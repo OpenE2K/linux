@@ -142,6 +142,11 @@ static inline void gpio_unexport(unsigned gpio)
 	gpiod_unexport(gpio_to_desc(gpio));
 }
 
+#ifdef CONFIG_MCST
+struct file;
+extern long gpio_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+#endif
+
 #ifdef CONFIG_PINCTRL
 
 /**

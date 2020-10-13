@@ -47,6 +47,9 @@ struct thread_info {
 	struct reg_window32	reg_window[NSWINS];	/* align for ldd! */
 	unsigned long		rwbuf_stkptrs[NSWINS];
 	unsigned long		w_saved;
+#ifdef CONFIG_MCST
+	long long		irq_enter_clk;
+#endif
 
 	struct restart_block	restart_block;
 };

@@ -90,7 +90,8 @@ struct tsb_config {
 #endif
 
 typedef struct {
-	spinlock_t		lock;
+	raw_spinlock_t		lock;
+	unsigned char		is_exit_mmap:1;
 	unsigned long		sparc64_ctx_val;
 	unsigned long		huge_pte_count;
 	struct tsb_config	tsb_block[MM_NUM_TSBS];

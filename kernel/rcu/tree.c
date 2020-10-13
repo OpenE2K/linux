@@ -61,6 +61,9 @@
 #include <linux/oom.h>
 #include <linux/smpboot.h>
 #include "../time/tick-internal.h"
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#endif
 
 #include "tree.h"
 #include <trace/events/rcu.h>
@@ -2931,8 +2934,11 @@ static int __rcu_pending(struct rcu_state *rsp, struct rcu_data *rdp)
 
 	rdp->n_rcu_pending++;
 
-	/* Check for CPU stalls, if enabled. */
-	check_cpu_stall(rsp, rdp);
+#ifdef CONFIG_MCST_RT
+	if (!rts_mode)
+#endif
+		/* Check for CPU stalls, if enabled. */
+		check_cpu_stall(rsp, rdp);
 
 	/* Is this CPU a NO_HZ_FULL CPU that should ignore RCU? */
 	if (rcu_nohz_full_cpu(rsp))

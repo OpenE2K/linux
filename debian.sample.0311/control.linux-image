@@ -1,0 +1,9 @@
+Package: linux-image-xxSARCHPKGxx-xxLOCVERxx
+Source: linux-xxLOCALVERSIONxx
+Version: 0311.mcst
+Architecture: xxARCHPKGxx
+Maintainer: MCST Kernel Mainteiners <os@mcst.ru>
+Provides: linux-image
+Section: kernel
+Priority: optional
+Description: Linux kernel image. Kernel xxKERNELDESCxx

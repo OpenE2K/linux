@@ -1959,7 +1959,11 @@ static int nl80211_set_wds_peer(struct sk_buff *skb, struct genl_info *info)
 
 static int nl80211_set_wiphy(struct sk_buff *skb, struct genl_info *info)
 {
+#ifdef CONFIG_MCST
+	struct cfg80211_registered_device *uninitialized_var(rdev);
+#else
 	struct cfg80211_registered_device *rdev;
+#endif
 	struct net_device *netdev = NULL;
 	struct wireless_dev *wdev;
 	int result = 0, rem_txq_params = 0;

@@ -1,0 +1,49 @@
+#
+# Sunlance device configuration
+#
+
+config SBUS_SUNLANCE
+	tristate "Sun LANCE support for SBUS"
+	depends on SBUS
+	select CRC32
+	help
+	  This driver supports the "le" interface present on all 32-bit Sparc
+	  systems, on some older Ultra systems and as an Sbus option.  These
+	  cards are based on the AMD Lance chipset, which is better known
+	  via the NE2100 cards.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called sbus-sunlance.
+
+config PCI_SUNLANCE
+	tristate "Pci version Sun LANCE support"
+	depends on PCI
+	select CRC32
+	help
+	  To compile this driver as a module, choose M here: the module
+	  will be called pci-sunlance.
+
+config MCST_PCC
+	tristate "PCC controller (MCST) support"
+	depends on PCI
+	default y
+	---help---
+	  Driver for ethernet over PCI on MGA3D. PCC is the second
+	  function of MGA3D.
+
+	  Select y if you have this device on board.
+
+config RDMA_NET
+	tristate "MCST RDMA NET support"
+	depends on E90_FASTBOOT || E90S || E2K
+	def_tristate y if (E90_FASTBOOT = y || E90S = y)
+	def_tristate m if (E2K = y)
+	help
+	  This driver supports the "sn0" interface present on R-500S, _4R, 
+	  E2K systems.
+
+config ETH1000
+	tristate "Elbrus Gigabit Ethernet support"
+	depends on PCI
+	select CRC32
+	select MII

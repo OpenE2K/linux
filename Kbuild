@@ -58,6 +58,11 @@ define sed-y
 	s:->::; p;}"
 endef
 
+# Custom string to workaround LCC limitations
+define sed-$(CONFIG_E2K)
+  "/@@@/x; s:^->::p; /\.uadword/{s:.*\.uadword[^0-f]*\([x0-f]*\).*:\1:;x;G;s:->\([^ ]*\) @@@ \(.*\)\n\([^ ]*\):#define \1 \3 /* \2 */:p;}"
+endef
+
 quiet_cmd_offsets = GEN     $@
 define cmd_offsets
 	(set -e; \

@@ -32,7 +32,8 @@
 #include <asm/estate.h>
 #include <asm/sfafsr.h>
 #include <asm/unistd.h>
-	
+
+#ifndef CONFIG_E90S
 /* This section from from _start to sparc64_boot_end should fit into
  * 0x0000000000404000 to 0x0000000000408000.
  */
@@ -862,6 +863,360 @@ setup_tba:
 
 	ret
 	 restore
+#else /*CONFIG_E90S*/
+#include <asm/e90s.h>
+#include <asm/apicdef.h>
+#include <asm/irq_vectors.h>
+
+/* This section from from _start to sparc64_boot_end should fit into
+ * 0x0000000000404000 to 0x0000000000408000.
+ */
+	.text
+	.globl	start, _start, stext, _stext
+_start:
+start:
+_stext:
+stext:
+! 0x0000000000404000
+	b	sparc64_boot
+	 nop
+
+/* This stuff has to be in sync with SILO and other potential boot loaders
+ * Fields should be kept upward compatible and whenever any change is made,
+ * HdrS version should be incremented.
+ */
+        .global root_flags, ram_flags, root_dev
+        .global sparc_ramdisk_image, sparc_ramdisk_size
+	.global sparc_ramdisk_image64, is_sun4v
+	.global bootblock;
+
+        .ascii  "HdrS"
+        .word   LINUX_VERSION_CODE
+
+	/* History:
+	 *
+	 * 0x0300 : Supports being located at other than 0x4000
+	 * 0x0202 : Supports kernel params string
+	 * 0x0201 : Supports reboot_command
+	 */
+	.half   0x0301          /* HdrS version */
+is_sun4v:
+	.word	0
+root_flags:
+        .half   1
+root_dev:
+        .half   0
+ram_flags:
+        .half   0
+.align	8
+bootblock:
+	.xword	0
+sparc_ramdisk_image:
+        .word   0
+sparc_ramdisk_size:
+        .word   0
+        .xword  reboot_command
+sparc_ramdisk_image64:
+	.xword	0
+	.word	_end
+
+sparc64_boot:
+
+#ifdef CONFIG_SMP
+	set	APIC_BSP, %g1
+	lduwa	[%g1]ASI_LAPIC, %g1
+	andcc	%g1, APIC_BSP_IS_BSP, %g0
+	bz	1f
+	 nop
+#endif
+	/* Boot E90S pass bootblock pointer in %o2, save it */
+	set	bootblock, %g1
+	stx	%o2, [%g1]
+
+
+	/*Инициализируем процессорные регистры*/
+	wrpr    0, %tl
+	wrpr    PSTATE_PRIV, %pstate
+	wr      %g0, 1<<2, %fprs
+	wr      %g0, 0, %ccr
+	wr      %g0, 0, %asi
+#ifndef CONFIG_MCST
+	setx    0, %g1, %g2
+	wrpr    %g2, %tick
+	setx    0, %g1, %g2
+	mov	%g2, %asr24
+#endif
+	mov     0x1, %g2
+	sllx    %g2, 63, %g2
+	mov     %g2, %asr23
+	mov     %g2, %asr25
+	mov     %g0, %y
+	wrpr    0xf, %pil
+	wrpr    0, %cwp
+	wrpr    6, %cansave
+	wrpr    0, %canrestore
+	wrpr    0, %otherwin
+	wrpr    7, %cleanwin
+	wrpr    7, %wstate
+
+	mov	PRIMARY_CONTEXT, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	membar	#Sync
+
+	mov	SECONDARY_CONTEXT, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	membar	#Sync
+
+	mov	TSB_REG, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	stxa	%g0, [%g1] ASI_IMMU
+	membar	#Sync
+
+	mov	TSB_EXTENSION_P, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	stxa	%g0, [%g1] ASI_IMMU
+	membar	#Sync
+
+	mov	TSB_EXTENSION_S, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	membar	#Sync
+
+	mov	TSB_EXTENSION_N, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	stxa	%g0, [%g1] ASI_IMMU
+
+/*Сбрасываем регистры ошибок УУП*/
+	mov     TLB_SFSR, %g1
+	stxa    %g0, [%g1]ASI_IMMU
+	stxa    %g0, [%g1]ASI_DMMU
+	
+
+	stxa	%g0, [%g0] ASI_AFSR
+	stxa	%g0, [%g0] ASI_AFAR
+
+/*Сбрасываем tlb*/
+	mov     0x80, %g1
+	stxa    %g0, [%g1]ASI_IMMU_DEMAP
+	stxa    %g0, [%g1]ASI_DMMU_DEMAP
+	
+	/* Set ctx 0 */
+	mov	PRIMARY_CONTEXT, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	membar	#Sync
+
+	mov	SECONDARY_CONTEXT, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	membar	#Sync
+
+	mov	TSB_REG, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	stxa	%g0, [%g1] ASI_IMMU
+	membar	#Sync
+
+	mov	TSB_EXTENSION_P, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	stxa	%g0, [%g1] ASI_IMMU
+	membar	#Sync
+
+	mov	TSB_EXTENSION_S, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	membar	#Sync
+
+	mov	TSB_EXTENSION_N, %g1
+	stxa	%g0, [%g1] ASI_DMMU
+	stxa	%g0, [%g1] ASI_IMMU
+
+	setx DCU_ME|DCU_RE|DCU_HPE|DCU_SPE|DCU_SL\
+		|DCU_WE|DCU_DM|DCU_IM|DCU_DC|DCU_IC, %g2, %g7
+	set 1f, %l0
+	call  %l0
+	 stxa	%g7, [%g0] ASI_DCU_CONTROL_REG
+1:
+	membar	#Sync
+
+cheetah_boot:
+	/*
+	 * Make sure we are in privileged mode, have address masking,
+         * using the ordinary globals and have enabled floating
+         * point.
+	 *
+	 * Again, typically PROM has left %pil at 13 or similar, and
+	 * (PSTATE_PRIV | PSTATE_PEF | PSTATE_IE) in %pstate.
+         */
+	wrpr    %g0, (PSTATE_PRIV|PSTATE_PEF|PSTATE_IE), %pstate
+	wr	%g0, 0, %fprs
+
+#ifdef CONFIG_SMP
+	set	APIC_BSP, %g1
+	lduwa	[%g1]ASI_LAPIC, %g1
+	andcc	%g1, APIC_BSP_IS_BSP, %g0
+	bnz	1f
+	 nop
+	call	sparc64_cpu_startup
+	 nop
+#endif
+
+1:	call	cheetah_tlb_fixup
+	 nop
+
+	__REF
+cheetah_tlb_fixup:
+/* attach all async exceptions to bsp cpu */
+	set	APIC_ID, %g1
+	lduwa	[%g1] ASI_LAPIC, %g2
+	srlx	%g2, APIC_ID_SHIFT, %g2
+	mov	(~0) << 8, %g4
+	mov	1, %g1
+	sllx	%g1, %g2, %g2
+	or	%g4, %g2, %g4
+	sllx	%g2, 4, %g2
+	or	%g4, %g2, %g4
+
+	setx	BASE_NODE0 + NBSR_INT_CFG, %g3, %g1
+	lduwa	[%g1]ASI_CONFIG, %g3
+	and	%g3, %g4, %g3
+	stwa	%g3, [%g1]ASI_CONFIG
+
+	mov	2, %g2		/* Set TLB type to cheetah_plus. */
+
+1:	sethi	%hi(tlb_type), %g1
+	stw	%g2, [%g1 + %lo(tlb_type)]
+
+	/* Patch copy/page operations to cheetah optimized versions. */
+	call	cheetah_patch_copyops
+	 nop
+	call	cheetah_patch_copy_page
+	 nop
+
+	call	cheetah_patch_cachetlbops
+	 nop
+
+	sethi	%hi(init_thread_union), %g6
+	or	%g6, %lo(init_thread_union), %g6
+	ldx	[%g6 + TI_TASK], %g4
+	mov	%sp, %l6
+	mov	%o4, %l7
+
+	wr	%g0, ASI_P, %asi
+	mov	1, %g1
+	sllx	%g1, THREAD_SHIFT, %g1
+	sub	%g1, (STACKFRAME_SZ + STACK_BIAS), %g1
+	add	%g6, %g1, %sp
+	mov	0, %fp
+
+	/* Set per-cpu pointer initially to zero, this makes
+	 * the boot-cpu use the in-kernel-image per-cpu areas
+	 * before setup_per_cpu_area() is invoked.
+	 */
+	clr	%g5
+
+	wrpr	%g0, 0, %wstate
+	wrpr	%g0, 0x0, %tl
+
+	/* Clear the bss */
+	sethi	%hi(__bss_start), %o0
+	or	%o0, %lo(__bss_start), %o0
+	sethi	%hi(_end), %o1
+	or	%o1, %lo(_end), %o1
+	call	__bzero
+	 sub	%o1, %o0, %o1
+
+	call		setup_trap_table
+	nop
+
+	/* Off we go.... */
+	call	start_kernel
+	 nop
+	/* Not reached... */
+
+.globl	setup_trap_table
+setup_trap_table:
+	save	%sp, -192, %sp
+
+	/* Force interrupts to be disabled. */
+	rdpr	%pstate, %o1
+	andn	%o1, PSTATE_IE, %o1
+	wrpr	%o1, 0x0, %pstate
+	wrpr	%g0, 15, %pil
+
+	/*
+	 * Set MCNTL register to enable STLB for N Kb pages and
+	 * E90S TSBRP type
+	 */
+	set	E90S_MCNTL_IRM_DEFAULT \
+			 | E90S_MCNTL_DRM01_DEFAULT | E90S_MCNTL_DRM23_DEFAULT, %g1
+	set	E90S_MCNTL, %g2
+	stxa    %g1, [%g2]ASI_DCU_CONTROL_REG
+
+	/*Включаем размер области предсказания перехода */
+	set	0x10, %g1
+	ldxa	[%g1]ASI_IIU_INST_TRAP, %g2
+#ifdef	CONFIG_SPARC64_PAGE_SIZE_64KB
+	or	%g2, 1 << 8, %g2
+#else
+	andn	%g2, 1 << 8, %g2
+#endif
+	stxa    %g2, [%g1]ASI_IIU_INST_TRAP
+	stxa	%g0, [%g0] ASI_IC_TAG
+
+#ifndef	CONFIG_RMO
+	set	E90S_DBGJMP, %g1
+	ldxa	[%g1]ASI_DCU_CONTROL_REG, %g2
+	set	DBGJMP_MM_MASK, %g3
+	andn	%g2, %g3, %g2
+	or	%g2, DBGJMP_MM_PSTATE_MM, %g2
+	membar	#Sync
+	stxa    %g2, [%g1]ASI_DCU_CONTROL_REG
+	membar	#Sync
+#endif	/*CONFIG_RMO*/
+
+	set	sparc64_ttable_tl0, %o0
+	wrpr	%o0, %tba
+
+	/* Start using proper page size encodings in ctx register.  */
+	sethi	%hi(sparc64_kern_pri_context), %g3
+	ldx	[%g3 + %lo(sparc64_kern_pri_context)], %g2
+	mov	PRIMARY_CONTEXT, %g1
+	stxa	%g2, [%g1] ASI_DMMU
+	membar	#Sync
+	
+	rdpr	%pstate, %o1
+	wrpr	%o1, PSTATE_IG, %pstate
+
+	set	APIC_ID, %g1
+	lduwa	[%g1] ASI_LAPIC, %g1
+	srlx	%g1, APIC_ID_SHIFT, %g1
+	set	e90s_irq_pending, %g6
+	sllx	%g1, 6, %g1
+	add	%g6, %g1, %g6
+
+	wrpr	%o1, 0, %pstate
+
+	/* Kill PROM timer */
+	sethi	%hi(0x80000000), %o2
+	sllx	%o2, 32, %o2
+	wr	%o2, 0, %tick_cmpr
+
+	/* Disable STICK_INT interrupts. */
+
+	sethi	%hi(0x80000000), %o2
+	sllx	%o2, 32, %o2
+	wr	%o2, %asr25
+
+	/* Now we can turn interrupts back on. */
+#if	1 /* hardware error workaround: timer interrupts are active after */
+	/* machine reset/power on */
+	rdpr	%pstate, %o1
+	or	%o1, PSTATE_IE, %o1
+	wrpr	%o1, 0, %pstate
+#endif	/* 0 hardware error workaround: timer interrupts are active after */
+	/* machine reset/power on */
+	wrpr	%g0, 0x0, %pil
+
+	ret
+	 restore
+
+#endif /*CONFIG_E90S*/
 sparc64_boot_end:
 
 #include "etrap_64.S"
@@ -876,9 +1231,11 @@ sparc64_boot_end:
 #include "misctrap.S"
 #include "syscalls.S"
 #include "helpers.S"
+#ifdef	CONFIG_SPARC64_SUN4V
 #include "hvcalls.S"
 #include "sun4v_tlb_miss.S"
 #include "sun4v_ivec.S"
+#endif	/*CONFIG_SPARC64_SUN4V*/
 #include "ktlb.S"
 #include "tsb.S"
 

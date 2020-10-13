@@ -57,12 +57,13 @@ struct thread_info {
 
 	unsigned long		gsr[7];
 	unsigned long		xfsr[7];
-
 	struct restart_block	restart_block;
 
 	struct pt_regs		*kern_una_regs;
 	unsigned int		kern_una_insn;
-
+#ifdef CONFIG_MCST
+	long long               irq_enter_clk;
+#endif
 	unsigned long		fpregs[(7 * 256) / sizeof(unsigned long)]
 		__attribute__ ((aligned(64)));
 };

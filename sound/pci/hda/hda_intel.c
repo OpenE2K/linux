@@ -580,6 +580,9 @@ enum {
 	AZX_DRIVER_TERA,
 	AZX_DRIVER_CTX,
 	AZX_DRIVER_CTHDA,
+#ifdef CONFIG_MCST
+	AZX_DRIVER_IOHUB2,
+#endif /* CONFIG_MCST */
 	AZX_DRIVER_GENERIC,
 	AZX_NUM_DRIVERS, /* keep this as last entry */
 };
@@ -660,6 +663,9 @@ static char *driver_short_names[] = {
 	[AZX_DRIVER_TERA] = "HDA Teradici", 
 	[AZX_DRIVER_CTX] = "HDA Creative", 
 	[AZX_DRIVER_CTHDA] = "HDA Creative",
+#ifdef CONFIG_MCST
+	[AZX_DRIVER_IOHUB2] = "HDA MCST",
+#endif /* CONFIG_MCST */
 	[AZX_DRIVER_GENERIC] = "HD-Audio Generic",
 };
 
@@ -3583,6 +3589,12 @@ static int azx_create(struct snd_card *card, struct pci_dev *pci,
 		case AZX_DRIVER_PCH:
 			bdl_pos_adj[dev] = 1;
 			break;
+#ifdef CONFIG_MCST
+		case AZX_DRIVER_IOHUB2:
+		/* iohub2 hda have problems with short buffers */
+			bdl_pos_adj[dev] = 0;
+			break;
+#endif /* CONFIG_MCST */
 		default:
 			bdl_pos_adj[dev] = 32;
 			break;
@@ -3976,6 +3988,10 @@ static void azx_remove(struct pci_dev *pci)
 
 /* PCI IDs */
 static DEFINE_PCI_DEVICE_TABLE(azx_ids) = {
+#ifdef CONFIG_MCST
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_HDA),
+		      .driver_data = AZX_DRIVER_IOHUB2 },
+#endif /* CONFIG_MCST */
 	/* CPT */
 	{ PCI_DEVICE(0x8086, 0x1c20),
 	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH_NOPM },

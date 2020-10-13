@@ -182,6 +182,10 @@ static inline int vma_migratable(struct vm_area_struct *vma)
 		return 0;
 #endif
 
+#ifdef CONFIG_E2K
+	if (vma->vm_flags & VM_DONTMIGRATE)
+		return 0;
+#endif
 	/*
 	 * Migration allocates pages in the highest zone. If we cannot
 	 * do so then migration (at least from node to node) is not

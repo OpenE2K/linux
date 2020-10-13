@@ -209,3 +209,191 @@ void insl(unsigned long __addr, void *dst, unsigned long count)
 }
 EXPORT_SYMBOL(insl);
 
+
+
+#ifdef	__arch64__
+/*
+ * Copy data from IO memory space to "real" memory space.
+ * This needs to be optimized.
+ */
+void memcpy_fromio(void *to, const volatile void __iomem *from, long count)
+{
+	/* Optimize aligned transfers.  Everything else gets handled
+	   a byte at a time. */
+
+#ifdef	__arch64__
+	if (count >= 8 && !(((long)to & 7) || ((long)from & 7))) {
+		count -= 8;
+		do {
+			*(u64 *)to = __raw_readq(from);
+			count -= 8;
+			to += 8;
+			from += 8;
+		} while (count >= 0);
+		count += 8;
+	}
+#endif
+	if (count >= 4 && !(((long)to & 3) || ((long)from & 3))) {
+		count -= 4;
+		do {
+			*(u32 *)to = __raw_readl(from);
+			count -= 4;
+			to += 4;
+			from += 4;
+		} while (count >= 0);
+		count += 4;
+	}
+
+	if (count >= 2 && !(((long)to & 1) || ((long)from & 1))) {
+		count -= 2;
+		do {
+			*(u16 *)to = __raw_readw(from);
+			count -= 2;
+			to += 2;
+			from += 2;
+		} while (count >= 0);
+		count += 2;
+	}
+
+	while (count > 0) {
+		*(u8 *) to = __raw_readb(from);
+		count--;
+		to++;
+		from++;
+	}
+	mb();
+}
+
+EXPORT_SYMBOL(memcpy_fromio);
+
+
+/*
+ * Copy data from "real" memory space to IO memory space.
+ * This needs to be optimized.
+ */
+void memcpy_toio(volatile void __iomem *to, const void *from, long count)
+{
+	/* Optimize aligned transfers.  Everything else gets handled
+	   a byte at a time. */
+
+#ifdef	__arch64__
+	if (count >= 8 && !(((long)to & 7) || ((long)from & 7))) {
+		count -= 8;
+		do {
+			__raw_writeq(*(const u64 *)from, to);
+			count -= 8;
+			to += 8;
+			from += 8;
+		} while (count >= 0);
+		count += 8;
+	}
+#endif
+
+	if (count >= 4 && !(((long)to & 3) || ((long)from & 3))) {
+		count -= 4;
+		do {
+			__raw_writel(*(const u32 *)from, to);
+			count -= 4;
+			to += 4;
+			from += 4;
+		} while (count >= 0);
+		count += 4;
+	}
+
+	if (count >= 2 && !(((long)to & 1) || ((long)from & 1))) {
+		count -= 2;
+		do {
+			__raw_writew(*(const u16 *)from, to);
+			count -= 2;
+			to += 2;
+			from += 2;
+		} while (count >= 0);
+		count += 2;
+	}
+
+	while (count > 0) {
+		__raw_writeb(*(const u8 *) from, to);
+		count--;
+		to++;
+		from++;
+	}
+	mb();
+}
+
+EXPORT_SYMBOL(memcpy_toio);
+
+
+/*
+ * "memset" on IO memory space.
+ */
+void _memset_c_io(volatile void __iomem *to, unsigned long c, long count)
+{
+	/* Handle any initial odd byte */
+	if (count > 0 && ((long)to & 1)) {
+		__raw_writeb(c, to);
+		to++;
+		count--;
+	}
+
+	/* Handle any initial odd halfword */
+	if (count >= 2 && ((long)to & 2)) {
+		__raw_writew(c, to);
+		to += 2;
+		count -= 2;
+	}
+
+#ifdef	__arch64__
+	/* Handle any initial odd word */
+	if (count >= 4 && ((long)to & 4)) {
+		__raw_writel(c, to);
+		to += 4;
+		count -= 4;
+	}
+
+	/* Handle all full-sized quadwords: we're aligned
+	   (or have a small count) */
+	count -= 8;
+	if (count >= 0) {
+		do {
+			__raw_writeq(c, to);
+			to += 8;
+			count -= 8;
+		} while (count >= 0);
+	}
+	count += 8;
+
+	/* The tail is word-aligned if we still have count >= 4 */
+	if (count >= 4) {
+		__raw_writel(c, to);
+		to += 4;
+		count -= 4;
+	}
+#else /*__arch64__*/
+	count -= 4;
+	if (count >= 0) {
+		do {
+			__raw_writel(c, to);
+			to += 4;
+			count -= 4;
+		} while (count >= 0);
+	}
+	count += 4;
+#endif /*__arch64__*/
+
+	/* The tail is half-word aligned if we have count >= 2 */
+	if (count >= 2) {
+		__raw_writew(c, to);
+		to += 2;
+		count -= 2;
+	}
+
+	/* And finally, one last byte.. */
+	if (count) {
+		__raw_writeb(c, to);
+	}
+	mb();
+}
+
+EXPORT_SYMBOL(_memset_c_io);
+
+#endif /*__arch64__*/

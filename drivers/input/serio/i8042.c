@@ -206,6 +206,15 @@ static int i8042_wait_read(void)
 		udelay(50);
 		i++;
 	}
+#ifdef CONFIG_E2K
+	/*
+	 * Workaround against ps/2 mouse detection failure on 2.6.14
+	 * This happens on E2K motherboard only
+	 * Looks like it is necessary to execute a short delay to relax
+	 * hardware after i8042 register status read.
+	 */
+	udelay(500);
+#endif
 	return -(i == I8042_CTL_TIMEOUT);
 }
 
@@ -217,6 +226,15 @@ static int i8042_wait_write(void)
 		udelay(50);
 		i++;
 	}
+#ifdef CONFIG_E2K
+	/*
+	 * Workaround against ps/2 mouse detection failure on 2.6.14
+	 * This happens on E2K motherboard only
+	 * Looks like it is necessary to execute a short delay to relax
+	 * hardware after i8042 register status read.
+	 */
+	udelay(500);
+#endif
 	return -(i == I8042_CTL_TIMEOUT);
 }
 

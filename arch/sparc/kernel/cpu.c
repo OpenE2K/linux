@@ -20,6 +20,11 @@
 #include <asm/psr.h>
 #include <asm/mbus.h>
 #include <asm/cpudata.h>
+#ifdef CONFIG_E90S
+#define NEEDS_GET_DCR
+#include <asm/bootinfo.h>
+#endif
+
 
 #include "kernel.h"
 
@@ -367,11 +372,25 @@ unsigned int icache_parity_tl1_occurred;
 
 static int show_cpuinfo(struct seq_file *m, void *__unused)
 {
+#ifdef CONFIG_E90S
+	unsigned long ver;
+	__asm__ __volatile__("rdpr %%ver, %0" : "=r" (ver));
+#endif
+
 	seq_printf(m,
+#ifdef CONFIG_E90S
+		   "vendor_id\t: %s\n"
+		   "model name\t: %s\n"
+#endif
 		   "cpu\t\t: %s\n"
 		   "fpu\t\t: %s\n"
 		   "pmu\t\t: %s\n"
+#ifdef CONFIG_E90S
+		   "revision\t: %lu\n"
+		   "dcr\t\t: 0x%lx\n"
+#else
 		   "prom\t\t: %s\n"
+#endif
 		   "type\t\t: %s\n"
 		   "ncpus probed\t: %d\n"
 		   "ncpus active\t: %d\n"
@@ -381,10 +400,21 @@ static int show_cpuinfo(struct seq_file *m, void *__unused)
 		   "Cpu0ClkTck\t: %016lx\n"
 #endif
 		   ,
+#ifdef CONFIG_E90S
+		   mcst_mb_name,
+		   GET_CPU_TYPE_NAME(bootblock->info.bios.cpu_type),
+		   GET_CPU_TYPE_NAME(bootblock->info.bios.cpu_type),
+#else
 		   sparc_cpu_type,
+#endif
 		   sparc_fpu_type,
 		   sparc_pmu_type,
+#ifdef CONFIG_E90S
+		   (ver >> 24) & 0xff,
+		   get_dcr(),
+#else
 		   prom_version,
+#endif
 		   ((tlb_type == hypervisor) ?
 		    "sun4v" :
 		    "sun4u"),
@@ -512,8 +542,10 @@ static void __init sun4v_cpu_probe(void)
 		break;
 
 	default:
+#ifndef CONFIG_E90S
 		printk(KERN_WARNING "CPU: Unknown sun4v cpu type [%s]\n",
 		       prom_cpu_compatible);
+#endif
 		sparc_cpu_type = "Unknown SUN4V CPU";
 		sparc_fpu_type = "Unknown SUN4V FPU";
 		sparc_pmu_type = "Unknown SUN4V PMU";

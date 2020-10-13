@@ -90,8 +90,28 @@
  * if !TRACE_IRQFLAGS.
  */
 #ifdef CONFIG_TRACE_IRQFLAGS_SUPPORT
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#define local_irq_enable() \
+do {                                            \
+	trace_hardirqs_on();                    \
+	raw_local_irq_enable();                 \
+	preempt_check_resched();                \
+} while (0)
+
+#define local_irq_enable_no_resched() \
+do {                                            \
+	trace_hardirqs_on();                    \
+	raw_local_irq_enable();                 \
+} while (0)
+
+#else
+
 #define local_irq_enable() \
 	do { trace_hardirqs_on(); raw_local_irq_enable(); } while (0)
+
+#endif
+
 #define local_irq_disable() \
 	do { raw_local_irq_disable(); trace_hardirqs_off(); } while (0)
 #define local_irq_save(flags)				\
@@ -137,13 +157,45 @@
 
 #else /* !CONFIG_TRACE_IRQFLAGS_SUPPORT */
 
-#define local_irq_enable()	do { raw_local_irq_enable(); } while (0)
 #define local_irq_disable()	do { raw_local_irq_disable(); } while (0)
+
+#ifdef CONFIG_MCST_RT
+
+# define local_irq_enable_no_resched() \
+	do {                                            \
+		raw_local_irq_enable();                 \
+} while (0)
+
+# define local_irq_enable()                             \
+do {                                            \
+	raw_local_irq_enable();                 \
+	preempt_check_resched();                \
+} while (0)
+# define local_irq_save(flags)                  \
+do {                                            \
+	typecheck(unsigned long, flags);        \
+	raw_local_irq_save(flags);                      \
+} while (0)
+# define local_irq_restore(flags)                       \
+do {                                            \
+	typecheck(unsigned long, flags);        \
+	raw_local_irq_restore(flags);           \
+	if (!raw_irqs_disabled_flags(flags)) {  \
+		preempt_check_resched();        \
+	}                                       \
+} while (0)
+
+#else
+
+#define local_irq_enable()	do { raw_local_irq_enable(); } while (0)
 #define local_irq_save(flags)					\
 	do {							\
 		raw_local_irq_save(flags);			\
 	} while (0)
 #define local_irq_restore(flags) do { raw_local_irq_restore(flags); } while (0)
+
+#endif
+
 #define local_save_flags(flags)	do { raw_local_save_flags(flags); } while (0)
 #define irqs_disabled()		(raw_irqs_disabled())
 #define irqs_disabled_flags(flags) (raw_irqs_disabled_flags(flags))

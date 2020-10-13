@@ -612,6 +612,9 @@ struct inode {
 #ifdef CONFIG_IMA
 	atomic_t		i_readcount; /* struct files open RO */
 #endif
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	struct list_head	el_posix_objects; /* shared objects in this inode */
+#endif
 	void			*i_private; /* fs or device private pointer */
 };
 
@@ -812,7 +815,12 @@ struct file {
 #ifdef CONFIG_DEBUG_WRITECOUNT
 	unsigned long f_mnt_write_state;
 #endif
+#if defined CONFIG_MCST && defined __LCC__
+/* Shut up __LCC__ warning */
+} __attribute__((aligned(8))); /* lest something weird decides that 2 is OK */
+#else
 } __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
+#endif
 
 struct file_handle {
 	__u32 handle_bytes;

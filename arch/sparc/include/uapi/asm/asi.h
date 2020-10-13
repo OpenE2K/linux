@@ -221,6 +221,10 @@
 #define ASI_IC_INSTR		0x66 /* Insn cache instrucion ram diag	*/
 #define ASI_IC_TAG		0x67 /* Insn cache tag/valid ram diag 	*/
 #define ASI_IC_STAG		0x68 /* (III) Insn cache snoop tag ram	*/
+#ifdef CONFIG_E90S
+#define ASI_LAPIC		0x68
+#define ASI_CONFIG		0x69 /* (e90s) доступ к локальным ресурсам */
+#endif /*CONFIG_E90S*/
 #define ASI_IC_PRE_DECODE	0x6e /* Insn cache pre-decode ram diag	*/
 #define ASI_IC_NEXT_FIELD	0x6f /* Insn cache next-field ram diag	*/
 #define ASI_BRPRED_ARRAY	0x6f /* (III) Branch Prediction RAM diag*/

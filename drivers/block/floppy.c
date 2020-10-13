@@ -4106,6 +4106,17 @@ static int floppy_resume(struct device *dev)
 {
 	int fdc;
 
+#if defined CONFIG_E2K && defined CONFIG_RECOVERY
+	/* Cntp: improvement of floppy_resume() function to fix
+	 * starvation during floppy resume. panteleev_p@mcst.ru */
+	for (fdc = 0; fdc < N_FDC; fdc++) {
+		if (FDCS->address != -1) {
+			reset_fdc_info(1);
+			fd_outb(FDCS->dor, FD_DOR);
+		}
+	}
+#endif
+
 	for (fdc = 0; fdc < N_FDC; fdc++)
 		if (FDCS->address != -1)
 			user_reset_fdc(-1, FD_RESET_ALWAYS, false);

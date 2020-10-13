@@ -39,7 +39,11 @@ UTS_MACHINE   := sparc64
 
 KBUILD_CFLAGS += -m64 -pipe -mno-fpu -mcpu=ultrasparc -mcmodel=medlow
 KBUILD_CFLAGS += -ffixed-g4 -ffixed-g5 -fcall-used-g7 -Wno-sign-compare
-KBUILD_CFLAGS += -Wa,--undeclared-regs
+ifeq ($(call cc-lcc-yn),y)
+  KBUILD_CFLAGS += -fkernel
+  KBUILD_CFLAGS += -Wno-unused-result  
+  KBUILD_CFLAGS += -Wno-builtin-functions-redefined -Wa,--undeclared-regs
+endif
 KBUILD_CFLAGS += $(call cc-option,-mtune=ultrasparc3)
 KBUILD_AFLAGS += -m64 -mcpu=ultrasparc -Wa,--undeclared-regs
 
@@ -54,7 +58,13 @@ head-y                 := arch/sparc/kernel/head_$(BITS).o
 # See arch/sparc/Kbuild for the core part of the kernel
 core-y                 += arch/sparc/
 
-libs-y                 += arch/sparc/prom/
+ifdef CONFIG_E90S
+# Elbrus common modules
+core-y                         += arch/l/
+drivers-$(CONFIG_PCI)          += arch/l/pci/
+endif
+
+libs-$(CONFIG_OF)                 += arch/sparc/prom/
 libs-y                 += arch/sparc/lib/
 
 drivers-$(CONFIG_PM) += arch/sparc/power/
@@ -70,6 +80,9 @@ image zImage uImage tftpboot.img vmlinux.aout: vmlinux
 
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
+
+build-install: FORCE
+	$(CONFIG_SHELL) scripts/gen-osl-build -l $(srctree) -m $(MODLIB)
 
 # This is the image used for packaging
 KBUILD_IMAGE := $(boot)/zImage

@@ -154,7 +154,11 @@ if test ! "$srctree" -ef .; then
 fi
 
 # CONFIG_LOCALVERSION and LOCALVERSION (if set)
+if test x"$CONFIG_LOCALVERSION" = "x"; then
 res="${res}${CONFIG_LOCALVERSION}${LOCALVERSION}"
+else
+res="${res}${CONFIG_LOCALVERSION}"
+fi
 
 # scm version string if not at a tagged commit
 if test "$CONFIG_LOCALVERSION_AUTO" = "y"; then

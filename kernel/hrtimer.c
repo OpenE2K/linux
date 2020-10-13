@@ -177,7 +177,11 @@ struct hrtimer_clock_base *lock_hrtimer_base(const struct hrtimer *timer,
 static int hrtimer_get_target(int this_cpu, int pinned)
 {
 #ifdef CONFIG_NO_HZ_COMMON
+#ifdef CONFIG_MCST_RT
+	if (!pinned && get_sysctl_timer_migration() && rt_cpu(this_cpu))
+#else
 	if (!pinned && get_sysctl_timer_migration() && idle_cpu(this_cpu))
+#endif
 		return get_nohz_timer_target();
 #endif
 	return this_cpu;
@@ -2208,3 +2212,31 @@ int __sched schedule_hrtimeout(ktime_t *expires,
 	return schedule_hrtimeout_range(expires, 0, mode);
 }
 EXPORT_SYMBOL_GPL(schedule_hrtimeout);
+
+#ifdef __e2k__
+#ifdef CONFIG_HIGH_RES_TIMERS
+void hrtimers_reinit(int cpuid)
+{
+	/* Reinit highres timers on cpu_up hotplug */
+	struct hrtimer_cpu_base *base = &per_cpu(hrtimer_bases, cpuid);
+
+	if (tick_init_highres()) {
+		printk(KERN_WARNING "Could not switch to high resolution "
+				"mode on CPU %d\n", cpuid);
+	}
+	base->hres_active = 1;
+	base->clock_base[CLOCK_REALTIME].resolution = KTIME_HIGH_RES;
+	base->clock_base[CLOCK_MONOTONIC].resolution = KTIME_HIGH_RES;
+
+	tick_setup_sched_timer();
+	/* "Retrigger" the interrupt to get things going */
+	retrigger_next_event(NULL);
+
+	return;
+}
+#else /* CONFIG_HIGH_RES_TIMERS */
+void hrtimers_reinit(int cpuid) { }
+#endif  /* !CONFIG_HIGH_RES_TIMERS */
+EXPORT_SYMBOL_GPL(hrtimers_reinit);
+#endif /* __e2k__ */
+

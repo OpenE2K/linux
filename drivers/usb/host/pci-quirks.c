@@ -16,6 +16,7 @@
 #include <linux/export.h>
 #include <linux/acpi.h>
 #include <linux/dmi.h>
+#include <linux/usb.h>
 #include "pci-quirks.h"
 #include "xhci-ext-caps.h"
 
@@ -592,7 +593,7 @@ static void quirk_usb_handoff_ohci(struct pci_dev *pdev)
 	control = readl(base + OHCI_CONTROL);
 
 /* On PA-RISC, PDC can leave IR set incorrectly; ignore it there. */
-#ifdef __hppa__
+#if defined(__hppa__) || defined(CONFIG_E2K)
 #define	OHCI_CTRL_MASK		(OHCI_CTRL_RWC | OHCI_CTRL_IR)
 #else
 #define	OHCI_CTRL_MASK		OHCI_CTRL_RWC
@@ -1067,6 +1068,11 @@ hc_init:
 
 static void quirk_usb_early_handoff(struct pci_dev *pdev)
 {
+#if defined CONFIG_MCST && defined CONFIG_USB
+	/* Bug 77519: when usb is disabled do not touch usb registers */
+	if (usb_disabled())
+		return;
+#endif
 	/* Skip Netlogic mips SoC's internal PCI USB controller.
 	 * This device does not need/support EHCI/OHCI handoff
 	 */

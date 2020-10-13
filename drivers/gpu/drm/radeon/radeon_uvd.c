@@ -25,7 +25,7 @@
  */
 /*
  * Authors:
- *    Christian König <deathsimple@vodafone.de>
+ *    Christian Kц╤nig <deathsimple@vodafone.de>
  */
 
 #include <linux/firmware.h>
@@ -199,7 +199,7 @@ int radeon_uvd_suspend(struct radeon_device *rdev)
 	ptr += rdev->uvd_fw->size;
 
 	rdev->uvd.saved_bo = kmalloc(size, GFP_KERNEL);
-	memcpy(rdev->uvd.saved_bo, ptr, size);
+	memcpy_fromio(rdev->uvd.saved_bo, ptr, size);
 
 	return 0;
 }
@@ -212,7 +212,7 @@ int radeon_uvd_resume(struct radeon_device *rdev)
 	if (rdev->uvd.vcpu_bo == NULL)
 		return -EINVAL;
 
-	memcpy(rdev->uvd.cpu_addr, rdev->uvd_fw->data, rdev->uvd_fw->size);
+	memcpy_toio(rdev->uvd.cpu_addr, rdev->uvd_fw->data, rdev->uvd_fw->size);
 
 	size = radeon_bo_size(rdev->uvd.vcpu_bo);
 	size -= rdev->uvd_fw->size;
@@ -221,11 +221,11 @@ int radeon_uvd_resume(struct radeon_device *rdev)
 	ptr += rdev->uvd_fw->size;
 
 	if (rdev->uvd.saved_bo != NULL) {
-		memcpy(ptr, rdev->uvd.saved_bo, size);
+		memcpy_toio(ptr, rdev->uvd.saved_bo, size);
 		kfree(rdev->uvd.saved_bo);
 		rdev->uvd.saved_bo = NULL;
 	} else
-		memset(ptr, 0, size);
+		memset_io(ptr, 0, size);
 
 	return 0;
 }

@@ -1115,11 +1115,20 @@ static int vortex_probe1(struct device *gendev, void __iomem *ioaddr, int irq,
 	}
 
 	if (gendev) {
+#ifdef __LCC__ 
+		pdev = DEVICE_PCI(gendev);
+		if (pdev) {
+#else
 		if ((pdev = DEVICE_PCI(gendev))) {
+#endif
 			print_name = pci_name(pdev);
 		}
-
+#ifdef __LCC__
+		edev = DEVICE_EISA(gendev);
+		if (edev) {
+#else
 		if ((edev = DEVICE_EISA(gendev))) {
+#endif
 			print_name = dev_name(&edev->dev);
 		}
 	}

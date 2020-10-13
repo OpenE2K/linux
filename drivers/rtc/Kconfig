@@ -563,6 +563,27 @@ config RTC_DRV_M41T94
 	  This driver can also be built as a module. If so, the module
 	  will be called rtc-m41t94.
 
+config RTC_DRV_CY14B101P
+	tristate "Cypress CY14B101P"
+	help
+	  Select this driver to get support for the Cypress CY14B101P
+	  real time clock chip. These support alarms and NVRAM in addition 
+	  to the clock.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called rtc-cy14b101p.
+
+config RTC_DRV_FM33256
+	tristate "Ramtron FM33256"
+	help
+	  If you say Y here you will get support for the
+	  Ramtron FM33256 RTC chips.
+	  Ramtron FM33256 is a chip with two separate devices inside,
+	  RTC clock and FRAM. This driver provides only RTC functionality.
+
+	  This driver can also be built as a module. If so the module
+	  will be called rtc-fm33256.
+
 config RTC_DRV_DS1305
 	tristate "Dallas/Maxim DS1305/DS1306"
 	help
@@ -648,7 +669,7 @@ comment "Platform RTC drivers"
 
 config RTC_DRV_CMOS
 	tristate "PC-style 'CMOS'"
-	depends on X86 || ARM || M32R || PPC || MIPS || SPARC64
+	depends on X86 || ARM || M32R || PPC || MIPS || SPARC64 || E2K
 	default y if X86
 	help
 	  Say "yes" here to get direct support for the real time clock

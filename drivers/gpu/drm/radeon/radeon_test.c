@@ -19,7 +19,7 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  *
- * Authors: Michel Dänzer
+ * Authors: Michel Dц╓nzer
  */
 #include <drm/drmP.h>
 #include <drm/radeon_drm.h>
@@ -28,6 +28,18 @@
 
 #define RADEON_TEST_COPY_BLIT 1
 #define RADEON_TEST_COPY_DMA  0
+
+#ifdef CONFIG_MCST
+#if BITS_PER_LONG == 32
+#define	fb_readp	fb_readl
+#define	fb_writep	fb_writel
+#elif BITS_PER_LONG == 64
+#define	fb_readp	fb_readq
+#define	fb_writep	fb_writeq
+#else
+#error BITS_PER_LONG not 32 or 64
+#endif
+#endif
 
 
 /* Test BO GTT->VRAM and VRAM->GTT GPU copies across the whole GTT aperture */
@@ -148,11 +160,12 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 		     vram_start = vram_map, vram_end = vram_map + size;
 		     vram_start < vram_end;
 		     gtt_start++, vram_start++) {
-			if (*vram_start != gtt_start) {
+			if ((void *) fb_readp(vram_start) != gtt_start) {
 				DRM_ERROR("Incorrect GTT->VRAM copy %d: Got 0x%p, "
 					  "expected 0x%p (GTT/VRAM offset "
 					  "0x%16llx/0x%16llx)\n",
-					  i, *vram_start, gtt_start,
+					  i, (void *)fb_readp(vram_start),
+					  (void *)gtt_start,
 					  (unsigned long long)
 					  (gtt_addr - rdev->mc.gtt_start +
 					   (void*)gtt_start - gtt_map),
@@ -162,7 +175,7 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 				radeon_bo_kunmap(vram_obj);
 				goto out_lclean_unpin;
 			}
-			*vram_start = vram_start;
+			fb_writep((unsigned long) vram_start, vram_start);
 		}
 
 		radeon_bo_kunmap(vram_obj);

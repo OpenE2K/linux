@@ -1,32 +1,33 @@
-/*******************************************************************************
-
-  Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2013 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  Linux NICS <linux.nics@intel.com>
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
+/*
+ * Intel PRO/1000 Linux driver
+ * Copyright(c) 1999 - 2014 Intel Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * The full GNU General Public License is included in this distribution in
+ * the file called "COPYING".
+ *
+ * Contact Information:
+ * Linux NICS <linux.nics@intel.com>
+ * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
+ * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
+ */
 
 #include "e1000.h"
+#ifdef  CONFIG_MCST
+#include <asm/setup.h>
+#endif
 
 /**
  *  e1000_raise_eec_clk - Raise EEPROM clock
@@ -179,7 +180,6 @@ s32 e1000e_acquire_nvm(struct e1000_hw *hw)
 
 	ew32(EECD, eecd | E1000_EECD_REQ);
 	eecd = er32(EECD);
-
 	while (timeout) {
 		if (eecd & E1000_EECD_GNT)
 			break;
@@ -313,13 +313,15 @@ static s32 e1000_ready_nvm_eeprom(struct e1000_hw *hw)
  *
  *  Reads a 16 bit word from the EEPROM using the EERD register.
  **/
-s32 e1000e_read_nvm_eerd(struct e1000_hw *hw, u16 offset, u16 words, u16 *data)
+/* BUGFIX_POVOZKA */
+s32 e1000e_read_nvm_eerd_true(struct e1000_hw *hw, u16 offset, u16 words, u16 *data)
 {
 	struct e1000_nvm_info *nvm = &hw->nvm;
 	u32 i, eerd = 0;
 	s32 ret_val = 0;
 
-	/* A check for invalid values:  offset too large, too many words,
+	/*
+	 * A check for invalid values:  offset too large, too many words,
 	 * too many words for the offset, and not enough words.
 	 */
 	if ((offset >= nvm->word_size) || (words > (nvm->word_size - offset)) ||
@@ -329,8 +331,8 @@ s32 e1000e_read_nvm_eerd(struct e1000_hw *hw, u16 offset, u16 words, u16 *data)
 	}
 
 	for (i = 0; i < words; i++) {
-		eerd = ((offset + i) << E1000_NVM_RW_ADDR_SHIFT) +
-		    E1000_NVM_RW_REG_START;
+		eerd = ((offset+i) << E1000_NVM_RW_ADDR_SHIFT) +
+		       E1000_NVM_RW_REG_START;
 
 		ew32(EERD, eerd);
 		ret_val = e1000e_poll_eerd_eewr_done(hw, E1000_NVM_POLL_READ);
@@ -342,6 +344,63 @@ s32 e1000e_read_nvm_eerd(struct e1000_hw *hw, u16 offset, u16 words, u16 *data)
 
 	return ret_val;
 }
+
+#ifdef CONFIG_MCST
+static u16 eeprom_static[64]={ 0x1b00, 0x5221, 0x16d7, 0x0420, 0xf746, 0x1080, 0xffff, 0xffff,
+				0xe469, 0x8103, 0x026b, 0xa01f, 0x8086, 0x10d3, 0xffff, 0x9c58,
+				0x0000, 0x2001, 0x7e94, 0xffff, 0x1000, 0x0048, 0x0000, 0x2704,
+				0x6cc9, 0x3150, 0x073e, 0x460b, 0x2d84, 0x0140, 0xf000, 0x0706,
+				0x6000, 0x7100, 0x1408, 0xffff, 0x4d01, 0x92ec, 0xfc5c, 0xf083,
+				0x0028, 0x0233, 0x0050, 0x7d1f, 0x1961, 0x0453, 0x00a0, 0xffff,
+				0x0100, 0x4000, 0x1315, 0x4003, 0xffff, 0xffff, 0xffff, 0xffff,
+				0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0130, 0xffff, 0x28fe };
+
+#endif
+																					 
+s32 e1000e_read_nvm_eerd(struct e1000_hw *hw, u16 offset, u16 words, u16 *data)
+{
+#ifdef CONFIG_MCST
+	struct e1000_nvm_info *nvm = &hw->nvm;
+	u32 i;
+	s32 ret_val = 0;
+
+
+	if (hw->has_nvram == -1) {
+		u16 tmp_data[4];
+		if (e1000e_read_nvm_eerd_true(hw, 0,  3, tmp_data) == 0) {
+			if ((tmp_data[0] != 0) && (tmp_data[0] != 0xffff) &&
+			     (tmp_data[1] != 0) && (tmp_data[1] != 0xffff) &&
+			     (tmp_data[2] != 0) && (tmp_data[2] != 0xffff)) {
+				hw->has_nvram = 1;
+			} else {
+				hw->has_nvram = 0;
+			}
+		} else {
+			hw->has_nvram = 0;
+		}
+	}
+
+	if (hw->has_nvram == 1) {
+#endif
+		return e1000e_read_nvm_eerd_true(hw,  offset,  words, data);
+#ifdef CONFIG_MCST
+	}
+	
+	/* 
+	* a check for invalid values:  offset too large, too many words, 
+	* too many words for the offset, and not enough words. 
+	*/
+	if ((offset >= nvm->word_size) || (words > (nvm->word_size - offset)) ||
+		(words == 0)) {
+			return -E1000_ERR_NVM;
+		}
+	for (i = 0; i < words; i++) {
+		data[i] = eeprom_static[offset + i];
+	}
+       return ret_val;
+#endif
+}
+/* BUGFIX_POVOZKA */
 
 /**
  *  e1000e_write_nvm_spi - Write to EEPROM using SPI
@@ -551,7 +610,15 @@ s32 e1000_read_mac_addr_generic(struct e1000_hw *hw)
 
 	for (i = 0; i < E1000_RAH_MAC_ADDR_LEN; i++)
 		hw->mac.perm_addr[i + 4] = (u8)(rar_high >> (i * 8));
-
+#ifdef CONFIG_MCST
+	if (hw->has_nvram == 0) { /* No nvram or nvram wrong */
+		l_cards_without_mac++;
+		for (i = 0; i < ETH_ALEN; i++) {
+			hw->mac.perm_addr[i] = l_base_mac_addr[i];
+		}
+		hw->mac.perm_addr[5] += (l_cards_without_mac - 1) & 0xff;
+       }
+#endif  /* CONFIG_E2K || CONFIG_E90S */
 	for (i = 0; i < ETH_ALEN; i++)
 		hw->mac.addr[i] = hw->mac.perm_addr[i];
 

@@ -196,5 +196,8 @@ extern int rtc_hctosys_ret;
 #else
 #define rtc_hctosys_ret -ENODEV
 #endif
+#if defined(CONFIG_MCST) & defined(__e2k__)
+extern int sclk_register(void *);
+#endif
 
 #endif /* _LINUX_RTC_H_ */

@@ -141,6 +141,10 @@ extern int __must_check
 request_percpu_irq(unsigned int irq, irq_handler_t handler,
 		   const char *devname, void __percpu *percpu_dev_id);
 
+#ifdef CONFIG_MCST_RT
+extern int mk_hndl_first(unsigned int irq, const char *name);
+#endif
+
 extern void free_irq(unsigned int, void *);
 extern void free_percpu_irq(unsigned int, void __percpu *);
 

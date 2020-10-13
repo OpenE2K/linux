@@ -6,6 +6,9 @@
 
 #include <uapi/asm/setup.h>
 
+#ifdef CONFIG_E90S
+#include <asm-l/setup.h>
+#endif
 
 extern char reboot_command[];
 
@@ -25,7 +28,9 @@ static inline int con_is_present(void)
 #endif
 
 #ifdef CONFIG_SPARC64
+#ifndef CONFIG_E90S
 extern void __init start_early_boot(void);
+#endif
 #endif
 
 extern void sun_do_break(void);

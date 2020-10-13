@@ -3082,6 +3082,64 @@ SYSCALL_DEFINE3(tgkill, pid_t, tgid, pid_t, pid, int, sig)
 	return do_tkill(tgid, pid, sig);
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+/*
+ * merge sys_tgkill && sys_rt_sigqueueinfo
+ */
+long sys_tgkill_info(pid_t pid, pid_t tgid, struct siginfo __user *uinfo)
+{
+	struct siginfo info;
+	int error;
+	struct task_struct *p;
+	int sig;
+
+	/* This is only valid for single tasks */
+	if (pid <= 0 || tgid <= 0)
+		return -EINVAL;
+
+	if (current->thread.flags & E2K_FLAG_32BIT){
+		if (copy_siginfo_from_user32(&info,
+				(struct compat_siginfo __user *) uinfo))
+			return -EFAULT;
+	} else {
+		if (copy_from_user(&info, uinfo, sizeof(siginfo_t)))
+			return -EFAULT;
+	}
+
+	/* Not even root can pretend to send signals from the kernel.
+	 * Nor can they impersonate a kill(), which adds source info. */
+	if ((info.si_code >= 0 || info.si_code == SI_TKILL) &&
+	    (task_pid_vnr(current) != pid))
+		return -EPERM;
+
+	/* Таке signo from siginfo */
+	sig = info.si_signo;
+
+	error = -ESRCH;
+	rcu_read_lock();
+	p = find_task_by_vpid(pid);
+	if (p && (tgid <= 0 || task_tgid_vnr(p) == tgid)) {
+		error = check_kill_permission(sig, &info, p);
+		/*
+		 * The null signal is a permissions and process existence
+		 * probe.  No signal is actually delivered.
+		 */
+		if (!error && sig) {
+			error = do_send_sig_info(sig, &info, p, false);
+			/*
+			 * If lock_task_sighand() failed we pretend the task
+			 * dies after receiving the signal. The window is tiny,
+			 * and the signal is private anyway.
+			 */
+			if (unlikely(error == -ESRCH))
+				error = 0;
+		}
+	}
+	rcu_read_unlock();
+	return error;
+}
+#endif
+
 /**
  *  sys_tkill - send signal to one specific task
  *  @pid: the PID of the task

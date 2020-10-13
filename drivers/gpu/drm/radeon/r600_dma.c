@@ -258,6 +258,12 @@ int r600_dma_ring_test(struct radeon_device *rdev,
 	radeon_ring_write(ring, 0xDEADBEEF);
 	radeon_ring_unlock_commit(rdev, ring);
 
+#ifdef CONFIG_E2K
+	/* We do not want to fetch the old value into Radeon's
+	 * cache, so give GPU some time to write the new value. */
+	mdelay(1);
+#endif
+
 	for (i = 0; i < rdev->usec_timeout; i++) {
 		tmp = readl(ptr);
 		if (tmp == 0xDEADBEEF)

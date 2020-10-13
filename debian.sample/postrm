@@ -1,0 +1,82 @@
+#!/bin/bash
+################################################################################
+#
+################################################################################
+unalias -a
+set +xv
+
+VERBOSE=0
+
+ARCHP=xxARCHPxx
+ARCHM=xxARCHMxx
+LOCALVERSION=xxLOCALVERSIONxx
+LOCVER=xxLOCVERxx
+KERNELRELEASE=xxKERNELRELEASExx
+FIMAGE=xxFIMAGExx
+FCONFIG=xxFCONFIGxx
+FSYSTEMMAP=xxFSYSTEMMAPxx
+FVMLINUX=xxFVMLINUXxx
+
+x=${KERNELRELEASE#*elbrus.}
+x=${LOCVER}
+#x=`echo $x | sed -e 's/\./-/g'`
+LABEL=k${x}
+
+[[ -z $ROOT ]] && ROOT=/
+ROOTDIR=$ROOT
+
+OSLBASE=base
+OSLUP=$LABEL
+OSLFLASH=oslflash
+
+BOOTCONF=/boot/boot.conf
+
+tmpf=/tmp/__postrm_linux_$$_
+################################################################################
+cleanup()
+{
+	rm -f ${tmpf}*
+}
+DoEcho()
+{
+	echo "=== linux postrm: $LOCVER: $*"
+}
+DoEchoV()
+{
+	[[ $VERBOSE == 0 ]] && return 0
+	DoEcho "$*"
+}
+################################################################################
+# update boot.conf: delete label=
+################################################################################
+BootConf_cleanup()
+{
+O_IFS="$IFS"
+export IFS=
+	isbase=0
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		if [[ $line1 == "label="* ]]; then
+			if [[ $line1 == "label=${OSLUP}" || $line1 == "label=${OSLUP}#"* ]]; then
+				isbase=1
+			else
+				isbase=0
+			fi
+		fi
+		[[ $isbase == 1 ]] && continue
+		echo "$line"
+	done <${BOOTCONF} >$tmpf
+	cp $tmpf ${BOOTCONF}
+IFS="$O_IFS"
+}
+################################################################################
+trap "cleanup" 1 2 3 6 15 EXIT
+
+DoEchoV "FIMAGE=$FIMAGE"
+DoEchoV "LABEL=$LABEL"
+
+if [[ -f $BOOTCONF ]]; then
+	BootConf_cleanup
+fi
+
+exit 0

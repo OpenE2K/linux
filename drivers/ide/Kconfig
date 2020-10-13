@@ -499,6 +499,14 @@ config BLK_DEV_PIIX
 	  This allows the kernel to change PIO, DMA and UDMA speeds and to
 	  configure the chip to optimum performance.
 
+config BLK_DEV_ELBRUS
+	tristate "Elbrus chipsets support"
+	select BLK_DEV_IDEDMA_PCI
+	help
+	  This driver adds explicit support for ELBRUS (E3S/E90/E90S) chips
+	  This allows the kernel to change PIO, DMA and UDMA speeds
+	  and to configure the chip to optimum performance.
+
 config BLK_DEV_IT8172
 	tristate "IT8172 IDE support"
 	select BLK_DEV_IDEDMA_PCI

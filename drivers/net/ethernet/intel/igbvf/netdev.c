@@ -1075,8 +1075,11 @@ static int igbvf_request_msix(struct igbvf_adapter *adapter)
 	}
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-	                  igbvf_intr_msix_tx, 0, adapter->tx_ring->name,
-	                  netdev);
+			igbvf_intr_msix_tx, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, adapter->tx_ring->name, netdev);
 	if (err)
 		goto out;
 
@@ -1085,8 +1088,11 @@ static int igbvf_request_msix(struct igbvf_adapter *adapter)
 	vector++;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-	                  igbvf_intr_msix_rx, 0, adapter->rx_ring->name,
-	                  netdev);
+			igbvf_intr_msix_rx, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, adapter->rx_ring->name, netdev);
 	if (err)
 		goto out;
 
@@ -1095,7 +1101,11 @@ static int igbvf_request_msix(struct igbvf_adapter *adapter)
 	vector++;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-	                  igbvf_msix_other, 0, netdev->name, netdev);
+			igbvf_msix_other, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, netdev);
 	if (err)
 		goto out;
 

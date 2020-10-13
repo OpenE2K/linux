@@ -85,6 +85,9 @@ static inline unsigned long
 calc_vm_flag_bits(unsigned long flags)
 {
 	return _calc_vm_trans(flags, MAP_GROWSDOWN,  VM_GROWSDOWN ) |
+#ifdef CONFIG_E2K
+	       _calc_vm_trans(flags, MAP_WRITECOMBINED, VM_WRITECOMBINED) |
+#endif
 	       _calc_vm_trans(flags, MAP_DENYWRITE,  VM_DENYWRITE ) |
 	       _calc_vm_trans(flags, MAP_LOCKED,     VM_LOCKED    );
 }

@@ -368,9 +368,17 @@ void tick_shutdown(unsigned int *cpup)
 		 * the set mode function!
 		 */
 		dev->mode = CLOCK_EVT_MODE_UNUSED;
+#ifdef CONFIG_E2K
+		if (!(dev->features & CLOCK_EVT_FEAT_NOHWSTOP)) {
+			clockevents_exchange_device(dev, NULL);
+			dev->event_handler = clockevents_handle_noop;
+			td->evtdev = NULL;
+		}
+#else
 		clockevents_exchange_device(dev, NULL);
 		dev->event_handler = clockevents_handle_noop;
 		td->evtdev = NULL;
+#endif
 	}
 }
 

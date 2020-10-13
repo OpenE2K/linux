@@ -15,6 +15,68 @@
 #define STATUS(p)   ((p)->base    + 0x1)
 #define DATA(p)     ((p)->base    + 0x0)
 
+#ifdef _WORKAROUND_MCST_PP
+
+#define PPC_MODE(p) ((p)->base_hi + 0xf)
+#define ICR(p)     ((p)->base_hi + 0xe)
+#define HCR(p)     ((p)->base_hi + 0xc)
+#define DMACOUNT(p) ((p)->base_hi + 0x8)
+#define DMAADDR(p)  ((p)->base_hi + 0x4)
+#define PPC_SR(p)   ((p)->base    + 0x8)
+
+/* PPC_SR fields */
+#define reqFIFOdelta	(0xf << 12) /* RO Number of PIO requests in reqFIFO buffer (0x8 max) */
+#define WordFrac	(0x3 << 10) /* RO Number of bytes of 4-byte word on output of.
+				     * dataFIFO buffer to write in peripherial device
+				     * so as to finish current request */
+#define StatusChange	(0x1 << 9)..
+#define Threshold	(0x1 << 8)  /* reqFIFOdelta bit value changing from value 0x5 to 0x4.
+				     * indication. It shows that second 16 bytes data segment is
+				     * now able to be filled with another data */
+#define DMA_SysReqErr	(0x1 << 7)
+#define PIO_SysReqErr	(0x1 << 6)
+#define Periph_Intr	(0x1 << 5)  /* Peripheral device interrupt */
+#define reqFIFOErr	(0x1 << 4)  /* reqFIFO buffer overflow indication */
+#define ECP_Err		(0x1 << 3)
+#define TO		(0x1 << 2)  /* Peripheral device hanging during data exchange. Onle hardware
+				     * mode */
+#define DMA_active	(0x1 << 1)  /* DMA indication. 1 -> is now running 0 -> isn't running */
+#define TC		(0x1 << 0)  /* Terminal Count. Data block transmition completion while.
+				     * DMA mode. 1 if dma_wc (DMACOUNT) counter zeroed */
+
+#define Normal_Intrs	(Threshold | TC | Periph_Intr)
+#define Err_Intrs	(DMA_SysReqErr | PIO_SysReqErr | reqFIFOErr | ECP_Err | TO )
+
+#define Full_Intr_Allowed (Err_Intrs | Normal_Intrs)
+/* ICR fields */
+#define MaskIntr	(0x1 << 7)  /* disable all interrupts if 1. If 0 enables all interrupts
+				     * described below. These interrups must be specified by their
+				     * own masks as disabled or enabled  */
+#define Threshold_IntrEn (0x1 << 6) /* If 1 enables interrupt when Threshold event occures */
+#define SysReqErr_IntrEn (0x1 << 5) /* If 1 enables interrupts when DMA_SysReqErr or PIO_SysReqErr
+				     * events occur */
+#define StatusChange_IntrEn	(0x1 << 4) /* If 1 enables interrupt when StatusChange event occures */
+#define reqFIFOErr_IntrEn	(0x1 << 3) /* If 1 enables interrupt when reqFIFO event occures */
+#define Periph_IntrEn	(0x1 << 2) /* If 1 enables interrupt when Periph_Intr event occures */
+#define BusErr_IntrEn	(0x1 << 1) /* If 1 enables interrupts when ECP_Err or TO events occur */
+#define TC_IntrEn	(0x1 << 0) /* If 1 enables interrupt when TC event occures */
+
+#define Normal_IntrsEn	(Threshold_IntrEn | TC_IntrEn | Periph_IntrEn)
+#define Err_IntrsEn	(SysReqErr_IntrEn | reqFIFOErr_IntrEn | BusErr_IntrEn)
+
+#define Full_Intr_AllowedEn (Err_IntrsEn | Normal_IntrsEn)
+
+/* For e3s only */
+#define mSPPs	(0x00) /* That mode supports Compatibility and Nibble protocols */
+#define mSPPh   (0x04) /* 100 That mode supports Compatibility and Nibble protocols */
+#define mPS2	(0x01)
+			/* 001 That mode supports Compatibility, Nibble, Byte, EPP, ECP Protocols.
+		         and can implement Forward to Reverse, Reverse to Forward, Termination,
+			 Negotiation, Setup cycles */
+#define mECP	(0x07) /* 111 That mode supports ECP protocol */
+#define mEPP	(0x06) /* 110 That mode supports EPP protocol */
+#endif /*   _WORKAROUND_MCST_PP  */
+
 struct parport_pc_private {
 	/* Contents of CTR. */
 	unsigned char ctr;
@@ -30,7 +92,11 @@ struct parport_pc_private {
 
 	/* Number of bytes per portword. */
 	int pword;
-
+#ifdef _WORKAROUND_MCST_PP
+	int driver_data;
+	struct pci_dev *dev;
+	u8 parport_rev;
+#endif
 	/* Not used yet. */
 	int readIntrThreshold;
 	int writeIntrThreshold;

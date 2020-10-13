@@ -1119,6 +1119,10 @@ submit_async (
 			 qtd, urb->ep->hcpriv);
 	}
 #endif
+#ifdef CONFIG_MCST
+	if (ehci->rh_state != EHCI_RH_RUNNING)
+		return -ENODEV;
+#endif
 
 	spin_lock_irqsave (&ehci->lock, flags);
 	if (unlikely(!HCD_HW_ACCESSIBLE(ehci_to_hcd(ehci)))) {

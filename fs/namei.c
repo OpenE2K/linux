@@ -37,6 +37,10 @@
 #include <linux/hash.h>
 #include <asm/uaccess.h>
 
+#ifdef CONFIG_MAC_
+#include <linux/mac/mac_kernel.h>
+#endif
+
 #include "internal.h"
 #include "mount.h"
 
@@ -324,6 +328,19 @@ int generic_permission(struct inode *inode, int mask)
 {
 	int ret;
 
+#ifdef CONFIG_MAC_
+	if (mac_active != 0) {
+		if (kmac_access_userp((kmac_subject_id_t)
+				      __kuid_val(current->cred->fsuid),
+				      (kmac_user_id_t) __kuid_val(inode->i_uid),
+				      (int) mask) != 0) {
+#ifdef MAC_DEBUG_FS
+			printk("<1>generic_permission(): uid: %i mac EACCES (%i)\n", current->real_cred->fsuid, EACCES);
+#endif /* MAC_DEBUG_FS */
+			return (-EACCES);
+		}
+	}
+#endif /* CONFIG_MAC_ */	
 	/*
 	 * Do the basic permission checks.
 	 */

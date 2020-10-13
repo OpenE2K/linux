@@ -1371,7 +1371,7 @@ struct e1000_hw {
 	e1000_ffe_config ffe_config_state;
 	u32 asf_firmware_present;
 	u32 eeprom_semaphore_present;
-	unsigned long io_base;
+	void * __iomem io_base;
 	u32 phy_id;
 	u32 phy_revision;
 	u32 phy_addr;

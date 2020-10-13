@@ -79,6 +79,13 @@
 #define CPUINFO_PROC	"cpu model"
 #endif
 
+#ifdef __e2k__
+#define mb()		asm volatile("{wait all_c=1}" ::: "memory")
+#define wmb()		asm volatile("{wait st_c=1}" ::: "memory")
+#define rmb()		asm volatile("{wait ld_c=1}" ::: "memory")
+#define CPUINFO_PROC	"model name"
+#endif
+
 #ifdef __ia64__
 #define mb()		asm volatile ("mf" ::: "memory")
 #define wmb()		asm volatile ("mf" ::: "memory")

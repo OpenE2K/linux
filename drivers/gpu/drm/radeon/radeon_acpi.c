@@ -694,6 +694,10 @@ int radeon_acpi_init(struct radeon_device *rdev)
 	struct radeon_atcs *atcs = &rdev->atcs;
 	int ret;
 
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	return 0;
+#endif
+
 	/* Get the device handle */
 	handle = ACPI_HANDLE(&rdev->pdev->dev);
 

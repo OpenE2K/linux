@@ -708,6 +708,15 @@ void do_exit(long code)
 
 	profile_task_exit(tsk);
 
+#ifdef CONFIG_MCST_RT_SMP
+	if (mcst_rt_affinity(tsk)) {
+		local_irq_disable();
+		tsk->mcst_smp_cpu = 0;
+		local_irq_enable();
+		dec_unbound_tasks();
+	}
+#endif
+
 	WARN_ON(blk_needs_flush_plug(tsk));
 
 	if (unlikely(in_interrupt()))

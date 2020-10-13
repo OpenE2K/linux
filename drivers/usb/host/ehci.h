@@ -262,6 +262,11 @@ struct ehci_hcd {			/* one per controller */
 						/* us budgeted per uframe */
 	struct list_head	tt_list;
 
+#ifdef CONFIG_MCST
+	struct work_struct	iohub2_work;	/* Worker for iohub2 quirk */
+	struct delayed_work	iohub2_workdone;
+	unsigned		iohub2_false_fatal_error:1;
+#endif
 	/* platform-specific data -- must come last */
 	unsigned long		priv[0] __aligned(sizeof(s64));
 };

@@ -28,6 +28,9 @@
 #include <linux/slab.h>
 #include <linux/syscore_ops.h>
 #include <linux/tick.h>
+#ifdef CONFIG_MCST
+#include <linux/timex.h>
+#endif
 #include <trace/events/power.h>
 
 /**
@@ -314,6 +317,9 @@ static void __cpufreq_notify_transition(struct cpufreq_policy *policy,
 				CPUFREQ_POSTCHANGE, freqs);
 		if (likely(policy) && likely(policy->cpu == freqs->cpu))
 			policy->cur = freqs->new;
+#ifdef CONFIG_MCST
+		cpu_freq_hz = policy->cur * 1000;
+#endif
 		break;
 	}
 }

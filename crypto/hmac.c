@@ -41,6 +41,8 @@ static inline struct hmac_ctx *hmac_ctx(struct crypto_shash *tfm)
 			 crypto_tfm_ctx_alignment());
 }
 
+/* LCC does not understand VLA in structures */
+#if !defined CONFIG_MCST || !defined __LCC__
 static int hmac_setkey(struct crypto_shash *parent,
 		       const u8 *inkey, unsigned int keylen)
 {
@@ -88,6 +90,54 @@ static int hmac_setkey(struct crypto_shash *parent,
 	       crypto_shash_update(&desc.shash, opad, bs) ?:
 	       crypto_shash_export(&desc.shash, opad);
 }
+#else /* !defined CONFIG_MCST || !defined __LCC__ || __LCC__ != 118 */
+static int hmac_setkey(struct crypto_shash *parent,
+		       const u8 *inkey, unsigned int keylen)
+{
+	int bs = crypto_shash_blocksize(parent);
+	int ds = crypto_shash_digestsize(parent);
+	int ss = crypto_shash_statesize(parent);
+	char *ipad = crypto_shash_ctx_aligned(parent);
+	char *opad = ipad + ss;
+	struct hmac_ctx *ctx = align_ptr(opad + ss,
+					 crypto_tfm_ctx_alignment());
+	struct crypto_shash *hash = ctx->hash;
+	struct shash_desc *desc;
+	unsigned int i;
+
+	desc = __builtin_alloca(sizeof(*desc) + crypto_shash_descsize(hash));
+
+	desc->tfm = hash;
+	desc->flags = crypto_shash_get_flags(parent) &
+			    CRYPTO_TFM_REQ_MAY_SLEEP;
+
+	if (keylen > bs) {
+		int err;
+
+		err = crypto_shash_digest(desc, inkey, keylen, ipad);
+		if (err)
+			return err;
+
+		keylen = ds;
+	} else
+		memcpy(ipad, inkey, keylen);
+
+	memset(ipad + keylen, 0, bs - keylen);
+	memcpy(opad, ipad, bs);
+
+	for (i = 0; i < bs; i++) {
+		ipad[i] ^= 0x36;
+		opad[i] ^= 0x5c;
+	}
+
+	return crypto_shash_init(desc) ?:
+	       crypto_shash_update(desc, ipad, bs) ?:
+	       crypto_shash_export(desc, ipad) ?:
+	       crypto_shash_init(desc) ?:
+	       crypto_shash_update(desc, opad, bs) ?:
+	       crypto_shash_export(desc, opad);
+}
+#endif /* !defined CONFIG_MCST || !defined __LCC__ || __LCC__ != 118 */
 
 static int hmac_export(struct shash_desc *pdesc, void *out)
 {

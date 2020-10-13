@@ -351,6 +351,26 @@ config APDS9802ALS
 	  This driver can also be built as a module.  If so, the module
 	  will be called apds9802als.
 
+config ISL29020
+	tristate "Intersil ISL29020 ambient light sensor"
+	depends on I2C
+	help
+	  If you say yes here you get support for the Intersil ISL29020
+	  ambient light sensor.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called isl29020.
+
+config ISL22317
+	tristate "Intersil ISL22317 digitally controlled potentiometer"
+	depends on I2C && SYSFS
+	help
+	  If you say yes here you get support for the Intersil ISL22317
+	  precision single digitally controlled potentiometer.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called isl22317.
+
 config ISL29003
 	tristate "Intersil ISL29003 ambient light sensor"
 	depends on I2C && SYSFS
@@ -361,15 +381,35 @@ config ISL29003
 	  This driver can also be built as a module.  If so, the module
 	  will be called isl29003.
 
-config ISL29020
-	tristate "Intersil ISL29020 ambient light sensor"
-	depends on I2C
+config LTC4306
+	tristate "Linear Technology LTC4306 bus multiplexer"
+	depends on I2C && SYSFS
 	help
-	  If you say yes here you get support for the Intersil ISL29020
-	  ambient light sensor.
+	  If you say yes here you get support for the LTC4306
+	  4-channel 2-Wire Bus Multiplexer with Capacitance Buffering.
 
 	  This driver can also be built as a module.  If so, the module
-	  will be called isl29020.
+	  will be called ltc4306.
+
+config UCD9080
+	tristate "Texas Instruments 8-ch power supply sequencer and monitor"
+	depends on I2C && SYSFS
+	help
+	  If you say yes here you get support for the UCD9080
+	  Texas Instruments 8-ch power supply sequencer and monitor.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called ucd9080.
+
+config I2C_P2PMC
+	tristate "i2c p2pmc device"
+	depends on I2C && SYSFS
+	help
+	  If you say yes here you get support for the I2C P2PMC
+	  i2c p2pmc device.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called i2c_p2pmc.
 
 config SENSORS_TSL2550
 	tristate "Taos TSL2550 ambient light sensor"

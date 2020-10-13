@@ -435,6 +435,25 @@ __acquires(uhci->lock)
 	mod_timer(&uhci_to_hcd(uhci)->rh_timer, jiffies);
 }
 
+#ifdef CONFIG_USB_IRQ_ON_THREAD
+static irqreturn_t uhci_preirq(struct usb_hcd *hcd)
+{
+	struct uhci_hcd *uhci = hcd_to_uhci(hcd);
+	unsigned short status;
+
+	/*
+	 * Read the interrupt status, and check write it back to clear the
+	 * interrupt cause.  Contrary to the UHCI specification, the
+	 * "HC Halted" status bit is persistent: it is RO, not R/WC.
+	 */
+	status = inw(uhci->io_addr + USBSTS);
+	if (!(status & ~USBSTS_HCH))	/* shared interrupt, not mine */
+		return IRQ_NONE;
+
+	return IRQ_WAKE_THREAD;
+}
+#endif
+
 static irqreturn_t uhci_irq(struct usb_hcd *hcd)
 {
 	struct uhci_hcd *uhci = hcd_to_uhci(hcd);

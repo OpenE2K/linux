@@ -1511,6 +1511,17 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 		bio_endio(bio, -EIO);
 		return;
 	}
+#ifdef CONFIG_MCST_RT
+	/*
+	 * Don't merging if RT because too long time ide_dma_intr() under cli()
+	 */
+	if (rts_act_mask & RTS_NO_IO_SCHED) {
+		spin_lock_irq(q->queue_lock);
+		bio->bi_rw |= REQ_FLUSH | REQ_FUA;
+		where = ELEVATOR_INSERT_FLUSH;
+		goto get_rq;
+	}
+#endif /* CONFIG_MCST_RT */
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
 		spin_lock_irq(q->queue_lock);

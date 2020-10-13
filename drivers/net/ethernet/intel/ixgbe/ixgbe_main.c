@@ -2765,8 +2765,11 @@ static int ixgbe_request_msix_irqs(struct ixgbe_adapter *adapter)
 			/* skip this unused q_vector */
 			continue;
 		}
-		err = request_irq(entry->vector, &ixgbe_msix_clean_rings, 0,
-				  q_vector->name, q_vector);
+		err = request_irq(entry->vector, &ixgbe_msix_clean_rings, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, q_vector->name, q_vector);
 		if (err) {
 			e_err(probe, "request_irq failed for MSIX interrupt "
 			      "Error: %d\n", err);
@@ -2781,7 +2784,11 @@ static int ixgbe_request_msix_irqs(struct ixgbe_adapter *adapter)
 	}
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  ixgbe_msix_other, 0, netdev->name, adapter);
+			  ixgbe_msix_other, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, adapter);
 	if (err) {
 		e_err(probe, "request_irq for msix_other failed: %d\n", err);
 		goto free_queue_irqs;
@@ -2887,11 +2894,17 @@ static int ixgbe_request_irq(struct ixgbe_adapter *adapter)
 	if (adapter->flags & IXGBE_FLAG_MSIX_ENABLED)
 		err = ixgbe_request_msix_irqs(adapter);
 	else if (adapter->flags & IXGBE_FLAG_MSI_ENABLED)
-		err = request_irq(adapter->pdev->irq, ixgbe_intr, 0,
-				  netdev->name, adapter);
+		err = request_irq(adapter->pdev->irq, ixgbe_intr, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, adapter);
 	else
-		err = request_irq(adapter->pdev->irq, ixgbe_intr, IRQF_SHARED,
-				  netdev->name, adapter);
+		err = request_irq(adapter->pdev->irq, ixgbe_intr, IRQF_SHARED
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, adapter);
 
 	if (err)
 		e_err(probe, "request_irq failed, Error %d\n", err);

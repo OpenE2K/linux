@@ -815,6 +815,13 @@ config DEBUG_PREEMPT
 	  if kernel code uses it in a preemption-unsafe way. Also, the kernel
 	  will detect preemption count underflows.
 
+config DEBUG_PREEMPT_COUNT
+	bool "Debug preempt count decreasing < 0"
+	depends on WATCH_PREEMPT
+	default n
+	help
+	 Check in sub_preempt_count preempt_count becomes negative
+
 menu "Lock Debugging (spinlocks, mutexes, etc...)"
 
 config DEBUG_RT_MUTEXES

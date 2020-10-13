@@ -166,6 +166,9 @@ extern unsigned int alarm_setitimer(unsigned int seconds);
 extern int do_getitimer(int which, struct itimerval *value);
 extern int __getnstimeofday(struct timespec *tv);
 extern void getnstimeofday(struct timespec *tv);
+#ifdef CONFIG_MCST
+extern s64 getns64timeofday(void);
+#endif
 extern void getrawmonotonic(struct timespec *ts);
 extern void getnstime_raw_and_real(struct timespec *ts_raw,
 		struct timespec *ts_real);

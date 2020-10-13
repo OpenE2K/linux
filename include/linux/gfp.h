@@ -344,8 +344,15 @@ extern struct page *alloc_pages_vma(gfp_t gfp_mask, int order,
 #else
 #define alloc_pages(gfp_mask, order) \
 		alloc_pages_node(numa_node_id(), gfp_mask, order)
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+extern struct page *binco_alloc_pages(gfp_t gfp_mask, unsigned int order,
+				      unsigned long addr);
+#define alloc_pages_vma(gfp_mask, order, vma, addr, node) \
+	binco_alloc_pages(gfp_mask, order, addr)
+#else /* ! CONFIG_E2K || ! CONFIG_SECONDARY_SPACE_SUPPORT */
 #define alloc_pages_vma(gfp_mask, order, vma, addr, node)	\
 	alloc_pages(gfp_mask, order)
+#endif /* CONFIG_E2K && CONFIG_SECONDARY_SPACE_SUPPORT */
 #endif
 #define alloc_page(gfp_mask) alloc_pages(gfp_mask, 0)
 #define alloc_page_vma(gfp_mask, vma, addr)			\

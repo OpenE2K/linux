@@ -56,6 +56,13 @@ enum clock_event_mode {
 #define CLOCK_EVT_FEAT_C3STOP		0x000008
 #define CLOCK_EVT_FEAT_DUMMY		0x000010
 
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+/*
+ * l specific misfeatures:
+ */
+#define CLOCK_EVT_FEAT_NOHWSTOP                0x000040
+#endif
+
 /*
  * Core shall set the interrupt affinity dynamically in broadcast mode
  */

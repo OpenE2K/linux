@@ -1288,6 +1288,12 @@ static inline int __fastpath_timer_check(struct task_struct *tsk)
 
 	return 0;
 }
+#ifdef CONFIG_MCST_RT
+void wakeup_delayed_posix_timer(int cpu)
+{
+	wake_up_process(per_cpu(posix_timer_task, cpu));
+}
+#endif
 
 void run_posix_cpu_timers(struct task_struct *tsk)
 {
@@ -1313,8 +1319,16 @@ void run_posix_cpu_timers(struct task_struct *tsk)
 			tsk->posix_timer_list = tsk;
 		}
 		per_cpu(posix_timer_tasklist, cpu) = tsk;
-
+#ifdef CONFIG_MCST_RT
+		if ((rts_act_mask & RTS_FAST_TIMER) &&
+				!(rts_act_mask & RTS_POSTP_TICK)) {
+			per_cpu(delayed_posix_timer, cpu) = 1;
+		} else {
+			wake_up_process(per_cpu(posix_timer_task, cpu));
+		}
+#else
 		wake_up_process(per_cpu(posix_timer_task, cpu));
+#endif
 	}
 }
 

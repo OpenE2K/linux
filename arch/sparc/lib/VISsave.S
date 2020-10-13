@@ -25,15 +25,13 @@
 	.align		32
 VISenter:
 	ldub		[%g6 + TI_FPDEPTH], %g1
-	brnz,a,pn	%g1, 1f
-	 cmp		%g1, 1
-	stb		%g0, [%g6 + TI_FPSAVED]
-	stx		%fsr, [%g6 + TI_XFSR]
-9:	jmpl		%g7 + %g0, %g0
-	 nop
-1:	bne,pn		%icc, 2f
+	brz,a,pn	%g1, 1f
+	 mov		1, %g2
+	add		%g1, 2, %g2
+1:	stb		%g2, [%g6 + TI_FPDEPTH]
+	brz,a,pn	%g1, 2f
+	 srl		%g2, 1, %g1
 
-	 srl		%g1, 1, %g1
 vis1:	ldub		[%g6 + TI_FPSAVED], %g3
 	stx		%fsr, [%g6 + TI_XFSR]
 	or		%g3, %o5, %g3
@@ -56,7 +54,7 @@ vis1:	ldub		[%g6 + TI_FPSAVED], %g3
 	stx		%fsr, [%g2 + TI_XFSR]
 	sll		%g1, 5, %g1
 3:	andcc		%o5, FPRS_DL|FPRS_DU, %g0
-	be,pn		%icc, 9b
+	be,pn		%icc, 80f
 	 add		%g6, TI_FPREGS, %g2
 	andcc		%o5, FPRS_DL, %g0
 
@@ -103,16 +101,13 @@ vis1:	ldub		[%g6 + TI_FPSAVED], %g3
 	.align		32
 VISenterhalf:
 	ldub		[%g6 + TI_FPDEPTH], %g1
-	brnz,a,pn	%g1, 1f
-	 cmp		%g1, 1
-	stb		%g0, [%g6 + TI_FPSAVED]
-	stx		%fsr, [%g6 + TI_XFSR]
-	clr		%o5
-	jmpl		%g7 + %g0, %g0
-	 wr		%g0, FPRS_FEF, %fprs
+	brz,a,pn	%g1, 1f
+	 mov		1, %g2
+	add		%g1, 2, %g2
+1:	stb		%g2, [%g6 + TI_FPDEPTH]
+	brz,a,pn	%g1, 2f
+	 srl		%g2, 1, %g1
 
-1:	bne,pn		%icc, 2f
-	 srl		%g1, 1, %g1
 	ba,pt		%xcc, vis1
 	 sub		%g7, 8, %g7
 2:	addcc		%g6, %g1, %g3

@@ -741,6 +741,19 @@ int __do_adjtimex(struct timex *txc, struct timespec *ts, s32 *time_tai)
 
 	return result;
 }
+#ifdef CONFIG_MCST
+EXPORT_SYMBOL(time_status);
+int		do_log_stv = 0;
+EXPORT_SYMBOL(do_log_stv);
+
+void
+set_pps_stat2(int new_st)
+{
+	update_tmstatus_for_ntp(&time_status,
+		STA_PPSTIME | STA_PPSFREQ, new_st);
+}
+EXPORT_SYMBOL(set_pps_stat2);
+#endif
 
 #ifdef	CONFIG_NTP_PPS
 
@@ -880,7 +893,11 @@ static long hardpps_update_freq(struct pps_normtime freq_norm)
 }
 
 /* correct REALTIME clock phase error against PPS signal */
+#ifdef CONFIG_MCST
+static void hardpps_update_phase(long error, int sec)
+#else
 static void hardpps_update_phase(long error)
+#endif
 {
 	long correction = -error;
 	long jitter;
@@ -894,8 +911,13 @@ static void hardpps_update_phase(long error)
 	 * the time offset is updated.
 	 */
 	if (jitter > (pps_jitter << PPS_POPCORN)) {
+#ifdef CONFIG_MCST
+		pr_warning("hardpps: PPSJITTER: on %d sec jitter=%ld >  limit=%ld << %d\n",
+		       sec, jitter, pps_jitter, PPS_POPCORN);
+#else
 		pr_warning("hardpps: PPSJITTER: jitter=%ld, limit=%ld\n",
 		       jitter, (pps_jitter << PPS_POPCORN));
+#endif
 		time_status |= STA_PPSJITTER;
 		pps_jitcnt++;
 	} else if (time_status & STA_PPSTIME) {
@@ -909,6 +931,9 @@ static void hardpps_update_phase(long error)
 	pps_jitter += (jitter - pps_jitter) >> PPS_INTMIN;
 }
 
+#ifdef CONFIG_MCST
+static int prev_error_sec = 0;
+#endif
 /*
  * __hardpps() - discipline CPU clock oscillator to external PPS signal
  *
@@ -952,11 +977,23 @@ void __hardpps(const struct timespec *phase_ts, const struct timespec *raw_ts)
 		time_status |= STA_PPSJITTER;
 		/* restart the frequency calibration interval */
 		pps_fbase = *raw_ts;
+#ifdef CONFIG_MCST
+		if (pts_norm.sec - prev_error_sec > 30) {
+			pr_err("hardpps: Incorrect pulse_per_second period "
+			" = %ld.%9lld sec. Time: %d (secs since 1970)\n",
+			freq_norm.sec, freq_norm.nsec, pts_norm.sec);
+		}
+#else
 		pr_err("hardpps: PPSJITTER: bad pulse\n");
+#endif
 		return;
 	}
 
 	/* signal is ok */
+#ifdef CONFIG_MCST
+	if ((time_status & STA_PPSJITTER))
+		time_status &= ~STA_PPSFREQ;
+#endif
 
 	/* check if the current frequency interval is finished */
 	if (freq_norm.sec >= (1 << pps_shift)) {
@@ -966,9 +1003,14 @@ void __hardpps(const struct timespec *phase_ts, const struct timespec *raw_ts)
 		hardpps_update_freq(freq_norm);
 	}
 
+#ifdef CONFIG_MCST
+	hardpps_update_phase(pts_norm.nsec, pts_norm.sec);
+#else
 	hardpps_update_phase(pts_norm.nsec);
+#endif
 
 }
+
 #endif	/* CONFIG_NTP_PPS */
 
 static int __init ntp_tick_adj_setup(char *str)

@@ -69,6 +69,24 @@
   } while (0)
 
 /* Right shift with sticky-lsb.  */
+#define _FP_FRAC_SRST_2(X,S, N,sz)					  \
+(void)(((N) < _FP_W_TYPE_SIZE)						  \
+       ? ({								  \
+	    S = (__builtin_constant_p(N) && (N) == 1			  \
+		 ? X##_f0 & 1						  \
+		 : (X##_f0 << (_FP_W_TYPE_SIZE - (N))) != 0);		  \
+	    X##_f0 = (X##_f1 << (_FP_W_TYPE_SIZE - (N)) | X##_f0 >> (N)); \
+	    X##_f1 >>= (N);						  \
+	  })								  \
+       : ({								  \
+	    S = ((((N) == _FP_W_TYPE_SIZE				  \
+		   ? 0							  \
+		   : (X##_f1 << (2*_FP_W_TYPE_SIZE - (N))))		  \
+		  | X##_f0) != 0);					  \
+	    X##_f0 = (X##_f1 >> ((N) - _FP_W_TYPE_SIZE));		  \
+	    X##_f1 = 0;							  \
+	  }))
+
 #define _FP_FRAC_SRS_2(X,N,sz)						\
   do {									\
     if ((N) < _FP_W_TYPE_SIZE)						\
@@ -81,7 +99,10 @@
       }									\
     else								\
       {									\
-	X##_f0 = (X##_f1 >> ((N) - _FP_W_TYPE_SIZE) |			\
+	if ((N) == _FP_W_TYPE_SIZE)					\
+	  X##_f0 = X##_f1 | (X##_f0 != 0);				\
+	else								\
+	  X##_f0 = (X##_f1 >> ((N) - _FP_W_TYPE_SIZE) |			\
 		(((X##_f1 << (2*_FP_W_TYPE_SIZE - (N))) | X##_f0) != 0)); \
 	X##_f1 = 0;							\
       }									\

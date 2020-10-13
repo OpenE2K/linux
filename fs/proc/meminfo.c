@@ -86,6 +86,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	 * Tagged format, for easy grepping and expansion.
 	 */
 	seq_printf(m,
+		"MemFullSize:    %8lu kB\n"
 		"MemTotal:       %8lu kB\n"
 		"MemFree:        %8lu kB\n"
 		"MemAvailable:   %8lu kB\n"
@@ -139,6 +140,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		"AnonHugePages:  %8lu kB\n"
 #endif
 		,
+		K(totalreal_mem),
 		K(i.totalram),
 		K(i.freeram),
 		K(available),

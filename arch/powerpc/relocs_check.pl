@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# Copyright © 2009 IBM Corporation
+# Copyright б╘ 2009 IBM Corporation
 
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License

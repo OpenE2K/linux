@@ -207,7 +207,11 @@ int
 ixgb_up(struct ixgb_adapter *adapter)
 {
 	struct net_device *netdev = adapter->netdev;
-	int err, irq_flags = IRQF_SHARED;
+	int err, irq_flags = IRQF_SHARED
+#ifdef CONFIG_MCST
+			 | IRQF_NODELAY | IRQF_ONESHOT
+#endif
+		;
 	int max_frame = netdev->mtu + ENET_HEADER_SIZE + ENET_FCS_LENGTH;
 	struct ixgb_hw *hw = &adapter->hw;
 

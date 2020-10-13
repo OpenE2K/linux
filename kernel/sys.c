@@ -424,6 +424,10 @@ static int set_user(struct cred *new)
 	else
 		current->flags &= ~PF_NPROC_EXCEEDED;
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+        el_posix_switch_user(current_user(), new_user);
+#endif
+
 	free_uid(new->user);
 	new->user = new_user;
 	return 0;
@@ -760,7 +764,7 @@ change_okay:
 }
 
 /*
- * Samma på svenska..
+ * Samma pц╔ svenska..
  */
 SYSCALL_DEFINE1(setfsgid, gid_t, gid)
 {

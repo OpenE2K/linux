@@ -1,0 +1,11 @@
+#
+# E2K CPU Idle drivers
+#
+
+config E2K_CPUIDLE
+	tristate "CPU Idle Driver for E2K machines (es2, e2s, e8c)"
+	depends on E2K && !E2K_LEGACY_CPUIDLE
+	default m
+	help
+	  This adds the CPU Idle driver for E2K machines (es2, e2s, e8c).
+

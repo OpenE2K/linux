@@ -121,6 +121,9 @@ struct hrtimer {
 	void				*start_site;
 	char				start_comm[16];
 #endif
+#ifdef CONFIG_MCST_RT
+	s64                             intr_timeout;
+#endif
 };
 
 /**
@@ -478,3 +481,7 @@ extern u64 ktime_divns(const ktime_t kt, s64 div);
 extern void sysrq_timer_list_show(void);
 
 #endif
+
+#ifdef __e2k__
+void hrtimers_reinit(int cpuid);
+#endif /* __e2k__ */

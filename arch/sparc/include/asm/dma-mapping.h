@@ -1,6 +1,10 @@
 #ifndef ___ASM_SPARC_DMA_MAPPING_H
 #define ___ASM_SPARC_DMA_MAPPING_H
 
+#if	defined(CONFIG_E90) || defined(CONFIG_E90S)
+#include <asm-l/dma-mapping.h>
+#else /*CONFIG_E90 || CONFIG_E90S*/
+
 #include <linux/scatterlist.h>
 #include <linux/mm.h>
 #include <linux/dma-debug.h>
@@ -76,4 +80,5 @@ static inline int dma_set_mask(struct device *dev, u64 mask)
 	return -EINVAL;
 }
 
+#endif /*CONFIG_E90 || CONFIG_E90S*/
 #endif

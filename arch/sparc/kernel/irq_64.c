@@ -811,6 +811,10 @@ void __irq_entry handler_irq(int pil, struct pt_regs *regs)
 	unsigned long pstate, bucket_pa;
 	struct pt_regs *old_regs;
 	void *orig_sp;
+#ifdef CONFIG_MCST
+	struct thread_info *ti = current_thread_info();
+	ti->irq_enter_clk = get_cycles();
+#endif
 
 	clear_softint(1 << pil);
 

@@ -625,6 +625,10 @@ ehci_hub_status_data (struct usb_hcd *hcd, char *buf)
 	unsigned long	flags;
 	u32		ppcd = ~0;
 
+#ifdef CONFIG_MCST
+	if (ehci->rh_state != EHCI_RH_RUNNING)
+		return -ENODEV;
+#endif
 	/* init status to no-changes */
 	buf [0] = 0;
 	ports = HCS_N_PORTS (ehci->hcs_params);
@@ -886,6 +890,10 @@ static int ehci_hub_control (
 	int		retval = 0;
 	unsigned	selector;
 
+#ifdef CONFIG_MCST
+	if (ehci->rh_state != EHCI_RH_RUNNING)
+		return -ENODEV;
+#endif
 	/*
 	 * FIXME:  support SetPortFeatures USB_PORT_FEAT_INDICATOR.
 	 * HCS_INDICATOR may say we can change LEDs to off/amber/green.
@@ -1292,7 +1300,10 @@ error_exit:
 static void ehci_relinquish_port(struct usb_hcd *hcd, int portnum)
 {
 	struct ehci_hcd		*ehci = hcd_to_ehci(hcd);
-
+#ifdef CONFIG_MCST
+	if (ehci->iohub2_false_fatal_error)
+		return;
+#endif
 	if (ehci_is_TDI(ehci))
 		return;
 	set_owner(ehci, --portnum, PORT_OWNER);
@@ -1303,6 +1314,10 @@ static int ehci_port_handed_over(struct usb_hcd *hcd, int portnum)
 	struct ehci_hcd		*ehci = hcd_to_ehci(hcd);
 	u32 __iomem		*reg;
 
+#ifdef CONFIG_MCST
+	if (ehci->rh_state != EHCI_RH_RUNNING)
+		return -ENODEV;
+#endif
 	if (ehci_is_TDI(ehci))
 		return 0;
 	reg = &ehci->regs->port_status[portnum - 1];

@@ -46,6 +46,7 @@ stack_trace_flush:
 	 nop
 	.size		stack_trace_flush,.-stack_trace_flush
 
+#ifndef CONFIG_E90S
 #ifdef CONFIG_SMP
 	.globl		hard_smp_processor_id
 	.type		hard_smp_processor_id,#function
@@ -61,3 +62,5 @@ real_hard_smp_processor_id:
 	.size		hard_smp_processor_id,.-hard_smp_processor_id
 #endif
 	.size		real_hard_smp_processor_id,.-real_hard_smp_processor_id
+
+#endif	/*CONFIG_E90S*/

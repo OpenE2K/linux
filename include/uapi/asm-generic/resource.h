@@ -45,7 +45,14 @@
 					   0-39 for nice level 19 .. -20 */
 #define RLIMIT_RTPRIO		14	/* maximum realtime priority */
 #define RLIMIT_RTTIME		15	/* timeout for RT tasks in us */
+
+#ifdef CONFIG_E2K
+#define RLIM_P_STACK		10001	/* maximum procedure stack size */
+#define RLIM_PC_STACK		10002	/* maximum chain stack size */
+#define RLIM_NLIMITS		18
+#else
 #define RLIM_NLIMITS		16
+#endif
 
 /*
  * SuS says limits have to be unsigned.

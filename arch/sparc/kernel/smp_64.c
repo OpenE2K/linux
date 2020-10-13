@@ -165,7 +165,11 @@ static inline long get_delta (long *rt, long *master)
 	for (i = 0; i < NUM_ITERS; i++) {
 		t0 = tick_ops->get_tick();
 		go[MASTER] = 1;
+#ifndef	CONFIG_RMO
 		membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+		membar_storeload();
+#endif	/* CONFIG_RMO */
 		while (!(tm = go[SLAVE]))
 			rmb();
 		go[SLAVE] = 0;
@@ -257,7 +261,11 @@ static void smp_synchronize_one_tick(int cpu)
 
 	/* now let the client proceed into his loop */
 	go[MASTER] = 0;
+#ifndef	CONFIG_RMO
 	membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+	membar_storeload();
+#endif	/* CONFIG_RMO */
 
 	raw_spin_lock_irqsave(&itc_sync_lock, flags);
 	{
@@ -267,7 +275,11 @@ static void smp_synchronize_one_tick(int cpu)
 			go[MASTER] = 0;
 			wmb();
 			go[SLAVE] = tick_ops->get_tick();
+#ifndef	CONFIG_RMO
 			membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+			membar_storeload();
+#endif	/* CONFIG_RMO */
 		}
 	}
 	raw_spin_unlock_irqrestore(&itc_sync_lock, flags);
@@ -981,12 +993,12 @@ void __irq_entry smp_new_mmu_context_version_client(int irq, struct pt_regs *reg
 	if (unlikely(!mm || (mm == &init_mm)))
 		return;
 
-	spin_lock_irqsave(&mm->context.lock, flags);
+	raw_spin_lock_irqsave(&mm->context.lock, flags);
 
 	if (unlikely(!CTX_VALID(mm->context)))
 		get_new_mmu_context(mm);
 
-	spin_unlock_irqrestore(&mm->context.lock, flags);
+	raw_spin_unlock_irqrestore(&mm->context.lock, flags);
 
 	load_secondary_context(mm);
 	__flush_tlb_mm(CTX_HWBITS(mm->context),
@@ -1164,6 +1176,9 @@ void smp_capture(void)
 		       smp_processor_id());
 #endif
 		penguins_are_doing_time = 1;
+#ifdef	CONFIG_RMO
+		membar_storestore_loadstore();
+#endif	/* CONFIG_RMO */
 		atomic_inc(&smp_capture_registry);
 		smp_cross_call(&xcall_capture, 0, 0, 0);
 		while (atomic_read(&smp_capture_registry) != ncpus)
@@ -1183,7 +1198,11 @@ void smp_release(void)
 		       smp_processor_id());
 #endif
 		penguins_are_doing_time = 0;
+#ifndef	CONFIG_RMO
 		membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+		membar_storeload_storestore();
+#endif	/* CONFIG_RMO */
 		atomic_dec(&smp_capture_registry);
 	}
 }
@@ -1202,7 +1221,11 @@ void __irq_entry smp_penguin_jailcell(int irq, struct pt_regs *regs)
 	__asm__ __volatile__("flushw");
 	prom_world(1);
 	atomic_inc(&smp_capture_registry);
+#ifndef	CONFIG_RMO
 	membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+	membar_storeload_storestore();
+#endif	/* CONFIG_RMO */
 	while (penguins_are_doing_time)
 		rmb();
 	atomic_dec(&smp_capture_registry);
@@ -1403,6 +1426,11 @@ void __init smp_cpus_done(unsigned int max_cpus)
 
 void smp_send_reschedule(int cpu)
 {
+#ifdef CONFIG_MCST
+	if (show_woken_time > 1) {
+		current->intr_sc = getns64timeofday();
+	}
+#endif
 	if (cpu == smp_processor_id()) {
 		WARN_ON_ONCE(preemptible());
 		set_softint(1 << PIL_SMP_RECEIVE_SIGNAL);

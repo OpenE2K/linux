@@ -19,6 +19,7 @@
 #include "key.h"
 #include "aes_ccm.h"
 
+#if !defined CONFIG_MCST || !defined __LCC__
 void ieee80211_aes_ccm_encrypt(struct crypto_aead *tfm, u8 *b_0, u8 *aad,
 			       u8 *data, size_t data_len, u8 *mic)
 {
@@ -70,6 +71,57 @@ int ieee80211_aes_ccm_decrypt(struct crypto_aead *tfm, u8 *b_0, u8 *aad,
 
 	return crypto_aead_decrypt(&aead_req.req);
 }
+#else
+void ieee80211_aes_ccm_encrypt(struct crypto_aead *tfm, u8 *b_0, u8 *aad,
+			       u8 *data, size_t data_len, u8 *mic)
+{
+	struct scatterlist assoc, pt, ct[2];
+	struct aead_request *req;
+
+	req = __builtin_alloca(sizeof(*req) + crypto_aead_reqsize(tfm));
+
+	memset(req, 0, sizeof(*req) + crypto_aead_reqsize(tfm));
+
+	sg_init_one(&pt, data, data_len);
+	sg_init_one(&assoc, &aad[2], be16_to_cpup((__be16 *)aad));
+	sg_init_table(ct, 2);
+	sg_set_buf(&ct[0], data, data_len);
+	sg_set_buf(&ct[1], mic, IEEE80211_CCMP_MIC_LEN);
+
+	aead_request_set_tfm(req, tfm);
+	aead_request_set_assoc(req, &assoc, assoc.length);
+	aead_request_set_crypt(req, &pt, ct, data_len, b_0);
+
+	crypto_aead_encrypt(req);
+}
+
+int ieee80211_aes_ccm_decrypt(struct crypto_aead *tfm, u8 *b_0, u8 *aad,
+			      u8 *data, size_t data_len, u8 *mic)
+{
+	struct scatterlist assoc, pt, ct[2];
+	struct aead_request *req;
+
+	req = __builtin_alloca(sizeof(*req) + crypto_aead_reqsize(tfm));
+
+	memset(req, 0, sizeof(*req) + crypto_aead_reqsize(tfm));
+
+	if (data_len == 0)
+		return -EINVAL;
+
+	sg_init_one(&pt, data, data_len);
+	sg_init_one(&assoc, &aad[2], be16_to_cpup((__be16 *)aad));
+	sg_init_table(ct, 2);
+	sg_set_buf(&ct[0], data, data_len);
+	sg_set_buf(&ct[1], mic, IEEE80211_CCMP_MIC_LEN);
+
+	aead_request_set_tfm(req, tfm);
+	aead_request_set_assoc(req, &assoc, assoc.length);
+	aead_request_set_crypt(req, ct, &pt,
+			       data_len + IEEE80211_CCMP_MIC_LEN, b_0);
+
+	return crypto_aead_decrypt(req);
+}
+#endif
 
 struct crypto_aead *ieee80211_aes_key_setup_encrypt(const u8 key[])
 {

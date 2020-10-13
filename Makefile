@@ -1,7 +1,7 @@
 VERSION = 3
 PATCHLEVEL = 14
 SUBLEVEL = 46
-EXTRAVERSION =
+EXTRAVERSION = -elbrus
 NAME = Remembering Coco
 
 # *DOCUMENTATION*
@@ -333,15 +333,25 @@ include $(srctree)/scripts/Kbuild.include
 
 # Make variables (CC, etc...)
 
-AS		= $(CROSS_COMPILE)as
-LD		= $(CROSS_COMPILE)ld
 CC		= $(CROSS_COMPILE)gcc
 CPP		= $(CC) -E
+ifeq  ($(call cc-lcc-yn),y)
+AS		= $(shell $(CC) -print-prog-name=as)
+LD		= $(shell $(CC) -print-prog-name=ld)
+AR		= $(shell $(CC) -print-prog-name=ar)
+NM		= $(shell $(CC) -print-prog-name=nm)
+STRIP		= $(shell $(CC) -print-prog-name=strip)
+OBJCOPY		= $(shell $(CC) -print-prog-name=objcopy)
+OBJDUMP		= $(shell $(CC) -print-prog-name=objdump)
+else
+AS		= $(CROSS_COMPILE)as
+LD		= $(CROSS_COMPILE)ld
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
 STRIP		= $(CROSS_COMPILE)strip
 OBJCOPY		= $(CROSS_COMPILE)objcopy
 OBJDUMP		= $(CROSS_COMPILE)objdump
+endif
 AWK		= awk
 GENKSYMS	= scripts/genksyms/genksyms
 INSTALLKERNEL  := installkernel
@@ -682,8 +692,13 @@ KBUILD_CFLAGS += $(call cc-option,-Wdeclaration-after-statement,)
 # disable pointer signed / unsigned warnings in gcc 4.0
 KBUILD_CFLAGS += $(call cc-disable-warning, pointer-sign)
 
+# MCST: The original gcc bug which caused introduction of -fno-strict-overflow
+# (optimizing away pointer overflow checking) does not exist in lcc, and this
+# option prohibits many compiler optimizations.
+ifneq  ($(call cc-lcc-yn),y)
 # disable invalid "can't wrap" optimizations for signed / pointers
 KBUILD_CFLAGS	+= $(call cc-option,-fno-strict-overflow)
+endif
 
 # conserve stack if available
 KBUILD_CFLAGS   += $(call cc-option,-fconserve-stack)
@@ -783,7 +798,7 @@ export mod_sign_cmd
 
 
 ifeq ($(KBUILD_EXTMOD),)
-core-y		+= kernel/ mm/ fs/ ipc/ security/ crypto/ block/
+core-y		+= kernel/ mm/ fs/ ipc/ security/ crypto/ block/ ltt/
 
 vmlinux-dirs	:= $(patsubst %/,%,$(filter %/, $(init-y) $(init-m) \
 		     $(core-y) $(core-m) $(drivers-y) $(drivers-m) \

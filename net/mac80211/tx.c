@@ -1804,7 +1804,11 @@ netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_tx_info *info;
 	int head_need;
+#ifdef CONFIG_MCST
+	u16 ethertype, uninitialized_var(hdrlen),  meshhdrlen = 0;
+#else
 	u16 ethertype, hdrlen,  meshhdrlen = 0;
+#endif
 	__le16 fc;
 	struct ieee80211_hdr hdr;
 	struct ieee80211s_hdr mesh_hdr __maybe_unused;
@@ -1818,7 +1822,11 @@ netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
 	bool multicast;
 	u32 info_flags = 0;
 	u16 info_id = 0;
+#ifdef CONFIG_MCST
+	struct ieee80211_chanctx_conf *uninitialized_var(chanctx_conf);
+#else
 	struct ieee80211_chanctx_conf *chanctx_conf;
+#endif
 	struct ieee80211_sub_if_data *ap_sdata;
 	enum ieee80211_band band;
 

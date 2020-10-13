@@ -1,0 +1,177 @@
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/config-language.txt.
+#
+mainmenu_name "Linux Kernel Configuration"
+
+define_bool CONFIG_E2K y
+define_bool CONFIG_ISA y
+
+
+mainmenu_option next_comment
+comment 'Code maturity level options'
+bool 'Prompt for development and/or incomplete code/drivers' CONFIG_EXPERIMENTAL
+endmenu
+
+mainmenu_option next_comment
+comment 'Loadable module support'
+bool 'Enable loadable module support' CONFIG_MODULES
+if [ "$CONFIG_MODULES" = "y" ]; then
+   bool '  Set version information on all module symbols' CONFIG_MODVERSIONS
+   bool '  Kernel module loader' CONFIG_KMOD
+fi
+endmenu
+
+mainmenu_option next_comment
+comment 'Processor type and features'
+#choice 'Processor family' \
+#	"E2K_V0.4.1				CONFIG_E2K_0_4_1 \
+#	 E2K_V0.4.2				CONFIG_E2K_0_4_2 \
+#	 E2K_V0.5.0				CONFIG_E2K_0_5_0 \
+#	 E2K_V0.5.1				CONFIG_E2K_0_5_1 \
+#	 E2K_V0.5.2				CONFIG_E2K_0_5_2" E2K_V0.4.2
+choice '        Target machine' \
+	"Simulator 	CONFIG_TARGET_LMS"	Simulator
+
+bool 'Large pages (4MB) enabled to load kernel' \
+			CONFIG_KERNEL_LARGE_PAGES_ENABLED
+
+bool 'RT_SUPPORT' RT_SUPPORT
+bool 'CLI_CHECK_TIME' CLI_CHECK_TIME
+bool 'Software swap tags' CONFIG_SOFTWARE_SWAP_TAGS
+bool 'Software swap tags v.2' CONFIG_SOFTWARE_SWAP_TAGS_V2
+bool 'Enable extra caches' CONFIG_ARCH_CACHES
+bool 'Symmetric multi-processing support' CONFIG_SMP
+define_bool CONFIG_X86_IO_APIC y
+define_bool CONFIG_X86_LOCAL_APIC y
+bool 'Enable prompt for kernel command string' CONFIG_CMDLINE_PROMPT
+bool 'Make all virtual pages valid' CONFIG_MAKE_ALL_PAGES_VALID
+bool 'Enable AAU context support' CONFIG_USE_AAU
+bool 'PCI support' CONFIG_PCI
+tristate '  Kernel support for 32-bit ELF binaries' CONFIG_BINFMT_ELF32
+tristate 'Protected mode'  CONFIG_PROTECTED_MODE
+
+bool "E2K Huge TLB (4MB) Page Support" CONFIG_HUGETLB_PAGE
+
+bool 'Global registers in thread context'  CONFIG_GREGS_CONTEXT
+bool 'Enable system recovery' CONFIG_RECOVERY
+if [ "$CONFIG_RECOVERY" = "y" ]; then
+	int '   Time period (secs) to restart system (RECOVERY debugging) ' \
+			CONFIG_TIME_TO_RESTART 0
+fi
+string 'Initial kernel command string' CONFIG_CMDLINE "root=/dev/hda1"
+
+endmenu
+
+mainmenu_option next_comment
+comment 'General setup'
+
+bool 'Networking support' CONFIG_NET
+
+bool 'System V IPC' CONFIG_SYSVIPC
+bool 'BSD Process Accounting' CONFIG_BSD_PROCESS_ACCT
+bool 'Sysctl support' CONFIG_SYSCTL
+if [ "$CONFIG_PROC_FS" = "y" ]; then
+   choice 'Kernel core (/proc/kcore) format' \
+	"ELF		CONFIG_KCORE_ELF	\
+	 A.OUT		CONFIG_KCORE_AOUT" ELF
+fi
+tristate 'Kernel support for a.out binaries' CONFIG_BINFMT_AOUT
+tristate 'Kernel support for ELF binaries' CONFIG_BINFMT_ELF
+tristate 'Kernel support for MISC binaries' CONFIG_BINFMT_MISC
+
+endmenu
+
+source drivers/block/Config.in
+
+if [ "$CONFIG_NET" = "y" ]; then
+   source net/Config.in
+fi
+
+if [ "$CONFIG_NET" = "y" ]; then
+   mainmenu_option next_comment
+   comment 'Network device support'
+
+   bool 'Network device support' CONFIG_NETDEVICES
+   if [ "$CONFIG_NETDEVICES" = "y" ]; then
+      source drivers/net/Config.in
+   fi
+   endmenu
+fi
+
+if [ "$CONFIG_PCI" = "y" ]; then
+   mainmenu_option next_comment
+   comment 'PCI device support'
+
+   source drivers/pci/Config.in
+
+   endmenu
+fi
+
+mainmenu_option next_comment
+comment 'ATA/IDE/MFM/RLL support'
+
+tristate 'ATA/IDE/MFM/RLL support' CONFIG_IDE
+
+if [ "$CONFIG_IDE" != "n" ]; then
+   source drivers/ide/Config.in
+else
+   define_bool CONFIG_BLK_DEV_IDE_MODES n
+   define_bool CONFIG_BLK_DEV_HD n
+fi
+endmenu
+
+#source drivers/char/Config.in
+#
+# Character device configuration
+#
+mainmenu_option next_comment
+comment 'Character devices'
+
+bool 'Virtual terminal' CONFIG_VT
+if [ "$CONFIG_VT" = "y" ]; then
+   bool '  Support for console on virtual terminal' CONFIG_VT_CONSOLE
+fi
+tristate 'Standard/generic (8250/16550 and compatible UARTs) serial support' CONFIG_SERIAL
+if [ "$CONFIG_SERIAL" = "y" ]; then
+   bool '  Support for console on serial port' CONFIG_SERIAL_CONSOLE
+   if [ "$CONFIG_ARCH_ACORN" = "y" ]; then
+      tristate '   Atomwide serial port support' CONFIG_ATOMWIDE_SERIAL
+      tristate '   Dual serial port support' CONFIG_DUALSP_SERIAL
+   fi
+fi
+bool 'LMS console port support' CONFIG_LMS_CONSOLE
+if [ "$CONFIG_LMS_CONSOLE" = "y" ] ; then
+   define_bool CONFIG_SERIAL_CONSOLE y
+fi
+bool 'Unix98 PTY support' CONFIG_UNIX98_PTYS
+if [ "$CONFIG_UNIX98_PTYS" = "y" ]; then
+   int 'Maximum number of Unix98 PTYs in use (0-2048)' CONFIG_UNIX98_PTY_COUNT 256
+fi
+tristate '/dev/nvram support' CONFIG_NVRAM
+tristate 'Enhanced Real Time Clock Support' CONFIG_RTC
+endmenu
+
+
+#source drivers/misc/Config.in
+
+source fs/Config.in
+
+if [ "$CONFIG_VT" = "y" ]; then
+   mainmenu_option next_comment
+   comment 'Console drivers'
+   bool 'VGA text console' CONFIG_VGA_CONSOLE
+   bool 'Video mode selection support' CONFIG_VIDEO_SELECT
+   if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+      tristate 'MDA text console (dual-headed) (EXPERIMENTAL)' CONFIG_MDA_CONSOLE
+      source drivers/video/Config.in
+   fi
+   endmenu
+fi
+
+mainmenu_option next_comment
+comment 'Kernel hacking'
+
+#bool 'Debug kmalloc/kfree' CONFIG_DEBUG_MALLOC
+bool 'Magic SysRq key' CONFIG_MAGIC_SYSRQ
+endmenu

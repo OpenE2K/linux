@@ -381,7 +381,7 @@ static irqreturn_t atkbd_interrupt(struct serio *serio, unsigned char data,
 
 	dev_dbg(&serio->dev, "Received %02x flags %02x\n", data, flags);
 
-#if !defined(__i386__) && !defined (__x86_64__)
+#if !defined(__i386__) && !defined (__x86_64__) && !defined(__e2k__)
 	if ((flags & (SERIO_FRAME | SERIO_PARITY)) && (~flags & SERIO_TIMEOUT) && !atkbd->resend && atkbd->write) {
 		dev_warn(&serio->dev, "Frame/parity error: %02x\n", flags);
 		serio_write(serio, ATKBD_CMD_RESEND);

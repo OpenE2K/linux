@@ -489,6 +489,16 @@ static int umh_pipe_setup(struct subprocess_info *info, struct cred *new)
 	return err;
 }
 
+#ifdef CONFIG_E2K
+int debug_coredump = 0;
+static int __init coredump_setup(char *str)
+{
+	debug_coredump = 1;
+	return 1;
+}
+__setup("debug_coredump", coredump_setup);
+#endif
+
 void do_coredump(const siginfo_t *siginfo)
 {
 	struct core_state core_state;
@@ -517,6 +527,15 @@ void do_coredump(const siginfo_t *siginfo)
 	};
 
 	audit_core_dumps(siginfo->si_signo);
+
+#ifdef CONFIG_E2K
+	if (debug_coredump) {
+		pr_info("do_coredump() started for signal %d\n",
+				siginfo->si_signo);
+		print_task_pt_regs(current_thread_info()->pt_regs);
+		dump_stack();
+       }
+#endif
 
 	binfmt = mm->binfmt;
 	if (!binfmt || !binfmt->core_dump)

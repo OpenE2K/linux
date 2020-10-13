@@ -16,6 +16,71 @@
 #include <asm/ptrace.h>
 #include <uapi/linux/parport.h>
 
+#ifdef _WORKAROUND_MCST_PP
+enum parport_pc_sio_types {
+	sio_via_686a = 0,   /* Via VT82C686A motherboard Super I/O */
+	sio_via_8231,	    /* Via VT8231 south bridge integrated Super IO */
+	sio_ite_8872,
+	last_sio
+};
+
+enum parport_pc_pci_cards {
+	siig_1p_10x = last_sio,
+	siig_2p_10x,
+	siig_1p_20x,
+	siig_2p_20x,
+	lava_parallel,
+	lava_parallel_dual_a,
+	lava_parallel_dual_b,
+	boca_ioppar,
+	plx_9050,
+	timedia_4078a,
+	timedia_4079h,
+	timedia_4085h,
+	timedia_4088a,
+	timedia_4089a,
+	timedia_4095a,
+	timedia_4096a,
+	timedia_4078u,
+	timedia_4079a,
+	timedia_4085u,
+	timedia_4079r,
+	timedia_4079s,
+	timedia_4079d,
+	timedia_4079e,
+	timedia_4079f,
+	timedia_9079a,
+	timedia_9079b,
+	timedia_9079c,
+	timedia_4006a,
+	timedia_4014,
+	timedia_4008a,
+	timedia_4018,
+	timedia_9018a,
+	syba_2p_epp,
+	syba_1p_ecp,
+	titan_010l,
+	titan_1284p1,
+	titan_1284p2,
+	avlab_1p,
+	avlab_2p,
+	oxsemi_952,
+	oxsemi_954,
+	oxsemi_840,
+	oxsemi_pcie_pport,
+	aks_0100,
+	mobility_pp,
+	netmos_9705,
+	netmos_9715,
+	netmos_9755,
+	netmos_9805,
+	netmos_9815,
+	netmos_9901,
+	quatech_sppxp100,
+	mcst_pp_iee1284, /* MCST */
+};
+#endif
+
 /* Define this later. */
 struct parport;
 struct pardevice;

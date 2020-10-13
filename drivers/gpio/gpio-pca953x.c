@@ -653,6 +653,103 @@ pca953x_get_alt_pdata(struct i2c_client *client, int *gpio_base, u32 *invert)
 }
 #endif
 
+#if IS_ENABLED(CONFIG_IPE2ST_POWER)
+/* We use sysfs interfaces for power management */
+
+/* direction */
+static ssize_t pca953x_show_direction(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct pca953x_chip *chip;
+	int ret, i;
+
+	chip = i2c_get_clientdata(client);
+	for (i = 0; i < chip->gpio_chip.ngpio / 8 &&
+			i < ARRAY_SIZE(chip->reg_direction); i++)
+		ret += sprintf(buf, "%x\n", chip->reg_direction[i]);
+	return ret;
+}
+
+static ssize_t pca953x_store_direction(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct pca953x_chip *chip;
+	unsigned long reg_val;
+	int ret;
+
+	if ((strict_strtoul(buf, 10, &reg_val) < 0) || 
+						(reg_val > 15))
+		return -EINVAL;
+
+	chip = i2c_get_clientdata(client);
+	ret = pca953x_write_single(chip, PCA953X_DIRECTION,
+						(unsigned short)reg_val, 0);
+	if (ret) {
+		printk (KERN_ERR "Failed to write pca953x direction\n");
+		return ret;
+	}
+	chip->reg_direction[0] = reg_val;
+
+	return count;
+}
+
+static DEVICE_ATTR(direction, S_IWUSR | S_IRUGO,
+			pca953x_show_direction, pca953x_store_direction);
+
+/* output */
+static ssize_t pca953x_show_output(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct pca953x_chip *chip;
+	int ret = 0, i;
+
+	chip = i2c_get_clientdata(client);
+	for (i = 0; i < chip->gpio_chip.ngpio / 8 &&
+			i < ARRAY_SIZE(chip->reg_direction); i++)
+		ret += sprintf(buf, "%x\n", chip->reg_direction[i]);
+	return ret;
+}
+
+static ssize_t pca953x_store_output(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct pca953x_chip *chip;
+	unsigned long val;
+	int ret;
+
+	if ((strict_strtoul(buf, 10, &val) < 0) ||
+		((val != 1) && (val != 2) && (val != 4) && (val != 8)))
+		return -EINVAL;
+
+	chip = i2c_get_clientdata(client);
+	ret = pca953x_write_single(chip, PCA953X_OUTPUT, (u32)val, 0);
+	if (ret) {
+		printk (KERN_ERR "Failed to write pca953x output\n");
+		return ret;
+	}
+	chip->reg_output[0] = val;
+
+	return count;
+}
+
+static DEVICE_ATTR(output, S_IWUSR | S_IRUGO,
+			pca953x_show_output, pca953x_store_output);
+
+static struct attribute *pca953x_attributes[] = {
+	&dev_attr_direction.attr,
+	&dev_attr_output.attr,
+	NULL
+};
+
+static const struct attribute_group pca953x_attr_group = {
+	.attrs = pca953x_attributes,
+};
+#endif /* IS_ENABLED(CONFIG_IPE2ST_POWER) */
+
 static int device_pca953x_init(struct pca953x_chip *chip, u32 invert)
 {
 	int ret;
@@ -714,6 +811,12 @@ static int pca953x_probe(struct i2c_client *client,
 	int irq_base = 0;
 	int ret;
 	u32 invert = 0;
+#if IS_ENABLED(CONFIG_IPE2ST_POWER)
+	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
+
+	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE))
+		return -EIO;
+#endif
 
 	chip = devm_kzalloc(&client->dev,
 			sizeof(struct pca953x_chip), GFP_KERNEL);
@@ -769,6 +872,12 @@ static int pca953x_probe(struct i2c_client *client,
 	}
 
 	i2c_set_clientdata(client, chip);
+#if IS_ENABLED(CONFIG_IPE2ST_POWER)
+	/* register sysfs hooks */
+	ret = sysfs_create_group(&client->dev.kobj, &pca953x_attr_group);
+	if (ret)
+		return ret;
+#endif
 	return 0;
 }
 
@@ -777,6 +886,10 @@ static int pca953x_remove(struct i2c_client *client)
 	struct pca953x_platform_data *pdata = dev_get_platdata(&client->dev);
 	struct pca953x_chip *chip = i2c_get_clientdata(client);
 	int ret = 0;
+
+#if IS_ENABLED(CONFIG_IPE2ST_POWER)
+	sysfs_remove_group(&client->dev.kobj, &pca953x_attr_group);
+#endif
 
 	if (pdata && pdata->teardown) {
 		ret = pdata->teardown(client, chip->gpio_chip.base,

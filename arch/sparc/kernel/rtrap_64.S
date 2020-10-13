@@ -14,9 +14,15 @@
 #include <asm/visasm.h>
 #include <asm/processor.h>
 
+#ifndef	CONFIG_RMO
 #define		RTRAP_PSTATE		(PSTATE_TSO|PSTATE_PEF|PSTATE_PRIV|PSTATE_IE)
 #define		RTRAP_PSTATE_IRQOFF	(PSTATE_TSO|PSTATE_PEF|PSTATE_PRIV)
 #define		RTRAP_PSTATE_AG_IRQOFF	(PSTATE_TSO|PSTATE_PEF|PSTATE_PRIV|PSTATE_AG)
+#else	/* CONFIG_RMO */
+#define		RTRAP_PSTATE		(PSTATE_RMO|PSTATE_PEF|PSTATE_PRIV|PSTATE_IE)
+#define		RTRAP_PSTATE_IRQOFF	(PSTATE_RMO|PSTATE_PEF|PSTATE_PRIV)
+#define		RTRAP_PSTATE_AG_IRQOFF	(PSTATE_RMO|PSTATE_PEF|PSTATE_PRIV|PSTATE_AG)
+#endif	/* CONFIG_RMO */
 
 #ifdef CONFIG_CONTEXT_TRACKING
 # define SCHEDULE_USER schedule_user
@@ -78,6 +84,10 @@ rtrap_nmi:	ldx			[%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
 		.align			64
 		.globl			rtrap_irq, rtrap, irqsz_patchme, rtrap_xcall
 rtrap_irq:
+#ifdef	CONFIG_E90S
+		mov			APIC_TASKPRI, %l0
+		stwa			%g0, [%l0] ASI_LAPIC
+#endif
 rtrap:
 		/* mm/ultra.S:xcall_report_regs KNOWS about this load. */
 		ldx			[%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
@@ -144,7 +154,6 @@ __handle_preemption_continue:
 		sethi			%hi(TSTATE_PEF), %o0
 		andcc			%l1, %o0, %g0
 
-		/* This fpdepth clear is necessary for non-syscall rtraps only */
 user_nowork:
 		bne,pn			%xcc, __handle_userfpu
 		 stb			%g0, [%g6 + TI_FPDEPTH]
@@ -168,11 +177,13 @@ rt_continue:	ldx			[%sp + PTREGS_OFF + PT_V9_G1], %g1
 		/* Normal globals are restored, go to trap globals.  */
 661:		wrpr			%g0, RTRAP_PSTATE_AG_IRQOFF, %pstate
 		nop
+#ifdef	CONFIG_SPARC64_SUN4V
 		.section		.sun4v_2insn_patch, "ax"
 		.word			661b
 		wrpr			%g0, RTRAP_PSTATE_IRQOFF, %pstate
 		SET_GL(1)
 		.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 		mov			%l2, %g6
 
@@ -312,13 +323,29 @@ to_kernel:
 		 nop
 		cmp			%l4, 0
 		bne,pn			%xcc, kern_fpucheck
+#ifdef CONFIG_MCST_RT
+		rdpr			%pil, %l6
+		wrpr			%g0, PIL_NORMAL_MAX, %pil
+		ldx			[%g6 + TI_FLAGS], %l5
+		andcc			%l5, _TIF_NEED_RESCHED, %g0
+		be,pt			%xcc, 1f
+		nop
+		call			preempt_schedule_irq
+		nop
+		wrpr			%g0, %l6, %pil
+		ba,pt                   %xcc, rtrap
+		nop
+1:		wrpr                    %g0, %l6, %pil
+#else
 		 nop
 		call			preempt_schedule_irq
 		 nop
 		ba,pt			%xcc, rtrap
 #endif
+#endif
 kern_fpucheck:	ldub			[%g6 + TI_FPDEPTH], %l5
-		brz,pt			%l5, rt_continue
+		cmp			%l5, 1
+		ble,pt			%icc, rt_continue
 		 srl			%l5, 1, %o0
 		add			%g6, TI_FPSAVED, %l6
 		ldub			[%l6 + %o0], %l2

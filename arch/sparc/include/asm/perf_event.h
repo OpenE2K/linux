@@ -24,6 +24,11 @@ do {							\
 	(regs)->u_regs[UREG_I6] = _fp;			\
 	(regs)->u_regs[UREG_I7] = _i7;			\
 } while (0)
+
+#ifdef CONFIG_E90S
+struct pt_regs;
+extern int perf_event_nmi_handler(struct pt_regs *regs);
+#endif
 #endif
 
 #endif

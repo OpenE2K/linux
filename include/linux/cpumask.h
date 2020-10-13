@@ -80,6 +80,9 @@ extern const struct cpumask *const cpu_possible_mask;
 extern const struct cpumask *const cpu_online_mask;
 extern const struct cpumask *const cpu_present_mask;
 extern const struct cpumask *const cpu_active_mask;
+#ifdef CONFIG_MCST_RT
+extern struct cpumask *rt_cpu_mask;
+#endif
 
 #if NR_CPUS > 1
 #define num_online_cpus()	cpumask_weight(cpu_online_mask)
@@ -90,6 +93,9 @@ extern const struct cpumask *const cpu_active_mask;
 #define cpu_possible(cpu)	cpumask_test_cpu((cpu), cpu_possible_mask)
 #define cpu_present(cpu)	cpumask_test_cpu((cpu), cpu_present_mask)
 #define cpu_active(cpu)		cpumask_test_cpu((cpu), cpu_active_mask)
+#ifdef CONFIG_MCST_RT
+#define rt_cpu(cpu)		cpumask_test_cpu((cpu), rt_cpu_mask)
+#endif
 #else
 #define num_online_cpus()	1U
 #define num_possible_cpus()	1U
@@ -99,6 +105,9 @@ extern const struct cpumask *const cpu_active_mask;
 #define cpu_possible(cpu)	((cpu) == 0)
 #define cpu_present(cpu)	((cpu) == 0)
 #define cpu_active(cpu)		((cpu) == 0)
+#ifdef CONFIG_MCST_RT
+#define rt_cpu(cpu)		0U
+#endif
 #endif
 
 /* verify cpu argument to cpumask_* operators */

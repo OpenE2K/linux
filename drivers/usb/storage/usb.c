@@ -77,7 +77,15 @@ MODULE_AUTHOR("Matthew Dharm <mdharm-usb@one-eyed-alien.net>");
 MODULE_DESCRIPTION("USB Mass Storage driver for Linux");
 MODULE_LICENSE("GPL");
 
+#ifdef CONFIG_MCST
+/*
+ * At boot time usb drive starts faster than sata.
+ * So we have to increase delay_use.
+ */
+static unsigned int delay_use = 3;
+#else
 static unsigned int delay_use = 1;
+#endif
 module_param(delay_use, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(delay_use, "seconds to delay before using a new device");
 

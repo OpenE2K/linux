@@ -82,7 +82,7 @@ EXPORT_SYMBOL_GPL(platform_get_resource);
  */
 int platform_get_irq(struct platform_device *dev, unsigned int num)
 {
-#ifdef CONFIG_SPARC
+#if defined(CONFIG_SPARC) && !defined(CONFIG_E90S)
 	/* sparc does not have irqs represented as IORESOURCE_IRQ resources */
 	if (!dev || num >= dev->archdata.num_irqs)
 		return -ENXIO;

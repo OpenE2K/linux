@@ -62,6 +62,10 @@
 #define	IR_DISABLE
 #endif
 
+#if defined(CONFIG_E2K)
+#define	IR_DISABLE
+#endif
+
 #ifdef CONFIG_ARCH_OMAP
 /* OMAP doesn't support IR (no SMM; not needed) */
 #define	IR_DISABLE
@@ -383,7 +387,7 @@ static int ohci_get_frame (struct usb_hcd *hcd)
 static void ohci_usb_reset (struct ohci_hcd *ohci)
 {
 	ohci->hc_control = ohci_readl (ohci, &ohci->regs->control);
-	ohci->hc_control &= OHCI_CTRL_RWC;
+	ohci->hc_control &= OHCI_CTRL_DFLT;
 	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
 	ohci->rh_state = OHCI_RH_HALTED;
 }
@@ -613,13 +617,13 @@ static int ohci_run (struct ohci_hcd *ohci)
 		break;
 	case OHCI_USB_SUSPEND:
 	case OHCI_USB_RESUME:
-		ohci->hc_control &= OHCI_CTRL_RWC;
+		ohci->hc_control &= OHCI_CTRL_DFLT;
 		ohci->hc_control |= OHCI_USB_RESUME;
 		val = 10 /* msec wait */;
 		break;
 	// case OHCI_USB_RESET:
 	default:
-		ohci->hc_control &= OHCI_CTRL_RWC;
+		ohci->hc_control &= OHCI_CTRL_DFLT;
 		ohci->hc_control |= OHCI_USB_RESET;
 		val = 50 /* msec wait */;
 		break;
@@ -694,7 +698,7 @@ retry:
 	hcd->uses_new_polling = 1;
 
 	/* start controller operations */
-	ohci->hc_control &= OHCI_CTRL_RWC;
+	ohci->hc_control &= OHCI_CTRL_DFLT;
 	ohci->hc_control |= OHCI_CONTROL_INIT | OHCI_USB_OPER;
 	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
 	ohci->rh_state = OHCI_RH_RUNNING;
@@ -767,6 +771,20 @@ static int ohci_start(struct usb_hcd *hcd)
 	struct ohci_hcd		*ohci = hcd_to_ohci(hcd);
 	int	ret;
 
+#if defined(CONFIG_E2K)
+	if (hcd->self.controller) {
+		struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
+
+		if (iohub_revision(pdev) == 0 &&
+				pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+				pdev->device == PCI_DEVICE_ID_MCST_OHCI) {
+			ohci->hc_control |=
+					ohci_readl(ohci, &ohci->regs->control) &
+					OHCI_CTRL_IR;
+		}
+	}
+#endif
+
 	ret = ohci_run(ohci);
 	if (ret < 0) {
 		ohci_err(ohci, "can't start\n");
@@ -778,6 +796,33 @@ static int ohci_start(struct usb_hcd *hcd)
 /*-------------------------------------------------------------------------*/
 
 /* an interrupt happens */
+
+#ifdef CONFIG_USB_IRQ_ON_THREAD
+static irqreturn_t ohci_preirq(struct usb_hcd *hcd)
+{
+	struct ohci_hcd         *ohci = hcd_to_ohci(hcd);
+	int   ints = ohci_readl(ohci, &ohci->regs->intrstatus);
+
+	/* Check for an all 1's result which is a typical consequence
+	 * of dead, unclocked, or unplugged (CardBus...) devices
+	 */
+	if (ints == ~(u32)0) {
+		ohci->rh_state = OHCI_RH_HALTED;
+		ohci_dbg(ohci, "device removed!\n");
+		usb_hc_died(hcd);
+		return IRQ_HANDLED;
+	}
+
+	/* We only care about interrupts that are enabled */
+	ints &= ohci_readl(ohci, &ohci->regs->intrenable);
+
+	/* interrupt for some other device? */
+	if (ints == 0 || unlikely(ohci->rh_state == OHCI_RH_HALTED))
+		return IRQ_NOTMINE;
+	return IRQ_WAKE_THREAD;
+}
+#endif
+
 
 static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 {
@@ -1068,7 +1113,11 @@ int ohci_resume(struct usb_hcd *hcd, bool hibernated)
 
 	/* See if the controller is already running or has been reset */
 	ohci->hc_control = ohci_readl(ohci, &ohci->regs->control);
+#if defined(CONFIG_E2K)
+	if (ohci->hc_control & OHCI_SCHED_ENABLES) {
+#else
 	if (ohci->hc_control & (OHCI_CTRL_IR | OHCI_SCHED_ENABLES)) {
+#endif
 		need_reinit = true;
 	} else {
 		switch (ohci->hc_control & OHCI_CTRL_HCFS) {
@@ -1089,6 +1138,13 @@ int ohci_resume(struct usb_hcd *hcd, bool hibernated)
 	/* Normally just turn on port power and enable interrupts */
 	else {
 		ohci_dbg(ohci, "powerup ports\n");
+
+#if defined(__e2k__) && defined(CONFIG_RECOVERY)
+		if (irq_get_chip(hcd->irq))
+			irq_get_chip(hcd->irq)->irq_unmask(
+				irq_get_irq_data(hcd->irq));
+#endif  /* __e2k__ && CONFIG_RECOVERY */
+
 		for (port = 0; port < ohci->num_ports; port++)
 			ohci_writel(ohci, RH_PS_PPS,
 					&ohci->regs->roothub.portstatus[port]);
@@ -1122,6 +1178,9 @@ static const struct hc_driver ohci_hc_driver = {
 	 * generic hardware linkage
 	*/
 	.irq =                  ohci_irq,
+#ifdef CONFIG_USB_IRQ_ON_THREAD
+	.preirq =               ohci_preirq,
+#endif
 	.flags =                HCD_MEMORY | HCD_USB11,
 
 	/*

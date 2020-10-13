@@ -561,7 +561,29 @@ static void ahci_pci_save_initial_config(struct pci_dev *pdev,
 static int ahci_pci_reset_controller(struct ata_host *host)
 {
 	struct pci_dev *pdev = to_pci_dev(host->dev);
-
+#ifdef CONFIG_MCST
+/*
+	ERR 23 - sata, (ahci port reg reset)
+	В sata контроллере после прописи регистра  GHC.HBA Reset не происходит
+	сброс регистров порта в значения по умолчанию. Это приводит
+	к возникновению непредвиденных записей в память, если до этого
+	был установлен бит PxCMD.FRE.
+	Программный обход - сбросить значимые регистры портов
+	 в значения по умолчанию до ресета, а после этого делать ресет.
+*/
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
+		int i;
+		for (i = 0; i < host->n_ports; i++) {
+			void __iomem *port_mmio =
+					__ahci_port_base(host, i);
+			u32 tmp = readl(port_mmio + PORT_CMD);
+			/* disable FIS reception */
+			tmp &= ~PORT_CMD_FIS_RX;
+			writel(tmp, port_mmio + PORT_CMD);
+		}
+	}
+#endif
 	ahci_reset_controller(host);
 
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL) {
@@ -730,6 +752,22 @@ static int ahci_pci_device_resume(struct pci_dev *pdev)
 }
 #endif
 
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+/* Elbrus SATA controller hardware bug workaround:
+ * all DMA addresses should be 64 bytes aligned */
+static inline unsigned long long workaround_l_sata(struct pci_dev *pdev,
+						   unsigned long long mask)
+{
+	if (pdev->vendor == PCI_VENDOR_ID_INTEL &&
+			pdev->device == 0x4748 && iohub_revision(pdev) == 0)
+		mask ^= (64 - 1);
+
+	return mask;
+}
+#else
+# define workaround_l_sata(pdev, mask) mask
+#endif
+
 static int ahci_configure_dma_masks(struct pci_dev *pdev, int using_dac)
 {
 	int rc;
@@ -742,10 +780,13 @@ static int ahci_configure_dma_masks(struct pci_dev *pdev, int using_dac)
 		return 0;
 
 	if (using_dac &&
-	    !pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
-		rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
+	    !pci_set_dma_mask(pdev,
+			      workaround_l_sata(pdev, DMA_BIT_MASK(64)))) {
+		rc = pci_set_consistent_dma_mask(pdev,
+				workaround_l_sata(pdev, DMA_BIT_MASK(64)));
 		if (rc) {
-			rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
+			rc = pci_set_consistent_dma_mask(pdev,
+				workaround_l_sata(pdev, DMA_BIT_MASK(32)));
 			if (rc) {
 				dev_err(&pdev->dev,
 					"64-bit DMA enable failed\n");
@@ -753,12 +794,14 @@ static int ahci_configure_dma_masks(struct pci_dev *pdev, int using_dac)
 			}
 		}
 	} else {
-		rc = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
+		rc = pci_set_dma_mask(pdev,
+				workaround_l_sata(pdev, DMA_BIT_MASK(32)));
 		if (rc) {
 			dev_err(&pdev->dev, "32-bit DMA enable failed\n");
 			return rc;
 		}
-		rc = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
+		rc = pci_set_consistent_dma_mask(pdev,
+				workaround_l_sata(pdev, DMA_BIT_MASK(32)));
 		if (rc) {
 			dev_err(&pdev->dev,
 				"32-bit consistent DMA enable failed\n");
@@ -1382,6 +1425,15 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return -ENOMEM;
 	hpriv->flags |= (unsigned long)pi.private_data;
 
+#if defined(CONFIG_E2K)
+	if (iohub_generation(pdev) == 1 && iohub_revision(pdev) == 0 &&
+		    pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
+		hpriv->flags |= AHCI_HFLAG_SECT1;
+		dev_info(&pdev->dev, "IOHUB2: limiting to 1 sector"
+					" per dma table line\n");
+	}
+#endif
 	/* MCP65 revision A1 and A2 can't do MSI */
 	if (board_id == board_ahci_mcp65 &&
 	    (pdev->revision == 0xa1 || pdev->revision == 0xa2))

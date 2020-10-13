@@ -53,11 +53,13 @@ tsb_miss_page_table_walk:
 
 661:	ldx		[%g7 + TRAP_PER_CPU_TSB_HUGE], %g5
 	nop
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	mov		SCRATCHPAD_UTSBREG2, %g5
 	ldxa		[%g5] ASI_SCRATCHPAD, %g5
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	cmp		%g5, -1
 	be,pt		%xcc, 80f
@@ -115,21 +117,25 @@ tsb_miss_page_table_walk_sun4v_fastpath:
 #if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
 661:	sethi		%uhi(_PAGE_SZALL_4U), %g7
 	sllx		%g7, 32, %g7
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	mov		_PAGE_SZALL_4V, %g7
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	and		%g5, %g7, %g2
 
 661:	sethi		%uhi(_PAGE_SZHUGE_4U), %g7
 	sllx		%g7, 32, %g7
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	mov		_PAGE_SZHUGE_4V, %g7
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	cmp		%g2, %g7
 	bne,pt		%xcc, 60f
@@ -156,11 +162,13 @@ tsb_miss_page_table_walk_sun4v_fastpath:
 
 661:	rdpr		%pstate, %g5
 	wrpr		%g5, PSTATE_AG | PSTATE_MG, %pstate
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	SET_GL(1)
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	rdpr	%tl, %g7
 	cmp	%g7, 1
@@ -196,6 +204,7 @@ tsb_dtlb_load:
 
 661:	stxa		%g5, [%g0] ASI_DTLB_DATA_IN
 	retry
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	nop
@@ -216,22 +225,26 @@ tsb_dtlb_load:
 	 */
 	ba,pt		%xcc, sun4v_dtlb_load
 	 mov		%g5, %g3
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 tsb_itlb_load:
 	/* Executable bit must be set.  */
 661:	sethi		%hi(_PAGE_EXEC_4U), %g4
 	andcc		%g5, %g4, %g0
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	andcc		%g5, _PAGE_EXEC_4V, %g0
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	be,pn		%xcc, tsb_do_fault
 	 nop
 
 661:	stxa		%g5, [%g0] ASI_ITLB_DATA_IN
 	retry
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	nop
@@ -256,6 +269,7 @@ tsb_itlb_load:
 	/* No valid entry in the page tables, do full fault
 	 * processing.
 	 */
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	.globl		tsb_do_fault
 tsb_do_fault:
@@ -263,11 +277,13 @@ tsb_do_fault:
 
 661:	rdpr		%pstate, %g5
 	wrpr		%g5, PSTATE_AG | PSTATE_MG, %pstate
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	SET_GL(1)
 	ldxa		[%g0] ASI_SCRATCHPAD, %g4
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	bne,pn		%xcc, tsb_do_itlb_fault
 	 nop
@@ -278,11 +294,13 @@ tsb_do_dtlb_fault:
 
 661:	mov	TLB_TAG_ACCESS, %g4
 	ldxa	[%g4] ASI_DMMU, %g5
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section .sun4v_2insn_patch, "ax"
 	.word	661b
 	ldx	[%g4 + HV_FAULT_D_ADDR_OFFSET], %g5
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	be,pt	%xcc, sparc64_realfault_common
 	 mov	FAULT_CODE_DTLB, %g4
@@ -347,7 +365,11 @@ tsb_flush:
 	srlx	%g1, 32, %o3
 	andcc	%o3, %g2, %g0
 	bne,pn	%icc, 1b
+#ifndef	CONFIG_RMO
 	 nop
+#else	/* CONFIG_RMO */
+	 membar	#LoadLoad
+#endif	/* CONFIG_RMO */
 	cmp	%g1, %o1
 	mov	1, %o3
 	bne,pt	%xcc, 2f
@@ -357,7 +379,11 @@ tsb_flush:
 	bne,pn	%xcc, 1b
 	 nop
 2:	retl
+#ifndef	CONFIG_RMO
 	 nop
+#else	/* CONFIG_RMO */
+	 TSB_MEMBAR
+#endif	/* CONFIG_RMO */
 	.size	tsb_flush, .-tsb_flush
 
 	/* Reload MMU related context switch state at
@@ -508,7 +534,11 @@ copy_tsb:		/* %o0=old_tsb_base, %o1=old_tsb_size
 	 nop
 
 	retl
+#ifndef	CONFIG_RMO
 	 nop
+#else	/* CONFIG_RMO */
+	 TSB_MEMBAR
+#endif	/* CONFIG_RMO */
 	.size		copy_tsb, .-copy_tsb
 
 	/* Set the invalid bit in all TSB entries.  */

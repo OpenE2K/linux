@@ -16,7 +16,7 @@
 /*
  * the semaphore definition
  */
-#ifdef CONFIG_PPC64
+#if defined CONFIG_PPC64 || defined CONFIG_E2K
 # define RWSEM_ACTIVE_MASK		0xffffffffL
 #else
 # define RWSEM_ACTIVE_MASK		0x0000ffffL

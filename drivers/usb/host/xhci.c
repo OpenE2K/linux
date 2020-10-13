@@ -344,6 +344,9 @@ static void xhci_cleanup_msix(struct xhci_hcd *xhci)
 	return;
 }
 
+#ifdef CONFIG_MCST
+#ifdef CONFIG_PM
+
 static void __maybe_unused xhci_msix_sync_irqs(struct xhci_hcd *xhci)
 {
 	int i;
@@ -354,6 +357,8 @@ static void __maybe_unused xhci_msix_sync_irqs(struct xhci_hcd *xhci)
 	}
 }
 
+#endif
+#endif
 static int xhci_try_enable_msi(struct usb_hcd *hcd)
 {
 	struct xhci_hcd *xhci = hcd_to_xhci(hcd);

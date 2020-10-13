@@ -341,6 +341,7 @@ struct cp_private {
 	unsigned		tx_tail;
 	struct cp_desc		*tx_ring;
 	struct sk_buff		*tx_skb[CP_TX_RING_SIZE];
+	unsigned short		tx_len[CP_TX_RING_SIZE];
 
 	unsigned		rx_buf_sz;
 	unsigned		wol_enabled : 1; /* Is Wake-on-LAN enabled? */
@@ -675,8 +676,7 @@ static void cp_tx (struct cp_private *cp)
 		BUG_ON(!skb);
 
 		dma_unmap_single(&cp->pdev->dev, le64_to_cpu(txd->addr),
-				 le32_to_cpu(txd->opts1) & 0xffff,
-				 PCI_DMA_TODEVICE);
+				 cp->tx_len[tx_tail], PCI_DMA_TODEVICE);
 
 		if (status & LastFrag) {
 			if (status & (TxError | TxFIFOUnder)) {
@@ -796,6 +796,7 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 		wmb();
 
 		cp->tx_skb[entry] = skb;
+		cp->tx_len[entry] = len;
 		entry = NEXT_TX(entry);
 	} else {
 		struct cp_desc *txd;
@@ -815,6 +816,7 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 			goto out_dma_error;
 
 		cp->tx_skb[entry] = skb;
+		cp->tx_len[entry] = first_len;
 		entry = NEXT_TX(entry);
 
 		for (frag = 0; frag < skb_shinfo(skb)->nr_frags; frag++) {
@@ -860,6 +862,7 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 			wmb();
 
 			cp->tx_skb[entry] = skb;
+			cp->tx_len[entry] = len;
 			entry = NEXT_TX(entry);
 		}
 
@@ -1014,7 +1017,7 @@ static inline void cp_start_hw (struct cp_private *cp)
 
 	/*
 	 * These (at least TxRingAddr) need to be configured after the
-	 * corresponding bits in CpCmd are enabled. Datasheet v1.6 §6.33
+	 * corresponding bits in CpCmd are enabled. Datasheet v1.6 б╖6.33
 	 * (C+ Command Register) recommends that these and more be configured
 	 * *after* the [RT]xEnable bits in CpCmd are set. And on some hardware
 	 * it's been observed that the TxRingAddr is actually reset to garbage
@@ -1171,8 +1174,8 @@ static void cp_clean_rings (struct cp_private *cp)
 
 			desc = cp->tx_ring + i;
 			dma_unmap_single(&cp->pdev->dev,le64_to_cpu(desc->addr),
-					 le32_to_cpu(desc->opts1) & 0xffff,
-					 PCI_DMA_TODEVICE);
+					cp->tx_len[i],
+					PCI_DMA_TODEVICE);
 			if (le32_to_cpu(desc->opts1) & LastFrag)
 				dev_kfree_skb(skb);
 			cp->dev->stats.tx_dropped++;

@@ -43,6 +43,7 @@
 #include <asm/prom.h>
 #include <asm/memctrl.h>
 #include <asm/cacheflush.h>
+#include <asm/cpudata.h>
 
 #include "entry.h"
 #include "kstack.h"
@@ -147,10 +148,14 @@ static int sprintf_dimm(int synd_code, unsigned long paddr, char *buf, int bufle
 	if (dimm_handler) {
 		ret = dimm_handler(synd_code, paddr, buf, buflen);
 	} else if (tlb_type == spitfire) {
+#ifdef CONFIG_OF
 		if (prom_getunumber(synd_code, paddr, buf, buflen) == -1)
 			ret = -EINVAL;
 		else
 			ret = 0;
+#else
+		ret = -ENODEV;
+#endif
 	} else
 		ret = -ENODEV;
 	spin_unlock_irqrestore(&dimm_handler_lock, flags);
@@ -367,7 +372,7 @@ void sun4v_data_access_exception_tl1(struct pt_regs *regs, unsigned long addr, u
 	sun4v_data_access_exception(regs, addr, type_ctx);
 }
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 #include "pci_impl.h"
 #endif
 
@@ -550,7 +555,7 @@ void spitfire_access_error(struct pt_regs *regs, unsigned long status_encoded, u
 	udbl = (status_encoded & SFSTAT_UDBL_MASK) >> SFSTAT_UDBL_SHIFT;
 	udbh = (status_encoded & SFSTAT_UDBH_MASK) >> SFSTAT_UDBH_SHIFT;
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 	if (tt == TRAP_TYPE_DAE &&
 	    pci_poke_in_progress && pci_poke_cpu == smp_processor_id()) {
 		spitfire_clean_and_reenable_l1_caches();
@@ -1397,6 +1402,9 @@ static int cheetah_fix_ce(unsigned long physaddr)
 	__asm__ __volatile__("ldxa	[%0] %3, %%g0\n\t"
 			     "ldxa	[%1] %3, %%g0\n\t"
 			     "casxa	[%2] %3, %%g0, %%g0\n\t"
+#ifdef	CONFIG_RMO
+			     "membar	#StoreLoad | #StoreStore\n\t"
+#endif	/* CONFIG_RMO */
 			     "ldxa	[%0] %3, %%g0\n\t"
 			     "ldxa	[%1] %3, %%g0\n\t"
 			     "membar	#Sync"
@@ -1543,7 +1551,7 @@ void cheetah_deferred_handler(struct pt_regs *regs, unsigned long afsr, unsigned
 	struct cheetah_err_info local_snapshot, *p;
 	int recoverable, is_memory;
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 	/* Check for the special PCI poke sequence. */
 	if (pci_poke_in_progress && pci_poke_cpu == smp_processor_id()) {
 		cheetah_flush_icache();
@@ -1767,6 +1775,7 @@ void cheetah_plus_parity_error(int type, struct pt_regs *regs)
 	printk(KERN_WARNING "TPC<%pS>\n", (void *) regs->tpc);
 }
 
+#ifdef	CONFIG_SPARC64_SUN4V
 struct sun4v_error_entry {
 	/* Unique error handle */
 /*0x00*/u64		err_handle;
@@ -2073,7 +2082,7 @@ void sun4v_nonresum_error(struct pt_regs *regs, unsigned long offset)
 
 	put_cpu();
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 	/* Check for the special PCI poke sequence. */
 	if (pci_poke_in_progress && pci_poke_cpu == cpu) {
 		pci_poke_faulted = 1;
@@ -2164,6 +2173,7 @@ void hypervisor_tlbop_error_xcall(unsigned long err, unsigned long op)
 	printk(KERN_CRIT "SUN4V: XCALL TLB hv call error %lu for op %lu\n",
 	       err, op);
 }
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 static void do_fpe_common(struct pt_regs *regs)
 {
@@ -2340,8 +2350,14 @@ void show_stack(struct task_struct *tsk, unsigned long *_ksp)
 		flushw_all();
 
 	fp = ksp + STACK_BIAS;
-
+#ifdef CONFIG_MCST
+	if (tsk == current) {
+		pr_info("%s", linux_banner);
+	}
+		pr_info("Call Trace %d - %s:\n", tsk->pid, tsk->comm);
+#else
 	printk("Call Trace:\n");
+#endif
 	do {
 		struct sparc_stackf *sf;
 		struct pt_regs *regs;
@@ -2373,7 +2389,11 @@ void show_stack(struct task_struct *tsk, unsigned long *_ksp)
 			}
 		}
 #endif
+#if defined(CONFIG_E90S)
+	} while (++count < NUM_DUMP_FRAMES);
+#else
 	} while (++count < 16);
+#endif
 }
 
 static inline struct reg_window *kernel_stack_up(struct reg_window *rw)
@@ -2427,8 +2447,12 @@ void die_if_kernel(char *str, struct pt_regs *regs)
 		}
 		user_instruction_dump ((unsigned int __user *) regs->tpc);
 	}
-	if (regs->tstate & TSTATE_PRIV)
+	if (regs->tstate & TSTATE_PRIV) {
+#ifdef CONFIG_E90S
+		show_state();
+#endif
 		do_exit(SIGKILL);
+	}
 	do_exit(SIGSEGV);
 }
 EXPORT_SYMBOL(die_if_kernel);
@@ -2451,8 +2475,14 @@ void do_illegal_instruction(struct pt_regs *regs)
 		       0, 0x10, SIGILL) == NOTIFY_STOP)
 		goto out;
 
-	if (tstate & TSTATE_PRIV)
+	if (tstate & TSTATE_PRIV) {
+#ifdef CONFIG_MCST
+		if (*((u32 *)pc) == 0) {
+			show_state();
+		}
+#endif
 		die_if_kernel("Kernel illegal instruction", regs);
+	}
 	if (test_thread_flag(TIF_32BIT))
 		pc = (u32)pc;
 	if (get_user(insn, (u32 __user *) pc) != -EFAULT) {
@@ -2463,6 +2493,7 @@ void do_illegal_instruction(struct pt_regs *regs)
 			if (handle_ldf_stq(insn, regs))
 				goto out;
 		} else if (tlb_type == hypervisor) {
+#ifdef	CONFIG_SPARC64_SUN4V
 			if ((insn & VIS_OPCODE_MASK) == VIS_OPCODE_VAL) {
 				if (!vis_emul(regs, insn))
 					goto out;
@@ -2477,6 +2508,7 @@ void do_illegal_instruction(struct pt_regs *regs)
 				if (do_mathemu(regs, f, true))
 					goto out;
 			}
+#endif	/*CONFIG_SPARC64_SUN4V*/
 		}
 	}
 	info.si_signo = SIGILL;

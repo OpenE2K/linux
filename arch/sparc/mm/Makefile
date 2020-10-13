@@ -2,11 +2,15 @@
 #
 
 asflags-y := -ansi
-ccflags-y := -Werror
+#ccflags-y := -Werror
 
 obj-$(CONFIG_SPARC64)   += ultra.o tlb.o tsb.o gup.o
 obj-y                   += fault_$(BITS).o
+ifdef CONFIG_E90S
+obj-y                   += init_e90s.o
+else
 obj-y                   += init_$(BITS).o
+endif
 obj-$(CONFIG_SPARC32)   += extable.o srmmu.o iommu.o io-unit.o
 obj-$(CONFIG_SPARC32)   += srmmu_access.o
 obj-$(CONFIG_SPARC32)   += hypersparc.o viking.o tsunami.o swift.o

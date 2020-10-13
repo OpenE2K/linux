@@ -284,7 +284,7 @@ config AUDIT
 
 config AUDITSYSCALL
 	bool "Enable system-call auditing support"
-	depends on AUDIT && (X86 || PARISC || PPC || S390 || IA64 || UML || SPARC64 || SUPERH || (ARM && AEABI && !OABI_COMPAT) || ALPHA)
+	depends on AUDIT && (X86 || PARISC || PPC || S390 || IA64 || UML || SPARC64 || SUPERH || E2K || (ARM && AEABI && !OABI_COMPAT) || ALPHA)
 	default y if SECURITY_SELINUX
 	help
 	  Enable low-overhead system-call auditing infrastructure that
@@ -1524,6 +1524,16 @@ config DEBUG_PERF_USE_VMALLOC
 
 	 Say N if unsure.
 
+config WATCH_PREEMPT
+        default n
+        bool "Monitor non preempible intervals"
+        depends on (E90 || E90S || E2K || X86) && !ENABLE_DEFAULT_TRACERS
+        help
+         To turn on monitoring echo 1 > /proc/watch-preempt
+         To turn off monitoring echo 0 > /proc/watch-preempt
+         cat /proc/watch-preempt shows maximum interval of preempt
+           disable time for each CPU
+
 endmenu
 
 config VM_EVENT_COUNTERS
@@ -1648,9 +1658,13 @@ config PROFILING
 # dynamically changed for a probe function.
 #
 config TRACEPOINTS
-	bool
+	bool "Tracepoint support"
+	help
+	  Say Y here to enable the extended profiling support mechanisms used
+	  by profilers such as OProfile.
 
 source "arch/Kconfig"
+source "ltt/Kconfig"
 
 endmenu		# General setup
 

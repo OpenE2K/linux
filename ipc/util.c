@@ -62,6 +62,11 @@
 
 #include <asm/unistd.h>
 
+#include <asm/unistd.h>
+#ifdef CONFIG_MAC_
+#include <linux/mac/mac_kernel.h>
+#endif
+
 #include "util.h"
 
 struct ipc_proc_iface {
@@ -542,6 +547,15 @@ int ipcperms(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp, short flag)
 	    !ns_capable(ns->user_ns, CAP_IPC_OWNER))
 		return -1;
 
+#ifdef CONFIG_MAC_
+	if (mac_active != 0) {
+		if (kmac_access_userp((kmac_subject_id_t) __kuid_val(euid),
+				      (kmac_user_id_t) __kuid_val(ipcp->uid),
+				      (int) requested_mode) != 0) {
+			return -1;
+		}
+	}
+#endif /* CONFIG_MAC_ */
 	return security_ipc_permission(ipcp, flag);
 }
 

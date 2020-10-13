@@ -97,6 +97,13 @@ struct thread_struct {
 struct task_struct;
 extern unsigned long thread_saved_pc(struct task_struct *);
 
+#ifdef CONFIG_E90S
+# ifdef CONFIG_L_LOCAL_APIC
+/* Boot cpu frequency measured when calibrating LAPIC timer. */
+extern u64 lapic_calibration_result_ticks;
+# endif
+#endif
+
 /* On Uniprocessor, even in RMO processes see TSO semantics */
 #ifdef CONFIG_SMP
 #define TSTATE_INITIAL_MM	TSTATE_TSO
@@ -252,6 +259,29 @@ static inline void prefetchw(const void *x)
 #define spin_lock_prefetch(x)	prefetchw(x)
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
+
+#ifdef CONFIG_E90S
+#define NUM_DUMP_FRAMES	32
+#endif
+#if defined(CONFIG_E90S) && defined(CONFIG_SMP)
+#include <asm/percpu.h>
+typedef struct {
+        char comm[16];
+        long pid;
+        long state;
+        long need_resched;
+        long cpu;
+        long t_pc;
+        long t_npc;
+        long prio;
+        long fp[NUM_DUMP_FRAMES];
+        long tpc[NUM_DUMP_FRAMES];
+} cpu_bt_buf_t;
+DECLARE_PER_CPU(cpu_bt_buf_t, cpu_bt_buf);
+
+extern void smp_show_backtrace_all_cpus(void);
+
+#endif	/*CONFIG_SMP && CONFIG_E90S*/
 
 #endif /* !(__ASSEMBLY__) */
 

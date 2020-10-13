@@ -49,6 +49,7 @@
 #include <linux/rmap.h>
 #include <linux/export.h>
 #include <linux/delayacct.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/writeback.h>
 #include <linux/memcontrol.h>
@@ -884,7 +885,11 @@ static int copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 {
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *src_ptl, *uninitialized_var(dst_ptl);
+#else
 	spinlock_t *src_ptl, *dst_ptl;
+#endif
 	int progress = 0;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
@@ -947,8 +952,14 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm, struct mm_struct *src
 {
 	pmd_t *src_pmd, *dst_pmd;
 	unsigned long next;
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	unsigned long sec = ((pud_secondary(*src_pud) && !IS_UPT_E3S) ?
+			     TBL_SEC_BIT : 0);
 
+	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr | sec);
+#else
 	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
+#endif
 	if (!dst_pmd)
 		return -ENOMEM;
 	src_pmd = pmd_offset(src_pud, addr);
@@ -1085,6 +1096,13 @@ again:
 	do {
 		pte_t ptent = *pte;
 		if (pte_none(ptent)) {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+			if (pte_valid(ptent)) {
+				if (!test_ts_flag(TS_KEEP_PAGES_VALID))
+					pte_clear_not_present_full(mm, addr,
+							pte, tlb->fullmm);
+			}
+#endif
 			continue;
 		}
 
@@ -1110,6 +1128,12 @@ again:
 				     page->index > details->last_index))
 					continue;
 			}
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+			if (test_ts_flag(TS_KEEP_PAGES_VALID))
+				ptent = ptep_get_and_clear_as_valid(mm, addr,
+								    pte);
+			else
+#endif
 			ptent = ptep_get_and_clear_full(mm, addr, pte,
 							tlb->fullmm);
 			tlb_remove_tlb_entry(tlb, pte, addr);
@@ -2266,7 +2290,11 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long pfn, pgprot_t prot)
 {
 	pte_t *pte;
+#ifdef CONFIG_MCST
+	spinlock_t *uninitialized_var(ptl);
+#else
 	spinlock_t *ptl;
+#endif
 
 	pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
@@ -2832,7 +2860,11 @@ gotten:
 		 * seen in the presence of one thread doing SMC and another
 		 * thread doing COW.
 		 */
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		ptep_clear_flush_as_valid(vma, address, page_table);
+#else
 		ptep_clear_flush(vma, address, page_table);
+#endif
 		page_add_new_anon_rmap(new_page, vma, address);
 		/*
 		 * We call the notify macro here because, when using secondary
@@ -2908,7 +2940,17 @@ static void unmap_mapping_range_vma(struct vm_area_struct *vma,
 		unsigned long start_addr, unsigned long end_addr,
 		struct zap_details *details)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+        /*
+	 * vma is not destroyed here, but zap_page_range will clear
+	 * vma ptes, so keep valid bit to handle pagefaults.
+	 */
+	set_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 	zap_page_range_single(vma, start_addr, end_addr - start_addr, details);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	clear_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 }
 
 static inline void unmap_mapping_range_tree(struct rb_root *root,
@@ -3292,6 +3334,27 @@ oom:
 	return VM_FAULT_OOM;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+struct sec_space_page {
+	unsigned long address;
+	struct vm_area_struct *vma;
+};
+
+static struct page *new_sec_space_page(struct page *p,
+		unsigned long private, int **result)
+{
+	struct page *page;
+	struct sec_space_page *params = (struct sec_space_page *) private;
+
+	*result = NULL;
+
+	page = alloc_page_vma(GFP_HIGHUSER_MOVABLE,
+			      params->vma, params->address);
+
+	return page;
+}
+#endif
+
 /*
  * __do_fault() tries to create a new page mapping. It aggressively
  * tries to share with existing pages, but makes a separate copy if
@@ -3340,6 +3403,9 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	} else
 		cow_page = NULL;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+retry:
+#endif
 	vmf.virtual_address = (void __user *)(address & PAGE_MASK);
 	vmf.pgoff = pgoff;
 	vmf.flags = flags;
@@ -3366,6 +3432,53 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		lock_page(vmf.page);
 	else
 		VM_BUG_ON_PAGE(!PageLocked(vmf.page), vmf.page);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	if (TASK_IS_BINCO(current) && !IS_UPT_E3S && ADDR_IN_SS(address) &&
+	    !PAGE_IN_SS(vmf.page)) {
+		struct sec_space_page params = { address, vma };
+		LIST_HEAD(pagelist);
+		int err;
+
+		unlock_page(vmf.page);
+
+		migrate_prep();
+
+		err = isolate_lru_page(vmf.page);
+		/*
+		 * Either remove the duplicate refcount from
+		 * isolate_lru_page() or drop the page ref if it was
+		 * not isolated.
+		 */
+		put_page(vmf.page);
+
+		if (err) {
+			pr_info_ratelimited("Error %d on LRU isolating secondary space page\n",
+				err);
+			msleep(10);
+			goto retry;
+		}
+
+		list_add_tail(&vmf.page->lru, &pagelist);
+		err = migrate_pages(&pagelist, new_sec_space_page, NULL,
+				(unsigned long) &params,
+				MIGRATE_SYNC, MR_SYSCALL);
+		if (err) {
+			putback_movable_pages(&pagelist);
+			pr_notice("Error %d on migrating secondary space page, mapcount %d, count %d, LRU %d\n",
+				err, page_mapcount(vmf.page),
+				page_count(vmf.page), PageLRU(vmf.page));
+
+			ret = (err == -ENOMEM) ? VM_FAULT_OOM : VM_FAULT_SS;
+
+			goto uncharge_out;
+		}
+
+		msleep(10);
+
+		goto retry;
+	}
+#endif
 
 	/*
 	 * Should we do an early C-O-W break?
@@ -3732,6 +3845,17 @@ static int __handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
+
+#ifdef CONFIG_MCST_RT
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* Attempt to allocate page when VM_MLOCK_DONE set */
+		/* for gracefully exit() */
+		mm->extra_vm_flags &= ~VM_MLOCK_DONE;
+		pr_err("Attempt to allocate page when VM_MLOCK_DONE"
+				"(after mlockall())\n");
+		return VM_FAULT_SIGBUS;
+	}
+#endif  /* CONFIG_MCST_RT */
 
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		return hugetlb_fault(mm, vma, address, flags);

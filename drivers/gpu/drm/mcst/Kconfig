@@ -1,0 +1,19 @@
+config DRM_MCST
+	tristate "MCST MGAM/MGA3D DRM driver"
+	depends on DRM && PCI
+	select DRM_TTM
+	select FB_DEFERRED_IO
+	select FB_SYS_COPYAREA
+	select FB_SYS_FILLRECT
+	select FB_SYS_IMAGEBLIT
+	select DRM_KMS_HELPER
+	help
+	 Say yes for experimental MCST MGAM/MGA3D driver
+
+config DRM_MCST_DEBUG
+        bool "Build in MCST's debugfs support"
+        depends on DRM_MCST && DEBUG_FS
+        default n
+        help
+          Say Y here if you want MCST DRM to output debugging information
+          via debugfs.

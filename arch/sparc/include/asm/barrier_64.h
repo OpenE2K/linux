@@ -1,6 +1,14 @@
 #ifndef __SPARC64_BARRIER_H
 #define __SPARC64_BARRIER_H
 
+#ifdef	CONFIG_E90S
+#define membar_safe(type) \
+do {	__asm__ __volatile__( \
+			     " membar	" type "\n" \
+			     : : : "memory"); \
+} while (0)
+
+#else /*CONFIG_E90S*/
 /* These are here in an effort to more fully work around Spitfire Errata
  * #51.  Essentially, if a memory barrier occurs soon after a mispredicted
  * branch, the chip can stop executing instructions until a trap occurs.
@@ -22,13 +30,16 @@
  * the memory barrier explicitly into a "branch always, predicted taken"
  * delay slot to avoid the problem case.
  */
+
 #define membar_safe(type) \
 do {	__asm__ __volatile__("ba,pt	%%xcc, 1f\n\t" \
 			     " membar	" type "\n" \
 			     "1:\n" \
 			     : : : "memory"); \
 } while (0)
+#endif /*CONFIG_E90S*/
 
+#ifndef	CONFIG_RMO
 /* The kernel always executes in TSO memory model these days,
  * and furthermore most sparc64 chips implement more stringent
  * memory ordering than required by the specifications.
@@ -36,10 +47,46 @@ do {	__asm__ __volatile__("ba,pt	%%xcc, 1f\n\t" \
 #define mb()	membar_safe("#StoreLoad")
 #define rmb()	__asm__ __volatile__("":::"memory")
 #define wmb()	__asm__ __volatile__("":::"memory")
+#else	/* CONFIG_RMO */
+#define mb()	\
+	membar_safe("#LoadLoad | #LoadStore | #StoreStore | #StoreLoad")
+#define rmb()	\
+	membar_safe("#LoadLoad")
+#define wmb()	\
+	membar_safe("#StoreStore")
+#define membar_storeload() \
+	membar_safe("#StoreLoad")
+#define membar_storeload_storestore() \
+	membar_safe("#StoreLoad | #StoreStore")
+#define membar_storeload_loadload() \
+	membar_safe("#StoreLoad | #LoadLoad")
+#define membar_storestore_loadstore() \
+	membar_safe("#StoreStore | #LoadStore")
+#endif	/* CONFIG_RMO */
 
 #define read_barrier_depends()		do { } while(0)
+#ifndef	CONFIG_RMO
 #define set_mb(__var, __value) \
 	do { __var = __value; membar_safe("#StoreLoad"); } while(0)
+#else	/* CONFIG_RMO */
+#define set_mb(__var, __value) \
+	do { __var = __value; membar_storeload_storestore(); } while(0)
+#endif	/* CONFIG_RMO */
+
+#ifdef	CONFIG_RMO
+#ifdef CONFIG_SMP
+#define smp_mb()	mb()
+#define smp_rmb()	rmb()
+#define smp_wmb()	wmb()
+#define smp_read_barrier_depends()	read_barrier_depends()
+#else
+#define smp_mb()	__asm__ __volatile__("":::"memory")
+#define smp_rmb()	__asm__ __volatile__("":::"memory")
+#define smp_wmb()	__asm__ __volatile__("":::"memory")
+#define smp_read_barrier_depends()	do { } while(0)
+#endif
+
+#else	/* CONFIG_RMO */
 
 #ifdef CONFIG_SMP
 #define smp_mb()	mb()
@@ -52,6 +99,8 @@ do {	__asm__ __volatile__("ba,pt	%%xcc, 1f\n\t" \
 #endif
 
 #define smp_read_barrier_depends()	do { } while(0)
+
+#endif	/* CONFIG_RMO */
 
 #define smp_store_release(p, v)						\
 do {									\

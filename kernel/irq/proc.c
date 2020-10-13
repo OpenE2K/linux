@@ -12,6 +12,9 @@
 #include <linux/seq_file.h>
 #include <linux/interrupt.h>
 #include <linux/kernel_stat.h>
+#ifdef CONFIG_MCST_RT
+#include <asm/uaccess.h>
+#endif
 
 #include "internals.h"
 
@@ -239,6 +242,77 @@ static const struct file_operations default_affinity_proc_fops = {
 	.release	= single_release,
 	.write		= default_affinity_write,
 };
+#ifdef CONFIG_MCST_RT
+static int irq_fst_proc_show(struct seq_file *m, void *v)
+{
+	struct irqaction *action = irq_to_desc((long)m->private)->action;
+
+	if (action) {
+		seq_printf(m, "%20s\tIRQF_DISABLED=%d\n", action->name,
+			!!(action->flags & IRQF_DISABLED));
+	}
+	return 0;
+}
+#define MAX_NAMELEN 128
+static ssize_t default_fst_write(struct file *file,
+		const char __user *driver_name, size_t count, loff_t *ppos)
+{
+	unsigned int irq = (int)(long)PDE_DATA(file->f_path.dentry->d_inode);
+	char name4srch[MAX_NAMELEN];
+	int		rval;
+
+	memset(name4srch, 0, MAX_NAMELEN);
+	rval = copy_from_user((void *)&name4srch, (void *)driver_name,
+		count > MAX_NAMELEN ? MAX_NAMELEN : (count - 1));
+	if (rval != 0) {
+		pr_err("default_fst_write: copy_from_user() error.");
+		return -EFAULT;
+	};
+	rval = mk_hndl_first(irq, name4srch);
+	if (rval != 0) {
+		pr_err("/proc/.../drv_sequence name=%s count=%lld irq=%u\n",
+				name4srch, count, irq);
+		return -EINVAL;
+	};
+	return count;
+}
+
+
+static int irq_fst_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, irq_fst_proc_show, PDE_DATA(inode));
+}
+
+static const struct file_operations irq_fst_proc_fops = {
+	.open		= irq_fst_proc_open,
+	.read		= seq_read,
+	.write		= default_fst_write,
+};
+static int irq_seq_proc_show(struct seq_file *m, void *v)
+{
+	struct irqaction *action = irq_to_desc((long)m->private)->action;
+
+	if (action) {
+		do {
+			seq_printf(m, "%20s\tIRQF_DISABLED=%d\n", action->name,
+				!!(action->flags & IRQF_DISABLED));
+		} while ((action = action->next) != NULL);
+	}
+	return 0;
+}
+
+static int irq_seq_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, irq_seq_proc_show, PDE_DATA(inode));
+}
+
+static const struct file_operations irq_seq_proc_fops = {
+	.open		= irq_seq_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+#endif
 
 static int irq_node_proc_show(struct seq_file *m, void *v)
 {
@@ -247,7 +321,6 @@ static int irq_node_proc_show(struct seq_file *m, void *v)
 	seq_printf(m, "%d\n", desc->irq_data.node);
 	return 0;
 }
-
 static int irq_node_proc_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, irq_node_proc_show, PDE_DATA(inode));
@@ -358,6 +431,12 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 
 	proc_create_data("spurious", 0444, desc->dir,
 			 &irq_spurious_proc_fops, (void *)(long)irq);
+#ifdef CONFIG_MCST_RT
+	proc_create_data("handl_fst", 0444, desc->dir,
+			 &irq_fst_proc_fops, (void *)(long)irq);
+	proc_create_data("handl_seq", 0444, desc->dir,
+			 &irq_seq_proc_fops, (void *)(long)irq);
+#endif
 }
 
 void unregister_irq_proc(unsigned int irq, struct irq_desc *desc)
@@ -373,6 +452,10 @@ void unregister_irq_proc(unsigned int irq, struct irq_desc *desc)
 	remove_proc_entry("node", desc->dir);
 #endif
 	remove_proc_entry("spurious", desc->dir);
+#ifdef CONFIG_MCST_RT
+	remove_proc_entry("handl_fst", desc->dir);
+	remove_proc_entry("handl_seq", desc->dir);
+#endif
 
 	memset(name, 0, MAX_NAMELEN);
 	sprintf(name, "%u", irq);

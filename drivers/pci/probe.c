@@ -1659,16 +1659,37 @@ void pcie_bus_configure_settings(struct pci_bus *bus)
 }
 EXPORT_SYMBOL_GPL(pcie_bus_configure_settings);
 
-unsigned int pci_scan_child_bus(struct pci_bus *bus)
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+/*
+ * The next function pci_scan_root_child_bus() have to be updated
+ * to support commonroot bus domains on e2k && e90s arch
+ */
+static void pci_scan_bus_slots(struct pci_bus *bus)
 {
+	unsigned int devfn;
+	/* Go find them, Rover! */
+	for (devfn = 0; devfn < 0x100; devfn += 8)
+		pci_scan_slot(bus, devfn);
+}
+unsigned int pci_scan_root_child_bus(struct pci_bus *bus)
+#else	/* ! E2K && ! E90S */
+unsigned int pci_scan_child_bus(struct pci_bus *bus)
+#endif	/* CONFIG_E2K || CONFIG_E90S */
+{
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	unsigned int pass, max = bus->busn_res.start;
+#else
 	unsigned int devfn, pass, max = bus->busn_res.start;
+#endif
 	struct pci_dev *dev;
 
 	dev_dbg(&bus->dev, "scanning bus\n");
 
+#if !defined(CONFIG_E2K) && !defined(CONFIG_E90S)
 	/* Go find them, Rover! */
 	for (devfn = 0; devfn < 0x100; devfn += 8)
 		pci_scan_slot(bus, devfn);
+#endif
 
 	/* Reserve buses for SR-IOV capability. */
 	max += pci_iov_bus_range(bus);
@@ -1700,6 +1721,17 @@ unsigned int pci_scan_child_bus(struct pci_bus *bus)
 	dev_dbg(&bus->dev, "bus scan returning with max=%02x\n", max);
 	return max;
 }
+
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+/* Implemented support of multiple PCI domains on e90s. IO link of any
+ * node (not only BSP) now can be connected to IOHUB. atic@mcst.ru */
+unsigned int pci_scan_child_bus(struct pci_bus *bus)
+{
+	pci_scan_bus_slots(bus);
+
+	return pci_scan_root_child_bus(bus);
+}
+#endif
 
 /**
  * pcibios_root_bridge_prepare - Platform-specific host bridge setup.

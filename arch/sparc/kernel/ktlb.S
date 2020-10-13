@@ -50,11 +50,14 @@ kvmap_itlb_vmalloc_addr:
 	TSB_WRITE(%g1, %g5, %g6)
 
 	/* fallthrough to TLB load */
-
+#ifdef	CONFIG_MCST
+	nop /* Sivuch bug: retry instruction must be aligned at 64 bytes */
+#endif
 kvmap_itlb_load:
 
 661:	stxa		%g5, [%g0] ASI_ITLB_DATA_IN
 	retry
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	nop
@@ -75,16 +78,19 @@ kvmap_itlb_load:
 	 */
 	ba,pt		%xcc, sun4v_itlb_load
 	 mov		%g5, %g3
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 kvmap_itlb_longpath:
 
 661:	rdpr	%pstate, %g5
 	wrpr	%g5, PSTATE_AG | PSTATE_MG, %pstate
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section .sun4v_2insn_patch, "ax"
 	.word	661b
 	SET_GL(1)
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	rdpr	%tpc, %g5
 	ba,pt	%xcc, sparc64_realfault_common
@@ -155,6 +161,7 @@ kvmap_dtlb_vmalloc_addr:
 	KERN_PGTABLE_WALK(%g4, %g5, %g2, kvmap_dtlb_longpath)
 
 	TSB_LOCK_TAG(%g1, %g2, %g7)
+
 	TSB_WRITE(%g1, %g5, %g6)
 
 	/* fallthrough to TLB load */
@@ -163,6 +170,7 @@ kvmap_dtlb_load:
 
 661:	stxa		%g5, [%g0] ASI_DTLB_DATA_IN	! Reload TLB
 	retry
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	nop
@@ -183,6 +191,7 @@ kvmap_dtlb_load:
 	 */
 	ba,pt		%xcc, sun4v_dtlb_load
 	 mov		%g5, %g3
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
 kvmap_vmemmap:
@@ -234,22 +243,26 @@ kvmap_dtlb_longpath:
 
 661:	rdpr	%pstate, %g5
 	wrpr	%g5, PSTATE_AG | PSTATE_MG, %pstate
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section .sun4v_2insn_patch, "ax"
 	.word	661b
 	SET_GL(1)
 	ldxa		[%g0] ASI_SCRATCHPAD, %g5
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	rdpr	%tl, %g3
 	cmp	%g3, 1
 
 661:	mov	TLB_TAG_ACCESS, %g4
 	ldxa	[%g4] ASI_DMMU, %g5
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section .sun4v_2insn_patch, "ax"
 	.word	661b
 	ldx	[%g5 + HV_FAULT_D_ADDR_OFFSET], %g5
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	be,pt	%xcc, sparc64_realfault_common
 	 mov	FAULT_CODE_DTLB, %g4

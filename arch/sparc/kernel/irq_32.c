@@ -217,6 +217,10 @@ void handler_irq(unsigned int pil, struct pt_regs *regs)
 {
 	struct pt_regs *old_regs;
 	struct irq_bucket *p;
+#ifdef CONFIG_MCST
+	struct thread_info *ti = current_thread_info();
+	ti->irq_enter_clk = get_cycles();
+#endif
 
 	BUG_ON(pil > 15);
 	old_regs = set_irq_regs(regs);

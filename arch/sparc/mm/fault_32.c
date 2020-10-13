@@ -179,6 +179,14 @@ asmlinkage void do_sparc_fault(struct pt_regs *regs, int text_fault, int write,
 	int fault, code;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
+#ifdef CONFIG_MCST_RT
+	if (my_rt_cpu_data->modes & RTCPUM_NO_PG_FAULT ||
+		((rts_act_mask & RTS_PGFLT_RTWRN && rt_task(tsk)) ||
+			rts_act_mask & RTS_PGFLT_WRN)) {
+		pr_err("page fault on cpu #%d. pid = %d (%s)\n",
+			raw_smp_processor_id(), current->pid, current->comm);
+	}
+#endif
 	if (text_fault)
 		address = regs->pc;
 

@@ -52,6 +52,9 @@
 #define IFF_DORMANT	0x20000		/* driver signals dormant	*/
 
 #define IFF_ECHO	0x40000		/* echo sent packets		*/
+/* #ifdef CONFIG_MCST */
+#define IFF_SPINWAIT	0x80000	/* dev_rx_action thread pools, not schedule */
+/* #endif */
 
 #define IFF_VOLATILE	(IFF_LOOPBACK|IFF_POINTOPOINT|IFF_BROADCAST|IFF_ECHO|\
 		IFF_MASTER|IFF_SLAVE|IFF_RUNNING|IFF_LOWER_UP|IFF_DORMANT)

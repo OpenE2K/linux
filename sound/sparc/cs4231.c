@@ -27,8 +27,12 @@
 #include <sound/initval.h>
 #include <sound/pcm_params.h>
 
+#if 0
 #ifdef CONFIG_SBUS
 #define SBUS_SUPPORT
+#endif
+#else
+#undef SBUS_SUPPORT
 #endif
 
 #if defined(CONFIG_PCI) && defined(CONFIG_SPARC64)

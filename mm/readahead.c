@@ -165,6 +165,11 @@ int __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 		goto out;
 
 	end_index = ((isize - 1) >> PAGE_CACHE_SHIFT);
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_NO_RD_AHEAD) {
+		return 0;
+	}
+#endif
 
 	/*
 	 * Preallocate as many pages as we will need.

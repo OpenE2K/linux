@@ -372,6 +372,9 @@ struct zone {
 	unsigned long		min_slab_pages;
 #endif /* CONFIG_NUMA */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_ARCH_DISCONTIG_NODE_MEM_MAP)
+	struct page		*zone_mem_map;
+#endif /* CONFIG_E2K && CONFIG_ARCH_DISCONTIG_NODE_MEM_MAP */
 	/* zone_start_pfn == zone_start_paddr >> PAGE_SHIFT */
 	unsigned long		zone_start_pfn;
 

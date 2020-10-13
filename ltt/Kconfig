@@ -1,0 +1,28 @@
+menuconfig LTT
+	boolean "Linux Trace Toolkit Next Generation (LTTng)"
+	depends on MODULES
+	depends on KALLSYMS
+	depends on HIGH_RES_TIMERS
+	depends on TRACEPOINTS
+	default n
+	help
+	  It is possible for the kernel to log important events to a trace
+	  facility. Doing so enables the use of the generated traces in order
+	  to reconstruct the dynamic behavior of the kernel, and hence the
+	  whole system.
+
+	  The tracing process contains 4 parts :
+	      1) The logging of events by key parts of the kernel.
+	      2) The tracer that keeps the events in a data buffer (uses
+	         relay).
+	      3) A trace daemon that interacts with the tracer and is
+	         notified every time there is a certain quantity of data to
+	         read from the tracer.
+	      4) A trace event data decoder that reads the accumulated data
+	         and formats it in a human-readable format.
+
+	  If you say Y, the first component will be built into the kernel.
+
+	  For more information on kernel tracing, lttctl, lttd or lttv,
+	  please check the following address :
+	       http://ltt.polymtl.ca

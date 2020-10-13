@@ -1,0 +1,76 @@
+#!/bin/sh
+
+usage() {
+	printf    "Usage: `basename $0` -l <linuxsrc> -m <modpath>\n"
+}
+
+while [ $# -gt 0 ]; do
+	arg="$1"
+	shift
+	case "$arg" in
+		"-l") linuxsrc="$1"; shift;;
+		"-m") modpath="$1"; shift;;
+		"-h") usage; exit 0;;
+		*)
+			printf "ERROR: unknown option \"$arg\"\n" >&2
+			usage >&2; exit 1;;
+	esac
+done
+
+docmd()
+{
+	cmd="$*"
+	[ ${KBUILD_VERBOSE} -eq 1 ] && echo $cmd
+	$cmd; [ $? -ne 0 ] && exit 1
+}
+
+if [[ -z ${linuxsrc} ]]; then
+	echo "incorrect params: set -l option" >&2
+	exit 1
+fi
+if [[ -z ${modpath} ]]; then
+	echo "incorrect params: set -m option" >&2
+	exit 1
+fi
+
+SRCARCH=$ARCH
+[[ $ARCH == sparc64 ]] && SRCARCH=sparc
+[[ $ARCH == i386 ]] && SRCARCH=x86
+[[ $ARCH == x86_64 ]] && SRCARCH=x86
+
+[ -L ${modpath}/build ] && docmd unlink ${modpath}/build
+[ -d ${modpath}/build ] && docmd rm -rf ${modpath}/build
+[ -L ${modpath}/source ] && docmd unlink ${modpath}/source
+[ -d ${modpath}/source ] && docmd rm -rf ${modpath}/source
+
+docmd mkdir -p ${modpath}/build
+docmd cp ${linuxsrc}/Module.symvers ${modpath}/build/
+docmd cp ${linuxsrc}/.config ${modpath}/build/
+docmd cp ${linuxsrc}/Makefile ${modpath}/build/
+docmd cp -r ${linuxsrc}/scripts ${modpath}/build/
+
+docmd mkdir -p ${modpath}/build/arch/$SRCARCH
+docmd cp ${linuxsrc}/arch/$SRCARCH/Makefile ${modpath}/build/arch/$SRCARCH/
+[[ $ARCH == i386 ]] && cp ${linuxsrc}/arch/x86/Makefile_32.cpu ${modpath}/build/arch/x86/
+
+docmd cp -r -L ${linuxsrc}/include ${modpath}/build/
+
+docmd mkdir -p ${modpath}/build/arch/$SRCARCH
+docmd cp -r -L ${linuxsrc}/arch/$SRCARCH/include ${modpath}/build/arch/$SRCARCH/
+
+### CLEANUP
+
+docmd rm -f ${modpath}/build/include/linux/mac/mac_kernel.h
+
+docmd cd ${modpath}/build
+rm -rf $(find -name ".svn")
+
+docmd cd ${modpath}/build/scripts
+ll=$(find -name .'*'.cmd); docmd rm -rf $ll
+ll=$(find -name '*'.c); docmd rm -rf $ll
+ll=$(find -name '*'.o); docmd rm -rf $ll
+ll=$(find -name '*'.h); docmd rm -rf $ll
+
+
+exit 0
+

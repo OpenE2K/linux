@@ -56,6 +56,7 @@ struct device;
 struct phy_device;
 /* 802.11 specific */
 struct wireless_dev;
+
 					/* source back-compat hooks */
 #define SET_ETHTOOL_OPS(netdev,ops) \
 	( (netdev)->ethtool_ops = (ops) )
@@ -333,6 +334,9 @@ enum {
 	NAPI_STATE_DISABLE,	/* Disable pending */
 	NAPI_STATE_NPSVC,	/* Netpoll - don't dequeue from poll_list */
 	NAPI_STATE_HASHED,	/* In NAPI hash */
+#ifdef CONFIG_MCST
+	NAPI_STATE_READY,
+#endif
 };
 
 enum gro_result {
@@ -410,34 +414,8 @@ static inline bool napi_disable_pending(struct napi_struct *n)
  * insure only one NAPI poll instance runs.  We also make
  * sure there is no pending NAPI disable.
  */
-static inline bool napi_schedule_prep(struct napi_struct *n)
-{
-	return !napi_disable_pending(n) &&
-		!test_and_set_bit(NAPI_STATE_SCHED, &n->state);
-}
 
-/**
- *	napi_schedule - schedule NAPI poll
- *	@n: napi context
- *
- * Schedule NAPI poll routine to be called if it is not already
- * running.
- */
-static inline void napi_schedule(struct napi_struct *n)
-{
-	if (napi_schedule_prep(n))
-		__napi_schedule(n);
-}
-
-/* Try to reschedule poll. Called by dev->poll() after napi_complete().  */
-static inline bool napi_reschedule(struct napi_struct *napi)
-{
-	if (napi_schedule_prep(napi)) {
-		__napi_schedule(napi);
-		return true;
-	}
-	return false;
-}
+/* moved after struct net_device definition */
 
 /**
  *	napi_complete - NAPI processing complete
@@ -1130,13 +1108,12 @@ struct net_device_ops {
 						      bool new_carrier);
 	int			(*ndo_get_phys_port_id)(struct net_device *dev,
 							struct netdev_phys_port_id *ppid);
-	void			(*ndo_add_vxlan_port)(struct  net_device *dev,
+	void			(*ndo_add_vxlan_port)(struct net_device *dev,
 						      sa_family_t sa_family,
 						      __be16 port);
-	void			(*ndo_del_vxlan_port)(struct  net_device *dev,
+	void			(*ndo_del_vxlan_port)(struct net_device *dev,
 						      sa_family_t sa_family,
 						      __be16 port);
-
 	void*			(*ndo_dfwd_add_station)(struct net_device *pdev,
 							struct net_device *dev);
 	void			(*ndo_dfwd_del_station)(struct net_device *pdev,
@@ -1146,7 +1123,13 @@ struct net_device_ops {
 							struct net_device *dev,
 							void *priv);
 	int			(*ndo_get_lock_subclass)(struct net_device *dev);
+
+#ifdef CONFIG_MCST_RT
+	int                     ndo_unlocked_ioctl;
+#endif
 };
+
+struct dev_softnet_data;
 
 /*
  *	The DEVICE structure.
@@ -1478,10 +1461,59 @@ struct net_device {
 	int group;
 
 	struct pm_qos_request	pm_qos_req;
-};
-#define to_net_dev(d) container_of(d, struct net_device, dev)
 
+#ifdef CONFIG_MCST
+	struct dev_softnet_data *dsd;
+#endif
+};
+
+
+
+static inline bool napi_schedule_prep(struct napi_struct *n)
+{
+#ifdef CONFIG_MCST
+	if (n->dev->dsd) {
+		set_bit(NAPI_STATE_READY, &n->state);
+		return !napi_disable_pending(n);
+	}
+#endif
+	return !napi_disable_pending(n) &&
+		!test_and_set_bit(NAPI_STATE_SCHED, &n->state);
+}
+
+/**
+ *	napi_schedule - schedule NAPI poll
+ *	@n: napi context
+ *
+ * Schedule NAPI poll routine to be called if it is not already
+ * running.
+ */
+static inline void napi_schedule(struct napi_struct *n)
+{
+	if (napi_schedule_prep(n))
+		__napi_schedule(n);
+}
+
+/* Try to reschedule poll. Called by dev->poll() after napi_complete().  */
+static inline bool napi_reschedule(struct napi_struct *napi)
+{
+	if (napi_schedule_prep(napi)) {
+		__napi_schedule(napi);
+		return true;
+	}
+	return false;
+}
+#define to_net_dev(d) container_of(d, struct net_device, dev)
+#ifdef CONFIG_MCST
+#define net_dev_has_own_threads(dev)	(dev->dsd != NULL)
+#endif
+
+#ifdef CONFIG_MCST
+/* l_e1000 needs this... */
+#define	NETDEV_ALIGN		64
+#else
 #define	NETDEV_ALIGN		32
+#endif
 
 static inline
 int netdev_get_prio_tc_map(const struct net_device *dev, u32 prio)
@@ -2028,6 +2060,9 @@ struct softnet_data {
 	unsigned int		input_queue_head;
 	unsigned int		input_queue_tail;
 #endif
+#ifdef CONFIG_MCST
+	int			in_dsd;
+#endif
 	unsigned int		dropped;
 	struct sk_buff_head	input_pkt_queue;
 	struct napi_struct	backlog;
@@ -2036,6 +2071,16 @@ struct softnet_data {
 #ifdef CONFIG_NET_FLOW_LIMIT
 	struct sd_flow_limit __rcu *flow_limit;
 #endif
+};
+
+struct dev_softnet_data {
+	struct softnet_data	sd;
+	/* Protects output_queue and completion_queue */
+	raw_spinlock_t          dsd_tx_lock;
+	/* Protects input_pkt_queue, tofree_queue, poll_list and backlog */
+	raw_spinlock_t          dsd_rx_lock;
+	struct task_struct      *dsd_tx_tsk;
+	struct task_struct      *dsd_rx_tsk;
 };
 
 static inline void input_queue_head_incr(struct softnet_data *sd)
@@ -2709,6 +2754,9 @@ enum {
 	NETIF_MSG_PKTDATA	= 0x1000,
 	NETIF_MSG_HW		= 0x2000,
 	NETIF_MSG_WOL		= 0x4000,
+#ifdef CONFIG_MCST
+	NETIF_MSG_1588		= 0x8000,
+#endif
 };
 
 #define netif_msg_drv(p)	((p)->msg_enable & NETIF_MSG_DRV)
@@ -2726,6 +2774,11 @@ enum {
 #define netif_msg_pktdata(p)	((p)->msg_enable & NETIF_MSG_PKTDATA)
 #define netif_msg_hw(p)		((p)->msg_enable & NETIF_MSG_HW)
 #define netif_msg_wol(p)	((p)->msg_enable & NETIF_MSG_WOL)
+#ifdef CONFIG_MCST
+#define netif_msg_1588(p)	((p)->msg_enable & NETIF_MSG_1588)
+#else
+#define netif_msg_1588(p)	(0)
+#endif
 
 static inline u32 netif_msg_init(int debug_value, int default_msg_enable_bits)
 {

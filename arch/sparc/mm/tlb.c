@@ -25,6 +25,9 @@ void flush_tlb_pending(void)
 	struct tlb_batch *tb = &get_cpu_var(tlb_batch);
 	struct mm_struct *mm = tb->mm;
 
+#ifdef CONFIG_WATCH_PREEMPT
+	__get_cpu_var(nowatch_set) |= NOPWATCH_EXITMM;
+#endif
 	if (!tb->tlb_nr)
 		goto out;
 
@@ -128,7 +131,7 @@ void tlb_batch_add(struct mm_struct *mm, unsigned long vaddr,
 	}
 
 no_cache_flush:
-	if (!fullmm)
+	if (!fullmm && !mm->context.is_exit_mmap)
 		tlb_batch_add_one(mm, vaddr, pte_exec(orig));
 }
 

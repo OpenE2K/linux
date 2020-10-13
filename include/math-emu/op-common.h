@@ -685,7 +685,7 @@ do {									\
 	    else								\
 	      {									\
 		r = 0;								\
-		if (!X##_s)							\
+		if (X##_s)							\
 		  r = ~r;							\
 	      }									\
 	    FP_SET_EXCEPTION(FP_EX_INVALID);					\
@@ -715,72 +715,6 @@ do {									\
 	      r = -r;								\
 	  }									\
 	break;									\
-      }										\
-  } while (0)
-
-#define _FP_TO_INT_ROUND(fs, wc, r, X, rsize, rsigned)				\
-  do {										\
-    r = 0;									\
-    switch (X##_c)								\
-      {										\
-      case FP_CLS_NORMAL:							\
-	if (X##_e >= _FP_FRACBITS_##fs - 1)					\
-	  {									\
-	    if (X##_e < rsize - 1 + _FP_WFRACBITS_##fs)				\
-	      {									\
-		if (X##_e >= _FP_WFRACBITS_##fs - 1)				\
-		  {								\
-		    _FP_FRAC_ASSEMBLE_##wc(r, X, rsize);			\
-		    r <<= X##_e - _FP_WFRACBITS_##fs + 1;			\
-		  }								\
-		else								\
-		  {								\
-		    _FP_FRAC_SRL_##wc(X, _FP_WORKBITS - X##_e			\
-				      + _FP_FRACBITS_##fs - 1);			\
-		    _FP_FRAC_ASSEMBLE_##wc(r, X, rsize);			\
-		  }								\
-	      }									\
-	  }									\
-	else									\
-	  {									\
-	    int _lz0, _lz1;							\
-	    if (X##_e <= -_FP_WORKBITS - 1)					\
-	      _FP_FRAC_SET_##wc(X, _FP_MINFRAC_##wc);				\
-	    else								\
-	      _FP_FRAC_SRS_##wc(X, _FP_FRACBITS_##fs - 1 - X##_e,		\
-				_FP_WFRACBITS_##fs);				\
-	    _FP_FRAC_CLZ_##wc(_lz0, X);						\
-	    _FP_ROUND(wc, X);							\
-	    _FP_FRAC_CLZ_##wc(_lz1, X);						\
-	    if (_lz1 < _lz0)							\
-	      X##_e++; /* For overflow detection.  */				\
-	    _FP_FRAC_SRL_##wc(X, _FP_WORKBITS);					\
-	    _FP_FRAC_ASSEMBLE_##wc(r, X, rsize);				\
-	  }									\
-	if (rsigned && X##_s)							\
-	  r = -r;								\
-	if (X##_e >= rsize - (rsigned > 0 || X##_s)				\
-	    || (!rsigned && X##_s))						\
-	  {	/* overflow */							\
-	  case FP_CLS_NAN:                                                      \
-	  case FP_CLS_INF:							\
-	    if (!rsigned)							\
-	      {									\
-		r = 0;								\
-		if (!X##_s)							\
-		  r = ~r;							\
-	      }									\
-	    else if (rsigned != 2)						\
-	      {									\
-		r = 1;								\
-		r <<= rsize - 1;						\
-		r -= 1 - X##_s;							\
-	      }									\
-	    FP_SET_EXCEPTION(FP_EX_INVALID);					\
-	  }									\
-	break;									\
-      case FP_CLS_ZERO:								\
-        break;									\
       }										\
   } while (0)
 

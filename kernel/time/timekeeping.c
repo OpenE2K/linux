@@ -33,7 +33,10 @@
 
 static struct timekeeper timekeeper;
 static DEFINE_RAW_SPINLOCK(timekeeper_lock);
-static seqcount_t timekeeper_seq;
+#ifndef CONFIG_E2K
+static
+#endif
+seqcount_t timekeeper_seq;
 static struct timekeeper shadow_timekeeper;
 
 /* flag for if timekeeping is suspended */
@@ -334,6 +337,28 @@ void getnstimeofday(struct timespec *ts)
 	WARN_ON(__getnstimeofday(ts));
 }
 EXPORT_SYMBOL(getnstimeofday);
+
+#ifdef CONFIG_MCST
+s64 getns64timeofday()
+{
+	struct timekeeper *tk = &timekeeper;
+	unsigned long seq;
+	s64 nsecs = 0;
+
+	do {
+		seq = read_seqcount_begin(&timekeeper_seq);
+
+		nsecs = tk->xtime_sec * NSEC_PER_SEC +
+			timekeeping_get_ns(tk);
+
+	} while (read_seqcount_retry(&timekeeper_seq, seq));
+
+	if (unlikely(timekeeping_suspended))
+		WARN_ON(1);
+	return nsecs;
+}
+EXPORT_SYMBOL(getns64timeofday);
+#endif
 
 ktime_t ktime_get(void)
 {
@@ -1725,6 +1750,22 @@ void hardpps(const struct timespec *phase_ts, const struct timespec *raw_ts)
 	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
 }
 EXPORT_SYMBOL(hardpps);
+#endif
+
+#ifdef CONFIG_MCST
+extern void update_tmstatus_for_ntp(int *status, int reset, int set)
+{
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&timekeeper_lock, flags);
+	write_seqcount_begin(&timekeeper_seq);
+
+	*status &= ~reset;
+	*status |= set;
+
+	write_seqcount_end(&timekeeper_seq);
+	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
+}
 #endif
 
 /**

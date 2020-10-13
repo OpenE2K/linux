@@ -5930,7 +5930,11 @@ static struct sctp_bind_bucket *sctp_bucket_create(
 
 static long sctp_get_port_local(struct sock *sk, union sctp_addr *addr)
 {
+#ifdef CONFIG_MCST
+	struct sctp_bind_hashbucket *uninitialized_var(head); /* hash list */
+#else
 	struct sctp_bind_hashbucket *head; /* hash list */
+#endif
 	struct sctp_bind_bucket *pp;
 	unsigned short snum;
 	int ret;

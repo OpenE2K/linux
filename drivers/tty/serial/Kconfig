@@ -593,7 +593,7 @@ config SERIAL_UARTLITE_CONSOLE
 
 config SERIAL_SUNCORE
 	bool
-	depends on SPARC
+	depends on SPARC && !E90S
 	select SERIAL_CORE
 	select SERIAL_CORE_CONSOLE
 	default y
@@ -1475,6 +1475,26 @@ config SERIAL_RP2_NR_UARTS
 	help
 	  If multiple cards are present, the default limit of 32 ports may
 	  need to be increased.
+
+config LMS_CONSOLE
+	bool "LMS console port support"
+	depends on (E2K || E90S)
+	select SERIAL_CORE
+	select SERIAL_CORE_CONSOLE
+	default n
+
+config SERIAL_L_ZILOG
+	tristate "Am85c30 Elbrus and compatible serial support"
+	depends on (E2K || E90S)
+	select SERIAL_CORE
+	select SERIAL_PRINTK
+	select SERIAL_AM85C30_CONSOLE
+	default y
+
+config SERIAL_L_ZILOG_CONSOLE
+	bool "Console on Am85c30 Elbrus and compatible serial port"
+	depends on SERIAL_L_ZILOG=y
+	select SERIAL_CORE_CONSOLE
 
 config SERIAL_FSL_LPUART
 	tristate "Freescale lpuart serial port support"

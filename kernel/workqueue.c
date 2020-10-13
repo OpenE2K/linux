@@ -50,7 +50,9 @@
 #include <linux/uaccess.h>
 #include <linux/locallock.h>
 #include <linux/delay.h>
-
+#ifdef CONFIG_MCST_RT
+#include <uapi/linux/mcst_rt.h>
+#endif
 #include "workqueue_internal.h"
 
 enum {
@@ -2004,6 +2006,10 @@ __acquires(&pool->lock)
 {
 	if (!need_to_create_worker(pool))
 		return;
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_NO_FORK)
+		return;
+#endif
 restart:
 	spin_unlock_irq(&pool->lock);
 

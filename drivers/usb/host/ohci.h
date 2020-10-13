@@ -252,6 +252,12 @@ struct ohci_regs {
 #define OHCI_CTRL_RWC	(1 << 9)	/* remote wakeup connected */
 #define OHCI_CTRL_RWE	(1 << 10)	/* remote wakeup enable */
 
+#if defined(CONFIG_E2K)
+#define OHCI_CTRL_DFLT	(OHCI_CTRL_RWC | OHCI_CTRL_IR)
+#else
+#define OHCI_CTRL_DFLT	OHCI_CTRL_RWC
+#endif
+
 /* pre-shifted values for HCFS */
 #	define OHCI_USB_RESET	(0 << 6)
 #	define OHCI_USB_RESUME	(1 << 6)

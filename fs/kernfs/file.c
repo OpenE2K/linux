@@ -14,6 +14,10 @@
 #include <linux/poll.h>
 #include <linux/pagemap.h>
 #include <linux/sched.h>
+#if defined(CONFIG_MCST) && defined(CONFIG_GPIO_SYSFS) && \
+	(defined(CONFIG_E90S) || defined(CONFIG_E2K))
+#include <asm-generic/gpio.h>
+#endif
 
 #include "kernfs-internal.h"
 
@@ -798,6 +802,13 @@ const struct file_operations kernfs_file_fops = {
 	.open		= kernfs_fop_open,
 	.release	= kernfs_fop_release,
 	.poll		= kernfs_fop_poll,
+#if defined(CONFIG_MCST) && defined(CONFIG_GPIO_SYSFS) && \
+    (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= gpio_ioctl,
+#endif
+	.unlocked_ioctl	= gpio_ioctl,
+#endif
 };
 
 /**

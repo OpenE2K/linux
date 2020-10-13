@@ -18,3 +18,10 @@ obj-$(CONFIG_ARM_AT91_CPUIDLE)          += cpuidle-at91.o
 # POWERPC drivers
 obj-$(CONFIG_PSERIES_CPUIDLE)		+= cpuidle-pseries.o
 obj-$(CONFIG_POWERNV_CPUIDLE)		+= cpuidle-powernv.o
+
+###############################################################################
+# E2K drivers
+
+CFLAGS_cpuidle-e2k.o                       = $(CFLAGS_E3S)
+obj-$(CONFIG_E2K_CPUIDLE)		+= cpuidle-e2k.o
+

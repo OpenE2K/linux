@@ -260,6 +260,31 @@ rt_mutex_dequeue_pi(struct task_struct *task, struct rt_mutex_waiter *waiter)
  * Return task->normal_prio when the waiter tree is empty or when
  * the waiter is not allowed to do priority boosting
  */
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+int el_posix_getprio(struct task_struct *task, const int has_pi_waiters)
+{
+	int prio = task->normal_prio;
+
+	if (unlikely(task_has_pi_waiters(task))) {
+		int pi_prio = task_top_pi_waiter(task)->prio;
+
+		prio = min(prio, pi_prio);
+	}
+
+	if (unlikely(has_pi_waiters)) {
+		int pi_prio = plist_first(&task->el_posix.pi_waiters)->prio;
+
+		prio = min(prio, pi_prio);
+	}
+
+	return prio;
+}
+int rt_mutex_getprio(struct task_struct *task)
+{
+	return el_posix_getprio(task,
+				!plist_head_empty(&task->el_posix.pi_waiters));
+}
+#else
 int rt_mutex_getprio(struct task_struct *task)
 {
 	if (likely(!task_has_pi_waiters(task)))
@@ -268,6 +293,7 @@ int rt_mutex_getprio(struct task_struct *task)
 	return min(task_top_pi_waiter(task)->prio,
 		   task->normal_prio);
 }
+#endif
 
 struct task_struct *rt_mutex_get_top_task(struct task_struct *task)
 {
@@ -283,10 +309,27 @@ struct task_struct *rt_mutex_get_top_task(struct task_struct *task)
  */
 int rt_mutex_check_prio(struct task_struct *task, int newprio)
 {
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	int prio;
+#endif
+
 	if (!task_has_pi_waiters(task))
 		return 0;
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	prio = task_top_pi_waiter(task)->task->prio;
+
+	if (!plist_head_empty(&task->el_posix.pi_waiters)) {
+		int pi_prio = plist_first(&task->el_posix.pi_waiters)->prio;
+
+		if (rt_prio(pi_prio))
+			prio = min(prio, pi_prio);
+	}
+
+	return prio <= newprio;
+#else
 	return task_top_pi_waiter(task)->task->prio <= newprio;
+#endif
 }
 
 /*
@@ -1213,8 +1256,15 @@ static int adaptive_wait(struct rt_mutex *lock,
 }
 #endif
 
+#ifdef CONFIG_MCST_RT
+/* irq is disabled when pi_lock is called.
+ * pi_unlock should not enable irq */
+# define pi_lock(lock)                  raw_spin_lock(lock)
+# define pi_unlock(lock)                raw_spin_unlock(lock)
+#else
 # define pi_lock(lock)			raw_spin_lock_irq(lock)
 # define pi_unlock(lock)		raw_spin_unlock_irq(lock)
+#endif
 
 /*
  * Slow path lock function spin_lock style: this variant is very
@@ -1228,13 +1278,27 @@ static void  noinline __sched rt_spin_lock_slowlock(struct rt_mutex *lock)
 	struct task_struct *lock_owner, *self = current;
 	struct rt_mutex_waiter waiter, *top_waiter;
 	int ret;
+#ifdef CONFIG_MCST_RT
+	unsigned long flags;
+#endif
 
 	rt_mutex_init_waiter(&waiter, true);
 
+#ifdef CONFIG_MCST_RT
+        /* If irq is enabled then wakeup by driver is long
+	 * if driver have started under locked wait_lock.
+	 * Fix it by disabling of irq. */
+	raw_spin_lock_irqsave(&lock->wait_lock, flags);
+#else
 	raw_spin_lock(&lock->wait_lock);
+#endif
 
 	if (__try_to_take_rt_mutex(lock, self, NULL, STEAL_LATERAL)) {
+#ifdef CONFIG_MCST_RT
+		raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+#else
 		raw_spin_unlock(&lock->wait_lock);
+#endif
 		return;
 	}
 
@@ -1262,14 +1326,22 @@ static void  noinline __sched rt_spin_lock_slowlock(struct rt_mutex *lock)
 		top_waiter = rt_mutex_top_waiter(lock);
 		lock_owner = rt_mutex_owner(lock);
 
+#ifdef CONFIG_MCST_RT
+		raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+#else
 		raw_spin_unlock(&lock->wait_lock);
+#endif
 
 		debug_rt_mutex_print_deadlock(&waiter);
 
 		if (top_waiter != &waiter || adaptive_wait(lock, lock_owner))
 			schedule_rt_mutex(lock);
 
+#ifdef CONFIG_MCST_RT
+		raw_spin_lock_irqsave(&lock->wait_lock, flags);
+#else
 		raw_spin_lock(&lock->wait_lock);
+#endif
 
 		pi_lock(&self->pi_lock);
 		__set_current_state(TASK_UNINTERRUPTIBLE);
@@ -1297,7 +1369,11 @@ static void  noinline __sched rt_spin_lock_slowlock(struct rt_mutex *lock)
 	BUG_ON(rt_mutex_has_waiters(lock) && &waiter == rt_mutex_top_waiter(lock));
 	BUG_ON(!RB_EMPTY_NODE(&waiter.tree_entry));
 
+#ifdef CONFIG_MCST_RT
+	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+#else
 	raw_spin_unlock(&lock->wait_lock);
+#endif
 
 	debug_rt_mutex_free_waiter(&waiter);
 }
@@ -1327,8 +1403,31 @@ static void __sched __rt_spin_lock_slowunlock(struct rt_mutex *lock)
 
 static void  noinline __sched rt_spin_lock_slowunlock(struct rt_mutex *lock)
 {
+#ifdef CONFIG_MCST_RT
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&lock->wait_lock, flags);
+
+	debug_rt_mutex_unlock(lock);
+
+	rt_mutex_deadlock_account_unlock(current);
+
+	if (!rt_mutex_has_waiters(lock)) {
+		lock->owner = NULL;
+		raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+		return;
+	}
+
+	wakeup_next_waiter(lock);
+
+	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+
+	/* Undo pi boosting.when necessary */
+	rt_mutex_adjust_prio(current);
+#else
 	raw_spin_lock(&lock->wait_lock);
 	__rt_spin_lock_slowunlock(lock);
+#endif
 }
 
 static void  noinline __sched rt_spin_lock_slowunlock_hirq(struct rt_mutex *lock)
@@ -1345,6 +1444,9 @@ static void  noinline __sched rt_spin_lock_slowunlock_hirq(struct rt_mutex *lock
 void __lockfunc rt_spin_lock(spinlock_t *lock)
 {
 	rt_spin_lock_fastlock(&lock->lock, rt_spin_lock_slowlock);
+#ifdef CONFIG_MCST
+	lock->lock.mux_ip = _RET_IP_;
+#endif
 	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
 }
 EXPORT_SYMBOL(rt_spin_lock);
@@ -1359,6 +1461,9 @@ EXPORT_SYMBOL(__rt_spin_lock);
 void __lockfunc rt_spin_lock_nested(spinlock_t *lock, int subclass)
 {
 	rt_spin_lock_fastlock(&lock->lock, rt_spin_lock_slowlock);
+#ifdef CONFIG_MCST
+	lock->lock.mux_ip = _RET_IP_;
+#endif
 	spin_acquire(&lock->dep_map, subclass, 0, _RET_IP_);
 }
 EXPORT_SYMBOL(rt_spin_lock_nested);
@@ -1406,8 +1511,12 @@ int __lockfunc rt_spin_trylock(spinlock_t *lock)
 {
 	int ret = rt_mutex_trylock(&lock->lock);
 
-	if (ret)
+	if (ret) {
+#ifdef CONFIG_MCST
+		lock->lock.mux_ip = _RET_IP_;
+#endif
 		spin_acquire(&lock->dep_map, 0, 1, _RET_IP_);
+	}
 	return ret;
 }
 EXPORT_SYMBOL(rt_spin_trylock);
@@ -1420,6 +1529,9 @@ int __lockfunc rt_spin_trylock_bh(spinlock_t *lock)
 	ret = rt_mutex_trylock(&lock->lock);
 	if (ret) {
 		migrate_disable();
+#ifdef CONFIG_MCST
+		lock->lock.mux_ip = _RET_IP_;
+#endif
 		spin_acquire(&lock->dep_map, 0, 1, _RET_IP_);
 	} else
 		local_bh_enable();
@@ -1435,6 +1547,9 @@ int __lockfunc rt_spin_trylock_irqsave(spinlock_t *lock, unsigned long *flags)
 	ret = rt_mutex_trylock(&lock->lock);
 	if (ret) {
 		migrate_disable();
+#ifdef CONFIG_MCST
+		lock->lock.mux_ip = _RET_IP_;
+#endif
 		spin_acquire(&lock->dep_map, 0, 1, _RET_IP_);
 	}
 	return ret;
@@ -2295,4 +2410,16 @@ void __sched ww_mutex_unlock(struct ww_mutex *lock)
 	rt_mutex_unlock(&lock->base.lock);
 }
 EXPORT_SYMBOL(ww_mutex_unlock);
+#endif
+
+#ifdef CONFIG_MCST
+struct task_struct *get_rtmutex_owner(struct rt_mutex *lock)
+{
+	return rt_mutex_owner(lock);
+}
+
+void *get_rtmutex_ip(struct rt_mutex *lock)
+{
+	return (void *)(lock->mux_ip);
+}
 #endif

@@ -79,9 +79,37 @@
 #define __NR_getegid             50 /* SunOS calls getgid()                        */
 #define __NR_acct                51 /* Common                                      */
 #ifdef __32bit_syscall_numbers__
+#ifdef CONFIG_MAC_ 
+#define __NR_macctl              52 /* MCST trust linux                            */ 
+#define _syscall3(type,name,type1,arg1,type2,arg2,type3,arg3) \
+type name(type1 arg1,type2 arg2,type3 arg3) \
+{ \
+long __res; \
+register long __g1 __asm__ ("g1") = __NR_##name; \
+register long __o0 __asm__ ("o0") = (long)(arg1); \
+register long __o1 __asm__ ("o1") = (long)(arg2); \
+register long __o2 __asm__ ("o2") = (long)(arg3); \
+__asm__ __volatile__ ("t 0x10\n\t" \
+			"bcc 1f\n\t" \
+			"mov %%o0, %0\n\t" \
+			"sub %%g0, %%o0, %0\n\t" \
+			"1:\n\t" \
+			: "=r" (__res), "=&r" (__o0) \
+			: "1" (__o0), "r" (__o1), "r" (__o2), "r" (__g1) \
+			: "cc"); \
+if (__res < -255 || __res>=0) \
+	return (type) __res; \
+errno = -__res; \
+return -1; \
+}
+#endif
 #define __NR_getgid32            53 /* Linux sparc32 specific                      */
 #else
-#define __NR_memory_ordering	 52 /* Linux Specific				   */
+#ifdef CONFIG_MAC_
+#define __NR_macctl              52 /* MCST trust linux                            */
+#else
+#define __NR_memory_ordering     52 /* Linux Specific                              */
+#endif
 #endif
 #define __NR_ioctl               54 /* Common                                      */
 #define __NR_reboot              55 /* Common                                      */
@@ -411,7 +439,13 @@
 #define __NR_sched_setattr	343
 #define __NR_sched_getattr	344
 
-#define NR_syscalls		345
+#if defined(CONFIG_MCST) || defined(CONFIG_HAVE_EL_POSIX_SYSCALL)
+#define __NR_el_posix		498
+#define __NR_atomic             499     /* For v8 and for compat mode of v9 */
+#define NR_syscalls             500
+#else
+#define NR_syscalls             345
+#endif
 
 /* Bitmask values returned from kern_features system call.  */
 #define KERN_FEATURE_MIXED_MODE_STACK	0x00000001

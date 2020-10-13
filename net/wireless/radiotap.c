@@ -213,7 +213,11 @@ int ieee80211_radiotap_iterator_next(
 {
 	while (1) {
 		int hit = 0;
+#ifdef CONFIG_MCST
+		int pad, align, uninitialized_var(size), subns;
+#else
 		int pad, align, size, subns;
+#endif
 		uint32_t oui;
 
 		/* if no more EXT bits, that's it */

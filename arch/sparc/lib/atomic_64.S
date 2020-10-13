@@ -40,14 +40,38 @@ ENTRY(atomic_sub) /* %o0 = decrement, %o1 = atomic_ptr */
 2:	BACKOFF_SPIN(%o2, %o3, 1b)
 ENDPROC(atomic_sub)
 
+#ifdef	CONFIG_RMO
+	/* On SMP we need to use memory barriers to ensure
+	 * correct memory operation ordering, nop these out
+	 * for uniprocessor.
+	 */
+#ifdef CONFIG_SMP
+
+#define ATOMIC_PRE_BARRIER	membar #StoreLoad | #LoadLoad;
+#define ATOMIC_POST_BARRIER	\
+	membar #StoreLoad | #StoreStore
+
+#else
+#define ATOMIC_PRE_BARRIER
+#define ATOMIC_POST_BARRIER
+#endif
+
+#endif	/* CONFIG_RMO */
+
 ENTRY(atomic_add_ret) /* %o0 = increment, %o1 = atomic_ptr */
 	BACKOFF_SETUP(%o2)
+#ifdef	CONFIG_RMO
+	ATOMIC_PRE_BARRIER
+#endif	/* CONFIG_RMO */
 1:	lduw	[%o1], %g1
 	add	%g1, %o0, %g7
 	cas	[%o1], %g1, %g7
 	cmp	%g1, %g7
 	bne,pn	%icc, BACKOFF_LABEL(2f, 1b)
 	 add	%g1, %o0, %g1
+#ifdef	CONFIG_RMO
+	ATOMIC_POST_BARRIER
+#endif	/* CONFIG_RMO */
 	retl
 	 sra	%g1, 0, %o0
 2:	BACKOFF_SPIN(%o2, %o3, 1b)
@@ -55,12 +79,18 @@ ENDPROC(atomic_add_ret)
 
 ENTRY(atomic_sub_ret) /* %o0 = decrement, %o1 = atomic_ptr */
 	BACKOFF_SETUP(%o2)
+#ifdef	CONFIG_RMO
+	ATOMIC_PRE_BARRIER
+#endif	/* CONFIG_RMO */
 1:	lduw	[%o1], %g1
 	sub	%g1, %o0, %g7
 	cas	[%o1], %g1, %g7
 	cmp	%g1, %g7
 	bne,pn	%icc, BACKOFF_LABEL(2f, 1b)
 	 sub	%g1, %o0, %g1
+#ifdef	CONFIG_RMO
+	ATOMIC_POST_BARRIER
+#endif	/* CONFIG_RMO */
 	retl
 	 sra	%g1, 0, %o0
 2:	BACKOFF_SPIN(%o2, %o3, 1b)
@@ -94,12 +124,18 @@ ENDPROC(atomic64_sub)
 
 ENTRY(atomic64_add_ret) /* %o0 = increment, %o1 = atomic_ptr */
 	BACKOFF_SETUP(%o2)
+#ifdef	CONFIG_RMO
+	ATOMIC_PRE_BARRIER
+#endif	/* CONFIG_RMO */
 1:	ldx	[%o1], %g1
 	add	%g1, %o0, %g7
 	casx	[%o1], %g1, %g7
 	cmp	%g1, %g7
 	bne,pn	%xcc, BACKOFF_LABEL(2f, 1b)
 	 nop
+#ifdef	CONFIG_RMO
+	ATOMIC_POST_BARRIER
+#endif	/* CONFIG_RMO */
 	retl
 	 add	%g1, %o0, %o0
 2:	BACKOFF_SPIN(%o2, %o3, 1b)
@@ -107,12 +143,18 @@ ENDPROC(atomic64_add_ret)
 
 ENTRY(atomic64_sub_ret) /* %o0 = decrement, %o1 = atomic_ptr */
 	BACKOFF_SETUP(%o2)
+#ifdef	CONFIG_RMO
+	ATOMIC_PRE_BARRIER
+#endif	/* CONFIG_RMO */
 1:	ldx	[%o1], %g1
 	sub	%g1, %o0, %g7
 	casx	[%o1], %g1, %g7
 	cmp	%g1, %g7
 	bne,pn	%xcc, BACKOFF_LABEL(2f, 1b)
 	 nop
+#ifdef	CONFIG_RMO
+	ATOMIC_POST_BARRIER
+#endif	/* CONFIG_RMO */
 	retl
 	 sub	%g1, %o0, %o0
 2:	BACKOFF_SPIN(%o2, %o3, 1b)
@@ -120,6 +162,9 @@ ENDPROC(atomic64_sub_ret)
 
 ENTRY(atomic64_dec_if_positive) /* %o0 = atomic_ptr */
 	BACKOFF_SETUP(%o2)
+#ifdef	CONFIG_RMO
+	ATOMIC_PRE_BARRIER
+#endif	/* CONFIG_RMO */
 1:	ldx	[%o0], %g1
 	brlez,pn %g1, 3f
 	 sub	%g1, 1, %g7
@@ -127,6 +172,9 @@ ENTRY(atomic64_dec_if_positive) /* %o0 = atomic_ptr */
 	cmp	%g1, %g7
 	bne,pn	%xcc, BACKOFF_LABEL(2f, 1b)
 	 nop
+#ifdef	CONFIG_RMO
+	ATOMIC_POST_BARRIER
+#endif	/* CONFIG_RMO */
 3:	retl
 	 sub	%g1, 1, %o0
 2:	BACKOFF_SPIN(%o2, %o3, 1b)

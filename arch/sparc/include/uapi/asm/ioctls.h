@@ -118,6 +118,9 @@
 #define TIOCSERSETMULTI 0x545B /* Set multiport config */
 #define TIOCMIWAIT	0x545C /* Wait for change on serial input line(s) */
 #define TIOCGICOUNT	0x545D /* Read serial port inline interrupt counts */
+#ifdef CONFIG_MCST
+#define TIODUMPREGS     0x54F6  /* return array of dev regs */
+#endif
 
 /* Kernel definitions */
 

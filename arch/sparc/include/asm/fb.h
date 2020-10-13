@@ -16,6 +16,7 @@ static inline void fb_pgprotect(struct file *file, struct vm_area_struct *vma,
 
 static inline int fb_is_primary_device(struct fb_info *info)
 {
+#ifndef CONFIG_E90S
 	struct device *dev = info->device;
 	struct device_node *node;
 
@@ -26,7 +27,7 @@ static inline int fb_is_primary_device(struct fb_info *info)
 	if (node &&
 	    node == of_console_device)
 		return 1;
-
+#endif	/*CONFIG_E90S*/
 	return 0;
 }
 

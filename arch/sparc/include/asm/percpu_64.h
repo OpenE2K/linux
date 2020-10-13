@@ -21,4 +21,9 @@ register unsigned long __local_per_cpu_offset asm("g5");
 
 #include <asm-generic/percpu.h>
 
+#if defined CONFIG_E90S
+/* For EARLY_PER_CPU_* definitions */
+# include <asm-l/percpu.h>
+#endif
+
 #endif /* __ARCH_SPARC64_PERCPU__ */

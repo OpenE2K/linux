@@ -253,13 +253,26 @@ static int uncached_access(struct file *file, phys_addr_t addr)
 }
 #endif
 
+#ifdef CONFIG_E2K
+static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+				     unsigned long size, pgprot_t vma_prot,
+				     struct vm_area_struct *vma)
+#else
 static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
 				     unsigned long size, pgprot_t vma_prot)
+#endif
 {
 #ifdef pgprot_noncached
 	phys_addr_t offset = pfn << PAGE_SHIFT;
 
 	if (uncached_access(file, offset))
+#ifdef CONFIG_E2K
+		/* Support for MAP_WRITECOMBINED flag */
+		if (cpu_has(CPU_FEAT_WC_PCI_PREFETCH) &&
+				vma->vm_flags & VM_WRITECOMBINED)
+			return pgprot_writecombine(vma_prot);
+		else
+#endif /* CONFIG_E2K */
 		return pgprot_noncached(vma_prot);
 #endif
 	return vma_prot;
@@ -315,9 +328,16 @@ static int mmap_mem(struct file *file, struct vm_area_struct *vma)
 						&vma->vm_page_prot))
 		return -EINVAL;
 
+#ifdef CONFIG_E2K
+	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
+						 size,
+						 vma->vm_page_prot,
+						 vma);
+#else
 	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
 						 size,
 						 vma->vm_page_prot);
+#endif
 
 	vma->vm_ops = &mmap_mem_ops;
 

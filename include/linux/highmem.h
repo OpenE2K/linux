@@ -255,7 +255,13 @@ static inline void copy_user_highpage(struct page *to, struct page *from,
 
 #endif
 
+/* TODO bug 76795 - remove when fixed */
+#if defined __LCC__ && defined __LCC_MINOR__ && \
+		__LCC__ == 120 && __LCC_MINOR__ <= 5
+static __attribute__((unused)) void copy_highpage(struct page *to, struct page *from)
+#else
 static inline void copy_highpage(struct page *to, struct page *from)
+#endif
 {
 	char *vfrom, *vto;
 

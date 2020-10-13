@@ -13,8 +13,10 @@
 #include <linux/log2.h>
 #include <linux/spinlock_types.h>
 
+#ifndef CONFIG_E2K
 void foo(void)
 {
+#endif
 	/* The enum constants to put into include/generated/bounds.h */
 	DEFINE(NR_PAGEFLAGS, __NR_PAGEFLAGS);
 	DEFINE(MAX_NR_ZONES, __MAX_NR_ZONES);
@@ -24,4 +26,6 @@ void foo(void)
 #endif
 	DEFINE(SPINLOCK_SIZE, sizeof(spinlock_t));
 	/* End of constants */
+#ifndef CONFIG_E2K
 }
+#endif

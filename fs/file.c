@@ -186,7 +186,10 @@ static int expand_fdtable(struct files_struct *files, int nr)
  * expanded and execution may have blocked.
  * The files->file_lock should be held on entry, and will be held on exit.
  */
-static int expand_files(struct files_struct *files, int nr)
+#ifndef	CONFIG_E2K
+static
+#endif
+int expand_files(struct files_struct *files, int nr)
 {
 	struct fdtable *fdt;
 

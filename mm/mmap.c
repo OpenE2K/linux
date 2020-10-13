@@ -43,6 +43,10 @@
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
+
 #include "internal.h"
 
 #ifndef arch_mmap_check
@@ -1235,6 +1239,13 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	vm_flags_t vm_flags;
 
 	*populate = 0;
+#ifdef CONFIG_MCST_RT
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* That is RT task, which done mlockall().
+		 * New mmap() is impossible */
+		return -EFAULT;
+	}
+#endif
 
 	/*
 	 * Does the application expect PROT_READ to imply PROT_EXEC?
@@ -1629,6 +1640,17 @@ out:
 
 	if (file)
 		uprobe_mmap(vma);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (vm_flags & VM_PAGESVALID) {
+		int ret = make_vma_pages_valid(vma, addr, addr + len);
+
+		if (ret) {
+			do_munmap(mm, addr, len);
+			return ret;
+		}
+	}
+#endif
 
 	/*
 	 * New (or expanded) vma always get soft dirty status.
@@ -2186,6 +2208,9 @@ int expand_downwards(struct vm_area_struct *vma,
 				   unsigned long address)
 {
 	int error;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	unsigned long start = vma->vm_start;
+#endif
 
 	/*
 	 * We must make sure the anon_vma is allocated
@@ -2244,6 +2269,10 @@ int expand_downwards(struct vm_area_struct *vma,
 	vma_unlock_anon_vma(vma);
 	khugepaged_enter_vma_merge(vma);
 	validate_mm(vma->vm_mm);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (!error && (vma->vm_flags & VM_PAGESVALID))
+		error = make_vma_pages_valid(vma, address, start);
+#endif
 	return error;
 }
 
@@ -2509,6 +2538,12 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 	if (vma->vm_start >= end)
 		return 0;
 
+#ifdef CONFIG_E2K
+	if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
+			__is_u_hw_stack_range(vma, start, start + len))
+		return -EPERM;
+#endif
+
 	/*
 	 * If we need to split any vma, do it now to save pain later.
 	 *
@@ -2679,6 +2714,16 @@ out:
 	if (flags & VM_LOCKED)
 		mm->locked_vm += (len >> PAGE_SHIFT);
 	vma->vm_flags |= VM_SOFTDIRTY;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (flags & VM_PAGESVALID) {
+		int ret;
+		ret = make_vma_pages_valid(vma, addr, addr + len);
+		if (ret) {
+			do_munmap(mm, addr, len);
+			return ret;
+		}
+	}
+#endif
 	return addr;
 }
 
@@ -2957,6 +3002,14 @@ int install_special_mapping(struct mm_struct *mm,
 	mm->total_vm += len >> PAGE_SHIFT;
 
 	perf_event_mmap(vma);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (vm_flags & VM_PAGESVALID) {
+		int ret = make_vma_pages_valid(vma, addr, addr + len);
+		if (ret)
+			return ret;
+	}
+#endif
 
 	return 0;
 

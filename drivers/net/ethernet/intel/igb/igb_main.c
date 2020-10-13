@@ -937,7 +937,11 @@ static int igb_request_msix(struct igb_adapter *adapter)
 	int i, err = 0, vector = 0, free_vector = 0;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  igb_msix_other, 0, netdev->name, adapter);
+			  igb_msix_other, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+				, netdev->name, adapter);
 	if (err)
 		goto err_out;
 
@@ -961,8 +965,11 @@ static int igb_request_msix(struct igb_adapter *adapter)
 			sprintf(q_vector->name, "%s-unused", netdev->name);
 
 		err = request_irq(adapter->msix_entries[vector].vector,
-				  igb_msix_ring, 0, q_vector->name,
-				  q_vector);
+				  igb_msix_ring, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, q_vector->name, q_vector);
 		if (err)
 			goto err_free;
 	}
@@ -1412,8 +1419,11 @@ static int igb_request_irq(struct igb_adapter *adapter)
 	igb_assign_vector(adapter->q_vector[0], 0);
 
 	if (adapter->flags & IGB_FLAG_HAS_MSI) {
-		err = request_irq(pdev->irq, igb_intr_msi, 0,
-				  netdev->name, adapter);
+		err = request_irq(pdev->irq, igb_intr_msi, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, adapter);
 		if (!err)
 			goto request_done;
 
@@ -1422,8 +1432,11 @@ static int igb_request_irq(struct igb_adapter *adapter)
 		adapter->flags &= ~IGB_FLAG_HAS_MSI;
 	}
 
-	err = request_irq(pdev->irq, igb_intr, IRQF_SHARED,
-			  netdev->name, adapter);
+	err = request_irq(pdev->irq, igb_intr, IRQF_SHARED
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+		, netdev->name, adapter);
 
 	if (err)
 		dev_err(&pdev->dev, "Error %d getting interrupt\n",

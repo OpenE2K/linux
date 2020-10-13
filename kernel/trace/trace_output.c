@@ -749,7 +749,7 @@ int trace_print_context(struct trace_iterator *iter)
 		t = ns2usecs(iter->ts);
 		usec_rem = do_div(t, USEC_PER_SEC);
 		secs = (unsigned long)t;
-		return trace_seq_printf(s, " %5lu.%06lu: ", secs, usec_rem);
+		return trace_seq_printf(s, " %5lu%06lu ", secs, usec_rem);
 	} else
 		return trace_seq_printf(s, " %12llu: ", iter->ts);
 }

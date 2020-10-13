@@ -17,6 +17,8 @@
 
 #include "gpiolib.h"
 
+#include <asm/gpio.h>
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/gpio.h>
 
@@ -2626,6 +2628,54 @@ static int gpiolib_open(struct inode *inode, struct file *file)
 {
 	return seq_open(file, &gpiolib_seq_ops);
 }
+
+#ifdef CONFIG_MCST
+#ifdef CONFIG_GPIO_SYSFS
+#define to_dev(obj) container_of(obj, struct device, kobj)
+#include <asm/uaccess.h>
+#include <linux/kobject.h>
+#include <../fs/sysfs/sysfs.h>
+#include <linux/mcst/gpio.h>
+long
+gpio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	int			 rval = -EINVAL;
+
+	switch (cmd) {
+	    case GPIO_WAIT_INTR: {
+		struct dentry		*dentry = file->f_path.dentry;
+		struct kernfs_node	*kn = dentry->d_fsdata;
+		struct kobject		*kobj = kn->parent->priv;
+		struct device		*dev = to_dev(kobj);
+		const struct gpio_desc	*desc = dev_get_drvdata(dev);
+		struct gpio_chip	*chip = desc->chip;
+		unsigned		 gpio = desc - gpio_desc;
+		gpio_intr_inf_t		intr_inf;
+
+		rval = copy_from_user(&intr_inf, (gpio_intr_inf_t *)arg,
+						sizeof(gpio_intr_inf_t));
+		if (rval != 0) {
+			pr_err("GPIO_WAIT_INTR: copy_from_user() error.");
+			return -EFAULT;
+		};
+		rval = chip->wait_irq(chip, gpio - chip->base, &intr_inf);
+		if (rval) {
+			pr_err("GPIO_WAIT_INTR: wait_irq() error=%d.\n", rval);
+			return rval;
+		};
+		rval = copy_to_user((gpio_intr_inf_t *)arg, (void *)&intr_inf,
+						sizeof(gpio_intr_inf_t));
+		if (rval != 0) {
+			pr_err("GPIO_WAIT_INTR: copy_to_user() error.\n");
+			return -EFAULT;
+		};
+	    }
+	}
+	return rval;
+}
+EXPORT_SYMBOL_GPL(gpio_ioctl);
+#endif
+#endif
 
 static const struct file_operations gpiolib_operations = {
 	.owner		= THIS_MODULE,

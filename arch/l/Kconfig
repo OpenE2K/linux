@@ -1,0 +1,245 @@
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+config IOMMU_HELPER
+        bool
+        default y
+
+config HAVE_DMA_ATTRS
+        bool
+        default y
+
+config SWIOTLB
+        bool
+        default y
+	depends on E2K
+
+menu "Elbrus Architecture Linux Kernel Configuration"
+
+menu "Boot/prom console support"
+
+config SERIAL_PRINTK
+	bool "dump_printk() support"
+	depends on E2K || E90S
+	default y
+	help
+	  dump_printk() outputs directly to serial port bypassing all
+	  buffers and locks. It is useful for hardware debugging.
+
+	  Only two devices are supported currently: ns16550 (== 8550)
+	  and l_zilog (== am85c30).
+
+	  On simulator dump_printk() also outputs to LMS console.
+
+	  Kernel parameter "boot_printk_all" is added. If set, dump_print()
+	  will be used everywhere instead of printk().
+
+config SERIAL_NS16550_CONSOLE
+	bool "Init-time serial console on 8250/16550 and compatible serial port"
+	depends on SERIAL_PRINTK && E2K
+	default y
+	help
+	  Say Y to support simple console based on 8250/16550 serial port.
+
+config SERIAL_AM85C30_CONSOLE
+	bool "Init-time serial console on Am85c30 zilog and compatible devices"
+	depends on SERIAL_PRINTK && (!E2K || SERIAL_AM85C30_BOOT_CONSOLE)
+	default y
+	help
+	  Say Y to support simple console based on Am85c30 serial port.
+
+config EARLY_DUMP_CONSOLE
+	bool "Early serial console based on Am85c30/8250"
+	depends on SERIAL_PRINTK && \
+			(SERIAL_NS16550_CONSOLE || SERIAL_AM85C30_CONSOLE)
+	default y
+	help
+	  Say Y to enable early serial console support.
+	  Useful when debugging kernel boot process.
+
+endmenu # "Boot/prom console support"
+
+config MCST
+	bool
+	default y
+
+config SCLKR_CLOCKSOURCE
+	bool
+	default E2K
+	select CLOCKSOURCE_WATCHDOG
+
+config CLOCKSOURCE_WATCHDOG
+	def_bool y
+
+config CLKR_CLOCKSOURCE
+	bool
+	default E2K || E90S
+
+config CLKR_SYNCHRONIZATION_WARNING
+	bool
+	depends on CLKR_CLOCKSOURCE && SMP
+	default n
+	help
+	  Set to Y to enable warnings about CLKR registers synchronization
+	  across several CPUs.
+
+config CLKR_OFFSET
+	bool
+	depends on CLKR_CLOCKSOURCE && SMP
+	default E2K && RECOVERY || E90S
+	help
+	  Set to Y when different cpus' clock registers have the same
+	  frequency but different initial values. Then per-cpu offset
+	  will be added to each cpu's register value.
+
+config IOHUB_GPIO
+	tristate "IOHUB Gpiolib"
+	depends on GPIOLIB
+	default m
+	help
+	   Gpiolib implementation for Elbrus IOHUB.
+
+config PIC
+	bool "PIC support"
+	depends on E2K
+	default n
+	help
+	  An PIC (Programmable Interrupt Controller) is an old-style
+	  interrupt controllers. If you say Y here kernel will use PIC
+	  only while initialization to service erly time interrupts.
+	  Later after initialization SMP mode, local and IO APICs
+	  kernel will switch all interrupts from PIC to IO-APIC
+	  If you say N (recomended) PIC is not used never and not even
+	  initialized.
+
+config L_X86_64
+	def_bool y
+	depends on L_LOCAL_APIC
+	---help---
+	  This option helps compiling code copied from arch/x86/kernel/apic
+	  with minimal changes to code (renamed X86_64 -> L_X86_64).
+	  Hopefully it will be easier to update the code this way.
+
+config SPARSE_IRQ
+	bool "Support sparse irq numbering"
+	depends on L_LOCAL_APIC
+	default y
+	---help---
+	  This enables support for sparse irqs. This is useful for distro
+	  kernels that want to define a high CONFIG_NR_CPUS value but still
+	  want to have low kernel memory footprint on smaller machines.
+
+	  ( Sparse IRQs can also be beneficial on NUMA boxes, as they spread
+	    out the irq_desc[] array in a more NUMA-friendly way. )
+
+	  If you don't know what to do here, say N.
+
+config NUMA_IRQ_DESC
+	def_bool y
+	depends on SPARSE_IRQ && NUMA
+
+config L_UP_APIC
+	bool
+	depends on !SMP
+	default E2K || E90S
+	---help---
+	  A local APIC (Advanced Programmable Interrupt Controller) is an
+	  integrated interrupt controller in the CPU. If you have a single-CPU
+	  system which has a processor with a local APIC, you can say Y here to
+	  enable and use it. If you say Y here even though your machine doesn't
+	  have a local APIC, then the kernel will still run with no slowdown at
+	  all. The local APIC supports CPU-generated self-interrupts (timer,
+	  performance counters), and the NMI watchdog which detects hard
+	  lockups.
+
+	  If you have a system with several CPUs, you do not need to say Y
+	  here: the local APIC will be used automatically.
+
+config L_UP_IOAPIC
+	bool
+	depends on L_UP_APIC
+	default E2K || E90S
+	---help---
+	  An IO-APIC (I/O Advanced Programmable Interrupt Controller) is an
+	  SMP-capable replacement for PC-style interrupt controllers. Most
+	  SMP systems and many recent uniprocessor systems have one.
+
+	  If you have a single-CPU system with an IO-APIC, you can say Y here
+	  to use it. If you say Y here even though your machine doesn't have
+	  an IO-APIC, then the kernel will still run with no slowdown at all.
+
+config L_LOCAL_APIC
+	def_bool E2K || E90S
+	depends on SMP || L_UP_APIC
+
+config L_IO_APIC
+	def_bool E2K || E90S
+	depends on SMP || L_UP_IOAPIC
+
+config L_SIC_IPLINK_OFF
+	bool "MCST E2S: support for ipcc2 iplinks off"
+	depends on E2K
+	select PROC_FS
+	default y
+	help
+	  Support for IPCC2 iplinks switching off
+
+config L_PMC
+	bool "MCST Power Management Controller"
+	depends on E2K || E90S
+	select CPU_IDLE
+	select CPU_FREQ
+	default y
+	help
+	  Power Management Controller for Izumrud and Processor-2
+
+config I2C_SPI_RESET_CONTROLLER
+	bool "MCST I2C SPI Controller Support"
+	depends on PCI && (E2K || E90S)
+	default y
+	help
+	  Support for MCST I2C SPI Controller
+
+config L_I2C_CONTROLLER
+	tristate "Elbrus I2C Controller"
+	depends on I2C && I2C_SPI_RESET_CONTROLLER
+	default y
+	help
+	  If you say yes to this option, support will be
+	  included for the Elbrus I2C controller that is
+	  part of Elbrus IOHUB.
+
+config L_SPI_CONTROLLER
+	tristate "Elbrus SPI controller"
+	depends on SPI && I2C_SPI_RESET_CONTROLLER
+	default y
+	help
+	  If you say yes to this option, support will be
+	  included for the Elbrus SPI controller that is
+	  part of Elbrus IOHUB.
+
+config I2C_SPI_IRQ
+	bool
+	depends on L_SPI_CONTROLLER || L_I2C_CONTROLLER
+	default n
+
+config IPE2ST_POWER
+	tristate "Elbrus IPE2-ST Power Source"
+	depends on E2K && L_I2C_CONTROLLER && GPIO_PCA953X && ISL22317
+	default y
+	help
+	   If you say yes to this option, support will be included for the
+	   Elbrus IPE2-ST Power Source. IPE2-ST uses GPIO_PCA953x and ISL22317
+	   by modprobing them from /etc.
+
+config ACPI_L_SPMC
+	tristate "Processor-8 SPMC Controller (SCI, PM Timer, sleep states)"
+	default m
+	help
+	   If you say yes to this option, support will be
+	   included for the Processor-8 SPMC Controller (SCI, PM Timer,
+	   sleep states) that is part of KPI-2. By default it is module
+	   named spmc.ko.
+
+endmenu # "Elbrus Architecture Linux Kernel Configuration"

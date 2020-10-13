@@ -37,6 +37,10 @@ extern int sparc64_multi_core;
 extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 
+#if defined(CONFIG_E90S) && defined(CONFIG_SMP)
+extern void smp_show_backtrace_all_cpus(void);
+#endif
+
 /*
  *	General functions that each host system must provide.
  */

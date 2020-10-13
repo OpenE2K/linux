@@ -33,18 +33,37 @@ void btrfs_hash_exit(void)
 
 u32 btrfs_crc32c(u32 crc, const void *address, unsigned int length)
 {
+#if defined(CONFIG_MCST)
+	SHASH_DESC_ON_STACK(shash, tfm);
+	u32 *ctx = (u32 *)shash_desc_ctx(shash);
+#else
 	struct {
 		struct shash_desc shash;
 		char ctx[crypto_shash_descsize(tfm)];
 	} desc;
+#endif
 	int err;
 
+#if defined(CONFIG_MCST)
+	shash->tfm = tfm;
+	shash->flags = 0;
+	*ctx = crc;
+#else
 	desc.shash.tfm = tfm;
 	desc.shash.flags = 0;
 	*(u32 *)desc.ctx = crc;
+#endif
 
+#if defined(CONFIG_MCST)
+	err = crypto_shash_update(shash, address, length);
+#else
 	err = crypto_shash_update(&desc.shash, address, length);
+#endif
 	BUG_ON(err);
 
+#if defined(CONFIG_MCST)
+	return *ctx;
+#else
 	return *(u32 *)desc.ctx;
+#endif
 }

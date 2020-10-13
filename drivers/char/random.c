@@ -772,7 +772,23 @@ static void add_timer_randomness(struct timer_rand_state *state, unsigned num)
 	} sample;
 	long delta, delta2, delta3;
 
+#if (defined CONFIG_E2K || defined CONFIG_E90S) && CONFIG_HZ != 1000
+	/* Check that cpu_freq_hz is initialized */
+	WARN_ON_ONCE((s64) cpu_freq_hz < 1000000);
+	/*
+	 * Using jiffies at HZ=1000 for enthropy estimation is
+	 * already pessimistic, and at HZ==100 it is so pessimistic
+	 * that we barely have any bytes in /dev/random pool at all.
+	 * Here we fake HZ==1000 so that the estimation gives us a few
+	 * bits of enthropy. "The Linux Pseudorandom Number Generator
+	 * Revisited" suggests that this should be OK for architectures
+	 * with working get_cycles().
+	 */
+	sample.jiffies = div64_u64(get_cycles() * MSEC_PER_SEC,
+				   (u64) cpu_freq_hz);
+#else
 	sample.jiffies = jiffies;
+#endif
 	sample.cycles = random_get_entropy();
 	sample.num = num;
 	r = nonblocking_pool.initialized ? &input_pool : &nonblocking_pool;

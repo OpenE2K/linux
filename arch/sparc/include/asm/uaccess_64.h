@@ -270,6 +270,18 @@ extern unsigned long compute_effective_address(struct pt_regs *,
 					       unsigned int insn,
 					       unsigned int rd);
 
+#if	defined(CONFIG_E90S) && defined(CONFIG_SERIAL_PRINTK)
+#include <asm/console.h>
+#define one_char_to_shadow_console(c)	do {				\
+	if(likely(serial_console_opts)) {				\
+		if (c == '\n') {           				\
+	        	serial_console_opts->serial_putc('\r');		\
+		}							\
+        	serial_console_opts->serial_putc(c);			\
+	}								\
+	} while(0)
+#endif
+
 #endif  /* __ASSEMBLY__ */
 
 #endif /* _ASM_UACCESS_H */

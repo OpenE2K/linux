@@ -213,7 +213,18 @@ static struct dma_page *pool_alloc_page(struct dma_pool *pool, gfp_t mem_flags)
 {
 	struct dma_page *page;
 
+#ifdef CONFIG_MCST
+	/*
+	 * When we alloc dma pool in dma_pool_create(), we do it on
+	 * device's node with kmalloc_node() in dma_pool_create() function.
+	 * But when we alloc page in pool, we alloc dma page descriptor with
+	 * kmalloc() in pool_alloc_page() function. Using kmalloc_node()
+	 * instead of using kmalloc() here is better.
+	 */
+	page = kmalloc_node(sizeof(*page), mem_flags, dev_to_node(pool->dev));
+#else
 	page = kmalloc(sizeof(*page), mem_flags);
+#endif
 	if (!page)
 		return NULL;
 	page->vaddr = dma_alloc_coherent(pool->dev, pool->allocation,

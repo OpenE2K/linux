@@ -23,7 +23,9 @@
 #include <net/pkt_sched.h>
 
 static int zero = 0;
+#ifndef CONFIG_MCST
 static int one = 1;
+#endif
 static int ushort_max = USHRT_MAX;
 static int min_sndbuf = SOCK_MIN_SNDBUF;
 static int min_rcvbuf = SOCK_MIN_RCVBUF;

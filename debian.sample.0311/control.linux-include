@@ -1,0 +1,9 @@
+Package: linux-include
+Source: linux-xxLOCALVERSIONxx
+Version: xxFULLLOCALVERSIONxx
+Architecture: xxARCHPKGxx
+Maintainer: MCST Kernel Mainteiners <os@mcst.ru>
+Provides: linux-include
+Section: kernel
+Priority: optional
+Description: Header files related to Linux kernel. Version xxLOCALVERSIONxx

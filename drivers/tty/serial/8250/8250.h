@@ -186,3 +186,7 @@ static inline int serial8250_request_dma(struct uart_8250_port *p)
 }
 static inline void serial8250_release_dma(struct uart_8250_port *p) { }
 #endif
+
+#ifdef CONFIG_MCST
+void serial8250_get_reg( int *major , int * minor);
+#endif

@@ -381,7 +381,11 @@ void __init tick_nohz_init(void)
 /*
  * NO HZ enabled ?
  */
+#ifdef CONFIG_MCST
+int tick_nohz_enabled __read_mostly  = 1;
+#else
 static int tick_nohz_enabled __read_mostly  = 1;
+#endif
 int tick_nohz_active  __read_mostly;
 /*
  * Enable / Disable tickless mode
@@ -766,6 +770,11 @@ static void __tick_nohz_idle_enter(struct tick_sched *ts)
 
 	now = tick_nohz_start_idle(ts);
 
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_HZ_RT)
+		/* can not stop idle */
+		return;
+#endif
 	if (can_stop_idle_tick(cpu, ts)) {
 		int was_stopped = ts->tick_stopped;
 
@@ -1087,9 +1096,13 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 	 * Do not call, when we are not in irq context and have
 	 * no valid regs pointer
 	 */
-	if (regs)
+#ifdef CONFIG_MCST_RT
+	if (hardirq_count() && regs) { /* rt bug if set_irq_regs wasn't made */
+#else
+	if (regs) {
+#endif
 		tick_sched_handle(ts, regs);
-
+	}
 	hrtimer_forward(timer, now, tick_period);
 
 	return HRTIMER_RESTART;

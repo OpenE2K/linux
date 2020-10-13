@@ -247,7 +247,12 @@ recalibrate:
 	return lpj;
 }
 
+#ifdef CONFIG_E2K
+/* On e2k calibrate_delay() is called simultaneously for several CPUs */
+DEFINE_PER_CPU(unsigned long, cpu_loops_per_jiffy) = { 0 };
+#else
 static DEFINE_PER_CPU(unsigned long, cpu_loops_per_jiffy) = { 0 };
+#endif
 
 /*
  * Check if cpu calibration delay is already known. For example,

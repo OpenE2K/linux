@@ -42,7 +42,9 @@
 #ifdef CONFIG_SPARC
 #include <linux/sunserialcore.h>
 #endif
-
+#ifdef CONFIG_E2K
+#include <asm/e2k.h>
+#endif
 #include <asm/io.h>
 #include <asm/irq.h>
 
@@ -830,6 +832,7 @@ static void autoconfig_8250(struct uart_8250_port *up)
 
 	if (status1 == 0xa5 && status2 == 0x5a)
 		up->port.type = PORT_16450;
+printk("autoconfig_8250: port->type = %d\n", up->port.type);
 }
 
 static int broken_efr(struct uart_8250_port *up)
@@ -1065,8 +1068,21 @@ static void autoconfig(struct uart_8250_port *up, unsigned int probeflags)
 	if (!port->iobase && !port->mapbase && !port->membase)
 		return;
 
+#ifdef CONFIG_E90S
+	/* mpkm support. weerf@mcst.ru */
+	DEBUG_AUTOCONF("ttyM%d: autoconf (0x%04x, 0x%p): ",
+		serial_index(port), port->iobase, port->membase);
+#elif defined (CONFIG_E2K)
+	if (machine_id != MACHINE_ID_E3M && machine_id != MACHINE_ID_E3M_LMS)
+		DEBUG_AUTOCONF("ttyM%d: autoconf (0x%04x, 0x%p): ",
+			port->line, port->iobase, port->membase);
+	else
+		DEBUG_AUTOCONF("ttyS%d: autoconf (0x%04x, 0x%p): ",
+			port->line, port->iobase, port->membase);
+#else
 	DEBUG_AUTOCONF("ttyS%d: autoconf (0x%04lx, 0x%p): ",
 		       serial_index(port), port->iobase, port->membase);
+#endif
 
 	/*
 	 * We really do need global IRQs disabled here - we're going to
@@ -1157,7 +1173,6 @@ static void autoconfig(struct uart_8250_port *up, unsigned int probeflags)
 
 	serial_out(up, UART_FCR, UART_FCR_ENABLE_FIFO);
 	scratch = serial_in(up, UART_IIR) >> 6;
-
 	switch (scratch) {
 	case 0:
 		autoconfig_8250(up);
@@ -2809,7 +2824,9 @@ static void __init serial8250_isa_init_ports(void)
 
 	if (share_irqs)
 		irqflag = IRQF_SHARED;
-
+#ifdef CONFIG_E2K
+	if (IS_MACHINE_E3M)
+#endif
 	for (i = 0, up = serial8250_ports;
 	     i < ARRAY_SIZE(old_serial_port) && i < nr_uarts;
 	     i++, up++) {
@@ -2961,21 +2978,57 @@ static int serial8250_console_early_setup(void)
 }
 
 static struct console serial8250_console = {
+#ifdef CONFIG_E90S
+	/* mpkm support. weerf@mcst.ru */
+	.name		= "ttyM",
+#else
 	.name		= "ttyS",
+#endif
 	.write		= serial8250_console_write,
 	.device		= uart_console_device,
 	.setup		= serial8250_console_setup,
 	.early_setup	= serial8250_console_early_setup,
+#if defined(CONFIG_E2K) && defined(CONFIG_EARLY_DUMP_CONSOLE)
+	/* On E3M there is an early console which is set up by boot,
+	 * so remove CON_PRINTBUFFER. */
+	.flags		= CON_ANYTIME,
+#else
 	.flags		= CON_PRINTBUFFER | CON_ANYTIME,
+#endif
 	.index		= -1,
 	.data		= &serial8250_reg,
 };
 
 static int __init serial8250_console_init(void)
 {
+#ifdef CONFIG_SERIAL_NS16550_CONSOLE
+	int err = 0;
+
+	/* Probe ports */
+	pr_info("Serial 8250/16550: console probe ...");
+	if (serial_console_opts == NULL) {
+		err = -ENODEV;
+		goto error;
+	}
+	if (strcmp(serial_console_opts->name, SERIAL_CONSOLE_8250_NAME) &&
+	    strcmp(serial_console_opts->name, SERIAL_CONSOLE_16550_NAME)) {
+		err = -ENODEV;
+		goto error;
+	}
+	if (machine_id != MACHINE_ID_E3M && machine_id != MACHINE_ID_E3M_LMS)
+		serial8250_console.name[3] = 'M';
+	pr_cont(" found\n");
+#endif
+
 	serial8250_isa_init_ports();
 	register_console(&serial8250_console);
 	return 0;
+
+#ifdef CONFIG_SERIAL_NS16550_CONSOLE
+error:
+	pr_cont(" is not detected\n");
+	return (err);
+#endif
 }
 console_initcall(serial8250_console_init);
 
@@ -3000,9 +3053,15 @@ int serial8250_find_port(struct uart_port *p)
 static struct uart_driver serial8250_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "serial",
+#ifdef CONFIG_E90S
+	.dev_name		= "ttyM",
+	.major			= 44,
+	.minor			= 0,
+#else
 	.dev_name		= "ttyS",
 	.major			= TTY_MAJOR,
 	.minor			= 64,
+#endif
 	.cons			= SERIAL8250_CONSOLE,
 };
 
@@ -3248,9 +3307,9 @@ int serial8250_register_8250_port(struct uart_8250_port *up)
 	struct uart_8250_port *uart;
 	int ret = -ENOSPC;
 
-	if (up->port.uartclk == 0)
+	if (up->port.uartclk == 0) {
 		return -EINVAL;
-
+	}
 	mutex_lock(&serial_mutex);
 
 	uart = serial8250_find_match_or_unused(&up->port);
@@ -3346,9 +3405,31 @@ void serial8250_unregister_port(int line)
 }
 EXPORT_SYMBOL(serial8250_unregister_port);
 
+#ifdef CONFIG_MCST
+void serial8250_get_reg(int *major , int *minor)
+{
+	*major = serial8250_reg.major;
+	*minor = serial8250_reg.minor;
+}
+EXPORT_SYMBOL(serial8250_get_reg);
+#endif
+
 static int __init serial8250_init(void)
 {
 	int ret;
+
+#ifdef CONFIG_E2K
+	/* mpkm support. weerf@mcst.ru */
+	static const char *dev_H = "ttyM";
+
+	if (machine_id != MACHINE_ID_E3M && machine_id != MACHINE_ID_E3M_LMS) {
+		strcpy(serial8250_console.name, dev_H);
+		serial8250_console.name[strlen(dev_H)] = 0;
+		serial8250_reg.dev_name = dev_H;
+		serial8250_reg.major = 44;
+		serial8250_reg.minor = 0;
+	}
+#endif
 
 	serial8250_isa_init_ports();
 
@@ -3356,7 +3437,7 @@ static int __init serial8250_init(void)
 		"%d ports, IRQ sharing %sabled\n", nr_uarts,
 		share_irqs ? "en" : "dis");
 
-#ifdef CONFIG_SPARC
+#if defined CONFIG_SPARC && !defined CONFIG_E90S
 	ret = sunserial_register_minors(&serial8250_reg, UART_NR);
 #else
 	serial8250_reg.nr = UART_NR;
@@ -3392,7 +3473,7 @@ put_dev:
 unreg_pnp:
 	serial8250_pnp_exit();
 unreg_uart_drv:
-#ifdef CONFIG_SPARC
+#if defined CONFIG_SPARC && !defined CONFIG_E90S
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);
@@ -3417,7 +3498,7 @@ static void __exit serial8250_exit(void)
 
 	serial8250_pnp_exit();
 
-#ifdef CONFIG_SPARC
+#if defined CONFIG_SPARC && !defined CONFIG_E90S
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);

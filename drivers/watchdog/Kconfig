@@ -1347,6 +1347,15 @@ config WATCHDOG_RIO
 
 # XTENSA Architecture
 
+# E2K Architecture
+
+config L_WDT
+	tristate "L Watchdog timer"
+	depends on WATCHDOG
+	help
+	  Based on nmi apic timer in E3M, i2c_spi watchdog timer on
+	  IOHUB based machines.
+
 # Xen Architecture
 
 config XEN_WDT

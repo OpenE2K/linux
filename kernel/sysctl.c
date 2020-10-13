@@ -55,6 +55,9 @@
 #include <linux/reboot.h>
 #include <linux/ftrace.h>
 #include <linux/perf_event.h>
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#include <linux/clocksource.h>
+#endif
 #include <linux/kprobes.h>
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
@@ -115,6 +118,10 @@ extern int sysctl_nr_trim_pages;
 #ifdef CONFIG_BLOCK
 extern int blk_iopoll_enabled;
 #endif
+#ifdef CONFIG_MCST
+extern int shadow_console;
+#endif
+
 
 /* Constants used for minimum and  maximum */
 #ifdef CONFIG_LOCKUP_DETECTOR
@@ -164,6 +171,17 @@ extern int pwrsw_enabled;
 
 #ifdef CONFIG_SYSCTL_ARCH_UNALIGN_ALLOW
 extern int unaligned_enabled;
+#endif
+
+#ifdef CONFIG_E2K
+extern int debug_signal;
+extern int debug_coredump;
+extern int debug_userstack;
+extern int debug_pagefault;
+extern int debug_semi_spec;
+# ifdef CONFIG_DATA_STACK_WINDOW
+extern int debug_datastack;
+# endif
 #endif
 
 #ifdef CONFIG_IA64
@@ -587,6 +605,15 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_MCST_RT
+	{
+		.procname       = "printk_shadow_console",
+		.data           = &shadow_console,
+		.maxlen         = sizeof(int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
+#endif
 #ifdef CONFIG_FUNCTION_TRACER
 	{
 		.procname	= "ftrace_enabled",
@@ -606,6 +633,22 @@ static struct ctl_table kern_table[] = {
 	},
 #endif
 #ifdef CONFIG_TRACING
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_STACKS_TRACER)
+	{
+		.procname	= "stack_tracer_enabled",
+		.data		= &stack_tracer_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= stack_trace_sysctl,
+	},
+	{
+		.procname	= "stack_tracer_kernel_only",
+		.data		= &stack_tracer_kernel_only,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{
 		.procname	= "ftrace_dump_on_oops",
 		.data		= &ftrace_dump_on_oops,
@@ -1035,6 +1078,15 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dostring,
 	},
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	{
+		.procname	= "sclkr_src",
+		.data		= &sclkr_src,
+		.maxlen		= SCLKR_SRC_LEN,
+		.mode		= 0644,
+		.proc_handler	= proc_sclkr,
+	},
+#endif
 #ifdef CONFIG_KEYS
 	{
 		.procname	= "keys",
@@ -1692,6 +1744,52 @@ static struct ctl_table debug_table[] = {
 		.extra2		= &one,
 	},
 #endif
+#ifdef CONFIG_E2K
+	{
+		.procname	= "sigdebug",
+		.data		= &debug_signal,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "coredump",
+		.data		= &debug_coredump,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "userstack",
+		.data		= &debug_userstack,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "pagefault",
+		.data		= &debug_pagefault,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "semi_spec",
+		.data		= &debug_semi_spec,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+#ifdef CONFIG_DATA_STACK_WINDOW
+	{
+		.procname	= "datastack",
+		.data		= &debug_datastack,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+#endif
+#endif /* CONFIG_E2K */
 	{ }
 };
 

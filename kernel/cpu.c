@@ -986,6 +986,11 @@ EXPORT_SYMBOL(cpu_possible_mask);
 static DECLARE_BITMAP(cpu_online_bits, CONFIG_NR_CPUS) __read_mostly;
 const struct cpumask *const cpu_online_mask = to_cpumask(cpu_online_bits);
 EXPORT_SYMBOL(cpu_online_mask);
+#ifdef CONFIG_MCST_RT
+static DECLARE_BITMAP(rt_cpu_bits, CONFIG_NR_CPUS) __read_mostly = {0UL};
+struct cpumask *rt_cpu_mask = to_cpumask(rt_cpu_bits);
+EXPORT_SYMBOL(rt_cpu_mask);
+#endif
 
 static DECLARE_BITMAP(cpu_present_bits, CONFIG_NR_CPUS) __read_mostly;
 const struct cpumask *const cpu_present_mask = to_cpumask(cpu_present_bits);

@@ -3116,7 +3116,9 @@ struct device *tty_register_device(struct tty_driver *driver, unsigned index,
 	return tty_register_device_attr(driver, index, device, NULL, NULL);
 }
 EXPORT_SYMBOL(tty_register_device);
-
+#ifdef CONFIG_MCST
+EXPORT_SYMBOL(tty_class); // MCST_SERIAL_8250
+#endif
 static void tty_device_create_release(struct device *dev)
 {
 	pr_debug("device: '%s': %s\n", dev_name(dev), __func__);

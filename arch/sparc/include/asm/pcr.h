@@ -47,4 +47,42 @@ extern void schedule_deferred_pcr_work(void);
 
 extern int pcr_arch_init(void);
 
+#ifdef CONFIG_E90S
+#define E90S_PIC_NR	4
+
+
+#define	E90S_PCR_PRIV_SHIFT	0
+
+#define	E90S_PCR_SYS_SHIFT	1
+#define	E90S_PCR_USR_SHIFT	2
+
+#define	E90S_PCR_PICL_SHIFT	4
+#define	E90S_PCR_PICU_MASK	0x3f
+#define	E90S_PCR_PICU_SHIFT	11
+
+#define	E90S_PCR_ULRO_SHIFT	3
+#define	E90S_PCR_SC_SHIFT	18
+#define	E90S_PCR_SC_MASK	0x7UL
+#define	E90S_PCR_NC_SHIFT	22
+#define	E90S_PCR_NC_MASK	0x7UL
+#define	E90S_PCR_OVRO_SHIFT	26
+#define	E90S_PCR_OVF_SHIFT	32
+#define	E90S_PCR_OVF_MASK	0xfUL
+
+#define	E90S_PCR_PRIV	(1UL << E90S_PCR_PRIV_SHIFT)
+#define	E90S_PCR_SYS	(1UL << E90S_PCR_SYS_SHIFT)
+#define	E90S_PCR_USR	(1UL << E90S_PCR_USR_SHIFT)
+#define	E90S_PCR_ULRO	(1UL << E90S_PCR_ULRO_SHIFT)
+#define	E90S_PCR_OVRO	(1UL << E90S_PCR_OVRO_SHIFT)
+#define	E90S_PCR_OVF	(E90S_PCR_OVF_MASK << \
+					E90S_PCR_OVF_SHIFT)
+
+/* Performance counter register access. */
+#define rd_pcr(__p)  __asm__ __volatile__("rd	%%pcr, %0" : "=r" (__p))
+#define wr_pcr(__p) __asm__ __volatile__("wr	%0, 0x0, %%pcr" : : "r" (__p))
+#define rd_pic(__p)  __asm__ __volatile__("rd %%pic, %0" : "=r" (__p))
+#define wr_pic(__p) __asm__ __volatile__("wr	%0, 0x0, %%pic" : : "r" (__p))
+
+#endif
+
 #endif /* __PCR_H */

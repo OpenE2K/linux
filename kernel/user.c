@@ -92,6 +92,12 @@ struct user_struct root_user = {
 	.sigpending	= ATOMIC_INIT(0),
 	.locked_shm     = 0,
 	.uid		= GLOBAL_ROOT_UID,
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	.el_posix	= {
+		.shared_objects  = 0,
+		.private_objects = 0
+	},
+#endif
 };
 
 /*

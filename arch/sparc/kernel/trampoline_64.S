@@ -106,6 +106,9 @@ startup_continue:
 	 */
 	sethi		%hi(prom_entry_lock), %g2
 1:	ldstub		[%g2 + %lo(prom_entry_lock)], %g1
+#ifdef	CONFIG_RMO
+	membar		#StoreLoad | #StoreStore
+#endif	/* CONFIG_RMO */
 	brnz,pn		%g1, 1b
 	 nop
 
@@ -212,6 +215,9 @@ startup_continue:
 
 	sethi		%hi(prom_entry_lock), %g2
 	stb		%g0, [%g2 + %lo(prom_entry_lock)]
+#ifdef	CONFIG_RMO
+	membar		#StoreStore | #StoreLoad
+#endif	/* CONFIG_RMO */
 
 	ba,pt		%xcc, after_lock_tlb
 	 nop
@@ -326,6 +332,9 @@ after_lock_tlb:
 
 	sethi		%hi(prom_entry_lock), %g2
 1:	ldstub		[%g2 + %lo(prom_entry_lock)], %g1
+#ifdef	CONFIG_RMO
+	membar		#StoreLoad | #StoreStore
+#endif	/* CONFIG_RMO */
 	brnz,pn		%g1, 1b
 	 nop
 
@@ -389,6 +398,9 @@ after_lock_tlb:
 
 3:	sethi		%hi(prom_entry_lock), %g2
 	stb		%g0, [%g2 + %lo(prom_entry_lock)]
+#ifdef	CONFIG_RMO
+	membar		#StoreStore | #StoreLoad
+#endif	/* CONFIG_RMO */
 
 	ldx		[%l0], %g6
 	ldx		[%g6 + TI_TASK], %g4

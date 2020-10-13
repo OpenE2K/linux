@@ -1,0 +1,33 @@
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+
+menu "Elbrus chipset PCI support"
+
+config PCI_ELBRUS
+       bool "Elbrus (e2k/e90s) PCI controller support"
+       depends on (E2K || E90S) && PCI
+       default y
+       help
+         Elbrus PCI controller designed for machines based on both
+	 microprocessors arch: e3s and e90s
+
+config IOHUB_DOMAINS
+	bool "Elbrus PCI controller domain support (multiple IOHUB)"
+	depends on PCI_ELBRUS && NUMA && (E2K || E90S)
+	select PCI_DOMAINS
+	default y
+	help
+          Each node on Elbrus NUMA based machine has a few IO links
+          so system can have multiple IOHUBs to support PCI domains
+	  If say Y then PCI controllers will be scaned on each online
+	  node
+	  If say N then only one root IOHUB will be enabled on node 0
+
+config PCI_DOMAINS
+	bool
+	depends on IOHUB_DOMAINS
+	default y
+
+endmenu # "Elbrus chipset PCI support"

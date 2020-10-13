@@ -132,6 +132,7 @@
 #include <linux/hashtable.h>
 #include <linux/vmalloc.h>
 #include <linux/if_macvlan.h>
+#include <linux/kthread.h>
 
 #include "net-sysfs.h"
 
@@ -146,6 +147,31 @@ static DEFINE_SPINLOCK(offload_lock);
 struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
 struct list_head ptype_all __read_mostly;	/* Taps */
 static struct list_head offload_base __read_mostly;
+
+#ifdef CONFIG_MCST
+#ifdef CONFIG_MCST_RT
+#ifdef CONFIG_RPS
+static int use_dev_sirq_threads = 0;
+#else
+static int use_dev_sirq_threads = 1;
+#endif
+#else
+static int use_dev_sirq_threads = 0;
+#endif
+#endif
+
+int __init use_dev_sirq_threads_setup(char *str)
+{
+#ifndef CONFIG_RPS
+	if (get_option(&str, &use_dev_sirq_threads)) {
+		printk(KERN_INFO "Changing use_dev_sirq_threads = %d\n",
+			 use_dev_sirq_threads);
+	}
+#endif
+	return 1;
+}
+__setup("use_dev_sirq_threads=", use_dev_sirq_threads_setup);
+
 
 static int netif_rx_internal(struct sk_buff *skb);
 static int call_netdevice_notifiers_info(unsigned long val,
@@ -2146,6 +2172,27 @@ static inline void __netif_reschedule(struct Qdisc *q)
 {
 	struct softnet_data *sd;
 	unsigned long flags;
+#ifdef CONFIG_MCST
+	struct dev_softnet_data *dsd;
+
+	if (q->dev_queue == NULL) {
+		panic("q->dev_queue == NULL\n");
+	}
+	if (q->dev_queue->dev == NULL) {
+		clear_bit(__QDISC_STATE_SCHED, &q->state);
+		return;
+	}
+	dsd = q->dev_queue->dev->dsd;
+	if (dsd) {
+		raw_spin_lock_irqsave(&dsd->dsd_tx_lock, flags);
+		q->next_sched = dsd->sd.output_queue;
+		dsd->sd.output_queue = q;
+		raw_spin_unlock_irqrestore(&dsd->dsd_tx_lock, flags);
+
+		wake_up_process(dsd->dsd_tx_tsk);
+		return;
+	}
+#endif
 
 	local_irq_save(flags);
 	sd = &__get_cpu_var(softnet_data);
@@ -2176,7 +2223,9 @@ static struct dev_kfree_skb_cb *get_kfree_skb_cb(const struct sk_buff *skb)
 void __dev_kfree_skb_irq(struct sk_buff *skb, enum skb_free_reason reason)
 {
 	unsigned long flags;
-
+#ifdef CONFIG_MCST
+	struct net_device *dev = skb->dev;
+#endif
 	if (likely(atomic_read(&skb->users) == 1)) {
 		smp_rmb();
 		atomic_set(&skb->users, 0);
@@ -2184,6 +2233,21 @@ void __dev_kfree_skb_irq(struct sk_buff *skb, enum skb_free_reason reason)
 		return;
 	}
 	get_kfree_skb_cb(skb)->reason = reason;
+#ifdef CONFIG_MCST
+	BUG_ON(dev == NULL);
+
+	if (dev->dsd) {
+		struct dev_softnet_data *dsd = dev->dsd;
+
+		raw_spin_lock_irqsave(&dsd->dsd_tx_lock, flags);
+		skb->next = dsd->sd.completion_queue;
+		dsd->sd.completion_queue = skb;
+		raw_spin_unlock_irqrestore(&dsd->dsd_tx_lock, flags);
+
+		wake_up_process(dsd->dsd_tx_tsk);
+		return;
+	}
+#endif
 	local_irq_save(flags);
 	skb->next = __this_cpu_read(softnet_data.completion_queue);
 	__this_cpu_write(softnet_data.completion_queue, skb);
@@ -2941,6 +3005,20 @@ int weight_p __read_mostly = 64;            /* old backlog weight */
 static inline void ____napi_schedule(struct softnet_data *sd,
 				     struct napi_struct *napi)
 {
+#ifdef CONFIG_MCST
+	struct dev_softnet_data *dsd = NULL;
+	if (sd->in_dsd) {
+		dsd = container_of(sd, struct dev_softnet_data, sd);
+	}
+	if (dsd) {
+		if (test_and_set_bit(NAPI_STATE_SCHED, &napi->state)) {
+			return;
+		}
+		list_add_tail(&napi->poll_list, &sd->poll_list);
+		wake_up_process(dsd->dsd_rx_tsk);
+		return;
+	}
+#endif
 	list_add_tail(&napi->poll_list, &sd->poll_list);
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 }
@@ -3138,7 +3216,6 @@ EXPORT_SYMBOL(rps_may_expire_flow);
 static void rps_trigger_softirq(void *data)
 {
 	struct softnet_data *sd = data;
-
 	____napi_schedule(sd, &sd->backlog);
 	sd->received_rps++;
 }
@@ -3254,6 +3331,10 @@ enqueue:
 	return NET_RX_DROP;
 }
 
+#ifdef CONFIG_MCST
+static int enqueue_to_dev_backlog(struct sk_buff *skb);
+#endif
+
 static int netif_rx_internal(struct sk_buff *skb)
 {
 	int ret;
@@ -3281,6 +3362,11 @@ static int netif_rx_internal(struct sk_buff *skb)
 
 		rcu_read_unlock();
 		migrate_enable();
+	} else
+#endif
+#ifdef CONFIG_MCST
+	if (skb->dev->dsd) {
+		ret = enqueue_to_dev_backlog(skb);
 	} else
 #endif
 	{
@@ -4268,7 +4354,18 @@ static int process_backlog(struct napi_struct *napi, int quota)
 void __napi_schedule(struct napi_struct *n)
 {
 	unsigned long flags;
+#ifdef CONFIG_MCST
+	struct dev_softnet_data *dsd = n->dev->dsd;
 
+	if (dsd) {
+		struct dev_softnet_data *dsd = n->dev->dsd;
+
+		raw_spin_lock_irqsave(&dsd->dsd_rx_lock, flags);
+		____napi_schedule(&dsd->sd, n);
+		raw_spin_unlock_irqrestore(&dsd->dsd_rx_lock, flags);
+		return;
+	}
+#endif
 	local_irq_save(flags);
 	____napi_schedule(&__get_cpu_var(softnet_data), n);
 	local_irq_restore(flags);
@@ -4278,12 +4375,32 @@ EXPORT_SYMBOL(__napi_schedule);
 
 void __napi_complete(struct napi_struct *n)
 {
+#ifdef CONFIG_MCST
+	struct dev_softnet_data *dsd = n->dev->dsd;
+
+	if (dsd) {
+		raw_spin_lock(&dsd->dsd_rx_lock);
+		if (test_bit(NAPI_STATE_READY, &n->state)) {
+			raw_spin_unlock(&dsd->dsd_rx_lock);
+			return;
+		}
+	}
+#endif
+
 	BUG_ON(!test_bit(NAPI_STATE_SCHED, &n->state));
 	BUG_ON(n->gro_list);
 
 	list_del(&n->poll_list);
-	smp_mb__before_clear_bit();
-	clear_bit(NAPI_STATE_SCHED, &n->state);
+#ifdef CONFIG_MCST
+	if (dsd) {
+		clear_bit(NAPI_STATE_SCHED, &n->state);
+		raw_spin_unlock(&dsd->dsd_rx_lock);
+	} else
+#endif
+	{
+		smp_mb__before_clear_bit();
+		clear_bit(NAPI_STATE_SCHED, &n->state);
+	}
 }
 EXPORT_SYMBOL(__napi_complete);
 
@@ -5448,6 +5565,9 @@ int __dev_change_flags(struct net_device *dev, unsigned int flags)
 
 	dev->flags = (flags & (IFF_DEBUG | IFF_NOTRAILERS | IFF_NOARP |
 			       IFF_DYNAMIC | IFF_MULTICAST | IFF_PORTSEL |
+#ifdef CONFIG_MCST
+				IFF_SPINWAIT |
+#endif
 			       IFF_AUTOMEDIA)) |
 		     (dev->flags & (IFF_UP | IFF_VOLATILE | IFF_PROMISC |
 				    IFF_ALLMULTI));
@@ -6016,6 +6136,413 @@ static int netif_alloc_netdev_queues(struct net_device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_MCST
+static int process_backlog_dsd(struct napi_struct *napi, int quota)
+{
+	int work = 0;
+	struct net_device *dev = napi->dev;
+	struct dev_softnet_data *dsd;
+	struct softnet_data *sd;
+
+	BUG_ON(!dev);
+	dsd = dev->dsd;
+	BUG_ON(!dsd);
+	sd = &dsd->sd;
+	BUG_ON(!sd);
+
+	napi->weight = weight_p;
+	raw_spin_lock_irq(&dsd->dsd_rx_lock);
+	while (work < quota) {
+		struct sk_buff *skb;
+		unsigned int qlen;
+
+		while ((skb = __skb_dequeue(&sd->process_queue))) {
+			raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+			__netif_receive_skb(skb);
+			raw_spin_lock_irq(&dsd->dsd_rx_lock);
+			input_queue_head_incr(sd);
+			if (++work >= quota) {
+				raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+				return work;
+			}
+		}
+
+		rps_lock(sd);
+		qlen = skb_queue_len(&sd->input_pkt_queue);
+		if (qlen)
+			skb_queue_splice_tail_init(&sd->input_pkt_queue,
+						   &sd->process_queue);
+
+		if (qlen < quota - work) {
+			/*
+			 * Inline a custom version of __napi_complete().
+			 * only current cpu owns and manipulates this napi,
+			 * and NAPI_STATE_SCHED is the only possible flag set
+			 * on backlog.
+			 * we can use a plain write instead of clear_bit(),
+			 * and we dont need an smp_mb() memory barrier.
+			 */
+			list_del(&napi->poll_list);
+			napi->state = 0;
+
+			quota = work + qlen;
+		}
+		rps_unlock(sd);
+	}
+	raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+
+	return work;
+}
+
+static int enqueue_to_dev_backlog(struct sk_buff *skb)
+{
+	struct net_device *dev = skb->dev;
+	struct dev_softnet_data *dsd;
+	struct softnet_data *sd;
+	unsigned long flags;
+
+	if (!dev) {
+		pr_err("Fatal error in enqueue_to_dev_backlog: skb->dev == NULL!\n");
+		pr_cont("Fix your device driver\n");
+		dump_stack();
+		goto drop_skb;
+	}
+
+	dsd = dev->dsd;
+	BUG_ON(!dsd);
+
+	sd = &dsd->sd;
+
+	raw_spin_lock_irqsave(&dsd->dsd_rx_lock, flags);
+
+	rps_lock(sd);
+	if (skb_queue_len(&sd->input_pkt_queue) <= netdev_max_backlog) {
+		if (skb_queue_len(&sd->input_pkt_queue)) {
+			unsigned int dummy;
+enqueue:
+			__skb_queue_tail(&sd->input_pkt_queue, skb);
+			input_queue_tail_incr_save(sd, &dummy);
+			rps_unlock(sd);
+			raw_spin_unlock_irqrestore(&dsd->dsd_rx_lock, flags);
+			return NET_RX_SUCCESS;
+		}
+
+		/* Schedule NAPI for backlog device
+		 * We can use non atomic operation since we own the queue lock
+		 */
+		____napi_schedule(sd, &sd->backlog);
+		goto enqueue;
+	}
+
+	sd->dropped++;
+	rps_unlock(sd);
+
+	raw_spin_unlock_irqrestore(&dsd->dsd_rx_lock, flags);
+drop_skb:
+	atomic_long_inc(&skb->dev->rx_dropped);
+	kfree_skb(skb);
+	return NET_RX_DROP;
+}
+
+static void flush_dev_backlog(void *arg)
+{
+	struct net_device *dev = arg;
+	struct dev_softnet_data *dsd = dev->dsd;
+	struct softnet_data *sd = &dsd->sd;
+	struct sk_buff *skb, *tmp;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&dsd->dsd_rx_lock, flags);
+
+	rps_lock(sd);
+	skb_queue_walk_safe(&sd->input_pkt_queue, skb, tmp) {
+		if (skb->dev == dev) {
+			__skb_unlink(skb, &sd->input_pkt_queue);
+			__skb_queue_tail(&sd->tofree_queue, skb);
+			input_queue_head_incr(sd);
+		}
+	}
+	rps_unlock(sd);
+
+	skb_queue_walk_safe(&sd->process_queue, skb, tmp) {
+		if (skb->dev == dev) {
+			__skb_unlink(skb, &sd->process_queue);
+			__skb_queue_tail(&sd->tofree_queue, skb);
+			input_queue_head_incr(sd);
+		}
+	}
+	raw_spin_unlock_irqrestore(&dsd->dsd_rx_lock, flags);
+
+	if (!skb_queue_empty(&sd->tofree_queue))
+		wake_up_process(dsd->dsd_rx_tsk);
+}
+
+static int dev_rx_action(void *arg)
+{
+	struct net_device *dev = (struct net_device *)arg;
+	struct dev_softnet_data *dsd = dev->dsd;
+	struct softnet_data *sd = &dsd->sd;
+	struct sk_buff *skb;
+	void *have;
+	unsigned long finish_spinwait;
+
+	/*
+	 * create_kthread creates threads in uninterruptible state.
+	 * Change to interruptible to make this thread be no accounted
+	 * in load average statistics.
+	 */
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule();
+
+	while (!kthread_should_stop()) {
+		int should_sleep = 1;
+
+
+		raw_spin_lock_irq(&dsd->dsd_rx_lock);
+
+		while ((skb = __skb_dequeue(&sd->tofree_queue))) {
+			raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+			kfree_skb(skb);
+			should_sleep = 0;
+			raw_spin_lock_irq(&dsd->dsd_rx_lock);
+		}
+
+		while (!list_empty(&sd->poll_list)) {
+			struct napi_struct *n;
+			int work, weight;
+
+
+			/* Even though interrupts have been re-enabled, this
+			 * access is safe because interrupts can only add new
+			 * entries to the tail of this list, and only ->poll()
+			 * calls can remove this head entry from the list.
+			 */
+			n = list_first_entry(&sd->poll_list, struct napi_struct,
+					     poll_list);
+
+			have = netpoll_poll_lock(n);
+
+			weight = n->weight;
+
+			/* This NAPI_STATE_SCHED test is for avoiding a race
+			 * with netpoll's poll_napi().  Only the entity which
+			 * obtains the lock and sees NAPI_STATE_SCHED set will
+			 * actually make the ->poll() call.  Therefore we avoid
+			 * accidentally calling ->poll() when NAPI is not
+			 * scheduled.
+			 */
+			work = 0;
+			clear_bit(NAPI_STATE_READY, &n->state);
+			raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+			local_bh_disable();
+			work = n->poll(n, weight);
+			local_bh_enable_no_bh();
+			raw_spin_lock_irq(&dsd->dsd_rx_lock);
+			trace_napi_poll(n);
+
+			WARN_ON_ONCE(work > weight);
+
+
+			/* Drivers must not modify the NAPI state if they
+			 * consume the entire weight.  In such cases this code
+			 * still "owns" the NAPI instance and therefore can
+			 * move the instance around on the list at-will.
+			 */
+			if (unlikely(work == weight)) {
+				if (unlikely(napi_disable_pending(n))) {
+					raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+					napi_complete(n);
+					raw_spin_lock_irq(&dsd->dsd_rx_lock);
+				} else {
+					if (n->gro_list) {
+						/* flush too old packets
+						 * If HZ < 1000, flush all
+						 * packets.
+						 */
+						raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+						napi_gro_flush(n, HZ >= 1000);
+						raw_spin_lock_irq(&dsd->dsd_rx_lock);
+					}
+					list_move_tail(&n->poll_list, &sd->poll_list);
+				}
+			}
+
+			netpoll_poll_unlock(have);
+
+			should_sleep = 0;
+		}
+		raw_spin_unlock_irq(&dsd->dsd_rx_lock);
+		
+		if (dev->flags & IFF_SPINWAIT) {
+			local_irq_enable();
+			finish_spinwait = jiffies + 1;
+			while (list_empty(&sd->poll_list) && (sd->tofree_queue.qlen == 0) &&
+				time_before(jiffies, finish_spinwait)) {
+				cpu_relax();
+			}
+		}
+
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (list_empty(&sd->poll_list) && (sd->tofree_queue.qlen ==0)) {
+			schedule();
+		} else {
+			set_current_state(TASK_RUNNING);
+		}
+
+#ifdef CONFIG_NET_DMA
+		/*
+		 * There may not be any more sk_buffs coming right now, so push
+		 * any pending DMA copies to hardware
+		 */
+		dma_issue_pending_all();
+#endif
+	}
+
+	return 0;
+}
+
+static int dev_tx_action(void *arg)
+{
+	struct net_device *dev = (struct net_device *)arg;
+	struct dev_softnet_data *dsd = dev->dsd;
+	struct softnet_data *sd = &dsd->sd;
+
+	/*
+	 * create_kthread creates threads in uninterruptible state.
+	 * Change to interruptible to make this thread be no accounted
+	 * in load average statistics.
+	 */
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule();
+
+	while (!kthread_should_stop()) {
+		int worked = 0;
+
+		set_current_state(TASK_INTERRUPTIBLE);
+
+		if (sd->completion_queue) {
+			struct sk_buff *clist;
+
+			raw_spin_lock_irq(&dsd->dsd_tx_lock);
+			clist = sd->completion_queue;
+			sd->completion_queue = NULL;
+			raw_spin_unlock_irq(&dsd->dsd_tx_lock);
+
+			while (clist) {
+				struct sk_buff *skb = clist;
+				clist = clist->next;
+
+				WARN_ON(atomic_read(&skb->users));
+				trace_kfree_skb(skb, net_tx_action);
+				__kfree_skb(skb);
+			}
+			worked = 1;
+		}
+
+		if (sd->output_queue) {
+			struct Qdisc *head;
+
+			raw_spin_lock_irq(&dsd->dsd_tx_lock);
+			head = sd->output_queue;
+			sd->output_queue = NULL;
+			sd->output_queue_tailp = &sd->output_queue;
+			raw_spin_unlock_irq(&dsd->dsd_tx_lock);
+
+			migrate_disable();
+
+			while (head) {
+				struct Qdisc *q = head;
+				spinlock_t *root_lock;
+
+				head = head->next_sched;
+
+				root_lock = qdisc_lock(q);
+				if (take_root_lock(root_lock)) {
+					smp_mb__before_clear_bit();
+					clear_bit(__QDISC_STATE_SCHED,
+						  &q->state);
+					qdisc_run(q);
+					spin_unlock(root_lock);
+				} else {
+					if (!test_bit(__QDISC_STATE_DEACTIVATED,
+						      &q->state)) {
+						__netif_reschedule(q);
+					} else {
+						smp_mb__before_clear_bit();
+						clear_bit(__QDISC_STATE_SCHED,
+							  &q->state);
+					}
+				}
+			}
+			migrate_enable();
+
+			worked = 1;
+		}
+
+		if (!worked)
+			schedule();
+	}
+
+	return 0;
+}
+
+static int create_dsd(struct net_device *dev)
+{
+	struct dev_softnet_data *dsd;
+	struct softnet_data     *queue;
+	dsd = kzalloc(sizeof(struct dev_softnet_data), GFP_KERNEL);
+	if (!dsd)
+		return -ENOMEM;
+
+	raw_spin_lock_init(&dsd->dsd_rx_lock);
+	raw_spin_lock_init(&dsd->dsd_tx_lock);
+	dsd->dsd_rx_tsk = kthread_create(dev_rx_action, dev, "%s-rx-thread",
+					 dev->name);
+	if (IS_ERR(dsd->dsd_rx_tsk))
+		goto free_dsd;
+
+	dsd->dsd_tx_tsk = kthread_create(dev_tx_action, dev, "%s-tx-thread",
+					 dev->name);
+	if (IS_ERR(dsd->dsd_tx_tsk))
+		goto stop_rxa;
+
+	dev->dsd = dsd;
+
+	if (wait_task_inactive(dsd->dsd_rx_tsk, TASK_UNINTERRUPTIBLE) &&
+	    wait_task_inactive(dsd->dsd_tx_tsk, TASK_UNINTERRUPTIBLE)) {
+		/* Some devices never use dsd tasks and they are shown
+		 * as uninterruptible forever. This makes it accountable
+		 * in loadaverage. Do wakeup here to give them possibility
+		 * to become interruptible.
+		 */
+		wake_up_process(dsd->dsd_rx_tsk);
+		wake_up_process(dsd->dsd_tx_tsk);
+	} else {
+		WARN_ON(1);
+	}
+
+	queue = &dsd->sd;
+	skb_queue_head_init_raw(&queue->input_pkt_queue);
+	skb_queue_head_init_raw(&queue->process_queue);
+	skb_queue_head_init_raw(&queue->tofree_queue);
+	queue->completion_queue = NULL;
+	INIT_LIST_HEAD(&queue->poll_list);
+	queue->backlog.poll = process_backlog_dsd;
+	queue->backlog.weight = weight_p;
+	queue->backlog.gro_list = NULL;
+	queue->backlog.gro_count = 0;
+	queue->backlog.dev = dev;
+	queue->in_dsd = 1;
+
+	return 0;
+stop_rxa:
+	kthread_stop(dsd->dsd_rx_tsk);
+free_dsd:
+	kfree(dsd);
+	return -ENOMEM;
+}
+#endif /* CONFIG_MCST */
+
 /**
  *	register_netdevice	- register a network device
  *	@dev: device to register
@@ -6128,6 +6655,15 @@ int register_netdevice(struct net_device *dev)
 
 	linkwatch_init_dev(dev);
 
+#ifdef CONFIG_MCST
+	if (use_dev_sirq_threads) {
+		if (create_dsd(dev))
+			panic("Can't create network sortdata threads\n");
+	} else {
+		dev->dsd = NULL;
+	}
+#endif
+
 	dev_init_scheduler(dev);
 	dev_hold(dev);
 	list_netdevice(dev);
@@ -6157,7 +6693,6 @@ int register_netdevice(struct net_device *dev)
 
 out:
 	return ret;
-
 err_uninit:
 	if (dev->netdev_ops->ndo_uninit)
 		dev->netdev_ops->ndo_uninit(dev);
@@ -6358,7 +6893,12 @@ void netdev_run_todo(void)
 
 		dev->reg_state = NETREG_UNREGISTERED;
 
-		on_each_cpu(flush_backlog, dev, 1);
+#ifdef CONFIG_MCST
+		if (dev->dsd)
+			flush_dev_backlog(dev);
+		else
+#endif
+			on_each_cpu(flush_backlog, dev, 1);
 
 		netdev_wait_allrefs(dev);
 
@@ -6513,9 +7053,14 @@ struct net_device *alloc_netdev_mqs(int sizeof_priv, const char *name,
 	/* ensure 32-byte alignment of whole construct */
 	alloc_size += NETDEV_ALIGN - 1;
 
+#ifdef CONFIG_MCST
+/* FIXME TODO l_e1000 & sunlance need this */
+	p = kzalloc(alloc_size, GFP_KERNEL | __GFP_NOWARN | __GFP_REPEAT | GFP_DMA);
+#else
 	p = kzalloc(alloc_size, GFP_KERNEL | __GFP_NOWARN | __GFP_REPEAT);
 	if (!p)
 		p = vzalloc(alloc_size);
+#endif
 	if (!p)
 		return NULL;
 
@@ -7236,10 +7781,16 @@ static int __init net_dev_init(void)
 	if (register_pernet_device(&default_device_ops))
 		goto out;
 
-	open_softirq(NET_TX_SOFTIRQ, net_tx_action);
-	open_softirq(NET_RX_SOFTIRQ, net_rx_action);
+#ifdef CONFIG_MCST
+	if (!use_dev_sirq_threads) {
+#endif
+		open_softirq(NET_TX_SOFTIRQ, net_tx_action);
+		open_softirq(NET_RX_SOFTIRQ, net_rx_action);
 
-	hotcpu_notifier(dev_cpu_callback, 0);
+		hotcpu_notifier(dev_cpu_callback, 0);
+#ifdef CONFIG_MCST
+	}
+#endif
 	dst_init();
 	rc = 0;
 out:
@@ -7247,3 +7798,8 @@ out:
 }
 
 subsys_initcall(net_dev_init);
+
+#ifdef CONFIG_MCST
+int e1000 = 0;
+EXPORT_SYMBOL(e1000);
+#endif

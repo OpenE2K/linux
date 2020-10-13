@@ -111,6 +111,7 @@ EXPORT_SYMBOL(node_states);
 static DEFINE_SPINLOCK(managed_page_count_lock);
 
 unsigned long totalram_pages __read_mostly;
+unsigned long totalreal_mem __read_mostly = 0;
 unsigned long totalreserve_pages __read_mostly;
 /*
  * When calculating the number of globally allowed dirty pages, there
@@ -191,6 +192,7 @@ int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES-1] = {
 };
 
 EXPORT_SYMBOL(totalram_pages);
+EXPORT_SYMBOL(totalreal_mem);
 
 static char * const zone_names[MAX_NR_ZONES] = {
 #ifdef CONFIG_ZONE_DMA

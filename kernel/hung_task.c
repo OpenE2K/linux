@@ -17,6 +17,9 @@
 #include <linux/sysctl.h>
 #include <linux/utsname.h>
 #include <trace/events/sched.h>
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#endif
 
 /*
  * The number of tasks checked:
@@ -233,7 +236,10 @@ static int watchdog(void *dummy)
 		if (atomic_xchg(&reset_hung_task, 0))
 			continue;
 
-		check_hung_uninterruptible_tasks(timeout);
+#ifdef CONFIG_MCST_RT
+		if (!rts_mode)
+#endif
+			check_hung_uninterruptible_tasks(timeout);
 	}
 
 	return 0;

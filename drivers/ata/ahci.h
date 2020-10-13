@@ -51,7 +51,11 @@
 
 enum {
 	AHCI_MAX_PORTS		= 32,
+#if defined(CONFIG_E2K)
+	AHCI_MAX_SG		= 168 * 16,
+#else
 	AHCI_MAX_SG		= 168, /* hardware max is 64K */
+#endif
 	AHCI_DMA_BOUNDARY	= 0xffffffff,
 	AHCI_MAX_CMDS		= 32,
 	AHCI_CMD_SZ		= 32,
@@ -233,7 +237,10 @@ enum {
 						        port start (wait until
 						        error-handling stage) */
 	AHCI_HFLAG_MULTI_MSI		= (1 << 16), /* multiple PCI MSIs */
-
+#if defined(CONFIG_E2K)
+	AHCI_HFLAG_SECT1		= (1 << 13), /* max 1 sector per
+							dma table line */
+#endif
 	/* ap->flags bits */
 
 	AHCI_FLAG_COMMON		= ATA_FLAG_SATA | ATA_FLAG_PIO_DMA |

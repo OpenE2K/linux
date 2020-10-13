@@ -419,7 +419,16 @@ EXPORT_SYMBOL_GPL(rtc_initialize_alarm);
 
 int rtc_alarm_irq_enable(struct rtc_device *rtc, unsigned int enabled)
 {
-	int err = mutex_lock_interruptible(&rtc->ops_lock);
+	int err;
+
+#if defined(CONFIG_E2K) && defined(CONFIG_L_WDT)
+	if (IS_MACHINE_E3M) {
+		pr_debug("rtc_alarm_irq_enable: irq8 is busy for NMI watchdog timer\n");
+		return -EINVAL;
+	}
+#endif
+
+	err = mutex_lock_interruptible(&rtc->ops_lock);
 	if (err)
 		return err;
 
@@ -446,7 +455,16 @@ EXPORT_SYMBOL_GPL(rtc_alarm_irq_enable);
 
 int rtc_update_irq_enable(struct rtc_device *rtc, unsigned int enabled)
 {
-	int err = mutex_lock_interruptible(&rtc->ops_lock);
+	int err;
+
+#if defined(CONFIG_E2K) && defined(CONFIG_L_WDT)
+	if (IS_MACHINE_E3M) {
+		pr_debug("rtc_update_irq_enable: irq8 is busy for NMI watchdog timer\n");
+		return -EINVAL;
+	}
+#endif
+
+	err = mutex_lock_interruptible(&rtc->ops_lock);
 	if (err)
 		return err;
 

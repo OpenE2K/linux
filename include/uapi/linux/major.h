@@ -70,8 +70,10 @@
 #define RISCOM8_NORMAL_MAJOR	48
 #define DAC960_MAJOR		48   /* 48..55 */
 #define RISCOM8_CALLOUT_MAJOR	49
+#define MSPS_MAJOR		54   /* MSPS for e2k architecture, project aporia */
 #define MKISS_MAJOR		55
 #define DSP56K_MAJOR		55   /* DSP56001 processor device */
+#define ELDSP_MAJOR		55   /* Elbrus DSP for e2k architecture, project cubic */
 
 #define IDE4_MAJOR		56
 #define IDE5_MAJOR		57

@@ -2092,7 +2092,12 @@ static int aty128_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	par->vram_size = aty_ld_le32(CNFG_MEMSIZE) & 0x03FFFFFF;
 
 	/* Virtualize the framebuffer */
+#ifdef CONFIG_MCST
+	/* Performance optimization */
+	info->screen_base = ioremap_wc(fb_addr, par->vram_size);
+#else
 	info->screen_base = ioremap(fb_addr, par->vram_size);
+#endif
 	if (!info->screen_base)
 		goto err_unmap_out;
 

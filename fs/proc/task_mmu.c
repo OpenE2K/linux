@@ -14,6 +14,9 @@
 #include <linux/swapops.h>
 #include <linux/mmu_notifier.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h> /* For UHWS_DISCONT_MODE */
+#endif
 #include <asm/elf.h>
 #include <asm/uaccess.h>
 #include <asm/tlbflush.h>
@@ -1413,6 +1416,9 @@ static int show_numa_map(struct seq_file *m, void *v, int is_pid)
 	struct mempolicy *pol;
 	char buffer[64];
 	int nid;
+#ifdef CONFIG_E2K
+	struct thread_info *ti = task_thread_info(task);
+#endif
 
 	if (!mm)
 		return 0;
@@ -1452,6 +1458,17 @@ static int show_numa_map(struct seq_file *m, void *v, int is_pid)
 				seq_printf(m, " stack:%d", tid);
 		}
 	}
+#ifdef CONFIG_E2K
+	if (vma->vm_start >= (u64) GET_PS_BASE(ti) &&
+		 vma->vm_start < ((u64) GET_PS_BASE(ti) + GET_PS_SIZE(ti) +
+					KERNEL_P_STACK_SIZE)) {
+		seq_printf(m, " procedure stack");
+	} else if (vma->vm_start >= (u64) GET_PCS_BASE(ti) &&
+		   vma->vm_start < ((u64) GET_PCS_BASE(ti) + GET_PCS_SIZE(ti) +
+					  KERNEL_PC_STACK_SIZE)) {
+		seq_printf(m, " chain stack");
+	}
+#endif
 
 	if (is_vm_hugetlb_page(vma))
 		seq_printf(m, " huge");

@@ -846,7 +846,7 @@ static ssize_t set_pwmfreq(struct device *dev, struct device_attribute *attr,
 
 	data->range[sattr->index] =
 		adt7475_read(TEMP_TRANGE_REG(sattr->index));
-	data->range[sattr->index] &= ~7;
+	data->range[sattr->index] &= ~15;
 	data->range[sattr->index] |= out;
 
 	i2c_smbus_write_byte_data(client, TEMP_TRANGE_REG(sattr->index),

@@ -66,6 +66,7 @@ config E1000
 
 config E1000E
 	tristate "Intel(R) PRO/1000 PCI-Express Gigabit Ethernet support"
+    default y
 	depends on PCI && (!SPARC32 || BROKEN)
 	select CRC32
 	select PTP_1588_CLOCK

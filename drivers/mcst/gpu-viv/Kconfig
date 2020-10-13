@@ -1,0 +1,10 @@
+menu "MCST Vivante GPU support"
+	depends on E2K
+
+config MCST_GPU_VIV
+	tristate "MCST Vivante GPU support"
+	default m
+	---help---
+         Say Y to get the GPU driver support.
+
+endmenu

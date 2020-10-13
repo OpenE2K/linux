@@ -311,7 +311,7 @@ int mmc_of_parse(struct mmc_host *host)
 	struct device_node *np;
 	u32 bus_width;
 	bool explicit_inv_wp, gpio_inv_wp = false;
-	enum of_gpio_flags flags;
+	enum of_gpio_flags uninitialized_var(flags);
 	int len, ret, gpio;
 
 	if (!host->parent || !host->parent->of_node)

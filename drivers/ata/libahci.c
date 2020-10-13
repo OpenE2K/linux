@@ -1505,6 +1505,44 @@ static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc)
 	else
 		return sata_pmp_qc_defer_cmd_switch(qc);
 }
+#if defined(CONFIG_E2K)
+static unsigned int ahci_fill_sg_1sect(struct ata_queued_cmd *qc, void *cmd_tbl)
+{
+	struct scatterlist *sg;
+	struct ahci_sg *ahci_sg = cmd_tbl + AHCI_CMD_TBL_HDR_SZ;
+	unsigned int si, j = 0;
+
+	VPRINTK("ENTER\n");
+
+	/*
+	 * Next, the S/G list.
+	 */
+	for_each_sg(qc->sg, sg, qc->n_elem, si) {
+		dma_addr_t addr = sg_dma_address(sg);
+		u32 sg_len = sg_dma_len(sg);
+		int i, rem = sg_len % ATA_SECT_SIZE;
+		for (i = 0; i < sg_len / ATA_SECT_SIZE; i++,
+						addr += ATA_SECT_SIZE) {
+			BUG_ON(j + i >= AHCI_MAX_SG);
+			ahci_sg[j + i].addr = cpu_to_le32(addr & 0xffffffff);
+			ahci_sg[j + i].addr_hi =
+					cpu_to_le32((addr >> 16) >> 16);
+			ahci_sg[j + i].flags_size =
+					cpu_to_le32(ATA_SECT_SIZE - 1);
+		}
+		if (rem) {
+			ahci_sg[j + i].addr = cpu_to_le32(addr & 0xffffffff);
+			ahci_sg[j + i].addr_hi =
+					cpu_to_le32((addr >> 16) >> 16);
+			ahci_sg[j + i].flags_size = cpu_to_le32(rem - 1);
+			i++;
+		}
+		j += i;
+	}
+
+	return j;
+}
+#endif
 
 static void ahci_qc_prep(struct ata_queued_cmd *qc)
 {
@@ -1529,8 +1567,26 @@ static void ahci_qc_prep(struct ata_queued_cmd *qc)
 	}
 
 	n_elem = 0;
+#if defined(CONFIG_E2K)
+	if (qc->flags & ATA_QCFLAG_DMAMAP) {
+		struct ahci_host_priv *hpriv = ap->host->private_data;
+		if (hpriv->flags & AHCI_HFLAG_SECT1)
+			n_elem = ahci_fill_sg_1sect(qc, cmd_tbl);
+		else
+			n_elem = ahci_fill_sg(qc, cmd_tbl);
+
+		if (is_atapi && hpriv->flags & AHCI_HFLAG_SECT1) {
+			void __iomem *port_mmio = ahci_port_base(ap);
+			u32 v = readl(port_mmio + PORT_CMD);
+			writel(v & ~PORT_CMD_START, port_mmio + PORT_CMD);
+			readl(port_mmio + PORT_CMD);
+			writel(v, port_mmio + PORT_CMD);
+		}
+	}
+#else
 	if (qc->flags & ATA_QCFLAG_DMAMAP)
 		n_elem = ahci_fill_sg(qc, cmd_tbl);
+#endif
 
 	/*
 	 * Fill in command slot information.

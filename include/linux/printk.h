@@ -420,4 +420,10 @@ static inline void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
 		       groupsize, buf, len, ascii)
 #endif /* defined(CONFIG_DYNAMIC_DEBUG) */
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SERIAL_PRINTK)
+extern void flush_printk_buffer(void);
+#else           
+static inline void flush_printk_buffer(void) { }
+#endif
+
 #endif

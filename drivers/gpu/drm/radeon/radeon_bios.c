@@ -60,7 +60,11 @@ static bool igp_read_bios_from_vram(struct radeon_device *rdev)
 		return false;
 	}
 
+#ifdef CONFIG_MCST
+	if (size == 0 || readb(&bios[0]) != 0x55 || readb(&bios[1]) != 0xaa) {
+#else
 	if (size == 0 || bios[0] != 0x55 || bios[1] != 0xaa) {
+#endif
 		iounmap(bios);
 		return false;
 	}
@@ -93,6 +97,7 @@ static bool radeon_read_bios(struct radeon_device *rdev)
 		pci_unmap_rom(rdev->pdev, bios);
 		return false;
 	}
+
 	rdev->bios = kzalloc(size, GFP_KERNEL);
 	if (rdev->bios == NULL) {
 		pci_unmap_rom(rdev->pdev, bios);

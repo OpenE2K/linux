@@ -1,0 +1,119 @@
+menu "Elbrus MCST Device Drivers"
+
+config DDI
+	bool
+
+config DRM_MGA2
+	tristate "MGA2 video adapter"
+	depends on PCI
+	default y
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select DRM_KMS_HELPER
+	select DRM_TTM
+
+config AGAT_NIC
+	tristate "AGAT network card driver"
+	depends on (PCI && NET)
+
+config AGAT_SCSI
+	tristate "AGAT scsi card driver"
+	depends on (PCI && SCSI)
+
+config GPIO
+	tristate "PCI A97 general purpose input-output (GPIO) support"
+	depends on PCI
+
+config MSPS
+	tristate "MSPS driver"
+	depends on E2K && NUMA
+	default m
+	help
+	Driver for MSPS - needed for connect external ADC with our VK.
+
+config ELDSP
+	tristate "Elbrus DSP driver"
+	depends on E2K
+	help
+	  Driver for Elbrus DSP (eldsp), older name "DSP Cube".
+
+
+config MPV
+	tristate "MPV driver"
+	depends on MCST && PCI
+	select DDI
+
+
+config MGPM
+        tristate "MGPM PCI driver"
+        depends on PCI
+
+config MMRM
+        tristate "MMRM PCI driver"
+        depends on PCI
+        select DDI
+
+config MOKM
+    tristate "MOKM PCI driver"
+    depends on PCI
+
+
+config RDMA
+	tristate "RDMA driver"
+	depends on E2K
+	default m
+
+config RDMA_SIC
+	tristate "RDMA_SIC driver"
+	depends on (E2K || E90S) && NUMA
+	default m
+
+config RDMA_M
+	tristate "RDMA_M driver"
+	depends on (E2K || E90S) && NUMA
+	default m
+
+config MOKX
+	tristate "MOKX driver"
+	depends on E2K && NUMA
+	default m
+
+config WD
+	bool "WD driver"
+	depends on E2K
+	help
+	  System work(watchdog) control manager.
+	  /dev/watchdog major 10 minor 130
+
+config DMP_ASSIST
+	tristate "DMP_ASSIST driver"
+	depends on E2K && RECOVERY
+	---help---
+	  Pseudo-driver for online support dump-analyzer activity.
+	  Needs ....dump_analyze_cmd= ... in cmdline.
+
+#config WRNVRAM
+#	tristate "WRNVRAM driver"
+#	depends on E90
+
+config LPTOUTS
+	tristate "GPIO via LPT"
+	depends on PARPORT_MCST
+	default m
+	---help---
+	You should say Y here if you have a BCVM-INEUM module.
+	To compile this driver as a module, choose M here: the
+	module will be called lptous.
+
+config M2MLC
+	tristate "M2MLC driver"
+        depends on PCI
+	default m
+	---help---
+	  Driver for Node Interconnect Controller.
+
+source "drivers/mcst/gpu-viv/Kconfig"
+
+endmenu
+

@@ -188,6 +188,39 @@ static int console_may_schedule;
  * separated by ',', and find the message after the ';' character.
  */
 
+#ifdef CONFIG_MCST
+int shadow_console = 0;
+int shadow_console_on_panic = 0;
+
+int set_shadow_console(int value)
+{
+	int r = shadow_console;
+	shadow_console = value;
+	return r;
+}
+
+void set_shadow_console_in_panic(void)
+{
+	shadow_console = shadow_console_on_panic;
+}
+
+static int __init shadow_console_setup(char *str)
+{
+	int ret;
+
+	ret = get_option(&str, &shadow_console);
+	if (ret == 2)
+		ret = get_option(&str, &shadow_console_on_panic);
+
+	if (!ret)
+		return 1;
+	pr_info("Shadow console: %d on start, %d on panic\n",
+		shadow_console, shadow_console_on_panic);
+	return 0;
+}
+early_param("shadow_console", shadow_console_setup);
+#endif
+
 enum log_flags {
 	LOG_NOCONS	= 1,	/* already flushed, do not print to console */
 	LOG_NEWLINE	= 2,	/* text ended with a newline */
@@ -1372,6 +1405,10 @@ static int console_trylock_for_printk(unsigned int cpu, unsigned long flags)
 #ifdef CONFIG_PREEMPT_RT_FULL
 	int lock = !early_boot_irqs_disabled && !irqs_disabled_flags(flags) &&
 		(preempt_count() <= 1);
+# ifdef CONFIG_MCST
+	if (!lock)
+		lock = (system_state == SYSTEM_BOOTING);
+# endif
 #else
 	int lock = 1;
 #endif
@@ -1572,6 +1609,18 @@ static inline int forced_early_printk(const char *fmt, va_list ap)
 }
 #endif
 
+#ifdef CONFIG_MCST
+#ifdef one_char_to_shadow_console
+static void printk_to_shadow_console(char *text, size_t len)
+{
+	for (; len > 0; len--) {
+		one_char_to_shadow_console(*text);
+		text++;
+	}
+}
+#endif
+#endif
+
 asmlinkage int vprintk_emit(int facility, int level,
 			    const char *dict, size_t dictlen,
 			    const char *fmt, va_list args)
@@ -1637,6 +1686,19 @@ asmlinkage int vprintk_emit(int facility, int level,
 	 * prefix which might be passed-in as a parameter.
 	 */
 	text_len = vscnprintf(text, sizeof(textbuf), fmt, args);
+
+#ifdef CONFIG_MCST
+#ifdef one_char_to_shadow_console
+	if (shadow_console) {
+		printk_to_shadow_console(text, text_len);
+		if (shadow_console == 2) {
+			raw_spin_unlock(&logbuf_lock);
+			lockdep_on();
+			goto out_restore_irqs;
+		}
+	}
+#endif
+#endif
 
 	/* mark and strip a trailing newline */
 	if (text_len && text[text_len-1] == '\n') {
@@ -1753,6 +1815,12 @@ asmlinkage int printk_emit(int facility, int level,
 }
 EXPORT_SYMBOL(printk_emit);
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SERIAL_PRINTK)
+int console_initialized = 0;
+int use_boot_printk = 0;	/* use dump_printk if console_initialized */
+int use_boot_printk_all = 0;	/* always use dump_printk instaead of printk */
+#endif
+
 /**
  * printk - print a kernel message
  * @fmt: format string
@@ -1788,6 +1856,20 @@ asmlinkage int printk(const char *fmt, ...)
 	}
 #endif
 	va_start(args, fmt);
+#if defined(CONFIG_MCST) && defined(CONFIG_SERIAL_PRINTK)
+	if (use_boot_printk_all || (use_boot_printk && !console_initialized)) {
+# if defined(CONFIG_PRINTK_TIME)
+		unsigned long long t, t_rem;
+
+		t = ((unsigned long long) jiffies - INITIAL_JIFFIES) * 1000;
+		do_div(t, HZ);
+		t_rem = do_div(t, 1000);
+		dump_printk("[%5llu.%03llu] ", t, t_rem);
+# endif
+		dump_vprintk(fmt, args);
+		return 1;
+	}
+#endif
 	r = vprintk_emit(0, -1, NULL, 0, fmt, args);
 	va_end(args);
 
@@ -2994,4 +3076,14 @@ void show_regs_print_info(const char *log_lvl)
 	       task_thread_info(current));
 }
 
+#endif
+
+#if defined(CONFIG_MCST) && defined(CONFIG_SERIAL_PRINTK)
+void flush_printk_buffer(void)
+{
+	dump_printk("flush_printk_buffer: start\n");
+	//TODO 3.10
+	dump_printk("implement me!\n");
+	dump_printk("flush_printk_buffer: finish\n");
+}
 #endif

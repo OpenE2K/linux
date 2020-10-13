@@ -709,6 +709,11 @@ struct drm_gem_object {
 	 * simply leave it as NULL.
 	 */
 	struct dma_buf_attachment *import_attach;
+
+#ifdef CONFIG_MCST
+	//TODO 3.14 (mga2) should properly embed gem object in other structures
+	void *driver_private;
+#endif
 };
 
 #include <drm/drm_crtc.h>

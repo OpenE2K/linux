@@ -26,7 +26,7 @@
  *			   Anthony Tong <atong@uiuc.edu>
  *
  *  Generic LCD support written by Daniel Mantione, ported from 2.4.20 by Alex Kern
- *  Many Thanks to Ville Syrjälä for patches and fixing nasting 16 bit color bug.
+ *  Many Thanks to Ville Syrjц╓lц╓ for patches and fixing nasting 16 bit color bug.
  *
  *  This file is subject to the terms and conditions of the GNU General Public
  *  License. See the file COPYING in the main directory of this archive for
@@ -433,7 +433,7 @@ static int correct_chipset(struct atyfb_par *par)
 	u16 type;
 	u32 chip_id;
 	const char *name;
-	int i;
+	long i;
 
 	for (i = (int)ARRAY_SIZE(aty_chips) - 1; i >= 0; i--)
 		if (par->pci_id == aty_chips[i].pci_id)
@@ -532,8 +532,15 @@ static int correct_chipset(struct atyfb_par *par)
 	return 0;
 }
 
+#ifndef CONFIG_MCST
 static char ram_dram[] __maybe_unused = "DRAM";
 static char ram_resv[] __maybe_unused = "RESV";
+#else
+#if defined(CONFIG_FB_ATY_CT) || defined(CONFIG_FB_ATY_GX)
+static char ram_dram[] = "DRAM";
+static char ram_resv[] = "RESV";
+#endif
+#endif
 #ifdef CONFIG_FB_ATY_GX
 static char ram_vram[] = "VRAM";
 #endif /* CONFIG_FB_ATY_GX */
@@ -2167,7 +2174,7 @@ static int atyfb_pci_resume(struct pci_dev *pdev)
 
 /* Backlight */
 #ifdef CONFIG_FB_ATY_BACKLIGHT
-#define MAX_LEVEL 0xFF
+#define ATYMAX_LEVEL 0xFF
 
 static int aty_bl_get_level_brightness(struct atyfb_par *par, int level)
 {
@@ -2176,12 +2183,12 @@ static int aty_bl_get_level_brightness(struct atyfb_par *par, int level)
 
 	/* Get and convert the value */
 	/* No locking of bl_curve since we read a single value */
-	atylevel = info->bl_curve[level] * FB_BACKLIGHT_MAX / MAX_LEVEL;
+	atylevel = info->bl_curve[level] * FB_BACKLIGHT_MAX / ATYMAX_LEVEL;
 
 	if (atylevel < 0)
 		atylevel = 0;
-	else if (atylevel > MAX_LEVEL)
-		atylevel = MAX_LEVEL;
+	else if (atylevel > ATYMAX_LEVEL)
+		atylevel = ATYMAX_LEVEL;
 
 	return atylevel;
 }
@@ -2248,8 +2255,8 @@ static void aty_bl_init(struct atyfb_par *par)
 
 	info->bl_dev = bd;
 	fb_bl_default_curve(info, 0,
-			    0x3F * FB_BACKLIGHT_MAX / MAX_LEVEL,
-			    0xFF * FB_BACKLIGHT_MAX / MAX_LEVEL);
+			    0x3F * FB_BACKLIGHT_MAX / ATYMAX_LEVEL,
+			    0xFF * FB_BACKLIGHT_MAX / ATYMAX_LEVEL);
 
 	bd->props.brightness = bd->props.max_brightness;
 	bd->props.power = FB_BLANK_UNBLANK;
@@ -3487,7 +3494,12 @@ static int atyfb_setup_generic(struct pci_dev *pdev, struct fb_info *info,
 
 	/* Map in frame buffer */
 	info->fix.smem_start = addr;
+#ifdef CONFIG_MCST
+	/* Performance optimization */
+	info->screen_base = ioremap_wc(addr, 0x800000);
+#else
 	info->screen_base = ioremap(addr, 0x800000);
+#endif
 	if (info->screen_base == NULL) {
 		ret = -ENOMEM;
 		goto atyfb_setup_generic_fail;
@@ -3507,7 +3519,9 @@ static int atyfb_setup_generic(struct pci_dev *pdev, struct fb_info *info,
 		par->clk_wr_offset = aty_ld_8(CLOCK_CNTL, par) & 0x03U;
 
 	/* according to ATI, we should use clock 3 for acelerated mode */
+#ifndef CONFIG_E2K /* +MACH64 for e2k. alexmipt@mcst.ru */
 	par->clk_wr_offset = 3;
+#endif
 
 	return 0;
 
@@ -3660,7 +3674,13 @@ static int __init atyfb_atari_probe(void)
 		 * Map the video memory (physical address given)
 		 * to somewhere in the kernel address space.
 		 */
+#ifdef CONFIG_MCST
+		/* Performance optimization */
+		info->screen_base = ioremap_wc(phys_vmembase[m64_num],
+				phys_size[m64_num]);
+#else
 		info->screen_base = ioremap(phys_vmembase[m64_num], phys_size[m64_num]);
+#endif
 		info->fix.smem_start = (unsigned long)info->screen_base; /* Fake! */
 		par->ati_regbase = ioremap(phys_guiregbase[m64_num], 0x10000) +
 						0xFC00ul;

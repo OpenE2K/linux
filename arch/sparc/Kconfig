@@ -13,9 +13,9 @@ config SPARC
 	bool
 	default y
 	select ARCH_MIGHT_HAVE_PC_PARPORT if SPARC64 && PCI
-	select ARCH_MIGHT_HAVE_PC_SERIO
-	select OF
-	select OF_PROMTREE
+	select ARCH_MIGHT_HAVE_PC_SERIO   if !E90S
+	select OF					if !E90S
+	select OF_PROMTREE				if !E90S
 	select HAVE_IDE
 	select HAVE_OPROFILE
 	select HAVE_ARCH_KGDB if !SMP || SPARC64
@@ -24,14 +24,15 @@ config SPARC
 	select ARCH_WANT_OPTIONAL_GPIOLIB
 	select ARCH_HAS_ATOMIC64_DEC_IF_POSITIVE
 	select RTC_CLASS
-	select RTC_DRV_M48T59
+	select RTC_DRV_M48T59				if !E90S
 	select HAVE_DMA_ATTRS
 	select HAVE_DMA_API_DEBUG
 	select HAVE_ARCH_JUMP_LABEL if SPARC64
+	select IRQ_FORCED_THREADING
 	select GENERIC_IRQ_SHOW
 	select ARCH_WANT_IPC_PARSE_VERSION
 	select GENERIC_PCI_IOMAP
-	select HAVE_NMI_WATCHDOG if SPARC64
+	select HAVE_NMI_WATCHDOG if (SPARC64 && !E90S)
 	select HAVE_BPF_JIT
 	select HAVE_DEBUG_BUGVERBOSE
 	select GENERIC_SMP_IDLE_THREAD
@@ -42,6 +43,7 @@ config SPARC
 	select MODULES_USE_ELF_RELA
 	select ODD_RT_SIGACTION
 	select OLD_SIGSUSPEND
+	select HAVE_EL_POSIX_SYSCALL	if MCST
 
 config SPARC32
 	def_bool !64BIT
@@ -68,10 +70,10 @@ config SPARC64
 	select HAVE_CONTEXT_TRACKING
 	select HAVE_DEBUG_KMEMLEAK
 	select SPARSE_IRQ
-	select RTC_DRV_CMOS
-	select RTC_DRV_BQ4802
-	select RTC_DRV_SUN4V
-	select RTC_DRV_STARFIRE
+	select RTC_DRV_CMOS			if !E90S
+	select RTC_DRV_BQ4802			if !E90S
+	select RTC_DRV_SUN4V			if !E90S
+	select RTC_DRV_STARFIRE			if !E90S
 	select HAVE_PERF_EVENTS
 	select PERF_USE_VMALLOC
 	select IRQ_PREFLOW_FASTEOI
@@ -79,6 +81,7 @@ config SPARC64
 	select HAVE_C_RECORDMCOUNT
 	select NO_BOOTMEM
 	select ARCH_SUPPORTS_ATOMIC_RMW
+	select IRQ_FORCED_THREADING		if E90S
 
 config ARCH_DEFCONFIG
 	string
@@ -102,7 +105,7 @@ config HAVE_LATENCYTOP_SUPPORT
 	default y if SPARC64
 
 config ARCH_HIBERNATION_POSSIBLE
-	def_bool y if SPARC64
+	def_bool y if SPARC64 && !E90S
 
 config AUDIT_ARCH
 	bool
@@ -142,6 +145,34 @@ config GENERIC_ISA_DMA
 config ARCH_SUPPORTS_DEBUG_PAGEALLOC
 	def_bool y if SPARC64
 
+if SPARC64
+menu "Elbrus90S-micro machine setup"
+config E90S
+	bool "Elbrus90-micro machine suport"
+	default y
+	help
+	  SPARC E90S is a family of RISC microprocessors designed and marketed by
+	  MCST, incorporated.
+	  <http://www.mcst.ru/>
+
+config RMO
+	bool	"Relaxed memory order (RMO) model"
+	---help---
+	  Unlike Ultra E90S have slow Total Store Order (TSO) memory model
+          implementation
+       default n
+
+config E90S_SERIALIZE_IO
+       bool	"Serialize io operations (Ch2 iteration-1 bug workaround)"
+       depends on E90S
+       default n
+endmenu
+
+config PCI_ELBRUS
+	def_bool y if E90S && PCI
+
+endif
+
 source "init/Kconfig"
 
 source "kernel/Kconfig.freezer"
@@ -174,9 +205,9 @@ config NR_CPUS
 	int "Maximum number of CPUs"
 	depends on SMP
 	range 2 32 if SPARC32
-	range 2 1024 if SPARC64
+	range 2 16 if SPARC64
 	default 32 if SPARC32
-	default 64 if SPARC64
+	default 16 if SPARC64
 
 source kernel/Kconfig.hz
 
@@ -214,12 +245,12 @@ config SPARC32_SMP
 config SPARC64_SMP
 	bool
 	default y
-	depends on SPARC64 && SMP
+	depends on SPARC64 && SMP && !E90S
 
 config EARLYFB
 	bool "Support for early boot text console"
 	default y
-	depends on SPARC64
+	depends on SPARC64 && !E90S
 	help
 	  Say Y here to enable a faster early framebuffer boot console.
 
@@ -242,7 +273,7 @@ config SECCOMP
 
 config HOTPLUG_CPU
 	bool "Support for hot-pluggable CPUs"
-	depends on SPARC64 && SMP
+	depends on SPARC64 && SMP && !E90S
 	help
 	  Say Y here to experiment with turning CPUs off and on.  CPUs
 	  can be controlled through /sys/devices/system/cpu/cpu#.
@@ -254,7 +285,7 @@ endif
 
 config US3_MC
 	tristate "UltraSPARC-III Memory Controller driver"
-	depends on SPARC64
+	depends on SPARC64 && !E90S
 	default y
 	help
 	  This adds a driver for the UltraSPARC-III memory controller.
@@ -306,7 +337,7 @@ endif
 
 config SCHED_SMT
 	bool "SMT (Hyperthreading) scheduler support"
-	depends on SPARC64 && SMP
+	depends on SPARC64 && SMP && !E90S
 	default y
 	help
 	  SMT scheduler support improves the CPU scheduler's decision making
@@ -432,15 +463,17 @@ endmenu
 menu "Bus options (PCI etc.)"
 config SBUS
 	bool
+	depends on !E90S
 	default y
 
 config SBUSCHAR
 	bool
+	depends on !E90S
 	default y
 
 config SUN_LDOMS
 	bool "Sun Logical Domains support"
-	depends on SPARC64
+	depends on SPARC64 && !E90S
 	help
 	  Say Y here is you want to support virtual devices via
 	  Logical Domains.
@@ -458,7 +491,7 @@ config PCI
 	  All of these platforms are extremely obscure, so say N if unsure.
 
 config PCI_DOMAINS
-	def_bool PCI if SPARC64
+	def_bool PCI if SPARC64 && !E90S
 
 config PCI_SYSCALL
 	def_bool PCI
@@ -491,11 +524,13 @@ config SPARC_GRPCI2
 	help
 	  Say Y here to include the GRPCI2 Host Bridge Driver.
 
+source "arch/l/pci/Kconfig"
 source "drivers/pci/Kconfig"
 
 source "drivers/pcmcia/Kconfig"
 
 config SUN_OPENPROMFS
+	depends on !E90S
 	tristate "Openprom tree appears in /proc/openprom"
 	help
 	  If you say Y, the OpenPROM device tree will be available as a
@@ -512,7 +547,7 @@ config SUN_OPENPROMFS
 config SPARC64_PCI
 	bool
 	default y
-	depends on SPARC64 && PCI
+	depends on SPARC64 && PCI && !E90S
 
 config SPARC64_PCI_MSI
 	bool
@@ -563,3 +598,5 @@ source "security/Kconfig"
 source "crypto/Kconfig"
 
 source "lib/Kconfig"
+
+source "arch/l/Kconfig"

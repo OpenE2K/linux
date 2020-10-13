@@ -2574,6 +2574,9 @@ int radeon_asic_init(struct radeon_device *rdev)
 		/* FIXME: not supported yet */
 		return -EINVAL;
 	}
+#ifdef CONFIG_MCST
+	rdev->has_uvd = false;
+#endif
 
 	if (rdev->flags & RADEON_IS_IGP) {
 		rdev->asic->pm.get_memory_clock = NULL;

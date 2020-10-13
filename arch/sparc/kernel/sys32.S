@@ -36,6 +36,19 @@ STUB:	sra	REG1, 0, REG1; \
 	jmpl	%g1 + %lo(SYSCALL), %g0; \
 	sra	REG3, 0, REG3
 
+#ifdef CONFIG_MCST
+#define SIGN4(STUB,SYSCALL,REG1,REG2,REG3,REG4) \
+	.align  32; \
+	.globl  STUB; \
+STUB:   sra     REG1, 0, REG1; \
+	sethi   %hi(SYSCALL), %g1; \
+	sra     REG2, 0, REG2; \
+	sra     REG3, 0, REG3; \
+	jmpl    %g1 + %lo(SYSCALL), %g0; \
+	sra     REG4, 0, REG4
+SIGN4(sys32_atomic, sys_atomic, %o0, %o1, %o3, %o4)
+#endif
+
 SIGN1(sys32_readahead, compat_sys_readahead, %o0)
 SIGN2(sys32_fadvise64, compat_sys_fadvise64, %o0, %o4)
 SIGN2(sys32_fadvise64_64, compat_sys_fadvise64_64, %o0, %o5)

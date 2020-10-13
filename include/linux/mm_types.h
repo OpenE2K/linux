@@ -383,7 +383,9 @@ struct mm_struct {
 	unsigned long start_code, end_code, start_data, end_data;
 	unsigned long start_brk, brk, start_stack;
 	unsigned long arg_start, arg_end, env_start, env_end;
-
+#ifdef CONFIG_MCST_RT
+	unsigned long extra_vm_flags;
+#endif /* CONFIG_MCST_RT */
 	unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
 
 	/*
@@ -395,6 +397,11 @@ struct mm_struct {
 	struct linux_binfmt *binfmt;
 
 	cpumask_var_t cpu_vm_mask_var;
+
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	//TODO 3.10 move to mm_context_t
+	i386_pgd_t *sec_pgd;	/* secondary space page global directory */
+#endif
 
 	/* Architecture-specific MM context */
 	mm_context_t context;
@@ -456,6 +463,20 @@ struct mm_struct {
 	struct uprobes_state uprobes_state;
 #ifdef CONFIG_PREEMPT_RT_BASE
 	struct rcu_head delayed_drop;
+#endif
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	struct {
+		struct user_struct *user; /* structure used for accounting */
+		struct list_head shared_objects; /* shared objects in this mm */
+		struct allocated_private_mutex_descs *mutexes;
+		struct allocated_private_other_descs *others;
+		struct rw_semaphore lock; /* protects list of private objects */
+		/* If not set, every descriptor of a shared object is associated
+		 * with it's user counterpart and all invalid invocations are
+		 * detected, however operations on shared objects will have
+		 * worse execution time. */
+		char unsafe_shared_objects;
+	} el_posix;
 #endif
 };
 

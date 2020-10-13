@@ -1,0 +1,9 @@
+Package: linux-firmware-xxVERSIONPATCHLEVELxx-xxSARCHPKGxx
+Source: linux-xxLOCALVERSIONxx
+Version: xxLOCALVERSIONxx
+Architecture: xxARCHPKGxx
+Maintainer: MCST Kernel Mainteiners <debian@mcst.ru>
+Provides: linux-firmware, linux-firmware-xxVERSIONPATCHLEVELxx
+Section: kernel
+Priority: optional
+Description: Firmware related to Linux kernel. Version xxLOCALVERSIONxx.

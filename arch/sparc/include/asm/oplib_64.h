@@ -99,7 +99,12 @@ extern unsigned char prom_get_idprom(char *idp_buffer, int idpbuf_size);
 extern void prom_console_write_buf(const char *buf, int len);
 
 /* Prom's internal routines, don't use in kernel/boot code. */
+#ifdef CONFIG_E90S
+#define prom_printf	printk
+#else
 extern __printf(1, 2) void prom_printf(const char *fmt, ...);
+#endif /*CONFIG_E90S*/
+
 extern void prom_write(const char *buf, unsigned int len);
 
 /* Multiprocessor operations... */

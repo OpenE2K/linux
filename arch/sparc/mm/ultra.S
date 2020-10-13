@@ -16,6 +16,9 @@
 #include <asm/cacheflush.h>
 #include <asm/hypervisor.h>
 #include <asm/cpudata.h>
+#ifdef CONFIG_E90S
+#include <asm/e90s.h>
+#endif /*CONFIG_E90S*/
 
 	/* Basically, most of the Spitfire vs. Cheetah madness
 	 * has to do with the fact that Cheetah does not support
@@ -152,6 +155,9 @@ __spitfire_flush_tlb_mm_slow:
 	.align		32
 	.globl		__flush_icache_page
 __flush_icache_page:	/* %o0 = phys_page */
+#ifdef	CONFIG_RMO
+	membar		#StoreStore
+#endif	/* CONFIG_RMO */
 	srlx		%o0, PAGE_SHIFT, %o0
 	sethi		%hi(PAGE_OFFSET), %g1
 	sllx		%o0, PAGE_SHIFT, %o0
@@ -300,6 +306,7 @@ __cheetah_flush_dcache_page: /* 11 insns */
 	 nop
 #endif /* DCACHE_ALIASING_POSSIBLE */
 
+#ifdef	CONFIG_SPARC64_SUN4V
 	/* Hypervisor specific versions, patched at boot time.  */
 __hypervisor_tlb_tl0_error:
 	save		%sp, -192, %sp
@@ -382,6 +389,7 @@ __hypervisor_flush_dcache_page:	/* 2 insns */
 	retl
 	 nop
 #endif
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 tlb_patch_one:
 1:	lduw		[%o1], %g1
@@ -527,11 +535,13 @@ xcall_sync_tick:
 
 661:	rdpr		%pstate, %g2
 	wrpr		%g2, PSTATE_IG | PSTATE_AG, %pstate
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	nop
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	rdpr		%pil, %g2
 	wrpr		%g0, PIL_NORMAL_MAX, %pil
@@ -574,6 +584,9 @@ xcall_fetch_glob_regs:
 	sllx		%g2, TRAP_BLOCK_SZ_SHIFT, %g2
 	add		%g7, %g2, %g7
 	ldx		[%g7 + TRAP_PER_CPU_THREAD], %g3
+#ifdef	CONFIG_RMO
+	membar		#StoreStore
+#endif	/* CONFIG_RMO */
 	stx		%g3, [%g1 + GR_SNAP_THREAD]
 	retry
 
@@ -686,6 +699,7 @@ xcall_flush_dcache_page_spitfire: /* %g1 == physical page address
 	nop
 	nop
 
+#ifdef	CONFIG_SPARC64_SUN4V
 	/* %g5:	error
 	 * %g6:	tlb op
 	 */
@@ -773,6 +787,7 @@ __hypervisor_xcall_flush_tlb_kernel_range: /* 25 insns */
 	mov		%g7, %o2
 	membar		#Sync
 	retry
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	/* These just get rescheduled to PIL vectors. */
 	.globl		xcall_call_function
@@ -810,6 +825,7 @@ xcall_kgdb_capture:
 #endif /* CONFIG_SMP */
 
 
+#ifdef	CONFIG_SPARC64_SUN4V
 	.globl		hypervisor_patch_cachetlbops
 hypervisor_patch_cachetlbops:
 	save		%sp, -128, %sp
@@ -876,3 +892,39 @@ hypervisor_patch_cachetlbops:
 
 	ret
 	 restore
+#endif	/*CONFIG_SPARC64_SUN4V*/
+
+
+#ifdef CONFIG_E90S
+        .globl          xcall_dump_stack_chain
+xcall_dump_stack_chain:
+        rdpr            %pstate, %g2
+        wrpr            %g2, PSTATE_IG | PSTATE_AG, %pstate
+        rdpr            %pil, %g2
+        wrpr            %g0, 15, %pil
+        sethi           %hi(110f), %g7
+        b,pt            %xcc, etrap_irq
+110:     or             %g7, %lo(110b), %g7
+        call            dump_backtrace_smp
+         add            %sp, PTREGS_OFF, %o0
+        clr             %l6
+        /* Has to be a non-v9 branch due to the large distance. */
+        b               rtrap_xcall
+         ldx            [%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
+
+	.globl		e90s_async_data_error
+e90s_async_data_error:
+	setx	BASE_NODE0 + NBSR_INT_CFG, %g3, %g1
+	stwa	%g0, [%g1]ASI_CONFIG
+	set		1<<PIL_E90S_ASYNC_ERR, %g2
+	wr		%g2, 0x0, %set_softint
+	retry
+
+	.globl		e90s_async_data_error_tl1
+e90s_async_data_error_tl1:
+	setx	BASE_NODE0 + NBSR_INT_CFG, %g3, %g1
+	stwa	%g0, [%g1]ASI_CONFIG
+	set		1<<PIL_E90S_ASYNC_ERR, %g2
+	wr		%g2, 0x0, %set_softint
+	retry
+#endif /*CONFIG_E90S*/

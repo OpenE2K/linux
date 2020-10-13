@@ -1,0 +1,121 @@
+I. Basic description.
+
+Function graph tracer allows tracing of both the entry and the exit of each
+kernel fuction. It does so with the help from compiler which inserts a call
+to user-defined _mcount() function at the beginning of every kernel function
+that is not marked with 'notrace'.
+
+When implementaion based on chain stack is selected (configuration option is
+called FUNCTION_GRAPH_TRACER_CR_MAGIC), it works like this: 
+
+parent()         __return_to_handler_XX()            parent()
+     \                  /          \                 /
+      \                /            \               /
+       \              /              \             /
+  traced_func() traced_func() return_to_hook() return_to_hook()
+         \          /                  \         /
+          \        /                    \       /
+           \      /                      \     /
+           _mcount()              ftrace_return_to_handler()
+
+1. Traced function calls _mcount(). _mcount() checks that graph tracing
+is enabled and just returns if it is not.
+2. _mcount() calls ftrace_push_return_trace() which does all tracing
+stuff that should be done on enter.
+3. _mcount() replaces return ip in traced function's stack frame with
+the ip of __return_to_handler_XX() (where XX is wbs = (rbs + rcur) of
+traced function).
+4. When traced function returns, register window is switched to its
+parent's one, but ip is set to __return_to_handler_XX().
+5. __return_to_handler_XX() just calls return_to_hook() with correct
+wbs. This sets the new register window so return_to_hook() may not worry
+about corrupting registers. At this point the return value that the traced
+function returned is stored in dr0 (but beware that it could be void and
+dr0 could contain empty or diagnostic word).
+6. return_to_hook() calls ftrace_return_to_handler() which does all tracing
+stuff needed on exit and returns the original return ip in db[0]. It does
+not touch dr0-dr7 registers which may store return value of traced_func().
+7. return_to_hook() writes the original return ip into cr0.hi
+and returns to parent().
+
+
+II. But there is another stack.
+
+The scheme shown above works fine with chain and register stacks, but user
+stack requires special attention. According to the calling conventions the
+caller must allocate space in stack for all passed parameters.
+
+For _mcount() and all functions called from it this is done by compiler.
+
+return_to_hook() has 0 parameters so __return_to_handler_XX() may not
+allocate stack. And since ftrace_return_to_handler() takes one argument,
+return_to_hook() must allocate 8 bytes (16 bytes with alignment) before
+the call.
+
+Freeing of user stack is done automatically by hardware on return.
+
+
+III. Disable or not disable interrupts?
+
+To understand what's written below you must first look at
+ftrace_push_return_trace() and ftrace_pop_return_trace() functions
+in kernel/trace/trace_functions_graph.c to understand what 'curr_ret_stack'
+and 'ret_stack' mean.
+
+Let's consider this typical stack:
+
+ .............................
+ <user funcs>					- not traced
+ <kernel funcs>					- not traced
+ return_to_handler_xx				- not traced
+ return_to_handler_xx				- traced
+ return_to_hook					- traced
+ return_to_handler_xx				- not traced
+ return_to_handler_xx				- traced
+ <kernel func>					- traced
+ <kernel funcs>					- not traced
+ <user funcs>					- not traced
+ return_to_handler_xx //ttable_entry		- not traced
+ return_to_handler_xx //sys_clone		- traced
+ ............................
+
+Here is the problem: child inherits parent's stack, but some ips in that
+stack were replaced by hooks.
+
+Note that return_to_hook() not only is never traced, but a pointer to it
+in the chain stack can never be replaced by return_to_handler_xx(). This
+is because return_to_hook calls only 'notrace' functions and trap handlers
+also have this attribute.
+
+There is no way of telling whether the function which was replaced by
+return_to_hook() finished tracing (i.e. decremented current->curr_ret_stack)
+or not before it was interrupted. Also if _mcount is interrupted right
+after we increment curr_ret_stack, ret_stack may contain bad (not filled)
+entries.
+
+So if we allow interrupts in these hooks it is not possible to remove all
+ftraces' entries from the stack before clone() and child will have those
+hooks in its stack which is definitely bad.
+
+Thus the only way out (besides disabling interrupts) is to deal with two
+situations: child returning to return_to_handler_xx() and to return_to_hook().
+Of course, child must know the original return points, so the first thing
+to do is to copy 'ret_stack' from the parent's task_struct to child's one.
+
+Handling returns to return_to_handler_xx() is easy, but returns to
+return_to_hook() are harder to deal with. If return_to_hook() was
+interrupted in the middle of ftrace_return_to_handle(), it is unclear
+how ftrace would handle an unmatched return when child will get to this
+point. So the only way out is to disable interrupts and check whether we
+are the child before calling into the ftrace framework.
+
+But another problem arises: as was mentioned before, there can be empty
+records, and they must not be considered as unmatched. Thus the only way
+out is to disable interrupts before calling into ftrace framework from
+_mcount too.
+
+So it is necessary to disable interrupts before calling any ftrace
+function (ftrace_return_to_handler(), ftrace_push_return_trace() and
+ftrace_graph_entry()). But if this is the case, it is much simpler to
+explicitly remove all pointers to hooks from child's chain stack in
+copy_thread() function.

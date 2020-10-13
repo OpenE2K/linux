@@ -31,6 +31,12 @@ static inline int rt_task(struct task_struct *p)
 {
 	return rt_prio(p->prio);
 }
+#ifdef CONFIG_MCST_RT
+static inline int rt_user_task(struct task_struct *p)
+{
+	return (rt_prio(p->prio) && p->mm);
+}
+#endif
 
 #ifdef CONFIG_RT_MUTEXES
 extern int rt_mutex_getprio(struct task_struct *p);
@@ -43,6 +49,9 @@ static inline bool tsk_is_pi_blocked(struct task_struct *tsk)
 	return tsk->pi_blocked_on != NULL;
 }
 #else
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+extern void rt_mutex_setprio(struct task_struct *p, int prio);
+#endif
 static inline int rt_mutex_getprio(struct task_struct *p)
 {
 	return p->normal_prio;

@@ -1,0 +1,54 @@
+menu "Kernel hacking"
+
+config TRACE_IRQFLAGS_SUPPORT
+        def_bool y
+
+
+source "lib/Kconfig.debug"
+
+config E2K_DEBUG_KERNEL
+	bool "Enable e2k arch kernel debugging"
+	depends on DEBUG_KERNEL
+	default y
+
+config DEBUG_IRQ
+	bool "Check of IRQ enabled/disabled using both PSR & UPSR"
+	depends on E2K_DEBUG_KERNEL
+	default n
+
+config CHECK_LOCK_AREAS
+	bool "Enable checker of locked/unlocked areas of hardware stacks"
+	depends on E2K_DEBUG_KERNEL
+	default n
+
+config CHECK_KERNEL_USD_SIZE
+	bool "Enable checker of size of kernel local data stack"
+	depends on E2K_DEBUG_KERNEL
+	default n
+
+config DEBUG_PT_REGS
+	bool "Enable checker of pt_regs structure linking"
+	depends on E2K_DEBUG_KERNEL
+	default n
+ 
+config DEBUG_KMEM_AREA
+	bool "Enable checker of kernel memory area getting and freeing"
+	depends on E2K_DEBUG_KERNEL
+	default n
+
+config DEBUG_STACK_USAGE
+	bool "Stack utilization instrumentation"
+	depends on DEBUG_KERNEL
+	help
+	  Enables the display of the minimum amount of free stack which each
+	  task has ever had available in the sysrq-T and sysrq-P debug output.
+
+	  This option will slow down process creation somewhat.
+
+config ARCH_SUPPORTS_DEBUG_PAGEALLOC
+	def_bool y
+
+source	"arch/l/Kconfig.debug"
+
+
+endmenu

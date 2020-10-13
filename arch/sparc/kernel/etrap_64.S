@@ -47,7 +47,11 @@ etrap_syscall:	TRAP_LOAD_THREAD_REG(%g6, %g1)
 		brnz,pn	%g3, 1f
 		 add	%g6, %g2, %g2
 		wr	%g0, 0, %fprs
-1:		rdpr	%tpc, %g3
+		ba,a,pt	%xcc, 2f
+		 mov	0, %g3
+1:		mov	1, %g3 /* nothing to save */
+2:		stb	%g3, [%g6 + TI_FPDEPTH]
+		rdpr	%tpc, %g3
 
 		stx	%g1, [%g2 + STACKFRAME_SZ + PT_V9_TSTATE]
 		rdpr	%tnpc, %g1
@@ -93,9 +97,8 @@ etrap_save:	save	%g2, -STACK_BIAS, %sp
 		wrpr	%g0, 0, %canrestore
 		sll	%g2, 3, %g2
 
-		/* Set TI_SYS_FPDEPTH to 1 and clear TI_SYS_NOERROR.  */
-		mov	1, %l5
-		sth	%l5, [%l6 + TI_SYS_NOERROR]
+		/* Clear TI_SYS_NOERROR.  */
+		stb	%g0, [%l6 + TI_SYS_NOERROR]
 
 		wrpr	%g3, 0, %otherwin
 		wrpr	%g2, 0, %wstate
@@ -132,7 +135,11 @@ etrap_save:	save	%g2, -STACK_BIAS, %sp
 		stx	%g6, [%sp + PTREGS_OFF + PT_V9_G6]
 		stx	%g7, [%sp + PTREGS_OFF + PT_V9_G7]
 		or	%l7, %l0, %l7
+#ifndef	CONFIG_RMO
 		sethi	%hi(TSTATE_TSO | TSTATE_PEF), %l0
+#else	/* CONFIG_RMO */
+		sethi	%hi(TSTATE_RMO | TSTATE_PEF), %l0
+#endif	/* CONFIG_RMO */
 		or	%l7, %l0, %l7
 		wrpr	%l2, %tnpc
 		wrpr	%l7, (TSTATE_PRIV | TSTATE_IE), %tstate
@@ -151,15 +158,15 @@ etrap_save:	save	%g2, -STACK_BIAS, %sp
 
 3:		mov	ASI_P, %l7
 		ldub	[%l6 + TI_FPDEPTH], %l5
-		add	%l6, TI_FPSAVED + 1, %l4
-		srl	%l5, 1, %l3
-		add	%l5, 2, %l5
 
-		/* Set TI_SYS_FPDEPTH to %l5 and clear TI_SYS_NOERROR.  */
-		sth	%l5, [%l6 + TI_SYS_NOERROR]
+		/* clear TI_SYS_NOERROR. */
+		stb	%g0, [%l6 + TI_SYS_NOERROR]
+		brnz,a,pn       %l5, 1f
+		 mov		1, %l5
+1:		add	%l6, TI_FPSAVED + 1, %l4
+		srl	%l5, 1, %l3
 		ba,pt	%xcc, 2b
 		 stb	%g0, [%l4 + %l3]
-		nop
 
 etraptl1:	/* Save tstate/tpc/tnpc of TL 1-->4 and the tl register itself.
 		 * We place this right after pt_regs on the trap stack.

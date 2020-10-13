@@ -32,6 +32,10 @@
 #include <asm/lsu.h>
 #include <asm/sections.h>
 #include <asm/mmu_context.h>
+#include <asm/irq.h>
+#ifdef CONFIG_MCST_RT
+#include <linux/sched/rt.h>
+#endif
 
 int show_unhandled_signals = 1;
 
@@ -291,6 +295,14 @@ asmlinkage void __kprobes do_sparc64_fault(struct pt_regs *regs)
 	unsigned long address, mm_rss;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
+#ifdef CONFIG_MCST_RT
+	if (my_rt_cpu_data->modes & RTCPUM_NO_PG_FAULT ||
+		((rts_act_mask & RTS_PGFLT_RTWRN && rt_task(current)) ||
+			rts_act_mask & RTS_PGFLT_WRN)) {
+		pr_err("page fault on cpu #%d. pid = %d (%s)\n",
+			raw_smp_processor_id(), current->pid, current->comm);
+	}
+#endif
 	fault_code = get_thread_fault_code();
 
 	if (notify_page_fault(regs))
@@ -544,3 +556,124 @@ do_sigbus:
 	if (regs->tstate & TSTATE_PRIV)
 		goto handle_kernel_fault;
 }
+
+#ifdef CONFIG_E90S
+#include <asm/io.h>
+#include <asm/e90s.h>
+
+/*	Регистр AFSR*/
+/* Биты 	 Название 	 Режим доступа 	 Reset 	 Описание*/
+/*63:32 	Резерв 				RO 	X 	Резерв*/
+#define	AFSR_L1_WAY 		(F << 28) 	/*RW 	X 	L1 way mask ? Столбцы в L1, в которых случилась ошибка*/
+/*27:25 	Резерв 				RO 	X 	Резерв*/
+#define AFSR_L2_ERR 		(3 << 23)	/*RW 	X 	L2 error code ? Код ошибки L2:*/
+		/*
+		* 00 ? Нет ошибки	
+		* 01 ? Ошибка данных
+		* 10 ? Не существующий адрес
+		* 11 ? Ошибка протокола 
+		*/
+#define AFSR_L2_SIZE 		(3 << 21)	/*RW 	X 	L2 size - Размер для размерных обращений в L2*/
+#define AFSR_L2_CFG 		(1 << 20)	/*RW 	X 	L2 configuration access - Конфиграционный доступ в L2*/
+#define	AFSR_L2_OP		(F << 16) 	/*RW 	X 	L2 operation code - Опкод, с которым обращались в L2*/
+/*14:15 	Резерв			 	RO 	0 	Резерв*/
+#define	AFSR_ERR_IOCC		(1 << 13) 	/*RW 	X 	Error in IOCC - Неисправимая ошибка в IOCC.*/
+#define	AFSR_ERR_SC		(1 << 12) 	/*RW 	X 	 Error in SC - Неисправимая ошибка в SC.*/
+#define	AFSR_ERR_IOMMU 		(1 << 11) 	/*RW 	X 	Error in IOMMU - Неисправимая ошибка в IOMMU.*/
+#define	AFSR_ERR_IC_SNOOP_MULTIHIT	(1 << 10) 	/*RW 	X 	IC snoop multihit - Multihit при снупировании IC.*/
+#define	AFSR_ERR_IC_SNOOP	(1 << 9) 	/*RW 	X 	Error IC snoop - Неисправимая ошибка при снупировании IC.*/
+#define	AFSR_ERR_RB_DATA 	(1 << 8) 	/*RW 	X 	Error L1 repeat data read - Неисправимая ошибка при чтении данных при повторе запроса из repeat buff.*/
+#define AFSR_ERR_RB_TAG 	(1 << 7)	/*RW 	X 	Error L1 repeat tag read - Неисправимая ошибка при чтении тегов при повторе запроса из repeat buff.*/
+#define AFSR_ERR_SNOOP_DATA 	(1 << 6)	/*RW 	X 	Error L1 snoop data read - Неисправимая ошибка при чтении данных для снупинга*/
+#define AFSR_ERR_SNOOP_TAG 	(1 << 5)	/*RW 	X 	Error L1 snoop tag read - Неисправимая ошибка при чтении тегов для снупинга*/
+#define	AFSR_ERR_CWB		(1 << 4) 	/*RW 	X 	Error L1 write-back - Неисправимая ошибка при чтении данных для вытеснения из L1*/
+#define AFSR_ERR_L2_WR		(1 << 3)	/*RW 	X 	Error L2 write - Неисправимая ошибка при записи L2*/
+#define	AFSR_ERR_L2_RD		(1 << 2)	/*RW 	X 	Error L2 read - Неисправимая ошибка при чтении L2*/
+#define	AFSR_OW 		(1 << 1) 	/*RW 	X 	Overwrite - Устанавливается при исключении если бит FV уже установлен.*/
+#define	AFSR_FV 		(1 << 0) 	/*RW 	0 	Fault Valid - Значимость содержимого регистра. НЕ устанавливается при исключении fast_data_access_MMU_miss*/
+
+
+#define	L2_FAR	((2UL << 32) | (3 << 8))
+#define	L2_FSR	((2UL << 32) | (4 << 8))
+
+asmlinkage void do_async_data_error(int irq, struct pt_regs *regs)
+{
+	unsigned long asfr = readq_asi(0, ASI_AFSR);
+	unsigned long afar = readq_asi(0, ASI_AFAR);
+	unsigned long l2_fsr = readq_asi(L2_FSR, ASI_CONFIG);
+	unsigned long l2_far = readq_asi(L2_FAR, ASI_CONFIG);
+	char s[128];
+	int len;
+	int cpu = smp_processor_id();
+		
+	char *err =
+	  asfr & AFSR_ERR_IOCC		? "Error in IOCC"
+	: asfr & AFSR_ERR_SC		? "Error in SC"
+	: asfr & AFSR_ERR_IOMMU 		? "Error in IOMMU"
+	: asfr & AFSR_ERR_IC_SNOOP_MULTIHIT	? "IC snoop multihit"
+	: asfr & AFSR_ERR_IC_SNOOP	? "Error IC snoop"
+	: asfr & AFSR_ERR_RB_DATA 	? "Error L1 repeat data read"
+	: asfr & AFSR_ERR_RB_TAG 	? "Error L1 repeat tag read"
+	: asfr & AFSR_ERR_SNOOP_DATA 	? "Error L1 snoop data read"
+	: asfr & AFSR_ERR_SNOOP_TAG 	? "Error L1 snoop tag read"
+	: asfr & AFSR_ERR_RB_DATA	? "Error L1 repeat data read" 
+	: asfr & AFSR_ERR_RB_TAG 	? "Error L1 repeat tag read" 
+	: asfr & AFSR_ERR_SNOOP_DATA 	? "Error L1 snoop data read" 
+	: asfr & AFSR_ERR_SNOOP_TAG 	? "Error L1 snoop tag read" 
+	: asfr & AFSR_ERR_CWB		? "Error L1 write-back" 
+	: asfr & AFSR_ERR_L2_WR		? "Error L2 write" 
+	: asfr & AFSR_ERR_L2_RD		? "Error L2 read"
+		: "Unknown error";
+
+	clear_softint(1 << irq);
+	len = snprintf(s, sizeof(s), "cpu %d:async data error: %s "
+			"(afsr: 0x%lx) at address 0x%lx.\n"
+			"\tpc: %lx, L2 fsr: 0x%lx, far: 0x%lx",
+			cpu, err, asfr, afar,
+			regs->tpc, l2_fsr, l2_far);
+
+	if(asfr & AFSR_ERR_IOMMU) {
+		char *str;
+		unsigned fsr = _raw_readl(BASE_NODE0 + NBSR_IOMMU_FSR);
+ 		afar = _raw_readl(BASE_NODE0 + NBSR_IOMMU_FAH);	
+		afar = (afar << 32) | 
+				_raw_readl(BASE_NODE0 + NBSR_IOMMU_FAL);
+		err =  
+		fsr & IOMMU_FSR_MULTIHIT 		? "Multihit"
+		: fsr & IOMMU_FSR_WRITE_PROTECTION	? "Write protection error"
+		: fsr & IOMMU_FSR_PAGE_MISS 		? "Page miss"
+		: fsr & IOMMU_FSR_ADDR_RNG_VIOLATION 	? "Address range violation"
+			: "Unknown error";
+		str = fsr & IOMMU_FSR_MUTIPLE_ERR ? " (Mutiple error)" :"";
+
+		snprintf(s + len, sizeof(s) - len,
+			 "\n\t\tIOMMU %s%s (afsr: 0x%lx iommu sfr: 0x%x)"
+				" at address 0x%lx",
+				err, str, asfr, fsr,  afar);
+	}
+
+	panic(s);
+}
+
+asmlinkage void do_e90s_data_access_error(struct pt_regs *regs)
+{
+	int cpu = smp_processor_id();
+	char s[128];
+	unsigned long fsr = readq_asi(TLB_SFSR, ASI_DMMU);
+	unsigned long far = readq_asi(DMMU_SFAR, ASI_DMMU);
+	sprintf(s, "cpu %d: data access error: dsfsr: 0x%lx dfar: 0x%lx",
+		 cpu, fsr, far);
+	panic(s);
+}
+
+asmlinkage void do_e90s_insn_access_error(struct pt_regs *regs)
+{
+	int cpu = smp_processor_id();
+	char s[128];
+	unsigned long fsr = readq_asi(TLB_SFSR, ASI_IMMU);
+	sprintf(s, "cpu %d: instruction access error: isfsr: 0x%lx",
+		 cpu, fsr);
+	panic(s);
+}
+
+#endif /*CONFIG_E90S*/

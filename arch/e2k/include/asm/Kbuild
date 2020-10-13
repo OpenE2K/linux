@@ -1,0 +1,6 @@
+### generic
+
+generic-y += preempt.h
+generic-y += hash.h
+generic-y += irq_work.h
+

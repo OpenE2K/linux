@@ -60,38 +60,59 @@ int swiotlb_force;
  * swiotlb_tbl_sync_single_*, to see if the memory was in fact allocated by this
  * API.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static phys_addr_t io_tlb_start[MAX_NUMNODES], io_tlb_end[MAX_NUMNODES];
+#else
 static phys_addr_t io_tlb_start, io_tlb_end;
+#endif
 
 /*
  * The number of IO TLB blocks (in groups of 64) between io_tlb_start and
  * io_tlb_end.  This is command line adjustable via setup_io_tlb_npages.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static unsigned long io_tlb_nslabs[MAX_NUMNODES];
+#else
 static unsigned long io_tlb_nslabs;
+#endif
 
 /*
  * When the IOMMU overflows we return a fallback buffer. This sets the size.
  */
 static unsigned long io_tlb_overflow = 32*1024;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static phys_addr_t io_tlb_overflow_buffer[MAX_NUMNODES];
+#else
 static phys_addr_t io_tlb_overflow_buffer;
+#endif
 
 /*
  * This is a free list describing the number of free entries available from
  * each index
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static unsigned int *io_tlb_list[MAX_NUMNODES];
+static unsigned int io_tlb_index[MAX_NUMNODES];
+#else
 static unsigned int *io_tlb_list;
 static unsigned int io_tlb_index;
+#endif
 
 /*
  * We need to save away the original address corresponding to a mapped entry
  * for the sync operations.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static phys_addr_t *io_tlb_orig_addr[MAX_NUMNODES];
+#else
 static phys_addr_t *io_tlb_orig_addr;
+#endif
 
 /*
  * Protect the above data structures in the map and unmap calls
  */
-static DEFINE_SPINLOCK(io_tlb_lock);
+static DEFINE_RAW_SPINLOCK(io_tlb_lock);
 
 static int late_alloc;
 
@@ -99,9 +120,23 @@ static int __init
 setup_io_tlb_npages(char *str)
 {
 	if (isdigit(*str)) {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		int node;
+		unsigned long nslabs;
+
+		nslabs = simple_strtoul(str, &str, 0);
+		/* avoid tail segment of size < IO_TLB_SEGSIZE */
+		nslabs = ALIGN(nslabs, IO_TLB_SEGSIZE);
+		for_each_online_node(node) {
+			if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+				continue;
+			io_tlb_nslabs[node] = nslabs;
+		}
+#else
 		io_tlb_nslabs = simple_strtoul(str, &str, 0);
 		/* avoid tail segment of size < IO_TLB_SEGSIZE */
 		io_tlb_nslabs = ALIGN(io_tlb_nslabs, IO_TLB_SEGSIZE);
+#endif
 	}
 	if (*str == ',')
 		++str;
@@ -115,7 +150,11 @@ early_param("swiotlb", setup_io_tlb_npages);
 
 unsigned long swiotlb_nr_tbl(void)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	return io_tlb_nslabs[first_online_node];
+#else
 	return io_tlb_nslabs;
+#endif
 }
 EXPORT_SYMBOL_GPL(swiotlb_nr_tbl);
 
@@ -125,7 +164,11 @@ unsigned long swiotlb_size_or_default(void)
 {
 	unsigned long size;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	size = io_tlb_nslabs[first_online_node] << IO_TLB_SHIFT;
+#else
 	size = io_tlb_nslabs << IO_TLB_SHIFT;
+#endif
 
 	return size ? size : (IO_TLB_DEFAULT_SIZE);
 }
@@ -137,6 +180,326 @@ static dma_addr_t swiotlb_virt_to_bus(struct device *hwdev,
 	return phys_to_dma(hwdev, virt_to_phys(address));
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static bool no_iotlb_memory[MAX_NUMNODES];
+
+static int io_tlb_addr_to_node(unsigned long addr)
+{
+	int node = NUMA_NO_NODE, i;
+
+	for_each_online_node(i) {
+		if (!NODE_DATA(i) || !NODE_DATA(i)->bdata)
+			continue;
+		if (io_tlb_start[i] && addr >= io_tlb_start[i] &&
+				addr < io_tlb_end[i]) {
+			node = i;
+			break;
+		}
+	}
+
+	return node;
+}
+
+void swiotlb_print_info(void)
+{
+	unsigned long bytes;
+	unsigned char *vstart, *vend;
+	int node;
+
+	for_each_online_node(node) {
+		if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+			continue;
+
+		if (no_iotlb_memory[node]) {
+			pr_warn("software IO TLB: No low mem on node %d\n",
+				node);
+			continue;
+		}
+
+		bytes = io_tlb_nslabs[node] << IO_TLB_SHIFT;
+
+		vstart = phys_to_virt(io_tlb_start[node]);
+		vend = phys_to_virt(io_tlb_end[node]);
+
+		printk(KERN_INFO "software IO TLB [mem %#010llx-%#010llx] (%luMB) mapped at [%p-%p] on node %d\n",
+		       (unsigned long long) io_tlb_start[node],
+		       (unsigned long long) io_tlb_end[node],
+		       bytes >> 20, vstart, vend - 1, node);
+	}
+}
+
+int __init swiotlb_init_with_tbl(char *tlb, unsigned long nslabs, int verbose,
+				 int node)
+{
+	void *v_overflow_buffer;
+	unsigned long i, bytes;
+
+	bytes = nslabs << IO_TLB_SHIFT;
+
+	io_tlb_nslabs[node] = nslabs;
+	io_tlb_start[node] = __pa(tlb);
+	io_tlb_end[node] = io_tlb_start[node] + bytes;
+
+	/*
+	 * Get the overflow emergency buffer
+	 */
+	v_overflow_buffer = alloc_bootmem_low_pages_node(NODE_DATA(node),
+					PAGE_ALIGN(io_tlb_overflow));
+	if (!v_overflow_buffer)
+		return -ENOMEM;
+
+	io_tlb_overflow_buffer[node] = __pa(v_overflow_buffer);
+
+	/*
+	 * Allocate and initialize the free list array.  This array is used
+	 * to find contiguous free memory regions of size up to IO_TLB_SEGSIZE
+	 * between io_tlb_start and io_tlb_end.
+	 */
+	io_tlb_list[node] = alloc_bootmem_pages_node(NODE_DATA(node),
+				 PAGE_ALIGN(io_tlb_nslabs[node] * sizeof(int)));
+	for (i = 0; i < io_tlb_nslabs[node]; i++)
+		io_tlb_list[node][i] = IO_TLB_SEGSIZE -
+						OFFSET(i, IO_TLB_SEGSIZE);
+	io_tlb_index[node] = 0;
+	io_tlb_orig_addr[node] = alloc_bootmem_pages_node(NODE_DATA(node),
+			PAGE_ALIGN(io_tlb_nslabs[node] * sizeof(phys_addr_t)));
+
+	if (verbose)
+		swiotlb_print_info();
+
+	return 0;
+}
+
+/*
+ * Statically reserve bounce buffer space and initialize bounce buffer data
+ * structures for the software IO TLB used to implement the DMA API.
+ */
+void  __init
+swiotlb_init(int verbose)
+{
+	size_t default_size = IO_TLB_DEFAULT_SIZE;
+	unsigned char *vstart;
+	unsigned long bytes;
+	int node;
+
+	for_each_online_node(node) {
+		if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+			continue;
+
+		if (!io_tlb_nslabs[node]) {
+			io_tlb_nslabs[node] = (default_size >> IO_TLB_SHIFT);
+			io_tlb_nslabs[node] = ALIGN(io_tlb_nslabs[node],
+						    IO_TLB_SEGSIZE);
+		}
+
+		bytes = io_tlb_nslabs[node] << IO_TLB_SHIFT;
+
+		/* Get IO TLB memory from the low pages */
+		vstart = alloc_bootmem_low_pages_node(NODE_DATA(node),
+						      PAGE_ALIGN(bytes));
+		if (vstart && !swiotlb_init_with_tbl(vstart,
+				io_tlb_nslabs[node], verbose, node))
+			return;
+
+		if (io_tlb_start[node])
+			free_bootmem(io_tlb_start[node],
+			       PAGE_ALIGN(io_tlb_nslabs[node] << IO_TLB_SHIFT));
+
+		pr_warn("Cannot allocate SWIOTLB buffer on node %d\n", node);
+		no_iotlb_memory[node] = true;
+	}
+}
+
+/*
+ * Systems with larger DMA zones (those that don't support ISA) can
+ * initialize the swiotlb later using the slab allocator if needed.
+ * This should be just like above, but with some error catching.
+ */
+int
+swiotlb_late_init_with_default_size(size_t default_size)
+{
+	unsigned long bytes, req_nslabs;
+	unsigned char *vstart;
+	unsigned int order;
+	int rc = 0, ret;
+	int node;
+
+	for_each_online_node(node) {
+		if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+			continue;
+
+		vstart = NULL;
+		req_nslabs = io_tlb_nslabs[node];
+
+		if (!io_tlb_nslabs[node]) {
+			io_tlb_nslabs[node] = (default_size >> IO_TLB_SHIFT);
+			io_tlb_nslabs[node] = ALIGN(io_tlb_nslabs[node],
+						    IO_TLB_SEGSIZE);
+		}
+
+		/*
+		 * Get IO TLB memory from the low pages
+		 */
+		order = get_order(io_tlb_nslabs[node] << IO_TLB_SHIFT);
+		io_tlb_nslabs[node] = SLABS_PER_PAGE << order;
+		bytes = io_tlb_nslabs[node] << IO_TLB_SHIFT;
+
+		while ((SLABS_PER_PAGE << order) > IO_TLB_MIN_SLABS) {
+			struct page *p = alloc_pages_node(node,
+						GFP_DMA | __GFP_NOWARN, order);
+			vstart = (p) ? (void *) page_address(p) : NULL;
+			if (vstart)
+				break;
+			order--;
+		}
+
+		if (!vstart) {
+			io_tlb_nslabs[node] = req_nslabs;
+			return -ENOMEM;
+		}
+		if (order != get_order(bytes)) {
+			printk(KERN_WARNING "Warning: only able to allocate "
+			       "%ld MB for software IO TLB\n",
+			       (PAGE_SIZE << order) >> 20);
+			io_tlb_nslabs[node] = SLABS_PER_PAGE << order;
+		}
+		ret = swiotlb_late_init_with_tbl(vstart, io_tlb_nslabs[node],
+						 node);
+		if (ret) {
+			rc = ret;
+			free_pages((unsigned long)vstart, order);
+		}
+	}
+
+	swiotlb_print_info();
+
+	return rc;
+}
+
+int
+swiotlb_late_init_with_tbl(char *tlb, unsigned long nslabs, int node)
+{
+	unsigned long i, bytes;
+	unsigned char *v_overflow_buffer;
+
+	bytes = nslabs << IO_TLB_SHIFT;
+
+	io_tlb_nslabs[node] = nslabs;
+	io_tlb_start[node] = virt_to_phys(tlb);
+	io_tlb_end[node] = io_tlb_start[node] + bytes;
+
+	memset(tlb, 0, bytes);
+
+	/*
+	 * Get the overflow emergency buffer
+	 */
+	v_overflow_buffer = (void *)__get_free_pages(GFP_DMA,
+						get_order(io_tlb_overflow));
+	if (!v_overflow_buffer)
+		goto cleanup2;
+
+	io_tlb_overflow_buffer[node] = virt_to_phys(v_overflow_buffer);
+
+	/*
+	 * Allocate and initialize the free list array.  This array is used
+	 * to find contiguous free memory regions of size up to IO_TLB_SEGSIZE
+	 * between io_tlb_start and io_tlb_end.
+	 */
+	io_tlb_list[node] = (unsigned int *)__get_free_pages(GFP_KERNEL,
+				get_order(io_tlb_nslabs[node] * sizeof(int)));
+	if (!io_tlb_list[node])
+		goto cleanup3;
+
+	for (i = 0; i < io_tlb_nslabs[node]; i++)
+		io_tlb_list[node][i] = IO_TLB_SEGSIZE - OFFSET(i,
+							       IO_TLB_SEGSIZE);
+	io_tlb_index[node] = 0;
+
+	io_tlb_orig_addr[node] = (phys_addr_t *)
+		__get_free_pages(GFP_KERNEL,
+				 get_order(io_tlb_nslabs[node] *
+					   sizeof(phys_addr_t)));
+	if (!io_tlb_orig_addr[node])
+		goto cleanup4;
+
+	memset(io_tlb_orig_addr[node], 0,
+			io_tlb_nslabs[node] * sizeof(phys_addr_t));
+
+	late_alloc = 1;
+
+	return 0;
+
+cleanup4:
+	free_pages((unsigned long)io_tlb_list[node],
+			get_order(io_tlb_nslabs[node] * sizeof(int)));
+	io_tlb_list[node] = NULL;
+cleanup3:
+	free_pages((unsigned long)v_overflow_buffer,
+		   get_order(io_tlb_overflow));
+	io_tlb_overflow_buffer[node] = 0;
+cleanup2:
+	io_tlb_end[node] = 0;
+	io_tlb_start[node] = 0;
+	io_tlb_nslabs[node] = 0;
+	return -ENOMEM;
+}
+
+void __init swiotlb_free(void)
+{
+	int node;
+
+	for_each_online_node(node) {
+		if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+			continue;
+
+		if (!io_tlb_orig_addr[node])
+			return;
+
+		if (late_alloc) {
+			free_pages((unsigned long)
+				phys_to_virt(io_tlb_overflow_buffer[node]),
+				get_order(io_tlb_overflow));
+			free_pages((unsigned long)io_tlb_orig_addr[node],
+				   get_order(io_tlb_nslabs[node] *
+					     sizeof(phys_addr_t)));
+			free_pages((unsigned long)io_tlb_list[node],
+				   get_order(io_tlb_nslabs[node] *
+					     sizeof(int)));
+			free_pages((unsigned long)
+				phys_to_virt(io_tlb_start[node]),
+				get_order(io_tlb_nslabs[node] << IO_TLB_SHIFT));
+		} else {
+			free_bootmem_late(io_tlb_overflow_buffer[node],
+					  PAGE_ALIGN(io_tlb_overflow));
+			free_bootmem_late(__pa(io_tlb_orig_addr[node]),
+					  PAGE_ALIGN(io_tlb_nslabs[node] *
+						     sizeof(phys_addr_t)));
+			free_bootmem_late(__pa(io_tlb_list[node]),
+					  PAGE_ALIGN(io_tlb_nslabs[node] *
+						     sizeof(int)));
+			free_bootmem_late(io_tlb_start[node],
+					  PAGE_ALIGN(io_tlb_nslabs[node] <<
+						     IO_TLB_SHIFT));
+		}
+		io_tlb_nslabs[node] = 0;
+	}
+}
+
+static int is_swiotlb_buffer(phys_addr_t paddr)
+{
+	int node;
+
+	for_each_online_node(node) {
+		if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+			continue;
+
+		if (paddr >= io_tlb_start[node] && paddr < io_tlb_end[node])
+			return true;
+	}
+
+	return false;
+}
+#else
 static bool no_iotlb_memory;
 
 void swiotlb_print_info(void)
@@ -378,6 +741,7 @@ static int is_swiotlb_buffer(phys_addr_t paddr)
 {
 	return paddr >= io_tlb_start && paddr < io_tlb_end;
 }
+#endif
 
 /*
  * Bounce: copy the swiotlb buffer back to the original dma location
@@ -431,9 +795,20 @@ phys_addr_t swiotlb_tbl_map_single(struct device *hwdev,
 	unsigned long mask;
 	unsigned long offset_slots;
 	unsigned long max_slots;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
 
+	node = hwdev->numa_node;
+	if (node < 0 || node >= MAX_NUMNODES || !node_online(node))
+		node = first_online_node;
+
+	if (no_iotlb_memory[node])
+		panic("Can not allocate SWIOTLB buffer earlier and can't now provide you with the DMA bounce buffer on node %d",
+				node);
+#else
 	if (no_iotlb_memory)
 		panic("Can not allocate SWIOTLB buffer earlier and can't now provide you with the DMA bounce buffer");
+#endif
 
 	mask = dma_get_seg_boundary(hwdev);
 
@@ -464,17 +839,27 @@ phys_addr_t swiotlb_tbl_map_single(struct device *hwdev,
 	 * Find suitable number of IO TLB entries size that will fit this
 	 * request and allocate a buffer from that IO TLB pool.
 	 */
-	spin_lock_irqsave(&io_tlb_lock, flags);
+	raw_spin_lock_irqsave(&io_tlb_lock, flags);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	index = ALIGN(io_tlb_index[node], stride);
+	if (index >= io_tlb_nslabs[node])
+		index = 0;
+#else
 	index = ALIGN(io_tlb_index, stride);
 	if (index >= io_tlb_nslabs)
 		index = 0;
+#endif
 	wrap = index;
 
 	do {
 		while (iommu_is_span_boundary(index, nslots, offset_slots,
 					      max_slots)) {
 			index += stride;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+			if (index >= io_tlb_nslabs[node])
+#else
 			if (index >= io_tlb_nslabs)
+#endif
 				index = 0;
 			if (index == wrap)
 				goto not_found;
@@ -485,6 +870,32 @@ phys_addr_t swiotlb_tbl_map_single(struct device *hwdev,
 		 * contiguous buffers, we allocate the buffers from that slot
 		 * and mark the entries as '0' indicating unavailable.
 		 */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		if (io_tlb_list[node][index] >= nslots) {
+			int count = 0;
+
+			for (i = index; i < (int) (index + nslots); i++)
+				io_tlb_list[node][i] = 0;
+			for (i = index - 1; (OFFSET(i, IO_TLB_SEGSIZE) !=
+					     IO_TLB_SEGSIZE - 1) &&
+						io_tlb_list[node][i]; i--)
+				io_tlb_list[node][i] = ++count;
+			tlb_addr = io_tlb_start[node] + (index << IO_TLB_SHIFT);
+
+			/*
+			 * Update the indices to avoid searching in the next
+			 * round.
+			 */
+			io_tlb_index[node] = ((index + nslots) <
+							io_tlb_nslabs[node]
+					? (index + nslots) : 0);
+
+			goto found;
+		}
+		index += stride;
+		if (index >= io_tlb_nslabs[node])
+			index = 0;
+#else
 		if (io_tlb_list[index] >= nslots) {
 			int count = 0;
 
@@ -506,15 +917,16 @@ phys_addr_t swiotlb_tbl_map_single(struct device *hwdev,
 		index += stride;
 		if (index >= io_tlb_nslabs)
 			index = 0;
+#endif
 	} while (index != wrap);
 
 not_found:
-	spin_unlock_irqrestore(&io_tlb_lock, flags);
+	raw_spin_unlock_irqrestore(&io_tlb_lock, flags);
 	if (printk_ratelimit())
 		dev_warn(hwdev, "swiotlb buffer is full (sz: %zd bytes)\n", size);
 	return SWIOTLB_MAP_ERROR;
 found:
-	spin_unlock_irqrestore(&io_tlb_lock, flags);
+	raw_spin_unlock_irqrestore(&io_tlb_lock, flags);
 
 	/*
 	 * Save away the mapping from the original address to the DMA address.
@@ -522,7 +934,12 @@ found:
 	 * needed.
 	 */
 	for (i = 0; i < nslots; i++)
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		io_tlb_orig_addr[node][index+i] = orig_addr +
+						  (i << IO_TLB_SHIFT);
+#else
 		io_tlb_orig_addr[index+i] = orig_addr + (i << IO_TLB_SHIFT);
+#endif
 	if (dir == DMA_TO_DEVICE || dir == DMA_BIDIRECTIONAL)
 		swiotlb_bounce(orig_addr, tlb_addr, size, DMA_TO_DEVICE);
 
@@ -537,7 +954,18 @@ EXPORT_SYMBOL_GPL(swiotlb_tbl_map_single);
 phys_addr_t map_single(struct device *hwdev, phys_addr_t phys, size_t size,
 		       enum dma_data_direction dir)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
+	dma_addr_t start_dma_addr;
+
+	node = hwdev->numa_node;
+	if (node < 0 || node >= MAX_NUMNODES || !node_online(node))
+		node = first_online_node;
+
+	start_dma_addr = phys_to_dma(hwdev, io_tlb_start[node]);
+#else
 	dma_addr_t start_dma_addr = phys_to_dma(hwdev, io_tlb_start);
+#endif
 
 	return swiotlb_tbl_map_single(hwdev, start_dma_addr, phys, size, dir);
 }
@@ -550,8 +978,20 @@ void swiotlb_tbl_unmap_single(struct device *hwdev, phys_addr_t tlb_addr,
 {
 	unsigned long flags;
 	int i, count, nslots = ALIGN(size, 1 << IO_TLB_SHIFT) >> IO_TLB_SHIFT;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
+	int index;
+	phys_addr_t orig_addr;
+
+	node = io_tlb_addr_to_node(tlb_addr);
+	BUG_ON(node == NUMA_NO_NODE);
+
+	index = (tlb_addr - io_tlb_start[node]) >> IO_TLB_SHIFT;
+	orig_addr = io_tlb_orig_addr[node][index];
+#else
 	int index = (tlb_addr - io_tlb_start) >> IO_TLB_SHIFT;
 	phys_addr_t orig_addr = io_tlb_orig_addr[index];
+#endif
 
 	/*
 	 * First, sync the memory before unmapping the entry
@@ -565,8 +1005,25 @@ void swiotlb_tbl_unmap_single(struct device *hwdev, phys_addr_t tlb_addr,
 	 * While returning the entries to the free list, we merge the entries
 	 * with slots below and above the pool being returned.
 	 */
-	spin_lock_irqsave(&io_tlb_lock, flags);
+	raw_spin_lock_irqsave(&io_tlb_lock, flags);
 	{
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		count = ((index + nslots) < ALIGN(index + 1, IO_TLB_SEGSIZE) ?
+			 io_tlb_list[node][index + nslots] : 0);
+		/*
+		 * Step 1: return the slots to the free list, merging the
+		 * slots with superceeding slots
+		 */
+		for (i = index + nslots - 1; i >= index; i--)
+			io_tlb_list[node][i] = ++count;
+		/*
+		 * Step 2: merge the returned slots with the preceding slots,
+		 * if available (non zero)
+		 */
+		for (i = index - 1; (OFFSET(i, IO_TLB_SEGSIZE) !=
+				IO_TLB_SEGSIZE -1) && io_tlb_list[node][i]; i--)
+			io_tlb_list[node][i] = ++count;
+#else
 		count = ((index + nslots) < ALIGN(index + 1, IO_TLB_SEGSIZE) ?
 			 io_tlb_list[index + nslots] : 0);
 		/*
@@ -581,8 +1038,9 @@ void swiotlb_tbl_unmap_single(struct device *hwdev, phys_addr_t tlb_addr,
 		 */
 		for (i = index - 1; (OFFSET(i, IO_TLB_SEGSIZE) != IO_TLB_SEGSIZE -1) && io_tlb_list[i]; i--)
 			io_tlb_list[i] = ++count;
+#endif
 	}
-	spin_unlock_irqrestore(&io_tlb_lock, flags);
+	raw_spin_unlock_irqrestore(&io_tlb_lock, flags);
 }
 EXPORT_SYMBOL_GPL(swiotlb_tbl_unmap_single);
 
@@ -590,8 +1048,20 @@ void swiotlb_tbl_sync_single(struct device *hwdev, phys_addr_t tlb_addr,
 			     size_t size, enum dma_data_direction dir,
 			     enum dma_sync_target target)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
+	int index;
+	phys_addr_t orig_addr;
+
+	node = io_tlb_addr_to_node(tlb_addr);
+	BUG_ON(node == NUMA_NO_NODE);
+
+	index = (tlb_addr - io_tlb_start[node]) >> IO_TLB_SHIFT;
+	orig_addr = io_tlb_orig_addr[node][index];
+#else
 	int index = (tlb_addr - io_tlb_start) >> IO_TLB_SHIFT;
 	phys_addr_t orig_addr = io_tlb_orig_addr[index];
+#endif
 
 	orig_addr += (unsigned long)tlb_addr & ((1 << IO_TLB_SHIFT) - 1);
 
@@ -620,15 +1090,30 @@ void *
 swiotlb_alloc_coherent(struct device *hwdev, size_t size,
 		       dma_addr_t *dma_handle, gfp_t flags)
 {
+#ifdef CONFIG_MCST
+	dma_addr_t uninitialized_var(dev_addr);
+#else
 	dma_addr_t dev_addr;
+#endif
 	void *ret;
 	int order = get_order(size);
 	u64 dma_mask = DMA_BIT_MASK(32);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct page *p;
+	int node = hwdev->numa_node;
+	if (node < 0 || node >= MAX_NUMNODES || !node_online(node))
+		node = first_online_node;
+#endif
 
 	if (hwdev && hwdev->coherent_dma_mask)
 		dma_mask = hwdev->coherent_dma_mask;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	p = alloc_pages_node(node, flags, order);
+	ret = (p) ? (void *) page_address(p) : NULL;
+#else
 	ret = (void *)__get_free_pages(flags, order);
+#endif
 	if (ret) {
 		dev_addr = swiotlb_virt_to_bus(hwdev, ret);
 		if (dev_addr + size - 1 > dma_mask) {
@@ -726,6 +1211,11 @@ dma_addr_t swiotlb_map_page(struct device *dev, struct page *page,
 {
 	phys_addr_t map, phys = page_to_phys(page) + offset;
 	dma_addr_t dev_addr = phys_to_dma(dev, phys);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node = dev->numa_node;
+	if (node < 0 || node >= MAX_NUMNODES || !node_online(node))
+		node = first_online_node;
+#endif
 
 	BUG_ON(dir == DMA_NONE);
 	/*
@@ -742,7 +1232,11 @@ dma_addr_t swiotlb_map_page(struct device *dev, struct page *page,
 	map = map_single(dev, phys, size, dir);
 	if (map == SWIOTLB_MAP_ERROR) {
 		swiotlb_full(dev, size, dir, 1);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		return phys_to_dma(dev, io_tlb_overflow_buffer[node]);
+#else
 		return phys_to_dma(dev, io_tlb_overflow_buffer);
+#endif
 	}
 
 	dev_addr = phys_to_dma(dev, map);
@@ -750,7 +1244,11 @@ dma_addr_t swiotlb_map_page(struct device *dev, struct page *page,
 	/* Ensure that the address returned is DMA'ble */
 	if (!dma_capable(dev, dev_addr, size)) {
 		swiotlb_tbl_unmap_single(dev, map, size, dir);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		return phys_to_dma(dev, io_tlb_overflow_buffer[node]);
+#else
 		return phys_to_dma(dev, io_tlb_overflow_buffer);
+#endif
 	}
 
 	return dev_addr;
@@ -968,7 +1466,19 @@ EXPORT_SYMBOL(swiotlb_sync_sg_for_device);
 int
 swiotlb_dma_mapping_error(struct device *hwdev, dma_addr_t dma_addr)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
+	for_each_online_node(node) {
+		if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+			continue;
+		if (dma_addr == phys_to_dma(hwdev,
+					    io_tlb_overflow_buffer[node]))
+			return true;
+	}
+	return false;
+#else
 	return (dma_addr == phys_to_dma(hwdev, io_tlb_overflow_buffer));
+#endif
 }
 EXPORT_SYMBOL(swiotlb_dma_mapping_error);
 
@@ -981,6 +1491,17 @@ EXPORT_SYMBOL(swiotlb_dma_mapping_error);
 int
 swiotlb_dma_supported(struct device *hwdev, u64 mask)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
+	for_each_online_node(node) {
+		if (!NODE_DATA(node) || !NODE_DATA(node)->bdata)
+			continue;
+		if (phys_to_dma(hwdev, io_tlb_end[node] - 1) <= mask)
+			return true;
+	}
+	return false;
+#else
 	return phys_to_dma(hwdev, io_tlb_end - 1) <= mask;
+#endif
 }
 EXPORT_SYMBOL(swiotlb_dma_supported);

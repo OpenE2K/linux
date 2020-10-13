@@ -1,0 +1,10 @@
+Package: linux-libc-dev
+Source: linux-xxLOCALVERSIONxx
+Version: xxLOCALVERSIONxx
+Architecture: xxARCHPKGxx
+Maintainer: MCST Kernel Mainteiners <debian@mcst.ru>
+Conflicts: linux-headers
+Provides: linux-headers
+Section: devel
+Priority: optional
+Description: Linux support headers for userspace development.

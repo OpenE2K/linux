@@ -38,6 +38,7 @@ static inline void set_max_mapnr(unsigned long limit) { }
 #endif
 
 extern unsigned long totalram_pages;
+extern unsigned long totalreal_mem;
 extern void * high_memory;
 extern int page_cluster;
 
@@ -887,6 +888,14 @@ static inline void set_page_links(struct page *page, enum zone_type zone,
 
 static __always_inline void *lowmem_page_address(const struct page *page)
 {
+#ifdef CONFIG_E2K
+	if (TASK_IS_BINCO(current) && !IS_UPT_E3S) {
+		u64 sec = ((u64)page) & TBL_SEC_BIT;
+		struct page *__pg1 = (struct page *)((u64)page & ~TBL_SEC_BIT);
+		return (void *) ((u64) (__va(page_to_pfn(__pg1) << PAGE_SHIFT))
+					| sec);
+	}
+#endif
 	return __va(PFN_PHYS(page_to_pfn(page)));
 }
 
@@ -1010,6 +1019,9 @@ static inline int page_mapped(struct page *page)
 #define VM_FAULT_HWPOISON 0x0010	/* Hit poisoned small page */
 #define VM_FAULT_HWPOISON_LARGE 0x0020  /* Hit poisoned large page. Index encoded in upper bits */
 #define VM_FAULT_SIGSEGV 0x0040
+#ifdef CONFIG_E2K
+#define VM_FAULT_SS	0x0080  /* Special case for secondary space */
+#endif
 
 #define VM_FAULT_NOPAGE	0x0100	/* ->fault installed the pte, not return page */
 #define VM_FAULT_LOCKED	0x0200	/* ->fault locked the returned page */
@@ -1018,9 +1030,15 @@ static inline int page_mapped(struct page *page)
 
 #define VM_FAULT_HWPOISON_LARGE_MASK 0xf000 /* encodes hpage index for large hwpoison */
 
+#ifdef CONFIG_E2K
+#define VM_FAULT_ERROR	(VM_FAULT_OOM | VM_FAULT_SIGBUS | VM_FAULT_SIGSEGV | \
+			 VM_FAULT_HWPOISON | VM_FAULT_HWPOISON_LARGE | \
+			 VM_FAULT_FALLBACK | VM_FAULT_SS)
+#else
 #define VM_FAULT_ERROR	(VM_FAULT_OOM | VM_FAULT_SIGBUS | VM_FAULT_SIGSEGV | \
 			 VM_FAULT_HWPOISON | VM_FAULT_HWPOISON_LARGE | \
 			 VM_FAULT_FALLBACK)
+#endif
 
 /* Encode hstate index for a hwpoisoned large page */
 #define VM_FAULT_SET_HINDEX(x) ((x) << 12)
@@ -1161,6 +1179,13 @@ static inline int fixup_user_fault(struct task_struct *tsk,
 	BUG();
 	return -EFAULT;
 }
+#endif
+
+#ifdef CONFIG_E2K
+extern pmd_t *pmd_alloc_cont(struct mm_struct *mm, pud_t *pud,
+			     unsigned long address);
+extern pte_t *pte_alloc_cont(struct mm_struct *mm, pmd_t *pmd,
+			     unsigned long address, spinlock_t **ptlp);
 #endif
 
 extern int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, int len, int write);
@@ -1373,6 +1398,12 @@ static inline pud_t *pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long a
 
 static inline pmd_t *pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 {
+#if defined(__e2k__) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	if (TASK_IS_BINCO(current) && is_sec_table(address) &&
+			!IS_UPT_E3S && (pud_none(*pud) || pud_frozen(*pud))) {
+		return pmd_alloc_cont(mm, pud, address&(~TBL_SEC_BIT));
+	}
+#endif
 	return (unlikely(pud_none(*pud)) && __pmd_alloc(mm, pud, address))?
 		NULL: pmd_offset(pud, address);
 }
@@ -1410,7 +1441,11 @@ static inline spinlock_t *ptlock_ptr(struct page *page)
 
 static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	return ptlock_ptr(pmd_head_page(pmd));
+#else
 	return ptlock_ptr(pmd_page(*pmd));
+#endif
 }
 
 static inline bool ptlock_init(struct page *page)
@@ -1437,7 +1472,7 @@ static inline void pte_lock_deinit(struct page *page)
 	ptlock_free(page);
 }
 
-#else	/* !USE_SPLIT_PTE_PTLOCKS */
+#else /* !USE_SPLIT_PTE_PTLOCKS */
 /*
  * We use mm->page_table_lock to guard all pagetable pages of the mm.
  */
@@ -1482,6 +1517,23 @@ static inline void pgtable_page_dtor(struct page *page)
 	pte_unmap(pte);					\
 } while (0)
 
+#ifdef CONFIG_E2K
+#define pte_alloc_map(mm, vma, pmd, address) \
+	((unlikely(TASK_IS_BINCO(current) && \
+		   ADDR_IN_SS(address) && !IS_UPT_E3S)) ? \
+		pte_alloc_cont(mm, pmd, address & (~TBL_SEC_BIT), NULL) : \
+		((unlikely(pmd_none(*(pmd))) && __pte_alloc(mm, vma,	\
+							pmd, address))?	\
+			NULL: pte_offset_map(pmd, address)))
+
+#define pte_alloc_map_lock(mm, pmd, address, ptlp) \
+	((unlikely(TASK_IS_BINCO(current) && \
+		   ADDR_IN_SS(address) && !IS_UPT_E3S)) ? \
+		pte_alloc_cont(mm, pmd, address & (~TBL_SEC_BIT), ptlp) : \
+		((unlikely(pmd_none(*(pmd))) && __pte_alloc(mm, NULL,	\
+							pmd, address))?	\
+			NULL: pte_offset_map_lock(mm, pmd, address, ptlp)))
+#else
 #define pte_alloc_map(mm, vma, pmd, address)				\
 	((unlikely(pmd_none(*(pmd))) && __pte_alloc(mm, vma,	\
 							pmd, address))?	\
@@ -1491,6 +1543,7 @@ static inline void pgtable_page_dtor(struct page *page)
 	((unlikely(pmd_none(*(pmd))) && __pte_alloc(mm, NULL,	\
 							pmd, address))?	\
 		NULL: pte_offset_map_lock(mm, pmd, address, ptlp))
+#endif
 
 #define pte_alloc_kernel(pmd, address)			\
 	((unlikely(pmd_none(*(pmd))) && __pte_alloc_kernel(pmd, address))? \

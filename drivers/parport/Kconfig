@@ -53,6 +53,18 @@ config PARPORT_PC
 
 	  If unsure, say Y.
 
+config PARPORT_MCST
+	tristate "PC-style MCST hardware"
+	depends on E2K || SPARC64
+	---help---
+	  You should say Y here if you have a PC-style parallel port.
+	  MCST E3M & E90C have PC-style parallel ports.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called parport_mcst.
+
+	  If unsure, say Y.
+
 config PARPORT_SERIAL
 	tristate "Multi-IO cards (parallel and serial)"
 	depends on SERIAL_8250_PCI && PARPORT_PC && PCI

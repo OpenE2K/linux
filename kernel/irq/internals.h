@@ -53,6 +53,9 @@ enum {
 	IRQS_WAITING		= 0x00000080,
 	IRQS_PENDING		= 0x00000200,
 	IRQS_SUSPENDED		= 0x00000800,
+#ifdef CONFIG_MCST
+	IRQS_DO_ONESHOT		= 0x00001000,
+#endif
 };
 
 #include "debug.h"

@@ -34,6 +34,10 @@
 #include <linux/netdev_features.h>
 #include <net/flow_keys.h>
 
+#ifdef CONFIG_E2K
+#include <asm/iommu.h>
+#endif
+
 /* A. Checksumming of received packets by device.
  *
  * CHECKSUM_NONE:
@@ -2007,7 +2011,10 @@ static inline struct page *__skb_alloc_pages(gfp_t gfp_mask,
 	struct page *page;
 
 	gfp_mask |= __GFP_COLD;
-
+#ifdef CONFIG_E2K
+	if (!l_iommu_supported())
+		gfp_mask |= GFP_DMA;
+#endif
 	if (!(gfp_mask & __GFP_NOMEMALLOC))
 		gfp_mask |= __GFP_MEMALLOC;
 

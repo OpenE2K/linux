@@ -17,9 +17,17 @@ tl0_resv000:	BOOT_KERNEL BTRAP(0x1) BTRAP(0x2) BTRAP(0x3)
 tl0_resv004:	BTRAP(0x4)  BTRAP(0x5) BTRAP(0x6) BTRAP(0x7)
 tl0_iax:	membar #Sync
 		TRAP_NOSAVE_7INSNS(__spitfire_insn_access_exception)
+#ifdef	CONFIG_SPARC64_SUN4V
 tl0_itsb_4v:	SUN4V_ITSB_MISS
+#else
+tl0_itsb_4v:	BTRAP(0x9)
+#endif	/*CONFIG_SPARC64_SUN4V*/
+#ifndef CONFIG_E90S
 tl0_iae:	membar #Sync
 		TRAP_NOSAVE_7INSNS(__spitfire_access_error)
+#else
+tl0_iae:	TRAP(do_e90s_insn_access_error)
+#endif
 tl0_resv00b:	BTRAP(0xb) BTRAP(0xc) BTRAP(0xd) BTRAP(0xe) BTRAP(0xf)
 tl0_ill:	membar #Sync
 		TRAP_7INSNS(do_illegal_instruction)
@@ -36,20 +44,39 @@ tl0_div0:	TRAP(do_div0)
 tl0_resv029:	BTRAP(0x29) BTRAP(0x2a) BTRAP(0x2b) BTRAP(0x2c) BTRAP(0x2d) BTRAP(0x2e)
 tl0_resv02f:	BTRAP(0x2f)
 tl0_dax:	TRAP_NOSAVE(__spitfire_data_access_exception)
+#ifdef	CONFIG_SPARC64_SUN4V
 tl0_dtsb_4v:	SUN4V_DTSB_MISS
+#else
+tl0_dtsb_4v:	BTRAP(0x31)
+#endif	/*CONFIG_SPARC64_SUN4V*/
+#ifndef CONFIG_E90S
 tl0_dae:	membar #Sync
 		TRAP_NOSAVE_7INSNS(__spitfire_access_error)
+#else
+tl0_dae:	TRAP(do_e90s_data_access_error)
+#endif
 tl0_resv033:	BTRAP(0x33)
 tl0_mna:	TRAP_NOSAVE(do_mna)
 tl0_lddfmna:	TRAP_NOSAVE(do_lddfmna)
 tl0_stdfmna:	TRAP_NOSAVE(do_stdfmna)
 tl0_privact:	TRAP_NOSAVE(__do_privact)
 tl0_resv038:	BTRAP(0x38) BTRAP(0x39) BTRAP(0x3a) BTRAP(0x3b) BTRAP(0x3c) BTRAP(0x3d)
-tl0_resv03e:	BTRAP(0x3e) BTRAP(0x3f) BTRAP(0x40)
+tl0_resv03e:	BTRAP(0x3e) BTRAP(0x3f)
+#ifndef CONFIG_E90S
+		BTRAP(0x40)
+#else
+tl0_async_de:	TRAP_NOSAVE(e90s_async_data_error)
+#endif
 #ifdef CONFIG_SMP
+#ifndef CONFIG_E90S
 tl0_irq1:	TRAP_IRQ(smp_call_function_client, 1)
 tl0_irq2:	TRAP_IRQ(smp_receive_signal_client, 2)
 tl0_irq3:	TRAP_IRQ(smp_penguin_jailcell, 3)
+#else
+tl0_irq1:	BTRAP(0x41)
+tl0_irq2:	BTRAP(0x42)
+tl0_irq3:	BTRAP(0x43)
+#endif
 tl0_irq4:	TRAP_IRQ(smp_new_mmu_context_version_client, 4)
 #else
 tl0_irq1:	BTRAP(0x41)
@@ -58,20 +85,33 @@ tl0_irq3:	BTRAP(0x43)
 tl0_irq4:	BTRAP(0x44)
 #endif
 tl0_irq5:	TRAP_IRQ(handler_irq, 5)
-#ifdef CONFIG_SMP
+#if defined(CONFIG_SMP) && !defined(CONFIG_E90S)
 tl0_irq6:	TRAP_IRQ(smp_call_function_single_client, 6)
 #else
 tl0_irq6:	BTRAP(0x46)
 #endif
+#ifndef CONFIG_E90S
 tl0_irq7:	TRAP_IRQ(deferred_pcr_work_irq, 7)
+#else
+tl0_irq7:	BTRAP(0x47)
+#endif
 #if defined(CONFIG_KGDB) && defined(CONFIG_SMP)
 tl0_irq8:	TRAP_IRQ(smp_kgdb_capture_client, 8)
 #else
 tl0_irq8:	BTRAP(0x48)
 #endif
 tl0_irq9:	BTRAP(0x49)
-tl0_irq10:	BTRAP(0x4a) BTRAP(0x4b) BTRAP(0x4c) BTRAP(0x4d)
+tl0_irq10:	BTRAP(0x4a) BTRAP(0x4b) BTRAP(0x4c)
+#ifndef CONFIG_E90S
+tl0_irq13:	BTRAP(0x4d)
+#else
+tl0_irq13:	TRAP_IRQ(do_async_data_error, 13)
+#endif
+#ifndef CONFIG_E90S
 tl0_irq14:	TRAP_IRQ(timer_interrupt, 14)
+#else
+tl0_irq14:	BTRAP(0x4e)
+#endif
 tl0_irq15:	TRAP_NMI_IRQ(perfctr_irq, 15)
 tl0_resv050:	BTRAP(0x50) BTRAP(0x51) BTRAP(0x52) BTRAP(0x53) BTRAP(0x54) BTRAP(0x55)
 tl0_resv056:	BTRAP(0x56) BTRAP(0x57) BTRAP(0x58) BTRAP(0x59) BTRAP(0x5a) BTRAP(0x5b)
@@ -92,10 +132,14 @@ tl0_dcpe:	BTRAP(0x71)	/* D-cache Parity Error on Cheetah+ */
 tl0_icpe:	BTRAP(0x72)	/* I-cache Parity Error on Cheetah+ */
 tl0_resv073:	BTRAP(0x73) BTRAP(0x74) BTRAP(0x75)
 tl0_resv076:	BTRAP(0x76) BTRAP(0x77) BTRAP(0x78) BTRAP(0x79) BTRAP(0x7a) BTRAP(0x7b)
+#ifdef	CONFIG_SPARC64_SUN4V
 tl0_cpu_mondo:	TRAP_NOSAVE(sun4v_cpu_mondo)
 tl0_dev_mondo:	TRAP_NOSAVE(sun4v_dev_mondo)
 tl0_res_mondo:	TRAP_NOSAVE(sun4v_res_mondo)
 tl0_nres_mondo:	TRAP_NOSAVE(sun4v_nonres_mondo)
+#else
+tl0_resv07b:	BTRAP(0x7b) BTRAP(0x7c) BTRAP(0x7d) BTRAP(0x7e)
+#endif	/*CONFIG_SPARC64_SUN4V*/
 tl0_s0n:	SPILL_0_NORMAL
 tl0_s1n:	SPILL_1_NORMAL
 tl0_s2n:	SPILL_2_NORMAL
@@ -182,9 +226,17 @@ sparc64_ttable_tl1:
 tl1_resv000:	BOOT_KERNEL    BTRAPTL1(0x1) BTRAPTL1(0x2) BTRAPTL1(0x3)
 tl1_resv004:	BTRAPTL1(0x4)  BTRAPTL1(0x5) BTRAPTL1(0x6) BTRAPTL1(0x7)
 tl1_iax:	TRAP_NOSAVE(__spitfire_insn_access_exception_tl1)
+#ifdef	CONFIG_SPARC64_SUN4V
 tl1_itsb_4v:	SUN4V_ITSB_MISS
+#else
+tl1_itsb_4v:	BTRAP(0x9)
+#endif	/*CONFIG_SPARC64_SUN4V*/
+#ifndef CONFIG_E90S
 tl1_iae:	membar #Sync
 		TRAP_NOSAVE_7INSNS(__spitfire_access_error)
+#else
+tl1_iae:	TRAPTL1(do_e90s_insn_access_error)
+#endif
 tl1_resv00b:	BTRAPTL1(0xb) BTRAPTL1(0xc) BTRAPTL1(0xd) BTRAPTL1(0xe) BTRAPTL1(0xf)
 tl1_ill:	TRAPTL1(do_ill_tl1)
 tl1_privop:	BTRAPTL1(0x11)
@@ -201,9 +253,17 @@ tl1_div0:	TRAPTL1(do_div0_tl1)
 tl1_resv029:	BTRAPTL1(0x29) BTRAPTL1(0x2a) BTRAPTL1(0x2b) BTRAPTL1(0x2c)
 tl1_resv02d:	BTRAPTL1(0x2d) BTRAPTL1(0x2e) BTRAPTL1(0x2f)
 tl1_dax:	TRAP_NOSAVE(__spitfire_data_access_exception_tl1)
+#ifdef	CONFIG_SPARC64_SUN4V
 tl1_dtsb_4v:	SUN4V_DTSB_MISS
+#else
+tl1_dtsb_4v:	BTRAP(0x9)
+#endif	/*CONFIG_SPARC64_SUN4V*/
+#ifndef CONFIG_E90S
 tl1_dae:	membar #Sync
 		TRAP_NOSAVE_7INSNS(__spitfire_access_error)
+#else
+tl1_dae:	TRAPTL1(do_e90s_data_access_error)
+#endif
 tl1_resv033:	BTRAPTL1(0x33)
 tl1_mna:	TRAP_NOSAVE(do_mna)
 tl1_lddfmna:	TRAPTL1(do_lddfmna_tl1)
@@ -211,7 +271,11 @@ tl1_stdfmna:	TRAPTL1(do_stdfmna_tl1)
 tl1_privact:	BTRAPTL1(0x37)
 tl1_resv038:	BTRAPTL1(0x38) BTRAPTL1(0x39) BTRAPTL1(0x3a) BTRAPTL1(0x3b)
 tl1_resv03c:	BTRAPTL1(0x3c) BTRAPTL1(0x3d) BTRAPTL1(0x3e) BTRAPTL1(0x3f)
+#ifndef CONFIG_E90S
 tl1_resv040:	BTRAPTL1(0x40)
+#else
+tl1_async_de:	TRAP_NOSAVE(e90s_async_data_error_tl1)
+#endif
 tl1_irq1:	TRAP_IRQ(do_irq_tl1, 1)  TRAP_IRQ(do_irq_tl1, 2)  TRAP_IRQ(do_irq_tl1, 3)
 tl1_irq4:	TRAP_IRQ(do_irq_tl1, 4)  TRAP_IRQ(do_irq_tl1, 5)  TRAP_IRQ(do_irq_tl1, 6)
 tl1_irq7:	TRAP_IRQ(do_irq_tl1, 7)  TRAP_IRQ(do_irq_tl1, 8)  TRAP_IRQ(do_irq_tl1, 9)

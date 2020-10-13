@@ -88,6 +88,10 @@ struct gpio_chip {
 
 	void			(*dbg_show)(struct seq_file *s,
 						struct gpio_chip *chip);
+#ifdef CONFIG_MCST
+	int			(*wait_irq)(struct gpio_chip *chip,
+					    unsigned offset, void *intr_inf);
+#endif
 	int			base;
 	u16			ngpio;
 	struct gpio_desc	*desc;

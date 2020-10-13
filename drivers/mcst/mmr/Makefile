@@ -1,0 +1,25 @@
+#
+# Ported in Linux by Alexey V. Sitnikov, alexmipt@mcst.ru, MCST, 2004
+#
+
+# for sbus and pci-to-sbus module
+
+obj-$(CONFIG_MMR)	+= mmr.o
+
+EXTRA_CFLAGS += -D_KERNEL
+ifeq ($(CONFIG_MMR_OLD_VERSION), y)
+EXTRA_CFLAGS += -DMMR_OLD_VERSION
+endif
+EXTRA_CFLAGS += -D_WITHOUT_MP_INTERRUPT_
+EXTRA_CFLAGS += -D__DRV_TRANSL__
+EXTRA_CFLAGS += -D__MMR_BOARD_DRIVER__
+EXTRA_CFLAGS += -D__HIGH_INTERDRIVER_AREA_USED__
+EXTRA_CFLAGS += -D__TRANS_SPEC_INTO_BUF__
+ifeq ($(CONFIG_SBUS), y)
+EXTRA_CFLAGS += -DMY_DRIVER_BIG_ENDIAN
+endif
+#CFLAGS += -D_MP_TIME_USE_
+
+
+
+

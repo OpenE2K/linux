@@ -107,6 +107,16 @@ extern struct sun4v_2insn_patch_entry __sun4v_2insn_patch,
 
 #include <asm/scratchpad.h>
 
+
+#ifdef CONFIG_E90S
+#include <asm/apicdef.h>
+
+#define __GET_CPUID(REG)				\
+	set	APIC_ID, REG;		 		\
+	lduwa	[REG] ASI_LAPIC, REG;			\
+	srlx	REG, APIC_ID_SHIFT, REG;
+
+#else /*CONFIG_E90S*/
 #define __GET_CPUID(REG)				\
 	/* Spitfire implementation (default). */	\
 661:	ldxa		[%g0] ASI_UPA_CONFIG, REG;	\
@@ -137,6 +147,7 @@ extern struct sun4v_2insn_patch_entry __sun4v_2insn_patch,
 	nop;						\
 	nop;						\
 	.previous;
+#endif /*CONFIG_E90S*/
 
 #ifdef CONFIG_SMP
 

@@ -967,7 +967,13 @@ static int mmc_blk_issue_discard_rq(struct mmc_queue *mq, struct request *req)
 {
 	struct mmc_blk_data *md = mq->data;
 	struct mmc_card *card = md->queue.card;
+#ifdef CONFIG_MCST
+	unsigned int uninitialized_var(from);
+	unsigned int uninitialized_var(nr);
+	unsigned int uninitialized_var(arg);
+#else
 	unsigned int from, nr, arg;
+#endif
 	int err = 0, type = MMC_BLK_DISCARD;
 
 	if (!mmc_can_erase(card)) {

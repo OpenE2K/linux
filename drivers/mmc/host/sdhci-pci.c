@@ -1477,26 +1477,32 @@ static int sdhci_pci_probe(struct pci_dev *pdev,
 	dev_info(&pdev->dev, "SDHCI controller found [%04x:%04x] (rev %x)\n",
 		 (int)pdev->vendor, (int)pdev->device, (int)pdev->revision);
 
-	ret = pci_read_config_byte(pdev, PCI_SLOT_INFO, &slots);
-	if (ret)
-		return ret;
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+		pdev->device == PCI_DEVICE_ID_MCST_IDE_SDHCI) {
+		first_bar = 5;
+		slots = 1;
+	} else {
+		ret = pci_read_config_byte(pdev, PCI_SLOT_INFO, &slots);
+		if (ret)
+			return ret;
 
-	slots = PCI_SLOT_INFO_SLOTS(slots) + 1;
-	dev_dbg(&pdev->dev, "found %d slot(s)\n", slots);
-	if (slots == 0)
-		return -ENODEV;
+		slots = PCI_SLOT_INFO_SLOTS(slots) + 1;
+		dev_dbg(&pdev->dev, "found %d slot(s)\n", slots);
+		if (slots == 0)
+			return -ENODEV;
 
-	BUG_ON(slots > MAX_SLOTS);
+		BUG_ON(slots > MAX_SLOTS);
 
-	ret = pci_read_config_byte(pdev, PCI_SLOT_INFO, &first_bar);
-	if (ret)
-		return ret;
+		ret = pci_read_config_byte(pdev, PCI_SLOT_INFO, &first_bar);
+		if (ret)
+			return ret;
 
-	first_bar &= PCI_SLOT_INFO_FIRST_BAR_MASK;
+		first_bar &= PCI_SLOT_INFO_FIRST_BAR_MASK;
 
-	if (first_bar > 5) {
-		dev_err(&pdev->dev, "Invalid first BAR. Aborting.\n");
-		return -ENODEV;
+		if (first_bar > 5) {
+			dev_err(&pdev->dev, "Invalid first BAR. Aborting.\n");
+			return -ENODEV;
+		}
 	}
 
 	ret = pci_enable_device(pdev);

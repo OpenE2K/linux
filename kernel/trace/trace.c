@@ -5982,6 +5982,11 @@ rb_simple_write(struct file *filp, const char __user *ubuf,
 		mutex_unlock(&trace_types_lock);
 	}
 
+#ifdef CONFIG_MCST
+	if (val == 2) {
+		tracer_tracing_off(tr);
+	}
+#endif
 	(*ppos)++;
 
 	return cnt;

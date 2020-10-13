@@ -1,0 +1,9 @@
+Package: linux-firmware
+Source: linux-xxLOCALVERSIONxx
+Version: xxFULLLOCALVERSIONxx
+Architecture: xxARCHPKGxx
+Maintainer: MCST Kernel Mainteiners <os@mcst.ru>
+Provides: linux-firmware
+Section: kernel
+Priority: optional
+Description: Firmware related to Linux kernel. Version xxLOCALVERSIONxx

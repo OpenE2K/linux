@@ -713,18 +713,27 @@ static int raid10_mergeable_bvec(struct request_queue *q,
 		max = biovec->bv_len;
 
 	if (mddev->merge_check_needed) {
+#ifdef __LCC__
+		struct r10bio *r10_bio;
+		int s;
+#else
 		struct {
 			struct r10bio r10_bio;
 			struct r10dev devs[conf->copies];
 		} on_stack;
 		struct r10bio *r10_bio = &on_stack.r10_bio;
 		int s;
+#endif
 		if (conf->reshape_progress != MaxSector) {
 			/* Cannot give any guidance during reshape */
 			if (max <= biovec->bv_len && bio_sectors == 0)
 				return biovec->bv_len;
 			return 0;
 		}
+#ifdef __LCC__
+		r10_bio = __builtin_alloca(sizeof (struct r10bio) +
+			conf->copies * sizeof (struct r10dev));
+#endif
 		r10_bio->sector = sector;
 		raid10_find_phys(conf, r10_bio);
 		rcu_read_lock();
@@ -4578,15 +4587,23 @@ static int handle_reshape_read_error(struct mddev *mddev,
 	/* Use sync reads to get the blocks from somewhere else */
 	int sectors = r10_bio->sectors;
 	struct r10conf *conf = mddev->private;
+#ifdef __LCC__
+	struct r10bio *r10b;
+#else
 	struct {
 		struct r10bio r10_bio;
 		struct r10dev devs[conf->copies];
 	} on_stack;
 	struct r10bio *r10b = &on_stack.r10_bio;
+#endif
 	int slot = 0;
 	int idx = 0;
 	struct bio_vec *bvec = r10_bio->master_bio->bi_io_vec;
 
+#ifdef __LCC__
+	r10b = __builtin_alloca(sizeof(struct r10bio) +
+			conf->copies * sizeof(struct r10dev));
+#endif
 	r10b->sector = r10_bio->sector;
 	__raid10_find_phys(&conf->prev, r10b);
 

@@ -373,6 +373,28 @@ void dev_load(struct net *net, const char *name)
 }
 EXPORT_SYMBOL(dev_load);
 
+
+#ifdef CONFIG_MCST_RT
+static int mcst_dev_ifsioc(struct net *net, unsigned int cmd, struct ifreq *ifr)
+{
+	int err;
+	struct net_device *dev = __dev_get_by_name(net, ifr->ifr_name);
+	const struct net_device_ops *ops;
+
+	if (!dev)
+		return -ENODEV;
+	ops = dev->netdev_ops;
+	if (!ops->ndo_unlocked_ioctl || (cmd < SIOCDEVPRIVATE) ||
+		(cmd > (SIOCDEVPRIVATE + 15))) {
+		rtnl_lock();
+		err = dev_ifsioc(net, ifr, cmd);
+		rtnl_unlock();
+		return err;
+	}
+        return dev_ifsioc(net, ifr, cmd);
+}
+#endif
+
 /*
  *	This function handles all "interface"-type I/O control requests. The actual
  *	'doing' part of this is dev_ifsioc above.
@@ -477,9 +499,13 @@ int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 		dev_load(net, ifr.ifr_name);
+#ifdef CONFIG_MCST_RT
+		ret = mcst_dev_ifsioc(net, cmd, &ifr);
+#else
 		rtnl_lock();
 		ret = dev_ifsioc(net, &ifr, cmd);
 		rtnl_unlock();
+#endif
 		if (!ret) {
 			if (colon)
 				*colon = ':';
@@ -551,9 +577,13 @@ int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 		    (cmd >= SIOCDEVPRIVATE &&
 		     cmd <= SIOCDEVPRIVATE + 15)) {
 			dev_load(net, ifr.ifr_name);
+#ifdef CONFIG_MCST_RT
+			ret = mcst_dev_ifsioc(net, cmd, &ifr);
+#else
 			rtnl_lock();
 			ret = dev_ifsioc(net, &ifr, cmd);
 			rtnl_unlock();
+#endif
 			if (!ret && copy_to_user(arg, &ifr,
 						 sizeof(struct ifreq)))
 				ret = -EFAULT;

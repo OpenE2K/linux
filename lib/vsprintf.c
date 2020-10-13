@@ -1160,7 +1160,7 @@ char *address_val(char *buf, char *end, const void *addr,
 		  struct printf_spec spec, const char *fmt)
 {
 	unsigned long long num;
-
+ 
 	spec.flags |= SPECIAL | SMALL | ZEROPAD;
 	spec.base = 16;
 
@@ -1179,7 +1179,11 @@ char *address_val(char *buf, char *end, const void *addr,
 	return number(buf, end, num, spec);
 }
 
+#ifdef CONFIG_MCST
+int kptr_restrict __read_mostly = 1;
+#else
 int kptr_restrict __read_mostly;
+#endif
 
 /*
  * Show a '%p' thing.  A kernel extension is that the '%p' is followed

@@ -165,7 +165,16 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	mapping->a_ops = &empty_aops;
 	mapping->host = inode;
 	mapping->flags = 0;
+#ifdef CONFIG_E2K
+	/*
+	 * Binco on e3m can access only the low 4 Gbytes of memory
+	 */
+	mapping_set_gfp_mask(mapping,
+		(!TASK_IS_BINCO(current) || IS_UPT_E3S) ? GFP_HIGHUSER_MOVABLE :
+		(GFP_HIGHUSER_MOVABLE & ~GFP_ZONEMASK) | __GFP_IA32);
+#else
 	mapping_set_gfp_mask(mapping, GFP_HIGHUSER_MOVABLE);
+#endif
 	mapping->private_data = NULL;
 	mapping->backing_dev_info = &default_backing_dev_info;
 	mapping->writeback_index = 0;
@@ -244,6 +253,9 @@ void __destroy_inode(struct inode *inode)
 		posix_acl_release(inode->i_acl);
 	if (inode->i_default_acl && inode->i_default_acl != ACL_NOT_CACHED)
 		posix_acl_release(inode->i_default_acl);
+#endif
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_inode_free(inode);
 #endif
 	this_cpu_dec(nr_inodes);
 }
@@ -372,6 +384,9 @@ void inode_init_once(struct inode *inode)
 	i_size_ordered_init(inode);
 #ifdef CONFIG_FSNOTIFY
 	INIT_HLIST_HEAD(&inode->i_fsnotify_marks);
+#endif
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	INIT_LIST_HEAD(&inode->el_posix_objects);
 #endif
 }
 EXPORT_SYMBOL(inode_init_once);

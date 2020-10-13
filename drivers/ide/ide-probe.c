@@ -599,6 +599,9 @@ static int ide_port_wait_ready(ide_hwif_t *hwif)
 	const struct ide_tp_ops *tp_ops = hwif->tp_ops;
 	ide_drive_t *drive;
 	int i, rc;
+#ifdef CONFIG_E2K
+	int ports_num = 0;
+#endif
 
 	printk(KERN_DEBUG "Probing IDE interface %s...\n", hwif->name);
 
@@ -623,13 +626,28 @@ static int ide_port_wait_ready(ide_hwif_t *hwif)
 			tp_ops->write_devctl(hwif, ATA_DEVCTL_OBS);
 			mdelay(2);
 			rc = ide_wait_not_busy(hwif, 35000);
+#ifdef CONFIG_E2K
+			/* e2k lms simulator workaround: if only master
+			 * or slave disk image is specified for simulator,
+			 * then access to other port (slave or master)
+			 * return error.
+			 *
+			 * Remove when the bug is fixed */
+			if (rc == 0)
+				++ports_num;
+			else if (ports_num)
+				rc = 0;
+#else
 			if (rc)
 				goto out;
+#endif
 		} else
 			printk(KERN_DEBUG "%s: ide_wait_not_busy() skipped\n",
 					  drive->name);
 	}
+#ifndef CONFIG_E2K
 out:
+#endif
 	/* Exit function with master reselected (let's be sane) */
 	if (i)
 		tp_ops->dev_select(hwif->devices[0]);

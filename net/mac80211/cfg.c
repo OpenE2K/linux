@@ -3624,6 +3624,9 @@ static int ieee80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
 		break;
 	default:
 		ret = -ENOTSUPP;
+#ifdef CONFIG_MCST
+		send_direct = true;
+#endif
 		break;
 	}
 

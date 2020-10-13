@@ -130,7 +130,7 @@ config INPUT_PMIC8XXX_PWRKEY
 
 config INPUT_SPARCSPKR
 	tristate "SPARC Speaker support"
-	depends on PCI && SPARC64
+	depends on PCI && SPARC64 && OF
 	help
 	  Say Y here if you want the standard Speaker on Sparc PCI systems
 	  to be used for bells and whistles.
@@ -322,6 +322,20 @@ config INPUT_KEYSPAN_REMOTE
 
 	  To compile this driver as a module, choose M here: the module will
 	  be called keyspan_remote.
+
+config INPUT_LTC2954
+	tristate "LTC2954 Pushbutton Controller with Interrupt"
+	depends on INPUT_POLLDEV
+	depends on GPIOLIB
+	help
+	  Say Y here if you want to use a LTC2954 button for power
+	  management. By default button will poll on gpio pin, without
+	  raising interrupts. If "modprobe ltc2954 use_irq=1"- gpio pin
+	  raises interrupt (do not use this mode when CONFGI_L_WDT is set,
+	  due watchdog and gpio share the same irq line)
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called ltc2954.
 
 config INPUT_KXTJ9
 	tristate "Kionix KXTJ9 tri-axis digital accelerometer"

@@ -65,6 +65,14 @@ static pgprot_t drm_io_prot(struct drm_local_map *map,
 		tmp = pgprot_noncached(tmp);
 #elif defined(__sparc__) || defined(__arm__) || defined(__mips__)
 	tmp = pgprot_noncached(tmp);
+#elif defined(__e2k__)
+	if (map->type == _DRM_REGISTERS)
+		tmp = pgprot_noncached(tmp);
+	else if (map->type == _DRM_FRAME_BUFFER)
+		tmp = (cpu_has(CPU_FEAT_WC_PCI_PREFETCH) &&
+		       (vma->vm_flags & VM_WRITECOMBINED)) ?
+				pgprot_writecombine(vma->vm_page_prot) :
+				pgprot_noncached(vma->vm_page_prot);
 #endif
 	return tmp;
 }

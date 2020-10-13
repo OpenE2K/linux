@@ -553,6 +553,11 @@ static int mlock_fixup(struct vm_area_struct *vma, struct vm_area_struct **prev,
 	int ret = 0;
 	int lock = !!(newflags & VM_LOCKED);
 
+#ifdef CONFIG_E2K
+	if ((vma->vm_flags & VM_HW_STACK) && !test_ts_flag(TS_KERNEL_SYSCALL))
+		goto out;
+#endif
+
 	if (newflags == vma->vm_flags || (vma->vm_flags & VM_SPECIAL) ||
 	    is_vm_hugetlb_page(vma) || vma == get_gate_vma(current->mm))
 		goto out;	/* don't set VM_LOCKED,  don't count */
@@ -785,6 +790,17 @@ static int do_mlockall(int flags)
 		cond_resched();
 	}
 out:
+#ifdef CONFIG_MCST_RT
+	if (current->extra_flags & RT_MLOCK_CONTROL) {
+		/* RT task done mlockall() and need to check PF occurence */
+		if (flags & MCL_CURRENT) {
+			current->mm->extra_vm_flags |=  VM_MLOCK_DONE;
+		} else if (flags == 0) {
+			/* RT task done munlockall() */
+			current->mm->extra_vm_flags &= ~VM_MLOCK_DONE;
+		}
+	}
+#endif  /* CONFIG_MCST_RT */
 	return 0;
 }
 

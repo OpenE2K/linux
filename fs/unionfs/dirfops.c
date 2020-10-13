@@ -70,6 +70,7 @@ static int unionfs_filldir(void *__buf, const char *oname, int namelen,
 #endif
 		buf->caller->pos = buf->ctx.pos;
 		err = !dir_emit(buf->caller, name, namelen, ino, d_type);
+
 		buf->rdstate->offset++;
 		verify_rdstate_offset(buf->rdstate);
 	}

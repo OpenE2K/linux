@@ -1,0 +1,787 @@
+#!/bin/bash
+unalias -a
+set +xv
+
+VERBOSE=0
+
+###TTTTT
+## e2k:  config-033.0.0.rt image-033.0.0.rt System.map-033.0.0.rt vmlinux-033.0.0.rt
+## e90:  config-033.0.0.rt image-033.0.0.rt System.map-033.0.0.rt image-033.0.0.rt.das.gz
+## e90s: config-033.0.0.rt image-033.0.0.rt System.map-033.0.0.rt image-033.0.0.rt.das.gz
+## x86:  config-033.0.0.rt image-033.0.0.rt System.map-033.0.0.rt vmlinux-033.0.0.rt
+## KERNELRELEASE=2.6.33-elbrus.033.0.0.rt
+## LOCVER=033.0.0.rt
+## FIMAGE=image-033.3.3.rt
+## BOOTCONF=/boot/boot.conf
+## e2k:  /boot/boot/image-033.0.0.rt	BOOTIMAGE=boot/$FIMAGE
+## e90:  /boot/image-033.0.0.rt		BOOTIMAGE=$FIMAGE
+## e90s: /boot/image-033.0.0.rt		BOOTIMAGE=$FIMAGE
+## x86:  /boot/image-033.0.0.rt		BOOTIMAGE=$FIMAGE
+
+[[ -z $ROOT ]] && ROOT=/
+ROOTDIR=$ROOT
+
+ARCHP=xxARCHPxx
+ARCHM=xxARCHMxx
+LOCALVERSION=xxLOCALVERSIONxx
+LOCVER=xxLOCVERxx
+KERNELRELEASE=xxKERNELRELEASExx
+FIMAGE=xxFIMAGExx
+FCONFIG=xxFCONFIGxx
+FSYSTEMMAP=xxFSYSTEMMAPxx
+FVMLINUX=xxFVMLINUXxx
+
+x=${KERNELRELEASE#*elbrus.}
+x=${LOCVER}
+#x=`echo $x | sed -e 's/\./-/g'`
+LABEL=k${x}
+
+OSLBASE=base
+OSLUP=$LABEL
+OSLFLASH=oslflash
+
+BOOTCONF=${ROOTDIR}/boot/boot.conf
+if [[ $ARCHM == e2k ]]; then
+	BOOIMAGE=/boot/$FIMAGE
+else
+	BOOIMAGE=/$FIMAGE
+fi
+
+UNAMEM=`uname -m`
+UNAMEP=`uname -p`
+UNAMEI=`uname -i`
+
+[[ -z $KEYS ]] && KEYS=
+
+KEY_PARAM_key= # ???????????????????
+
+tmpf=/tmp/__postinst_linux_$$_
+################################################################################
+cleanup()
+{
+	rm -f ${tmpf}*
+}
+DoEcho()
+{
+	echo "=== linux postinst: $LOCVER: $*"
+}
+DoEchoV()
+{
+	[[ $VERBOSE == 0 ]] && return 0
+	DoEcho "$*"
+}
+################################################################################
+# create boot.conf
+################################################################################
+BootConf_create()
+{
+# e90s: ch2-pc3: cmdline=root=/dev/hda4 console=ttyS0,115200 serial=0,115200 console=tty0 hardreset
+# e90:  vk32-16: cmdline=root=/dev/hda4 console=tty0 console=ttyS0
+# e90:  vk32-16: cmdline=root=/dev/hda4 console=tty0 console=ttyS0,115200
+# e2k:  uvk-c:   cmdline=root=/dev/hda3 console=ttyS0,115200 console=tty0
+
+# KVS:	RdmaNN
+# NOTEBOOK || MPY2: video=mgam83fb:1024x768-8@60
+# KVS: pci_sunlance.start_tx_afterfill=1
+
+	DoEcho "create ${BOOTCONF}: label=${OSLBASE} image=/$BOOTIMAGE"
+
+	cmdline="cmdline=root=${ROOT_DEVICE} console=tty0"
+	[[ $ARCHP == e90s ]] && cmdline="cmdline=root=${ROOT_DEVICE} console=tty0 RdmaNN hardreset"
+#	[[ $ARCHP == e90 ]] &&  cmdline="cmdline=root=${ROOT_DEVICE} console=tty0"
+	[[ $ARCHP == e2k && $UNAMEI == *"KVS"* ]] && cmdline="cmdline=root=${ROOT_DEVICE} console=tty0 e1000 pci_sunlance.start_tx_afterfill=1"
+	[[ $UNAMEI == *"NOTEBOOK"* || $UNAMEI == *"MPY2"* ]] && cmdline="cmdline=root=${ROOT_DEVICE} console=tty0 video=mgam83fb:1024x768-8@60"
+
+	{
+	echo "# BOOT configuration file sample"
+	echo
+	echo "default=${OSLBASE}"
+	echo "timeout=3"
+	echo
+	echo "# load linux and start bash"
+	echo
+	echo "label=${OSLBASE}"
+	echo "	partition=${BOOT_PARTITION}"
+	echo "	image=/$BOOTIMAGE"
+	echo "	$cmdline"
+	echo
+	} >${BOOTCONF}
+
+	return 0
+}
+################################################################################
+# update boot.conf: set default to label=oslup
+################################################################################
+BootConf_default()
+{
+	bootf=$1
+	DoEcho "Update ${bootf}: default=${OSLUP}"
+        cat ${bootf} | sed -e "s/^default=.*/default=${OSLUP}/g" >$tmpf
+	cp $tmpf ${bootf}
+}
+################################################################################
+# update boot.conf image (create label oslup)
+################################################################################
+BootConf_oslup()
+{
+	# update /boot/boot.conf or /boot/silo.conf
+
+	bootf=$1
+	imagef=$2
+
+	[[ $bootf == boot/boot.conf ]] && boottype=boot
+	[[ $bootf == boot/silo.conf ]] && boottype=silo
+
+	if [[ $ARCHM == e2k ]]; then
+		DoEcho "Update $bootf: label=${OSLUP}, image=/boot/$imagef"
+	else
+		DoEcho "Обновление $bootf: label=${OSLUP}, image=/$imagef"
+	fi
+
+O_IFS="$IFS"
+export IFS=
+
+while read -r line; do
+	l=$(echo $line | sed -e 's/[\t ]*//g')
+	if [[ "$l" == "default="* ]]; then
+		l=${l%%\#*}; base=${l#default=}
+	fi
+done <$bootf
+cat $bootf | sed -e 's/[\t ]*//g' | grep -v "^#" | grep "^label=${base}$" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+	DoEcho "Ошибка: в $bootf не найдена строка label=${base}"
+	DoEcho "Файл $bootf не обновлен"
+	exit 1
+fi
+
+cat $bootf | sed -e 's/[\t ]*//g' | grep -v "^#" | grep "^label=${OSLUP}$" >/dev/null 2>&1
+ret=$?
+cat $bootf | sed -e 's/[\t ]*//g' | grep -v "^#" | grep "^label=${OSLUP}#" >/dev/null 2>&1
+ret1=$?
+(( isoslup = ret & ret1 ))
+
+if [[ $boottype == boot && ${isoslup} == 1 ]]; then
+	## label=oslup does not exist
+	isbase=false
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "label="* && $isbase == true ]] && break
+		if [[ $line1 == "label=${base}" || $line1 == "label=${base}#"* ]]; then
+			isbase=true
+		fi
+		[[ $line1 == "partition="* && $isbase == true ]] && spartition="$line"
+		[[ $line1 == "cmdline="* && $isbase == true ]] && scmdline="$line"
+	done <$bootf
+	{
+		echo "label=${OSLUP}"
+		echo "$spartition"
+		if [[ $ARCHM == e2k ]]; then
+			echo "	image=/boot/$imagef"
+		else
+			echo "	image=/$imagef"
+		fi
+		echo "$scmdline"
+		echo
+	} >>$bootf
+fi
+if [[ $boottype == boot && ${isoslup} == 0 ]]; then
+	## label=oslup exists
+	isbase=false
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		if [[ $line1 == "#"* ]]; then
+			echo "$line"
+			continue
+		fi
+		[[ $line1 == "label=${OSLUP}" || $line1 == "label=${OSLUP}#"* ]] && isbase=true
+		if [[ $line1 == "image="* && $isbase == true ]]; then
+			isbase=false
+			if [[ $ARCHM == e2k ]]; then
+				echo "	image=/boot/$imagef"
+			else
+				echo "	image=/$imagef"
+			fi
+			continue
+		fi
+		echo "$line"
+	done <$bootf >$tmpf
+	cp $tmpf $bootf
+fi
+if [[ $boottype == silo && ${isoslup} == 1 ]]; then
+	## label=oslup does not exist
+	isbase=false
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "label="* && $isbase == true ]] && break
+		[[ $line1 == "label=${base}" || $line1 == "label=${base}#"* ]] && isbase=true
+		[[ $line1 == "append="* && $isbase == true ]] && sappend="$line"
+		[[ $line1 == "root="* && $isbase == true ]] && sroot="$line"
+	done <$bootf
+	{
+		echo "image=/$imagef"
+		echo "	label=${OSLUP}"
+		echo "$sappend"
+		echo "$sroot"
+		echo
+	} >>$bootf
+fi
+if [[ $boottype == silo && ${isoslup} == 0 ]]; then
+	## label=oslup exists
+	cnt=0; CNT=0
+	while read -r line; do
+		(( cnt++ ))
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "#"* ]] && continue
+		[[ $line1 == "image="* ]] && CNT=$cnt
+		[[ $line1 == "label=${OSLUP}" || $line1 == "label=${OSLUP}#"* ]] && break
+	done <$bootf
+	cnt=0
+	while read -r line; do
+		(( cnt++ ))
+		if (( cnt == CNT )); then
+			line="image=/$imagef"
+		fi
+		echo "$line"
+	done <$bootf >$tmpf
+	cp $tmpf $bootf
+fi
+IFS=$O_IFS
+}
+################################################################################
+# update boot.conf by keys
+################################################################################
+BootConf_ch1()
+{
+O_IFS="$IFS"
+export IFS=
+	bootf=$1
+	imagef=$2
+
+	[[ $bootf == boot/boot.conf ]] && boottype=boot
+	[[ $bootf == boot/silo.conf ]] && boottype=silo
+
+	DoEcho "Обновление $bootf: key ch1"
+
+cat $bootf | sed -e 's/[\t ]*//g' | grep -v "^#" | grep "^label=${OSLFLASH}$" >/dev/null 2>&1
+ret=$?
+cat $bootf | sed -e 's/[\t ]*//g' | grep -v "^#" | grep "^label=${OSLFLASH}#" >/dev/null 2>&1
+ret1=$?
+(( isoslflash = ret & ret1 ))
+if [[ $boottype == boot && ${isoslflash} == 1 ]]; then
+	## label=oslflash does not exist
+	isbase=false
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "label="* && $isbase == true ]] && break
+		[[ $line1 == "label=${OSLUP}" || $line1 == "label=${OSLUP}#"* ]] && isbase=true
+		[[ $line1 == "partition="* && $isbase == true ]] && spartition="$line"
+		[[ $line1 == "cmdline="* && $isbase == true ]] && scmdline="$line"
+		[[ $line1 == "image="* && $isbase == true ]] && simage="$line"
+	done <$bootf
+#	scmdline='      cmdline=console=tty0 -client:"root=/dev/nfs rw console=ttyS0 ip=bootp ip_champ"'
+	scmdline='	cmdline=console=tty0 h2h_d sunlance_sbus.sbus_mii=1 rdma_to=1 -client:"root=/dev/nfs rw ip=bootp ip_champ h2h_d sunlance_sbus.sbus_mii=1"'
+	{
+		echo "label=${OSLFLASH}"
+		echo "$spartition"
+		if [[ $ARCHM == e2k ]]; then
+			echo "	image=/boot/$imagef"
+		else
+			echo "	image=/$imagef"
+		fi
+		echo "$scmdline"
+		echo
+	} >>$bootf
+fi
+if [[ $boottype == boot && ${isoslflash} == 0 ]]; then
+	 ## label=oslflash exists - change cmdline=
+	 isbase=false
+	 while read -r line; do
+	 	line1=$(echo $line | sed -e 's/[\t ]*//g')
+	 	[[ $line1 == "label=${OSLFLASH}" || $line1 == "label=${OSLFLASH}#"* ]] && isbase=true
+	 	if [[ $line1 == "cmdline="* && $isbase == true ]]; then
+	 		isbase=false
+	 		echo '	cmdline=console=tty0 h2h_d sunlance_sbus.sbus_mii=1 rdma_to=1 -client:"root=/dev/nfs rw ip=bootp ip_champ h2h_d sunlance_sbus.sbus_mii=1"'
+			continue
+		fi
+		echo "$line"
+	done <$bootf >$tmpf
+	cp $tmpf $bootf
+fi
+if [[ $boottype == boot && ${isoslflash} == 0 ]]; then
+	## label=oslflash exists - change image=
+	isbase=false
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "label=${OSLFLASH}" || $line1 == "label=${OSLFLASH}#"* ]] && isbase=true
+		if [[ $line1 == "image="* && $isbase == true ]]; then
+			isbase=false
+			if [[ $ARCHM == e2k ]]; then
+				echo "	image=/boot/$imagef"
+			else
+				echo "	image=/$imagef"
+			fi
+			continue
+		fi
+		echo "$line"
+	done <$bootf >$tmpf
+	cp $tmpf $bootf
+fi
+if [[ $boottype == silo && ${isoslflash} == 1 ]]; then
+	## label=oslflash does not exist
+	isbase=false
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "label="* && $isbase == true ]] && break
+		[[ $line1 == "label=${OSLUP}" || $line1 == "label=${OSLUP}#"* ]] && isbase=true
+		[[ $line1 == "append="* && $isbase == true ]] && sappend="$line"
+		[[ $line1 == "root="* && $isbase == true ]] && sroot="$line"
+	done <$bootf
+#	sappend='       append="console=tty0 -client:\"root=/dev/nfs rw console=ttyS0 ip=bootp ip_champ\""'
+	sappend='	append="console=tty0 h2h_d sunlance_sbus.sbus_mii=1 rdma_to=1 -client:\"root=/dev/nfs rw ip=bootp ip_champ h2h_d sunlance_sbus.sbus_mii=1\""'
+	{
+		echo
+		echo "image=/$imagef"
+		echo "	label=${OSLFLASH}"
+		echo "$sappend"
+		echo "$sroot"
+		echo
+	} >>$bootf
+fi
+if [[ $boottype == silo && ${isoslflash} == 0 ]]; then
+        ## label=oslflash exists - change append=
+	isbase=false
+	while read -r line; do
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "label=${OSLFLASH}" || $line1 == "label=${OSLFLASH}#"* ]] && isbase=true
+		if [[ $line1 == "append="* && $isbase == true ]]; then
+			isbase=false
+			echo '	append="console=tty0 h2h_d sunlance_sbus.sbus_mii=1 rdma_to=1 -client:\"root=/dev/nfs rw ip=bootp ip_champ h2h_d sunlance_sbus.sbus_mii=1\""'
+			continue
+		fi
+		echo "$line"
+	done <$bootf >$tmpf
+	cp $tmpf $bootf
+fi
+if [[ $boottype == silo && ${isoslflash} == 0 ]]; then
+	## label=oslflash exists - change image=
+	cnt=0; CNT=0
+	while read -r line; do
+		(( cnt++ ))
+		line1=$(echo $line | sed -e 's/[\t ]*//g')
+		[[ $line1 == "#"* ]] && continue
+		[[ $line1 == "image="* ]] && CNT=$cnt
+		[[ $line1 == "label=${OSLFLASH}" || $line1 == "label=${OSLFLASH}#"* ]] && break
+	done <$bootf
+	cnt=0
+	while read -r line; do
+		(( cnt++ ))
+		if (( cnt == CNT )); then
+			line="image=/$imagef"
+		fi
+		echo "$line"
+	done <$bootf >$tmpf
+	cp $tmpf $bootf
+fi
+IFS=$O_IFS
+}
+################################################################################
+# add params into kernel comand line by key
+ConfParam()
+{
+	bootf=$1
+	key=$2
+
+	DoEcho "Update $bootf: key $key"
+
+O_IFS="$IFS"
+export IFS=
+isbase=false
+isflash=false
+while read -r line; do
+	line1=$(echo $line | sed -e 's/[\t ]*//g')
+	[[ $line1 == "label=${OSLUP}" || $line1 == "label=${OSLUP}#"* ]] && isbase=true
+	[[ $line1 == "label=${OSLFLASH}" || $line1 == "label=${OSLFLASH}#"* ]] && isflash=true
+	if [[ $line1 == "cmdline="* || $line1 == "append="* ]]; then
+		if [[ $isbase == true ]]; then
+			isbase=false
+			if [[ $key == mpy2 ]]; then
+				echo "$line" | grep "video=mgam83fb:1024x768-24@60" >/dev/null
+				r1=$?
+				echo "$line" | grep "console=tty0" >/dev/null
+				r2=$?
+				if [[ $r1 != 0 && $r2 != 0 ]]; then
+					line=${line%\"}; line="$line video=mgam83fb:1024x768-24@60 console=tty0"
+					[[ $line1 == "append="* ]] && line="$line\""
+				fi
+				if [[ $r1 != 0 && $r2 == 0 ]]; then
+					line=$(echo "$line" | sed -e 's/console=tty0/video=mgam83fb:1024x768-24@60 console=tty0/g')
+				fi
+				if [[ $r1 == 0 && $r2 != 0 ]]; then
+					line=$(echo "$line" | sed -e 's/video=mgam83fb:1024x768-24@60/video=mgam83fb:1024x768-24@60 console=tty0/g')
+				fi
+			fi
+			if [[ $key == e1000 ]]; then
+				echo "$line" | grep "e1000" >/dev/null
+				r1=$?
+				echo "$line" | grep "pci_sunlance.startx_afterfill=1" >/dev/null
+				r2=$?
+				if [[ $r1 != 0 && $r2 != 0 ]]; then
+					line=${line%\"}; line="$line e1000 pci_sunlance.startx_afterfill=1"
+					[[ $line1 == "append="* ]] && line="$line\""
+				fi
+				if [[ $r1 != 0 && $r2 == 0 ]]; then
+					line=$(echo "$line" | sed -e 's/pci_sunlance.startx_afterfill=1/e1000 pci_sunlance.startx_afterfill=1/g')
+				fi
+				if [[ $r1 == 0 && $r2 != 0 ]]; then
+					line=$(echo "$line" | sed -e 's/e1000/e1000 pci_sunlance.startx_afterfill=1/g')
+				fi
+			fi
+			if [[ $key == ttyS0 ]]; then
+				echo "$line" | grep "console=ttyS0" >/dev/null
+				if [ $? -eq 0 ]; then
+					line=$(echo "$line" | sed -e 's/console=ttyS0[^ ^"]*//g')
+				fi
+			fi
+			if [[ $key == hardreset ]]; then
+				echo "$line" | grep "hardreset" >/dev/null
+				if [ $? -ne 0 ]; then
+					line=${line%\"}; line="$line hardreset"
+				fi
+			fi
+			if [[ $key == rdmann ]]; then
+				echo "$line" | grep "RdmaNN" >/dev/null
+				if [ $? -ne 0 ]; then
+					line=${line%\"}; line="$line RdmaNN"
+				fi
+			fi
+		fi
+		if [[ $isflash == true ]]; then
+			isflash=false
+			if [[ $key == mpy2 ]]; then
+				echo "$line" | grep "video=mgam83fb:1024x768-24@60" >/dev/null
+				r1=$?
+				echo "$line" | grep "console=tty0" >/dev/null
+				r2=$?
+				if [[ $r1 != 0 && $r2 != 0 ]]; then
+					l2=${x#*append=\"}; echo "$l2"
+					if [[ $line1 == "append="* ]]; then
+						l1=${line%append=\"*};
+						line="${l1}append=\"video=mgam83fb:1024x768-24@60 console=tty0 ${l2}"
+					fi
+					if [[ $line1 == "cmdline="* ]]; then
+						l1=${line%cmdline=*};
+						line="${l1}cmdline=video=mgam83fb:1024x768-24@60 console=tty0 ${l2}"
+					fi
+				fi
+				if [[ $r1 != 0 && $r2 == 0 ]]; then
+					line=$(echo "$line" | sed -e 's/console=tty0/video=mgam83fb:1024x768-24@60 console=tty0/g')
+				fi
+				if [[ $r1 == 0 && $r2 != 0 ]]; then
+					line=$(echo "$line" | sed -e 's/video=mgam83fb:1024x768-24@60/video=mgam83fb:1024x768-24@60 console=tty0/g')
+				fi
+			fi
+			if [[ $key == ttyS0 ]]; then
+				echo "$line" | grep "console=ttyS0" >/dev/null
+				if [ $? -eq 0 ]; then
+					line=$(echo "$line" | sed -e 's/console=ttyS0[^ ^"]*//g')
+				fi
+			fi
+		fi
+	fi
+	echo "$line"
+done <$bootf >$tmpf
+cp $tmpf $bootf
+IFS=$O_IFS
+}
+################################################################################
+# Update param: 'console=tty0' -> 'video=mgam83fb:1024x768-24@60 console=tty0'
+ConfParam2()
+{
+	bootf=$1
+O_IFS="$IFS"
+export IFS=
+while read -r line; do
+	line1=$(echo $line | sed -e 's/[\t ]*//g')
+	if [[ $line1 == "cmdline="* || $line1 == "append="* ]]; then
+		echo "$line" | grep "video=mgam83fb:1024x768-24@60" >/dev/null
+		if [ $? -ne 0 ]; then
+			line=$(echo "$line" | sed -e 's/console=tty0/video=mgam83fb:1024x768-24@60 console=tty0/g')
+		fi
+	fi
+	echo "$line"
+done <$bootf >$tmpf
+cp $tmpf $bootf
+IFS=$O_IFS
+}
+################################################################################
+# delete line: 's0:2345:respawn:/sbin/agetty -L ttyS0 9600'
+inittab_vmc61()
+{
+	if [[ ! -a ${ROOTDIR}/etc/inittab ]]; then
+		DoEchoW "Key vmc61: cannot find ${ROOTDIR}/etc/inittab"
+		return 0
+	fi
+	cp ${ROOTDIR}/etc/inittab $tmpf
+	cat $tmpf | sed -e 's/^S0:/#S0:/g' >${ROOTDIR}/etc/inittab
+	cp ${ROOTDIR}/etc/inittab $tmpf
+	cat $tmpf | sed -e 's/^s0:/#s0:/g' >${ROOTDIR}/etc/inittab
+}
+################################################################################
+# execute operation by keys
+################################################################################
+do_keys()
+{
+for KEY in $KEYS; do
+	eval "KEY_PARAM=\${KEY_PARAM_${KEY}}"
+	DoEcho "Key handling: $KEY:$KEY_PARAM"
+	ConfParam $KEY
+	if [[ ${KEY} == ch1 ]]; then
+		BootConf_ch1
+	fi
+	if [[ ${KEY} == mpy2 ]]; then
+		ll=`ls ${ROOTDIR}/etc/sysconfig/network-devices/ifconfig.eth[0-9]/ipv4 2>/dev/null`
+		for l in $ll; do
+			cat $l | grep -v "^MTU=" >${tmpf}
+			cat ${tmpf} >$l
+			echo "MTU=1000" >>$l
+		done
+	fi
+	if [[ ${KEY} == uvkca ]]; then
+		for n in 1 2 3 5; do
+			d=${ROOTDIR}/etc/rc.d/rc${n}.d
+			f=$d/nS76kbd-serial
+			f2=$d/S76kbd-serial
+			if [[ -a $f ]]; then
+				rm -f $f2
+				mv $f $f2
+			fi
+		done
+		f=${ROOTDIR}/etc/X11/xorg.conf-mga+kbd-serial
+		f2=${ROOTDIR}/etc/X11/xorg.conf
+		if [[ -a $f ]]; then
+			rm -f $f2
+			cp $f $f2
+		fi
+	fi
+	if [[ ${KEY} == vmc61 ]]; then
+		if [[ -a ${ROOTDIR}/etc/xorg.conf.VMC61.2 ]]; then
+			cp ${ROOTDIR}/etc/xorg.conf ${ROOTDIR}/etc/xorg.conf.orig
+			cp ${ROOTDIR}/etc/xorg.conf.VMC61.2 ${ROOTDIR}/etc/xorg.conf
+		fi
+		if [[ -z "$KEY_PARAM" ]]; then
+			ConfParam ttyS0
+		else
+			if [[ ${KEY_PARAM} != /dev/ttyS0 ]] && [[ -f ${ROOTDIR}/etc/xorg.conf ]]; then
+				cat ${ROOTDIR}/etc/xorg.conf | sed -e "s%/dev/ttyS0%${KEY_PARAM}%g" >$tmpf
+				if [[ $? == 0 ]]; then
+					cp $tmpf ${ROOTDIR}/etc/xorg.conf
+				fi
+			fi
+		fi
+		inittab_vmc61
+	fi
+done
+}
+################################################################################
+## get ROOT_DEVICE BOOT_PARTITION through /etc/fstab or 'mount -v'
+################################################################################
+RootDevice()
+{
+	if [[ ! -f /etc/fstab ]]; then
+		DoEcho "cannot access /etc/fstab"
+		DoEcho "cannot detect ROOT_DEVICE"
+		return 1
+	fi
+	str=$(cat /etc/fstab | awk '$c==a {print $0}' c=2 a="/")
+	if [[ -z $str ]]; then
+		DoEcho "cannot find the / mount point in /etc/fstab"
+		DoEcho "cannot detect ROOT_DEVICE"
+		return 1
+	fi
+	ROOT_DEVICE=$(echo $str | cut -d " " -f 1)
+	DoEchoV "ROOT_DEVICE=$ROOT_DEVICE"
+}
+BootDevice()
+{
+	if [[ ! -f /etc/fstab ]]; then
+		DoEcho "cannot access /etc/fstab"
+		DoEcho "cannot detect BOOT_DEVICE"
+		return 1
+	fi
+	str=$(cat /etc/fstab | awk '$c==a {print $0}' c=2 a="/boot")
+	if [[ -z $str ]]; then
+		DoEcho "cannot find the /boot mount point in /etc/fstab"
+		DoEcho "cannot detect BOOT_DEVICE"
+		return 1
+	fi
+	BOOT_DEVICE=$(echo $str | cut -d " " -f 1)
+	DoEchoV "BOOT_DEVICE=$BOOT_DEVICE"
+	BOOT_TYPE=$(echo $str | cut -d " " -f 3)
+	DoEchoV "BOOT_TYPE=$BOOT_TYPE"
+	bdev=$(echo $str | cut -d " " -f 1)
+	n=$(echo -n $bdev | wc -c); (( n-- ))
+	bnum=${bdev:${n}:1}; (( bnum-- ))
+	BOOT_PARTITION=$bnum
+	DoEchoV "BOOT_PARTITION=$BOOT_PARTITION"
+}
+CheckMount()
+{
+	str=$(mount -v | awk '$c==a {print $0}' c=3 a="/boot")
+	if [[ ! -z $str ]]; then
+		DoEchoV "CheckMount: /boot is mounted: $str"
+		return 0
+	fi
+	DoEchoV "CheckMount: /boot is not mounted"
+	BootDevice
+	if [ $? -ne 0 ]; then
+		DoEcho "CheckMount: unknown boot device"
+		return 1
+	fi
+	DoEchoV "mount -t $BOOT_TYPE $BOOT_DEVICE /boot"
+	mount -t $BOOT_TYPE $BOOT_DEVICE /boot
+	if [ $? -ne 0 ]; then
+		DoEcho "CheckMount: cannot mount: $BOOT_DEVICE to /boot"
+		return 1
+	fi
+	DoEchoV "CheckMount: /boot is mounted to $BOOT_DEVICE"
+}
+### for installer
+FstabDevice()
+{
+	ff=$1
+	mnt=$2
+	[[ ! -f $ff ]] && return
+	str=$(cat $ff | awk '$c==a {print $0}' c=2 a="${mnt}")
+	[[ -z $str ]] && return
+	echo $str | cut -d " " -f 1
+}
+MountDevice()
+{
+	mnt=$1
+	str=$(mount | awk '$c==a {print $0}' c=3 a="${mnt}")
+	[[ -z $str ]] && return
+	echo $str | cut -d' ' -f 1
+}
+BootPartition()
+{
+	bdev=$1
+	n=$(echo -n $bdev | wc -c); (( n-- ))
+	bnum=${bdev:${n}:1}; (( bnum-- ))
+	echo $bnum
+}
+################################################################################
+trap "cleanup" 1 2 3 6 15 EXIT
+################################################################################
+DoEchoV "START: LINUX POSTINST"
+
+cwd=`pwd`
+DoEchoV "pwd: $cwd"
+
+krelease=`uname -r`
+DoEchoV "uname -r: $krelease"
+
+DoEchoV "mount -v"
+[[ $VERBOSE == 1 ]] && mount -v
+
+rootdev_mount=$(MountDevice "/")
+bootdev_mount=$(MountDevice "/boot")
+
+if [[ -f /etc/fstab ]]; then
+	DoEchoV "cat /etc/fstab"
+	[[ $VERBOSE == 1 ]] && cat /etc/fstab
+	ffstab=/etc/fstab
+fi
+if [[ ! -z $ffstab ]]; then
+	rootdev_fstab=$(FstabDevice $ffstab "/")
+	bootdev_fstab=$(FstabDevice $ffstab "/boot")
+fi
+BOOTIMAGE=$FIMAGE
+if [[ -z $bootdev_fstab ]]; then
+	bootdev_fstab=$rootdev_fstab
+	BOOTIMAGE=boot/$FIMAGE
+fi
+if [[ ! -z $bootdev_fstab ]]; then
+	boot_partition=$(BootPartition $bootdev_fstab)
+fi
+
+if [[ -f boot/$FIMAGE ]]; then
+	DoEchoV "kernel: boot/$FIMAGE"
+	dboot=boot
+	bootimage=boot/$FIMAGE
+fi
+if [[ -f /boot/$FIMAGE ]]; then
+	DoEchoV "kernel: /boot/$FIMAGE"
+	dboot=/boot
+	bootimage=/boot/$FIMAGE
+fi
+
+DoEchoV "rootdev_mount:  $rootdev_mount"
+DoEchoV "bootdev_mount:  $bootdev_mount"
+DoEchoV "rootdev_fstab:  $rootdev_fstab"
+DoEchoV "bootdev_fstab:  $bootdev_fstab"
+DoEchoV "boot_partition: $boot_partition"
+DoEchoV "dboot: $dboot"
+DoEchoV "image: $bootimage"
+
+ROOT_DEVICE=$rootdev_fstab
+BOOT_DEVICE=$bootdev_fstab
+BOOT_PARTITION=$boot_partition
+BOOTCONF=${dboot}/boot.conf
+
+if [[ x${bootimage} != x ]] && [[ -f $BOOTCONF ]]; then
+# boot.conf exists
+	OPO_DATE=`date +%g%m%d.%H%M`
+	cp $BOOTCONF ${BOOTCONF}.${OPO_DATE}
+	BootConf_oslup $BOOTCONF $FIMAGE
+	BootConf_default $BOOTCONF
+	if [[ 1 == 0 ]]; then
+	while [ true ]; do
+#		echo -en "Установить $FIMAGE (label=$OSLUP) загружаемым по умолчанию (yes/no): " 1>&2
+		echo -en "Do label=$OSLUP ($FIMAGE) set as default (yes/no): " 1>&2
+		read answer
+		if [[ $answer == yes ]]; then
+			BootConf_default $BOOTCONF
+			break
+		fi
+		if [[ $answer == no ]]; then
+			break
+		fi
+	done
+	fi
+fi
+if [[ x${bootimage} != x ]] && [[ ! -f $BOOTCONF ]]; then
+# boot.conf does not exist
+	DoEcho "BOOTCONF:       $BOOTCONF"
+	DoEcho "ROOT_DEVICE:    $ROOT_DEVICE"
+	DoEcho "BOOT_DEVICE:    $BOOT_DEVICE"
+	DoEcho "BOOT_PARTITION: $BOOT_PARTITION"
+	DoEcho "BOOTIMAGE:      $BOOTIMAGE"
+	if [[ -z $BOOT_DEVICE ]]; then
+		DoEcho "WARNING: cannot detect boot device"
+		DoEcho "WARNING: cannot create boot.conf"
+	elif [[ -z $BOOT_PARTITION ]]; then
+		DoEcho "WARNING: cannot detect boot partition"
+		DoEcho "WARNING: cannot create boot.conf"
+	else
+		touch $BOOTCONF
+		if [ $? -ne 0 ]; then
+			DoEcho "WARNING: touch $BOOTCONF - failed"
+			DoEcho "WARNING: cannot create boot.conf"
+		else
+			BootConf_create
+			BootConf_oslup $BOOTCONF $FIMAGE
+		fi
+	fi
+fi
+if [[ x${bootimage} == x ]]; then
+	DoEcho "WARNING: cannot find ${FIMAGE}"
+	DoEcho "WARNING: cannot create or update boot.conf"
+fi
+
+if [[ -f /etc/modules-$LOCVER ]] && [[ ! -f /etc/modules ]]; then
+	cp /etc/modules-$LOCVER /etc/modules
+fi
+
+DoEchoV "END: LINUX POSTINST"
+exit 0
+

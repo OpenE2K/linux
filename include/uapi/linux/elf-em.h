@@ -37,7 +37,9 @@
 #define EM_AARCH64	183	/* ARM 64 bit */
 #define EM_FRV		0x5441	/* Fujitsu FR-V */
 #define EM_AVR32	0x18ad	/* Atmel AVR32 */
-
+/* MCST addition */
+#define EM_MCST_ELBRUS	175	/* MCST Elbrus hardware architecture */
+/* MCST addition end */
 /*
  * This is an interim value that we will use until the committee comes
  * up with a final number.

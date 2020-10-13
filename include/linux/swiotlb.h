@@ -23,10 +23,18 @@ extern int swiotlb_force;
 #define IO_TLB_SHIFT 11
 
 extern void swiotlb_init(int verbose);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+int swiotlb_init_with_tbl(char *tlb, unsigned long nslabs, int verbose, int);
+#else
 int swiotlb_init_with_tbl(char *tlb, unsigned long nslabs, int verbose);
+#endif
 extern unsigned long swiotlb_nr_tbl(void);
 unsigned long swiotlb_size_or_default(void);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+extern int swiotlb_late_init_with_tbl(char *tlb, unsigned long nslabs, int);
+#else
 extern int swiotlb_late_init_with_tbl(char *tlb, unsigned long nslabs);
+#endif
 
 /*
  * Enumeration for sync targets

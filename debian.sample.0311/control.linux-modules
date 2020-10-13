@@ -1,0 +1,10 @@
+Package: linux-modules-xxSARCHPKGxx-xxLOCVERxx
+Source: linux-xxLOCALVERSIONxx
+Version: 0311.mcst
+Architecture: xxARCHPKGxx
+Maintainer: MCST Kernel Mainteiners <os@mcst.ru>
+Provides: linux-modules
+Section: kernel
+Priority: optional
+Depends: linux-image-xxSARCHPKGxx-xxLOCVERxx
+Description: Linux kernel modules for kernel xxKERNELDESCxx

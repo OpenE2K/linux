@@ -28,7 +28,11 @@ struct audit_chunk {
 	int count;
 	atomic_long_t refs;
 	struct rcu_head head;
-	struct node {
+	/* FIXME
+	 * It was changen struct node to struct node_new
+	 * to avoid lcc problems
+	 */
+	struct node_new {
 		struct list_head list;
 		struct audit_tree *owner;
 		unsigned index;		/* index; upper bit indicates 'will prune' */
@@ -140,7 +144,7 @@ static struct audit_chunk *alloc_chunk(int count)
 	size_t size;
 	int i;
 
-	size = offsetof(struct audit_chunk, owners) + count * sizeof(struct node);
+	size = offsetof(struct audit_chunk, owners) + count * sizeof(struct node_new);
 	chunk = kzalloc(size, GFP_KERNEL);
 	if (!chunk)
 		return NULL;
@@ -207,14 +211,14 @@ int audit_tree_match(struct audit_chunk *chunk, struct audit_tree *tree)
 
 /* tagging and untagging inodes with trees */
 
-static struct audit_chunk *find_chunk(struct node *p)
+static struct audit_chunk *find_chunk(struct node_new *p)
 {
 	int index = p->index & ~(1U<<31);
 	p -= index;
 	return container_of(p, struct audit_chunk, owners[0]);
 }
 
-static void untag_chunk(struct node *p)
+static void untag_chunk(struct node_new *p)
 {
 	struct audit_chunk *chunk = find_chunk(p);
 	struct fsnotify_mark *entry = &chunk->mark;
@@ -357,7 +361,7 @@ static int tag_chunk(struct inode *inode, struct audit_tree *tree)
 	struct fsnotify_mark *old_entry, *chunk_entry;
 	struct audit_tree *owner;
 	struct audit_chunk *chunk, *old;
-	struct node *p;
+	struct node_new *p;
 	int n;
 
 	old_entry = fsnotify_find_inode_mark(audit_tree_group, inode);
@@ -493,9 +497,9 @@ static void prune_one(struct audit_tree *victim)
 {
 	spin_lock(&hash_lock);
 	while (!list_empty(&victim->chunks)) {
-		struct node *p;
+		struct node_new *p;
 
-		p = list_entry(victim->chunks.next, struct node, list);
+		p = list_entry(victim->chunks.next, struct node_new, list);
 
 		untag_chunk(p);
 	}
@@ -515,7 +519,7 @@ static void trim_marked(struct audit_tree *tree)
 	}
 	/* reorder */
 	for (p = tree->chunks.next; p != &tree->chunks; p = q) {
-		struct node *node = list_entry(p, struct node, list);
+		struct node_new *node = list_entry(p, struct node_new, list);
 		q = p->next;
 		if (node->index & (1U<<31)) {
 			list_del_init(p);
@@ -524,9 +528,9 @@ static void trim_marked(struct audit_tree *tree)
 	}
 
 	while (!list_empty(&tree->chunks)) {
-		struct node *node;
+		struct node_new *node;
 
-		node = list_entry(tree->chunks.next, struct node, list);
+		node = list_entry(tree->chunks.next, struct node_new, list);
 
 		/* have we run out of marked? */
 		if (!(node->index & (1U<<31)))
@@ -589,7 +593,7 @@ void audit_trim_trees(void)
 		struct audit_tree *tree;
 		struct path path;
 		struct vfsmount *root_mnt;
-		struct node *node;
+		struct node_new *node;
 		int err;
 
 		tree = container_of(cursor.next, struct audit_tree, list);
@@ -689,7 +693,7 @@ int audit_add_tree_rule(struct audit_krule *rule)
 	drop_collected_mounts(mnt);
 
 	if (!err) {
-		struct node *node;
+		struct node_new *node;
 		spin_lock(&hash_lock);
 		list_for_each_entry(node, &tree->chunks, list)
 			node->index &= ~(1U<<31);
@@ -791,7 +795,7 @@ int audit_tag_tree(char *old, char *new)
 		mutex_unlock(&audit_filter_mutex);
 
 		if (!failed) {
-			struct node *node;
+			struct node_new *node;
 			spin_lock(&hash_lock);
 			list_for_each_entry(node, &tree->chunks, list)
 				node->index &= ~(1U<<31);

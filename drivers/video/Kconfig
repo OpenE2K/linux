@@ -2396,6 +2396,61 @@ config FB_BROADSHEET
 	  and could also have been called by other names when coupled with
 	  a bridge adapter.
 
+config FB_MGAM83
+	tristate
+	depends on FB
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select FB_SOFT_CURSOR
+	default n
+
+config PCI_FB_MGAM83
+	tristate "PCI MGAM83 Frame buffer driver"
+	depends on PCI && FB
+	select FB_MGAM83
+	default y
+
+config MGA_HWCOPYAREA
+	bool "PCI - Harware accelerator for \"fb_copyarea\" enabling"
+	depends on PCI_FB_MGAM83
+	default y
+
+config MGA_HWIMAGEBLIT
+	bool "Harware accelerator for \"fb_imageblit\" enabling"
+	depends on PCI_FB_MGAM83
+	default y
+
+config SBUS_FB_MGAM83
+	tristate "SBUS MGAM83 Frame buffer driver"
+	depends on SBUS && FB
+	select FB_MGAM83
+	default y
+
+config SBUS_MGA_HWCOPYAREA
+	bool "SBUS - Harware accelerator for \"fb_copyarea\" enabling"
+	depends on SBUS_FB_MGAM83 
+	default y
+
+config FB_MGA3D
+	tristate "MGA3D framebuffer driver"
+	depends on PCI && FB
+	default m
+
+config FB_LYNXFB
+	tristate "SMI lynx sm750/718/712/722/502 display support"
+	depends on FB && PCI
+	select FB_CFB_IMAGEBLIT
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	default y
+	help
+	  This driver supports graphic board with the siliconmotion
+	  sm750/sm718/sm712/sm722/sm502. Say Y if you have such a
+	  graphic board.
+	  To compile this driver as a module, choose M here: the
+	  module will be called lynxfb.
+
 config FB_AUO_K190X
 	tristate "AUO-K190X EPD controller support"
 	depends on FB
@@ -2484,6 +2539,19 @@ config FB_SIMPLE
 
 	  Configuration re: surface address, size, and format must be provided
 	  through device tree, or plain old platform data.
+
+config FB_LYNXFB_DOMAINS
+        bool "SMI lynx multiple frame buffers (fb domains)"
+        depends on FB && PCI && FB_LYNXFB
+	select CONFIG_MCST_PCI_DOMAINS
+	select CONFIG_IOHUB_DOMAINS
+        default y
+        ---help---
+	  This option implements support for multiple lynx frame buffers
+	  for sm750/sm718/sm712/sm722/sm502. Say Y if you have NUMA with
+	  multiple pci domains and VGA monitor bound to each domain. 
+	  Images will be bound to different devices but configured 
+	  by common kernel command line options (same as existant).
 
 source "drivers/video/omap/Kconfig"
 source "drivers/video/omap2/Kconfig"

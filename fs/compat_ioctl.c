@@ -870,12 +870,20 @@ COMPATIBLE_IOCTL(TIOCGPTN)
 COMPATIBLE_IOCTL(TIOCSPTLCK)
 COMPATIBLE_IOCTL(TIOCSERGETLSR)
 COMPATIBLE_IOCTL(TIOCSIG)
+#ifdef TIODUMPREGS 
+COMPATIBLE_IOCTL(TIODUMPREGS)
+#endif
+
 #ifdef TIOCSRS485
 COMPATIBLE_IOCTL(TIOCSRS485)
 #endif
 #ifdef TIOCGRS485
 COMPATIBLE_IOCTL(TIOCGRS485)
 #endif
+#ifdef CONFIG_MCST
+COMPATIBLE_IOCTL(TIODUMPREGS)
+#endif
+
 #ifdef TCGETS2
 COMPATIBLE_IOCTL(TCGETS2)
 COMPATIBLE_IOCTL(TCSETS2)
@@ -1430,7 +1438,7 @@ IGNORE_IOCTL(FBIOGCURSOR32)
  * Convert common ioctl arguments based on their command number
  *
  * Please do not add any code in here. Instead, implement
- * a compat_ioctl operation in the place that handleѕ the
+ * a compat_ioctl operation in the place that handleя∙ the
  * ioctl for the native case.
  */
 static long do_ioctl_trans(int fd, unsigned int cmd,

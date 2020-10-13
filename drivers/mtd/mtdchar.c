@@ -1,5 +1,5 @@
 /*
- * Copyright © 1999-2010 David Woodhouse <dwmw2@infradead.org>
+ * Copyright б╘ 1999-2010 David Woodhouse <dwmw2@infradead.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -563,8 +563,13 @@ static int mtdchar_write_ioctl(struct mtd_info *mtd,
 	int ret;
 
 	if (copy_from_user(&req, argp, sizeof(req)) ||
+#ifdef __LCC__
+			!access_ok(VERIFY_READ, (void *)req.usr_data, req.len) ||
+			!access_ok(VERIFY_READ, (void *)req.usr_oob, req.ooblen))
+#else
 			!access_ok(VERIFY_READ, req.usr_data, req.len) ||
 			!access_ok(VERIFY_READ, req.usr_oob, req.ooblen))
+#endif
 		return -EFAULT;
 	if (!mtd->_write_oob)
 		return -EOPNOTSUPP;

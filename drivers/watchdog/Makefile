@@ -166,6 +166,11 @@ obj-$(CONFIG_WATCHDOG_CP1XXX)		+= cpwd.o
 
 # XTENSA Architecture
 
+# E2K Arhitecture
+
+# L Architecture
+obj-$(CONFIG_L_WDT) += lwdt.o
+
 # Xen
 obj-$(CONFIG_XEN_WDT) += xen_wdt.o
 

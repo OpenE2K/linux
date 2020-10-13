@@ -19,7 +19,6 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
-
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/dmapool.h>
@@ -446,6 +445,11 @@ static void ehci_stop (struct usb_hcd *hcd)
 		    ehci_readl(ehci, &ehci->regs->status));
 }
 
+#ifdef CONFIG_MCST
+static void ehci_quirk_iohub2_worker(struct work_struct *work);
+static void ehci_quirkdone_iohub2_worker(struct work_struct *work);
+#endif
+
 /* one-time init, only for memory state */
 static int ehci_init(struct usb_hcd *hcd)
 {
@@ -455,6 +459,10 @@ static int ehci_init(struct usb_hcd *hcd)
 	u32			hcc_params;
 	struct ehci_qh_hw	*hw;
 
+#ifdef CONFIG_MCST
+	INIT_WORK(&ehci->iohub2_work, ehci_quirk_iohub2_worker);
+	INIT_DELAYED_WORK(&ehci->iohub2_workdone, ehci_quirkdone_iohub2_worker);
+#endif
 	spin_lock_init(&ehci->lock);
 
 	/*
@@ -621,10 +629,20 @@ static int ehci_run (struct usb_hcd *hcd)
 	 * be started before the port switching actions could complete.
 	 */
 	down_write(&ehci_cf_port_reset_rwsem);
+
+#ifdef CONFIG_MCST
+	if (!ehci->iohub2_false_fatal_error)
+		ehci->rh_state = EHCI_RH_RUNNING;
+#else
 	ehci->rh_state = EHCI_RH_RUNNING;
+#endif
 	ehci_writel(ehci, FLAG_CF, &ehci->regs->configured_flag);
 	ehci_readl(ehci, &ehci->regs->command);	/* unblock posted writes */
 	msleep(5);
+#ifdef CONFIG_MCST
+	if (ehci->iohub2_false_fatal_error)
+		ehci->rh_state = EHCI_RH_RUNNING;
+#endif
 	up_write(&ehci_cf_port_reset_rwsem);
 	ehci->last_periodic_enable = ktime_get_real();
 
@@ -642,8 +660,15 @@ static int ehci_run (struct usb_hcd *hcd)
 	 * So long as they're part of class devices, we can't do it init()
 	 * since the class device isn't created that early.
 	 */
+
+#ifdef CONFIG_MCST
+	if (!ehci->iohub2_false_fatal_error) {
+#endif
 	create_debug_files(ehci);
 	create_sysfs_files(ehci);
+#ifdef CONFIG_MCST
+	}
+#endif
 
 	return 0;
 }
@@ -677,6 +702,69 @@ int ehci_setup(struct usb_hcd *hcd)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ehci_setup);
+
+#ifdef CONFIG_USB_IRQ_ON_THREAD
+static irqreturn_t ehci_preirq(struct usb_hcd *hcd)
+{
+	struct ehci_hcd		*ehci = hcd_to_ehci(hcd);
+
+	if (!(ehci_readl(ehci, &ehci->regs->status) & INTR_MASK)) {
+		return IRQ_NONE;
+	}
+	return IRQ_WAKE_THREAD;
+}
+#endif
+
+#ifdef CONFIG_MCST
+static int ehci_restart(struct ehci_hcd *ehci)
+{
+	int ret = 0;
+	unsigned long		flags;
+	ehci->rh_state = EHCI_RH_HALTED;
+
+	ret = ehci_halt(ehci);
+	if (ret)
+		goto out;
+
+	spin_lock_irqsave(&ehci->lock, flags);
+	ehci_work(ehci);
+	end_unlink_async(ehci);
+	spin_unlock_irqrestore(&ehci->lock, flags);
+
+	ret = ehci_reset(ehci);
+	if (ret)
+		goto out;
+	ehci_writel(ehci, FLAG_CF, &ehci->regs->configured_flag);
+
+	ret = ehci_run(ehci_to_hcd(ehci));
+	if (ret)
+		goto out;
+out:
+
+	return ret;
+}
+
+static void ehci_quirkdone_iohub2_worker(struct work_struct *work)
+{
+	struct ehci_hcd *ehci = container_of(work, struct ehci_hcd,
+					iohub2_workdone.work);
+	ehci->iohub2_false_fatal_error = 0;
+}
+
+static void ehci_quirk_iohub2_worker(struct work_struct *work)
+{
+	struct ehci_hcd *ehci = container_of(work, struct ehci_hcd, iohub2_work);
+	int status;
+
+	status = ehci_restart(ehci);
+	if (status != 0)
+		ehci_err(ehci, "Restarting iohub2 controller failed in %s, %d\n",
+			 "ehci_restart", status);
+	
+	schedule_delayed_work(&ehci->iohub2_workdone,
+			        msecs_to_jiffies(5 * 1000));
+}
+#endif /*CONFIG_MCST*/
 
 /*-------------------------------------------------------------------------*/
 
@@ -802,6 +890,23 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 
 	/* PCI errors [4.15.2.4] */
 	if (unlikely ((status & STS_FATAL) != 0)) {
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	if (hcd->self.controller) {
+		struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
+		if (iohub_revision(pdev) < 2 &&
+			pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+				pdev->device == PCI_DEVICE_ID_MCST_EHCI) {
+			/* Workaround for a silicon bug. */
+			ehci->iohub2_false_fatal_error = 1;
+			ehci->rh_state = EHCI_RH_HALTED;
+			ehci_err(ehci, "EHCI False Error, "
+					"scheduling iohub2 chip restart\n");
+			ehci_writel(ehci, 0,
+				    &ehci->regs->intr_enable);
+			schedule_work(&ehci->iohub2_work);
+			bh = 0;
+		} else {
+#endif
 		ehci_err(ehci, "fatal error\n");
 		dbg_cmd(ehci, "fatal", cmd);
 		dbg_status(ehci, "fatal", status);
@@ -818,6 +923,9 @@ dead:
 
 		/* Handle completions when the controller stops */
 		bh = 0;
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	}}
+#endif
 	}
 
 	if (bh)
@@ -851,6 +959,11 @@ static int ehci_urb_enqueue (
 	struct list_head	qtd_list;
 
 	INIT_LIST_HEAD (&qtd_list);
+
+#ifdef CONFIG_MCST
+	if (ehci->rh_state != EHCI_RH_RUNNING)
+		return -ENODEV;
+#endif
 
 	switch (usb_pipetype (urb->pipe)) {
 	case PIPE_CONTROL:
@@ -1182,6 +1295,9 @@ static const struct hc_driver ehci_hc_driver = {
 	/*
 	 * generic hardware linkage
 	 */
+#ifdef CONFIG_USB_IRQ_ON_THREAD
+	.preirq =               ehci_preirq,
+#endif
 	.irq =			ehci_irq,
 	.flags =		HCD_MEMORY | HCD_USB2 | HCD_BH,
 

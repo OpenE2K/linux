@@ -83,5 +83,51 @@ config PREEMPT_RT_FULL
 
 endchoice
 
+config MCST_RT
+	bool "MCST enhancement of PREEMPT_RT_FULL"
+	default y
+	depends on PREEMPT_RT_FULL
+	help
+	   Possibility to turn off some fair opportunuties
+	   for all tasks to decrease latency for RT tasks
+
+config USB_IRQ_ON_THREAD
+	bool "USB irq implemented as threaded irq "
+	depends on MCST_RT
+	default y
+	help
+	  USB interrupt handler just find out interrupt, all other work
+	  is done on threadfn thread. It is useful if USB shares irq with
+	  important rt device.
+	  Say Y if you want that usb interrupts executed on kernel thread.
+	  Otherwise say N
+
+config MCST_RT_SMP
+        bool
+        depends on SMP
+
+config MCST_RT_GRQ
+        bool "MCST RT: Global Runqueue Additions"
+        depends on  MCST_RT && SMP && !CGROUPS && !GROUP_SCHED && !CPUSETS
+        default y
+        select MCST_RT_SMP
+
+config MCST_RT_NUMA
+        bool "MCST RT NUMA additions"
+        depends on  MCST_RT && NUMA && !CGROUPS && !GROUP_SCHED && !CPUSETS
+        default y
+        select MCST_RT_SMP
+
+config NETDEV_THREADS
+	bool "Each net dev has personal softirq threads"
+	depends on MCST_RT
+	default y
+	help
+	  net devices don't use SOFTIRQ stuff (NET_TX_SOFTIRQ and
+	  NET_RX_SOFTIRQ not used). Each net device has it's own
+	  threads pair - one for receiving and one for transmitting. It's
+	  possible to bind these threads to CPU and assign priority
+	  for each thread separately.
+
 config PREEMPT_COUNT
        bool

@@ -112,6 +112,10 @@ struct mem_cgroup;
 void __init kmem_cache_init(void);
 int slab_is_available(void);
 
+#ifdef CONFIG_MAC_
+typedef struct kmem_cache kmem_cache_t;
+#endif
+
 struct kmem_cache *kmem_cache_create(const char *, size_t, size_t,
 			unsigned long,
 			void (*)(void *));

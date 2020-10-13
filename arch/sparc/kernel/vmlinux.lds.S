@@ -76,6 +76,15 @@ SECTIONS
 	. = ALIGN(PAGE_SIZE);
 	__init_begin = ALIGN(PAGE_SIZE);
 	INIT_TEXT_SECTION(PAGE_SIZE)
+
+#ifdef CONFIG_E90S
+	. = ALIGN(8);
+	.apicdrivers : AT(ADDR(.apicdrivers) - LOAD_OFFSET) {
+		__apicdrivers = .;
+		*(.apicdrivers);
+		__apicdrivers_end = .;
+	}
+#endif	/*CONFIG_E90S*/
 	__init_text_end = .;
 	INIT_DATA_SECTION(16)
 

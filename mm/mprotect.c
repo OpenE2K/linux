@@ -29,6 +29,10 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
+
 #ifndef pgprot_modify
 static inline pgprot_t pgprot_modify(pgprot_t oldprot, pgprot_t newprot)
 {
@@ -225,6 +229,9 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	pgoff_t pgoff;
 	int error;
 	int dirty_accountable = 0;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	pgprot_t oldprot = vma->vm_page_prot;
+#endif
 
 	if (newflags == oldflags) {
 		*pprev = vma;
@@ -289,6 +296,29 @@ success:
 	change_protection(vma, start, end, vma->vm_page_prot,
 			  dirty_accountable, 0);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	/*
+	 * We may need to change valid bits in 2 cases:
+	 *
+	 * 1) !PROT_NONE -> PROT_NONE - must remove the valid bit to avoid
+	 * performance loss when semispeculative loads hit this area.
+	 *
+	 * 2) PROT_NONE -> !PROT_NONE - must set the valid bit for
+	 * semispeculative loads to work.
+	 *
+	 * We must do the TLB flush _after_ changing the valid bit
+	 * regardless of whether the flush has been done before.
+	 *
+	 * Also change_protection() function does not flush TLB in
+	 * the second case above.
+	 */
+	if ((pgprot_val(oldprot) ^ pgprot_val(vma->vm_page_prot)) &
+			_PAGE_VALID) {
+		if (make_all_vma_pages_valid(vma, 1, 1))
+			printk_once(KERN_WARNING "make_all_vma_pages_valid() failed in change_protection()\n");
+	}
+#endif
+
 	vm_stat_account(mm, oldflags, vma->vm_file, -nrpages);
 	vm_stat_account(mm, newflags, vma->vm_file, nrpages);
 	perf_event_mmap(vma);
@@ -336,6 +366,13 @@ SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 	error = -ENOMEM;
 	if (!vma)
 		goto out;
+#ifdef CONFIG_E2K
+	if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
+			__is_u_hw_stack_range(vma, start, start + len)) {
+		error = -EPERM;
+		goto out;
+	}
+#endif
 	prev = vma->vm_prev;
 	if (unlikely(grows & PROT_GROWSDOWN)) {
 		if (vma->vm_start >= end)

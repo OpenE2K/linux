@@ -12,6 +12,7 @@
 #undef DEBUG
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/proc_fs.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -21,6 +22,12 @@
 #include <linux/serial_core.h>
 #include <linux/8250_pci.h>
 #include <linux/bitops.h>
+#ifdef CONFIG_MCST
+#include <linux/major.h> 
+#include <linux/module.h> 
+#include <linux/proc_fs.h> 
+#include <linux/seq_file.h>
+#endif
 
 #include <asm/byteorder.h>
 #include <asm/io.h>
@@ -53,8 +60,20 @@ struct serial_private {
 	unsigned int		nr;
 	void __iomem		*remapped_bar[PCI_NUM_BAR_RESOURCES];
 	struct pci_serial_quirk	*quirk;
-	int			line[0];
+#ifdef CONFIG_MCST
+	char			nod[16];
+	int			mpkm_nr;
+#endif
+	int			line[16];
 };
+
+#ifdef CONFIG_MCST
+extern 	struct class  *tty_class;
+static struct class  *mpkm_class=NULL;
+static int mpkm_count = 0;
+static int mpkm_nr = -4;
+static int mpk2m_nr = -8; 
+#endif
 
 static int pci_default_setup(struct serial_private*,
 	  const struct pciserial_board*, struct uart_8250_port *, int);
@@ -1286,6 +1305,68 @@ static void pci_quatech_exit(struct pci_dev *dev)
 {
 }
 
+#ifdef CONFIG_MCST
+static struct proc_dir_entry *serial_dir;
+
+static const struct file_operations mkp_proc_driver_ops = {
+	.owner          = THIS_MODULE,
+	.open           = nonseekable_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = seq_release,
+};
+
+
+static int mpkm_init(struct pci_dev *dev)
+{
+	void __iomem *p;
+	int extra_regs_offset, num_ports, port;
+
+	p = ioremap(pci_resource_start(dev, 0), 0x80);
+	if (p == NULL)
+		return -ENOMEM;
+
+
+	if (dev->device == PCI_DEVICE_ID_MCST_MPKM) {
+		num_ports = 4;
+		extra_regs_offset = num_ports * 8;
+		for (port = 0; port < num_ports; port++)
+			writeb(0x74,
+			       p + extra_regs_offset + num_ports + port);
+
+		pr_info("MPKM device found\n");
+	} else if (dev->device == PCI_DEVICE_ID_MCST_MPKM2) {
+
+		num_ports = 8;
+		extra_regs_offset = num_ports * 8;
+		for (port = 0; port < num_ports; port++)
+			writeb(0x6,
+			       p + extra_regs_offset + num_ports + port);
+
+		pr_info("MPK2M device found\n");
+	} else {
+		pr_err("8250 driver error:"
+			" no such MPKM pci device number\n");
+		return 1;
+	}
+	iounmap(p);
+	return 0;
+}
+
+static void mpkm_exit(struct pci_dev *dev)
+{
+}
+
+static int mpkm_setup(struct serial_private *priv,
+		      const struct pciserial_board *board,
+		      struct uart_8250_port *port, int idx)
+{
+	port->port.flags |= UPF_BUGGY_UART;
+
+	return pci_default_setup(priv, board, port, idx);
+}
+#endif
+
 static int pci_default_setup(struct serial_private *priv,
 		  const struct pciserial_board *board,
 		  struct uart_8250_port *port, int idx)
@@ -1785,6 +1866,35 @@ pci_wch_ch353_setup(struct serial_private *priv,
  * Specific entries must come before more generic entries.
  */
 static struct pci_serial_quirk pci_serial_quirks[] __refdata = {
+#ifdef CONFIG_MCST
+   	/*
+	 * MCST
+	 * MPKM
+	 */
+	{
+		.vendor		= PCI_VENDOR_ID_ELBRUS,
+		.device		= PCI_DEVICE_ID_MCST_MPKM,
+		.subvendor	= PCI_ANY_ID,
+		.subdevice	= PCI_ANY_ID,
+		.setup		= mpkm_setup,
+		.init		= mpkm_init,
+		.exit		= mpkm_exit,
+	},
+	/*
+	 * MCST
+	 * MPKM2
+	 */
+	{
+		.vendor		= PCI_VENDOR_ID_ELBRUS,
+		.device		= PCI_DEVICE_ID_MCST_MPKM2,
+		.subvendor	= PCI_ANY_ID,
+		.subdevice	= PCI_ANY_ID,
+		.setup		= mpkm_setup,
+		.init		= mpkm_init,
+		.exit		= mpkm_exit,
+	},
+	
+#endif
 	/*
 	* ADDI-DATA GmbH communication cards <info@addi-data.com>
 	*/
@@ -2595,6 +2705,10 @@ enum pci_board_num_t {
 	pbn_b0_1_921600,
 	pbn_b0_2_921600,
 	pbn_b0_4_921600,
+#ifdef CONFIG_MCST
+	/* mpkm */
+	pbn_b0_8_921600,
+#endif
 
 	pbn_b0_2_1130000,
 
@@ -2792,6 +2906,14 @@ static struct pciserial_board pci_boards[] = {
 		.base_baud	= 921600,
 		.uart_offset	= 8,
 	},
+#ifdef CONFIG_MCST
+	[pbn_b0_8_921600] = {
+		.flags		= FL_BASE0,
+		.num_ports	= 8,
+		.base_baud	= 921600,
+		.uart_offset	= 8,
+	},
+#endif
 
 	[pbn_b0_2_1130000] = {
 		.flags          = FL_BASE0,
@@ -3620,6 +3742,10 @@ pciserial_init_ports(struct pci_dev *dev, const struct pciserial_board *board)
 	struct serial_private *priv;
 	struct pci_serial_quirk *quirk;
 	int rc, nr_ports, i;
+#ifdef CONFIG_MCST
+	int d_major,d_minor;
+	char card_name[32];
+#endif
 
 	nr_ports = board->num_ports;
 
@@ -3679,6 +3805,53 @@ pciserial_init_ports(struct pci_dev *dev, const struct pciserial_board *board)
 		}
 	}
 	priv->nr = i;
+
+#ifdef CONFIG_MCST
+	serial8250_get_reg(&d_major , &d_minor);
+
+	if (priv->dev->vendor == PCI_VENDOR_ID_ELBRUS &&
+		   priv->dev->device == PCI_DEVICE_ID_MCST_MPKM) {
+		sprintf(card_name , "MPKM_%d_%d",
+			d_major, d_minor + priv->line[0]);
+		proc_create(card_name, S_IRUGO, serial_dir,
+				&mkp_proc_driver_ops);
+		printk("creating /proc/driver/serial/%s\n",card_name);
+		strncpy(priv->nod, "mpkm", 16);
+		mpkm_nr += 4;
+	} else if (priv->dev->vendor == PCI_VENDOR_ID_ELBRUS &&
+			priv->dev->device == PCI_DEVICE_ID_MCST_MPKM2) {
+		sprintf(card_name , "MPK2M_%d_%d",
+			d_major, d_minor + priv->line[0]);
+		proc_create(card_name, S_IRUGO, serial_dir,
+					&mkp_proc_driver_ops);
+		printk("creating /proc/driver/serial/%s\n",card_name);
+		strncpy(priv->nod, "mpk2m", 16);
+		mpk2m_nr += 8;
+	}
+	if (mpkm_class == NULL) 
+		mpkm_class = class_create(THIS_MODULE, "mpkm");
+	
+	if (IS_ERR(mpkm_class)) {
+	       pr_err("Error creating class: /sys/class/mpkm.\n");
+	       goto err_leb;
+	}
+							       
+	priv->mpkm_nr = (priv->nr==8)?mpk2m_nr:mpkm_nr;
+	for( i = 0; i < priv->nr; i++) {
+	    char nod2[128];
+	    
+	    strcpy(nod2, priv->nod);
+	    sprintf(nod2,"%s%d", priv->nod, i + priv->mpkm_nr); 
+	    device_destroy(tty_class, MKDEV(d_major,  d_minor + priv->line[0]+ i)); 
+	    if (device_create(mpkm_class, NULL,
+	        MKDEV(d_major,  d_minor + priv->line[0]+ i), NULL, nod2) == NULL)
+		    printk(KERN_ERR "create a node %s failed\n", nod2);
+	}
+
+err_leb:
+	mpkm_count += 1;
+#endif
+
 	return priv;
 
 err_deinit:
@@ -3693,6 +3866,23 @@ void pciserial_remove_ports(struct serial_private *priv)
 {
 	struct pci_serial_quirk *quirk;
 	int i;
+#ifdef CONFIG_MCST
+	int d_major, d_minor;
+	char card_name[32];
+	serial8250_get_reg(&d_major, &d_minor);
+
+	if (priv->dev->vendor == PCI_VENDOR_ID_ELBRUS
+	    && priv->dev->device == PCI_DEVICE_ID_MCST_MPKM) {
+		sprintf(card_name, "MPKM_%d_%d", d_major,
+			d_minor + priv->line[0]);
+		remove_proc_entry(card_name, serial_dir);
+	} else if (priv->dev->vendor == PCI_VENDOR_ID_ELBRUS
+		   && priv->dev->device == PCI_DEVICE_ID_MCST_MPKM2) {
+		sprintf(card_name, "MPK2M_%d_%d", d_major,
+			d_minor + priv->line[0]);
+		remove_proc_entry(card_name, serial_dir);
+	}
+#endif
 
 	for (i = 0; i < priv->nr; i++)
 		serial8250_unregister_port(priv->line[i]);
@@ -3702,6 +3892,17 @@ void pciserial_remove_ports(struct serial_private *priv)
 			iounmap(priv->remapped_bar[i]);
 		priv->remapped_bar[i] = NULL;
 	}
+#ifdef CONFIG_MCST
+	for( i = 0; i < priv->nr; i++) {
+	    device_destroy(mpkm_class, MKDEV(d_major,
+	    			d_minor + priv->line[0]+ i));
+						   
+	}
+	mpkm_count--;
+	
+	if (mpkm_count == 0)
+	    class_destroy(mpkm_class);
+#endif
 
 	/*
 	 * Find the exit quirks.
@@ -3766,6 +3967,13 @@ pciserial_init_one(struct pci_dev *dev, const struct pci_device_id *ent)
 			return rc;
 	}
 
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	/* i2c/spi controller is not serial device, so ignore it */
+	if (dev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+		dev->device == PCI_DEVICE_ID_MCST_I2C_SPI) {
+		return -ENODEV;
+	}
+#endif	/* CONFIG_E2K || CONFIG_E90S */
 	if (ent->driver_data >= ARRAY_SIZE(pci_boards)) {
 		dev_err(&dev->dev, "invalid driver_data: %ld\n",
 			ent->driver_data);
@@ -4894,6 +5102,19 @@ static struct pci_device_id serial_pci_tbl[] = {
 		0, 0, pbn_b0_8_115200 },
 
 
+#ifdef CONFIG_MCST
+	/*
+	 * MCST MPKM
+	 */
+	{	PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_MPKM,
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0,
+		pbn_b0_4_921600 },
+		
+	{	PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_MPKM2,
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0,
+		pbn_b0_8_921600 },
+#endif
+
 	/*
 	 * PA Semi PA6T-1682M on-chip UART
 	 */
@@ -5320,7 +5541,26 @@ static struct pci_driver serial_pci_driver = {
 	.err_handler	= &serial8250_err_handler,
 };
 
+#ifdef CONFIG_MCST
+static int __init serial8250_pci_init(void)
+{
+	serial_dir = proc_mkdir("driver/serial", NULL);
+
+	return pci_register_driver(&serial_pci_driver);
+}
+
+static void __exit serial8250_pci_exit(void)
+{
+	pci_unregister_driver(&serial_pci_driver);
+
+	remove_proc_entry("driver/serial", NULL);
+}
+
+module_init(serial8250_pci_init);
+module_exit(serial8250_pci_exit);
+#else
 module_pci_driver(serial_pci_driver);
+#endif
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Generic 8250/16x50 PCI serial probe module");

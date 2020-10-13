@@ -1,9 +1,15 @@
 config SUNRPC
-	tristate
+	tristate "Sun RPC: Sun remote procedure calls"
+	help
+	  Setting M for this option may cause mistakes on loading module sunrpc.
+	  If unsure, say Y.
 
 config SUNRPC_GSS
-	tristate
+	tristate "Sun RPC GSS: provides cryptographic authentication"
 	select OID_REGISTRY
+	help
+	  Setting M for this option may cause mistakes on loading module sunrpc.
+	  If unsure, say Y.
 
 config SUNRPC_BACKCHANNEL
 	bool

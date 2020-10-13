@@ -93,6 +93,9 @@
 
 #define TIOCMIWAIT	0x545C	/* wait for a change on serial input line(s) */
 #define TIOCGICOUNT	0x545D	/* read serial port inline interrupt counts */
+#ifdef CONFIG_MCST
+#define TIODUMPREGS	0x54F6	/* return array of dev regs */
+#endif
 
 /*
  * Some arches already define FIOQSIZE due to a historical

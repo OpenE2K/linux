@@ -89,6 +89,14 @@
 #include <asm/smp.h>
 #endif
 
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+#include <asm/boot_profiling.h>
+#endif
+
+#if defined CONFIG_E2K && defined CONFIG_RECOVERY
+#include <asm/cnt_point.h>
+#endif
+
 static int kernel_init(void *);
 
 extern void init_IRQ(void);
@@ -536,7 +544,13 @@ asmlinkage void __init start_kernel(void)
 	vfs_caches_init_early();
 	sort_main_extable();
 	trap_init();
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+	BOOT_TRACEPOINT("Calling mm_init()");
+#endif
 	mm_init();
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+	BOOT_TRACEPOINT("mm_init() finished");
+#endif
 
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
@@ -581,6 +595,9 @@ asmlinkage void __init start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+#if defined(CONFIG_MCST) && defined(CONFIG_SERIAL_PRINTK)
+	console_initialized = 1;
+#endif
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -764,8 +781,15 @@ static void __init do_initcall_level(int level)
 		   level, level,
 		   &repair_env_string);
 
-	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
+	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++) {
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+		BOOT_TRACEPOINT("Initcall %ps started", *fn);
+#endif
 		do_one_initcall(*fn);
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+		BOOT_TRACEPOINT("Initcall %ps finished", *fn);
+#endif
+	}
 }
 
 static void __init do_initcalls(void)
@@ -800,8 +824,15 @@ static void __init do_pre_smp_initcalls(void)
 {
 	initcall_t *fn;
 
-	for (fn = __initcall_start; fn < __initcall0_start; fn++)
+	for (fn = __initcall_start; fn < __initcall0_start; fn++) {
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+		BOOT_TRACEPOINT("Early initcall %pS started", *fn);
+#endif
 		do_one_initcall(*fn);
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+		BOOT_TRACEPOINT("Early initcall %pS finished", *fn);
+#endif
+	}
 }
 
 /*
@@ -815,7 +846,10 @@ void __init load_default_modules(void)
 	load_default_elevator_module();
 }
 
-static int run_init_process(const char *init_filename)
+#if !defined CONFIG_E2K || !defined CONFIG_RECOVERY || CONFIG_CNT_POINTS_NUM > 1
+static
+#endif
+int run_init_process(const char *init_filename)
 {
 	argv_init[0] = init_filename;
 	return do_execve(getname_kernel(init_filename),
@@ -844,6 +878,7 @@ static int __ref kernel_init(void *unused)
 	int ret;
 
 	kernel_init_freeable();
+
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 	free_initmem();
@@ -853,6 +888,15 @@ static int __ref kernel_init(void *unused)
 
 	flush_delayed_fput();
 
+#if defined(CONFIG_E2K) && defined(CONFIG_RECOVERY)
+# if (CONFIG_CNT_POINTS_NUM == 1)
+        save_dump_for_quick_restart();
+# endif
+# if (CONFIG_CNT_POINTS_NUM < 2)
+	start_dump_analyze();
+# endif
+#endif /* CONFIG_E2K && CONFIG_RECOVERY */
+
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
 		if (!ret)
@@ -860,7 +904,9 @@ static int __ref kernel_init(void *unused)
 		pr_err("Failed to execute %s (error %d)\n",
 		       ramdisk_execute_command, ret);
 	}
-
+#ifdef CONFIG_MCST
+	pr_alert("%s", linux_banner);
+#endif
 	/*
 	 * We try each of these until one succeeds.
 	 *
@@ -875,6 +921,9 @@ static int __ref kernel_init(void *unused)
 			execute_command, ret);
 	}
 	if (!try_to_run_init_process("/sbin/init") ||
+#ifdef CONFIG_MCST
+	    !try_to_run_init_process("/mcst/bin/init") ||
+#endif
 	    !try_to_run_init_process("/etc/init") ||
 	    !try_to_run_init_process("/bin/init") ||
 	    !try_to_run_init_process("/bin/sh"))

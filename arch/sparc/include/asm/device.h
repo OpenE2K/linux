@@ -6,6 +6,9 @@
 #ifndef _ASM_SPARC_DEVICE_H
 #define _ASM_SPARC_DEVICE_H
 
+#ifdef	CONFIG_E90S
+#include <asm-generic/device.h>
+#else	/*CONFIG_E90S*/
 #include <asm/openprom.h>
 
 struct device_node;
@@ -26,5 +29,9 @@ struct pdev_archdata {
 	unsigned int		irqs[PROMINTR_MAX];
 	int			num_irqs;
 };
+#endif	/*CONFIG_E90S*/
+
+#define dev_to_link(dev)		0
+#define set_dev_link(dev, link)		do{}while(0)
 
 #endif /* _ASM_SPARC_DEVICE_H */

@@ -10,9 +10,9 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/capability.h>
-#include <linux/fs.h> 
-#include <linux/mm.h> 
-#include <linux/file.h> 
+#include <linux/fs.h>
+#include <linux/mm.h>
+#include <linux/file.h>
 #include <linux/signal.h>
 #include <linux/resource.h>
 #include <linux/times.h>
@@ -49,7 +49,8 @@
 #include <asm/mmu_context.h>
 #include <asm/compat_signal.h>
 
-asmlinkage long sys32_truncate64(const char __user * path, unsigned long high, unsigned long low)
+asmlinkage long sys32_truncate64(const char __user *path, unsigned long high,
+				 unsigned long low)
 {
 	if ((int)high < 0)
 		return -EINVAL;
@@ -57,7 +58,8 @@ asmlinkage long sys32_truncate64(const char __user * path, unsigned long high, u
 		return sys_truncate(path, (high << 32) | low);
 }
 
-asmlinkage long sys32_ftruncate64(unsigned int fd, unsigned long high, unsigned long low)
+asmlinkage long sys32_ftruncate64(unsigned int fd, unsigned long high,
+				  unsigned long low)
 {
 	if ((int)high < 0)
 		return -EINVAL;
@@ -70,18 +72,22 @@ static int cp_compat_stat64(struct kstat *stat,
 {
 	int err;
 
-	err  = put_user(huge_encode_dev(stat->dev), &statbuf->st_dev);
+	err = put_user(huge_encode_dev(stat->dev), &statbuf->st_dev);
 	err |= put_user(stat->ino, &statbuf->st_ino);
 	err |= put_user(stat->mode, &statbuf->st_mode);
 	err |= put_user(stat->nlink, &statbuf->st_nlink);
-	err |= put_user(from_kuid_munged(current_user_ns(), stat->uid), &statbuf->st_uid);
-	err |= put_user(from_kgid_munged(current_user_ns(), stat->gid), &statbuf->st_gid);
+	err |=
+	    put_user(from_kuid_munged(current_user_ns(), stat->uid),
+		     &statbuf->st_uid);
+	err |=
+	    put_user(from_kgid_munged(current_user_ns(), stat->gid),
+		     &statbuf->st_gid);
 	err |= put_user(huge_encode_dev(stat->rdev), &statbuf->st_rdev);
-	err |= put_user(0, (unsigned long __user *) &statbuf->__pad3[0]);
+	err |= put_user(0, (unsigned long __user *)&statbuf->__pad3[0]);
 	err |= put_user(stat->size, &statbuf->st_size);
 	err |= put_user(stat->blksize, &statbuf->st_blksize);
-	err |= put_user(0, (unsigned int __user *) &statbuf->__pad4[0]);
-	err |= put_user(0, (unsigned int __user *) &statbuf->__pad4[4]);
+	err |= put_user(0, (unsigned int __user *)&statbuf->__pad4[0]);
+	err |= put_user(0, (unsigned int __user *)&statbuf->__pad4[4]);
 	err |= put_user(stat->blocks, &statbuf->st_blocks);
 	err |= put_user(stat->atime.tv_sec, &statbuf->st_atime);
 	err |= put_user(stat->atime.tv_nsec, &statbuf->st_atime_nsec);
@@ -95,8 +101,8 @@ static int cp_compat_stat64(struct kstat *stat,
 	return err;
 }
 
-asmlinkage long compat_sys_stat64(const char __user * filename,
-		struct compat_stat64 __user *statbuf)
+asmlinkage long compat_sys_stat64(const char __user *filename,
+				  struct compat_stat64 __user *statbuf)
 {
 	struct kstat stat;
 	int error = vfs_stat(filename, &stat);
@@ -106,8 +112,8 @@ asmlinkage long compat_sys_stat64(const char __user * filename,
 	return error;
 }
 
-asmlinkage long compat_sys_lstat64(const char __user * filename,
-		struct compat_stat64 __user *statbuf)
+asmlinkage long compat_sys_lstat64(const char __user *filename,
+				   struct compat_stat64 __user *statbuf)
 {
 	struct kstat stat;
 	int error = vfs_lstat(filename, &stat);
@@ -118,7 +124,7 @@ asmlinkage long compat_sys_lstat64(const char __user * filename,
 }
 
 asmlinkage long compat_sys_fstat64(unsigned int fd,
-		struct compat_stat64 __user * statbuf)
+				   struct compat_stat64 __user *statbuf)
 {
 	struct kstat stat;
 	int error = vfs_fstat(fd, &stat);
@@ -129,8 +135,9 @@ asmlinkage long compat_sys_fstat64(unsigned int fd,
 }
 
 asmlinkage long compat_sys_fstatat64(unsigned int dfd,
-		const char __user *filename,
-		struct compat_stat64 __user * statbuf, int flag)
+				     const char __user *filename,
+				     struct compat_stat64 __user *statbuf,
+				     int flag)
 {
 	struct kstat stat;
 	int error;
@@ -142,55 +149,56 @@ asmlinkage long compat_sys_fstatat64(unsigned int dfd,
 }
 
 COMPAT_SYSCALL_DEFINE3(sparc_sigaction, int, sig,
-			struct compat_old_sigaction __user *,act,
-			struct compat_old_sigaction __user *,oact)
+		       struct compat_old_sigaction __user *, act,
+		       struct compat_old_sigaction __user *, oact)
 {
 	WARN_ON_ONCE(sig >= 0);
 	return compat_sys_sigaction(-sig, act, oact);
 }
 
 COMPAT_SYSCALL_DEFINE5(rt_sigaction, int, sig,
-			struct compat_sigaction __user *,act,
-			struct compat_sigaction __user *,oact,
-			void __user *,restorer,
-			compat_size_t,sigsetsize)
+		       struct compat_sigaction __user *, act,
+		       struct compat_sigaction __user *, oact,
+		       void __user *, restorer, compat_size_t, sigsetsize)
 {
-        struct k_sigaction new_ka, old_ka;
-        int ret;
+	struct k_sigaction new_ka, old_ka;
+	int ret;
 	compat_sigset_t set32;
 
-        /* XXX: Don't preclude handling different sized sigset_t's.  */
-        if (sigsetsize != sizeof(compat_sigset_t))
-                return -EINVAL;
+	/* XXX: Don't preclude handling different sized sigset_t's.  */
+	if (sigsetsize != sizeof(compat_sigset_t))
+		return -EINVAL;
 
-        if (act) {
+	if (act) {
 		u32 u_handler, u_restorer;
 
 		new_ka.ka_restorer = restorer;
 		ret = get_user(u_handler, &act->sa_handler);
-		new_ka.sa.sa_handler =  compat_ptr(u_handler);
+		new_ka.sa.sa_handler = compat_ptr(u_handler);
 		ret |= copy_from_user(&set32, &act->sa_mask, sizeof(compat_sigset_t));
 		sigset_from_compat(&new_ka.sa.sa_mask, &set32);
 		ret |= get_user(new_ka.sa.sa_flags, &act->sa_flags);
 		ret |= get_user(u_restorer, &act->sa_restorer);
 		new_ka.sa.sa_restorer = compat_ptr(u_restorer);
-                if (ret)
-                	return -EFAULT;
+		if (ret)
+			return -EFAULT;
 	}
 
 	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
 
 	if (!ret && oact) {
 		sigset_to_compat(&set32, &old_ka.sa.sa_mask);
-		ret = put_user(ptr_to_compat(old_ka.sa.sa_handler), &oact->sa_handler);
+		ret =
+		    put_user(ptr_to_compat(old_ka.sa.sa_handler),
+			     &oact->sa_handler);
 		ret |= copy_to_user(&oact->sa_mask, &set32, sizeof(compat_sigset_t));
 		ret |= put_user(old_ka.sa.sa_flags, &oact->sa_flags);
 		ret |= put_user(ptr_to_compat(old_ka.sa.sa_restorer), &oact->sa_restorer);
 		if (ret)
 			ret = -EFAULT;
-        }
+	}
 
-        return ret;
+	return ret;
 }
 
 asmlinkage compat_ssize_t sys32_pread64(unsigned int fd,
@@ -213,16 +221,14 @@ asmlinkage compat_ssize_t sys32_pwrite64(unsigned int fd,
 
 asmlinkage long compat_sys_readahead(int fd,
 				     unsigned long offhi,
-				     unsigned long offlo,
-				     compat_size_t count)
+				     unsigned long offlo, compat_size_t count)
 {
 	return sys_readahead(fd, (offhi << 32) | offlo, count);
 }
 
 long compat_sys_fadvise64(int fd,
 			  unsigned long offhi,
-			  unsigned long offlo,
-			  compat_size_t len, int advice)
+			  unsigned long offlo, compat_size_t len, int advice)
 {
 	return sys_fadvise64_64(fd, (offhi << 32) | offlo, len, advice);
 }
@@ -234,21 +240,225 @@ long compat_sys_fadvise64_64(int fd,
 {
 	return sys_fadvise64_64(fd,
 				(offhi << 32) | offlo,
-				(lenhi << 32) | lenlo,
-				advice);
+				(lenhi << 32) | lenlo, advice);
 }
 
-long sys32_sync_file_range(unsigned int fd, unsigned long off_high, unsigned long off_low, unsigned long nb_high, unsigned long nb_low, unsigned int flags)
+long sys32_sync_file_range(unsigned int fd, unsigned long off_high,
+			   unsigned long off_low, unsigned long nb_high,
+			   unsigned long nb_low, unsigned int flags)
 {
 	return sys_sync_file_range(fd,
 				   (off_high << 32) | off_low,
-				   (nb_high << 32) | nb_low,
-				   flags);
+				   (nb_high << 32) | nb_low, flags);
 }
 
 asmlinkage long compat_sys_fallocate(int fd, int mode, u32 offhi, u32 offlo,
 				     u32 lenhi, u32 lenlo)
 {
-	return sys_fallocate(fd, mode, ((loff_t)offhi << 32) | offlo,
-			     ((loff_t)lenhi << 32) | lenlo);
+	return sys_fallocate(fd, mode, ((loff_t) offhi << 32) | offlo,
+			     ((loff_t) lenhi << 32) | lenlo);
 }
+
+#ifdef CONFIG_MCST
+
+#define ATOMIC_HASH_SIZE        256
+#define ATOMIC_HASH(a)  (&__sys_atomic_hash[((unsigned long) a) &\
+				(ATOMIC_HASH_SIZE-1)])
+
+static raw_spinlock_t __sys_atomic_hash[ATOMIC_HASH_SIZE] = {
+	[0 ... (ATOMIC_HASH_SIZE - 1)] = __RAW_SPIN_LOCK_UNLOCKED(sys_atomic)
+};
+
+enum {
+	ATOMIC_XCHG = 0,
+	ATOMIC_CMPXCHG = 1,
+	ATOMIC_ADD = 2
+};
+
+static void force_sigbus_at(void __user *addr)
+{
+	siginfo_t info;
+
+	info.si_signo = SIGBUS;
+	info.si_errno = 0;
+	info.si_code = BUS_ADRERR;
+	info.si_addr = addr;
+	info.si_trapno = 0;
+
+	force_sig_info(SIGBUS, &info, current);
+}
+
+static void force_sigsegv_at(void __user *addr)
+{
+	siginfo_t info;
+
+	info.si_signo = SIGSEGV;
+	info.si_errno = 0;
+	info.si_addr = addr;
+	info.si_trapno = 0;
+
+	force_sig_info(SIGSEGV, &info, current);
+}
+
+asmlinkage long sys_atomic(int req, int size, void __user *addr,
+			   s32 arg1, s32 arg2, void __user *old)
+{
+	struct mm_struct *mm = current->mm;
+	unsigned long flags;
+	long rval;
+	s32 val32 = 0;
+	s16 val16 = 0;
+	s8 val8 = 0;
+
+	__chk_user_ptr(addr);
+	__chk_user_ptr(old);
+
+	if (unlikely(!access_ok(VERIFY_WRITE, addr, size))) {
+		force_sigsegv_at(addr);
+
+		return -EFAULT;
+	}
+
+	if (unlikely(!access_ok(VERIFY_WRITE, old, size))) {
+		force_sigsegv_at(old);
+
+		return -EFAULT;
+	}
+
+	if (unlikely(!IS_ALIGNED((unsigned long)addr, size) ||
+		     !IS_ALIGNED((unsigned long)old, size))) {
+		force_sigbus_at(IS_ALIGNED((unsigned long)addr, size) ?
+				old : addr);
+
+		return -EFAULT;
+	}
+
+again:
+	raw_spin_lock_irqsave(ATOMIC_HASH(addr), flags);
+
+	switch (__builtin_expect(size, 4)) {
+	case 1:
+		switch (req) {
+		case ATOMIC_XCHG:
+			if (unlikely(__get_user(val8, (s8 *) addr)
+				     || __put_user((s8) arg1, (s8 *) addr)))
+				goto handle_fault;
+			break;
+		case ATOMIC_CMPXCHG:
+			if (unlikely(__get_user(val8, (s8 *) addr)))
+				goto handle_fault;
+
+			if (val8 == (s8) arg1)
+				if (unlikely(__put_user((s8) arg2,
+							(s8 *) addr)))
+					goto handle_fault;
+			break;
+		case ATOMIC_ADD:
+			if (unlikely(__get_user(val8, (s8 *) addr)
+				     || __put_user(val8 + (s8) arg1,
+						   (s8 *) addr)))
+				goto handle_fault;
+			break;
+		default:
+			val8 = -EINVAL;
+			break;
+		}
+		break;
+	case 2:
+		switch (req) {
+		case ATOMIC_XCHG:
+			if (unlikely(__get_user(val16, (s16 *) addr) ||
+				     __put_user((s16) arg1, (s16 *) addr)))
+				goto handle_fault;
+			break;
+		case ATOMIC_CMPXCHG:
+			if (unlikely(__get_user(val16, (s16 *) addr)))
+				goto handle_fault;
+
+			if (val16 == (s16) arg1)
+				if (unlikely(__put_user((s16) arg2,
+							(s16 *) addr)))
+					goto handle_fault;
+			break;
+		case ATOMIC_ADD:
+			if (unlikely(__get_user(val16, (s16 *) addr)
+				     || __put_user(val16 + (s16) arg1,
+						   (s16 *) addr)))
+				goto handle_fault;
+			break;
+		default:
+			val16 = -EINVAL;
+			break;
+		}
+		break;
+	case 4:
+		switch (req) {
+		case ATOMIC_XCHG:
+			if (unlikely(__get_user(val32, (s32 *) addr) ||
+				     __put_user((s32) arg1, (s32 *) addr)))
+				goto handle_fault;
+			break;
+		case ATOMIC_CMPXCHG:
+			if (unlikely(__get_user(val32, (s32 *) addr)))
+				goto handle_fault;
+
+			if (val32 == (s32) arg1)
+				if (unlikely(__put_user((s32) arg2,
+							(s32 *) addr)))
+					goto handle_fault;
+			break;
+		case ATOMIC_ADD:
+			if (unlikely(__get_user(val32, (s32 *) addr)
+				     || __put_user(val32 + (s32) arg1,
+						   (s32 *) addr)))
+				goto handle_fault;
+			break;
+		default:
+			val32 = -EINVAL;
+			break;
+		}
+		break;
+	default:
+		raw_spin_unlock_irqrestore(ATOMIC_HASH(addr), flags);
+		return -EINVAL;
+	}
+	raw_spin_unlock_irqrestore(ATOMIC_HASH(addr), flags);
+
+	switch (size) {
+	case 1:
+		rval = put_user(val8, (s8 *) old);
+		break;
+	case 2:
+		rval = put_user(val16, (s16 *) old);
+		break;
+	case 4:
+		rval = put_user(val32, (s32 *) old);
+		break;
+	default:
+		pr_notice_ratelimited("sys_atomic: bad size %d passed\n", size);
+		rval = -EINVAL;
+		break;
+	}
+
+	if (rval)
+		force_sigsegv_at(old);
+
+	return rval;
+
+handle_fault:
+	raw_spin_unlock_irqrestore(ATOMIC_HASH(addr), flags);
+
+	down_read(&mm->mmap_sem);
+	rval = get_user_pages(current, mm, (unsigned long)addr,
+			      1, 1, 0, NULL, NULL);
+	up_read(&mm->mmap_sem);
+
+	if (rval < 0) {
+		force_sigsegv_at(addr);
+
+		return rval;
+	}
+
+	goto again;
+}
+#endif /* CONFIG_MCST */

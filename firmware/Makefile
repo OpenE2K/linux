@@ -52,6 +52,7 @@ fw-shipped-$(CONFIG_DRM_RADEON) += radeon/R100_cp.bin radeon/R200_cp.bin \
 				   radeon/RS690_cp.bin radeon/RS600_cp.bin \
 				   radeon/R520_cp.bin \
 				   radeon/R600_pfp.bin radeon/R600_me.bin \
+				   radeon/R600_rlc.bin radeon/R700_rlc.bin \
 				   radeon/RV610_pfp.bin radeon/RV610_me.bin \
 				   radeon/RV630_pfp.bin radeon/RV630_me.bin \
 				   radeon/RV620_pfp.bin radeon/RV620_me.bin \
@@ -60,7 +61,26 @@ fw-shipped-$(CONFIG_DRM_RADEON) += radeon/R100_cp.bin radeon/R200_cp.bin \
 				   radeon/RS780_pfp.bin radeon/RS780_me.bin \
 				   radeon/RV770_pfp.bin radeon/RV770_me.bin \
 				   radeon/RV730_pfp.bin radeon/RV730_me.bin \
-				   radeon/RV710_pfp.bin radeon/RV710_me.bin
+				   radeon/RV710_pfp.bin radeon/RV710_me.bin \
+				   radeon/CAICOS_mc.bin radeon/CAICOS_me.bin radeon/CAICOS_pfp.bin \
+				   radeon/CAICOS_smc.bin \
+				   radeon/BTC_rlc.bin \
+				   radeon/TURKS_mc.bin radeon/TURKS_me.bin radeon/TURKS_pfp.bin \
+				   radeon/TURKS_smc.bin \
+				   radeon/SUMO_me.bin  radeon/SUMO_pfp.bin radeon/SUMO_rlc.bin \
+				   radeon/SUMO_uvd.bin \
+				   radeon/CEDAR_me.bin radeon/CEDAR_pfp.bin \
+				   radeon/CEDAR_rlc.bin radeon/CEDAR_smc.bin \
+				   radeon/CYPRESS_me.bin radeon/CYPRESS_pfp.bin \
+				   radeon/CYPRESS_rlc.bin radeon/CYPRESS_smc.bin \
+				   radeon/CYPRESS_uvd.bin \
+				   radeon/OLAND_ce.bin radeon/OLAND_mc.bin radeon/OLAND_me.bin \
+				   radeon/OLAND_pfp.bin radeon/OLAND_rlc.bin \
+				   radeon/OLAND_mc2.bin radeon/OLAND_smc.bin \
+				   radeon/TAHITI_uvd.bin
+
+
+
 fw-shipped-$(CONFIG_DVB_AV7110) += av7110/bootcode.bin
 fw-shipped-$(CONFIG_DVB_TTUSB_BUDGET) += ttusb-budget/dspbootcode.bin
 fw-shipped-$(CONFIG_E100) += e100/d101m_ucode.bin e100/d101s_ucode.bin \

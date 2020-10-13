@@ -56,6 +56,20 @@ static unsigned long elf_map(struct file *, unsigned long, struct elf_phdr *,
  */
 #ifdef CONFIG_ELF_CORE
 static int elf_core_dump(struct coredump_params *cprm);
+
+# ifdef CONFIG_E2K
+/* Hardware stacks lie above 4Gb boundary in 32-bit applications on e2k
+ * so the same core dump function is used for all modes. */
+#  if ELF_CLASS == ELFCLASS64
+int elf_core_dump_64(struct coredump_params *cprm)
+{
+	return elf_core_dump(cprm);
+}
+#  else
+extern int elf_core_dump_64(struct coredump_params *cprm);
+#  endif
+# endif
+
 #else
 #define elf_core_dump	NULL
 #endif
@@ -78,7 +92,11 @@ static struct linux_binfmt elf_format = {
 	.module		= THIS_MODULE,
 	.load_binary	= load_elf_binary,
 	.load_shlib	= load_elf_library,
+#if defined(CONFIG_E2K) && (ELF_CLASS != ELFCLASS64)
+	.core_dump	= elf_core_dump_64,
+#else
 	.core_dump	= elf_core_dump,
+#endif
 	.min_coredump	= ELF_EXEC_PAGESIZE,
 };
 

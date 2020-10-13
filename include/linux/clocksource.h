@@ -328,6 +328,14 @@ static inline void __clocksource_updatefreq_khz(struct clocksource *cs, u32 khz)
 
 
 extern int timekeeping_notify(struct clocksource *clock);
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#define SCLKR_SRC_LEN	4
+extern char sclkr_src[SCLKR_SRC_LEN];
+extern int sclk_register(void *);
+extern struct clocksource clocksource_sclkr;
+extern int proc_sclkr(struct ctl_table *, int,
+	void __user *, size_t *, loff_t *);
+#endif
 
 extern cycle_t clocksource_mmio_readl_up(struct clocksource *);
 extern cycle_t clocksource_mmio_readl_down(struct clocksource *);

@@ -24,19 +24,25 @@ struct poll {
 
 /* from helpers.S */
 EXPORT_SYMBOL(__flushw_user);
+#ifndef CONFIG_E90S
 EXPORT_SYMBOL_GPL(real_hard_smp_processor_id);
+#endif	/*CONFIG_E90S*/
 
 /* from head_64.S */
 EXPORT_SYMBOL(__ret_efault);
 EXPORT_SYMBOL(tlb_type);
 EXPORT_SYMBOL(sun4v_chip_type);
+#ifdef	CONFIG_OF
 EXPORT_SYMBOL(prom_root_node);
+#endif	/*CONFIG_OF*/
 
+#ifdef	CONFIG_SPARC64_SUN4V
 /* from hvcalls.S */
 EXPORT_SYMBOL(sun4v_niagara_getperf);
 EXPORT_SYMBOL(sun4v_niagara_setperf);
 EXPORT_SYMBOL(sun4v_niagara2_getperf);
 EXPORT_SYMBOL(sun4v_niagara2_setperf);
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 /* from hweight.S */
 EXPORT_SYMBOL(__arch_hweight8);

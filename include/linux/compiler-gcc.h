@@ -12,7 +12,14 @@
 
 /* Optimization barrier */
 /* The "volatile" is due to gcc bugs */
+
+#if !defined(CONFIG_E2K) || !defined(__LCC__)
 #define barrier() __asm__ __volatile__("": : :"memory")
+#else /* CONFIG_E2K && __LCC__ */
+/* Workaround LCC bug # 44701 */
+#include <asm/e2k_api.h>
+#define barrier() __asm__ __volatile__("{nop}" : : : IRQ_BARRIER_CLOBBERS)
+#endif /* ! CONFIG_E2K || ! __LCC__ */
 
 /*
  * This macro obfuscates arithmetic on a variable address so that gcc

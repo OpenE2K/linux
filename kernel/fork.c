@@ -81,6 +81,10 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
+
 #include <trace/events/sched.h>
 
 #define CREATE_TRACE_POINTS
@@ -293,6 +297,18 @@ void __init fork_init(unsigned long mempages)
 	if (max_threads < 20)
 		max_threads = 20;
 
+#ifdef CONFIG_E2K
+	init_task.signal->rlim[RLIM_P_STACK_EXT].rlim_cur =
+		init_task.signal->rlim[RLIM_P_STACK_EXT].rlim_max =
+			(UHWS_PSEUDO_MODE) ?
+				(USER_P_STACKS_MAX_SIZE) :
+				(USER_P_STACK_SIZE + KERNEL_P_STACK_SIZE);
+	init_task.signal->rlim[RLIM_PC_STACK_EXT].rlim_cur =
+		init_task.signal->rlim[RLIM_PC_STACK_EXT].rlim_max =
+			(UHWS_PSEUDO_MODE) ?
+				(USER_PC_STACKS_MAX_SIZE) :
+				(USER_PC_STACK_SIZE + KERNEL_PC_STACK_SIZE);
+#endif
 	init_task.signal->rlim[RLIMIT_NPROC].rlim_cur = max_threads/2;
 	init_task.signal->rlim[RLIMIT_NPROC].rlim_max = max_threads/2;
 	init_task.signal->rlim[RLIMIT_SIGPENDING] =
@@ -306,7 +322,10 @@ int __attribute__((weak)) arch_dup_task_struct(struct task_struct *dst,
 	return 0;
 }
 
-static struct task_struct *dup_task_struct(struct task_struct *orig)
+#if !defined(__e2k__) || !defined(CONFIG_RECOVERY)
+static
+#endif
+struct task_struct *dup_task_struct(struct task_struct *orig)
 {
 	struct task_struct *tsk;
 	struct thread_info *ti;
@@ -474,6 +493,16 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 
 		if (retval)
 			goto out;
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		if (tmp->vm_flags & VM_PAGESVALID) {
+			/* No need to flush TLB since there is
+			 * no user for the new mm yet. */
+			retval = make_all_vma_pages_valid(tmp, 0, 0);
+			if (retval)
+				goto out;
+		}
+#endif
 	}
 	/* a new mm has just been created */
 	arch_dup_mmap(oldmm, mm);
@@ -554,6 +583,13 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	mm_init_aio(mm);
 	mm_init_owner(mm, p);
 	clear_tlb_flush_pending(mm);
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	INIT_LIST_HEAD(&mm->el_posix.shared_objects);
+	init_rwsem(&mm->el_posix.lock);
+	mm->el_posix.mutexes = NULL;
+	mm->el_posix.others = NULL;
+	mm->el_posix.user = NULL;
+#endif
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
@@ -606,6 +642,9 @@ struct mm_struct *mm_alloc(void)
 void __mmdrop(struct mm_struct *mm)
 {
 	BUG_ON(mm == &init_mm);
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_mm_destroy(mm);
+#endif
 	mm_free_pgd(mm);
 	destroy_context(mm);
 	mmu_notifier_mm_destroy(mm);
@@ -791,6 +830,10 @@ void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 		exit_pi_state_list(tsk);
 #endif
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	exit_el_posix(tsk);
+#endif
+
 	uprobe_free_utask(tsk);
 
 	/* Get rid of any cached register state */
@@ -829,7 +872,8 @@ void mm_release(struct task_struct *tsk, struct mm_struct *mm)
  * Allocate a new mm structure and copy contents from the
  * mm structure of the passed in task structure.
  */
-static struct mm_struct *dup_mm(struct task_struct *tsk)
+static struct mm_struct *dup_mm(struct task_struct *tsk,
+				unsigned long clone_flags)
 {
 	struct mm_struct *mm, *oldmm = current->mm;
 	int err;
@@ -851,6 +895,12 @@ static struct mm_struct *dup_mm(struct task_struct *tsk)
 		goto fail_nocontext;
 
 	dup_mm_exe_file(oldmm, mm);
+
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	err = dup_mm_el_posix(oldmm, mm, clone_flags);
+	if (err)
+		goto free_pt;
+#endif
 
 	err = dup_mmap(mm, oldmm);
 	if (err)
@@ -915,7 +965,7 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	}
 
 	retval = -ENOMEM;
-	mm = dup_mm(tsk);
+	mm = dup_mm(tsk, clone_flags);
 	if (!mm)
 		goto fail_nomem;
 
@@ -1165,7 +1215,10 @@ init_task_pid(struct task_struct *task, enum pid_type type, struct pid *pid)
  * parts of the process environment (as per the clone
  * flags). The actual kick-off is left to the caller.
  */
-static struct task_struct *copy_process(unsigned long clone_flags,
+#ifndef CONFIG_E2K
+static
+#endif
+struct task_struct *copy_process(unsigned long clone_flags,
 					unsigned long stack_start,
 					unsigned long stack_size,
 					int __user *child_tidptr,
@@ -1344,6 +1397,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 #ifdef CONFIG_DEBUG_MUTEXES
 	p->blocked_on = NULL; /* not blocked yet */
 #endif
+#ifdef CONFIG_MCST
+	p->wait_on_mutex = NULL;
+#endif
+
 #ifdef CONFIG_MEMCG
 	p->memcg_batch.do_batch = 0;
 	p->memcg_batch.memcg = NULL;
@@ -1351,6 +1408,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 #ifdef CONFIG_BCACHE
 	p->sequential_io	= 0;
 	p->sequential_io_avg	= 0;
+#endif
+
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_init(p);
 #endif
 
 	/* Perform scheduler related setup. Assign this task to a CPU. */
@@ -1380,9 +1441,19 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	retval = copy_signal(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_sighand;
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_lock(clone_flags);
+	retval = copy_mm(clone_flags, p);
+	if (retval) {
+		el_posix_unlock(clone_flags);
+		goto bad_fork_cleanup_signal;
+	}
+	el_posix_unlock(clone_flags);	
+#else
 	retval = copy_mm(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_signal;
+#endif
 	retval = copy_namespaces(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_mm;
@@ -1397,7 +1468,11 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		retval = -ENOMEM;
 		pid = alloc_pid(p->nsproxy->pid_ns_for_children);
 		if (!pid)
+#ifdef CONFIG_E2K
+			goto bad_fork_cleanup_thread;
+#else
 			goto bad_fork_cleanup_io;
+#endif
 	}
 
 	p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? child_tidptr : NULL;
@@ -1541,6 +1616,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 bad_fork_free_pid:
 	if (pid != &init_struct_pid)
 		free_pid(pid);
+#ifdef CONFIG_E2K
+bad_fork_cleanup_thread:
+	free_thread(p);
+#endif
 bad_fork_cleanup_io:
 	if (p->io_context)
 		exit_io_context(p);
@@ -1621,6 +1700,23 @@ long do_fork(unsigned long clone_flags,
 	int trace = 0;
 	long nr;
 
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_NO_FORK) {
+		p = current;
+		pr_warn("RTS_NO_FORK but %s-%d does. Parents:",
+			p->comm, p->pid);
+		while (p->real_parent) {
+			p = p->real_parent;
+			pr_warn(" %s-%d", p->comm, p->pid);
+			if (p->pid <= 2)
+				break;
+		}
+		pr_warn("\n");
+		if (!strncmp(p->comm, "kworker", 6))
+			WARN_ON(1);
+	}
+#endif
+
 	/*
 	 * Determine whether and which event to report to ptracer.  When
 	 * called from kernel_thread or CLONE_UNTRACED is explicitly
@@ -1662,6 +1758,22 @@ long do_fork(unsigned long clone_flags,
 			init_completion(&vfork);
 			get_task_struct(p);
 		}
+#ifdef CONFIG_MCST_RT
+#include <linux/cpumask.h>
+		if (cpumask_weight(&p->cpus_allowed) > 1 &&
+				cpumask_intersects(&(p->cpus_allowed),
+					rt_cpu_mask)) {
+			cpumask_var_t new_mask;
+			if (!alloc_cpumask_var(&new_mask, GFP_KERNEL)) {
+				return -ENOMEM;
+			}
+			cpumask_copy(new_mask, &p->cpus_allowed);
+			cpumask_andnot(new_mask, new_mask,
+				rt_cpu_mask);
+			set_cpus_allowed_ptr(p, new_mask);
+			free_cpumask_var(new_mask);
+		}
+#endif
 
 		wake_up_new_task(p);
 

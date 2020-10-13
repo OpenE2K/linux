@@ -5227,8 +5227,15 @@ static int evergreen_startup(struct radeon_device *rdev)
 		dev_err(rdev->dev, "failed initializing DMA fences (%d).\n", r);
 		return r;
 	}
-
+#ifdef CONFIG_MCST
+	/* chered_d@mcst.ru: Fixup:e90s:uvd does not work */
+	if (rdev->has_uvd)
+		r = uvd_v2_2_resume(rdev);
+	else
+		r = -1;
+#else
 	r = uvd_v2_2_resume(rdev);
+#endif
 	if (!r) {
 		r = radeon_fence_driver_start_ring(rdev,
 						   R600_RING_TYPE_UVD_INDEX);
@@ -5442,6 +5449,13 @@ int evergreen_init(struct radeon_device *rdev)
 	rdev->ring[R600_RING_TYPE_DMA_INDEX].ring_obj = NULL;
 	r600_ring_init(rdev, &rdev->ring[R600_RING_TYPE_DMA_INDEX], 64 * 1024);
 
+#ifdef CONFIG_MCST
+	/* chered_d@mcst.ru: Fixup:e90s:uvd does not work */
+	if (rdev->has_uvd)
+		r = uvd_v2_2_resume(rdev);
+	else
+		r = -1;
+#endif
 	r = radeon_uvd_init(rdev);
 	if (!r) {
 		rdev->ring[R600_RING_TYPE_UVD_INDEX].ring_obj = NULL;

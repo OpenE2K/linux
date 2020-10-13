@@ -5,8 +5,10 @@
 #define DEVID_FIELD(devid, field) \
 	DEFINE(OFF_##devid##_##field, offsetof(struct devid, field))
 
+#ifndef __e2k__
 int main(void)
 {
+#endif
 	DEVID(usb_device_id);
 	DEVID_FIELD(usb_device_id, match_flags);
 	DEVID_FIELD(usb_device_id, idVendor);
@@ -183,5 +185,7 @@ int main(void)
 	DEVID_FIELD(rio_device_id, asm_did);
 	DEVID_FIELD(rio_device_id, asm_vid);
 
+#ifndef __e2k__
 	return 0;
 }
+#endif

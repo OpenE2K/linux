@@ -30,6 +30,10 @@ config CPU_IDLE_GOV_MENU
 	bool "Menu governor (for tickless system)"
 	default y
 
+config CPU_IDLE_GOV_RT
+	bool "RT governor (for realtime system)"
+	default y
+
 menu "ARM CPU Idle Drivers"
 depends on ARM
 source "drivers/cpuidle/Kconfig.arm"
@@ -38,6 +42,11 @@ endmenu
 menu "POWERPC CPU Idle Drivers"
 depends on PPC
 source "drivers/cpuidle/Kconfig.powerpc"
+endmenu
+
+menu "E2K CPU Idle Drivers"
+depends on E2K
+source "drivers/cpuidle/Kconfig.e2k"
 endmenu
 
 endif

@@ -9,4 +9,7 @@ extern int second_overflow(unsigned long secs);
 extern int ntp_validate_timex(struct timex *);
 extern int __do_adjtimex(struct timex *, struct timespec *, s32 *);
 extern void __hardpps(const struct timespec *, const struct timespec *);
+#ifdef CONFIG_MCST
+extern void update_tmstatus_for_ntp(int *status, int reset, int set);
+#endif
 #endif /* _LINUX_NTP_INTERNAL_H */

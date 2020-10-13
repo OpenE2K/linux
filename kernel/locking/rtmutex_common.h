@@ -33,7 +33,16 @@ extern void schedule_rt_mutex_test(struct rt_mutex *lock);
   } while (0)
 
 #else
+#ifdef CONFIG_MCST
+#define schedule_rt_mutex(_lock)				\
+	do {							\
+		current->wait_on_mutex = lock;			\
+		schedule();					\
+		current->wait_on_mutex = NULL;			\
+	} while (0)
+#else
 # define schedule_rt_mutex(_lock)			schedule()
+#endif
 #endif
 
 /*

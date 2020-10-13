@@ -1,0 +1,9 @@
+Package: linux-image-xxSARCHPKGxx-xxLOCVERxx
+Source: linux-xxLOCALVERSIONxx
+Version: 01.mcst
+Architecture: xxARCHPKGxx
+Maintainer: MCST Kernel Mainteiners <debian@mcst.ru>
+Provides: linux-image, linux-image-xxVERSIONPATCHLEVELxx
+Section: kernel
+Priority: optional
+Description: Linux kernel image, modules, firmware. Kernel xxKERNELDESCxx.

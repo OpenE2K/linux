@@ -1000,7 +1000,7 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			if (pci_resource_len(pdev, i) == 0)
 				continue;
 			if (pci_resource_flags(pdev, i) & IORESOURCE_IO) {
-				hw->io_base = pci_resource_start(pdev, i);
+				hw->io_base = pci_iomap(pdev, i, 0);
 				break;
 			}
 		}

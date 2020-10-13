@@ -207,7 +207,7 @@ extern void __bad_size_call_parameter(void);
 	case 4: pscr_ret__ = stem##4(variable);break;			\
 	case 8: pscr_ret__ = stem##8(variable);break;			\
 	default:							\
-		__bad_size_call_parameter();break;			\
+		__bad_size_call_parameter();pscr_ret__=0;break;		\
 	}								\
 	pscr_ret__;							\
 })

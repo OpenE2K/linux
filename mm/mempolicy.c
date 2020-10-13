@@ -2059,6 +2059,13 @@ alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 	struct page *page;
 	unsigned int cpuset_mems_cookie;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	if (TASK_IS_BINCO(current) && !IS_UPT_E3S && ADDR_IN_SS(addr)) {
+		gfp &= ~GFP_ZONEMASK;
+		gfp |= __GFP_IA32;
+	}
+#endif
+
 retry_cpuset:
 	pol = get_vma_policy(current, vma, addr);
 	cpuset_mems_cookie = read_mems_allowed_begin();

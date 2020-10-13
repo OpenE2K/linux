@@ -623,10 +623,12 @@ static int radeon_ttm_tt_populate(struct ttm_tt *ttm)
 						       0, PAGE_SIZE,
 						       PCI_DMA_BIDIRECTIONAL);
 		if (pci_dma_mapping_error(rdev->pdev, gtt->ttm.dma_address[i])) {
-			while (--i) {
-				pci_unmap_page(rdev->pdev, gtt->ttm.dma_address[i],
+			int j;
+			gtt->ttm.dma_address[i] = 0;
+			for (j = 0; j < i; j++) {
+				pci_unmap_page(rdev->pdev, gtt->ttm.dma_address[j],
 					       PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
-				gtt->ttm.dma_address[i] = 0;
+				gtt->ttm.dma_address[j] = 0;
 			}
 			ttm_pool_unpopulate(ttm);
 			return -EFAULT;

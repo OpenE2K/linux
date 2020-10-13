@@ -145,6 +145,10 @@ cc-ifversion = $(shell [ $(call cc-version, $(CC)) $(1) $(2) ] && echo $(3))
 cc-ldoption = $(call try-run,\
 	$(CC) $(1) -nostdlib -x c /dev/null -o "$$TMP",$(1),$(2))
 
+# MCST LCC support
+cc-lcc-yn = $(shell if $(CC) -v 2>&1 | grep lcc > /dev/null ; \
+		    then echo "y"; else echo "n"; fi; )
+
 # ld-option
 # Usage: LDFLAGS += $(call ld-option, -X)
 ld-option = $(call try-run,\

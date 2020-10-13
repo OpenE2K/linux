@@ -13,6 +13,7 @@
  * and rebuild your kernel.
  */
 
+#ifndef	CONFIG_RMO
 /* Because we play games to save cycles in the non-contention case, we
  * need to be extra careful about branch targets into the "spinning"
  * code.  They live in their own section, but the newer V9 branches
@@ -20,6 +21,20 @@
  * variants.  The rule is that the branches that go into and out of
  * the spinner sections must be pre-V9 branches.
  */
+#else	/* CONFIG_RMO */
+/* All of these locking primitives are expected to work properly
+ * even in an RMO memory model, which currently is what the kernel
+ * runs in.
+ *
+ * There is another issue.  Because we play games to save cycles
+ * in the non-contention case, we need to be extra careful about
+ * branch targets into the "spinning" code.  They live in their
+ * own section, but the newer V9 branches have a shorter range
+ * than the traditional 32-bit sparc branch variants.  The rule
+ * is that the branches that go into and out of the spinner sections
+ * must be pre-V9 branches.
+ */
+#endif	/* CONFIG_RMO */
 
 #define arch_spin_is_locked(lp)	((lp)->lock != 0)
 
@@ -33,10 +48,16 @@ static inline void arch_spin_lock(arch_spinlock_t *lock)
 
 	__asm__ __volatile__(
 "1:	ldstub		[%1], %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 "	brnz,pn		%0, 2f\n"
 "	 nop\n"
 "	.subsection	2\n"
 "2:	ldub		[%1], %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#LoadLoad\n"
+#endif	/* CONFIG_RMO */
 "	brnz,pt		%0, 2b\n"
 "	 nop\n"
 "	ba,a,pt		%%xcc, 1b\n"
@@ -52,6 +73,9 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
 
 	__asm__ __volatile__(
 "	ldstub		[%1], %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore"
+#endif	/* CONFIG_RMO */
 	: "=r" (result)
 	: "r" (lock)
 	: "memory");
@@ -62,6 +86,9 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
 static inline void arch_spin_unlock(arch_spinlock_t *lock)
 {
 	__asm__ __volatile__(
+#ifdef	CONFIG_RMO
+"	membar		#StoreStore | #LoadStore\n"
+#endif	/* CONFIG_RMO */
 "	stb		%%g0, [%0]"
 	: /* No outputs */
 	: "r" (lock)
@@ -74,12 +101,18 @@ static inline void arch_spin_lock_flags(arch_spinlock_t *lock, unsigned long fla
 
 	__asm__ __volatile__(
 "1:	ldstub		[%2], %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 "	brnz,pn		%0, 2f\n"
 "	 nop\n"
 "	.subsection	2\n"
 "2:	rdpr		%%pil, %1\n"
 "	wrpr		%3, %%pil\n"
 "3:	ldub		[%2], %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#LoadLoad\n"
+#endif	/* CONFIG_RMO */
 "	brnz,pt		%0, 3b\n"
 "	 nop\n"
 "	ba,pt		%%xcc, 1b\n"
@@ -102,10 +135,16 @@ static void inline arch_read_lock(arch_rwlock_t *lock)
 "4:	 add		%0, 1, %1\n"
 "	cas		[%2], %0, %1\n"
 "	cmp		%0, %1\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 "	bne,pn		%%icc, 1b\n"
 "	 nop\n"
 "	.subsection	2\n"
 "2:	ldsw		[%2], %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#LoadLoad\n"
+#endif	/* CONFIG_RMO */
 "	brlz,pt		%0, 2b\n"
 "	 nop\n"
 "	ba,a,pt		%%xcc, 4b\n"
@@ -126,6 +165,9 @@ static int inline arch_read_trylock(arch_rwlock_t *lock)
 "	add		%0, 1, %1\n"
 "	cas		[%2], %0, %1\n"
 "	cmp		%0, %1\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 "	bne,pn		%%icc, 1b\n"
 "	 mov		1, %0\n"
 "2:"
@@ -141,6 +183,9 @@ static void inline arch_read_unlock(arch_rwlock_t *lock)
 	unsigned long tmp1, tmp2;
 
 	__asm__ __volatile__(
+#ifdef	CONFIG_RMO
+"	membar	#StoreLoad | #LoadLoad\n"
+#endif	/* CONFIG_RMO */
 "1:	lduw	[%2], %0\n"
 "	sub	%0, 1, %1\n"
 "	cas	[%2], %0, %1\n"
@@ -164,10 +209,16 @@ static void inline arch_write_lock(arch_rwlock_t *lock)
 "4:	 or		%0, %3, %1\n"
 "	cas		[%2], %0, %1\n"
 "	cmp		%0, %1\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 "	bne,pn		%%icc, 1b\n"
 "	 nop\n"
 "	.subsection	2\n"
 "2:	lduw		[%2], %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#LoadLoad\n"
+#endif	/* CONFIG_RMO */
 "	brnz,pt		%0, 2b\n"
 "	 nop\n"
 "	ba,a,pt		%%xcc, 4b\n"
@@ -180,6 +231,9 @@ static void inline arch_write_lock(arch_rwlock_t *lock)
 static void inline arch_write_unlock(arch_rwlock_t *lock)
 {
 	__asm__ __volatile__(
+#ifdef	CONFIG_RMO
+"	membar		#LoadStore | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 "	stw		%%g0, [%0]"
 	: /* no outputs */
 	: "r" (lock)
@@ -199,6 +253,9 @@ static int inline arch_write_trylock(arch_rwlock_t *lock)
 "	 or		%0, %4, %1\n"
 "	cas		[%3], %0, %1\n"
 "	cmp		%0, %1\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 "	bne,pn		%%icc, 1b\n"
 "	 nop\n"
 "	mov		1, %2\n"

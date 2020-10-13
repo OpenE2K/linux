@@ -1341,7 +1341,6 @@ static int snd_cs4281_create(struct snd_card *card,
 			     int dual_codec)
 {
 	struct cs4281 *chip;
-	unsigned int tmp;
 	int err;
 	static struct snd_device_ops ops = {
 		.dev_free =	snd_cs4281_dev_free,
@@ -1381,18 +1380,18 @@ static int snd_cs4281_create(struct snd_card *card,
 		return -ENOMEM;
 	}
 	
-	if (request_irq(pci->irq, snd_cs4281_interrupt, IRQF_SHARED,
-			KBUILD_MODNAME, chip)) {
+	if ((err = request_irq(pci->irq, snd_cs4281_interrupt, IRQF_SHARED,
+			KBUILD_MODNAME, chip))) {
 		snd_printk(KERN_ERR "unable to grab IRQ %d\n", pci->irq);
 		snd_cs4281_free(chip);
-		return -ENOMEM;
+		return err;
 	}
 	chip->irq = pci->irq;
 
-	tmp = snd_cs4281_chip_init(chip);
-	if (tmp) {
+	err = snd_cs4281_chip_init(chip);
+	if (err) {
 		snd_cs4281_free(chip);
-		return tmp;
+		return err;
 	}
 
 	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, chip, &ops)) < 0) {

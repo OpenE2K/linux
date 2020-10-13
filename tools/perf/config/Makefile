@@ -82,7 +82,7 @@ ifndef DEBUG
 endif
 
 ifeq ($(DEBUG),0)
-  CFLAGS += -O6
+  CFLAGS += -O3
 endif
 
 ifdef PARSER_DEBUG

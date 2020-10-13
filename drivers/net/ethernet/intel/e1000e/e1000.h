@@ -1,30 +1,28 @@
-/*******************************************************************************
-
-  Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2013 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  Linux NICS <linux.nics@intel.com>
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
+/*
+ * Intel PRO/1000 Linux driver
+ * Copyright(c) 1999 - 2014 Intel Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * The full GNU General Public License is included in this distribution in
+ * the file called "COPYING".
+ *
+ * Contact Information:
+ * Linux NICS <linux.nics@intel.com>
+ * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
+ * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
+ */
 
 /* Linux PRO/1000 Ethernet Driver main header file */
 
@@ -33,20 +31,22 @@
 
 #include <linux/bitops.h>
 #include <linux/types.h>
-#include <linux/timer.h>
-#include <linux/workqueue.h>
-#include <linux/io.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
-#include <linux/pci-aspm.h>
-#include <linux/crc32.h>
 #include <linux/if_vlan.h>
+#include "kcompat.h"
+#ifdef HAVE_HW_TIME_STAMP
 #include <linux/clocksource.h>
 #include <linux/net_tstamp.h>
+#endif
+#ifdef HAVE_PTP_1588_CLOCK
 #include <linux/ptp_clock_kernel.h>
 #include <linux/ptp_classify.h>
+#endif
 #include <linux/mii.h>
+#ifdef ETHTOOL_GEEE
 #include <linux/mdio.h>
+#endif
 #include "hw.h"
 
 struct e1000_info;
@@ -67,6 +67,10 @@ struct e1000_info;
 #define E1000E_INT_MODE_MSI		1
 #define E1000E_INT_MODE_MSIX		2
 
+#ifndef CONFIG_E1000E_NAPI
+#define E1000_MAX_INTR 10
+
+#endif /* CONFIG_E1000E_NAPI */
 /* Tx/Rx descriptor defines */
 #define E1000_DEFAULT_TXD		256
 #define E1000_MAX_TXD			4096
@@ -89,6 +93,9 @@ struct e1000_info;
 #define E1000_EEPROM_APME		0x0400
 
 #define E1000_MNG_VLAN_NONE		(-1)
+
+/* Number of packet split data buffers (not including the header buffer) */
+#define PS_PAGE_BUFFERS			(MAX_PS_BUFFERS - 1)
 
 #define DEFAULT_JUMBO			9234
 
@@ -196,6 +203,7 @@ struct e1000_ring {
 	struct sk_buff *rx_skb_top;
 };
 
+#ifdef SIOCGMIIPHY
 /* PHY register snapshot values */
 struct e1000_phy_regs {
 	u16 bmcr;		/* basic mode control register    */
@@ -207,6 +215,7 @@ struct e1000_phy_regs {
 	u16 stat1000;		/* 1000BASE-T status register     */
 	u16 estatus;		/* extended status register       */
 };
+#endif
 
 /* board specific private data structure */
 struct e1000_adapter {
@@ -219,7 +228,11 @@ struct e1000_adapter {
 
 	const struct e1000_info *ei;
 
+#ifdef HAVE_VLAN_RX_REGISTER
+	struct vlan_group *vlgrp;
+#else
 	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
+#endif
 	u32 bd_number;
 	u32 rx_buffer_len;
 	u16 mng_vlan_id;
@@ -240,7 +253,9 @@ struct e1000_adapter {
 	struct e1000_ring *tx_ring ____cacheline_aligned_in_smp;
 	u32 tx_fifo_limit;
 
+#ifdef CONFIG_E1000E_NAPI
 	struct napi_struct napi;
+#endif
 
 	unsigned int uncorr_errors;	/* uncorrectable ECC errors */
 	unsigned int corr_errors;	/* correctable ECC errors */
@@ -271,8 +286,12 @@ struct e1000_adapter {
 	u32 tx_dma_failed;
 
 	/* Rx */
+#ifdef CONFIG_E1000E_NAPI
 	bool (*clean_rx) (struct e1000_ring *ring, int *work_done,
 			  int work_to_do) ____cacheline_aligned_in_smp;
+#else
+	bool (*clean_rx) (struct e1000_ring *ring) ____cacheline_aligned_in_smp;
+#endif
 	void (*alloc_rx_buf) (struct e1000_ring *ring, int cleaned_count,
 			      gfp_t gfp);
 	struct e1000_ring *rx_ring;
@@ -288,27 +307,45 @@ struct e1000_adapter {
 	u64 gorc_old;
 	u32 alloc_rx_buff_failed;
 	u32 rx_dma_failed;
+#ifdef HAVE_HW_TIME_STAMP
 	u32 rx_hwtstamp_cleared;
+#endif
+#ifdef DYNAMIC_LTR_SUPPORT
+	u64 c10_mpc_count;	/* frequently updated MPC count */
+	u64 c10_rx_bytes;	/* frequently updated RX bytes count */
+	u32 c10_pba_bytes;	/* current PBA RXA converted to bytes*/
+	bool c10_demote_ltr;	/* is/should LTR be demoted */
+#endif /* DYNAMIC_LTR_SUPPORT */
 
 	unsigned int rx_ps_pages;
 	u16 rx_ps_bsize0;
+#ifndef CONFIG_E1000E_NAPI
+	u64 rx_dropped_backlog;		/* count drops from rx int handler */
+#endif
 	u32 max_frame_size;
 	u32 min_frame_size;
 
 	/* OS defined structs */
 	struct net_device *netdev;
 	struct pci_dev *pdev;
+#ifndef HAVE_NETDEV_STATS_IN_NETDEV
+	struct net_device_stats net_stats;
+#endif
 
 	/* structs defined in e1000_hw.h */
 	struct e1000_hw hw;
 
+#ifdef HAVE_NDO_GET_STATS64
 	spinlock_t stats64_lock;	/* protects statistics counters */
+#endif
 	struct e1000_hw_stats stats;
 	struct e1000_phy_info phy_info;
 	struct e1000_phy_stats phy_stats;
 
+#ifdef SIOCGMIIPHY
 	/* Snapshot of PHY registers */
 	struct e1000_phy_regs phy_regs;
+#endif
 
 	struct e1000_ring test_tx_ring;
 	struct e1000_ring test_rx_ring;
@@ -326,19 +363,31 @@ struct e1000_adapter {
 	u32 max_hw_frame_size;
 
 	bool fc_autoneg;
+//niki
+	u32 eeprom_bad;
+//niki
+#ifndef HAVE_ETHTOOL_SET_PHYS_ID
+	unsigned long led_status;
 
+#endif
 	unsigned int flags;
 	unsigned int flags2;
 	struct work_struct downshift_task;
 	struct work_struct update_phy_task;
+#ifndef HAVE_ETHTOOL_SET_PHYS_ID
+	struct work_struct led_blink_task;
+#endif
 	struct work_struct print_hang_task;
+	u32 *config_space;
 
-	bool idle_check;
+	int node; /* store the node to allocate memory on */
 	int phy_hang_count;
 
 	u16 tx_ring_count;
 	u16 rx_ring_count;
+	u8 revision_id;
 
+#ifdef HAVE_HW_TIME_STAMP
 	struct hwtstamp_config hwtstamp_config;
 	struct delayed_work systim_overflow_work;
 	struct sk_buff *tx_hwtstamp_skb;
@@ -346,8 +395,11 @@ struct e1000_adapter {
 	spinlock_t systim_lock;	/* protects SYSTIML/H regsters */
 	struct cyclecounter cc;
 	struct timecounter tc;
+#endif
+#ifdef HAVE_PTP_1588_CLOCK
 	struct ptp_clock *ptp_clock;
 	struct ptp_clock_info ptp_clock_info;
+#endif
 
 	u16 eee_advert;
 };
@@ -364,7 +416,10 @@ struct e1000_info {
 	const struct e1000_nvm_operations *nvm_ops;
 };
 
+#ifdef HAVE_HW_TIME_STAMP
+#ifdef HAVE_PTP_1588_CLOCK
 s32 e1000e_get_base_timinca(struct e1000_adapter *adapter, u32 *timinca);
+#endif
 
 /* The system time is maintained by a 64-bit counter comprised of the 32-bit
  * SYSTIMH and SYSTIML registers.  How the counter increments (and therefore
@@ -397,6 +452,9 @@ s32 e1000e_get_base_timinca(struct e1000_adapter *adapter, u32 *timinca);
  * 25MHz	46-bit	2^46 / 10^9 / 3600 = 19.55 hours
  */
 #define E1000_SYSTIM_OVERFLOW_PERIOD	(HZ * 60 * 60 * 4)
+#define E1000_MAX_82574_SYSTIM_REREADS 50
+#define E1000_82574_SYSTIM_EPSILON (1ULL << 35ULL)
+#endif /* HAVE_HW_TIME_STAMP */
 
 /* hardware capability, feature, and workaround flags */
 #define FLAG_HAS_AMT                      (1 << 0)
@@ -407,7 +465,7 @@ s32 e1000e_get_base_timinca(struct e1000_adapter *adapter, u32 *timinca);
 #define FLAG_HAS_CTRLEXT_ON_LOAD          (1 << 5)
 #define FLAG_HAS_SWSM_ON_LOAD             (1 << 6)
 #define FLAG_HAS_JUMBO_FRAMES             (1 << 7)
-#define FLAG_READ_ONLY_NVM                (1 << 8)
+/* reserved bit8 */
 #define FLAG_IS_ICH                       (1 << 9)
 #define FLAG_HAS_MSIX                     (1 << 10)
 #define FLAG_HAS_SMART_POWER_DOWN         (1 << 11)
@@ -427,7 +485,11 @@ s32 e1000e_get_base_timinca(struct e1000_adapter *adapter, u32 *timinca);
 #define FLAG_LSC_GIG_SPEED_DROP           (1 << 25)
 #define FLAG_SMART_POWER_DOWN             (1 << 26)
 #define FLAG_MSI_ENABLED                  (1 << 27)
+#ifndef HAVE_NDO_SET_FEATURES
+#define FLAG_RX_CSUM_ENABLED              (1 << 28)
+#else
 /* reserved (1 << 28) */
+#endif
 #define FLAG_TSO_FORCE                    (1 << 29)
 #define FLAG_RESTART_NOW                  (1 << 30)
 #define FLAG_MSI_TEST_FAILED              (1 << 31)
@@ -456,6 +518,7 @@ s32 e1000e_get_base_timinca(struct e1000_adapter *adapter, u32 *timinca);
 #define E1000_CONTEXT_DESC(R, i)	E1000_GET_DESC(R, i, e1000_context_desc)
 
 enum e1000_state_t {
+	__E1000_OBFF_DISABLED,
 	__E1000_TESTING,
 	__E1000_RESETTING,
 	__E1000_ACCESS_SHARED_RESOURCE,
@@ -472,25 +535,36 @@ enum latency_range {
 extern char e1000e_driver_name[];
 extern const char e1000e_driver_version[];
 
-void e1000e_check_options(struct e1000_adapter *adapter);
-void e1000e_set_ethtool_ops(struct net_device *netdev);
+extern void e1000e_check_options(struct e1000_adapter *adapter);
+extern void e1000e_set_ethtool_ops(struct net_device *netdev);
+#ifndef HAVE_ETHTOOL_SET_PHYS_ID
+extern void e1000e_led_blink_task(struct work_struct *work);
+#endif
+#ifdef ETHTOOL_OPS_COMPAT
+extern int ethtool_ioctl(struct ifreq *ifr);
+#endif
 
-int e1000e_up(struct e1000_adapter *adapter);
-void e1000e_down(struct e1000_adapter *adapter);
-void e1000e_reinit_locked(struct e1000_adapter *adapter);
-void e1000e_reset(struct e1000_adapter *adapter);
-void e1000e_power_up_phy(struct e1000_adapter *adapter);
-int e1000e_setup_rx_resources(struct e1000_ring *ring);
-int e1000e_setup_tx_resources(struct e1000_ring *ring);
-void e1000e_free_rx_resources(struct e1000_ring *ring);
-void e1000e_free_tx_resources(struct e1000_ring *ring);
-struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
-					     struct rtnl_link_stats64 *stats);
-void e1000e_set_interrupt_capability(struct e1000_adapter *adapter);
-void e1000e_reset_interrupt_capability(struct e1000_adapter *adapter);
-void e1000e_get_hw_control(struct e1000_adapter *adapter);
-void e1000e_release_hw_control(struct e1000_adapter *adapter);
-void e1000e_write_itr(struct e1000_adapter *adapter, u32 itr);
+extern int e1000e_up(struct e1000_adapter *adapter);
+extern void e1000e_down(struct e1000_adapter *adapter, bool reset);
+extern void e1000e_reinit_locked(struct e1000_adapter *adapter);
+extern void e1000e_reset(struct e1000_adapter *adapter);
+extern void e1000e_power_up_phy(struct e1000_adapter *adapter);
+extern int e1000e_setup_rx_resources(struct e1000_ring *ring);
+extern int e1000e_setup_tx_resources(struct e1000_ring *ring);
+extern void e1000e_free_rx_resources(struct e1000_ring *ring);
+extern void e1000e_free_tx_resources(struct e1000_ring *ring);
+#ifdef HAVE_NDO_GET_STATS64
+extern struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
+						    struct rtnl_link_stats64
+						    *stats);
+#else /* HAVE_NDO_GET_STATS64 */
+extern void e1000e_update_stats(struct e1000_adapter *adapter);
+#endif /* HAVE_NDO_GET_STATS64 */
+extern void e1000e_set_interrupt_capability(struct e1000_adapter *adapter);
+extern void e1000e_reset_interrupt_capability(struct e1000_adapter *adapter);
+extern void e1000e_get_hw_control(struct e1000_adapter *adapter);
+extern void e1000e_release_hw_control(struct e1000_adapter *adapter);
+extern void e1000e_write_itr(struct e1000_adapter *adapter, u32 itr);
 
 extern unsigned int copybreak;
 
@@ -507,8 +581,13 @@ extern const struct e1000_info e1000_pch2_info;
 extern const struct e1000_info e1000_pch_lpt_info;
 extern const struct e1000_info e1000_es2_info;
 
-void e1000e_ptp_init(struct e1000_adapter *adapter);
-void e1000e_ptp_remove(struct e1000_adapter *adapter);
+#ifdef HAVE_PTP_1588_CLOCK
+extern void e1000e_ptp_init(struct e1000_adapter *adapter);
+extern void e1000e_ptp_remove(struct e1000_adapter *adapter);
+#else
+#define e1000e_ptp_init(adapter) do {} while (0)
+#define e1000e_ptp_remove(adapter) do {} while (0)
+#endif
 
 static inline s32 e1000_phy_hw_reset(struct e1000_hw *hw)
 {
@@ -535,7 +614,7 @@ static inline s32 e1e_wphy_locked(struct e1000_hw *hw, u32 offset, u16 data)
 	return hw->phy.ops.write_reg_locked(hw, offset, data);
 }
 
-void e1000e_reload_nvm_generic(struct e1000_hw *hw);
+extern void e1000e_reload_nvm_generic(struct e1000_hw *hw);
 
 static inline s32 e1000e_read_mac_addr(struct e1000_hw *hw)
 {
@@ -574,6 +653,13 @@ static inline s32 e1000_get_phy_info(struct e1000_hw *hw)
 
 static inline u32 __er32(struct e1000_hw *hw, unsigned long reg)
 {
+#ifdef __e2k__
+/*
+ * 3.31 ERR 31 - PCI-Express root hub (pcie)
+ *
+ */
+	mb();
+#endif	/* __e2k__ */
 	return readl(hw->hw_addr + reg);
 }
 
@@ -601,12 +687,50 @@ static inline s32 __ew32_prepare(struct e1000_hw *hw)
 	return i;
 }
 
+#ifdef __e2k__
+/*
+ * 3.31 ERR 31 - PCI-Express root hub (pcie)
+ * 
+ * сигнал dn_rdy между коммутатором и контроллером PCIE (RC_SI) снимается на
+ * такт позже чем следует (через такт после окончания предыдущего запроса,
+ * определяется сигналом dn_val, а нужно не позже чем со снятием сигнала dn_val),
+ * что приводит к тому, что коммутатор выдаёт запрос который некуда принимать,
+ * что в последствии приводит к затыру
+ * кроме того не учтено, что комплешены имеют право приходить при снятом сигнале
+ * dn_rdy
+ * Программный обход:
+ * ограничить число PIO запросов, так чтобы dn_rdy никогда не сбрасывался в 0
+ * для этого достаточно после каждых 4 записей вставлять одно блокирующее чтение,
+ * кроме того самих незавершившихся чтений не должно быть более 4
+ * Актуальна для  итераций (1 и 2) "Повозки"
+ * Сделано исправление в металлах начиная с итерации 3.
+ */
+
+static inline void l_fix_pcie_povozka_bug(struct e1000_hw *hw)
+{
+	struct pci_dev *pdev = hw->adapter->pdev;
+#if 0
+	/*FIXME: e1000e won't work at iohub2 without this fixup */
+	if (iohub_generation(pdev) != 0 || iohub_revision(pdev) > 1)
+		return;
+#else
+	if (iohub_generation(pdev) == 0 && iohub_revision(pdev) > 1)
+		return;
+#endif
+	er32(STATUS);
+}
+
+#else	/* __e2k__ */
+#define l_fix_pcie_povozka_bug(hw) do { } while(0)
+#endif	/* __e2k__ */
+
 static inline void __ew32(struct e1000_hw *hw, unsigned long reg, u32 val)
 {
 	if (hw->adapter->flags2 & FLAG2_PCIM2PCI_ARBITER_WA)
 		__ew32_prepare(hw);
 
 	writel(val, hw->hw_addr + reg);
+	l_fix_pcie_povozka_bug(hw);
 }
 
 #define ew32(reg, val)	__ew32(hw, E1000_##reg, (val))

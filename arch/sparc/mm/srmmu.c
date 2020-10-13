@@ -106,6 +106,61 @@ static struct bit_map srmmu_nocache_map;
 static inline int srmmu_pmd_none(pmd_t pmd)
 { return !(pmd_val(pmd) & 0xFFFFFFF); }
 
+static inline int srmmu_pmd_bad(pmd_t pmd)
+{ return !(pmd_val(pmd) & (SRMMU_ET_PTD | SRMMU_ET_PTE)); }
+
+static inline int srmmu_pmd_present(pmd_t pmd)
+{ return ((pmd_val(pmd) & (SRMMU_ET_PTD | SRMMU_ET_PTE))); }
+
+static inline void srmmu_pmd_clear(pmd_t *pmdp) {
+	int i;
+	for (i = 0; i < PTRS_PER_PTE/SRMMU_REAL_PTRS_PER_PTE; i++)
+		srmmu_set_pte((pte_t *)&pmdp->pmdv[i], __pte(0));
+}
+
+static inline int srmmu_pgd_none(pgd_t pgd)          
+{ return !(pgd_val(pgd) & 0xFFFFFFF); }
+
+static inline int srmmu_pgd_bad(pgd_t pgd)
+{ return !(pgd_val(pgd) & (SRMMU_ET_PTD | SRMMU_ET_PTE)); }
+
+static inline int srmmu_pgd_present(pgd_t pgd)
+{ return ((pgd_val(pgd) & (SRMMU_ET_PTD | SRMMU_ET_PTE))); }
+
+static inline void srmmu_pgd_clear(pgd_t * pgdp)
+{ srmmu_set_pte((pte_t *)pgdp, __pte(0)); }
+
+static inline pte_t srmmu_pte_wrprotect(pte_t pte)
+{ return __pte(pte_val(pte) & ~SRMMU_WRITE);}
+
+static inline pte_t srmmu_pte_mkclean(pte_t pte)
+{ return __pte(pte_val(pte) & ~SRMMU_DIRTY);}
+
+static inline pte_t srmmu_pte_mkold(pte_t pte)
+{ return __pte(pte_val(pte) & ~SRMMU_REF);}
+
+static inline pte_t srmmu_pte_mkwrite(pte_t pte)
+{ return __pte(pte_val(pte) | SRMMU_WRITE);}
+
+static inline pte_t srmmu_pte_mkdirty(pte_t pte)
+{ return __pte(pte_val(pte) | SRMMU_DIRTY);}
+
+static inline pte_t srmmu_pte_mkyoung(pte_t pte)
+{ return __pte(pte_val(pte) | SRMMU_REF);}
+
+/*
+ * Conversion functions: convert a page and protection to a page entry,
+ * and a page entry and page directory to the page they refer to.
+ */
+static pte_t srmmu_mk_pte(struct page *page, pgprot_t pgprot)
+{ return __pte(pfn_to_pte(page_to_pfn(page)) | pgprot_val(pgprot)); }
+
+static pte_t srmmu_mk_pte_phys(unsigned long page, pgprot_t pgprot)
+{ return __pte(phys_addr_to_pte(page) | pgprot_val(pgprot)); }
+
+static pte_t srmmu_mk_pte_io(unsigned long page, pgprot_t pgprot, int space)
+{ return __pte(((page) >> 4) | (space << 28) | pgprot_val(pgprot_noncached(pgprot))); }
+
 /* XXX should we hyper_flush_whole_icache here - Anton */
 static inline void srmmu_ctxd_set(ctxd_t *ctxp, pgd_t *pgdp)
 { set_pte((pte_t *)ctxp, (SRMMU_ET_PTD | (__nocache_pa((unsigned long) pgdp) >> 4))); }

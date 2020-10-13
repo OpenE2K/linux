@@ -22,6 +22,12 @@
 #define POOL_SIZE	64
 #define ISA_POOL_SIZE	16
 
+#if defined(CONFIG_E2K) && defined(CONFIG_BOUNCE_BUFFERS_ON_CPU)
+extern mempool_t* e2k_page_pool(struct bio *bio);
+extern mempool_t* e2k_isa_page_pool(struct bio *bio);
+#define page_pool	e2k_page_pool(bio)
+#define isa_page_pool	e2k_isa_page_pool(bio)
+#else
 static mempool_t *page_pool, *isa_page_pool;
 
 #if defined(CONFIG_HIGHMEM) || defined(CONFIG_NEED_BOUNCE_POOL)
@@ -41,6 +47,7 @@ static __init int init_emergency_pool(void)
 
 __initcall(init_emergency_pool);
 #endif
+#endif /* CONFIG_E2K && CONFIG_BOUNCE_BUFFERS_ON_CPU */
 
 #ifdef CONFIG_HIGHMEM
 /*
@@ -65,6 +72,7 @@ static void bounce_copy_vec(struct bio_vec *to, unsigned char *vfrom)
 
 #endif /* CONFIG_HIGHMEM */
 
+#if !defined(CONFIG_E2K) || !defined(CONFIG_BOUNCE_BUFFERS_ON_CPU)
 /*
  * allocate pages in the DMA region for the ISA pool
  */
@@ -89,6 +97,7 @@ int init_emergency_isa_pool(void)
 	printk("isa bounce pool size: %d pages\n", ISA_POOL_SIZE);
 	return 0;
 }
+#endif
 
 /*
  * Simple bounce buffer support for highmem pages. Depending on the
@@ -255,6 +264,9 @@ void blk_queue_bounce(struct request_queue *q, struct bio **bio_orig)
 {
 	int must_bounce;
 	mempool_t *pool;
+#if defined(CONFIG_E2K) && defined(CONFIG_BOUNCE_BUFFERS_ON_CPU)
+	struct bio *bio = *bio_orig;
+#endif
 
 	/*
 	 * Data-less bio, nothing to bounce

@@ -27,7 +27,9 @@
 #include <linux/smpboot.h>
 #include <linux/tick.h>
 #include <linux/locallock.h>
-
+#ifdef CONFIG_MCST_RT
+#include <linux/sched/rt.h>
+#endif
 #define CREATE_TRACE_POINTS
 #include <trace/events/irq.h>
 
@@ -155,6 +157,17 @@ static inline void softirq_set_runner(unsigned int sirq) { }
 static inline void softirq_clr_runner(unsigned int sirq) { }
 #endif
 
+
+#ifdef CONFIG_MCST_RT
+void wakeup_delayed_softirq(int cpu)
+{
+	/* Called in idle or in __schedule with preempt_disabled */
+	struct task_struct *tsk = __this_cpu_read(ksoftirqd);
+	if (tsk && tsk->state != TASK_RUNNING)
+		wake_up_process(tsk);
+}
+#endif
+
 /*
  * we cannot loop indefinitely here to avoid userspace starvation,
  * but we also don't want to introduce a worst case 1/HZ latency
@@ -165,7 +178,13 @@ static void wakeup_softirqd(void)
 {
 	/* Interrupts are disabled: no need to stop preemption */
 	struct task_struct *tsk = __this_cpu_read(ksoftirqd);
-
+#ifdef CONFIG_MCST_RT
+	if ((rts_act_mask & RTS_FAST_TIMER) && rt_user_task(current) &&
+			!(rts_act_mask & RTS_POSTP_TICK)) {
+		per_cpu(delayed_softirq, smp_processor_id()) = 1;
+		return;
+	}
+#endif
 	if (tsk && tsk->state != TASK_RUNNING)
 		wake_up_process(tsk);
 }
@@ -592,6 +611,27 @@ void local_bh_enable(void)
 	__local_bh_enable();
 }
 EXPORT_SYMBOL(local_bh_enable);
+
+#ifdef CONFIG_MCST
+void local_bh_enable_no_bh(void)
+{
+	if (WARN_ON(current->softirq_nestcnt == 0))
+		return;
+	local_irq_disable();
+	if (current->softirqs_raised !=
+		(current->softirqs_raised & local_softirq_pending())) {
+		if (local_softirq_pending() == 0) {
+			wakeup_softirqd();
+		}
+		or_softirq_pending(current->softirqs_raised);
+	}
+	current->softirqs_raised = 0;
+	local_irq_enable();
+	if (--current->softirq_nestcnt == 0)
+		migrate_enable();
+}
+#endif
+
 
 extern void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 {

@@ -139,7 +139,11 @@ static void ohci_quirk_nec_worker(struct work_struct *work)
 static int ohci_quirk_nec(struct usb_hcd *hcd)
 {
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
-
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
+	if (iohub_revision(pdev) > 1)
+		return 0;
+#endif
 	ohci->flags |= OHCI_QUIRK_NEC;
 	INIT_WORK(&ohci->nec_work, ohci_quirk_nec_worker);
 	ohci_dbg (ohci, "enabled NEC chipset lost interrupt quirk\n");
@@ -190,6 +194,12 @@ static const struct pci_device_id ohci_pci_quirks[] = {
 		PCI_DEVICE(PCI_VENDOR_ID_NEC, PCI_DEVICE_ID_NEC_USB),
 		.driver_data = (unsigned long)ohci_quirk_nec,
 	},
+#ifdef CONFIG_MCST
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_OHCI),
+		.driver_data = (unsigned long)ohci_quirk_nec,
+	},
+#endif
 	{
 		/* Toshiba portege 4000 */
 		.vendor		= PCI_VENDOR_ID_AL,
@@ -214,7 +224,6 @@ static const struct pci_device_id ohci_pci_quirks[] = {
 		PCI_DEVICE(PCI_VENDOR_ID_ATI, 0x4399),
 		.driver_data = (unsigned long)ohci_quirk_amd700,
 	},
-
 	/* FIXME for some of the early AMD 760 southbridges, OHCI
 	 * won't work at all.  blacklist them.
 	 */

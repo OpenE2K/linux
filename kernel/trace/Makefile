@@ -1,6 +1,16 @@
 
 # Do not instrument the tracer itself:
 
+ifdef CONFIG_E2K
+# kernel/trace/ deals with stack traces and function
+# inlining causes some frames to be lost
+ORIG_CFLAGS := $(KBUILD_CFLAGS)
+KBUILD_CFLAGS = $(subst -finline-functions-called-once,,$(ORIG_CFLAGS))
+ORIG_CFLAGS := $(KBUILD_CFLAGS)
+KBUILD_CFLAGS = $(subst -finline-functions,,$(ORIG_CFLAGS))
+KBUILD_CFLAGS += -finline-only-native
+endif
+
 ifdef CONFIG_FUNCTION_TRACER
 ORIG_CFLAGS := $(KBUILD_CFLAGS)
 KBUILD_CFLAGS = $(subst -pg,,$(ORIG_CFLAGS))

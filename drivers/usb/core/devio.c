@@ -503,7 +503,14 @@ static void async_completed(struct urb *urb)
 	if (signr) {
 		memset(&sinfo, 0, sizeof(sinfo));
 		sinfo.si_signo = as->signr;
+#if defined CONFIG_E2K && defined CONFIG_SECONDARY_SPACE_SUPPORT
+		/* bug #45130: binco uses si_errno to distinguish
+		 * signals that were sent from exceptions.
+		 * It checks if SI_EXC is set in si_errno.*/
+		sinfo.si_errno = 0;
+#else
 		sinfo.si_errno = as->status;
+#endif
 		sinfo.si_code = SI_ASYNCIO;
 		sinfo.si_addr = as->userurb;
 		pid = get_pid(as->pid);
@@ -2230,7 +2237,14 @@ static void usbdev_remove(struct usb_device *udev)
 		if (ps->discsignr) {
 			memset(&sinfo, 0, sizeof(sinfo));
 			sinfo.si_signo = ps->discsignr;
+#if defined CONFIG_E2K && defined CONFIG_SECONDARY_SPACE_SUPPORT
+			/* bug #45130: binco uses si_errno to distinguish
+			 * signals that were sent from exceptions.
+			 * It checks if SI_EXC is set in si_errno.*/
+			sinfo.si_errno = 0;
+#else
 			sinfo.si_errno = EPIPE;
+#endif
 			sinfo.si_code = SI_ASYNCIO;
 			sinfo.si_addr = ps->disccontext;
 			kill_pid_info_as_cred(ps->discsignr, &sinfo,

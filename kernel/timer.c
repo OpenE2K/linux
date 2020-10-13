@@ -797,7 +797,12 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 	cpu = smp_processor_id();
 
 #if defined(CONFIG_NO_HZ_COMMON) && defined(CONFIG_SMP)
+#ifdef CONFIG_MCST_RT
+	if (!pinned && get_sysctl_timer_migration() &&
+			(idle_cpu(cpu) || rt_cpu(cpu)))
+#else
 	if (!pinned && get_sysctl_timer_migration() && idle_cpu(cpu))
+#endif
 		cpu = get_nohz_timer_target();
 #endif
 	preempt_enable_rt();
@@ -1457,6 +1462,11 @@ void update_process_times(int user_tick)
 	run_posix_cpu_timers(p);
 }
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+int sclkr_unstable = 0;
+EXPORT_SYMBOL(sclkr_unstable);
+#endif
+
 /*
  * This function runs timers and the timer-tq in bottom half context.
  */
@@ -1468,6 +1478,10 @@ static void run_timer_softirq(struct softirq_action *h)
 
 #if defined(CONFIG_IRQ_WORK) && defined(CONFIG_PREEMPT_RT_FULL)
 	irq_work_tick();
+#endif
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	if (sclkr_unstable)
+		clocksource_mark_unstable(&clocksource_sclkr);
 #endif
 
 	if (time_after_eq(jiffies, base->timer_jiffies))

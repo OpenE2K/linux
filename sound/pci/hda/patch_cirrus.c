@@ -63,6 +63,9 @@ enum {
 	CS420X_MBP101,
 	CS420X_MBP81,
 	CS420X_MBA42,
+#ifdef CONFIG_MCST
+	CS420X_IOHUB2,
+#endif /* CONFIG_MCST */
 	CS420X_AUTO,
 	/* aliases */
 	CS420X_IMAC27_122 = CS420X_GPIO_23,
@@ -244,8 +247,8 @@ static const struct hda_verb cs4208_coef_init_verbs[] = {
  *
  * http://www.cirrus.com/en/pubs/errata/ER880C3.pdf
  *
- * 6. At high temperature (TA > +85°C), the digital supply current (IVD)
- * may be excessive (up to an additional 200 μA), which is most easily
+ * 6. At high temperature (TA > +85б╟C), the digital supply current (IVD)
+ * may be excessive (up to an additional 200 н╪A), which is most easily
  * observed while the part is being held in reset (RESET# active low).
  *
  * Root Cause: At initial powerup of the device, the logic that drives
@@ -381,6 +384,9 @@ static const struct hda_model_fixup cs420x_models[] = {
 	{ .id = CS420X_MBP101, .name = "mbp101" },
 	{ .id = CS420X_MBP81, .name = "mbp81" },
 	{ .id = CS420X_MBA42, .name = "mba42" },
+#ifdef CONFIG_MCST
+	{ .id = CS420X_IOHUB2, .name = "iohub2" },
+#endif /* CONFIG_MCST */
 	{}
 };
 
@@ -402,6 +408,20 @@ static const struct snd_pci_quirk cs420x_fixup_tbl[] = {
 	{} /* terminator */
 };
 
+#ifdef CONFIG_MCST
+
+static const struct hda_pintbl iohub2_pincfgs[] = {
+	{ 0x09, 0x01014060 },
+	{ 0x0a, 0x01016061 },
+	{ 0x0b, 0x01011062 },
+#if 0
+	{ 0x10, 0x40000063 },
+	{ 0x15, 0x40000064 },
+#endif
+	{} /* terminator */
+};
+
+#endif /* CONFIG_MCST */
 static const struct hda_pintbl mbp53_pincfgs[] = {
 	{ 0x09, 0x012b4050 },
 	{ 0x0a, 0x90100141 },
@@ -513,6 +533,13 @@ static void cs420x_fixup_gpio_23(struct hda_codec *codec,
 }
 
 static const struct hda_fixup cs420x_fixups[] = {
+#ifdef CONFIG_MCST
+	[CS420X_IOHUB2] = {
+		.type = HDA_FIXUP_PINS,
+		.v.pins = iohub2_pincfgs,
+		.chained = false,
+	},
+#endif /* CONFIG_MCST */
 	[CS420X_MBP53] = {
 		.type = HDA_FIXUP_PINS,
 		.v.pins = mbp53_pincfgs,
@@ -590,6 +617,15 @@ static int patch_cs420x(struct hda_codec *codec)
 	spec->gen.automute_hook = cs_automute;
 	codec->single_adc_amp = 1;
 
+#ifdef CONFIG_MCST
+	if (codec->bus->pci) {
+		u16 v = codec->bus->pci->vendor;
+		u16 d = codec->bus->pci->device;
+		if (v == PCI_VENDOR_ID_MCST_TMP &&
+			d == PCI_DEVICE_ID_MCST_HDA)
+				codec->modelname = "iohub2";
+	}
+#endif /* CONFIG_MCST */
 	snd_hda_pick_fixup(codec, cs420x_models, cs420x_fixup_tbl,
 			   cs420x_fixups);
 	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PRE_PROBE);
@@ -1014,7 +1050,10 @@ static void parse_cs421x_digital(struct hda_codec *codec)
 	struct cs_spec *spec = codec->spec;
 	struct auto_pin_cfg *cfg = &spec->gen.autocfg;
 	int i;
-
+#ifdef CONFIG_MCST
+	/*don't touch digital outs: they introduce noise*/
+	return;
+#endif
 	for (i = 0; i < cfg->dig_outs; i++) {
 		hda_nid_t nid = cfg->dig_out_pins[i];
 		if (get_wcaps(codec, nid) & AC_WCAP_UNSOL_CAP) {

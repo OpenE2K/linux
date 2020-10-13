@@ -9,6 +9,9 @@
 extern void local_bh_disable(void);
 extern void _local_bh_enable(void);
 extern void local_bh_enable(void);
+#ifdef CONFIG_MCST
+extern void local_bh_enable_no_bh(void);
+#endif
 extern void local_bh_enable_ip(unsigned long ip);
 extern void __local_bh_disable_ip(unsigned long ip, unsigned int cnt);
 extern void __local_bh_enable_ip(unsigned long ip, unsigned int cnt);
@@ -42,6 +45,9 @@ static inline void local_bh_enable(void)
 {
 	__local_bh_enable_ip(_THIS_IP_, SOFTIRQ_DISABLE_OFFSET);
 }
+#ifdef CONFIG_MCST
+#define local_bh_enable_no_bh local_bh_enable
+#endif
 #endif
 
 #endif /* _LINUX_BH_H */

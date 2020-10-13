@@ -34,7 +34,8 @@
  * autofs_wqt_t stays constant between 32- and 64-bit Linux kernels so that we
  * do not break the binary ABI interface by changing the structure size.
  */
-#if defined(__ia64__) || defined(__alpha__) /* pure 64bit architectures */
+#if defined(__ia64__) || defined(__alpha__) || \
+    defined(__e2k__) /* pure 64bit architectures */
 typedef unsigned long autofs_wqt_t;
 #else
 typedef unsigned int autofs_wqt_t;

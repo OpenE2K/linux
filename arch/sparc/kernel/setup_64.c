@@ -55,6 +55,13 @@
 #include <net/ipconfig.h>
 #endif
 
+#ifdef CONFIG_E90S
+#include <asm/mpspec.h>
+#include <asm/apic.h>
+#include <asm/io_apic.h>
+#include <asm/console.h>
+#endif
+
 #include "entry.h"
 #include "kernel.h"
 
@@ -76,14 +83,23 @@ struct screen_info screen_info = {
 	16                      /* orig-video-points */
 };
 
+/* Exported for mm/init.c:paging_init. */
+unsigned long cmdline_memory_size = 0;
+
+
+/* Global for RDMA drivers*/
+#ifdef CONFIG_E90S
+int             rdma_present = 0;
+EXPORT_SYMBOL(rdma_present);
+#endif
+
+#ifdef	CONFIG_OF
 static void
 prom_console_write(struct console *con, const char *s, unsigned n)
 {
 	prom_write(s, n);
 }
 
-/* Exported for mm/init.c:paging_init. */
-unsigned long cmdline_memory_size = 0;
 
 static struct console prom_early_console = {
 	.name =		"earlyprom",
@@ -91,6 +107,7 @@ static struct console prom_early_console = {
 	.flags =	CON_PRINTBUFFER | CON_BOOT | CON_ANYTIME,
 	.index =	-1,
 };
+#endif	/*CONFIG_OF*/
 
 /* 
  * Process kernel command line switches that are specific to the
@@ -106,9 +123,11 @@ static void __init process_switch(char c)
 		prom_printf("boot_flags_init: Halt!\n");
 		prom_halt();
 		break;
+#ifdef	CONFIG_OF
 	case 'p':
 		prom_early_console.flags &= ~CON_BOOT;
 		break;
+#endif	/*CONFIG_OF*/
 	case 'P':
 		/* Force UltraSPARC-III P-Cache on. */
 		if (tlb_type != cheetah) {
@@ -175,6 +194,7 @@ char reboot_command[COMMAND_LINE_SIZE];
 
 static struct pt_regs fake_swapper_regs = { { 0, }, 0, 0, 0, 0 };
 
+#ifndef CONFIG_E90S
 static void __init per_cpu_patch(void)
 {
 	struct cpuid_patch_entry *p;
@@ -234,6 +254,7 @@ static void __init per_cpu_patch(void)
 		p++;
 	}
 }
+#endif /*CONFIG_E90S*/
 
 void sun4v_patch_1insn_range(struct sun4v_1insn_patch_entry *start,
 			     struct sun4v_1insn_patch_entry *end)
@@ -267,6 +288,7 @@ void sun4v_patch_2insn_range(struct sun4v_2insn_patch_entry *start,
 	}
 }
 
+#ifndef CONFIG_E90S
 static void __init sun4v_patch(void)
 {
 	extern void sun4v_hvapi_init(void);
@@ -282,6 +304,7 @@ static void __init sun4v_patch(void)
 
 	sun4v_hvapi_init();
 }
+#endif /*CONFIG_E90S*/
 
 static void __init popc_patch(void)
 {
@@ -336,6 +359,7 @@ static void __init pause_patch(void)
 	}
 }
 
+#ifndef CONFIG_E90S
 void __init start_early_boot(void)
 {
 	int cpu;
@@ -355,6 +379,7 @@ void __init start_early_boot(void)
 	prom_init_report();
 	start_kernel();
 }
+#endif /*CONFIG_E90S*/
 
 /* On Ultra, we support all of the v8 capabilities. */
 unsigned long sparc64_elf_hwcap = (HWCAP_SPARC_FLUSH | HWCAP_SPARC_STBAR |
@@ -450,6 +475,7 @@ static void __init report_hwcaps(unsigned long caps)
 		printk(KERN_CONT "]\n");
 }
 
+#ifdef	CONFIG_OF
 static unsigned long __init mdesc_cpu_hwcap_list(void)
 {
 	struct mdesc_handle *hp;
@@ -495,6 +521,12 @@ out:
 	mdesc_release(hp);
 	return caps;
 }
+#else	/* CONFIG_OF */
+static unsigned long __init mdesc_cpu_hwcap_list(void)
+{
+	return 0;
+}
+#endif	/* CONFIG_OF */
 
 /* This yields a mask that user programs can use to figure out what
  * instruction set this cpu supports.
@@ -575,11 +607,29 @@ static void __init init_sparc64_elf_hwcap(void)
 		pause_patch();
 }
 
+#ifdef	CONFIG_OF
 static inline void register_prom_console(void)
 {
+#ifdef CONFIG_EARLY_PRINTK
 	early_console = &prom_early_console;
+#endif
 	register_console(&prom_early_console);
 }
+#endif	/*CONFIG_OF*/
+
+#ifdef	CONFIG_E90S
+static void __init e90s_late_init(void)
+{
+	if (HAS_MACHINE_E90S_SIC) {
+		int ret = e90s_sic_init();
+		if (ret != 0) {
+			panic("e90s_late_time_init() could not init access "
+				"to NBSR registers, error %d\n", ret);
+		}
+	}
+	e90s_late_time_init();
+}
+#endif	/* CONFIG_E90S */
 
 void __init setup_arch(char **cmdline_p)
 {
@@ -592,8 +642,14 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_EARLYFB
 	if (btext_find_display())
 #endif
+#ifdef	CONFIG_OF
 		register_prom_console();
+#endif	/*CONFIG_OF*/
 
+#ifdef	CONFIG_SERIAL_PRINTK
+	setup_serial_dump_console(&bootblock->info);
+	register_early_dump_console();
+#endif
 	if (tlb_type == hypervisor)
 		printk("ARCH: SUN4V\n");
 	else
@@ -603,7 +659,9 @@ void __init setup_arch(char **cmdline_p)
 	conswitchp = &dummy_con;
 #endif
 
+#ifndef CONFIG_E90S
 	idprom_init();
+#endif
 
 	if (!root_flags)
 		root_mountflags &= ~MS_RDONLY;
@@ -616,7 +674,7 @@ void __init setup_arch(char **cmdline_p)
 
 	task_thread_info(&init_task)->kregs = &fake_swapper_regs;
 
-#ifdef CONFIG_IP_PNP
+#if defined(CONFIG_IP_PNP) && defined(CONFIG_OF)
 	if (!ic_set_manually) {
 		phandle chosen = prom_finddevice("/chosen");
 		u32 cl, sv, gw;
@@ -639,12 +697,37 @@ void __init setup_arch(char **cmdline_p)
 	/* Get boot processor trap_block[] setup.  */
 	init_cur_cpu_trap(current_thread_info());
 
+#ifdef CONFIG_E90S
+# ifdef CONFIG_NET
+	{
+		extern int e1000;
+		e1000 = 1;
+	}
+# endif
+	l_setup_arch();
+	/*
+	 * Find (but now set) boot-time smp configuration.
+	 * Like in i386 arch. used MP Floating Pointer Structure.
+	 */
+	find_smp_config(&bootblock->info);
+	/* Set entries of MP Configuration tables(but now one processor system). */
+	get_smp_config();
+
+	init_apic_mappings();
+
+	probe_nr_irqs_gsi();
+
+	late_time_init = e90s_late_init;
+
+#endif
+
 	paging_init();
 	init_sparc64_elf_hwcap();
 }
 
 extern int stop_a_enabled;
 
+#ifndef CONFIG_E90S
 void sun_do_break(void)
 {
 	if (!stop_a_enabled)
@@ -656,6 +739,7 @@ void sun_do_break(void)
 	prom_cmdline();
 }
 EXPORT_SYMBOL(sun_do_break);
+#endif /*CONFIG_E90S*/
 
 int stop_a_enabled = 1;
 EXPORT_SYMBOL(stop_a_enabled);

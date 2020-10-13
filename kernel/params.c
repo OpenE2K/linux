@@ -83,7 +83,10 @@ bool parameq(const char *a, const char *b)
 	return parameqn(a, b, strlen(a)+1);
 }
 
-static int parse_one(char *param,
+#ifndef CONFIG_E2K
+static
+#endif
+int parse_one(char *param,
 		     char *val,
 		     const char *doing,
 		     const struct kernel_param *params,
