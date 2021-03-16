@@ -10,9 +10,14 @@
 # define __compiletime_error(message)
 #endif
 
+#if !defined(__e2k__) || !defined(__LCC__)
 /* Optimization barrier */
 /* The "volatile" is due to gcc bugs */
-#define barrier() __asm__ __volatile__("": : :"memory")
+# define barrier() __asm__ __volatile__("": : :"memory")
+#else
+/* Workaround LCC bug # 44701 */
+# define barrier() __asm__ __volatile__("{nop}" : : : "memory")
+#endif
 
 #ifndef __always_inline
 # define __always_inline	inline __attribute__((always_inline))

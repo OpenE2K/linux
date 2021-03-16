@@ -53,6 +53,13 @@
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
+#ifdef CONFIG_MCST
+#include <uapi/linux/mcst_rt.h>
+#endif
+
 #include "internal.h"
 
 #ifndef arch_mmap_check
@@ -1396,6 +1403,13 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	int pkey = 0;
 
 	*populate = 0;
+#ifdef CONFIG_MCST
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* That is RT task, which done mlockall().
+		 * New mmap() is impossible */
+		return -EFAULT;
+	}
+#endif
 
 	if (!len)
 		return -EINVAL;
@@ -1736,8 +1750,19 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	/* Clear old maps */
 	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
 			      &rb_parent)) {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		int ret;
+		if (vm_flags & VM_PAGESVALID)
+			set_ts_flag(TS_KEEP_PAGES_VALID);
+		ret = do_munmap(mm, addr, len, uf);
+		if (vm_flags & VM_PAGESVALID)
+			clear_ts_flag(TS_KEEP_PAGES_VALID);
+		if (ret)
+			return -ENOMEM;
+#else
 		if (do_munmap(mm, addr, len, uf))
 			return -ENOMEM;
+#endif
 	}
 
 	/*
@@ -1840,6 +1865,17 @@ out:
 
 	if (file)
 		uprobe_mmap(vma);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (vm_flags & VM_PAGESVALID) {
+		int ret = make_vma_pages_valid(vma, addr, addr + len);
+
+		if (ret) {
+			do_munmap(mm, addr, len, uf);
+			return ret;
+		}
+	}
+#endif
 
 	/*
 	 * New (or expanded) vma always get soft dirty status.
@@ -2433,10 +2469,13 @@ int expand_downwards(struct vm_area_struct *vma,
 	struct mm_struct *mm = vma->vm_mm;
 	struct vm_area_struct *prev;
 	int error = 0;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	unsigned long start = vma->vm_start;
+#endif
 
 	address &= PAGE_MASK;
 	if (address < mmap_min_addr)
-		return -EPERM;
+		return -EPERM; 
 
 	/* Enforce stack_guard_gap */
 	prev = vma->vm_prev;
@@ -2498,6 +2537,10 @@ int expand_downwards(struct vm_area_struct *vma,
 	anon_vma_unlock_write(vma->anon_vma);
 	khugepaged_enter_vma_merge(vma, vma->vm_flags);
 	validate_mm(mm);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (!error && address < start && (vma->vm_flags & VM_PAGESVALID))
+		error = make_vma_pages_valid(vma, address, start);
+#endif
 	return error;
 }
 
@@ -2774,6 +2817,12 @@ int __do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 	if (vma->vm_start >= end)
 		return 0;
 
+#ifdef CONFIG_E2K
+	if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
+			__is_privileged_range(vma, start, start + len))
+		return -EPERM;
+#endif
+
 	/*
 	 * If we need to split any vma, do it now to save pain later.
 	 *
@@ -3027,8 +3076,17 @@ static int do_brk_flags(unsigned long addr, unsigned long len, unsigned long fla
 	 */
 	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
 			      &rb_parent)) {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		int ret;
+		set_ts_flag(TS_KEEP_PAGES_VALID);
+		ret = do_munmap(mm, addr, len, uf);
+		clear_ts_flag(TS_KEEP_PAGES_VALID);
+		if (ret)
+			return -ENOMEM;
+#else
 		if (do_munmap(mm, addr, len, uf))
 			return -ENOMEM;
+#endif
 	}
 
 	/* Check against address space limits *after* clearing old maps... */
@@ -3070,6 +3128,16 @@ out:
 	if (flags & VM_LOCKED)
 		mm->locked_vm += (len >> PAGE_SHIFT);
 	vma->vm_flags |= VM_SOFTDIRTY;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (flags & VM_PAGESVALID) {
+		int ret;
+		ret = make_vma_pages_valid(vma, addr, addr + len);
+		if (ret) {
+			do_munmap(mm, addr, len, uf);
+			return ret;
+		}
+	}
+#endif
 	return 0;
 }
 
@@ -3432,7 +3500,14 @@ static struct vm_area_struct *__install_special_mapping(
 
 	perf_event_mmap(vma);
 
-	return vma;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (vm_flags & VM_PAGESVALID) {
+		int ret = make_vma_pages_valid(vma, addr, addr + len);
+		if (ret)
+			return ERR_PTR(ret);
+	}
+#endif
+	return 0;
 
 out:
 	vm_area_free(vma);

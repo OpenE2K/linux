@@ -1,0 +1,10 @@
+#ifndef _ASM_E2K_SPARSEMEM_H
+#define _ASM_E2K_SPARSEMEM_H
+
+#ifdef CONFIG_SPARSEMEM
+
+# define SECTION_SIZE_BITS	28
+# define MAX_PHYSMEM_BITS	40
+
+#endif /* CONFIG_SPARSEMEM */
+#endif /* _ASM_E2K_SPARSEMEM_H */

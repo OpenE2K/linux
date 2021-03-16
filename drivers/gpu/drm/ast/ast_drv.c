@@ -58,7 +58,12 @@ static struct drm_driver driver;
 	.driver_data = (unsigned long) info }
 
 static const struct pci_device_id pciidlist[] = {
+#ifdef CONFIG_MCST /* our chip shows PCI_BASE_CLASS_MULTIMEDIA */
+#define PCI_VENDOR_ID_ASPEED 0x1a03
+	{ PCI_VDEVICE(ASPEED, PCI_CHIP_AST2000) },
+#else
 	AST_VGA_DEVICE(PCI_CHIP_AST2000, NULL),
+#endif
 	AST_VGA_DEVICE(PCI_CHIP_AST2100, NULL),
 	/*	AST_VGA_DEVICE(PCI_CHIP_AST1180, NULL), - don't bind to 1180 for now */
 	{0, 0, 0},

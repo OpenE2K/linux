@@ -62,6 +62,9 @@ enum {
 	IRQS_SUSPENDED		= 0x00000800,
 	IRQS_TIMINGS		= 0x00001000,
 	IRQS_NMI		= 0x00002000,
+#ifdef CONFIG_MCST
+	IRQS_DO_ONESHOT		= 0x00004000,
+#endif
 };
 
 #include "debug.h"

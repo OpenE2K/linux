@@ -69,17 +69,17 @@ static void tick_disable_protection(void)
 {
 	/* Set things up so user can access tick register for profiling
 	 * purposes.  Also workaround BB_ERRATA_1 by doing a dummy
-	 * read back of %tick after writing it.
+	 * read back of %stick after writing it.
 	 */
 	__asm__ __volatile__(
 	"	ba,pt	%%xcc, 1f\n"
 	"	 nop\n"
 	"	.align	64\n"
-	"1:	rd	%%tick, %%g2\n"
+	"1:	rd	%%stick, %%g2\n"
 	"	add	%%g2, 6, %%g2\n"
 	"	andn	%%g2, %0, %%g2\n"
-	"	wrpr	%%g2, 0, %%tick\n"
-	"	rdpr	%%tick, %%g0"
+	"	wrpr	%%g2, 0, %%stick\n"
+	"	rdpr	%%stick, %%g0"
 	: /* no outputs */
 	: "r" (TICK_PRIV_BIT)
 	: "g2");
@@ -107,7 +107,7 @@ static unsigned long long tick_get_tick(void)
 {
 	unsigned long ret;
 
-	__asm__ __volatile__("rd	%%tick, %0\n\t"
+	__asm__ __volatile__("rd	%%stick, %0\n\t"
 			     "mov	%0, %0"
 			     : "=r" (ret));
 
@@ -118,7 +118,7 @@ static int tick_add_compare(unsigned long adj)
 {
 	unsigned long orig_tick, new_tick, new_compare;
 
-	__asm__ __volatile__("rd	%%tick, %0"
+	__asm__ __volatile__("rd	%%stick, %0"
 			     : "=r" (orig_tick));
 
 	orig_tick &= ~TICKCMP_IRQ_BIT;
@@ -141,7 +141,7 @@ static int tick_add_compare(unsigned long adj)
 			     : "=r" (new_compare)
 			     : "r" (orig_tick), "r" (adj));
 
-	__asm__ __volatile__("rd	%%tick, %0"
+	__asm__ __volatile__("rd	%%stick, %0"
 			     : "=r" (new_tick));
 	new_tick &= ~TICKCMP_IRQ_BIT;
 
@@ -153,9 +153,9 @@ static unsigned long tick_add_tick(unsigned long adj)
 	unsigned long new_tick;
 
 	/* Also need to handle Blackbird bug here too. */
-	__asm__ __volatile__("rd	%%tick, %0\n\t"
+	__asm__ __volatile__("rd	%%stick, %0\n\t"
 			     "add	%0, %1, %0\n\t"
-			     "wrpr	%0, 0, %%tick\n\t"
+			     "wrpr	%0, 0, %%stick\n\t"
 			     : "=&r" (new_tick)
 			     : "r" (adj));
 
@@ -226,9 +226,9 @@ static void stick_init_tick(void)
 
 		/* Let the user get at STICK too. */
 		__asm__ __volatile__(
-		"	rd	%%asr24, %%g2\n"
+		"	rd	%%stick, %%g2\n"
 		"	andn	%%g2, %0, %%g2\n"
-		"	wr	%%g2, 0, %%asr24"
+		"	wr	%%g2, 0, %%stick"
 		: /* no outputs */
 		: "r" (TICK_PRIV_BIT)
 		: "g1", "g2");
@@ -241,7 +241,7 @@ static unsigned long long stick_get_tick(void)
 {
 	unsigned long ret;
 
-	__asm__ __volatile__("rd	%%asr24, %0"
+	__asm__ __volatile__("rd	%%stick, %0"
 			     : "=r" (ret));
 
 	return ret & ~TICK_PRIV_BIT;
@@ -251,9 +251,9 @@ static unsigned long stick_add_tick(unsigned long adj)
 {
 	unsigned long new_tick;
 
-	__asm__ __volatile__("rd	%%asr24, %0\n\t"
+	__asm__ __volatile__("rd	%%stick, %0\n\t"
 			     "add	%0, %1, %0\n\t"
-			     "wr	%0, 0, %%asr24\n\t"
+			     "wr	%0, 0, %%stick\n\t"
 			     : "=&r" (new_tick)
 			     : "r" (adj));
 
@@ -264,7 +264,7 @@ static int stick_add_compare(unsigned long adj)
 {
 	unsigned long orig_tick, new_tick;
 
-	__asm__ __volatile__("rd	%%asr24, %0"
+	__asm__ __volatile__("rd	%%stick, %0"
 			     : "=r" (orig_tick));
 	orig_tick &= ~TICKCMP_IRQ_BIT;
 
@@ -272,7 +272,7 @@ static int stick_add_compare(unsigned long adj)
 			     : /* no outputs */
 			     : "r" (orig_tick + adj));
 
-	__asm__ __volatile__("rd	%%asr24, %0"
+	__asm__ __volatile__("rd	%%stick, %0"
 			     : "=r" (new_tick));
 	new_tick &= ~TICKCMP_IRQ_BIT;
 

@@ -37,6 +37,13 @@ struct user_struct {
 	atomic_long_t locked_vm;
 #endif
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	struct {
+		int shared_objects;  /* How many shared objects does this user have? */
+		int private_objects; /* How many private objects does this user have? */
+	} el_posix;
+#endif
+
 	/* Miscellaneous per-user rate limit */
 	struct ratelimit_state ratelimit;
 };

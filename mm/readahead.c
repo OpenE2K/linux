@@ -21,7 +21,10 @@
 #include <linux/file.h>
 #include <linux/mm_inline.h>
 #include <linux/blk-cgroup.h>
-#include <linux/fadvise.h>
+#include <linux/fadvise.h> 
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#endif
 
 #include "internal.h"
 
@@ -169,6 +172,12 @@ unsigned int __do_page_cache_readahead(struct address_space *mapping,
 		goto out;
 
 	end_index = ((isize - 1) >> PAGE_SHIFT);
+
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_NO_RD_AHEAD) {
+		return 0;
+	}
+#endif
 
 	/*
 	 * Preallocate as many pages as we will need.

@@ -61,6 +61,9 @@
 /* Idle loop support on sparc64. */
 void arch_cpu_idle(void)
 {
+#ifdef CONFIG_E90S
+	local_irq_enable();
+#else
 	if (tlb_type != hypervisor) {
 		touch_nmi_watchdog();
 		local_irq_enable();
@@ -95,6 +98,7 @@ void arch_cpu_idle(void)
 			: "=&r" (pstate)
 			: "i" (PSTATE_IE));
 	}
+#endif /*CONFIG_E90S*/
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -198,8 +202,60 @@ void show_regs(struct pt_regs *regs)
 	show_stack(current, (unsigned long *) regs->u_regs[UREG_FP]);
 }
 
+#if defined(CONFIG_SMP) && defined(CONFIG_E90S)
+DEFINE_PER_CPU(cpu_bt_buf_t, cpu_bt_buf);
+
+void dump_backtrace_smp(void)
+{
+        unsigned long fp;
+        int i;
+        struct reg_window *rw;
+        unsigned long thread_base;
+	cpu_bt_buf_t *bt_buf = this_cpu_ptr(&cpu_bt_buf);
+        unsigned long flags;
+
+        /* Protect against xcall ipis which might lead to livelock on the lock */
+        __asm__ __volatile__("rdpr      %%pstate, %0\n\t"
+                             "wrpr      %0, %1, %%pstate"
+                             : "=r" (flags)
+                             : "i" (PSTATE_IE));
+
+        flushw_all();
+         __asm__ __volatile__("mov %%i6, %0" : "=r" (fp)); // get fp
+        fp += STACK_BIAS;
+        bt_buf->pid = current->pid;
+        bt_buf->t_pc = current_thread_info()->kregs->tpc;
+        bt_buf->t_npc = current_thread_info()->kregs->tnpc;
+        bt_buf->prio = current->prio;
+        bt_buf->need_resched = need_resched();
+
+        for (i = 0; i < 16; i++) {
+                bt_buf->comm[i] = current->comm[i];
+        }
+        thread_base = (unsigned long) current_thread_info();
+        for (i = 0; i < NUM_DUMP_FRAMES; i++) {
+                /* Bogus frame pointer? */
+                if (fp < (thread_base + sizeof(struct thread_info)) ||
+                    fp >= (thread_base + THREAD_SIZE))
+                        break;
+                rw = (struct reg_window *)fp;
+                bt_buf->tpc[i] = *((long *)(fp + PT_V9_TPC));
+                bt_buf->fp[i] = rw->ins[7];
+                fp = rw->ins[6] + STACK_BIAS;
+        }
+        if (i < NUM_DUMP_FRAMES) {
+                bt_buf->fp[i] = 0;
+        }
+
+        __asm__ __volatile__("wrpr      %0, 0, %%pstate"
+                             : : "r" (flags));
+}
+#endif	/*CONFIG_SMP && CONFIG_E90S*/
+
 union global_cpu_snapshot global_cpu_snapshot[NR_CPUS];
+#ifndef CONFIG_MCST
 static DEFINE_SPINLOCK(global_cpu_snapshot_lock);
+#endif
 
 static void __global_reg_self(struct thread_info *tp, struct pt_regs *regs,
 			      int this_cpu)
@@ -248,18 +304,32 @@ static void __global_reg_poll(struct global_reg_snapshot *gp)
 		udelay(1);
 	}
 }
+#ifdef CONFIG_MCST
+static unsigned long backtrace_flag;
+#endif
 
 void arch_trigger_cpumask_backtrace(const cpumask_t *mask, bool exclude_self)
 {
 	struct thread_info *tp = current_thread_info();
 	struct pt_regs *regs = get_irq_regs();
+#if !defined(CONFIG_MCST)
 	unsigned long flags;
+#endif
 	int this_cpu, cpu;
 
 	if (!regs)
 		regs = tp->kregs;
-
+#ifdef CONFIG_MCST
+	if (test_and_set_bit(0, &backtrace_flag))
+		/*
+		 * If there is already a trigger_all_cpu_backtrace() in progress
+		 * (backtrace_flag == 1), don't output double cpu dump infos.
+		 */
+		return;
+#else
 	spin_lock_irqsave(&global_cpu_snapshot_lock, flags);
+#endif
+	memset(global_cpu_snapshot, 0, sizeof(global_cpu_snapshot));
 
 	this_cpu = raw_smp_processor_id();
 
@@ -302,8 +372,12 @@ void arch_trigger_cpumask_backtrace(const cpumask_t *mask, bool exclude_self)
 	}
 
 	memset(global_cpu_snapshot, 0, sizeof(global_cpu_snapshot));
-
+#ifdef CONFIG_MCST
+	clear_bit(0, &backtrace_flag);
+	smp_mb__after_clear_bit();
+#else
 	spin_unlock_irqrestore(&global_cpu_snapshot_lock, flags);
+#endif
 }
 
 #ifdef CONFIG_MAGIC_SYSRQ
@@ -319,6 +393,7 @@ static struct sysrq_key_op sparc_globalreg_op = {
 	.action_msg	= "Show Global CPU Regs",
 };
 
+#ifndef CONFIG_E90S
 static void __global_pmu_self(int this_cpu)
 {
 	struct global_pmu_snapshot *pp;
@@ -393,13 +468,15 @@ static struct sysrq_key_op sparc_globalpmu_op = {
 	.help_msg	= "global-pmu(x)",
 	.action_msg	= "Show Global PMU Regs",
 };
+#endif /*CONFIG_E90S*/
 
 static int __init sparc_sysrq_init(void)
 {
 	int ret = register_sysrq_key('y', &sparc_globalreg_op);
-
+#ifndef CONFIG_E90S
 	if (!ret)
 		ret = register_sysrq_key('x', &sparc_globalpmu_op);
+#endif /*CONFIG_E90S*/
 	return ret;
 }
 
@@ -418,6 +495,12 @@ void exit_thread(struct task_struct *tsk)
 		else
 			t->utraps[0]--;
 	}
+#ifdef CONFIG_E90S
+	if (test_and_clear_thread_flag(TIF_PERFCTR)) {
+		memset(t->pcr_regs, 0, sizeof(t->pcr_regs));
+		wr_pcr(0);
+	}
+#endif /* CONFIG_E90S */
 }
 
 void flush_thread(void)
@@ -433,6 +516,12 @@ void flush_thread(void)
 
 	/* Clear FPU register state. */
 	t->fpsaved[0] = 0;
+#ifdef CONFIG_E90S
+	if (test_and_clear_thread_flag(TIF_PERFCTR)) {
+		memset(t->pcr_regs, 0, sizeof(t->pcr_regs));
+		wr_pcr(0);
+	}
+#endif /* CONFIG_E90S */
 }
 
 /* It's a bit more tricky when 64-bit tasks are involved... */
@@ -582,6 +671,9 @@ asmlinkage long sparc_do_fork(unsigned long clone_flags,
 	unsigned long orig_i1 = regs->u_regs[UREG_I1];
 	long ret;
 
+#ifdef CONFIG_MCST
+	synchronize_user_stack();
+#endif
 #ifdef CONFIG_COMPAT
 	if (test_thread_flag(TIF_32BIT)) {
 		parent_tid_ptr = compat_ptr(regs->u_regs[UREG_I2]);
@@ -592,7 +684,6 @@ asmlinkage long sparc_do_fork(unsigned long clone_flags,
 		parent_tid_ptr = (int __user *) regs->u_regs[UREG_I2];
 		child_tid_ptr = (int __user *) regs->u_regs[UREG_I4];
 	}
-
 	ret = do_fork(clone_flags, stack_start, stack_size,
 		      parent_tid_ptr, child_tid_ptr);
 
@@ -682,6 +773,7 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
  */
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
+#ifndef CONFIG_E90S
 	if (adi_capable()) {
 		register unsigned long tmp_mcdper;
 
@@ -696,7 +788,7 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 		else
 			clear_thread_flag(TIF_MCDPER);
 	}
-
+#endif
 	*dst = *src;
 	return 0;
 }
@@ -798,3 +890,32 @@ unsigned long get_wchan(struct task_struct *task)
 out:
 	return ret;
 }
+
+#ifdef CONFIG_MCST
+unsigned long mcst_copy_to_user(char __user *to, void *from,
+		unsigned long size)
+{
+	unsigned long sz;
+	unsigned long a;
+
+	if (unlikely(size == 0))
+		return 0;
+	sz = PAGE_SIZE - ((unsigned long)to) % PAGE_SIZE;
+	sz = min(size, sz);
+	do {
+		if (unlikely(__put_user(0, to) != 0)) {
+			return size;
+		}
+		a = _raw_copy_to_user(to, from, sz);
+		if (unlikely(a)) {
+			return size - sz + a;
+		}
+		to += sz;
+		from += sz;
+		size -= sz;
+		sz = min(size, PAGE_SIZE);
+	} while (size > 0);
+	return 0;
+}
+EXPORT_SYMBOL(mcst_copy_to_user);
+#endif /* CONFIG_MCST */

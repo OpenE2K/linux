@@ -206,6 +206,7 @@ source "drivers/gpu/drm/arm/Kconfig"
 config DRM_RADEON
 	tristate "ATI Radeon"
 	depends on DRM && PCI && MMU
+	select FB_SYS_FOPS
 	select FW_LOADER
         select DRM_KMS_HELPER
         select DRM_TTM
@@ -252,6 +253,13 @@ config DRM_VGEM
 	  Choose this option to get a virtual graphics memory manager,
 	  as used by Mesa's software renderer for enhanced performance.
 	  If M is selected the module will be called vgem.
+
+config DRM_VIVANTE
+	tristate "Vivante GCCore"
+	depends on DRM
+	help
+	   Choose this option if you have a Vivante graphics card.
+	   If M is selected, the module will be called vivante.
 
 config DRM_VKMS
 	tristate "Virtual KMS (EXPERIMENTAL)"

@@ -28,7 +28,11 @@
 generic_patch_copyops:
 	GEN_DO_PATCH(memcpy, GENmemcpy)
 	GEN_DO_PATCH(raw_copy_from_user, GENcopy_from_user)
+#ifdef CONFIG_MCST
+	GEN_DO_PATCH(_raw_copy_to_user, GENcopy_to_user)
+#else
 	GEN_DO_PATCH(raw_copy_to_user, GENcopy_to_user)
+#endif /* CONFIG_MCST */
 	retl
 	 nop
 	.size	generic_patch_copyops,.-generic_patch_copyops

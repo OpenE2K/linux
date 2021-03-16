@@ -140,7 +140,12 @@ const struct consw *conswitchp;
  */
 #define DEFAULT_BELL_PITCH	750
 #define DEFAULT_BELL_DURATION	(HZ/8)
+
+#if defined(CONFIG_MCST) && HZ < 100 /* suppose it is processor-prototype */
+#define DEFAULT_CURSOR_BLINK_MS	2000
+#else
 #define DEFAULT_CURSOR_BLINK_MS	200
+#endif
 
 struct vc vc_cons [MAX_NR_CONSOLES];
 

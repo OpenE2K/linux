@@ -1,0 +1,141 @@
+/*
+ * M2E-UVP
+ * TVGI.469555.385 ver.1
+ * (UVM_KMI)
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+
+/ {
+	/* version = ""; */
+	model = "e1c+,mcst,m2e-uvp";
+	compatible = "mcst,m2e-uvp";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD19:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "IOHUB Temp Sensor";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "IOHUB Temp";
+				/* no fan control */
+			};
+		};
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			/* pndt006@38 from M1R:i2c@1 */
+
+			/* KSZ9896CTX@64 from PK-UVP:I2C_1 (M1R:i2c@1) */
+		};
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* KSZ9896CTX@64 from PK-UVP:I2C_2 (M1R:i2c@2) */
+		};
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* config SENSORS_PMBUS */
+			pndt006@10 {
+				/* hwmon/pmbus/pmbus.ko (DA7:PNDT006A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x10>;
+				label = "+1V0_P8 (in +3V3)";
+			};
+			pndt006@14 {
+				/* hwmon/pmbus/pmbus.ko (DA8:PNDT006A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x14>;
+				label = "+2V5_IOH (in +5V)";
+			};
+		};
+	};
+
+	/* PMBUS I2C */
+	pmc_i2c {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "pmc_i2c";
+		label = "pmbus i2c";
+
+		/* config SENSORS_PMBUS */
+		pndt012@10 {
+			/* hwmon/pmbus/pmbus.ko (DA2:PNDT012A0X3-SRZ) */
+			compatible = "pmbus";
+			reg = <0x10>;
+			label = "+0V9_CPU (in +3V3)";
+		};
+		pndt006@13 {
+			/* hwmon/pmbus/pmbus.ko (DA3:PNDT006A0X3-SRZ) */
+			compatible = "pmbus";
+			reg = <0x13>;
+			label = "+PWR_MC (in +5V)";
+		};
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			/* DD13:S25FL128SAGNFI001) */
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			/* (DD14:CY14B101PA-SFXI) */
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+
+	/* IOHUB2 GPIO */
+	gpio0:l_gpio@0 {
+		compatible = "mcst,gpio";
+		reg = <0x0>;
+		label = "L-GPIO";
+		gpio-controller;
+		ngpios = <32>;
+		#gpio-cells = <2>;
+
+		gpio-line-names =
+			/*  0.. 3 */ "nc", "nc", "nc", "nc",
+			/*  4.. 7 */ "GA0", "GA1", "nc", "nc",
+			/*  8..11 */ "nc", "nc", "nc", "nc",
+			/* 12..15 */ "nc", "nc", "nc", "nc",
+			/* 16..19 */ "nc", "nc", "nc", "nc",
+			/* 20..23 */ "nc", "nc", "nc", "nc",
+			/* 24..27 */ "nc", "nc", "nc", "nc",
+			/* 28..31 */ "nc", "nc", "nc", "nc";
+	};
+};

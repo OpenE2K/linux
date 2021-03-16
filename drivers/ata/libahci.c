@@ -1624,6 +1624,8 @@ static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc)
 		return sata_pmp_qc_defer_cmd_switch(qc);
 }
 
+
+
 static void ahci_qc_prep(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
@@ -1642,11 +1644,22 @@ static void ahci_qc_prep(struct ata_queued_cmd *qc)
 
 	ata_tf_to_fis(&qc->tf, qc->dev->link->pmp, 1, cmd_tbl);
 	if (is_atapi) {
+#ifdef CONFIG_MCST
+		/* handle hw bug: problems with dma on packet commands:
+			use pio instead */
+		if (qc->tf.flags & ATA_TFLAG_WRITE &&
+				ap->flags & ATA_FLAG_IOHUB2_REV2) {
+			u8 *fis = cmd_tbl;
+			fis[3] &= ~ATAPI_PKT_DMA;
+		}
+#endif
+
 		memset(cmd_tbl + AHCI_CMD_TBL_CDB, 0, 32);
 		memcpy(cmd_tbl + AHCI_CMD_TBL_CDB, qc->cdb, qc->dev->cdb_len);
 	}
 
 	n_elem = 0;
+
 	if (qc->flags & ATA_QCFLAG_DMAMAP)
 		n_elem = ahci_fill_sg(qc, cmd_tbl);
 

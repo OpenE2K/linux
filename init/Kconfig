@@ -784,6 +784,7 @@ config NUMA_BALANCING_DEFAULT_ENABLED
 
 menuconfig CGROUPS
 	bool "Control Group support"
+	depends on !CONFIG_MCST_RT_GRQ
 	select KERNFS
 	help
 	  This option adds support for grouping sets of processes together, for
@@ -862,6 +863,7 @@ config CGROUP_WRITEBACK
 
 menuconfig CGROUP_SCHED
 	bool "CPU controller"
+	depends on !CONFIG_MCST_RT_GRQ
 	default n
 	help
 	  This feature lets CPU scheduler recognize task groups and control CPU
@@ -1713,6 +1715,16 @@ config DEBUG_PERF_USE_VMALLOC
 
 	 Say N if unsure.
 
+config WATCH_PREEMPT
+        default n
+        bool "Monitor non preempible intervals"
+        depends on MCST && !ENABLE_DEFAULT_TRACERS
+        help
+         To turn on monitoring echo 1 > /proc/watch-preempt
+         To turn off monitoring echo 0 > /proc/watch-preempt
+         cat /proc/watch-preempt shows maximum interval of preempt
+           disable time for each CPU
+
 endmenu
 
 config VM_EVENT_COUNTERS
@@ -1916,6 +1928,8 @@ config PROFILING
 #
 config TRACEPOINTS
 	bool
+
+source "ltt/Kconfig"
 
 endmenu		# General setup
 

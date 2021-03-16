@@ -1,0 +1,64 @@
+/*
+ * MBE8C-PC
+ * TVGI.369555.318 ver.5
+ * (801-PC)
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+
+/ {
+	/* version = ""; */
+	model = "e8c,mcst,mbe8c-pc,801-pc";
+	compatible = "mcst,mbe8c-pc";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			adt7475@2e {
+				/* hwmon/adt7475.ko (DD4:ADT7475ARQ) */
+				compatible = "adt7475";
+				reg = <0x2e>;
+				label = "board temp";
+				/* trivial-devices */
+
+				temp1 = "iohub2";
+				temp2 = "motherboard";
+				/* sensor under power supply on motherboard */
+				temp3 = "power supply";
+			};
+		};
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+};

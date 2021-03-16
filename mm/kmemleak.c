@@ -1942,8 +1942,15 @@ void __init kmemleak_init(void)
 	scan_area_cache = KMEM_CACHE(kmemleak_scan_area, SLAB_NOLEAKTRACE);
 
 	/* register the data/bss sections */
+#ifndef CONFIG_E2K
 	create_object((unsigned long)_sdata, _edata - _sdata,
 		      KMEMLEAK_GREY, GFP_ATOMIC);
+#else
+	create_object((unsigned long)_sdata, __end_ro_after_init - _sdata,
+		      KMEMLEAK_GREY, GFP_ATOMIC);
+	create_object((unsigned long)__common_data_begin, _edata - __common_data_begin,
+		      KMEMLEAK_GREY, GFP_ATOMIC);
+#endif
 	create_object((unsigned long)__bss_start, __bss_stop - __bss_start,
 		      KMEMLEAK_GREY, GFP_ATOMIC);
 	/* only register .data..ro_after_init if not within .data */

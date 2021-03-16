@@ -1,0 +1,6 @@
+SECTIONS
+{
+	/DISCARD/ : {
+		*(.data)
+	}
+}

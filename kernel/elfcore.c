@@ -20,7 +20,11 @@ int __weak elf_core_write_extra_data(struct coredump_params *cprm)
 	return 1;
 }
 
+#ifndef CONFIG_E2K
 size_t __weak elf_core_extra_data_size(void)
+#else
+size_t __weak elf_core_extra_data_size(struct coredump_params *cprmvoid)
+#endif /* CONFIG_E2K */
 {
 	return 0;
 }

@@ -246,7 +246,7 @@ source "net/ncsi/Kconfig"
 
 config RPS
 	bool
-	depends on SMP && SYSFS
+	depends on SMP && SYSFS && !NETDEV_THREADS
 	default y
 
 config RFS_ACCEL

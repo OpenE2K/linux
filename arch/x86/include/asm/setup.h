@@ -9,6 +9,7 @@
 #include <linux/linkage.h>
 #include <asm/page_types.h>
 
+
 #ifdef __i386__
 
 #include <linux/pfn.h>
@@ -29,6 +30,9 @@
 #ifndef __ASSEMBLY__
 #include <asm/bootparam.h>
 #include <asm/x86_init.h>
+#ifdef CONFIG_MCST
+extern int l_set_ethernet_macaddr(struct pci_dev *pdev, char *macaddr);
+#endif
 
 extern u64 relocated_ramdisk;
 

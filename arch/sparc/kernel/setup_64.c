@@ -5,7 +5,6 @@
  *  Copyright (C) 1995,1996  David S. Miller (davem@caip.rutgers.edu)
  *  Copyright (C) 1997       Jakub Jelinek (jj@sunsite.mff.cuni.cz)
  */
-
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -60,6 +59,17 @@
 #include <net/ipconfig.h>
 #endif
 
+#ifdef CONFIG_E90S
+#include <asm/mpspec.h>
+#include <asm/apic.h>
+#include <asm/sic_regs.h>
+#include <asm/console.h>
+#include <asm/io_apic_regs.h>
+#include <asm-l/pic.h>
+#include <asm-l/io_apic.h>
+#include <asm-l/devtree.h>
+#endif
+
 #include "entry.h"
 #include "kernel.h"
 
@@ -69,6 +79,7 @@
 DEFINE_SPINLOCK(ns87303_lock);
 EXPORT_SYMBOL(ns87303_lock);
 
+#ifndef CONFIG_E90S
 struct screen_info screen_info = {
 	0, 0,			/* orig-x, orig-y */
 	0,			/* unused */
@@ -80,15 +91,25 @@ struct screen_info screen_info = {
 	0,                      /* orig-video-isVGA */
 	16                      /* orig-video-points */
 };
+#endif
 
+/* Exported for mm/init.c:paging_init. */
+unsigned long cmdline_memory_size = 0;
+
+
+/* Global for RDMA drivers*/
+#ifdef CONFIG_E90S
+int             rdma_present = 0;
+EXPORT_SYMBOL(rdma_present);
+#endif
+
+#if defined CONFIG_OF && !defined CONFIG_E90S
 static void
 prom_console_write(struct console *con, const char *s, unsigned int n)
 {
 	prom_write(s, n);
 }
 
-/* Exported for mm/init.c:paging_init. */
-unsigned long cmdline_memory_size = 0;
 
 static struct console prom_early_console = {
 	.name =		"earlyprom",
@@ -96,6 +117,7 @@ static struct console prom_early_console = {
 	.flags =	CON_PRINTBUFFER | CON_BOOT | CON_ANYTIME,
 	.index =	-1,
 };
+#endif	/*CONFIG_OF*/
 
 /*
  * Process kernel command line switches that are specific to the
@@ -111,9 +133,11 @@ static void __init process_switch(char c)
 		prom_printf("boot_flags_init: Halt!\n");
 		prom_halt();
 		break;
+#if defined CONFIG_OF && !defined CONFIG_E90S
 	case 'p':
 		prom_early_console.flags &= ~CON_BOOT;
 		break;
+#endif	/*CONFIG_OF*/
 	case 'P':
 		/* Force UltraSPARC-III P-Cache on. */
 		if (tlb_type != cheetah) {
@@ -168,6 +192,26 @@ char reboot_command[COMMAND_LINE_SIZE];
 
 static struct pt_regs fake_swapper_regs = { { 0, }, 0, 0, 0, 0 };
 
+#ifdef CONFIG_E90S
+static void __init per_cpu_patch(void)
+{
+	struct cpuid_patch_entry *p;
+	if (!cpu_has_epic())
+		return;
+
+	for (p = &__cpuid_patch; p < &__cpuid_patch_end; p++) {
+		int i;
+		unsigned *insns = p->r2000p;
+		unsigned *addr = (unsigned *)(long)p->addr;
+		for (i = 0; i < ARRAY_SIZE(p->r2000p); i++) {
+			addr[i] = insns[i];
+			wmb();
+			__asm__ __volatile__(
+				"flush	%0" : : "r" (addr +  i));
+		}
+	}
+}
+#else
 static void __init per_cpu_patch(void)
 {
 	struct cpuid_patch_entry *p;
@@ -188,7 +232,6 @@ static void __init per_cpu_patch(void)
 	while (p < &__cpuid_patch_end) {
 		unsigned long addr = p->addr;
 		unsigned int *insns;
-
 		switch (tlb_type) {
 		case spitfire:
 			insns = &p->starfire[0];
@@ -227,6 +270,7 @@ static void __init per_cpu_patch(void)
 		p++;
 	}
 }
+#endif
 
 void sun4v_patch_1insn_range(struct sun4v_1insn_patch_entry *start,
 			     struct sun4v_1insn_patch_entry *end)
@@ -278,6 +322,7 @@ void sun_m7_patch_2insn_range(struct sun4v_2insn_patch_entry *start,
 	}
 }
 
+#ifndef CONFIG_E90S
 static void __init sun4v_patch(void)
 {
 	extern void sun4v_hvapi_init(void);
@@ -311,6 +356,7 @@ static void __init sun4v_patch(void)
 
 	sun4v_hvapi_init();
 }
+#endif
 
 static void __init popc_patch(void)
 {
@@ -365,6 +411,20 @@ static void __init pause_patch(void)
 	}
 }
 
+#ifdef CONFIG_E90S
+void __init start_early_boot(void)
+{
+	if (!cpu_has_epic()) {
+		/* use APIC_LVT0 to store cpuid for __GET_CPUID() */
+		u32 v = apic_read(APIC_LVT0);
+		v &= ~APIC_VECTOR_MASK;
+		v |= smp_processor_id();
+		apic_write(APIC_LVT0, v);
+	}
+	per_cpu_patch();
+	start_kernel();
+}
+#else /*CONFIG_E90S*/
 void __init start_early_boot(void)
 {
 	int cpu;
@@ -386,6 +446,7 @@ void __init start_early_boot(void)
 	prom_init_report();
 	start_kernel();
 }
+#endif /*CONFIG_E90S*/
 
 /* On Ultra, we support all of the v8 capabilities. */
 unsigned long sparc64_elf_hwcap = (HWCAP_SPARC_FLUSH | HWCAP_SPARC_STBAR |
@@ -415,6 +476,9 @@ void cpucap_info(struct seq_file *m)
 {
 	unsigned long caps = sparc64_elf_hwcap;
 	int i, printed = 0;
+#ifdef CONFIG_E90S
+	 caps &= ~(AV_SPARC_VIS | AV_SPARC_VIS2);
+#endif
 
 	seq_puts(m, "cpucaps\t\t: ");
 	for (i = 0; i < ARRAY_SIZE(hwcaps); i++) {
@@ -438,6 +502,12 @@ void cpucap_info(struct seq_file *m)
 			}
 		}
 	}
+#ifdef CONFIG_E90S
+	if ((e90s_get_cpu_type() == E90S_CPU_R2000) &&
+		((1 << 4) & sic_read_node_nbsr_reg(0, NBSR_NODE_CFG2))) {
+			seq_printf(m, ",pf"); /* probe-filter is on */
+	}
+#endif /*CONFIG_E90S*/
 	seq_putc(m, '\n');
 }
 
@@ -482,6 +552,7 @@ static void __init report_hwcaps(unsigned long caps)
 		printk(KERN_CONT "]\n");
 }
 
+#if defined CONFIG_OF && !defined CONFIG_E90S
 static unsigned long __init mdesc_cpu_hwcap_list(void)
 {
 	struct mdesc_handle *hp;
@@ -527,6 +598,12 @@ out:
 	mdesc_release(hp);
 	return caps;
 }
+#else	/* CONFIG_OF */
+static unsigned long __init mdesc_cpu_hwcap_list(void)
+{
+	return 0;
+}
+#endif	/* CONFIG_OF */
 
 /* This yields a mask that user programs can use to figure out what
  * instruction set this cpu supports.
@@ -615,6 +692,30 @@ static void __init init_sparc64_elf_hwcap(void)
 		pause_patch();
 }
 
+#if defined CONFIG_OF && !defined CONFIG_E90S
+static inline void register_prom_console(void)
+{
+#ifdef CONFIG_EARLY_PRINTK
+	early_console = &prom_early_console;
+#endif
+	register_console(&prom_early_console);
+}
+#endif	/*CONFIG_OF*/
+
+#ifdef	CONFIG_E90S
+static void __init e90s_late_init(void)
+{
+	if (HAS_MACHINE_E90S_SIC) {
+		int ret = e90s_sic_init();
+		if (ret != 0) {
+			panic("e90s_late_time_init() could not init access "
+				"to NBSR registers, error %d\n", ret);
+		}
+	}
+	e90s_late_time_init();
+}
+#endif	/* CONFIG_E90S */
+
 void __init alloc_irqstack_bootmem(void)
 {
 	unsigned int i, node;
@@ -646,8 +747,13 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_EARLYFB
 	if (btext_find_display())
 #endif
-		register_console(&prom_early_console);
+#if defined CONFIG_OF && !defined CONFIG_E90S
+		register_prom_console();
+#endif	/*CONFIG_OF*/
 
+#ifdef	CONFIG_SERIAL_PRINTK
+	setup_serial_dump_console(&bootblock->info);
+#endif
 	if (tlb_type == hypervisor)
 		pr_info("ARCH: SUN4V\n");
 	else
@@ -657,7 +763,9 @@ void __init setup_arch(char **cmdline_p)
 	conswitchp = &dummy_con;
 #endif
 
+#ifndef CONFIG_E90S
 	idprom_init();
+#endif
 
 	if (!root_flags)
 		root_mountflags &= ~MS_RDONLY;
@@ -670,7 +778,7 @@ void __init setup_arch(char **cmdline_p)
 
 	task_thread_info(&init_task)->kregs = &fake_swapper_regs;
 
-#ifdef CONFIG_IP_PNP
+#if defined(CONFIG_IP_PNP) && defined(CONFIG_OF) && !defined(CONFIG_E90S)
 	if (!ic_set_manually) {
 		phandle chosen = prom_finddevice("/chosen");
 		u32 cl, sv, gw;
@@ -693,19 +801,60 @@ void __init setup_arch(char **cmdline_p)
 	/* Get boot processor trap_block[] setup.  */
 	init_cur_cpu_trap(current_thread_info());
 
+#ifdef CONFIG_E90S
+	if ((e90s_get_cpu_type() == E90S_CPU_R2000)) {
+		extern int max_iolinks;
+		max_iolinks += MAX_NUMNODES; // + RDMA IOAPICS
+		printk("max_iolinks corrected = %d\n", max_iolinks);
+	}
+# ifdef CONFIG_NET
+	{
+		extern int e1000;
+		e1000 = 1;
+	}
+# endif
+	l_setup_arch();
+	/*
+	 * Find (but now set) boot-time smp configuration.
+	 * Like in i386 arch. used MP Floating Pointer Structure.
+	 */
+	find_smp_config(&bootblock->info);
+	/* Set entries of MP Configuration tables(but now one processor system). */
+	get_smp_config();
+
+	init_pic_mappings();
+
+	probe_nr_irqs_gsi();
+
+	late_time_init = e90s_late_init;
+
+#endif
+
 	paging_init();
 	init_sparc64_elf_hwcap();
+#ifndef CONFIG_E90S
 	smp_fill_in_cpu_possible_map();
+#endif
+
 	/*
 	 * Once the OF device tree and MDESC have been setup and nr_cpus has
 	 * been parsed, we know the list of possible cpus.  Therefore we can
 	 * allocate the IRQ stacks.
 	 */
 	alloc_irqstack_bootmem();
+
+#ifdef CONFIG_E90S
+#ifdef CONFIG_OF
+	device_tree_init();
+#endif
+	/* Must be called after paging_init() & device_tree_init() */
+	l_setup_vga();
+#endif
 }
 
 extern int stop_a_enabled;
 
+#ifndef CONFIG_E90S
 void sun_do_break(void)
 {
 	if (!stop_a_enabled)
@@ -717,6 +866,7 @@ void sun_do_break(void)
 	prom_cmdline();
 }
 EXPORT_SYMBOL(sun_do_break);
+#endif /*CONFIG_E90S*/
 
 int stop_a_enabled = 1;
 EXPORT_SYMBOL(stop_a_enabled);

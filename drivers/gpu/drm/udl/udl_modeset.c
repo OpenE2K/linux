@@ -46,7 +46,7 @@ static char *udl_vidreg_unlock(char *buf)
  */
 static char *udl_set_blank(char *buf, int dpms_mode)
 {
-	u8 reg;
+	u8 reg = 0;
 	switch (dpms_mode) {
 	case DRM_MODE_DPMS_OFF:
 		reg = 0x07;

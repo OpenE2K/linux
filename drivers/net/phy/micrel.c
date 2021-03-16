@@ -640,6 +640,10 @@ static int ksz9031_config_init(struct phy_device *phydev)
 				goto err_force_master;
 		}
 	}
+#ifdef CONFIG_MCST
+	/* write magik constant to CLK_PAD_SKEW */
+	phy_write_mmd(phydev, 2, MII_KSZ9031RN_CLK_PAD_SKEW, 0x03EF);
+#endif
 
 	return ksz9031_center_flp_timing(phydev);
 

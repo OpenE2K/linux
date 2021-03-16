@@ -144,7 +144,11 @@ bool ieee80211_ht_cap_ie_to_sta_ht_cap(struct ieee80211_sub_if_data *sdata,
 	int i, max_tx_streams;
 	bool changed;
 	enum ieee80211_sta_rx_bandwidth bw;
+#if defined(CONFIG_MCST) && defined(__LCC__)
+	enum ieee80211_smps_mode smps_mode = 0;
+#else
 	enum ieee80211_smps_mode smps_mode;
+#endif
 
 	memset(&ht_cap, 0, sizeof(ht_cap));
 

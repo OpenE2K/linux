@@ -3863,6 +3863,44 @@ static int reset_chelsio_generic_dev(struct pci_dev *dev, int probe)
 	return 0;
 }
 
+#ifdef CONFIG_MCST
+#define PCI_MCST_CFG	0x40
+#define PCI_MCST_RESET	(1 << 6)
+static int reset_mcst_generic_dev(struct pci_dev *dev, int probe)
+{
+	u8 tmp;
+	int i;
+	int timeout_us = 10;
+#if HZ < 100 /* supposing it is processor prototype */
+	timeout_us *= 200;
+#endif
+	if ((dev->class >> 16) == PCI_BASE_CLASS_BRIDGE)
+		return -ENOTTY;
+
+	pci_read_config_byte(dev, PCI_MCST_CFG, &tmp);
+	if (tmp & PCI_MCST_RESET || tmp == 0xff)
+		return -ENOTTY;
+	/*
+	 * If this is the "probe" phase, return 0 indicating that we can
+	 * reset this device.
+	 */
+	if (probe)
+		return 0;
+
+	pci_clear_master(dev);
+
+	pci_write_config_byte(dev, PCI_MCST_CFG, tmp | PCI_MCST_RESET);
+	for (i = 0; i < 100; i++) {
+		pci_read_config_byte(dev, PCI_MCST_CFG, &tmp);
+		if (!(tmp & PCI_MCST_RESET))
+			break;
+		udelay(timeout_us);
+	}
+	WARN_ON(i == 100);
+	return 0;
+}
+#endif
+
 #define PCI_DEVICE_ID_INTEL_82599_SFP_VF   0x10ed
 #define PCI_DEVICE_ID_INTEL_IVB_M_VGA      0x0156
 #define PCI_DEVICE_ID_INTEL_IVB_M2_VGA     0x0166
@@ -3980,6 +4018,10 @@ static const struct pci_dev_reset_methods pci_dev_reset_methods[] = {
 	{ PCI_VENDOR_ID_INTEL, 0x0953, delay_250ms_after_flr },
 	{ PCI_VENDOR_ID_CHELSIO, PCI_ANY_ID,
 		reset_chelsio_generic_dev },
+#ifdef CONFIG_MCST
+	{ PCI_VENDOR_ID_MCST_TMP, PCI_ANY_ID,
+		reset_mcst_generic_dev },
+#endif
 	{ 0 }
 };
 
@@ -5184,7 +5226,10 @@ static void quirk_no_ext_tags(struct pci_dev *pdev)
 
 	if (!bridge)
 		return;
-
+#ifdef CONFIG_MCST
+	if (iohub_generation(pdev) != 1 || iohub_revision(pdev) > 3)
+		return;
+#endif
 	bridge->no_ext_tags = 1;
 	pci_info(pdev, "disabling Extended Tags (this device can't handle them)\n");
 
@@ -5197,6 +5242,10 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0142, quirk_no_ext_tags);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0144, quirk_no_ext_tags);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0420, quirk_no_ext_tags);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0422, quirk_no_ext_tags);
+#ifdef CONFIG_MCST
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIe1, quirk_no_ext_tags);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIe8, quirk_no_ext_tags);
+#endif
 
 #ifdef CONFIG_PCI_ATS
 /*

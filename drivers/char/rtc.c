@@ -859,6 +859,11 @@ static int __init rtc_init(void)
 #endif
 #endif
 
+#ifdef CONFIG_E2K
+	if (HAS_MACHINE_E2K_IOHUB)
+		return -ENODEV;
+#endif
+
 #ifdef CONFIG_SPARC32
 	for_each_node_by_name(ebus_dp, "ebus") {
 		struct device_node *dp;

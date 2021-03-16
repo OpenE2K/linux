@@ -154,6 +154,9 @@ extern struct vm_struct *__get_vm_area_caller(unsigned long size,
 					const void *caller);
 extern struct vm_struct *remove_vm_area(const void *addr);
 extern struct vm_struct *find_vm_area(const void *addr);
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+extern struct vm_struct *find_io_vm_area(const void *addr);
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 
 extern int map_vm_area(struct vm_struct *area, pgprot_t prot,
 			struct page **pages);

@@ -10,6 +10,7 @@
 
 #ifdef CONFIG_SMP
 
+#define cpu_physical_id(cpu)	per_cpu(x86_cpu_to_apicid, cpu)
 extern void prefill_possible_map(void);
 
 #else /* CONFIG_SMP */

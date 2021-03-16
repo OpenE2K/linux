@@ -1,0 +1,12 @@
+menu "MCST Vivante GPU support (galcore v6.2.4p3)"
+	depends on DRM_VIVANTE
+
+config MCST_GPU_VIV
+	tristate "MCST Vivante GPU support (galcore v6.2.4p3)"
+	depends on FORCE_MAX_ZONEORDER > 15
+	select DRM_VM
+	default m
+	---help---
+         Say Y to get the GPU driver support.
+
+endmenu

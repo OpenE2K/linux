@@ -435,8 +435,13 @@ void __init anon_vma_init(void)
 	anon_vma_cachep = kmem_cache_create("anon_vma", sizeof(struct anon_vma),
 			0, SLAB_TYPESAFE_BY_RCU|SLAB_PANIC|SLAB_ACCOUNT,
 			anon_vma_ctor);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	anon_vma_chain_cachep = KMEM_CACHE(anon_vma_chain,
+			SLAB_PANIC|SLAB_ACCOUNT | SLAB_NO_SANITIZE);
+#else
 	anon_vma_chain_cachep = KMEM_CACHE(anon_vma_chain,
 			SLAB_PANIC|SLAB_ACCOUNT);
+#endif
 }
 
 /*
@@ -914,7 +919,11 @@ static bool page_mkclean_one(struct page *page, struct vm_area_struct *vma,
 				continue;
 
 			flush_cache_page(vma, address, pte_pfn(*pte));
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+			entry = ptep_clear_flush_as_valid(vma, address, pte);
+#else
 			entry = ptep_clear_flush(vma, address, pte);
+#endif
 			entry = pte_wrprotect(entry);
 			entry = pte_mkclean(entry);
 			set_pte_at(vma->vm_mm, address, pte, entry);
@@ -1351,7 +1360,12 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	struct page *subpage;
 	bool ret = true;
 	struct mmu_notifier_range range;
+#ifdef CONFIG_MCST
+	/* Fix compilation warning */
+	enum ttu_flags flags = (enum ttu_flags)(unsigned long)arg;
+#else
 	enum ttu_flags flags = (enum ttu_flags)arg;
+#endif
 
 	/* munlock has nothing to gain from examining un-locked vmas */
 	if ((flags & TTU_MUNLOCK) && !(vma->vm_flags & VM_LOCKED))
@@ -1512,7 +1526,12 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
 			set_tlb_ubc_flush_pending(mm, pte_dirty(pteval));
 		} else {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+			pteval = ptep_clear_flush_as_valid(
+						vma, address, pvmw.pte);
+#else
 			pteval = ptep_clear_flush(vma, address, pvmw.pte);
+#endif
 		}
 
 		/* Move the dirty bit to the page. Now the pte is gone. */

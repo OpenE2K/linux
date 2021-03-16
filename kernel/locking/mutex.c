@@ -134,7 +134,11 @@ static inline struct task_struct *__mutex_trylock_or_owner(struct mutex *lock)
 		 */
 		flags &= ~MUTEX_FLAG_HANDOFF;
 
+#ifdef CONFIG_E2K
+		old = atomic_long_cmpxchg_lock(&lock->owner, owner, curr | flags);
+#else
 		old = atomic_long_cmpxchg_acquire(&lock->owner, owner, curr | flags);
+#endif
 		if (old == owner)
 			return NULL;
 
@@ -168,8 +172,19 @@ static __always_inline bool __mutex_trylock_fast(struct mutex *lock)
 	unsigned long curr = (unsigned long)current;
 	unsigned long zero = 0UL;
 
+#ifdef CONFIG_MCST
+# ifdef CONFIG_E2K
+	if (atomic_long_try_cmpxchg_lock(&lock->owner, &zero, curr)) {
+# else
+	if (atomic_long_try_cmpxchg_acquire(&lock->owner, &zero, curr)) {
+# endif
+		lock->mux_ip = _RET_IP_;
+		return true;
+	}
+#else
 	if (atomic_long_try_cmpxchg_acquire(&lock->owner, &zero, curr))
 		return true;
+#endif
 
 	return false;
 }
@@ -958,6 +973,9 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 	if (__mutex_trylock(lock) ||
 	    mutex_optimistic_spin(lock, ww_ctx, use_ww_ctx, NULL)) {
 		/* got the lock, yay! */
+#ifdef CONFIG_MCST
+		lock->mux_ip = ip;
+#endif
 		lock_acquired(&lock->dep_map, ip);
 		if (use_ww_ctx && ww_ctx)
 			ww_mutex_set_context_fastpath(ww, ww_ctx);
@@ -1030,7 +1048,13 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 		}
 
 		spin_unlock(&lock->wait_lock);
+#ifdef CONFIG_MCST
+		current->wait_on_mutex = lock;
+#endif
 		schedule_preempt_disabled();
+#ifdef CONFIG_MCST
+		current->wait_on_mutex = NULL;
+#endif
 
 		/*
 		 * ww_mutex needs to always recheck its position since its waiter
@@ -1083,6 +1107,9 @@ skip_wait:
 
 	spin_unlock(&lock->wait_lock);
 	preempt_enable();
+#ifdef CONFIG_MCST
+	lock->mux_ip = ip;
+#endif
 	return 0;
 
 err:
@@ -1419,6 +1446,11 @@ int __sched mutex_trylock(struct mutex *lock)
 	if (locked)
 		mutex_acquire(&lock->dep_map, 0, 1, _RET_IP_);
 
+#ifdef CONFIG_MCST
+	if (locked)
+		lock->mux_ip = _RET_IP_;
+#endif
+
 	return locked;
 }
 EXPORT_SYMBOL(mutex_trylock);
@@ -1479,3 +1511,15 @@ int atomic_dec_and_mutex_lock(atomic_t *cnt, struct mutex *lock)
 	return 1;
 }
 EXPORT_SYMBOL(atomic_dec_and_mutex_lock);
+
+#if defined(CONFIG_MCST)
+struct task_struct *get_mutex_owner(struct mutex *lock)
+{
+	return __mutex_owner(lock);
+}
+
+void *get_mutex_ip(struct mutex *lock)
+{
+	return (void *)(lock->mux_ip);
+}
+#endif

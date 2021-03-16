@@ -3103,6 +3103,9 @@ static u32 sky2_mhz(const struct sky2_hw *hw)
 
 	default:
 		BUG();
+#ifdef __LCC__
+		return 0;
+#endif
 	}
 }
 

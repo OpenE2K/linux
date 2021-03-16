@@ -71,6 +71,10 @@ extern int
 elf_core_write_extra_phdrs(struct coredump_params *cprm, loff_t offset);
 extern int
 elf_core_write_extra_data(struct coredump_params *cprm);
+#ifndef CONFIG_E2K
 extern size_t elf_core_extra_data_size(void);
+#else
+extern size_t elf_core_extra_data_size(struct coredump_params *cprm);
+#endif /* CONFIG_E2K */
 
 #endif /* _LINUX_ELFCORE_H */

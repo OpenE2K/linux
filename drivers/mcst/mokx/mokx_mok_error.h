@@ -1,0 +1,16 @@
+#ifndef	__MOKX_MOK_ERROR_H__
+#define	__MOKX_MOK_ERROR_H__
+
+#define SUCCES_MOK_X					  0
+#define FAILED_MOK_X					 -1
+#define ERROR_MOK_X_REG_READ				-11
+#define ERROR_MOK_X_REG_WRITE				-12
+#define ERROR_MOK_X_REG_READ_REMOTE			-13
+#define ERROR_MOK_X_REG_WRITE_REMOTE			-14
+#define ERROR_MOK_X_REG_UNKNOWN_TYPE_MSG		-15
+#define ERROR_MOK_X_REG_NULL				-16
+#define ERROR_MOK_X_STATUS_REG_UNKNOWN_FIELD_MSG	-17
+#define ERROR_MOK_X_REG_UNKNOWN_TYPE_COP		-18
+#define ERROR_MOK_X_NOT_SET_BIT				-18
+
+#endif /* __MOKX_MOK_ERROR_H__ */

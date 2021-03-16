@@ -75,6 +75,9 @@
 #include <linux/uaccess.h>
 #include <linux/fsnotify_backend.h>
 #include <uapi/linux/limits.h>
+#ifdef CONFIG_SECURITY
+#include <linux/security.h>
+#endif
 
 #include "audit.h"
 

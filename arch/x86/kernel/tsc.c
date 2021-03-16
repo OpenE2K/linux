@@ -1411,6 +1411,10 @@ static bool __init determine_cpu_tsc_frequencies(bool early)
 		cpu_khz = pit_hpet_ptimer_calibrate_cpu();
 	}
 
+#ifdef CONFIG_MCST
+	cpu_freq_hz = cpu_khz * 1000;
+#endif
+
 	/*
 	 * Trust non-zero tsc_khz as authoritative,
 	 * and use it to sanity check cpu_khz,

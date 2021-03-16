@@ -1,0 +1,36 @@
+#
+# IgH EtherCAT Master configuration
+#
+
+menuconfig ETHERCAT
+	bool "EtherCAT support"
+	depends on ETHERNET
+	default y
+	---help---
+	  This section contains EtherCAT Master support.
+
+if ETHERCAT
+config EC_MASTER
+	tristate "IgH EtherCAT master driver support"
+	default y
+	---help---
+	  Device-independent part of The IgH EtherCAT Master.
+	  Say Y to include support for IgH EtherCAT Master.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called ec_master.
+
+config EC_MASTER_DEBUG_IF
+	bool "Debug for IgH EtherCAT master driver"
+	depends on EC_MASTER
+	default y
+	---help---
+	  Debugging facilities for IgH EtherCAT Master.
+
+config EC_MASTER_EOE
+	bool "Ethernet over Ethercat for IgH EtherCAT master support"
+	depends on EC_MASTER
+	default y
+	---help---
+	  Ethernet over Ethercat (EOE) for IgH EtherCAT Master.
+endif # ETHERCAT

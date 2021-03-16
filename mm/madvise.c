@@ -753,7 +753,13 @@ static int madvise_free_single_vma(struct vm_area_struct *vma,
 static long madvise_dontneed_single_vma(struct vm_area_struct *vma,
 					unsigned long start, unsigned long end)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	set_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 	zap_page_range(vma, start, end - start);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	clear_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 	return 0;
 }
 
@@ -934,6 +940,14 @@ static long
 madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 		unsigned long start, unsigned long end, int behavior)
 {
+#ifdef CONFIG_E2K
+	if ((vma->vm_flags & VM_PRIVILEGED) &&
+	    !test_ts_flag(TS_KERNEL_SYSCALL)) {
+		*prev = vma;
+		return 0;
+	}
+#endif
+
 	switch (behavior) {
 	case MADV_REMOVE:
 		return madvise_remove(vma, prev, start, end);
