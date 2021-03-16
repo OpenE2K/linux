@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: (GPL-2.0 or LGPL-2.1)
+
+TOP_LTTNG_MODULES_DIR := $(shell dirname $(lastword $(MAKEFILE_LIST)))/..
+
+include $(TOP_LTTNG_MODULES_DIR)/Kbuild.common
+
+ccflags-y += -I$(TOP_LTTNG_MODULES_DIR)
+
+obj-$(CONFIG_LTTNG) += lttng-test.o
+lttng-test-objs := probes/lttng-test.o
+
+obj-$(CONFIG_LTTNG_CLOCK_PLUGIN_TEST) += lttng-clock-plugin-test.o
+lttng-clock-plugin-test-objs := clock-plugin/lttng-clock-plugin-test.o
+
+# vim:syntax=make
