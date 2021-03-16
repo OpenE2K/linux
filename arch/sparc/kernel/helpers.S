@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-	.align	32
+#include <asm/export.h>
+.align	32
 	.globl	__flushw_user
 	.type	__flushw_user,#function
 __flushw_user:
@@ -48,6 +48,7 @@ stack_trace_flush:
 	 nop
 	.size		stack_trace_flush,.-stack_trace_flush
 
+#ifndef CONFIG_E90S
 #ifdef CONFIG_SMP
 	.globl		hard_smp_processor_id
 	.type		hard_smp_processor_id,#function
@@ -64,3 +65,5 @@ real_hard_smp_processor_id:
 #endif
 	.size		real_hard_smp_processor_id,.-real_hard_smp_processor_id
 EXPORT_SYMBOL_GPL(real_hard_smp_processor_id)
+
+#endif	/*CONFIG_E90S*/

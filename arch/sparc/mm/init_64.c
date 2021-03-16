@@ -235,6 +235,9 @@ static inline void set_dcache_dirty(struct page *page, int this_cpu)
 			     "or	%%g1, %0, %%g1\n\t"
 			     "casx	[%2], %%g7, %%g1\n\t"
 			     "cmp	%%g7, %%g1\n\t"
+#ifdef	CONFIG_RMO
+			     "membar	#StoreLoad | #StoreStore\n\t"
+#endif	/* CONFIG_RMO */
 			     "bne,pn	%%xcc, 1b\n\t"
 			     " nop"
 			     : /* no outputs */
@@ -256,6 +259,9 @@ static inline void clear_dcache_dirty_cpu(struct page *page, unsigned long cpu)
 			     " andn	%%g7, %1, %%g1\n\t"
 			     "casx	[%2], %%g7, %%g1\n\t"
 			     "cmp	%%g7, %%g1\n\t"
+#ifdef	CONFIG_RMO
+			     "membar	#StoreLoad | #StoreStore\n\t"
+#endif	/* CONFIG_RMO */
 			     "bne,pn	%%xcc, 1b\n\t"
 			     " nop\n"
 			     "2:"
@@ -433,7 +439,7 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address, pte_t *
 	if (!pte_accessible(mm, pte))
 		return;
 
-	spin_lock_irqsave(&mm->context.lock, flags);
+	raw_spin_lock_irqsave(&mm->context.lock, flags);
 
 	is_huge_tsb = false;
 #if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
@@ -469,7 +475,7 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address, pte_t *
 		__update_mmu_tsb_insert(mm, MM_TSB_BASE, PAGE_SHIFT,
 					address, pte_val(pte));
 
-	spin_unlock_irqrestore(&mm->context.lock, flags);
+	raw_spin_unlock_irqrestore(&mm->context.lock, flags);
 }
 
 void flush_dcache_page(struct page *page)
@@ -769,7 +775,7 @@ void __flush_dcache_range(unsigned long start, unsigned long end)
 EXPORT_SYMBOL(__flush_dcache_range);
 
 /* get_new_mmu_context() uses "cache + 1".  */
-DEFINE_SPINLOCK(ctx_alloc_lock);
+DEFINE_RAW_SPINLOCK(ctx_alloc_lock);
 unsigned long tlb_context_cache = CTX_FIRST_VERSION;
 #define MAX_CTX_NR	(1UL << CTX_NR_BITS)
 #define CTX_BMAP_SLOTS	BITS_TO_LONGS(MAX_CTX_NR)
@@ -822,7 +828,7 @@ static void mmu_context_wrap(void)
 		}
 	}
 }
-
+ 
 /* Caller does TLB context flushing on local CPU if necessary.
  * The caller also ensures that CTX_VALID(mm->context) is false.
  *
@@ -838,7 +844,7 @@ void get_new_mmu_context(struct mm_struct *mm)
 	unsigned long ctx, new_ctx;
 	unsigned long orig_pgsz_bits;
 
-	spin_lock(&ctx_alloc_lock);
+	raw_spin_lock(&ctx_alloc_lock);
 retry:
 	/* wrap might have happened, test again if our context became valid */
 	if (unlikely(CTX_VALID(mm->context)))
@@ -860,7 +866,7 @@ retry:
 	tlb_context_cache = new_ctx;
 	mm->context.sparc64_ctx_val = new_ctx | orig_pgsz_bits;
 out:
-	spin_unlock(&ctx_alloc_lock);
+	raw_spin_unlock(&ctx_alloc_lock);
 }
 
 static int numa_enabled = 1;
@@ -3006,10 +3012,9 @@ void hugetlb_setup(struct pt_regs *regs)
 	 * the Data-TLB for huge pages.
 	 */
 	if (tlb_type == cheetah_plus) {
-		bool need_context_reload = false;
 		unsigned long ctx;
 
-		spin_lock_irq(&ctx_alloc_lock);
+		raw_spin_lock(&ctx_alloc_lock);
 		ctx = mm->context.sparc64_ctx_val;
 		ctx &= ~CTX_PGSZ_MASK;
 		ctx |= CTX_PGSZ_BASE << CTX_PGSZ0_SHIFT;
@@ -3028,29 +3033,26 @@ void hugetlb_setup(struct pt_regs *regs)
 			 * also executing in this address space.
 			 */
 			mm->context.sparc64_ctx_val = ctx;
-			need_context_reload = true;
-		}
-		spin_unlock_irq(&ctx_alloc_lock);
-
-		if (need_context_reload)
 			on_each_cpu(context_reload, mm, 0);
+		}
+		raw_spin_unlock(&ctx_alloc_lock);
 	}
 }
 #endif
 
 static struct resource code_resource = {
 	.name	= "Kernel code",
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static struct resource data_resource = {
 	.name	= "Kernel data",
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static struct resource bss_resource = {
 	.name	= "Kernel bss",
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static inline resource_size_t compute_kern_paddr(void *addr)

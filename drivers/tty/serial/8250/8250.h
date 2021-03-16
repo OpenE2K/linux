@@ -386,3 +386,7 @@ static inline int serial_index(struct uart_port *port)
 {
 	return port->minor - 64;
 }
+
+#ifdef CONFIG_MCST
+void serial8250_get_reg( int *major , int * minor);
+#endif

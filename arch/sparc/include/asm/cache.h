@@ -10,8 +10,13 @@
 
 #define ARCH_SLAB_MINALIGN	__alignof__(unsigned long long)
 
+#ifdef	CONFIG_E90S
+#define L1_CACHE_SHIFT 6
+#else
 #define L1_CACHE_SHIFT 5
-#define L1_CACHE_BYTES 32
+#endif
+
+#define L1_CACHE_BYTES (1 << L1_CACHE_SHIFT)
 
 #ifdef CONFIG_SPARC32
 #define SMP_CACHE_BYTES_SHIFT 5

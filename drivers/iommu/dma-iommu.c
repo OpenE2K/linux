@@ -23,6 +23,10 @@
 #include <linux/pci.h>
 #include <linux/scatterlist.h>
 #include <linux/vmalloc.h>
+#ifdef CONFIG_E2K
+#include <linux/swiotlb.h>
+#include <asm/l-iommu.h>
+#endif
 
 struct iommu_dma_msi_page {
 	struct list_head	list;
@@ -649,11 +653,114 @@ static int __iommu_dma_mmap(struct page **pages, size_t size,
 	return vm_map_pages(vma, pages, PAGE_ALIGN(size) >> PAGE_SHIFT);
 }
 
+#ifdef CONFIG_E2K
+#define IO_PAGE_SHIFT		12
+#define IO_PAGE_SIZE			(1UL << IO_PAGE_SHIFT)
+#define IO_PAGE_MASK			(~(IO_PAGE_SIZE-1))
+#define IO_PAGE_ALIGN(addr)		ALIGN(addr, IO_PAGE_SIZE)
+
+static bool l_dom_iova_hi(unsigned long iova)
+{
+	return iova & (~0UL << 32) ? true : false;
+}
+
+static struct idr *l_dom_get_idr(struct iommu_domain *d, unsigned long iova)
+{
+	return l_dom_iova_hi(iova) ? &d->idr_hi : &d->idr_lo;
+}
+
+static unsigned l_dom_page_indx(struct iommu_domain *d, unsigned long iova)
+{
+	if (!l_dom_iova_hi(iova))
+		return iova / IO_PAGE_SIZE;
+
+	return (iova - d->map_base) / IO_PAGE_SIZE;
+}
+
+
+static phys_addr_t l_dom_lookup_id(struct iommu_domain *d,
+				     unsigned long iova)
+{
+	void *p;
+	unsigned long flags;
+	struct idr *idr = l_dom_get_idr(d, iova);
+	unsigned i = l_dom_page_indx(d, iova);
+
+	idr_lock_irqsave(idr, flags);
+	p = idr_find(idr, i);
+	idr_unlock_irqrestore(idr, flags);
+
+	return (phys_addr_t)p;
+}
+
+static void __l_sync_single(struct iommu_domain *d,
+				dma_addr_t iova, size_t sz,
+				enum dma_data_direction dir,
+				enum dma_sync_target target)
+{
+	phys_addr_t orig_phys, phys;
+	unsigned offset = offset_in_page(iova);
+
+	orig_phys = l_dom_lookup_id(d, iova);
+	if (!orig_phys)
+		return;
+
+	phys = iommu_iova_to_phys(d, iova);
+
+	switch (target) {
+	case SYNC_FOR_CPU:
+		if (dir == DMA_FROM_DEVICE || dir == DMA_BIDIRECTIONAL) {
+			void *to   = __va(orig_phys) + offset;
+			void *from = __va(phys)      + offset;
+			memcpy(to, from, sz);
+		} else {
+			BUG_ON(dir != DMA_TO_DEVICE);
+		}
+		break;
+	case SYNC_FOR_DEVICE:
+		if (dir == DMA_TO_DEVICE || dir == DMA_BIDIRECTIONAL) {
+			void *from = __va(orig_phys) + offset;
+			void   *to = __va(phys)      + offset;
+			memcpy(to, from, sz);
+		} else {
+			BUG_ON(dir != DMA_FROM_DEVICE);
+		}
+		break;
+	default:
+		BUG();
+	}
+}
+
+#define offset_in_iopage(p) (((unsigned long)p) % IO_PAGE_SIZE)
+
+static void l_sync_single(struct iommu_domain *d,
+				dma_addr_t iova, size_t sz,
+				enum dma_data_direction dir,
+				enum dma_sync_target target)
+{
+	do {
+		unsigned this_step = min((IO_PAGE_SIZE -
+						offset_in_iopage(iova)), sz);
+
+		__l_sync_single(d, iova, this_step, dir, target);
+
+		sz   -= this_step;
+		iova += this_step;
+	} while (sz > 0);
+}
+#endif /*CONFIG_E2K*/
+
 static void iommu_dma_sync_single_for_cpu(struct device *dev,
 		dma_addr_t dma_handle, size_t size, enum dma_data_direction dir)
 {
 	phys_addr_t phys;
-
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		struct iommu_domain *d = iommu_get_dma_domain(dev);
+		l_sync_single(d, dma_handle, size, dir, SYNC_FOR_CPU);
+		return;
+	}
+#endif
 	if (dev_is_dma_coherent(dev))
 		return;
 
@@ -665,6 +772,14 @@ static void iommu_dma_sync_single_for_device(struct device *dev,
 		dma_addr_t dma_handle, size_t size, enum dma_data_direction dir)
 {
 	phys_addr_t phys;
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		struct iommu_domain *d = iommu_get_dma_domain(dev);
+		l_sync_single(d, dma_handle, size, dir, SYNC_FOR_DEVICE);
+		return;
+	}
+#endif
 
 	if (dev_is_dma_coherent(dev))
 		return;
@@ -679,6 +794,17 @@ static void iommu_dma_sync_sg_for_cpu(struct device *dev,
 {
 	struct scatterlist *sg;
 	int i;
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		for_each_sg(sgl, sg, nelems, i) {
+			if (sg_dma_len(sg) == 0)
+				break;
+			iommu_dma_sync_single_for_cpu(dev, sg_dma_address(sg),
+					sg_dma_len(sg), dir);
+		}
+		return;
+	}
+#endif
 
 	if (dev_is_dma_coherent(dev))
 		return;
@@ -693,7 +819,18 @@ static void iommu_dma_sync_sg_for_device(struct device *dev,
 {
 	struct scatterlist *sg;
 	int i;
-
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		for_each_sg(sgl, sg, nelems, i) {
+			if (sg_dma_len(sg) == 0)
+				break;
+			iommu_dma_sync_single_for_device(dev,
+					sg_dma_address(sg),
+					sg_dma_len(sg), dir);
+		}
+		return;
+	}
+#endif
 	if (dev_is_dma_coherent(dev))
 		return;
 
@@ -711,6 +848,13 @@ static dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
 	dma_addr_t dma_handle;
 
 	dma_handle =__iommu_dma_map(dev, phys, size, prot);
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug() && !(attrs & DMA_ATTR_SKIP_CPU_SYNC) &&
+	    dma_handle != DMA_MAPPING_ERROR)
+		iommu_dma_sync_single_for_device(dev, dma_handle,
+			size, dir);
+#endif
 	if (!coherent && !(attrs & DMA_ATTR_SKIP_CPU_SYNC) &&
 	    dma_handle != DMA_MAPPING_ERROR)
 		arch_sync_dma_for_device(dev, phys, size, dir);
@@ -819,10 +963,12 @@ static int iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	size_t iova_len = 0;
 	unsigned long mask = dma_get_seg_boundary(dev);
 	int i;
-
+#ifdef CONFIG_E2K
+	int ret;
+#else
 	if (!(attrs & DMA_ATTR_SKIP_CPU_SYNC))
 		iommu_dma_sync_sg_for_device(dev, sg, nents, dir);
-
+#endif
 	/*
 	 * Work out how much IOVA space we need, and align the segments to
 	 * IOVA granules for the IOMMU driver to handle. With some clever
@@ -873,6 +1019,12 @@ static int iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	if (iommu_map_sg(domain, iova, sg, nents, prot) < iova_len)
 		goto out_free_iova;
 
+#ifdef CONFIG_E2K
+	ret = __finalise_sg(dev, sg, nents, iova);
+	if (!(attrs & DMA_ATTR_SKIP_CPU_SYNC))
+		iommu_dma_sync_sg_for_device(dev, sg, nents, dir);
+	return ret;
+#endif
 	return __finalise_sg(dev, sg, nents, iova);
 
 out_free_iova:
@@ -1001,6 +1153,11 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 	int ioprot = dma_info_to_prot(DMA_BIDIRECTIONAL, coherent, attrs);
 	struct page *page = NULL;
 	void *cpu_addr;
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug())	/* force the allocation from */
+		gfp |= __GFP_THISNODE;	/* the device node */
+#endif
 
 	gfp |= __GFP_ZERO;
 

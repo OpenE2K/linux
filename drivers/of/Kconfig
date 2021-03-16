@@ -64,7 +64,7 @@ config OF_DYNAMIC
 
 config OF_ADDRESS
 	def_bool y
-	depends on !SPARC && (HAS_IOMEM || UML)
+	depends on (!SPARC && (HAS_IOMEM || UML)) || E90S
 
 config OF_IRQ
 	def_bool y

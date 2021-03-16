@@ -29,6 +29,12 @@
 #define SLAB_RED_ZONE		((slab_flags_t __force)0x00000400U)
 /* DEBUG: Poison objects */
 #define SLAB_POISON		((slab_flags_t __force)0x00000800U)
+
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+/* PaX: Do not sanitize objs on free */
+#define SLAB_NO_SANITIZE	0x00001000UL
+#endif
+
 /* Align objs on cache lines */
 #define SLAB_HWCACHE_ALIGN	((slab_flags_t __force)0x00002000U)
 /* Use GFP_DMA memory */
@@ -141,6 +147,7 @@ struct mem_cgroup;
  */
 void __init kmem_cache_init(void);
 bool slab_is_available(void);
+
 
 extern bool usercopy_fallback;
 

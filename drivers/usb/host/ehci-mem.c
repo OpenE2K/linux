@@ -139,7 +139,11 @@ static void ehci_mem_cleanup (struct ehci_hcd *ehci)
 static int ehci_mem_init (struct ehci_hcd *ehci, gfp_t flags)
 {
 	int i;
-
+#ifdef CONFIG_MCST
+	int align = 32;
+	if (ehci->align_descs_to_64)
+		align = 64;
+#endif
 	/* QTDs for control/bulk/intr transfers */
 	ehci->qtd_pool = dma_pool_create ("ehci_qtd",
 			ehci_to_hcd(ehci)->self.sysdev,
@@ -154,7 +158,11 @@ static int ehci_mem_init (struct ehci_hcd *ehci, gfp_t flags)
 	ehci->qh_pool = dma_pool_create ("ehci_qh",
 			ehci_to_hcd(ehci)->self.sysdev,
 			sizeof(struct ehci_qh_hw),
+#ifdef CONFIG_MCST
+			align,
+#else
 			32 /* byte alignment (for hw parts) */,
+#endif
 			4096 /* can't cross 4K */);
 	if (!ehci->qh_pool) {
 		goto fail;
@@ -168,7 +176,11 @@ static int ehci_mem_init (struct ehci_hcd *ehci, gfp_t flags)
 	ehci->itd_pool = dma_pool_create ("ehci_itd",
 			ehci_to_hcd(ehci)->self.sysdev,
 			sizeof (struct ehci_itd),
+#ifdef CONFIG_MCST
+			align,
+#else
 			32 /* byte alignment (for hw parts) */,
+#endif
 			4096 /* can't cross 4K */);
 	if (!ehci->itd_pool) {
 		goto fail;

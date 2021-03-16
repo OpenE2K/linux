@@ -1,0 +1,11 @@
+#
+# Mcst CAN device configuration
+#
+
+config CAN_ELCAN
+	tristate "MCST PCI Bus based ELCAN driver"
+	depends on PCI
+	default n
+	---help---
+	  This driver adds support for the ELCAN/CAN2 connected
+	  to the PCI bus.

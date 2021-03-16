@@ -4,6 +4,8 @@
 
 #include <asm-generic/mman-common.h>
 
+#define PROT_INVEND	0x00010000	/* Invert Endianness    */
+
 /* SunOS'ified... */
 
 #define PROT_ADI	0x10		/* ADI enabled */

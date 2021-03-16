@@ -1,0 +1,86 @@
+/*
+ * MBE2S-PC
+ * TVGI.469555.300 ver.4 / ver.5
+ * (401-PC)
+ */
+/dts-v1/;
+
+/ {
+	/* version = ""; */
+	model = "e4c,mcst,mbe2s-pc,401-pc";
+	compatible = "mcst,mbe2s-pc";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			adt7475@2e {
+				/* hwmon/adt7475.ko (DD13:ADT7475ARQZ) */
+				compatible = "adt7475";
+				reg = <0x2e>;
+				label = "board temp";
+				/* trivial-devices */
+
+				temp1_label = "internal";
+				temp2_label = "cpu";
+				temp3_label = "motherboard";
+			};
+
+			/* TODO: ???.ko (DD18:MAX3674ECM+) */
+
+			/* (X9..X11) DIMMs */
+		};
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			/* empty */
+		};
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* empty */
+		};
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* empty */
+		};
+	};
+
+	/* IOHUB SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub spi";
+
+		boot@0 {
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+};

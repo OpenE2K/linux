@@ -654,6 +654,10 @@ static bool symbol__is_idle(const char *name)
 		"poll_idle",
 		"ppc64_runlatch_off",
 		"pseries_dedicated_idle_sleep",
+#ifdef __e2k__
+		"native_default_idle",
+		"e2k_enter_idle",
+#endif
 		NULL
 	};
 	int i;

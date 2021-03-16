@@ -59,7 +59,9 @@
 #include <linux/ctype.h>
 
 struct annotation_options annotation__default_options = {
+#ifndef __e2k__
 	.use_offset     = true,
+#endif
 	.jump_arrows    = true,
 	.annotate_src	= true,
 	.offset_level	= ANNOTATION__OFFSET_JUMP_TARGETS,
@@ -152,6 +154,7 @@ static int arch__associate_ins_ops(struct arch* arch, const char *name, struct i
 #include "arch/arm/annotate/instructions.c"
 #include "arch/arm64/annotate/instructions.c"
 #include "arch/csky/annotate/instructions.c"
+#include "arch/e2k/annotate/instructions.c"
 #include "arch/x86/annotate/instructions.c"
 #include "arch/powerpc/annotate/instructions.c"
 #include "arch/s390/annotate/instructions.c"
@@ -170,6 +173,13 @@ static struct arch architectures[] = {
 		.name = "arm64",
 		.init = arm64__annotate_init,
 	},
+#ifdef __e2k__
+	{
+		.name = "e2k",
+		.instructions = e2k__instructions,
+		.nr_instructions = ARRAY_SIZE(e2k__instructions),
+	},
+#endif
 	{
 		.name = "csky",
 		.init = csky__annotate_init,
@@ -1113,7 +1123,18 @@ static int disasm_line__parse(char *line, const char **namep, char **rawp)
 	char tmp, *name = skip_spaces(line);
 
 	if (name[0] == '\0')
+#ifdef __e2k__
+	{
+		char *s = strdup(name);
+		if (!s)
+			return -1;
+		*namep = s;
+		*rawp = s;
+		return 0;
+	}
+#else
 		return -1;
+#endif
 
 	*rawp = name + 1;
 
@@ -1217,8 +1238,12 @@ static struct disasm_line *disasm_line__new(struct annotate_args *args)
 
 		if (dl->al.line == NULL)
 			goto out_delete;
+#ifdef __e2k__
+		{
+#else
 
 		if (args->offset != -1) {
+#endif
 			if (disasm_line__parse(dl->al.line, &dl->ins.name, &dl->ops.raw) < 0)
 				goto out_free_line;
 
@@ -1513,12 +1538,25 @@ static int symbol__parse_objdump_line(struct symbol *sym, FILE *file,
 	}
 
 	tmp = skip_spaces(parsed_line);
+#ifdef __e2k__
+	/*
+	 * Skip empty lines
+	 */
+	if (*tmp == '\0' || *tmp == '\n') {
+		free(line);
+		return 0;
+	}
+#endif
 	if (*tmp) {
 		/*
 		 * Parse hexa addresses followed by ':'
 		 */
 		line_ip = strtoull(tmp, &tmp2, 16);
+#ifdef __e2k__
+		if (*tmp2 != ':' || tmp == tmp2)
+#else
 		if (*tmp2 != ':' || tmp == tmp2 || tmp2[1] == '\0')
+#endif
 			line_ip = -1;
 	}
 
@@ -1543,7 +1581,11 @@ static int symbol__parse_objdump_line(struct symbol *sym, FILE *file,
 	(*line_nr)++;
 
 	if (dl == NULL)
+#ifdef __e2k__
+		return 0;
+#else
 		return -1;
+#endif
 
 	if (!disasm_line__has_local_offset(dl)) {
 		dl->ops.target.offset = dl->ops.target.addr -
@@ -2909,7 +2951,12 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 
 	obj__printf(obj, " ");
 
+#ifdef __e2k__
+	/* Lines with ip are empty on e2k */
+	if (!*al->line && al->offset == -1)
+#else
 	if (!*al->line)
+#endif
 		obj__printf(obj, "%-*s", width - pcnt_width - cycles_width, " ");
 	else if (al->offset == -1) {
 		if (al->line_nr && notes->options->show_linenr)

@@ -91,6 +91,9 @@ static const unsigned short normal_i2c[] = { 0x18, 0x4c, 0x4e, I2C_CLIENT_END };
 #define LM96163_REG_REMOTE_TEMP_U_MSB	0x31
 #define LM96163_REG_REMOTE_TEMP_U_LSB	0x32
 #define LM96163_REG_CONFIG_ENHANCED	0x45
+#ifdef CONFIG_MCST
+#define LM96163_REG_RDTF_CMP_MODE	0xBF
+#endif
 
 #define LM63_MAX_CONVRATE		9
 
@@ -969,7 +972,9 @@ static int lm63_detect(struct i2c_client *client,
 {
 	struct i2c_adapter *adapter = client->adapter;
 	u8 man_id, chip_id, reg_config1, reg_config2;
+#ifndef __e2k__
 	u8 reg_alert_status, reg_alert_mask;
+#endif
 	int address = client->addr;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
@@ -980,15 +985,24 @@ static int lm63_detect(struct i2c_client *client,
 
 	reg_config1 = i2c_smbus_read_byte_data(client, LM63_REG_CONFIG1);
 	reg_config2 = i2c_smbus_read_byte_data(client, LM63_REG_CONFIG2);
+#ifndef __e2k__
 	reg_alert_status = i2c_smbus_read_byte_data(client,
 			   LM63_REG_ALERT_STATUS);
 	reg_alert_mask = i2c_smbus_read_byte_data(client, LM63_REG_ALERT_MASK);
+#endif
 
+#ifndef __e2k__
 	if (man_id != 0x01 /* National Semiconductor */
 	 || (reg_config1 & 0x18) != 0x00
 	 || (reg_config2 & 0xF8) != 0x00
 	 || (reg_alert_status & 0x20) != 0x00
 	 || (reg_alert_mask & 0xA4) != 0xA4) {
+#else
+	/* For e2k: reduce sensor detection time. Very bad strut. Emkr. */
+	if (man_id != 0x01 /* National Semiconductor */
+	 || (reg_config1 & 0x18) != 0x00
+	 || (reg_config2 & 0xF8) != 0x00) {
+#endif
 		dev_dbg(&adapter->dev,
 			"Unsupported chip (man_id=0x%02X, chip_id=0x%02X)\n",
 			man_id, chip_id);
@@ -1018,6 +1032,9 @@ static void lm63_init_client(struct lm63_data *data)
 	u8 convrate;
 
 	data->config = i2c_smbus_read_byte_data(client, LM63_REG_CONFIG1);
+#ifdef CONFIG_MCST
+	i2c_smbus_write_byte_data(client, LM63_REG_CONFIG_FAN, 0x20);
+#endif
 	data->config_fan = i2c_smbus_read_byte_data(client,
 						    LM63_REG_CONFIG_FAN);
 
@@ -1028,6 +1045,55 @@ static void lm63_init_client(struct lm63_data *data)
 		i2c_smbus_write_byte_data(client, LM63_REG_CONFIG1,
 					  data->config);
 	}
+#ifdef CONFIG_MCST
+	if (data->kind == lm96163) {
+		/* MCST Boot knows nothing about configuration of sensor,
+		 * we do it ourselves: */
+		i2c_smbus_write_byte_data(client, 0x4b, 0x3f);
+
+		/*
+		* Configuration register (0x3):
+		* 1) Enable alerts;
+		* 2) Set mode to operational;
+		* 3) Enable PWM;
+		* 4) Enable TACH;
+		* 5) Unlock T_CRIT for overriding.
+		*/
+		data->config = 0x6;
+		i2c_smbus_write_byte_data(client, LM63_REG_CONFIG1,
+							data->config);
+		/*
+		* Enhanced configuration (reg 0x45):
+		* 0x68
+		*/
+		i2c_smbus_write_byte_data(client, LM96163_REG_CONFIG_ENHANCED,
+									0x68);
+
+		/*
+		* Enable manual mode for pwm (regs 0x4a, 0x4d):
+		* 1) Enable writing to PWM value register;
+		* 2) Set dircet PWM polarity;
+		* 3) Set master PWM clock to 1,4 kHz;
+		* 4) Enable least effort TACH monitoring.
+		*/
+		i2c_smbus_write_byte_data(client, LM63_REG_CONFIG_FAN, 0x2b);
+		i2c_smbus_write_byte_data(client, LM63_REG_PWM_FREQ, 23);
+
+		/* Set ALERT pin to behave as a comparator, asserting itself
+		* when an ALERT condition exists, de-asserting itself when
+		* the ALERT condition goes away.*/
+		i2c_smbus_write_byte_data(client, LM96163_REG_RDTF_CMP_MODE,
+									0x1);
+	} else {
+		/* Start converting if needed */
+		if (data->config & 0x40) { /* standby */
+			dev_dbg(dev, "Switching to oper. mode\n");
+			data->config &= 0xA7;
+			i2c_smbus_write_byte_data(client, LM63_REG_CONFIG1,
+							data->config);
+		}
+	}
+#endif
 	/* Tachometer is always enabled on LM64 */
 	if (data->kind == lm64)
 		data->config |= 0x04;

@@ -51,6 +51,16 @@ static bool hwcalib_xy;
 module_param(hwcalib_xy, bool, 0644);
 MODULE_PARM_DESC(hwcalib_xy, "If set hw-calibrated X/Y are used if available");
 
+#ifdef CONFIG_MCST
+static int xres = CONFIG_INPUT_MOUSEDEV_SCREEN_X;
+module_param(xres, uint, 0644);
+MODULE_PARM_DESC(xres, "Horizontal screen resolution");
+
+static int yres = CONFIG_INPUT_MOUSEDEV_SCREEN_Y;
+module_param(yres, uint, 0644);
+MODULE_PARM_DESC(yres, "Vertical screen resolution");
+
+#endif /* CONFIG_MCST */
 /* device specifc data/functions */
 struct usbtouch_usb;
 struct usbtouch_device_info {
@@ -128,14 +138,29 @@ enum {
 	DEVTYPE_NEXIO,
 	DEVTYPE_ELO,
 	DEVTYPE_ETOUCH,
+#ifdef CONFIG_MCST
+	DEVTYPE_ELO_VMC,
+	DEVTYPE_XIROKU,
+#endif /* CONFIG_MCST */
 };
 
+#ifdef CONFIG_MCST
+#define USB_DEVICE_HID_CLASS(vend, prod) \
+	.match_flags = USB_DEVICE_ID_MATCH_INT_CLASS \
+		| USB_DEVICE_ID_MATCH_INT_PROTOCOL \
+		| USB_DEVICE_ID_MATCH_DEVICE, \
+	.idVendor = (vend), \
+	.idProduct = (prod), \
+	.bInterfaceClass = USB_INTERFACE_CLASS_HID, \
+	.bInterfaceProtocol = USB_INTERFACE_PROTOCOL_MOUSE
+#else /* CONFIG_MCST */
 #define USB_DEVICE_HID_CLASS(vend, prod) \
 	.match_flags = USB_DEVICE_ID_MATCH_INT_CLASS \
 		| USB_DEVICE_ID_MATCH_DEVICE, \
 	.idVendor = (vend), \
 	.idProduct = (prod), \
 	.bInterfaceClass = USB_INTERFACE_CLASS_HID
+#endif /* CONFIG_MCST */
 
 static const struct usb_device_id usbtouch_devices[] = {
 #ifdef CONFIG_TOUCHSCREEN_USB_EGALAX
@@ -151,6 +176,9 @@ static const struct usb_device_id usbtouch_devices[] = {
 	{USB_DEVICE(0x0eef, 0x0002), .driver_info = DEVTYPE_EGALAX},
 	{USB_DEVICE(0x1234, 0x0001), .driver_info = DEVTYPE_EGALAX},
 	{USB_DEVICE(0x1234, 0x0002), .driver_info = DEVTYPE_EGALAX},
+#ifdef CONFIG_MCST
+	{USB_DEVICE(0x2505, 0x0220), .driver_info = DEVTYPE_XIROKU},
+#endif /* CONFIG_MCST */
 #endif
 
 #ifdef CONFIG_TOUCHSCREEN_USB_PANJIT
@@ -231,6 +259,9 @@ static const struct usb_device_id usbtouch_devices[] = {
 
 #ifdef CONFIG_TOUCHSCREEN_USB_ELO
 	{USB_DEVICE(0x04e7, 0x0020), .driver_info = DEVTYPE_ELO},
+#ifdef CONFIG_MCST
+	{USB_DEVICE(0x04e7, 0x0050), .driver_info = DEVTYPE_ELO_VMC},
+#endif /* CONFIG_MCST */
 #endif
 
 #ifdef CONFIG_TOUCHSCREEN_USB_EASYTOUCH
@@ -290,6 +321,7 @@ static int e2i_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
 #define EGALAX_PKT_TYPE_REPT		0x80
 #define EGALAX_PKT_TYPE_DIAG		0x0A
 
+#ifndef CONFIG_MCST
 static int egalax_init(struct usbtouch_usb *usbtouch)
 {
 	int ret, i;
@@ -329,13 +361,28 @@ static int egalax_init(struct usbtouch_usb *usbtouch)
 	return ret;
 }
 
+#endif /* ! CONFIG_MCST */
 static int egalax_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
 {
+#ifdef CONFIG_MCST
+	struct usbtouch_device_info	*type = dev->type;
+
+#endif /* CONFIG_MCST */
 	if ((pkt[0] & EGALAX_PKT_TYPE_MASK) != EGALAX_PKT_TYPE_REPT)
 		return 0;
 
+#ifndef CONFIG_MCST
 	dev->x = ((pkt[3] & 0x0F) << 7) | (pkt[4] & 0x7F);
 	dev->y = ((pkt[1] & 0x0F) << 7) | (pkt[2] & 0x7F);
+#else /* CONFIG_MCST */
+	dev->x = ((pkt[2] & 0x0F) << 8) | pkt[1];
+	dev->y = ((pkt[4] & 0x0F) << 8) | pkt[3];
+	dev->touch = pkt[0] & 0x01;
+	dev->x = (dev->x * xres) / (type->max_xc - type->min_xc);
+	dev->y = yres - (dev->y * yres) / (type->max_yc - type->min_yc);
+	if (dev->y < 0)
+		dev->y = 0;
+#endif /* CONFIG_MCST */
 	dev->touch = pkt[0] & 0x01;
 
 	return 1;
@@ -356,6 +403,35 @@ static int egalax_get_pkt_len(unsigned char *buf, int len)
 
 	return 0;
 }
+#ifdef CONFIG_MCST
+
+static int xiroku_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
+{
+	struct usbtouch_device_info	*type = dev->type;
+	int				x = 0, y = 0;
+
+	if (pkt[1] != 0) {
+		x = ((pkt[3] & 0x7F) << 8) | pkt[2];
+		y = ((pkt[5] & 0x7F) << 8) | pkt[4];
+		if ((x == 0) || (y == 0)) {
+			return 0;
+		};
+		dev->touch = 1;
+		dev->x = (x * xres) / (type->max_xc - type->min_xc);
+		dev->y = (y * yres) / (type->max_yc - type->min_yc);
+	} else {
+		dev->touch = 0;
+	};
+	return 1;
+}
+
+static int xiroku_get_pkt_len(unsigned char *buf, int len)
+{
+	if (buf[0] == 1)
+		return 6;
+	return 0;
+}
+#endif /* CONFIG_MCST */
 #endif
 
 /*****************************************************************************
@@ -430,16 +506,52 @@ static int panjit_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
 
 #define MTOUCHUSB_REQ_CTRLLR_ID_LEN	16
 
+#ifdef CONFIG_MCST
+static int last_x = 0, last_y = 0;
+
+#endif /* CONFIG_MCST */
 static int mtouch_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
 {
+#ifdef CONFIG_MCST
+	unsigned int			x, y;
+	struct usbtouch_device_info	*type = dev->type;
+
+	dev->touch = (pkt[2] & 0x40) ? 1 : 0;
+	if (dev->touch == 0) {
+		dev->x = last_x;
+		dev->y = last_y;
+		return 1;
+	};
+#endif /* CONFIG_MCST */
 	if (hwcalib_xy) {
 		dev->x = (pkt[4] << 8) | pkt[3];
 		dev->y = 0xffff - ((pkt[6] << 8) | pkt[5]);
 	} else {
+#ifndef CONFIG_MCST
 		dev->x = (pkt[8] << 8) | pkt[7];
 		dev->y = (pkt[10] << 8) | pkt[9];
+#else /* CONFIG_MCST */
+		x = (pkt[8] << 8) | pkt[7];
+		y = (pkt[10] << 8) | pkt[9];
+		if (x > type->max_xc)
+			x = type->max_xc;
+		x -= type->min_xc;
+		if (x < 0)
+			x = 0;
+		if (y > type->max_yc)
+			y = type->max_yc;
+		y -= type->min_yc;
+		if (y < 0)
+			y = 0;
+		dev->x = (x * xres) / (type->max_xc - type->min_xc);
+		dev->y = (y * yres) / (type->max_yc - type->min_yc);
+		last_x = dev->x;
+		last_y = dev->y;
+#endif /* CONFIG_MCST */
 	}
+#ifndef CONFIG_MCST
 	dev->touch = (pkt[2] & 0x40) ? 1 : 0;
+#endif /* ! CONFIG_MCST */
 
 	return 1;
 }
@@ -1133,6 +1245,37 @@ static int nexio_read_data(struct usbtouch_usb *usbtouch, unsigned char *pkt)
 
 #ifdef CONFIG_TOUCHSCREEN_USB_ELO
 
+#ifdef CONFIG_MCST
+#ifndef MULTI_PACKET
+#define MULTI_PACKET
+#endif
+
+#define ELO_PKT_TYPE_HEADER		0x54
+
+static int elo_vmc_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
+{
+	struct usbtouch_device_info	*type = dev->type;
+	int				maxx, minx, maxy, miny;
+
+	if (pkt[0] != ELO_PKT_TYPE_HEADER)
+		return 0;
+
+	dev->x = ((pkt[3] & 0x0F) << 8) | pkt[2];
+	dev->y = ((pkt[5] & 0x0F) << 8) | pkt[4];
+	dev->touch = pkt[1] & 0x01;
+	maxx = type->max_xc;
+	minx = type->min_xc;
+	maxy = type->max_yc;
+	miny = type->min_yc;
+	dev->x = ((dev->x - minx)* xres) / (maxx - minx);
+	dev->y = yres - ((dev->y - miny) * yres) / (maxy - miny);
+	if (dev->y < 0)
+		dev->y = 0;
+	return 1;
+}
+
+#endif /* CONFIG_MCST */
+
 static int elo_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
 {
 	dev->x = (pkt[3] << 8) | pkt[2];
@@ -1142,6 +1285,15 @@ static int elo_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
 
 	return 1;
 }
+#ifdef CONFIG_MCST
+
+static int elo_get_pkt_len(unsigned char *buf, int len)
+{
+	if (buf[0] != ELO_PKT_TYPE_HEADER)
+		return 0;
+	return 8;
+}
+#endif /* CONFIG_MCST */
 #endif
 
 
@@ -1151,6 +1303,10 @@ static int elo_read_data(struct usbtouch_usb *dev, unsigned char *pkt)
 #ifdef MULTI_PACKET
 static void usbtouch_process_multi(struct usbtouch_usb *usbtouch,
 				   unsigned char *pkt, int len);
+#ifdef CONFIG_MCST
+static void usbtouch_process_multi_xiroku(struct usbtouch_usb *usbtouch,
+				   unsigned char *pkt, int len);
+#endif /* CONFIG_MCST */
 #endif
 
 static struct usbtouch_device_info usbtouch_dev_info[] = {
@@ -1164,19 +1320,39 @@ static struct usbtouch_device_info usbtouch_dev_info[] = {
 		.rept_size	= 8,
 		.read_data	= elo_read_data,
 	},
-#endif
 
+#endif /* ! CONFIG_MCST */
 #ifdef CONFIG_TOUCHSCREEN_USB_EGALAX
 	[DEVTYPE_EGALAX] = {
+#ifndef CONFIG_MCST
 		.min_xc		= 0x0,
 		.max_xc		= 0x07ff,
 		.min_yc		= 0x0,
 		.max_yc		= 0x07ff,
+#else /* CONFIG_MCST */
+		.min_xc		= 0,
+		.max_xc		= 4096,
+		.min_yc		= 0,
+		.max_yc		= 4096,
+#endif /* CONFIG_MCST */
 		.rept_size	= 16,
 		.process_pkt	= usbtouch_process_multi,
 		.get_pkt_len	= egalax_get_pkt_len,
 		.read_data	= egalax_read_data,
+#ifndef CONFIG_MCST
 		.init		= egalax_init,
+#else /* CONFIG_MCST */
+	},
+	[DEVTYPE_XIROKU] = {
+		.min_xc		= 0,
+		.max_xc		= 0x7FFF,
+		.min_yc		= 0,
+		.max_yc		= 0x7FFF,
+		.rept_size	= 16,
+		.process_pkt	= usbtouch_process_multi_xiroku,
+		.get_pkt_len	= xiroku_get_pkt_len,
+		.read_data	= xiroku_read_data,
+#endif /* CONFIG_MCST */
 	},
 #endif
 
@@ -1193,10 +1369,17 @@ static struct usbtouch_device_info usbtouch_dev_info[] = {
 
 #ifdef CONFIG_TOUCHSCREEN_USB_3M
 	[DEVTYPE_3M] = {
+#ifndef CONFIG_MCST
 		.min_xc		= 0x0,
 		.max_xc		= 0x4000,
 		.min_yc		= 0x0,
 		.max_yc		= 0x4000,
+#else /* CONFIG_MCST */
+		.min_xc		= 3200,	/* 3000 */
+		.max_xc		= 13640,
+		.min_yc		= 3500,
+		.max_yc		= 13100,
+#endif /* CONFIG_MCST */
 		.rept_size	= 11,
 		.read_data	= mtouch_read_data,
 		.alloc		= mtouch_alloc,
@@ -1376,8 +1559,21 @@ static struct usbtouch_device_info usbtouch_dev_info[] = {
 		.read_data	= etouch_read_data,
 	},
 #endif
+#ifdef CONFIG_MCST
+#ifdef CONFIG_TOUCHSCREEN_USB_ELO
+	[DEVTYPE_ELO_VMC] = {
+		.min_xc		= 262,
+		.max_xc		= 3821,
+		.min_yc		= 335,
+		.max_yc		= 3793,
+		.rept_size	= 16,
+		.process_pkt	= usbtouch_process_multi,
+		.get_pkt_len	= elo_get_pkt_len,
+		.read_data	= elo_vmc_read_data,
+	},
+#endif
+#endif /* CONFIG_MCST */
 };
-
 
 /*****************************************************************************
  * Generic Part
@@ -1481,6 +1677,17 @@ out_flush_buf:
 	usbtouch->buf_len = 0;
 	return;
 }
+#ifdef CONFIG_MCST
+
+static void usbtouch_process_multi_xiroku(struct usbtouch_usb *usbtouch,
+		unsigned char *pkt, int len)
+{
+	int pkt_len;
+
+	pkt_len = usbtouch->type->get_pkt_len(pkt, 0);
+	usbtouch_process_pkt(usbtouch, pkt, pkt_len);
+}
+#endif /* CONFIG_MCST */
 #endif
 
 

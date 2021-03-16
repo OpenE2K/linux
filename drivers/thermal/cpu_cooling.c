@@ -667,6 +667,7 @@ cpufreq_cooling_register(struct cpufreq_policy *policy)
 }
 EXPORT_SYMBOL_GPL(cpufreq_cooling_register);
 
+#ifdef CONFIG_THERMAL_OF
 /**
  * of_cpufreq_cooling_register - function to create cpufreq cooling device.
  * @policy: cpufreq policy
@@ -715,6 +716,7 @@ of_cpufreq_cooling_register(struct cpufreq_policy *policy)
 	return cdev;
 }
 EXPORT_SYMBOL_GPL(of_cpufreq_cooling_register);
+#endif
 
 /**
  * cpufreq_cooling_unregister - function to remove cpufreq cooling device.

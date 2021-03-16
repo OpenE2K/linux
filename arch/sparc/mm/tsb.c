@@ -16,6 +16,9 @@
 #include <asm/tsb.h>
 #include <asm/tlb.h>
 #include <asm/oplib.h>
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#endif
 
 extern struct tsb swapper_tsb[KERNEL_TSB_NENTRIES];
 
@@ -121,7 +124,7 @@ void flush_tsb_user(struct tlb_batch *tb)
 	struct mm_struct *mm = tb->mm;
 	unsigned long nentries, base, flags;
 
-	spin_lock_irqsave(&mm->context.lock, flags);
+	raw_spin_lock_irqsave(&mm->context.lock, flags);
 
 	if (tb->hugepage_shift < REAL_HPAGE_SHIFT) {
 		base = (unsigned long) mm->context.tsb_block[MM_TSB_BASE].tsb;
@@ -142,11 +145,10 @@ void flush_tsb_user(struct tlb_batch *tb)
 		nentries = mm->context.tsb_block[MM_TSB_HUGE].tsb_nentries;
 		if (tlb_type == cheetah_plus || tlb_type == hypervisor)
 			base = __pa(base);
-		__flush_huge_tsb_one(tb, REAL_HPAGE_SHIFT, base, nentries,
-				     tb->hugepage_shift);
+		__flush_tsb_one(tb, REAL_HPAGE_SHIFT, base, nentries);
 	}
 #endif
-	spin_unlock_irqrestore(&mm->context.lock, flags);
+	raw_spin_unlock_irqrestore(&mm->context.lock, flags);
 }
 
 void flush_tsb_user_page(struct mm_struct *mm, unsigned long vaddr,
@@ -154,7 +156,7 @@ void flush_tsb_user_page(struct mm_struct *mm, unsigned long vaddr,
 {
 	unsigned long nentries, base, flags;
 
-	spin_lock_irqsave(&mm->context.lock, flags);
+	raw_spin_lock_irqsave(&mm->context.lock, flags);
 
 	if (hugepage_shift < REAL_HPAGE_SHIFT) {
 		base = (unsigned long) mm->context.tsb_block[MM_TSB_BASE].tsb;
@@ -180,7 +182,7 @@ void flush_tsb_user_page(struct mm_struct *mm, unsigned long vaddr,
 					   nentries, hugepage_shift);
 	}
 #endif
-	spin_unlock_irqrestore(&mm->context.lock, flags);
+	raw_spin_unlock_irqrestore(&mm->context.lock, flags);
 }
 
 #define HV_PGSZ_IDX_BASE	HV_PGSZ_IDX_8K
@@ -408,6 +410,9 @@ void tsb_grow(struct mm_struct *mm, unsigned long tsb_index, unsigned long rss)
 	new_cache_index = 0;
 	for (new_size = 8192; new_size < max_tsb_size; new_size <<= 1UL) {
 		new_rss_limit = tsb_size_to_rss_limit(new_size);
+#ifdef CONFIG_MCST_RT
+	    if (!rts_act_mask)
+#endif
 		if (new_rss_limit > rss)
 			break;
 		new_cache_index++;
@@ -470,7 +475,7 @@ retry_tsb_alloc:
 	 * the lock and ask all other cpus running this address space
 	 * to run tsb_context_switch() to see the new TSB table.
 	 */
-	spin_lock_irqsave(&mm->context.lock, flags);
+	raw_spin_lock_irqsave(&mm->context.lock, flags);
 
 	old_tsb = mm->context.tsb_block[tsb_index].tsb;
 	old_cache_index =
@@ -485,7 +490,7 @@ retry_tsb_alloc:
 	 */
 	if (unlikely(old_tsb &&
 		     (rss < mm->context.tsb_block[tsb_index].tsb_rss_limit))) {
-		spin_unlock_irqrestore(&mm->context.lock, flags);
+		raw_spin_unlock_irqrestore(&mm->context.lock, flags);
 
 		kmem_cache_free(tsb_caches[new_cache_index], new_tsb);
 		return;
@@ -509,12 +514,19 @@ retry_tsb_alloc:
 		copy_tsb(old_tsb_base, old_size, new_tsb_base, new_size,
 			tsb_index == MM_TSB_BASE ?
 			PAGE_SHIFT : REAL_HPAGE_SHIFT);
+#ifdef CONFIG_MCST_RT
+		if (rts_act_mask) {
+			pr_warn("tsb_grow() %7lu->%7lu cpu %d in %s-%d\n",
+				old_size, new_size, smp_processor_id(),
+				current->comm, current->pid);
+		}
+#endif
 	}
 
 	mm->context.tsb_block[tsb_index].tsb = new_tsb;
 	setup_tsb_params(mm, tsb_index, new_size);
 
-	spin_unlock_irqrestore(&mm->context.lock, flags);
+	raw_spin_unlock_irqrestore(&mm->context.lock, flags);
 
 	/* If old_tsb is NULL, we're being invoked for the first time
 	 * from init_new_context().
@@ -542,12 +554,11 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 #endif
 	unsigned int i;
 
-	spin_lock_init(&mm->context.lock);
+	raw_spin_lock_init(&mm->context.lock);
 
 	mm->context.sparc64_ctx_val = 0UL;
-
 	mm->context.tag_store = NULL;
-	spin_lock_init(&mm->context.tag_lock);
+	mm->context.is_exit_mmap = 0;
 
 #if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
 	/* We reset them to zero because the fork() page copying
@@ -606,30 +617,12 @@ void destroy_context(struct mm_struct *mm)
 	for (i = 0; i < MM_NUM_TSBS; i++)
 		tsb_destroy_one(&mm->context.tsb_block[i]);
 
-	spin_lock_irqsave(&ctx_alloc_lock, flags);
+	raw_spin_lock_irqsave(&ctx_alloc_lock, flags);
 
 	if (CTX_VALID(mm->context)) {
 		unsigned long nr = CTX_NRBITS(mm->context);
 		mmu_context_bmap[nr>>6] &= ~(1UL << (nr & 63));
 	}
 
-	spin_unlock_irqrestore(&ctx_alloc_lock, flags);
-
-	/* If ADI tag storage was allocated for this task, free it */
-	if (mm->context.tag_store) {
-		tag_storage_desc_t *tag_desc;
-		unsigned long max_desc;
-		unsigned char *tags;
-
-		tag_desc = mm->context.tag_store;
-		max_desc = PAGE_SIZE/sizeof(tag_storage_desc_t);
-		for (i = 0; i < max_desc; i++) {
-			tags = tag_desc->tags;
-			tag_desc->tags = NULL;
-			kfree(tags);
-			tag_desc++;
-		}
-		kfree(mm->context.tag_store);
-		mm->context.tag_store = NULL;
-	}
+	raw_spin_unlock_irqrestore(&ctx_alloc_lock, flags);
 }

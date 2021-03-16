@@ -598,4 +598,9 @@ static inline void page_key_write(void *address) {}
 
 #endif /* !CONFIG_ARCH_SAVE_PAGE_KEYS */
 
+#ifdef CONFIG_E2K
+int alloc_tag_pages(unsigned long pages, unsigned long *tags);
+void save_tag_for_pfn(unsigned long pfn);
+#endif
+
 #endif /* _LINUX_SUSPEND_H */

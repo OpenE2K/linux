@@ -62,6 +62,14 @@ struct ports_driver_data {
 	/* All the console devices handled by this driver */
 	struct list_head consoles;
 };
+
+/*
+ * FIXME: Community patch 4b0a2c5ff7215206ea6135a405f17c5f6fca7d00
+ * broke virtio console.
+ * When switching from early console to the real one, real gets vtermno 1,
+ * and index 1, however hvc_console.index remains 0. Early console is shut down
+ * and hvc_console_print stops working
+ */
 static struct ports_driver_data pdrvdata = { .next_vtermno = 1};
 
 static DEFINE_SPINLOCK(pdrvdata_lock);
@@ -1245,7 +1253,16 @@ static int init_port_console(struct port *port)
 	 * pointers.  The final argument is the output buffer size: we
 	 * can do any size, so we put PAGE_SIZE here.
 	 */
+#if	!defined(CONFIG_E2K) && !defined(CONFIG_MCST)
+	/*
+	 * FIXME: probably it is arch-independent bug
+	 * Community patch 4b0a2c5ff7215206ea6135a405f17c5f6fca7d00 set
+	 * console port vtermno to 0 (at add_port()), but it is ignored here
+	 */
 	port->cons.vtermno = pdrvdata.next_vtermno;
+#else	/* CONFIG_E2K || CONFIG_MCST */
+	BUG_ON(port->cons.vtermno != 0);
+#endif	/* !CONFIG_E2K && !CONFIG_MCST */
 
 	port->cons.hvc = hvc_alloc(port->cons.vtermno, 0, &hv_ops, PAGE_SIZE);
 	if (IS_ERR(port->cons.hvc)) {

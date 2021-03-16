@@ -261,6 +261,9 @@ static const struct hc_driver uhci_driver = {
 
 	/* Generic hardware linkage */
 	.irq =			uhci_irq,
+#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
+	.preirq =               uhci_preirq,
+#endif
 	.flags =		HCD_DMA | HCD_USB11,
 
 	/* Basic lifecycle operations */

@@ -4,6 +4,10 @@
  * derived from imx-hdmi.c(renamed to bridge/dw_hdmi.c now)
  */
 
+#ifdef CONFIG_MCST
+#define DEBUG
+#endif /* CONFIG_MCST */
+
 #include <linux/component.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mfd/syscon/imx6q-iomuxc-gpr.h>
@@ -99,6 +103,7 @@ static const struct dw_hdmi_phy_config imx_phy_config[] = {
 
 static int dw_hdmi_imx_parse_dt(struct imx_hdmi *hdmi)
 {
+#ifndef CONFIG_MCST
 	struct device_node *np = hdmi->dev->of_node;
 
 	hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "gpr");
@@ -107,6 +112,7 @@ static int dw_hdmi_imx_parse_dt(struct imx_hdmi *hdmi)
 		return PTR_ERR(hdmi->regmap);
 	}
 
+#endif /* ! CONFIG_MCST */
 	return 0;
 }
 
@@ -116,29 +122,32 @@ static void dw_hdmi_imx_encoder_disable(struct drm_encoder *encoder)
 
 static void dw_hdmi_imx_encoder_enable(struct drm_encoder *encoder)
 {
+#ifndef CONFIG_MCST
 	struct imx_hdmi *hdmi = enc_to_imx_hdmi(encoder);
 	int mux = drm_of_encoder_active_port_id(hdmi->dev->of_node, encoder);
 
 	regmap_update_bits(hdmi->regmap, IOMUXC_GPR3,
 			   IMX6Q_GPR3_HDMI_MUX_CTL_MASK,
 			   mux << IMX6Q_GPR3_HDMI_MUX_CTL_SHIFT);
+#endif /* ! CONFIG_MCST */
 }
 
 static int dw_hdmi_imx_atomic_check(struct drm_encoder *encoder,
 				    struct drm_crtc_state *crtc_state,
 				    struct drm_connector_state *conn_state)
 {
+#ifndef CONFIG_MCST
 	struct imx_crtc_state *imx_crtc_state = to_imx_crtc_state(crtc_state);
 
 	imx_crtc_state->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
 	imx_crtc_state->di_hsync_pin = 2;
 	imx_crtc_state->di_vsync_pin = 3;
-
+#endif /* ! CONFIG_MCST */
 	return 0;
 }
 
 static const struct drm_encoder_helper_funcs dw_hdmi_imx_encoder_helper_funcs = {
-	.enable     = dw_hdmi_imx_encoder_enable,
+	.enable	    = dw_hdmi_imx_encoder_enable,
 	.disable    = dw_hdmi_imx_encoder_disable,
 	.atomic_check = dw_hdmi_imx_atomic_check,
 };
@@ -173,6 +182,15 @@ imx6dl_hdmi_mode_valid(struct drm_connector *con,
 	return MODE_OK;
 }
 
+#ifdef CONFIG_MCST
+static enum drm_mode_status
+mga2_hdmi_mode_valid(struct drm_connector *con,
+		       const struct drm_display_mode *mode)
+{
+	return MODE_OK;
+}
+
+#endif /* CONFIG_MCST */
 static struct dw_hdmi_plat_data imx6q_hdmi_drv_data = {
 	.mpll_cfg   = imx_mpll_cfg,
 	.cur_ctr    = imx_cur_ctr,
@@ -187,6 +205,23 @@ static struct dw_hdmi_plat_data imx6dl_hdmi_drv_data = {
 	.mode_valid = imx6dl_hdmi_mode_valid,
 };
 
+#ifdef CONFIG_MCST
+static struct dw_hdmi_plat_data mga2_drv_data = {
+	.mpll_cfg = imx_mpll_cfg,
+	.cur_ctr  = imx_cur_ctr,
+	.phy_config = imx_phy_config,
+	.mode_valid = mga2_hdmi_mode_valid,
+};
+
+static struct platform_device_id imx_hdmi_devtype[] = {
+	{
+	  .name = "mga2-hdmi",
+	  .driver_data = (unsigned long)&mga2_drv_data
+	}, { /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(platform, imx_hdmi_devtype);
+
+#endif /* CONFIG_MCST */
 static const struct of_device_id dw_hdmi_imx_dt_ids[] = {
 	{ .compatible = "fsl,imx6q-hdmi",
 	  .data = &imx6q_hdmi_drv_data
@@ -194,6 +229,12 @@ static const struct of_device_id dw_hdmi_imx_dt_ids[] = {
 	  .compatible = "fsl,imx6dl-hdmi",
 	  .data = &imx6dl_hdmi_drv_data
 	},
+#ifdef CONFIG_MCST
+	{
+	  .compatible = "mga2-hdmi",
+	  .data = &mga2_drv_data
+	},
+#endif /* CONFIG_MCST */
 	{},
 };
 MODULE_DEVICE_TABLE(of, dw_hdmi_imx_dt_ids);
@@ -203,25 +244,46 @@ static int dw_hdmi_imx_bind(struct device *dev, struct device *master,
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	const struct dw_hdmi_plat_data *plat_data;
+#ifdef CONFIG_MCST
+	struct drm_crtc *crtc;
+	uint32_t crtc_mask = 0;
+#else
 	const struct of_device_id *match;
+#endif /* ! CONFIG_MCST */
 	struct drm_device *drm = data;
 	struct drm_encoder *encoder;
 	struct imx_hdmi *hdmi;
 	int ret;
 
+#ifndef CONFIG_MCST
 	if (!pdev->dev.of_node)
 		return -ENODEV;
 
+#endif /* ! CONFIG_MCST */
 	hdmi = devm_kzalloc(&pdev->dev, sizeof(*hdmi), GFP_KERNEL);
 	if (!hdmi)
 		return -ENOMEM;
 
+#ifndef CONFIG_MCST
 	match = of_match_node(dw_hdmi_imx_dt_ids, pdev->dev.of_node);
 	plat_data = match->data;
+#else /* CONFIG_MCST */
+	plat_data = (struct dw_hdmi_plat_data *)
+				platform_get_device_id(pdev)->driver_data;
+#endif /* CONFIG_MCST */
 	hdmi->dev = &pdev->dev;
 	encoder = &hdmi->encoder;
 
+#ifdef CONFIG_MCST
+	platform_set_drvdata(pdev, hdmi);
+	drm_for_each_crtc(crtc, drm)
+		crtc_mask |= drm_crtc_mask(crtc);
+
+	encoder->possible_crtcs = crtc_mask;
+#else
 	encoder->possible_crtcs = drm_of_find_possible_crtcs(drm, dev->of_node);
+#endif /* CONFIG_MCST */
+
 	/*
 	 * If we failed to find the CRTC(s) which this encoder is
 	 * supposed to be connected to, it's because the CRTC has
@@ -287,6 +349,9 @@ static struct platform_driver dw_hdmi_imx_platform_driver = {
 		.name = "dwhdmi-imx",
 		.of_match_table = dw_hdmi_imx_dt_ids,
 	},
+#ifdef CONFIG_MCST
+	.id_table = imx_hdmi_devtype,
+#endif /* CONFIG_MCST */
 };
 
 module_platform_driver(dw_hdmi_imx_platform_driver);

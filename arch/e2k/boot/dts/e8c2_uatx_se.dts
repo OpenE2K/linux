@@ -1,0 +1,159 @@
+/*
+ * E8C2-uATX/SE
+ * LYUI.469555.098 ver.1 / ver.2
+ *
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+
+/ {
+	/* version = ""; */
+	model = "e8c2,mcst,e8c2-uatx_se";
+	compatible = "mcst,e8c2-uatx_se";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD22:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN_CPU";
+				/* trivial-devices */
+
+				temp1_label = "Internal diode";
+				temp2_label = "External diode";
+			};
+
+			/* (X45..X48) DDR4 DIMMs: 0x18 0x1A 0x1C 0x1E */
+			/* (X52) "MNGR" I2C1_ISO */
+		};
+
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			/* config SENSORS_PMBUS */
+			pdt012@23 {
+				/* hwmon/pmbus/pmbus.ko (DA4:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x23>;
+				label = "+2V5";
+			};
+			mdt040@12 {
+				/* ver1: hwmon/pmbus/pmbus.ko (DA8:UDT020A0X3-SRZ) */
+				/* ver2: hwmon/pmbus/pmbus.ko (DA8:MDT040A0X3-SRPHZ) */
+				compatible = "pmbus";
+				reg = <0x12>;
+				label = "+1V2";
+			};
+			pdt012@22 {
+				/* hwmon/pmbus/pmbus.ko (DA5:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x22>;
+				label = "+1V0";
+			};
+			pdt012@0A {
+				/* hwmon/pmbus/pmbus.ko (DA12:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x0A>;
+				label = "+0V9_LINK";
+			};
+			udt020@1A {
+				/* hwmon/pmbus/pmbus.ko (DA10:UDT020A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x1A>;
+				label = "+0V9UN";
+			};
+			pdt003@1B {
+				/* hwmon/pmbus/pmbus.ko (DA7:PDT003A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x1B>;
+				label = "+1V2_0";
+			};
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD23:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN_IOHUB2";
+				/* trivial-devices */
+
+				temp1_label = "Internal diode";
+				temp2_label = "IOHUB2 TERM";
+			};
+
+			/* (X52) "MNGR" I2C3_ISO */
+		};
+
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* (X6..X9) PCIe/PCI */
+			/* (X52) "MNGR" I2C2_ISO */
+		};
+
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* config SENSORS_PMBUS */
+			pdt012@1B {
+				/* hwmon/pmbus/pmbus.ko (DA19:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x1B>;
+				label = "+3V3_SUS";
+			};
+
+			/* (X52) "MNGR" I2C4_ISO */
+			/* [DD26]24FC128-I/ST(EEPROM)@0x57 "FRUID" */
+		};
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			/* (DD20:S25FL128SAGNFI001) */
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			/* (DD19:CY14B101PA-SFXI) */
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+
+	/* l_gpio@%d */
+	/*
+	 * I2C3_ALERT - [DD2]1991VG2YA - GPIO15
+	 * I2C2_ALERT - [DD2]1991VG2YA - none!!!(16)
+	 * I2C1_ALERT - [DD2]1991VG2YA - GPIO17
+	 * I2C0_ALERT - [DD2]1991VG2YA - GPIO18
+	 */
+};

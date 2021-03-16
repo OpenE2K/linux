@@ -735,6 +735,11 @@ struct inode {
 	struct fsverity_info	*i_verity_info;
 #endif
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	/* shared objects in this inode */
+	struct list_head	el_posix_objects;
+#endif
+
 	void			*i_private; /* fs or device private pointer */
 } __randomize_layout;
 
@@ -971,8 +976,12 @@ struct file {
 #endif /* #ifdef CONFIG_EPOLL */
 	struct address_space	*f_mapping;
 	errseq_t		f_wb_err;
+#ifndef CONFIG_E2K
 } __randomize_layout
   __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
+#else
+} __randomize_layout;
+#endif
 
 struct file_handle {
 	__u32 handle_bytes;

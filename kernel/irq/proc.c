@@ -12,6 +12,9 @@
 #include <linux/interrupt.h>
 #include <linux/kernel_stat.h>
 #include <linux/mutex.h>
+#ifdef CONFIG_MCST
+#include <linux/uaccess.h>
+#endif
 
 #include "internals.h"
 
@@ -214,6 +217,77 @@ static const struct file_operations irq_affinity_list_proc_fops = {
 	.write		= irq_affinity_list_proc_write,
 };
 
+#ifdef CONFIG_MCST
+static int irq_fst_proc_show(struct seq_file *m, void *v)
+{
+	struct irqaction *action = irq_to_desc((long)m->private)->action;
+
+	if (action) {
+		seq_printf(m, "%20s\n", action->name);
+	}
+	return 0;
+}
+
+#define MAX_NAMELEN 128
+static ssize_t default_fst_write(struct file *file,
+		const char __user *driver_name, size_t count, loff_t *ppos)
+{
+	unsigned int irq = (int)(long)PDE_DATA(file->f_path.dentry->d_inode);
+	char name4srch[MAX_NAMELEN];
+	int		rval;
+
+	memset(name4srch, 0, MAX_NAMELEN);
+	rval = copy_from_user((void *)&name4srch, (void *)driver_name,
+		min(sizeof(name4srch), count - 1));
+	if (rval != 0) {
+		pr_err("default_fst_write: copy_from_user() error.");
+		return -EFAULT;
+	};
+	rval = mk_hndl_first(irq, name4srch);
+	if (rval != 0) {
+		pr_err("/proc/.../drv_sequence name=%s count=%ld irq=%u\n",
+				name4srch, count, irq);
+		return -EINVAL;
+	};
+	return count;
+}
+
+
+static int irq_fst_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, irq_fst_proc_show, PDE_DATA(inode));
+}
+
+static const struct file_operations irq_fst_proc_fops = {
+	.open		= irq_fst_proc_open,
+	.read		= seq_read,
+	.write		= default_fst_write,
+};
+static int irq_seq_proc_show(struct seq_file *m, void *v)
+{
+	struct irqaction *action = irq_to_desc((long)m->private)->action;
+
+	if (action) {
+		do {
+			seq_printf(m, "%20s\n", action->name);
+		} while ((action = action->next) != NULL);
+	}
+	return 0;
+}
+
+static int irq_seq_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, irq_seq_proc_show, PDE_DATA(inode));
+}
+
+static const struct file_operations irq_seq_proc_fops = {
+	.open		= irq_seq_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+#endif
+
 #ifdef CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK
 static int irq_effective_aff_proc_show(struct seq_file *m, void *v)
 {
@@ -368,7 +442,7 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 
 	/* create /proc/irq/<irq>/affinity_hint */
 	proc_create_single_data("affinity_hint", 0444, desc->dir,
-			irq_affinity_hint_proc_show, irqp);
+			irq_affinity_hint_proc_show, irqp); 
 
 	/* create /proc/irq/<irq>/smp_affinity_list */
 	proc_create_data("smp_affinity_list", 0644, desc->dir,
@@ -385,6 +459,13 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 #endif
 	proc_create_single_data("spurious", 0444, desc->dir,
 			irq_spurious_proc_show, (void *)(long)irq);
+ 
+#if defined(CONFIG_MCST_RT_SMP)
+	proc_create_data("handl_fst", 0444, desc->dir,
+			 &irq_fst_proc_fops, (void *)(long)irq);
+	proc_create_data("handl_seq", 0444, desc->dir,
+			 &irq_seq_proc_fops, (void *)(long)irq);
+#endif
 
 out_unlock:
 	mutex_unlock(&register_lock);
@@ -407,6 +488,10 @@ void unregister_irq_proc(unsigned int irq, struct irq_desc *desc)
 # endif
 #endif
 	remove_proc_entry("spurious", desc->dir);
+#ifdef CONFIG_MCST_RT_SMP
+	remove_proc_entry("handl_fst", desc->dir);
+	remove_proc_entry("handl_seq", desc->dir);
+#endif
 
 	sprintf(name, "%u", irq);
 	remove_proc_entry(name, root_irq_dir);

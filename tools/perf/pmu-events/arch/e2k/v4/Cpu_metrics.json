@@ -1,0 +1,38 @@
+[
+    {
+        "MetricExpr": "100 * L1_HIT / L1_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l1_hit_rate",
+        "BriefDescription": "процент попаданий чтений и записей в L1 = l1_hit / l1_query",
+    },
+    {
+        "MetricExpr": "100 * L1_ST_HIT / L1_ST_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l1_st_hit_rate",
+        "BriefDescription": "процент попаданий записей в L1 = l1_st_hit / l1_st_query",
+    },
+    {
+        "MetricExpr": "100 * L2_HIT / L2_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l2_hit_rate",
+        "BriefDescription": "процент попаданий чтений и записей в L2 = l2_hit / l2_query",
+    },
+    {
+        "MetricExpr": "100 * L2_ST_HIT / L2_ST_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l2_st_hit_rate",
+        "BriefDescription": "процент попаданий записей в L2 = l2_st_hit / l2_st_query",
+    },
+    {
+        "MetricExpr": "100 * DTLB_HIT / DTLB_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "dtlb_hit_rate",
+        "BriefDescription": "процент попаданий чтений и записей в DTLB = dtlb_hit / dtlb_query",
+    },
+    {
+        "MetricExpr": "100 * (CYCLES - IB_NO_COMMAND) / CYCLES",
+        "MetricGroup": "hit_rate",
+        "MetricName": "ib_hit_rate",
+        "BriefDescription": "процент попаданий в IB = (cycles - ib_no_command) / cycles",
+    },
+]

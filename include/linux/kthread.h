@@ -5,6 +5,10 @@
 #include <linux/err.h>
 #include <linux/sched.h>
 
+#ifdef CONFIG_MCST
+extern atomic_t num_shrink_page_list;
+#endif
+
 __printf(4, 5)
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 					   void *data,

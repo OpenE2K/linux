@@ -28,7 +28,11 @@
 cheetah_patch_copyops:
 	ULTRA3_DO_PATCH(memcpy, U3memcpy)
 	ULTRA3_DO_PATCH(raw_copy_from_user, U3copy_from_user)
+#ifdef CONFIG_MCST
+	ULTRA3_DO_PATCH(_raw_copy_to_user, U3copy_to_user)
+#else
 	ULTRA3_DO_PATCH(raw_copy_to_user, U3copy_to_user)
+#endif /* CONFIG_MCST */
 	retl
 	 nop
 	.size	cheetah_patch_copyops,.-cheetah_patch_copyops

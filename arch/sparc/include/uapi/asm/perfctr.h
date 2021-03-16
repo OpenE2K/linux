@@ -52,7 +52,32 @@ enum perfctr_opcode {
 	/* Store in pointer given in ARG0 the current PCR register value
 	 * being used.
 	 */
-	PERFCTR_GETPCR
+	PERFCTR_GETPCR,
+#ifdef CONFIG_E90S
+	/* Requests for E90S. Initial requests disabled.
+	 * Signal SIGTRAP is sent in case of process performance counter overflow
+	 */
+
+	/* Write to perfctr and pic registers.
+	 *	ARG0 - pid of task to profile.
+	 *	ARG1 - pointer to initial value set of 4 64-bit counters.
+	 *	ARG2 - pointer to set of 4 64-bit PCR register values.
+	 */
+	E90S_PERFCTR_WRITE_AND_ON,
+
+	/* Disable performance counter
+	 *	ARG0 - pid of task to profile.
+	 */
+	E90S_PERFCTR_OFF,
+ 
+	/* Read from perfctr and pic registers.
+	 *	ARG0 - pid of task to profile.
+	 *	ARG1 - pointer to initial value set of 4 64-bit counters.
+	 *	ARG2 - pointer to set of 4 64-bit PCR register values.
+	 *	ARG1 and/or ARG2 can be empty (set to NULL).
+	 */
+	E90S_PERFCTR_READ,
+#endif /* CONFIG_E90S */
 };
 
 #define  PRIV 0x00000001

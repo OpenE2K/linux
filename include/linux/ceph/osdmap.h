@@ -70,6 +70,10 @@ static inline bool ceph_can_shift_osds(struct ceph_pg_pool_info *pool)
 	default:
 		BUG();
 	}
+#ifdef CONFIG_MCST
+	/* lcc warns */
+	return false;
+#endif
 }
 
 struct ceph_object_locator {

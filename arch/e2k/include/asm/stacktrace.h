@@ -1,0 +1,4 @@
+#ifndef _ASM_E2K_STACKTRACE_H
+#define _ASM_E2K_STACKTRACE_H
+
+#endif /* _ASM_E2K_STACKTRACE_H */

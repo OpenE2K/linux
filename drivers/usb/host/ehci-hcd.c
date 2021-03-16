@@ -1,12 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
+ * Enhanced Host Controller Interface (EHCI) driver for USB.
  * Enhanced Host Controller Interface (EHCI) driver for USB.
  *
  * Maintainer: Alan Stern <stern@rowland.harvard.edu>
  *
  * Copyright (c) 2000-2004 by David Brownell
  */
-
+#ifdef CONFIG_MCST
+#define DEBUG
+#endif
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/dmapool.h>
@@ -448,6 +450,10 @@ static void ehci_stop (struct usb_hcd *hcd)
 		    ehci_readl(ehci, &ehci->regs->status));
 }
 
+#ifdef CONFIG_MCST
+static void ehci_quirk_iohub2_worker(struct work_struct *work);
+#endif
+
 /* one-time init, only for memory state */
 static int ehci_init(struct usb_hcd *hcd)
 {
@@ -456,7 +462,9 @@ static int ehci_init(struct usb_hcd *hcd)
 	int			retval;
 	u32			hcc_params;
 	struct ehci_qh_hw	*hw;
-
+#ifdef CONFIG_MCST
+	INIT_WORK(&ehci->iohub2_work, ehci_quirk_iohub2_worker);
+#endif
 	spin_lock_init(&ehci->lock);
 
 	/*
@@ -626,7 +634,9 @@ static int ehci_run (struct usb_hcd *hcd)
 	 * be started before the port switching actions could complete.
 	 */
 	down_write(&ehci_cf_port_reset_rwsem);
+
 	ehci->rh_state = EHCI_RH_RUNNING;
+
 	ehci_writel(ehci, FLAG_CF, &ehci->regs->configured_flag);
 	ehci_readl(ehci, &ehci->regs->command);	/* unblock posted writes */
 	msleep(5);
@@ -647,6 +657,7 @@ static int ehci_run (struct usb_hcd *hcd)
 	 * So long as they're part of class devices, we can't do it init()
 	 * since the class device isn't created that early.
 	 */
+
 	create_debug_files(ehci);
 	create_sysfs_files(ehci);
 
@@ -684,6 +695,30 @@ int ehci_setup(struct usb_hcd *hcd)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ehci_setup);
+
+#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
+static irqreturn_t ehci_preirq(struct usb_hcd *hcd)
+{
+	struct ehci_hcd		*ehci = hcd_to_ehci(hcd);
+
+	if (!(ehci_readl(ehci, &ehci->regs->status) & INTR_MASK)) {
+		return IRQ_NONE;
+	}
+	return IRQ_WAKE_THREAD;
+}
+#endif
+
+
+#ifdef CONFIG_MCST
+static void ehci_quirk_iohub2_worker(struct work_struct *work)
+{
+	struct ehci_hcd *ehci = container_of(work, struct ehci_hcd,
+						iohub2_work);
+	struct usb_hcd *hcd = ehci_to_hcd(ehci);
+	usb_remove_hcd(hcd);
+	usb_add_hcd(hcd, hcd->irq, IRQF_SHARED);
+}
+#endif /*CONFIG_MCST*/
 
 /*-------------------------------------------------------------------------*/
 
@@ -806,7 +841,23 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 			mod_timer(&hcd->rh_timer, ehci->reset_done[i]);
 		}
 	}
-
+#ifdef CONFIG_MCST
+	if (unlikely((status & STS_FATAL) != 0) && hcd->self.controller) {
+		struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
+		if (iohub_revision(pdev) < 2 &&
+			pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+				pdev->device == PCI_DEVICE_ID_MCST_EHCI) {
+			/* Workaround for a silicon bug. */
+			ehci_writel(ehci, 0,
+					&ehci->regs->intr_enable);
+			ehci_err(ehci, "IOHUB2 EHCI False Error, "
+					"scheduling chip restart\n");
+			schedule_work(&ehci->iohub2_work);
+			bh = 0;
+			pcd_status = 0;
+		}
+	} else
+#endif
 	/* PCI errors [4.15.2.4] */
 	if (unlikely ((status & STS_FATAL) != 0)) {
 		ehci_err(ehci, "fatal error\n");
@@ -835,6 +886,37 @@ dead:
 	return IRQ_HANDLED;
 }
 
+#ifdef CONFIG_MCST
+static int check_ep_cscid(struct usb_device *dev, unsigned int ep)
+{
+	unsigned int i, j, e;
+	struct usb_interface *intf;
+	struct usb_host_interface *alts;
+	struct usb_endpoint_descriptor *endpt;
+
+	if (ep & ~(USB_DIR_IN|0xf))
+		return -EINVAL;
+	if (!dev->actconfig)
+		return -ESRCH;
+	if (dev->descriptor.bDeviceClass == USB_CLASS_CSCID)
+		return 0;
+	for (i = 0; i < dev->actconfig->desc.bNumInterfaces; i++) {
+		intf = dev->actconfig->interface[i];
+		for (j = 0; j < intf->num_altsetting; j++) {
+			alts = &intf->altsetting[j];
+			for (e = 0; e < alts->desc.bNumEndpoints; e++) {
+				endpt = &alts->endpoint[e].desc;
+				if (endpt->bEndpointAddress == ep &&
+						alts->desc.bInterfaceClass
+							== USB_CLASS_CSCID)
+					return 0;
+			}
+		}
+	}
+	return -ENOENT;
+}
+#endif
+
 /*-------------------------------------------------------------------------*/
 
 /*
@@ -856,7 +938,20 @@ static int ehci_urb_enqueue (
 ) {
 	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
 	struct list_head	qtd_list;
+#ifdef CONFIG_MCST
+	struct usb_device *dev = urb->dev;
 
+	if (ehci->short_read_does_not_supported &&
+		(dev->speed == USB_SPEED_LOW ||
+			dev->speed == USB_SPEED_FULL) &&
+		usb_pipeint(urb->pipe) &&
+		usb_pipein(urb->pipe) &&
+		!check_ep_cscid(dev, usb_pipeendpoint(urb->pipe) |
+						USB_DIR_IN)) {
+			if (urb->transfer_buffer_length == 8)
+				urb->transfer_buffer_length = 2;
+	}
+#endif
 	INIT_LIST_HEAD (&qtd_list);
 
 	switch (usb_pipetype (urb->pipe)) {
@@ -1192,6 +1287,9 @@ static const struct hc_driver ehci_hc_driver = {
 	/*
 	 * generic hardware linkage
 	 */
+#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
+	.preirq =               ehci_preirq,
+#endif
 	.irq =			ehci_irq,
 	.flags =		HCD_MEMORY | HCD_DMA | HCD_USB2 | HCD_BH,
 

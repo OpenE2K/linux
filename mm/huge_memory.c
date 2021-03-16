@@ -47,11 +47,13 @@
  * for all hugepage allocations.
  */
 unsigned long transparent_hugepage_flags __read_mostly =
+#ifndef CONFIG_E90S
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS
 	(1<<TRANSPARENT_HUGEPAGE_FLAG)|
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_MADVISE
 	(1<<TRANSPARENT_HUGEPAGE_REQ_MADV_FLAG)|
+#endif
 #endif
 	(1<<TRANSPARENT_HUGEPAGE_DEFRAG_REQ_MADV_FLAG)|
 	(1<<TRANSPARENT_HUGEPAGE_DEFRAG_KHUGEPAGED_FLAG)|
@@ -1202,7 +1204,11 @@ static vm_fault_t do_huge_pmd_wp_page_fallback(struct vm_fault *vmf,
 	unsigned long haddr = vmf->address & HPAGE_PMD_MASK;
 	struct mem_cgroup *memcg;
 	pgtable_t pgtable;
+#ifdef CONFIG_E2K
+	pmd_t _pmd = __pmd(0);
+#else
 	pmd_t _pmd;
+#endif
 	int i;
 	vm_fault_t ret = 0;
 	struct page **pages;
@@ -1893,7 +1899,11 @@ bool move_huge_pmd(struct vm_area_struct *vma, unsigned long old_addr,
 		new_ptl = pmd_lockptr(mm, new_pmd);
 		if (new_ptl != old_ptl)
 			spin_lock_nested(new_ptl, SINGLE_DEPTH_NESTING);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		pmd = pmdp_huge_get_and_clear_as_valid(mm, old_addr, old_pmd);
+#else
 		pmd = pmdp_huge_get_and_clear(mm, old_addr, old_pmd);
+#endif
 		if (pmd_present(pmd))
 			force_flush = true;
 		VM_BUG_ON(!pmd_none(*new_pmd));
@@ -2107,7 +2117,11 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	pgtable_t pgtable;
+#ifdef CONFIG_E2K
+	pmd_t _pmd = __pmd(0);
+#else
 	pmd_t _pmd;
+#endif
 	int i;
 
 	/*
@@ -2142,8 +2156,12 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	struct mm_struct *mm = vma->vm_mm;
 	struct page *page;
 	pgtable_t pgtable;
-	pmd_t old_pmd, _pmd;
 	bool young, write, soft_dirty, pmd_migration = false;
+#ifdef CONFIG_E2K
+	pmd_t old_pmd, _pmd = __pmd(0);
+#else
+	pmd_t old_pmd, _pmd;
+#endif
 	unsigned long addr;
 	int i;
 

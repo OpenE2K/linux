@@ -12,14 +12,28 @@
 #define flushw_all()	__asm__ __volatile__("flushw")
 
 void __flushw_user(void);
-#define flushw_user() __flushw_user()
 
+#ifdef CONFIG_MCST
+#define flushw_user() synchronize_user_stack()
+#define flush_user_windows __flushw_user
+
+void e90s_flush_l2_cache(void);
+#else
+#define flushw_user() __flushw_user()
 #define flush_user_windows flushw_user
+#endif
+
 #define flush_register_windows flushw_all
 
 /* These are the same regardless of whether this is an SMP kernel or not. */
+#ifdef CONFIG_MCST
+#define flush_cache_mm(__mm) \
+	do { if ((__mm) == current->mm) flush_user_windows(); } while(0)
+#else
 #define flush_cache_mm(__mm) \
 	do { if ((__mm) == current->mm) flushw_user(); } while(0)
+#endif
+
 #define flush_cache_dup_mm(mm) flush_cache_mm(mm)
 #define flush_cache_range(vma, start, end) \
 	flush_cache_mm((vma)->vm_mm)

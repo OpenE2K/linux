@@ -55,6 +55,9 @@
 #include <linux/rmap.h>
 #include <linux/export.h>
 #include <linux/delayacct.h>
+#ifdef CONFIG_MCST
+#include <linux/delay.h>
+#endif
 #include <linux/init.h>
 #include <linux/pfn_t.h>
 #include <linux/writeback.h>
@@ -71,6 +74,9 @@
 #include <linux/dax.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
+#ifdef CONFIG_MCST
+#include <linux/mcst_rt.h>
+#endif
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -298,7 +304,9 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 		return;
 
 	p4d = p4d_offset(pgd, start);
+#ifndef CONFIG_E2K
 	pgd_clear(pgd);
+#endif
 	p4d_free_tlb(tlb, p4d, start);
 }
 
@@ -787,7 +795,11 @@ static int copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 {
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *src_ptl, *uninitialized_var(dst_ptl);
+#else
 	spinlock_t *src_ptl, *dst_ptl;
+#endif
 	int progress = 0;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
@@ -1024,7 +1036,18 @@ again:
 	do {
 		pte_t ptent = *pte;
 		if (pte_none(ptent))
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		{
+			if (pte_valid(ptent)) {
+				if (!test_ts_flag(TS_KEEP_PAGES_VALID))
+					pte_clear_not_present_full(mm, addr,
+							pte, tlb->fullmm);
+			}
+#endif
 			continue;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		}
+#endif
 
 		if (need_resched())
 			break;
@@ -1162,7 +1185,48 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		 * mode.
 		 */
 		if (pmd_none_or_trans_huge_or_clear_bad(pmd))
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		{
+			while (pmd_valid(*pmd) &&
+					!test_ts_flag(TS_KEEP_PAGES_VALID)) {
+				spinlock_t *ptl = pmd_lockptr(vma->vm_mm, pmd);
+				int cleared;
+
+				/*
+				 * Must clear the valid bit. Only 2 cases here:
+				 * 1) Clear it on the whole pmd.
+				 * 2) Allocate the next level and descend to it.
+				 *
+				 * All of this must be protected with pmd_lock.
+				 */
+				spin_lock(ptl);
+				if (pmd_trans_huge(*pmd) ||
+				    pmd_none(*pmd) && next - addr == PMD_SIZE) {
+					validate_pmd_at(vma->vm_mm, addr, pmd,
+						__pmd(_PAGE_CLEAR_VALID(pmd_val(*pmd))));
+					cleared = 1;
+				} else {
+					cleared = 0;
+				}
+				spin_unlock(ptl);
+				if (cleared)
+					break;
+
+				if (__pte_alloc(vma->vm_mm, pmd)) {
+					pr_err("%s: couldn't allocate pte page for pmd 0x%lx\n",
+							__func__, pmd);
+					break;
+				}
+
+				if (!pmd_trans_unstable(pmd))
+					goto zap;
+			}
+#endif
 			goto next;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		}
+zap:
+#endif
 		next = zap_pte_range(tlb, vma, pmd, addr, next, details);
 next:
 		cond_resched();
@@ -1191,7 +1255,27 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 			/* fall through */
 		}
 		if (pud_none_or_clear_bad(pud))
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		{
+			if (pud_valid(*pud) &&
+					!test_ts_flag(TS_KEEP_PAGES_VALID)) {
+				if ((addr & PUD_MASK) == addr &&
+						end >= pud_addr_bound(addr)) {
+					invalidate_pud_at(vma->vm_mm,
+								addr, pud);
+				} else if (!pmd_alloc(vma->vm_mm, pud, addr)) {
+					pr_err("%s: couldn't allocate pmd page for pud 0x%lx\n",
+							__func__, pud);
+				} else {
+					goto zap;
+				}
+			}
+#endif
 			continue;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		}
+zap:
+#endif
 		next = zap_pmd_range(tlb, vma, pud, addr, next, details);
 next:
 		cond_resched();
@@ -1233,7 +1317,27 @@ void unmap_page_range(struct mmu_gather *tlb,
 	do {
 		next = pgd_addr_end(addr, end);
 		if (pgd_none_or_clear_bad(pgd))
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		{
+			if (pgd_valid(*pgd) &&
+					!test_ts_flag(TS_KEEP_PAGES_VALID)) {
+				if ((addr & PGDIR_MASK) == addr &&
+						end >= pgd_addr_bound(addr)) {
+					invalidate_pgd_at(vma->vm_mm,
+								addr, pgd);
+				} else if (!pud_alloc(vma->vm_mm, pgd, addr)) {
+					pr_err("%s: couldn't allocate pud page for pgd 0x%lx\n",
+							__func__, pgd);
+				} else {
+					goto zap;
+				}
+			}
+#endif
 			continue;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		}
+zap:
+#endif
 		next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
 	} while (pgd++, addr = next, addr != end);
 	tlb_end_vma(tlb, vma);
@@ -1425,7 +1529,11 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 	struct mm_struct *mm = vma->vm_mm;
 	int retval;
 	pte_t *pte;
+#ifdef CONFIG_MCST
+	spinlock_t *uninitialized_var(ptl);
+#else
 	spinlock_t *ptl;
+#endif
 
 	retval = -EINVAL;
 	if (PageAnon(page) || PageSlab(page) || page_has_type(page))
@@ -1793,7 +1901,11 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long pfn, pgprot_t prot)
 {
 	pte_t *pte;
+#ifdef CONFIG_MCST
+	spinlock_t *uninitialized_var(ptl);
+#else
 	spinlock_t *ptl;
+#endif
 	int err = 0;
 
 	pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
@@ -2109,7 +2221,12 @@ int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 	if (WARN_ON(addr >= end))
 		return -EINVAL;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	BUG_ON(mm != &init_mm);
+	pgd = node_pgd_offset_kernel(numa_node_id(), addr);
+#else
 	pgd = pgd_offset(mm, addr);
+#endif
 	do {
 		next = pgd_addr_end(addr, end);
 		err = apply_to_p4d_range(mm, pgd, addr, next, fn, data);
@@ -2378,7 +2495,11 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		 * seen in the presence of one thread doing SMC and another
 		 * thread doing COW.
 		 */
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		ptep_clear_flush_as_valid(vma, vmf->address, vmf->pte);
+#else
 		ptep_clear_flush_notify(vma, vmf->address, vmf->pte);
+#endif
 		page_add_new_anon_rmap(new_page, vma, vmf->address, false);
 		mem_cgroup_commit_charge(new_page, memcg, false, false);
 		lru_cache_add_active_or_unevictable(new_page, vma);
@@ -2648,7 +2769,17 @@ static void unmap_mapping_range_vma(struct vm_area_struct *vma,
 		unsigned long start_addr, unsigned long end_addr,
 		struct zap_details *details)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+        /*
+	 * vma is not destroyed here, but zap_page_range will clear
+	 * vma ptes, so keep valid bit to handle pagefaults.
+	 */
+	set_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 	zap_page_range_single(vma, start_addr, end_addr - start_addr, details);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	clear_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 }
 
 static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
@@ -3921,6 +4052,17 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	pgd_t *pgd;
 	p4d_t *p4d;
 	vm_fault_t ret;
+
+#ifdef CONFIG_MCST
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* Attempt to allocate page when VM_MLOCK_DONE set */
+		/* for gracefully exit() */
+		mm->extra_vm_flags &= ~VM_MLOCK_DONE;
+		pr_err("Attempt to allocate page when VM_MLOCK_DONE"
+				"(after mlockall())\n");
+		return VM_FAULT_SIGBUS;
+	}
+#endif  /* CONFIG_MCST */
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);

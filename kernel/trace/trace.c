@@ -3049,7 +3049,7 @@ void trace_printk_init_buffers(void)
 		return;
 
 	/* trace_printk() is for debug use only. Don't use it in production. */
-
+#ifndef CONFIG_MCST
 	pr_warn("\n");
 	pr_warn("**********************************************************\n");
 	pr_warn("**   NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE   **\n");
@@ -3064,7 +3064,7 @@ void trace_printk_init_buffers(void)
 	pr_warn("**                                                      **\n");
 	pr_warn("**   NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE   **\n");
 	pr_warn("**********************************************************\n");
-
+#endif
 	/* Expand the buffers to set size */
 	tracing_update_buffers();
 
@@ -3151,7 +3151,11 @@ int trace_vbprintk(unsigned long ip, const char *fmt, va_list args)
 	memcpy(entry->buf, tbuffer, sizeof(u32) * len);
 	if (!call_filter_check_discard(call, entry, buffer, event)) {
 		__buffer_unlock_commit(buffer, event);
+#ifdef CONFIG_E2K
+		ftrace_trace_stack(tr, buffer, flags, 2, pc, NULL);
+#else
 		ftrace_trace_stack(tr, buffer, flags, 6, pc, NULL);
+#endif
 	}
 
 out:
@@ -8210,6 +8214,11 @@ rb_simple_write(struct file *filp, const char __user *ubuf,
 		mutex_unlock(&trace_types_lock);
 	}
 
+#ifdef CONFIG_MCST
+	if (val == 2) {
+		tracer_tracing_off(tr);
+	}
+#endif
 	(*ppos)++;
 
 	return cnt;

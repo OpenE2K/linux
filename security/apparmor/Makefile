@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# Makefile for AppArmor Linux Security Module
 # Makefile for AppArmor Linux Security Module
 #
 obj-$(CONFIG_SECURITY_APPARMOR) += apparmor.o
@@ -8,7 +8,7 @@ apparmor-y := apparmorfs.o audit.o capability.o task.o ipc.o lib.o match.o \
               resource.o secid.o file.o policy_ns.o label.o mount.o net.o
 apparmor-$(CONFIG_SECURITY_APPARMOR_HASH) += crypto.o
 
-clean-files := capability_names.h rlim_names.h net_names.h
+clean-files := capability_names.h rlim_names.h net_names.h rlim_names_noe2k.h
 
 # Build a lower case string table of address family names
 # Transform lines from
@@ -43,7 +43,7 @@ cmd_make-sock = echo "static const char *sock_type_names[] = {" >> $@ ;\
 	sed $^ >>$@ -r -n \
 	-e 's/^\tSOCK_([A-Z0-9_]+)[\t]+=[ \t]+([0-9]+)(.*)/[\2] = "\L\1",/p';\
 	echo "};" >> $@
-
+ 
 # Build a lower case string table of capability names
 # Transforms lines from
 #    #define CAP_DAC_OVERRIDE     1
@@ -100,9 +100,11 @@ $(obj)/resource.o : $(obj)/rlim_names.h
 $(obj)/capability_names.h : $(srctree)/include/uapi/linux/capability.h \
 			    $(src)/Makefile
 	$(call cmd,make-caps)
-$(obj)/rlim_names.h : $(srctree)/include/uapi/asm-generic/resource.h \
-		      $(src)/Makefile
+$(obj)/rlim_names.h : $(obj)/rlim_names_noe2k.h
 	$(call cmd,make-rlim)
+$(obj)/rlim_names_noe2k.h : $(srctree)/include/uapi/asm-generic/resource.h \
+			    $(src)/Makefile
+	 $(Q)sed '/RLIMIT_PC_STACK\|RLIMIT_P_STACK/d' $< >> $@
 $(obj)/net_names.h : $(srctree)/include/linux/socket.h \
 		     $(srctree)/include/linux/net.h \
 		     $(src)/Makefile

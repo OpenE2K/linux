@@ -1,0 +1,87 @@
+/*
+ * MONOCUBE
+ * TVGI.469555.253 ver.5
+ * (MONOCUBE-PC)
+ */
+/dts-v1/;
+
+/ {
+	/* version = ""; */
+	model = "e2c+,mcst,mono-pc";
+	compatible = "mcst,mono-pc";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			lm95231@2b {
+				/* hwmon/lm95231.ko (DD12:LM95231CIMM) */
+				/* CIMM:0x57 / CIMM-1:0x19 / CIMM-2:0x2A */
+				compatible = "ti,lm95231";
+				reg = <0x2b>;
+				label = "CPU Temp Sensor";
+
+				temp1_label = "Board Temp";
+				temp2_label = "CPU Temp";
+				temp3_label = "not connected";
+				/* no fan control */
+			};
+
+			/* TODO: ???.ko (DD14:MAX3674ECM+) */
+
+			/* (X29, X30) DIMMs */
+		};
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			/* empty */
+		};
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* empty */
+		};
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* empty */
+		};
+	};
+
+	/* IOHUB SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub spi";
+
+		boot@0 {
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+};

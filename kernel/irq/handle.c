@@ -146,7 +146,28 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 		irqreturn_t res;
 
 		trace_irq_handler_entry(irq, action);
+#ifdef CONFIG_MCST
+		if (((desc->istate & (IRQS_ONESHOT | IRQS_DO_ONESHOT)) ==
+			(IRQS_ONESHOT | IRQS_DO_ONESHOT)) &&
+			(action->flags & IRQF_ONESHOT) &&
+			!irqd_irq_masked(&desc->irq_data)) {
+			/*
+			 * It can be if we just added ONESHOT irq handler to
+			 * not ONESHOT desk when interrupt had being handled.
+			 * Just skip it for this time.
+			 * If interrupt is really raised
+			 * we will handle it next time
+			 */
+			pr_info("Reject irq due to irq unmasked."
+				"irq = %d, action = %s\n",
+				irq, action->name ? action->name : "NULL");
+			res = IRQ_NONE;
+		} else {
+			res = action->handler(irq, action->dev_id);
+		}
+#else
 		res = action->handler(irq, action->dev_id);
+#endif
 		trace_irq_handler_exit(irq, action, res);
 
 		if (WARN_ONCE(!irqs_disabled(),"irq %u handler %pS enabled interrupts\n",

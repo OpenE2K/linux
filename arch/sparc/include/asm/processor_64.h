@@ -47,6 +47,9 @@
 
 #ifndef __ASSEMBLY__
 
+/* virtualization does not support */
+#define	paravirt_enabled()	false
+
 typedef struct {
 	unsigned char seg;
 } mm_segment_t;
@@ -85,6 +88,10 @@ struct thread_struct {
 #include <asm/fpumacro.h>
 
 struct task_struct;
+
+#ifdef CONFIG_E90S
+#define default_idle()
+#endif
 
 /* On Uniprocessor, even in RMO processes see TSO semantics */
 #ifdef CONFIG_SMP
@@ -251,6 +258,50 @@ static inline void prefetchw(const void *x)
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap);
+
+#ifdef CONFIG_E90S
+#define NUM_DUMP_FRAMES	64
+#endif /*CONFIG_E90S*/
+
+#define SET_UNALIGN_CTL(task, value)	({				\
+	__u32 status = task_thread_info(task)->status &			\
+			~(TS_UNALIGN_NOPRINT | TS_UNALIGN_SIGBUS);	\
+	if (value & PR_UNALIGN_NOPRINT)					\
+		status |= TS_UNALIGN_NOPRINT;				\
+	if (value & PR_UNALIGN_SIGBUS)					\
+		status |= TS_UNALIGN_SIGBUS;				\
+	task_thread_info(task)->status = status;			\
+	0; })
+
+#define GET_UNALIGN_CTL(task, value)	({				\
+	__u32 status = task_thread_info(task)->status;			\
+	__u32 res = 0;							\
+	if (status & TS_UNALIGN_NOPRINT)				\
+		res |= PR_UNALIGN_NOPRINT;				\
+	if (status & TS_UNALIGN_SIGBUS)					\
+		res |= PR_UNALIGN_SIGBUS;				\
+	put_user(res, (int __user *)(value));				\
+	})
+
+#if defined(CONFIG_E90S) && defined(CONFIG_SMP)
+#include <asm/percpu.h>
+typedef struct {
+        char comm[16];
+        long pid;
+        long state;
+        long need_resched;
+        long cpu;
+        long t_pc;
+        long t_npc;
+        long prio;
+        long fp[NUM_DUMP_FRAMES];
+        long tpc[NUM_DUMP_FRAMES];
+} cpu_bt_buf_t;
+DECLARE_PER_CPU(cpu_bt_buf_t, cpu_bt_buf);
+
+extern void smp_show_backtrace_all_cpus(void);
+
+#endif	/*CONFIG_SMP && CONFIG_E90S*/
 
 #endif /* !(__ASSEMBLY__) */
 

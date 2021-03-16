@@ -28,6 +28,10 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
+
 #include "internal.h"
 
 static pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
@@ -158,10 +162,18 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 
 	for (; old_addr < old_end; old_pte++, old_addr += PAGE_SIZE,
 				   new_pte++, new_addr += PAGE_SIZE) {
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+		if (pte_none(*old_pte) && !pte_valid(*old_pte))
+#else
 		if (pte_none(*old_pte))
+#endif
 			continue;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+		pte = ptep_get_and_clear_to_move(mm, old_addr, old_pte);
+#else	/* ! CONFIG_E2K || ! CONFIG_VIRTUALIZATION */
 		pte = ptep_get_and_clear(mm, old_addr, old_pte);
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 		/*
 		 * If we are remapping a valid PTE, make sure
 		 * to flush TLB before we drop the PTL for the
@@ -177,7 +189,11 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 			force_flush = true;
 		pte = move_pte(pte, new_vma->vm_page_prot, old_addr, new_addr);
 		pte = move_soft_dirty_pte(pte);
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+		set_pte_to_move_at(mm, new_addr, new_pte, pte);
+#else	/* ! CONFIG_E2K || ! CONFIG_VIRTUALIZATION */
 		set_pte_at(mm, new_addr, new_pte, pte);
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 	}
 
 	arch_leave_lazy_mmu_mode();
@@ -222,7 +238,13 @@ static bool move_normal_pmd(struct vm_area_struct *vma, unsigned long old_addr,
 
 	/* Clear the pmd */
 	pmd = *old_pmd;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	set_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 	pmd_clear(old_pmd);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	clear_ts_flag(TS_KEEP_PAGES_VALID);
+#endif
 
 	VM_BUG_ON(!pmd_none(*new_pmd));
 
@@ -252,6 +274,16 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 	mmu_notifier_range_init(&range, MMU_NOTIFY_UNMAP, 0, vma, vma->vm_mm,
 				old_addr, old_end);
 	mmu_notifier_invalidate_range_start(&range);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	/*
+	 * Semispeculative requests can access on virtual addresses
+	 * from this validated VM area while this addresses were not
+	 * exist yet and write invalid TLB entry (valid bit = 0)
+	 * So it need flush same TLB entries for all VM area
+	 */
+	flush_tlb_range_and_pgtables(new_vma->vm_mm, new_addr, new_addr + len);
+#endif
 
 	for (; old_addr < old_end; old_addr += extent, new_addr += extent) {
 		cond_resched();
@@ -422,6 +454,14 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 			vma->vm_next->vm_flags |= VM_ACCOUNT;
 	}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if ((vm_flags & VM_PAGESVALID)) {
+		int ret = make_all_vma_pages_valid(new_vma, MV_FLUSH);
+		if (ret)
+			return ret;
+	}
+#endif
+
 	if (vm_flags & VM_LOCKED) {
 		mm->locked_vm += new_len >> PAGE_SHIFT;
 		*locked = true;
@@ -495,7 +535,10 @@ static struct vm_area_struct *vma_to_resize(unsigned long addr,
 	return vma;
 }
 
-static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
+#ifndef CONFIG_E2K
+static
+#endif
+unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 		unsigned long new_addr, unsigned long new_len, bool *locked,
 		struct vm_userfaultfd_ctx *uf,
 		struct list_head *uf_unmap_early,
@@ -572,13 +615,31 @@ out:
 	return ret;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+static int vma_expandable(struct vm_area_struct *vma, unsigned long delta,
+			  unsigned long addr)
+#else
 static int vma_expandable(struct vm_area_struct *vma, unsigned long delta)
+#endif
 {
 	unsigned long end = vma->vm_end + delta;
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	unsigned long max_addr = TASK_SIZE;
+#endif
 	if (end < vma->vm_end) /* overflow */
 		return 0;
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	if (vma->vm_next)
+		max_addr = vma->vm_next->vm_start;
+	if (ADDR_IN_SS(addr) && TASK_IS_BINCO(current)
+			&& !ADDR_IN_SS(max_addr))
+		max_addr = SS_ADDR_END;
+	if (max_addr < end)
+		return 0;
+#else
 	if (vma->vm_next && vma->vm_next->vm_start < end) /* intersection */
 		return 0;
+#endif
 	if (get_unmapped_area(NULL, vma->vm_start, end - vma->vm_start,
 			      0, MAP_FIXED) & ~PAGE_MASK)
 		return 0;
@@ -626,6 +687,16 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 
 	if (offset_in_page(addr))
 		return ret;
+
+#ifdef CONFIG_E2K
+	if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
+			  (is_privileged_range(addr, addr + old_len) ||
+			   (flags & MREMAP_FIXED) &&
+			   is_privileged_range(new_addr, new_addr + new_len))) {
+		ret = -EPERM;
+		return ret;
+	}
+#endif
 
 	old_len = PAGE_ALIGN(old_len);
 	new_len = PAGE_ALIGN(new_len);
@@ -681,7 +752,11 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	 */
 	if (old_len == vma->vm_end - addr) {
 		/* can we just expand the current mapping? */
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+		if (vma_expandable(vma, new_len - old_len, addr)) {
+#else
 		if (vma_expandable(vma, new_len - old_len)) {
+#endif
 			int pages = (new_len - old_len) >> PAGE_SHIFT;
 
 			if (vma_adjust(vma, vma->vm_start, addr + new_len,
@@ -690,6 +765,14 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 				goto out;
 			}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+			 if (vma->vm_flags & VM_PAGESVALID) {
+			 	ret = make_vma_pages_valid(vma,
+					addr + old_len, addr + new_len);
+				if (ret)
+					goto out;
+			}
+#endif
 			vm_stat_account(mm, vma->vm_flags, pages);
 			if (vma->vm_flags & VM_LOCKED) {
 				mm->locked_vm += pages;
@@ -711,10 +794,20 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 		if (vma->vm_flags & VM_MAYSHARE)
 			map_flags |= MAP_SHARED;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+		new_addr = get_unmapped_area(vma->vm_file,
+				(ADDR_IN_SS(addr) && TASK_IS_BINCO(current)) ?
+							SS_ADDR_START : 0,
+				new_len,
+				vma->vm_pgoff +
+					((addr - vma->vm_start) >> PAGE_SHIFT),
+				map_flags);
+#else
 		new_addr = get_unmapped_area(vma->vm_file, 0, new_len,
 					vma->vm_pgoff +
 					((addr - vma->vm_start) >> PAGE_SHIFT),
 					map_flags);
+#endif
 		if (offset_in_page(new_addr)) {
 			ret = new_addr;
 			goto out;

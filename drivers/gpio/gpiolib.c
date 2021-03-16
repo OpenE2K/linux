@@ -17,6 +17,9 @@
 #include <linux/gpio/driver.h>
 #include <linux/gpio/machine.h>
 #include <linux/pinctrl/consumer.h>
+#ifdef CONFIG_MCST
+#include <linux/pinctrl/pinconf-generic.h>
+#endif
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
@@ -31,6 +34,10 @@
 #include "gpiolib.h"
 #include "gpiolib-of.h"
 #include "gpiolib-acpi.h"
+
+#ifdef CONFIG_MCST
+#include <asm/gpio.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/gpio.h>

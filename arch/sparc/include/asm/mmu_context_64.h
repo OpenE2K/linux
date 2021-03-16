@@ -16,11 +16,20 @@
 #include <asm-generic/mm_hooks.h>
 #include <asm/percpu.h>
 
+#ifdef CONFIG_E90S
+#include <asm/e90s.h>
+#include <asm/io.h>
+#endif	/*CONFIG_E90S*/
+
 static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 {
 }
 
+#ifdef CONFIG_MCST
+extern raw_spinlock_t ctx_alloc_lock;
+#else
 extern spinlock_t ctx_alloc_lock;
+#endif
 extern unsigned long tlb_context_cache;
 extern unsigned long mmu_context_bmap[];
 
@@ -38,6 +47,29 @@ void __tsb_context_switch(unsigned long pgd_pa,
 static inline void tsb_context_switch_ctx(struct mm_struct *mm,
 					  unsigned long ctx)
 {
+#ifdef CONFIG_E90S
+#if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
+	u64 o = readq_asi(E90S_MCNTL, ASI_DCU_CONTROL_REG);
+	u64 n = o & ~E90S_MCNTL_DRM23_MSK;
+	/* setup 2 and 3 sDTLB sets to store huge pages ttes */
+	n |= mm->context.tsb_block[MM_TSB_HUGE].tsb ?
+		E90S_MCNTL_DRM23_4M : E90S_MCNTL_DRM23_DEFAULT;
+	if (n != o) {
+		unsigned long flags;
+		local_save_flags(flags);
+		local_irq_restore((unsigned long)PIL_NMI);
+		if ((o & E90S_MCNTL_DRM23_MSK) != E90S_MCNTL_DRM23_4M) {
+			/* flush kernel to avoid tlb double hit */
+			writeq_asi(0, 0x20, ASI_DMMU_DEMAP);
+			membar_sync();
+			writeq_asi(n, E90S_MCNTL, ASI_DCU_CONTROL_REG);
+			membar_sync();
+		}
+		local_irq_restore(flags);
+	}
+#endif
+#endif	/*CONFIG_E90S*/
+
 	__tsb_context_switch(__pa(mm->pgd),
 			     &mm->context.tsb_block[MM_TSB_BASE],
 #if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
@@ -87,7 +119,11 @@ static inline void switch_mm(struct mm_struct *old_mm, struct mm_struct *mm, str
 	if (unlikely(mm == &init_mm))
 		return;
 
+#ifdef CONFIG_MCST
+	raw_spin_lock_irqsave(&mm->context.lock, flags);
+#else
 	spin_lock_irqsave(&mm->context.lock, flags);
+#endif
 	ctx_valid = CTX_VALID(mm->context);
 	if (!ctx_valid)
 		get_new_mmu_context(mm);
@@ -133,7 +169,11 @@ static inline void switch_mm(struct mm_struct *old_mm, struct mm_struct *mm, str
 		__flush_tlb_mm(CTX_HWBITS(mm->context),
 			       SECONDARY_CONTEXT);
 	}
+#ifdef CONFIG_MCST
+	raw_spin_unlock_irqrestore(&mm->context.lock, flags);
+#else
 	spin_unlock_irqrestore(&mm->context.lock, flags);
+#endif
 }
 
 #define deactivate_mm(tsk,mm)	do { } while (0)
@@ -142,6 +182,7 @@ static inline void switch_mm(struct mm_struct *old_mm, struct mm_struct *mm, str
 #define  __HAVE_ARCH_START_CONTEXT_SWITCH
 static inline void arch_start_context_switch(struct task_struct *prev)
 {
+#ifndef CONFIG_E90S
 	/* Save the current state of MCDPER register for the process
 	 * we are switching from
 	 */
@@ -159,11 +200,13 @@ static inline void arch_start_context_switch(struct task_struct *prev)
 		else
 			clear_tsk_thread_flag(prev, TIF_MCDPER);
 	}
+#endif
 }
 
 #define finish_arch_post_lock_switch	finish_arch_post_lock_switch
 static inline void finish_arch_post_lock_switch(void)
 {
+#ifndef CONFIG_E90S
 	/* Restore the state of MCDPER register for the new process
 	 * just switched to.
 	 */
@@ -185,6 +228,7 @@ static inline void finish_arch_post_lock_switch(void)
 			regs->tstate |= TSTATE_MCDE;
 		}
 	}
+#endif
 }
 
 #endif /* !(__ASSEMBLY__) */

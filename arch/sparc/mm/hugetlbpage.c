@@ -134,6 +134,22 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 
 static pte_t sun4u_hugepage_shift_to_tte(pte_t entry, unsigned int shift)
 {
+#ifdef CONFIG_MCST
+	switch (shift) {
+	case HPAGE_16GB_SHIFT:
+		pte_val(entry) |= _PAGE_PUD_HUGE;
+		break;
+	case HPAGE_2GB_SHIFT:
+	case HPAGE_256MB_SHIFT:
+	case HPAGE_SHIFT:
+		pte_val(entry) |= _PAGE_PMD_HUGE;
+		break;
+	case HPAGE_64K_SHIFT:
+		break;
+	default:
+		WARN_ONCE(1, "unsupported hugepage shift=%u\n", shift);
+	}
+#endif
 	return entry;
 }
 

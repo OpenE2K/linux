@@ -12,6 +12,8 @@ source "drivers/rapidio/Kconfig"
 
 source "drivers/base/Kconfig"
 
+source "drivers/mcst/Kconfig"
+
 source "drivers/bus/Kconfig"
 
 source "drivers/connector/Kconfig"

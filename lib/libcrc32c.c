@@ -35,6 +35,8 @@
 
 static struct crypto_shash *tfm;
 
+/* LCC does not understand VLA in structures */
+#if !defined CONFIG_MCST || !defined __LCC__
 u32 crc32c(u32 crc, const void *address, unsigned int length)
 {
 	SHASH_DESC_ON_STACK(shash, tfm);
@@ -51,6 +53,23 @@ u32 crc32c(u32 crc, const void *address, unsigned int length)
 	barrier_data(ctx);
 	return ret;
 }
+#else /* !defined CONFIG_MCST || !defined __LCC__ || __LCC__ != 118 */
+u32 crc32c(u32 crc, const void *address, unsigned int length)
+{
+	struct shash_desc *desc;
+	int err;
+
+	desc = __builtin_alloca(sizeof(*desc) + crypto_shash_descsize(tfm));
+
+	desc->tfm = tfm;
+	*(u32 *)(desc->__ctx) = crc;
+
+	err = crypto_shash_update(desc, address, length);
+	BUG_ON(err);
+
+	return *(u32 *)(desc->__ctx);
+}
+#endif /* !defined CONFIG_MCST || !defined __LCC__ || __LCC__ != 118 */
 
 EXPORT_SYMBOL(crc32c);
 
@@ -59,7 +78,6 @@ static int __init libcrc32c_mod_init(void)
 	tfm = crypto_alloc_shash("crc32c", 0, 0);
 	return PTR_ERR_OR_ZERO(tfm);
 }
-
 static void __exit libcrc32c_mod_fini(void)
 {
 	crypto_free_shash(tfm);

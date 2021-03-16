@@ -1,0 +1,256 @@
+/*
+ * E8C-SWTX
+ * TVGI.469535.221 ver.4 (izm7)
+ * (804 1U)
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+
+/ {
+	/* version = ""; */
+	model = "e8c,mcst,e8c-swtx,804_1u";
+	compatible = "mcst,e8c-swtx";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			/* I2C_CPU */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			i2c-mux@4E {
+				/* i2c/muxes/i2c-mux-ltc4306.ko (DD7:LTC4306IUFD) */
+				#address-cells = <1>;
+				#size-cells = <0>;
+				compatible = "lltc,ltc4306";
+				reg = <0x4E>; /* NLN */
+				/* i2c-mux-idle-disconnect; */
+
+				i2c@0 {
+					/* I2C_CPU0 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+
+					lm96163@4c {
+						/* hwmon/lm63.ko (DD8:LM96163CISD) */
+						compatible = "lm63";
+						reg = <0x4c>;
+						label = "CPU0 FAN Control (X31)";
+
+						temp1_label = "Internal Temp";
+						temp2_label = "CPU0 Temp";
+					};
+
+					/* A1 "CPU0" - I2C_MAIN */
+					/*
+					 * MC0.S0:0x50,0x30,0x18
+					 * MC0.S1:0x51,0x31,0x19
+					 * MC1.S0:0x52,0x32,0x1A
+					 * MC1.S1:0x53,0x33,0x1B
+					 * MC2.S0:0x54,0x34,0x1C
+					 * MC2.S1:0x55,0x35,0x1D
+					 * MC3.S0:0x56,0x36,0x1E
+					 * MC3.S1:0x57,0x37,0x1f
+					 */
+				};
+
+				i2c@1 {
+					/* I2C_CPU1 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+
+					lm96163@4c {
+						/* hwmon/lm63.ko (DD11:LM96163CISD) */
+						compatible = "lm63";
+						reg = <0x4c>;
+						label = "CPU1 FAN Control (X20)";
+
+						temp1_label = "Internal Temp";
+						temp2_label = "CPU1 Temp";
+					};
+
+					/* A2 "CPU1" - I2C_MAIN */
+					/*
+					 * MC0.S0:0x50,0x30,0x18
+					 * MC0.S1:0x51,0x31,0x19
+					 * MC1.S0:0x52,0x32,0x1A
+					 * MC1.S1:0x53,0x33,0x1B
+					 * MC2.S0:0x54,0x34,0x1C
+					 * MC2.S1:0x55,0x35,0x1D
+					 * MC3.S0:0x56,0x36,0x1E
+					 * MC3.S1:0x57,0x37,0x1f
+					 */
+				};
+
+				i2c@2 {
+					/* I2C_CPU2 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <2>;
+
+					lm96163@4c {
+						/* hwmon/lm63.ko (DD14:LM96163CISD) */
+						compatible = "lm63";
+						reg = <0x4c>;
+						label = "CPU2 FAN Control (X32)";
+
+						temp1_label = "Internal Temp";
+						temp2_label = "CPU2 Temp";
+					};
+
+					/* A3 "CPU2" - I2C_MAIN */
+					/*
+					 * MC0.S0:0x50,0x30,0x18
+					 * MC0.S1:0x51,0x31,0x19
+					 * MC1.S0:0x52,0x32,0x1A
+					 * MC1.S1:0x53,0x33,0x1B
+					 * MC2.S0:0x54,0x34,0x1C
+					 * MC2.S1:0x55,0x35,0x1D
+					 * MC3.S0:0x56,0x36,0x1E
+					 * MC3.S1:0x57,0x37,0x1f
+					 */
+				};
+
+				i2c@3 {
+					/* I2C_CPU3 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <3>;
+
+					lm96163@4c {
+						/* hwmon/lm63.ko (DD15:LM96163CISD) */
+						compatible = "lm63";
+						reg = <0x4c>;
+						label = "CPU3 FAN Control (X30)";
+
+						temp1_label = "Internal Temp";
+						temp2_label = "CPU3 Temp";
+					};
+
+					/* A4 "CPU3" - I2C_MAIN */
+					/*
+					 * MC0.S0:0x50,0x30,0x18
+					 * MC0.S1:0x51,0x31,0x19
+					 * MC1.S0:0x52,0x32,0x1A
+					 * MC1.S1:0x53,0x33,0x1B
+					 * MC2.S0:0x54,0x34,0x1C
+					 * MC2.S1:0x55,0x35,0x1D
+					 * MC3.S0:0x56,0x36,0x1E
+					 * MC3.S1:0x57,0x37,0x1f
+					 */
+				};
+			};
+		};
+
+		i2c@1 {
+			/* I2C_PMBUS */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD5:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "IOHUB FAN Control (X52)";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "IOHUB Temp";
+			};
+
+			/* config SENSORS_PMBUS */
+			pdt012@12 {
+				/* hwmon/pmbus/pmbus.ko (DA2:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x12>; /* 23k7|23k7 */
+				label = "+1V8_CPU (in: +12V_IO)";
+			};
+			pdt012@22 {
+				/* hwmon/pmbus/pmbus.ko (DA4:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x22>; /* 54k9|23k7 */
+				label = "+1V0 (in: +12V_IO)";
+			};
+			pdt012@23 {
+				/* hwmon/pmbus/pmbus.ko (DA3:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x23>; /* 54k9|36k5 */
+				label = "+2V5 (in: +12V_IO)";
+			};
+
+			/* I2C_PMBUS -- [DD40] -- I2C_PMBUS_ISO */
+
+			pdt012@24 {
+				/* hwmon/pmbus/pmbus.ko (DA1:PDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x24>; /* 54k9|54k9 */
+				label = "+3V3_SUSP (in: +5V_SB)";
+			};
+
+			/*
+			 * [X39:SNP346-24VP21-2V_FP_IO] SSI EEB v.1.0.1 p. 2.3.3
+			 * [X56:SNP346-10VP21-2V] Digital Power Insight
+			 * [X55:70545-0004] SSI EEB v.1.0.1 p. 2.3.1.3
+			 *       Addr:0x38,0x39,0x3C,0x3D
+			 */
+		};
+
+		i2c@2 {
+			/* I2C_PCI */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* PCIe/PCI slots */
+		};
+
+		i2c@3 {
+			/* I2C_FRUID */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* [DD28:24FC128-I/ST] (EEPROM)@0x57 "FRUID" */
+		};
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			/* (DD33:S25FL128SAGNFI001) */
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			/* (DD6:CY14B101PA-SFXI) */
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+
+	/* l_gpio@%d */
+	/*
+	 * I2C0: I2C_CPU_ALERT#   - [DD2]1991VG2YA - GPIO18
+	 * I2C1: I2C_PMBUS_ALERT# - [DD2]1991VG2YA - GPIO17
+	 */
+};

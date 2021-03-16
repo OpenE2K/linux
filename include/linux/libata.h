@@ -162,6 +162,9 @@ enum {
 	ATA_DFLAG_ACPI_DISABLED = (1 << 28), /* ACPI for the device is disabled */
 	ATA_DFLAG_D_SENSE	= (1 << 29), /* Descriptor sense requested */
 	ATA_DFLAG_ZAC		= (1 << 30), /* ZAC device */
+#ifdef CONFIG_MCST
+	ATA_DFLAG_ATAPI_CHECK_BUFFER = (1 << 31),
+#endif
 
 	ATA_DEV_UNKNOWN		= 0,	/* unknown device */
 	ATA_DEV_ATA		= 1,	/* ATA device */
@@ -218,6 +221,9 @@ enum {
 					      * led */
 	ATA_FLAG_NO_DIPM	= (1 << 23), /* host not happy with DIPM */
 	ATA_FLAG_SAS_HOST	= (1 << 24), /* SAS host */
+#ifdef CONFIG_MCST
+	ATA_FLAG_IOHUB2_REV2            = (1 << 25), /* iohub2 rev2 bugs */
+#endif
 
 	/* bits 24:31 of ap->flags are reserved for LLD specific flags */
 
@@ -422,7 +428,9 @@ enum {
 	ATA_HORKAGE_NO_DMA_LOG	= (1 << 23),	/* don't use DMA for log read */
 	ATA_HORKAGE_NOTRIM	= (1 << 24),	/* don't use TRIM */
 	ATA_HORKAGE_MAX_SEC_1024 = (1 << 25),	/* Limit max sects to 1024 */
-
+#ifdef CONFIG_MCST
+	ATA_HORKAGE_FIX_ERROR_ON_WRITE = (1 << 26),
+#endif
 	 /* DMA mask for user DMA control: User visible values; DO NOT
 	    renumber */
 	ATA_DMA_MASK_ATA	= (1 << 0),	/* DMA on ATA Disk */
