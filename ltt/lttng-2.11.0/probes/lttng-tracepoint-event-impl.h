@@ -15,7 +15,7 @@
 #include <probes/lttng.h>
 #include <probes/lttng-types.h>
 #include <probes/lttng-probe-user.h>
-#include <wrapper/vmalloc.h>	/* for wrapper_vmalloc_sync_all() */
+#include <wrapper/vmalloc.h>	/* for wrapper_vmalloc_sync_mappings() */
 #include <wrapper/ringbuffer/frontend_types.h>
 #include <wrapper/ringbuffer/backend.h>
 #include <wrapper/rcu.h>
@@ -1131,11 +1131,11 @@ static void __event_probe__##_name(void *__data, _proto)		      \
 									      \
 	if (!_TP_SESSION_CHECK(session, __session))			      \
 		return;							      \
-	if (unlikely(!READ_ONCE(__session->active)))			      \
+	if (unlikely(!LTTNG_READ_ONCE(__session->active)))		      \
 		return;							      \
-	if (unlikely(!READ_ONCE(__chan->enabled)))			      \
+	if (unlikely(!LTTNG_READ_ONCE(__chan->enabled)))		      \
 		return;							      \
-	if (unlikely(!READ_ONCE(__event->enabled)))			      \
+	if (unlikely(!LTTNG_READ_ONCE(__event->enabled)))		      \
 		return;							      \
 	__lpf = lttng_rcu_dereference(__session->pid_tracker);		      \
 	if (__lpf && likely(!lttng_pid_tracker_lookup(__lpf, current->tgid))) \
@@ -1205,11 +1205,11 @@ static void __event_probe__##_name(void *__data)			      \
 									      \
 	if (!_TP_SESSION_CHECK(session, __session))			      \
 		return;							      \
-	if (unlikely(!READ_ONCE(__session->active)))			      \
+	if (unlikely(!LTTNG_READ_ONCE(__session->active)))		      \
 		return;							      \
-	if (unlikely(!READ_ONCE(__chan->enabled)))			      \
+	if (unlikely(!LTTNG_READ_ONCE(__chan->enabled)))		      \
 		return;							      \
-	if (unlikely(!READ_ONCE(__event->enabled)))			      \
+	if (unlikely(!LTTNG_READ_ONCE(__event->enabled)))		      \
 		return;							      \
 	__lpf = lttng_rcu_dereference(__session->pid_tracker);		      \
 	if (__lpf && likely(!lttng_pid_tracker_lookup(__lpf, current->tgid)))  \
@@ -1352,7 +1352,7 @@ static __used struct lttng_probe_desc TP_ID(__probe_desc___, TRACE_SYSTEM) = {
 #ifndef TP_MODULE_NOINIT
 static int TP_ID(__lttng_events_init__, TRACE_SYSTEM)(void)
 {
-	wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_mappings();
 	return lttng_probe_register(&TP_ID(__probe_desc___, TRACE_SYSTEM));
 }
 

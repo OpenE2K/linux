@@ -31,11 +31,11 @@ int lttng_kprobes_handler_pre(struct kprobe *p, struct pt_regs *regs)
 	int ret;
 	unsigned long data = (unsigned long) p->addr;
 
-	if (unlikely(!READ_ONCE(chan->session->active)))
+	if (unlikely(!LTTNG_READ_ONCE(chan->session->active)))
 		return 0;
-	if (unlikely(!READ_ONCE(chan->enabled)))
+	if (unlikely(!LTTNG_READ_ONCE(chan->enabled)))
 		return 0;
-	if (unlikely(!READ_ONCE(event->enabled)))
+	if (unlikely(!LTTNG_READ_ONCE(event->enabled)))
 		return 0;
 
 	lib_ring_buffer_ctx_init(&ctx, chan->chan, &lttng_probe_ctx, sizeof(data),
@@ -132,7 +132,7 @@ int lttng_kprobes_register(const char *name,
 	 * Well.. kprobes itself puts the page fault handler on the blacklist,
 	 * but we can never be too careful.
 	 */
-	wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_mappings();
 
 	ret = register_kprobe(&event->u.kprobe.kp);
 	if (ret)

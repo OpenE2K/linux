@@ -20,6 +20,14 @@
 
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0))
+#define LTTNG_DEFINE_TRACE(name, proto, args)		\
+	DEFINE_TRACE(name, PARAMS(proto), PARAMS(args))
+#else
+#define LTTNG_DEFINE_TRACE(name, proto, args)		\
+	DEFINE_TRACE(name)
+#endif
+
 #ifndef HAVE_KABI_2635_TRACEPOINT
 
 #define kabi_2635_tracepoint_probe_register tracepoint_probe_register
@@ -52,7 +60,7 @@ void lttng_tracepoint_exit(void)
 
 #endif /* #else #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)) */
 
-#ifdef CONFIG_MODULE_SIG
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0) && defined(CONFIG_MODULE_SIG))
 
 #include <linux/kallsyms.h>
 #include <wrapper/kallsyms.h>
@@ -74,9 +82,20 @@ int wrapper_tracepoint_module_notify(struct notifier_block *nb,
 	}
 }
 
-#endif /* CONFIG_MODULE_SIG */
+/*
+ * No canary for 'tracepoint_module_notify()', it's only defined in 'kernel/tracepoint.c'.
+ *
+ * static inline
+ * int __canary__tracepoint_module_notify(struct notifier_block *nb,
+ * 		unsigned long val, struct module *mod)
+ * {
+ * 	return tracepoint_module_notify(nb, val, mod);
+ * }
+ */
 
-#if defined(CONFIG_MODULE_SIG) && defined(MODULE)
+#endif /* #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0) && defined(CONFIG_MODULE_SIG)) */
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0) && defined(CONFIG_MODULE_SIG) && defined(MODULE))
 
 static inline
 int wrapper_lttng_fixup_sig(struct module *mod)
@@ -97,7 +116,7 @@ int wrapper_lttng_fixup_sig(struct module *mod)
 	return ret;
 }
 
-#else /* #if defined(CONFIG_MODULE_SIG) && defined(MODULE) */
+#else /* #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0) && defined(CONFIG_MODULE_SIG) && defined(MODULE)) */
 
 static inline
 int wrapper_lttng_fixup_sig(struct module *mod)
@@ -105,7 +124,7 @@ int wrapper_lttng_fixup_sig(struct module *mod)
 	return 0;
 }
 
-#endif /*#else #if defined(CONFIG_MODULE_SIG) && defined(MODULE) */
+#endif /* #else #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0) && defined(CONFIG_MODULE_SIG) && defined(MODULE)) */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,19,0))
 static inline struct tracepoint *lttng_tracepoint_ptr_deref(tracepoint_ptr_t *p)

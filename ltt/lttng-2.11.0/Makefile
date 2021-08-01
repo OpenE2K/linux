@@ -41,6 +41,8 @@ ifneq ($(KERNELRELEASE),)
 
   obj-$(CONFIG_LTTNG) += lttng-tracer.o
 
+  obj-$(CONFIG_LTTNG) += lttng-wrapper.o
+
   lttng-tracer-objs := lttng-events.o lttng-abi.o lttng-string-utils.o \
                        lttng-probes.o lttng-context.o \
                        lttng-context-pid.o lttng-context-procname.o \
@@ -51,15 +53,22 @@ ifneq ($(KERNELRELEASE),)
                        lttng-context-interruptible.o \
                        lttng-context-need-reschedule.o \
                        lttng-context-callstack.o lttng-calibrate.o \
-                       lttng-context-hostname.o wrapper/random.o \
-                       probes/lttng.o wrapper/trace-clock.o \
-                       wrapper/page_alloc.o \
+                       lttng-context-hostname.o \
+                       probes/lttng.o \
                        lttng-tracker-pid.o \
                        lttng-filter.o lttng-filter-interpreter.o \
                        lttng-filter-specialize.o \
                        lttng-filter-validator.o \
                        probes/lttng-probe-user.o \
-                       lttng-tp-mempool.o
+                       lttng-tp-mempool.o \
+
+  lttng-wrapper-objs := wrapper/page_alloc.o \
+                        wrapper/random.o \
+                        wrapper/trace-clock.o \
+                        wrapper/kallsyms.o \
+                        wrapper/irqdesc.o \
+                        wrapper/fdtable.o \
+                        lttng-wrapper-impl.o
 
   ifneq ($(CONFIG_HAVE_SYSCALL_TRACEPOINTS),)
     lttng-tracer-objs += lttng-syscalls.o
@@ -72,10 +81,10 @@ ifneq ($(KERNELRELEASE),)
         echo "lttng-context-perf-counters.o" ; fi;)
   endif # CONFIG_PERF_EVENTS
 
-  ifneq ($(CONFIG_PREEMPT_RT),)
+  ifneq ($(CONFIG_PREEMPT_RT_FULL),)
     lttng-tracer-objs += lttng-context-migratable.o
     lttng-tracer-objs += lttng-context-preemptible.o
-  endif # CONFIG_PREEMPT_RT
+  endif # CONFIG_PREEMPT_RT_FULL
 
   ifneq ($(CONFIG_PREEMPT),)
     lttng-tracer-objs += lttng-context-preemptible.o
@@ -87,8 +96,7 @@ ifneq ($(KERNELRELEASE),)
       echo "lttng-tracepoint.o" ; fi;)
 
   obj-$(CONFIG_LTTNG) += lttng-statedump.o
-  lttng-statedump-objs := lttng-statedump-impl.o wrapper/irqdesc.o \
-                          wrapper/fdtable.o
+  lttng-statedump-objs := lttng-statedump-impl.o
 
   obj-$(CONFIG_LTTNG) += probes/
   obj-$(CONFIG_LTTNG) += lib/

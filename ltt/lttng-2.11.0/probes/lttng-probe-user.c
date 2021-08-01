@@ -10,6 +10,8 @@
 #include <wrapper/uaccess.h>
 #include <probes/lttng-probe-user.h>
 
+#define LTTNG_MAX_USER_STRING_LEN 1048576 /* 1MB */
+
 /*
  * Calculate string length. Include final null terminating character if there is
  * one, or ends at first fault. Disabling page faults ensures that we can safely
@@ -19,13 +21,10 @@
 long lttng_strlen_user_inatomic(const char *addr)
 {
 	long count = 0;
-	mm_segment_t old_fs;
 
 	if (!addr)
 		return 0;
 
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
 	pagefault_disable();
 	for (;;) {
 		char v;
@@ -41,12 +40,13 @@ long lttng_strlen_user_inatomic(const char *addr)
 		if (unlikely(ret > 0))
 			break;
 		count++;
+		if (unlikely(count > LTTNG_MAX_USER_STRING_LEN))
+			break;
 		if (unlikely(!v))
 			break;
 		addr++;
 	}
 	pagefault_enable();
-	set_fs(old_fs);
 	return count;
 }
 EXPORT_SYMBOL_GPL(lttng_strlen_user_inatomic);

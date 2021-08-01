@@ -8,7 +8,7 @@
  */
 
 #include <linux/module.h>
-#include <linux/tracepoint.h>
+#include <wrapper/tracepoint.h>
 #include <linux/uaccess.h>
 #include <linux/gfp.h>
 #include <linux/fs.h>
@@ -32,7 +32,10 @@
 #define LTTNG_LOGGER_COUNT_MAX	1024
 #define LTTNG_LOGGER_FILE	"lttng-logger"
 
-DEFINE_TRACE(lttng_logger);
+LTTNG_DEFINE_TRACE(lttng_logger,
+	PARAMS(const char __user *text, size_t len),
+	PARAMS(text, len)
+);
 
 static struct proc_dir_entry *lttng_logger_dentry;
 
@@ -93,6 +96,18 @@ static const struct file_operations lttng_logger_operations = {
 	.write = lttng_logger_write,
 };
 
+/*
+ * Linux 5.6 introduced a separate proc_ops struct for /proc operations
+ * to decouple it from the vfs.
+ */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0))
+static const struct proc_ops lttng_logger_proc_ops = {
+	.proc_write = lttng_logger_write,
+};
+#else
+#define lttng_logger_proc_ops lttng_logger_operations
+#endif
+
 static struct miscdevice logger_dev = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "lttng-logger",
@@ -104,7 +119,7 @@ int __init lttng_logger_init(void)
 {
 	int ret = 0;
 
-	wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_mappings();
 
 	/* /dev/lttng-logger */
 	ret = misc_register(&logger_dev);
@@ -116,7 +131,7 @@ int __init lttng_logger_init(void)
 	/* /proc/lttng-logger */
 	lttng_logger_dentry = proc_create_data(LTTNG_LOGGER_FILE,
 				S_IRUGO | S_IWUGO, NULL,
-				&lttng_logger_operations, NULL);
+				&lttng_logger_proc_ops, NULL);
 	if (!lttng_logger_dentry) {
 		printk(KERN_ERR "Error creating LTTng logger proc file\n");
 		ret = -ENOMEM;

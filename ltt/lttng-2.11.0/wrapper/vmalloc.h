@@ -20,9 +20,70 @@
 
 #include <linux/kallsyms.h>
 #include <wrapper/kallsyms.h>
+#include <lttng-kernel-version.h>
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,8,0))
+
+/*
+ * wrapper_vmalloc_sync_mappings was removed in v5.8, the vmalloc mappings
+ * are now synchronized when they are created or torn down.
+ */
+static inline
+void wrapper_vmalloc_sync_mappings(void)
+{}
+
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0) \
+  || LTTNG_KERNEL_RANGE(5,5,12, 5,6,0)            \
+  || LTTNG_KERNEL_RANGE(5,4,28, 5,5,0)            \
+  || LTTNG_KERNEL_RANGE(5,2,37, 5,3,0)            \
+  || LTTNG_KERNEL_RANGE(4,19,113, 4,20,0)         \
+  || LTTNG_KERNEL_RANGE(4,14,175, 4,15,0)         \
+  || LTTNG_KERNEL_RANGE(4,9,218, 4,10,0)          \
+  || LTTNG_KERNEL_RANGE(4,4,218, 4,5,0))	  \
+  || LTTNG_UBUNTU_KERNEL_RANGE(4,15,18,97, 4,16,0,0) \
+  || LTTNG_UBUNTU_KERNEL_RANGE(5,0,21,48, 5,1,0,0)   \
+  || LTTNG_UBUNTU_KERNEL_RANGE(5,3,18,52, 5,4,0,0)
 
 static inline
-void wrapper_vmalloc_sync_all(void)
+void wrapper_vmalloc_sync_mappings(void)
+{
+	void (*vmalloc_sync_mappings_sym)(void);
+
+	vmalloc_sync_mappings_sym = (void *) kallsyms_lookup_funcptr("vmalloc_sync_mappings");
+	if (vmalloc_sync_mappings_sym) {
+		vmalloc_sync_mappings_sym();
+	} else {
+#ifdef CONFIG_X86
+		/*
+		 * Only x86 needs vmalloc_sync_mappings to make sure LTTng does not
+		 * trigger recursive page faults.
+		 */
+		printk_once(KERN_WARNING "LTTng: vmalloc_sync_mappings symbol lookup failed.\n");
+		printk_once(KERN_WARNING "Page fault handler and NMI tracing might trigger faults.\n");
+#endif
+	}
+}
+
+/*
+ * Canary function to check for 'vmalloc_sync_mappings()' at compile time.
+ *
+ * From 'include/linux/vmalloc.h':
+ *
+ *   void vmalloc_sync_mappings(void);
+ */
+static inline
+void __canary__vmalloc_sync_mappings(void)
+{
+	vmalloc_sync_mappings();
+}
+
+#else /* #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)) */
+
+/*
+ * Map vmalloc_sync_mappings to vmalloc_sync_all() on kernels before 5.6.
+ */
+static inline
+void wrapper_vmalloc_sync_mappings(void)
 {
 	void (*vmalloc_sync_all_sym)(void);
 
@@ -40,13 +101,62 @@ void wrapper_vmalloc_sync_all(void)
 #endif
 	}
 }
-#else
+
+/*
+ * Canary function to check for 'vmalloc_sync_all()' at compile time.
+ *
+ * From 'include/linux/vmalloc.h':
+ *
+ *   void vmalloc_sync_all(void);
+ */
+static inline
+void __canary__vmalloc_sync_all(void)
+{
+	vmalloc_sync_all();
+}
+
+#endif /* #else #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)) */
+
+#else /* CONFIG_KALLSYMS */
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,8,0))
+
+/*
+ * wrapper_vmalloc_sync_mappings was removed in v5.8, the vmalloc mappings
+ * are now synchronized when they are created or torn down.
+ */
+static inline
+void wrapper_vmalloc_sync_mappings(void)
+{}
+
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0) \
+  || LTTNG_KERNEL_RANGE(5,5,12, 5,6,0)            \
+  || LTTNG_KERNEL_RANGE(5,4,28, 5,5,0)            \
+  || LTTNG_KERNEL_RANGE(5,2,37, 5,3,0)            \
+  || LTTNG_KERNEL_RANGE(4,19,113, 4,20,0)         \
+  || LTTNG_KERNEL_RANGE(4,14,175, 4,15,0)         \
+  || LTTNG_KERNEL_RANGE(4,9,218, 4,10,0)          \
+  || LTTNG_KERNEL_RANGE(4,4,218, 4,5,0))	  \
+  || LTTNG_UBUNTU_KERNEL_RANGE(4,15,18,97, 4,18,0,0) \
+  || LTTNG_UBUNTU_KERNEL_RANGE(5,0,21,48, 5,1,0,0)   \
+  || LTTNG_UBUNTU_KERNEL_RANGE(5,3,18,52, 5,4,0,0)
 
 static inline
-void wrapper_vmalloc_sync_all(void)
+void wrapper_vmalloc_sync_mappings(void)
+{
+	return vmalloc_sync_mappings();
+}
+
+#else /* #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)) */
+
+static inline
+void wrapper_vmalloc_sync_mappings(void)
 {
 	return vmalloc_sync_all();
 }
+
+#endif /* #else #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)) */
+
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0))
@@ -61,7 +171,7 @@ void *lttng_kvmalloc_node(unsigned long size, gfp_t flags, int node)
 		 * Make sure we don't trigger recursive page faults in the
 		 * tracing fast path.
 		 */
-		wrapper_vmalloc_sync_all();
+		wrapper_vmalloc_sync_mappings();
 	}
 	return ret;
 }
@@ -102,6 +212,8 @@ void print_vmalloc_node_range_warning(void)
 	printk_once(KERN_WARNING "Please rebuild your kernel with CONFIG_KALLSYMS enabled.\n");
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0))
+
 /*
  * kallsyms wrapper of __vmalloc_node with a fallback to kmalloc_node.
  */
@@ -129,6 +241,138 @@ void *__lttng_vmalloc_node_range(unsigned long size, unsigned long align,
 		print_vmalloc_node_range_warning();
 	return __vmalloc(size, gfp_mask, prot);
 }
+
+/*
+ * Canary function to check for '__vmalloc_node_range()' at compile time.
+ *
+ * From 'include/linux/vmalloc.h':
+ *
+ *   extern void *__vmalloc_node_range(unsigned long size, unsigned long align,
+ *                           unsigned long start, unsigned long end, gfp_t gfp_mask,
+ *                           pgprot_t prot, unsigned long vm_flags, int node,
+ *                           const void *caller);
+ */
+static inline
+void *__canary____lttng_vmalloc_node_range(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, unsigned long vm_flags, int node,
+			const void *caller)
+{
+	return __vmalloc_node_range(size, align, start, end, gfp_mask, prot,
+			vm_flags, node, caller);
+}
+
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
+
+/*
+ * kallsyms wrapper of __vmalloc_node with a fallback to kmalloc_node.
+ */
+static inline
+void *__lttng_vmalloc_node_range(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, unsigned long vm_flags, int node,
+			const void *caller)
+{
+#ifdef CONFIG_KALLSYMS
+	/*
+	 * If we have KALLSYMS, get * __vmalloc_node_range which is not exported.
+	 */
+	void *(*lttng__vmalloc_node_range)(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, int node, const void *caller);
+
+	lttng__vmalloc_node_range = (void *) kallsyms_lookup_funcptr("__vmalloc_node_range");
+	if (lttng__vmalloc_node_range)
+		return lttng__vmalloc_node_range(size, align, start, end, gfp_mask, prot,
+				node, caller);
+#endif
+	if (node != NUMA_NO_NODE)
+		print_vmalloc_node_range_warning();
+	return __vmalloc(size, gfp_mask, prot);
+}
+
+/*
+ * Canary function to check for '__vmalloc_node_range()' at compile time.
+ *
+ * From 'include/linux/vmalloc.h':
+ *
+ *   extern void *__vmalloc_node_range(unsigned long size, unsigned long align,
+ *                           unsigned long start, unsigned long end, gfp_t gfp_mask,
+ *                           pgprot_t prot, unsigned long vm_flags, int node,
+ *                           const void *caller);
+ */
+static inline
+void *__canary____lttng_vmalloc_node_range(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, int node, const void *caller)
+{
+	return __vmalloc_node_range(size, align, start, end, gfp_mask, prot,
+			node, caller);
+}
+
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,38))
+
+/*
+ * kallsyms wrapper of __vmalloc_node with a fallback to kmalloc_node.
+ */
+static inline
+void *__lttng_vmalloc_node_range(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, unsigned long vm_flags, int node,
+			void *caller)
+{
+#ifdef CONFIG_KALLSYMS
+	/*
+	 * If we have KALLSYMS, get * __vmalloc_node_range which is not exported.
+	 */
+	void *(*lttng__vmalloc_node_range)(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, int node, void *caller);
+
+	lttng__vmalloc_node_range = (void *) kallsyms_lookup_funcptr("__vmalloc_node_range");
+	if (lttng__vmalloc_node_range)
+		return lttng__vmalloc_node_range(size, align, start, end, gfp_mask, prot,
+				node, caller);
+#endif
+	if (node != NUMA_NO_NODE)
+		print_vmalloc_node_range_warning();
+	return __vmalloc(size, gfp_mask, prot);
+}
+
+/*
+ * Canary function to check for '__vmalloc_node_range()' at compile time.
+ *
+ * From 'include/linux/vmalloc.h':
+ *
+ *   extern void *__vmalloc_node_range(unsigned long size, unsigned long align,
+ *                           unsigned long start, unsigned long end, gfp_t gfp_mask,
+ *                           pgprot_t prot, unsigned long vm_flags, int node,
+ *                           void *caller);
+ */
+static inline
+void *__canary____lttng_vmalloc_node_range(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, int node, void *caller)
+{
+	return __vmalloc_node_range(size, align, start, end, gfp_mask, prot,
+			node, caller);
+}
+
+#else /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,38)) */
+
+/*
+ * Basic fallback for kernel prior to 2.6.38 without __vmalloc_node_range()
+ */
+static inline
+void *__lttng_vmalloc_node_range(unsigned long size, unsigned long align,
+			unsigned long start, unsigned long end, gfp_t gfp_mask,
+			pgprot_t prot, unsigned long vm_flags, int node,
+			void *caller)
+{
+	return __vmalloc(size, gfp_mask, prot);
+}
+
+#endif
 
 /**
  * lttng_kvmalloc_node - attempt to allocate physically contiguous memory, but upon
@@ -173,7 +417,7 @@ void *lttng_kvmalloc_node(unsigned long size, gfp_t flags, int node)
 		 * Make sure we don't trigger recursive page faults in the
 		 * tracing fast path.
 		 */
-		wrapper_vmalloc_sync_all();
+		wrapper_vmalloc_sync_mappings();
 	}
 	return ret;
 }

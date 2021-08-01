@@ -59,7 +59,7 @@ void perf_counter_record(struct lttng_ctx_field *field,
 	chan->ops->event_write(ctx, &value, sizeof(value));
 }
 
-#if defined(CONFIG_PERF_EVENTS) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3,0,99))
+#if defined(CONFIG_PERF_EVENTS) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3,1,0))
 static
 void overflow_callback(struct perf_event *event,
 		       struct perf_sample_data *data,
@@ -321,7 +321,7 @@ int lttng_add_perf_counter_to_ctx(uint32_t type,
 	field->u.perf_counter = perf_field;
 	lttng_context_update(*ctx);
 
-	wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_mappings();
 	return 0;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))

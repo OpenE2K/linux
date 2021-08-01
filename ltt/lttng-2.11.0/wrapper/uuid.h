@@ -1,30 +1,31 @@
-/* SPDX-License-Identifier: (GPL-2.0 or LGPL-2.1)
+/* SPDX-License-Identifier: (GPL-2.0-only or LGPL-2.1-only)
  *
  * wrapper/uuid.h
  *
- * Copyright (C) 2011-2012 Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+ * Copyright (C) 2020 Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
  */
 
 #ifndef _LTTNG_WRAPPER_UUID_H
 #define _LTTNG_WRAPPER_UUID_H
 
 #include <linux/version.h>
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,35))
 #include <linux/uuid.h>
-#else
 
-#include <linux/random.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0))
+static inline
+void lttng_guid_gen(guid_t *u)
+{
+	return guid_gen(u);
+}
+#else /* #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)) */
 
-typedef struct {
-	__u8 b[16];
-} uuid_le;
+typedef uuid_le guid_t;
 
 static inline
-void uuid_le_gen(uuid_le *u)
+void lttng_guid_gen(guid_t *u)
 {
-	generate_random_uuid(u->b);
+	return uuid_le_gen(u);
 }
+#endif /* #else #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)) */
 
-#endif
 #endif /* _LTTNG_WRAPPER_UUID_H */
