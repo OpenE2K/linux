@@ -697,19 +697,6 @@ int ehci_setup(struct usb_hcd *hcd)
 }
 EXPORT_SYMBOL_GPL(ehci_setup);
 
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
-static irqreturn_t ehci_preirq(struct usb_hcd *hcd)
-{
-	struct ehci_hcd		*ehci = hcd_to_ehci(hcd);
-
-	if (!(ehci_readl(ehci, &ehci->regs->status) & INTR_MASK)) {
-		return IRQ_NONE;
-	}
-	return IRQ_WAKE_THREAD;
-}
-#endif
-
-
 #ifdef CONFIG_MCST
 static void ehci_quirk_iohub2_worker(struct work_struct *work)
 {
@@ -1288,9 +1275,6 @@ static const struct hc_driver ehci_hc_driver = {
 	/*
 	 * generic hardware linkage
 	 */
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
-	.preirq =               ehci_preirq,
-#endif
 	.irq =			ehci_irq,
 	.flags =		HCD_MEMORY | HCD_DMA | HCD_USB2 | HCD_BH,
 

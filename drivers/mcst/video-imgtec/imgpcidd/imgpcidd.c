@@ -1181,13 +1181,15 @@ int imgpci_register_device(struct device *parent, struct imgpci_info *info)
 
 	info->imgpci_dev = idev;
 
+/* DISABLE IRQ!!! */
+#if 0
 	/* request irq */
 	ret = imgpci_request_irq (info);
 	if(ret)
 	{
 		goto err_imgpci_dev_add_attributes;
 	}
-
+#endif
 	return 0;
 
 	imgpci_dev_del_attributes(idev);
@@ -1309,44 +1311,84 @@ static int imgpci_read32(struct imgpci_info *info, unsigned long bar, unsigned l
 ******************************************************************************/
 static irqreturn_t imgpci_handler(int irq, struct imgpci_info *info)
 {
-#if 1
 /* Hack for acknowledge of interrupt (this fatal situation for pdump traces) */
-	unsigned long status;
+	unsigned long status, enabled;
 	switch (info->pdev->device) {
 	case PCI_MCST_VXD_DEVICE_ID:
-#define CR_PVDEC_HOST_INTERRUPT_STATUS (0x0400 + 0x0010)
-#define CR_PVDEC_INTERRUPT_CLEAR       (0x0400 + 0x0014)
-		imgpci_read32(info, 0, CR_PVDEC_HOST_INTERRUPT_STATUS, &status);
-		imgpci_write32(info, 0, CR_PVDEC_INTERRUPT_CLEAR,
-				    status & ~0xFFff);
-		printk(KERN_ERR "Got IRQ=%lu from VXD (enabled=%lu) "
-				"host_interrupt_status=0x%08lx\n",
-				info->irq, info->irq_enabled, status);
-		/* Unknow source of interrupt? */
-		BUG_ON((status & ~0xFFff) == 0);
+		/* register PVDEC_HOST_INTERRUPT_STATUS */
+#define PVDEC_CORE_PVDEC_INT_STAT     (0x0400 + 0x0010)
+		/* register PVDEC_INTERRUPT_CLEAR */
+#define PVDEC_CORE_PVDEC_INT_CLEAR    (0x0400 + 0x0014)
+		/* register PVDEC_HOST_INTERRUPT_ENABLE */
+#define PVDEC_CORE_PVDEC_HOST_INT_ENA (0x0400 + 0x0018)
+
+#define PVDEC_CORE_PVDEC_INT_STAT_HOST_MMU_FAULT_IRQ_MASK 0x00010000
+
+		imgpci_read32(info, 0, PVDEC_CORE_PVDEC_INT_STAT,     &status);
+		imgpci_read32(info, 0, PVDEC_CORE_PVDEC_HOST_INT_ENA, &enabled);
+
+#ifdef DEBUG
+		printk(KERN_ERR "VXD: Got IRQ=%lu (enabled=%lu) "
+			    "[PVDEC_INT_STAT]=>0x%lx [PVDEC_HOST_INT_ENA]=>0x%lx\n",
+			    info->irq, info->irq_enabled, status, enabled);
+#endif
+		status &= enabled;
+		/* Disable MMU interrupts - clearing is not enough */
+		if (status & PVDEC_CORE_PVDEC_INT_STAT_HOST_MMU_FAULT_IRQ_MASK) {
+			enabled &= ~PVDEC_CORE_PVDEC_INT_STAT_HOST_MMU_FAULT_IRQ_MASK;
+			imgpci_write32(info, 0, PVDEC_CORE_PVDEC_HOST_INT_ENA, enabled);
+		}
+		imgpci_write32(info, 0, PVDEC_CORE_PVDEC_INT_CLEAR, status);
 		break;
 	case PCI_MCST_VXE_DEVICE_ID:
-		/* While not supported - no PDUMP traces with irq generaton */
-		printk(KERN_ERR "Got IRQ=%lu from VXE (enabled=%lu) "
-			    "VXE device TODO: not supported now!\n",
-			    info->irq, info->irq_enabled);
-		BUG_ON(1); /* TODO: ^^^ */
+#define QUARTZ_TOP_MULTIPIPE_INT_STAT  (0x0000 + 0x0010)
+#define QUARTZ_TOP_MULTIPIPE_INT_CLEAR (0x0000 + 0x001C)
+
+#define MASK_QUARTZ_TOP_INT_STAT_DMAC		0x00000001
+#define MASK_QUARTZ_TOP_INT_STAT_PROC		0x00000002
+#define MASK_QUARTZ_TOP_INT_STAT_PROC_HALT	0x00000004
+#define MASK_QUARTZ_TOP_INT_STAT_MMU_FAULT	0x00000008
+#define MASK_QUARTZ_TOP_INT_STAT_FRAME_ALARM	0x00000010
+#define MASK_QUARTZ_TOP_INT_PROC_FENCE_DONE	0x00000020
+#define MASK_QUARTZ_TOP_INT_STAT_PIPE_PROC	0x00000F00
+#define MASK_QUARTZ_TOP_INT_STAT_PIPE_HOST	0x000F0000
+
+		imgpci_read32(info, 0, QUARTZ_TOP_MULTIPIPE_INT_STAT, &status);
+#ifdef DEBUG
+		printk(KERN_ERR "VXE: Got IRQ=%lu (enabled=%lu status=0x%lx)\n",
+			info->irq, info->irq_enabled, status);
+#endif
+		status &= MASK_QUARTZ_TOP_INT_STAT_DMAC |
+			  MASK_QUARTZ_TOP_INT_STAT_PROC |
+			  MASK_QUARTZ_TOP_INT_STAT_PROC_HALT |
+			  MASK_QUARTZ_TOP_INT_STAT_MMU_FAULT |
+			  MASK_QUARTZ_TOP_INT_STAT_FRAME_ALARM |
+			  MASK_QUARTZ_TOP_INT_PROC_FENCE_DONE;
+		if (status) {
+			imgpci_write32(info, 0, QUARTZ_TOP_MULTIPIPE_INT_CLEAR, status);
+		}
+#ifdef DEBUG
+		else {
+		    printk(KERN_ERR "Got VXE spurious interrupt?\n");
+		}
+#endif
 		break;
 	case PCI_MCST_GPU_DEVICE_ID:
 #define RGX_CR_META_SP_MSLVIRQSTATUS   (0x0AC8U)
 		imgpci_read32(info, 0, RGX_CR_META_SP_MSLVIRQSTATUS, &status);
 		imgpci_write32(info, 0, RGX_CR_META_SP_MSLVIRQSTATUS, 0);
-		printk(KERN_ERR "Got IRQ=%lu from 3D GPU (enabled=%lu) "
-			"META_SP_MSLVIRQSTATUS=0x%08lx\n",
-			info->irq, info->irq_enabled, status);
-		BUG_ON(status == 0); /* Unknow source of interrupt */
+#ifdef DEBUG
+		printk(KERN_ERR "3DGPU: Got IRQ=%lu (enabled=%lu) "
+				"META_SP_MSLVIRQSTATUS=0x%08lx\n",
+				info->irq, info->irq_enabled, status);
+#endif
+		/* WARN_ON(status == 0); */ /* Unknow source of interrupt */
 		break;
 	default:
 		printk(KERN_ERR "Got IRQ=%lu from Unknow device (enabled=%lu)\n",
 			    info->irq, info->irq_enabled);
 		break;
 	}
-#endif
 
   #ifdef IMGPCI_EXTRA_DEBUG
 	g_int_count_total++;
@@ -1504,7 +1546,7 @@ static int imgpci_perform_ioctl(struct imgpci_info *info,	unsigned int cmd, unsi
  @Function              imgpci_pci_probe
 
 ******************************************************************************/
-static int __init imgpci_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
+static int imgpci_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	struct imgpci_info *info;
 	unsigned long bar;
@@ -1545,27 +1587,27 @@ static int __init imgpci_pci_probe(struct pci_dev *dev, const struct pci_device_
 	switch(dev->device)
 	{
 	  case PCI_MCST_VXD_DEVICE_ID:
-	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x1180000000;
+	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x0B80000000;
 	     info->mem[MAX_IMGPCI_MAPS-1].size = 0x0040000000; /* 1024M */
 	     break;
 	  case PCI_MCST_VXE_DEVICE_ID:
-	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x11C0000000;
+	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x0BC0000000;
 	     info->mem[MAX_IMGPCI_MAPS-1].size = 0x0010000000; /* 256M */
 	     break;
 	  case PCI_MCST_GPU_DEVICE_ID:
-	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x11D0000000;
+	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x0BD0000000;
 	     info->mem[MAX_IMGPCI_MAPS-1].size = 0x0030000000; /* 768M */
 	     break;
 	  default:
-	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x1177000000;
+	     info->mem[MAX_IMGPCI_MAPS-1].addr = 0x0B77000000;
 	     info->mem[MAX_IMGPCI_MAPS-1].size = 0x0009000000; /* 144M (res) */
 	     break;
 	}
 	info->mem[MAX_IMGPCI_MAPS-1].internal_addr =
 		ioremap_wc(info->mem[MAX_IMGPCI_MAPS-1].addr,
 			   info->mem[MAX_IMGPCI_MAPS-1].size);
-	printk(KERN_ERR "imgpcidev: virtual BAR%u 0x%10lx +0x%08lx, "
-			"mapped to 0x%10lx\n",
+	printk(KERN_ERR "imgpcidev: virtual BAR%u 0x%010lx +0x%08lx, "
+			"mapped to 0x%010lx\n",
 	       MAX_IMGPCI_MAPS-1,
 	       info->mem[MAX_IMGPCI_MAPS-1].addr,
 	       info->mem[MAX_IMGPCI_MAPS-1].size,

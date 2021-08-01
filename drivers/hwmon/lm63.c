@@ -36,6 +36,10 @@
 #include <linux/of_device.h>
 #include <linux/sysfs.h>
 #include <linux/types.h>
+#ifdef CONFIG_MCST
+#include <linux/pwm.h>
+#include <linux/thermal.h>
+#endif
 
 /*
  * Addresses to scan
@@ -177,6 +181,27 @@ struct lm63_data {
 	bool remote_unsigned; /* true if unsigned remote upper limits */
 	bool trutherm;
 };
+
+#ifdef CONFIG_MCST
+#define MAX_SENSORS	2
+
+struct lm63_pwm_chip {
+	struct lm63_data *data;
+	struct pwm_chip chip;
+};
+
+struct lm63_thermal_sensor {
+	struct i2c_client *client;
+	struct lm63_data *data;
+	struct thermal_zone_device *tz;
+	unsigned int sensor_id;
+};
+
+static inline struct lm63_pwm_chip *to_pwm(struct pwm_chip *chip)
+{
+	return container_of(chip, struct lm63_pwm_chip, chip);
+}
+#endif
 
 static inline int temp8_from_reg(struct lm63_data *data, int nr)
 {
@@ -1153,6 +1178,126 @@ static void lm63_init_client(struct lm63_data *data)
 		(data->config_fan & 0x20) ? "manual" : "auto");
 }
 
+#ifdef CONFIG_MCST
+static int lm63_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
+			const struct pwm_state *state)
+{
+	struct lm63_pwm_chip *lm63_pwm = to_pwm(chip);
+	struct i2c_client *client = to_i2c_client(chip->dev);
+	struct lm63_data *data = lm63_pwm->data;
+	u8 val;
+
+	if (state->period > 1) {
+		mutex_lock(&data->update_lock);
+		val = state->duty_cycle * 255 / (state->period - 1);
+		val = clamp_val(val, 0, 255);
+		val = data->pwm_highres ? val :
+				(val * data->pwm1_freq * 2 + 127) / 255;
+		i2c_smbus_write_byte_data(client, LM63_REG_PWM_VALUE, val);
+		mutex_unlock(&data->update_lock);
+	} else {
+		dev_err(chip->dev, "cooling device period failed\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const struct pwm_ops lm63_pwm_ops = {
+	.apply = lm63_pwm_apply,
+	.owner = THIS_MODULE,
+};
+
+static int lm63_init_pwm(struct i2c_client *client,
+		      struct lm63_data *data)
+{
+	struct lm63_pwm_chip *lm63_pwm;
+	int ret;
+
+	lm63_pwm = devm_kzalloc(&client->dev, sizeof(*lm63_pwm), GFP_KERNEL);
+	if (!lm63_pwm)
+		return -ENOMEM;
+
+	lm63_pwm->data = data;
+	i2c_set_clientdata(client, lm63_pwm);
+
+	/* Initialize chip */
+
+	lm63_pwm->chip.dev = &client->dev;
+	lm63_pwm->chip.ops = &lm63_pwm_ops;
+	lm63_pwm->chip.base = -1;
+	lm63_pwm->chip.npwm = 1;
+
+	ret = pwmchip_add(&lm63_pwm->chip);
+	if (ret < 0) {
+		dev_err(&client->dev, "pwmchip_add() failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int lm63_pwm_remove(struct i2c_client *client)
+{
+	struct lm63_pwm_chip *lm63_pwm = i2c_get_clientdata(client);
+	int ret;
+
+	ret = pwmchip_remove(&lm63_pwm->chip);
+	if (ret) {
+		dev_err(&client->dev, "pwmchip_remove() failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int lm63_get_temp(void *data, int *temp)
+{
+	struct lm63_thermal_sensor *thermal_sensor = data;
+
+	mutex_lock(&thermal_sensor->data->update_lock);
+	*temp = i2c_smbus_read_byte_data(thermal_sensor->client,
+				LM63_REG_LOCAL_TEMP + thermal_sensor->sensor_id) * 1000;
+	mutex_unlock(&thermal_sensor->data->update_lock);
+
+	return 0;
+}
+
+static const struct thermal_zone_of_device_ops lm63_tz_ops = {
+	.get_temp = lm63_get_temp,
+};
+
+static int lm63_init_thermal(struct i2c_client *client,
+		      struct lm63_data *data)
+{
+	unsigned int i;
+
+	for (i = 0; i < MAX_SENSORS; i++) {
+		struct lm63_thermal_sensor *thermal_sensor;
+
+		thermal_sensor = devm_kzalloc(&client->dev,
+					sizeof(*thermal_sensor), GFP_KERNEL);
+		if (!thermal_sensor) {
+			return -ENOMEM;
+		}
+
+		thermal_sensor->client = client;
+		thermal_sensor->data = data;
+		thermal_sensor->sensor_id = i;
+
+		thermal_sensor->tz =
+			devm_thermal_zone_of_sensor_register(&client->dev,
+					     i, thermal_sensor, &lm63_tz_ops);
+		if (IS_ERR(thermal_sensor->tz))
+			return PTR_ERR(thermal_sensor->tz);
+
+		dev_dbg(&client->dev, "thermal sensor %d registered\n", 0);
+	}
+
+	return 0;
+}
+#endif
+
 static int lm63_probe(struct i2c_client *client,
 		      const struct i2c_device_id *id)
 {
@@ -1191,6 +1336,10 @@ static int lm63_probe(struct i2c_client *client,
 
 	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
 							   data, data->groups);
+#ifdef CONFIG_MCST
+	lm63_init_thermal(client, data);
+	lm63_init_pwm(client, data);
+#endif
 	return PTR_ERR_OR_ZERO(hwmon_dev);
 }
 
@@ -1233,6 +1382,9 @@ static struct i2c_driver lm63_driver = {
 	.id_table	= lm63_id,
 	.detect		= lm63_detect,
 	.address_list	= normal_i2c,
+#ifdef CONFIG_MCST
+	.remove		= lm63_pwm_remove,
+#endif
 };
 
 module_i2c_driver(lm63_driver);

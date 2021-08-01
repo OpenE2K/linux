@@ -557,8 +557,7 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 	pt_regs_t *__regs = (pt_regs);					\
 	bool is_ligh_hypercall;						\
 									\
-	is_ligh_hypercall =						\
-		(__regs->flags & LIGHT_HYPERCALL_FLAG_PT_REGS) != 0;	\
+	is_ligh_hypercall = __regs->flags.light_hypercall;		\
 	is_ligh_hypercall;						\
 })
 #define	TI_LIGHT_HYPERCALL_MODE(thread_info)				\
@@ -596,6 +595,7 @@ typedef struct pv_vcpu_ctxt {
 	e2k_psr_t guest_psr;		/* guest PSR state before trap */
 	bool irq_under_upsr;		/* is IRQ control under UOSR? */
 	bool in_sig_handler;		/* signal handler in progress */
+	unsigned long sigreturn_entry;	/* guest signal return start IP */
 } pv_vcpu_ctxt_t;
 
 #else	/* !CONFIG_KVM_HOST_MODE */

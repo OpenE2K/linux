@@ -19,8 +19,9 @@
 #include <asm/epicdef.h>
 #include <asm/mmu_regs_types.h>
 #include <asm/mmu_types.h>
-
+#include <asm/kvm/vcpu-regs-debug.h>
 #include <asm/kvm/irq.h>
+#include <uapi/asm/sigcontext.h>
 
 typedef	struct kvm_cpu_regs {
 #if	defined(CONFIG_KVM_GUEST_KERNEL) && \
@@ -62,6 +63,7 @@ typedef	struct kvm_cpu_regs {
 	e2k_ctpr_t	CPU_CTPR3;
 	e2k_tir_t	CPU_TIRs[MAX_TIRs_NUM];	/* Trap Info Registers */
 	int		CPU_TIRs_num;	/* number of occupied TIRs */
+	u64		CPU_SBBP[SBBP_ENTRIES_NUM];
 	e2k_wd_t	CPU_WD;		/* Window Descriptor Register */
 	e2k_bgr_t	CPU_BGR;	/* Base Global Register */
 	e2k_lsr_t	CPU_LSR;	/* Loop Status Register */
@@ -72,7 +74,7 @@ typedef	struct kvm_cpu_regs {
 	e2k_cuir_t	CPU_OSCUIR;	/* CUI register of OS */
 	u64		CPU_OSR0;	/* OS register #0 */
 	u32		CPU_OSEM;	/* OS Entries Mask */
-	e2k_psr_t	CPU_PSR;	/* Processor State Register */
+	e2k_psr_t	CPU_E2K_PSR;	/* Processor State Register */
 	e2k_upsr_t	CPU_UPSR;	/* User Processor State Register */
 	e2k_pfpfr_t	CPU_PFPFR;	/* floating point control registers */
 	e2k_fpcr_t	CPU_FPCR;
@@ -297,6 +299,9 @@ typedef struct kvm_vcpu_state {
 	bool			irqs_under_upsr;
 	bool			do_dump_state;	/* dump all stacks */
 	bool			do_dump_stack;	/* dump only active stack */
+#ifdef	VCPU_REGS_DEBUG
+	vcpu_regs_trace_t	trace;	/* VCPU state trace */
+#endif	/* VCPU_REGS_DEBUG */
 } kvm_vcpu_state_t;
 
 #define	DEBUG_MODE_ON		(vcpu->arch.kmap_vcpu_state->debug_mode_on)

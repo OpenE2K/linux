@@ -1119,12 +1119,17 @@ int ttm_populate_and_map_pages(struct device *dev, struct ttm_dma_tt *tt,
 						  0, num_pages * PAGE_SIZE,
 						  DMA_BIDIRECTIONAL);
 		if (dma_mapping_error(dev, tt->dma_address[i])) {
+#ifdef CONFIG_MCST /* number of maps do not equal to i */
+			tt->dma_address[i] = 0;
+			ttm_unmap_and_unpopulate_pages(dev, tt);
+#else
 			while (i--) {
 				dma_unmap_page(dev, tt->dma_address[i],
-					       PAGE_SIZE, DMA_BIDIRECTIONAL);
+				PAGE_SIZE, DMA_BIDIRECTIONAL);
 				tt->dma_address[i] = 0;
 			}
 			ttm_pool_unpopulate(&tt->ttm);
+#endif
 			return -EFAULT;
 		}
 

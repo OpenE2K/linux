@@ -297,6 +297,7 @@ extern int __init e90s_early_iohub_online(int node, int link);
 #define NBSR_INT_CFG       0x7080	/* 4	Node Interrupt Configuration */
 #define NBSR_NODE_CFG_INFO 0x7088	/* 4	Node Config Information */
 #define NBSR_JUMPER        0x70b0	/* 4	Node Jumper Register */
+# define NBSR_JUMPER_R2000P_JmpIommuMirrorEn (1 << 12)
 #define NBSR_NODE_CFG2     0x70b4	/* 4	NodeConfig2 */
 
 /* e90s has only one IO link on each node */

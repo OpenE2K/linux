@@ -8,13 +8,15 @@ Confs()
 {
 cat <<EOF
  e2k_nort e2k_rt e2k_nn e2k_nnrt e2k_host e2k_guest
- e2c3_proto e12c_proto e16c_proto e2c3_nort e12c_nort
- e1cp_nort e1cp_rt
+ e2c3_proto e12c_proto e16c_proto
+ e12c_nort
+ e16c_nort e16c_rt e16c_nn e16c_nnrt
+ e1cp_nort e1cp_rt e1cp_host e1cp_guest
+ e2c3_nort e2c3_rt
  e2s_nort e2s_rt e2s_nn e2s_nnrt e2s_host e2s_guest
  e3s_nort e3s_rt e3s_nn e3s_nnrt e3s_host e3s_guest
  e8c_nort e8c_rt e8c_nn e8c_nnrt e8c_host e8c_guest
  e8c2_nort e8c2_rt e8c2_nn e8c2_nnrt e8c2_host e8c2_guest
- e16c_nort e16c_rt e16c_nn e16c_nnrt
 EOF
 }
 CONFS=`Confs | sed -e 's/$/ /g'`
@@ -27,7 +29,7 @@ Confs
 usage()
 {
 	echo "incorrect param: $1"
-	echo "usage: $scname [--def] --conf <conf> [--file <anyname>_defconfig]" >&2
+	echo "usage: $scname [--def] --conf <conf> [--file <anyname>_defconfig] [CC=<cc>]" >&2
 	exit 1
 }
 Usage() {
@@ -59,13 +61,13 @@ cleanup()
 {
 	rm -f $conf_path/$tmpf
 }
-###############################################################################
-conf_localversion()
+localversion()
 {
 	l=`echo $DCONF | sed -e 's/_/-/' -e 's/nort//' -e 's/-$//'`
-	$conf_script $OPTFILE --set-str CONFIG_LOCALVERSION "-${l}" \
+	$conf_script --file $OUTPUT_DIR/.config --set-str CONFIG_LOCALVERSION "-${l}" \
 	|| exit 1
 }
+###############################################################################
 conf_no_builtin_gpu()
 {
 	$conf_script $OPTFILE \
@@ -180,8 +182,6 @@ conf_prototype()
 }
 conf_hardware_virt()
 {
-	# CONFIG_FB_VGA16, CONFIG_VGA_CONSOLE, CONFIG_FRAMEBUFFER_CONSOLE are
-	# disabled temporarily - QEMU does not support them
 	$conf_script $OPTFILE \
 	-e CONFIG_EARLY_VIRTIO_CONSOLE \
 	-e CONFIG_VSOCKETS \
@@ -192,11 +192,8 @@ conf_hardware_virt()
 	-e CONFIG_VIRTIO_NET \
 	-e CONFIG_HVC_L \
 	-e CONFIG_VIRTIO_CONSOLE \
-	-d CONFIG_FB_VGA16 \
-	-d CONFIG_VGA_CONSOLE \
 	-e CONFIG_E1000 \
 	-e CONFIG_DRM_BOCHS \
-	-d CONFIG_FRAMEBUFFER_CONSOLE \
 	-e CONFIG_VIRT_DRIVERS \
 	-e CONFIG_VIRTIO \
 	-e CONFIG_VIRTIO_PCI \
@@ -302,6 +299,7 @@ conf_guest()
 	-e CONFIG_DIRECT_VIRQ_INJECTION \
 	-e CONFIG_VIRQ_VCPU_INJECTION \
 	-e CONFIG_ISO9660_FS \
+	-e CONFIG_BLK_DEV_LOOP \
 	|| exit 1
 }
 conf_power_efficient()
@@ -310,51 +308,54 @@ conf_power_efficient()
 	-e CONFIG_WQ_POWER_EFFICIENT_DEFAULT \
 	|| exit 1
 }
-e2k_nort()  { conf_localversion; }
-e2k_rt()    { conf_localversion; }
-e2k_nn()    { conf_localversion; conf_nn; }
-e2k_nnrt()  { conf_localversion; conf_nn; }
-e2k_host()  { conf_localversion; conf_host; }
-e2k_guest() { conf_localversion; conf_guest; }
-e1cp_nort() { conf_localversion; conf_e1cp; conf_power_efficient; }
-e1cp_rt()   { conf_localversion; conf_e1cp; conf_power_efficient; }
-e2s_nort()  { conf_localversion; conf_e2s; }
-e2s_rt()    { conf_localversion; conf_e2s; }
-e2s_nn()    { conf_localversion; conf_e2s; conf_nn; }
-e2s_nnrt()  { conf_localversion; conf_e2s; conf_nn; }
-e2s_host()  { conf_localversion; conf_e2s; conf_host; }
-e2s_guest() { conf_localversion; conf_e2s; conf_guest; }
-e3s_nort()  { conf_localversion; conf_e3s; }
-e3s_rt()    { conf_localversion; conf_e3s; }
-e3s_nn()    { conf_localversion; conf_e3s; conf_nn; }
-e3s_nnrt()  { conf_localversion; conf_e3s; conf_nn; }
-e3s_host()  { conf_localversion; conf_e3s; conf_host; }
-e3s_guest() { conf_localversion; conf_e3s; conf_guest; }
-e8c_nort()  { conf_localversion; conf_e8c; }
-e8c_rt()    { conf_localversion; conf_e8c; }
-e8c_nn()    { conf_localversion; conf_e8c; conf_nn; }
-e8c_nnrt()  { conf_localversion; conf_e8c; conf_nn; }
-e8c_host()  { conf_localversion; conf_e8c; conf_host; }
-e8c_guest() { conf_localversion; conf_e8c; conf_guest; }
-e8c2_nort() { conf_localversion; conf_e8c2; }
-e8c2_rt()   { conf_localversion; conf_e8c2; }
-e8c2_nn()   { conf_localversion; conf_e8c2; conf_nn; }
-e8c2_nnrt() { conf_localversion; conf_e8c2; conf_nn; }
-e8c2_host() { conf_localversion; conf_e8c2; conf_host; }
-e8c2_guest(){ conf_localversion; conf_e8c2; conf_guest; }
-e16c_nort() { conf_localversion; conf_e16c; conf_hardware_virt; }
-e16c_rt()   { conf_localversion; conf_e16c; conf_hardware_virt; }
-e16c_nn()   { conf_localversion; conf_e16c; conf_hardware_virt; conf_nn; }
-e16c_nnrt() { conf_localversion; conf_e16c; conf_hardware_virt; conf_nn; }
-e12c_proto(){ conf_localversion; conf_e12c; conf_hardware_virt; conf_prototype; }
-e16c_proto(){ conf_localversion; conf_e16c; conf_hardware_virt; conf_prototype; }
-e2c3_proto(){ conf_localversion; conf_e2c3; conf_hardware_virt; conf_prototype;
-	      conf_power_efficient; conf_nn; }
+e2k_nort()  { :; }
+e2k_rt()    { :; }
+e2k_nn()    { conf_nn; }
+e2k_nnrt()  { conf_nn; }
+e2k_host()  { conf_host; }
+e2k_guest() { conf_guest; }
+e1cp_nort() { conf_e1cp; conf_power_efficient; }
+e1cp_rt()   { conf_e1cp; conf_power_efficient; }
+e1cp_host() { conf_e1cp; conf_power_efficient; conf_host; }
+e1cp_guest(){ conf_e1cp; conf_power_efficient; conf_guest; }
+e2s_nort()  { conf_e2s; }
+e2s_rt()    { conf_e2s; }
+e2s_nn()    { conf_e2s; conf_nn; }
+e2s_nnrt()  { conf_e2s; conf_nn; }
+e2s_host()  { conf_e2s; conf_host; }
+e2s_guest() { conf_e2s; conf_guest; }
+e3s_nort()  { conf_e3s; }
+e3s_rt()    { conf_e3s; }
+e3s_nn()    { conf_e3s; conf_nn; }
+e3s_nnrt()  { conf_e3s; conf_nn; }
+e3s_host()  { conf_e3s; conf_host; }
+e3s_guest() { conf_e3s; conf_guest; }
+e8c_nort()  { conf_e8c; }
+e8c_rt()    { conf_e8c; }
+e8c_nn()    { conf_e8c; conf_nn; }
+e8c_nnrt()  { conf_e8c; conf_nn; }
+e8c_host()  { conf_e8c; conf_host; }
+e8c_guest() { conf_e8c; conf_guest; }
+e8c2_nort() { conf_e8c2; }
+e8c2_rt()   { conf_e8c2; }
+e8c2_nn()   { conf_e8c2; conf_nn; }
+e8c2_nnrt() { conf_e8c2; conf_nn; }
+e8c2_host() { conf_e8c2; conf_host; }
+e8c2_guest(){ conf_e8c2; conf_guest; }
+e16c_nort() { conf_e16c; conf_hardware_virt; }
+e16c_rt()   { conf_e16c; conf_hardware_virt; }
+e16c_nn()   { conf_e16c; conf_hardware_virt; conf_nn; }
+e16c_nnrt() { conf_e16c; conf_hardware_virt; conf_nn; }
+e2c3_nort() { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; }
+e2c3_rt()   { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; }
+e12c_proto(){ conf_e12c; conf_hardware_virt; conf_prototype; }
+e16c_proto(){ conf_e16c; conf_hardware_virt; conf_prototype; }
+e2c3_proto(){ conf_e2c3; conf_hardware_virt; conf_prototype; conf_power_efficient; conf_nn; }
 # These are temporary and needed because distribution does not know about "_proto" kernels
 e12c_nort() { e12c_proto; }
-e2c3_nort() { e2c3_proto; }
 ###############################################################################
 trap "cleanup" 1 2 3 6 15 EXIT
+OUTPUT_DIR=.
 while [ "$1" != "" ] ; do
 	opt="$1"
 	shift
@@ -363,6 +364,8 @@ while [ "$1" != "" ] ; do
 	--conf|-c) [ x"$DCONF" != x ] && usage; DCONF="$1"; shift;;
 	--file|-f) [ x"$DFILE" != x ] && usage; DFILE="$1"; shift;;
 	--output_directory|-o) OUTPUT_DIR="$1"; shift;;
+	CC=*) optcc="$opt";;
+	V=*) optv="$opt";;
 	--help|-h) Usage;;
 	*) echo "incorrect param: $opt"; Usage;;
 	esac
@@ -373,11 +376,13 @@ if [[ "$CONFS" != *" $DCONF "* ]]; then
 	KnownConfs
 	exit 1
 fi
+# additional configuration files to use
+ADDITIONAL_CONFIGS=
+if [[ "$DCONF" == *"_rt"* ]] || [[ "$DCONF" == *"_nnrt"* ]]; then
+	ADDITIONAL_CONFIGS+=" mcst_rt.config "
+fi
 # src defconfig
 SFILE=$conf_path/defconfig
-if [[ "$DCONF" == *"_rt"* ]] || [[ "$DCONF" == *"_nnrt"* ]]; then
-	SFILE=$conf_path/rt_defconfig
-fi
 # dst defconfig
 if [ x"$DFILE" == x ]; then
 	DFILENAME=$tmpf
@@ -403,6 +408,7 @@ $DCONF
 [ x$def_flg == x0 ] && exit 0
 
 # Generate .config
-make O=$OUTPUT_DIR $DFILENAME || exit 1
-make O=$OUTPUT_DIR olddefconfig
+make O=$OUTPUT_DIR $DFILENAME $ADDITIONAL_CONFIGS $optcc $optv || exit 1
+localversion
+make O=$OUTPUT_DIR olddefconfig $optcc $optv
 exit $?

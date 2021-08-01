@@ -636,13 +636,6 @@ void handle_level_irq(struct irq_desc *desc)
 		goto out_unlock;
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
-#ifdef CONFIG_MCST
-	if (desc->istate & IRQS_ONESHOT) {
-		desc->istate |= IRQS_DO_ONESHOT;
-	} else {
-		desc->istate &= ~IRQS_DO_ONESHOT;
-	}
-#endif
 
 	/*
 	 * If its disabled or no action available
@@ -725,17 +718,8 @@ void handle_fasteoi_irq(struct irq_desc *desc)
 	}
 
 	kstat_incr_irqs_this_cpu(desc);
-#ifdef CONFIG_MCST
-	if (desc->istate & IRQS_ONESHOT) {
-		desc->istate |= IRQS_DO_ONESHOT;
-		mask_irq(desc);
-	} else {
-		desc->istate &= ~IRQS_DO_ONESHOT;
-	}
-#else
 	if (desc->istate & IRQS_ONESHOT)
 		mask_irq(desc);
-#endif
 
 	preflow_handler(desc);
 	handle_irq_event(desc);

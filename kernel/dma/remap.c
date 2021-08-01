@@ -19,6 +19,12 @@ struct page **dma_common_find_pages(void *cpu_addr)
 		return NULL;
 	return area->pages;
 }
+#ifdef CONFIG_MCST
+/* unified_map_um() needs it.
+ * See: drivers/mcst/video-imgtec/linux/mem_man/img_mem_unified.c
+ */
+EXPORT_SYMBOL_GPL(dma_common_find_pages);
+#endif /*CONFIG_MCST*/
 
 static struct vm_struct *__dma_common_pages_remap(struct page **pages,
 			size_t size, pgprot_t prot, const void *caller)

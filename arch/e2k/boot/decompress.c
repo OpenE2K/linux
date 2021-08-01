@@ -95,6 +95,11 @@ static u8 dec_readb(void __iomem *addr)
 	return NATIVE_READ_MAS_B((unsigned long) addr, MAS_IOADDR);
 }
 
+static u32 dec_readl(void __iomem *addr)
+{
+	return NATIVE_READ_MAS_W((unsigned long) addr, MAS_IOADDR);
+}
+
 static inline u8 am85c30_com_inb_command(u64 iomem_addr, u8 reg_num)
 {
 	dec_writeb(reg_num, (void __iomem *) iomem_addr);
@@ -104,6 +109,19 @@ static inline u8 am85c30_com_inb_command(u64 iomem_addr, u8 reg_num)
 static inline void am85c30_com_outb(u64 iomem_addr, u8 byte)
 {
 	dec_writeb(byte, (void __iomem *) iomem_addr);
+}
+
+static inline unsigned int dec_epic_is_bsp(void)
+{
+	union cepic_ctrl reg;
+
+	reg.raw = dec_readl((void __iomem *)(EPIC_DEFAULT_PHYS_BASE + CEPIC_CTRL));
+	return reg.bits.bsp_core;
+}
+
+static inline unsigned int dec_apic_is_bsp(void)
+{
+	return BootStrap(dec_readl((void __iomem *)(APIC_DEFAULT_PHYS_BASE + APIC_BSP)));
 }
 
 #define AM85C30_RR0	0x00
@@ -527,9 +545,9 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 	 */
 	idr = read_idr();
 	if (idr.mdl >= IDR_E12C_MDL)
-		ret = boot_epic_is_bsp();
+		ret = dec_epic_is_bsp();
 	else
-		ret = boot_apic_is_bsp();
+		ret = dec_apic_is_bsp();
 
 	if (!ret) {
 		while (unpacking_in_progress)

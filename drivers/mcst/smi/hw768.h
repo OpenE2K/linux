@@ -12,6 +12,8 @@
 #define LYNX_HW768_H__
 #include "hw_com.h"
 
+void hw768_enable_lvds(int channels);
+
 void ddk768_set_mmio(volatile unsigned char * addr,unsigned short devId,char revId);
 unsigned long ddk768_getFrameBufSize(void);
 long ddk768_initChip(void);
@@ -30,7 +32,6 @@ long ddk768_edidHeaderReadMonitorExHwI2C(
 );
 
 
-
 long ddk768_detectCRTMonitor(disp_control_t dispControl, unsigned char redValue, 
 	unsigned char greenValue, unsigned char blueValue);
 
@@ -43,8 +44,6 @@ long ddk768_edidReadMonitor(
 
 
 
-
-
 long ddk768_edidReadMonitorEx(
     unsigned char *pEDIDBuffer,
     unsigned long bufferSize,
@@ -54,9 +53,7 @@ long ddk768_edidReadMonitorEx(
 );
 
 
-
 int hw768_get_hdmi_edid(unsigned char *pEDIDBuffer);
-
 
 
 long ddk768_edidReadMonitorExHwI2C(
@@ -70,8 +67,8 @@ long ddk768_edidReadMonitorExHwI2C(
  * Disable double pixel clock. 
  * This is a teporary function, used to patch for the random fuzzy font problem. 
  */
-void DisableDoublePixel(void);
-
+void EnableDoublePixel(disp_control_t dispControl);
+void DisableDoublePixel(disp_control_t dispControl);
 
 /*
  * This function initializes the cursor attributes.
@@ -124,7 +121,7 @@ void setDisplayDPMS(
    );
 
 void hw768_init_hdmi(void);
-int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode);
+int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode, bool isHDMI);
 
 void ddk768_setDisplayEnable(disp_control_t dispControl, /* Channel 0 or Channel 1) */
 disp_state_t dispState /* ON or OFF */);
@@ -133,7 +130,6 @@ int hw768_check_iis_interrupt(void);
 
 int hw768_check_vsync_interrupt(int path);
 void hw768_clear_vsync_interrupt(int path);
-
 
 
 int hw768_en_dis_interrupt(int status, int pipe);

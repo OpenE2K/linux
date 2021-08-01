@@ -11,6 +11,8 @@
 #include <linux/iova.h>
 #include <linux/syscore_ops.h>
 #include <linux/pci.h>
+#include <linux/platform_device.h>
+#include <linux/memblock.h>
 #include <linux/kvm_host.h>
 
 #include <asm/sic_regs.h>
@@ -137,9 +139,12 @@ struct dte {
 #define E2K_IOMMU_GRANULE()		IO_PAGE_SIZE
 
 static int e2k_iommu_no_domains = 0;
+static int e2k_iommu_direct_map = 0;
 static struct iommu_ops e2k_iommu_ops;
 typedef u64 io_pte;
-
+static int e2k_iommu_map(struct iommu_domain *iommu_domain,
+			    unsigned long iova, phys_addr_t paddr, size_t size,
+			    int iommu_prot);
 
 /* IOPTE accessors */
 #define iopte_deref(pte)	__va(iopte_to_pa(pte))
@@ -182,7 +187,7 @@ static io_pte e2k_iommu_prot_to_pte(int prot)
 
 struct e2k_iommu {
 	struct dte *dtable;
-	io_pte	*pgtable;
+	io_pte	*default_pgtable;
 	spinlock_t lock;
 	int node;
 	struct iommu_group *default_group;
@@ -203,17 +208,19 @@ static struct e2k_iommu_domain *to_e2k_domain(struct iommu_domain *dom)
 	return container_of(dom, struct e2k_iommu_domain, domain);
 }
 
+static struct pci_dev *e2k_dev_to_parent_pcidev(struct device *dev)
+{
+	while (dev && !dev_is_pci(dev))
+		dev = dev->parent;
+	BUG_ON(!dev);
+	BUG_ON(!dev_is_pci(dev));
+	return to_pci_dev(dev);
+}
+
 static struct e2k_iommu *dev_to_iommu(struct device *dev)
 {
-	struct iohub_sysdata *sd;
-
-	if(WARN_ON(!dev))
-		return NULL;
-	if(WARN_ON(!dev_is_pci(dev)))
-		return NULL;
-
-	sd = to_pci_dev(dev)->bus->sysdata;
-
+	struct pci_dev *pdev = e2k_dev_to_parent_pcidev(dev);
+	struct iohub_sysdata *sd = pdev->bus->sysdata;
 	return sd->l_iommu;
 }
 
@@ -224,8 +231,9 @@ static u16 to_sid(int bus, int slot, int func)
 
 static u16 dev_to_sid(struct device *dev)
 {
-	int bus = to_pci_dev(dev)->bus->number;
-	int devfn = to_pci_dev(dev)->devfn;
+	struct pci_dev *pdev = e2k_dev_to_parent_pcidev(dev);
+	int bus = pdev->bus->number;
+	int devfn = pdev->devfn;
 	return to_sid(bus, PCI_SLOT(devfn), PCI_FUNC(devfn));
 }
 
@@ -399,7 +407,7 @@ static void e2k_iommu_init_hw(struct e2k_iommu *i)
 	int node = i->node;
 	u64 d = __pa(i->dtable) | IOMMU_DTBAR_PRESENT |
 			IOMMU_DTBAR_CASHABLE_DTE | IOMMU_DTBAR_DFLT_SZ;
-	u64 p = __pa(i->pgtable) | IOMMU_PTBAR_PRESENT |
+	u64 p = __pa(i->default_pgtable) | IOMMU_PTBAR_PRESENT |
 			IOMMU_PTBAR_CASHABLE_TTE | IOMMU_PTBAR_DFLT_SZ;
 	u32 c = IOMMU_CTRL_NEW_VERS | IOMMU_CTRL_PREFETCH_EN |
 			 IOMMU_CTRL_CASHABLE_TTE | IOMMU_CTRL_ENAB;
@@ -439,6 +447,44 @@ static void __e2k_iommu_free_pages(void *pages, size_t size)
 	free_pages((unsigned long)pages, get_order(size));
 }
 
+static int __e2k_iommu_direct_map(struct iommu_domain *d,
+				     unsigned long start,
+				     unsigned long end)
+{
+	int ret = 0;
+	unsigned long s = rounddown(start, SZ_2M), a;
+	unsigned long e = roundup(end, SZ_2M);
+
+	for (a = s; a <= e && !ret; a += SZ_2M) {
+		/*FIXME: check the result*/
+		e2k_iommu_map(d, a, a, SZ_2M,
+				IOMMU_READ | IOMMU_WRITE);
+	}
+
+	return ret;
+}
+/*TODO: iommu_default_passthrough()*/
+static int _e2k_iommu_direct_map(struct e2k_iommu *iommu)
+{
+	int ret = 0, nid;
+	struct e2k_iommu_domain d = {
+		.pgtable = iommu->default_pgtable,
+		.e2k_iommu = iommu,
+	};
+	for_each_online_node(nid) {
+		unsigned long start_pfn, end_pfn;
+		int i;
+
+		for_each_mem_pfn_range(i, nid, &start_pfn, &end_pfn, NULL) {
+			ret = __e2k_iommu_direct_map(&d.domain,
+					PFN_PHYS(start_pfn), PFN_PHYS(end_pfn));
+			if (ret)
+				return ret;
+		}
+	}
+	return ret;
+}
+
 static struct e2k_iommu *__e2k_iommu_init(int node, struct device *parent)
 {
 	struct e2k_iommu *i;
@@ -450,17 +496,20 @@ static struct e2k_iommu *__e2k_iommu_init(int node, struct device *parent)
 		return i;
 
 	if (e2k_iommu_no_domains) {
-		i->pgtable = __e2k_iommu_alloc_pages(E2K_IOMMU_GRANULE(),
+		i->default_pgtable =
+			__e2k_iommu_alloc_pages(E2K_IOMMU_GRANULE(),
 					     GFP_KERNEL, i->node);
 	} else {
 		i->dtable = __e2k_iommu_alloc_pages(E2K_DTE_ENTRIES_NR *
 					sizeof(struct dte), GFP_KERNEL, node);
 	}
-	if (!i->pgtable && !i->dtable)
+	if (!i->default_pgtable && !i->dtable)
 		goto fail;
 
 	i->node = node;
 	spin_lock_init(&i->lock);
+	if (e2k_iommu_direct_map)
+		_e2k_iommu_direct_map(i);
 
 	iommu_device_sysfs_add(&i->iommu, parent, NULL, "iommu%d", node);
 	iommu_device_set_ops(&i->iommu, &e2k_iommu_ops);
@@ -720,6 +769,119 @@ void e2k_iommu_error_interrupt(void)
 	else
 		panic(str);
 }
+/*
+ * This function checks if the driver got a valid device from the caller to
+ * avoid dereferencing invalid pointers.
+ */
+static bool e2k_iommu_check_device(struct device *dev)
+{
+	if (!dev || !dev->dma_mask)
+		return false;
+
+	while (dev && !dev_is_pci(dev))
+		dev = dev->parent;
+
+	if (!dev || !dev_is_pci(dev))
+		return false;
+	return true;
+}
+
+static const struct pci_device_id e2c3_devices[] = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA25)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_IMAGINATION_VXE)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_IMAGINATION_VXD)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2)},
+	{ }	/* terminate list */
+};
+
+static bool e2c3_disable_iommu_for_devices[ARRAY_SIZE(e2c3_devices)] = {
+	false,
+	false, /*PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650*/
+};
+
+static int e2k_iommu_attach_device_with_iommu_disabled(struct device *dev)
+{
+	unsigned long flags;
+	struct dte *dte;
+	struct dte dteval = {
+		.h_present = 1,
+		.int_enable = 1, /* enable interruts */
+		.id = 0, /* FIXME: */
+	};
+	struct e2k_iommu *i = dev_to_iommu(dev);
+
+	if (!dev_is_pci(dev))
+		goto out;
+
+	dte = dev_to_dte(i, dev);
+
+	if (dte) {
+		spin_lock_irqsave(&i->lock, flags);
+		memcpy(dte, &dteval, sizeof(struct dte));
+		spin_unlock_irqrestore(&i->lock, flags);
+	}
+out:
+	return 0;
+}
+
+#define PCI_E2C3_HW_NCTRL	0x40
+#define PCI_E2C3_DISABLE_IOMMU	(1 << 5)
+static bool e2k_iommu_disable_for_device(struct device *dev)
+{
+	u32 v = 0;
+	struct pci_dev *pdev = e2k_dev_to_parent_pcidev(dev);
+	const struct pci_device_id *id = pci_match_id(e2c3_devices, pdev);
+	int i = id - e2c3_devices;
+	bool disabled, disable;
+
+	if (!id)
+		return false;
+
+	pci_read_config_dword(pdev, PCI_E2C3_HW_NCTRL, &v);
+	disabled = v & PCI_E2C3_DISABLE_IOMMU;
+	disable = e2c3_disable_iommu_for_devices[i];
+
+	if (disabled && disable)
+		return true;
+	if (!disabled && !disable)
+		return false;
+	if (pdev->device == PCI_DEVICE_ID_MCST_MGA25)
+		return false; /* driver mga2 handles iommu itself */
+
+	if (disable) {
+		v |= PCI_E2C3_DISABLE_IOMMU;
+		dev_info(dev, "disabling iommu\n");
+		e2k_iommu_attach_device_with_iommu_disabled(dev);
+	}  else {
+		v &= ~PCI_E2C3_DISABLE_IOMMU;
+		dev_info(dev, "enabling iommu\n");
+	}
+	pci_write_config_dword(pdev, PCI_E2C3_HW_NCTRL, v);
+	return disable;
+}
+
+static char *e2k_iommu_cfg_for_device(char *str, bool disable)
+{
+	while (*str) {
+		int vendor, device, i;
+		int ret = sscanf(str, "%x:%x", &vendor, &device);
+		if (ret != 2)
+			return str;
+		for (i = 0; !(e2c3_devices[i].vendor == vendor &&
+			e2c3_devices[i].device == device) &&
+			i < ARRAY_SIZE(e2c3_devices) - 1; i++);
+
+		if (i < ARRAY_SIZE(e2c3_devices) - 1)
+			e2c3_disable_iommu_for_devices[i] = disable;
+
+		str += strcspn(str, ",");
+		while (*str == ',')
+			str++;
+	}
+	return str;
+}
 
 void e2k_iommu_virt_enable(int node)
 {
@@ -962,26 +1124,31 @@ static phys_addr_t e2k_iommu_iova_to_phys(struct iommu_domain *iommu_domain,
 static void e2k_iommu_detach_device(struct iommu_domain *iommu_domain,
 				    struct device *dev)
 {
-	struct e2k_iommu *i = dev_to_iommu(dev);
+	struct e2k_iommu *i;
 	struct e2k_iommu_domain *d = to_e2k_domain(iommu_domain);
 	unsigned long flags;
 	struct dte *dte;
-	if (WARN_ON(!i))
+	if (!e2k_iommu_check_device(dev))
 		return;
-	dev->archdata.iommu.domain = NULL;
+	i = dev_to_iommu(dev);
+
+	if (!dev_is_pci(dev))
+		goto out;
+	dev->archdata.domain = NULL;
 	dte = dev_to_dte(i, dev);
 	if (dte) {
 		spin_lock_irqsave(&i->lock, flags);
 		memset(dte, 0, sizeof(*dte));
 		spin_unlock_irqrestore(&i->lock, flags);
 	}
+out:
 	e2k_iommu_flush_dev(i, dev);
 }
 
 static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 				   struct device *dev)
 {
-	struct e2k_iommu *i = dev_to_iommu(dev);
+	struct e2k_iommu *i;
 	struct e2k_iommu_domain *d = to_e2k_domain(iommu_domain);
 	unsigned long flags;
 	struct dte *dte;
@@ -996,25 +1163,28 @@ static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 		.id = iommu_group_id(dev->iommu_group),
 	};
 
-	if (dev->archdata.iommu.domain)
-		e2k_iommu_detach_device(&dev->archdata.iommu.domain->domain,
+	if (!e2k_iommu_check_device(dev))
+		return -EINVAL;
+	i = dev_to_iommu(dev);
+
+	if (dev->archdata.domain)
+		e2k_iommu_detach_device(&dev->archdata.domain->domain,
 			dev);
 
-	dev->archdata.iommu.domain = d;
+	dev->archdata.domain = d;
 
-	if (!i)
-		return -EINVAL;
-
+	if (!dev_is_pci(dev))
+		goto out;
 
 	dte = dev_to_dte(i, dev);
 
 	mutex_lock(&d->mutex);
 	if (!d->e2k_iommu) {
 		d->e2k_iommu = i;
-		d->pgtable = i->pgtable;
+		d->pgtable = i->default_pgtable;
 
 		if (iommu_domain->type == IOMMU_DOMAIN_UNMANAGED) {
-			struct kvm *kvm = dev->archdata.iommu.kvm;
+			struct kvm *kvm = dev->archdata.kvm;
 			unsigned long int_table;
 			u32 edid;
 
@@ -1055,7 +1225,7 @@ static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 		memcpy(dte, &dteval, sizeof(struct dte));
 		spin_unlock_irqrestore(&i->lock, flags);
 	}
-
+out:
 	return 0;
 }
 
@@ -1096,7 +1266,7 @@ static void e2k_iommu_domain_free(struct iommu_domain *iommu_domain)
 	iommu_put_dma_cookie(iommu_domain);
 	__e2k_iommu_free_pgtable(d, 0, E2K_IOMMU_START_LVL(), ptep);
 
-	if (!d->e2k_iommu || (d->e2k_iommu->pgtable != ptep))
+	if (!d->e2k_iommu || (d->e2k_iommu->default_pgtable != ptep))
 		__e2k_iommu_free_pages(ptep, E2K_IOMMU_GRANULE());
 
 	if (d->e2k_iommu)
@@ -1107,13 +1277,21 @@ static void e2k_iommu_domain_free(struct iommu_domain *iommu_domain)
 
 static int e2k_iommu_add_device(struct device *dev)
 {
-	struct iommu_group *group = iommu_group_get_for_dev(dev);
+	struct iommu_group *group;
+	struct e2k_iommu *i;
 
+	if (!e2k_iommu_check_device(dev))
+		return -ENODEV;
+	if (e2k_iommu_disable_for_device(dev))
+		return -ENODEV;
+	group = iommu_group_get_for_dev(dev);
 	if (IS_ERR(group))
 		return PTR_ERR(group);
 
+	i = dev_to_iommu(dev);
+
 	iommu_group_put(group);
-	iommu_device_link(&dev_to_iommu(dev)->iommu, dev);
+	iommu_device_link(&i->iommu, dev);
 	iommu_setup_dma_ops(dev, 0, dma_get_mask(dev) + 1);
 
 	return 0;
@@ -1121,14 +1299,23 @@ static int e2k_iommu_add_device(struct device *dev)
 
 static void e2k_iommu_remove_device(struct device *dev)
 {
-	iommu_device_unlink(&dev_to_iommu(dev)->iommu, dev);
+	struct e2k_iommu *i;
+
+	if (!e2k_iommu_check_device(dev))
+		return;
+	i = dev_to_iommu(dev);
+	iommu_device_unlink(&i->iommu, dev);
 	iommu_group_remove_device(dev);
 }
 
 static struct iommu_group *e2k_iommu_device_group(struct device *dev)
 {
-	struct pci_dev *p = to_pci_dev(dev);
-	struct e2k_iommu *i = dev_to_iommu(dev);
+	struct pci_dev *p;
+	struct e2k_iommu *i;
+
+	if (!e2k_iommu_check_device(dev))
+		return NULL;
+	i = dev_to_iommu(dev);
 
 	if (i->default_group)
 		return i->default_group;
@@ -1139,7 +1326,12 @@ static struct iommu_group *e2k_iommu_device_group(struct device *dev)
 		spin_unlock_irqrestore(&i->lock, flags);
 		return i->default_group;
 	}
+	if (!dev_is_pci(dev)) {
+		p = e2k_dev_to_parent_pcidev(dev);
+		return p->dev.iommu_group;
+	}
 	/* hw bug: ohci uses ehci device-id, so put them to one group */
+	p = to_pci_dev(dev);
 	if (p->vendor == PCI_VENDOR_ID_MCST_TMP &&
 			(p->device == PCI_DEVICE_ID_MCST_OHCI ||
 			 p->device == PCI_DEVICE_ID_MCST_EHCI)) {
@@ -1178,14 +1370,15 @@ static bool e2k_iommu_capable(enum iommu_cap cap)
 static void e2k_iommu_get_resv_regions(struct device *dev,
 				      struct list_head *head)
 {
+	struct pci_dev *pdev;
+	struct iohub_sysdata *sd;
 	struct iommu_resv_region *region;
 	int prot = IOMMU_WRITE | IOMMU_NOEXEC | IOMMU_MMIO;
-	struct iohub_sysdata *sd;
-
-	if(WARN_ON(!dev_is_pci(dev)))
+	if (!e2k_iommu_check_device(dev))
 		return;
 
-	sd = to_pci_dev(dev)->bus->sysdata;
+	pdev = e2k_dev_to_parent_pcidev(dev);
+	sd = pdev->bus->sysdata;
 
 	if (!sd->pci_msi_addr_lo)
 		return;
@@ -1237,8 +1430,21 @@ static struct iommu_ops e2k_iommu_ops = {
 
 static int __init e2k_iommu_setup(char *str)
 {
-	if (!strcmp(str, "no-domains"))
-		e2k_iommu_no_domains = 1;
+	while (*str) {
+		if (!strncmp(str, "no-domains", 10)) {
+			e2k_iommu_no_domains = 1;
+		} else if (!strncmp(str, "direct-map", 10)) {
+			e2k_iommu_direct_map = 1;
+			e2k_iommu_no_domains = 1;
+		} else if (!strncmp(str, "disable:", 8)) {
+			e2k_iommu_cfg_for_device(str + 8, true);
+		} else if (!strncmp(str, "enable:", 7)) {
+			e2k_iommu_cfg_for_device(str + 7, false);
+		}
+		str += strcspn(str, ",");
+		while (*str == ',')
+			str++;
+	}
 	return 1;
 }
 __setup("e2k-iommu=", e2k_iommu_setup);
@@ -1248,7 +1454,7 @@ static int __init e2k_iommu_init(void)
 	int ret;
 	struct pci_bus *b;
 
-	if (!HAS_MACHINE_E2K_IOMMU || l_use_swiotlb)
+	if (!HAS_MACHINE_E2K_IOMMU || (l_use_swiotlb && !e2k_iommu_direct_map))
 		return 0;
 
 	BUILD_BUG_ON(sizeof(struct dte) != 32);
@@ -1267,8 +1473,13 @@ static int __init e2k_iommu_init(void)
 			return -ENOMEM;
 		sd->l_iommu = i;
 	}
+	if (e2k_iommu_direct_map)
+		return 0;
 
-	ret  = bus_set_iommu(&pci_bus_type, &e2k_iommu_ops);
+	ret = bus_set_iommu(&pci_bus_type, &e2k_iommu_ops);
+	if (ret)
+		return ret;
+	ret = bus_set_iommu(&platform_bus_type, &e2k_iommu_ops);
 	if (ret)
 		return ret;
 	e2k_iommu_init_pm_ops();

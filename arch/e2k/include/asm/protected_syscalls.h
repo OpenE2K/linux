@@ -7,9 +7,13 @@
 
 /****************** PROTECTED SYSTEM CALL DEBUG DEFINES *******************/
 
+#ifndef _E2K_PROTECTED_SYSCALLS_H_
+#define _E2K_PROTECTED_SYSCALLS_H_
+
 #ifdef CONFIG_PROTECTED_MODE
 
 #include <asm/mmu.h>
+#include <asm/e2k_ptypes.h>
 
 #undef	DYNAMIC_DEBUG_SYSCALLP_ENABLED
 #define	DYNAMIC_DEBUG_SYSCALLP_ENABLED	1 /* Dynamic prot. syscalls control */
@@ -123,6 +127,112 @@ do { \
 
 /**************************** END of DEBUG DEFINES ***********************/
 
+
+static inline
+long make_ap_lo(e2k_addr_t base, long size, long offset, int access)
+{
+	return MAKE_AP_LO(base, size, offset, access);
+}
+
+static inline
+long make_ap_hi(e2k_addr_t base, long size, long offset, int access)
+{
+	return MAKE_AP_HI(base, size, offset, access);
+}
+
+static inline
+int e2k_ptr_itag(long low)
+{
+	e2k_ptr_t ptr;
+
+	AW(ptr).lo = low;
+
+	return AS(ptr).itag;
+}
+
+static inline
+int e2k_ptr_rw(long low)
+{
+	e2k_ptr_t ptr;
+
+	AW(ptr).lo = low;
+
+	return AS(ptr).rw;
+}
+
+static inline
+unsigned long e2k_ptr_ptr(long low, long hiw, unsigned int min_size)
+{
+	e2k_ptr_t ptr;
+	unsigned int ptr_size;
+
+	AW(ptr).lo = low;
+	AW(ptr).hi = hiw;
+	ptr_size = AS(ptr).size - AS(ptr).curptr;
+
+	if (ptr_size < min_size) {
+		DbgSCP_ALERT("  Pointer is too small: %d < %d\n",
+			     ptr_size, min_size);
+		return 0;
+	} else {
+		return E2K_PTR_PTR(ptr, GET_SBR_HI());
+	}
+}
+
+static inline
+unsigned long e2k_ptr_curptr(long low, long hiw)
+{
+	e2k_ptr_t ptr;
+
+	AW(ptr).lo = low;
+	AW(ptr).hi = hiw;
+
+	return AS(ptr).curptr;
+}
+
+static inline
+unsigned long e2k_ptr_size(long low, long hiw, unsigned int min_size)
+{
+	e2k_ptr_hi_t hi;
+	unsigned int ptr_size;
+
+	AW(hi) = hiw;
+	ptr_size = AS(hi).size - AS(hi).curptr;
+
+	if (ptr_size < min_size) {
+		DbgSCP_ALERT("  Pointer is too small: %d < %d\n",
+			     ptr_size, min_size);
+		return 0;
+	} else {
+		return ptr_size;
+	}
+}
+
+static inline int e2k_ptr_str_check(char __user *str, u64 max_size)
+{
+	long slen;
+
+	slen = strnlen_user(str, max_size);
+
+	if (unlikely(!slen || slen > max_size))
+		return 1;
+
+	return 0;
+}
+
+static inline char __user *e2k_ptr_str(long low, long hiw, u64 sbr_hi)
+{
+	char __user *str;
+	e2k_ptr_hi_t hi = { .word = hiw };
+
+	str = (char __user *) __E2K_PTR_PTR(low, hiw, sbr_hi);
+
+	if (!e2k_ptr_str_check(str, AS(hi).size - AS(hi).curptr))
+		return str;
+
+	return NULL;
+}
+
 #else /* #ifndef CONFIG_PROTECTED_MODE */
 
 #define DbgSCP(...)
@@ -131,3 +241,7 @@ do { \
 #define DbgSC_ALERT(...)
 
 #endif /* CONFIG_PROTECTED_MODE */
+
+
+#endif /* _E2K_PROTECTED_SYSCALLS_H_ */
+

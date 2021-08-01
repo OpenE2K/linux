@@ -63,6 +63,7 @@ static const char TPI_FW_VERSION[] = "TPI Firmware v6.6.3_APP v1.3";
 
 // Generic Constants
 //====================================================
+
 #define OFF                    0
 #define ON                      1
 

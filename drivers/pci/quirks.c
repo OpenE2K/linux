@@ -5228,10 +5228,7 @@ static void quirk_no_ext_tags(struct pci_dev *pdev)
 
 	if (!bridge)
 		return;
-#ifdef CONFIG_MCST
-	if (iohub_generation(pdev) != 1 || iohub_revision(pdev) > 3)
-		return;
-#endif
+
 	bridge->no_ext_tags = 1;
 	pci_info(pdev, "disabling Extended Tags (this device can't handle them)\n");
 
@@ -5244,10 +5241,6 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0142, quirk_no_ext_tags);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0144, quirk_no_ext_tags);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0420, quirk_no_ext_tags);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, 0x0422, quirk_no_ext_tags);
-#ifdef CONFIG_MCST
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIe1, quirk_no_ext_tags);
-DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIe8, quirk_no_ext_tags);
-#endif
 
 #ifdef CONFIG_PCI_ATS
 /*

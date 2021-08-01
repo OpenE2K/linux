@@ -309,7 +309,7 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
 	}
 }
 
-#ifdef CONFIG_MCST
+#if defined CONFIG_MCST && defined CONFIG_FANOTIFY
 extern char fanotify_forwarded_chroot_task[TASK_COMM_LEN];
 static bool mnt_fully_visible(struct vfsmount *mnt)
 {
@@ -343,7 +343,7 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 	if (mask & FS_EVENT_ON_CHILD)
 		mnt_or_sb_mask = 0;
 
-#ifdef CONFIG_MCST
+#if defined CONFIG_MCST && defined CONFIG_FANOTIFY
 	if (data_is == FSNOTIFY_EVENT_PATH &&
 				fanotify_forwarded_chroot_task[0]) {
 		struct vfsmount *vmnt = ((struct path *)data)->mnt;

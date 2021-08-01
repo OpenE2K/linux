@@ -3336,6 +3336,7 @@ static int e1000_init_dma_ba(struct e1000_private *ep)
 	e1000_write_mgio_csr(ep, soft_reset); /* start software reset */
 	soft_reset = e1000_read_mgio_csr(ep);
 	soft_reset &= ~(SRST);
+	usleep_range(10, 20); /* reset delay */
 	e1000_write_mgio_csr(ep, soft_reset); /* stop software reset */
 	e1000_read_mgio_csr(ep); /* wait for software reset */
 	mdelay(1); /* delay */

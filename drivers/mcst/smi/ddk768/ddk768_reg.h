@@ -194,6 +194,12 @@
 #define INT_STATUS_TIMER0                          28:28
 #define INT_STATUS_TIMER0_INACTIVE                 0
 #define INT_STATUS_TIMER0_ACTIVE                   1
+#define INT_STATUS_VPU                             27:27
+#define INT_STATUS_VPU_INACTIVE                    0
+#define INT_STATUS_VPU_ACTIVE                      1
+#define INT_STATUS_JPU                             26:26
+#define INT_STATUS_JPU_INACTIVE                    0
+#define INT_STATUS_JPU_ACTIVE                      1
 #define INT_STATUS_USBH                            25:25
 #define INT_STATUS_USBH_INACTIVE                   0
 #define INT_STATUS_USBH_ACTIVE                     1
@@ -291,6 +297,12 @@
 #define INT_MASK_TIMER0                            28:28
 #define INT_MASK_TIMER0_DISABLE                    0
 #define INT_MASK_TIMER0_ENABLE                     1
+#define INT_MASK_VPU                               27:27
+#define INT_MASK_VPU_DISABLE                       0
+#define INT_MASK_VPU_ENABLE                        1
+#define INT_MASK_JPU                               26:26
+#define INT_MASK_JPU_DISABLE                       0
+#define INT_MASK_JPU_ENABLE                        1
 #define INT_MASK_USBH                              25:25
 #define INT_MASK_USBH_DISABLE                      0
 #define INT_MASK_USBH_ENABLE                       1
@@ -440,9 +452,11 @@
 
 #define JPU_PERFORMANCE_MODE                         0x000134
 #define JPU_PERFORMANCE_MODE_JPU1                    3:2
+#define JPU_PERFORMANCE_MODE_JPU1_DISABLE            0
 #define JPU_PERFORMANCE_MODE_JPU1_HD                 1
 #define JPU_PERFORMANCE_MODE_JPU1_UHD                2
 #define JPU_PERFORMANCE_MODE_JPU0                    1:0
+#define JPU_PERFORMANCE_MODE_JPU0_DISABLE	     0
 #define JPU_PERFORMANCE_MODE_JPU0_HD                 1
 #define JPU_PERFORMANCE_MODE_JPU0_UHD                2
 
@@ -1382,6 +1396,22 @@
 #define CURRENT_LINE_LVDS_P12                   12:12
 #define CURRENT_LINE_LINE                       11:0
 
+#define LVDS_CTRL1				0x080020
+#define LVDS_CTRL1_CLKSEL_PLL2			31:31
+#define LVDS_CTRL1_CLKSEL_PLL2_RE		0
+#define LVDS_CTRL1_CLKSEL_PLL2_FE		1
+#define LVDS_CTRL1_CLKSEL_PLL1			30:30
+#define LVDS_CTRL1_CLKSEL_PLL1_RE		0
+#define LVDS_CTRL1_CLKSEL_PLL1_FE		1
+#define LVDS_CTRL1_DCLK2			29:23
+#define LVDS_CTRL1_DCLK2_DEFAULT		0x63
+#define LVDS_CTRL1_DCLK1			22:16
+#define LVDS_CTRL1_DCLK1_DEFAULT		0x63
+#define LVDS_CTRL1_PLL2_LOCK			15:15
+#define LVDS_CTRL1_PLL1_LOCK			14:14
+#define LVDS_CTRL1_POR25			13:13
+#define LVDS_CTRL1_POR12			12:12
+
 #define CRT_DETECT                     0x080024
 #define CRT_DETECT_DAC				   31:31
 #define CRT_DETECT_DAC_ENABLE		   0
@@ -1405,6 +1435,7 @@
 #define COLOR_KEY                               0x080028
 #define COLOR_KEY_MASK                          31:16
 #define COLOR_KEY_VALUE                         15:0
+
 
 #define LVDS_CONTROL							0x08002C
 #define LVDS_CONTROL_SHTDNB						30:29
@@ -1439,7 +1470,88 @@
 #define LVDS_CONTROL_MODESEL1_ONE				1
 
 
-
+#define LVDS_CTRL2					0x08002C
+#define LVDS_CTRL2_SHTDNB2				30:30
+#define LVDS_CTRL2_SHTDNB2_RESET			0
+#define LVDS_CTRL2_SHTDNB2_NORMAL			1
+#define LVDS_CTRL2_SHTDNB1				29:29
+#define LVDS_CTRL2_SHTDNB1_RESET			0
+#define LVDS_CTRL2_SHTDNB1_NORMAL			1
+#define LVDS_CTRL2_CLK2_DS 				28:27
+#define LVDS_CTRL2_CLK2_DS_3MA				0
+#define LVDS_CTRL2_CLK2_DS_1MA				1
+#define LVDS_CTRL2_CLK2_DS_5MA				2
+#define LVDS_CTRL2_CLK2_DS_2MA				3
+#define LVDS_CTRL2_CLK1_DS 				26:25
+#define LVDS_CTRL2_CLK1_DS_3MA				0
+#define LVDS_CTRL2_CLK1_DS_1MA				1
+#define LVDS_CTRL2_CLK1_DS_5MA				2
+#define LVDS_CTRL2_CLK1_DS_2MA				3
+#define LVDS_CTRL2_DS					24:23
+#define LVDS_CTRL2_DS_3MA				0
+#define LVDS_CTRL2_DS_1MA				1
+#define LVDS_CTRL2_DS_5MA				2
+#define LVDS_CTRL2_DS_2MA				3
+#define LVDS_CTRL2_CLK2_TR				22:22
+#define LVDS_CTRL2_CLK2_TR_0				0
+#define LVDS_CTRL2_CLK2_TR_100				1
+#define LVDS_CTRL2_CLK1_TR				21:21
+#define LVDS_CTRL2_CLK1_TR_0				0
+#define LVDS_CTRL2_CLK1_TR_100				1
+#define LVDS_CTRL2_TR					20:20
+#define LVDS_CTRL2_TR_0					0
+#define LVDS_CTRL2_TR_100				1
+#define LVDS_CTRL2_CLK2_COMP				19:18
+#define LVDS_CTRL2_CLK2_COMP_0				0
+#define LVDS_CTRL2_CLK2_COMP_1				1
+#define LVDS_CTRL2_CLK2_COMP_2				2
+#define LVDS_CTRL2_CLK2_COMP_3				3
+#define LVDS_CTRL2_CLK1_COMP				17:16
+#define LVDS_CTRL2_CLK1_COMP_0				0
+#define LVDS_CTRL2_CLK1_COMP_1				1
+#define LVDS_CTRL2_CLK1_COMP_2				2
+#define LVDS_CTRL2_CLK1_COMP_3				3
+#define LVDS_CTRL2_PRE_COMP				15:14
+#define LVDS_CTRL2_PRE_COMP_0				0
+#define LVDS_CTRL2_PRE_COMP_1				1
+#define LVDS_CTRL2_PRE_COMP_2				2
+#define LVDS_CTRL2_PRE_COMP_3				3
+#define LVDS_CTRL2_VCOS_PLL2				13:11
+#define LVDS_CTRL2_VCOS_PLL2_10M			0
+#define LVDS_CTRL2_VCOS_PLL2_20M			1
+#define LVDS_CTRL2_VCOS_PLL2_40M			2
+#define LVDS_CTRL2_VCOS_PLL2_80M			3
+#define LVDS_CTRL2_VCOS_PLL2_160M			4
+#define LVDS_CTRL2_VCOS_PLL2_350M			5
+#define LVDS_CTRL2_VCOS_PLL1				10:8
+#define LVDS_CTRL2_VCOS_PLL1_10M			0
+#define LVDS_CTRL2_VCOS_PLL1_20M			1
+#define LVDS_CTRL2_VCOS_PLL1_40M			2
+#define LVDS_CTRL2_VCOS_PLL1_80M			3
+#define LVDS_CTRL2_VCOS_PLL1_160M			4
+#define LVDS_CTRL2_VCOS_PLL1_350M			5
+#define LVDS_CTRL2_SHORTS_PLL2				7:6
+#define LVDS_CTRL2_SHORTS_PLL2_2048			0
+#define LVDS_CTRL2_SHORTS_PLL2_1024			1
+#define LVDS_CTRL2_SHORTS_PLL2_512			2
+#define LVDS_CTRL2_SHORTS_PLL2_256			3
+#define LVDS_CTRL2_SHORTS_PLL1				5:4
+#define LVDS_CTRL2_SHORTS_PLL1_2048			0
+#define LVDS_CTRL2_SHORTS_PLL1_1024			1
+#define LVDS_CTRL2_SHORTS_PLL1_512			2
+#define LVDS_CTRL2_SHORTS_PLL1_256			3
+#define LVDS_CTRL2_PD_PLL2				3:3
+#define LVDS_CTRL2_PD_PLL2_NORMAL			0
+#define LVDS_CTRL2_PD_PLL2_DOWN				1
+#define LVDS_CTRL2_PD_PLL1				2:2
+#define LVDS_CTRL2_PD_PLL1_NORMAL			0
+#define LVDS_CTRL2_PD_PLL1_DOWN				1
+#define LVDS_CTRL2_MODESEL2				1:1
+#define LVDS_CTRL2_MODESEL2_DC0				0
+#define LVDS_CTRL2_MODESEL2_DC1				1
+#define LVDS_CTRL2_MODESEL1				0:0
+#define LVDS_CTRL2_MODESEL1_DC0				0
+#define LVDS_CTRL2_MODESEL1_DC1				1
 
 /* Cursor Control */
 #define HWC_CONTROL                             0x080030

@@ -47,6 +47,13 @@
 #define	NATIVE_READ_MMU_TRAP_POINT()	\
 		NATIVE_READ_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_TRAP_POINT_NO))
+#define	NATIVE_WRITE_MMU_US_CL_D(us_cl_d)				\
+		NATIVE_WRITE_MMU_REG(					\
+			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO), \
+			mmu_reg_val(us_cl_d))
+#define	NATIVE_READ_MMU_US_CL_D()	\
+		NATIVE_READ_MMU_REG(	\
+			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO))
 #define	NATIVE_WRITE_MMU_OS_PPTB_REG_VALUE(mmu_phys_ptb)	\
 		NATIVE_WRITE_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_OS_PPTB_NO), \
@@ -225,6 +232,12 @@ native_flush_ICACHE_all(void)
  */
 #define	NATIVE_READ_CLW_REG(clw_addr)	\
 		NATIVE_READ_MAS_D_5((clw_addr), MAS_CLW_REG)
+
+/*
+ * Write CLW register
+ */
+#define	NATIVE_WRITE_CLW_REG(clw_addr, val)	\
+		NATIVE_WRITE_MAS_D((clw_addr), (val), MAS_CLW_REG)
 
 /*
  * native MMU DEBUG registers access

@@ -760,29 +760,103 @@ read_CLW_reg(clw_addr_t clw_addr)
 	return READ_CLW_REG(clw_addr);
 }
 
+static	inline	clw_reg_t
+native_read_CLW_reg(clw_addr_t clw_addr)
+{
+	DebugCLW("Read CLW reg 0x%lx\n", clw_addr);
+	return NATIVE_READ_CLW_REG(clw_addr);
+}
+
 /*
  * Read CLW bottom register
  */
-#define	read_US_CL_B()	read_CLW_reg(ADDR_US_CL_B)
-#define	READ_US_CL_B()	READ_CLW_REG(ADDR_US_CL_B)
+#define	read_US_CL_B()		read_CLW_reg(ADDR_US_CL_B)
+#define	READ_US_CL_B()		READ_CLW_REG(ADDR_US_CL_B)
+#define	native_read_US_CL_B()	native_read_CLW_reg(ADDR_US_CL_B)
+#define	NATIVE_READ_US_CL_B()	NATIVE_READ_CLW_REG(ADDR_US_CL_B)
 
 /*
  * Read CLW up register
  */
-#define	read_US_CL_UP()	read_CLW_reg(ADDR_US_CL_UP)
-#define	READ_US_CL_UP()	READ_CLW_REG(ADDR_US_CL_UP)
+#define	read_US_CL_UP()		read_CLW_reg(ADDR_US_CL_UP)
+#define	READ_US_CL_UP()		READ_CLW_REG(ADDR_US_CL_UP)
+#define	native_read_US_CL_UP()	native_read_CLW_reg(ADDR_US_CL_UP)
+#define	NATIVE_READ_US_CL_UP()	NATIVE_READ_CLW_REG(ADDR_US_CL_UP)
 
 /*
  * Read CLW bit-mask registers
  */
-#define	read_US_CL_M0() read_CLW_reg(ADDR_US_CL_M0)
-#define	READ_US_CL_M0()	READ_CLW_REG(ADDR_US_CL_M0)
-#define	read_US_CL_M1() read_CLW_reg(ADDR_US_CL_M1)
-#define	READ_US_CL_M1()	READ_CLW_REG(ADDR_US_CL_M1)
-#define	read_US_CL_M2() read_CLW_reg(ADDR_US_CL_M2)
-#define	READ_US_CL_M2()	READ_CLW_REG(ADDR_US_CL_M2)
-#define	read_US_CL_M3() read_CLW_reg(ADDR_US_CL_M3)
-#define	READ_US_CL_M3()	READ_CLW_REG(ADDR_US_CL_M3)
+#define	read_US_CL_M0()		read_CLW_reg(ADDR_US_CL_M0)
+#define	READ_US_CL_M0()		READ_CLW_REG(ADDR_US_CL_M0)
+#define	read_US_CL_M1()		read_CLW_reg(ADDR_US_CL_M1)
+#define	READ_US_CL_M1()		READ_CLW_REG(ADDR_US_CL_M1)
+#define	read_US_CL_M2()		read_CLW_reg(ADDR_US_CL_M2)
+#define	READ_US_CL_M2()		READ_CLW_REG(ADDR_US_CL_M2)
+#define	read_US_CL_M3()		read_CLW_reg(ADDR_US_CL_M3)
+#define	READ_US_CL_M3()		READ_CLW_REG(ADDR_US_CL_M3)
+#define	native_read_US_CL_M0()	native_read_CLW_reg(ADDR_US_CL_M0)
+#define	NATIVE_READ_US_CL_M0()	NATIVE_READ_CLW_REG(ADDR_US_CL_M0)
+#define	native_read_US_CL_M1()	native_read_CLW_reg(ADDR_US_CL_M1)
+#define	NATIVE_READ_US_CL_M1()	NATIVE_READ_CLW_REG(ADDR_US_CL_M1)
+#define	native_read_US_CL_M2()	native_read_CLW_reg(ADDR_US_CL_M2)
+#define	NATIVE_READ_US_CL_M2()	NATIVE_READ_CLW_REG(ADDR_US_CL_M2)
+#define	native_read_US_CL_M3()	native_read_CLW_reg(ADDR_US_CL_M3)
+#define	NATIVE_READ_US_CL_M3()	NATIVE_READ_CLW_REG(ADDR_US_CL_M3)
+
+/*
+ * Write CLW register
+ */
+
+static	inline	void
+write_CLW_reg(clw_addr_t clw_addr, clw_reg_t val)
+{
+	DebugCLW("Write CLW reg 0x%lx value 0x%lx\n", clw_addr, val);
+	WRITE_CLW_REG(clw_addr, val);
+}
+
+static	inline	void
+native_write_CLW_reg(clw_addr_t clw_addr, clw_reg_t val)
+{
+	DebugCLW("Write CLW reg 0x%lx value 0x%lx\n", clw_addr, val);
+	NATIVE_WRITE_CLW_REG(clw_addr, val);
+}
+
+/*
+ * Write CLW bottom register
+ */
+#define	write_US_CL_B(val)		write_CLW_reg(ADDR_US_CL_B, val)
+#define	WRITE_US_CL_B(val)		WRITE_CLW_REG(ADDR_US_CL_B, val)
+#define	native_write_US_CL_B(val)	native_write_CLW_reg(ADDR_US_CL_B, val)
+#define	NATIVE_WRITE_US_CL_B(val)	NATIVE_WRITE_CLW_REG(ADDR_US_CL_B, val)
+
+/*
+ * Write CLW up register
+ */
+#define	write_US_CL_UP(val)		write_CLW_reg(ADDR_US_CL_UP, val)
+#define	WRITE_US_CL_UP(val)		WRITE_CLW_REG(ADDR_US_CL_UP, val)
+#define	native_write_US_CL_UP(val)	native_write_CLW_reg(ADDR_US_CL_UP, val)
+#define	NATIVE_WRITE_US_CL_UP(val)	NATIVE_WRITE_CLW_REG(ADDR_US_CL_UP, val)
+
+/*
+ * Write CLW bit-mask registers
+ */
+#define	write_US_CL_M0(val)		write_CLW_reg(ADDR_US_CL_M0, val)
+#define	WRITE_US_CL_M0(val)		WRITE_CLW_REG(ADDR_US_CL_M0, val)
+#define	write_US_CL_M1(val)		write_CLW_reg(ADDR_US_CL_M1, val)
+#define	WRITE_US_CL_M1(val)		WRITE_CLW_REG(ADDR_US_CL_M1, val)
+#define	write_US_CL_M2(val)		write_CLW_reg(ADDR_US_CL_M2, val)
+#define	WRITE_US_CL_M2(val)		WRITE_CLW_REG(ADDR_US_CL_M2, val)
+#define	write_US_CL_M3(val)		write_CLW_reg(ADDR_US_CL_M3, val)
+#define	WRITE_US_CL_M3(val)		WRITE_CLW_REG(ADDR_US_CL_M3, val)
+#define	native_write_US_CL_M0(val)	native_write_CLW_reg(ADDR_US_CL_M0, val)
+#define	NATIVE_WRITE_US_CL_M0(val)	NATIVE_WRITE_CLW_REG(ADDR_US_CL_M0, val)
+#define	native_write_US_CL_M1(val)	native_write_CLW_reg(ADDR_US_CL_M1, val)
+#define	NATIVE_WRITE_US_CL_M1(val)	NATIVE_WRITE_CLW_REG(ADDR_US_CL_M1, val)
+#define	native_write_US_CL_M2(val)	native_write_CLW_reg(ADDR_US_CL_M2, val)
+#define	NATIVE_WRITE_US_CL_M2(val)	NATIVE_WRITE_CLW_REG(ADDR_US_CL_M2, val)
+#define	native_write_US_CL_M3(val)	native_write_CLW_reg(ADDR_US_CL_M3, val)
+#define	NATIVE_WRITE_US_CL_M3(val)	NATIVE_WRITE_CLW_REG(ADDR_US_CL_M3, val)
+
 
 #endif /* ! __ASSEMBLY__ */
 

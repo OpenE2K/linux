@@ -100,6 +100,35 @@ static inline void KVM_COPY_STACKS_TO_MEMORY(void)
 		HYPERVISOR_copy_stacks_to_memory();
 }
 
+/* own VCPU state: directly accessible through global registers */
+static inline kvm_vcpu_state_t *kvm_get_vcpu_state(void)
+{
+	unsigned long vcpu_base;
+
+	KVM_GET_VCPU_STATE_BASE(vcpu_base);
+	return (kvm_vcpu_state_t *)(vcpu_base);
+}
+
+/*
+ * Restore proper psize field of WD register
+ */
+static inline void
+kvm_restore_wd_register_psize(e2k_wd_t wd_from)
+{
+	HYPERVISOR_update_wd_psize(wd_from.WD_psize);
+}
+
+/*
+ * Preserve current p[c]shtp as they indicate how much to FILL when returning
+ */
+static inline void
+kvm_preserve_user_hw_stacks_to_copy(e2k_stacks_t *u_stacks,
+					e2k_stacks_t *cur_stacks)
+{
+	/* guest user hardware stacks sizes to copy should be updated */
+	/* after copying and therefore are not preserve */
+}
+
 static inline void
 kvm_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
 {
@@ -271,7 +300,7 @@ failed:
 }
 
 static __always_inline int
-kvm_user_hw_stacks_copy(pt_regs_t *regs, int add_frames_num)
+kvm_user_hw_stacks_copy(pt_regs_t *regs)
 {
 	e2k_psp_lo_t psp_lo;
 	e2k_psp_hi_t psp_hi;
@@ -282,10 +311,30 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs, int add_frames_num)
 	e2k_stacks_t *stacks;
 	void __user *dst;
 	void *src;
-	long to_copy, from, there_are, add_frames_size;
+	long copyed_ps_size, copyed_pcs_size, to_copy, from, there_are;
 	int ret;
 
-	BUG_ON(irqs_disabled());
+	if (unlikely(irqs_disabled())) {
+		pr_err("%s() called with IRQs disabled PSP: 0x%lx UPSR: 0x%lx "
+			"under UPSR %d\n",
+			__func__, KVM_READ_PSR_REG_VALUE(),
+			KVM_READ_UPSR_REG_VALUE(),
+			kvm_get_vcpu_state()->irqs_under_upsr);
+		local_irq_enable();
+		WARN_ON(true);
+	}
+
+	stacks = &regs->stacks;
+	copyed_ps_size = regs->copyed.ps_size;
+	copyed_pcs_size = regs->copyed.pcs_size;
+	if (unlikely(copyed_ps_size || copyed_pcs_size)) {
+		/* stacks have been already copyed */
+		BUG_ON(copyed_ps_size != GET_PSHTP_MEM_INDEX(stacks->pshtp) &&
+			GET_PSHTP_MEM_INDEX(stacks->pshtp) != 0);
+		BUG_ON(copyed_pcs_size != PCSHTP_SIGN_EXTEND(stacks->pcshtp) &&
+			PCSHTP_SIGN_EXTEND(stacks->pcshtp) != SZ_OF_CR);
+		return 0;
+	}
 
 	ret = HYPERVISOR_copy_stacks_to_memory();
 	if (ret != 0) {
@@ -295,7 +344,6 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs, int add_frames_num)
 	}
 
 	/* copy user part of procedure stack from kernel back to user */
-	stacks = &regs->stacks;
 	ATOMIC_READ_HW_STACKS_REGS(psp_lo.PSP_lo_half, psp_hi.PSP_hi_half,
 				   pshtp.PSHTP_reg,
 				   pcsp_lo.PCSP_lo_half, pcsp_hi.PCSP_hi_half,
@@ -339,17 +387,16 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs, int add_frames_num)
 				__func__, src, dst, to_copy, ret);
 			goto failed;
 		}
+		regs->copyed.ps_size = to_copy;
 	}
 
 	/* copy user part of chain stack from kernel back to user */
-	add_frames_size = add_frames_num * SZ_OF_CR;
 	src = (void *)pcsp_lo.PCSP_lo_base;
-	DebugUST("chain stack at kernel from %px, size 0x%x + 0x%lx, ind 0x%x, "
+	DebugUST("chain stack at kernel from %px, size 0x%x, ind 0x%x, "
 		"pcshtp 0x%x\n",
-		src, pcsp_hi.PCSP_hi_size, add_frames_size, pcsp_hi.PCSP_hi_ind,
-		pcshtp);
-	BUG_ON(pcsp_hi.PCSP_hi_ind + PCSHTP_SIGN_EXTEND(pcshtp) +
-				add_frames_size > pcsp_hi.PCSP_hi_size);
+		src, pcsp_hi.PCSP_hi_size, pcsp_hi.PCSP_hi_ind, pcshtp);
+	BUG_ON(pcsp_hi.PCSP_hi_ind + PCSHTP_SIGN_EXTEND(pcshtp) >
+							pcsp_hi.PCSP_hi_size);
 	if (stacks->pcsp_hi.PCSP_hi_ind >= stacks->pcsp_hi.PCSP_hi_size) {
 		/* chain stack overflow, need expand */
 		ret = handle_chain_stack_bounds(stacks, regs->trap);
@@ -365,7 +412,6 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs, int add_frames_num)
 	from = stacks->pcsp_hi.PCSP_hi_ind - to_copy;
 	BUG_ON(from < 0);
 	dst = (void *)stacks->pcsp_lo.PCSP_lo_base + from;
-	to_copy += add_frames_size;
 	BUG_ON(to_copy > pcsp_hi.PCSP_hi_ind + PCSHTP_SIGN_EXTEND(pcshtp));
 	DebugUST("chain stack at user from %px, ind 0x%x, "
 		"pcshtp size to copy 0x%lx\n",
@@ -385,10 +431,95 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs, int add_frames_num)
 				__func__, src, dst, to_copy, ret);
 			goto failed;
 		}
+		regs->copyed.pcs_size = to_copy;
 	}
-	if (add_frames_size > 0) {
+
+failed:
+	if (DEBUG_USER_STACKS_MODE)
+		debug_ustacks = false;
+	return ret;
+}
+
+/*
+ * Copy additional frames injected to the guest kernel stack, but these frames
+ * are for guest user stack and should be copyed from kernel back to the top
+ * of user.
+ */
+static __always_inline int
+kvm_copy_injected_pcs_frames_to_user(pt_regs_t *regs, int frames_num)
+{
+	e2k_size_t pcs_ind, pcs_size;
+	e2k_addr_t pcs_base;
+	int  pcsh_top;
+	e2k_stacks_t *stacks;
+	void __user *dst;
+	void *src;
+	long copyed_frames_size, to_copy, from, there_are, frames_size;
+	int ret;
+
+	BUG_ON(irqs_disabled());
+
+	frames_size = frames_num * SZ_OF_CR;
+	copyed_frames_size  = regs->copyed.pcs_injected_frames_size;
+	if (unlikely(copyed_frames_size >= frames_size)) {
+		/* all frames have been already copyed */
+		return 0;
+	} else {
+		/* copyed only part of frames - not implemented case */
+		BUG_ON(copyed_frames_size != 0);
+	}
+
+	stacks = &regs->stacks;
+	ATOMIC_GET_HW_PCS_SIZES_BASE_TOP(pcs_ind, pcs_size, pcs_base, pcsh_top);
+
+	/* guest user stacks part spilled to kernel should be already copyed */
+	BUG_ON(PCSHTP_SIGN_EXTEND(regs->copyed.pcs_size != stacks->pcshtp));
+
+	src = (void *)(pcs_base + regs->copyed.pcs_size);
+	DebugUST("chain stack at kernel from %px, size 0x%lx + 0x%lx, "
+		"ind 0x%lx, pcsh top 0x%x\n",
+		src, pcs_size, frames_size, pcs_ind, pcsh_top);
+	BUG_ON(regs->copyed.pcs_size + frames_size > pcs_ind + pcsh_top);
+	if (stacks->pcsp_hi.PCSP_hi_ind + frames_size >
+						stacks->pcsp_hi.PCSP_hi_size) {
+		/* user chain stack can overflow, need expand */
+		ret = handle_chain_stack_bounds(stacks, regs->trap);
+		if (unlikely(ret)) {
+			pr_err("%s(): could not handle process %s (%d) "
+				"chain stack overflow, error %d\n",
+				__func__, current->comm, current->pid, ret);
+			goto failed;
+		}
+	}
+	to_copy = frames_size;
+	BUG_ON(to_copy < 0);
+	from = stacks->pcsp_hi.PCSP_hi_ind;
+	BUG_ON(from < regs->copyed.pcs_size);
+	dst = (void *)stacks->pcsp_lo.PCSP_lo_base + from;
+	DebugUST("chain stack at user from %px, ind 0x%x, "
+		"frames size to copy 0x%lx\n",
+		dst, stacks->pcsp_hi.PCSP_hi_ind, to_copy);
+	there_are = stacks->pcsp_hi.PCSP_hi_size - from;
+	if (there_are < to_copy) {
+		pr_err("%s(): user chain stack overflow, there are 0x%lx "
+			"to copy need 0x%lx, not yet implemented\n",
+			__func__, there_are, to_copy);
+		BUG_ON(true);
+	}
+	if (likely(to_copy > 0)) {
+		ret = kvm_copy_user_stack_from_kernel(dst, src, to_copy, true);
+		if (ret != 0) {
+			pr_err("%s(): chain stack copying from kernel %px "
+				"to user %px, size 0x%lx failed, error %d\n",
+				__func__, src, dst, to_copy, ret);
+			goto failed;
+		}
+		regs->copyed.pcs_injected_frames_size = to_copy;
 		/* increment chain stack pointer */
-		stacks->pcsp_hi.PCSP_hi_ind += add_frames_size;
+		stacks->pcsp_hi.PCSP_hi_ind += to_copy;
+	} else {
+		BUG_ON(true);
+		ret = 0;
 	}
 
 failed:
@@ -451,7 +582,7 @@ static __always_inline int kvm_user_hw_stacks_prepare(
 	 * 2) User data copying will be done some later at
 	 *    kvm_prepare_user_hv_stacks()
 	 */
-	ret = kvm_user_hw_stacks_copy(regs, 0);
+	ret = kvm_user_hw_stacks_copy(regs);
 	if (ret != 0) {
 		pr_err("%s(): copying of hardware stacks failed< error %d\n",
 			__func__, ret);
@@ -463,7 +594,44 @@ static __always_inline int kvm_user_hw_stacks_prepare(
 static inline int
 kvm_ret_from_fork_prepare_hv_stacks(struct pt_regs *regs)
 {
-	return kvm_user_hw_stacks_copy(regs, 0);
+	return kvm_user_hw_stacks_copy(regs);
+}
+
+static __always_inline void
+kvm_jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
+{
+	if (from & FROM_SYSCALL_N_PROT) {
+		switch (regs->kernel_entry) {
+		case 1:
+		case 3:
+		case 4:
+			KVM_WRITE_UPSR_REG(E2K_KERNEL_UPSR_ENABLED);
+			regs->stack_regs_saved = true;
+			__E2K_JUMP_WITH_ARGUMENTS_8(handle_sys_call,
+					regs->sys_func,
+					regs->args[1], regs->args[2],
+					regs->args[3], regs->args[4],
+					regs->args[5], regs->args[6],
+					regs);
+		default:
+			BUG();
+		}
+	} else if (from & FROM_SYSCALL_PROT_8) {
+		/* the syscall restart is not yet implemented */
+		BUG();
+	} else if (from & FROM_SYSCALL_PROT_10) {
+		/* the syscall restart is not yet implemented */
+		BUG();
+	} else {
+		BUG();
+	}
+}
+
+static inline void kvm_clear_virt_thread_struct(thread_info_t *ti)
+{
+	/* guest PID/MMID's can be received only after registration on host */
+	ti->gpid_nr = -1;
+	ti->gmmid_nr = -1;
 }
 
 static inline void kvm_release_task_struct(struct task_struct *task)
@@ -473,6 +641,11 @@ static inline void kvm_release_task_struct(struct task_struct *task)
 
 	ti = task_thread_info(task);
 	BUG_ON(ti == NULL);
+	if (ti->gpid_nr == -1) {
+		/* the process was not registered on host, nothing to do */
+		BUG_ON(ti->gmmid_nr != -1);
+		return;
+	}
 
 	ret = HYPERVISOR_release_task_struct(ti->gpid_nr);
 	if (ret != 0) {
@@ -525,15 +698,6 @@ extern kvm_vcpu_state_t *vcpus_state[NR_CPUS];
 static inline kvm_vcpu_state_t *kvm_get_the_vcpu_state(long vcpu_id)
 {
 	return vcpus_state[vcpu_id];
-}
-
-/* own VCPU state: directly accessible through global registers */
-static inline kvm_vcpu_state_t *kvm_get_vcpu_state(void)
-{
-	unsigned long vcpu_base;
-
-	KVM_GET_VCPU_STATE_BASE(vcpu_base);
-	return (kvm_vcpu_state_t *)(vcpu_base);
 }
 
 #define	KVM_ONLY_SET_GUEST_GREGS(ti)	\
@@ -646,6 +810,19 @@ static inline void COPY_STACKS_TO_MEMORY(void)
 	KVM_COPY_STACKS_TO_MEMORY();
 }
 
+static inline void
+restore_wd_register_psize(e2k_wd_t wd_from)
+{
+	kvm_restore_wd_register_psize(wd_from);
+}
+
+static inline void
+preserve_user_hw_stacks_to_copy(e2k_stacks_t *u_stacks,
+					e2k_stacks_t *cur_stacks)
+{
+	kvm_preserve_user_hw_stacks_to_copy(u_stacks, cur_stacks);
+}
+
 static __always_inline void
 kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
 {
@@ -664,6 +841,13 @@ collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
 	kvm_collapse_kernel_pcs(dst, src, spilled_size);
 }
 
+static __always_inline int
+user_hw_stacks_copy(struct e2k_stacks *stacks,
+		pt_regs_t *regs, u64 cur_window_q, bool copy_full)
+{
+	return kvm_user_hw_stacks_copy(regs);
+}
+
 static __always_inline void host_user_hw_stacks_prepare(
 		struct e2k_stacks *stacks, pt_regs_t *regs,
 		u64 cur_window_q, enum restore_caller from, int syscall)
@@ -676,10 +860,22 @@ static __always_inline void host_user_hw_stacks_prepare(
 					from, syscall);
 }
 
+static __always_inline void
+host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
+{
+	/* native & guest kernels cannot be as host */
+}
+
 static inline int
 ret_from_fork_prepare_hv_stacks(struct pt_regs *regs)
 {
 	return kvm_ret_from_fork_prepare_hv_stacks(regs);
+}
+
+static __always_inline void
+jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
+{
+	kvm_jump_to_ttable_entry(regs, from);
 }
 
 static inline void
@@ -850,6 +1046,7 @@ complete_go2user(thread_info_t *ti, long fn)
 static inline void
 clear_virt_thread_struct(thread_info_t *ti)
 {
+	kvm_clear_virt_thread_struct(ti);
 }
 
 static inline void virt_setup_arch(void)

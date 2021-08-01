@@ -432,7 +432,13 @@ static inline void native_tagged_memcpy_8(void *__restrict dst,
  *
  * All parameters must be 8-bytes aligned.
  */
-#if defined(CONFIG_PARAVIRT_GUEST)
+#ifdef	CONFIG_BOOT_E2K
+#define tagged_memcpy_8(dst, src, n)					\
+({									\
+	native_tagged_memcpy_8(dst, src, n,				\
+			__alignof(*(dst)), __alignof(*(src)));		\
+})
+#elif defined(CONFIG_PARAVIRT_GUEST)
 #include <asm/paravirt/string.h>
 #elif defined(CONFIG_KVM_GUEST_KERNEL)
 #include <asm/kvm/guest/string.h>

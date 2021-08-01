@@ -351,6 +351,8 @@ void kvm_outsb(unsigned short port, const void *src, unsigned long count)
 		count, src, port);
 	kvm_guest_ioport_string(port, src, 1, count, 1);
 }
+EXPORT_SYMBOL(kvm_outsb);
+
 void kvm_outsw(unsigned short port, const void *src, unsigned long count)
 {
 	DebugKVMIO("started to write 0x%lx halfwords fron %px to "
@@ -358,30 +360,39 @@ void kvm_outsw(unsigned short port, const void *src, unsigned long count)
 		count, src, port);
 	kvm_guest_ioport_string(port, src, 2, count, 1);
 }
+EXPORT_SYMBOL(kvm_outsw);
+
 void kvm_outsl(unsigned short port, const void *src, unsigned long count)
 {
 	DebugKVMIO("started to write 0x%lx words fron %px to IO port 0x%x\n",
 		count, src, port);
 	kvm_guest_ioport_string(port, src, 4, count, 1);
 }
+EXPORT_SYMBOL(kvm_outsl);
+
 void kvm_insb(unsigned short port, void *dst, unsigned long count)
 {
 	DebugKVMIO("started to read 0x%lx bytes to %px from IO port 0x%x\n",
 		count, dst, port);
 	kvm_guest_ioport_string(port, dst, 1, count, 0);
 }
+EXPORT_SYMBOL(kvm_insb);
+
 void kvm_insw(unsigned short port, void *dst, unsigned long count)
 {
 	DebugKVMIO("started to read 0x%lx halfwords to %px from IO port 0x%x\n",
 		count, dst, port);
 	kvm_guest_ioport_string(port, dst, 2, count, 0);
 }
+EXPORT_SYMBOL(kvm_insw);
+
 void kvm_insl(unsigned short port, void *dst, unsigned long count)
 {
 	DebugKVMIO("started to read 0x%lx words to %px from IO port 0x%x\n",
 		count, dst, port);
 	kvm_guest_ioport_string(port, dst, 4, count, 0);
 }
+EXPORT_SYMBOL(kvm_insl);
 
 void kvm_conf_inb(unsigned int domain, unsigned int bus, unsigned long port,
 			u8 *byte)

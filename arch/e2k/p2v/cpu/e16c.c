@@ -9,9 +9,9 @@ void boot_e16c_setup_arch(void)
 		boot_machine.native_iset_ver = ELBRUS_16C_ISET;
 #ifdef	CONFIG_MMU_PT_V6
 	boot_machine.mmu_pt_v6 = true;
-#else	/* ! CONFIG_MMU_PT_V6 */
+#else
 	boot_machine.mmu_pt_v6 = false;
-#endif	/* CONFIG_MMU_PT_V6 */
+#endif
 #ifdef CONFIG_MMU_SEP_VIRT_SPACE
 	boot_machine.mmu_separate_pt = true;
 #else
@@ -35,10 +35,10 @@ void boot_e16c_setup_arch(void)
 	boot_machine.tlb_addr_line_num_shift2 = E16C_TLB_ADDR_LINE_NUM_SHIFT2;
 	boot_machine.tlb_addr_set_num = E16C_TLB_ADDR_SET_NUM;
 	boot_machine.tlb_addr_set_num_shift = E16C_TLB_ADDR_SET_NUM_SHIFT;
-	boot_machine.sic_mc_size = 0;
+	boot_machine.sic_mc_size = E16C_SIC_MC_SIZE;
 	boot_machine.sic_mc_count = E16C_SIC_MC_COUNT;
-	boot_machine.sic_mc1_ecc = E16C_SIC_MC1_ECC;
-	boot_machine.sic_io_str1 = 0;
+	boot_machine.sic_mc1_ecc = 0;	/* no MC1_ECC reg */
+	boot_machine.sic_io_str1 = 0;	/* no IO_STR1 reg */
 	boot_machine.clock_tick_rate = E16C_CLOCK_TICK_RATE;
 }
 

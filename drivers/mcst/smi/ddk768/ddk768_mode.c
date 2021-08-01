@@ -338,8 +338,14 @@ mode_parameter_t *ddk768_findModeParamFromTable(
     mode_parameter_t *pModeTable
 )
 {
+    extern int lvds_channel;
     unsigned short modeIndex = 0, tempIndex = 0;
+    static mode_parameter_t lvds_1920_1080_60 = {2142,1920,2008,44,POS,1100,1080,1081,3,POS,141400000,67500,60,NEG};
     
+    if (lvds_channel && pModeTable == gDefaultModeParamTable &&
+	        width == 1920 && height == 1080 && refresh_rate == 60)
+	    return &lvds_1920_1080_60;
+
     /* Walk the entire mode table. */    
     while (pModeTable[modeIndex].pixel_clock != 0)
     {
@@ -630,7 +636,6 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
     unsigned long ulTmpValue;
     unsigned long paletteRam;
     unsigned long offset, pllReg;
-    unsigned long hdmi_channel;
 
 #if 0 // print UHD register setting for debug.
     if (pLogicalMode->x == 3840)
@@ -679,7 +684,7 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
 
 
     
-    hdmi_channel = FIELD_GET(peekRegisterDWord(DISPLAY_CTRL+offset),
+    unsigned long hdmi_channel = FIELD_GET(peekRegisterDWord(DISPLAY_CTRL+offset),
                                    DISPLAY_CTRL,
                                    HDMI_SELECT);    
 

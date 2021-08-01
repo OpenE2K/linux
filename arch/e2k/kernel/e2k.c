@@ -96,7 +96,7 @@ int native_show_cpuinfo(struct seq_file *m, void *v)
 #else
 	cpu = 0;
 #endif
-	freq = measure_cpu_freq(cpu);
+	freq = (measure_cpu_freq(cpu) + 500000) / 1000000;
 
 	seq_printf(m,
 		"processor\t: %d\n"
@@ -105,18 +105,12 @@ int native_show_cpuinfo(struct seq_file *m, void *v)
 		"model\t\t: %d\n"
 		"model name\t: %s\n"
 		"revision\t: %u\n"
-		"cpu MHz\t\t: %llu.%03llu\n",
-		cpu,
-		c->family >= 5 ? ES2_CPU_VENDOR : mcst_mb_name,
-		c->family,
-		c->model,
-		GET_CPU_TYPE_NAME(c->model),
-		c->revision,
-		freq / 1000000, (freq / 1000) % 1000);
+		"cpu MHz\t\t: %llu\n"
+		"bogomips\t: %llu.%02u\n\n",
+		cpu, c->family >= 5 ? ES2_CPU_VENDOR : mcst_mb_name,
+		c->family, c->model, GET_CPU_TYPE_NAME(c->model),
+		c->revision, freq, 2 * freq, 0);
 
-	seq_printf(m, "bogomips\t: %lu.%02lu\n\n",
-			loops_per_jiffy / (500000 / HZ),
-			(loops_per_jiffy / (5000 / HZ)) % 100);
 
 	if (last == cpu)
 		show_cacheinfo(m);
@@ -204,50 +198,6 @@ static void iommu_interrupt(struct pt_regs *regs)
 	else
 		panic(str);
 
-	irq_exit();
-}
-
-static DEFINE_RAW_SPINLOCK(sic_error_lock);
-
-void sic_error_interrupt(struct pt_regs *regs)
-{
-	int node;
-	unsigned long flags;
-
-	ack_pic_irq();
-	irq_enter();
-
-	if (!raw_spin_trylock_irqsave(&sic_error_lock, flags))
-		goto out;
-
-	for_each_online_node(node) {
-		int offset;
-
-		pr_err("NODE%d SIC_INT=0x%x\n",
-			node,
-			sic_read_node_nbsr_reg(node, SIC_sic_int));
-
-		pr_err("MC registers dump:\n");
-		offset = SIC_MC_BASE;
-		for (; offset < SIC_MC_BASE + SIC_MC_SIZE; offset += 4)
-			pr_err("%x ",
-				sic_read_node_nbsr_reg(node, offset));
-		pr_err("\n");
-
-		pr_err("PHY registers dump:\n");
-		offset = SIC_PHY_BASE;
-		for (; offset < SIC_PHY_BASE + SIC_PHY_SIZE; offset += 4)
-			pr_err("%x ",
-				sic_read_node_nbsr_reg(node, offset));
-		pr_err("\n");
-	}
-
-	raw_spin_unlock_irqrestore(&sic_error_lock, flags);
-
-	panic("SIC error interrupt received on CPU%d:\n",
-		smp_processor_id());
-
-out:
 	irq_exit();
 }
 

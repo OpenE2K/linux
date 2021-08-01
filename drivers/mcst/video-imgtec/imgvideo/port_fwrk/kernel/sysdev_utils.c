@@ -530,15 +530,6 @@ IMG_RESULT SYSDEVU_DetachMemory(
 }
 IMGVIDEO_EXPORT_SYMBOL(SYSDEVU_DetachMemory)
 
-#ifdef CONFIG_MCST
-static int find_ptr_id(int id, void *ptr, void *data)
-{
-	if (ptr == data)
-		return id;
-	return 0;
-}
-#endif
-
 /*!
 ******************************************************************************
 
@@ -551,32 +542,17 @@ IMG_PHYSADDR SYSDEVU_CpuPAddrToDevPAddr(
 )
 {
     SYSDEVU_sInfo *  psSysDev = (SYSDEVU_sInfo *)hSysDevHandle;
-#ifdef CONFIG_MCST
-    void *ptr;
-    int id;
-    SYSDEVU_sInfo *dev = psSysDev;
-#endif
-    IMG_ASSERT(gSysDevInitialised);
 
+    IMG_ASSERT(gSysDevInitialised);
+#ifdef CONFIG_MCST
+    BUG();
+#endif
     IMG_ASSERT(hSysDevHandle != IMG_NULL);
     if (hSysDevHandle == IMG_NULL)
     {
         return 0;
     }
-#ifdef CONFIG_MCST
-	idr_lock         (&dev->pa_id_map);
-	id = idr_for_each(&dev->pa_id_map, &find_ptr_id,
-			    phys_to_page(paCpuPAddr));
-	idr_unlock       (&dev->pa_id_map);
-	if (WARN_ON(id == 0))
-        	return 0;
-	idr_lock      (&dev->dma_id_map);
-	ptr = idr_find(&dev->dma_id_map, id);
-	idr_unlock    (&dev->dma_id_map);
-	if (WARN_ON(ptr == NULL))
-        	return 0;
-	return (IMG_PHYSADDR)ptr;
-#endif
+
     /*
      * If conversion routines isn't added by the customer ( using sysdev ),
      *  we assume that it's a unified memory model where pa == dev_pa

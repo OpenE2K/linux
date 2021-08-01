@@ -367,8 +367,6 @@ typedef struct pv_cpu_ops {
 			bool proc_bounds, bool chain_bounds);
 	irqreturn_t (*handle_interrupt)(struct pt_regs *regs);
 	void (*init_guest_system_handlers_table)(void);
-	void (*handle_deferred_traps_in_syscall)(struct pt_regs *regs,
-			bool use_pt_regs, bool new_hs);
 	void (*fix_process_pt_regs)(struct thread_info *ti,
 			struct e2k_stacks *stacks, struct pt_regs *regs,
 			struct pt_regs *old_regs);
@@ -390,8 +388,10 @@ typedef struct pv_cpu_ops {
 	unsigned long (*fast_tagged_memory_set)(void *addr, u64 val, u64 tag,
 		size_t len, u64 strd_opcode);
 	unsigned long (*extract_tags_32)(u16 *dst, const void *src);
-	void (*save_local_glob_regs)(struct local_gregs *l_gregs);
-	void (*restore_local_glob_regs)(struct local_gregs *l_gregs);
+	void (*save_local_glob_regs)(struct local_gregs *l_gregs,
+					bool is_signal);
+	void (*restore_local_glob_regs)(struct local_gregs *l_gregs,
+					bool is_signal);
 	void (*restore_kernel_gregs_in_syscall)(struct thread_info *ti);
 	void (*get_all_user_glob_regs)(struct global_regs *gregs);
 	void (*arch_setup_machine)(void);
@@ -574,6 +574,7 @@ typedef struct pv_mmu_ops {
 	probe_entry_t (*entry_probe_mmu_op)(e2k_addr_t virt_addr);
 	probe_entry_t (*address_probe_mmu_op)(e2k_addr_t virt_addr);
 	clw_reg_t (*read_clw_reg)(clw_addr_t clw_addr);
+	void (*write_clw_reg)(clw_addr_t clw_addr, clw_reg_t val);
 	void (*save_DAM)(unsigned long long *dam);
 	void (*write_mmu_debug_reg)(int reg_no, mmu_reg_t mmu_reg);
 	mmu_reg_t (*read_mmu_debug_reg)(int reg_no);

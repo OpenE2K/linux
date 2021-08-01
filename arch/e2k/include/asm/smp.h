@@ -59,16 +59,10 @@ extern unsigned long smp_invalidate_needed;
 extern int pic_mode;
 extern cpumask_t callin_go;
 
-extern void smp_alloc_memory(void);
 extern void e2k_start_secondary(int cpuid);
 extern void start_secondary_resume(int cpuid, int cpu);
 extern void wait_for_startup(int cpuid, int hotplug);
-extern void smp_flush_tlb(void);
-extern void smp_message_irq(int cpl, void *dev_id, struct pt_regs *regs);
 extern void smp_send_reschedule(int cpu);
-extern void smp_invalidate_rcv(void);		/* Process an NMI */
-extern void (*mtrr_hook) (void);
-extern void zap_low_mappings (void);
 extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 extern void smp_send_refresh(void);

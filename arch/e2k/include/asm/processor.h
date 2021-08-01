@@ -144,6 +144,7 @@ typedef struct thread_struct {
 						/* protected mode */
 #define	BIN_COMP_CODE_TASK_FLAG_BIT	4	/* task is binary application */
 						/* compiler code */
+#define	CLONE_SETTLS_TASK_FLAG_BIT	5	/* set new TLS for thread */
 #define	DO_PRESENT_HW_STACKS_TASK_FLAG_BIT 8	/* hardware stacks should be */
 						/* made present (populated) */
 #define	DO_LOCK_HW_STACKS_TASK_FLAG_BIT	9	/* hardware stacks should be */
@@ -163,6 +164,7 @@ typedef struct thread_struct {
 #define BIN_32_CODE_TASK_FLAG		(1UL << BIN_32_CODE_TASK_FLAG_BIT)
 #define BIN_COMP_CODE_TASK_FLAG		(1UL << BIN_COMP_CODE_TASK_FLAG_BIT)
 #define PROTECTED_CODE_TASK_FLAG	(1UL << PROTECTED_CODE_TASK_FLAG_BIT)
+#define	CLONE_SETTLS_TASK_FLAG		(1UL << CLONE_SETTLS_TASK_FLAG_BIT)
 #define DO_PRESENT_HW_STACKS_TASK_FLAG	\
 		(1UL << DO_PRESENT_HW_STACKS_TASK_FLAG_BIT)
 #define DO_LOCK_HW_STACKS_TASK_FLAG	\

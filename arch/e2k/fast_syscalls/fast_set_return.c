@@ -13,6 +13,11 @@ int fast_sys_set_return(u64 ip, int flags)
 	e2k_mem_crs_t *frame, *base;
 	u64 prev_ip;
 
+#ifdef	CONFIG_KVM_HOST_MODE
+	/* TODO set_retrun does not have a slow counterpart, not implemented for paravirt guest */
+	KVM_BUG_ON(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
+#endif
+
 	E2K_FLUSHC;
 
 	if (unlikely(flags))

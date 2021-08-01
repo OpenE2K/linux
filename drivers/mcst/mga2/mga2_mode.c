@@ -211,8 +211,9 @@ static void __mga25_vid_dpms(struct drm_crtc *crtc,
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	void __iomem *vid_regs = mga2->regs + mga2->info->vid_regs_base +
 			 	mga2_get_vid(connector) * MGA2_VID0_SZ;
-	u32 omux = rvidc(MUX), mux = 0;
-	u32 ctrl = 0;
+	u32 omux = rvidc(MUX), mux = 0, i;
+	u32 ctrl = rvidc(CTRL) & ~MGA2_VID0_B_ENABLE;
+
 
 	if (mode == DRM_MODE_DPMS_ON)
 		mux |= ((mcrtc->index) << MGA25_VID0_B_AUSEL_OFFSET) |
@@ -222,17 +223,106 @@ static void __mga25_vid_dpms(struct drm_crtc *crtc,
 
 	if (mux == omux) /*everything is already set */
 		return;
+
 	switch (connector->connector_type) {
 	case DRM_MODE_CONNECTOR_VGA:
+	case DRM_MODE_CONNECTOR_DVID:
+		ctrl = MGA2_VID0_B_2XDDR_EN_RESYNC |
+				(MGA2_VID0_B_STROBE_DELAY_1_4 <<
+				MGA2_VID0_B_STROBE_DELAY_OFFSET);
+		break;
+	case DRM_MODE_CONNECTOR_HDMIA:
+		ctrl &= ~(MGA2_VID12_B_ENABLE |
+			(MGA2_VID12_B_CONV_ALL << MGA2_VID12_B_DE_CONV_OFFSET) |
+			(MGA2_VID12_B_CONV_ALL << MGA2_VID12_B_HS_CONV_OFFSET) |
+			(MGA2_VID12_B_CONV_ALL << MGA2_VID12_B_VS_CONV_OFFSET));
+
+		ctrl |= (MGA2_VID12_B_CONV_DIRECT << MGA2_VID12_B_DE_CONV_OFFSET) |
+			(MGA2_VID12_B_CONV_DIRECT << MGA2_VID12_B_HS_CONV_OFFSET) |
+			(MGA2_VID12_B_CONV_DIRECT << MGA2_VID12_B_VS_CONV_OFFSET);
+		ctrl |= MGA2_VID12_B_ENABLE;
+		break;
+	case DRM_MODE_CONNECTOR_LVDS:
+		mux |= MGA25_VID3_B_SCALER_OFF;
+		ctrl = MGA2_VID3_B_10BIT;
+		for (i = 0; i < mga2->used_lvds_channels; i++) {
+			ctrl |= i << (MGA2_VID3_B_P0CHAN_OFFSET + i * 2);
+			ctrl |= 1 << (MGA2_VID3_B_P0ENA_OFFSET + i);
+		}
+		ctrl |= ilog2(mga2->used_lvds_channels) | MGA2_VID3_B_RESYNC;
+
 		break;
 	default:
-		WARN_ON(mga2->subdevice != MGA25_PCI_PROTO &&
-			mga2->subdevice != MGA26_PCI_PROTO);
+		WARN_ON(1);
 	}
 	wvidc(ctrl, CTRL);
 	wvidc(mux, MUX);
+
 	if (mode == DRM_MODE_DPMS_ON)
 		wvidc(ctrl | MGA2_VID0_B_ENABLE, CTRL);
+
+	if (mode == DRM_MODE_DPMS_ON &&
+			connector->connector_type == DRM_MODE_CONNECTOR_LVDS) {
+		char v[] = {
+			19,  4,  5,  6,  7,  8,  9,
+			28, 29, 14, 15, 16, 17, 18,
+			34, 35, 36, 24, 25, 26, 27,
+			32, 22, 23, 12, 13,  2, 3,
+			32, 20, 21, 10, 11,  0, 1,
+			33, 33, 32, 32, 32, 33, 33,
+		};
+		for (i = 0; i < ARRAY_SIZE(v); i++)
+			wvidc(v[i] | (i << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+	}
+	if (0) {
+		wvidc(LVDS25_00 | (0 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B9 | (1 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B8 | (2 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G9 | (3 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G8 | (4 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R9 | (5 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R8 | (6 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+
+		wvidc(LVDS25_01 | (7 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_01 | (8 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_00 | (9 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_00 | (10 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_00 | (11 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_01 | (12 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_01 | (13 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+
+		wvidc(LVDS25_G0 | (14 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R5 | (15 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R4 | (16 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R3 | (17 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R2 | (18 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R1 | (19 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R0 | (20 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+
+		wvidc(LVDS25_B1 | (21 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B0 | (22 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G5 | (23 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G4 | (24 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G3 | (25 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G2 | (26 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G1 | (27 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+
+		wvidc(LVDS25_DE | (28 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_VS | (29 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_HS | (30 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B5 | (31 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B4 | (32 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B3 | (33 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B2 | (34 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+
+		wvidc(LVDS25_00 | (35 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B7 | (36 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_B6 | (37 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G7 | (38 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_G6 | (39 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R7 | (40 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+		wvidc(LVDS25_R6 | (41 << MGA2_VID3_B_ADDR_OFFSET), BITCTRL);
+	}
 }
 
 static void mga2_vid_dpms(struct drm_crtc *crtc,
@@ -291,15 +381,32 @@ static void mga2_vids_dpms(struct drm_crtc *crtc, int mode)
 		goto out;				\
 	}						\
 } while(0)
-static int __mga2_calc_int_pll(struct cln40g_clk *clk, unsigned long long fout,
-		const struct mga2_div *d, struct mga2_div *div)
+
+enum mga2_clks {
+	CLN40G = 44,
+	CLN16FF
+};
+static int __mga2_calc_int_pll(struct mga2_clk *clk, unsigned long long fout,
+		const struct mga2_div *d, struct mga2_div *div, int pll_type)
 {
+	bool found = false;
 	int ret = -EINVAL, i, k = 0;
 	unsigned long long merr = ULLONG_MAX, err, mfvco = 1, fvco;
 	for (i = 0; d[i].pix && merr; i++) {
 		unsigned long long a, b, fa, fb;
-		struct cln40g_clk c;
-		ret = mga2_calc_int_pll(&c, fout * d[i].pix, &fvco, &err);
+		struct mga2_clk c;
+		switch (pll_type) {
+		case CLN40G:
+			ret = mga2_calc_int_pll(&c, fout * d[i].pix, &fvco, &err);
+			break;
+		case CLN16FF:
+			ret = mga25_calc_int_pll(&c, fout * d[i].pix, &fvco, &err);
+			break;
+		default:
+			BUG();
+		}
+		if (ret)
+			continue;
 		a = merr / (fout * d[k].pix);
 		b =  err / (fout * d[i].pix);
 		if (b > a)
@@ -317,22 +424,35 @@ found:
 		merr = err;
 		k = i;
 		*clk = c;
+		found = true;
 	}
 	memcpy(div, d + k, sizeof(*d));
 	fout *= div->pix;
-	if (ret)
+	if (!found) {
 		DRM_ERROR("failed to calculate PLL setup.\n");
-	else
+	} else {
 		DRM_DEBUG_KMS("Calculated: %lld kHz => %lld kHz"
 			" (err: %lld.%02lld%%)"
-			 ", Fvco = %lld\n"
-			"\tPLL setup: "
-			"nr=%d nf=%lld od=%d nb=%d\n",
+			", Fvco = %lld\n"
+			"\tPLL setup: ",
 			fout / 1000, mfvco / clk->od / 1000,
 			merr * 100   / fout,
 			merr * 10000 / fout % 100,
-			mfvco,
-			clk->nr, clk->nf, clk->od, clk->nb);
+			mfvco);
+		switch (pll_type) {
+		case CLN40G:
+		DRM_DEBUG_KMS("nr=%d nf=%lld od=%d nb=%d\n",
+				clk->nr, clk->nf, clk->od, clk->nb);
+			break;
+		case CLN16FF:
+		DRM_DEBUG_KMS("nr=%d nf=%lld.%lld od=%d\n",
+				clk->nr, clk->nf_i, clk->nf_f, clk->od);
+			break;
+		default:
+			BUG();
+		}
+		ret = 0;
+	}
 	return ret;
 }
 
@@ -342,8 +462,8 @@ static int mga2_int_pll_set_pixclock(struct drm_crtc *crtc,
 {
 	unsigned val;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
-	struct cln40g_clk clk = {};
-	int ret = __mga2_calc_int_pll(&clk, clock_khz * 1000, d, div);
+	struct mga2_clk clk = {};
+	int ret = __mga2_calc_int_pll(&clk, clock_khz * 1000, d, div, CLN40G);
 	if (ret)
 		goto out;
 
@@ -603,12 +723,66 @@ out:
 	return ret;
 }
 
+static int mga25_int_pll_set_pixclock(struct drm_crtc *crtc,
+		unsigned long clock_khz,
+		const struct mga2_div *d, struct mga2_div *div)
+{
+	unsigned v;
+	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
+	struct mga2_clk clk = {};
+	int ret = __mga2_calc_int_pll(&clk, clock_khz * 1000, d, div, CLN16FF);
+	if (ret)
+		goto out;
+
+	/* switching PIXMUX & AUXMUX to reference */
+	mga2_wait_bit_clear(CLKCTRL, MGA25_DC_B_INPROGRESS);
+	v = rcrtc(CLKCTRL);
+	v |= MGA25_DC_B_FPIXENA;
+	wcrtc(v, CLKCTRL);
+	mga2_wait_bit_clear(CLKCTRL, MGA25_DC_B_INPROGRESS);
+
+	/* resetting PLL */
+	wcrtc(MGA2_DC_B_INTPLL_RESET, PLLCTRL_25);
+
+	wcrtc(clk.nf_i, PLLCLKF0INT_25);
+	wcrtc((clk.nf_f) >> 1, PLLCLKF0FRAC_25);
+	wcrtc(clk.nr - 1, PLLCLKR0_25);
+	wcrtc(clk.od - 1, PLLCLKOD0_25);
+
+	udelay(5);
+	/* clearing reset and waiting for lock */
+	wcrtc(0, PLLCTRL_25);
+	udelay(5);
+	mga2_wait_bit(PLLCTRL_25, MGA2_DC_B_INTPLL_LOCK);
+out:
+	return ret;
+}
+
+static const struct mga2_div mga25_default_div[] = {
+	{1, 1}, {},
+	/*{1, 1}, {}, {2, 2}, {4, 4}, {6, 6}, {7, 7}, {8, 8}, {9, 9}, {}*/
+};
+static const struct mga2_div mga25_dvi_duallink_div[] = {
+	{2, 1}, {4, 2}, {}
+};
+static const struct mga2_div mga25_lvds_div[][2] = {
+	{ {} },
+	{ {7, 1}, {} },
+	{ {7, 2}, {} },
+	{ {} },
+	{ {7, 4}, {} }
+};
+
 static int mga25_div2val(int div)
 {
-	int v[10] = {-1, -1, 2, 3, 4, 5, 6, 7, 0, 1};
-	WARN_ON(div > ARRAY_SIZE(v));
-	WARN_ON(v[div] == -1);
+	int v[10] = {0, 0, 2, 3, 4, 5, 6, 7, 0, 1};
+	BUG_ON(div > ARRAY_SIZE(v));
 	return v[div];
+}
+
+static int mga25_div2sel(int div)
+{
+	return div == 1 ? 2 : 3;
 }
 
 static int __mga25_setup_clock(struct drm_crtc *crtc,
@@ -618,22 +792,48 @@ static int __mga25_setup_clock(struct drm_crtc *crtc,
 	u32 v;
 	struct mga2 *mga2 = crtc->dev->dev_private;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
-	int div = 2;
-	unsigned long clock_khz = mode->clock * div;
-	WARN_ON(!mga2_proto(mga2));
+	struct drm_connector *connector = mga2_get_connector(crtc);
+	unsigned long clock_khz;
+	const struct mga2_div *d = mga25_default_div;
+	struct mga2_div dd = {
+		.pix = 1,
+		.aux = 1
+	}, *div = &dd;
 
-	if (mcrtc->i2c) {
-		ret = _mga2_ext_pll_set_pixclock(mcrtc->pll,
-						mcrtc->i2c, clock_khz);
-		if (ret)
-			goto out;
+	switch (connector->connector_type) {
+	case DRM_MODE_CONNECTOR_DVID:
+		if (clock_khz <= 165000)
+			d = mga25_dvi_duallink_div;
+		break;
+	case DRM_MODE_CONNECTOR_HDMIA:
+		break;
+	case DRM_MODE_CONNECTOR_LVDS:
+		d = mga25_lvds_div[mga2->used_lvds_channels];
+		break;
+	case DRM_MODE_CONNECTOR_VGA:
+			div->pix = 2;
+			div->aux = 1;
+		break;
+	default:
+		BUG();
 	}
+	clock_khz = mode->clock * div->pix;
+	ret = mcrtc->i2c ?
+		_mga2_ext_pll_set_pixclock(mcrtc->pll, mcrtc->i2c, clock_khz) :
+		mga25_int_pll_set_pixclock(crtc, clock_khz, d, div);
+	if (ret)
+		goto out;
 
 	mga2_wait_bit_clear(CLKCTRL, MGA25_DC_B_INPROGRESS);
-	v = MGA25_DC_B_FAUXENA | MGA25_DC_B_FAUX_OUT |
-		MGA25_DC_B_FPIXENA | MGA25_DC_B_FPIX_DIVOUT |
-		(mga25_div2val(div) << MGA25_DC_B_FPIXDIV_OFFSET);
+	v = MGA25_DC_B_FAUXENA |
+		(mga25_div2sel(div->aux) << MGA25_DC_B_FAUXSEL_OFFSET) |
+		(mga25_div2val(div->aux) << MGA25_DC_B_FAUXDIV_OFFSET) |
+		MGA25_DC_B_FPIXENA |
+		(mga25_div2sel(div->pix) << MGA25_DC_B_FPIXSEL_OFFSET) |
+		(mga25_div2val(div->pix) << MGA25_DC_B_FPIXDIV_OFFSET);
 	wcrtc(v, CLKCTRL);
+	DRM_DEBUG("clock: %ld, pixdiv: %d, auxdiv: %d\n",
+		  clock_khz, div->pix, div->aux);
 out:
 	return ret;
 }
@@ -721,6 +921,9 @@ static int mga2_crtc_mode_set(struct drm_crtc *crtc,
 
 
 	hvctrl = MGA2_DC_B_DE_ENA;
+	if (mga2_lvds_channels && mga2->subdevice == MGA25) /*FIXME:*/
+		hvctrl |= MGA2_DC_B_VSYNC_POL | MGA2_DC_B_HSYNC_POL;
+
 	if (mode->flags & DRM_MODE_FLAG_NVSYNC)
 		hvctrl |= MGA2_DC_B_VSYNC_POL | MGA2_DC_B_VSYNC_ENA;
 	else if (mode->flags & DRM_MODE_FLAG_PVSYNC)
@@ -902,7 +1105,7 @@ static int mga2_y2r_matrix38[3][3] = {
 
 void mga2_crtc_hw_init(struct drm_crtc *crtc)
 {
-	int i, j;
+	int i, j, ret;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	struct mga2 *mga2 = crtc->dev->dev_private;
 
@@ -910,6 +1113,9 @@ void mga2_crtc_hw_init(struct drm_crtc *crtc)
 	wcrtc(MGA2_DC_DITCTRL_DISABLE, DITCTRL);
 	if (mga2_p2(mga2))
 		goto out;
+
+	mga2_wait_bit_clear(CLKCTRL, MGA25_DC_B_INPROGRESS);
+	wcrtc(MGA25_DC_B_FAUXENA | MGA25_DC_B_FPIXENA, CLKCTRL);
 
 	wcrtc(0, ZOOM_IHVSUM);
 	wcrtc(0, ZOOM_CTRL);
@@ -1059,11 +1265,8 @@ static int mga2_hdmi_init(struct drm_device *dev, void __iomem *regs)
 	int ret = 0;
 	void __iomem *vid_regs = regs;
 	u32 val = rvidc(CTRL);
-	/* убрать сброс irstz. */
-	val &= ~(MGA2_VID12_B_HDMI_RSTZ |
-			MGA2_VID12_B_USE_MGA2_DDC);
 
-	val |= MGA2_VID12_B_HDMI_RSTZ |
+	val |= MGA2_VID12_B_ENABLE | MGA2_VID12_B_HDMI_RSTZ |
 			 MGA2_VID12_B_USE_MGA2_DDC;
 
 	wvidc(val, CTRL);
@@ -1089,16 +1292,32 @@ static int _mga2_dvi_init(struct drm_device *dev, void __iomem *regs)
 	return 0;
 }
 
+static int mga2_lvds_init(struct drm_device *dev, void __iomem *regs)
+{
+	int ret = 0;
+	void __iomem *vid_regs = regs;
+	struct mga2 *mga2 = dev->dev_private;
+	if (!mga25(mga2))
+		return ret;
+	wvidc(MGA25_DC_B_FAUXENA | MGA25_DC_B_FPIXENA, CLKCTRL25);
+
+	return ret;
+}
+
 int mga2_mode_init_hw(struct drm_device *dev)
 {
 	int ret;
 	struct mga2 *mga2 = dev->dev_private;
 	void __iomem *vid_regs = mga2->regs + mga2->info->vid_regs_base;
-	if ((ret = _mga2_dvi_init(dev, vid_regs + 0 * MGA2_VID0_SZ)))
-		goto out;
+	if (mga2_p2(mga2) && (ret = _mga2_dvi_init(dev,
+					vid_regs + 0 * MGA2_VID0_SZ))) {
+			goto out;
+	}
 	if ((ret = mga2_hdmi_init(dev, vid_regs + 1 * MGA2_VID0_SZ)))
 		goto out;
 	if ((ret = mga2_hdmi_init(dev, vid_regs + 2 * MGA2_VID0_SZ)))
+		goto out;
+	if ((ret = mga2_lvds_init(dev, vid_regs + 3 * MGA2_VID0_SZ)))
 		goto out;
 out:
 	return ret;
@@ -1128,9 +1347,6 @@ int mga2_mode_init(struct drm_device *dev)
 		void __iomem *vid_regs = mga2->regs + mga2->info->vid_regs_base;
 		wvidc(MGA2_VID0_B_GPIOMUX_I2C, GPIO_MUX);
 	}
-
-	if (!mga2_p2(mga2))
-		goto out;
 
 	if ((ret = mga2_mode_init_hw(dev)))
 		goto out;

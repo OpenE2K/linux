@@ -88,7 +88,7 @@ do { \
 	do { \
 		val = mxgbe_rreg32(base, I2C_REG_READY); \
 		if (time_after(jiffies, timestart + HZ)) { \
-			ERR_MSG("ERROR: I2C controller busy\n"); \
+			pr_err(KBUILD_MODNAME ": I2C controller busy\n"); \
 			return; \
 		} \
 	} while (!(val & (1 << cnum))); \
@@ -379,12 +379,12 @@ struct i2c_adapter *mxgbe_i2c_create(struct device *parent,
 	i2c->regs = regs;
 	i2c_set_adapdata(&i2c->adapter, i2c);
 	snprintf(i2c->adapter.name, sizeof(i2c->adapter.name),
-		 DRIVER_NAME " i2c bus%s", name);
+		 KBUILD_MODNAME " i2c bus%s", name);
 
 	i2c->adapter.algo = &i2c_algo;
 	ret = i2c_add_adapter(&i2c->adapter);
 	if (ret) {
-		ERR_MSG("ERROR: Failed to register i2c adapter\n");
+		pr_err(KBUILD_MODNAME ": Failed to register i2c adapter\n");
 		goto out_free;
 	}
 
@@ -495,11 +495,14 @@ u64 mxgbe_i2c_read_mac(mxgbe_priv_t *priv)
 
 	FDEBUG;
 
-	for (i = 0; i < 6; i++) {
-		mac <<= 8;
-		v8 = mxgbe_i2c_rd(priv->i2c_2, I2C_EEPROM_ADDR,
-				  i + I2C_EEPROM_MAC_BASE);
-		mac |= v8;
+	if (priv->i2c_2) {
+		for (i = 0; i < 6; i++) {
+			mac <<= 8;
+			v8 = mxgbe_i2c_rd(priv->i2c_2, I2C_EEPROM_ADDR,
+					i + I2C_EEPROM_MAC_BASE);
+			mac |= v8;
+		}
 	}
+
 	return mac;
 } /* mxgbe_i2c_read_mac */

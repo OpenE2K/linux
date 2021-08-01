@@ -35,11 +35,28 @@ static inline bool
 is_gdb_breakpoint_trap(struct pt_regs *regs)
 {
 	u64 *instr = (u64 *)GET_IP_CR0_HI(regs->crs.cr0_hi);
+	u64 sylab;
 
-	return (*instr & GDB_BREAKPOINT_STUB_MASK) == GDB_BREAKPOINT_STUB;
+	host_get_user(sylab, instr, regs);
+	return (sylab & GDB_BREAKPOINT_STUB_MASK) == GDB_BREAKPOINT_STUB;
 }
 
 extern void kernel_stack_overflow(unsigned int overflows);
+
+static inline void native_clear_fork_child_pt_regs(struct pt_regs *childregs)
+{
+	childregs->sys_rval = 0;
+	/*
+	 * Remove all pointers to parent's data stack
+	 * (these are not needed anyway for system calls)
+	 */
+	childregs->trap = NULL;
+	childregs->aau_context = NULL;
+#ifdef CONFIG_KERNEL_TIMES_ACCOUNT
+	childregs->scall_times = NULL;
+#endif
+	childregs->next = NULL;
+}
 
 static inline unsigned int
 native_is_kernel_data_stack_bounds(bool trap_on_kernel, e2k_usd_lo_t usd_lo)
@@ -63,23 +80,14 @@ native_correct_trap_return_ip(struct pt_regs *regs, unsigned long return_ip)
 	}
 	regs->crs.cr0_hi.CR0_hi_IP = return_ip;
 }
-static inline void
-native_handle_deferred_traps_in_syscall(struct pt_regs *regs)
-{
-	/* none deferred traps in system call */
-}
-static inline bool
-native_have_deferred_traps(struct pt_regs *regs)
-{
-	return false;	/* none deferred traps in system call */
-}
 
-static inline void
+static inline int
 native_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
 	(void)do_page_fault(regs, address, condition, mask, 0);
+	return 0;
 }
 
 extern long native_ttable_entry1(int sys_num, ...);
@@ -160,15 +168,15 @@ extern const system_call_func sys_call_table_deprecated[NR_syscalls];
 
 #define	FILL_HARDWARE_STACKS()	NATIVE_FILL_HARDWARE_STACKS()
 
+static inline void clear_fork_child_pt_regs(struct pt_regs *childregs)
+{
+	native_clear_fork_child_pt_regs(childregs);
+}
+
 static inline void
 correct_trap_return_ip(struct pt_regs *regs, unsigned long return_ip)
 {
 	native_correct_trap_return_ip(regs, return_ip);
-}
-static inline void
-handle_deferred_traps_in_syscall(struct pt_regs *regs)
-{
-	native_handle_deferred_traps_in_syscall(regs);
 }
 static inline void
 stack_bounds_trap_enable(void)
@@ -203,12 +211,12 @@ kvm_mmio_page_fault(struct pt_regs *regs, trap_cellar_t *tcellar)
 #define	instr_page_fault(__regs, __ftype, __async)	\
 		native_do_instr_page_fault(__regs, __ftype, __async)
 
-static inline void
+static inline int
 do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
-	native_do_aau_page_fault(regs, address, condition, mask, aa_no);
+	return native_do_aau_page_fault(regs, address, condition, mask, aa_no);
 }
 
 static inline unsigned int
@@ -250,7 +258,7 @@ static inline void init_pt_regs_for_syscall(struct pt_regs *regs)
 	regs->aau_context = NULL;
 #endif
 
-	regs->flags = 0;
+	AW(regs->flags) = 0;
 	init_guest_syscalls_handling(regs);
 }
 #endif

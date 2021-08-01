@@ -169,15 +169,6 @@ unsigned long kvm_do_mmio_page_fault(struct pt_regs *regs,
  * expanded. In the case of stack underflow it will be constricted
  */
 
-static inline void kvm_do_proc_stack_bounds(struct pt_regs *regs)
-{
-	WARN_ONCE(1, "implement me");
-}
-static inline void kvm_do_chain_stack_bounds(struct pt_regs *regs)
-{
-	WARN_ONCE(1, "implement me");
-}
-
 static int kvm_proc_stack_bounds(struct pt_regs *regs)
 {
 	WARN_ONCE(1, "implement me");
@@ -390,70 +381,6 @@ irqreturn_t kvm_do_interrupt(struct pt_regs *regs)
 irqreturn_t guest_do_interrupt(struct pt_regs *regs)
 {
 	return guest_do_interrupt_pic(regs);
-}
-
-static void kvm_deferred_proc_stack_bounds(struct pt_regs *regs)
-{
-	kvm_do_proc_stack_bounds(regs);
-}
-static void kvm_deferred_chain_stack_bounds(struct pt_regs *regs)
-{
-	kvm_do_chain_stack_bounds(regs);
-}
-
-static void kvm_deferred_proc_bounds_in_syscall(struct pt_regs *regs)
-{
-	WARN_ONCE(1, "implement me");
-}
-static void kvm_deferred_chain_bounds_in_syscall(struct pt_regs *regs)
-{
-	WARN_ONCE(1, "implement me");
-}
-
-void kvm_handle_deferred_traps(struct pt_regs *regs)
-{
-	if (regs->deferred_traps == 0) {
-		DebugGT("deferred traps mask is empty\n");
-		return;
-	}
-	BUG_ON(!guest_user_mode(regs));
-	DebugGHS("deferred traps mask is 0x%lx\n", regs->deferred_traps);
-	if (regs->deferred_traps & exc_proc_stack_bounds_mask) {
-		DebugGHS("deferred procedure stack bounds detected\n");
-		kvm_deferred_proc_stack_bounds(regs);
-		regs->deferred_traps &= ~exc_proc_stack_bounds_mask;
-	}
-	if (regs->deferred_traps & exc_chain_stack_bounds_mask) {
-		DebugGHS("deferred chain stack bounds detected\n");
-		kvm_deferred_chain_stack_bounds(regs);
-		regs->deferred_traps &= ~exc_chain_stack_bounds_mask;
-	}
-	if (regs->deferred_traps)
-		panic("Unhandled deferred traps remained 0x%lx\n",
-			regs->deferred_traps);
-}
-
-void kvm_handle_deferred_traps_in_syscall(struct pt_regs *regs)
-{
-	if (regs->deferred_traps == 0) {
-		DebugGT("deferred traps mask is empty\n");
-		return;
-	}
-	BUG_ON(!guest_user_mode(regs));
-	DebugGHS("deferred traps mask is 0x%lx\n", regs->deferred_traps);
-	if (regs->deferred_traps & exc_proc_stack_bounds_mask) {
-		DebugGHS("deferred procedure stack bounds detected\n");
-		kvm_deferred_proc_bounds_in_syscall(regs);
-		regs->deferred_traps &= ~exc_proc_stack_bounds_mask;
-	}
-	if (regs->deferred_traps & exc_chain_stack_bounds_mask) {
-		DebugGHS("deferred chain stack bounds detected\n");
-		kvm_deferred_chain_bounds_in_syscall(regs);
-		regs->deferred_traps &= ~exc_chain_stack_bounds_mask;
-	}
-	if (regs->deferred_traps)
-		panic("Unhandled deferred traps remained 0x%lx\n",
-			regs->deferred_traps);
 }
 
 /*

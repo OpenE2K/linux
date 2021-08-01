@@ -8,7 +8,12 @@
 
 struct dev_archdata {
 	unsigned int link;
-	struct e2k_iommu_dev_data iommu;
+#ifdef CONFIG_IOMMU_API
+	void *iommu;			/* private IOMMU data */
+	struct e2k_iommu_domain *domain; /* Domain the device is bound to */
+	struct kvm *kvm;		 /* Virtual machine, to which device is
+					  * passed */
+#endif
 };
 
 struct pdev_archdata {

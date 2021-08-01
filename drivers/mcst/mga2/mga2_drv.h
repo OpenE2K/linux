@@ -309,9 +309,9 @@ static inline int mga2_timeout(struct mga2 *mga2)
 	return timeout_msec;
 }
 
-struct cln40g_clk {
+struct mga2_clk {
 	int nr, od, nb;
-	long long nf;
+	long long nf, nf_i, nf_f;
 };
 
 struct mga2_div {
@@ -322,7 +322,10 @@ void mga2_pll_init_pixclock(struct i2c_adapter *adapter);
 int _mga2_ext_pll_set_pixclock(int pll, struct i2c_adapter *adapter,
 				  unsigned long clock_khz);
 
-int mga2_calc_int_pll(struct cln40g_clk *res, const unsigned long long fout,
+int mga2_calc_int_pll(struct mga2_clk *res, const unsigned long long fout,
+		     unsigned long long *rfvco, unsigned long long *rerr);
+
+int mga25_calc_int_pll(struct mga2_clk *res, const unsigned long long fout,
 		     unsigned long long *rfvco, unsigned long long *rerr);
 
 struct i2c_adapter *mga2_i2c_create(struct device *parent, resource_size_t regs,
@@ -374,6 +377,7 @@ int drm_vblank_get(struct drm_device *dev, unsigned int pipe);
 void drm_vblank_put(struct drm_device *dev, unsigned int pipe);
 
 extern bool mga2_use_external_pll;
+extern int mga2_lvds_channels;
 
 /* low-level interface prime helpers */
 

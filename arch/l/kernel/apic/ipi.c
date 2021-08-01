@@ -12,7 +12,6 @@
 #include <linux/export.h>
 
 #include <asm/smp.h>
-#include <asm/mtrr.h>
 #include <asm/tlbflush.h>
 #include <asm/mmu_context.h>
 #include <asm/apic.h>

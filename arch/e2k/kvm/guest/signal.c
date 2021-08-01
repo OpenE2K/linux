@@ -40,30 +40,13 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-static int copy_sighandler_frame(struct pt_regs *regs,
-				 u64 *pframe, e2k_mem_crs_t *crs)
+static int kvm_copy_sighandler_frame(struct pt_regs *regs, u64 *pframe)
 {
 	e2k_stacks_t *stacks = &regs->stacks;
 	size_t pframe_size;
 	void __user *u_pframe;
 	unsigned long ts_flag;
 	int ret;
-
-	/*
-	 * Ccopy user's part of hardware stacks from guest kernel back to user
-	 * plus 2 additional chain stack frames:
-	 *	top user frame that caused trap or system call;
-	 *	host trampoline to return to user stacks & context;
-	 *
-	 * The signal handler chain frame should be topmost, so on CRs,
-	 * although a copy in memory may be needed
-	 */
-	ret = kvm_user_hw_stacks_copy(regs, 2);
-	if (ret != 0) {
-		pr_err("%s(): could not restore user hardware stacks frames\n",
-			__func__);
-		goto failed;
-	}
 
 	/* copy the signal handler procedure frame */
 	/* to the top of user procedure stack */
@@ -85,9 +68,6 @@ static int copy_sighandler_frame(struct pt_regs *regs,
 		"PSP new ind 0x%x\n",
 		u_pframe, pframe_size, stacks->psp_hi.PSP_hi_ind);
 
-	signal_setup_done(0, &current_thread_info()->ksig,
-				test_ts_flag(TS_SINGLESTEP_USER));
-
 	return 0;
 
 failed:
@@ -96,7 +76,7 @@ failed:
 
 static int kvm_launch_sig_handler(struct pt_regs *regs)
 {
-	kvm_long_jump_info_t regs_info;
+	kvm_stacks_info_t regs_info;
 	long sys_rval = regs->sys_rval;
 	int ret;
 
@@ -117,13 +97,18 @@ static int kvm_launch_sig_handler(struct pt_regs *regs)
 	regs_info.cr1_hi = regs->crs.cr1_hi.CR1_hi_half;
 
 	/* return IRQs mask control from UPSR to PSR */
-	/* FIXME: here should be restore of user process UPSR state before */
-	/* trap or system call? not initial user UPSR value */
-	KVM_SET_USER_INITIAL_UPSR(E2K_USER_INITIAL_UPSR);
+	KVM_RETURN_TO_USER_UPSR(current_thread_info()->upsr, false);
 
-	ret = HYPERVISOR_launch_sig_handler(&regs_info, sys_rval);
-	if (ret != 0) {
-		pr_err("%s(): could not complete long jump on host, "
+retry:
+	ret = HYPERVISOR_launch_sig_handler(&regs_info,
+		(unsigned long)sighandler_trampoline_continue, sys_rval);
+	if (unlikely(ret == -EAGAIN)) {
+		pr_err("%s(): could not complete launch sig handler on host, "
+			"error %d, retry\n",
+			__func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
+		pr_err("%s(): could not complete launch sig handler on host, "
 			"error %d\n",
 			__func__, ret);
 	}
@@ -133,25 +118,60 @@ static int kvm_launch_sig_handler(struct pt_regs *regs)
 int kvm_signal_setup(struct pt_regs *regs)
 {
 	register thread_info_t *ti = current_thread_info();
+	e2k_stacks_t *stacks = &regs->stacks;
 	u64 pframe[32];
 	int ret;
 
 	ret = signal_rt_frame_setup(regs);
 	if (ret != 0) {
-		pr_err("%s(): setup signal rt frame failed< error %d\n",
+		pr_err("%s(): setup signal rt frame failed, error %d\n",
 			__func__, ret);
 		return ret;
 	}
 
 	/*
+	 * Copy user's part of kernel hardware stacks into user
+	 */
+	ret = kvm_user_hw_stacks_copy(regs);
+	if (ret)
+		return ret;
+
+	/*
+	 * Copy 2 additional chain stack frames from guest kernel back to user:
+	 *	top user frame that caused trap or system call;
+	 *	host trampoline to return to user stacks & context;
+	 *
+	 * plus Guest kernel signal handler trampoline frame;
+	 *
+	 * The signal handler chain frame should be topmost, so on CRs,
+	 * although a copy in memory may be needed
+	 */
+	ret = kvm_copy_injected_pcs_frames_to_user(regs, 2);
+	if (ret != 0) {
+		pr_err("%s(): could not restore user hardware stacks frames\n",
+			__func__);
+		return ret;
+	}
+
+	collapse_kernel_hw_stacks(stacks);
+
+	/*
+	 * After having called setup_signal_stack() we must unroll signal
+	 * stack by calling pop_signal_stack() in case an error happens.
+	 */
+	ret = setup_signal_stack(regs, true);
+	if (ret)
+		return ret;
+
+	/*
 	 * User's signal handler frame should be the last in stacks
 	 */
-	ret = prepare_sighandler_frame(&regs->stacks, pframe, &regs->crs);
+	ret = prepare_sighandler_frame(stacks, pframe, &regs->crs);
 	if (ret)
-		return ret;
-	ret = copy_sighandler_frame(regs, pframe, &regs->crs);
+		goto free_signal_stack;
+	ret = kvm_copy_sighandler_frame(regs, pframe);
 	if (ret)
-		return ret;
+		goto free_signal_stack;
 
 	/*
 	 * Update psize for ttable_entry8: syscall uses 0x70
@@ -176,10 +196,19 @@ int kvm_signal_setup(struct pt_regs *regs)
 	DebugHS("will start handler() 0x%lx for sig #%d\n",
 		ti->ksig.ka.sa.sa_handler, ti->ksig.sig);
 
-	clear_restore_sigmask();
+	signal_setup_done(0, &ti->ksig, test_ts_flag(TS_SINGLESTEP_USER));
+	regs->flags.sig_call_handler = 1;
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+	if (regs->trap)
+		regs->trap->flags &= ~TRAP_RP_FLAG;
+#endif /* CONFIG_SECONDARY_SPACE_SUPPORT */
 
 	ret = kvm_launch_sig_handler(regs);
 
+	/* should not be return to here */
+
+free_signal_stack:
+	pop_signal_stack();
 	return ret;
 }
 
@@ -204,8 +233,14 @@ int kvm_complete_long_jump(struct pt_regs *regs)
 	regs_info.cr1_lo = regs->crs.cr1_lo.CR1_lo_half;
 	regs_info.cr1_hi = regs->crs.cr1_hi.CR1_hi_half;
 
+retry:
 	ret = HYPERVISOR_complete_long_jump(&regs_info);
-	if (ret != 0) {
+	if (unlikely(ret == -EAGAIN)) {
+		pr_err("%s(): could not complete long jump on host, "
+			"error %d, retry\n",
+			__func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
 		pr_err("%s(): could not complete long jump on host, "
 			"error %d\n",
 			__func__, ret);

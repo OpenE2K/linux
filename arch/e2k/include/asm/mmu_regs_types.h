@@ -321,14 +321,6 @@ typedef	unsigned long long		mmu_reg_t;
 #define	mmu_trap_count_get(mmu_reg)	MMU_TRAP_COUNT_GET(mmu_reg)
 
 /*
- * MMU Memory Protection Table Base MMU_MPT_B
- * The base address of Memory Protection Table,
- * aligned to table size
- */
-
-#define _MMU_MPT_B		0x000000fffffff000UL
-
-/*
  * MMU PCI Low Bound MMU_PCI_L_B
  * Fix the boundary between PCIand main memory addresses
  * for Intel accesses
@@ -688,12 +680,12 @@ typedef	e2k_addr_t			flush_addr_t;
 typedef	e2k_addr_t			clw_addr_t;
 #endif /* __ASSEMBLY__ */
 
-#define US_CL_B_NO		0x024	/* User stack bottom to clean */
-#define US_CL_UP_NO		0x124	/* User stack up to clean */
-#define US_CL_M0_NO		0x004	/* User stack bit-mask [0:63] */
-#define US_CL_M1_NO		0x084	/* User stack bit-mask [64:127] */
-#define US_CL_M2_NO		0x104	/* User stack bit-mask [128:195] */
-#define US_CL_M3_NO		0x184	/* User stack bit-mask [196:255] */
+#define ADDR_US_CL_B		0x024	/* User stack bottom to clean */
+#define ADDR_US_CL_UP		0x124	/* User stack up to clean */
+#define ADDR_US_CL_M0		0x004	/* User stack bit-mask [0:63] */
+#define ADDR_US_CL_M1		0x084	/* User stack bit-mask [64:127] */
+#define ADDR_US_CL_M2		0x104	/* User stack bit-mask [128:195] */
+#define ADDR_US_CL_M3		0x184	/* User stack bit-mask [196:255] */
 
 /* CLW internel register contents */
 

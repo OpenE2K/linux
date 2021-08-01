@@ -20,7 +20,7 @@ Confs
 usage()
 {
 	echo "incorrect param: $1"
-	echo "usage: $scname [--def] --conf <conf> [--file <anyname>_defconfig]" >&2
+	echo "usage: $scname [--def] --conf <conf> [--file <anyname>_defconfig] [CC=<cc>]" >&2
 	exit 1
 }
 Usage() {
@@ -52,25 +52,26 @@ cleanup()
 {
 	rm -f $conf_path/$tmpf
 }
-###############################################################################
-conf_localversion()
+localversion()
 {
 	l=`echo $DCONF | sed -e 's/_/-/' -e 's/nort//' -e 's/-$//'`
-	$conf_script $OPTFILE --set-str CONFIG_LOCALVERSION "-${l}" \
+	$conf_script --file $OUTPUT_DIR/.config --set-str CONFIG_LOCALVERSION "-${l}" \
 	|| exit 1
 }
+###############################################################################
 conf_nn()
 {
 	$conf_script $OPTFILE \
 	-d CONFIG_NUMA -u CONFIG_NUMA_BALANCING -u CONFIG_NUMA_BALANCING_DEFAULT_ENABLED \
 	|| exit 1
 }
-e90s_nort()  { conf_localversion; }
-e90s_rt()    { conf_localversion; }
-e90s_nn()    { conf_localversion; conf_nn; }
-e90s_nnrt()  { conf_localversion; conf_nn; }
+e90s_nort()  { :; }
+e90s_rt()    { :; }
+e90s_nn()    { conf_nn; }
+e90s_nnrt()  { conf_nn; }
 ###############################################################################
 trap "cleanup" 1 2 3 6 15 EXIT
+OUTPUT_DIR=.
 while [ "$1" != "" ] ; do
 	opt="$1"
 	shift
@@ -79,6 +80,8 @@ while [ "$1" != "" ] ; do
 	--conf|-c) [ x"$DCONF" != x ] && usage; DCONF="$1"; shift;;
 	--file|-f) [ x"$DFILE" != x ] && usage; DFILE="$1"; shift;;
 	--output_directory|-o) OUTPUT_DIR="$1"; shift;;
+	CC=*) optcc="$opt";;
+	V=*) optv="$opt";;
 	--help|-h) Usage;;
 	*) echo "incorrect param: $opt"; Usage;;
 	esac
@@ -89,11 +92,13 @@ if [[ "$CONFS" != *" $DCONF "* ]]; then
 	KnownConfs
 	exit 1
 fi
+# additional configuration files to use
+ADDITIONAL_CONFIGS=
+if [[ "$DCONF" == *"_rt"* ]] || [[ "$DCONF" == *"_nnrt"* ]]; then
+	ADDITIONAL_CONFIGS+=" mcst_rt.config "
+fi
 # src defconfig
 SFILE=$conf_path/sparc64_defconfig
-if [[ "$DCONF" == *"_rt"* ]] || [[ "$DCONF" == *"_nnrt"* ]]; then
-	SFILE=$conf_path/rt_sparc64_defconfig
-fi
 # dst defconfig
 if [ x"$DFILE" == x ]; then
 	DFILENAME=$tmpf
@@ -120,6 +125,7 @@ $DCONF
 [ x$def_flg == x0 ] && exit 0
 
 # Generate .config
-make O=$OUTPUT_DIR $DFILENAME || exit 1
-make O=$OUTPUT_DIR olddefconfig
+make O=$OUTPUT_DIR $DFILENAME $ADDITIONAL_CONFIGS $optcc $optv || exit 1
+localversion
+make O=$OUTPUT_DIR olddefconfig $optcc $optv
 exit $?

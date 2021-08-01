@@ -82,32 +82,31 @@ do { \
 		 * data intact, and returns as if everything were OK (i.e. 0).
 		 */
 
-/*
- * Function for alignemnt of pointer in convert_array:
- * If pointer is not aligned to the alignment then round it up
- * If pointer is already aligned then simply increase it on the alignemnt
- */
-static int *align_ptr_up(const int *ptr, const int alignment)
+/* Aligning pointer to the upper bound: */
+
+static inline
+int *align_ptr_up(int *ptr, const int alignment)
 {
-	int *aligned_ptr;
-
 	if (((unsigned long) ptr) % alignment)
-		aligned_ptr = (int *) (((unsigned long) ptr
+		ptr = (int *) (((unsigned long) ptr
 			+ alignment - 1) & ~(alignment - 1));
-	else
-		aligned_ptr = (int *) (ptr + (alignment / sizeof(int)));
 
-	return aligned_ptr;
+	return ptr;
 }
 
-
-#define PUT_USER_OR_KERNEL(_mode, ptr, val)            \
-do {                                                   \
-	if (_mode) {                                   \
-		put_user(val, ptr);                    \
-	} else {                                       \
-		*ptr = val;                            \
-	}                                              \
+/* TODO: Get rid of PUT_USER_OR_KERNEL when entry #10 is gone and
+ *		Replace 'PUT_USER_OR_KERNEL' with 'put_user'
+ */
+#define PUT_USER_OR_KERNEL(_mode, ptr, val)		\
+do {							\
+	if (_mode) {					\
+		if (put_user(val, ptr)) {		\
+			failed_2_write = 1;		\
+			goto out;			\
+		}					\
+	} else {					\
+		*ptr = val;				\
+	}						\
 } while (0)
 
 /*
@@ -115,23 +114,28 @@ do {                                                   \
  * protected user pointers to memory, function descriptors, and int values.
  * prot_array - pointer to original (user-type) array
  * new_array - pointer for putting of converted array
- * max_prot_array_size - the maximum size, which user-type array can occupy
+ * max_prot_array_size - the maximum size, which protected array should take
  * fields - number of enries in each element
  * items - number of identical elements in the array to convert
  * mask_type - mask for encoding of field type in each element
- * 2 bits per each entry:
- * --- 00 (0x0) - int
- * --- 01 (0x1) - long
- * --- 10 (0x2) - pointer to function
- * --- 11 (0x3) - pointer to memory
+ * 4 bits per each entry:
+ * --- 0000 (0x0) - int
+ * --- 0001 (0x1) - long
+ * --- 0010 (0x2) - pointer to function
+ * --- 0011 (0x3) - descriptor (pointer to memory)
+ * --- 0100 (0x4) - descriptor or int
+ * --- 0101 (0x5) - descriptor or long
+ * --- 0110 (0x6) - descriptor or Fptr
+ * --- 0111 (0x7) - everything is possible
+ * --- 1*** (0x8) - may be uninitialized (empty tag allowed)
  * mask_align - mask for encoding of alignment of the NEXT! field
- * 2 bits per each entry:
+ * 4 bits per each entry:
  * --- 00 (0x0) - next field aligned as int (to 4 bytes)
  * --- 01 (0x1) - next field aligned as long (to 8 bytes)
  * --- 10 (0x2) - not used yet
  * --- 11 (0x3) - next field aligned as pointer (to 16 bytes)
  * mask_rw - mask for encoding access type of the structure elements
- * 2 bits per each entry:
+ * 4 bits per each entry:
  * --- 01 (0x1) - the field's content gets read by syscall (READ-able)
  * --- 10 (0x2) - the field's content gets updated by syscall (WRITE-able)
  * --- 11 (0x3) - the field is both READ-able and WRITE-able
@@ -150,7 +154,8 @@ do {                                                   \
  *     error number - otherwise.
  */
 
-extern int convert_array_3(long __user *prot_array, long *new_array,
+extern int get_pm_struct(long __user *prot_array,
+			 long		*new_array,
 			 const int max_prot_array_size, const int fields,
 			 const int items, const long mask_type,
 			 const long mask_align, const long mask_rw,
@@ -159,10 +164,15 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 #define MAX_LOCAL_ARGS 32
 
 /* Field type, 2 bits: (mask_type & 0x3) */
-#define _INT_FIELD      0x0  /* int value */
-#define _LONG_FIELD     0x1  /* long value */
-#define _FUNC_FIELD     0x2  /* pointer to function */
-#define _PTR_FIELD      0x3  /* pointer to memory */
+#define _INT_FIELD		0x0  /* int value */
+#define _LONG_FIELD		0x1  /* long value */
+#define _FUNC_FIELD		0x2  /* pointer to function */
+#define _PTR_FIELD		0x3  /* pointer to memory */
+#define _INT_PTR_FIELD		0x4  /* int or pointer value */
+#define _LONG_PTR_FIELD		0x5  /* long or pointer value */
+#define _PTR__FUNC_FIELD	0x6  /* descriptor or func.ptr */
+#define _TAG_DEFINED_FIELD	0x7  /* everything is possible */
+#define _UNINITIALIZED_FIELD 0x8 /* tag may be ETAGEWS or ETAGEWD */
 
 /* Alignment of the NEXT! field, 2 bits: mask_align & 0x3 */
 #define _INT_ALIGN      0x0  /* next field aligned as int (to 4 bytes) */
@@ -174,22 +184,24 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 #define _WRITEABLE      0x2  /* field gets updated by syscall */
 
 	int tmp_array[MAX_LOCAL_ARGS];
-	int i, j;
 	int struct_len, prot_len;
-	int alignment;
-	long pat_type, pat_align, pat_rw;
+	int elem_type, alignment;
+	long pat_type, pat_align, pat_rw, val_long;
 	int *tmp;
 	int *ptr_from;
 	int *ptr_to;
 	int user_mode = 0;
+	int may_be_uninitialized;
 	unsigned long noncopied;
-	int misaligned_ptr_from = 0; /* normally ptr_from must be aligned */
 	unsigned long pm_sc_debug_mode = current->mm->context.pm_sc_debug_mode;
+	int misaligned_ptr_from = 0; /* normally ptr_from must be aligned */
 	int rval = 0; /* result of the function */
+	int failed_2_write = 0;
+	int i, j;
 
-	DbgSCP("prot_array = 0x%lx, new_array = 0x%lx, size = %d\n",
+	DbgSCP("struct128 = 0x%lx, struct64 = 0x%lx, size = %d\n",
 		prot_array, new_array, max_prot_array_size);
-	DbgSCP("filds = %d, items = %d, mask_type = x%lx, mask_align = x%lx, mask_rw = x%lx\n",
+	DbgSCP("fields = %d, items = %d, mask_t = 0x%lx, mask_a = 0x%lx, mask_rw = 0x%lx\n",
 		fields, items, mask_type, mask_align, mask_rw);
 
 	if (!prot_array) {
@@ -210,13 +222,13 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 		return -EINVAL;
 	}
 
-	/* Count the size of each struct in the array */
+	/* Counting protected structure size: */
 	pat_align = mask_align;
 	struct_len = 0;
 	ptr_from = (int *) prot_array;
 
 	for (i = 0; i < fields; i++) {
-		alignment = ((pat_align & 0x3) + 1) * sizeof(int);
+		alignment = ((pat_align & 0xf) + 1) * sizeof(int);
 		if (((unsigned long) ptr_from) % alignment) {
 			misaligned_ptr_from = 1;
 			struct_len += ((((unsigned long) ptr_from
@@ -228,7 +240,7 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 			struct_len += alignment;
 			ptr_from += (alignment / sizeof(int));
 		}
-		pat_align >>= 2;
+		pat_align >>= 4;
 	}
 
 	if (struct_len & 0x7) {
@@ -251,7 +263,7 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 	 * size of this array in user space
 	 */
 	if (prot_len > max_prot_array_size) {
-		DbgSCP_ERR("prot_len(%d) > max_prot_array_size(%d)\n",
+		DbgSCP_ERR("prot_len (%d) > max_prot_array_size(%d)\n",
 			   prot_len, max_prot_array_size);
 		if (misaligned_ptr_from)
 			DbgSCP_ERR("prot_array (0x%lx) must be properly aligned\n",
@@ -270,8 +282,8 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 	if (noncopied) {
 		if (prot_len > MAX_LOCAL_ARGS * sizeof(int))
 			kfree(tmp);
-		DbgSCP("copy_from_user_with_tags(tmp=%p, len=%d) returned %lu\n",
-		       tmp, prot_len, noncopied);
+		DbgSCP("copy_from_user_with_tags(tmp=0x%lx, len=%d) returned %lu\n",
+		       (long) tmp, prot_len, noncopied);
 		DbgSCP_ERR("pid#%d Copying original array with tags failed\n",
 			current->pid);
 		rval = -EFAULT;
@@ -281,13 +293,13 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 	if (arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_CONV_STRUCT)) {
 		/* Displaying input (protected) array: */
 		ptr_to = tmp;
-		pr_info("convert_array: sizeof(prot_array/tmp=0x%p) = %zd (words):\n",
-			tmp, items * (struct_len / sizeof(int)));
+		pr_info("convert_128bit_struct: sizeof(struct128/tmp=0x%lx) = %zd (words):\n",
+			(long) tmp, items * (struct_len / sizeof(int)));
 		if (items > 1)
-			pr_info("[total item number: %d]\n", items);
+			pr_info("[array size: %d]\n", items);
 		for (j = 0; j < items; j++) {
 			if (items > 1)
-				pr_info("[item #%d]\n", j);
+				pr_info("[element #%d]\n", j);
 			for (i = 0; i < (struct_len / sizeof(int)); i++) {
 				pr_info("\t0x%.8x\n", *ptr_to);
 				ptr_to++;
@@ -301,7 +313,9 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 		user_mode = 1;
 	}
 
-	/* Handle each item int the array */
+TRY_USR_PFAULT {
+
+	/* Detailed analysis of data encoded in the input structure(s): */
 	for (i = 0; i < items; i++) {
 		ptr_from = tmp + struct_len * i / sizeof(int);
 		pat_type = mask_type;
@@ -310,38 +324,42 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 
 		/* Handle each entry in the strcut */
 		for (j = 0; j < fields; j++) {
-			long val_long;
 			int val_int;
 			int tag;
 
-			/* Count the alignment of the next field */
-			alignment = ((pat_align & 0x3) + 1) * sizeof(int);
+			elem_type = pat_type & 0x7;
+			may_be_uninitialized = pat_type & _UNINITIALIZED_FIELD;
 
-			/* Load the entry of type, specified by mask_type */
-			/*
-			 * FIXME: Now there is no fields in masks for encoding
-			 * of unnecessary fields, which can be unitialized.
-			 * Now we simply skip such fields changing them by zero
-			 * It protects only from using of deliberate values
-			 * of wrong type
-			 */
-			switch (pat_type & 0x3) {
+			DbgSCP("round %d: type=%d from=0x%lx  to=0x%lx\n",
+			       j, elem_type, (long)ptr_from, (long)ptr_to);
+
+			/* Load the field by type specified in mask_type */
+load_current_element:
+			switch (elem_type) {
 			case _INT_FIELD:
 				/* Load word (4 bytes) with tags */
 				NATIVE_LOAD_VAL_AND_TAGW((int *) ptr_from,
 							val_int, tag);
 
-				/* Copy valid int field */
-				if (likely((pat_rw & 0x3) != _WRITEABLE)
+				if ((tag == ETAGEWS) && may_be_uninitialized)
+					val_int = 0; /* we don't copy trash */
+				/* Check for valid 'int' field */
+				else if (likely((pat_rw & 0xf) != _WRITEABLE)
 					&& (tag != ETAGNUM)
 					&& !(rval_mode
 					     & CONV_ARR_IGNORE_INT_FLD_ERR)) {
-#define ERROR_UNEXPECTED_ELEMENT \
-	"unexpected value (tag=0x%x) at prot_array[%d]: %d\n"
-					DbgSCP_ALERT(ERROR_UNEXPECTED_ELEMENT,
+#define ERROR_UNINIT_FLDI \
+	"uninitialized value (tag=0x%x) at struct128[%d]: 0x%x\n"
+#define ERROR_UNEXPECTED_VALI \
+	"unexpected value (tag=0x%x) at struct128[%d]: 0x%x\n"
+					if (tag == ETAGEWS)
+						DbgSCP_ALERT(ERROR_UNINIT_FLDI,
+						   tag, j, val_int);
+					else
+						DbgSCP_ALERT(ERROR_UNEXPECTED_VALI,
 						   tag, j, val_int);
 #define IGNORING_ARR_ELEM \
-	"ignoring prot_array[%d]; replaced with zero\n"
+	"ignoring struct128[%d]; replaced with zero\n"
 					/* Don't copy field of another type */
 					if (val_int && (!CONVERT_WARN_ONLY)) {
 						DbgSCP_ALERT(IGNORING_ARR_ELEM,
@@ -354,18 +372,9 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 				PUT_USER_OR_KERNEL(user_mode,
 						(int *) ptr_to, val_int);
 
-				/*
-				 * Increase ptr_from and ptr_to in accordance
-				 * with the alignment of the next field
-				 */
-
-				ptr_from = align_ptr_up(ptr_from, alignment);
-
-				if (((pat_align & 0x3) == _LONG_ALIGN) ||
-					((pat_align & 0x3) == _PTR_ALIGN))
-					ptr_to = align_ptr_up(ptr_to, 8);
-				else
-					ptr_to = align_ptr_up(ptr_to, 4);
+				/* Move on ptr_from and ptr_to: */
+				ptr_from++;
+				ptr_to++;
 
 				break;
 			case _LONG_FIELD:
@@ -373,15 +382,23 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
 							val_long, tag);
 
-				/* Copy valid long field */
-				if (likely((pat_rw & 0x3) != _WRITEABLE)
+				if ((tag == ETAGEWD) && may_be_uninitialized)
+					val_long = 0; /* we don't copy trash */
+				/* Check for valid 'long' field */
+				else if (likely((pat_rw & 0xf) != _WRITEABLE)
 					&& (tag != ETAGNUM)
 					&& !(rval_mode
 					     & CONV_ARR_IGNORE_LONG_FLD_ERR)) {
-#define ERROR_UNEXPECTED_ELEMENTL \
-	"unexpected value (tag=0x%x) at prot_array[%d]: %ld\n"
-					DbgSCP_ALERT(ERROR_UNEXPECTED_ELEMENTL,
-						   tag, j, val_long);
+#define ERROR_UNINIT_FLDL \
+	"uninitialized value (tag=0x%x) at struct128[%d]: 0x%lx\n"
+#define ERROR_UNEXPECTED_VALL \
+	"unexpected value (tag=0x%x) at struct128[%d]: 0x%lx\n"
+					if (tag == ETAGEWD)
+						DbgSCP_ALERT(ERROR_UNINIT_FLDL,
+							     tag, j, val_long);
+					else
+						DbgSCP_ALERT(ERROR_UNEXPECTED_VALL,
+							     tag, j, val_long);
 					/* Don't copy field of another type */
 					if (val_long && (!CONVERT_WARN_ONLY)) {
 						DbgSCP_ALERT(IGNORING_ARR_ELEM,
@@ -394,18 +411,9 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 				PUT_USER_OR_KERNEL(user_mode,
 						(long *) ptr_to, val_long);
 
-				/*
-				 * Increase ptr_from and ptr_to in accordance
-				 * with the alignment of the next field
-				 */
-
-				ptr_from = align_ptr_up(ptr_from, alignment);
-
-				if (((pat_align & 0x3) == _LONG_ALIGN) ||
-					((pat_align & 0x3) == _PTR_ALIGN))
-					ptr_to = align_ptr_up(ptr_to, 8);
-				else
-					ptr_to = align_ptr_up(ptr_to, 4);
+				/* Move on ptr_from and ptr_to: */
+				ptr_from += 2;
+				ptr_to += 2;
 
 				break;
 			case _FUNC_FIELD:
@@ -413,14 +421,16 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
 							val_long, tag);
 
-				/* Copy valid func field */
-				if (likely((pat_rw & 0x3) != _WRITEABLE)
+				if ((tag == ETAGEWD) && may_be_uninitialized)
+					val_long = 0; /* we don't copy trash */
+				/* Check for valid func field */
+				else if (likely((pat_rw & 0xf) != _WRITEABLE)
 					&& (tag != ETAGPLD) && val_long
 					&& (!(rval_mode
 					      & CONV_ARR_IGNORE_FUNC_FLD_ERR))
 						|| tag) {
 #define ERROR_UNEXPECTED_ELEMENTF \
-	"not function pointer (tag=0x%x) at prot_array[%d]: %ld\n"
+	"not function pointer (tag=0x%x) at struct128[%d]: 0x%lx\n"
 					DbgSCP_ALERT(ERROR_UNEXPECTED_ELEMENTF,
 						   tag, j, val_long);
 					if (rval_mode & CONV_ARR_WRONG_FUNC_FLD)
@@ -431,18 +441,9 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 				PUT_USER_OR_KERNEL(user_mode,
 						(long *) ptr_to, val_long);
 
-				/*
-				 * Increase ptr_from and ptr_to in accordance
-				 * with the alignment of the next field
-				 */
-
-				ptr_from = align_ptr_up(ptr_from, alignment);
-
-				if (((pat_align & 0x3) == _LONG_ALIGN) ||
-					((pat_align & 0x3) == _PTR_ALIGN))
-					ptr_to = align_ptr_up(ptr_to, 8);
-				else
-					ptr_to = align_ptr_up(ptr_to, 4);
+				/* Move on ptr_from and ptr_to: */
+				ptr_from += 4;
+				ptr_to += 2;
 
 				break;
 			case _PTR_FIELD: {
@@ -468,7 +469,7 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 
 				/* Copy valid pointer field */
 				if ((dtag == ETAGAPQ) ||
-					(pat_rw & 0x3) == _WRITEABLE) {
+					(pat_rw & 0xf) == _WRITEABLE) {
 					AW(__ptr__).lo = val_long;
 					AW(__ptr__).hi = next_val_long;
 					PUT_USER_OR_KERNEL(
@@ -477,13 +478,15 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 							    GET_SBR_HI()));
 					goto eo_ptr_field;
 				}
+				if ((tag == ETAGEWD) && may_be_uninitialized)
+					val_long = 0; /* we don't copy trash */
 				/* Something different found: */
-				if ((val_long || next_val_long)
+				else if ((val_long || next_val_long)
 					&& (!(rval_mode
 					      & CONV_ARR_IGNORE_DSCR_FLD_ERR))
 						|| tag) {
 #define ERR_NOT_DSCR \
-	"not descriptor (tag=0x%x) at prot_array[%d]: 0x%lx : 0x%lx\n"
+	"not descriptor (tag=0x%x) at struct128[%d]: 0x%lx : 0x%lx\n"
 					DbgSCP_ALERT(ERR_NOT_DSCR, dtag, j,
 						val_long, next_val_long);
 					if (rval_mode & CONV_ARR_WRONG_DSCR_FLD)
@@ -494,10 +497,45 @@ extern int convert_array_3(long __user *prot_array, long *new_array,
 				PUT_USER_OR_KERNEL(user_mode,
 						(long *) ptr_to, val_long);
 eo_ptr_field:
+				/* Move on ptr_from and ptr_to: */
 				ptr_from += 2;
 				ptr_to += 2;
 
 				break;
+			}
+			case _INT_PTR_FIELD:
+			case _LONG_PTR_FIELD: {
+				/* Check for descriptor tag in the field: */
+				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
+							val_long, tag);
+				if (tag == E2K_AP_LO_ETAG)
+					/* This must be descriptor: */
+					elem_type = _PTR_FIELD;
+				else /* This is 'int' or 'long' */
+					elem_type &= 0x3;
+					/* _INT_PTR_FIELD -> _INT_FIELD */
+					/* _LONG_PTR_FIELD -> _LONG_FIELD */
+				goto load_current_element;
+			}
+			case _PTR__FUNC_FIELD: {
+				/* Check for descriptor tag in the field: */
+				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
+							val_long, tag);
+				elem_type = (tag == E2K_AP_LO_ETAG) ? _PTR_FIELD
+								: _FUNC_FIELD;
+				goto load_current_element;
+			}
+			case _TAG_DEFINED_FIELD: {
+				/* Check for tag in the field: */
+				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
+							val_long, tag);
+				if (tag == E2K_AP_LO_ETAG)
+					elem_type = _PTR_FIELD;
+				else if (tag == E2K_PL_ETAG)
+					elem_type = _FUNC_FIELD;
+				else /* This is 'int' or 'long' */
+					elem_type = _INT_FIELD;
+				goto load_current_element;
 			}
 			default:
 				/* Otherwise it is something invalid. */
@@ -506,11 +544,28 @@ eo_ptr_field:
 				return -EFAULT;
 			}
 
-			pat_type >>= 2;
-			pat_align >>= 2;
-			pat_rw >>= 2;
+			/* Fixing ptr_from/ptr_to alignment: */
+			alignment = pat_align & 0xf;
+			ptr_from = align_ptr_up(ptr_from, /* 128 bit */
+						(alignment + 1) * sizeof(int));
+			if (alignment)
+				ptr_to = align_ptr_up(ptr_to, 8); /* 64 bit */
+
+			DbgSCP("alignment=%d   from->0x%lx  to->0x%lx\n",
+			       alignment, (long)ptr_from, (long)ptr_to);
+
+			/* Moving on structure field masks: */
+			pat_type >>= 4;
+			pat_align >>= 4;
+			pat_rw >>= 4;
 		}
 	}
+
+} CATCH_USR_PFAULT {
+#define ERR_FATAL "FATAL ERROR: failed to read from 0x%lx (field %d) !!!\n"
+			DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+			return -EFAULT;
+} END_USR_PFAULT
 
 	DbgSCP("The array was converted successfully\n");
 
@@ -522,10 +577,10 @@ eo_ptr_field:
 		pat_type = mask_type;
 		pat_align = mask_align;
 		for (j = 0; j < fields; j++) {
-			pr_info("convert_array prot_array[%d]=",
+			pr_info("convert_array struct128[%d]=",
 				i * fields + j);
 			/* Outputs a field based upon mask_type */
-			switch (pat_type & 0x3) {
+			switch (pat_type & 0x7) {
 			case _INT_FIELD: {
 				pr_info("[INT] \t%d / 0x%x\n",
 				       *(int *)ptr_to, *(int *)ptr_to);
@@ -544,6 +599,8 @@ eo_ptr_field:
 				ptr_to += 2;
 				break;
 			}
+			case _INT_PTR_FIELD:
+			case _LONG_PTR_FIELD:
 			case _PTR_FIELD: {
 				pr_info("[PTR] \t0x%lx\n",
 				       *(unsigned long *)ptr_to);
@@ -552,29 +609,34 @@ eo_ptr_field:
 			}
 			default:
 				/* Otherwise it is something invalid. */
-				pr_err("Error in convert_array print:\n");
+				pr_err("Error in %s print:\n", __func__);
 				pr_err("\t\titem=%d field=%d pat_type=%d\n",
-					 i, j, (int)pat_type & 0x3);
+					 i, j, (int)pat_type & 0xf);
 			}
 			/* Check for correct alignment: */
-			if ((pat_align & 0x3) != _INT_ALIGN)
+			if ((pat_align & 0xf) != _INT_ALIGN)
 				if ((unsigned long)ptr_to & 0x7)
 					ptr_to++; /* even address */
-			pat_type >>= 2;
-			pat_align >>= 2;
+			pat_type >>= 4;
+			pat_align >>= 4;
 		}
 	}
-	struct_len = ((unsigned long)ptr_to - (unsigned long)new_array)
+	struct_len = ((unsigned long) ptr_to - (unsigned long) new_array)
 			/ sizeof(int); /* in words */
 	ptr_to = (int *)new_array;
-	pr_info("convert_array: sizeof(ptr_to=0x%px) = %d (words):\n",
-	       ptr_to, struct_len);
+	pr_info("%s: sizeof(ptr_to=0x%lx) = %d (words):\n",
+		__func__, (long) ptr_to, struct_len);
 	for (i = 0; i < struct_len; i++) {
 		pr_info("\t0x%.8x\n", *ptr_to);
 		ptr_to++;
 	}
 
 out:
+	if (failed_2_write) {
+#define ERR_FATAL_WRITE "FATAL ERROR: failed to write at 0x%lx (field %d) !!!\n"
+		DbgSCP_ALERT(ERR_FATAL_WRITE, (long) ptr_to, j /*field*/);
+
+	}
 	if (prot_len > MAX_LOCAL_ARGS * sizeof(int))
 		kfree(tmp);
 
@@ -589,11 +651,13 @@ out:
  * tags - argument tags (4 bits per arg; lower to higher bits ordered)
  * arg_num - number of arguments
  * mask_type - mask for encoding of field type in each element
- * 2 bits per each entry:
+ * 4 bits per each entry:
  * --- 00 (0x0) - int
  * --- 01 (0x1) - long
  * --- 10 (0x2) - pointer to function
- * --- 11 (0x3) - pointer to memory.
+ * --- 11 (0x3) - pointer to memory
+ * --- 0100 (0x4) - descriptor or int
+ * --- 0101 (0x5) - descriptor or long
  * rval_mode - error (return value) reporting mode mask:
  *	0 - report only critical problems;
  *	1 - return with -EFAULT if wrong tag in 'int' field;
@@ -607,20 +671,19 @@ out:
  * Returns: 0 - if converted OK;
  *     error number - otherwise.
  */
-
-extern int check_args_array(const long *args_array,
-			    const long arg_tags,
-			    const int arg_num,
-			    const long mask_type,
-			    const int rval_mode,
-			    const char *ErrMsgHeader)
+extern int check_args_array4(const long *args_array,
+			     const long arg_tags,
+			     const int arg_num,
+			     const long mask_type,
+			     const int rval_mode,
+			     const char *ErrMsgHeader)
 {
-	int j;
-	long arg_type;
+	long arg_types;
 	long *argument;
 	long tag;
-	int rval = 0; /* result of the function */
 	unsigned long pm_sc_debug_mode = current->mm->context.pm_sc_debug_mode;
+	int rval = 0; /* result of the function */
+	int  j, t, uninit;
 
 	DbgSCP("args_array=0x%lx, tags=0x%lx, arg_num=%d, mask_type=x%lx\n",
 		args_array, arg_tags, arg_num, mask_type);
@@ -634,13 +697,15 @@ extern int check_args_array(const long *args_array,
 	/* Checking for correctness of each argument type: */
 	argument = (long *) args_array;
 	tag = arg_tags;
-	arg_type = mask_type;
+	arg_types = mask_type;
 	for (j = 0; j < arg_num;
-	     j++, argument += 2, tag >>= 8, arg_type >>= 2) {
+	     j++, argument += 2, tag >>= 8, arg_types >>= 4) {
 
-		switch (arg_type & 0x3) {
+		uninit = arg_types & _UNINITIALIZED_FIELD;
+		t = tag & 0xf;
+		switch (arg_types & 0x7) {
 		case _INT_FIELD:
-			if ((tag & 0xf) == ETAGNUM)
+			if ((t == ETAGNUM) || ((t == ETAGEWS) && uninit))
 				break;
 			if (!(rval_mode & CONV_ARR_IGNORE_INT_FLD_ERR)) {
 #define ERROR_UNEXPECTED_ARG_TYPE_I \
@@ -653,7 +718,7 @@ extern int check_args_array(const long *args_array,
 			}
 			break;
 		case _LONG_FIELD:
-			if ((tag & 0xf) == ETAGNUM)
+			if ((t == ETAGNUM) || ((t == ETAGEWD) && uninit))
 				break;
 			if (!(rval_mode & CONV_ARR_IGNORE_LONG_FLD_ERR)) {
 #define ERROR_UNEXPECTED_ARG_TYPE_L \
@@ -666,7 +731,7 @@ extern int check_args_array(const long *args_array,
 			}
 			break;
 		case _FUNC_FIELD:
-			if ((tag & 0xf) == ETAGPLD)
+			if ((t == ETAGPLD) || ((t == ETAGEWD) && uninit))
 				break;
 			if (*argument
 				&& (!(rval_mode & CONV_ARR_IGNORE_FUNC_FLD_ERR))
@@ -688,7 +753,7 @@ extern int check_args_array(const long *args_array,
 
 			dtag = tag & 0xff;
 
-			if (dtag == ETAGAPQ)
+			if ((dtag == ETAGAPQ) || ((t == ETAGEWD) && uninit))
 				break;
 			/* Something different found: */
 			val_long = *argument;
@@ -708,6 +773,10 @@ extern int check_args_array(const long *args_array,
 					goto out;
 			}
 			break;
+		case _INT_PTR_FIELD:
+		case _LONG_PTR_FIELD:
+			/* any type may be over here */
+			break;
 		}
 		default:
 			/* Otherwise it is something invalid. */
@@ -716,6 +785,56 @@ extern int check_args_array(const long *args_array,
 	}
 out:
 	return rval;
+}
+
+
+static inline
+unsigned long get_mask4_from_mask2(unsigned long mask2)
+{
+	unsigned long mask4 = 0;
+	int i;
+
+	for (i = 0; mask2; i++, mask2 >>= 2)
+		mask4 |= (mask2 & 0x3) << (i * 4);
+	if (current->mm->context.pm_sc_debug_mode & PM_SC_DBG_MODE_CONV_STRUCT)
+		pr_info("%s : mask4  = 0x%lx\n", __func__, mask4);
+	return mask4;
+}
+
+/* This function realizes old mask format with 2 bits per structure field */
+
+extern int convert_array_3(long __user *prot_array, long *new_array,
+			 const int max_prot_array_size,
+			 const int fields, const int items,
+			 unsigned long mask_type, unsigned long mask_align,
+			 unsigned long mask_rw, const int rval_mode)
+{
+	long mask_type4, mask_align4, mask_rw4;
+
+	mask_type4 = get_mask4_from_mask2(mask_type);
+	mask_align4 = get_mask4_from_mask2(mask_align);
+	mask_rw4 = get_mask4_from_mask2(mask_rw);
+
+	return get_pm_struct(prot_array, new_array,
+				max_prot_array_size, fields, items,
+				mask_type4, mask_align4, mask_rw4, rval_mode);
+}
+
+/* This function realizes old mask format with 2 bits per structure field */
+
+extern int check_args_array(const long *args_array,
+			    const long	arg_tags,
+			    const int	arg_num,
+			    unsigned long mask_type,
+			    const int	rval_mode,
+			    const char *ErrMsgHeader)
+{
+	long mask_type4;
+
+	mask_type4 = get_mask4_from_mask2(mask_type);
+
+	return check_args_array4(args_array, arg_tags, arg_num,
+				mask_type4, rval_mode, ErrMsgHeader);
 }
 
 #endif /* CONFIG_PROTECTED_MODE */

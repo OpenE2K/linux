@@ -5,8 +5,20 @@
 #ifndef _ASM_SPARC_DEVICE_H
 #define _ASM_SPARC_DEVICE_H
 
-#if defined(CONFIG_E90S) && !defined(CONFIG_OF)
-#include <asm-generic/device.h>
+#if defined(CONFIG_E90S)
+
+struct dev_archdata {
+#ifdef CONFIG_IOMMU_API
+	void *iommu;			/* private IOMMU data */
+#endif
+};
+
+struct pdev_archdata {
+};
+
+#define dev_to_link(dev)		0
+#define set_dev_link(dev, link)		do { } while (0)
+
 #else	/*CONFIG_E90S*/
 #include <asm/openprom.h>
 
@@ -29,8 +41,4 @@ struct pdev_archdata {
 	int			num_irqs;
 };
 #endif	/*CONFIG_E90S*/
-
-#define dev_to_link(dev)		0
-#define set_dev_link(dev, link)		do{}while(0)
-
 #endif /* _ASM_SPARC_DEVICE_H */

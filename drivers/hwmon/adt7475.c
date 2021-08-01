@@ -20,6 +20,8 @@
 #include <linux/err.h>
 #include <linux/jiffies.h>
 #include <linux/util_macros.h>
+#include <linux/pwm.h>
+#include <linux/thermal.h>
 
 /* Indexes for the sysfs hooks */
 
@@ -214,6 +216,27 @@ struct adt7475_data {
 	u8 vrm;
 	const struct attribute_group *groups[9];
 };
+#ifdef CONFIG_MCST
+#define MAX_SENSORS		3
+#define MAX_PWM_DEVICES		3
+
+struct adt7475_pwm_chip {
+	struct adt7475_data *data;
+	struct pwm_chip chip;
+};
+
+struct adt7475_thermal_sensor {
+	struct i2c_client *client;
+	struct adt7475_data *data;
+	struct thermal_zone_device *tz;
+	unsigned int sensor_id;
+};
+
+static inline struct adt7475_pwm_chip *to_pwm(struct pwm_chip *chip)
+{
+	return container_of(chip, struct adt7475_pwm_chip, chip);
+}
+#endif
 
 static struct i2c_driver adt7475_driver;
 static struct adt7475_data *adt7475_update_device(struct device *dev);
@@ -359,7 +382,7 @@ static ssize_t voltage_store(struct device *dev,
 	mutex_lock(&data->lock);
 
 	data->voltage[sattr->nr][sattr->index] =
-				volt2reg(sattr->index, val, data->bypass_attn);
+		volt2reg(sattr->index, val, data->bypass_attn);
 
 	if (sattr->index < ADT7475_VOLTAGE_COUNT) {
 		if (sattr->nr == MIN)
@@ -672,7 +695,7 @@ static ssize_t point2_store(struct device *dev, struct device_attribute *attr,
 	 */
 	temp = reg2temp(data, data->temp[AUTOMIN][sattr->index]);
 	val = clamp_val(val, temp + autorange_table[0],
-		temp + autorange_table[ARRAY_SIZE(autorange_table) - 1]);
+			temp + autorange_table[ARRAY_SIZE(autorange_table) - 1]);
 	val -= temp;
 
 	/* Find the nearest table entry to what the user wrote */
@@ -1008,8 +1031,8 @@ static ssize_t pwmfreq_store(struct device *dev,
 }
 
 static ssize_t pwm_use_point2_pwm_at_crit_show(struct device *dev,
-					struct device_attribute *devattr,
-					char *buf)
+					       struct device_attribute *devattr,
+					       char *buf)
 {
 	struct adt7475_data *data = adt7475_update_device(dev);
 
@@ -1020,8 +1043,8 @@ static ssize_t pwm_use_point2_pwm_at_crit_show(struct device *dev,
 }
 
 static ssize_t pwm_use_point2_pwm_at_crit_store(struct device *dev,
-					struct device_attribute *devattr,
-					const char *buf, size_t count)
+						struct device_attribute *devattr,
+						const char *buf, size_t count)
 {
 	struct adt7475_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
@@ -1457,6 +1480,135 @@ static int adt7475_update_limits(struct i2c_client *client)
 
 	return 0;
 }
+#ifdef CONFIG_MCST
+static int adt7475_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
+			     const struct pwm_state *state)
+{
+	struct adt7475_pwm_chip *adt7475_pwm = to_pwm(chip);
+	struct i2c_client *client = to_i2c_client(chip->dev);
+	struct adt7475_data *data = adt7475_pwm->data;
+	u8 val;
+
+	if (state->period > 1) {
+		mutex_lock(&data->lock);
+		val = state->duty_cycle * 255 / (state->period - 1);
+		val = clamp_val(val, 0, 255);
+		i2c_smbus_write_byte_data(client, PWM_REG(pwm->hwpwm), val);
+		mutex_unlock(&data->lock);
+	} else {
+		dev_err(chip->dev, "cooling device period failed\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const struct pwm_ops adt7475_pwm_ops = {
+	.apply = adt7475_pwm_apply,
+	.owner = THIS_MODULE,
+};
+
+static int adt7475_init_pwm(struct i2c_client *client,
+			    struct adt7475_data *data)
+{
+	struct adt7475_pwm_chip *adt7475_pwm;
+	int ret;
+
+	adt7475_pwm = devm_kzalloc(&client->dev,
+				   sizeof(*adt7475_pwm), GFP_KERNEL);
+	if (!adt7475_pwm)
+		return -ENOMEM;
+
+	adt7475_pwm->data = data;
+	i2c_set_clientdata(client, adt7475_pwm);
+
+	/* Initialize chip */
+
+	adt7475_pwm->chip.dev = &client->dev;
+	adt7475_pwm->chip.ops = &adt7475_pwm_ops;
+	adt7475_pwm->chip.base = -1;
+	adt7475_pwm->chip.npwm = MAX_PWM_DEVICES;
+
+	ret = pwmchip_add(&adt7475_pwm->chip);
+	if (ret < 0) {
+		dev_err(&client->dev, "pwmchip_add() failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int adt7475_pwm_remove(struct i2c_client *client)
+{
+	struct adt7475_pwm_chip *adt7475_pwm = i2c_get_clientdata(client);
+	int ret;
+
+	ret = pwmchip_remove(&adt7475_pwm->chip);
+	if (ret) {
+		dev_err(&client->dev, "pwmchip_remove() failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int adt7475_get_temp(void *data, int *temp)
+{
+	struct adt7475_thermal_sensor *thermal_sensor = data;
+	struct i2c_client *client = thermal_sensor->client;
+	int ret;
+	u16 val;
+	u8 ext;
+
+	mutex_lock(&thermal_sensor->data->lock);
+	ext = adt7475_read(REG_EXTEND2);
+	if (ext < 0)
+		return ext;
+	ret = adt7475_read(TEMP_REG(thermal_sensor->sensor_id));
+	if (ret < 0)
+		return ret;
+	val = (ret << 2) | ((ext >> ((thermal_sensor->sensor_id + 1) * 2)) & 3);
+	*temp = reg2temp(thermal_sensor->data, val);
+	mutex_unlock(&thermal_sensor->data->lock);
+
+	return 0;
+}
+
+static const struct thermal_zone_of_device_ops adt7475_tz_ops = {
+	.get_temp = adt7475_get_temp,
+};
+
+static int adt7475_init_thermal(struct i2c_client *client,
+				struct adt7475_data *data)
+{
+	unsigned int i;
+
+	for (i = 0; i < MAX_SENSORS; i++) {
+		struct adt7475_thermal_sensor *thermal_sensor;
+
+		thermal_sensor = devm_kzalloc(&client->dev,
+					      sizeof(*thermal_sensor),
+					      GFP_KERNEL);
+		if (!thermal_sensor)
+			return -ENOMEM;
+
+		thermal_sensor->client = client;
+		thermal_sensor->data = data;
+		thermal_sensor->sensor_id = i;
+
+		thermal_sensor->tz =
+			devm_thermal_zone_of_sensor_register(&client->dev,
+							     i, thermal_sensor,
+							     &adt7475_tz_ops);
+		if (IS_ERR(thermal_sensor->tz))
+			return PTR_ERR(thermal_sensor->tz);
+
+		dev_dbg(&client->dev, "thermal sensor %d registered\n", 0);
+	}
+
+	return 0;
+}
+#endif
 
 static int adt7475_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
@@ -1551,7 +1703,7 @@ static int adt7475_probe(struct i2c_client *client,
 		data->bypass_attn = (0x3 << 3) | 0x3;
 	} else {
 		data->bypass_attn = ((data->config4 & CONFIG4_ATTN_IN10) >> 4) |
-				    ((data->config4 & CONFIG4_ATTN_IN43) >> 3);
+			((data->config4 & CONFIG4_ATTN_IN43) >> 3);
 	}
 	data->bypass_attn &= data->has_voltage;
 
@@ -1630,6 +1782,10 @@ static int adt7475_probe(struct i2c_client *client,
 	if (ret)
 		return ret;
 
+#ifdef CONFIG_MCST
+	adt7475_init_thermal(client, data);
+	adt7475_init_pwm(client, data);
+#endif
 	return 0;
 }
 
@@ -1643,6 +1799,9 @@ static struct i2c_driver adt7475_driver = {
 	.id_table	= adt7475_id,
 	.detect		= adt7475_detect,
 	.address_list	= normal_i2c,
+#ifdef CONFIG_MCST
+	.remove		= adt7475_pwm_remove,
+#endif
 };
 
 static void adt7475_read_hystersis(struct i2c_client *client)

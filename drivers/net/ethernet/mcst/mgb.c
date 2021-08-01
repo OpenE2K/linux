@@ -86,11 +86,11 @@ MODULE_PARM_DESC(hd, "work in half duplex mode");
 
 static int an_clause_73;
 module_param(an_clause_73, int, 0444);
-MODULE_PARM_DESC(hd, "Use clause 37 autunegotiation");
+MODULE_PARM_DESC(hd, "use clause 37 autunegotiation");
 
 static int mpll_mode = -1;
 module_param_named(mpllmode, mpll_mode, int, 0444);
-MODULE_PARM_DESC(mpllmode, "PCS MPLL mode: 0-normal, 1-bifurcation");
+MODULE_PARM_DESC(mpllmode, "PCS MPLL mode: 0-normal, 1-bifurcation, 2-2.5G");
 
 
 static DEFINE_MUTEX(mgb_mutex);
@@ -205,6 +205,7 @@ static DEFINE_MUTEX(mgb_mutex);
 #define MG_CLST		(1 << 10) /* R/W1C,CHANGED LINK STATUS */
 #define MG_LSTA		(1 <<  9) /* R,    LINK STATUS */
 #define MG_EFTC		(1 <<  8) /* RW,   ENABLE CTFL INTR */
+#define MG_OUTS		(1 <<  7) /* RW,   DISABLE TRANSMIT / SAVE POWER */
 #define MG_RSTP(p)	((p) << 6)/* RW    RESET POLARITY */
 #define MG_ERDY		(1 <<  5) /* RW,   ENABLE RRDY INTR */
 #define MG_ECRL		(1 <<  4) /* RW,   ENABLE CRLS INTR */
@@ -272,6 +273,7 @@ static DEFINE_MUTEX(mgb_mutex);
 /* PCS MPLL MODE */
 #define PCS_NORMAL_MODE		0
 #define PCS_BIFURCATION_MODE	1
+#define PCS_2G5_MODE		2
 
 static const char mgb_gstrings_test[][ETH_GSTRING_LEN] = {
 	"Loopback test  (offline)"
@@ -469,7 +471,10 @@ struct mgb_private {
 	struct mii_bus		*mii_bus;
 	int			extphyaddr;	/* Address of External PHY */
 	int			pcsaddr;	/* Address of Internal PHY */
-	int			mpll_mode;      /* Normal=0, Bifurcation=1 */
+	u32			pcs_dev_id;
+	struct device_node	*phy_node;	/* Connection to External PHY */
+	int			mpll_mode;      /* Normal=0,
+						 * Bifurcation=1, 2G5=2 */
 #if 0
 	struct phy_device	*pcsdev;
 #endif
@@ -984,11 +989,17 @@ static void mgb_phylink_handler(struct net_device *dev)
 		phy_print_status(dev->phydev);
 }
 
+static int mgb_pcs_vs_reset(struct mgb_private *ep);
+
 /* called at begin of open() */
 static int mgb_extphy_connect(struct mgb_private *ep)
 {
 	struct phy_device *phydev;
 	int ret;
+
+	if (mgb_pcs_vs_reset(ep)) {
+		return 1;
+	}
 
 	if (ep->extphyaddr == -1)
 		return 0;
@@ -1047,23 +1058,25 @@ static void mgb_init_extphy(struct mgb_private *ep)
 
 static int mgio_read_clause_45(struct mgb_private *ep, int mii_id, int reg_num)
 {
-	u32 rd = 0x00020000 | reg_num | ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
+	u32 rd;
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
-	mgb_write_mgio_csr(ep, (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) |
-					MG_RRDY);
+	mgb_write_mgio_csr(ep,
+			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
+	rd = (0x2UL << MGIO_CS_OFF) |
+	     (reg_num & ((0x1fUL << MGIO_REG_AD_OFF) | 0xffff)) |
+	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	mgb_write_mgio_data(ep, rd);
-	if (mgb_wait_rrdy(ep)) {
+	if (mgb_wait_rrdy(ep))
 		goto bad_result;
-	}
-	rd |= 0x30000000;
-	mgb_write_mgio_csr(ep, (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) |
-					MG_RRDY);
+
+	mgb_write_mgio_csr(ep,
+			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
+	rd |= 0x3UL << MGIO_OP_CODE_OFF;
 	mgb_write_mgio_data(ep, rd);
-	if (mgb_wait_rrdy(ep)) {
+	if (mgb_wait_rrdy(ep))
 		goto bad_result;
-	}
 
 	rd = mgb_read_mgio_data(ep) & 0xffff;
 	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
@@ -1077,7 +1090,7 @@ static int mgio_read_clause_45(struct mgb_private *ep, int mii_id, int reg_num)
 
 bad_result:
 	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
-	dev_err(&ep->dev->dev,
+	dev_err(&ep->pci_dev->dev,
 		"%s: Unable to read from MGIO_DATA reg 0x%x\n",
 		__func__, reg_num);
 	return -1;
@@ -1086,24 +1099,29 @@ bad_result:
 static void mgio_write_clause_45(struct mgb_private *ep, int mii_id,
 				 int reg_num, int val)
 {
-	u32 wr = 0x00020000 | reg_num | ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
+	u32 wr;
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
+	wr = (0x2 << MGIO_CS_OFF) |
+	     (reg_num & ((0x1f << MGIO_REG_AD_OFF) | 0xffff)) |
+	     ((mii_id & 0x1f) << MGIO_PHY_AD_OFF);
 	mgb_write_mgio_data(ep, wr);
-	if (mgb_wait_rrdy(ep)) {
+	if (mgb_wait_rrdy(ep))
 		goto bad_result;
-	}
+
 	wr &= ~0xffff;
-	wr |= 0x10020000 | (val & 0xffff);
+	wr |= (0x2 << MGIO_CS_OFF) |
+	      (0x1 << MGIO_OP_CODE_OFF) |
+	      (val & 0xffff);
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
 	mgb_write_mgio_data(ep, wr);
-	if (mgb_wait_rrdy(ep)) {
+	if (mgb_wait_rrdy(ep))
 		goto bad_result;
-	}
+
 	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
 
 	if (netif_msg_hw(ep))
@@ -1115,7 +1133,7 @@ static void mgio_write_clause_45(struct mgb_private *ep, int mii_id,
 
 bad_result:
 	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
-	dev_err(&ep->dev->dev,
+	dev_err(&ep->pci_dev->dev,
 		"%s: Unable to write MGIO_DATA reg 0x%x\n", __func__, reg_num);
 	return;
 }
@@ -1131,6 +1149,8 @@ static void mgb_pcs_write(struct mgb_private *ep, int regnum, u16 value)
 	mgio_write_clause_45(ep, ep->pcsaddr, regnum, value);
 }
 
+#define PCS_DEV_ID_1G_2G5	0x7996CED0
+#define PCS_DEV_ID_1G_2G5_10G	0x7996CED1
 
 #define PMA_and_PMD_MMD	(0x1 << 18)
 #define PCS_MMD		(0x3 << 18)
@@ -1139,6 +1159,8 @@ static void mgb_pcs_write(struct mgb_private *ep, int regnum, u16 value)
 #define VS_MII_MMD	(0x1f << 18)
 
 #define SR_XS_PCS_CTRL1		(0x0000 | PCS_MMD)
+#define SR_XS_PCS_DEV_ID1	(0x0002 | PCS_MMD)
+#define SR_XS_PCS_DEV_ID2	(0x0003 | PCS_MMD)
 #define SR_XS_PCS_CTRL2		(0x0007 | PCS_MMD)
 #define VR_XS_PCS_DIG_CTRL1	(0x8000 | PCS_MMD)
 
@@ -1192,10 +1214,17 @@ static void mgb_pcs_write(struct mgb_private *ep, int regnum, u16 value)
 /* reset for both controllers are configured via func 0 */
 static int mgb_pcs_vs_reset(struct mgb_private *ep)
 {
+	/**if (ep->pcs_dev_id != PCS_DEV_ID_1G_2G5_10G)
+		return 0;*/
+
 	if (PCI_FUNC(ep->pci_dev->devfn) == 0) {
 		int i;
-		/* EN_VSMMD1, VR_RST */
-		mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1, 0xa000);
+
+		if (ep->mpll_mode == PCS_2G5_MODE)
+			mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1, 0xa004);
+		else
+			mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1, 0xa000);
+
 		for (i = 0; i < MGB_PHY_WAIT_NUM; i++) {
 			if ((mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) &
 				0x8000) == 0) {
@@ -1204,7 +1233,7 @@ static int mgb_pcs_vs_reset(struct mgb_private *ep)
 			udelay(1);
 		}
 		if (i == MGB_PHY_WAIT_NUM) {
-			dev_warn(&ep->dev->dev, "Could not reset phy\n");
+			dev_warn(&ep->pci_dev->dev, "could not reset PCS\n");
 			return 1;
 		}
 	}
@@ -1215,140 +1244,144 @@ static void mgb_pcs_first_init(struct mgb_private *ep)
 {
 	int i;
 
-	/* Wait RST (SR_XS_PCS_CTRL1) to 1'h0 */
+	/** eth1g_double_pcs_regs_config.txt */
+	/** eth1g_bifurcation_double_pcs_regs_config.txt */
+	/** eth2_5G_bifurcation_double_pcs_regs_config.txt */
+	/* 1./2. Wait RST to 1'h0 */
 	for (i = 0; i <= MGB_PHY_WAIT_NUM; i++) {
 		if ((mgb_pcs_read(ep, SR_XS_PCS_CTRL1) & 0x8000) == 0)
 			break;
 		udelay(1);
 	}
 	if (i >= MGB_PHY_WAIT_NUM)
-		dev_warn(&ep->dev->dev, "Could not reset pcs\n");
+		dev_warn(&ep->pci_dev->dev,
+			 "could not reset PCS at first init\n");
 
-	/* Configuration MPLL Registers (both via geth_1) */
-	if (PCI_FUNC(ep->pci_dev->devfn) == 0) {
-		if (ep->mpll_mode == PCS_BIFURCATION_MODE) {
-			dev_info(&ep->dev->dev,
-				"Configure PCS MPLL: BIFURCATION MODE\n");
-			/* MPLL_EN_0 to 1'h1 / MPLLB_SEL_0 to 1'h1 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL,
-					0x0011);
-			/* MPLLB_MULTIPLIER to 8'h28,
-			 * MPLLB_CAL_DISABLE to 1'h0 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0,
-					0x0028);
-			/* MPLLB_SSC_EN to 1'h0, MPLLB_SSC_RANGE to 3'h0,
-			* MPLLB_SSC_CLK_SEL to 3'h0, MPLLB_FRACN_CTRL to 9'h0 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_MPLLB_CTRL1,
-					0x0000);
-			/* MPLLB_DIV_MULT to 7'h19, MPLLB_DIV_CLK_EN to 1'h1,
-			 * MPLLB_DIV8_CLK_EN to 1'h0,
-			 * MPLLB_DIV10_CLK_EN to 1'h1 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2,
-					0x0299);
-			/* MPLLB_BANDWIDTH to 11'h7 */
-			mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL3,
-					0x0007);
-		} else { /* PCS_NORMAL_MODE */
-			dev_info(&ep->dev->dev,
-				"Configure PCS MPLL: NORMAL MODE\n");
-			/* MPLL_EN_0 to 1'h1 / MPLLB_SEL_0 to 1'h0 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL,
-					0x0001);
-			/* MPLLA_MULTIPLIER to 8'h20
-			 * MPLLA_CAL_DISABLE to 1'h0 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0,
-					0x0020);
-			/* MPLLA_SSC_EN,MPLLA_SSC_RANGE,MPLLA_SSC_CLK_SEL,
-			 * MPLLA_FRACN_CTRL=0 */
-			mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLA_CTRL1,
-					0x0000);
-			/* MPLLA_DIV_MULT,MPLLA_DIV_CLK_EN,
-			 * MPLLA_DIV8_CLK_EN = 0
-			 * MPLLA_DIV10_CLK_EN to 1'h1,
-			 * MPLLA_DIV16P5_CLK_EN to 1'h0 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2,
-					0x0200);
-			/* MPLLB_MULTIPLIER to 8'h0,
-			 * MPLLB_CAL_DISABLE to 1'h1 */
-			mgb_pcs_write(ep,
-					VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0,
-					0x8000);
-			/* MPLLA_BANDWIDTH to 11'h3a */
-			mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLA_CTRL3,
-					0x003A);
-		}
-	} /* func 0 */
+	/*if (ep->pcs_dev_id != PCS_DEV_ID_1G_2G5_10G)
+		goto skip_funk0_init;*/
 
-	/* SET PCS_TYPE_SEL to 4'h1 */
-	mgb_pcs_write(ep, SR_XS_PCS_CTRL2, 0x0001);
-	/* DET_RX_REQ_0 to 1'h0, VBOOST_EN_0 to 1'h0, VBOOST_LVL to 3'h5,
-	 * TX_CLK_RDY_0 to 1'h1 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1500);
-	/* TX_REQ_0 to 1'h0, TX_LPD_0 to 1'h0, TX0_WIDTH to 2'h1 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0100);
-	/* TX0_IBOOST to 4'hf */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL, 0x000F);
-	if (ep->mpll_mode == PCS_BIFURCATION_MODE) {
-		/* TX0_RATE to 3'h7 */
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,
-				     0x0007);
+	/* 3. Configuration MPLL Registers */
+	/* NOT: mpll registers for both controllers are configured via geth_1 */
+	if (ep->mpll_mode == PCS_2G5_MODE) {
+		/** eth2_5G_bifurcation_double_pcs_regs_config.txt */
+		dev_info(&ep->pci_dev->dev,
+			"configure PCS MPLL: 2.5G MODE\n");
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2, 0x0200);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0, 0x0028);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL1, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2, 0x0299);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL3, 0x0007);
+	} else if (ep->mpll_mode == PCS_BIFURCATION_MODE) {
+		/** eth1g_bifurcation_double_pcs_regs_config.txt */
+		dev_info(&ep->pci_dev->dev,
+			"configure PCS MPLL: BIFURCATION MODE\n");
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2, 0x0200);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0, 0x0028);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL1, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2, 0x0299);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL3, 0x0007);
 	} else { /* PCS_NORMAL_MODE */
-		/* TX0_RATE to 3'h3 */
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,
-				     0x0003);
+		/** eth1g_double_pcs_regs_config.txt */
+		dev_info(&ep->pci_dev->dev,
+			 "configure PCS MPLL: NORMAL MODE\n");
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL, 0x0001);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0, 0x0020);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLA_CTRL1, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2, 0x0200);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0, 0x8000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLA_CTRL3, 0x003A);
 	}
-	/* TX_EQ_PRE to 6'h0, TX_EQ_MAIN to 6'h28 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0, 0x2800);
-	/* TX_EQ_POST to 6'h0 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1, 0x000);
-	/* RX_REQ_0 to 1'h0, RX_LPD_0 to 1'h0, RX0_WIDTH to 2'h1 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0100);
-	/* LOS_TRSHLD_0 to 3'h3, LOS_LFPS_EN_0 to 1'h0 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0003);
-	/* RX0_RATE to 2'h3 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0003);
-	/* CDR_TRACK_EN_0 to 1'h1,CDR_SSC_EN_0 to 1'h0,VCO_LOW_FREQ_0 to 1'h1 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL, 0x0101);
-	/* RX0_EQ_ATT_LVL to 3'h0 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL, 0x0000);
-	/* CTLE_BOOST_0 to 5'h6, CTLE_POLE_0 to 3'h5, VGA2_GAIN_0 to 4'h7,
-	 * VGA1_GAIN_0 to 4'h7 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77A6);
-	/* CONT_ADAPT_0 to 1'h0, CONT_OFF_CAN_0 to 1'h1 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0010);
-	/* AFE_EN_0 to 1'h0, DFE_EN_0 to 1'h0 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0000);
-	/* TX2RX_LB_EN_0 to 1'h0, RX2TX_LB_EN_0 to 1'h0, RX_VREF_CTRL to 5'h11,
-	 * RTUNE_REQ to 1'h0, CR_PARA_SEL to 1'h1, PLL_CTRL to 1'h0*/
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
-	if (ep->mpll_mode == PCS_BIFURCATION_MODE) {
-		/* REF_CLK_EN to 1'h1, REF_USE_PAD to 1'h0,
-		 * REF_CLK_DIV2 to 1'h0,
-		 * REF_RANGE to 3'h6, REF_MPLLA_DIV2 to 1'h1,
-		 * REF_MPLLB_DIV2 to 1'h1,
-		 * REF_RPT_CLK_EN to 1'h0 */
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
-				     0x00F1);
+
+	/*skip_funk0_init:*/
+
+	/* 4. Configuration Registers */
+	if (ep->mpll_mode == PCS_2G5_MODE) {
+		/** eth2_5G_bifurcation_double_pcs_regs_config.txt */
+		/* 4.2. Check PCS_TYPE_SEL (SR_XS_PCS_CTRL2) to 4'h1 */
+		mgb_pcs_write(ep, SR_XS_PCS_CTRL2, 0x0001);
+		/* 4.3. Enable 2.5G GMII Mode */
+		mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1,
+			      mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) | 0x2004);
+		/* 4.4. Check SS13 (SR_PMA_CTRL1(only for Backplane Ethernet)
+		 * or SR_XS_PCS_CTRL1) to 1'h0 */
+		/* TODO: ... */
+		/* 4.5. Program the register bits for 12G PHY */
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL, 0x0011);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1510);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL, 0x000F);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL, 0x0002);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0, 0x2000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1, 0x0020);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0002);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0002);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL, 0x0101);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77A6);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0010);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL, 0x00F1);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0550);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x0022);
+	} else if (ep->mpll_mode == PCS_BIFURCATION_MODE) {
+		mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1,
+			      mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) & ~0x0004);
+		/** eth1g_bifurcation_double_pcs_regs_config.txt */
+		/* 4.2. Check PCS_TYPE_SEL (SR_XS_PCS_CTRL2) to 4'h1 */
+		mgb_pcs_write(ep, SR_XS_PCS_CTRL2, 0x0001);
+		/* 4.3. Check SS13 (SR_PMA_CTRL1(only for Backplane Ethernet)
+		 * or SR_XS_PCS_CTRL1) to 1'h0 */
+		/* TODO: ... */
+		/* 4.4. Program the register bits for 12G PHY */
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL, 0x0011);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1500);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL, 0x000F);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL, 0x0007);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0, 0x2800);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0003);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0003);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL, 0x0101);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77A6);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0010);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL, 0x00F1);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0540);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x002A);
 	} else { /* PCS_NORMAL_MODE */
-		/* REF_CLK_EN to 1'h1, REF_USE_PAD to 1'h0,
-		 * REF_CLK_DIV2 to 1'h0,
-		 * REF_RANGE to 3'h6, REF_MPLLA_DIV2 to 1'h1,
-		 * REF_MPLLB_DIV2 to 1'h0,
-		 * REF_RPT_CLK_EN to 1'h0 */
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
-				     0x0071);
+		mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1,
+			      mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) & ~0x0004);
+		/** eth1g_double_pcs_regs_config.txt */
+		/* 4.2. Check PCS_TYPE_SEL (SR_XS_PCS_CTRL2) to 4'h1 */
+		mgb_pcs_write(ep, SR_XS_PCS_CTRL2, 0x0001);
+		/* 4.3. Check SS13 (SR_PMA_CTRL1) to 1'h0 */
+		/* TODO: ... */
+		/* 4.4. Program the register bits for 12G PHY */
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1500);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL, 0x000F);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL, 0x0003);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0, 0x2800);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0003);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0003);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL, 0x0101);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77A6);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0010);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0000);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL, 0x0071);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0540);
+		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x002A);
 	}
-	/* VCO_LD_VAL_0 to 13'h540 */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0540);
-	/* VCO_REF_LD_0 to 6'h2a */
-	mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x002A);
 }
 
 static void mgb_sw_reset_mgio(struct mgb_private *ep)
@@ -1356,12 +1389,16 @@ static void mgb_sw_reset_mgio(struct mgb_private *ep)
 	int r;
 	unsigned long flags;
 
+	/**if (ep->pcs_dev_id != PCS_DEV_ID_1G_2G5_10G)
+		return;*/
+
 	/* do for func0 only! */
 	if (PCI_FUNC(ep->pci_dev->devfn) == 0) {
 		raw_spin_lock_irqsave(&ep->mgio_lock, flags);
 		r = mgb_read_mgio_csr(ep);
 		r &= ~MG_W1C_MASK;
 		r |= MG_SRST; /* RST */
+		/*r |= MG_OUTS;*/ /* TX_DISABLE */
 		mgb_write_mgio_csr(ep, r); /* software reset */
 		r &= ~MG_SRST; /* ~RST */
 		mgb_write_mgio_csr(ep, r); /* wait for reset */
@@ -1509,10 +1546,13 @@ static int mgb_set_pcsphy_mode(struct net_device *dev)
 
 	ep->pcsaddr = mgb_is_eiohub_proto() ? 2 : 1;
 
-	dev_info(&dev->dev, "pcs[%d] phy id: 0x%04x%04x\n",
-		 ep->pcsaddr,
-		 mgb_pcs_read(ep, MII_PHYSID1),
-		 mgb_pcs_read(ep, MII_PHYSID2));
+	ep->pcs_dev_id = mgb_pcs_read(ep, SR_XS_PCS_DEV_ID1) << 16 |
+			 mgb_pcs_read(ep, SR_XS_PCS_DEV_ID2);
+	dev_info(&ep->pci_dev->dev,
+		 "pcs[%d] id: 0x%08x - %s\n",
+		 ep->pcsaddr, ep->pcs_dev_id,
+		 (ep->pcs_dev_id == PCS_DEV_ID_1G_2G5_10G) ? "1G/2.5G/10G" :
+		 (ep->pcs_dev_id == PCS_DEV_ID_1G_2G5) ? "1G/2.5G" : "unknown");
 
 	/* Switch DWC_xpcs to 1G speed mode XXX */
 
@@ -1520,9 +1560,11 @@ static int mgb_set_pcsphy_mode(struct net_device *dev)
 
 	mgb_pcs_first_init(ep);
 
+	/*
 	if (mgb_pcs_vs_reset(ep)) {
 		return 1;
 	}
+	*/
 
 	if (ep->extphyaddr != -1) {
 		/* External PHY present */
@@ -4559,9 +4601,11 @@ do { \
 
 static char mgb_dbg_reg_pcs_buf[PAGE_SIZE] = "";
 
-const u_int32_t mgb_dbg_reg_id_pcs[18] = {
-	MII_PHYSID1,
-	MII_PHYSID2,
+const u_int32_t mgb_dbg_reg_id_pcs[47] = {
+	SR_XS_PCS_CTRL1,
+	SR_XS_PCS_DEV_ID1,
+	SR_XS_PCS_DEV_ID2,
+	SR_XS_PCS_CTRL2,
 	VR_XS_PCS_DIG_CTRL1,
 	SR_MII_CTRL,
 	VR_MII_AN_CTRL,
@@ -4578,10 +4622,39 @@ const u_int32_t mgb_dbg_reg_id_pcs[18] = {
 	SR_AN_XNP_TX1,
 	SR_AN_XNP_TX2,
 	SR_AN_XNP_TX3,
+	VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0,
+	VR_XS_PMA_Gen5_12G_MPLLA_CTRL1,
+	VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2,
+	VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0,
+	VR_XS_PMA_Gen5_12G_MPLLB_CTRL1,
+	VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2,
+	VR_XS_PMA_Gen5_12G_MPLLA_CTRL3,
+	VR_XS_PMA_Gen5_12G_MPLLB_CTRL3,
+	VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1,
+	VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2,
+	VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0,
+	VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1,
+	VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2,
+	VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3,
+	VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL,
+	VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0,
+	VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4,
+	VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0,
+	VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,
+	VR_XS_PMA_Gen5_12G_VCO_CAL_REF0,
 };
-const char *mgb_dbg_reg_name_pcs[18] = {
-	"MII_PHYSID1",
-	"MII_PHYSID2",
+const char *mgb_dbg_reg_name_pcs[47] = {
+	"SR_XS_PCS_CTRL1",
+	"SR_XS_PCS_DEV_ID1",
+	"SR_XS_PCS_DEV_ID2",
+	"SR_XS_PCS_CTRL2",
 	"VR_XS_PCS_DIG_CTRL1",
 	"SR_MII_CTRL",
 	"VR_MII_AN_CTRL",
@@ -4598,6 +4671,33 @@ const char *mgb_dbg_reg_name_pcs[18] = {
 	"SR_AN_XNP_TX1",
 	"SR_AN_XNP_TX2",
 	"SR_AN_XNP_TX3",
+	"VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0",
+	"VR_XS_PMA_Gen5_12G_MPLLA_CTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0",
+	"VR_XS_PMA_Gen5_12G_MPLLB_CTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2",
+	"VR_XS_PMA_Gen5_12G_MPLLA_CTRL3",
+	"VR_XS_PMA_Gen5_12G_MPLLB_CTRL3",
+	"VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2",
+	"VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0",
+	"VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2",
+	"VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3",
+	"VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL",
+	"VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0",
+	"VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4",
+	"VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0",
+	"VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0",
+	"VR_XS_PMA_Gen5_12G_VCO_CAL_REF0",
 };
 
 static ssize_t mgb_dbg_reg_pcs_read(struct file *filp, char __user *buffer,
@@ -4881,11 +4981,11 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (np) {
 		of_status_prop = of_get_property(np, "status", NULL);
 		if (!strcmp(of_status_prop, "disabled")) {
-			dev_warn(&pdev->dev, "device disabled in devtree\n");
+			dev_warn(&pdev->dev, "device disabled in devicetree\n");
 			return -ENODEV;
 		}
 	} else {
-		dev_warn(&pdev->dev, "can't find node in devtree\n");
+		dev_warn(&pdev->dev, "devicetree for node not found!\n");
 	}
 
 	dev_info(&pdev->dev, "initializing PCI device %04x:%04x\n",
@@ -4984,9 +5084,14 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	ep->log_tx_buffs = MGB_LOG_TX_BUFFERS;
 
 	ep->ptp_clock_info = mgb_ptp_clock_info;
+#if 0	/* TODO check PPS is supplied to MPV */
 	ep->ptp_clock = ptp_clock_register(&ep->ptp_clock_info,
 					&(pdev->dev));
 	ep->ptp_clock_info.max_adj = 1000000000;
+#else
+	pr_err("failed to register MPV pps source\n");
+	ep->ptp_clock = ERR_PTR(-EINVAL);
+#endif
 	if (IS_ERR(ep->ptp_clock)) {
 		ep->ptp_clock = NULL;
 		dev_warn(&pdev->dev, "ptp_clock_register failed\n");

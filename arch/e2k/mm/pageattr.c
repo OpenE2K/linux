@@ -580,6 +580,13 @@ static int set_memory_attr(unsigned long start, unsigned long end,
 		 * interrupts, so do not use on_each_cpu() here.
 		 */
 		nmi_on_each_cpu(sma_flush_tlb_ipi, NULL, 1, 0);
+
+		/*
+		 * gpu-imgtec expects the caches to be dropped
+		 * (see _ApplyOSPagesAttribute()).
+		 */
+		if (mode == SMA_UC_MT || mode == SMA_WC_MT)
+			write_back_cache_range(start, end - start);
 	}
 
 	return 0;

@@ -30,6 +30,15 @@
 	greg_vs;							\
 })
 
+#define	HOST_GET_SAVED_VCPU_STATE_GREG_AS_LIGHT(__ti)			\
+({									\
+	unsigned long greg_vs;						\
+									\
+	HOST_ONLY_COPY_FROM_VCPU_STATE_GREG(&(__ti)->k_gregs_light,	\
+						greg_vs);		\
+	greg_vs;							\
+})
+
 #define	HOST_ONLY_SAVE_VCPU_STATE_GREG(vs__)				\
 ({									\
 	(vs__) = NATIVE_GET_UNTEGGED_DGREG(GUEST_VCPU_STATE_GREG);	\
@@ -69,13 +78,16 @@
 })
 
 #define	HOST_SAVE_KERNEL_GREGS_AS_LIGHT(__ti) \
-		HOST_SAVE_HOST_GREGS_TO(&(__ti)->k_gregs_light, true)
+		HOST_SAVE_HOST_GREGS_TO(&(__ti)->k_gregs_light, false)
 
 #define	HOST_SAVE_KERNEL_GREGS(__ti) \
 		HOST_SAVE_HOST_GREGS_TO(&(__ti)->k_gregs, true)
 
 #define	HOST_SAVE_HOST_GREGS(__ti) \
 		HOST_SAVE_HOST_GREGS_TO(&(__ti)->k_gregs, false)
+
+#define	HOST_SAVE_GUEST_KERNEL_GREGS(__gti) \
+		HOST_SAVE_HOST_GREGS_TO(&(__gti)->gk_gregs, false)
 
 #define	HOST_RESTORE_HOST_GREGS_FROM(__k_gregs, only_kernel)		\
 ({									\
@@ -97,13 +109,16 @@
 })
 
 #define	HOST_RESTORE_KERNEL_GREGS_AS_LIGHT(_ti) \
-		HOST_RESTORE_HOST_GREGS_FROM(&(_ti)->k_gregs_light, true)
+		HOST_RESTORE_HOST_GREGS_FROM(&(_ti)->k_gregs_light, false)
 
 #define	HOST_RESTORE_KERNEL_GREGS(_ti) \
 		HOST_RESTORE_HOST_GREGS_FROM(&(_ti)->k_gregs, true)
 
 #define	HOST_RESTORE_HOST_GREGS(_ti) \
 		HOST_RESTORE_HOST_GREGS_FROM(&(_ti)->k_gregs, false)
+
+#define	HOST_RESTORE_GUEST_KERNEL_GREGS(_gti) \
+		HOST_RESTORE_HOST_GREGS_FROM(&(_gti)->gk_gregs, false)
 #else	/* !CONFIG_KVM_HOST_MODE */
 #define	HOST_SAVE_HOST_GREGS(__ti)
 #define	HOST_RESTORE_HOST_GREGS(_ti)

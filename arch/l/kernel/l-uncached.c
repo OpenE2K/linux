@@ -59,6 +59,8 @@ static int l_uncached_add_chunk(struct gen_pool *uc_pool, int nid)
 							L_POOL_ORDER);
 	if (!page)
 		return -1;
+	split_page(page, L_POOL_ORDER);
+
 	pa = page_to_phys(page);
 	va = l_vmap_wc(pa, sz);
 	if (!va)

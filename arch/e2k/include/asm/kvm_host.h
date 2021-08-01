@@ -109,7 +109,8 @@ kvm_is_hw_pv_vm_available(void)
 #undef E2K_INVALID_PAGE
 #define E2K_INVALID_PAGE	(~(hpa_t)0)
 
-#define UNMAPPED_GVA	(~(gpa_t)0)
+#define UNMAPPED_GVA		(~(gpa_t)0)
+#define	arch_is_error_gpa(gpa)	((gpa_t)(gpa) == UNMAPPED_GVA)
 
 /*
  * See include/linux/kvm_host.h
@@ -387,6 +388,10 @@ typedef struct kvm_mmu_page {
 
 	/* Number of writes since the last time traversal visited this page.  */
 	atomic_t write_flooding_count;
+#ifdef	CONFIG_GUEST_MM_SPT_LIST
+	struct list_head gmm_entry;	/* entry at the gmm list of SPs */
+	gmm_struct_t *gmm;		/* the gmm in whose list the entry */
+#endif	/* CONFIG_GUEST_MM_SPT_LIST */
 } kvm_mmu_page_t;
 
 /* page fault handling results */
@@ -533,9 +538,9 @@ typedef struct kvm_mmu {
 			       struct kvm_arch_exception *exception);
 	void (*update_pte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 			   pgprot_t *spte, const void *pte);
-	void (*flush_gva)(struct kvm_vcpu *vcpu, gva_t gva);
-	void (*flush_gva_range)(struct kvm_vcpu *vcpu, gva_t gva_start,
-							gva_t gva_end);
+	void (*sync_gva)(struct kvm_vcpu *vcpu, gva_t gva);
+	void (*sync_gva_range)(struct kvm_vcpu *vcpu, gva_t gva_start,
+					gva_t gva_end, bool flush_tlb);
 	int (*sync_page)(struct kvm_vcpu *vcpu, kvm_mmu_page_t *sp);
 } kvm_mmu_t;
 
@@ -649,6 +654,18 @@ typedef struct kvm_sw_cpu_context {
 		e2k_sbr_t sbr;
 	} saved;
 
+	/*
+	 * Host VCPU local data stack pointer registers state (to save/restore).
+	 * It is relevant only for paravirtualization, since in this case
+	 * there is one VCPU process, but there are two mode of its execution:
+	 *	as host part of VCPU (qemu)
+	 *	as guest part of VCPU
+	 * and, accordingly, two stacks: host & guest.
+	 */
+	e2k_usd_lo_t host_usd_lo;
+	e2k_usd_hi_t host_usd_hi;
+	e2k_sbr_t host_sbr;
+
 	e2k_mem_crs_t	crs;	/* only for PV guest */
 
 	/*
@@ -726,6 +743,14 @@ typedef struct kvm_sw_cpu_context {
 	u64 rpr_lo;
 	u64 rpr_hi;
 	u64 tcd;
+
+	mmu_reg_t us_cl_d;
+	clw_reg_t us_cl_b;
+	clw_reg_t us_cl_up;
+	clw_reg_t us_cl_m0;
+	clw_reg_t us_cl_m1;
+	clw_reg_t us_cl_m2;
+	clw_reg_t us_cl_m3;
 } kvm_sw_cpu_context_t;
 
 /*
@@ -873,6 +898,9 @@ typedef struct kvm_host_context {
 
 	/* pointer to the top of 'pt_regs' structures list */
 	pt_regs_t	*pt_regs;
+	/* some additional items of processes context */
+	e2k_upsr_t	upsr;	/* user UPSR register state */
+	unsigned	osem;	/* OSEM register state */
 	/* the host kernel's signal/trap stack of contexts */
 	kvm_signal_context_t signal;
 } kvm_host_context_t;
@@ -896,6 +924,9 @@ struct kvm_vcpu_arch {
 					/* support */
 	bool is_hv;			/* VCPU is under hardware virtualized */
 					/* support */
+	/* host switch to vcpu-host mode from host interception emulation mode */
+	/* (trap or system call on PV mode) */
+	bool from_pv_intc;
 
 	kvm_vcpu_state_t *vcpu_state;
 	kvm_vcpu_state_t *kmap_vcpu_state;	/* alias of VCPU state */
@@ -990,6 +1021,9 @@ struct kvm_vcpu_arch {
 	bool on_virqs_handling;		/* VCPU is handling pending VIRQs */
 	bool vm_exit_wish;		/* VCPU is need to VM exit and */
 					/* exit reason handling */
+	bool trap_wish;			/* VCPU is need to inject traps */
+	bool hcall_irqs_disabled;	/* VCPU entered HCALL with disabled interrupts */
+	unsigned long trap_mask_wish;	/* mask of traps to wish */
 	struct completion exited;	/* guest VCPU thread completed */
 	struct completion released;	/* all VCPU threads completed and */
 					/* VCPU can be freed */
@@ -1371,15 +1405,11 @@ static inline void kvm_arch_vcpu_block_finish(struct kvm_vcpu *vcpu)
 #define KVM_ARCH_WANT_MMU_NOTIFIER
 
 #ifdef	KVM_ARCH_WANT_MMU_NOTIFIER
-int kvm_unmap_hva_range(struct kvm *kvm,
-			unsigned long start, unsigned long end);
+int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end, unsigned flags);
 int kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
 int kvm_age_hva(struct kvm *kvm, unsigned long start, unsigned long end);
 int kvm_test_age_hva(struct kvm *kvm, unsigned long hva);
 #endif	/* KVM_ARCH_WANT_MMU_NOTIFIER */
-
-extern int kvm_mmu_load(struct kvm_vcpu *vcpu, unsigned flags);
-extern void kvm_mmu_unload(struct kvm_vcpu *vcpu, unsigned flags);
 
 extern void kvm_fire_mask_notifiers(struct kvm *kvm, int irq, bool mask);
 

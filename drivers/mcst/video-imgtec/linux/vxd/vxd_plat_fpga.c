@@ -43,7 +43,6 @@
  *
  *****************************************************************************/
 
-
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -136,7 +135,7 @@ static struct heap_config vxd_plat_fpga_heap_configs[] = {
 	{
 		.type = IMG_MEM_HEAP_TYPE_UNIFIED,
 		.options.unified = {
-			.gfp_type = GFP_DMA32 | __GFP_ZERO,
+			.gfp_type = GFP_HIGHUSER | __GFP_ZERO,
 		},
 		.to_dev_addr = NULL,
 	},

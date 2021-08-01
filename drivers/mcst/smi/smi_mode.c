@@ -9,15 +9,15 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_edid.h>
-#include <drm/drm_probe_helper.h>
 
-//#include <video/smi.h>
 #include <linux/version.h>
-#if KERNEL_VERSION(3, 17, 0) <= LINUX_VERSION_CODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0)
 #include <drm/drm_gem.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_atomic_helper.h>
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
+#include <drm/drm_probe_helper.h>
 #endif
 #include <drm/drm_panel.h>
 #include <drm/drm_of.h>
@@ -31,7 +31,6 @@ struct smi_crtc * smi_crtc_tab[MAX_CRTC];
 struct drm_encoder * smi_enc_tab[MAX_ENCODER];
 
 int g_m_connector = 0;//bit 0: DVI, bit 1: VGA, bit 2: HDMI.
-
 
 int smi_calc_hdmi_ctrl(int m_connector)
 {
@@ -87,14 +86,13 @@ static int smi_crtc_do_set_base(struct drm_crtc *crtc,
 				struct drm_framebuffer *old_fb,
 				int x, int y, int atomic, int dst_ctrl)
 {
-	struct smi_crtc *smi_crtc = to_smi_crtc(crtc);
-	struct smi_framebuffer *smi_fb;
-	struct smi_bo *bo;
-	int ret, pitch, win_width, align_width, align_offset;
-	unsigned long base_addr;
+	int ret, pitch;
 	u64 gpu_addr;
-	ENTER();
+	struct smi_bo *bo;
+	struct smi_framebuffer *smi_fb;
+	struct smi_crtc *smi_crtc = to_smi_crtc(crtc);
 
+	ENTER();
 	if (old_fb) {
 		smi_fb = to_smi_framebuffer(old_fb);
 		bo = gem_to_smi_bo(smi_fb->obj);
@@ -113,7 +111,7 @@ static int smi_crtc_do_set_base(struct drm_crtc *crtc,
 	smi_fb = to_smi_framebuffer(crtc->fb);
 #endif
 	bo = gem_to_smi_bo(smi_fb->obj);
-	dbg_msg("bo addr:%p\n",bo);
+	dbg_msg("bo addr:0x%x\n",bo);	
 	ret = smi_bo_reserve(bo, false);
 	if (ret)
 	{
@@ -130,16 +128,16 @@ static int smi_crtc_do_set_base(struct drm_crtc *crtc,
 	smi_bo_unreserve(bo);
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3,14,0)	
-	pitch = crtc->primary->fb->pitches[0] ;
+	pitch = crtc->primary->fb->pitches[0];
 #else
 	pitch = crtc->fb->pitches[0] ;
 #endif
 	// Known issue: when setting 4K+1080p or 2K+1080p, the total pitch exceeds 4096.
 	// The max pitch SM768's register supports is 4096, the issue will cause screen garbage.
-	win_width = x * smi_bpp/8;
-	align_width = (win_width + 15)&~15;
-	align_offset = align_width - win_width;
-	base_addr = gpu_addr + y*pitch + align_width;
+	int win_width = x * smi_bpp/8;
+	int align_width = (win_width + 15)&~15; 	
+	int align_offset = align_width - win_width;
+	unsigned long base_addr = gpu_addr + y*pitch + align_width;
 
 	
 	 if(g_specId == SPC_SM750)
@@ -166,8 +164,8 @@ static int smi_crtc_do_set_base(struct drm_crtc *crtc,
 static int smi_crtc_mode_set_base(struct drm_crtc *crtc, int x, int y,
 			     struct drm_framebuffer *old_fb)
 {
-
 	int i, ctrl_index, dst_ctrl, ret, max_index;
+
 	ENTER();
 	ret = 0;
 	ctrl_index = 0;
@@ -247,20 +245,20 @@ static int smi_crtc_mode_set(struct drm_crtc *crtc,
 				struct drm_display_mode *adjusted_mode,
 				int x, int y, struct drm_framebuffer *old_fb)
 {
-	u32 refresh_rate;
-	logicalMode_t logicalMode;
+	u32 refresh_rate = drm_mode_vrefresh(mode);
+	struct smi_device *sdev = crtc->dev->dev_private;
 	disp_format_t dispFormat = SINGLE_PIXEL_24BIT;
+	logicalMode_t logicalMode;
 	const struct drm_framebuffer *fb = crtc->primary->fb;
 	u32 bpp = fb->format->cpp[0] * 8;
 
 	ENTER();
-	dbg_msg("***crtc addr:%p\n",crtc);
+	dbg_msg("***crtc addr:0x%x\n",crtc);
 	dbg_msg("x:%d,y:%d\n",x,y);
 	
-	dbg_msg("encode 0->crtc:[%p], 1->crtc:[%p] \n",smi_enc_tab[0]->crtc, smi_enc_tab[1]->crtc);
+	dbg_msg("encode 0->crtc:[0x%x], 1->crtc:[0x%x] \n",smi_enc_tab[0]->crtc, smi_enc_tab[1]->crtc);
 	dbg_msg("Printf g_m_connector = %d,  DVI [%d], VGA[%d], HDMI[%d] \n",g_m_connector, g_m_connector&0x1, g_m_connector&0x2, g_m_connector&0x4);
-
-	refresh_rate = drm_mode_vrefresh(mode);
+	
 	dbg_msg("wxh:%dx%d@%dHz\n",adjusted_mode->hdisplay,adjusted_mode->vdisplay,refresh_rate);
 
 	if(adjusted_mode->hdisplay == 3840)
@@ -340,38 +338,43 @@ static int smi_crtc_mode_set(struct drm_crtc *crtc,
 		logicalMode.pitch = 0;
 		logicalMode.dispCtrl = dst_ctrl;
 		ddk768_setMode(&logicalMode);
-		
-		if (smi_crtc_connector_lvds(crtc))
-			dispFormat = DOUBLE_PIXEL_48BIT;
-		else
-			DisableDoublePixel();
 
+		if (smi_crtc_connector_lvds(crtc)) {
+			dispFormat = DOUBLE_PIXEL_48BIT;
+		} else {
+			DisableDoublePixel(0);
+			DisableDoublePixel(1);
+		}
 		smi_crtc_do_set_base(crtc, old_fb, x, y, 0, dst_ctrl);
 		setSingleViewOn(dst_ctrl, dispFormat);
 
 		if((g_m_connector & USE_HDMI)&&(ctrl_index > SMI1_CTRL))
 		{
-			int ret;
 			printk("starting init HDMI!dst=[%d]\n", dst_ctrl);
-			ret=hw768_set_hdmi_mode(&logicalMode);
+			int ret=hw768_set_hdmi_mode(&logicalMode, sdev->is_hdmi);
 			if (ret != 0)
 			{
 				printk("HDMI Mode not supported!\n");
 			}
 		}
-
+#if 0
+		if(lvds_channel == 1)
+			hw768_enable_lvds(1);
+		else if(lvds_channel == 2){
+			hw768_enable_lvds(2);
+			EnableDoublePixel(0);
+		}
+#endif
 		if(force_connect)
 		{
-			int ret;
 			logicalMode.dispCtrl = 0;
 			printk("starting init HDMI!dst=[%d]\n", dst_ctrl);
-			ret=hw768_set_hdmi_mode(&logicalMode);
+			int ret=hw768_set_hdmi_mode(&logicalMode, true);
 			if (ret != 0)
 			{
 				printk("HDMI Mode not supported!\n");
 			}
 		}
-		
 
 	}
 	LEAVE(0);
@@ -555,15 +558,15 @@ static void smi_encoder_mode_set(struct drm_encoder *encoder,
 static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 {
 	int index =0;
+
 	ENTER();
-	if( encoder->encoder_type  == DRM_MODE_ENCODER_LVDS)
-		index =  0;
-	else if(encoder->encoder_type  == DRM_MODE_ENCODER_DAC)
-		index =  1;
+	if (encoder->encoder_type  == DRM_MODE_ENCODER_LVDS)
+		index = 0;
+	else if (encoder->encoder_type  == DRM_MODE_ENCODER_DAC)
+		index = 1;
 	else if (encoder->encoder_type  == DRM_MODE_ENCODER_TMDS)
 		index = 2;
 	
-
 	dbg_msg("The current connect group = [%d], we deal with con=[%d], mode=[%s]\n", g_m_connector,index, (mode == DRM_MODE_DPMS_OFF)?"Off":"ON");
 	if(g_specId == SPC_SM750)
 	{	
@@ -579,13 +582,13 @@ static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 	}else if(g_specId == SPC_SM768)
 	{
 		bool lvds = smi_encoder_connector_lvds(encoder);
-		
+
 		if(encoder->encoder_type  == DRM_MODE_ENCODER_LVDS) 
 		{
 			if(g_m_connector == USE_VGA_HDMI||g_m_connector==USE_HDMI)
 			{
 				dbg_msg("DVI connector off\n");
-				LEAVE_NORET();
+				LEAVE();
 			}
 			dbg_msg("DVI connector: index=%d\n",index);
 	
@@ -595,14 +598,14 @@ static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 			if(g_m_connector == USE_DVI_HDMI)
 			{
 				dbg_msg("VGA connector off\n");
-				LEAVE_NORET();
+				LEAVE();
 			}
 			dbg_msg("VGA connector: index=%d\n",index);
 		}
 		else if(encoder->encoder_type  == DRM_MODE_ENCODER_TMDS)
 		{	
 			if(force_connect)
-				LEAVE_NORET();
+				LEAVE();
 			if (mode == DRM_MODE_DPMS_OFF)	
 				hw768_HDMI_Disable_Output();
 			else
@@ -616,7 +619,7 @@ static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 			 	dbg_msg("HDMI connector: index=%d\n",index);
 			}else{
 				dbg_msg("HDMI connector not set dpms\n");
-				LEAVE_NORET();
+				LEAVE();
 			}
 		}
 		
@@ -627,6 +630,9 @@ static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 			setDisplayDPMS(index, DISP_DPMS_ON, lvds);
 			ddk768_swPanelPowerSequence(index, 1, 4);
 		}
+
+		if(lvds_channel == 2)
+			EnableDoublePixel(0);
 	}
 	
 	LEAVE();
@@ -712,13 +718,6 @@ static struct drm_encoder *smi_encoder_init(struct drm_device *dev, int index)
  	return encoder;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,13,0)
-void drm_set_preferred_mode(struct drm_connector *connector, int hpref, int vpref) {}
-#endif
-
-struct edid edid0;
-struct edid edid1;
-struct edid hdmi_edid;
 
 static inline struct smi_connector *
 drm_connector_to_smi(struct drm_connector *connector)
@@ -764,11 +763,14 @@ static int smi_add_cmdline_mode(struct drm_connector *connector)
 
 int smi_connector_get_modes(struct drm_connector *connector)
 {
-	int count = 0, ret;
-	void* tmpedid;
+	int ret, count = 0;
+	void *edid_buf;
 	struct smi_connector *smi = drm_connector_to_smi(connector);
+	struct smi_device *sdev = connector->dev->dev_private;
+
 	ENTER();
-	dbg_msg("print connector type :[%d], DVI=%d, VGA=%d, HDMI=%d\n",connector->connector_type, DRM_MODE_CONNECTOR_DVII,DRM_MODE_CONNECTOR_VGA,DRM_MODE_CONNECTOR_HDMIA );
+	dbg_msg("print connector type: [%d], DVI=%d, VGA=%d, HDMI=%d\n",
+			connector->connector_type, DRM_MODE_CONNECTOR_DVII, DRM_MODE_CONNECTOR_VGA, DRM_MODE_CONNECTOR_HDMIA);
 	count = smi_add_cmdline_mode(connector);
 	if (count > 0)
 		return count;
@@ -782,32 +784,47 @@ int smi_connector_get_modes(struct drm_connector *connector)
 			count = drm_add_modes_noedid(connector, 1920, 1080);
 			drm_set_preferred_mode(connector, 1024, 768);
 #else
-			tmpedid = &edid0;
-			ret = ddk750_edidReadMonitorEx_HW(SMI0_CTRL, tmpedid, 256, 0);
+			edid_buf = sdev->dvi_edid;
+			ret = ddk750_edidReadMonitorEx_HW(SMI0_CTRL, edid_buf, 256, 0);
 			dbg_msg("DVI edid size= %d\n",ret);
 			if (ret) {
-				drm_connector_update_edid_property(connector, &edid0);
-				count = drm_add_edid_modes(connector, &edid0);
-			} else {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
+				drm_connector_update_edid_property(connector, sdev->dvi_edid);
+#else
+				drm_mode_connector_update_edid_property(connector, sdev->dvi_edid);
+#endif
+				count = drm_add_edid_modes(connector, sdev->dvi_edid);
+			}
+			if (ret == 0 || count == 0) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
 				drm_connector_update_edid_property(connector, NULL);
+#else
+				drm_mode_connector_update_edid_property(connector, NULL);
+#endif
 				count = drm_add_modes_noedid(connector, 1920, 1080);
 				drm_set_preferred_mode(connector, 1024, 768);
 			}
-
 #endif
 		}
 		if(connector->connector_type == DRM_MODE_CONNECTOR_VGA)
 		{
-			tmpedid = &edid1;
-			ret = ddk750_edidReadMonitorEx(SMI1_CTRL, tmpedid, 128, 0, 17, 18);
+			edid_buf = sdev->vga_edid;
+			ret = ddk750_edidReadMonitorEx(SMI1_CTRL, edid_buf, 256, 0, 17, 18);
 
-			if (ret == 0) {
-				edid1.checksum += edid1.extensions;
-				edid1.extensions = 0;
-				drm_connector_update_edid_property(connector, &edid1);
-				count = drm_add_edid_modes(connector, &edid1);
-			} else {
+			if (ret) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
+				drm_connector_update_edid_property(connector, sdev->vga_edid);
+#else
+				drm_mode_connector_update_edid_property(connector, sdev->vga_edid);
+#endif
+				count = drm_add_edid_modes(connector, sdev->vga_edid);
+			}
+			if (ret == 0 || count == 0) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
 				drm_connector_update_edid_property(connector, NULL);
+#else
+				drm_mode_connector_update_edid_property(connector, NULL);
+#endif
 				count = drm_add_modes_noedid(connector, 1920, 1080);
 				drm_set_preferred_mode(connector, 1024, 768);
 			}
@@ -819,38 +836,65 @@ int smi_connector_get_modes(struct drm_connector *connector)
 	{ //SM768 Part
 		if(connector->connector_type == DRM_MODE_CONNECTOR_DVII)
 		{
-			tmpedid = &edid0;
-#ifdef HW_I2C
-			ret = ddk768_edidReadMonitorExHwI2C(tmpedid,256,0,0);
-			dbg_msg("DVI edid size= %d\n",ret);
-#else
-			ddk768_edidReadMonitorEx(tmpedid, 256, 0, 30,31 );//GPIO 30,31 for DVI,HW I2C0   
-#endif
-			if (ret) {
-				drm_connector_update_edid_property(connector, &edid0);
-				count = drm_add_edid_modes(connector, &edid0);
-			} else {
+			if (lvds_channel) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
 				drm_connector_update_edid_property(connector, NULL);
+#else
+				drm_mode_connector_update_edid_property(connector, NULL);
+#endif
 				count = drm_add_modes_noedid(connector, 1920, 1080);
-				drm_set_preferred_mode(connector, 1280, 1024);
+				drm_set_preferred_mode(connector, 1920, 1080);
+			} else {
+				edid_buf = sdev->dvi_edid;
+#ifdef HW_I2C
+				ret = ddk768_edidReadMonitorExHwI2C(edid_buf, 256, 0, 0);
+				dbg_msg("DVI edid size= %d\n",ret);
+#else
+				ddk768_edidReadMonitorEx(edid_buf, 256, 0, 30, 31); // GPIO 30,31 for DVI, HW I2C0
+#endif
+				if (ret) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
+					drm_connector_update_edid_property(connector, sdev->dvi_edid);
+#else
+					drm_mode_connector_update_edid_property(connector, sdev->dvi_edid);
+#endif
+					count = drm_add_edid_modes(connector, sdev->dvi_edid);
+				}
+				if (ret == 0 || count == 0) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
+					drm_connector_update_edid_property(connector, NULL);
+#else
+					drm_mode_connector_update_edid_property(connector, NULL);
+#endif
+					count = drm_add_modes_noedid(connector, 1920, 1080);
+					drm_set_preferred_mode(connector, 1024, 768);
+				}
 			}
-
 		}
 		if(connector->connector_type == DRM_MODE_CONNECTOR_VGA)
 		{
-			tmpedid = &edid1;
+			edid_buf = sdev->vga_edid;
 #ifdef HW_I2C		
-			ret = ddk768_edidReadMonitorExHwI2C(tmpedid,256,0,1);
+			ret = ddk768_edidReadMonitorExHwI2C(edid_buf, 256, 0, 1);
 			dbg_msg("VGA edid size= %d\n",ret);
 #else
-			ddk768_edidReadMonitorEx(tmpedid, 256, 0, 6, 7);//GPIO 6,7 for VGA,HW I2C1 
+			ddk768_edidReadMonitorEx(edid_buf, 256, 0, 6, 7);//GPIO 6,7 for VGA, HW I2C1
 #endif			
 		       
 			if (ret) {
-				drm_connector_update_edid_property(connector, &edid1);
-				count = drm_add_edid_modes(connector, &edid1);
-			} else {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
+				drm_connector_update_edid_property(connector, sdev->vga_edid);
+#else
+				drm_mode_connector_update_edid_property(connector, sdev->vga_edid);
+#endif
+				count = drm_add_edid_modes(connector, sdev->vga_edid);
+			}
+			if (ret == 0 || count == 0) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
 				drm_connector_update_edid_property(connector, NULL);
+#else
+				drm_mode_connector_update_edid_property(connector, NULL);
+#endif
 				count = drm_add_modes_noedid(connector, 1920, 1080);
 				drm_set_preferred_mode(connector, 1024, 768);
 			}
@@ -858,23 +902,31 @@ int smi_connector_get_modes(struct drm_connector *connector)
 		}
 		if(connector->connector_type == DRM_MODE_CONNECTOR_HDMIA)
 		{
-			tmpedid = &hdmi_edid;
-
-			ret = ddk768_edidReadMonitorEx(tmpedid, 256, 0, 8,9 ); //use GPIO8/9 for HDMI,
+			edid_buf = sdev->hdmi_edid;
+			ret = ddk768_edidReadMonitorEx(edid_buf, 256, 0, 8, 9); //use GPIO8/9 for HDMI
 			dbg_msg("HDMI edid size= %d\n",ret);
-			//hw768_get_hdmi_edid(tmpedid);   // Too Slow..
 
 			if (ret) {
-				drm_connector_update_edid_property(connector, &hdmi_edid);
-				count = drm_add_edid_modes(connector, &hdmi_edid);
-			} else {
-				drm_connector_update_edid_property(connector, NULL);
-				count = drm_add_modes_noedid(connector, 1920, 1080);
-				drm_set_preferred_mode(connector, 1280, 1024);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
+				drm_connector_update_edid_property(connector, sdev->hdmi_edid);
+#else
+				drm_mode_connector_update_edid_property(connector, sdev->hdmi_edid);
+#endif
+				count = drm_add_edid_modes(connector, sdev->hdmi_edid);
+				sdev->is_hdmi = drm_detect_hdmi_monitor(sdev->hdmi_edid);
+				dbg_msg("HDMI connector is %s\n",(sdev->is_hdmi ? "HDMI monitor" : "DVI monitor"));
 			}
-
+			if (ret == 0 || count == 0) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
+				drm_connector_update_edid_property(connector, NULL);
+#else
+				drm_mode_connector_update_edid_property(connector, NULL);
+#endif
+				count = drm_add_modes_noedid(connector, 1920, 1080);
+				drm_set_preferred_mode(connector, 1024, 768);
+				sdev->is_hdmi = true;
+			}
 		}
-
 	}
 	
 	LEAVE(count);
@@ -883,30 +935,35 @@ int smi_connector_get_modes(struct drm_connector *connector)
 static int smi_connector_mode_valid(struct drm_connector *connector,
 				 struct drm_display_mode *mode)
 {
-	u32 vrefresh = drm_mode_vrefresh(mode);	
+	u32 refresh, vrefresh = drm_mode_vrefresh(mode);
 	
 	/* Only support and use 30Hz or 60Hz mode currently. */
 	switch (vrefresh) {
 	case 30:
 	case 30-1:
 	case 30+1:
+		refresh = 30;
 		break;
 	case 60:
 	case 60-1:
 	case 60+1:
-		if (mode->hdisplay < 3840)
-			break;
-		else /* Only support 4K@30Hz */
-			return MODE_NOMODE;
+		refresh = 60;
+		break;
 	default:
 		return MODE_NOMODE;
 	}
+
+	/* Bandwidth: 2K-32bpp@60Hz / 4K-16bpp@60Hz / 4K-32bpp@30Hz / 8K-16bpp@30Hz */
+	if ((mode->hdisplay * smi_bpp * refresh) > (1920 * 32 * 60))
+		return MODE_NOMODE;
+
 #ifdef CONFIG_CPU_LOONGSON3
 	if ((mode->hdisplay == 1360) && (mode->vdisplay == 768))
 		return MODE_NOMODE;
 	if ((mode->hdisplay == 1366) && (mode->vdisplay == 768))
 		return MODE_NOMODE;
 #endif
+
 	return MODE_OK;
 }
 
@@ -992,6 +1049,10 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 	{
 		if(connector->connector_type == DRM_MODE_CONNECTOR_DVII)
 		{
+			if (lvds_channel) {
+				g_m_connector =g_m_connector | USE_DVI;
+				return connector_status_connected;
+			}
 #ifdef HW_I2C	
 			if(ddk768_edidHeaderReadMonitorExHwI2C(0)<0)						
 #else
@@ -1008,7 +1069,6 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 				g_m_connector =g_m_connector |USE_DVI;
 				return connector_status_connected;
 			}
-
 		}
 		
 		if(connector->connector_type == DRM_MODE_CONNECTOR_VGA)
@@ -1055,6 +1115,12 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 				return connector_status_disconnected;
 			}
 		
+		}
+		if(connector->connector_type == DRM_MODE_CONNECTOR_LVDS)
+		{	/*FIXME:hdmi connected*/
+			if(ddk768_edidHeaderReadMonitorEx(8,9)==0)
+				return connector_status_disconnected;
+			return connector_status_connected; 
 		}
 	}
 	return connector_status_disconnected;
@@ -1126,7 +1192,8 @@ static struct drm_connector *smi_connector_init(struct drm_device *dev, int inde
 			printk("error index of Connector\n");
 	}
 	drm_connector_helper_add(connector, &smi_vga_connector_helper_funcs);
-	if (index == 3) { /* lvds */
+	if (0 ) {/* (index == 3) { lvds */
+		 /*FIXME:hdmi connected*/
 		if (panel)
 			connector->force = DRM_FORCE_ON;
 	} else {
@@ -1146,13 +1213,10 @@ static struct drm_connector *smi_connector_init(struct drm_device *dev, int inde
 
 int smi_modeset_init(struct smi_device *cdev)
 {
-	struct smi_crtc *smi_crtc;
+	int ret, index, max_index;
 	struct drm_encoder *encoder;
 	struct drm_connector *connector;
-	int ret;
-	int index;
-	int max_index;
-
+	struct smi_crtc *smi_crtc;
 
 	if(smi_bpp >= 24)
 		smi_bpp = 32;
@@ -1177,7 +1241,11 @@ int smi_modeset_init(struct smi_device *cdev)
 #endif
 
 	cdev->dev->mode_config.fb_base = cdev->mc.vram_base;
+#ifdef PRIME
 	cdev->dev->mode_config.preferred_depth = smi_bpp;
+#else
+	cdev->dev->mode_config.preferred_depth = min(24, smi_bpp);
+#endif
 	cdev->dev->mode_config.prefer_shadow = 1;
 
 	for(index = 0; index < MAX_CRTC ; index ++)
@@ -1185,7 +1253,7 @@ int smi_modeset_init(struct smi_device *cdev)
 		smi_crtc = smi_crtc_init(cdev->dev, index);
 		smi_crtc->crtc_index = index;
 		smi_crtc_tab[index] = smi_crtc;
-		dbg_msg("******smi_crtc_tab[%d]:%p******\n",index, smi_crtc_tab[index]);
+		dbg_msg("******smi_crtc_tab[%d]:0x%x******\n",index, smi_crtc_tab[index]);
 
 	}
 	if(g_specId == SPC_SM750)
@@ -1207,9 +1275,13 @@ int smi_modeset_init(struct smi_device *cdev)
 			return -1;
 		}
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
 		drm_connector_attach_encoder(connector, encoder);
-
+#else
+		drm_mode_connector_attach_encoder(connector, encoder);
+#endif
 	}
+
 	/* add lvds */
 	connector = smi_connector_init(cdev->dev, index);
 	if (connector)

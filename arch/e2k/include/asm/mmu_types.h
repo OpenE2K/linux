@@ -411,6 +411,11 @@ struct mmu_tc_opcode {
 
 
 #ifndef	__ASSEMBLY__
+static inline bool tc_fmt_has_valid_mask(int fmt)
+{
+	return fmt == LDST_QP_FMT || fmt == TC_FMT_QWORD_QP || fmt == TC_FMT_DWORD_QP;
+}
+
 
 typedef union {
 	unsigned word;
@@ -499,6 +504,56 @@ typedef union {
 } tc_cond_t;
 
 #define TC_COND_FMT_FULL(cond) (AS(cond).fmt | (AS(cond).fmtc << 3))
+
+static inline bool tc_cond_is_special_mmu_aau(tc_cond_t cond)
+{
+	unsigned int mas = AS(cond).mas;
+	int chan = AS(cond).chan;
+	int store = AS(cond).store;
+	int spec_mode = AS(cond).spec;
+
+	if (unlikely(is_mas_special_mmu_aau(mas) && (store ||
+			!store && !spec_mode && (chan == 1 || chan == 3))))
+		return true;
+
+	return false;
+}
+
+static inline bool tc_cond_is_check_ld(tc_cond_t cond)
+{
+	unsigned int mas = AS(cond).mas;
+	int store = AS(cond).store;
+	int spec_mode = AS(cond).spec;
+
+	return is_mas_check(mas) && !spec_mode && !store;
+}
+
+static inline bool tc_cond_is_check_unlock_ld(tc_cond_t cond)
+{
+	unsigned int mas = AS(cond).mas;
+	int store = AS(cond).store;
+	int spec_mode = AS(cond).spec;
+
+	return is_mas_check_unlock(mas) && !spec_mode && !store;
+}
+
+static inline bool tc_cond_is_lock_check_ld(tc_cond_t cond)
+{
+	unsigned int mas = AS(cond).mas;
+	int store = AS(cond).store;
+	int spec_mode = AS(cond).spec;
+
+	return is_mas_lock_check(mas) && spec_mode && !store;
+}
+
+static inline bool tc_cond_is_spec_lock_check_ld(tc_cond_t cond)
+{
+	unsigned int mas = AS(cond).mas;
+	int store = AS(cond).store;
+	int spec_mode = AS(cond).spec;
+
+	return is_mas_spec_lock_check(mas) && spec_mode && !store;
+}
 
 /*
  * Caveat: for qword accesses this will return 16 bytes for
@@ -746,35 +801,6 @@ typedef union {
 #define	LD_ST_REC_OPC_mask(ld_st_rec)	(ld_st_rec.mask)
 #define	LD_ST_REC_OPC_reg(ld_st_rec)	(ld_st_rec.word)
 
-typedef enum ld_st_rec_mode {
-	primary_rec_mode	= 0,	/* primary, privileged, */
-	primary_prot_rec_mode	= 1,	/* primary, privileged, protected */
-	secondary_rec_mode	= 2,	/* secondary, privileged */
-	guest_physical_rec_mode	= 3,	/* guest, physical, privileged */
-	primary_user_rec_mode	= 4,	/* primary */
-	guest_primary_rec_mode	= 5,	/* guest, primary, privileged, prot */
-	secondary_user_rec_mode	= 6,	/* secondary, not privileged */
-} ld_st_rec_mode_t;
-
-static inline ld_st_rec_mode_t
-get_ld_st_rec_opc_mode(ldst_rec_op_t rec_opcode)
-{
-	unsigned mode = 0;
-
-	mode |= LD_ST_REC_OPC_prot(rec_opcode) ? 0x01 : 0x00;
-	mode |= LD_ST_REC_OPC_root(rec_opcode) ? 0x02 : 0x00;
-	mode |= LD_ST_REC_OPC_mode_h(rec_opcode) ? 0x04 : 0x00;
-	return (ld_st_rec_mode_t)mode;
-}
-static inline ldst_rec_op_t
-set_ld_st_rec_opc_mode(ldst_rec_op_t rec_opcode, ld_st_rec_mode_t mode)
-{
-	LD_ST_REC_OPC_prot(rec_opcode) = (mode & 0x01) ? 1 : 0;
-	LD_ST_REC_OPC_root(rec_opcode) = (mode & 0x02) ? 1 : 0;
-	LD_ST_REC_OPC_mode_h(rec_opcode) = (mode & 0x04) ? 1 : 0;
-	return rec_opcode;
-}
-
 #endif	/* ! __ASSEMBLY__ */
 
 #define LDST_REC_OPC_BYPASS_L1		(MAS_BYPASS_L1_CACHE << \
@@ -790,6 +816,7 @@ set_ld_st_rec_opc_mode(ldst_rec_op_t rec_opcode, ld_st_rec_mode_t mode)
 			MAS_FILL_OPERATION << LDST_REC_OPC_MAS_SHIFT)
 #define	TAGGED_MEM_STORE_REC_OPC (LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT)
 #define	TAGGED_MEM_STORE_REC_OPC_W (LDST_WORD_FMT << LDST_REC_OPC_FMT_SHIFT)
+#define	MEM_STORE_REC_OPC_B (LDST_BYTE_FMT << LDST_REC_OPC_FMT_SHIFT)
 
 
 #endif /* _E2K_MMU_TYPES_H_ */

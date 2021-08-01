@@ -470,6 +470,7 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 	unsigned int	aa_bit = 0;
 	tc_cond_t	condition;
 	tc_mask_t	mask;
+	long ret_get_user;
 
 	regs->trap->nr_page_fault_exc = exc_data_page_num;
 
@@ -488,6 +489,7 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 		u64 area_num, mrng, addr1, addr2, d_num;
 		e2k_fapb_instr_t *fapb_addr;
 		e2k_fapb_instr_t fapb;
+		int ret;
 
 		if (!(aa_field & 0x1) || !(aafstr & 0x1))
 			goto next_area;
@@ -503,8 +505,13 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 			fapb_addr = (e2k_fapb_instr_t *)(AS(regs->ctpr2).ta_base
 					+ 16 * (area_num - 32) + 8);
 
-		if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-			goto die;
+		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
+		if (ret_get_user) {
+			if (ret_get_user == -EAGAIN)
+				break;
+			else
+				goto die;
+		}
 
 		if (area_num >= 32 && AS(fapb).dpl) {
 			/* See bug #53880 */
@@ -512,8 +519,14 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 				current->comm, current->pid, fapb_addr);
 			area_num -= 32;
 			fapb_addr -= 1;
-			if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-				goto die;
+			ret_get_user = host_get_user(AW(fapb),
+						(u64 *)fapb_addr, regs);
+			if (ret_get_user) {
+				if (ret_get_user == -EAGAIN)
+					break;
+				else
+					goto die;
+			}
 		}
 
 		if (!AS(aau_regs->aasr).iab) {
@@ -545,8 +558,30 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 			addr1, addr2, mrng);
 
 		do_aau_page_fault(regs, addr1, condition, mask, aa_bit);
-		if ((addr1 & PAGE_MASK) != (addr2 & PAGE_MASK))
-			do_aau_page_fault(regs, addr2, condition, mask, aa_bit);
+		if (ret) {
+			if (ret == 2) {
+				/*
+				 * Special case of trap handling on host:
+				 *	host inject the trap to guest
+				 */
+				return;
+			}
+			goto die;
+		}
+		if ((addr1 & PAGE_MASK) != (addr2 & PAGE_MASK)) {
+			ret = do_aau_page_fault(regs, addr2, condition, mask,
+						aa_bit);
+			if (ret) {
+				if (ret == 2) {
+					/*
+					* Special case of trap handling on host:
+					*	host inject the trap to guest
+					*/
+					return;
+				}
+				goto die;
+			}
+		}
 
 next_area:
 		aa_bit++;
@@ -571,17 +606,8 @@ static void __cpuidle mem_wait_idle(void)
 {
 	NATIVE_READ_MAS_D_CH(&current_thread_info()->flags,
 			MAS_WATCH_FOR_MODIFICATION_V6, 0);
-	if (!need_resched()) {
+	if (!need_resched())
 		E2K_WAIT_V6(_mem_mod | _int);
-
-		if (cpu_has(CPU_HWBUG_E16C_SLEEP)) {
-			freq_core_sleep_t fr_state;
-			do {
-				fr_state.word = sic_read_node_nbsr_reg(numa_node_id(),
-						PMC_FREQ_CORE_N_SLEEP(smp_processor_id()));
-			} while (fr_state.status != 0 /* C0 */);
-		}
-	}
 }
 
 void __cpuidle C1_enter_v6(void)
@@ -601,6 +627,16 @@ void __cpuidle C3_enter_v6(void)
 	freq_core_sleep_t C3 = { .cmd = 3 };
 
 	raw_all_irq_save(flags);
+
 	C3_WAIT_INT_V6(AW(C3), nbsr_phys + reg);
+
+	if (cpu_has(CPU_HWBUG_E16C_SLEEP)) {
+		freq_core_sleep_t fr_state;
+		do {
+			fr_state.word = sic_read_node_nbsr_reg(numa_node_id(),
+					PMC_FREQ_CORE_N_SLEEP(smp_processor_id()));
+		} while (fr_state.status != 0 /* C0 */);
+	}
+
 	raw_all_irq_restore(flags);
 }

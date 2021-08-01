@@ -8,12 +8,22 @@
 
 #define	ttable_entry1_args3(sys_num, arg1, arg2)	\
 		((ttable_entry_args3)(ttable_entry1))(sys_num, arg1, arg2)
+#define	ttable_entry1_args4(sys_num, arg1, arg2, arg3)	\
+		((ttable_entry_args4)(ttable_entry1))(sys_num, arg1, arg2, arg3)
+
+/* trap table entry started by direct branch (it is closer to fast system */
+/* call wirthout switch and use user local data stack) */
+#define	goto_ttable_entry1_args3(sys_num, arg1, arg2)	\
+		goto_ttable_entry_args3(ttable_entry1, sys_num, arg1, arg2)
+#define	goto_ttable_entry1_args4(sys_num, arg1, arg2, arg3)	\
+		goto_ttable_entry_args4(ttable_entry1, sys_num, arg1, arg2, arg3)
 
 #define	ttable_entry1_clock_gettime(which, time)		\
-		ttable_entry1_args3(__NR_clock_gettime, which, time)
+		goto_ttable_entry1_args3(__NR_clock_gettime, which, time)
 #define	ttable_entry1_gettimeofday(tv, tz)		\
-		ttable_entry1_args3(__NR_gettimeofday, tv, tz)
-
+		goto_ttable_entry1_args3(__NR_gettimeofday, tv, tz)
+#define	ttable_entry1_sigprocmask(how, nset, oset)		\
+		goto_ttable_entry1_args4(__NR_sigprocmask, how, nset, oset)
 
 notrace __section(.entry_handlers)
 int compat_fast_sys_clock_gettime(const clockid_t which_clock,
@@ -25,6 +35,11 @@ int compat_fast_sys_clock_gettime(const clockid_t which_clock,
 
 	prefetchw(&fsys_data);
 
+#ifdef	CONFIG_KVM_HOST_MODE
+	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
+		ttable_entry1_clock_gettime((u64) which_clock, (u64) tp);
+#endif
+
 	if (unlikely((u64) tp + sizeof(struct compat_timespec) >
 			ti->addr_limit.seg))
 		return -EFAULT;
@@ -34,7 +49,7 @@ int compat_fast_sys_clock_gettime(const clockid_t which_clock,
 		tp->tv_sec = kts.tv_sec;
 		tp->tv_nsec = kts.tv_nsec;
 	} else {
-		ret = ttable_entry1_clock_gettime((u64) which_clock, (u64) tp);
+		ttable_entry1_clock_gettime((u64) which_clock, (u64) tp);
 	}
 
 	return ret;
@@ -50,6 +65,11 @@ int compat_fast_sys_gettimeofday(struct compat_timeval __user *__restrict tv,
 
 	prefetchw(&fsys_data);
 
+#ifdef	CONFIG_KVM_HOST_MODE
+	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
+		ttable_entry1_gettimeofday((u64) tv, (u64) tz);
+#endif
+
 	if (unlikely((u64) tv + sizeof(struct compat_timeval) >
 					ti->addr_limit.seg
 			|| (u64) tz + sizeof(struct timezone) >
@@ -59,7 +79,7 @@ int compat_fast_sys_gettimeofday(struct compat_timeval __user *__restrict tv,
 	if (likely(tv)) {
 		ret = do_fast_gettimeofday(&ktv);
 		if (unlikely(ret))
-			return ttable_entry1_gettimeofday((u64) tv, (u64) tz);
+			ttable_entry1_gettimeofday((u64) tv, (u64) tz);
 	} else {
 		ret = 0;
 	}
@@ -85,6 +105,9 @@ int compat_fast_sys_siggetmask(u32 __user *oset, size_t sigsetsize)
 	struct thread_info *const ti = READ_CURRENT_REG();
 	struct task_struct *task = thread_info_task(ti);
 	int ret = 0;
+#ifdef	CONFIG_KVM_HOST_MODE
+	bool guest = test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE);
+#endif
 	union {
 		u32 word[2];
 		u64 whole;
@@ -94,6 +117,11 @@ int compat_fast_sys_siggetmask(u32 __user *oset, size_t sigsetsize)
 
 	if (unlikely(sigsetsize != 8))
 		return -EINVAL;
+
+#ifdef	CONFIG_KVM_HOST_MODE
+	if (unlikely(guest))
+		ttable_entry1_sigprocmask((u64) 0, (u64) NULL, (u64) oset);
+#endif
 
 	if (unlikely((u64) oset + sizeof(sigset_t) > ti->addr_limit.seg))
 		return -EFAULT;
@@ -120,6 +148,11 @@ int compat_fast_sys_getcontext(struct ucontext_32 __user *ucp,
 		u64 whole;
 	} set;
 	u64 key;
+
+#ifdef	CONFIG_KVM_HOST_MODE
+	/* TODO getcontext does not have a slow counterpart, not implemented for paravirt guest */
+	KVM_BUG_ON(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
+#endif
 
 	BUILD_BUG_ON(sizeof(task->blocked.sig[0]) != 8);
 	set.whole = task->blocked.sig[0];

@@ -873,7 +873,6 @@ static void clean_descriptors_in_psp(struct rb_root_cached *areas,
 	}
 }
 
-__always_inline
 static int clean_descriptors_range_user(struct rb_root_cached *areas,
 		unsigned long start, unsigned long end, bool proc_stack)
 {

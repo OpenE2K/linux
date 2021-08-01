@@ -585,7 +585,7 @@ int kvm_cpu_has_pending_epic_timer(struct kvm_vcpu *vcpu)
  */
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu)
 {
-	return kvm_cpu_has_pending_pic_timer(vcpu);
+	return !vcpu->arch.hcall_irqs_disabled && kvm_cpu_has_pending_pic_timer(vcpu);
 
 }
 EXPORT_SYMBOL(kvm_cpu_has_pending_timer);

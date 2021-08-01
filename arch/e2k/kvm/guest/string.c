@@ -9,6 +9,7 @@
 #include <asm/pv_info.h>
 #include <asm/kvm/hypercall.h>
 #include <asm/kvm/guest/string.h>
+#include <asm-generic/bug.h>
 
 #ifdef	DEBUG_GUEST_STRINGS
 /*
@@ -32,40 +33,17 @@ retry:
 		ret = kvm_do_fast_tagged_memory_copy(dst, src, len,
 					strd_opcode, ldrd_opcode, prefetch);
 	}
-	if (likely(ret == len))
-		return ret;
 
 	if (unlikely(ret < 0)) {
-		pr_err("%s(): could not copy memory from %px to %px, "
-			"size 0x%lx, error %ld\n",
-			__func__, src, dst, len, ret);
-		return ret;
-	}
-
-	if ((u64)dst >= GUEST_TASK_SIZE) {
-		/* guest kernel address should be always allocated */
-		pr_warn("%s() could not copy memory to guest kernel addr %px from 0x%px size 0x%lx\n",
-			__func__, dst, src, len);
-	}
-
-	/*
-	 * 1) If it is copy to user then dst can be only mapped (valid) but
-	 * not allocated real pages, so force alloccation
-	 * 2) copied only part or nothing of data and page fault has been
-	 * occured on dst
-	 */
-	BUG_ON(ret > 0 && ((unsigned long)(dst) & PAGE_MASK) ==
-				((unsigned long)(dst + ret) & PAGE_MASK));
-	ret = fixup_user_fault(current, current->mm, (unsigned long)(dst + ret),
-				FAULT_FLAG_WRITE, NULL);
-	if (likely(ret == 0)) {
+		BUG_ON(ret != -EAGAIN);
+		printk(KERN_ERR "%s(): could not copy memory from %px to %px, "
+			"size 0x%lx, error %ldi, retry\n", __func__, src, dst,
+			len, ret);
 		goto retry;
-	} else {
-		pr_err("%s(): could not fixup guest user addr %px fault, "
-			"error %ld\n",
-			__func__, dst, ret);
-		ret = 0;
 	}
+
+	BUG_ON(ret != len);
+
 	return ret;
 }
 EXPORT_SYMBOL(kvm_fast_tagged_memory_copy);
@@ -74,51 +52,27 @@ unsigned long
 kvm_fast_tagged_memory_set(void *addr, u64 val, u64 tag,
 		size_t len, u64 strd_opcode)
 {
-	long ret = 0;
+	long ret;
 
 retry:
 	if (likely(IS_HV_GM())) {
-		ret = native_fast_tagged_memory_set(addr, val, tag, len,
+		return native_fast_tagged_memory_set(addr, val, tag, len,
 						    strd_opcode);
 	} else {
 		ret = kvm_do_fast_tagged_memory_set(addr, val, tag, len,
 							strd_opcode);
 	}
-	if (likely(ret == len))
-		return ret;
 
-	if (ret < 0) {
-		pr_err("%s() could not set memory from %px "
-			"by 0x%01llx_0x%016llx, size 0x%lx, error %ld\n",
-			__func__, addr, tag, val, len, ret);
-		return ret;
-	}
-
-	if ((u64)addr >= GUEST_TASK_SIZE) {
-		/* guest kernel address should be always allocated */
-		pr_warn("%s() could not set memory from guest kernel addr %px "
-			"by 0x%01llx_0x%016llx, size 0x%lx\n",
-			__func__, addr, tag, val, len);
-	}
-
-	/*
-	 * 1) If it is copy to user then dst can be only mapped (valid) but
-	 * not allocated real pages, so force alloccation
-	 * 2) copied only part or nothing of data and page fault has been
-	 * occured on dst
-	 */
-	BUG_ON(ret > 0 && ((unsigned long)(addr) & PAGE_MASK) ==
-				((unsigned long)(addr + ret) & PAGE_MASK));
-	ret = fixup_user_fault(current, current->mm,
-				(unsigned long)(addr + ret),
-				FAULT_FLAG_WRITE, NULL);
-	if (likely(ret == 0)) {
+	if (unlikely(ret < 0)) {
+		BUG_ON(ret != -EAGAIN);
+		printk(KERN_ERR "%s(): could set memory %px, size 0x%lx, "
+				"error %ldi, retry\n", __func__,
+				addr, len, ret);
 		goto retry;
-	} else {
-		pr_err("%s(): could not fixup guest user addr %px fault, "
-			"error %ld\n",
-			__func__, addr, ret);
 	}
+
+	BUG_ON(ret != len);
+
 	return ret;
 }
 EXPORT_SYMBOL(kvm_fast_tagged_memory_set);

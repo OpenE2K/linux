@@ -371,7 +371,7 @@ long ddk768_edidGetAnalogSignalInfo(
 )
 {
     unsigned char version, revision;
-    unsigned short whiteReference = 0, syncLevel = 0;
+    unsigned short whiteReference, syncLevel;
     
     /* Get EDID Version and revision */
     version = ddk768_edidGetVersion(pEDIDBuffer, &revision);
@@ -1449,7 +1449,7 @@ static long edidCalculateStdTiming(
     unsigned long *pRefreshRate
 )
 {
-    unsigned long x = 0, y = 0;
+    unsigned long x, y;
      
     /* Calculate the standard timing into x and y mode dimension */
     if (pStdTiming->horzActive != 0x01)

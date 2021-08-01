@@ -249,7 +249,6 @@ extern struct page *e2k_virt_to_page(const void *kaddr);
 #define VM_HW_STACK_PCS	 0x00400000000UL /* chain stack area */
 #define	VM_WRITECOMBINED 0x00800000000UL
 #define VM_PRIVILEGED	 0x04000000000UL /* pages are privileged */
-#define	VM_GUARD	 0x08000000000UL /* guard page(s) mapping */
 #define	VM_MPDMA	 0x10000000000UL /* pages are under MPDMA */
 					 /* hardware protection */
 #define VM_SIGNAL_STACK	 0x20000000000UL /* Signal stack area */

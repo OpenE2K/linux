@@ -170,32 +170,6 @@ bool kvm_is_guest_TIRs_frozen(pt_regs_t *regs)
 }
 
 /*
- * Some guest trap occured on host kernel should be delayed while return to
- * guest kernel or user.
- * Find host activation from guest and set corresponding bit of deferred trap
- * at pt_regs structure. The deferred traps should be examinated each time
- * before return to guest.
- */
-static inline void
-kvm_set_deffered_traps(struct pt_regs *regs, unsigned long trap_mask)
-{
-	regs->deferred_traps |= trap_mask;
-}
-static inline void
-kvm_delay_guest_trap(struct pt_regs *regs, unsigned long trap_mask)
-{
-	struct pt_regs *guest_regs = regs;
-
-	do {
-		if (!native_kernel_mode(guest_regs))
-			break;
-		guest_regs = guest_regs->next;
-	} while (guest_regs);
-	BUG_ON(guest_regs == NULL);
-	kvm_set_deffered_traps(guest_regs, trap_mask);
-}
-
-/*
  * Following functions run on host, check if traps occurred on guest user
  * or kernel, so probably should be passed to guest kernel to handle.
  * In some cases traps should be passed to guest, but need be preliminary
@@ -288,7 +262,6 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 			unsigned long TIR_hi, unsigned long TIR_lo)
 {
 	struct kvm_vcpu *vcpu;
-	struct pt_regs *guser_regs;
 	unsigned long ret;
 
 	vcpu = current_thread_info()->vcpu;
@@ -332,13 +305,6 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 			"could not pass\n");
 		goto some_later;
 	}
-	guser_regs = current_thread_info()->pt_regs;
-	if (guser_regs == NULL) {
-		/* could not find guest activation, so keep pending */
-		/* VIRQs flag for appropriate other case to pass them */
-		DebugVIRQs("could not find user regs, so do not pass\n");
-		goto some_later;
-	}
 
 	BUG_ON(!kvm_test_pending_virqs(vcpu));
 
@@ -348,15 +314,6 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 	}
 
 	raw_spin_unlock(&vcpu->kvm->arch.virq_lock);
-
-	/* FIXME: it need account system calls and interrupts in trap cases */
-	if (guser_regs != regs) {
-		/* right now interrupt cannot be handled, */
-		/* so pass it as deferred trap */
-		kvm_set_deffered_traps(guser_regs, exc_interrupt_mask);
-		DebugVIRQs("set deferred traps, to pass later\n");
-		return exc_interrupt_mask;
-	}
 
 	DebugVIRQs("pass interrupt to guest\n");
 	kvm_inject_interrupt(vcpu, regs);
@@ -581,25 +538,14 @@ pass_hw_stack_bounds_to_guest_TIRs(struct pt_regs *regs,
 
 	vcpu = current_thread_info()->vcpu;
 
-	if (native_kernel_mode(regs)) {
-		BUG_ON(true);
-		/* trap on host kernel and IRQs at this moment were disabled */
-		/* so trap cannot be passed immediatly to guest, because of */
-		/* any call of guest kernel can be trapped and host receives */
-		/* recursive trap and may be dedlock. */
-		/* For example hardware stack bounds trap on native change */
-		/* stacks from scheduler (see 2) below) */
-		DebugKVMSGE("%s (%d/%d) hardware stack bounds trap occured "
-			"on host with disabled IRQs, cannot pass the trap "
-			"to guest right now\n",
-			current->comm, current->pid,
-			current_thread_info()->gthread_info->gpid->nid.nr);
-		/* trap on guest and should be handled by guest, */
-		/* but now guest trap handling cannot be started */
-		/* still trap will repeat while return to guest */
-		kvm_delay_guest_trap(regs, trap_mask);
-		return masked_hw_stack_bounds_mask | trap_mask;
-	}
+	/* trap on host kernel and IRQs at this moment were disabled */
+	/* so trap cannot be passed immediatly to guest, because of */
+	/* any call of guest kernel can be trapped and host receives */
+	/* recursive trap and may be dedlock. */
+	/* For example hardware stack bounds trap on native change */
+	/* stacks from scheduler (see 2) below) */
+	BUG_ON(native_kernel_mode(regs));
+
 	if (!kvm_get_guest_vcpu_sge(vcpu) ||
 			kvm_guest_vcpu_irqs_disabled(vcpu,
 				kvm_get_guest_vcpu_UPSR_value(vcpu),
@@ -644,20 +590,6 @@ pass_hw_stack_bounds_to_guest_TIRs(struct pt_regs *regs,
 	}
 	DebugHWSB("hardware stack bounds trap is set to guest TIRs #0\n");
 	return trap_mask;
-}
-
-static inline unsigned long
-pass_proc_stack_bounds_to_guest_TIRs(struct pt_regs *regs)
-{
-	return pass_hw_stack_bounds_to_guest_TIRs(regs,
-					exc_proc_stack_bounds_mask);
-}
-
-static inline unsigned long
-pass_chain_stack_bounds_to_guest_TIRs(struct pt_regs *regs)
-{
-	return pass_hw_stack_bounds_to_guest_TIRs(regs,
-					exc_chain_stack_bounds_mask);
 }
 
 /*
@@ -1128,30 +1060,6 @@ trap_hndl_t kvm_do_handle_guest_traps(struct pt_regs *regs)
 {
 	pr_err("%s() should not be called and need delete\n", __func__);
 	return (trap_hndl_t)-ENOSYS;
-}
-
-trap_hndl_t kvm_handle_guest_deferred_traps(struct pt_regs *regs)
-{
-	unsigned long flags;
-
-	local_irq_save(flags);
-	if (regs->deferred_traps & exc_interrupt_mask) {
-		pass_virqs_to_guest_TIRs(regs, 0, 0);
-		regs->deferred_traps &= ~exc_interrupt_mask;
-	}
-	if (regs->deferred_traps & exc_proc_stack_bounds_mask) {
-		pass_proc_stack_bounds_to_guest_TIRs(regs);
-		regs->deferred_traps &= ~exc_proc_stack_bounds_mask;
-	}
-	if (regs->deferred_traps & exc_chain_stack_bounds_mask) {
-		pass_chain_stack_bounds_to_guest_TIRs(regs);
-		regs->deferred_traps &= ~exc_chain_stack_bounds_mask;
-	}
-	local_irq_restore(flags);
-	BUG_ON(regs->deferred_traps);	/* unknown deferred trap */
-	if (regs->traps_to_guest)
-		return kvm_do_handle_guest_traps(regs);
-	return GUEST_TRAP_HANDLED;
 }
 
 /*

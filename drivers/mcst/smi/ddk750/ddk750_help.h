@@ -9,34 +9,8 @@
 #include <linux/uaccess.h>
 #include "ddk750_mode.h"
 
-#define __PEEK32(addr) readl((addr)+mmio750)
-#define __POKE32(addr,data) writel((data),(addr)+mmio750)
-
-/*#define DEBUG_REGS*/
-
-#ifdef DEBUG_REGS
-#define PEEK32(__offset)				\
-({							\
-	unsigned __val = __PEEK32(__offset);		\
-	DRM_DEBUG("R: %x: %x: %s\t%s:%d: %pf\n",	\
-		(u32)(__offset), __val, # __offset,	\
-			__func__, __LINE__, __builtin_return_address(0));		\
-	__val;						\
-})
-
-#define POKE32(__offset, __val)	do {			\
-	unsigned __val2 = __val;			\
-	DRM_DEBUG("W: %x: %x: %s\t%s:%d: %pf\n",	\
-		(u32)(__offset), __val2, # __offset,	\
-		__func__, __LINE__, __builtin_return_address(0));			\
-	__POKE32(__offset, __val2);			\
-} while (0)
-
-#else
-#define		PEEK32		__PEEK32
-#define		POKE32		__POKE32
-#endif
-
+#define PEEK32(addr) readl((addr)+mmio750)
+#define POKE32(addr,data) writel((data),(addr)+mmio750)
 #define peekRegisterDWord PEEK32
 #define pokeRegisterDWord POKE32
 

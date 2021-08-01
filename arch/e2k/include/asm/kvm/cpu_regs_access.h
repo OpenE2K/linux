@@ -53,6 +53,9 @@
 				(offsetof(kvm_cpu_regs_t, CPU_TIRs)) +	\
 				(sizeof(e2k_tir_t) * TIR_no) +		\
 				(offsetof(e2k_tir_t, TIR_hi)))
+#define	GUEST_CPU_SBBP(SBBP_no) (GUEST_CPU_SREGS_BASE +		\
+				(offsetof(kvm_cpu_regs_t, CPU_SBBP)) +	\
+				(sizeof(u64) * SBBP_no))
 #define	GUEST_GET_CPU_SREG(reg_name)					\
 		E2K_LOAD_GUEST_VCPU_STATE_W(GUEST_CPU_SREG(reg_name))
 #define	GUEST_GET_CPU_DSREG(reg_name)					\
@@ -65,6 +68,8 @@
 		E2K_LOAD_GUEST_VCPU_STATE_D(GUEST_CPU_TIR_lo(TIR_no))
 #define	GUEST_GET_CPU_TIR_hi(TIR_no)					\
 		E2K_LOAD_GUEST_VCPU_STATE_D(GUEST_CPU_TIR_hi(TIR_no))
+#define	GUEST_GET_CPU_SBBP(SBBP_no)					\
+		E2K_LOAD_GUEST_VCPU_STATE_D(GUEST_CPU_SBBP(SBBP_no))
 #define	GUEST_IRQS_UNDER_UPSR()	\
 		offsetof(kvm_vcpu_state_t, irqs_under_upsr)
 
@@ -751,6 +756,11 @@
 		KVM_WRITE_TIRs_num(-1)
 
 /*
+ * Read double-word Stcak of Base Blocks Pointers (SBBP)
+ */
+#define	KVM_READ_SBBP_REG_VALUE(no)	GUEST_GET_CPU_SBBP(no)
+
+/*
  * Read/write virtual deferred traps register - DTR
  */
 #define	KVM_READ_DTR_REG_VALUE()	GUEST_GET_CPU_DSREG(DTR)
@@ -1034,7 +1044,6 @@
  */
 #define	KVM_READ_RPR_LO_REG_VALUE()	NATIVE_GET_DSREG_OPEN(rpr.lo)
 #define	KVM_READ_RPR_HI_REG_VALUE()	NATIVE_GET_DSREG_OPEN(rpr.hi)
-#define	KVM_READ_SBBP_REG_VALUE()	NATIVE_GET_DSREG_OPEN(sbbp)
 
 #define	KVM_WRITE_RPR_LO_REG_VALUE(RPR_lo_value) \
 			NATIVE_SET_DSREG_OPEN(rpr.lo, RPR_lo_value)
@@ -1092,7 +1101,7 @@
 #define	KVM_READ_PSR_REG_VALUE()	\
 ({ \
 extern void dump_stack(void); \
-	unsigned long PSR_value = GUEST_GET_CPU_SREG(PSR); \
+	unsigned long PSR_value = GUEST_GET_CPU_SREG(E2K_PSR); \
 	unsigned long vcpu_base; \
 	\
 	KVM_GET_VCPU_STATE_BASE(vcpu_base); \
@@ -1110,14 +1119,24 @@ extern void dump_stack(void); \
 	if (BOOT_IS_HV_GM()) \
 		PSR_value = NATIVE_NV_READ_PSR_REG_VALUE(); \
 	else \
-		PSR_value = GUEST_GET_CPU_SREG(PSR); \
+		PSR_value = GUEST_GET_CPU_SREG(E2K_PSR); \
 	PSR_value; \
 })
 
 #define	KVM_ATOMIC_WRITE_PSR_REG_VALUE(PSR_value, under_upsr)	\
-		KVM_DO_ATOMIC_WRITE_PSR_REG_VALUE(GUEST_VCPU_STATE_GREG, \
-			GUEST_CPU_SREG(PSR), PSR_value, \
-			GUEST_IRQS_UNDER_UPSR(), under_upsr)
+({ \
+	KVM_DO_ATOMIC_WRITE_PSR_REG_VALUE(GUEST_VCPU_STATE_GREG, \
+		GUEST_CPU_SREG(E2K_PSR), PSR_value, \
+		GUEST_IRQS_UNDER_UPSR(), under_upsr); \
+	trace_vcpu_psr_update(PSR_value, under_upsr); \
+})
+
+#define	BOOT_KVM_ATOMIC_WRITE_PSR_REG_VALUE(PSR_value, under_upsr)	\
+({ \
+	KVM_DO_ATOMIC_WRITE_PSR_REG_VALUE(GUEST_VCPU_STATE_GREG, \
+		GUEST_CPU_SREG(E2K_PSR), PSR_value, \
+		GUEST_IRQS_UNDER_UPSR(), under_upsr); \
+})
 
 #define	KVM_WRITE_SW_PSR_REG_VALUE(PSR_value)	\
 ({ \
@@ -1133,6 +1152,21 @@ extern void dump_stack(void); \
 		under_upsr = false; \
 	KVM_ATOMIC_WRITE_PSR_REG_VALUE(PSR_value, under_upsr); \
 })
+
+#define	BOOT_KVM_WRITE_SW_PSR_REG_VALUE(PSR_value)	\
+({ \
+	kvm_vcpu_state_t *vcpu_state; \
+	bool under_upsr; \
+	\
+	KVM_GET_VCPU_STATE_BASE(vcpu_state); \
+	under_upsr = vcpu_state->irqs_under_upsr; \
+	if (((PSR_value) & (PSR_IE | PSR_NMIE | PSR_UIE | PSR_UNMIE)) == \
+			(PSR_IE | PSR_NMIE | PSR_UIE | PSR_UNMIE)) \
+		under_upsr = true; \
+	if (((PSR_value) & (PSR_IE | PSR_NMIE | PSR_UIE | PSR_UNMIE)) == 0) \
+		under_upsr = false; \
+	BOOT_KVM_ATOMIC_WRITE_PSR_REG_VALUE(PSR_value, under_upsr); \
+})
 #define	KVM_WRITE_PSR_REG_VALUE(PSR_value)	\
 ({ \
 	KVM_WRITE_SW_PSR_REG_VALUE(PSR_value); \
@@ -1141,7 +1175,7 @@ extern void dump_stack(void); \
 })
 #define	BOOT_KVM_WRITE_PSR_REG_VALUE(PSR_value)	\
 ({ \
-	KVM_WRITE_SW_PSR_REG_VALUE(PSR_value); \
+	BOOT_KVM_WRITE_SW_PSR_REG_VALUE(PSR_value); \
 	if (BOOT_IS_HV_GM()) \
 		NATIVE_WRITE_PSR_REG_VALUE(PSR_value); \
 })
@@ -1172,6 +1206,19 @@ extern void dump_stack(void); \
 		UPSR_value = GUEST_GET_CPU_SREG(UPSR); \
 	UPSR_value; \
 })
+
+#define	KVM_ATOMIC_WRITE_UPSR_REG_VALUE(UPSR_value)	\
+({ \
+	KVM_DO_ATOMIC_WRITE_UPSR_REG_VALUE(GUEST_VCPU_STATE_GREG, \
+		GUEST_CPU_SREG(UPSR), UPSR_value); \
+})
+
+#define	BOOT_KVM_ATOMIC_WRITE_UPSR_REG_VALUE(UPSR_value)	\
+({ \
+	KVM_DO_ATOMIC_WRITE_UPSR_REG_VALUE(GUEST_VCPU_STATE_GREG, \
+		GUEST_CPU_SREG(UPSR), UPSR_value); \
+})
+
 #if	defined(CONFIG_DIRECT_VIRQ_INJECTION)
 #define	KVM_WRITE_UPSR_REG_VALUE(UPSR_value)	\
 ({ \
@@ -1180,11 +1227,14 @@ extern void dump_stack(void); \
 	\
 	KVM_GET_VCPU_STATE_BASE(vcpu_state); \
 	under_upsr = vcpu_state->irqs_under_upsr; \
-	GUEST_SET_CPU_SREG(UPSR, UPSR_value); \
-	NATIVE_WRITE_UPSR_REG_VALUE(UPSR_value); \
+	KVM_ATOMIC_WRITE_UPSR_REG_VALUE(UPSR_value); \
 	if (under_upsr && vcpu_state->lapic.virqs_num.counter) { \
-		if ((UPSR_value) & UPSR_IE) \
-			HYPERVISOR_inject_interrupt(); \
+		if ((UPSR_value) & UPSR_IE) { \
+			trace_vcpu_upsr_update(UPSR_value, true); \
+			kvm_hypervisor_inject_interrupt(); \
+		} \
+	} else { \
+		trace_vcpu_upsr_update(UPSR_value, false); \
 	} \
 })
 #define	BOOT_KVM_WRITE_UPSR_REG_VALUE(UPSR_value)	\
@@ -1194,25 +1244,13 @@ extern void dump_stack(void); \
 	\
 	KVM_GET_VCPU_STATE_BASE(vcpu_state); \
 	under_upsr = vcpu_state->irqs_under_upsr; \
-	GUEST_SET_CPU_SREG(UPSR, UPSR_value); \
-	NATIVE_WRITE_UPSR_REG_VALUE(UPSR_value); \
+	BOOT_KVM_ATOMIC_WRITE_UPSR_REG_VALUE(UPSR_value); \
 	if (under_upsr && vcpu_state->lapic.virqs_num.counter) { \
 		if ((UPSR_value) & UPSR_IE) \
 			HYPERVISOR_inject_interrupt(); \
 	} \
 })
-#elif	defined(CONFIG_VIRQ_VCPU_INJECTION)
-#define	KVM_WRITE_UPSR_REG_VALUE(UPSR_value)	\
-({ \
-	GUEST_SET_CPU_SREG(UPSR, UPSR_value); \
-	NATIVE_WRITE_UPSR_REG_VALUE(UPSR_value); \
-})
-#define	BOOT_KVM_WRITE_UPSR_REG_VALUE(UPSR_value)	\
-({ \
-	GUEST_SET_CPU_SREG(UPSR, UPSR_value); \
-	NATIVE_WRITE_UPSR_REG_VALUE(UPSR_value); \
-})
-#else	/* ! CONFIG_DIRECT_VIRQ_INJECTION && ! CONFIG_VIRQ_VCPU_INJECTION */
+#else	/* ! CONFIG_DIRECT_VIRQ_INJECTION */
 #define	KVM_WRITE_UPSR_REG_VALUE(UPSR_value)
 #define	BOOT_KVM_WRITE_UPSR_REG_VALUE(UPSR_value)
 #endif	/* CONFIG_DIRECT_VIRQ_INJECTION */
@@ -1488,10 +1526,14 @@ extern void dump_stack(void); \
 		KVM_WRITE_SBR_REG_VALUE(SBR_value)
 #define	WRITE_USBR_REG_VALUE(USBR_value)		\
 		KVM_WRITE_USBR_REG_VALUE(USBR_value)
+#define	NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)	\
+		KVM_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)
 #define	BOOT_WRITE_USBR_REG_VALUE(USBR_value)	\
 		KVM_WRITE_USBR_REG_VALUE(USBR_value)
 #define	BOOT_WRITE_SBR_REG_VALUE(SBR_value)		\
 		KVM_WRITE_SBR_REG_VALUE(SBR_value)
+#define	BOOT_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)	\
+		KVM_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)
 
 /*
  * Read/write double-word Window Descriptor Register (WD)

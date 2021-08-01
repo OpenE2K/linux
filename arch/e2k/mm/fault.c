@@ -16,8 +16,6 @@
 #include <linux/syscalls.h>
 #include <linux/extable.h>
 
-#include "../../../mm/internal.h" /* for munlock_vma_pages_range */
-
 #include <asm/cpu_regs_access.h>
 #include <asm/getsp_adj.h>
 #include <asm/mmu_regs.h>
@@ -40,6 +38,7 @@
 #include <asm/e2k_debug.h>
 #include <asm/secondary_space.h>
 #include <asm/kvm/async_pf.h>
+#include <asm/sync_pg_tables.h>
 #ifdef CONFIG_SOFTWARE_SWAP_TAGS
 #include <asm/tag_mem.h>
 #endif
@@ -1421,8 +1420,7 @@ void __user *arch_compat_alloc_user_space(unsigned long len)
 	calculate_e2k_dstack_parameters(&regs->stacks, &sp, &free_space, NULL);
 
 	if (len > free_space) {
-		if (expand_user_data_stack(current_thread_info()->pt_regs,
-					   len - free_space))
+		if (expand_user_data_stack(regs, len - free_space))
 			return NULL;
 	}
 
@@ -2177,39 +2175,6 @@ static int adjust_pcsp_regs(struct pt_regs *regs, s64 delta)
 			delta, regs, true);
 }
 
-static bool has_chan01_psp_fill_entry(const trap_cellar_t *tc, int tc_count)
-{
-	int cnt;
-
-	for (cnt = 0; (3 * cnt) < tc_count; cnt++) {
-		tc_cond_t cond = tc[cnt].condition;
-
-		if (AS(cond).s_f && !AS(cond).sru && !AS(cond).store &&
-				(AS(cond).chan == 0 || AS(cond).chan == 1))
-			return true;
-	}
-
-	return false;
-}
-
-static bool has_4_psp_fill_entries(const trap_cellar_t *tc, int tc_count)
-{
-	int cnt;
-	int psp_fill_entries = 0;
-
-	for (cnt = 0; (3 * cnt) < tc_count; cnt++) {
-		tc_cond_t cond = tc[cnt].condition;
-
-		if (AS(cond).s_f && !AS(cond).sru && !AS(cond).store) {
-			++psp_fill_entries;
-			if (psp_fill_entries == 4)
-				return true;
-		}
-	}
-
-	return false;
-}
-
 static int handle_spill_fill(struct pt_regs *regs, trap_cellar_t *tcellar,
 		unsigned int cnt, s64 *last_store, s64 *last_load)
 {
@@ -2277,21 +2242,9 @@ static int handle_spill_fill(struct pt_regs *regs, trap_cellar_t *tcellar,
 		trap->flags |= TRAP_PCSP_FILL_ADJUSTED;
 	} else if (!AS(condition).sru &&
 			!(trap->flags & TRAP_PSP_FILL_ADJUSTED)) {
-		int tc_count = trap->tc_count;
 		s64 delta;
 
-		if (machine.native_iset_ver < E2K_ISET_V5) {
-			if (!AS(condition).mode_80 &&
-			    has_chan01_psp_fill_entry(tcellar, tc_count))
-				delta = 64;
-			else
-				delta = 32;
-		} else {
-			if (has_4_psp_fill_entries(tcellar, tc_count))
-				delta = 64;
-			else
-				delta = 32;
-		}
+		delta = min(64, GET_PSHTP_MEM_INDEX(regs->stacks.pshtp));
 
 		if (adjust_psp_regs(regs, delta))
 			goto fail_sigsegv;
@@ -2373,8 +2326,7 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 		 * Check if we are in the nested exception that appeared while
 		 * executing execute_mmu_operations()
 		 */
-		if (unlikely(prev_regs &&
-				(prev_regs->flags & E_MMU_OP_FLAG_PT_REGS))) {
+		if (unlikely(prev_regs && prev_regs->flags.exec_mmu_op)) {
 			/*
 			 * We suppose that spill/fill records are placed at the
 			 * end of trap cellar so skip at the beginning.
@@ -2389,7 +2341,7 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 			 * returned value and repeat execution of current
 			 * record with modified data.
 			 */
-			prev_regs->flags |= E_MMU_NESTED_OP_FLAG_PT_REGS;
+			prev_regs->flags.exec_mmu_op_nested = 1;
 		}
 
 		trap->curr_cnt = skip;
@@ -2497,6 +2449,7 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 			if (!tc_record_asynchronous(&tcellar[cnt]))
 				continue;
 		}
+retry_guest_kernel:
 		pass_result = pass_page_fault_to_guest(regs, &tcellar[cnt]);
 		to_complete |= KVM_GET_NEED_COMPLETE_PF(pass_result);
 		if (likely(KVM_IS_NOT_GUEST_TRAP(pass_result))) {
@@ -2795,7 +2748,7 @@ handled:
 				DebugKVMPF("%s(): execute_mmu_operations() "
 					"could not recover KVM guest kernel "
 					"faulted operation, retry\n", __func__);
-				goto repeat;
+				goto retry_guest_kernel;
 			}
 			break;
 		}
@@ -3050,7 +3003,7 @@ static int access_error(struct vm_area_struct *vma, unsigned long address,
 {
 	if (mode.write) {
 		/* Check write permissions */
-		if (unlikely(!(vma->vm_flags & VM_WRITE))) {
+		if (unlikely(!(vma->vm_flags & (VM_WRITE | VM_MPDMA)))) {
 			if (!is_spec_load_fault(mode))
 				PFDBGPRINT("Page is not writable");
 			return 1;
@@ -3259,10 +3212,15 @@ static int mm_fault_error(struct vm_area_struct *vma, unsigned long address,
 	BUG();
 }
 
-static int pf_on_page_boundary(unsigned long address, tc_cond_t cond)
+int pf_on_page_boundary(unsigned long address, tc_cond_t cond)
 {
 	unsigned long end_address;
 	const int size = tc_cond_to_size(cond);
+
+	/* Special operations cannot cross page boundary
+	 * as they do not access RAM. */
+	if (tc_cond_is_special_mmu_aau(cond))
+		return false;
 
 	/*
 	 * Always manually check for page boundary crossing.
@@ -3320,10 +3278,15 @@ static int handle_kernel_address(unsigned long address, struct pt_regs *regs,
 
 /* bug 118398: is this an unaligned qp store with masked out
  * bytes landing in not existent page? */
-static inline bool is_spurious_qp_store(bool store, unsigned long address,
+bool is_spurious_qp_store(bool store, unsigned long address,
 		int fmt, tc_mask_t mask, unsigned long *pf_address)
 {
-	if (!cpu_has(CPU_FEAT_ISET_V6) || !store || fmt != LDST_QP_FMT)
+	if (!cpu_has(CPU_FEAT_ISET_V6) || !store || !tc_fmt_has_valid_mask(fmt))
+		return false;
+
+	/* User could do an stmqp with 0 mask.  This operation makes
+	 * no sense so we will just loop repeating it until killed. */
+	if (unlikely(!mask.mask))
 		return false;
 
 	if (address >> PAGE_SHIFT !=
@@ -3730,6 +3693,9 @@ good_area:
 				      1, regs, address);
 		}
 
+		if (fault == VM_FAULT_NOPAGE)
+			sync_addr_range(address, address);
+
 		--addr_num;
 		if (unlikely(addr_num > 0)) {
 			address = PAGE_ALIGN(address);
@@ -3924,44 +3890,48 @@ static inline void calculate_qp_wr_data(int offset,
 	*data_ext = wr_data_ext;
 }
 
-static long recovery_store_with_bytes(unsigned long address, u64 data,
-		ldst_rec_op_t st_rec_opc, int chan, int length, int mask)
+static void recovery_store_with_bytes(unsigned long address,
+		unsigned long address_hi, unsigned long address_hi_offset,
+		u64 data, u64 data_ext, ldst_rec_op_t st_rec_opc, int chan,
+		int length, int mask, int mask_ext)
 {
 	int byte;
-	long ret = 0;
 
 	st_rec_opc.fmt = LDST_BYTE_FMT;
 	st_rec_opc.fmt_h = 0;
 
 	for (byte = 0; byte < length;
 			byte++, address++, data >>= 8, mask >>= 1) {
+		if (address_hi_offset && byte == address_hi_offset)
+			address = address_hi;
+
+		if (byte == 8) {
+			data = data_ext;
+			mask = mask_ext;
+		}
+
 		if (mask & 1) {
-			ret = recovery_faulted_tagged_store(address, data, 0,
+			recovery_faulted_tagged_store(address, data, 0,
 					AW(st_rec_opc), 0, 0, 0, chan,
 					0 /* qp_store */,
 					0 /* atomic_store */);
 
-			if (ret)
-				return ret;
 		}
 	}
-
-	return ret;
 }
 
-static int do_recovery_store(struct pt_regs *regs, const trap_cellar_t *tcellar,
-		const trap_cellar_t *next_tcellar,
-		e2k_addr_t address, int fmt, int chan, int rg)
+static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
+		const trap_cellar_t *tcellar, const trap_cellar_t *next_tcellar,
+		e2k_addr_t address, e2k_addr_t address_hi_hva,
+		int fmt, int chan, int rg, unsigned long hva_page_offset)
 {
 	bool big_endian, qp_store, q_store, atomic_qp_store, atomic_q_store,
 	     atomic_store, aligned_16 = IS_ALIGNED(address, 16);
 	int next_fmt, strd_fmt, offset = address & 0x7;
-	long recovery_res = 0;
 	ldst_rec_op_t	st_rec_opc, ld_rec_opc, st_opc_ext;
 	u64 data, data_ext,
 	    mas = AS(tcellar->condition).mas,
 	    root = AS(tcellar->condition).root;
-	u32		flags;
 	u8		data_tag, data_ext_tag;
 #ifdef	CONFIG_ACCESS_CONTROL
 	e2k_upsr_t	upsr_to_save;
@@ -4030,37 +4000,27 @@ static int do_recovery_store(struct pt_regs *regs, const trap_cellar_t *tcellar,
 	ld_rec_opc.fmt = LDST_QWORD_FMT;
 	ld_rec_opc.index = 0;
 
-	recovery_res = recovery_faulted_load((e2k_addr_t)&tcellar->data,
-					&data, &data_tag, AW(ld_rec_opc), 0);
-
-	if (recovery_res) {
-		recovery_res = -EFAULT;
-		goto recovery_failed;
-	}
+	recovery_faulted_load((e2k_addr_t)&tcellar->data,
+				&data, &data_tag, AW(ld_rec_opc), 0,
+				(tc_cond_t) {.word = 0});
 
 	if (atomic_q_store) {
-		recovery_res = recovery_faulted_load(
-				(e2k_addr_t) &next_tcellar->data,
-				&data_ext, &data_ext_tag, AW(ld_rec_opc), 0);
+		recovery_faulted_load((e2k_addr_t) &next_tcellar->data,
+				&data_ext, &data_ext_tag, AW(ld_rec_opc), 0,
+				(tc_cond_t) {.word = 0});
 
 		/* This is aligned so offset == 0 */
 		calculate_wr_data(fmt, offset, &data, &data_tag);
 		calculate_wr_data(fmt, offset, &data_ext, &data_ext_tag);
 	} else if (qp_store) {
-		recovery_res = recovery_faulted_load(
-				(e2k_addr_t)&tcellar->data_ext,
-				&data_ext, &data_ext_tag, AW(ld_rec_opc), 0);
+		recovery_faulted_load((e2k_addr_t)&tcellar->data_ext,
+				&data_ext, &data_ext_tag, AW(ld_rec_opc), 0,
+				(tc_cond_t) {.word = 0});
 
 		calculate_qp_wr_data(offset, &data, &data_tag,
 				&data_ext, &data_ext_tag);
 	} else {
 		calculate_wr_data(fmt, offset, &data, &data_tag);
-
-	}
-
-	if (recovery_res) {
-		recovery_res = -EFAULT;
-		goto recovery_failed;
 	}
 
 	if (DEBUG_EXEC_MMU_OP)
@@ -4099,49 +4059,50 @@ static int do_recovery_store(struct pt_regs *regs, const trap_cellar_t *tcellar,
 		swap(st_rec_opc, st_opc_ext);
 	}
 
-	/* 1) Page bound exception exists on e2c+ only.
-	 * 2) bug 118398: handle unaligned qp store with masked out
-	 * bytes landing in not existent page. */
-	if (IS_MACHINE_ES2 && AS(tcellar->condition).page_bound) {
+	if (unlikely(hva_page_offset)) {
+		recovery_store_with_bytes(address, address_hi_hva, hva_page_offset,
+			data, data_ext, st_rec_opc, chan,
+			tc_cond_to_size(tcellar->condition),
+			tc_fmt_has_valid_mask(fmt) ? tcellar->mask.mask_lo : 0xff,
+			tc_fmt_has_valid_mask(fmt) ? tcellar->mask.mask_hi : 0xff);
+	} else if (IS_MACHINE_ES2 && AS(tcellar->condition).page_bound) {
+		/*
+		 * 1) Page bound exception exists on e2c+ only.
+		 * 2) bug 118398: handle unaligned qp store with masked out
+		 * bytes landing in not existent page.
+		 */
+
 		/* v2 only: page_bound exception */
 		int length = min(8, 1 << (fmt - 1));
 
-		recovery_res = recovery_store_with_bytes(address, data,
-					st_rec_opc, chan, length, 0xff);
+		recovery_store_with_bytes(address, 0, 0, data, 0,
+				st_rec_opc, chan, length, 0xff, 0);
 	} else if (is_spurious_qp_store(true, address,
 			fmt, tcellar->mask, NULL)) {
-		/* Since v6: qp store with spurious fault */
-		recovery_res = recovery_store_with_bytes(address, data,
-					st_rec_opc, chan, 8, st_rec_opc.mask);
-		if (recovery_res)
-			goto recovery_failed;
-		recovery_res = recovery_store_with_bytes(address, data_ext,
-					st_opc_ext, chan, 8, st_opc_ext.mask);
+		/* Since v6: qp store with spurious fault, repeating the whole
+		 * operation will generate another spurious fault so repeat
+		 * each byte store separately. */
+		recovery_store_with_bytes(address, 0, 0, data, data_ext,
+				st_rec_opc, chan, 16, st_rec_opc.mask, st_opc_ext.mask);
 	} else {
-		recovery_res = recovery_faulted_tagged_store(address, data,
-				data_tag, AW(st_rec_opc), data_ext,
-				data_ext_tag, AW(st_opc_ext), chan,
-				qp_store, atomic_store);
+		recovery_faulted_tagged_store(address, data, data_tag,
+				AW(st_rec_opc), data_ext, data_ext_tag,
+				AW(st_opc_ext), chan, qp_store, atomic_store);
 	}
-
-recovery_failed:
 
 	ACCESS_CONTROL_RESTORE(upsr_to_save);
 
-	flags = READ_ONCE(regs->flags);
+	/* Make sure we finished recovery operations before reading flags */
+	E2K_CMD_SEPARATOR;
 
 	/* Nested exception appeared while do_recovery_store() */
-	if (flags & E_MMU_NESTED_OP_FLAG_PT_REGS ||
-				recovery_res == -EAGAIN) {
-		regs->flags &= ~E_MMU_NESTED_OP_FLAG_PT_REGS;
+	if (regs->flags.exec_mmu_op_nested) {
+		regs->flags.exec_mmu_op_nested = 0;
 
 		if (fatal_signal_pending(current))
 			return EXEC_MMU_STOP;
 		else
 			return EXEC_MMU_REPEAT;
-	} else if (recovery_res) {
-		panic("%s(): Failed to recovery store to addr = 0x%lx\n",
-				__func__, address);
 	}
 
 	return EXEC_MMU_SUCCESS;
@@ -4249,8 +4210,9 @@ static int calculate_recovery_load_parameters(struct pt_regs *regs,
  * Returns zero on success and value of type exec_mmu_ret on failure.
  */
 #define CHECK_PSHTP
-static int calculate_recovery_load_to_rf_frame(struct pt_regs *regs,
-			tc_cond_t cond, u64 **radr, bool *load_to_rf)
+static enum exec_mmu_ret calculate_recovery_load_to_rf_frame(
+		struct pt_regs *regs, tc_cond_t cond,
+		u64 **radr, bool *load_to_rf)
 {
 	unsigned	dst_addr = AS(cond).address;
 	unsigned	w_base_rnum_d;
@@ -4429,6 +4391,34 @@ static int is_MLT_mas(ldst_rec_op_t opcode)
 }
 #endif
 
+static void recovery_load_with_bytes(unsigned long address,
+		unsigned long address_hi, unsigned long address_hi_offset,
+		unsigned long reg_address, unsigned long reg_address_hi,
+		int vr, ldst_rec_op_t ld_rec_opc, int chan, int length,
+		tc_cond_t cond)
+{
+	int byte;
+	u32 first_time;
+
+	ld_rec_opc.fmt = LDST_BYTE_FMT;
+	ld_rec_opc.fmt_h = 0;
+
+	for (byte = 0; byte < length; byte++, address++, reg_address++) {
+		if (address_hi_offset && byte == address_hi_offset)
+			address = address_hi;
+		first_time = (byte == 0) ? 1 : 0;
+		if (byte == 8)
+			reg_address = reg_address_hi;
+		if (vr || byte >= 4) {
+			recovery_faulted_move(address, reg_address, 0,
+					1 /* vr */, AW(ld_rec_opc), chan,
+					0 /* qp_load */, 0 /* atomic_load */,
+					first_time /* is it first move? */,
+					cond);
+		}
+	}
+}
+
 static void debug_print_recovery_load(unsigned long address, int fmt,
 		unsigned long radr, int chan, unsigned greg_recovery,
 		unsigned greg_num_d, ldst_rec_op_t ld_rec_opc)
@@ -4443,7 +4433,8 @@ static void debug_print_recovery_load(unsigned long address, int fmt,
 		ACCESS_CONTROL_DISABLE_AND_SAVE(upsr_to_save);
 		if (!radr) {
 			recovery_faulted_load(address, &val,
-					&tag, AW(ld_rec_opc), 2);
+					&tag, AW(ld_rec_opc), 2,
+					(tc_cond_t) {.word = 0});
 		} else if (greg_recovery) {
 			E2K_GET_DGREG_VAL_AND_TAG(greg_num_d, val, tag);
 		} else {
@@ -4458,19 +4449,19 @@ static void debug_print_recovery_load(unsigned long address, int fmt,
 	}
 }
 
-static int do_recovery_load(struct pt_regs *regs, trap_cellar_t *tcellar,
-		trap_cellar_t *next_tcellar, int zeroing, unsigned long address,
+static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
+		trap_cellar_t *tcellar, trap_cellar_t *next_tcellar, int zeroing,
+		unsigned long address, unsigned long address_hi_hva,
 		unsigned long radr, int fmt, int chan, unsigned greg_recovery,
-		unsigned greg_num_d, int rg, e2k_addr_t *adr)
+		unsigned greg_num_d, int rg, e2k_addr_t *adr,
+		unsigned long hva_page_offset)
 {
 	ldst_rec_op_t	ld_rec_opc;
 	unsigned	vr = AS(tcellar->condition).vr;
 	int next_fmt, ldrd_fmt;
-	long recovery_res = 0;
 #ifdef	CONFIG_ACCESS_CONTROL
 	e2k_upsr_t	upsr_to_save;
 #endif
-	u32		flags;
 	bool aligned_16 = IS_ALIGNED(address, 16), q_load, qp_load,
 	     atomic_qp_load, atomic_q_load, atomic_load;
 
@@ -4483,8 +4474,8 @@ static int do_recovery_load(struct pt_regs *regs, trap_cellar_t *tcellar,
 	 * Do not try to repeat this atomically. */
 	next_fmt = next_tcellar ? TC_COND_FMT_FULL(next_tcellar->condition) : -1;
 	atomic_q_load = (cpu_has(CPU_FEAT_ISET_V6) && aligned_16 && q_load &&
-			  (chan == 0 || chan == 2) && next_fmt == fmt &&
-			  (next_tcellar->address % 16) == 8);
+			 (chan == 0 || chan == 2) && next_fmt == fmt &&
+			 (next_tcellar->address % 16) == 8);
 
 	atomic_load = (atomic_q_load || atomic_qp_load);
 
@@ -4495,11 +4486,8 @@ static int do_recovery_load(struct pt_regs *regs, trap_cellar_t *tcellar,
 		if (greg_recovery) {
 			E2K_GET_DGREG_VAL_AND_TAG(greg_num_d, val, tag);
 		} else {
-			recovery_res = load_value_and_tagd((void *) radr,
+			load_value_and_tagd((void *) radr,
 					&val, &tag);
-			if (recovery_res)
-				panic("%s(): Failed to recovery load from "
-					"addr = 0x%lx\n", __func__, address);
 		}
 
 		DbgEXMMU("load from register file background register value 0x%llx tag 0x%x\n",
@@ -4518,14 +4506,9 @@ static int do_recovery_load(struct pt_regs *regs, trap_cellar_t *tcellar,
 
 	if (zeroing) {
 		if (!greg_recovery && radr)
-			recovery_res = store_tagged_dword((void *) radr,
-					0ULL, 0);
+			store_tagged_dword((void *) radr, 0ULL, 0);
 
-		if (recovery_res)
-			panic("%s(): Failed to recovery load from "
-				"addr = 0x%lx\n", __func__, address);
-		else
-			return EXEC_MMU_SUCCESS;
+		return EXEC_MMU_SUCCESS;
 	}
 
 	if (cpu_has(CPU_FEAT_ISET_V6) && q_load && (address % 16 == 8) &&
@@ -4574,34 +4557,40 @@ static int do_recovery_load(struct pt_regs *regs, trap_cellar_t *tcellar,
 #endif
 
 	if (!greg_recovery) {
+		/* Load to %r/%b register - move data
+		 * to register location in memory */
 		unsigned long reg_address, reg_address_hi;
 		u64 fake_reg[2] __aligned(16);
 
-		if (radr)
-			reg_address = (unsigned long) radr;
-		else
-			reg_address = (unsigned long) fake_reg;
+		reg_address = radr ?: (unsigned long) fake_reg;
 
 		if (!cpu_has(CPU_FEAT_QPREG) || qp_load)
 			reg_address_hi = reg_address + 8;
 		else
 			reg_address_hi = reg_address + 16;
 
-		recovery_res = recovery_faulted_move(address, reg_address,
-				reg_address_hi, vr, AW(ld_rec_opc), chan,
-				qp_load, atomic_load);
+		if (likely(!hva_page_offset)) {
+			recovery_faulted_move(address, reg_address,
+					reg_address_hi, vr, AW(ld_rec_opc),
+					chan, qp_load, atomic_load, 1,
+					tcellar->condition);
+		} else {
+			recovery_load_with_bytes(address, address_hi_hva,
+					hva_page_offset, reg_address,
+					reg_address_hi, vr, ld_rec_opc, chan,
+					tc_cond_to_size(tcellar->condition),
+					tcellar->condition);
+		}
 	} else {
+		/* Load to %g register */
 		u64 *saved_greg_lo = NULL, *saved_greg_hi = NULL;
-		bool is_kernel_gregs = false;
 
 		if (KERNEL_GREGS_MASK != 0 &&
 				(KERNEL_GREGS_MASK & (1UL << greg_num_d))) {
 			saved_greg_lo = current_thread_info()->k_gregs.g[
 				    greg_num_d - KERNEL_GREGS_PAIRS_START].xreg;
-			is_kernel_gregs = true;
 		} else if (is_guest_kernel_gregs(current_thread_info(),
 						 greg_num_d, &saved_greg_lo)) {
-			is_kernel_gregs = true;
 			BUG_ON(saved_greg_lo == NULL);
 		} else {
 			saved_greg_lo = NULL;
@@ -4612,10 +4601,28 @@ static int do_recovery_load(struct pt_regs *regs, trap_cellar_t *tcellar,
 			else
 				saved_greg_hi = &saved_greg_lo[2];
 		}
-		recovery_res = recovery_faulted_load_to_greg(address,
-				greg_num_d, vr, AW(ld_rec_opc), chan,
-				qp_load, atomic_load, saved_greg_lo,
-				saved_greg_hi);
+		if (likely(!hva_page_offset)) {
+			recovery_faulted_load_to_greg(address, greg_num_d, vr,
+					AW(ld_rec_opc), chan, qp_load,
+					atomic_load, saved_greg_lo,
+					saved_greg_hi, tcellar->condition);
+		} else {
+			u64 tmp[2] __aligned(16);
+			recovery_load_with_bytes(address, address_hi_hva, hva_page_offset,
+					(unsigned long) (saved_greg_lo ?: &tmp[0]),
+					(unsigned long) (saved_greg_hi ?: &tmp[1]),
+					vr, ld_rec_opc, chan,
+					tc_cond_to_size(tcellar->condition),
+					tcellar->condition);
+			if (!saved_greg_lo) {
+				recovery_faulted_load_to_greg(
+						(unsigned long) tmp,
+						greg_num_d, vr,
+						AW(ld_rec_opc), chan, qp_load,
+						atomic_load, NULL, NULL,
+						tcellar->condition);
+			}
+		}
 	}
 
 	ACCESS_CONTROL_RESTORE(upsr_to_save);
@@ -4623,20 +4630,17 @@ static int do_recovery_load(struct pt_regs *regs, trap_cellar_t *tcellar,
 	debug_print_recovery_load(address, fmt, radr, chan, greg_recovery,
 			greg_num_d, ld_rec_opc);
 
-	flags = READ_ONCE(regs->flags);
+	/* Make sure we finished recovery operations before reading flags */
+	E2K_CMD_SEPARATOR;
 
 	/* Nested exception appeared while do_recovery_load() */
-	if (flags & E_MMU_NESTED_OP_FLAG_PT_REGS ||
-				recovery_res == -EAGAIN) {
-		regs->flags &= ~E_MMU_NESTED_OP_FLAG_PT_REGS;
+	if (regs->flags.exec_mmu_op_nested) {
+		regs->flags.exec_mmu_op_nested = 0;
 
 		if (fatal_signal_pending(current))
 			return EXEC_MMU_STOP;
 		else
 			return EXEC_MMU_REPEAT;
-	} else if (recovery_res) {
-		panic("%s(): Failed to recovery load from addr = 0x%lx\n",
-				__func__, address);
 	}
 
 	return EXEC_MMU_SUCCESS;
@@ -4742,18 +4746,39 @@ check_spill_fill_recovery(tc_cond_t cond, e2k_addr_t address, bool s_f,
 	return false;
 }
 
-int execute_mmu_operations(trap_cellar_t *tcellar, trap_cellar_t *next_tcellar,
-		struct pt_regs *regs, int rg, int zeroing, e2k_addr_t *adr,
+static enum exec_mmu_ret convert_pv_gva_to_hva(unsigned long *address_hva_p,
+		unsigned long address, size_t size, const struct pt_regs *regs)
+{
+	void *address_hva = guest_ptr_to_host((void *) address, size, regs);
+
+	if (unlikely(IS_ERR(address_hva))) {
+		pr_err("%s(): could not convert page fault addr 0x%lx "
+			"to recovery format, error %ld\n",
+			__func__, address, PTR_ERR(address_hva));
+		if (PTR_ERR(address_hva) == -EAGAIN)
+			return EXEC_MMU_REPEAT;
+		else
+			return EXEC_MMU_STOP;
+	}
+
+	*address_hva_p = (unsigned long) address_hva;
+
+	return EXEC_MMU_SUCCESS;
+}
+
+enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
+		trap_cellar_t *next_tcellar, struct pt_regs *regs,
+		int rg, int zeroing, e2k_addr_t *adr,
 		bool (*is_spill_fill_recovery)(tc_cond_t cond,
 					e2k_addr_t address, bool s_f,
 					struct pt_regs *regs),
-		int (*calculate_rf_frame)(struct pt_regs *regs,
+		enum exec_mmu_ret (*calculate_rf_frame)(struct pt_regs *regs,
 					tc_cond_t cond, u64 **radr,
 					bool *load_to_rf))
 {
-	unsigned long	flags;
+	unsigned long	flags, hva_page_offset = 0;
 	tc_cond_t	cond = tcellar->condition;
-	e2k_addr_t	address = tcellar->address;
+	e2k_addr_t	address = tcellar->address, address_hi;
 	int		chan, store, fmt, ret;
 	bool		is_s_f;
 
@@ -4770,7 +4795,7 @@ int execute_mmu_operations(trap_cellar_t *tcellar, trap_cellar_t *next_tcellar,
 		*adr = 0;
 #endif /* CONFIG_PROTECTED_MODE */
 
-	regs->flags |= E_MMU_OP_FLAG_PT_REGS;
+	regs->flags.exec_mmu_op = 1;
 
 	fmt = TC_COND_FMT_FULL(cond);
 	BUG_ON(fmt == 6 || fmt == 0 || fmt > 7 && fmt < 0xd || fmt == 0xe ||
@@ -4778,46 +4803,76 @@ int execute_mmu_operations(trap_cellar_t *tcellar, trap_cellar_t *next_tcellar,
 	       fmt >= 0x20);
 
 	/*
-	 * In some case faulted address should be converted to some other one
-	 * to enable recovery on the current MMU context.
-	 * For example, the source paravirtualized guest faulted address
-	 * should be converted to host user address mapped to: gva <-> hva
+	 * If ld/st hits to page boundary page, page fault can occur on first
+	 * or on second page. If page fault occurs on second page, we need to
+	 * correct addr. In this case addr points to the end of touched area.
 	 */
-	if (!(tcellar->flags & TC_IS_HVA_FLAG)) {
-		void *addr;
-
-		addr = guest_ptr_to_host((void *)address,
-					tc_cond_to_size(cond),
-					current_thread_info()->pt_regs);
-		if (unlikely(IS_ERR(addr))) {
-			pr_err("%s(): could not convert page fault addr 0x%lx "
-				"to recovery format, error %ld\n",
-				__func__, address, PTR_ERR(addr));
-			return PTR_ERR(addr);
-		}
-		address = (e2k_addr_t)addr;
-	}
-
-	store = AS(cond).store;
-
-	if (likely(is_spill_fill_recovery == NULL))
-		is_s_f = check_spill_fill_recovery(cond, tcellar->address,
-						IS_SPILL(tcellar[0]), regs);
-	else
-		is_s_f = is_spill_fill_recovery(cond, address,
-						IS_SPILL(tcellar[0]), regs);
-	if (is_s_f)
-		store = 1;
-
-	chan = AS(cond).chan;
-	BUG_ON((unsigned int) chan > 3 || store && !(chan & 1));
-
 	if (AS(cond).num_align) {
 		if (fmt != LDST_QP_FMT && fmt != TC_FMT_QPWORD_Q)
 			address -= 8;
 		else
 			address -= 16;
 	}
+
+	store = AS(cond).store;
+
+	/*
+	 * 1) In some case faulted address should be converted to some other
+	 * one to enable recovery on the current MMU context.  For example,
+	 * the source paravirtualized guest faulted address should be converted
+	 * to host user address mapped to: gva <-> hva
+	 * 2) Guest user's loads and stores also can land on a page boundary
+	 * and cause a page fault on guest's page table.  After fixing the
+	 * page table a hypercall is invoked to repeat the operation, and
+	 * it is possible that hypercall will have to access not adjacent
+	 * HVA pages.  We could support this in hypercalls, but reusing
+	 * code from 1) above is simpler (does not require duplicating
+	 * functionality).
+	 */
+	if (host_test_intc_emul_mode(regs) && !(tcellar->flags & TC_IS_HVA_FLAG) ||
+			IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
+		unsigned long address_lo_hva;
+		int size = tc_cond_to_size(cond);
+		int size_lo = min(PAGE_SIZE - offset_in_page(address), size);
+		ret = convert_pv_gva_to_hva(&address_lo_hva, address, size_lo, regs);
+		if (ret != EXEC_MMU_SUCCESS)
+			return ret;
+
+		/*
+		 * Check if ls/st really hits at page boundary.  If guest ld/st hits
+		 * at page boundary, gva may point to non-contigious area on the host
+		 * side.  So we need to split operation into two steps:
+		 * 1. execute ld/st of low part of tcellar->data to the 1st page
+		 * 2. execute ld/st of high part of tcellar->data to the 2nd page
+		 */
+		if (pf_on_page_boundary(address, cond) &&
+		    !is_spurious_qp_store(store, address, fmt, tcellar->mask, NULL)) {
+			unsigned long address_hi_hva;
+			ret = convert_pv_gva_to_hva(&address_hi_hva,
+					PAGE_ALIGN(address), size - size_lo, regs);
+			if (ret != EXEC_MMU_SUCCESS)
+				return ret;
+
+			address_hi = address_hi_hva;
+			hva_page_offset = size_lo;
+		}
+
+		address = address_lo_hva;
+	}
+
+	if (likely(is_spill_fill_recovery == NULL)) {
+		is_s_f = check_spill_fill_recovery(cond, tcellar->address,
+						IS_SPILL(tcellar[0]), regs);
+	} else {
+		is_s_f = is_spill_fill_recovery(cond, address,
+						IS_SPILL(tcellar[0]), regs);
+	}
+	if (is_s_f)
+		store = 1;
+
+	chan = AS(cond).chan;
+	BUG_ON((unsigned int) chan > 3 || store && !(chan & 1));
+
 
 	raw_all_irq_save(flags);
 	/*
@@ -4832,20 +4887,15 @@ int execute_mmu_operations(trap_cellar_t *tcellar, trap_cellar_t *next_tcellar,
 		 * Here performs dropped store operation, opcode.fmt contains
 		 * size of data that must be stored, address it's address where
 		 * data must be stored, data is data ;-) 
-		 * As manual says data must be in little endian, in this case
-		 * we can entrust conversion operation on compiler.
 		 */
-		ret = do_recovery_store(regs, tcellar, next_tcellar,
-				address, fmt, chan, rg);
-
-		if (ret == EXEC_MMU_REPEAT)
-			tcellar->flags |= TC_NESTED_EXC_FLAG;
+		ret = do_recovery_store(regs, tcellar, next_tcellar, address,
+				address_hi, fmt, chan, rg, hva_page_offset);
 	} else {
-		/* Here we must perform load operation, there is more difficult
-		 * then load, we know only the number of register in window of
-		 * other process, so we need to SPILL register file in memory
-		 * than find in it needed register and only after it perform
-		 * operation.
+		/*
+		 * Here we perform a load operation which is more difficult
+		 * than store, we know only the register's number in interrupted
+		 * frame, so we need to SPILL register file to memory and then
+		 * find the needed register in it; only then perform operation.
 		 */
 		unsigned	greg_num_d = -1;
 		bool		greg_recovery = false;
@@ -4871,12 +4921,10 @@ int execute_mmu_operations(trap_cellar_t *tcellar, trap_cellar_t *next_tcellar,
 			if (load_to_rf)
 				COPY_STACKS_TO_MEMORY();
 			ret = do_recovery_load(regs, tcellar, next_tcellar,
-					zeroing, address, (unsigned long) radr,
-					fmt, chan, greg_recovery, greg_num_d,
-					rg, adr);
-
-			if (ret == EXEC_MMU_REPEAT)
-				tcellar->flags |= TC_NESTED_EXC_FLAG;
+					zeroing, address, address_hi,
+					(unsigned long) radr, fmt, chan,
+					greg_recovery, greg_num_d,
+					rg, adr, hva_page_offset);
 
 			/*
 			 * Restore BGR register to recover rotatable state
@@ -4888,7 +4936,8 @@ int execute_mmu_operations(trap_cellar_t *tcellar, trap_cellar_t *next_tcellar,
 
 	raw_all_irq_restore(flags);
 
-	regs->flags &= ~(E_MMU_OP_FLAG_PT_REGS | E_MMU_NESTED_OP_FLAG_PT_REGS);
+	regs->flags.exec_mmu_op = 0;
+	regs->flags.exec_mmu_op_nested = 0;
 
 	return ret;
 }

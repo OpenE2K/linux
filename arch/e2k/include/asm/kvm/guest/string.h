@@ -2,6 +2,7 @@
 #define _E2K_KVM_GUEST_STRING_H_
 
 #include <linux/types.h>
+#include <linux/errno.h>
 
 #include <asm/pv_info.h>
 #include <asm/kvm/hypercall.h>
@@ -19,14 +20,11 @@ kvm_do_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
 {
 	long ret;
 
-	if (IS_HOST_KERNEL_ADDRESS((e2k_addr_t)src) ||
-			IS_HOST_KERNEL_ADDRESS((e2k_addr_t)dst)) {
-		ret = HYPERVISOR_fast_tagged_guest_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
-	} else {
+	do {
 		ret = HYPERVISOR_fast_tagged_memory_copy(dst, src, len,
 				strd_opcode, ldrd_opcode, prefetch);
-	}
+	} while (ret == -EAGAIN);
+
 	return ret;
 }
 static inline unsigned long

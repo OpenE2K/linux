@@ -219,6 +219,7 @@ void kvm_startup_local_apic_virq(unsigned int cpuid)
 	init_idle(current, cpuid);
 }
 
+#ifdef CONFIG_EPIC
 void kvm_setup_epic_virq(unsigned int cpuid)
 {
 }
@@ -237,3 +238,4 @@ static __init int kvm_setup_boot_pic_virq(void)
 	return kvm_setup_boot_local_pic_virq();
 }
 early_initcall(kvm_setup_boot_pic_virq);
+#endif

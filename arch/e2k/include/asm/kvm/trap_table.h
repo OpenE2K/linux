@@ -156,11 +156,6 @@ is_guest_TIRs_frozen(struct pt_regs *regs)
 {
 	return false;	/* none any guest */
 }
-static inline bool
-have_deferred_traps(struct pt_regs *regs)
-{
-	return native_have_deferred_traps(regs);
-}
 
 static inline bool
 handle_guest_last_wish(struct pt_regs *regs)
@@ -261,7 +256,6 @@ typedef enum trap_hndl {
 } trap_hndl_t;
 
 extern trap_hndl_t kvm_do_handle_guest_traps(struct pt_regs *regs);
-extern trap_hndl_t kvm_handle_guest_deferred_traps(struct pt_regs *regs);
 
 extern bool kvm_is_guest_TIRs_frozen(struct pt_regs *regs);
 extern bool kvm_is_guest_proc_stack_bounds(struct pt_regs *regs);
@@ -285,8 +279,7 @@ extern unsigned long kvm_pass_page_fault_to_guest(struct pt_regs *regs,
 				trap_cellar_t *tcellar);
 extern void kvm_complete_page_fault_to_guest(unsigned long what_complete);
 
-extern noinline notrace int do_hret_last_wish_intc(struct kvm_vcpu *vcpu,
-							struct pt_regs *regs);
+extern int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs);
 
 extern void trap_handler_trampoline(void);
 extern void syscall_handler_trampoline(void);
@@ -302,12 +295,10 @@ kvm_init_guest_traps_handling(struct pt_regs *regs, bool user_mode_trap)
 {
 	regs->traps_to_guest = 0;	/* only for host */
 	regs->is_guest_user = false;	/* only for host */
-	regs->deferred_traps = 0;	/* for host and guest */
 	regs->g_stacks_valid = false;	/* only for host */
-	if (user_mode_trap &&
-		test_thread_flag(TIF_LIGHT_HYPERCALL) &&
+	if (user_mode_trap && test_thread_flag(TIF_LIGHT_HYPERCALL) &&
 			(NATIVE_NV_READ_CR1_LO_REG().CR1_lo_pm)) {
-		regs->flags |= LIGHT_HYPERCALL_FLAG_PT_REGS;
+		regs->flags.light_hypercall = 1;
 	}
 }
 
@@ -316,13 +307,7 @@ kvm_init_guest_syscalls_handling(struct pt_regs *regs)
 {
 	regs->traps_to_guest = 0;	/* only for host */
 	regs->is_guest_user = true;	/* only for host */
-	regs->deferred_traps = 0;	/* only for guest */
 	regs->g_stacks_valid = false;	/* only for host */
-}
-static inline bool
-kvm_have_guest_deferred_traps(struct pt_regs *regs)
-{
-	return regs->deferred_traps != 0;
 }
 
 static inline void
@@ -347,6 +332,12 @@ kvm_handle_guest_last_wish(struct pt_regs *regs)
 	if (vcpu == NULL) {
 		/* it is not guest VCPU thread, or completed */
 		return false;
+	}
+	if (vcpu->arch.trap_wish) {
+		/* some trap was injected, goto trap handling */
+		regs->traps_to_guest |= vcpu->arch.trap_mask_wish;
+		vcpu->arch.trap_mask_wish = 0;
+		return true;
 	}
 	if (vcpu->arch.virq_wish) {
 		/* trap is only to interrupt guest kernel on guest mode */
@@ -407,8 +398,11 @@ kvm_should_pass_the_trap_to_guest(struct pt_regs *regs, int trap_no)
 			}
 		} else if (vcpu->arch.is_pv) {
 			if (vcpu->arch.virq_wish) {
-				/* it is paravirtualized guest, pass trap */
-				/* to guest, if it is enabled */
+				/* it is paravirtualized guest, pass */
+				/* interrupt to guest, if it is enabled */
+				;
+			} else if (vcpu->arch.trap_wish) {
+				/* it is wish to inject some trap to guest */
 				;
 			} else {
 				/* there is not any wish for guest */
@@ -479,15 +473,8 @@ static inline bool kvm_handle_guest_traps(struct pt_regs *regs)
 			"created\n");
 		return false;
 	}
-	regs->flags |= GUEST_FLAG_PT_REGS;
 	ret = kvm_do_handle_guest_traps(regs);
 	regs->traps_to_guest = 0;
-	if (regs->deferred_traps) {
-		/* New traps (VIRQs interrupt) occured to pass to guest */
-		ret = kvm_handle_guest_deferred_traps(regs);
-		regs->deferred_traps = 0;
-	}
-	regs->flags &= ~GUEST_FLAG_PT_REGS;
 
 	if (ret == GUEST_TRAP_HANDLED) {
 		DebugKVMGT("the guest trap handled\n");
@@ -552,11 +539,6 @@ is_guest_TIRs_frozen(struct pt_regs *regs)
 
 	return kvm_is_guest_TIRs_frozen(regs);
 }
-static inline bool
-have_deferred_traps(struct pt_regs *regs)
-{
-	return kvm_have_guest_deferred_traps(regs);
-}
 
 static inline bool
 handle_guest_last_wish(struct pt_regs *regs)
@@ -580,18 +562,18 @@ kvm_host_instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 	kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, async_instr);
 }
 
-static inline void
+static inline int
 kvm_host_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
 	if (likely(!kvm_test_intc_emul_flag(regs))) {
-		native_do_aau_page_fault(regs, address, condition, mask, aa_no);
-		return;
+		return native_do_aau_page_fault(regs, address, condition, mask,
+						aa_no);
 	}
 
-	kvm_pv_mmu_aau_page_fault(current_thread_info()->vcpu, regs,
-				  address, condition, aa_no);
+	return kvm_pv_mmu_aau_page_fault(current_thread_info()->vcpu, regs,
+					 address, condition, aa_no);
 }
 
 /*
@@ -830,12 +812,13 @@ instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 	kvm_host_instr_page_fault(regs, ftype, async_instr);
 }
 
-static inline void
+static inline int
 do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
-	kvm_host_do_aau_page_fault(regs, address, condition, mask, aa_no);
+	return kvm_host_do_aau_page_fault(regs, address, condition, mask,
+					  aa_no);
 }
 #endif	/* CONFIG_VIRTUALIZATION */
 

@@ -1,14 +1,6 @@
 #ifndef __ASM_E2K_IOMMU_H
 #define __ASM_E2K_IOMMU_H
 
-/*
- * This struct contains device specific data for the IOMMU
- */
-struct e2k_iommu_dev_data {
-	struct e2k_iommu_domain *domain; /* Domain the device is bound to */
-	struct kvm *kvm;		 /* Virtual machine, to which device is
-					  * passed */
-};
 
 extern int iommu_panic_off;
 extern void e2k_iommu_error_interrupt(void);

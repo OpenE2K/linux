@@ -68,24 +68,17 @@ static inline struct e2k_stacks *
 kvm_syscall_guest_get_restore_stacks(struct thread_info *ti,
 						struct pt_regs *regs)
 {
-	return native_syscall_guest_get_restore_stacks(ti, regs);
+	return native_syscall_guest_get_restore_stacks(regs);
 }
 
 /*
  * The function should return bool is the system call from guest
  */
-static inline bool
-kvm_guest_syscall_enter(struct thread_info *ti, struct pt_regs *regs)
+static inline bool kvm_guest_syscall_enter(struct pt_regs *regs)
 {
 	/* guest cannot have own nested guests */
 
 	return false;	/* it is not nested guest system call */
-}
-static inline void
-kvm_guest_syscall_exit_to(struct thread_info *ti, struct pt_regs *regs,
-				unsigned flags)
-{
-	/* nothing guests can be */
 }
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
@@ -138,25 +131,28 @@ trap_guest_get_restore_stacks(struct thread_info *ti, struct pt_regs *regs)
 }
 
 static inline struct e2k_stacks *
-syscall_guest_get_restore_stacks(struct thread_info *ti, struct pt_regs *regs)
+syscall_guest_get_restore_stacks(bool ts_host_at_vcpu_mode, struct pt_regs *regs)
 {
-	return kvm_syscall_guest_get_restore_stacks(ti, regs);
+	return kvm_syscall_guest_get_restore_stacks(
+			current_thread_info(), regs);
 }
+
+#define ts_host_at_vcpu_mode() false
 
 /*
  * The function should return bool is the system call from guest
  */
-static inline bool
-guest_syscall_enter(struct thread_info *ti, struct pt_regs *regs)
+static inline bool guest_syscall_enter(struct pt_regs *regs,
+		bool ts_host_at_vcpu_mode)
 {
-	return kvm_guest_syscall_enter(ti, regs);
+	return kvm_guest_syscall_enter(regs);
 }
-static inline void
-guest_syscall_exit_to(struct thread_info *ti, struct pt_regs *regs,
-			unsigned flags)
-{
-	kvm_guest_syscall_exit_to(ti, regs, flags);
-}
+
+static inline void guest_exit_intc(struct pt_regs *regs,
+		bool intc_emul_flag) { }
+static inline void guest_syscall_exit_trap(struct pt_regs *regs,
+		bool ts_host_at_vcpu_mode) { }
+
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
 #endif	/* ! _E2K_KVM_GUEST_SWITCH_H */

@@ -99,12 +99,28 @@ void boot_kvm_setup_machine_id(bootblock_struct_t *bootblock)
 	boot_native_setup_machine_id(bootblock);
 
 	/* boot_machine now contains info from emulated IDR */
+
+	/*
+	 * At this point we have three machine ids:
+	 * - boot_machine.native_id is determined by QEMU parameter
+	 * - kvm_vcpu_host_machine_id is host id
+	 * - boot_native_machine_id may be statically set when compiling guest
+	 */
+
 	boot_guest_machine_id = boot_machine.native_id;
 	boot_machine.guest.id = boot_guest_machine_id;
 	boot_machine.guest.rev = boot_machine.native_rev;
 	boot_machine.guest.iset_ver = boot_machine.native_iset_ver;
 
+#ifdef	CONFIG_E2K_MACHINE
+	if (boot_guest_machine_id != boot_native_machine_id)
+		BOOT_BUG("Guest kernel arch does not match QEMU parameter arch");
+
+	if (boot_native_machine_id != kvm_vcpu_host_machine_id())
+		BOOT_BUG("Guest kernel arch does not match host arch");
+#else
 	boot_native_machine_id = kvm_vcpu_host_machine_id();
+#endif
 	boot_machine.native_id = boot_native_machine_id;
 	boot_machine.native_rev = kvm_vcpu_host_cpu_rev();
 	boot_machine.native_iset_ver = kvm_vcpu_host_cpu_iset();

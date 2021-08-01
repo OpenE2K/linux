@@ -286,8 +286,9 @@ kvm_gfn_to_index(struct kvm *kvm, gfn_t gfn, gfn_t base_gfn, int level_id)
 #define	PFERR_ONLY_VALID_BIT	13
 #define	PFERR_READ_PROT_BIT	14
 #define	PFERR_IS_UNMAPPED_BIT	15
+#define	PFERR_FAPB_BIT		16
 
-#define	PFERR_ACCESS_SIZE_BIT	16
+#define	PFERR_ACCESS_SIZE_BIT	24
 
 #define PFERR_PRESENT_MASK	(1U << PFERR_PRESENT_BIT)
 #define PFERR_WRITE_MASK	(1U << PFERR_WRITE_BIT)
@@ -305,6 +306,7 @@ kvm_gfn_to_index(struct kvm *kvm, gfn_t gfn, gfn_t base_gfn, int level_id)
 #define	PFERR_ONLY_VALID_MASK	(1U << PFERR_ONLY_VALID_BIT)
 #define	PFERR_READ_PROT_MASK	(1U << PFERR_READ_PROT_BIT)
 #define	PFERR_IS_UNMAPPED_MASK	(1U << PFERR_IS_UNMAPPED_BIT)
+#define	PFERR_FAPB_MASK		(1U << PFERR_FAPB_BIT)
 
 #define	PFERR_ACCESS_SIZE_MASK	(~0U << PFERR_ACCESS_SIZE_BIT)
 
@@ -349,10 +351,10 @@ static inline bool is_mmio_space_pfn(kvm_pfn_t pfn)
 }
 
 typedef struct kvm_arch_exception {
-	u8 vector;
-	bool error_code_valid;
-	u16 error_code;
-	u64 address;	/* page fault gpa */
+	bool error_code_valid;	/* PFERR_* flags is valid */
+	u32 error_code;		/* PFERR_* flags */
+	u64 address;		/* page fault gpa */
+	u64 ip;			/* IP to inject trap */
 } kvm_arch_exception_t;
 
 /* FIXME: following emulation is for x86 arch, so it need be updated */
@@ -552,7 +554,8 @@ static inline u32 permission_fault(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu,
 			!(pte_access & ACC_WRITE_MASK))
 		/* try write to write protected page (by pte) */
 		return errcode | PFERR_WRITE_MASK;
-	if ((pfec & PFERR_USER_MASK) && !(pte_access & ACC_WRITE_MASK))
+	if ((pfec & PFERR_USER_MASK) && !(pfec & PFERR_FAPB_MASK) &&
+			!(pte_access & ACC_WRITE_MASK))
 		/* try access from user to privileged page */
 		return errcode | PFERR_USER_MASK;
 	if ((pfec & (PFERR_INSTR_PROT_MASK | PFERR_INSTR_FAULT_MASK)) &&
@@ -666,6 +669,11 @@ static inline bool vcpu_match_mmio_gpa(struct kvm_vcpu *vcpu, gpa_t gpa)
 
 extern bool tdp_enabled;
 
+extern int kvm_mmu_load(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+			unsigned flags);
+extern void kvm_mmu_unload(struct kvm_vcpu *vcpu, unsigned flags);
+extern void kvm_mmu_free_page(struct kvm *kvm, struct kvm_mmu_page *sp);
+
 extern void kvm_setup_mmu_intc_mode(struct kvm_vcpu *vcpu);
 
 extern void kvm_mmu_set_mmio_spte_mask(pgprotval_t mmio_mask);
@@ -738,12 +746,11 @@ extern int kvm_switch_shadow_u_pptb(struct kvm_vcpu *vcpu, gpa_t u_pptb,
 					hpa_t *u_root);
 extern int kvm_switch_shadow_os_pptb(struct kvm_vcpu *vcpu, gpa_t os_pptb,
 					hpa_t *os_root);
-extern int kvm_sync_shadow_u_root(struct kvm_vcpu *vcpu, bool force);
 extern int kvm_prepare_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 				gpa_t u_phys_ptb);
 extern void kvm_dump_shadow_os_pt_regs(struct kvm_vcpu *vcpu);
 extern void copy_guest_kernel_root_range(struct kvm_vcpu *vcpu,
-			struct kvm_mmu_page *sp, pgprot_t *src_root);
+		gmm_struct_t *gmm, struct kvm_mmu_page *sp, pgprot_t *src_root);
 extern void mmu_zap_linked_children(struct kvm *kvm,
 					struct kvm_mmu_page *parent);
 
@@ -755,8 +762,8 @@ set_guest_kernel_pgd_range(pgd_t *dst_pgd, pgd_t pgd_to_set)
 }
 
 static inline void
-kvm_prepare_shadow_root(struct kvm_vcpu *vcpu, hpa_t root, hpa_t gp_root,
-			gva_t vptb)
+kvm_prepare_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+			hpa_t root, hpa_t gp_root, gva_t vptb)
 {
 	pgprot_t *new_root;
 	int pt_index;
@@ -780,7 +787,7 @@ kvm_prepare_shadow_root(struct kvm_vcpu *vcpu, hpa_t root, hpa_t gp_root,
 
 		src_root = (pgprot_t *)init_pgd;
 		if (init_pgd != NULL)
-			copy_guest_kernel_root_range(vcpu, sp, src_root);
+			copy_guest_kernel_root_range(vcpu, gmm, sp, src_root);
 
 		/* copy MMU context of the guest nonpaging PT on host */
 		spin_lock(&vcpu->kvm->mmu_lock);
@@ -830,7 +837,7 @@ mmu_pv_prepare_spt_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, hpa_t root)
 	src_root = (pgprot_t *)kvm_mmu_get_init_gmm_root(vcpu->kvm);
 	KVM_BUG_ON(src_root == NULL);
 	sp = page_header(root);
-	copy_guest_kernel_root_range(vcpu, sp, src_root);
+	copy_guest_kernel_root_range(vcpu, gmm, sp, src_root);
 
 	/* create new host MMU context for guest user process */
 	KVM_BUG_ON(pv_vcpu_is_init_gmm(vcpu, gmm));
@@ -1034,6 +1041,15 @@ static inline void kvm_init_sw_ctxt(struct kvm_vcpu *vcpu)
 	}
 
 	sw_ctxt->trap_count = 0;
+
+	/* Initialize CLW context */
+	sw_ctxt->us_cl_d = 1;
+	sw_ctxt->us_cl_b = 0;
+	sw_ctxt->us_cl_up = 0;
+	sw_ctxt->us_cl_m0 = 0;
+	sw_ctxt->us_cl_m1 = 0;
+	sw_ctxt->us_cl_m2 = 0;
+	sw_ctxt->us_cl_m3 = 0;
 }
 extern int kvm_hv_setup_nonpaging_mode(struct kvm_vcpu *vcpu);
 extern int write_to_guest_pt_phys(struct kvm_vcpu *vcpu, gpa_t gpa,
@@ -1088,7 +1104,6 @@ void kvm_mmu_invalidate_zap_all_pages(struct kvm *kvm);
 
 extern int kvm_pv_vcpu_mmu_state(struct kvm_vcpu *vcpu,
 			  vcpu_gmmu_info_t __user *mmu_info);
-extern int kvm_pv_switch_to_shadow_pt(struct kvm_vcpu *vcpu);
 extern int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu,
 			gmm_struct_t *gmm, gpa_t u_phys_ptb);
 extern hpa_t mmu_pv_switch_spt_u_pptb(struct kvm_vcpu *vcpu,
@@ -1097,7 +1112,7 @@ extern int mmu_pv_switch_tdp_u_pptb(struct kvm_vcpu *vcpu,
 			int pid, gpa_t u_phys_ptb);
 
 extern int kvm_hv_setup_tdp_paging(struct kvm_vcpu *vcpu);
-extern int kvm_hv_setup_shadow_paging(struct kvm_vcpu *vcpu);
+extern int kvm_hv_setup_shadow_paging(struct kvm_vcpu *vcpu, gmm_struct_t *gmm);
 extern void mmu_get_spt_roots(struct kvm_vcpu *vcpu, unsigned flags,
 			hpa_t *os_root_p, hpa_t *u_root_p, hpa_t *gp_root_p);
 extern void mmu_check_invalid_roots(struct kvm_vcpu *vcpu, bool invalid,
@@ -1125,7 +1140,6 @@ pv_vcpu_switch_to_init_spt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 		kvm_set_space_type_guest_os_root(vcpu, init_gmm->os_pptb);
 	}
 	kvm_set_vcpu_os_pt_context(vcpu);
-	gmm->in_release = true;
 }
 
 static inline void kvm_mmu_unload_gmm_root(struct kvm_vcpu *vcpu)
@@ -1163,11 +1177,12 @@ static inline unsigned int kvm_mmu_available_pages(struct kvm *kvm)
 	return 0;
 }
 
-static inline int kvm_mmu_reload(struct kvm_vcpu *vcpu, unsigned flags)
+static inline int kvm_mmu_reload(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				 unsigned flags)
 {
 	mmu_check_invalid_roots(vcpu, true /* invalid ? */, flags);
 
-	return kvm_mmu_load(vcpu, flags);
+	return kvm_mmu_load(vcpu, gmm, flags);
 }
 
 static inline int kvm_mmu_populate_area(struct kvm *kvm,
@@ -1545,7 +1560,8 @@ extern long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu,
 		u64 ld_rec_opc, int chan);
 extern long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 		e2k_addr_t addr_from, e2k_addr_t addr_to,
-		e2k_addr_t addr_to_hi, u64 ld_rec_opc, u64 _arg);
+		e2k_addr_t addr_to_hi, u64 ld_rec_opc, u64 _arg,
+		u32 first_time);
 extern long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 		e2k_addr_t address, u32 greg_num_d, u64 ld_rec_opc,
 		u64 arg, u64 saved_greg_lo, u64 saved_greg_hi);
@@ -1607,19 +1623,9 @@ kvm_clear_guest_dcache_l1_range(void *virt_addr, size_t len)
 	return 0;
 }
 static inline long
-kvm_flush_guest_icache_range(e2k_addr_t start, e2k_addr_t end)
+kvm_flush_guest_icache_all(void)
 {
-	pte_t pte;
-	e2k_addr_t addr;
-
-	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		pte = native_do_get_pte_for_address(NULL, addr);
-		if (!pte_present(pte)) {
-			/* it need do present the flushed address */
-			return -EFAULT;
-		}
-		native_flush_icache_range(start, end);
-	}
+	native_flush_icache_all();
 	return 0;
 }
 static inline long

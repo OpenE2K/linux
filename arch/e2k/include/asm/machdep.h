@@ -122,12 +122,12 @@ typedef struct machdep {
 
 	void (*save_kernel_gregs)(struct kernel_gregs *);
 	void (*save_gregs)(struct global_regs *);
-	void (*save_local_gregs)(struct local_gregs *);
+	void (*save_local_gregs)(struct local_gregs *, bool is_signal);
 	void (*save_gregs_dirty_bgr)(struct global_regs *);
 	void (*save_gregs_on_mask)(struct global_regs *, bool dirty_bgr,
 					unsigned long not_save_gregs_mask);
 	void (*restore_gregs)(const struct global_regs *);
-	void (*restore_local_gregs)(const struct local_gregs *);
+	void (*restore_local_gregs)(const struct local_gregs *, bool is_signal);
 	void (*restore_gregs_on_mask)(struct global_regs *, bool dirty_bgr,
 					unsigned long not_restore_gregs_mask);
 
@@ -598,8 +598,8 @@ extern void save_kernel_gregs_v2(struct kernel_gregs *);
 extern void save_kernel_gregs_v5(struct kernel_gregs *);
 extern void save_gregs_v2(struct global_regs *);
 extern void save_gregs_v5(struct global_regs *);
-extern void save_local_gregs_v2(struct local_gregs *);
-extern void save_local_gregs_v5(struct local_gregs *);
+extern void save_local_gregs_v2(struct local_gregs *, bool is_signal);
+extern void save_local_gregs_v5(struct local_gregs *, bool is_signal);
 extern void save_gregs_dirty_bgr_v2(struct global_regs *);
 extern void save_gregs_dirty_bgr_v5(struct global_regs *);
 extern void save_gregs_on_mask_v2(struct global_regs *, bool dirty_bgr,
@@ -608,8 +608,8 @@ extern void save_gregs_on_mask_v5(struct global_regs *, bool dirty_bgr,
 					unsigned long mask_not_save);
 extern void restore_gregs_v2(const struct global_regs *);
 extern void restore_gregs_v5(const struct global_regs *);
-extern void restore_local_gregs_v2(const struct local_gregs *);
-extern void restore_local_gregs_v5(const struct local_gregs *);
+extern void restore_local_gregs_v2(const struct local_gregs *, bool is_signal);
+extern void restore_local_gregs_v5(const struct local_gregs *, bool is_signal);
 extern void restore_gregs_on_mask_v2(struct global_regs *, bool dirty_bgr,
 					unsigned long mask_not_restore);
 extern void restore_gregs_on_mask_v5(struct global_regs *, bool dirty_bgr,

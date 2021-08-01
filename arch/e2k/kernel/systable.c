@@ -478,9 +478,12 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_copy_file_range),
 	SYSTEM_CALL_TBL_ENTRY(sys_preadv2),
 	SYSTEM_CALL_TBL_ENTRY(sys_pwritev2),
-	SYSTEM_CALL_TBL_ENTRY(sys_pkey_mprotect),
-	SYSTEM_CALL_TBL_ENTRY(sys_pkey_alloc),
-	SYSTEM_CALL_TBL_ENTRY(sys_pkey_free),
+
+	/* free (unused) items */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_name_to_handle_at),	/* 400 */
 	SYSTEM_CALL_TBL_ENTRY(sys_open_by_handle_at),	/* 401 */
 	SYSTEM_CALL_TBL_ENTRY(sys_statx),		/* 402 */
@@ -962,9 +965,12 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_copy_file_range),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_preadv2),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_pwritev2),
-	SYSTEM_CALL_TBL_ENTRY(sys_pkey_mprotect),
-	SYSTEM_CALL_TBL_ENTRY(sys_pkey_alloc),
-	SYSTEM_CALL_TBL_ENTRY(sys_pkey_free),
+
+	/* free (unused) items */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_name_to_handle_at),	/* 400 */
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_open_by_handle_at),
 	SYSTEM_CALL_TBL_ENTRY(sys_statx),		/* 402 */
@@ -1676,7 +1682,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_rt_sigprocmask),	/* 175 */
 	PROT_SYSCALL_TBL_ENTRY(sys_rt_sigpending),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_rt_sigtimedwait),
-	PROT_SYSCALL_TBL_ENTRY(sys_rt_sigqueueinfo),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_rt_sigqueueinfo),
 	PROT_SYSCALL_TBL_ENTRY(sys_rt_sigsuspend),
 	PROT_SYSCALL_TBL_ENTRY(sys_pread64),		/* 180 */
 	PROT_SYSCALL_TBL_ENTRY(sys_pwrite64),
@@ -1707,8 +1713,8 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_getegid),
 	PROT_SYSCALL_TBL_ENTRY(sys_setreuid),
 	PROT_SYSCALL_TBL_ENTRY(sys_setregid),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* 205 */
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_pidfd_send_signal), /* 205 */
+	PROT_SYSCALL_TBL_ENTRY(sys_pidfd_open),
 	PROT_SYSCALL_TBL_ENTRY(sys_fchown),
 	PROT_SYSCALL_TBL_ENTRY(sys_setresuid),
 	PROT_SYSCALL_TBL_ENTRY(sys_getresuid),
@@ -1765,9 +1771,9 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_get_backtrace),
 	PROT_SYSCALL_TBL_ENTRY(sys_access_hw_stacks),
 	PROT_SYSCALL_TBL_ENTRY(sys_el_posix), /* 255 */
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* 256 */
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
+	PROT_SYSCALL_TBL_ENTRY(sys_io_uring_setup),
+	PROT_SYSCALL_TBL_ENTRY(sys_io_uring_enter),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_io_uring_register),
 	PROT_SYSCALL_TBL_ENTRY(sys_set_tid_address),
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	PROT_SYSCALL_TBL_ENTRY(sys_el_binary), /* 260 */
@@ -1795,8 +1801,8 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_shmctl),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_shmat),	/* 280 */
 	PROT_SYSCALL_TBL_ENTRY(sys_shmdt),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
+	PROT_SYSCALL_TBL_ENTRY(sys_open_tree),
+	PROT_SYSCALL_TBL_ENTRY(sys_move_mount),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* 285 */
 	PROT_SYSCALL_TBL_ENTRY(sys_accept4),
@@ -1840,8 +1846,8 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_mq_timedreceive),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_mq_notify),
 	PROT_SYSCALL_TBL_ENTRY(sys_mq_getsetattr), /* 320 */
-	PROT_SYSCALL_TBL_ENTRY(sys_kexec_load),
-	PROT_SYSCALL_TBL_ENTRY(sys_waitid),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_kexec_load),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_waitid),
 	PROT_SYSCALL_TBL_ENTRY(sys_add_key),
 	PROT_SYSCALL_TBL_ENTRY(sys_request_key),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_keyctl),
@@ -1853,7 +1859,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_tee),
 	PROT_SYSCALL_TBL_ENTRY(sys_migrate_pages),
 	PROT_SYSCALL_TBL_ENTRY(sys_utimensat),
-	PROT_SYSCALL_TBL_ENTRY(sys_rt_tgsigqueueinfo),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_rt_tgsigqueueinfo),
 	PROT_SYSCALL_TBL_ENTRY(sys_openat),
 	PROT_SYSCALL_TBL_ENTRY(sys_mkdirat),
 	PROT_SYSCALL_TBL_ENTRY(sys_mknodat),
@@ -1868,7 +1874,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_epoll_pwait),
 	PROT_SYSCALL_TBL_ENTRY(sys_signalfd4),
 	PROT_SYSCALL_TBL_ENTRY(sys_eventfd2),
-	PROT_SYSCALL_TBL_ENTRY(sys_recvmmsg),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_recvmmsg),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* 350 */
 #ifdef CONFIG_TIMERFD
 	PROT_SYSCALL_TBL_ENTRY(sys_timerfd_create),
@@ -1903,11 +1909,11 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(e2k_sys_prlimit64),
 	PROT_SYSCALL_TBL_ENTRY(sys_clock_adjtime),
 	PROT_SYSCALL_TBL_ENTRY(sys_syncfs),
-	PROT_SYSCALL_TBL_ENTRY(sys_sendmmsg),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_sendmmsg),
 	PROT_SYSCALL_TBL_ENTRY(sys_setns),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_process_vm_readv), /* 380 */
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_process_vm_writev),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* sys_kcmp obsoleted */
+	PROT_SYSCALL_TBL_ENTRY(sys_kcmp),
 	PROT_SYSCALL_TBL_ENTRY(sys_finit_module),
 	/* added in linux-4.4 */
 	PROT_SYSCALL_TBL_ENTRY(sys_renameat2),
@@ -1924,9 +1930,12 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_copy_file_range),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_preadv2),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_pwritev2),
-	PROT_SYSCALL_TBL_ENTRY(sys_pkey_mprotect),
-	PROT_SYSCALL_TBL_ENTRY(sys_pkey_alloc),
-	PROT_SYSCALL_TBL_ENTRY(sys_pkey_free),
+
+	/* free (unused) items */
+	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
+	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
+	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
+
 	PROT_SYSCALL_TBL_ENTRY(sys_name_to_handle_at),	/* 400 */
 	PROT_SYSCALL_TBL_ENTRY(sys_open_by_handle_at),	/* 401 */
 	PROT_SYSCALL_TBL_ENTRY(sys_statx),		/* 402 */
@@ -1959,14 +1968,14 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_clean_descriptors), /* 424 */
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_unuselib), /* 425 */
 
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),
-	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* 430 */
+	PROT_SYSCALL_TBL_ENTRY(sys_clone3),
+	PROT_SYSCALL_TBL_ENTRY(sys_fsopen),
+	PROT_SYSCALL_TBL_ENTRY(sys_fsconfig),
+	PROT_SYSCALL_TBL_ENTRY(sys_fsmount),
+	PROT_SYSCALL_TBL_ENTRY(sys_fspick),	/* 430 */
 
 	/* 430 last System call */
-};
+}; /* sys_call_table_entry8 */
 
 /*
  * Following is table of masks for pre-processing system call parameters
@@ -2133,7 +2142,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 	{ 0xfffff30,	/*	chroot	61		SX	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0xffff140,	/*	ustat	62		iP	*/
-					0, 48, 0, 0, 0, 0 },
+					0, 32, 0, 0, 0, 0 },
 	{ 0xffff440,	/*	dup2	63		ii	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0xffffff0,	/*	getppid	64		XX	*/
@@ -2418,8 +2427,10 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xffff440,	/*	setregid32	204	ii	*/
 					0, 0, 0, 0, 0, 0 },
-	{ 0x0,		/*	reserved	205	*/ 0, 0, 0, 0, 0, 0 },
-	{ 0x0,		/*	reserved	206	*/ 0, 0, 0, 0, 0, 0 },
+	{ 0xff41440,	/* pidfd_send_signal	205	iiPi	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xffff440,	/*	pidfd_open	206	ii	*/
+					0, 0, 0, 0, 0, 0 },
 	{ 0xfff4440,	/*	fchown32	207	iii	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0xfff4440,	/*	setresuid32	208	iii	*/
@@ -2518,9 +2529,12 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 8, -4, 0, 8, 0 },
 	{ 0xff22240,	/*	el_posix	255	i???	*/
 					0, 0, 0, 0, 0, 0 },
-	{ 0x0,		/*	reserved	256	*/ 0, 0, 0, 0, 0, 0 },
-	{ 0x0,		/*	reserved	257	*/ 0, 0, 0, 0, 0, 0 },
-	{ 0x0,		/*	reserved	258	*/ 0, 0, 0, 0, 0, 0 },
+	{ 0xffff140,	/*	io_uring_setup 256	iP	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0x0144440,	/*	io_uring_enter 257	iiiiPL	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xff41440,	/*	io_uring_register 258	iiPi	*/
+					0, 0, 0, 0, 0, 0 },
 	{ 0xfffff10,	/*	set_tid_address	259	PX	*/
 					4, 0, 0, 0, 0, 0 },
 	{ 0x0,		/*	el_binary	260	*/
@@ -2557,7 +2571,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xff14140,	/* semtimedop	276		iPiP	*/
 					0, 6, 0, 16, 0, 0 },
-	{ 0xfff1010,	/*	semop	277		LPL	*/
+	{ 0xfff0140,	/*	semop	277		iPL	*/
 					0, 6, 0, 0, 0, 0 },
 	{ 0xfff4040,	/*	shmget	278		iLi	*/
 					0, 0, 0, 0, 0, 0 },
@@ -2567,8 +2581,10 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xfffff10,	/*	shmdt	281		P	*/
 					0, 0, 0, 0, 0, 0 },
-	{ 0x0,	/*	reserved	282	*/ 0, 0, 0, 0, 0, 0 },
-	{ 0x0,	/*	reserved	283	*/ 0, 0, 0, 0, 0, 0 },
+	{ 0xfff4340,	/*	open_tree 282		iSi	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xf434340,	/*	move_mount 283		iSiSi */
+					0, 0, 0, 0, 0, 0 },
 	{ 0x0,	/*	reserved	284	*/ 0, 0, 0, 0, 0, 0 },
 	{ 0x0,	/*	reserved	285	*/ 0, 0, 0, 0, 0, 0 },
 
@@ -2668,7 +2684,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xff41140,	/*	utimensat 333		iPPi	*/
 					0, 0, 0, 0, 0, 0 },
-	{ 0xfff4440,	/* rt_tgsigqueueinfo	334	iiiP	*/
+	{ 0xff14440,	/* rt_tgsigqueueinfo	334	iiiP	*/
 					0, 0, 0, 128, 0, 0 },
 	{ 0xff44340,	/*	openat	335		iSii	*/
 					0, 0, 0, 0, 0, 0 },
@@ -2764,7 +2780,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 32, 0, 32, 0, 0 },
 	{ 0x0010140,	/* process_vm_writev 381	iPLPLL	*/
 					0, 32, 0, 32, 0, 0 },
-	{ 0xf000000,	/*	kcmp	382		LLLLL	ni_syscall */
+	{ 0xf004440,	/*	kcmp	382		iiiLL	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0xfff4340,	/*	finit_module 383	iSi	*/
 					0, 0, 0, 0, 0, 0 },
@@ -2794,12 +2810,9 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 32, 0, 0, 0, 0 },
 	{ 0x0000100,	/*	pwritev2 396		LPLLLL	*/
 					0, 32, 0, 0, 0, 0 },
-	{ 0xff40010,	/* pkey_mprotect 397		PLLi	*/
-					0, 0, 0, 0, 0, 0 },
-	{ 0xffff000,	/* pkey_alloc	398		LL	*/
-					0, 0, 0, 0, 0, 0 },
-	{ 0xfffff40,	/* pkey_free	399		iX	*/
-					0, 0, 0, 0, 0, 0 },
+	{ 0x0,	/*	reserved	397	*/ 0, 0, 0, 0, 0, 0 },
+	{ 0x0,	/*	reserved	398	*/ 0, 0, 0, 0, 0, 0 },
+	{ 0x0,	/*	reserved	399	*/ 0, 0, 0, 0, 0, 0 },
 	{ 0xf411340,	/* name_to_handle_at 400	iSPPi	*/
 					0, 0, 8, 0, 0, 0 },
 	{ 0xfff4140,	/* open_by_handle_at 401	iPi	*/
@@ -2850,6 +2863,16 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 	{ 0xfff0010,	/* clean_descriptors 424	PLL	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0xfffff10,	/*	unuselib 425		PX	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xffff010,	/*	clone3	426		PL	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xffff430,	/*	fsopen	427		Si	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xf413440,	/*	fsconfig 428		iiSPi	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xfff4440,	/*	fsmount	429		iii	*/
+					0, 0, 0, 0, 0, 0 },
+	{ 0xfff4340,	/*	fspick	430		iSi	*/
 					0, 0, 0, 0, 0, 0 }
 };
 
@@ -3282,11 +3305,14 @@ const char *sys_call_ID_to_name[NR_syscalls] = {
 	"seccomp",
 	"shutdown",
 	"copy_file_range",
-	"preadv2",
+	"preadv2",		/* 395 */
 	"pwritev2",
-	"pkey_mprotect",
-	"pkey_alloc",
-	"pkey_free",
+
+	/* free (unused) items */
+	"ni_syscall",		/* 397 */
+	"ni_syscall",		/* 398 */
+	"ni_syscall",		/* 399 */
+
 	"name_to_handle_at",	/* 400 */
 	"open_by_handle_at",	/* 401 */
 	"statx",		/* 402 */

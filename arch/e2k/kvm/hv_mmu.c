@@ -179,7 +179,12 @@ int vcpu_write_mmu_cr_reg(struct kvm_vcpu *vcpu, mmu_reg_t mmu_cr)
 	if (is_tdp_paging(vcpu)) {
 		r = kvm_hv_setup_tdp_paging(vcpu);
 	} else if (is_shadow_paging(vcpu)) {
-		r = kvm_hv_setup_shadow_paging(vcpu);
+		if (vcpu->arch.is_hv) {
+			r = kvm_hv_setup_shadow_paging(vcpu, NULL);
+		} else {
+			r = kvm_hv_setup_shadow_paging(vcpu,
+						pv_vcpu_get_gmm(vcpu));
+		}
 	} else {
 		KVM_BUG_ON(true);
 		r = -EINVAL;

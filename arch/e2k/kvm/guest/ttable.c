@@ -25,6 +25,7 @@
 #include <asm/kvm/cpu_regs_access.h>
 #include <asm/kvm/aau_regs_access.h>
 #include <asm/kvm/mmu_regs_access.h>
+#include <asm/kvm/runstate.h>
 #include <asm/kvm/guest/traps.h>
 #include <asm/kvm/guest/trap_table.h>
 #include <asm/kvm/guest/regs_state.h>
@@ -32,6 +33,7 @@
 #include "cpu.h"
 #include "traps.h"
 #include "fast_syscalls.h"
+#include "../../kernel/ttable-inline.h"
 
 /**************************** DEBUG DEFINES *****************************/
 
@@ -46,6 +48,11 @@
 })
 
 bool debug_ustacks = false;
+
+#ifdef	VCPU_REGS_DEBUG
+bool vcpu_regs_trace_on	= false;
+EXPORT_SYMBOL(vcpu_regs_trace_on);
+#endif	/* VCPU_REGS_DEBUG */
 
 /*********************************************************************/
 static inline void switch_to_guest_kernel_stacks(void)
@@ -109,6 +116,15 @@ void kvm_correct_trap_return_ip(struct pt_regs *regs, unsigned long return_ip)
 	}
 }
 
+static void kvm_guest_save_sbbp(u64 *sbbp)
+{
+	int i;
+
+	for (i = 0; i < SBBP_ENTRIES_NUM; i++) {
+		sbbp[i] = KVM_READ_SBBP_REG_VALUE(i);
+	}
+}
+
 /*
  * The function return boolean value: there is interrupt (MI or NMI) as one
  * of trap to handle
@@ -120,13 +136,6 @@ static unsigned long kvm_guest_save_tirs(trap_pt_regs_t *trap)
 	unsigned long all_interrupts = 0;
 
 	DebugGT("started\n");
-
-	/*
-	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
-	 * so it must be read before TIRs.
-	 * FIXME: not implemented
-	 */
-	trap->sbbp = NULL;
 
 	trap->nr_TIRs = KVM_READ_TIRs_num();
 	for (tir_no = trap->nr_TIRs; tir_no >= 0; tir_no--) {
@@ -427,6 +436,7 @@ int kvm_trap_handler(void)
 {
 	pt_regs_t	pt_regs;
 	trap_pt_regs_t	trap;
+	u64		sbbp[SBBP_ENTRIES_NUM];
 #ifdef CONFIG_USE_AAU
 	e2k_aau_t	aau_context;
 #endif /* CONFIG_USE_AAU */
@@ -434,12 +444,11 @@ int kvm_trap_handler(void)
 	thread_info_t	*thread_info = KVM_READ_CURRENT_REG();
 	unsigned long	exceptions;
 	e2k_psr_t	user_psr;
-	e2k_upsr_t	user_upsr;
 	bool		irqs_under_upsr;
 	bool		in_user_mode;
 	bool		has_irqs = false;
+	int		save_sbbp;
 	struct task_struct *task = thread_info_task(thread_info);
-	int		ret;
 
 	preempt_disable();
 
@@ -462,9 +471,10 @@ int kvm_trap_handler(void)
 	regs->next = thread_info->pt_regs;
 	regs->trap = &trap;
 	regs->aau_context = &aau_context;
+	regs->stack_regs_saved = false;
 	thread_info->pt_regs = regs;
 
-	KVM_SWITCH_TO_KERNEL_UPSR(user_psr, user_upsr, irqs_under_upsr,
+	KVM_SWITCH_TO_KERNEL_UPSR(user_psr, thread_info->upsr, irqs_under_upsr,
 					false,	/* enable IRQs */
 					false);	/* disable nmi */
 
@@ -478,8 +488,9 @@ int kvm_trap_handler(void)
 	/*
 	 * See comments in ttable_entry4() for sc_restart
 	 */
-	regs->flags = 0;
+	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, true	/* user mode trap */);
+	save_sbbp = current->ptrace || debug_trap;
 
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	/* FIXME: secondary space support does not implemented for guest */
@@ -497,6 +508,17 @@ int kvm_trap_handler(void)
 	 */
 	in_user_mode = kvm_trap_user_mode(regs);
 	DebugGT("trap on %s\n", (in_user_mode) ? "user" : "kernel");
+
+	/*
+	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
+	 * so it must be read before TIRs.
+	 */
+	if (unlikely(save_sbbp)) {
+		kvm_guest_save_sbbp(sbbp);
+		trap.sbbp = sbbp;
+	} else {
+		trap.sbbp = NULL;
+	}
 
 	/*
 	 * Now we can store all needed trap context into the
@@ -518,7 +540,7 @@ int kvm_trap_handler(void)
 
 	/* any checkers with BUG() can be run only after unfreezing TIRs */
 	kvm_check_vcpu_id();
-	KVM_CHECK_IRQ_STATE(user_psr, user_upsr, irqs_under_upsr,
+	KVM_CHECK_IRQ_STATE(user_psr, thread_info->upsr, irqs_under_upsr,
 				has_irqs, in_user_mode);
 	if (DEBUG_GUEST_TRAPS)
 		print_pt_regs(regs);
@@ -541,86 +563,24 @@ int kvm_trap_handler(void)
 	/* parse_TIR_registers() returns with interrupts disabled */
 	local_irq_enable();
 
-	if (regs->deferred_traps)
-		kvm_handle_deferred_traps(regs);
-
 	if (in_user_mode) {
-		u64 wsz = get_wsz(FROM_USER_TRAP);
-
-		ret = kvm_user_hw_stacks_prepare(&regs->stacks, regs,
-						 wsz, FROM_USER_TRAP, false);
-		if (ret != 0) {
-			do_exit(SIGKILL);
-		}
-	}
-
-	/* here we do signal handling */
-	while (unlikely(in_user_mode &&
-			!test_delayed_signal_handling(task, thread_info) &&
-				signal_pending(task))) {
-
-		DebugGT("will start signal handling\n");
-		do_signal(regs);
+		finish_user_trap_handler(regs, FROM_USER_TRAP);
+	} else {
+		local_irq_disable();
 		/*
-		 * We can be here on the new stack and new process,
-		 * if signal handler made fork()
-		 * So we should reset all pointers
+		 * Dequeue current pt_regs structure and previous
+		 * regs will be now actuale
 		 */
-		thread_info = current_thread_info();
-		task = current;
-		regs = thread_info->pt_regs;
-
-		/* traps can occur while signal handling and were deferred */
-		if (regs->deferred_traps)
-			kvm_handle_deferred_traps(regs);
+		thread_info->pt_regs = regs->next;
+		regs->next = NULL;
 	}
-
-	/* and here we do tasks re-scheduling on a h/w interrupt */
-	/* FIXME in case of host_trap_on_guest, received at the end of guest's
-	 * signal handler, scheduling ends in panic, caused by
-	 * WARN_ON(gti->gregs_active && !gti->gregs_for_currents_valid) in
-	 * switch_guest_thread_stacks(). Work around this by checking the
-	 * trap_from_host_kernel_mode.
-	 */
-	if (in_user_mode && !in_interrupt() && need_resched() /*&&
-		!trap_from_host_kernel_mode(regs)*/) {
-		DebugGT("will start re-scheduling\n");
-		schedule();
-		DebugGT("re-scheduling completed\n");
-
-		/* traps can occur while scheduling and were deferred */
-		if (regs->deferred_traps)
-			kvm_handle_deferred_traps(regs);
-	}
-
-	if (in_user_mode && test_thread_flag(TIF_NOTIFY_RESUME)) {
-		clear_thread_flag(TIF_NOTIFY_RESUME);
-		do_notify_resume(regs);
-	}
-
-	local_irq_disable();
-	/*
-	 * Dequeue current pt_regs structure and previous
-	 * regs will be now actuale
-	 */
-	if (regs->deferred_traps)
-		kvm_handle_deferred_traps(regs);
-	thread_info->pt_regs = regs->next;
-	regs->next = NULL;
 
 	/* FIXME: Stack registers can be updated by not all traps handlers, */
 	/* so it need here traps mask & conditional statement before the */
 	/* follow restore of stack & system registers */
 	kvm_guest_restore_stack_regs(regs);
-/*	RETURN_TO_USER_PSP_PCSP(thread_info);	no increment of hw stacks */
 
-	/* global regs will be restored by host */
-
-#ifdef CONFIG_USE_AAU
-	/* Only host should save/restore of AAU */
-#endif
-
-	KVM_RETURN_TO_USER_UPSR(user_upsr, irqs_under_upsr);
+	KVM_RETURN_TO_USER_UPSR(thread_info->upsr, irqs_under_upsr);
 
 	DebugGT("returns with GUEST_TRAP_HANDLED\n");
 
@@ -658,7 +618,9 @@ static noinline long kvm_guest_sys_call32(long sys_num_and_entry,
 	/* USD is restored in restore_hard_sys_calls() */
 	regs->stacks.usd_hi.USD_hi_half = KVM_READ_USD_HI_REG_VALUE();
 	regs->stacks.usd_lo.USD_lo_half = KVM_READ_USD_LO_REG_VALUE();
+	regs->stack_regs_saved = false;
 	regs->sys_num = sys_num;
+	regs->sys_func = (u64)sys_func;
 	regs->kernel_entry = entry;
 
 	rval = handle_sys_call(sys_func,
@@ -696,7 +658,9 @@ static noinline long kvm_guest_sys_call64(long sys_num_and_entry,
 	/* USD is restored in restore_hard_sys_calls() */
 	regs->stacks.usd_hi.USD_hi_half = KVM_READ_USD_HI_REG_VALUE();
 	regs->stacks.usd_lo.USD_lo_half = KVM_READ_USD_LO_REG_VALUE();
+	regs->stack_regs_saved = false;
 	regs->sys_num = sys_num;
+	regs->sys_func = (u64)sys_func;
 	regs->kernel_entry = entry;
 
 	rval = handle_sys_call(sys_func,
@@ -754,7 +718,9 @@ static noinline long kvm_guest_sys_call64_or_32(long sys_num_and_entry,
 	/* USD is restored in restore_hard_sys_calls() */
 	regs->stacks.usd_hi.USD_hi_half = KVM_READ_USD_HI_REG_VALUE();
 	regs->stacks.usd_lo.USD_lo_half = KVM_READ_USD_LO_REG_VALUE();
+	regs->stack_regs_saved = false;
 	regs->sys_num = sys_num;
+	regs->sys_func = (u64)sys_func;
 	regs->kernel_entry = entry;
 
 	rval = handle_sys_call(sys_func,
@@ -831,50 +797,6 @@ static inline thread_info_t *sys_call_prolog(int sys_num)
 }
 
 /* trap table entry #0 is allways traps/interrupts guest kernel entry */
-
-#define __kvm_guest_ttable_entry0__	\
-		__attribute__((__section__(".kvm_guest_ttable_entry0")))
-
-int __kvm_guest_ttable_entry0__
-kvm_guest_ttable_entry0(void)
-{
-	thread_info_t *ti = KVM_READ_CURRENT_REG();
-	int ret;
-
-	DebugGT("started guest kernel traps entry\n");
-	if (ti == NULL || test_ti_thread_flag(ti, TIF_PSEUDOTHREAD)) {
-		DebugGT("guest traps cannot be handled: none or empty current "
-			"thread info structure\n");
-		return GUEST_TRAP_NOT_HANDLED;
-	}
-	KVM_SAVE_GREGS_AND_SET(ti);
-
-	/*
-	 * Hardware trap operation disables interrupts mask in PSR
-	 * and PSR becomes main register to control interrupts.
-	 * Switch control from PSR register to UPSR, if UPSR
-	 * interrupts control is used and all following trap handling
-	 * will be executed under UPSR control
-	 * FIXME: guest kernel executes under enabled interrupts,
-	 * so it need emulate PSR/UPSR control swicth???
-	 */
-/*	DO_SWITCH_TO_KERNEL_UPSR(upsr_to_save, 0);	*/
-
-	ret = kvm_trap_handler();
-
-	/*
-	 * Return control from UPSR register to PSR, if UPSR
-	 * interrupts control is used.
-	 * DONE operation restores PSR state at trap point and
-	 * recovers interrupts control
-	 *
-	 * This also disables all interrupts including NMIs.
-	 */
-/*	RESTORE_USER_UPSR(upsr_to_save);	*/
-
-	/* host saved global register and will restore its */
-	return ret;
-}
 
 #define __kvm_pv_vcpu_ttable_entry0__	\
 		__attribute__((__section__(".kvm_pv_vcpu_ttable_entry0")))

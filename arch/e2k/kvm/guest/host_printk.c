@@ -3,8 +3,8 @@
  */
 
 #include <stdarg.h>
-#include <linux/kernel.h>
 #include <linux/types.h>
+#include <linux/kernel.h>
 
 #include <asm/host_printk.h>
 #include <asm/kvm/hypercall.h>

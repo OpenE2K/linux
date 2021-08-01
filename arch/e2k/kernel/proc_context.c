@@ -1473,11 +1473,11 @@ static void switch_hw_contexts(struct pt_regs *__restrict regs,
 __always_inline
 static void save_ctx_32_bit(struct ucontext_32 __user *__restrict oucp,
 		u64 prev_key, e2k_fpcr_t fpcr, e2k_fpsr_t fpsr,
-		e2k_pfpfr_t pfpfr)
+		e2k_pfpfr_t pfpfr, sigset_t current_blocked_sigset)
 {
 	const struct pt_regs *regs = current_thread_info()->pt_regs;
 
-	*((u64 *) &oucp->uc_sigmask) = current->blocked.sig[0];
+	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
 	oucp->uc_mcontext.sbr = prev_key;
 	oucp->uc_mcontext.cr0_hi = AW(regs->crs.cr0_hi);
 	oucp->uc_mcontext.cr1_lo = AW(regs->crs.cr1_lo);
@@ -1492,11 +1492,11 @@ static void save_ctx_32_bit(struct ucontext_32 __user *__restrict oucp,
 __always_inline
 static void save_ctx_64_bit(struct ucontext __user *__restrict oucp,
 		u64 prev_key, e2k_fpcr_t fpcr, e2k_fpsr_t fpsr,
-		e2k_pfpfr_t pfpfr)
+		e2k_pfpfr_t pfpfr, sigset_t current_blocked_sigset)
 {
 	const struct pt_regs *regs = current_thread_info()->pt_regs;
 
-	*((u64 *) &oucp->uc_sigmask) = current->blocked.sig[0];
+	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
 	oucp->uc_mcontext.sbr = prev_key;
 	oucp->uc_mcontext.cr0_hi = AW(regs->crs.cr0_hi);
 	oucp->uc_mcontext.cr1_lo = AW(regs->crs.cr1_lo);
@@ -1511,11 +1511,11 @@ static void save_ctx_64_bit(struct ucontext __user *__restrict oucp,
 __always_inline
 static void save_ctx_128_bit(struct ucontext_prot __user *__restrict oucp,
 		u64 prev_key, e2k_fpcr_t fpcr, e2k_fpsr_t fpsr,
-		e2k_pfpfr_t pfpfr)
+		e2k_pfpfr_t pfpfr, sigset_t current_blocked_sigset)
 {
 	const struct pt_regs *regs = current_thread_info()->pt_regs;
 
-	*((u64 *) &oucp->uc_sigmask) = current->blocked.sig[0];
+	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
 	oucp->uc_mcontext.sbr = prev_key;
 	oucp->uc_mcontext.cr0_hi = AW(regs->crs.cr0_hi);
 	oucp->uc_mcontext.cr1_lo = AW(regs->crs.cr1_lo);
@@ -1540,7 +1540,7 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 	struct ucontext __user *oucp_64 = oucp;
 	struct ucontext_prot __user *oucp_128 = oucp;
 	u64 next_key, prev_key, sigset;
-	sigset_t k_sigset;
+	sigset_t k_sigset, current_blocked_sigset = current->blocked;
 	struct hw_context *next_ctx, *prev_ctx;
 	mm_context_t *mm_context = &current->mm->context;
 	e2k_pcsp_lo_t pcsp_lo;
@@ -1675,13 +1675,16 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 		if (save_prev_ctx) {
 			if (format == CTX_32_BIT) {
 				save_ctx_32_bit(oucp_32, prev_key, prev_fpcr,
-						prev_fpsr, prev_pfpfr);
+						prev_fpsr, prev_pfpfr,
+						current_blocked_sigset);
 			} else if (format == CTX_64_BIT) {
 				save_ctx_64_bit(oucp_64, prev_key, prev_fpcr,
-						prev_fpsr, prev_pfpfr);
+						prev_fpsr, prev_pfpfr,
+						current_blocked_sigset);
 			} else { /* CTX_128_BIT */
 				save_ctx_128_bit(oucp_128, prev_key, prev_fpcr,
-						prev_fpsr, prev_pfpfr);
+						prev_fpsr, prev_pfpfr,
+						current_blocked_sigset);
 			}
 		}
 	} CATCH_USR_PFAULT {
@@ -1736,7 +1739,8 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 	}
 
 	k_sigset.sig[0] = sigset;
-	set_current_blocked(&k_sigset);
+	if (!sigequalsets(&current_blocked_sigset, &k_sigset))
+		set_current_blocked(&k_sigset);
 
 	return 0;
 }

@@ -1,4 +1,4 @@
-ccflags-y += -DE2K_FAST_SYSCALL
+subdir-ccflags-y := -DE2K_FAST_SYSCALL -Werror -Wswitch -Wenum-compare
 
 empty:=
 space:= $(empty) $(empty)

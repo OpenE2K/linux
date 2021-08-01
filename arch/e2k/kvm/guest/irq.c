@@ -363,3 +363,9 @@ __init void kvm_virqs_init(int cpu)
 	regs = this_cpu_ptr(&vcpu_virq_regs);
 	memset(regs, 0, sizeof(*regs));
 }
+
+notrace unsigned long kvm_hypervisor_inject_interrupt(void)
+{
+	return HYPERVISOR_inject_interrupt();
+}
+EXPORT_SYMBOL(kvm_hypervisor_inject_interrupt);

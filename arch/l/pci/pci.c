@@ -611,6 +611,50 @@ static void mga25_disable_iommu_translation(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA25,
 			  mga25_disable_iommu_translation);
 
+static int pci_disable_extended_tags(struct pci_dev *dev, void *ign)
+{
+	u32 cap;
+	u16 ctl;
+	int ret;
+
+	if (!pci_is_pcie(dev))
+		return 0;
+
+	ret = pcie_capability_read_dword(dev, PCI_EXP_DEVCAP, &cap);
+	if (ret)
+		return 0;
+
+	if (!(cap & PCI_EXP_DEVCAP_EXT_TAG))
+		return 0;
+
+	ret = pcie_capability_read_word(dev, PCI_EXP_DEVCTL, &ctl);
+	if (ret)
+		return 0;
+
+	if (ctl & PCI_EXP_DEVCTL_EXT_TAG) {
+		pci_info(dev, "iohub2: disabling Extended Tags\n");
+		pcie_capability_clear_word(dev, PCI_EXP_DEVCTL,
+						PCI_EXP_DEVCTL_EXT_TAG);
+	}
+	return 0;
+}
+
+static void l_quirk_no_ext_tags(struct pci_dev *pdev)
+{
+	if (iohub_generation(pdev) != 1 || iohub_revision(pdev) > 3)
+		return;
+
+	pci_disable_extended_tags(pdev, NULL);
+	if (pdev->subordinate) {
+		pci_walk_bus(pdev->subordinate,
+			     pci_disable_extended_tags, NULL);
+	}
+}
+/* Must override pci_configure_device() */
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIe1, l_quirk_no_ext_tags);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIe8, l_quirk_no_ext_tags);
+
+
 /*
  *  Called after each bus is probed, but before its children
  *  are examined.
@@ -638,3 +682,50 @@ void pcibios_add_bus(struct pci_bus *bus)
 		}
 	}
 }
+
+static const struct pci_device_id l_iohub_root_devices[] = {
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_ELBRUS,
+			   PCI_DEVICE_ID_MCST_VIRT_PCI_BRIDGE),
+	},
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_MCST_PCIE_BRIDGE,
+		      PCI_DEVICE_ID_MCST_PCIE_BRIDGE)
+	},
+	{}
+};
+
+static bool __l_eioh_device(struct pci_dev *pdev)
+{
+	struct pci_bus *b = pdev->bus;
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_VPPB) {
+		return pdev->revision >= 0x10 ? true : false;
+	} else if (pci_match_id(l_iohub_root_devices, pdev)) {
+		return false;
+	}
+	if (pci_is_root_bus(b)) {
+		u16 vid = 0, did = 0;
+		u8 rev;
+		pci_bus_read_config_word(b, 0, PCI_VENDOR_ID, &vid);
+		pci_bus_read_config_word(b, 0, PCI_DEVICE_ID, &did);
+		pci_bus_read_config_byte(b, 0, PCI_REVISION_ID, &rev);
+		if (vid == PCI_VENDOR_ID_MCST_TMP &&
+			did == PCI_DEVICE_ID_MCST_VPPB) {
+			return rev >= 0x10 ? true : false;
+		}
+		return false;
+	}
+	return __l_eioh_device(b->self);
+}
+
+bool l_eioh_device(struct pci_dev *pdev)
+{
+	struct iohub_sysdata *sd = pdev->bus->sysdata;
+	if (!sd->has_eioh)
+		return false;
+	if (!sd->has_iohub)
+		return true;
+	return __l_eioh_device(pdev);
+}
+EXPORT_SYMBOL(l_eioh_device);

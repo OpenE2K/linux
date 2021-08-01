@@ -25,6 +25,14 @@
 
 #define	CHK_DEBUGGER(trapnr, signr, error_code, address, regs, after)
 
+#define	IS_KERNEL_THREAD(task, mm) \
+({ \
+	e2k_addr_t ps_base; \
+	\
+	ps_base = (e2k_addr_t)task_thread_info(task)->u_hw_stack.ps.base; \
+	((mm) == NULL || ps_base >= TASK_SIZE); \
+})
+
 extern void print_stack_frames(struct task_struct *task,
 		struct pt_regs *pt_regs, int show_reg_window) __cold;
 extern void print_mmap(struct task_struct *task) __cold;
@@ -190,6 +198,18 @@ typedef struct stack_regs {
 
 extern void print_chain_stack(struct stack_regs *regs,
 				int show_reg_window);
+extern void copy_stack_regs(struct task_struct *task,
+		const struct pt_regs *limit_regs, struct stack_regs *regs);
+extern int parse_chain_stack(int flags, struct task_struct *p,
+				parse_chain_fn_t func, void *arg);
+
+extern struct stack_regs stack_regs_cache[NR_CPUS];
+extern int debug_userstack;
+extern int print_window_regs;
+
+#ifdef CONFIG_DATA_STACK_WINDOW
+extern int debug_datastack;
+#endif
 
 #ifndef	CONFIG_VIRTUALIZATION
 /* it is native kernel without any virtualization */

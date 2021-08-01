@@ -77,11 +77,6 @@ long	kernel_strtab_size;
 
 e2k_addr_t print_kernel_address_ptes(e2k_addr_t address);
 
-#define	IS_KERNEL_THREAD(task, mm)					\
-	((mm) == NULL || 						\
-		(e2k_addr_t)task_thread_info(task)->u_hw_stack.ps.base >= \
-			TASK_SIZE)
-
 int debug_userstack = 0;
 static int __init userstack_setup(char *str)
 {
@@ -260,8 +255,7 @@ static char chain_stack_cache[NR_CPUS][SIZE_CHAIN_STACK];
 /* Initially 'chain_stack_cache' array is used but later
  * it is discarded together with .init.data and replaced
  * with kmalloc()'ed memory (see print_stack_init()). */
-__refdata
-static struct stack_regs stack_regs_cache[NR_CPUS] = {
+__refdata struct stack_regs stack_regs_cache[NR_CPUS] = {
 	[0].psp_stack_cache = psp_stack_cache,
 #ifdef CONFIG_DATA_STACK_WINDOW
 	[0].k_data_stack_cache = k_data_stack_cache,
@@ -337,7 +331,7 @@ static void copy_k_data_stack_regs(const struct pt_regs *limit_regs,
 		regs->base_k_data_stack = NULL;
 	}
 
-	pt_regs = current_thread_info()->pt_regs;
+	pt_regs = find_host_regs(current_thread_info()->pt_regs);
 
 	for (i = 0; i < MAX_PT_REGS_SHOWN; i++) {
 		if (!pt_regs)
@@ -345,7 +339,7 @@ static void copy_k_data_stack_regs(const struct pt_regs *limit_regs,
 
 		regs->pt_regs[i].valid = 1;
 		regs->pt_regs[i].addr = (unsigned long) pt_regs;
-		pt_regs = pt_regs->next;
+		pt_regs = find_host_regs(pt_regs->next);
 	}
 }
 #else
@@ -364,14 +358,14 @@ static void copy_trap_stack_regs(const struct pt_regs *limit_regs,
 	if (!regs->show_trap_regs)
 		return;
 
-	trap_pt_regs = find_trap_regs(current_thread_info()->pt_regs);
+	trap_pt_regs = find_trap_host_regs(current_thread_info()->pt_regs);
 
 	while (trap_pt_regs && limit_regs &&
 			(AS(trap_pt_regs->stacks.pcsp_lo).base +
 			 AS(trap_pt_regs->stacks.pcsp_hi).ind) >
 			(AS(limit_regs->stacks.pcsp_lo).base +
 			 AS(limit_regs->stacks.pcsp_hi).ind))
-		trap_pt_regs = trap_pt_regs->next;
+		trap_pt_regs = find_trap_host_regs(trap_pt_regs->next);
 
 	for (i = 0; i < MAX_USER_TRAPS; i++) {
 		if (!trap_pt_regs)
@@ -400,7 +394,7 @@ static void copy_trap_stack_regs(const struct pt_regs *limit_regs,
 		}
 		regs->trap[i].valid = 1;
 
-		trap_pt_regs = find_trap_regs(trap_pt_regs->next);
+		trap_pt_regs = find_trap_host_regs(trap_pt_regs->next);
 	}
 }
 
@@ -615,8 +609,7 @@ static int copy_chain_stack_regs(const struct pt_regs *limit_regs,
  * Must be called with maskable interrupts disabled because
  * stack registers are protected by IRQ-disable.
  */
-noinline
-static void copy_stack_regs(struct task_struct *task,
+noinline void copy_stack_regs(struct task_struct *task,
 		const struct pt_regs *limit_regs, struct stack_regs *regs)
 {
 	int i;
@@ -823,7 +816,7 @@ static void nmi_copy_current_stack_regs(void *arg)
 		return;
 	}
 
-	copy_stack_regs(current, current_thread_info()->pt_regs, args->regs);
+	copy_stack_regs(current, find_host_regs(current_thread_info()->pt_regs), args->regs);
 }
 
 static int get_cpu_regs_nmi(int cpu, struct task_struct *task,
@@ -1200,6 +1193,7 @@ void print_all_TC(const trap_cellar_t *TC, int TC_count)
 void print_pt_regs(const pt_regs_t *regs)
 {
 	const e2k_mem_crs_t *crs = &regs->crs;
+	const e2k_upsr_t upsr = current_thread_info()->upsr;
 
 	if (!regs)
 		return;
@@ -1272,6 +1266,8 @@ void print_pt_regs(const pt_regs_t *regs)
 					READ_DIMAR0_REG_VALUE(), READ_DIMAR1_REG_VALUE());
 		}
 	}
+	pr_info("UPSR: 0x%x : fe %d\n",
+		upsr.UPSR_reg, upsr.UPSR_fe);
 }
 
 

@@ -239,7 +239,12 @@ static IMG_BOOL allocateMemoryHelper(
 	{
 		paAddr = SYSMEMU_CpuKmAddrToCpuPAddr(psDevContext->hSysDevHandle->sMemPool, pMemInfo->pvKmAddress);
 		pMemInfo->ui64umToken = paAddr;
+#ifdef CONFIG_MCST
+	paAddr = SYSMEMU_CpuKmAddrToDevPAddr(pMemInfo->sysMemHandle,
+					     pMemInfo->pvKmAddress);
+#else
 		paAddr = SYSDEVU_CpuPAddrToDevPAddr(psDevContext->hSysDevHandle, paAddr);
+#endif
 	}
 
 	/* If the map call failed, we free the pages and the caller will free pMemInfo */

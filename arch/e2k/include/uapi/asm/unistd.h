@@ -431,9 +431,7 @@
 #define __NR_copy_file_range	394
 #define __NR_preadv2		395
 #define __NR_pwritev2		396
-#define __NR_pkey_mprotect	397
-#define __NR_pkey_alloc		398
-#define __NR_pkey_free		399
+/* free (unused) entries - reserve 397 - 399 */
 #define __NR_name_to_handle_at	400
 #define __NR_open_by_handle_at	401
 #define __NR_statx		402

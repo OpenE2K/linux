@@ -639,7 +639,7 @@ void mxgbe_rx_dbg_prn_data(mxgbe_priv_t *priv, char *data, ssize_t size)
 	DEV_DBG(MXGBE_DBG_MSK_RX, &priv->pdev->dev,
 		"Received data >>>\n");
 	for (i = 0; i < size; i++) {
-		printk(KERN_DEBUG "%02X ", (unsigned char)data[i]);
+		pr_debug("%02X ", (unsigned char)data[i]);
 	}
 	DEV_DBG(MXGBE_DBG_MSK_RX, &priv->pdev->dev,
 		"Received data <<<\n");

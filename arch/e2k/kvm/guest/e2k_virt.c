@@ -7,6 +7,7 @@
 #include <linux/export.h>
 #include <linux/cpu.h>
 #include <linux/extable.h>
+#include <linux/nmi.h>
 
 #include <asm/apic.h>
 #include <asm/epic.h>
@@ -40,14 +41,8 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-#ifndef	CONFIG_E2K_MACHINE
-/* the variable should be inited to be placed in 'data' segment not 'bss' */
-/* because of one will set very early before clear bss */
 unsigned int guest_machine_id = -1;
 EXPORT_SYMBOL(guest_machine_id);
-#else	/* CONFIG_E2K_MACHINE */
-/* the variable is constant (inline macros) */
-#endif	/* ! CONFIG_E2K_MACHINE */
 
 static int e2k_virt_show_cpuinfo(struct seq_file *m, void *v);
 
@@ -159,11 +154,42 @@ static void e2k_virt_reset_machine(char *reason)
  * Panicing.
  */
 
+#define KVM_PANIC_TIMER_STEP	100
+#define KVM_PANIC_BLINK_SPD	6
+#define	KVM_PANIC_TIMEOUT	1
+
+static long no_blink(int state)
+{
+	return 0;
+}
+
 static int kvm_panic(struct notifier_block *nb, unsigned long event, void *msg)
 {
+	long i, i_next = 0;
+	int state = 0;
+
 	DebugKVMSH("started: %s\n", (char *)msg);
 	host_printk("%s\n", msg);
-	dump_stack();
+	host_dump_stack();
+
+	/*
+	 * Delay some times before rebooting the guest to wait
+	 * for flush to console all important messages of kernel
+	 * Here can't be used the "normal" timers since kernel just panicked.
+	 */
+	suppress_printk = 1;
+	if (!panic_blink)
+		panic_blink = no_blink;
+	local_irq_enable();
+	for (i = 0; i < KVM_PANIC_TIMEOUT * 1000; i += KVM_PANIC_TIMER_STEP) {
+		touch_softlockup_watchdog();
+		if (i >= i_next) {
+			i += panic_blink(state ^= 1);
+			i_next = i + 3600 / KVM_PANIC_BLINK_SPD;
+		}
+		msleep_interruptible(KVM_PANIC_TIMER_STEP);
+	}
+
 	e2k_virt_shutdown();
 	HYPERVISOR_kvm_shutdown(msg, KVM_SHUTDOWN_PANIC);
 	/* The hypercall won't return, but to keep gcc happy, we're "done". */
@@ -202,6 +228,7 @@ int e2k_virt_get_vector_apic(void)
 	return vector;
 }
 
+#ifdef CONFIG_EPIC
 int e2k_virt_get_vector_epic(void)
 {
 	union cepic_vect_inta reg_inta;
@@ -221,6 +248,7 @@ int e2k_virt_get_vector_epic(void)
 	}
 	return reg_inta.raw;
 }
+#endif
 
 #ifdef CONFIG_IOHUB_DOMAINS
 /*

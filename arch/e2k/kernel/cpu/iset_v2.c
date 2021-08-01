@@ -42,11 +42,12 @@ void native_set_cu_hw1_v2(u64 cu_hw1)
 
 __section(.entry_handlers)
 notrace __interrupt
-void save_local_gregs_v2(struct local_gregs *gregs)
+void save_local_gregs_v2(struct local_gregs *gregs, bool is_signal)
 {
 	gregs->bgr = NATIVE_READ_BGR_REG();
 	init_BGR_reg(); /* enable whole GRF */
-	SAVE_GREGS_SIGNAL(gregs->g, E2K_ISET_V2);
+	if (is_signal)
+		SAVE_GREGS_SIGNAL(gregs->g, E2K_ISET_V2);
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
@@ -109,10 +110,11 @@ void save_gregs_dirty_bgr_v2(struct global_regs *gregs)
 
 __section(.entry_handlers)
 notrace __interrupt
-void restore_local_gregs_v2(const struct local_gregs *gregs)
+void restore_local_gregs_v2(const struct local_gregs *gregs, bool is_signal)
 {
 	init_BGR_reg();
-	RESTORE_GREGS_SIGNAL(gregs->g, E2K_ISET_V2);
+	if (is_signal)
+		RESTORE_GREGS_SIGNAL(gregs->g, E2K_ISET_V2);
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
@@ -169,10 +171,9 @@ void calculate_aau_aaldis_aaldas_v2(const struct pt_regs *regs,
 	memset(aaldas, 0, AALDAS_REGS_NUM * sizeof(aaldas[0]));
 	memset(aaldis, 0, AALDIS_REGS_NUM * sizeof(aaldis[0]));
 
-	if (regs == NULL) {
-		/* it is first start to set initial state of AAU */
+	/* It is first guest run to set initial state of AAU */
+	if (unlikely(!regs))
 		return;
-	}
 
 	/* See bug 33621 comment 2 and bug 52350 comment 29 */
 	iter_count = get_lcnt(regs->ilcr) - get_lcnt(regs->lsr);
@@ -222,13 +223,26 @@ void calculate_aau_aaldis_aaldas_v2(const struct pt_regs *regs,
 		 * union's fields into inline asm. Bug 76907.
 		 */
 		u64 tmp;
+		long ret_get_user;
 
-		if (host_get_user(tmp, (u64 *)fapb_addr, regs))
-			goto die;
+		ret_get_user = host_get_user(tmp, (u64 *)fapb_addr, regs);
+		if (ret_get_user) {
+			if (ret_get_user == -EAGAIN)
+				break;
+			else
+				goto die;
+		}
 		fapb.word = tmp;
 # else
-		if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-			goto die;
+		long ret_get_user;
+
+		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
+		if (ret_get_user) {
+			if (ret_get_user == -EAGAIN)
+				break;
+			else
+				goto die;
+		}
 # endif
 		DebugPF("FAPB at %px instruction 0x%llx, fmt %d, si %d\n",
 			fapb_addr, AW(fapb), AS(fapb).fmt, AS(fapb).si);
@@ -300,6 +314,8 @@ void do_aau_fault_v2(int aa_field, struct pt_regs *regs)
 	u64		iter_count;
 	tc_cond_t	condition;
 	tc_mask_t	mask;
+	int		ret;
+	long ret_get_user;
 
 	regs->trap->nr_page_fault_exc = exc_data_page_num;
 
@@ -338,8 +354,14 @@ void do_aau_fault_v2(int aa_field, struct pt_regs *regs)
 			fapb_addr = (e2k_fapb_instr_t *)(AS(regs->ctpr2).ta_base
 					+ 16 * (area_num - 32) + 8);
 
-		if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-			goto die;
+		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
+		if (ret_get_user) {
+			if (ret_get_user == -EAGAIN)
+				break;
+			else
+				goto die;
+		}
+
 		DebugPF("FAPB at %px instruction 0x%llx\n",
 			fapb_addr, AW(fapb));
 
@@ -349,8 +371,14 @@ void do_aau_fault_v2(int aa_field, struct pt_regs *regs)
 				current->comm, current->pid, fapb_addr);
 			area_num -= 32;
 			fapb_addr -= 1;
-			if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-				goto die;
+			ret_get_user = host_get_user(AW(fapb),
+						(u64 *)fapb_addr, regs);
+			if (ret_get_user) {
+				if (ret_get_user == -EAGAIN)
+					break;
+				else
+					goto die;
+			}
 		}
 
 		if (!AS(aau_regs->aasr).iab) {
@@ -392,9 +420,31 @@ void do_aau_fault_v2(int aa_field, struct pt_regs *regs)
 		DebugPF("address1 = 0x%llx, address2 = 0x%llx, mrng=%lld\n",
 			addr1, addr2, mrng);
 
-		do_aau_page_fault(regs, addr1, condition, mask, aa_bit);
-		if ((addr1 & 0xfffUL) > (addr2 & 0xfffUL))
-			do_aau_page_fault(regs, addr2, condition, mask, aa_bit);
+		ret = do_aau_page_fault(regs, addr1, condition, mask, aa_bit);
+		if (ret) {
+			if (ret == 2) {
+				/*
+				 * Special case of trap handling on host:
+				 *	host inject the trap to guest
+				 */
+				return;
+			}
+			goto die;
+		}
+		if ((addr1 & 0xfffUL) > (addr2 & 0xfffUL)) {
+			ret = do_aau_page_fault(regs, addr2, condition, mask,
+						aa_bit);
+			if (ret) {
+				if (ret == 2) {
+					/*
+					* Special case of trap handling on host:
+					*	host inject the trap to guest
+					*/
+					return;
+				}
+				goto die;
+			}
+		}
 
 next_area:
 		aa_bit++;

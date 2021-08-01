@@ -1,6 +1,7 @@
 /*
  * E8C/E8C2 Power Control System (PCS)
  * hwmon driver
+ * (c) MCST, 2020
  */
 
 #include <linux/kernel.h>
@@ -12,14 +13,14 @@
 #include <linux/node.h>
 #include <linux/cpu.h>
 #include <linux/mod_devicetable.h>
+#include <linux/hwmon-sysfs.h>
 
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 
 
-#define DRIVER_VERSION		"1.1"
+#define DRIVER_VERSION		"1.2"
 #undef PCS_PLATFORM_DRIVER
-
 
 /* Regs index */
 #define PCS_CTRL5	0x0CC4
@@ -27,6 +28,12 @@
 #define PCS_CTRL7	0x0CCC
 #define PCS_CTRL8	0x0CD0
 #define PCS_CTRL9	0x0CD4
+
+/* Number of sensors for each CPU type */
+#define SENSORS_E8C	9
+#define SENSORS_E8C2	8
+
+static int sensors = 0;
 
 struct pcs_ctrl_info {
 	int offset;
@@ -80,11 +87,39 @@ static ssize_t show_label(struct device *dev,
 {
 	struct pcs_data *pcs = dev_get_drvdata(dev);
 	int idx = to_sensor_dev_attr(attr)->index;
-
-	if (idx == 8)
-		return sprintf(buf, "Node %d Max\n", pcs->node);
-	else
-		return sprintf(buf, "Core %d\n", idx);
+	if (sensors == SENSORS_E8C) {
+		if (idx == 0 || idx == 2)
+			return sprintf(buf, "Sensor T%d (Core %d)\n", idx, idx + 1);
+		else if (idx == 1)
+			return sprintf(buf, "Sensor T%d (Cores %d, %d)\n", idx, 0, 2);
+		else if (idx == 3 || idx == 5)
+			return sprintf(buf, "Sensor T%d (Core %d)\n", idx, idx + 2);
+		else if (idx == 4)
+			return sprintf(buf, "Sensor T%d (Cores %d, %d)\n", idx, 4, 6);
+		else if (idx == 6)
+			return sprintf(buf, "Sensor T%d (Memory Controllers %d, %d)\n",
+									idx, 2, 3);
+		else if (idx == 7)
+			return sprintf(buf, "Sensor T%d (Memory Controllers %d, %d)\n",
+									idx, 0, 1);
+		else if (idx == 8)
+			return sprintf(buf, "Node %d Max\n", pcs->node);
+	} else if (sensors == SENSORS_E8C2) {
+		if (idx < 4)
+			return sprintf(buf, "Sensor T%d (Cores %d, %d)\n",
+							 idx, idx * 2, idx * 2 + 1);
+		else if (idx == 4)
+			return sprintf(buf, "Sensor T%d (Memory Controllers %d, %d)\n",
+									idx, 0, 1);
+		else if (idx == 5)
+			return sprintf(buf, "Sensor T%d (Memory Controllers %d, %d)\n",
+									idx, 2, 3);
+		else if (idx == 6)
+			return sprintf(buf, "Sensor T%d (System Commutator)\n", idx);
+		else if (idx == 8)
+			return sprintf(buf, "Node %d Max\n", pcs->node);
+	}
+	return sprintf(buf, "\n");
 } /* show_label */
 
 static ssize_t show_type(struct device *dev,
@@ -101,76 +136,104 @@ static ssize_t show_node(struct device *dev,
 	return sprintf(buf, "%d\n", pcs->node);
 } /* show_node */
 
-SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_temp, NULL, 0);
-SENSOR_DEVICE_ATTR(temp2_input, S_IRUGO, show_temp, NULL, 1);
-SENSOR_DEVICE_ATTR(temp3_input, S_IRUGO, show_temp, NULL, 2);
-SENSOR_DEVICE_ATTR(temp4_input, S_IRUGO, show_temp, NULL, 3);
-SENSOR_DEVICE_ATTR(temp5_input, S_IRUGO, show_temp, NULL, 4);
-SENSOR_DEVICE_ATTR(temp6_input, S_IRUGO, show_temp, NULL, 5);
-SENSOR_DEVICE_ATTR(temp7_input, S_IRUGO, show_temp, NULL, 6);
-SENSOR_DEVICE_ATTR(temp8_input, S_IRUGO, show_temp, NULL, 7);
-SENSOR_DEVICE_ATTR(temp9_input, S_IRUGO, show_temp, NULL, 8);
+#define MAX_NAME	16
 
-SENSOR_DEVICE_ATTR(temp1_label, S_IRUGO, show_label, NULL, 0);
-SENSOR_DEVICE_ATTR(temp2_label, S_IRUGO, show_label, NULL, 1);
-SENSOR_DEVICE_ATTR(temp3_label, S_IRUGO, show_label, NULL, 2);
-SENSOR_DEVICE_ATTR(temp4_label, S_IRUGO, show_label, NULL, 3);
-SENSOR_DEVICE_ATTR(temp5_label, S_IRUGO, show_label, NULL, 4);
-SENSOR_DEVICE_ATTR(temp6_label, S_IRUGO, show_label, NULL, 5);
-SENSOR_DEVICE_ATTR(temp7_label, S_IRUGO, show_label, NULL, 6);
-SENSOR_DEVICE_ATTR(temp8_label, S_IRUGO, show_label, NULL, 7);
-SENSOR_DEVICE_ATTR(temp9_label, S_IRUGO, show_label, NULL, 8);
+static int num_attrs = 0;
 
-SENSOR_DEVICE_ATTR(temp1_type, S_IRUGO, show_type, NULL, 0);
-SENSOR_DEVICE_ATTR(temp2_type, S_IRUGO, show_type, NULL, 1);
-SENSOR_DEVICE_ATTR(temp3_type, S_IRUGO, show_type, NULL, 2);
-SENSOR_DEVICE_ATTR(temp4_type, S_IRUGO, show_type, NULL, 3);
-SENSOR_DEVICE_ATTR(temp5_type, S_IRUGO, show_type, NULL, 4);
-SENSOR_DEVICE_ATTR(temp6_type, S_IRUGO, show_type, NULL, 5);
-SENSOR_DEVICE_ATTR(temp7_type, S_IRUGO, show_type, NULL, 6);
-SENSOR_DEVICE_ATTR(temp8_type, S_IRUGO, show_type, NULL, 7);
-/*SENSOR_DEVICE_ATTR(temp9_type, S_IRUGO, show_type, NULL, 8);*/
+struct pcs_device_attribute {
+	struct sensor_device_attribute s_attrs;
+	char name[MAX_NAME];
+};
 
-SENSOR_DEVICE_ATTR(node, S_IRUGO, show_node, NULL, 9);
+static struct attribute_group pcs_group = {
+	.attrs = NULL,
+};
 
-static struct attribute *pcs_attrs[] = {
-	&sensor_dev_attr_temp1_input.dev_attr.attr,
-	&sensor_dev_attr_temp2_input.dev_attr.attr,
-	&sensor_dev_attr_temp3_input.dev_attr.attr,
-	&sensor_dev_attr_temp4_input.dev_attr.attr,
-	&sensor_dev_attr_temp5_input.dev_attr.attr,
-	&sensor_dev_attr_temp6_input.dev_attr.attr,
-	&sensor_dev_attr_temp7_input.dev_attr.attr,
-	&sensor_dev_attr_temp8_input.dev_attr.attr,
-	&sensor_dev_attr_temp9_input.dev_attr.attr,
-
-	&sensor_dev_attr_temp1_label.dev_attr.attr,
-	&sensor_dev_attr_temp2_label.dev_attr.attr,
-	&sensor_dev_attr_temp3_label.dev_attr.attr,
-	&sensor_dev_attr_temp4_label.dev_attr.attr,
-	&sensor_dev_attr_temp5_label.dev_attr.attr,
-	&sensor_dev_attr_temp6_label.dev_attr.attr,
-	&sensor_dev_attr_temp7_label.dev_attr.attr,
-	&sensor_dev_attr_temp8_label.dev_attr.attr,
-	&sensor_dev_attr_temp9_label.dev_attr.attr,
-
-	&sensor_dev_attr_temp1_type.dev_attr.attr,
-	&sensor_dev_attr_temp2_type.dev_attr.attr,
-	&sensor_dev_attr_temp3_type.dev_attr.attr,
-	&sensor_dev_attr_temp4_type.dev_attr.attr,
-	&sensor_dev_attr_temp5_type.dev_attr.attr,
-	&sensor_dev_attr_temp6_type.dev_attr.attr,
-	&sensor_dev_attr_temp7_type.dev_attr.attr,
-	&sensor_dev_attr_temp8_type.dev_attr.attr,
-	/*&sensor_dev_attr_temp9_type.dev_attr.attr,*/
-
-	&sensor_dev_attr_node.dev_attr.attr,
-
+static const struct attribute_group *pcs_groups[] = {
+	&pcs_group,
 	NULL,
 };
 
-ATTRIBUTE_GROUPS(pcs);
+static struct pcs_device_attribute *pcs_attrs;
 
+static int create_sensor_device_attr(struct device *dev)
+{
+	int i;
+	pcs_attrs = devm_kzalloc(dev, (3 * sensors) *
+			sizeof(struct pcs_device_attribute), GFP_KERNEL);
+	if (!pcs_attrs)
+		return -ENOMEM;
+	for (i = 0; i < sensors; i++) {
+		struct pcs_device_attribute *pattr;
+
+		pattr = pcs_attrs + num_attrs;
+		snprintf(pattr->name, MAX_NAME, "temp%d_input", i + 1);
+		pattr->s_attrs.dev_attr.attr.name = pattr->name;
+		pattr->s_attrs.dev_attr.attr.mode = S_IRUGO;
+		pattr->s_attrs.dev_attr.show = show_temp;
+		pattr->s_attrs.dev_attr.store = NULL;
+		if ((sensors == SENSORS_E8C2) && (i == sensors - 1))
+			pattr->s_attrs.index = i + 1;
+		else
+			pattr->s_attrs.index = i;
+		sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
+		num_attrs++;
+
+		pattr = pcs_attrs + num_attrs;
+		snprintf(pattr->name, MAX_NAME, "temp%d_label", i + 1);
+		pattr->s_attrs.dev_attr.attr.name = pattr->name;
+		pattr->s_attrs.dev_attr.attr.mode = S_IRUGO;
+		pattr->s_attrs.dev_attr.show = show_label;
+		pattr->s_attrs.dev_attr.store = NULL;
+		if ((sensors == SENSORS_E8C2) && (i == sensors - 1))
+			pattr->s_attrs.index = i + 1;
+		else
+			pattr->s_attrs.index = i;
+		sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
+		num_attrs++;
+
+		pattr = pcs_attrs + num_attrs;
+		if (i == sensors - 1)
+			snprintf(pattr->name, MAX_NAME, "node");
+		else
+			snprintf(pattr->name, MAX_NAME, "temp%d_type", i + 1);
+		pattr->s_attrs.dev_attr.attr.name = pattr->name;
+		pattr->s_attrs.dev_attr.attr.mode = S_IRUGO;
+		if (i == sensors - 1)
+			pattr->s_attrs.dev_attr.show = show_node;
+		else
+			pattr->s_attrs.dev_attr.show = show_type;
+		pattr->s_attrs.dev_attr.store = NULL;
+		if ((sensors == SENSORS_E8C2) && (i == sensors - 1))
+			pattr->s_attrs.index = i + 1;
+		else
+			pattr->s_attrs.index = i;
+		sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
+		num_attrs++;
+	}
+	return 0;
+}
+
+static struct attribute **attrs;
+
+static int create_pcs_group(struct device *dev)
+{
+	int i;
+
+	attrs = devm_kzalloc(dev, num_attrs * sizeof(struct attribute *),
+			GFP_KERNEL);
+	if (!attrs)
+		return -ENOMEM;
+	for (i = 0; i < num_attrs; i++)
+		*(attrs + i) = &((pcs_attrs + i)->s_attrs.dev_attr.attr);
+	pcs_group.attrs = attrs;
+
+	return 0;
+}
+
+#define	MAX_NODE	4
+
+struct device *hwmon_dev[MAX_NODE];
 
 #ifndef PCS_PLATFORM_DRIVER
 static int __init pcs_probe(void)
@@ -180,14 +243,28 @@ static int pcs_probe(struct platform_device *pdev)
 {
 	int node;
 	struct pcs_data *pcs;
-	struct device *hwmon_dev;
 #ifdef PCS_PLATFORM_DRIVER
 	struct device *dev = &pdev->dev;
 #else /* !PCS_PLATFORM_DRIVER */
 	struct device *dev = cpu_subsys.dev_root;
+	int ret;
 
-	if (!(IS_MACHINE_E8C || IS_MACHINE_E8C2))
+	if (machine.native_id != MACHINE_ID_E8C &&
+			machine.native_id != MACHINE_ID_E8C2)
 		return -ENODEV;
+
+	if (machine.native_id == MACHINE_ID_E8C)
+		sensors = SENSORS_E8C;
+	else if (machine.native_id == MACHINE_ID_E8C2)
+		sensors = SENSORS_E8C2;
+
+	ret = create_sensor_device_attr(dev);
+	if (ret)
+		return -ENOMEM;
+	ret = create_pcs_group(dev);
+	if (ret)
+		return -ENOMEM;
+
 #endif /* PCS_PLATFORM_DRIVER */
 
 	for_each_online_node(node) {
@@ -195,15 +272,14 @@ static int pcs_probe(struct platform_device *pdev)
 		if (!pcs)
 			return -ENOMEM;
 		pcs->node = node;
-
-		hwmon_dev = devm_hwmon_device_register_with_groups(dev,
+		hwmon_dev[node] = devm_hwmon_device_register_with_groups(dev,
 								KBUILD_MODNAME,
 								pcs,
 								pcs_groups);
 		if (IS_ERR(hwmon_dev))
 			return PTR_ERR(hwmon_dev);
 
-		pcs->hdev = hwmon_dev;
+		pcs->hdev = hwmon_dev[node];
 
 		dev_info(dev, "node %d hwmon device enabled - %s",
 			 pcs->node, dev_name(pcs->hdev));
@@ -213,8 +289,23 @@ static int pcs_probe(struct platform_device *pdev)
 } /* pcs_probe */
 
 #ifndef PCS_PLATFORM_DRIVER
+static void __exit pcs_remove(void)
+#else
+static void pcs_remove(struct platform_device *pdev)
+#endif
+{
+	int node;
+
+	for_each_online_node(node) {
+		sysfs_remove_group(&hwmon_dev[node]->kobj, &pcs_group);
+		hwmon_device_unregister(hwmon_dev[node]);
+	}
+}
+
+#ifndef PCS_PLATFORM_DRIVER
 
 module_init(pcs_probe);
+module_exit(pcs_remove);
 
 #else /* PCS_PLATFORM_DRIVER */
 
@@ -229,6 +320,7 @@ static struct platform_driver pcs_driver = {
 		.name = KBUILD_MODNAME,
 		.of_match_table = pcs_of_match,
 	},
+	.remove = pcs_remove,
 };
 
 module_platform_driver(pcs_driver);
@@ -238,6 +330,6 @@ MODULE_DEVICE_TABLE(of, pcs_of_match);
 #endif /* PCS_PLATFORM_DRIVER */
 
 MODULE_AUTHOR("Andrey.V.Kalita@mcst.ru");
-MODULE_DESCRIPTION("e8c pcs driver");
+MODULE_DESCRIPTION("e8c/e8c2 pcs driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRIVER_VERSION);

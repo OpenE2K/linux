@@ -491,6 +491,10 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 			       struct vmem_altmap *altmap)
 {
 	int ret;
+
+	BUILD_BUG_ON(VMEMMAP_END > KERNEL_VPTB_BASE_ADDR ||
+		     VMEMMAP_END > NATIVE_HWBUG_WRITE_MEMORY_BARRIER_ADDRESS);
+
 	ret = vmemmap_populate_basepages(start, end, node);
 	if (ret) {
 		pr_err("%s(): could not populate sparse memory VMEMMAP "
@@ -784,31 +788,58 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 void __meminit memmap_init(unsigned long size, int nid, unsigned long zone,
 		unsigned long start_pfn)
 {
-	unsigned long real_start, real_size;
+	unsigned long real_start, real_end, end_pfn = start_pfn + size;
 	struct memblock_region *r;
 
 	/*
-	 * Remove holes from the beginning of zone. This way the check
-	 * for `zone_end' in update_defer_init() still works.
+	 * Calculate real (actually existing) start and end pfn
 	 */
-	real_start = start_pfn + size;
-
+	real_start = end_pfn;
+	real_end = start_pfn;
 	for_each_memblock(memory, r) {
 		unsigned long region_base = memblock_region_memory_base_pfn(r);
+		unsigned long region_end = memblock_region_memory_end_pfn(r);
 
-		if (region_base < real_start) {
-			if (region_base >= start_pfn) {
-				real_start = region_base;
-			} else if (memblock_region_memory_end_pfn(r) >
-					start_pfn) {
-				real_start = start_pfn;
-				break;
-			}
-		}
+		if (r->nid != nid)
+			continue;
+
+		if (region_base < real_start && region_end > start_pfn)
+			real_start = max(region_base, start_pfn);
+		if (region_end > real_end && region_base < end_pfn)
+			real_end = min(region_end, end_pfn);
+
+		if (real_start == start_pfn && real_end == end_pfn)
+			break;
 	}
 
-	real_size = size - (real_start - start_pfn);
-	memmap_init_zone(real_size, nid, zone, real_start, MEMMAP_EARLY, NULL);
+	if (real_start >= real_end) {
+		pr_info("  (Node %d: pfn range [0x%lx-0x%lx] reduced to nothing)\n",
+				nid, start_pfn, end_pfn);
+		return;
+	}
+
+	/*
+	 * Remove hole from the beginning of zone.  Cannot remove
+	 * hole from the end, otherwise the check for `zone_end'
+	 * in defer_init() won't work and we lose the optmization
+	 * of startup time by deferring the memory init.  So we
+	 * check and remove hole at the end only if:
+	 *  - either it is much bigger then the area size,
+	 *  - or the deferring won't work anyway (see the check for
+	 *    pgdat_end_pfn() in defer_init()).
+	 */
+	if (end_pfn < pgdat_end_pfn(NODE_DATA(nid)) ||
+	    (real_end - real_start) < (end_pfn - real_end) >> 6) {
+		pr_info("  (Node %d: pfn range [0x%lx-0x%lx] reduced to [0x%lx-0x%lx])\n",
+				nid, start_pfn, end_pfn, real_start, real_end);
+		memmap_init_zone(real_end - real_start, nid, zone, real_start,
+				 MEMINIT_EARLY, NULL);
+	} else {
+		pr_info("  (Node %d: pfn range [0x%lx-0x%lx] reduced to [0x%lx-0x%lx], real end 0x%lx)\n",
+				nid, start_pfn, end_pfn, real_start, end_pfn, real_end);
+		memmap_init_zone(end_pfn - real_start, nid, zone, real_start,
+				 MEMINIT_EARLY, NULL);
+	}
 }
 
 /*

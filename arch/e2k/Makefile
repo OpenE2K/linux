@@ -17,7 +17,7 @@ LD	= $(shell $(CC) -print-prog-name=ld)
 OBJCOPY	= $(shell $(CC) -print-prog-name=objcopy)
 
 KBUILD_CFLAGS += -fkernel -gline -masm-inline $(call cc-option,-fforbid-fp) \
-		 $(call cc-option,-fmax-errors=5)
+		 $(call cc-option,-fmax-errors=5) $(call cc-option,-fno-loop-apb)
 
 ifeq ($(PROFILE_GENERATE), 1)
 KBUILD_CFLAGS += -fprofile-generate-kernel
@@ -146,7 +146,6 @@ drivers-$(CONFIG_PM)			+= arch/e2k/power/
 
 #KVM hypervisor and guest support
 core-$(CONFIG_KVM)			+= arch/e2k/kvm/
-core-$(CONFIG_KVM_GUEST)		+= arch/e2k/kvm/guest/
 
 # Elbrus common modules
 core-y					+= arch/l/

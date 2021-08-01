@@ -418,6 +418,30 @@ IMG_RESULT SYSMEMU_GetCpuKmAddr(IMG_VOID **ppvCpuKmAddr,IMG_HANDLE hPagesHandle)
 }
 IMGVIDEO_EXPORT_SYMBOL(SYSMEMU_GetCpuKmAddr)
 
+#ifdef CONFIG_MCST
+IMG_PHYSADDR SYSMEMU_CpuKmAddrToDevPAddr(IMG_HANDLE hPagesHandle, IMG_VOID *pvCpuKmAddr)
+{
+	SYSMEMU_sPages *psPages = hPagesHandle;
+	SYSMEM_Heap *heap = psPages->memHeap;
+	IMG_ASSERT(pvCpuKmAddr != IMG_NULL);
+	if(!pvCpuKmAddr)
+	{
+		return IMG_ERROR_GENERIC_FAILURE;
+	}
+
+    IMG_ASSERT(heap);
+    IMG_ASSERT(heap->ops);
+    IMG_ASSERT(heap->ops->CpuKmAddrToDevPAddr);
+    if (!heap->ops->CpuKmAddrToDevPAddr)
+    {
+    	return IMG_ERROR_GENERIC_FAILURE;
+    }
+
+	return heap->ops->CpuKmAddrToDevPAddr(psPages, pvCpuKmAddr);
+}
+IMGVIDEO_EXPORT_SYMBOL(SYSMEMU_CpuKmAddrToDevPAddr)
+#endif /*CONFIG_MCST*/
+
 IMG_PHYSADDR SYSMEMU_CpuKmAddrToCpuPAddr(SYS_eMemPool eMemPool, IMG_VOID *pvCpuKmAddr)
 {
 	SYSMEM_Heap *heap;

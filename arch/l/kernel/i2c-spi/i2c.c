@@ -67,8 +67,10 @@
 #define I2C_DST_BUS(bus_id)					\
 ({								\
 	unsigned __ret = 0, __bus_id = bus_id;			\
-	if (__bus_id > 0 && __bus_id < I2C_MAX_BUSSES)		\
+	if (__bus_id > 0 && __bus_id < I2C_DST_BUSSES)		\
 		__ret = (__bus_id << I2C_DST_BUS_NUMBER_SHIFT);	\
+	else if (__bus_id == 4)					\
+		__ret = (1 << I2C_BUS_4_SHIFT);			\
 	__ret;							\
 })
 #define I2C_START_BYTE_ON_SHIFT	26
@@ -77,7 +79,8 @@
 #define I2C_KILL		(1 << I2C_KILL_SHIFT)
 #define I2C_START_EXEC_SHIFT	28
 #define I2C_START_EXEC		(1 << I2C_START_EXEC_SHIFT)
-#define I2C_CONTROL_MASK	0x1fffffff	/* bits 31:29 not used
+#define I2C_BUS_4_SHIFT		30
+#define I2C_CONTROL_MASK	0x1fffffff	/* bits 31 not used
 						   (const zeros) */
 
 /* I2C_STATUS field */
@@ -102,7 +105,9 @@
 #define I2C_BUS_3_MODE_MASK	(I2C_BUS_0_MODE_MASK << I2C_BUS_3_MODE_SHIFT)
 #define I2C_INTERRUPT_ENABLE_SHIFT	8
 #define I2C_INTERRUPT_ENABLE	(1 << I2C_INTERRUPT_ENABLE_SHIFT)
-#define I2C_MODE_MASK		0x1ff /* bits 31:9 not used (const zeros) */
+#define I2C_BUS_4_MODE_SHIFT	9
+#define I2C_BUS_4_MODE_MASK	(I2C_BUS_0_MODE_MASK << I2C_BUS_4_MODE_SHIFT)
+#define I2C_MODE_MASK		0x1ff /* bits 31:11 not used (const zeros) */
 
 /* I2C_TIMEOUTVAL field */
 
@@ -147,7 +152,7 @@ struct adapter_entry {
 #endif
 
 struct l_i2c {
-	struct i2c_adapter adapter[I2C_MAX_ADAPTERS_PER_CONTROLLER];
+	struct i2c_adapter adapter[I2C_MAX_BUSSES];
 	struct platform_device *pdev;
 	void __iomem *cbase;
 	void __iomem *dbase;

@@ -233,6 +233,13 @@ native_set_aau_context(e2k_aau_t *context)
 ({								\
 	regs = native_read_aafstr_reg_value();			\
 })
+
+static __always_inline void
+set_aau_context(e2k_aau_t *context)
+{
+	native_set_aau_context(context);
+}
+
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
 /* 

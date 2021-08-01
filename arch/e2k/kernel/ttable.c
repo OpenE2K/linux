@@ -243,7 +243,7 @@ static inline void save_syscall_args_prot(struct pt_regs *regs,
 #define	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_lo_reg)
 #endif
 
-#if	CONFIG_CPU_ISET < 5
+#ifndef CONFIG_CPU_HW_CLEAR_RF
 /*
  * Hardware does not properly clean the register file
  * before returning to user so do the cleaning manually.
@@ -638,7 +638,7 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * registers would be zeroed.
 	 */
 	aasr = native_read_aasr_reg();
-	SWITCH_GUEST_AAU_AASR(&aasr, aau_regs, test_thread_flag(TIF_HOST_AT_VCPU_MODE));
+	SWITCH_GUEST_AAU_AASR(&aasr, aau_regs, test_ts_flag(TS_HOST_AT_VCPU_MODE));
 #endif /* CONFIG_USE_AAU */
 
 	/*
@@ -667,7 +667,7 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	E2K_SAVE_CLOCK_REG(trap_times->pt_regs_set);
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 
-	regs->flags = 0;
+	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, true	/* user mode trap */);
 
 #ifdef CONFIG_USE_AAU
@@ -687,7 +687,7 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
 	 * so it must be read before TIRs.
 	 */
-	if (unlikely(save_sbbp)) {
+	if (unlikely(save_sbbp || ts_host_at_vcpu_mode())) {
 		trap->sbbp = __builtin_alloca(sizeof(*trap->sbbp) *
 					      SBBP_ENTRIES_NUM);
 		SAVE_SBBP(trap->sbbp);
@@ -900,7 +900,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	E2K_SAVE_CLOCK_REG(trap_times->pt_regs_set);
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 
-	regs->flags = 0;
+	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, false	/* user mode trap */);
 
 	/*
@@ -940,10 +940,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 			       likely(!hw_overflow && !kstack_pf_addr));
         info_save_stack_reg(clock);
 	cr0_hi = regs->crs.cr0_hi;
-
-	/* save IRQs state (enable/disable) at trap point */
-	SAVE_IRQS_STATE(regs, READ_UPSR_REG());
-
 	psp_hi = regs->stacks.psp_hi;
 	pcsp_hi = regs->stacks.pcsp_hi;
 
@@ -1059,7 +1055,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	}
 
 	NATIVE_RESTORE_COMMON_REGS(regs);
-	E2K_DONE;
+	E2K_DONE();
 }
 
 
@@ -1072,131 +1068,6 @@ int handle_futex_death(u32 __user *uaddr, struct task_struct *curr,
 		       bool pi, bool pending_op);
 
 extern const system_call_func sys_protcall_table[]; /* defined in systable.c */
-
-static inline
-long make_ap_lo(e2k_addr_t base, long size, long offset, int access)
-{
-	return MAKE_AP_LO(base, size, offset, access);
-}
-
-static inline
-long make_ap_hi(e2k_addr_t base, long size, long offset, int access)
-{
-	return MAKE_AP_HI(base, size, offset, access);
-}
-
-static inline
-int e2k_ptr_itag(long low)
-{
-	e2k_ptr_t ptr;
-
-	AW(ptr).lo = low;
-
-	return AS(ptr).itag;
-}
-
-static inline
-int e2k_ptr_rw(long low)
-{
-	e2k_ptr_t ptr;
-
-	AW(ptr).lo = low;
-
-	return AS(ptr).rw;
-}
-
-static inline
-unsigned long e2k_ptr_ptr(long low, long hiw, unsigned int min_size)
-{
-	e2k_ptr_t ptr;
-	unsigned int ptr_size;
-
-	AW(ptr).lo = low;
-	AW(ptr).hi = hiw;
-	ptr_size = AS(ptr).size - AS(ptr).curptr;
-
-	if (ptr_size < min_size) {
-		DbgSCP_ALERT("  Pointer is too small: %d < %d\n",
-			     ptr_size, min_size);
-		return 0;
-	} else {
-		return E2K_PTR_PTR(ptr, GET_SBR_HI());
-	}
-}
-
-static inline
-unsigned long e2k_dscr_ptr_size(long low, long hiw, long min_size,
-				unsigned int *ptr_size, u64 sbr_hi, u16 sys_num)
-{
-	/* NB> 'min_size' may be negative; this is why it has 'long' type */
-	e2k_ptr_t ptr;
-
-	AW(ptr).lo = low;
-	AW(ptr).hi = hiw;
-	*ptr_size = AS(ptr).size - AS(ptr).curptr;
-
-	if (*ptr_size < min_size) {
-		DbgSCP_ALERT("System call #%d: Pointer is too small:%d < %ld\n",
-			     sys_num, *ptr_size, min_size);
-		*ptr_size = 0;
-		return 0;
-	}
-	return E2K_PTR_PTR(ptr, sbr_hi);
-}
-
-static inline
-unsigned long e2k_ptr_curptr(long low, long hiw)
-{
-	e2k_ptr_t ptr;
-
-	AW(ptr).lo = low;
-	AW(ptr).hi = hiw;
-
-	return AS(ptr).curptr;
-}
-
-static inline
-unsigned long e2k_ptr_size(long low, long hiw, unsigned int min_size)
-{
-	e2k_ptr_hi_t hi;
-	unsigned int ptr_size;
-
-	AW(hi) = hiw;
-	ptr_size = AS(hi).size - AS(hi).curptr;
-
-	if (ptr_size < min_size) {
-		DbgSCP_ALERT("  Pointer is too small: %d < %d\n",
-			     ptr_size, min_size);
-		return 0;
-	} else {
-		return ptr_size;
-	}
-}
-
-static inline int e2k_ptr_str_check(char __user *str, u64 max_size)
-{
-	long slen;
-
-	slen = strnlen_user(str, max_size);
-
-	if (unlikely(!slen || slen > max_size))
-		return 1;
-
-	return 0;
-}
-
-static inline char __user *e2k_ptr_str(long low, long hiw, u64 sbr_hi)
-{
-	char __user *str;
-	e2k_ptr_hi_t hi = { .word = hiw };
-
-	str = (char __user *) __E2K_PTR_PTR(low, hiw, sbr_hi);
-
-	if (!e2k_ptr_str_check(str, AS(hi).size - AS(hi).curptr))
-		return str;
-
-	return NULL;
-}
 
 static int count_descriptors(long __user *prot_array,
 				const int prot_array_size);
@@ -1386,17 +1257,20 @@ void pm_exit_robust_list(struct task_struct *curr)
 	if (fetch_pm_robust_entry(&entry, head, &pi))
 		return;
 	/*
-	 * Fetch the relative futex offset. Note the use of 16 for
-	 * PROT_ARRAY_SIZE here due to current limiations of `convert_array ()'
-	 * which believes that structures being converted are aligned on 16
+	 * Fetch the relative futex offset.
+	 * Note that structures being converted are aligned on 16
 	 * byte boundary and have size being a multiple of 16. This is rather
 	 * harmless as the FUTEX_OFFSET field in PM `struct robust_list_head'
 	 * is aligned on 16 byte boundary and there's an 8-byte gap between it
 	 * and the next LIST_OP_PENDING field, however, it makes sense to get
 	 * rid of this limiation when (sub)structures containing no APs are
-	 * converted.  */
-	if (convert_array(&head[2], &futex_offset, 16, 1, 1, 0x1, 0x1))
+	 * converted.
+	 */
+	if (get_user(futex_offset, (long *) &head[2])) {
+		DbgSCP_ALERT("failed to read from 0x%lx !!!\n",
+			     (uintptr_t) &head[2]);
 		return;
+	}
 
 	/*
 	 * Fetch any possibly pending lock-add first, and handle it
@@ -1549,7 +1423,7 @@ do { \
 
 	init_pt_regs_for_syscall(regs);
 	/* now we have 2 proc_sys_call entry*/
-	regs->flags |= PROT_10_FLAG_PT_REGS;
+	regs->flags.protected_entry10 = 1;
 	regs->return_desk = 0;
 	SAVE_STACK_REGS(regs, current_thread_info(), true, false);
 	regs->sys_num = sys_num;
@@ -3159,6 +3033,29 @@ nr_mmap_out:
 }
 
 
+static inline
+unsigned long e2k_dscr_ptr_size(long low, long hiw, long min_size,
+				unsigned int *ptr_size, u64 sbr_hi,
+				u16 sys_num, u8 argnum, u8 *fatal)
+{
+	/* NB> 'min_size' may be negative; this is why it has 'long' type */
+	e2k_ptr_t ptr;
+
+	AW(ptr).lo = low;
+	AW(ptr).hi = hiw;
+	*ptr_size = AS(ptr).size - AS(ptr).curptr;
+
+	if (*ptr_size < min_size) {
+#define ERR_DESCRIPTOR_SIZE "System call #%d arg #%d: Pointer is too small: %d < %ld\n"
+		DbgSCP_ALERT(ERR_DESCRIPTOR_SIZE,
+			     sys_num, argnum, *ptr_size, min_size);
+		*ptr_size = 0;
+		*fatal = 1;
+		return 0;
+	}
+	return E2K_PTR_PTR(ptr, sbr_hi);
+}
+
 #define MASK_PROT_ARG_LONG		0
 #define MASK_PROT_ARG_DSCR		1
 #define MASK_PROT_ARG_LONG_OR_DSCR	2
@@ -3257,7 +3154,7 @@ unsigned long get_protected_ARG(u16 sys_num, u64 tag, u32 mask, u8 a_num,
 	}
 
 	ptr = e2k_dscr_ptr_size(descr_lo, descr_hi, min_size, &size,
-				sbr_hi, sys_num);
+				sbr_hi, sys_num, a_num, fatal);
 
 	/* Second, we check if the argument is string: */
 	if (msk == MASK_PROT_ARG_STRING) {
@@ -3356,7 +3253,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	read_ticks(clock1);
 	info_save_stack_reg(clock1);
 #endif
-	if ((u64) sys_num >= NR_syscalls) {
+	if (sys_num >= NR_syscalls) {
 		sys_call = (protected_system_call_func) sys_ni_syscall;
 		mask = size1 = size2 = 0;
 	} else {
@@ -3377,7 +3274,8 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_ENABLED));
 
 	DbgSCP("_NR_ %lld/%s start: mask=0x%x current %px pid %d\n", sys_num,
-		sys_call_ID_to_name[sys_num], mask, current, current->pid);
+		(sys_num < NR_syscalls) ? sys_call_ID_to_name[sys_num] : "sys_ni_syscall",
+		mask, current, current->pid);
 
 	/* All other arguments have been saved in assembler already */
 	regs->args[1] = arg1;
@@ -3386,61 +3284,65 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	regs->args[4] = arg4;
 	regs->tags = tags;
 
-	if (size1 < 0) {
-		size1 = regs->args[-size1*2 - 1];
-		if (mask & ADJUST_SIZE_MASK) {
-			size1 = adjust_bufsize_to_descrsize(
-				sys_num, size1,
-				regs->args[1], regs->args[2]);
-		}
-	}
-	/* NB> So far there is no two-argument syscall
-	 *     with the size specified in the 1st argument.
-	 * Therefore the check for 'size2' is unneeded for now.
-	 */
-	size3 = sys_protcall_args[sys_num].size3;
-	if (size3 < 0) {
-		size3 = regs->args[-size3*2 - 1];
-		if (mask & ADJUST_SIZE_MASK) {
-			size3 = adjust_bufsize_to_descrsize(
-				sys_num, size3,
-				regs->args[5], regs->args[6]);
-		}
-	}
-	size4 = sys_protcall_args[sys_num].size4;
-	/* So far we don't have negative size in the 4th row.
-	 * To be added in the future if needed:
-	if (size4 < 0)
-		size4 = regs->args[-size4];
-	 */
-	size5 = sys_protcall_args[sys_num].size5;
-	if (size2 < 0) {
-		size2 = regs->args[-size2*2 - 1];
-		if (mask & ADJUST_SIZE_MASK) {
-			size2 = adjust_bufsize_to_descrsize(
-				sys_num, size2,
-				regs->args[3], regs->args[4]);
-		}
-	}
-	size6 = sys_protcall_args[sys_num].size6;
-	/* So far we don't have negative size in the 6th row.
-	 * To be added in the future if needed:
-	if (size6 < 0)
-		size6 = regs->args[-size6];
-	 */
+	if (likely(sys_num < NR_syscalls)) {
 
-	a1 = get_protected_ARG(sys_num, (tags >> 8) & 0xffUL, mask, 1,
+		if (size1 < 0) {
+			size1 = regs->args[-size1*2 - 1];
+			if (mask & ADJUST_SIZE_MASK) {
+				size1 = adjust_bufsize_to_descrsize(
+					sys_num, size1,
+					regs->args[1], regs->args[2]);
+			}
+		}
+		/* NB> So far there is no two-argument syscall
+		 *     with the size specified in the 1st argument.
+		 * Therefore the check for 'size2' is unneeded for now.
+		 */
+		size3 = sys_protcall_args[sys_num].size3;
+		if (size3 < 0) {
+			size3 = regs->args[-size3*2 - 1];
+			if (mask & ADJUST_SIZE_MASK) {
+				size3 = adjust_bufsize_to_descrsize(
+					sys_num, size3,
+					regs->args[5], regs->args[6]);
+			}
+		}
+		size4 = sys_protcall_args[sys_num].size4;
+		/* So far we don't have negative size in the 4th row.
+		 * To be added in the future if needed:
+		if (size4 < 0)
+			size4 = regs->args[-size4];
+		 */
+		size5 = sys_protcall_args[sys_num].size5;
+		if (size2 < 0) {
+			size2 = regs->args[-size2*2 - 1];
+			if (mask & ADJUST_SIZE_MASK) {
+				size2 = adjust_bufsize_to_descrsize(
+					sys_num, size2,
+					regs->args[3], regs->args[4]);
+			}
+		}
+		size6 = sys_protcall_args[sys_num].size6;
+		/* So far we don't have negative size in the 6th row.
+		 * To be added in the future if needed:
+		if (size6 < 0)
+			size6 = regs->args[-size6];
+		 */
+
+		a1 = get_protected_ARG(sys_num, (tags >> 8) & 0xffUL, mask, 1,
 			       arg1, arg2, size1, sbr_hi, &wrong_arg);
-	a2 = get_protected_ARG(sys_num, (tags >> 16) & 0xffUL, mask, 2,
+		a2 = get_protected_ARG(sys_num, (tags >> 16) & 0xffUL, mask, 2,
 			       arg3, arg4, size2, sbr_hi, &wrong_arg);
-	a3 = get_protected_ARG(sys_num, (tags >> 24) & 0xffUL, mask, 3,
+		a3 = get_protected_ARG(sys_num, (tags >> 24) & 0xffUL, mask, 3,
 			       arg5, arg6, size3, sbr_hi, &wrong_arg);
-	a4 = get_protected_ARG(sys_num, (tags >> 32) & 0xffUL, mask, 4,
+		a4 = get_protected_ARG(sys_num, (tags >> 32) & 0xffUL, mask, 4,
 			       arg7, arg8, size4, sbr_hi, &wrong_arg);
-	a5 = get_protected_ARG(sys_num, (tags >> 40) & 0xffUL, mask, 5,
+		a5 = get_protected_ARG(sys_num, (tags >> 40) & 0xffUL, mask, 5,
 			       arg9, arg10, size5, sbr_hi, &wrong_arg);
-	a6 = get_protected_ARG(sys_num, (tags >> 48) & 0xffUL, mask, 6,
+		a6 = get_protected_ARG(sys_num, (tags >> 48) & 0xffUL, mask, 6,
 			       arg11, arg12, size6, sbr_hi, &wrong_arg);
+
+	} /* (sys_num < NR_syscalls) */
 
 	DbgSCP("system call %lld (0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx)\n",
 			sys_num, a1, a2, a3, a4, a5, a6);
@@ -4373,6 +4275,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 {
 	unsigned long ti_flags = current_thread_info()->flags;
 	long rval;
+	bool ts_host_at_vcpu_mode = ts_host_at_vcpu_mode();
 
 	check_cli();
 	info_save_stack_reg(NATIVE_READ_CLKR_REG_VALUE());
@@ -4387,7 +4290,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 
 	SAVE_SYSCALL_ARGS(regs, arg1, arg2, arg3, arg4, arg5, arg6);
 
-	if (guest_syscall_enter(current_thread_info(), regs)) {
+	if (guest_syscall_enter(regs, ts_host_at_vcpu_mode)) {
 		/* the system call is from guest and syscall is injecting */
 		current_thread_info()->pt_regs = NULL;
 		guest_syscall_inject(current_thread_info(), regs);
@@ -4515,13 +4418,14 @@ notrace long __ret_from_fork(struct task_struct *prev)
 		raw_all_irq_restore(flags);
 	}
 
-	if (TASK_IS_PROTECTED(current))
-		if (regs->flags & PROT_10_FLAG_PT_REGS)
+	if (TASK_IS_PROTECTED(current)) {
+		if (regs->flags.protected_entry10)
 			from |= FROM_SYSCALL_PROT_10;
 		else
 			from |= FROM_SYSCALL_PROT_8;
-	else
+	} else {
 		from |= FROM_SYSCALL_N_PROT;
+	}
 
 	ret = ret_from_fork_prepare_hv_stacks(regs);
 	if (ret) {
@@ -4673,7 +4577,6 @@ notrace long do_sigreturn(void)
 	e2k_usd_lo_t usd_lo;
 	e2k_usd_hi_t usd_hi;
 	rt_sigframe_t __user *frame;
-	e2k_wd_t wd;
 
 	COPY_U_HW_STACKS_FROM_TI(&cur_stacks, ti);
 	raw_all_irq_enable();
@@ -4698,20 +4601,14 @@ notrace long do_sigreturn(void)
 		user_exit();
 		do_exit(SIGKILL);
 	}
-	/* Preserve current p[c]shtp as they indicate
-	 * how much to FILL when returning */
-	regs.stacks.pshtp = cur_stacks.pshtp;
-	regs.stacks.pcshtp = cur_stacks.pcshtp;
 
-	/*
-	 * Restore proper psize as it was when signal was delivered.
-	 */
-	if (AS(regs.wd).psize) {
-		raw_all_irq_disable();
-		wd = READ_WD_REG();
-		wd.psize = AS(regs.wd).psize;
-		WRITE_WD_REG(wd);
-		raw_all_irq_enable();
+	/* Preserve current p[c]shtp as they indicate */
+	/* how much to FILL when returning */
+	preserve_user_hw_stacks_to_copy(&regs.stacks, &cur_stacks);
+
+	/* Restore proper psize as it was when signal was delivered */
+	if (regs.wd.WD_psize) {
+		restore_wd_register_psize(regs.wd);
 	}
 
 	if (from_trap(&regs))
@@ -4750,7 +4647,7 @@ notrace long do_sigreturn(void)
 	clear_restore_sigmask();
 
 	if (!TASK_IS_BINCO(current))
-		restore_local_glob_regs(&l_gregs);
+		restore_local_glob_regs(&l_gregs, true);
 
 	if (!from_syscall(&regs)) {
 		BUG_ON(!regs.trap || !regs.aau_context || regs.kernel_entry);

@@ -59,9 +59,9 @@ obj-$(CONFIG_SPARC32)   += devices.o
 obj-y                   += ptrace_$(BITS).o
 obj-y                   += unaligned_$(BITS).o
 obj-y                   += una_asm_$(BITS).o
+ifndef CONFIG_E90S
 obj-$(CONFIG_OF)        += of_device_common.o
 obj-$(CONFIG_OF)        += of_device_$(BITS).o
-ifndef CONFIG_E90S
 obj-y                   += prom_common.o
 obj-y                   += prom_$(BITS).o
 obj-$(CONFIG_SPARC64)   += prom_irqtrans.o

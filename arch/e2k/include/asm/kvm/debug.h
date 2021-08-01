@@ -9,6 +9,7 @@
 /* do not include this header directly, only through asm/e2k_debug.h */
 
 #include <linux/types.h>
+#include <asm/kvm/vcpu-regs-debug-inline.h>
 
 /*
  * Some definitions to print/dump/show stacks

@@ -10,26 +10,10 @@
 
 #ifdef	CONFIG_VIRTUALIZATION
 
-#if	defined(CONFIG_PARAVIRT_GUEST)
+#if defined(CONFIG_KVM_GUEST_KERNEL) || defined(CONFIG_PARAVIRT_GUEST)
 extern unsigned int guest_machine_id;
 #define	boot_guest_machine_id	boot_get_vo_value(guest_machine_id)
-#endif /* CONFIG_E2K_MACHINE */
-
-extern void kvm_set_mach_type_id(void);
-
-#ifdef	CONFIG_KVM_GUEST_KERNEL
-/* it is native guest kernel */
-#ifdef	CONFIG_E2K_MACHINE
- #if	defined(CONFIG_E2K_VIRT)
-  #define guest_machine_id	MACHINE_ID_E2K_VIRT
-  #define boot_guest_machine_id	guest_machine_id
- #else
-  #error "E2K VIRTUAL MACHINE type does not defined"
- #endif
-#else	/* ! CONFIG_E2K_MACHINE */
-extern unsigned int guest_machine_id;
-#define	boot_guest_machine_id	boot_get_vo_value(guest_machine_id)
-#endif /* CONFIG_E2K_MACHINE */
+#endif	/* CONFIG_KVM_GUEST_KERNEL || CONFIG_PARAVIRT_GUEST */
 
 #define	machine_id		guest_machine_id
 #define	boot_machine_id		boot_guest_machine_id
@@ -39,12 +23,11 @@ extern unsigned int guest_machine_id;
 #define	set_machine_id(mach_id)		(machine_id = (mach_id))
 #define	boot_set_machine_id(mach_id)	(boot_machine_id = (mach_id))
 
+extern void kvm_set_mach_type_id(void);
 static inline void set_mach_type_id(void)
 {
 	kvm_set_mach_type_id();
 }
-
-#endif	/* CONFIG_KVM_GUEST_KERNEL */
 
 #endif	/* CONFIG_VIRTUALIZATION */
 

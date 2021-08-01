@@ -152,15 +152,12 @@ check_boot_spin_unlocked_list(struct kvm_vcpu *vcpu, void *lock, bool find)
 					panic("infinity spinlock checked "
 						"threads\n");
 			}
-			GTI_BUG_ON(!list_empty(
-					&current_thread_info()->tasks_to_spin));
-			current_thread_info()->gti_to_spin =
-				current_thread_info()->gthread_info;
-			list_add_tail(&current_thread_info()->tasks_to_spin,
+			GTI_BUG_ON(!list_empty(&vcpu->arch.vcpus_to_spin));
+			list_add_tail(&vcpu->arch.vcpus_to_spin,
 					&u->checked_unlocked);
-			DebugKVM("task %s (%d) is added to the list of "
-				"spin %px unlock checked tasks\n",
-				current->comm, current->pid, lock);
+			DebugKVM("vcpu #%d is added to the list of "
+				"spin %px unlock checked vcpus\n",
+				vcpu->vcpu_id, lock);
 			return u;
 		}
 	}

@@ -192,7 +192,7 @@ static inline int setup_frame(struct sigcontext __user *sigc,
 			rval = (rval) ?: __put_user(
 						trap->tcellar[i].condition.word,
 						&sigc->trap_cell_info[i]);
-			rval = (rval) ?: load_value_and_tagd(
+			load_value_and_tagd(
 					&trap->tcellar[i].data, &data, &tag);
 			rval = (rval) ?: __put_user(tag,
 						    &sigc->trap_cell_tag[i]);
@@ -716,11 +716,8 @@ static int copy_context_to_signal_stack(
 	return ret ? -EFAULT : 0;
 }
 
-
 /*
- * Follow function is sutable only for native and host kernel
- * Don't forget update virtual mode function kvm_sa_handler_restore()
- * if update here
+ * Follow function is sutable for native, host and guest kernels
  */
 notrace noinline __interrupt __section(.entry_handlers)
 void sighandler_trampoline_continue(void)
@@ -736,7 +733,7 @@ void sighandler_trampoline_continue(void)
 	 * Switch to kernel stacks.
 	 */
 	GET_SIG_RESTORE_STACK(current_thread_info(), sbr, usd_lo, usd_hi);
-	NATIVE_NV_WRITE_USBR_USD_REG_VALUE(sbr, AW(usd_hi), AW(usd_lo));
+	NV_WRITE_USBR_USD_REG_VALUE(sbr, AW(usd_hi), AW(usd_lo));
 
 	/*
 	 * Switch to %upsr for interrupts control
@@ -876,7 +873,7 @@ void free_signal_stack(struct signal_stack *signal_stack)
  * setup_signal_stack - save priviliged part of interrupted user context
  * to a special privileged area in user space.
  */
-int setup_signal_stack(struct pt_regs *regs)
+int setup_signal_stack(struct pt_regs *regs, bool is_signal)
 {
 	struct signal_stack_context __user *context;
 	struct local_gregs l_gregs, *gregs;
@@ -885,7 +882,7 @@ int setup_signal_stack(struct pt_regs *regs)
 	/* FIXME; macros TASK_IS_BINCO() should be updated to provide */
 	/* guest user process case: is one running under binary compiler */
 	if (!TASK_IS_BINCO(current)) {
-		save_local_glob_regs(&l_gregs);
+		save_local_glob_regs(&l_gregs, is_signal);
 		gregs = &l_gregs;
 	} else {
 		gregs = NULL;
@@ -1230,7 +1227,7 @@ int native_signal_setup(struct pt_regs *regs)
 
 	ret = signal_rt_frame_setup(regs);
 	if (ret != 0) {
-		pr_err("%s(): setup signal rt frame failed< error %d\n",
+		pr_err("%s(): setup signal rt frame failed, error %d\n",
 			__func__, ret);
 		return ret;
 	}
@@ -1239,7 +1236,7 @@ int native_signal_setup(struct pt_regs *regs)
 	 * After having called setup_signal_stack() we must unroll signal
 	 * stack by calling pop_signal_stack() in case an error happens.
 	 */
-	ret = setup_signal_stack(regs);
+	ret = setup_signal_stack(regs, true);
 	if (ret)
 		return ret;
 
@@ -1317,7 +1314,7 @@ void do_signal(struct pt_regs *regs)
 		signal_setup_done(failed, ksig,
 				  test_ts_flag(TS_SINGLESTEP_USER));
 		if (!failed) {
-			regs->flags |= SIG_CALL_HANDLER_FLAG_PT_REGS;
+			regs->flags.sig_call_handler = 1;
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 			if (regs->trap)
 				regs->trap->flags &= ~TRAP_RP_FLAG;
@@ -1361,7 +1358,7 @@ void do_signal(struct pt_regs *regs)
 	restore_saved_sigmask();
 
 	if (restart_needed)
-		regs->flags |= SIG_RESTART_SYSCALL_FLAG_PT_REGS;
+		regs->flags.sig_restart_syscall = 1;
 }
 
 

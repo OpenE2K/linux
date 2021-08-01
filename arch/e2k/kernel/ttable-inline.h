@@ -14,6 +14,7 @@
 #include <asm/trap_def.h>
 #include <asm/glob_regs.h>
 #include <asm/mmu_regs_types.h>
+#include <asm/process.h>
 #include <asm/kvm/switch.h>
 
 #include "ttable-help.h"
@@ -286,10 +287,10 @@ set_new_regs:
 }
 #endif	/* CONFIG_CPU_HAS_FILL_INSTRUCTION */
 
-static __always_inline void jump_to_ttable_entry(struct pt_regs *regs,
-		enum restore_caller from)
+static __always_inline void
+native_jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 {
-	if (from & FROM_SYSCALL_N_PROT) {
+	if (from & (FROM_SYSCALL_N_PROT | FROM_PV_VCPU_SYSCALL)) {
 		switch (regs->kernel_entry) {
 		case 1:
 			__E2K_JUMP_WITH_ARGUMENTS_7(ttable_entry1,
@@ -332,6 +333,14 @@ static __always_inline void jump_to_ttable_entry(struct pt_regs *regs,
 	}
 }
 
+#if	!defined(CONFIG_VIRTUALIZATION) || !defined(CONFIG_KVM_GUEST_KERNEL)
+static __always_inline void
+jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
+{
+	native_jump_to_ttable_entry(regs, from);
+}
+#endif	/* !CONFIG_VIRTUALIZATION || !CONFIG_KVM_GUEST_KERNEL) */
+
 extern int copy_context_from_signal_stack(struct local_gregs *l_gregs,
 		struct pt_regs *regs, struct trap_pt_regs *trap, u64 *sbbp,
 		e2k_aau_t *aau_context, struct k_sigaction *ka);
@@ -343,8 +352,8 @@ static inline int signal_pending_usermode_loop(bool syscall)
 			signal_pending(current);
 }
 
-static inline unsigned long exit_to_usermode_has_work(bool return_to_user,
-		bool syscall)
+static inline unsigned long exit_to_usermode_has_work(struct pt_regs *regs,
+						bool return_to_user, bool syscall)
 {
 	if (unlikely(!return_to_user))
 		return 0;
@@ -352,15 +361,10 @@ static inline unsigned long exit_to_usermode_has_work(bool return_to_user,
 	if (syscall)
 		return unlikely(current_thread_info()->flags & _TIF_WORK_MASK);
 
-	if (guest_trap_pending(current_thread_info()))
-		return 1;
-
-	return unlikely((!test_delayed_signal_handling(current,
+	return unlikely(!test_delayed_signal_handling(current,
 					current_thread_info()) &&
-			 (current_thread_info()->flags & _TIF_SIGPENDING) ||
-			 (current_thread_info()->flags &
-					_TIF_WORK_MASK_NOSIG)) &&
-			!host_is_at_HV_GM_mode());
+			(current_thread_info()->flags & _TIF_SIGPENDING) ||
+			(current_thread_info()->flags & _TIF_WORK_MASK_NOSIG));
 }
 
 /*
@@ -385,10 +389,17 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 	 */
 	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_DISABLED));
 
+	if (unlikely(host_test_intc_emul_mode(regs))) {
+		/* host is at guest VCPU interception emulation mode */
+		host_exit_to_usermode_loop(regs, syscall,
+				signal_pending_usermode_loop(syscall));
+		return pshtp;
+	}
+
 	/*
 	 * Check under closed interrupts to avoid races
 	 */
-	while (exit_to_usermode_has_work(*return_to_user, syscall)) {
+	while (unlikely(exit_to_usermode_has_work(regs, *return_to_user, syscall))) {
 		/* Make sure compiler does not reuse previous checks (this
 		 * is better than adding "volatile" to reads in hot path). */
 		barrier();
@@ -418,8 +429,7 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 #endif
 		}
 
-		if (syscall && (regs->flags &
-				SIG_RESTART_SYSCALL_FLAG_PT_REGS)) {
+		if (syscall && regs->flags.sig_restart_syscall) {
 			/*
 			 * Rules for system call restart:
 			 * 1) First we call signal handlers for _all_ signals
@@ -427,7 +437,7 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 			 * 2) Then we restart system call _exactly_once_ even
 			 * if multiple signals were restart-worthy.
 			 */
-			if (regs->flags & SIG_CALL_HANDLER_FLAG_PT_REGS) {
+			if (regs->flags.sig_call_handler) {
 				/* Call handler _before_ restarting system call
 				 * and do not forget to restart it later. */
 				typeof(orig_u_pt_regs->flags) flags;
@@ -439,27 +449,24 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 				if (!orig_u_pt_regs)
 					orig_u_pt_regs = signal_pt_regs_first();
 				ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-				ret = __get_user(flags, &orig_u_pt_regs->flags);
+				ret = __get_user(AW(flags), &AW(orig_u_pt_regs->flags));
 				if (!ret) {
-					flags |= SIG_RESTART_SYSCALL_FLAG_PT_REGS;
-					ret = __put_user(flags,
-							&orig_u_pt_regs->flags);
+					flags.sig_restart_syscall = 1;
+					ret = __put_user(AW(flags),
+							 &AW(orig_u_pt_regs->flags));
 				}
 				clear_ts_flag(ts_flag);
 				if (ret)
 					force_sigsegv(SIGSEGV);
 
 				/* Restart will be done after signal handling */
-				regs->flags &=
-					~SIG_RESTART_SYSCALL_FLAG_PT_REGS;
+				regs->flags.sig_restart_syscall = 0;
 			} else if (!signal_pending_usermode_loop(syscall)) {
 				/* There are no signal handlers and no more
 				 * signals so we can restart this system call */
+				BUG_ON(host_test_intc_emul_mode(regs));
 				*return_to_user = false;
 			}
-		}
-		if (guest_trap_pending(current_thread_info())) {
-			insert_pv_vcpu_traps(current_thread_info(), regs);
 		}
 
 		if (test_thread_flag(TIF_NOTIFY_RESUME)) {
@@ -471,7 +478,7 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 		 * Signal handler delivery does magic with stack,
 		 * so check again whether manual copy is needed
 		 */
-		if (regs->flags & SIG_CALL_HANDLER_FLAG_PT_REGS) {
+		if (regs->flags.sig_call_handler) {
 			/* this case has not yet been accounted for */
 			BUG_ON(!syscall &&
 				guest_trap_from_user(current_thread_info()) ||
@@ -632,6 +639,8 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	trap = regs->trap;
 #endif
 
+	/* TODO Drop this leftover from Paravirt-1.0 (user_trap_handler
+	 * is the last entry, nothing to queue in entry or dequeue here) */
 	/*
 	 * Dequeue current pt_regs structure and previous
 	 * regs will be now actuale
@@ -642,23 +651,23 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	/* restore some guest context, if trap was on guest */
 	ti = current_thread_info();
 	trap_guest_enter(ti, regs, EXIT_FROM_TRAP_SWITCH);
-	BUG_ON(ti != NATIVE_READ_CURRENT_REG());
+	BUG_ON(ti != READ_CURRENT_REG());
 	/* WARNING: from here should not use current, current_thread_info() */
 	/* only variable 'ti' */
 
 #ifdef CONFIG_USE_AAU
-	native_clear_apb();
+	clear_apb();
 	if (cpu_has(CPU_HWBUG_AAU_AALDV))
 		__E2K_WAIT(_ma_c);
 	if (aau_working(aau_regs)) {
-		native_set_aau_context(aau_regs);
+		set_aau_context(aau_regs);
 
 		/*
 		 * It's important to restore AAD after
 		 * all return operations.
 		 */
 		if (AS(aau_regs->aasr).iab)
-			NATIVE_RESTORE_AADS(aau_regs);
+			RESTORE_AADS(aau_regs);
 	}
 
 	/*
@@ -671,9 +680,9 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	 */
 	if (likely(!AAU_STOPPED(aau_regs->aasr))) {
 #endif
-		NATIVE_RESTORE_COMMON_REGS(regs);
+		RESTORE_COMMON_REGS(regs);
 #ifdef CONFIG_USE_AAU
-		NATIVE_RESTORE_AAU_MASK_REGS(aau_regs);
+		RESTORE_AAU_MASK_REGS(aau_regs);
 #endif
 		/* only if return from paravirtualized host to guest */
 		COND_GOTO_DONE_TO_PARAVIRT_GUEST(from_paravirt_guest);
@@ -687,10 +696,11 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 #ifdef CONFIG_USE_AAU
 	} else {
 		BUILD_BUG_ON(!__builtin_constant_p(from));
-		RESTORE_GUEST_AAU_AASR(aau_regs, test_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE));
-		NATIVE_RESTORE_COMMON_REGS(regs);
+		RESTORE_GUEST_AAU_AASR(aau_regs,
+			test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
+		RESTORE_COMMON_REGS(regs);
 		native_set_aau_aaldis_aaldas(ti, aau_regs);
-		NATIVE_RESTORE_AAU_MASK_REGS(aau_regs);
+		RESTORE_AAU_MASK_REGS(aau_regs);
 		/* only if return from paravirtualized host to guest */
 		COND_GOTO_DONE_TO_PARAVIRT_GUEST(from_paravirt_guest);
 		if (from & FROM_SIGRETURN) {
@@ -713,6 +723,7 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from,
 	e2k_pshtp_t pshtp;
 	u64 wsz, num_q, rval;
 	int return_desk;
+	bool ts_host_at_vcpu_mode, intc_emul_flag;
 
 	/*
 	 * This can page fault so call with open interrupts
@@ -723,6 +734,9 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from,
 				   FROM_SYSCALL_PROT_10)));
 
 	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, wsz, true);
+
+	intc_emul_flag = kvm_test_intc_emul_flag(regs);
+	ts_host_at_vcpu_mode = ts_host_at_vcpu_mode() || intc_emul_flag;
 
 #ifndef CONFIG_CPU_HAS_FILL_INSTRUCTION
 	current->thread.fill.from = from;
@@ -739,21 +753,15 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from,
 
 	num_q = get_ps_clear_size(wsz, pshtp);
 
-	/* deferred traps can accumulate while signal handling */
-	/* and rescheduling */
-	if (have_deferred_traps(regs))
-		handle_deferred_traps_in_syscall(regs);
-
 	/* complete intercept emulation mode */
-	guest_syscall_exit_to(current_thread_info(), regs,
-				EXIT_FROM_INTC_SWITCH);
+	guest_exit_intc(regs, intc_emul_flag);
 
 	/*
 	 * We have FILLed user hardware stacks so no
 	 * function calls are allowed after this point.
 	 */
 	user_hw_stacks_restore(regs,
-		syscall_guest_get_restore_stacks(current_thread_info(), regs),
+		syscall_guest_get_restore_stacks(ts_host_at_vcpu_mode, regs),
 		wsz, num_q);
 #ifndef CONFIG_CPU_HAS_FILL_INSTRUCTION
 	regs = current_thread_info()->pt_regs;
@@ -772,20 +780,15 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from,
 	exit_handle_syscall(regs->stacks.top, regs->stacks.usd_hi,
 			regs->stacks.usd_lo, current_thread_info()->upsr);
 
-	/* CUTD register restore is important on host for guest syscall */
-	RESTORE_USER_SYSCALL_CUT_REGS(current_thread_info(), regs);
-
 	/*
-	 * Dequeue current pt_regs structure and previous
-	 * regs will be now actuale
+	 * Dequeue current pt_regs structure
 	 */
 	current_thread_info()->pt_regs = NULL;
 
 	/* restore some guest context, if trap was on guest */
-	guest_syscall_exit_to(current_thread_info(), regs,
-				EXIT_FROM_TRAP_SWITCH);
+	guest_syscall_exit_trap(regs, ts_host_at_vcpu_mode);
 
-	if (!(from & (FROM_SYSCALL_N_PROT | FROM_PV_VCPU_SYSCALL)))
+	if (!(from & (FROM_SYSCALL_N_PROT | FROM_PV_VCPU_SYSCALL | FROM_PV_VCPU_SYSFORK)))
 		ENABLE_US_CLW();
 
 	/* %gN-%gN+3 must be restored last as they hold pointers to current */

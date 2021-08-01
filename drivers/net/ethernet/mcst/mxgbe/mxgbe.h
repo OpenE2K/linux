@@ -32,6 +32,14 @@
 #include <linux/mii.h>
 #include <linux/mdio.h>
 
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_device.h>
+#include <linux/of_mdio.h>
+#include <linux/of_net.h>
+
+#include <asm/setup.h>
+
 
 /**
  ******************************************************************************
@@ -61,16 +69,13 @@
  ******************************************************************************
  **/
 
-#define DRIVER_NAME		"mxgbe"
-#define DRIVER_VERSION		"1.1.0"
-#define MXGBE_DEVNAME		"mxg"
+#define DRIVER_VERSION		"1.2.0"
 
 
 /* Module parameters */
 extern u32 mxgbe_debug_mask;
 extern u32 mxgbe_loopback_mode;
 extern u32 mxgbe_led_gpio;
-extern u32 mxgbe_renameeth;
 
 
 /**
@@ -113,58 +118,12 @@ do { \
  **/
 
 /* forward declaration */
-struct mxgbe_hw;
-struct mxgbe_queue;
 struct mxgbe_vector;
 struct mxgbe_priv;
 
-/* PHY */
-struct mxgbe_phy_op {
-	s32 (*identify)(struct mxgbe_hw *);
-	s32 (*identify_sfp)(struct mxgbe_hw *);
-	s32 (*init)(struct mxgbe_hw *);
-	s32 (*reset)(struct mxgbe_hw *);
-	s32 (*read_reg)(struct mxgbe_hw *, u32, u32, u16 *);
-	s32 (*write_reg)(struct mxgbe_hw *, u32, u32, u16);
-	s32 (*read_reg_mdi)(struct mxgbe_hw *, u32, u32, u16 *);
-	s32 (*write_reg_mdi)(struct mxgbe_hw *, u32, u32, u16);
-	s32 (*setup_link)(struct mxgbe_hw *);
-#if 0
-	s32 (*setup_link_speed)(struct mxgbe_hw *, mxgbe_link_speed, bool);
-	s32 (*check_link)(struct mxgbe_hw *, mxgbe_link_speed *, bool *);
-#endif
-	s32 (*get_firmware_version)(struct mxgbe_hw *, u16 *);
-	s32 (*read_i2c_byte)(struct mxgbe_hw *, u8, u8, u8 *);
-	s32 (*write_i2c_byte)(struct mxgbe_hw *, u8, u8, u8);
-	s32 (*read_i2c_sff8472)(struct mxgbe_hw *, u8 , u8 *);
-	s32 (*read_i2c_eeprom)(struct mxgbe_hw *, u8 , u8 *);
-	s32 (*write_i2c_eeprom)(struct mxgbe_hw *, u8, u8);
-	s32 (*check_overtemp)(struct mxgbe_hw *);
-};
-
-struct mxgbe_phy_info {
-	struct mxgbe_phy_op	ops;
-	struct mdio_if_info	mdio;
-	u32			id;
-};
-
-struct mxgbe_hw {
-	u8 __iomem		*hw_addr;
-	void			*back;
-	struct mxgbe_phy_info	phy;
-};
-
-struct mxgbe_queue_container {
-	struct mxgbe_queue *ring;	/* pointer to linked list of rings */
-	unsigned int	total_bytes;	/* total bytes processed this int */
-	unsigned int	total_packets;	/* total packets processed this int */
-	u16		work_limit;	/* total work allowed per interrupt */
-	u8		count;		/* total number of rings in vector */
-};
-
 struct mxgbe_tx_buff {
-	struct sk_buff	*skb;
-	dma_addr_t	dma;
+	struct sk_buff		*skb;
+	dma_addr_t		dma;
 	/*
 	union mxgbe_adv_tx_desc *next_to_watch;
 	unsigned long time_stamp;
@@ -178,32 +137,32 @@ struct mxgbe_tx_buff {
 typedef struct mxgbe_tx_buff mxgbe_tx_buff_t; /* net, txq */
 
 struct mxgbe_rx_buff {
-	void		*addr;		/* CPU-viewed addr */
-	dma_addr_t	dma;		/* DMA-viewed addr */
-	size_t		size;
-	struct sk_buff	*skb;
-	unsigned int	bytecount;
+	void			*addr;		/* CPU-viewed addr */
+	dma_addr_t		dma;		/* DMA-viewed addr */
+	size_t			size;
+	struct sk_buff		*skb;
+	unsigned int		bytecount;
 };
 typedef struct mxgbe_rx_buff mxgbe_rx_buff_t; /* net, rxq */
 
 struct mxgbe_queue {
-	struct mxgbe_vector *vector;	/* backpointer to host vector */
-	int		descr_cnt;	/* <-- ethtool set_ringparam */
-	size_t		que_size;
-	void		*que_addr;	/* CPU-viewed addr */
-	dma_addr_t	que_handle;	/* dev-viewed addr */
-	size_t		tail_size;
-	void		*tail_addr;	/* CPU-viewed addr */
-	dma_addr_t	tail_handle;	/* dev-viewed addr */
-	int		prio;
+	struct mxgbe_vector	*vector;	/* backpointer to host vector */
+	int			descr_cnt;	/* <-- ethtool set_ringparam */
+	size_t			que_size;
+	void			*que_addr;	/* CPU-viewed addr */
+	dma_addr_t		que_handle;	/* dev-viewed addr */
+	size_t			tail_size;
+	void			*tail_addr;	/* CPU-viewed addr */
+	dma_addr_t		tail_handle;	/* dev-viewed addr */
+	int			prio;
 	union {
-		mxgbe_rx_buff_t	*rx_buff;  /* [sizeof() * descr_cnt] */
-		mxgbe_tx_buff_t	*tx_buff;  /* [sizeof() * descr_cnt] */
+		mxgbe_rx_buff_t	*rx_buff;	/* [sizeof() * descr_cnt] */
+		mxgbe_tx_buff_t	*tx_buff;	/* [sizeof() * descr_cnt] */
 	};
-	int		last_alloc;
+	int			last_alloc;
 
-	raw_spinlock_t	lock;		/* lock .tail */
-	u16		tail;
+	raw_spinlock_t		lock;		/* lock .tail */
+	u16			tail;
 } ____cacheline_internodealigned_in_smp;
 
 typedef struct mxgbe_vector {
@@ -225,11 +184,11 @@ typedef struct mxgbe_vector {
 } mxgbe_vector_t;
 
 struct mxgbe_err_flags {
-	int quefull_f;
-	u64 quefull_c;
-	int queempty_f;
-	u64 queempty_c;
-	u64 errirq_c;
+	int			quefull_f;
+	u64			quefull_c;
+	int			queempty_f;
+	u64			queempty_c;
+	u64			errirq_c;
 };
 
 /* PCI */
@@ -238,6 +197,7 @@ typedef struct mxgbe_priv {
 	struct pci_dev		*pdev;		/* PCI device struct */
 	void __iomem		*bar0_base;	/* ioremap'ed address to BAR0 */
 	phys_addr_t		bar0_base_bus;	/* BAR0 phys address for mmap */
+	int			revision;
 
 	/* Net */
 	struct net_device	*ndev;		/* Network device */
@@ -263,17 +223,18 @@ typedef struct mxgbe_priv {
 	struct msix_entry	*msix_entries;
 
 	u32			msg_enable;	/* debug message level */
-	unsigned int		mii;		/* mii port available */
-	struct mii_if_info	mii_if;
 
-	/* PHY */
-	struct mxgbe_hw		hw;
+	/* MDIO */
+	raw_spinlock_t		mgio_lock;
+	struct mii_bus		*mii_bus;
+	int			pcsaddr;	/* Address of Internal PHY */
+	u32			pcs_dev_id;
 
 	/* I2C */
 	struct i2c_adapter	*i2c_0;	/* SFP */
 	struct i2c_adapter	*i2c_1;	/* VSC */
 	struct i2c_adapter	*i2c_2;	/* EEPROM */
-	u64 MAC;
+	u64			MAC;
 
 	/* MAC */
 	struct task_struct	*mac_task;

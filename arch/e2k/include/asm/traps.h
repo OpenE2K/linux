@@ -34,6 +34,9 @@ do {									       \
 	force_sig_fault(signo, code, addr, trapno);			       \
 } while (0)
 
+extern int pf_on_page_boundary(unsigned long address, tc_cond_t cond);
+extern bool is_spurious_qp_store(bool store, unsigned long address,
+			int fmt, tc_mask_t mask, unsigned long *pf_address);
 extern void parse_TIR_registers(struct pt_regs *regs, u64 exceptions);
 extern void do_aau_fault(int aa_field, struct pt_regs *regs);
 extern int handle_proc_stack_bounds(struct e2k_stacks *stacks,

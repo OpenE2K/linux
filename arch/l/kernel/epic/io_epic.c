@@ -2318,26 +2318,3 @@ static bool irqchip_is_ioepic(struct irq_chip *chip)
 	return chip == &ioepic_chip || chip == &msi_chip;
 }
 
-static void quirk_pci_msi(struct pci_dev *pdev)
-{
-	struct iohub_sysdata *sd = pdev->bus->sysdata;
-	unsigned long pci_msi_addr;
-
-	if (!cpu_has_epic()) /* APIC + EIOhub proto */
-		return;
-	get_io_epic_msi(dev_to_node(&pdev->dev),
-			 &sd->pci_msi_addr_lo, &sd->pci_msi_addr_hi);
-
-	sd->revision = pdev->revision;
-	sd->generation = 2; /* EIOHub */
-
-	pci_msi_addr = (unsigned long)sd->pci_msi_addr_hi << 32 |
-		sd->pci_msi_addr_lo;
-
-	epic_printk("MSI address at: 0x%lx; IOHUB generation:%d,"
-		"revision %d\n", pci_msi_addr,
-		  sd->generation, sd->revision);
-}
-
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP,
-		PCI_DEVICE_ID_MCST_I2C_SPI_EPIC, quirk_pci_msi);

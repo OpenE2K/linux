@@ -34,15 +34,25 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 	size_t size;
 	void __iomem *bar_addr[MXGBE_PCI_BAR_NUMS] = {NULL};
 	phys_addr_t bar_addr_bus[MXGBE_PCI_BAR_NUMS] = {0};
-
-	FDEBUG;
+	struct device_node *np = dev_of_node(&pdev->dev);
+	const char *of_status_prop = NULL;
 
 	assert(pdev);
 	if (!pdev)
 		return -ENODEV;
 
-	DEV_DBG(MXGBE_DBG_MSK_PCI, &pdev->dev, "PCI Probe: device %s\n",
-		pci_name(pdev));
+	/* check devtree config */
+	if (np) {
+		of_status_prop = of_get_property(np, "status", NULL);
+		if (!strcmp(of_status_prop, "okay")) {
+			dev_info(&pdev->dev, "device enabled in devtree\n");
+		} else {
+			dev_warn(&pdev->dev, "device disabled in devtree\n");
+			return -ENODEV;
+		}
+	} else {
+		dev_warn(&pdev->dev, "can't find node in devtree\n");
+	}
 
 	dev_info(&pdev->dev, "initializing PCI device %04x:%04x\n",
 		 pdev->vendor, pdev->device);
@@ -50,13 +60,13 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 	/* PCI */
 	if ((err = pci_enable_device(pdev))) {
 		dev_err(&pdev->dev,
-			"ERROR: Cannot enable PCI device, aborting\n");
+			"Cannot enable PCI device, aborting\n");
 		goto failure;
 	}
 
-	if ((err = pci_request_regions(pdev, DRIVER_NAME))) {
+	if ((err = pci_request_regions(pdev, KBUILD_MODNAME))) {
 		dev_err(&pdev->dev,
-			"ERROR: Cannot obtain PCI resources, aborting\n");
+			"Cannot obtain PCI resources, aborting\n");
 		goto failure_release_pci;
 	}
 
@@ -66,7 +76,7 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 		if ((bar_addr[i] = pci_iomap(pdev, i, size)) == NULL) {
 			err = -ENODEV;
 			dev_err(&pdev->dev,
-				"ERROR: Cannot map BAR%d, aborting\n", i);
+				"Cannot map BAR%d, aborting\n", i);
 			goto failure_iounmap;
 		}
 		bar_addr_bus[i] = pci_resource_start(pdev, i);
@@ -78,7 +88,7 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 
 	if (pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
 		dev_warn(&pdev->dev,
-			"WARNING: No usable 64bit DMA configuration\n");
+			"No usable 64bit DMA configuration\n");
 	} else {
 		pci_set_master(pdev);
 		/*pci_set_cacheline_size(pdev);*/
@@ -87,7 +97,8 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 	if ((err = mxgbe_init_board(pdev, bar_addr, bar_addr_bus)))
 		goto failure_iounmap;
 
-	DEV_DBG(MXGBE_DBG_MSK_PCI, &pdev->dev, "PCI Probe: done\n");
+	dev_dbg(&pdev->dev, "PCI probe: done\n");
+
 	return 0;
 
 
@@ -119,14 +130,11 @@ static void remove(struct pci_dev *pdev)
 	mxgbe_priv_t *priv;
 	void __iomem *bar_addr[MXGBE_PCI_BAR_NUMS] = {NULL};
 
-
-	FDEBUG;
-
 	assert(pdev);
 	if (!pdev)
 		return;
 
-	DEV_DBG(MXGBE_DBG_MSK_PCI, &pdev->dev, "PCI Remove device\n");
+	dev_dbg(&pdev->dev, "PCI remove device\n");
 
 	priv = pci_get_drvdata(pdev);
 	assert(priv);
@@ -145,18 +153,16 @@ static void remove(struct pci_dev *pdev)
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 
-	DEV_DBG(MXGBE_DBG_MSK_PCI, &pdev->dev, "PCI Remove: done\n");
+	dev_dbg(&pdev->dev, "PCI remove: done\n");
 } /* remove */
 
 
 static void shutdown(struct pci_dev *pdev)
 {
-	FDEBUG;
-
 	if (!pdev)
 		return;
 
-	DEV_DBG(MXGBE_DBG_MSK_PCI, &pdev->dev, "PCI Shutdown\n");
+	dev_dbg(&pdev->dev, "PCI shutdown\n");
 
 	mxgbe_release_board(pdev);
 
@@ -177,7 +183,7 @@ MODULE_DEVICE_TABLE(pci, ids);
 
 /* PCI Device API Driver */
 struct pci_driver mxgbe_pci_driver = {
-	.name		= DRIVER_NAME,
+	.name		= KBUILD_MODNAME,
 	.id_table	= ids,
 	.probe		= probe,
 	.remove		= remove,

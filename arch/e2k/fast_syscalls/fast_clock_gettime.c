@@ -39,6 +39,11 @@ int fast_sys_gettimeofday(struct timeval __user *__restrict tv,
 
 	prefetchw(&fsys_data);
 
+#ifdef	CONFIG_KVM_HOST_MODE
+	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
+		ttable_entry_gettimeofday((u64) tv, (u64) tz);
+#endif
+
 	tv = (typeof(tv)) ((u64) tv & E2K_VA_MASK);
 	tz = (typeof(tz)) ((u64) tz & E2K_VA_MASK);
 	if (unlikely((u64) tv + sizeof(struct timeval) > ti->addr_limit.seg
@@ -49,8 +54,7 @@ int fast_sys_gettimeofday(struct timeval __user *__restrict tv,
 	if (likely(tv)) {
 		ret = do_fast_gettimeofday(tv);
 		if (unlikely(ret))
-/* ibranch */		ttable_entry_gettimeofday((u64) tv, (u64) tz);
-/* call			return ttable_entry_gettimeofday((u64) tv, (u64) tz); */
+			ttable_entry_gettimeofday((u64) tv, (u64) tz);
 	} else {
 		ret = 0;
 	}

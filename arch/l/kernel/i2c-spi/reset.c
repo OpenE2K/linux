@@ -22,6 +22,7 @@
 #endif
 #include <asm/iolinkmask.h>
 #include <asm/sic_regs.h>
+#include <asm/epic.h>
 
 #include <asm-l/i2c-spi.h>
 #include <asm-l/gpio.h>
@@ -162,7 +163,8 @@ static void l_reset_set_control_func(struct pci_dev *dev)
 static struct pci_dev *get_i2c_spi_dev(void)
 {
 	struct pci_dev *dev = NULL;
-	dev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
+	if (cpu_has_epic())
+		dev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
 				PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI, NULL);
 	if (!dev)
 		dev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,

@@ -60,22 +60,33 @@ typedef struct iohub_sysdata {
 	int	node;		/* NUMA node */
 	int	link;		/* local number of IO link on the node */
 #endif /* CONFIG_IOHUB_DOMAINS */
-	u32	pci_msi_addr_lo;	/* MSI transaction address */
-	u32	pci_msi_addr_hi;	/* MSI transaction upper address */
-	u8	revision;	/* IOHUB revision */
-	u8	generation;	/* IOHUB generation */
+	u32	pci_msi_addr_lo; /* MSI transaction address */
+	u32	pci_msi_addr_hi;/* MSI transaction upper address */
+	/*IOHUB can be connected to EIOHUB and vice versa */
+	bool	has_iohub;
+	u8	iohub_revision;		/* IOHUB revision */
+	u8	iohub_generation;	/* IOHUB generation */
+	bool	has_eioh;
+	u8	eioh_generation;	/* EIOHUB generation */
+	u8	eioh_revision;		/* EIOHUB revision */
 
-	struct resource			mem_space;
+	struct resource		mem_space; /* pci registers memory */
 	void *l_iommu;
 } iohub_sysdata_t;
 
-#define iohub_revision(pdev)	({			\
-	struct iohub_sysdata *sd = pdev->bus->sysdata;	\
-	(sd->revision >> 1);				\
+bool l_eioh_device(struct pci_dev *pdev);
+
+#define iohub_revision(pdev)	({				\
+	struct iohub_sysdata *sd = pdev->bus->sysdata;		\
+	u8 rev = l_eioh_device(pdev) ? sd->eioh_revision :	\
+					sd->iohub_revision;	\
+	(rev >> 1);						\
 })
+
 #define iohub_generation(pdev)	({			\
 	struct iohub_sysdata *sd = pdev->bus->sysdata;	\
-	sd->generation;					\
+	(l_eioh_device(pdev) ? sd->eioh_generation :	\
+				sd->iohub_generation);	\
 })
 
 #ifdef CONFIG_IOHUB_DOMAINS

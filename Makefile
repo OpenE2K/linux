@@ -2,7 +2,7 @@
 VERSION = 5
 PATCHLEVEL = 4
 SUBLEVEL = 91
-EXTRAVERSION = -2.3-sd
+EXTRAVERSION = -2.9
 NAME = Kleptomaniac Octopus
 
 # *DOCUMENTATION*
@@ -409,19 +409,6 @@ KBUILD_HOSTLDFLAGS  := $(HOST_LFS_LDFLAGS) $(HOSTLDFLAGS)
 KBUILD_HOSTLDLIBS   := $(HOST_LFS_LIBS) $(HOSTLDLIBS)
 
 # Make variables (CC, etc...)
-CC		= $(CROSS_COMPILE)gcc
-CPP		= $(CC) -E
-ifeq  ($(call cc-lcc-yn),y)
-AS		:= $(shell $(CC) -print-prog-name=as)
-LD		:= $(shell $(CC) -print-prog-name=ld)
-AR		:= $(shell $(CC) -print-prog-name=ar)
-NM		:= $(shell $(CC) -print-prog-name=nm)
-STRIP		:= $(shell $(CC) -print-prog-name=strip)
-OBJCOPY		:= $(shell $(CC) -print-prog-name=objcopy)
-OBJDUMP		:= $(shell $(CC) -print-prog-name=objdump)
-OBJSIZE		:= $(shell $(CC) -print-prog-name=size)
-else
-AS		= $(CROSS_COMPILE)as
 CPP		= $(CC) -E
 ifneq ($(LLVM),)
 CC		= clang
@@ -435,6 +422,16 @@ OBJSIZE		= llvm-size
 STRIP		= llvm-strip
 else
 CC		= $(CROSS_COMPILE)gcc
+ifeq  ($(call cc-lcc-yn),y)
+LD              := $(shell $(CC) -print-prog-name=ld)
+AR		:= $(shell $(CC) -print-prog-name=ar)
+NM		:= $(shell $(CC) -print-prog-name=nm)
+OBJCOPY		:= $(shell $(CC) -print-prog-name=objcopy)
+OBJDUMP		:= $(shell $(CC) -print-prog-name=objdump)
+READELF		:= $(shell $(CC) -print-prog-name=readelf)
+OBJSIZE		:= $(shell $(CC) -print-prog-name=size)
+STRIP		:= $(shell $(CC) -print-prog-name=strip)
+else
 LD		= $(CROSS_COMPILE)ld
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -461,7 +458,7 @@ KBZIP2		= bzip2
 KLZOP		= lzop
 LZMA		= lzma
 LZ4		= lz4c
-XZ		= xz
+XZ		= xz 
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void -Wno-unknown-attribute $(CF)
@@ -500,13 +497,13 @@ ifeq  ($(call cc-lcc-yn),y)
 KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common -fno-PIE \
 		   -Werror=implicit-function-declaration -Werror=implicit-int \
-		   -Wno-format-security \
+		   -Werror=return-type -Wno-format-security \
 		   -std=gnu89
 else
 KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
 		   -Werror=implicit-function-declaration -Werror=implicit-int \
-		   -Werror=return-type -Wno-format-security \
+		   -Wno-format-security \
 		   -std=gnu89
 endif
 ifeq  ($(call cc-lcc-yn),y)

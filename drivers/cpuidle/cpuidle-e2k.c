@@ -61,13 +61,17 @@ static int __cpuidle C3_enter(struct cpuidle_device *dev,
 	state; \
 })
 
-#define E2K_CPUIDLE_C2_STATE ({ \
+/* One step takes ~2.6 us */
+#define DIVF_STEPS_LENGTH_US(divF) ((divF) * 26 / 10)
+#define E2K_CPUIDLE_C2_STATE(divF) ({ \
 	struct cpuidle_state state = { \
 		.name = "C2", \
 		.desc = "CPU pipeline stop at lower freq", \
-		/* TODO These can be measured only on real hardware */ \
-		.exit_latency = 10, \
-		.target_residency = 20, \
+		/* Divide by 2 since CPU starts executing immediately \
+		 * (although at lower frequency), and enters C2 also \
+		 * immediately (although at higher frequency). */ \
+		.exit_latency = DIVF_STEPS_LENGTH_US(divF) / 2, \
+		.target_residency = 1 + DIVF_STEPS_LENGTH_US(divF) / 2, \
 		.enter = &C2_enter \
 	}; \
 	state; \
@@ -77,8 +81,13 @@ static int __cpuidle C3_enter(struct cpuidle_device *dev,
 	struct cpuidle_state state = { \
 		.name = "C3", \
 		.desc = "CPU clock off (including L1/L2)", \
-		.exit_latency = 30, \
-		.target_residency = 100, \
+		/* Since v6 C3 is entered and exited ~(7 * 2.6) us slower */ \
+		.exit_latency = 30 + (cpu_has(CPU_FEAT_ISET_V6) \
+				      ? DIVF_STEPS_LENGTH_US(7) \
+				      : 0), \
+		.target_residency = 100 + (cpu_has(CPU_FEAT_ISET_V6) \
+					   ? DIVF_STEPS_LENGTH_US(14) \
+					   : 0), \
 		.enter = &C3_enter \
 	}; \
 	state; \
@@ -90,26 +99,39 @@ static struct cpuidle_driver e2k_idle_driver = {
 	.owner = THIS_MODULE,
 };
 
+static int __initdata cpu_divF[NR_CPUS];
 static void __init initialize_C2_state(void *unused)
 {
 	int cpu = smp_processor_id();
 	int node = numa_node_id();
 	int core = cpu_to_cpuid(cpu) % cpu_max_cores_num();
 	freq_core_mon_t C2_mon;
-	int new_divF = 0x2f;
+	/* Choose not too deep sleep, otherwise there is no
+	 * value in choosing C2 over C3. */
+	int new_divF = 0x10;
 
 	C2_mon.word = sic_read_node_nbsr_reg(node, PMC_FREQ_CORE_N_MON(core));
 	if (C2_mon.divF_limit_hi < new_divF)
 		new_divF = C2_mon.divF_limit_hi;
-	pr_info("Chosen C2 divider: 0x%x (hardware limit 0x%x)\n",
-			new_divF, C2_mon.divF_limit_hi);
+
+	cpu_divF[cpu] = new_divF;
 
 	/* Set C2 state to also reduce CPU frequency */
 	if (cpu == cpumask_first(cpumask_of_node(node)))
 		sic_write_node_nbsr_reg(node, PMC_FREQ_C2, new_divF);
-
-	put_cpu();
 }
+
+/* TODO: C3 is temporarily disabled, this allows to force it */
+static bool force_C3;
+static int __init force_C3_setup(char *__unused)
+{
+	pr_info("C3 idle state enabled from command line\n");
+	force_C3 = 1;
+
+	return 1;
+}
+__setup("force_C3", force_C3_setup);
+
 
 /* Initialize CPU idle by registering the idle states */
 static int __init e2k_idle_init(void)
@@ -118,22 +140,50 @@ static int __init e2k_idle_init(void)
 		int nr = 0;
 
 		if (!idle_nomwait) {
-			e2k_idle_driver.states[nr] = E2K_CPUIDLE_C1_STATE;
+			int cpu, divF_min = INT_MAX, divF_max = 0;
 
+			/* Enable C1 state */
+			e2k_idle_driver.states[nr] = E2K_CPUIDLE_C1_STATE;
+			nr += 1;
+
+			/* Enable C2 state if hardware limits are sane */
 			on_each_cpu(initialize_C2_state, NULL, 1);
-			e2k_idle_driver.states[nr + 1] = E2K_CPUIDLE_C2_STATE;
-			nr += 2;
+			for_each_online_cpu(cpu) {
+				divF_min = min(divF_min, cpu_divF[cpu]);
+				divF_max = max(divF_max, cpu_divF[cpu]);
+			}
+			pr_info("Chosen C2 state dividers range 0x%x:0x%x\n",
+					divF_min, divF_max);
+			if (divF_min) {
+				e2k_idle_driver.states[nr] = E2K_CPUIDLE_C2_STATE(
+						(divF_min + divF_max) / 2);
+				nr += 1;
+			} else {
+				pr_warn("WARNING: disabling C2 state\n");
+			}
 		}
-		/* Old C3 state would just cause interceptions */
-		if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
+
+		/* Enable C3 state everywhere except pure paravrit guest:
+		 * old C3 state would just cause interceptions. */
+		/* TODO bug 130748: temporarily disable C3 on e12c/e16c/e2c3 until bug is fixed,
+		 * can be forced back on with "force_C3" in cmdline */
+		if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) && force_C3) {
 			e2k_idle_driver.states[nr] = E2K_CPUIDLE_C3_STATE;
 			nr += 1;
+			WARN_ON(nr > 1 && e2k_idle_driver.states[nr - 1].target_residency <=
+					  e2k_idle_driver.states[nr - 2].target_residency);
 		}
 		e2k_idle_driver.state_count = nr;
 	} else if (cpu_has(CPU_FEAT_ISET_V3)) {
 		e2k_idle_driver.states[0] = E2K_CPUIDLE_C1_STATE;
-		e2k_idle_driver.states[1] = E2K_CPUIDLE_C3_STATE;
-		e2k_idle_driver.state_count = 2;
+		e2k_idle_driver.state_count = 1;
+
+		/* TODO bug 130433: temporarily disable C3 on e1c+ until bug is fixed,
+		 * can be forced back on with "force_C3" in cmdline */
+		if (!IS_MACHINE_E1CP || force_C3) {
+			e2k_idle_driver.states[1] = E2K_CPUIDLE_C3_STATE;
+			e2k_idle_driver.state_count = 2;
+		}
 	} else {
 		e2k_idle_driver.states[0] = E2K_CPUIDLE_C1_STATE;
 		e2k_idle_driver.state_count = 1;

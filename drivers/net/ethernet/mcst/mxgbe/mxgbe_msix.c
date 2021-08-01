@@ -37,11 +37,8 @@ static void msix_lut_set(mxgbe_vector_t *vector, uint16_t idx)
 {
 	void __iomem *base = vector->priv->bar0_base;
 
-	FDEBUG;
-
-	if (-1 == vector->bidx) {
+	if (-1 == vector->bidx)
 		vector->bidx = idx;
-	}
 
 	DEV_DBG(MXGBE_DBG_MSK_IRQ, &vector->priv->pdev->dev,
 		"set MSIXLUT: event=%3u(%3u), vect=%3u, irq=%3u, qn=%3u - %s\n",
@@ -64,8 +61,6 @@ int mxgbe_msix_prepare(mxgbe_priv_t *priv)
 	int err;
 	int vectors;
 
-	FDEBUG;
-
 	/* init priv->msix_entries */
 #ifdef MSIX_COMPACTMODE
 #warning not_tested
@@ -86,7 +81,7 @@ int mxgbe_msix_prepare(mxgbe_priv_t *priv)
 	vectors = min_t(int, vectors, MSIX_V_NUM);
 	priv->num_msix_entries = vectors;
 
-	DEV_DBG(MXGBE_DBG_MSK_IRQ, &priv->pdev->dev,
+	dev_dbg(&priv->pdev->dev,
 		"msix_prepare: rxn=%d txn=%d macn=%d vectors=%d cpus=%d\n",
 		priv->msix_rx_num, priv->msix_tx_num, priv->msix_mac_num,
 		vectors, num_online_cpus());
@@ -102,7 +97,7 @@ int mxgbe_msix_prepare(mxgbe_priv_t *priv)
 	} else {
 		priv->num_msix_entries = 0;
 		dev_err(&priv->pdev->dev,
-			"ERROR: Cannot allocate memory for msix, aborting\n");
+			"cannot allocate memory for msix, aborting\n");
 		return -ENOMEM;
 	}
 
@@ -121,11 +116,8 @@ err_free_msix:
 	return err;
 } /* mxgbe_msix_prepare */
 
-
 void mxgbe_msix_free(mxgbe_priv_t *priv)
 {
-	FDEBUG;
-
 	pci_disable_msix(priv->pdev);
 	kfree(priv->msix_entries);
 } /* mxgbe_msix_free */
@@ -140,9 +132,6 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 	unsigned int un;
 	unsigned int cpus;
 	int i;
-
-
-	FDEBUG;
 
 	cpus = num_online_cpus();
 	/* cleanup irq struct */
@@ -176,8 +165,7 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 					(void *)&priv->vector[i]);
 			if (err) {
 				dev_err(&priv->pdev->dev,
-					"ERROR: Cannot request rx irq %d," \
-					" aborting\n",
+					"Cannot request rx irq %d, aborting\n",
 					priv->msix_entries[i].vector);
 				goto err_unregister_irq;
 			}
@@ -196,8 +184,7 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 					(void *)&priv->vector[i]);
 			if (err) {
 				dev_err(&priv->pdev->dev,
-					"ERROR: Cannot request tx irq %d," \
-					" aborting\n",
+					"Cannot request tx irq %d, aborting\n",
 					priv->msix_entries[i].vector);
 				goto err_unregister_irq;
 			}
@@ -215,8 +202,7 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 					(void *)&priv->vector[i]);
 			if (err) {
 				dev_err(&priv->pdev->dev,
-					"ERROR: Cannot request mac irq %d," \
-					" aborting\n",
+					"Cannot request mac irq %d, aborting\n",
 					priv->msix_entries[i].vector);
 				goto err_unregister_irq;
 			}
@@ -297,12 +283,9 @@ err_unregister_irq:
 	return err;
 } /* mxgbe_msix_init */
 
-
 void mxgbe_msix_release(mxgbe_priv_t *priv)
 {
 	int i;
-
-	FDEBUG;
 
 	for (i = 0; i < priv->num_msix_entries; i++) {
 		if (priv->vector[i].irq != -1) {

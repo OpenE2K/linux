@@ -320,7 +320,8 @@ static inline int get_user_regs_struct_size(
 		     *size < offsetofend(struct user_regs_struct, gext_tag_v5) ||
 		     cpu_has(CPU_FEAT_ISET_V6) &&
 		     *size < offsetofend(struct user_regs_struct, ctpr3_hi)))
-		pr_info_ratelimited("sys_ptrace: size of user_regs_struct is too small to keep all registers. Are you using an old version of profiler or gdb?\n");
+		pr_info_ratelimited("%s [%d] sys_ptrace: size of user_regs_struct is too small to keep all registers. Are you using an old version of profiler or gdb?\n",
+				current->comm, current->pid);
 
 	return ret;
 }

@@ -8,8 +8,11 @@
 #include <asm/alternative.h>
 #include <asm/mmu_regs_access.h>
 #include <asm/gregs.h>
+#include <asm/regs_state.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
+
+#define	DEBUG_UPSR_FP_DISABLE
 
 /*
  * See below the 'flags' argument of xxx_guest_enter()/xxx_guest_exit()
@@ -23,10 +26,12 @@
 #define	DONT_CU_REGS_SWITCH	0x0010U	/* do not save/restore CUT and CU */
 					/* registers */
 #define DONT_MMU_CONTEXT_SWITCH	0x0020U	/* do not switch MMU context */
-#define	DONT_SAVE_GREGS_SWITCH	0x0040U	/* do not save global regs */
+#define	DONT_SAVE_KGREGS_SWITCH	0x0040U	/* do not save and set kernel global */
+					/* regs */
 #define	DONT_AAU_CONTEXT_SWITCH	0x0080U	/* do not switch AAU context */
-#define	EXIT_FROM_INTC_SWITCH	0x0100U	/* complete intercept emulation mode */
-#define	EXIT_FROM_TRAP_SWITCH	0x0200U	/* complete trap mode */
+#define	DONT_TRAP_MASK_SWITCH	0x0100U	/* do not switch OSEM context */
+#define	EXIT_FROM_INTC_SWITCH	0x1000U	/* complete intercept emulation mode */
+#define	EXIT_FROM_TRAP_SWITCH	0x2000U	/* complete trap mode */
 
 static inline void
 native_trap_guest_enter(struct thread_info *ti, struct pt_regs *regs,
@@ -77,8 +82,7 @@ native_trap_guest_get_restore_stacks(struct thread_info *ti,
 }
 
 static inline struct e2k_stacks *
-native_syscall_guest_get_restore_stacks(struct thread_info *ti,
-					struct pt_regs *regs)
+native_syscall_guest_get_restore_stacks(struct pt_regs *regs)
 {
 	return &regs->stacks;
 }
@@ -87,54 +91,14 @@ native_syscall_guest_get_restore_stacks(struct thread_info *ti,
  * The function should return bool is the system call from guest
  */
 static inline bool
-native_guest_syscall_enter(struct thread_info *ti, struct pt_regs *regs)
+native_guest_syscall_enter(struct pt_regs *regs)
 {
 	/* nothing guests can be */
 
 	return false;	/* it is not guest system call */
 }
-static inline void
-native_guest_syscall_exit_to(struct thread_info *ti, struct pt_regs *regs,
-				unsigned flags)
-{
-	/* nothing guests can be */
-}
 
 #ifdef	CONFIG_VIRTUALIZATION
-
-/*
- * Normally data stack is switched on interceptions as follows:
- * 1) Upon interception guest's USD_hi.size is saved into backup
- * stacks (cr1_lo.ussz field).
- * 2) Then hardware switches PCSP stack (see Phase 5) and does an
- * equivalent of DONE which modifies guest's USD with 'cr1_lo.ussz'
- * from the function that called GLAUNCH.
- * 3) Hypervisor in software saves this modified USD and restores it
- * before GLAUNCH.
- * 4) Hardware in GLAUNCH switches PCSP stack (see Phase 4)
- * 5) Hardware in GLAUNCH does an equivalent of DONE (see Phase 6)
- * which restores proper guest USD.
- *
- * But if hypervisor sets VIRT_CTRL_CU.glnch.g_th then that DONE is
- * skipped and guest's data stack is incorrect. So we manually do
- * here what DONE does. For simplicity do it always although it
- * actually is needed only in 'g_th' case.
- */
-static inline void kvm_correct_guest_data_stack_regs(
-		struct kvm_sw_cpu_context *sw_ctxt, e2k_cr1_hi_t cr1_hi)
-{
-	e2k_usd_lo_t usd_lo;
-	e2k_usd_hi_t usd_hi;
-	e2k_size_t real_size;
-
-	real_size = cr1_hi.CR1_hi_ussz << 4;
-	usd_hi = sw_ctxt->usd_hi;
-	usd_lo = sw_ctxt->usd_lo;
-	usd_lo.USD_lo_base += (real_size - usd_hi.USD_hi_size);
-	usd_hi.USD_hi_size = real_size;
-	sw_ctxt->usd_lo = usd_lo;
-	sw_ctxt->usd_hi = usd_hi;
-}
 
 /*
  * For interceptions just switch actual registers with saved values
@@ -187,9 +151,6 @@ static inline void kvm_switch_stack_regs(struct kvm_sw_cpu_context *sw_ctxt,
 	}
 }
 
-#define	Compiler_bug_128308_workaround
-
-#ifndef	Compiler_bug_128308_workaround
 static inline void kvm_switch_fpu_regs(struct kvm_sw_cpu_context *sw_ctxt)
 {
 	e2k_fpcr_t fpcr;
@@ -212,9 +173,6 @@ static inline void kvm_switch_fpu_regs(struct kvm_sw_cpu_context *sw_ctxt)
 	sw_ctxt->pfpfr = pfpfr;
 	sw_ctxt->upsr = upsr;
 }
-#else	/* Compiler_bug_128308_workaround */
-extern noinline void kvm_switch_fpu_regs(struct kvm_sw_cpu_context *sw_ctxt);
-#endif	/* !Compiler_bug_128308_workaround */
 
 static inline void kvm_switch_cu_regs(struct kvm_sw_cpu_context *sw_ctxt)
 {
@@ -377,6 +335,39 @@ static inline void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt,
 
 }
 
+#ifdef	CONFIG_CLW_ENABLE
+static inline void kvm_switch_clw_regs(struct kvm_sw_cpu_context *sw_ctxt, bool guest_enter)
+{
+	if (guest_enter) {
+		native_write_US_CL_B(sw_ctxt->us_cl_b);
+		native_write_US_CL_UP(sw_ctxt->us_cl_up);
+		native_write_US_CL_M0(sw_ctxt->us_cl_m0);
+		native_write_US_CL_M1(sw_ctxt->us_cl_m1);
+		native_write_US_CL_M2(sw_ctxt->us_cl_m2);
+		native_write_US_CL_M3(sw_ctxt->us_cl_m3);
+
+		NATIVE_WRITE_MMU_US_CL_D(sw_ctxt->us_cl_d);
+	} else {
+		sw_ctxt->us_cl_d = NATIVE_READ_MMU_US_CL_D();
+
+		DISABLE_US_CLW();
+
+		sw_ctxt->us_cl_b = native_read_US_CL_B();
+		sw_ctxt->us_cl_up = native_read_US_CL_UP();
+		sw_ctxt->us_cl_m0 = native_read_US_CL_M0();
+		sw_ctxt->us_cl_m1 = native_read_US_CL_M1();
+		sw_ctxt->us_cl_m2 = native_read_US_CL_M2();
+		sw_ctxt->us_cl_m3 = native_read_US_CL_M3();
+	}
+}
+#else
+static inline void kvm_switch_clw_regs(struct kvm_sw_cpu_context *sw_ctxt, bool guest_enter)
+{
+	/* Nothing to do */
+}
+#endif
+
+
 static inline void
 switch_ctxt_trap_enable_mask(struct kvm_sw_cpu_context *sw_ctxt)
 {
@@ -392,11 +383,23 @@ static inline void host_guest_enter(struct thread_info *ti,
 {
 	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->sw_ctxt;
 
-	switch_ctxt_trap_enable_mask(sw_ctxt);
-	/* In full virtualization mode guest sets his own OSEM in thread_init() */
-	if (!vcpu->is_hv)
-		KVM_BUG_ON((NATIVE_READ_OSEM_REG_VALUE() & HYPERCALLS_TRAPS_MASK) !=
-			HYPERCALLS_TRAPS_MASK);
+	if (likely(!(flags & DONT_TRAP_MASK_SWITCH))) {
+		switch_ctxt_trap_enable_mask(sw_ctxt);
+		/* In full virtualization mode guest sets his own OSEM */
+		/* in thread_init() */
+		if (!vcpu->is_hv) {
+			KVM_BUG_ON((NATIVE_READ_OSEM_REG_VALUE() &
+					HYPERCALLS_TRAPS_MASK) !=
+						HYPERCALLS_TRAPS_MASK);
+		}
+	} else {
+		/* In full virtualization mode guest sets his own OSEM */
+		/* in thread_init() */
+		if (!vcpu->is_hv) {
+			KVM_BUG_ON((NATIVE_READ_OSEM_REG_VALUE() &
+					HYPERCALLS_TRAPS_MASK) != 0);
+		}
+	}
 
 	if (flags & FROM_HYPERCALL_SWITCH) {
 		/*
@@ -427,8 +430,13 @@ static inline void host_guest_enter(struct thread_info *ti,
 			machine.calculate_aau_aaldis_aaldas(NULL, ti, &sw_ctxt->aau_context);
 #endif
 
-		/* For interceptions restore extended part */
-		NATIVE_RESTORE_KERNEL_GREGS(&ti->k_gregs);
+		if (machine.flushts)
+			machine.flushts();
+
+		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
+			/* For interceptions restore extended part */
+			NATIVE_RESTORE_KERNEL_GREGS(&ti->k_gregs);
+		}
 
 		NATIVE_RESTORE_INTEL_REGS(sw_ctxt);
 
@@ -438,7 +446,9 @@ static inline void host_guest_enter(struct thread_info *ti,
 		 * the list in sw_ctxt definition */
 		kvm_switch_fpu_regs(sw_ctxt);
 		kvm_switch_cu_regs(sw_ctxt);
-		kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+		if (likely(!(flags & DONT_MMU_CONTEXT_SWITCH))) {
+			kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+		}
 
 #ifdef CONFIG_USE_AAU
 		if (!(flags & DONT_AAU_CONTEXT_SWITCH)) {
@@ -477,6 +487,9 @@ static inline void host_guest_enter(struct thread_info *ti,
 			/* restore saved source pointers of host stack */
 			kvm_switch_stack_regs(sw_ctxt, false, true);
 		}
+
+		if (vcpu->is_hv)
+			kvm_switch_clw_regs(sw_ctxt, true);
 	}
 }
 
@@ -509,11 +522,16 @@ static inline void host_guest_exit(struct thread_info *ti,
 {
 	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->sw_ctxt;
 
-	switch_ctxt_trap_enable_mask(sw_ctxt);
+	if (likely(!(flags & DONT_TRAP_MASK_SWITCH))) {
+		switch_ctxt_trap_enable_mask(sw_ctxt);
+	}
 	KVM_BUG_ON(NATIVE_READ_OSEM_REG_VALUE() & HYPERCALLS_TRAPS_MASK);
 
 	/* Switch data stack before all function calls */
 	if (flags & USD_CONTEXT_SWITCH) {
+		if (vcpu->is_hv)
+			kvm_switch_clw_regs(sw_ctxt, false);
+
 		if (!(flags & FROM_HYPERCALL_SWITCH) || !vcpu->is_hv) {
 			kvm_switch_stack_regs(sw_ctxt, false, false);
 		} else {
@@ -593,21 +611,23 @@ static inline void host_guest_exit(struct thread_info *ti,
 		if (cpu_has(CPU_HWBUG_L1I_STOPS_WORKING))
 			E2K_DISP_CTPRS();
 
-		/* For interceptions save extended part. */
-		machine.save_kernel_gregs(&ti->k_gregs);
-		ONLY_SET_KERNEL_GREGS(ti);
+		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
+			/* For interceptions save extended part. */
+			machine.save_kernel_gregs(&ti->k_gregs);
+			ONLY_SET_KERNEL_GREGS(ti);
+		}
 
 		NATIVE_SAVE_INTEL_REGS(sw_ctxt);
 #ifdef CONFIG_MLT_STORAGE
 		machine.invalidate_MLT();
 #endif
-		if (machine.flushts)
-			machine.flushts();
 
 		/* Isolate from QEMU */
 		kvm_switch_fpu_regs(sw_ctxt);
 		kvm_switch_cu_regs(sw_ctxt);
-		kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+		if (likely(!(flags & DONT_MMU_CONTEXT_SWITCH))) {
+			kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+		}
 	} else {
 		/*
 		 * Starting emulation of interseption of paravirtualized vcpu
@@ -708,6 +728,7 @@ pv_vcpu_switch_guest_host_context(struct kvm_vcpu *vcpu,
 static inline void pv_vcpu_switch_host_context(struct kvm_vcpu *vcpu)
 {
 	kvm_host_context_t *host_ctxt = &vcpu->arch.host_ctxt;
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
 	unsigned long	*stack;
 	pt_regs_t	*regs;
 	e2k_usd_hi_t	k_usd_hi;
@@ -717,13 +738,16 @@ static inline void pv_vcpu_switch_host_context(struct kvm_vcpu *vcpu)
 	e2k_psp_hi_t	k_psp_hi;
 	e2k_pcsp_lo_t	k_pcsp_lo;
 	e2k_pcsp_hi_t	k_pcsp_hi;
+	e2k_upsr_t	upsr;
 	unsigned long	base;
 	unsigned long	size;
 	unsigned long	used;
+	unsigned osem;
 
 	/* keep current state of context */
 	stack = current->stack;
 	regs = current_thread_info()->pt_regs;
+	upsr = current_thread_info()->upsr;
 	k_usd_lo = current_thread_info()->k_usd_lo;
 	k_usd_hi = current_thread_info()->k_usd_hi;
 	k_sbr.SBR_reg = (unsigned long)stack + KERNEL_C_STACK_SIZE +
@@ -736,6 +760,7 @@ static inline void pv_vcpu_switch_host_context(struct kvm_vcpu *vcpu)
 	/* restore VCPU thread context */
 	current->stack = host_ctxt->stack;
 	current_thread_info()->pt_regs = host_ctxt->pt_regs;
+	current_thread_info()->upsr = host_ctxt->upsr;
 	current_thread_info()->k_usd_hi = host_ctxt->k_usd_hi;
 	current_thread_info()->k_usd_lo = host_ctxt->k_usd_lo;
 	current_thread_info()->k_psp_lo = host_ctxt->k_psp_lo;
@@ -746,6 +771,7 @@ static inline void pv_vcpu_switch_host_context(struct kvm_vcpu *vcpu)
 	/* save VCPU thread context */
 	host_ctxt->stack = stack;
 	host_ctxt->pt_regs = regs;
+	host_ctxt->upsr = upsr;
 	host_ctxt->k_usd_lo = k_usd_lo;
 	host_ctxt->k_usd_hi = k_usd_hi;
 	host_ctxt->k_sbr = k_sbr;
@@ -753,6 +779,11 @@ static inline void pv_vcpu_switch_host_context(struct kvm_vcpu *vcpu)
 	host_ctxt->k_psp_hi = k_psp_hi;
 	host_ctxt->k_pcsp_lo = k_pcsp_lo;
 	host_ctxt->k_pcsp_hi = k_pcsp_hi;
+
+	/* remember host/guest OSEM registers state & restore guest/host state */
+	osem = host_ctxt->osem;
+	host_ctxt->osem = sw_ctxt->osem;
+	sw_ctxt->osem = osem;
 
 	/* keep current signal stack state */
 	base = current_thread_info()->signal_stack.base;
@@ -778,6 +809,20 @@ static inline void pv_vcpu_exit_to_host(struct kvm_vcpu *vcpu)
 	/* save VCPU guest thread context */
 	/* restore VCPU host thread context */
 	pv_vcpu_switch_host_context(vcpu);
+#ifdef	DEBUG_UPSR_FP_DISABLE
+	if (unlikely(!current_thread_info()->upsr.UPSR_fe)) {
+		pr_err("%s(): switch to host QEMU process with disabled "
+			"FloatPoint mask, UPSR 0x%x\n",
+			__func__, current_thread_info()->upsr.UPSR_reg);
+		/* correct UPSR to enable float pointing */
+		current_thread_info()->upsr.UPSR_fe = 1;
+	}
+	if (unlikely(!vcpu->arch.host_ctxt.upsr.UPSR_fe)) {
+		pr_err("%s(): switch from host VCPU process where disabled "
+			"FloatPoint mask, UPSR 0x%x\n",
+			__func__, vcpu->arch.host_ctxt.upsr.UPSR_reg);
+	}
+#endif	/* DEBUG_UPSR_FP_DISABLE */
 }
 
 static inline void pv_vcpu_enter_to_guest(struct kvm_vcpu *vcpu)
@@ -785,6 +830,14 @@ static inline void pv_vcpu_enter_to_guest(struct kvm_vcpu *vcpu)
 	/* save VCPU host thread context */
 	/* restore VCPU guest thread context */
 	pv_vcpu_switch_host_context(vcpu);
+#ifdef	DEBUG_UPSR_FP_DISABLE
+	if (unlikely(!current_thread_info()->upsr.UPSR_fe)) {
+		pr_err("%s(): switch to host VCPU process with disabled "
+			"FloatPoint mask, UPSR 0x%x\n",
+			__func__, current_thread_info()->upsr.UPSR_reg);
+		/* do not correct UPSR, maybe it should be */
+	}
+#endif	/* DEBUG_UPSR_FP_DISABLE */
 }
 
 static inline void
@@ -879,11 +932,12 @@ host_syscall_from_guest_user(struct thread_info *ti)
 static inline void
 host_trap_guest_exit_intc(struct thread_info *ti, struct pt_regs *regs)
 {
-	if (!kvm_test_and_clear_intc_emul_flag(regs)) {
+	if (likely(!kvm_test_intc_emul_flag(regs))) {
 		/* it is not paravirtualized guest VCPU intercepts*/
 		/* emulation mode, so nothing to do more */
 		return;
 	}
+	kvm_clear_intc_emul_flag(regs);
 
 	/*
 	 * Return from trap on paravirtualized guest VCPU which was
@@ -972,29 +1026,18 @@ host_syscall_guest_get_pv_vcpu_restore_stacks(struct thread_info *ti,
 		return &regs->g_stacks;
 	} else {
 		/* it need switch to guest user context */
-		return native_syscall_guest_get_restore_stacks(ti, regs);
+		return native_syscall_guest_get_restore_stacks(regs);
 	}
 }
 
 static inline struct e2k_stacks *
 host_trap_guest_get_restore_stacks(struct thread_info *ti, struct pt_regs *regs)
 {
-	if (test_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE)) {
+	if (test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)) {
 		/* host return to paravirtualized guest (VCPU) mode */
 		return host_trap_guest_get_pv_vcpu_restore_stacks(ti, regs);
 	}
 	return native_trap_guest_get_restore_stacks(ti, regs);
-}
-
-static inline struct e2k_stacks *
-host_syscall_guest_get_restore_stacks(struct thread_info *ti,
-						struct pt_regs *regs)
-{
-	if (test_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE)) {
-		/* host return to paravirtualized guest (VCPU) mode */
-		return host_syscall_guest_get_pv_vcpu_restore_stacks(ti, regs);
-	}
-	return native_syscall_guest_get_restore_stacks(ti, regs);
 }
 
 static inline void
@@ -1021,7 +1064,7 @@ host_trap_pv_vcpu_exit_trap(struct thread_info *ti, struct pt_regs *regs)
 static inline void
 host_trap_guest_exit_trap(struct thread_info *ti, struct pt_regs *regs)
 {
-	if (test_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE)) {
+	if (test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)) {
 		/* host return to paravirtualized guest (VCPU) mode */
 		host_trap_pv_vcpu_exit_trap(ti, regs);
 	}
@@ -1065,29 +1108,7 @@ host_syscall_pv_vcpu_exit_trap(struct thread_info *ti, struct pt_regs *regs)
 	atomic_inc(&vcpu->arch.host_ctxt.signal.in_syscall);
 }
 
-static inline void
-host_syscall_guest_exit_trap(struct thread_info *ti, struct pt_regs *regs)
-{
-	if (!test_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE))
-		return;
-
-	/* host return to paravirtualized guest (VCPU) mode */
-	host_syscall_pv_vcpu_exit_trap(ti, regs);
-
-	host_switch_trap_enable_mask(ti, regs, true);
-}
-
-static inline void
-host_guest_syscall_exit_to(struct thread_info *ti, struct pt_regs *regs,
-				unsigned flags)
-{
-	if (flags & EXIT_FROM_INTC_SWITCH) {
-		host_trap_guest_exit_intc(ti, regs);
-	}
-	if (flags & EXIT_FROM_TRAP_SWITCH) {
-		host_syscall_guest_exit_trap(ti, regs);
-	}
-}
+extern void host_syscall_guest_exit_trap(struct thread_info *, struct pt_regs *);
 
 extern void kvm_init_pv_vcpu_intc_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs);
 extern int last_light_hcall;
@@ -1096,13 +1117,14 @@ static inline void
 host_trap_guest_exit(struct thread_info *ti, struct pt_regs *regs,
 			trap_pt_regs_t *trap, unsigned flags)
 {
-	if (!test_and_clear_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE))
+	if (likely(!test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
 		return;
+
+	clear_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE);
 
 	/*
 	 * Trap on paravirtualized guest VCPU is interpreted as intercept
 	 */
-
 	kvm_emulate_pv_vcpu_intc(ti, regs, trap);
 
 	/* only after switch to host MMU context at previous function */
@@ -1112,13 +1134,14 @@ host_trap_guest_exit(struct thread_info *ti, struct pt_regs *regs,
 /*
  * The function should return bool 'is the system call from guest?'
  */
-static inline bool
-host_guest_syscall_enter(struct thread_info *ti, struct pt_regs *regs)
+static inline bool host_guest_syscall_enter(struct pt_regs *regs,
+		bool ts_host_at_vcpu_mode)
 {
-	if (!test_and_clear_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE))
+	if (likely(!ts_host_at_vcpu_mode))
 		return false;	/* it is not guest system call */
 
-	return pv_vcpu_syscall_intc(ti, regs);
+	clear_ts_flag(TS_HOST_AT_VCPU_MODE);
+	return pv_vcpu_syscall_intc(current_thread_info(), regs);
 }
 #endif	/* CONFIG_VIRTUALIZATION */
 
@@ -1188,25 +1211,26 @@ trap_guest_get_restore_stacks(struct thread_info *ti, struct pt_regs *regs)
 }
 
 static inline struct e2k_stacks *
-syscall_guest_get_restore_stacks(struct thread_info *ti, struct pt_regs *regs)
+syscall_guest_get_restore_stacks(bool ts_host_at_vcpu_mode, struct pt_regs *regs)
 {
-	return native_syscall_guest_get_restore_stacks(ti, regs);
+	return native_syscall_guest_get_restore_stacks(regs);
 }
+
+#define ts_host_at_vcpu_mode() false
 
 /*
  * The function should return bool is the system call from guest
  */
-static inline bool
-guest_syscall_enter(struct thread_info *ti, struct pt_regs *regs)
+static inline bool guest_syscall_enter(struct pt_regs *regs,
+		bool ts_host_at_vcpu_mode)
 {
-	return native_guest_syscall_enter(ti, regs);
+	return native_guest_syscall_enter(regs);
 }
-static inline void
-guest_syscall_exit_to(struct thread_info *ti, struct pt_regs *regs,
-				unsigned flags)
-{
-	native_guest_syscall_exit_to(ti, regs, flags);
-}
+static inline void guest_exit_intc(struct pt_regs *regs,
+		bool intc_emul_flag) { }
+static inline void guest_syscall_exit_trap(struct pt_regs *regs,
+		bool ts_host_at_vcpu_mode) { }
+
 #else	/* CONFIG_VIRTUALIZATION */
 /* it is only host kernel with virtualization support */
 static inline void __guest_enter(struct thread_info *ti,
@@ -1268,25 +1292,47 @@ trap_guest_get_restore_stacks(struct thread_info *ti, struct pt_regs *regs)
 }
 
 static inline struct e2k_stacks *
-syscall_guest_get_restore_stacks(struct thread_info *ti, struct pt_regs *regs)
+syscall_guest_get_restore_stacks(bool ts_host_at_vcpu_mode, struct pt_regs *regs)
 {
-	return host_syscall_guest_get_restore_stacks(ti, regs);
+	if (unlikely(ts_host_at_vcpu_mode)) {
+		/* host return to paravirtualized guest (VCPU) mode */
+		return host_syscall_guest_get_pv_vcpu_restore_stacks(
+				current_thread_info(), regs);
+	}
+	return native_syscall_guest_get_restore_stacks(regs);
 }
+
+#define ts_host_at_vcpu_mode() unlikely(!!test_ts_flag(TS_HOST_AT_VCPU_MODE))
 
 /*
  * The function should return bool is the system call from guest
  */
-static inline bool
-guest_syscall_enter(struct thread_info *ti, struct pt_regs *regs)
+static inline bool guest_syscall_enter(struct pt_regs *regs,
+		bool ts_host_at_vcpu_mode)
 {
-	return host_guest_syscall_enter(ti, regs);
+	return host_guest_syscall_enter(regs, ts_host_at_vcpu_mode);
 }
-static inline void
-guest_syscall_exit_to(struct thread_info *ti, struct pt_regs *regs,
-				unsigned flags)
+
+static inline void guest_exit_intc(struct pt_regs *regs, bool intc_emul_flag)
 {
-	host_guest_syscall_exit_to(ti, regs, flags);
+	if (unlikely(intc_emul_flag)) {
+		kvm_clear_intc_emul_flag(regs);
+
+		/*
+		 * Return from trap on paravirtualized guest VCPU which was
+		 * interpreted as interception
+		 */
+		return_from_pv_vcpu_intc(current_thread_info(), regs);
+	}
 }
+
+static inline void guest_syscall_exit_trap(struct pt_regs *regs,
+		bool ts_host_at_vcpu_mode)
+{
+	if (unlikely(ts_host_at_vcpu_mode))
+		host_syscall_guest_exit_trap(current_thread_info(), regs);
+}
+
 #endif	/* ! CONFIG_VIRTUALIZATION */
 #endif	/* CONFIG_PARAVIRT_GUEST */
 

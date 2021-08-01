@@ -2,6 +2,7 @@
 #define __E2K_KVM_HOST_MM_H
 
 #include <linux/types.h>
+#include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/kvm.h>
 
@@ -27,6 +28,13 @@ typedef struct gmm_struct {
 					/* of guest mm structure */
 	atomic_t mm_count;		/* How many references to guest mm */
 					/* shared mm */
+#ifdef	CONFIG_GUEST_MM_SPT_LIST
+	struct list_head spt_list;	/* shadow page tables pages list */
+	spinlock_t spt_list_lock;	/* spin lock to access to list */
+	size_t spt_list_size;		/* current numbers of SPs in list */
+	size_t total_released;		/* total number of allocated and */
+					/* released SPs through list */
+#endif	/* CONFIG_GUEST_MM_SPT_LIST */
 #ifdef	CONFIG_KVM_HV_MMU
 	hpa_t root_hpa;			/* physical base of root shadow PT */
 					/* for guest mm on host */
@@ -44,8 +52,6 @@ typedef struct gmm_struct {
 					/* the guest mm */
 	cpumask_t cpu_vm_mask;		/* mask of CPUs where the mm is */
 					/* in use or was some early */
-	bool in_release;		/* guest mm is in release and cannot */
-					/* be used as active */
 } gmm_struct_t;
 
 /* same as accessor for struct mm_struct's cpu_vm_mask but for guest mm */

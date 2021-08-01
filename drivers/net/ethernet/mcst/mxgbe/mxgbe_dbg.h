@@ -5,14 +5,14 @@
 /**
  ******************************************************************************
  * Debug mask
+ * for debug level:
+ * echo 8 > /proc/sys/kernel/printk
+ * and build module with DEBUG=y
  ******************************************************************************
  **/
 
 /* for Module parameter debug_mask*/
-#define MXGBE_DBG_MSK_UNK	0x00000001	/* debug */
 #define MXGBE_DBG_MSK_NAME	0x00000002	/* func name */
-#define MXGBE_DBG_MSK_MODULE	0x00000004	/* main */
-#define MXGBE_DBG_MSK_PCI	0x00000008	/* pci */
 #define MXGBE_DBG_MSK_MAC	0x00000010	/* mac */
 #define MXGBE_DBG_MSK_NET	0x00000020	/* net */
 #define MXGBE_DBG_MSK_MEM	0x00000040	/* ALLOC_RAM */
@@ -29,14 +29,6 @@
 #define MXGBE_DBG_MSK_TX_IRQ	0x00020000	/* Tx irq */
 #define MXGBE_DBG_MSK_RX_IRQ	0x00040000	/* Rx irq */
 
-/* used on mxgbe_print_all_regs() */
-#define MXGBE_PRINTREG_MAC	0x01000000
-#define MXGBE_PRINTREG_TX	0x02000000
-#define MXGBE_PRINTREG_TXQ	0x04000000
-#define MXGBE_PRINTREG_RX	0x08000000
-#define MXGBE_PRINTREG_RXQ	0x10000000
-#define MXGBE_PRINTREG_IRQ	0x20000000
-
 
 /**
  ******************************************************************************
@@ -51,7 +43,7 @@
 #define PDEBUG(msk, fmt, args...) \
 do { \
 	if (mxgbe_debug_mask & msk) { \
-		printk(KERN_DEBUG KBUILD_MODNAME ": " "[%lld] " fmt, \
+		pr_debug(KBUILD_MODNAME ": " "[%lld] " fmt, \
 		ktime_to_ns(ktime_get()), ## args); \
 	} \
 } while (0)
@@ -75,13 +67,6 @@ do { \
 
 #undef nDEV_DBG
 #define nDEV_DBG(msk, dev, fmt, args...) do {} while (0)
-
-#define ERR_MSG(fmt, args...) \
-	printk(KERN_ERR KBUILD_MODNAME ": " fmt, ## args)
-#define WRN_MSG(fmt, args...) \
-	printk(KERN_WARNING KBUILD_MODNAME ": " fmt, ## args)
-#define LOG_MSG(fmt, args...) \
-	printk(KERN_INFO KBUILD_MODNAME ": " fmt, ## args)
 
 #ifdef DEBUG
 #define assert(expr) \

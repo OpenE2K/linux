@@ -253,9 +253,6 @@ struct hc_driver {
 
 	/* irq handler */
 	irqreturn_t	(*irq) (struct usb_hcd *hcd);
-#ifdef CONFIG_USB_IRQ_ON_THREAD
-	irqreturn_t	(*preirq) (struct usb_hcd *hcd);
-#endif
 	int	flags;
 #define	HCD_MEMORY	0x0001		/* HC regs use memory (else I/O) */
 #define	HCD_DMA		0x0002		/* HC uses DMA */

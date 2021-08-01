@@ -30,9 +30,9 @@
 #define I2C_SPI_DATA_AREA_SIZE		0x40
 
 #define	I2C_SPI_DEFAULT_IRQ		23
-#define I2C_MAX_ADAPTERS_PER_CONTROLLER	5
 
-#define I2C_MAX_BUSSES			I2C_MAX_ADAPTERS_PER_CONTROLLER
+#define I2C_MAX_BUSSES			5
+#define I2C_DST_BUSSES			4
 
 #ifdef CONFIG_E2K
 extern int iohub_i2c_line_id;

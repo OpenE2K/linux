@@ -266,6 +266,12 @@ config IA64_ACPI_CPUFREQ
 	If in doubt, say N.
 endif
 
+if E2K
+config E2K_PCS_CPUFREQ
+	tristate "E2K CPUFreq Driver"
+	default y
+endif
+
 if MIPS
 config BMIPS_CPUFREQ
 	tristate "BMIPS CPUfreq Driver"

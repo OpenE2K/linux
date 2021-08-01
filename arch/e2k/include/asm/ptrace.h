@@ -94,7 +94,6 @@ typedef struct trap_pt_regs {
 	u64		TIR_lo;
 	int		TIR_no;		/* current handled TIRs # */
 	s8		nr_TIRs;
-	bool		irqs_disabled;	/* IRQs are disabled while trap */
 	s8		tc_count;
 	s8		curr_cnt;
 	char		ignore_user_tc;
@@ -114,11 +113,29 @@ typedef struct trap_pt_regs {
 #endif
 } trap_pt_regs_t;
 
-/*
- * WARNING: 'usd_lo' field in the 'pt_regs' structure should have offset
- * JB_USD_LO = 22 (in format of long long) as defined by e2k GLIBC header
- * /usr/include/bits/setjmp.h
- */
+union pt_regs_flags {
+	struct {
+		/* execute_mmu_operations() is working */
+		u32 exec_mmu_op		: 1;
+		/* nested exception appeared while
+		 * execute_mmu_operations() was working */
+		u32 exec_mmu_op_nested	: 1;
+		/* A signal's handler will be called upon return to userspace */
+		u32 sig_call_handler	: 1;
+		/* System call should be restarted after signal's handler */
+		u32 sig_restart_syscall	: 1;
+		/* Used to distinguish between entry8 and entry10 for protected syscalls */
+		u32 protected_entry10	: 1;
+		/* From hardware guest interception */
+		u32 kvm_hw_intercept	: 1;
+		/* trap or system call is on or from guest */
+		u32 trap_as_intc_emul	: 1;
+		/* Trap occurred in light hypercall */
+		u32 light_hypercall	: 1;
+	};
+	u32 word;
+};
+
 typedef	struct pt_regs {
 	struct pt_regs	*next;		/* the previous regs structure */
 	struct trap_pt_regs *trap;
@@ -131,9 +148,7 @@ typedef	struct pt_regs {
 	e2k_wd_t	wd;		/* current window descriptor	*/
 	int		sys_num;	/* to restart sys_call		*/
 	int		kernel_entry;
-	u32		flags;		/* Trap occured on the instruction */
-					/* with "Store recovery point" flag */
-	bool		irqs_disabled;	/* IRQs are disabled while trap */
+	union pt_regs_flags flags;
 	e2k_ctpr_t	ctpr1;		/* CTPRj for control transfer */
 	e2k_ctpr_t	ctpr2;
 	e2k_ctpr_t	ctpr3;
@@ -168,12 +183,15 @@ typedef	struct pt_regs {
         u64             rpr_lo; 
         u64             rpr_hi; 
 #ifdef	CONFIG_VIRTUALIZATION
+	u64		sys_func;	/* need only for guest */
 	e2k_stacks_t	g_stacks;	/* current state of guest kernel */
 					/* stacks registers */
 	bool		g_stacks_valid;	/* the state of guest kernel stacks */
 					/* registers is valid */
 	bool		g_stacks_active; /* the guest kernel stacks */
 					/* registers is in active work */
+	bool		stack_regs_saved; /* stack state regs was already */
+					  /* saved */
 	bool		need_inject;	/* flag for unconditional injection */
 					/* trap to guest to avoid acces to */
 					/* guest user space in trap context */
@@ -183,11 +201,19 @@ typedef	struct pt_regs {
 	unsigned long	traps_to_guest;	/* mask of traps passed to guest */
 					/* and are not yet handled by guest */
 					/* need only for host */
-	unsigned long	deferred_traps;	/* mask of deffered traps, which */
-					/* cannot be handled immediately */
-					/* (for guest) or occured while */
-					/* guest is handling previous traps */
-					/* (for host, for example interrupts) */
+#ifdef	CONFIG_KVM_GUEST_KERNEL
+/* only for guest kernel */
+	/* already copyed back part of guest user hardware stacks */
+	/* spilled to guest kernel stacks */
+	struct {
+		e2k_size_t ps_size;	/* procedure stack copyed size */
+		e2k_size_t pcs_size;	/* chain stack copyesd size */
+		/* The frames injected to support 'signal stack' */
+		/* and trampolines to return from user to kernel */
+		e2k_size_t pcs_injected_frames_size;
+	} copyed;
+#endif	/* CONFIG_KVM_GUEST_KERNEL */
+
 #endif	/* CONFIG_VIRTUALIZATION */
 
 #if	defined(CONFIG_KVM) || defined(CONFIG_KVM_GUEST_KERNEL)
@@ -198,23 +224,6 @@ typedef	struct pt_regs {
 	scall_times_t	*scall_times;
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 } pt_regs_t;
-
-#define E_MMU_OP_FLAG_PT_REGS		0x2U	 /* execute_mmu_operations is */
-						 /* working */
-#define E_MMU_NESTED_OP_FLAG_PT_REGS	0x4U	 /* nested exception appeared */
-						 /* while */
-						 /* execute_mmu_operations is */
-						 /* working */
-#define SIG_CALL_HANDLER_FLAG_PT_REGS	0x8U
-#define SIG_RESTART_SYSCALL_FLAG_PT_REGS 0x10U
-#define PROT_10_FLAG_PT_REGS		0x20U	/* marked 10 pm sys_call */
-#define	TRAP_AS_INTC_EMUL_PT_REGS	0x0100	/* trap or system call */
-						/* is on or from guest */
-#define	GUEST_FLAG_PT_REGS		0x10000U /* Trap occurred on the */
-						 /* guest and  should be */
-						 /* handled by guest */
-#define	LIGHT_HYPERCALL_FLAG_PT_REGS	0x20000U /* Trap occurred in */
-						 /* hypercall */
 
 static inline struct trap_pt_regs *
 pt_regs_to_trap_regs(struct pt_regs *regs)
@@ -580,8 +589,9 @@ struct signal_stack_context {
 do { \
 	struct pt_regs *__pt_regs = current_thread_info()->pt_regs; \
 	if (__pt_regs) { \
-		user_hw_stacks_copy_full(&__pt_regs->stacks, \
-					 __pt_regs, NULL); \
+		if (!test_ts_flag(TS_USER_EXECVE)) \
+			user_hw_stacks_copy_full(&__pt_regs->stacks, \
+						__pt_regs, NULL); \
 		SAVE_AAU_REGS_FOR_PTRACE(__pt_regs, current_thread_info()); \
 		if (!paravirt_enabled()) { \
 			/* FIXME: it need implement for guest kernel */ \
@@ -709,7 +719,7 @@ static inline struct pt_regs *find_user_regs(const struct pt_regs *regs)
 	do {
 		CHECK_PT_REGS_LOOP(regs);
 
-		if (user_mode(regs))
+		if (user_mode(regs) && !regs->flags.kvm_hw_intercept)
 			break;
 
 		regs = regs->next;
@@ -731,7 +741,7 @@ static inline struct pt_regs *find_entry_regs(const struct pt_regs *regs)
 	do {
 		CHECK_PT_REGS_LOOP(regs);
 
-		if (user_mode(regs))
+		if (user_mode(regs) && !regs->flags.kvm_hw_intercept)
 			goto found;
 
 		prev_regs = regs;
@@ -745,12 +755,26 @@ found:
 	return (struct pt_regs *) regs;
 }
 
-static inline struct pt_regs *find_trap_regs(const struct pt_regs *regs)
+static inline struct pt_regs *find_host_regs(const struct pt_regs *regs)
 {
 	while (regs) {
 		CHECK_PT_REGS_LOOP(regs);
 
-		if (from_trap(regs))
+		if (likely(!regs->flags.kvm_hw_intercept))
+			break;
+
+		regs = regs->next;
+	};
+
+	return (struct pt_regs *) regs;
+}
+
+static inline struct pt_regs *find_trap_host_regs(const struct pt_regs *regs)
+{
+	while (regs) {
+		CHECK_PT_REGS_LOOP(regs);
+
+		if (from_trap(regs) && !regs->flags.kvm_hw_intercept)
 			break;
 
 		regs = regs->next;

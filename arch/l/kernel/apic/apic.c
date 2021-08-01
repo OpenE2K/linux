@@ -61,7 +61,6 @@
 #include <asm/apic.h>
 #include <asm/io_apic.h>
 #include <asm-l/idle.h>
-#include <asm/mtrr.h>
 #include <asm/smp.h>
 
 #include <asm/irq_regs.h>

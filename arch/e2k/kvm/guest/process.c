@@ -373,11 +373,16 @@ int kvm_prepare_start_thread_frames(unsigned long entry, unsigned long sp)
 	ps_frames[1].word_lo = true;		/* %dr2	*/
 	ps_frame_size = (2 * EXT_4_NR_SZ);	/* 4 double-word registers */
 
+retry:
 	ret = HYPERVISOR_update_hw_stacks_frames(pcs_frames, pcs_frame_ind,
 				ps_frames, ps_frame_ind, ps_frame_size);
-	if (ret < 0) {
+	if (unlikely(ret == -EAGAIN)) {
+		DebugKVMEX("could not update hardware stacks, error %d "
+			"retry\n", ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
 		DebugKVMEX("could not update hardware stacks, error %d\n",
-			ret);
+				ret);
 	}
 
 	return ret;
@@ -573,6 +578,7 @@ int kvm_copy_kernel_stacks(struct task_struct *new_task,
 	}
 	DebugKVMKS("created new kernel thread, GPID #%d\n", ret);
 	new_ti->gpid_nr = ret;
+	new_ti->gmmid_nr = current_thread_info()->gmmid_nr;
 
 	new_sw_regs->crs.cr0_lo.CR0_lo_half = task_info.cr0_lo;
 	new_sw_regs->crs.cr0_hi.CR0_hi_half = task_info.cr0_hi;
@@ -585,7 +591,7 @@ out_k_stacks:
 	return ret;
 }
 
-void kvm_bsp_switch_to_init_stack(void)
+void __init kvm_bsp_switch_to_init_stack(void)
 {
 	kvm_task_info_t	task_info;
 	e2k_addr_t stack_base = (unsigned long) &init_stack;
@@ -714,6 +720,7 @@ int kvm_switch_to_new_user(e2k_stacks_t *stacks, hw_stack_t *hw_stacks,
 	task_info.cut_base = cut_base;
 	task_info.cut_size = cut_size;
 	task_info.cui = cui;
+	task_info.kernel = kernel;
 
 	DebugKVMEX("compilation unit table CUT from 0x%lx size 0x%lx CUI %d\n",
 		task_info.cut_base, task_info.cut_size, task_info.cui);
@@ -763,8 +770,13 @@ int kvm_switch_to_new_user(e2k_stacks_t *stacks, hw_stack_t *hw_stacks,
 	/* switch to IRQs control under PSR and init user UPSR */
 	KVM_RETURN_TO_INIT_USER_UPSR();
 
+retry:
 	ret = HYPERVISOR_switch_to_guest_new_user(&task_info);
-	if (ret < 0) {
+	if (unlikely(ret == -EAGAIN)) {
+		DebugKVM("could not switch to new user process, error %d, "
+			"retry\n", ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
 		DebugKVM("could not switch to new user process, error %d\n",
 			ret);
 		goto out;
@@ -877,9 +889,14 @@ int kvm_clone_prepare_spilled_user_stacks(e2k_stacks_t *child_stacks,
 	new_sw_regs->cutd = new_ti->u_cutd;
 	task_info.cut_base = new_sw_regs->cutd.CUTD_base;
 
+	if (clone_flags & CLONE_SETTLS) {
+		task_info.flags |= CLONE_SETTLS_TASK_FLAG;
+	}
+	task_info.gregs = (e2k_addr_t)new_sw_regs->gregs.g;
+
 	task_info.entry_point = (u64)&__ret_from_fork;
-	DebugKVMCLN("handler of return from fork() is %pfx\n",
-		(void *)task_info.entry_point);
+	DebugKVMCLN("handler of return from fork() is %pfx, gregs at 0x%lx\n",
+		(void *)task_info.entry_point, task_info.gregs);
 
 	/*
 	 * Set pointers of kernel local & hardware stacks to empty state
@@ -894,8 +911,13 @@ int kvm_clone_prepare_spilled_user_stacks(e2k_stacks_t *child_stacks,
 	BUG_ON(new_task->mm != current->mm);
 	kvm_get_mm_notifier(new_ti, new_task->mm);
 
+retry:
 	gpid_nr = HYPERVISOR_clone_guest_user_stacks(&task_info);
-	if (gpid_nr < 0) {
+	if (unlikely(gpid_nr == -EAGAIN)) {
+		pr_err("host could not clone stacks of new user thread, "
+			"error %d, retry\n", gpid_nr);
+		goto retry;
+	} else if (unlikely(gpid_nr < 0)) {
 		pr_err("host could not clone stacks of new user thread, "
 			"error %d\n", gpid_nr);
 		ret = gpid_nr;
@@ -985,9 +1007,11 @@ int kvm_copy_spilled_user_stacks(e2k_stacks_t *child_stacks,
 	new_sw_regs->cutd = new_ti->u_cutd;
 	task_info.cut_base = new_sw_regs->cutd.CUTD_base;
 
+	task_info.gregs = (e2k_addr_t)new_sw_regs->gregs.g;
+
 	task_info.entry_point = (u64)&__ret_from_fork;
-	DebugKVMCPY("handler of return from fork() is %pfx\n",
-		(void *)task_info.entry_point);
+	DebugKVMCLN("handler of return from fork() is %pfx, gregs at 0x%lx\n",
+		(void *)task_info.entry_point, task_info.gregs);
 
 	/*
 	 * Set pointers of kernel local & hardware stacks to empty state
@@ -1003,10 +1027,15 @@ int kvm_copy_spilled_user_stacks(e2k_stacks_t *child_stacks,
 	gmmu_info.opcode = CREATE_NEW_GMM_GMMU_OPC;
 	gmmu_info.u_pptb = __pa(new_task->mm->pgd);
 
+retry:
 	gpid_nr = HYPERVISOR_copy_guest_user_stacks(&task_info, &gmmu_info);
-	if (gpid_nr < 0) {
+	if (unlikely(gpid_nr == -EAGAIN)) {
 		DebugKVM("could not copy stacks of new user thread, "
-			"error %d\n", gpid_nr);
+			"error %d, retry\n", gpid_nr);
+		goto retry;
+	} else if (unlikely(gpid_nr < 0)) {
+		DebugKVM("could not copy stacks of new user thread, "
+				"error %d\n", gpid_nr);
 		ret = gpid_nr;
 		goto out_error;
 	}
@@ -1037,13 +1066,17 @@ void kvm_save_glob_regs(global_regs_t *gregs)
 	unsigned long **g_regs = (unsigned long **)&gregs->g[0].xreg;
 	int ret;
 
+retry:
 	ret = HYPERVISOR_get_guest_glob_regs(g_regs, GUEST_GREGS_MASK,
 				true,	/*dirty BGR */
 				NULL);
-	if (ret) {
+	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not get global registers state, "
-			"error %d\n",
-			__func__, ret);
+			"error %d, retry\n", __func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
+		pr_err("%s(): could not get global registers state, "
+			"error %d\n", __func__, ret);
 	}
 }
 void kvm_restore_glob_regs(const global_regs_t *gregs)
@@ -1051,13 +1084,17 @@ void kvm_restore_glob_regs(const global_regs_t *gregs)
 	unsigned long **g_regs = (unsigned long **)&gregs->g[0].xreg;
 	int ret;
 
+retry:
 	ret = HYPERVISOR_set_guest_glob_regs(g_regs, GUEST_GREGS_MASK,
 				true,	/*dirty BGR */
 				NULL);
-	if (ret) {
+	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not set global registers state, "
-			"error %d\n",
-			__func__, ret);
+			"error %d, retry\n", __func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
+		pr_err("%s(): could not set global registers state, "
+			"error %d\n", __func__, ret);
 	}
 }
 void kvm_save_glob_regs_dirty_bgr(global_regs_t *gregs)
@@ -1065,36 +1102,48 @@ void kvm_save_glob_regs_dirty_bgr(global_regs_t *gregs)
 	unsigned long **g_regs = (unsigned long **)&gregs->g[0].xreg;
 	int ret;
 
+retry:
 	ret = HYPERVISOR_set_guest_glob_regs_dirty_bgr(g_regs,
 				GUEST_GREGS_MASK);
-	if (ret) {
+	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not get global registers state, "
-			"error %d\n",
-			__func__, ret);
+			"error %d, retry\n", __func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
+		pr_err("%s(): could not get global registers state, "
+			"error %d\n", __func__, ret);
 	}
 }
-void kvm_save_local_glob_regs(local_gregs_t *l_gregs)
+void kvm_save_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
 	unsigned long **gregs = (unsigned long **)&l_gregs->g[0].xreg;
 	int ret;
 
-	ret = HYPERVISOR_get_guest_local_glob_regs(gregs);
-	if (ret) {
+retry:
+	ret = HYPERVISOR_get_guest_local_glob_regs(gregs, is_signal);
+	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not get local global registers state, "
-			"error %d\n",
-			__func__, ret);
+			"error %d, retry\n", __func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
+		pr_err("%s(): could not get local global registers state, "
+			"error %d\n", __func__, ret);
 	}
 }
-void kvm_restore_local_glob_regs(const local_gregs_t *l_gregs)
+void kvm_restore_local_glob_regs(const local_gregs_t *l_gregs, bool is_signal)
 {
 	unsigned long **gregs = (unsigned long **)&l_gregs->g[0].xreg;
 	int ret;
 
-	ret = HYPERVISOR_set_guest_local_glob_regs(gregs);
-	if (ret) {
+retry:
+	ret = HYPERVISOR_set_guest_local_glob_regs(gregs, is_signal);
+	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not get local global registers state, "
-			"error %d\n",
-			__func__, ret);
+			"error %d, retry\n", __func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
+		pr_err("%s(): could not get local global registers state, "
+			"error %d\n", __func__, ret);
 	}
 }
 
@@ -1103,11 +1152,15 @@ void kvm_get_all_user_glob_regs(global_regs_t *gregs)
 	unsigned long **g_regs = (unsigned long **)&gregs->g[0].xreg;
 	int ret;
 
+retry:
 	ret = HYPERVISOR_get_all_guest_glob_regs(g_regs);
-	if (ret) {
+	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not get all global registers state, "
-			"error %d\n",
-			__func__, ret);
+			"error %d, retry\n", __func__, ret);
+		goto retry;
+	} else if (unlikely(ret < 0)) {
+		pr_err("%s(): could not get all global registers state, "
+			"error %d\n", __func__, ret);
 	}
 }
 

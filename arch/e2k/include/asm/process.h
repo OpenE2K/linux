@@ -12,8 +12,6 @@
 #include <linux/ftrace.h>
 #include <linux/rmap.h>
 #include <linux/vmalloc.h>
-#include <linux/swap.h>
-#include <linux/swapops.h>
 #include <linux/sched/signal.h>
 
 #include <asm/e2k_syswork.h>
@@ -794,6 +792,13 @@ clear_virt_thread_struct(thread_info_t *thread_info)
 {
 	/* virtual machines is not supported */
 }
+
+static __always_inline void
+host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
+{
+	/* native & guest kernels cannot be as host */
+}
+
 static __always_inline __interrupt void
 complete_switch_to_user_func(void)
 {
@@ -820,6 +825,32 @@ static inline void free_virt_task_struct(struct task_struct *task)
  #include <asm/kvm/process.h>
  */
 #endif	/* ! CONFIG_VIRTUALIZATION */
+
+/*
+ * Restore proper psize field of WD register
+ */
+static inline void
+native_restore_wd_register_psize(e2k_wd_t wd_from)
+{
+	e2k_wd_t wd;
+
+	raw_all_irq_disable();
+	wd = NATIVE_READ_WD_REG();
+	wd.psize = wd_from.WD_psize;
+	NATIVE_WRITE_WD_REG(wd);
+	raw_all_irq_enable();
+}
+
+/*
+ * Preserve current p[c]shtp as they indicate how much to FILL when returning
+ */
+static inline void
+native_preserve_user_hw_stacks_to_copy(e2k_stacks_t *u_stacks,
+					e2k_stacks_t *cur_stacks)
+{
+	u_stacks->pshtp = cur_stacks->pshtp;
+	u_stacks->pcshtp = cur_stacks->pcshtp;
+}
 
 static __always_inline void
 native_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
@@ -1049,6 +1080,19 @@ extern e2k_addr_t get_nested_kernel_IP(pt_regs_t *regs, int n);
 
 #define	ONLY_SET_GUEST_GREGS(ti)	NATIVE_ONLY_SET_GUEST_GREGS(ti)
 
+static inline void
+restore_wd_register_psize(e2k_wd_t wd_from)
+{
+	native_restore_wd_register_psize(wd_from);
+}
+
+static inline void
+preserve_user_hw_stacks_to_copy(e2k_stacks_t *u_stacks,
+					e2k_stacks_t *cur_stacks)
+{
+	native_preserve_user_hw_stacks_to_copy(u_stacks, cur_stacks);
+}
+
 static __always_inline void
 kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
 {
@@ -1277,9 +1321,9 @@ user_hw_stack_frames_copy(void __user *dst, void *src, unsigned long copy_size,
 }
 
 static __always_inline int
-user_crs_frames_copy(e2k_mem_crs_t __user *u_frame, pt_regs_t *regs)
+user_crs_frames_copy(e2k_mem_crs_t __user *u_frame, pt_regs_t *regs,
+			e2k_mem_crs_t *crs)
 {
-	e2k_mem_crs_t *crs = &regs->crs;
 	unsigned long ts_flag;
 	int ret;
 
@@ -1397,7 +1441,7 @@ static inline void apply_graph_tracer_delta(unsigned long delta)
  * data from user space is spilled to kernel space.
  */
 static __always_inline int
-user_hw_stacks_copy(struct e2k_stacks *stacks,
+native_user_hw_stacks_copy(struct e2k_stacks *stacks,
 		pt_regs_t *regs, u64 cur_window_q, bool copy_full)
 {
 	trap_pt_regs_t *trap = regs->trap;
@@ -1534,65 +1578,6 @@ static inline void collapse_kernel_hw_stacks(struct e2k_stacks *stacks)
 }
 
 /**
- * user_hw_stacks_copy_full - copy part of user stacks that was SPILLed
- *	into kernel back to user stacks.
- * @stacks - saved user stack registers
- * @regs - pt_regs pointer
- * @crs - last frame to copy
- *
- * If @crs is not NULL then the frame pointed to by it will also be copied
- * to userspace.  Note that 'stacks->pcsp_hi.ind' is _not_ updated after
- * copying since it would leave stack in inconsistent state (with two
- * copies of the same @crs frame), this is left to the caller. *
- *
- * Inlining this reduces the amount of memory to copy in
- * collapse_kernel_hw_stacks().
- */
-static inline int user_hw_stacks_copy_full(struct e2k_stacks *stacks,
-					   pt_regs_t *regs, e2k_mem_crs_t *crs)
-{
-	int ret;
-
-	/*
-	 * Copy part of user stacks that were SPILLed into kernel stacks
-	 */
-	ret = user_hw_stacks_copy(stacks, regs, 0, true);
-	if (unlikely(ret))
-		return ret;
-
-	/*
-	 * Nothing to FILL so remove the resulting hole from kernel stacks.
-	 *
-	 * IMPORTANT: there is always at least one user frame at the top of
-	 * kernel stack - the one that issued a system call (in case of an
-	 * exception we uphold this rule manually, see user_hw_stacks_prepare())
-	 * We keep this ABI and _always_ leave space for one user frame,
-	 * this way we can later FILL using return trick (otherwise there
-	 * would be no space in chain stack for the trick).
-	 */
-	collapse_kernel_hw_stacks(stacks);
-
-	/*
-	 * Copy saved %cr registers
-	 *
-	 * Caller must take care of filling of resulting hole
-	 * (last user frame from pcshtp == SZ_OF_CR).
-	 */
-	if (crs) {
-		e2k_mem_crs_t __user *u_frame;
-		int ret;
-
-		u_frame = (void __user *) (AS(stacks->pcsp_lo).base +
-					   AS(stacks->pcsp_hi).ind);
-		ret = user_crs_frames_copy(u_frame, regs);
-		if (unlikely(ret))
-			return ret;
-	}
-
-	return 0;
-}
-
-/**
  * user_hw_stacks_prepare - prepare user hardware stacks that have been
  *			 SPILLed to kernel back to user space
  * @stacks - saved user stack registers
@@ -1691,13 +1676,20 @@ static __always_inline void native_user_hw_stacks_prepare(
 	/*
 	 * 2) Copy user data that cannot be FILLed
 	 */
-	ret = user_hw_stacks_copy(stacks, regs, cur_window_q, false);
+	ret = native_user_hw_stacks_copy(stacks, regs, cur_window_q, false);
 	if (unlikely(ret))
 		do_exit(SIGKILL);
 }
 
 #ifndef	CONFIG_VIRTUALIZATION
 /* native kernel without virtualization support */
+static __always_inline int
+user_hw_stacks_copy(struct e2k_stacks *stacks,
+		pt_regs_t *regs, u64 cur_window_q, bool copy_full)
+{
+	return native_user_hw_stacks_copy(stacks, regs, cur_window_q, copy_full);
+}
+
 static __always_inline void
 host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 		u64 cur_window_q, enum restore_caller from, int syscall)
@@ -1718,6 +1710,64 @@ host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 #error	"unknown virtualization mode"
 #endif	/* !CONFIG_VIRTUALIZATION */
 
+/**
+ * user_hw_stacks_copy_full - copy part of user stacks that was SPILLed
+ *	into kernel back to user stacks.
+ * @stacks - saved user stack registers
+ * @regs - pt_regs pointer
+ * @crs - last frame to copy
+ *
+ * If @crs is not NULL then the frame pointed to by it will also be copied
+ * to userspace.  Note that 'stacks->pcsp_hi.ind' is _not_ updated after
+ * copying since it would leave stack in inconsistent state (with two
+ * copies of the same @crs frame), this is left to the caller. *
+ *
+ * Inlining this reduces the amount of memory to copy in
+ * collapse_kernel_hw_stacks().
+ */
+static inline int user_hw_stacks_copy_full(struct e2k_stacks *stacks,
+					pt_regs_t *regs, e2k_mem_crs_t *crs)
+{
+	int ret;
+
+	/*
+	 * Copy part of user stacks that were SPILLed into kernel stacks
+	 */
+	ret = user_hw_stacks_copy(stacks, regs, 0, true);
+	if (unlikely(ret))
+		return ret;
+
+	/*
+	 * Nothing to FILL so remove the resulting hole from kernel stacks.
+	 *
+	 * IMPORTANT: there is always at least one user frame at the top of
+	 * kernel stack - the one that issued a system call (in case of an
+	 * exception we uphold this rule manually, see user_hw_stacks_prepare())
+	 * We keep this ABI and _always_ leave space for one user frame,
+	 * this way we can later FILL using return trick (otherwise there
+	 * would be no space in chain stack for the trick).
+	 */
+	collapse_kernel_hw_stacks(stacks);
+
+	/*
+	 * Copy saved %cr registers
+	 *
+	 * Caller must take care of filling of resulting hole
+	 * (last user frame from pcshtp == SZ_OF_CR).
+	 */
+	if (crs) {
+		e2k_mem_crs_t __user *u_frame;
+		int ret;
+
+		u_frame = (void __user *) (AS(stacks->pcsp_lo).base +
+					   AS(stacks->pcsp_hi).ind);
+		ret = user_crs_frames_copy(u_frame, regs, &regs->crs);
+		if (unlikely(ret))
+			return ret;
+	}
+
+	return 0;
+}
 
 extern e2k_addr_t get_nested_kernel_IP(pt_regs_t *regs, int n);
 extern unsigned long remap_e2k_stack(unsigned long addr,

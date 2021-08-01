@@ -42,8 +42,6 @@ extern void __init *node_early_get_zeroed_page(int nid);
 
 extern int mem_init_done;
 
-#define check_pgt_cache()      do { } while (0)
-
 static inline void pgd_ctor(pgd_t *pgd)
 {
 	int root_pt_index;

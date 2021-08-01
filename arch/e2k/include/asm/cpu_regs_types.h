@@ -9,11 +9,11 @@
 #ifndef __ASSEMBLY__
 
 /* E2K physical address definitions */
-#define	MAX_PA_SIZE	40			/* E2K physical address size */
-						/* (bits number) */
-#define	MAX_PA_MSB	(MAX_PA_SIZE - 1)	/* The number of the most */
-						/* significant bit of E2K */
-						/* physical address */
+
+/* E2K physical address size (bits number) */
+#define	MAX_PA_SIZE	CONFIG_E2K_PA_BITS
+/* The number of the most significant bit of E2K physical address */
+#define	MAX_PA_MSB	(MAX_PA_SIZE - 1)
 #define	MAX_PA_MASK	((1UL << MAX_PA_SIZE) - 1)
 #define	MAX_PM_SIZE	(1UL << MAX_PA_SIZE)
 
@@ -2356,23 +2356,23 @@ typedef struct e2k_svd_gregs_struct {
 } e2k_svd_gregs_t;
 
 /* CU_HW0 register */
-#define	_CU_HW0_TRWM_ITAG_MASK		0x00000007	/* IB tag */
-#define	_CU_HW0_TRWM_IDATA_MASK		0x00000038	/* IB data */
-#define	_CU_HW0_TRWM_CF_MASK		0x000001c0	/* Chain File */
-/* Disable IB snooping */
-#define _CU_HW0_IB_SNOOP_DISABLE_MASK	0x00000200
-#define	_CU_HW0_BIST_CF_MASK		0x00000400	/* Chain File */
-#define	_CU_HW0_BIST_TU_MASK		0x00000800	/* Trap Unit */
-#define	_CU_HW0_BIST_ITAG_MASK		0x00001000	/* IB tag */
-#define	_CU_HW0_BIST_ITLB_TAG_MASK	0x00002000	/* ITLB tag */
-#define	_CU_HW0_BIST_ITLB_DATA_MASK	0x00004000	/* ITLB data */
-#define	_CU_HW0_BIST_IDATA_NM_MASK	0x00078000	/* IB data */
-#define	_CU_HW0_BIST_IDATA_CNT_MASK	0x1ff80000	/* IB tag */
-#define	_CU_HW0_PIPE_FROST_DISABLE_MASK	0x20000000	/* Instruction pipe */
-#define	_CU_HW0_RF_CLEAN_DISABLE_MASK	0x40000000	/* Register File */
-/* Disable hardware virtualization support */
-#define _CU_HW0_VIRT_DISABLE_MASK	0x80000000
-
+#define	_CU_HW0_TRWM_ITAG_MASK		   0x000000007 /* IB tag */
+#define	_CU_HW0_TRWM_IDATA_MASK		   0x000000038 /* IB data */
+#define	_CU_HW0_TRWM_CF_MASK		   0x0000001c0 /* Chain File */
+#define _CU_HW0_IB_SNOOP_DISABLE_MASK	   0x000000200 /* Disable IB snooping */
+#define	_CU_HW0_BIST_CF_MASK		   0x000000400 /* Chain File */
+#define	_CU_HW0_BIST_TU_MASK		   0x000000800 /* Trap Unit */
+#define	_CU_HW0_BIST_ITAG_MASK		   0x000001000 /* IB tag */
+#define	_CU_HW0_BIST_ITLB_TAG_MASK	   0x000002000 /* ITLB tag */
+#define	_CU_HW0_BIST_ITLB_DATA_MASK	   0x000004000 /* ITLB data */
+#define	_CU_HW0_BIST_IDATA_NM_MASK	   0x000078000 /* IB data */
+#define	_CU_HW0_BIST_IDATA_CNT_MASK	   0x01ff80000 /* IB tag */
+#define	_CU_HW0_PIPE_FROST_DISABLE_MASK	   0x020000000 /* Instruction pipe */
+#define	_CU_HW0_RF_CLEAN_DISABLE_MASK	   0x040000000 /* Register File */
+#define _CU_HW0_VIRT_DISABLE_MASK	   0x080000000 /* Disable hardware */
+						       /* virtualization support */
+#define	_CU_HW0_UPT_SEC_AD_SHIFT_DSBL_MASK 0x100000000 /* Disable address shift in */
+						       /* MMU_CR.upt mode */
 
 struct hw_stacks {
 	e2k_psp_lo_t	psp_lo;

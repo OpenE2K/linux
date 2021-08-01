@@ -98,6 +98,15 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_PV_VCPU_SIG_MODE
+#undef	DebugSIG
+#define	DEBUG_PV_VCPU_SIG_MODE	0	/* signals injection debugging */
+#define	DebugSIG(fmt, args...)						\
+({									\
+	if (DEBUG_PV_VCPU_SIG_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 #undef	DEBUG_PV_UST_MODE
 #undef	DebugUST
 #define	DEBUG_PV_UST_MODE	0	/* trap injection debugging */
@@ -302,8 +311,13 @@ void kvm_init_pv_vcpu_intc_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	intc_ctxt->cur_mu = -1;
 
 	/* clear guest interception TIRs & trap cellar */
-	kvm_clear_vcpu_intc_TIRs_num(vcpu);
-	regs->traps_to_guest = 0;
+	if (likely(!vcpu->arch.trap_wish)) {
+		kvm_clear_vcpu_intc_TIRs_num(vcpu);
+		regs->traps_to_guest = 0;
+	} else {
+		/* some trap(s)was (were) injected as wish to handle them */
+		regs->traps_to_guest = 0;
+	}
 
 	/* replace stacks->top value with real register SBR state */
 	regs->stacks.top = regs->g_stacks.top;
@@ -313,6 +327,7 @@ noinline __interrupt void
 startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 		unsigned flags)
 {
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
 	e2k_cr0_lo_t cr0_lo;
 	e2k_cr0_hi_t cr0_hi;
 	e2k_cr1_lo_t cr1_lo;
@@ -350,6 +365,14 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 
+	if (unlikely(!(flags & FROM_HYPERCALL_SWITCH))) {
+		KVM_BUG_ON(true);	/* now only from hypercall */
+		/* save host VCPU data stack pointer registers */
+		sw_ctxt->host_sbr = NATIVE_NV_READ_SBR_REG();
+		sw_ctxt->host_usd_lo = NATIVE_NV_READ_USD_LO_REG();
+		sw_ctxt->host_usd_hi = NATIVE_NV_READ_USD_HI_REG();
+	}
+
 	__guest_enter(current_thread_info(), &vcpu->arch, flags);
 
 	/* switch host MMU to VCPU MMU context */
@@ -365,7 +388,7 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 	KVM_BUG_ON(host_hypercall_exit(vcpu));
 
 	/* set guest UPSR to initial state */
-	NATIVE_WRITE_UPSR_REG(vcpu->arch.sw_ctxt.upsr);
+	NATIVE_WRITE_UPSR_REG(sw_ctxt->upsr);
 
 	preempt_enable();
 
@@ -392,8 +415,7 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 	 */
 	E2K_WAIT(_ma_c);
 
-	NATIVE_NV_WRITE_SBR_REG(sbr);
-	NATIVE_NV_WRITE_USD_REG(usd_hi, usd_lo);
+	NATIVE_NV_WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo);
 
 	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
 
@@ -444,13 +466,18 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 	/* disable all IRQs in UPSR to switch mmu context */
 	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
 
+	/* save host VCPU data stack pointer registers */
+	sw_ctxt->host_sbr = NATIVE_NV_READ_SBR_REG();
+	sw_ctxt->host_usd_lo = NATIVE_NV_READ_USD_LO_REG();
+	sw_ctxt->host_usd_hi = NATIVE_NV_READ_USD_HI_REG();
+
 	__guest_enter(ti, &vcpu->arch, switch_flags);
 
 	/* switch host MMU to VCPU MMU context */
 	kvm_switch_to_guest_mmu_pid(vcpu);
 
 	/* from now the host process is at paravirtualized guest (VCPU) mode */
-	set_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE);
+	set_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE);
 
 	if (switch_flags & FROM_HYPERCALL_SWITCH) {
 		int users;
@@ -501,6 +528,30 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 
 	KVM_COND_GOTO_RETURN_TO_PARAVIRT_GUEST(is_pv_guest, 0);
 	return 0;
+}
+
+notrace noinline __interrupt void
+pv_vcpu_switch_to_host_from_intc(thread_info_t *ti)
+{
+	struct kvm_vcpu *vcpu = ti->vcpu;
+
+	KVM_BUG_ON(vcpu == NULL);
+	vcpu->arch.from_pv_intc = true;
+	(void) switch_to_host_pv_vcpu_mode(ti, vcpu, false /* from vcpu-guest */,
+			FULL_CONTEXT_SWITCH | DONT_AAU_CONTEXT_SWITCH |
+			DONT_SAVE_KGREGS_SWITCH | DONT_MMU_CONTEXT_SWITCH |
+			DONT_TRAP_MASK_SWITCH);
+}
+
+notrace noinline __interrupt void
+pv_vcpu_return_to_intc_mode(thread_info_t *ti, struct kvm_vcpu *vcpu)
+{
+	KVM_BUG_ON(vcpu == NULL);
+	vcpu->arch.from_pv_intc = false;
+	(void) return_to_intc_pv_vcpu_mode(ti, vcpu,
+			FULL_CONTEXT_SWITCH | DONT_AAU_CONTEXT_SWITCH |
+			DONT_SAVE_KGREGS_SWITCH | DONT_MMU_CONTEXT_SWITCH |
+			DONT_TRAP_MASK_SWITCH);
 }
 
 void kvm_emulate_pv_vcpu_intc(thread_info_t *ti, pt_regs_t *regs,
@@ -581,6 +632,35 @@ void syscall_fork_trampoline_continue(u64 sys_rval)
 	E2K_JUMP(return_pv_vcpu_syscall_fork);
 }
 
+static void fill_pv_vcpu_handler_trampoline(struct kvm_vcpu *vcpu,
+				e2k_mem_crs_t *crs, inject_caller_t from)
+{
+	memset(crs, 0, sizeof(*crs));
+
+	crs->cr0_lo.CR0_lo_pf = -1ULL;
+	if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
+		crs->cr0_hi.CR0_hi_IP = (u64)syscall_handler_trampoline;
+	} else if (from == FROM_PV_VCPU_TRAP_INJECT) {
+		crs->cr0_hi.CR0_hi_IP = (u64)trap_handler_trampoline;
+	} else {
+		KVM_BUG_ON(true);
+	}
+	crs->cr1_lo.CR1_lo_psr = E2K_KERNEL_PSR_DISABLED.PSR_reg;
+	crs->cr1_lo.CR1_lo_cui = KERNEL_CODES_INDEX;
+	if (machine.native_iset_ver < E2K_ISET_V6)
+		crs->cr1_lo.CR1_lo_ic = 1;
+	if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
+		crs->cr1_lo.CR1_lo_wpsz = 1;
+		crs->cr1_lo.CR1_lo_wbs = 0;
+	} else if (from == FROM_PV_VCPU_TRAP_INJECT) {
+		crs->cr1_lo.CR1_lo_wpsz = 0;
+		crs->cr1_lo.CR1_lo_wbs = 0;
+	} else {
+		KVM_BUG_ON(true);
+	}
+	crs->cr1_hi.CR1_hi_ussz = pv_vcpu_get_gti(vcpu)->us_size >> 4;
+}
+
 static void prepare_pv_vcpu_inject_handler_trampoline(struct kvm_vcpu *vcpu,
 				e2k_stacks_t *stacks, inject_caller_t from,
 				bool guest_user)
@@ -591,30 +671,7 @@ static void prepare_pv_vcpu_inject_handler_trampoline(struct kvm_vcpu *vcpu,
 	/*
 	 * Prepare 'sighandler_trampoline' frame
 	 */
-	memset(&crs, 0, sizeof(crs));
-
-	crs.cr0_lo.CR0_lo_pf = -1ULL;
-	if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
-		crs.cr0_hi.CR0_hi_IP = (u64)syscall_handler_trampoline;
-	} else if (from == FROM_PV_VCPU_TRAP_INJECT) {
-		crs.cr0_hi.CR0_hi_IP = (u64)trap_handler_trampoline;
-	} else {
-		KVM_BUG_ON(true);
-	}
-	crs.cr1_lo.CR1_lo_psr = E2K_KERNEL_PSR_DISABLED.PSR_reg;
-	crs.cr1_lo.CR1_lo_cui = KERNEL_CODES_INDEX;
-	if (machine.native_iset_ver < E2K_ISET_V6)
-		crs.cr1_lo.CR1_lo_ic = 1;
-	if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
-		crs.cr1_lo.CR1_lo_wpsz = 1;
-		crs.cr1_lo.CR1_lo_wbs = 0;
-	} else if (from == FROM_PV_VCPU_TRAP_INJECT) {
-		crs.cr1_lo.CR1_lo_wpsz = 0;
-		crs.cr1_lo.CR1_lo_wbs = 0;
-	} else {
-		KVM_BUG_ON(true);
-	}
-	crs.cr1_hi.CR1_hi_ussz = pv_vcpu_get_gti(vcpu)->us_size >> 4;
+	fill_pv_vcpu_handler_trampoline(vcpu, &crs, from);
 
 	/*
 	 * Copy the new frame into chain stack
@@ -845,7 +902,7 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		atomic_read(&host_ctxt->signal.traps_num),
 		atomic_read(&host_ctxt->signal.syscall_num));
 
-	ret = setup_signal_stack(regs);
+	ret = setup_signal_stack(regs, false);
 	if (unlikely(ret)) {
 		pr_err("%s(): could not create alt stack to save context, "
 			"error %d\n",
@@ -984,6 +1041,7 @@ void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 	KVM_BUG_ON(vcpu == NULL);
 
 	KVM_BUG_ON(!kvm_test_intc_emul_flag(regs));
+	KVM_BUG_ON(vcpu->arch.sw_ctxt.in_hypercall);
 
 	TIRs_num = kvm_get_guest_vcpu_TIRs_num(vcpu);
 	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) > 1) {
@@ -999,12 +1057,21 @@ void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 			KVM_BUG_ON(true);
 		}
 	} else {
-		KVM_BUG_ON(TIRs_num >= 0);
+		if (TIRs_num >= 0) {
+			pr_err("%s(): new trap before previous TIRs read\n",
+				__func__);
+			print_all_TIRs(regs->trap->TIRs, regs->trap->nr_TIRs);
+			print_pt_regs(regs);
+			print_all_TIRs(vcpu->arch.kmap_vcpu_state->
+							cpu.regs.CPU_TIRs,
+					TIRs_num);
+			do_exit(SIGKILL);
+		}
 	}
 
 	kvm_clear_vcpu_guest_stacks_pending(vcpu, regs);
 
-	kvm_set_pv_vcpu_TIRs(vcpu, regs);
+	kvm_set_pv_vcpu_SBBP_TIRs(vcpu, regs);
 	kvm_set_pv_vcpu_trap_cellar(vcpu);
 	kvm_set_pv_vcpu_trap_context(vcpu, regs);
 
@@ -1097,8 +1164,9 @@ static void insert_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	if (!failed) {
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 		if (regs->trap && regs->trap->flags & TRAP_RP_FLAG) {
-			pr_err("%s(): binary compliler support is not yet impleneted "
-				"for trap in generations mode\n", __func__);
+			pr_err("%s(): binary compliler support is not yet "
+				"impleneted for trap in generations mode\n",
+				__func__);
 			KVM_BUG_ON(true);
 		}
 #endif /* CONFIG_SECONDARY_SPACE_SUPPORT */
@@ -1106,6 +1174,223 @@ static void insert_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 		do_exit(SIGKILL);
 	}
 
+}
+
+static int prepare_pv_vcpu_sigreturn_handler_trampoline(struct kvm_vcpu *vcpu,
+				pt_regs_t *regs, inject_caller_t from)
+{
+	e2k_mem_crs_t crs;
+
+	/*
+	 * Create 'sighandler_trampoline' chain stack frame
+	 */
+	fill_pv_vcpu_handler_trampoline(vcpu, &crs, from);
+
+	/*
+	 * Copy the new frame into the top of guest kernel chain stack
+	 */
+	return pv_vcpu_user_hw_stacks_copy_crs(vcpu, &regs->g_stacks, regs,
+						&crs);
+}
+
+static int prepare_pv_vcpu_sigreturn_frame(struct kvm_vcpu *vcpu,
+			pt_regs_t *regs, unsigned long sigreturn_entry)
+{
+	e2k_stacks_t *g_stacks = &regs->g_stacks;
+	e2k_mem_crs_t *crs = &regs->crs;
+	int cui;
+
+	memset(crs, 0, sizeof(*crs));
+
+	cui = 0;
+
+	crs->cr0_lo.CR0_lo_pf = -1ULL;
+	crs->cr0_hi.CR0_hi_IP = sigreturn_entry;
+	/* real guest VCPU PSR should be as for user - nonprivileged */
+	crs->cr1_lo.CR1_lo_psr = E2K_USER_INITIAL_PSR.PSR_reg;
+	crs->cr1_lo.CR1_lo_cui = cui;
+	if (machine.native_iset_ver < E2K_ISET_V6)
+		crs->cr1_lo.CR1_lo_ic = 0;
+	crs->cr1_lo.CR1_lo_wbs = 0;
+	crs->cr1_hi.CR1_hi_ussz = g_stacks->usd_hi.USD_hi_size >> 4;
+
+	return 0;
+}
+
+static int setup_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu,
+			pv_vcpu_ctxt_t *vcpu_ctxt, pt_regs_t *regs)
+{
+	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+	inject_caller_t from = vcpu_ctxt->inject_from;
+	unsigned long sigreturn_entry;
+	int ret;
+
+	if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
+		DebugSIG("start on VCPU #%d, signal on system call\n",
+			vcpu->vcpu_id);
+	} else if (from == FROM_PV_VCPU_TRAP_INJECT) {
+		DebugSIG("start on VCPU #%d, signal on trap\n",
+			vcpu->vcpu_id);
+	} else {
+		KVM_BUG_ON(true);
+	}
+
+	KVM_BUG_ON(!user_mode(regs));
+	regs->is_guest_user = true;
+
+	regs->g_stacks_valid = false;
+	prepare_pv_vcpu_inject_stacks(vcpu, regs);
+
+	/*
+	 * Copy guest user CRS to the bottom of guest kernel stack
+	 * to return to trap/system call entry point
+	 */
+	ret = pv_vcpu_user_hw_stacks_copy_crs(vcpu, &regs->g_stacks, regs,
+						&regs->crs);
+	if (ret)
+		goto error_out;
+
+	/*
+	 * We want user to return to inject_handler_trampoline so
+	 * create fake kernel frame in user's chain stack
+	 */
+	ret = prepare_pv_vcpu_sigreturn_handler_trampoline(vcpu, regs, from);
+	if (ret)
+		goto error_out;
+
+	/*
+	 * guest's sigreturn frame should be at on chain stack registers (crs)
+	 */
+	sigreturn_entry = vcpu_ctxt->sigreturn_entry;
+	ret = prepare_pv_vcpu_sigreturn_frame(vcpu, regs, sigreturn_entry);
+	if (ret)
+		goto error_out;
+
+	return 0;
+
+error_out:
+	return ret;
+}
+
+noinline __interrupt void
+switch_to_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
+				e2k_mem_crs_t *g_crs)
+{
+	e2k_cr0_lo_t cr0_lo;
+	e2k_cr0_hi_t cr0_hi;
+	e2k_cr1_lo_t cr1_lo;
+	e2k_cr1_hi_t cr1_hi;
+	e2k_psp_lo_t psp_lo;
+	e2k_psp_hi_t psp_hi;
+	e2k_pcsp_lo_t pcsp_lo;
+	e2k_pcsp_hi_t pcsp_hi;
+	e2k_sbr_t sbr;
+	e2k_usd_lo_t usd_lo;
+	e2k_usd_hi_t usd_hi;
+	e2k_cutd_t cutd;
+
+	cr0_lo = g_crs->cr0_lo;
+	cr0_hi = g_crs->cr0_hi;
+	cr1_lo = g_crs->cr1_lo;
+	cr1_hi = g_crs->cr1_hi;
+	psp_lo = g_stacks->psp_lo;
+	psp_hi = g_stacks->psp_hi;
+	pcsp_lo = g_stacks->pcsp_lo;
+	pcsp_hi = g_stacks->pcsp_hi;
+	sbr.SBR_reg = g_stacks->top;
+	usd_lo = g_stacks->usd_lo;
+	usd_hi = g_stacks->usd_hi;
+	cutd = vcpu->arch.hw_ctxt.sh_oscutd;
+
+	preempt_disable();
+
+	/* return interrupts control to PSR and disable all IRQs */
+	/* disable all IRQs in UPSR to switch mmu context */
+	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
+
+	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
+
+	__guest_enter(current_thread_info(), &vcpu->arch, 0);
+
+	/* switch host MMU to VCPU MMU context */
+	kvm_switch_to_guest_mmu_pid(vcpu);
+
+	/* from now the host process is at paravirtualized guest (VCPU) mode */
+	set_ts_flag(TS_HOST_AT_VCPU_MODE);
+
+	/* set guest UPSR to initial state */
+	NATIVE_WRITE_UPSR_REG(E2K_USER_INITIAL_UPSR);
+
+	/* Restore guest kernel & host (vcpu state) global registers */
+	HOST_RESTORE_GUEST_KERNEL_GREGS(pv_vcpu_get_gti(vcpu));
+
+	preempt_enable();
+
+	/*
+	 * Optimization to do not flush chain stack.
+	 *
+	 * Old stacks are not needed anymore, do not flush procedure
+	 * registers and chain registers - only strip sizes
+	 */
+	NATIVE_STRIP_PSHTP_WINDOW();
+	NATIVE_STRIP_PCSHTP_WINDOW();
+
+	/*
+	 * There might be a FILL operation still going right now.
+	 * Wait for it's completion before going further - otherwise
+	 * the next FILL on the new PSP/PCSP registers will race
+	 * with the previous one.
+	 *
+	 * The first and the second FILL operations will use different
+	 * addresses because we will change PSP/PCSP registers, and
+	 * thus loads/stores from these two FILLs can race with each
+	 * other leading to bad register file (containing values from
+	 * both stacks)..
+	 */
+	E2K_WAIT(_ma_c);
+
+	NATIVE_NV_WRITE_SBR_REG(sbr);
+	NATIVE_NV_WRITE_USD_REG(usd_hi, usd_lo);
+
+	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
+
+	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(cr0_lo);
+	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(cr0_hi);
+	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(cr1_lo);
+	NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG(cr1_hi);
+
+	NATIVE_NV_WRITE_PSP_REG(psp_hi, psp_lo);
+	NATIVE_NV_WRITE_PCSP_REG(pcsp_hi, pcsp_lo);
+}
+
+void insert_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, pv_vcpu_ctxt_t *vcpu_ctxt,
+				pt_regs_t *regs)
+{
+	struct signal_stack_context __user *context;
+	pv_vcpu_ctxt_t *u_vcpu_ctxt;
+	unsigned long ts_flag;
+	int failed;
+
+	failed = setup_pv_vcpu_sigreturn(vcpu, vcpu_ctxt, regs);
+
+	if (failed)
+		goto fault;
+
+	/* clear flag of return from signal handler */
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	context = get_signal_stack();
+	u_vcpu_ctxt = &context->vcpu_ctxt;
+	failed = __put_user(false, &u_vcpu_ctxt->in_sig_handler);
+	clear_ts_flag(ts_flag);
+
+	if (failed)
+		goto fault;
+
+	switch_to_pv_vcpu_sigreturn(vcpu, &regs->g_stacks, &regs->crs);
+
+fault:
+	user_exit();
+	do_exit(SIGKILL);
 }
 
 /*
@@ -1180,22 +1465,27 @@ kvm_get_guest_glob_regs(struct kvm_vcpu *vcpu,
 	bool dirty_bgr, __user unsigned int *bgr)
 {
 	hva_t hva;
+	kvm_arch_exception_t exception;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)g_gregs);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)g_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, g_gregs);
-		return -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, "
+			"inject page fault to guest\n", g_gregs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
+		return -EAGAIN;
 	}
-	g_gregs = (void *)hva;
 
+	g_gregs = (void *)hva;
 	if (bgr != NULL) {
-		hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)bgr);
+		hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)bgr, true, &exception);
 		if (kvm_is_error_hva(hva)) {
-			pr_err("%s(): address %px is invalid guest address\n",
-				__func__, bgr);
-			return -EFAULT;
+			DebugKVM("failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n", bgr);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)bgr,
+						&exception);
+			return -EAGAIN;
 		}
+
 		bgr = (void *)hva;
 	}
 	return kvm_get_host_guest_glob_regs(vcpu, g_gregs, not_get_gregs_mask,
@@ -1315,22 +1605,27 @@ copy_guest_h_gregs_to_guest_gregs(global_regs_t *g_gregs,
 
 unsigned long
 kvm_get_guest_local_glob_regs(struct kvm_vcpu *vcpu,
-					__user unsigned long *u_l_gregs[2])
+				__user unsigned long *u_l_gregs[2],
+				bool is_signal)
 {
 	thread_info_t *ti = current_thread_info();
 	global_regs_t gregs;
 	unsigned long **l_gregs = u_l_gregs;
 	hva_t hva;
+	kvm_arch_exception_t exception;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)l_gregs);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)l_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, l_gregs);
-		return -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+				"fault to guest\n", l_gregs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)l_gregs, &exception);
+		return -EAGAIN;
 	}
+
 	l_gregs = (void *)hva;
 	preempt_disable();	/* to restore on one CPU */
-	machine.save_gregs_on_mask(&gregs,
+	if (is_signal)
+		machine.save_gregs_on_mask(&gregs,
 				   true,	/* dirty BGR */
 				   GLOBAL_GREGS_USER_MASK  | GUEST_GREGS_MASK);
 	preempt_enable();
@@ -1347,13 +1642,16 @@ int kvm_get_all_guest_glob_regs(struct kvm_vcpu *vcpu,
 	unsigned long **gregs = g_gregs;
 	hva_t hva;
 	int ret;
+	kvm_arch_exception_t exception;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)gregs);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, gregs);
-		return -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n", g_gregs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
+		return -EAGAIN;
 	}
+
 	gregs = (void *)hva;
 	ret = kvm_get_host_guest_glob_regs(vcpu, gregs, GUEST_GREGS_MASK,
 				true,	/* dirty BGR */
@@ -1373,24 +1671,30 @@ kvm_set_guest_glob_regs(struct kvm_vcpu *vcpu,
 	global_regs_t gregs;
 	hva_t hva;
 	unsigned long ret = 0;
+	kvm_arch_exception_t exception;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)g_gregs);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)g_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, g_gregs);
-		return -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n", g_gregs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
+		return -EAGAIN;
 	}
+
 	g_gregs = (void *)hva;
 	if (copy_from_user(gregs.g, g_gregs, sizeof(gregs.g))) {
 		DebugKVM("could not copy global registers base from user\n");
 		ret = -EFAULT;
 	}
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)bgr);
+
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)bgr, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, bgr);
-		return -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n", bgr);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)bgr, &exception);
+		return -EAGAIN;
 	}
+
 	bgr = (void *)hva;
 	if (get_user(gregs.bgr.BGR_reg, bgr)) {
 		DebugKVM("could not copy BGR registers from user\n");
@@ -1462,22 +1766,51 @@ copy_guest_local_gregs_to_gregs(global_regs_t *gregs,
 	return 0;
 }
 
+int kvm_copy_guest_all_glob_regs(struct kvm_vcpu *vcpu,
+		global_regs_t *h_gregs, __user unsigned long *g_gregs)
+{
+	hva_t hva;
+	kvm_arch_exception_t exception;
+
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)g_gregs, true, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n",
+			__func__, g_gregs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)g_gregs, &exception);
+		return -EAGAIN;
+	}
+
+	g_gregs = (void *)hva;
+	if (copy_from_user_with_tags(h_gregs->g, g_gregs, sizeof(h_gregs->g))) {
+		pr_err("%s(); could not copy global registers from user\n",
+			__func__);
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 unsigned long
 kvm_set_guest_local_glob_regs(struct kvm_vcpu *vcpu,
-					__user unsigned long *u_l_gregs[2])
+				__user unsigned long *u_l_gregs[2],
+				bool is_signal)
 {
 	thread_info_t *ti = current_thread_info();
 	global_regs_t gregs;
 	unsigned long **l_gregs = u_l_gregs;
 	hva_t hva;
 	int ret;
+	kvm_arch_exception_t exception;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)l_gregs);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)l_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, l_gregs);
-		return -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n", l_gregs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)l_gregs, &exception);
+		return -EAGAIN;
 	}
+
 	l_gregs = (void *)hva;
 	ret = copy_guest_local_gregs_to_gregs(&gregs, l_gregs);
 	if (ret != 0)
@@ -1490,7 +1823,8 @@ kvm_set_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 		copy_h_gregs_from_guest_gregs(&ti->h_gregs, &gregs);
 	}
 	preempt_disable();	/* to restore on one CPU */
-	machine.restore_gregs_on_mask(&gregs,
+	if (is_signal)
+		machine.restore_gregs_on_mask(&gregs,
 			true,	/* dirty BGR */
 			GLOBAL_GREGS_USER_MASK | GUEST_GREGS_MASK);
 	preempt_enable();
@@ -1549,7 +1883,7 @@ done_to_paravirt_guest(void)
 	native_raw_flush_TLB_all();
 	native_raw_write_back_CACHE_L12();
 
-	E2K_DONE;
+	E2K_DONE();
 }
 
 /*
@@ -1734,6 +2068,7 @@ int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
 	int ps_ind, pcs_ind;
 	int frame;
 	int ret;
+	kvm_arch_exception_t exception;
 
 	if ((pcs_frame_ind & E2K_ALIGN_PSTACK_TOP_MASK) != 0) {
 		DebugKVM("chain stack frame ind 0x%x is not aligned\n",
@@ -1767,15 +2102,19 @@ int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
 			ps_frame_ind, ps_frame_size, ps_ind);
 		return -EINVAL;
 	}
-	if (kvm_vcpu_copy_from_guest(vcpu, &pcs_frame, u_pcs_frame,
-							sizeof(pcs_frame))) {
-		DebugKVM("copy chain stack frames from user failed\n");
-		return -EFAULT;
+	ret = kvm_vcpu_copy_from_guest(vcpu, &pcs_frame, u_pcs_frame,
+							sizeof(pcs_frame));
+	if (unlikely(ret < 0)) {
+		DebugKVM("copy chain stack frames from user failed, "
+			"maybe retried\n");
+		return ret;
 	}
-	if (kvm_vcpu_copy_from_guest(vcpu, &ps_frame, u_ps_frame,
-							ps_frame_size)) {
-		DebugKVM("copy procedure stack frames from user failed\n");
-		return -EFAULT;
+	ret = kvm_vcpu_copy_from_guest(vcpu, &ps_frame, u_ps_frame,
+							ps_frame_size);
+	if (unlikely(ret < 0)) {
+		DebugKVM("copy procedure stack frames from user failed, "
+			"maybe retried\n");
+		return ret;
 	}
 
 	/* hardware virtualized guest runs by GLAUNCH at privileged mode */
@@ -1787,24 +2126,27 @@ int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
 	ps = (e2k_mem_ps_t *)guest_stacks->psp_lo.PSP_lo_base;
 	pcs = (e2k_mem_crs_t *)guest_stacks->pcsp_lo.PCSP_lo_base;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)ps);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)ps, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, ps);
-		ret = -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n", ps);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)ps, &exception);
+		ret = -EAGAIN;
 		goto out_error;
 	}
+
 	ps = (e2k_mem_ps_t *)hva;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)pcs);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)pcs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, pcs);
-		ret = -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n", pcs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)pcs, &exception);
+		ret = -EAGAIN;
 		goto out_error;
 	}
-	pcs = (e2k_mem_crs_t *)hva;
 
+	pcs = (e2k_mem_crs_t *)hva;
 	ps = &ps[ps_frame_ind / sizeof(*ps)];
 	DebugKVMHSU("procedure stack frame to update: index 0x%x base %px\n",
 		ps_frame_ind, ps);
@@ -1864,11 +2206,12 @@ int kvm_patch_guest_data_stack(struct kvm_vcpu *vcpu,
 	kvm_data_stack_info_t ds_patch;
 	int ret = 0;
 
-	if (kvm_vcpu_copy_from_guest(vcpu, &ds_patch, u_ds_patch,
-							sizeof(ds_patch))) {
-		pr_err("%s(): copy dat stack pointers patch from user failed\n",
-			__func__);
-		return -EFAULT;
+	ret = kvm_vcpu_copy_from_guest(vcpu, &ds_patch, u_ds_patch,
+							sizeof(ds_patch));
+	if (unlikely(ret < 0)) {
+		pr_err("%s(): copy dat stack pointers patch from user "
+			"failed, maybe retried\n", __func__);
+		return ret;
 	}
 	if (gti == NULL) {
 		pr_err("%s(): process %s (%d) is not guest thread\n",
@@ -1949,6 +2292,7 @@ int kvm_patch_guest_chain_stack(struct kvm_vcpu *vcpu,
 	unsigned long flags;
 	int fr_no;
 	int ret = 0;
+	kvm_arch_exception_t exception;
 
 	if (pcs_frames > KVM_MAX_PCS_FRAME_NUM_TO_PATCH ||
 			pcs_frames < 0) {
@@ -1956,11 +2300,12 @@ int kvm_patch_guest_chain_stack(struct kvm_vcpu *vcpu,
 			__func__, pcs_frames, KVM_MAX_PCS_FRAME_NUM_TO_PATCH);
 		return -EINVAL;
 	}
-	if (kvm_vcpu_copy_from_guest(vcpu, pcs_patch, u_pcs_patch,
-				sizeof(pcs_patch[0]) * pcs_frames)) {
-		pr_err("%s(): copy chain stack frames patch from user failed\n",
-			__func__);
-		return -EFAULT;
+	ret = kvm_vcpu_copy_from_guest(vcpu, pcs_patch, u_pcs_patch,
+				sizeof(pcs_patch[0]) * pcs_frames);
+	if (unlikely(ret < 0)) {
+		pr_err("%s(): copy chain stack frames patch from user "
+			"failed, maybe retried\n", __func__);
+		return ret;
 	}
 
 	/* hardware virtualized guest runs by GLAUNCH at privileged mode */
@@ -1981,15 +2326,16 @@ int kvm_patch_guest_chain_stack(struct kvm_vcpu *vcpu,
 
 	pcs = (e2k_mem_crs_t *)pcs_base;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)pcs);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)pcs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): address %px is invalid guest address\n",
-			__func__, pcs);
-		ret = -EFAULT;
+		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
+			"fault to guest\n", pcs);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)pcs, &exception);
+		ret = -EAGAIN;
 		goto out_error;
 	}
-	pcs = (e2k_mem_crs_t *)hva;
 
+	pcs = (e2k_mem_crs_t *)hva;
 	for (fr_no = 0; fr_no < pcs_frames; fr_no++) {
 		patch = &pcs_patch[fr_no];
 		DebugKVMHSP("PCS patch #%d will patch frame at ind 0x%x\n",
@@ -2080,30 +2426,3 @@ int kvm_patch_guest_data_and_chain_stacks(struct kvm_vcpu *vcpu,
 					u_pcs_patch, pcs_frames);
 	return ret;
 }
-
-#ifdef	Compiler_bug_128308_workaround
-/* Compiler bug 128308 workaround: do not inline kvm_switch_fpu_regs */
-noinline void kvm_switch_fpu_regs(struct kvm_sw_cpu_context *sw_ctxt)
-{
-	e2k_fpcr_t fpcr;
-	e2k_fpsr_t fpsr;
-	e2k_pfpfr_t pfpfr;
-	e2k_upsr_t upsr;
-
-	fpcr = NATIVE_NV_READ_FPCR_REG();
-	fpsr = NATIVE_NV_READ_FPSR_REG();
-	pfpfr = NATIVE_NV_READ_PFPFR_REG();
-	upsr = NATIVE_NV_READ_UPSR_REG();
-
-	NATIVE_NV_WRITE_FPCR_REG(sw_ctxt->fpcr);
-	NATIVE_NV_WRITE_FPSR_REG(sw_ctxt->fpsr);
-	NATIVE_NV_WRITE_PFPFR_REG(sw_ctxt->pfpfr);
-	NATIVE_WRITE_UPSR_REG(sw_ctxt->upsr);
-
-	sw_ctxt->fpcr = fpcr;
-	sw_ctxt->fpsr = fpsr;
-	sw_ctxt->pfpfr = pfpfr;
-	sw_ctxt->upsr = upsr;
-}
-#endif	/* Compiler_bug_128308_workaround */
-

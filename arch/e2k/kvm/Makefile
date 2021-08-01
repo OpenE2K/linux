@@ -1,3 +1,4 @@
+subdir-ccflags-y := -Werror -Wswitch -Wenum-compare
 
 ccflags-y += -Iarch/e2k/kvm
 EXTRA_CFLAGS += -Wframe-larger-than=4096
@@ -5,13 +6,15 @@ EXTRA_CFLAGS += -Wframe-larger-than=4096
 KVM := ../../../virt/kvm
 KERNEL := ../kernel
 
+obj-$(CONFIG_KVM_GUEST)		+= guest/
+
 kvm-$(CONFIG_KVM_HOST_MODE)	+= $(KVM)/kvm_main.o
 kvm-$(CONFIG_KVM_HOST_MODE)	+= $(KVM)/irqchip.o
 kvm-$(CONFIG_KVM_HOST_MODE)	+= $(KVM)/eventfd.o
 kvm-$(CONFIG_KVM_HOST_MODE)	+= $(KVM)/vfio.o
 kvm-$(CONFIG_KVM_ASYNC_PF)	+= $(KVM)/async_pf.o
 
-kvm-$(CONFIG_KVM_HOST_MODE)	+= pt-structs.o \
+kvm-$(CONFIG_KVM_HOST_MODE)	+= pt-structs.o switch.o \
 				   lapic.o ioapic.o cepic.o ioepic.o \
 				   irq_comm.o timer.o virq.o io.o \
 				   user_area.o nid.o vmid.o gpid.o \

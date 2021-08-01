@@ -79,8 +79,13 @@ extern long protected_sys_rt_sigaction_ex(int sig,
 			const size_t sigsetsize);
 extern long protected_sys_mq_notify(const long a1,
 					const unsigned long __user a2);
-extern long protected_sys_timer_create(const long a1,
-		const unsigned long __user a2, const unsigned long __user a3);
+extern long protected_sys_timer_create(const long	a1, /* clockid */
+				const unsigned long __user a2, /* sevp */
+				const unsigned long __user a3, /* timerid */
+				const unsigned long	unused4,
+				const unsigned long	unused5,
+				const unsigned long	unused6,
+				const struct pt_regs	*regs);
 extern long protected_sys_rt_sigtimedwait(const unsigned long __user a1,
 		const unsigned long __user a2, const unsigned long __user a3,
 		const unsigned long a4);
@@ -225,11 +230,25 @@ extern long protected_sys_sendmsg(const unsigned long	sockfd,
 			      const unsigned long unused5,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
+extern long protected_sys_sendmmsg(const unsigned long	sockfd,
+			   const unsigned long __user msgvec,
+			   const unsigned long		vlen,
+			   const unsigned long		flags,
+			   const unsigned long unused5,
+			   const unsigned long unused6,
+			   const struct pt_regs		*regs);
 extern long protected_sys_recvmsg(const unsigned long	socket,
 			      const unsigned long __user message,
 			      const unsigned long	flags,
 			      const unsigned long unused4,
 			      const unsigned long unused5,
+			      const unsigned long unused6,
+			      const struct pt_regs	*regs);
+extern long protected_sys_recvmmsg(const unsigned long	socket,
+			      const unsigned long __user message,
+			      const unsigned long	vlen,
+			      const unsigned long	flags,
+			      const unsigned long __user timeout,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
 extern long protected_sys_olduselib(const unsigned long __user a1, /* library */
@@ -309,13 +328,13 @@ extern long protected_sys_prctl(const int		option, /* a1 */
 				 const unsigned long		arg5,
 				 const unsigned long		unused6,
 				 const struct pt_regs		*regs);
-extern long protected_sys_ioctl(const int		fd,	/* a1 */
-				 const unsigned long	request,/* a2 */
-				 void			*argp,	/* a3 */
-				 const unsigned long	unused4,
-				 const unsigned long	unused5,
-				 const unsigned long	unused6,
-				 const struct pt_regs	*regs);
+extern long protected_sys_ioctl(const int		fd,		/* a1 */
+				const unsigned long	request,	/* a2 */
+				const unsigned long __user argp,	/* a3 */
+				const unsigned long	unused4,
+				const unsigned long	unused5,
+				const unsigned long	unused6,
+				const struct pt_regs	*regs);
 extern long protected_sys_epoll_ctl(const unsigned long epfd,	/* a1 */
 				    const unsigned long op,	/* a2 */
 				    const unsigned long fd,	/* a3 */
@@ -344,6 +363,48 @@ extern long protected_sys_pselect6(const long		nfds,		/* a1 */
 				   const unsigned long timeout,		/* a5 */
 				   const unsigned long sigmask,		/* a6 */
 				   const struct pt_regs *regs);
+extern long protected_sys_rt_sigqueueinfo(const long		tgid,	/* a1 */
+				     const long			sig,	/* a2 */
+				     const unsigned long __user uinfo,	/* a3 */
+				     const unsigned long unused4,
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs);
+extern long protected_sys_rt_tgsigqueueinfo(const long		tgid,	/* a1 */
+				     const long			tid,	/* a2 */
+				     const long			sig,	/* a3 */
+				     const unsigned long __user uinfo,	/* a4 */
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs);
+extern long protected_sys_pidfd_send_signal(const long		pidfd,	/* a1 */
+				     const long			sig,	/* a2 */
+				     const unsigned long __user info,	/* a3 */
+				     unsigned long		flags,	/* a4 */
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs);
+extern long protected_sys_waitid(const long	which,		/* a1 */
+			  const long		pid,		/* a2 */
+			  const unsigned long __user *infop,	/* a3 */
+			  const long		options,	/* a4 */
+			  const unsigned long __user *ru,	/* a5 */
+			  const unsigned long unused6,
+			  const struct pt_regs *regs);
+extern long protected_sys_io_uring_register(const unsigned long	fd,	/* a1 */
+				     const unsigned long	opcode,	/* a2 */
+				     const unsigned long __user arg,	/* a3 */
+				     const unsigned long nr_args,	/* a4 */
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs);
+extern long protected_sys_kexec_load(const unsigned long entry,		/* a1 */
+			      const unsigned long	nr_segments,	/* a2 */
+			      const unsigned long __user segments,	/* a3 */
+			      const unsigned long	flags,		/* a4 */
+			      const unsigned long unused5,
+			      const unsigned long unused6,
+			      const struct pt_regs *regs);
 
 extern int arch_init_pm_sc_debug_mode(const int debug_mask);
 

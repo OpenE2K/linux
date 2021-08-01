@@ -651,6 +651,8 @@ static inline void write_aaldv_reg(e2k_aaldv_t *aaldv)
 	native_write_aaldv_reg(aaldv);
 }
 
+#define clear_apb()	native_clear_apb()
+
 #ifdef CONFIG_USE_AAU
 # define SAVE_AAU_REGS_FOR_PTRACE(__regs, ti) \
 		NATIVE_SAVE_AAU_REGS_FOR_PTRACE(__regs, ti)

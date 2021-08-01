@@ -228,6 +228,12 @@ extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
 		NATIVE_READ_CLW_REG(clw_addr)
 
 /*
+ * Write CLW register
+ */
+#define	WRITE_CLW_REG(clw_addr, val)						\
+		NATIVE_WRITE_CLW_REG(clw_addr, val)
+
+/*
  * MMU DEBUG registers access
  */
 #define	READ_DDBAR0_REG_VALUE()		NATIVE_READ_DDBAR0_REG_VALUE()

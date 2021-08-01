@@ -2018,7 +2018,6 @@ static void l_zilog_console_do_write(struct console *con, const char *s,
 		if (s[i] == '\n')
 			l_zilog_console_putchar(uap, '\r');
 	}
-	l_zilog_wait_for_xmitr(uap);
 
 	/* Restore the values in the registers. */
 	write_zsreg(uap, R1, uap->curregs[1]);

@@ -182,65 +182,10 @@ enter_lazy_tlb (struct mm_struct *mm, struct task_struct *tsk)
 {
 }
 
-/*
- * Initialize a new mmu context.  This is invoked when a new
- * address space instance (unique or shared) is instantiated.
- * This just needs to set mm->context[] to an invalid context.
- */
-static inline int
-__init_new_context(struct task_struct *p, struct mm_struct *mm,
-		mm_context_t *context)
-{
-	bool is_fork = p && (p != current);
-	int ret;
 
-	memset(&context->cpumsk, 0, nr_cpu_ids * sizeof(context->cpumsk[0]));
-
-	if (is_fork) {
-		/*
-		 * Copy data on user fork
-		 */
-		mm_context_t *curr_context = &current->mm->context;
-
-		/*
-		 * Copy cut mask from the context of parent process
-		 * to the context of new process
-		 */
-		mutex_lock(&curr_context->cut_mask_lock);
-		bitmap_copy((unsigned long *) &context->cut_mask,
-				(unsigned long *) &curr_context->cut_mask,
-				USER_CUT_AREA_SIZE/sizeof(e2k_cute_t));
-		mutex_unlock(&curr_context->cut_mask_lock);
-	} else {
-		/*
-		 * Initialize by zero cut_mask of new process
-		 */
-		mutex_init(&context->cut_mask_lock);
-		bitmap_zero((unsigned long *) &context->cut_mask,
-				USER_CUT_AREA_SIZE/sizeof(e2k_cute_t));
-	}
-
-	atomic_set(&context->tstart, 1);
-
-	init_rwsem(&context->sival_ptr_list_sem);
-	INIT_LIST_HEAD(&context->sival_ptr_list_head);
-
-	INIT_LIST_HEAD(&context->delay_free_stacks);
-	init_rwsem(&context->core_lock);
-
-	INIT_LIST_HEAD(&context->cached_stacks);
-	spin_lock_init(&context->cached_stacks_lock);
-	context->cached_stacks_size = 0;
-
-	if (mm == NULL)
-		return 0;
-
-	ret = hw_contexts_init(p, context, is_fork);
-	return ret;
-}
-
-static inline int
-init_new_context(struct task_struct *p, struct mm_struct *mm)
+extern int __init_new_context(struct task_struct *p, struct mm_struct *mm,
+		mm_context_t *context);
+static inline int init_new_context(struct task_struct *p, struct mm_struct *mm)
 {
 	return __init_new_context(p, mm, &mm->context);
 }
