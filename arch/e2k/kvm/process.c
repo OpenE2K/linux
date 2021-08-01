@@ -353,19 +353,6 @@ gthread_info_t *create_guest_start_thread_info(struct kvm_vcpu *vcpu)
  */
 void kvm_clear_host_thread_info(thread_info_t *ti)
 {
-
-	/*
-	 * Clear pointer to VCPU structure of the parent into thread info
-	 * structure to inherit NULL VCPU pointer by son and disable access to
-	 * the structure while clone new thread for interrupt handler.
-	 * Interrupt handler thread will create own VIRQ VCPU and set pointer
-	 * to own VCPU and should not share parent VCPU
-	 * For example, any interrupt on created thread must account
-	 * guest real running and stolen time and update some values into
-	 * VCPU structure without any synchronization.
-	 */
-	ti->vcpu = NULL;
-
 	/* each VCPU can has own root pgd */
 	ti->kernel_image_pgd_p = NULL;
 	pgd_val(ti->kernel_image_pgd) = 0;
@@ -431,7 +418,8 @@ static int prepare_pv_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 			guest_hw_stack_t *stack_regs,
 			u64 *args, int args_num,
 			char *entry_point, e2k_psr_t psr,
-			e2k_size_t usd_size, void *ps_base, void *pcs_base)
+			e2k_size_t usd_size, void *ps_base, void *pcs_base,
+			int cui, bool kernel)
 {
 	e2k_mem_crs_t pcs_frames[2];
 	e2k_mem_ps_t ps_frames[8 * sizeof(*args) / (EXT_4_NR_SZ / 2)];
@@ -448,12 +436,12 @@ static int prepare_pv_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 
 	prepare_stacks_to_startup_vcpu(vcpu, ps_frames, pcs_frames,
 		args, args_num, entry_point, psr,
-		usd_size, &ps_ind, &pcs_ind);
+		usd_size, &ps_ind, &pcs_ind, cui, kernel);
 
 	g_ps_frames = (e2k_mem_ps_t *)ps_base;
 	g_pcs_frames = (e2k_mem_crs_t *)pcs_base;
 	ret = kvm_vcpu_copy_to_guest(vcpu, g_ps_frames, ps_frames, ps_ind);
-	if (ret != 0) {
+	if (unlikely(ret < 0)) {
 		pr_err("%s(): could not prepare initial content of "
 			"guest boot procedure stack, error %d\n",
 			__func__, ret);
@@ -468,7 +456,7 @@ static int prepare_pv_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 	stack_regs->crs.cr1_hi = pcs_frames[up_frame].cr1_hi;
 
 	ret = kvm_vcpu_copy_to_guest(vcpu, g_pcs_frames, pcs_frames, pcs_ind);
-	if (ret != 0) {
+	if (unlikely(ret < 0)) {
 		pr_err("%s(): could not prepare initial content of "
 			"guest boot chain stack, error %d\n",
 			__func__, ret);
@@ -494,7 +482,6 @@ int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu)
 	sprintf(name, "kvm/%d-vcpu/%d",
 		vcpu->kvm->arch.vmid.nr, vcpu->vcpu_id);
 	set_task_comm(current, name);
-	current_thread_info()->vcpu = vcpu;
 	vcpu->arch.host_task = current;
 
 	INIT_LIST_HEAD(&current_thread_info()->tasks_to_spin);
@@ -555,7 +542,7 @@ int kvm_prepare_pv_vcpu_start_stacks(struct kvm_vcpu *vcpu)
 			vcpu->arch.entry_point, E2K_USER_INITIAL_PSR,
 			GET_VCPU_BOOT_CS_SIZE(boot_stacks),
 			GET_VCPU_BOOT_PS_BASE(boot_stacks),
-			GET_VCPU_BOOT_PCS_BASE(boot_stacks));
+			GET_VCPU_BOOT_PCS_BASE(boot_stacks), 0, true);
 	if (ret) {
 		pr_err("%s(): failed to prepare VCPU #%d boot stacks, "
 			"error %d\n",
@@ -801,7 +788,7 @@ static int kvm_get_guest_kernel_stacks(struct kvm_vcpu *vcpu,
 	ret = prepare_pv_stacks_to_startup_vcpu(vcpu,
 			stack_regs, args, args_num, entry_point,
 			psr, user_info->sp_offset,
-			(void *)ps_base, (void *)pcs_base);
+			(void *)ps_base, (void *)pcs_base, 0, true);
 	if (ret)
 		goto failed;
 
@@ -952,8 +939,8 @@ static int kvm_setup_guest_user_stacks(struct kvm_vcpu *vcpu,
 	gmm_struct_t	*gmm;
 	char		*entry_point;
 	e2k_psr_t	psr;
-	int		cui;
-	int		ret;
+	int		ret, cui;
+	bool		kernel;
 
 	gti = pv_vcpu_get_gti(vcpu);
 	BUG_ON(gti == NULL);
@@ -965,6 +952,7 @@ static int kvm_setup_guest_user_stacks(struct kvm_vcpu *vcpu,
 	set_pv_vcpu_u_stack_context(vcpu, stack_regs);
 
 	cui = user_info->cui;
+	kernel = user_info->kernel;
 	atomic_set(&gmm->context.cur_cui, cui);
 	DebugKVMEX("set new CUTD size 0x%lx, CUI to 0x%x\n",
 		user_info->cut_size, cui);
@@ -977,13 +965,17 @@ static int kvm_setup_guest_user_stacks(struct kvm_vcpu *vcpu,
 			stack_regs, NULL, 0, entry_point,
 			psr, user_info->u_sp_offset,
 			(void *)user_info->u_ps_base,
-			(void *)user_info->u_pcs_base);
+			(void *)user_info->u_pcs_base,
+			cui, kernel);
 	if (ret)
 		goto out_failed;
 
 	kvm_set_guest_vcpu_PSR(vcpu, psr);
 	kvm_set_guest_vcpu_UPSR(vcpu, E2K_USER_INITIAL_UPSR);
 	kvm_set_guest_vcpu_under_upsr(vcpu, false);
+
+	DebugFRTASK("starting the new user task GPID #%d GMMID #%d\n",
+		gti->gpid->nid.nr, gmm->nid.nr);
 
 	return 0;
 
@@ -1084,7 +1076,7 @@ int kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 		/* it need create shadow PT based on PTs created by guest */
 		/* and enable paging mode */
 		KVM_BUG_ON(!is_shadow_paging(vcpu));
-		ret = kvm_pv_switch_to_shadow_pt(vcpu);
+		ret = kvm_mmu_enable_shadow_paging(vcpu);
 		if (ret) {
 			pr_err("%s(): VCPU #%d could not switch to "
 				"shadow PT, error %d\n",
@@ -1179,14 +1171,13 @@ failed:
 
 extern int guest_thread_copy;	/* FIXME: only to debug */
 
-static inline void
-kvm_put_guest_new_sw_regs(gthread_info_t *new_gti,
+static inline int
+kvm_put_guest_new_sw_regs(struct kvm_vcpu *vcpu, gthread_info_t *new_gti,
 		e2k_stacks_t *new_stacks, e2k_mem_crs_t *new_crs,
-		bool save_gregs)
+		__user unsigned long *g_gregs)
 {
 	struct sw_regs *sw_regs = &new_gti->sw_regs;
 
-#define	gti	new_gti
 	sw_regs->top	 = new_stacks->top;
 	sw_regs->usd_lo	 = new_stacks->usd_lo;
 	sw_regs->usd_hi	 = new_stacks->usd_hi;
@@ -1199,7 +1190,20 @@ kvm_put_guest_new_sw_regs(gthread_info_t *new_gti,
 	sw_regs->crs.cr1_lo = new_crs->cr1_lo;
 	sw_regs->crs.cr1_hi = new_crs->cr1_hi;
 
-	init_sw_user_regs(sw_regs, save_gregs, new_gti->task_is_binco);
+	init_sw_user_regs(sw_regs, false, new_gti->task_is_binco);
+	if (g_gregs != NULL) {
+		int ret;
+
+		ret = kvm_copy_guest_all_glob_regs(vcpu, &sw_regs->gregs,
+							g_gregs);
+		if (ret != 0) {
+			pr_err("%s(): could not copy guest global registers, "
+				"error %d\n", __func__, ret);
+			return ret;
+		}
+		/* set BGR register to enable floating point stack */
+		sw_regs->gregs.bgr = E2K_INITIAL_BGR;
+	}
 	sw_regs->cutd	= new_gti->stack_regs.cutd;
 	sw_regs->dimar0 = 0;
 	sw_regs->dimar1 = 0;
@@ -1219,7 +1223,7 @@ kvm_put_guest_new_sw_regs(gthread_info_t *new_gti,
 	/* set initial state of guest kernel UPSR */
 	/* guest kernel is user of host, so initial user UPSR state */
 	DO_SAVE_GUEST_KERNEL_UPSR(new_gti, E2K_USER_INITIAL_UPSR);
-#undef	gti
+	return 0;
 }
 
 int kvm_copy_guest_kernel_stacks(struct kvm_vcpu *vcpu,
@@ -1349,8 +1353,8 @@ int kvm_copy_guest_kernel_stacks(struct kvm_vcpu *vcpu,
 	user_info.cr1_ussz = new_crs->cr1_hi.CR1_hi_half;
 	if (kvm_vcpu_copy_to_guest(vcpu, task_info, &user_info,
 						sizeof(*task_info))) {
-		pr_err("%s(): copy updated task info to user failed\n",
-			__func__);
+		pr_err("%s(): copy updated task info to user failed, "
+			"retry\n", __func__);
 		ret = -EFAULT;
 		goto out_free_gti;
 	}
@@ -1358,8 +1362,7 @@ int kvm_copy_guest_kernel_stacks(struct kvm_vcpu *vcpu,
 
 	/* save user special registers to initial state while switch */
 	gti->task_is_binco = 0;
-	kvm_put_guest_new_sw_regs(gti, new_stacks, new_crs,
-		0	/*save global regs */);
+	kvm_put_guest_new_sw_regs(vcpu, gti, new_stacks, new_crs, NULL);
 
 	DebugKVMKS("completed successfully, GPID #%d\n",
 		gti->gpid->nid.nr);
@@ -1375,8 +1378,8 @@ int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 	gthread_info_t *gti;
 	gthread_info_t *cur_gti;
 	gmm_struct_t *gmm;
-
-	DebugFRTASK("started for guest thread GPID #%d\n", gpid_nr);
+	int gmmid_nr;
+	bool kthread;
 
 	if (gpid_nr < 0) {
 		pr_alert("%s(): invalid GPID # %d: nothing to release\n",
@@ -1389,6 +1392,12 @@ int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 			__func__, gpid_nr);
 		return -ENODEV;
 	}
+
+	kthread = test_gti_thread_flag(gti, GTIF_KERNEL_THREAD);
+
+	if (!kthread)
+		DebugFRTASK("started for guest thread GPID #%d\n", gpid_nr);
+
 	/* Guest should pass gpid number only of the dead process */
 	/* FIXME: it need check the passed gpid is not number of active */
 	/* (queued or running) guest thread. But now it is checker */
@@ -1407,8 +1416,10 @@ int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 		gmm = pv_vcpu_get_init_gmm(vcpu);
 	}
 	KVM_BUG_ON(gmm == NULL);
+	gmmid_nr = gmm->nid.nr;
 	if (!pv_vcpu_is_init_gmm(vcpu, gmm) &&
-			(gmm == pv_vcpu_get_gmm(vcpu) ||
+			!test_gti_thread_flag(gti, GTIF_USER_THREAD) &&
+				(gmm == pv_vcpu_get_gmm(vcpu) ||
 				gmm == pv_vcpu_get_active_gmm(vcpu))) {
 		pr_err("%s(): guest tries to release current active "
 			"gmm GMMID #%d\n",
@@ -1417,11 +1428,17 @@ int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 	}
 
 	if (kvm_gmm_put(vcpu->kvm, gti) == 0) {
-		DebugFRTASK("gmm GMMID #%d was released\n", gmm->nid.nr);
+		DebugFRTASK("gmm GMMID #%d was released\n", gmmid_nr);
+	} else {
+		if (!kthread) {
+			DebugFRTASK("gmm GMMID #%d cannot be released\n",
+				gmmid_nr);
+		}
 	}
 	free_guest_thread_info(vcpu->kvm, gti);
 
-	DebugFRTASK("task GPID #%d released successfully\n", gpid_nr);
+	if (!kthread)
+		DebugFRTASK("task GPID #%d released successfully\n", gpid_nr);
 
 	return 0;
 }
@@ -1445,11 +1462,12 @@ int kvm_switch_to_guest_new_user(struct kvm_vcpu *vcpu,
 	BUG_ON(vcpu == NULL);
 	BUG_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_in_hcall);
 
-	if (kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
-						sizeof(*task_info))) {
+	ret = kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
+						sizeof(*task_info));
+	if (unlikely(ret < 0)) {
 		pr_err("%s(): copy new task info from user failed\n",
 			__func__);
-		return -EFAULT;
+		return ret;
 	}
 
 	ret = kvm_setup_guest_user_stacks(vcpu, &user_info, stack_regs);
@@ -1623,18 +1641,20 @@ int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 	int		gmmid_nr;
 	int		ret;
 
-	if (kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
-						sizeof(*task_info))) {
+	ret = kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
+						sizeof(*task_info));
+	if (unlikely(ret < 0)) {
 		pr_err("%s(): copy new task info from user failed\n",
 			__func__);
-		return -EFAULT;
+		return ret;
 	}
 
-	if (kvm_vcpu_copy_from_guest(vcpu, &gmm_info, gmmu_info,
-						sizeof(*gmmu_info))) {
+	ret = kvm_vcpu_copy_from_guest(vcpu, &gmm_info, gmmu_info,
+						sizeof(*gmmu_info));
+	if (unlikely(ret < 0)) {
 		pr_err("%s(): copy new GMMU info from user failed\n",
 			__func__);
-		return -EFAULT;
+		return ret;
 	}
 	KVM_BUG_ON(gmm_info.opcode != CREATE_NEW_GMM_GMMU_OPC);
 
@@ -1742,8 +1762,9 @@ int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 		((user_info.flags & BIN_COMP_CODE_TASK_FLAG) != 0);
 	gti->task_is_protect =
 		((user_info.flags & PROTECTED_CODE_TASK_FLAG) != 0);
-	kvm_put_guest_new_sw_regs(gti, new_stacks, new_crs,
-		1	/* save global regs */);
+
+	kvm_put_guest_new_sw_regs(vcpu, gti, new_stacks, new_crs,
+				(unsigned long *)user_info.gregs);
 
 	/* prepare new shadow PT to switch to */
 	u_pptb = gmm_info.u_pptb;
@@ -1757,13 +1778,16 @@ int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 
 	/* return ID of created gmm struct to guest */
 	gmm_info.gmmid_nr = gmmid_nr;
-	if (kvm_vcpu_copy_to_guest(vcpu, gmmu_info, &gmm_info,
-						sizeof(*gmmu_info))) {
-		pr_err("%s(): copy updated gmm info to user failed\n",
+	ret = kvm_vcpu_copy_to_guest(vcpu, gmmu_info, &gmm_info,
+						sizeof(*gmmu_info));
+	if (unlikely(ret < 0)) {
+		pr_err("%s(): copy updated gmm info to user failed, retry\n",
 			__func__);
-		ret = -EFAULT;
 		goto out_free_gmm;
 	}
+
+	DebugFRTASK("created task GPID #%d GMMID #%d\n",
+		gti->gpid->nid.nr, gmm->nid.nr);
 
 	if (DEBUG_KVM_COPY_USER_MODE)
 		debug_copy_guest = false;
@@ -1805,11 +1829,12 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	e2k_pcsp_hi_t	pcsp_hi;
 	int		ret;
 
-	if (kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
-						sizeof(*task_info))) {
+	ret = kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
+						sizeof(*task_info));
+	if (unlikely(ret < 0)) {
 		pr_err("%s(): copy new task info from user failed\n",
 			__func__);
-		return -EFAULT;
+		return ret;
 	}
 	if (DEBUG_KVM_CLONE_USER_MODE)
 		debug_clone_guest = true;
@@ -1828,6 +1853,13 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	gmm = cur_gti->gmm;
 	BUG_ON(gmm == NULL);
 	kvm_gmm_get(vcpu, gti, gmm);
+
+	/*
+	 * Mark the parent & child processes as user threads
+	 * on common virtual memory (gmm structure)
+	 */
+	set_gti_thread_flag(cur_gti, GTIF_USER_THREAD);
+	set_gti_thread_flag(gti, GTIF_USER_THREAD);
 
 	cur_regs = &cur_gti->fork_regs;
 	regs = &gti->fork_regs;
@@ -1925,8 +1957,12 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 		((user_info.flags & BIN_COMP_CODE_TASK_FLAG) != 0);
 	gti->task_is_protect =
 		((user_info.flags & PROTECTED_CODE_TASK_FLAG) != 0);
-	kvm_put_guest_new_sw_regs(gti, new_stacks, new_crs,
-		1	/* save global regs */);
+
+	kvm_put_guest_new_sw_regs(vcpu, gti, new_stacks, new_crs,
+				(unsigned long *)user_info.gregs);
+
+	DebugFRTASK("created thread GPID #%d GMMID #%d\n",
+		gti->gpid->nid.nr, gmm->nid.nr);
 
 	if (DEBUG_KVM_CLONE_USER_MODE)
 		debug_clone_guest = false;
@@ -1944,7 +1980,8 @@ out_free_gmm:
 }
 
 int kvm_sig_handler_return(struct kvm_vcpu *vcpu, kvm_stacks_info_t *regs_info,
-				long sys_rval, guest_hw_stack_t *stack_regs)
+				unsigned long sigreturn_entry, long sys_rval,
+				guest_hw_stack_t *stack_regs)
 {
 	kvm_stacks_info_t user_info;
 	struct signal_stack_context __user *context;
@@ -1953,11 +1990,12 @@ int kvm_sig_handler_return(struct kvm_vcpu *vcpu, kvm_stacks_info_t *regs_info,
 	unsigned long ts_flag;
 	int ret;
 
-	if (kvm_vcpu_copy_from_guest(vcpu, &user_info, regs_info,
-						sizeof(*regs_info))) {
+	ret = kvm_vcpu_copy_from_guest(vcpu, &user_info, regs_info,
+						sizeof(*regs_info));
+	if (ret < 0) {
 		pr_err("%s(): copy stack registers state info from user "
 			"failed\n", __func__);
-		return -EFAULT;
+		return ret;
 	}
 
 	stack_regs->stacks.top = user_info.top;
@@ -2009,6 +2047,7 @@ int kvm_sig_handler_return(struct kvm_vcpu *vcpu, kvm_stacks_info_t *regs_info,
 	context = get_signal_stack();
 	vcpu_ctxt = &context->vcpu_ctxt;
 	ret = __put_user(true, &vcpu_ctxt->in_sig_handler);
+	ret |= __put_user(sigreturn_entry, &vcpu_ctxt->sigreturn_entry);
 	ret |= __put_user(sys_rval, &vcpu_ctxt->sys_rval);
 	clear_ts_flag(ts_flag);
 
@@ -2025,11 +2064,12 @@ int kvm_long_jump_return(struct kvm_vcpu *vcpu,
 	unsigned long ts_flag;
 	int ret;
 
-	if (kvm_vcpu_copy_from_guest(vcpu, &user_info, regs_info,
-						sizeof(*regs_info))) {
+	ret = kvm_vcpu_copy_from_guest(vcpu, &user_info, regs_info,
+						sizeof(*regs_info));
+	if (unlikely(ret < 0)) {
 		pr_err("%s(): copy stack registers state info from user "
 			"failed\n", __func__);
-		return -EFAULT;
+		return ret;
 	}
 
 	context = get_signal_stack();
@@ -2291,13 +2331,23 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void __user *msg,
 	e2k_addr_t hva_msg;
 	int exit_reason;
 	int ret;
+	kvm_arch_exception_t exception;
 
 	DebugKVMSH("started for msg %px, reason %ld\n",
 		msg, reason);
-	if (msg != NULL)
-		hva_msg = kvm_vcpu_gva_to_hva(vcpu, (gva_t)msg);
-	else
+	if (msg != NULL) {
+		hva_msg = kvm_vcpu_gva_to_hva(vcpu, (gva_t)msg,
+					false, &exception);
+		if (kvm_is_error_hva(hva_msg)) {
+			DebugKVM("failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n", msg);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)msg,
+						&exception);
+			return -EAGAIN;
+		}
+	} else {
 		hva_msg = 0;
+	}
 	if (hva_msg == 0) {
 		DebugKVMSH("could not copy string from user\n");
 		buf = NULL;

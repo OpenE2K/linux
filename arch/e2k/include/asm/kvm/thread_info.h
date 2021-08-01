@@ -147,8 +147,13 @@ typedef struct gthread_info {
 	vcpu_l_gregs_t	l_gregs;	/* guest user "local" global */
 					/* registers to save updated on page */
 					/* fault values */
-	kernel_gregs_t	g_gregs;	/* guest kernel global resiters state */
+	kernel_gregs_t	gk_gregs;	/* guest kernel global resiters state */
+					/* some registers can be updated only */
 					/* after migration to other VCPU */
+	kernel_gregs_t	gu_gregs;	/* guest user global resiters state */
+					/* only for global registers which */
+					/* used by the guest kernel for its */
+					/* own purposes */
 
 	/* the following flags to mark event: */
 	/* hardware stacks bounds trap occured, but 'sge' on guest */
@@ -236,6 +241,8 @@ typedef struct gthread_info {
 					/* thread */
 #define	GTIF_THREAD_MIGRATED	2	/* the thread was migrated from one */
 					/* VCPU to other */
+#define	GTIF_USER_THREAD	4	/* the process is user thread on */
+					/* common virtual memory (gmm) */
 #define	GTIF_HW_PS_LOCKED	16	/* hardware procedure stack */
 					/* was locked by host */
 #define	GTIF_HW_PCS_LOCKED	17	/* hardware chain stack */
@@ -258,6 +265,7 @@ typedef struct gthread_info {
 #define _GTIF_VCPU_START_THREAD		(1UL << GTIF_VCPU_START_THREAD)
 #define	_GTIF_KERNEL_THREAD		(1UL << GTIF_KERNEL_THREAD)
 #define	_GTIF_THREAD_MIGRATED		(1UL << GTIF_THREAD_MIGRATED)
+#define	_GTIF_USER_THREAD		(1UL << GTIF_USER_THREAD)
 #define	_GTIF_HW_PS_LOCKED		(1UL << GTIF_HW_PS_LOCKED)
 #define	_GTIF_HW_PCS_LOCKED		(1UL << GTIF_HW_PCS_LOCKED)
 #define	_GTIF_HW_PS_PRESENTED		(1UL << GTIF_HW_PS_PRESENTED)

@@ -52,7 +52,7 @@
 
 #undef	DEBUG_MMIO_SHUTDOWN_MODE
 #undef	DebugMMIOSHUTDOWN
-#define	DEBUG_MMIO_SHUTDOWN_MODE	0	/* MMIO shutdown debugging */
+#define	DEBUG_MMIO_SHUTDOWN_MODE	1	/* MMIO shutdown debugging */
 #define	DebugMMIOSHUTDOWN(fmt, args...)					\
 ({									\
 	if (DEBUG_MMIO_SHUTDOWN_MODE)					\
@@ -119,39 +119,54 @@ static void copy_io_intc_info_data(void *mmio_data, void *intc_data,
 	}
 }
 
+/* TODO Emulation of PCI config space should be done in QEMU */
 #define	PCI_SOFT_RESET_CONTROL		0x64
+#define	L_SOFTWARE_RESET		0x00000001
 
-static void kvm_spmc_or_other_check_reboot_halt(struct kvm_vcpu *vcpu,
-				gpa_t addr, int len, const void *v)
+static spmc_pm1_cnt_t reg_spmc_pm1_cnt;
+
+static void kvm_i2c_spi_conf_write(struct kvm_vcpu *vcpu, gpa_t conf, gpa_t addr, u32 value)
 {
-	unsigned int x, i;
+	WARN_ON(!conf);
 
-	if (len != 4)
+	if (addr == (conf + PCI_SOFT_RESET_CONTROL) && value & L_SOFTWARE_RESET) {
+		vcpu->arch.exit_shutdown_terminate = KVM_EXIT_E2K_RESTART;
+		DebugMMIOSHUTDOWN("REBOOT i2c-spi probe\n");
+		return;
+	}
+}
+
+static void kvm_spmc_conf_write(struct kvm_vcpu *vcpu, gpa_t conf, gpa_t addr, u32 value)
+{
+	WARN_ON(!conf);
+
+	if (addr == (conf + SPMC_PM1_CNT_OFF)) {
+		reg_spmc_pm1_cnt.reg = value;
+		if (reg_spmc_pm1_cnt.sci_en == 1 && reg_spmc_pm1_cnt.slp_typx == 5 &&
+				reg_spmc_pm1_cnt.slp_en == 1) {
+			vcpu->arch.exit_shutdown_terminate = KVM_EXIT_SHUTDOWN;
+			DebugMMIOSHUTDOWN("set HALT spmc probe\n");
+			return;
+		}
+	}
+}
+
+static void kvm_check_reboot_halt(struct kvm_vcpu *vcpu, gpa_t addr, int len, const void *v)
+{
+	u32 value;
+	int i;
+
+	if (len == 4)
+		value = *(u32 *)v;
+	else if (len == 2)
+		value = *(u16 *)v;
+	else
 		return;
 
-	x = *(unsigned int *)v;
-	if (x != 0x1)
-		return;
 
 	for (i = 0; i < vcpu->kvm->arch.num_numa_nodes; i++) {
-		if (kvm_spmc_conf_base[i] != 0) {
-			if (addr == (gpa_t)(kvm_spmc_conf_base[i] +
-						  SPMC_PM1_CNT_OFF)) {
-				vcpu->arch.exit_shutdown_terminate =
-							KVM_EXIT_SHUTDOWN;
-				DebugMMIOSHUTDOWN("set HALT spmc probe\n");
-				return;
-			}
-		}
-		if (kvm_i2c_spi_conf_base[i] != 0) {
-			if (addr == (gpa_t)(kvm_i2c_spi_conf_base[i] +
-						PCI_SOFT_RESET_CONTROL)) {
-				vcpu->arch.exit_shutdown_terminate =
-						KVM_EXIT_E2K_RESTART;
-				DebugMMIOSHUTDOWN("REBOOT i2c-spi probe\n");
-				return;
-			}
-		}
+		kvm_i2c_spi_conf_write(vcpu, kvm_i2c_spi_conf_base[i], addr, value);
+		kvm_spmc_conf_write(vcpu, kvm_spmc_conf_base[i], addr, value);
 	}
 }
 
@@ -166,7 +181,7 @@ int vcpu_mmio_write(struct kvm_vcpu *vcpu, gpa_t addr, int len,
 		!kvm_iodevice_write(vcpu, &vcpu->arch.epic->dev, addr, len, v))
 		return 0;
 
-	kvm_spmc_or_other_check_reboot_halt(vcpu, addr, len, v);
+	kvm_check_reboot_halt(vcpu, addr, len, v);
 
 	return kvm_io_bus_write(vcpu, KVM_MMIO_BUS, addr, len, v);
 }

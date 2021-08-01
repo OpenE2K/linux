@@ -1,4 +1,3 @@
-
 #include "mga2_drv.h"
 
 #define	__rint(__addr) readl(mga2->regs + \
@@ -168,6 +167,14 @@ void mga2_driver_irq_preinstall(struct drm_device *drm)
 	/* Set *all* edge-low*/
 	wwint(0x7FFFffff, INTLEVEL);
 	wwint(0x7FFFffff, INTMODE);
+	if (mga25(mga2)) {
+		u32 v = MGA2_INT_B_SETRST |
+			MGA25_INT_B_V1HDMI | MGA25_INT_B_V2HDMI |
+			MGA25_INT_B_V1HDMI_WAKEUP | MGA25_INT_B_V2HDMI_WAKEUP |
+			MGA25_INT_B_HDA1 | MGA25_INT_B_HDA2;
+		wwint(v, INTLEVEL);
+		wwint(v, INTMODE);
+	}
 	/* Clear *all* interrupts */
 	wwint(0x7FFFffff, INTREQ);
 }
@@ -176,11 +183,10 @@ int mga2_driver_irq_postinstall(struct drm_device *drm)
 {
 	struct mga2 *mga2 = drm->dev_private;
 	u32 v = MGA2_INT_B_V1HDMI | MGA2_INT_B_V2HDMI;
-	if (mga25(mga2))
+	if (mga25(mga2)) {
 		v = MGA2_INT_B_SETRST |
-			MGA25_INT_B_V1HDMI | MGA25_INT_B_V2HDMI |
-			MGA25_INT_B_V1HDMI_WAKEUP | MGA25_INT_B_V2HDMI_WAKEUP |
-			MGA25_INT_B_HDA1 | MGA25_INT_B_HDA2;
+			MGA25_INT_B_V1HDMI | MGA25_INT_B_V2HDMI;
+	}
 	mga2_enable_irq(mga2, v);
 	return 0;
 }

@@ -128,7 +128,7 @@ struct signal_stack;
 extern void free_signal_stack(struct signal_stack *signal_stack);
 extern struct signal_stack_context __user *pop_signal_stack(void);
 extern struct signal_stack_context __user *get_signal_stack(void);
-extern int setup_signal_stack(struct pt_regs *regs);
+extern int setup_signal_stack(struct pt_regs *regs, bool is_signal);
 
 #define	GET_SIG_RESTORE_STACK(ti, sbr, usd_lo, usd_hi) \
 do { \

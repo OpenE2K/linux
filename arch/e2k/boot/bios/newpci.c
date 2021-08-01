@@ -109,6 +109,7 @@ static const struct bios_pci_ops *conf;
 #define B2_2_0	BUS_DEV_FUNC(1, ((2<<3)|0))
 #define B2_2_1	BUS_DEV_FUNC(1, ((2<<3)|1))
 #define B2_2_2	BUS_DEV_FUNC(1, ((2<<3)|2))
+#define B2_3_0	BUS_DEV_FUNC(1, ((3<<3)|0))
 #define B2_2_3	BUS_DEV_FUNC(1, ((2<<3)|3))
 #define B2_0_0	BUS_DEV_FUNC(1, ((0<<3)|0))
 #define B2_1_0	BUS_DEV_FUNC(1, ((1<<3)|0))

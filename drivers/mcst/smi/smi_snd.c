@@ -33,17 +33,8 @@
 #include "smi_drv.h"
 #include "hw768.h"
 
-
-
-#ifdef SAVE_AUDIO_DATA
-int file_pos = 0;
-#define FILE_SIZE 1*1024*1024
-unsigned char file_date[FILE_SIZE];
-#endif
-
 char sramTxSection = 0; /* updated section by firmware, Start with section 0 of SRAM */
 struct sm768chip *chip_irq_id=NULL;/*chip_irq_id is use for request and free irq*/
-
 
 static int SM768_AudioInit(unsigned long wordLength, unsigned long sampleRate)
 {
@@ -134,9 +125,9 @@ static int snd_falconi2s_info_hw_volume(struct snd_kcontrol *kcontrol,
 static int snd_falconi2s_get_hw_play_volume(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
+	dbg_msg("snd_falconi2s_get_hw_volume\n");
 
 	struct sm768chip *chip = kcontrol->private_data;
-	dbg_msg("snd_falconi2s_get_hw_volume\n");
 	
 	ucontrol->value.integer.value[0] = chip->playback_vol;
 	
@@ -145,12 +136,11 @@ static int snd_falconi2s_get_hw_play_volume(struct snd_kcontrol *kcontrol,
 static int snd_falconi2s_put_hw_play_volume(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
+	dbg_msg("snd_falconi2s_put_hw_volume:%d\n",ucontrol->value.integer.value[0]);
 
 	struct sm768chip *chip = kcontrol->private_data;
 	int changed = 0;
 	u8 vol;
-	dbg_msg("snd_falconi2s_put_hw_volume:%ld\n",ucontrol->value.integer.value[0]);
-
 
 
 	if (chip->playback_vol!= ucontrol->value.integer.value[0]) {
@@ -167,9 +157,9 @@ static int snd_falconi2s_put_hw_play_volume(struct snd_kcontrol *kcontrol,
 static int snd_falconi2s_get_hw_capture_volume(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
+	dbg_msg("snd_falconi2s_get_hw_volume\n");
 
 	struct sm768chip *chip = kcontrol->private_data;
-	dbg_msg("snd_falconi2s_get_hw_volume\n");
 	
 	ucontrol->value.integer.value[0] = chip->capture_vol;
 	
@@ -178,12 +168,12 @@ static int snd_falconi2s_get_hw_capture_volume(struct snd_kcontrol *kcontrol,
 static int snd_falconi2s_put_hw_capture_volume(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
+	dbg_msg("snd_falconi2s_put_hw_volume:%d\n",ucontrol->value.integer.value[0]);
 
 
 	struct sm768chip *chip = kcontrol->private_data;
 	int changed = 0;
 	u8 vol;
-	dbg_msg("snd_falconi2s_put_hw_volume:%ld\n",ucontrol->value.integer.value[0]);
 
 
 	if (chip->capture_vol!= ucontrol->value.integer.value[0]) {
@@ -235,7 +225,7 @@ static struct snd_pcm_hardware snd_falconi2s_playback_hw = {
 	.periods_min =	  P_PERIOD_MIN,
 	.periods_max =	  P_PERIOD_MAX,
 };
-#if 0
+
   /* hardware definition */
 static struct snd_pcm_hardware snd_falconi2s_capture_hw = {
 	.info = (SNDRV_PCM_INFO_MMAP |
@@ -254,14 +244,14 @@ static struct snd_pcm_hardware snd_falconi2s_capture_hw = {
 	.periods_min =      1,
 	.periods_max =      1024,
 };
-#endif
+
   /* open callback */
 static int snd_falconi2s_playback_open(struct snd_pcm_substream *substream)
 {
+	dbg_msg("snd_falconi2s_playback_open\n");
 		
 	struct sm768chip *chip = snd_pcm_substream_chip(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	dbg_msg("snd_falconi2s_playback_open\n");
 
 	spin_lock(&chip->lock);
 	runtime->hw = snd_falconi2s_playback_hw;
@@ -284,7 +274,6 @@ static int snd_falconi2s_playback_close(struct snd_pcm_substream *substream)
 
 }
 
-#if 0
   /* open callback */
 static int snd_falconi2s_capture_open(struct snd_pcm_substream *substream)
 {
@@ -310,7 +299,7 @@ static int snd_falconi2s_capture_close(struct snd_pcm_substream *substream)
 	return 0;
 
 }
-#endif
+
   /* hw_params callback */
 static int snd_falconi2s_pcm_hw_params(struct snd_pcm_substream *substream,
                                struct snd_pcm_hw_params *hw_params)
@@ -331,17 +320,20 @@ static int snd_falconi2s_pcm_hw_free(struct snd_pcm_substream *substream)
   /* prepare callback */
 static int snd_falconi2s_pcm_prepare(struct snd_pcm_substream *substream)
 {
+#if (SMI_DEBUG != 0)
+	struct snd_pcm_runtime *runtime = substream->runtime;
+#endif
 	struct sm768chip *chip = snd_pcm_substream_chip(substream);
 	dbg_msg("snd_falconi2s_pcm_prepare\n");
 
 	chip->pos = 0;
 
-	dbg_msg("runtime->rate:%d\n",substream->runtime->rate);
-	dbg_msg("runtime->buffer_size:%ld\n",substream->runtime->buffer_size);
-	dbg_msg("runtime->periods:%d\n",substream->runtime->periods);
-	dbg_msg("runtime->period_size:%ld\n",substream->runtime->period_size);
-	dbg_msg("runtime->frame_bits:%d\n",substream->runtime->frame_bits);
-	dbg_msg("runtime->dma_bytes:%ld\n",substream->runtime->dma_bytes);
+	dbg_msg("runtime->rate:%d\n",runtime->rate);
+	dbg_msg("runtime->buffer_size:%d\n",runtime->buffer_size);
+	dbg_msg("runtime->periods:%d\n",runtime->periods);
+	dbg_msg("runtime->period_size:%d\n",runtime->period_size);
+	dbg_msg("runtime->frame_bits:%d\n",runtime->frame_bits);
+	dbg_msg("runtime->dma_bytes:%d\n",runtime->dma_bytes);
 
 	return 0;
 }
@@ -352,7 +344,7 @@ static int snd_falconi2s_pcm_playback_trigger(struct snd_pcm_substream *substrea
 {
 	struct sm768chip *chip = snd_pcm_substream_chip(substream);
 	dbg_msg("snd_falconi2s_pcm_trigger\n");
-	dbg_msg("substream:%p\n",substream);
+	dbg_msg("substream:0x%x\n",substream);
 
 	spin_lock(&chip->lock);
 	
@@ -428,7 +420,7 @@ static struct snd_pcm_ops snd_falconi2s_playback_ops = {
           .trigger =     snd_falconi2s_pcm_trigger,
           .pointer =     snd_falconi2s_pcm_pointer,
   };
-#if 0
+
   /* operators */
 static struct snd_pcm_ops snd_falconi2s_capture_ops = {
           .open =        snd_falconi2s_capture_open,
@@ -440,7 +432,7 @@ static struct snd_pcm_ops snd_falconi2s_capture_ops = {
           .trigger =     snd_falconi2s_pcm_trigger,
           .pointer =     snd_falconi2s_pcm_pointer,
   };
-#endif
+
 
 
 
@@ -492,17 +484,7 @@ static irqreturn_t snd_smi_interrupt(int irq, void *dev_id)
 		
 		/* put data of next section */  
 		/* only support SRAM_SECTION_NUM = 2 */
-		memcpy_toio((void *)chip->pvReg + SRAM_OUTPUT_BASE + SRAM_SECTION_SIZE * sramTxSection, runtime->dma_area + chip->pos, P_PERIOD_BYTE);
-#ifdef SAVE_AUDIO_DATA
-		if(file_pos < FILE_SIZE) {
-			dbg_msg("copy date\n");
-			memcpy(file_data+file_pos,runtime->dma_area + chip->pos, P_PERIOD_BYTE);
-		   	file_pos += P_PERIOD_BYTE;
-		}
-		else {
-		   	dbg_msg("copy ok\n");
-		}
-#endif
+		memcpy_toio(chip->pvReg + SRAM_OUTPUT_BASE + SRAM_SECTION_SIZE * sramTxSection, runtime->dma_area + chip->pos, P_PERIOD_BYTE);
 		
 		chip->pos += P_PERIOD_BYTE;
 		chip->pos %= ((runtime->periods) * (P_PERIOD_BYTE));
@@ -510,27 +492,27 @@ static irqreturn_t snd_smi_interrupt(int irq, void *dev_id)
 		snd_pcm_period_elapsed(substream);
 		
 		return IRQ_HANDLED;
-	}else
+	}
+	else
 		return IRQ_NONE;
-	
-	
 }
 
   /* chip-specific constructor
    * (see "Management of Cards and Components")
    */
 static int snd_falconi2s_create(struct snd_card *card,
-                                         struct pci_dev *pci,
+                                         struct drm_device *dev,
                                          struct sm768chip **rchip)
 {
-	struct sm768chip *chip;
 	int err;
+	struct pci_dev *pci = dev->pdev;
+	struct smi_device *smi_device = dev->dev_private;
+	struct sm768chip *chip;
 	static struct snd_device_ops ops = {
 		.dev_free = snd_falconi2s_dev_free,
 	};
 
 	*rchip = NULL;
-
 
 	/* allocate a chip-specific data with zero filled */
 	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
@@ -546,25 +528,17 @@ static int snd_falconi2s_create(struct snd_card *card,
 	}
 	
 	//map register
-	chip->vidreg_start = pci_resource_start(pci,1);
-	chip->vidreg_size = pci_resource_len(pci, 1);
-	dbg_msg("Audio MMIO phyAddr = 0x%lx\n",chip->vidreg_start);
+	chip->vidreg_start = smi_device->rmmio_base;
+	chip->vidreg_size = smi_device->rmmio_size;
+	dbg_msg("Audio MMIO phyAddr = 0x%x\n",chip->vidreg_start);
 
-	chip->pvReg = ioremap_nocache(chip->vidreg_start,chip->vidreg_size);
-	if(!chip->pvReg) {
-		err_msg("mmio failed\n");
-		snd_falconi2s_free(chip);
-		err= -EFAULT;
-		return err;
-	}
-	else {
-		dbg_msg("Audio MMIO virtual addr = %p\n",chip->pvReg);
-	}
+	chip->pvReg = smi_device->rmmio;
+	dbg_msg("Audio MMIO virtual addr = %p\n",chip->pvReg);
 
-	//map video memory. save file postion todo...  in fact, bar 0 is not use.
-	chip->vidmem_start = pci_resource_start(pci,0);
+	//map video memory.
+	chip->vidmem_start = smi_device->mc.vram_base;
 	chip->vidmem_size = 0x200000;   // change the video memory temperarily
-	dbg_msg("video memory phyAddr = 0x%lx, size = (Dec)%ld bytes\n",
+	dbg_msg("video memory phyAddr = 0x%x, size = (Dec)%d bytes\n",
 	chip->vidmem_start,chip->vidmem_size);
 	chip->pvMem = ioremap_wc(chip->vidmem_start,chip->vidmem_size);
 
@@ -590,7 +564,7 @@ static int snd_falconi2s_create(struct snd_card *card,
 	}
 
 	chip_irq_id=chip;/*Record chip_irq_id which will use in free_irq*/
-	dbg_msg("chip_irq_id=%p\n", chip_irq_id);
+	dbg_msg("chip_irq_id=%d\n", chip_irq_id);
 
 	iisClearRawInt();//clear int
 
@@ -613,15 +587,14 @@ static int snd_falconi2s_create(struct snd_card *card,
 }
 
 
-
-int smi_audio_init(struct pci_dev *pci)
+int smi_audio_init(struct drm_device *dev)
 {
 
-	struct snd_card *card;
+	int idx, err;
+	struct pci_dev *pci = dev->pdev;
 	struct snd_pcm *pcm;
-
+	struct snd_card *card;
 	struct sm768chip *chip;
-	int idx,err;
 	
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)
 	err = snd_card_new(&pci->dev, SNDRV_DEFAULT_IDX1, SNDRV_DEFAULT_STR1, THIS_MODULE, 0, &card);
@@ -632,7 +605,7 @@ int smi_audio_init(struct pci_dev *pci)
 	if (err < 0)
 		return err;
 
-	err = snd_falconi2s_create(card, pci, &chip);
+	err = snd_falconi2s_create(card, dev, &chip);
 	if (err < 0) {
 		snd_card_free(card);
       		return err;
@@ -645,7 +618,7 @@ int smi_audio_init(struct pci_dev *pci)
 	snd_pcm_new(card,"smiaudio_pcm",0,1,0,&pcm);
 	pcm->private_data = chip;
 
-      
+	memset(&snd_falconi2s_capture_ops, 0, sizeof(snd_falconi2s_capture_ops));
 	/* set operators */
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK,
                           &snd_falconi2s_playback_ops);
@@ -676,47 +649,24 @@ int smi_audio_init(struct pci_dev *pci)
 
 }
 
-void smi_audio_remove(struct pci_dev *pci)
+void smi_audio_remove(struct drm_device *dev)
 {
+	struct pci_dev *pci = dev->pdev;
 	struct snd_card *card;
 
 	inf_msg("smi_pci_remove\n");
 	card = pci_get_drvdata(pci);
 	
-	dbg_msg("perpare to free irq, pci irq :%d, chip_irq_id=%p\n", pci->irq, chip_irq_id);
+	dbg_msg("perpare to free irq, pci irq :%d, chip_irq_id=%d\n", pci->irq, chip_irq_id);
 	if(pci->irq){				
 		free_irq(pci->irq, chip_irq_id);
 		dbg_msg("free irq\n");
 	}
 
-
 	SM768_AudioDeinit();
 	
 	snd_card_free(card);
 	pci_set_drvdata(pci, NULL);
-
-#ifdef SAVE_AUDIO_DATA
-	/* This is for test audio data*/
-	dbg_msg("prepare to save file\n");
-	char filename[50];
-	sprintf(filename,"/work/pcie-audio/test/audio_data");
-			
-	struct file *fp;
-	mm_segment_t fs;
-	loff_t pos;
-	dbg_msg("open file\n");
-	fp =filp_open(filename,O_RDWR | O_CREAT,0644);
-	if (IS_ERR(fp)){
-		printk("create file error\n");
-		return -1;
-	}
-	fs =get_fs();
-	set_fs(KERNEL_DS);
-	pos =0;
-	vfs_write(fp,file_date, FILE_SIZE, &pos);
-	filp_close(fp,NULL);
-	set_fs(fs);
-	dbg_msg("saved file\n");	
-#endif	
+	iounmap(chip_irq_id->pvMem);
 }
 

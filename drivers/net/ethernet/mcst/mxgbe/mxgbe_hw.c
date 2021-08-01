@@ -23,6 +23,7 @@
 /* PRST_CST regiter bits */
 #define PRST_CST_SETRST		SET_BIT(31)	/* [31] - set rst */
 #define PRST_CST_STATRST	SET_BIT(30)	/* [30] - rst state */
+#define PRST_DIS_STB_CLK	SET_BIT(29)	/* [29] - standby clk disable */
 #define PRST_DMAERR		0X00700000	/* [22:20] - DMA err */
 #define PRST_SIGNS		0X000FFC00	/* [19:10] - wr/rd_signs */
 #define PRST_ZEROS		0X000003FF	/* [09:00] - wr/rd_zeros */
@@ -44,7 +45,7 @@ inline u32 mxgbe_rreg32(void __iomem *base, u32 port)
 inline void mxgbe_wreg32(void __iomem *base, u32 port, u32 val)
 {
 	iowrite32(val, base + port);
-} /* mxgbe_wreg32 */
+}
 
 
 /* Read counter register */
@@ -88,16 +89,22 @@ int mxgbe_hw_reset(mxgbe_priv_t *priv)
 	void __iomem *base = priv->bar0_base;
 	unsigned long timestart;
 
-	FDEBUG;
-
 	val = mxgbe_rreg32(base, PRST_CST);
-	if (val & ~(PRST_CST_STATRST | PRST_ZEROS_SIGNS_ERR)) {
+	if ((val & PRST_CST_SETRST) || !(val & PRST_CST_STATRST)) {
+		dev_err(&priv->pdev->dev,
+			"ERROR: HW Reset not started\n");
 		err = -EAGAIN;
 		goto err_reset;
 	}
+	if ((val & (PRST_DMAERR | PRST_SIGNS)) || (~val & PRST_ZEROS)) {
+		dev_info(&priv->pdev->dev,
+			"HW Reset start, PRST_CST=0x%08X\n", val);
+	}
 
+	/* Start reset */
 	mxgbe_wreg32(base, PRST_CST, PRST_CST_SETRST);
 
+	/* wait for bit 31 */
 	timestart = jiffies;
 	do {
 		val = mxgbe_rreg32(base, PRST_CST);
@@ -107,6 +114,7 @@ int mxgbe_hw_reset(mxgbe_priv_t *priv)
 		}
 	} while (val & PRST_CST_SETRST);
 
+	/* wait for bit 30 */
 	timestart = jiffies;
 	do {
 		val = mxgbe_rreg32(base, PRST_CST);
@@ -115,6 +123,9 @@ int mxgbe_hw_reset(mxgbe_priv_t *priv)
 			goto err_reset;
 		}
 	} while (!(val & PRST_CST_STATRST));
+
+	/* R2000+ proto */
+	mxgbe_wreg32(base, PRST_CST, PRST_DIS_STB_CLK);
 
 	dev_info(&priv->pdev->dev,
 		 "HW Reset done, PRST_CST=0x%08X\n", val);
@@ -139,16 +150,26 @@ int mxgbe_hw_getinfo(mxgbe_priv_t *priv)
 	void __iomem *base = priv->bar0_base;
 	struct pci_dev *pdev = priv->pdev;
 
-	FDEBUG;
-
 	assert(base);
 	assert(pdev);
 
-
 	/* PCI Config Space */
 	pci_read_config_byte(pdev, PCI_REVISION_ID, &byte);
-	if (MXGBE_REVISION_ID != byte)
+	if (MXGBE_REVISION_ID_BOARD == byte) {
+		priv->revision = MXGBE_REVISION_ID_BOARD;
+		priv->pcsaddr = 0;
+		dev_info(&priv->pdev->dev,
+			 "revision id = %d: PCIe board\n", byte);
+	} else if (MXGBE_REVISION_ID_E16C == byte) {
+		priv->revision = MXGBE_REVISION_ID_E16C;
+		priv->pcsaddr = 1;
+		dev_info(&priv->pdev->dev,
+			 "revision id = %d: E16C\n", byte);
+	} else {
+		dev_info(&priv->pdev->dev,
+			 "revision id = %d: unknown\n", byte);
 		return -ENODEV;
+	}
 
 	/* read Tx */
 	val = mxgbe_rreg32(base, TX_QNUM);
@@ -191,8 +212,6 @@ int mxgbe_hw_init(mxgbe_priv_t *priv)
 {
 	int err = 0;
 
-	FDEBUG;
-
 	/* Init GPIO */
 	mxgbe_gpio_init(priv);
 
@@ -232,8 +251,6 @@ out_err:
 void mxgbe_hw_start(mxgbe_priv_t *priv)
 {
 	unsigned int qn;
-
-	FDEBUG;
 
 	/* Start MAC */
 	mxgbe_mac_start(priv);

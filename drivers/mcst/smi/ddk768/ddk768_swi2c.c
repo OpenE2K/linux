@@ -191,6 +191,7 @@ static unsigned char swI2CReadSDA(void)
         return 0;
 }
 
+
 /*
  *  This function sends ACK signal
  */

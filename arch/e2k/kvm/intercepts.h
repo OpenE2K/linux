@@ -68,6 +68,12 @@ kvm_clear_vcpu_intc_TIRs_num(struct kvm_vcpu *vcpu)
 	kvm_set_vcpu_intc_TIRs_num(vcpu, -1);
 }
 
+static inline bool
+kvm_is_empty_vcpu_intc_TIRs(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.intc_ctxt.nr_TIRs < 0;
+}
+
 static inline e2k_tir_lo_t
 kvm_get_vcpu_intc_TIR_lo(struct kvm_vcpu *vcpu, int TIR_no)
 {
@@ -370,6 +376,12 @@ kvm_inject_last_wish(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 }
 
 static inline void
+kvm_inject_data_page_exc_on_IP(struct kvm_vcpu *vcpu, u64 ip)
+{
+	kvm_inject_trap_TIR(vcpu, 1, exc_data_page_mask, ip);
+}
+
+static inline void
 kvm_inject_data_page_exc(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
@@ -389,7 +401,7 @@ kvm_inject_data_page_exc(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 		/* Precise IP unknown, so take IP of intercepted command */
 		ip = AS(regs->crs.cr0_hi).ip << 3;
 	}
-	kvm_inject_trap_TIR(vcpu, 1, exc_data_page_mask, ip);
+	kvm_inject_data_page_exc_on_IP(vcpu, ip);
 }
 
 static inline void

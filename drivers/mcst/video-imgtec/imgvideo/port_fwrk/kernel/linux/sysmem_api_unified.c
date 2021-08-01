@@ -91,15 +91,6 @@ static IMG_VOID Deinitialise(
 {
 }
 
-#ifdef CONFIG_MCST
-static int find_ptr_id(int id, void *ptr, void *data)
-{
-	if (ptr == data)
-		return id;
-	return 0;
-}
-#endif
-
 /*!
 ******************************************************************************
 
@@ -117,17 +108,13 @@ static IMG_RESULT AllocPages(
     unsigned numPages, pg_i, pgrm_i;
     struct page **pages;
     IMG_UINT64 *      pCpuPhysAddrs;
-    size_t            physAddrArrSize;
-    unsigned int gfp_mask = GFP_KERNEL;
 #ifdef CONFIG_MCST
-    dma_addr_t d;
-    int id;
-    SYSDEVU_sInfo *dev = heap->sysdev;
-    Res = 0;
-#else
-    uint64_t dma_address;
-    int ret = 0;
+    IMG_UINT64 *      pDevPhysAddrs;
 #endif
+    size_t            physAddrArrSize;
+    uint64_t dma_address;
+    unsigned int gfp_mask = GFP_KERNEL;
+    int ret = 0;
 
     //eMemAttrib = SYS_MEMATTRIB_CACHED;
 
@@ -145,10 +132,20 @@ static IMG_RESULT AllocPages(
         Res = IMG_ERROR_OUT_OF_MEMORY;
         goto errPhysAddrsAlloc;
     }
+#ifdef CONFIG_MCST
+    physAddrArrSize = sizeof(*pCpuPhysAddrs) * numPages;
+    pDevPhysAddrs = IMG_BIGORSMALL_ALLOC(physAddrArrSize);
+    if (!pDevPhysAddrs) {
+        Res = IMG_ERROR_OUT_OF_MEMORY;
+        goto errDevAddrsAlloc;
+    }
+#endif
 
-    if (dma_get_mask(heap->sysdev->native_device) <= DMA_BIT_MASK(32))
-		gfp_mask |= GFP_DMA;
-
+    if (dma_get_mask(heap->sysdev->native_device) == DMA_BIT_MASK(40)) {
+		gfp_mask |= GFP_HIGHUSER;
+    } else {
+		gfp_mask |= GFP_DMA32;
+    }
     for (pg_i = 0; pg_i < numPages; ++pg_i) {
 	pages[pg_i] = alloc_page(gfp_mask);
         if (!pages[pg_i]) {
@@ -157,55 +154,33 @@ static IMG_RESULT AllocPages(
         }
 
         pCpuPhysAddrs[pg_i] = page_to_pfn(pages[pg_i]) << PAGE_SHIFT;
-
 #ifdef CONFIG_MCST
-	d = dma_map_page(dev->native_device, pages[pg_i],
-			  0, PAGE_SIZE, DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(dev->native_device, d)) {
-                Res = IMG_ERROR_MALLOC_FAILED;
-		goto err1;
-	}
-
-	idr_lock      (&dev->pa_id_map);
-	id = idr_alloc(&dev->pa_id_map, pages[pg_i], 1, 0, GFP_KERNEL);
-	idr_unlock    (&dev->pa_id_map);
-	if (WARN_ON(id < 0)) {
-		Res = -id;
-		goto err2;
-	}
-
-	idr_lock       (&dev->dma_id_map);
-	Res = idr_alloc(&dev->dma_id_map, (void *)d, id, id + 1, GFP_KERNEL);
-	idr_unlock     (&dev->dma_id_map);
-	if (WARN_ON(Res < 0)) {
-		Res = -id;
-		goto err3;
-	}
-	if (Res < 0) {
-err3:		idr_lock  (&dev->pa_id_map);
-		idr_remove(&dev->pa_id_map, id);
-		idr_unlock(&dev->pa_id_map);
-err2:		dma_unmap_page(dev->native_device, d, PAGE_SIZE, DMA_BIDIRECTIONAL);
-err1:        	__free_pages(pages[pg_i], 0);
-		goto errPageAlloc;
-	}
+	dma_address = dma_map_page(heap->sysdev->native_device, pages[pg_i], 0,
+				HOST_MMU_PAGE_SIZE, DMA_BIDIRECTIONAL);
+	pDevPhysAddrs[pg_i] = dma_address;
 #else
         // Invalidate the region ( whether it's cached or not )
 	dma_address = dma_map_page(heap->sysdev->native_device, pages[pg_i], 0,
 				PAGE_SIZE, DMA_FROM_DEVICE);
+#endif
 	ret = dma_mapping_error(heap->sysdev->native_device, dma_address);
 	if (ret) {
 		DEBUG_REPORT(REPORT_MODULE_SYSMEM,
 				"sysmem_api_unified/AllocPages: dma_mapping_error!!!");
 		Res = IMG_ERROR_UNEXPECTED_STATE;
+#ifdef CONFIG_MCST
+		goto errCreateMapRegion;
+#else
 		goto errPageAlloc;
+#endif	
 	}
-#endif
     }
 
     // Set pointer to physical address in structure
     psPages->ppaPhysAddr = pCpuPhysAddrs;
-
+#ifdef CONFIG_MCST
+    psPages->ppaDevPAddr = pDevPhysAddrs;
+#endif
     Res = SYSBRGU_CreateMappableRegion(psPages->ppaPhysAddr[0], ui32Size, eMemAttrib,
                                        psPages, &psPages->hRegHandle);
     DEBUG_REPORT(REPORT_MODULE_SYSMEM, "%s (unified) region of size %u phys 0x%llx",
@@ -221,24 +196,20 @@ err1:        	__free_pages(pages[pg_i], 0);
     return IMG_SUCCESS;
 
 errCreateMapRegion:
+    for (pgrm_i = 0; pgrm_i < pg_i; ++pgrm_i) {
+        dma_unmap_page(heap->sysdev->native_device,
+		pDevPhysAddrs[pgrm_i], HOST_MMU_PAGE_SIZE, DMA_BIDIRECTIONAL);
+    }
+    if (pg_i < numPages)
+	    pg_i++;
 errPageAlloc:
     for (pgrm_i = 0; pgrm_i < pg_i; ++pgrm_i) {
         __free_pages(pages[pgrm_i], 0);
-#ifdef CONFIG_MCST
-	idr_lock         (&dev->pa_id_map);
-	id = idr_for_each(&dev->pa_id_map, &find_ptr_id, pages[pgrm_i]);
-	idr_remove       (&dev->pa_id_map, id);
-	idr_unlock       (&dev->pa_id_map);
-	BUG_ON(id == 0);
-
-	idr_lock      (&dev->dma_id_map);
-	d = (dma_addr_t)idr_find(&dev->dma_id_map, id);
-	idr_remove    (&dev->dma_id_map, id);
-	idr_unlock    (&dev->dma_id_map);
-	BUG_ON(d == 0);
-	dma_unmap_page(dev->native_device, d, PAGE_SIZE, DMA_BIDIRECTIONAL);
-#endif
     }
+#ifdef CONFIG_MCST
+    IMG_BIGORSMALL_FREE(numPages * sizeof(*pDevPhysAddrs), pDevPhysAddrs);
+errDevAddrsAlloc:
+#endif
     IMG_BIGORSMALL_FREE(numPages * sizeof(*pCpuPhysAddrs), pCpuPhysAddrs);
 errPhysAddrsAlloc:
     IMG_BIGORSMALL_FREE(numPages * sizeof(*pages), pages);
@@ -314,6 +285,7 @@ static IMG_RESULT GetCpuKmAddr(
     return IMG_SUCCESS;
 }
 
+
 /*!
 ******************************************************************************
  @Function                FreePages
@@ -326,11 +298,6 @@ static IMG_VOID FreePages(
 {
     SYSMEMU_sPages *  psPages = hPagesHandle;
     size_t            numPages;
-#ifdef CONFIG_MCST
-    void *ptr;
-    int id;
-    SYSDEVU_sInfo *dev = heap->sysdev;
-#endif
 
     numPages = (psPages->ui32Size + HOST_MMU_PAGE_SIZE - 1)/HOST_MMU_PAGE_SIZE;
 
@@ -358,20 +325,10 @@ static IMG_VOID FreePages(
         for (pg_i = 0; pg_i < numPages; ++pg_i) {
             pages[pg_i] = pfn_to_page(psPages->ppaPhysAddr[pg_i] >> PAGE_SHIFT);
 #ifdef CONFIG_MCST
-		idr_lock         (&dev->pa_id_map);
-		id = idr_for_each(&dev->pa_id_map, &find_ptr_id, pages[pg_i]);
-		idr_remove       (&dev->pa_id_map, id);
-		idr_unlock       (&dev->pa_id_map);
-		BUG_ON(id == 0);
-		idr_lock      (&dev->dma_id_map);
-		ptr = idr_find(&dev->dma_id_map, id);
-		idr_remove    (&dev->dma_id_map, id);
-		idr_unlock    (&dev->dma_id_map);
-		BUG_ON(ptr == NULL);
-		dma_unmap_page(dev->native_device, (dma_addr_t)ptr,
-				PAGE_SIZE, DMA_BIDIRECTIONAL);
+        dma_unmap_page(heap->sysdev->native_device,
+		psPages->ppaDevPAddr[pg_i], HOST_MMU_PAGE_SIZE, DMA_BIDIRECTIONAL);
 #else
-		dma_unmap_page(heap->sysdev->native_device, SYSDEVU_CpuPAddrToDevPAddr(heap->sysdev, psPages->ppaPhysAddr[pg_i]), PAGE_SIZE, DMA_FROM_DEVICE);
+	dma_unmap_page(heap->sysdev->native_device, SYSDEVU_CpuPAddrToDevPAddr(heap->sysdev, psPages->ppaPhysAddr[pg_i]), PAGE_SIZE, DMA_FROM_DEVICE);
 #endif
         }
 
@@ -388,6 +345,9 @@ static IMG_VOID FreePages(
     }
 
     IMG_BIGORSMALL_FREE(numPages * sizeof(psPages->ppaPhysAddr[0]), psPages->ppaPhysAddr);
+#ifdef CONFIG_MCST
+    IMG_BIGORSMALL_FREE(numPages * sizeof(psPages->ppaDevPAddr[0]), psPages->ppaDevPAddr);
+#endif
 }
 
 static IMG_VOID *CpuPAddrToCpuKmAddr(
@@ -420,6 +380,22 @@ static IMG_PHYSADDR CpuKmAddrToCpuPAddr(
 
     return ret;
 }
+#ifdef CONFIG_MCST
+static IMG_PHYSADDR CpuKmAddrToDevPAddr(
+    SYSMEMU_sPages *  psPages,
+    IMG_VOID *     pvCpuKmAddr
+)
+{
+    size_t numPages = (psPages->ui32Size + HOST_MMU_PAGE_SIZE - 1)/HOST_MMU_PAGE_SIZE;
+
+    int i = (psPages->pvCpuKmAddr - pvCpuKmAddr) / HOST_MMU_PAGE_SIZE;
+    BUG_ON(!psPages->pvCpuKmAddr);
+    BUG_ON(i < 0);
+    BUG_ON(i > numPages);
+    BUG_ON(0 == psPages->ppaDevPAddr[i]);
+    return psPages->ppaDevPAddr[i];
+}
+#endif
 
 #define updateMemoryHelper(func, dir) { \
 \
@@ -582,7 +558,9 @@ static SYSMEM_Ops unified_ops = {
         .GetCpuKmAddr = GetCpuKmAddr,
         .CpuKmAddrToCpuPAddr = CpuKmAddrToCpuPAddr,
         .CpuPAddrToCpuKmAddr = CpuPAddrToCpuKmAddr,
-
+#ifdef CONFIG_MCST
+        .CpuKmAddrToDevPAddr = CpuKmAddrToDevPAddr,
+#endif
         .UpdateMemory = UpdateMemory,
         .UpdateMemoryRegion = UpdateMemoryRegion,
 

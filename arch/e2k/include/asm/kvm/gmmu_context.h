@@ -232,7 +232,9 @@ switch_guest_mm(gthread_info_t *next_gti, struct gmm_struct *next_gmm)
 	DebugKVMSW("started to switch guest mm from GPID #%d to GPID #%d\n",
 		cur_gti->gpid->nid.nr, next_gti->gpid->nid.nr);
 	active_gmm = pv_vcpu_get_active_gmm(vcpu);
-	if (next_gmm == NULL || next_gti->gmm == NULL) {
+	if (next_gmm == NULL ||
+			next_gti->gmm == NULL ||
+					next_gti->gmm_in_release) {
 #ifdef	DO_NOT_USE_ACTIVE_GMM
 		/* switch to guest kernel thread, but optimization */
 		/* has been turned OFF, so switch to init gmm & PTs */
@@ -258,12 +260,13 @@ switch_guest_mm(gthread_info_t *next_gti, struct gmm_struct *next_gmm)
 			active_gmm, active_gmm->nid.nr);
 		goto out;
 	}
-	if (likely(!next_gmm->in_release && !next_gti->gmm_in_release &&
-			!pv_vcpu_is_init_gmm(vcpu, next_gmm))) {
+	if (likely(!pv_vcpu_is_init_gmm(vcpu, next_gmm))) {
 		next_pgd = kvm_mmu_load_gmm_root(current_thread_info(),
 						 next_gti);
+		pv_vcpu_set_gmm(vcpu, next_gmm);
 	} else {
 		next_pgd = kvm_mmu_load_init_root(vcpu);
+		pv_vcpu_clear_gmm(vcpu);
 	}
 	switch_guest_pgd(next_pgd);
 	pv_vcpu_set_active_gmm(vcpu, next_gmm);

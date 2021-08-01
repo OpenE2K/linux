@@ -64,6 +64,12 @@ struct bctrl {
 	struct bctrl_desc fence[MGA2_RING_SIZE];
 } __packed;
 
+static u64 bctrl_get_current_desc(struct mga2 *mga2)
+{
+	struct bctrl_base *base = &mga2->bctrl->base;
+	return le64_to_cpu(READ_ONCE(base->current_desc));
+}
+
 static dma_addr_t idx_to_addr(struct mga2 *mga2, int i)
 {
 	dma_addr_t base = mga2->bctrl_dma + offsetof(struct bctrl, desc);
@@ -164,7 +170,7 @@ static int mga2_append_desc(struct mga2 *mga2, struct mga2_gem_object *mo)
 		goto uptdate_ptr;
 	else if (current_desc && current_desc != last_addr)
 		goto out;
-	/* Now we don't if mga2 has read the desc.
+	/* Now we don't know if mga2 has read the desc.
 	   Let's wait for previous one and see */
 	ret = dma_fence_wait_timeout(dfence, true, timeout);
 	if (ret == 0) {

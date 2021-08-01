@@ -244,9 +244,10 @@ static void __hdmi_modb(struct dw_hdmi *hdmi, u8 data, u8 mask, unsigned reg)
 
 #define hdmi_modb(hdmi, data, mask, _reg) do {			\
 	unsigned _val2 = data;					\
-	DRM_DEBUG("%s: md: %s (%x): 0x%02x\n", dev_name(hdmi->dev),	\
-			#_reg, _reg, _val2);			\
-	__hdmi_modb(hdmi, data, mask, _reg);			\
+	unsigned _m = mask;					\
+	DRM_DEBUG("%s: md: %s (%x): 0x%02x (mask %x)\n", dev_name(hdmi->dev),\
+			#_reg, _reg, _val2, _m);		\
+	__hdmi_modb(hdmi, data, _m, _reg);			\
 } while (0)
 
 #else
@@ -1179,12 +1180,12 @@ static bool hdmi_phy_wait_i2c_done(struct dw_hdmi *hdmi, int msec)
 {
 	u32 val;
 
-	while ((val = hdmi_readb(hdmi, HDMI_IH_I2CMPHY_STAT0) & 0x3) == 0) {
+	while ((val = __hdmi_readb(hdmi, HDMI_IH_I2CMPHY_STAT0) & 0x3) == 0) {
 		if (msec-- == 0)
 			return false;
 		udelay(1000);
 	}
-	hdmi_writeb(hdmi, val, HDMI_IH_I2CMPHY_STAT0);
+	__hdmi_writeb(hdmi, val, HDMI_IH_I2CMPHY_STAT0);
 
 	return true;
 }
@@ -1192,24 +1193,33 @@ static bool hdmi_phy_wait_i2c_done(struct dw_hdmi *hdmi, int msec)
 void __dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
 			   unsigned char addr)
 {
-	hdmi_writeb(hdmi, 0xFF, HDMI_IH_I2CMPHY_STAT0);
-	hdmi_writeb(hdmi, addr, HDMI_PHY_I2CM_ADDRESS_ADDR);
-	hdmi_writeb(hdmi, (unsigned char)(data >> 8),
+	__hdmi_writeb(hdmi, 0xFF, HDMI_IH_I2CMPHY_STAT0);
+	__hdmi_writeb(hdmi, addr, HDMI_PHY_I2CM_ADDRESS_ADDR);
+	__hdmi_writeb(hdmi, (unsigned char)(data >> 8),
 		    HDMI_PHY_I2CM_DATAO_1_ADDR);
-	hdmi_writeb(hdmi, (unsigned char)(data >> 0),
+	__hdmi_writeb(hdmi, (unsigned char)(data >> 0),
 		    HDMI_PHY_I2CM_DATAO_0_ADDR);
-	hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_WRITE,
+	__hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_WRITE,
 		    HDMI_PHY_I2CM_OPERATION_ADDR);
-	hdmi_phy_wait_i2c_done(hdmi, 1000);
+	WARN_ON(!hdmi_phy_wait_i2c_done(hdmi, 1000));
 }
-#define dw_hdmi_phy_i2c_write(_hdmi, _val, _offset) do {			\
-	unsigned _val2 = _val;					\
-	DRM_DEBUG("hdmi: i2c wr: %s (%x): 0x%02x\n",			\
-			#_offset, _offset, _val2);			\
-	__dw_hdmi_phy_i2c_write(_hdmi, _val, _offset);			\
-} while (0)
-//EXPORT_SYMBOL_GPL(dw_hdmi_phy_i2c_write);
+EXPORT_SYMBOL_GPL(__dw_hdmi_phy_i2c_write);
 
+#ifdef CONFIG_MCST
+unsigned short __dw_hdmi_phy_i2c_read(struct dw_hdmi *hdmi, unsigned char addr)
+{
+	unsigned short v;
+	__hdmi_writeb(hdmi, 0xFF, HDMI_IH_I2CMPHY_STAT0);
+	__hdmi_writeb(hdmi, addr, HDMI_PHY_I2CM_ADDRESS_ADDR);
+	__hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_READ,
+		    HDMI_PHY_I2CM_OPERATION_ADDR);
+	WARN_ON(!hdmi_phy_wait_i2c_done(hdmi, 1000));
+	v = __hdmi_readb(hdmi, HDMI_PHY_I2CM_DATAI_0_ADDR);
+	v |= __hdmi_readb(hdmi,  HDMI_PHY_I2CM_DATAI_1_ADDR) << 8;
+	return v;
+}
+EXPORT_SYMBOL_GPL(__dw_hdmi_phy_i2c_read);
+#endif
 /* Filter out invalid setups to avoid configuring SCDC and scrambling */
 static bool dw_hdmi_support_scdc(struct dw_hdmi *hdmi)
 {
@@ -1321,8 +1331,13 @@ void dw_hdmi_phy_reset(struct dw_hdmi *hdmi)
 {
 	/* PHY reset. The reset signal is active high on Gen2 PHYs. */
 #ifdef CONFIG_MCST
-	hdmi_writeb(hdmi, 0, HDMI_MC_PHYRSTZ);
-	hdmi_writeb(hdmi, HDMI_MC_PHYRSTZ_PHYRSTZ, HDMI_MC_PHYRSTZ);
+	if (hdmi->version == 0x200a) { /* e1c+ */
+		hdmi_writeb(hdmi, 0, HDMI_MC_PHYRSTZ);
+		hdmi_writeb(hdmi, HDMI_MC_PHYRSTZ_PHYRSTZ, HDMI_MC_PHYRSTZ);
+	} else {
+		hdmi_writeb(hdmi, HDMI_MC_PHYRSTZ_PHYRSTZ, HDMI_MC_PHYRSTZ);
+		hdmi_writeb(hdmi, 0, HDMI_MC_PHYRSTZ);
+	}
 #else
 	hdmi_writeb(hdmi, HDMI_MC_PHYRSTZ_PHYRSTZ, HDMI_MC_PHYRSTZ);
 	hdmi_writeb(hdmi, 0, HDMI_MC_PHYRSTZ);
@@ -1817,14 +1832,10 @@ err:
 static int hdmi_phy_configure(struct dw_hdmi *hdmi)
 {
 	const struct dw_hdmi_phy_data *phy = hdmi->phy.data;
-#ifndef CONFIG_MCST
 	const struct dw_hdmi_plat_data *pdata = hdmi->plat_data;
 	unsigned long mpixelclock = hdmi->hdmi_data.video_mode.mpixelclock;
-#endif	/*CONFIG_MCST*/
 	unsigned long mtmdsclock = hdmi->hdmi_data.video_mode.mtmdsclock;
-#ifndef CONFIG_MCST
 	int ret;
-#endif	/*CONFIG_MCST*/
 
 	dw_hdmi_phy_power_off(hdmi);
 
@@ -1841,21 +1852,26 @@ static int hdmi_phy_configure(struct dw_hdmi *hdmi)
 	dw_hdmi_phy_i2c_set_addr(hdmi, HDMI_PHY_I2CM_SLAVE_ADDR_PHY_GEN2);
 
 #ifdef CONFIG_MCST
-	if (hdmi_plls_configure(hdmi, 8))
-		return -EINVAL;
-#else
+	if (hdmi->version == 0x200a) { /* e1c+ */
+		if (hdmi_plls_configure(hdmi, 8))
+			return -EINVAL;
+		goto out;
+	}
+#endif
 	/* Write to the PHY as configured by the platform */
 	if (pdata->configure_phy)
 		ret = pdata->configure_phy(hdmi, pdata, mpixelclock);
 	else
 		ret = phy->configure(hdmi, pdata, mpixelclock);
 	if (ret) {
-		dev_err(hdmi->dev, "PHY configuration failed (clock %lu)\n",
-			mpixelclock);
+		dev_err(hdmi->dev, "PHY configuration failed (%d, clock %lu)\n",
+			ret, mpixelclock);
 		return ret;
 	}
-#endif	/*CONFIG_MCST*/
 
+#ifdef CONFIG_MCST
+out:
+#endif
 	/* Wait for resuming transmission of TMDS clock and data */
 	if (mtmdsclock > HDMI14_MAX_TMDSCLK)
 		msleep(100);
@@ -2615,7 +2631,8 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 		ret = drm_add_edid_modes(connector, edid);
 		kfree(edid);
 	} else {
-		dev_dbg(hdmi->dev, "failed to get edid\n");
+		dev_dbg(hdmi->dev, "failed to get edid (%s:%d)\n",
+			hdmi->ddc->name, hdmi->ddc->nr);
 	}
 
 	return ret;
@@ -2781,7 +2798,7 @@ static irqreturn_t dw_hdmi_hardirq(int irq, void *dev_id)
 	if (hdmi->i2c)
 		ret = dw_hdmi_i2c_irq(hdmi);
 
-	intr_stat = hdmi_readb(hdmi, HDMI_IH_PHY_STAT0);
+	intr_stat = __hdmi_readb(hdmi, HDMI_IH_PHY_STAT0);
 	if (intr_stat) {
 		hdmi_writeb(hdmi, ~0, HDMI_IH_MUTE_PHY_STAT0);
 		return IRQ_WAKE_THREAD;

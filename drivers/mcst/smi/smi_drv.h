@@ -15,7 +15,7 @@
 #include <linux/irq.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_fb_helper.h>
-
+#include <drm/drm_edid.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
 #include <drm/drm_encoder.h>
@@ -34,11 +34,11 @@
 
 #define DRIVER_NAME		"smifb"
 #define DRIVER_DESC		"SiliconMotion GPU DRM Driver"
-#define DRIVER_DATE		"20171031"
+#define DRIVER_DATE		"20180723"
 
 #define DRIVER_MAJOR		1
 #define DRIVER_MINOR		2
-#define DRIVER_PATCHLEVEL	3
+#define DRIVER_PATCHLEVEL	5
 
 #define SMIFB_CONN_LIMIT 3
 
@@ -47,7 +47,7 @@
 #define SUPPORT_CHIP "SM750, SM768"
 #define SUPPORT_XVERSION "All Linux distribution"
 
-#define _version_	"1.2.3.1"
+#define _version_	"1.2.5.0"
 
 #ifdef CONFIG_CPU_LOONGSON3
 #define NO_WC
@@ -67,7 +67,6 @@ extern int smi_indent;
 #if (SMI_DEBUG == 0)
 #define ENTER()
 #define LEAVE(...) return __VA_ARGS__;
-#define LEAVE_NORET() return;
 #define dbg_msg(fmt,args...)
 #define err_msg(fmt,args...) 
 #define war_msg(fmt,args...) 
@@ -78,7 +77,6 @@ extern int smi_indent;
 #warning "debug=1 build"
 #define ENTER()	printk(KERN_DEBUG PFX "%*c %s\n",smi_indent++,'>',__func__)
 #define LEAVE(...) printk(KERN_DEBUG PFX "%*c %s\n",--smi_indent,'<',__func__);return __VA_ARGS__;
-#define LEAVE_NORET() printk(KERN_DEBUG PFX "%*c %s\n",--smi_indent,'<',__func__);return;
 #define dbg_msg(fmt,args...)	printk(KERN_DEBUG "[%s]:" fmt,__func__,## args)
 #define err_msg(fmt,args...) printk(KERN_ERR  fmt, ## args)
 #define war_msg(fmt,args...) printk(KERN_WARNING fmt, ## args)
@@ -108,7 +106,7 @@ extern int smi_indent;
 
 extern int smi_bpp;
 extern int force_connect;
-
+extern int lvds_channel;
 
 struct smi_fbdev;
 
@@ -165,6 +163,7 @@ struct smi_connector {
 struct smi_framebuffer {
 	struct drm_framebuffer		base;
 	struct drm_gem_object *obj;
+	void * vmapping;
 };
 
 struct smi_mc {
@@ -190,16 +189,24 @@ struct smi_device {
 	int fb_mtrr;	
 	bool				need_dma32;
 	struct {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
+		struct drm_global_reference mem_global_ref;
+		struct ttm_bo_global_ref bo_global_ref;
+#endif
 		struct ttm_bo_device bdev;
 	} ttm;
 	bool mm_inited;
 	struct smi_750_register *regsave;
 	struct smi_768_register *regsave_768;
+	struct edid dvi_edid[2];
+	struct edid vga_edid[2];
+	struct edid hdmi_edid[2];
+	bool is_hdmi;
 };
 
 
 struct smi_fbdev {
-	struct drm_fb_helper helper;
+	struct drm_fb_helper helper; /* must be first */
 	struct smi_framebuffer gfb;
 	struct list_head fbdev_list;
 	int size;
@@ -303,6 +310,9 @@ void smi_ttm_placement(struct smi_bo *bo, int domain);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,18,0)
 int smi_bo_create(struct drm_device *dev, int size, int align,
 		  uint32_t flags, struct sg_table *sg, struct smi_bo **psmibo);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
+int smi_bo_create(struct drm_device *dev, int size, int align,
+		  uint32_t flags, struct sg_table *sg, struct reservation_object *resv, struct smi_bo **psmibo);
 #else
 int smi_bo_create(struct drm_device *dev, int size, int align,
 		  uint32_t flags, struct sg_table *sg, struct dma_resv *resv, struct smi_bo **psmibo);
@@ -364,13 +374,7 @@ struct drm_gem_object *smi_gem_prime_import_sg_table(struct drm_device *dev,
 int smi_gem_prime_pin(struct drm_gem_object *obj);
 void smi_gem_prime_unpin(struct drm_gem_object *obj);
 
-struct dma_resv *smi_gem_prime_res_obj(struct drm_gem_object *obj);
-
-int smi_crtc_cursor_set2(struct drm_crtc *crtc,
-				 struct drm_file *file,
-				 uint32_t handle,
-				 uint32_t width, uint32_t height, int32_t hot_x, int32_t hot_y);
-int smi_crtc_cursor_move(struct drm_crtc *crtc, int x, int y);
+struct reservation_object *smi_gem_prime_res_obj(struct drm_gem_object *obj);
 
 #if KERNEL_VERSION(4, 12, 0) > LINUX_VERSION_CODE
 int smi_crtc_page_flip(struct drm_crtc *crtc,struct drm_framebuffer *fb,
@@ -380,11 +384,8 @@ int smi_crtc_page_flip(struct drm_crtc *crtc,struct drm_framebuffer *fb,
 	struct drm_pending_vblank_event *event, uint32_t page_flip_flags, struct drm_modeset_acquire_ctx *ctx);
 #endif
 
-
-
-int smi_audio_init(struct pci_dev *pci);
-void smi_audio_remove(struct pci_dev *pci);
-
+int smi_audio_init(struct drm_device *dev);
+void smi_audio_remove(struct drm_device *dev);
 
 /* please use revision id to distinguish sm750le and sm750*/
 #define SPC_SM750 	0

@@ -213,6 +213,8 @@ static inline unsigned long generic_hypercall6(unsigned long nr,
 						/* PCSP_hi register */
 #define	KVM_HCALL_SETUP_IDLE_TASK	12	/* setup current task of */
 						/* guest as task */
+#define	KVM_HCALL_UPDATE_WD_PSIZE	13	/* write updated psize field */
+						/* to the WD register */
 #define	KVM_HCALL_MOVE_TAGGED_DATA	15	/* move quad value from to */
 #define	KVM_HCALL_UNFREEZE_TRAPS	16	/* unfreeze TIRs & trap */
 						/* cellar */
@@ -236,7 +238,7 @@ static inline unsigned long generic_hypercall6(unsigned long nr,
 						/* virtual addresses */
 #define	KVM_HCALL_MMU_PROBE		29	/* probe MMU entry or */
 						/* address */
-#define	KVM_HCALL_FLUSH_ICACHE_RANGE	30	/* flush ICACHE range */
+#define	KVM_HCALL_FLUSH_ICACHE_ALL	30	/* flush all ICACHE */
 /* notify host kernel aboout switch to updated procedure stack on guest */
 #define	KVM_HCALL_SWITCH_TO_EXPANDED_PROC_STACK	31
 /* notify host kernel aboout switch to updated procedure chain stack on guest */
@@ -313,6 +315,12 @@ HYPERVISOR_update_psp_hi(unsigned long psp_hi_value)
 }
 
 static inline unsigned long
+HYPERVISOR_update_wd_psize(unsigned long psize_value)
+{
+	return light_hypercall1(KVM_HCALL_UPDATE_WD_PSIZE, psize_value);
+}
+
+static inline unsigned long
 HYPERVISOR_update_pcsp_hi(unsigned long pcsp_hi_value)
 {
 	return light_hypercall1(KVM_HCALL_UPDATE_PCSP_HI, pcsp_hi_value);
@@ -366,6 +374,7 @@ HYPERVISOR_inject_interrupt(void)
 {
 	return light_hypercall0(KVM_HCALL_INJECT_INTERRUPT);
 }
+extern unsigned long kvm_hypervisor_inject_interrupt(void);
 static inline unsigned long
 HYPERVISOR_virqs_handled(void)
 {
@@ -411,10 +420,9 @@ HYPERVISOR_clear_dcache_l1_range(void *addr, size_t len)
 			(unsigned long)addr, len);
 }
 static inline unsigned long
-HYPERVISOR_flush_icache_range(e2k_addr_t start, e2k_addr_t end, u64 dummy)
+HYPERVISOR_flush_icache_all(void)
 {
-	return light_hypercall3(KVM_HCALL_FLUSH_ICACHE_RANGE,
-				start, end, dummy);
+	return light_hypercall0(KVM_HCALL_FLUSH_ICACHE_ALL);
 }
 
 typedef enum kvm_mmu_probe {
@@ -599,8 +607,10 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 #define KVM_HCALL_PV_ENABLE_ASYNC_PF		133 /* enable async pf */
 						    /* on current vcpu */
 #endif /* CONFIG_KVM_ASYNC_PF */
-#define KVM_HCALL_FLUSH_TLB_RANGE		134 /* flush given address */
-						    /* range in tlb */
+#define KVM_HCALL_FLUSH_TLB_RANGE	134 /* sync given address range */
+					/* in page tables and flush tlb */
+#define KVM_HCALL_SYNC_ADDR_RANGE	135 /* sync ptes in page */
+					/* tables without flushing tlb */
 #define	KVM_HCALL_RECOVERY_FAULTED_TAGGED_STORE 141
 						/* recovery faulted store */
 						/* tagged value operations */
@@ -679,9 +689,11 @@ typedef struct kvm_task_info {
 	unsigned long	gd_size;	/* and size */
 	unsigned long	cut_base;	/* CUTD: base */
 	unsigned long	cut_size;	/* and size */
-	unsigned int	cui;		/* compilation unit index of code */
+	int		cui;		/* compilation unit index of code */
+	bool		kernel;		/* task in kernel mode */
 	unsigned long	entry_point;	/* entry point (address) of task */
-	unsigned long	tls;		/* TLS of new user thread */
+	unsigned long	gregs;		/* pointer to the global registers */
+					/* state of the new process */
 } kvm_task_info_t;
 
 /* hardware stack extention, update and change */
@@ -834,10 +846,11 @@ HYPERVISOR_complete_long_jump(kvm_long_jump_info_t *regs_state)
 }
 
 static inline unsigned long
-HYPERVISOR_launch_sig_handler(kvm_stacks_info_t *regs_state, long sys_rval)
+HYPERVISOR_launch_sig_handler(kvm_stacks_info_t *regs_state,
+			unsigned long sigreturn_entry, long sys_rval)
 {
-	return generic_hypercall2(KVM_HCALL_LAUNCH_SIG_HANDLER,
-				  (unsigned long)regs_state, sys_rval);
+	return generic_hypercall3(KVM_HCALL_LAUNCH_SIG_HANDLER,
+			(unsigned long)regs_state, sigreturn_entry, sys_rval);
 }
 
 static inline unsigned long
@@ -1005,16 +1018,16 @@ HYPERVISOR_set_guest_glob_regs_dirty_bgr(unsigned long *gregs[2],
 			(unsigned long)false, (unsigned long)NULL);
 }
 static inline unsigned long
-HYPERVISOR_get_guest_local_glob_regs(unsigned long *l_gregs[2])
+HYPERVISOR_get_guest_local_glob_regs(unsigned long *l_gregs[2], bool is_signal)
 {
-	return generic_hypercall1(KVM_HCALL_GET_GUEST_LOCAL_GLOB_REGS,
-			(unsigned long)l_gregs);
+	return generic_hypercall2(KVM_HCALL_GET_GUEST_LOCAL_GLOB_REGS,
+			(unsigned long)l_gregs, is_signal);
 }
 static inline unsigned long
-HYPERVISOR_set_guest_local_glob_regs(unsigned long *l_gregs[2])
+HYPERVISOR_set_guest_local_glob_regs(unsigned long *l_gregs[2], bool is_signal)
 {
-	return generic_hypercall1(KVM_HCALL_SET_GUEST_LOCAL_GLOB_REGS,
-			(unsigned long)l_gregs);
+	return generic_hypercall2(KVM_HCALL_SET_GUEST_LOCAL_GLOB_REGS,
+			(unsigned long)l_gregs, is_signal);
 }
 
 static inline unsigned long
@@ -1051,7 +1064,7 @@ HYPERVISOR_recovery_faulted_guest_load(e2k_addr_t address,
 static inline unsigned long
 HYPERVISOR_recovery_faulted_guest_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load)
+		int qp_load, int atomic_load, u32 first_time)
 {
 	union recovery_faulted_arg arg = {
 		.vr = vr,
@@ -1059,9 +1072,9 @@ HYPERVISOR_recovery_faulted_guest_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		.qp = !!qp_load,
 		.atomic = !!atomic_load
 	};
-	return generic_hypercall5(KVM_HCALL_RECOVERY_FAULTED_GUEST_MOVE,
+	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_GUEST_MOVE,
 				addr_from, addr_to, addr_to_hi,
-				ld_rec_opc, arg.entire);
+				ld_rec_opc, arg.entire, first_time);
 }
 static inline unsigned long
 HYPERVISOR_recovery_faulted_load_to_guest_greg(e2k_addr_t address,
@@ -1108,7 +1121,7 @@ HYPERVISOR_recovery_faulted_load(e2k_addr_t address, u64 *ld_val,
 static inline unsigned long
 HYPERVISOR_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load)
+		int qp_load, int atomic_load, u32 first_time)
 {
 	union recovery_faulted_arg arg = {
 		.vr = vr,
@@ -1116,9 +1129,9 @@ HYPERVISOR_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		.qp = !!qp_load,
 		.atomic = !!atomic_load
 	};
-	return generic_hypercall5(KVM_HCALL_RECOVERY_FAULTED_MOVE,
+	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_MOVE,
 				addr_from, addr_to, addr_to_hi,
-				ld_rec_opc, arg.entire);
+				ld_rec_opc, arg.entire, first_time);
 }
 static inline unsigned long
 HYPERVISOR_recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
@@ -1447,6 +1460,12 @@ static inline unsigned long
 HYPERVISOR_flush_tlb_range(e2k_addr_t start_gva, e2k_addr_t end_gva)
 {
 	return generic_hypercall2(KVM_HCALL_FLUSH_TLB_RANGE,
+			start_gva, end_gva);
+}
+static inline void
+HYPERVISOR_sync_addr_range(e2k_addr_t start_gva, e2k_addr_t end_gva)
+{
+	generic_hypercall2(KVM_HCALL_SYNC_ADDR_RANGE,
 			start_gva, end_gva);
 }
 

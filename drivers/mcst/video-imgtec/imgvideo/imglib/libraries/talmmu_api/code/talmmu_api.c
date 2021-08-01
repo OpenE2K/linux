@@ -368,9 +368,14 @@ static IMG_UINT32 talmmu_MakePageDirEntryValid(
 #else
 
     #if defined (__TALMMU_USE_SYSAPIS__)
+#ifdef CONFIG_MCST
+	paAddr = SYSMEMU_CpuKmAddrToDevPAddr(psDevMemHeap->pasPageTable[ui32PageTableNo]->hPageTableSysMemHandle,
+					     psDevMemHeap->pasPageTable[ui32PageTableNo]->pui32PageTable);
+#else
         paAddr = SYSMEMU_CpuKmAddrToCpuPAddr(psDevMemHeap->eMemPool,
                                              psDevMemHeap->pasPageTable[ui32PageTableNo]->pui32PageTable);
         paAddr = SYSDEVU_CpuPAddrToDevPAddr(psDevMemHeap->psDevMemTemplate->hSysDevHandle, paAddr);
+    #endif
     #else
         #error Not Supported __TALMMU_NO_TAL__ must be used with __TALMMU_USE_SYSAPIS__
     #endif
@@ -593,7 +598,12 @@ static IMG_RESULT talmmu_MakePageTableEntryValid(
 #else
 
     #if defined (__TALMMU_USE_SYSAPIS__)
+
+#ifdef CONFIG_MCST
+	paAddr = paCpuPhysAddr;
+#else
         paAddr = SYSDEVU_CpuPAddrToDevPAddr(psDevMemHeap->psDevMemTemplate->hSysDevHandle, paCpuPhysAddr);
+#endif
     #else
         #error Not Supported __TALMMU_NO_TAL__ must be used with __TALMMU_USE_SYSAPIS__
     #endif
@@ -1155,14 +1165,23 @@ static IMG_RESULT talmmu_ProcessMemMap (
         //which is multiple of device page size and index of device page in currennt host page
         IMG_SIZE addrIdx = ui32BytesProcessed / HOST_MMU_PAGE_SIZE;
         IMG_UINT32 ui32DevPageInHostPage = ((ui32BytesProcessed % HOST_MMU_PAGE_SIZE )/ DEV_MMU_PAGE_SIZE);//get bytes processed in current host page, than get index of device page
+#ifdef CONFIG_MCST
+        talmmu_MakePageTableEntryValid(psDevMemHeap, ui32PageNo, 0,
+                                       psSysMem->ppaDevPAddr[addrIdx] + DEV_MMU_PAGE_SIZE * ui32DevPageInHostPage);
+#else
         talmmu_MakePageTableEntryValid(psDevMemHeap, ui32PageNo, 0,
                                        psSysMem->ppaPhysAddr[addrIdx] + DEV_MMU_PAGE_SIZE * ui32DevPageInHostPage);
+#endif
 
     } else
 #endif
     {
+#ifdef CONFIG_MCST
+        BUG();
+#endif
         talmmu_MakePageTableEntryValid(psDevMemHeap, ui32PageNo, 0,
                                        SYSMEMU_CpuKmAddrToCpuPAddr(psSysMem->memHeap->memId, pvPageCpuLinearAddr));
+
     }
 
     /* Update the page table reference count...*/
@@ -1358,12 +1377,19 @@ static IMG_RESULT talmmu_ProcessMapAttrib (
     if (psSysMem->ppaPhysAddr) {
         IMG_SIZE addrIdx = ui32BytesProcessed / HOST_MMU_PAGE_SIZE;
         IMG_UINT32 ui32DevPageInHostPage = ((ui32BytesProcessed % HOST_MMU_PAGE_SIZE )/ DEV_MMU_PAGE_SIZE);
+	#ifdef CONFIG_MCST
+        talmmu_MakePageTableEntryValid(psDevMemHeap, ui32PageNo, ui32Param,
+                                       psSysMem->ppaDevPAddr[addrIdx] + DEV_MMU_PAGE_SIZE * ui32DevPageInHostPage);
+#else
         talmmu_MakePageTableEntryValid(psDevMemHeap, ui32PageNo, ui32Param,
                                        psSysMem->ppaPhysAddr[addrIdx] + DEV_MMU_PAGE_SIZE * ui32DevPageInHostPage);
-
+#endif
     } else
 #endif
     {
+#ifdef CONFIG_MCST
+        BUG();
+#endif
         talmmu_MakePageTableEntryValid(psDevMemHeap, ui32PageNo, ui32Param,
                                        SYSMEMU_CpuKmAddrToCpuPAddr(psSysMem->memHeap->memId, pvCpuLinearAddr));
     }
@@ -2399,9 +2425,14 @@ IMG_RESULT TALMMU_DevMemContextSetMMUPtd(
     }
 #else
     #if defined (__TALMMU_USE_SYSAPIS__)
+#ifdef CONFIG_MCST
+	paAddr = SYSMEMU_CpuKmAddrToDevPAddr(psDevMemContext->hSysMemHandlePageDir,
+					     psDevMemContext->pui32PageDir);
+#else
             paAddr = SYSMEMU_CpuKmAddrToCpuPAddr(psDevMemTemplate->sDevMemInfo.eMemPool,
                                                  psDevMemContext->pui32PageDir);
             paAddr = SYSDEVU_CpuPAddrToDevPAddr(psDevMemTemplate->hSysDevHandle, paAddr);
+#endif
     #else
             #error Not Supported __TALMMU_NO_TAL__ must be used with __TALMMU_USE_SYSAPIS__
     #endif

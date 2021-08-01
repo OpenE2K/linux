@@ -635,7 +635,7 @@ extern void * __e2k_read_kernel_return_address(int n);
 			:						\
 			__e2k_read_kernel_return_address(n); })
 
-#if	CONFIG_CPU_ISET < 5
+#ifndef CONFIG_CPU_HW_CLEAR_RF
 typedef void (*clear_rf_t)(void);
 extern const clear_rf_t clear_rf_fn[];
 
@@ -643,7 +643,7 @@ static __always_inline void clear_rf_kernel_except_current(u64 num_q)
 {
 	clear_rf_fn[num_q]();
 }
-#endif	/* CONFIG_CPU_ISET < 5 */
+#endif
 
 #define	SWITCH_TO_KERNEL_UPSR(upsr_reg, irq_en, nmirq_dis) \
 		NATIVE_SWITCH_TO_KERNEL_UPSR(upsr_reg, irq_en, nmirq_dis)

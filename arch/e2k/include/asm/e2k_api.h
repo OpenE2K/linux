@@ -1476,43 +1476,6 @@ do { \
 #define NATIVE_WRITE_MAS_D(addr, val, mas)				\
 		NATIVE_DO_WRITE_MAS(addr, val, mas, __e2k_u64_t, d, 2)
 
-
-/*
- * Relaxed IO read/write
- *
- * bug #81369: put every UC access into a separate
- * wide instruction to avoid reorderings possible if
- * one access hits in DTLB and another one misses.
- */
-#define IO_READ(_addr, type, size_letter) \
-({ \
-	type __ior_val; \
-	asm ("{ld" #size_letter " %[addr], %[val]}" \
-		: [val] "=r" (__ior_val) \
-		: [addr] "m" (*((volatile type *) (_addr))) \
-		: "memory"); \
-	__ior_val; \
-})
-
-#define IO_WRITE(_addr, _val, type, size_letter) \
-do { \
-	asm ("{st" #size_letter " %[addr], %[val]}" \
-		: [addr] "=m" (*((volatile type *) (_addr))) \
-		: [val] "r" ((type) (_val)) \
-		: "memory"); \
-} while (0)
-
-#define IO_READ_B(addr) IO_READ((addr), u8, b)
-#define IO_READ_H(addr) IO_READ((addr), u16, h)
-#define IO_READ_W(addr) IO_READ((addr), u32, w)
-#define IO_READ_D(addr) IO_READ((addr), u64, d)
-
-#define IO_WRITE_B(addr, val) IO_WRITE((addr), (val), u8, b)
-#define IO_WRITE_H(addr, val) IO_WRITE((addr), (val), u16, h)
-#define IO_WRITE_W(addr, val) IO_WRITE((addr), (val), u32, w)
-#define IO_WRITE_D(addr, val) IO_WRITE((addr), (val), u64, d)
-
-
 /*
  * Read from and write to system configuration registers SIC
  * Now SIC is the same as NBSRs registers
@@ -1719,7 +1682,7 @@ do { \
 	u64 val, val_8; \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
-	u32 __chan_q = (__quadro) ? __chan : -1; \
+	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
 	u64 __opc = (_opc); \
 	asm volatile ( \
 		"{disp %%ctpr1, qpswitchd_sm\n" \
@@ -2103,7 +2066,7 @@ do { \
 ({ \
 	u64 tmp, tmp_ext; \
 	u32 __chan = (u32) (_chan); \
-	u32 __chan_q = (_quadro) ? __chan : -1; \
+	u32 __chan_q = (_quadro) ? __chan : 4; /* Not existent channel - skip */ \
 	asm (	"{nop 1\n" \
 		" puttagd,2 %[val], %[tag], %[tmp]\n" \
 		" puttagd,5,sm %[val_ext], %[tag_ext], %[tmp_ext]\n" \
@@ -2120,7 +2083,7 @@ do { \
 		  [val] "r" ((u64) (_val)), [val_ext] "r" ((u64) (_val_ext)), \
 		  [tag] "r" ((u32) (_tag)), [tag_ext] "r" ((u32) (_tag_ext)), \
 		  [opc] "ir" (_opc), [opc_ext] "ir" (_opc_ext), \
-		  [chan] "r" ((u32) (__chan)), [chan_q] "r" ((u32) (__chan_q)) \
+		  [chan] "ir" ((u32) (__chan)), [chan_q] "ir" ((u32) (__chan_q)) \
 		: "memory", "pred20", "pred21", "pred22", "pred23"); \
 })
 
@@ -2250,17 +2213,23 @@ do { \
  * quadro: set if this is a non-atomic quadro operation to move 16 bytes
  * vr: set to 0 if we want to preserve the lower 4-byte word
  *     (same as vr in cellar)
+ * not_single_byte: set to "false" if we want to write only 1 byte at target
+ *                  address (i.e. do not clear the whole register we are
+ *                  writing into).  This makes sense when we manually split
+ *                  the faulting load into a series of 1-byte loads - only
+ *                  the first one should clear the register then.
  */
 #define NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_CH_VR(_from, _to, _to_hi, _vr, _opc, \
-		_chan, _quadro) \
+		_chan, _quadro, _not_single_byte) \
 do { \
 	u64 prev, val, val_8; \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
-	u32 __chan_q = (__quadro) ? __chan : -1; \
+	u32 __chan_q = (__quadro) ? __chan : 4 /* Not existent channel - skip */; \
 	u64 __opc = (_opc); \
 	asm (	"{cmpesb %[quadro], 0, %%pred18\n" \
-		" cmpesb %[vr], 0, %%pred19}\n" \
+		" cmpesb %[vr], 0, %%pred19\n" \
+		" cmpesb %[not_single_byte], 0, %%pred28}\n" \
 		"{cmpesb,0 %[chan], 0, %%pred20\n" \
 		" cmpesb,1 %[chan], 1, %%pred21\n" \
 		" cmpesb,3 %[chan], 2, %%pred22\n" \
@@ -2280,7 +2249,8 @@ do { \
 		" ldrd,3 [ %[from] + %[opc_8] ], %[val_8] ? %%pred26\n" \
 		" ldrd,5 [ %[from] + %[opc_8] ], %[val_8] ? %%pred27}\n" \
 		"{movts,1 %[prev], %[val] ? %%pred19}\n" \
-		"{strd,2 [ %[to] + %[opc_st] ], %[val]\n" \
+		"{strd,2 [ %[to] + %[opc_st_byte] ], %[val] ? %%pred28}\n" \
+		"{strd,2 [ %[to] + %[opc_st] ], %[val] ? ~%%pred28\n" \
 		" strd,5 [ %[to_hi] + %[opc_st] ], %[val_8] ? ~ %%pred18}\n" \
 		: [prev] "=&r" (prev), [val] "=&r" (val), \
 		  [val_8] "=&r" (val_8) \
@@ -2288,10 +2258,13 @@ do { \
 		  [vr] "ir" ((u32) (_vr)), [quadro] "r" (__quadro), \
 		  [chan] "ir" (__chan), [chan_q] "ir" (__chan_q), \
 		  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull),  \
+		  [not_single_byte] "ir" (_not_single_byte), \
 		  [opc_ld] "i" (TAGGED_MEM_LOAD_REC_OPC), \
+		  [opc_st_byte] "i" (MEM_STORE_REC_OPC_B), \
 		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC) \
-		: "memory", "pred18", "pred19", "pred20", "pred21", "pred22", \
-		  "pred23", "pred24", "pred25", "pred26", "pred27"); \
+		: "memory", "pred18", "pred19", "pred20", "pred21", \
+		  "pred22", "pred23", "pred24", "pred25", "pred26", \
+		  "pred27", "pred28"); \
 } while (false)
 
 /*
@@ -4938,6 +4911,20 @@ do { \
 		DO_ATOMIC_WRITE_PSR_REG_VALUE(greg_no, psr_off, psr_value, \
 					under_upsr_off, under_upsr_bool) \
 
+#define	DO_ATOMIC_WRITE_UPSR_REG_VALUE(greg_no, upsr_off, upsr_value) \
+({ \
+	asm volatile ( \
+		"{\n\t" \
+		"  rws %1, %%upsr\n\t" \
+		"  stw %%dg" #greg_no ", [%0], %1\n\t" \
+		"}" \
+		: \
+		: "ri" ((__e2k_u64_t)(upsr_off)), \
+		  "r"  ((__e2k_u32_t)(upsr_value))); \
+})
+#define	KVM_DO_ATOMIC_WRITE_UPSR_REG_VALUE(greg_no, upsr_off, upsr_value) \
+		DO_ATOMIC_WRITE_UPSR_REG_VALUE(greg_no, upsr_off, upsr_value)
+
 #define NATIVE_GET_TCD() \
 ({ \
     register __e2k_u64_t res; \
@@ -4965,14 +4952,26 @@ do { \
 
 /* Add ctpr3 to clobbers to explain to lcc that this
  * GNU asm does a return. */
-#define E2K_DONE \
+#define E2K_DONE() \
 do { \
 	/* #80747: must repeat interrupted barriers */ \
 	asm volatile ("{nop 3; wait st_c=1} {done}" ::: "ctpr3"); \
 } while (0)
 
-#define E2K_SYSCALL_RETURN E2K_RETURN
-#define E2K_RETURN(rval) \
+#define NATIVE_RETURN() \
+do { \
+	asm volatile(   "{\n" \
+			"return %%ctpr3\n" \
+			"}\n" \
+			"{\n" \
+			"ct %%ctpr3\n" \
+			"}\n" \
+			: \
+			: \
+			: "ctpr3"); \
+} while (0)
+
+#define NATIVE_RETURN_VALUE(rval) \
 do { \
 	asm volatile(   "{\n" \
 			"return %%ctpr3\n" \
@@ -4981,9 +4980,12 @@ do { \
 			"{\n" \
 			"ct %%ctpr3\n" \
 			"}\n" \
-			:: [r0] "ir" (rval) \
+			: \
+			: [r0] "ir" (rval) \
 			: "ctpr3"); \
 } while (0)
+
+#define E2K_SYSCALL_RETURN NATIVE_RETURN_VALUE
 
 #define E2K_EMPTY_CMD(input...) \
 do { \
@@ -5515,6 +5517,24 @@ _Pragma("no_asm_inline")						\
 		: "ri" ((__e2k_u64_t) (arg1)),				\
 		  "ri" ((__e2k_u64_t) (arg2)),				\
 		  "ri" ((__e2k_u64_t) (arg3))				\
+	);								\
+} while (false)
+#define E2K_GOTO_ARG4(label, arg1, arg2, arg3, arg4)			\
+do {									\
+_Pragma("no_asm_inline")						\
+	asm volatile ("\n"						\
+		"{\n"							\
+		"addd \t 0, %0, %%dr0\n"				\
+		"addd \t 0, %1, %%dr1\n"				\
+		"addd \t 0, %2, %%dr2\n"				\
+		"addd \t 0, %3, %%dr3\n"				\
+		"ibranch \t" #label "\n"				\
+		"}\n"							\
+		:							\
+		: "ri" ((__e2k_u64_t) (arg1)),				\
+		  "ri" ((__e2k_u64_t) (arg2)),				\
+		  "ri" ((__e2k_u64_t) (arg3)),				\
+		  "ri" ((__e2k_u64_t) (arg4))				\
 	);								\
 } while (false)
 #define E2K_GOTO_AND_RETURN_ARG6(label,				\
@@ -6134,6 +6154,199 @@ do { \
 	__dres;							\
 })
 
+#define SIMPLE_RECOVERY_STORE(_addr, _data, _opc) \
+do { \
+	u32 _fmt = ((ldst_rec_op_t *) &_opc)->fmt; \
+	u32 _ind = ((ldst_rec_op_t *) &_opc)->index; \
+	asm ( \
+		"{nop 1\n" \
+		" cmpesb,0 %[fmt], 1, %%pred20\n" \
+		" cmpesb,1 %[fmt], 2, %%pred21\n" \
+		" cmpesb,3 %[fmt], 3, %%pred22\n" \
+		" cmpesb,4 %[fmt], 4, %%pred23}\n" \
+		"{stb,2 %[addr], %[ind], %[data] ? %%pred20\n" \
+		" sth,5 %[addr], %[ind], %[data] ? %%pred21}\n" \
+		"{stw,2 %[addr], %[ind], %[data] ? %%pred22\n" \
+		" std,5 %[addr], %[ind], %[data] ? %%pred23}\n" \
+		: \
+		: [addr] "r" (_addr), [data] "r" (_data), \
+		  [fmt] "r" (_fmt), [ind] "r" (_ind) \
+		: "memory", "pred20", "pred21", "pred22", "pred23" \
+	); \
+} while (0)
+
+#define SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, _greg_no, _sm, _mas) \
+do { \
+	u32 _fmt = ((ldst_rec_op_t *) &_opc)->fmt; \
+	u32 _ind = ((ldst_rec_op_t *) &_opc)->index; \
+	asm ( \
+		"{nop 1\n" \
+		" cmpesb,0 %[fmt], 1, %%pred20\n" \
+		" cmpesb,1 %[fmt], 2, %%pred21\n" \
+		" cmpesb,3 %[fmt], 3, %%pred22\n" \
+		" cmpesb,4 %[fmt], 4, %%pred23}\n" \
+		"{nop 4\n" \
+		" ldb" _sm ",0 %[addr], %[ind], %%dg" #_greg_no ", " \
+			"mas=%[mas] ? %%pred20\n" \
+		" ldh" _sm ",2 %[addr], %[ind], %%dg" #_greg_no ", " \
+			"mas=%[mas] ? %%pred21\n" \
+		" ldw" _sm ",3 %[addr], %[ind], %%dg" #_greg_no ", " \
+			"mas=%[mas] ? %%pred22\n" \
+		" ldd" _sm ",5 %[addr], %[ind], %%dg" #_greg_no ", " \
+			"mas=%[mas] ? %%pred23}\n" \
+		: \
+		: [addr] "r" (_addr), [fmt] "r" (_fmt), \
+		  [ind] "r" (_ind), [mas] "r" (_mas) \
+		: "memory", "pred20", "pred21", "pred22", "pred23", \
+		  "g" #_greg_no \
+	); \
+} while (0)
+
+#define SIMPLE_RECOVERY_LOAD_TO_GREG(_addr, _opc, _greg_num, _sm, _mas) \
+do { \
+	switch (_greg_num) { \
+	case  0: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 0, _sm, _mas); \
+		break; \
+	case  1: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 1, _sm, _mas); \
+		break; \
+	case  2: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 2, _sm, _mas); \
+		break; \
+	case  3: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 3, _sm, _mas); \
+		break; \
+	case  4: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 4, _sm, _mas); \
+		break; \
+	case  5: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 5, _sm, _mas); \
+		break; \
+	case  6: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 6, _sm, _mas); \
+		break; \
+	case  7: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 7, _sm, _mas); \
+		break; \
+	case  8: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 8, _sm, _mas); \
+		break; \
+	case  9: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 9, _sm, _mas); \
+		break; \
+	case 10: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 10, _sm, _mas); \
+		break; \
+	case 11: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 11, _sm, _mas); \
+		break; \
+	case 12: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 12, _sm, _mas); \
+		break; \
+	case 13: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 13, _sm, _mas); \
+		break; \
+	case 14: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 14, _sm, _mas); \
+		break; \
+	case 15: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 15, _sm, _mas); \
+		break; \
+	/* Do not load g16-g19 as they are used by kernel */ \
+	case 16: \
+	case 17: \
+	case 18: \
+	case 19: \
+		break; \
+	case 20: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 20, _sm, _mas); \
+		break; \
+	case 21: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 21, _sm, _mas); \
+		break; \
+	case 22: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 22, _sm, _mas); \
+		break; \
+	case 23: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 23, _sm, _mas); \
+		break; \
+	case 24: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 24, _sm, _mas); \
+		break; \
+	case 25: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 25, _sm, _mas); \
+		break; \
+	case 26: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 26, _sm, _mas); \
+		break; \
+	case 27: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 27, _sm, _mas); \
+		break; \
+	case 28: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 28, _sm, _mas); \
+		break; \
+	case 29: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 29, _sm, _mas); \
+		break; \
+	case 30: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 30, _sm, _mas); \
+		break; \
+	case 31: \
+		SIMPLE_RECOVERY_LOAD_TO_GREG_NO(_addr, _opc, 31, _sm, _mas); \
+		break; \
+	default: \
+		panic("Invalid global register # %d\n", _greg_num); \
+	} \
+} while (0)
+
+#define SIMPLE_RECOVERY_MOVE(_from, _to, _opc, _first_time, _sm, _mas) \
+do { \
+	u64 _data; \
+	u32 _fmt = ((ldst_rec_op_t *) &_opc)->fmt; \
+	u32 _ind = ((ldst_rec_op_t *) &_opc)->index; \
+	asm ( \
+		"{nop 1\n" \
+		" cmpesb,0 %[fmt], 1, %%pred20\n" \
+		" cmpesb,1 %[fmt], 2, %%pred21\n" \
+		" cmpesb,3 %[fmt], 3, %%pred22\n" \
+		" cmpesb,4 %[fmt], 4, %%pred23}\n" \
+		"{nop 4\n" \
+		" ldb" _sm ",0 %[from], %[ind], %[data], " \
+			"mas=%[mas] ? %%pred20\n" \
+		" ldh" _sm ",2 %[from], %[ind], %[data], " \
+			"mas=%[mas] ? %%pred21\n" \
+		" ldw" _sm ",3 %[from], %[ind], %[data], " \
+			"mas=%[mas] ? %%pred22\n" \
+		" ldd" _sm ",5 %[from], %[ind], %[data], " \
+			"mas=%[mas] ? %%pred23}\n" \
+		"{cmpesb,0 %[first_time], 0, %%pred19}\n" \
+		"{pass %%pred19, @p0\n" \
+		" pass %%pred20, @p1\n" \
+		" pass %%pred21, @p2\n" \
+		" pass %%pred22, @p3\n" \
+		" landp @p0, @p1, @p4\n" \
+		" pass @p4, %%pred20\n" \
+		" landp @p0, @p2, @p5\n" \
+		" pass @p5, %%pred21\n" \
+		" landp @p0, @p3, @p6\n" \
+		" pass @p6, %%pred22}\n" \
+		"{pass %%pred19, @p0\n" \
+		" pass %%pred23, @p1\n" \
+		" landp @p0, ~@p1, @p4\n" \
+		" pass @p4, %%pred23}\n" \
+		"{stb,sm,2 %[to], 0, %[data] ? %%pred20\n" \
+		" sth,sm,5 %[to], 0, %[data] ? %%pred21}\n" \
+		"{stw,sm,2 %[to], 0, %[data] ? %%pred22\n" \
+		" std,sm,5 %[to], 0, %[data] ? ~%%pred23}\n" \
+		: [data] "=&r" (_data) \
+		: [from] "r" (_from), [to] "r" (_to), \
+		  [fmt] "r" (_fmt), [ind] "r" (_ind), \
+		  [first_time] "r" (_first_time), [mas] "r" (_mas) \
+		: "memory", "pred19", "pred20", "pred21", "pred22", "pred23" \
+	); \
+} while (0)
+
 /* Since v6 this got replaced with "wait int=1,mem_mod=1" */
 #define C1_WAIT_TRAP_V3() \
 do { \
@@ -6204,7 +6417,7 @@ do { \
 		  [addr_flush_icache] "r" ((u64) (_FLUSH_ICACHE_ALL_OP)), \
 		  [val_icache] "r" (0ULL), \
 		  [mas_icache] "i" (MAS_ICACHE_FLUSH), \
-		  [addr_flush_tlb] "r" ((u64) (_FLUSH_ICACHE_ALL_OP)), \
+		  [addr_flush_tlb] "r" ((u64) (_FLUSH_TLB_ALL_OP)), \
 		  [val_tlb] "r" (0ULL), \
 		  [mas_tlb] "i" (MAS_TLB_FLUSH), \
 		  [mas_ioaddr] "i" (MAS_IOADDR), \
@@ -6266,7 +6479,7 @@ do { \
 		  [addr_flush_icache] "r" ((u64) (_FLUSH_ICACHE_ALL_OP)), \
 		  [val_icache] "r" (0ULL), \
 		  [mas_icache] "i" (MAS_ICACHE_FLUSH), \
-		  [addr_flush_tlb] "r" ((u64) (_FLUSH_ICACHE_ALL_OP)), \
+		  [addr_flush_tlb] "r" ((u64) (_FLUSH_TLB_ALL_OP)), \
 		  [val_tlb] "r" (0ULL), \
 		  [mas_tlb] "i" (MAS_TLB_FLUSH), \
 		  [mas_ioaddr] "i" (MAS_IOADDR) \

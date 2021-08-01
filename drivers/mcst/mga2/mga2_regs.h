@@ -140,15 +140,17 @@
 # define MGA25_DC_B_ACLKON        (1 << 29)
 
 # define MGA25_DC_B_FAUXENA       (1 << 15)
-# define MGA25_DC_B_FAUX_REF       (0 << 12)
-# define MGA25_DC_B_FAUX_OUT       (2 << 12)
-# define MGA25_DC_B_FAUX_DIVOUT    (3 << 12)
+# define MGA25_DC_B_FAUXSEL_OFFSET    12
+# define MGA25_DC_B_FAUX_REF       (0 << MGA25_DC_B_FAUXSEL_OFFSET)
+# define MGA25_DC_B_FAUX_OUT       (2 << MGA25_DC_B_FAUXSEL_OFFSET)
+# define MGA25_DC_B_FAUX_DIVOUT    (3 << MGA25_DC_B_FAUXSEL_OFFSET)
 # define MGA25_DC_B_FAUXDIV_OFFSET       8
 
 # define MGA25_DC_B_FPIXENA       (1 << 7)
-# define MGA25_DC_B_FPIX_REF       (0 << 4)
-# define MGA25_DC_B_FPIX_OUT       (2 << 4)
-# define MGA25_DC_B_FPIX_DIVOUT    (3 << 4)
+# define MGA25_DC_B_FPIXSEL_OFFSET    4
+# define MGA25_DC_B_FPIX_REF       (0 << MGA25_DC_B_FPIXSEL_OFFSET)
+# define MGA25_DC_B_FPIX_OUT       (2 << MGA25_DC_B_FPIXSEL_OFFSET)
+# define MGA25_DC_B_FPIX_DIVOUT    (3 << MGA25_DC_B_FPIXSEL_OFFSET)
 # define MGA25_DC_B_FPIXDIV_OFFSET       0
 
 #define	 MGA2_DC0_CLKCTRL_ACLKON	0x000C4	/* автоматическое переключение частоты в процессе */
@@ -177,6 +179,12 @@
 #define MGA2_28322_CLKR		43
 #define MGA2_28322_CLKOD	14
 #define MGA2_28322_BWADJ	170
+
+#define MGA2_DC0_PLLCTRL_25	0x0C4
+#define MGA2_DC0_PLLCLKF0INT_25	0x0CC
+#define MGA2_DC0_PLLCLKF0FRAC_25	0x0C8
+#define MGA2_DC0_PLLCLKR0_25	0x0D0
+#define MGA2_DC0_PLLCLKOD0_25	0x0D4
 
 # define MGA2_DC_EXTPLLI2C_RD            (0 << 31)
 # define MGA2_DC_EXTPLLI2C_WR            (1 << 31)
@@ -299,6 +307,8 @@
 # define MGA25_VID0_B_PXENA      (1 << 3)
 # define MGA25_VID0_B_PXSEL_OFFSET      0
 
+# define MGA25_VID3_B_SCALER_OFF      (2 << 30)
+
 #define	 MGA2_VID0_CTRL		0x00010	/* управление видеовыходом #0 */
 # define MGA2_VID12_B_USE_MGA2_DDC       (1 << 0)
 # define MGA2_VID12_B_HS_CONV_OFFSET     2
@@ -329,6 +339,7 @@
 
 # define MGA2_VID3_B_ENABLE    (1 << 31)
 # define MGA2_VID3_B_RESYNC    (1 << 30)
+# define MGA2_VID3_B_10BIT    (1 << 28)
 # define MGA2_VID3_B_CHAN_MASK      3
 # define MGA2_VID3_B_P3CHAN_OFFSET    22
 # define MGA2_VID3_B_P2CHAN_OFFSET    20
@@ -364,6 +375,8 @@
 # define MGA2_VID3_B_P0_ENREF (1 << 1)
 # define MGA2_VID3_B_P0_OEB   (1 << 0)
 
+#define	 MGA2_VID0_CLKCTRL25	0x000a0
+
 #define MGA2_VID3_PWM0_CTRL	0x03080
 /* PWB bits are common for PWM0 and PWM1 */
 # define MGA2_VID3_B_PWMENABLE (1 << 31)
@@ -381,6 +394,7 @@
 #define MGA2_CLK_RATE	(500 * 1000 * 1000) /*Hz*/
 
 #define	 MGA2_VID3_BITCTRL	0x03018 /* управление распределением бит в фрейме LVDS-сигнала. */
+#define	 MGA2_VID0_BITCTRL	0x00018
 # define MGA2_VID3_B_ADDR_OFFSET	8
 
 # define	 LVDS_R7	 0
@@ -416,6 +430,46 @@
 # define	 LVDS_VS	 27
 # define	 LVDS_HS	 28
 # define	 LVDS_CS	 29
+
+# define	 LVDS25_R9	 0
+# define	 LVDS25_R8	 1
+# define	 LVDS25_R7	 2
+# define	 LVDS25_R6	 3
+# define	 LVDS25_R5	 4
+# define	 LVDS25_R4	 5
+# define	 LVDS25_R3	 6
+# define	 LVDS25_R2	 7
+# define	 LVDS25_R1	 8
+# define	 LVDS25_R0	 9
+
+# define	 LVDS25_G9	 10
+# define	 LVDS25_G8	 11
+# define	 LVDS25_G7	 12
+# define	 LVDS25_G6	 13
+# define	 LVDS25_G5	 14
+# define	 LVDS25_G4	 15
+# define	 LVDS25_G3	 16
+# define	 LVDS25_G2	 17
+# define	 LVDS25_G1	 18
+# define	 LVDS25_G0	 19
+
+# define	 LVDS25_B9	 20
+# define	 LVDS25_B8	 21
+# define	 LVDS25_B7	 22
+# define	 LVDS25_B6	 23
+# define	 LVDS25_B5	 24
+# define	 LVDS25_B4	 25
+# define	 LVDS25_B3	 26
+# define	 LVDS25_B2	 27
+# define	 LVDS25_B1	 28
+# define	 LVDS25_B0	 29
+
+# define	 LVDS25_00	 32
+# define	 LVDS25_01	 33
+# define	 LVDS25_DE	 34
+# define	 LVDS25_VS	 35
+# define	 LVDS25_HS	 36
+# define	 LVDS25_CS	 37
 
 #define	 MGA2_VID0_RESYNC_CTRL		0x00014	/* управление пересинхронизацией через FIFO. */
 #define	 MGA2_VID0_TXI2C		0x00020	/* управление I2C-контроллером DVI-передатчиков. */

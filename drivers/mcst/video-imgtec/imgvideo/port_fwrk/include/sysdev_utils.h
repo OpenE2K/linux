@@ -185,10 +185,6 @@ typedef struct SYSDEVU_sInfo
 
 	IMG_VOID *				native_device;
 	IMG_VOID *pPrivate;
-#ifdef CONFIG_MCST
-	struct idr pa_id_map;
-	struct idr dma_id_map;
-#endif
 } SYSDEVU_sInfo;
 
 /*!

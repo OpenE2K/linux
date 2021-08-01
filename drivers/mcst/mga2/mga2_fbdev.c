@@ -148,11 +148,20 @@ static int ___mga2_sync(struct mga2 *mga2)
 	return ret;
 }
 
+static u64 mga2_get_current_desc(struct mga2 *mga2)
+{
+	if (mga25(mga2))
+		return auc2_get_current_desc(mga2);
+	else
+		return bctrl_get_current_desc(mga2);
+}
+
 static int __mga2_sync(struct mga2 *mga2)
 {
 	long ret = 0, timeout = msecs_to_jiffies(mga2_timeout(mga2));
 	int n = circ_dec(mga2->head);
 	struct dma_fence *fence = &mga2->mga2_fence[n];
+	u64 current_desc = mga2_get_current_desc(mga2);
 	if (mga2->flags & MGA2_BCTRL_OFF)
 		goto cant_sleep;
 
@@ -162,7 +171,14 @@ static int __mga2_sync(struct mga2 *mga2)
 	if (in_atomic() || in_dbg_master() || irqs_disabled())
 		goto cant_sleep;
 
-	ret = dma_fence_wait_timeout(fence, true, timeout);
+	while (0 == (ret = dma_fence_wait_timeout(fence, true, timeout))) {
+		/* Timeout */
+		u64 d = mga2_get_current_desc(mga2);
+		if (d == current_desc) /* AUC's stuck */
+			break;
+		/* AUC is still working, let's wait. */
+		current_desc = d;
+	}
 	if (ret == 0) {
 		ret = -ETIMEDOUT;
 		mga2->flags |= MGA2_BCTRL_OFF;

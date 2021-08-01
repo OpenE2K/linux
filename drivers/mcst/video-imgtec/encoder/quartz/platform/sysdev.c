@@ -505,10 +505,6 @@ IMG_RESULT SYSDEVU_RegisterDriver(SYSDEVU_sInfo *sysdev) {
 		sysdev[i].native_device = (void*)&dev->dev;
 		data->devs[i] = &sysdev[i];
 
-#ifdef CONFIG_MCST
-	idr_init(&sysdev[i].pa_id_map);
-	idr_init(&sysdev[i].dma_id_map);
-#endif
 	/* Save register pointer etc....*/
 	    if( IS_MCST_DEVICE(dev->device) )
 	    {
@@ -611,10 +607,6 @@ IMG_RESULT SYSDEVU_UnRegisterDriver(SYSDEVU_sInfo *sysdev) {
 	/* No device ever registered (can be caused by an earlier error) */
 	if (NO_DEVICES_REGISTERED != registered_devices)
 	{
-#ifdef CONFIG_MCST
-		idr_destroy(&sysdev->pa_id_map);
-		idr_destroy(&sysdev->dma_id_map);
-#endif
 		registered_devices--;
 		if (NO_DEVICES_REGISTERED == registered_devices)
 		{

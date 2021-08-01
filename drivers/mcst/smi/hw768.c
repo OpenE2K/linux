@@ -41,6 +41,26 @@ struct smi_768_register{
 	uint32_t secondary_hwc_color_12, secondary_hwc_color_3;
 };
 
+void hw768_enable_lvds(int channels)
+{
+	if(channels == 1){
+		pokeRegisterDWord(0x80020,0x31E30000);
+		pokeRegisterDWord(0x8002C,0x74001200);
+	}else{
+		pokeRegisterDWord(0x80020,0x31E3F71D);
+		pokeRegisterDWord(0x8002C,0x750FED02);
+		unsigned long value = peekRegisterDWord(DISPLAY_CTRL);
+		value = FIELD_SET(value, DISPLAY_CTRL, LVDS_OUTPUT_FORMAT, CHANNEL0_48BIT);
+		value = FIELD_SET(value, DISPLAY_CTRL, PIXEL_CLOCK_SELECT, HALF);
+		value = FIELD_SET(value, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
+		pokeRegisterDWord(DISPLAY_CTRL,value);
+
+		value = peekRegisterDWord(DISPLAY_CTRL + CHANNEL_OFFSET);
+		value = FIELD_SET(value, DISPLAY_CTRL, LVDS_OUTPUT_FORMAT, CHANNEL0_48BIT);
+		pokeRegisterDWord(DISPLAY_CTRL + CHANNEL_OFFSET,value);
+	}
+}
+
 void hw768_suspend(struct smi_768_register * pSave)
 {
 	printk("sm768 suspend\n");; 
@@ -83,7 +103,7 @@ void hw768_init_hdmi(void)
 	HDMI_Init();
 }
 
-int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode)
+int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode, bool isHDMI)
 {
 	int ret = 1;
 	if(pLogicalMode->x == 3840)
@@ -95,7 +115,7 @@ int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode)
 		pLogicalMode->hz = 60;
 	// set HDMI parameters
 	HDMI_Disable_Output();
-	ret = HDMI_Set_Mode(pLogicalMode);
+	ret = HDMI_Set_Mode(pLogicalMode, isHDMI);
 	return ret;
 }
 
@@ -201,13 +221,12 @@ int hdmi_int_status = 0;
 
 inline int hdmi_hotplug_detect(void)
 {
-	int ret;
-	unsigned int intMask = peekRegisterDWord(INT_MASK);
+		unsigned int intMask = peekRegisterDWord(INT_MASK);
     	intMask = FIELD_SET(intMask, INT_MASK, HDMI, ENABLE);
     	pokeRegisterDWord(INT_MASK, intMask);
 
 
-		ret = hdmi_detect();
+		int ret = hdmi_detect();
 
 		if (ret == 1) {
 			hdmi_int_status = 1;

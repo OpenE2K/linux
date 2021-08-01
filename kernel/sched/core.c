@@ -56,7 +56,7 @@ struct rq *node_rq[MAX_NUMNODES];
 static int try_to_run_mcst_rt_task(struct task_struct *p, int this_cpu);
 #endif
 
-#if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_JUMP_LABEL)
+#ifdef CONFIG_SCHED_DEBUG
 /*
  * Debugging: various feature bits
  *

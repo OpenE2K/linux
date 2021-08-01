@@ -1257,7 +1257,7 @@ out_free:
 				sk->udp_snd_sz / sk->udp_snd_num <
 							snd_lim_sz) {
 				usleep_range(delts_us,
-					delts_us + (delts_us >> 1));
+					delts_us + delts_us >> 3);
 			}
 			sk->udp_snd_num = 0;
 			sk->udp_snd_sz = 0;

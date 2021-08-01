@@ -32,7 +32,18 @@
  */
 long initDisplay()
 {
-    //Empty function for now. Just a place holder for future use.
+#if 0
+    /* set 80024[30:28] and 88024[30:28] to 0x3 in order for the DAC to output stronger signal. */
+    unsigned long value;
+    value = peekRegisterDWord(MONITOR_DETECT);
+    value &= 0xCFFFFFFF;
+    value |= 0x30000000;
+    pokeRegisterDWord(MONITOR_DETECT, value);
+    value = peekRegisterDWord(MONITOR_DETECT + CHANNEL_OFFSET);
+    value &= 0xCFFFFFFF;
+    value |= 0x30000000;
+    pokeRegisterDWord(MONITOR_DETECT + CHANNEL_OFFSET, value);
+#endif
     return 0;
 
 }
@@ -182,7 +193,7 @@ void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount)
     unsigned long ulDispCtrlAddr;
     unsigned long status;
     unsigned long ulLoopCount = 0;
-    static unsigned long ulDeadLoopCount = 1000;
+    static unsigned long ulDeadLoopCount = 10;
     
     if (dispControl == CHANNEL0_CTRL)
     {
@@ -250,7 +261,7 @@ void ddk768_waitVSyncLine(disp_control_t dispControl)
     unsigned long value;
     mode_parameter_t modeParam;
     
-    ulDispCtrlAddr = (dispControl == CHANNEL0_CTRL)? DISPLAY_CTRL : (DISPLAY_CTRL+CHANNEL_OFFSET);
+    ulDispCtrlAddr = (dispControl == CHANNEL0_CTRL)? CURRENT_LINE : (CURRENT_LINE+CHANNEL_OFFSET);
 
     /* Get the current mode parameter of the specific display control */
     modeParam = ddk768_getCurrentModeParam(dispControl);
@@ -629,21 +640,38 @@ long setAllViewOff()
  * Disable double pixel clock. 
  * This is a temporary function, used to patch for the random fuzzy font problem. 
  */
-void DisableDoublePixel(void)
+void DisableDoublePixel(disp_control_t dispControl)
 {
-    unsigned long ulDispCtrlAddr;
-    unsigned long ulDispCtrlReg;
+	unsigned long ulDispCtrlAddr;
+	unsigned long ulDispCtrlReg;
 
-    ulDispCtrlAddr = DISPLAY_CTRL;
-    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
-    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, DISABLE);
-    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-    
-    ulDispCtrlAddr = DISPLAY_CTRL+CHANNEL_OFFSET;
-    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
-    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, DISABLE);
-    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	if(dispControl == CHANNEL0_CTRL) {
+	    ulDispCtrlAddr = DISPLAY_CTRL;
+	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, DISABLE);
+	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	}else{
+	    ulDispCtrlAddr = DISPLAY_CTRL+CHANNEL_OFFSET;
+	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, DISABLE);
+	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	}
 }
 
+void EnableDoublePixel(disp_control_t dispControl)
+{
+	unsigned long ulDispCtrlAddr;
+	unsigned long ulDispCtrlReg;
 
-
+	if(dispControl == CHANNEL0_CTRL) {
+	    ulDispCtrlAddr = DISPLAY_CTRL;
+	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
+	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	}else{
+	    ulDispCtrlAddr = DISPLAY_CTRL+CHANNEL_OFFSET;
+	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
+	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	}
+}

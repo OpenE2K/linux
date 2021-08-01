@@ -95,6 +95,7 @@ typedef struct guest_walker {
 	bool pte_writable[PT_MAX_FULL_LEVELS];
 	unsigned pt_access;
 	unsigned pte_access;
+	u64 pte_cui;
 	gfn_t gfn;
 	gva_t gva;
 	kvm_arch_exception_t fault;
@@ -255,6 +256,12 @@ static inline unsigned FNAME(gpte_access)(struct kvm_vcpu *vcpu, u64 gpte)
 	return access;
 }
 
+static inline u64 FNAME(gpte_cui)(u64 gpte)
+{
+	return !cpu_has(CPU_FEAT_ISET_V6) ?
+		_PAGE_INDEX_FROM_CUNIT_V2(gpte) : 0;
+}
+
 static int FNAME(update_accessed_dirty_bits)(struct kvm_vcpu *vcpu,
 					     struct kvm_mmu *mmu,
 					     guest_walker_t *walker,
@@ -339,6 +346,7 @@ static int FNAME(walk_addr_generic)(guest_walker_t *walker,
 	int level;
 	const pt_level_t *pt_level;
 	pt_element_t pte;
+	u64 pte_cui;
 	pt_element_t __user *uninitialized_var(ptep_user);
 	gfn_t table_gfn;
 	unsigned index, pt_access, pte_access, accessed_dirty, pte_pkey;
@@ -360,6 +368,7 @@ retry_walk:
 	walker->pt_struct = kvm_get_vcpu_pt_struct(vcpu);
 	walker->pt_level = &walker->pt_struct->levels[mmu->root_level];
 	walker->fault.error_code_valid = false;
+	walker->fault.error_code = 0;
 	pte = kvm_get_space_addr_guest_root(vcpu, addr);
 	DebugSPF("root pte 0x%lx\n", pte);
 
@@ -432,7 +441,7 @@ retry_walk:
 		 * information to fix the exit_qualification or exit_info_1
 		 * fields.
 		 */
-		if (unlikely(real_gpa == UNMAPPED_GVA))
+		if (unlikely(arch_is_error_gpa(real_gpa)))
 			return 0;
 
 		real_gfn = gpa_to_gfn(real_gpa);
@@ -472,6 +481,7 @@ retry_walk:
 
 		accessed_dirty &= pte;
 
+		pte_cui = FNAME(gpte_cui)(pte);
 #if PTTYPE == PTTYPE_E2K
 		/* protections PT directories entries and page entries are */
 		/* independent for e2k arch, see full comment above */
@@ -498,7 +508,8 @@ retry_walk:
 
 	if (!(access & (PFERR_WRITE_MASK | PFERR_WAIT_LOCK_MASK |
 			PFERR_INSTR_FAULT_MASK | PFERR_INSTR_PROT_MASK)) &&
-				!(pte_access & ACC_WRITE_MASK)) {
+				!(access & PFERR_FAPB_MASK) &&
+					!(pte_access & ACC_WRITE_MASK)) {
 		/*
 		 * Try read from write protected page (by gpte).
 		 * Probably there is(are) before some write(s) to this page
@@ -521,7 +532,7 @@ retry_walk:
 
 	real_gpa = mmu->translate_gpa(vcpu, gfn_to_gpa(gfn), access,
 					&walker->fault);
-	if (real_gpa == UNMAPPED_GVA)
+	if (arch_is_error_gpa(real_gpa))
 		return 0;
 	DebugSPF("level #%d gfn from guest pte 0x%llx, gpa 0x%llx "
 		"real gpa 0x%llx\n",
@@ -559,6 +570,7 @@ retry_walk:
 
 	walker->pt_access = pt_access;
 	walker->pte_access = pte_access;
+	walker->pte_cui = pte_cui;
 	pgprintk("%s: pte %llx pte_access %x pt_access %x\n",
 		 __func__, (u64)pte, pte_access, pt_access);
 	return 1;
@@ -568,7 +580,6 @@ error:
 	if (fetch_fault && (mmu->nx || is_smep(vcpu)))
 		errcode |= PFERR_FETCH_MASK;
 
-	walker->fault.vector = PF_VECTOR;
 	walker->fault.error_code_valid = true;
 	walker->fault.error_code = errcode;
 
@@ -613,6 +624,7 @@ FNAME(prefetch_gpte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 	gfn_t gfn;
 	kvm_pfn_t pfn;
 	bool gfn_only_valid = false;
+	u64 pte_cui;
 	int ret;
 
 	if (FNAME(prefetch_invalid_gpte)(vcpu, sp, spte, gpte))
@@ -629,6 +641,7 @@ FNAME(prefetch_gpte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 	}
 
 	gfn = gpte_to_gfn_ind(vcpu, 0, gpte, kvm_get_vcpu_pt_struct(vcpu));
+	pte_cui = FNAME(gpte_cui)(gpte);
 #if PTTYPE == PTTYPE_E2K
 	pte_access = FNAME(gpte_access)(vcpu, gpte);
 	FNAME(protect_clean_gpte)(&pte_access, gpte);
@@ -664,7 +677,7 @@ write_spte:
 	 * pte_prefetch_gfn_to_pfn always gets a writable pfn.
 	 */
 	mmu_set_spte(vcpu, spte, pte_access, 0, PT_PAGE_TABLE_LEVEL, gfn, pfn,
-		     true, true, gfn_only_valid);
+		     true, true, gfn_only_valid, pte_cui);
 
 	return true;
 }
@@ -737,7 +750,8 @@ static void FNAME(pte_prefetch)(struct kvm_vcpu *vcpu, guest_walker_t *gw,
  * Fetch a shadow PT levels up to the specified level in the paging hierarchy.
  */
 static int FNAME(fetch_shadow_pts)(struct kvm_vcpu *vcpu, gva_t addr,
-			kvm_shadow_walk_iterator_t *it, hpa_t spt_root,
+			kvm_shadow_walk_iterator_t *it,
+			gmm_struct_t *gmm, hpa_t spt_root,
 			int down_to_level, guest_walker_t *gw)
 {
 	struct kvm_mmu_page *sp = NULL;
@@ -794,7 +808,7 @@ static int FNAME(fetch_shadow_pts)(struct kvm_vcpu *vcpu, gva_t addr,
 			goto out_gpte_changed;
 
 		if (sp) {
-			link_shadow_page(vcpu, it->sptep, sp);
+			link_shadow_page(vcpu, gmm, it->sptep, sp);
 			DebugSPF("level #%d: linked shadow pte %px == 0x%lx\n",
 				it->level, it->sptep, pgprot_val(*it->sptep));
 		}
@@ -812,19 +826,23 @@ out_gpte_changed:
  */
 static pf_res_t FNAME(fetch)(struct kvm_vcpu *vcpu, gva_t addr,
 			     guest_walker_t *gw, hpa_t spt_root,
-			     int write_fault, int hlevel,
+			     int error_code, int hlevel,
 			     kvm_pfn_t pfn, bool map_writable, bool prefault,
 			     bool only_validate, bool not_prefetch)
 {
 	struct kvm_mmu_page *sp = NULL;
 	struct kvm_shadow_walk_iterator it;
 	unsigned direct_access;
+	bool write_fault = !!(error_code & PFERR_WRITE_MASK);
+	gmm_struct_t *gmm;
 	pf_res_t emulate;
 
 	DebugTOVM("started for guest addr 0x%lx pfn 0x%llx level %d\n",
 		addr, pfn, hlevel);
 
-	if (FNAME(fetch_shadow_pts)(vcpu, addr, &it, spt_root,
+	gmm = kvm_get_page_fault_gmm(vcpu, error_code);
+
+	if (FNAME(fetch_shadow_pts)(vcpu, addr, &it, gmm, spt_root,
 					gw->level, gw))
 		goto out_gpte_changed;
 
@@ -854,7 +872,7 @@ static pf_res_t FNAME(fetch)(struct kvm_vcpu *vcpu, gva_t addr,
 		sp = kvm_mmu_get_page(vcpu, direct_gfn, addr, it.level-1,
 				true, direct_access,
 				is_shadow_valid_pte(vcpu->kvm, *it.sptep));
-		link_shadow_page(vcpu, it.sptep, sp);
+		link_shadow_page(vcpu, gmm, it.sptep, sp);
 		DebugTOVM("allocated shadow page at %px for direct "
 			"gfn 0x%llx, direct access %s\n",
 			sp, direct_gfn, (direct_access) ? "true" : "false");
@@ -865,7 +883,7 @@ static pf_res_t FNAME(fetch)(struct kvm_vcpu *vcpu, gva_t addr,
 	clear_sp_write_flooding_count(it.sptep);
 	emulate = mmu_set_spte(vcpu, it.sptep, gw->pte_access, write_fault,
 			       it.level, gw->gfn, pfn, prefault, map_writable,
-			       only_validate);
+			       only_validate, gw->pte_cui);
 	if (!not_prefetch)
 		FNAME(pte_prefetch)(vcpu, gw, it.sptep);
 	DebugTOVM("set shadow spte %px == 0x%lx, emulate %d\n",
@@ -1072,7 +1090,7 @@ static pf_res_t FNAME(page_fault)(struct kvm_vcpu *vcpu, gva_t addr,
 	make_mmu_pages_available(vcpu);
 	if (!force_pt_level)
 		transparent_hugepage_adjust(vcpu, &walker.gfn, &pfn, &level);
-	r = FNAME(fetch)(vcpu, addr, &walker, E2K_INVALID_PAGE, write_fault,
+	r = FNAME(fetch)(vcpu, addr, &walker, E2K_INVALID_PAGE, error_code,
 			 level, pfn, map_writable, prefault, false, false);
 	++vcpu->stat.pf_fixed;
 	kvm_mmu_audit(vcpu, AUDIT_POST_PAGE_FAULT);
@@ -1117,7 +1135,7 @@ static gpa_t FNAME(get_level1_sp_gpa)(struct kvm_mmu_page *sp)
 	return gfn_to_gpa(sp->gfn) + offset * sizeof(pt_element_t);
 }
 
-static void FNAME(flush_gva)(struct kvm_vcpu *vcpu, gva_t gva)
+static void FNAME(sync_gva)(struct kvm_vcpu *vcpu, gva_t gva)
 {
 	struct kvm_shadow_walk_iterator iterator;
 	struct kvm_mmu_page *sp;
@@ -1136,6 +1154,8 @@ static void FNAME(flush_gva)(struct kvm_vcpu *vcpu, gva_t gva)
 		WARN_ON(1);
 		return;
 	}
+
+retry_sync_gva:
 
 	spin_lock(&vcpu->kvm->mmu_lock);
 	for_each_shadow_entry(vcpu, gva, iterator) {
@@ -1160,8 +1180,16 @@ static void FNAME(flush_gva)(struct kvm_vcpu *vcpu, gva_t gva)
 				break;
 
 			if (kvm_vcpu_read_guest_atomic(vcpu, pte_gpa, &gpte,
-						       sizeof(pt_element_t)))
-				break;
+						sizeof(pt_element_t))) {
+
+				spin_unlock(&vcpu->kvm->mmu_lock);
+
+				if (kvm_vcpu_read_guest(vcpu, pte_gpa, &gpte,
+							sizeof(pt_element_t)))
+					return;
+				else
+					goto retry_sync_gva;
+			}
 
 			FNAME(update_pte)(vcpu, sp, sptep, &gpte);
 		}
@@ -1173,9 +1201,10 @@ static void FNAME(flush_gva)(struct kvm_vcpu *vcpu, gva_t gva)
 	spin_unlock(&vcpu->kvm->mmu_lock);
 }
 
-static void FNAME(flush_gva_pte_range)(struct kvm_vcpu *vcpu,
+static bool FNAME(sync_gva_pte_range)(struct kvm_vcpu *vcpu,
 				struct kvm_shadow_walk_iterator *spt_walker,
-				gva_t gva_start, gva_t gva_end)
+				gva_t gva_start, gva_t gva_end,
+				gva_t *retry_gva)
 {
 	struct kvm_mmu_page *sp;
 	int level;
@@ -1221,12 +1250,25 @@ static void FNAME(flush_gva_pte_range)(struct kvm_vcpu *vcpu,
 
 			mmu_page_zap_pte(vcpu->kvm, sp, sptep);
 
+			/* Read pte from guest table */
 			if (kvm_vcpu_read_guest_atomic(vcpu, pte_gpa, &gpte,
-						sizeof(pt_element_t)))
-				goto next_pte;
+						sizeof(pt_element_t))) {
+
+				spin_unlock(&vcpu->kvm->mmu_lock);
+
+				if (kvm_vcpu_read_guest(vcpu, pte_gpa, &gpte,
+							sizeof(pt_element_t)))
+					*retry_gva = gva_next;
+				else
+					*retry_gva = gva;
+
+				return false;
+			}
 
 			FNAME(update_pte)(vcpu, sp, sptep, &gpte);
 		} else {
+			bool ret;
+
 			if (!is_shadow_present_pte(vcpu->kvm, *sptep) ||
 					!sp->unsync_children)
 				goto next_pte;
@@ -1240,8 +1282,8 @@ static void FNAME(flush_gva_pte_range)(struct kvm_vcpu *vcpu,
 			spt_walker->level--;
 			spt_walker->pt_level--;
 
-			FNAME(flush_gva_pte_range)(vcpu, spt_walker,
-						gva, gva_next);
+			ret = FNAME(sync_gva_pte_range)(vcpu, spt_walker,
+						gva, gva_next, retry_gva);
 
 			/*
 			 * Move iterators back to upper level
@@ -1249,6 +1291,9 @@ static void FNAME(flush_gva_pte_range)(struct kvm_vcpu *vcpu,
 			 */
 			spt_walker->level++;
 			spt_walker->pt_level++;
+
+			if (!ret)
+				return ret;
 		}
 
 next_pte:
@@ -1256,16 +1301,21 @@ next_pte:
 		sptep++;
 		gva = gva_next;
 	} while (gva != gva_end);
+
+	return true;
 }
 
-static void FNAME(flush_gva_range)(struct kvm_vcpu *vcpu,
-				gva_t start, gva_t end)
+static void FNAME(sync_gva_range)(struct kvm_vcpu *vcpu,
+				gva_t start, gva_t end,
+				bool flush_tlb)
 {
 	struct kvm_shadow_walk_iterator spt_walker;
 	hpa_t spt_root;
 	e2k_addr_t vptb_start, vptb_size, vptb_mask, vptb_end;
 	int top_level;
 	const pt_struct_t *vcpu_pt = kvm_get_vcpu_pt_struct(vcpu);
+	gva_t retry_gva;
+	bool sync_range1, sync_range2;
 
 	/* Get hpa of shadow page table root */
 	spt_root = kvm_get_space_addr_spt_root(vcpu, start);
@@ -1291,40 +1341,59 @@ static void FNAME(flush_gva_range)(struct kvm_vcpu *vcpu,
 	vptb_end = vptb_start + vptb_size - 1;
 
 	/*
-	 * Use simplified function flush_gva to flush single address
+	 * Use simplified function sync_gva to flush single address
 	 * which does not hit into vptb range
 	 */
 	if ((start == end) && (start < vptb_start || start >= vptb_end)) {
-		FNAME(flush_gva)(vcpu, start);
+		FNAME(sync_gva)(vcpu, start);
 		goto flush_cpu_tlb;
 	}
+
+retry_sync_gva_range:
+
+	sync_range1 = true;
+	sync_range2 = true;
 
 	spin_lock(&vcpu->kvm->mmu_lock);
 	if (start < vptb_start && end < vptb_start ||
 			start >= vptb_end && end >= vptb_end) {
 		/* flushed gva range doesn't overlap vptb range */
 		shadow_pt_walk_init(&spt_walker, vcpu, spt_root, start);
-		FNAME(flush_gva_pte_range)(vcpu, &spt_walker, start, end);
+		sync_range1 = FNAME(sync_gva_pte_range)(vcpu, &spt_walker,
+						start, end, &retry_gva);
 	} else if (start < vptb_start && end >= vptb_start &&
 				end < vptb_end) {
 		/* end part of flushed gva range overlaps vptb range */
 		shadow_pt_walk_init(&spt_walker, vcpu, spt_root, start);
-		FNAME(flush_gva_pte_range)(vcpu, &spt_walker,
-						start, vptb_start);
+		sync_range1 = FNAME(sync_gva_pte_range)(vcpu, &spt_walker,
+					start, vptb_start, &retry_gva);
 	} else if (end > vptb_end && start >= vptb_start &&
 				start < vptb_end) {
 		/* start part of flushed gva range overlaps vptb range */
 		shadow_pt_walk_init(&spt_walker, vcpu, spt_root, vptb_end);
-		FNAME(flush_gva_pte_range)(vcpu, &spt_walker, vptb_end, end);
+		sync_range1 = FNAME(sync_gva_pte_range)(vcpu, &spt_walker,
+						vptb_end, end, &retry_gva);
 	} else if (start < vptb_start && end >= vptb_end) {
 		/* flushed gva range contains vptb range */
 		shadow_pt_walk_init(&spt_walker, vcpu, spt_root, start);
-		FNAME(flush_gva_pte_range)(vcpu, &spt_walker,
-						start, vptb_start);
-		shadow_pt_walk_init(&spt_walker, vcpu, spt_root, vptb_end);
-		FNAME(flush_gva_pte_range)(vcpu, &spt_walker, vptb_end, end);
+		sync_range1 = FNAME(sync_gva_pte_range)(vcpu, &spt_walker,
+					start, vptb_start, &retry_gva);
+
+		if (sync_range1) {
+			shadow_pt_walk_init(&spt_walker, vcpu, spt_root,
+						vptb_end);
+			sync_range2 = FNAME(sync_gva_pte_range)(vcpu,
+						&spt_walker, vptb_end,
+						end, &retry_gva);
+		}
 	}
 	/* Do nothing if vptb range contains flushed gva range */
+
+	if (!sync_range1 || !sync_range2) {
+		start = retry_gva;
+		goto retry_sync_gva_range;
+	}
+
 	spin_unlock(&vcpu->kvm->mmu_lock);
 
 	/*
@@ -1332,8 +1401,10 @@ static void FNAME(flush_gva_range)(struct kvm_vcpu *vcpu,
 	 * in host kernel.
 	 */
 flush_cpu_tlb:
-	kvm_vcpu_flush_tlb(vcpu);
-	kvm_flush_remote_tlbs(vcpu->kvm);
+	if (flush_tlb) {
+		kvm_vcpu_flush_tlb(vcpu);
+		kvm_flush_remote_tlbs(vcpu->kvm);
+	}
 }
 
 gpa_t FNAME(gva_to_gpa)(struct kvm_vcpu *vcpu, gva_t vaddr, u32 access,
@@ -1372,6 +1443,7 @@ static int FNAME(sync_page)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp)
 	int i, nr_present = 0;
 	bool host_writable;
 	gpa_t first_pte_gpa;
+	u64 pte_cui;
 
 	/* direct kvm_mmu_page can not be unsync. */
 	BUG_ON(sp->role.direct);
@@ -1409,13 +1481,14 @@ static int FNAME(sync_page)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp)
 			set_spte(vcpu, &sp->spt[i], 0,
 				PT_PAGE_TABLE_LEVEL, 0, 0,
 				false, false, false,
-				true	/* only validate */);
+				true	/* only validate */, 0);
 			nr_present++;
 			continue;
 		}
 
 		gfn = gpte_to_gfn_ind(vcpu, 0, gpte,
 					kvm_get_vcpu_pt_struct(vcpu));
+		pte_cui = FNAME(gpte_cui)(gpte);
 #if PTTYPE == PTTYPE_E2K
 		/* protections PT directories entries and page entries are */
 		/* independent for e2k arch, see full comment above */
@@ -1451,7 +1524,7 @@ static int FNAME(sync_page)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp)
 		set_spte(vcpu, &sp->spt[i], pte_access,
 			 PT_PAGE_TABLE_LEVEL, gfn,
 			 spte_to_pfn(vcpu->kvm, sp->spt[i]), true, false,
-			 host_writable, false);
+			 host_writable, false, pte_cui);
 		DebugSPF("shadow spte %px == 0x%lx, gfn 0x%llx, pfn 0x%llx\n",
 			&sp->spt[i], pgprot_val(sp->spt[i]), gfn,
 			spte_to_pfn(vcpu->kvm, sp->spt[i]));
@@ -1482,7 +1555,8 @@ static void guest_pt_walk_init(guest_walker_t *guest_walker,
 /*
  * Allocate new spte
  */
-static pf_res_t allocate_shadow_level(struct kvm_vcpu *vcpu, gfn_t table_gfn,
+static pf_res_t allocate_shadow_level(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+					gfn_t table_gfn,
 					gva_t gva, int level,
 					unsigned int pt_access,
 					pgprot_t *spt_pte_hva,
@@ -1505,7 +1579,7 @@ static pf_res_t allocate_shadow_level(struct kvm_vcpu *vcpu, gfn_t table_gfn,
 			return PFRES_ERR;
 		}
 
-		link_shadow_page(vcpu, spt_pte_hva, sp);
+		link_shadow_page(vcpu, gmm, spt_pte_hva, sp);
 		DebugSYNC("allocated new shadow page with hpa 0x%llx, guest"
 			" table gfn 0x%llx, on level #%d, linked to spte"
 			" with hpa 0x%lx, hva 0x%lx on level #%d\n",
@@ -1571,10 +1645,9 @@ static void gfn_atomic_pf(struct kvm_vcpu *vcpu, gfn_t gfn, gva_t gva,
  * Create mapping for guest huge page in shadow page table.
  * Split huge page into smaller shadow pages if needed.
  */
-static pf_res_t map_huge_page_to_spte(struct kvm_vcpu *vcpu,
+static pf_res_t map_huge_page_to_spte(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			guest_walker_t *guest_walker, int level,
-			int split_to_level, pgprot_t *root_pte_hva,
-			unsigned int pte_access)
+			int split_to_level, pgprot_t *root_pte_hva)
 {
 	pf_res_t ret;
 	pgprot_t *pte_hva;
@@ -1650,19 +1723,21 @@ map:
 	split_page_size = pt_struct->levels[split_to_level].page_size;
 	if (level == split_to_level) {
 		gfn_atomic_pf(vcpu, guest_walker->gfn, guest_walker->gva,
-				pte_access, &pfn, &gfn_only_valid);
-		mmu_set_spte(vcpu, root_pte_hva, pte_access, false,
-				level, guest_walker->gfn, pfn, false,
-				true, gfn_only_valid);
+				guest_walker->pte_access, &pfn,
+				&gfn_only_valid);
+		mmu_set_spte(vcpu, root_pte_hva, guest_walker->pte_access,
+				false, level, guest_walker->gfn, pfn, false,
+				true, gfn_only_valid, guest_walker->pte_cui);
 		guest_walker->gfn += (split_page_size >> PAGE_SHIFT);
 		guest_walker->gva += split_page_size;
 		return PFRES_NO_ERR;
 	} else {
 		table_gfn = guest_walker->gfn &
 			~(KVM_PT_LEVEL_PAGES_PER_HPAGE(pt_level) - 1);
-		ret = allocate_shadow_level(vcpu, table_gfn,
+		ret = allocate_shadow_level(vcpu, gmm, table_gfn,
 					guest_walker->gva, level - 1,
-					pte_access, root_pte_hva, true);
+					guest_walker->pte_access,
+					root_pte_hva, true);
 		if (ret)
 			return ret;
 	}
@@ -1680,8 +1755,8 @@ map:
 	 */
 	ind = 0;
 	do {
-		ret = map_huge_page_to_spte(vcpu, guest_walker, level - 1,
-				split_to_level, pte_hva, pte_access);
+		ret = map_huge_page_to_spte(vcpu, gmm, guest_walker, level - 1,
+						split_to_level, pte_hva);
 		if (ret)
 			return ret;
 
@@ -1697,7 +1772,7 @@ map:
  * in accordance with guest page table maping.
  */
 static pf_res_t FNAME(sync_shadow_pte_range)(struct kvm_vcpu *vcpu,
-				struct kvm_mmu *mmu,
+				gmm_struct_t *gmm, struct kvm_mmu *mmu,
 				gva_t start_gva, gva_t end_gva,
 				guest_walker_t *guest_walker,
 				kvm_shadow_walk_iterator_t *spt_walker,
@@ -1839,7 +1914,7 @@ static pf_res_t FNAME(sync_shadow_pte_range)(struct kvm_vcpu *vcpu,
 				guest_pte_gpa, guest_pte_hva, gva, level);
 			mmu_set_spte(vcpu, spt_pte_hva, pte_access, false,
 					level, guest_walker->gfn, 0, false,
-					true, true);
+					true, true, 0);
 			goto next_pte;
 		}
 
@@ -1865,6 +1940,7 @@ static pf_res_t FNAME(sync_shadow_pte_range)(struct kvm_vcpu *vcpu,
 		FNAME(protect_clean_gpte)(&pte_access, guest_pte);
 		guest_walker->pt_access = guest_walker->pte_access;
 		guest_walker->pte_access = pte_access;
+		guest_walker->pte_cui = FNAME(gpte_cui)(guest_pte);
 
 		/* Check if current pt entry is huge page */
 		is_huge_page = (guest_pte & PT_PAGE_SIZE_MASK) &&
@@ -1886,12 +1962,11 @@ static pf_res_t FNAME(sync_shadow_pte_range)(struct kvm_vcpu *vcpu,
 			/* Set pfn in spte */
 			mmu_set_spte(vcpu, spt_pte_hva, pte_access, false,
 				level, guest_walker->gfn, pfn, false,
-				true, gfn_only_valid);
+				true, gfn_only_valid, guest_walker->pte_cui);
 		} else if (is_huge_page) {
 			/* Map huge page to spte */
-			ret = map_huge_page_to_spte(vcpu, guest_walker,
-						level, level, spt_pte_hva,
-						pte_access);
+			ret = map_huge_page_to_spte(vcpu, gmm, guest_walker,
+						level, level, spt_pte_hva);
 
 			if (ret)
 				return ret;
@@ -1905,7 +1980,8 @@ static pf_res_t FNAME(sync_shadow_pte_range)(struct kvm_vcpu *vcpu,
 			}
 		} else {
 			/* Allocate lower level in shadow page table */
-			ret = allocate_shadow_level(vcpu, guest_walker->gfn,
+			ret = allocate_shadow_level(vcpu, gmm,
+					guest_walker->gfn,
 					gva, level - 1, pte_access,
 					(pgprot_t *) spt_pte_hva, false);
 			if (ret)
@@ -1931,7 +2007,7 @@ static pf_res_t FNAME(sync_shadow_pte_range)(struct kvm_vcpu *vcpu,
 			spt_walker->pt_level--;
 
 			/* Sync lower-level pt range */
-			ret = FNAME(sync_shadow_pte_range)(vcpu, mmu,
+			ret = FNAME(sync_shadow_pte_range)(vcpu, gmm, mmu,
 					gva, next_gva, guest_walker,
 					spt_walker, retry_gva);
 
@@ -1960,7 +2036,7 @@ next_pte:
 	return PFRES_NO_ERR;
 }
 
-static int do_sync_shadow_pt_range(struct kvm_vcpu *vcpu,
+static int do_sync_shadow_pt_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			hpa_t spt_root, pt_element_t guest_root,
 			gva_t start, gva_t end)
 {
@@ -2015,7 +2091,7 @@ retry:
 	guest_pt_walk_init(&guest_walker, vcpu, guest_root);
 
 	/* Sync page tables starting from pgd ranges */
-	pfres = FNAME(sync_shadow_pte_range)(vcpu, &vcpu->arch.mmu,
+	pfres = FNAME(sync_shadow_pte_range)(vcpu, gmm, &vcpu->arch.mmu,
 				gva_start, gva_end, &guest_walker,
 				&spt_walker, &gva_retry);
 	if (pfres == PFRES_RETRY) {
@@ -2034,7 +2110,7 @@ retry:
 	return 0;
 }
 
-static int FNAME(sync_shadow_pt_range)(struct kvm_vcpu *vcpu,
+static int FNAME(sync_shadow_pt_range)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			hpa_t spt_root, gva_t start, gva_t end,
 			gpa_t guest_pptb, gva_t vptb)
 {
@@ -2092,7 +2168,7 @@ static int FNAME(sync_shadow_pt_range)(struct kvm_vcpu *vcpu,
 
 		DebugPTSYNC("VCPU #%d : sync range from 0x%lx to 0x%lx\n",
 			vcpu->vcpu_id, gva_start, gva_end);
-		ret = do_sync_shadow_pt_range(vcpu, spt_root, guest_root,
+		ret = do_sync_shadow_pt_range(vcpu, gmm, spt_root, guest_root,
 						gva_start, gva_end);
 		if (ret != 0)
 			return ret;
@@ -2120,6 +2196,7 @@ int FNAME(shadow_pt_protection_fault)(struct kvm_vcpu *vcpu, gpa_t addr,
 	unsigned index;
 	const pt_struct_t *gpt;
 	const pt_level_t *gpt_level;
+	gmm_struct_t *gmm;
 	int level;
 
 	DebugPTE("SP of protected PT at %px level %d, gfn 0x%llx, "
@@ -2142,7 +2219,8 @@ int FNAME(shadow_pt_protection_fault)(struct kvm_vcpu *vcpu, gpa_t addr,
 	KVM_BUG_ON(root_hpa != kvm_get_space_addr_spt_root(vcpu, end_gva));
 	vptb = kvm_get_space_addr_spt_vptb(vcpu, start_gva);
 
-	r = FNAME(sync_shadow_pt_range)(vcpu, root_hpa,
+	gmm = kvm_get_faulted_addr_gmm(vcpu, start_gva);
+	r = FNAME(sync_shadow_pt_range)(vcpu, gmm, root_hpa,
 			start_gva, end_gva, E2K_INVALID_PAGE, vptb);
 	KVM_BUG_ON(r != 0);
 	return r;

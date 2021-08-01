@@ -47,6 +47,16 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_KVM_FREE_GMM_SP_MODE
+#undef	DebugFGMM
+#define	DEBUG_KVM_FREE_GMM_SP_MODE	0	/* guest mm SPs freeing */
+						/* debug */
+#define	DebugFGMM(fmt, args...)						\
+({									\
+	if (DEBUG_KVM_FREE_GMM_SP_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 #undef	DEBUG_KVM_SHUTDOWN_MODE
 #undef	DebugKVMSH
 #define	DEBUG_KVM_SHUTDOWN_MODE	1	/* KVM shutdown debugging */
@@ -106,7 +116,13 @@ static inline void gmm_init(gmm_struct_t *gmm)
 {
 	atomic_set(&gmm->mm_count, 1);
 	spin_lock_init(&gmm->page_table_lock);
-	kvm_gmm_init(gmm);
+	gmm->root_hpa = E2K_INVALID_PAGE;
+#ifdef	CONFIG_GUEST_MM_SPT_LIST
+	INIT_LIST_HEAD(&gmm->spt_list);
+	spin_lock_init(&gmm->spt_list_lock);
+	gmm->spt_list_size = 0;
+	gmm->total_released = 0;
+#endif	/* CONFIG_GUEST_MM_SPT_LIST */
 }
 
 static inline gmm_struct_t *do_alloc_gmm(gmmid_table_t *gmmid_table)
@@ -151,9 +167,15 @@ static inline void do_drop_gmm(gmm_struct_t *gmm, gmmid_table_t *gmmid_table)
 	kmem_cache_free(gmmid_table->nid_cachep, gmm);
 }
 
-void do_free_gmm(gmm_struct_t *gmm, gmmid_table_t *gmmid_table)
+void do_free_gmm(struct kvm *kvm, gmm_struct_t *gmm, gmmid_table_t *gmmid_table)
 {
 	DebugKVMF("started for guest mm #%d\n", gmm->nid.nr);
+
+	if (!kvm_is_empty_gmm_spt_list(gmm)) {
+		pr_err("%s(): gmm #%d SP list is not empty, force release\n",
+			__func__, gmm->nid.nr);
+		kvm_delete_gmm_sp_list(kvm, gmm);
+	}
 
 	kvm_do_free_nid(&gmm->nid, gmmid_table);
 	do_drop_gmm(gmm, gmmid_table);
@@ -205,7 +227,7 @@ gmm_struct_t *create_gmm(struct kvm *kvm)
  * Called when the last reference to the guest mm agent is dropped.
  * Free the page directory and the guest mm structure.
  */
-void do_gmm_drop(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+static void do_gmm_drop(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
 	DebugGMM("started on for guest MM #%d at %px users %d\n",
 		gmm->nid.nr, gmm, atomic_read(&gmm->mm_count));
@@ -242,6 +264,9 @@ int kvm_guest_mm_drop(struct kvm_vcpu *vcpu, int gmmid_nr)
 	DebugGMM("host gmm #%d at %px users %d\n",
 		gmmid_nr, gmm, atomic_read(&gmm->mm_count));
 
+	DebugFGMM("gmm #%d before release has 0x%lx SPs\n",
+		gmm->nid.nr, kvm_get_gmm_spt_list_size(gmm));
+
 	if (active_gmm == gmm) {
 		DebugGMM("gmm #%d can be now as active, so deactivate it\n",
 			gmm->nid.nr);
@@ -254,6 +279,12 @@ int kvm_guest_mm_drop(struct kvm_vcpu *vcpu, int gmmid_nr)
 
 	gmm_drop(vcpu->kvm, gmm);
 
+	DebugFGMM("gmm #%d after release has 0x%lx SPs, total released 0x%lx\n",
+		gmm->nid.nr, kvm_get_gmm_spt_list_size(gmm),
+		kvm_get_gmm_spt_total_released(gmm));
+
+	KVM_BUG_ON(!kvm_is_empty_gmm_spt_list(gmm));
+
 	destroy_gmm_u_context(vcpu, gmm);
 
 	return 0;
@@ -262,8 +293,12 @@ int kvm_guest_mm_drop(struct kvm_vcpu *vcpu, int gmmid_nr)
 static inline void force_drop_gmm(struct kvm *kvm, gmm_struct_t *gmm)
 {
 	if (atomic_read(&gmm->mm_count) != 0) {
-		pr_err("%s(): gmm GMMID #%d usage counter is %d, should be 0\n",
-			__func__, gmm->nid.nr, atomic_read(&gmm->mm_count));
+		if (gmm != pv_mmu_get_init_gmm(kvm)) {
+			pr_err("%s(): gmm GMMID #%d usage counter is %d, "
+				"should be 0\n",
+				__func__, gmm->nid.nr,
+				atomic_read(&gmm->mm_count));
+		}
 		atomic_set(&gmm->mm_count, 0);
 	}
 	do_gmm_drop(current_thread_info()->vcpu, gmm);
@@ -308,8 +343,7 @@ int kvm_activate_guest_mm(struct kvm_vcpu *vcpu,
 {
 	struct kvm *kvm = vcpu->kvm;
 	gthread_info_t *cur_gti = pv_vcpu_get_gti(vcpu);
-	gmm_struct_t *new_gmm;
-	gmm_struct_t *cur_gmm;
+	gmm_struct_t *new_gmm, *old_gmm, *cur_gmm;
 
 	DebugGMM("started for new host agent of new guest mm, pptb at %px\n",
 		(void *)u_phys_ptb);
@@ -318,40 +352,44 @@ int kvm_activate_guest_mm(struct kvm_vcpu *vcpu,
 		DebugGMM("could not create new host agent of guest mm\n");
 		return -EINVAL;
 	}
-	gmmid_nr = new_gmm->nid.nr;
+
 	cur_gmm = pv_vcpu_get_gmm(vcpu);
-	if (active_gmmid_nr == 0)  {
-		DebugGMM("active host agent is init guest mm: %d\n",
-			active_gmmid_nr);
-		if (!pv_vcpu_is_init_gmm(vcpu, cur_gmm)) {
-			pr_err("%s(): active host agent is init guest mm, "
-				"but current host agent #%d is not NULL\n",
-				__func__, (cur_gmm) ? cur_gmm->nid.nr : -1);
-			return -EINVAL;
-		}
-	} else {
-		DebugGMM("active host agent is #%d\n", active_gmmid_nr);
-		if (pv_vcpu_is_init_gmm(vcpu, cur_gmm)) {
-			GTI_BUG_ON(!cur_gti->gmm_in_release &&
-				!test_gti_thread_flag(cur_gti,
-						GTIF_KERNEL_THREAD));
-		} else if (cur_gmm->nid.nr != active_gmmid_nr &&
-				!vcpu->arch.is_hv) {
-			pr_err("%s(): active host agent is #%d, but current "
-				"host agent #%d is not the same\n",
-				__func__, active_gmmid_nr, cur_gmm->nid.nr);
-			return -EINVAL;
-		}
+	if (!pv_vcpu_is_init_gmm(vcpu, cur_gmm)) {
+		/* current gmm should have been switched to init gmm */
+		pr_err("%s(): active gmm #%d is not init guest\n",
+			__func__, cur_gmm->nid.nr);
 	}
-	BUG_ON(cur_gmm == new_gmm);
+
+	old_gmm = cur_gti->gmm;
+	if (likely(active_gmmid_nr > 0)) {
+		/* old process was user guest process */
+		DebugGMM("guest old gmm is #%d\n", active_gmmid_nr);
+		if (old_gmm && old_gmm->nid.nr != active_gmmid_nr &&
+							!vcpu->arch.is_hv) {
+			pr_err("%s(): old host gmm is #%d, but guest old "
+				"gmm #%d is not the same\n",
+				__func__, old_gmm->nid.nr, active_gmmid_nr);
+		}
+		KVM_BUG_ON(old_gmm == NULL);
+	} else {
+		/* old task was guest kernel thread */
+		DebugGMM("guest old gmm is #%d (init gmm)\n", active_gmmid_nr);
+		if (old_gmm && !pv_vcpu_is_init_gmm(vcpu, old_gmm) &&
+							!vcpu->arch.is_hv) {
+			pr_err("%s(): old guest gmm is init #%d, but host old "
+				"gmm #%d is not the init too\n",
+				__func__, active_gmmid_nr, old_gmm->nid.nr);
+		}
+		KVM_BUG_ON(old_gmm != NULL);
+	}
 
 	/* deactivate old gmm of this thread */
-	if (!pv_vcpu_is_init_gmm(vcpu, cur_gmm)) {
+	if (likely(old_gmm && !pv_vcpu_is_init_gmm(vcpu, old_gmm))) {
 		int ret;
 
-		ret = kvm_deactivate_gmm(vcpu, cur_gti, cur_gmm);
+		ret = kvm_deactivate_gmm(vcpu, cur_gti, old_gmm);
 		if (ret) {
-			pr_err("%s(): could not deactivate current guest mm, "
+			pr_err("%s(): could not deactivate old guest mm, "
 				"error %d\n",
 				__func__, ret);
 			return ret;
@@ -454,6 +492,11 @@ void kvm_guest_pv_mm_destroy(struct kvm *kvm)
 	int i;
 
 	DebugKVMSH("started\n");
+
+	/* release init gmm */
+	gmm = pv_mmu_get_init_gmm(kvm);
+	gmm_drop(kvm, gmm);
+
 	gpid_table_lock(&kvm->arch.gpid_table);
 	for_each_guest_thread_info(gpid, i, next, &kvm->arch.gpid_table) {
 		if (gpid->gthread_info->gmm != NULL)

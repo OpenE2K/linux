@@ -559,21 +559,19 @@ static int do_instr_page_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	return 0;
 }
 
-static noinline notrace int
-do_nonp_instr_page_intc_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+static int do_nonp_instr_page_intc_exc(struct kvm_vcpu *vcpu,
+		struct pt_regs *regs)
 {
 	return do_instr_page_exc(vcpu, regs, true /* nonpaging ? */);
 }
 
-static noinline notrace int
-do_instr_page_intc_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+static int do_instr_page_intc_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	return do_instr_page_exc(vcpu, regs, false /* nonpaging ? */);
 }
 
-static noinline notrace int
-instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
-	intc_info_mu_t *intc_info_mu, pt_regs_t *regs, bool async_instr)
+static int instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
+		intc_info_mu_t *intc_info_mu, pt_regs_t *regs, bool async_instr)
 {
 	intc_mu_state_t *mu_state = get_intc_mu_state(vcpu);
 	struct trap_pt_regs *trap = regs->trap;
@@ -652,22 +650,19 @@ instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
 	return kvm_mmu_instr_page_fault(vcpu, address, async_instr, error_code);
 }
 
-static noinline notrace int
-do_instr_page_intc_mu(struct kvm_vcpu *vcpu,
-	intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
+static int do_instr_page_intc_mu(struct kvm_vcpu *vcpu,
+		intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
 	return instr_page_fault_intc_mu(vcpu, intc_info_mu, regs, false);
 }
 
-static noinline notrace int
-do_ainstr_page_intc_mu(struct kvm_vcpu *vcpu,
-	intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
+static int do_ainstr_page_intc_mu(struct kvm_vcpu *vcpu,
+		intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
 	return instr_page_fault_intc_mu(vcpu, intc_info_mu, regs, true);
 }
 
-static noinline notrace int
-do_forced_data_page_intc_mu(struct kvm_vcpu *vcpu,
+static int do_forced_data_page_intc_mu(struct kvm_vcpu *vcpu,
 		intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
 	int event = intc_info_mu->hdr.event_code;
@@ -732,8 +727,7 @@ do_forced_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-static noinline notrace int
-do_forced_gva_data_page_intc_mu(struct kvm_vcpu *vcpu,
+static int do_forced_gva_data_page_intc_mu(struct kvm_vcpu *vcpu,
 		intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
 	int event = intc_info_mu->hdr.event_code;
@@ -778,8 +772,7 @@ do_forced_gva_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-static noinline notrace int
-do_data_page_intc_mu(struct kvm_vcpu *vcpu,
+static int do_data_page_intc_mu(struct kvm_vcpu *vcpu,
 		intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
 	gpa_t gpa;
@@ -817,8 +810,7 @@ do_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-static noinline notrace int
-do_shadow_data_page_intc_mu(struct kvm_vcpu *vcpu,
+static int do_shadow_data_page_intc_mu(struct kvm_vcpu *vcpu,
 		intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
 	gpa_t gpa;
@@ -862,8 +854,7 @@ do_shadow_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-noinline notrace int
-do_nonp_data_page_intc_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+int do_nonp_data_page_intc_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
 	bool nonpaging = !is_paging(vcpu);
@@ -910,11 +901,11 @@ static int do_tlb_line_flush_intc_mu(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-noinline notrace int
-do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
 	unsigned long flags;
+	bool was_trap_wish = false;
 
 	if (DEBUG_LWISH_TIRs_MODE &&
 			trap->nr_TIRs >= 0 && !AW(trap->TIRs[0].TIR_hi)) {
@@ -929,9 +920,22 @@ do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 		vcpu->arch.vm_exit_wish = false;
 		return 1;
 	}
+
+	if (vcpu->arch.trap_wish) {
+		DebugVMEX("intercept to inject VM traps\n");
+		KVM_WARN_ON(kvm_is_empty_vcpu_intc_TIRs(vcpu));
+		regs->traps_to_guest |= vcpu->arch.trap_mask_wish;
+		vcpu->arch.trap_wish = false;
+		vcpu->arch.trap_mask_wish = 0;
+		was_trap_wish = true;
+	}
+
 	if (!vcpu->arch.virq_wish) {
-		pr_err("%s(): unknown reason for HRET last wish intercept\n",
-			__func__);
+		if (!was_trap_wish) {
+			pr_err("%s(): unknown reason for HRET last wish "
+				"intercept\n",
+				__func__);
+		}
 		return 0;
 	}
 
@@ -955,7 +959,6 @@ do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 		}
 		vcpu->arch.virq_wish = false;
 	} else if (vcpu->arch.is_pv) {
-		/* the case is not yet implemented */
 		kvm_inject_interrupt(vcpu, regs);
 		vcpu->arch.virq_wish = false;
 	} else {
@@ -1524,9 +1527,8 @@ static int do_read_mmu_intc_mu(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-static noinline notrace int
-handle_exc_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs,
-				unsigned long exc_mask)
+static int handle_exc_interrupt_intc(struct kvm_vcpu *vcpu,
+		struct pt_regs *regs, unsigned long exc_mask)
 {
 	struct trap_pt_regs *trap = regs->trap;
 	unsigned long exc;
@@ -1551,14 +1553,12 @@ handle_exc_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	return 0;
 }
 
-static noinline notrace int
-do_exc_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+static int do_exc_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	return handle_exc_interrupt_intc(vcpu, regs, exc_interrupt_mask);
 }
 
-static noinline notrace int
-do_exc_nm_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
+static int do_exc_nm_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 {
 	return handle_exc_interrupt_intc(vcpu, regs, exc_nm_interrupt_mask);
 }
@@ -1602,6 +1602,36 @@ e2k_idr_t kvm_vcpu_get_idr(struct kvm_vcpu *vcpu)
 	return idr;
 }
 
+static void print_intc_ctxt(struct kvm_vcpu *vcpu)
+{
+	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
+	int cu_num = intc_ctxt->cu_num, mu_num = intc_ctxt->mu_num;
+	intc_info_mu_t *mu = intc_ctxt->mu;
+	int evn_no;
+
+	pr_alert("Dumping intercept context on CPU %d VCPU %d. cu_num %d, mu_num %d\n",
+		vcpu->cpu, vcpu->vcpu_id, cu_num, mu_num);
+	pr_alert("CU header: lo 0x%llx; hi 0x%llx\n",
+		AW(intc_ctxt->cu.header.lo), AW(intc_ctxt->cu.header.hi));
+	pr_alert("CU entry0: lo 0x%llx; hi 0x%llx\n",
+		AW(intc_ctxt->cu.entry[0].lo), intc_ctxt->cu.entry[0].hi);
+	pr_alert("CU entry1: lo 0x%llx; hi 0x%llx\n",
+		AW(intc_ctxt->cu.entry[1].lo), intc_ctxt->cu.entry[1].hi);
+
+	for (evn_no = 0; evn_no < mu_num; evn_no++) {
+		intc_info_mu_t *mu_event = &mu[evn_no];
+		int event = mu_event->hdr.event_code;
+
+		pr_alert("MU entry %d: code %d %s\n", evn_no, event, kvm_get_mu_event_name(event));
+		pr_alert("hdr 0x%llx gpa 0x%lx gva 0x%lx data 0x%lx\n",
+			mu_event->hdr.word, mu_event->gpa, mu_event->gva, mu_event->data);
+		pr_alert("condition 0x%llx data_ext 0x%lx mask 0x%llx\n",
+			mu_event->condition.word, mu_event->data_ext, mu_event->mask.word);
+	}
+
+	print_all_TIRs(intc_ctxt->TIRs, intc_ctxt->nr_TIRs);
+}
+
 static int do_read_cu_idr(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
 {
 	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
@@ -1610,8 +1640,8 @@ static int do_read_cu_idr(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
 
 	rr_event = find_cu_info_entry(vcpu, cu, ICE_READ_CU, IDR_cu_reg_no);
 	if (rr_event == NULL) {
-		pr_err("%s(): could not find INTC_INFO_CU event with IDR\n",
-			__func__);
+		pr_err("%s(): could not find INTC_INFO_CU event with IDR\n", __func__);
+		print_intc_ctxt(vcpu);
 		KVM_BUG_ON(true);
 		return -EINVAL;
 	}
@@ -2784,7 +2814,8 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	memcpy(sbbp, intc_ctxt->sbbp, sizeof(sbbp));
 	trap.sbbp = sbbp;
 
-	regs.flags = 0;
+	AW(regs.flags) = 0;
+	regs.flags.kvm_hw_intercept = 1;
 
 	regs.trap = &trap;
 	regs.aau_context = &vcpu->sw_ctxt.aau_context;
@@ -2814,6 +2845,8 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	/* This makes sure that user_mode(regs) returns true (thus we
 	 * cannot put here real guest SBR since it could be >PAGE_OFFSET). */
 	regs.stacks.top = 0;
+	AW(regs.stacks.usd_lo) = 0;
+	AW(regs.stacks.usd_hi) = 0;
 
 	/* CR registers are used e.g. in perf to get user IP */
 	frame = (e2k_mem_crs_t *) (AS(hw_ctxt->bu_pcsp_lo).base +
@@ -2822,11 +2855,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	regs.crs = *frame;
 	guest_ip = AS(regs.crs.cr0_hi).ip << 3;
 
-	/* Guest local data stack state registers should be corrected
-	 * because of USD.base & USD.size were calculated by intercept
-	 * hardware based on cr1.hi.ussz of hypervisor, not guest */
-	kvm_correct_guest_data_stack_regs(&vcpu->sw_ctxt, regs.crs.cr1_hi);
-
 	/* Intercepted data page, read guest's trap cellar */
 	if (cu->header.lo.exc_data_page)
 		NATIVE_SAVE_TRAP_CELLAR(&regs, &trap);
@@ -2834,6 +2862,12 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	KVM_BUG_ON(current_thread_info()->pt_regs == NULL);
 	regs.next = current_thread_info()->pt_regs;
 	current_thread_info()->pt_regs = &regs;
+
+	/* Trap for bug 130291 */
+	if (unlikely(cu->header.lo.rr_idr && !hw_ctxt->virt_ctrl_cu.VIRT_CTRL_CU_rr_idr)) {
+		print_intc_ctxt(arch_to_vcpu(vcpu));
+		KVM_BUG_ON(true);
+	}
 
 	/* Try more lightweight tracepoints first */
 	if (mu_num == 1 && cu_num == -1)
@@ -2861,6 +2895,10 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 		trace_intc_aau(&vcpu->sw_ctxt.aau_context,
 			intc_ctxt->lsr, intc_ctxt->lsr1,
 			intc_ctxt->ilcr, intc_ctxt->ilcr1);
+
+	trace_intc_clw(vcpu->sw_ctxt.us_cl_d, vcpu->sw_ctxt.us_cl_b, vcpu->sw_ctxt.us_cl_up,
+		vcpu->sw_ctxt.us_cl_m0, vcpu->sw_ctxt.us_cl_m1,
+		vcpu->sw_ctxt.us_cl_m2, vcpu->sw_ctxt.us_cl_m3);
 
 	intc_ctxt->exc_to_create = 0;
 	intc_ctxt->exc_to_delete = 0;

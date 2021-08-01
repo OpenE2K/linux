@@ -143,39 +143,29 @@
 }
 .endm	/* GOTO_GUEST_KERNEL_TTABLE */
 
+# ifdef CONFIG_PARAVIRT_GUEST
 /*
  * goto guest kernel system call table entry, if system call is from guest user
  * rti: register of current_thread_info()
  * rtmp0 rtmp1 rtmp2: temporary registers
  * ptmp0 ptmp1: temporary predicates
  */
-.macro	GOTO_PV_VCPU_KERNEL_TTABLE entry_num rti rtmp0 rtmp1 rtmp2 \
-						ptmp0 ptmp1
+.macro	GOTO_PV_VCPU_KERNEL_TTABLE rti rtmp0 rtmp1 rtmp2 ptmp1
 	/* thread_info_t *ti = %dr7				*/
 	/* e2k_cr1_lo_t cr1_lo = NATIVE_READ_CR1_LO_REG();	*/
 	/*							*/
-	/* if ((ti->flags & TIF_HOST_AT_VCPU_MODE)) {		*/
 	/*	if (ti->flags & _TIF_PARAVIRT_GUEST) {		*/
 	/*		DO_SWITCH_TO_KERNEL_IMAGE_PGD()		*/
 	/*	}						*/
-	/*	goto goto_guest_kernel_ttable_C(		*/
-	/*			sys_num << 32 | entry,		*/
-	/*			arg1, arg2, arg3, arg4,		*/
-	/*			arg5, arg6);			*/
-	/* }							*/
 
 {
 	ldd	[\rti + TI_FLAGS], \rtmp0;
 	sxt	2, %r0, %dr0;
 }
 {
-	cmpandedb \rtmp0, _TIF_HOST_AT_VCPU_MODE, \ptmp0;
 	cmpandedb \rtmp0, _TIF_PARAVIRT_GUEST, \ptmp1;
 }
 {
-	pass	\ptmp0, @p0;
-	landp	~@p0, ~@p0, @p4;
-	pass	@p4, \ptmp0;
 	pass	\ptmp1, @p2;
 	landp	~@p2, ~@p2, @p5;
 	pass	@p5, \ptmp1;
@@ -185,6 +175,10 @@
 	/* rtmp0, rtmp1, rtmp2: temporary registers */
 	DO_SWITCH_TO_KERNEL_IMAGE_PGD \rti, \ptmp1, \rtmp0, \rtmp1, \rtmp2
 .endm	/* GOTO_GUEST_KERNEL_TTABLE */
+# else
+.macro	GOTO_PV_VCPU_KERNEL_TTABLE rti rtmp0 rtmp1 rtmp2 ptmp1
+.endm
+# endif /* CONFIG_PARAVIRT_GUEST */
 
 /*
  * goto guest kernel fast system call table entry, if system call is
@@ -329,64 +323,6 @@
 #ifdef	CONFIG_KVM_HOST_MODE
 /* it is host kernel with virtualization support */
 /* or paravirtualized host and guest kernel */
-.macro	NEED_SAVE_CUR_AND_VCPU_STATE_GREGS drti, predV5, \
-					drtmp0, drtmp1, predtmp, \
-					predCUR, predVCPU, predEXTk
-	/*
-	 * drti - pointer to thread_info
-	 * predV5 - ISET is V5
-	 * predCUR - is now set to true (trap from user) and can be updated
-	 * to does not save kernel global regs and set current
-	 * Trap at host mode and host kernel currents and other global registers
-	 * (GCURTI & GCURTASK & CPU_ID & CPU_OFF)
-	 * should not be saved to not invalidate guest kernel or user state of
-	 * global registers, which were or will be saved at thread info
-	 * %predVCPU - save VCPU state pointer regs
-	 * predEXTk - need save kernel (predCUR) & need save extention (!predV5)
-	 *
-	 *	predCUR = test_thread_flag(TIF_HOST_AT_VCPU_MODE) &&
-	 *		!test_thread_flag(TIF_LIGHT_HYPERCALL) ||
-	 *		!test_thread_flag(TIF_HOST_AT_VCPU_MODE) &&
-	 *			(cr0_hi.CR0_hi_IP >= NATIVE_TASK_SIZE)
-	 *	predVCPU = predCUR;
-	 *	predEXTk = predCUR & !predV5
-	 */
-	{
-	rrd	%cr0.hi, \drtmp0;		/* %drtmp0: cr0_hi.IP */
-	ldd	[\drti + TI_FLAGS], \drtmp1;	/* %drtmp1: ti->flags */
-	}
-	{
-	cmpbdb	\drtmp0, NATIVE_TASK_SIZE, \predtmp;
-	cmpandedb \drtmp1, _TIF_LIGHT_HYPERCALL, \predCUR;
-	cmpandedb \drtmp1, _TIF_HOST_AT_VCPU_MODE, \predVCPU;
-	}
-	{
-	nop	1;
-	pass	\predtmp, @p2;
-	pass	\predCUR, @p0;
-	pass	\predVCPU, @p1;
-	landp	@p0, ~@p1, @p4;
-	pass	@p4, \predCUR;
-	}
-	{
-	nop	1;
-	pass	\predVCPU, @p0;
-	pass	\predCUR, @p2;
-	pass	\predtmp, @p1;
-	landp	@p0, ~@p1, @p4;
-	landp	~@p2, ~@p4, @p5;
-	landp	~@p2, ~@p4, @p6;
-	pass	@p5, \predCUR;
-	pass	@p6, \predVCPU;
-	}
-	{
-	pass	\predV5, @p0;
-	pass	\predCUR, @p1;
-	landp	~@p0, @p1, @p4;
-	pass	@p4, \predEXTk;
-	}
-.endm	/* NEED_SAVE_CUR_AND_VCPU_STATE_GREGS */
-
 .macro	DO_SAVE_HOST_GREGS_V2 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
 				drti, predSAVE, drtmp, rtmp0, rtmp1
 	/* drtmp: thread_info->h_gregs.g */
@@ -439,27 +375,6 @@
 #include <asm/kvm/guest/trap_table.S.h>
 #else	/* ! CONFIG_KVM_HOST_MODE && ! CONFIG_KVM_GUEST_KERNEL */
 /* It is native host kernel without any virtualization */
-.macro	NEED_SAVE_CUR_AND_VCPU_STATE_GREGS drti, predV5, \
-					drtmp0, drtmp1, predtmp, \
-					predCUR, predVCPU, predEXTk
-	/*
-	 * drti - pointer to thread_info (unused)
-	 * predV5 - ISET is V5
-	 * predCUR - save kernel global regs and set current (already
-	 * calculated, don't update)
-	 * %predVCPU - set to false (none any VCPUs)
-	 * predEXTk - need save kernel (predCUR) & need save extention (!predV5)
-	 */
-	{
-	pass	\predV5, @p0;
-	pass	\predCUR, @p1;
-	landp	~@p0, @p1, @p4;
-	landp	~@p1, @p1, @p5;
-	pass	@p4, \predEXTk;
-	pass	@p5, \predVCPU;
-	}
-.endm	/* NEED_SAVE_CUR_AND_VCPU_STATE_GREGS */
-
 .macro	SAVE_HOST_GREGS_TO_VIRT_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
 	/* not used */
 .endm	/* SAVE_VCPU_STATE_GREGS */

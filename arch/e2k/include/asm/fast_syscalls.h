@@ -203,15 +203,23 @@ DO_FAST_CLOCK_GETTIME(const clockid_t which_clock, struct timespec *tp)
 
 /* trap table entry is called as function (it is closer to hardware start) */
 typedef long (*ttable_entry_args3)(int sys_num, u64 arg1, u64 arg2);
+typedef long (*ttable_entry_args4)(int sys_num, u64 arg1, u64 arg2, u64 arg3);
 #define	ttable_entry3_args3(sys_num, arg1, arg2)	\
 		((ttable_entry_args3)(get_ttable_entry3))(sys_num, arg1, arg2)
+#define	ttable_entry3_args4(sys_num, arg1, arg2)	\
+		((ttable_entry_args4)(get_ttable_entry3))(sys_num, arg1, arg2, arg3)
 
 /* trap table entry started by direct branch (it is closer to fast system */
 /* call wirthout switch and use user local data stack */
 #define	goto_ttable_entry_args3(entry_label, sys_num, arg1, arg2)	\
 		E2K_GOTO_ARG3(entry_label, sys_num, arg1, arg2)
+#define	goto_ttable_entry_args4(entry_label, sys_num, arg1, arg2, arg3)	\
+		E2K_GOTO_ARG4(entry_label, sys_num, arg1, arg2, arg3)
 #define	goto_ttable_entry3_args3(sys_num, arg1, arg2)	\
 		goto_ttable_entry_args3(ttable_entry3, sys_num, arg1, arg2)
+#define	goto_ttable_entry3_args4(sys_num, arg1, arg2, arg3)	\
+		goto_ttable_entry_args4(ttable_entry3, sys_num, arg1, arg2, arg3)
+
 
 #define	ttable_entry_clock_gettime(which, time)		\
 /* ibranch */	goto_ttable_entry3_args3(__NR_clock_gettime, which, time)
@@ -219,6 +227,12 @@ typedef long (*ttable_entry_args3)(int sys_num, u64 arg1, u64 arg2);
 #define	ttable_entry_gettimeofday(tv, tz)		\
 /* ibranch */	goto_ttable_entry3_args3(__NR_gettimeofday, tv, tz)
 /*		ttable_entry3_args3(__NR_gettimeofday, tv, tz) */
+#define	ttable_entry_sigprocmask(how, nset, oset)		\
+/* ibranch */	goto_ttable_entry3_args4(__NR_sigprocmask, how, nset, oset)
+/*		ttable_entry3_args4(__NR_sigprocmask, how, nset, oset) */
+#define	ttable_entry_getcpu(cpup, nodep, unused)		\
+/* ibranch */	goto_ttable_entry3_args4(__NR_getcpu, cpup, nodep, unused)
+/*		ttable_entry3_args4(__NR_getcpu, cpup, nodep, unused) */
 
 static inline int
 FAST_SYS_CLOCK_GETTIME(const clockid_t which_clock, struct timespec __user *tp)
@@ -228,14 +242,19 @@ FAST_SYS_CLOCK_GETTIME(const clockid_t which_clock, struct timespec __user *tp)
 
 	prefetchw(&fsys_data);
 
+#ifdef	CONFIG_KVM_HOST_MODE
+	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
+		ttable_entry_clock_gettime((u64) which_clock, (u64) tp);
+#endif
+
 	tp = (typeof(tp)) ((u64) tp & E2K_VA_MASK);
 	if (unlikely((u64) tp + sizeof(struct timespec) > ti->addr_limit.seg))
 		return -EFAULT;
 
 	r = do_fast_clock_gettime(which_clock, tp);
 	if (unlikely(r))
-/* ibranch */	ttable_entry_clock_gettime((u64) which_clock, (u64) tp);
-/* call		r = ttable_entry_clock_gettime((u64) which_clock, (u64) tp); */
+		ttable_entry_clock_gettime((u64) which_clock, (u64) tp);
+
 	return r;
 }
 
@@ -259,12 +278,20 @@ FAST_SYS_SIGGETMASK(u64 __user *oset, size_t sigsetsize)
 {
 	struct thread_info *const ti = READ_CURRENT_REG();
 	struct task_struct *task = thread_info_task(ti);
+#ifdef	CONFIG_KVM_HOST_MODE
+	bool guest = test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE);
+#endif
 	u64 set;
 
 	set = task->blocked.sig[0];
 
 	if (unlikely(sigsetsize != 8))
 		return -EINVAL;
+
+#ifdef	CONFIG_KVM_HOST_MODE
+	if (unlikely(guest))
+		ttable_entry_sigprocmask((u64) 0, (u64) NULL, (u64) oset);
+#endif
 
 	oset = (typeof(oset)) ((u64) oset & E2K_VA_MASK);
 	if (unlikely((u64) oset + sizeof(sigset_t) > ti->addr_limit.seg))

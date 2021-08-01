@@ -34,6 +34,7 @@
 #include <linux/io-64-nonatomic-lo-hi.h>
 #if defined(CONFIG_MCST) && defined(CONFIG_E2K)
 #include <asm/sic_regs.h>
+#include <asm/epic.h>
 #endif
 #include "ahci.h"
 
@@ -620,8 +621,8 @@ static void ahci_pci_save_initial_config(struct pci_dev *pdev,
 					 struct ahci_host_priv *hpriv)
 {
 #if defined(CONFIG_MCST) && defined(CONFIG_E2K)
-	if (iohub_generation(pdev) == 2 && /* Bug 127617 */
-			pdev->vendor == PCI_VENDOR_ID_MCST &&
+	if (cpu_has_epic() && iohub_generation(pdev) == 2 && /* Bug 127617 */
+			pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
 			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
 		sys_mon_1_t r;
 		int node = dev_to_node(&pdev->dev);
@@ -824,6 +825,28 @@ static int ahci_avn_hardreset(struct ata_link *link, unsigned int *class,
 	return rc;
 }
 
+#ifdef CONFIG_MCST
+void mcst_ahci_port_reset(struct pci_dev *pdev)
+{
+	struct ata_host *host = pci_get_drvdata(pdev);
+
+	/*
+	 * ERR 23 - sata (ahci port reg reset)
+	 */
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
+		int i;
+		for (i = 0; i < host->n_ports; i++) {
+			void __iomem *port_mmio =
+					__ahci_port_base(host, i);
+			u32 tmp = readl(port_mmio + PORT_CMD);
+			/* disable FIS reception */
+			tmp &= ~PORT_CMD_FIS_RX;
+			writel(tmp, port_mmio + PORT_CMD);
+		}
+	}
+}
+#endif
 
 #ifdef CONFIG_PM
 static void ahci_pci_disable_interrupts(struct ata_host *host)
@@ -850,29 +873,6 @@ static int ahci_pci_device_runtime_suspend(struct device *dev)
 	ahci_pci_disable_interrupts(host);
 	return 0;
 }
-
-#ifdef CONFIG_MCST
-void mcst_ahci_port_reset(struct pci_dev *pdev)
-{
-	struct ata_host *host = pci_get_drvdata(pdev);
-
-	/*
-	 * ERR 23 - sata (ahci port reg reset)
-	 */
-	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
-		int i;
-		for (i = 0; i < host->n_ports; i++) {
-			void __iomem *port_mmio =
-					__ahci_port_base(host, i);
-			u32 tmp = readl(port_mmio + PORT_CMD);
-			/* disable FIS reception */
-			tmp &= ~PORT_CMD_FIS_RX;
-			writel(tmp, port_mmio + PORT_CMD);
-		}
-	}
-}
-#endif
 
 static int ahci_pci_device_runtime_resume(struct device *dev)
 {
@@ -1813,10 +1813,14 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 #ifdef CONFIG_MCST
 	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-			pdev->device == PCI_DEVICE_ID_MCST_SATA &&
-			iohub_generation(pdev) == 1 &&
-			iohub_revision(pdev) < 3) {
-		pi.flags |= ATA_FLAG_IOHUB2_REV2;
+			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
+		if (iohub_generation(pdev) == 1 &&
+				iohub_revision(pdev) < 3) {
+			pi.flags |= ATA_FLAG_IOHUB2_REV2;
+		} else if (iohub_generation(pdev) == 2 &&
+				pdev->revision == 2) {
+			pi.flags |= ATA_FLAG_E2C3_REV0;
+		}
 	}
 #endif
 

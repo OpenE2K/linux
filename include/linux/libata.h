@@ -222,7 +222,8 @@ enum {
 	ATA_FLAG_NO_DIPM	= (1 << 23), /* host not happy with DIPM */
 	ATA_FLAG_SAS_HOST	= (1 << 24), /* SAS host */
 #ifdef CONFIG_MCST
-	ATA_FLAG_IOHUB2_REV2            = (1 << 25), /* iohub2 rev2 bugs */
+	ATA_FLAG_IOHUB2_REV2    = (1 << 25), /* iohub2 rev2 bugs */
+	ATA_FLAG_E2C3_REV0      = (1 << 26), /* E2C3 rev0 bugs */
 #endif
 
 	/* bits 24:31 of ap->flags are reserved for LLD specific flags */

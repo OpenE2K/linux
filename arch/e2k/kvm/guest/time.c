@@ -705,8 +705,10 @@ __init void kvm_time_init_clockevents(void)
 	/* Local APIC support on guest is not ready at present time, */
 	/* so temporarly disable APIC timer */
 	disable_apic_timer = true;
+#ifdef CONFIG_EPIC
 	/* Same with CEPIC paravirt model. Do not disable timer for HW EPIC */
 	disable_epic_timer = true;
+#endif
 
 	ret = kvm_early_setup_timer(cpu);
 	if (ret) {

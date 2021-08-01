@@ -131,27 +131,27 @@ do { \
 })
 
 static inline void
-kvm_clear_virt_thread_struct(thread_info_t *thread_info)
+kvm_clear_virt_thread_struct(thread_info_t *ti)
 {
-	thread_info->gpid_nr = -1;	/* cannot inherit, only set by */
-					/* guest/host kernel */
-#ifdef	CONFIG_KVM_HOST_MODE
-	/* clear KVM support fields and flags */
-	if (test_ti_thread_flag(thread_info, TIF_VIRTUALIZED_HOST) ||
-		test_ti_thread_flag(thread_info, TIF_VIRTUALIZED_GUEST))
-		/* It is clone() on host to create guest */
-		/* VCPU or VIRQ VCPU threads */
-		kvm_clear_host_thread_info(thread_info);
-	if (thread_info->gthread_info) {
-		/* It is guest thread: clear from old process */
-		thread_info->gthread_info = NULL;
-		/* kvm_pv_clear_guest_thread_info(thread_info->gthread_info); */
+	if (likely(ti->vcpu == NULL)) {
+		/* it is not creation of host process */
+		/* to support virtualization */
+		return;
 	}
-	/* VCPU host/guest thread flags and VCPU structure cannot inherit */
-	/* only to pass */
-	clear_ti_thread_flag(thread_info, TIF_VIRTUALIZED_HOST);
-	thread_info->vcpu = NULL;
-#endif	/* CONFIG_KVM_HOST_MODE */
+
+	/*
+	 * Host VCPU thread can be only created by user process (for example
+	 * by qemu) and only user process can clone the thread to handle
+	 * some VCPU running exit reasons.
+	 * But the new thread cannot be one more host VCPU thread,
+	 * so clean up all about VCPU
+	 */
+
+	/* VCPU thread should be only at host mode (handle exit reason), */
+	/* not at running VCPU mode */
+	KVM_BUG_ON(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
+
+	ti->gthread_info = NULL;
 }
 
 #if	!defined(CONFIG_PARAVIRT_GUEST) && !defined(CONFIG_KVM_GUEST_KERNEL)
@@ -618,6 +618,14 @@ pv_vcpu_user_hw_stacks_prepare(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 		do_exit(SIGKILL);
 }
 
+/* Same as for native kernel without virtualization support */
+static __always_inline int
+user_hw_stacks_copy(struct e2k_stacks *stacks,
+		pt_regs_t *regs, u64 cur_window_q, bool copy_full)
+{
+	return native_user_hw_stacks_copy(stacks, regs, cur_window_q, copy_full);
+}
+
 static __always_inline void
 host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 		u64 cur_window_q, enum restore_caller from, int syscall)
@@ -635,7 +643,54 @@ host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 	pv_vcpu_user_hw_stacks_prepare(vcpu, regs, cur_window_q, from, syscall);
 }
 
-#define	SAVE_HOST_KERNEL_GREGS_COPY_TO(__k_gregs, __g_gregs)		\
+static __always_inline void
+host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
+{
+	KVM_BUG_ON(!host_test_intc_emul_mode(regs));
+
+	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_ENABLED));
+
+	/* Check for rescheduling first */
+	if (need_resched()) {
+		schedule();
+	}
+
+	if (has_signal) {
+		/*
+		 * This is guest VCPU interception emulation, but
+		 * there is (are) pending signal for host VCPU mode,
+		 * so it need switch to host VCPU mode to handle
+		 * signal and probably to kill VM
+		 */
+		WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_DISABLED));
+		pv_vcpu_switch_to_host_from_intc(current_thread_info());
+	} else if (likely(guest_trap_pending(current_thread_info()))) {
+		/*
+		 * This is guest VCPU interception emulation and
+		 * there is (are) the guest trap(s) to handle
+		 */
+		insert_pv_vcpu_traps(current_thread_info(), regs);
+	} else {
+		/*
+		 * This is just a return from VCPU interception
+		 * emulation mode to the continue execution
+		 * of the guest paravirtualized VCPU.
+		 * In such case:
+		 *	- the currents point to the host qemu-VCPU
+		 *	  process structures;
+		 *	- the regs points to the host guest-VCPU
+		 *	  process structure.
+		 * So nothing works based on these non-interconnected
+		 * structures cannot be running
+		 */
+	}
+
+	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_DISABLED));
+}
+
+#ifdef	CONFIG_SMP
+#define	SAVE_GUEST_KERNEL_GREGS_COPY_TO(__k_gregs, __g_gregs,		\
+					only_kernel)			\
 ({									\
 	kernel_gregs_t *kg = (__k_gregs);				\
 	kernel_gregs_t *gg = (__g_gregs);				\
@@ -643,19 +698,45 @@ host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 	unsigned long cpu_id__;						\
 	unsigned long cpu_off__;					\
 									\
+	if (likely(!(only_kernel))) {					\
+		unsigned long vs__;					\
+									\
+		HOST_ONLY_SAVE_VCPU_STATE_GREG(vs__);			\
+		HOST_ONLY_COPY_TO_VCPU_STATE_GREG(gg, vs__);		\
+	}								\
 	ONLY_COPY_FROM_KERNEL_GREGS(kg, task__, cpu_id__, cpu_off__);	\
 	ONLY_COPY_TO_KERNEL_GREGS(gg, task__, cpu_id__, cpu_off__);	\
 })
+#else	/* ! CONFIG_SMP */
+#define	SAVE_GUEST_KERNEL_GREGS_COPY_TO(__k_gregs, __g_gregs,		\
+					only_kernel)			\
+({									\
+	kernel_gregs_t *kg = (__k_gregs);				\
+	kernel_gregs_t *gg = (__g_gregs);				\
+	unsigned long task__;						\
+									\
+	if (likely(!(only_kernel))) {					\
+		unsigned long vs__;					\
+									\
+		HOST_ONLY_SAVE_VCPU_STATE_GREG(vs__);			\
+		HOST_ONLY_COPY_TO_VCPU_STATE_GREG(gg, vs__);		\
+	}								\
+	ONLY_COPY_FROM_KERNEL_CURRENT_GREGS(kg, task__);		\
+	ONLY_COPY_TO_KERNEL_CURRENT_GREGS(gg, task__);			\
+})
+#endif	/* CONFIG_SMP */
 
-#define	SAVE_HOST_KERNEL_GREGS_COPY(__ti, __gti)			\
+#define	SAVE_GUEST_KERNEL_GREGS_COPY(__ti, __gti)			\
 ({									\
 	kernel_gregs_t *k_gregs = &(__ti)->k_gregs_light;		\
-	kernel_gregs_t *g_gregs = &(__gti)->g_gregs;			\
+	kernel_gregs_t *g_gregs = &(__gti)->gk_gregs;			\
 									\
-	SAVE_HOST_KERNEL_GREGS_COPY_TO(k_gregs, g_gregs);		\
+	SAVE_GUEST_KERNEL_GREGS_COPY_TO(k_gregs, g_gregs, false);	\
 })
 
-#define	RESTORE_HOST_KERNEL_GREGS_COPY_FROM(__k_gregs, __g_gregs)	\
+#ifdef	CONFIG_SMP
+#define	RESTORE_GUEST_KERNEL_GREGS_COPY_FROM(__k_gregs, __g_gregs,	\
+						only_kernel)		\
 ({									\
 	kernel_gregs_t *kg = (__k_gregs);				\
 	kernel_gregs_t *gg = (__g_gregs);				\
@@ -663,16 +744,40 @@ host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 	unsigned long cpu_id__;						\
 	unsigned long cpu_off__;					\
 									\
+	if (likely(!(only_kernel))) {					\
+		unsigned long vs__;					\
+									\
+		HOST_ONLY_COPY_FROM_VCPU_STATE_GREG(k_gregs, vs__);	\
+		HOST_ONLY_RESTORE_VCPU_STATE_GREG(vs__);		\
+	}								\
 	ONLY_COPY_FROM_KERNEL_GREGS(gg, task__, cpu_id__, cpu_off__);	\
 	ONLY_COPY_TO_KERNEL_GREGS(kg, task__, cpu_id__, cpu_off__);	\
 })
+#else	/* ! CONFIG_SMP */
+#define	RESTORE_GUEST_KERNEL_GREGS_COPY_FROM(__k_gregs, __g_gregs,	\
+						only_kernel)		\
+({									\
+	kernel_gregs_t *kg = (__k_gregs);				\
+	kernel_gregs_t *gg = (__g_gregs);				\
+	unsigned long task__;						\
+									\
+	if (likely(!(only_kernel))) {					\
+		unsigned long vs__;					\
+									\
+		HOST_ONLY_COPY_FROM_VCPU_STATE_GREG(k_gregs, vs__);	\
+		HOST_ONLY_RESTORE_VCPU_STATE_GREG(vs__);		\
+	}								\
+	ONLY_COPY_FROM_KERNEL_CURRENT_GREGS(gg, task__);		\
+	ONLY_COPY_TO_KERNEL_CURRENT_GREGS(kg, task__);			\
+})
+#endif	/* CONFIG_SMP */
 
-#define	RESTORE_HOST_KERNEL_GREGS_COPY(__ti, __gti, __vcpu)		\
+#define	RESTORE_GUEST_KERNEL_GREGS_COPY(__ti, __gti, __vcpu)		\
 ({									\
 	kernel_gregs_t *k_gregs = &(__ti)->k_gregs;			\
-	kernel_gregs_t *g_gregs = &(__gti)->g_gregs;			\
+	kernel_gregs_t *g_gregs = &(__gti)->gu_gregs;			\
 									\
-	RESTORE_HOST_KERNEL_GREGS_COPY_FROM(k_gregs, g_gregs);		\
+	RESTORE_GUEST_KERNEL_GREGS_COPY_FROM(k_gregs, g_gregs, true);	\
 	INIT_HOST_VCPU_STATE_GREG_COPY(__ti, __vcpu);			\
 })
 

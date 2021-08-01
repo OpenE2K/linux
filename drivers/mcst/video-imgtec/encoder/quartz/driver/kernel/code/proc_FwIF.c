@@ -1245,7 +1245,7 @@ static IMG_RESULT ltp_selectFirmwareBuild(VXE_KM_FW_SOFT_IMAGE* psFWSoftImage, V
 		return IMG_ERROR_COULD_NOT_OBTAIN_RESOURCE;
 	}
 
-	PRINT("\nUsing firmware: %s with %i pipes, hwconfig=%i (text size=%i, data size=%i) for requested codec: '%s' - RC mode '%s'\n\n",
+	DEBUG_PRINT("\nUsing firmware: %s with %i pipes, hwconfig=%i (text size=%i, data size=%i) for requested codec: '%s' - RC mode '%s'\n\n",
 		psSelectedBuild->sFormat, psSelectedBuild->ui32Pipes, psSelectedBuild->ui32HwConfig, psSelectedBuild->ui32TextSize, psSelectedBuild->ui32DataSize,
 		g_asLookupTableCodecToMask[eCodec].pszFormat, g_asLookupTableCodecToMask[eCodec].pszRCModes);
 	
@@ -2315,7 +2315,7 @@ IMG_RESULT LTP_LoadFirmware(IMG_HANDLE hDevContext, VXE_KM_FW_SOFT_IMAGE * psFWS
 			return eRet;
 		}
 
-		PRINT("PC_START_ADDRESS = 0x%08X\n", ui32PCReg);
+		DEBUG_PRINT("PC_START_ADDRESS = 0x%08X\n", ui32PCReg);
 		if (ui32PCReg != ui32PCCheckValue)
 		{
 			IMG_ASSERT(ui32PCReg == ui32PCCheckValue);

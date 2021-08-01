@@ -2,6 +2,7 @@
 #define _ASM_E2K_PERF_EVENT_H
 
 #include <linux/percpu.h>
+#include <asm/process.h>
 #include <asm/regs_state.h>
 
 static inline void set_perf_event_pending(void) {}

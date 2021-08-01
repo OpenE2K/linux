@@ -563,6 +563,8 @@ return_pv_vcpu_inject(inject_caller_t from)
 	}
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 
+	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_trap);
+
 	context = get_signal_stack();
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
@@ -574,12 +576,22 @@ return_pv_vcpu_inject(inject_caller_t from)
 		do_exit(SIGKILL);
 	}
 
-	if (unlikely(!vcpu_ctxt.in_sig_handler)) {
+	if (likely(!vcpu_ctxt.in_sig_handler)) {
 		KVM_BUG_ON(kvm_is_guest_migrated_to_other_vcpu(ti, vcpu));
 	} else {
 		/* return from trampoline was from guest user signal handler, */
 		/* so the guest global registers contain user values and */
 		/* migration checker can not be running here */
+
+		ret = __copy_from_user_with_tags(&regs, &context->regs,
+						 sizeof(regs));
+		if (ret) {
+			user_exit();
+			do_exit(SIGKILL);
+		}
+		insert_pv_vcpu_sigreturn(vcpu, &vcpu_ctxt, &regs);
+		/* should not be here */
+		KVM_BUG_ON(true);
 	}
 
 	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
@@ -632,7 +644,7 @@ return_pv_vcpu_inject(inject_caller_t from)
 			/* registers state, so update the registers on host */
 			restore_guest_trap_regs(vcpu, &regs);
 		} else {
-			/* clear upadting flags for trap on guest kernel */
+			/* clear updating flags for trap on guest kernel */
 			kvm_reset_guest_vcpu_regs_status(vcpu);
 		}
 	} else {
@@ -707,7 +719,7 @@ return_pv_vcpu_inject(inject_caller_t from)
 		update_pv_vcpu_local_glob_regs(vcpu, &l_gregs);
 	}
 	if (!gti->task_is_binco) {
-		restore_local_glob_regs(&l_gregs);
+		restore_local_glob_regs(&l_gregs, false);
 		if (!regs.is_guest_user &&
 				kvm_is_guest_migrated_to_other_vcpu(ti, vcpu)) {
 			u64 old_task, new_task;
@@ -719,7 +731,7 @@ return_pv_vcpu_inject(inject_caller_t from)
 			 */
 			ONLY_COPY_FROM_KERNEL_CURRENT_GREGS(&ti->k_gregs,
 							    old_task);
-			RESTORE_HOST_KERNEL_GREGS_COPY(ti, gti, vcpu);
+			RESTORE_GUEST_KERNEL_GREGS_COPY(ti, gti, vcpu);
 			ONLY_COPY_FROM_KERNEL_CURRENT_GREGS(&ti->k_gregs,
 							    new_task);
 			KVM_BUG_ON(old_task != new_task);
@@ -742,7 +754,25 @@ return_pv_vcpu_inject(inject_caller_t from)
 	} else {
 		COPY_U_HW_STACKS_TO_STACKS(&regs.g_stacks, &cur_g_stacks);
 		if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
-			finish_syscall(&regs, FROM_PV_VCPU_SYSCALL, true);
+			bool restart_needed = false;
+
+			switch (regs.sys_rval) {
+			case -ERESTART_RESTARTBLOCK:
+			case -ERESTARTNOHAND:
+				regs.sys_rval = -EINTR;
+				break;
+			case -ERESTARTSYS:
+				if (!(context->sigact.sa.sa_flags & SA_RESTART)) {
+					regs.sys_rval = -EINTR;
+					break;
+				}
+			/* fallthrough */
+			case -ERESTARTNOINTR:
+				restart_needed = true;
+				break;
+			}
+
+			finish_syscall(&regs, FROM_PV_VCPU_SYSCALL, !restart_needed);
 		} else if (from == FROM_PV_VCPU_TRAP_INJECT) {
 			finish_user_trap_handler(&regs,
 						 FROM_RETURN_PV_VCPU_TRAP);

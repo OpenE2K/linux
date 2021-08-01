@@ -2,6 +2,7 @@
  * mxgbe_debudfs.c - MXGBE module device driver
  *
  * DEBUGFS Driver Part
+ * Usage: mount -t debugfs none /sys/kernel/debug
  *
  * /sys/kernel/debug/mxgbe/<pcidev>/REG_CNT  - RO - read TX/RX_CNT
  * /sys/kernel/debug/mxgbe/<pcidev>/REG_I2C  - RO - read MAC & SFP
@@ -443,7 +444,69 @@ const char *mxgbe_dbg_reg_name_misc[25] = {
 	"MDIO_DATA: data from PHY (def: -)",
 };
 
+#define PMA_and_PMD_MMD	(0x1 << 16)
+#define PCS_MMD		(0x3 << 16)
+#define AN_MMD		(0x7 << 16)
+#define VS_MMD1		(0x1e << 16)
+#define VS_MII_MMD	(0x1f << 16)
+
+#define SR_XS_PCS_CTRL1		(0x0000 | PCS_MMD)
+#define SR_XS_PCS_DEV_ID1	(0x0002 | PCS_MMD)
+#define SR_XS_PCS_DEV_ID2	(0x0003 | PCS_MMD)
+#define SR_XS_PCS_CTRL2		(0x0007 | PCS_MMD)
+#define VR_XS_PCS_DIG_CTRL1	(0x8000 | PCS_MMD)
+
+#define SR_MII_CTRL		(0x0000 | VS_MII_MMD)
+#define VR_MII_AN_CTRL		(0x8001 | VS_MII_MMD)
+#define SR_MII_AN_ADV		(0x0004 | VS_MII_MMD)
+#define VR_MII_DIG_CTRL1	(0x8000 | VS_MII_MMD)
+#define VR_MII_AN_INTR_STS	(0x8002 | VS_MII_MMD)
+#define VR_MII_LINK_TIMER_CTRL	(0x800a | VS_MII_MMD)
+
+#define SR_VSMMD_CTRL		(0x0009 | VS_MMD1)
+
+#define VR_AN_INTR		(0x8002 | AN_MMD)
+#define SR_AN_CTRL		(0x0000 | AN_MMD)
+#define SR_AN_LP_ABL1		(0x0013 | AN_MMD)
+#define SR_AN_LP_ABL2		(0x0014 | AN_MMD)
+#define SR_AN_LP_ABL3		(0x0015 | AN_MMD)
+#define SR_AN_XNP_TX1		(0x0016 | AN_MMD)
+#define SR_AN_XNP_TX2		(0x0017 | AN_MMD)
+#define SR_AN_XNP_TX3		(0x0018 | AN_MMD)
+
+#define SR_PMA_KR_PMD_CTRL	(0x0096 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL	(0x8070 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0	(0x8071 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLA_CTRL1		(0x8072 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2	(0x8073 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0	(0x8074 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLB_CTRL1		(0x8075 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2	(0x8076 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLA_CTRL3		(0x8077 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLB_CTRL3		(0x8078 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1	(0x8031 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2	(0x8032 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL	(0x8033 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL	(0x8034 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0	(0x8036 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1	(0x8037 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2	(0x8052 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3	(0x8053 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL	(0x8054 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL	(0x8056 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL	(0x8057 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0		(0x8058 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4	(0x805C | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL	(0x805D | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0	(0x8090 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL	(0x8091 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0	(0x8092 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_VCO_CAL_REF0		(0x8096 | PMA_and_PMD_MMD)
+#define SR_XS_PCS_KR_STS2	 (0x0021 | PCS_MMD)
+#define VR_XS_PCS_DIG_STS	 (0x8010 | PCS_MMD)
+
 /* PHY */
+#if 0 /* old ext phy */
 const u_int32_t mxgbe_dbg_reg_id_phy[12] = {
 	/* Global */
 	0x1E0000,
@@ -461,7 +524,61 @@ const u_int32_t mxgbe_dbg_reg_id_phy[12] = {
 	0x010007,
 	0x010008,
 	0x01000A,
+#else
+const u_int32_t mxgbe_dbg_reg_id_phy[50] = {
+	SR_XS_PCS_CTRL1,
+	SR_XS_PCS_DEV_ID1,
+	SR_XS_PCS_DEV_ID2,
+	SR_XS_PCS_CTRL2,
+	VR_XS_PCS_DIG_CTRL1,
+	SR_MII_CTRL,
+	VR_MII_AN_CTRL,
+	SR_MII_AN_ADV,
+	VR_MII_DIG_CTRL1,
+	VR_MII_AN_INTR_STS,
+	VR_MII_LINK_TIMER_CTRL,
+	SR_VSMMD_CTRL,
+	VR_AN_INTR,
+	SR_AN_CTRL,
+	SR_AN_LP_ABL1,
+	SR_AN_LP_ABL2,
+	SR_AN_LP_ABL3,
+	SR_AN_XNP_TX1,
+	SR_AN_XNP_TX2,
+	SR_AN_XNP_TX3,
+	SR_PMA_KR_PMD_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0,
+	VR_XS_PMA_Gen5_12G_MPLLA_CTRL1,
+	VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2,
+	VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0,
+	VR_XS_PMA_Gen5_12G_MPLLB_CTRL1,
+	VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2,
+	VR_XS_PMA_Gen5_12G_MPLLA_CTRL3,
+	VR_XS_PMA_Gen5_12G_MPLLB_CTRL3,
+	VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1,
+	VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2,
+	VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0,
+	VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1,
+	VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2,
+	VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3,
+	VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL,
+	VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0,
+	VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4,
+	VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0,
+	VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
+	VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,
+	VR_XS_PMA_Gen5_12G_VCO_CAL_REF0,
+	SR_XS_PCS_KR_STS2,
+	VR_XS_PCS_DIG_STS,
+#endif
 };
+#if 0 /* old ext phy */
 const char *mxgbe_dbg_reg_name_phy[12] = {
 	/* Global */
 	"Device ID (def: 0x8488)",
@@ -479,6 +596,59 @@ const char *mxgbe_dbg_reg_name_phy[12] = {
 	"PMA/PMD Control 2 (def: 0x0007)",
 	"PMA/PMD Status 2 (def: 0xB1EF)",
 	"PMA/PMD Receive SigDet (def: 0x0000)",
+#else
+const char *mxgbe_dbg_reg_name_phy[50] = {
+	"SR_XS_PCS_CTRL1",
+	"define SR_XS_PCS_DEV_ID1",
+	"define SR_XS_PCS_DEV_ID2",
+	"SR_XS_PCS_CTRL2",
+	"VR_XS_PCS_DIG_CTRL1",
+	"SR_MII_CTRL",
+	"VR_MII_AN_CTRL",
+	"SR_MII_AN_ADV",
+	"VR_MII_DIG_CTRL1",
+	"VR_MII_AN_INTR_STS",
+	"VR_MII_LINK_TIMER_CTRL",
+	"SR_VSMMD_CTRL",
+	"VR_AN_INTR",
+	"SR_AN_CTRL",
+	"SR_AN_LP_ABL1",
+	"SR_AN_LP_ABL2",
+	"SR_AN_LP_ABL3",
+	"SR_AN_XNP_TX1",
+	"SR_AN_XNP_TX2",
+	"SR_AN_XNP_TX3",
+	"SR_PMA_KR_PMD_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0",
+	"VR_XS_PMA_Gen5_12G_MPLLA_CTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0",
+	"VR_XS_PMA_Gen5_12G_MPLLB_CTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2",
+	"VR_XS_PMA_Gen5_12G_MPLLA_CTRL3",
+	"VR_XS_PMA_Gen5_12G_MPLLB_CTRL3",
+	"VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2",
+	"VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0",
+	"VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1",
+	"VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2",
+	"VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3",
+	"VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL",
+	"VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0",
+	"VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4",
+	"VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0",
+	"VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL",
+	"VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0",
+	"VR_XS_PMA_Gen5_12G_VCO_CAL_REF0",
+	"SR_XS_PCS_KR_STS2",
+	"VR_XS_PCS_DIG_STS",
+#endif
 };
 
 /* CNT */
@@ -500,85 +670,6 @@ const char *mxgbe_dbg_reg_name_cnt[7] = {
 	"RX_DROP_CNT: RX packets dropped/overbuf",
 	"RX_ERR_CNT: RX packets errors",
 };
-
-
-/**
- ******************************************************************************
- * HW DEBUG
- ******************************************************************************
- */
-
-#define PREG_32(R, N)	LOG_MSG("\t%05X: %08X - %s\n", \
-				(R), mxgbe_rreg32(priv->bar0_base, (R)), (N))
-
-void mxgbe_print_all_regs(mxgbe_priv_t *priv, uint32_t regmsk)
-{
-	int i, q;
-
-	FDEBUG;
-
-	LOG_MSG("\n");
-	LOG_MSG("  -= register dump (hex) =-\n");
-
-	if (!(MXGBE_PRINTREG_MAC & regmsk))
-		goto skip_mac;
-	LOG_MSG("MAC:\n");
-	for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_mac); i++) {
-		PREG_32(mxgbe_dbg_reg_id_mac[i], mxgbe_dbg_reg_name_mac[i]);
-	}
-skip_mac:
-
-	if (!(MXGBE_PRINTREG_TX & regmsk))
-		goto skip_tx;
-	LOG_MSG("TX:\n");
-	for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_tx); i++) {
-		PREG_32(mxgbe_dbg_reg_id_tx[i], mxgbe_dbg_reg_name_tx[i]);
-	}
-skip_tx:
-
-	if (!(MXGBE_PRINTREG_TXQ & regmsk))
-		goto skip_txq;
-	LOG_MSG("TXQ:\n");
-	for (q = 0; q < priv->num_tx_queues; q++) {
-		LOG_MSG("TXQ%d:\n", q);
-		for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_q); i++) {
-			PREG_32(TXQ_REG_ADDR(q, mxgbe_dbg_reg_id_q[i]),
-				mxgbe_dbg_reg_name_q[i]);
-		}
-	}
-skip_txq:
-
-	if (!(MXGBE_PRINTREG_RX & regmsk))
-		goto skip_rx;
-	LOG_MSG("RX:\n");
-	for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_rx); i++) {
-		PREG_32(mxgbe_dbg_reg_id_rx[i], mxgbe_dbg_reg_name_rx[i]);
-	}
-skip_rx:
-
-	if (!(MXGBE_PRINTREG_RXQ & regmsk))
-		goto skip_rxq;
-	LOG_MSG("RXQ:\n");
-	for (q = 0; q < priv->num_rx_queues; q++) {
-		LOG_MSG("RXQ%d:\n", q);
-		for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_q); i++) {
-			PREG_32(RXQ_REG_ADDR(q, mxgbe_dbg_reg_id_q[i]),
-				mxgbe_dbg_reg_name_q[i]);
-		}
-	}
-skip_rxq:
-
-	if (!(MXGBE_PRINTREG_IRQ & regmsk))
-		goto skip_irq;
-	LOG_MSG("IRQST:\n");
-	for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_irq); i++) {
-		PREG_32(mxgbe_dbg_reg_id_irq[i], mxgbe_dbg_reg_name_irq[i]);
-	}
-skip_irq:
-
-	LOG_MSG("\n");
-	return;
-} /* mxgbe_print_all_regs */
 
 
 /**
@@ -622,7 +713,8 @@ do { \
 	scnprintf(buf + offs, PAGE_SIZE - 1 - offs, \
 		"%02X.%04X: %04X - %s\n", \
 		(D), (R), \
-		mxgbe_mdio_read(priv, 0 /*phy_id*/, (D), (R)), (N)); \
+		mdiobus_read(priv->mii_bus, \
+				priv->pcsaddr, ((D) << 18) | (R)), (N)); \
 } while (0)
 
 #define DPREG_64C(R, N) \
@@ -650,8 +742,6 @@ static ssize_t mxgbe_dbg_reg_mac_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_mac_buf;
-
-	FDEBUG;
 
 	/* don't allow partial reads */
 	if (*ppos != 0)
@@ -698,8 +788,6 @@ static ssize_t mxgbe_dbg_reg_tx_read(struct file *filp, char __user *buffer,
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_tx_buf;
 
-	FDEBUG;
-
 	/* don't allow partial reads */
 	if (*ppos != 0)
 		return 0;
@@ -744,8 +832,6 @@ static ssize_t mxgbe_dbg_reg_txq_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_txq_buf;
-
-	FDEBUG;
 
 	/* don't allow partial reads */
 	if (*ppos != 0)
@@ -797,8 +883,6 @@ static ssize_t mxgbe_dbg_reg_rx_read(struct file *filp, char __user *buffer,
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_rx_buf;
 
-	FDEBUG;
-
 	/* don't allow partial reads */
 	if (*ppos != 0)
 		return 0;
@@ -843,8 +927,6 @@ static ssize_t mxgbe_dbg_reg_rxq_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_rxq_buf;
-
-	FDEBUG;
 
 	/* don't allow partial reads */
 	if (*ppos != 0)
@@ -895,8 +977,6 @@ static ssize_t mxgbe_dbg_reg_irq_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_irq_buf;
-
-	FDEBUG;
 
 	/* don't allow partial reads */
 	if (*ppos != 0)
@@ -965,8 +1045,6 @@ static ssize_t mxgbe_dbg_reg_misc_read(struct file *filp, char __user *buffer,
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_misc_buf;
 
-	FDEBUG;
-
 	/* don't allow partial reads */
 	if (*ppos != 0)
 		return 0;
@@ -1009,11 +1087,8 @@ static ssize_t mxgbe_dbg_reg_phy_read(struct file *filp, char __user *buffer,
 	int i;
 	int len;
 	int offs = 0;
-	int val;
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_phy_buf;
-
-	FDEBUG;
 
 	/* don't allow partial reads */
 	if (*ppos != 0)
@@ -1028,11 +1103,6 @@ static ssize_t mxgbe_dbg_reg_phy_read(struct file *filp, char __user *buffer,
 			  mxgbe_dbg_reg_id_phy[i] & 0xFFFF,
 			  mxgbe_dbg_reg_name_phy[i]);
 	}
-
-	val = mxgbe_mdio_read_temp(priv);
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "VSC8488 temp = %d (0x%02X)\n",
-			  val & 0xFF, val & 0xFF);
 
 	if (count < strlen(buf)) {
 		return -ENOSPC;
@@ -1069,61 +1139,63 @@ static ssize_t mxgbe_dbg_reg_i2c_read(struct file *filp, char __user *buffer,
 	char *buf = mxgbe_dbg_reg_i2c_buf;
 	char sfp_buf[256];
 
-	FDEBUG;
-
 	/* don't allow partial reads */
 	if (*ppos != 0)
 		return 0;
 
 
 	/* MAC EEPROM */
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "= %s | %s - I2C: EEPROM dump (hex) =\n",
-			  priv->ndev->name, pci_name(priv->pdev));
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "EEPROM 0x%05X:",
-			  I2C_EEPROM_MAC_BASE);
-	for (i = 0; i < 6; i++) {
-		v8 = mxgbe_i2c_rd(priv->i2c_2, I2C_EEPROM_ADDR,
-				  i + I2C_EEPROM_MAC_BASE);
+	if (priv->i2c_2) {
 		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-				  "%s%02X", (i == 0) ? " " : "-", v8);
+				"= %s | %s - I2C: EEPROM dump (hex) =\n",
+				priv->ndev->name, pci_name(priv->pdev));
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+				"EEPROM 0x%05X:",
+				I2C_EEPROM_MAC_BASE);
+		for (i = 0; i < 6; i++) {
+			v8 = mxgbe_i2c_rd(priv->i2c_2, I2C_EEPROM_ADDR,
+					i + I2C_EEPROM_MAC_BASE);
+			offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+					"%s%02X", (i == 0) ? " " : "-", v8);
+		}
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs, " - MAC\n");
 	}
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs, " - MAC\n");
-
 
 	/* SFP+ */
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "= %s | %s - I2C: 1-SFP+ dump (hex) =\n",
-			  priv->ndev->name, pci_name(priv->pdev));
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "      00 01 02 03 04 05 06 07 08 " \
-			  "09 0A 0B 0C 0D 0E 0F\n");
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "      -- -- -- -- -- -- -- -- -- " \
-			  "-- -- -- -- -- -- --");
-	for (i = 0; i < 256; i++) {
-		v8 = mxgbe_i2c_rd(priv->i2c_0, I2C_SFP1_ADDR, i);
-		sfp_buf[i] = v8;
-		if (!(i % 16)) {
-			offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-					  "\n0x%02X: %02X ", i, v8);
-		} else {
-			offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-					  "%02X ", v8);
+	if (priv->i2c_0) {
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+				"= %s | %s - I2C: 1-SFP+ dump (hex) =\n",
+				priv->ndev->name, pci_name(priv->pdev));
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+				"      00 01 02 03 04 05 06 07 08 " \
+				"09 0A 0B 0C 0D 0E 0F\n");
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+				"      -- -- -- -- -- -- -- -- -- " \
+				"-- -- -- -- -- -- --");
+		for (i = 0; i < 256; i++) {
+			v8 = mxgbe_i2c_rd(priv->i2c_0, I2C_SFP1_ADDR, i);
+			sfp_buf[i] = v8;
+			if (!(i % 16)) {
+				offs += scnprintf(buf + offs,
+						  PAGE_SIZE - 1 - offs,
+						  "\n0x%02X: %02X ", i, v8);
+			} else {
+				offs += scnprintf(buf + offs,
+						  PAGE_SIZE - 1 - offs,
+						  "%02X ", v8);
+			}
 		}
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs, "\n");
+		sfp_buf[36] = 0;
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+				"Vendor name: %s\n", sfp_buf + 20);
+		sfp_buf[60] = 0;
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+				"Vendor OUI/PN: %s\n", sfp_buf + 40);
+		sfp_buf[84] = 0;
+		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
+				"Vendor SN: %s\n", sfp_buf + 68);
 	}
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs, "\n");
-	sfp_buf[36] = 0;
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "Vendor name: %s\n", sfp_buf + 20);
-	sfp_buf[60] = 0;
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "Vendor OUI/PN: %s\n", sfp_buf + 40);
-	sfp_buf[84] = 0;
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "Vendor SN: %s\n", sfp_buf + 68);
-
 
 	if (count < strlen(buf)) {
 		return -ENOSPC;
@@ -1157,8 +1229,6 @@ static ssize_t mxgbe_dbg_reg_cnt_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_reg_cnt_buf;
-
-	FDEBUG;
 
 	/* don't allow partial reads */
 	if (*ppos != 0)
@@ -1208,8 +1278,6 @@ static ssize_t mxgbe_dbg_rxq0_descr_read(struct file *filp,
 	mxgbe_descr_t *descr;
 	mxgbe_priv_t *priv = filp->private_data;
 	char *buf = mxgbe_dbg_rxq0_descr_buf;
-
-	FDEBUG;
 
 	/* don't allow partial reads */
 	if (*ppos != 0)
@@ -1267,8 +1335,6 @@ static ssize_t mxgbe_dbg_reg_ops_read(struct file *filp, char __user *buffer,
 	char *buf;
 	int len;
 
-	FDEBUG;
-
 	/* don't allow partial reads */
 	if (*ppos != 0)
 		return 0;
@@ -1302,8 +1368,6 @@ static ssize_t mxgbe_dbg_reg_ops_write(struct file *filp,
 	mxgbe_priv_t *priv = filp->private_data;
 	int len;
 
-	FDEBUG;
-
 	/* don't allow partial writes */
 	if (*ppos != 0)
 		return 0;
@@ -1328,12 +1392,10 @@ static ssize_t mxgbe_dbg_reg_ops_write(struct file *filp,
 		if (cnt == 2) {
 			priv->reg_last_value = value;
 			mxgbe_wreg32(priv->bar0_base, reg, value);
-			PDEBUG(MXGBE_DBG_MSK_REGS,
-			       "debugfs reg_ops write: 0x%08x = 0x%08x\n",
-			       reg, value);
 		} else {
 			priv->reg_last_value = 0xFFFFFFFF;
-			ERR_MSG("debugfs reg_ops usage: write <reg> <value>\n");
+			pr_err(KBUILD_MODNAME
+			       ": debugfs reg_ops usage: write <reg> <val>\n");
 		}
 	} else if (strncmp(mxgbe_dbg_reg_ops_buf, "read", 4) == 0) {
 		u32 reg, value;
@@ -1342,20 +1404,22 @@ static ssize_t mxgbe_dbg_reg_ops_write(struct file *filp,
 		if (cnt == 1) {
 			value = mxgbe_rreg32(priv->bar0_base, reg);
 			priv->reg_last_value = value;
-			PDEBUG(MXGBE_DBG_MSK_REGS,
-			       "debugfs reg_ops read 0x%08x = 0x%08x\n",
-			       reg, value);
 		} else {
 			priv->reg_last_value = 0xFFFFFFFF;
-			ERR_MSG("debugfs reg_ops usage: read <reg>\n");
+			pr_err(KBUILD_MODNAME
+			       ": debugfs reg_ops usage: read <reg>\n");
 		}
 	} else {
 		priv->reg_last_value = 0xFFFFFFFF;
-		ERR_MSG("debugfs reg_ops: Unknown command %s\n",
-			mxgbe_dbg_reg_ops_buf);
-		ERR_MSG("debugfs reg_ops: Available commands:\n");
-		ERR_MSG("debugfs reg_ops:   read <reg>\n");
-		ERR_MSG("debugfs reg_ops:   write <reg> <value>\n");
+		pr_err(KBUILD_MODNAME
+		       ": debugfs reg_ops: Unknown command %s\n",
+		       mxgbe_dbg_reg_ops_buf);
+		pr_err(KBUILD_MODNAME
+		       ": debugfs reg_ops: Available commands:\n");
+		pr_err(KBUILD_MODNAME
+		       ": debugfs reg_ops:   read <reg>\n");
+		pr_err(KBUILD_MODNAME
+		       ": debugfs reg_ops:   write <reg> <val>\n");
 	}
 	/* parse cmd <<< */
 
@@ -1385,8 +1449,6 @@ void mxgbe_dbg_board_init(mxgbe_priv_t *priv)
 	const char *name = pci_name(priv->pdev);
 	struct dentry *pfile;
 
-	FDEBUG;
-
 	priv->mxgbe_dbg_board = debugfs_create_dir(name, mxgbe_dbg_root);
 	if (priv->mxgbe_dbg_board) {
 		/* reg_ops */
@@ -1394,77 +1456,88 @@ void mxgbe_dbg_board_init(mxgbe_priv_t *priv)
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_ops_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs reg_ops for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create reg_ops file failed\n");
 		}
 		/* MAC */
 		pfile = debugfs_create_file("REG_MAC", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_mac_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_MAC for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_MAC file failed\n");
 		}
 		/* TX */
 		pfile = debugfs_create_file("REG_TX", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_tx_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_TX for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_TX file failed\n");
 		}
 		/* TXQ */
 		pfile = debugfs_create_file("REG_TXQ", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_txq_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_TXQ for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_TXQ file failed\n");
 		}
 		/* RX */
 		pfile = debugfs_create_file("REG_RX", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_rx_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_RX for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_RX file failed\n");
 		}
 		/* RXQ */
 		pfile = debugfs_create_file("REG_RXQ", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_rxq_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_RXQ for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_RXQ file failed\n");
 		}
 		/* IRQ */
 		pfile = debugfs_create_file("REG_IRQ", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_irq_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_IRQ for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_IRQ file failed\n");
 		}
 		/* MISC */
 		pfile = debugfs_create_file("REG_MISC", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_misc_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_MISC for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_MISC file failed\n");
 		}
 		/* PHY */
 		pfile = debugfs_create_file("REG_PHY", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_phy_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_PHY for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_PHY file failed\n");
 		}
 		/* I2C */
 		pfile = debugfs_create_file("REG_I2C", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_i2c_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_I2C for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_I2C file failed\n");
 		}
 		/* CNT */
 		pfile = debugfs_create_file("REG_CNT", 0400,
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_reg_cnt_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs REG_CNT for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create REG_CNT file failed\n");
 		}
 #if 0
 		/* rxq0_descr */
@@ -1472,11 +1545,12 @@ void mxgbe_dbg_board_init(mxgbe_priv_t *priv)
 					    priv->mxgbe_dbg_board, priv,
 					    &mxgbe_dbg_rxq0_descr_fops);
 		if (!pfile) {
-			ERR_MSG("debugfs rxq0_descr for %s failed\n", name);
+			dev_warn(&priv->pdev->dev,
+				 "debugfs create rxq0_descr file failed\n");
 		}
 #endif /* 0 */
 	} else {
-		ERR_MSG("debugfs entry for %s failed\n", name);
+		dev_warn(&priv->pdev->dev, "debugfs create dir failed\n");
 	}
 } /* mxgbe_dbg_board_init */
 
@@ -1486,10 +1560,9 @@ void mxgbe_dbg_board_init(mxgbe_priv_t *priv)
  **/
 void mxgbe_dbg_board_exit(mxgbe_priv_t *priv)
 {
-	FDEBUG;
-
 	if (priv->mxgbe_dbg_board)
 		debugfs_remove_recursive(priv->mxgbe_dbg_board);
+
 	priv->mxgbe_dbg_board = NULL;
 } /* mxgbe_dbg_board_exit */
 
@@ -1506,12 +1579,9 @@ void mxgbe_dbg_board_exit(mxgbe_priv_t *priv)
  **/
 void mxgbe_dbg_init(void)
 {
-	FDEBUG;
-
-	mxgbe_dbg_root = debugfs_create_dir(DRIVER_NAME, NULL);
-	if (mxgbe_dbg_root == NULL)
-		ERR_MSG("Init of debugfs failed\n");
-	PDEBUG(MXGBE_DBG_MSK_MODULE, "Init of debugfs done\n");
+	mxgbe_dbg_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
+	if (!mxgbe_dbg_root)
+		pr_warning(KBUILD_MODNAME ": Init of debugfs failed\n");
 } /* mxgbe_dbg_init */
 
 
@@ -1520,9 +1590,10 @@ void mxgbe_dbg_init(void)
  **/
 void mxgbe_dbg_exit(void)
 {
-	FDEBUG;
+	if (mxgbe_dbg_root)
+		debugfs_remove_recursive(mxgbe_dbg_root);
 
-	debugfs_remove_recursive(mxgbe_dbg_root);
+	mxgbe_dbg_root = NULL;
 } /* mxgbe_dbg_exit */
 
 #endif /* CONFIG_DEBUG_FS */

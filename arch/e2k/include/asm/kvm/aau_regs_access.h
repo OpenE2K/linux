@@ -612,6 +612,8 @@ kvm_write_aads_4_reg(int AADs_no, e2k_aadj_t *mem_p)
 	KVM_SET_AAU_4_AADs(AADs_no, mem_p);
 }
 
+#define	kvm_clear_apb()	/* AAU context should restore host */
+
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* It is pure kvm kernel without paravirtualization */
 
@@ -657,6 +659,8 @@ static inline void write_aaldv_reg(e2k_aaldv_t *aaldv)
 {
 	kvm_write_aaldm_reg_value(aaldv->lo, aaldv->hi);
 }
+
+#define clear_apb()	kvm_clear_apb()
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 

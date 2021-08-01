@@ -189,22 +189,27 @@
 
 /* MC */
 
-#define SIC_MAX_MC_COUNT	4
+#define SIC_MAX_MC_COUNT	E16C_SIC_MC_COUNT
 #define SIC_MC_COUNT		(machine.sic_mc_count)
 
+#define SIC_MC_BASE		0x400
+#define SIC_MC_SIZE		(machine.sic_mc_size)
+
+#define SIC_mc_ecc		0x440
 #define SIC_mc0_ecc		0x400
 #define SIC_mc1_ecc		(machine.sic_mc1_ecc)
 #define SIC_mc2_ecc		0x480
 #define SIC_mc3_ecc		0x4c0
 
-#define SIC_MC_BASE	SIC_mc0_ecc
-#define SIC_MC_SIZE	(IS_MACHINE_E2S ? 0xa4 :	\
-				(IS_MACHINE_E8C ? 0xe4 : 0xf4))
+#define SIC_mc_ch		0x400
+#define SIC_mc_status		0x44c
 
-/* PHY */
-#define SIC_PHY_BASE	(IS_MACHINE_E8C2 ? 0x4000 : 0x1000)
-#define SIC_PHY_SIZE	(IS_MACHINE_E2S ? 0x0c00 :	\
-				(IS_MACHINE_E8C ? 0x1000 : 0x4000))
+/* HMU */
+#define SIC_hmu_mic		0xd00
+#define SIC_hmu0_int		0xd40
+#define SIC_hmu1_int		0xd70
+#define SIC_hmu2_int		0xda0
+#define SIC_hmu3_int		0xdd0
 
 /* IPCC */
 #define SIC_IPCC_LINKS_COUNT	3
@@ -259,6 +264,28 @@ typedef union {
 	};
 	u32 word;
 } freq_core_mon_t;
+
+/* PMC_FREQ_CORE_0_CTRL fields: */
+typedef union {
+	struct {
+		u32 enable		: 1;
+		u32 mode		: 3;
+		u32 progr_divF		: 6;
+		u32 progr_divF_max	: 6;
+		u32 decr_dsbl		: 1;
+		u32 pin_en		: 1;
+		u32 clk_en		: 1;
+		u32 log_en		: 1;
+		u32 sleep_c2		: 1;
+		u32 w_trap		: 1;
+		u32 ev_term		: 1;
+		u32 mon_Fmax		: 1;
+		u32 divF_curr		: 6;
+		u32 bfs_bypass		: 1;
+		u32 rmwen		: 1;
+	};
+	u32 word;
+} freq_core_ctrl_t;
 
 /* PMC_SYS_MON_1 fields: */
 typedef union {
@@ -426,6 +453,9 @@ typedef union {
 #define	BC_MM_REG_BASE		BC_MM_CTRL
 #define	BC_MM_REG_SIZE		(BC_MM_REG_END - BC_MM_REG_BASE)
 #define	BC_MM_REG_NUM		(BC_MM_REG_SIZE / 4)
+
+#define EFUSE_RAM_ADDR          0x0cc0
+#define EFUSE_RAM_DATA          0x0cc4
 
 #ifndef __ASSEMBLY__
 /*

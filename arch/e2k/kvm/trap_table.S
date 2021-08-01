@@ -51,7 +51,8 @@ ttable_entry16:
 	//	usd_hi = thread_info->k_usd_hi;
 	//	WRITE_USD_REG(usd_hi, usd_lo);
 	//	WRITE_SBR_REG_VALUE(
-	//		(current->stack + KERNEL_C_STACK_SIZE));
+	//		current->stack +
+	//			KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET);
 	/*	FIXME: generic hypercalls do not increment hardware stacks now
 	//	psp_hi = READ_PSP_HI_REG();
 	//	pcsp_hi = READ_PCSP_HI_REG();
@@ -94,7 +95,7 @@ ttable_entry16:
 	disp %ctpr3, kvm_generic_hcalls
 	}
 	{
-	addd	%dr10, KERNEL_C_STACK_SIZE, %dr10
+	addd	%dr10, KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET, %dr10
 	ldd [%dr17 + TI_VCPU], %dr19 ? %pred0
 	ct %ctpr1 ? ~ %pred0
 	}
@@ -117,7 +118,7 @@ ttable_entry16:
 	}
 	// Switch to kernel local data stack
 	{
-		// sbr = stack + KERNEL_C_STACK_SIZE
+		// sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET
 	rwd	%dr10, %sbr			// WRITE_SBR_REG_VALUE(sbr)
 	sxt 6, %r0, %dr0
 	}
@@ -263,39 +264,45 @@ ttable_entry17:
  */
 #define HW_HCALL(KERNEL_ENTRY) \
 	{ \
+		setwd wsz = HCALL_WSZ, nfx = 0; \
+		rrd %rpr.lo, %dr20; \
+	} \
+	{ \
+		rrd %rpr.hi, %dr21; \
 		/* Disable load/store generations */ \
 		crp; \
 	} \
 	{ \
-		setwd wsz = HCALL_WSZ, nfx = 0; \
-		rrd %osr0, %dr17; /* %dr17: current_thread_info */ \
-		addd 0, 0, %dr18; \
-	} \
-	{ \
-		rrd %sbr, %dr7; \
 		disp %ctpr3, KERNEL_ENTRY; \
+		rrd %osr0, %dr17; /* %dr17: current_thread_info */ \
 		/* Important: the first memory access in kernel is store. \
 		 * This is needed to flush SLT before trying to load anything. */ \
 		stw,sm %r0, [slt_disable + 0]; \
 	} \
 	{ \
-		rrd %usd.hi, %dr20; \
-		ldd [%dr17 + TI_VCPU], %dr19; \
+		rwd %dr20, %rpr.lo; \
 	} \
 	{ \
-		rrd %usd.lo, %dr21; \
+		nop 1; /* ldd */ \
+		rwd %dr21, %rpr.hi; \
+		ldd,2 [%dr17 + TI_VCPU], %dr19; \
+	} \
+	{ \
+		rrd %sbr, %dr7; \
 		puttagd,5 %dr0, 0, %dr0; \
 	} \
 	{ \
+		rrd %usd.hi, %dr20; \
 		puttagd,2 %dr1, 0, %dr1; \
 		puttagd,5 %dr2, 0, %dr2; \
 	} \
 	{ \
+		rrd %usd.lo, %dr21; \
 		puttagd,2 %dr3, 0, %dr3; \
 		puttagd,5 %dr4, 0, %dr4; \
 	} \
 	{ \
-		nop 2; /* ldd */ \
+		nop 3; /* ldd */ \
 		ldd [%dr19 + VCPU_ARCH_CTXT_SBR], %dr10; \
 		ldd [%dr19 + VCPU_ARCH_CTXT_USD_HI], %dr8; \
 		ldd [%dr19 + VCPU_ARCH_CTXT_USD_LO], %dr9; \
@@ -313,7 +320,7 @@ ttable_entry17:
 	} \
 	{ \
 		rwd %dr9, %usd.lo; \
-		nop 4; /* usd->getsp */ \
+		nop 2; /* usd->getsp */ \
 		sxt 6, %r0, %dr0; \
 		std %dr7, [ %dr19 + VCPU_ARCH_CTXT_SBR ]; \
 		cmpesb %r11, 0, %pred0; \
@@ -321,11 +328,11 @@ ttable_entry17:
 	{ \
 		std %dr20, [ %dr19 + VCPU_ARCH_CTXT_USD_HI ]; \
 		std %dr21, [ %dr19 + VCPU_ARCH_CTXT_USD_LO ]; \
-		adds 0, 1, %r11; \
+		adds,1 0, 1, %r11; \
 		ibranch  1f ? ~%pred0; \
 	} \
 	{ \
-		stb %r11, [ %dr19 + VCPU_ARCH_CTXT_SAVED_VALID ]; \
+		stb,2 %r11, [ %dr19 + VCPU_ARCH_CTXT_SAVED_VALID ]; \
 		std %dr10, [ %dr19 + VCPU_ARCH_CTXT_SAVED_SBR ]; \
 	} \
 	{ \

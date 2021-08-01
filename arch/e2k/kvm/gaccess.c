@@ -15,7 +15,9 @@
 #include <linux/uaccess.h>
 
 #include "gaccess.h"
+#include "cpu.h"
 #include "mmu.h"
+#include "intercepts.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -99,6 +101,41 @@ static int kvm_vcpu_read_guest_phys_helper(struct kvm_vcpu *vcpu,
 			__func__, gpa, bytes);
 	}
 	return ret;
+}
+
+void kvm_vcpu_inject_page_fault(struct kvm_vcpu *vcpu, void *addr,
+				   kvm_arch_exception_t *exception)
+{
+	trap_cellar_t tcellar;
+	tc_cond_t cond;
+	tc_fault_type_t ftype;
+	u32 error_code;
+
+	AW(cond) = 0;
+	AS(cond).fmt = LDST_BYTE_FMT;
+	AW(ftype) = 0;
+
+	KVM_BUG_ON(!exception->error_code_valid);
+
+	error_code = exception->error_code;
+	if (error_code & PFERR_ONLY_VALID_MASK) {
+		AS(ftype).page_miss = 1;
+	} else if (error_code & PFERR_WRITE_MASK) {
+		AS(cond).store = 1;
+		AS(ftype).nwrite_page = 1;
+	} else if (exception->error_code & PFERR_IS_UNMAPPED_MASK) {
+		AS(ftype).illegal_page = 1;
+	}
+	AS(cond).fault_type = AW(ftype);
+	AS(cond).chan = 1;
+
+	tcellar.address = (e2k_addr_t)addr;
+	tcellar.condition = cond;
+	tcellar.data = 0;
+
+	kvm_inject_pv_vcpu_tc_entry(vcpu, &tcellar);
+	kvm_inject_data_page_exc_on_IP(vcpu, exception->ip);
+	kvm_inject_guest_traps_wish(vcpu, exc_data_page_num);
 }
 
 /* can be used for instruction fetching */
@@ -188,12 +225,17 @@ int kvm_vcpu_write_guest_virt_system(struct kvm_vcpu *vcpu,
 
 	while (bytes) {
 		gpa_t gpa = kvm_mmu_gva_to_gpa_write(vcpu, addr, &exception);
+		if (arch_is_error_gpa(gpa)) {
+			DebugKVM("failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n", addr);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)addr,
+						&exception);
+			return -EAGAIN;
+		}
 		unsigned offset = addr & ~PAGE_MASK;
 		unsigned towrite = min(bytes, (unsigned)PAGE_SIZE - offset);
 		int ret;
 
-		if (gpa == UNMAPPED_GVA)
-			return -EFAULT;
 		ret = kvm_vcpu_write_guest_page(vcpu, gpa_to_gfn(gpa), data,
 						offset, towrite);
 		if (ret < 0) {
@@ -206,12 +248,6 @@ int kvm_vcpu_write_guest_virt_system(struct kvm_vcpu *vcpu,
 		bytes -= towrite;
 		data += towrite;
 		addr += towrite;
-	}
-	if (exception.error_code_valid) {
-		pr_err("%s(): exception on write data to guest virt "
-			"addr 0x%lx, size 0x%x\n",
-			__func__, addr, bytes);
-		return -EFAULT;
 	}
 	return 0;
 }
@@ -237,7 +273,7 @@ static int kvm_vcpu_write_guest_phys_system(struct kvm_vcpu *vcpu,
 int kvm_vcpu_write_guest_system(struct kvm_vcpu *vcpu,
 			gva_t addr, void *val, unsigned int bytes)
 {
-	int ret;
+	long ret;
 
 	if (kvm_mmu_gva_is_gpa_range(vcpu, addr, bytes)) {
 		ret = kvm_vcpu_write_guest_phys_system(vcpu, (gpa_t)addr, val,
@@ -254,27 +290,29 @@ int kvm_vcpu_write_guest_system(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-int kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
+long kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
 		void *addr, u64 val, u64 tag, size_t size, u64 strd_opcode)
 {
 	size_t len = size;
-	int ret;
+	long set = 0;
+	unsigned long memset_ret;
+	kvm_arch_exception_t exception;
 
 	while (len) {
 		void *haddr;
-		unsigned offset;
-		unsigned towrite;
-		unsigned long hva;
+		long offset;
+		long towrite;
+		hva_t hva;
 
-		hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)addr);
+		hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)addr, true, &exception);
 		if (kvm_is_error_hva(hva)) {
-			if (kvm_is_only_valid_hva(hva)) {
-				goto faulted;
-			}
-			pr_err("%s(): address %px is invalid guest address\n",
-				__func__, addr);
-			return -EFAULT;
+			DebugKVM("failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n", addr);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)addr,
+						&exception);
+			return -EAGAIN;
 		}
+
 		haddr = (void *)hva;
 		offset = hva & ~PAGE_MASK;
 		towrite = min(len, (unsigned)PAGE_SIZE - offset);
@@ -282,76 +320,88 @@ int kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
 		if (!access_ok(haddr, towrite))
 			return -EFAULT;
 		SET_USR_PFAULT("$.recovery_memset_fault");
-		ret = recovery_memset_8(haddr, val, tag, towrite, strd_opcode);
+		memset_ret = recovery_memset_8(haddr, val, tag,
+						towrite, strd_opcode);
 		if (RESTORE_USR_PFAULT)
 			return -EFAULT;
-		if (ret < towrite) {
+		if (memset_ret < towrite) {
 			pr_err("%s(): could not set data to guest virt "
-				"addr %px host addr %px, size 0x%x, error %d\n",
-				__func__, addr, haddr, towrite, ret);
-			return ret;
+				"addr %px host addr %px, size 0x%lx, "
+				"error %ld\n", __func__, addr, haddr,
+				towrite, memset_ret);
+			return set;
 		}
 
 		len -= towrite;
 		addr += towrite;
+		set += towrite;
 	}
-	return size;
-
-faulted:
-	KVM_BUG_ON(len > size);
-	return size - len;
+	return set;
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_set_guest_virt_system);
 
-int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
-		void __user *dst, const void __user *src, size_t size,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
+			void __user *dst, const void __user *src, size_t size,
+			unsigned long strd_opcode, unsigned long ldrd_opcode,
+			int prefetch, int ALIGN)
 {
 	size_t len = size;
+	long copied = 0;
 	void *dst_arg = dst;
 	const void *src_arg = src;
 	void *haddr_dst = NULL, *haddr_src = NULL;
 	int to_dst = 0, to_src = 0, off, tail;
 	bool is_dst_len = true, is_src_len = true;
-	int ret;
+	unsigned long memcpy_ret;
+	kvm_arch_exception_t exception;
 
 	/* src can be not aligned */
-	off = (u64)src & (16 - 1);
+	off = (u64)src & (ALIGN - 1);
 
 	DebugCOPY("started to copy from %px to %px, size 0x%lx\n",
 		src, dst, size);
 
-	/* dst & size should be 16-bytes aligned */
-	KVM_BUG_ON(((u64)dst & (16 - 1)) != 0);
-	KVM_BUG_ON((size & (16 - 1)) != 0);
+	/* dst & size should be 'ALIGN'-bytes aligned */
+	KVM_BUG_ON(((u64)dst & (ALIGN - 1)) != 0);
+	KVM_BUG_ON((size & (ALIGN - 1)) != 0);
 
 	while (len) {
 		unsigned offset_dst, offset_src;
 		int towrite;
-		unsigned long hva_dst, hva_src;
+		hva_t hva_dst, hva_src;
 
 		if (is_dst_len) {
 			KVM_BUG_ON(to_dst != 0);
-			hva_dst = kvm_vcpu_gva_to_hva(vcpu, (gva_t)dst);
+			hva_dst = kvm_vcpu_gva_to_hva(vcpu, (gva_t)dst,
+							true, &exception);
 			if (kvm_is_error_hva(hva_dst)) {
-				DebugCOPY("failed to find HVA for dst %px GVA\n", dst);
-				goto faulted;
+				DebugCOPY("failed to find GPA for dst %lx GVA,"
+					" inject page fault to guest\n", dst);
+				kvm_vcpu_inject_page_fault(vcpu, (void *)dst,
+								&exception);
+				return -EAGAIN;
 			}
+
 			haddr_dst = (void *)hva_dst;
 			offset_dst = hva_dst & ~PAGE_MASK;
 			to_dst = min(len, (unsigned)PAGE_SIZE - offset_dst);
 			DebugCOPY("dst %px hva %px offset 0x%x size 0x%x\n",
 				dst, haddr_dst, offset_dst, to_dst);
-			KVM_BUG_ON((to_dst & (16 - 1)) != 0);
+			KVM_BUG_ON((to_dst & (ALIGN - 1)) != 0);
 		}
 		if (is_src_len) {
 			KVM_BUG_ON(to_src > 0);
-			hva_src = kvm_vcpu_gva_to_hva(vcpu, (gva_t)src);
+
+			hva_src = kvm_vcpu_gva_to_hva(vcpu, (gva_t)src,
+							false, &exception);
 			if (kvm_is_error_hva(hva_src)) {
-				DebugCOPY("failed to find HVA for src %px GVA\n", src);
-				goto faulted;
+				DebugCOPY("failed to find GPA for dst %lx GVA,"
+					" inject page fault to guest\n", src);
+				kvm_vcpu_inject_page_fault(vcpu, (void *)src,
+								&exception);
+				return -EAGAIN;
 			}
+
 			haddr_src = (void *)hva_src;
 			if (unlikely(to_src < 0)) {
 				/*
@@ -374,6 +424,7 @@ int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 				haddr_src += off;
 				hva_src += off;
 				to_dst -= off;
+				copied += off;
 				to_src = 0;
 				DebugCOPY("len 0x%lx dst %px 0x%x "
 					"src %px 0x%x\n",
@@ -388,15 +439,15 @@ int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 				tail = 0;
 			} else {
 				to_src = (unsigned)PAGE_SIZE - offset_src;
-				tail = (off) ? 16 - off : 0;
+				tail = (off) ? ALIGN - off : 0;
 				to_src -= tail;
 			}
 			DebugCOPY("src %px hva %px offset 0x%x size 0x%x\n",
 				src, haddr_src, offset_src, to_src);
-			KVM_BUG_ON((to_src & (16 - 1)) != 0);
+			KVM_BUG_ON((to_src & (ALIGN - 1)) != 0);
 		}
 
-		if (unlikely(to_src < 16 && tail != 0)) {
+		if (unlikely(to_src < ALIGN && tail != 0)) {
 			/*
 			 * Current src address crosses the page boundaries
 			 * and the remaining' tail' bytes at the ending of the
@@ -415,6 +466,7 @@ int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 			haddr_src += tail;
 			to_dst -= tail;
 			to_src -= tail;
+			copied += tail;
 			tail = 0;
 			DebugCOPY("len 0x%lx dst %px 0x%x src %px 0x%x\n",
 				len, haddr_dst, to_dst, haddr_src, to_src);
@@ -440,26 +492,27 @@ int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 
 		DebugCOPY("copy from %px to %px size 0x%x\n",
 			haddr_src, haddr_dst, towrite);
-		KVM_BUG_ON((towrite & (16 - 1)) != 0 || len == 0);
+		KVM_BUG_ON((towrite & (ALIGN - 1)) != 0 || len == 0);
 		if (towrite) {
-			/* fast copy 16-bytes aligned and */
+			/* fast copy 'ALIGN'-bytes aligned and */
 			/* within one page dst and src areas */
 			if (!access_ok(haddr_dst, towrite) ||
 					!access_ok(haddr_src, towrite))
 				return -EFAULT;
 			SET_USR_PFAULT("$.recovery_memcpy_fault");
-			ret = recovery_memcpy_8(haddr_dst, haddr_src, towrite,
-					strd_opcode, ldrd_opcode, prefetch);
+			memcpy_ret = recovery_memcpy_8(haddr_dst, haddr_src,
+					towrite, strd_opcode, ldrd_opcode,
+					prefetch);
 			if (RESTORE_USR_PFAULT)
 				return -EFAULT;
-			if (ret < towrite) {
+			if (memcpy_ret < towrite) {
 				pr_err("%s(): could not copy data to guest "
 					"virt addr %px host addr %px, from "
 					"guest virt addr %px host addr %px "
-					"size 0x%x, error %d\n",
+					"size 0x%x, error %ld\n",
 					__func__, dst, haddr_dst,
-					src, haddr_src, towrite, ret);
-				return ret;
+					src, haddr_src, towrite, memcpy_ret);
+				return copied;
 			}
 
 			len -= towrite;
@@ -469,6 +522,7 @@ int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 			haddr_src += towrite;
 			to_dst -= towrite;
 			to_src -= towrite;
+			copied += towrite;
 			DebugCOPY("len 0x%lx dst %px 0x%x src %px 0x%x\n",
 				len, haddr_dst, to_dst, haddr_src, to_src);
 			if (len == 0)
@@ -480,13 +534,28 @@ int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 	KVM_BUG_ON(src != src_arg + size);
 	KVM_BUG_ON(dst != dst_arg + size);
 
-	return size;
+	return copied;
+}
 
-faulted:
-	KVM_BUG_ON(len > size);
-	return size - len;
+long kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
+		void __user *dst, const void __user *src, size_t size,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	return copy_aligned_guest_virt_system(vcpu, dst, src, size,
+				strd_opcode, ldrd_opcode, prefetch, 8);
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_virt_system);
+
+long kvm_vcpu_copy_guest_virt_system_16(struct kvm_vcpu *vcpu,
+		void __user *dst, const void __user *src, size_t size,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	return copy_aligned_guest_virt_system(vcpu, dst, src, size,
+				strd_opcode, ldrd_opcode, prefetch, 16);
+}
+EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_virt_system_16);
 
 static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 		void *host, void __user *guest, size_t size, bool to_host,
@@ -498,6 +567,7 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 	void *dst_addr = NULL, *src_addr = NULL, *guest_addr = NULL;
 	unsigned guest_off, hva_len = 0;
 	int head, head_len, tail, tail_len, ret;
+	kvm_arch_exception_t exception;
 
 	if (to_host) {
 		dst_addr = host;
@@ -516,17 +586,17 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 
 	/* copy not quad aligned head of transfered data */
 	while (head) {
-		hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest);
+		hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
+						true, &exception);
 		if (kvm_is_error_hva(hva)) {
-			if (kvm_is_only_valid_hva(hva))
-				goto faulted;
-			E2K_LMS_HALT_OK;
-			pr_err("%s(): guest address %px is invalid\n",
-				__func__, guest);
-			return -EFAULT;
+			DebugHGCOPY("failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n", guest);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)guest,
+						&exception);
+			return -EAGAIN;
 		}
-		guest_addr = (void *)hva;
 
+		guest_addr = (void *)hva;
 		if (to_host)
 			src_addr = guest_addr;
 		else
@@ -573,18 +643,18 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 		int quad_tail, tail_len;
 
 		if (hva_len == 0) {
-			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest);
+			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
+							true, &exception);
 			if (kvm_is_error_hva(hva)) {
-				if (kvm_is_only_valid_hva(hva)) {
-					goto faulted;
-				}
-				E2K_LMS_HALT_OK;
-				pr_err("%s(): guest address %px is invalid\n",
-					__func__, guest);
-				return -EFAULT;
+				DebugHGCOPY("failed to find GPA for dst %lx "
+					"GVA, inject page fault to guest\n",
+					guest);
+				kvm_vcpu_inject_page_fault(vcpu, (void *)guest,
+							&exception);
+				return -EAGAIN;
 			}
-			guest_addr = (void *)hva;
 
+			guest_addr = (void *)hva;
 			if (to_host)
 				src_addr = guest_addr;
 			else
@@ -633,19 +703,19 @@ quad_tail_copy:
 
 		do {
 			if (hva_len == 0) {
-				hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest);
+				hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
+							true, &exception);
 				if (kvm_is_error_hva(hva)) {
-					if (kvm_is_only_valid_hva(hva)) {
-						goto faulted;
-					}
-					E2K_LMS_HALT_OK;
-					pr_err("%s(): guest address %px is "
-						"invalid\n",
-						__func__, guest);
-					return -EFAULT;
+					DebugHGCOPY("failed to find GPA for "
+						"dst %lx GVA, inject page "
+						"fault to guest\n", guest);
+					kvm_vcpu_inject_page_fault(vcpu,
+							(void *)guest,
+							&exception);
+					return -EAGAIN;
 				}
-				guest_addr = (void *)hva;
 
+				guest_addr = (void *)hva;
 				if (to_host)
 					src_addr = guest_addr;
 				else
@@ -686,18 +756,18 @@ tail_copy:
 	/* copy not quad aligned tail of transfered data */
 	do {
 		if (hva_len == 0) {
-			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest);
+			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
+						true, &exception);
 			if (kvm_is_error_hva(hva)) {
-				if (kvm_is_only_valid_hva(hva)) {
-					goto faulted;
-				}
-			E2K_LMS_HALT_OK;
-				pr_err("%s(): guest address %px is invalid\n",
-					__func__, guest);
-				return -EFAULT;
+				DebugHGCOPY("failed to find GPA for dst %lx "
+					"GVA, inject page fault to guest\n",
+					guest);
+				kvm_vcpu_inject_page_fault(vcpu, (void *)guest,
+							&exception);
+				return -EAGAIN;
 			}
-			guest_addr = (void *)hva;
 
+			guest_addr = (void *)hva;
 			if (to_host)
 				src_addr = guest_addr;
 			else
@@ -730,9 +800,6 @@ tail_copy:
 
 out:
 	return size;
-faulted:
-	KVM_BUG_ON(len > size);
-	return size - len;
 }
 
 int kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
@@ -777,6 +844,7 @@ unsigned long kvm_copy_to_user_with_tags(void *__user to,
 			const void *from, unsigned long n)
 {
 	struct kvm_vcpu *vcpu = native_current_thread_info()->vcpu;
+	kvm_arch_exception_t exception;
 
 	if (unlikely(((long) to & 0x7) || ((long) from & 0x7) || (n & 0x7))) {
 		DebugHUCOPY("%s(): to=%px from=%px n=%ld\n",
@@ -787,14 +855,14 @@ unsigned long kvm_copy_to_user_with_tags(void *__user to,
 	while (n) {
 		size_t left, copy_len, hva_off;
 
-		hva_t to_hva = kvm_vcpu_gva_to_hva(vcpu, (__force gva_t) to);
-		if (unlikely(kvm_is_error_hva(to_hva))) {
-			if (!kvm_is_only_valid_hva(to_hva)) {
-				pr_err("%s(): guest address %px is invalid\n",
-						__func__, to);
-				E2K_LMS_HALT_OK;
-			}
-			return n;
+		hva_t to_hva = kvm_vcpu_gva_to_hva(vcpu, (__force gva_t) to,
+						true, &exception);
+		if (kvm_is_error_hva(to_hva)) {
+			DebugHUCOPY("failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n", to);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)to,
+						&exception);
+			return -EAGAIN;
 		}
 
 		hva_off = to_hva & ~PAGE_MASK;
@@ -825,6 +893,7 @@ unsigned long kvm_copy_from_user_with_tags(void *to,
 			const void __user *from, unsigned long n)
 {
 	struct kvm_vcpu *vcpu = native_current_thread_info()->vcpu;
+	kvm_arch_exception_t exception;
 
 	if (unlikely(((long) to & 0x7) || ((long) from & 0x7) || (n & 0x7))) {
 		DebugHUCOPY("%s(): to=%px from=%px n=%ld\n",
@@ -835,14 +904,14 @@ unsigned long kvm_copy_from_user_with_tags(void *to,
 	while (n) {
 		size_t left, copy_len, hva_off;
 
-		hva_t from_hva = kvm_vcpu_gva_to_hva(vcpu, (__force gva_t) from);
-		if (unlikely(kvm_is_error_hva(from_hva))) {
-			if (!kvm_is_only_valid_hva(from_hva)) {
-				pr_err("%s(): guest address %px is invalid\n",
-						__func__, from);
-				E2K_LMS_HALT_OK;
-			}
-			return n;
+		hva_t from_hva = kvm_vcpu_gva_to_hva(vcpu,
+				(__force gva_t) from, false, &exception);
+		if (kvm_is_error_hva(from_hva)) {
+			DebugHUCOPY("failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n", from);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)from,
+						&exception);
+			return -EAGAIN;
 		}
 
 		hva_off = from_hva & ~PAGE_MASK;

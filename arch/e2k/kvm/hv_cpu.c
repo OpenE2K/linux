@@ -134,7 +134,8 @@ void prepare_vcpu_startup_args(struct kvm_vcpu *vcpu)
 void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 		e2k_mem_ps_t *ps_frames, e2k_mem_crs_t *pcs_frames,
 		u64 *args, int args_num, char *entry_point, e2k_psr_t psr,
-		e2k_size_t usd_size, e2k_size_t *ps_ind, e2k_size_t *pcs_ind)
+		e2k_size_t usd_size, e2k_size_t *ps_ind, e2k_size_t *pcs_ind,
+		int cui, bool kernel)
 {
 	e2k_cr0_lo_t cr0_lo;
 	e2k_cr0_hi_t cr0_hi;
@@ -178,6 +179,10 @@ void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 	cr1_lo.CR1_lo_psr = psr.PSR_reg;
 	cr1_lo.CR1_lo_wbs = wbs;
 	cr1_lo.CR1_lo_wpsz = cr1_lo.CR1_lo_wbs;
+	cr1_lo.CR1_lo_cui = cui;
+	if (!cpu_has(CPU_FEAT_ISET_V6))
+		cr1_lo.CR1_lo_ic = kernel;
+
 	cr1_hi.CR1_hi_half = 0;
 	cr1_hi.CR1_hi_ussz = usd_size / 16;
 	pcs_frames[1].cr0_lo = cr0_lo;
@@ -266,7 +271,7 @@ void prepare_bu_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu)
 			vcpu->arch.args, vcpu->arch.args_num,
 			vcpu->arch.entry_point, psr,
 			GET_VCPU_BOOT_CS_SIZE(boot_stacks),
-			&ps_ind, &pcs_ind);
+			&ps_ind, &pcs_ind, 0, 1);
 
 	/* correct stacks pointers indexes */
 	hypv_backup->psp_hi.PSP_hi_ind = ps_ind;
@@ -1339,7 +1344,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	intc_info_mu_t *mu = vcpu->arch.intc_ctxt.mu;
 	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->arch.intc_ctxt;
 	u64 exceptions;
-	e2k_pshtp_t pshtp;
 	int ret;
 	bool g_th;
 	bool tir_fz;
@@ -1422,11 +1426,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	intc_ctxt->cur_mu = -1;
 	kvm_reset_intc_info_mu_is_updated(vcpu);
 	kvm_reset_intc_info_cu_is_updated(vcpu);
-
-	/* Bug #107384 workaround: correct PSHTP.tind, set as PSHTP.ind */
-	pshtp.PSHTP_reg = READ_SH_PSHTP_REG_VALUE();
-	pshtp.PSHTP_tind = pshtp.PSHTP_ind;
-	WRITE_SH_PSHTP_REG_VALUE(pshtp.PSHTP_reg);
 
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 
@@ -1733,7 +1732,6 @@ enum hrtimer_restart kvm_epic_idle_timer_fn(struct hrtimer *data)
 	return HRTIMER_NORESTART;
 }
 
-
 void kvm_init_cepic_idle_timer(struct kvm_vcpu *vcpu)
 {
 	ASSERT(vcpu != NULL);
@@ -1751,8 +1749,15 @@ void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu)
 	unsigned int cepic_freq_mhz = vcpu->kvm->arch.cepic_freq / 1000000;
 	u64 period_ns = (u64)cepic->timer_cur * NSEC_PER_USEC / cepic_freq_mhz;
 
-	if (!vcpu->arch.on_idle || cepic->timer_cur == 0)
+	if (likely(!vcpu->arch.on_idle))
 		return;
+
+	/*
+	 * VCPU might be waiting for spinlock under closed MI.
+	 * Wake it up periodically to check for NMI.
+	 */
+	if (unlikely(!period_ns))
+		period_ns = jiffies_to_nsecs(VCPU_IDLE_TIMEOUT);
 
 	hrtimer_start(timer, ktime_add_ns(timer->base->get_time(), period_ns),
 		HRTIMER_MODE_ABS);
@@ -1766,8 +1771,13 @@ void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu)
 	ktime_t expire, now;
 	unsigned long delta_ns, delta_cepic;
 
-	if (!vcpu->arch.on_idle || cepic->timer_cur == 0)
+	if (likely(!vcpu->arch.on_idle))
 		return;
+
+	if (unlikely(!cepic->timer_cur)) {
+		hrtimer_cancel(timer);
+		return;
+	}
 
 	/* Recalculate current CEPIC timer value */
 	if (hrtimer_cancel(timer)) {

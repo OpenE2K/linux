@@ -15,14 +15,14 @@
 })
 
 static inline void
-pv_save_local_glob_regs(local_gregs_t *l_gregs)
+pv_save_local_glob_regs(local_gregs_t *l_gregs, is_signal)
 {
-	pv_cpu_ops.save_local_glob_regs(l_gregs);
+	pv_cpu_ops.save_local_glob_regs(l_gregs, is_signal);
 }
 static inline void
-pv_restore_local_glob_regs(local_gregs_t *l_gregs)
+pv_restore_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	pv_cpu_ops.restore_local_glob_regs(l_gregs);
+	pv_cpu_ops.restore_local_glob_regs(l_gregs, is_signal);
 }
 static inline void
 pv_get_all_user_glob_regs(struct global_regs *gregs)
@@ -46,14 +46,14 @@ pv_restore_kernel_gregs_in_syscall(struct thread_info *ti)
 #define	INIT_G_REGS()	PV_INIT_G_REGS()
 
 static inline void
-save_local_glob_regs(local_gregs_t *l_gregs)
+save_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	pv_save_local_glob_regs(l_gregs);
+	pv_save_local_glob_regs(l_gregs, is_signal);
 }
 static inline void
-restore_local_glob_regs(local_gregs_t *l_gregs)
+restore_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	pv_restore_local_glob_regs(l_gregs);
+	pv_restore_local_glob_regs(l_gregs, is_signal);
 }
 static inline void
 get_all_user_glob_regs(struct global_regs *gregs)

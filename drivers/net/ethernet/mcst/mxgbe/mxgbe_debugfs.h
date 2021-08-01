@@ -2,8 +2,6 @@
 #define MXGBE_DEBUGFS_H__
 
 
-void mxgbe_print_all_regs(mxgbe_priv_t *priv, uint32_t regmsk);
-
 #ifdef CONFIG_DEBUG_FS
 void mxgbe_dbg_board_init(mxgbe_priv_t *priv);
 void mxgbe_dbg_board_exit(mxgbe_priv_t *priv);

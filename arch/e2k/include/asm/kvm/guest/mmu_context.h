@@ -19,7 +19,8 @@ static inline void
 deactivate_mm(struct task_struct *dead_task, struct mm_struct *mm)
 {
 	native_deactivate_mm(dead_task, mm);
-	HYPERVISOR_switch_to_guest_init_mm();
+	if (!dead_task->clear_child_tid || (atomic_read(&mm->mm_users) <= 1))
+		HYPERVISOR_switch_to_guest_init_mm();
 }
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 

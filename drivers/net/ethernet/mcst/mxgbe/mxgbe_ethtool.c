@@ -242,7 +242,7 @@ static void mxgbe_get_drvinfo(struct net_device *ndev,
 
 	FDEBUG;
 
-	strlcpy(drvinfo->driver,  DRIVER_NAME,
+	strlcpy(drvinfo->driver, KBUILD_MODNAME,
 		sizeof(drvinfo->driver));
 	strlcpy(drvinfo->version, DRIVER_VERSION,
 		sizeof(drvinfo->version));

@@ -4500,7 +4500,24 @@ void  l_request_msi_addresses_window(struct pci_dev *pdev)
 static void quirk_pci_msi(struct pci_dev *pdev)
 {
 	struct iohub_sysdata *sd = pdev->bus->sysdata;
+	int gen, rev = pdev->revision;
 
+	if (pdev->device == PCI_DEVICE_ID_MCST_I2CSPI) {
+		gen = 0;
+		sd->iohub_generation = gen;
+		sd->has_iohub = true;
+		sd->iohub_revision = rev;
+	} else if (pdev->device == PCI_DEVICE_ID_MCST_I2C_SPI) {
+		gen = 1;
+		sd->iohub_generation = gen;
+		sd->has_iohub = true;
+		sd->iohub_revision = rev;
+	} else  {
+		gen = 2;
+		sd->eioh_generation = gen;
+		sd->has_eioh = true;
+		sd->eioh_revision = rev;
+	}
 	/*
 	 * If IOHub2 is connected to EIOHub, use RT_MSI address instead of
 	 * the address from IOAPIC BARs
@@ -4508,25 +4525,21 @@ static void quirk_pci_msi(struct pci_dev *pdev)
 	if (cpu_has_epic()) {
 		get_io_epic_msi(dev_to_node(&pdev->dev),
 			 &sd->pci_msi_addr_lo, &sd->pci_msi_addr_hi);
-	} else {
+	} else if (gen < 2) {
 		pci_read_config_dword(pdev, MSI_LO_ADDRESS,
 			&sd->pci_msi_addr_lo);
 		pci_read_config_dword(pdev, MSI_HI_ADDRESS,
 			&sd->pci_msi_addr_hi);
 	}
-	sd->revision = pdev->revision;
-	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-		    pdev->device == PCI_DEVICE_ID_MCST_I2C_SPI)
-		sd->generation = 1;
-	dev_info(&pdev->dev, "MSI address at: 0x%x; IOHUB generation:%d,"
-		"revision %d\n", sd->pci_msi_addr_lo,
-		  sd->generation, sd->revision);
+	dev_info(&pdev->dev, "MSI address at: %x; IOHUB generation: %d, "
+		"revision: %x\n", sd->pci_msi_addr_lo, gen, rev);
 }
-
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_I2CSPI,
-			  quirk_pci_msi);
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_I2C_SPI,
-			  quirk_pci_msi);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ELBRUS,
+			  PCI_DEVICE_ID_MCST_I2CSPI, quirk_pci_msi);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP,
+			  PCI_DEVICE_ID_MCST_I2C_SPI, quirk_pci_msi);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP,
+			  PCI_DEVICE_ID_MCST_I2C_SPI_EPIC, quirk_pci_msi);
 
 #elif defined CONFIG_PCI_MSI
 #error		fixme

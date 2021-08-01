@@ -27,6 +27,8 @@ kvm_modify_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip,
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */
 
+#include <asm/kvm/vcpu-regs-debug-inline.h>
+
 #define	GET_PHYS_ADDR(task, addr)	GUEST_GET_PHYS_ADDR(task, addr)
 
 #define	debug_guest_regs(task)	false	/* none any guests */

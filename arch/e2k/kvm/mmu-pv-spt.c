@@ -29,6 +29,7 @@
 #include <asm/cpu_regs.h>
 #include <asm/kvm/gpid.h>
 #include <asm/kvm/switch.h>
+#include <asm/traps.h>
 
 #include "mmu_defs.h"
 #include "mmu.h"
@@ -136,7 +137,7 @@
 #define	DEBUG_KVM_PTE_MODE	0	/* guest PTE update/write debug */
 #define	DebugPTE(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_PTE_MODE)					\
+	if (DEBUG_KVM_PTE_MODE)						\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -145,7 +146,16 @@
 #define	DEBUG_KVM_GMM_MODE	0	/* guest mm freeing debug */
 #define	DebugGMM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_GMM_MODE)					\
+	if (DEBUG_KVM_GMM_MODE)						\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_ACTIVATE_GMM_MODE
+#undef	DebugAGMM
+#define	DEBUG_ACTIVATE_GMM_MODE	0	/* guest mm activating debug */
+#define	DebugAGMM(fmt, args...)						\
+({									\
+	if (DEBUG_ACTIVATE_GMM_MODE)					\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -518,104 +528,6 @@ int kvm_e2k_paravirt_page_prefault(pt_regs_t *regs, trap_cellar_t *tcellar)
 	return -EINVAL;
 }
 
-static void kvm_pv_mmu_load_gmm(struct kvm_vcpu *vcpu)
-{
-	pgprotval_t os_phys_ptb;
-	pgprotval_t u_phys_ptb;
-	gva_t os_virt_ptb;
-	gva_t os_virt_base;
-	gva_t u_virt_ptb;
-	gmm_struct_t *gmm = NULL;
-	bool mmu_is_load = false;
-	int ret;
-
-	KVM_BUG_ON(IS_E2K_INVALID_PAGE(os_virt_ptb));
-
-	if (os_phys_ptb >= GUEST_PAGE_OFFSET)
-		os_phys_ptb = __guest_pa(os_phys_ptb);
-	vcpu_read_mmu_os_pptb_reg(vcpu, &os_phys_ptb);
-	vcpu_read_mmu_os_vptb_reg(vcpu, &os_virt_ptb);
-	vcpu_read_mmu_os_vab_reg(vcpu, &os_virt_base);
-	vcpu_read_mmu_u_pptb_reg(vcpu, &u_phys_ptb);
-	vcpu_read_mmu_u_vptb_reg(vcpu, &u_virt_ptb);
-	DebugGMM("VCPU #%d guest OS root PT base: physical 0x%lx, "
-		"virtual 0x%lx\n",
-		vcpu->vcpu_id, os_phys_ptb, os_virt_ptb);
-	DebugGMM("VCPU #%d guest user root PT base: physical 0x%lx, "
-		"virtual 0x%lx\n",
-		vcpu->vcpu_id, u_phys_ptb, u_virt_ptb);
-
-	/* It need create new shadow PT based on the initial guest PT state */
-	mutex_lock(&vcpu->kvm->slots_lock);
-	if (IS_E2K_INVALID_PAGE(gmm->root_hpa)) {
-		DebugGMM("VCPU #%d shadow root PT is not yet created, "
-			"so create and sync\n",
-			vcpu->vcpu_id);
-		ret = kvm_sync_init_shadow_pt(vcpu, gmm,
-				u_phys_ptb, u_virt_ptb,
-				os_phys_ptb, os_virt_ptb, os_virt_base);
-		if (ret) {
-			pr_err("%s(): coiuld not create initial shadow PT or "
-				"sync all guest pages, error %d\n",
-				__func__, ret);
-			goto unlock_failed;
-		}
-		mmu_is_load = true;
-	} else if (VALID_PAGE(gmm->root_hpa)) {
-		DebugGMM("VCPU #%d shadow PT has been already created "
-			"at 0x%llx and synced\n",
-			vcpu->vcpu_id, gmm->root_hpa);
-	} else if (ERROR_PAGE(gmm->root_hpa)) {
-		ret = PAGE_TO_ERROR(gmm->root_hpa);
-		DebugGMM("VCPU #%d shadow PT creation has been failed, "
-			"error %d\n",
-			vcpu->vcpu_id, ret);
-		goto unlock_failed;
-	} else {
-		BUG_ON(true);
-	}
-	mutex_unlock(&vcpu->kvm->slots_lock);
-
-	if (!mmu_is_load) {
-		unsigned flags;
-
-		preempt_disable();	/* to avoid schedule() when VCPU root */
-					/* PT is cleared and not set */
-		KVM_BUG_ON(is_shadow_paging(vcpu));
-
-		/* always separate speces should be used */
-		set_sep_virt_spaces(vcpu);
-		vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, os_phys_ptb);
-		vcpu->arch.mmu.set_vcpu_os_vptb(vcpu, os_virt_ptb);
-		vcpu->arch.mmu.set_vcpu_sh_os_vptb(vcpu, os_virt_ptb);
-		vcpu->arch.mmu.set_vcpu_os_vab(vcpu, os_virt_base);
-		if (u_phys_ptb != os_phys_ptb) {
-			/* need create two shadow PTs: user & kernel */
-			vcpu->arch.mmu.set_vcpu_u_pptb(vcpu, u_phys_ptb);
-			vcpu->arch.mmu.set_vcpu_u_vptb(vcpu, u_virt_ptb);
-			vcpu->arch.mmu.set_vcpu_sh_u_vptb(vcpu, u_virt_ptb);
-			flags = OS_ROOT_PT_FLAG | U_ROOT_PT_FLAG;
-		} else {
-			/* only kernel shadow PT */
-			flags = OS_ROOT_PT_FLAG;
-		}
-		kvm_mmu_load(vcpu, flags);
-		preempt_enable();
-	} else {
-		KVM_BUG_ON(!VALID_PAGE(kvm_get_space_type_spt_os_root(vcpu)));
-	}
-	/* flush all guest physical addresses translations */
-	/* probable here should be operation to flush only GP_* translations */
-	/* probably here (after kvm_sync_init_shadow_pt()) should be SMP */
-	/* flush to flush GPA->PA translations on all CPUs */
-	__flush_tlb_all();
-
-	return;
-
-unlock_failed:
-	mutex_unlock(&vcpu->kvm->slots_lock);
-}
-
 static int kvm_pv_mmu_load_u_gmm(struct kvm_vcpu *vcpu,
 			gmm_struct_t *gmm, gpa_t u_phys_ptb)
 {
@@ -657,17 +569,6 @@ static int kvm_pv_mmu_prepare_u_gmm(struct kvm_vcpu *vcpu,
 	KVM_BUG_ON(!VALID_PAGE(gmm->root_hpa));
 
 	return 0;
-}
-
-static void complete_nonpaging_mode(struct kvm_vcpu *vcpu)
-{
-	/* switch from nonpaging mode to paging */
-	set_paging_flag(vcpu);
-	kvm_mmu_unload(vcpu, OS_ROOT_PT_FLAG | U_ROOT_PT_FLAG);
-	guest_pv_vcpu_state_to_paging(vcpu);
-	kvm_mmu_setup(vcpu);
-
-	/* FIXME: it need free nonpaging PTs, inclunig root */
 }
 
 static int vcpu_init_pv_mmu_state(struct kvm_vcpu *vcpu,
@@ -779,73 +680,29 @@ int kvm_pv_vcpu_mmu_state(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-int kvm_pv_switch_to_shadow_pt(struct kvm_vcpu *vcpu)
-{
-	int r;
-
-	DebugTOVM("started on VCPU #%d to create shadow PTs for guest %s "
-		"PTs mode\n",
-		vcpu->vcpu_id,
-		(is_sep_virt_spaces(vcpu)) ? "separate" : "united");
-
-	if (vcpu->arch.is_hv || vcpu->arch.is_pv) {
-		r = kvm_mmu_enable_shadow_paging(vcpu);
-		if (r != 0) {
-			pr_err("%s() : could not enable shadow paging "
-				"on VCPU #%d, error %d\n",
-				__func__, vcpu->vcpu_id, r);
-		}
-		return r;
-	} else {
-		/* unknown mode */
-		KVM_BUG_ON(true);
-		return -ENOSYS;
-	}
-
-	if (!is_paging(vcpu)) {
-		/* complete nonpaging mode to start paging on shadow PTs */
-		complete_nonpaging_mode(vcpu);
-	}
-
-	/* It need create new shadow PT based on the initial guest PT created */
-	/* while guest kernel booting process and then enable VCPU MMU paging */
-	kvm_pv_mmu_load_gmm(vcpu);
-
-	set_shadow_paging(vcpu);
-
-	DebugTOVM("VCPU #%d created and set initial shadow PT at %px\n",
-		vcpu->vcpu_id,
-		(pgd_t *)__va(kvm_get_space_type_spt_os_root(vcpu)));
-
-	/* activate shadow PT should be done by caller */
-
-	return 0;
-}
-
 int kvm_pv_activate_guest_mm(struct kvm_vcpu *vcpu,
 		gmm_struct_t *new_gmm, gpa_t u_phys_ptb)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
+	gthread_info_t *gti;
 	int ret;
+
+	KVM_BUG_ON(!is_shadow_paging(vcpu));
+	KVM_BUG_ON(vcpu->arch.is_hv);
+
+	gti = pv_vcpu_get_gti(vcpu);
+	DebugAGMM("proces #%d the new gmm #%d\n",
+		gti->gpid->nid.nr, new_gmm->nid.nr);
 
 	new_gmm->u_pptb = u_phys_ptb;
 	DebugKVMSWH("VCPU #%d guest user mm #%d root PT base: 0x%llx\n",
 		vcpu->vcpu_id, new_gmm->nid.nr, u_phys_ptb);
 
-	if (is_shadow_paging(vcpu)) {
-		ret = kvm_pv_mmu_load_u_gmm(vcpu, new_gmm, u_phys_ptb);
-		if (ret != 0)
-			goto failed;
-		if (vcpu->arch.is_hv) {
-			KVM_BUG_ON(true);
-		} else if (vcpu->arch.is_pv) {
-			mmu_pv_setup_shadow_u_pptb(vcpu, new_gmm);
-		} else {
-			KVM_BUG_ON(true);
-		}
-	} else {
-		KVM_BUG_ON(true);
-	}
+	ret = kvm_pv_mmu_load_u_gmm(vcpu, new_gmm, u_phys_ptb);
+	if (ret != 0)
+		goto failed;
+
+	mmu_pv_setup_shadow_u_pptb(vcpu, new_gmm);
 
 	if (!mmu->u_context_on)
 		mmu->u_context_on = true;
@@ -931,27 +788,35 @@ int kvm_guest_addr_to_host(void **addr)
 {
 	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
 	unsigned long hva;
+	kvm_arch_exception_t exception;
 
 	KVM_BUG_ON(vcpu == NULL || !vcpu->arch.is_pv);
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (e2k_addr_t)*addr);
-	if (kvm_is_error_hva(hva))
-		return -EFAULT;
+	hva = kvm_vcpu_gva_to_hva(vcpu, (e2k_addr_t)*addr,
+				false, &exception);
+	if (kvm_is_error_hva(hva)) {
+		DebugKVM("failed to find GPA for dst %lx GVA, "
+			"inject page fault to guest\n", addr);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)addr,
+				&exception);
+		return -EAGAIN;
+	}
 
 	*addr = (void *)hva;
 	return 0;
 }
 
-void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size)
+void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size, bool need_inject)
 {
 	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
 	unsigned long hva;
+	kvm_arch_exception_t exception;
 
 	if ((u64)guest_ptr & PAGE_MASK !=
 				(u64)(guest_ptr + size - 1) & PAGE_MASK) {
 		/* in this case need translation of two pages addresses */
 		/* and two separate access to two part of data */
-		pr_err("%s(): guest pointer %px size %d bytes crosses "
+		pr_err("%s(): guest pointer %lx size %d bytes crosses "
 			"page boundaries, not implemented !!!\n",
 			__func__, guest_ptr, size);
 		return ERR_PTR(-EINVAL);
@@ -960,13 +825,17 @@ void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size)
 	vcpu = current_thread_info()->vcpu;
 	KVM_BUG_ON(vcpu == NULL || vcpu->arch.is_hv);
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (e2k_addr_t)guest_ptr);
-	if (unlikely(kvm_is_error_hva(hva))) {
-		pr_err("%s(): could not convert guest pointer %px size %d "
-			"bytes to host HVA\n",
-			__func__, guest_ptr, size);
-		return ERR_PTR(-EFAULT);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (e2k_addr_t)guest_ptr,
+				false, &exception);
+	if (kvm_is_error_hva(hva)) {
+		DebugKVM("failed to find GPA for dst %lx GVA, "
+			"inject page fault to guest\n", guest_ptr);
+		if (need_inject)
+			kvm_vcpu_inject_page_fault(vcpu, (void *)guest_ptr,
+					&exception);
+		return ERR_PTR(-EAGAIN);
 	}
+
 	return (void *)hva;
 }
 
@@ -1003,7 +872,7 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	tc_fault_type_t ftype;
 	tc_opcode_t opcode;
 	unsigned mas;
-	bool store;
+	bool store, page_boundary = false;
 	u32 error_code = 0;
 	bool nonpaging = !is_paging(vcpu);
 	kvm_pfn_t pfn;
@@ -1012,22 +881,49 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	e2k_addr_t hva;
 	int bytes;
 	intc_mu_state_t *mu_state;
-	int r, pfres, try;
+	int r, pfres, try, fmt;
 
 	address = tcellar->address;
 	cond = tcellar->condition;
 
 	AW(ftype) = AS(cond).fault_type;
 	AW(opcode) = AS(cond).opcode;
+	fmt = TC_COND_FMT_FULL(cond);
 	KVM_BUG_ON(AS(opcode).fmt == 0 || AS(opcode).fmt == 6);
 	bytes = tc_cond_to_size(cond);
 	PFRES_SET_ACCESS_SIZE(error_code, bytes);
 	mas = AS(cond).mas;
+	store = tc_cond_is_store(cond, machine.native_iset_ver);
 	DebugNONP("page fault on guest address 0x%lx fault type 0x%x\n",
 		address, AW(ftype));
 
 	KVM_BUG_ON(regs->trap == NULL);
 	set_pv_vcpu_cur_mu_event_no(vcpu, regs->trap->curr_cnt);
+
+	/*
+	 * address belongs to 2 pages (ld/st through page boundary)
+	 * Count real address of ld/st
+	 */
+	if (AS(cond).num_align) {
+		if (fmt != LDST_QP_FMT && fmt != TC_FMT_QPWORD_Q)
+			address -= 8;
+		else
+			address -= 16;
+	}
+
+	if (pf_on_page_boundary(address, cond)) {
+		unsigned long pf_address;
+
+		if (is_spurious_qp_store(store, address, fmt,
+					tcellar->mask, &pf_address)) {
+			page_boundary = false;
+			address = pf_address;
+		} else {
+			page_boundary = true;
+		}
+	} else {
+		page_boundary = false;
+	}
 
 	if (address >= NATIVE_TASK_SIZE) {
 		/* address from host page space range, so pass the fault */
@@ -1047,7 +943,6 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		error_code |= PFERR_NOT_PRESENT_MASK;
 		DebugSPF("fault type at nonpaging mode\n");
 	}
-	store = tc_cond_is_store(cond, machine.native_iset_ver);
 	if (store) {
 		error_code |= PFERR_WRITE_MASK;
 		DebugSPF("page fault on store\n");
@@ -1092,6 +987,32 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	do {
 		pfres = vcpu->arch.mmu.page_fault(vcpu, address, error_code,
 						  false, &gfn, &pfn);
+		if (page_boundary) {
+			int pfres_hi;
+			e2k_addr_t address_hi;
+			/*
+			 * If address points tp page boundary, then
+			 * handle next page
+			 */
+			address_hi = PAGE_ALIGN(address);
+			pfres_hi = vcpu->arch.mmu.page_fault(vcpu, address_hi,
+					error_code, false, &gfn, &pfn);
+
+			if (pfres == PFRES_ERR || pfres_hi == PFRES_ERR)
+				pfres = PFRES_ERR;
+			else if (pfres == PFRES_RETRY ||
+					pfres_hi == PFRES_RETRY)
+				pfres = PFRES_RETRY;
+			else if (pfres == PFRES_INJECTED ||
+					pfres_hi == PFRES_INJECTED)
+				pfres = PFRES_INJECTED;
+			else if (pfres == PFRES_WRITE_TRACK ||
+					pfres_hi == PFRES_WRITE_TRACK)
+				pfres = PFRES_WRITE_TRACK;
+			else
+				pfres = PFRES_NO_ERR;
+		}
+
 		if (likely(pfres != PFRES_RETRY))
 			break;
 		if (!mu_state->may_be_retried) {
@@ -1315,7 +1236,7 @@ int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		goto out;	/* fault injected to guest */
 	}
 
-	error_code |= PFERR_NOT_PRESENT_MASK;
+	error_code |= (PFERR_NOT_PRESENT_MASK | PFERR_FAPB_MASK);
 	store = tc_cond_is_store(cond, machine.native_iset_ver);
 	if (store) {
 		error_code |= PFERR_WRITE_MASK;

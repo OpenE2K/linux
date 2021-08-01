@@ -137,7 +137,7 @@ kvm_get_guest_thread_info(struct kvm *kvm, int gpid_nr)
 #ifdef CONFIG_KVM_GUEST_HW_HCALL
 #define	CHECK_GUEST_KERNEL_DATA_STACK(ti, g_sbr, g_usd_size)		\
 ({									\
-	if (!test_ti_thread_flag((ti), TIF_HOST_AT_VCPU_MODE)) {	\
+	if (!test_ti_status_flag((ti), TS_HOST_AT_VCPU_MODE)) {	\
 		/* It is host stack */					\
 		CHECK_BUG((g_sbr) != (ti)->u_stack.top, 1);		\
 		CHECK_BUG((g_usd_size) > (ti)->u_stack.size, 2);	\
@@ -148,8 +148,8 @@ kvm_get_guest_thread_info(struct kvm *kvm, int gpid_nr)
 		CHECK_BUG((ti)->vcpu->arch.is_hv, 8);			\
 	}								\
 	if ((ti)->gthread_info == NULL) {				\
-		CHECK_BUG(!test_ti_thread_flag((ti),			\
-				TIF_HOST_AT_VCPU_MODE), 4);		\
+		CHECK_BUG(!test_ti_status_flag((ti),			\
+				TS_HOST_AT_VCPU_MODE), 4);		\
 	} else {							\
 		gthread_info_t *gti = (ti)->gthread_info;		\
 		e2k_stacks_t *stacks = &gti->stack_regs.stacks;		\
@@ -525,7 +525,8 @@ extern int kvm_start_pv_guest(struct kvm_vcpu *vcpu);
 extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 		e2k_mem_ps_t *ps_frames, e2k_mem_crs_t *pcs_frames,
 		u64 *args, int args_num, char *entry_point, e2k_psr_t psr,
-		e2k_size_t usd_size, e2k_size_t *ps_ind, e2k_size_t *pcs_ind);
+		e2k_size_t usd_size, e2k_size_t *ps_ind, e2k_size_t *pcs_ind,
+		int cui, bool kernel);
 extern int kvm_prepare_pv_vcpu_start_stacks(struct kvm_vcpu *vcpu);
 extern int vcpu_init_os_cu_hw_ctxt(struct kvm_vcpu *vcpu,
 					kvm_task_info_t *user_info);
@@ -560,8 +561,8 @@ extern int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 		kvm_task_info_t __user *task_info,
 		vcpu_gmmu_info_t __user *gmmu_info);
 extern int kvm_sig_handler_return(struct kvm_vcpu *vcpu,
-		kvm_stacks_info_t *regs_info, long sys_rval,
-		guest_hw_stack_t *stack_regs);
+		kvm_stacks_info_t *regs_info, unsigned long sigreturn_entry,
+		long sys_rval, guest_hw_stack_t *stack_regs);
 extern int kvm_long_jump_return(struct kvm_vcpu *vcpu,
 				kvm_long_jump_info_t *regs_info);
 extern void kvm_guest_vcpu_common_idle(struct kvm_vcpu *vcpu,
@@ -718,11 +719,34 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 	return 0;
 }
 
+static inline int
+pv_vcpu_user_hw_stacks_copy_crs(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
+				pt_regs_t *regs, e2k_mem_crs_t *crs)
+{
+	e2k_mem_crs_t __user *u_frame;
+	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+	int ret;
+
+	u_frame = (void __user *) g_stacks->pcsp_lo.PCSP_lo_base +
+				  g_stacks->pcsp_hi.PCSP_hi_ind;
+	DebugGUST("copy last user frame from CRS at %px to guest "
+		"kernel chain %px (base 0x%llx + ind 0x%x)\n",
+		crs, u_frame, g_stacks->pcsp_lo.PCSP_lo_base,
+		g_stacks->pcsp_hi.PCSP_hi_ind);
+	ret = user_crs_frames_copy(u_frame, regs, crs);
+	if (unlikely(ret))
+		return ret;
+
+	g_stacks->pcsp_hi.PCSP_hi_ind += SZ_OF_CR;
+	DebugGUST("guest kernel chain stack index is now 0x%x\n",
+		g_stacks->pcsp_hi.PCSP_hi_ind);
+	return 0;
+}
+
 static inline int pv_vcpu_user_hw_stacks_copy_full(struct kvm_vcpu *vcpu,
 						   pt_regs_t *regs)
 {
 	e2k_stacks_t *g_stacks = &regs->g_stacks;
-	e2k_mem_crs_t *crs = &regs->crs;
 	long ps_copy, pcs_copy, ps_ind, pcs_ind;
 	int ret;
 
@@ -778,24 +802,9 @@ static inline int pv_vcpu_user_hw_stacks_copy_full(struct kvm_vcpu *vcpu,
 	 * Caller must take care of filling of resulting hole
 	 * (last user frame from pcshtp == SZ_OF_CR).
 	 */
-	if (likely(crs)) {
-		e2k_mem_crs_t __user *u_frame;
-		gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
-
-		u_frame = (void __user *) g_stacks->pcsp_lo.PCSP_lo_base +
-					  g_stacks->pcsp_hi.PCSP_hi_ind;
-		DebugGUST("copy last user frame from CRS at %px to guest "
-			"kernel chain %px (base 0x%llx + ind 0x%x)\n",
-			crs, u_frame, g_stacks->pcsp_lo.PCSP_lo_base,
-			g_stacks->pcsp_hi.PCSP_hi_ind);
-		ret = user_crs_frames_copy(u_frame, regs);
-		if (unlikely(ret))
-			return ret;
-
-		g_stacks->pcsp_hi.PCSP_hi_ind += SZ_OF_CR;
-		DebugGUST("guest kernel chain stack index is now 0x%x\n",
-			g_stacks->pcsp_hi.PCSP_hi_ind);
-	}
+	ret = pv_vcpu_user_hw_stacks_copy_crs(vcpu, g_stacks, regs, &regs->crs);
+	if (unlikely(ret))
+		return ret;
 
 	if (DEBUG_KVM_GUEST_STACKS_MODE && debug_guest_user_stacks)
 		debug_guest_user_stacks = false;
@@ -810,13 +819,18 @@ pv_vcpu_user_crs_copy_to_kernel(struct kvm_vcpu *vcpu,
 	hva_t hva;
 	unsigned long ts_flag;
 	int ret;
+	kvm_arch_exception_t exception;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)u_frame);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)u_frame, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): CRS frame addr %px is invalid guest address\n",
-			__func__, u_frame);
-		return -EFAULT;
+		pr_err("%s(): failed to find GPA for dst %lx GVA, "
+				"inject page fault to guest\n",
+				__func__, u_frame);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)u_frame,
+					&exception);
+		return -EAGAIN;
 	}
+
 	u_frame = (void *)hva;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);

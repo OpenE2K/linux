@@ -18,20 +18,40 @@ extern long kvm_guest_ttable_entry5(int sys_num,
 extern long kvm_guest_ttable_entry6(int sys_num,
 		u64 arg1, u64 arg2, u64 arg3, u64 arg4, u64 arg5, u64 arg6);
 
+static __always_inline void kvm_init_pt_regs_copyed_fields(struct pt_regs *regs)
+{
+#ifdef	CONFIG_KVM_GUEST_KERNEL
+	if (likely(!regs->stack_regs_saved)) {
+		regs->copyed.ps_size = 0;
+		regs->copyed.pcs_size = 0;
+		regs->copyed.pcs_injected_frames_size = 0;
+	} else {
+		/* the regs is reused and all stacks should be already copyed */
+		;
+	}
+#endif	/* CONFIG_KVM_GUEST_KERNEL */
+}
+
+static __always_inline void kvm_init_pt_regs(struct pt_regs *regs)
+{
+	kvm_init_pt_regs_copyed_fields(regs);
+}
+
 static __always_inline void
 kvm_init_traps_handling(struct pt_regs *regs, bool user_mode_trap)
 {
-	regs->deferred_traps = 0;
+	kvm_init_pt_regs(regs);
 }
 static __always_inline void
 kvm_init_syscalls_handling(struct pt_regs *regs)
 {
 	kvm_init_traps_handling(regs, true);	/* now as traps init */
 }
-static inline bool
-kvm_have_deferred_traps(struct pt_regs *regs)
+
+static inline void kvm_clear_fork_child_pt_regs(struct pt_regs *childregs)
 {
-	return regs->deferred_traps != 0;
+	native_clear_fork_child_pt_regs(childregs);
+	kvm_init_pt_regs_copyed_fields(childregs);
 }
 
 #define	KVM_FILL_HARDWARE_STACKS()	/* host itself will fill */
@@ -99,15 +119,12 @@ kvm_stack_bounds_trap_enable(void)
 	kvm_set_sge();
 }
 
-extern void kvm_handle_deferred_traps(struct pt_regs *regs);
-extern void kvm_handle_deferred_traps_in_syscall(struct pt_regs *regs);
-
-static inline void
+static inline int
 kvm_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
-	native_do_aau_page_fault(regs, address, condition, mask, aa_no);
+	return native_do_aau_page_fault(regs, address, condition, mask, aa_no);
 }
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
@@ -178,16 +195,12 @@ is_guest_TIRs_frozen(struct pt_regs *regs)
 {
 	return false;	/* none any guest */
 }
-static inline bool
-have_deferred_traps(struct pt_regs *regs)
+
+static inline void clear_fork_child_pt_regs(struct pt_regs *childregs)
 {
-	return kvm_have_deferred_traps(regs);
+	kvm_clear_fork_child_pt_regs(childregs);
 }
-static inline void
-handle_deferred_traps_in_syscall(struct pt_regs *regs)
-{
-	kvm_handle_deferred_traps_in_syscall(regs);
-}
+
 static inline bool
 is_proc_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
 {
@@ -229,12 +242,12 @@ handle_guest_last_wish(struct pt_regs *regs)
 	return false;	/* none any guest and any wishes from */
 }
 
-static inline void
+static inline int
 do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
-	kvm_do_aau_page_fault(regs, address, condition, mask, aa_no);
+	return kvm_do_aau_page_fault(regs, address, condition, mask, aa_no);
 }
 
 /*

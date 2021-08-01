@@ -390,8 +390,8 @@ static pgprot_t set_spte_pfn(struct kvm *kvm, pgprot_t spte, kvm_pfn_t pfn);
 static void mmu_spte_set(struct kvm *kvm, pgprot_t *sptep, pgprot_t spte);
 static void mmu_free_roots(struct kvm_vcpu *vcpu, unsigned flags);
 static void kvm_unsync_page(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp);
-static int kvm_sync_shadow_root(struct kvm_vcpu *vcpu, hpa_t root_hpa,
-				unsigned flags);
+static int kvm_sync_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				hpa_t root_hpa, unsigned flags);
 
 /*
  * the low bit of the generation number is always presumed to be zero.
@@ -719,6 +719,11 @@ static pgprot_t set_spte_dirty_mask(struct kvm *kvm, pgprot_t spte)
 
 	mask = get_spte_dirty_mask(kvm);
 	return __pgprot(pgprot_val(spte) | mask);
+}
+static pgprot_t set_spte_cui(pgprot_t spte, u64 cui)
+{
+	return !cpu_has(CPU_FEAT_ISET_V6) ? __pgprot(pgprot_val(spte) |
+			_PAGE_INDEX_TO_CUNIT_V2(cui)) : spte;
 }
 static pgprot_t clear_spte_dirty_mask(struct kvm *kvm, pgprot_t spte)
 {
@@ -2527,7 +2532,7 @@ int kvm_unmap_hva(struct kvm *kvm, unsigned long hva)
 	return kvm_handle_hva(kvm, hva, 0, kvm_unmap_rmapp);
 }
 
-int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end)
+int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end, unsigned flags)
 {
 	return kvm_handle_hva_range(kvm, start, end, 0, kvm_unmap_rmapp);
 }
@@ -2646,8 +2651,8 @@ static int is_empty_shadow_page(struct kvm *kvm, pgprot_t *spt)
 	for (pos = spt, end = pos + PAGE_SIZE / sizeof(pgprot_t);
 			pos != end; pos++)
 		if (is_shadow_present_pte(kvm, *pos)) {
-			printk(KERN_ERR "%s: %px %lx\n", __func__,
-			       pos, pgprot_val(*pos));
+			pr_err("%s: %px %lx\n",
+				__func__, pos, pgprot_val(*pos));
 			return 0;
 		}
 	return 1;
@@ -2666,13 +2671,16 @@ static inline void kvm_mod_used_mmu_pages(struct kvm *kvm, int nr)
 	percpu_counter_add(&kvm_total_used_mmu_pages, nr);
 }
 
-static void kvm_mmu_free_page(struct kvm *kvm, struct kvm_mmu_page *sp)
+void kvm_mmu_free_page(struct kvm *kvm, struct kvm_mmu_page *sp)
 {
 	DebugZAP("SP at %px gva 0x%lx gfn 0x%llx spt at %px\n",
 		sp, sp->gva, sp->gfn, sp->spt);
-	MMU_WARN_ON(!is_empty_shadow_page(kvm, sp->spt));
+	KVM_WARN_ON(!is_empty_shadow_page(kvm, sp->spt));
 	hlist_del(&sp->hash_link);
 	list_del(&sp->link);
+	if (!kvm->arch.is_hv) {
+		kvm_delete_sp_from_gmm_list(sp);
+	}
 	free_page((unsigned long)sp->spt);
 	if (!sp->role.direct)
 		free_page((unsigned long)sp->gfns);
@@ -2764,13 +2772,14 @@ static int nonpaging_sync_page(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-static void nonpaging_flush_gva(struct kvm_vcpu *vcpu, gva_t gva)
+static void nonpaging_sync_gva(struct kvm_vcpu *vcpu, gva_t gva)
 {
 }
 
-static void nonpaging_flush_gva_range(struct kvm_vcpu *vcpu,
+static void nonpaging_sync_gva_range(struct kvm_vcpu *vcpu,
 					gva_t gva_start,
-					gva_t gva_end)
+					gva_t gva_end,
+					bool flush_tlb)
 {
 }
 
@@ -3281,7 +3290,7 @@ static void check_pt_validation(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp)
 
 static inline bool
 kvm_compare_mmu_page(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
-			gva_t gaddr, gfn_t gfn)
+			gva_t gaddr, gfn_t gfn, bool is_direct)
 {
 	gva_t sp_gva, pt_gva;
 	unsigned index;
@@ -3301,8 +3310,8 @@ kvm_compare_mmu_page(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 	sp_gva = set_pt_level_addr_index(sp_gva, index, gpt_level);
 	pt_gva = gaddr & get_pt_level_mask(gpt_level);
 	pt_gva = set_pt_level_addr_index(pt_gva, index, gpt_level);
-	if (pt_gva >= GUEST_KERNEL_IMAGE_AREA_BASE &&
-			pt_gva < GUEST_KERNEL_IMAGE_AREA_BASE +
+	if (!is_direct && pt_gva >= GUEST_KERNEL_IMAGE_AREA_BASE &&
+				pt_gva < GUEST_KERNEL_IMAGE_AREA_BASE +
 						vcpu->arch.guest_size) {
 		/* it is virtual address from guest kernel image, */
 		/* convert it to equal "virtual" physical */
@@ -3360,7 +3369,8 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 			continue;
 		}
 
-		if (unlikely(!kvm_compare_mmu_page(vcpu, sp, gaddr, gfn)))
+		if (unlikely(!kvm_compare_mmu_page(vcpu, sp, gaddr, gfn,
+							direct)))
 			continue;
 
 		if (sp->unsync) {
@@ -3393,6 +3403,7 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 	sp->role = role;
 	hlist_add_head(&sp->hash_link,
 		&vcpu->kvm->arch.mmu_page_hash[kvm_page_table_hashfn(gfn)]);
+	kvm_init_sp_gmm_entry(sp);
 	if (!direct) {
 		/*
 		 * we should do write protection before syncing pages
@@ -3488,8 +3499,8 @@ void shadow_walk_next(struct kvm_shadow_walk_iterator *iterator)
 	return __shadow_walk_next(iterator, *iterator->sptep);
 }
 
-static void link_shadow_page(struct kvm_vcpu *vcpu, pgprot_t *sptep,
-			     struct kvm_mmu_page *sp)
+static void link_shadow_page(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				pgprot_t *sptep, struct kvm_mmu_page *sp)
 {
 	struct kvm *kvm = vcpu->kvm;
 	pgprot_t spte;
@@ -3500,6 +3511,10 @@ static void link_shadow_page(struct kvm_vcpu *vcpu, pgprot_t *sptep,
 	mmu_spte_set(vcpu->kvm, sptep, spte);
 
 	mmu_page_add_parent_pte(vcpu, sp, sptep);
+
+	if (unlikely(!vcpu->arch.is_hv)) {
+		kvm_try_add_sp_to_gmm_list(gmm, sp);
+	}
 
 	if (sp->unsync_children || sp->unsync)
 		mark_unsync(kvm, sptep);
@@ -3528,13 +3543,14 @@ static void validate_direct_spte(struct kvm_vcpu *vcpu, pgprot_t *sptep,
 	}
 }
 
-void copy_guest_kernel_root_range(struct kvm_vcpu *vcpu,
+void copy_guest_kernel_root_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			struct kvm_mmu_page *sp, pgprot_t *src_root)
 {
 	int start, end, index;
 	pgprot_t *dst_root = sp->spt;
 	pgprot_t *sptep, spte;
 	struct kvm_mmu_page *child;
+	gmm_struct_t *init_gmm = pv_vcpu_get_init_gmm(vcpu);
 
 	start = GUEST_KERNEL_PGD_PTRS_START;
 	end = GUEST_KERNEL_PGD_PTRS_END;
@@ -3546,7 +3562,7 @@ void copy_guest_kernel_root_range(struct kvm_vcpu *vcpu,
 			continue;
 		child = page_header(kvm_spte_pfn_to_phys_addr(vcpu->kvm, spte));
 		KVM_BUG_ON(child == NULL);
-		link_shadow_page(vcpu, sptep, child);
+		link_shadow_page(vcpu, init_gmm, sptep, child);
 		DebugCPSPT("copied %px = 0x%lx from %px = 0x%lx index 0x%lx\n",
 			sptep, pgprot_val(*sptep), &src_root[index],
 			pgprot_val(spte), index * sizeof(pgprot_t));
@@ -3917,7 +3933,7 @@ static int set_spte(struct kvm_vcpu *vcpu, pgprot_t *sptep,
 		    unsigned pte_access, int level,
 		    gfn_t gfn, kvm_pfn_t pfn, bool speculative,
 		    bool can_unsync, bool host_writable,
-		    bool only_validate)
+		    bool only_validate, u64 pte_cui)
 {
 	struct kvm *kvm = vcpu->kvm;
 	pgprot_t spte;
@@ -3967,6 +3983,8 @@ static int set_spte(struct kvm_vcpu *vcpu, pgprot_t *sptep,
 		pte_access &= ~ACC_WRITE_MASK;
 	DebugSPF("spte %px current value 0x%lx, host_writable %d\n",
 		sptep, pgprot_val(spte), host_writable);
+
+	spte = set_spte_cui(spte, pte_cui);
 
 	spte = set_spte_pfn(kvm, spte, pfn);
 
@@ -4023,7 +4041,7 @@ static pf_res_t mmu_set_spte(struct kvm_vcpu *vcpu, pgprot_t *sptep,
 			 unsigned pte_access, int write_fault,
 			 int level, gfn_t gfn, kvm_pfn_t pfn,
 			 bool speculative, bool host_writable,
-			 bool only_validate)
+			 bool only_validate, u64 pte_cui)
 {
 	int was_rmapped = 0;
 	int rmap_count;
@@ -4067,7 +4085,7 @@ static pf_res_t mmu_set_spte(struct kvm_vcpu *vcpu, pgprot_t *sptep,
 	}
 
 	if (set_spte(vcpu, sptep, pte_access, level, gfn, pfn, speculative,
-			true, host_writable, only_validate)) {
+			true, host_writable, only_validate, pte_cui)) {
 		if (write_fault)
 			emulate = PFRES_WRITE_TRACK;
 		kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
@@ -4138,7 +4156,7 @@ static int direct_pte_prefetch_many(struct kvm_vcpu *vcpu,
 
 	for (i = 0; i < ret; i++, gfn++, start++)
 		mmu_set_spte(vcpu, start, access, 0, sp->role.level, gfn,
-			     page_to_pfn(pages[i]), true, true, false);
+			     page_to_pfn(pages[i]), true, true, false, 0);
 
 	return 0;
 }
@@ -4194,12 +4212,17 @@ static pf_res_t __direct_map(struct kvm_vcpu *vcpu, int write, int map_writable,
 	kvm_mmu_page_t *sp;
 	pf_res_t emulate = PFRES_NO_ERR;
 	gfn_t pseudo_gfn;
+	gmm_struct_t *init_gmm = NULL;
 
 	DebugNONP("started for level %d gfn 0x%llx pfn 0x%llx\n",
 		level, gfn, pfn);
 
 	if (!VALID_PAGE(kvm_get_gp_phys_root(vcpu)))
 		return 0;
+
+	if (unlikely(!vcpu->arch.is_hv)) {
+		init_gmm = pv_vcpu_get_init_gmm(vcpu);
+	}
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		DebugNONP("iterator level %d spte %px == 0x%lx\n",
@@ -4208,7 +4231,7 @@ static pf_res_t __direct_map(struct kvm_vcpu *vcpu, int write, int map_writable,
 		if (iterator.level == level) {
 			emulate = mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
 					       write, level, gfn, pfn, prefault,
-					       map_writable, false);
+					       map_writable, false, 0);
 			DebugNONP("set spte %px == 0x%lx\n",
 				iterator.sptep, pgprot_val(*iterator.sptep));
 			if (emulate == PFRES_TRY_MMIO)
@@ -4228,7 +4251,7 @@ static pf_res_t __direct_map(struct kvm_vcpu *vcpu, int write, int map_writable,
 					      iterator.level - 1, 1, ACC_ALL,
 					      false /* validate */);
 
-			link_shadow_page(vcpu, iterator.sptep, sp);
+			link_shadow_page(vcpu, init_gmm, iterator.sptep, sp);
 			DebugNONP("allocated PTD to nonpaging level %d, pseudo "
 				"gfn 0x%llx SPTE %px == 0x%lx\n",
 				iterator.level - 1, pseudo_gfn,
@@ -5457,7 +5480,8 @@ static hpa_t e2k_mmu_alloc_spt_root(struct kvm_vcpu *vcpu, gfn_t root_gfn)
 	return root_hpa;
 }
 
-static int e2k_mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu, unsigned flags)
+static int e2k_mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+					unsigned flags)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
 	pgprotval_t u_pptb, os_pptb;
@@ -5494,7 +5518,7 @@ static int e2k_mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu, unsigned flags)
 			kvm_set_space_type_spt_u_root(vcpu, root);
 		}
 		if (!(flags & DONT_SYNC_ROOT_PT_FLAG)) {
-			kvm_sync_shadow_root(vcpu, root, OS_ROOT_PT_FLAG);
+			kvm_sync_shadow_root(vcpu, gmm, root, OS_ROOT_PT_FLAG);
 		}
 		DebugSPT("VCPU #%d, guest OS_PT root at 0x%llx shadow root "
 			"at 0x%llx\n",
@@ -5521,7 +5545,7 @@ static int e2k_mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu, unsigned flags)
 		kvm_set_space_type_spt_os_root(vcpu, root);
 	}
 	if (!(flags & DONT_SYNC_ROOT_PT_FLAG)) {
-		kvm_sync_shadow_root(vcpu, root, U_ROOT_PT_FLAG);
+		kvm_sync_shadow_root(vcpu, gmm, root, U_ROOT_PT_FLAG);
 	}
 	DebugSPT("VCPU #%d, guest U_PT root at 0x%llx, shadow root "
 		"at 0x%llx\n",
@@ -5620,15 +5644,11 @@ int x86_mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu, unsigned flags)
 	return 0;
 }
 
-static int mmu_alloc_roots(struct kvm_vcpu *vcpu, unsigned flags)
+static int mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+					unsigned flags)
 {
-	DebugSYNC("started on VCPU #%d direct map is %s\n",
-		vcpu->vcpu_id,
-		(vcpu->arch.mmu.direct_map) ? "true" : "false");
-	if (vcpu->arch.mmu.direct_map)
-		return mmu_alloc_direct_roots(vcpu);
-	else
-		return e2k_mmu_alloc_shadow_roots(vcpu, flags);
+	KVM_BUG_ON(vcpu->arch.mmu.direct_map);
+	return e2k_mmu_alloc_shadow_roots(vcpu, gmm, flags);
 }
 
 static void mmu_sync_spt_root(struct kvm_vcpu *vcpu, hpa_t root)
@@ -6322,8 +6342,9 @@ static void inject_shadow_page_fault(struct kvm_vcpu *vcpu,
  *
  * Returns zero on success and value of type exec_mmu_ret on failure.
  */
-static int calculate_guest_recovery_load_to_rf_frame(struct pt_regs *regs,
-			tc_cond_t cond, u64 **radr, bool *load_to_rf)
+static enum exec_mmu_ret calculate_guest_recovery_load_to_rf_frame(
+		struct pt_regs *regs, tc_cond_t cond,
+		u64 **radr, bool *load_to_rf)
 {
 	unsigned	dst_ind = AS(cond).dst_ind;
 	unsigned	w_base_rnum_d, frame_rnum_d;
@@ -7194,7 +7215,6 @@ static try_pf_err_t try_atomic_pf(struct kvm_vcpu *vcpu, gfn_t gfn,
 		return TRY_PF_MMIO_ERR;
 	} else if (*pfn == KVM_PFN_ERR_FAULT) {
 		e2k_addr_t hva;
-		pgprot_t *pgprot;
 
 		/* gfn is not valid or rmapped to pfn on host */
 		hva = gfn_to_hva_memslot(slot, gfn);
@@ -7203,6 +7223,11 @@ static try_pf_err_t try_atomic_pf(struct kvm_vcpu *vcpu, gfn_t gfn,
 				__func__, gfn);
 			return TO_TRY_PF_ERR(-EFAULT);
 		}
+
+		/* Bug 129228: we may want to use a separate thread for HVA->HPA and debug prints */
+		return TRY_PF_ONLY_VALID_ERR;
+#if 0
+		pgprot_t *pgprot;
 		pgprot = kvm_hva_to_pte(hva);
 		if (pgprot == NULL) {
 			pr_err("%s(): kvm_hva_to_pte() for gfn 0x%llx failed\n",
@@ -7232,6 +7257,7 @@ static try_pf_err_t try_atomic_pf(struct kvm_vcpu *vcpu, gfn_t gfn,
 			return TRY_PF_ONLY_VALID_ERR;
 		}
 		KVM_BUG_ON(true);
+#endif
 	} else if (is_error_pfn(*pfn)) {
 		pr_err("%s(): gfn_to_pfn_memslot_atomic() for gfn 0x%llx "
 			"failed\n",
@@ -7900,8 +7926,8 @@ static void e2k_paging_init_context_common(struct kvm_vcpu *vcpu,
 	context->page_fault = e2k_page_fault;
 	context->gva_to_gpa = e2k_gva_to_gpa;
 	context->sync_page = e2k_sync_page;
-	context->flush_gva = e2k_flush_gva;
-	context->flush_gva_range = e2k_flush_gva_range;
+	context->sync_gva = e2k_sync_gva;
+	context->sync_gva_range = e2k_sync_gva_range;
 	context->update_pte = e2k_update_pte;
 	context->shadow_root_level = level;
 	context->sh_os_root_hpa = E2K_INVALID_PAGE;
@@ -7932,8 +7958,8 @@ static void paging64_init_context_common(struct kvm_vcpu *vcpu,
 	context->page_fault = paging64_page_fault;
 	context->gva_to_gpa = paging64_gva_to_gpa;
 	context->sync_page = paging64_sync_page;
-	context->flush_gva = paging64_flush_gva;
-	context->flush_gva_range = paging64_flush_gva_range;
+	context->sync_gva = paging64_sync_gva;
+	context->sync_gva_range = paging64_sync_gva_range;
 	context->update_pte = paging64_update_pte;
 	context->shadow_root_level = level;
 	context->os_root_hpa = E2K_INVALID_PAGE;
@@ -7961,8 +7987,8 @@ static void paging32_init_context(struct kvm_vcpu *vcpu,
 	context->page_fault = paging32_page_fault;
 	context->gva_to_gpa = paging32_gva_to_gpa;
 	context->sync_page = paging32_sync_page;
-	context->flush_gva = paging32_flush_gva;
-	context->flush_gva_range = paging32_flush_gva_range;
+	context->sync_gva = paging32_sync_gva;
+	context->sync_gva_range = paging32_sync_gva_range;
 	context->update_pte = paging32_update_pte;
 	context->shadow_root_level = PT32E_ROOT_LEVEL;
 	context->os_root_hpa = E2K_INVALID_PAGE;
@@ -8031,8 +8057,8 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu *vcpu)
 	context->base_role.smm = is_smm(vcpu);
 	context->page_fault = tdp_page_fault;
 	context->sync_page = nonpaging_sync_page;
-	context->flush_gva = nonpaging_flush_gva;
-	context->flush_gva_range = nonpaging_flush_gva_range;
+	context->sync_gva = nonpaging_sync_gva;
+	context->sync_gva_range = nonpaging_sync_gva_range;
 	context->update_pte = nonpaging_update_pte;
 	context->shadow_root_level = get_tdp_root_level();
 	if (!is_paging(vcpu)) {
@@ -8175,8 +8201,8 @@ void kvm_init_shadow_ept_mmu(struct kvm_vcpu *vcpu, bool execonly)
 	context->page_fault = ept_page_fault;
 	context->gva_to_gpa = ept_gva_to_gpa;
 	context->sync_page = ept_sync_page;
-	context->flush_gva = ept_flush_gva;
-	context->flush_gva_range = ept_flush_gva_range;
+	context->sync_gva = ept_sync_gva;
+	context->sync_gva_range = ept_sync_gva_range;
 	context->update_pte = ept_update_pte;
 	context->root_level = context->shadow_root_level;
 	context->root_hpa = E2K_INVALID_PAGE;
@@ -8230,7 +8256,7 @@ void kvm_mmu_reset_context(struct kvm_vcpu *vcpu, unsigned flags)
 }
 EXPORT_SYMBOL_GPL(kvm_mmu_reset_context);
 
-int kvm_mmu_load(struct kvm_vcpu *vcpu, unsigned flags)
+int kvm_mmu_load(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, unsigned flags)
 {
 	int r;
 
@@ -8238,7 +8264,11 @@ int kvm_mmu_load(struct kvm_vcpu *vcpu, unsigned flags)
 	r = mmu_topup_memory_caches(vcpu);
 	if (r)
 		goto out;
-	r = mmu_alloc_roots(vcpu, flags);
+	if (vcpu->arch.mmu.direct_map) {
+		r = mmu_alloc_direct_roots(vcpu);
+	} else {
+		r = mmu_alloc_shadow_roots(vcpu, gmm, flags);
+	}
 	kvm_mmu_sync_roots(vcpu, flags);
 	if (r)
 		goto out;
@@ -8560,7 +8590,7 @@ static void make_mmu_pages_available(struct kvm_vcpu *vcpu)
 
 void kvm_mmu_flush_gva(struct kvm_vcpu *vcpu, gva_t gva)
 {
-	vcpu->arch.mmu.flush_gva(vcpu, gva);
+	vcpu->arch.mmu.sync_gva(vcpu, gva);
 	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 	++vcpu->stat.flush_gva;
 }
@@ -9259,11 +9289,12 @@ static void kvm_setup_nonp_shadow_pt(struct kvm_vcpu *vcpu, hpa_t root)
 		} else if (vcpu->arch.is_pv) {
 			/* shadow PTs will be used in both modes */
 			/* as well as host and guest translations */
-			kvm_prepare_shadow_root(vcpu, root, E2K_INVALID_PAGE,
-				(is_sep_virt_spaces(vcpu)) ?
-					MMU_SEPARATE_KERNEL_VPTB
-					:
-					MMU_UNITED_KERNEL_VPTB);
+			kvm_prepare_shadow_root(vcpu, NULL,
+					root, E2K_INVALID_PAGE,
+					(is_sep_virt_spaces(vcpu)) ?
+						MMU_SEPARATE_KERNEL_VPTB
+						:
+						MMU_UNITED_KERNEL_VPTB);
 		} else {
 			KVM_BUG_ON(true);
 		}
@@ -9306,7 +9337,7 @@ int kvm_hv_setup_nonpaging_mode(struct kvm_vcpu *vcpu)
 	} else {
 		KVM_BUG_ON(true);
 	}
-	ret = kvm_mmu_load(vcpu, flags);
+	ret = kvm_mmu_load(vcpu, NULL, flags);
 	if (ret) {
 		pr_err("%s(): could not create VCPU #%d root PT, error %d\n",
 			__func__, vcpu->vcpu_id, ret);
@@ -9357,7 +9388,8 @@ static void complete_nonpaging_mode(struct kvm_vcpu *vcpu)
 	kvm_mmu_reset_context(vcpu, OS_ROOT_PT_FLAG | U_ROOT_PT_FLAG);
 }
 
-static int setup_shadow_root(struct kvm_vcpu *vcpu, unsigned flags)
+static int setup_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				unsigned flags)
 {
 	struct kvm *kvm = vcpu->kvm;
 	hpa_t os_root, u_root, gp_root;
@@ -9371,7 +9403,7 @@ static int setup_shadow_root(struct kvm_vcpu *vcpu, unsigned flags)
 
 	preempt_disable();	/* to avoid schedule() when VCPU root */
 				/* PT is cleared and not set */
-	ret = kvm_mmu_load(vcpu, flags);
+	ret = kvm_mmu_load(vcpu, gmm, flags);
 	if (ret) {
 		preempt_enable();
 		pr_err("%s(): could not create support of VCPU #%d MMU\n",
@@ -9383,11 +9415,11 @@ static int setup_shadow_root(struct kvm_vcpu *vcpu, unsigned flags)
 				&os_root, &u_root, &gp_root);
 
 	if (VALID_PAGE(u_root)) {
-		kvm_prepare_shadow_root(vcpu, u_root, gp_root,
+		kvm_prepare_shadow_root(vcpu, gmm, u_root, gp_root,
 			vcpu->arch.mmu.get_vcpu_sh_u_vptb(vcpu));
 	}
 	if (VALID_PAGE(os_root) && os_root != u_root) {
-		kvm_prepare_shadow_root(vcpu, os_root, gp_root,
+		kvm_prepare_shadow_root(vcpu, gmm, os_root, gp_root,
 			vcpu->arch.mmu.get_vcpu_sh_os_vptb(vcpu));
 	}
 
@@ -9396,8 +9428,8 @@ static int setup_shadow_root(struct kvm_vcpu *vcpu, unsigned flags)
 	return 0;
 }
 
-static int kvm_sync_shadow_root(struct kvm_vcpu *vcpu, hpa_t root_hpa,
-				unsigned flags)
+static int kvm_sync_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				hpa_t root_hpa, unsigned flags)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
 	struct kvm_mmu_page *sp;
@@ -9474,8 +9506,8 @@ static int kvm_sync_shadow_root(struct kvm_vcpu *vcpu, hpa_t root_hpa,
 	}
 
 	kvm_unlink_unsync_page(vcpu->kvm, sp);
-	ret = e2k_sync_shadow_pt_range(vcpu, root_hpa, sync_start, sync_end,
-					E2K_INVALID_PAGE, vptb);
+	ret = e2k_sync_shadow_pt_range(vcpu, gmm, root_hpa,
+			sync_start, sync_end, E2K_INVALID_PAGE, vptb);
 	if (ret) {
 		pr_err("%s(): could not sync host shadow U_PT "
 			"and guest initial PT, error %d\n",
@@ -9489,7 +9521,8 @@ static int kvm_sync_shadow_root(struct kvm_vcpu *vcpu, hpa_t root_hpa,
 	return 0;
 }
 
-int kvm_sync_shadow_u_root(struct kvm_vcpu *vcpu, bool force)
+static int kvm_sync_shadow_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+					bool force)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
 	struct kvm_mmu_page *sp;
@@ -9530,7 +9563,7 @@ int kvm_sync_shadow_u_root(struct kvm_vcpu *vcpu, bool force)
 		vcpu->vcpu_id, type, root, u_pptb);
 
 	kvm_unlink_unsync_page(vcpu->kvm, sp);
-	ret = e2k_sync_shadow_pt_range(vcpu, root, sync_start, sync_end,
+	ret = e2k_sync_shadow_pt_range(vcpu, gmm, root, sync_start, sync_end,
 					u_pptb, vptb);
 	if (ret) {
 		pr_err("%s(): could not sync host shadow U_PT "
@@ -9545,8 +9578,8 @@ int kvm_sync_shadow_u_root(struct kvm_vcpu *vcpu, bool force)
 	return 0;
 }
 
-static int sync_pv_vcpu_shadow_u_root(struct kvm_vcpu *vcpu, hpa_t root_hpa,
-					gpa_t u_pptb)
+static int sync_pv_vcpu_shadow_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+					hpa_t root_hpa, gpa_t u_pptb)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
 	struct kvm_mmu_page *sp;
@@ -9582,7 +9615,7 @@ static int sync_pv_vcpu_shadow_u_root(struct kvm_vcpu *vcpu, hpa_t root_hpa,
 		vcpu->vcpu_id, root_hpa, u_pptb);
 
 	kvm_unlink_unsync_page(vcpu->kvm, sp);
-	ret = e2k_sync_shadow_pt_range(vcpu, root_hpa,
+	ret = e2k_sync_shadow_pt_range(vcpu, gmm, root_hpa,
 				sync_start, sync_end, u_pptb, vptb);
 	if (ret) {
 		pr_err("%s(): could not sync host shadow user PT "
@@ -9620,7 +9653,7 @@ int kvm_sync_init_shadow_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	vcpu->arch.mmu.set_vcpu_sh_u_vptb(vcpu, u_virt_ptb);
 	flags = OS_ROOT_PT_FLAG | U_ROOT_PT_FLAG;
 
-	ret = setup_shadow_root(vcpu, flags);
+	ret = setup_shadow_root(vcpu, gmm, flags);
 	if (ret) {
 		pr_err("%s(): could not create support of VCPU #%d MMU\n",
 			__func__, vcpu->vcpu_id);
@@ -9637,6 +9670,7 @@ int kvm_sync_init_shadow_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	} else {
 		KVM_BUG_ON(true);
 	}
+	kvm_set_root_gmm_spt_list(gmm);
 	return 0;
 
 failed:
@@ -9648,6 +9682,7 @@ int kvm_prepare_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 				gpa_t u_phys_ptb)
 {
 	hpa_t root;
+	struct kvm_mmu_page *sp;
 	int ret;
 
 	KVM_BUG_ON(!is_shadow_paging(vcpu));
@@ -9670,7 +9705,10 @@ int kvm_prepare_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 
 	mmu_pv_prepare_spt_u_root(vcpu, gmm, root);
 
-	ret = sync_pv_vcpu_shadow_u_root(vcpu, root, u_phys_ptb);
+	sp = page_header(root);
+	kvm_init_root_gmm_spt_list(gmm, sp);
+
+	ret = sync_pv_vcpu_shadow_u_root(vcpu, gmm, root, u_phys_ptb);
 	if (ret) {
 		pr_err("%s(): failed to sync user root of GMM #%d, error %d\n",
 			__func__, gmm->nid.nr, ret);
@@ -9724,7 +9762,7 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		}
 	}
 	mmu->set_vcpu_u_pptb(vcpu, u_phys_ptb);
-	ret = kvm_mmu_load(vcpu, U_ROOT_PT_FLAG | DONT_SYNC_ROOT_PT_FLAG);
+	ret = kvm_mmu_load(vcpu, gmm, U_ROOT_PT_FLAG | DONT_SYNC_ROOT_PT_FLAG);
 	if (ret) {
 		preempt_enable();
 		pr_err("%s(): could not load MMU support of VCPU #%d\n",
@@ -9743,6 +9781,8 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	mmu_pv_prepare_spt_u_root(vcpu, gmm, root);
 
 	sp = page_header(root);
+	kvm_init_root_gmm_spt_list(gmm, sp);
+
 	sync_start = 0;
 	if (sp->guest_kernel_synced) {
 		sync_end = GUEST_TASK_SIZE;
@@ -9752,7 +9792,7 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 
 	preempt_enable();
 
-	ret = e2k_sync_shadow_pt_range(vcpu, root, sync_start, sync_end,
+	ret = e2k_sync_shadow_pt_range(vcpu, gmm, root, sync_start, sync_end,
 			u_phys_ptb, mmu->get_vcpu_sh_u_vptb(vcpu));
 	if (ret) {
 		pr_err("%s(): could not sync host shadow PT and guest "
@@ -9773,7 +9813,8 @@ failed:
 	return ret;
 }
 
-static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gpa_t pptb, unsigned flags)
+static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				gpa_t pptb, unsigned flags)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
 	hpa_t root;
@@ -9797,7 +9838,7 @@ static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gpa_t pptb, unsigned flags)
 	} else {
 		KVM_BUG_ON(true);
 	}
-	ret = kvm_mmu_load(vcpu, flags);
+	ret = kvm_mmu_load(vcpu, gmm, flags);
 	if (ret) {
 		pr_err("%s(): could not load new shadow PT\n", __func__);
 		goto failed_preempt;
@@ -9809,13 +9850,14 @@ static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gpa_t pptb, unsigned flags)
 		vcpu->vcpu_id, root, pptb, mmu->get_vcpu_sh_u_vptb(vcpu));
 
 	if (!vcpu->arch.is_hv) {
-		kvm_prepare_shadow_root(vcpu, root, E2K_INVALID_PAGE,
+		KVM_BUG_ON(true);
+		kvm_prepare_shadow_root(vcpu, NULL, root, E2K_INVALID_PAGE,
 					mmu->get_vcpu_sh_u_vptb(vcpu));
 	}
 
 	preempt_enable();
 
-	ret = kvm_sync_shadow_u_root(vcpu, false);
+	ret = kvm_sync_shadow_u_root(vcpu, gmm, false);
 	if (ret) {
 		pr_err("%s(): could not sync host shadow PT and guest "
 			"user root PT, error %d\n",
@@ -9838,7 +9880,7 @@ hpa_t mmu_pv_switch_spt_u_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	hpa_t root;
 	int ret;
 
-	ret = switch_shadow_pptb(vcpu, u_phys_ptb, U_ROOT_PT_FLAG);
+	ret = switch_shadow_pptb(vcpu, gmm, u_phys_ptb, U_ROOT_PT_FLAG);
 	if (ret) {
 		pr_err("%s(): could not load PT of next MM pid #%d\n",
 			__func__, gmm->nid.nr);
@@ -9868,7 +9910,10 @@ int kvm_switch_shadow_u_pptb(struct kvm_vcpu *vcpu, gpa_t u_pptb,
 
 	DebugSPT("started on VCPU #%d for guest user root PT at 0x%llx\n",
 		vcpu->vcpu_id, u_pptb);
-	ret = switch_shadow_pptb(vcpu, u_pptb, U_ROOT_PT_FLAG);
+
+	KVM_BUG_ON(!vcpu->arch.is_hv);
+
+	ret = switch_shadow_pptb(vcpu, NULL, u_pptb, U_ROOT_PT_FLAG);
 	if (ret) {
 		pr_err("%s(): could not load new U_PPTB root\n",
 			__func__);
@@ -9893,7 +9938,9 @@ int kvm_switch_shadow_os_pptb(struct kvm_vcpu *vcpu, gpa_t os_pptb,
 	hpa_t root;
 	int ret;
 
-	ret = switch_shadow_pptb(vcpu, os_pptb, OS_ROOT_PT_FLAG);
+	KVM_BUG_ON(!vcpu->arch.is_hv);
+
+	ret = switch_shadow_pptb(vcpu, NULL, os_pptb, OS_ROOT_PT_FLAG);
 	if (ret) {
 		pr_err("%s(): could not load new OS PT root\n",
 			__func__);
@@ -10043,7 +10090,8 @@ int kvm_hv_setup_tdp_paging(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static int setup_shadow_paging(struct kvm_vcpu *vcpu, unsigned flags)
+static int setup_shadow_paging(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				unsigned flags)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
 	hpa_t os_root, u_root;
@@ -10052,7 +10100,7 @@ static int setup_shadow_paging(struct kvm_vcpu *vcpu, unsigned flags)
 	KVM_BUG_ON(VALID_PAGE(mmu->sh_root_hpa));
 
 	/* setup shadow root of USER page table */
-	ret = setup_shadow_root(vcpu, flags);
+	ret = setup_shadow_root(vcpu, gmm, flags);
 	if (ret) {
 		pr_err("%s(): could not create shadow PT root "
 			"of VCPU #%d MMU\n",
@@ -10073,7 +10121,9 @@ static int setup_shadow_paging(struct kvm_vcpu *vcpu, unsigned flags)
 		KVM_BUG_ON(true);
 	}
 	kvm_mmu_set_init_gmm_root(vcpu, mmu->sh_root_hpa);
-
+	if (!vcpu->arch.is_hv) {
+		kvm_set_root_gmm_spt_list(gmm);
+	}
 	return 0;
 
 failed:
@@ -10081,7 +10131,7 @@ failed:
 	return ret;
 }
 
-int kvm_hv_setup_shadow_paging(struct kvm_vcpu *vcpu)
+int kvm_hv_setup_shadow_paging(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
 	struct kvm *kvm = vcpu->kvm;
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
@@ -10122,7 +10172,7 @@ int kvm_hv_setup_shadow_paging(struct kvm_vcpu *vcpu)
 	if (!kvm->arch.shadow_pt_set_up) {
 		DebugSETPM("VCPU #%d shadow root PT is not yet created, so create\n",
 			vcpu->vcpu_id);
-		ret = setup_shadow_paging(vcpu, flags);
+		ret = setup_shadow_paging(vcpu, gmm, flags);
 		if (ret) {
 			pr_err("%s(): coiuld not create initial shadow PT error %d\n",
 				__func__, ret);
@@ -10137,7 +10187,7 @@ int kvm_hv_setup_shadow_paging(struct kvm_vcpu *vcpu)
 	if (!mmu_is_load) {
 		preempt_disable();	/* to avoid schedule() when VCPU root */
 					/* PT is cleared and not set */
-		kvm_mmu_load(vcpu, flags);
+		kvm_mmu_load(vcpu, gmm, flags);
 		preempt_enable();
 	}
 

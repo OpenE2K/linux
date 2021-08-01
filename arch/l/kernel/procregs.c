@@ -262,9 +262,6 @@ static int sicread_seq_show(struct seq_file *s, void *v)
 	format = sicreg_format;
 	raw_spin_unlock_irqrestore(&sicreg_lock, flags);
 
-	if (!offset)
-		return 0;
-
 	switch (format) {
 	case SICREG_FORMAT_W:
 		val = sic_readw_node_nbsr_reg(node, offset);

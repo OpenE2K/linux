@@ -444,6 +444,41 @@ TRACE_EVENT(
 	TP_printk("gpa 0x%lx, data 0x%lx\n", __entry->gpa, __entry->data)
 );
 
+TRACE_EVENT(
+	intc_clw,
+
+	TP_PROTO(bool us_cl_d, unsigned long us_cl_b, unsigned long us_cl_up,
+		unsigned long us_cl_m0, unsigned long us_cl_m1,
+		unsigned long us_cl_m2, unsigned long us_cl_m3),
+
+	TP_ARGS(us_cl_d, us_cl_b, us_cl_up, us_cl_m0, us_cl_m1, us_cl_m2, us_cl_m3),
+
+	TP_STRUCT__entry(
+		__field(	bool,		us_cl_d		)
+		__field(	unsigned long,	us_cl_b		)
+		__field(	unsigned long,	us_cl_up	)
+		__field(	unsigned long,	us_cl_m0	)
+		__field(	unsigned long,	us_cl_m1	)
+		__field(	unsigned long,	us_cl_m2	)
+		__field(	unsigned long,	us_cl_m3	)
+	),
+
+	TP_fast_assign(
+		__entry->us_cl_d = us_cl_d;
+		__entry->us_cl_b = us_cl_b;
+		__entry->us_cl_up = us_cl_up;
+		__entry->us_cl_m0 = us_cl_m0;
+		__entry->us_cl_m1 = us_cl_m1;
+		__entry->us_cl_m2 = us_cl_m2;
+		__entry->us_cl_m3 = us_cl_m3;
+	),
+
+	TP_printk("us_cl_d %d, us_cl_b 0x%lx, us_cl_up 0x%lx\n"
+		"us_cl_m0 0x%lx us_cl_m1 0x%lx us_cl_m2 0x%lx, us_cl_m3 0x%lx\n",
+		__entry->us_cl_d, __entry->us_cl_b, __entry->us_cl_up,
+		__entry->us_cl_m0, __entry->us_cl_m1, __entry->us_cl_m2, __entry->us_cl_m3)
+);
+
 #endif /* _TRACE_KVM_HV_H */
 
 /* This part must be outside protection */

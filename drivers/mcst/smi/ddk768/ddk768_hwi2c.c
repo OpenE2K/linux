@@ -44,7 +44,7 @@ long ddk768_hwI2CInit(
               
     /* Enable the I2C Controller and set the bus speed mode */
     value = FIELD_SET(peekRegisterByte(I2C_CTRL+offset), I2C_CTRL, EN, ENABLE);
-    value = FIELD_SET(value, I2C_CTRL, MODE, FAST);        
+    value = FIELD_SET(value, I2C_CTRL, MODE, STANDARD);        
     pokeRegisterByte(I2C_CTRL+offset, value);
     
     return 0;

@@ -850,12 +850,21 @@ static int PcieInit(void)
   }
   pci_set_master(gDev);
 
+#ifdef CONFIG_E90S
+  rc = pci_alloc_irq_vectors(gDev, 1, 1, PCI_IRQ_MSIX);
+  if (rc < 0) {
+    printk(KERN_ERR "bige: unable to allocate MSIX irq vector.\n");
+    return rc;
+  }
+  irq = pci_irq_vector(gDev, 0);
+#else /* E2K */
   // Try to setup the interrupt
   if (pci_enable_msi(gDev)) {
     printk(KERN_ERR "bige: pci_enable_msi() failed.\n");
 //    return -1;
   }
   irq = gDev->irq;
+#endif
   printk(KERN_INFO "bige: IRQ = %d\n", gDev->irq);
 
   gHantroRegBase = gBaseHdwr + BIGE_REG_OFFSET;

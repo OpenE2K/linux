@@ -1,21 +1,5 @@
 #include "mga2_drv.h"
 
-static const unsigned long long vco_min = 6.8e+08;
-static const unsigned long long vco_max = 3.4e+09;
-static const unsigned long long ref_min = 415039;
-static const unsigned long long ref_max = 3.4e+09;
-static const int nr_min = 1;
-/* static const int nr_max = 64; */
-static const int nr_max = 5 /* e1c+ does not like more then that */;
-static const int nf_min = 1;
-static const int nf_max = 4096;
-static const int no_min = 1;
-static const int no_max = 16;
-static const int no_even = 1;
-static const int nb_min = 1;
-static const int nb_max = 4096;
-static const int max_vco = 1;
-static const int ref_rng = 1;
 
 #define DIV_ROUND_DOWN(n,d) ((n) / (d))
 
@@ -29,9 +13,25 @@ static const int ref_rng = 1;
 )
 
 static int
-_mga2_calc_int_pll(struct cln40g_clk *res, const unsigned long long fout,
+_mga2_calc_int_pll(struct mga2_clk *res, const unsigned long long fout,
 		  unsigned long long *rfvco, unsigned long long *rerr)
 {
+	const unsigned long long vco_min = 6.8e+08;
+	const unsigned long long vco_max = 3.4e+09;
+	const unsigned long long ref_min = 415039;
+	const unsigned long long ref_max = 3.4e+09;
+	const int nr_min = 1;
+	/* const int nr_max = 64; */
+	const int nr_max = 5 /* e1c+ does not like more then that */;
+	const int nf_min = 1;
+	const int nf_max = 4096;
+	const int no_min = 1;
+	const int no_max = 16;
+	const int no_even = 1;
+	const int nb_min = 1;
+	const int nb_max = 4096;
+	const int max_vco = 1;
+	const int ref_rng = 1;
 	const unsigned long long fin = 100 * 1000 * 1000;
 	int nr, nrx, nf, nfi, no, noe, not, nor, nore, nb, first, firstx,
 	    found;
@@ -175,9 +175,13 @@ _mga2_calc_int_pll(struct cln40g_clk *res, const unsigned long long fout,
 	return !found;
 }
 
-int mga2_calc_int_pll(struct cln40g_clk *res, const unsigned long long fout,
+int mga2_calc_int_pll(struct mga2_clk *res, const unsigned long long fout,
 	unsigned long long *fvco, unsigned long long *err)
 {
+	const unsigned long long vco_min = 6.8e+08;
+	const unsigned long long vco_max = 3.4e+09;
+	const int no_min = 1;
+	const int no_max = 16;
 	if (fout * no_min > vco_max)
 		return -EINVAL;
 
@@ -185,6 +189,178 @@ int mga2_calc_int_pll(struct cln40g_clk *res, const unsigned long long fout,
 		return -EINVAL;
 
 	return _mga2_calc_int_pll(res, fout, fvco, err);
+}
+
+static int
+_mga25_calc_int_pll(struct mga2_clk *res, const unsigned long long fout,
+		  unsigned long long *rfvco, unsigned long long *rerr)
+{
+	const unsigned long long vco_min = 1.5e+07;
+	/*const unsigned long long vco_max = 3.25e+09; bug 130125:*/
+	const unsigned long long vco_max = 3.0e+09; /*PLL losing lock*/
+	const unsigned long long ref_min = 10000;
+	const unsigned long long ref_max = 8.12e+08;
+	const int nr_min = 1;
+	/* const int nr_max = 4096; */
+	const int nr_max = 5 /* e1c+ does not like more then that */;
+	const int nf_min = 1;
+	const int nf_max = 262144;
+	/*const int nf_fbits = 33;*/
+	const int no_min = 1;
+	const int no_max = 2048;
+	const int no_even = 0;
+	const int max_vco = 1;
+	const int ref_rng = 1;
+	const unsigned long long fin = 100 * 1000 * 1000;
+	int nr, nrx, nf, nfi, no, noe, not, nor, nore, first, firstx,
+	    found;
+	long long nfx;
+	unsigned long long fvco;
+	long long val, nval, err, merr = 0, terr, x_err = 0;
+	int x_nrx = 0, x_no = 0;
+	long long x_nfx = 0;
+	unsigned long long x_fvco = 0;
+
+	terr = 0; /* minimize nr & err */
+	terr = -2; /* minimize err */
+	first = firstx = 1;
+	val = fout / fin;
+	found = 0;
+	for (nfi = fout / fin; nfi < nf_max; ++nfi) {
+		nr = DIV_ROUND_CLOSEST(nfi * fin, fout);
+		if (nr == 0)
+			continue;
+		if ((ref_rng) && (nr < nr_min))
+			continue;
+		if (DIV_ROUND_UP(fin, nr) > ref_max)
+			continue;
+		nrx = nr;
+		nf = nfx = nfi;
+		nval = DIV_ROUND_CLOSEST(nfx * fin, nr);
+		if (nf == 0)
+			nf = 1;
+		err = abs(fout - nval);
+
+		if (first || err <= merr || err == 0) {
+			not = DIV_ROUND_DOWN(vco_max, fout);
+			for (no = (not > no_max) ? no_max : not;
+			     no > no_min; --no) {
+				if ((no_even) && (no & 1) && (no > 1)) {
+					continue;
+				}
+				if ((ref_rng) && ((nr / no) < nr_min))
+					continue;
+				if ((nr % no) == 0)
+					break;
+			}
+			if ((nr % no) != 0)
+				continue;
+			nor = ((not > no_max) ? no_max : not) / no;
+			nore = nf_max / nf;
+			if (nor > nore)
+				nor = nore;
+			if ((no_even) && (no & 1) && (no > 1) && (nor & 1)
+			    && (nor > 1))
+				--nor;
+			noe = DIV_ROUND_UP(vco_min, fout);
+			if (!max_vco) {
+				nore = (noe - 1) / no + 1;
+				if ((no_even) && (no & 1) && (no > 1)
+				    && (nore & 1)
+				    && (nor > nore))
+					++nore;
+				nor = nore;
+				not = 0;	/* force next if to fail */
+			}
+			if ((((no * nor) < (not >> 1))
+			     || ((no * nor) < noe))
+			    && ((no * nor) < (nf_max / nf))) {
+				no = nf_max / nf;
+				if (no > no_max)
+					no = no_max;
+				if (no > not)
+					no = not;
+				if ((no_even) && (no & 1) && (no > 1))
+					--no;
+				nfx *= no;
+				nf *= no;
+				if ((no > 1) && (!firstx))
+					continue;
+				/* wait for larger nf in later iterations */
+			} else {
+				nrx /= no;
+				nfx *= nor;
+				nf *= nor;
+				no *= nor;
+				if (no > no_max)
+					continue;
+				if ((no_even) && (no & 1) && (no > 1))
+					continue;
+				if ((nor > 1) && (!firstx))
+					continue;
+				/* wait for larger nf in later iterations */
+			}
+
+			fvco = DIV_ROUND_CLOSEST(fin * nfx, nrx);
+			if (fvco < vco_min)
+				continue;
+			if (fvco > vco_max)
+				continue;
+			if (nf < nf_min)
+				continue;
+			if (ref_rng && DIV_ROUND_DOWN(fin, nrx) < ref_min)
+				continue;
+			if ((ref_rng) && (nrx > nr_max))
+				continue;
+			if (!
+			    ((firstx && (terr < 0)) || err < merr
+			     || (max_vco && no > x_no)))
+				continue;
+			if ((!firstx) && (terr >= 0) && (nrx > x_nrx))
+				continue;
+
+			found = 1;
+			x_no = no;
+			x_nrx = nrx;
+			x_nfx = nfx;
+			x_fvco = fvco;
+			x_err = err;
+			first = firstx = 0;
+			merr = err;
+		}
+	}
+
+	res->nr = x_nrx;
+	res->nf_i = x_nfx;
+	res->nf_f = 0;
+	res->od = x_no;
+
+	nrx = x_nrx;
+	nfx = x_nfx;
+	no = x_no;
+	fvco = x_fvco;
+	err = x_err;
+
+	*rfvco = fvco;
+	*rerr = err;
+	return !found;
+}
+
+int mga25_calc_int_pll(struct mga2_clk *res, const unsigned long long fout,
+	unsigned long long *fvco, unsigned long long *err)
+{
+	const unsigned long long vco_min = 1.5e+07;
+	/*const unsigned long long vco_max = 3.25e+09;*/
+	const unsigned long long vco_max = 3.0e+09; /*bug 130125*/
+	const int no_min = 1;
+	const int no_max = 2048;
+	if (fout * no_min > vco_max)
+		return -EINVAL;
+
+	if (fout * no_max < vco_min)
+		return -EINVAL;
+
+	return _mga25_calc_int_pll(res, fout, fvco, err);
 }
 
 /*

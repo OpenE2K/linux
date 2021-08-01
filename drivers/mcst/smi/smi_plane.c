@@ -27,7 +27,7 @@ void colorcur2monocur(void * data)
 {
 	unsigned int * col = (unsigned int *)data;
 	unsigned char * mono = (unsigned char *)data;
-	unsigned char pixel = 0;
+	unsigned char pixel;
 	char bit_values;
 
 	int i;
@@ -196,16 +196,17 @@ static int smi_plane_prepare_fb(struct drm_plane *plane, const struct drm_plane_
 static int smi_plane_prepare_fb(struct drm_plane *plane, struct drm_plane_state *new_state)
 #endif
 {
+	ENTER();
 
 	struct drm_gem_object *obj;
 	struct smi_bo *user_bo;
 	struct drm_crtc *crtc = new_state->crtc;
 	int ret;
 	u64 gpu_addr;
+
+
 	disp_control_t disp_crtc;
 	int i, ctrl_index, max_enc;
-
-	ENTER();
 	ctrl_index = 0;
 
 	if(g_specId == SPC_SM750)
@@ -270,9 +271,9 @@ static void smi_plane_cleanup_fb(struct drm_plane *plane, const struct drm_plane
 static void smi_plane_cleanup_fb(struct drm_plane *plane, struct drm_plane_state *old_state)
 #endif
 {
+	ENTER();
 	struct drm_gem_object *obj;
 	struct smi_bo *user_bo;
-	ENTER();
 	
 	if(g_specId == SPC_SM750)
 	{
@@ -309,15 +310,94 @@ static const uint32_t smi768_cursor_plane_formats[] = {DRM_FORMAT_ARGB8888};
 
 static const uint32_t smi768_formats[] = {DRM_FORMAT_RGB565, DRM_FORMAT_XRGB8888};
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,12,0)
+static int smi_plane_update(struct drm_plane *plane, struct drm_crtc *crtc, struct drm_framebuffer *fb,
+			int crtc_x, int crtc_y, unsigned int crtc_w, unsigned int crtc_h,
+			uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h)
+#else
+static int smi_plane_update(struct drm_plane *plane, struct drm_crtc *crtc, struct drm_framebuffer *fb,
+			int crtc_x, int crtc_y, unsigned int crtc_w, unsigned int crtc_h,
+			uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h, struct drm_modeset_acquire_ctx *ctx)
+#endif
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0)
+	return 0;
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+	return drm_primary_helper_update(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,12,0)
+	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+		return drm_primary_helper_update(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h);
+	else
+		return drm_plane_helper_update(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,19,0)
+	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+		return drm_primary_helper_update(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h, ctx);
+	else
+		return drm_plane_helper_update(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
+	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+		return drm_primary_helper_update(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h, ctx);
+	else
+		return drm_plane_helper_update(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h, ctx);
+#else
+	return -1; /*FIXME: atomic does not work */
+	return drm_atomic_helper_update_plane(plane, crtc, fb,
+			crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h, ctx);
+#endif
+}
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,12,0)
+static int smi_plane_disable(struct drm_plane *plane)
+#else
+static int smi_plane_disable(struct drm_plane *plane, struct drm_modeset_acquire_ctx *ctx)
+#endif
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0)
+	return -EINVAL;
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+	return drm_primary_helper_disable(plane);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,12,0)
+	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+		return drm_primary_helper_disable(plane);
+	else
+		return drm_plane_helper_disable(plane);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,19,0)
+	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+		return drm_primary_helper_disable(plane, ctx);
+	else
+		return drm_plane_helper_disable(plane);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
+	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+		return drm_primary_helper_disable(plane, ctx);
+	else
+		return drm_plane_helper_disable(plane, ctx);
+#else
+	return -1; /*FIXME: atomic does not work */
+	return drm_atomic_helper_disable_plane(plane, ctx);
+#endif
+}
+
 static void smi_plane_destroy(struct drm_plane *plane)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,12,0)
+	smi_plane_disable(plane);
+#else
+	smi_plane_disable(plane, NULL);
+#endif
 	drm_plane_cleanup(plane);
 	kfree(plane);
 }
 
 static struct drm_plane_funcs smi_plane_funcs = {
-	.update_plane = drm_atomic_helper_update_plane,
-	.disable_plane = drm_atomic_helper_disable_plane,
+	.update_plane	= smi_plane_update,
+	.disable_plane	= smi_plane_disable,
 	.destroy	= smi_plane_destroy,
 };
 
@@ -370,11 +450,11 @@ struct drm_plane *smi_plane_init(struct smi_device *cdev,unsigned int possible_c
 		funcs = &smi_plane_funcs;
 		formats = smi_cursor_plane_formats;
 		num_formats = ARRAY_SIZE(smi_cursor_plane_formats);
-		if (g_specId == SPC_SM768) {
-		formats = smi768_cursor_plane_formats;
-		num_formats = ARRAY_SIZE(smi768_cursor_plane_formats);
-		}
 		helper_funcs = &smi_cursor_helper_funcs;
+		if (g_specId == SPC_SM768) {
+			formats = smi768_cursor_plane_formats;
+			num_formats = ARRAY_SIZE(smi768_cursor_plane_formats);
+		}
 		break;
 	default:
 		return ERR_PTR(-EINVAL);
@@ -405,11 +485,11 @@ struct drm_plane *smi_plane_init(struct smi_device *cdev,unsigned int possible_c
 
 	if (err)
 		goto free_plane;
-	
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,19,0)
 	drm_plane_helper_add(plane, helper_funcs);
 #endif
-	
+
 	return plane;
 	
 free_plane:

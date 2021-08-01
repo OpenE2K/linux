@@ -1135,8 +1135,6 @@ static const pv_cpu_ops_t kvm_cpu_ops __initdata = {
 	.do_hw_stack_bounds = kvm_do_hw_stack_bounds,
 	.handle_interrupt = guest_do_interrupt,
 	.init_guest_system_handlers_table = kvm_init_system_handlers_table,
-	.handle_deferred_traps_in_syscall =
-		kvm_handle_deferred_traps_in_syscall,
 	.fix_process_pt_regs = kvm_fix_process_pt_regs,
 	.run_user_handler = kvm_run_user_handler,
 	.trap_table_entry1 = (long (*)(int, ...))kvm_guest_ttable_entry1,
@@ -1329,6 +1327,16 @@ kvm_READ_CLW_REG(clw_addr_t clw_addr)
 	return KVM_READ_CLW_REG(clw_addr);
 }
 
+/*
+ * Write CLW register
+ */
+
+static void
+kvm_WRITE_CLW_REG(clw_addr_t clw_addr, clw_reg_t val)
+{
+	KVM_WRITE_CLW_REG(clw_addr, val);
+}
+
 /* save DAM state */
 static void
 do_save_DAM(unsigned long long dam[DAM_ENTRIES_NUM])
@@ -1419,6 +1427,7 @@ pv_mmu_ops_t kvm_mmu_ops = {
 	.entry_probe_mmu_op = kvm_ENTRY_PROBE_MMU_OP,
 	.address_probe_mmu_op = kvm_ADDRESS_PROBE_MMU_OP,
 	.read_clw_reg = kvm_READ_CLW_REG,
+	.write_clw_reg = kvm_WRITE_CLW_REG,
 	.save_DAM = do_save_DAM,
 	.write_mmu_debug_reg = PV_DO_WRITE_MMU_DEBUG_REG_VALUE,
 	.read_mmu_debug_reg = PV_DO_READ_MMU_DEBUG_REG_VALUE,

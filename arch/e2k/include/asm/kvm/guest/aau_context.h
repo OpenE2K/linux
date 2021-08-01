@@ -32,6 +32,7 @@
 #define	KVM_RESTORE_AAU_MASK_REGS(aau_context)	\
 ({ \
 	if (IS_HV_GM()) { \
+		E2K_CMD_SEPARATOR; \
 		NATIVE_RESTORE_AAU_MASK_REGS(aau_context); \
 	} else { \
 		PREFIX_RESTORE_AAU_MASK_REGS(KVM, kvm, aau_context); \
@@ -253,6 +254,12 @@ kvm_get_aau_context_v5(e2k_aau_t *context)
 	KVM_GET_AAU_CONTEXT_V5(context);
 }
 
+static __always_inline void
+kvm_set_aau_context(e2k_aau_t *context)
+{
+	/* AAU contesxt should restore host */
+}
+
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* It is pure kvm kernel without paravirtualization */
 
@@ -305,6 +312,12 @@ static inline void
 get_aau_context(e2k_aau_t *context)
 {
 	kvm_get_aau_context(context);
+}
+
+static __always_inline void
+set_aau_context(e2k_aau_t *context)
+{
+	kvm_set_aau_context(context);
 }
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */

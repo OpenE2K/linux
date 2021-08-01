@@ -2,6 +2,8 @@
 # Makefile for "Physical-to-Virtual Switch".
 #
 
+subdir-ccflags-y := -Werror -Wswitch -Wenum-compare
+
 GCOV_PROFILE := n
 
 # remove profile flags

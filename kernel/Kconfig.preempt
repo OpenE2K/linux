@@ -88,17 +88,6 @@ config MCST_RT
 	   Possibility to turn off some fair opportunuties
 	   for all tasks to decrease latency for RT tasks
 
-config USB_IRQ_ON_THREAD
-	bool "USB irq implemented as threaded irq "
-	depends on MCST_RT
-	default y
-	help
-	  USB interrupt handler just find out interrupt, all other work
-	  is done on threadfn thread. It is useful if USB shares irq with
-	  important rt device.
-	  Say Y if you want that usb interrupts executed on kernel thread.
-	  Otherwise say N
-
 config MCST_RT_SMP
         bool
         depends on SMP

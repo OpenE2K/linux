@@ -119,7 +119,6 @@ irqreturn_t mxgbe_mac_irq_handler(int irq, void *dev_id)
 	u32 val, stat;
 
 	nFDEBUG;
-	nPDEBUG(MXGBE_DBG_MSK_IRQ, "MACIRQ #%d\n", irq);
 
 	if (!dev_id)
 		return IRQ_NONE;

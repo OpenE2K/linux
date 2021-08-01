@@ -331,25 +331,10 @@ to_kernel:
 		 nop
 		cmp			%l4, 0
 		bne,pn			%xcc, kern_fpucheck
-#ifdef CONFIG_MCST_RT
-		rdpr			%pil, %l6
-		wrpr			%g0, PIL_NORMAL_MAX, %pil
-		ldx			[%g6 + TI_FLAGS], %l5
-		andcc			%l5, _TIF_NEED_RESCHED, %g0
-		be,pt			%xcc, 1f
-		nop
-		call			preempt_schedule_irq
-		nop
-		wrpr			%g0, %l6, %pil
-		ba,pt                   %xcc, rtrap
-		nop
-1:		wrpr                    %g0, %l6, %pil
-#else
 		 nop
 		call			preempt_schedule_irq
 		 nop
 		ba,pt			%xcc, rtrap
-#endif
 #endif
 kern_fpucheck:	ldub			[%g6 + TI_FPDEPTH], %l5
 		brz,pt			%l5, rt_continue

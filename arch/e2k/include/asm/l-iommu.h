@@ -52,7 +52,7 @@ typedef struct { unsigned iopte; } iopte_t;
 
 #define addr_to_flush(__a) ((__a) >> IO_PAGE_SHIFT)
 
-static inline void l_iommu_write(unsigned node, u32 val, unsigned long addr)
+static inline void __l_iommu_write(unsigned node, u32 val, unsigned long addr)
 {
 	sic_write_node_iolink_nbsr_reg(node, 0, addr, val);
 }
@@ -62,10 +62,13 @@ static inline u32 l_iommu_read(unsigned node, unsigned long addr)
 	return sic_read_node_iolink_nbsr_reg(node, 0, addr);
 }
 
-static inline void l_iommu_set_ba(unsigned node, unsigned long *ba)
+#define __l_iommu_set_ba	__l_iommu_set_ba
+static inline void __l_iommu_set_ba(unsigned node, unsigned long *ba)
 {
-	l_iommu_write(node, pa_to_iopte(ba[IOMMU_LOW_TABLE]), SIC_iommu_ba_lo);
-	l_iommu_write(node, pa_to_iopte(ba[IOMMU_HIGH_TABLE]), SIC_iommu_ba_hi);
+	__l_iommu_write(node, pa_to_iopte(ba[IOMMU_LOW_TABLE]),
+			 SIC_iommu_ba_lo);
+	__l_iommu_write(node, pa_to_iopte(ba[IOMMU_HIGH_TABLE]),
+			 SIC_iommu_ba_hi);
 }
 
 #define l_prefetch_iopte_supported	l_prefetch_iopte_supported
@@ -82,9 +85,9 @@ static inline void l_prefetch_iopte(iopte_t *iopte, int prefetch)
 		iopte_val(iopte[0]) |= IOPTE_STP_PREF_IOPTE;
 }
 
-static inline void *l_iommu_map_table(void *va, unsigned long size)
+static inline void *l_iommu_map_table(unsigned long pa, unsigned long size)
 {
-	phys_addr_t start = __pa(va);
+	phys_addr_t start = pa;
 	pgprot_t prot = pgprot_writecombine(PAGE_KERNEL);
 	struct page **pages;
 	phys_addr_t page_start;
@@ -93,7 +96,7 @@ static inline void *l_iommu_map_table(void *va, unsigned long size)
 	void *vaddr;
 
 	if (!cpu_has(CPU_HWBUG_IOMMU))
-		return va;
+		return __va(pa);
 
 	page_start = start - offset_in_page(start);
 	page_count = DIV_ROUND_UP(size + offset_in_page(start), PAGE_SIZE);

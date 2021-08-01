@@ -75,7 +75,7 @@ static void gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 
 
 static struct gpio_chip gpio_chip = {
-	.label			= "mxgbe",
+	.label			= KBUILD_MODNAME,
 	.owner			= THIS_MODULE,
 	.get			= gpio_get,
 	.direction_output	= gpio_direction_out,

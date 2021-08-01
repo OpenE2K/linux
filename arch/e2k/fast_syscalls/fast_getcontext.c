@@ -19,6 +19,11 @@ int fast_sys_getcontext(struct ucontext __user *ucp, size_t sigsetsize)
 	register u32 fpcr, fpsr, pfpfr;
 	u64 set, key;
 
+#ifdef	CONFIG_KVM_HOST_MODE
+	/* TODO getcontext does not have a slow counterpart, not implemented for paravirt guest */
+	KVM_BUG_ON(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
+#endif
+
 	BUILD_BUG_ON(sizeof(task->blocked.sig[0]) != 8);
 	set = task->blocked.sig[0];
 

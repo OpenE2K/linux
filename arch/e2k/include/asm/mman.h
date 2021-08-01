@@ -57,22 +57,8 @@ static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
 
 	vm_flags = cui << VM_CUI_SHIFT;
 
-	/*
-	 * Check if we are allocating hardware stacks.
-	 */
-	if (current_thread_info()->status & TS_MMAP_DONTEXPAND) {
-		/*
-		 * VM_DONTEXPAND makes sure that even if VM_MLOCK
-		 * is set, this area won't be populated on mmap().
-		 */
-		vm_flags |= VM_DONTEXPAND;
-	}
-
 	if (current_thread_info()->status & TS_MMAP_PRIVILEGED)
 		vm_flags |= VM_PRIVILEGED;
-
-	if (current_thread_info()->status & TS_MMAP_DONTCOPY)
-		vm_flags |= VM_DONTCOPY;
 
 	if (current_thread_info()->status & TS_MMAP_PS)
 		vm_flags |= VM_HW_STACK_PS;
@@ -82,9 +68,6 @@ static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
 
 	if (current_thread_info()->status & TS_MMAP_SIGNAL_STACK)
 		vm_flags |= VM_SIGNAL_STACK;
-
-	if (current_thread_info()->status & TS_MMAP_NOHUGEPAGE)
-		vm_flags |= VM_NOHUGEPAGE;
 
 	return vm_flags;
 }
@@ -136,13 +119,13 @@ enum exec_mmu_ret {
 	/* Trap cellar record should be executed again */
 	EXEC_MMU_REPEAT
 };
-extern int execute_mmu_operations(trap_cellar_t *tcellar,
+extern enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 		trap_cellar_t *next_tcellar, struct pt_regs *regs,
 		int rg, int zeroing, e2k_addr_t *addr,
 		bool (*is_spill_fill_recovery)(tc_cond_t cond,
 					e2k_addr_t address, bool s_f,
 					struct pt_regs *regs),
-		int (*calculate_rf_frame)(struct pt_regs *regs,
+		enum exec_mmu_ret (*calculate_rf_frame)(struct pt_regs *regs,
 					tc_cond_t cond, u64 **radr,
 					bool *load_to_rf));
 

@@ -122,6 +122,18 @@ config KVM_SHADOW_PT_ENABLE
 	  PTs and special hypercalls to updatem them from guest. If say N here
 	  then only old style of PTs will be enabled for software mode
 
+config GUEST_MM_SPT_LIST
+	bool "Enable Guest MM Shadow Page Tables list support"
+	depends on KVM_SHADOW_PT_ENABLE && KVM_PARAVIRTUALIZATION
+	default n
+	help
+	  Say Y here to enable support of separate list of shadow page tables
+	  for each guest MM structure. Any allocation shadow page tables for
+	  guest MM adds the new structure SP to the list and any release of
+	  the shadow page table deletes the structure SP from the list.
+	  It allows to control the complete release of all shadow PTs when
+	  the guest mm released.
+
 config KVM_PARAVIRT_TLB_FLUSH
 	bool "Enable flush tlb through hypercall by paravirt guest"
 	depends on (KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE) || (KVM_GUEST_MODE && KVM_SHADOW_PT)

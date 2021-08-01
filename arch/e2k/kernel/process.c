@@ -2066,17 +2066,7 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 	childregs = reserve_child_pt_regs(new_sw_regs, new_task);
 
 	*childregs = *regs;
-	childregs->sys_rval = 0;
-	/*
-	 * Remove all pointers to parent's data stack
-	 * (these are not needed anyway for system calls)
-	 */
-	childregs->trap = NULL;
-	childregs->aau_context = NULL;
-#ifdef CONFIG_KERNEL_TIMES_ACCOUNT
-	childregs->scall_times = NULL;
-#endif
-	childregs->next = NULL;
+	clear_fork_child_pt_regs(childregs);
 	new_ti->pt_regs = childregs;
 
 	/*
@@ -2251,19 +2241,21 @@ void exit_thread(struct task_struct *task)
 	free_getsp_adj(&ti->getsp_adj);
 
 	if (task != current) {
-		/* We don't have to free virtual memory if this was
-		 * a fork (and we'd have to switch mm to do it). */
-		if (task->mm != current->mm) {
-			SET_PS_BASE(&ti->u_hw_stack, NULL);
-			SET_PCS_BASE(&ti->u_hw_stack, NULL);
-			return;
-		}
-		BUG_ON(current->mm != current->active_mm);
+		if (task->mm) {
+			/* We don't have to free virtual memory if this was
+			 * a fork (and we'd have to switch mm to do it). */
+			if (task->mm != current->mm) {
+				SET_PS_BASE(&ti->u_hw_stack, NULL);
+				SET_PCS_BASE(&ti->u_hw_stack, NULL);
+				return;
+			}
+			BUG_ON(current->mm != current->active_mm);
 
-		/* It is possible that copy_process() failed after
-		 * allocating stacks in copy_thread(). In this case
-		 * we must free the allocated stacks. */
-		free_user_hw_stacks(&ti->u_hw_stack);
+			/* It is possible that copy_process() failed after
+			 * allocating stacks in copy_thread(). In this case
+			 * we must free the allocated stacks. */
+			free_user_hw_stacks(&ti->u_hw_stack);
+		}
 
 		return;
 	}

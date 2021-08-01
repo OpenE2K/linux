@@ -30,19 +30,14 @@
 #define iopte_to_pa(iopte) (((unsigned long)(iopte) & IOPTE_PAGE_MASK) \
 						<< (IO_PAGE_SHIFT - 5))
 
-static inline void l_iommu_write(unsigned node, u32 val, unsigned long addr)
+static inline void __l_iommu_write(unsigned node, u32 val, unsigned long addr)
 {
 	nbsr_writel(val, addr, node);
 }
 
-static inline void l_iommu_set_ba(unsigned node, unsigned long *ba)
+static inline void *l_iommu_map_table(unsigned long pa, unsigned long size)
 {
-	l_iommu_write(node, (u32)pa_to_iopte(ba[0]), L_IOMMU_BA);
-}
-
-static inline void *l_iommu_map_table(void *va, unsigned long size)
-{
-	return va;
+	return __va(pa);
 }
 
 static inline void *l_iommu_unmap_table(void *va)
@@ -56,7 +51,18 @@ static inline int l_iommu_get_table(unsigned long iova)
 }
 
 #define l_iommu_supported()		1
+#define l_has_devices_with_iommu()	(e90s_get_cpu_type() == E90S_CPU_R2000P)
 
+#define l_iommu_enable_embedded_iommus l_iommu_enable_embedded_iommus
+static inline void l_iommu_enable_embedded_iommus(int node)
+{
+	unsigned v;
+	if (!l_has_devices_with_iommu())
+		return;
+	v = nbsr_readl(NBSR_JUMPER, node);
+	v &= ~NBSR_JUMPER_R2000P_JmpIommuMirrorEn;
+	nbsr_writel(v, NBSR_JUMPER, node);
+}
 
 #define	L_PGSIZE_BITMAP SZ_8K
 

@@ -121,7 +121,11 @@ static int __initdata node_io_mapped[MAX_NUMNODES] = { 0 };
 static int __initdata node_info_mapped[MAX_NUMNODES] = { 0 };
 static int __initdata node_ports_mapped[MAX_NUMNODES] = { 0 };
 static int __initdata node_hwbug_mapped[MAX_NUMNODES] = { 0 };
+#ifdef CONFIG_ONLY_HIGH_PHYS_MEM
 static int __initdata_recv node_flushed[MAX_NUMNODES] = { 0 };
+# define boot_node_flushed					\
+		boot_get_vo_value(node_flushed[boot_numa_node_id()])
+#endif
 #define	boot_node_image_mapped					\
 		boot_get_vo_value(node_image_mapped[boot_numa_node_id()])
 #define	boot_node_mem_mapped					\
@@ -134,8 +138,6 @@ static int __initdata_recv node_flushed[MAX_NUMNODES] = { 0 };
 		boot_get_vo_value(node_ports_mapped[boot_numa_node_id()])
 #define	boot_node_hwbug_mapped					\
 		boot_get_vo_value(node_hwbug_mapped[boot_numa_node_id()])
-#define	boot_node_flushed					\
-		boot_get_vo_value(node_flushed[boot_numa_node_id()])
 #else	/* ! CONFIG_NUMA */
 e2k_addr_t kernel_phys_base;
 #define	boot_node_image_mapped	0
@@ -166,6 +168,8 @@ static int __init boot_mem_set(char *cmd)
 		boot_mem_limit <<= 10;
 	else if (*cmd == 'M' || *cmd == 'm')
 		boot_mem_limit <<= 20;
+	else if (*cmd == 'G' || *cmd == 'g')
+		boot_mem_limit <<= 30;
 
 	boot_mem_limit &= ~(PAGE_SIZE-1);
 

@@ -15,7 +15,7 @@ menu "Elbrus Architecture Linux Kernel Configuration"
 
 config EPIC
 	bool "Elbrus PIC support"
-	depends on E90S || (E2K && (CPU_ISET >= 6 || CPU_ISET = 0))
+	depends on E90S || (E2K && (CPU_ISET >= 6 || CPU_ISET = 0 || KVM_HOST_MODE))
 	def_bool y
 	help
 	  Elbrus Programmable Interrupt Controller supports multiprocessor
@@ -197,7 +197,7 @@ config S2_PMC
 	bool "R2000 Power Management Controller (S2 PMC)"
 	depends on E90S
 	select CPU_IDLE  if !MCST_RT
-	select CPU_FREQ  if !MCST_RT
+	select CPU_FREQ
 	default y # we need s2_get_freq_mult() for r2000
 	help
 	 Power Management Controller (PMC) for MCST R2000 (E90S/SPARC v9) CPU

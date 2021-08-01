@@ -2,7 +2,6 @@
 #include <stdlib.h>
 
 #include "../../../include/generated/autoconf.h"
-#include "../kvm/ttable-help.h"
 #include "ttable_wbs.h"
 
 #define B "\t\t\""
@@ -21,7 +20,8 @@ static void print_header(int rbs, int rsz, int type)
 {
 	printf(B "{" E);
 	printf(B "setbn rbs=%d, rsz=%d, rcur=0" E, rbs, rsz);
-	if (type != TYPE_INTERRUPT && !return_printed) {
+	if ((type == TYPE_SYSCALL || type == TYPE_SYSCALL_PROT) &&
+			!return_printed) {
 		return_printed = 1;
 		printf(B "return %%%%ctpr3" E);
 	}
@@ -140,9 +140,14 @@ int main(void)
 			  DO_SIGRETURN_SIZE, TYPE_SYSCALL);
 	print_clear_macro("CLEAR_DO_SIGRETURN_SYSCALL_PROT",
 			  DO_SIGRETURN_SIZE, TYPE_SYSCALL_PROT);
-
-	/* virtualization support */
-	PRINT_HOST_CLEAR_MACRO();
+#ifdef CONFIG_KVM_HOST_MODE
+	print_clear_macro("CLEAR_RETURN_PV_VCPU_TRAP_WINDOW",
+			  RETURN_PV_VCPU_TRAP_SIZE, TYPE_INTERRUPT);
+	print_clear_macro("CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW",
+			  HANDLE_PV_VCPU_SYS_CALL_SIZE, TYPE_SYSCALL);
+	print_clear_macro("CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW",
+			  HANDLE_PV_VCPU_SYS_FORK_SIZE, TYPE_SYSCALL);
+#endif
 
 	return 0;
 }

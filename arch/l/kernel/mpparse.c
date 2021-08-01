@@ -22,7 +22,6 @@
 #include <asm/unaligned.h>
 #include <asm/epic.h>
 #include <asm/smp.h>
-#include <asm/mtrr.h>
 #include <asm/mpspec.h>
 #include <asm/pgalloc.h>
 #include <asm/console.h>
@@ -763,7 +762,7 @@ void mp_pci_add_resources(struct list_head *resources,
 	if (iolink->pci_mem_end) {
 		sd->mem_space.start	= iolink->pci_mem_start;
 		sd->mem_space.end	= iolink->pci_mem_end - 1;
-		insert_resource(&iomem_resource, &sd->mem_space);
+		WARN_ON(request_resource(&iomem_resource, &sd->mem_space));
 		mem = &sd->mem_space;
 	} else {
 		mem = &iomem_resource;

@@ -363,29 +363,3 @@ int hpet_assign_irq(struct irq_domain *domain, struct hpet_dev *dev,
 }
 #endif
 
-#if defined CONFIG_PCI_MSI && defined CONFIG_PCI_QUIRKS
-#define MSI_LO_ADDRESS			0x48
-#define MSI_HI_ADDRESS			0x4c
-
-static void quirk_pci_msi(struct pci_dev *pdev)
-{
-	struct iohub_sysdata *sd = pdev->bus->sysdata;
-	pci_read_config_dword(pdev, MSI_LO_ADDRESS, &sd->pci_msi_addr_lo);
-	pci_read_config_dword(pdev, MSI_HI_ADDRESS, &sd->pci_msi_addr_hi);
-	sd->revision = pdev->revision;
-	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-		    pdev->device == PCI_DEVICE_ID_MCST_I2C_SPI)
-		sd->generation = 1;
-	dev_info(&pdev->dev, "MSI address at: 0x%x; IOHUB generation:%d,"
-		"revision %d\n", sd->pci_msi_addr_lo,
-		  sd->generation, sd->revision);
-}
-
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_I2CSPI,
-			  quirk_pci_msi);
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_I2C_SPI,
-			  quirk_pci_msi);
-
-#elif defined CONFIG_PCI_MSI
-#error		fixme
-#endif	/*CONFIG_PCI_QUIRKS*/

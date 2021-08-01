@@ -1,6 +1,8 @@
 #
-# Makefile for E2K-specific library files..
+# Makefile for E2K-specific library files
 #
+
+subdir-ccflags-y := -Werror -Wswitch -Wenum-compare
 
 # compile  with -O3 since only performance-sensitive functions are here
 empty:=
@@ -9,7 +11,6 @@ ORIG_CFLAGS := $(KBUILD_CFLAGS)
 ORIG_CFLAGS := $(subst $(space)-O2$(space),$(space),$(ORIG_CFLAGS))
 ORIG_CFLAGS := $(subst $(space)-Os$(space),$(space),$(ORIG_CFLAGS))
 KBUILD_CFLAGS = $(ORIG_CFLAGS) -O3
-
 
 lib-y = delay.o usercopy.o builtin.o checksum.o
 

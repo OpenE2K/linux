@@ -33,11 +33,12 @@ void native_set_cu_hw1_v5(u64 cu_hw1)
 
 __section(.entry_handlers)
 notrace __interrupt
-void save_local_gregs_v5(struct local_gregs *gregs)
+void save_local_gregs_v5(struct local_gregs *gregs, bool is_signal)
 {
 	gregs->bgr = NATIVE_READ_BGR_REG();
 	init_BGR_reg(); /* enable whole GRF */
-	SAVE_GREGS_SIGNAL(gregs->g, E2K_ISET_V5);
+	if (is_signal)
+		SAVE_GREGS_SIGNAL(gregs->g, E2K_ISET_V5);
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
@@ -100,10 +101,11 @@ void save_gregs_dirty_bgr_v5(struct global_regs *gregs)
 
 __section(.entry_handlers)
 notrace __interrupt
-void restore_local_gregs_v5(const struct local_gregs *gregs)
+void restore_local_gregs_v5(const struct local_gregs *gregs, bool is_signal)
 {
 	init_BGR_reg();
-	RESTORE_GREGS_SIGNAL(gregs->g, E2K_ISET_V5);
+	if (is_signal)
+		RESTORE_GREGS_SIGNAL(gregs->g, E2K_ISET_V5);
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
@@ -170,6 +172,10 @@ void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
 	memset(aaldas, 0, AALDAS_REGS_NUM * sizeof(aaldas[0]));
 	memset(aaldis, 0, AALDIS_REGS_NUM * sizeof(aaldis[0]));
 
+	/* It is first guest run to set initial state of AAU */
+	if (unlikely(!regs))
+		return;
+
 	/* See bug 33621 comment 2 and bug 52350 comment 29 */
 	iter_count = regs->ilcr1 - regs->lsr1;
 	if (get_ldmc(regs->lsr) && !regs->lsr1)
@@ -216,13 +222,27 @@ void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
 		 * union's fields into inline asm. Bug 76907.
 		 */
 		u64 tmp;
+		long ret_get_user;
 
-		if (host_get_user(tmp, (u64 *)fapb_addr, regs))
-			goto die;
+		ret_get_user = host_get_user(tmp, (u64 *)fapb_addr, regs);
+
+		if (ret_get_user) {
+			if (ret_get_user == -EAGAIN)
+				break;
+			else
+				goto die;
+		}
 		fapb.word = tmp;
 # else
-		if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-			goto die;
+		long ret_get_user;
+
+		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
+		if (ret_get_user) {
+			if (ret_get_user == -EAGAIN)
+				break;
+			else
+				goto die;
+		}
 # endif
 
 		if (area_num >= 32 && AS(fapb).dpl) {
@@ -271,6 +291,7 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 	u64		iter_count;
 	tc_cond_t	condition;
 	tc_mask_t	mask;
+	long ret_get_user;
 
 	regs->trap->nr_page_fault_exc = exc_data_page_num;
 
@@ -294,6 +315,7 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 		u64 area_num, mrng, addr1, addr2, step, ind, d_num;
 		e2k_fapb_instr_t *fapb_addr;
 		e2k_fapb_instr_t fapb;
+		int ret;
 
 		if (!(aa_field & 0x1) || !(aafstr & 0x1))
 			goto next_area;
@@ -310,8 +332,13 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 			fapb_addr = (e2k_fapb_instr_t *)(AS(regs->ctpr2).ta_base
 					+ 16 * (area_num - 32) + 8);
 
-		if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-			goto die;
+		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
+		if (ret_get_user) {
+			if (ret_get_user == -EAGAIN)
+				break;
+			else
+				goto die;
+		}
 
 		if (area_num >= 32 && AS(fapb).dpl) {
 			/* See bug #53880 */
@@ -320,8 +347,14 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 				current->comm, current->pid, fapb_addr);
 			area_num -= 32;
 			fapb_addr -= 1;
-			if (host_get_user(AW(fapb), (u64 *)fapb_addr, regs))
-				goto die;
+			ret_get_user = host_get_user(AW(fapb),
+						(u64 *)fapb_addr, regs);
+			if (ret_get_user) {
+				if (ret_get_user == -EAGAIN)
+					break;
+				else
+					goto die;
+			}
 		}
 
 		if (!AS(aau_regs->aasr).iab) {
@@ -363,9 +396,31 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 			"mrng=%lld\n",
 			addr1, addr2, mrng);
 
-		do_aau_page_fault(regs, addr1, condition, mask, aa_bit);
-		if ((addr1 & PAGE_MASK) != (addr2 & PAGE_MASK))
-			do_aau_page_fault(regs, addr2, condition, mask, aa_bit);
+		ret = do_aau_page_fault(regs, addr1, condition, mask, aa_bit);
+		if (ret) {
+			if (ret == 2) {
+				/*
+				 * Special case of trap handling on host:
+				 *	host inject the trap to guest
+				 */
+				return;
+			}
+			goto die;
+		}
+		if ((addr1 & PAGE_MASK) != (addr2 & PAGE_MASK)) {
+			ret = do_aau_page_fault(regs, addr2, condition, mask,
+						aa_bit);
+			if (ret) {
+				if (ret == 2) {
+					/*
+					* Special case of trap handling on host:
+					*	host inject the trap to guest
+					*/
+					return;
+				}
+				goto die;
+			}
+		}
 
 next_area:
 		aa_bit++;

@@ -6,6 +6,8 @@
 # unless it's something special (ie not a .c file).
 #
 
+subdir-ccflags-y := -Werror -Wswitch -Wenum-compare
+
 extra-y		:= vmlinux.lds
 EXTRA_AFLAGS	:= $(CFLAGS)
 EXTRA_CFLAGS	:= $(CFLAGS) -Ifs

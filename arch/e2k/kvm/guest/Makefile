@@ -72,10 +72,14 @@ CFLAGS_boot-pv-hpt.o = $(BOOT_CFLAGS_ADD)
 obj-$(CONFIG_KVM_GUEST_MODE) +=	ttable.o traps.o fast_syscalls.o \
 				process.o signal.o mmu.o \
 				e2k_virt.o time.o io.o string.o \
-				spinlock.o host_printk.o irq.o lapic.o \
-				cepic.o \
+				spinlock.o irq.o lapic.o \
+				host_printk.o host_dump_stack.o \
 				boot.o boot_spinlock.o boot_e2k_virt.o boot_io.o \
 				boot_vram.o boot_string.o tlbflush.o
+
+ifeq ($(CONFIG_EPIC),y)
+obj-$(CONFIG_KVM_GUEST_MODE) += cepic.o
+endif # CONFIG_EPIC
 
 obj-$(CONFIG_KVM_ASYNC_PF) +=	async_pf.o
 

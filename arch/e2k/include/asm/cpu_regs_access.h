@@ -274,10 +274,14 @@
 		NATIVE_NV_WRITE_USBR_REG_VALUE(USBR_value)
 #define	WRITE_SBR_REG_VALUE(SBR_value)				\
 		NATIVE_NV_WRITE_SBR_REG_VALUE(SBR_value)
+#define	NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)	\
+		NATIVE_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)
 #define	BOOT_WRITE_USBR_REG_VALUE(USBR_value)			\
 		NATIVE_NV_WRITE_USBR_REG_VALUE(USBR_value)
 #define	BOOT_WRITE_SBR_REG_VALUE(SBR_value)			\
 		NATIVE_NV_WRITE_SBR_REG_VALUE(SBR_value)
+#define	BOOT_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)	\
+		NATIVE_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo)
 
 /*
  * Read/write double-word Window Descriptor Register (WD)

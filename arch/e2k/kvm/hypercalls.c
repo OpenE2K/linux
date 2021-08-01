@@ -214,7 +214,6 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 	/* switch mm to new process, it is actual if user process */
 	NATIVE_FLUSHCPU;	/* spill current stacks on current mm */
 	switch_guest_mm(next_gti, next_gmm);
-	pv_vcpu_set_gmm(vcpu, next_gmm);
 	if (next_gti->gmm != NULL && next_gti->gmm == next_gmm) {
 		/* switch guest MMU context */
 		kvm_switch_to_guest_mmu_pid(vcpu);
@@ -286,16 +285,17 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 
 	/* FIXME: only to debug gregs save/restore, should be deleted */
 	E2K_SET_USER_STACK(DEBUG_KVM_MIGRATE_VCPU_MODE);
-	if (migrated && current_thread_info()->signal_stack.used != 0) {
-		/* remember new state of guest kernel global registers, */
-		/* after migration some of its can be changed */
-		SAVE_HOST_KERNEL_GREGS_COPY(current_thread_info(), next_gti);
-		DebugMGVCPU("thread GPID #%d migrates from VCPU #%d to "
-			"VCPU #%d signal stack entries %ld\n",
-			gpid_nr, old_vcpu_id, vcpu->vcpu_id,
-			current_thread_info()->signal_stack.used /
-				sizeof(struct signal_stack_context));
-	}
+	/* save current state of guest kernel global registers */
+	/* it need here save only some registers which can be changed */
+	/* after migration, but now all global registers are saved
+	if (migrated)
+	 */
+	SAVE_GUEST_KERNEL_GREGS_COPY(current_thread_info(), next_gti);
+	DebugMGVCPU("thread GPID #%d migrates from VCPU #%d to "
+		"VCPU #%d signal stack entries %ld\n",
+		gpid_nr, old_vcpu_id, vcpu->vcpu_id,
+		current_thread_info()->signal_stack.used /
+			sizeof(struct signal_stack_context));
 
 	return;
 }
@@ -307,10 +307,18 @@ static inline unsigned long kvm_hv_flush_tlb_range(struct kvm_vcpu *vcpu,
 						e2k_addr_t start_gva,
 						e2k_addr_t end_gva)
 {
-	vcpu->arch.mmu.flush_gva_range(vcpu, PAGE_ALIGN_UP(start_gva),
-					end_gva);
+	vcpu->arch.mmu.sync_gva_range(vcpu, PAGE_ALIGN_UP(start_gva),
+					PAGE_ALIGN_UP(end_gva), true);
 
 	return 0;
+}
+
+static inline void kvm_hv_sync_addr_range(struct kvm_vcpu *vcpu,
+						e2k_addr_t start_gva,
+						e2k_addr_t end_gva)
+{
+	vcpu->arch.mmu.sync_gva_range(vcpu, PAGE_ALIGN_UP(start_gva),
+					PAGE_ALIGN_UP(end_gva), false);
 }
 
 static inline unsigned long update_psp_hi(unsigned long psp_hi_value)
@@ -363,6 +371,21 @@ static inline unsigned long update_pcsp_hi(unsigned long pcsp_hi_value)
 	return 0;
 }
 
+static inline unsigned long update_wd_psise(unsigned long psize_value)
+{
+	e2k_wd_t wd;
+	e2k_cr1_lo_t cr1_lo;
+
+	wd = NATIVE_READ_WD_REG();
+	cr1_lo = NATIVE_NV_READ_CR1_LO_REG();
+	wd.psize = psize_value;
+	cr1_lo.CR1_lo_wpsz = psize_value >> 4;
+	NATIVE_WRITE_WD_REG(wd);
+	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(cr1_lo);
+
+	return 0;
+}
+
 /*
  * This is the light hypercalls execution.
  * Lighte hypercalls do not:
@@ -397,7 +420,7 @@ kvm_light_hcalls(unsigned long hcall_num,
 	__guest_exit_light(thread_info, &vcpu->arch);
 
 	/* check VCPU ID of global register and running VCPU */
-	kvm_check_vcpu_ids(vcpu);
+	kvm_check_vcpu_ids_as_light(vcpu);
 
 	/* set kernel state of UPSR to preserve FP disable exception */
 	/* on movfi instructions while global registers saving */
@@ -458,6 +481,9 @@ kvm_light_hcalls(unsigned long hcall_num,
 		break;
 	case KVM_HCALL_UPDATE_PSP_HI:
 		update_psp_hi(arg1);
+		break;
+	case KVM_HCALL_UPDATE_WD_PSIZE:
+		ret = update_wd_psise(arg1);
 		break;
 	case KVM_HCALL_SETUP_IDLE_TASK:
 		ret = pv_vcpu_get_gpid_id(vcpu);
@@ -524,8 +550,8 @@ kvm_light_hcalls(unsigned long hcall_num,
 	case KVM_HCALL_CLEAR_DCACHE_L1_RANGE:
 		ret = kvm_clear_guest_dcache_l1_range((void *)arg1, arg2);
 		break;
-	case KVM_HCALL_FLUSH_ICACHE_RANGE:
-		ret = kvm_flush_guest_icache_range(arg1, arg2);
+	case KVM_HCALL_FLUSH_ICACHE_ALL:
+		ret = kvm_flush_guest_icache_all();
 		break;
 	case KVM_HCALL_MMU_PROBE:
 		ret = kvm_guest_mmu_probe(arg1, (kvm_mmu_probe_t)arg2);
@@ -560,7 +586,7 @@ kvm_light_hcalls(unsigned long hcall_num,
 				kvm_get_guest_vcpu_PSR_value(vcpu));
 
 	/* check VCPU ID of global register and running VCPU */
-	kvm_check_vcpu_ids(vcpu);
+	kvm_check_vcpu_ids_as_light(vcpu);
 
 	__guest_enter_light(thread_info, &vcpu->arch, !!from_sdisp);
 
@@ -838,6 +864,14 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		to_new_stacks = true;
 
 	cr1_lo = NATIVE_NV_READ_CR1_LO_REG();
+	/*
+	 * FIXME Bug 130066: paravirt spinlocks are currently broken, so wake VCPU with interrupts
+	 * even if its mask is closed
+	 * vcpu->arch.hcall_irqs_disabled = kvm_guest_vcpu_irqs_disabled(vcpu,
+	 *	vcpu->arch.is_hv ? AW(upsr_to_save) : kvm_get_guest_vcpu_UPSR_value(vcpu),
+	 *	cr1_lo.CR1_lo_psr);
+	 */
+	vcpu->arch.hcall_irqs_disabled = false;
 
 	/* save guest stack state to return from hypercall */
 	cr1_hi = NATIVE_NV_READ_CR1_HI_REG();
@@ -883,7 +917,7 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		break;
 	case KVM_HCALL_LAUNCH_SIG_HANDLER:
 		ret = kvm_sig_handler_return(vcpu, (kvm_stacks_info_t *)arg1,
-						arg2, &stack_regs);
+						arg2, arg3, &stack_regs);
 		to_new_user_stacks = true;
 		break;
 	case KVM_HCALL_APPLY_PSP_BOUNDS:
@@ -970,11 +1004,11 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		break;
 	case KVM_HCALL_GET_GUEST_LOCAL_GLOB_REGS:
 		ret = kvm_get_guest_local_glob_regs(vcpu,
-					(unsigned long **)arg1);
+					(unsigned long **)arg1, (bool)arg2);
 		break;
 	case KVM_HCALL_SET_GUEST_LOCAL_GLOB_REGS:
 		ret = kvm_set_guest_local_glob_regs(vcpu,
-					(unsigned long **)arg1);
+					(unsigned long **)arg1, (bool)arg2);
 		break;
 	case KVM_HCALL_GET_ALL_GUEST_GLOB_REGS:
 		ret = kvm_get_all_guest_glob_regs(vcpu, (unsigned long **)arg1);
@@ -992,7 +1026,7 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	case KVM_HCALL_RECOVERY_FAULTED_GUEST_MOVE:
 	case KVM_HCALL_RECOVERY_FAULTED_MOVE:
 		ret = kvm_recovery_faulted_guest_move(vcpu, arg1, arg2,
-						arg3, arg4, arg5);
+						arg3, arg4, arg5, (u32)arg6);
 		break;
 	case KVM_HCALL_RECOVERY_FAULTED_LOAD_TO_GUEST_GREG:
 	case KVM_HCALL_RECOVERY_FAULTED_LOAD_TO_GREG:
@@ -1129,6 +1163,9 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	case KVM_HCALL_FLUSH_TLB_RANGE:
 		ret = kvm_hv_flush_tlb_range(vcpu, arg1, arg2);
 		break;
+	case KVM_HCALL_SYNC_ADDR_RANGE:
+		kvm_hv_sync_addr_range(vcpu, arg1, arg2);
+		break;
 	default:
 		pr_err("Bad hypercall #%li\n", hcall_num);
 		ret = -ENOSYS;
@@ -1163,6 +1200,8 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		DO_RESTORE_GUEST_KERNEL_UPSR(gti, upsr_to_save);
 		 */
 	}
+
+	vcpu->arch.hcall_irqs_disabled = false;
 
 	trace_generic_hcall_exit(ret);
 

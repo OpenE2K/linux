@@ -139,6 +139,30 @@ kvm_reset_guest_updated_vcpu_regs_flags(struct kvm_vcpu *vcpu,
 	tir->TIR_hi.TIR_hi_reg;						\
 })
 
+#define CPU_SET_SBBP(vcpu, reg_no, reg_value)				\
+({									\
+	u64 *sbbp_reg = &((vcpu)->arch.kmap_vcpu_state->		\
+					cpu.regs.CPU_SBBP[reg_no]);	\
+	*sbbp_reg = (reg_value);					\
+})
+
+#define CPU_COPY_SBBP(vcpu, sbbp_from)					\
+({									\
+	u64 *sbbp_to = ((vcpu)->arch.kmap_vcpu_state->cpu.regs.CPU_SBBP); \
+	if (likely(sbbp_from)) {					\
+		memcpy(sbbp_to, sbbp_from, sizeof(*sbbp_to) * SBBP_ENTRIES_NUM); \
+	} else {							\
+		memset(sbbp_to, 0, sizeof(*sbbp_to) * SBBP_ENTRIES_NUM); \
+	}								\
+})
+
+#define CPU_GET_SBBP(vcpu, reg_no)					\
+({									\
+	u64 *sbbp = &((vcpu)->arch.kmap_vcpu_state->			\
+					cpu.regs.CPU_SBBP[reg_no]);	\
+	*sbbp;								\
+})
+
 static inline e2k_aau_t *get_vcpu_aau_context(struct kvm_vcpu *vcpu)
 {
 	return &(vcpu->arch.kmap_vcpu_state->cpu.aau);
@@ -751,12 +775,12 @@ kvm_get_guest_vcpu_CORE_MODE(struct kvm_vcpu *vcpu)
 static inline void
 kvm_set_guest_vcpu_PSR(struct kvm_vcpu *vcpu, e2k_psr_t psr)
 {
-	CPU_SET_SSREG(vcpu, PSR.PSR_reg, psr.PSR_reg);
+	CPU_SET_SSREG(vcpu, E2K_PSR.PSR_reg, psr.PSR_reg);
 }
 static inline unsigned int
 kvm_get_guest_vcpu_PSR_value(struct kvm_vcpu *vcpu)
 {
-	return CPU_GET_SSREG(vcpu, PSR.PSR_reg);
+	return CPU_GET_SSREG(vcpu, E2K_PSR.PSR_reg);
 }
 static inline e2k_psr_t
 kvm_get_guest_vcpu_PSR(struct kvm_vcpu *vcpu)
@@ -894,6 +918,28 @@ static inline u64
 kvm_get_guest_vcpu_ILCR_value(struct kvm_vcpu *vcpu)
 {
 	return CPU_GET_DSREG(vcpu, ILCR.ILCR_reg);
+}
+
+static inline void
+kvm_set_guest_vcpu_SBBP(struct kvm_vcpu *vcpu, int sbbp_no, u64 sbbp)
+{
+	CPU_SET_SBBP(vcpu, sbbp_no, sbbp);
+}
+
+static inline void
+kvm_copy_guest_vcpu_SBBP(struct kvm_vcpu *vcpu, u64 *sbbp)
+{
+	CPU_COPY_SBBP(vcpu, sbbp);
+}
+
+static inline u64
+kvm_get_guest_vcpu_SBBP(struct kvm_vcpu *vcpu, int sbbp_no)
+{
+	u64 sbbp;
+
+	BUG_ON(sbbp_no > SBBP_ENTRIES_NUM);
+	sbbp = CPU_GET_SBBP(vcpu, sbbp_no);
+	return sbbp;
 }
 
 static inline void

@@ -412,6 +412,16 @@ KVM_READ_CLW_REG(clw_addr_t clw_addr)
 }
 
 /*
+ * Write CLW register
+ */
+
+static inline void
+KVM_WRITE_CLW_REG(clw_addr_t clw_addr, clw_reg_t val)
+{
+	panic("KVM_WRITE_CLW_REG() is not yet implemented\n");
+}
+
+/*
  * KVM MMU DEBUG registers access
  */
 static inline mmu_reg_t
@@ -729,6 +739,16 @@ static inline clw_reg_t
 READ_CLW_REG(clw_addr_t clw_addr)
 {
 	return KVM_READ_CLW_REG(clw_addr);
+}
+
+/*
+ * Write CLW register
+ */
+
+static inline void
+WRITE_CLW_REG(clw_addr_t clw_addr, clw_reg_t val)
+{
+	KVM_WRITE_CLW_REG(clw_addr, val);
 }
 
 /*

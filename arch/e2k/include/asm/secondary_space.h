@@ -79,6 +79,8 @@ s64 sys_el_binary(s64 work, s64 arg2, s64 arg3, s64 arg4);
 #define SET_SECONDARY_64BIT_MODE	11
 #define GET_PROTOCOL_VERSION		12
 #define SET_IC_NEED_FLUSH_ON_SWITCH	13
+#define GET_UPT_SEC_AD_SHIFT_DSBL	14
+#define SET_UPT_SEC_AD_SHIFT_DSBL	15
 
 /* Selector numbers for GET_SECONDARY_SPACE_OFFSET */
 enum sel_num {

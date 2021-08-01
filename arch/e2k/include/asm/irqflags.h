@@ -269,8 +269,6 @@ do { \
 #define native_psr_irqs_disabled()	\
 		psr_irqs_disabled_flags(NATIVE_NV_READ_PSR_REG_VALUE())
 
-#define	native_trap_irqs_disabled(regs)	(regs->irqs_disabled)
-
 #define	psr_and_upsr_nm_irqs_disabled()			\
 ({							\
 	int ret;					\

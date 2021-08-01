@@ -356,7 +356,7 @@ void HDMI_Init (void);
  *      -1 - Error 
  *
  */
-long HDMI_Set_Mode (logicalMode_t *pLogicalMode);
+long HDMI_Set_Mode (logicalMode_t *pLogicalMode, bool isHDMI);
 
 void HDMI_Enable_Output(void);
 

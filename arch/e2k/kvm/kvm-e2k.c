@@ -1023,6 +1023,8 @@ static int create_vcpu_host_context(struct kvm_vcpu *vcpu)
 	}
 	host_ctxt->stack = stack;
 	addr = (unsigned long)stack;
+	host_ctxt->pt_regs = NULL;
+	host_ctxt->upsr = E2K_USER_INITIAL_UPSR;
 	host_ctxt->k_psp_lo.PSP_lo_half = 0;
 	host_ctxt->k_psp_lo.PSP_lo_base = addr + KERNEL_P_STACK_OFFSET;
 	host_ctxt->k_psp_hi.PSP_hi_half = 0;
@@ -1037,6 +1039,8 @@ static int create_vcpu_host_context(struct kvm_vcpu *vcpu)
 	host_ctxt->k_usd_hi.USD_hi_half = 0;
 	host_ctxt->k_usd_hi.USD_hi_size = KERNEL_C_STACK_SIZE;
 	host_ctxt->k_sbr.SBR_reg = host_ctxt->k_usd_lo.USD_lo_base;
+
+	host_ctxt->osem = guest_trap_init();
 
 	host_ctxt->signal.stack.used = 0;
 	atomic_set(&host_ctxt->signal.traps_num, 0);
@@ -1065,6 +1069,8 @@ static int kvm_arch_any_vcpu_init(struct kvm_vcpu *vcpu)
 	int r;
 
 	DebugKVM("started for CPU %d\n", vcpu->vcpu_id);
+
+	vcpu->arch.exit_reason = -1;
 
 	/* create shared with guest kernel structure to pass */
 	/* some useful info about host and hypervisor */
@@ -1338,53 +1344,6 @@ static int handle_vm_error(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	return 0;
 }
 
-/*
- * Each real VCPU of guest (named main VCPU) can have a few additional VCPUs
- * (name VIRQ VCPU) to handle IRQs on own separate virtual CPUs to avoid
- * deadlocks because of interrupts can not be really disabled on VCPU
- * Main VCPU is run on host main thread. Each VIRQ VICPUs run on separate
- * host threads.
- * Request to host/QEMU (exit reasons) can be from all VCPUs (main and VIRQs)
- * Arch-independent kvm unknowns about our additional VIRQ VCPUs and
- * operate only with main VCPU. So it needs find real VCPU exit request from
- * Argument vcpu of functions below is main VCPU
- */
-static struct kvm_vcpu *get_exit_req_vcpu(struct kvm_vcpu *vcpu)
-{
-	struct kvm_vcpu *req_vcpu;
-
-	DebugKVMRUN("started for VCPU #%d\n", vcpu->vcpu_id);
-	raw_spin_lock(&vcpu->arch.exit_reqs_lock);
-	if (list_empty(&vcpu->arch.exit_reqs_list)) {
-		DebugKVMER("exit requests list is empty, so it is first "
-			"start run of VCPU #%d\n", vcpu->vcpu_id);
-		raw_spin_unlock(&vcpu->arch.exit_reqs_lock);
-		return vcpu;
-	}
-	req_vcpu = list_entry(vcpu->arch.exit_reqs_list.next,
-				    struct kvm_vcpu, arch.exit_req);
-	raw_spin_unlock(&vcpu->arch.exit_reqs_lock);
-	if (req_vcpu == vcpu) {
-		DebugKVMERM("exit request from main VCPU #%d\n", vcpu->vcpu_id);
-	} else {
-		BUG_ON(true);
-	}
-	return req_vcpu;
-}
-static bool put_exit_req_vcpu(struct kvm_vcpu *vcpu)
-{
-	bool req_empty;
-
-	DebugKVMERM("started for VCPU #%d\n", vcpu->vcpu_id);
-	raw_spin_lock(&vcpu->arch.exit_reqs_lock);
-	list_del_init(&vcpu->arch.exit_req);
-	req_empty = list_empty(&vcpu->arch.exit_reqs_list);
-	raw_spin_unlock(&vcpu->arch.exit_reqs_lock);
-	DebugKVMERM("deleted exit request from main VCPU #%d\n",
-		vcpu->vcpu_id);
-	return req_empty;
-}
-
 static int handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
 	struct kvm_mmio_fragment *frag;
@@ -1524,6 +1483,7 @@ static const int kvm_guest_max_exit_handlers =
 
 static inline uint32_t kvm_get_exit_reason(struct kvm_vcpu *vcpu)
 {
+	u32 exit_reason;
 	if (vcpu->arch.exit_shutdown_terminate) {
 		vcpu->arch.exit_reason = EXIT_SHUTDOWN;
 		if (vcpu->arch.exit_shutdown_terminate == KVM_EXIT_E2K_RESTART)
@@ -1531,7 +1491,9 @@ static inline uint32_t kvm_get_exit_reason(struct kvm_vcpu *vcpu)
 		else
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 	}
-	return vcpu->arch.exit_reason;
+	exit_reason = vcpu->arch.exit_reason;
+	vcpu->arch.exit_reason = -1;
+	return exit_reason;
 }
 
 /*
@@ -1546,9 +1508,12 @@ static int kvm_handle_exit(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 	DebugKVMRUN("started on VCPU %d on exit reason %d\n",
 		vcpu->vcpu_id, exit_reason);
 	if (exit_reason < kvm_guest_max_exit_handlers
-			&& kvm_guest_exit_handlers[exit_reason])
+			&& kvm_guest_exit_handlers[exit_reason]) {
 		return kvm_guest_exit_handlers[exit_reason](vcpu, kvm_run);
-	else {
+	} else if (exit_reason == -1) {
+		/* exit reason was not set, try run VCPU again */
+		return 1;
+	} else {
 		kvm_run->exit_reason = KVM_EXIT_UNKNOWN;
 		kvm_run->hw.hardware_exit_reason = exit_reason;
 		DebugKVM("exit reason %d is unknown\n",
@@ -1557,42 +1522,12 @@ static int kvm_handle_exit(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static void kvm_run_guest(struct kvm_vcpu *vcpu)
-{
-	bool req_empty;
-
-	DebugKVMRUN("started on VCPU %d CPU %d\n",
-		vcpu->vcpu_id, vcpu->cpu);
-	complete(&vcpu->arch.exit_req_done);
-	put_exit_req_vcpu(vcpu);
-	raw_spin_lock(&vcpu->arch.exit_reqs_lock);
-	req_empty = list_empty(&vcpu->arch.exit_reqs_list);
-	if (req_empty) {
-		DebugKVMERM("exit request list is empty for VCPU #%d, go "
-			"to waiting\n", vcpu->vcpu_id);
-		set_current_state(TASK_INTERRUPTIBLE);
-		raw_spin_unlock(&vcpu->arch.exit_reqs_lock);
-		schedule();
-		__set_current_state(TASK_RUNNING);
-	} else {
-		DebugKVMER("exit request list is not empty for VCPU #%d, go "
-			"to next request\n", vcpu->vcpu_id);
-		raw_spin_unlock(&vcpu->arch.exit_reqs_lock);
-	}
-}
-
 static int __vcpu_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
-	bool first_run;
 	int r;
 
 	DebugKVMRUN("started on VCPU %d CPU %d\n",
 		vcpu->vcpu_id, vcpu->cpu);
-	raw_spin_lock(&vcpu->arch.exit_reqs_lock);
-	first_run = list_empty(&vcpu->arch.exit_reqs_list);
-	raw_spin_unlock(&vcpu->arch.exit_reqs_lock);
-	if (first_run)
-		DebugKVMER("start run of VCPU #%d\n", vcpu->vcpu_id);
 
 	/*
 	 * down_read() may sleep and return with interrupts enabled
@@ -1603,6 +1538,7 @@ again:
 	if (unlikely(signal_pending(current))) {
 		r = -EINTR;
 		kvm_run->exit_reason = KVM_EXIT_INTR;
+		++vcpu->stat.signal_exits;
 		goto out;
 	}
 	if (unlikely(vcpu->arch.halted)) {
@@ -1624,28 +1560,15 @@ again:
 	/*
 	 * Transition to the guest
 	 */
-	if (vcpu->arch.is_hv) {
+	if (likely(vcpu->arch.is_hv)) {
 		r = startup_hv_vcpu(vcpu);
-		if (r) {
-			goto handle_exit;
-		}
 		KVM_BUG_ON(r == 0);
-	} else if (first_run) {
+	} else if (!vcpu->arch.from_pv_intc) {
 		launch_pv_vcpu(vcpu, FULL_CONTEXT_SWITCH | USD_CONTEXT_SWITCH);
-		first_run = false;
-		goto handle_exit;
 	} else {
-		kvm_run_guest(vcpu);
+		return_to_pv_vcpu_intc(vcpu);
 	}
 
-	if (unlikely(vcpu->kvm->arch.halted))
-		goto vm_run_complete;
-
-	vcpu = get_exit_req_vcpu(vcpu);
-	vcpu->arch.launched = 1;
-	set_bit(KVM_REQ_KICK, (void *) &vcpu->requests);
-
-handle_exit:
 	local_irq_enable();
 	preempt_enable();
 
@@ -1672,9 +1595,6 @@ out:
 
 	return r;
 
-vm_run_complete:
-	local_irq_enable();
-	preempt_enable();
 vm_complete:
 	kvm_run->exit_reason = KVM_EXIT_SHUTDOWN;
 	return 0;
@@ -1683,20 +1603,26 @@ vm_complete:
 int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
 	int r;
-	sigset_t sigsaved;
 
 	DebugKVMRUN("started\n");
-	vcpu = get_exit_req_vcpu(vcpu);
 
 	vcpu_load(vcpu);
 
-	if (vcpu->sigset_active)
-		sigprocmask(SIG_SETMASK, &vcpu->sigset, &sigsaved);
+	kvm_sigset_activate(vcpu);
 
 	if (unlikely(vcpu->arch.mp_state == KVM_MP_STATE_UNINITIALIZED)) {
+		if (kvm_run->immediate_exit) {
+			r = -EINTR;
+			goto out;
+		}
 		kvm_vcpu_block(vcpu);
-		clear_bit(KVM_REQ_UNHALT, (void *) &vcpu->requests);
+		kvm_clear_request(KVM_REQ_UNHALT, vcpu);
 		r = -EAGAIN;
+		if (signal_pending(current)) {
+			r = -EINTR;
+			vcpu->run->exit_reason = KVM_EXIT_INTR;
+			++vcpu->stat.signal_exits;
+		}
 		goto out;
 	}
 
@@ -1745,10 +1671,13 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 				__func__, r);
 		}
 	}
-	r = __vcpu_run(vcpu, kvm_run);
+	if (kvm_run->immediate_exit) {
+		r = -EINTR;
+	} else {
+		r = __vcpu_run(vcpu, kvm_run);
+	}
 out:
-	if (vcpu->sigset_active)
-		sigprocmask(SIG_SETMASK, &sigsaved, NULL);
+	kvm_sigset_deactivate(vcpu);
 
 	if (kvm_run->exit_reason == KVM_EXIT_E2K_RESTART) {
 		vcpu->kvm->arch.reboot = true;
@@ -2025,13 +1954,11 @@ static int kvm_setup_passthrough(struct kvm *kvm)
 	if (kvm->arch.is_hv) {
 		/* Setup passthrough for first device with vfio-pci driver */
 		for_each_pci_dev(pdev) {
-			if (pdev->driver && !strcmp(pdev->driver->name,
-				"vfio-pci")) {
-				struct iohub_sysdata *sd = pdev->bus->sysdata;
+			if (pdev->driver && !strcmp(pdev->driver->name, "vfio-pci")) {
 				int node = dev_to_node(&pdev->dev);
 
 				irt->vfio_dev = pdev;
-				pdev->dev.archdata.iommu.kvm = kvm;
+				pdev->dev.archdata.kvm = kvm;
 
 				if (node == NUMA_NO_NODE)
 					node = 0;
@@ -2045,7 +1972,7 @@ static int kvm_setup_passthrough(struct kvm *kvm)
 					return 0;
 				}
 
-				if (sd->generation < 2) {
+				if (!l_eioh_device(pdev)) {
 					pr_warn("kvm_ioepic: IOHub2 interrupt passthrough not supported (IOAPIC pin %d)\n",
 						pdev->irq);
 					return 0;
@@ -3267,6 +3194,8 @@ static void kvm_wait_for_vcpu_release(struct kvm_vcpu *vcpu)
 
 	if (vcpu->arch.host_task != NULL) {
 		kvm_halt_host_vcpu_thread(vcpu);
+	} else {
+		kvm_arch_vcpu_release(vcpu);
 	}
 
 	if (!vcpu->arch.is_hv) {
@@ -3525,6 +3454,8 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 		}
 	}
 	local_irq_restore(flags);
+
+	current_thread_info()->vcpu = NULL;
 }
 
 DEFINE_PER_CPU(struct kvm_vcpu *, last_vcpu) = NULL;
@@ -3535,6 +3466,8 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu, bool schedule)
 	unsigned long flags;
 
 	DebugKVMRUN("started on VCPU %d CPU %d\n", vcpu->vcpu_id, cpu);
+
+	current_thread_info()->vcpu = vcpu;
 	vcpu->cpu = cpu;
 	trace_vcpu_load(vcpu->vcpu_id, last_cpu, cpu);
 	clear_bit(KVM_REQ_KICK, (void *) &vcpu->requests);
@@ -3616,7 +3549,9 @@ static void kvm_arch_vcpu_release(struct kvm_vcpu *vcpu)
 	kvm_init_guest_lapic_virqs_num(vcpu);
 	kvm_cancel_clockdev(vcpu);
 	free_vcpu_state(vcpu);
-	complete(&vcpu->arch.released);
+	if (!vcpu->arch.is_hv) {
+		complete(&vcpu->arch.released);
+	}
 }
 void kvm_arch_vcpu_free(struct kvm_vcpu *vcpu)
 {
@@ -4558,7 +4493,7 @@ bool kvm_vcpu_has_epic_interrupts(struct kvm_vcpu *vcpu)
 
 	/* Check mi_gst by reading CEPIC_CIR.stat */
 	reg_cir.raw = epic_read_guest_w(CEPIC_CIR);
-	if (reg_cir.bits.stat)
+	if (!vcpu->arch.hcall_irqs_disabled && reg_cir.bits.stat)
 		return true;
 
 	/* Check nmi_gst by reading CEPIC_PNMIRR */

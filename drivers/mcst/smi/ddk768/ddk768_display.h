@@ -229,7 +229,7 @@ long setAllViewOff(void);
  * Disable double pixel clock. 
  * This is a teporary function, used to patch for the random fuzzy font problem. 
  */
-void DisableDoublePixel(void);
-
+void EnableDoublePixel(disp_control_t dispControl);
+void DisableDoublePixel(disp_control_t dispControl);
 
 #endif /* _DISPLAY_H_ */

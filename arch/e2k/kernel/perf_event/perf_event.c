@@ -109,8 +109,11 @@ static int handle_event(struct perf_event *event, struct pt_regs *regs)
 
 	perf_sample_data_init(&data, 0, hwc->last_period);
 
-	if (!(hwc->config & ARCH_PERFMON_OS))
+	if (!(hwc->config & ARCH_PERFMON_OS)) {
 		regs = find_user_regs(regs);
+		if (WARN_ON_ONCE(!regs))
+			return 0;
+	}
 
 	if (!(event->attr.exclude_idle && current->pid == 0))
 		return perf_event_overflow(event, &data, regs);

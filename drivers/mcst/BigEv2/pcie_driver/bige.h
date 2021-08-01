@@ -20,10 +20,16 @@
 #endif
 
 /* TODO(mheikkinen) These are the Xilinx defaults. */
+/* Base address got control register */
+#ifdef CONFIG_E90S /* MCST R2000+ */
+#define BIGE_CONTROL_BAR 2
+#define BIGE_PCI_VENDOR_ID PCI_VENDOR_ID_MCST_TMP
+#define BIGE_PCI_DEVICE_ID PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P
+#else /* MCST Elbrus-e2c3 */
+#define BIGE_CONTROL_BAR 0
 #define BIGE_PCI_VENDOR_ID PCI_VENDOR_ID_MCST_TMP
 #define BIGE_PCI_DEVICE_ID PCI_DEVICE_ID_MCST_VP9_BIGEV2
-/* Base address got control register */
-#define BIGE_CONTROL_BAR 0
+#endif
 
 /* PCIe BigEv2 driver offset in control register */
 #define BIGE_REG_OFFSET 0x0

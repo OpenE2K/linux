@@ -43,13 +43,13 @@ static hdmi_PHY_param_t gHdmiPHYParamTable[] =
  { 0x22, 0x0E, 0x00, 0x40, 0x40, 0x1E, 0x92, 0x2E, 0x71, 0x00},
 
 /* TMDS clock range 150-200 MHz [8bpc] */
- { 0x22, 0x0E, 0x00, 0x40, 0x40, 0x1E, 0x94, 0x2E, 0x72, 0x00},
+ { 0x22, 0x0E, 0x00, 0x40, 0x40, 0x1E, 0x94, 0x2E, 0x71, 0x00},
 
 /* TMDS clock range 200-250 MHz [8bpc] */
- { 0x22, 0x0E, 0x00, 0x40, 0x40, 0x1E, 0x94, 0x2E, 0x74, 0x00},
+ { 0x22, 0x0E, 0x00, 0x40, 0x40, 0x1E, 0x94, 0x2E, 0x71, 0x00},
 
 /* 4K mode  [8bpc] */
- { 0x22, 0x0E, 0x00, 0x40, 0x40, 0x1E, 0x95, 0x2E, 0x74, 0x00},
+ { 0x22, 0x0E, 0x00, 0x40, 0x40, 0x1E, 0x95, 0x2E, 0x71, 0x00},
 
 /* End of table. */
  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -494,11 +494,11 @@ void HDMI_Init(void)
     writeHDMIRegister (X60_PACKET_HB0, 0x82); // HB0
     writeHDMIRegister (X61_PACKET_HB1, 0x02); // HB1
     writeHDMIRegister (X62_PACKET_HB2, 0x0D); // HB2
-    writeHDMIRegister (X63_PACKET_PB0, 0xa5); // PB0
-    writeHDMIRegister (X64_PACKET_PB1, 0x18); // PB1
-    writeHDMIRegister (X65_PACKET_PB2, 0xfd); // PB2
+    writeHDMIRegister (X63_PACKET_PB0, 0x16); // PB0
+    writeHDMIRegister (X64_PACKET_PB1, 0x00); // PB1
+    writeHDMIRegister (X65_PACKET_PB2, 0x00); // PB2
     writeHDMIRegister (X66_PACKET_PB3, 0x12); // PB3
-    writeHDMIRegister (X67_PACKET_PB4, 0x02); // PB4
+    writeHDMIRegister (X67_PACKET_PB4, 0x00); // PB4
     writeHDMIRegister (X68_PACKET_PB5, 0x00); // PB5
     writeHDMIRegister (X69_PACKET_PB6, 0xe4); // PB6
     writeHDMIRegister (X6A_PACKET_PB7, 0xb5); // PB7
@@ -514,9 +514,9 @@ void HDMI_Init(void)
     writeHDMIRegister (X60_PACKET_HB0, 0x84); // HB0
     writeHDMIRegister (X61_PACKET_HB1, 0x01); // HB1
     writeHDMIRegister (X62_PACKET_HB2, 0x0A); // HB2
-    writeHDMIRegister (X63_PACKET_PB0, 0xF7); // PB0
+    writeHDMIRegister (X63_PACKET_PB0, 0x70); // PB0
     writeHDMIRegister (X64_PACKET_PB1, 0x01); // PB1
-    writeHDMIRegister (X65_PACKET_PB2, 0x09); // PB2
+    writeHDMIRegister (X65_PACKET_PB2, 0x00); // PB2
     writeHDMIRegister (X66_PACKET_PB3, 0x00); // PB3
     writeHDMIRegister (X67_PACKET_PB4, 0x00); // PB4
     writeHDMIRegister (X68_PACKET_PB5, 0x00); // PB5
@@ -595,14 +595,14 @@ void HDMI_Audio_Setting_44100Hz (mode_parameter_t *pModeParam)
 
     // set audio setting registers
     writeHDMIRegister(X0A_AUDIO_SOURCE, 0x00);      // internal CTS
-    writeHDMIRegister(X0B_AUDIO_SET2, 0x4c);//0x40);
+    writeHDMIRegister(X0B_AUDIO_SET2, 0x40);
     writeHDMIRegister(X0C_I2S_MODE, 0x04);      // I2S 2ch (0x3C for 8ch) + I2S
     //writeHDMIRegister(X0D_DSD_MODE, 0x00);      // DSD audio disabled
     writeHDMIRegister(X10_I2S_PINMODE, 0x00);      // I2S input pin swap
-    writeHDMIRegister(X11_ASTATUS1, 0x0F);//0x00);      // Original frequency not indicated(defult)
+    writeHDMIRegister(X11_ASTATUS1, 0x0F);      // Original frequency not indicated(defult)
     writeHDMIRegister(X12_ASTATUS2, 0x22);
     writeHDMIRegister(X13_CAT_CODE, 0x00);
-    writeHDMIRegister(X14_A_SOURCE, 0x03);//0x00);
+    writeHDMIRegister(X14_A_SOURCE, 0x02);
     
     regValue = (readHDMIRegister(X15_AVSET1) & 0x0F);       // set freq 44.1kHz
     writeHDMIRegister(X15_AVSET1, regValue);
@@ -629,7 +629,7 @@ void HDMI_Audio_Setting_44100Hz (mode_parameter_t *pModeParam)
  *      None
  *
  */
-void HDMI_Video_Setting (mode_parameter_t *pModeParam)
+void HDMI_Video_Setting (mode_parameter_t *pModeParam, bool isHDMI)
 {
     unsigned long temp = 0;
     unsigned char regValue = 0;
@@ -689,9 +689,12 @@ void HDMI_Video_Setting (mode_parameter_t *pModeParam)
     writeHDMIRegister(X46_OUTPUT_OPTION, 0x04);
     writeHDMIRegister(XD3_CSC_CONFIG1, 0x01);
 
-    // video set output - setting to HDMI mode
+    // video set output - setting to HDMI/DVI mode
     regValue = readHDMIRegister(XAF_HDCP_CTRL);
-    writeHDMIRegister(XAF_HDCP_CTRL, (regValue | 0x02));
+    if (isHDMI)
+        writeHDMIRegister(XAF_HDCP_CTRL, (regValue | 0x02));
+    else
+        writeHDMIRegister(XAF_HDCP_CTRL, (regValue & 0xFD));
 
     // set DDC bus access frequency control register based on pixel clock value (400kHz is preferred)
     // At mode_d/mode_e: 
@@ -743,19 +746,14 @@ long HDMI_PHY_Setting (mode_parameter_t *pModeParam)
     {
         clkIndex = CLK_200_to_250;
     }
+    else if (pModeParam->pixel_clock >= 250000000 && pModeParam->pixel_clock <= 297000000)
+    {
+        clkIndex = CLK_4Kmode;
+    }
     else
     {
-        // 4K mode uses seperate PHY param values
-        if ((pModeParam->horizontal_display_end >= 3840 && pModeParam->horizontal_display_end < 5120) && 
-            (pModeParam->vertical_display_end >= 2160 && pModeParam->vertical_display_end < 2880))
-        {
-            clkIndex = CLK_4Kmode; 
-        }
-        else
-        {
-            // Does not support TMDS clock larger than 250MHz, except 4K mode
-            return (-1);
-        }
+        // Does not support TMDS clock larger than 297MHz.
+        return (-1);
     }
 
     pPHYParamTable = (hdmi_PHY_param_t *)gHdmiPHYParamTable;
@@ -790,7 +788,7 @@ long HDMI_PHY_Setting (mode_parameter_t *pModeParam)
  *      -1 - Error 
  *
  */
-long HDMI_Set_Mode (logicalMode_t *pLogicalMode)
+long HDMI_Set_Mode (logicalMode_t *pLogicalMode, bool isHDMI)
 {
     mode_parameter_t *pModeParam;
     unsigned char temp = 0;
@@ -808,7 +806,7 @@ long HDMI_Set_Mode (logicalMode_t *pLogicalMode)
         return -1;
 
     // set video param
-    HDMI_Video_Setting(pModeParam);
+    HDMI_Video_Setting(pModeParam, isHDMI);
 
     // set audio param
     HDMI_Audio_Setting_44100Hz(pModeParam);
@@ -1107,7 +1105,7 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
     
     BYTE byChecksum = 0, regValue;
     unsigned long i = 0;
-    unsigned long retry = 10000;
+    unsigned long retry = 1000;
             
     if (pEDIDBuffer == (unsigned char *)0)
     {
@@ -1140,7 +1138,7 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
     	/* Hook the interrupt before going to the while */ 
         //hookHDMIInterrupt(HdmiHandler);
     	
-        retry = 10000;
+        retry = 1000;
         while(retry)
     	{		
             retry--;

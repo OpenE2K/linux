@@ -11,7 +11,9 @@
 #include <linux/console.h>
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
 #include <drm/drm_probe_helper.h>
+#endif
 
 #include "smi_drv.h"
 #include "hw750.h"
@@ -19,25 +21,25 @@
 
 int smi_modeset = -1;
 int smi_indent = 0;
-int smi_bpp = 16;
+int smi_bpp = 32;
 int force_connect = 0;
 int g_specId;
 int smi_pat = 0xff;
-
+int lvds_channel = 0;
 
 extern void hw750_suspend(struct smi_750_register * pSave);
 extern void hw750_resume(struct smi_750_register * pSave);
 
-module_param(smi_pat,int, S_IWUSR | S_IRUSR);
+module_param(smi_pat, int, S_IWUSR | S_IRUSR);
 
-
-MODULE_PARM_DESC(modeset, "Disable/Enable modesetting");
+MODULE_PARM_DESC(modeset, "Enable/Disable modesetting");
 module_param_named(modeset, smi_modeset, int, 0400);
-MODULE_PARM_DESC(bpp, "Max bits-per-pixel (default:16)");
+MODULE_PARM_DESC(bpp, "Max bits-per-pixel (default:32)");
 module_param_named(bpp, smi_bpp, int, 0400);
 MODULE_PARM_DESC(nopnp, "Force conncet to the monitor without monitor EDID (default:0)");
 module_param_named(nopnp, force_connect, int, 0400);
-
+MODULE_PARM_DESC(lvds, "LVDS Channel, 0=disable 1=single_channel, 2=dual_channel (default:0)");
+module_param_named(lvds, lvds_channel, int, 0400);
 
 /*
  * This is the generic driver code. This binds the driver to the drm core,
@@ -136,9 +138,9 @@ static void smi_pci_remove(struct pci_dev *pdev)
 
 static int smi_drm_freeze(struct drm_device *dev)
 {
-	struct smi_device *sdev = dev->dev_private;
 	ENTER();
 
+	struct smi_device *sdev = dev->dev_private;
 	
 	drm_kms_helper_poll_disable(dev);
 
@@ -164,9 +166,9 @@ static int smi_drm_freeze(struct drm_device *dev)
 }
 
 static int smi_drm_thaw(struct drm_device *dev)
-{
-	struct smi_device *sdev = dev->dev_private;
+{	
 	ENTER();
+	struct smi_device *sdev = dev->dev_private;
 	
 
 	drm_mode_config_reset(dev);
@@ -195,9 +197,10 @@ static int smi_drm_thaw(struct drm_device *dev)
 
 
 static int smi_drm_resume(struct drm_device *dev)
-{
-	int ret;
+{	
 	ENTER();
+	
+	int ret;
 
 	if (pci_enable_device(dev->pdev))
 		return -EIO;
@@ -380,8 +383,17 @@ static const struct file_operations smi_driver_fops = {
 	.read = drm_read,
 	.llseek = no_llseek,
 };
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
+#define DRIVER_IRQ_SHARED 0
+#endif
+
 static struct drm_driver driver = {
-	.driver_features = DRIVER_GEM | DRIVER_MODESET,
+#ifdef PRIME
+	.driver_features = DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED |DRIVER_GEM | DRIVER_MODESET,
+#else
+	.driver_features = DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED |DRIVER_GEM | DRIVER_MODESET,
+#endif
 	.load = smi_driver_load,
 	.unload = smi_driver_unload,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0))
@@ -434,6 +446,9 @@ static struct drm_driver driver = {
 	.gem_prime_pin		= smi_gem_prime_pin,
 	.gem_prime_unpin 	= smi_gem_prime_unpin,	
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0) && LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
+	.gem_prime_res_obj = smi_gem_prime_res_obj,
+#endif
 #endif
 
 };
@@ -469,7 +484,7 @@ static int __init smi_init(void)
 #endif
 	if (smi_modeset == 0)
 		return -EINVAL;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0)
 	return drm_pci_init(&driver, &smi_pci_driver);
 #else
 	return pci_register_driver(&smi_pci_driver);
@@ -478,7 +493,7 @@ static int __init smi_init(void)
 
 static void __exit smi_exit(void)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0)
 	drm_pci_exit(&driver, &smi_pci_driver);
 #else
 	pci_unregister_driver(&smi_pci_driver);

@@ -10,6 +10,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/pci.h>
+#include <linux/platform_device.h>
 #include <linux/swiotlb.h>
 #include <linux/syscore_ops.h>
 #include <linux/dma-direct.h>
@@ -47,6 +48,14 @@ static const struct iommu_ops l_iommu_ops;
 #define l_iommu_has_numa_bug()	0
 #endif
 
+#ifndef l_has_devices_with_iommu
+#define l_has_devices_with_iommu()	0
+#endif
+
+#ifndef l_iommu_enable_embedded_iommus
+#define l_iommu_enable_embedded_iommus(node)	do {} while (0)
+#endif
+
 /*
  * These give mapping size of each iommu pte/tlb.
  */
@@ -64,29 +73,58 @@ static const struct iommu_ops l_iommu_ops;
 #define IOMMU_RNGE_OFF      2
 
 struct l_iommu {
+	struct list_head list;		/* list of all iommu */
 	int node;
+	unsigned regs_offset;
+	unsigned companion_regs_offset;
+	struct mutex mutex;
 
 	struct l_iommu_table {
 		iopte_t	*pgtable;
+		unsigned long pgtable_pa;
 		unsigned long map_base;
 	} table[IOMMU_TABLES_NR];
 
-	unsigned int prefetch_supported:	1;
+	unsigned prefetch_supported:	1;
 	struct iommu_group *default_group;
 
 	struct iommu_device iommu;	/* IOMMU core handle */
 };
 
-static void __iommu_flushall(unsigned node)
+static int l_dev_to_node(struct device *dev)
 {
-	l_iommu_write(node, 0, L_IOMMU_FLUSH_ALL);
+	return dev && dev_to_node(dev) >= 0 ?
+			dev_to_node(dev) : 0;
 }
 
-static inline void iommu_flush(struct l_iommu *iommu,
-			       dma_addr_t addr)
+static void l_iommu_write(struct l_iommu *iommu, unsigned val, unsigned addr)
 {
-	l_iommu_write(iommu->node,
-		      addr_to_flush(addr), L_IOMMU_FLUSH_ADDR);
+	__l_iommu_write(iommu->node, val, addr + iommu->regs_offset);
+	if (iommu->companion_regs_offset) {
+		__l_iommu_write(iommu->node, val,
+				addr + iommu->companion_regs_offset);
+	}
+}
+#ifdef __l_iommu_set_ba
+static inline void l_iommu_set_ba(struct l_iommu *iommu, unsigned long *ba)
+{
+	__l_iommu_set_ba(iommu->node, ba);
+}
+#else
+static inline void l_iommu_set_ba(struct l_iommu *iommu, unsigned long *ba)
+{
+	l_iommu_write(iommu, (u32)pa_to_iopte(ba[0]), L_IOMMU_BA);
+}
+#endif
+
+static void iommu_flushall(struct l_iommu *iommu)
+{
+	l_iommu_write(iommu, 0, L_IOMMU_FLUSH_ALL);
+}
+
+static inline void iommu_flush(struct l_iommu *iommu, dma_addr_t addr)
+{
+	l_iommu_write(iommu, addr_to_flush(addr), L_IOMMU_FLUSH_ADDR);
 }
 
 static unsigned long l_iommu_prot_to_pte(int prot)
@@ -108,20 +146,6 @@ struct l_iommu_domain {
 static struct l_iommu_domain *to_l_domain(struct iommu_domain *dom)
 {
 	return container_of(dom, struct l_iommu_domain, domain);
-}
-
-static struct l_iommu *dev_to_iommu(struct device *dev)
-{
-	struct iohub_sysdata *sd;
-
-	if (WARN_ON(!dev))
-		return NULL;
-	if (WARN_ON(!dev_is_pci(dev)))
-		return NULL;
-
-	sd = to_pci_dev(dev)->bus->sysdata;
-
-	return sd->l_iommu;
 }
 
 static struct l_iommu_table *l_iommu_to_table(struct l_iommu *i,
@@ -232,24 +256,49 @@ static void l_free_pages(struct iommu_domain *d, phys_addr_t phys,
 	l_dom_free_id(d, iova);
 }
 
-static void l_iommu_init_hw(struct l_iommu *iommu,
-					unsigned long win_sz, int node)
+static struct pci_dev *l_dev_to_parent_pcidev(struct device *dev)
+{
+	while (dev && !dev_is_pci(dev))
+		dev = dev->parent;
+	BUG_ON(!dev);
+	BUG_ON(!dev_is_pci(dev));
+	return to_pci_dev(dev);
+}
+
+/*
+ * This function checks if the driver got a valid device from the caller to
+ * avoid dereferencing invalid pointers.
+ */
+static bool l_iommu_check_device(struct device *dev)
+{
+	if (!dev || !dev->dma_mask)
+		return false;
+
+	while (dev && !dev_is_pci(dev))
+		dev = dev->parent;
+
+	if (!dev || !dev_is_pci(dev))
+		return false;
+	return true;
+}
+
+static void l_iommu_init_hw(struct l_iommu *iommu, unsigned long win_sz)
 {
 	int i;
 	unsigned long pa[ARRAY_SIZE(iommu->table)];
 	unsigned long range = ilog2(win_sz) - ilog2(MIN_IOMMU_WINSIZE);
 	range <<= IOMMU_RNGE_OFF;	/* Virtual DMA Address Range */
 	for (i = 0; i < ARRAY_SIZE(iommu->table); i++)
-		pa[i] = __pa(iommu->table[i].pgtable);
+		pa[i] = iommu->table[i].pgtable_pa;
 
-	l_iommu_set_ba(node, pa);
+	l_iommu_set_ba(iommu, pa);
 
 	if (iommu->prefetch_supported)
 		range |= IOMMU_CTRL_PREFETCH_EN;
 
-	l_iommu_write(node, range | IOMMU_CTRL_CASHABLE_TTE |
+	l_iommu_write(iommu, range | IOMMU_CTRL_CASHABLE_TTE |
 					IOMMU_CTRL_ENAB, L_IOMMU_CTRL);
-	__iommu_flushall(node);
+	iommu_flushall(iommu);
 }
 
 static int l_iommu_init_table(struct l_iommu_table *t, unsigned long win_sz,
@@ -257,11 +306,17 @@ static int l_iommu_init_table(struct l_iommu_table *t, unsigned long win_sz,
 {
 	int win_bits = ilog2(win_sz);
 	size_t sz = win_sz / IO_PAGE_SIZE * sizeof(iopte_t);
-	void *p = kzalloc_node(sz, GFP_KERNEL, node);
+	void *p;
+	if (t->pgtable)
+		return 0;
+	p = kzalloc_node(sz, GFP_KERNEL, node);
 	if (!p)
 		goto fail;
+	t->pgtable_pa = __pa(p);
 
-	t->pgtable = l_iommu_map_table(p, win_sz);
+	t->pgtable = l_iommu_map_table(t->pgtable_pa, win_sz);
+	if (!t->pgtable)
+		goto fail;
 
 	t->map_base = (~0UL) << win_bits;
 	if (win_bits <= 32)
@@ -276,18 +331,19 @@ static void l_iommu_free_table(struct l_iommu_table *t)
 {
 	t->pgtable = l_iommu_unmap_table(t->pgtable);
 	kfree(t->pgtable);
+	t->pgtable = NULL;
 }
 
-static struct l_iommu *__l_iommu_init(int node, unsigned long win_sz,
-					  struct device *parent)
+struct l_iommu_device {
+	unsigned regs_offset;
+	unsigned companion_regs_offset;
+};
+
+static int l_iommu_init_tables(struct l_iommu *iommu)
 {
-	struct l_iommu *iommu = kzalloc_node(sizeof(*iommu), GFP_KERNEL, node);
-	int ret = 0;
-	int i, n = ARRAY_SIZE(iommu->table);
-
-	if (!iommu)
-		return iommu;
-
+	unsigned long win_sz = l_iommu_win_sz;
+	int node = iommu->node;
+	int n = ARRAY_SIZE(iommu->table), i, ret;
 	if (win_sz <= (1UL << 32))
 		n = 1;
 	if (n == 2) {
@@ -299,28 +355,196 @@ static struct l_iommu *__l_iommu_init(int node, unsigned long win_sz,
 					  win_sz, node);
 	} else {
 		ret = l_iommu_init_table(&iommu->table[IOMMU_LOW_TABLE],
-					  win_sz, node);
+					  win_sz, iommu->node);
 	}
 	if (ret)
 		goto fail;
-	iommu->default_group = iommu_group_alloc();
-	if (IS_ERR(iommu->default_group))
-		goto fail;
-
-	iommu->node = node;
-	if (l_prefetch_iopte_supported() && !l_not_use_prefetch)
-		iommu->prefetch_supported = 1;
-
-	iommu_device_sysfs_add(&iommu->iommu, parent, NULL, "iommu%d", node);
-	iommu_device_set_ops(&iommu->iommu, &l_iommu_ops);
-	iommu_device_register(&iommu->iommu);
-	l_iommu_init_hw(iommu, win_sz, node);
-	return iommu;
+	return ret;
 fail:
 	for (i = 0; i < ARRAY_SIZE(iommu->table); i++)
 		l_iommu_free_table(iommu->table);
-	kfree(iommu);
+	return ret;
+}
+
+static void l_iommu_cleanup_one(struct l_iommu *iommu, int stage)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(iommu->table); i++)
+		l_iommu_free_table(iommu->table);
+
+	switch (stage) {
+	case 4:
+		iommu_device_unregister(&iommu->iommu);
+	case 3:
+		iommu_device_sysfs_remove(&iommu->iommu);
+	case 2:
+		iommu_group_put(iommu->default_group);
+	case 1:
+		kfree(iommu);
+	}
+}
+
+static __init struct l_iommu *l_iommu_init_one(int node, struct device *parent,
+					const struct l_iommu_device *desc)
+{
+	int ret, stage = 0;
+	struct l_iommu *i = kzalloc_node(sizeof(*i), GFP_KERNEL, node);
+
+	if (!i)
+		return ERR_PTR(-ENOMEM);
+	stage++;
+	i->node = node;
+	i->regs_offset = desc->regs_offset;
+	i->companion_regs_offset = desc->companion_regs_offset;
+
+	mutex_init(&i->mutex);
+
+	if (l_prefetch_iopte_supported() && !l_not_use_prefetch)
+		i->prefetch_supported = 1;
+
+	i->default_group = iommu_group_alloc();
+	if (IS_ERR(i->default_group)) {
+		ret = PTR_ERR(i->default_group);
+		goto fail;
+	}
+	stage++;
+
+	ret = iommu_device_sysfs_add(&i->iommu,  parent, NULL,
+			"iommu%x", i->regs_offset ? i->regs_offset : node);
+	if (ret)
+		goto fail;
+	stage++;
+	iommu_device_set_ops(&i->iommu, &l_iommu_ops);
+	ret = iommu_device_register(&i->iommu);
+	if (ret)
+		goto fail;
+	return i;
+fail:
+	l_iommu_cleanup_one(i, stage);
+	return ERR_PTR(ret);
+}
+
+
+static void l_quirk_enable_local_iommu(struct pci_dev *pdev)
+{
+	struct l_iommu *i = pdev->dev.archdata.iommu;
+	WARN_ON(l_iommu_init_tables(i));
+	l_iommu_init_hw(i, l_iommu_win_sz);
+}
+DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26, l_quirk_enable_local_iommu);
+DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P, l_quirk_enable_local_iommu);
+DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P, l_quirk_enable_local_iommu);
+DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P, l_quirk_enable_local_iommu);
+
+static const struct pci_device_id l_devices_with_iommu[] = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P)},
+	{ }	/* terminate list */
+};
+/* must correspond to l_devices_with_iommu[] */
+static const unsigned l_iommu_devices_iommu_offset[] = {
+	0x2000,
+	0x2800,
+	0x2c00,
+	0x3000,
+	0x3000,
+};
+
+static const struct l_iommu_device l_iommu_devices[] = {
+	{ 0x2000, 0x2400 },
+	{ 0x2800 },
+	{ 0x2c00 },
+	{ 0x3000 },
+};
+
+static LIST_HEAD(l_iommus);
+static struct l_iommu *l_node_to_iommu[MAX_NUMNODES];
+
+#define for_each_iommu(iommu) \
+	list_for_each_entry(iommu, &l_iommus, list)
+
+static struct l_iommu *l_iommu_get_iommu_for_device(struct device *dev)
+{
+	int i;
+	unsigned o;
+	struct l_iommu *iommu;
+	const struct pci_device_id *id;
+	struct pci_dev *pdev;
+	if (!l_has_devices_with_iommu())
+		return NULL;
+	pdev = l_dev_to_parent_pcidev(dev);
+	id = pci_match_id(l_devices_with_iommu, pdev);
+	if (!id)
+		return NULL;
+	if (pdev->bus->number != 0)
+		return NULL;
+
+	i = id - l_devices_with_iommu;
+	o = l_iommu_devices_iommu_offset[i];
+
+	for_each_iommu(iommu) {
+		if (l_dev_to_node(dev) == iommu->node &&
+				  iommu->regs_offset == o) {
+			return iommu;
+		}
+	}
+	BUG(); /* unreachable */
 	return NULL;
+}
+
+static struct l_iommu *l_find_iommu(struct device *dev)
+{
+	struct l_iommu *i;
+	if (!l_iommu_check_device(dev))
+		return NULL;
+	i = l_iommu_get_iommu_for_device(dev);
+	if (i)
+		return i;
+	return l_node_to_iommu[l_dev_to_node(dev)];
+}
+
+static void l_iommu_cleaup(void)
+{
+	struct l_iommu *i, *ii;
+	list_for_each_entry_safe(i, ii, &l_iommus, list) {
+		list_del(&i->list);
+		l_iommu_cleanup_one(i, 4);
+	}
+	memset(l_node_to_iommu, 0, sizeof(l_node_to_iommu));
+}
+
+static __init int __l_iommu_init(int node, struct device *parent)
+{
+	int j;
+	struct l_iommu_device default_desc = {};
+	struct l_iommu *i;
+	i = l_iommu_init_one(node, parent, &default_desc);
+	if (IS_ERR(i))
+		goto fail;
+	list_add(&i->list, &l_iommus);
+	l_node_to_iommu[node] = i;
+	if (l_iommu_init_tables(i)) {
+		i = ERR_PTR(-ENOMEM);
+		goto fail;
+	}
+	l_iommu_init_hw(i, l_iommu_win_sz);
+
+	if (!l_has_devices_with_iommu())
+		return 0;
+	l_iommu_enable_embedded_iommus(node);
+
+	for (j = 0; j < ARRAY_SIZE(l_iommu_devices); j++) {
+		i = l_iommu_init_one(node, parent, &l_iommu_devices[j]);
+		if (IS_ERR(i))
+			goto fail;
+		list_add(&i->list, &l_iommus);
+	}
+	return 0;
+fail:
+	l_iommu_cleaup();
+	return PTR_ERR(i);
 }
 
 static int __init l_iommu_debugfs_init(void)
@@ -352,7 +576,6 @@ static int l_iommu_map(struct iommu_domain *iommu_domain,
 		return -EINVAL;
 	if (WARN_ON(size ^ L_PGSIZE_BITMAP))
 		return -EINVAL;
-
 
 	/* If no access, then nothing to do */
 	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
@@ -417,13 +640,8 @@ static void l_iommu_detach_device(struct iommu_domain *iommu_domain,
 static int l_iommu_attach_device(struct iommu_domain *iommu_domain,
 				   struct device *dev)
 {
-	struct l_iommu *i = dev_to_iommu(dev);
 	struct l_iommu_domain *d = to_l_domain(iommu_domain);
-	if (!i)
-		return -EINVAL;
-
-	d->iommu = i;
-
+	d->iommu = dev->archdata.iommu;
 	return 0;
 }
 
@@ -481,13 +699,23 @@ static void l_iommu_domain_free(struct iommu_domain *iommu_domain)
 
 static int l_iommu_add_device(struct device *dev)
 {
-	struct iommu_group *group = iommu_group_get_for_dev(dev);
-
-	if (IS_ERR(group))
+	struct iommu_group *group;
+	struct l_iommu *i;
+	if (!l_iommu_check_device(dev))
+		return -ENODEV;
+	i = l_find_iommu(dev);
+	if (!i)
+		return -ENODEV;
+	dev->archdata.iommu = i;
+	group = iommu_group_get_for_dev(dev);
+	if (IS_ERR(group)) {
+		dev->archdata.iommu = NULL;
 		return PTR_ERR(group);
+	}
 
 	iommu_group_put(group);
-	iommu_device_link(&dev_to_iommu(dev)->iommu, dev);
+	dev->archdata.iommu = i;
+	iommu_device_link(&i->iommu, dev);
 	iommu_setup_dma_ops(dev, 0, dma_get_mask(dev) + 1);
 
 	return 0;
@@ -495,13 +723,21 @@ static int l_iommu_add_device(struct device *dev)
 
 static void l_iommu_remove_device(struct device *dev)
 {
-	iommu_device_unlink(&dev_to_iommu(dev)->iommu, dev);
+	struct l_iommu *i = dev->archdata.iommu;
+	dev->archdata.iommu = NULL;
+	iommu_device_unlink(&i->iommu, dev);
 	iommu_group_remove_device(dev);
 }
 
 static struct iommu_group *l_iommu_device_group(struct device *dev)
 {
-	return dev_to_iommu(dev)->default_group;
+	struct l_iommu *i;
+	if (!l_iommu_check_device(dev))
+		return NULL;
+	i = l_find_iommu(dev);
+	if (!i)
+		return NULL;
+	return i->default_group;
 }
 
 static bool l_iommu_capable(enum iommu_cap cap)
@@ -527,9 +763,8 @@ static void l_iommu_get_resv_regions(struct device *dev,
 	struct iommu_resv_region *region;
 	int prot = IOMMU_WRITE | IOMMU_NOEXEC | IOMMU_MMIO;
 	struct iohub_sysdata *sd;
+	struct pci_dev *pdev = l_dev_to_parent_pcidev(dev);
 
-	if (WARN_ON(!dev_is_pci(dev)))
-		return;
 
 	if (l_iommu_win_sz > (1UL << 32)) {
 		unsigned long start = 1UL << 32;
@@ -542,7 +777,7 @@ static void l_iommu_get_resv_regions(struct device *dev,
 		list_add_tail(&region->list, head);
 	}
 
-	sd = to_pci_dev(dev)->bus->sysdata;
+	sd = pdev->bus->sysdata;
 	if (!sd->pci_msi_addr_lo)
 		return;
 
@@ -672,19 +907,11 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA2,
 #ifdef CONFIG_PM_SLEEP
 void l_iommu_stop_all(void)
 {
-	struct pci_bus *b;
-
-	if (!l_iommu_supported())
+	struct l_iommu *i;
+	if (paravirt_enabled())
 		return;
-
-	list_for_each_entry(b, &pci_root_buses, node) {
-		int node = 0;
-
-#ifdef CONFIG_IOHUB_DOMAINS
-		node = ((struct iohub_sysdata *)b->sysdata)->node;
-#endif
-		l_iommu_write(node, 0, L_IOMMU_CTRL);
-	}
+	for_each_iommu(i)
+		l_iommu_write(i, 0, L_IOMMU_CTRL);
 }
 
 static int l_iommu_suspend(void)
@@ -694,17 +921,9 @@ static int l_iommu_suspend(void)
 
 static void l_iommu_resume(void)
 {
-	struct pci_bus *b;
-
-	list_for_each_entry(b, &pci_root_buses, node) {
-		struct iohub_sysdata *sd = b->sysdata;
-		int node = 0;
-
-#ifdef CONFIG_IOHUB_DOMAINS
-		node = sd->node;
-#endif
-		l_iommu_init_hw(sd->l_iommu, l_iommu_win_sz, node);
-	}
+	struct l_iommu *i;
+	for_each_iommu(i)
+		l_iommu_init_hw(i, l_iommu_win_sz);
 }
 
 static void l_iommu_shutdown(void)
@@ -729,47 +948,72 @@ static inline void l_iommu_init_pm_ops(void) {}
 #endif	/* CONFIG_PM_SLEEP */
 
 
-static resource_size_t l_get_max_resource_end(struct pci_bus *bus)
+static void l_get_max_resource(struct pci_bus *bus, resource_size_t *start, resource_size_t *end)
 {
 	int i;
 	struct resource *res;
-	resource_size_t end = 0, c;
+	resource_size_t e = 0, s = ~0ULL;
+	struct pci_dev *dev = bus->self;
 
 	pci_bus_for_each_resource(bus, res, i) {
 		if (!res || !res->flags || res->start > res->end)
 			continue;
 		if (!(res->flags & IORESOURCE_MEM))
 			continue;
-		c = res->end;
-		if (c > end)
-			end = c;
+		if (res->start < s)
+			s = res->start;
+		if (res->end > e)
+			e = res->end;
 	}
-	return end;
+	for (i = 0; dev && i < DEVICE_COUNT_RESOURCE; i++) {
+		res = dev->resource + i;
+		if (!res || !res->flags || res->start > res->end)
+			continue;
+		if (!(res->flags & IORESOURCE_MEM))
+			continue;
+		if (res->start < s)
+			s = res->start;
+		if (res->end > e)
+			e = res->end;
+	}
+	*start = s;
+	*end = e;
 }
 
 static void l_trim_pci_window(struct pci_bus *root_bus)
 {
 	struct pci_bus *b;
-	resource_size_t end = 0, c;
+	resource_size_t start = ~0ULL, end = 0;
 	struct resource_entry *window;
 	struct pci_host_bridge *bridge = pci_find_host_bridge(root_bus);
 
 	list_for_each_entry(b, &root_bus->children, node) {
-		c = l_get_max_resource_end(b);
-		if (c > end)
-			end = c;
+		resource_size_t s, e;
+		l_get_max_resource(b, &s, &e);
+		if (s < start)
+			start = s;
+		if (e > end)
+			end = e;
 	}
 
 	resource_list_for_each_entry(window, &bridge->windows) {
-		if (resource_type(window->res) != IORESOURCE_MEM)
+		struct resource *res;
+		if (window->res != &iomem_resource)
 			continue;
 		/*
 		 * Fixup for iova_reserve_pci_windows(): trim the window if
 		 * the boot didn't pass us pci memory ranges
 		 * (see mp_pci_add_resources()).
 		 */
-		if (window->res->end == ~0UL)
-			window->res->end = end;
+		res = kzalloc(sizeof(*res), GFP_KERNEL);
+		BUG_ON(res == NULL);
+		res->name = "PCI mem";
+		res->flags = IORESOURCE_MEM;
+		res->start = start;
+		res->end = end;
+		window->res = res;
+		pr_info("iommu: trim bridge window: %pR\n", window->res);
+		break;
 	}
 }
 
@@ -780,9 +1024,9 @@ static int __init l_iommu_setup(char *str)
 {
 	unsigned long win_sz = DFLT_IOMMU_WINSIZE;
 
-	if (!strcmp(str, "force-numa-bug-on"))
+	if (!strcmp(str, "force-numa-bug-on")) {
 		l_iommu_force_numa_bug_on = 1;
-	if (!strcmp(str, "no-numa-bug")) {
+	} else if (!strcmp(str, "no-numa-bug")) {
 		l_iommu_no_numa_bug = 1;
 	} else if (!strcmp(str, "noprefetch")) {
 		l_not_use_prefetch = 1;
@@ -791,6 +1035,8 @@ static int __init l_iommu_setup(char *str)
 		if (win_sz == 0)
 			l_use_swiotlb = 1;
 	}
+	if (l_iommu_has_numa_bug() && num_online_nodes() > 1)
+		l_use_swiotlb = 0; /*swiotlb does not support numa*/
 
 	win_sz = roundup_pow_of_two(win_sz);
 	if (win_sz > MAX_IOMMU_WINSIZE)
@@ -809,6 +1055,8 @@ static int __init l_iommu_init(void)
 	struct pci_bus *b;
 	size_t idr_sz = 1UL + INT_MAX;
 	size_t tbl_sz = l_iommu_win_sz / IO_PAGE_SIZE * sizeof(iopte_t);
+	
+	WARN_ON(l_init_uncached_pool());
 #if defined CONFIG_SWIOTLB || defined CONFIG_E2K
 	if (HAS_MACHINE_E2K_IOMMU && !l_use_swiotlb)
 			return 0;
@@ -829,24 +1077,23 @@ static int __init l_iommu_init(void)
 	if (l_iommu_has_numa_bug() && l_iommu_win_sz > idr_sz * PAGE_SIZE)
 		l_iommu_win_sz = idr_sz * PAGE_SIZE;
 
-
 	list_for_each_entry(b, &pci_root_buses, node) {
 		int node = 0;
-		struct l_iommu *i;
 		struct iohub_sysdata *sd = b->sysdata;
-
 #ifdef CONFIG_IOHUB_DOMAINS
 		node = sd->node;
 #endif
 		l_trim_pci_window(b);
-		i = __l_iommu_init(node, l_iommu_win_sz, &b->dev);
-		if (!i)
-			return -ENOMEM;
+		ret = __l_iommu_init(node, &b->dev);
+		if (ret)
+			return ret;
 		pr_info("iommu:%d: enabled; window size %lu MiB\n",
 				node,  l_iommu_win_sz / (1024 * 1024));
-		sd->l_iommu = i;
 	}
-	ret  = bus_set_iommu(&pci_bus_type, &l_iommu_ops);
+	ret = bus_set_iommu(&pci_bus_type, &l_iommu_ops);
+	if (ret)
+		return ret;
+	ret = bus_set_iommu(&platform_bus_type, &l_iommu_ops);
 	if (ret)
 		return ret;
 

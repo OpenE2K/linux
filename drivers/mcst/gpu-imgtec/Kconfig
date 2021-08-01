@@ -1,0 +1,55 @@
+menu "MCST support of Imagination`s GPU (Rogue_DDK_Linux_WS_REL_1.13@5824814)"
+	depends on DRM && E2K
+
+config MCST_GPU_IMGTEC
+	tristate "MCST support Imagination`s GPU support for E2C3 SoC (Rogue_DDK_Linux_WS_REL_1.13@5824814)"
+	select DRM_VM
+	default m
+	---help---
+         Say Y to get the GPU driver support.
+
+config MCST_GPU_IMGTEC_GPUVIRT
+	bool "Enable GPU virtualization support"
+        depends on MCST_GPU_IMGTEC && VIRTUALIZATION
+	default n
+	---help---
+         Enable GPU virtualization support.
+
+config MCST_GPU_IMGTEC_GPUVIRT_GUESTDRV
+	bool "Enable guest driver build."
+	depends on MCST_GPU_IMGTEC_GPUVIRT
+	default n
+	---help---
+	 Enable guest driver build.
+
+config MCST_GPU_IMGTEC_GPUVIRT_NUM_OSID
+	int "Number of firmware supported OSIDs"
+	depends on MCST_GPU_IMGTEC_GPUVIRT
+	default 2
+	---help---
+	 Number of firmware supported OSIDs
+
+config MCST_GPU_IMGTEC_PDUMP
+	bool "Enable PDUMP support in E2C3 GPU graphics driver"
+	depends on MCST_GPU_IMGTEC
+	default n
+	help
+	  Choose this option to enable PDUMP on E2C3 GPU (for debugging only).
+
+config MCST_GPU_IMGTEC_DEBUG
+	bool "Build debug version of E2C3 GPU graphics driver"
+	depends on MCST_GPU_IMGTEC
+	default n
+	help
+	  Choose this option to debugging only (rebuild userland code and firmware with debug, also).
+
+config MCST_GPU_IMGTEC_CONTIGUOUS_FW
+	bool "Allocate contiguous physical memory for GPU FW heap"
+	depends on MCST_GPU_IMGTEC
+	default y
+	help
+	  For virtualization builds, FW heaps (for host and all guests) should normally be allocated
+	  as any other DMA buffer, using dma_alloc_coherent. This currently does not work on e2c3
+	  prototype, so we enable this workaround to alloc FW heaps contiguously in physical memory
+
+endmenu

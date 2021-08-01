@@ -79,6 +79,8 @@ ttable_entry0:
 	{
 		rrd %sbr, GCURTASK
 		stgdq,sm %qg16, 0, TSK_TI_TMP_G_TASK
+		/* Do not restore %rpr (it's not clobbered by kernel entry) */
+		cmpesb,3 0, 1, %pred1
 	}
 	{
 		rrd %osr0, GVCPUSTATE
@@ -379,9 +381,8 @@ trap_handler_switched_stacks:
 	/* if system call is from guest user */				\
 	/* %dr7: register of current_thread_info() */			\
 	/* %dr18, %dr19, %dr11: temporary registers */			\
-	/* %pred0, %pred1: temporary predicates */			\
-	GOTO_PV_VCPU_KERNEL_TTABLE KERNEL_ENTRY, %dr7, %dr18, %dr19, %dr11, \
-						%pred0, %pred1		\
+	/* %pred1: temporary predicates */				\
+	GOTO_PV_VCPU_KERNEL_TTABLE %dr7, %dr18, %dr19, %dr11, %pred1	\
 									\
 	{								\
 		ipd 2;							\

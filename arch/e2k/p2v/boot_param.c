@@ -316,6 +316,15 @@ boot_native_parse_param(bootblock_struct_t *bootblock)
 	char *boot_cmdline;
 	int  boot_cmdline_len;
 
+#ifdef CONFIG_CMDLINE_OVERRIDE
+	boot_strlcpy(bootblock->info.kernel_args_string,
+		BOOT_KERNEL_ARGS_STRING_EX_SIGNATURE,
+		KERNEL_ARGS_STRING_EX_SIGN_SIZE);
+	boot_strlcpy(bootblock->info.bios.kernel_args_string_ex,
+		boot_va_to_pa(CONFIG_CMDLINE),
+		KSTRMAX_SIZE_EX);
+#endif
+
 	if (!boot_strncmp(bootblock->info.kernel_args_string,
 			BOOT_KERNEL_ARGS_STRING_EX_SIGNATURE,
 			KERNEL_ARGS_STRING_EX_SIGN_SIZE)) {

@@ -81,10 +81,10 @@ ifneq ($(KERNELRELEASE),)
         echo "lttng-context-perf-counters.o" ; fi;)
   endif # CONFIG_PERF_EVENTS
 
-  ifneq ($(CONFIG_PREEMPT_RT_FULL),)
+  ifneq ($(CONFIG_PREEMPT_RT),)
     lttng-tracer-objs += lttng-context-migratable.o
     lttng-tracer-objs += lttng-context-preemptible.o
-  endif # CONFIG_PREEMPT_RT_FULL
+  endif # CONFIG_PREEMPT_RT
 
   ifneq ($(CONFIG_PREEMPT),)
     lttng-tracer-objs += lttng-context-preemptible.o

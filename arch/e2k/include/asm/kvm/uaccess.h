@@ -54,24 +54,38 @@ native_copy_from_user_with_tags(void *to, const void __user *from,
 ({									\
 	__typeof__(*(uptr)) __user *___pu_ptr = (uptr);			\
 	int sz_uptr = sizeof(*(uptr));					\
+	long res;							\
 									\
 	___pu_ptr = (!host_test_intc_emul_mode(hregs)) ?		\
 			(uptr)						\
 			:						\
-			kvm_guest_ptr_to_host_ptr((uptr), sz_uptr);	\
-	(___pu_ptr) ? native_get_user(kval, ___pu_ptr) : -EFAULT;	\
+			kvm_guest_ptr_to_host_ptr((uptr), sz_uptr,	\
+							true);		\
+	if (PTR_ERR(___pu_ptr) == -EAGAIN)				\
+		res = -EAGAIN;						\
+	else								\
+		res = (___pu_ptr) ? native_get_user(kval, ___pu_ptr) :	\
+					-EFAULT;			\
+	(res);								\
 })
 
 #define	host_put_user(kval, uptr, hregs)				\
 ({									\
 	__typeof__(*(uptr)) __user *___pu_ptr = (uptr);			\
 	int sz_uptr = sizeof(*(uptr));					\
+	long res;							\
 									\
 	___pu_ptr = (!host_test_intc_emul_mode(hregs)) ?		\
 			(uptr)						\
 			:						\
-			kvm_guest_ptr_to_host_ptr((uptr), sz_uptr);	\
-	(___pu_ptr) ? native_put_user(kval, ___pu_ptr) : -EFAULT;	\
+			kvm_guest_ptr_to_host_ptr((uptr), sz_uptr,	\
+							true);		\
+	if (PTR_ERR(___pu_ptr) == -EAGAIN)				\
+		res = -EAGAIN;						\
+	else								\
+		res = (___pu_ptr) ? native_put_user(kval, ___pu_ptr) :	\
+					-EFAULT;			\
+	(res);								\
 })
 
 extern unsigned long kvm_copy_in_user_with_tags(void __user *to,

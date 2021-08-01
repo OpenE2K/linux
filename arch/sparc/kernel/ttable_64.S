@@ -276,7 +276,7 @@ tl1_resv03c:	BTRAPTL1(0x3c) BTRAPTL1(0x3d) BTRAPTL1(0x3e) BTRAPTL1(0x3f)
 #ifndef CONFIG_E90S
 tl1_resv040:	BTRAPTL1(0x40)
 #else
-tl1_async_de:	TRAP(do_async_data_error)
+tl1_async_de:	TRAPTL1(do_async_data_error)
 #endif
 tl1_irq1:	TRAP_IRQ(do_irq_tl1, 1)  TRAP_IRQ(do_irq_tl1, 2)  TRAP_IRQ(do_irq_tl1, 3)
 tl1_irq4:	TRAP_IRQ(do_irq_tl1, 4)  TRAP_IRQ(do_irq_tl1, 5)  TRAP_IRQ(do_irq_tl1, 6)

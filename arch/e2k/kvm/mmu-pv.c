@@ -974,21 +974,18 @@ long kvm_recovery_faulted_tagged_guest_store(struct kvm_vcpu *vcpu,
 {
 	union recovery_faulted_arg arg = { .entire = _arg };
 	unsigned long hva;
+	kvm_arch_exception_t exception;
 
 	DebugKVMREC("started for address 0x%lx data 0x%llx tag 0x%x, channel #%d\n",
 		address, wr_data, arg.tag, arg.chan);
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, address);
-	if (kvm_is_only_valid_hva(hva) || kvm_is_unmapped_hva(hva)) {
-		pr_err("%s(): %s pt for guest address 0x%lx\n",
-			__func__,
-			kvm_is_only_valid_hva(hva) ? "only valid" : "unmapped",
-			address);
+	hva = kvm_vcpu_gva_to_hva(vcpu, address, true, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): cannot translate guest address 0x%lx, "
+			"retry with page fault\n", __func__, address);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)address,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): guest address 0x%lx is invalid\n",
-				__func__, address);
-		return -EFAULT;
 	}
 	address = hva;
 
@@ -1001,55 +998,38 @@ long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu, e2k_addr_t address,
 		u64 *ld_val, u8 *data_tag, u64 ld_rec_opc, int chan)
 {
 	unsigned long hva;
+	kvm_arch_exception_t exception;
 
 	DebugKVMREC("started for address 0x%lx, channel #%d\n",
 		address, chan);
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, address);
-	if (kvm_is_only_valid_hva(hva)) {
-		pr_err("%s(): only valid pt for guest address 0x%lx\n",
-			__func__, address);
+	hva = kvm_vcpu_gva_to_hva(vcpu, address, false, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): cannot translate guest address 0x%lx, "
+			"retry with page fault\n", __func__, address);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)address,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva)) {
-		pr_err("%s(): unmapped pt for guest address 0x%lx\n",
-			__func__, address);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): guest address 0x%lx is invalid\n",
-			__func__, address);
-		return -EFAULT;
 	}
 	address = hva;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)ld_val);
-	if (kvm_is_only_valid_hva(hva)) {
-		pr_err("%s(): only valid pt for guest ld_val 0x%lx\n",
-			__func__, ld_val);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)ld_val, true, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): cannot translate guest ld_val 0x%lx, "
+			"retry with page fault\n", __func__, ld_val);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)ld_val,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva)) {
-		pr_err("%s(): unmapped pt for guest ld_val 0x%lx\n",
-			__func__, ld_val);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): guest ld_val 0x%lx is invalid\n",
-			__func__, ld_val);
-		return -EFAULT;
 	}
 	ld_val = (u64 *)hva;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)data_tag);
-	if (kvm_is_only_valid_hva(hva)) {
-		pr_err("%s(): only valid pt for guest data_tag 0x%lx\n",
-			__func__, data_tag);
+	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)data_tag, true, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): cannot translate guest data_tag 0x%lx, "
+			"retry with page fault\n", __func__, data_tag);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)data_tag,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva)) {
-		pr_err("%s(): unmapped pt for guest data_tag 0x%lx\n",
-			__func__, data_tag);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): guest data_tag 0x%lx is invalid\n",
-			__func__, data_tag);
-		return -EFAULT;
 	}
 	data_tag = (u8 *)hva;
 
@@ -1061,68 +1041,51 @@ long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu, e2k_addr_t address,
 }
 long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 		e2k_addr_t addr_from, e2k_addr_t addr_to, e2k_addr_t addr_to_hi,
-		u64 ld_rec_opc, u64 _arg)
+		u64 ld_rec_opc, u64 _arg, u32 first_time)
 {
 	union recovery_faulted_arg arg = { .entire = _arg };
 	unsigned long hva;
+	kvm_arch_exception_t exception;
 
 	DebugKVMREC("started from address 0x%lx to addr 0x%lx, channel #%d\n",
 		addr_from, addr_to, arg.chan);
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, addr_from);
-	if (kvm_is_only_valid_hva(hva)) {
-		pr_err("%s(): only valid pt for guest addr_from 0x%lx\n",
-			__func__, addr_from);
+	hva = kvm_vcpu_gva_to_hva(vcpu, addr_from, false, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): cannot translate guest addr_from 0x%lx, "
+			"retry with page fault\n", __func__, addr_from);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)addr_from,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva)) {
-		pr_err("%s(): unmapped pt for guest addr_from 0x%lx\n",
-			__func__, addr_from);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): guest addr_from 0x%lx is invalid\n",
-			__func__, addr_from);
-		return -EFAULT;
 	}
 	addr_from = hva;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, addr_to);
-	if (kvm_is_only_valid_hva(hva)) {
-		pr_err("%s(): only valid pt for guest addr_to 0x%lx\n",
-			__func__, addr_to);
+	hva = kvm_vcpu_gva_to_hva(vcpu, addr_to, true, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): cannot translate guest addr_to 0x%lx, "
+			"retry with page fault\n", __func__, addr_to);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)addr_to,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva)) {
-		pr_err("%s(): unmapped pt for guest addr_to 0x%lx\n",
-			__func__, addr_to);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): guest addr_to 0x%lx is invalid\n",
-			__func__, addr_to);
-		return -EFAULT;
 	}
 	addr_to = hva;
 
 	if (addr_to_hi) {
-		hva = kvm_vcpu_gva_to_hva(vcpu, addr_to_hi);
-		if (kvm_is_only_valid_hva(hva)) {
-			pr_err("%s(): only valid pt for guest "
-				"addr_to_hi 0x%lx\n",
+		hva = kvm_vcpu_gva_to_hva(vcpu, addr_to_hi, true, &exception);
+		if (kvm_is_error_hva(hva)) {
+			pr_err("%s(): cannot translate guest addr_to_hi 0x%lx, "
+				"retry with page fault\n",
 				__func__, addr_to_hi);
+			kvm_vcpu_inject_page_fault(vcpu, (void *)addr_to_hi,
+						&exception);
 			return -EAGAIN;
-		} else if (kvm_is_unmapped_hva(hva)) {
-			pr_err("%s(): unmapped pt for guest "
-				"addr_to_hi 0x%lx\n",
-				__func__, addr_to_hi);
-			return -EAGAIN;
-		} else if (kvm_is_error_hva(hva)) {
-			pr_err("%s(): guest addr_to_hi 0x%lx is invalid\n",
-				__func__, addr_to_hi);
-			return -EFAULT;
 		}
 		addr_to_hi = hva;
 	}
 
 	native_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
-			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic);
+			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic,
+			first_time);
 	DebugKVMREC("loaded data 0x%llx from address 0x%lx\n",
 		*((u64 *)addr_to), addr_from);
 	return 0;
@@ -1135,62 +1098,44 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 	unsigned long hva;
 	vcpu_l_gregs_t *l_gregs;
 	u64 *addr_lo, *addr_hi;
+	kvm_arch_exception_t exception;
 
 	DebugKVMREC("started for address 0x%lx global reg #%d, channel #%d\n",
 		address, greg_num_d, arg.chan);
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, address);
-	if (kvm_is_only_valid_hva(hva)) {
-		pr_err("%s(): only valid pt for guest address 0x%lx\n",
-			__func__, address);
+	hva = kvm_vcpu_gva_to_hva(vcpu, address, false, &exception);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): cannot translate guest address 0x%lx, "
+			"retry with page fault\n", __func__, address);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)address, &exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva)) {
-		pr_err("%s(): unmapped pt for guest address 0x%lx\n",
-			__func__, address);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): guest address 0x%lx is invalid\n",
-			__func__, address);
-		return -EFAULT;
 	}
 	address = hva;
 
 	if ((u64 *)saved_greg_lo != NULL) {
-		hva = kvm_vcpu_gva_to_hva(vcpu, saved_greg_lo);
-		if (kvm_is_only_valid_hva(hva)) {
-			pr_err("%s(): only valid pt for guest "
-				"saved_greg_lo 0x%llx\n",
+		hva = kvm_vcpu_gva_to_hva(vcpu, saved_greg_lo, true,
+					&exception);
+		if (kvm_is_error_hva(hva)) {
+			pr_err("%s(): cannot translate guest addr_to 0x%llx, "
+				"retry with page fault\n",
 				__func__, saved_greg_lo);
+			kvm_vcpu_inject_page_fault(vcpu,
+					(void *)saved_greg_lo, &exception);
 			return -EAGAIN;
-		} else if (kvm_is_unmapped_hva(hva)) {
-			pr_err("%s(): unmapped pt for guest "
-				"saved_greg_lo 0x%llx\n",
-				__func__, saved_greg_lo);
-			return -EAGAIN;
-		} else if (kvm_is_error_hva(hva)) {
-			pr_err("%s(): guest saved_greg_lo 0x%llx is invalid\n",
-				__func__, saved_greg_lo);
-			return -EFAULT;
 		}
 		saved_greg_lo = hva;
 	}
 
 	if ((u64 *)saved_greg_hi != NULL) {
-		hva = kvm_vcpu_gva_to_hva(vcpu, saved_greg_hi);
-		if (kvm_is_only_valid_hva(hva)) {
-			pr_err("%s(): only valid pt for guest "
-				"saved_greg_hi 0x%llx\n",
+		hva = kvm_vcpu_gva_to_hva(vcpu, saved_greg_hi, true,
+					&exception);
+		if (kvm_is_error_hva(hva)) {
+			pr_err("%s(): cannot translate guest saved_greg_hi "
+				"0x%llx, retry with page fault\n",
 				__func__, saved_greg_hi);
+			kvm_vcpu_inject_page_fault(vcpu,
+					(void *)saved_greg_hi, &exception);
 			return -EAGAIN;
-		} else if (kvm_is_unmapped_hva(hva)) {
-			pr_err("%s(): unmapped pt for guest "
-				"saved_greg_hi 0x%llx\n",
-				__func__, saved_greg_hi);
-			return -EAGAIN;
-		} else if (kvm_is_error_hva(hva)) {
-			pr_err("%s(): guest saved_greg_lo 0x%llx is invalid\n",
-				__func__, saved_greg_hi);
-			return -EFAULT;
 		}
 		saved_greg_hi = hva;
 	}
@@ -1222,11 +1167,11 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 	if ((u64 *)saved_greg_lo != NULL) {
 		native_recovery_faulted_move(saved_greg_lo,
 			(u64)addr_lo, (u64)addr_hi,
-			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic);
+			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic, 1);
 	} else {
 		native_recovery_faulted_move(address,
 			(u64)addr_lo, (u64)addr_hi,
-			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic);
+			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic, 1);
 	}
 	l_gregs->updated |= (1UL << greg_num_d);
 
@@ -1279,40 +1224,29 @@ long kvm_move_tagged_guest_data(struct kvm_vcpu *vcpu,
 		int word_size, e2k_addr_t addr_from, e2k_addr_t addr_to)
 {
 	unsigned long hva_from, hva_to;
+	kvm_arch_exception_t exception;
 
 	DebugKVMREC("started for address from 0x%lx to 0x%lx\n",
 		addr_from, addr_to);
 
-	hva_from = kvm_vcpu_gva_to_hva(vcpu, addr_from);
-	if (kvm_is_only_valid_hva(hva_from)) {
-		pr_err("%s(): only valid pt for guest addr_from 0x%lx\n",
-			__func__, addr_from);
+	hva_from = kvm_vcpu_gva_to_hva(vcpu, addr_from, false, &exception);
+	if (kvm_is_error_hva(hva_from)) {
+		pr_err("%s(): cannot translate guest addr_from 0x%lx, "
+			"retry with page fault\n", __func__, addr_from);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)addr_from,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva_from)) {
-		pr_err("%s(): unmapped pt for guest addr_from 0x%lx\n",
-			__func__, addr_from);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva_from)) {
-		pr_err("%s(): guest addr_from 0x%lx is invalid\n",
-			__func__, addr_from);
-		return -EFAULT;
 	}
 	DebugKVMREC("guest address from 0x%lx converted to hva 0x%lx\n",
 		addr_from, hva_from);
 
-	hva_to = kvm_vcpu_gva_to_hva(vcpu, addr_to);
-	if (kvm_is_only_valid_hva(hva_to)) {
-		pr_err("%s(): only valid pt for guest addr_to 0x%lx\n",
-			__func__, addr_to);
+	hva_to = kvm_vcpu_gva_to_hva(vcpu, addr_to, true, &exception);
+	if (kvm_is_error_hva(hva_to)) {
+		pr_err("%s(): cannot translate guest addr_to 0x%lx, "
+			"retry with page fault\n", __func__, addr_to);
+		kvm_vcpu_inject_page_fault(vcpu, (void *)addr_to,
+					&exception);
 		return -EAGAIN;
-	} else if (kvm_is_unmapped_hva(hva_to)) {
-		pr_err("%s(): unmapped pt for guest addr_to 0x%lx\n",
-			__func__, addr_to);
-		return -EAGAIN;
-	} else if (kvm_is_error_hva(hva_to)) {
-		pr_err("%s(): guest addr_to 0x%lx is invalid\n",
-			__func__, addr_to);
-		return -EFAULT;
 	}
 	DebugKVMREC("guest address to 0x%lx converted to hva 0x%lx\n",
 		addr_to, hva_to);

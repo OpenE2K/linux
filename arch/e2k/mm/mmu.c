@@ -696,8 +696,7 @@ void local_write_back_cache_range(unsigned long start, size_t size)
 /*
  *  Invalidate all ICACHES of the host processor
  */
-void
-__flush_icache_all(void)
+void native_flush_icache_all(void)
 {
 	DebugIC("started flush_icache_all()\n");
 	flush_ICACHE_all();
@@ -747,8 +746,7 @@ flush_icache_other_range(e2k_addr_t start, e2k_addr_t end,
  * of the processor
  */
 
-void
-native_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
+void native_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
 {
 	e2k_addr_t addr;
 
@@ -782,8 +780,7 @@ EXPORT_SYMBOL(native_flush_icache_range);
  * ICACHE of the processor
  */
 
-void
-__flush_icache_range_array(icache_range_array_t *icache_range_arr)
+void native_flush_icache_range_array(icache_range_array_t *icache_range_arr)
 {
 	int i;
 	unsigned long context;
@@ -819,7 +816,7 @@ __flush_icache_range_array(icache_range_array_t *icache_range_arr)
 /*
  * Flush just one specified page from ICACHE of all processors
  */
-void __flush_icache_page(struct vm_area_struct *vma, struct page *page)
+void native_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 {
 	/*
 	 * icache on all cpus can be flushed from current cpu
@@ -940,3 +937,58 @@ void arch_exit_mmap(struct mm_struct *mm)
 	hw_contexts_destroy(&mm->context);
 }
 
+/*
+ * Initialize a new mmu context.  This is invoked when a new
+ * address space instance (unique or shared) is instantiated.
+ * This just needs to set mm->context[] to an invalid context.
+ */
+int __init_new_context(struct task_struct *p, struct mm_struct *mm,
+		mm_context_t *context)
+{
+	bool is_fork = p && (p != current);
+	int ret;
+
+	memset(&context->cpumsk, 0, nr_cpu_ids * sizeof(context->cpumsk[0]));
+
+	if (is_fork) {
+		/*
+		 * Copy data on user fork
+		 */
+		mm_context_t *curr_context = &current->mm->context;
+
+		/*
+		 * Copy cut mask from the context of parent process
+		 * to the context of new process
+		 */
+		mutex_lock(&curr_context->cut_mask_lock);
+		bitmap_copy((unsigned long *) &context->cut_mask,
+				(unsigned long *) &curr_context->cut_mask,
+				USER_CUT_AREA_SIZE/sizeof(e2k_cute_t));
+		mutex_unlock(&curr_context->cut_mask_lock);
+	} else {
+		/*
+		 * Initialize by zero cut_mask of new process
+		 */
+		mutex_init(&context->cut_mask_lock);
+		bitmap_zero((unsigned long *) &context->cut_mask,
+				USER_CUT_AREA_SIZE/sizeof(e2k_cute_t));
+	}
+
+	atomic_set(&context->tstart, 1);
+
+	init_rwsem(&context->sival_ptr_list_sem);
+	INIT_LIST_HEAD(&context->sival_ptr_list_head);
+
+	INIT_LIST_HEAD(&context->delay_free_stacks);
+	init_rwsem(&context->core_lock);
+
+	INIT_LIST_HEAD(&context->cached_stacks);
+	spin_lock_init(&context->cached_stacks_lock);
+	context->cached_stacks_size = 0;
+
+	if (mm == NULL)
+		return 0;
+
+	ret = hw_contexts_init(p, context, is_fork);
+	return ret;
+}

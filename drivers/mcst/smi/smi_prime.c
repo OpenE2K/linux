@@ -48,8 +48,11 @@ struct drm_gem_object *smi_gem_prime_import_sg_table(struct drm_device *dev,
 	struct smi_bo *bo;
 	int ret;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
+	struct reservation_object *resv = attach->dmabuf->resv;
+#else
 	struct dma_resv *resv = attach->dmabuf->resv;
-
+#endif
 	ww_mutex_lock(&resv->lock, NULL);
 	ret = smi_bo_create(dev, attach->dmabuf->size, PAGE_SIZE, 0, sg, resv, &bo);
 	ww_mutex_unlock(&resv->lock);
@@ -64,10 +67,10 @@ struct drm_gem_object *smi_gem_prime_import_sg_table(struct drm_device *dev,
 
 int smi_gem_prime_pin(struct drm_gem_object *obj)
 {
-	struct smi_bo *bo  = gem_to_smi_bo(obj);
-	int ret = 0;
 	ENTER();
 
+	struct smi_bo *bo  = gem_to_smi_bo(obj);
+	int ret = 0;
 
 	ret = smi_bo_reserve(bo, false);
 	if (unlikely(ret != 0))
@@ -93,12 +96,12 @@ void smi_gem_prime_unpin(struct drm_gem_object *obj)
 	smi_bo_unreserve(bo);
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0)
-struct dma_resv *smi_gem_prime_res_obj(struct drm_gem_object *obj)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0) && LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
+struct reservation_object *smi_gem_prime_res_obj(struct drm_gem_object *obj)
 {
 	struct smi_bo *bo = gem_to_smi_bo(obj);
 
-	return bo->bo.base.resv;
+	return bo->bo.resv;
 }
 #endif
 

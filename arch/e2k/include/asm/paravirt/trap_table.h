@@ -10,15 +10,6 @@
 #define	pv_ttable_entry4	(pv_cpu_ops.trap_table_entry4)
 
 static inline void
-pv_handle_deferred_traps_in_syscall(struct pt_regs *regs,
-					bool use_pt_regs, bool new_hs)
-{
-	if (pv_cpu_ops.handle_deferred_traps_in_syscall)
-		pv_cpu_ops.handle_deferred_traps_in_syscall(regs,
-						use_pt_regs, new_hs);
-}
-
-static inline void
 pv_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
 			e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
 {
@@ -78,13 +69,6 @@ exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
 			e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
 {
 	pv_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr);
-}
-
-static inline void
-handle_deferred_traps_in_syscall(struct pt_regs *regs,
-					bool use_pt_regs, bool new_hs)
-{
-	pv_handle_deferred_traps_in_syscall(regs, use_pt_regs, new_hs);
 }
 
 static inline bool

@@ -73,11 +73,9 @@ void ddk768_deInit()
  */
 void ddk768_deReset()
 {
-#if 0
-    unsigned long sysCtrl;
 	logical_chip_type_t chipType = ddk768_getChipType();
 
- /* Cheok(2/11/2014): Not sure which registers are used for Falcon */
+#if 0 /* Cheok(2/11/2014): Not sure which registers are used for Falcon */
 
 	if (chipType == SM750 || chipType == SM718)
 	{
@@ -510,7 +508,6 @@ long ddk768_deNextTrapezoidFill(
     unsigned long length        /* Line length */
 )
 {
-    
     if (ddk768_deWaitForNotBusy() != 0)
     {
         /* The 2D engine is always busy for some unknown reason.

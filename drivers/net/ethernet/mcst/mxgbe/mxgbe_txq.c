@@ -212,6 +212,10 @@ int mxgbe_txq_init_all(mxgbe_priv_t *priv)
 		/* Tune Tx IRQ:
 		 * use `ethtool -C eth* tx-frames N` to set Q_RDYTHR
 		 */
+		mxgbe_wreg32(base, TXQ_REG_ADDR(qn, Q_RDYTHR), 0
+			| Q_RDYTHR_SET_TO(500) /* ~1ms */
+			| Q_RDYTHR_SET_N(10)
+			);
 	}
 
 	return 0;
@@ -321,7 +325,6 @@ irqreturn_t mxgbe_txq_irq_handler(int irq, void *dev_id)
 	u32 qirq;
 
 	nFDEBUG;
-	nPDEBUG(MXGBE_DBG_MSK_IRQ, "TXIRQ #%d\n", irq);
 
 	if (!dev_id)
 		return IRQ_NONE;
@@ -470,7 +473,7 @@ void mxgbe_tx_dbg_prn_data(mxgbe_priv_t *priv, char *data, ssize_t size)
 	DEV_DBG(MXGBE_DBG_MSK_TX, &priv->pdev->dev,
 		"Transmit data >>>\n");
 	for (i = 0; i < size; i++) {
-		printk(KERN_DEBUG "%02X ", (unsigned char)data[i]);
+		pr_debug("%02X ", (unsigned char)data[i]);
 	}
 	DEV_DBG(MXGBE_DBG_MSK_TX, &priv->pdev->dev,
 		"Transmit data <<<\n");

@@ -59,6 +59,152 @@
 
 static int trace_physical_pages;
 
+#ifdef CONFIG_MCST
+
+static int unified_alloc_wo_iommu(struct device *device, struct heap *heap,
+			size_t size, enum img_mem_attr attr,
+			struct buffer *buffer)
+{
+	struct sg_table *sgt;
+	struct scatterlist *sgl;
+	int pages;
+	int ret;
+
+	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
+	if (!sgt)
+		return -ENOMEM;
+
+	pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+	ret = sg_alloc_table(sgt, pages, GFP_KERNEL);
+	if (ret)
+		goto sg_alloc_table_failed;
+
+	sgl = sgt->sgl;
+	while (sgl) {
+		struct page *page;
+		page = alloc_page(heap->options.unified.gfp_type);
+		if (!page) {
+			ret = -ENOMEM;
+			goto alloc_page_failed;
+		}
+		sg_set_page(sgl, page, PAGE_SIZE, 0);
+#ifdef CONFIG_X86
+		set_memory_wc((unsigned long)page_address(page), 1);
+#endif
+		sgl = sg_next(sgl);
+	}
+
+	ret = dma_map_sg(device, sgt->sgl, sgt->orig_nents,
+			DMA_BIDIRECTIONAL);
+	if (ret <= 0) {
+		ret = -EIO;
+		goto alloc_page_failed;
+	}
+	sgt->nents = ret;
+
+	buffer->priv = sgt;
+	return 0;
+
+alloc_page_failed:
+	sgl = sgt->sgl;
+	while (sgl) {
+		struct page *page = sg_page(sgl);
+
+		if (page) {
+#ifdef CONFIG_X86
+			set_memory_wb((unsigned long)page_address(page), 1);
+#endif
+			__free_page(page);
+		}
+		sgl = sg_next(sgl);
+	}
+	sg_free_table(sgt);
+sg_alloc_table_failed:
+	kfree(sgt);
+	return ret;
+}
+
+static int unified_alloc_w_iommu(struct device *device, struct heap *heap,
+			size_t size, enum img_mem_attr attr,
+			struct buffer *buffer)
+{
+	struct sg_table *sgt;
+	struct page **pages = NULL;
+	int ret, count;
+	dma_addr_t	dma_addr;
+	BUILD_BUG_ON(!IS_ENABLED(CONFIG_DMA_REMAP));
+	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
+	if (!sgt)
+		return -ENOMEM;
+
+	count = PAGE_ALIGN(size) / PAGE_SIZE;
+
+	buffer->kptr = dma_alloc_coherent(device, size,
+			&dma_addr, heap->options.unified.gfp_type);
+
+	if (!buffer->kptr) {
+		ret = -EFAULT;
+		goto alloc_page_failed;
+	}
+	BUG_ON(!is_vmalloc_addr(buffer->kptr));
+	pages = dma_common_find_pages(buffer->kptr);
+	BUG_ON(!pages);
+
+	ret = sg_alloc_table_from_pages(sgt, pages, count, 0, size, GFP_KERNEL);
+	if (ret)
+		goto sg_alloc_table_failed;
+
+	sg_dma_len(sgt->sgl) = size;
+	sg_dma_address(sgt->sgl) = dma_addr;
+
+	buffer->priv = sgt;
+	return 0;
+
+sg_alloc_table_failed:
+	dma_free_coherent(buffer->device, size, buffer->kptr, dma_addr);
+alloc_page_failed:
+	kfree(sgt);
+	return ret;
+}
+
+static int unified_alloc(struct device *device, struct heap *heap,
+			size_t size, enum img_mem_attr attr,
+			struct buffer *buffer)
+{
+	
+	return device_iommu_mapped(device) ?
+		unified_alloc_w_iommu(device, heap, size, attr, buffer) :
+		unified_alloc_wo_iommu(device, heap, size, attr, buffer);
+		
+}
+static void unified_free(struct heap *heap, struct buffer *buffer)
+{
+	struct sg_table *sgt = buffer->priv;
+	struct scatterlist *sgl = sgt->sgl;
+	if (device_iommu_mapped(buffer->device)) {
+		dma_free_coherent(buffer->device, buffer->actual_size,
+						buffer->kptr, sg_dma_address(sgl));
+	} else {
+		struct sg_table *sgt = buffer->priv;
+		struct scatterlist *sgl;
+		if (buffer->kptr)
+			vunmap(buffer->kptr);
+		dma_unmap_sg(buffer->device, sgt->sgl,
+				sgt->orig_nents, DMA_BIDIRECTIONAL);
+		sgl = sgt->sgl;
+		while (sgl) {
+	#if defined(CONFIG_X86)
+			set_memory_wb((unsigned long)page_address(sg_page(sgl)), 1);
+	#endif
+			__free_page(sg_page(sgl));
+			sgl = sg_next(sgl);
+		}
+	}
+	sg_free_table(sgt);
+	kfree(sgt);
+}
+#else /*CONFIG_MCST*/
 static int unified_alloc(struct device *device, struct heap *heap,
 			size_t size, enum img_mem_attr attr,
 			struct buffer *buffer)
@@ -84,9 +230,8 @@ static int unified_alloc(struct device *device, struct heap *heap,
 	sgl = sgt->sgl;
 	while (sgl) {
 		struct page *page;
-#ifndef CONFIG_MCST
 		dma_addr_t dma_addr;
-#endif
+
 		page = alloc_page(heap->options.unified.gfp_type);
 		if (!page) {
 			pr_err("%s alloc_page failed!\n", __func__);
@@ -98,7 +243,7 @@ static int unified_alloc(struct device *device, struct heap *heap,
 				__func__, __LINE__,
 				(unsigned long long)page_to_phys(page),
 				PAGE_SIZE, page_address(page));
-#ifndef CONFIG_MCST
+
 		/*
 		 * dma_map_page() is probably going to fail if alloc flags are
 		 * GFP_HIGHMEM, since it is not mapped to CPU. Hopefully, this
@@ -116,25 +261,12 @@ static int unified_alloc(struct device *device, struct heap *heap,
 			goto alloc_page_failed;
 		}
 		dma_unmap_page(device, dma_addr, PAGE_SIZE, DMA_BIDIRECTIONAL);
-#endif
 		sg_set_page(sgl, page, PAGE_SIZE, 0);
 #ifdef CONFIG_X86
 		set_memory_wc((unsigned long)page_address(page), 1);
 #endif
 		sgl = sg_next(sgl);
 	}
-#ifdef CONFIG_MCST
-	ret = dma_map_sg(device, sgt->sgl, sgt->orig_nents,
-			DMA_FROM_DEVICE);
-	if (ret <= 0) {
-		pr_err("%s dma_map_sg failed!\n", __func__);
-		ret = -EIO;
-		goto alloc_page_failed;
-	}
-	pr_debug("%s:%d buffer %d orig_nents %d nents %d\n", __func__, __LINE__,
-		buffer->id, sgt->orig_nents, ret);
-	sgt->nents = ret;
-#endif
 	buffer->priv = sgt;
 	return 0;
 
@@ -167,16 +299,10 @@ static void unified_free(struct heap *heap, struct buffer *buffer)
 
 	if (buffer->kptr) {
 		pr_debug("%s vunmap 0x%p\n", __func__, buffer->kptr);
-#ifndef CONFIG_MCST
 		dma_unmap_sg(buffer->device, sgt->sgl,
 				sgt->orig_nents, DMA_FROM_DEVICE);
-#endif
 		vunmap(buffer->kptr);
 	}
-#ifdef CONFIG_MCST
-	dma_unmap_sg(buffer->device, sgt->sgl,
-			sgt->orig_nents, DMA_FROM_DEVICE);
-#endif
 	sgl = sgt->sgl;
 	while (sgl) {
 #ifdef CONFIG_X86
@@ -188,6 +314,7 @@ static void unified_free(struct heap *heap, struct buffer *buffer)
 	sg_free_table(sgt);
 	kfree(sgt);
 }
+#endif /*CONFIG_MCST*/
 
 static int unified_map_um(struct heap *heap, struct buffer *buffer,
 			struct vm_area_struct *vma)
@@ -237,6 +364,7 @@ static int unified_map_um(struct heap *heap, struct buffer *buffer,
 	return 0;
 }
 
+
 static int unified_map_km(struct heap *heap, struct buffer *buffer)
 {
 	struct sg_table *sgt = buffer->priv;
@@ -247,14 +375,17 @@ static int unified_map_km(struct heap *heap, struct buffer *buffer)
 #ifndef CONFIG_MCST
 	int ret;
 #endif
+
 	int i;
 
 	pr_debug("%s:%d buffer %d (0x%p)\n", __func__, __LINE__,
 		buffer->id, buffer);
 
 	if (buffer->kptr) {
+#ifndef CONFIG_MCST
 		pr_warn("%s called for already mapped buffer %d\n",
 			__func__, buffer->id);
+#endif
 		return 0;
 	}
 

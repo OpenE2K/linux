@@ -183,19 +183,6 @@ do {									\
 })
 
 /*
- * Remeber state of IRQs at trap point
- * Now it usefull to analyze can be traps passed to guest handler
- * immediately or should be deferred
- */
-#define SAVE_IRQS_STATE(regs, upsr) \
-({ \
-	unsigned long psr_val = (regs)->crs.cr1_lo.CR1_lo_psr; \
-	unsigned long upsr_val = (upsr).UPSR_reg; \
-	(regs)->irqs_disabled = \
-			psr_and_upsr_irqs_disabled_flags(psr_val, upsr_val); \
-})
-
-/*
  * Interrupts should be disabled by caller to read all hardware
  * stacks registers in coordinated state
  * Hardware stacks do not copy or flush to memory
@@ -579,24 +566,24 @@ do {									\
 #endif /* E2K_MAXGR_d */
 
 static inline void
-native_save_local_glob_regs(local_gregs_t *l_gregs)
+native_save_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	void (*save_local_gregs)(struct local_gregs *);
+	void (*save_local_gregs)(struct local_gregs *, bool is_signal);
 
 	save_local_gregs = machine.save_local_gregs;
 
 	copy_k_gregs_to_l_gregs(l_gregs, &current_thread_info()->k_gregs);
-	save_local_gregs(l_gregs);
+	save_local_gregs(l_gregs, is_signal);
 }
 static inline void
-native_restore_local_glob_regs(local_gregs_t *l_gregs)
+native_restore_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	void (*restore_local_gregs)(const struct local_gregs *);
+	void (*restore_local_gregs)(const struct local_gregs *, bool is_signal);
 
 	restore_local_gregs = machine.restore_local_gregs;
 
 	get_k_gregs_from_l_regs(&current_thread_info()->k_gregs, l_gregs);
-	restore_local_gregs(l_gregs);
+	restore_local_gregs(l_gregs, is_signal);
 }
 
 static inline void
@@ -767,7 +754,7 @@ do { \
 	(trap)->tc_count = cnt * 3;					\
 	if (unlikely(GET_CLW_REQUEST_COUNT(regs) &&			\
 			cpu_has(CPU_HWBUG_CLW_STALE_L1_ENTRY)))		\
-		(regs)->clw_cpu = raw_smp_processor_id();		\
+		SET_CLW_CPU(regs, raw_smp_processor_id());		\
 	if (cs_req_num > 0) {						\
 		/* recover chain stack pointers to repeat FILL */	\
 		e2k_pcshtp_t pcshtp = NATIVE_READ_PCSHTP_REG_SVALUE();	\
@@ -798,6 +785,7 @@ do { \
 # define GET_CLW_REQUEST_COUNT(regs)		((regs)->clw_count)
 # define SET_CLW_FIRST_REQUEST(regs, cnt)	((regs)->clw_first = (cnt))
 # define GET_CLW_FIRST_REQUEST(regs)		((regs)->clw_first)
+# define SET_CLW_CPU(regs, cpu)			((regs)->clw_cpu = (cpu))
 #define	ENABLE_US_CLW() \
 do { \
 	if (!cpu_has(CPU_HWBUG_CLW)) \
@@ -810,6 +798,7 @@ do { \
 # define GET_CLW_REQUEST_COUNT(regs)	(0)
 # define SET_CLW_FIRST_REQUEST(regs, cnt)
 # define GET_CLW_FIRST_REQUEST(regs)	(0)
+# define SET_CLW_CPU(regs, cpu)
 # define ENABLE_US_CLW()
 # define DISABLE_US_CLW()
 #endif	/* CONFIG_CLW_ENABLE */
@@ -862,10 +851,6 @@ do { \
 		PREFIX_RESTORE_USER_CRs(NATIVE, regs)
 #define NATIVE_RESTORE_USER_STACK_REGS(regs, insyscall) \
 		PREFIX_RESTORE_USER_STACK_REGS(NATIVE, regs, insyscall)
-#define NATIVE_RESTORE_USER_TRAP_STACK_REGS(regs) \
-		NATIVE_RESTORE_USER_STACK_REGS(regs, false)
-#define NATIVE_RESTORE_USER_SYSCALL_STACK_REGS(regs) \
-		NATIVE_RESTORE_USER_STACK_REGS(regs, true)
 
 #if defined(CONFIG_PARAVIRT_GUEST)
 /* it is paravirtualized host and guest */
@@ -887,19 +872,21 @@ do { \
 		RESTORE_USER_STACK_REGS(regs, false)
 #define RESTORE_USER_SYSCALL_STACK_REGS(regs) \
 		RESTORE_USER_STACK_REGS(regs, true)
+#define RESTORE_COMMON_REGS(regs) \
+		NATIVE_RESTORE_COMMON_REGS(regs)
 
 #define INIT_G_REGS()		NATIVE_INIT_G_REGS()
 #define BOOT_INIT_G_REGS()	NATIVE_BOOT_INIT_G_REGS()
 
 static inline void
-save_local_glob_regs(local_gregs_t *l_gregs)
+save_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	native_save_local_glob_regs(l_gregs);
+	native_save_local_glob_regs(l_gregs, is_signal);
 }
 static inline void
-restore_local_glob_regs(local_gregs_t *l_gregs)
+restore_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	native_restore_local_glob_regs(l_gregs);
+	native_restore_local_glob_regs(l_gregs, is_signal);
 }
 
 static inline void
@@ -1080,7 +1067,11 @@ NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 static inline void
 NATIVE_SAVE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 {
+#ifdef CONFIG_VIRTUALIZATION
+	const int task_is_binco = TASK_IS_BINCO(task) || task_thread_info(task)->vcpu;
+#else
 	const int task_is_binco = TASK_IS_BINCO(task);
+#endif
 	struct mm_struct *mm = task->mm;
 	struct sw_regs *sw_regs = &task->thread.sw_regs;
 
@@ -1166,7 +1157,11 @@ NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
 	u64 pcsp_lo = AS_WORD(sw_regs->pcsp_lo);
 	u64 pcsp_hi = AS_WORD(sw_regs->pcsp_hi);
 	e2k_mem_crs_t crs = sw_regs->crs;
+#ifdef CONFIG_VIRTUALIZATION
+	const int task_is_binco = TASK_IS_BINCO(task) || ti->vcpu;
+#else
 	const int task_is_binco = TASK_IS_BINCO(task);
+#endif
 	struct mm_struct *mm = task->mm;
 
 	NATIVE_FLUSHCPU;

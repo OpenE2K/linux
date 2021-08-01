@@ -129,7 +129,7 @@ unsigned long videoGetBufferSize(
     unsigned long bufferIndex
 )
 {
-    unsigned long value = 0;
+    unsigned long value;
     
     if (bufferIndex == 0)
     {

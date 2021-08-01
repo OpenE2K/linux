@@ -41,27 +41,20 @@ static inline bool l_mcmonitor_eec_enabled(void)
 #define L_MC_ECC_WORDS_NR	4
 #define L_MCMONITOR_TEST_SIZE (256 * L_MC_ECC_WORDS_NR)
 
-static inline void local_set_mc_ecc(void *node_nbsr, int num, unsigned int reg_value)
-{
-	nbsr_write(reg_value, node_nbsr + SIC_mc0_ecc + num * 0x40);
-}
-
 static inline void l_mcmonitor_fill_data(u64 *a, bool make_error)
 {
 	int i, mc = SIC_MC_COUNT;
 	int sz = L_MCMONITOR_TEST_SIZE / L_MC_ECC_WORDS_NR / sizeof(*a);
 	e2k_mc_ecc_struct_t mc_ecc[SIC_MAX_MC_COUNT];
 	a = (void *)__pa(a);
-	
-	void *node_nbsr = sic_get_node_nbsr_base(0);
-	
+
 	for (i = 0; i < mc; i++)
 		mc_ecc[i].E2K_MC_ECC_reg = sic_get_mc_ecc(0, i);
-	
+
 	for (i = 0; i < mc; i++) {
 		l_mc_ecc_struct_t e = mc_ecc[i];
 		e.E2K_MC_ECC_dmode = 1;
-		local_set_mc_ecc(node_nbsr, i, e.E2K_MC_ECC_reg);
+		sic_set_mc_ecc(0, i, e.E2K_MC_ECC_reg);
 	}
 	mb();
 
@@ -78,7 +71,7 @@ static inline void l_mcmonitor_fill_data(u64 *a, bool make_error)
 	}
 
 	for (i = 0; i < mc; i++)
-		local_set_mc_ecc(node_nbsr, i, mc_ecc[i].E2K_MC_ECC_reg);
+		sic_set_mc_ecc(0, i, mc_ecc[i].E2K_MC_ECC_reg);
 	mb();
 }
 

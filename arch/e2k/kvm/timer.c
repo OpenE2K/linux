@@ -200,6 +200,9 @@ void kvm_cancel_clockdev(struct kvm_vcpu *vcpu)
 {
 	DebugKVM("started to cancel the timer for the VCPU #%d\n",
 		vcpu->vcpu_id);
+	if (unlikely(vcpu->arch.hrt.base == NULL)) {
+		return;	/* is not yet inited */
+	}
 	/* Clock event device is shutting down. */
 	hrtimer_cancel(&vcpu->arch.hrt);
 	if (vcpu->arch.apic != NULL)

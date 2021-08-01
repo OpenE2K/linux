@@ -2324,31 +2324,6 @@ EXPORT_SYMBOL_GPL(usb_bus_start_enum);
 
 /*-------------------------------------------------------------------------*/
 
-
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
-irqreturn_t pre_usb_hcd_irq(int irq, void *__hcd)
-{
-	struct usb_hcd		*hcd = __hcd;
-	unsigned long		flags;
-	irqreturn_t		rc;
-
-	local_irq_save(flags);
-	if (unlikely(hcd->state == HC_STATE_HALT ||
-		!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags))) {
-		local_irq_restore(flags);
-		return IRQ_NONE;
-	}
-	if (!hcd->driver->preirq) {
-		local_irq_restore(flags);
-		return IRQ_WAKE_THREAD;
-	}
-	rc = hcd->driver->preirq(hcd);
-	local_irq_restore(flags);
-	return rc;
-}
-#endif
-
-
 /**
  * usb_hcd_irq - hook IRQs to HCD framework (bus glue)
  * @irq: the IRQ being raised
@@ -2625,15 +2600,8 @@ static int usb_hcd_request_irqs(struct usb_hcd *hcd,
 
 		snprintf(hcd->irq_descr, sizeof(hcd->irq_descr), "%s:usb%d",
 				hcd->driver->description, hcd->self.busnum);
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
-		retval = request_threaded_irq(irqnum,
-				&pre_usb_hcd_irq, &usb_hcd_irq,
-				irqflags | IRQF_ONESHOT,
-				hcd->irq_descr, hcd);
-#else
 		retval = request_irq(irqnum, &usb_hcd_irq, irqflags,
 				hcd->irq_descr, hcd);
-#endif
 		if (retval != 0) {
 			dev_err(hcd->self.controller,
 					"request interrupt %d failed\n",

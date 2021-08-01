@@ -793,14 +793,14 @@ do_extract_tags_32(u16 *dst, const void *src)
 }
 
 static void
-do_save_local_glob_regs(local_gregs_t *l_gregs)
+do_save_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	native_save_local_glob_regs(l_gregs);
+	native_save_local_glob_regs(l_gregs, bool is_signal);
 }
 static void
-do_restore_local_glob_regs(local_gregs_t *l_gregs)
+do_restore_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 {
-	native_restore_local_glob_regs(l_gregs);
+	native_restore_local_glob_regs(l_gregs, is_signal);
 }
 
 static void
@@ -1028,7 +1028,6 @@ do_arch_csd_lock_async(call_single_data_t *data)
 	.handle_interrupt = native_do_interrupt,			\
 	.init_guest_system_handlers_table =				\
 		do_init_guest_system_handlers_table,			\
-	.handle_deferred_traps_in_syscall = NULL,			\
 	.fix_process_pt_regs = NULL,					\
 	.run_user_handler = NULL,					\
 	.trap_table_entry1 = native_ttable_entry1,			\
@@ -1363,6 +1362,16 @@ DO_READ_CLW_REG(clw_addr_t clw_addr)
 	return NATIVE_READ_CLW_REG(clw_addr);
 }
 
+/*
+ * Write CLW register
+ */
+
+static void
+DO_WRITE_CLW_REG(clw_addr_t clw_addr, clw_reg_t val)
+{
+	NATIVE_WRITE_CLW_REG(clw_addr, val);
+}
+
 /* save DAM state */
 static void
 DO_SAVE_DAM(unsigned long long dam[DAM_ENTRIES_NUM])
@@ -1492,6 +1501,7 @@ static int do_set_memory_attr_on_host(e2k_addr_t start, e2k_addr_t end,
 	.entry_probe_mmu_op = DO_ENTRY_PROBE_MMU_OP,			\
 	.address_probe_mmu_op = DO_ADDRESS_PROBE_MMU_OP,		\
 	.read_clw_reg = DO_READ_CLW_REG,				\
+	.write_clw_reg = DO_WRITE_CLW_REG,				\
 	.save_DAM = DO_SAVE_DAM,					\
 	.write_mmu_debug_reg = DO_WRITE_MMU_DEBUG_REG,			\
 	.read_mmu_debug_reg = DO_READ_MMU_DEBUG_REG,			\

@@ -22,7 +22,6 @@
 
 #include <asm/pic.h>
 #include <asm/e2k_debug.h>
-#include <asm/mtrr.h>
 #include <asm/pgalloc.h>
 #include <asm/mmu_context.h>
 #include <asm/console.h>
@@ -365,17 +364,17 @@ void native_smp_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 	migrate_enable();
 }
 
-void smp_flush_icache_all_ipi(void *info)
+static void smp_flush_icache_all_ipi(void *info)
 {
 	__flush_icache_all();
 }
 
-void native_smp_flush_icache_all(void)
+void smp_flush_icache_all(void)
 {
 	smp_call_function(smp_flush_icache_all_ipi, NULL, 1);
 	__flush_icache_all();
 }
-
+EXPORT_SYMBOL(smp_flush_icache_all);
 
 void smp_send_refresh(void)
 {
@@ -386,10 +385,7 @@ void smp_send_refresh(void)
 
 static void stop_this_cpu_ipi(void *dummy)
 {
-	/*
-	 * All Irqs are already disabled by parse_TIR_registers()
-	 * because this is an NMI (non-maskable interrupt).
-	 */
+	raw_all_irq_disable();
 
 	set_cpu_online(smp_processor_id(), false);
 
@@ -410,15 +406,20 @@ static void stop_this_cpu_ipi(void *dummy)
 #endif
 }
 
-/* Should not use prints here: we may stop other CPU holding the lock */
 void smp_send_stop(void)
 {
 	unsigned long timeout;
 
-	nmi_call_function(stop_this_cpu_ipi, NULL, 0, 1000);
+	/*
+	 * NMI may stop other CPU holding printk ringbuffer lock, causing panicking CPU to
+	 * hang on next printk (bug 128863).
+	 * As a workaround, use MI to stop other CPUs.
+	 *
+	 * nmi_call_function(stop_this_cpu_ipi, NULL, 0, 1000);
+	 */
+	smp_call_function(stop_this_cpu_ipi, NULL, 0);
 
-	/* NMI delivery may take a while, if other CPU is currently printing stacks.
-	 * Wait up to 30 seconds for other CPUs to stop */
+	/* Interrupt delivery may take a while, wait for up to 30 seconds for other CPUs to stop */
 	timeout = 30 * USEC_PER_SEC;
 	while (num_online_cpus() > 1 && timeout--)
 		udelay(1);

@@ -11,29 +11,22 @@
 #include <asm/ptrace.h>
 
 #ifdef	CONFIG_VIRTUALIZATION
-
-static __always_inline bool
-kvm_host_at_pv_vcpu_mode(thread_info_t *ti)
-{
-	return ti->vcpu && test_ti_thread_flag(ti, TIF_HOST_AT_VCPU_MODE);
-}
-
 static __always_inline void
 kvm_set_intc_emul_flag(pt_regs_t *regs)
 {
-	regs->flags |= TRAP_AS_INTC_EMUL_PT_REGS;
+	regs->flags.trap_as_intc_emul = 1;
 }
 
 static __always_inline bool
 kvm_test_intc_emul_flag(pt_regs_t *regs)
 {
-	return !!(regs->flags & TRAP_AS_INTC_EMUL_PT_REGS);
+	return regs->flags.trap_as_intc_emul;
 }
 
 static __always_inline void
 kvm_clear_intc_emul_flag(pt_regs_t *regs)
 {
-	regs->flags &= ~TRAP_AS_INTC_EMUL_PT_REGS;
+	regs->flags.trap_as_intc_emul = 0;
 }
 
 static __always_inline bool
@@ -59,12 +52,27 @@ host_test_intc_emul_mode(const struct pt_regs *regs)
 
 	return true;
 }
+
+extern void pv_vcpu_switch_to_host_from_intc(thread_info_t *ti);
+extern void pv_vcpu_return_to_intc_mode(thread_info_t *ti, struct kvm_vcpu *vcpu);
+
+static inline void return_to_pv_vcpu_intc(struct kvm_vcpu *vcpu)
+{
+	pv_vcpu_return_to_intc_mode(current_thread_info(), vcpu);
+}
+
 #else	/* !CONFIG_KVM_HOST_MODE */
 /* it is not host kernel */
 static inline bool
 host_test_intc_emul_mode(const pt_regs_t *regs)
 {
 	return false;
+}
+
+static inline __interrupt void
+pv_vcpu_switch_to_host_from_intc(thread_info_t *ti)
+{
+	/* nothing to do */
 }
 #endif	/* CONFIG_KVM_HOST_MODE */
 
@@ -113,6 +121,8 @@ kvm_clear_vcpu_guest_stacks_pending(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 }
 
 extern noinline void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs);
+extern void insert_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu,
+				pv_vcpu_ctxt_t *vcpu_ctxt, pt_regs_t *regs);
 
 extern void kvm_emulate_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs,
 					trap_pt_regs_t *trap);
@@ -235,12 +245,6 @@ static inline mm_context_t *pv_vcpu_get_gmm_context(struct kvm_vcpu *vcpu)
 }
 
 #else	/* !CONFIG_VIRTUALIZATION */
-static __always_inline bool
-kvm_host_at_pv_vcpu_mode(thread_info_t *ti)
-{
-	return false;
-}
-
 static __always_inline void
 kvm_set_intc_emul_flag(pt_regs_t *regs)
 {

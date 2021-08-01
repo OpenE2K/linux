@@ -416,7 +416,7 @@ unsigned long getSecondaryDispCtrlClock()
  */
 unsigned long getMasterClock()
 {
-    unsigned long value, divisor = 0;
+    unsigned long value, divisor;
 
 #if 1
 	/* Cheok_0509: For SM750LE, the chip clock is fixed */
@@ -454,7 +454,7 @@ unsigned long getMasterClock()
  */
 unsigned long getMemoryClock()
 {
-    unsigned long value, divisor = 0;
+    unsigned long value, divisor;
 
 #if 1
 	/* Cheok_0509: For SM750LE, the memory clock is fixed. */

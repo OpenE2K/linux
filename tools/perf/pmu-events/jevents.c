@@ -1134,7 +1134,8 @@ int main(int argc, char *argv[])
 		/* Make build fail */
 		fclose(eventsfp);
 		free_arch_std_events();
-		return 1;
+		ret = 1;
+		goto out_free_mapfile;
 	} else if (rc) {
 		goto empty_map;
 	}
@@ -1147,8 +1148,7 @@ int main(int argc, char *argv[])
 		/* Make build fail */
 		fclose(eventsfp);
 		free_arch_std_events();
-		ret = 1;
-		goto out_free_mapfile;
+		return 1;
 	} else if (rc) {
 		goto empty_map;
 	}

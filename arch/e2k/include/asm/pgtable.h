@@ -377,14 +377,18 @@ static inline void untrack_pfn_moved(struct vm_area_struct *vma)
 #define NATIVE_VMALLOC_START	(NATIVE_KERNEL_IMAGE_AREA_BASE + \
 							0x020000000000UL)
 				/* 0x0000 e400 0000 0000 */
-#define NATIVE_VMALLOC_END	(NATIVE_VMALLOC_START + 0x010000000000UL)
-				/* 0x0000 e500 0000 0000 */
-#define NATIVE_VMEMMAP_START	(NATIVE_VMALLOC_END +   0x010000000000UL)
-				/* 0x0000 e600 0000 0000 */
+/* We need big enough vmalloc area since usage of pcpu_embed_first_chunk()
+ * on e2k leads to having pcpu area span large ranges, and vmalloc area
+ * should be able to span those same ranges (see pcpu_embed_first_chunk()). */
+#define NATIVE_VMALLOC_END	(NATIVE_VMALLOC_START + 0x100000000000UL)
+				/* 0x0000 f400 0000 0000 */
+#define NATIVE_VMEMMAP_START	NATIVE_VMALLOC_END
+				/* 0x0000 f400 0000 0000 */
 #define NATIVE_VMEMMAP_END	(NATIVE_VMEMMAP_START + \
-					(1ULL << (E2K_MAX_PHYS_BITS - \
-						PAGE_SHIFT)) * \
-							sizeof(struct page))
+				 (1ULL << (E2K_MAX_PHYS_BITS - PAGE_SHIFT)) * \
+						sizeof(struct page))
+			/* 0x0000 f800 0000 0000 - for 64 bytes struct page */
+			/* 0x0000 fc00 0000 0000 - for 128 bytes struct page */
 
 #ifdef CONFIG_SMP
 static inline void
@@ -821,7 +825,7 @@ extern pmd_t pmdp_huge_clear_flush(struct vm_area_struct *vma,
 				   unsigned long address, pmd_t *pmdp);
 
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
-		unsigned long address, pmd_t *pmdp)
+		unsigned long addr, pmd_t *pmdp)
 {
 # ifdef CONFIG_SMP
 	u64 newval;
@@ -829,7 +833,8 @@ static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 	newval = (test_ts_flag(TS_KEEP_PAGES_VALID)) ?
 					_PAGE_INIT_VALID : 0UL;
 
-	return __pmd(__api_xchg_return(newval, &pmdp->pmd, d, RELAXED_MB));
+	return __pmd(pt_get_and_xchg_atomic(mm, addr, newval,
+					    (pgprot_t *)pmdp));
 # else
 	pmd_t pmd = *pmdp;
 	pmd_clear(pmdp);
@@ -841,8 +846,8 @@ static inline pmd_t pmdp_huge_get_and_clear_as_valid(struct mm_struct *mm,
 		unsigned long addr, pmd_t *pmdp)
 {
 # ifdef CONFIG_SMP
-	return __pmd(__api_xchg_return(_PAGE_INIT_VALID, &pmdp->pmd, d,
-			RELAXED_MB));
+	return __pmd(pt_get_and_xchg_atomic(mm, addr, _PAGE_INIT_VALID,
+					    (pgprot_t *)pmdp));
 # else
 	pmd_t pmd = *pmdp;
 	set_pmd_at(mm, addr, pmdp, __pmd(_PAGE_INIT_VALID));

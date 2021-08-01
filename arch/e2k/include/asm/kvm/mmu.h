@@ -390,14 +390,15 @@ kvm_mmu_instr_page_fault(struct kvm_vcpu *vcpu, gva_t address,
 #endif	/* CONFIG_KVM_SHADOW_PT_ENABLE */
 
 extern int kvm_guest_addr_to_host(void **addr);
-extern void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size);
+extern void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size,
+					bool need_inject);
 
 #ifdef	CONFIG_KVM_HOST_MODE
 /* it is native host kernel with virtualization support */
 static inline int
-guest_addr_to_host(void **addr, pt_regs_t *regs)
+guest_addr_to_host(void **addr, const pt_regs_t *regs)
 {
-	if (likely(!host_test_intc_emul_mode((const struct pt_regs *)regs))) {
+	if (likely(!host_test_intc_emul_mode(regs))) {
 		/* faulted addres is not paravirtualized guest one */
 		return native_guest_addr_to_host(addr);
 	}
@@ -405,14 +406,14 @@ guest_addr_to_host(void **addr, pt_regs_t *regs)
 	return kvm_guest_addr_to_host(addr);
 }
 static inline void *
-guest_ptr_to_host(void *ptr, int size, pt_regs_t *regs)
+guest_ptr_to_host(void *ptr, int size, const pt_regs_t *regs)
 {
-	if (likely(!host_test_intc_emul_mode((const struct pt_regs *)regs))) {
+	if (likely(!host_test_intc_emul_mode(regs))) {
 		/* faulted addres is not paravirtualized guest one */
 		return native_guest_ptr_to_host(ptr, size);
 	}
 
-	return kvm_guest_ptr_to_host_ptr(ptr, size);
+	return kvm_guest_ptr_to_host_ptr(ptr, size, false);
 }
 #endif	/* CONFIG_KVM_HOST_MODE */
 

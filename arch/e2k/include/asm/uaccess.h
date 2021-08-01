@@ -119,9 +119,15 @@ struct exception_table_entry
 	might_fault(); \
 	__TRY_USR_PFAULT
 
+#pragma unknown_control_flow(set_usr_pfault_jump)
+static __always_inline void set_usr_pfault_jump(void)
+{
+	SAVE_CURRENT_ADDR(&current_thread_info()->usr_pfault_jump);
+}
+
 #define __TRY_USR_PFAULT \
-	unsigned long _usr_pfault_jmp = current_thread_info()->usr_pfault_jump;\
-	SAVE_CURRENT_ADDR(&current_thread_info()->usr_pfault_jump); \
+	unsigned long _usr_pfault_jmp = current_thread_info()->usr_pfault_jump; \
+	set_usr_pfault_jump(); \
 	if (likely(current_thread_info()->usr_pfault_jump)) {
 
 #define CATCH_USR_PFAULT \

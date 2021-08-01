@@ -38,7 +38,7 @@ extern int __init native_arch_pci_init(void);
 
 static inline u8 native_readb_relaxed(const volatile void __iomem *addr)
 {
-	u8 res = IO_READ_B(addr);
+	u8 res = *(const volatile u8 __force *) addr;
 	if (cpu_has(CPU_HWBUG_PIO_READS))
 		__E2K_WAIT(_ld_c);
 	return res;
@@ -46,7 +46,7 @@ static inline u8 native_readb_relaxed(const volatile void __iomem *addr)
 
 static inline u16 native_readw_relaxed(const volatile void __iomem *addr)
 {
-	u16 res = IO_READ_H(addr);
+	u16 res = *(const volatile u16 __force *) addr;
 	if (cpu_has(CPU_HWBUG_PIO_READS))
 		__E2K_WAIT(_ld_c);
 	return res;
@@ -54,7 +54,7 @@ static inline u16 native_readw_relaxed(const volatile void __iomem *addr)
 
 static inline u32 native_readl_relaxed(const volatile void __iomem *addr)
 {
-	u32 res = IO_READ_W(addr);
+	u32 res = *(const volatile u32 __force *) addr;
 	if (cpu_has(CPU_HWBUG_PIO_READS))
 		__E2K_WAIT(_ld_c);
 	return res;
@@ -62,7 +62,7 @@ static inline u32 native_readl_relaxed(const volatile void __iomem *addr)
 
 static inline u64 native_readq_relaxed(const volatile void __iomem *addr)
 {
-	u64 res = IO_READ_D(addr);
+	u64 res = *(const volatile u64 __force *) addr;
 	if (cpu_has(CPU_HWBUG_PIO_READS))
 		__E2K_WAIT(_ld_c);
 	return res;
@@ -70,23 +70,22 @@ static inline u64 native_readq_relaxed(const volatile void __iomem *addr)
 
 static inline void native_writeb_relaxed(u8 value, volatile void __iomem *addr)
 {
-	IO_WRITE_B(addr, value);
+	*(volatile u8 __force *) addr = value;
 }
 
 static inline void native_writew_relaxed(u16 value, volatile void __iomem *addr)
 {
-	IO_WRITE_H(addr, value);
 	*(volatile u16 __force *) addr = value;
 }
 
 static inline void native_writel_relaxed(u32 value, volatile void __iomem *addr)
 {
-	IO_WRITE_W(addr, value);
+	*(volatile u32 __force *) addr = value;
 }
 
 static inline void native_writeq_relaxed(u64 value, volatile void __iomem *addr)
 {
-	IO_WRITE_D(addr, value);
+	*(volatile u64 __force *) addr = value;
 }
 
 

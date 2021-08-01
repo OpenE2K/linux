@@ -22,7 +22,7 @@
 /* MDIO_DATA registers bits */
 #define	MDIO_DATA_OFF		0	/* [15:00] = data */
 #define	MDIO_CS_OFF		16	/* [17:16] = 2 */
-#define	MDIO_REG_AD_OFF		18	/* [22:18] = phy reg num  */
+#define	MDIO_REG_AD_OFF		18	/* [22:18] = phy reg num */
 #define	MDIO_PHY_AD_OFF		23	/* [27:23] = phy id */
 #define	MDIO_OP_CODE_OFF	28	/* [29:28] = 1-W, 2-R */
 #define	MDIO_ST_OF_F_OFF	30	/* [31:30] = 1 */
@@ -32,12 +32,75 @@
 #define MDIO_DATA_OPCODE_RDINC	0x2
 
 
-/* VSC8488 */
-#define TMON_AN_DIS	(1 << 14)
-#define TMON_ENABLE	(1 << 12)
-#define TMON_RUN	(1 << 11)
-#define TMON_DONE	(1 << 10)
-#define TMON_MASK	(0xFF)
+/* VSC8488 - external phy on PCIe board */
+
+
+#define PCS_DEV_ID_1G_2G5	0x7996CED0
+#define PCS_DEV_ID_1G_2G5_10G	0x7996CED1
+
+/** Internal PCS */
+#define PMA_and_PMD_MMD	(0x1 << 18)
+#define PCS_MMD		(0x3 << 18)
+#define AN_MMD		(0x7 << 18)
+#define VS_MMD1		(0x1e << 18)
+#define VS_MII_MMD	(0x1f << 18)
+
+#define SR_XS_PCS_CTRL1		(0x0000 | PCS_MMD)
+#define SR_XS_PCS_DEV_ID1	(0x0002 | PCS_MMD)
+#define SR_XS_PCS_DEV_ID2	(0x0003 | PCS_MMD)
+#define SR_XS_PCS_CTRL2		(0x0007 | PCS_MMD)
+#define VR_XS_PCS_DIG_CTRL1	(0x8000 | PCS_MMD)
+#define VR_XS_PCS_DIG_CTRL2	(0x8001 | PCS_MMD)
+
+#define SR_MII_CTRL		(0x0000 | VS_MII_MMD)
+#define VR_MII_AN_CTRL		(0x8001 | VS_MII_MMD)
+#define SR_MII_AN_ADV		(0x0004 | VS_MII_MMD)
+#define VR_MII_DIG_CTRL1	(0x8000 | VS_MII_MMD)
+#define VR_MII_AN_INTR_STS	(0x8002 | VS_MII_MMD)
+#define VR_MII_LINK_TIMER_CTRL	(0x800a | VS_MII_MMD)
+
+#define SR_VSMMD_CTRL		(0x0009 | VS_MMD1)
+
+#define VR_AN_INTR		(0x8002 | AN_MMD)
+#define SR_AN_CTRL		(0x0000 | AN_MMD)
+#define SR_AN_LP_ABL1		(0x0013 | AN_MMD)
+#define SR_AN_LP_ABL2		(0x0014 | AN_MMD)
+#define SR_AN_LP_ABL3		(0x0015 | AN_MMD)
+#define SR_AN_XNP_TX1		(0x0016 | AN_MMD)
+#define SR_AN_XNP_TX2		(0x0017 | AN_MMD)
+#define SR_AN_XNP_TX3		(0x0018 | AN_MMD)
+
+#define SR_PMA_KR_PMD_CTRL	(0x0096 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL	(0x8070 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0	(0x8071 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLA_CTRL1		(0x8072 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2	(0x8073 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0	(0x8074 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLB_CTRL1		(0x8075 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2	(0x8076 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLA_CTRL3		(0x8077 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_MPLLB_CTRL3		(0x8078 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1	(0x8031 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2	(0x8032 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL	(0x8033 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL	(0x8034 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0	(0x8036 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1	(0x8037 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2	(0x8052 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3	(0x8053 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL	(0x8054 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL	(0x8056 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL	(0x8057 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0		(0x8058 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4	(0x805C | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL	(0x805D | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0	(0x8090 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL	(0x8091 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0	(0x8092 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_VCO_CAL_REF0		(0x8096 | PMA_and_PMD_MMD)
+
+#define SR_XS_PCS_KR_STS2	 (0x0021 | PCS_MMD)
+#define VR_XS_PCS_DIG_STS	 (0x8010 | PCS_MMD)
 
 
 /**
@@ -46,31 +109,137 @@
  ******************************************************************************
  */
 
-static int mdio_io(mxgbe_priv_t *priv, u32 dat)
+static int mdio_io(void __iomem *base, u32 dat)
 {
 	u32 val;
 	unsigned long timestart;
-	void __iomem *base = priv->bar0_base;
-
-	FDEBUG;
 
 	mxgbe_wreg32(base, MDIO_DATA, dat);
 
-	timestart = jiffies;
 	/* wait for Read done */
+	timestart = jiffies;
 	do {
-		if (time_after(jiffies, timestart + HZ)) {
-			dev_err(&priv->pdev->dev,
-				"ERROR: Unable to read/write MDIO reg\n");
+		if (time_after(jiffies, timestart + HZ))
 			return -EAGAIN;
-		}
+
 		val = mxgbe_rreg32(base, MDIO_CSR);
-		DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
-			"mdio_io: reg MDIO_CSR = 0x%08X\n", val);
 	} while (!(val & MDIO_CSR_RRDY));
 
 	return 0;
 } /* mdio_io */
+
+/* mii_bus->read wrapper for read PHYs */
+static int mdio_read(struct mii_bus *bus, int phy_id, int reg_num)
+{
+	u32 val;
+	u16 val_out;
+	mxgbe_priv_t *priv = bus->priv;
+	void __iomem *base = priv->bar0_base;
+	unsigned long flags;
+
+	if (!base)
+		return -ENODEV;
+
+	raw_spin_lock_irqsave(&priv->mgio_lock, flags);
+
+	/* Write Address */
+	val = 0;
+	val |= 0x2 << MDIO_CS_OFF; /* const */
+	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
+	val |= MDIO_DATA_OPCODE_ADDR << MDIO_OP_CODE_OFF;
+	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
+	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	val |= reg_num & 0xFFFF;
+	if (mdio_io(base, val) != 0) {
+		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		dev_err(&priv->pdev->dev, "Unable to write MDIO addr\n");
+		return -EAGAIN;
+	}
+
+	/* Read Data */
+	val = 0;
+	val |= 0x2 << MDIO_CS_OFF; /* const */
+	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
+	val |= MDIO_DATA_OPCODE_RD << MDIO_OP_CODE_OFF;
+	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
+	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	if (mdio_io(base, val) != 0) {
+		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		dev_err(&priv->pdev->dev, "Unable to read MDIO data\n");
+		return -EAGAIN;
+	}
+
+	val_out = (u16)(mxgbe_rreg32(base, MDIO_DATA) & 0xFFFF);
+
+	raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+
+	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
+		"mdio_read: dev 0x%02X - reg 0x%04X = 0x%04X\n",
+		(reg_num >> MDIO_REG_AD_OFF) & 0x1F, reg_num & 0xFFFF, val_out);
+
+	return (int)val_out;
+} /* mdio_read */
+
+/* mii_bus->write wrapper for write PHYs */
+static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
+{
+	u32 val;
+	mxgbe_priv_t *priv = bus->priv;
+	void __iomem *base = priv->bar0_base;
+	unsigned long flags;
+
+	if (!base)
+		return -ENODEV;
+
+	raw_spin_lock_irqsave(&priv->mgio_lock, flags);
+
+	/* Write Address */
+	val = 0;
+	val |= 0x2 << MDIO_CS_OFF; /* const */
+	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
+	val |= MDIO_DATA_OPCODE_ADDR << MDIO_OP_CODE_OFF;
+	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
+	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	val |= reg_num & 0xFFFF;
+	if (mdio_io(base, val) != 0) {
+		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		dev_err(&priv->pdev->dev, "Unable to write MDIO addr\n");
+		return -EAGAIN;
+	}
+
+	/* Write Data */
+	val = 0;
+	val |= 0x2 << MDIO_CS_OFF; /* const */
+	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
+	val |= MDIO_DATA_OPCODE_WR << MDIO_OP_CODE_OFF;
+	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
+	val |= reg_num & (0x1F << MDIO_REG_AD_OFF);
+	val |= val_in & 0xFFFF;
+	if (mdio_io(base, val) != 0) {
+		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		dev_err(&priv->pdev->dev, "Unable to write MDIO data\n");
+		return -EAGAIN;
+	}
+
+	raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+
+	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
+		"mdio_write: dev 0x%02X - reg 0x%04X := 0x%04X\n",
+		(reg_num >> MDIO_REG_AD_OFF) & 0x1F, reg_num & 0xFFFF, val_in);
+
+	return 0;
+} /* mdio_write */
+
+/* PCS Register read/write functions */
+static u16 mxgbe_pcs_read(mxgbe_priv_t *priv, int regnum)
+{
+	return (u16)mdio_read(priv->mii_bus, priv->pcsaddr, regnum);
+}
+
+static void mxgbe_pcs_write(mxgbe_priv_t *priv, int regnum, u16 value)
+{
+	mdio_write(priv->mii_bus, priv->pcsaddr, regnum, value);
+}
 
 
 /**
@@ -85,8 +254,6 @@ void mxgbe_mdio_reset(mxgbe_priv_t *priv)
 	void __iomem *base = priv->bar0_base;
 #endif /* GPIO_RESET_PHY */
 
-	FDEBUG;
-
 #ifdef GPIO_RESET_PHY
 	/* Use GPIO.0 to reset Phy */
 	mxgbe_gpio_phy_reset(priv);
@@ -97,149 +264,381 @@ void mxgbe_mdio_reset(mxgbe_priv_t *priv)
 	mxgbe_wreg32(base, MDIO_CSR, MDIO_CSR_PHY_RSTHI | 0);
 	mdelay(1);
 #endif /* GPIO_RESET_PHY */
-
-	/* Enable Digitel temp monitor */
-	mxgbe_mdio_write(priv, 0 /*phy_id*/, MXGBE_PHY_DEV_GLOBAL,
-			 MXGBE_PHY_DEVGLB_TEMPMON,
-			 TMON_AN_DIS | TMON_ENABLE);
 } /* mxgbe_mdio_reset */
 
-
-int mxgbe_mdio_read(mxgbe_priv_t *priv, int phy_id, int dev, int reg_num)
+/* called from init_board() */
+int mxgbe_mdio_register(mxgbe_priv_t *priv)
 {
-	u32 val;
-	u16 val_out;
-	void __iomem *base = priv->bar0_base;
+	struct pci_dev *pdev = priv->pdev;
+	struct mii_bus *new_bus;
+	struct device_node *np = dev_of_node(&pdev->dev);
+	int ret;
 
-	FDEBUG;
+	new_bus = devm_mdiobus_alloc(&pdev->dev);
+	if (!new_bus) {
+		dev_err(&pdev->dev,
+			"Error on devm_mdiobus_alloc\n");
+		return -ENOMEM;
+	}
 
-	if (!base)
-		return -ENODEV;
+	new_bus->name = KBUILD_MODNAME" mdio";
+	new_bus->priv = priv;
+	new_bus->parent = &pdev->dev;
+	new_bus->irq[0] = PHY_IGNORE_INTERRUPT;
+	snprintf(new_bus->id, MII_BUS_ID_SIZE, KBUILD_MODNAME"-%x",
+		 PCI_DEVID(pdev->bus->number, pdev->devfn));
 
-	/* Write Address */
-	val = 0;
-	val |= 0x2 << MDIO_CS_OFF; /* const */
-	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
-	val |= MDIO_DATA_OPCODE_ADDR << MDIO_OP_CODE_OFF;
-	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= (dev & 0x1F) << MDIO_REG_AD_OFF;
-	val |= reg_num & 0xFFFF;
-	if (mdio_io(priv, val) != 0)
-		return -EAGAIN;
+	new_bus->read = mdio_read;
+	new_bus->write = mdio_write;
 
-	/* Read Data */
-	val = 0;
-	val |= 0x2 << MDIO_CS_OFF; /* const */
-	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
-	val |= MDIO_DATA_OPCODE_RD << MDIO_OP_CODE_OFF;
-	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= (dev & 0x1F) << MDIO_REG_AD_OFF;
-	if (mdio_io(priv, val) != 0)
-		return -EAGAIN;
+	if (np) {
+		struct device_node *mdio_node;
 
-	val_out = (u16)(mxgbe_rreg32(base, MDIO_DATA) & 0xFFFF);
-	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
-		"mdio_read: dev 0x%02X - reg 0x%04X = 0x%04X\n",
-		dev, reg_num, val_out);
-
-	return (int)val_out;
-} /* mxgbe_mdio_read */
-
-
-int mxgbe_mdio_write(mxgbe_priv_t *priv, int phy_id, int dev, int reg_num,
-		     int val_in)
-{
-	u32 val;
-	void __iomem *base = priv->bar0_base;
-
-	FDEBUG;
-
-	if (!base)
-		return -ENODEV;
-
-	/* Write Address */
-	val = 0;
-	val |= 0x2 << MDIO_CS_OFF; /* const */
-	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
-	val |= MDIO_DATA_OPCODE_ADDR << MDIO_OP_CODE_OFF;
-	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= (dev & 0x1F) << MDIO_REG_AD_OFF;
-	val |= reg_num & 0xFFFF;
-	if (mdio_io(priv, val) != 0)
-		return -EAGAIN;
-
-	val = 0;
-	val |= 0x2 << MDIO_CS_OFF; /* const */
-	val |= 0x0 << MDIO_ST_OF_F_OFF; /* const */
-	val |= MDIO_DATA_OPCODE_WR << MDIO_OP_CODE_OFF;
-	val |= (phy_id  & 0x1F) << MDIO_PHY_AD_OFF;
-	val |= (dev & 0x1F) << MDIO_REG_AD_OFF;
-	val |= val_in & 0xFFFF;
-	if (mdio_io(priv, val) != 0)
-		return -EAGAIN;
-
-	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
-		"mdio_write: dev 0x%02X - reg 0x%04X := 0x%04X\n",
-		dev, reg_num, val_in);
+		mdio_node = of_get_child_by_name(np, "mdio");
+		ret = of_mdiobus_register(new_bus, mdio_node);
+		of_node_put(mdio_node);
+	} else {
+		ret = mdiobus_register(new_bus);
+	}
+	if (ret) {
+		dev_err(&pdev->dev,
+			"Error on mdiobus_register\n");
+		return ret;
+	}
+	priv->mii_bus = new_bus;
+	dev_info(&pdev->dev, "register mdiobus %s\n", new_bus->id);
 
 	return 0;
-} /* mxgbe_mdio_write */
+} /* mxgbe_mdio_register */
 
 
 /**
  ******************************************************************************
- * VSC8488
+ * Internal PCS
  ******************************************************************************
  */
 
-int mxgbe_mdio_read_temp(mxgbe_priv_t *priv)
+static void mxgbe_pcs_first_init(mxgbe_priv_t *priv)
 {
-	int val;
-	unsigned long timestart;
+	int i;
+	u16 val;
 
-	FDEBUG;
+	/* PCS Reset */
+	val = mxgbe_pcs_read(priv, SR_XS_PCS_CTRL1);
+	mxgbe_pcs_write(priv, SR_XS_PCS_CTRL1, val | (1 << 15)); /* RST */
+	val = mxgbe_pcs_read(priv, SR_XS_PCS_CTRL1);
+	/* Wait RST (SR_XS_PCS_CTRL1) to 1'h0 */
+	for (i = 0; i <= 500; i++) {
+		if ((mxgbe_pcs_read(priv, SR_XS_PCS_CTRL1) & 0x8000) == 0)
+			break;
+		udelay(1);
+	}
+	if (i >= 500)
+		dev_warn(&priv->pdev->dev, "could not reset pcs\n");
 
-	mxgbe_mdio_write(priv, 0 /*phy_id*/, MXGBE_PHY_DEV_GLOBAL,
-			 MXGBE_PHY_DEVGLB_TEMPMON,
-			 TMON_AN_DIS | TMON_ENABLE | TMON_RUN);
 
-	timestart = jiffies;
-	/* wait for TMON_DONE set (autoclean) */
-	do {
-		val = mxgbe_mdio_read(priv, 0 /*phy_id*/,
-				      MXGBE_PHY_DEV_GLOBAL,
-				      MXGBE_PHY_DEVGLB_TEMPMON);
-		if (val < -1)
-			return val;
-		if (time_after(jiffies, timestart + HZ)) {
-			return -EAGAIN;
+	/* Disable Clause 73 Auto-Negotiation */
+	/* RSTRT_AN to 1'h0 / LPM to 1'h0 / AN_EN to 1'h0
+	 * EXT_NP_CTL to 1'h1 / AN_RST to 1'h0 */
+	/*
+	mxgbe_pcs_write(priv,
+			SR_AN_CTRL,
+			0x2000);
+	*/
+
+	/* Disable Clause 72 Auto-Negotiation */
+	/* RS_TR to 1'h0 / TR_EN to 1'h1 */
+	/*
+	mxgbe_pcs_write(priv,
+			SR_PMA_KR_PMD_CTRL,
+			0x0002);
+	*/
+#if 0
+	mxgbe_pcs_write(priv,
+			SR_PMA_KR_PMD_CTRL,
+			0x0000);
+
+	/* Check PCS_TYPE_SEL to 4'h0 */
+	val = mxgbe_pcs_read(priv, SR_XS_PCS_CTRL2);
+	if (val & 0xF != 0) {
+		dev_warn(&priv->pdev->dev, "wrong PCS_TYPE_SEL\n");
+		/* SET PCS_TYPE_SEL to 4'h0 */
+		mxgbe_pcs_write(priv, SR_XS_PCS_CTRL2, 0x0000);
+	} else {
+		dev_dbg(&priv->pdev->dev, "PCS_TYPE_SEL - Ok\n");
+	}
+
+	/* DET_RX_REQ_0 to 1'h0, VBOOST_EN_0 to 1'h1, VBOOST_LVL to 3'h5,
+	 * TX_CLK_RDY_0 to 1'h1 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1510);
+
+	/* TX_REQ_0 to 1'h0, TX_LPD_0 to 1'h0, TX0_WIDTH to 2'h3 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0300);
+
+	/* TX0_RATE to 3'h0 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,
+			     0x0000);
+
+	/* RX_REQ_0 to 1'h0, RX_LPD_0 to 1'h0, RX0_WIDTH to 2'h3 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0300);
+
+	/* LOS_TRSHLD_0 3'h3 --> 3'h1 / LOS_TRSHLD_1 3'h0 / LOS_TRSHLD_2 3'h0
+	 * LOS_TRSHLD_3 3'h0 / LOS_LFPS_EN_0 1'h0 / LOS_LFPS_EN_3_1 3'h0 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0001);
+
+	/* RX0_RATE to 2'h0 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0000);
+#endif
+
+	/* CTLE_BOOST_0 to 5'hA, CTLE_POLE_0 to 3'h6, VGA2_GAIN_0 to 4'h7,
+	 * VGA1_GAIN_0 to 4'h7 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77CA);
+
+#if 0
+	/* CONT_ADAPT_0 to 1'h1 / CONT_OFF_CAN_0 to 1'h1 / SEQ_EQ_EN to 1'h0
+	 * PING_PONG_EN to 1'h0 / SELF_MAIN_EN to 1'h0
+	 * RX_EQ_STRT_CTRL to 1'h0 / RX_AD_REQ to 1'h0 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0011);
+
+	/* AFE_EN_0 to 1'h1, DFE_EN_0 to 1'h1 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0011);
+
+	/* MPLLA_MULTIPLIER to 8'h21
+	 * MPLLA_CAL_DISABLE to 1'h0 */
+	mxgbe_pcs_write(priv,
+			VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0,
+			0x0021);
+
+	/* MPLLA_SSC_EN, MPLLA_SSC_RANGE, MPLLA_SSC_CLK_SEL,
+	 * MPLLA_FRACN_CTRL = 0 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_MPLLA_CTRL1,
+			0x0000);
+
+	/* MPLLA_DIV_MULT, MPLLA_DIV_CLK_EN,
+	 * MPLLA_DIV8_CLK_EN = 0
+	 * MPLLA_DIV10_CLK_EN to 1'h1,
+	 * MPLLA_DIV16P5_CLK_EN to 1'h1 */
+	mxgbe_pcs_write(priv,
+			VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2,
+			0x0600);
+#endif
+
+	/* MPLLA_BANDWIDTH to 11'h4 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_MPLLA_CTRL3,
+			0x0004);
+
+#if 0
+	/* MPLLB_MULTIPLIER to 8'h21 --> 40,
+	 * MPLLB_CAL_DISABLE to 1'h0 */
+	mxgbe_pcs_write(priv,
+			VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0,
+			0x0040);
+
+	/* MPLLB_SSC_EN to 1'h0 / MPLLB_SSC_RANGE to 3'h0
+	 * MPLLB_SSC_CLK_SEL to 3'h0 / MPLLB_FRACN_CTRL to 9'h0 */
+	mxgbe_pcs_write(priv,
+			VR_XS_PMA_Gen5_12G_MPLLB_CTRL1,
+			0x0000);
+
+	/* MPLLB_DIV_MULT to 7'h0 / MPLLB_DIV_CLK_EN to 1'h0
+	 * MPLLB_DIV8_CLK_EN to 1'h0 / MPLLB_DIV10_CLK_EN to 1'h1 */
+	mxgbe_pcs_write(priv,
+			VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2,
+			0x0200);
+
+	/* MPLLB_BANDWIDTH to 11'h4 --> 7 */
+	mxgbe_pcs_write(priv,
+			VR_XS_PMA_Gen5_12G_MPLLB_CTRL3,
+			0x0007);
+
+	/* TX2RX_LB_EN_0 to 1'h0, RX2TX_LB_EN_0 to 1'h0, RX_VREF_CTRL to 5'h11,
+	 * RTUNE_REQ to 1'h0, CR_PARA_SEL to 1'h1, PLL_CTRL to 1'h0*/
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
+
+	/* REF_CLK_EN to 1'h1, REF_USE_PAD to 1'h0,
+	 * REF_CLK_DIV2 to 1'h0,
+	 * REF_RANGE to 3'h6, REF_MPLLA_DIV2 to 1'h1,
+	 * REF_MPLLB_DIV2 to 1'h1,
+	 * REF_RPT_CLK_EN to 1'h0 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
+			     0x00f1);
+
+	/* VCO_LD_VAL_0 to 13'h549 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0549);
+
+	/* VCO_REF_LD_0 to 6'h29 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x0029);
+#endif
+
+#if 1
+	/* Soft Reset */
+	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
+	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL1, val | (1 << 15)); /* VR_RST */
+	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
+	i = 0;
+	while ((val & (1 << 15)) && (i < 10)) {
+		DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
+			"wait for PCSDIG reset: dev.reg 0x%02X.%04X = 0x%04X\n",
+			VR_XS_PCS_DIG_CTRL1 >> 16,
+			VR_XS_PCS_DIG_CTRL1 & 0xFFFF, val);
+		val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
+		i++;
+	};
+
+	/* SAPFIR1:
+	 * Proto: Error on PCB (Bug 115092 #8)
+	 * Reg: 0x038001 - VR_XS_PCS_DIG_CTRL2
+	 * set bit [04:04] TX_POL_INV_0 --> 1
+	 */
+#if 0
+	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL2);
+	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL2, val | (1 << 4)); /* TX_POL_INV_0 */
+#endif
+
+	/* INIT */
+	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
+	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL1, val | (1 << 8)); /* INIT */
+	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
+	i = 0;
+	while ((val & (1 << 8)) && (i < 10)) {
+		DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
+			"wait for INIT done: dev.reg 0x%02X.%04X = 0x%04X\n",
+			VR_XS_PCS_DIG_CTRL1 >> 16,
+			VR_XS_PCS_DIG_CTRL1 & 0xFFFF, val);
+		val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
+		i++;
+	};
+#endif
+} /* mxgbe_pcs_first_init */
+
+/* Initiate the Vendor specific software reset */
+/* reset for both controllers are configured via func 0 */
+#if 0
+static int mxgbe_pcs_vs_reset(mxgbe_priv_t *priv)
+{
+	int i;
+
+	/* EN_VSMMD1, VR_RST */
+	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL1, 0xa000);
+	for (i = 0; i < 500; i++) {
+		if ((mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1) &
+			0x8000) == 0) {
+			break;
 		}
-	} while (!(val & TMON_DONE));
+		udelay(1);
+	}
+	if (i ==  500) {
+		dev_warn(&priv->pdev->dev, "Could not reset phy\n");
+		return 1;
+	}
+	dev_dbg(&priv->pdev->dev, "phy reset done\n");
 
-	return val & TMON_MASK;
-} /* mxgbe_mdio_read_temp */
+	return 0;
+} /* mxgbe_pcs_vs_reset */
+#endif
 
-
-u32 mxgbe_mdio_get_pma_stat(mxgbe_priv_t *priv)
+/* Programming Guidelines for Clause 73 Auto-Negotiation */
+static int mxgbe_set_pcs_an_clause_73(mxgbe_priv_t *priv)
 {
-	int val;
-	u32 ret;
+	int i;
+	int r;
 
-	FDEBUG;
+	if (netif_msg_hw(priv))
+		dev_info(&priv->ndev->dev, "%s\n", __func__);
 
-	val = mxgbe_mdio_read(priv, 0 /*phy_id*/,
-			      MXGBE_PHY_DEV_PMD_PMA,
-			      MXGBE_PHY_DEVPMA_STATUS1);
-	if (val < -1)
-		return (u32)-1;
-	ret = (u32)(val & 0xFFFF);
+	for (i = 0; i < 500; i++) {
+		r = mxgbe_pcs_read(priv, VR_AN_INTR);
+		if (r & 0x7) { /* AN_INT_CMPLT | AN_INC_LINK | AN_PG_RCV */
+			break;
+		}
+	}
+	if (i == 500) {
+		dev_warn(&priv->ndev->dev,
+			 "could not set autonegotiation mode\n");
+		return 1;
+	}
 
-	val = mxgbe_mdio_read(priv, 0 /*phy_id*/,
-			      MXGBE_PHY_DEV_PMD_PMA,
-			      MXGBE_PHY_DEVPMA_STATUS2);
-	if (val < -1)
-		return (u32)-1;
-	ret |= (u32)(val << 16);
+	if (r & 0x1) { /* AN_INT_CMPLT */
+	/* Ready */
+		return 0;
+	}
 
-	return ret;
-} /* mxgbe_mdio_get_pma_stat */
+	if ((r & 0x4) == 0) { /* AN_PG_RCV == 0 */
+		goto wait_an_int_cmplt;
+	}
+	r &= ~0x4; /* AN_PG_RCV = 0 */
+	mxgbe_pcs_write(priv, VR_AN_INTR, r);
+	(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
+	(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL2);
+	(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL3);
+
+	r = mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
+	if ((r & 0x800) == 0) { /* AN_LP_ADV_NP == 0 */
+		goto wait_an_int_cmplt;
+	}
+
+	for (i = 0; i < 500; i++) {
+		int j;
+		mxgbe_pcs_write(priv, SR_AN_XNP_TX3, 0);
+		mxgbe_pcs_write(priv, SR_AN_XNP_TX2, 0);
+		mxgbe_pcs_write(priv, SR_AN_XNP_TX1, 0);
+		for (j = 0; j < 500; j++) {
+			if (mxgbe_pcs_read(priv, VR_AN_INTR) & 0x4) {
+				break;
+			}
+		}
+		if (j == 500) {
+			return 1;
+		}
+		r = mxgbe_pcs_read(priv, VR_AN_INTR);
+		mxgbe_pcs_write(priv, VR_AN_INTR, r & ~0x4);/*AN_PG_RCV=0*/
+		(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
+		(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL2);
+		(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL3);
+		r = mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
+		if ((r & 0x800) == 0) { /* AN_LP_ADV_NP == 0 */
+			break;
+		}
+	}
+	if (i == 500) {
+		return 1;
+	}
+wait_an_int_cmplt:
+	for (i = 0; i < 500; i++) {
+		r = mxgbe_pcs_read(priv, VR_AN_INTR);
+		if (r & 0x1) { /* AN_INT_CMPLT */
+			break;
+		}
+	}
+	if (i == 500) {
+		return 1;
+	}
+	return 0;
+} /* mxgbe_set_pcs_an_clause_73 */
+
+/* init internal PCS/PMA phy */
+int mxgbe_set_pcsphy_mode(struct net_device *ndev)
+{
+	u32 val;
+	mxgbe_priv_t *priv = netdev_priv(ndev);
+
+	val = mdio_read(priv->mii_bus, priv->pcsaddr, SR_XS_PCS_DEV_ID1);
+	val <<= 16;
+	val |= mdio_read(priv->mii_bus, priv->pcsaddr, SR_XS_PCS_DEV_ID2);
+	priv->pcs_dev_id = val;
+	dev_info(&priv->pdev->dev,
+		 "pcs[%d] phy id: 0x%08X - %s\n",
+		 priv->pcsaddr, priv->pcs_dev_id,
+		 (priv->pcs_dev_id == PCS_DEV_ID_1G_2G5_10G) ? "10G" :
+		 (priv->pcs_dev_id == PCS_DEV_ID_1G_2G5) ? "1G/2.5G" :
+			"unknown");
+
+	/*if (mxgbe_pcs_vs_reset(priv))
+		return 1;*/
+
+	mxgbe_pcs_first_init(priv);
+
+	mxgbe_set_pcs_an_clause_73(priv);
+
+	return 0;
+} /* mxgbe_set_pcsphy_mode */

@@ -30,10 +30,6 @@
  */
 #define SWITCH_HW_STACKS_FROM_USER(...) \
 	{ \
-		/* Disable load/store generations */ \
-		crp; \
-	} \
-	{ \
 		/* Wait for FPU exceptions before switching stacks */ \
 		wait all_e = 1; \
 		rrd %osr0, GVCPUSTATE; \
@@ -43,12 +39,27 @@
 		rrd %psp.hi, GCURTASK; \
 		stgdq,sm %qg18, 0, TSK_TI_G_MY_CPU_OFFSET; \
 		cmpesb,1 0, 0, %pred0; \
+		/* Do restore %rpr (it's clobbered by "crp" below) */ \
+		cmpesb,3 0, 0, %pred1; \
+	} \
+	{ \
+		/* 'crp' instruction also clears %rpr besides the generations \
+		 * table, so make sure we preserve %rpr value. */ \
+		rrd %rpr.lo, GCPUOFFSET; \
+	} \
+	{ \
+		rrd %rpr.hi, GCPUID; \
+		/* Disable load/store generations */ \
+		crp; \
 	} \
 	SWITCH_HW_STACKS(TSK_TI_, ##__VA_ARGS__)
 
 /*
  * This assumes that GVCPUSTATE points to current_thread_info()
  * and %psp.hi has been read into GCURTASK
+ *
+ * %pred0 - set to "true" if PSP/PCSP should be switched.
+ * %pred1 - set to "true" if RPR should be restored.
  *
  * Does the following:
  *
@@ -65,14 +76,18 @@
  */
 #define SWITCH_HW_STACKS(PREFIX, ...) \
 	{ \
-		ldd,0 GVCPUSTATE, TI_K_PSP_LO, GCPUOFFSET; \
-		ldd,2 GVCPUSTATE, TI_K_PCSP_LO, GCPUID; \
+		rwd GCPUOFFSET, %rpr.lo ? %pred1; \
+		ldd,2 GVCPUSTATE, TI_K_PSP_LO, GCPUOFFSET; \
 		__VA_ARGS__ \
+	} \
+	{ \
+		rwd GCPUID, %rpr.hi ? %pred1; \
+		ldd,2 GVCPUSTATE, TI_K_PCSP_LO, GCPUID; \
 	} \
 	{ \
 		rrd %psp.lo, GCURTASK ? %pred0; \
 		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PSP_HI ? %pred0; \
-		SMP_ONLY(ldw,5 GVCPUSTATE, TSK_TI_CPU_DELTA, GCPUID ? ~ %pred0;) \
+		SMP_ONLY(ldgdw,5 0, TSK_TI_CPU_DELTA, GCPUID ? ~ %pred0;) \
 	} \
 	{ \
 		rrd %pcsp.hi, GCURTASK ? %pred0; \
@@ -82,7 +97,6 @@
 		ibranch trap_handler_switched_stacks ? ~ %pred0; \
 	} \
 	{ \
-		nop 1; /* ldd -> use */ \
 		rrd %pcsp.lo, GCURTASK; \
 		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PCSP_HI; \
 	} \

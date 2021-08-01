@@ -21,6 +21,7 @@
  */
 #define KVM_HVA_ONLY_VALID	(PAGE_OFFSET + 2 * PAGE_SIZE)
 #define KVM_HVA_IS_UNMAPPED	(PAGE_OFFSET + 3 * PAGE_SIZE)
+#define KVM_HVA_IS_WRITE_PROT	(PAGE_OFFSET + 4 * PAGE_SIZE)
 
 static inline bool kvm_is_only_valid_hva(unsigned long addr)
 {
@@ -30,6 +31,11 @@ static inline bool kvm_is_only_valid_hva(unsigned long addr)
 static inline bool kvm_is_unmapped_hva(unsigned long addr)
 {
 	return addr == KVM_HVA_IS_UNMAPPED;
+}
+
+static inline bool kvm_is_write_prot_hva(unsigned long addr)
+{
+	return addr == KVM_HVA_IS_WRITE_PROT;
 }
 
 static inline bool
@@ -125,7 +131,7 @@ kvm_mmu_gva_to_gpa(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
 
 again:
 	gpa = vcpu->arch.mmu.gva_to_gpa(vcpu, gva, access, exception);
-	if (gpa == UNMAPPED_GVA) {
+	if (arch_is_error_gpa(gpa)) {
 		/* it's OK to have bad guest virt address and
 		 * pass it back to guest even if it's not valid */
 	} else if (unlikely(gpa >= HOST_PAGE_OFFSET && !again &&
@@ -136,6 +142,7 @@ again:
 			again = true;
 			goto again;
 	}
+	gpa |= (gva & ~PAGE_MASK);
 	return gpa;
 }
 
@@ -176,22 +183,47 @@ kvm_mmu_gva_to_gpa_system(struct kvm_vcpu *vcpu, gva_t gva,
 	return kvm_mmu_gva_to_gpa(vcpu, gva, 0, exception);
 }
 
-static inline hva_t kvm_vcpu_gva_to_hva(struct kvm_vcpu *vcpu, gva_t gva)
+static inline hva_t kvm_vcpu_gpa_to_hva(struct kvm_vcpu *vcpu, gpa_t gpa)
+{
+	gfn_t gfn;
+	unsigned long hva;
+
+	gfn = gpa_to_gfn(gpa);
+
+	hva = kvm_vcpu_gfn_to_hva(vcpu, gfn);
+	if (kvm_is_error_hva(hva))
+		return hva;
+
+	hva |= (gpa & ~PAGE_MASK);
+	return hva;
+}
+
+static inline hva_t kvm_vcpu_gva_to_hva(struct kvm_vcpu *vcpu, gva_t gva,
+				bool is_write, kvm_arch_exception_t *exception)
 {
 	gpa_t gpa;
 	gfn_t gfn;
 	unsigned long hva;
-	kvm_arch_exception_t exception;
+	kvm_arch_exception_t gpa_exception;
 
-	gpa = kvm_mmu_gva_to_gpa_system(vcpu, gva, &exception);
-	if (unlikely(gpa == UNMAPPED_GVA)) {
-		if (exception.error_code & PFERR_ONLY_VALID_MASK) {
-			return KVM_HVA_ONLY_VALID;
-		} else if (exception.error_code & PFERR_IS_UNMAPPED_MASK) {
-			return KVM_HVA_IS_UNMAPPED;
-		} else {
-			return KVM_HVA_ERR_BAD;
-		}
+	gpa = is_write ? kvm_mmu_gva_to_gpa_write(vcpu, gva, &gpa_exception) :
+			kvm_mmu_gva_to_gpa_read(vcpu, gva, &gpa_exception);
+	if (unlikely(arch_is_error_gpa(gpa))) {
+		if (gpa_exception.error_code & PFERR_ONLY_VALID_MASK)
+			hva = KVM_HVA_ONLY_VALID;
+		else if (gpa_exception.error_code & PFERR_IS_UNMAPPED_MASK)
+			hva = KVM_HVA_IS_UNMAPPED;
+		else if (is_write &&
+				(gpa_exception.error_code & PFERR_WRITE_MASK))
+			hva = KVM_HVA_IS_WRITE_PROT;
+		else
+			hva = KVM_HVA_ERR_BAD;
+
+		if (exception)
+			memcpy(exception, &gpa_exception,
+					sizeof(gpa_exception));
+
+		return hva;
 	}
 
 	gfn = gpa_to_gfn(gpa);
@@ -204,6 +236,8 @@ static inline hva_t kvm_vcpu_gva_to_hva(struct kvm_vcpu *vcpu, gva_t gva)
 	return hva;
 }
 
+extern void kvm_vcpu_inject_page_fault(struct kvm_vcpu *vcpu, void *addr,
+				   kvm_arch_exception_t *exception);
 extern int kvm_vcpu_fetch_guest_virt(struct kvm_vcpu *vcpu,
 			gva_t addr, void *val, unsigned int bytes);
 extern int kvm_vcpu_read_guest_virt_system(struct kvm_vcpu *vcpu,
@@ -218,9 +252,13 @@ extern int kvm_read_guest_phys_system(struct kvm *kvm, gpa_t addr,
 			void *val, unsigned int bytes);
 extern int kvm_write_guest_phys_system(struct kvm *kvm, gpa_t addr,
 			void *val, unsigned int bytes);
-extern int kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
+extern long kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
 		void *addr, u64 val, u64 tag, size_t size, u64 strd_opcode);
-extern int kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
+extern long kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
+		void *dst, const void *src, size_t len,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch);
+extern long kvm_vcpu_copy_guest_virt_system_16(struct kvm_vcpu *vcpu,
 		void *dst, const void *src, size_t len,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch);

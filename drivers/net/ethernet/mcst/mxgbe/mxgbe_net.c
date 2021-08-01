@@ -810,7 +810,7 @@ static int mxgbe_open(struct net_device *ndev)
 	if (!priv->carrier)
 		netif_carrier_on(ndev);
 
-	dev_info(&ndev->dev, "interface OPEN\n");
+	dev_info(&ndev->dev, KBUILD_MODNAME " interface OPEN\n");
 
 	return 0;
 
@@ -844,7 +844,7 @@ static int mxgbe_stop(struct net_device *ndev)
 		return -1;
 
 	/*if (netif_msg_ifup(priv))*/
-	dev_info(&ndev->dev, "interface STOP\n");
+	dev_info(&ndev->dev, KBUILD_MODNAME " interface STOP\n");
 
 	/* Disable interrupt */
 
@@ -875,12 +875,7 @@ static int mxgbe_ioctl(struct net_device *ndev, struct ifreq *rq, int cmd)
 	switch (cmd) {
 	default:
 		/* SIOC[GS]MIIxxx ioctls */
-		if (priv->mii) {
-			rc = generic_mii_ioctl(&priv->mii_if,
-					       if_mii(rq), cmd, NULL);
-		} else {
-			rc = -EOPNOTSUPP;
-		}
+		rc = -EOPNOTSUPP;
 	}
 	return rc;
 }
@@ -993,32 +988,13 @@ static const struct net_device_ops mxgbe_netdev_ops = {
  ******************************************************************************
  **/
 
-static int mdio_read(struct net_device *ndev, int phy_id, int reg_num)
-{
-	mxgbe_priv_t *priv = netdev_priv(ndev);
-
-	return mxgbe_mdio_read(priv, 0, phy_id, reg_num);
-}
-
-static void mdio_write(struct net_device *ndev, int phy_id, int reg_num,
-		       int val)
-{
-	mxgbe_priv_t *priv = netdev_priv(ndev);
-
-	mxgbe_mdio_write(priv, 0, phy_id, reg_num, val);
-}
-
 mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev)
 {
 	mxgbe_priv_t *priv;
 	struct net_device *ndev;
 	unsigned int max_q = TXQ_MAXNUM;
 
-#if 1
 	ndev = alloc_etherdev_mq(sizeof(struct mxgbe_priv), max_q);
-#else
-	ndev = alloc_etherdev(sizeof(struct mxgbe_priv));
-#endif
 	if (!ndev) {
 		dev_err(&pdev->dev,
 			"ERROR: Cannot allocate memory" \
@@ -1043,10 +1019,6 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 
 	assert(ndev);
 
-	/* Netdev name: */
-	if (mxgbe_renameeth) {
-		strcpy(ndev->name, MXGBE_DEVNAME "%d");
-	}
 	ndev->netdev_ops = &mxgbe_netdev_ops;
 	ndev->tx_queue_len = MXGBE_TX_QUE_LEN;
 	ndev->watchdog_timeo = MXGBE_WATCHDOG_PERIOD;
@@ -1077,14 +1049,11 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 	/* link off */
 	netif_carrier_off(ndev);
 
-	priv->mii = 0;
-	priv->mii_if.full_duplex = 1;
-	priv->mii_if.supports_gmii = 1;
-	priv->mii_if.phy_id_mask = 0x1f;
-	priv->mii_if.reg_num_mask = 0x1f;
-	priv->mii_if.dev = ndev;
-	priv->mii_if.mdio_read = mdio_read;
-	priv->mii_if.mdio_write = mdio_write;
+	if (ret = mxgbe_mdio_register(priv)) {
+		dev_err(&priv->pdev->dev,
+			"Cannot register mdio bus, aborting\n");
+		goto err_out_free_rxq;
+	}
 
 	/* set MAC from EEPROM */
 	memcpy(ndev->dev_addr, &priv->MAC, 6);
@@ -1093,10 +1062,10 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 
 	ndev->features = 0;
 
-	if ((ret = register_netdev(ndev))) {
+	if (ret = register_netdev(ndev)) {
 		dev_err(&priv->pdev->dev,
-			"ERROR: Cannot register net device, aborting\n");
-		goto err_out_free_rxq;
+			"Cannot register net device, aborting\n");
+		goto err_out_mdiobus;
 	}
 
 	for (qn = 0; qn < priv->num_rx_queues; qn++) {
@@ -1104,7 +1073,16 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 			dev_err(&priv->pdev->dev,
 				"ERROR: DMA_ALLOC_RAM qn=%d\n", qn);
 			ret = -ENOMEM;
-			goto err_out_free_rxq;
+			goto err_out_mdiobus;
+		}
+	}
+
+	if (priv->revision != MXGBE_REVISION_ID_BOARD) {
+		if (mxgbe_set_pcsphy_mode(ndev)) {
+			dev_err(&priv->pdev->dev,
+				"could not set PCS PHY mode\n");
+			ret = -EIO;
+			goto err_out_mdiobus;
 		}
 	}
 
@@ -1117,7 +1095,7 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 		"\tstate=%lu\n" \
 		"\thard_header_len=%u\n" \
 		"\tmtu=%u\n" \
-		"\ttx_queue_len=%lu\n" \
+		"\ttx_queue_len=%u\n" \
 		"\ttype=%u\n" \
 		"\taddr_len=%u\n" \
 		"\tflags=0x%X\n" \
@@ -1138,7 +1116,9 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 
 	return 0;
 
-
+err_out_mdiobus:
+	if (priv->mii_bus)
+		mdiobus_unregister(priv->mii_bus);
 err_out_free_rxq:
 	for (qn = 0; qn < priv->num_rx_queues; qn++) {
 		net_rxq_clean_q(priv, qn);
@@ -1175,9 +1155,11 @@ void mxgbe_net_remove(mxgbe_priv_t *priv)
 		net_rxq_clean_q(priv, qn);
 	}
 
-	if (ndev) {
+	if (ndev)
 		unregister_netdev(ndev);
-	}
+
+	if (priv->mii_bus)
+		mdiobus_unregister(priv->mii_bus);
 } /* mxgbe_net_remove */
 
 void mxgbe_net_free(mxgbe_priv_t *priv)
@@ -1195,8 +1177,7 @@ void mxgbe_net_free(mxgbe_priv_t *priv)
 #ifdef DEBUG
 static void print_skb(struct sk_buff *skb, mxgbe_priv_t *priv, int dir)
 {
-	printk(KERN_DEBUG ">>>>> %s >>>>> (skb: %p)\n",
-	       (dir) ? "TX" : "RX", skb);
+	pr_debug(">>>>> %s >>>>> (skb: %p)\n", (dir) ? "TX" : "RX", skb);
 
 	dev_dbg(&skb->dev->dev, "\tlen=%u, data_len=%u" \
 				", mac_len=%u, hdr_len=%u",
@@ -1223,24 +1204,24 @@ static void print_skb(struct sk_buff *skb, mxgbe_priv_t *priv, int dir)
 		packet = (void *)skb->data;
 		eth = (struct ethhdr *) packet;
 		for (i = 0; i != 6; i++) {
-			printk(KERN_DEBUG "%s eth: src %02X, dst %02X\n",
+			pr_debug("%s eth: src %02X, dst %02X\n",
 			       (dir) ? "TX" : "RX",
 			       eth->h_source[i], eth->h_dest[i]);
 		}
 		for (i = 0; i != ((skb->len) / 4); i++) {
-			printk(KERN_DEBUG "%s packet: int # %d  0x%08X\n",
+			pr_debug("%s packet: int # %d  0x%08X\n",
 			       (dir) ? "TX" : "RX",
 			       i, *(u32 *)packet);
 			packet += 4;
 		}
 		for (i = 0; i != ((skb->len) % 4); i++) {
-			printk(KERN_DEBUG "%s packet: byte # %d  0x%02X\n",
+			pr_debug("%s packet: byte # %d  0x%02X\n",
 			       (dir) ? "TX" : "RX",
 			       i, *(u8 *)packet);
 			packet += 1;
 		}
 	}
 #endif
-	printk(KERN_DEBUG "<<<<< %s <<<<<\n", (dir) ? "TX" : "RX");
+	pr_debug("<<<<< %s <<<<<\n", (dir) ? "TX" : "RX");
 } /* print_skb */
 #endif /* DEBUG */

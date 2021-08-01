@@ -14,14 +14,28 @@
 #include <linux/fb.h>
 #include "smi_drv.h"
 
+
+static int smifb_mmap(struct fb_info *info,
+			struct vm_area_struct *vma)
+{
+	struct smi_fbdev *afbdev = info->par;
+	struct drm_gem_object *obj;
+	struct smi_bo *bo;
+	obj = afbdev->gfb.obj;
+	bo = gem_to_smi_bo(obj);	
+
+	return ttm_fbdev_mmap(vma, &bo->bo);
+}
+
+
 static struct fb_ops smifb_ops = {
 	.owner = THIS_MODULE,
 	.fb_check_var = drm_fb_helper_check_var,
 	.fb_set_par = drm_fb_helper_set_par,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,3,0)
-	.fb_fillrect = sys_fillrect,
-	.fb_copyarea = sys_copyarea,
-	.fb_imageblit = sys_imageblit,
+	.fb_fillrect = cfb_fillrect,
+	.fb_copyarea = cfb_copyarea,
+	.fb_imageblit = cfb_imageblit,
 #else
 	.fb_fillrect = drm_fb_helper_cfb_fillrect,
 	.fb_copyarea = drm_fb_helper_cfb_copyarea,
@@ -30,6 +44,7 @@ static struct fb_ops smifb_ops = {
 	.fb_pan_display = drm_fb_helper_pan_display,
 	.fb_blank = drm_fb_helper_blank,
 	.fb_setcmap = drm_fb_helper_setcmap,
+	.fb_mmap = smifb_mmap,
 };
 
 static int smifb_create_object(struct smi_fbdev *afbdev,
@@ -39,6 +54,7 @@ static int smifb_create_object(struct smi_fbdev *afbdev,
 	struct drm_device *dev = afbdev->helper.dev;
 	u32 size;
 	struct drm_gem_object *gobj;
+
 	int ret = 0;
 	size = mode_cmd->pitches[0] * mode_cmd->height;
 	ret = smi_gem_create(dev, size, true, &gobj);
@@ -70,16 +86,19 @@ smi_fb_zfill(struct drm_device *dev, struct smi_fbdev *gfbdev)
 }
 
 
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 static int smifb_create(struct drm_fb_helper *helper,
 			   struct drm_fb_helper_surface_size *sizes)
+#else
+static int smifb_create(struct smi_fbdev *gfbdev,
+			   struct drm_fb_helper_surface_size *sizes)
+#endif
 {
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3,14,0)
-	struct smi_fbdev *gfbdev =
-		container_of(helper, struct smi_fbdev, helper);
-#else
+	struct smi_fbdev *gfbdev = container_of(helper, struct smi_fbdev, helper);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 	struct smi_fbdev *gfbdev = (struct smi_fbdev *)helper;
-#endif		
+#endif
 
 	struct drm_device *dev = gfbdev->helper.dev;
 	struct smi_device *cdev = gfbdev->helper.dev->dev_private;
@@ -138,7 +157,9 @@ static int smifb_create(struct drm_fb_helper *helper,
 	if (IS_ERR(info))
 		return PTR_ERR(info);
 #endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0)
 	info->par = gfbdev;
+#endif
 
 	ret = smi_framebuffer_init(cdev->dev, &gfbdev->gfb, &mode_cmd, gobj);
 	if (ret)
@@ -161,7 +182,9 @@ static int smifb_create(struct drm_fb_helper *helper,
 
 	memset_io(bo->kmap.virtual, 0x0, size);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0)
 	strcpy(info->fix.id, "smidrmfb");
+#endif
 
 	info->flags = FBINFO_DEFAULT;
 #ifdef __BIG_ENDIAN
@@ -170,7 +193,17 @@ static int smifb_create(struct drm_fb_helper *helper,
 #endif
 	info->fbops = &smifb_ops;
 
-	drm_fb_helper_fill_info(info, helper, sizes);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,11,0)
+	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->depth);
+	drm_fb_helper_fill_var(info, &gfbdev->helper, sizes->fb_width,
+			       sizes->fb_height);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0)
+	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->format->depth);
+	drm_fb_helper_fill_var(info, &gfbdev->helper, sizes->fb_width,
+			       sizes->fb_height);
+#else
+	drm_fb_helper_fill_info(info, &gfbdev->helper, sizes);
+#endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,3,0)
 	/* setup aperture base/size for vesafb takeover */
@@ -183,14 +216,16 @@ static int smifb_create(struct drm_fb_helper *helper,
 	info->apertures->ranges[0].base = cdev->dev->mode_config.fb_base;
 	info->apertures->ranges[0].size = cdev->mc.vram_size;
 
-	info->fix.smem_start = bo->bo.mem.bus.base + bo->bo.mem.bus.offset;
-	info->fix.smem_len = bo->bo.mem.num_pages << PAGE_SHIFT;
+	info->fix.smem_start = cdev->dev->mode_config.fb_base;
+	info->fix.smem_len = cdev->mc.vram_size;
 
 	info->screen_base = bo->kmap.virtual; 
 	info->screen_size = size;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,12,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,4,0)
 	drm_vma_offset_remove(&bo->bo.bdev->vma_manager, &bo->bo.base.vma_node);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,12,0)
+	drm_vma_offset_remove(&bo->bo.bdev->vma_manager, &bo->bo.vma_node);
 #endif
 	
 	info->fix.mmio_start = 0;
@@ -225,15 +260,30 @@ out_iounmap:
 #endif	
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
+static int smifb_find_or_create_single(struct drm_fb_helper *helper,
+			   struct drm_fb_helper_surface_size *sizes)
+{
+	struct smi_fbdev *gfbdev = (struct smi_fbdev *)helper;
+	int new_fb = 0;
+	int ret;
+
+	if (!helper->fb) {
+		ret = smifb_create(gfbdev, sizes);
+		if (ret)
+			return ret;
+		new_fb = 1;
+	}
+	return new_fb;
+}
+#endif
+
 void
 smi_fb_output_poll_changed(struct smi_device *sdev)
 {
-
 	if (sdev->mode_info.gfbdev)
 		drm_fb_helper_hotplug_event(&sdev->mode_info.gfbdev->helper);
-	
 }
-
 
 
 static int smi_fbdev_destroy(struct drm_device *dev,
@@ -260,13 +310,19 @@ static int smi_fbdev_destroy(struct drm_device *dev,
 #endif
 #endif
 	if (gfb->obj) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,12,0)
 		drm_gem_object_put_unlocked(gfb->obj);
+#else
+		drm_gem_object_unreference_unlocked(gfb->obj);
+#endif
 		gfb->obj = NULL;
 	}
 
 
 	drm_fb_helper_fini(&gfbdev->helper);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 	drm_framebuffer_unregister_private(&gfb->base);
+#endif
 	drm_framebuffer_cleanup(&gfb->base);
 
 	return 0;
@@ -277,7 +333,11 @@ static const struct drm_fb_helper_funcs smi_fb_helper_funcs = {
 	.gamma_set = smi_crtc_fb_gamma_set,
 	.gamma_get = smi_crtc_fb_gamma_get,
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 	.fb_probe = smifb_create,
+#else
+	.fb_probe = smifb_find_or_create_single,
+#endif
 };
 
 int smi_fbdev_init(struct smi_device *cdev)

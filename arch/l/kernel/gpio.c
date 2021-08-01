@@ -541,15 +541,15 @@ static struct l_gpio_data l_iohub3_private_data = {
 };
 
 static struct pci_device_id __initdata l_gpio_pci_tbl[] = {
+	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_GPIO_MPV_EIOH),
+	 .driver_data = (unsigned long)&l_iohub3_private_data},
+	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_GPIO_MPV),
+	 .driver_data = (unsigned long)&l_iohub2_private_data},
 	{PCI_DEVICE(PCI_AC97GPIO_VENDOR_ID_ELBRUS,
 		    PCI_AC97GPIO_DEVICE_ID_ELBRUS),
 	 .driver_data = (unsigned long)&l_iohub_private_data},
 	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_GPIO),
 	 .driver_data = (unsigned long)&l_pci_private_data},
-	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_GPIO_MPV),
-	 .driver_data = (unsigned long)&l_iohub2_private_data},
-	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_GPIO_MPV_EIOH),
-	 .driver_data = (unsigned long)&l_iohub3_private_data},
 	{},
 };
 

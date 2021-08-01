@@ -208,7 +208,8 @@ struct compat_shmid64_ds {
 
 static inline int is_compat_task(void)
 {
-	return current->thread.flags & E2K_FLAG_32BIT;
+	return (TASK_IS_PROTECTED(current)) ? 0 :
+				(current->thread.flags & E2K_FLAG_32BIT);
 }
 
 #endif /* _ASM_E2K_COMPAT_H */

@@ -50,11 +50,12 @@ typedef struct icache_range_array {
 	struct mm_struct	*mm;
 } icache_range_array_t;
 
-extern	void __flush_icache_all(void);
-extern	void native_flush_icache_range(e2k_addr_t start, e2k_addr_t end);
-extern	void __flush_icache_range_array(
-				icache_range_array_t *icache_range_arr);
-extern	void __flush_icache_page(struct vm_area_struct *vma, struct page *page);
+extern void native_flush_icache_all(void);
+extern void native_flush_icache_range(e2k_addr_t start, e2k_addr_t end);
+extern void native_flush_icache_range_array(
+			icache_range_array_t *icache_range_arr);
+extern void native_flush_icache_page(struct vm_area_struct *vma,
+				     struct page *page);
 
 #ifndef CONFIG_SMP
 #define flush_icache_all()		__flush_icache_all()
@@ -62,18 +63,18 @@ extern	void __flush_icache_page(struct vm_area_struct *vma, struct page *page);
 #define	flush_icache_range_array	__flush_icache_range_array
 #define	flush_icache_page(vma, page)	__flush_icache_page(vma, page)
 
+#define	smp_flush_icache_all()
 #define	native_smp_flush_icache_range(start, end)
 #define	native_smp_flush_icache_range_array(icache_range_arr)
 #define	native_smp_flush_icache_page(vma, page)
-#define	native_smp_flush_icache_all()
 #define	native_smp_flush_icache_kernel_line(addr)
 #else	/* CONFIG_SMP */
+extern void smp_flush_icache_all(void);
 extern void native_smp_flush_icache_range(e2k_addr_t start, e2k_addr_t end);
 extern void native_smp_flush_icache_range_array(
 			icache_range_array_t *icache_range_arr);
 extern void native_smp_flush_icache_page(struct vm_area_struct *vma,
 			struct page *page);
-extern void native_smp_flush_icache_all(void);
 extern void native_smp_flush_icache_kernel_line(e2k_addr_t addr);
 
 #define flush_icache_all()		smp_flush_icache_all()
@@ -176,20 +177,32 @@ smp_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 	native_smp_flush_icache_page(vma, page);
 }
 static inline void
-smp_flush_icache_all(void)
-{
-	native_smp_flush_icache_all();
-}
-static inline void
 smp_flush_icache_kernel_line(e2k_addr_t addr)
 {
 	native_smp_flush_icache_kernel_line(addr);
+}
+
+static inline void
+__flush_icache_all(void)
+{
+	native_flush_icache_all();
 }
 static inline void
 __flush_icache_range(e2k_addr_t start, e2k_addr_t end)
 {
 	native_flush_icache_range(start, end);
 }
+static inline void
+__flush_icache_range_array(icache_range_array_t *icache_range_arr)
+{
+	native_flush_icache_range_array(icache_range_arr);
+}
+static inline void
+__flush_icache_page(struct vm_area_struct *vma, struct page *page)
+{
+	native_flush_icache_page(vma, page);
+}
+
 static inline void
 flush_DCACHE_range(void *addr, size_t len)
 {

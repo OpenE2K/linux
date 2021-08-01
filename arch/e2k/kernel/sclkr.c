@@ -13,6 +13,7 @@
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/rtc.h>
+#include <linux/cpuidle.h>
 #include <asm/sclkr.h>
 #include <linux/sched/clock.h>
 
@@ -227,21 +228,21 @@ void sclk_set_deviat(int dev)
 static long long diff_tod_sclkr = 0;
 int watch4sclkr(void *arg)
 {
-	struct timespec ts;
+	struct timespec64 ts;
 	u64 sclkr_time;
 	long long gtod_time;
 	unsigned long flags;
 
 	while (1) {
 		local_irq_save(flags);
-		getnstimeofday(&ts);
+		ktime_get_real_ts64(&ts);
 		sclkr_time = clocksource_sclkr.read(&clocksource_sclkr);
 		local_irq_restore(flags);
 		gtod_time = ts.tv_sec * NSEC_PER_SEC + ts.tv_nsec;
 		if (diff_tod_sclkr == 0)
 			diff_tod_sclkr = gtod_time - sclkr_time;
 		if (abs(diff_tod_sclkr - (gtod_time - sclkr_time)) > 10000)
-			pr_warning("cpu%02u %ld gtod-sclkr= %lld\n",
+			pr_warn("cpu%02u %lld gtod-sclkr= %lld\n",
 				raw_smp_processor_id(), ts.tv_sec,
 				gtod_time - sclkr_time);
 		schedule_timeout_interruptible(600 * HZ);
@@ -253,14 +254,14 @@ int watch4sclkr(void *arg)
 noinline int sclk_register(void *new_sclkr_src_arg)
 {
 	long	new_sclkr_mode = (long)new_sclkr_src_arg;
-	unsigned int sclkr_lo, sclkr_lo_prev, sclkr_lo_saved;
-	unsigned int freq, freq1, safe_lo, safe_lo2;
+	unsigned int sclkr_lo, sclkr_lo_swch;
+	unsigned int freq, safe_lo, safe_lo2;
 	unsigned long long range, sclkr_all;
 	e2k_sclkm1_t sclkm1;
 	struct task_struct *sclkr_w_thread;
-	struct timespec ts;
+	struct timespec64 ts;
 	unsigned long flags;
-	int waiting = 0, cpu;
+	int cpu;
 
 	if (basic_freq_hz == 1) { /* was not call to basic_freq_setup() */
 		if (is_prototype()) {
@@ -274,6 +275,8 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 			basic_freq_hz = READ_SSCLKM1_REG().div;
 		}
 	}
+	sclkm1 = (e2k_sclkm1_t) { .mdiv = 1, .div = basic_freq_hz };
+	WRITE_SSCLKM1_REG(sclkm1); /* SCLKR_INT */
 	pr_info("sclk_register old mod %d new %ld basic_fr_hz=%lld m1=%llx\n",
 		sclkr_mode, new_sclkr_mode, basic_freq_hz,
 		READ_SSCLKM1_REG().word);
@@ -342,104 +345,44 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 			}
 		}
 		return 0;
-	}
+	}	/* new_sclkr_mode == SCLKR_INT */
 
 	/* FIXME add call register_cpu_notifier() for cpu hotplug case */
-	/* We want to be far from beginning of internal second.
-	 * So different processors will not appear on the different
-	 * parties of seconds border while switching to extrnal.
-	 */
+
+	/* Next for new_sclkr_mode == SCLKR_EXT or SCLKR_RTC */
+
 	raw_all_irq_save(flags);
-	WRITE_SSCLKM2_REG(0xffffffff00000000); /* max range */
-	sclkm1 = (e2k_sclkm1_t) { .mdiv = 1, .div = basic_freq_hz };
-	WRITE_SSCLKM1_REG(sclkm1); /* SCLKR_INT */
 	freq = basic_freq_hz;
-	safe_lo = (freq >> 2) + (freq >> 3);	/* 37% reserve */
+	safe_lo = (freq >> 2) + (freq >> 3) + (freq >> 4) + (freq >> 5);	/* 46% reserve */
 	safe_lo2 = freq - safe_lo;
 	pr_err("sclkr INFO safe_lo=%u %u fr=%u div=%u bas=%llu\n",
 		safe_lo, safe_lo2, freq, READ_SSCLKM1_REG().div, basic_freq_hz);
 
+	/* We want to be far from beginning of internal second.
+	 * So different processors will not appear on the different
+	 * parties of seconds border while switching to extrnal.
+	 */
 	sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
 	while (sclkr_lo < safe_lo || sclkr_lo > safe_lo2) {
 		cpu_relax();
 		sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
 	}
-	sclkr_lo_saved = sclkr_lo;
+	sclkr_lo_swch = sclkr_lo;
 
 	/* Wait for first external signal of second biginig and look at
 	 * sclkm1.div (prvious sclkr_lo) to see how far from external
 	 * second bigining the swinching was. */
-	sclkm1 = (e2k_sclkm1_t) { .mode = 1 };
-	WRITE_SSCLKM1_REG(sclkm1);
-	sclkr_lo_prev = sclkr_lo;
-	sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
-	while (sclkr_lo >= sclkr_lo_prev) {
-		cpu_relax();
-		sclkr_lo_prev = sclkr_lo;
-		sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
-	}
 
-	freq1 = READ_SSCLKM1_REG().div;
-	if (freq1 <= basic_freq_hz) {
-		/* Wait for other cpus as well will increase sclkr seconds
-		 * and safe_lo sclkr ticks more */
-		if (freq1 > basic_freq_hz - (basic_freq_hz >> 2)) {
-			safe_lo = basic_freq_hz >> 1;
-			sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
-			while (sclkr_lo <= safe_lo) {
-				cpu_relax();
-				sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
-			}
-		} else {
-			freq = basic_freq_hz;
-			safe_lo = freq - (freq >> 3);
-			pr_err("sclkr info safe_lo=%u=%llu%% "
-				"fr=%u fr1=%u=%llu%%\n",
-				safe_lo,
-				(long long)safe_lo * 100 / freq, freq,
-				freq1, (long long)freq1 * 100 / freq);
-			if (safe_lo > (basic_freq_hz << 2)) {
-				pr_err("sclkr error safe_lo=%u=%llu%% large "
-					"fr=%u fr1=%u=%llu%%\n",
-					safe_lo,
-					(long long)safe_lo * 100 / freq, freq,
-					freq1, (long long)freq1 * 100 / freq);
-				goto error_irq_unlock;
-			}
-			do {
-				sclkr_lo_prev = sclkr_lo;
-				sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
-				if (waiting == 3) {
-					pr_err("sclkr info sfl=%llu%% wait=3 "
-						"f=%u f1=%llu%% l=%u-%u=%u\n",
-						(long long)safe_lo * 100 / freq,
-						freq,
-						(long long)freq1 * 100 / freq,
-						sclkr_lo, sclkr_lo_prev,
-						sclkr_lo - sclkr_lo_prev);
-				}
-				if (waiting++ > basic_freq_hz) {
-					pr_err("sclkr error sf_lo=%llu%% wait "
-						"f=%u f1=%llu%% l=%u prl=%u\n",
-						(long long)safe_lo * 100 / freq,
-						freq,
-						(long long)freq1 * 100 / freq,
-						sclkr_lo, sclkr_lo_prev);
-					goto error_irq_unlock;
-				}
-			} while (sclkr_lo <= safe_lo);
-		}
-	}
 	raw_all_irq_restore(flags);
 	/* .mode = 1 -- for RTC or externel sync */
 	sclkm1 = (e2k_sclkm1_t) { .sw = 1, .trn = 1, .mode = 1 };
+	cpuidle_pause_and_lock();
 	on_each_cpu(sclkr_set_mode, (void *) AW(sclkm1), 1);
-	pr_info("sclkr other CPU registation done sclkr=%lld.%09llu sec,"
-		" last sclkr_lo=%d.%d\n",
+	pr_info("Set sclkm1.mode=1 done in all CPUs sclkr=%lld.%09llu sec,"
+		" last sclkm1.div=%d,\nWating for sclkm1.trn==0\n",
 		READ_SSCLKR_REG() >> 32,
-		(unsigned long long)READ_SSCLKR_REG() &
-				SCLKR_LO * NSEC_PER_SEC / freq,
-		freq1 / 1000000, freq1 % 1000000);
+		((unsigned long long)READ_SSCLKR_REG() &
+				SCLKR_LO) * NSEC_PER_SEC / freq, READ_SSCLKM1_REG().div);
 	/* SCLKR synchronized by RTC is for monotonic time coherent across CPUs
 	 * It may leap due to hwclock command */
 	if (new_sclkr_mode != SCLKR_RTC) {
@@ -449,24 +392,19 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 		sclk_set_range((void *)range);
 		smp_call_function(sclk_set_range, (void *)range, 1);
 	}
+#define WAIT_TRNOFF 3	/* sec */
 	mutex_unlock(&sclkr_set_lock);
-	schedule_timeout_interruptible(10 * HZ);
-	if (!READ_SSCLKM1_REG().mode) {
-		pr_err("Error sclkr. cpu%02d bit 'ext' is cleared by HW.\n",
-			raw_smp_processor_id());
+	schedule_timeout_interruptible(WAIT_TRNOFF * HZ);
+	sclkm1 = READ_SSCLKM1_REG();
+	cpuidle_resume_and_unlock();
+	if (sclkm1.trn || !sclkm1.mode)
 		goto sclkr_no;
-	}
-	if (READ_SSCLKM1_REG().trn) {
-		pr_err("Error sclkr. cpu%02d 'training' was not cleared.\n",
-			raw_smp_processor_id());
-		goto sclkr_no;
-	}
 	sclkr_all = READ_SSCLKR_REG();
-	sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
+	sclkr_lo = sclkr_all & SCLKR_LO;
 	freq = READ_SSCLKM1_REG().div;
-	getnstimeofday(&ts);
+	ktime_get_real_ts64(&ts);
 	pr_info("sclkr clocksource registation at cpu %d "
-		"sclkr=%lld.%09llu sec, getnstod =%ld.%09ld "
+		"sclkr=%lld.%09llu sec, getnstod =%lld.%09ld "
 		"fr=%u Hz, ext=%d swOK=%d range= %lld:%lld\n",
 		raw_smp_processor_id(), sclkr_all >> 32,
 		(unsigned long long)sclkr_lo * NSEC_PER_SEC / freq,
@@ -477,8 +415,6 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 #ifdef SCLKR_CHECKUP
 	{
 	int cpu, cpu_cur = raw_smp_processor_id();
-	safe_lo = (freq >> 2) + (freq >> 3);	/* 37% reserve */
-	safe_lo2 = freq - safe_lo;
 	while (sclkr_lo < safe_lo || sclkr_lo > safe_lo2) {
 		cpu_relax();
 		sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
@@ -512,11 +448,23 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 		strcpy(sclkr_src, "int");
 	mutex_unlock(&sclkr_set_lock);
 	return 0;
-error_irq_unlock:
-	raw_all_irq_restore(flags);
-	mutex_unlock(&sclkr_set_lock);
 sclkr_no:
-	panic("There is no pulse per second signal from RTC, tell your hw vendor. As a temporary workaround you can try setting \"sclkr=int nohlt\" in kernel cmdline on a single-socket system and \"sclkr=no\" on a multi-socket system.");
+	panic("There is no pulse per second signal from RTC during %d secs, "
+		"tell your hw vendor.\n"
+		"As a temporary workaround you can try setting "
+		"\"sclkr=int nohlt\" in kernel cmdline "
+		"on a single-socket system\n"
+		"and \"sclkr=no\" on a multi-socket system.\n"
+		"sclkm1=0x%llx (sw=%d, trn=%d mode=%d mdiv=%d "
+		"div or freq =%d )\n"
+		"sclkm2= 0x%llx safe_lo=%u=%llu%% basic_freq_hz=%lld "
+		"sclkr_lo_swch=%d\n", WAIT_TRNOFF,
+		READ_SSCLKM1_REG().word, READ_SSCLKM1_REG().sw,
+		READ_SSCLKM1_REG().trn, READ_SSCLKM1_REG().mode,
+		READ_SSCLKM1_REG().mdiv, READ_SSCLKM1_REG().div,
+		READ_SSCLKM2_REG(),
+		safe_lo, (long long)safe_lo * 100 / freq,
+		basic_freq_hz, sclkr_lo_swch);
 }
 EXPORT_SYMBOL(sclk_register);
 

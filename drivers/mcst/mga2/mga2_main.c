@@ -11,7 +11,7 @@
 MODULE_PARM_DESC(lvds, "LVDS channels number. "
 			"Panel parameters may be set from cmdline. Example:\n"
 			"\tvideo=LVDS-1:1600x1200@60 mga2.lvds=2");
-static int mga2_lvds_channels = 0;
+int mga2_lvds_channels = 0;
 module_param_named(lvds, mga2_lvds_channels, int, 0400);
 MODULE_PARM_DESC(dvi, "enable dvi");
 static bool mga2_dvi_enable = 0;
@@ -134,10 +134,12 @@ static const struct component_master_ops mga2_master_ops = {
 
 static int mga2_add_hdmi(struct drm_device *drm)
 {
-	int ret = 0, i;
+	int ret = 0, i, irq;
 	struct component_match *match = NULL;
 	struct mga2 *mga2 = drm->dev_private;
 	resource_size_t vid_phys = mga2->regs_phys + mga2->info->vid_regs_base;
+	int bar = mga2->info->regs_bar;
+	char *dev = mga2_p2(mga2) ? "mga2-hdmi" : "mga25-hdmi";
 	struct resource mga2_hdmi_resources[][2] = {
 	{
 		[0] = {
@@ -162,19 +164,24 @@ static int mga2_add_hdmi(struct drm_device *drm)
 
 	if ((ret = request_module("dw_hdmi_imx")))
 		goto out;
+	irq = drm->pdev->irq;
+	if (mga2_p2(mga2))
+		irq++;
+	else if (mga2->subdevice == MGA26)
+		irq = mga2->msix_entries[0].vector;
 
 	for (i = 0; i < ARRAY_SIZE(mga2->mga2_hdmi_device); i++) {
 		struct resource *r = &mga2_hdmi_resources[i][0];
 		char name[64];
 		sprintf(name, "DWC_hdmi_tx %d ddc", i);
-		r[0].start += pci_resource_start(drm->pdev, 2);
-		r[0].end += pci_resource_start(drm->pdev, 2);
-		r[1].start = drm->pdev->irq + 1;
-		r[1].end = drm->pdev->irq + 1;
+		r[0].start += pci_resource_start(drm->pdev, bar);
+		r[0].end += pci_resource_start(drm->pdev, bar);
+		r[1].start = irq;
+		r[1].end = irq;
 
 		mga2->mga2_hdmi_device[i] =
 			platform_device_register_resndata(drm->dev,
-				"mga2-hdmi", i, r,
+				dev, i, r,
 				ARRAY_SIZE(mga2_hdmi_resources[0]),
 				NULL, 0);
 		if (!mga2->mga2_hdmi_device[i]) {
@@ -216,6 +223,13 @@ static int mga2_add_devices(struct drm_device *drm)
 
 	drm_for_each_crtc(crtc, drm)
 		crtc_mask |= drm_crtc_mask(crtc);
+
+	mga2->dvi_i2c =  mga2_i2c_create(drm->dev, vid_phys + MGA2_VID0_TXI2C,
+			"SIL1178" " tx", mga2->base_freq, 50 * 1000);
+	if (!mga2->dvi_i2c) {
+		ret = -1;
+		goto out;
+	}
 	switch (mga2->subdevice) {
 	case MGA25_PCI_PROTO:
 	case MGA26_PCI_PROTO:
@@ -225,6 +239,17 @@ static int mga2_add_devices(struct drm_device *drm)
 		ret = mga2_common_connector_init(drm, vid_phys,
 				DRM_MODE_CONNECTOR_VGA, true, crtc_mask);
 		goto out;
+	case MGA2_P2:
+		if (!mga2_dvi_enable)
+			break;
+		ret = mga2_dvi_init(drm, vid_regs, vid_phys);
+		if (ret  == -ENODEV) {
+			ret = 0;
+			DRM_INFO("DVI i2c encoder not connected\n");
+		}
+		if (ret)
+			goto out;
+		break;
 	case MGA26_PROTO:
 		mga2->dvi_i2c =  mga2_i2c_create(drm->dev, vid_phys + MGA2_VID0_TXI2C,
 				"ad9889b", mga2->base_freq, 50 * 1000);
@@ -243,23 +268,14 @@ static int mga2_add_devices(struct drm_device *drm)
 					DRM_MODE_CONNECTOR_VGA, true, m);
 		}
 		goto out;
-	}
-
-	mga2->dvi_i2c =  mga2_i2c_create(drm->dev, vid_phys + MGA2_VID0_TXI2C,
-			"SIL1178" " tx", mga2->base_freq, 50 * 1000);
-	if (!mga2->dvi_i2c) {
-		ret = -1;
-		goto out;
-	}
-
-	if (mga2_dvi_enable) {
-		ret = mga2_dvi_init(drm, vid_regs, vid_phys);
-		if (ret  == -ENODEV) {
-			ret = 0;
-			DRM_INFO("DVI i2c encoder not connected\n");
-		}
+	case MGA25:
+		if (!mga2_dvi_enable)
+			break;
+		ret = mga2_common_connector_init(drm, vid_phys,
+				DRM_MODE_CONNECTOR_DVID, true, crtc_mask);
 		if (ret)
 			goto out;
+		break;
 	}
 
 	if (mga2_hdmi_enable) {

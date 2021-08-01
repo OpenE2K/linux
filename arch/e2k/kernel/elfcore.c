@@ -45,7 +45,7 @@ static struct vm_area_struct *next_vma(struct vm_area_struct *this_vma,
 
 Elf64_Half elf_core_extra_phdrs(void)
 {
-	struct pt_regs *regs = current_thread_info()->pt_regs;
+	struct pt_regs *regs = find_host_regs(current_thread_info()->pt_regs);
 
 	/*
 	 * Dump all user registers

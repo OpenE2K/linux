@@ -450,9 +450,6 @@ int pci_mmap_page_range(struct pci_dev *dev, int bar,
 		prot = _PAGE_SET_MEM_TYPE(prot, EXT_PREFETCH_MT);
 	vma->vm_page_prot = __pgprot(prot);
 
-	/* Write-combine setting is ignored, it is changed via the mtrr
-	 * interfaces on this platform.
-	 */
 	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 			     vma->vm_end - vma->vm_start,
 			     vma->vm_page_prot))

@@ -52,6 +52,10 @@ struct desc1 {
 	};
 } __packed;
 
+static u64 auc2_get_current_desc(struct mga2 *mga2)
+{
+	return le64_to_cpu(READ_ONCE(mga2->status->status)) >> 32;
+}
 
 static int blitter_reg_nr(u32 reg)
 {

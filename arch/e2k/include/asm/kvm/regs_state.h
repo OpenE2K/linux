@@ -408,7 +408,7 @@ do { \
 	e2k_cutd_t cutd; \
 	struct kvm_vcpu *vcpu; \
 \
-	if (likely(!test_ti_thread_flag((ti), TIF_HOST_AT_VCPU_MODE))) { \
+	if (likely(!test_ti_status_flag((ti), TS_HOST_AT_VCPU_MODE))) { \
 		/* host at native or hypervisor mode */ \
 		/* so CUT context is alredy set */ \
 		break; \
@@ -437,11 +437,6 @@ do { \
 #else
  #error	"Undefined virtualization mode"
 #endif	/* !CONFIG_VIRTUALIZATION */
-
-#define	RESTORE_USER_TRAP_CUT_REGS(ti, regs)	\
-		RESTORE_USER_CUT_REGS(ti, regs, false)
-#define	RESTORE_USER_SYSCALL_CUT_REGS(ti, regs)	\
-		RESTORE_USER_CUT_REGS(ti, regs, true)
 
 #if defined(CONFIG_KVM) || defined(CONFIG_KVM_GUEST_KERNEL)
 #define	SAVE_GUEST_VCPU_STATE_GREGS(regs)				\

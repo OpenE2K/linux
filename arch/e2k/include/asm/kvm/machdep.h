@@ -22,8 +22,10 @@ extern void kvm_save_host_gregs_v2(struct host_gregs *gregs);
 extern void kvm_save_host_gregs_v5(struct host_gregs *gregs);
 extern void kvm_restore_host_gregs_v5(const struct host_gregs *gregs);
 
-extern void kvm_guest_save_local_gregs_v2(struct local_gregs *gregs);
-extern void kvm_guest_save_local_gregs_v5(struct local_gregs *gregs);
+extern void kvm_guest_save_local_gregs_v2(struct local_gregs *gregs,
+					bool is_signal);
+extern void kvm_guest_save_local_gregs_v5(struct local_gregs *gregs,
+					bool is_signal);
 extern void kvm_guest_save_kernel_gregs_v2(kernel_gregs_t *gregs);
 extern void kvm_guest_save_kernel_gregs_v5(kernel_gregs_t *gregs);
 extern void kvm_guest_save_gregs_v2(struct global_regs *gregs);
@@ -34,8 +36,10 @@ extern void kvm_guest_restore_gregs_v2(const global_regs_t *gregs);
 extern void kvm_guest_restore_gregs_v5(const global_regs_t *gregs);
 extern void kvm_guest_restore_kernel_gregs_v2(global_regs_t *gregs);
 extern void kvm_guest_restore_kernel_gregs_v5(global_regs_t *gregs);
-extern void kvm_guest_restore_local_gregs_v2(const struct local_gregs *gregs);
-extern void kvm_guest_restore_local_gregs_v5(const struct local_gregs *gregs);
+extern void kvm_guest_restore_local_gregs_v2(const struct local_gregs *gregs,
+					bool is_signal);
+extern void kvm_guest_restore_local_gregs_v5(const struct local_gregs *gregs,
+					bool is_signal);
 
 #if	defined(CONFIG_PARAVIRT_GUEST) || defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is paravirtualized host and guest kernel */

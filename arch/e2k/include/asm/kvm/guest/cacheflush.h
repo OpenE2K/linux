@@ -3,35 +3,39 @@
 
 #include <linux/types.h>
 
+#ifndef __ASSEMBLY__
+
 struct icache_range_array;
 struct vm_area_struct;
 struct page;
 
 #ifdef	CONFIG_SMP
 /*
- * Guest kernel supports pseudo page tables,
- * real page tables are managed now by host kernel
- * So guest flushes can be empty
+ * Guest kernel functions can be run on any guest user processes and can have
+ * arbitrary MMU contexts to track which on host is not possible, therefore
+ * it is necessary to flush all instruction caches
  */
+extern void smp_flush_icache_all(void);
+
 static inline void
 kvm_smp_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
 {
+	smp_flush_icache_all();
 }
 static inline void
 kvm_smp_flush_icache_range_array(struct icache_range_array *icache_range_arr)
 {
+	smp_flush_icache_all();
 }
 static inline void
 kvm_smp_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 {
-}
-static inline void
-kvm_smp_flush_icache_all(void)
-{
+	smp_flush_icache_all();
 }
 static inline void
 kvm_smp_flush_icache_kernel_line(e2k_addr_t addr)
 {
+	smp_flush_icache_all();
 }
 #endif	/* CONFIG_SMP */
 
@@ -42,7 +46,12 @@ extern void kvm_clear_dcache_l1_range(void *virt_addr, size_t len);
 extern void kvm_write_dcache_l2_reg(unsigned long reg_val,
 					int reg_num, int bank_num);
 extern unsigned long kvm_read_dcache_l2_reg(int reg_num, int bank_num);
-extern	int kvm_flush_icache_range(e2k_addr_t start, e2k_addr_t end);
+extern void kvm_flush_icache_all(void);
+extern void kvm_flush_icache_range(e2k_addr_t start, e2k_addr_t end);
+extern void kvm_flush_icache_range_array(
+			struct icache_range_array *icache_range_arr);
+extern void kvm_flush_icache_page(struct vm_area_struct *vma,
+				  struct page *page);
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */
@@ -63,11 +72,6 @@ smp_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 	kvm_smp_flush_icache_page(vma, page);
 }
 static inline void
-smp_flush_icache_all(void)
-{
-	kvm_smp_flush_icache_all();
-}
-static inline void
 smp_flush_icache_kernel_line(e2k_addr_t addr)
 {
 	kvm_smp_flush_icache_kernel_line(addr);
@@ -85,16 +89,27 @@ clear_DCACHE_L1_range(void *virt_addr, size_t len)
 	kvm_clear_dcache_l1_range(virt_addr, len);
 }
 static inline void
+__flush_icache_all(void)
+{
+	kvm_flush_icache_all();
+}
+static inline void
 __flush_icache_range(e2k_addr_t start, e2k_addr_t end)
 {
-	int ret;
-
-	ret = kvm_flush_icache_range(start, end);
-	if (ret) {
-		panic("%s(): could not flush ICACHE, error %d\n",
-			__func__, ret);
-	}
+	kvm_flush_icache_range(start, end);
+}
+static inline void
+__flush_icache_range_array(struct icache_range_array *icache_range_arr)
+{
+	kvm_flush_icache_range_array(icache_range_arr);
+}
+static inline void
+__flush_icache_page(struct vm_area_struct *vma, struct page *page)
+{
+	kvm_flush_icache_page(vma, page);
 }
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
+
+#endif	/* !__ASSEMBLY__ */
 
 #endif	/* __ASM_KVM_GUEST_CACHEFLUSH_H */

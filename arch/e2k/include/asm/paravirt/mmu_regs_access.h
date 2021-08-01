@@ -216,6 +216,15 @@ PV_READ_CLW_REG(clw_addr_t clw_addr)
 }
 
 /*
+ * Write CLW register
+ */
+static inline void
+PV_WRITE_CLW_REG(clw_addr_t clw_addr, clw_reg_t val)
+{
+	pv_mmu_ops.write_clw_reg(clw_addr, val);
+}
+
+/*
  * MMU DEBUG registers access
  */
 static inline void
@@ -529,6 +538,16 @@ static inline clw_reg_t
 READ_CLW_REG(clw_addr_t clw_addr)
 {
 	return PV_READ_CLW_REG(clw_addr);
+}
+
+/*
+ * Write CLW register
+ */
+
+static inline void
+WRITE_CLW_REG(clw_addr_t clw_addr, clw_reg_t val)
+{
+	PV_WRITE_CLW_REG(clw_addr, val);
 }
 
 /*

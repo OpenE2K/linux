@@ -27,6 +27,9 @@
 #include <linux/swiotlb.h>
 #include <asm/l-iommu.h>
 #endif
+#ifdef CONFIG_MCST
+#include <asm-l/l-uncached.h>
+#endif
 
 struct iommu_dma_msi_page {
 	struct list_head	list;
@@ -1071,11 +1074,23 @@ static void iommu_dma_unmap_resource(struct device *dev, dma_addr_t handle,
 	__iommu_dma_unmap(dev, handle, size);
 }
 
+#ifdef CONFIG_MCST
+static void __iommu_dma_free(struct device *dev, size_t size,
+			      void *cpu_addr, unsigned long attrs)
+#else
 static void __iommu_dma_free(struct device *dev, size_t size, void *cpu_addr)
+#endif
 {
 	size_t alloc_size = PAGE_ALIGN(size);
 	int count = alloc_size >> PAGE_SHIFT;
 	struct page *page = NULL, **pages = NULL;
+
+#ifdef CONFIG_MCST
+	if (attrs & DMA_ATTR_NON_CONSISTENT) {
+		l_free_uncached(dev, alloc_size, cpu_addr);
+		return;
+	}
+#endif
 
 	/* Non-coherent atomic allocation? Easy */
 	if (IS_ENABLED(CONFIG_DMA_DIRECT_REMAP) &&
@@ -1106,7 +1121,11 @@ static void iommu_dma_free(struct device *dev, size_t size, void *cpu_addr,
 		dma_addr_t handle, unsigned long attrs)
 {
 	__iommu_dma_unmap(dev, handle, size);
+#ifdef CONFIG_MCST
+	__iommu_dma_free(dev, size, cpu_addr, attrs);
+#else
 	__iommu_dma_free(dev, size, cpu_addr);
+#endif
 }
 
 static void *iommu_dma_alloc_pages(struct device *dev, size_t size,
@@ -1117,8 +1136,17 @@ static void *iommu_dma_alloc_pages(struct device *dev, size_t size,
 	int node = dev_to_node(dev);
 	struct page *page = NULL;
 	void *cpu_addr;
-
+#ifdef CONFIG_MCST
+	if (attrs & DMA_ATTR_NON_CONSISTENT) {
+		phys_addr_t pa;
+		cpu_addr = l_alloc_uncached(dev, alloc_size, &pa, gfp);
+		if (!cpu_addr)
+			return NULL;
+		page = phys_to_page(pa);
+	} else
+#endif
 	page = dma_alloc_contiguous(dev, alloc_size, gfp);
+
 	if (!page)
 		page = alloc_pages_node(node, gfp, get_order(alloc_size));
 	if (!page)
@@ -1135,6 +1163,9 @@ static void *iommu_dma_alloc_pages(struct device *dev, size_t size,
 		if (!coherent)
 			arch_dma_prep_coherent(page, size);
 	} else {
+#ifdef CONFIG_MCST
+		if (!(attrs & DMA_ATTR_NON_CONSISTENT))
+#endif
 		cpu_addr = page_address(page);
 	}
 
@@ -1175,7 +1206,11 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 
 	*handle = __iommu_dma_map(dev, page_to_phys(page), size, ioprot);
 	if (*handle == DMA_MAPPING_ERROR) {
+#ifdef CONFIG_MCST
+		__iommu_dma_free(dev, size, cpu_addr, attrs);
+#else
 		__iommu_dma_free(dev, size, cpu_addr);
+#endif
 		return NULL;
 	}
 

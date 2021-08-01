@@ -24,14 +24,6 @@ unsigned char sii9022xIsConnected(void)
 	return 1;
 }
 
-#if 0
-static void dump9022a(uint8_t reg){
-#if 1
-	printk("reg%x=%x\n",reg,i2cReadReg(SII9022A_I2C_ADDRESS,reg));
-#endif
-}
-#endif
-
 int sii9022xSetMode(int num)
 {
 	int ret;

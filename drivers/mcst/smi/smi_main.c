@@ -23,11 +23,11 @@
 int smi_handle_damage(struct smi_framebuffer *fb, int x, int y,
 						int width, int height)
 {
-	struct smi_bo *bo = NULL, *src_bo = NULL;
-	void *src = NULL, *dst = NULL;
-	int ret = 0, i;
+	bool kmap = false;
+	int i, ret = 0;
 	unsigned long offset = 0;
-
+	void *dst = NULL;
+	struct smi_bo *dst_bo = NULL;
 	
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 	unsigned bytesPerPixel = fb->base.format->cpp[0];
@@ -40,35 +40,45 @@ int smi_handle_damage(struct smi_framebuffer *fb, int x, int y,
 		return -EINVAL;
 	}
 	
-	src_bo = gem_to_smi_bo(fb->obj->import_attach->dmabuf->priv);
-	
-	src = dma_buf_vmap(fb->obj->import_attach->dmabuf);
-	if (!src)
-		return 0;
+	if (!fb->vmapping) {
+		fb->vmapping = dma_buf_vmap(fb->obj->import_attach->dmabuf);
+		if (!fb->vmapping)
+			return 0;
+	}
 
-	bo = gem_to_smi_bo(fb->obj);
-
-	ret = ttm_bo_kmap(&bo->bo, 0, bo->bo.num_pages, &bo->dma_buf_vmap);
-	if (ret) {
-		DRM_ERROR("failed to kmap fbcon\n");
+	dst_bo = gem_to_smi_bo(fb->obj);
+	ret = smi_bo_reserve(dst_bo, true);
+	if (ret){
+		dbg_msg("smi_bo_reserve failed\n");
+		smi_bo_unreserve(dst_bo);
 		goto error;
 	}
-	
-	dbg_msg("src: %p, dst: %p, bpp = %u\n", src, bo->dma_buf_vmap.virtual, (bytesPerPixel << 3));
 
-	dst = bo->dma_buf_vmap.virtual;
+	if (!dst_bo->dma_buf_vmap.virtual) {
+		ret = ttm_bo_kmap(&dst_bo->bo, 0, dst_bo->bo.num_pages, &dst_bo->dma_buf_vmap);
+		if (ret) {
+			DRM_ERROR("failed to kmap fbcon\n");
+			goto error;
+		}
+		kmap = true;
+	}
+	dst = dst_bo->dma_buf_vmap.virtual;
+
+	dbg_msg("src: %p, dst: %p, x=%d, y=%d, fbwidth=%d, fbheight=%d, width=%d, height=%d, bpp = %u, pitch=%d\n",
+		fb->vmapping, dst, x, y, fb->base.width, fb->base.height, width,height, (bytesPerPixel << 3), fb->base.pitches[0]);
+
 #if 1
-	offset = (y * fb->base.width + x) * bytesPerPixel;
-	for (i = 0; i < height; i++) {
-		memcpy_toio(dst + offset, src + offset, width * bytesPerPixel);
-		offset += fb->base.width * bytesPerPixel;
+	for (i = y; i < y + height; i++) {
+		offset = i * fb->base.pitches[0] + (x * bytesPerPixel);
+		memcpy_toio(dst + offset, fb->vmapping + offset, width * bytesPerPixel);
 	}
 #else
-	memcpy_toio(dst + offset, src + offset, width * height * bytesPerPixel);
+	//copy whole screen
+	memcpy_toio(dst, fb->vmapping, fb->base.pitches[0] * fb->base.height);
 #endif
-	ttm_bo_kunmap(&bo->dma_buf_vmap);
-
-	dma_buf_vunmap(fb->obj->import_attach->dmabuf, src);
+	if (kmap)
+		ttm_bo_kunmap(&dst_bo->dma_buf_vmap);
+	smi_bo_unreserve(dst_bo);
 
 error:
 	return 0;
@@ -78,10 +88,18 @@ error:
 static void smi_user_framebuffer_destroy(struct drm_framebuffer *fb)
 {
 	struct smi_framebuffer *smi_fb = to_smi_framebuffer(fb);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,1,0)
-	if (smi_fb->obj)//After kernel v4.1, judge it in the function below. by ilena.
-#endif	
-	drm_gem_object_put_unlocked(smi_fb->obj);
+
+	if (smi_fb->obj) {
+		if (smi_fb->obj->import_attach) {
+			if(smi_fb->vmapping)
+				dma_buf_vunmap(smi_fb->obj->import_attach->dmabuf, smi_fb->vmapping);
+		}
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,12,0)
+		drm_gem_object_put_unlocked(smi_fb->obj);
+#else
+		drm_gem_object_unreference_unlocked(smi_fb->obj);
+#endif
+	}
 	drm_framebuffer_cleanup(fb);
 	kfree(fb);
 }
@@ -97,8 +115,12 @@ static int smi_user_framebuffer_dirty(struct drm_framebuffer *fb,
 	struct smi_framebuffer *smi_fb = to_smi_framebuffer(fb);
 	int i, ret = 0;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 	drm_modeset_lock_all(fb->dev);
-	
+#else
+	mutex_lock(&fb->dev->mode_config.mutex);
+#endif
+
 	if (smi_fb->obj->import_attach) {
 		ret = dma_buf_begin_cpu_access(smi_fb->obj->import_attach->dmabuf,
 #if KERNEL_VERSION(4, 6, 0) > LINUX_VERSION_CODE
@@ -119,13 +141,17 @@ static int smi_user_framebuffer_dirty(struct drm_framebuffer *fb,
 	if (smi_fb->obj->import_attach) {
 		dma_buf_end_cpu_access(smi_fb->obj->import_attach->dmabuf,
 #if KERNEL_VERSION(4, 6, 0) > LINUX_VERSION_CODE
-						0, smi_fb->obj->size,
+					0, smi_fb->obj->size,
 #endif
-						DMA_FROM_DEVICE);
+					DMA_FROM_DEVICE);
 	}
 	
 unlock:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
 	drm_modeset_unlock_all(fb->dev);
+#else
+	mutex_unlock(&fb->dev->mode_config.mutex);
+#endif
 
 	return ret;
 }
@@ -140,7 +166,6 @@ static int smi_user_framebuffer_create_handle(struct drm_framebuffer *fb,
 	struct smi_framebuffer *smi_fb = to_smi_framebuffer(fb);
 	return drm_gem_handle_create(file_priv, smi_fb->obj, handle);
 }
-
 
 
 static const struct drm_framebuffer_funcs smi_fb_funcs = {
@@ -192,13 +217,21 @@ smi_user_framebuffer_create(struct drm_device *dev,
 
 	smi_fb = kzalloc(sizeof(*smi_fb), GFP_KERNEL);
 	if (!smi_fb) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,12,0)
 		drm_gem_object_put_unlocked(obj);
+#else
+		drm_gem_object_unreference_unlocked(obj);
+#endif
 		return ERR_PTR(-ENOMEM);
 	}
 
 	ret = smi_framebuffer_init(dev, smi_fb, mode_cmd, obj);
 	if (ret) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,12,0)
 		drm_gem_object_put_unlocked(obj);
+#else
+		drm_gem_object_unreference_unlocked(obj);
+#endif
 		kfree(smi_fb);
 		return ERR_PTR(ret);
 	}
@@ -304,6 +337,8 @@ int smi_device_init(struct smi_device *cdev,
 	else
 		ddk768_set_mmio(cdev->rmmio,pdev->device,pdev->revision);
 
+	ddev->dev->of_node =
+		of_find_compatible_node(NULL, NULL, "smi,smi");
 
 	ret = smi_vram_init(cdev);
 	if (ret) {
@@ -329,15 +364,17 @@ int smi_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct smi_device *cdev;
 	int r;
-	int ret;
 
 	cdev = kzalloc(sizeof(struct smi_device), GFP_KERNEL);
 	if (cdev == NULL)
 		return -ENOMEM;
 	dev->dev_private = (void *)cdev;
 
-	dev->dev->of_node =
-		of_find_compatible_node(NULL, NULL, "smi,smi");
+	r = pci_enable_device(dev->pdev);
+	if (r) {
+		dev_err(&dev->pdev->dev, "Fatal error pci_enable_device: %d\n", r);
+		goto out;
+	}
 
 	r = smi_device_init(cdev, dev, dev->pdev, flags);
 	if (r) {
@@ -365,11 +402,10 @@ int smi_driver_load(struct drm_device *dev, unsigned long flags)
 		ddk768_deInit();
 		hw768_init_hdmi();
 #ifdef AUDIO_EN
-		smi_audio_init(dev->pdev);	
+		smi_audio_init(dev);
 #endif
 	}
 	
-
 	r = smi_mm_init(cdev);
 	if (r){
 		dev_err(&dev->pdev->dev, "fatal err on mm init\n");
@@ -377,6 +413,8 @@ int smi_driver_load(struct drm_device *dev, unsigned long flags)
 	}
 
 	drm_vblank_init(dev, dev->mode_config.num_crtc);
+
+	int ret;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)	
 		ret = drm_irq_install(dev, dev->pdev->irq);
@@ -438,7 +476,7 @@ int smi_driver_unload(struct drm_device *dev)
 
 #ifdef AUDIO_EN
 	if(g_specId == SPC_SM768)
-		smi_audio_remove(dev->pdev);
+		smi_audio_remove(dev);
 #endif
 		
 	vfree(cdev->regsave);
@@ -496,7 +534,11 @@ int smi_dumb_create(struct drm_file *file,
 		return ret;
 
 	ret = drm_gem_handle_create(file, gobj, &handle);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,12,0)
 	drm_gem_object_put_unlocked(gobj);
+#else
+	drm_gem_object_unreference_unlocked(gobj);
+#endif
 	if (ret)
 		return ret;
 
@@ -518,8 +560,14 @@ void smi_bo_unref(struct smi_bo **bo)
 		return;
 
 	tbo = &((*bo)->bo);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
 	ttm_bo_put(tbo);
-	*bo = NULL;
+#else
+	ttm_bo_unref(&tbo);
+#endif
+	if (tbo == NULL)
+		*bo = NULL;
+
 }
 
 void smi_gem_free_object(struct drm_gem_object *obj)
@@ -538,6 +586,8 @@ static inline u64 smi_bo_mmap_offset(struct smi_bo *bo)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,12,0)
 	return bo->bo.addr_space_offset;
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
+	return drm_vma_node_offset_addr(&bo->bo.vma_node);
 #else
 	return drm_vma_node_offset_addr(&bo->bo.base.vma_node);
 #endif
@@ -559,7 +609,11 @@ smi_dumb_mmap_offset(struct drm_file *file,
 	bo = gem_to_smi_bo(obj);
 	*offset = smi_bo_mmap_offset(bo);
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,12,0)
 	drm_gem_object_put_unlocked(obj);
+#else
+	drm_gem_object_unreference_unlocked(obj);
+#endif
 	return 0;
 #else
 	int ret;

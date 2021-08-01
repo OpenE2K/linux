@@ -9,8 +9,9 @@
 #ifdef __KERNEL__
 
 #ifndef __ASSEMBLY__
-#include <linux/types.h>
 #include <linux/list.h>
+#include <linux/restart_block.h>
+#include <linux/types.h>
 
 #include <asm/e2k_api.h>
 #include <asm/cpu_regs_types.h>
@@ -232,13 +233,8 @@ typedef struct thread_info {
 #define	TIF_PSEUDOTHREAD	24	/* the thread is pseudo only to run */
 					/* on VIRQ VCPU as starter of VIRQ */
 					/* handler */
-#define	TIF_HOST_AT_VCPU_MODE	25	/* the host thread is switching to */
-					/* VCPU running mode and wait for */
-					/* interception (trap on PV mode) */
 #define	TIF_VIRQS_ACTIVE	26	/* the thread is ready to inject */
 					/* VIRQS interrupt */
-#define	TIF_VIRQ_HANDLER	27	/* the thread is VIRQ handler and */
-					/* should run with max priorety */
 #define	TIF_LIGHT_HYPERCALL	28	/* hypervisor is executing light */
 					/* hypercall */
 #define	TIF_GENERIC_HYPERCALL	29	/* hypervisor is executing generic */
@@ -266,9 +262,7 @@ typedef struct thread_info {
 #define _TIF_VIRTUALIZED_GUEST	(1 << TIF_VIRTUALIZED_GUEST)
 #define _TIF_PARAVIRT_GUEST	(1 << TIF_PARAVIRT_GUEST)
 #define _TIF_PSEUDOTHREAD	(1 << TIF_PSEUDOTHREAD)
-#define	_TIF_HOST_AT_VCPU_MODE	(1 << TIF_HOST_AT_VCPU_MODE)
 #define	_TIF_VIRQS_ACTIVE	(1 << TIF_VIRQS_ACTIVE)
-#define	_TIF_VIRQ_HANDLER	(1 << TIF_VIRQ_HANDLER)
 #define _TIF_LIGHT_HYPERCALL	(1 << TIF_LIGHT_HYPERCALL)
 #define _TIF_GENERIC_HYPERCALL	(1 << TIF_GENERIC_HYPERCALL)
 #define _TIF_SYSCALL_TRACEPOINT	(1 << TIF_SYSCALL_TRACEPOINT)
@@ -298,18 +292,18 @@ typedef struct thread_info {
  * have to worry about atomic accesses.
  */
 #define TS_DELAYED_SIG_HANDLING		0x00000001
-#define TS_KEEP_PAGES_VALID		0x00000004
-#define TS_MMAP_PRIVILEGED		0x00000010
-#define TS_MMAP_DONTEXPAND		0x00000020
-#define TS_MMAP_DONTCOPY		0x00000040
-#define TS_KERNEL_SYSCALL		0x00000100
-#define TS_USER_EXECVE			0x00001000
-#define TS_MMAP_PS			0x00010000
-#define TS_MMAP_PCS			0x00020000
-#define TS_MMAP_NOHUGEPAGE		0x00040000
-#define TS_MMAP_SIGNAL_STACK		0x00080000
-#define TS_SINGLESTEP_KERNEL		0x00100000
-#define TS_SINGLESTEP_USER		0x00200000
+#define TS_KEEP_PAGES_VALID		0x00000002
+#define TS_MMAP_PRIVILEGED		0x00000004
+#define TS_MMAP_PS			0x00000008
+#define TS_MMAP_PCS			0x00000010
+#define TS_MMAP_SIGNAL_STACK		0x00000020
+#define TS_KERNEL_SYSCALL		0x00000040
+#define TS_USER_EXECVE			0x00000080
+#define TS_SINGLESTEP_KERNEL		0x00000100
+#define TS_SINGLESTEP_USER		0x00000200
+/* the host thread is switching to VCPU running mode
+ * and wait for interception (trap on PV mode) */
+#define	TS_HOST_AT_VCPU_MODE		0x00001000
 
 #define	THREAD_SIZE	KERNEL_STACKS_SIZE
 
@@ -343,12 +337,22 @@ static inline unsigned long test_ti_status_flag(struct thread_info *ti,
 	return ti->status & flag;
 }
 
+static inline unsigned long test_and_clear_ti_status_flag(
+		struct thread_info *ti, int flag)
+{
+	typeof(ti->status) status = ti->status;
+	ti->status = status & ~flag;
+	return status & flag;
+}
+
 #define set_ts_flag(flag) \
 	set_ti_status_flag(current_thread_info(), flag)
 #define clear_ts_flag(flag) \
 	clear_ti_status_flag(current_thread_info(), flag)
 #define test_ts_flag(flag) \
 	test_ti_status_flag(current_thread_info(), flag)
+#define test_and_clear_ts_flag(flag) \
+	test_and_clear_ti_status_flag(current_thread_info(), flag)
 
 #define native_current_thread_info()	current_thread_info()
 #define boot_current_thread_info()	BOOT_READ_CURRENT_REG()

@@ -429,9 +429,6 @@ static int radeonfb_create(struct drm_fb_helper *helper,
 			ret = -ENOMEM;
 			goto out;
 		}
-		spin_lock_init(&rfbdev->dirty_lock);
-		INIT_WORK(&rfbdev->dirty_work, radeon_fb_helper_dirty_work);
-		rfbdev->dirty_clip.x1 = rfbdev->dirty_clip.y1 = ~0;
 	} else {
 		radeonfb_ops.fb_fillrect  = cfb_fillrect;
 		radeonfb_ops.fb_copyarea  = cfb_copyarea;
@@ -562,7 +559,11 @@ int radeon_fbdev_init(struct radeon_device *rdev)
 
 	rfbdev->rdev = rdev;
 	rdev->mode_info.rfbdev = rfbdev;
-
+#ifdef CONFIG_MCST
+	spin_lock_init(&rfbdev->dirty_lock);
+	INIT_WORK(&rfbdev->dirty_work, radeon_fb_helper_dirty_work);
+	rfbdev->dirty_clip.x1 = rfbdev->dirty_clip.y1 = ~0;
+#endif
 	drm_fb_helper_prepare(rdev->ddev, &rfbdev->helper,
 			      &radeon_fb_helper_funcs);
 

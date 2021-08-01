@@ -29,6 +29,8 @@
 #include <linux/if.h>
 
 #include <linux/msg.h>
+#include <linux/io_uring.h>
+#include <linux/kexec.h>
 
 #ifdef CONFIG_PROTECTED_MODE
 
@@ -91,70 +93,8 @@ do { \
 #define NOT_PTR(i)	(ARG_TAGS(i) != ETAGAPQ)
 #define NULL_PTR(i) ((ARG_TAG(i) == E2K_NULLPTR_ETAG) && (arg##i == 0))
 
+#define DESCRIPTOR_SIZE	16
 
-static inline
-int e2k_ptr_itag(long low)
-{
-	e2k_ptr_t ptr;
-
-	AW(ptr).lo = low;
-
-	return AS(ptr).itag;
-}
-
-static inline
-long make_ap_lo(e2k_addr_t base, long size, long offset, int access)
-{
-	return MAKE_AP_LO(base, size, offset, access);
-}
-
-static inline
-long make_ap_hi(e2k_addr_t base, long size, long offset, int access)
-{
-	return MAKE_AP_HI(base, size, offset, access);
-}
-
-
-/*
- * Outputs size of protected descriptor specified in low/high pair:
- */
-static inline
-unsigned int e2k_ptr_size(long low, long hiw, unsigned int min_size)
-{
-	e2k_ptr_hi_t hi;
-	unsigned int ptr_size;
-
-	AW(hi) = hiw;
-	ptr_size = AS(hi).size - AS(hi).curptr;
-
-	if (ptr_size < min_size) {
-		DbgSCP_ALERT("  Pointer is too small: %u < %u\n",
-			     ptr_size, min_size);
-		return 0;
-	}
-	return ptr_size;
-}
-
-static inline
-int e2k_ptr_rw(long low)
-{
-	e2k_ptr_t ptr;
-
-	AW(ptr).lo = low;
-
-	return AS(ptr).rw;
-}
-
-static inline
-unsigned long e2k_ptr_curptr(long low, long hiw)
-{
-	e2k_ptr_t ptr;
-
-	AW(ptr).lo = low;
-	AW(ptr).hi = hiw;
-
-	return AS(ptr).curptr;
-}
 
 /*
  * Counts the number of descriptors in array, which is terminated by NULL
@@ -347,6 +287,74 @@ int arch_init_pm_sc_debug_mode(const int debug_mask)
 		return 0;
 
 	return context->pm_sc_debug_mode & debug_mask;
+}
+
+
+static long __user *convert_msghdr(long __user *prot_msghdr,
+				   unsigned int size,
+				   const char *syscall_name)
+/* Converts user msghdr structure from protected to regular structure format.
+ * Outputs converted structure (allocated in user space).
+ * 'prot_msghdr' - protected message header structure.
+ * 'size' - size of the input structure.
+ */
+{
+	long __user *args;
+	struct user_msghdr __user *converted_msghdr = NULL;
+	struct iovec __user *converted_iovec;
+	int err_mh, err_iov;
+
+#define MASK_MSGHDR_TYPE     0x0773 /* type mask for struct msghdr */
+#define MASK_MSGHDR_ALIGN    0x17ff /* alignment mask for msghdr structure */
+#define MASK_MSGHDR_RW       0x2000 /* WRITE-only msg_flags field */
+#define SIZE_MSGHDR          96     /* size of struct msghdr in user space */
+#define MASK_IOVEC_TYPE      0x7    /* mask for converting of struct iovec */
+#define MASK_IOVEC_ALIGN     0xf    /* alignment mask for struct iovec */
+#define SIZE_IOVEC           32     /* size of struct iovec in user space */
+	/*
+	 * Structures user_msghdr and iovec contain pointers
+	 * inside, therefore they need to be additionally
+	 * converted with saving results in these structures
+	 */
+
+	 /* Allocating space on user stack for converted structures: */
+	args = get_user_space(sizeof(struct user_msghdr) +
+				sizeof(struct iovec));
+
+	/* Convert struct msghdr: */
+	converted_msghdr = (struct user_msghdr *) args;
+	err_mh = convert_array_3(prot_msghdr, (long *) converted_msghdr,
+				SIZE_MSGHDR, 7, 1, MASK_MSGHDR_TYPE,
+				MASK_MSGHDR_ALIGN, MASK_MSGHDR_RW,
+				CONV_ARR_WRONG_DSCR_FLD);
+	if (err_mh)
+		DbgSCP_ALERT("Bad user_msghdr in syscall \'%s\'\n",
+			     syscall_name);
+
+	if (converted_msghdr->msg_iov) {
+		/* Convert struct iovec from msghdr->msg_iov */
+		converted_iovec = (struct iovec *)
+					((char *)converted_msghdr +
+					sizeof(struct user_msghdr));
+		err_iov = convert_array_3((long *) converted_msghdr->msg_iov,
+					  (long *) converted_iovec,
+					  SIZE_IOVEC, 2, 1, MASK_IOVEC_TYPE,
+					  MASK_IOVEC_ALIGN, 0,
+					  CONV_ARR_WRONG_DSCR_FLD);
+		if (err_iov) {
+			DbgSCP_ALERT("Bad struct iovec in msghdr (syscall \'%s\')\n",
+				     syscall_name);
+		}
+	} else {
+			DbgSCP_ALERT("Empty struct iovec in msghdr (syscall \'%s\')\n",
+				     syscall_name);
+			converted_iovec = NULL;
+	}
+
+	/* Assign converted iovec pointer to converted msghdr structure: */
+	converted_msghdr->msg_iov = converted_iovec;
+
+	return args;
 }
 
 
@@ -823,12 +831,14 @@ long protected_sys_getgroups(const unsigned long       a1, /* size */
  * It returns converted structure pointer if OK; NULL pointer otherwise.
  */
 static inline
-long *convert_prot_iovec_struct(const unsigned long __user iov,
-				const unsigned long        iovcnt,
-				const struct pt_regs       *regs)
+long __user *convert_prot_iovec_struct(const unsigned long __user iov,
+				       const unsigned long        iovcnt,
+				       const unsigned long        descr_lo,
+				       const unsigned long        descr_hi,
+				       const char                 *sysname)
 {
 	const int nr_segs = iovcnt;
-	long *new_arg = NULL;
+	long __user *new_arg = NULL;
 	unsigned int size;
 	long rval; /* syscall return value */
 
@@ -842,7 +852,7 @@ long *convert_prot_iovec_struct(const unsigned long __user iov,
 	 * One could use 0 in place `32 * nr_segs' here as the size
 	 * will be checked below in `convert_array ()'.
 	 */
-	size = e2k_ptr_size(regs->args[3], regs->args[4], 0);
+	size = e2k_ptr_size(descr_lo, descr_hi, 0);
 	if (size < (32 * nr_segs)) {
 		DbgSCP_ALERT("Bad iov structure size: %u < %d\n",
 			     size, 32 * nr_segs);
@@ -850,10 +860,10 @@ long *convert_prot_iovec_struct(const unsigned long __user iov,
 	}
 
 	new_arg = get_user_space(nr_segs * 2 * 8);
-	rval = convert_array((long *) iov, new_arg, size,
-					2, nr_segs, 0x7, 0xf);
+	rval = get_pm_struct_simple((long *) iov, new_arg, size,
+				    2, nr_segs, 0x13, 0x33);
 	if (rval) {
-		DbgSCP_ALERT("Bad iov structure in protected sysctl\n");
+		DbgSCP_ALERT("Bad iov structure in protected %s()\n", sysname);
 		return NULL;
 	}
 	return new_arg;
@@ -878,13 +888,14 @@ long protected_sys_readv(const unsigned long        a1, /* fd */
 	 * };
 	 */
 	const int nr_segs = (int) a3;
-	long *new_arg;
+	long __user *new_arg;
 	long rval; /* syscall return value */
 
 	if (!nr_segs)
 		return 0;
 
-	new_arg = convert_prot_iovec_struct(a2, a3, regs);
+	new_arg = convert_prot_iovec_struct(a2, a3, regs->args[3],
+					    regs->args[4], "readv");
 	if (!new_arg)
 		return -EINVAL;
 
@@ -904,10 +915,11 @@ long protected_sys_preadv(const unsigned long        a1, /* fd */
 			  const struct pt_regs	*regs)
 {
 	const int nr_segs = (int) a3;
-	long *new_arg;
+	long __user *new_arg;
 	long rval; /* syscall return value */
 
-	new_arg = convert_prot_iovec_struct(a2, a3, regs);
+	new_arg = convert_prot_iovec_struct(a2, a3, regs->args[3],
+					    regs->args[4], "preadv");
 	if (!new_arg)
 		return -EINVAL;
 
@@ -927,13 +939,14 @@ long protected_sys_writev(const unsigned long        a1, /* fd */
 			  const struct pt_regs	*regs)
 {
 	const int nr_segs = (int) a3;
-	long *new_arg;
+	long __user *new_arg;
 	long rval; /* syscall return value */
 
 	if (!nr_segs)
 		return 0;
 
-	new_arg = convert_prot_iovec_struct(a2, a3, regs);
+	new_arg = convert_prot_iovec_struct(a2, a3, regs->args[3],
+					    regs->args[4], "writev");
 	if (!new_arg)
 		return -EINVAL;
 
@@ -953,10 +966,11 @@ long protected_sys_pwritev(const unsigned long        a1, /* fd */
 			   const struct pt_regs	*regs)
 {
 	const int nr_segs = (int) a3;
-	long *new_arg;
+	long __user *new_arg;
 	long rval; /* syscall return value */
 
-	new_arg = convert_prot_iovec_struct(a2, a3, regs);
+	new_arg = convert_prot_iovec_struct(a2, a3, regs->args[3],
+					    regs->args[4], "pwritev");
 	if (!new_arg)
 		return -EINVAL;
 
@@ -976,10 +990,11 @@ long protected_sys_preadv2(const unsigned long        a1, /* fd */
 			  const struct pt_regs	*regs)
 {
 	const int nr_segs = (int) a3;
-	long *new_arg;
+	long __user *new_arg;
 	long rval; /* syscall return value */
 
-	new_arg = convert_prot_iovec_struct(a2, a3, regs);
+	new_arg = convert_prot_iovec_struct(a2, a3, regs->args[3],
+					    regs->args[4], "preadv2");
 	if (!new_arg)
 		return -EINVAL;
 
@@ -1000,10 +1015,11 @@ long protected_sys_pwritev2(const unsigned long        a1, /* fd */
 			   const struct pt_regs	*regs)
 {
 	const int nr_segs = (int) a3;
-	long *new_arg;
+	long __user *new_arg;
 	long rval; /* syscall return value */
 
-	new_arg = convert_prot_iovec_struct(a2, a3, regs);
+	new_arg = convert_prot_iovec_struct(a2, a3, regs->args[3],
+					    regs->args[4], "pwritev2");
 	if (!new_arg)
 		return -EINVAL;
 
@@ -1250,6 +1266,15 @@ static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 		/*		(struct sockaddr __user *) a[1],	*/
 		/*		(int __user*) a[2]);			*/
 		break;
+	case SYS_ACCEPT4:
+		*mask_type = 0x7d;
+		*mask_align = 0xff;
+		*fields = 4;
+		/* err = sys_accept4(a[0],				*/
+		/*		(struct sockaddr __user *) a[1],	*/
+		/*		(int	__user*)	a[2]		*/
+		/*		int			a[3]);		*/
+		break;
 	case SYS_GETSOCKNAME:
 		*mask_type = 0x3d;
 		*mask_align = 0x3f;
@@ -1382,10 +1407,6 @@ long protected_sys_socketcall(const unsigned long        a1, /* call */
 	 * for syscalls recvmsg/sendmsg
 	 */
 	if ((a1 == SYS_SENDMSG) || (a1 == SYS_RECVMSG)) {
-#define MASK_MSGHDR_TYPE     0x773  /* type mask for struct msghdr */
-#define MASK_MSGHDR_ALIGN    0x17ff /* alignment mask for msghdr structure */
-#define MASK_MSGHDR_RW       0x2000 /* WRITE-only msg_flags field */
-#define SIZE_MSGHDR          96     /* size of struct msghdr in user space */
 #define MASK_IOVEC_TYPE      0x7    /* mask for converting of struct iovec */
 #define MASK_IOVEC_ALIGN     0xf    /* alignment mask for struct iovec */
 #define SIZE_IOVEC           32     /* size of struct iovec in user space */
@@ -1500,74 +1521,6 @@ err_out_bad_array:
 }
 
 notrace __section(.entry_handlers)
-static long __user *convert_msghdr(long __user *prot_msghdr,
-				   unsigned int size,
-				   const char *syscall_name)
-/* Converts user msghdr structure from protected to regular structure format.
- * Outputs converted structure (allocated in user space).
- * 'prot_msghdr' - protected message header structure.
- * 'size' - size of the input structure.
- */
-{
-	long __user *args;
-	struct user_msghdr __user *converted_msghdr = NULL;
-	struct iovec __user *converted_iovec;
-	int err_mh, err_iov;
-
-#define MASK_MSGHDR_TYPE     0x773  /* type mask for struct msghdr */
-#define MASK_MSGHDR_ALIGN    0x17ff /* alignment mask for msghdr structure */
-#define MASK_MSGHDR_RW       0x2000 /* WRITE-only msg_flags field */
-#define SIZE_MSGHDR          96     /* size of struct msghdr in user space */
-#define MASK_IOVEC_TYPE      0x7    /* mask for converting of struct iovec */
-#define MASK_IOVEC_ALIGN     0xf    /* alignment mask for struct iovec */
-#define SIZE_IOVEC           32     /* size of struct iovec in user space */
-	/*
-	 * Structures user_msghdr and iovec contain pointers
-	 * inside, therefore they need to be additionally
-	 * converted with saving results in these structures
-	 */
-
-	 /* Allocating space on user stack for converted structures: */
-	args = get_user_space(sizeof(struct user_msghdr) +
-				sizeof(struct iovec));
-
-	/* Convert struct msghdr: */
-	converted_msghdr = (struct user_msghdr *) args;
-	err_mh = convert_array_3(prot_msghdr, (long *) converted_msghdr,
-				SIZE_MSGHDR, 7, 1, MASK_MSGHDR_TYPE,
-				MASK_MSGHDR_ALIGN, MASK_MSGHDR_RW,
-				CONV_ARR_WRONG_DSCR_FLD);
-	if (err_mh)
-		DbgSCP_ALERT("Bad user_msghdr in syscall \'%s\'\n",
-			     syscall_name);
-
-	if (converted_msghdr->msg_iov) {
-		/* Convert struct iovec from msghdr->msg_iov */
-		converted_iovec = (struct iovec *)
-					((char *)converted_msghdr +
-					sizeof(struct user_msghdr));
-		err_iov = convert_array_3((long *) converted_msghdr->msg_iov,
-					  (long *) converted_iovec,
-					  SIZE_IOVEC, 2, 1, MASK_IOVEC_TYPE,
-					  MASK_IOVEC_ALIGN, 0,
-					  CONV_ARR_WRONG_DSCR_FLD);
-		if (err_iov) {
-			DbgSCP_ALERT("Bad struct iovec in msghdr (syscall \'%s\')\n",
-				     syscall_name);
-		}
-	} else {
-			DbgSCP_ALERT("Empty struct iovec in msghdr (syscall \'%s\')\n",
-				     syscall_name);
-			converted_iovec = NULL;
-	}
-
-	/* Assign converted iovec pointer to converted msghdr structure: */
-	converted_msghdr->msg_iov = converted_iovec;
-
-	return args;
-}
-
-notrace __section(.entry_handlers)
 long protected_sys_sendmsg(const unsigned long		sockfd,
 			   const unsigned long __user msg,
 			   const unsigned long		flags,
@@ -1590,7 +1543,6 @@ long protected_sys_sendmsg(const unsigned long		sockfd,
 	DbgSCP(" returned %ld\n", rval);
 	return rval;
 }
-
 
 notrace __section(.entry_handlers)
 long protected_sys_recvmsg(const unsigned long		socket,
@@ -1624,6 +1576,289 @@ long protected_sys_recvmsg(const unsigned long		socket,
 			DbgSCP_ERR("Socket call 'recvmsg' faled to return msg_flags\n");
 			rval = -EFAULT;
 		}
+	}
+
+	DbgSCP(" returned %ld\n", rval);
+	return rval;
+}
+
+
+#define MMSGHDR_STRUCT_SIZE_LONGS \
+	(sizeof(struct mmsghdr) / sizeof(long))
+#define MMSGHDR_VECT_SIZE_LONGS(vlen) \
+	((sizeof(struct mmsghdr) * vlen) / sizeof(long))
+
+static long convert_mmsghdr(long __user *prot_mmsghdr,
+			    long __user *kernel_mmsghdr,
+			    unsigned int size,
+			    unsigned int vlen,
+			    const char *syscall_name)
+/* Converts user msghdr structure from protected to regular structure format.
+ * Outputs: 0 if converted OK; error code otherwise.
+ * 'prot_msghdr' - protected message header structure.
+ * 'kernel_mmsghdr' - converted structure (to be allocated in syscall
+ *                    to avoid re-using stack area if allocated over here).
+ * 'size' - size of the input structure.
+ * 'vlen' - vector length if vector of structures is converted.
+ * 'syscall_name' - reference to particular syscall in diagnostic output.
+ */
+{
+	long __user *args = kernel_mmsghdr;
+	long __user *v_mmsrhdr;
+	struct mmsghdr __user *converted_mmsghdr;
+	struct user_msghdr __user *converted_msghdr;
+	long __user *converted_iovec;
+	int err, iov_len, i;
+
+#define MASK_MMSGHDR_TYPE     0x0773 /* type mask for struct mmsghdr */
+#define MASK_MMSGHDR_ALIGN    0xd7ff /* alignment mask for mmsghdr structure */
+#define MASK_MMSGHDR_RW       MASK_MSGHDR_RW
+	/*
+	 * Structures user_msghdr and iovec contain pointers
+	 * inside, therefore they need to be additionally
+	 * converted with saving results in these structures
+	 */
+
+	/* (1) Converting 'mmsghdr' structure array: */
+
+	converted_mmsghdr = (struct mmsghdr *) args;
+	err = convert_array_3(prot_mmsghdr, (long *) converted_mmsghdr,
+				size, 8, vlen, MASK_MMSGHDR_TYPE,
+				MASK_MMSGHDR_ALIGN, MASK_MMSGHDR_RW,
+				CONV_ARR_WRONG_DSCR_FLD);
+	if (err) {
+		DbgSCP_ALERT("Bad mmsghdr in syscall \'%s\'\n", syscall_name);
+		return -EINVAL;
+	}
+
+	/* (2) Converting struct iovec fields in msghdr structures
+	 *            (msghdr->msg_iov):
+	 */
+	converted_iovec = args + MMSGHDR_VECT_SIZE_LONGS(vlen);
+	for (i = 0, v_mmsrhdr = args; i < vlen; i++) {
+		converted_mmsghdr = (struct mmsghdr *) v_mmsrhdr;
+		converted_msghdr = &converted_mmsghdr->msg_hdr;
+		iov_len = converted_msghdr->msg_iovlen;
+		if (converted_msghdr->msg_iov) {
+			err = convert_array_3(
+				(long *) converted_msghdr->msg_iov,
+				(long *) converted_iovec,
+				SIZE_IOVEC * iov_len, 2, iov_len,
+				MASK_IOVEC_TYPE, MASK_IOVEC_ALIGN, 0,
+				CONV_ARR_WRONG_DSCR_FLD);
+			if (err) {
+				DbgSCP_ALERT("Bad struct iovec in mmsghdr (syscall \'%s\')\n",
+					     syscall_name);
+			}
+		} else {
+			DbgSCP_ALERT("Empty struct iovec in mmsghdr (syscall \'%s\')\n",
+				     syscall_name);
+			converted_iovec = NULL;
+		}
+
+		/* Replacing iovec pointer in converted msghdr structure: */
+		converted_msghdr->msg_iov = (struct iovec *) converted_iovec;
+
+		v_mmsrhdr += MMSGHDR_STRUCT_SIZE_LONGS;
+		converted_iovec +=
+				iov_len * sizeof(struct iovec) / sizeof(long);
+	}
+
+	return 0;
+}
+
+#if 1
+#define print_mmsghdr_struct(a1, a2, a3)
+#else
+static void print_mmsghdr_struct(const char *title,
+				 long __user *mmsghdr_arr,
+				 const int vlen)
+{
+	if (arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_CONV_STRUCT)) {
+		long __user *larr = mmsghdr_arr;
+		struct mmsghdr __user *mmsghdrp;
+		struct iovec __user *iovp;
+		long lval;
+		int i, j;
+
+		/* Print structure content: */
+		pr_info("%s[%d]:\n", title, vlen);
+		for (i = 0; i < vlen; i++) {
+			mmsghdrp = (struct mmsghdr *)larr;
+			pr_info("\t##### mmsghdr[%d] : 0x%lx #####\n",
+				i, (long)mmsghdrp);
+			for (j = 0; j < MMSGHDR_STRUCT_SIZE_LONGS; j++) {
+				pr_info("\t0x%.8x.%.8x\n",
+					(int)(*larr), (int)(*larr >> 32));
+				lar++;
+			}
+			iovp = mmsghdrp->msg_hdr.msg_iov;
+			for (j = 0; j < mmsghdrp->msg_hdr.msg_iovlen; j++) {
+				lval = (long) iovp;
+				pr_info("\t->msg_iov[%d: 0x%lx]: base = 0x%lx  len = %ld\n",
+					j, lval,
+					(long)iovp->iov_base, iovp->iov_len);
+				lval += sizeof(struct iovec);
+				iovp = (struct iovec *)lval;
+			}
+		}
+	}
+}
+#endif /* print_mmsghdr_struct */
+
+static long update_prot_mmsghdr_struct(long __user *mmsghdr_arr,
+				       long __user *prot_msgvec,
+				       const int vlen)
+/* This is post-syscall post-processing procedure.
+ * Propagate .msg_len values from processed 'mmsghdr_arr' back to 'prot_msgvec'.
+ * 'vlen' - number of elements in the array.
+ * Returns error code or 0 if OK.
+ */
+{
+#define MMSGHDR_STR_LEN_OFFSET 96
+	/* .msg_len field offset in the protected structure */
+#define PROT_MMSGHDR_SIZE     112
+	/* size of struct mmsghdr in prot. user space */
+	long __user *from = mmsghdr_arr;
+	long __user *to = prot_msgvec;
+	struct mmsghdr __user *mmsghdr_from;
+	long rval = 0, val;
+	int i;
+
+	to += MMSGHDR_STR_LEN_OFFSET / sizeof(long);
+
+	for (i = 0; i < vlen; i++) {
+		mmsghdr_from = (struct mmsghdr *) from;
+		val = mmsghdr_from->msg_len;
+		DbgSCP("mmsghdr[%d].msg_len = %ld\n", i, val);
+		rval |= put_user(val, to);
+
+		from += MMSGHDR_STRUCT_SIZE_LONGS;
+		to += PROT_MMSGHDR_SIZE / sizeof(long);
+	}
+
+	DbgSCP(" returned %ld\n", rval);
+	return rval;
+}
+
+#define PROTECTED_MMSGHDR_SIZE(vlen) \
+			(PROT_MMSGHDR_SIZE * vlen)
+
+notrace __section(.entry_handlers)
+long protected_sys_sendmmsg(const unsigned long		sockfd,
+			    const unsigned long __user msgvec,
+			    const unsigned long		vlen, /* vector lngth */
+			    const unsigned long		flags,
+			    const unsigned long unused5,
+			    const unsigned long unused6,
+			    const struct pt_regs		*regs)
+{
+	unsigned int size;
+	long rval; /* syscall return value */
+	long __user *kernel_mmsghdr;
+
+	DbgSCP(" sockfd=%ld  vlen=%ld\n", sockfd, vlen);
+
+	size = e2k_ptr_size(regs->args[3], regs->args[4], 1 /*min_size*/);
+	if (size < PROTECTED_MMSGHDR_SIZE(vlen)) {
+		DbgSCP_ERR(" Bad 'msgvec' size: %d < %ld",
+			   size, PROTECTED_MMSGHDR_SIZE(vlen));
+		return -EINVAL;
+	}
+
+	/* NB> For the sake of performance we don't calculate exact vector size.
+	 *     Instead, we allocate same space as in PM, which is bigger
+	 *     and is quite enough for kernel structire for sure.
+	 */
+	kernel_mmsghdr = get_user_space(size);
+	if (!kernel_mmsghdr) {
+		DbgSCP_ERR("FATAL ERROR: failed to allocate %d on stack !!!",
+			   size);
+		return -EINVAL;
+	}
+
+	if (convert_mmsghdr((long *) msgvec, kernel_mmsghdr,
+					size, vlen, "sendmmsg"))
+		return -EINVAL;
+
+	if (arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_CONV_STRUCT))
+		print_mmsghdr_struct("protected sendmmsg: converted mmsghdr",
+				     kernel_mmsghdr, vlen);
+
+	rval = sys_sendmmsg(sockfd, (struct mmsghdr *) kernel_mmsghdr, vlen,
+			    flags);
+
+	if (rval <= 0)
+		DbgSCP("sys_sendmmsg() failed with error code %ld\n", rval);
+
+	if (arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_CONV_STRUCT))
+		print_mmsghdr_struct("protected sendmmsg: post-syscall mmsghdr",
+				     kernel_mmsghdr, vlen);
+
+	if (rval > 0) {
+		/* Propagating .msg_len values back to 'msgvec' */
+		long ret;
+
+		ret = update_prot_mmsghdr_struct(kernel_mmsghdr,
+						 (long *)msgvec, (int)vlen);
+		if (ret)
+			rval = ret;
+	}
+
+	DbgSCP(" returned %ld\n", rval);
+	return rval;
+}
+
+notrace __section(.entry_handlers)
+long protected_sys_recvmmsg(const unsigned long		sockfd,
+			    const unsigned long __user msgvec,
+			    const unsigned long		vlen, /* vector lngth */
+			    const unsigned long		flags,
+			    const unsigned long __user timeout,
+			    const unsigned long unused6,
+			    const struct pt_regs		*regs)
+{
+	unsigned int size;
+	long rval; /* syscall return value */
+	long __user *kernel_mmsghdr;
+
+	DbgSCP(" sockfd=%ld  vlen=%ld\n", sockfd, vlen);
+
+	size = e2k_ptr_size(regs->args[3], regs->args[4], 1 /*min_size*/);
+	if (size < PROTECTED_MMSGHDR_SIZE(vlen)) {
+		DbgSCP_ERR(" Bad 'msgvec' arg size: %d < %ld",
+			   size, PROTECTED_MMSGHDR_SIZE(vlen));
+		return -EINVAL;
+	}
+
+	/* NB> For the sake of performance we allocate same space as in PM. */
+	kernel_mmsghdr = get_user_space(size);
+	if (!kernel_mmsghdr) {
+		DbgSCP_ERR("FATAL ERROR: failed to allocate %d on stack !!!",
+			   size);
+		return -EINVAL;
+	}
+
+	if (convert_mmsghdr((long *) msgvec, kernel_mmsghdr,
+					size, vlen, "recvmmsg"))
+		return -EINVAL;
+
+	if (arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_CONV_STRUCT))
+		print_mmsghdr_struct("protected recvmmsg: converted mmsghdr",
+				     kernel_mmsghdr, vlen);
+
+	rval = sys_recvmmsg(sockfd, (struct mmsghdr *) kernel_mmsghdr, vlen,
+			    flags, (struct __kernel_timespec *) timeout);
+
+	if (rval <= 0) {
+		DbgSCP("sys_recvmmsg() failed with error code %ld\n", rval);
+	} else { /* (rval > 0) */
+		long ret;
+
+		ret = update_prot_mmsghdr_struct(kernel_mmsghdr,
+						 (long *)msgvec, (int)vlen);
+		if (ret)
+			rval = ret;
 	}
 
 	DbgSCP(" returned %ld\n", rval);
@@ -1726,6 +1961,12 @@ static long process_shmat_syscall_result(const int shmid, const int shmflg,
 	return rval;
 }
 
+#define MASK_SEMUN_PTR_TYPE  0x3 /* mask for union semun with pointer */
+#define MASK_SEMUN_PTR_ALIGN 0x3 /* alignment mask for union semun with ptr */
+#define SEMUN_STR_SIZE       16  /* size of union semun */
+#define MASK_SEMUN_INT_TYPE  0x0 /* mask for union semun with int */
+#define MASK_SEMUN_INT_ALIGN 0x3 /* alignment mask for union semun with int */
+
 notrace __section(.entry_handlers)
 long protected_sys_semctl(const long	semid,	/* a1 */
 			  const long	semnum,	/* a2 */
@@ -1739,11 +1980,6 @@ long protected_sys_semctl(const long	semid,	/* a1 */
 	unsigned long fourth = 0; /* fourth arg to 'semctl' syscall */
 	long rval; /* syscall return value */
 
-#define MASK_SEMUN_PTR_TYPE  0x3 /* mask for union semun with pointer */
-#define MASK_SEMUN_PTR_ALIGN 0x3 /* alignment mask for union semun with ptr */
-#define SEMUN_STR_SIZE       16  /* size of union semun */
-#define MASK_SEMUN_INT_TYPE  0x0 /* mask for union semun with int */
-#define MASK_SEMUN_INT_ALIGN 0x3 /* alignment mask for union semun with int */
 	/*
 	 * Union semun (4-th parameter) contains pointers
 	 * inside, therefore they need to be additionally
@@ -1855,12 +2091,6 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 	int fields;
 	void *fourth = (void *) ptr; /* fourth arg to 'ipc' syscall */
 	long rval; /* syscall return value */
-
-#define MASK_SEMUN_PTR_TYPE  0x3 /* mask for union semun with pointer */
-#define MASK_SEMUN_PTR_ALIGN 0x3 /* alignment mask for union semun with ptr */
-#define SEMUN_STR_SIZE       16  /* size of union semun */
-#define MASK_SEMUN_INT_TYPE  0x0 /* mask for union semun with int */
-#define MASK_SEMUN_INT_ALIGN 0x3 /* alignment mask for union semun with int */
 
 	get_ipc_mask(call, &mask_type, &mask_align, &fields);
 	if ((fields == 0) || (unlikely(fields > 5))) {
@@ -2047,12 +2277,18 @@ static long prot_sys_mmap(const unsigned long start,
 		DbgSCP_WARN("\tbase = 0x%lx  size = 0x%lx  prot = 0\n",
 				(unsigned long)base, length);
 	}
-
+#if 0
 	if (prot & PROT_READ)
 		enable |= R_ENABLE;
 	if (prot & PROT_WRITE)
 		enable |= W_ENABLE;
-
+#endif
+/*
+ * NB> Syscall mprotect() can change access rights at any moment.
+ *	To avoid access right discrepancy between descriptor and memory
+ *	page protection mechanism, we enable 'rw' descriptor fields anyway.
+ */
+	enable = R_ENABLE | W_ENABLE;
 	rval1 = make_ap_lo(base, length, 0, enable);
 	rval2 = make_ap_hi(base, length, 0, enable);
 	rv1_tag = E2K_AP_LO_ETAG;
@@ -2602,12 +2838,12 @@ long protected_sys_prctl(const int	option,
 
 notrace __section(.entry_handlers)
 long protected_sys_ioctl(const int fd,				/* a1 */
-				const unsigned long request,	/* a2 */
-				void *argp,			/* a3 */
-				const unsigned long unused4,
-				const unsigned long unused5,
-				const unsigned long unused6,
-				const struct pt_regs *regs)
+			 const unsigned long request,		/* a2 */
+			 const unsigned long __user argp,	/* a3 */
+			 const unsigned long unused4,
+			 const unsigned long unused5,
+			 const unsigned long unused6,
+			 const struct pt_regs *regs)
 {
 	unsigned int size;
 	long rval;
@@ -2628,32 +2864,64 @@ long protected_sys_ioctl(const int fd,				/* a1 */
 #define STRUCT_IFREQ_PROT_SIZE		48
 
 		/* Pointer to user128 struct ifconf */
-		void *ifc128 = argp;
+		void __user *ifc128 = (void *) argp;
 		/* Pointer to user128 array of ifreq structures */
-		void *ifr128;
+		void __user *ifr128;
 
 		/* Pointer to temporary64 translated struct ifconf */
-		struct ifconf *ifc64;
+		struct ifconf __user *ifc64;
 		/* Pointer to temporary64 array of ifreq structures */
-		struct ifreq *ifr64;
+		struct ifreq __user *ifr64;
 
 		/*
 		 * Lengths in terms of bytes of user128 and temporary64 array
 		 * of ifreq structures
 		 */
 		int ifc_len128, ifc_len64;
-		int i;
+		long stack_size; /* to allocate for calculations */
+		int i, tag;
 
 		/* Check descriptor's size of user128 struct ifconf. */
 		size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
 		if (size < STRUCT_IFCONF_PROT_SIZE) {
-			DbgSCP_ALERT("ifconf ptr is too little: %d < %d\n",
-				size, STRUCT_IFCONF_PROT_SIZE);
+			DbgSCP_ALERT("ifconf pointer is too little: %d < %d\n",
+				     size, STRUCT_IFCONF_PROT_SIZE);
 			return -EINVAL;
 		}
 
+		/* Reading value of the 'ifc_len' field: */
+TRY_USR_PFAULT {
+		NATIVE_LOAD_VAL_AND_TAGW((int *) ifc128, ifc_len128, tag);
+} CATCH_USR_PFAULT {
+#define ERR_FATAL_READ "FATAL ERROR: failed to read from 0x%lx !!!\n"
+		DbgSCP_ALERT(ERR_FATAL_READ, (long) argp);
+		return -EINVAL;
+} END_USR_PFAULT
+
+		if (tag != ETAGNVS) {
+#define ERR_FATAL_IFCLEN "unexpected value in field 'ifc_len' (tag 0x%x)\n"
+			DbgSCP_ALERT(ERR_FATAL_IFCLEN, tag);
+			return -EINVAL;
+		}
+
+		/*
+		 * Count length of temporary64 array of ifreq structures.
+		 * It differs from user128 one, because struct ifreq contains
+		 * pointers.
+		 */
+		ifc_len64 = ifc_len128 * sizeof(struct ifreq) /
+							STRUCT_IFREQ_PROT_SIZE;
+
+		/* Allocating stack to convert 'ifc128' to 64 bit mode.
+		 * NB> 'stack_size' must be multiple of 16; otherwise
+		 *     get_user_space() may deliver non-aligned space.
+		 */
+		stack_size = (sizeof(struct ifconf) + ifc_len64 + 15) & ~0xf;
+		ifc64 = get_user_space(stack_size);
 		/* Translate struct ifconf from user128 to kernel64 mode. */
-		ifc64 = get_user_space(sizeof(struct ifconf));
+		ifr64 = (struct ifreq *) ((uintptr_t) ifc64 +
+						sizeof(struct ifconf));
+
 		rval = convert_array(ifc128, (long *) ifc64, size,
 				STRUCT_IFCONF_FIELDS, STRUCT_IFCONF_ITEMS,
 				STRUCT_IFCONF_MASK_TYPE,
@@ -2667,26 +2935,13 @@ long protected_sys_ioctl(const int fd,				/* a1 */
 		ifr128 = ifc64->ifc_req;
 
 		/*
-		 * Count length of temporary64 array of ifreq structures.
-		 * It differs from user128 one, because struct ifreq contains
-		 * pointers.
-		 */
-		ifc_len128 = ifc64->ifc_len;
-		ifc_len64 = ifc_len128 * sizeof(struct ifreq) /
-							STRUCT_IFREQ_PROT_SIZE;
-
-		/*
 		 * Initialize temporary64 struct ifconf with translated values.
 		 */
 		ifc64->ifc_len = ifc_len64;
-		ifr64 = get_user_space(ifc_len64);
 		ifc64->ifc_req = ifr64;
 
 		/* Do the ioctl(). */
 		rval = sys_ioctl(fd, request, (unsigned long) ifc64);
-		DbgSCP("%s:%d sys_ioctl(%d, %ld, 0x%lx) returns %ld\n",
-				__FILE__, __LINE__,
-				fd, request, (unsigned long) ifc64, rval);
 		if (rval)
 			return rval;
 
@@ -2985,6 +3240,454 @@ long protected_sys_pselect6(const long		nfds,		/* a1 */
 			    (void *) exceptfds, (void *) timeout,
 			    (void *) sigmask_ptr64);
 	DbgSCP("sys_pselect6(nfds=%ld, ...) returned %ld\n", nfds, rval);
+
+	return rval;
+}
+
+/*
+ * Converting protected structure siginfo_t into 64-bit format.
+ * Allocates converted structure on user stack and returns it in the 2nd arg.
+ * Returns error code or 0 if converted OK.
+ */
+static
+int convert_protected_siginfo_t(const unsigned long __user prot_siginfo,
+						void __user **siginfo_64,
+				const unsigned long mask_type)
+{
+/* Structure siginfo_t contains 9 fields:
+ *    [ int-int - int - int-int - ptr - int - long - {int,ptr} ]
+ * Full conversion masks for siginfo_t structure (every field initialized):
+ */
+#define MASK_SIGINFO_T		0x410400000 /* field type mask */
+#define MASK_SIGINFO_T_ALIGN	0x311330100 /* next field alignment mask */
+#define SIGINFO_T_FIELDS	9      /* field number in the structure */
+#define SIGVAL_OFFSET_LO	32     /* 'sigval' field offset (in bytes) */
+#define SIGVAL_OFFSET_HI	40     /* ditto */
+#define SIGVAL_OFFSET		24     /* ditto in the 64-bit structure */
+	void __user *converted_siginfo;
+	long descr_lo, descr_hi, ptr;
+	int rval, tag, tag_hi;
+
+	DbgSCP(" siginfo=0x%lx\n", prot_siginfo);
+
+	/* Allocating space on user stack: */
+	converted_siginfo = get_user_space(sizeof(siginfo_t));
+
+	/* Convert 'prot_siginfo': */
+	rval = get_pm_struct((long *) prot_siginfo,
+			     converted_siginfo,
+				sizeof(siginfo_t), SIGINFO_T_FIELDS, 1,
+				mask_type, MASK_SIGINFO_T_ALIGN, 0,
+				CONV_ARR_WRONG_DSCR_FLD);
+
+	if (rval) {
+		converted_siginfo = NULL;
+		goto out;
+	}
+
+	/* Check for descriptor in the '_sigval' field: */
+TRY_USR_PFAULT {
+	NATIVE_LOAD_VAL_AND_TAGD((prot_siginfo + SIGVAL_OFFSET_LO),
+				 descr_lo, tag);
+	if (!tag) /* 'int' in the union */
+		goto out;
+	NATIVE_LOAD_VAL_AND_TAGD((prot_siginfo + SIGVAL_OFFSET_HI),
+				 descr_hi, tag_hi);
+} CATCH_USR_PFAULT {
+#define ERR_PROT_SIGINFO "FATAL ERROR: failed to read from 0x%lx !!!\n"
+		DbgSCP_ALERT(ERR_PROT_SIGINFO, (long) (prot_siginfo + 4));
+		converted_siginfo = NULL;
+		rval = -EFAULT;
+		goto out;
+} END_USR_PFAULT
+
+	tag |= (tag_hi << 4);
+	if (tag != ETAGAPQ) {
+		DbgSCP_ALERT("Bad struct '_sigval' in siginfo_t: tag = 0x%x\n",
+			     tag);
+		goto out;
+	}
+	/* Storing descriptor attributes in 'sival_ptr_list' for
+	 * kernel to update 'usiginfo' in copy_siginfo_to_user_prot():
+	 */
+	ptr = *(long *)(converted_siginfo + SIGVAL_OFFSET);
+	store_descriptor_attrs((void *)ptr,
+			       descr_lo, descr_hi, tag, 0 /*sig#*/);
+	DbgSCP("stored sigval attrs: [0x%lx] ==> 0x%lx 0x%lx\n", ptr,
+	       descr_lo, descr_hi);
+
+out:
+	*siginfo_64 = converted_siginfo;
+
+	return rval;
+}
+
+/* Post-processor aimed to return syscall termination status
+ *          from temporal structure used to run syscall back
+ *            to original protected structure.
+ * Returns error code from put_user() or 0 if OK.
+ */
+static
+int update_protected_siginfo_t(unsigned long __user siginfo64,
+			       unsigned long __user siginfo128)
+{
+	unsigned long __user *infop64 = (unsigned long __user *) siginfo64;
+	unsigned long __user *infop128 = (unsigned long __user *) siginfo128;
+	unsigned long lval;
+	int rval = 0;
+	/*
+	  Structure siginfo_t consists of 5 'int's + ptr + int + long + ptr:
+
+		-= 128 bit format: =-			-= 64 bit format: =-
+	63            32               0      63            32               0
+	+===============|===============+     +===============|===============+
+	|   si_errno    |   si_signo    |  0  |   si_errno    |   si_signo    |
+	+===============|===============+     +===============|===============+
+	| XXXXXXXXXXXXX |   si_code     |  1  | XXXXXXXXXXXXX |   si_code     |
+	+===============|===============+     +===============|===============+
+	|     _uid      |      _pid     |  2  |     _uid      |      _pid     |
+	+===============|===============+     +===============|===============+
+	| XXXXXXXXXXXXXXXXXXXXXXXXXXXXX |  3  |  sigval_t: {int, sival_ptr}   |
+	+===============|===============+     +===============|===============+
+	| sigval_t: {int/sival_ptr(lo)} |  4  | XXXXXXXXXXXXX |  si_status    |
+	+---------------|---------------+     +===============|===============+
+	|         sival_ptr(hi)         |  5  |            [long]             |
+	+===============|===============+     +===============|===============+
+	| XXXXXXXXXXXXX |   si_status   |  6  |            [ptr]              |
+	+===============|===============+     +===============|===============+
+	|             [long]            |  7
+	+===============|===============+
+	|            [ptr (lo)]         |  8
+	+---------------|---------------+
+	|            [ptr (hi)]         |  9
+	+===============|===============+
+	*/
+
+	if (!infop64 || !infop128) {
+		DbgSCP("Empty input: siginfo64=0x%lx siginfo128=0x%lx\n",
+		       siginfo64, siginfo128);
+		return rval;
+	}
+
+	if (infop64 != infop128) { /* these are different descriptors */
+		lval = *infop64;
+		rval = put_user(lval, infop128);
+
+		lval = *(infop64 + 1);
+		rval = (rval) ?:  put_user(lval, infop128 + 1);
+
+		lval = *(infop64 + 2);
+		rval = (rval) ?:  put_user(lval, infop128 + 2);
+
+		if (rval)
+			goto out;
+	}
+	/* NB> We cannot use direct order below as it wouldn't work
+	 *     in the case when siginfo64 and siginfo128 are the same pointer.
+	 */
+	lval = *(infop64 + 5);
+	rval = (rval) ?:  put_user(lval, infop128 + 7);
+
+	lval = *(infop64 + 4);
+	rval = (rval) ?:  put_user(lval, infop128 + 6);
+
+	lval = *(infop64 + 3);
+	rval = (rval) ?:  put_user(lval, infop128 + 4);
+
+	rval = (rval) ?:  put_user(0L, infop128 + 5); /* to avoid ETAG */
+
+out:
+	if (rval)
+		DbgSCP_ALERT("FATAL ERROR: failed to write at 0x%lx !!!\n",
+			     (long) infop128);
+	return rval;
+}
+
+/* rt_sigqueueinfo/rt_tgsigqueueinfo conversion masks siginfo_t structure: */
+#define MASK_SIGINFO_T_RT_PID_UID	0xc9c400088 /* field type mask */
+#define MASK_SIGINFO_T_RT		0xc9c488088 /* field type mask */
+
+static inline
+unsigned long get_siginfo_mask_on_layout(int signo, int code)
+/* This function implements check similar to the one in has_si_pid_and_uid() */
+{
+	unsigned long mask;
+
+	switch (siginfo_layout(signo, code)) {
+	case SIL_KILL:
+	case SIL_CHLD:
+	case SIL_RT:
+		mask = MASK_SIGINFO_T_RT_PID_UID;
+		break;
+	default:
+		mask = MASK_SIGINFO_T_RT;
+		break;
+	}
+
+	return mask;
+}
+
+static inline
+unsigned long get_siginfo_mask_on_siginfo(const unsigned long __user usiginfo)
+{
+	int signo, code;
+	long mask;
+
+	if (get_user(signo, (int *) usiginfo)
+		|| get_user(code, (int *) (usiginfo + 8))) {
+#define FATAL_ERR_READ "FATAL ERROR: failed to read from 0x%lx !!!\n"
+		DbgSCP_ALERT(FATAL_ERR_READ, (long) usiginfo);
+		return 0L;
+	}
+
+	mask =  get_siginfo_mask_on_layout(signo, code);
+	DbgSCP("signo=%d, code=%d ==> mask = 0x%lx\n", signo, code, mask);
+
+	return mask;
+}
+
+notrace __section(.entry_handlers)
+long protected_sys_rt_sigqueueinfo(const long			tgid,	/* a1 */
+				   const long			sig,	/* a2 */
+				   const unsigned long __user usiginfo, /* a3 */
+				   const unsigned long unused4,
+				   const unsigned long unused5,
+				   const unsigned long unused6,
+				   const struct pt_regs *regs)
+{
+	void *converted_siginfo = NULL;
+	long rval;
+
+	DbgSCP("tgid=%ld, sig=%ld, usiginfo=0x%lx\n",
+	       tgid, sig, (long)usiginfo);
+
+	if (usiginfo) {
+		unsigned int size;
+		unsigned long mask;
+
+		size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
+		if (size < sizeof(siginfo_t)) {
+			DbgSCP_ALERT(" 'uinfo' pointer size is too little: %d < %zd\n",
+				size, sizeof(siginfo_t));
+			return -EINVAL;
+		}
+		mask = get_siginfo_mask_on_siginfo(usiginfo);
+		if (!mask)
+			return -EINVAL;
+		rval = convert_protected_siginfo_t(usiginfo, &converted_siginfo,
+						   mask);
+		if (rval)
+			return rval;
+	}
+
+	rval = sys_rt_sigqueueinfo(tgid, sig, converted_siginfo);
+
+	return rval;
+}
+
+notrace __section(.entry_handlers)
+long protected_sys_rt_tgsigqueueinfo(const long			tgid,	/* a1 */
+				     const long			tid,	/* a2 */
+				     const long			sig,	/* a3 */
+				     const unsigned long __user usiginfo, /*a4*/
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs)
+{
+	void *converted_siginfo = NULL;
+	long rval;
+
+	DbgSCP("tgid=%ld, tid=%ld, sig=%ld, usiginfo=0x%lx\n",
+	       tgid, tid, sig, (long)usiginfo);
+
+	if (usiginfo) {
+		unsigned int size;
+		unsigned long mask;
+
+		size = e2k_ptr_size(regs->args[7], regs->args[8], 0);
+		if (size < sizeof(siginfo_t)) {
+			DbgSCP_ALERT("'usiginfo' pointer size is too little: %d < %zd\n",
+				     size, sizeof(siginfo_t));
+			return -EINVAL;
+		}
+		mask = get_siginfo_mask_on_siginfo(usiginfo);
+		if (!mask)
+			return -EINVAL;
+		rval = convert_protected_siginfo_t(usiginfo, &converted_siginfo,
+						   mask);
+		if (rval)
+			return rval;
+	}
+
+	rval = sys_rt_tgsigqueueinfo(tgid, tid, sig, converted_siginfo);
+
+	return rval;
+}
+
+notrace __section(.entry_handlers)
+long protected_sys_pidfd_send_signal(const long			pidfd,	/* a1 */
+				     const long			sig,	/* a2 */
+				     const unsigned long __user info,	/* a3 */
+				     unsigned long		flags,	/* a4 */
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs)
+{
+	void *siginfo64 = NULL;
+	long rval;
+
+	DbgSCP("pidfd=%ld, sig=%ld, info=0x%lx, flags=0x%lx\n",
+	       pidfd, sig, (long)info, flags);
+
+	if (!pidfd) {
+		DbgSCP_ALERT("Bad syscall args: pidfd=%ld, sig=%ld, info=0x%lx\n",
+			     pidfd, sig, (long)info);
+		return -EINVAL;
+	}
+
+	if (info) {
+		unsigned int size;
+		unsigned long mask;
+
+		size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
+		if (size < sizeof(siginfo_t)) {
+			DbgSCP_ALERT("'info' pointer size is too little: %d < %zd\n",
+				     size, sizeof(siginfo_t));
+			return -EINVAL;
+		}
+		mask = get_siginfo_mask_on_siginfo(info);
+		if (!mask)
+			return -EINVAL;
+		rval = convert_protected_siginfo_t(info, &siginfo64,
+						   mask);
+		if (rval)
+			return rval;
+	}
+
+	rval = sys_pidfd_send_signal((int) pidfd, (int) sig,
+				     (siginfo_t __user *) siginfo64,
+				     (unsigned int) flags);
+	if (!rval && info)
+		update_protected_siginfo_t((unsigned long)siginfo64, info);
+
+	return rval;
+}
+
+notrace __section(.entry_handlers)
+long protected_sys_waitid(const long		which,		/* a1 */
+			  const long		pid,		/* a2 */
+			  const unsigned long __user *infop,	/* a3 */
+			  const long		options,	/* a4 */
+			  const unsigned long __user *ru,	/* a5 */
+			  const unsigned long unused6,
+			  const struct pt_regs *regs)
+{
+	long __user siginfop = (long) infop;
+	long rval;
+
+	DbgSCP("which=%ld, pid=%ld, infop=0x%lx, options=0x%x, ru=0x%lx\n",
+	       which, pid, infop, (int) options, ru);
+
+	if (infop) {
+		unsigned int size;
+
+		size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
+		if (size < sizeof(siginfo_t)) {
+			DbgSCP_ALERT(" 'infop' pointer size is too little: %d < %zd\n",
+				size, sizeof(siginfo_t));
+			return -EINVAL;
+		}
+		/* NB> There is no need in converting input 'infop' to 64 format
+		 *     as the syscall uses only top half of the structure data.
+		 */
+	}
+
+	rval = sys_waitid((int) which, (pid_t) pid,
+			  (struct siginfo __user *) siginfop,
+			  (int) options, (struct rusage __user *) ru);
+	update_protected_siginfo_t(siginfop, siginfop);
+
+	return rval;
+}
+
+notrace __section(.entry_handlers)
+long protected_sys_io_uring_register(const unsigned long	fd,	/* a1 */
+				     const unsigned long	opcode,	/* a2 */
+				     const unsigned long __user arg,	/* a3 */
+				     const unsigned long nr_args,	/* a4 */
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs)
+{
+	void __user *arg64 = (void __user *) arg;
+	long rval;
+
+	DbgSCP("fd=%ld, opcode=%ld, arg=0x%lx, nr_args=0x%lx\n",
+	       fd, opcode, arg, nr_args);
+
+	if (arg && (opcode == IORING_REGISTER_BUFFERS)) {
+		unsigned int size;
+
+		size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
+		if (size < (DESCRIPTOR_SIZE * nr_args)) {
+			DbgSCP_ALERT(" 'arg' pointer size is too little: %d < %zd\n",
+				     size, (DESCRIPTOR_SIZE * nr_args));
+			return -EINVAL;
+		}
+		arg64 = convert_prot_iovec_struct(arg, nr_args, regs->args[5],
+					regs->args[6], "io_uring_register");
+		rval = get_pm_struct_simple((long __user *) arg, arg64, size,
+					    1, nr_args, 0x3, 0x3);
+		if (rval)
+			return rval;
+	}
+
+	rval = sys_io_uring_register((unsigned int) fd, (unsigned int) opcode,
+				     arg64, (unsigned int) nr_args);
+
+	return rval;
+}
+
+notrace __section(.entry_handlers)
+long protected_sys_kexec_load(const unsigned long	entry,		/* a1 */
+			      const unsigned long	nr_segments,	/* a2 */
+			      const unsigned long __user segments,	/* a3 */
+			      const unsigned long	flags,		/* a4 */
+			      const unsigned long unused5,
+			      const unsigned long unused6,
+			      const struct pt_regs *regs)
+{
+	void __user *segments64;
+	long rval;
+	unsigned int size, size128;
+#define KEXEC_SEGMENT_STRUCT_SIZE128 64 /* protected segment structure size */
+#define KEXEC_SEGMENT_T 0x3131
+#define KEXEC_SEGMENT_A 0x3331
+	DbgSCP("entry=%ld, nr_segments=%ld, segments=0x%lx, flags=0x%lx\n",
+	       entry, nr_segments, segments, flags);
+
+	if (!segments || !nr_segments) {
+		DbgSCP_ALERT("Empty segments/nr_segments: 0x%lx / %ld\n",
+			     segments, nr_segments);
+		return -EADDRNOTAVAIL;
+	}
+
+	size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
+	size128 = KEXEC_SEGMENT_STRUCT_SIZE128 * nr_segments;
+	if (size < size128) {
+		DbgSCP_ALERT(" 'segments' pointer size is too little: %d < %d\n",
+			     size, size128);
+		return -EADDRNOTAVAIL;
+	}
+
+	segments64 = get_user_space(size128);
+	rval = get_pm_struct_simple((long *) segments, segments64, size,
+					4, nr_segments,
+					KEXEC_SEGMENT_T, KEXEC_SEGMENT_A);
+	if (rval)
+		return rval;
+
+	rval = sys_kexec_load(entry, nr_segments, segments64, flags);
 
 	return rval;
 }

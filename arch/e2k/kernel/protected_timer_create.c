@@ -72,17 +72,17 @@ do { \
 #define USER_PTR_OFFSET_HI 8
 
 static inline
-unsigned long e2k_ptr_size(long user_ptr, unsigned int min_size)
+unsigned long e2k_descriptor_size(long user_ptr_hi, unsigned int min_size)
 {
 	e2k_ptr_hi_t hi;
 	unsigned int ptr_size;
 
-	AW(hi) = user_ptr + USER_PTR_OFFSET_HI;
+	AW(hi) = user_ptr_hi;
 	ptr_size = AS(hi).size - AS(hi).curptr;
 
 	if (ptr_size < min_size) {
 #define E2K_PTR_ERR_MSG \
-		"protected_timer_create.c: Pointer is too small: %d < %d\n"
+		"Pointer is too small in protected timer_create(): %d < %d\n"
 		DbgSCP_ALERT(E2K_PTR_ERR_MSG, ptr_size, min_size);
 		return 0;
 	} else {
@@ -96,8 +96,12 @@ unsigned long e2k_ptr_size(long user_ptr, unsigned int min_size)
  *                                                   indicate the error.
  */
 long protected_sys_timer_create(const long arg1 /*clockid*/,
-				const unsigned long arg2 /*sevp*/,
-				const unsigned long arg3 /*timerid*/)
+			const unsigned long __user arg2 /*sevp*/,
+			const unsigned long __user arg3 /*timerid*/,
+			const unsigned long	unused4,
+			const unsigned long	unused5,
+			const unsigned long	unused6,
+			const struct pt_regs *regs)
 {
 #define MASK_SIGEVENT_TYPE_I   0x0
 #define MASK_SIGEVENT_TYPE_P   0x3
@@ -115,7 +119,7 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 				     */
 	unsigned long user_sev = (unsigned long)arg2;
 	timer_t *timerid  = (timer_t *)arg3;
-	sigevent_t *kernel_sev;
+	sigevent_t *kernel_sev = NULL;
 	unsigned long size;
 	long mask_sigevent_type, mask_align, mask_rw_type;
 	int field_num;
@@ -124,6 +128,8 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 	int rval;
 
 	DbgSCP("clockid=%ld, sevp=0x%lx, timerid=0x%lx\n", arg1, arg2, arg3);
+	if (!user_sev)
+		goto run_syscall;
 
 	/* Detecting the type of the first field of the sigevent structure: */
 	TRY_USR_PFAULT {
@@ -193,7 +199,9 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 
 	/* Converting structure sigevent sev: */
 	kernel_sev = get_user_space(sizeof(*kernel_sev));
-	size = e2k_ptr_size(user_sev, SIZE_SIGEVENT /*min_size*/);
+	size = e2k_descriptor_size(regs->args[4], SIZE_SIGEVENT /*min_size*/);
+	if (!size)
+		return -EINVAL;
 	rval = convert_array_3((long *) user_sev, (long *)kernel_sev, size,
 			field_num, 1,
 			mask_sigevent_type, mask_align, mask_rw_type, 0);
@@ -202,19 +210,22 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 		DbgSCP_ERR("Bad structure sigevent\n");
 		return -EINVAL;
 	}
-
+run_syscall:
 	rval = sys_timer_create((clockid_t)arg1, kernel_sev, timerid);
 	if (rval)
 		return rval;
 
 	/* Save it in sival_ptr_list: */
-	store_descriptor_attrs(kernel_sev->sigev_value.sival_ptr,
+	if (kernel_sev) {
+		store_descriptor_attrs(kernel_sev->sigev_value.sival_ptr,
 			user_ptr_lo, user_ptr_hi, sival_ptr_tags, 0 /*signum*/);
 
-	DbgSCP("\tkernel_ptr = %px\n", kernel_sev->sigev_value.sival_ptr);
-	DbgSCP("\tuser_ptr_lo = 0x%lx\n", user_ptr_lo);
-	DbgSCP("\tuser_ptr_hi = 0x%lx\n", user_ptr_hi);
-	DbgSCP("\tuser_tags = 0x%x\n", sival_ptr_tags);
+		DbgSCP("\tkernel_ptr = 0x%lx\n",
+		       (long)kernel_sev->sigev_value.sival_ptr);
+		DbgSCP("\tuser_ptr_lo = 0x%lx\n", user_ptr_lo);
+		DbgSCP("\tuser_ptr_hi = 0x%lx\n", user_ptr_hi);
+		DbgSCP("\tuser_tags = 0x%x\n", sival_ptr_tags);
+	}
 	return 0;
 }
 

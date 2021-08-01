@@ -111,10 +111,26 @@ static bool wd_debug = false;
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_MMIO_SHUTDOWN_MODE
+#undef	DebugMMIOSHUTDOWN
+#define	DEBUG_MMIO_SHUTDOWN_MODE	1	/* MMIO shutdown debugging */
+#define	DebugMMIOSHUTDOWN(fmt, args...)					\
+({									\
+	if (DEBUG_MMIO_SHUTDOWN_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 #define	HRTIMER_EXPIRES_PERCENT		90	/* percents */
 /* If hrtimer expires on HRTIMER_EXPIRES_PERCENTs it does not reactivate */
 #define	HRTIMER_EXPIRES_APPROX(time)	\
 		(((time) / 100) * HRTIMER_EXPIRES_PERCENT)
+
+/*
+ * Bug 129924: sometimes guest doesn't make it in time to ack watchdog interrupt, and reboots.
+ * Since lintel is currently the only user of watchdog, and it doesn't expect reboot, disable it.
+ * Send another normal interrupt instead.
+ */
+#define	ENABLE_WATCHDOG_RESET	0
 
 static inline struct kvm_lt *to_lt(struct kvm_io_device *dev)
 {
@@ -633,9 +649,15 @@ static void generate_and_reset_interrupt(struct kvm *kvm, lt_irq_map_t irq_id)
 	generate_interrupt(kvm, irq_id, false);
 }
 
-static void generate_watchdog_reset(struct kvm_vcpu *vcpu)
+static void generate_watchdog_reset(struct kvm_vcpu *vcpu, struct kvm_lt *lt)
 {
-	panic("%s(): is not yet implemented\n", __func__);
+	if (ENABLE_WATCHDOG_RESET) {
+		lt->regs.wd_control.w_evn = 0;
+		vcpu->arch.exit_shutdown_terminate = KVM_EXIT_E2K_RESTART;
+		DebugMMIOSHUTDOWN("%s(): rebooting guest\n", __func__);
+	} else {
+		generate_and_reset_interrupt(vcpu->kvm, lt->wd_timer_irq_id);
+	}
 }
 
 static int lt_mmio_read_64(struct kvm_vcpu *vcpu, struct kvm_lt *lt,
@@ -933,11 +955,9 @@ static int lt_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 		if (!was_oe && control.w_out_e && lt->regs.wd_control.w_evn) {
 			DebugWD("w_evn is set when enabling watchdog timer\n");
 			if (!control.w_m) {
-				lt->regs.wd_control.w_evn = 0;
-				generate_watchdog_reset(vcpu);
+				generate_watchdog_reset(vcpu, lt);
 			} else {
-				generate_and_reset_interrupt(vcpu->kvm,
-							lt->wd_timer_irq_id);
+				generate_and_reset_interrupt(vcpu->kvm, lt->wd_timer_irq_id);
 			}
 		}
 
@@ -1011,7 +1031,7 @@ static void lt_wd_timer_do_work(struct kthread_work *work)
 	if (timer->work == kvm_set_reset_irq_timer_work) {
 		generate_and_reset_interrupt(kvm, lt->wd_timer_irq_id);
 	} else if (timer->work == kvm_watchdog_reset_timer_work) {
-		generate_watchdog_reset(timer->vcpu);
+		generate_watchdog_reset(timer->vcpu, lt);
 	} else {
 		pr_err("%s(): %d is unknown or unsupported timer "
 			"expires work\n",

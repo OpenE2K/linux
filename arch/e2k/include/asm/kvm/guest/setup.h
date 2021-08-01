@@ -8,7 +8,7 @@
 
 extern void __init boot_e2k_virt_setup_arch(void);
 extern void __init e2k_virt_setup_machine(void);
-extern void kvm_bsp_switch_to_init_stack(void);
+extern void __init kvm_bsp_switch_to_init_stack(void);
 extern void kvm_setup_bsp_idle_task(int cpu);
 extern void setup_guest_interface(void);
 

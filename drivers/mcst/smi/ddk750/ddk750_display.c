@@ -726,7 +726,6 @@ long setLogicalDispOutput(
     unsigned char dispCtrlUsage
 )
 {
-
     //DDKDEBUGPRINT((DISPLAY_LEVEL, "setLogicalDispOutput\n"));
 
     switch (output)
@@ -1212,7 +1211,6 @@ long setLogicalDispOutputExt(
     unsigned char dispCtrlUsage
 )
 {
-
     //DDKDEBUGPRINT((DISPLAY_LEVEL, "setLogicalDispOutputExt\n"));
 
     switch (output)

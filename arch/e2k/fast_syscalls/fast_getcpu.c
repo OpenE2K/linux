@@ -12,6 +12,11 @@ int fast_sys_getcpu(unsigned __user *cpup, unsigned __user *nodep,
 	int cpu = task_cpu(thread_info_task(ti));
 	int node;
 
+#ifdef	CONFIG_KVM_HOST_MODE
+	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
+		ttable_entry_getcpu((u64) cpup, (u64) nodep, (u64) unused);
+#endif
+
 	cpup = (typeof(cpup)) ((u64) cpup & E2K_VA_MASK);
 	nodep = (typeof(nodep)) ((u64) nodep & E2K_VA_MASK);
 	if (unlikely((u64) cpup + sizeof(unsigned) > ti->addr_limit.seg

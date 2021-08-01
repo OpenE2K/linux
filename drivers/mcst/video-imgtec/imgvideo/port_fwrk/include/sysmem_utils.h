@@ -82,6 +82,9 @@ typedef struct
     IMG_VOID *      pvImplData;           //!< Pointer that holds data specific to sysmem implementation
     IMG_INT32       ai32ImplData[2];      //!< additional implementation specific data
     IMG_PHYSADDR *  ppaPhysAddr;          //!< Array with physical addresses of the pages
+#ifdef CONFIG_MCST
+    IMG_PHYSADDR *  ppaDevPAddr;          //!< Array with device dma addresses of the pages
+#endif
     SYSDEVU_sInfo	*sysdev;
 } SYSMEMU_sPages;
 
@@ -115,7 +118,9 @@ typedef struct SYSMEM_Ops {
     IMG_RESULT    (*GetCpuKmAddr)(struct SYSMEM_Heap *, IMG_VOID **ppvCpuKmAddr,IMG_HANDLE hPagesHandle);
     IMG_PHYSADDR (*CpuKmAddrToCpuPAddr)(struct SYSMEM_Heap *heap, IMG_VOID *pvCpuKmAddr);
     IMG_VOID *(*CpuPAddrToCpuKmAddr)(struct SYSMEM_Heap *heap, IMG_PHYSADDR paCpuPAddr);
-
+#ifdef CONFIG_MCST
+    IMG_PHYSADDR (*CpuKmAddrToDevPAddr)(SYSMEMU_sPages *psPages, IMG_VOID *pvCpuKmAddr);
+#endif
     // maintenance
 
     IMG_VOID (*UpdateMemory)(struct SYSMEM_Heap *, IMG_HANDLE hPagesHandle, SYSMEM_UpdateDirection dir);
@@ -425,7 +430,25 @@ IMG_RESULT SYSMEMU_DuplicateHandle(IMG_UINT32 ui32Size, IMG_HANDLE hExtImportHan
 
 
 // translation
+#ifdef CONFIG_MCST
+/*!
+******************************************************************************
 
+ @Function                SYSMEMU_CpuKmAddrToDevPAddr
+
+ @Description
+
+ Get a device accessible handle for SYSMEM handle.
+
+ @Input     hPagesHandle: A handle to the memory control block.
+
+ @Input     pvCpuKmAddr: The CPU accessible address.
+
+ @Return    IMG_UINT64: The physical address.
+
+******************************************************************************/
+IMG_PHYSADDR SYSMEMU_CpuKmAddrToDevPAddr(IMG_HANDLE hPagesHandle, IMG_VOID *pvCpuKmAddr);
+#endif
 /*!
 ******************************************************************************
 

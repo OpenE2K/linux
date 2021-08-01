@@ -15,6 +15,19 @@
 /* it is native host without any virtualization or */
 /* native kernel with virtualization support */
 #define	host_printk(fmt, args...)	printk(fmt, ##args)
+
+#define	host_pr_alert(fmt, args...)	pr_alert(fmt, ##args)
+#define	host_pr_cont(fmt, args...)	pr_cont(fmt, ##args)
+#define	host_pr_info(fmt, args...)	pr_info(fmt, ##args)
+
+#define host_dump_stack()		dump_stack()
+#define host_print_pt_regs(regs)	print_pt_regs(regs)
+#define host_print_all_TIRs(TIRs, nr_TIRs)	\
+		print_all_TIRs(TIRs, nr_TIRs)
+#define host_print_tc_record(tcellar, num)	\
+		print_tc_record(tcellar, num)
+#define host_print_all_TC(TC, TC_count)		\
+		print_all_TC(TC, TC_count)
 #elif	defined(CONFIG_PARAVIRT_GUEST)
 /* it is paravirtualized host and guest */
 #include <asm/paravirt/host_printk.h>

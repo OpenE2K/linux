@@ -602,7 +602,7 @@ IMG_RESULT km_populate_hw_config(VXE_KM_DEVCONTEXT *psDevContext)
 
 			/* save and print the current LTP Clk Freq */
 			psDevContext->sDevSpecs.sHWConfig.ui32ClkFreqkHz = (1000 * (ui32HWTimerEnd - ui32HWTimerStart)) / ui32ElapsedTime;
-			PRINT("LTP Clk Freq: %d kHz\n", psDevContext->sDevSpecs.sHWConfig.ui32ClkFreqkHz);
+			DEBUG_PRINT("LTP Clk Freq: %d kHz\n", psDevContext->sDevSpecs.sHWConfig.ui32ClkFreqkHz);
 }
 #else
 {
