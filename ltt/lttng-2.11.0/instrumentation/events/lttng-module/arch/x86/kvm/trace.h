@@ -115,6 +115,61 @@ LTTNG_TRACEPOINT_EVENT_MAP(kvm_apic, kvm_x86_apic,
 /*
  * Tracepoint for kvm guest exit:
  */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0))
+LTTNG_TRACEPOINT_EVENT_CODE_MAP(kvm_exit, kvm_x86_exit,
+	TP_PROTO(unsigned int exit_reason, struct kvm_vcpu *vcpu, u32 isa),
+	TP_ARGS(exit_reason, vcpu, isa),
+
+	TP_locvar(
+		u64 info1, info2;
+		u32 intr_info, error_code;
+	),
+
+	TP_code_pre(
+		kvm_x86_ops.get_exit_info(vcpu, &tp_locvar->info1,
+				&tp_locvar->info2,
+				&tp_locvar->intr_info,
+				&tp_locvar->error_code);
+	),
+
+	TP_FIELDS(
+		ctf_integer(unsigned int, exit_reason, exit_reason)
+		ctf_integer(unsigned long, guest_rip, kvm_rip_read(vcpu))
+		ctf_integer(u32, isa, isa)
+		ctf_integer(u64, info1, tp_locvar->info1)
+		ctf_integer(u64, info2, tp_locvar->info2)
+		ctf_integer(u32, intr_info, tp_locvar->intr_info)
+		ctf_integer(u32, error_code, tp_locvar->error_code)
+		ctf_integer(unsigned int, vcpu_id, vcpu->vcpu_id)
+	),
+
+	TP_code_post()
+)
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0))
+LTTNG_TRACEPOINT_EVENT_CODE_MAP(kvm_exit, kvm_x86_exit,
+	TP_PROTO(unsigned int exit_reason, struct kvm_vcpu *vcpu, u32 isa),
+	TP_ARGS(exit_reason, vcpu, isa),
+
+	TP_locvar(
+		u64 info1, info2;
+	),
+
+	TP_code_pre(
+		kvm_x86_ops.get_exit_info(vcpu, &tp_locvar->info1,
+				&tp_locvar->info2);
+	),
+
+	TP_FIELDS(
+		ctf_integer(unsigned int, exit_reason, exit_reason)
+		ctf_integer(unsigned long, guest_rip, kvm_rip_read(vcpu))
+		ctf_integer(u32, isa, isa)
+		ctf_integer(u64, info1, tp_locvar->info1)
+		ctf_integer(u64, info2, tp_locvar->info2)
+	),
+
+	TP_code_post()
+)
+#else
 LTTNG_TRACEPOINT_EVENT_CODE_MAP(kvm_exit, kvm_x86_exit,
 	TP_PROTO(unsigned int exit_reason, struct kvm_vcpu *vcpu, u32 isa),
 	TP_ARGS(exit_reason, vcpu, isa),
@@ -138,6 +193,7 @@ LTTNG_TRACEPOINT_EVENT_CODE_MAP(kvm_exit, kvm_x86_exit,
 
 	TP_code_post()
 )
+#endif
 
 /*
  * Tracepoint for kvm interrupt injection:
@@ -430,13 +486,15 @@ LTTNG_TRACEPOINT_EVENT_MAP(kvm_emulate_insn, kvm_x86_emulate_insn,
 		ctf_integer(__u8, len, vcpu->arch.emulate_ctxt.decode.eip
 				- vcpu->arch.emulate_ctxt.decode.fetch.start)
 		ctf_array(__u8, insn, vcpu->arch.emulate_ctxt.decode.fetch.data, 15)
+		ctf_integer(__u8, flags, kei_decode_mode(vcpu->arch.emulate_ctxt.mode))
 #elif (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
 		ctf_integer(__u64, rip, vcpu->arch.emulate_ctxt.fetch.start)
 		ctf_integer(__u32, csbase, kvm_x86_ops->get_segment_base(vcpu, VCPU_SREG_CS))
 		ctf_integer(__u8, len, vcpu->arch.emulate_ctxt._eip
 				- vcpu->arch.emulate_ctxt.fetch.start)
 		ctf_array(__u8, insn, vcpu->arch.emulate_ctxt.fetch.data, 15)
-#else
+		ctf_integer(__u8, flags, kei_decode_mode(vcpu->arch.emulate_ctxt.mode))
+#elif (LINUX_VERSION_CODE < KERNEL_VERSION(5,7,0))
 		ctf_integer(__u64, rip, vcpu->arch.emulate_ctxt._eip -
 				(vcpu->arch.emulate_ctxt.fetch.ptr -
 					vcpu->arch.emulate_ctxt.fetch.data))
@@ -444,8 +502,17 @@ LTTNG_TRACEPOINT_EVENT_MAP(kvm_emulate_insn, kvm_x86_emulate_insn,
 		ctf_integer(__u8, len, vcpu->arch.emulate_ctxt.fetch.ptr -
 				vcpu->arch.emulate_ctxt.fetch.data)
 		ctf_array(__u8, insn, vcpu->arch.emulate_ctxt.fetch.data, 15)
-#endif
 		ctf_integer(__u8, flags, kei_decode_mode(vcpu->arch.emulate_ctxt.mode))
+#else
+		ctf_integer(__u64, rip, vcpu->arch.emulate_ctxt->_eip -
+				(vcpu->arch.emulate_ctxt->fetch.ptr -
+					vcpu->arch.emulate_ctxt->fetch.data))
+		ctf_integer(__u32, csbase, kvm_x86_ops.get_segment_base(vcpu, VCPU_SREG_CS))
+		ctf_integer(__u8, len, vcpu->arch.emulate_ctxt->fetch.ptr -
+				vcpu->arch.emulate_ctxt->fetch.data)
+		ctf_array(__u8, insn, vcpu->arch.emulate_ctxt->fetch.data, 15)
+		ctf_integer(__u8, flags, kei_decode_mode(vcpu->arch.emulate_ctxt->mode))
+#endif
 		ctf_integer(__u8, failed, failed)
 	)
 )

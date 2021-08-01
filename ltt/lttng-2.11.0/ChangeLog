@@ -1,3 +1,121 @@
+2021-01-11 (National Clean Off Your Desk Day) LTTng modules 2.11.7
+	* fix: adjust version range for trace_find_free_extent()
+	* fix: backport of fix: tracepoint: Optimize using static_call() (v5.10)
+	* Revert "fix: include order for older kernels"
+	* fix: backport of fix: ext4: fast commit recovery path (v5.10)
+	* Improve the release script
+	* Add release maintainer script
+	* fix: include order for older kernels
+	* fix: tracepoint: Optimize using static_call() (v5.10)
+	* fix: KVM: x86/mmu: Return unique RET_PF_* values if the fault was fixed (v5.10)
+	* fix: kvm: x86/mmu: Add TDP MMU PF handler (v5.10)
+	* fix: KVM: x86: Add intr/vectoring info and error code to kvm_exit tracepoint (v5.10)
+	* fix: ext4: fast commit recovery path (v5.10)
+	* fix: btrfs: make ordered extent tracepoint take btrfs_inode (v5.10)
+	* fix: btrfs: tracepoints: output proper root owner for trace_find_free_extent() (v5.10)
+	* fix: objtool: Rename frame.h -> objtool.h (v5.10)
+	* fix: strncpy equals destination size warning
+
+2020-10-05 (National Get Funky Day) LTTng modules 2.11.6
+	* Cleanup: lttng-syscalls: silence warning about uninitialized bitmap variable
+	* fix: backport 'Add 'kernel_read' wrapper for kernels < v4.14'
+	* Add 'kernel_read' wrapper for kernels < v4.14
+	* fix: Use 'kernel_read' to read from procfs
+	* fix: don't allow userspace copy to read kernel memory
+	* fix: Add a 1MB limit to lttng_strlen_user_inatomic
+	* fix: Adjust ranges for Ubuntu 4.15.0-119 kernel
+	* fix: Adjust ranges for Ubuntu HWE 5.0 kernels
+	* Fix: system call filter table
+	* fix: version ranges for ext4_discard_preallocations and writeback_queue_io
+	* fix: writeback: Fix sync livelock due to b_dirty_time processing (v5.9)
+	* fix: writeback: Drop I_DIRTY_TIME_EXPIRE (v5.9)
+	* fix: removal of [smp_]read_barrier_depends (v5.9)
+	* fix: ext4: indicate via a block bitmap read is prefetched… (v5.9)
+	* fix: ext4: limit the length of per-inode prealloc list (v5.9)
+	* fix: KVM: x86/mmu: Make kvm_mmu_page definition and accessor internal-only (v5.9)
+	* fix: Move mmutrace.h into the mmu/ sub-directory (v5.9)
+	* Kconfig: fix dependency issue when building in-tree without CONFIG_FTRACE
+
+2020-08-04 (National Chocolate Chip Cookie Day) LTTng modules 2.11.5
+	* fix: no __lttng_vmalloc_node_range() prior to v2.6.38
+	* Fix: Lock metadata cache on session destroy
+	* Fix: metadata stream leak, missing list removal and locking
+	* Fix: coherent state not changed atomically with metadata written
+	* fix: include module.h for EXPORT_SYMBOL_GPL
+	* fix: __lttng_vmalloc_node_range const caller introduced in v3.6
+	* fix: version range for overflow_callback
+	* fix: global_dirty_limit was introduced in v3.1
+	* fix: wrapper_uprobe_unregister is a void function
+	* fix: prior to v4.0, __vmalloc_node_range had no vm_flags param
+	* fix: vmalloc on v5.8 without KALLSYMS
+	* Detect missing symbols used with kallsyms_lookup at compile time
+	* Use exported symbol bdevname() instead of disk_name()
+	* Add git-review config
+	* fix: mm: remove vmalloc_sync_(un)mappings() (v5.8)
+	* fix: backport of block_bio_complete for <= v2.6.38
+	* fix: mm/writeback: discard NR_UNSTABLE_NFS, use NR_WRITEBACK (v5.8)
+	* fix: block: remove the error argument to the block_bio_complete (v5.8)
+	* fix: pipe_buf_operations rework (v5.8)
+
+2020-06-02 (National Leave the Office Early Day (or Simply Stay Home ?) LTTng modules 2.11.4
+	* Fix: Implement RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK
+	* fix: vmalloc_sync_mappings was backported to v5.5.12
+	* Update: Additional kernel ranges for vmalloc_sync_mappings
+	* Update: Use vmalloc_sync_mappings for stable kernels
+	* Fix: Use vmalloc_sync_mappings on kernel 5.6 as well
+	* fix: add missing guid_t type to wrapper
+	* Fix: missing wrapper rename to wrapper_vmalloc_sync_mappings
+	* Update for kernel 5.7: use vmalloc_sync_mappings on kernels >= 5.7
+	* Unbreak LTTng for kernel 5.7
+	* Move lttng wrappers into own module
+	* Introduce lttng_guid_gen wrapper for kernels >= 5.7.0
+	* Drop uuid.h wrapper
+	* instrumentation: update x86 kvm instrumentation for kernel >= 5.7.0
+	* instrumentation: update mm_vmscan for kernel >= 5.7.0
+
+2020-04-08 (The Day After National Beer Day) LTTng modules 2.11.3
+	* fix: uaccess wrapper for CentOS >= 4.18.0-147
+	* fix: ext4 instrumentation for CentOS >= 4.18.0-147
+	* fix: signal instrumentation for CentOS >= 4.18.0-147
+	* fix: kvm instrumentation for CentOS >= 4.18.0-147
+	* fix: rcu instrumentation for CentOS >= 4.18.0-80
+	* Fix: update kvm instrumentation for Ubuntu 5.3.0-45
+	* Fix: update kvm instrumentation for Ubuntu 5.3.0-43
+	* Fix: update kvm instrumentation for Ubuntu 4.15.0-92
+	* Remove lttng-ftrace integration
+	* Remove dependency on kallsyms for splice_to_pipe (kernel 4.2+)
+	* Remove dependency on kallsyms for irq_to_desc (kernel 3.4+)
+	* Remove work-around for signed tracepoint module tainting (kernel 3.15+)
+
+2020-02-25 (National Chocolate Covered Nut Day) LTTng modules 2.11.2
+	* Fix: rcu: Fix data-race due to atomic_t copy-by-value (5.5.6, 5.4.22)
+	* fix: workqueue: add worker function to workqueue_execute_end tracepoint (v5.6)
+	* fix: media: v4l2: abstract timeval handling in v4l2_buffer (v5.6)
+	* fix: rcu: Remove kfree_rcu() special casing and lazy-callback (v5.6)
+	* fix: rcu: Fix data-race due to atomic_t copy-by-value (v5.6)
+	* fix: btrfs: make btrfs_ordered_extent naming consistent (v5.6)
+	* fix: KVM: x86: Use gpa_t for cr2/gpa to fix TDP support on 32-bit (v5.6)
+	* fix: proc: decouple proc from VFS with "struct proc_ops" (v5.6)
+	* fix: y2038: hide timeval/timespec/itimerval/itimerspec types (v5.6)
+	* fix: use timespec64 on kernels that have it
+	* fix: move lttng_close_on_exec to proper wrapper
+	* fix: 'struct timex' removed upstream (v5.6)
+	* Fix: statedump: check task_active_pid_ns return value for NULL
+	* Fix: lttng-syscalls.c: marking wrong syscall probe as unregistered
+
+2020-01-29 (National Puzzle Day) LTTng modules 2.11.1
+	* fix: function prototype in wrapper/mm.h
+	* sunrpc: introduce lttng_get_clid helper
+	* Fix: sunrpc: use signed integer for client id
+	* Fix: sunrpc: null rpc_clnt dereference in rpc_task_queued tracepoint
+	* Fix: SUNRPC: Fix oops when trace sunrpc_task events in nfs client
+	* fix: ext4: Reserve revoke credits for freed blocks (v5.5)
+	* fix: btrfs: tracepoints: constify all pointers (v5.5)
+	* fix: btrfs block group struct refactor (v5.5)
+	* fix: y2038: itimer: change implementation to timespec64 (v5.5)
+	* Update .gitignore from upstream
+	* Fix: LTTNG_KERNEL_ADD_CALLSITE: Handle unknown event type
+
 2019-10-17 (Wear Something Gaudy Day) LTTng modules 2.11.0
 	* (no change)
 

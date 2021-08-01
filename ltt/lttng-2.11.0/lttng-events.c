@@ -27,9 +27,10 @@
 #include <linux/jhash.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
+#include <linux/uuid.h>
 
 #include <wrapper/uuid.h>
-#include <wrapper/vmalloc.h>	/* for wrapper_vmalloc_sync_all() */
+#include <wrapper/vmalloc.h>	/* for wrapper_vmalloc_sync_mappings() */
 #include <wrapper/random.h>
 #include <wrapper/tracepoint.h>
 #include <wrapper/list.h>
@@ -43,6 +44,7 @@
 #include <wrapper/vzalloc.h>
 #include <wrapper/ringbuffer/backend.h>
 #include <wrapper/ringbuffer/frontend.h>
+#include <wrapper/time.h>
 
 #define METADATA_CACHE_DEFAULT_SIZE 4096
 
@@ -83,7 +85,7 @@ void synchronize_trace(void)
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0))
-#ifdef CONFIG_PREEMPT_RT
+#ifdef CONFIG_PREEMPT_RT_FULL
 	synchronize_rcu();
 #endif
 #else /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0)) */
@@ -129,7 +131,7 @@ struct lttng_session *lttng_session_create(void)
 		goto err;
 	INIT_LIST_HEAD(&session->chan);
 	INIT_LIST_HEAD(&session->events);
-	uuid_le_gen(&session->uuid);
+	lttng_guid_gen(&session->uuid);
 
 	metadata_cache = kzalloc(sizeof(struct lttng_metadata_cache),
 			GFP_KERNEL);
@@ -188,6 +190,10 @@ void lttng_session_destroy(struct lttng_session *session)
 		WARN_ON(ret);
 	}
 	synchronize_trace();	/* Wait for in-flight events to complete */
+	list_for_each_entry(chan, &session->chan, list) {
+		ret = lttng_syscalls_destroy(chan);
+		WARN_ON(ret);
+	}
 	list_for_each_entry_safe(enabler, tmpenabler,
 			&session->enablers_head, node)
 		lttng_enabler_destroy(enabler);
@@ -197,8 +203,10 @@ void lttng_session_destroy(struct lttng_session *session)
 		BUG_ON(chan->channel_type == METADATA_CHANNEL);
 		_lttng_channel_destroy(chan);
 	}
+	mutex_lock(&session->metadata_cache->lock);
 	list_for_each_entry(metadata_stream, &session->metadata_cache->metadata_stream, list)
 		_lttng_metadata_channel_hangup(metadata_stream);
+	mutex_unlock(&session->metadata_cache->lock);
 	if (session->pid_tracker)
 		lttng_pid_tracker_destroy(session->pid_tracker);
 	kref_put(&session->metadata_cache->refcount, metadata_cache_destroy);
@@ -399,7 +407,6 @@ int lttng_event_enable(struct lttng_event *event)
 		ret = -EINVAL;
 		break;
 	case LTTNG_KERNEL_KPROBE:
-	case LTTNG_KERNEL_FUNCTION:
 	case LTTNG_KERNEL_UPROBE:
 	case LTTNG_KERNEL_NOOP:
 		WRITE_ONCE(event->enabled, 1);
@@ -407,6 +414,7 @@ int lttng_event_enable(struct lttng_event *event)
 	case LTTNG_KERNEL_KRETPROBE:
 		ret = lttng_kretprobes_event_enable_state(event, 1);
 		break;
+	case LTTNG_KERNEL_FUNCTION:	/* Fall-through. */
 	default:
 		WARN_ON_ONCE(1);
 		ret = -EINVAL;
@@ -435,7 +443,6 @@ int lttng_event_disable(struct lttng_event *event)
 		ret = -EINVAL;
 		break;
 	case LTTNG_KERNEL_KPROBE:
-	case LTTNG_KERNEL_FUNCTION:
 	case LTTNG_KERNEL_UPROBE:
 	case LTTNG_KERNEL_NOOP:
 		WRITE_ONCE(event->enabled, 0);
@@ -443,6 +450,7 @@ int lttng_event_disable(struct lttng_event *event)
 	case LTTNG_KERNEL_KRETPROBE:
 		ret = lttng_kretprobes_event_enable_state(event, 0);
 		break;
+	case LTTNG_KERNEL_FUNCTION:	/* Fall-through. */
 	default:
 		WARN_ON_ONCE(1);
 		ret = -EINVAL;
@@ -585,11 +593,11 @@ struct lttng_event *_lttng_event_create(struct lttng_channel *chan,
 	case LTTNG_KERNEL_KPROBE:
 	case LTTNG_KERNEL_UPROBE:
 	case LTTNG_KERNEL_KRETPROBE:
-	case LTTNG_KERNEL_FUNCTION:
 	case LTTNG_KERNEL_NOOP:
 	case LTTNG_KERNEL_SYSCALL:
 		event_name = event_param->name;
 		break;
+	case LTTNG_KERNEL_FUNCTION:	/* Fall-through. */
 	default:
 		WARN_ON_ONCE(1);
 		ret = -EINVAL;
@@ -712,27 +720,6 @@ struct lttng_event *_lttng_event_create(struct lttng_channel *chan,
 		list_add(&event_return->list, &chan->session->events);
 		break;
 	}
-	case LTTNG_KERNEL_FUNCTION:
-		/*
-		 * Needs to be explicitly enabled after creation, since
-		 * we may want to apply filters.
-		 */
-		event->enabled = 0;
-		event->registered = 1;
-		/*
-		 * Populate lttng_event structure before event
-		 * registration.
-		 */
-		smp_wmb();
-		ret = lttng_ftrace_register(event_name,
-				event_param->u.ftrace.symbol_name,
-				event);
-		if (ret) {
-			goto register_error;
-		}
-		ret = try_module_get(event->desc->owner);
-		WARN_ON_ONCE(!ret);
-		break;
 	case LTTNG_KERNEL_NOOP:
 	case LTTNG_KERNEL_SYSCALL:
 		/*
@@ -742,6 +729,28 @@ struct lttng_event *_lttng_event_create(struct lttng_channel *chan,
 		event->enabled = 0;
 		event->registered = 0;
 		event->desc = event_desc;
+		switch (event_param->u.syscall.entryexit) {
+		case LTTNG_KERNEL_SYSCALL_ENTRYEXIT:
+			ret = -EINVAL;
+			goto register_error;
+		case LTTNG_KERNEL_SYSCALL_ENTRY:
+			event->u.syscall.entryexit = LTTNG_SYSCALL_ENTRY;
+			break;
+		case LTTNG_KERNEL_SYSCALL_EXIT:
+			event->u.syscall.entryexit = LTTNG_SYSCALL_EXIT;
+			break;
+		}
+		switch (event_param->u.syscall.abi) {
+		case LTTNG_KERNEL_SYSCALL_ABI_ALL:
+			ret = -EINVAL;
+			goto register_error;
+		case LTTNG_KERNEL_SYSCALL_ABI_NATIVE:
+			event->u.syscall.abi = LTTNG_SYSCALL_ABI_NATIVE;
+			break;
+		case LTTNG_KERNEL_SYSCALL_ABI_COMPAT:
+			event->u.syscall.abi = LTTNG_SYSCALL_ABI_COMPAT;
+			break;
+		}
 		if (!event->desc) {
 			ret = -EINVAL;
 			goto register_error;
@@ -769,6 +778,7 @@ struct lttng_event *_lttng_event_create(struct lttng_channel *chan,
 		ret = try_module_get(event->desc->owner);
 		WARN_ON_ONCE(!ret);
 		break;
+	case LTTNG_KERNEL_FUNCTION:	/* Fall-through */
 	default:
 		WARN_ON_ONCE(1);
 		ret = -EINVAL;
@@ -827,16 +837,15 @@ void register_event(struct lttng_event *event)
 						  event);
 		break;
 	case LTTNG_KERNEL_SYSCALL:
-		ret = lttng_syscall_filter_enable(event->chan,
-			desc->name);
+		ret = lttng_syscall_filter_enable(event->chan, event);
 		break;
 	case LTTNG_KERNEL_KPROBE:
 	case LTTNG_KERNEL_UPROBE:
 	case LTTNG_KERNEL_KRETPROBE:
-	case LTTNG_KERNEL_FUNCTION:
 	case LTTNG_KERNEL_NOOP:
 		ret = 0;
 		break;
+	case LTTNG_KERNEL_FUNCTION:	/* Fall-through */
 	default:
 		WARN_ON_ONCE(1);
 	}
@@ -870,13 +879,8 @@ int _lttng_event_unregister(struct lttng_event *event)
 		lttng_kretprobes_unregister(event);
 		ret = 0;
 		break;
-	case LTTNG_KERNEL_FUNCTION:
-		lttng_ftrace_unregister(event);
-		ret = 0;
-		break;
 	case LTTNG_KERNEL_SYSCALL:
-		ret = lttng_syscall_filter_disable(event->chan,
-			desc->name);
+		ret = lttng_syscall_filter_disable(event->chan, event);
 		break;
 	case LTTNG_KERNEL_NOOP:
 		ret = 0;
@@ -885,6 +889,7 @@ int _lttng_event_unregister(struct lttng_event *event)
 		lttng_uprobes_unregister(event);
 		ret = 0;
 		break;
+	case LTTNG_KERNEL_FUNCTION:	/* Fall-through */
 	default:
 		WARN_ON_ONCE(1);
 	}
@@ -911,10 +916,6 @@ void _lttng_event_destroy(struct lttng_event *event)
 		module_put(event->desc->owner);
 		lttng_kretprobes_destroy_private(event);
 		break;
-	case LTTNG_KERNEL_FUNCTION:
-		module_put(event->desc->owner);
-		lttng_ftrace_destroy_private(event);
-		break;
 	case LTTNG_KERNEL_NOOP:
 	case LTTNG_KERNEL_SYSCALL:
 		break;
@@ -922,6 +923,7 @@ void _lttng_event_destroy(struct lttng_event *event)
 		module_put(event->desc->owner);
 		lttng_uprobes_destroy_private(event);
 		break;
+	case LTTNG_KERNEL_FUNCTION:	/* Fall-through */
 	default:
 		WARN_ON_ONCE(1);
 	}
@@ -1191,37 +1193,85 @@ int lttng_desc_match_enabler(const struct lttng_event_desc *desc,
 		struct lttng_enabler *enabler)
 {
 	const char *desc_name, *enabler_name;
+	bool compat = false, entry = false;
 
 	enabler_name = enabler->event_param.name;
 	switch (enabler->event_param.instrumentation) {
 	case LTTNG_KERNEL_TRACEPOINT:
 		desc_name = desc->name;
+		switch (enabler->type) {
+		case LTTNG_ENABLER_STAR_GLOB:
+			return lttng_match_enabler_star_glob(desc_name, enabler_name);
+		case LTTNG_ENABLER_NAME:
+			return lttng_match_enabler_name(desc_name, enabler_name);
+		default:
+			return -EINVAL;
+		}
 		break;
 	case LTTNG_KERNEL_SYSCALL:
 		desc_name = desc->name;
-		if (!strncmp(desc_name, "compat_", strlen("compat_")))
+		if (!strncmp(desc_name, "compat_", strlen("compat_"))) {
 			desc_name += strlen("compat_");
+			compat = true;
+		}
 		if (!strncmp(desc_name, "syscall_exit_",
 				strlen("syscall_exit_"))) {
 			desc_name += strlen("syscall_exit_");
 		} else if (!strncmp(desc_name, "syscall_entry_",
 				strlen("syscall_entry_"))) {
 			desc_name += strlen("syscall_entry_");
+			entry = true;
 		} else {
 			WARN_ON_ONCE(1);
+			return -EINVAL;
+		}
+		switch (enabler->event_param.u.syscall.entryexit) {
+		case LTTNG_KERNEL_SYSCALL_ENTRYEXIT:
+			break;
+		case LTTNG_KERNEL_SYSCALL_ENTRY:
+			if (!entry)
+				return 0;
+			break;
+		case LTTNG_KERNEL_SYSCALL_EXIT:
+			if (entry)
+				return 0;
+			break;
+		default:
+			return -EINVAL;
+		}
+		switch (enabler->event_param.u.syscall.abi) {
+		case LTTNG_KERNEL_SYSCALL_ABI_ALL:
+			break;
+		case LTTNG_KERNEL_SYSCALL_ABI_NATIVE:
+			if (compat)
+				return 0;
+			break;
+		case LTTNG_KERNEL_SYSCALL_ABI_COMPAT:
+			if (!compat)
+				return 0;
+			break;
+		default:
+			return -EINVAL;
+		}
+		switch (enabler->event_param.u.syscall.match) {
+		case LTTNG_SYSCALL_MATCH_NAME:
+			switch (enabler->type) {
+			case LTTNG_ENABLER_STAR_GLOB:
+				return lttng_match_enabler_star_glob(desc_name, enabler_name);
+			case LTTNG_ENABLER_NAME:
+				return lttng_match_enabler_name(desc_name, enabler_name);
+			default:
+				return -EINVAL;
+			}
+			break;
+		case LTTNG_SYSCALL_MATCH_NR:
+			return -EINVAL;	/* Not implemented. */
+		default:
 			return -EINVAL;
 		}
 		break;
 	default:
 		WARN_ON_ONCE(1);
-		return -EINVAL;
-	}
-	switch (enabler->type) {
-	case LTTNG_ENABLER_STAR_GLOB:
-		return lttng_match_enabler_star_glob(desc_name, enabler_name);
-	case LTTNG_ENABLER_NAME:
-		return lttng_match_enabler_name(desc_name, enabler_name);
-	default:
 		return -EINVAL;
 	}
 }
@@ -1349,8 +1399,20 @@ void lttng_create_event_if_missing(struct lttng_enabler *enabler)
 static
 int lttng_enabler_ref_events(struct lttng_enabler *enabler)
 {
-	struct lttng_session *session = enabler->chan->session;
+	struct lttng_channel *chan = enabler->chan;
+	struct lttng_session *session = chan->session;
 	struct lttng_event *event;
+
+	if (enabler->event_param.instrumentation == LTTNG_KERNEL_SYSCALL &&
+			enabler->event_param.u.syscall.entryexit == LTTNG_KERNEL_SYSCALL_ENTRYEXIT &&
+			enabler->event_param.u.syscall.abi == LTTNG_KERNEL_SYSCALL_ABI_ALL &&
+			enabler->event_param.u.syscall.match == LTTNG_SYSCALL_MATCH_NAME &&
+			!strcmp(enabler->event_param.name, "*")) {
+		if (enabler->enabled)
+			WRITE_ONCE(chan->syscall_all, 1);
+		else
+			WRITE_ONCE(chan->syscall_all, 0);
+	}
 
 	/* First ensure that probe events are created for this enabler. */
 	lttng_create_event_if_missing(enabler);
@@ -1612,7 +1674,7 @@ void lttng_session_lazy_sync_enablers(struct lttng_session *session)
  * was written and a negative value on error.
  */
 int lttng_metadata_output_channel(struct lttng_metadata_stream *stream,
-		struct channel *chan)
+		struct channel *chan, bool *coherent)
 {
 	struct lib_ring_buffer_ctx ctx;
 	int ret = 0;
@@ -1651,6 +1713,7 @@ int lttng_metadata_output_channel(struct lttng_metadata_stream *stream,
 	ret = stream->transport->ops.event_reserve(&ctx, 0);
 	if (ret != 0) {
 		printk(KERN_WARNING "LTTng: Metadata event reservation failed\n");
+		stream->coherent = false;
 		goto end;
 	}
 	stream->transport->ops.event_write(&ctx,
@@ -1658,11 +1721,37 @@ int lttng_metadata_output_channel(struct lttng_metadata_stream *stream,
 			reserve_len);
 	stream->transport->ops.event_commit(&ctx);
 	stream->metadata_in += reserve_len;
+	if (reserve_len < len)
+		stream->coherent = false;
+	else
+		stream->coherent = true;
 	ret = reserve_len;
 
 end:
+	if (coherent)
+		*coherent = stream->coherent;
 	mutex_unlock(&stream->metadata_cache->lock);
 	return ret;
+}
+
+static
+void lttng_metadata_begin(struct lttng_session *session)
+{
+	if (atomic_inc_return(&session->metadata_cache->producing) == 1)
+		mutex_lock(&session->metadata_cache->lock);
+}
+
+static
+void lttng_metadata_end(struct lttng_session *session)
+{
+	WARN_ON_ONCE(!atomic_read(&session->metadata_cache->producing));
+	if (atomic_dec_return(&session->metadata_cache->producing) == 0) {
+		struct lttng_metadata_stream *stream;
+
+		list_for_each_entry(stream, &session->metadata_cache->metadata_stream, list)
+			wake_up_interruptible(&stream->read_wait);
+		mutex_unlock(&session->metadata_cache->lock);
+	}
 }
 
 /*
@@ -1670,6 +1759,8 @@ end:
  * Must be called with sessions_mutex held.
  * The metadata cache lock protects us from concurrent read access from
  * thread outputting metadata content to ring buffer.
+ * The content of the printf is printed as a single atomic metadata
+ * transaction.
  */
 int lttng_metadata_printf(struct lttng_session *session,
 			  const char *fmt, ...)
@@ -1677,9 +1768,8 @@ int lttng_metadata_printf(struct lttng_session *session,
 	char *str;
 	size_t len;
 	va_list ap;
-	struct lttng_metadata_stream *stream;
 
-	WARN_ON_ONCE(!READ_ONCE(session->active));
+	WARN_ON_ONCE(!LTTNG_READ_ONCE(session->active));
 
 	va_start(ap, fmt);
 	str = kvasprintf(GFP_KERNEL, fmt, ap);
@@ -1688,7 +1778,7 @@ int lttng_metadata_printf(struct lttng_session *session,
 		return -ENOMEM;
 
 	len = strlen(str);
-	mutex_lock(&session->metadata_cache->lock);
+	WARN_ON_ONCE(!atomic_read(&session->metadata_cache->producing));
 	if (session->metadata_cache->metadata_written + len >
 			session->metadata_cache->cache_alloc) {
 		char *tmp_cache_realloc;
@@ -1714,16 +1804,11 @@ int lttng_metadata_printf(struct lttng_session *session,
 			session->metadata_cache->metadata_written,
 			str, len);
 	session->metadata_cache->metadata_written += len;
-	mutex_unlock(&session->metadata_cache->lock);
 	kfree(str);
-
-	list_for_each_entry(stream, &session->metadata_cache->metadata_stream, list)
-		wake_up_interruptible(&stream->read_wait);
 
 	return 0;
 
 err:
-	mutex_unlock(&session->metadata_cache->lock);
 	kfree(str);
 	return -ENOMEM;
 }
@@ -2260,6 +2345,8 @@ int _lttng_fields_metadata_statedump(struct lttng_session *session,
 
 /*
  * Must be called with sessions_mutex held.
+ * The entire event metadata is printed as a single atomic metadata
+ * transaction.
  */
 static
 int _lttng_event_metadata_statedump(struct lttng_session *session,
@@ -2268,10 +2355,12 @@ int _lttng_event_metadata_statedump(struct lttng_session *session,
 {
 	int ret = 0;
 
-	if (event->metadata_dumped || !READ_ONCE(session->active))
+	if (event->metadata_dumped || !LTTNG_READ_ONCE(session->active))
 		return 0;
 	if (chan->channel_type == METADATA_CHANNEL)
 		return 0;
+
+	lttng_metadata_begin(session);
 
 	ret = lttng_metadata_printf(session,
 		"event {\n"
@@ -2322,12 +2411,15 @@ int _lttng_event_metadata_statedump(struct lttng_session *session,
 
 	event->metadata_dumped = 1;
 end:
+	lttng_metadata_end(session);
 	return ret;
 
 }
 
 /*
  * Must be called with sessions_mutex held.
+ * The entire channel metadata is printed as a single atomic metadata
+ * transaction.
  */
 static
 int _lttng_channel_metadata_statedump(struct lttng_session *session,
@@ -2335,11 +2427,13 @@ int _lttng_channel_metadata_statedump(struct lttng_session *session,
 {
 	int ret = 0;
 
-	if (chan->metadata_dumped || !READ_ONCE(session->active))
+	if (chan->metadata_dumped || !LTTNG_READ_ONCE(session->active))
 		return 0;
 
 	if (chan->channel_type == METADATA_CHANNEL)
 		return 0;
+
+	lttng_metadata_begin(session);
 
 	WARN_ON_ONCE(!chan->header_type);
 	ret = lttng_metadata_printf(session,
@@ -2374,6 +2468,7 @@ int _lttng_channel_metadata_statedump(struct lttng_session *session,
 
 	chan->metadata_dumped = 1;
 end:
+	lttng_metadata_end(session);
 	return ret;
 }
 
@@ -2448,6 +2543,9 @@ int _lttng_event_header_declare(struct lttng_session *session)
  * in future versions.
  * This function may return a negative offset. It may happen if the
  * system sets the REALTIME clock to 0 after boot.
+ *
+ * Use 64bit timespec on kernels that have it, this makes 32bit arch
+ * y2038 compliant.
  */
 static
 int64_t measure_clock_offset(void)
@@ -2455,13 +2553,21 @@ int64_t measure_clock_offset(void)
 	uint64_t monotonic_avg, monotonic[2], realtime;
 	uint64_t tcf = trace_clock_freq();
 	int64_t offset;
-	struct timespec rts = { 0, 0 };
 	unsigned long flags;
+#ifdef LTTNG_KERNEL_HAS_TIMESPEC64
+	struct timespec64 rts = { 0, 0 };
+#else
+	struct timespec rts = { 0, 0 };
+#endif
 
 	/* Disable interrupts to increase correlation precision. */
 	local_irq_save(flags);
 	monotonic[0] = trace_clock_read64();
+#ifdef LTTNG_KERNEL_HAS_TIMESPEC64
+	ktime_get_real_ts64(&rts);
+#else
 	getnstimeofday(&rts);
+#endif
 	monotonic[1] = trace_clock_read64();
 	local_irq_restore(flags);
 
@@ -2547,8 +2653,11 @@ int _lttng_session_metadata_statedump(struct lttng_session *session)
 	struct lttng_event *event;
 	int ret = 0;
 
-	if (!READ_ONCE(session->active))
+	if (!LTTNG_READ_ONCE(session->active))
 		return 0;
+
+	lttng_metadata_begin(session);
+
 	if (session->metadata_dumped)
 		goto skip_session;
 
@@ -2710,6 +2819,7 @@ skip_session:
 	}
 	session->metadata_dumped = 1;
 end:
+	lttng_metadata_end(session);
 	return ret;
 }
 
@@ -2720,9 +2830,9 @@ end:
  * Registers a transport which can be used as output to extract the data out of
  * LTTng. The module calling this registration function must ensure that no
  * trap-inducing code will be executed by the transport functions. E.g.
- * vmalloc_sync_all() must be called between a vmalloc and the moment the memory
+ * vmalloc_sync_mappings() must be called between a vmalloc and the moment the memory
  * is made visible to the transport function. This registration acts as a
- * vmalloc_sync_all. Therefore, only if the module allocates virtual memory
+ * vmalloc_sync_mappings. Therefore, only if the module allocates virtual memory
  * after its registration must it synchronize the TLBs.
  */
 void lttng_transport_register(struct lttng_transport *transport)
@@ -2730,9 +2840,9 @@ void lttng_transport_register(struct lttng_transport *transport)
 	/*
 	 * Make sure no page fault can be triggered by the module about to be
 	 * registered. We deal with this here so we don't have to call
-	 * vmalloc_sync_all() in each module's init.
+	 * vmalloc_sync_mappings() in each module's init.
 	 */
-	wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_mappings();
 
 	mutex_lock(&sessions_mutex);
 	list_add_tail(&transport->node, &lttng_transport_list);

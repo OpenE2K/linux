@@ -51,11 +51,11 @@ int _lttng_kretprobes_handler(struct kretprobe_instance *krpi,
 		unsigned long parent_ip;
 	} payload;
 
-	if (unlikely(!READ_ONCE(chan->session->active)))
+	if (unlikely(!LTTNG_READ_ONCE(chan->session->active)))
 		return 0;
-	if (unlikely(!READ_ONCE(chan->enabled)))
+	if (unlikely(!LTTNG_READ_ONCE(chan->enabled)))
 		return 0;
-	if (unlikely(!READ_ONCE(event->enabled)))
+	if (unlikely(!LTTNG_READ_ONCE(event->enabled)))
 		return 0;
 
 	payload.ip = (unsigned long) krpi->rp->kp.addr;
@@ -221,7 +221,7 @@ int lttng_kretprobes_register(const char *name,
 	 * Well.. kprobes itself puts the page fault handler on the blacklist,
 	 * but we can never be too careful.
 	 */
-	wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_mappings();
 
 	ret = register_kretprobe(&lttng_krp->krp);
 	if (ret)

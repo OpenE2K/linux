@@ -15,7 +15,7 @@
 #include <linux/kprobes.h>
 #include <linux/kref.h>
 #include <lttng-cpuhotplug.h>
-#include <wrapper/uuid.h>
+#include <linux/uuid.h>
 #include <wrapper/uprobes.h>
 #include <lttng-tracer.h>
 #include <lttng-abi.h>
@@ -292,6 +292,16 @@ struct lttng_uprobe_handler {
 	struct list_head node;
 };
 
+enum lttng_syscall_entryexit {
+	LTTNG_SYSCALL_ENTRY,
+	LTTNG_SYSCALL_EXIT,
+};
+
+enum lttng_syscall_abi {
+	LTTNG_SYSCALL_ABI_NATIVE,
+	LTTNG_SYSCALL_ABI_COMPAT,
+};
+
 /*
  * lttng_event structure is referred to by the tracing fast path. It must be
  * kept small.
@@ -315,12 +325,14 @@ struct lttng_event {
 			char *symbol_name;
 		} kretprobe;
 		struct {
-			char *symbol_name;
-		} ftrace;
-		struct {
 			struct inode *inode;
 			struct list_head head;
 		} uprobe;
+		struct {
+			char *syscall_name;
+			enum lttng_syscall_entryexit entryexit;
+			enum lttng_syscall_abi abi;
+		} syscall;
 	} u;
 	struct list_head list;		/* Event list in session */
 	unsigned int metadata_dumped:1;
@@ -460,10 +472,10 @@ struct lttng_channel {
 	struct lttng_syscall_filter *sc_filter;
 	int header_type;		/* 0: unset, 1: compact, 2: large */
 	enum channel_type channel_type;
+	int syscall_all;
 	unsigned int metadata_dumped:1,
 		sys_enter_registered:1,
 		sys_exit_registered:1,
-		syscall_all:1,
 		tstate:1;		/* Transient enable state */
 };
 
@@ -477,6 +489,7 @@ struct lttng_metadata_stream {
 	struct list_head list;		/* Stream list */
 	struct lttng_transport *transport;
 	uint64_t version;		/* Current version of the metadata cache */
+	bool coherent;			/* Stream in a coherent state */
 };
 
 #define LTTNG_DYNAMIC_LEN_STACK_SIZE	128
@@ -529,6 +542,7 @@ struct lttng_metadata_cache {
 	char *data;			/* Metadata cache */
 	unsigned int cache_alloc;	/* Metadata allocated size (bytes) */
 	unsigned int metadata_written;	/* Number of bytes written in metadata cache */
+	atomic_t producing;		/* Metadata being produced (incomplete) */
 	struct kref refcount;		/* Metadata cache usage */
 	struct list_head metadata_stream;	/* Metadata stream list */
 	uuid_le uuid;			/* Trace session unique ID (copy) */
@@ -609,7 +623,7 @@ int lttng_probes_init(void);
 void lttng_probes_exit(void);
 
 int lttng_metadata_output_channel(struct lttng_metadata_stream *stream,
-		struct channel *chan);
+		struct channel *chan, bool *coherent);
 
 int lttng_pid_tracker_get_node_pid(const struct lttng_pid_hash_node *node);
 struct lttng_pid_tracker *lttng_pid_tracker_create(void);
@@ -629,10 +643,11 @@ void lttng_clock_unref(void);
 #if defined(CONFIG_HAVE_SYSCALL_TRACEPOINTS)
 int lttng_syscalls_register(struct lttng_channel *chan, void *filter);
 int lttng_syscalls_unregister(struct lttng_channel *chan);
+int lttng_syscalls_destroy(struct lttng_channel *chan);
 int lttng_syscall_filter_enable(struct lttng_channel *chan,
-		const char *name);
+		struct lttng_event *event);
 int lttng_syscall_filter_disable(struct lttng_channel *chan,
-		const char *name);
+		struct lttng_event *event);
 long lttng_channel_syscall_mask(struct lttng_channel *channel,
 		struct lttng_kernel_syscall_mask __user *usyscall_mask);
 #else
@@ -646,14 +661,19 @@ static inline int lttng_syscalls_unregister(struct lttng_channel *chan)
 	return 0;
 }
 
+static inline int lttng_syscalls_destroy(struct lttng_channel *chan)
+{
+	return 0;
+}
+
 static inline int lttng_syscall_filter_enable(struct lttng_channel *chan,
-		const char *name)
+		struct lttng_event *event);
 {
 	return -ENOSYS;
 }
 
 static inline int lttng_syscall_filter_disable(struct lttng_channel *chan,
-		const char *name)
+		struct lttng_event *event);
 {
 	return -ENOSYS;
 }
@@ -697,7 +717,7 @@ int lttng_add_vppid_to_ctx(struct lttng_ctx **ctx);
 int lttng_add_hostname_to_ctx(struct lttng_ctx **ctx);
 int lttng_add_interruptible_to_ctx(struct lttng_ctx **ctx);
 int lttng_add_need_reschedule_to_ctx(struct lttng_ctx **ctx);
-#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT)
+#if defined(CONFIG_PREEMPT_RT_FULL) || defined(CONFIG_PREEMPT)
 int lttng_add_preemptible_to_ctx(struct lttng_ctx **ctx);
 #else
 static inline
@@ -706,7 +726,7 @@ int lttng_add_preemptible_to_ctx(struct lttng_ctx **ctx)
 	return -ENOSYS;
 }
 #endif
-#ifdef CONFIG_PREEMPT_RT
+#ifdef CONFIG_PREEMPT_RT_FULL
 int lttng_add_migratable_to_ctx(struct lttng_ctx **ctx);
 #else
 static inline
@@ -859,32 +879,6 @@ int lttng_kretprobes_event_enable_state(struct lttng_event *event,
 	int enable)
 {
 	return -ENOSYS;
-}
-#endif
-
-#if defined(CONFIG_DYNAMIC_FTRACE) && !defined(LTTNG_FTRACE_MISSING_HEADER)
-int lttng_ftrace_register(const char *name,
-			  const char *symbol_name,
-			  struct lttng_event *event);
-void lttng_ftrace_unregister(struct lttng_event *event);
-void lttng_ftrace_destroy_private(struct lttng_event *event);
-#else
-static inline
-int lttng_ftrace_register(const char *name,
-			  const char *symbol_name,
-			  struct lttng_event *event)
-{
-	return -ENOSYS;
-}
-
-static inline
-void lttng_ftrace_unregister(struct lttng_event *event)
-{
-}
-
-static inline
-void lttng_ftrace_destroy_private(struct lttng_event *event)
-{
 }
 #endif
 

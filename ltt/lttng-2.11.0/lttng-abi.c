@@ -30,7 +30,7 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-#include <wrapper/vmalloc.h>	/* for wrapper_vmalloc_sync_all() */
+#include <wrapper/vmalloc.h>	/* for wrapper_vmalloc_sync_mappings() */
 #include <wrapper/ringbuffer/vfs.h>
 #include <wrapper/ringbuffer/backend.h>
 #include <wrapper/ringbuffer/frontend.h>
@@ -51,7 +51,13 @@
  */
 
 static struct proc_dir_entry *lttng_proc_dentry;
-static const struct file_operations lttng_fops;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0))
+static const struct proc_ops lttng_proc_ops;
+#else
+static const struct file_operations lttng_proc_ops;
+#endif
+
 static const struct file_operations lttng_session_fops;
 static const struct file_operations lttng_channel_fops;
 static const struct file_operations lttng_metadata_fops;
@@ -59,6 +65,7 @@ static const struct file_operations lttng_event_fops;
 static struct file_operations lttng_stream_ring_buffer_file_operations;
 
 static int put_u64(uint64_t val, unsigned long arg);
+static int put_u32(uint32_t val, unsigned long arg);
 
 /*
  * Teardown management: opened file descriptors keep a refcount on the module,
@@ -353,13 +360,22 @@ long lttng_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	}
 }
 
-static const struct file_operations lttng_fops = {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0))
+static const struct proc_ops lttng_proc_ops = {
+	.proc_ioctl = lttng_ioctl,
+#ifdef CONFIG_COMPAT
+	.proc_compat_ioctl = lttng_ioctl,
+#endif /* CONFIG_COMPAT */
+};
+#else
+static const struct file_operations lttng_proc_ops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = lttng_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = lttng_ioctl,
-#endif
+#endif /* CONFIG_COMPAT */
 };
+#endif
 
 static
 int lttng_abi_create_channel(struct file *session_file,
@@ -729,6 +745,13 @@ long lttng_metadata_ring_buffer_ioctl(struct file *filp,
 	int ret;
 	struct lttng_metadata_stream *stream = filp->private_data;
 	struct lib_ring_buffer *buf = stream->priv;
+	unsigned int rb_cmd;
+	bool coherent;
+
+	if (cmd == RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK)
+		rb_cmd = RING_BUFFER_GET_NEXT_SUBBUF;
+	else
+		rb_cmd = cmd;
 
 	switch (cmd) {
 	case RING_BUFFER_GET_NEXT_SUBBUF:
@@ -737,7 +760,7 @@ long lttng_metadata_ring_buffer_ioctl(struct file *filp,
 		struct lib_ring_buffer *buf = stream->priv;
 		struct channel *chan = buf->backend.chan;
 
-		ret = lttng_metadata_output_channel(stream, chan);
+		ret = lttng_metadata_output_channel(stream, chan, NULL);
 		if (ret > 0) {
 			lib_ring_buffer_switch_slow(buf, SWITCH_ACTIVE);
 			ret = 0;
@@ -763,7 +786,7 @@ long lttng_metadata_ring_buffer_ioctl(struct file *filp,
 		 * Before doing the actual ring buffer flush, write up to one
 		 * packet of metadata in the ring buffer.
 		 */
-		ret = lttng_metadata_output_channel(stream, chan);
+		ret = lttng_metadata_output_channel(stream, chan, NULL);
 		if (ret < 0)
 			goto err;
 		break;
@@ -780,13 +803,28 @@ long lttng_metadata_ring_buffer_ioctl(struct file *filp,
 
 		return lttng_metadata_cache_dump(stream);
 	}
+	case RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK:
+	{
+		struct lttng_metadata_stream *stream = filp->private_data;
+		struct lib_ring_buffer *buf = stream->priv;
+		struct channel *chan = buf->backend.chan;
+
+		ret = lttng_metadata_output_channel(stream, chan, &coherent);
+		if (ret > 0) {
+			lib_ring_buffer_switch_slow(buf, SWITCH_ACTIVE);
+			ret = 0;
+		} else if (ret < 0) {
+			goto err;
+		}
+		break;
+	}
 	default:
 		break;
 	}
 	/* PUT_SUBBUF is the one from lib ring buffer, unmodified. */
 
 	/* Performing lib ring buffer ioctl after our own. */
-	ret = lib_ring_buffer_ioctl(filp, cmd, arg, buf);
+	ret = lib_ring_buffer_ioctl(filp, rb_cmd, arg, buf);
 	if (ret < 0)
 		goto err;
 
@@ -796,6 +834,10 @@ long lttng_metadata_ring_buffer_ioctl(struct file *filp,
 		lttng_metadata_ring_buffer_ioctl_put_next_subbuf(filp,
 				cmd, arg);
 		break;
+	}
+	case RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK:
+	{
+		return put_u32(coherent, arg);
 	}
 	default:
 		break;
@@ -812,6 +854,13 @@ long lttng_metadata_ring_buffer_compat_ioctl(struct file *filp,
 	int ret;
 	struct lttng_metadata_stream *stream = filp->private_data;
 	struct lib_ring_buffer *buf = stream->priv;
+	unsigned int rb_cmd;
+	bool coherent;
+
+	if (cmd == RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK)
+		rb_cmd = RING_BUFFER_GET_NEXT_SUBBUF;
+	else
+		rb_cmd = cmd;
 
 	switch (cmd) {
 	case RING_BUFFER_GET_NEXT_SUBBUF:
@@ -820,7 +869,7 @@ long lttng_metadata_ring_buffer_compat_ioctl(struct file *filp,
 		struct lib_ring_buffer *buf = stream->priv;
 		struct channel *chan = buf->backend.chan;
 
-		ret = lttng_metadata_output_channel(stream, chan);
+		ret = lttng_metadata_output_channel(stream, chan, NULL);
 		if (ret > 0) {
 			lib_ring_buffer_switch_slow(buf, SWITCH_ACTIVE);
 			ret = 0;
@@ -846,7 +895,7 @@ long lttng_metadata_ring_buffer_compat_ioctl(struct file *filp,
 		 * Before doing the actual ring buffer flush, write up to one
 		 * packet of metadata in the ring buffer.
 		 */
-		ret = lttng_metadata_output_channel(stream, chan);
+		ret = lttng_metadata_output_channel(stream, chan, NULL);
 		if (ret < 0)
 			goto err;
 		break;
@@ -863,13 +912,28 @@ long lttng_metadata_ring_buffer_compat_ioctl(struct file *filp,
 
 		return lttng_metadata_cache_dump(stream);
 	}
+	case RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK:
+	{
+		struct lttng_metadata_stream *stream = filp->private_data;
+		struct lib_ring_buffer *buf = stream->priv;
+		struct channel *chan = buf->backend.chan;
+
+		ret = lttng_metadata_output_channel(stream, chan, &coherent);
+		if (ret > 0) {
+			lib_ring_buffer_switch_slow(buf, SWITCH_ACTIVE);
+			ret = 0;
+		} else if (ret < 0) {
+			goto err;
+		}
+		break;
+	}
 	default:
 		break;
 	}
 	/* PUT_SUBBUF is the one from lib ring buffer, unmodified. */
 
 	/* Performing lib ring buffer ioctl after our own. */
-	ret = lib_ring_buffer_compat_ioctl(filp, cmd, arg, buf);
+	ret = lib_ring_buffer_compat_ioctl(filp, rb_cmd, arg, buf);
 	if (ret < 0)
 		goto err;
 
@@ -879,6 +943,10 @@ long lttng_metadata_ring_buffer_compat_ioctl(struct file *filp,
 		lttng_metadata_ring_buffer_ioctl_put_next_subbuf(filp,
 				cmd, arg);
 		break;
+	}
+	case RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK:
+	{
+		return put_u32(coherent, arg);
 	}
 	default:
 		break;
@@ -916,8 +984,12 @@ int lttng_metadata_ring_buffer_release(struct inode *inode, struct file *file)
 	struct lttng_metadata_stream *stream = file->private_data;
 	struct lib_ring_buffer *buf = stream->priv;
 
+	mutex_lock(&stream->metadata_cache->lock);
+	list_del(&stream->list);
+	mutex_unlock(&stream->metadata_cache->lock);
 	kref_put(&stream->metadata_cache->refcount, metadata_cache_destroy);
 	module_put(stream->transport->owner);
+	kfree(stream);
 	return lib_ring_buffer_release(inode, file, buf);
 }
 
@@ -1046,6 +1118,8 @@ int lttng_abi_open_metadata_stream(struct file *channel_file)
 	metadata_stream->priv = buf;
 	stream_priv = metadata_stream;
 	metadata_stream->transport = channel->transport;
+	/* Initial state is an empty metadata, considered as incoherent. */
+	metadata_stream->coherent = false;
 
 	/*
 	 * Since life-time of metadata cache differs from that of
@@ -1067,8 +1141,10 @@ int lttng_abi_open_metadata_stream(struct file *channel_file)
 	if (ret < 0)
 		goto fd_error;
 
+	mutex_lock(&session->metadata_cache->lock);
 	list_add(&metadata_stream->list,
 		&session->metadata_cache->metadata_stream);
+	mutex_unlock(&session->metadata_cache->lock);
 	return ret;
 
 fd_error:
@@ -1080,6 +1156,46 @@ notransport:
 nomem:
 	channel->ops->buffer_read_close(buf);
 	return ret;
+}
+
+static
+int lttng_abi_validate_event_param(struct lttng_kernel_event *event_param)
+{
+	/* Limit ABI to implemented features. */
+	switch (event_param->instrumentation) {
+	case LTTNG_KERNEL_SYSCALL:
+		switch (event_param->u.syscall.entryexit) {
+		case LTTNG_KERNEL_SYSCALL_ENTRYEXIT:
+			break;
+		default:
+			return -EINVAL;
+		}
+		switch (event_param->u.syscall.abi) {
+		case LTTNG_KERNEL_SYSCALL_ABI_ALL:
+			break;
+		default:
+			return -EINVAL;
+		}
+		switch (event_param->u.syscall.match) {
+		case LTTNG_SYSCALL_MATCH_NAME:
+			break;
+		default:
+			return -EINVAL;
+		}
+		break;
+
+	case LTTNG_KERNEL_TRACEPOINT:	/* Fallthrough */
+	case LTTNG_KERNEL_KPROBE:	/* Fallthrough */
+	case LTTNG_KERNEL_KRETPROBE:	/* Fallthrough */
+	case LTTNG_KERNEL_NOOP:		/* Fallthrough */
+	case LTTNG_KERNEL_UPROBE:
+		break;
+
+	case LTTNG_KERNEL_FUNCTION:	/* Fallthrough */
+	default:
+		return -EINVAL;
+	}
+	return 0;
 }
 
 static
@@ -1100,7 +1216,8 @@ int lttng_abi_create_event(struct file *channel_file,
 		event_param->u.kprobe.symbol_name[LTTNG_KERNEL_SYM_NAME_LEN - 1] = '\0';
 		break;
 	case LTTNG_KERNEL_FUNCTION:
-		event_param->u.ftrace.symbol_name[LTTNG_KERNEL_SYM_NAME_LEN - 1] = '\0';
+		WARN_ON_ONCE(1);
+		/* Not implemented. */
 		break;
 	default:
 		break;
@@ -1122,6 +1239,9 @@ int lttng_abi_create_event(struct file *channel_file,
 		ret = -EOVERFLOW;
 		goto refcount_error;
 	}
+	ret = lttng_abi_validate_event_param(event_param);
+	if (ret)
+		goto event_error;
 	if (event_param->instrumentation == LTTNG_KERNEL_TRACEPOINT
 			|| event_param->instrumentation == LTTNG_KERNEL_SYSCALL) {
 		struct lttng_enabler *enabler;
@@ -1251,9 +1371,8 @@ long lttng_channel_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				sizeof(uevent_param->u.kretprobe.symbol_name));
 			break;
 		case LTTNG_KERNEL_FUNCTION:
-			memcpy(uevent_param->u.ftrace.symbol_name,
-					old_uevent_param->u.ftrace.symbol_name,
-					sizeof(uevent_param->u.ftrace.symbol_name));
+			WARN_ON_ONCE(1);
+			/* Not implemented. */
 			break;
 		default:
 			break;
@@ -1529,6 +1648,9 @@ long lttng_event_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				(struct lttng_kernel_event_callsite __user *) arg);
 		case LTTNG_TYPE_ENABLER:
 			return -EINVAL;
+		default:
+			WARN_ON_ONCE(1);
+			return -ENOSYS;
 		}
 	default:
 		return -ENOIOCTLCMD;
@@ -1577,6 +1699,11 @@ static const struct file_operations lttng_event_fops = {
 static int put_u64(uint64_t val, unsigned long arg)
 {
 	return put_user(val, (uint64_t __user *) arg);
+}
+
+static int put_u32(uint32_t val, unsigned long arg)
+{
+	return put_user(val, (uint32_t __user *) arg);
 }
 
 static long lttng_stream_ring_buffer_ioctl(struct file *filp,
@@ -1814,7 +1941,7 @@ int __init lttng_abi_init(void)
 {
 	int ret = 0;
 
-	wrapper_vmalloc_sync_all();
+	wrapper_vmalloc_sync_mappings();
 	lttng_clock_ref();
 
 	ret = lttng_tp_mempool_init();
@@ -1823,7 +1950,7 @@ int __init lttng_abi_init(void)
 	}
 
 	lttng_proc_dentry = proc_create_data("lttng", S_IRUSR | S_IWUSR, NULL,
-					&lttng_fops, NULL);
+					&lttng_proc_ops, NULL);
 
 	if (!lttng_proc_dentry) {
 		printk(KERN_ERR "Error creating LTTng control file\n");

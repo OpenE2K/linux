@@ -197,8 +197,8 @@ static bool ptrace_freeze_traced(struct task_struct *task)
 
 static void ptrace_unfreeze_traced(struct task_struct *task)
 {
-	unsigned long flags;
-	bool frozen = true;
+	if (task->state != __TASK_TRACED)
+		return;
 
 	WARN_ON(!task->ptrace || task->parent != current);
 
@@ -207,19 +207,12 @@ static void ptrace_unfreeze_traced(struct task_struct *task)
 	 * Recheck state under the lock to close this race.
 	 */
 	spin_lock_irq(&task->sighand->siglock);
-
-	raw_spin_lock_irqsave(&task->pi_lock, flags);
-	if (task->state == __TASK_TRACED)
-		task->state = TASK_TRACED;
-	else if (task->saved_state == __TASK_TRACED)
-		task->saved_state = TASK_TRACED;
-	else
-		frozen = false;
-	raw_spin_unlock_irqrestore(&task->pi_lock, flags);
-
-	if (frozen && __fatal_signal_pending(task))
-		wake_up_state(task, __TASK_TRACED);
-
+	if (task->state == __TASK_TRACED) {
+		if (__fatal_signal_pending(task))
+			wake_up_state(task, __TASK_TRACED);
+		else
+			task->state = TASK_TRACED;
+	}
 	spin_unlock_irq(&task->sighand->siglock);
 }
 
