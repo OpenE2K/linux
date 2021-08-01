@@ -179,6 +179,7 @@
 #else
 #define __diag_GCC_8(s)
 #endif
+<<<<<<< HEAD
 
 #if defined(CONFIG_MCST) && defined(__LCC__)
 	/* lcc bug #121410 workaround */
@@ -186,3 +187,5 @@
 #else
 #define __no_fgcse __attribute__((optimize("-fno-gcse")))
 #endif
+=======
+>>>>>>> cc1908343b61c14f2f710112627228db205b8e29

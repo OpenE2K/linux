@@ -88,8 +88,9 @@ EXPORT_SYMBOL_GPL(module_mutex);
 static LIST_HEAD(modules);
 
 /* Work queue for freeing init sections in success case */
-static struct work_struct init_free_wq;
-static struct llist_head init_free_list;
+static void do_free_init(struct work_struct *w);
+static DECLARE_WORK(init_free_wq, do_free_init);
+static LLIST_HEAD(init_free_list);
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 
@@ -1517,18 +1518,34 @@ struct module_sect_attrs {
 	struct module_sect_attr attrs[0];
 };
 
+#define MODULE_SECT_READ_SIZE (3 /* "0x", "\n" */ + (BITS_PER_LONG / 4))
 static ssize_t module_sect_read(struct file *file, struct kobject *kobj,
 				struct bin_attribute *battr,
 				char *buf, loff_t pos, size_t count)
 {
 	struct module_sect_attr *sattr =
 		container_of(battr, struct module_sect_attr, battr);
+	char bounce[MODULE_SECT_READ_SIZE + 1];
+	size_t wrote;
 
 	if (pos != 0)
 		return -EINVAL;
 
-	return sprintf(buf, "0x%px\n",
-		       kallsyms_show_value(file->f_cred) ? (void *)sattr->address : NULL);
+	/*
+	 * Since we're a binary read handler, we must account for the
+	 * trailing NUL byte that sprintf will write: if "buf" is
+	 * too small to hold the NUL, or the NUL is exactly the last
+	 * byte, the read will look like it got truncated by one byte.
+	 * Since there is no way to ask sprintf nicely to not write
+	 * the NUL, we have to use a bounce buffer.
+	 */
+	wrote = scnprintf(bounce, sizeof(bounce), "0x%px\n",
+			 kallsyms_show_value(file->f_cred)
+				? (void *)sattr->address : NULL);
+	count = min(count, wrote);
+	memcpy(buf, bounce, count);
+
+	return count;
 }
 
 static void free_sect_attrs(struct module_sect_attrs *sect_attrs)
@@ -1577,7 +1594,7 @@ static void add_sect_attrs(struct module *mod, const struct load_info *info)
 			goto out;
 		sect_attrs->nsections++;
 		sattr->battr.read = module_sect_read;
-		sattr->battr.size = 3 /* "0x", "\n" */ + (BITS_PER_LONG / 4);
+		sattr->battr.size = MODULE_SECT_READ_SIZE;
 		sattr->battr.attr.mode = 0400;
 		*(gattr++) = &(sattr++)->battr;
 	}
@@ -1846,7 +1863,6 @@ static int mod_sysfs_init(struct module *mod)
 	if (err)
 		mod_kobject_put(mod);
 
-	/* delay uevent until full sysfs population */
 out:
 	return err;
 }
@@ -1883,7 +1899,6 @@ static int mod_sysfs_setup(struct module *mod,
 	add_sect_attrs(mod, info);
 	add_notes_attrs(mod, info);
 
-	kobject_uevent(&mod->mkobj.kobj, KOBJ_ADD);
 	return 0;
 
 out_unreg_modinfo_attrs:
@@ -3547,14 +3562,6 @@ static void do_free_init(struct work_struct *w)
 	}
 }
 
-static int __init modules_wq_init(void)
-{
-	INIT_WORK(&init_free_wq, do_free_init);
-	init_llist_head(&init_free_list);
-	return 0;
-}
-module_init(modules_wq_init);
-
 /*
  * This is where the real work happens.
  *
@@ -3598,6 +3605,9 @@ static noinline int do_init_module(struct module *mod)
 	mod->state = MODULE_STATE_LIVE;
 	blocking_notifier_call_chain(&module_notify_list,
 				     MODULE_STATE_LIVE, mod);
+
+	/* Delay uevent until module has finished its init routine */
+	kobject_uevent(&mod->mkobj.kobj, KOBJ_ADD);
 
 	/*
 	 * We need to finish all async code before the module init sequence
@@ -3944,6 +3954,7 @@ static int load_module(struct load_info *info, const char __user *uargs,
 				     MODULE_STATE_GOING, mod);
 	klp_module_going(mod);
  bug_cleanup:
+	mod->state = MODULE_STATE_GOING;
 	/* module_bug_cleanup needs module_mutex protection */
 	mutex_lock(&module_mutex);
 	module_bug_cleanup(mod);
