@@ -46,8 +46,8 @@ static int rtc_wr_sec = 0;
 
 static DEFINE_MUTEX(sclkr_set_lock); /* for /proc/sclkr_src */
 #ifdef DEBUG_SCLKR_FREQ
-static DEFINE_PER_CPU(u64, prev_freq);
-static DEFINE_PER_CPU(u64, freq_print) = 0;
+static DEFINE_PER_CPU(u32, prev_freq);
+static DEFINE_PER_CPU(u32, freq_print) = 0;
 #endif
 
 u64 basic_freq_hz = 1;	/* 1 means there was not call to basic_freq_setup()
@@ -84,11 +84,12 @@ DEFINE_PER_CPU(int, ema_freq);
 notrace
 static u64 read_sclkr(struct clocksource *cs)
 {
-	u64 sclkr_sec, sclkr, freq, res;
+	u64 sclkr_sec, sclkr, res;
+	u32 freq;
 	e2k_sclkm1_t sclkm1;
 	unsigned long flags;
 #ifdef DEBUG_SCLKR_FREQ
-	u64 this_prev_freq;
+	u32 this_prev_freq;
 
 	this_prev_freq = __this_cpu_read(prev_freq);
 #endif
@@ -100,13 +101,12 @@ static u64 read_sclkr(struct clocksource *cs)
 
 	if (unlikely(sclkr_mode != SCLKR_INT && !sclkm1.mode ||
 			!sclkm1.sw || !freq)) {
-		pr_alert("WARNING: sclkr clocksource error.\n"
-			"CPU%02d sclkr=.%09lld, freq=%llu Hz, sclkm1=0x%llx, sclkr_mode=%d\n"
+		panic("sclkr clocksource error.\n"
+			"CPU%02d sclkr=.%09lld, freq=%u Hz, sclkm1=0x%llx, sclkr_mode=%d\n"
 			"There is no PulsePerSecond signal.\n"
 			"Set sclkr=no in cmdline\n",
 			raw_smp_processor_id(), (u64) (u32) sclkr, freq,
 			AW(sclkm1), sclkr_mode);
-		panic("read_sclkr: ERROR");
 	}
 #ifdef DEBUG_SCLKR_FREQ
 	if (unlikely(abs(this_prev_freq - freq) >
@@ -116,7 +116,7 @@ static u64 read_sclkr(struct clocksource *cs)
 				rtc_wr_sec != sclkr_sec &&
 				(rtc_wr_sec + 1) != sclkr_sec) {
 			__this_cpu_write(freq_print, freq);
-			pr_err("CPU %d SCLKR ERROR freq(div)= %llu prev=%llu rtcwr=%d sec=%lld\n",
+			pr_err("CPU %d SCLKR ERROR freq(div)= %u prev=%u rtcwr=%d sec=%lld\n",
 				raw_smp_processor_id(), freq, this_prev_freq,
 				rtc_wr_sec, sclkr_sec);
 		}
@@ -125,19 +125,20 @@ static u64 read_sclkr(struct clocksource *cs)
 	}
 	__this_cpu_write(prev_freq, freq);
 #endif
-	res = sclkr_to_ns(sclkr, freq);
+	res = sclkr2ns(sclkr, freq, true);
 	raw_all_irq_restore(flags);
 	return res;
 }
 
 notrace
-u64 raw_read_sclkr(void)
+u64 read_sclkr_nosync(void)
 {
-	u64 sclkr, freq, res;
+	u64 sclkr, res;
+	u32 freq;
 	unsigned long flags;
 	e2k_sclkm1_t sclkm1;
 #ifdef DEBUG_SCLKR_FREQ
-	u64 this_prev_freq;
+	u32 this_prev_freq;
 
 	this_prev_freq = __this_cpu_read(prev_freq);
 #endif
@@ -148,20 +149,53 @@ u64 raw_read_sclkr(void)
 	freq = sclkm1.div;
 
 	if (unlikely(!freq)) {
-		raw_all_irq_restore(flags);
-		return 0;
-	}
-
+		res = 0;
+	} else {
 #ifdef DEBUG_SCLKR_FREQ
-	if (unlikely(abs(this_prev_freq - freq) >
-		     (this_prev_freq >> OSCIL_JIT_SHFT)))
-		freq = basic_freq_hz;
-	__this_cpu_write(prev_freq, freq);
+		if (unlikely(abs(this_prev_freq - freq) > (this_prev_freq >> OSCIL_JIT_SHFT)))
+			freq = basic_freq_hz;
+		__this_cpu_write(prev_freq, freq);
 #endif
-	res = sclkr_to_ns(sclkr, freq);
+		res = sclkr2ns(sclkr, freq, false);
+	}
 	raw_all_irq_restore(flags);
+
 	return res;
 }
+
+notrace
+u64 read_sclkr_sync(void)
+{
+	u64 sclkr, res;
+	u32 freq;
+	unsigned long flags;
+	e2k_sclkm1_t sclkm1;
+#ifdef DEBUG_SCLKR_FREQ
+	u32 this_prev_freq;
+
+	this_prev_freq = __this_cpu_read(prev_freq);
+#endif
+	raw_all_irq_save(flags);
+
+	sclkr = READ_SSCLKR_REG();
+	sclkm1 = READ_SSCLKM1_REG();
+	freq = sclkm1.div;
+
+	if (unlikely(!freq)) {
+		res = 0;
+	} else {
+#ifdef DEBUG_SCLKR_FREQ
+		if (unlikely(abs(this_prev_freq - freq) > (this_prev_freq >> OSCIL_JIT_SHFT)))
+			freq = basic_freq_hz;
+		__this_cpu_write(prev_freq, freq);
+#endif
+		res = sclkr2ns(sclkr, freq, true);
+	}
+	raw_all_irq_restore(flags);
+
+	return res;
+}
+
 static void sclk_set_range(void *range)
 {
 	WRITE_SSCLKM2_REG((unsigned long long) range);
@@ -350,7 +384,7 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 		on_each_cpu(sclkr_set_mode, (void *) AW(sclkm1), 1);
 		strcpy(sclkr_src, "int");
 		sclkr_mode = SCLKR_INT;
-		sclkr_sched_offset = sched_clock() - raw_read_sclkr();
+		sclkr_sched_offset = sched_clock() - read_sclkr_sync();
 		/* sclkr_initialized should be set after sclkr_sched_offset */
 		smp_wmb();
 		sclkr_initialized = 1;
@@ -385,7 +419,7 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 	freq = basic_freq_hz;
 	safe_lo = (freq >> 2) + (freq >> 3) + (freq >> 4) + (freq >> 5);	/* 46% reserve */
 	safe_lo2 = freq - safe_lo;
-	pr_err("sclkr INFO safe_lo=%u %u fr=%u div=%u bas=%llu\n",
+	pr_info("sclkr INFO safe_lo=%u %u fr=%u div=%u bas=%llu\n",
 		safe_lo, safe_lo2, freq, READ_SSCLKM1_REG().div, basic_freq_hz);
 
 	/* We want to be far from beginning of internal second.
@@ -467,7 +501,7 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 	set_sched_clock_stable();
 #endif
 	mutex_lock(&sclkr_set_lock);
-	sclkr_sched_offset = sched_clock() - raw_read_sclkr();
+	sclkr_sched_offset = sched_clock() - read_sclkr_sync();
 	/* sclkr_initialized should be set after sclkr_sched_offset */
 	smp_wmb();
 	sclkr_initialized = 1;
@@ -529,3 +563,17 @@ static int __init sclkr_init(void)
 	return 0;
 }
 arch_initcall(sclkr_init);
+
+/*
+ * Scheduler clock - returns current time in nanosec units.
+ */
+unsigned long long sched_clock(void)
+{
+	if (likely(use_sclkr_sched_clock())) {
+		/* sched_clock() tolerates small errors and we want it
+		 * to be as fast as possible, so skip syncing across CPUs */
+		return sclkr_sched_offset + read_sclkr_nosync();
+	}
+
+	return (unsigned long long) (jiffies - INITIAL_JIFFIES) * (NSEC_PER_SEC / HZ);
+}

@@ -522,7 +522,7 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base, int node_id)
 			gfn_t gfn = gpa_to_gfn(irt->gpa);
 
 			/* This will request TLB flushes */
-			direct_unmap_prefixed_mmio_gfn(kvm, gfn);
+			mmu_pt_direct_unmap_prefixed_mmio_gfn(kvm, gfn);
 			pr_info("%s(): Unmapping IOEPIC passthrough page GPA 0x%llx -> HPA 0x%llx\n",
 				__func__, irt->gpa, irt->hpa);
 		}

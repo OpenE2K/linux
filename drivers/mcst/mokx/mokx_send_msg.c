@@ -119,7 +119,7 @@ check_msf:
 		}
 	}
 #if	0
-	if ((!IS_MACHINE_ES2) && ((msg_cs & MSG_CS_DMRCL) == 0)) {
+	if ((msg_cs & MSG_CS_DMRCL) == 0) {
 		dbg_send_msg("%s: unexpected MSG_CS_DMRCL==0\n", __FUNCTION__);
 		WRR_rdma(SHIFT_MSG_CS, instance, msg_cs_dmrcl);
 		msg_cs = RDR_rdma(SHIFT_MSG_CS, instance);

@@ -298,7 +298,7 @@ static void monitor_resume(struct hw_perf_event *hwc, int reload, s64 period)
 	hwc->state = 0;
 
 	dibcr = READ_DIBCR_REG();
-	WARN_ON(AS(dibcr).stop);
+	WARN_ON(dibcr.stop);
 
 	switch (monitor) {
 	case DIM0:
@@ -366,7 +366,7 @@ static s64 monitor_pause(struct perf_event *event,
 	hwc->state |= PERF_HES_STOPPED;
 
 	dibcr = READ_DIBCR_REG();
-	WARN_ON(AS(dibcr).stop);
+	WARN_ON(dibcr.stop);
 
 	switch (monitor) {
 	case DIM0:
@@ -489,7 +489,7 @@ static int monitor_enable(u32 monitor, u32 event_id, s64 period,
 	period = -period;
 
 	dibcr = READ_DIBCR_REG();
-	WARN_ON(AS(dibcr).stop);
+	WARN_ON(dibcr.stop);
 
 	switch (monitor) {
 	case DIM0:
@@ -1000,7 +1000,7 @@ static u8 hardware_events_map[PERF_COUNT_HW_MAX][2] = {
 __init
 static int init_perf_events_map(void)
 {
-	if (machine.native_iset_ver >= E2K_ISET_V2) {
+	if (machine.native_iset_ver >= E2K_ISET_V3) {
 		hardware_events_map[PERF_COUNT_HW_CPU_CYCLES][0] = DIM0_DIM1;
 		hardware_events_map[PERF_COUNT_HW_CPU_CYCLES][1] = 0x72;
 	}
@@ -1017,7 +1017,7 @@ static int init_perf_events_map(void)
 }
 pure_initcall(init_perf_events_map);
 
-static u8 hw_cache_events_map_v2[PERF_COUNT_HW_CACHE_MAX][PERF_COUNT_HW_CACHE_OP_MAX][PERF_COUNT_HW_CACHE_RESULT_MAX][2] = {
+static u8 hw_cache_events_map_v3[PERF_COUNT_HW_CACHE_MAX][PERF_COUNT_HW_CACHE_OP_MAX][PERF_COUNT_HW_CACHE_RESULT_MAX][2] = {
 	[PERF_COUNT_HW_CACHE_L1D] = {
 		[PERF_COUNT_HW_CACHE_OP_WRITE] = {
 			[PERF_COUNT_HW_CACHE_RESULT_ACCESS] = {DDM1, 0x1}
@@ -1080,15 +1080,14 @@ static u8 hw_cache_events_map_v6[PERF_COUNT_HW_CACHE_MAX][PERF_COUNT_HW_CACHE_OP
 #define MAX_EVENTS 256
 static char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 	[_DDM0] = {
-		[0x0 ... 0x3]	= E2K_ISET_SINCE_V2_MASK,
-		[0x10 ... 0x16] = E2K_ISET_SINCE_V2_MASK,
-		[0x20 ... 0x21] = E2K_ISET_SINCE_V2_MASK,
-		[0x30 ... 0x3a] = E2K_ISET_SINCE_V2_MASK,
-		[0x40 ... 0x46] = E2K_ISET_SINCE_V2_MASK,
-		[0x48]		= E2K_ISET_SINCE_V2_MASK,
-		[0x4a ... 0x4b] = E2K_ISET_SINCE_V2_MASK,
-		[0x70 ... 0x72] = E2K_ISET_SINCE_V2_MASK,
-
+		[0x0 ... 0x3]	= E2K_ISET_SINCE_V3_MASK,
+		[0x10 ... 0x16] = E2K_ISET_SINCE_V3_MASK,
+		[0x20 ... 0x21] = E2K_ISET_SINCE_V3_MASK,
+		[0x30 ... 0x3a] = E2K_ISET_SINCE_V3_MASK,
+		[0x40 ... 0x46] = E2K_ISET_SINCE_V3_MASK,
+		[0x48]		= E2K_ISET_SINCE_V3_MASK,
+		[0x4a ... 0x4b] = E2K_ISET_SINCE_V3_MASK,
+		[0x70 ... 0x72] = E2K_ISET_SINCE_V3_MASK,
 		[0x17 ... 0x19] = E2K_ISET_SINCE_V3_MASK,
 		[0x22 ... 0x24] = E2K_ISET_SINCE_V3_MASK,
 
@@ -1097,19 +1096,17 @@ static char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 
 		[0x5 ... 0x7]	= E2K_ISET_SINCE_V6_MASK,
 		[0x1a ... 0x1c]	= E2K_ISET_SINCE_V6_MASK,
-
-		[0x49]		= E2K_ISET_V2_MASK | E2K_ISET_SINCE_V6_MASK,
-		[0x4c ... 0x4f]	= E2K_ISET_V2_MASK | E2K_ISET_SINCE_V6_MASK,
+		[0x49]		= E2K_ISET_SINCE_V6_MASK,
+		[0x4c ... 0x4f]	= E2K_ISET_SINCE_V6_MASK,
 	},
 	[_DDM1] = {
-		[0x0 ... 0x2]	= E2K_ISET_SINCE_V2_MASK,
-		[0x10 ... 0x16] = E2K_ISET_SINCE_V2_MASK,
-		[0x20 ... 0x21] = E2K_ISET_SINCE_V2_MASK,
-		[0x30 ... 0x3a] = E2K_ISET_SINCE_V2_MASK,
-		[0x40 ... 0x48] = E2K_ISET_SINCE_V2_MASK,
-		[0x4a ... 0x4b] = E2K_ISET_SINCE_V2_MASK,
-		[0x70 ... 0x72] = E2K_ISET_SINCE_V2_MASK,
-
+		[0x0 ... 0x2]	= E2K_ISET_SINCE_V3_MASK,
+		[0x10 ... 0x16] = E2K_ISET_SINCE_V3_MASK,
+		[0x20 ... 0x21] = E2K_ISET_SINCE_V3_MASK,
+		[0x30 ... 0x3a] = E2K_ISET_SINCE_V3_MASK,
+		[0x40 ... 0x48] = E2K_ISET_SINCE_V3_MASK,
+		[0x4a ... 0x4b] = E2K_ISET_SINCE_V3_MASK,
+		[0x70 ... 0x72] = E2K_ISET_SINCE_V3_MASK,
 		[0x17 ... 0x19] = E2K_ISET_SINCE_V3_MASK,
 		[0x22 ... 0x23] = E2K_ISET_SINCE_V3_MASK,
 
@@ -1118,51 +1115,41 @@ static char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 		[0x3 ... 0x7]	= E2K_ISET_SINCE_V6_MASK,
 		[0x1a ... 0x1c]	= E2K_ISET_SINCE_V6_MASK,
 		[0x49]		= E2K_ISET_SINCE_V6_MASK,
-
-		[0x4c]		= E2K_ISET_V2_MASK,
-
-		[0x4d ... 0x4f] = E2K_ISET_V2_MASK | E2K_ISET_SINCE_V6_MASK,
+		[0x4d ... 0x4f] = E2K_ISET_SINCE_V6_MASK,
 	},
 	[_DIM0] = {
-		[0x0 ... 0x3]	= E2K_ISET_SINCE_V2_MASK,
-		[0x7 ... 0xa]	= E2K_ISET_SINCE_V2_MASK,
-		[0x10 ... 0x1f] = E2K_ISET_SINCE_V2_MASK,
-		[0x20 ... 0x26] = E2K_ISET_SINCE_V2_MASK,
-		[0x30 ... 0x3c] = E2K_ISET_SINCE_V2_MASK,
-		[0x40 ... 0x4a] = E2K_ISET_SINCE_V2_MASK,
-		[0x50 ... 0x5a] = E2K_ISET_SINCE_V2_MASK,
-		[0x60 ... 0x69] = E2K_ISET_SINCE_V2_MASK,
-		[0x70 ... 0x74] = E2K_ISET_SINCE_V2_MASK,
-
+		[0x0 ... 0x3]	= E2K_ISET_SINCE_V3_MASK,
+		[0x7 ... 0xa]	= E2K_ISET_SINCE_V3_MASK,
+		[0x10 ... 0x1f] = E2K_ISET_SINCE_V3_MASK,
+		[0x20 ... 0x26] = E2K_ISET_SINCE_V3_MASK,
+		[0x30 ... 0x3c] = E2K_ISET_SINCE_V3_MASK,
+		[0x40 ... 0x4a] = E2K_ISET_SINCE_V3_MASK,
+		[0x50 ... 0x5a] = E2K_ISET_SINCE_V3_MASK,
+		[0x60 ... 0x69] = E2K_ISET_SINCE_V3_MASK,
+		[0x70 ... 0x74] = E2K_ISET_SINCE_V3_MASK,
 		[0xf]		= E2K_ISET_SINCE_V3_MASK,
 		[0x3d]		= E2K_ISET_SINCE_V3_MASK,
 
 		[0x2d ... 0x2f] = E2K_ISET_SINCE_V5_MASK,
 
 		[0x27]		= E2K_ISET_SINCE_V6_MASK,
-
-		[0x4 ... 0x6]	= E2K_ISET_V2_MASK,
-		[0x25 ... 0x26] = E2K_ISET_SINCE_V2_MASK,
 	},
 	[_DIM1] = {
 		/* Almost same as _DIM0 - only 0xf/0x25/0x26 events differ */
-		[0x0 ... 0x3]	= E2K_ISET_SINCE_V2_MASK,
-		[0x7 ... 0xa]	= E2K_ISET_SINCE_V2_MASK,
-		[0x10 ... 0x1f] = E2K_ISET_SINCE_V2_MASK,
-		[0x20 ... 0x24] = E2K_ISET_SINCE_V2_MASK,
-		[0x30 ... 0x3c] = E2K_ISET_SINCE_V2_MASK,
-		[0x40 ... 0x4a] = E2K_ISET_SINCE_V2_MASK,
-		[0x50 ... 0x5a] = E2K_ISET_SINCE_V2_MASK,
-		[0x60 ... 0x69] = E2K_ISET_SINCE_V2_MASK,
-		[0x70 ... 0x74] = E2K_ISET_SINCE_V2_MASK,
-
+		[0x0 ... 0x3]	= E2K_ISET_SINCE_V3_MASK,
+		[0x7 ... 0xa]	= E2K_ISET_SINCE_V3_MASK,
+		[0x10 ... 0x1f] = E2K_ISET_SINCE_V3_MASK,
+		[0x20 ... 0x24] = E2K_ISET_SINCE_V3_MASK,
+		[0x30 ... 0x3c] = E2K_ISET_SINCE_V3_MASK,
+		[0x40 ... 0x4a] = E2K_ISET_SINCE_V3_MASK,
+		[0x50 ... 0x5a] = E2K_ISET_SINCE_V3_MASK,
+		[0x60 ... 0x69] = E2K_ISET_SINCE_V3_MASK,
+		[0x70 ... 0x74] = E2K_ISET_SINCE_V3_MASK,
 		[0x3d]		= E2K_ISET_SINCE_V3_MASK,
 
 		[0x2d ... 0x2f] = E2K_ISET_SINCE_V5_MASK,
 
 		[0x27]		= E2K_ISET_SINCE_V6_MASK,
-
-		[0x4 ... 0x6]	= E2K_ISET_V2_MASK,
 	},
 	[_DDM0_DDM1] = {
 		/* Intersection of DDM0/DDM1 */
@@ -1170,23 +1157,22 @@ static char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 	},
 	[_DIM0_DIM1] = {
 		/* Intersection of DIM0/DIM1 */
-		[0x0 ... 0x3]	= E2K_ISET_SINCE_V2_MASK,
-		[0x7 ... 0xa]	= E2K_ISET_SINCE_V2_MASK,
-		[0x10 ... 0x1f] = E2K_ISET_SINCE_V2_MASK,
-		[0x20 ... 0x24] = E2K_ISET_SINCE_V2_MASK,
-		[0x30 ... 0x3c] = E2K_ISET_SINCE_V2_MASK,
-		[0x40 ... 0x4a] = E2K_ISET_SINCE_V2_MASK,
-		[0x50 ... 0x5a] = E2K_ISET_SINCE_V2_MASK,
-		[0x60 ... 0x69] = E2K_ISET_SINCE_V2_MASK,
-		[0x70 ... 0x74] = E2K_ISET_SINCE_V2_MASK,
-
+		[0x0 ... 0x3]	= E2K_ISET_SINCE_V3_MASK,
+		[0x7 ... 0xa]	= E2K_ISET_SINCE_V3_MASK,
+		[0x10 ... 0x1f] = E2K_ISET_SINCE_V3_MASK,
+		[0x20 ... 0x24] = E2K_ISET_SINCE_V3_MASK,
+		[0x30 ... 0x3c] = E2K_ISET_SINCE_V3_MASK,
+		[0x40 ... 0x4a] = E2K_ISET_SINCE_V3_MASK,
+		[0x50 ... 0x5a] = E2K_ISET_SINCE_V3_MASK,
+		[0x60 ... 0x69] = E2K_ISET_SINCE_V3_MASK,
+		[0x70 ... 0x74] = E2K_ISET_SINCE_V3_MASK,
 		[0x3d]		= E2K_ISET_SINCE_V3_MASK,
 
 		[0x2d ... 0x2f] = E2K_ISET_SINCE_V5_MASK,
 
 		[0x27]		= E2K_ISET_SINCE_V6_MASK,
 
-		[0x4 ... 0x6]	= E2K_ISET_V2_MASK | E2K_ISET_V2_MASK,
+		[0x4 ... 0x6]	= E2K_ISET_V3_MASK,
 	},
 };
 
@@ -1234,8 +1220,8 @@ static int event_attr_to_monitor_and_id(struct perf_event_attr *attr,
 			*monitor = hw_cache_events_map_v6[type][op][result][0];
 			*event_id = hw_cache_events_map_v6[type][op][result][1];
 		} else {
-			*monitor = hw_cache_events_map_v2[type][op][result][0];
-			*event_id = hw_cache_events_map_v2[type][op][result][1];
+			*monitor = hw_cache_events_map_v3[type][op][result][0];
+			*event_id = hw_cache_events_map_v3[type][op][result][1];
 		}
 		break;
 		}

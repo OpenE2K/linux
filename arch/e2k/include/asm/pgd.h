@@ -288,6 +288,12 @@ copy_user_pgd_to_kernel_root_pt(pgd_t *user_pgd)
 {
 	copy_user_pgd_to_kernel_pgd(cpu_kernel_root_pt, user_pgd);
 }
+#else	/* !CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
+static inline void
+copy_user_pgd_to_kernel_root_pt(pgd_t *user_pgd)
+{
+	BUG_ON(true);
+}
 #endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 
 #endif /* _E2K_PGD_H */

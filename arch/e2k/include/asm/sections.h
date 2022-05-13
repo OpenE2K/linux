@@ -40,6 +40,7 @@ extern char __common_data_begin[], __common_data_end[];
 extern char _edata_bss[];
 extern char _t_entry[], _t_entry_end[];
 extern char __entry_handlers_start[], __entry_handlers_end[];
+extern char __entry_handlers_hcalls_start[], __entry_handlers_hcalls_end[];
 extern char __start_ro_after_init[], __end_ro_after_init[];
 #endif	/* ! __ASSEMBLY__ */
 

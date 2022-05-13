@@ -295,6 +295,12 @@ extern int __init e90s_early_iohub_online(int node, int link);
 #define NBSR_ROUTE_TBL2    0x7018	/* 4	RouteTbl 2 */
 #define NBSR_ROUTE_TBL3    0x701c	/* 4	RouteTbl 3  */
 #define NBSR_INT_CFG       0x7080	/* 4	Node Interrupt Configuration */
+# define NBSR_INTCFG_CLUSTER_MASK		0xf
+# define NBSR_INTCFG_IommuScMask2_OFFSET	16
+# define NBSR_INTCFG_IommuAerrMask2_OFFSET	12
+# define NBSR_INTCFG_IommuScMask_OFFSET		 4
+# define NBSR_INTCFG_IommuAerrMask_OFFSET	 0
+
 #define NBSR_NODE_CFG_INFO 0x7088	/* 4	Node Config Information */
 #define NBSR_JUMPER        0x70b0	/* 4	Node Jumper Register */
 # define NBSR_JUMPER_R2000P_JmpIommuMirrorEn (1 << 12)
@@ -397,10 +403,8 @@ extern int __init e90s_early_iohub_online(int node, int link);
 
 static inline unsigned get_cpu_revision(void)
 {
-#ifdef CONFIG_E90S
 	unsigned long ver;
 	__asm__ __volatile__("rdpr %%ver, %0" : "=r" (ver));
-#endif
 	return (ver >> 24) & 0xff;
 }
 
@@ -448,10 +452,8 @@ static inline bool has_external_iohub(void)
 #define	HAS_MACHINE_E90S_SIC		(1)
 #define	HAS_MACHINE_E2K_SIC		HAS_MACHINE_E90S_SIC
 #define	HAS_MACHINE_E2K_FULL_SIC	HAS_MACHINE_E90S_SIC
-#define	HAS_MACHINE_E2K_IOHUB		(1)
 #define	HAS_MACHINE_L_SIC		HAS_MACHINE_E90S_SIC
 #define	HAS_MACHINE_L_FULL_SIC		HAS_MACHINE_E2K_FULL_SIC
-#define	HAS_MACHINE_L_IOHUB		HAS_MACHINE_E2K_IOHUB
 
 extern void flush_locked_tte(void);
 extern void smp_synchronize_one_tick(int cpu);
@@ -459,6 +461,7 @@ extern long long delta_ticks[];
 extern long long do_sync_cpu_clocks;
 
 extern void __init e90s_late_time_init(void);
+void __e90s_enter_c6(void);
 #endif	/*__ASSEMBLY__*/
 
 #define CYCL_SYNC_GAP_BIT	11

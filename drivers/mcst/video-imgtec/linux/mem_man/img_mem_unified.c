@@ -53,6 +53,9 @@
 #ifdef CONFIG_X86
 #include <asm/cacheflush.h>
 #endif
+#ifdef CONFIG_E2K
+#include <asm/set_memory.h>
+#endif
 
 #include <img_mem_man.h>
 #include "img_mem_man_priv.h"
@@ -89,7 +92,7 @@ static int unified_alloc_wo_iommu(struct device *device, struct heap *heap,
 			goto alloc_page_failed;
 		}
 		sg_set_page(sgl, page, PAGE_SIZE, 0);
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 		set_memory_wc((unsigned long)page_address(page), 1);
 #endif
 		sgl = sg_next(sgl);
@@ -112,7 +115,7 @@ alloc_page_failed:
 		struct page *page = sg_page(sgl);
 
 		if (page) {
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 			set_memory_wb((unsigned long)page_address(page), 1);
 #endif
 			__free_page(page);
@@ -130,30 +133,28 @@ static int unified_alloc_w_iommu(struct device *device, struct heap *heap,
 			struct buffer *buffer)
 {
 	struct sg_table *sgt;
-	struct page **pages = NULL;
-	int ret, count;
+	int ret;
 	dma_addr_t	dma_addr;
-	BUILD_BUG_ON(!IS_ENABLED(CONFIG_DMA_REMAP));
+
 	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
 	if (!sgt)
 		return -ENOMEM;
 
-	count = PAGE_ALIGN(size) / PAGE_SIZE;
-
 	buffer->kptr = dma_alloc_coherent(device, size,
 			&dma_addr, heap->options.unified.gfp_type);
-
 	if (!buffer->kptr) {
 		ret = -EFAULT;
 		goto alloc_page_failed;
 	}
-	BUG_ON(!is_vmalloc_addr(buffer->kptr));
-	pages = dma_common_find_pages(buffer->kptr);
-	BUG_ON(!pages);
+	BUG_ON(is_vmalloc_addr(buffer->kptr));
 
-	ret = sg_alloc_table_from_pages(sgt, pages, count, 0, size, GFP_KERNEL);
+	ret = dma_get_sgtable(device, sgt, buffer->kptr, dma_addr, size);
 	if (ret)
-		goto sg_alloc_table_failed;
+		goto get_sgtable_failed;
+
+#if defined CONFIG_X86 || defined CONFIG_E2K
+	set_memory_wc((unsigned long) buffer->kptr, PAGE_ALIGN(size) >> PAGE_SHIFT);
+#endif
 
 	sg_dma_len(sgt->sgl) = size;
 	sg_dma_address(sgt->sgl) = dma_addr;
@@ -161,8 +162,8 @@ static int unified_alloc_w_iommu(struct device *device, struct heap *heap,
 	buffer->priv = sgt;
 	return 0;
 
-sg_alloc_table_failed:
-	dma_free_coherent(buffer->device, size, buffer->kptr, dma_addr);
+get_sgtable_failed:
+	dma_free_coherent(device, size, buffer->kptr, dma_addr);
 alloc_page_failed:
 	kfree(sgt);
 	return ret;
@@ -183,6 +184,10 @@ static void unified_free(struct heap *heap, struct buffer *buffer)
 	struct sg_table *sgt = buffer->priv;
 	struct scatterlist *sgl = sgt->sgl;
 	if (device_iommu_mapped(buffer->device)) {
+#if defined CONFIG_X86 || defined CONFIG_E2K
+		set_memory_wb((unsigned long) buffer->kptr,
+				PAGE_ALIGN(buffer->actual_size) >> PAGE_SHIFT);
+#endif
 		dma_free_coherent(buffer->device, buffer->actual_size,
 						buffer->kptr, sg_dma_address(sgl));
 	} else {
@@ -194,7 +199,7 @@ static void unified_free(struct heap *heap, struct buffer *buffer)
 				sgt->orig_nents, DMA_BIDIRECTIONAL);
 		sgl = sgt->sgl;
 		while (sgl) {
-	#if defined(CONFIG_X86)
+	#if defined CONFIG_X86 || defined CONFIG_E2K
 			set_memory_wb((unsigned long)page_address(sg_page(sgl)), 1);
 	#endif
 			__free_page(sg_page(sgl));

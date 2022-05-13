@@ -18,10 +18,9 @@ extern int __init native_arch_pci_init(void);
 #define	E2K_X86_IO_AREA_BASE	E2K_KERNEL_IO_BIOS_AREAS_BASE
 
 /* Size of pages for the IO area */
-#define	E2K_X86_IO_PAGE_SIZE (cpu_has(CPU_HWBUG_LARGE_PAGES) ? \
-				E2K_SMALL_PAGE_SIZE : E2K_LARGE_PAGE_SIZE)
-#define X86_IO_AREA_PHYS_BASE		(machine.x86_io_area_base)
-#define X86_IO_AREA_PHYS_SIZE		(machine.x86_io_area_size)
+#define	E2K_X86_IO_PAGE_SIZE 	E2K_LARGE_PAGE_SIZE
+#define X86_IO_AREA_PHYS_BASE	(machine.x86_io_area_base)
+#define X86_IO_AREA_PHYS_SIZE	(machine.x86_io_area_size)
 
 
 /*
@@ -39,32 +38,24 @@ extern int __init native_arch_pci_init(void);
 static inline u8 native_readb_relaxed(const volatile void __iomem *addr)
 {
 	u8 res = *(const volatile u8 __force *) addr;
-	if (cpu_has(CPU_HWBUG_PIO_READS))
-		__E2K_WAIT(_ld_c);
 	return res;
 }
 
 static inline u16 native_readw_relaxed(const volatile void __iomem *addr)
 {
 	u16 res = *(const volatile u16 __force *) addr;
-	if (cpu_has(CPU_HWBUG_PIO_READS))
-		__E2K_WAIT(_ld_c);
 	return res;
 }
 
 static inline u32 native_readl_relaxed(const volatile void __iomem *addr)
 {
 	u32 res = *(const volatile u32 __force *) addr;
-	if (cpu_has(CPU_HWBUG_PIO_READS))
-		__E2K_WAIT(_ld_c);
 	return res;
 }
 
 static inline u64 native_readq_relaxed(const volatile void __iomem *addr)
 {
 	u64 res = *(const volatile u64 __force *) addr;
-	if (cpu_has(CPU_HWBUG_PIO_READS))
-		__E2K_WAIT(_ld_c);
 	return res;
 }
 
@@ -198,11 +189,7 @@ static inline void native_writeq(u64 value, volatile void __iomem *addr)
  * x86 works and how most of the drivers are tested. */
 # define __io_paw() __E2K_WAIT(_st_c | _sas)
 #else
-# define __io_par() \
-do { \
-	if (cpu_has(CPU_HWBUG_PIO_READS)) \
-		__E2K_WAIT(_ld_c); \
-} while (0)
+# define __io_par()
 # define __io_pbw()
 # define __io_paw()
 #endif
@@ -515,15 +502,16 @@ static inline int __init arch_pci_init(void)
  * Map in an area of physical address space, for accessing
  * I/O devices etc.
  */
-#define ioremap_cache	ioremap_cache
 #define ioremap_wc	ioremap_wc
-#define ioremap_wt	ioremap_wc
 #define ioremap_nocache ioremap_nocache
 #define	ioremap_uc	ioremap_nocache
 #define	ioremap		ioremap_nocache
-extern void __iomem *ioremap_cache(resource_size_t address, unsigned long size);
 extern void __iomem *ioremap_wc(resource_size_t address, unsigned long size);
 extern void __iomem *ioremap_nocache(resource_size_t address, unsigned long size);
+
+extern void __iomem *ioremap_prot(resource_size_t address, unsigned long size,
+		unsigned long prot_val);
+#define ioremap_prot ioremap_prot
 
 #define iounmap iounmap
 extern void iounmap(volatile void __iomem *addr);
@@ -531,6 +519,8 @@ extern void iounmap(volatile void __iomem *addr);
 #define ARCH_HAS_IOREMAP_WC
 #define ARCH_HAS_IOREMAP_WT
 
+void *arch_memremap_wb(phys_addr_t phys_addr, size_t size);
+#define arch_memremap_wb arch_memremap_wb
 
 extern void __memset_io(void *s, long c, size_t count);
 

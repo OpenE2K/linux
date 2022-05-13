@@ -115,7 +115,7 @@ static int ehci_pci_setup(struct usb_hcd *hcd)
 				ehci->set_type_to_last_in_list = 1;
 				ehci->short_read_does_not_supported = 1;
 #ifdef CONFIG_E2K
-				if (IS_MACHINE_ES2 || IS_MACHINE_E2S)
+				if (IS_MACHINE_E2S)
 					ehci->align_descs_to_64 = 1;
 #endif
 			}

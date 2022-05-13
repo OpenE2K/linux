@@ -133,17 +133,13 @@ extern void *malloc(int size);
 
 #define	APICINT_SIZE		0x01000000
 
-#define	ES2_LAPICINT_BASE	0x120000000
-#define	ES2_IOAPICINT_BASE	0x130000000
-#define	ES2_SAPICINT_BASE	0x140000000
+#define	E2S_LAPICINT_BASE	0x120000000
+#define	E2S_IOAPICINT_BASE	0x130000000
+#define	E2S_SAPICINT_BASE	0x140000000
 
-#define	E2S_LAPICINT_BASE	ES2_LAPICINT_BASE
-#define	E2S_IOAPICINT_BASE	ES2_IOAPICINT_BASE
-#define	E2S_SAPICINT_BASE	ES2_SAPICINT_BASE
-
-#define	E8C_LAPICINT_BASE	ES2_LAPICINT_BASE
-#define	E8C_IOAPICINT_BASE	ES2_IOAPICINT_BASE
-#define	E8C_SAPICINT_BASE	ES2_SAPICINT_BASE
+#define	E8C_LAPICINT_BASE	E2S_LAPICINT_BASE
+#define	E8C_IOAPICINT_BASE	E2S_IOAPICINT_BASE
+#define	E8C_SAPICINT_BASE	E2S_SAPICINT_BASE
 
 #define	E1CP_EMBEDED_IOAPIC_BASE 0x00000010fec01000
 #define	E1CP_LEGACY_NBSR_BASE	 0x0000001100000000
@@ -428,26 +424,26 @@ int pcibios_debugwrite_config_dword(int domain, unsigned char bus, unsigned char
 
 #ifdef CONFIG_E2K_SIC
 #ifndef	CONFIG_L_IOH2
-int system_commutator_es2_ioh_write_byte(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_write_byte(int domain, unsigned char bus,
 							int where, u8 value);
-int system_commutator_es2_ioh_read_byte(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_read_byte(int domain, unsigned char bus,
 							int where, u8 *value);
-int system_commutator_es2_ioh_write_word(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_write_word(int domain, unsigned char bus,
 							int where, u16 value);
-int system_commutator_es2_ioh_read_word(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_read_word(int domain, unsigned char bus,
 							int where, u16 *value);
-int system_commutator_es2_ioh_write_dword(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_write_dword(int domain, unsigned char bus,
 							int where, u32 value);
-int system_commutator_es2_ioh_read_dword(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_read_dword(int domain, unsigned char bus,
 							int where, u32 *value);
 #else	/* CONFIG_L_IOH2 */
 /* IOHUB #2 has not SCRB registers to read/write */
-#define system_commutator_es2_ioh_write_byte(domain, bus, where, value)	0
-#define system_commutator_es2_ioh_read_byte(domain, bus, where, value)	0
-#define system_commutator_es2_ioh_write_word(domain, bus, where, value)	0
-#define system_commutator_es2_ioh_read_word(domain, bus, where, value)	0
-#define system_commutator_es2_ioh_write_dword(domain, bus, where, value) 0
-#define system_commutator_es2_ioh_read_dword(domain, bus, where, value)	0
+#define system_commutator_e2s_ioh_write_byte(domain, bus, where, value)
+#define system_commutator_e2s_ioh_read_byte(domain, bus, where, value)
+#define system_commutator_e2s_ioh_write_word(domain, bus, where, value)
+#define system_commutator_e2s_ioh_read_word(domain, bus, where, value)
+#define system_commutator_e2s_ioh_write_dword(domain, bus, where, value)
+#define system_commutator_e2s_ioh_read_dword(domain, bus, where, value)
 #endif	/* ! CONFIG_L_IOH2 */
 #endif /* CONFIG_E2K_SIC */
 

@@ -728,6 +728,13 @@ int kvm_boot_spinlock_init(struct kvm *kvm)
 	return 0;
 }
 
+
+int vcpu_boot_spinlock_init(struct kvm_vcpu *vcpu)
+{
+	INIT_LIST_HEAD(&vcpu->arch.vcpus_to_spin);
+	return 0;
+}
+
 static void destroy_boot_spinlock_list(struct hlist_head *head)
 {
 	spinlock_waiter_t *w;

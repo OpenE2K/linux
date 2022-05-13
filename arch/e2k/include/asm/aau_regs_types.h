@@ -22,20 +22,20 @@
 
 #if	CONFIG_CPU_ISET >= 5
 #  define	IS_AAU_ISET_V5()	true
-#  define	IS_AAU_ISET_V2()	false
+#  define	IS_AAU_ISET_V3()	false
 #  define	IS_AAU_ISET_GENERIC()	false
 #elif	CONFIG_CPU_ISET >= 1
-#  define	IS_AAU_ISET_V2()	true
+#  define	IS_AAU_ISET_V3()	true
 #  define	IS_AAU_ISET_V5()	false
 #  define	IS_AAU_ISET_GENERIC()	false
 #elif	CONFIG_CPU_ISET == 0
 #  define	IS_AAU_ISET_GENERIC()	true
-#  define	IS_AAU_ISET_V2()	false
+#  define	IS_AAU_ISET_V3()	false
 #  define	IS_AAU_ISET_V5()	false
 #else	/* CONFIG_CPU_ISET undefined or negative */
 # warning "Undefined CPU ISET VERSION #, IS_AAU_ISET_Vx is defined dinamicaly"
 #  define	IS_AAU_ISET_GENERIC()	true
-#  define	IS_AAU_ISET_V2()	false
+#  define	IS_AAU_ISET_V3()	false
 #  define	IS_AAU_ISET_V5()	false
 #endif	/* CONFIG_CPU_ISET 0-6 */
 
@@ -48,22 +48,25 @@ enum {
 };
 #define AAU_AASR_STB 0x20
 #define AAU_AASR_IAB 0x40
-typedef struct e2k_aasr_fields {
-	u32 reserved    : 5;    /* [4:0] */
-	u32 stb         : 1;    /* [5:5] */
-	u32 iab         : 1;    /* [6:6] */
-	u32 lds         : 3;    /* [9:7] */
-} e2k_aasr_fields_t;
 typedef union e2k_aasr {                       /* aadj quad-word */
-	e2k_aasr_fields_t fields;
+	struct {
+		u32 reserved    : 5;    /* [4:0] */
+		u32 stb         : 1;    /* [5:5] */
+		u32 iab         : 1;    /* [6:6] */
+		u32 lds         : 3;    /* [9:7] */
+	};
 	u32 word;
 } e2k_aasr_t;
 
+#define E2K_FULL_AASR ((e2k_aasr_t) { .stb = 1, .iab = 1, .lds = AASR_STOPPED })
+
 /* Check up AAU state */
-#define AAU_NULL(aasr)		(AS(aasr).lds == AASR_NULL)
-#define AAU_READY(aasr)		(AS(aasr).lds == AASR_READY)
-#define AAU_ACTIVE(aasr)	(AS(aasr).lds == AASR_ACTIVE)
-#define AAU_STOPPED(aasr)	(AS(aasr).lds == AASR_STOPPED)
+#define AAU_NULL(aasr)		(aasr.lds == AASR_NULL)
+#define AAU_READY(aasr)		(aasr.lds == AASR_READY)
+#define AAU_ACTIVE(aasr)	(aasr.lds == AASR_ACTIVE)
+#define AAU_STOPPED(aasr)	(aasr.lds == AASR_STOPPED)
+
+#define aau_has_state(aasr)	(!AAU_NULL(aasr) || aasr.iab || aasr.stb)
 
 typedef u32	e2k_aafstr_t;
 
@@ -150,13 +153,7 @@ typedef union e2k_aalda_struct {
 #define	AALDIS_REGS_NUM		64
 #define	AALDAS_REGS_NUM		64
 
-/*
- * For virtualization, aasr might be switched to worst-case scenario (lds = AAU_STOPPED,
- * iab = 1, stb = 1). In that case, real aasr will be saved to guest_aasr
- */
 typedef struct e2k_aau_context {
-	e2k_aasr_t		aasr;
-	e2k_aasr_t		guest_aasr;
 	e2k_aafstr_t		aafstr;
 	e2k_aaldm_t		aaldm;
 	e2k_aaldv_t		aaldv;

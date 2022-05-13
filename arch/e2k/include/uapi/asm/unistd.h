@@ -369,7 +369,7 @@
 #define __NR_signalfd4		347
 #define __NR_eventfd2		348
 #define __NR_recvmmsg		349
-#define __NR_cnt_point		350
+/* free (unused) entries - reserve 350 - 350 */
 #define __NR_timerfd_create	351
 #define __NR_timerfd_settime	352
 #define __NR_timerfd_gettime	353

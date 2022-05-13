@@ -10,16 +10,14 @@
 	.globl		sparc64_cpu_startup, sparc64_cpu_startup_end
 sparc64_cpu_startup:
 
-	setx	cpu_new_thread, %g4, %g6
+	set	cpu_new_thread, %g6
 	ldx	[%g6], %g6
 
 	wrpr	%g0, 0, %wstate
-	wrpr	%g0, 0x0, %tl
 
 	call		setup_trap_table
 	nop
 
-	wr	%g0, ASI_P, %asi
 	mov	1, %g1
 	sllx	%g1, THREAD_SHIFT, %g1
 	sub	%g1, (STACKFRAME_SZ + STACK_BIAS), %g1

@@ -78,9 +78,7 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	if (!size || last_addr < phys_addr)
 		return NULL;
 
-	/*
-	 * Don't remap the low PCI/ISA area, it's always mapped..
-	 */
+	/* Don't remap the VGA area, it's always mapped */
 	if (phys_addr >= VGA_VRAM_PHYS_BASE &&
 			last_addr < (VGA_VRAM_PHYS_BASE + VGA_VRAM_SIZE)) {
 		DebugIO("VGA VRAM phys. area, it's always mapped\n");
@@ -139,25 +137,6 @@ void __iomem *ioremap_nocache(resource_size_t address, unsigned long size)
 }
 EXPORT_SYMBOL(ioremap_nocache);
 
-void __iomem *ioremap_cache(resource_size_t address, unsigned long size)
-{
-	/* So, this is fragile.  Driver *can* map its device memory
-	 * with ioremap_cache() and later call set_memory_{wc/uc}()
-	 * on it, in which case we must first set memory type to
-	 * "GnC" (and it will work as expected) and then to "XnP/XP".
-	 *
-	 * But at the point when set_memory_{wc/uc} is called pte has
-	 * no information that it belongs to a device so we can not
-	 * possibly know that External memory type is needed.
-	 *
-	 * Fix this by using software bit in PTE to track memory type
-	 * ("External" vs "General" distinction) essentially creating
-	 * a new purely software type: EXT_CACHE_MT. */
-	return __ioremap_caller(address, size, EXT_CACHE_MT,
-			__builtin_return_address(0));
-}
-EXPORT_SYMBOL(ioremap_cache);
-
 void __iomem *ioremap_wc(resource_size_t address, unsigned long size)
 {
 	return __ioremap_caller(address, size, EXT_PREFETCH_MT,
@@ -165,13 +144,19 @@ void __iomem *ioremap_wc(resource_size_t address, unsigned long size)
 }
 EXPORT_SYMBOL(ioremap_wc);
 
+void __iomem *ioremap_prot(resource_size_t address, unsigned long size,
+		unsigned long prot_val)
+{
+	return __ioremap_caller(address, size, get_pte_val_memory_type(prot_val),
+			__builtin_return_address(0));
+}
+EXPORT_SYMBOL(ioremap_prot);
+
 void iounmap(volatile void __iomem *addr)
 {
 	DebugIO("started for virtual addr 0x%px\n", addr);
 
-	/*
-	 * Don't unmap the VGA area, it's always mapped..
-	 */
+	/* Don't unmap the VGA area, it's always mapped */
 	if (addr >= phys_to_virt(VGA_VRAM_PHYS_BASE) &&
 	    addr < phys_to_virt(VGA_VRAM_PHYS_BASE + VGA_VRAM_SIZE)) {
 		DebugIO("VGA VRAM phys. area, it's always mapped\n");
@@ -192,7 +177,7 @@ int arch_ioremap_pud_supported(void)
 
 int arch_ioremap_pmd_supported(void)
 {
-	return !IS_MACHINE_ES2;
+	return 1;
 }
 
 int arch_ioremap_p4d_supported(void)
@@ -200,3 +185,15 @@ int arch_ioremap_p4d_supported(void)
 	return 0;
 }
 #endif
+
+void *arch_memremap_wb(phys_addr_t phys_addr, size_t size)
+{
+	/*
+	 * For RAM remapping arch-independent code will try reusing
+	 * linear map.  So we get here only when trying to map device
+	 * memory as WriteBack which is not allowed on e2k.
+	 */
+	WARN_ONCE(1, "Writeback remap attempted on non-ram region %llx-%llx\n",
+			phys_addr, phys_addr + size);
+	return NULL;
+}

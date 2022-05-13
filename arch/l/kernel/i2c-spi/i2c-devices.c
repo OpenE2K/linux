@@ -210,7 +210,7 @@ static int __init i2c_board_info_init(void)
 #endif
 
 #ifdef	CONFIG_E2K
-	if (bootblock_virt->info.bios.mb_type == MB_TYPE_ES2_BUTTERFLY) {
+	if (0) {
 #else
 	if (1) {
 #endif
@@ -230,7 +230,6 @@ static int __init i2c_board_info_init(void)
 				ARRAY_SIZE(butterfly_i2c_devices_bus3));
 	} else {
 #ifdef	CONFIG_E2K
-
 	if (bootblock_virt->info.bios.mb_type ==
 		    MB_TYPE_E1CP_IOHUB2_RAZBRAKOVSCHIK
 	   ) {
@@ -255,7 +254,6 @@ static int __init i2c_board_info_init(void)
 					e2k_i2c_board_info_e8c,
 					ARRAY_SIZE(e2k_i2c_board_info_e8c));
 	} else {
-
 #if IS_ENABLED(CONFIG_IPE2ST_POWER)
 		if (iohub_i2c_line_id) {
 			i2c_register_board_info(iohub_i2c_line_id,

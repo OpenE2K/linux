@@ -913,6 +913,11 @@ kvm_set_guest_vcpu_LSR(struct kvm_vcpu *vcpu, u64 lsr)
 {
 	CPU_SET_DSREG(vcpu, LSR.LSR_reg, lsr);
 }
+static inline void
+kvm_set_guest_vcpu_LSR1(struct kvm_vcpu *vcpu, u64 lsr1)
+{
+	CPU_SET_DSREG(vcpu, LSR1.LSR_reg, lsr1);
+}
 static inline u64
 kvm_get_guest_vcpu_LSR_value(struct kvm_vcpu *vcpu)
 {
@@ -923,6 +928,11 @@ static inline void
 kvm_set_guest_vcpu_ILCR(struct kvm_vcpu *vcpu, u64 ilcr)
 {
 	CPU_SET_DSREG(vcpu, ILCR.ILCR_reg, ilcr);
+}
+static inline void
+kvm_set_guest_vcpu_ILCR1(struct kvm_vcpu *vcpu, u64 ilcr1)
+{
+	CPU_SET_DSREG(vcpu, ILCR1.ILCR_reg, ilcr1);
 }
 static inline u64
 kvm_get_guest_vcpu_ILCR_value(struct kvm_vcpu *vcpu)
@@ -1076,7 +1086,7 @@ static inline bool kvm_get_guest_vcpu_sge(struct kvm_vcpu *vcpu)
 static inline void
 kvm_set_guest_vcpu_aasr_value(struct kvm_vcpu *vcpu, u32 reg_value)
 {
-	AAU_SET_SREG(vcpu, aasr.word, reg_value);
+	CPU_SET_SREG(vcpu, AASR.word, reg_value);
 }
 static inline void
 kvm_set_guest_vcpu_aasr(struct kvm_vcpu *vcpu, e2k_aasr_t aasr)
@@ -1087,7 +1097,7 @@ kvm_set_guest_vcpu_aasr(struct kvm_vcpu *vcpu, e2k_aasr_t aasr)
 static inline u32
 kvm_get_guest_vcpu_aasr_value(struct kvm_vcpu *vcpu)
 {
-	return AAU_GET_SREG(vcpu, aasr.word);
+	return CPU_GET_SREG(vcpu, AASR.word);
 }
 static inline e2k_aasr_t
 kvm_get_guest_vcpu_aasr(struct kvm_vcpu *vcpu)

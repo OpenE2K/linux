@@ -46,12 +46,7 @@ static inline __wsum ip_fast_csum_nofold_maybe_unaligned(const void *iph, unsign
 #define ip_fast_csum ip_fast_csum
 static inline __sum16 ip_fast_csum(const void *iph, unsigned int ihl)
 {
-	if (cpu_has(CPU_HWBUG_UNALIGNED_LOADS) &&
-			!IS_ALIGNED((unsigned long) iph, 4))
-		return (__force __sum16) ~e2k_do_csum(iph, ihl*4);
-	else
-		return csum_fold(ip_fast_csum_nofold_maybe_unaligned(iph, ihl));
-
+	return csum_fold(ip_fast_csum_nofold_maybe_unaligned(iph, ihl));
 }
 
 static inline u32 add32_with_carry(u32 a, u32 b)
@@ -86,8 +81,7 @@ __wsum __csum_partial(const void *buff, int len, __wsum sum);
 
 static inline __wsum csum_partial(const void *buff, int len, __wsum sum)
 {
-	if (__builtin_constant_p(len) && len <= 16 && (len & 1) == 0 &&
-			!cpu_has(CPU_HWBUG_UNALIGNED_LOADS)) {
+	if (__builtin_constant_p(len) && len <= 16 && (len & 1) == 0) {
 		u64 sum_64 = (__force u32) sum;
 
 		if (len == 2)
@@ -108,8 +102,7 @@ static inline __wsum csum_partial(const void *buff, int len, __wsum sum)
 			sum_64 += *(const u32 *) (buff + 12);
 
 		sum = from64to32(sum_64);
-	} else if (__builtin_constant_p(len) && (len & 3) == 0 &&
-			!cpu_has(CPU_HWBUG_UNALIGNED_LOADS)) {
+	} else if (__builtin_constant_p(len) && (len & 3) == 0) {
 		sum = csum_add(sum, ip_fast_csum_nofold_maybe_unaligned(buff, len >> 2));
 	} else {
 		prefetch((__force void *) buff);

@@ -519,9 +519,6 @@ static void fixup_vga(struct pci_dev *pdev)
 	if (vga_default_device())
 		return;
 
-	if (!HAS_MACHINE_E2K_IOHUB)
-		return;
-
 	pci_read_config_word(pdev, PCI_COMMAND, &cmd);
 	if ((cmd & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) !=
 				(PCI_COMMAND_IO | PCI_COMMAND_MEMORY))

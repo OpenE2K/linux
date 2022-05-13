@@ -149,6 +149,7 @@ typedef	struct pt_regs {
 	int		sys_num;	/* to restart sys_call		*/
 	int		kernel_entry;
 	union pt_regs_flags flags;
+	e2k_aasr_t	aasr;
 	e2k_ctpr_t	ctpr1;		/* CTPRj for control transfer */
 	e2k_ctpr_t	ctpr2;
 	e2k_ctpr_t	ctpr3;
@@ -195,9 +196,13 @@ typedef	struct pt_regs {
 	bool		need_inject;	/* flag for unconditional injection */
 					/* trap to guest to avoid acces to */
 					/* guest user space in trap context */
+	bool		dont_inject;	/* page fault injection to the guest */
+					/* is prohibited */
 	bool		in_hypercall;	/* trap is occured in hypercall */
 	bool		is_guest_user;	/* trap/system call on/from guest */
 					/* user */
+	bool		in_fast_syscall;/* guest issues fast system call and */
+					/* it is in progress */
 	unsigned long	traps_to_guest;	/* mask of traps passed to guest */
 					/* and are not yet handled by guest */
 					/* need only for host */
@@ -231,23 +236,6 @@ pt_regs_to_trap_regs(struct pt_regs *regs)
 	return PTR_ALIGN((void *) regs + sizeof(*regs), 8);
 }
 
-#ifdef CONFIG_USE_AAU
-static inline e2k_aau_t *
-pt_regs_to_aau_regs(struct pt_regs *regs)
-{
-	struct trap_pt_regs *trap;
-
-	trap = pt_regs_to_trap_regs(regs);
-
-	return PTR_ALIGN((void *) trap + sizeof(*trap), 8);
-}
-#else	/* ! CONFIG_USE_AAU */
-static inline e2k_aau_t *
-pt_regs_to_aau_regs(struct pt_regs *regs)
-{
-	return NULL;
-}
-#endif
 static inline bool
 is_sys_call_pt_regs(struct pt_regs *regs)
 {
@@ -505,7 +493,7 @@ static inline void calculate_e2k_dstack_parameters(
 /* virtualization support */
 #include <asm/kvm/ptrace.h>
 
-struct signal_stack_context {
+typedef struct signal_stack_context {
 	struct pt_regs		regs;
 	struct trap_pt_regs	trap;
 	struct k_sigaction	sigact;
@@ -515,7 +503,7 @@ struct signal_stack_context {
 #endif
 	u64			sbbp[SBBP_ENTRIES_NUM];
 	struct pv_vcpu_ctxt	vcpu_ctxt;
-};
+} signal_stack_context_t;
 
 #define __signal_pt_regs_last(ti) \
 ({ \
@@ -815,7 +803,6 @@ extern unsigned long profile_pc(struct pt_regs *regs);
 #else
 #define profile_pc(regs) instruction_pointer(regs)
 #endif
-extern void show_regs(struct pt_regs *);
 extern int syscall_trace_entry(struct pt_regs *regs);
 extern void syscall_trace_leave(struct pt_regs *regs);
 

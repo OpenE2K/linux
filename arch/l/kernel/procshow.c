@@ -54,16 +54,6 @@ static loadtime_tpnt_t 	loadtime_tpnt_arr[LOADTIME_TPNT_NUM] = {
 };
 #endif	/* CONFIG_BOOT_TRACE */
 
-
-#ifdef CONFIG_E2K
-#define LDSP_FILENAME		"dspinfo"
-struct proc_dir_entry *ldsp_entry = NULL;
-EXPORT_SYMBOL(ldsp_entry);
-const struct file_operations *ldsp_proc_fops_pointer = NULL;
-EXPORT_SYMBOL(ldsp_proc_fops_pointer);
-#endif
-
-
 #if defined(CONFIG_E2K) || defined(CONFIG_E90S)
 #define RDMA_FILENAME		"rdmainfo"
 struct proc_dir_entry	*rdma_entry = NULL;
@@ -534,82 +524,6 @@ static const struct file_operations nodes_proc_fops = {
 
 #endif /* CONFIG_E2K || CONFIG_E90S */
 
-#ifdef CONFIG_E2K
-static int ldsp_seq_show(struct seq_file *s, void *v)
-{
-	int node = (int)(*((loff_t *)v));
-	e2k_pwr_mgr_t pwr;
-
-	seq_printf(s, "    node: %d\n", node);
-	pwr.word = sic_read_node_nbsr_reg(node, SIC_pwr_mgr);
-	seq_printf(s, "      state: %s\n",
-		   (pwr.fields.ic_clk) ? "on" : "off");
-
-	return 0;
-}
-
-extern int eldsp_disable;
-static void *ldsp_seq_start(struct seq_file *s, loff_t *pos)
-{
-	int node = 0, dsp_on = 0;
-	e2k_pwr_mgr_t pwr;
-
-	if (!node_online(*pos))
-		*pos = next_online_node(*pos);
-
-	for_each_online_node(node) {
-		pwr.word = sic_read_node_nbsr_reg(node, SIC_pwr_mgr);
-		if (pwr.fields.ic_clk)
-			dsp_on++;
-	}
-
-	if (eldsp_disable)
-		seq_printf(s, "! ELDSP device disabled " \
-			      "from cmdline (\"eldsp-off\").\n");
-
-	seq_printf(s, "- ELDSP device info - number: %d, online: %d.\n",
-		   num_online_nodes() * 4,
-		   dsp_on * 4);
-	seq_printf(s, "  Module not loaded.\n");
-	if (*pos == MAX_NUMNODES)
-		return 0;
-	seq_printf(s, "  Status for each node:\n");
-	return (void *)pos;
-}
-
-static void *ldsp_seq_next(struct seq_file *s, void *v, loff_t *pos)
-{
-	*pos = next_online_node(*pos);
-	if (*pos == MAX_NUMNODES)
-		return 0;
-	return (void *)pos;
-}
-
-static void ldsp_seq_stop(struct seq_file *s, void *v)
-{
-}
-
-static const struct seq_operations ldsp_seq_ops = {
-	.start = ldsp_seq_start,
-	.next  = ldsp_seq_next,
-	.stop  = ldsp_seq_stop,
-	.show  = ldsp_seq_show
-};
-
-static int ldsp_proc_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &ldsp_seq_ops);
-}
-
-static const struct file_operations ldsp_proc_fops = {
-	.owner   = THIS_MODULE,
-	.open    = ldsp_proc_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release
-};
-#endif	/* __e2k__ */
-
 static int loadtime_proc_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, loadtime_proc_show, NULL);
@@ -715,18 +629,6 @@ static int __init init_procshow(void)
 			 &loadtime_kernel_proc_fops))
 		return -ENOMEM;
 #endif	/* CONFIG_BOOT_TRACE */
-
-#ifdef CONFIG_E2K
-	if (HAS_MACHINE_E2K_DSP) {
-		ldsp_proc_fops_pointer = &ldsp_proc_fops;
-		ldsp_entry = proc_create(LDSP_FILENAME, S_IRUGO,
-				NULL, ldsp_proc_fops_pointer);
-		if (!ldsp_entry) {
-			ldsp_proc_fops_pointer = NULL;
-			return -ENOMEM;
-		}
-	}
-#endif
 
 #if defined(CONFIG_E2K) || defined(CONFIG_E90S)
 	if (num_possible_rdmas()) {

@@ -29,7 +29,7 @@
 /* numbers of PTE's bits */
 #define	_PAGE_P_BIT_GP		0	/* Present */
 #define _PAGE_W_BIT_GP		1	/* Writable */
-#define _PAGE_A_HW_BIT_GP	5	/* page Accessed */
+#define _PAGE_A_BIT_GP		5	/* page Accessed */
 #define	_PAGE_D_BIT_GP		6	/* page Dirty */
 #define	_PAGE_HUGE_BIT_GP	7	/* huge Page Size */
 #define	_PAGE_MTCR_SHIFT_GP	8	/* shift of Memory Type Combination */
@@ -43,7 +43,7 @@
 
 #define _PAGE_P_GP		(1ULL << _PAGE_P_BIT_GP)
 #define _PAGE_W_GP		(1ULL << _PAGE_W_BIT_GP)
-#define _PAGE_A_HW_GP		(1ULL << _PAGE_A_HW_BIT_GP)
+#define _PAGE_A_GP		(1ULL << _PAGE_A_BIT_GP)
 #define _PAGE_D_GP		(1ULL << _PAGE_D_BIT_GP)
 #define _PAGE_HUGE_GP		(1ULL << _PAGE_HUGE_BIT_GP)
 #define	_PAGE_MTCR_GP		\
@@ -81,17 +81,17 @@
 		((e2k_addr_t)(pte_val) & _PAGE_PFN_GP)
 
 /* PTE flags mask to can update/reduce and restricted to update */
-#define _PAGE_CHG_MASK_GP	(_PAGE_PFN_GP | _PAGE_A_HW_GP | _PAGE_D_GP | \
+#define _PAGE_CHG_MASK_GP	(_PAGE_PFN_GP | _PAGE_A_GP | _PAGE_D_GP | \
 				_PAGE_SW1_GP | _PAGE_SW2_GP | \
 				_PAGE_MTCR_GP | _PAGE_MT_GP)
 #define _HPAGE_CHG_MASK_GP	(_PAGE_CHG_MASK_GP | _PAGE_HUGE_GP)
-#define _PROT_REDUCE_MASK_GP	(_PAGE_P_GP | _PAGE_W_GP | _PAGE_A_HW_GP | \
+#define _PROT_REDUCE_MASK_GP	(_PAGE_P_GP | _PAGE_W_GP | _PAGE_A_GP | \
 				_PAGE_D_GP | _PAGE_MTCR_GP | _PAGE_MT_GP)
 #define	_PROT_RESTRICT_MASK_GP	0ULL
 
 /* some useful PT entries protection basis values */
 #define _PAGE_KERNEL_RX_GP	\
-		(_PAGE_P_GP | _PAGE_A_HW_GP)
+		(_PAGE_P_GP | _PAGE_A_GP)
 #define _PAGE_KERNEL_RO_GP	_PAGE_KERNEL_RX_GP
 #define _PAGE_KERNEL_RW_GP	\
 		(_PAGE_KERNEL_RX_GP | _PAGE_W_GP | _PAGE_D_GP)
@@ -137,8 +137,8 @@ covert_uni_pte_flags_to_pte_val_gp(const uni_pteval_t uni_flags)
 		pte_flags |= (_PAGE_W_GP);
 	if (uni_flags & UNI_PAGE_MEM_TYPE_RULE)
 		pte_flags |= (_PAGE_MTCR_GP);
-	if (uni_flags & UNI_PAGE_HW_ACCESS)
-		pte_flags |= (_PAGE_A_HW_GP);
+	if (uni_flags & UNI_PAGE_ACCESSED)
+		pte_flags |= (_PAGE_A_GP);
 	if (uni_flags & UNI_PAGE_DIRTY)
 		pte_flags |= (_PAGE_D_GP);
 	if (uni_flags & UNI_PAGE_HUGE)
@@ -149,10 +149,8 @@ covert_uni_pte_flags_to_pte_val_gp(const uni_pteval_t uni_flags)
 		pte_flags |= (_PAGE_MT_GP);
 
 	BUG_ON(uni_flags & UNI_PAGE_AVAIL);
-	BUG_ON(uni_flags & UNI_PAGE_SW_ACCESS);
 	BUG_ON(uni_flags & UNI_PAGE_SPECIAL);
 	BUG_ON(uni_flags & UNI_PAGE_GFN);
-	BUG_ON(uni_flags & UNI_PAGE_ACCESSED);
 
 	return pte_flags;
 }

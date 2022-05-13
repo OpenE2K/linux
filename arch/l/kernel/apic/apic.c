@@ -62,6 +62,7 @@
 #include <asm/io_apic.h>
 #include <asm-l/idle.h>
 #include <asm/smp.h>
+#include <asm/epic.h>
 
 #include <asm/irq_regs.h>
 #include <asm/hw_irq.h>
@@ -85,6 +86,8 @@ unsigned int max_physical_apicid;
  * Bitmask of physically existing CPUs:
  */
 physid_mask_t phys_cpu_present_map;
+/* it can be used before clearing the bss section */
+physid_mask_t phys_cpu_offline_map = PHYSID_MASK_ALL;
 
 /*
  * Processor to be disabled specified by kernel parameter
@@ -100,6 +103,16 @@ DEFINE_EARLY_PER_CPU_READ_MOSTLY(u16, x86_cpu_to_apicid, BAD_APICID);
 DEFINE_EARLY_PER_CPU_READ_MOSTLY(u16, x86_bios_cpu_apicid, BAD_APICID);
 EXPORT_EARLY_PER_CPU_SYMBOL(x86_cpu_to_apicid);
 EXPORT_EARLY_PER_CPU_SYMBOL(x86_bios_cpu_apicid);
+
+bool default_check_phys_apicid_online(void)
+{
+	/* use only raw functions as it is supposed
+	 * to be called at booting stage */
+	unsigned long id = cpu_has_epic() ?
+			cepic_id_full_to_short(epic_read_w(CEPIC_ID)) :
+				GET_APIC_ID(native_apic_mem_read(APIC_ID));
+	return !physid_isset(id, phys_cpu_offline_map);
+}
 
 #ifdef CONFIG_L_X86_32
 
@@ -610,12 +623,7 @@ static int lapic_timer_shutdown(struct clock_event_device *evt)
 static inline int
 lapic_timer_set_periodic_oneshot(struct clock_event_device *evt, bool oneshot)
 {
-#ifdef CONFIG_E2K
-	__setup_APIC_LVTT(lapic_timer_frequency,
-			cpu_has(CPU_HWBUG_LAPIC_TIMER) ? 0 : oneshot, 1);
-#else
 	__setup_APIC_LVTT(lapic_timer_frequency, oneshot, 1);
-#endif
 	return 0;
 }
 
@@ -811,8 +819,8 @@ calibrate_by_pmtimer(long deltapm, long *delta, long *deltatsc)
 
 int __init calibrate_APIC_clock(void)
 {
-	struct clock_event_device *levt = this_cpu_ptr(&lapic_events);
 #ifdef CONFIG_X86_PM_TIMER
+	struct clock_event_device *levt = this_cpu_ptr(&lapic_events);
 	unsigned long deltaj;
 	int pm_referenced = 0;
 #endif
@@ -1663,11 +1671,7 @@ void setup_local_APIC(void)
 #endif
 
 #ifdef CONFIG_E2K
-	if(l_iommu_supported()
-#if defined(CONFIG_ELDSP) || defined(CONFIG_ELDSP_MODULE)
-	||	IS_MACHINE_ES2
-#endif
-	   ) {
+	if (l_iommu_supported()) {
 		unsigned int value;
 		unsigned int apic_id;
 
@@ -1691,7 +1695,7 @@ void setup_local_APIC(void)
 				SET_APIC_DEST_FIELD(apic_id);
 		apic_write(APIC_LVT4, value);
 	}
-#endif	/*CONFIG_E2K*/
+#endif	/* CONFIG_E2K */
 
 	/*
 	 * only the BP should see the LINT1 NMI signal, obviously.
@@ -2735,142 +2739,6 @@ static void apic_pm_activate(void) { }
 
 #endif	/* CONFIG_PM */
 
-#if 0
-#ifdef CONFIG_L_X86_64
-
-static int apic_cluster_num(void)
-{
-	int i, clusters, zeros;
-	unsigned id;
-	u16 *bios_cpu_apicid;
-	DECLARE_BITMAP(clustermap, NUM_APIC_CLUSTERS);
-
-	bios_cpu_apicid = early_per_cpu_ptr(x86_bios_cpu_apicid);
-	bitmap_zero(clustermap, NUM_APIC_CLUSTERS);
-
-	for (i = 0; i < nr_cpu_ids; i++) {
-		/* are we being called early in kernel startup? */
-		if (bios_cpu_apicid) {
-			id = bios_cpu_apicid[i];
-		} else if (i < nr_cpu_ids) {
-			if (cpu_present(i))
-				id = per_cpu(x86_bios_cpu_apicid, i);
-			else
-				continue;
-		} else
-			break;
-
-		if (id != BAD_APICID)
-			__set_bit(APIC_CLUSTERID(id), clustermap);
-	}
-
-	/* Problem:  Partially populated chassis may not have CPUs in some of
-	 * the APIC clusters they have been allocated.  Only present CPUs have
-	 * x86_bios_cpu_apicid entries, thus causing zeroes in the bitmap.
-	 * Since clusters are allocated sequentially, count zeros only if
-	 * they are bounded by ones.
-	 */
-	clusters = 0;
-	zeros = 0;
-	for (i = 0; i < NUM_APIC_CLUSTERS; i++) {
-		if (test_bit(i, clustermap)) {
-			clusters += 1 + zeros;
-			zeros = 0;
-		} else
-			++zeros;
-	}
-
-	return clusters;
-}
-
-static int multi_checked;
-static int multi;
-
-static int set_multi(const struct dmi_system_id *d)
-{
-	if (multi)
-		return 0;
-	pr_info("APIC: %s detected, Multi Chassis\n", d->ident);
-	multi = 1;
-	return 0;
-}
-
-static const struct dmi_system_id multi_dmi_table[] = {
-	{
-		.callback = set_multi,
-		.ident = "IBM System Summit2",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "IBM"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "Summit2"),
-		},
-	},
-	{}
-};
-
-static void dmi_check_multi(void)
-{
-	if (multi_checked)
-		return;
-
-	dmi_check_system(multi_dmi_table);
-	multi_checked = 1;
-}
-
-/*
- * apic_is_clustered_box() -- Check if we can expect good TSC
- *
- * Thus far, the major user of this is IBM's Summit2 series:
- * Clustered boxes may have unsynced TSC problems if they are
- * multi-chassis.
- * Use DMI to check them
- */
-int apic_is_clustered_box(void)
-{
-	dmi_check_multi();
-	if (multi)
-		return 1;
-
-	if (!is_vsmp_box())
-		return 0;
-
-	/*
-	 * ScaleMP vSMPowered boxes have one cluster per board and TSCs are
-	 * not guaranteed to be synced between boards
-	 */
-	if (apic_cluster_num() > 1)
-		return 1;
-
-	return 0;
-}
-#endif
-#endif
-
-/*
- * APIC command line parameters
- */
-#if 0
-static int __init setup_disableapic(char *arg)
-{
-	disable_apic = 1;
-	setup_clear_cpu_cap(X86_FEATURE_APIC);
-	return 0;
-}
-early_param("disableapic", setup_disableapic);
-
-/* same as disableapic, for compatibility */
-static int __init setup_nolapic(char *arg)
-{
-	return setup_disableapic(arg);
-}
-early_param("nolapic", setup_nolapic);
-
-static int __init parse_lapic_timer_c2_ok(char *arg)
-{
-	local_apic_timer_c2_ok = 1;
-	return 0;
-}
-early_param("lapic_timer_c2_ok", parse_lapic_timer_c2_ok);
-#endif
 
 static int __init parse_disable_apic_timer(char *arg)
 {

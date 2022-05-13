@@ -28,7 +28,7 @@
 #define	_PAGE_PV_BIT_V6		2	/* PriVileged */
 #define	_PAGE_VALID_BIT_V6	3	/* Valid */
 #define	_PAGE_INT_PR_BIT_V6	4	/* PRotected */
-#define _PAGE_A_HW_BIT_V6	5	/* page Accessed */
+#define _PAGE_A_BIT_V6		5	/* page Accessed */
 #define	_PAGE_D_BIT_V6		6	/* page Dirty */
 #define	_PAGE_HUGE_BIT_V6	7	/* huge Page Size */
 #define	_PAGE_G_BIT_V6		8	/* Global page */
@@ -45,7 +45,7 @@
 #define _PAGE_PV_V6		(1ULL << _PAGE_PV_BIT_V6)
 #define _PAGE_VALID_V6		(1ULL << _PAGE_VALID_BIT_V6)
 #define _PAGE_INT_PR_V6		(1ULL << _PAGE_INT_PR_BIT_V6)
-#define _PAGE_A_HW_V6		(1ULL << _PAGE_A_HW_BIT_V6)
+#define _PAGE_A_V6		(1ULL << _PAGE_A_BIT_V6)
 #define _PAGE_D_V6		(1ULL << _PAGE_D_BIT_V6)
 #define _PAGE_HUGE_V6		(1ULL << _PAGE_HUGE_BIT_V6)
 #define _PAGE_G_V6		(1ULL << _PAGE_G_BIT_V6)
@@ -74,19 +74,6 @@
 #define	_PAGE_GFN_V6		_PAGE_SW2_V6	/* Page is mapped to guest */
 						/* physical memory */
 
-/*
- * Bug #76626 - hardware access bit should always be set.
- * This bug is actual for e2c/e2c+ only CPUs,
- * so CPUs based on iset v6 cannot have the bug all the more
- * and software bit can be identical to hardware one.
- * Software bit is not used in the case of V6, but is not deleted
- * for compatibility.
- */
-#define _PAGE_A_SW_BIT_V6	_PAGE_A_HW_BIT_V6
-#define _PAGE_A_BIT_V6		_PAGE_A_HW_BIT_V6
-#define	_PAGE_A_SW_V6		_PAGE_A_HW_V6
-#define _PAGE_A_V6		_PAGE_A_HW_V6
-
 #define	_PAGE_MT_GET_VAL(x)	(((x) & _PAGE_MT_V6) >> _PAGE_MT_SHIFT_V6)
 #define	_PAGE_MT_SET_VAL(x, mt)	\
 		(((x) & ~_PAGE_MT_V6) | \
@@ -95,7 +82,7 @@
 /* some useful PT entries protection basis values */
 #define _PAGE_KERNEL_RX_NOT_GLOB_V6	\
 		(_PAGE_P_V6 | _PAGE_VALID_V6 | \
-				 _PAGE_PV_V6 | _PAGE_A_HW_V6)
+				 _PAGE_PV_V6 | _PAGE_A_V6)
 #define _PAGE_KERNEL_RO_NOT_GLOB_V6	\
 		(_PAGE_KERNEL_RX_NOT_GLOB_V6 | _PAGE_NON_EX_V6)
 #define _PAGE_KERNEL_RWX_NOT_GLOB_V6	\
@@ -195,8 +182,8 @@ covert_uni_pte_flags_to_pte_val_v6(const uni_pteval_t uni_flags)
 		pte_flags |= (_PAGE_VALID_V6);
 	if (uni_flags & UNI_PAGE_PROTECT)
 		pte_flags |= (_PAGE_INT_PR_V6);
-	if (uni_flags & UNI_PAGE_HW_ACCESS)
-		pte_flags |= (_PAGE_A_HW_V6);
+	if (uni_flags & UNI_PAGE_ACCESSED)
+		pte_flags |= (_PAGE_A_V6);
 	if (uni_flags & UNI_PAGE_DIRTY)
 		pte_flags |= (_PAGE_D_V6);
 	if (uni_flags & UNI_PAGE_HUGE)
@@ -211,14 +198,10 @@ covert_uni_pte_flags_to_pte_val_v6(const uni_pteval_t uni_flags)
 		pte_flags |= (_PAGE_PROTNONE_V6);
 	if (uni_flags & UNI_PAGE_AVAIL)
 		pte_flags |= (_PAGE_SW2_V6);
-	if (uni_flags & UNI_PAGE_SW_ACCESS)
-		pte_flags |= (_PAGE_A_SW_V6);
 	if (uni_flags & UNI_PAGE_SPECIAL)
 		pte_flags |= (_PAGE_SPECIAL_V6);
 	if (uni_flags & UNI_PAGE_GFN)
 		pte_flags |= (_PAGE_GFN_V6);
-	if (uni_flags & UNI_PAGE_ACCESSED)
-		pte_flags |= (_PAGE_A_V6);
 	if (uni_flags & UNI_PAGE_PFN)
 		pte_flags |= (_PAGE_PFN_V6);
 	if (uni_flags & UNI_PAGE_MEM_TYPE)
@@ -268,14 +251,8 @@ static inline pte_mem_type_t get_pte_val_v6_memory_type(pteval_t pte_val)
 	if (!(pte_val & _PAGE_SOFTWARE_MT))
 		return hardware_mt;
 
-	if (hardware_mt == GEN_CACHE_MT) {
-		return EXT_CACHE_MT;
-	} else if (hardware_mt == GEN_NON_CACHE_MT) {
-		return GEN_NON_CACHE_ORDERED_MT;
-	} else {
-		WARN_ON_ONCE(1);
-		return EXT_CACHE_MT;
-	}
+	WARN_ON_ONCE(hardware_mt != GEN_NON_CACHE_MT);
+	return GEN_NON_CACHE_ORDERED_MT;
 }
 
 static inline pteval_t
@@ -286,13 +263,9 @@ set_pte_val_v6_memory_type(pteval_t pte_val, pte_mem_type_t memory_type)
 		memory_type != GEN_NON_CACHE_ORDERED_MT &&
 		memory_type != EXT_PREFETCH_MT &&
 		memory_type != EXT_NON_PREFETCH_MT &&
-		memory_type != EXT_CONFIG_MT &&
-		memory_type != EXT_CACHE_MT);
+		memory_type != EXT_CONFIG_MT);
 
-	if (memory_type == EXT_CACHE_MT) {
-		pte_val |= _PAGE_SOFTWARE_MT;
-		memory_type = GEN_CACHE_MT;
-	} else if (memory_type == GEN_NON_CACHE_ORDERED_MT) {
+	if (memory_type == GEN_NON_CACHE_ORDERED_MT) {
 		pte_val |= _PAGE_SOFTWARE_MT;
 		memory_type = GEN_NON_CACHE_MT;
 	} else {

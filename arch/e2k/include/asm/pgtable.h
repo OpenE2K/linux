@@ -149,7 +149,6 @@ static inline unsigned long pgd_page_vaddr(pgd_t pgd)
 	return (unsigned long)__va(_PAGE_PFN_TO_PADDR(pgd_val(pgd)));
 }
 
-
 #define boot_pmd_set_k(pmdp, ptep)	\
 		(*(pmdp) = mk_pmd_phys(boot_vpa_to_pa((e2k_addr_t)(ptep)), \
 							PAGE_KERNEL_PTE))
@@ -274,12 +273,11 @@ static __always_inline void native_set_pte(pte_t *ptep, pte_t pteval,
 	if (known_not_present) {
 		*ptep = pteval;
 	} else {
-		int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
 		pte_t oldpte = *ptep;
 
 		*ptep = pteval;
 
-		if (have_flush_dc_ic && pte_present_and_exec(oldpte) &&
+		if (pte_present_and_exec(oldpte) &&
 				(!pte_present_and_exec(pteval) ||
 				 pte_pfn(oldpte) != pte_pfn(pteval)))
 			flush_pte_from_ic(oldpte);
@@ -288,12 +286,11 @@ static __always_inline void native_set_pte(pte_t *ptep, pte_t pteval,
 
 static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 {
-	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
 	pmd_t oldpmd = *pmdp;
 
 	*pmdp = pmdval;
 
-	if (have_flush_dc_ic && pmd_present_and_exec_and_huge(oldpmd) &&
+	if (pmd_present_and_exec_and_huge(oldpmd) &&
 			(!pmd_present_and_exec_and_huge(pmdval) ||
 			 pmd_pfn(oldpmd) != pmd_pfn(pmdval)))
 		flush_pmd_from_ic(oldpmd);
@@ -301,12 +298,11 @@ static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 
 static inline void native_set_pud(pud_t *pudp, pud_t pudval)
 {
-	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
 	pud_t oldpud = *pudp;
 
 	*pudp = pudval;
 
-	if (have_flush_dc_ic && pud_present_and_exec_and_huge(oldpud) &&
+	if (pud_present_and_exec_and_huge(oldpud) &&
 			(!pud_present_and_exec_and_huge(pudval) ||
 			 pud_pfn(oldpud) != pud_pfn(pudval)))
 		flush_pud_from_ic(oldpud);
@@ -330,58 +326,38 @@ static inline void native_set_pgd(pgd_t *pgdp, pgd_t pgdval)
  * This function is used only on device memory and track_pfn_remap()
  * will explicitly set "External" memory type.
  *
- * And remap_pfn_range() should be used on RAM only and not on device
- * memory, but in practice many drivers violate API and just use
- * remap_pfn_range() everywhere.  In this case track_pfn_remap() will
- * determine the required type. */
-#define io_remap_pfn_range(vma, addr, pfn, size, prot) \
-({ \
-	unsigned long __irp_pfn = (pfn); \
-	VM_WARN_ON_ONCE(pfn_valid(__irp_pfn)); \
-	remap_pfn_range((vma), (addr), (pfn), (size), (prot)); \
-})
-
-/*
- * track_pfn_remap is called when a _new_ pfn mapping is being established
- * by remap_pfn_range() for physical range indicated by pfn and size.
+ * As for remap_pfn_range(), it unfortunately can be used with anything,
+ * so we rely on track_pfn_remap to check pfn and assign proper memory type:
+ * https://lkml.org/lkml/2006/3/16/170
+ *
+ * "
+ * remap_pfn_range() doesn't muck around with "struct page" AT ALL, so you
+ * can pass it damn well anything you want these days. It doesn't care,
+ * the VM doesn't care, there's no ref-counting or page flag checking
+ * either on the mmap or the munmap parh.
+ *
+ * Normally, you'd use remap_pfn_range() only for special allocations.
+ * Most commonly, it's not RAM at all, but the PCI MMIO memory window to
+ * the hardware itself.
+ * "
  */
+#define io_remap_pfn_range io_remap_pfn_range
+extern int io_remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
+		unsigned long pfn, unsigned long size, pgprot_t prot);
+
+extern int memtype_reserve(phys_addr_t start, phys_addr_t end,
+			   enum page_cache_mode memtype, bool *cache_flush_needed);
+extern bool __must_check memtype_free_cacheflush(phys_addr_t start, phys_addr_t end);
+extern void memtype_free(phys_addr_t start, phys_addr_t end);
+
+extern int track_pfn_copy(struct vm_area_struct *vma);
 extern int track_pfn_remap(struct vm_area_struct *vma, pgprot_t *prot,
 		unsigned long pfn, unsigned long addr, unsigned long size);
-
-/*
- * track_pfn_insert is called when a _new_ single pfn is established
- * by vm_insert_pfn().
- *
- * This does not cover vm_insert_page so if some bad driver decides
- * to use it on I/O memory we could get into trouble.
- */
 extern void track_pfn_insert(struct vm_area_struct *vma, pgprot_t *prot, pfn_t pfn);
+extern void untrack_pfn(struct vm_area_struct *vma, unsigned long pfn,
+			unsigned long size);
+extern void untrack_pfn_moved(struct vm_area_struct *vma);
 
-/*
- * track_pfn_copy is called when vma that is covering the pfnmap gets
- * copied through copy_page_range().
- */
-static inline int track_pfn_copy(struct vm_area_struct *vma)
-{
-	return 0;
-}
-
-/*
- * untrack_pfn is called while unmapping a pfnmap for a region.
- * untrack can be called for a specific region indicated by pfn and size or
- * can be for the entire vma (in which case pfn, size are zero).
- */
-static inline void untrack_pfn(struct vm_area_struct *vma,
-			       unsigned long pfn, unsigned long size)
-{
-}
-
-/*
- * untrack_pfn_moved is called while mremapping a pfnmap for a new region.
- */
-static inline void untrack_pfn_moved(struct vm_area_struct *vma)
-{
-}
 #define MK_IOSPACE_PFN(space, pfn)	(pfn)
 #define GET_IOSPACE(pfn)		0
 #define GET_PFN(pfn)			(pfn)
@@ -433,7 +409,6 @@ do { \
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 		unsigned long addr, pte_t *ptep)
 {
-	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
 	int mm_users = atomic_read(&mm->mm_users);
 	pte_t oldpte;
 
@@ -450,7 +425,7 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 
 	/* mm_users check is for the fork() case: we do not
 	 * want to spend time flushing when we are exiting. */
-	if (have_flush_dc_ic && mm_users != 0 && pte_present_and_exec(oldpte))
+	if (mm_users != 0 && pte_present_and_exec(oldpte))
 		flush_pte_from_ic(oldpte);
 
 	return oldpte;
@@ -543,7 +518,7 @@ extern pgd_t *node_pgd_offset_kernel(int nid, e2k_addr_t virt_addr);
 #else	/* ! CONFIG_NUMA */
 #define node_pgd_offset_kernel(nid, virt_addr)	\
 ({						\
-	(nid);					\
+	(void) (nid);				\
 	pgd_offset_k(virt_addr);		\
 })
 #endif	/* CONFIG_NUMA */
@@ -637,7 +612,7 @@ mmu_get_swap_offset(swp_entry_t swap_entry, bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return get_swap_offset_v6(swap_entry);
 	else
-		return get_swap_offset_v2(swap_entry);
+		return get_swap_offset_v3(swap_entry);
 }
 static inline swp_entry_t
 mmu_create_swap_entry(unsigned long type, unsigned long offset, bool mmu_pt_v6)
@@ -645,7 +620,7 @@ mmu_create_swap_entry(unsigned long type, unsigned long offset, bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return create_swap_entry_v6(type, offset);
 	else
-		return create_swap_entry_v2(type, offset);
+		return create_swap_entry_v3(type, offset);
 }
 static inline pte_t
 mmu_convert_swap_entry_to_pte(swp_entry_t swap_entry, bool mmu_pt_v6)
@@ -653,7 +628,7 @@ mmu_convert_swap_entry_to_pte(swp_entry_t swap_entry, bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return convert_swap_entry_to_pte_v6(swap_entry);
 	else
-		return convert_swap_entry_to_pte_v2(swap_entry);
+		return convert_swap_entry_to_pte_v3(swap_entry);
 }
 static inline unsigned long __swp_offset(swp_entry_t swap_entry)
 {
@@ -723,7 +698,6 @@ extern int ptep_set_access_flags(struct vm_area_struct *vma,
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 		unsigned long addr, pmd_t *pmdp)
 {
-	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
 	int mm_users = atomic_read(&mm->mm_users);
 	pmd_t oldpmd;
 
@@ -736,8 +710,7 @@ static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 
 	/* mm_users check is for the fork() case: we do not
 	 * want to spend time flushing when we are exiting. */
-	if (have_flush_dc_ic && mm_users != 0 &&
-			pmd_present_and_exec_and_huge(oldpmd))
+	if (mm_users != 0 && pmd_present_and_exec_and_huge(oldpmd))
 		flush_pmd_from_ic(oldpmd);
 
 	return oldpmd;
@@ -757,12 +730,9 @@ static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 #endif
 
 /* interface functions to handle some things on the PT level */
-void split_simple_pmd_page(pgprot_t *ptp, pte_t *ptes[MAX_NUM_HUGE_PTES]);
-void split_multiple_pmd_page(pgprot_t *ptp, pte_t *ptes[MAX_NUM_HUGE_PTES]);
+void split_simple_pmd_page(pgprot_t *ptp, pte_t *ptes);
 void map_pud_huge_page_to_simple_pmds(pgprot_t *pmd_page, e2k_addr_t phys_page,
 					pgprot_t pgprot);
-void map_pud_huge_page_to_multiple_pmds(pgprot_t *pmd_page,
-			e2k_addr_t phys_page, pgprot_t pgprot);
 
 #endif	/* !(__ASSEMBLY__) */
 
@@ -806,7 +776,8 @@ static inline void pmdp_set_wrprotect(struct mm_struct *mm,
 static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
 		unsigned long address, pmd_t *pmdp, pmd_t pmd)
 {
-	return __pmd(xchg_relaxed(&pmd_val(*pmdp), pmd_val(pmd)));
+	return __pmd(pt_get_and_xchg_relaxed(vma->vm_mm, address,
+					     pmd_val(pmd), (pgprot_t *)pmdp));
 }
 
 extern int pmdp_set_access_flags(struct vm_area_struct *vma,

@@ -2901,7 +2901,8 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 #endif
 
 #ifdef CONFIG_MCST
-	if (unlikely(show_woken_time)) {
+#ifdef SHOW_WOKEN_TIME
+	if (unlikely(show_woken_time) && system_state == SYSTEM_RUNNING) {
 		p->waken_tm = 0;
 		p->wakeup_tm = getns64timeofday();
 		if (show_woken_time > 1) {
@@ -2909,6 +2910,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 			p->sched_lock_tm = 0;
 		}
 	}
+#endif /* SHOW_WOKEN_TIME */
 #include <linux/cpumask.h>
 	cpu = task_cpu(p);
 	if (cpumask_test_cpu(cpu, rt_cpu_mask) &&
@@ -2935,10 +2937,10 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 */
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	smp_mb__after_spinlock();
-#ifdef CONFIG_MCST
-	if (show_woken_time > 1)
+#if defined(CONFIG_MCST) && defined(SHOW_WOKEN_TIME)
+	if (show_woken_time > 1 && system_state == SYSTEM_RUNNING)
 		p->intr_w = __this_cpu_read(last_intr_clock);
-#endif /* CONFIG_MCST */
+#endif
 	if (!(p->state & state)) {
 		/*
 		 * The task might be running due to a spinlock sleeper
@@ -4554,11 +4556,11 @@ static void __sched notrace __schedule(bool preempt)
 	struct rq_flags rf;
 	struct rq *rq;
 	int cpu;
-#ifdef CONFIG_MCST
+#if defined(CONFIG_MCST) && defined(SHOW_WOKEN_TIME)
 	s64 enter_tm = 0, lock_tm = 0, cur_tm;
 	int show_woken_time_val = show_woken_time;
 
-	if (unlikely(show_woken_time_val > 1))
+	if (unlikely(show_woken_time_val > 1) && system_state == SYSTEM_RUNNING)
 		enter_tm = getns64timeofday();
 #endif
 
@@ -4588,8 +4590,8 @@ static void __sched notrace __schedule(bool preempt)
 	if (__migrate_disabled(prev))
 		migrate_disabled_sched(prev);
 
-#ifdef CONFIG_MCST
-	if (unlikely(show_woken_time_val > 1))
+#if defined(CONFIG_MCST) && defined(SHOW_WOKEN_TIME)
+	if (unlikely(show_woken_time_val > 1) && system_state == SYSTEM_RUNNING)
 		lock_tm = getns64timeofday();
 #endif
 
@@ -4617,8 +4619,9 @@ static void __sched notrace __schedule(bool preempt)
 	clear_tsk_need_resched_lazy(prev);
 	clear_preempt_need_resched();
 
-#ifdef CONFIG_MCST
-	if (unlikely(show_woken_time_val > 1)) {
+#if defined(CONFIG_MCST) && defined(SHOW_WOKEN_TIME)
+	if (unlikely(show_woken_time_val > 1) &&
+			system_state == SYSTEM_RUNNING) {
 		next->sched_enter_tm = enter_tm;
 		next->sched_lock_tm = lock_tm;
 		next->cntx_swb_tm = getns64timeofday();
@@ -4627,9 +4630,12 @@ static void __sched notrace __schedule(bool preempt)
 #endif
 
 	if (likely(prev != next)) {
-#ifdef CONFIG_MCST
-		next->last_tm_on_cpu = 0;
-		prev->last_tm_on_cpu = getns64timeofday();
+#if defined(CONFIG_MCST) && defined(SHOW_WOKEN_TIME)
+		if (unlikely(show_woken_time_val > 1) &&
+				system_state == SYSTEM_RUNNING) {
+			next->last_tm_on_cpu = 0;
+			prev->last_tm_on_cpu = getns64timeofday();
+		}
 #endif
 		rq->nr_switches++;
 		/*
@@ -4666,14 +4672,15 @@ static void __sched notrace __schedule(bool preempt)
 		(void) idle_check_delayed_works(cpu);
 #endif
 
-#ifdef CONFIG_MCST
-	cur_tm = getns64timeofday();
-	if (unlikely(show_woken_time_val && current->waken_tm == 0))
-		current->waken_tm = cur_tm;
-
-	if (unlikely(show_woken_time_val > 1)) {
-		current->cntx_swe_tm = cur_tm;
-		current->intr_s = last_intr_clock;
+#if defined(CONFIG_MCST) && defined(SHOW_WOKEN_TIME)
+	if (unlikely(show_woken_time_val) && system_state == SYSTEM_RUNNING) {
+		cur_tm = getns64timeofday();
+		if (current->waken_tm == 0)
+			current->waken_tm = cur_tm;
+		if (unlikely(show_woken_time_val > 1)) {
+			current->cntx_swe_tm = cur_tm;
+			current->intr_s = last_intr_clock;
+		}
 	}
 #endif
 	balance_callback(rq);

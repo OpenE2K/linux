@@ -38,6 +38,7 @@ extern int kvm_boot_spin_locked_slow(struct kvm_vcpu *vcpu, void *lock);
 extern int kvm_boot_spin_unlock_slow(struct kvm_vcpu *vcpu, void *lock,
 					bool add_to_unlock);
 
+extern int vcpu_boot_spinlock_init(struct kvm_vcpu *vcpu);
 extern int kvm_boot_spinlock_init(struct kvm *kvm);
 extern void kvm_boot_spinlock_destroy(struct kvm *kvm);
 

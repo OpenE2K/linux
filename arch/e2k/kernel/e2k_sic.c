@@ -16,6 +16,7 @@
 #include <asm/iolinkmask.h>
 #include <asm/io.h>
 #include <asm/console.h>
+#include <asm/l-mcmonitor.h>
 
 #include <asm-l/pic.h>
 
@@ -488,6 +489,8 @@ static void __init create_nodes_io_config(void)
 		}
 		if (iolinks_num >= max_iolinks)
 			break;
+		if (paravirt_enabled() && iolink_online_iohub_num >= mp_iohubs_num)
+			break;
 	}
 	if (iolinks_num > 1) {
 		printk(KERN_INFO "Total IO links %d: IOHUBs %d, RDMAs %d\n",
@@ -604,7 +607,15 @@ static DEFINE_RAW_SPINLOCK(sic_error_lock);
 static void sic_mc_regs_dump(int node)
 {
 	if (machine.native_iset_ver < E2K_ISET_V6) {
-		int offset = SIC_MC_BASE;
+		int offset = SIC_MC_BASE, i = 0;
+
+		for (; i < SIC_MC_COUNT; i++) {
+			char s[256];
+			e2k_mc_ecc_struct_t ecc;
+
+			ecc.E2K_MC_ECC_reg = sic_get_mc_ecc(node, i);
+			pr_emerg("%s\n", l_mc_get_error_str(&ecc, i, s, sizeof(s)));
+		}
 
 		pr_emerg("MC registers dump:\n");
 		for (; offset < SIC_MC_BASE + SIC_MC_SIZE; offset += 4)
@@ -667,8 +678,8 @@ void sic_error_interrupt(struct pt_regs *regs)
 
 	do_sic_error_interrupt();
 
+	irq_exit();
+
 	panic("SIC error interrupt received on CPU%d:\n",
 		smp_processor_id());
-
-	irq_exit();
 }

@@ -51,7 +51,8 @@ typedef struct _mode_parameter_t {
 	spolarity_t clock_phase_polarity;
 } mode_parameter_t;
 
-int ddk750_setModeTiming(mode_parameter_t *, clock_type_t);
+int ddk750_setModeTiming(struct lynx_share *share,
+				mode_parameter_t *, clock_type_t);
 
 
 #endif

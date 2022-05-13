@@ -210,7 +210,7 @@ const char *arch_vma_name(struct vm_area_struct *vma)
 	return NULL;
 }
 
-static void clean_pc_stack_zero_frame(void *addr, bool user)
+void native_clean_pc_stack_zero_frame(void *addr, bool user)
 {
 	unsigned long ts_flag;
 	e2k_mem_crs_t *pcs = addr;
@@ -710,6 +710,34 @@ void show_regs(struct pt_regs *regs)
 	print_pt_regs(regs);
 }
 
+void __debug_signal_print(const char *message,
+		struct pt_regs *regs, bool print_stack)
+{
+	unsigned long return_ip;
+
+	if (likely(!debug_signal))
+		return;
+
+	return_ip = get_return_ip(regs);
+	if (regs->trap) {
+		unsigned long trap_ip = get_trap_ip(regs);
+		if (trap_ip == return_ip) {
+			pr_info("%s: IP=%lx %s(pid=%d)\n",
+				message, trap_ip, current->comm, current->pid);
+		} else {
+			pr_info("%s: IP=%lx (%%cr.IP=%lx) %s(pid=%d)\n",
+				message, trap_ip, return_ip, current->comm, current->pid);
+		}
+	} else {
+		pr_info("%s: IP=%lx %s(pid=%d)\n",
+			message, return_ip, current->comm, current->pid);
+	}
+
+	if (print_stack)
+		show_regs(regs);
+}
+
+
 static int check_wchan(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 		unsigned long corrected_frame_addr, int flags, void *arg)
 {
@@ -956,14 +984,12 @@ int create_cut_entry(int tcount,
 		unsigned long glob_base, unsigned  glob_sz)
 {
 	struct mm_struct *mm = current->mm;
+	struct page *page;
 	register e2k_cute_t *cute_p;	/* register for workaround against */
 							/* gcc bug */
 	unsigned long ts_flag;
 	int free_cui;
 	int error = 0;
-#ifdef CONFIG_PROTECTED_MODE
-	int retval;
-#endif
 
 	if (TASK_IS_PROTECTED(current)) {
 		mutex_lock(&mm->context.cut_mask_lock);
@@ -990,7 +1016,7 @@ int create_cut_entry(int tcount,
 	}
 
 	/* Fill found cut entry by information about loaded module */
-	cute_p = (e2k_cute_t *) USER_CUT_AREA_BASE + free_cui;
+	cute_p = get_cut_entry_pointer(free_cui, &page);
 	DebugCU("Create cut entry: cui = %d; tct = %d; code = 0x%lx: 0x%x; "
 		"data = 0x%lx : 0x%x\n", free_cui, tcount, code_base, code_sz,
 		glob_base, glob_sz);
@@ -998,10 +1024,10 @@ int create_cut_entry(int tcount,
 	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE) {
 		DebugCU("e2k_set_vmm_cui called for cui = %d; code 0x%lx : 0x%lx\n",
 			free_cui, code_base, code_base + code_sz);
-		retval = e2k_set_vmm_cui(mm, free_cui, code_base,
+		error = e2k_set_vmm_cui(mm, free_cui, code_base,
 					 code_base + code_sz);
-		if (retval)
-			return retval;
+		if (error)
+			goto failed;
   	}
 #endif
 
@@ -1017,11 +1043,17 @@ int create_cut_entry(int tcount,
 	} END_USR_PFAULT
 	clear_ts_flag(ts_flag);
 
+	put_cut_entry_pointer(page);
+
 	/* If something was wrong with access to cut */
 	if (error)
 		return error;
 
 	return free_cui;
+
+failed:
+	put_cut_entry_pointer(page);
+	return error;
 }
 
 int free_cut_entry(unsigned long glob_base, size_t glob_sz,
@@ -1039,9 +1071,10 @@ int free_cut_entry(unsigned long glob_base, size_t glob_sz,
 	mutex_lock(&mm->context.cut_mask_lock);
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 	TRY_USR_PFAULT {
-		for (cui = 1; cui < USER_CUT_AREA_SIZE/sizeof(e2k_cute_t);
-			cui++) {
-			cute_p = (e2k_cute_t *) USER_CUT_AREA_BASE + cui;
+		for (cui = 1; cui < USER_CUT_AREA_SIZE/sizeof(e2k_cute_t); cui++) {
+			struct page *page;
+
+			cute_p = get_cut_entry_pointer(cui, &page);
 			if (CUTE_GD_BASE(cute_p) == glob_base &&
 					CUTE_GD_SIZE(cute_p) == glob_sz) {
 				if (code_base)
@@ -1053,6 +1086,7 @@ int free_cut_entry(unsigned long glob_base, size_t glob_sz,
 					&mm->context.cut_mask, cui, 1);
 				removed_cui = cui;
 			}
+			put_cut_entry_pointer(page);
 		}
 	} CATCH_USR_PFAULT {
 		error = -EFAULT;
@@ -1092,7 +1126,7 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 	e2k_stacks_t	stacks;
 	e2k_usd_lo_t	usd_lo;
 	e2k_usd_hi_t	usd_hi;
-	unsigned long	u_stk_bottom, u_stk_sz, stack_top;
+	unsigned long	u_stk_bottom, u_stk_sz, stack_top, base_lo, base_hi;
 	hw_stack_t	hw_stacks;
 	e2k_cutd_t	cutd;
 	e2k_size_t	cut_size;
@@ -1154,6 +1188,23 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 	if (ret) {
 		DebugEX("Can't create CU table.\n");
 		goto fatal_error;
+	}
+
+	if (TASK_IS_PROTECTED(current)) {
+		unsigned long *p_base_lo, *p_base_hi;
+
+		init_sem_malloc(&mm->context.umpools);
+
+		/* new loader interface */
+		p_base_lo = (unsigned long *) mm->start_stack;
+		p_base_hi = p_base_lo + 1;
+		/* We may erase base descriptor from stack since
+		 * no one will ever need it there. */
+		if (get_user(base_lo, p_base_lo) || get_user(base_hi, p_base_hi) ||
+		    put_user(0ul, p_base_lo) || put_user(0ul, p_base_hi)) {
+			ret = -EFAULT;
+			goto fatal_error;
+		}
 	}
 
 	/*
@@ -1281,34 +1332,22 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 	NATIVE_WRITE_RPR_LO_REG_VALUE(0);
 
 	if (TASK_IS_PROTECTED(current)) {
-                unsigned long *p_base_lo, *p_base_hi;
-                unsigned long base_lo, base_hi;
-
-		init_sem_malloc(&mm->context.umpools);
-		/* new loader interface */
-		p_base_lo = (unsigned long *) mm->start_stack;
-		p_base_hi = p_base_lo + 1;
-		base_lo = *p_base_lo;
-		base_hi = *p_base_hi;
-		/* We may erase base descriptor from stack since
-		 * no one will ever need it there. */
-                *p_base_lo = 0;
-                *p_base_hi = 0;
-		E2K_JUMP_WITH_ARGUMENTS(protected_switch_to_user_func,
-				5, base_lo, base_hi, start, u_stk_sz, cui);
+		E2K_JUMP_WITH_ARGUMENTS(protected_switch_to_user_func, 5,
+					base_lo, base_hi, start, u_stk_sz, cui);
 	} else {
 		E2K_JUMP_WITH_ARGUMENTS(switch_to_user_func,
 				4, 0, start, u_stk_sz, cui);
 	}
 
 fatal_error:
-	E2K_LMS_HALT_OK;
 
 	DebugEX("fatal error %d: send KILL signal\n", ret);
 
-	if (kernel)
+	if (kernel) {
 		/* Nowhere to return to, just exit */
+		pr_err("%s(): fatal error %d on kernel\n", __func__, ret);
 		do_exit(SIGKILL);
+	}
 
 	send_sig(SIGKILL, current, 0);
 
@@ -2212,8 +2251,10 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 		/*
 		 * User process creation
 		 */
-		copy_spilled_user_stacks(&childregs->stacks, &childregs->crs,
+		ret = copy_spilled_user_stacks(&childregs->stacks, &childregs->crs,
 					 new_sw_regs, new_ti);
+		if (ret)
+			return ret;
 
 		ret = copy_old_u_pcs_list(new_ti, current_thread_info());
 		if (ret)

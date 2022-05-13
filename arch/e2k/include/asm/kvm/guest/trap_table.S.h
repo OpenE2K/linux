@@ -53,35 +53,26 @@
 	}
 .endm	/* NEED_SAVE_CUR_AND_VCPU_STATE_GREGS */
 
-/* guest VCPU state registers are saved at thread_info->h_gregs */
-/* same as by host for paravirtualized guest */
+/* guest VCPU state registers are saved with other kernel global registers */
+/* at thread_info->k_gregs, same as by host for paravirtualized guest */
 
-.macro	DO_SAVE_HOST_GREGS_V2 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
+.macro	DO_SAVE_HOST_GREGS_V3 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
 				drti, predSAVE, drtmp, rtmp0, rtmp1
-	/* drtmp: thread_info->h_gregs.g */
-	addd	\drti, TI_HOST_GREGS_TO_VIRT, \drtmp ? \predSAVE;
-	SAVE_GREGS_PAIR_COND_V2 \gvcpu_lo, \gvcpu_hi, \hvcpu_lo, \hvcpu_hi, \
-		\drtmp,		/* thread_info->h_gregs.g base address */ \
-		\predSAVE, \
-		\rtmp0, \rtmp1
-.endm	/* DO_SAVE_HOST_GREGS_V2 */
+	/* not used */
+.endm	/* DO_SAVE_HOST_GREGS_V3 */
 
 .macro	DO_SAVE_HOST_GREGS_V5 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
 				drti, predSAVE, drtmp
-	/* drtmp: thread_info->h_gregs.g */
-	addd	\drti, TI_HOST_GREGS_TO_VIRT, \drtmp ? \predSAVE;
-	SAVE_GREGS_PAIR_COND_V5 \gvcpu_lo, \gvcpu_hi, \hvcpu_lo, \hvcpu_hi, \
-		\drtmp,		/* thread_info->h_gregs.g base address */ \
-		\predSAVE
+	/* not used */
 .endm	/* DO_SAVE_HOST_GREGS_V5 */
 
-.macro	SAVE_HOST_GREGS_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
-	DO_SAVE_HOST_GREGS_V2 \
+.macro	SAVE_HOST_GREGS_V3 drti, predSAVE, drtmp, rtmp0, rtmp1
+	DO_SAVE_HOST_GREGS_V3 \
 		GUEST_VCPU_STATE_GREG, GUEST_VCPU_STATE_UNUSED_GREG, \
 		VCPU_STATE_GREGS_PAIRS_INDEX, VCPU_STATE_GREGS_PAIRS_HI_INDEX, \
 		\drti, \predSAVE, \
 		\drtmp, \rtmp0, \rtmp1
-.endm	/* SAVE_HOST_GREGS_V2 */
+.endm	/* SAVE_HOST_GREGS_V3 */
 
 .macro	SAVE_HOST_GREGS_V5 drti, predSAVE, drtmp
 	DO_SAVE_HOST_GREGS_V5 \
@@ -92,9 +83,7 @@
 .endm	/* SAVE_HOST_GREGS_V5 */
 
 .macro	SAVE_HOST_GREGS_UNEXT gvcpu, hvcpu, drti, drtmp
-	/* drtmp: thread_info->h_gregs.g */
-	addd	\drti, TI_HOST_GREGS_TO_VIRT, \drtmp;
-	SAVE_GREG_UNEXT \gvcpu, \hvcpu, \drtmp
+	/* not used */
 .endm	/* SAVE_HOST_GREGS_UNEXT */
 
 .global	vcpus_state;
@@ -119,10 +108,10 @@
 .endm	/* SET_VCPU_STATE_GREGS */
 #endif
 
-.macro	SAVE_HOST_GREGS_TO_VIRT_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
-		SAVE_HOST_GREGS_V2 \drti, \predSAVE, \drtmp, \rtmp0, \rtmp1
+.macro	SAVE_HOST_GREGS_TO_VIRT_V3 drti, predSAVE, drtmp, rtmp0, rtmp1
+		SAVE_HOST_GREGS_V3 \drti, \predSAVE, \drtmp, \rtmp0, \rtmp1
 		SET_VCPU_STATE_GREGS \drti, \predSAVE, \drtmp
-.endm	/* SAVE_HOST_GREGS_TO_VIRT_V2 */
+.endm	/* SAVE_HOST_GREGS_TO_VIRT_V3 */
 
 .macro	SAVE_HOST_GREGS_TO_VIRT_V5 drti, predSAVE, drtmp
 		SAVE_HOST_GREGS_V5 \drti, \predSAVE, \drtmp
@@ -146,7 +135,7 @@
 	/* not used */
 .endm	/* NEED_SAVE_CUR_AND_VCPU_STATE_GREGS */
 
-.macro	SAVE_HOST_GREGS_TO_VIRT_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
+.macro	SAVE_HOST_GREGS_TO_VIRT_V3 drti, predSAVE, drtmp, rtmp0, rtmp1
 	/* not used */
 .endm	/* SAVE_VCPU_STATE_GREGS */
 

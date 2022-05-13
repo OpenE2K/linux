@@ -142,6 +142,8 @@ release_referenced() {
 #include <asm/traps.h>
 #include <asm/e2k_debug.h>
 #include <asm/ucontext.h>
+#include <asm/proc_context_stacks.h>
+#include <asm/kvm/ctx_signal_stacks.h>
 
 #ifdef CONFIG_PROTECTED_MODE
 #include <asm/3p.h>
@@ -509,22 +511,23 @@ int hw_contexts_init(struct task_struct *p, mm_context_t *mm_context,
 	rhashtable_walk_enter(&current->mm->context.hw_contexts, &iter);
 
 	do {
+		/* Allocate memory before taking HWC_STATE_COPYING
+		 * reference to context, otherwise we might stall
+		 * another thread which would spin in take_reference(). */
+		struct hw_context *new = kmem_cache_alloc(hw_context_cache, GFP_KERNEL);
+		if (!new) {
+			ret = -ENOMEM;
+			goto error_walk_exit;
+		}
+
 		rhashtable_walk_start(&iter);
 
 		while ((ctx = rhashtable_walk_next(&iter)) && !IS_ERR(ctx)) {
-			struct hw_context *new;
-
 			ret = take_reference(ctx, HWC_STATE_COPYING);
 			if (ret)
 				continue;
 
 			rhashtable_walk_stop(&iter);
-
-			new = kmem_cache_alloc(hw_context_cache, GFP_KERNEL);
-			if (!new) {
-				ret = -ENOMEM;
-				goto error_drop_reference;
-			}
 
 			ret = copy_context(p, new, ctx);
 			if (ret) {
@@ -543,10 +546,18 @@ int hw_contexts_init(struct task_struct *p, mm_context_t *mm_context,
 
 			(void) release_reference(ctx, HWC_STATE_COPYING);
 
+			new = kmem_cache_alloc(hw_context_cache, GFP_KERNEL);
+			if (!new) {
+				ret = -ENOMEM;
+				goto error_walk_exit;
+			}
+
 			rhashtable_walk_start(&iter);
 		}
 
 		rhashtable_walk_stop(&iter);
+
+		kmem_cache_free(hw_context_cache, new);
 	} while (cond_resched(), ctx == ERR_PTR(-EAGAIN));
 
 	rhashtable_walk_exit(&iter);
@@ -587,6 +598,7 @@ int hw_contexts_init(struct task_struct *p, mm_context_t *mm_context,
 error_drop_reference:
 	(void) release_reference(ctx, HWC_STATE_COPYING);
 
+error_walk_exit:
 	rhashtable_walk_exit(&iter);
 
 error:
@@ -732,7 +744,6 @@ struct longjmp_regs {
 	e2k_pcsp_hi_t pcsp_hi;
 };
 
-
 /**
  * makecontext_prepare_user_stacks - set up all stacks for a user function execution
  * @ctx: hardware context
@@ -754,12 +765,12 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 {
 	struct pt_regs *regs = current_pt_regs();
 	e2k_stacks_t stacks;
-	e2k_mem_crs_t __user *cs_frames;
-	e2k_mem_crs_t crs_trampoline, crs_user;
+	e2k_mem_crs_t __user *cs_frames, crs_user, crs_trampoline;
 	void __user *ps_frame;
+	char args_buf[args_size];
 	u64 args_registers_size, args_stack_size, func_frame_size;
-	unsigned long ts_flag, func_frame_ptr;
-	int ret, i;
+	unsigned long func_frame_ptr, ts_flag;
+	int ret;
 
 	if (ALIGN(args_size, 16) + (protected ? 16 : 0) > u_stk_size)
 		return -EINVAL;
@@ -787,7 +798,13 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	 */
 	AS(stacks.psp_hi).ind = (protected ? 16 : 8) * EXT_4_NR_SZ;
 
-	ps_frame = GET_PS_BASE(&ctx->ti.u_hw_stack) + (protected ? 8 : 4) * EXT_4_NR_SZ;
+	ps_frame = GET_PS_BASE(&ctx->ti.u_hw_stack) +
+				(protected ? 8 : 4) * EXT_4_NR_SZ;
+
+	/*
+	 * Set chain stack for the trampoline and user function
+	 */
+	cs_frames = (e2k_mem_crs_t __user *) GET_PCS_BASE(&ctx->ti.u_hw_stack);
 
 	/*
 	 * Calculate user function frame's parameters.
@@ -851,106 +868,44 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	}
 
 	/*
-	 * Put arguments into registers and user data stack
+	 * Copy args from user memory to allocated kernel buffer
+	 * to avoid faults when further accessing user memory
 	 */
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	TRY_USR_PFAULT {
-		for (i = 0; i < args_registers_size / 16; i++) {
-			u64 reg1_offset;
-#if DEBUG_CTX_MODE
-			u64 val_lo, val_hi;
-			u8 tag_lo, tag_hi;
-			load_qvalue_and_tagq((e2k_addr_t)(args + 16 * i),
-					&val_lo, &val_hi, &tag_lo, &tag_hi);
-			DebugCTX("register arguments: 0x%llx 0x%llx\n",
-					val_lo, val_hi);
-#endif
-
-			reg1_offset = (machine.native_iset_ver < E2K_ISET_V5) ?
-					8 : 16;
-
-			if (protected) {
-				/* We have to check for SAP */
-				u64 val_lo, val_hi;
-				u8 tag_lo, tag_hi;
-				e2k_sap_lo_t sap;
-				e2k_ap_lo_t ap;
-
-				load_qvalue_and_tagq(
-					(e2k_addr_t)(args + 16 * i),
-					&val_lo, &val_hi, &tag_lo, &tag_hi);
-				if (((tag_hi << 4) | tag_lo) == ETAGAPQ &&
-						((val_lo & AP_ITAG_MASK) >>
-						 AP_ITAG_SHIFT) == SAP_ITAG) {
-					/* SAP was passed, convert to AP
-					 * for the new context since it has
-					 * separate data stack. */
-					AW(sap) = val_lo;
-					AW(ap) = 0;
-					AS(ap).itag = AP_ITAG;
-					AS(ap).rw = AS(sap).rw;
-					AS(ap).base = AS(sap).base +
-						((u64)current->stack &
-							0xFFFF00000000UL);
-					val_lo = AW(ap);
-					DebugCTX("\tfixed SAP: 0x%llx 0x%llx\n",
-							val_lo, val_hi);
-				}
-				/* FIXME: should be paravirtualized */
-				__NATIVE_STORE_TAGGED_QWORD(
-						ps_frame + EXT_4_NR_SZ * i,
-						val_lo, val_hi, tag_lo, tag_hi,
-						reg1_offset);
-			} else {
-				/* FIXME: should be paravirtualized */
-				NATIVE_MOVE_TAGGED_DWORD(args + 16 * i,
-						ps_frame + EXT_4_NR_SZ * i);
-				NATIVE_MOVE_TAGGED_DWORD(args + 16 * i + 8,
-						ps_frame + EXT_4_NR_SZ * i +
-							reg1_offset);
-			}
-		}
-
-		if (2 * i < args_registers_size / 8) {
-#if DEBUG_CTX_MODE
-			u64 val;
-			u8 tag;
-
-			/* FIXME: should be paravirtualized */
-			NATIVE_LOAD_VAL_AND_TAGD(args + 16 * i, val, tag);
-			DebugCTX("register arguments: 0x%llx\n", val);
-#endif
-			/* FIXME: should be paravirtualized */
-			NATIVE_MOVE_TAGGED_DWORD(args + 16 * i,
-					ps_frame + EXT_4_NR_SZ * i);
-		}
-
-#if DEBUG_CTX_MODE
-		for (i = 0; i + 1 < args_stack_size / 8; i += 2) {
-			u64 val_lo, val_hi;
-			u8 tag_lo, tag_hi;
-			load_qvalue_and_tagq((e2k_addr_t)
-					(args + args_registers_size + 8 * i),
-					&val_lo, &val_hi, &tag_lo, &tag_hi);
-			DebugCTX("stack arguments: 0x%llx 0x%llx\n",
-					val_lo, val_hi);
-		}
-#endif
-	} CATCH_USR_PFAULT {
-		clear_ts_flag(ts_flag);
+	if (copy_from_user_with_tags((void *)&args_buf, args, args_size))
 		return -EFAULT;
-	} END_USR_PFAULT
-	clear_ts_flag(ts_flag);
+
+	ret = mkctxt_prepare_hw_user_stacks(func, (void *)&args_buf,
+					args_registers_size,
+					AS(stacks.usd_hi).size,
+					protected, ps_frame,
+					cs_frames);
+	if (ret)
+		return -EFAULT;
 
 	if (args_stack_size) {
 		DebugCTX("Copying stack arguments to 0x%lx\n",
 				(void *) func_frame_ptr + 64);
-		if (copy_in_user_with_tags(
-				(void *) func_frame_ptr + (protected ? 128 : 64),
-				args + args_registers_size, args_stack_size))
+		if (copy_to_user_with_tags((void *) func_frame_ptr +
+				(protected ? 128 : 64),
+				((void *)&args_buf) + args_registers_size,
+				args_stack_size))
 			return -EFAULT;
 	}
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret = __copy_from_user(&crs_user, cs_frames + 3, SZ_OF_CR);
+	ret |= __copy_from_user(&crs_trampoline, cs_frames + 2, SZ_OF_CR);
+	clear_ts_flag(ts_flag);
+
+	if (ret)
+		return -EFAULT;
+
+	ctx->regs.crs = crs_user;
+	/*
+	 * do_swapcontext() loads values from ctx->prev_ctx,
+	 * this way it's faster.
+	 */
+	ctx->prev_crs = crs_trampoline;
 
 	/*
 	 * Initialize thread_info
@@ -966,36 +921,6 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	ctx->ti.signal_stack.base = 0;
 	ctx->ti.signal_stack.size = 0;
 	ctx->ti.signal_stack.used = 0;
-
-	/*
-	 * Set chain stack for the trampoline and user function
-	 */
-	cs_frames = (e2k_mem_crs_t __user *) GET_PCS_BASE(&ctx->ti.u_hw_stack);
-
-	/* makecontext_trampoline()->do_longjmp() expects parameter area
-	 * size (cr1_lo.wbs/cr1_lo.wpsz) according to the C ABI: 4 or 8. */
-	ret = chain_stack_frame_init(&crs_trampoline, protected ?
-			makecontext_trampoline_protected : makecontext_trampoline,
-			KERNEL_C_STACK_SIZE, E2K_KERNEL_PSR_DISABLED,
-			protected ? 8 : 4, protected ? 8 : 4, false);
-	ret = ret ?: chain_stack_frame_init(&crs_user, func, AS(stacks.usd_hi).size,
-			E2K_USER_INITIAL_PSR, protected ? 8 : 4, protected ? 8 : 4, true);
-	if (ret)
-		return ret;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = __clear_user(&cs_frames[1], SZ_OF_CR);
-	ret = ret ?: __copy_to_user(&cs_frames[2], &crs_trampoline, SZ_OF_CR);
-	ret = ret ?: __copy_to_user(&cs_frames[3], &crs_user, SZ_OF_CR);
-	clear_ts_flag(ts_flag);
-	if (ret)
-		return -EFAULT;
-
-	ctx->regs.crs = crs_user;
-
-	/* do_swapcontext() loads values from ctx->prev_ctx,
-	 * this way it's faster. */
-	ctx->prev_crs = crs_trampoline;
 
 	/*
 	 * Prepare new pt_regs
@@ -1231,6 +1156,9 @@ static long do_makecontext(void __user *ucp, void (*func)(void),
 			if (!rhashtable_remove_fast(&mm_context->hw_contexts,
 					&ctx->hash_entry, hash_params))
 				context_free(same_key_ctx);
+
+			remove_ctx_signal_stack(same_key_ctx->key);
+
 			return ret;
 		}
 
@@ -1285,8 +1213,13 @@ static long do_makecontext(void __user *ucp, void (*func)(void),
 							same_key_ctx);
 					context_free(same_key_ctx);
 				}
+
+				remove_ctx_signal_stack(same_key_ctx->key);
 			}
 		} while (same_key_ctx);
+
+		/* Create signal stack on host side for this context */
+		add_ctx_signal_stack(ctx->key, false);
 
 		DebugCTX("added ctx %lx with key %llx\n", ctx, key);
 	}
@@ -1349,6 +1282,8 @@ static long do_freecontext(u64 key)
 
 	context_free(ctx);
 
+	remove_ctx_signal_stack(ctx->key);
+
 	return 0;
 }
 
@@ -1399,7 +1334,8 @@ static void switch_hw_contexts(struct pt_regs *__restrict regs,
 		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr)
 {
 	struct thread_info *ti = current_thread_info();
-	e2k_mem_crs_t *__restrict k_crs = (e2k_mem_crs_t * __restrict) AS(ti->k_pcsp_lo).base;
+	e2k_mem_crs_t *__restrict k_crs = (e2k_mem_crs_t *__restrict)
+					AS(ti->k_pcsp_lo).base;
 	e2k_pcshtp_t pcshtp = regs->stacks.pcshtp;
 	e2k_pshtp_t pshtp = regs->stacks.pshtp;
 
@@ -1418,10 +1354,10 @@ static void switch_hw_contexts(struct pt_regs *__restrict regs,
 	 * free the @next_ctx. */
 
 	raw_all_irq_disable();
+
 	E2K_FLUSHC;
-	prev_ctx->prev_crs = k_crs[0];
-	k_crs[0] = next_ctx->prev_crs;
-	k_crs[1] = next_ctx->regs.crs;
+	update_kernel_crs(k_crs, &next_ctx->regs.crs, &next_ctx->prev_crs,
+			&prev_ctx->prev_crs);
 
 	/*
 	 * 3) Switch thread_info
@@ -1448,8 +1384,7 @@ static void switch_hw_contexts(struct pt_regs *__restrict regs,
 	 * here to not hinder compiler optimizations) */
 	barrier();
 
-	/* FIXME: should be paravirtualized */
-	NATIVE_CLEAR_DAM;
+	CLEAR_DAM;
 
 	list_splice_init(&ti->old_u_pcs_list, &prev_ctx->ti.old_u_pcs_list);
 	list_splice_init(&next_ctx->ti.old_u_pcs_list, &ti->old_u_pcs_list);
@@ -1581,6 +1516,7 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 	struct pt_regs *regs = current_thread_info()->pt_regs;
 	e2k_mem_crs_t *__restrict k_crs = (e2k_mem_crs_t *__restrict)
 			AS(current_thread_info()->k_pcsp_lo).base;
+	bool stacks_switched = false;
 	int ret;
 
 	DebugCTX("oucp=%lx ucp=%lx started\n", oucp, ucp);
@@ -1657,6 +1593,9 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 			return ret;
 		}
 		current_thread_info()->this_hw_context = prev_ctx;
+
+		/* Create signal stack on host side for this context */
+		add_ctx_signal_stack(prev_ctx->key, true);
 	}
 
 	/*
@@ -1752,6 +1691,8 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 		current_thread_info()->this_hw_context = next_ctx;
 
 		(void) release_reference(prev_ctx, HWC_STATE_BUSY);
+
+		stacks_switched = true;
 	}
 
 	/*
@@ -1778,6 +1719,9 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 				AS(cr1_hi).br, format == CTX_128_BIT ? 0x80 : 0x40,
 				fpcr, fpsr, pfpfr, !fpu_restored);
 	}
+
+	if (stacks_switched)
+		complete_long_jump(regs, true, next_key);
 
 	k_sigset.sig[0] = sigset;
 	if (!sigequalsets(&current_blocked_sigset, &k_sigset))

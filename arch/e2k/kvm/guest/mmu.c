@@ -15,6 +15,7 @@
 #include <asm/mman.h>
 #include <asm/mmu_fault.h>
 #include <asm/mmu_types.h>
+#include <asm/copy-hw-stacks.h>
 
 #include <asm/kvm/hypercall.h>
 
@@ -72,6 +73,15 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_KVM_RETRY_MODE
+#undef	DebugRETRY
+#define	DEBUG_KVM_RETRY_MODE		0	/* memory copy retries debug */
+#define	DebugRETRY(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_RETRY_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 static bool is_simple_ldst_op(u64 ldst_rec_opc, tc_cond_t cond)
 {
 	ldst_rec_op_t *opc = (ldst_rec_op_t *) &ldst_rec_opc;
@@ -83,7 +93,7 @@ static bool is_simple_ldst_op(u64 ldst_rec_opc, tc_cond_t cond)
 	return (!opc->mas || is_simple_lock_check_ld) &&
 		!opc->prot && !opc->root && !opc->mode_h && !opc->fmt_h &&
 		(opc->fmt >= LDST_BYTE_FMT) && (opc->fmt <= LDST_DWORD_FMT) &&
-		!TASK_IS_PROTECTED(current);
+		!opc->pm && !TASK_IS_PROTECTED(current);
 }
 
 static void simple_recovery_faulted_load_to_greg(e2k_addr_t address,
@@ -121,6 +131,170 @@ static void simple_recovery_faulted_store(e2k_addr_t address, u64 wr_data,
 				u64 st_rec_opc)
 {
 	SIMPLE_RECOVERY_STORE(address, wr_data, st_rec_opc);
+}
+
+unsigned long __kvm_copy_to_priv_user_with_tags(void __user *to,
+					const void *from, unsigned long n)
+{
+	unsigned long _to = (unsigned long)to, _from = (unsigned long)from;
+	unsigned long ret, head, mid, tail, k_addr, end_mid;
+	struct page *u_page;
+
+	head = (n > PAGE_SIZE - offset_in_page(_to)) ?
+				PAGE_SIZE - offset_in_page(_to) : n;
+	mid = (n - head > PAGE_SIZE) ?
+			((n - head) - offset_in_page(_to + n)) : 0;
+	tail = n - head - mid;
+
+	/* Copy head (from "to" to start of next page) */
+	if (head) {
+		u_page = get_user_addr_to_kernel_page(_to);
+		if (IS_ERR_OR_NULL(u_page)) {
+			ret = (IS_ERR(u_page)) ? PTR_ERR(u_page) : -EINVAL;
+		} else {
+			k_addr = ((unsigned long)page_address(u_page)) +
+							(_to & ~PAGE_MASK);
+			ret = HYPERVISOR_copy_in_user_with_tags((void *)k_addr,
+						(const void *)_from, head);
+			put_user_addr_to_kernel_page(u_page);
+		}
+
+		if (ret)
+			return ret;
+
+		_to += head;
+		_from += head;
+	}
+
+	/* Copy middle (whole pages) */
+	if (mid) {
+		end_mid = _to + mid;
+		for (; _to < end_mid; _to += PAGE_SIZE, _from += PAGE_SIZE) {
+
+			u_page = get_user_addr_to_kernel_page(_to);
+			if (IS_ERR_OR_NULL(u_page)) {
+				ret = (IS_ERR(u_page)) ? PTR_ERR(u_page) :
+							-EINVAL;
+			} else {
+				k_addr = (unsigned long)page_address(u_page);
+				ret = HYPERVISOR_copy_in_user_with_tags(
+					(void *)k_addr, (const void *)_from,
+					PAGE_SIZE);
+				put_user_addr_to_kernel_page(u_page);
+			}
+
+			if (ret)
+				return ret;
+		}
+	}
+
+	/* Copy tail (from end of page to "to" + n) */
+	if (tail) {
+		u_page = get_user_addr_to_kernel_page(_to);
+		if (IS_ERR_OR_NULL(u_page)) {
+			ret = (IS_ERR(u_page)) ? PTR_ERR(u_page) :
+				-EINVAL;
+		} else {
+			k_addr = ((unsigned long)page_address(u_page)) +
+							(_to & ~PAGE_MASK);
+			ret = HYPERVISOR_copy_in_user_with_tags((void *)k_addr,
+						(const void *)_from, tail);
+			put_user_addr_to_kernel_page(u_page);
+		}
+
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+unsigned long __kvm_copy_from_priv_user_with_tags(void *to,
+				const void __user *from, unsigned long n)
+{
+	unsigned long _to = (unsigned long) to, _from = (unsigned long) from;
+	unsigned long ret, head, mid, tail, k_addr, end_mid;
+	struct page *u_page;
+
+	head = (n > PAGE_SIZE - offset_in_page(_from)) ?
+		PAGE_SIZE - offset_in_page(_from) : n;
+	mid = (n - head > PAGE_SIZE) ?
+		((n - head) - offset_in_page(_from + n)) : 0;
+	tail = n - head - mid;
+
+	/* Copy head (from "from" to start of next page) */
+	if (head) {
+		u_page = get_user_addr_to_kernel_page(_from);
+		if (IS_ERR_OR_NULL(u_page)) {
+			ret = (IS_ERR(u_page)) ? PTR_ERR(u_page) : -EINVAL;
+		} else {
+			k_addr = ((unsigned long)page_address(u_page)) +
+							(_from & ~PAGE_MASK);
+			ret = HYPERVISOR_copy_in_user_with_tags((void *)_to,
+						(const void *)k_addr, head);
+			put_user_addr_to_kernel_page(u_page);
+		}
+
+		if (ret)
+			return ret;
+
+		_to += head;
+		_from += head;
+	}
+
+	/* Copy middle (whole pages) */
+	if (mid) {
+		end_mid = _from + mid;
+		for (; _from < end_mid; _from += PAGE_SIZE, _to += PAGE_SIZE) {
+
+			u_page = get_user_addr_to_kernel_page(_from);
+			if (IS_ERR_OR_NULL(u_page)) {
+				ret = (IS_ERR(u_page)) ? PTR_ERR(u_page) :
+					-EINVAL;
+			} else {
+				k_addr = (unsigned long)page_address(u_page);
+				ret = HYPERVISOR_copy_in_user_with_tags(
+					(void *)_to,
+					(const void *)k_addr, PAGE_SIZE);
+				put_user_addr_to_kernel_page(u_page);
+			}
+
+			if (ret)
+				return ret;
+		}
+	}
+
+	/* Copy tail (from end of page to "from" + n) */
+	if (tail) {
+		u_page = get_user_addr_to_kernel_page(_from);
+		if (IS_ERR_OR_NULL(u_page)) {
+			ret = (IS_ERR(u_page)) ? PTR_ERR(u_page) :
+				-EINVAL;
+		} else {
+			k_addr = ((unsigned long)page_address(u_page)) +
+							(_from & ~PAGE_MASK);
+			ret = HYPERVISOR_copy_in_user_with_tags((void *)_to,
+						(const void *)k_addr, tail);
+			put_user_addr_to_kernel_page(u_page);
+		}
+
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+unsigned long __kvm_copy_to_priv_user(void __user *to,
+					const void *from, unsigned long n)
+{
+	return __kvm_copy_to_priv_user_with_tags(to, from, n);
+}
+
+unsigned long __kvm_copy_from_priv_user(void *to,
+				const void __user *from, unsigned long n)
+{
+	return __kvm_copy_from_priv_user_with_tags(to, from, n);
 }
 
 static probe_entry_t
@@ -310,6 +484,9 @@ static void kvm_mmu_notifier_release(struct mmu_notifier *mn,
 			gmmid_nr);
 	}
 	BUG_ON(current->mm == mm);
+	/* Order is important: first mark mm as being destroyed by clearing
+	 * gmmid_nr to stop issuing TLB flushes; then actually do the drop. */
+	mm->gmmid_nr = -1;
 	if (gmmid_nr > 0) {
 		ret = HYPERVISOR_kvm_guest_mm_drop(gmmid_nr);
 		if (ret != 0) {
@@ -318,7 +495,6 @@ static void kvm_mmu_notifier_release(struct mmu_notifier *mn,
 		}
 	}
 	mmu_notifier_put(mn);
-	mm->gmmid_nr = -1;
 }
 
 static struct mmu_notifier *kvm_alloc_mm_notifier(struct mm_struct *mm)
@@ -350,19 +526,35 @@ static const struct mmu_notifier_ops kvm_mmu_notifier_ops = {
 	.free_notifier = kvm_free_notifier,
 };
 
-void kvm_get_mm_notifier_locked(struct mm_struct *mm)
+int kvm_get_mm_notifier_locked(struct mm_struct *mm)
 {
 	struct mmu_notifier *mn;
+	int err;
 
 	/* create mm notifier to trace some events over mm */
 	mn = mmu_notifier_get_locked(&kvm_mmu_notifier_ops, mm);
 	if (IS_ERR(mn)) {
-		panic("%s(): %s (%d) ; could not create mm notifier, "
-			"error %ld\n",
-			__func__, current->comm, current->pid, PTR_ERR(mn));
+		err = PTR_ERR(mn);
+
+		pr_warn("%s(): %s (%d) ; could not create mm notifier, "
+			"error %d\n",
+			__func__, current->comm, current->pid, err);
+
+		return err != -EINTR ? err : -ERESTARTNOINTR;
 	}
 	DebugMN("%s (%d) created mm notifier at %px\n users %d\n",
 		current->comm, current->pid, mn, mn->users);
+	return 0;
+}
+
+int kvm_get_mm_notifier(struct mm_struct *mm)
+{
+	int ret;
+
+	down_write(&mm->mmap_sem);
+	ret = kvm_get_mm_notifier_locked(mm);
+	up_write(&mm->mmap_sem);
+	return ret;
 }
 
 /*
@@ -418,6 +610,7 @@ void kvm_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
 	DebugKVMREC("started for address 0x%lx data 0x%llx tag 0x%x, "
 		"channel #%d\n", address, wr_data, data_tag, chan);
 
+again:
 	if (likely(is_simple_ldst_op(st_rec_opc, (tc_cond_t) {.word = 0})) &&
 			!data_tag) {
 		simple_recovery_faulted_store(address, wr_data, st_rec_opc);
@@ -431,6 +624,12 @@ void kvm_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
 				wr_data, data_tag, st_rec_opc, data_ext,
 				data_ext_tag, opc_ext, chan, qp_store,
 				atomic_store);
+	}
+
+	if (hret == -EAGAIN) {
+		DebugKVMREC("retry store to address 0x%lx data 0x%llx tag 0x%x, "
+			"channel #%d\n", address, wr_data, data_tag, chan);
+		goto again;
 	}
 
 	if (!hret) {
@@ -449,6 +648,7 @@ void kvm_recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
 
 	DebugKVMREC("started for address 0x%lx, channel #%d\n", address, chan);
 
+again:
 	if (likely(is_simple_ldst_op(ld_rec_opc, cond))) {
 		simple_recovery_faulted_move(address, (e2k_addr_t) ld_val,
 						ld_rec_opc, 1, cond);
@@ -462,6 +662,12 @@ void kvm_recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
 	} else {
 		hret = HYPERVISOR_recovery_faulted_load(address, ld_val,
 					data_tag, ld_rec_opc, chan);
+	}
+
+	if (hret == -EAGAIN) {
+		DebugKVMREC("retry ld from address 0x%lx, channel #%d\n",
+				address, chan);
+		goto again;
 	}
 
 	if (!hret) {
@@ -484,6 +690,8 @@ void kvm_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 	DebugKVMREC("started for address from 0x%lx to addr 0x%lx, "
 		"channel #%d\n",
 		addr_from, addr_to, chan);
+
+again:
 	if (likely(is_simple_ldst_op(ld_rec_opc, cond)) && vr) {
 		simple_recovery_faulted_move(addr_from, addr_to, ld_rec_opc,
 						first_time, cond);
@@ -496,6 +704,12 @@ void kvm_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		hret = HYPERVISOR_recovery_faulted_move(addr_from, addr_to,
 				addr_to_hi, vr, ld_rec_opc, chan,
 				qp_load, atomic_load, first_time);
+	}
+
+	if (hret == -EAGAIN) {
+		DebugKVMREC("retry move from addr 0x%lx to addr 0x%lx, "
+			"channel #%d\n", addr_from, addr_to, chan);
+		goto again;
 	}
 
 	if (DEBUG_KVM_RECOVERY_MODE)
@@ -515,6 +729,7 @@ void kvm_recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
 	DebugKVMREC("started for address 0x%lx global reg #%d, channel #%d\n",
 		address, greg_num_d, chan);
 
+again:
 	if (likely(is_simple_ldst_op(ld_rec_opc, cond))
 					&& !saved_greg_lo && vr) {
 		simple_recovery_faulted_load_to_greg(address, greg_num_d,
@@ -528,6 +743,12 @@ void kvm_recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
 		hret = HYPERVISOR_recovery_faulted_load_to_greg(address,
 			greg_num_d, vr, ld_rec_opc, chan,
 			qp_load, atomic_load, saved_greg_lo, saved_greg_hi);
+	}
+
+	if (hret == -EAGAIN) {
+		DebugKVMREC("retry load from addr 0x%lx to global reg #%d, "
+			"channel #%d\n", address, greg_num_d, chan);
+		goto again;
 	}
 
 	if (DEBUG_KVM_RECOVERY_MODE)
@@ -551,6 +772,7 @@ static inline void kvm_do_move_tagged_data(int word_size, e2k_addr_t addr_from,
 				((word_size == sizeof(u64) * 2) ? "quad"
 					:
 					"???")));
+again:
 	if (IS_HOST_KERNEL_ADDRESS(addr_from) ||
 			IS_HOST_KERNEL_ADDRESS(addr_to)) {
 		hret = HYPERVISOR_move_tagged_guest_data(word_size,
@@ -558,6 +780,12 @@ static inline void kvm_do_move_tagged_data(int word_size, e2k_addr_t addr_from,
 	} else {
 		hret = HYPERVISOR_move_tagged_data(word_size,
 							addr_from, addr_to);
+	}
+
+	if (hret == -EAGAIN) {
+		DebugKVMREC("retry tagged move from 0x%lx to 0x%lx, "
+			"word size : %d\n", addr_from, addr_to, word_size);
+		goto again;
 	}
 
 	if (!hret) {
@@ -609,6 +837,11 @@ void kvm_flush_dcache_line(e2k_addr_t virt_addr)
 	}
 }
 EXPORT_SYMBOL(kvm_flush_dcache_line);
+
+u64 kvm_read_dcache_l1_fault_reg(void)
+{
+	panic("kvm_read_l1_fault_reg() not implemented\n");
+}
 
 void kvm_clear_dcache_l1_set(e2k_addr_t virt_addr, unsigned long set)
 {

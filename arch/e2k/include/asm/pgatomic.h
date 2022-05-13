@@ -64,6 +64,15 @@ native_pt_get_and_xchg_atomic(pgprotval_t newval, pgprotval_t *pgprot)
 }
 
 static inline pgprotval_t
+native_pt_get_and_xchg_relaxed(pgprotval_t newval, pgprotval_t *pgprot)
+{
+	pgprotval_t oldval = xchg_relaxed(pgprot, newval);
+	trace_pt_update("pt_get_and_xchg_relaxed: entry at 0x%lx: 0x%lx -> 0x%lx\n",
+			pgprot, oldval, newval);
+	return oldval;
+}
+
+static inline pgprotval_t
 native_pt_clear_relaxed_atomic(pgprotval_t mask, pgprotval_t *pgprot)
 {
 	pgprotval_t oldval = __api_atomic_fetch_op(mask, pgprot, d,
@@ -112,6 +121,13 @@ pt_get_and_xchg_atomic(struct mm_struct *mm, unsigned long addr,
 				pgprotval_t newval, pgprot_t *pgprot)
 {
 	return native_pt_get_and_xchg_atomic(newval, &pgprot->pgprot);
+}
+
+static inline pgprotval_t
+pt_get_and_xchg_relaxed(struct mm_struct *mm, unsigned long addr,
+				pgprotval_t newval, pgprot_t *pgprot)
+{
+	return native_pt_get_and_xchg_relaxed(newval, &pgprot->pgprot);
 }
 
 static inline pgprotval_t

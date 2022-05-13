@@ -18,7 +18,7 @@
 *******************************************************************/
 #ifndef DDK750_SII164_H__
 #define DDK750_SII164_H__
-
+struct lynx_share;
 /* Hot Plug detection mode structure */
 typedef enum _sii164_hot_plug_mode_t {
 	SII164_HOTPLUG_DISABLE = 0,	/* Disable Hot Plug output bit (always high). */
@@ -29,7 +29,8 @@ typedef enum _sii164_hot_plug_mode_t {
 
 
 /* Silicon Image SiI164 chip prototype */
-long sii164InitChip(unsigned char edgeSelect,
+long sii164InitChip(struct lynx_share *share,
+			unsigned char edgeSelect,
 		    unsigned char busSelect,
 		    unsigned char dualEdgeClkSelect,
 		    unsigned char hsyncEnable,
@@ -40,18 +41,18 @@ long sii164InitChip(unsigned char edgeSelect,
 		    unsigned char pllFilterEnable,
 		    unsigned char pllFilterValue);
 
-unsigned short sii164GetVendorID(void);
-unsigned short sii164GetDeviceID(void);
+unsigned short sii164GetVendorID(struct lynx_share *share);
+unsigned short sii164GetDeviceID(struct lynx_share *share);
 
 
 #ifdef SII164_FULL_FUNCTIONS
-void sii164ResetChip(void);
+void sii164ResetChip(struct lynx_share *share);
 char *sii164GetChipString(void);
-void sii164SetPower(unsigned char powerUp);
-void sii164EnableHotPlugDetection(unsigned char enableHotPlug);
-unsigned char sii164IsConnected(void);
-unsigned char sii164CheckInterrupt(void);
-void sii164ClearInterrupt(void);
+void sii164SetPower(struct lynx_share *share, unsigned char powerUp);
+void sii164EnableHotPlugDetection(struct lynx_share *share, unsigned char enableHotPlug);
+unsigned char sii164IsConnected(struct lynx_share *share);
+unsigned char sii164CheckInterrupt(struct lynx_share *share);
+void sii164ClearInterrupt(struct lynx_share *share);
 #endif
 /* below register definination is used for Silicon Image SiI164 DVI controller chip */
 /*

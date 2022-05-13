@@ -30,20 +30,6 @@ config MGA2_GPIO
         depends on GPIOLIB
         default m
 
-config MSPS
-	tristate "MSPS driver"
-	depends on E2K && NUMA
-	default m
-	help
-	    Driver for MSPS - needed for connect external ADC with our VK.
-
-config ELDSP
-	tristate "Elbrus DSP driver"
-	depends on E2K && CPU_ES2
-	default m
-	help
-	  Driver for Elbrus DSP (eldsp), older name "DSP Cube".
-
 config MPV
 	tristate "MPV driver"
 	depends on MCST && PCI
@@ -141,7 +127,7 @@ config BIGE
 
 config E8CPCS
 	tristate "E8C Power Control System (PCS) hwmon driver"
-	depends on E2K && (E2K_E8C || E2K_E8C2 || E2K_MINVER <= 5)
+	depends on E2K && (E2K_E8C || E2K_E8C2)
 	default m
 
 config PCSM
@@ -168,7 +154,24 @@ config VXD_FPGA
         def_bool y
         depends on IMGTEC
 
-source "drivers/mcst/gpu-imgtec/Kconfig"
+config MCST_GPU_IMGTEC
+        tristate "MCST support Imagination`s GPU support for E2C3 SoC"
+        select DRM_VM
+        depends on IMGTEC
+        default m
+choice
+        prompt "Choice Imagination`s GPU module version to build"
+        default MCST_GPU_IMGTEC_R5824814
+
+        config MCST_GPU_IMGTEC_R4991288
+                bool "Rogue_DDK_Linux_WS_REL_1.9@4991288 with desktop OpenGL"
+        	depends on IMGTEC
+        config MCST_GPU_IMGTEC_R5824814
+                bool "Rogue_DDK_Linux_WS_REL_1.13@5824814 w/o desktop OpenGL"
+        	depends on IMGTEC
+endchoice
+source "drivers/mcst/gpu-imgtec.r4991288/Kconfig"
+source "drivers/mcst/gpu-imgtec.r5824814/Kconfig"
 
 source "drivers/mcst/gpu-viv/Kconfig"
 
@@ -194,5 +197,12 @@ config SENSORS_EMC2305
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called emc2305.
+
+config PMC_R2KP
+	bool "R2000+ Power Management Controller"
+	depends on E90S
+	default y #
+	help
+	  Power Management Controller (PMC) for MCST R2000+ (E90S/SPARC v9) CPU
 
 endmenu

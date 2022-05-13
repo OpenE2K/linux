@@ -129,6 +129,15 @@ PV_FLUSH_DCACHE_LINE(e2k_addr_t virt_addr)
 }
 
 /*
+ * Read DCACHE L1 fault_reg register
+ */
+static inline u64
+PV_READ_L1_FAULT_REG(void)
+{
+	return pv_mmu_ops.read_dcache_l1_fault_reg();
+}
+
+/*
  * Clear DCACHE L1 set
  */
 static inline void
@@ -444,6 +453,15 @@ static inline void FLUSH_DCACHE_LINE(e2k_addr_t virt_addr)
 static inline void FLUSH_DCACHE_LINE_OFFSET(e2k_addr_t virt_addr, size_t offset)
 {
 	PV_FLUSH_DCACHE_LINE(virt_addr + offset);
+}
+
+/*
+ * Read DCACHE L1 fault_reg register
+ */
+static inline u64
+READ_L1_FAULT_REG(void)
+{
+	return PV_KVM_READ_L1_FAULT_REG();
 }
 
 /*

@@ -329,8 +329,7 @@ static pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
 	if (uncached_access(file, offset))
 #ifdef CONFIG_E2K
 		/* Support for MAP_WRITECOMBINED flag */
-		if (cpu_has(CPU_FEAT_WC_PCI_PREFETCH) &&
-				vma->vm_flags & VM_WRITECOMBINED)
+		if (vma->vm_flags & VM_WRITECOMBINED)
 			return pgprot_writecombine(vma_prot);
 		else
 #endif /* CONFIG_E2K */

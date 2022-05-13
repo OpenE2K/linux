@@ -10,24 +10,35 @@
  * in the .text section nearly to the OS entry code.
  */
 
-int kvm_do_fast_clock_gettime(const clockid_t which_clock,
+int notrace kvm_do_fast_clock_gettime(const clockid_t which_clock,
 		struct timespec *tp)
 {
 	return DO_FAST_CLOCK_GETTIME(which_clock, tp);
 }
 
-int kvm_fast_sys_clock_gettime(const clockid_t which_clock,
+int notrace kvm_fast_sys_clock_gettime(const clockid_t which_clock,
 		struct timespec __user *tp)
 {
 	return FAST_SYS_CLOCK_GETTIME(which_clock, tp);
 }
 
-int kvm_do_fast_gettimeofday(struct timeval *tv)
+int notrace kvm_do_fast_gettimeofday(struct timeval *tv)
 {
 	return DO_FAST_GETTIMEOFDAY(tv);
 }
 
-int kvm_fast_sys_siggetmask(u64 __user *oset, size_t sigsetsize)
+int notrace kvm_do_fast_sys_set_return(u64 ip, int flags)
+{
+	if (IS_HV_GM()) {
+		return native_do_fast_sys_set_return(ip, flags);
+	} else {
+		thread_info_t *gti = READ_CURRENT_REG();
+
+		return HYPERVISOR_set_return_user_ip((u64) gti, ip, flags);
+	}
+}
+
+int notrace kvm_fast_sys_siggetmask(u64 __user *oset, size_t sigsetsize)
 {
 	return FAST_SYS_SIGGETMASK(oset, sigsetsize);
 }

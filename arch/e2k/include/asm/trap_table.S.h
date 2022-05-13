@@ -88,7 +88,7 @@
 	{ \
 		rrd %psp.lo, GCURTASK ? %pred0; \
 		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PSP_HI ? %pred0; \
-		SMP_ONLY(ldgdd,5 0, TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, GCPUID_PREEMPT ? ~ %pred0;) \
+		ldgdd,5 0, TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, GCPUID_PREEMPT ? ~ %pred0; \
 	} \
 	{ \
 		rrd %pcsp.hi, GCURTASK ? %pred0; \
@@ -142,6 +142,7 @@
 	} \
 	{ \
 		SMP_ONLY(ldw,3 GVCPUSTATE, TSK_TI_CPU_DELTA, GCPUID_PREEMPT;) \
+		NOT_SMP_ONLY(addd,3 0, 0, GCPUID_PREEMPT;) \
 		strd,5 GCPUID_PREEMPT, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_VCPU_STATE_EXT; \
 	}
 

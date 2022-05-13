@@ -25,6 +25,11 @@ static __always_inline int preempt_count(void)
 	__cpu_preempt_reg = (u64) (u32) __cpu_preempt_reg; \
 } while (0)
 
+#define set_cpu_preempt_reg(__cpu_reg, __val) \
+do { \
+	__cpu_reg = (__cpu_reg) & 0x00000000ffffffffull | (__val); \
+} while (0)
+
 static __always_inline void set_preempt_need_resched(void)
 {
 	__cpu_preempt_reg |= PREEMPT_NEED_RESCHED;
@@ -72,6 +77,9 @@ static __always_inline bool __preempt_count_dec_and_test(void)
 
 	E2K_SUBD_ATOMIC__SHRD32(__cpu_preempt_reg, 1ull << PREEMPT_COUNTER_SHIFT, old);
 #ifdef CONFIG_PREEMPT_LAZY
+	if (unlikely(old == 1))
+		return true;
+	/* preempt count == 0 ? */
 	if ((__cpu_preempt_reg >> 32ull) & ~1ull) /* as in arm64 */
 		return false;
 	if (current_thread_info()->preempt_lazy_count)
@@ -99,7 +107,7 @@ static __always_inline bool should_resched(int preempt_offset)
 	u64 tmp_par = (u64) (u32) preempt_offset << 1;
 	u64 tmp = __cpu_preempt_reg >> 32ull;
 
-	if (tmp == tmp_par)
+	if (unlikely(tmp == (tmp_par | 1)))
 		return true;
 
 	/* preempt count == 0 ? */

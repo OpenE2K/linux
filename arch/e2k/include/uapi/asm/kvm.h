@@ -4,12 +4,20 @@
 /*
  * KVM e2k specific structures and definitions
  *
+ * Note: you must update KVM_ARCH_API_VERSION if you change this interface.
  */
 
 #ifndef __ASSEMBLY__
 
 #include <linux/types.h>
 #include <linux/ioctl.h>
+
+/*
+ * e2k KVM api is not yet stable, so there is specific e2k arch
+ * refinement of the interface in format yymmdd so that the version
+ * number always monotonously increased
+ */
+#define KVM_ARCH_API_VERSION	210512
 
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1
 
@@ -67,6 +75,16 @@
 
 /* Architectural interrupt line count. */
 #define KVM_NR_INTERRUPTS 256
+
+/*
+ * e2k arch-dependent limits for the nr of threads virtual CPUs
+ */
+
+/* KVM manage */
+#define	KVM_VM_MAX_LIMIT	1024	/* max number of VM IDs at use */
+
+/* VCPUs manage */
+#define KVM_MAX_VCPUS		64
 
 typedef struct kvm_memory_alias {
 	__u32 slot;	/* this has a different namespace than memory slots */
@@ -353,6 +371,7 @@ typedef struct kvm_guest_area_reserve {
 #define	KVM_GUEST_NBSR_BASE_NODE_1	0x00040000
 #define	KVM_GUEST_NBSR_BASE_NODE_2	0x00080000
 #define	KVM_GUEST_NBSR_BASE_NODE_3	0x00100000
+#define	KVM_HOST_INFO_VRAM_SIZE		0x00200000
 
 /* flags of IO ports area mapping for guest */
 #define	KVM_IO_PORTS_MMAP	0x1ff00000000	/* > max physical memory */
@@ -448,10 +467,17 @@ typedef struct kvm_guest_nbsr_state {
 						/* paravirtualized guest */
 						/* (same as ttable #0) */
 
+
+#define GUEST_COMPAT_FAST_SYSCALL_TRAP_NUM	5
+#define GUEST_FAST_SYSCALL_TRAP_NUM		6
+#define GUEST_PROT_FAST_SYSCALL_TRAP_NUM	7
+
 #ifndef __ASSEMBLY__
 
+#define KVM_GET_ARCH_API_VERSION	_IO(KVMIO, 0xe1)
+#define KVM_VCPU_THREAD_SETUP		_IO(KVMIO, 0xe0)
 #define KVM_GET_GUEST_ADDRESS		_IOWR(KVMIO, 0xe2, unsigned long *)
-#define KVM_SETUP_VCPU			_IO(KVMIO, 0xe3)
+#define KVM_RESET_E2K_VCPU		_IO(KVMIO, 0xe3)
 #define KVM_ALLOC_GUEST_AREA		_IOWR(KVMIO, 0xe4,	\
 						kvm_guest_area_alloc_t)
 #define KVM_VCPU_GUEST_STARTUP		_IOW(KVMIO, 0xe5,	\
@@ -480,8 +506,11 @@ typedef struct kvm_guest_nbsr_state {
 
 /* e2k-specific exit reasons from KVM to userspace assistance */
 #define KVM_EXIT_E2K_NOTIFY_IO		33
+#define KVM_EXIT_E2K_SHUTDOWN		36
 #define KVM_EXIT_E2K_RESTART		37
 #define KVM_EXIT_E2K_PANIC		38
+#define	KVM_EXIT_E2K_INTR		39
+#define	KVM_EXIT_E2K_UNKNOWN		44
 
 #endif	/* __ASSEMBLY__ */
 

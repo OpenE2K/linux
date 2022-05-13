@@ -6,8 +6,6 @@
 #include <asm/e2k.h>
 #include <asm/l_timer_regs.h>
 
-#define	L_TIMER_IS_ALLOWED()	(HAS_MACHINE_E2K_IOHUB || IS_HV_GM())
-
 #include <asm-l/l_timer.h>
 
 #endif  /* __KERNEL__ */

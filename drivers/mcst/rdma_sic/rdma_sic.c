@@ -712,9 +712,6 @@ static int __init rdma_init(void)
 #else
 	INFO_MSG("I am worked on CUBIC/E2S, NODE_NUMIOLINKS: %d "
 		 "MAX_NUMIOLINKS: %d\n", NODE_NUMIOLINKS, MAX_NUMIOLINKS);
-	if (IS_MACHINE_ES2) {
-		INFO_MSG("CUBIC. Loopback mode is not implemented.\n");
-	}
 	if (IS_MACHINE_E2S) {
 		INFO_MSG("E2S. Loopback mode implemented.\n");
 		INFO_MSG("E2S. IS_MACHINE_E2S: %d IS_MACHINE_E2S: %x.\n",

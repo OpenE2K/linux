@@ -5,9 +5,15 @@
 #include <linux/dma-buf.h>
 #include <linux/regmap.h>
 #include <linux/genalloc.h>
+#include <linux/async.h>
+
 #include <drm/drm_gem.h>
 #include <drm/drm_probe_helper.h>
+#include <drm/ttm/ttm_bo_driver.h>
 
+#ifdef CONFIG_E2K
+#include <asm/set_memory.h>
+#endif
 
 MODULE_PARM_DESC(lvds, "LVDS channels number. "
 			"Panel parameters may be set from cmdline. Example:\n"
@@ -166,6 +172,8 @@ static int mga2_add_hdmi(struct drm_device *drm)
 	},
 	};
 
+	if (!mga2_hdmi(mga2))
+		return 0;
 	if ((ret = request_module("dw_hdmi_imx")))
 		goto out;
 	irq = drm->pdev->irq;
@@ -228,11 +236,13 @@ static int mga2_add_devices(struct drm_device *drm)
 	drm_for_each_crtc(crtc, drm)
 		crtc_mask |= drm_crtc_mask(crtc);
 
-	mga2->dvi_i2c =  mga2_i2c_create(drm->dev, vid_phys + MGA2_VID0_TXI2C,
-			"SIL1178" " tx", mga2->base_freq, 50 * 1000);
-	if (!mga2->dvi_i2c) {
-		ret = -1;
-		goto out;
+	if (mga2_dvi_enable) {
+		mga2->dvi_i2c =  mga2_i2c_create(drm->dev, vid_phys + MGA2_VID0_TXI2C,
+				"SIL1178" " tx", mga2->base_freq, 50 * 1000);
+		if (!mga2->dvi_i2c) {
+			ret = -1;
+			goto out;
+		}
 	}
 	switch (mga2->subdevice) {
 	case MGA25_PCI_PROTO:
@@ -308,8 +318,7 @@ static int mga2_add_devices(struct drm_device *drm)
 			if ((ret = request_module("panel-lvds")))
 				goto out;
 		}
-		ret = mga2_common_connector_init(drm, mga2->regs_phys +
-				3 * MGA2_VID0_SZ,
+		ret = mga2_common_connector_init(drm, 0,
 				DRM_MODE_CONNECTOR_LVDS, false, crtc_mask);
 		if (ret < 0)
 			goto out;
@@ -446,6 +455,12 @@ static struct drm_mode_config_helper_funcs mga2_mode_config_helpers = {
 	.atomic_commit_tail	= drm_atomic_helper_commit_tail_rpm,
 };
 
+static void mga2_load_3d(void *data, async_cookie_t cookie)
+{
+	request_module_nowait("galcore");
+	request_module_nowait("vivante");
+}
+
 int mga2_driver_load(struct drm_device *drm, unsigned long flags)
 {
 	struct mga2 *mga2;
@@ -531,8 +546,7 @@ int mga2_driver_load(struct drm_device *drm, unsigned long flags)
 		mga2->base_freq = 80 * 1000 * 1000;
 		break;
 	case MGA26:
-		mga2->base_freq = 100 * 1000 * 1000;
-		WARN(1, "FIXME");
+		mga2->base_freq = 1000 * 1000 * 1000;
 		break;
 	default:
 		mga2->base_freq = 33 * 1000 * 1000;
@@ -552,6 +566,7 @@ int mga2_driver_load(struct drm_device *drm, unsigned long flags)
 	drm->mode_config.min_height = 0;
 	drm->mode_config.preferred_depth = 24;
 	drm->mode_config.prefer_shadow = 0;
+	drm->mode_config.quirk_addfb_prefer_host_byte_order = true;
 
         drm->mode_config.max_width = (1 << 16) - 1;
         drm->mode_config.max_height = (1 << 16) - 1;
@@ -613,6 +628,12 @@ int mga2_driver_load(struct drm_device *drm, unsigned long flags)
 	ret = mga2_fbdev_init(drm);
 	if (ret)
 		goto out_fb;
+
+	if (mga2_p2(mga2)) {
+		/* 3d has no pci-device, so load drivers here. */
+		/* Do it on another thread to avoid deadlock. */
+		async_schedule(mga2_load_3d, NULL);
+	}
 
 	return ret;
 out_fb:
@@ -886,6 +907,10 @@ struct drm_gem_object *mga2_gem_create(struct drm_device *drm,
 			ret = -ENOMEM;
 			goto fail;
 		}
+#ifdef CONFIG_E2K
+		set_memory_wc((unsigned long) obj->vaddr,
+			      PAGE_ALIGN(size) >> PAGE_SHIFT);
+#endif
 		break;
 	}
 	default:
@@ -926,25 +951,29 @@ void mga2_gem_free_object(struct drm_gem_object *gobj)
 	drm_gem_free_mmap_offset(gobj);
 
 	switch (mo->write_domain) {
-	case MGA2_GEM_DOMAIN_VRAM: if (mga2_use_uncached(mga2)) {
+	case MGA2_GEM_DOMAIN_VRAM:
+		 if (mga2_use_uncached(mga2)) {
 			mga2_free_uncached(drm->dev, gobj->size,
 					mo->vaddr, mo->dma_addr);
-	} else {
-		mutex_lock(&mga2->vram_mu);
-		drm_mm_remove_node(node);
-		mutex_unlock(&mga2->vram_mu);
+		} else {
+			mutex_lock(&mga2->vram_mu);
+			drm_mm_remove_node(node);
+			mutex_unlock(&mga2->vram_mu);
+		}
 		break;
-	}
-	case MGA2_GEM_DOMAIN_CPU: {
+	case MGA2_GEM_DOMAIN_CPU:
 		 if (gobj->import_attach) {
 			drm_prime_gem_destroy(gobj, mo->sgt);
 			vunmap(mo->vaddr);
 		} else if (mo->vaddr) {
+#ifdef CONFIG_E2K
+			set_memory_wb((unsigned long) mo->vaddr,
+				      PAGE_ALIGN(gobj->size) >> PAGE_SHIFT);
+#endif
 			dma_free_coherent(drm->dev, gobj->size,
 					mo->vaddr, mo->dma_addr);
 		}
 		break;
-	}
 	default:
 		WARN_ON(1);
 	}
@@ -1005,7 +1034,8 @@ static int mga2_gem_object_mmap(struct drm_gem_object *gobj,
 		ret = io_remap_pfn_range(vma, vma->vm_start,
 					pfn,
 					vma->vm_end - vma->vm_start,
-					pgprot_writecombine(vma->vm_page_prot));
+					ttm_io_prot(TTM_PL_FLAG_WC,
+					vma->vm_page_prot));
 		break;
 	}
 	case MGA2_GEM_DOMAIN_CPU: {
@@ -1097,22 +1127,6 @@ int mga2_gem_mmap_ioctl(struct drm_device *drm, void *data,
 						&args->offset);
 }
 
-#ifdef CONFIG_E2K
-static void mga2_flush_cache_range(void *start, void *end)
-{
-	void *p;
-
-	start = (void *)ALIGN_DOWN((uintptr_t)start, SMP_CACHE_BYTES);
-	end = PTR_ALIGN(end, SMP_CACHE_BYTES);
-
-	flush_DCACHE_line_begin();
-	for (p = start; p < end; p += SMP_CACHE_BYTES)
-		__flush_DCACHE_line((e2k_addr_t)p);
-	flush_DCACHE_line_end();
-}
-#else
-#define mga2_flush_cache_range(a, b)
-#endif
 
 /* low-level interface prime helpers */
 
@@ -1142,8 +1156,6 @@ struct sg_table *mga2_prime_get_sg_table(struct drm_gem_object *obj)
 	if (ret < 0)
 		goto out;
 
-	mga2_flush_cache_range(mga2_gem->vaddr, mga2_gem->vaddr + obj->size);
-
 	return sgt;
 
 out:
@@ -1172,6 +1184,7 @@ mga2_prime_import_sg_table(struct drm_device *dev,
 				     struct sg_table *sgt)
 {
 	struct mga2_gem_object *mo;
+	pgprot_t prot = PAGE_KERNEL;
 	int npages;
 	int ret;
 
@@ -1194,7 +1207,15 @@ mga2_prime_import_sg_table(struct drm_device *dev,
 	if (ret < 0)
 		goto err_free_large;
 
-	mo->vaddr = vmap(mo->pages, npages, VM_MAP, PAGE_KERNEL);
+#ifdef CONFIG_E2K
+	/* Imagination GPU uses dma_buf to share DMA buffer with MGA2.
+	 * Since Imagination uses PCIe No Snoop accesses, we make sure
+	 * to allocate & export everything as WC.  And naturally we must
+	 * vmap() the buffer as WC too (since all mappings on e2k must
+	 * use the same coherency attributes). */
+	prot = pgprot_writecombine(prot);
+#endif
+	mo->vaddr = vmap(mo->pages, npages, VM_MAP, prot);
 	if (!mo->vaddr) {
 		ret = -EFAULT;
 		goto err_free_large;

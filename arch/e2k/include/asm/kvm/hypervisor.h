@@ -102,5 +102,15 @@ static inline bool kvm_test_hprv_feats_bit(int feature_bit)
 #define	IS_PV_APIC_KVM()	kvm_test_hprv_feats_mask(KVM_FEAT_PV_APIC_MASK)
 #define	IS_PV_EPIC_KVM()	kvm_test_hprv_feats_mask(KVM_FEAT_PV_EPIC_MASK)
 
+static inline unsigned long kvm_hypervisor_inject_interrupt(void)
+{
+	/*
+	 * Not yet fully implemented
+	 * The real implementation requires checking for interrupts and only
+	 * after that call the host to inject interrupt
+	return HYPERVISOR_inject_interrupt();
+	 */
+	return 0;
+}
 
 #endif /* _ASM_E2K_KVM_HYPERVISOR_H */

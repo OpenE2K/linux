@@ -7,6 +7,11 @@
 #ifndef _ASM_E2K_MMU_REGS_TYPES_V6_H
 #define _ASM_E2K_MMU_REGS_TYPES_V6_H
 
+/* Avoid header dependency loop of probe_entry_t and DTLB_ENTRY_PH_BOUND_V6 */
+#ifndef _E2K_TLB_REGS_TYPES_H_
+# error Do not include <asm/mmu-regs-types-v6.h> directly, use <asm/tlb_regs_types.h> instead
+#endif
+
 /*
  * This file contains the functions and defines necessary to modify and
  * use the E2K ISET V2-V5 page tables.

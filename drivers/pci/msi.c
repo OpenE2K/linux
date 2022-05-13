@@ -1113,6 +1113,14 @@ void pci_disable_msi(struct pci_dev *dev)
 }
 EXPORT_SYMBOL(pci_disable_msi);
 
+#ifdef CONFIG_MCST
+static const struct pci_device_id r2000p_msix_buglist[] = {
+	{ PCI_VDEVICE(MCST_TMP, 0x803d), .driver_data = 9 },
+	{ PCI_VDEVICE(MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P),
+					.driver_data = 4 },
+	{ /* sentinel */ }
+};
+#endif
 /**
  * pci_msix_vec_count - return the number of device's MSI-X table entries
  * @dev: pointer to the pci_dev data structure of MSI-X device function
@@ -1125,8 +1133,14 @@ int pci_msix_vec_count(struct pci_dev *dev)
 {
 	u16 control;
 #ifdef MCST_MSIX
+	const struct pci_device_id *id;
 	if (!supports_msix(dev))
 		return -EINVAL;
+	/* Bug 138348 */
+	id = pci_match_id(r2000p_msix_buglist, dev);
+	if (id)
+		return id->driver_data;
+
 	pci_read_msix_cap_word(dev, PCI_MSIX_FLAGS, &control);
 #else
 	if (!dev->msix_cap)

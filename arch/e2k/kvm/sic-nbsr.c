@@ -1690,6 +1690,13 @@ static int node_nbsr_sic_read(struct kvm_nbsr *nbsr, int node_id,
 	case SIC_prepic_linp5:
 		return node_nbsr_read_prepic(nbsr, node_id,
 						reg_offset, reg_val);
+	case EFUSE_RAM_ADDR:
+	case EFUSE_RAM_DATA:
+		*reg_val = -1;
+		pr_err_once("%s(): node #%d NBSR : regs of EFUSE_RAM "
+			"(offset 0x%04x) is not yet supported, so return 0x%x\n",
+			__func__, node_id, reg_offset, *reg_val);
+		break;
 	default:
 		*reg_val = -1;
 		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
@@ -2038,6 +2045,12 @@ static int node_nbsr_sic_write(struct kvm_nbsr *nbsr, int node_id,
 		ret = node_nbsr_write_prepic(nbsr, node_id, reg_offset,
 			reg_value);
 		break;
+	case EFUSE_RAM_ADDR:
+	case EFUSE_RAM_DATA:
+		pr_err_once("%s(): node #%d NBSR : regs of EFUSE_RAM "
+			"(offset 0x%04x) is not yet supported, so ignore write\n",
+			__func__, node_id, reg_offset);
+		break;
 	default:
 		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
 			"supported, so ignore write\n",
@@ -2383,7 +2396,7 @@ static int nbsr_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	return ret;
 }
 
-static void kvm_nbsr_reset(struct kvm_nbsr *nbsr)
+static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 {
 	e2k_rt_mhi_struct_t rt_mhi;
 	e2k_rt_mlo_struct_t rt_mlo;
@@ -2426,14 +2439,16 @@ static void kvm_nbsr_reset(struct kvm_nbsr *nbsr)
 	rt_pcicfgb.E2K_RT_PCICFGB_bgn = 0x8;	/* 0x0002 0000 0000 */
 	pcicfgb_value = rt_pcicfgb.E2K_RT_PCICFGB_reg;
 	for (node = 0; node < MAX_NUMNODES; node++) {
-		u32 rt_msi_lo, rt_msi_hi;
+		u32 rt_msi_lo = E2K_RT_MSI_DEFAULT_BASE & 0xffffffff;
+		u32 rt_msi_hi = E2K_RT_MSI_DEFAULT_BASE >> 32;
 
 		/*
-		 * Set guest's RT_MSI the same as on host. This is needed for
-		 * device passthrough: guest will be writing this address
-		 * directly to hardware IOEPIC without intercepts
+		 * Bug 129111 workaround: set guest's RT_MSI the same as on host
+		 * We trust guest to never change this, and write this value
+		 * to IOEPIC/PCI_MSI
 		 */
-		get_io_epic_msi(0, &rt_msi_lo, &rt_msi_hi);
+		if (kvm->arch.is_hv)
+			get_io_epic_msi(0, &rt_msi_lo, &rt_msi_hi);
 
 		node_nbsr = &nbsr->nodes[node];
 		node_nbsr->regs[offset_to_no(SIC_rt_mhi0)] = mhi_value;
@@ -2533,7 +2548,7 @@ int kvm_nbsr_init(struct kvm *kvm)
 	for (i = 0; i < kvm->arch.num_numa_nodes; i++)
 		nbsr_set_node_online(nbsr, i);
 
-	kvm_nbsr_reset(nbsr);
+	kvm_nbsr_reset(kvm, nbsr);
 	kvm_iodevice_init(&nbsr->dev, &nbsr_mmio_ops);
 	nbsr->kvm = kvm;
 	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, nbsr->base,

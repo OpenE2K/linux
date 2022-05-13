@@ -19,43 +19,54 @@ extern int __memcmp(const void *cs, const void *ct, size_t count) __pure;
 #define memcmp(dst, src, n) _memcmp((dst), (src), (n))
 static inline int _memcmp(const void *s1, const void *s2, size_t n)
 {
-	if (__builtin_constant_p(n)) {
-		u64 v1, v2;
-		if (n == 16) {
-			v1 = *(u64 *) s1;
-			v2 = *(u64 *) s2;
+	if (__builtin_constant_p(n) && n < 0x20) {
+		/* Inline small memcmp's */
+		if (n & 0x10) {
+			u64 v1 = *(u64 *) s1;
+			u64 v2 = *(u64 *) s2;
 			u64 v21 = *(u64 *) (s1 + 8);
 			u64 v22 = *(u64 *) (s2 + 8);
 			if (v1 != v2)
 				return (__swab64(v1) > __swab64(v2)) ? 1 : -1;
-			if (v21 == v22)
-				return 0;
-			return (__swab64(v21) > __swab64(v22)) ? 1 : -1;
+			if (v21 != v22)
+				return (__swab64(v21) > __swab64(v22)) ? 1 : -1;
+
+			s1 += 0x10;
+			s2 += 0x10;
 		}
-		if (n == 8) {
-			v1 = *(u64 *) s1;
-			v2 = *(u64 *) s2;
-			if (v1 == v2)
-				return 0;
-			return (__swab64(v1) > __swab64(v2)) ? 1 : -1;
+		if (n & 0x8) {
+			u64 v1 = *(u64 *) s1;
+			u64 v2 = *(u64 *) s2;
+			if (v1 != v2)
+				return (__swab64(v1) > __swab64(v2)) ? 1 : -1;
+
+			s1 += 0x8;
+			s2 += 0x8;
 		}
-		if (n == 4) {
-			v1 = *(u32 *) s1;
-			v2 = *(u32 *) s2;
-			if (v1 == v2)
-				return 0;
-			return (__swab32(v1) > __swab32(v2)) ? 1 : -1;
+		if (n & 0x4) {
+			u64 v1 = *(u32 *) s1;
+			u64 v2 = *(u32 *) s2;
+			if (v1 != v2)
+				return (__swab32(v1) > __swab32(v2)) ? 1 : -1;
+
+			s1 += 0x4;
+			s2 += 0x4;
 		}
-		if (n == 2) {
-			v1 = *(u16 *) s1;
-			v2 = *(u16 *) s2;
-			return (u32) __swab16(v1) - (u32) __swab16(v2);
+		if (n & 0x2) {
+			u64 v1 = *(u16 *) s1;
+			u64 v2 = *(u16 *) s2;
+			if (!(n & 0x1) || v1 != v2)
+				return (u32) __swab16(v1) - (u32) __swab16(v2);
+
+			s1 += 0x1;
+			s2 += 0x1;
 		}
-		if (n == 1) {
-			v1 = *(u8 *) s1;
-			v2 = *(u8 *) s2;
+		if (n & 0x1) {
+			u64 v1 = *(u8 *) s1;
+			u64 v2 = *(u8 *) s2;
 			return v1 - v2;
 		}
+		return 0;
 	}
 
 	E2K_PREFETCH_L1_SPEC(s1);
@@ -159,9 +170,16 @@ static inline void *_memcpy(void *__restrict dst,
 		const void *__restrict src, 
 		size_t n, const unsigned long dst_align)
 {
+#if defined E2K_P2V || defined CONFIG_BOOT_E2K
+	bool manual_inline = true;
+#else
+	bool manual_inline = (dst_align >= 8 || cpu_has(CPU_FEAT_ISET_V6));
+#endif
+
 	/*
-	 * As measurements show, an unaligned dst causes a 20x slowdown,
-	 * but unaligned src causes only a 2x slowdown.
+	 * As measurements show, an unaligned dst causes a 4x slowdown,
+	 * but unaligned src causes only a 2x slowdown (also note that
+	 * since v6 unaligned accesses do not cause any slowdown at all).
 	 *
 	 * We can manually assure dst's alignment, but what about src?
 	 *
@@ -179,8 +197,8 @@ static inline void *_memcpy(void *__restrict dst,
 	 * alignment and do the copy with 8-bytes words.
 	 */
 
-	if (__builtin_constant_p(n) && dst_align >= 8 && n < 136) {
-		/* Inline small aligned memcpy's */
+	if (__builtin_constant_p(n) && n < 136 && manual_inline) {
+		/* Inline small memcpy's */
 		const u64 *__restrict l_src = src;
 		u64 *__restrict l_dst = dst;
 
@@ -468,8 +486,22 @@ fast_tagged_memory_copy(void *dst, const void *src, size_t len,
 				strd_opcode, ldrd_opcode, prefetch);
 }
 static inline unsigned long
+fast_tagged_memory_copy_user(void *dst, const void *src, size_t len, size_t *copied,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	return native_fast_tagged_memory_copy(dst, src, len,
+				strd_opcode, ldrd_opcode, prefetch);
+}
+static inline unsigned long
 fast_tagged_memory_set(void *addr, u64 val, u64 tag,
 		size_t len, u64 strd_opcode)
+{
+	return native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
+}
+static inline unsigned long
+fast_tagged_memory_set_user(void *addr, u64 val, u64 tag,
+		size_t len, size_t *cleared, u64 strd_opcode)
 {
 	return native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
 }
@@ -498,7 +530,7 @@ extract_tags_32(u16 *dst, const void *src)
 /* it is native kernel without virtualization support */
 static inline int
 fast_tagged_memory_copy_to_user(void __user *dst, const void *src,
-		size_t len, const struct pt_regs *regs,
+		size_t len, size_t *copied, const struct pt_regs *regs,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
 {
@@ -508,7 +540,7 @@ fast_tagged_memory_copy_to_user(void __user *dst, const void *src,
 
 static inline int
 fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
-		size_t len, const struct pt_regs *regs,
+		size_t len, size_t *copied, const struct pt_regs *regs,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
 {

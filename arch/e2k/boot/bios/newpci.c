@@ -178,74 +178,62 @@ static int pci_conf1_read_config_dword(int domain, unsigned char bus, int devfn,
 
 #ifdef	CONFIG_E2K_SIC
 #ifndef	CONFIG_L_IOH2
-int system_commutator_es2_ioh_write_byte(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_write_byte(int domain, unsigned char bus,
 						int where, u8 value)
 {
 	int link = iohub_domain_to_link(domain);
 	/* You must programming SCRB table registers only for bus 2 link 0 */
-	/* or bus 1 link 1 on es2 (cubic) */
-	if ((bus == 2 && link == 0) || (bus == 1 && link == 1)) {
-		bios_ioh_e3s_outb(domain, bus, value, where);
-	}
+	if ((bus == 2 && link == 0))
+		bios_ioh_e2s_outb(domain, bus, value, where);
 	return 0;
 }
 
-int system_commutator_es2_ioh_read_byte(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_read_byte(int domain, unsigned char bus,
 						int where, u8 *value)
 {
 	int link = iohub_domain_to_link(domain);
 	/* You must programming SCRB table registers only for bus 2 link 0 */
-	/* or bus 1 link 1 on es2 (cubic) */
-	if ((bus == 2 && link == 0) || (bus == 1 && link == 1)) {
-		*value = bios_ioh_e3s_inb(domain, bus, where);
-	}
+	if ((bus == 2 && link == 0))
+		*value = bios_ioh_e2s_inb(domain, bus, where);
 	return 0;
 }
 
-int system_commutator_es2_ioh_write_word(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_write_word(int domain, unsigned char bus,
 						int where, u16 value)
 {
 	int link = iohub_domain_to_link(domain);
 	/* You must programming SCRB table registers only for bus 2 link 0 */
-	/* or bus 1 link 1 on es2 (cubic) */
-	if ((bus == 2 && link == 0) || (bus == 1 && link == 1)) {
-		bios_ioh_e3s_outw(domain, bus, value, where);
-	}
+	if ((bus == 2 && link == 0))
+		bios_ioh_e2s_outw(domain, bus, value, where);
 	return 0;
 }
 
-int system_commutator_es2_ioh_read_word(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_read_word(int domain, unsigned char bus,
 						int where, u16 *value)
 {
 	int link = iohub_domain_to_link(domain);
 	/* You must programming SCRB table registers only for bus 2 link 0 */
-	/* or bus 1 link 1 on es2 (cubic) */
-	if ((bus == 2 && link == 0) || (bus == 1 && link == 1)) {
-		*value = bios_ioh_e3s_inw(domain, bus, where);
-	}
+	if ((bus == 2 && link == 0))
+		*value = bios_ioh_e2s_inw(domain, bus, where);
 	return 0;
 }
 
-int system_commutator_es2_ioh_write_dword(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_write_dword(int domain, unsigned char bus,
 						int where, u32 value)
 {
 	int link = iohub_domain_to_link(domain);
 	/* You must programming SCRB table registers only for bus 2 link 0 */
-	/* or bus 1 link 1 on es2 (cubic) */
-	if ((bus == 2 && link == 0) || (bus == 1 && link == 1)) {
-		bios_ioh_e3s_outl(domain, bus, value, where);
-	}
+	if ((bus == 2 && link == 0))
+		bios_ioh_e2s_outl(domain, bus, value, where);
 	return 0;
 }
-int system_commutator_es2_ioh_read_dword(int domain, unsigned char bus,
+int system_commutator_e2s_ioh_read_dword(int domain, unsigned char bus,
 						int where, u32 *value)
 {
 	int link = iohub_domain_to_link(domain);
 	/* You must programming SCRB table registers only for bus 2 link 0 */
-	/* or bus 1 link 1 on es2 (cubic) */
-	if ((bus == 2 && link == 0) || (bus == 1 && link == 1)) {
-		*value = bios_ioh_e3s_inl(domain, bus, where);
-	}
+	if ((bus == 2 && link == 0))
+		*value = bios_ioh_e2s_inl(domain, bus, where);
 	return 0;
 }
 #endif	/* ! CONFIG_L_IOH2 */
@@ -977,7 +965,7 @@ void assign_resources(struct bios_pci_bus *bus)
 				DaRprintk("assign_resources: bus 0x%x, io val "
 					"to SCRB = 0x%x\n",
 					curbus->self->bus->number, b1_iobl_val);
-				system_commutator_es2_ioh_write_word(domain,
+				system_commutator_e2s_ioh_write_word(domain,
 					curbus->self->bus->number, B1_IOBL,
 					b1_iobl_val);
 			} else {
@@ -1010,10 +998,10 @@ void assign_resources(struct bios_pci_bus *bus)
 				DaRprintk("assign_resources: will set bus "
 					"0x%x, mem val to SCRB = 0x%x\n",
 					curbus->self->bus->number, b1_mbl_val);
-				system_commutator_es2_ioh_write_dword(domain,
+				system_commutator_e2s_ioh_write_dword(domain,
 					curbus->self->bus->number, B1_MBL,
 					b1_mbl_val);
-				system_commutator_es2_ioh_read_dword(domain,
+				system_commutator_e2s_ioh_read_dword(domain,
 					curbus->self->bus->number, B1_MBL,
 					&b1_mbl_val);
 				DaRprintk("assign_resources: read bus 0x%x, "
@@ -1053,7 +1041,7 @@ void assign_resources(struct bios_pci_bus *bus)
 				DaRprintk("assign_resources: bus 0x%x, pmem "
 					"val to SCRB = 0x%x\n",
 					curbus->self->bus->number, b1_pmbl_val);
-				system_commutator_es2_ioh_write_dword(domain,
+				system_commutator_e2s_ioh_write_dword(domain,
 					curbus->self->bus->number, B1_PMBL,
 					b1_pmbl_val);
 			} else {
@@ -1089,14 +1077,14 @@ void assign_resources(struct bios_pci_bus *bus)
 							curdev->devfn)) {
 			case B2_2_3:  /* BUS:2 DEV:2 FUNC:3 = AC97 audio/gpio */
 				if (i == 0){
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A0_BA0,
 						curdev->base_address[i]);
 					break;
 				}
 				if (i == 1){
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A0_BA1,
 						curdev->base_address[i]);
@@ -1114,14 +1102,14 @@ void assign_resources(struct bios_pci_bus *bus)
 					 * on IOLINK 1
 					 */
 				if (i == 0){ /* i2c/spi */
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A1_BA0,
 						curdev->base_address[i]);
 					break;
 				}
 				if (i == 1){ /* i2c/spi */
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A1_BA1,
 						curdev->base_address[i]);
@@ -1132,14 +1120,14 @@ void assign_resources(struct bios_pci_bus *bus)
 				break;
 			case B2_2_2: /* BUS:2 DEV:2 FUNC:2 = ieee1284/rs232 */
 				if (i == 0){ /* parport */
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A5_BA0,
 						curdev->base_address[i]);
 					break;
 				}
 				if (i == 1){ /* rs232 */
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A6_BA0,
 						curdev->base_address[i]);
@@ -1151,11 +1139,11 @@ void assign_resources(struct bios_pci_bus *bus)
 			case B2_2_0: /* IDE contr */
 				if (i == 0) {
 					u32 bar;
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A7_BA0,
 						curdev->base_address[i]);
-					system_commutator_es2_ioh_read_dword(
+					system_commutator_e2s_ioh_read_dword(
 						domain, curdev->bus->number,
 						A7_BA0, &bar);
 					DaRprintk("assign_resources: set "
@@ -1166,11 +1154,11 @@ void assign_resources(struct bios_pci_bus *bus)
 				}
 				if (i == 1){
 					u32 bar;
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A7_BA1,
 						curdev->base_address[i]);
-					system_commutator_es2_ioh_read_dword(
+					system_commutator_e2s_ioh_read_dword(
 						domain, curdev->bus->number,
 						A7_BA1, &bar);
 					DaRprintk("assign_resources: set "
@@ -1181,11 +1169,11 @@ void assign_resources(struct bios_pci_bus *bus)
 				}
 				if (i == 2){
 					u32 bar;
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A7_BA2,
 						curdev->base_address[i]);
-					system_commutator_es2_ioh_read_dword(
+					system_commutator_e2s_ioh_read_dword(
 						domain, curdev->bus->number,
 						A7_BA2,
 						&bar);
@@ -1197,11 +1185,11 @@ void assign_resources(struct bios_pci_bus *bus)
 				}
 				if (i == 3){
 					u32 bar;
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A7_BA3,
 						curdev->base_address[i]);
-					system_commutator_es2_ioh_read_dword(
+					system_commutator_e2s_ioh_read_dword(
 						domain, curdev->bus->number,
 						A7_BA3, &bar);
 					DaRprintk("assign_resources: set "
@@ -1212,11 +1200,11 @@ void assign_resources(struct bios_pci_bus *bus)
 				}
 				if (i == 4){
 					u32 bar;
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A7_BA4,
 						curdev->base_address[i]);
-					system_commutator_es2_ioh_read_dword(
+					system_commutator_e2s_ioh_read_dword(
 						domain, curdev->bus->number,
 						A7_BA4, &bar);
 					DaRprintk("assign_resources: set "
@@ -1231,11 +1219,11 @@ void assign_resources(struct bios_pci_bus *bus)
 			case B2_3_0: /* SATA contr */
 				if (i == 5) {
 					u32 bar;
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A8_ABAR,
 						curdev->base_address[i]);
-					system_commutator_es2_ioh_read_dword(
+					system_commutator_e2s_ioh_read_dword(
 						domain, curdev->bus->number,
 						A8_ABAR, &bar);
 					DaRprintk("assign_resources: set "
@@ -1246,7 +1234,7 @@ void assign_resources(struct bios_pci_bus *bus)
 				break;
 			case B2_1_0: /* ETHERNET */
 				if (i == 0) {
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A4_BA0,
 						curdev->base_address[i]);
@@ -1257,7 +1245,7 @@ void assign_resources(struct bios_pci_bus *bus)
 				break;
 			case B1_1_0: /* ADC */
 				if (i == 0) {
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, curdev->bus->number,
 						A4_BA0,
 						curdev->base_address[i]);
@@ -1338,7 +1326,7 @@ void enable_resources(struct bios_pci_bus *bus)
 #ifndef	CONFIG_EIOH
 		switch (BUS_DEV_FUNC(curdev->bus->number,curdev->devfn)){
 		case B2_2_3:  /* BUS:2 DEV:2 FUNC:3 = AC97 audio/gpio */
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A0_SE,
 				PCI_COMMAND_MEMORY);
 			break;
@@ -1347,7 +1335,7 @@ void enable_resources(struct bios_pci_bus *bus)
 				 */
 			Dprintk("enable_resources() enable BUS:1 DEV:2 FUNC:0 "
 				"= ioapic/pic/timer/i2c/spi contr\n");
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A1_SE,
 				PCI_COMMAND_MEMORY | PCI_COMMAND_IO);
 			break;
@@ -1356,30 +1344,30 @@ void enable_resources(struct bios_pci_bus *bus)
 				 */
 			Dprintk("enable_resources() enable BUS:2 DEV:2 FUNC:1 "
 				"= ioapic/pic/timer/i2c/spi contr\n");
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A1_SE,
 				PCI_COMMAND_MEMORY | PCI_COMMAND_IO);
 			break;
 		case B2_2_2: /* BUS:2 DEV:2 FUNC:2 = ieee1284/rs232 */
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A5_SE,
 				PCI_COMMAND_MEMORY | PCI_COMMAND_IO);
 			break;
 		case B2_2_0: /* BUS:2 DEV:2 FUNC:0 = IDE contr */
 			bios_pci_write_config_dword(curdev, PCI_CLASS_REVISION,
 				NATIVE_MODE_CLASSC << 8);
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A7_AMR,
 				NATIVE_MODE_CLASSC);
 			Dprintk("enable_resources() set IDE BUS:2 DEV:2 FUNC:0 "
 				"to native mode\n");
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A7_SE,
 				PCI_COMMAND_MEMORY | PCI_COMMAND_IO);
 			/* set Addressing Mode Register to native mode
 			 * on IOHUB
 			 */
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A7_AMR,
 				IOHUB_AMR_PRIMARY_NATIVE |
 						IOHUB_AMR_SECONDARY_NATIVE);
@@ -1388,12 +1376,12 @@ void enable_resources(struct bios_pci_bus *bus)
 			Dprintk("enable_resources() set SATA BUS:2 DEV:3 "
 				"FUNC:0 A8_SE to 0x%x\n",
 				PCI_COMMAND_MEMORY);
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A8_SE,
 				PCI_COMMAND_MEMORY);
 			break;
 		case B2_0_0: /* BUS:2 DEV:0 FUNC:0 = REAL PCI_2_PCI BRIDGE */
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, B1_SE,
 				PCI_COMMAND_MEMORY | PCI_COMMAND_IO);
 			/* Allow arbitration to everyone */
@@ -1401,7 +1389,7 @@ void enable_resources(struct bios_pci_bus *bus)
 			break;
 		case B1_1_0: /* BUS:1 DEV:1 FUNC:0 = ADC */
 		case B2_1_0: /* BUS:2 DEV:1 FUNC:0 = ETHERNET */
-			system_commutator_es2_ioh_write_byte(domain,
+			system_commutator_e2s_ioh_write_byte(domain,
 				curdev->bus->number, A4_SE,
 				PCI_COMMAND_MEMORY);
 			break;

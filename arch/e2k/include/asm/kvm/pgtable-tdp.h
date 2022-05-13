@@ -31,7 +31,7 @@
 /* numbers of PTE's bits */
 #define	_PAGE_P_BIT_TDP		_PAGE_P_BIT_V6		/* Present */
 #define _PAGE_W_BIT_TDP		_PAGE_W_BIT_V6		/* Writable */
-#define _PAGE_A_HW_BIT_TDP	_PAGE_A_HW_BIT_V6	/* page Accessed */
+#define _PAGE_A_BIT_TDP		_PAGE_A_BIT_V6		/* page Accessed */
 #define	_PAGE_D_BIT_TDP		_PAGE_D_BIT_V6		/* page Dirty */
 #define	_PAGE_HUGE_BIT_TDP	_PAGE_HUGE_BIT_V6	/* huge Page Size */
 #define	_PAGE_MTCR_SHIFT_TDP	8			/* Memory Type */
@@ -47,7 +47,7 @@
 
 #define _PAGE_P_TDP		(1ULL << _PAGE_P_BIT_TDP)
 #define _PAGE_W_TDP		(1ULL << _PAGE_W_BIT_TDP)
-#define _PAGE_A_HW_TDP		(1ULL << _PAGE_A_HW_BIT_TDP)
+#define _PAGE_A_TDP		(1ULL << _PAGE_A_BIT_TDP)
 #define _PAGE_D_TDP		(1ULL << _PAGE_D_BIT_TDP)
 #define _PAGE_HUGE_TDP		(1ULL << _PAGE_HUGE_BIT_TDP)
 #define	_PAGE_MTCR_TDP		\
@@ -82,8 +82,8 @@ covert_uni_pte_flags_to_pte_val_tdp(const uni_pteval_t uni_flags)
 		pte_flags |= (_PAGE_P_TDP);
 	if (uni_flags & UNI_PAGE_WRITE)
 		pte_flags |= (_PAGE_W_TDP);
-	if (uni_flags & UNI_PAGE_HW_ACCESS)
-		pte_flags |= (_PAGE_A_HW_TDP);
+	if (uni_flags & UNI_PAGE_ACCESSED)
+		pte_flags |= (_PAGE_A_TDP);
 	if (uni_flags & UNI_PAGE_DIRTY)
 		pte_flags |= (_PAGE_D_TDP);
 	if (uni_flags & UNI_PAGE_HUGE)
@@ -141,8 +141,7 @@ set_pte_val_tdp_memory_type(pteval_t pte_val, unsigned int memory_type)
 		memory_type != GEN_NON_CACHE_ORDERED_MT &&
 		memory_type != EXT_PREFETCH_MT &&
 		memory_type != EXT_NON_PREFETCH_MT &&
-		memory_type != EXT_CONFIG_MT &&
-		memory_type != EXT_CACHE_MT);
+		memory_type != EXT_CONFIG_MT);
 
 	return _PAGE_MT_SET_VAL_TDP(pte_val, memory_type);
 }

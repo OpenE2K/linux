@@ -32,10 +32,10 @@ KBUILD_CFLAGS += $(call cc-option,-finline-functions,) \
                  $(call cc-option,-finline-functions-called-once,)
 
 # Some uninteresting or broken warnings can be disabled with #pragma's only
-KBUILD_CFLAGS += -Wno-array-bounds -Wno-duplicate-type-qualifier \
-		-Wno-builtin-functions-redefined -Wno-reduced-alignment \
-		-Wno-unused-value -Wno-overflow -Wno-signed-one-bit-field \
-		-include $(srctree)/arch/e2k/include/asm/override-lcc-warnings.h
+KBUILD_CFLAGS += -Wno-array-bounds -Wno-builtin-functions-redefined \
+		 -Wno-reduced-alignment -Wno-overflow -Wno-signed-one-bit-field \
+		 -Wno-alignment-reduction-ignored \
+		 -include $(srctree)/arch/e2k/include/asm/override-lcc-warnings.h
 
 LDFLAGS_vmlinux :=
 CHECKFLAGS	+= -D__e2k__
@@ -44,12 +44,7 @@ CFLAGS += -pipe -D__linux__
 
 KBUILD_CFLAGS += $(CFLAGS)
 
-ifdef CONFIG_SMP_DAM_BUG
- KBUILD_CFLAGS += -fno-dam-call
-endif
-
-CFLAGS_GENERIC	:= -march=elbrus-v$(CONFIG_E2K_MINVER)
-CFLAGS_ES2	:= -mtune=elbrus-2c+
+CFLAGS_GENERIC	:= -march=elbrus-v3
 CFLAGS_E2S	:= -mtune=elbrus-4c
 CFLAGS_E8C	:= -mtune=elbrus-8c
 CFLAGS_E1CP	:= -mtune=elbrus-1c+
@@ -58,71 +53,56 @@ CFLAGS_E12C	:= -mtune=elbrus-12c
 CFLAGS_E16C	:= -mtune=elbrus-16c
 CFLAGS_E2C3	:= -mtune=elbrus-2c3
 
-CFLAGS_ALL_CPUS	:= $(CFLAGS_ES2) $(CFLAGS_E2S) $(CFLAGS_E8C) $(CFLAGS_E1CP) \
-		   $(CFLAGS_E8C2) $(CFLAGS_E12C) $(CFLAGS_E16C) $(CFLAGS_E2C3)
-export CFLAGS_ALL_CPUS
+CFLAGS_ALL_CPUS	:= $(CFLAGS_E2S) $(CFLAGS_E8C) $(CFLAGS_E1CP) $(CFLAGS_E8C2) \
+		   $(CFLAGS_E12C) $(CFLAGS_E16C) $(CFLAGS_E2C3)
 
-CFLAGS_E2K_SIC	:= $(CFLAGS_ES2)
-
-export	CFLAGS_ES2 CFLAGS_E2S CFLAGS_E8C CFLAGS_E1CP CFLAGS_E8C2 CFLAGS_E2C3 \
-	CFLAGS_E12C CFLAGS_E16C CFLAGS_E2K_SIC
+export	CFLAGS_E2S CFLAGS_E8C CFLAGS_E1CP CFLAGS_E8C2 CFLAGS_E2C3 CFLAGS_E12C \
+	CFLAGS_E16C CFLAGS_ALL_CPUS
 
 ifeq ($(CONFIG_E2K_MACHINE),y)
- ifeq ($(CONFIG_E2K_ES2_DSP),y)
- KBUILD_CFLAGS += $(CFLAGS_ES2)
- KBUILD_AFLAGS += $(CFLAGS_ES2)
- TARGET_MDL    := 04
+ ifeq ($(CONFIG_E2K_E2S),y)
+ KBUILD_CFLAGS += $(CFLAGS_E2S)
+ KBUILD_AFLAGS += $(CFLAGS_E2S)
+ TARGET_MDL    := 03
  else
-  ifeq ($(CONFIG_E2K_ES2_RU),y)
-  KBUILD_CFLAGS	+= $(CFLAGS_ES2)
-  KBUILD_AFLAGS	+= $(CFLAGS_ES2)
-  TARGET_MDL    := 06
+  ifeq ($(CONFIG_E2K_E8C),y)
+  KBUILD_CFLAGS += $(CFLAGS_E8C)
+  KBUILD_AFLAGS += $(CFLAGS_E8C)
+  TARGET_MDL    := 07
   else
-   ifeq ($(CONFIG_E2K_E2S),y)
-   KBUILD_CFLAGS += $(CFLAGS_E2S)
-   KBUILD_AFLAGS += $(CFLAGS_E2S)
-   TARGET_MDL    := 03
+   ifeq ($(CONFIG_E2K_E1CP),y)
+   KBUILD_CFLAGS += $(CFLAGS_E1CP)
+   KBUILD_AFLAGS += $(CFLAGS_E1CP)
+   TARGET_MDL    := 08
    else
-    ifeq ($(CONFIG_E2K_E8C),y)
-    KBUILD_CFLAGS += $(CFLAGS_E8C)
-    KBUILD_AFLAGS += $(CFLAGS_E8C)
-    TARGET_MDL    := 07
+    ifeq ($(CONFIG_E2K_E8C2),y)
+    KBUILD_CFLAGS += $(CFLAGS_E8C2)
+    KBUILD_AFLAGS += $(CFLAGS_E8C2)
+    TARGET_MDL    := 09
     else
-     ifeq ($(CONFIG_E2K_E1CP),y)
-     KBUILD_CFLAGS += $(CFLAGS_E1CP)
-     KBUILD_AFLAGS += $(CFLAGS_E1CP)
-     TARGET_MDL    := 08
+     ifeq ($(CONFIG_E2K_E12C),y)
+     KBUILD_CFLAGS += $(CFLAGS_E12C)
+     KBUILD_AFLAGS += $(CFLAGS_E12C)
+     TARGET_MDL    := 0a
      else
-      ifeq ($(CONFIG_E2K_E8C2),y)
-      KBUILD_CFLAGS += $(CFLAGS_E8C2)
-      KBUILD_AFLAGS += $(CFLAGS_E8C2)
-      TARGET_MDL    := 09
+      ifeq ($(CONFIG_E2K_E16C),y)
+      KBUILD_CFLAGS += $(CFLAGS_E16C)
+      KBUILD_AFLAGS += $(CFLAGS_E16C)
+      TARGET_MDL    := 0b
       else
-       ifeq ($(CONFIG_E2K_E12C),y)
-       KBUILD_CFLAGS += $(CFLAGS_E12C)
-       KBUILD_AFLAGS += $(CFLAGS_E12C)
-       TARGET_MDL    := 0a
+       ifeq ($(CONFIG_E2K_E2C3),y)
+       KBUILD_CFLAGS += $(CFLAGS_E2C3)
+       KBUILD_AFLAGS += $(CFLAGS_E2C3)
+       TARGET_MDL    := 0c
        else
-        ifeq ($(CONFIG_E2K_E16C),y)
-        KBUILD_CFLAGS += $(CFLAGS_E16C)
-        KBUILD_AFLAGS += $(CFLAGS_E16C)
-        TARGET_MDL    := 0b
-        else
-         ifeq ($(CONFIG_E2K_E2C3),y)
-         KBUILD_CFLAGS += $(CFLAGS_E2C3)
-         KBUILD_AFLAGS += $(CFLAGS_E2C3)
-         TARGET_MDL    := 0c
-         else
-          error "Invalid e2k machine type"
-         endif	# ifeq ($(CONFIG_E2K_E2C3),y)
-        endif	# ifeq ($(CONFIG_E2K_E16C),y)
-       endif	# ifeq ($(CONFIG_E2K_E12C),y)
-      endif	# ifeq ($(CONFIG_E2K_E8C2),y)
-     endif	# ifeq ($(CONFIG_E2K_E1CP),y)
-    endif	# ifeq ($(CONFIG_E2K_E8C),y)
-   endif	# ifeq ($(CONFIG_E2K_E2S),y)
-  endif		# ifeq ($(CONFIG_E2K_ES2_RU),y)
- endif		# ifeq ($(CONFIG_E2K_ES2_DSP),y)
+        error "Invalid e2k machine type"
+       endif	# ifeq ($(CONFIG_E2K_E2C3),y)
+      endif	# ifeq ($(CONFIG_E2K_E16C),y)
+     endif	# ifeq ($(CONFIG_E2K_E12C),y)
+    endif	# ifeq ($(CONFIG_E2K_E8C2),y)
+   endif	# ifeq ($(CONFIG_E2K_E1CP),y)
+  endif		# ifeq ($(CONFIG_E2K_E8C),y)
+ endif		# ifeq ($(CONFIG_E2K_E2S),y)
 else		# ! ifeq ($(CONFIG_E2K_MACHINE),y)
 KBUILD_CFLAGS	+= $(CFLAGS_GENERIC)
 KBUILD_AFLAGS	+= $(CFLAGS_GENERIC)
@@ -153,14 +133,11 @@ core-y					+= arch/l/
 drivers-$(CONFIG_PCI)			+= arch/l/pci/
 
 boot :=   arch/e2k/boot
-all: es2boot
+all: e2sboot
 
 MAKEBOOT = $(MAKE) -C arch/$(ARCH)/boot
 
 .PHONY:	clean archclean archmrproper archdep bootimage image zImage
-
-es2boot: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) CONFIG_ES2=y boot
 
 e2sboot: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) CONFIG_E2S=y boot
@@ -240,7 +217,6 @@ define archhelp
   echo  '  zImage		- Compressed kernel boot image (image.boot)'
   echo  '  install-headers	- Install kernel headers in '
   echo  '                          <basedir>/usr/include'
-  echo  '  es2boot		- Build kernel boot image with small embedded boot for es2 simulator'
   echo  '  e2sboot		- Build kernel boot image with small embedded boot for e2s simulator'
   echo  '  e8cboot		- Build kernel boot image with small embedded boot for e8c simulator'
   echo  '  e1cpboot		- Build kernel boot image with small embedded boot for e1cp simulator'

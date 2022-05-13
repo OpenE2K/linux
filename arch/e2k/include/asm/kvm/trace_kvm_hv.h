@@ -6,6 +6,7 @@
 
 #include <linux/tracepoint.h>
 #include <asm/kvm_host.h>
+#include <asm/mmu_types.h>
 
 #define E2K_TRACE_PRINT_CU_HDR_LO(entry) \
 	__print_flags(entry, "|", \
@@ -67,238 +68,230 @@
 		{ IME_TLB_PAGE_FLUSH_UPPER, "TLB_PAGE_FLUSH_UPPER" }, \
 		{ IME_TLB_ENTRY_PROBE, "TLB_ENTRY_PROBE" })
 
-#define E2K_PRINT_INTC_CU_ENTRY(__entry, i) \
-	(__entry->cu_num > i) ? \
-		E2K_TRACE_PRINT_CU_INFO_LO(__entry->cu[2 * i]) : "(none)", \
-	(__entry->cu_num > i) ? __entry->cu[2 * i] : 0ULL, \
-	(__entry->cu_num > i) ? __entry->cu[2 * i + 1] : 0ULL
+#define E2K_TC_TYPE_STORE	(1ULL << 17)
+#define E2K_TC_TYPE_S_F		(1ULL << 19)
+#define E2K_TC_TYPE_ROOT	(1ULL << 27)
+#define E2K_TC_TYPE_SCAL	(1ULL << 28)
+#define E2K_TC_TYPE_SRU		(1ULL << 29)
+#define E2K_TC_TYPE_SPEC	(1ULL << 30)
+#define E2K_TC_TYPE_PM		(1ULL << 31)
+#define E2K_TC_TYPE_NUM_ALIGN	(1ULL << 50)
+#define E2K_TC_TYPE_EMPT	(1ULL << 51)
+#define E2K_TC_TYPE_CLW		(1ULL << 52)
 
-#define E2K_PRINT_INTC_MU_ENTRY(__entry, mu_num, i) \
-	(mu_num > i) ? \
-		E2K_TRACE_PRINT_MU_INFO_HDR(__entry->mu[7 * i]) : "(none)", \
-	(mu_num > i) ? __entry->mu[7 * i] : 0ULL, \
-	(mu_num > i) ? __entry->mu[7 * i + 1] : 0ULL, \
-	(mu_num > i) ? __entry->mu[7 * i + 2] : 0ULL, \
-	(mu_num > i) ? __entry->mu[7 * i + 3] : 0ULL, \
-	(mu_num > i) ? __entry->mu[7 * i + 4] : 0ULL, \
-	(mu_num > i) ? __entry->mu[7 * i + 5] : 0ULL, \
-	(mu_num > i) ? __entry->mu[7 * i + 6] : 0ULL
+#define E2K_TC_TYPE (E2K_TC_TYPE_STORE | E2K_TC_TYPE_S_F | E2K_TC_TYPE_ROOT | \
+		     E2K_TC_TYPE_SCAL | E2K_TC_TYPE_SRU | E2K_TC_TYPE_SPEC | \
+		     E2K_TC_TYPE_PM | E2K_TC_TYPE_NUM_ALIGN | \
+		     E2K_TC_TYPE_EMPT | E2K_TC_TYPE_CLW)
 
+#define E2K_FAULT_TYPE_GLOBAL_SP	(1ULL << 0)
+#define E2K_FAULT_TYPE_EXC_MEM_LOCK__ILLEGAL_SMPH (1ULL << 1)
+#define E2K_FAULT_TYPE_EXC_MEM_LOCK__MEM_LOCK	  (1ULL << 2)
+#define E2K_FAULT_TYPE_PH_PR_PAGE	(1ULL << 3)
+#define E2K_FAULT_TYPE_IO_PAGE		(1ULL << 4)
+#define E2K_FAULT_TYPE_ISYS_PAGE	(1ULL << 5)
+#define E2K_FAULT_TYPE_PROT_PAGE	(1ULL << 6)
+#define E2K_FAULT_TYPE_PRIV_PAGE	(1ULL << 7)
+#define E2K_FAULT_TYPE_ILLEGAL_PAGE	(1ULL << 8)
+#define E2K_FAULT_TYPE_NWRITE_PAGE	(1ULL << 9)
+#define E2K_FAULT_TYPE_PAGE_MISS	(1ULL << 10)
+#define E2K_FAULT_TYPE_PH_BOUND		(1ULL << 11)
+#define E2K_FAULT_TYPE_INTL_RES_BITS	(1ULL << 12)
 
 TRACE_EVENT(
-	intc,
+	cu_intc,
 
-	TP_PROTO(const struct kvm_intc_cpu_context *intc_ctxt,
-		u64 guest_ip, u64 cpu),
+	TP_PROTO(const intc_info_cu_t *cu, int num),
 
-	TP_ARGS(intc_ctxt, guest_ip, cpu),
+	TP_ARGS(cu, num),
 
 	TP_STRUCT__entry(
-		__field(	int,	cu_num	)
-		__field(	int,	mu_num	)
-		__field(	u64,	cu_hdr_lo )
-		__array(	u64,	cu,	INTC_INFO_CU_ENTRY_MAX )
-		__array(	u64,	mu,	INTC_INFO_MU_MAX )
-		__field(	u64,	guest_ip )
-		__field(	u64,	cpu )
+		__field(	int,	num )
+		__field(	u64,	cu_lo )
+		__field(	u64,	cu_hi )
 	),
 
 	TP_fast_assign(
-		__entry->cu_num = intc_ctxt->cu_num;
-		__entry->mu_num = intc_ctxt->mu_num;
-
-		if (__entry->cu_num >= 0)
-			__entry->cu_hdr_lo = AW(intc_ctxt->cu.header.lo);
-
-		if (__entry->cu_num > 0) {
-			int i;
-			for (i = 0; i < __entry->cu_num; i++) {
-				__entry->cu[2 * i] =
-					AW(intc_ctxt->cu.entry[i].lo);
-				__entry->cu[2 * i + 1] =
-					intc_ctxt->cu.entry[i].hi;
-			}
-		}
-
-		if (__entry->mu_num > 0) {
-			int i;
-			for (i = 0; i < __entry->mu_num; i++) {
-				__entry->mu[7 * i] =
-					AW(intc_ctxt->mu[i].hdr);
-				__entry->mu[7 * i + 1] =
-					intc_ctxt->mu[i].gpa;
-				__entry->mu[7 * i + 2] =
-					intc_ctxt->mu[i].gva;
-				__entry->mu[7 * i + 3] =
-					intc_ctxt->mu[i].data;
-				__entry->mu[7 * i + 4] =
-					AW(intc_ctxt->mu[i].condition);
-				__entry->mu[7 * i + 5] =
-					intc_ctxt->mu[i].data_ext;
-				__entry->mu[7 * i + 6] =
-					AW(intc_ctxt->mu[i].mask);
-			}
-		}
-
-		__entry->guest_ip = guest_ip;
-		__entry->cpu = cpu;
+		__entry->cu_lo = !num ? AW(cu->header.lo) : AW(cu->entry[num - 1].lo);
+		__entry->cu_hi = !num ? AW(cu->header.hi) : cu->entry[num - 1].hi;
+		__entry->num = num;
 	),
 
-	TP_printk("CPU#%llu, guest IP 0x%llx, cu_num %d, mu_num %d\n"
-		"CU header: %s (0x%llx)\n"
-		"CU entry0: %s (0x%llx 0x%llx)\n"
-		"CU entry1: %s (0x%llx 0x%llx)\n"
-		"MU entry0: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry1: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry2: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry3: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry4: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry5: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry6: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry7: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry8: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry9: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry10: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
+	TP_printk("CU %s: %s (lo 0x%llx   hi 0x%llx)",
+		(!__entry->num) ? "header" : "entry",
+		(!__entry->num) ? E2K_TRACE_PRINT_CU_HDR_LO(__entry->cu_lo) :
+				E2K_TRACE_PRINT_CU_INFO_LO(__entry->cu_lo),
+		__entry->cu_lo, __entry->cu_hi)
+);
+
+TRACE_EVENT(
+	mu_intc,
+
+	TP_PROTO(const intc_info_mu_t *mu, int num),
+
+	TP_ARGS(mu, num),
+
+	TP_STRUCT__entry(
+		__field(	int,	num		)
+		__field(	u64,	header		)
+		__field(	u64,	gpa		)
+		__field(	u64,	gva		)
+		__field(	u64,	data_val	)
+		__field(	u64,	data_ext_val	)
+		__field(	u8,	data_tag	)
+		__field(	u8,	data_ext_tag	)
+		__field(	u64,	condition	)
+		__field(	u64,	mask		)
+	),
+
+	TP_fast_assign(
+		__entry->num = num;
+		__entry->header = AW(mu[0].hdr);
+		__entry->gpa = mu[0].gpa;
+		__entry->gva = mu[0].gva;
+		load_value_and_tagd(&mu[0].data, &__entry->data_val,
+						&__entry->data_tag);
+		load_value_and_tagd(&mu[0].data_ext, &__entry->data_ext_val,
+						&__entry->data_ext_tag);
+		__entry->condition = AW(mu[0].condition);
+		__entry->mask = AW(mu[0].mask);
+	),
+
+	TP_printk("\n"
+		"MU entry %d: header %s   gva 0x%llx   gpa 0x%llx\n"
+		"data %hhx 0x%llx   data_ext %hhx 0x%llx\n"
+		"condition 0x%llx   mask 0x%llx\n"
+		"Register: address=0x%02hhx, vl=%d, vr=%d\n"
+		"Opcode:  fmt=%d, n_prot=%d, fmtc=%d\n"
+		"Info1:   chan=%d, mas=0x%02hhx, miss_lvl=%d, rcv=%d, dst_rcv=0x%03x\n"
+		"Info2:   %s\n"
+		"Ftype:   %s",
+		__entry->num,
+		E2K_TRACE_PRINT_MU_INFO_HDR(__entry->header), __entry->gva, __entry->gpa,
+		__entry->data_tag, __entry->data_val, __entry->data_ext_tag, __entry->data_ext_val,
+		__entry->condition, __entry->mask,
+		AS((tc_cond_t) __entry->condition).address,
+		AS((tc_cond_t) __entry->condition).vl,
+		AS((tc_cond_t) __entry->condition).vr,
+		AS((tc_cond_t) __entry->condition).fmt,
+		AS((tc_cond_t) __entry->condition).npsp,
+		AS((tc_cond_t) __entry->condition).fmtc,
+		AS((tc_cond_t) __entry->condition).chan,
+		AS((tc_cond_t) __entry->condition).mas,
+		AS((tc_cond_t) __entry->condition).miss_lvl,
+		AS((tc_cond_t) __entry->condition).rcv,
+		AS((tc_cond_t) __entry->condition).dst_rcv,
+		__print_flags(__entry->condition & E2K_TC_TYPE, "|",
+				{ E2K_TC_TYPE_STORE, "store" },
+				{ E2K_TC_TYPE_S_F, "s_f" },
+				{ E2K_TC_TYPE_ROOT, "root" },
+				{ E2K_TC_TYPE_SCAL, "scal" },
+				{ E2K_TC_TYPE_SRU, "sru" },
+				{ E2K_TC_TYPE_SPEC, "spec" },
+				{ E2K_TC_TYPE_PM, "pm" },
+				{ E2K_TC_TYPE_NUM_ALIGN, "num_align" },
+				{ E2K_TC_TYPE_EMPT, "empt" },
+				{ E2K_TC_TYPE_CLW, "clw" }
+			),
+		__print_flags(AS((tc_cond_t) __entry->condition).fault_type, "|",
+				{ E2K_FAULT_TYPE_GLOBAL_SP, "global_sp" },
+				{ E2K_FAULT_TYPE_EXC_MEM_LOCK__ILLEGAL_SMPH,
+						"exc_mem_lock.illegal_smph" },
+				{ E2K_FAULT_TYPE_EXC_MEM_LOCK__MEM_LOCK,
+						"exc_mem_lock.mem_lock" },
+				{ E2K_FAULT_TYPE_PH_PR_PAGE, "ph_pr_page" },
+				{ E2K_FAULT_TYPE_IO_PAGE, "io_page" },
+				{ E2K_FAULT_TYPE_ISYS_PAGE, "isys_page" },
+				{ E2K_FAULT_TYPE_PROT_PAGE, "prot_page" },
+				{ E2K_FAULT_TYPE_PRIV_PAGE, "priv_page" },
+				{ E2K_FAULT_TYPE_ILLEGAL_PAGE, "illegal_page" },
+				{ E2K_FAULT_TYPE_NWRITE_PAGE, "nwrite_page" },
+				{ E2K_FAULT_TYPE_PAGE_MISS, "page_miss" },
+				{ E2K_FAULT_TYPE_PH_BOUND, "ph_bound" },
+				{ E2K_FAULT_TYPE_INTL_RES_BITS, "intl_res_bits" }
+			))
+);
+
+TRACE_EVENT(
+	intc_stacks,
+
+	TP_PROTO(const kvm_sw_cpu_context_t *sw_ctxt, const kvm_hw_cpu_context_t *hw_ctxt,
+		 const e2k_mem_crs_t *crs),
+
+	TP_ARGS(sw_ctxt, hw_ctxt, crs),
+
+	TP_STRUCT__entry(
+		/* Stacks */
+		__field(	u64,	sbr	)
+		__field(	u64,	usd_lo	)
+		__field(	u64,	usd_hi	)
+		__field(	u64,	psp_lo	)
+		__field(	u64,	psp_hi	)
+		__field(	u64,	pcsp_lo	)
+		__field(	u64,	pcsp_hi	)
+		__field(	u64,	pshtp	)
+		__field(	unsigned int,	pcshtp	)
+		/* Backup stacks */
+		__dynamic_array(u64, frames, hw_ctxt->bu_pcsp_hi.ind / SZ_OF_CR)
+		__field(size_t, frames_len)
+		__field(	u64,	bu_psp_lo	)
+		__field(	u64,	bu_psp_hi	)
+		__field(	u64,	bu_pcsp_lo	)
+		__field(	u64,	bu_pcsp_hi	)
+		/* CRs */
+		__field(	u64,	cr0_lo	)
+		__field(	u64,	cr0_hi	)
+		__field(	u64,	cr1_lo	)
+		__field(	u64,	cr1_hi	)
+	),
+
+	TP_fast_assign(
+		u64 *frames = __get_dynamic_array(frames);
+		e2k_mem_crs_t *chain_stack = (e2k_mem_crs_t *) hw_ctxt->bu_pcsp_lo.base;
+		size_t len = hw_ctxt->bu_pcsp_hi.ind / SZ_OF_CR;
+		unsigned long i;
+
+		__entry->frames_len = len;
+		for (i = 0; i < len; i++)
+			frames[i] = chain_stack[i].cr0_hi.ip << 3;
+
+		__entry->sbr = AW(sw_ctxt->sbr);
+		__entry->usd_lo = AW(sw_ctxt->usd_lo);
+		__entry->usd_hi = AW(sw_ctxt->usd_hi);
+		__entry->psp_lo = AW(hw_ctxt->sh_psp_lo);
+		__entry->psp_hi = AW(hw_ctxt->sh_psp_hi);
+		__entry->pcsp_lo = AW(hw_ctxt->sh_pcsp_lo);
+		__entry->pcsp_hi = AW(hw_ctxt->sh_pcsp_hi);
+		__entry->pshtp = AW(hw_ctxt->sh_pshtp);
+		__entry->pcshtp = hw_ctxt->sh_pcshtp;
+		__entry->cr0_lo = AW(crs->cr0_lo);
+		__entry->cr0_hi = AW(crs->cr0_hi);
+		__entry->cr1_lo = AW(crs->cr1_lo);
+		__entry->cr1_hi = AW(crs->cr1_hi);
+		__entry->bu_psp_lo = AW(hw_ctxt->bu_psp_lo);
+		__entry->bu_psp_hi = AW(hw_ctxt->bu_psp_hi);
+		__entry->bu_pcsp_lo = AW(hw_ctxt->bu_pcsp_lo);
+		__entry->bu_pcsp_hi = AW(hw_ctxt->bu_pcsp_hi);
+	),
+
+	TP_printk("\n"
+		"sbr 0x%llx, usd_lo 0x%llx, usd_hi 0x%llx\n"
+		"sh_psp_lo 0x%llx, sh_psp_hi 0x%llx, sh_pshtp 0x%llx\n"
+		"sh_pcsp_lo 0x%llx, sh_pcsp_hi 0x%llx, sh_pcshtp 0x%x\n"
+		"cr0_lo 0x%llx, cr0_hi 0x%llx, cr1_lo 0x%llx, cr1_hi 0x%llx\n"
+		"bu_psp_lo 0x%llx, bu_psp_hi 0x%llx\n"
+		"bu_pcsp_lo 0x%llx, bu_pcsp_hi 0x%llx\n"
+		"backup chain stack IPs: %s"
 		,
-		__entry->cpu, __entry->guest_ip,
-		__entry->cu_num, __entry->mu_num,
-		(__entry->cu_num >= 0) ?
-		       E2K_TRACE_PRINT_CU_HDR_LO(__entry->cu_hdr_lo) : "(none)",
-		(__entry->cu_num >= 0) ? __entry->cu_hdr_lo : 0,
-		E2K_PRINT_INTC_CU_ENTRY(__entry, 0),
-		E2K_PRINT_INTC_CU_ENTRY(__entry, 1),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 0),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 1),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 2),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 3),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 4),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 5),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 6),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 7),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 8),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 9),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, __entry->mu_num, 10))
-);
+		__entry->sbr, __entry->usd_lo, __entry->usd_hi,
+		__entry->psp_lo, __entry->psp_hi, __entry->pshtp,
+		__entry->pcsp_lo, __entry->pcsp_hi, __entry->pcshtp,
+		__entry->cr0_lo, __entry->cr0_hi, __entry->cr1_lo, __entry->cr1_hi,
+		__entry->bu_psp_lo, __entry->bu_psp_hi,
+		__entry->bu_pcsp_lo, __entry->bu_pcsp_hi,
+		__print_array(__get_dynamic_array(frames),
+				__entry->frames_len, sizeof(u64)))
 
-TRACE_EVENT(
-	single_mu_intc,
-
-	TP_PROTO(const intc_info_mu_t *mu, u64 guest_ip, u64 cpu),
-
-	TP_ARGS(mu, guest_ip, cpu),
-
-	TP_STRUCT__entry(
-		__array(	u64,	mu,	INTC_INFO_MU_ITEM_SIZE )
-		__field(	u64,	guest_ip )
-		__field(	u64,	cpu )
-	),
-
-	TP_fast_assign(
-		__entry->mu[0] = AW(mu[0].hdr);
-		__entry->mu[1] = mu[0].gpa;
-		__entry->mu[2] = mu[0].gva;
-		__entry->mu[3] = mu[0].data;
-		__entry->mu[4] = AW(mu[0].condition);
-		__entry->mu[5] = mu[0].data_ext;
-		__entry->mu[6] = AW(mu[0].mask);
-		__entry->guest_ip = guest_ip;
-		__entry->cpu = cpu;
-	),
-
-	TP_printk("CPU#%llu, guest IP: 0x%llx\n"
-		"MU entry0: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n",
-		__entry->cpu, __entry->guest_ip,
-		E2K_PRINT_INTC_MU_ENTRY(__entry, 1, 0))
-);
-
-TRACE_EVENT(
-	double_mu_intc,
-
-	TP_PROTO(const intc_info_mu_t *mu, u64 guest_ip, u64 cpu),
-
-	TP_ARGS(mu, guest_ip, cpu),
-
-	TP_STRUCT__entry(
-		__array(	u64,	mu,	2 * INTC_INFO_MU_ITEM_SIZE )
-		__field(	u64,	guest_ip )
-		__field(	u64,	cpu )
-	),
-
-	TP_fast_assign(
-		int i;
-		for (i = 0; i < 2; i++) {
-			__entry->mu[7 * i] =
-				AW(mu[i].hdr);
-			__entry->mu[7 * i + 1] =
-				mu[i].gpa;
-			__entry->mu[7 * i + 2] =
-				mu[i].gva;
-			__entry->mu[7 * i + 3] =
-				mu[i].data;
-			__entry->mu[7 * i + 4] =
-				AW(mu[i].condition);
-			__entry->mu[7 * i + 5] =
-				mu[i].data_ext;
-			__entry->mu[7 * i + 6] =
-				AW(mu[i].mask);
-		}
-		__entry->guest_ip = guest_ip;
-		__entry->cpu = cpu;
-	),
-
-	TP_printk("CPU#%llu, guest IP: 0x%llx\n"
-		"MU entry0: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
-		"MU entry1: %s (0x%llx), 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n",
-		__entry->cpu, __entry->guest_ip,
-		E2K_PRINT_INTC_MU_ENTRY(__entry, 2, 0),
-		E2K_PRINT_INTC_MU_ENTRY(__entry, 2, 1))
-);
-
-TRACE_EVENT(
-	single_cu_intc,
-
-	TP_PROTO(const intc_info_cu_hdr_t cu_hdr, u64 guest_ip, u64 cpu),
-
-	TP_ARGS(cu_hdr, guest_ip, cpu),
-
-	TP_STRUCT__entry(
-		__field(	u64,	cu_hdr_lo )
-		__field(	u64,	guest_ip )
-		__field(	u64,	cpu )
-	),
-
-	TP_fast_assign(
-		__entry->cu_hdr_lo = AW(cu_hdr.lo);
-		__entry->guest_ip = guest_ip;
-		__entry->cpu = cpu;
-	),
-
-	TP_printk("CPU#%llu, guest IP: 0x%llx\n"
-		"CU header: %s (0x%llx)\n",
-		__entry->cpu, __entry->guest_ip,
-		E2K_TRACE_PRINT_CU_HDR_LO(__entry->cu_hdr_lo),
-		__entry->cu_hdr_lo)
-
-);
-
-TRACE_EVENT(
-	intc_exit,
-
-	TP_PROTO(int ret),
-
-	TP_ARGS(ret),
-
-	TP_STRUCT__entry(
-		__field(	int,	ret	)
-	),
-
-	TP_fast_assign(
-		__entry->ret = ret;
-	),
-
-	TP_printk("Intercept exit %s(%d)\n",
-		(__entry->ret) ? "to QEMU " : "",
-		__entry->ret)
 );
 
 TRACE_EVENT(
@@ -323,7 +316,7 @@ TRACE_EVENT(
 		__entry->dam_active = dam_active;
 	),
 
-	TP_printk("to vcpu %d via %s, vector 0x%x, dlvm %d\n", __entry->vcpu,
+	TP_printk("to vcpu %d via %s, vector 0x%x, dlvm %d", __entry->vcpu,
 		__entry->dam_active ? "icr" : "pmirr",
 		__entry->vector, __entry->dlvm)
 );
@@ -345,7 +338,7 @@ TRACE_EVENT(
 		__entry->val = val;
 	),
 
-	TP_printk("pmirr#%d val 0x%llx\n", __entry->pmirr, __entry->val)
+	TP_printk("pmirr#%d val 0x%llx", __entry->pmirr, __entry->val)
 );
 
 TRACE_EVENT(
@@ -365,7 +358,7 @@ TRACE_EVENT(
 		__entry->val = val;
 	),
 
-	TP_printk("pmirr#%d val 0x%llx\n", __entry->pmirr, __entry->val)
+	TP_printk("pmirr#%d val 0x%llx", __entry->pmirr, __entry->val)
 );
 
 TRACE_EVENT(
@@ -383,7 +376,7 @@ TRACE_EVENT(
 		__entry->val = val;
 	),
 
-	TP_printk("pnmirr val 0x%x\n", __entry->val)
+	TP_printk("pnmirr val 0x%x", __entry->val)
 );
 
 TRACE_EVENT(
@@ -401,7 +394,7 @@ TRACE_EVENT(
 		__entry->val = val;
 	),
 
-	TP_printk("pnmirr val 0x%x\n", __entry->val)
+	TP_printk("pnmirr val 0x%x", __entry->val)
 );
 
 TRACE_EVENT(
@@ -419,7 +412,7 @@ TRACE_EVENT(
 		__entry->cir = cir;
 	),
 
-	TP_printk("cir 0x%x\n", __entry->cir)
+	TP_printk("cir 0x%x", __entry->cir)
 );
 
 TRACE_EVENT(
@@ -437,7 +430,7 @@ TRACE_EVENT(
 		__entry->cir = cir;
 	),
 
-	TP_printk("cir 0x%x\n", __entry->cir)
+	TP_printk("cir 0x%x", __entry->cir)
 );
 
 TRACE_EVENT(
@@ -457,7 +450,7 @@ TRACE_EVENT(
 		__entry->data = data;
 	),
 
-	TP_printk("gpa 0x%lx, data 0x%lx\n", __entry->gpa, __entry->data)
+	TP_printk("gpa 0x%lx, data 0x%lx", __entry->gpa, __entry->data)
 );
 
 TRACE_EVENT(
@@ -477,7 +470,7 @@ TRACE_EVENT(
 		__entry->data = data;
 	),
 
-	TP_printk("gpa 0x%lx, data 0x%lx\n", __entry->gpa, __entry->data)
+	TP_printk("gpa 0x%lx, data 0x%lx", __entry->gpa, __entry->data)
 );
 
 TRACE_EVENT(
@@ -509,11 +502,13 @@ TRACE_EVENT(
 		__entry->us_cl_m3 = us_cl_m3;
 	),
 
-	TP_printk("us_cl_d %d, us_cl_b 0x%lx, us_cl_up 0x%lx\n"
-		"us_cl_m0 0x%lx us_cl_m1 0x%lx us_cl_m2 0x%lx, us_cl_m3 0x%lx\n",
+	TP_printk("\n"
+		"us_cl_d %d, us_cl_b 0x%lx, us_cl_up 0x%lx\n"
+		"us_cl_m0 0x%lx us_cl_m1 0x%lx us_cl_m2 0x%lx, us_cl_m3 0x%lx",
 		__entry->us_cl_d, __entry->us_cl_b, __entry->us_cl_up,
 		__entry->us_cl_m0, __entry->us_cl_m1, __entry->us_cl_m2, __entry->us_cl_m3)
 );
+
 
 #endif /* _TRACE_KVM_HV_H */
 

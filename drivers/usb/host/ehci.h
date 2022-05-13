@@ -230,7 +230,6 @@ struct ehci_hcd {			/* one per controller */
 					does not supported for low/full speed
 					devices */
 #endif
-
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
 	#define OHCI_USB_OPER           (2 << 6)

@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -56,41 +56,26 @@
 #ifndef __gc_hal_kernel_hardware_h_
 #define __gc_hal_kernel_hardware_h_
 
+#include "gc_hal_kernel_hardware_func.h"
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#define EVENT_ID_INVALIDATE_PIPE    29
+
 typedef enum {
     gcvHARDWARE_FUNCTION_MMU,
     gcvHARDWARE_FUNCTION_FLUSH,
 
-    /* BLT engine command sequence. */
-    gcvHARDWARE_FUNCTION_BLT_EVENT,
-    gcvHARDWARE_FUNCTION_DUMMY_DRAW,
     gcvHARDWARE_FUNCTION_NUM,
 }
 gceHARDWARE_FUNCTION;
 
-
-typedef struct _gcsHARWARE_FUNCTION
-{
-    /* Entry of the function. */
-    gctUINT32                   address;
-
-    /* CPU address of the function. */
-    gctUINT8_PTR                logical;
-
-    /* Bytes of the function. */
-    gctUINT32                   bytes;
-
-    /* Hardware address of END in this function. */
-    gctUINT32                   endAddress;
-
-    /* Logical of END in this function. */
-    gctUINT8_PTR                endLogical;
-}
-gcsHARDWARE_FUNCTION;
+typedef struct _gckASYNC_FE *   gckASYNC_FE;
+typedef struct _gckWLFE *       gckWLFE;
+typedef struct _gckMCFE *       gckMCFE;
 
 typedef struct _gcsSTATETIMER
 {
@@ -136,14 +121,14 @@ typedef struct _gcsHARDWARE_PAGETABLE_ARRAY
     /* Number of entries in page table array. */
     gctUINT                     num;
 
+    /* Video memory node. */
+    gckVIDMEM_NODE              videoMem;
+
     /* Size in bytes of array. */
     gctSIZE_T                   size;
 
     /* Physical address of array. */
     gctPHYS_ADDR_T              address;
-
-    /* Memory descriptor. */
-    gctPHYS_ADDR                physical;
 
     /* Logical address of array. */
     gctPOINTER                  logical;
@@ -165,6 +150,9 @@ struct _gckHARDWARE
     /* Core */
     gceCORE                     core;
 
+    /* Type */
+    gceHARDWARE_TYPE            type;
+
     /* Chip characteristics. */
     gcsHAL_QUERY_CHIP_IDENTITY  identity;
     gcsHAL_QUERY_CHIP_OPTIONS   options;
@@ -177,27 +165,27 @@ struct _gckHARDWARE
     /* Base address. */
     gctUINT32                   baseAddress;
 
+    /* FE modules. */
+    gckWLFE                     wlFE;
+    gckASYNC_FE                 asyncFE;
+    gckMCFE                     mcFE;
+
     /* Chip status */
     gctPOINTER                  powerMutex;
-    gctUINT32                   powerProcess;
-    gctUINT32                   powerThread;
     gceCHIPPOWERSTATE           chipPowerState;
-    gctUINT32                   lastWaitLink;
-    gctUINT32                   lastEnd;
     gctBOOL                     clockState;
     gctBOOL                     powerState;
     gctPOINTER                  globalSemaphore;
+    gctBOOL                     isLastPowerGlobal;
+
+    /* Wait Link FE only. */
+    gctUINT32                   lastWaitLink;
+    gctUINT32                   lastEnd;
 
     gctUINT32                   mmuVersion;
 
-    /* Type */
-    gceHARDWARE_TYPE            type;
-
-#if gcdPOWEROFF_TIMEOUT
-    gctUINT32                   powerOffTime;
-    gctUINT32                   powerOffTimeout;
-    gctPOINTER                  powerOffTimer;
-#endif
+    gceCHIPPOWERSTATE           nextPowerState;
+    gctPOINTER                  powerStateTimer;
 
 #if gcdENABLE_FSCALE_VAL_ADJUST
     gctUINT32                   powerOnFscaleVal;
@@ -217,29 +205,25 @@ struct _gckHARDWARE
 
     gctPOINTER                  pendingEvent;
 
-    /* Function used by gckHARDWARE. */
-    gctPHYS_ADDR                mmuFuncPhysical;
-    gctPOINTER                  mmuFuncLogical;
-    gctSIZE_T                   mmuFuncBytes;
+    gcsFUNCTION_EXECUTION_PTR   functions;
 
-    gctPHYS_ADDR                auxFuncPhysical;
-    gctPHYS_ADDR                auxPhysHandle;
-    gctPOINTER                  auxFuncLogical;
-    gctUINT32                   auxFuncAddress;
-    gctSIZE_T                   auxFuncBytes;
-
-    gcsHARDWARE_FUNCTION        functions[gcvHARDWARE_FUNCTION_NUM];
-
-    gcsSTATETIMER               powerStateTimer;
+    gcsSTATETIMER               powerStateCounter;
     gctUINT32                   executeCount;
     gctUINT32                   lastExecuteAddress;
 
     /* Head for hardware list in gckMMU. */
     gcsLISTHEAD                 mmuHead;
 
+    /* Internal SRAMs info. */
+    gckVIDMEM                   sRAMVidMem[gcvSRAM_INTER_COUNT];
+    gctPHYS_ADDR                sRAMPhysical[gcvSRAM_INTER_COUNT];
+
     gctPOINTER                  featureDatabase;
-    gctBOOL                     hasAsyncFe;
     gctBOOL                     hasL2Cache;
+
+    /* MCFE channel bindings, temporary. */
+    gceMCFE_CHANNEL_TYPE        mcfeChannels[64];
+    gctUINT32                   mcfeChannelCount;
 
     gcsHARDWARE_SIGNATURE       signature;
 
@@ -248,50 +232,9 @@ struct _gckHARDWARE
     gcsHARDWARE_PAGETABLE_ARRAY pagetableArray;
 
     gctUINT64                   contextID;
+
+    gctBOOL                     hasQchannel;
 };
-
-typedef struct _gcsFEDescriptor
-{
-    gctUINT32                   start;
-    gctUINT32                   end;
-}
-gcsFEDescriptor;
-
-typedef struct _gcsFE *         gckFE;
-typedef struct _gcsFE
-{
-    gckOS                       os;
-
-    /* Number of free descriptors. */
-    gctPOINTER                  freeDscriptors;
-}
-gcsFE;
-
-gceSTATUS
-gckFE_Initialize(
-    IN gckHARDWARE Hardware,
-    OUT gckFE FE
-    );
-
-gceSTATUS
-gckFE_ReserveSlot(
-    IN gckHARDWARE Hardware,
-    IN gckFE FE,
-    OUT gctBOOL * Available
-    );
-
-void
-gckFE_UpdateAvaiable(
-    IN gckHARDWARE Hardware,
-    OUT gckFE FE
-    );
-
-void
-gckFE_Execute(
-    IN gckHARDWARE Hardware,
-    IN gckFE FE,
-    IN gcsFEDescriptor * Desc
-    );
 
 gceSTATUS
 gckHARDWARE_GetBaseAddress(
@@ -324,8 +267,7 @@ gckHARDWARE_HandleFault(
 
 gceSTATUS
 gckHARDWARE_ExecuteFunctions(
-    IN gckHARDWARE Hardware,
-    IN gceHARDWARE_FUNCTION Function
+    IN gcsFUNCTION_EXECUTION_PTR Execution
     );
 
 gceSTATUS
@@ -351,6 +293,11 @@ gckHARDWARE_ExitQueryClock(
     IN gctUINT64 ShStart,
     OUT gctUINT32 *McClk,
     OUT gctUINT32 *ShClk
+    );
+
+gceSTATUS
+gckHARDWARE_QueryFrequency(
+    IN gckHARDWARE Hardware
     );
 
 #define gcmkWRITE_MEMORY(logical, data) \

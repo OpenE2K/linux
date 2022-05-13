@@ -177,7 +177,7 @@ static inline void BOOT_KVM_WRITE_MMU_PID_REG(mmu_reg_t reg_val)
 		/* all hardware MMU registers, but it is not so now, */
 		/* for example PT roots and context registers are controled */
 		/* by hypervisor as for paravirtualized kernels */
-		NATIVE_FLUSH_TLB_ALL(_flush_op_tlb_all);
+		NATIVE_FLUSH_TLB_ALL(flush_op_tlb_all);
 	}
 }
 static inline unsigned long BOOT_KVM_READ_MMU_PID_REG(void)
@@ -245,15 +245,13 @@ static inline mmu_reg_t KVM_READ_DTLB_REG(tlb_addr_t tlb_addr)
 static inline void
 KVM_FLUSH_TLB_ENTRY(flush_op_t flush_op, flush_addr_t flush_addr)
 {
-	if (IS_HV_GM()) {
-		/* FIXME: guest should fully control own PTs including */
-		/* all hardware MMU registers, but it is not so now, */
-		/* for example PT roots and context registers are controled */
-		/* by hypervisor as for paravirtualized kernels */
-		native_flush_TLB_all();
-	} else if (IS_ENABLED(CONFIG_KVM_PARAVIRT_TLB_FLUSH)) {
-		HYPERVISOR_flush_tlb_range(flush_addr_get_va(flush_addr),
-				flush_addr_get_va(flush_addr));
+	if (unlikely(flush_addr_get_pid(flush_addr) == E2K_KERNEL_CONTEXT)) {
+		pr_warn("%s(): CPU #%d try to flush %s addr 0x%llx pid 0x%03llx\n",
+			__func__, smp_processor_id(),
+			(flush_op_get_type(flush_op) == FLUSH_TLB_PAGE_OP) ?
+				"TLB page" : "???",
+			FLUSH_VADDR_TO_VA(flush_addr),
+			flush_addr_get_pid(flush_addr));
 	}
 }
 
@@ -275,6 +273,19 @@ KVM_FLUSH_DCACHE_LINE(e2k_addr_t virt_addr)
 		NATIVE_FLUSH_DCACHE_LINE(virt_addr);
 	} else {
 		kvm_flush_dcache_line(virt_addr);
+	}
+}
+
+/*
+ * Read DCACHE L1 fault_reg register
+ */
+static inline u64
+KVM_READ_L1_FAULT_REG(void)
+{
+	if (IS_HV_GM()) {
+		return NATIVE_READ_L1_FAULT_REG();
+	} else {
+		return kvm_read_dcache_l1_fault_reg();
 	}
 }
 
@@ -351,11 +362,8 @@ KVM_FLUSH_CACHE_L12(flush_op_t flush_op)
 static inline void
 KVM_FLUSH_TLB_ALL(flush_op_t flush_op)
 {
-	if (IS_HV_GM()) {
-		native_flush_TLB_all();
-	} else if (IS_ENABLED(CONFIG_KVM_PARAVIRT_TLB_FLUSH)) {
-		HYPERVISOR_flush_tlb_range(0, E2K_VA_SIZE);
-	}
+	pr_warn_once("%s(): try to flush all TLB : op 0x%lx\n",
+		__func__, flush_op);
 }
 
 /*
@@ -646,6 +654,14 @@ static inline void FLUSH_DCACHE_LINE_OFFSET(e2k_addr_t virt_addr, size_t offset)
 	KVM_FLUSH_DCACHE_LINE(virt_addr + offset);
 }
 
+/*
+ * Read DCACHE L1 fault_reg register
+ */
+static inline u64
+READ_L1_FAULT_REG(void)
+{
+	return KVM_READ_L1_FAULT_REG();
+}
 
 /*
  * Clear DCACHE L1 set

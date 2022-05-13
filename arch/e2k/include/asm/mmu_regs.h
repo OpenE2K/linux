@@ -81,31 +81,27 @@ boot_read_MMU_reg(mmu_addr_t mmu_addr)
 /*
  * Read MMU Control register
  */
-#define	read_MMU_CR()	read_MMU_reg(MMU_ADDR_CR)
-#define	READ_MMU_CR()	\
-	READ_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_CR_NO))
-static inline	unsigned long
-get_MMU_CR(void)
+#define	READ_MMU_CR()	((e2k_mmu_cr_t) \
+		{ .word = READ_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_CR_NO)) })
+static inline e2k_mmu_cr_t get_MMU_CR(void)
 {
-	unsigned long mmu_cr;
+	e2k_mmu_cr_t mmu_cr;
 
 	DebugMR("Get MMU Control Register\n");
 	mmu_cr = READ_MMU_CR();
-	DebugMR("MMU Control Register state : 0x%lx\n", mmu_cr);
+	DebugMR("MMU Control Register state : 0x%llx\n", AW(mmu_cr));
 	return mmu_cr;
 }
 
 /*
  * Write MMU Control register
  */
-#define	write_MMU_CR(mmu_cr)	write_MMU_reg(MMU_ADDR_CR, mmu_cr)
+#define	write_MMU_CR(mmu_cr)	write_MMU_reg(MMU_ADDR_CR, AW(mmu_cr))
 #define	WRITE_MMU_CR(mmu_cr)	\
-		WRITE_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_CR_NO), \
-			mmu_reg_val(mmu_cr))
-static inline	void
-set_MMU_CR(unsigned long mmu_cr)
+		WRITE_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_CR_NO), AW(mmu_cr))
+static inline void set_MMU_CR(e2k_mmu_cr_t mmu_cr)
 {
-	DebugMR("Set MMU Control Register to 0x%lx\n", mmu_cr);
+	DebugMR("Set MMU Control Register to 0x%llx\n", AW(mmu_cr));
 	WRITE_MMU_CR(mmu_cr);
 	DebugMR("Read MMU Control Register : 0x%llx\n",
 		READ_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_CR_NO)));
@@ -448,30 +444,34 @@ read_MMU_US_CL_D(void)
 static inline void
 ____flush_TLB_page(flush_op_t flush_op, flush_addr_t flush_addr)
 {
-	unsigned long flags;
-	bool fl_c_needed = cpu_has(CPU_HWBUG_TLB_FLUSH_L1D);
 
 	DebugTLB("Flush TLB page : op 0x%lx extended virtual addr 0x%lx\n",
-		flush_op_val(flush_op), flush_addr_val(flush_addr));
+			flush_op, flush_addr);
 
-	raw_all_irq_save(flags);
-	FLUSH_TLB_ENTRY(flush_op_val(flush_op), flush_addr_val(flush_addr));
-	if (fl_c_needed)
+	FLUSH_TLB_ENTRY(flush_op, flush_addr);
+	if (cpu_has(CPU_HWBUG_TLB_FLUSH_L1D))
 		__E2K_WAIT(_fl_c);
-	raw_all_irq_restore(flags);
 }
 
 #define flush_TLB_page_begin()
 #define flush_TLB_page_end() \
 do { \
-	__E2K_WAIT(_fl_c | _ma_c); \
+	__E2K_WAIT(_fl_c); \
 } while (0)
+
+static inline void __flush_TLB_page_tlu_cache(unsigned long virt_addr,
+		unsigned long context, u64 type)
+{
+	u64 va_tag = (virt_addr >> (9 * type + 12));
+	____flush_TLB_page(FLUSH_TLB_PAGE_TLU_CACHE_OP,
+			(va_tag << 21) | (context << 50) | type);
+}
+
 
 static inline void
 __flush_TLB_page(e2k_addr_t virt_addr, unsigned long context)
 {
-	____flush_TLB_page(flush_op_tlb_page_sys,
-				flush_addr_make_sys(virt_addr, context));
+	____flush_TLB_page(FLUSH_TLB_PAGE_OP, flush_addr_make_sys(virt_addr, context));
 }
 
 static inline void
@@ -499,8 +499,7 @@ flush_TLB_kernel_page(e2k_addr_t virt_addr)
 static inline void
 __flush_TLB_ss_page(e2k_addr_t virt_addr, unsigned long context)
 {
-	____flush_TLB_page(flush_op_tlb_page_sys,
-				flush_addr_make_ss(virt_addr, context));
+	____flush_TLB_page(FLUSH_TLB_PAGE_OP, flush_addr_make_ss(virt_addr, context));
 }
 
 static inline	void
@@ -628,8 +627,8 @@ static inline	void
 __flush_ICACHE_line(flush_op_t flush_op, flush_addr_t flush_addr)
 {
 	DebugMR("Flush ICACHE line : op 0x%lx extended virtual addr 0x%lx\n",
-		flush_op_val(flush_op), flush_addr_val(flush_addr));
-	FLUSH_ICACHE_LINE(flush_op_val(flush_op), flush_addr_val(flush_addr));
+			flush_op, flush_addr);
+	FLUSH_ICACHE_LINE(flush_op, flush_addr);
 }
 
 #define flush_ICACHE_line_begin()
@@ -641,8 +640,7 @@ do { \
 static inline void
 __flush_ICACHE_line_user(e2k_addr_t virt_addr)
 {
-	__flush_ICACHE_line(flush_op_icache_line_user,
-				flush_addr_make_user(virt_addr));
+	__flush_ICACHE_line(FLUSH_ICACHE_LINE_USER_OP, flush_addr_make_user(virt_addr));
 }
 
 static inline	void
@@ -656,8 +654,7 @@ flush_ICACHE_line_user(e2k_addr_t virt_addr)
 static inline void
 __flush_ICACHE_line_sys(e2k_addr_t virt_addr, unsigned long context)
 {
-	__flush_ICACHE_line(flush_op_icache_line_sys,
-				flush_addr_make_sys(virt_addr, context));
+	__flush_ICACHE_line(FLUSH_ICACHE_LINE_SYS_OP, flush_addr_make_sys(virt_addr, context));
 }
 
 static	inline	void
@@ -682,18 +679,11 @@ flush_ICACHE_kernel_line(e2k_addr_t virt_addr)
 static inline void
 boot_native_invalidate_CACHE_L12(void)
 {
-	int invalidate_supported;
 	unsigned long flags;
-
-	/* Invalidate operation was removed in E2S */
-	invalidate_supported = BOOT_NATIVE_IS_MACHINE_ES2;
 
 	raw_all_irq_save(flags);
 	E2K_WAIT_MA;
-	if (invalidate_supported)
-		NATIVE_FLUSH_CACHE_L12(_flush_op_invalidate_cache_L12);
-	else
-		NATIVE_FLUSH_CACHE_L12(_flush_op_write_back_cache_L12);
+	NATIVE_FLUSH_CACHE_L12(flush_op_write_back_cache_L12);
 	E2K_WAIT_FLUSH;
 	raw_all_irq_restore(flags);
 }
@@ -708,7 +698,7 @@ static inline void
 native_raw_write_back_CACHE_L12(void)
 {
 	__E2K_WAIT(_ma_c);
-	NATIVE_FLUSH_CACHE_L12(_flush_op_write_back_cache_L12);
+	NATIVE_FLUSH_CACHE_L12(flush_op_write_back_cache_L12);
 	__E2K_WAIT(_fl_c | _ma_c);
 }
 
@@ -716,8 +706,8 @@ static inline void
 write_back_CACHE_L12(void)
 {
 	DebugMR("Flush : Write back all CACHEs (op 0x%lx)\n",
-		_flush_op_write_back_cache_L12);
-	FLUSH_CACHE_L12(_flush_op_write_back_cache_L12);
+		flush_op_write_back_cache_L12);
+	FLUSH_CACHE_L12(flush_op_write_back_cache_L12);
 }
 
 /*
@@ -728,15 +718,15 @@ static inline void
 native_raw_flush_TLB_all(void)
 {
 	__E2K_WAIT(_st_c);
-	NATIVE_FLUSH_TLB_ALL(_flush_op_tlb_all);
+	NATIVE_FLUSH_TLB_ALL(flush_op_tlb_all);
 	__E2K_WAIT(_fl_c | _ma_c);
 }
 
 static inline void
 flush_TLB_all(void)
 {
-	DebugMR("Flush all TLBs (op 0x%lx)\n", _flush_op_tlb_all);
-	FLUSH_TLB_ALL(_flush_op_tlb_all);
+	DebugMR("Flush all TLBs (op 0x%lx)\n", flush_op_tlb_all);
+	FLUSH_TLB_ALL(flush_op_tlb_all);
 }
 
 /*
@@ -745,8 +735,8 @@ flush_TLB_all(void)
 static inline void
 flush_ICACHE_all(void)
 {
-	DebugMR("Flush all ICACHE op 0x%lx\n", _flush_op_icache_all);
-	FLUSH_ICACHE_ALL(_flush_op_icache_all);
+	DebugMR("Flush all ICACHE op 0x%lx\n", flush_op_icache_all);
+	FLUSH_ICACHE_ALL(flush_op_icache_all);
 }
 
 /*

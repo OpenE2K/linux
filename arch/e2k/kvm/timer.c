@@ -172,15 +172,14 @@ static enum hrtimer_restart clockdev_fn(struct hrtimer *timer)
 /* This sets up the timer for the VCPU */
 void kvm_init_clockdev(struct kvm_vcpu *vcpu)
 {
-	DebugKVM("started to set up the timer for the VCPU #%d\n",
+	DebugKVM("started to set up the early timer for the VCPU #%d\n",
 		vcpu->vcpu_id);
 
 	if (vcpu->arch.is_hv && kvm_vcpu_is_bsp(vcpu)) {
-		int ret;
+		int ret, irq;
 
-		ret = kvm_get_guest_direct_virq(vcpu,
-			KVM_VIRQ_TIMER + (KVM_NR_VIRQS_PER_CPU * vcpu->vcpu_id),
-			KVM_VIRQ_TIMER);
+		irq = vcpu->vcpu_id * KVM_NR_VIRQS_PER_CPU + KVM_VIRQ_TIMER;
+		ret = kvm_get_guest_direct_virq(vcpu, irq, KVM_VIRQ_TIMER);
 		if (ret != 0) {
 			pr_err("%s(): could not register early timer "
 				"VIRQ #%d on VCPU #%d\n",
@@ -190,10 +189,14 @@ void kvm_init_clockdev(struct kvm_vcpu *vcpu)
 				vcpu->vcpu_id);
 			KVM_BUG_ON(true);
 		}
+		DebugKVM("VCPU #%d VIRQ #%d %s was registered on host "
+			"as IRQ #%d\n",
+			vcpu->vcpu_id, KVM_VIRQ_TIMER,
+			kvm_get_virq_name(KVM_VIRQ_TIMER), irq);
 	}
 	hrtimer_init(&vcpu->arch.hrt, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	vcpu->arch.hrt.function = clockdev_fn;
-	DebugKVM("created timer for the VCPU #%d at %px base 0x%lx\n",
+	DebugKVM("created early timer for the VCPU #%d at %px base 0x%lx\n",
 		vcpu->vcpu_id, &vcpu->arch.hrt, vcpu->arch.hrt.base);
 }
 
@@ -206,8 +209,13 @@ void kvm_cancel_clockdev(struct kvm_vcpu *vcpu)
 	}
 	/* Clock event device is shutting down. */
 	hrtimer_cancel(&vcpu->arch.hrt);
-	if (vcpu->arch.apic != NULL)
+	DebugKVM("VCPU #%d early timer at %px was shutting down\n",
+		vcpu->vcpu_id, &vcpu->arch.hrt);
+	if (vcpu->arch.apic != NULL) {
 		hrtimer_cancel(&vcpu->arch.apic->lapic_timer.timer);
+		DebugKVM("VCPU #%d local apic timer at %px was shutting down\n",
+			vcpu->vcpu_id, &vcpu->arch.apic->lapic_timer.timer);
+	}
 }
 
 static void

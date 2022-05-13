@@ -36,20 +36,20 @@
 
 static inline void native_scr_writew(u16 val, volatile u16 *addr)
 {
-	native_writew(val, addr);
+	native_writew_relaxed(val, addr);
 }
 static inline u16 native_scr_readw(volatile const u16 *addr)
 {
-	return native_readw(addr);
+	return native_readw_relaxed(addr);
 }
 static inline void native_vga_writeb(u8 val, volatile u8 *addr)
 {
-	native_writeb(val, addr);
+	native_writeb_relaxed(val, addr);
 }
 
 static inline u8 native_vga_readb(volatile const u8 *addr)
 {
-	return native_readb(addr);
+	return native_readb_relaxed(addr);
 }
 
 #endif	/* E2K_VGA_DIRECT_IOMEM */
@@ -82,5 +82,16 @@ static inline u8 vga_readb(volatile const u8 *addr)
 	return native_vga_readb(addr);
 }
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
+
+/*
+ * Our drivers doens't use VGA legacy resources so
+ * we assume we can't have any conflicts
+ */
+#define __ARCH_HAS_VGA_CONFLICT
+struct pci_dev;
+static inline int vga_conflicts(struct pci_dev *p1, struct pci_dev *p2)
+{
+	return 0;
+}
 
 #endif

@@ -169,11 +169,6 @@ void smp_write_ioapic_intsrc_info(struct mpc_table *mc, unsigned int node,
 
 	/* On bus 2 device 0  PCI -> PCI bridge pin 1 */
 	smp_write_intsrc(mc, mp_INT,     0x0f, 0x02, 0x00, ioapicid, 0x10); /* IOAPIC IRQ A */
-#if defined(CONFIG_ES2) && !defined(CONFIG_ADC_DISABLE)
-	smp_write_ioapic(mc, ioapicid + 1, 0x11, 0xfec01000);
-	smp_write_intsrc(mc, mp_FixINT,     0x0d, 0x01, PCI_DEVFN(1, 0), ioapicid + 1, 0x0a); /* ADC */
-	smp_write_intsrc(mc, mp_FixINT,     0x0d, 0x01, PCI_DEVFN(2, 0), ioapicid + 1, 0x17); /* I2c/spi */
-#endif /* CONFIG_ES2  && ! CONFIG_ADC_DISABLE */
 
 #ifdef	CONFIG_E2K_LEGACY_SIC
 	/* Configure embeded IO-APIC */

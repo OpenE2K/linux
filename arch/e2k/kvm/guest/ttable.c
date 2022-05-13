@@ -30,6 +30,7 @@
 #include <asm/kvm/guest/traps.h>
 #include <asm/kvm/guest/trap_table.h>
 #include <asm/kvm/guest/regs_state.h>
+#include <asm/kvm/guest/gregs.h>
 
 #include <trace/events/kvm.h>
 
@@ -130,7 +131,6 @@ static void kvm_guest_save_sbbp(u64 *sbbp)
 		sbbp[i] = KVM_READ_SBBP_REG_VALUE(i);
 	}
 }
-
 /*
  * The function return boolean value: there is interrupt (MI or NMI) as one
  * of trap to handle
@@ -226,39 +226,34 @@ static void kvm_guest_save_stack_regs(pt_regs_t *regs)
 	/* Cycles control registers */
 	regs->lsr = KVM_READ_LSR_REG_VALUE();
 	regs->ilcr = KVM_READ_ILCR_REG_VALUE();
+	regs->lsr1 = KVM_READ_LSR1_REG_VALUE();
+	regs->ilcr1 = KVM_READ_ILCR1_REG_VALUE();
 }
 #ifdef CONFIG_USE_AAU
-static void kvm_save_guest_trap_aau_regs(trap_pt_regs_t *trap, e2k_aau_t *aau)
+static void kvm_save_guest_trap_aau_regs(struct pt_regs *regs, e2k_aau_t *aau)
 {
 	e2k_aasr_t aasr;
-	bool aau_fault = false;
-	int i;
 
-	aasr = kvm_read_aasr_reg();
+	aasr = aasr_parse(kvm_read_aasr_reg());
+	regs->aasr = aasr;
 	KVM_SAVE_AAU_MASK_REGS(aau, aasr);
-	if (AS(aasr).iab)
+	if (aasr.iab)
 		KVM_SAVE_AADS(aau);
-	for (i = 0; i <= trap->nr_TIRs; i++) {
-		if (GET_AA_TIRS(trap->TIRs[i].TIR_hi.TIR_hi_reg)) {
-			aau_fault = true;
-			break;
-		}
-	}
 
-	if (AS(aasr).iab) {
+	if (aasr.iab) {
 		/* get descriptors & auxiliary registers */
 		kvm_get_array_descriptors(aau);
 		aau->aafstr = kvm_read_aafstr_reg_value();
 	}
 
-	if (AS(aasr).stb) {
+	if (aasr.stb) {
 		/* get synchronous part of APB */
 		kvm_get_synchronous_part(aau);
 	}
 }
 #else /* ! CONFIG_USE_AAU */
 static inline void
-kvm_save_guest_trap_aau_regs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+kvm_save_guest_trap_aau_regs(struct pt_regs *regs, e2k_aau_t *aau)
 {
 }
 #endif /* ! CONFIG_USE_AAU */
@@ -428,6 +423,14 @@ static void kvm_restore_syscall_stack_regs(pt_regs_t *regs)
 }
 #endif	/* RESTORE_SYSCALL_REGS */
 
+static inline bool is_guest_kernel_data_stack_bounds(void)
+{
+	e2k_usd_hi_t usd_hi;
+
+	usd_hi = NATIVE_NV_READ_USD_HI_REG();
+	return usd_hi.USD_hi_size < PAGE_SIZE;
+}
+
 /*
  * Trap occured on user or kernel function but on user's stacks
  * So, it needs to switch to kernel stacks
@@ -489,7 +492,8 @@ int kvm_trap_handler(void)
 	 * has been restored by host and other gregs can be cleared,
 	 * so restore anyway its state
 	 */
-	KVM_SAVE_GREGS_AND_SET(thread_info);
+	if (KVM_READ_SBR_REG_VALUE() < GUEST_TASK_SIZE)
+		KVM_SAVE_GREGS_AND_SET(thread_info);
 
 	/*
 	 * See comments in ttable_entry4() for sc_restart
@@ -536,13 +540,16 @@ int kvm_trap_handler(void)
 
 	kvm_guest_save_trap_cellar(regs);
 
-	kvm_save_guest_trap_aau_regs(&trap, &aau_context);
+	kvm_save_guest_trap_aau_regs(regs, &aau_context);
 
 	/* user context was saved, so enable traps on hardware stacks bounds */
 	kvm_set_sge();
 
 	/* unfreeze TIRs & trap cellar on host */
 	HYPERVISOR_unfreeze_guest_traps();
+
+	if (is_guest_kernel_data_stack_bounds())
+		kernel_data_stack_overflow();
 
 	/* any checkers with BUG() can be run only after unfreezing TIRs */
 	kvm_check_vcpu_id();
@@ -742,26 +749,81 @@ static noinline long kvm_guest_sys_call64_or_32(long sys_num_and_entry,
 	return rval;
 }
 
-static __interrupt __always_inline int
+static noinline long
 kvm_guest_fast_sys_call32(int sys_num, u64 arg1, u64 arg2)
 {
-	kvm_fast_system_call_func func;
 	int ret;
 
-	func = kvm_fast_sys_calls_table_32[sys_num & NR_fast_syscalls_mask];
-	ret = func(arg1, arg2);
-	return ret;
+	switch (sys_num) {
+	case __NR_fast_gettimeofday:
+		ret = _compat_fast_sys_gettimeofday(
+					(struct compat_timeval *) arg1,
+					(struct timezone *) arg2);
+		break;
+	case __NR_fast_clock_gettime:
+		ret = _compat_fast_sys_clock_gettime(arg1,
+					(struct compat_timespec *) arg2);
+		break;
+	case __NR_fast_getcpu:
+		ret = fast_sys_getcpu((unsigned int *) arg1,
+					(unsigned int *) arg2, 0);
+		break;
+	case __NR_fast_siggetmask:
+		ret = _compat_fast_sys_siggetmask((u32 *) arg1, arg2);
+		break;
+	case __NR_fast_getcontext:
+		ret = _compat_fast_sys_getcontext((struct ucontext_32 *)arg1,
+						arg2);
+		break;
+	case __NR_fast_set_return:
+		ret = fast_sys_set_return(arg1, arg2);
+		break;
+	default:
+		ret = fast_sys_ni_syscall();
+		break;
+	}
+
+	HYPERVISOR_return_from_fast_syscall(ret);
+	unreachable();
+
+	return 0;
 }
 
-static __interrupt __always_inline int
+static __interrupt noinline long
 kvm_guest_fast_sys_call64(int sys_num, u64 arg1, u64 arg2)
 {
-	kvm_fast_system_call_func func;
 	int ret;
 
-	func = kvm_fast_sys_calls_table[sys_num & NR_fast_syscalls_mask];
-	ret = func(arg1, arg2);
-	return ret;
+	switch (sys_num) {
+	case __NR_fast_gettimeofday:
+		ret = _fast_sys_gettimeofday((struct timeval *) arg1,
+					(struct timezone *) arg2);
+		break;
+	case __NR_fast_clock_gettime:
+		ret = _fast_sys_clock_gettime(arg1, (struct timespec *) arg2);
+		break;
+	case __NR_fast_getcpu:
+		ret = fast_sys_getcpu((unsigned int *) arg1,
+					(unsigned int *) arg2, 0);
+		break;
+	case __NR_fast_siggetmask:
+		ret = _fast_sys_siggetmask((u64 *) arg1, arg2);
+		break;
+	case __NR_fast_getcontext:
+		ret = _fast_sys_getcontext((struct ucontext *)arg1, arg2);
+		break;
+	case __NR_fast_set_return:
+		ret = fast_sys_set_return(arg1, arg2);
+		break;
+	default:
+		ret = fast_sys_ni_syscall();
+		break;
+	}
+
+	HYPERVISOR_return_from_fast_syscall(ret);
+	unreachable();
+
+	return 0;
 }
 
 /* FIXME: protected fast system calls are not implemented */
@@ -876,10 +938,12 @@ kvm_guest_ttable_entry5(int sys_num,
 			u64 arg3, u64 arg4,
 			u64 arg5, u64 arg6)
 {
-	int ret;
+	E2K_JUMP_WITH_ARGUMENTS(kvm_guest_fast_sys_call32, 3,
+				sys_num, arg1, arg2);
 
-	ret = kvm_guest_fast_sys_call32(sys_num, arg1, arg2);
-	return ret;
+	unreachable();
+
+	return 0;
 }
 
 /* trap table entry #6 is fast 64 bits system calls entry */
@@ -893,10 +957,138 @@ kvm_guest_ttable_entry6(int sys_num,
 			u64 arg3, u64 arg4,
 			u64 arg5, u64 arg6)
 {
-	int ret;
+	E2K_JUMP_WITH_ARGUMENTS(kvm_guest_fast_sys_call64, 3,
+				sys_num, arg1, arg2);
 
-	ret = kvm_guest_fast_sys_call64(sys_num, arg1, arg2);
-	return ret;
+	unreachable();
+
+	return 0;
+}
+
+void kvm_guest_mkctxt_trampoline(void)
+{
+	thread_info_t *ti = KVM_READ_CURRENT_REG();
+	long ret = 0;
+	void __user *uc_link = NULL;
+	struct pt_regs regs;
+	struct hw_context *ctx;
+	u64 wsz;
+	bool return_to_user;
+
+	/* Save hw stacks state to ti->tmp_user_stacks */
+	KVM_SAVE_HW_STACKS_AT_TI(ti);
+
+	/* Switch kernel gregs to guest's kernel values */
+	KVM_SAVE_GREGS_AND_SET(ti);
+
+	/* Switch to kernel data stack. */
+	WRITE_USBR_USD_REG_VALUE(
+			(u64) current->stack + KERNEL_C_STACK_SIZE,
+			AW(current_thread_info()->k_usd_hi),
+			AW(current_thread_info()->k_usd_lo));
+
+	/* Switch to %upsr for interrupts control */
+	DO_SAVE_UPSR_REG(current_thread_info()->upsr);
+	SET_KERNEL_UPSR_WITH_DISABLED_NMI();
+
+	SAVE_STACK_REGS(&regs, current_thread_info(), true, false);
+	current_thread_info()->pt_regs = &regs;
+	/*
+	 * TODO: Stacks with right state should be prepared on host side
+	 * when injecting. Last user frame should be spilled to kernel
+	 */
+	regs.stacks.pcshtp = SZ_OF_CR;
+	regs.stacks.pshtp = ((e2k_pshtp_t) {.PSHTP_ind = 0});
+
+	raw_all_irq_enable();
+
+	ctx = current_thread_info()->this_hw_context;
+	if (!ctx)
+		goto exit_;
+
+	/*
+	 * Read uc_link from user
+	 */
+	if (ctx->ptr_format == CTX_32_BIT) {
+		u32 ucontext_32;
+
+		if (get_user(ucontext_32, (u32 *) ctx->p_uc_link)) {
+			ret = -EFAULT;
+			goto exit_;
+		}
+		uc_link = (struct ucontext_32 *) (u64) ucontext_32;
+	} else if (ctx->ptr_format == CTX_64_BIT) {
+		u64 ucontext_64;
+
+		if (get_user(ucontext_64, (u64 *) ctx->p_uc_link)) {
+			ret = -EFAULT;
+			goto exit_;
+		}
+		uc_link = (struct ucontext *) ucontext_64;
+	} else {
+		/* CTX_128_BIT */
+		e2k_ptr_t ptr;
+		u64 lo_val, hi_val;
+		u8 lo_tag, hi_tag;
+		u8 tag;
+		u32 size;
+
+		TRY_USR_PFAULT {
+			load_qvalue_and_tagq((e2k_addr_t)ctx->p_uc_link,
+					&lo_val, &hi_val, &lo_tag, &hi_tag);
+		} CATCH_USR_PFAULT {
+			ret = -EFAULT;
+			goto exit_;
+		} END_USR_PFAULT
+		AW(ptr).lo = lo_val;
+		AW(ptr).hi = hi_val;
+		size = AS(ptr).size - AS(ptr).curptr;
+		tag = (hi_tag << 4) | lo_tag;
+
+		/*
+		 * Check that the pointer is good.
+		 * We must be able to access uc_mcontext.sbr field.
+		 */
+		if (!size)
+			/* NULL pointer, just return */
+			goto exit_;
+		if (tag != ETAGAPQ || size <
+				offsetof(struct ucontext_prot,
+					uc_mcontext.usd_lo)) {
+			ret = -EFAULT;
+			goto exit_;
+		}
+
+		uc_link = (struct ucontext_prot *)
+				E2K_PTR_PTR(ptr, GET_SBR_HI());
+	}
+
+	if (uc_link) {
+		/*
+		 * Switch to context pointed by uc_link
+		 */
+		ret = swapcontext(uc_link, ctx->ptr_format);
+		if (!ret) {
+			/*
+			 * Handle all pending events before exiting from
+			 * guest's mkctxt kernel handler
+			 */
+			return_to_user = false;
+			wsz = get_wsz(FROM_MAKECONTEXT | FROM_SYSCALL_N_PROT);
+			exit_to_usermode_loop(&regs, FROM_MAKECONTEXT |
+					FROM_SYSCALL_N_PROT, &return_to_user,
+					wsz, true);
+
+			/* Context switched, return to host-side handler */
+			return;
+		}
+	}
+
+exit_:
+	/* Convert to user codes */
+	ret = -ret;
+
+	do_exit((ret & 0xff) << 8);
 }
 
 /* Pseudo SCALL 32 is used as a guest kernel jumpstart. */
@@ -913,7 +1105,7 @@ kvm_guest_startup_entry(int bsp, bootblock_struct_t *bootblock)
 {
 	unsigned long vcpu_base;
 
-#ifdef	CONFIG_PARAVIRT_GUEST
+#ifdef CONFIG_PARAVIRT_GUEST
 	cur_pv_v2p_ops = &kvm_v2p_ops;
 	if (bsp) {
 		kvm_init_paravirt_guest();

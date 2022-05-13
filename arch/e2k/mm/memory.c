@@ -352,12 +352,6 @@ static int e2k_make_single_pmd_valid(struct vm_area_struct *vma, pmd_t *pmd,
 
 	if (hpage) {
 		pte_t *huge_pte = (pte_t *) pmd;
-
-		if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE) {
-			if (huge_pte && pmd_index(address) % 2)
-				huge_pte--;
-		}
-
 		ptl = huge_pte_lockptr(hstate_vma(vma), mm, huge_pte);
 	} else {
 		ptl = pmd_lockptr(mm, pmd);

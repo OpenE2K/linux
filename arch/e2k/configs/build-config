@@ -9,12 +9,11 @@ Confs()
 cat <<EOF
  e2k_nort e2k_rt e2k_nn e2k_nnrt e2k_host e2k_guest
  e2c3_proto e12c_proto e16c_proto
- e12c_nort
+ e12c_nort e12c_rt e12c_nn e12c_nnrt
  e16c_nort e16c_rt e16c_nn e16c_nnrt
  e1cp_nort e1cp_rt e1cp_host e1cp_guest
  e2c3_nort e2c3_rt
  e2s_nort e2s_rt e2s_nn e2s_nnrt e2s_host e2s_guest e2s_nort_debug
- e3s_nort e3s_rt e3s_nn e3s_nnrt e3s_host e3s_guest
  e8c_nort e8c_rt e8c_nn e8c_nnrt e8c_host e8c_guest e8c_nort_debug
  e8c2_nort e8c2_rt e8c2_nn e8c2_nnrt e8c2_host e8c2_guest e8c2_nort_debug
 EOF
@@ -108,13 +107,6 @@ conf_e1cp()
 	-d CONFIG_MEM2ALLOC -d CONFIG_HANTRODEC -d CONFIG_BIGE \
 	|| exit 1
 }
-conf_e3s()
-{
-	$conf_script $OPTFILE \
-	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_ES2_DSP \
-	|| exit 1;
-	conf_no_builtin_gpu;
-}
 conf_e2s()
 {
 	$conf_script $OPTFILE \
@@ -192,124 +184,101 @@ conf_prototype()
 	-e CONFIG_IGB \
 	|| exit 1
 }
-conf_hardware_virt()
+
+conf_virtio()
 {
 	$conf_script $OPTFILE \
-	-e CONFIG_EARLY_VIRTIO_CONSOLE \
-	-e CONFIG_VSOCKETS \
-	-e CONFIG_VIRTIO_VSOCKETS \
-	-e CONFIG_VIRTIO_VSOCKETS_COMMON \
-	-e CONFIG_VIRTIO_BLK \
-	-e CONFIG_SCSI_VIRTIO \
-	-e CONFIG_VIRTIO_NET \
-	-e CONFIG_HVC_L \
-	-e CONFIG_VIRTIO_CONSOLE \
-	-e CONFIG_E1000 \
-	-e CONFIG_DRM_BOCHS \
-	-e CONFIG_VIRT_DRIVERS \
 	-e CONFIG_VIRTIO \
 	-e CONFIG_VIRTIO_PCI \
 	-e CONFIG_VIRTIO_PCI_LEGACY \
-	-e CONFIG_VIRTIO_BALLOON \
-	-e CONFIG_VIRTIO_INPUT \
-	-e CONFIG_VIRTIO_MMIO \
+	-e CONFIG_VIRTIO_BLK \
+	-e CONFIG_VIRTIO_NET \
+	-e CONFIG_VIRTIO_CONSOLE \
+	-e CONFIG_EARLY_VIRTIO_CONSOLE \
+	-e CONFIG_HVC_L \
+	-m CONFIG_VSOCKETS \
+	-m CONFIG_VIRTIO_VSOCKETS \
+	-m CONFIG_VIRTIO_VSOCKETS_COMMON \
+	-m CONFIG_SCSI_VIRTIO \
+	-m CONFIG_VIRTIO_BALLOON \
+	-m CONFIG_VIRTIO_INPUT \
+	-m CONFIG_DRM_VIRTIO_GPU \
+	-m CONFIG_VIRTIO_MMIO \
 	-e CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES \
+	|| exit 1
+}
+conf_vfio()
+{
+	$conf_script $OPTFILE \
+	-m CONFIG_VFIO \
+	-m CONFIG_VFIO_PCI \
+	-e CONFIG_VFIO_PCI_VGA \
+	|| exit 1
+}
+conf_kvm_common()
+{
+	$conf_script $OPTFILE \
 	-e CONFIG_VIRTUALIZATION \
-	-e CONFIG_HAVE_KVM_IRQCHIP \
-	-e CONFIG_HAVE_KVM_IRQFD \
-	-e CONFIG_HAVE_KVM_IRQ_ROUTING \
-	-e CONFIG_HAVE_KVM_EVENTFD \
-	-e CONFIG_KVM_COMPAT \
 	-e CONFIG_KVM \
+	-e CONFIG_KVM_COMPAT \
 	-e CONFIG_KVM_GUEST \
 	-e CONFIG_KVM_PARAVIRTUALIZATION \
 	-e CONFIG_KVM_HW_VIRTUALIZATION \
-	-e CONFIG_KVM_HW_PARAVIRTUALIZATION \
-	-e CONFIG_KVM_HOST_KERNEL \
-	-d CONFIG_KVM_GUEST_KERNEL \
 	-d CONFIG_PARAVIRT_GUEST \
+	-e CONFIG_DIRECT_VIRQ_INJECTION \
+	-e CONFIG_VIRQ_VCPU_INJECTION \
+	|| exit 1
+}
+conf_kvm_host()
+{
+	conf_kvm_common;
+	$conf_script $OPTFILE \
+	-d CONFIG_KVM_GUEST_KERNEL \
+	-e CONFIG_KVM_HOST_KERNEL \
+	-e CONFIG_KVM_HOST_MODE \
 	-e CONFIG_KVM_SHADOW_PT_ENABLE \
 	-e CONFIG_KVM_TDP_ENABLE \
 	-e CONFIG_KVM_NONPAGING_ENABLE \
 	-e CONFIG_KVM_PHYS_PT_ENABLE \
-	-e CONFIG_KVM_HOST_MODE \
-	-e CONFIG_DIRECT_VIRQ_INJECTION \
-	-e CONFIG_VIRQ_VCPU_INJECTION \
-	-e CONFIG_VFIO \
-	-e CONFIG_VFIO_PCI \
+	|| exit 1
+
+}
+conf_hardware_virt()
+{
+	conf_kvm_host;
+	conf_virtio;
+	conf_vfio;
+	$conf_script $OPTFILE \
+	-m CONFIG_DRM_BOCHS \
 	|| exit 1
 }
 conf_host()
 {
+	conf_kvm_host;
 	$conf_script $OPTFILE \
 	-e CONFIG_VIRTIO \
-	-e CONFIG_VIRTUALIZATION \
-	-e CONFIG_HAVE_KVM_IRQCHIP \
-	-e CONFIG_HAVE_KVM_IRQFD \
-	-e CONFIG_HAVE_KVM_IRQ_ROUTING \
-	-e CONFIG_HAVE_KVM_EVENTFD \
-	-e CONFIG_KVM_COMPAT \
-	-e CONFIG_KVM \
-	-e CONFIG_KVM_GUEST \
-	-e CONFIG_KVM_PARAVIRTUALIZATION \
-	-e CONFIG_KVM_HW_VIRTUALIZATION \
-	-e CONFIG_KVM_HW_PARAVIRTUALIZATION \
-	-e CONFIG_KVM_HOST_KERNEL \
-	-d CONFIG_KVM_GUEST_KERNEL \
-	-d CONFIG_PARAVIRT_GUEST \
-	-e CONFIG_KVM_SHADOW_PT_ENABLE \
-	-e CONFIG_KVM_NONPAGING_ENABLE \
-	-e CONFIG_KVM_PHYS_PT_ENABLE \
-	-e CONFIG_KVM_TDP_ENABLE \
-	-e CONFIG_KVM_HOST_MODE \
-	-e CONFIG_DIRECT_VIRQ_INJECTION \
-	-e CONFIG_VIRQ_VCPU_INJECTION \
-	-e CONFIG_STP \
-	-e CONFIG_BLK_DEV_LOOP \
-	--set-str CONFIG_CMDLINE "root=/dev/sda1 console=ttyS0,115200 ignore_loglevel init=/root/run_spt transparent_hugepage=madvise idle=mwait usbcore.nousb" \
 	|| exit 1
 }
-conf_guest()
+conf_kvm_pv_guest()
 {
+	conf_kvm_common;
 	$conf_script $OPTFILE \
-	-e CONFIG_EARLY_VIRTIO_CONSOLE \
-	-e CONFIG_VSOCKETS \
-	-e CONFIG_VIRTIO_BLK \
-	-e CONFIG_SCSI_VIRTIO \
-	-e CONFIG_VIRTIO_NET \
-	-e CONFIG_VIRTIO_CONSOLE \
-	-e CONFIG_VIRT_DRIVERS \
-	-e CONFIG_VIRTIO \
-	-e CONFIG_VIRTIO_PCI \
-	-e CONFIG_VIRTIO_PCI_LEGACY \
-	-e CONFIG_VIRTIO_BALLOON \
-	-e CONFIG_VIRTIO_INPUT \
-	-e CONFIG_VIRTIO_MMIO \
-	-e CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES \
-	-e CONFIG_HVC_L \
-	-e CONFIG_VIRTUALIZATION \
-	-e CONFIG_HAVE_KVM_IRQCHIP \
-	-e CONFIG_HAVE_KVM_IRQFD \
-	-e CONFIG_HAVE_KVM_IRQ_ROUTING \
-	-e CONFIG_HAVE_KVM_EVENTFD \
-	-e CONFIG_KVM_COMPAT \
-	-e CONFIG_KVM \
-	-e CONFIG_KVM_GUEST \
-	-e CONFIG_KVM_PARAVIRTUALIZATION \
-	-e CONFIG_KVM_HW_VIRTUALIZATION \
 	-d CONFIG_KVM_HOST_KERNEL \
 	-e CONFIG_KVM_GUEST_KERNEL \
-	-d CONFIG_PARAVIRT_GUEST \
-	-e CONFIG_KVM_GUEST_HW_PV \
-	-e CONFIG_KVM_SHADOW_PT \
 	-e CONFIG_KVM_GUEST_MODE \
 	-e CONFIG_KVM_GUEST_SMP \
 	-d CONFIG_KVM_GUEST_DEBUG \
 	-d CONFIG_KVM_GUEST_HW_HCALL \
-	-e CONFIG_DIRECT_VIRQ_INJECTION \
-	-e CONFIG_VIRQ_VCPU_INJECTION \
-	-e CONFIG_ISO9660_FS \
-	-e CONFIG_BLK_DEV_LOOP \
+	-e CONFIG_KVM_GUEST_HW_PV \
+	-e CONFIG_KVM_SHADOW_PT \
+	|| exit 1
+}
+conf_guest()
+{
+	# Bug 129401 workaround: disable i2c/spi in guest (this also disables rtc/sclkr)
+	conf_kvm_pv_guest;
+	conf_virtio;
+	$conf_script $OPTFILE \
 	-d CONFIG_L_I2C_CONTROLLER \
 	-d CONFIG_L_SPI_CONTROLLER \
 	|| exit 1
@@ -320,54 +289,57 @@ conf_power_efficient()
 	-e CONFIG_WQ_POWER_EFFICIENT_DEFAULT \
 	|| exit 1
 }
+conf_rt()
+{
+	$conf_script $OPTFILE \
+	-d CONFIG_PREEMPT_VOLUNTARY -e CONFIG_PREEMPT_RT \
+	-d CONFIG_NO_HZ_IDLE -e CONFIG_HZ_PERIODIC \
+	|| exit 1;
+}
 e2k_nort()  { :; }
-e2k_rt()    { :; }
+e2k_rt()    { conf_rt; }
 e2k_nn()    { conf_nn; }
-e2k_nnrt()  { conf_nn; }
+e2k_nnrt()  { conf_nn; conf_rt; }
 e2k_host()  { conf_host; }
 e2k_guest() { conf_guest; }
 e1cp_nort() { conf_e1cp; conf_power_efficient; }
-e1cp_rt()   { conf_e1cp; conf_power_efficient; }
+e1cp_rt()   { conf_e1cp; conf_power_efficient; conf_rt; }
 e1cp_host() { conf_e1cp; conf_power_efficient; conf_host; }
 e1cp_guest(){ conf_e1cp; conf_power_efficient; conf_guest; }
 e2s_nort()  { conf_e2s; }
-e2s_rt()    { conf_e2s; }
+e2s_rt()    { conf_e2s; conf_rt; }
 e2s_nn()    { conf_e2s; conf_nn; }
-e2s_nnrt()  { conf_e2s; conf_nn; }
+e2s_nnrt()  { conf_e2s; conf_nn; conf_rt; }
 e2s_host()  { conf_e2s; conf_host; }
 e2s_guest() { conf_e2s; conf_guest; }
 e2s_nort_debug()  { conf_e2s; }
-e3s_nort()  { conf_e3s; }
-e3s_rt()    { conf_e3s; }
-e3s_nn()    { conf_e3s; conf_nn; }
-e3s_nnrt()  { conf_e3s; conf_nn; }
-e3s_host()  { conf_e3s; conf_host; }
-e3s_guest() { conf_e3s; conf_guest; }
 e8c_nort()  { conf_e8c; }
-e8c_rt()    { conf_e8c; }
+e8c_rt()    { conf_e8c; conf_rt; }
 e8c_nn()    { conf_e8c; conf_nn; }
-e8c_nnrt()  { conf_e8c; conf_nn; }
+e8c_nnrt()  { conf_e8c; conf_nn; conf_rt; }
 e8c_host()  { conf_e8c; conf_host; }
 e8c_guest() { conf_e8c; conf_guest; }
 e8c_nort_debug() { conf_e8c; }
 e8c2_nort() { conf_e8c2; }
-e8c2_rt()   { conf_e8c2; }
+e8c2_rt()   { conf_e8c2; conf_rt; }
 e8c2_nn()   { conf_e8c2; conf_nn; }
-e8c2_nnrt() { conf_e8c2; conf_nn; }
+e8c2_nnrt() { conf_e8c2; conf_nn; conf_rt; }
 e8c2_host() { conf_e8c2; conf_host; }
 e8c2_guest(){ conf_e8c2; conf_guest; }
 e8c2_nort_debug() { conf_e8c2; }
 e16c_nort() { conf_e16c; conf_hardware_virt; }
-e16c_rt()   { conf_e16c; conf_hardware_virt; }
+e16c_rt()   { conf_e16c; conf_hardware_virt; conf_rt; }
 e16c_nn()   { conf_e16c; conf_hardware_virt; conf_nn; }
-e16c_nnrt() { conf_e16c; conf_hardware_virt; conf_nn; }
+e16c_nnrt() { conf_e16c; conf_hardware_virt; conf_nn; conf_rt; }
+e12c_nort() { conf_e12c; conf_hardware_virt; }
+e12c_rt()   { conf_e12c; conf_hardware_virt; conf_rt; }
+e12c_nn()   { conf_e12c; conf_hardware_virt; conf_nn; }
+e12c_nnrt() { conf_e12c; conf_hardware_virt; conf_nn; conf_rt; }
 e2c3_nort() { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; }
-e2c3_rt()   { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; }
+e2c3_rt()   { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; conf_rt; }
 e12c_proto(){ conf_e12c; conf_hardware_virt; conf_prototype; }
 e16c_proto(){ conf_e16c; conf_hardware_virt; conf_prototype; }
 e2c3_proto(){ conf_e2c3; conf_hardware_virt; conf_prototype; conf_power_efficient; conf_nn; }
-# These are temporary and needed because distribution does not know about "_proto" kernels
-e12c_nort() { e12c_proto; }
 ###############################################################################
 trap "cleanup" 1 2 3 6 15 EXIT
 OUTPUT_DIR=.

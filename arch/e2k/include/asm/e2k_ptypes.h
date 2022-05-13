@@ -15,12 +15,9 @@
 #include <asm/tags.h>
 
 
-
-
 		/*
 		 *	Tagged values structures
 		 */
-
 
 	/*		Address Pointers		*/
 
@@ -323,7 +320,7 @@ typedef struct e2k_pl {
 #define	PLHI_item		hi
 #define	IS_PL_ITAG(pl_lo_word)	(PL_ITAG_GET(pl_lo_word) == E2K_PL_ITAG)
 
-static inline e2k_pl_t DO_MAKE_PL_V2(u64 addr, bool pm)
+static inline e2k_pl_t DO_MAKE_PL_V3(u64 addr, bool pm)
 {
 	e2k_pl_t p;
 	e2k_pl_lo_t pl;
@@ -331,7 +328,7 @@ static inline e2k_pl_t DO_MAKE_PL_V2(u64 addr, bool pm)
 	pl.PL_lo_value = 0;
 	pl.PL_lo_target = addr;
 	pl.PL_lo_pm = pm;
-	pl.PL_lo_itag = E2K_PL_V2_ITAG;
+	pl.PL_lo_itag = E2K_PL_V3_ITAG;
 	p.lo = pl;
 	p.hi.word = 0L;
 	return p;
@@ -341,16 +338,16 @@ static inline e2k_pl_t DO_MAKE_PL_V6(u64 addr, bool pm, unsigned int cui)
 {
 	e2k_pl_t pl;
 
-	pl = DO_MAKE_PL_V2(addr, pm);
+	pl = DO_MAKE_PL_V3(addr, pm);
 	pl.PL_itag = E2K_PL_ITAG;
 	pl.PLHI_value = 0;
 	pl.PL_cui = cui;
 	return pl;
 }
 
-static inline e2k_pl_t MAKE_PL_V2(u64 addr)
+static inline e2k_pl_t MAKE_PL_V3(u64 addr)
 {
-	return DO_MAKE_PL_V2(addr, false);
+	return DO_MAKE_PL_V3(addr, false);
 }
 
 static inline e2k_pl_t MAKE_PL_V6(u64 addr,  unsigned int cui)

@@ -113,13 +113,14 @@ void hw_set2dformat(struct lynx_accel *accel, int fmt)
 	LEAVE();
 }
 
-int hw_fillrect(struct lynx_accel *accel,
+int hw_fillrect(struct lynx_share *share,
 		u32 base, u32 pitch, u32 Bpp,
 		u32 x, u32 y, u32 width, u32 height, u32 color, u32 rop)
 {
+	struct lynx_accel *accel = &share->accel;
 	u32 deCtrl;
 
-	if (accel->de_wait() != 0) {
+	if (accel->de_wait(share) != 0) {
 		/* int time wait and always busy, seems hardware
 		 * got something error */
 		dbg_msg("%s:De engine always bussy\n", __func__);
@@ -153,7 +154,8 @@ int hw_fillrect(struct lynx_accel *accel,
 	return 0;
 }
 
-int hw_copyarea(struct lynx_accel *accel, unsigned int sBase,	/* Address of source: offset in frame buffer */
+int hw_copyarea(struct lynx_share *share,
+		unsigned int sBase,	/* Address of source: offset in frame buffer */
 		unsigned int sPitch,	/* Pitch value of source surface in BYTE */
 		unsigned int sx, unsigned int sy,	/* Starting coordinate of source surface */
 		unsigned int dBase,	/* Address of destination: offset in frame buffer */
@@ -163,6 +165,7 @@ int hw_copyarea(struct lynx_accel *accel, unsigned int sBase,	/* Address of sour
 		unsigned int width, unsigned int height,	/* width and height of rectangle in pixel value */
 		unsigned int rop2)
 {				/* ROP value */
+	struct lynx_accel *accel = &share->accel;
 	unsigned int nDirection, de_ctrl;
 	int opSign;
 	nDirection = LEFT_TO_RIGHT;
@@ -266,7 +269,7 @@ int hw_copyarea(struct lynx_accel *accel, unsigned int sBase,	/* Address of sour
 		  ((dPitch / Bpp) << DE_WINDOW_WIDTH_DESTINATION_LSB) |
 		  ((sPitch / Bpp) << DE_WINDOW_WIDTH_SOURCE_LSB));
 
-	if (accel->de_wait() != 0) {
+	if (accel->de_wait(share) != 0) {
 		return -1;
 	}
 
@@ -371,7 +374,8 @@ static inline void writedp_rep(void __iomem *addr,
 #error	Endianess not defined
 #endif	/*__BIG_ENDIAN*/
 
-int hw_imageblit(struct lynx_accel *accel, const char *pSrcbuf,	/* pointer to start of source buffer in system memory */
+int hw_imageblit(struct lynx_share *share,
+		 const char *pSrcbuf,	/* pointer to start of source buffer in system memory */
 		 unsigned int  srcDelta,	/* Pitch value (in bytes) of the source buffer, +ive means top down and -ive mean button up */
 		 unsigned int startBit,	/* Mono data can start at any bit in a byte, this value should be 0 to 7 */
 		 unsigned int dBase,	/* Address of destination: offset in frame buffer */
@@ -382,6 +386,7 @@ int hw_imageblit(struct lynx_accel *accel, const char *pSrcbuf,	/* pointer to st
 		 unsigned int fColor,	/* Foreground color (corresponding to a 1 in the monochrome data */
 		 unsigned int bColor,	/* Background color (corresponding to a 0 in the monochrome data */
 		 unsigned int rop2) {	/* ROP value */
+	struct lynx_accel *accel = &share->accel;
 	unsigned int ulBytesPerScan;
 	unsigned int de_ctrl = 0;
 	int i;
@@ -389,7 +394,7 @@ int hw_imageblit(struct lynx_accel *accel, const char *pSrcbuf,	/* pointer to st
 	startBit &= 7;		/* Just make sure the start bit is within legal range */
 	ulBytesPerScan = (width + startBit + 7) / 8;
 
-	if (accel->de_wait() != 0) {
+	if (accel->de_wait(share) != 0) {
 		/* inf_msg("*** ImageBlit return -1 ***\n"); */
 		return -1;
 	}

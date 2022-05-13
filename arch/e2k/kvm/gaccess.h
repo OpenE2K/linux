@@ -13,6 +13,8 @@
 #include <linux/kvm_host.h>
 #include <linux/kvm.h>
 
+#include <asm/kvm/gva_cache.h>
+
 #include "mmu.h"
 
 /*
@@ -99,10 +101,6 @@ kvm_mmu_gva_is_gvpa(struct kvm_vcpu *vcpu, gva_t gva)
 	hva = kvm_vcpu_gfn_to_hva(vcpu, gfn);
 	if (unlikely(kvm_is_error_hva(hva)))
 		return false;
-	if (unlikely(hva != (gva & PAGE_MASK)))
-		/* gfn should be mapped to equal virtual addresses */
-		/* on host and on guest (from GUEST_PAGE_OFFSET) */
-		return false;
 
 	return true;
 }
@@ -125,12 +123,27 @@ kvm_mmu_gva_to_gpa(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
 {
 	gpa_t gpa;
 	bool again = false;
+#ifdef CONFIG_KVM_GVA_CACHE
+	gva_cache_t *gva_cache;
+#endif /* CONFIG_KVM_GVA_CACHE */
 
 	if (likely(kvm_mmu_gva_is_gvpa(vcpu, gva)))
 		return kvm_mmu_gvpa_to_gpa(gva);
 
 again:
-	gpa = vcpu->arch.mmu.gva_to_gpa(vcpu, gva, access, exception);
+
+#ifdef CONFIG_KVM_GVA_CACHE
+	gva_cache = (gva < GUEST_PAGE_OFFSET) ?
+		pv_vcpu_get_gmm(vcpu)->gva_cache :
+		pv_vcpu_get_init_gmm(vcpu)->gva_cache;
+	gpa = (is_paging(vcpu)) ?
+		gva_cache_translate(gva_cache, gva, access, vcpu,
+				exception, &mmu_pt_gva_to_gpa) :
+		mmu_pt_gva_to_gpa(vcpu, gva, access, exception, NULL);
+#else /* !CONFIG_KVM_GVA_CACHE */
+	gpa = mmu_pt_gva_to_gpa(vcpu, gva, access, exception, NULL);
+#endif /* !CONFIG_KVM_GVA_CACHE */
+
 	if (arch_is_error_gpa(gpa)) {
 		/* it's OK to have bad guest virt address and
 		 * pass it back to guest even if it's not valid */
@@ -253,12 +266,24 @@ extern int kvm_read_guest_phys_system(struct kvm *kvm, gpa_t addr,
 extern int kvm_write_guest_phys_system(struct kvm *kvm, gpa_t addr,
 			void *val, unsigned int bytes);
 extern long kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
-		void *addr, u64 val, u64 tag, size_t size, u64 strd_opcode);
+		void *addr, u64 val, u64 tag, size_t size, size_t *cleared,
+		u64 strd_opcode);
+extern long kvm_vcpu_set_guest_user_virt_system(struct kvm_vcpu *vcpu,
+		void *addr, u64 val, u64 tag, size_t size, size_t *cleared,
+		u64 strd_opcode);
 extern long kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
-		void *dst, const void *src, size_t len,
+		void *dst, const void *src, size_t len, size_t *copied,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch);
 extern long kvm_vcpu_copy_guest_virt_system_16(struct kvm_vcpu *vcpu,
+		void *dst, const void *src, size_t len,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch);
+extern long kvm_vcpu_copy_guest_user_virt_system(struct kvm_vcpu *vcpu,
+		void *dst, const void *src, size_t len, size_t *copied,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch);
+extern long kvm_vcpu_copy_guest_user_virt_system_16(struct kvm_vcpu *vcpu,
 		void *dst, const void *src, size_t len,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch);

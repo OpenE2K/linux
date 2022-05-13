@@ -397,6 +397,7 @@ void core_pt_regs_to_user_regs (struct pt_regs *pt_regs,
 #endif
 #ifdef CONFIG_USE_AAU
 	e2k_aau_t aau_regs;
+	e2k_aasr_t aasr;
 #endif /* CONFIG_USE_AAU */
 
 	DebugTRACE("core_pt_regs_to_user_regs current->pid=%d(%s)\n",
@@ -445,11 +446,11 @@ void core_pt_regs_to_user_regs (struct pt_regs *pt_regs,
 #ifdef CONFIG_USE_AAU
 	memset(&aau_regs, 0, sizeof(aau_regs));
 
-	aau_regs.aasr = read_aasr_reg();
+	aasr = read_aasr_reg();
 	aau_regs.aafstr = read_aafstr_reg_value();
 	read_aaldm_reg(&aau_regs.aaldm);
 	read_aaldv_reg(&aau_regs.aaldv);
-	machine.get_aau_context(&aau_regs);
+	machine.get_aau_context(&aau_regs, aasr);
 	SAVE_AADS(&aau_regs);
 
 	machine.save_aaldi(user_regs->aaldi);
@@ -483,7 +484,7 @@ void core_pt_regs_to_user_regs (struct pt_regs *pt_regs,
 	user_regs->aaldv = AW(aau_regs.aaldv);
 	user_regs->aaldm = AW(aau_regs.aaldm);
 
-	user_regs->aasr = AW(aau_regs.aasr);
+	user_regs->aasr = AW(aasr);
 	user_regs->aafstr = (unsigned long long) aau_regs.aafstr;
 #endif /* CONFIG_USE_AAU */
 
@@ -871,6 +872,7 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 	user_regs->ss_hi = sw_regs->ss_hi;
 
 #ifdef CONFIG_USE_AAU
+	user_regs->aasr = AW(pt_regs->aasr);
 	if (aau_regs) {
 		for (i = 0; i < 32; i++) {
 			user_regs->aad[2*i] = AW(aau_regs->aads[i]).lo;
@@ -909,8 +911,6 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 			user_regs->aalda[i] = AW(ti->aalda[i]);
 
 		user_regs->aaldm = AW(aau_regs->aaldm);
-
-		user_regs->aasr = AW(aau_regs->aasr);
 		user_regs->aafstr = (unsigned long long) aau_regs->aafstr;
 	}
 #endif /* CONFIG_USE_AAU */
@@ -1224,6 +1224,7 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 	AS(pt_regs->crs.cr1_hi).br = AS(cr1_hi).br;
 
 #ifdef CONFIG_USE_AAU
+	AW(pt_regs->aasr) = user_regs->aasr;
 	/*
 	 * Skip copying aaldi/aalda since they are recalculated anyway
 	 */
@@ -1242,7 +1243,6 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 		AW(aau_regs->aaldv) = user_regs->aaldv;
 		AW(aau_regs->aaldm) = user_regs->aaldm;
 
-		AW(aau_regs->aasr) = user_regs->aasr;
 		aau_regs->aafstr = user_regs->aafstr;
 
 		for (i = 0; i < 16; i++)
@@ -1785,7 +1785,7 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 						AW(pl.hi), E2K_PLHI_ETAG))
 					break;
 			} else {
-				pl = MAKE_PL_V2(data);
+				pl = MAKE_PL_V3(data);
 				if (arch_ptrace_poke(child, addr,
 						AW(pl.lo), E2K_PL_ETAG))
 					break;
@@ -1924,6 +1924,8 @@ int syscall_trace_entry(struct pt_regs *regs)
 #ifdef CONFIG_HAVE_ARCH_SECCOMP_FILTER
 	/* do the secure computing check first */
 	ret = secure_computing(NULL);
+	if (ret < 0)
+		return ret;
 #endif
 #endif
 	if (test_thread_flag(TIF_NOHZ))

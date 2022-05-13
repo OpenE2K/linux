@@ -11,6 +11,7 @@
 #include <asm/stacks.h>
 
 #include <asm/kvm/guest/trace-hw-stacks.h>
+#include <asm/kvm/guest/trace-tlb-state.h>
 
 extern bool debug_ustacks;
 #undef	DEBUG_USER_STACKS_MODE
@@ -33,7 +34,7 @@ kvm_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
 }
 
 static __always_inline void
-kvm_collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
+kvm_collapse_kernel_ps(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)
 {
 	e2k_psp_hi_t k_psp_hi;
 	u64 ps_ind, ps_size;
@@ -54,6 +55,8 @@ kvm_collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
 	k_psp_hi = NATIVE_NV_READ_PSP_HI_REG();
 	k_psp_hi.PSP_hi_ind = size;
 	HYPERVISOR_update_psp_hi(k_psp_hi.PSP_hi_half);
+	BUG_ON(regs->copyed.ps_size < spilled_size);
+	regs->copyed.ps_size -= spilled_size;
 
 	DebugUST("move spilled procedure part from host top %px to "
 		"bottom %px, size 0x%llx\n",
@@ -64,7 +67,7 @@ kvm_collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
 }
 
 static __always_inline void
-kvm_collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
+kvm_collapse_kernel_pcs(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)
 {
 	e2k_pcsp_hi_t k_pcsp_hi;
 	u64 pcs_ind, pcs_size;
@@ -85,6 +88,8 @@ kvm_collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
 	k_pcsp_hi = NATIVE_NV_READ_PCSP_HI_REG();
 	k_pcsp_hi.PCSP_hi_ind = size;
 	HYPERVISOR_update_pcsp_hi(k_pcsp_hi.PCSP_hi_half);
+	BUG_ON(regs->copyed.pcs_size < spilled_size);
+	regs->copyed.pcs_size -= spilled_size;
 
 	DebugUST("move spilled chain part from host top %px to "
 		"bottom %px, size 0x%llx\n",
@@ -104,17 +109,53 @@ copy_stack_page_from_kernel(void __user *dst, void *src, e2k_size_t to_copy,
 	return ret;
 }
 
+static inline struct page *get_user_addr_to_kernel_page(unsigned long addr)
+{
+	struct page *page = NULL;
+	mm_segment_t seg;
+	unsigned long ts_flag;
+	int npages;
+	int ret;
+
+	seg = get_fs();
+	set_fs(K_USER_DS);
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	do {
+		npages = __get_user_pages_fast(addr, 1, 1, &page);
+		if (likely(npages == 1))
+			break;
+		npages = get_user_pages_unlocked(addr, 1, &page, FOLL_WRITE);
+		if (likely(npages == 1)) {
+			break;
+		} else if (npages < 0) {
+			ret = npages;
+		} else {
+			ret = -EFAULT;
+		}
+		clear_ts_flag(ts_flag);
+		set_fs(seg);
+		return ERR_PTR(ret);
+	} while (npages != 1);
+	clear_ts_flag(ts_flag);
+	set_fs(seg);
+
+	return page;
+}
+
+static inline void put_user_addr_to_kernel_page(struct page *page)
+{
+	if (likely(!IS_ERR_OR_NULL(page)))
+		put_page(page);
+}
+
 static __always_inline int
 copy_stack_page_to_user(void __user *dst, void *src, e2k_size_t to_copy,
 			bool is_chain)
 {
-	struct page *page = NULL;
+	struct page *page;
 	unsigned long addr = (unsigned long)dst;
 	void *k_dst;
 	e2k_size_t offset;
-	mm_segment_t seg;
-	unsigned long ts_flag;
-	int npages;
 	int ret;
 
 	if (to_copy == 0)
@@ -124,23 +165,12 @@ copy_stack_page_to_user(void __user *dst, void *src, e2k_size_t to_copy,
 		"size 0x%lx\n",
 		(is_chain) ? "chain" : "procedure",
 		src, dst, to_copy);
-	seg = get_fs();
-	set_fs(K_USER_DS);
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	do {
-		npages = __get_user_pages_fast(addr, 1, 1, &page);
-		if (npages == 1)
-			break;
-		npages = get_user_pages_unlocked(addr, 1, &page, FOLL_WRITE);
-		if (npages == 1)
-			break;
-		clear_ts_flag(ts_flag);
-		set_fs(seg);
-		ret = -EFAULT;
+
+	page = get_user_addr_to_kernel_page(addr);
+	if (unlikely(IS_ERR_OR_NULL(page))) {
+		ret = (IS_ERR(page)) ? PTR_ERR(page) : -EINVAL;
 		goto failed;
-	} while (npages != 1);
-	clear_ts_flag(ts_flag);
-	set_fs(seg);
+	}
 
 	offset = addr & ~PAGE_MASK;
 	k_dst = page_address(page) + offset;
@@ -156,7 +186,7 @@ copy_stack_page_to_user(void __user *dst, void *src, e2k_size_t to_copy,
 	}
 
 failed_copy:
-	put_page(page);
+	put_user_addr_to_kernel_page(page);
 failed:
 	return ret;
 }
@@ -195,29 +225,70 @@ kvm_copy_user_stack_from_kernel(void __user *dst, void *src,
 		if (trace_guest_va_tlb_state_enabled()) {
 			trace_guest_va_tlb_state((e2k_addr_t)dst);
 		}
-		trace_proc_stack_frames((kernel_mem_ps_t *)(src - copied),
-					(kernel_mem_ps_t *)(src - copied), copied,
+		src -= copied;
+		trace_proc_stack_frames((kernel_mem_ps_t *)(src),
+					(kernel_mem_ps_t *)(src), copied,
 					trace_guest_proc_stack_frame);
-		trace_proc_stack_frames((kernel_mem_ps_t *)(dst - copied),
-					(kernel_mem_ps_t *)(dst - copied), copied,
+		dst -= copied;
+		to_copy = copied;
+		do {
+			struct page *page;
+			void *k_dst;
+
+			offset = (unsigned long)dst & ~PAGE_MASK;
+			len = min(to_copy, PAGE_SIZE - offset);
+			page = get_user_addr_to_kernel_page((unsigned long)dst);
+			if (unlikely(IS_ERR_OR_NULL(page))) {
+				ret = (IS_ERR(page)) ? PTR_ERR(page) : -EINVAL;
+				goto failed;
+			}
+			k_dst = page_address(page) + offset;
+			trace_proc_stack_frames((kernel_mem_ps_t *)(k_dst),
+					(kernel_mem_ps_t *)(k_dst), len,
 					trace_guest_proc_stack_frame);
+			dst += len;
+			to_copy -= len;
+		} while (to_copy > 0);
 	}
 	if (is_chain && trace_guest_chain_stack_frame_enabled()) {
 		if (trace_guest_va_tlb_state_enabled()) {
 			trace_guest_va_tlb_state((e2k_addr_t)dst);
 		}
-		trace_chain_stack_frames((e2k_mem_crs_t *)(src - copied),
-					(e2k_mem_crs_t *)(src - copied), copied,
+		src -= copied;
+		trace_chain_stack_frames((e2k_mem_crs_t *)(src),
+					(e2k_mem_crs_t *)(src), copied,
 					trace_guest_chain_stack_frame);
-		trace_chain_stack_frames((e2k_mem_crs_t *)(dst - copied),
-					(e2k_mem_crs_t *)(dst - copied), copied,
+		dst -= copied;
+		to_copy = copied;
+		do {
+			struct page *page;
+			void *k_dst;
+
+			offset = (unsigned long)dst & ~PAGE_MASK;
+			len = min(to_copy, PAGE_SIZE - offset);
+			page = get_user_addr_to_kernel_page((unsigned long)dst);
+			if (unlikely(IS_ERR_OR_NULL(page))) {
+				ret = (IS_ERR(page)) ? PTR_ERR(page) : -EINVAL;
+				goto failed;
+			}
+			k_dst = page_address(page) + offset;
+			trace_chain_stack_frames((e2k_mem_crs_t *)(k_dst),
+					(e2k_mem_crs_t *)(k_dst), len,
 					trace_guest_chain_stack_frame);
+			dst += len;
+			to_copy -= len;
+		} while (to_copy > 0);
 	}
 
 	return 0;
 
 failed:
-	pr_err("%s(): failed, error %d\n", __func__, ret);
+	if (likely(ret == -ERESTARTSYS && fatal_signal_pending(current))) {
+		/* there is fatal signal to kill the process */
+		;
+	} else {
+		pr_err("%s(): failed, error %d\n", __func__, ret);
+	}
 	return ret;
 }
 
@@ -249,14 +320,33 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs)
 	stacks = &regs->stacks;
 	copyed_ps_size = regs->copyed.ps_size;
 	copyed_pcs_size = regs->copyed.pcs_size;
-	if (unlikely(copyed_ps_size || copyed_pcs_size)) {
+	if (unlikely(copyed_ps_size)) {
 		/* stacks have been already copyed */
-		BUG_ON(copyed_ps_size != GET_PSHTP_MEM_INDEX(stacks->pshtp) &&
-			GET_PSHTP_MEM_INDEX(stacks->pshtp) != 0);
-		BUG_ON(copyed_pcs_size != PCSHTP_SIGN_EXTEND(stacks->pcshtp) &&
-			PCSHTP_SIGN_EXTEND(stacks->pcshtp) != SZ_OF_CR);
-		return 0;
+		if (copyed_ps_size != GET_PSHTP_MEM_INDEX(stacks->pshtp) &&
+				GET_PSHTP_MEM_INDEX(stacks->pshtp) != 0) {
+			pr_err("%s(): copyed_ps_size 0x%lx != pshtp 0x%llx or "
+				"pshtp 0x%llx != 0\n",
+				__func__,
+				copyed_ps_size, GET_PSHTP_MEM_INDEX(stacks->pshtp),
+				GET_PSHTP_MEM_INDEX(stacks->pshtp));
+			WARN_ON(true);
+		}
 	}
+	if (unlikely(copyed_pcs_size)) {
+		/* stacks have been already copyed */
+		if (copyed_pcs_size != PCSHTP_SIGN_EXTEND(stacks->pcshtp) &&
+				PCSHTP_SIGN_EXTEND(stacks->pcshtp) != SZ_OF_CR) {
+			pr_err("%s(): copyed_pcs_size 0x%lx != pcshtp 0x%llx or "
+				"pcshtp 0x%llx != 0x%lx\n",
+				__func__,
+				copyed_pcs_size, PCSHTP_SIGN_EXTEND(stacks->pcshtp),
+				PCSHTP_SIGN_EXTEND(stacks->pcshtp), SZ_OF_CR);
+			WARN_ON(true);
+		}
+	}
+	if (unlikely(copyed_ps_size && copyed_pcs_size))
+		/* both stacks have been already copyed */
+		return 0;
 
 	ret = HYPERVISOR_copy_stacks_to_memory();
 	if (ret != 0) {
@@ -270,6 +360,10 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs)
 				   pshtp.PSHTP_reg,
 				   pcsp_lo.PCSP_lo_half, pcsp_hi.PCSP_hi_half,
 				   pcshtp);
+
+	if (unlikely(copyed_ps_size))
+		goto copy_chain_stack;
+
 	src = (void *)psp_lo.PSP_lo_base;
 	DebugUST("procedure stack at kernel from %px, size 0x%x, ind 0x%x, "
 		"pshtp 0x%llx\n",
@@ -303,14 +397,26 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs)
 	}
 	if (to_copy > 0) {
 		ret = kvm_copy_user_stack_from_kernel(dst, src, to_copy, false);
-		if (ret != 0) {
-			pr_err("%s(): procedure stack copying from kernel %px "
-				"to user %px, size 0x%lx failed, error %d\n",
-				__func__, src, dst, to_copy, ret);
+		if (unlikely(ret != 0)) {
+			if (likely(ret == -ERESTARTSYS &&
+					fatal_signal_pending(current))) {
+				/* there is fatal signal to kill the process */
+				;
+			} else {
+				pr_err("%s(): procedure stack copying from "
+					"kernel %px to user %px, size 0x%lx "
+					"failed, error %d\n",
+					__func__, src, dst, to_copy, ret);
+			}
 			goto failed;
 		}
 		regs->copyed.ps_size = to_copy;
 	}
+
+copy_chain_stack:
+
+	if (unlikely(copyed_pcs_size))
+		goto complete_copy;
 
 	/* copy user part of chain stack from kernel back to user */
 	src = (void *)pcsp_lo.PCSP_lo_base;
@@ -347,15 +453,22 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs)
 	}
 	if (to_copy > 0) {
 		ret = kvm_copy_user_stack_from_kernel(dst, src, to_copy, true);
-		if (ret != 0) {
-			pr_err("%s(): chain stack copying from kernel %px "
-				"to user %px, size 0x%lx failed, error %d\n",
-				__func__, src, dst, to_copy, ret);
+		if (unlikely(ret != 0)) {
+			if (likely(ret == -ERESTARTSYS &&
+					fatal_signal_pending(current))) {
+				/* there is fatal signal to kill the process */
+				;
+			} else {
+				pr_err("%s(): chain stack copying from kernel %px "
+					"to user %px, size 0x%lx failed, error %d\n",
+					__func__, src, dst, to_copy, ret);
+			}
 			goto failed;
 		}
 		regs->copyed.pcs_size = to_copy;
 	}
 
+complete_copy:
 failed:
 	if (DEBUG_USER_STACKS_MODE)
 		debug_ustacks = false;
@@ -382,7 +495,7 @@ kvm_copy_injected_pcs_frames_to_user(pt_regs_t *regs, int frames_num)
 	BUG_ON(irqs_disabled());
 
 	frames_size = frames_num * SZ_OF_CR;
-	copyed_frames_size  = regs->copyed.pcs_injected_frames_size;
+	copyed_frames_size = regs->copyed.pcs_injected_frames_size;
 	if (unlikely(copyed_frames_size >= frames_size)) {
 		/* all frames have been already copyed */
 		return 0;
@@ -395,15 +508,16 @@ kvm_copy_injected_pcs_frames_to_user(pt_regs_t *regs, int frames_num)
 	ATOMIC_GET_HW_PCS_SIZES_BASE_TOP(pcs_ind, pcs_size, pcs_base, pcsh_top);
 
 	/* guest user stacks part spilled to kernel should be already copyed */
-	BUG_ON(PCSHTP_SIGN_EXTEND(regs->copyed.pcs_size != stacks->pcshtp));
+	BUG_ON(PCSHTP_SIGN_EXTEND(regs->copyed.pcs_size != stacks->pcshtp &&
+					stacks->pcshtp != SZ_OF_CR));
 
 	src = (void *)(pcs_base + regs->copyed.pcs_size);
 	DebugUST("chain stack at kernel from %px, size 0x%lx + 0x%lx, "
 		"ind 0x%lx, pcsh top 0x%x\n",
 		src, pcs_size, frames_size, pcs_ind, pcsh_top);
 	BUG_ON(regs->copyed.pcs_size + frames_size > pcs_ind + pcsh_top);
-	if (stacks->pcsp_hi.PCSP_hi_ind + frames_size >
-						stacks->pcsp_hi.PCSP_hi_size) {
+	if (unlikely(stacks->pcsp_hi.PCSP_hi_ind + frames_size >
+						stacks->pcsp_hi.PCSP_hi_size)) {
 		/* user chain stack can overflow, need expand */
 		ret = handle_chain_stack_bounds(stacks, regs->trap);
 		if (unlikely(ret)) {
@@ -430,10 +544,16 @@ kvm_copy_injected_pcs_frames_to_user(pt_regs_t *regs, int frames_num)
 	}
 	if (likely(to_copy > 0)) {
 		ret = kvm_copy_user_stack_from_kernel(dst, src, to_copy, true);
-		if (ret != 0) {
-			pr_err("%s(): chain stack copying from kernel %px "
-				"to user %px, size 0x%lx failed, error %d\n",
-				__func__, src, dst, to_copy, ret);
+		if (unlikely(ret != 0)) {
+			if (likely(ret == -ERESTARTSYS &&
+					fatal_signal_pending(current))) {
+				/* there is fatal signal to kill the process */
+				;
+			} else {
+				pr_err("%s(): chain stack copying from kernel %px "
+					"to user %px, size 0x%lx failed, error %d\n",
+					__func__, src, dst, to_copy, ret);
+			}
 			goto failed;
 		}
 		regs->copyed.pcs_injected_frames_size = to_copy;
@@ -503,9 +623,14 @@ static __always_inline int kvm_user_hw_stacks_prepare(
 	 *    kvm_prepare_user_hv_stacks()
 	 */
 	ret = kvm_user_hw_stacks_copy(regs);
-	if (ret != 0) {
-		pr_err("%s(): copying of hardware stacks failed< error %d\n",
-			__func__, ret);
+	if (unlikely(ret != 0)) {
+		if (likely(ret == -ERESTARTSYS)) {
+			/* there is fatal signal to kill the process */
+			;
+		} else {
+			pr_err("%s(): copying of hardware stacks failed, error %d\n",
+				__func__, ret);
+		}
 		do_exit(SIGKILL);
 	}
 	return ret;
@@ -527,15 +652,15 @@ kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
 }
 
 static __always_inline void
-collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
+collapse_kernel_ps(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)
 {
-	kvm_collapse_kernel_ps(dst, src, spilled_size);
+	kvm_collapse_kernel_ps(regs, dst, src, spilled_size);
 }
 
 static __always_inline void
-collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
+collapse_kernel_pcs(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)
 {
-	kvm_collapse_kernel_pcs(dst, src, spilled_size);
+	kvm_collapse_kernel_pcs(regs, dst, src, spilled_size);
 }
 
 static __always_inline int
@@ -549,7 +674,7 @@ static __always_inline void host_user_hw_stacks_prepare(
 		struct e2k_stacks *stacks, pt_regs_t *regs,
 		u64 cur_window_q, enum restore_caller from, int syscall)
 {
-	if (regs->sys_num == __NR_e2k_longjmp2) {
+	if (unlikely(from_syscall(regs) && regs->sys_num == __NR_e2k_longjmp2)) {
 		/* hardware stacks already are prepared */
 		return;
 	}

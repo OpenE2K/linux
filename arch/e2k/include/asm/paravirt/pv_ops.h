@@ -409,17 +409,6 @@ typedef struct pv_cpu_ops {
 	void (*csd_unlock)(struct __call_single_data *data);
 	void (*setup_local_pic_virq)(unsigned int cpuid);
 	void (*startup_local_pic_virq)(unsigned int cpuid);
-	void (*smp_flush_tlb_all)(void);
-	void (*smp_flush_tlb_mm)(struct mm_struct *mm);
-	void (*smp_flush_tlb_page)(struct vm_area_struct *vma,
-			e2k_addr_t addr);
-	void (*smp_flush_tlb_range)(struct mm_struct *mm,
-			e2k_addr_t start, e2k_addr_t end);
-	void (*smp_flush_pmd_tlb_range)(struct mm_struct *mm,
-			e2k_addr_t start, e2k_addr_t end);
-	void (*smp_flush_tlb_range_and_pgtables)(struct mm_struct *mm,
-			e2k_addr_t start, e2k_addr_t end);
-	void (*smp_flush_icache_range)(e2k_addr_t start, e2k_addr_t end);
 	void (*smp_flush_icache_range_array)(
 			void *icache_range_arr);
 	void (*smp_flush_icache_page)(struct vm_area_struct *vma,
@@ -427,6 +416,13 @@ typedef struct pv_cpu_ops {
 	void (*smp_flush_icache_all)(void);
 	void (*smp_flush_icache_kernel_line)(e2k_addr_t addr);
 #endif	/* CONFIG_SMP */
+	void (*flush_tlb_all)(void);
+	void (*flush_tlb_mm)(struct mm_struct *mm);
+	void (*flush_tlb_page)(struct vm_area_struct *vma,
+			e2k_addr_t addr);
+	void (*flush_tlb_mm_range)(struct mm_struct *mm,
+			unsigned long start, unsigned long end,
+			unsigned long stride, u32 levels_mask);
 	int  (*host_printk)(const char *fmt, ...);
 
 	void (*arch_spin_lock_slow)(void *lock);
@@ -561,6 +557,7 @@ typedef struct pv_mmu_ops {
 	mmu_reg_t (*read_dtlb_reg)(tlb_addr_t tlb_addr);
 	void (*flush_tlb_entry)(flush_op_t flush_op, flush_addr_t flush_addr);
 	void (*flush_dcache_line)(e2k_addr_t virt_addr);
+	u64 (*read_dcache_l1_fault_reg)(void);
 	void (*clear_dcache_l1_set)(e2k_addr_t virt_addr, unsigned long set);
 	void (*flush_dcache_range)(void *addr, size_t len);
 	void (*clear_dcache_l1_range)(void *virt_addr, size_t len);

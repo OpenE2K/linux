@@ -9,6 +9,7 @@
 #include <asm/mmu_regs_access.h>
 #include <asm/gregs.h>
 #include <asm/regs_state.h>
+#include <asm/processor.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
 #include <asm/pgd.h>
@@ -99,6 +100,12 @@ native_guest_syscall_enter(struct pt_regs *regs)
 	return false;	/* it is not guest system call */
 }
 
+static inline void
+native_pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs)
+{
+	/* Nothing to do in native mode */
+}
+
 #ifdef	CONFIG_VIRTUALIZATION
 
 /*
@@ -183,13 +190,93 @@ static inline void kvm_switch_cu_regs(struct kvm_sw_cpu_context *sw_ctxt)
 	sw_ctxt->cutd = cutd;
 }
 
-static inline void kvm_switch_mmu_pt_regs(struct kvm_sw_cpu_context *sw_ctxt)
+static inline void kvm_add_guest_kernel_map(struct kvm_vcpu *vcpu, hpa_t root)
+{
+	pgprot_t *src_root, *dst_root;
+	int start, end, index;
+
+	dst_root = (pgprot_t *)root;
+	src_root = (pgprot_t *)kvm_mmu_get_init_gmm_root(vcpu->kvm);
+	start = GUEST_KERNEL_PGD_PTRS_START;
+	end = GUEST_KERNEL_PGD_PTRS_END;
+
+	for (index = start; index < end; index++) {
+		dst_root[index] = src_root[index];
+	}
+}
+
+static inline void kvm_clear_guest_kernel_map(struct kvm_vcpu *vcpu, hpa_t root)
+{
+	pgprot_t *dst_root;
+	int start, end, index;
+
+	dst_root = (pgprot_t *)root;
+	start = GUEST_KERNEL_PGD_PTRS_START;
+	end = GUEST_KERNEL_PGD_PTRS_END;
+
+	for (index = start; index < end; index++) {
+		dst_root[index] = __pgprot(0);
+	}
+}
+
+static inline void kvm_switch_hv_mmu_pt_regs(struct kvm_sw_cpu_context *sw_ctxt)
 {
 	mmu_reg_t u_pptb;
 	mmu_reg_t u_vptb;
 
 	u_pptb = NATIVE_READ_MMU_U_PPTB_REG();
 	u_vptb = NATIVE_READ_MMU_U_VPTB_REG();
+
+	NATIVE_WRITE_MMU_U_PPTB_REG(sw_ctxt->sh_u_pptb);
+	NATIVE_WRITE_MMU_U_VPTB_REG(sw_ctxt->sh_u_vptb);
+
+	sw_ctxt->sh_u_pptb = u_pptb;
+	sw_ctxt->sh_u_vptb = u_vptb;
+}
+
+static inline void
+kvm_switch_pv_mmu_pt_regs_to_guest(struct kvm_sw_cpu_context *sw_ctxt,
+				   struct thread_info *ti)
+{
+	struct kvm_vcpu *vcpu = ti->vcpu;
+	mmu_reg_t u_pptb, u_vptb, root;
+
+	u_pptb = NATIVE_READ_MMU_U_PPTB_REG();
+	u_vptb = NATIVE_READ_MMU_U_VPTB_REG();
+
+	if (likely(test_ti_status_flag(ti, TS_HOST_TO_GUEST_USER))) {
+		root = kvm_get_space_type_spt_u_root(vcpu);
+		KVM_BUG_ON(is_paging(vcpu) &&
+			   root != pv_vcpu_get_gmm(ti->vcpu)->root_hpa);
+	} else {
+		root = kvm_get_space_type_spt_gk_root(vcpu);
+		KVM_BUG_ON(is_paging(vcpu) &&
+			   root != pv_vcpu_get_gmm(vcpu)->gk_root_hpa);
+	}
+	NATIVE_WRITE_MMU_U_PPTB_REG(root);
+	NATIVE_WRITE_MMU_U_VPTB_REG(sw_ctxt->sh_u_vptb);
+
+	sw_ctxt->sh_u_pptb = u_pptb;
+	sw_ctxt->sh_u_vptb = u_vptb;
+}
+
+static inline void
+kvm_switch_pv_mmu_pt_regs_to_host(struct kvm_sw_cpu_context *sw_ctxt,
+				  struct thread_info *ti)
+{
+	struct kvm_vcpu *vcpu = ti->vcpu;
+	mmu_reg_t u_pptb, u_vptb;
+
+	u_vptb = NATIVE_READ_MMU_U_VPTB_REG();
+	if (likely(test_ti_status_flag(ti, TS_HOST_TO_GUEST_USER))) {
+		u_pptb = kvm_get_space_type_spt_u_root(vcpu);
+		KVM_BUG_ON(is_paging(vcpu) &&
+			   u_pptb != pv_vcpu_get_gmm(ti->vcpu)->root_hpa);
+	} else {
+		u_pptb = kvm_get_space_type_spt_gk_root(vcpu);
+		KVM_BUG_ON(is_paging(vcpu) &&
+			   u_pptb != pv_vcpu_get_gmm(vcpu)->gk_root_hpa);
+	}
 
 	NATIVE_WRITE_MMU_U_PPTB_REG(sw_ctxt->sh_u_pptb);
 	NATIVE_WRITE_MMU_U_VPTB_REG(sw_ctxt->sh_u_vptb);
@@ -213,22 +300,78 @@ static inline void kvm_switch_mmu_tc_regs(struct kvm_sw_cpu_context *sw_ctxt)
 	sw_ctxt->trap_count = trap_count;
 }
 
-static inline void kvm_switch_mmu_regs(struct kvm_sw_cpu_context *sw_ctxt,
+static inline void kvm_switch_hv_mmu_regs(struct kvm_sw_cpu_context *sw_ctxt,
 					bool switch_tc)
 {
-	kvm_switch_mmu_pt_regs(sw_ctxt);
-	if (switch_tc)
+	if (likely(!sw_ctxt->no_switch_pt)) {
+		kvm_switch_hv_mmu_pt_regs(sw_ctxt);
+	}
+	if (switch_tc) {
 		kvm_switch_mmu_tc_regs(sw_ctxt);
+	}
 }
 
-static inline void kvm_switch_to_guest_mmu_pid(struct kvm_vcpu *vcpu)
+static inline void
+kvm_switch_pv_mmu_regs_to_guest(struct kvm_sw_cpu_context *sw_ctxt,
+				struct thread_info *ti, bool switch_tc)
+{
+	if (likely(!sw_ctxt->no_switch_pt)) {
+		kvm_switch_pv_mmu_pt_regs_to_guest(sw_ctxt, ti);
+	}
+	if (switch_tc) {
+		kvm_switch_mmu_tc_regs(sw_ctxt);
+	}
+}
+
+static inline void
+kvm_switch_pv_mmu_regs_to_host(struct kvm_sw_cpu_context *sw_ctxt,
+				struct thread_info *ti, bool switch_tc)
+{
+	if (likely(!sw_ctxt->no_switch_pt)) {
+		kvm_switch_pv_mmu_pt_regs_to_host(sw_ctxt, ti);
+	}
+	if (switch_tc) {
+		kvm_switch_mmu_tc_regs(sw_ctxt);
+	}
+}
+
+static inline void kvm_switch_to_guest_mmu_pid(struct kvm_vcpu *vcpu,
+					       struct thread_info *ti)
 {
 	mm_context_t *gmm_context;
-	unsigned long mask;
+	unsigned long mask, flags;
+	int cpu = raw_smp_processor_id();
 
+	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
+		pgd_t *pgd;
+
+		if (test_ti_status_flag(ti, TS_HOST_TO_GUEST_USER)) {
+			/* switch to guest user, guest kernel pgds should */
+			/* be zeroed at user root */
+			pgd = (pgd_t *)__va(kvm_get_space_type_spt_u_root(vcpu));
+		} else {
+			pgd = (pgd_t *)__va(kvm_get_space_type_spt_gk_root(vcpu));
+		}
+		copy_user_pgd_to_kernel_root_pt(pgd);
+	}
+	raw_all_irq_save(flags);
 	gmm_context = pv_vcpu_get_gmm_context(vcpu);
-	mask = get_mmu_pid(gmm_context, smp_processor_id());
+#ifdef	CONFIG_SMP
+	/* Stop flush ipis for the guest mm */
+	cpumask_set_cpu(cpu, pv_vcpu_get_gmm_cpumask(vcpu));
+	/* This barrier could be smp_mb__after_atomic() ..., */
+	/* see arch/e2k/iclude/asm/mmu_context.h */
+	smp_mb();
+#endif	/* CONFIG_SMP */
+	if (unlikely(test_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID))) {
+		/* get new MMU context to exclude access to guest kernel */
+		/* virtual space from guest user */
+		mask = get_new_mmu_pid(gmm_context, cpu);
+	} else {
+		mask = get_mmu_pid(gmm_context, cpu);
+	}
 	reload_context_mask(mask);
+	raw_all_irq_restore(flags);
 }
 
 static inline unsigned long kvm_get_guest_mmu_pid(struct kvm_vcpu *vcpu)
@@ -239,112 +382,26 @@ static inline unsigned long kvm_get_guest_mmu_pid(struct kvm_vcpu *vcpu)
 	return gmm_context->cpumsk[smp_processor_id()];
 }
 
-static inline void kvm_switch_to_host_mmu_pid(struct mm_struct *mm)
+static inline void kvm_switch_to_host_mmu_pid(struct kvm_vcpu *vcpu,
+							struct mm_struct *mm)
 {
-	unsigned long mask;
+	unsigned long mask, flags;
+	int cpu = raw_smp_processor_id();
 
-	mask = get_mmu_context(mm, smp_processor_id());
+	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
+		copy_user_pgd_to_kernel_root_pt(mm->pgd);
+	}
+	raw_all_irq_save(flags);
+#ifdef	CONFIG_SMP
+	/* Start receiving flush ipis for the guest mm */
+	cpumask_clear_cpu(cpu, pv_vcpu_get_gmm_cpumask(vcpu));
+	/* This barrier could be smp_mb__after_atomic() ..., */
+	/* see arch/e2k/iclude/asm/mmu_context.h */
+	smp_mb();
+#endif	/* CONFIG_SMP */
+	mask = get_mmu_context(mm, cpu);
 	reload_context_mask(mask);
-}
-
-static inline void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt,
-					 int is_active)
-{
-	u64 b_dimar0, b_dimar1, b_ddmar0, b_ddmar1, b_dibar0, b_dibar1,
-	    b_dibar2, b_dibar3, b_ddbar0, b_ddbar1, b_ddbar2, b_ddbar3,
-	    a_dimar0, a_dimar1, a_ddmar0, a_ddmar1, a_dibar0, a_dibar1,
-	    a_dibar2, a_dibar3, a_ddbar0, a_ddbar1, a_ddbar2, a_ddbar3;
-	e2k_dimcr_t b_dimcr, a_dimcr;
-	e2k_ddmcr_t b_ddmcr, a_ddmcr;
-	e2k_dibcr_t b_dibcr, a_dibcr;
-	e2k_dibsr_t b_dibsr, a_dibsr;
-	e2k_ddbcr_t b_ddbcr, a_ddbcr;
-	e2k_ddbsr_t b_ddbsr, a_ddbsr;
-
-	b_dibcr = sw_ctxt->dibcr;
-	b_ddbcr = sw_ctxt->ddbcr;
-	b_dibsr = sw_ctxt->dibsr;
-	b_ddbsr = sw_ctxt->ddbsr;
-	b_dimcr = sw_ctxt->dimcr;
-	b_ddmcr = sw_ctxt->ddmcr;
-	b_dibar0 = sw_ctxt->dibar0;
-	b_dibar1 = sw_ctxt->dibar1;
-	b_dibar2 = sw_ctxt->dibar2;
-	b_dibar3 = sw_ctxt->dibar3;
-	b_ddbar0 = sw_ctxt->ddbar0;
-	b_ddbar1 = sw_ctxt->ddbar1;
-	b_ddbar2 = sw_ctxt->ddbar2;
-	b_ddbar3 = sw_ctxt->ddbar3;
-	b_dimar0 = sw_ctxt->dimar0;
-	b_dimar1 = sw_ctxt->dimar1;
-	b_ddmar0 = sw_ctxt->ddmar0;
-	b_ddmar1 = sw_ctxt->ddmar1;
-
-	a_dibcr = NATIVE_READ_DIBCR_REG();
-	a_ddbcr = NATIVE_READ_DDBCR_REG();
-	a_dibsr = NATIVE_READ_DIBSR_REG();
-	a_ddbsr = NATIVE_READ_DDBSR_REG();
-	a_dimcr = NATIVE_READ_DIMCR_REG();
-	a_ddmcr = NATIVE_READ_DDMCR_REG();
-	a_dibar0 = NATIVE_READ_DIBAR0_REG_VALUE();
-	a_dibar1 = NATIVE_READ_DIBAR1_REG_VALUE();
-	a_dibar2 = NATIVE_READ_DIBAR2_REG_VALUE();
-	a_dibar3 = NATIVE_READ_DIBAR3_REG_VALUE();
-	a_ddbar0 = NATIVE_READ_DDBAR0_REG_VALUE();
-	a_ddbar1 = NATIVE_READ_DDBAR1_REG_VALUE();
-	a_ddbar2 = NATIVE_READ_DDBAR2_REG_VALUE();
-	a_ddbar3 = NATIVE_READ_DDBAR3_REG_VALUE();
-	a_ddmar0 = NATIVE_READ_DDMAR0_REG_VALUE();
-	a_ddmar1 = NATIVE_READ_DDMAR1_REG_VALUE();
-	a_dimar0 = NATIVE_READ_DIMAR0_REG_VALUE();
-	a_dimar1 = NATIVE_READ_DIMAR1_REG_VALUE();
-
-	if (is_active) {
-		/* These two must be written first to disable monitoring */
-		NATIVE_WRITE_DIBCR_REG(b_dibcr);
-		NATIVE_WRITE_DDBCR_REG(b_ddbcr);
-	}
-	NATIVE_WRITE_DIBAR0_REG_VALUE(b_dibar0);
-	NATIVE_WRITE_DIBAR1_REG_VALUE(b_dibar1);
-	NATIVE_WRITE_DIBAR2_REG_VALUE(b_dibar2);
-	NATIVE_WRITE_DIBAR3_REG_VALUE(b_dibar3);
-	NATIVE_WRITE_DDBAR0_REG_VALUE(b_ddbar0);
-	NATIVE_WRITE_DDBAR1_REG_VALUE(b_ddbar1);
-	NATIVE_WRITE_DDBAR2_REG_VALUE(b_ddbar2);
-	NATIVE_WRITE_DDBAR3_REG_VALUE(b_ddbar3);
-	NATIVE_WRITE_DDMAR0_REG_VALUE(b_ddmar0);
-	NATIVE_WRITE_DDMAR1_REG_VALUE(b_ddmar1);
-	NATIVE_WRITE_DIMAR0_REG_VALUE(b_dimar0);
-	NATIVE_WRITE_DIMAR1_REG_VALUE(b_dimar1);
-	NATIVE_WRITE_DIBSR_REG(b_dibsr);
-	NATIVE_WRITE_DDBSR_REG(b_ddbsr);
-	NATIVE_WRITE_DIMCR_REG(b_dimcr);
-	NATIVE_WRITE_DDMCR_REG(b_ddmcr);
-	if (!is_active) {
-		/* These two must be written last to enable monitoring */
-		NATIVE_WRITE_DIBCR_REG(b_dibcr);
-		NATIVE_WRITE_DDBCR_REG(b_ddbcr);
-	}
-
-	sw_ctxt->dibcr = a_dibcr;
-	sw_ctxt->ddbcr = a_ddbcr;
-	sw_ctxt->dibsr = a_dibsr;
-	sw_ctxt->ddbsr = a_ddbsr;
-	sw_ctxt->dimcr = a_dimcr;
-	sw_ctxt->ddmcr = a_ddmcr;
-	sw_ctxt->dibar0 = a_dibar0;
-	sw_ctxt->dibar1 = a_dibar1;
-	sw_ctxt->dibar2 = a_dibar2;
-	sw_ctxt->dibar3 = a_dibar3;
-	sw_ctxt->ddbar0 = a_ddbar0;
-	sw_ctxt->ddbar1 = a_ddbar1;
-	sw_ctxt->ddbar2 = a_ddbar2;
-	sw_ctxt->ddbar3 = a_ddbar3;
-	sw_ctxt->ddmar0 = a_ddmar0;
-	sw_ctxt->ddmar1 = a_ddmar1;
-	sw_ctxt->dimar0 = a_dimar0;
-	sw_ctxt->dimar1 = a_dimar1;
-
+	raw_all_irq_restore(flags);
 }
 
 #ifdef	CONFIG_CLW_ENABLE
@@ -390,6 +447,8 @@ switch_ctxt_trap_enable_mask(struct kvm_sw_cpu_context *sw_ctxt)
 	sw_ctxt->osem = osem;
 }
 
+extern void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt, int is_active);
+
 static inline void host_guest_enter(struct thread_info *ti,
 			struct kvm_vcpu_arch *vcpu, unsigned flags)
 {
@@ -413,6 +472,10 @@ static inline void host_guest_enter(struct thread_info *ti,
 		}
 	}
 
+	/* This makes a call so switch it before AAU */
+	if (flags & DEBUG_REGS_SWITCH)
+		kvm_switch_debug_regs(sw_ctxt, true);
+
 	if (flags & FROM_HYPERCALL_SWITCH) {
 		/*
 		 * Hypercalls - both hardware and software virtualization
@@ -420,8 +483,12 @@ static inline void host_guest_enter(struct thread_info *ti,
 		KVM_BUG_ON(!sw_ctxt->in_hypercall);
 		sw_ctxt->in_hypercall = false;
 
+		E2K_FLUSHTS;
+
 		/* For hypercalls skip the extended part. */
 		HOST_RESTORE_HOST_GREGS(ti);
+
+		NATIVE_RESTORE_INTEL_REGS(sw_ctxt);
 
 		/* compilation units context */
 		if (!(flags & DONT_CU_REGS_SWITCH)) {
@@ -430,7 +497,12 @@ static inline void host_guest_enter(struct thread_info *ti,
 
 		/* restore guest PT context (U_PPTB/U_VPTB) */
 		if (!(flags & DONT_MMU_CONTEXT_SWITCH)) {
-			kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+			if (likely(!vcpu->is_hv)) {
+				kvm_switch_pv_mmu_regs_to_guest(sw_ctxt, ti,
+								vcpu->is_hv);
+			} else {
+				kvm_switch_hv_mmu_regs(sw_ctxt, vcpu->is_hv);
+			}
 		}
 	} else if (flags & FULL_CONTEXT_SWITCH) {
 
@@ -439,11 +511,11 @@ static inline void host_guest_enter(struct thread_info *ti,
 		 */
 #ifdef CONFIG_USE_AAU
 		if (!(flags & DONT_AAU_CONTEXT_SWITCH))
-			machine.calculate_aau_aaldis_aaldas(NULL, ti, &sw_ctxt->aau_context);
+			machine.calculate_aau_aaldis_aaldas(NULL, ti->aalda,
+					&sw_ctxt->aau_context);
 #endif
 
-		if (machine.flushts)
-			machine.flushts();
+		E2K_FLUSHTS;
 
 		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
 			/* For interceptions restore extended part */
@@ -459,7 +531,12 @@ static inline void host_guest_enter(struct thread_info *ti,
 		kvm_switch_fpu_regs(sw_ctxt);
 		kvm_switch_cu_regs(sw_ctxt);
 		if (likely(!(flags & DONT_MMU_CONTEXT_SWITCH))) {
-			kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+			if (likely(!vcpu->is_hv)) {
+				kvm_switch_pv_mmu_regs_to_guest(sw_ctxt, ti,
+								vcpu->is_hv);
+			} else {
+				kvm_switch_hv_mmu_regs(sw_ctxt, vcpu->is_hv);
+			}
 		}
 
 #ifdef CONFIG_USE_AAU
@@ -470,7 +547,7 @@ static inline void host_guest_enter(struct thread_info *ti,
 			 * before restoring %aasr, so we must restore all AAU registers.
 			 */
 			native_clear_apb();
-			native_set_aau_context(&sw_ctxt->aau_context);
+			native_set_aau_context(&sw_ctxt->aau_context, ti->aalda, E2K_FULL_AASR);
 
 			/*
 			 * It's important to restore AAD after all return operations.
@@ -485,11 +562,12 @@ static inline void host_guest_enter(struct thread_info *ti,
 		 */
 
 		/* switch to guest MMU context to continue guest execution */
-		kvm_switch_mmu_regs(sw_ctxt, false);
+		if (likely(!vcpu->is_hv)) {
+			kvm_switch_pv_mmu_regs_to_guest(sw_ctxt, ti, false);
+		} else {
+			KVM_BUG_ON(true);
+		}
 	}
-
-	if (flags & DEBUG_REGS_SWITCH)
-		kvm_switch_debug_regs(sw_ctxt, true);
 
 	KVM_BUG_ON(vcpu->is_hv && !NATIVE_READ_MMU_US_CL_D());
 
@@ -570,6 +648,8 @@ static inline void host_guest_exit(struct thread_info *ti,
 		HOST_SAVE_HOST_GREGS(ti);
 		ONLY_SET_KERNEL_GREGS(ti);
 
+		NATIVE_SAVE_INTEL_REGS(sw_ctxt);
+
 		/* compilation units context */
 		if (!(flags & DONT_CU_REGS_SWITCH)) {
 			kvm_switch_cu_regs(sw_ctxt);
@@ -577,7 +657,11 @@ static inline void host_guest_exit(struct thread_info *ti,
 		/* save guest PT context (U_PPTB/U_VPTB) and restore host */
 		/* user PT context */
 		if (!(flags & DONT_MMU_CONTEXT_SWITCH)) {
-			kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+			if (likely(!vcpu->is_hv)) {
+				kvm_switch_pv_mmu_regs_to_host(sw_ctxt, ti, false);
+			} else {
+				kvm_switch_hv_mmu_regs(sw_ctxt, true);
+			}
 		}
 	} else if (flags & FULL_CONTEXT_SWITCH) {
 
@@ -586,19 +670,16 @@ static inline void host_guest_exit(struct thread_info *ti,
 		 */
 #ifdef CONFIG_USE_AAU
 		if (!(flags & DONT_AAU_CONTEXT_SWITCH)) {
-			e2k_aasr_t aasr;
-
 			/*
 			 * We cannot rely on %aasr value since interception could have
 			 * happened in guest user before "bap" or in guest trap handler
 			 * before restoring %aasr, so we must save all AAU registers.
 			 * Several macroses use %aasr to determine, which registers to
-			 * save/restore, so pass worst-case %aasr to them in
-			 * sw_ctxt->aau_context, and save the actual guest value to
-			 * sw_ctxt->aasr
+			 * save/restore, so pass worst-case %aasr to them directly
+			 * while saving the actual guest value to sw_ctxt->aasr
 			 */
-			aasr = native_read_aasr_reg();
-			SWITCH_GUEST_AAU_AASR(&aasr, &sw_ctxt->aau_context, 1);
+			sw_ctxt->aasr = aasr_parse(native_read_aasr_reg());
+
 			/*
 			 * This is placed before saving intc cellar since it is done
 			 * with 'mmurr' instruction which requires AAU to be stopped.
@@ -606,7 +687,7 @@ static inline void host_guest_exit(struct thread_info *ti,
 			 * Do this before saving %sbbp as it uses 'alc'
 			 * and thus zeroes %aaldm.
 			 */
-			NATIVE_SAVE_AAU_MASK_REGS(&sw_ctxt->aau_context, aasr);
+			NATIVE_SAVE_AAU_MASK_REGS(&sw_ctxt->aau_context, E2K_FULL_AASR);
 
 			/* It's important to save AAD before all call operations. */
 			NATIVE_SAVE_AADS(&sw_ctxt->aau_context);
@@ -619,7 +700,7 @@ static inline void host_guest_exit(struct thread_info *ti,
 			/* Since iset v6 %aaldi must be saved too */
 			NATIVE_SAVE_AALDIS(sw_ctxt->aau_context.aaldi);
 
-			machine.get_aau_context(&sw_ctxt->aau_context);
+			machine.get_aau_context(&sw_ctxt->aau_context, E2K_FULL_AASR);
 
 			native_clear_apb();
 		}
@@ -645,7 +726,11 @@ static inline void host_guest_exit(struct thread_info *ti,
 		kvm_switch_fpu_regs(sw_ctxt);
 		kvm_switch_cu_regs(sw_ctxt);
 		if (likely(!(flags & DONT_MMU_CONTEXT_SWITCH))) {
-			kvm_switch_mmu_regs(sw_ctxt, vcpu->is_hv);
+			if (likely(!vcpu->is_hv)) {
+				kvm_switch_pv_mmu_regs_to_host(sw_ctxt, ti, false);
+			} else {
+				kvm_switch_hv_mmu_regs(sw_ctxt, true);
+			}
 		}
 	} else {
 		/*
@@ -653,9 +738,14 @@ static inline void host_guest_exit(struct thread_info *ti,
 		 */
 
 		/* switch to hypervisor MMU context to emulate hw intercept */
-		kvm_switch_mmu_regs(sw_ctxt, false);
+		if (likely(!vcpu->is_hv)) {
+			kvm_switch_pv_mmu_regs_to_host(sw_ctxt, ti, false);
+		} else {
+			KVM_BUG_ON(true);
+		}
 	}
 
+	/* This makes a call so switch it after AAU */
 	if (flags & DEBUG_REGS_SWITCH)
 		kvm_switch_debug_regs(sw_ctxt, false);
 }
@@ -744,20 +834,6 @@ pv_vcpu_switch_guest_host_context(struct kvm_vcpu *vcpu,
 {
 	pv_vcpu_save_host_context(vcpu, cur_gti);
 	pv_vcpu_restore_host_context(vcpu, next_gti);
-}
-
-static inline void
-pv_vcpu_switch_kernel_pgd_range(struct kvm_vcpu *vcpu, int cpu)
-{
-	hpa_t vcpu_root;
-
-	if (is_sep_virt_spaces(vcpu)) {
-		vcpu_root = kvm_get_space_type_spt_os_root(vcpu);
-	} else {
-		vcpu_root = kvm_get_space_type_spt_u_root(vcpu);
-	}
-
-	copy_kernel_pgd_range(__va(vcpu_root), cpu_kernel_root_pt);
 }
 
 static inline void pv_vcpu_switch_host_context(struct kvm_vcpu *vcpu)
@@ -965,7 +1041,8 @@ host_syscall_from_guest_user(struct thread_info *ti)
 }
 
 static inline void
-host_trap_guest_exit_intc(struct thread_info *ti, struct pt_regs *regs)
+host_trap_guest_exit_intc(struct thread_info *ti, struct pt_regs *regs,
+				restore_caller_t from)
 {
 	if (likely(!kvm_test_intc_emul_flag(regs))) {
 		/* it is not paravirtualized guest VCPU intercepts*/
@@ -978,7 +1055,7 @@ host_trap_guest_exit_intc(struct thread_info *ti, struct pt_regs *regs)
 	 * Return from trap on paravirtualized guest VCPU which was
 	 * interpreted as interception
 	 */
-	return_from_pv_vcpu_intc(ti, regs);
+	return_from_pv_vcpu_intc(ti, regs, from);
 }
 
 static inline bool
@@ -1112,10 +1189,10 @@ host_trap_guest_exit_trap(struct thread_info *ti, struct pt_regs *regs)
 
 static inline void
 host_trap_guest_enter(struct thread_info *ti, struct pt_regs *regs,
-			unsigned flags)
+			unsigned flags, restore_caller_t from)
 {
 	if (flags & EXIT_FROM_INTC_SWITCH) {
-		host_trap_guest_exit_intc(ti, regs);
+		host_trap_guest_exit_intc(ti, regs, from);
 	}
 	if (flags & EXIT_FROM_TRAP_SWITCH) {
 		host_trap_guest_exit_trap(ti, regs);
@@ -1166,18 +1243,35 @@ host_trap_guest_exit(struct thread_info *ti, struct pt_regs *regs,
 	host_switch_trap_enable_mask(ti, regs, false);
 }
 
+static inline void __guest_exit(struct thread_info *ti,
+		struct kvm_vcpu_arch *vcpu, unsigned flags);
 /*
  * The function should return bool 'is the system call from guest?'
  */
 static inline bool host_guest_syscall_enter(struct pt_regs *regs,
 		bool ts_host_at_vcpu_mode)
 {
+	struct kvm_vcpu *vcpu;
+
 	if (likely(!ts_host_at_vcpu_mode))
 		return false;	/* it is not guest system call */
 
 	clear_ts_flag(TS_HOST_AT_VCPU_MODE);
-	return pv_vcpu_syscall_intc(current_thread_info(), regs);
+
+	vcpu = current_thread_info()->vcpu;
+	__guest_exit(current_thread_info(), &vcpu->arch, 0);
+	/* return to hypervisor MMU context to emulate intercept */
+	kvm_switch_to_host_mmu_pid(vcpu, current->mm);
+	kvm_set_intc_emul_flag(regs);
+
+	vcpu->mode = OUTSIDE_GUEST_MODE;
+	smp_wmb();	/* See the comment in kvm_vcpu_exiting_guest_mode() */
+
+	return true;
 }
+
+extern void host_pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs);
+
 #endif	/* CONFIG_VIRTUALIZATION */
 
 #if defined(CONFIG_PARAVIRT_GUEST)
@@ -1211,7 +1305,8 @@ static inline void __guest_exit_light(struct thread_info *ti,
 {
 }
 static inline void
-trap_guest_enter(struct thread_info *ti, struct pt_regs *regs, unsigned flags)
+trap_guest_enter(struct thread_info *ti, struct pt_regs *regs, unsigned flags,
+			restore_caller_t from)
 {
 	native_trap_guest_enter(ti, regs, flags);
 }
@@ -1261,8 +1356,12 @@ static inline bool guest_syscall_enter(struct pt_regs *regs,
 {
 	return native_guest_syscall_enter(regs);
 }
+static inline void pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs)
+{
+	native_pv_vcpu_syscall_intc(ti, regs);
+}
 static inline void guest_exit_intc(struct pt_regs *regs,
-		bool intc_emul_flag) { }
+		bool intc_emul_flag, restore_caller_t from) { }
 static inline void guest_syscall_exit_trap(struct pt_regs *regs,
 		bool ts_host_at_vcpu_mode) { }
 
@@ -1292,9 +1391,10 @@ static inline void __guest_exit_light(struct thread_info *ti,
 	host_guest_exit_light(ti, vcpu);
 }
 static inline void
-trap_guest_enter(struct thread_info *ti, struct pt_regs *regs, unsigned flags)
+trap_guest_enter(struct thread_info *ti, struct pt_regs *regs, unsigned flags,
+			restore_caller_t from)
 {
-	host_trap_guest_enter(ti, regs, flags);
+	host_trap_guest_enter(ti, regs, flags, from);
 }
 static inline void
 trap_guest_exit(struct thread_info *ti, struct pt_regs *regs,
@@ -1348,7 +1448,13 @@ static inline bool guest_syscall_enter(struct pt_regs *regs,
 	return host_guest_syscall_enter(regs, ts_host_at_vcpu_mode);
 }
 
-static inline void guest_exit_intc(struct pt_regs *regs, bool intc_emul_flag)
+static inline void pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs)
+{
+	host_pv_vcpu_syscall_intc(ti, regs);
+}
+
+static inline void guest_exit_intc(struct pt_regs *regs, bool intc_emul_flag,
+					restore_caller_t from)
 {
 	if (unlikely(intc_emul_flag)) {
 		kvm_clear_intc_emul_flag(regs);
@@ -1357,7 +1463,7 @@ static inline void guest_exit_intc(struct pt_regs *regs, bool intc_emul_flag)
 		 * Return from trap on paravirtualized guest VCPU which was
 		 * interpreted as interception
 		 */
-		return_from_pv_vcpu_intc(current_thread_info(), regs);
+		return_from_pv_vcpu_intc(current_thread_info(), regs, from);
 	}
 }
 

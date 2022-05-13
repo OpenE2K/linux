@@ -750,7 +750,7 @@ TRACE_EVENT(
 	),
 
 	TP_printk("TIR%lld: ip 0x%llx, als 0x%llx\n"
-		"      exceptions: %s\n"
+		"      exceptions: %s"
 		,
 		__entry->tir_hi >> 56,
 		__entry->tir_lo & E2K_VA_MASK,
@@ -785,9 +785,10 @@ TRACE_EVENT(
 		__entry->ctpr3_hi = ctpr3_hi;
 	),
 
-	TP_printk("ctpr1 0x%llx, ctpr1_hi 0x%llx\n"
+	TP_printk("\n"
+		"ctpr1 0x%llx, ctpr1_hi 0x%llx\n"
 		"ctpr2 0x%llx, ctpr2_hi 0x%llx\n"
-		"ctpr3 0x%llx, ctpr3_hi 0x%llx\n",
+		"ctpr3 0x%llx, ctpr3_hi 0x%llx",
 		__entry->ctpr1, __entry->ctpr1_hi,
 		__entry->ctpr2, __entry->ctpr2_hi,
 		__entry->ctpr3, __entry->ctpr3_hi)
@@ -796,9 +797,10 @@ TRACE_EVENT(
 TRACE_EVENT(
 	intc_aau,
 
-	TP_PROTO(const e2k_aau_t *aau_ctxt, u64 lsr, u64 lsr1, u64 ilcr, u64 ilcr1),
+	TP_PROTO(const e2k_aau_t *aau_ctxt, e2k_aasr_t aasr,
+			u64 lsr, u64 lsr1, u64 ilcr, u64 ilcr1),
 
-	TP_ARGS(aau_ctxt, lsr, lsr1, ilcr, ilcr1),
+	TP_ARGS(aau_ctxt, aasr, lsr, lsr1, ilcr, ilcr1),
 
 	TP_STRUCT__entry(
 		__field(	u32,	aasr )
@@ -829,7 +831,7 @@ TRACE_EVENT(
 	TP_fast_assign(
 		int i;
 
-		__entry->aasr = AW(aau_ctxt->guest_aasr);
+		__entry->aasr = AW(aasr);
 		__entry->lsr = lsr;
 		__entry->lsr1 = lsr1;
 		__entry->ilcr = ilcr;
@@ -862,7 +864,8 @@ TRACE_EVENT(
 			__entry->aaldi[i] = aau_ctxt->aaldi[i];
 	),
 
-	TP_printk("aasr 0x%x, lsr 0x%llx, lsr1 0x%llx, ilcr 0x%llx, ilcr1 0x%llx\n"
+	TP_printk("\n"
+		"aasr 0x%x, lsr 0x%llx, lsr1 0x%llx, ilcr 0x%llx, ilcr1 0x%llx\n"
 		"aaldv 0x%llx, aaldm = 0x%llx\n"
 		"aads lo/hi 0x%llx/0x%llx 0x%llx/0x%llx 0x%llx/0x%llx 0x%llx/0x%llx\n"
 		"0x%llx/0x%llx 0x%llx/0x%llx 0x%llx/0x%llx 0x%llx/0x%llx\n"
@@ -883,7 +886,7 @@ TRACE_EVENT(
 		"aaldis 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx\n"
 		"0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx\n"
 		"0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx\n"
-		"0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx\n",
+		"0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx",
 		__entry->aasr, __entry->lsr, __entry->lsr1,
 		__entry->ilcr, __entry->ilcr1,
 		__entry->aaldv, __entry->aaldm,
@@ -960,16 +963,44 @@ TRACE_EVENT(
 		__entry->aaldi[30], __entry->aaldi[31])
 );
 
+TRACE_EVENT(kvm_pid,
+	TP_PROTO(kvm_e2k_from_t from, unsigned long vmid, unsigned long vcpu_id, unsigned long pid),
+	TP_ARGS(from, vmid, vcpu_id, pid),
+
+	TP_STRUCT__entry(
+		__field(	kvm_e2k_from_t,	from		)
+		__field(	u64,		vmid		)
+		__field(	u64,		vcpu_id		)
+		__field(	u64,		pid		)
+	),
+
+	TP_fast_assign(
+		__entry->from		= from;
+		__entry->vmid		= vmid;
+		__entry->vcpu_id	= vcpu_id;
+		__entry->pid		= pid;
+	),
+
+	TP_printk("%s: vmid %llu vcpu %llu mmu pid 0x%llx",
+		__print_symbolic(__entry->from,
+			{ FROM_GENERIC_HYPERCALL,	"generic hcall" },
+			{ FROM_LIGHT_HYPERCALL,		"light hcall" },
+			{ FROM_PV_INTERCEPT,		"pv intc" },
+			{ FROM_HV_INTERCEPT,		"hv intc" },
+			{ FROM_VCPU_LOAD,		"vcpu load" },
+			{ FROM_VCPU_PUT,		"vcpu put" }),
+		__entry->vmid, __entry->vcpu_id, __entry->pid)
+);
+
 TRACE_EVENT(
 	generic_hcall,
 
 	TP_PROTO(unsigned long hcall_num, unsigned long arg1,
 		unsigned long arg2, unsigned long arg3,
 		unsigned long arg4, unsigned long arg5,
-		unsigned long arg6, unsigned long gsbr,
-		unsigned long cpu),
+		unsigned long arg6, unsigned long gsbr),
 
-	TP_ARGS(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6, gsbr, cpu),
+	TP_ARGS(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6, gsbr),
 
 	TP_STRUCT__entry(
 		__field(	u64,	hcall_num	)
@@ -980,7 +1011,6 @@ TRACE_EVENT(
 		__field(	u64,	arg5	)
 		__field(	u64,	arg6	)
 		__field(	u64,	gsbr	)
-		__field(	u64,	cpu	)
 	),
 
 	TP_fast_assign(
@@ -992,13 +1022,11 @@ TRACE_EVENT(
 		__entry->arg5	= arg5;
 		__entry->arg6	= arg6;
 		__entry->gsbr	= gsbr;
-		__entry->cpu	= cpu;
 	),
 
-	TP_printk("CPU#%llu, generic hypercall %llu\n"
-		"Args: 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx; gsbr: 0x%llx\n"
+	TP_printk("nr %llu\n"
+		"Args: 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx; gsbr: 0x%llx"
 		,
-		__entry->cpu,
 		__entry->hcall_num,
 		__entry->arg1,
 		__entry->arg2,
@@ -1015,9 +1043,9 @@ TRACE_EVENT(
 	TP_PROTO(unsigned long hcall_num, unsigned long arg1,
 		unsigned long arg2, unsigned long arg3,
 		unsigned long arg4, unsigned long arg5,
-		unsigned long arg6, unsigned long cpu),
+		unsigned long arg6),
 
-	TP_ARGS(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6, cpu),
+	TP_ARGS(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6),
 
 	TP_STRUCT__entry(
 		__field(	u64,	hcall_num	)
@@ -1027,7 +1055,6 @@ TRACE_EVENT(
 		__field(	u64,	arg4	)
 		__field(	u64,	arg5	)
 		__field(	u64,	arg6	)
-		__field(	u64,	cpu	)
 	),
 
 	TP_fast_assign(
@@ -1038,13 +1065,11 @@ TRACE_EVENT(
 		__entry->arg4	= arg4;
 		__entry->arg5	= arg5;
 		__entry->arg6	= arg6;
-		__entry->cpu	= cpu;
 	),
 
-	TP_printk("CPU#%llu, light hypercall %llu\n"
-		"Args: 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx\n"
+	TP_printk("nr %llu\n"
+		"Args: 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx"
 		,
-		__entry->cpu,
 		__entry->hcall_num,
 		__entry->arg1,
 		__entry->arg2,
@@ -1069,7 +1094,7 @@ TRACE_EVENT(
 		__entry->ret = ret;
 	),
 
-	TP_printk("Generic hypercall exit: %llu\n", __entry->ret)
+	TP_printk("Generic hypercall exit: %llu", __entry->ret)
 );
 
 TRACE_EVENT(
@@ -1087,7 +1112,7 @@ TRACE_EVENT(
 		__entry->ret = ret;
 	),
 
-	TP_printk("Light hypercall exit: %llu\n", __entry->ret)
+	TP_printk("Light hypercall exit: %llu", __entry->ret)
 );
 
 TRACE_EVENT(
@@ -1180,7 +1205,7 @@ TRACE_EVENT(
 		__entry->cpu = cpu;
 	),
 
-	TP_printk("vcpu %d, cpu %d\n", __entry->vcpu, __entry->cpu)
+	TP_printk("vcpu %d, cpu %d", __entry->vcpu, __entry->cpu)
 );
 
 TRACE_EVENT(
@@ -1202,7 +1227,7 @@ TRACE_EVENT(
 		__entry->cpu = cpu;
 	),
 
-	TP_printk("vcpu %d, cpu %d, last_cpu %d\n", __entry->vcpu, __entry->cpu,
+	TP_printk("vcpu %d, cpu %d, last_cpu %d", __entry->vcpu, __entry->cpu,
 		__entry->last_cpu)
 );
 
@@ -1230,10 +1255,484 @@ TRACE_EVENT(
 		__entry->handler = handler;
 	),
 
-	TP_printk("HVA 0x%llx - 0x%llx; GPA 0x%llx - 0x%llx; handler 0x%px\n",
+	TP_printk("HVA 0x%llx - 0x%llx; GPA 0x%llx - 0x%llx; handler 0x%px",
 		__entry->hva_start, __entry->hva_end,
 		__entry->gpa_start, __entry->gpa_end,
 		__entry->handler)
+);
+
+TRACE_EVENT(
+	rmap_add_sp_entry,
+
+	TP_PROTO(struct kvm_mmu_page *sp, gfn_t gfn, pgprot_t *sptep,
+		 struct kvm_rmap_head *rmap_head),
+
+	TP_ARGS(sp, gfn, sptep, rmap_head),
+
+	TP_STRUCT__entry(
+		__field(struct kvm_mmu_page *,	sp		)
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(gfn_t,			gfn		)
+		__field(int,			level		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sp = sp;
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->gfn = gfn;
+		__entry->level = sp->role.level;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : add sp %px gfn 0x%llx level %d "
+		"spte %px : 0x%lx\n",
+		__entry->rmap_head, __entry->sp, __entry->gfn, __entry->level,
+		__entry->sptep, __entry->spte)
+);
+
+TRACE_EVENT(
+	rmap_add_parent_pte,
+
+	TP_PROTO(struct kvm_mmu_page *sp, pgprot_t *sptep,
+		 struct kvm_rmap_head *rmap_head),
+
+	TP_ARGS(sp, sptep, rmap_head),
+
+	TP_STRUCT__entry(
+		__field(struct kvm_mmu_page *,	sp		)
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(gfn_t,			gfn		)
+		__field(int,			level		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sp = sp;
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->gfn = sp->gfn;
+		__entry->level = sp->role.level;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : add sp %px gfn 0x%llx level %d "
+		"parent spte %px : 0x%lx\n",
+		__entry->rmap_head, __entry->sp, __entry->gfn, __entry->level,
+		__entry->sptep, __entry->spte)
+);
+
+TRACE_EVENT(
+	rmap_remove_sp_entry,
+
+	TP_PROTO(struct kvm_mmu_page *sp, gfn_t gfn, pgprot_t *sptep,
+		 struct kvm_rmap_head *rmap_head),
+
+	TP_ARGS(sp, gfn, sptep, rmap_head),
+
+	TP_STRUCT__entry(
+		__field(struct kvm_mmu_page *,	sp		)
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(gfn_t,			gfn		)
+		__field(int,			level		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sp = sp;
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->gfn = gfn;
+		__entry->level = sp->role.level;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : remove sp %px gfn 0x%llx level %d "
+		"spte %px : 0x%lx\n",
+		__entry->rmap_head, __entry->sp, __entry->gfn, __entry->level,
+		__entry->sptep, __entry->spte)
+);
+
+TRACE_EVENT(
+	rmap_remove_parent_pte,
+
+	TP_PROTO(struct kvm_mmu_page *sp, pgprot_t *sptep,
+		 struct kvm_rmap_head *rmap_head),
+
+	TP_ARGS(sp, sptep, rmap_head),
+
+	TP_STRUCT__entry(
+		__field(struct kvm_mmu_page *,	sp		)
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(gfn_t,			gfn		)
+		__field(int,			level		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sp = sp;
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->gfn = sp->gfn;
+		__entry->level = sp->role.level;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : remove sp %px gfn 0x%llx level %d "
+		"parent spte %px : 0x%lx\n",
+		__entry->rmap_head, __entry->sp, __entry->gfn, __entry->level,
+		__entry->sptep, __entry->spte)
+);
+
+TRACE_EVENT(
+	rmap_add_0_1_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, pgprot_t *sptep),
+
+	TP_ARGS(rmap_head, sptep),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : add 0->1 spte %px : 0x%lx head val 0x%lx\n",
+		__entry->rmap_head, __entry->sptep, __entry->spte, __entry->val)
+);
+
+TRACE_EVENT(
+	rmap_add_1_many_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, struct pte_list_desc *desc,
+		 pgprot_t *sptep),
+
+	TP_ARGS(rmap_head, desc, sptep),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(struct pte_list_desc *,	desc		)
+		__field(unsigned long,		val		)
+		__field(pgprot_t *,		desc0		)
+		__field(pgprot_t *,		desc1		)
+		__field(pgprotval_t,		spte1		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->desc = desc;
+		__entry->desc0 = desc->sptes[0];
+		__entry->desc1 = desc->sptes[1];
+		__entry->spte1 = pgprot_val(*(desc->sptes[1]));
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : add 1->many spte %px : 0x%lx head val 0x%lx "
+		"desc %px\n"
+		"     desc[0] : val   %px\n"
+		"     desc[1] : spte  %px : 0x%lx\n",
+		__entry->rmap_head, __entry->sptep, __entry->spte, __entry->val,
+		__entry->desc, __entry->desc0, __entry->desc1, __entry->spte1)
+);
+
+TRACE_EVENT(
+	rmap_add_new_desc,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, struct pte_list_desc *desc),
+
+	TP_ARGS(rmap_head, desc),
+
+	TP_STRUCT__entry(
+		__field(struct pte_list_desc *,	desc		)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->desc = desc;
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : add many->many new desc %px head val 0x%lx\n",
+		__entry->rmap_head, __entry->desc, __entry->val)
+);
+
+TRACE_EVENT(
+	rmap_add_many_many_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, struct pte_list_desc *desc,
+		 pgprot_t *sptep, int index),
+
+	TP_ARGS(rmap_head, desc, sptep, index),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(struct pte_list_desc *,	desc		)
+		__field(unsigned long,		val		)
+		__field(int,			index		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->desc = desc;
+		__entry->index = index;
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : add many->many val 0x%lx\n"
+		"     adde to desc %px[%04x] : spte  %px : 0x%lx\n",
+		__entry->rmap_head, __entry->val, __entry->desc,
+		__entry->index, __entry->sptep, __entry->spte)
+);
+
+TRACE_EVENT(
+	rmap_remove_1_0_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, pgprot_t *sptep),
+
+	TP_ARGS(rmap_head, sptep),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(pgprot_t *,		rmap_sptep	)
+		__field(pgprotval_t,		rmap_spte	)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->rmap_sptep = (pgprot_t *)rmap_head->val;
+		__entry->rmap_spte = pgprot_val(*(pgprot_t *)rmap_head->val);
+		__entry->val = 0;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : remove 1->0 head val 0x%lx\n"
+		"     rmap spte : %px : 0x%lx\n"
+		"     to remove : %px : 0x%lx\n",
+		__entry->rmap_head, __entry->val,
+		__entry->rmap_sptep, __entry->rmap_spte,
+		__entry->sptep, __entry->spte)
+);
+
+TRACE_EVENT(
+	rmap_move_desc,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, struct pte_list_desc *desc,
+		 int index_to, int index_from),
+
+	TP_ARGS(rmap_head, desc, index_to, index_from),
+
+	TP_STRUCT__entry(
+		__field(struct pte_list_desc *,	desc		)
+		__field(pgprot_t *,		sptep_to	)
+		__field(pgprotval_t,		spte_to		)
+		__field(pgprot_t *,		sptep_from	)
+		__field(pgprotval_t,		spte_from	)
+		__field(int,			index_to	)
+		__field(int,			index_from	)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->desc = desc;
+		__entry->index_to = index_to;
+		__entry->index_from = index_from;
+		__entry->sptep_to = desc->sptes[index_to];
+		__entry->spte_to = pgprot_val(*(desc->sptes[index_to]));
+		__entry->sptep_from = desc->sptes[index_from];
+		__entry->spte_from = pgprot_val(*(desc->sptes[index_from]));
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : move many->many head val 0x%lx\n"
+		"     deleted desc at %px[%04x] : %px : 0x%lx\n"
+		"     moved to from   %px[%04x] : %px ; 0x%lx\n",
+		__entry->rmap_head, __entry->val,
+		__entry->desc, __entry->index_to,
+		__entry->sptep_to, __entry->spte_to,
+		__entry->desc, __entry->index_from,
+		__entry->sptep_from, __entry->spte_from)
+);
+
+TRACE_EVENT(
+	rmap_remove_desc,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, struct pte_list_desc *desc,
+		 struct pte_list_desc *prev),
+
+	TP_ARGS(rmap_head, desc, prev),
+
+	TP_STRUCT__entry(
+		__field(struct pte_list_desc *,	desc		)
+		__field(struct pte_list_desc *,	prev		)
+		__field(struct pte_list_desc *,	next		)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->desc = desc;
+		__entry->desc = prev;
+		if (prev != NULL) {
+			__entry->next = prev->more;
+		} else {
+			__entry->next = NULL;
+		}
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : remove many->many head val 0x%lx\n"
+		"     desc %px\n"
+		"     prev %px\n"
+		"     next %px\n",
+		__entry->rmap_head, __entry->val,
+		__entry->desc, __entry->prev, __entry->next)
+);
+
+TRACE_EVENT(
+	rmap_remove_many_many_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, pgprot_t *sptep,
+		 struct pte_list_desc *desc, int index),
+
+	TP_ARGS(rmap_head, sptep, desc, index),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(pgprot_t *,		rmap_sptep	)
+		__field(pgprotval_t,		rmap_spte	)
+		__field(struct pte_list_desc *,	desc		)
+		__field(int,			index		)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->desc = desc;
+		__entry->index = index;
+		__entry->rmap_sptep = desc->sptes[index];
+		__entry->rmap_spte = pgprot_val(*(desc->sptes[index]));
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : add many->many head val 0x%lx "
+		"desc %px[%04x]\n"
+		"     rmap spte : %px : 0x%lx\n"
+		"     to remove : %px : 0x%lx\n",
+		__entry->rmap_head, __entry->val, __entry->desc, __entry->index,
+		__entry->rmap_sptep, __entry->rmap_spte,
+		__entry->sptep, __entry->spte)
+);
+
+TRACE_EVENT(
+	rmap_remove_0_bad_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, pgprot_t *sptep),
+
+	TP_ARGS(rmap_head, sptep),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : remove 0->bad not found spte %px : 0x%lx "
+		"head val 0x%lx\n",
+		__entry->rmap_head, __entry->sptep, __entry->spte, __entry->val)
+);
+
+TRACE_EVENT(
+	rmap_remove_1_bad_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, pgprot_t *sptep),
+
+	TP_ARGS(rmap_head, sptep),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : remove 1->bad not found spte %px : 0x%lx "
+		"head val 0x%lx\n",
+		__entry->rmap_head, __entry->sptep, __entry->spte, __entry->val)
+);
+
+TRACE_EVENT(
+	rmap_remove_many_bad_spte,
+
+	TP_PROTO(struct kvm_rmap_head *rmap_head, pgprot_t *sptep),
+
+	TP_ARGS(rmap_head, sptep),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		spte		)
+		__field(unsigned long,		val		)
+		__field(struct kvm_rmap_head *,	rmap_head	)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->spte = pgprot_val(*sptep);
+		__entry->val = rmap_head->val;
+		__entry->rmap_head = rmap_head;
+	),
+
+	TP_printk("rmap head %px : remove many->bad not found spte %px : 0x%lx "
+		"head val 0x%lx\n",
+		__entry->rmap_head, __entry->sptep, __entry->spte, __entry->val)
 );
 
 #endif /* _TRACE_KVM_H */

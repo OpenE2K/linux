@@ -20,11 +20,14 @@
 #define DDK750_HWI2C_H__
 
 /* hwi2c functions */
-int hwI2CInit(unsigned char busSpeedMode);
-void hwI2CClose(void);
+int hwI2CInit(struct lynx_share *share,
+				unsigned char busSpeedMode);
+void hwI2CClose(struct lynx_share *share);
 
-unsigned char hwI2CReadReg(unsigned char deviceAddress,
+unsigned char hwI2CReadReg(struct lynx_share *share,
+				unsigned char deviceAddress,
 			   unsigned char registerIndex);
-int hwI2CWriteReg(unsigned char deviceAddress, unsigned char registerIndex,
+int hwI2CWriteReg(struct lynx_share *share,
+			unsigned char deviceAddress, unsigned char registerIndex,
 		  unsigned char data);
 #endif

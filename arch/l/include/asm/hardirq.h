@@ -28,11 +28,6 @@ typedef struct {
 		IS_ENABLED(CONFIG_RDMA_NET))
 	unsigned int irq_rdma_count;
 #endif
-#ifdef CONFIG_E2K
-#if IS_ENABLED(CONFIG_ELDSP)
-	unsigned int irq_eldsp_count;
-#endif
-#endif
 } ____cacheline_aligned irq_cpustat_t;
 
 DECLARE_PER_CPU_SHARED_ALIGNED(irq_cpustat_t, irq_stat);

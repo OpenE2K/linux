@@ -117,7 +117,7 @@ typedef enum _disp_output_t {
 	do_CRT_SEC = CRT_2_SEC | SEC_TP_ON | DPMS_ON | DAC_ON,
 } disp_output_t;
 
-void ddk750_setLogicalDispOut(disp_output_t);
-int ddk750_initDVIDisp(void);
+void ddk750_setLogicalDispOut(struct lynx_share *, disp_output_t);
+int ddk750_initDVIDisp(struct lynx_share *share);
 
 #endif

@@ -26,6 +26,7 @@ config SPARC
 	select HAVE_ARCH_TRACEHOOK
 	select HAVE_EXIT_THREAD
 	select HAVE_PCI
+	select EDAC_SUPPORT
 	select SYSCTL_EXCEPTION_TRACE
 	select RTC_CLASS
 	select RTC_DRV_M48T59				if !E90S
@@ -110,6 +111,9 @@ config ARCH_DEFCONFIG
 	string
 	default "arch/sparc/configs/sparc32_defconfig" if SPARC32
 	default "arch/sparc/configs/sparc64_defconfig" if SPARC64
+
+config E90S_NO_FPREGS_SAVE
+	def_bool y if E90S
 
 config ARCH_PROC_KCORE_TEXT
 	def_bool y

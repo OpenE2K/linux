@@ -20,6 +20,7 @@ struct kvm_lapic {
 	gpa_t vapic_addr;
 	struct page *vapic_page;
 	int virq_no;
+	bool virq_is_setup;
 	/* APIC v6 (APIC model based on hardware CEPIC support) */
 	u32 cepic_vector[MAX_CEPIC_PRIORITY + 1];
 };
@@ -30,6 +31,7 @@ void kvm_free_lapic(struct kvm_vcpu *vcpu);
 int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu);
 int kvm_apic_accept_pic_intr(struct kvm_vcpu *vcpu);
 void kvm_lapic_reset(struct kvm_vcpu *vcpu);
+extern void kvm_lapic_restart(struct kvm_vcpu *vcpu);
 void kvm_lapic_set_base(struct kvm_vcpu *vcpu, u64 value);
 u64 kvm_lapic_get_base(struct kvm_vcpu *vcpu);
 void kvm_apic_set_version(struct kvm_vcpu *vcpu);
@@ -37,6 +39,7 @@ void kvm_apic_set_version(struct kvm_vcpu *vcpu);
 int kvm_apic_match_physical_addr(struct kvm_lapic *apic, u16 dest);
 int kvm_apic_match_logical_addr(struct kvm_lapic *apic, u8 mda);
 int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq);
+extern void kvm_lapic_virq_setup(struct kvm_vcpu *vcpu);
 
 u64 kvm_get_apic_base(struct kvm_vcpu *vcpu);
 void kvm_set_apic_base(struct kvm_vcpu *vcpu, u64 data);
@@ -96,7 +99,7 @@ kvm_set_guest_lapic_virqs_num(struct kvm_vcpu *vcpu, int count)
 	atomic_set(&lapic->virqs_num, count);
 }
 static inline void
-kvm_init_guest_lapic_virqs_num(struct kvm_vcpu *vcpu)
+kvm_reset_guest_lapic_virqs_num(struct kvm_vcpu *vcpu)
 {
 	kvm_set_guest_lapic_virqs_num(vcpu, 0);
 }

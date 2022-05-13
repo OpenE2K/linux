@@ -68,8 +68,7 @@ extern	cpuinfo_e2k_t	cpu_data[NR_CPUS];
 #define INVALID_IO_BITMAP_OFFSET 0x8000
 
 typedef struct thread_struct {
-#ifndef CONFIG_CPU_HAS_FILL_INSTRUCTION
-	/* Used as a temporary area */
+	/* Used as a temporary area for !CPU_FEAT_FILL_INSTRUCTION case */
 	struct {
 		e2k_cr0_hi_t cr0_hi;
 		e2k_cr1_lo_t cr1_lo;
@@ -80,12 +79,13 @@ typedef struct thread_struct {
 		e2k_pcsp_hi_t u_pcsp_hi;
 		int from;
 		bool return_to_user;
-# if defined(CONFIG_VIRTUALIZATION) && !defined(CONFIG_KVM_GUEST_KERNEL)
 		bool from_paravirt_guest;
-# endif
+		bool ts_host_at_vcpu_mode;
 	} fill;
-#endif
+
 	u32		context;	/* context of running process	     */
+	/* Total number of all interrupts and exceptions since kernel boot */
+	u64 traps_count;
 	struct sw_regs	sw_regs;	/* switch regs                       */
 
 	struct {
@@ -184,9 +184,6 @@ typedef struct thread_struct {
 
 #define INIT_THREAD { 0 }
 
-#define INIT_MMAP \
-{ &init_mm, 0, 0, NULL, PAGE_SHARED, VM_READ | VM_WRITE | VM_EXEC, 1, NULL, NULL }
-
 extern void start_thread(struct pt_regs *regs,
 			unsigned long entry, unsigned long sp);
 extern int native_do_prepare_start_thread_frames(unsigned long entry,
@@ -235,6 +232,23 @@ unsigned long get_wchan(struct task_struct *p);
 	(pt_regs) ? AS_STRUCT(pt_regs->stacks.usd_lo).base :		\
 				task_thread_info(tsk)->u_stack.top;	\
 })
+
+typedef enum restore_caller {
+	FROM_SYSCALL_N_PROT = 1 << 1,
+	FROM_SYSCALL_PROT_8 = 1 << 2,
+	FROM_SYSCALL_PROT_10 = 1 << 3,
+	FROM_USER_TRAP = 1 << 4,
+	FROM_SIGRETURN = 1 << 5,
+	FROM_RET_FROM_FORK = 1 << 6,
+	FROM_MAKECONTEXT = 1 << 7,
+	FROM_RETURN_PV_VCPU_TRAP = 1 << 8,
+	FROM_PV_VCPU_SYSCALL = 1 << 10,
+	FROM_PV_VCPU_SYSFORK = 1 << 11,
+} restore_caller_t;
+
+#define	FROM_PV_VCPU_MODE	(FROM_RETURN_PV_VCPU_TRAP | \
+					FROM_PV_VCPU_SYSCALL | \
+						FROM_PV_VCPU_SYSFORK)
 
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 # define TASK_IS_BINCO(tsk)	(tsk->thread.flags & E2K_FLAG_BIN_COMP_CODE)
@@ -431,7 +445,7 @@ static inline int cpu_max_cores_num(void)
 {
 	if (IS_MACHINE_E1CP)
 		return 1;
-	else if (IS_MACHINE_ES2 || IS_MACHINE_E2C3)
+	else if (IS_MACHINE_E2C3)
 		return 2;
 	else if (IS_MACHINE_E2S)
 		return 4;

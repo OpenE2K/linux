@@ -55,6 +55,15 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_KVM_GET_VIRQ_MODE
+#undef	DebugGVIRQ
+#define	DEBUG_KVM_GET_VIRQ_MODE	0	/* KVM get & register IRQ debug */
+#define	DebugGVIRQ(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_GET_VIRQ_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 #undef	DEBUG_KVM_INTR_MODE
 #undef	DebugKVMINTR
 #define	DEBUG_KVM_INTR_MODE	0	/* KVM interrupt recieve debugging */
@@ -110,31 +119,73 @@ static int kvm_wake_up_virq(kvm_guest_virq_t *guest_virq,
 
 int debug_guest_virqs = 0;
 
+static int find_irq_on_virq_id(struct kvm *kvm, int vcpu_id, int virq_id)
+{
+	kvm_guest_virq_t *guest_virq;
+	unsigned long flags;
+	int irq;
+
+	raw_spin_lock_irqsave(&kvm->arch.virq_lock, flags);
+	for (irq = 0; irq < KVM_MAX_NR_VIRQS; irq++) {
+		guest_virq = &kvm->arch.guest_virq[irq];
+		if (guest_virq->flags == 0)
+			continue;
+		if (guest_virq->virq_id != virq_id)
+			continue;
+		KVM_BUG_ON(guest_virq->vcpu == NULL);
+		if (guest_virq->vcpu->vcpu_id == vcpu_id) {
+			raw_spin_unlock_irqrestore(&kvm->arch.virq_lock, flags);
+			return irq;
+		}
+	}
+	raw_spin_unlock_irqrestore(&kvm->arch.virq_lock, flags);
+	return -1;
+}
+
 #ifdef	CONFIG_DIRECT_VIRQ_INJECTION
 int kvm_get_guest_direct_virq(struct kvm_vcpu *vcpu, int irq, int virq_id)
 {
 	struct kvm *kvm = vcpu->kvm;
 	kvm_guest_virq_t *guest_virq;
+	int old_irq;
 
-	DebugDVIRQ("started for IRQ #%d VIRQ ID #%d\n",
-		irq, virq_id);
+	DebugGVIRQ("started on VCPU #%d for IRQ #%d VIRQ ID #%d\n",
+		vcpu->vcpu_id, irq, virq_id);
 	if (virq_id >= KVM_NR_VIRQS) {
-		DebugKVMIRQ("invalid VIRQ ID #%d for IRQ #%d\n",
+		DebugGVIRQ("invalid VIRQ ID #%d for IRQ #%d\n",
 			virq_id, irq);
 		return -EINVAL;
 	}
 	if (irq >= KVM_MAX_NR_VIRQS) {
-		DebugKVMIRQ("invalid IRQ num #%d VIRQ ID #%d\n",
+		DebugGVIRQ("invalid IRQ num #%d VIRQ ID #%d\n",
 			irq, virq_id);
 		return -EINVAL;
+	}
+	old_irq = find_irq_on_virq_id(vcpu->kvm, vcpu->vcpu_id, virq_id);
+	if (likely(old_irq < 0)) {
+		/* VIRQ has not been registered */
+		;
+	} else if (old_irq == irq) {
+		pr_warn("%s(): VIRQ #%d %s has been already registered "
+			"as IRQ #%d on VCPU #%d\n",
+			__func__, virq_id, kvm_get_virq_name(virq_id),
+			old_irq, vcpu->vcpu_id);
+		return 0;
+	} else {
+		pr_err("%s(): VIRQ #%d %s has been already registered "
+			"on VCPU #%d as IRQ #%d instead of #%d\n",
+			__func__, virq_id, kvm_get_virq_name(virq_id),
+			vcpu->vcpu_id, old_irq, irq);
+		return -EEXIST;
 	}
 	raw_spin_lock(&kvm->arch.virq_lock);
 	guest_virq = &kvm->arch.guest_virq[irq];
 	if (guest_virq->vcpu != NULL) {
 		raw_spin_unlock(&kvm->arch.virq_lock);
-		DebugKVM("IRQ #%d VIRQ ID #%d was already registered "
+		pr_err("%s(): IRQ #%d VIRQ #%d %s was already registered "
 			"on VCPU #%d\n",
-			irq, virq_id, guest_virq->vcpu->vcpu_id);
+			__func__, irq, virq_id, kvm_get_virq_name(virq_id),
+			guest_virq->vcpu->vcpu_id);
 		return -EEXIST;
 	}
 	guest_virq->virq_id = virq_id;
@@ -150,8 +201,13 @@ int kvm_get_guest_direct_virq(struct kvm_vcpu *vcpu, int irq, int virq_id)
 		kvm->arch.max_irq_no = irq;
 	raw_spin_unlock(&kvm->arch.virq_lock);
 
-	DebugDVIRQ("IRQ #%d VIRQ ID %s (#%d) is registered in VCPU #%d\n",
-		irq, kvm_get_virq_name(virq_id), virq_id, vcpu->vcpu_id);
+	if (virq_id == KVM_VIRQ_LAPIC) {
+		kvm_lapic_virq_setup(vcpu);
+	}
+
+	DebugKVM("vcpu #%d virq #%d %s was registered on host as irq #%d\n",
+		vcpu->vcpu_id, virq_id,
+		kvm_get_virq_name(virq_id), irq);
 	return 0;
 }
 
@@ -159,20 +215,25 @@ int kvm_free_guest_direct_virq(struct kvm *kvm, int irq)
 {
 	kvm_guest_virq_t *guest_virq;
 
-	DebugDVIRQ("started for IRQ #%d\n", irq);
+	DebugKVMSH("started for IRQ #%d\n", irq);
 	if (irq >= KVM_MAX_NR_VIRQS) {
-		DebugDVIRQ("invalid IRQ num #%d\n", irq);
+		DebugKVMSH("invalid IRQ num #%d\n", irq);
 		return -EINVAL;
 	}
 	guest_virq = &kvm->arch.guest_virq[irq];
+	if (guest_virq->flags == 0) {
+		DebugKVMSH("IRQ #%d is not active\n", irq);
+		return 0;
+	}
 	if (!(guest_virq->flags & DIRECT_INJ_VIRQ_FLAG)) {
+		pr_err("%s(): IRQ #%d is not of direct type ???\n", __func__, irq);
 		return 0;
 	}
 	raw_spin_lock_irq(&kvm->arch.virq_lock);
 	if (guest_virq->host_task == NULL) {
 		raw_spin_unlock_irq(&kvm->arch.virq_lock);
-		DebugDVIRQ("IRQ #%d VIRQ ID %s (#%d) is not active\n",
-			irq, kvm_get_virq_name(guest_virq->virq_id),
+		pr_err("%s(): IRQ #%d VIRQ ID %s (#%d) is not active\n",
+			__func__, irq, kvm_get_virq_name(guest_virq->virq_id),
 			guest_virq->virq_id);
 		return 0;
 	}
@@ -182,7 +243,7 @@ int kvm_free_guest_direct_virq(struct kvm *kvm, int irq)
 	clear_thread_flag(TIF_VIRQS_ACTIVE);
 	raw_spin_unlock_irq(&kvm->arch.virq_lock);
 
-	DebugDVIRQ("IRQ #%d VIRQ ID %s (#%d) was stopped\n",
+	DebugKVMSH("IRQ #%d VIRQ ID %s (#%d) was deleted\n",
 		irq, kvm_get_virq_name(guest_virq->virq_id),
 		guest_virq->virq_id);
 
@@ -203,53 +264,31 @@ int kvm_free_guest_direct_virq(struct kvm *kvm, int irq)
 }
 #endif	/* CONFIG_DIRECT_VIRQ_INJECTION */
 
-static int find_irq_on_virq_id(struct kvm *kvm, int vcpu_id, int virq_id)
-{
-	kvm_guest_virq_t *guest_virq;
-	unsigned long flags;
-	int irq;
-
-	raw_spin_lock_irqsave(&kvm->arch.virq_lock, flags);
-	for (irq = 0; irq < KVM_MAX_NR_VIRQS; irq++) {
-		guest_virq = &kvm->arch.guest_virq[irq];
-		if (guest_virq->vcpu == NULL)
-			continue;
-		if (guest_virq->virq_id != virq_id)
-			continue;
-		if (guest_virq->vcpu->vcpu_id == vcpu_id) {
-			raw_spin_unlock_irqrestore(&kvm->arch.virq_lock, flags);
-			return irq;
-		}
-	}
-	raw_spin_unlock_irqrestore(&kvm->arch.virq_lock, flags);
-	return -1;
-}
-
 static void
 kvm_register_vcpu_interrupt(struct kvm_vcpu *vcpu, int irq, int virq_id)
 {
-	DebugKVMIRQ("started for VCPU #%d IRQ #%d VIRQ ID #%d\n",
+	DebugGVIRQ("started for VCPU #%d IRQ #%d VIRQ ID #%d\n",
 		vcpu->vcpu_id, irq, virq_id);
 	switch (virq_id) {
 	case KVM_VIRQ_TIMER:
 		vcpu->arch.hrt_virq_no = irq;
-		DebugKVMIRQ("set IRQ #%d for timer VCPU #%d\n",
+		DebugGVIRQ("set IRQ #%d for timer VCPU #%d\n",
 			irq, vcpu->vcpu_id);
 		break;
 	case KVM_VIRQ_LAPIC:
 		WARN_ON(vcpu->arch.apic == NULL);
 		vcpu->arch.apic->virq_no = irq;
-		DebugKVMIRQ("set IRQ #%d for local APIC of VCPU #%d\n",
+		DebugGVIRQ("set IRQ #%d for local APIC of VCPU #%d\n",
 			irq, vcpu->vcpu_id);
 		break;
 	case KVM_VIRQ_CEPIC:
 		WARN_ON(vcpu->arch.epic == NULL);
 		vcpu->arch.epic->virq_no = irq;
-		DebugKVMIRQ("set IRQ #%d for CEPIC of VCPU #%d\n",
+		DebugGVIRQ("set IRQ #%d for CEPIC of VCPU #%d\n",
 			irq, vcpu->vcpu_id);
 		break;
 	case KVM_VIRQ_HVC:
-		DebugKVMIRQ("hvc console VIRQ, nothing to do\n");
+		DebugGVIRQ("hvc console VIRQ, nothing to do\n");
 		break;
 	default:
 		printk(KERN_WARNING "Bad VIRQ ID #%d\n", virq_id);
@@ -307,10 +346,14 @@ int kvm_vcpu_interrupt(struct kvm_vcpu *vcpu, int irq)
 
 	if (guest_virq->vcpu == NULL) {
 		/* virtual IRQ does not exist or register */
-		pr_warning("kvm_vcpu_interrupt() virtual IRQ #%d "
-			"does not exist or register\n", irq);
+		pr_warn("%s(): virtual IRQ #%d does not exist or register\n",
+			__func__, irq);
 		raw_spin_unlock_irqrestore(&kvm->arch.virq_lock, flags);
-		return -ENODEV;
+		if (likely(kvm->arch.reboot || kvm->arch.halted)) {
+			return 0;
+		} else {
+			return -ENODEV;
+		}
 	}
 	if (guest_virq->stop_handler) {
 		/* virtual IRQ already stopped */
@@ -544,7 +587,7 @@ void kvm_free_all_VIRQs(struct kvm *kvm)
 	kvm_guest_virq_t *guest_virq;
 	int irq;
 
-	DebugKVMIRQ("started\n");
+	DebugKVMSH("started\n");
 	for (irq = 0; irq <= kvm->arch.max_irq_no; irq++) {
 		guest_virq = &kvm->arch.guest_virq[irq];
 		if (guest_virq->flags & DIRECT_INJ_VIRQ_FLAG) {

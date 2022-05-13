@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -241,6 +241,8 @@ typedef struct _gcsALLOCATOR_OPERATIONS
     (*MapKernel)(
         IN gckALLOCATOR Allocator,
         IN PLINUX_MDL Mdl,
+        IN gctSIZE_T Offset,
+        IN gctSIZE_T Bytes,
         OUT gctPOINTER *Logical
         );
 
@@ -285,11 +287,11 @@ typedef struct _gcsALLOCATOR_OPERATIONS
     **      PLINUX_MDL Mdl
     **          Pointer to a Mdl object.
     **
-    **      gctSIZE_T Offset
-    **          Offset to this memory block
-    **
     **      gctPOINTER Logical
     **          Logical address, could be user address or kernel address
+    **
+    **      gctSIZE_T Offset
+    **          Physical address.
     **
     **      gctUINT32 Bytes
     **          Size of memory region.
@@ -307,7 +309,7 @@ typedef struct _gcsALLOCATOR_OPERATIONS
         IN PLINUX_MDL Mdl,
         IN gctSIZE_T Offset,
         IN gctPOINTER Logical,
-        IN gctUINT32 Bytes,
+        IN gctSIZE_T Bytes,
         IN gceCACHEOPERATION Operation
         );
 
@@ -396,6 +398,40 @@ typedef struct _gcsALLOCATOR_OPERATIONS
 }
 gcsALLOCATOR_OPERATIONS;
 
+/* defination of allocator operations wrapper*/
+#define gcmALLOCATOR_Alloc(Allocator, Mdl, NumPages, Flag)     \
+            (Allocator)->ops->Alloc((Allocator), (Mdl), (NumPages), (Flag))
+
+#define gcmALLOCATOR_Free(Allocator, Mdl)      \
+            (Allocator)->ops->Free((Allocator), (Mdl))
+
+#define gcmALLOCATOR_Mmap(Allocator, Mdl, Cacheable, skipPages, numPages, vma) \
+            (Allocator)->ops->Mmap((Allocator), (Mdl), (Cacheable), (skipPages), (numPages), (vma))
+
+#define gcmALLOCATOR_MapUser(Allocator, Mdl, MdlMap, Cacheable)    \
+            (Allocator)->ops->MapUser((Allocator), (Mdl), (MdlMap), (Cacheable))
+
+#define gcmALLOCATOR_UnmapUser(Allocator, Mdl, MdlMap, Size)   \
+            (Allocator)->ops->UnmapUser((Allocator), (Mdl), (MdlMap), (Size))
+
+#define gcmALLOCATOR_MapKernel(Allocator, Mdl, Offset, Bytes, Logical) \
+            (Allocator)->ops->MapKernel((Allocator), (Mdl), (Offset), (Bytes), (Logical))
+
+#define gcmALLOCATOR_UnmapKernel(Allocator, Mdl, Logical) \
+            (Allocator)->ops->UnmapKernel((Allocator), (Mdl), (Logical))
+
+#define gcmALLOCATOR_Cache(Allocator, Mdl, Offset, Logical, Bytes, Operation)  \
+            (Allocator)->ops->Cache((Allocator), (Mdl), (Offset), (Logical), (Bytes), (Operation))
+
+#define gcmALLOCATOR_Physical(Allocator, Mdl, Offset, Phys)    \
+            (Allocator)->ops->Physical((Allocator), (Mdl), (Offset), (Phys))
+
+#define gcmALLOCATOR_Attach(Allocator, Desc, Mdl)  \
+            (Allocator)->ops->Attach((Allocator), (Desc), (Mdl))
+
+#define gcmALLOCATOR_GetSGT(Allocator, Mdl, Offset, Bytes, SGT) \
+            (Allocator)->ops->GetSGT((Allocator), (Mdl), (Offset), (Bytes), (SGT))
+
 typedef struct _gcsALLOCATOR
 {
     /* Pointer to gckOS Object. */
@@ -465,6 +501,7 @@ typedef union _gcsATTACH_DESC
         unsigned long           size;
         const char *            name;
         int                     requested;
+        gctBOOL                 root;
     }
     reservedMem;
 }
@@ -526,11 +563,12 @@ OnError:
 }
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION (3,6,0)) || \
-	(LINUX_VERSION_CODE < KERNEL_VERSION (5,4,0) && \
-		!defined (ARCH_HAS_SG_CHAIN) && \
-		!defined (CONFIG_ARCH_HAS_SG_CHAIN)) || \
-	(LINUX_VERSION_CODE >= KERNEL_VERSION (5,4,0) && \
-		defined (CONFIG_ARCH_NO_SG_CHAIN))
+        (LINUX_VERSION_CODE < KERNEL_VERSION (5,4,0) && \
+                !defined (ARCH_HAS_SG_CHAIN) && \
+                !defined (CONFIG_ARCH_HAS_SG_CHAIN)) || \
+        (LINUX_VERSION_CODE >= KERNEL_VERSION (5,4,0) && \
+                defined (CONFIG_ARCH_NO_SG_CHAIN))
+
 int
 alloc_sg_list_from_pages(
     struct scatterlist **sgl,

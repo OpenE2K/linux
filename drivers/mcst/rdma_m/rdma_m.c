@@ -1,6 +1,6 @@
 /*
  * BUGS:
- * - E2C+, E90S: rfsm mode can not be used in a table mode.
+ * - E90S: rfsm mode can not be used in a table mode.
  */
 
 #include <linux/kernel.h>
@@ -165,7 +165,7 @@ unsigned int SHIFT_IOL_CSR;
 unsigned int SHIFT_IO_CSR;
 unsigned int SHIFT_CH0_IDT;	/* RDMA ID/Type E90		*/
 unsigned int SHIFT_CH1_IDT;	/* RDMA ID/Type E90		*/
-unsigned int SHIFT_CH_IDT;	/* RDMA ID/Type ES2/E90S	*/
+unsigned int SHIFT_CH_IDT;	/* RDMA ID/Type E90S	*/
 unsigned int SHIFT_CS;		/* RDMA Control/Status 000028a0	*/
 unsigned int SHIFT_DD_ID;	/* Data Destination ID 		*/
 unsigned int SHIFT_DMD_ID;	/* Data Message Destination ID 	*/
@@ -530,7 +530,7 @@ unsigned int	rdc_byte;
 void WRR_rdma(unsigned int reg, unsigned int node, unsigned int val)
 {
 	/*
-	 * SIC machine (E2C+, E2S, R1000)
+	 * SIC machine (E2S, R1000)
 	 */
 	if (HAS_MACHINE_L_SIC)
 		sic_write_node_nbsr_reg_rdma(node, reg, val);
@@ -543,7 +543,7 @@ unsigned int RDR_rdma(unsigned int reg, unsigned int node)
 {
 	unsigned int val;
 	/*
-	 * SIC machine (E2C+, E2S, R1000)
+	 * SIC machine (E2S, R1000)
 	 */
 	if (HAS_MACHINE_L_SIC)
 		val = sic_read_node_nbsr_reg_rdma(node, reg);
@@ -1368,12 +1368,9 @@ static int __init rdma_init(void)
 		 RDMA_MAX_NUMIOLINKS);
 	INFO_MSG("E90S. Loopback mode is not implemented.\n");
 #else 
-	INFO_MSG("I am worked on E2C+/E2S, NODE_NUMIOLINKS: %d "
+	INFO_MSG("I am worked on E2S, NODE_NUMIOLINKS: %d "
 		 "MAX_NUMIOLINKS: %d\n", RDMA_NODE_IOLINKS,
 		 RDMA_MAX_NUMIOLINKS);
-	if (IS_MACHINE_ES2) {
-		INFO_MSG("E2C+. Loopback mode is not implemented.\n");
-	}
 	if (IS_MACHINE_E2S) {
 		INFO_MSG("E2S. Loopback mode implemented.\n");
 	}

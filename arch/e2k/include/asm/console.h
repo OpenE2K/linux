@@ -8,6 +8,7 @@
 #include <linux/init.h>
 #include <asm/types.h>
 #include <stdarg.h>
+#include <asm/cpu_regs.h>
 #include <asm/machdep.h>
 #include <asm-l/console.h>
 #include <asm/kvm/guest/console.h>

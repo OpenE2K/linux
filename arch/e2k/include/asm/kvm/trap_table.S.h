@@ -252,7 +252,7 @@
  * rtmp0/rtmp1		two temporary registers (for example %dr20, %dr21)
  */
 
-.macro	SAVE_GREGS_PAIR_COND_V2 gpair_lo, gpair_hi, kreg_lo, kreg_hi, rbase, \
+.macro	SAVE_GREGS_PAIR_COND_V3 gpair_lo, gpair_hi, kreg_lo, kreg_hi, rbase, \
 				predSAVE, rtmp0, rtmp1
 {
 	strd,2	%dg\gpair_lo, [\rbase + (TAGGED_MEM_STORE_REC_OPC + \
@@ -270,7 +270,7 @@
 	sth	\rtmp1, [\rbase + (\kreg_hi * GLOB_REG_SIZE + \
 						GLOB_REG_EXT)] ? \predSAVE;
 }
-.endm	/* SAVE_GREGS_PAIR_COND_V2 */
+.endm	/* SAVE_GREGS_PAIR_COND_V3 */
 
 /* Bug 116851 - all strqp must be speculative if dealing with tags */
 .macro	SAVE_GREGS_PAIR_COND_V5 gpair_lo, gpair_hi, kreg_lo, kreg_hi, rbase, \
@@ -326,15 +326,15 @@
 #ifdef	CONFIG_KVM_HOST_MODE
 /* it is host kernel with virtualization support */
 /* or paravirtualized host and guest kernel */
-.macro	DO_SAVE_HOST_GREGS_V2 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
+.macro	DO_SAVE_HOST_GREGS_V3 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
 				drti, predSAVE, drtmp, rtmp0, rtmp1
 	/* drtmp: thread_info->h_gregs.g */
 	addd	\drti, TI_HOST_GREGS_TO_VIRT, \drtmp ? \predSAVE;
-	SAVE_GREGS_PAIR_COND_V2 \gvcpu_lo, \gvcpu_hi, \hvcpu_lo, \hvcpu_hi, \
+	SAVE_GREGS_PAIR_COND_V3 \gvcpu_lo, \gvcpu_hi, \hvcpu_lo, \hvcpu_hi, \
 		\drtmp,		/* thread_info->h_gregs.g base address */ \
 		\predSAVE, \
 		\rtmp0, \rtmp1
-.endm	/* DO_SAVE_HOST_GREGS_V2 */
+.endm	/* DO_SAVE_HOST_GREGS_V3 */
 
 .macro	DO_SAVE_HOST_GREGS_V5 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
 				drti, predSAVE, drtmp
@@ -345,13 +345,13 @@
 		\predSAVE
 .endm	/* DO_SAVE_HOST_GREGS_V5 */
 
-.macro	SAVE_HOST_GREGS_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
-	DO_SAVE_HOST_GREGS_V2 \
+.macro	SAVE_HOST_GREGS_V3 drti, predSAVE, drtmp, rtmp0, rtmp1
+	DO_SAVE_HOST_GREGS_V3 \
 		GUEST_VCPU_STATE_GREG, GUEST_VCPU_STATE_UNUSED_GREG, \
 		VCPU_STATE_GREGS_PAIRS_INDEX, VCPU_STATE_GREGS_PAIRS_HI_INDEX, \
 		\drti, \predSAVE, \
 		\drtmp, \rtmp0, \rtmp1
-.endm	/* SAVE_HOST_GREGS_V2 */
+.endm	/* SAVE_HOST_GREGS_V3 */
 
 .macro	SAVE_HOST_GREGS_V5 drti, predSAVE, drtmp
 	DO_SAVE_HOST_GREGS_V5 \
@@ -361,9 +361,9 @@
 		\drtmp,
 .endm	/* SAVE_HOST_GREGS_V5 */
 
-.macro	SAVE_HOST_GREGS_TO_VIRT_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
-		SAVE_HOST_GREGS_V2 \drti, \predSAVE, \drtmp, \rtmp0, \rtmp1
-.endm	/* SAVE_HOST_GREGS_TO_VIRT_V2 */
+.macro	SAVE_HOST_GREGS_TO_VIRT_V3 drti, predSAVE, drtmp, rtmp0, rtmp1
+		SAVE_HOST_GREGS_V3 \drti, \predSAVE, \drtmp, \rtmp0, \rtmp1
+.endm	/* SAVE_HOST_GREGS_TO_VIRT_V3 */
 
 .macro	SAVE_HOST_GREGS_TO_VIRT_V5 drti, predSAVE, drtmp
 		SAVE_HOST_GREGS_V5 \drti, \predSAVE, \drtmp
@@ -378,13 +378,13 @@
 #include <asm/kvm/guest/trap_table.S.h>
 #else	/* ! CONFIG_KVM_HOST_MODE && ! CONFIG_KVM_GUEST_KERNEL */
 /* It is native host kernel without any virtualization */
-.macro	SAVE_HOST_GREGS_TO_VIRT_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
+.macro	SAVE_HOST_GREGS_TO_VIRT_V3 drti, predSAVE, drtmp, rtmp0, rtmp1
 	/* not used */
-.endm	/* SAVE_VCPU_STATE_GREGS */
+.endm	/* SAVE_HOST_GREGS_TO_VIRT_V3 */
 
 .macro	SAVE_HOST_GREGS_TO_VIRT_V5 drti, predSAVE, drtmp
 	/* not used */
-.endm	/* SAVE_GREGS_TO_VIRT */
+.endm	/* SAVE_HOST_GREGS_TO_VIRT_V5 */
 
 .macro	SAVE_HOST_GREGS_TO_VIRT_UNEXT drti, drtmp
 	/* not used */

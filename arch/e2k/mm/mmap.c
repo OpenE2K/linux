@@ -76,12 +76,6 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 #endif
 
 	hole_size = 0;
-#ifdef	CONFIG_DRM
-	if (cpu_has(CPU_HWBUG_PIO_READS)) {
-		if (filp && filp->f_op && (filp->f_op->open == &drm_open))
-			hole_size = 15 * PAGE_SIZE;
-	}
-#endif	/* CONFIG_DRM */
 
 	info.flags = 0;
 	info.length = len + 2 * hole_size;

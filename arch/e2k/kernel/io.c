@@ -23,7 +23,7 @@ asmlinkage int sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 }
 
 /*
- * E2C+/E2C/E2S/E8C/E1C+ configuration area access
+ * Configuration area access
  */
 
 static inline unsigned long do_get_domain_pci_conf_base(unsigned int domain)

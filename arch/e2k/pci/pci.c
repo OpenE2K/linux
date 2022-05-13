@@ -13,6 +13,7 @@
 #include <asm/mman.h>
 #include <asm/io.h>
 #include <asm/smp.h>
+#include <asm/pgtable_def.h>
 
 #include <asm-l/pci_l.h>
 
@@ -23,6 +24,134 @@
 #else
 #define DBG(x...)
 #endif
+
+/* Hardware gained partial support for no_snoop mode only
+ * in iset v6 so assume conservatively that on these cpus
+ * we have such devices.
+ *
+ * Upon boot we will recheck this assumption by scanning
+ * through all PCIe devices and checking whether they declare
+ * "Enable No Snoop" (see check_for_no_snoop_devices()). */
+bool use_pcie_no_snoop = (CONFIG_CPU_ISET >= 6 || CONFIG_CPU_ISET == 0);
+EXPORT_SYMBOL(use_pcie_no_snoop);
+
+static bool use_pcie_no_snoop_forced = false;
+
+static int __init pcie_no_snoop_setup(char *str)
+{
+	if (!strcmp(str, "enable")) {
+		use_pcie_no_snoop = true;
+	} else if (!strcmp(str, "disable")) {
+		use_pcie_no_snoop = false;
+	} else {
+		pr_warn("Unable to parse pcie_no_snoop=\n");
+		return 0;
+	}
+
+	use_pcie_no_snoop_forced = true;
+	return 1;
+}
+__setup("pcie_no_snoop=", pcie_no_snoop_setup);
+
+/*
+ * If PCIe No Snoop is disabled in cmdline then propagate it into actual PCI
+ */
+static void fixup_pcie_no_snoop(struct pci_dev *dev)
+{
+	if (!use_pcie_no_snoop_forced || use_pcie_no_snoop)
+		return;
+
+	if (dev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+	    dev->device == PCI_DEVICE_ID_MCST_IMG_GPU_GX6650) {
+		/* Imagination GPU case */
+		u16 reg;
+
+		if (cpu_has(CPU_HWBUG_IMGGPU_NOSNOOP_ALWAYS_ON)) {
+			pci_err(dev, "WARNING: IMG GPU GX6650 does not support disabling PCIe No Snoop on e2c3.rev0\n");
+			return;
+		}
+
+		if (!pci_read_config_word(dev, 0x40, &reg) &&
+				!pci_write_config_word(dev, 0x40, reg | 0x10)) {
+			pci_info(dev, "clearing PCIe Enable No Snoop according to setting in cmdline\n");
+		} else {
+			pci_err(dev, "WARNING: failed to clear PCIe No Snoop\n");
+		}
+	} else if (pci_is_pcie(dev)) {
+		/* Normal case */
+		if (!pcie_capability_clear_word(dev, PCI_EXP_DEVCTL,
+				PCI_EXP_DEVCTL_NOSNOOP_EN)) {
+			pci_info(dev, "clearing PCIe Enable No Snoop according to setting in cmdline\n");
+		} else {
+			pci_err(dev, "WARNING: failed to clear PCIe No Snoop\n");
+		}
+	}
+}
+DECLARE_PCI_FIXUP_EARLY(PCI_ANY_ID, PCI_ANY_ID, fixup_pcie_no_snoop);
+
+int check_for_no_snoop_devices(void)
+{
+	struct pci_dev *dev = NULL;
+	bool found;
+
+	if (use_pcie_no_snoop_forced) {
+		pr_info("PCIe Enable No Snoop %s from cmdline\n",
+				(use_pcie_no_snoop) ? "enabled" : "disabled");
+		return 0;
+	}
+
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		pr_info("PCIe Enable No Snoop is not supported\n");
+		use_pcie_no_snoop = false;
+		return 0;
+	}
+
+	if (cpu_has(CPU_HWBUG_IMGGPU_NOSNOOP_ALWAYS_ON) &&
+			IS_ENABLED(CONFIG_MCST_GPU_IMGTEC)) {
+		/* Conservativaly assume that Imagination 3D always uses no_snoop */
+		pr_info("PCIe Enable No Snoop might be used by Imagination 3D driver\n");
+		return 0;
+	}
+
+	found = false;
+	for_each_pci_dev(dev) {
+		u16 reg;
+
+		/* Special casing Imagination GX6550 since in e2c3 it's
+		 * PCIe No Snoop support bit is in a wrong register */
+		if (!cpu_has(CPU_HWBUG_IMGGPU_NOSNOOP_ALWAYS_ON) &&
+				dev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+				dev->device == PCI_DEVICE_ID_MCST_IMG_GPU_GX6650) {
+			if (pci_read_config_word(dev, 0x40, &reg)) {
+				pci_warn(dev, "WARNING: failed to read HW_CTRL register from GX6650 GPU\n");
+				continue;
+			}
+
+			if (!(reg & 0x10)) {
+				/* Found device that might be using no_snoop */
+				pci_info(dev, "PCIe Enable No Snoop is allowed\n");
+				found = true;
+			}
+		}
+
+		if (pci_is_pcie(dev) &&
+		    !pcie_capability_read_word(dev, PCI_EXP_DEVCTL, &reg) &&
+		    (reg & PCI_EXP_DEVCTL_NOSNOOP_EN)) {
+			/* Found device that might be using no_snoop */
+			pci_info(dev, "PCIe Enable No Snoop is allowed\n");
+			found = true;
+		}
+	}
+	if (found)
+		return 0;
+
+	/* No devices found that might use no_snoop mode */
+	use_pcie_no_snoop = false;
+	pr_info("There are no devices using PCIe Enable No Snoop\n");
+	return 0;
+}
+late_initcall(check_for_no_snoop_devices);
+
 
 char *pcibios_setup(char *str)
 {
@@ -383,80 +512,7 @@ static int __init pci_init(void)
 {
 	return arch_pci_init();
 }
-
 arch_initcall(pci_init);
-
-/*
- * We need to avoid collisions with `mirrored' VGA ports
- * and other strange ISA hardware, so we always want the
- * addresses to be allocated in the 0x000-0x0ff region
- * modulo 0x400.
- *
- * Why? Because some silly external IO cards only decode
- * the low 10 bits of the IO address. The 0x00-0xff region
- * is reserved for motherboard devices that decode all 16
- * bits, so it's ok to allocate at, say, 0x2800-0x28ff,
- * but we want to try to avoid allocating at 0x2900-0x2bff
- * which might have be mirrored at 0x0100-0x03ff..
- */
-resource_size_t
-pcibios_align_resource(void *data, const struct resource *res,
-		       resource_size_t size, resource_size_t align)
-{
-	resource_size_t start = res->start;
-
-	if (res->flags & IORESOURCE_IO) {
-		if (start & 0x300)
-			start = (start + 0x3ff) & ~0x3ff;
-	}
-
-	return start;
-}
-
-void pcibios_set_master(struct pci_dev *dev)
-{
-	u8 lat;
-	pci_read_config_byte(dev, PCI_LATENCY_TIMER, &lat);
-	if (lat < 16)
-		lat = (64 <= pcibios_max_latency) ? 64 : pcibios_max_latency;
-	else if (lat > pcibios_max_latency)
-		lat = pcibios_max_latency;
-	else
-		return;
-	printk(KERN_DEBUG "PCI: Setting latency timer of device %s to %d\n", pci_name(dev), lat);
-	pci_write_config_byte(dev, PCI_LATENCY_TIMER, lat);
-}
-
-int pci_mmap_page_range(struct pci_dev *dev, int bar,
-			struct vm_area_struct *vma,
-			enum pci_mmap_state mmap_state, int write_combine)
-{
-	unsigned long prot;
-
-	/* I/O space cannot be accessed via normal processor loads and
-	 * stores on this platform.
-	 */
-	if (mmap_state == pci_mmap_io)
-		return -EINVAL;
-
-	/* Leave vm_pgoff as-is, the PCI space address is the physical
-	 * address on this platform.
-	 */
-
-	prot = pgprot_val(vma->vm_page_prot);
-	if (!write_combine || unlikely(no_writecombine))
-		prot = _PAGE_SET_MEM_TYPE(prot, EXT_CONFIG_MT);
-	else
-		prot = _PAGE_SET_MEM_TYPE(prot, EXT_PREFETCH_MT);
-	vma->vm_page_prot = __pgprot(prot);
-
-	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
-			     vma->vm_end - vma->vm_start,
-			     vma->vm_page_prot))
-		return -EAGAIN;
-
-	return 0;
-}
 
 #if	HAVE_PCI_LEGACY
 /**
@@ -483,14 +539,14 @@ pci_mmap_legacy_page_range(struct pci_bus *bus, struct vm_area_struct *vma,
 	vma->vm_pgoff += addr >> PAGE_SHIFT;
 	vma->vm_page_prot = prot;
 
-	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+	if (io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 			    size, vma->vm_page_prot))
 		return -EAGAIN;
 	return 0;
 }
 
 /**
- * ia64_pci_legacy_read - read from legacy I/O space
+ * pci_legacy_read - read from legacy I/O space
  * @bus: bus to read
  * @port: legacy port value
  * @val: caller allocated storage for returned value
@@ -523,7 +579,7 @@ int pci_legacy_read(struct pci_bus *bus, loff_t port, u32 *val, size_t size)
 }
 
 /**
- * ia64_pci_legacy_write - perform a legacy I/O write
+ * pci_legacy_write - perform a legacy I/O write
  * @bus: bus pointer
  * @port: port to write
  * @val: value to write

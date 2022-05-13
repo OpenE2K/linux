@@ -30,7 +30,7 @@
 typedef enum inject_caller {
 	FROM_HOST_INJECT = 1 << 0,
 	FROM_PV_VCPU_TRAP_INJECT = 1 << 1,
-	FROM_PV_VCPU_SYSCALL_INJECT = 1 << 2,
+	FROM_PV_VCPU_SYSCALL_INJECT = 1 << 2
 } inject_caller_t;
 
 #ifdef	CONFIG_VIRTUALIZATION
@@ -52,12 +52,6 @@ typedef enum inject_caller {
 #endif	/* CONFIG_VIRTUALIZATION */
 
 #ifdef __KERNEL__
-
-/* some global registers are used to support virtualization mode */
-/* (see usage and real numbers at asm/glob_regs.h) */
-typedef struct host_gregs {
-	struct e2k_greg g[HOST_KERNEL_GREGS_PAIRS_SIZE];
-} host_gregs_t;
 
 /*
  * We could check CR.pm and TIR.ip here, but that is not needed
@@ -223,6 +217,8 @@ static inline void atomic_load_osgd_to_gd(void)
 #define	is_call_from_guest_kernel_IP(cr0_hi, cr1_lo, ignore_IP)		\
 		((!(ignore_IP)) ? is_call_from_guest_kernel(cr0_hi, cr1_lo) : \
 			from_guest_kernel_mode(cr1_lo))
+#define	call_from_guest_kernel(regs)					\
+		is_call_from_guest_kernel((regs)->crs.cr0_hi, (regs)->crs.cr1_lo)
 
 #define	is_trap_on_user(regs, __HOST__)					\
 		((__HOST__) ?						\
@@ -464,6 +460,7 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 			from_kernel_mode(cr1_lo))
 #define	is_call_from_guest_kernel(cr0_hi, cr1_lo)		false
 #define	is_call_from_guest_kernel_IP(cr0_hi, cr1_lo, ignore_IP)	false
+#define	call_from_guest_kernel(regs)				false
 
 #define	is_call_from_user(cr0_hi, cr1_lo, __HOST__)			\
 		is_call_from_host_user(cr0_hi, cr1_lo)
@@ -591,6 +588,9 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 typedef struct pv_vcpu_ctxt {
 	inject_caller_t inject_from;	/* reason of injection */
 	int trap_no;			/* number of recursive trap */
+	int skip_frames;		/* number signal stack frame to remove */
+	int skip_traps;			/* number of traps frames to remove */
+	int skip_syscalls;		/* number of syscall frames to remove */
 	u64 sys_rval;			/* return value of guest system call */
 	e2k_psr_t guest_psr;		/* guest PSR state before trap */
 	bool irq_under_upsr;		/* is IRQ control under UOSR? */

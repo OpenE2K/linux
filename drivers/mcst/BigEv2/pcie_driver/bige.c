@@ -35,6 +35,9 @@
 
 #define DEC_IO_SIZE             (GOOGLE_DEC_REGS * 4) /* bytes */
 
+#define VCFG_OFFSET                     0x40
+#define VCFG_PMC_POWER_HINT             0x00000008
+
 static const int DecHwId[] = {0x6732};
 unsigned long base_port = -1;
 
@@ -422,6 +425,28 @@ static long bige_ioctl(struct file *filp, unsigned int cmd,
 
   if (err)
     return -EFAULT;
+
+    switch (cmd)
+    {
+	case BIGE_IOCT_POWER_ON_REQ:
+    {
+        int pdata;
+        pci_read_config_dword(gDev, VCFG_OFFSET, &pdata);
+        pdata = pdata & ~VCFG_PMC_POWER_HINT;
+        pci_write_config_dword(gDev, VCFG_OFFSET, pdata);
+        break;    
+    }    
+	case BIGE_IOCT_POWER_OFF_REQ:
+    {
+        int pdata;
+        pci_read_config_dword(gDev, VCFG_OFFSET, &pdata);
+        pdata = pdata | VCFG_PMC_POWER_HINT;
+        pci_write_config_dword(gDev, VCFG_OFFSET, pdata);
+        break;    
+    }
+    default:
+        return -ENOTTY;
+    }
 
 //  switch (cmd)
 //  {

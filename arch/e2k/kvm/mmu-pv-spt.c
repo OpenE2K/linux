@@ -29,6 +29,7 @@
 #include <asm/cpu_regs.h>
 #include <asm/kvm/gpid.h>
 #include <asm/kvm/switch.h>
+#include <asm/kvm/gva_cache.h>
 #include <asm/traps.h>
 
 #include "mmu_defs.h"
@@ -187,8 +188,10 @@
 })
 
 /* number of retries to handle page fault */
+#undef	PF_RETRIES_MAX_NUM
 #define	PF_RETRIES_MAX_NUM	1
 /* common number of one try and retries to handle page fault */
+#undef	PF_TRIES_MAX_NUM
 #define	PF_TRIES_MAX_NUM	(2 + PF_RETRIES_MAX_NUM)
 
 void kvm_init_gmm_root_pt(struct kvm *kvm, gmm_struct_t *new_gmm)
@@ -212,25 +215,65 @@ void kvm_fill_init_root_pt(struct kvm *kvm)
 	copy_kernel_pgd_range(root, cpu_kernel_root_pt);
 }
 
-void release_gmm_root_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+void release_gmm_root_pt(struct kvm *kvm, gmm_struct_t *gmm)
 {
-	hpa_t gmm_root, root_hpa;
+	hpa_t gmm_root, gk_root, vcpu_root;
+	struct kvm_vcpu *vcpu;
+	int r;
 
-	if (vcpu == NULL)
-		vcpu = native_current_thread_info()->vcpu;
-	if (vcpu == NULL)
-		return;
+	gmm->pt_synced = false;
 
+	spin_lock(&kvm->mmu_lock);
 	gmm_root = gmm->root_hpa;
-	KVM_BUG_ON(!VALID_PAGE(gmm_root));
+	gk_root = gmm->gk_root_hpa;
+	if (unlikely(!VALID_PAGE(gmm_root))) {
+		/* gmm root has been already released */
+		KVM_BUG_ON(VALID_PAGE(gk_root));
+		spin_unlock(&kvm->mmu_lock);
+		return;
+	}
+	KVM_BUG_ON(!VALID_PAGE(gk_root));
 
-	root_hpa = kvm_get_space_type_guest_u_root(vcpu);
-	KVM_BUG_ON(gmm_root == root_hpa);
+	if (unlikely(pv_mmu_is_init_gmm(kvm, gmm))) {
+		struct kvm_mmu_page *sp;
 
-	DebugFREE("will release gmm #%d shodow PT from root 0x%llx\n",
-		gmm->nid.nr, gmm_root);
+		/* init gmm (guest kernel root PT) is released */
+		/* well, at least some kind of correctness */
+		sp = page_header(gmm_root);
+		KVM_BUG_ON(sp->root_count != atomic_read(&kvm->online_vcpus));
+		sp->root_count = 1;	/* can be released */
+	}
 
-	mmu_release_spt_root(vcpu, gmm_root);
+	DebugFREE("will release gmm #%d shodow PT from user root 0x%llx "
+		"kernel root 0x%llx\n",
+		gmm->nid.nr, gmm_root, gk_root);
+
+	kvm_release_user_root_kernel_copy(kvm, gmm);
+	KVM_BUG_ON(VALID_PAGE(gmm->gk_root_hpa));
+
+	gmm->root_hpa = E2K_INVALID_PAGE;
+	spin_unlock(&kvm->mmu_lock);
+
+	mmu_release_spt_root(kvm, gmm_root);
+
+	mutex_lock(&kvm->lock);
+	kvm_for_each_vcpu(r, vcpu, kvm) {
+		if (vcpu == NULL)
+			continue;
+
+		spin_lock(&kvm->mmu_lock);
+		vcpu_root = kvm_get_space_type_spt_u_root(vcpu);
+		if (VALID_PAGE(vcpu_root) && vcpu_root == gmm_root) {
+			/* invalidate current VCPU SPT root */
+			kvm_set_space_type_spt_u_root(vcpu, E2K_INVALID_PAGE);
+			kvm_set_space_type_spt_os_root(vcpu,
+					pv_vcpu_get_init_gk_root_hpa(vcpu));
+			kvm_set_space_type_spt_gk_root(vcpu,
+					pv_vcpu_get_init_gk_root_hpa(vcpu));
+		}
+		spin_unlock(&kvm->mmu_lock);
+	}
+	mutex_unlock(&kvm->lock);
 }
 
 void kvm_arch_init_vm_mmap(struct kvm *kvm)
@@ -252,7 +295,7 @@ void kvm_arch_init_vm_mmap(struct kvm *kvm)
 void kvm_arch_free_memslot(struct kvm *kvm, struct kvm_memory_slot *free,
 				struct kvm_memory_slot *dont)
 {
-	const pt_struct_t *pt_struct = kvm_get_mmu_host_pt_struct(kvm);
+	const pt_struct_t *pt_struct = mmu_pt_get_host_pt_struct(kvm);
 	user_area_t *guest_area;
 	int i;
 	unsigned long base_gfn;
@@ -274,7 +317,7 @@ void kvm_arch_free_memslot(struct kvm *kvm, struct kvm_memory_slot *free,
 		const pt_level_t *pt_level;
 		int level = i + 1;
 
-		pt_level = &pt_struct->levels[level];
+		pt_level = get_pt_struct_level_on_id(pt_struct, level);
 		if (!dont || free->arch.rmap[i] != dont->arch.rmap[i]) {
 			kvfree(free->arch.rmap[i]);
 			DebugKVMVM("free slot ID %d RMAP %px\n",
@@ -300,7 +343,7 @@ void kvm_arch_free_memslot(struct kvm *kvm, struct kvm_memory_slot *free,
 int kvm_arch_create_memslot(struct kvm *kvm, struct kvm_memory_slot *slot,
 				unsigned long npages)
 {
-	const pt_struct_t *pt_struct = kvm_get_mmu_host_pt_struct(kvm);
+	const pt_struct_t *pt_struct = mmu_pt_get_host_pt_struct(kvm);
 	int i;
 	gfn_t bgfn = slot->base_gfn;
 
@@ -319,17 +362,15 @@ int kvm_arch_create_memslot(struct kvm *kvm, struct kvm_memory_slot *slot,
 			/* no more levels */
 			break;
 
-		pt_level = &pt_struct->levels[level];
-		if (!is_page_pt_level(pt_level) &&
-				!is_huge_pt_level(pt_level))
+		pt_level = get_pt_struct_level_on_id(pt_struct, level);
+		if (!is_page_pt_level(pt_level) && !is_huge_pt_level(pt_level))
 			/* nothing pages on the level */
 			continue;
 
 		lpages = gfn_to_index(bgfn + npages - 1, bgfn, pt_level) + 1;
 
-		slot->arch.rmap[i] =
-			kvzalloc(lpages * sizeof(*slot->arch.rmap[i]),
-					GFP_KERNEL);
+		slot->arch.rmap[i] = kvzalloc(lpages * sizeof(*slot->arch.rmap[i]),
+						GFP_KERNEL);
 		if (!slot->arch.rmap[i])
 			goto out_free;
 		DebugKVM("created RMAP %px to map 0x%x pages on PT level #%d\n",
@@ -509,7 +550,7 @@ e2k_addr_t kvm_guest_kernel_addr_to_hva(struct kvm_vcpu *vcpu,
 		KVM_BUG_ON(address >= NATIVE_TASK_SIZE);
 		return address;
 	}
-	gpa = e2k_gva_to_gpa(vcpu, address, ACC_WRITE_MASK, NULL);
+	gpa = mmu_pt_gva_to_gpa(vcpu, address, ACC_WRITE_MASK, NULL, NULL);
 	if (gpa == UNMAPPED_GVA) {
 		pr_err("%s(): address 0x%lx already unmapped or invalid\n",
 			__func__, address);
@@ -691,6 +732,8 @@ int kvm_pv_activate_guest_mm(struct kvm_vcpu *vcpu,
 	DebugAGMM("proces #%d the new gmm #%d\n",
 		gti->gpid->nid.nr, new_gmm->nid.nr);
 
+	gti->curr_ctx_key = 0;
+
 	new_gmm->u_pptb = u_phys_ptb;
 	DebugKVMSWH("VCPU #%d guest user mm #%d root PT base: 0x%llx\n",
 		vcpu->vcpu_id, new_gmm->nid.nr, u_phys_ptb);
@@ -722,21 +765,12 @@ int kvm_pv_prepare_guest_mm(struct kvm_vcpu *vcpu,
 	DebugKVMSWH("VCPU #%d guest user mm #%d root PT base: 0x%llx\n",
 		vcpu->vcpu_id, new_gmm->nid.nr, u_phys_ptb);
 
-	if (is_shadow_paging(vcpu)) {
-		ret = kvm_pv_mmu_prepare_u_gmm(vcpu, new_gmm, u_phys_ptb);
-		if (ret != 0)
-			goto failed;
-		if (vcpu->arch.is_hv) {
-			KVM_BUG_ON(true);
-		} else if (vcpu->arch.is_pv) {
-			/* new gmm will setup as active while switch to */
-			;
-		} else {
-			KVM_BUG_ON(true);
-		}
-	} else {
-		KVM_BUG_ON(true);
-	}
+	KVM_BUG_ON(!is_shadow_paging(vcpu));
+	KVM_BUG_ON(vcpu->arch.is_hv);
+
+	ret = kvm_pv_mmu_prepare_u_gmm(vcpu, new_gmm, u_phys_ptb);
+	if (ret != 0)
+		goto failed;
 
 	KVM_BUG_ON(!new_gmm->pt_synced);
 
@@ -777,7 +811,7 @@ int write_to_guest_pt_phys(struct kvm_vcpu *vcpu, gpa_t gpa,
 			__func__, gpte, pgprot_val(*gpte), gpa);
 		return ret;
 	}
-	kvm_page_track_write(vcpu, NULL, gpa, (const void *)gpte, bytes);
+	kvm_page_track_write(vcpu, NULL, gpa, (const void *)gpte, bytes, 0);
 
 	return 1;	/* fault handled and recovered */
 }
@@ -804,7 +838,8 @@ int kvm_guest_addr_to_host(void **addr)
 	return 0;
 }
 
-void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size, bool need_inject)
+void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, bool is_write,
+				int size, bool need_inject)
 {
 	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
 	unsigned long hva;
@@ -824,10 +859,11 @@ void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size, bool need_inject)
 	KVM_BUG_ON(vcpu == NULL || vcpu->arch.is_hv);
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (e2k_addr_t)guest_ptr,
-				false, &exception);
+				is_write, &exception);
 	if (kvm_is_error_hva(hva)) {
 		DebugKVM("failed to find GPA for dst %lx GVA, "
-			"inject page fault to guest\n", guest_ptr);
+			"inject page fault to guest is %d\n",
+			guest_ptr, need_inject);
 		if (need_inject)
 			kvm_vcpu_inject_page_fault(vcpu, (void *)guest_ptr,
 					&exception);
@@ -840,6 +876,10 @@ void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size, bool need_inject)
 static void inject_data_page_fault(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 					trap_cellar_t *tcellar)
 {
+	tc_cond_t cond;
+
+	cond = tcellar->condition;
+	tcellar->condition = tc_set_as_kvm_passed(cond);
 	kvm_inject_pv_vcpu_tc_entry(vcpu, tcellar);
 	kvm_inject_data_page_exc(vcpu, regs);
 }
@@ -871,7 +911,7 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	tc_opcode_t opcode;
 	unsigned mas;
 	bool store, page_boundary = false;
-	u32 error_code = 0;
+	u32 error_code = PFERR_PT_FAULT_MASK;
 	bool nonpaging = !is_paging(vcpu);
 	kvm_pfn_t pfn;
 	gfn_t gfn;
@@ -879,7 +919,8 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	e2k_addr_t hva;
 	int bytes;
 	intc_mu_state_t *mu_state;
-	int r, pfres, try, fmt;
+	int r, pfres, fmt, retry;
+	long try;
 
 	address = tcellar->address;
 	cond = tcellar->condition;
@@ -889,7 +930,7 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	fmt = TC_COND_FMT_FULL(cond);
 	KVM_BUG_ON(AS(opcode).fmt == 0 || AS(opcode).fmt == 6);
 	bytes = tc_cond_to_size(cond);
-	PFRES_SET_ACCESS_SIZE(error_code, bytes);
+	error_code = PFRES_SET_ACCESS_SIZE(error_code, bytes);
 	mas = AS(cond).mas;
 	store = tc_cond_is_store(cond, machine.native_iset_ver);
 	DebugNONP("page fault on guest address 0x%lx fault type 0x%x\n",
@@ -937,6 +978,9 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	} else if (AS(ftype).page_miss) {
 		error_code |= PFERR_NOT_PRESENT_MASK;
 		DebugSPF("page miss fault type\n");
+	} else if (AS(ftype).illegal_page) {
+		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_ILLEGAL_PAGE_MASK;
+		DebugSPF("page miss fault type\n");
 	} else if (nonpaging) {
 		error_code |= PFERR_NOT_PRESENT_MASK;
 		DebugSPF("fault type at nonpaging mode\n");
@@ -953,11 +997,20 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	} else {
 		DebugSPF("page fault at kernel mode\n");
 	}
+	if (AS(cond).spec) {
+		error_code |= PFERR_SPEC_MASK;
+		DebugSPF("speculative operation\n");
+	}
 
 	if (AS(ftype).nwrite_page) {
 		error_code &= ~PFERR_NOT_PRESENT_MASK;
 		error_code |= PFERR_PRESENT_MASK | PFERR_WRITE_MASK;
 		DebugSPF("not write page fault type\n");
+	}
+
+	if (is_hw_access_page_fault(tcellar)) {
+		error_code |= PFERR_HW_ACCESS_MASK;
+		DebugSPF("hardware access page fault type\n");
 	}
 
 	if (mas == MAS_WAIT_LOCK ||
@@ -977,14 +1030,29 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		DebugSPF("priviled page fault type\n");
 	}
 
+	if (regs->dont_inject) {
+		error_code |= PFERR_DONT_INJECT_MASK;
+	}
+
+	regs->is_guest_user = !pv_vcpu_trap_on_guest_kernel(regs) &&
+				is_guest_user_gva(address) && !nonpaging;
+	if (regs->is_guest_user)
+		error_code |= PFERR_USER_MASK;
+	if (is_guest_user_gva(address) && !nonpaging)
+		error_code |= PFERR_USER_ADDR_MASK;
+
 	mu_state = get_intc_mu_state(vcpu);
 	mu_state->may_be_retried = true;
-	mu_state->ignore_notifier = true;
+	mu_state->ignore_notifier = false;
+
+	/* clear flag to detect faulted address without update of PT entries */
+	kvm_clear_request(KVM_REQ_ADDR_FLUSH, vcpu);
 
 	try = 0;
+	retry = 0;
 	do {
-		pfres = vcpu->arch.mmu.page_fault(vcpu, address, error_code,
-						  false, &gfn, &pfn);
+		pfres = mmu_pt_page_fault(vcpu, address, error_code,
+					  false, &gfn, &pfn);
 		if (page_boundary) {
 			int pfres_hi;
 			e2k_addr_t address_hi;
@@ -993,8 +1061,8 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 			 * handle next page
 			 */
 			address_hi = PAGE_ALIGN(address);
-			pfres_hi = vcpu->arch.mmu.page_fault(vcpu, address_hi,
-					error_code, false, &gfn, &pfn);
+			pfres_hi = mmu_pt_page_fault(vcpu, address_hi, error_code,
+						     false, &gfn, &pfn);
 
 			if (pfres == PFRES_ERR || pfres_hi == PFRES_ERR)
 				pfres = PFRES_ERR;
@@ -1004,6 +1072,9 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 			else if (pfres == PFRES_INJECTED ||
 					pfres_hi == PFRES_INJECTED)
 				pfres = PFRES_INJECTED;
+			else if (pfres == PFRES_DONT_INJECT ||
+					pfres_hi == PFRES_DONT_INJECT)
+				pfres = PFRES_DONT_INJECT;
 			else if (pfres == PFRES_WRITE_TRACK ||
 					pfres_hi == PFRES_WRITE_TRACK)
 				pfres = PFRES_WRITE_TRACK;
@@ -1017,8 +1088,21 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 			/* cannot be retried */
 			break;
 		}
+		retry++;
 		try++;
-	} while (try < PF_TRIES_MAX_NUM);
+#ifdef	KVM_ARCH_WANT_MMU_NOTIFIER
+		if ((try & 0xfff) == 0) {
+			pr_err("%s() too many retries #%ld : count is %ld "
+				"seq from %ld to %ld\n",
+				__func__, try, vcpu->kvm->mmu_notifier_count,
+				mu_state->notifier_seq, vcpu->kvm->mmu_notifier_seq);
+		}
+#endif	/* KVM_ARCH_WANT_MMU_NOTIFIER */
+		if (retry >= PF_TRIES_MAX_NUM) {
+			kvm_mmu_notifier_wait(vcpu->kvm, mu_state->notifier_seq);
+			retry = 0;
+		}
+	} while (true);
 
 	DebugNONP("mmu.page_fault() returned %d\n", pfres);
 	if (pfres == PFRES_NO_ERR) {
@@ -1028,6 +1112,9 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		inject_data_page_fault(vcpu, regs, tcellar);
 		r = 2;
 		goto out;	/* fault injected to guest */
+	} else if (pfres == PFRES_DONT_INJECT) {
+		r = 3;
+		goto out;	/* fault cannot be injected to guest */
 	}
 	if (pfres != PFRES_WRITE_TRACK) {
 		/* error detected while page fault handling */
@@ -1046,6 +1133,10 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	gpa = gfn_to_gpa(gfn);
 	gpa |= (address & ~PAGE_MASK);
 	if (likely(bytes == sizeof(pgprot_t))) {
+		/*
+		 * TODO: Flush translation in gva cache in case of
+		 * all levels of gpt are write-protected
+		 */
 		/* highly likely it is update of protected PT entry */
 		r = write_to_guest_pt_phys(vcpu, gpa,
 				(pgprot_t *)&tcellar->data, bytes);
@@ -1071,12 +1162,21 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	}
 
 out:
-	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu)) {
-		DebugSPF("it need flush TLB, so flushing\n");
-		__flush_tlb_all();
-	} else if (nonpaging && (AS(ftype).illegal_page || AW(ftype) == 0)) {
+	if (kvm_check_request(KVM_REQ_ADDR_FLUSH, vcpu) &&
+				error_code & PFERR_ILLEGAL_PAGE_MASK) {
+		/*
+		 * The page fault type was illegal page, but old spte was not
+		 * changed while fault handling. Probably it need flush TLB
+		 * for faulted address to clear PT level entries, which masked
+		 * the new translation path that leeds to illegal page for
+		 * valid & present virtual address and its translation
+		 */
+		host_local_flush_tlb_range_and_pgtables(pv_vcpu_get_gmm(vcpu),
+			address, (page_boundary) ? address + PAGE_SIZE : address);
+	} else if (nonpaging) {
 		/* illegal PTDs/PTE can be at TLB, flush them */
-		__flush_tlb_all();
+		host_local_flush_tlb_range_and_pgtables(pv_vcpu_get_gmm(vcpu),
+			address, (page_boundary) ? address + PAGE_SIZE : address);
 	}
 
 	return r;
@@ -1087,12 +1187,12 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 				struct pt_regs *regs, tc_fault_type_t ftype,
 				const int async_instr)
 {
-	e2k_addr_t address;
+	e2k_addr_t address, pf_address;
 	gfn_t gfn;
-	u32 error_code;
+	u32 error_code = PFERR_PT_FAULT_MASK;
 	bool nonpaging = !is_paging(vcpu);
 	intc_mu_state_t *mu_state;
-	int instr_num = 1, try;
+	int instr_num = 1, instrs, try, retry;
 	int pfres, r;
 
 	if (!async_instr) {
@@ -1102,14 +1202,15 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 	} else {
 		address = AS_STRUCT(regs->ctpr2).ta_base;
 	}
+	pf_address = address;
 
 	DebugNONP("started for GVA 0x%lx\n", address);
 
 	mu_state = get_intc_mu_state(vcpu);
 	mu_state->may_be_retried = true;
-	mu_state->ignore_notifier = true;
+	mu_state->ignore_notifier = false;
 
-	if (address >= NATIVE_TASK_SIZE) {
+	if (unlikely(address >= NATIVE_TASK_SIZE)) {
 		/* IP from host virtual space range, so pass the fault */
 		/* to guest, let the guest itself handle what to do */
 		if (!async_instr) {
@@ -1121,9 +1222,14 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 		goto out;	/* fault injected to guest */
 	}
 
-	if (nonpaging) {
-		address = nonpaging_gva_to_gpa(vcpu, address, ACC_ALL, NULL);
+	regs->is_guest_user = is_guest_user_gva(address) && !nonpaging;
+	if (regs->is_guest_user)
+		error_code |= PFERR_USER_ADDR_MASK;
 
+	if (nonpaging) {
+		address = nonpaging_gva_to_gpa(vcpu, address, ACC_ALL, NULL,
+						NULL);
+		pf_address = address;
 		if (!kvm_is_visible_gfn(vcpu->kvm, gpa_to_gfn(address))) {
 			pr_err("%s(): address 0x%lx is not guest valid "
 				"physical address\n",
@@ -1133,11 +1239,12 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 		}
 	}
 
-	error_code = 0;
-	if (AS(ftype).page_miss)
+	if (likely(AS(ftype).page_miss)) {
 		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_INSTR_FAULT_MASK;
-	if (AS(ftype).illegal_page)
-		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_INSTR_PROT_MASK;
+	} else if (AS(ftype).illegal_page) {
+		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_INSTR_PROT_MASK |
+				PFERR_ILLEGAL_PAGE_MASK;
+	}
 
 	if (!async_instr && ((address & PAGE_MASK) !=
 			((address + E2K_INSTR_MAX_SIZE - 1) & PAGE_MASK))) {
@@ -1149,11 +1256,16 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 		}
 	}
 
+	/* clear flag to detect faulted address without update of PT entries */
+	kvm_clear_request(KVM_REQ_ADDR_FLUSH, vcpu);
+
+	instrs = instr_num;
 	do {
 		try = 0;
+		retry = 0;
 		do {
-			pfres = vcpu->arch.mmu.page_fault(vcpu, address,
-						error_code, false, &gfn, NULL);
+			pfres = mmu_pt_page_fault(vcpu, address, error_code,
+						  false, &gfn, NULL);
 			if (likely(pfres != PFRES_RETRY))
 				break;
 			if (!mu_state->may_be_retried) {
@@ -1161,14 +1273,18 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 				break;
 			}
 			try++;
-		} while (try < PF_TRIES_MAX_NUM);
+			retry++;
+			if (retry >= PF_TRIES_MAX_NUM) {
+				kvm_mmu_notifier_wait(vcpu->kvm,
+						      mu_state->notifier_seq);
+				retry = 0;
+			}
+		} while (true);
 
-		if (try >= PF_TRIES_MAX_NUM)
-			break;
 		if (pfres == PFRES_INJECTED)
 			break;
 		address = (address & PAGE_MASK) + PAGE_SIZE;
-	} while (--instr_num, instr_num > 0);
+	} while (--instrs, instrs > 0);
 
 
 	DebugNONP("mmu.page_fault() returned %d\n", pfres);
@@ -1193,12 +1309,21 @@ out:
 		return r;
 
 	DebugNONP("mmu.page_fault() returned %d\n", r);
-	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu)) {
-		DebugNONP("it need flush TLB, so flushing\n");
-		__flush_tlb_all();
-	} else if (nonpaging && (AS(ftype).illegal_page || AW(ftype) == 0)) {
+	if (kvm_check_request(KVM_REQ_ADDR_FLUSH, vcpu) &&
+				error_code & PFERR_ILLEGAL_PAGE_MASK) {
+		/*
+		 * The page fault type was illegal page, but old spte was not
+		 * changed while fault handling. Probably it need flush TLB
+		 * for faulted address to clear PT level entries, which masked
+		 * the new translation path that leeds to illegal page for
+		 * valid & present virtual address and its translation
+		 */
+		host_local_flush_tlb_range_and_pgtables(pv_vcpu_get_gmm(vcpu),
+			pf_address, address);
+	} else if (nonpaging) {
 		/* illegal PTDs/PTE can be at TLB, flush them */
-		__flush_tlb_all();
+		host_local_flush_tlb_range_and_pgtables(pv_vcpu_get_gmm(vcpu),
+			pf_address, address);
 	}
 	return r;
 }
@@ -1206,7 +1331,7 @@ out:
 int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		e2k_addr_t address, tc_cond_t cond, unsigned int aa_no)
 {
-	u32 error_code = 0;
+	u32 error_code = PFERR_PT_FAULT_MASK;
 	bool store;
 	bool nonpaging = !is_paging(vcpu);
 	tc_opcode_t opcode;
@@ -1214,12 +1339,12 @@ int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	gfn_t gfn;
 	int bytes;
 	intc_mu_state_t *mu_state;
-	int r, pfres, try;
+	int r, pfres, try, retry;
 
 	AW(opcode) = AS(cond).opcode;
 	KVM_BUG_ON(AS(opcode).fmt == 0 || AS(opcode).fmt == 6);
 	bytes = tc_cond_to_size(cond);
-	PFRES_SET_ACCESS_SIZE(error_code, bytes);
+	error_code = PFRES_SET_ACCESS_SIZE(error_code, bytes);
 	DebugAAUPF("page fault on guest address 0x%lx aa#%d\n",
 		address, aa_no);
 
@@ -1234,23 +1359,32 @@ int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		goto out;	/* fault injected to guest */
 	}
 
+	regs->is_guest_user = is_guest_user_gva(address);
+	if (regs->is_guest_user)
+		error_code |= PFERR_USER_ADDR_MASK;
+
 	error_code |= (PFERR_NOT_PRESENT_MASK | PFERR_FAPB_MASK);
 	store = tc_cond_is_store(cond, machine.native_iset_ver);
 	if (store) {
 		error_code |= PFERR_WRITE_MASK;
 	}
 	error_code |= PFERR_USER_MASK;
+	if (AS(cond).spec) {
+		error_code |= PFERR_SPEC_MASK;
+		DebugAAUPF("speculative operation\n");
+	}
 	DebugAAUPF("page miss fault type on %s\n",
 		(store) ? "store" : "load");
 
 	mu_state = get_intc_mu_state(vcpu);
 	mu_state->may_be_retried = true;
-	mu_state->ignore_notifier = true;
+	mu_state->ignore_notifier = false;
 
 	try = 0;
+	retry = 0;
 	do {
-		pfres = vcpu->arch.mmu.page_fault(vcpu, address, error_code,
-						  false, &gfn, &pfn);
+		pfres = mmu_pt_page_fault(vcpu, address, error_code,
+					  false, &gfn, &pfn);
 		if (likely(pfres != PFRES_RETRY))
 			break;
 		if (!mu_state->may_be_retried) {
@@ -1258,7 +1392,12 @@ int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 			break;
 		}
 		try++;
-	} while (try < PF_TRIES_MAX_NUM);
+		retry++;
+		if (retry >= PF_TRIES_MAX_NUM) {
+			kvm_mmu_notifier_wait(vcpu->kvm, mu_state->notifier_seq);
+			retry = 0;
+		}
+	} while (true);
 
 	DebugAAUPF("mmu.page_fault() returned %d\n", pfres);
 	if (pfres == PFRES_NO_ERR) {
@@ -1277,7 +1416,6 @@ int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 out:
 	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu)) {
 		DebugSPF("it need flush TLB, so flushing\n");
-		__flush_tlb_all();
 	}
 
 	return r;
@@ -1319,6 +1457,7 @@ int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, int gmmid_nr,
 	pgprot_t old_pt;
 	pgprot_t new_pt;
 	char *kaddr;
+	unsigned long flags = 0;
 	int ret;
 
 	DebugPTE("started for guest PT GPA 0x%llx\n", gpa);
@@ -1350,6 +1489,10 @@ int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, int gmmid_nr,
 		pgprot_val(old_pt) = native_pt_get_and_xchg_atomic(prot_mask,
 							(pgprotval_t *)kaddr);
 		pgprot_val(new_pt) = prot_mask;
+		if (mmu_pt_kvm_is_thp_gpmd_invalidate(vcpu, old_pt, new_pt)) {
+			/* probably it is invalidate of huge PT entry */
+			flags |= THP_INVALIDATE_WR_TRACK;
+		}
 		break;
 	case ATOMIC_GET_AND_CLEAR:
 		pgprot_val(old_pt) =
@@ -1386,23 +1529,26 @@ int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, int gmmid_nr,
 
 	kvm_vcpu_mark_page_dirty(vcpu, gfn);
 
-	if (likely(gmmid_nr >= 0 &&
-			gmmid_nr != pv_vcpu_get_init_gmm(vcpu)->nid.nr)) {
-		gmm = kvm_find_gmmid(&vcpu->kvm->arch.gmmid_table,
+	if (likely(gmmid_nr >= 0)) {
+		if (likely(gmmid_nr != pv_vcpu_get_init_gmm(vcpu)->nid.nr)) {
+			gmm = kvm_find_gmmid(&vcpu->kvm->arch.gmmid_table,
 						gmmid_nr);
-		if (gmm == NULL) {
-			pr_err("%s(): could not find gmm #%d\n",
-				__func__, gmmid_nr);
-			ret = -EINVAL;
-			goto failed_unmap;
+			if (gmm == NULL) {
+				pr_err("%s(): could not find gmm #%d\n",
+					__func__, gmmid_nr);
+				ret = -EINVAL;
+				goto failed_unmap;
+			}
+		} else {
+			/* gmm is kernel thread init_gmm */
+			gmm = pv_vcpu_get_init_gmm(vcpu);
 		}
+		kvm_page_track_write(vcpu, gmm, gpa, (const void *)&new_pt,
+				sizeof(pgprot_t), flags);
 	} else {
-		/* gmm is kernel thread init_gmm */
-		gmm = pv_vcpu_get_init_gmm(vcpu);
+		/* gmm has been already released, ignore */
+		;
 	}
-
-	kvm_page_track_write(vcpu, gmm, gpa, (const void *)&new_pt,
-				sizeof(pgprot_t));
 
 	ret = kvm_vcpu_copy_to_guest(vcpu, old_gpt, &old_pt,
 					sizeof(pgprot_t));

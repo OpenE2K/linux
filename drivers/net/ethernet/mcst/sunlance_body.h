@@ -498,7 +498,7 @@ struct lance_private {
 #endif
 #endif
 	struct napi_struct	napi;
-#ifdef CONFIG_SYSCTL
+#if defined(CONFIG_SYSCTL) && defined(CONFIG_MCST)
 	int			napi_cpu;
 	struct ctl_table_header	*ctl_table_header;
 #endif /* CONFIG_SYSCTL */

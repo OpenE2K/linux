@@ -5,7 +5,7 @@
 #include <linux/hugetlb.h>
 
 #include <asm/trace-defs.h>
-#include <asm/trace_pgtable-v2.h>
+#include <asm/trace_pgtable-v3.h>
 #include <asm/trace_pgtable-v6.h>
 #include <asm/pgtable_def.h>
 #include <asm/kvm/trace-defs.h>

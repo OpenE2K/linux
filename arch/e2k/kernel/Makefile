@@ -35,7 +35,13 @@ cmd_gen_ttable_wbs_h = rm -f $(obj)/ttable_wbs.h; \
 	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<do_sigreturn>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define DO_SIGRETURN_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h; \
 	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<return_pv_vcpu_trap>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define RETURN_PV_VCPU_TRAP_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h; \
 	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<return_pv_vcpu_syscall_fork>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define HANDLE_PV_VCPU_SYS_FORK_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h; \
-	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<return_pv_vcpu_syscall>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define HANDLE_PV_VCPU_SYS_CALL_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h
+	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<return_pv_vcpu_syscall>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define HANDLE_PV_VCPU_SYS_CALL_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h; \
+	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<finish_user_trap_handler_sw_fill>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h; \
+	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<finish_syscall_sw_fill>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define FINISH_SYSCALL_SW_FILL_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h; \
+	$(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<return_to_injected_syscall_sw_fill>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define RETURN_TO_INJECTED_SYSCALL_SW_FILL_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h
+ifeq ($(CONFIG_KVM_GUEST_KERNEL),y)
+cmd_gen_ttable_wbs_h += ; $(OBJDUMP) -me2k -d $(obj)/ttable_tmp.o | sed -n -e '/<kvm_trap_handler>/,/<*>:/ s/.*setwd wsz = \(0x[0-9a-f][0-9a-f]*\).*/\#define KVM_TRAP_HANDLER_SIZE \1/p' | sort -k 3 -g | tail -1 >> $(obj)/ttable_wbs.h
+endif
 
 $(obj)/ttable_tmp.o: $(src)/ttable_tmp.c FORCE
 
@@ -75,23 +81,16 @@ obj-y	+=	trap_table.o ttable.o page_tables.o process.o copy-hw-stacks.o \
 		entry_user.o signal.o io.o setup.o time.o sys_e2k.o traps.o \
 		systable.o ptrace.o e2k_syswork.o sys_32.o $(GDBSTART) \
 		proc_context.o backtrace.o trace_clock.o topology.o \
-		rtc.o e2k.o trace.o nmi.o getsp.o e2k-iommu.o alternative.o \
-		convert_array.o protected_mq_notify.o protected_timer_create.o \
-		protected_syscalls.o
+		rtc.o e2k.o trace.o nmi.o getsp.o alternative.o convert_array.o \
+		protected_mq_notify.o protected_timer_create.o protected_syscalls.o \
+		fill_handler_entry.o proc_context_stacks.o
 
-ifneq ($(CONFIG_CPU_HAS_FILL_INSTRUCTION),y)
-obj-y += fill_handler_entry.o
-endif
+obj-$(CONFIG_EPIC) += e2k-iommu.o
 obj-$(CONFIG_HAVE_HW_BREAKPOINT) += hw_breakpoint.o
 
 CFLAGS_process.o += -fno-tail-calls
 
 obj-y				+= cpu/
-
-ifeq ($(CONFIG_E2K_MACHINE),y)
-else
-#CFLAGS_e2k_sic.o		= $(CFLAGS_E2K_SIC)
-endif
 obj-y				+= e2k_sic.o
 
 ifdef CONFIG_FUNCTION_TRACER
@@ -104,19 +103,16 @@ CFLAGS_REMOVE_e2k_sic.o = -pg
 CFLAGS_REMOVE_hw_breakpoint.o = -pg
 endif
 
-ifdef CONFIG_CPU_ES2
-CFLAGS_REMOVE_sclkr.o = $(CFLAGS_ALL_CPUS)
-CFLAGS_sclkr.o += -march=elbrus-v3
-endif
-
 obj-$(CONFIG_SCLKR_CLOCKSOURCE) += sclkr.o
 obj-$(CONFIG_SCLKR_CLOCKSOURCE) += proc_sclkr.o
 
 obj-$(CONFIG_ELF_CORE)		+= elfcore.o
 obj-$(CONFIG_PERF_EVENTS)	+= perf_event/
 obj-$(CONFIG_MONITORS)		+= monitors.o
+ifdef CONFIG_SMP
 obj-$(CONFIG_SMP)		+= smp.o
 obj-$(CONFIG_SMP)		+= smpboot.o
+endif
 obj-$(CONFIG_IOCTL_ELF32)	+= ioctl32.o
 obj-$(CONFIG_RECOVERY)		+= recovery.o
 obj-$(CONFIG_MODULES)		+= module.o ksyms.o

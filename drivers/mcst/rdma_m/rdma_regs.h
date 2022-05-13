@@ -11,7 +11,7 @@ extern unsigned int	SHIFT_IOL_CSR;
 extern unsigned int	SHIFT_IO_CSR;
 extern unsigned int	SHIFT_CH0_IDT;	/* RDMA ID/Type E90		*/
 extern unsigned int	SHIFT_CH1_IDT;	/* RDMA ID/Type E90		*/
-extern unsigned int	SHIFT_CH_IDT;	/* RDMA ID/Type ES2/E90S	*/
+extern unsigned int	SHIFT_CH_IDT;	/* RDMA ID/Type E90S	*/
 extern unsigned int	SHIFT_CS;	/* RDMA Control/Status 000028a0	*/
 extern unsigned int	SHIFT_DD_ID;	/* Data Destination ID 		*/
 extern unsigned int	SHIFT_DMD_ID;	/* Data Message Destination ID 	*/
@@ -60,9 +60,8 @@ extern unsigned int	SHIFT_CAM;	/* CAM - channel alive management */
 
 #endif /* E90S */
 
-/*---------- Reg's for ES2 ---------- */
+/*---------- Reg's for E2K ---------- */
 #ifdef CONFIG_E2K
-/* ES2 */
 #define	IOL_CSR			0x900
 #define	IO_VID			0x700
 #define	IO_CSR			0x704
@@ -90,7 +89,6 @@ extern unsigned int	SHIFT_CAM;	/* CAM - channel alive management */
 
 /*---------- Reg's for E90 ---------- */
 #ifdef CONFIG_E90
-
 #define RDMA_VID		0x00	/* RDMA VID 			*/
 #define RDMA_CH0_IDT 	  	0x04	/* RDMA ID/Type 		*/
 #define RDMA_CS       	 	0x08	/* RDMA Control/Status 000028a0	*/

@@ -41,6 +41,9 @@
                                                          within dec regs. */
 #define DEC_IRQ                 HXDEC_NO_IRQ
 
+#define VCFG_OFFSET                     0x40
+#define VCFG_PMC_POWER_HINT             0x00000008
+
 static const int DecHwId[] =
 {
         0x6732
@@ -796,7 +799,22 @@ static long hantrodec_ioctl(struct file *filp, unsigned int cmd,
 	}
 	break;
     }
-
+    case HANTRODEC_IOCT_POWER_ON_REQ:
+    {
+        int pdata;
+        pci_read_config_dword(gDev, VCFG_OFFSET, &pdata);
+        pdata = pdata & ~VCFG_PMC_POWER_HINT;
+        pci_write_config_dword(gDev, VCFG_OFFSET, pdata);
+        break;
+    }
+    case HANTRODEC_IOCT_POWER_OFF_REQ:
+    {
+        int pdata;
+        pci_read_config_dword(gDev, VCFG_OFFSET, &pdata);
+        pdata = pdata | VCFG_PMC_POWER_HINT;
+        pci_write_config_dword(gDev, VCFG_OFFSET, pdata);
+        break;
+    }
     case HANTRODEC_DEBUG_STATUS:
     {
         printk(KERN_INFO "hantrodec: dec_irq     = 0x%08x \n", dec_irq);
@@ -869,6 +887,27 @@ static int hantrodec_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
+/*---------------------------------------------------------------------------
+ *Function name   : hantro_mmap
+ *Description     : memory map interface for hantro file operation
+ *
+ *Return type     : int
+ *---------------------------------------------------------------------------*/
+static int hantro_mmap(struct file *fp, struct vm_area_struct *vm)
+{
+    if (vm->vm_pgoff == (multicorebase[0] >> PAGE_SHIFT) || vm->vm_pgoff == (multicorebase[1] >> PAGE_SHIFT)) {
+        vm->vm_flags |= VM_IO;
+        vm->vm_page_prot = pgprot_noncached(vm->vm_page_prot);
+        PDEBUG("hantro mmap: size=0x%lX, page off=0x%lX\n", (vm->vm_end - vm->vm_start), vm->vm_pgoff);
+        return remap_pfn_range(vm, vm->vm_start, vm->vm_pgoff, vm->vm_end - vm->vm_start,
+                        vm->vm_page_prot) ? -EAGAIN : 0;
+    }   else {
+        pr_err("invalid map offset :0x%lX\n", vm->vm_pgoff);
+        return -EINVAL;
+    }
+}
+
+
 /* VFS methods */
 static struct file_operations hantrodec_fops =
 {
@@ -876,7 +915,8 @@ static struct file_operations hantrodec_fops =
         .open = hantrodec_open,
         .release = hantrodec_release,
         .unlocked_ioctl = hantrodec_ioctl,
-        .fasync = NULL
+        .fasync = NULL,
+        .mmap = hantro_mmap
 };
 
 /*------------------------------------------------------------------------------

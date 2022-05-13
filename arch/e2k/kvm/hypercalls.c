@@ -18,6 +18,7 @@
 #include <asm/tlb_regs_access.h>
 #include <asm/trap_table.h>
 #include <asm/process.h>
+#include <asm/fast_syscalls.h>
 
 #include <asm/kvm/mm.h>
 #include <asm/kvm/runstate.h>
@@ -26,6 +27,7 @@
 #include <process.h>
 #endif /* CONFIG_KVM_ASYNC_PF */
 #include <asm/kvm/trace_kvm.h>
+#include <asm/kvm/proc_context_stacks.h>
 
 #include "process.h"
 #include "cpu.h"
@@ -152,15 +154,21 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 	if (gmmid_nr != pv_vcpu_get_init_gmm(vcpu)->nid.nr) {
 		next_gmm = kvm_find_gmmid(&vcpu->kvm->arch.gmmid_table,
 						gmmid_nr);
-		if (next_gmm == NULL) {
-			/* FIXME: we should kill guest kernel, but first */
-			/* it needs to  switch to host kernel stacks */
-			panic("could not find new host agent #%d of guest mm\n",
-				gmmid_nr);
+		if (unlikely(next_gmm == NULL)) {
+			if (next_gti->gmm == NULL) {
+				/* gmm of next gti has been already released */
+				/* switch to guest kernel init gmm */
+				next_gmm = init_gmm;
+			} else {
+				/* FIXME: we should kill guest kernel, but first */
+				/* it needs to  switch to host kernel stacks */
+				panic("could not find new host agent #%d "
+					"of guest mm\n", gmmid_nr);
+			}
 		}
 	} else {
 		/* new process is kernel thread */
-		next_gmm = pv_vcpu_get_init_gmm(vcpu);
+		next_gmm = init_gmm;
 	}
 	cur_gsw = &cur_gti->sw_regs;
 
@@ -219,10 +227,20 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 
 	/* switch mm to new process, it is actual if user process */
 	NATIVE_FLUSHCPU;	/* spill current stacks on current mm */
-	switch_guest_mm(next_gti, next_gmm);
+	next_gmm = switch_guest_mm(next_gti, next_gmm);
 	if (next_gti->gmm != NULL && next_gti->gmm == next_gmm) {
+		unsigned long irqs_mask;
+
 		/* switch guest MMU context */
-		kvm_switch_to_guest_mmu_pid(vcpu);
+
+		/* set flags of return type to guest kernel or guest user: */
+		/* it is to kernel for now */
+		host_return_to_guest_kernel(current_thread_info());
+
+		/* all IRQs should be disabled to switch mm context */
+		raw_all_irq_save(irqs_mask);
+		kvm_switch_to_guest_mmu_pid(vcpu, current_thread_info());
+		raw_all_irq_restore(irqs_mask);
 	}
 
 	/* Should not be print or other functions calling here */
@@ -303,6 +321,9 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 	if (migrated)
 	 */
 	SAVE_GUEST_KERNEL_GREGS_COPY(current_thread_info(), next_gti);
+	/* g19 is now preempt count, it should be zero when preempting */
+	SET_PREEMPT_CNT_GUEST_KERNEL_GREGS_COPY(next_gti, 0);
+
 	DebugMGVCPU("thread GPID #%d migrates from VCPU #%d to "
 		"VCPU #%d signal stack entries %ld\n",
 		gpid_nr, old_vcpu_id, vcpu->vcpu_id,
@@ -313,34 +334,12 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 		trace_guest_switch_to(vcpu, cur_gti->gpid->nid.nr, cur_gmmid_nr,
 					gpid_nr, gmmid_nr, next_gsw);
 
-	KVM_BUG_ON(vcpu->cpu < 0);
-
-	if (!vcpu->arch.is_hv)
-		pv_vcpu_switch_kernel_pgd_range(vcpu, vcpu->cpu);
-
 	return;
 }
 
 /*
  * Hypercall hanlder of tlb flush requests from paravirtualized kernel
  */
-static inline unsigned long kvm_hv_flush_tlb_range(struct kvm_vcpu *vcpu,
-						e2k_addr_t start_gva,
-						e2k_addr_t end_gva)
-{
-	vcpu->arch.mmu.sync_gva_range(vcpu, PAGE_ALIGN_UP(start_gva),
-					PAGE_ALIGN_UP(end_gva), true);
-
-	return 0;
-}
-
-static inline void kvm_hv_sync_addr_range(struct kvm_vcpu *vcpu,
-						e2k_addr_t start_gva,
-						e2k_addr_t end_gva)
-{
-	vcpu->arch.mmu.sync_gva_range(vcpu, PAGE_ALIGN_UP(start_gva),
-					PAGE_ALIGN_UP(end_gva), false);
-}
 
 static inline unsigned long update_psp_hi(unsigned long psp_hi_value)
 {
@@ -407,6 +406,28 @@ static inline unsigned long update_wd_psise(unsigned long psize_value)
 	return 0;
 }
 
+static bool kvm_is_vcpu_id_switched(unsigned long hcall_num)
+{
+	return (hcall_num != KVM_HCALL_RETURN_FROM_FAST_SYSCALL) ?
+		true : false;
+}
+
+static DECLARE_BITMAP(unpriv_light_hcalls, KVM_LIGHT_HCALLS_NUM) __ro_after_init;
+static DECLARE_BITMAP(unpriv_generic_hcalls, KVM_GENERIC_HCALLS_NUM) __ro_after_init;
+
+static int __init init_unpriv_hcalls(void)
+{
+	/* Mark hypercalls that are safe to use by non-root user */
+	__set_bit(KVM_HCALL_PV_WAIT, unpriv_generic_hcalls);
+	__set_bit(KVM_HCALL_PV_KICK, unpriv_generic_hcalls);
+	__set_bit(KVM_HCALL_CONSOLE_IO, unpriv_generic_hcalls);
+#ifdef CONFIG_KVM_ASYNC_PF
+	__set_bit(KVM_HCALL_PV_ENABLE_ASYNC_PF, unpriv_generic_hcalls);
+#endif
+	return 0;
+}
+pure_initcall(init_unpriv_hcalls);
+
 /*
  * This is the light hypercalls execution.
  * Lighte hypercalls do not:
@@ -414,8 +435,8 @@ static inline unsigned long update_wd_psise(unsigned long psize_value)
  *  - use data stack
  *  - call any function
  */
-unsigned long notrace /* __interrupt */
-kvm_light_hcalls(unsigned long hcall_num,
+notrace __section(".text.entry_hcalls") /* __interrupt */
+unsigned long kvm_light_hcalls(unsigned long hcall_num,
 		unsigned long arg1, unsigned long arg2,
 		unsigned long arg3, unsigned long arg4,
 		unsigned long arg5, unsigned long arg6)
@@ -441,13 +462,17 @@ kvm_light_hcalls(unsigned long hcall_num,
 	__guest_exit_light(thread_info, &vcpu->arch);
 
 	/* check VCPU ID of global register and running VCPU */
-	kvm_check_vcpu_ids_as_light(vcpu);
+	if (kvm_is_vcpu_id_switched(hcall_num))
+		kvm_check_vcpu_ids_as_light(vcpu);
 
 	/* set kernel state of UPSR to preserve FP disable exception */
 	/* on movfi instructions while global registers saving */
 	NATIVE_SWITCH_TO_KERNEL_UPSR(user_upsr,
 					false,	/* enable IRQs */
 					false	/* disable NMI */);
+
+	vcpu->mode = OUTSIDE_GUEST_MODE;
+	smp_wmb();	/* See the comment in kvm_vcpu_exiting_guest_mode() */
 
 	if (!vcpu->arch.is_hv) {
 		/* Do not switch guest MMU context to host MMU one to enable */
@@ -474,7 +499,10 @@ kvm_light_hcalls(unsigned long hcall_num,
 		clear_thread_flag(TIF_GENERIC_HYPERCALL);
 
 	last_light_hcall = hcall_num;
-	trace_light_hcall(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6, vcpu->cpu);
+
+	trace_kvm_pid(FROM_LIGHT_HYPERCALL, vcpu->kvm->arch.vmid.nr,
+		vcpu->vcpu_id, read_guest_PID_reg(vcpu));
+	trace_light_hcall(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6);
 
 	/* in common case cannot enable hardware stacks bounds traps, */
 	/* disabled by assembler entry of the hypercall handler */
@@ -486,6 +514,12 @@ kvm_light_hcalls(unsigned long hcall_num,
 	if (hcall_num != KVM_HCALL_SWITCH_GUEST_THREAD_STACKS) {
 		//TODO needed?? This is only for virtualization w/o hardware support
 		//native_set_sge();
+	}
+
+	if (!test_bit(hcall_num, unpriv_light_hcalls) &&
+			!capable(CAP_SYS_ADMIN)) {
+		ret = -EPERM;
+		goto skip_hcall;
 	}
 
 	switch (hcall_num) {
@@ -525,7 +559,14 @@ kvm_light_hcalls(unsigned long hcall_num,
 		kvm_init_pv_vcpu_trap_handling(vcpu, NULL);
 		break;
 	case KVM_HCALL_SWITCH_TO_INIT_MM:
-		kvm_switch_to_init_guest_mm(vcpu);
+		if (likely(kvm_switch_to_init_guest_mm(vcpu))) {
+
+			/* set flags of return type to guest kernel or */
+			/* guest user: it is to kernel for now */
+			host_return_to_guest_kernel(thread_info);
+			/* switch MMU context to guest kernel init mm */
+			kvm_switch_to_guest_mmu_pid(vcpu, thread_info);
+		}
 		break;
 	case KVM_HCALL_SWITCH_GUEST_THREAD_STACKS:
 		kvm_switch_guest_thread_stacks(vcpu, (int) arg1, (int) arg2);
@@ -591,10 +632,35 @@ kvm_light_hcalls(unsigned long hcall_num,
 		WARN_ONCE(1, "implement me");
 		ret = -ENOSYS;
 		break;
+	case KVM_HCALL_RETURN_FROM_FAST_SYSCALL:
+		ret = kvm_return_from_fast_syscall(thread_info, arg1);
+		break;
+	case KVM_HCALL_SET_RETURN_USER_IP:
+		ret = kvm_set_return_user_ip((thread_info_t *)arg1, arg2, arg3);
+		break;
+	case KVM_HCALL_FAST_KERNEL_TAGGED_MEMORY_COPY:
+		ret = kvm_fast_guest_kernel_tagged_memory_copy(vcpu, (void *)arg1,
+				(void *)arg2, arg3, NULL, arg4, arg5, (int)arg6);
+		break;
+	case KVM_HCALL_FAST_KERNEL_TAGGED_MEMORY_SET:
+		ret = kvm_fast_guest_kernel_tagged_memory_set(vcpu, (void *)arg1,
+				arg2, arg3, arg4, NULL, arg5);
+		break;
+	case KVM_HCALL_UPDATE_GUEST_KERNEL_CRS:
+		ret = kvm_update_guest_kernel_crs((e2k_mem_crs_t *)arg1,
+				(e2k_mem_crs_t *)arg2, (e2k_mem_crs_t *)arg3);
+		break;
+	case KVM_HCALL_TRACING_START:
+		tracing_on();
+		break;
+	case KVM_HCALL_TRACING_STOP:
+		tracing_off();
+		break;
 	default:
 		ret = -ENOSYS;
 	}
 
+skip_hcall:
 	KVM_HOST_CHECK_VCPU_THREAD_CONTEXT(thread_info);
 
 	trace_light_hcall_exit(ret);
@@ -616,9 +682,23 @@ kvm_light_hcalls(unsigned long hcall_num,
 				kvm_get_guest_vcpu_PSR_value(vcpu));
 
 	/* check VCPU ID of global register and running VCPU */
-	kvm_check_vcpu_ids_as_light(vcpu);
+	if (kvm_is_vcpu_id_switched(hcall_num))
+		kvm_check_vcpu_ids_as_light(vcpu);
+
+	/*
+	 * Ensure we set mode to IN_GUEST_MODE after we disable
+	 * interrupts and before the final VCPU requests check.
+	 * See the comment in kvm_vcpu_exiting_guest_mode() and
+	 * Documentation/virt/kvm/vcpu-requests.rst
+	 */
+	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
 
 	__guest_enter_light(thread_info, &vcpu->arch, !!from_sdisp);
+
+	if (hcall_num == KVM_HCALL_RETURN_FROM_FAST_SYSCALL) {
+		/* restore MMU registers state */
+		pv_mmu_switch_from_fast_sys_call(vcpu, thread_info);
+	}
 
 	/* from here cannot by any traps including BUG/BUG_ON/KVM_BUG_ON */
 	/* because of host context is switched to guest context */
@@ -775,11 +855,10 @@ static inline long outdated_hypercall(const char *hcall_name)
  * This is the core hypercall routine: where the Guest gets what it wants.
  * Or gets killed.  Or, in the case of KVM_HCALL_SHUTDOWN, both.
  */
-notrace unsigned long
-kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
-				unsigned long arg2, unsigned long arg3,
-				unsigned long arg4, unsigned long arg5,
-				unsigned long arg6, unsigned long gsbr)
+notrace __section(".text.entry_hcalls")
+unsigned long kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
+		unsigned long arg2, unsigned long arg3, unsigned long arg4,
+		unsigned long arg5, unsigned long arg6, unsigned long gsbr)
 {
 	thread_info_t	*ti;
 	gthread_info_t	*gti = NULL;
@@ -799,8 +878,9 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	bool	to_host_vcpu = false;	/* it need return to host qemu thread */
 	bool	to_new_user_stacks = false;	/* it need switch to new user */
 						/* process */
+	bool	to_new_context = false;		/* to new MMU context */
 	bool	from_paravirt_guest;
-	bool	need_inject;
+	bool	need_inject, has_signal_pending;
 	unsigned	guest_enter_flags = FROM_HYPERCALL_SWITCH |
 							USD_CONTEXT_SWITCH;
 	int	users;
@@ -838,13 +918,16 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 					true	/* disable NMI to switch */
 						/* mm context */);
 
+	vcpu->mode = OUTSIDE_GUEST_MODE;
+	smp_wmb();	/* See the comment in kvm_vcpu_exiting_guest_mode() */
+
 	kvm = vcpu->kvm;
 
 	if (!vcpu->arch.is_hv) {
 		/* switch to host MMU context to enable access to guest */
 		/* physical memory from host, where this memory mapped */
 		/* as virtual space of user QEMU process */
-		kvm_switch_to_host_mmu_pid(current->mm);
+		kvm_switch_to_host_mmu_pid(vcpu, current->mm);
 	}
 
 	gti = ti->gthread_info;
@@ -866,7 +949,9 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	if (from_light_hypercall)
 		clear_thread_flag(TIF_LIGHT_HYPERCALL);
 
-	trace_generic_hcall(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6, gsbr, vcpu->cpu);
+	trace_kvm_pid(FROM_GENERIC_HYPERCALL, vcpu->kvm->arch.vmid.nr,
+		vcpu->vcpu_id, read_guest_PID_reg(vcpu));
+	trace_generic_hcall(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6, gsbr);
 
 	/* in common case cannot enable hardware stacks bounds traps, */
 	/* disabled by assembler entry of the hypercall handler */
@@ -925,6 +1010,13 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	k_usd_lo = NATIVE_NV_READ_USD_LO_REG();
 	raw_local_irq_enable();
 
+	if (!test_bit(hcall_num, unpriv_generic_hcalls) &&
+			!capable(CAP_SYS_ADMIN)) {
+		pr_info_once("hcall #%lu is for root mode only\n", hcall_num);
+		ret = -EPERM;
+		goto skip_hcall;
+	}
+
 	switch (hcall_num) {
 	case KVM_HCALL_PV_WAIT:
 		kvm_pv_wait(kvm, vcpu);
@@ -939,12 +1031,17 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		kvm_guest_set_clockevent(vcpu, arg1);
 		break;
 	case KVM_HCALL_COMPLETE_LONG_JUMP:
-		ret = kvm_long_jump_return(vcpu, (kvm_long_jump_info_t *)arg1);
+		ret = kvm_long_jump_return(vcpu, (kvm_long_jump_info_t *)arg1,
+					(bool)arg2, (u64)arg3);
 		break;
 	case KVM_HCALL_LAUNCH_SIG_HANDLER:
 		ret = kvm_sig_handler_return(vcpu, (kvm_stacks_info_t *)arg1,
 						arg2, arg3, &stack_regs);
 		to_new_user_stacks = true;
+		to_new_context = false;
+		break;
+	case KVM_HCALL_APPLY_USD_BOUNDS:
+		ret = kvm_apply_updated_usd_bounds(vcpu, arg1, arg2, (bool)arg3);
 		break;
 	case KVM_HCALL_APPLY_PSP_BOUNDS:
 		ret = kvm_apply_updated_psp_bounds(vcpu, arg1, arg2, arg3,
@@ -1006,6 +1103,7 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		ret = kvm_switch_to_guest_new_user(vcpu,
 				(kvm_task_info_t *)arg1, &stack_regs);
 		to_new_user_stacks = true;
+		to_new_context = true;
 		break;
 	case KVM_HCALL_CLONE_GUEST_USER_STACKS:
 		ret = kvm_clone_guest_user_stacks(vcpu,
@@ -1062,21 +1160,25 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	case KVM_HCALL_MOVE_TAGGED_GUEST_DATA:
 		ret = kvm_move_tagged_guest_data(vcpu, (int)arg1, arg2, arg3);
 		break;
-	case KVM_HCALL_FAST_TAGGED_GUEST_MEMORY_COPY:
-		ret = kvm_fast_tagged_guest_memory_copy(vcpu, (void *)arg1,
-				(void *)arg2, arg3, arg4, arg5, (int)arg6);
-		break;
-	case KVM_HCALL_FAST_TAGGED_GUEST_MEMORY_SET:
-		ret = kvm_fast_tagged_guest_memory_set(vcpu, (void *)arg1,
-				arg2, arg3, arg4, arg5);
+	case KVM_HCALL_COPY_IN_USER_WITH_TAGS:
+		ret = kvm_copy_in_user_with_tags((void *)arg1, (void *)arg2, arg3);
 		break;
 	case KVM_HCALL_FAST_TAGGED_MEMORY_COPY:
 		ret = kvm_fast_guest_tagged_memory_copy(vcpu, (void *)arg1,
-				(void *)arg2, arg3, arg4, arg5, (int)arg6);
+				(void *)arg2, arg3, NULL, arg4, arg5, (int)arg6);
 		break;
 	case KVM_HCALL_FAST_TAGGED_MEMORY_SET:
 		ret = kvm_fast_guest_tagged_memory_set(vcpu, (void *)arg1,
-				arg2, arg3, arg4, arg5);
+				arg2, arg3, arg4, NULL, arg5);
+		break;
+	case KVM_HCALL_FAST_TAGGED_MEMORY_COPY_USER:
+		ret = kvm_fast_guest_user_tagged_memory_copy(vcpu, (void *)arg1,
+				(void *)arg2, arg3, (void *)arg4, arg5, arg6,
+				LDST_PREFETCH_FLAG_GET(arg5));
+		break;
+	case KVM_HCALL_FAST_TAGGED_MEMORY_SET_USER:
+		ret = kvm_fast_guest_user_tagged_memory_set(vcpu, (void *)arg1,
+				arg2, arg3, arg4, (void *)arg5, arg6);
 		break;
 	case KVM_HCALL_PT_ATOMIC_UPDATE:
 		ret = kvm_pv_mmu_pt_atomic_update(vcpu, (int)arg1,
@@ -1140,7 +1242,7 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		ret = kvm_guest_notify_io(vcpu, (unsigned int)arg1);
 		break;
 	case KVM_HCALL_GUEST_VCPU_COMMON_IDLE:
-		kvm_guest_vcpu_common_idle(vcpu, arg1, (bool)arg2);
+		ret = kvm_guest_vcpu_common_idle(vcpu, arg1, (bool)arg2);
 		break;
 	case KVM_HCALL_GUEST_VCPU_RELAX:
 		kvm_guest_vcpu_relax();
@@ -1176,7 +1278,12 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		break;
 	}
 	case KVM_HCALL_FTRACE_STOP:
-		tracing_off();
+		if (kvm_ftrace_dump) {
+			ftrace_dump(DUMP_ALL);
+			tracing_on();
+		} else {
+			tracing_off();
+		}
 		break;
 	case KVM_HCALL_FTRACE_DUMP:
 		ftrace_dump(DUMP_ALL);
@@ -1190,21 +1297,36 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 				(u64) arg2, (u32) arg3, (u32) arg4);
 		break;
 #endif /* CONFIG_KVM_ASYNC_PF */
-	case KVM_HCALL_FLUSH_TLB_RANGE:
-		ret = kvm_hv_flush_tlb_range(vcpu, arg1, arg2);
+	case KVM_HCALL_MMU_PV_FLUSH_TLB:
+		ret = kvm_pv_sync_and_flush_tlb(vcpu,
+				(mmu_spt_flush_t __user *)arg1);
 		break;
 	case KVM_HCALL_SYNC_ADDR_RANGE:
-		kvm_hv_sync_addr_range(vcpu, arg1, arg2);
+		ret = kvm_pv_sync_addr_range(vcpu, arg1, arg2);
+		break;
+	case KVM_HCALL_PREPARE_MKCTXT_HW_USER_STACKS:
+		ret = kvm_prepare_gst_mkctxt_hw_stacks(vcpu,
+					(kvm_proc_ctxt_hw_stacks_t *)arg1);
+		break;
+	case KVM_HCALL_ADD_CTX_SIGNAL_STACK:
+		ret = kvm_add_ctx_signal_stack(vcpu, (u64) arg1,
+						(bool)arg2);
+		break;
+	case KVM_HCALL_REMOVE_CTX_SIGNAL_STACK:
+		kvm_remove_ctx_signal_stack(vcpu, (u64) arg1);
 		break;
 	default:
-		pr_err("Bad hypercall #%li\n", hcall_num);
+		pr_err_ratelimited("Bad hypercall #%li\n", hcall_num);
 		ret = -ENOSYS;
 	}
 
-	if (ret == RETURN_TO_HOST_APP_HCRET)
+skip_hcall:
+	if (ret == RETURN_TO_HOST_APP_HCRET) {
 		to_host_vcpu = true;
+		ret = 0;
+	}
 
-	raw_all_irq_disable();	/* all IRQs to switch mm context */
+	raw_all_irq_disable();
 	while (need_resched()) {
 		raw_all_irq_enable();
 		schedule();
@@ -1270,7 +1392,8 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 
 	/* if there are pending VIRQs, then provide with direct interrupt */
 	/* to cause guest interrupting and handling VIRQs */
-	if (!to_host_vcpu) {
+	has_signal_pending = signal_pending(current);
+	if (unlikely(!to_host_vcpu && !has_signal_pending)) {
 		need_inject = kvm_try_inject_event_wish(ti->vcpu, ti,
 					kvm_get_guest_vcpu_UPSR_value(vcpu),
 					kvm_get_guest_vcpu_PSR_value(vcpu));
@@ -1278,9 +1401,33 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		need_inject = false;
 	}
 
+	/*
+	 * Ensure we set mode to IN_GUEST_MODE after we disable
+	 * interrupts and before the final VCPU requests check.
+	 * See the comment in kvm_vcpu_exiting_guest_mode() and
+	 * Documentation/virt/kvm/vcpu-requests.rst
+	 */
+	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
+
 	if (!vcpu->arch.is_hv) {
+		unsigned long irqs_mask;
+
 		/* return to guest VCPU MMU context */
-		kvm_switch_to_guest_mmu_pid(vcpu);
+
+		/* set flags of return type to guest kernel or guest user: */
+		if (likely(!to_new_user_stacks)) {
+			/* it is to kernel for now */
+			host_return_to_guest_kernel(ti);
+		} else {
+			/* it is to user for now */
+			host_return_to_guest_user(ti, to_new_context);
+			/* set current u_pptb context to new user PT */
+			kvm_set_vcpu_spt_u_pptb_context(vcpu);
+		}
+		/* all IRQs should be disabled to switch mm context */
+		raw_all_irq_save(irqs_mask);
+		kvm_switch_to_guest_mmu_pid(vcpu, ti);
+		raw_all_irq_restore(irqs_mask);
 	}
 
 	/* check saved greg and running VCPU IDs: should be the same */
@@ -1312,8 +1459,8 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		kvm_pv_clear_hcall_host_stacks(ti->vcpu);
 	}
 
-	if (to_host_vcpu) {
-		return pv_vcpu_return_to_host(ti, vcpu);
+	if (to_host_vcpu || has_signal_pending) {
+		return pv_vcpu_return_to_host(ti, vcpu, ret);
 	}
 
 	COND_GOTO_RETURN_TO_PARAVIRT_GUEST(from_paravirt_guest, ret);

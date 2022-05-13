@@ -195,13 +195,6 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 	set_my_cpu_offset(__per_cpu_offset[cpu]);
 
 	/*
-	 * By this point BSP has already cleared and write-protected
-	 * ZERO_PAGE, so flush it from TLB
-	 */
-	flush_TLB_page((unsigned long) empty_zero_page,
-						E2K_KERNEL_CONTEXT);
-
-	/*
 	 * The BSP has finished the init stage and is spinning on
 	 * cpu_online_mask until we finish. We are free to set up this
 	 * CPU, first the init_task structure for this CPU.
@@ -218,6 +211,13 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 	setup_secondary_task(cpu);
 
 	set_secondary_space_MMU_state();
+
+	/*
+	 * By this point BSP has already cleared and write-protected
+	 * ZERO_PAGE, so flush it from TLB
+	 */
+	flush_TLB_page((unsigned long) empty_zero_page,
+						E2K_KERNEL_CONTEXT);
 
 	/*
 	 * This is to make sure that idle task is running with
@@ -510,7 +510,7 @@ void __init smp_prepare_boot_cpu(void)
 	/*
 	 * Allocate "PV qspinlock" global hash table used by paravirt spinlocks
 	 */
-	if (cpu_has(CPU_FEAT_ISET_V6) && READ_CORE_MODE_REG().gmi)
+	if (IS_HV_GM())
 		__pv_init_lock_hash();
 #endif /* CONFIG_PARAVIRT_SPINLOCKS */
 }

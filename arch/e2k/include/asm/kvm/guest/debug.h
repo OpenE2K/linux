@@ -24,6 +24,11 @@ kvm_modify_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip,
 	*((u64 *)pa_to_vpa(phys_ip)) = instr_word;
 }
 
+extern int kvm_do_parse_chain_stack(int flags, struct task_struct *p,
+		parse_chain_fn_t func, void *arg, unsigned long delta_user,
+		unsigned long top, unsigned long bottom,
+		bool *interrupts_enabled, unsigned long *irq_flags);
+
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */
 
@@ -48,6 +53,7 @@ print_guest_stack(struct task_struct *task,
 {
 	/* nothing to do, guest has not other guest processes */
 }
+
 static inline void
 host_ftrace_stop(void)
 {
@@ -57,6 +63,16 @@ static inline void
 host_ftrace_dump(void)
 {
 	HYPERVISOR_ftrace_dump();
+}
+static inline void
+host_tracing_stop(void)
+{
+	HYPERVISOR_tracing_stop();
+}
+static inline void
+host_tracing_start(void)
+{
+	HYPERVISOR_tracing_start();
 }
 
 /* Read instruction word (two syllables) from IP address */
@@ -71,6 +87,17 @@ modify_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip,
 				unsigned long instr_word)
 {
 	kvm_modify_instr_on_IP(ip, phys_ip, instr_word);
+}
+
+static inline int
+do_parse_chain_stack(int flags, struct task_struct *p,
+		parse_chain_fn_t func, void *arg, unsigned long delta_user,
+		unsigned long top, unsigned long bottom,
+		bool *interrupts_enabled, unsigned long *irq_flags)
+{
+	return kvm_do_parse_chain_stack(flags, p, func, arg, delta_user,
+					top, bottom,
+					interrupts_enabled, irq_flags);
 }
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */

@@ -43,8 +43,7 @@ static int should_io_be_busy(void)
 {
 #ifdef CONFIG_E2K
 	/* TODO remove check for IS_MACHINE_E1CP when bug #130433 is fixed */
-	if (cpu_has(CPU_FEAT_ISET_V3) && !cpu_has(CPU_HWBUG_C3) &&
-			!IS_MACHINE_E1CP)
+	if (!cpu_has(CPU_HWBUG_C3) && !IS_MACHINE_E1CP)
 		return 1;
 #endif
 #if defined(CONFIG_X86)

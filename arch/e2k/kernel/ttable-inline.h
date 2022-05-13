@@ -38,9 +38,12 @@ extern bool debug_guest_ust;
 #define	debug_guest_ust	false
 #endif	/* DEBUG_PV_UST_MODE || DEBUG_PV_SYSCALL_MODE */
 
-#ifdef CONFIG_CPU_HAS_FILL_INSTRUCTION
+extern u64 finish_user_trap_handler_sw_fill_wsz;
+extern u64 finish_syscall_sw_fill_wsz;
+extern u64 return_to_injected_syscall_sw_fill_wsz;
+
 static __always_inline void
-user_hw_stacks_restore(struct pt_regs *regs, e2k_stacks_t *stacks,
+user_hw_stacks_restore__hw(struct pt_regs *regs, e2k_stacks_t *stacks,
 			u64 cur_window_q, u64 clear_num_q)
 {
 	e2k_psp_lo_t u_psp_lo;
@@ -67,12 +70,12 @@ user_hw_stacks_restore(struct pt_regs *regs, e2k_stacks_t *stacks,
 	AS(u_psp_hi).ind -= u_pshtp_size;
 	AS(u_pcsp_hi).ind -= u_pcshtp_size;
 
-	FILL_HARDWARE_STACKS();
+	FILL_HARDWARE_STACKS__HW();
 
 	WRITE_PSP_REG(u_psp_hi, u_psp_lo);
 	WRITE_PCSP_REG(u_pcsp_hi, u_pcsp_lo);
 }
-#else	/* !CONFIG_CPU_HAS_FILL_INSTRUCTION */
+
 extern void fill_handler_0(void);
 extern void fill_handler_1(void);
 extern void fill_handler_2(void);
@@ -190,9 +193,13 @@ typedef void (*fill_handler_t)(void);
 
 extern const fill_handler_t fill_handlers_table[E2K_MAXSR];
 
+extern void __noreturn finish_user_trap_handler_sw_fill(void);
+extern void __noreturn finish_syscall_sw_fill(void);
+
 static __always_inline void
-user_hw_stacks_restore(struct pt_regs *regs, e2k_stacks_t *stacks,
-				u64 cur_window_q, u64 clear_num_q)
+user_hw_stacks_restore__sw(struct pt_regs *regs, e2k_stacks_t *stacks,
+				u64 cur_window_q, u64 clear_num_q,
+				void (*sw_fill_sequel), u64 sw_fill_window_q)
 {
 	e2k_pshtp_t u_pshtp;
 	e2k_pcshtp_t u_pcshtp;
@@ -220,7 +227,7 @@ user_hw_stacks_restore(struct pt_regs *regs, e2k_stacks_t *stacks,
 
 	u_pshtp_size = GET_PSHTP_MEM_INDEX(u_pshtp);
 	u_pcshtp_size = PCSHTP_SIGN_EXTEND(u_pcshtp);
-	ps_copy_size = get_ps_copy_size(cur_window_q, u_pshtp_size);
+	ps_copy_size = get_ps_copy_size(max(cur_window_q, sw_fill_window_q), u_pshtp_size);
 	pcs_copy_size = get_pcs_copy_size(u_pcshtp_size);
 
 	if (ps_copy_size > 0)
@@ -260,22 +267,46 @@ user_hw_stacks_restore(struct pt_regs *regs, e2k_stacks_t *stacks,
 	prefetch_nospec(&current->thread.fill.cr0_hi);
 	prefetch_nospec(&current->thread.fill.return_to_user);
 
-	/*
-	 * To make hardware issue a FILL we have to make stack empty first
-	 */
-	k_pcsp_hi = READ_PCSP_HI_REG();
-	if (AS(k_pcsp_hi).ind)
-		E2K_FLUSHC;
+	if (!cpu_has(CPU_FEAT_FILLC)) {
+		/*
+		 * To make hardware issue a FILL we have to make stack empty first
+		 */
+		k_pcsp_hi = READ_PCSP_HI_REG();
+		if (AS(k_pcsp_hi).ind)
+			E2K_FLUSHC;
+	}
 
-# define DEBUG_FILL_HARDWARE_STACKS_V2 0
-# if DEBUG_FILL_HARDWARE_STACKS_V2
+#define DEBUG_FILL_HARDWARE_STACKS_V3 0
+#if DEBUG_FILL_HARDWARE_STACKS_V3
 	if (__builtin_constant_p(cur_window_q))
 		asm volatile ("{setwd wsz=4}" "{setwd wsz=%0}"
 				:: "i" (cur_window_q));
-# endif
-	FILL_HARDWARE_STACKS();
+#endif
+	FILL_HARDWARE_STACKS__SW(sw_fill_sequel);
 
 set_new_regs:
+	WRITE_CR0_HI_REG(current->thread.fill.cr0_hi);
+	WRITE_CR1_LO_REG(current->thread.fill.cr1_lo);
+	WRITE_CR1_HI_REG(current->thread.fill.cr1_hi);
+
+	WRITE_PSP_REG(current->thread.fill.u_psp_hi,
+			current->thread.fill.u_psp_lo);
+	WRITE_PCSP_REG(current->thread.fill.u_pcsp_hi,
+			current->thread.fill.u_pcsp_lo);
+}
+
+static __always_inline void
+user_hw_stacks_restore__sw_sequel(void)
+{
+	BUG_ON(cpu_has(CPU_FEAT_FILLC) && cpu_has(CPU_FEAT_FILLR));
+
+	if (cpu_has(CPU_FEAT_FILLC))
+		NATIVE_FILL_CHAIN_STACK__HW();
+
+	if (cpu_has(CPU_HWBUG_INTC_CR_WRITE)) {
+		E2K_WAIT(_ma_c);
+		E2K_NOP(7);
+	}
 
 	WRITE_CR0_HI_REG(current->thread.fill.cr0_hi);
 	WRITE_CR1_LO_REG(current->thread.fill.cr1_lo);
@@ -286,7 +317,18 @@ set_new_regs:
 	WRITE_PCSP_REG(current->thread.fill.u_pcsp_hi,
 			current->thread.fill.u_pcsp_lo);
 }
-#endif	/* CONFIG_CPU_HAS_FILL_INSTRUCTION */
+
+static __always_inline void
+user_hw_stacks_restore(struct pt_regs *regs, e2k_stacks_t *stacks,
+			u64 cur_window_q, u64 clear_num_q,
+			void (*sw_fill_sequel), u64 sw_fill_window_q)
+{
+	if (cpu_has(CPU_FEAT_FILLC) && cpu_has(CPU_FEAT_FILLR))
+		user_hw_stacks_restore__hw(regs, stacks, cur_window_q, clear_num_q);
+	else
+		user_hw_stacks_restore__sw(regs, stacks, cur_window_q, clear_num_q,
+					sw_fill_sequel, sw_fill_window_q);
+}
 
 static __always_inline void
 native_jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
@@ -345,6 +387,11 @@ jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 extern int copy_context_from_signal_stack(struct local_gregs *l_gregs,
 		struct pt_regs *regs, struct trap_pt_regs *trap, u64 *sbbp,
 		e2k_aau_t *aau_context, struct k_sigaction *ka);
+
+static inline int copy_pt_regs_from_signal_stack(struct pt_regs *regs)
+{
+	return copy_context_from_signal_stack(NULL, regs, NULL, NULL, NULL, NULL);
+}
 
 static inline int signal_pending_usermode_loop(bool syscall)
 {
@@ -423,9 +470,9 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 			 * restored - we want APB to restart from the last
 			 * *used* address. So recalculate proper values here. */
 			if (!syscall && aau_regs &&
-			    unlikely(AAU_STOPPED(aau_regs->aasr))) {
+			    unlikely(AAU_STOPPED(regs->aasr))) {
 				machine.calculate_aau_aaldis_aaldas(regs,
-					current_thread_info(), aau_regs);
+					current_thread_info()->aalda, aau_regs);
 			}
 #endif
 		}
@@ -498,23 +545,129 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 	return pshtp;
 }
 
+static __noreturn __always_inline void finish_user_trap_handler_done(struct thread_info *ti,
+		struct pt_regs *regs, struct e2k_aau_context *aau_regs,
+		restore_caller_t from, bool from_paravirt_guest)
+{
+	BUILD_BUG_ON(!__builtin_constant_p(from));
+
+	/*
+	 * This 'if' is done before restoring %ctpr2
+	 * (actually it belongs to set_aau_aaldis_aaldas()).
+	 *
+	 * RESTORE_COMMON_REGS() must be called before RESTORE_AAU_MASK_REGS()
+	 * because of ctpr2 and AAU registers restoring dependencies.
+	 */
+#ifdef CONFIG_USE_AAU
+	if (likely(!AAU_STOPPED(regs->aasr))) {
+#endif
+		RESTORE_COMMON_REGS(regs);
+#ifdef CONFIG_USE_AAU
+		RESTORE_AAU_MASK_REGS((e2k_aaldm_t) { .word = 0 },
+				(e2k_aaldv_t) { .word = 0 }, regs->aasr);
+#endif
+		/* only if return from paravirtualized host to guest */
+		COND_GOTO_DONE_TO_PARAVIRT_GUEST(from_paravirt_guest);
+		if (from & FROM_SIGRETURN) {
+			CLEAR_DO_SIGRETURN_INTERRUPT();
+		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
+			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW();
+		} else {
+			CLEAR_USER_TRAP_HANDLER_WINDOW();
+		}
+#ifdef CONFIG_USE_AAU
+	} else {
+		RESTORE_COMMON_REGS(regs);
+		native_set_aau_aaldis_aaldas(ti->aalda, aau_regs);
+		RESTORE_AAU_MASK_REGS(aau_regs->aaldm, aau_regs->aaldv, regs->aasr);
+		/* only if return from paravirtualized host to guest */
+		COND_GOTO_DONE_TO_PARAVIRT_GUEST(from_paravirt_guest);
+		if (from & FROM_SIGRETURN) {
+			CLEAR_DO_SIGRETURN_INTERRUPT();
+		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
+			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW();
+		} else {
+			CLEAR_USER_TRAP_HANDLER_WINDOW();
+		}
+	}
+#endif
+
+	unreachable();
+}
+
+/*
+ * We have FILLed user hardware stacks so no
+ * function calls are allowed after this point.
+ */
+static __noreturn __always_inline void
+finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_regs *trap,
+		struct e2k_aau_context *aau_regs, restore_caller_t from, bool from_paravirt_guest)
+{
+	thread_info_t *ti;
+
+	/* TODO Drop this leftover from Paravirt-1.0 (user_trap_handler
+	 * is the last entry, nothing to queue in entry or dequeue here) */
+	/*
+	 * Dequeue current pt_regs structure and previous
+	 * regs will be now actuale
+	 */
+	current_thread_info()->pt_regs = regs->next;
+	regs->next = NULL;
+
+	/* restore some guest context, if trap was on guest */
+	ti = current_thread_info();
+	trap_guest_enter(ti, regs, EXIT_FROM_TRAP_SWITCH, from);
+	BUG_ON(ti != READ_CURRENT_REG());
+	/* WARNING: from here should not use current, current_thread_info() */
+	/* only variable 'ti' */
+
+#ifdef CONFIG_USE_AAU
+	clear_apb();
+	if (cpu_has(CPU_HWBUG_AAU_AALDV))
+		__E2K_WAIT(_ma_c);
+	if (aau_working(regs->aasr)) {
+		set_aau_context(aau_regs, ti->aalda, regs->aasr);
+
+		/*
+		 * It's important to restore AAD after
+		 * all return operations.
+		 */
+		if (regs->aasr.iab)
+			RESTORE_AADS(aau_regs);
+	}
+#endif
+
+	/*
+	 * There must not be any branches after restoring ctpr register
+	 * because of HW bug
+	 */
+	if (from & FROM_SIGRETURN)
+		finish_user_trap_handler_done(ti, regs, aau_regs,
+			FROM_SIGRETURN, from_paravirt_guest);
+	else if (from & FROM_RETURN_PV_VCPU_TRAP)
+		finish_user_trap_handler_done(ti, regs, aau_regs,
+			FROM_RETURN_PV_VCPU_TRAP, from_paravirt_guest);
+	else
+		finish_user_trap_handler_done(ti, regs, aau_regs,
+			FROM_USER_TRAP, from_paravirt_guest);
+
+	unreachable();
+}
+
 static __noreturn __always_inline void
 finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 {
-	thread_info_t *ti;
 	struct e2k_aau_context *aau_regs = regs->aau_context;
 	struct trap_pt_regs *trap = regs->trap;
-#if	defined(CONFIG_VIRTUALIZATION) && !defined(CONFIG_KVM_GUEST_KERNEL)
 	bool from_paravirt_guest;
-#endif	/* CONFIG_VIRTUALIZATION  && ! CONFIG_KVM_GUEST_KERNEL */
 	bool return_to_user = true;
 	e2k_pshtp_t pshtp;
 	u64 wsz, num_q;
 
 #ifdef CONFIG_USE_AAU
-	if (unlikely(AAU_STOPPED(aau_regs->aasr)))
+	if (unlikely(AAU_STOPPED(regs->aasr)))
 		machine.calculate_aau_aaldis_aaldas(regs,
-				current_thread_info(), aau_regs);
+				current_thread_info()->aalda, aau_regs);
 #endif
 
 	/*
@@ -541,31 +694,6 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 
 	read_ticks(start_tick);
 
-#if (!defined CONFIG_E2K_MACHINE && defined CONFIG_E2K_MINVER_V2) || defined CONFIG_E2K_ES2_DSP || \
-		defined CONFIG_E2K_ES2_RU
-	/* Hardware bug 71610 workaround */
-	if (cpu_has(CPU_HWBUG_ATOMIC) &&
-	    unlikely(AS(regs->ctpr1).ta_base == 0xfffffffffff8ULL)) {
-		unsigned long long g23;
-		int g23_tag;
-
-		E2K_GET_DGREG_VAL_AND_TAG(23, g23, g23_tag);
-		if ((current->thread.flags & E2K_FLAG_32BIT)
-				&& !TASK_IS_BINCO(current)
-				&& !(current->thread.flags &
-				     E2K_FLAG_PROTECTED_MODE)) {
-			g23 &= 0xffffffffULL;
-			g23_tag &= 0x3;
-		}
-		if (g23_tag == ETAGNVD && access_ok(g23, 1)) {
-			__TRY_USR_PFAULT {
-				flush_DCACHE_line(g23);
-			} CATCH_USR_PFAULT {
-			} END_USR_PFAULT
-		}
-	}
-#endif
-
 	info_restore_mmu_reg(start_tick);
 
 	CHECK_PT_REGS_CHAIN(regs,
@@ -585,7 +713,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 #endif	/* CONFIG_SECONDARY_SPACE_SUPPORT */
 
 	/* complete intercept emulation mode */
-	trap_guest_enter(current_thread_info(), regs, EXIT_FROM_INTC_SWITCH);
+	trap_guest_enter(current_thread_info(), regs, EXIT_FROM_INTC_SWITCH, from);
 
 	RESTORE_USER_TRAP_STACK_REGS(regs);
 
@@ -618,161 +746,35 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 		}
 	}
 
+	if (!cpu_has(CPU_FEAT_FILLC) || !cpu_has(CPU_FEAT_FILLR)) {
+		current->thread.fill.from = from;
+		current->thread.fill.from_paravirt_guest = from_paravirt_guest;
+	}
+
 	/*
-	 * We have FILLed user hardware stacks so no
-	 * function calls are allowed after this point.
+	 * If either FILLC or FILLR isn't supported, jump to finish_user_trap_handler_sw_fill.
+	 * Otherwise, fall through and call finish_user_trap_handler_switched_stacks directly.
 	 */
-#if !defined(CONFIG_CPU_HAS_FILL_INSTRUCTION) && \
-		defined(CONFIG_VIRTUALIZATION) && \
-			!defined(CONFIG_KVM_GUEST_KERNEL)
-	from_paravirt_guest = current->thread.fill.from_paravirt_guest;
-#endif
 	user_hw_stacks_restore(regs,
 		trap_guest_get_restore_stacks(current_thread_info(), regs),
-		wsz, num_q);
-#ifndef CONFIG_CPU_HAS_FILL_INSTRUCTION
-	BUILD_BUG_ON(!__builtin_constant_p(from));
-# if defined(CONFIG_VIRTUALIZATION) && !defined(CONFIG_KVM_GUEST_KERNEL)
-	from_paravirt_guest = current->thread.fill.from_paravirt_guest;
-# endif
-	regs = current_thread_info()->pt_regs;
-	aau_regs = regs->aau_context;
-	trap = regs->trap;
-#endif
+		wsz, num_q, &finish_user_trap_handler_sw_fill,
+		finish_user_trap_handler_sw_fill_wsz);
 
-	/* TODO Drop this leftover from Paravirt-1.0 (user_trap_handler
-	 * is the last entry, nothing to queue in entry or dequeue here) */
-	/*
-	 * Dequeue current pt_regs structure and previous
-	 * regs will be now actuale
-	 */
-	current_thread_info()->pt_regs = regs->next;
-	regs->next = NULL;
-
-	/* restore some guest context, if trap was on guest */
-	ti = current_thread_info();
-	trap_guest_enter(ti, regs, EXIT_FROM_TRAP_SWITCH);
-	BUG_ON(ti != READ_CURRENT_REG());
-	/* WARNING: from here should not use current, current_thread_info() */
-	/* only variable 'ti' */
-
-#ifdef CONFIG_USE_AAU
-	clear_apb();
-	if (cpu_has(CPU_HWBUG_AAU_AALDV))
-		__E2K_WAIT(_ma_c);
-	if (aau_working(aau_regs)) {
-		set_aau_context(aau_regs);
-
-		/*
-		 * It's important to restore AAD after
-		 * all return operations.
-		 */
-		if (AS(aau_regs->aasr).iab)
-			RESTORE_AADS(aau_regs);
-	}
-
-	/*
-	 * There must not be any branches after restoring ctpr register
-	 * because of HW bug, so this 'if' is done before restoring %ctpr2
-	 * (actually it belongs to set_aau_aaldis_aaldas()).
-	 *
-	 * RESTORE_COMMON_REGS() must be called before RESTORE_AAU_MASK_REGS()
-	 * because of ctpr2 and AAU registers restoring dependencies.
-	 */
-	if (likely(!AAU_STOPPED(aau_regs->aasr))) {
-#endif
-		RESTORE_COMMON_REGS(regs);
-#ifdef CONFIG_USE_AAU
-		RESTORE_AAU_MASK_REGS(aau_regs);
-#endif
-		/* only if return from paravirtualized host to guest */
-		COND_GOTO_DONE_TO_PARAVIRT_GUEST(from_paravirt_guest);
-		if (from & FROM_SIGRETURN) {
-			CLEAR_DO_SIGRETURN_INTERRUPT();
-		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
-			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW();
-		} else {
-			CLEAR_USER_TRAP_HANDLER_WINDOW();
-		}
-#ifdef CONFIG_USE_AAU
-	} else {
-		BUILD_BUG_ON(!__builtin_constant_p(from));
-		RESTORE_GUEST_AAU_AASR(aau_regs,
-			test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
-		RESTORE_COMMON_REGS(regs);
-		native_set_aau_aaldis_aaldas(ti, aau_regs);
-		RESTORE_AAU_MASK_REGS(aau_regs);
-		/* only if return from paravirtualized host to guest */
-		COND_GOTO_DONE_TO_PARAVIRT_GUEST(from_paravirt_guest);
-		if (from & FROM_SIGRETURN) {
-			CLEAR_DO_SIGRETURN_INTERRUPT();
-		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
-			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW();
-		} else {
-			CLEAR_USER_TRAP_HANDLER_WINDOW();
-		}
-	}
-#endif
+	finish_user_trap_handler_switched_stacks(regs, trap, aau_regs, from, from_paravirt_guest);
 
 	unreachable();
 }
 
+/*
+ * We have FILLed user hardware stacks so no
+ * function calls are allowed after this point.
+ */
 static __always_inline __noreturn
-void finish_syscall(struct pt_regs *regs, enum restore_caller from,
-		    bool return_to_user)
+void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller from,
+		    bool return_to_user, bool ts_host_at_vcpu_mode)
 {
-	e2k_pshtp_t pshtp;
-	u64 wsz, num_q, rval;
-	int return_desk;
-	bool ts_host_at_vcpu_mode, intc_emul_flag;
-
-	/*
-	 * This can page fault so call with open interrupts
-	 */
-	wsz = get_wsz(from);
-	host_user_hw_stacks_prepare(&regs->stacks, regs, wsz, from,
-		!(from & ~(FROM_SYSCALL_N_PROT | FROM_SYSCALL_PROT_8 |
-				   FROM_SYSCALL_PROT_10)));
-
-	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, wsz, true);
-
-	intc_emul_flag = kvm_test_intc_emul_flag(regs);
-	ts_host_at_vcpu_mode = ts_host_at_vcpu_mode() || intc_emul_flag;
-
-#ifndef CONFIG_CPU_HAS_FILL_INSTRUCTION
-	current->thread.fill.from = from;
-	current->thread.fill.return_to_user = return_to_user;
-#endif
-
-	/*
-	 * All signals delivered, can access *regs now
-	 */
-	BUG_ON(from & FROM_USER_TRAP);
-
-	CHECK_PT_REGS_CHAIN(regs, NATIVE_NV_READ_USD_LO_REG().USD_lo_base,
-			current->stack + KERNEL_C_STACK_SIZE);
-
-	num_q = get_ps_clear_size(wsz, pshtp);
-
-	/* complete intercept emulation mode */
-	guest_exit_intc(regs, intc_emul_flag);
-
-	/*
-	 * We have FILLed user hardware stacks so no
-	 * function calls are allowed after this point.
-	 */
-	user_hw_stacks_restore(regs,
-		syscall_guest_get_restore_stacks(ts_host_at_vcpu_mode, regs),
-		wsz, num_q);
-#ifndef CONFIG_CPU_HAS_FILL_INSTRUCTION
-	regs = current_thread_info()->pt_regs;
-	if (!__builtin_constant_p(from))
-		from = current->thread.fill.from;
-	return_to_user = current->thread.fill.return_to_user;
-#endif
-
-	rval = regs->sys_rval;
-	return_desk = regs->return_desk;
+	u64 rval = regs->sys_rval;
+	int return_desk = regs->return_desk;
 
 	/*
 	 * It is possible to use closed GNU ASM since we have more than
@@ -849,6 +851,59 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from,
 	} else {
 		jump_to_ttable_entry(regs, from);
 	}
+
+	unreachable();
+}
+
+static __always_inline __noreturn
+void finish_syscall(struct pt_regs *regs, enum restore_caller from,
+		    bool return_to_user)
+{
+	e2k_pshtp_t pshtp;
+	u64 wsz, num_q;
+	bool ts_host_at_vcpu_mode, intc_emul_flag;
+
+	/*
+	 * This can page fault so call with open interrupts
+	 */
+	wsz = get_wsz(from);
+	host_user_hw_stacks_prepare(&regs->stacks, regs, wsz, from,
+		!(from & ~(FROM_SYSCALL_N_PROT | FROM_SYSCALL_PROT_8 |
+				   FROM_SYSCALL_PROT_10)));
+
+	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, wsz, true);
+
+	intc_emul_flag = kvm_test_intc_emul_flag(regs);
+	ts_host_at_vcpu_mode = ts_host_at_vcpu_mode() || intc_emul_flag;
+
+	if (!cpu_has(CPU_FEAT_FILLC) || !cpu_has(CPU_FEAT_FILLR)) {
+		current->thread.fill.from = from;
+		current->thread.fill.return_to_user = return_to_user;
+		current->thread.fill.ts_host_at_vcpu_mode = ts_host_at_vcpu_mode;
+	}
+
+	/*
+	 * All signals delivered, can access *regs now
+	 */
+	BUG_ON(from & FROM_USER_TRAP);
+
+	CHECK_PT_REGS_CHAIN(regs, NATIVE_NV_READ_USD_LO_REG().USD_lo_base,
+			current->stack + KERNEL_C_STACK_SIZE);
+
+	num_q = get_ps_clear_size(wsz, pshtp);
+
+	/* complete intercept emulation mode */
+	guest_exit_intc(regs, intc_emul_flag, from);
+
+	/*
+	 * If either FILLC or FILLR isn't supported, jump to finish_syscall_sw_fill.
+	 * Otherwise, fall through and call finish_syscall_switched_stacks directly.
+	 */
+	user_hw_stacks_restore(regs,
+		syscall_guest_get_restore_stacks(ts_host_at_vcpu_mode, regs),
+		wsz, num_q, &finish_syscall_sw_fill, finish_syscall_sw_fill_wsz);
+
+	finish_syscall_switched_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
 
 	unreachable();
 }

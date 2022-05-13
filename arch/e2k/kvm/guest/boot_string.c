@@ -49,9 +49,9 @@ boot_kvm_fast_tagged_memory_set(void *addr, u64 val, u64 tag,
 	else
 		ret = kvm_do_fast_tagged_memory_set(addr, val, tag, len,
 							strd_opcode);
-	if (ret) {
-		do_boot_printk("%s() could not set memory "
-			"from %px by 0x%llx_0x%llx, size 0x%lx, error %ld\n",
+	if (ret != len) {
+		do_boot_printk("%s() could not set memory from %px "
+			"by 0x%x_0x%x, size 0x%lx, error %ld\n",
 			__func__, addr, val, tag, len, ret);
 	}
 	return ret;

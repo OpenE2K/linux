@@ -23,7 +23,7 @@ unsigned long vm_mmap_notkillable(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset);
 
-typedef enum sma_mode {
+enum sma_mode {
 	SMA_RO,
 	SMA_RW,
 	SMA_NX,
@@ -33,7 +33,7 @@ typedef enum sma_mode {
 	SMA_WB_MT,
 	SMA_WC_MT,
 	SMA_UC_MT,
-} sma_mode_t;
+};
 
 int e2k_set_vmm_cui(struct mm_struct *mm, int cui,
                     unsigned long code_base, unsigned long code_end);
@@ -127,6 +127,7 @@ extern enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 					struct pt_regs *regs),
 		enum exec_mmu_ret (*calculate_rf_frame)(struct pt_regs *regs,
 					tc_cond_t cond, u64 **radr,
-					bool *load_to_rf));
+					bool *load_to_rf),
+		bool priv_user);
 
 #endif /* _E2K_MMAN_H_ */

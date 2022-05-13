@@ -118,6 +118,15 @@ struct ftrace_likely_data {
 #define notrace			__attribute__((__no_instrument_function__))
 #endif
 
+#ifdef	CONFIG_MCST
+/* Some functions cannot be traced only on the host mode */
+#ifdef	CONFIG_KVM_HOST_KERNEL
+#define	notrace_on_host		notrace
+#else	/* !CONFIG_KVM_HOST_KERNEL */
+#define	notrace_on_host
+#endif	/* CONFIG_KVM_HOST_KERNEL */
+#endif	/* CONFIG_MCST */
+
 /* Section for code which can't be instrumented at all */
 #define noinstr								\
 	noinline notrace __attribute((__section__(".noinstr.text")))

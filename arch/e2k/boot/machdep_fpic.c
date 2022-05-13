@@ -9,9 +9,6 @@ int cpu_to_iset(int cpu)
 	int iset = ELBRUS_GENERIC_ISET;
 
 	switch (cpu) {
-	case IDR_ES2_DSP_MDL:
-	case IDR_ES2_RU_MDL:
-		iset = ELBRUS_S_ISET;
 	case IDR_E2S_MDL:
 		iset = ELBRUS_2S_ISET;
 	case IDR_E8C_MDL:
@@ -34,12 +31,21 @@ int cpu_to_iset(int cpu)
 int machdep_setup_features(int cpu, int revision)
 {
 	int iset_ver = cpu_to_iset(cpu);
+	bool is_hardware_guest;
 
 	if (iset_ver == ELBRUS_GENERIC_ISET)
 		return 1;
 
-	CPU_FEAT_EPIC_initializer(cpu, revision, iset_ver, cpu, &machine);
-	CPU_FEAT_ISET_V6_initializer(cpu, revision, iset_ver, cpu, &machine);
+	if (iset_ver < E2K_ISET_V6 || IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
+		is_hardware_guest = false;
+	} else {
+		is_hardware_guest = DECOMPRESSOR_READ_CORE_MODE().gmi;
+	}
+
+	CPU_FEAT_EPIC_initializer(cpu, revision, iset_ver, cpu,
+				  is_hardware_guest, &machine);
+	CPU_FEAT_ISET_V6_initializer(cpu, revision, iset_ver, cpu,
+				     is_hardware_guest, &machine);
 
 	return 0;
 }

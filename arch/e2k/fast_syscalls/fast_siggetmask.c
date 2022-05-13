@@ -6,9 +6,8 @@
 # error We read u64 value here...
 #endif
 
-notrace __interrupt __section(.ttable_entry6_C)
-int native_fast_sys_siggetmask(u64 __user *oset, size_t sigsetsize)
+notrace __interrupt __section(.entry_handlers)
+int fast_sys_siggetmask(u64 __user *oset, size_t sigsetsize)
 {
-	return FAST_SYS_SIGGETMASK(oset, sigsetsize);
+	return _fast_sys_siggetmask(oset, sigsetsize);
 }
-

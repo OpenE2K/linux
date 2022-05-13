@@ -1249,25 +1249,25 @@ long protected_sys_olduselib(const unsigned long __user a1, /* library */
 	rval |= PUT_USER_AP(&umdd->mdd_got, kmdd.got_addr,
 			    kmdd.got_len, 0, RW_ENABLE);
 	if (kmdd.init_got_point)
-		rval |= PUT_USER_PL_V2(&umdd->mdd_init_got,
+		rval |= PUT_USER_PL_V3(&umdd->mdd_init_got,
 					kmdd.init_got_point);
 	else
 		rval |= put_user(0L, &umdd->mdd_init_got.word);
 
 	if (kmdd.entry_point)
-		rval |= PUT_USER_PL_V2(&umdd->mdd_start,
+		rval |= PUT_USER_PL_V3(&umdd->mdd_start,
 					kmdd.entry_point);
 	else
 		rval |= put_user(0L, &umdd->mdd_start.word);
 
 	if (kmdd.init_point)
-		rval |= PUT_USER_PL_V2(&umdd->mdd_init,
+		rval |= PUT_USER_PL_V3(&umdd->mdd_init,
 					kmdd.init_point);
 	else
 		rval |= put_user(0L, &umdd->mdd_init.word);
 
 	if (kmdd.fini_point)
-		rval |= PUT_USER_PL_V2(&umdd->mdd_fini,
+		rval |= PUT_USER_PL_V3(&umdd->mdd_fini,
 					kmdd.fini_point);
 	else
 		rval |= put_user(0L, &umdd->mdd_fini.word);

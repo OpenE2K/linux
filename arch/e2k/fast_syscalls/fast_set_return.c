@@ -3,8 +3,8 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
-notrace __interrupt __section(".entry.text")
-int fast_sys_set_return(u64 ip, int flags)
+notrace __interrupt
+int native_do_fast_sys_set_return(u64 ip, int flags)
 {
 	struct thread_info *const ti = READ_CURRENT_REG();
 	e2k_pcsp_lo_t pcsp_lo;
@@ -12,11 +12,6 @@ int fast_sys_set_return(u64 ip, int flags)
 	e2k_cr0_hi_t cr0_hi;
 	e2k_mem_crs_t *frame, *base;
 	u64 prev_ip;
-
-#ifdef	CONFIG_KVM_HOST_MODE
-	/* TODO set_retrun does not have a slow counterpart, not implemented for paravirt guest */
-	KVM_BUG_ON(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
-#endif
 
 	E2K_FLUSHC;
 

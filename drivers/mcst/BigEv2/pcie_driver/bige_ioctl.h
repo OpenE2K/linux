@@ -51,6 +51,9 @@ struct core_desc
 
 #define BIGE_IOX_ASIC_ID        _IOWR(BIGE_IOC_MAGIC, 20, __void* )
 
+#define BIGE_IOCT_POWER_ON_REQ    _IO(BIGE_IOC_MAGIC, 21)
+#define BIGE_IOCT_POWER_OFF_REQ    _IO(BIGE_IOC_MAGIC, 22)
+
 #define BIGE_DEBUG_STATUS       _IO(BIGE_IOC_MAGIC, 29)
 
 #define BIGE_IOC_MAXNR 29

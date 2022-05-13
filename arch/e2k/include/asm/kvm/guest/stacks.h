@@ -13,6 +13,7 @@
  * Guest kernel thread stacks descriptions
  */
 #define	KVM_GUEST_KERNEL_C_STACK_SIZE	KERNEL_C_STACK_SIZE	/* as on host */
+#define KVM_GUEST_KERNEL_C_STACK_OFFSET	KERNEL_C_STACK_OFFSET	/* as on host */
 #define	KVM_GUEST_KERNEL_PS_SIZE	(16 * PAGE_SIZE)	/* 64 KBytes */
 #define	KVM_GUEST_KERNEL_PS_INIT_SIZE	(1 * PAGE_SIZE)		/*  4 KBytes */
 #define	KVM_GUEST_KERNEL_PCS_SIZE	(2 * PAGE_SIZE)		/*  8 KBytes */

@@ -65,11 +65,6 @@ get_lt_timer(void)
 
 	DebugLT("started\n");
 	/* check clock override */
-	if (!L_TIMER_IS_ALLOWED()) {
-		DebugLT("on this machine Elbrus timer is not "
-			"implemented\n");
-		return (-ENODEV);
-	}
 	lt = find_lt_in_mp_timers();
 	if (lt == NULL) {
 		DebugLT("on this machine Elbrus timer is not "
@@ -226,12 +221,6 @@ int __init init_lt_clocksource(void)
 	int ret;
 
 	DebugLT("started\n");
-#ifdef	__e2k__
-	if (!L_TIMER_IS_ALLOWED()) {
-		ret = -ENODEV;
-		goto out;
-	}
-#endif	/* __e2k__ */
 
 	if (!lt_regs) {
 		ret = -ENODEV;

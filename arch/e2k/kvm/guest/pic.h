@@ -65,6 +65,7 @@ static inline void __init_recv kvm_init_system_handlers_table_pic(void)
 
 extern __init int kvm_setup_boot_lapic_virq(void);
 extern __init int kvm_setup_boot_cepic_virq(void);
+
 static inline int __init kvm_setup_boot_local_pic_virq(void)
 {
 	if (IS_HV_GM())
@@ -77,6 +78,7 @@ static inline int __init kvm_setup_boot_local_pic_virq(void)
 	}
 }
 
+extern int kvm_setup_secondary_lapic_virq(unsigned int cpuid);
 extern void kvm_setup_local_apic_virq(unsigned int cpuid);
 extern void kvm_setup_epic_virq(unsigned int cpuid);
 static inline void kvm_setup_local_pic_virq(unsigned int cpuid)
@@ -125,6 +127,8 @@ static inline void __init_recv kvm_init_system_handlers_table_pic(void)
 }
 
 extern __init int kvm_setup_boot_lapic_virq(void);
+extern __init int kvm_setup_secondary_lapic_virq(unsigned int cpuid);
+
 static inline int __init kvm_setup_boot_local_pic_virq(void)
 {
 	if (IS_HV_GM())

@@ -49,7 +49,7 @@
 #endif	/* CONFIG_CPU_ISET 0-6 */
 
 /* max. number of physical address bits (architected) */
-#define E2K_MAX_PHYS_BITS_V2	40	/* on V1-V5 */
+#define E2K_MAX_PHYS_BITS_V3	40	/* on V1-V5 */
 #define E2K_MAX_PHYS_BITS_V6	48	/* from V6-... */
 
 /*
@@ -62,8 +62,6 @@ typedef enum pte_mem_type {
 	EXT_PREFETCH_MT		= 4,
 	EXT_NON_PREFETCH_MT	= 6,
 	EXT_CONFIG_MT		= 7,
-	/* See comment in ioremap_cache() */
-	EXT_CACHE_MT		= 8,
 	/* This is the same as GEN_NON_CACHE_MT but with additional bit
 	 * set so that track_pfn_*() functions can understand if this
 	 * is EXT_PREFETCH_MT (i.e. came from pgprot_writecombine())
@@ -84,6 +82,43 @@ typedef enum pte_mem_type {
 	GEN_NON_CACHE_ORDERED_MT = 9,
 } pte_mem_type_t;
 
+static inline char *pte_mem_type_name(enum pte_mem_type type)
+{
+	switch (type) {
+	case GEN_CACHE_MT:
+		return "GC";
+	case GEN_NON_CACHE_MT:
+		return "GnC";
+	case EXT_PREFETCH_MT:
+		return "XP";
+	case EXT_NON_PREFETCH_MT:
+		return "XnP";
+	case EXT_CONFIG_MT:
+		return "XC";
+	case GEN_NON_CACHE_ORDERED_MT:
+		return "GnC_ordered";
+	}
+	BUG();
+}
+
+static inline bool pte_mem_type_is_coherent(enum pte_mem_type type)
+{
+	switch (type) {
+	case GEN_CACHE_MT:
+	case GEN_NON_CACHE_MT:
+		return true;
+	case EXT_NON_PREFETCH_MT:
+	case EXT_CONFIG_MT:
+		return false;
+	case EXT_PREFETCH_MT:
+		return !cpu_has(CPU_FEAT_ISET_V6);
+	case GEN_NON_CACHE_ORDERED_MT:
+		return cpu_has(CPU_FEAT_ISET_V6);
+	}
+	BUG();
+}
+
+
 typedef enum pte_mem_type_rule {
 	MOST_STRONG_MTCR	= 0,
 	FROM_HYPERVISOR_MTCR	= 2,
@@ -97,7 +132,6 @@ typedef enum uni_page_bits {
 	UNI_PAGE_PRIV_BIT,		/* PriVileged */
 	UNI_PAGE_VALID_BIT,		/* Valid */
 	UNI_PAGE_PROTECT_BIT,		/* PRotected */
-	UNI_PAGE_HW_ACCESS_BIT,		/* page hardware Accessed */
 	UNI_PAGE_DIRTY_BIT,		/* page Dirty */
 	UNI_PAGE_HUGE_BIT,		/* huge Page Size */
 	UNI_PAGE_GLOBAL_BIT,		/* Global page */
@@ -105,7 +139,6 @@ typedef enum uni_page_bits {
 	UNI_PAGE_NON_EX_BIT,		/* NON EXecutable */
 	UNI_PAGE_PROTNONE_BIT,		/* software PROTection NONE */
 	UNI_PAGE_AVAIL_BIT,		/* software AVAILable */
-	UNI_PAGE_SW_ACCESS_BIT,		/* page software Accessed */
 	UNI_PAGE_SPECIAL_BIT,		/* software SPECIAL */
 	UNI_PAGE_GFN_BIT,		/* software Guest page Frame Number */
 	UNI_PAGE_ACCESSED_BIT,		/* page hardware/software Accessed */
@@ -141,7 +174,6 @@ typedef const unsigned long	uni_dtlb_t;
 #define	UNI_PAGE_PRIV		(uni_pteval_t)(1ULL << UNI_PAGE_PRIV_BIT)
 #define	UNI_PAGE_VALID		(uni_pteval_t)(1ULL << UNI_PAGE_VALID_BIT)
 #define	UNI_PAGE_PROTECT	(uni_pteval_t)(1ULL << UNI_PAGE_PROTECT_BIT)
-#define	UNI_PAGE_HW_ACCESS	(uni_pteval_t)(1ULL << UNI_PAGE_HW_ACCESS_BIT)
 #define	UNI_PAGE_DIRTY		(uni_pteval_t)(1ULL << UNI_PAGE_DIRTY_BIT)
 #define	UNI_PAGE_HUGE		(uni_pteval_t)(1ULL << UNI_PAGE_HUGE_BIT)
 #define	UNI_PAGE_GLOBAL		(uni_pteval_t)(1ULL << UNI_PAGE_GLOBAL_BIT)
@@ -149,7 +181,6 @@ typedef const unsigned long	uni_dtlb_t;
 #define	UNI_PAGE_NON_EX		(uni_pteval_t)(1ULL << UNI_PAGE_NON_EX_BIT)
 #define	UNI_PAGE_PROTNONE	(uni_pteval_t)(1ULL << UNI_PAGE_PROTNONE_BIT)
 #define	UNI_PAGE_AVAIL		(uni_pteval_t)(1ULL << UNI_PAGE_AVAIL_BIT)
-#define	UNI_PAGE_SW_ACCESS	(uni_pteval_t)(1ULL << UNI_PAGE_SW_ACCESS_BIT)
 #define	UNI_PAGE_SPECIAL	(uni_pteval_t)(1ULL << UNI_PAGE_SPECIAL_BIT)
 #define	UNI_PAGE_GFN		(uni_pteval_t)(1ULL << UNI_PAGE_GFN_BIT)
 #define	UNI_PAGE_ACCESSED	(uni_pteval_t)(1ULL << UNI_PAGE_ACCESSED_BIT)

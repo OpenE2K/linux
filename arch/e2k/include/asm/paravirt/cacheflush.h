@@ -6,11 +6,6 @@
 
 #ifdef	CONFIG_SMP
 static inline void
-pv_smp_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
-{
-	pv_cpu_ops.smp_flush_icache_range(start, end);
-}
-static inline void
 pv_smp_flush_icache_range_array(void *icache_range_arr)
 {
 	pv_cpu_ops.smp_flush_icache_range_array(icache_range_arr);
@@ -46,11 +41,6 @@ pv_clear_DCACHE_L1_range(void *virt_addr, size_t len)
 #ifdef	CONFIG_PARAVIRT_GUEST
 /* it is paravirtualized host and guest kernel */
 #ifdef	CONFIG_SMP
-static inline void
-smp_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
-{
-	pv_smp_flush_icache_range(start, end);
-}
 static inline void
 smp_flush_icache_range_array(struct icache_range_array *icache_range_arr)
 {

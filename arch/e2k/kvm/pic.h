@@ -46,14 +46,14 @@ static inline int kvm_pic_nmi_deliver(struct kvm_vcpu *vcpu)
 		return kvm_apic_nmi_deliver(vcpu);
 }
 
-extern int init_cepic_state(struct kvm_vcpu *vcpu);
-extern int init_lapic_state(struct kvm_vcpu *vcpu);
-static inline int init_pic_state(struct kvm_vcpu *vcpu)
+extern void reset_cepic_state(struct kvm_vcpu *vcpu);
+extern void reset_lapic_state(struct kvm_vcpu *vcpu);
+static inline void reset_pic_state(struct kvm_vcpu *vcpu)
 {
 	if (kvm_vcpu_is_epic(vcpu))
-		return init_cepic_state(vcpu);
+		reset_cepic_state(vcpu);
 	else
-		return init_lapic_state(vcpu);
+		reset_lapic_state(vcpu);
 }
 
 extern int kvm_ioepic_init(struct kvm *kvm);
@@ -119,18 +119,22 @@ extern int kvm_irq_delivery_to_sw_epic(struct kvm *kvm, int src,
 static inline int kvm_irq_delivery_to_epic(struct kvm *kvm, int src,
 		struct kvm_cepic_irq *irq)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm->arch.is_hv)
 		return kvm_irq_delivery_to_hw_epic(kvm, src, irq);
 	else
+#endif
 		return kvm_irq_delivery_to_sw_epic(kvm, src, irq);
 }
 
 extern int kvm_hw_epic_sysrq_deliver(struct kvm_vcpu *vcpu);
 static inline int kvm_epic_sysrq_deliver(struct kvm_vcpu *vcpu)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (vcpu->kvm->arch.is_hv)
 		return kvm_hw_epic_sysrq_deliver(vcpu);
 	else
+#endif
 		return kvm_sw_epic_sysrq_deliver(vcpu);
 }
 
@@ -216,9 +220,11 @@ extern int kvm_irq_delivery_to_sw_apic(struct kvm *kvm,
 static inline int kvm_irq_delivery_to_apic(struct kvm *kvm,
 		struct kvm_lapic *src, struct kvm_lapic_irq *irq)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_is_hw_apic(kvm))
 		return kvm_irq_delivery_to_hw_apic(kvm, src, irq);
 	else
+#endif
 		return kvm_irq_delivery_to_sw_apic(kvm, src, irq);
 }
 
@@ -226,9 +232,11 @@ extern int kvm_get_hw_apic_interrupt(struct kvm_vcpu *vcpu);
 extern int kvm_get_sw_apic_interrupt(struct kvm_vcpu *vcpu);
 static inline int kvm_get_apic_interrupt(struct kvm_vcpu *vcpu)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_vcpu_is_hw_apic(vcpu))
 		return kvm_get_hw_apic_interrupt(vcpu);
 	else
+#endif
 		return kvm_get_sw_apic_interrupt(vcpu);
 }
 
@@ -236,9 +244,11 @@ extern void hw_apic_set_eoi(struct kvm_lapic *apic);
 extern void sw_apic_set_eoi(struct kvm_lapic *apic);
 static inline void apic_set_eoi(struct kvm_lapic *apic)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_vcpu_is_hw_apic(apic->vcpu))
 		hw_apic_set_eoi(apic);
 	else
+#endif
 		sw_apic_set_eoi(apic);
 }
 
@@ -246,26 +256,32 @@ extern void start_hw_apic_timer(struct kvm_lapic *apic, u32 apic_tmict);
 extern void start_sw_apic_timer(struct kvm_lapic *apic, u32 apic_tmict);
 static inline void start_apic_timer(struct kvm_lapic *apic, u32 apic_tmict)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_vcpu_is_hw_apic(apic->vcpu))
 		start_hw_apic_timer(apic, apic_tmict);
 	else
+#endif
 		start_sw_apic_timer(apic, apic_tmict);
 }
 
 extern void hw_apic_write_nm(struct kvm_lapic *apic, u32 val);
 static inline void apic_write_nm(struct kvm_lapic *apic, u32 val)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_vcpu_is_hw_apic(apic->vcpu))
 		hw_apic_write_nm(apic, val);
+#endif
 }
 
 extern u32 hw_apic_read_nm(struct kvm_lapic *apic);
 extern u32 sw_apic_read_nm(struct kvm_lapic *apic);
 static inline u32 apic_read_nm(struct kvm_lapic *apic)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_vcpu_is_hw_apic(apic->vcpu))
 		return hw_apic_read_nm(apic);
 	else
+#endif
 		return sw_apic_read_nm(apic);
 }
 
@@ -273,17 +289,21 @@ extern u32 hw_apic_get_tmcct(struct kvm_lapic *apic);
 extern u32 sw_apic_get_tmcct(struct kvm_lapic *apic);
 static inline u32 apic_get_tmcct(struct kvm_lapic *apic)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_vcpu_is_hw_apic(apic->vcpu))
 		return hw_apic_get_tmcct(apic);
 	else
+#endif
 		return sw_apic_get_tmcct(apic);
 }
 
 extern void hw_apic_write_lvtt(struct kvm_lapic *apic, u32 apic_lvtt);
 static inline void apic_write_lvtt(struct kvm_lapic *apic, u32 apic_lvtt)
 {
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 	if (kvm_vcpu_is_hw_apic(apic->vcpu))
 		return hw_apic_write_lvtt(apic, apic_lvtt);
+#endif
 }
 
 extern bool kvm_check_lapic_priority(struct kvm_vcpu *vcpu);

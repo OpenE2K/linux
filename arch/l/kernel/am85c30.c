@@ -143,13 +143,6 @@ static int __init
 am85c30_init(void *serial_base)
 {
 	DebugSC("boot_am85c30_init() started\n");
-#ifdef CONFIG_E2K	
-	if (!HAS_MACHINE_E2K_IOHUB) {
-		DebugSC("boot_am85c30_init() on this machine AM85C30 serial "
-			"device is not used\n");
-		return (-ENODEV);
-	}
-#endif	/* CONFIG_E2K */
 
 	if (serial_base == NULL) {
 		dump_printk("am85c30_init() Serial console base IO "

@@ -139,7 +139,7 @@ native_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
 	} else {
 #pragma loop count (5)
 		for (i = 0; i < size / 128; i++)
-			E2K_TAGGED_MEMMOVE_128_RF_V2(&dst[16 * i],
+			E2K_TAGGED_MEMMOVE_128_RF_V3(&dst[16 * i],
 					&src[16 * i]);
 
 		copied = round_down(size, 128);
@@ -244,12 +244,12 @@ kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
 	native_kernel_hw_stack_frames_copy(dst, src, size);
 }
 static __always_inline void
-collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
+collapse_kernel_pcs(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)
 {
 	native_collapse_kernel_pcs(dst, src, spilled_size);
 }
 static __always_inline void
-collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
+collapse_kernel_ps(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)
 {
 	native_collapse_kernel_ps(dst, src, spilled_size);
 }
@@ -280,12 +280,9 @@ static __always_inline s64 get_ps_copy_size(u64 cur_window_q, s64 u_pshtp_size)
 	return u_pshtp_size - (E2K_MAXSR - cur_window_q) * EXT_4_NR_SZ;
 }
 
-#ifdef CONFIG_CPU_HAS_FILL_INSTRUCTION
-# define E2K_CF_MAX_FILL (E2K_CF_MAX_FILL_FILLC_q * 0x10)
-#else
 extern int cf_max_fill_return;
-# define E2K_CF_MAX_FILL cf_max_fill_return
-#endif
+#define E2K_CF_MAX_FILL (cpu_has(CPU_FEAT_FILLC) ? \
+	(E2K_CF_MAX_FILL_FILLC_q * 0x10) : cf_max_fill_return)
 
 static __always_inline s64 get_pcs_copy_size(s64 u_pcshtp_size)
 {
@@ -300,10 +297,10 @@ static __always_inline s64 get_pcs_copy_size(s64 u_pcshtp_size)
  * Copy hardware stack from user to *current* kernel stack.
  * One has to be careful to avoid hardware FILL of this stack.
  */
-static inline int __copy_user_to_current_hw_stack(void *dst, void __user *src,
+static inline int copy_user_to_current_hw_stack(void *dst, void __user *src,
 			unsigned long size, const pt_regs_t *regs, bool chain)
 {
-	unsigned long min_flt, maj_flt, ts_flag;
+	u64 counter;
 
 	if (likely(!host_test_intc_emul_mode(regs))) {
 		if (!__range_ok((unsigned long __force) src, size,
@@ -311,15 +308,14 @@ static inline int __copy_user_to_current_hw_stack(void *dst, void __user *src,
 			return -EFAULT;
 	}
 
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-
 	/*
-	 * Every page fault here has a chance of FILL'ing the frame
-	 * that is being copied, in which case we repeat the copy.
+	 * Every interrupt and exception here has a chance of FILL'ing
+	 * the frame that is being copied, in which case we repeat the copy.
 	 */
 	do {
-		min_flt = READ_ONCE(current->min_flt);
-		maj_flt = READ_ONCE(current->maj_flt);
+		unsigned long ts_flag;
+
+		counter = READ_ONCE(current->thread.traps_count);
 
 		if (chain)
 			E2K_FLUSHC;
@@ -327,36 +323,21 @@ static inline int __copy_user_to_current_hw_stack(void *dst, void __user *src,
 			E2K_FLUSHR;
 
 		SET_USR_PFAULT("$.recovery_memcpy_fault");
-		fast_tagged_memory_copy_from_user(dst, src, size, regs,
+		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		fast_tagged_memory_copy_from_user(dst, src, size, NULL, regs,
 				TAGGED_MEM_STORE_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 				TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 				true);
-		if (RESTORE_USR_PFAULT) {
-			clear_ts_flag(ts_flag);
+		clear_ts_flag(ts_flag);
+		if (RESTORE_USR_PFAULT)
 			return -EFAULT;
-		}
-	} while (unlikely(min_flt != READ_ONCE(current->min_flt) ||
-			  maj_flt != READ_ONCE(current->maj_flt)));
+	} while (unlikely(counter != READ_ONCE(current->thread.traps_count)));
 
-	clear_ts_flag(ts_flag);
 	return 0;
 }
 
-
-static inline int copy_user_to_current_hw_stack(void *dst, void __user *src,
-			unsigned long size, pt_regs_t *regs, bool chain)
-{
-	unsigned long flags;
-	int ret;
-
-	raw_all_irq_save(flags);
-	ret = __copy_user_to_current_hw_stack(dst, src, size, regs, chain);
-	raw_all_irq_restore(flags);
-
-	return ret;
-}
 
 static inline int copy_e2k_stack_from_user(void *dst, void __user *src,
 					unsigned long size, pt_regs_t *regs)
@@ -395,8 +376,8 @@ static inline int copy_e2k_stack_to_user(void __user *dst, void *src,
 }
 
 static __always_inline int
-user_hw_stack_frames_copy(void __user *dst, void *src, unsigned long copy_size,
-		const pt_regs_t *regs, unsigned long hw_stack_ind, bool is_pcsp)
+user_hw_stack_frames_copy(void __user *dst, void *src, long copy_size,
+		const pt_regs_t *regs, long hw_stack_ind, bool is_pcsp)
 {
 	unsigned long ts_flag;
 
@@ -414,7 +395,7 @@ user_hw_stack_frames_copy(void __user *dst, void *src, unsigned long copy_size,
 	SET_USR_PFAULT("$.recovery_memcpy_fault");
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	fast_tagged_memory_copy_to_user(dst, src, copy_size, regs,
+	fast_tagged_memory_copy_to_user(dst, src, copy_size, NULL, regs,
 			TAGGED_MEM_STORE_REC_OPC |
 			MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 			TAGGED_MEM_LOAD_REC_OPC |
@@ -604,7 +585,8 @@ native_user_hw_stacks_copy(struct e2k_stacks *stacks,
 	return 0;
 }
 
-static inline void collapse_kernel_hw_stacks(struct e2k_stacks *stacks)
+static inline void collapse_kernel_hw_stacks(pt_regs_t *regs,
+					     struct e2k_stacks *stacks)
 {
 	e2k_pcsp_lo_t k_pcsp_lo = current_thread_info()->k_pcsp_lo;
 	e2k_psp_lo_t k_psp_lo = current_thread_info()->k_psp_lo;
@@ -622,7 +604,7 @@ static inline void collapse_kernel_hw_stacks(struct e2k_stacks *stacks)
 	 * we will have pcshtp = pcsp_hi.ind = 0. But situation
 	 * with pcsp_hi.ind != 0 and pcshtp = 0 is impossible. */
 	if (WARN_ON_ONCE(spilled_pc_size < SZ_OF_CR &&
-			 AS(stacks->pcsp_hi).ind != 0))
+			 AS(stacks->pcsp_hi).ind != 0 && !paravirt_enabled()))
 		do_exit(SIGKILL);
 
 	/* Keep the last user frame (see user_hw_stacks_copy_full()) */
@@ -638,7 +620,7 @@ static inline void collapse_kernel_hw_stacks(struct e2k_stacks *stacks)
 	if (spilled_pc_size) {
 		dst = (u64 *) AS(k_pcsp_lo).base;
 		src = (u64 *) (AS(k_pcsp_lo).base + spilled_pc_size);
-		collapse_kernel_pcs(dst, src, spilled_pc_size);
+		collapse_kernel_pcs(regs, dst, src, spilled_pc_size);
 
 		stacks->pcshtp = SZ_OF_CR;
 
@@ -648,7 +630,7 @@ static inline void collapse_kernel_hw_stacks(struct e2k_stacks *stacks)
 	if (spilled_p_size) {
 		dst = (u64 *) AS(k_psp_lo).base;
 		src = (u64 *) (AS(k_psp_lo).base + spilled_p_size);
-		collapse_kernel_ps(dst, src, spilled_p_size);
+		collapse_kernel_ps(regs, dst, src, spilled_p_size);
 
 		AS(pshtp).ind = 0;
 		stacks->pshtp = pshtp;
@@ -724,8 +706,8 @@ static __always_inline void native_user_hw_stacks_prepare(
 					u_pcsp_lo.PCSP_lo_base :
 						(u64) CURRENT_PCS_BASE();
 		if ((u64) u_cframe > u_cbase) {
-			ret = __copy_user_to_current_hw_stack(k_crs,
-				u_cframe - 1, sizeof(*k_crs), regs, true);
+			ret = copy_user_to_current_hw_stack(k_crs, u_cframe - 1,
+					sizeof(*k_crs), regs, true);
 		}
 		raw_all_irq_restore(flags);
 
@@ -826,7 +808,7 @@ static inline int do_user_hw_stacks_copy_full(struct e2k_stacks *stacks,
 	 * this way we can later FILL using return trick (otherwise there
 	 * would be no space in chain stack for the trick).
 	 */
-	collapse_kernel_hw_stacks(stacks);
+	collapse_kernel_hw_stacks(regs, stacks);
 
 	/*
 	 * Copy saved %cr registers

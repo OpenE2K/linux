@@ -914,14 +914,18 @@ __visible void epic_hc_emerg_interrupt(struct pt_regs *regs)
 
 __visible void epic_iommu_interrupt(struct pt_regs *regs)
 {
+#ifndef CONFIG_E2K
 	l_irq_enter();
+#endif
 
 #ifdef	CONFIG_E2K
 	e2k_iommu_error_interrupt();
 #endif
 
+#ifndef CONFIG_E2K
 	ack_epic_irq();
 	l_irq_exit();
+#endif
 }
 
 __visible void epic_uncore_interrupt(struct pt_regs *regs)
@@ -932,11 +936,11 @@ __visible void epic_uncore_interrupt(struct pt_regs *regs)
 	do_sic_error_interrupt();
 #endif
 
-	panic("EPIC: received uncore interrupt on core %d\n",
-		smp_processor_id());
-
 	ack_epic_irq();
 	l_irq_exit();
+
+	panic("EPIC: received uncore interrupt on core %d\n",
+		smp_processor_id());
 }
 
 __visible void epic_ipcc_interrupt(struct pt_regs *regs)

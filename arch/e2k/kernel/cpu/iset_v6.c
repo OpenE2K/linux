@@ -8,11 +8,12 @@
 #include <asm/aau_context.h>
 #include <asm/cpu_regs.h>
 #include <asm/epic.h>
-#include <asm/sic_regs_access.h>
+#include <asm/kdebug.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
 #include <asm/machdep.h>
 #include <asm/pic.h>
+#include <asm/sic_regs_access.h>
 #include <asm/trap_def.h>
 #include <asm/trap_table.h>
 #include <asm/sclkr.h>
@@ -21,9 +22,9 @@
 #include <asm/kvm/trace_kvm_hv.h>
 
 /******************************* DEBUG DEFINES ********************************/
-#undef        DEBUG_PF_MODE
-#define       DEBUG_PF_MODE           0       /* Page fault */
-#define DebugPF(...)          DebugPrint(DEBUG_PF_MODE ,##__VA_ARGS__)
+#undef	DEBUG_PF_MODE
+#define	DEBUG_PF_MODE	0	/* Page fault */
+#define	DebugPF(...)	DebugPrint(DEBUG_PF_MODE ,##__VA_ARGS__)
 /******************************************************************************/
 
 unsigned long rrd_v6(int reg)
@@ -294,6 +295,7 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 	struct kvm_hw_cpu_context *hw_ctxt = &vcpu->hw_ctxt;
 	unsigned long flags;
 	struct kvm_arch *ka = &arch_to_vcpu(vcpu)->kvm->arch;
+	e2k_mmu_cr_t mmu_cr, old_mmu_cr;
 
 	/*
 	 * Stack registers
@@ -313,7 +315,7 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 	/*
 	 * MMU shadow context
 	 */
-	hw_ctxt->sh_mmu_cr = READ_SH_MMU_CR_REG_VALUE();
+	AW(hw_ctxt->sh_mmu_cr) = READ_SH_MMU_CR_REG_VALUE();
 	hw_ctxt->sh_pid = READ_SH_PID_REG_VALUE();
 	hw_ctxt->sh_os_pptb = READ_SH_OS_PPTB_REG_VALUE();
 	hw_ctxt->gp_pptb = READ_GP_PPTB_REG_VALUE();
@@ -337,8 +339,7 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 	/* The last still runnig vcpu saves it sclkm3.
 	 * Guest time run paused */
 	if (ka->num_sclkr_run-- == 1) {
-		ka->sh_sclkm3 = (long long) READ_SH_SCLKM3_REG_VALUE() -
-						 (long long) raw_read_sclkr();
+		ka->sh_sclkm3 = READ_SH_SCLKM3_REG_VALUE() - read_sclkr_sync();
 	}
 	raw_spin_unlock_irqrestore(&ka->sh_sclkr_lock, flags);
 
@@ -347,9 +348,9 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 	/*
 	 * VIRT_CTRL_* registers
 	 */
-	AW(hw_ctxt->virt_ctrl_cu) = READ_VIRT_CTRL_CU_REG_VALUE();
-	AW(hw_ctxt->virt_ctrl_mu) = READ_VIRT_CTRL_MU_REG_VALUE();
-	hw_ctxt->g_w_imask_mmu_cr = READ_G_W_IMASK_MMU_CR_REG_VALUE();
+	hw_ctxt->virt_ctrl_cu = READ_VIRT_CTRL_CU_REG();
+	hw_ctxt->virt_ctrl_mu = READ_VIRT_CTRL_MU_REG();
+	AW(hw_ctxt->g_w_imask_mmu_cr) = READ_G_W_IMASK_MMU_CR_REG_VALUE();
 
 	/*
 	 * INTC_INFO_* registers have to be saved immediately upon
@@ -372,8 +373,27 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 
 	/*
 	 * Binco context
+	 *
+	 * Note that reading higher 32 bits of %u2_pptb depends
+	 * on %mmu_cr.{slma,spae} bits, so we want to save %u2_pptb
+	 * using guest's values of those bits; also cr0_pg=1 enables
+	 * secondary space support and upt=0 avoids undefined
+	 * behavior.
 	 */
+	raw_all_irq_save(flags);
+
+	AW(old_mmu_cr) = NATIVE_GET_MMUREG(mmu_cr);
+	mmu_cr = old_mmu_cr;
+	mmu_cr.slma = hw_ctxt->sh_mmu_cr.slma;
+	mmu_cr.spae = hw_ctxt->sh_mmu_cr.spae;
+	mmu_cr.cr0_pg = 1;
+	mmu_cr.upt = 0;
+	NATIVE_SET_MMUREG(mmu_cr, AW(mmu_cr));
 	hw_ctxt->u2_pptb = NATIVE_GET_MMUREG(u2_pptb);
+	NATIVE_SET_MMUREG(mmu_cr, AW(old_mmu_cr));
+
+	raw_all_irq_restore(flags);
+
 	hw_ctxt->pid2 = NATIVE_GET_MMUREG(pid2);
 	hw_ctxt->mpt_b = NATIVE_GET_MMUREG(mpt_b);
 	hw_ctxt->pci_l_b = NATIVE_GET_MMUREG(pci_l_b);
@@ -392,6 +412,7 @@ void restore_kvm_context_v6(const struct kvm_vcpu_arch *vcpu)
 	const struct kvm_hw_cpu_context *hw_ctxt = &vcpu->hw_ctxt;
 	unsigned long flags;
 	struct kvm_arch *ka = &arch_to_vcpu(vcpu)->kvm->arch;
+	e2k_mmu_cr_t mmu_cr, old_mmu_cr;
 
 	/*
 	 * Stack registers
@@ -411,7 +432,7 @@ void restore_kvm_context_v6(const struct kvm_vcpu_arch *vcpu)
 	/*
 	 * MMU shadow context
 	 */
-	WRITE_SH_MMU_CR_REG_VALUE(hw_ctxt->sh_mmu_cr);
+	WRITE_SH_MMU_CR_REG_VALUE(AW(hw_ctxt->sh_mmu_cr));
 	WRITE_SH_PID_REG_VALUE(hw_ctxt->sh_pid);
 	WRITE_SH_OS_PPTB_REG_VALUE(hw_ctxt->sh_os_pptb);
 	WRITE_GP_PPTB_REG_VALUE(hw_ctxt->gp_pptb);
@@ -430,18 +451,16 @@ void restore_kvm_context_v6(const struct kvm_vcpu_arch *vcpu)
 	WRITE_SH_OSCUIR_REG_VALUE(AW(hw_ctxt->sh_oscuir));
 
 	WRITE_SH_OSR0_REG_VALUE(hw_ctxt->sh_osr0);
-	/* sclkm3 = sclkm3 + ("current raw_read_sclkr()" -
-	 *	"raw_read_sclkr() when last vcpu leaves cpu")
+	/* sclkm3 = sclkm3 + ("current read_sclkr_sync()" -
+	 *	"read_sclkr_sync() when last vcpu leaves cpu")
 	 * sclkm3 has a summary time when each vcpu of guest was out of cpu
 	 */
 	raw_spin_lock_irqsave(&ka->sh_sclkr_lock, flags);
 	/* The first activated vcpu calculates sclkm3 for
 	 * itself and all subsequent activated vcpu-s.*/
 	if (ka->num_sclkr_run++ == 0) {
-		ka->sh_sclkm3 = (long long)raw_read_sclkr() +
-					 ka->sh_sclkm3;
-		/* Guest time run resumed
-		 * (including still sleeping vcpu-s) */
+		ka->sh_sclkm3 = read_sclkr_sync() + ka->sh_sclkm3;
+		/* Guest time run resumed (including still sleeping vcpu-s) */
 	}
 	WRITE_SH_SCLKM3_REG_VALUE(ka->sh_sclkm3);
 	raw_spin_unlock_irqrestore(&ka->sh_sclkr_lock, flags);
@@ -451,9 +470,9 @@ void restore_kvm_context_v6(const struct kvm_vcpu_arch *vcpu)
 	/*
 	 * VIRT_CTRL_* registers
 	 */
-	WRITE_VIRT_CTRL_CU_REG_VALUE(AW(hw_ctxt->virt_ctrl_cu));
-	WRITE_VIRT_CTRL_MU_REG_VALUE(AW(hw_ctxt->virt_ctrl_mu));
-	WRITE_G_W_IMASK_MMU_CR_REG_VALUE(hw_ctxt->g_w_imask_mmu_cr);
+	WRITE_VIRT_CTRL_CU_REG(hw_ctxt->virt_ctrl_cu);
+	WRITE_VIRT_CTRL_MU_REG(hw_ctxt->virt_ctrl_mu);
+	WRITE_G_W_IMASK_MMU_CR_REG_VALUE(AW(hw_ctxt->g_w_imask_mmu_cr));
 
 	/*
 	 * INTC_INFO_* registers were saved immediately upon
@@ -469,8 +488,25 @@ void restore_kvm_context_v6(const struct kvm_vcpu_arch *vcpu)
 
 	/*
 	 * Binco context
+	 *
+	 * Note that writing higher 32 bits of %u2_pptb depends
+	 * on %mmu_cr.{slma,spae} bits, so we want to save %u2_pptb
+	 * using guest's values of those bits; also cr0_pg=1 enables
+	 * secondary space support.
 	 */
+	raw_all_irq_save(flags);
+
+	AW(old_mmu_cr) = NATIVE_GET_MMUREG(mmu_cr);
+	mmu_cr = old_mmu_cr;
+	mmu_cr.slma = hw_ctxt->sh_mmu_cr.slma;
+	mmu_cr.spae = hw_ctxt->sh_mmu_cr.spae;
+	mmu_cr.cr0_pg = 1;
+	NATIVE_SET_MMUREG(mmu_cr, AW(mmu_cr));
 	NATIVE_SET_MMUREG(u2_pptb, hw_ctxt->u2_pptb);
+	NATIVE_SET_MMUREG(mmu_cr, AW(old_mmu_cr));
+
+	raw_all_irq_restore(flags);
+
 	NATIVE_SET_MMUREG(pid2, hw_ctxt->pid2);
 	NATIVE_SET_MMUREG(mpt_b, hw_ctxt->mpt_b);
 	NATIVE_SET_MMUREG(pci_l_b, hw_ctxt->pci_l_b);
@@ -497,20 +533,20 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 /* calculate current array prefetch buffer indices values
  * (see chapter 1.10.2 in "Scheduling") */
 void calculate_aau_aaldis_aaldas_v6(const struct pt_regs *regs,
-		struct thread_info *ti, struct e2k_aau_context *context)
+		e2k_aalda_t *aaldas, struct e2k_aau_context *context)
 {
-	memset(ti->aalda, 0, AALDAS_REGS_NUM * sizeof(ti->aalda[0]));
+	memset(aaldas, 0, AALDAS_REGS_NUM * sizeof(aaldas[0]));
 }
 
 /* See chapter 1.10.3 in "Scheduling" */
 void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 {
+	bool user = user_mode(regs);
 	const e2k_aau_t	*const aau_regs = regs->aau_context;
 	u32		aafstr = aau_regs->aafstr;
 	unsigned int	aa_bit = 0;
 	tc_cond_t	condition;
 	tc_mask_t	mask;
-	long ret_get_user;
 
 	regs->trap->nr_page_fault_exc = exc_data_page_num;
 
@@ -536,7 +572,7 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 
 		area_num = (aafstr >> 1) & 0x3f;
 		DebugPF("do_aau_fault: got interrupt on %d mova channel, area %lld\n",
-			aa_bit, area_num);
+				aa_bit, area_num);
 
 		if (area_num < 32)
 			fapb_addr = (e2k_fapb_instr_t *)(AS(regs->ctpr2).ta_base
@@ -545,33 +581,33 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 			fapb_addr = (e2k_fapb_instr_t *)(AS(regs->ctpr2).ta_base
 					+ 16 * (area_num - 32) + 8);
 
-		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
-		if (ret_get_user) {
-			if (ret_get_user == -EAGAIN)
+		if (!user) {
+			fapb = *fapb_addr;
+		} else if ((ret = host_get_user(AW(fapb), (u64 *) fapb_addr, regs))) {
+			if (ret == -EAGAIN)
 				break;
-			else
-				goto die;
+			goto die;
 		}
 
 		if (area_num >= 32 && AS(fapb).dpl) {
 			/* See bug #53880 */
 			pr_notice_once("%s [%d]: AAU is working in dpl mode (FAPB at %px)\n",
-				current->comm, current->pid, fapb_addr);
+					current->comm, current->pid, fapb_addr);
 			area_num -= 32;
 			fapb_addr -= 1;
-			ret_get_user = host_get_user(AW(fapb),
-						(u64 *)fapb_addr, regs);
-			if (ret_get_user) {
-				if (ret_get_user == -EAGAIN)
+			if (!user) {
+				fapb = *fapb_addr;
+			} else if ((ret = host_get_user(AW(fapb),
+					(u64 *) fapb_addr, regs))) {
+				if (ret == -EAGAIN)
 					break;
-				else
-					goto die;
+				goto die;
 			}
 		}
 
-		if (!AS(aau_regs->aasr).iab) {
+		if (!regs->aasr.iab) {
 			WARN_ONCE(1, "%s [%d]: AAU fault happened but iab in AASR register was not set\n",
-				current->comm, current->pid);
+					current->comm, current->pid);
 			goto die;
 		}
 
@@ -588,14 +624,14 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 		addr2 = addr1 + mrng - 1;
 		if (unlikely((addr1 & ~E2K_VA_MASK) || (addr2 & ~E2K_VA_MASK))) {
 			pr_notice_once("Bad address: addr 0x%llx, ind 0x%llx, mrng 0x%llx, fapb 0x%llx\n",
-				addr1, aau_regs->aaldi[area_num], mrng,
-				(unsigned long long) AW(fapb));
+					addr1, aau_regs->aaldi[area_num], mrng,
+					(unsigned long long) AW(fapb));
 
 			addr1 &= E2K_VA_MASK;
 			addr2 &= E2K_VA_MASK;
 		}
 		DebugPF("do_aau_fault: address1 = 0x%llx, address2 = 0x%llx, mrng=%lld\n",
-			addr1, addr2, mrng);
+				addr1, addr2, mrng);
 
 		do_aau_page_fault(regs, addr1, condition, mask, aa_bit);
 		if (ret) {
@@ -630,12 +666,15 @@ next_area:
 	}
 
 	DebugPF("do_aau_fault: exit aau fault handler, TICKS = %ld\n",
-		get_cycles());
+			get_cycles());
 
 	return;
 
 die:
-	force_sig(SIGSEGV);
+	if (user)
+		force_sig(SIGSEGV);
+	else
+		die("AAU error", regs, 0);
 }
 #endif /* CONFIG_USE_AAU */
 

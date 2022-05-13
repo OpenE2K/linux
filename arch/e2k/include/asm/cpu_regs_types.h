@@ -619,47 +619,65 @@ typedef	e2k_rwap_struct_t	psp_struct_t;
  * describes the full procedure chain stack memory as well as the current
  * pointer to the top of a procedure chain stack memory part.
  */
+typedef	union {
+	struct {
+		u64 base : E2K_VA_SIZE;
+		u64      : 58 - E2K_VA_SIZE;
+		u64 p    : 1;
+		u64 rw   : 2;
+		u64      : 3;
+	};
+	e2k_rwap_lo_fields_t	fields;
+	u64			word;
+} e2k_pcsp_lo_t;
+#define	_PCSP_lo_rw	rw
+#define	 E2K_PCSR_RW_PROTECTIONS	E2_RWAR_RW_ENABLE;
+#define	PCSP_lo_base	base
+#define	PCSP_lo_half	word
 
-	/*
-	 * Structure of lower word
-	 * access PCSP.lo.PCSP_lo_xxx or PCSP -> lo.PCSP_lo_xxx
-	 *	or PCSP_lo.PCSP_lo_xxx or PCSP_lo -> PCSP_lo_xxx
-	 */
-typedef	e2k_rwap_lo_struct_t	e2k_pcsp_lo_t;
-#define	_PCSP_lo_rw	E2K_RWAP_lo_rw		/* [60:59] - read/write flags */
-						/* should be "RW" */
-#define	E2K_PCSR_RW_PROTECTIONS			E2_RWAR_RW_ENABLE;
-#define	PCSP_lo_base	E2K_RWAP_lo_base	/* [47: 0] - base address */
-#define	PCSP_lo_half	E2K_RWAP_lo_half	/* [63: 0] - entire lower */
-						/* double-word of register */
-	/*
-	 * Structure of high word
-	 * access PCSP.hi.PCSP_hi_xxx or PCSP -> hi.PCSP_hi_xxx
-	 *	or PCSP_hi.PCSP_hi_xxx or PCSP_hi -> PCSP_hi_xxx
-	 */
-typedef	e2k_rwap_hi_struct_t	e2k_pcsp_hi_t;
-#define	PCSP_hi_size	E2K_RPSP_hi_size	/* [63:32] - size */
-#define	PCSP_hi_ind	E2K_RPSP_hi_ind		/* [31: 0] - index for SPILL */
-						/*		and FILL */
-#define	PCSP_hi_half	E2K_RPSP_hi_half	/* [63: 0] - entire high */
+typedef	union {
+	struct {
+		u64 ind  : 32;
+		u64 size : 32;
+	};
+	e2k_rpsp_hi_fields_t	fields;
+	u64			word;
+} e2k_pcsp_hi_t;
+#define	PCSP_hi_size	size
+#define	PCSP_hi_ind	ind
+#define	PCSP_hi_half	word
 
 	/*
 	 * Structure of quad-word register
 	 * access PCSP.PCSP_xxx or PCSP -> PCSP_xxx
 	 */
-typedef	e2k_rwap_struct_t	pcsp_struct_t;
-#define	_PCSP_rw	E2K_RWAP_rw		/* [60:59] - read/write flags */
-						/* should be "RW" */
-#define	PCSP_base	E2K_RWAP_base		/* [47: 0] - base address */
-#define	PCSP_size	E2K_RPSP_size		/* [63:32] - size */
-#define	PCSP_ind	E2K_RPSP_ind		/* [31: 0] - index for SPILL */
-						/*		and FILL */
-#define	PCSP_lo_reg	E2K_RWAP_lo_reg		/* [63: 0] - entire lower */
-						/* double-word of register */
-#define	PCSP_hi_reg	E2K_RPSP_hi_reg		/* [63: 0] - entire high */
-						/* double-word of register */
-#define	PCSP_lo_struct	E2K_RWAP_lo_struct	/* low register structure */
-#define	PCSP_hi_struct	E2K_RPSP_hi_struct	/* high register structure */
+typedef	struct {
+	union {
+		struct {
+			u64 base : E2K_VA_SIZE;
+			u64      : 58 - E2K_VA_SIZE;
+			u64 p    : 1;
+			u64 rw   : 2;
+			u64      : 3;
+		};
+		e2k_pcsp_lo_t lo;
+	};
+	union {
+		struct {
+			u64 ind  : 32;
+			u64 size : 32;
+		};
+		e2k_pcsp_hi_t hi;
+	};
+} pcsp_struct_t;
+#define	PCSP_rw		rw
+#define	PCSP_base	base
+#define	PCSP_size	size
+#define	PCSP_ind	ind
+#define	PCSP_lo_reg	lo.word
+#define	PCSP_hi_reg	hi.word
+#define	PCSP_lo_struct	lo
+#define	PCSP_hi_struct	hi
 #endif /* !(__ASSEMBLY__) */
 
 #define	E2K_ALIGN_PCSTACK	12		/* Procedure chain stack */
@@ -1361,7 +1379,7 @@ typedef	union e2k_dst {
 
 #define AS_WORD(x)		((x).word)
 #define AS_STRUCT(x)		((x).fields)
-#define AS_V2_STRUCT(x)		((x).v2_fields)
+#define AS_V3_STRUCT(x)		((x).v3_fields)
 #define AS_V6_STRUCT(x)		((x).v6_fields)
 #define AS_SAP_STRUCT(x)	((x).sap_fields)
 #define AS_AP_STRUCT(x)		((x).ap_fields)
@@ -1902,13 +1920,13 @@ typedef	union e2k_tsd {
 #define	CUD_CFLAG_SET		1	/* ISV have passed		     */
 
 /* Hardware procedure stack memory mapping (one quad-register record, LE) */
-/* Istruction sets from V2 to V4 */
-typedef	struct e2k_mem_ps_v2 {
+/* Istruction sets from V3 to V4 */
+typedef	struct e2k_mem_ps_v3 {
 	unsigned long		word_lo;	/* low word value */
 	unsigned long		word_hi;	/* high word value */
 	unsigned long		ext_lo;		/* extention of low word */
 	unsigned long		ext_hi;		/* extention of hagh word */
-} e2k_mem_ps_v2_t;
+} e2k_mem_ps_v3_t;
 /* Istruction sets from V5 to V6 */
 typedef	struct e2k_mem_ps_v5 {
 	unsigned long		word_lo;	/* low word value */
@@ -1917,7 +1935,7 @@ typedef	struct e2k_mem_ps_v5 {
 	unsigned long		ext_hi;		/* extention of hagh word */
 } e2k_mem_ps_v5_t;
 typedef union e2k_mem_ps {
-	e2k_mem_ps_v2_t		v2;
+	e2k_mem_ps_v3_t		v3;
 	e2k_mem_ps_v5_t		v5;
 } e2k_mem_ps_t;
 
@@ -2061,7 +2079,7 @@ typedef	struct e2k_upsr_fields {
 	u32	a20	: 1;	/* emulation of 1 Mb memory (only for Intel) */
 				/* should be 0 for Elbrus */
 	u32	nmie	: 1;	/* not masked interrupt enable */
-	/* next field of register exist only on ES2/E2S/E8C/E1C+ CPUs */
+	/* next field of register exist only on E2S/E8C/E1C+ CPUs */
 	u32	fsm	: 1;	/* floating comparison mode flag */
 				/* 1 - compatible with x86/x87 */
 	u32	impt	: 1;	/* ignore Memory Protection Table flag */
@@ -2095,7 +2113,7 @@ typedef	union e2k_upsr {
 #define	UPSR_IE		0x20U
 #define	UPSR_A20	0x40U
 #define	UPSR_NMIE	0x80U
-/* next field of register exist only on ES2/E2S/E8C/E1C+ CPUs */
+/* next field of register exist only on E2S/E8C/E1C+ CPUs */
 #define	UPSR_FSM	0x100U
 #define	UPSR_IMPT	0x200U
 #define	UPSR_IUC	0x400U
@@ -2151,10 +2169,7 @@ typedef	union e2k_idr {
 /* CPU model numbers */
 #define IDR_NONE		0x00	/* No such hardware exists */
 #define	IDR_E2S_MDL		0x03	/* Elbrus-4C (Elbrus-2S) */
-#define	IDR_ES2_DSP_MDL		0x04	/* Elbrus-2C+ */
 #define	IDR_E4S_MDL		0x05	/* reserve */
-#define	IDR_ES2_RU_MDL		0x06	/* Elbrus-2CM (without DSP) */
-					/* russian MICRON release */
 #define IDR_E8C_MDL		0x07	/* Elbrus-8C */
 #define IDR_E1CP_MDL		0x08	/* Elbrus-1C+ one processor e2s */
 					/* + graphic */
@@ -2398,20 +2413,6 @@ typedef union {
 		u32 btf  : 1;
 		u32 gm   : 1;
 	};
-	struct {
-		u32 v0   : 1;
-		u32 t0   : 1;
-		u32 v1   : 1;
-		u32 t1   : 1;
-		u32 v2   : 1;
-		u32 t2   : 1;
-		u32 v3   : 1;
-		u32 t3   : 1;
-		u32 bt   : 1;
-		u32 stop : 1;
-		u32 btf  : 1;
-		u32 gm   : 1;
-	} fields;
 	u32 word;
 } e2k_dibcr_t;
 #define	DIBCR_reg	word
@@ -2421,10 +2422,10 @@ typedef union {
 typedef union e2k_dimtp {
 	struct {
 		struct {
-			u64 base   : E2K_VA_SIZE;
-			u64 __pad1 : 59 - E2K_VA_SIZE;
-			u64 rw     : 2;
-			u64 __pad2 : 3;
+			u64 base : E2K_VA_SIZE;
+			u64      : 59 - E2K_VA_SIZE;
+			u64 rw   : 2;
+			u64      : 3;
 		};
 		struct {
 			u64 ind  : 32;

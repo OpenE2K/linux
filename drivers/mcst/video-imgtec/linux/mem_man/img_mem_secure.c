@@ -53,6 +53,9 @@
 #ifdef CONFIG_X86
 #include <asm/cacheflush.h>
 #endif
+#ifdef CONFIG_E2K
+#include <asm/set_memory.h>
+#endif
 
 #include <img_mem_man.h>
 #include "img_mem_man_priv.h"
@@ -117,7 +120,7 @@ static int secure_alloc(struct device *device, struct heap *heap,
 		dma_unmap_page(device, dma_addr, PAGE_SIZE, DMA_BIDIRECTIONAL);
 
 		sg_set_page(sgl, page, PAGE_SIZE, 0);
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 		set_memory_wc((unsigned long)page_address(page), 1);
 #endif
 		sgl = sg_next(sgl);
@@ -132,7 +135,7 @@ alloc_page_failed:
 		struct page *page = sg_page(sgl);
 
 		if (page) {
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 			set_memory_wb((unsigned long)page_address(page), 1);
 #endif
 			__free_page(page);
@@ -155,7 +158,7 @@ static void secure_free(struct heap *heap, struct buffer *buffer)
 
 	sgl = sgt->sgl;
 	while (sgl) {
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 		set_memory_wb((unsigned long)page_address(sg_page(sgl)), 1);
 #endif
 		__free_page(sg_page(sgl));

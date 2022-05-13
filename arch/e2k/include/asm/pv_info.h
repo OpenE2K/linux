@@ -117,4 +117,6 @@
 
 #endif	/* CONFIG_PARAVIRT_GUEST */
 
+#define	kernel_is_privileged()		(!paravirt_enabled() || IS_HV_GM())
+
 #endif /* __ASM_E2K_PV_INFO_H */

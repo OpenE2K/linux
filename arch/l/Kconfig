@@ -77,8 +77,7 @@ config MCST
 	default y
 
 config CLKR_CLOCKSOURCE
-	bool
-	default E2K || E90S
+	def_bool E90S
 
 config CLKR_SYNCHRONIZATION_WARNING
 	bool
@@ -91,7 +90,7 @@ config CLKR_SYNCHRONIZATION_WARNING
 config CLKR_OFFSET
 	bool
 	depends on CLKR_CLOCKSOURCE && SMP
-	default E2K && RECOVERY || E90S
+	default y
 	help
 	  Set to Y when different cpus' clock registers have the same
 	  frequency but different initial values. Then per-cpu offset
@@ -170,7 +169,7 @@ config L_PCI_QUIRKS
 
 config L_SIC_IPLINK_OFF
 	bool "MCST E2S: support for ipcc2 iplinks off"
-	depends on CPU_E2S
+	depends on E2K
 	select PROC_FS
 	default y
 	help

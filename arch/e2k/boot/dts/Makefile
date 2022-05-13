@@ -3,7 +3,6 @@ dtb-$(CONFIG_MCST) += e1cp_e1cmt_tablet.dts
 dtb-$(CONFIG_MCST) += e1cp_m2e-uvp.dts
 dtb-$(CONFIG_MCST) += e1cp_mbe1c-pc.dts
 dtb-$(CONFIG_MCST) += e1cp_p2p8-sip-s1.dts
-dtb-$(CONFIG_MCST) += e2c_mono-pc.dts
 dtb-$(CONFIG_MCST) += e4c_apk-pc4c.dts
 dtb-$(CONFIG_MCST) += e4c_el-2s-4.dts
 dtb-$(CONFIG_MCST) += e4c_mbe2s-pc.dts

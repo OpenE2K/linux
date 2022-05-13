@@ -1076,7 +1076,7 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 	tfm = *this_cpu_ptr(entry->pool->tfm);
 	src = kmap_atomic(page);
 #ifdef CONFIG_E2K
-	get_page_with_tags(src_with_tags, src, &tag_length);
+	get_page_with_tags(&src_with_tags, src, &tag_length);
 	entry->tag_length = tag_length;
 	dlen =  tag_length + PAGE_SIZE;
 	ret = crypto_comp_compress(tfm, src_with_tags,

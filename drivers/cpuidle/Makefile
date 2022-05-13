@@ -37,6 +37,3 @@ obj-$(CONFIG_POWERNV_CPUIDLE)		+= cpuidle-powernv.o
 
 obj-$(CONFIG_E2K_CPUIDLE)		+= cpuidle-e2k.o
 obj-$(CONFIG_E90S_CPUIDLE)              += cpuidle-e90s.o
-
-CFLAGS_REMOVE_cpuidle-e2k.o = $(CFLAGS_ALL_CPUS)
-CFLAGS_cpuidle-e2k.o += -march=elbrus-v2

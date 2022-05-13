@@ -183,13 +183,6 @@ typedef struct thread_info {
 					/* to support spin lock/unlock */
 	struct gthread_info *gti_to_spin; /* guest thread waitin for the */
 					/* spin lock/unlock */
-	int	should_stop;		/* on host: guest kernel thread */
-					/* should be stopped */
-	/* structure to save state of user global registers, which are */
-	/* used to support virtualization and PV OPs by kernel */
-	host_gregs_t h_gregs;		/* state of user global registers */
-					/* used by host to support guest */
-					/* kernel */
 #endif	/* CONFIG_VIRTUALIZATION */
 } __aligned(SMP_CACHE_BYTES) thread_info_t;
 
@@ -306,6 +299,8 @@ typedef struct thread_info {
 /* the host thread is switching to VCPU running mode
  * and wait for interception (trap on PV mode) */
 #define	TS_HOST_AT_VCPU_MODE		0x00001000
+#define	TS_HOST_TO_GUEST_USER		0x00002000
+#define	TS_HOST_SWITCH_MMU_PID		0x00004000
 
 #define	THREAD_SIZE		KERNEL_STACKS_SIZE
 #define THREAD_SIZE_ORDER	order_base_2(KERNEL_STACKS_SIZE / PAGE_SIZE)

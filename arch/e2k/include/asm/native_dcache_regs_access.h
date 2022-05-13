@@ -47,13 +47,20 @@ static inline void NATIVE_FLUSH_DCACHE_LINE_OFFSET(unsigned long addr, size_t of
 #define NATIVE_FLUSH_DCACHE_LINE_UNPRIV(virt_addr) \
 	NATIVE_WRITE_MAS_D((virt_addr), 0, MAS_DCACHE_LINE_FLUSH)
 
+/*
+ * Read DCACHE L1 fault_reg register
+ */
+#define	NATIVE_READ_L1_FAULT_REG()					\
+		NATIVE_READ_MAS_D(					\
+			mk_dcache_l1_addr(0, 0, 0, 1, 0),		\
+			MAS_DCACHE_L1_REG)
 
 /*
  * Clear DCACHE L1 set
  */
 #define	NATIVE_CLEAR_DCACHE_L1_SET(virt_addr, set)			\
 		NATIVE_WRITE_MAS_D(					\
-			mk_dcache_l1_addr((virt_addr), set, 1, 0),	\
+			mk_dcache_l1_addr((virt_addr), set, 1, 0, 0),	\
 			0, MAS_DCACHE_L1_REG)
 
 /*

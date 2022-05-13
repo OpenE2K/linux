@@ -1060,6 +1060,10 @@ do_arch_csd_lock_async(call_single_data_t *data)
 	.ord_arch_write_locked_slow = NULL,				\
 	.ord_arch_read_unlock_slow = NULL,				\
 	.ord_arch_write_unlock_slow = NULL,				\
+	.flush_tlb_all = native_flush_tlb_all,				\
+	.flush_tlb_mm = native_flush_tlb_mm,				\
+	.flush_tlb_page = native_flush_tlb_page,			\
+	.flush_tlb_mm_range = native_flush_tlb_mm_range,
 
 #ifdef	CONFIG_SMP
 #define	PV_CPU_SMP_OPS							\
@@ -1072,15 +1076,7 @@ do_arch_csd_lock_async(call_single_data_t *data)
 	.arch_csd_lock_async = do_arch_csd_lock_async,			\
 	.csd_unlock = native_csd_unlock,				\
 	.setup_local_pic_virq = NULL,					\
-	.startup_local_pic_virq = NULL,				\
-	.smp_flush_tlb_all = native_smp_flush_tlb_all,			\
-	.smp_flush_tlb_mm = native_smp_flush_tlb_mm,			\
-	.smp_flush_tlb_page = native_smp_flush_tlb_page,		\
-	.smp_flush_tlb_range = native_smp_flush_tlb_range,		\
-	.smp_flush_pmd_tlb_range = native_smp_flush_pmd_tlb_range,	\
-	.smp_flush_tlb_range_and_pgtables =				\
-		native_smp_flush_tlb_range_and_pgtables,		\
-	.smp_flush_icache_range = native_smp_flush_icache_range,	\
+	.startup_local_pic_virq = NULL,					\
 	.smp_flush_icache_range_array =					\
 		(void (*)(void *))native_smp_flush_icache_range_array,	\
 	.smp_flush_icache_page = native_smp_flush_icache_page,		\
@@ -1256,6 +1252,15 @@ static void
 PV_DO_FLUSH_DCACHE_LINE(e2k_addr_t virt_addr)
 {
 	NATIVE_FLUSH_DCACHE_LINE(virt_addr);
+}
+
+/*
+ * Read DCACHE L1 fault_reg register
+ */
+static unsigned long
+DO_READ_DCACHE_L1_FAULT_REG(void)
+{
+	NATIVE_READ_L1_FAULT_REG();
 }
 
 /*
@@ -1484,6 +1489,7 @@ static int do_set_memory_attr_on_host(e2k_addr_t start, e2k_addr_t end,
 	.read_dtlb_reg = DO_READ_DTLB_REG,				\
 	.flush_tlb_entry = DO_FLUSH_TLB_ENTRY,				\
 	.flush_dcache_line = PV_DO_FLUSH_DCACHE_LINE,			\
+	.read_dcache_l1_fault_reg = DO_READ_DCACHE_L1_FAULT_REG,	\
 	.clear_dcache_l1_set = DO_CLEAR_DCACHE_L1_SET,			\
 	.flush_dcache_range = do_flush_DCACHE_range,			\
 	.clear_dcache_l1_range = do_clear_DCACHE_L1_range,		\

@@ -70,14 +70,14 @@ extern void *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 /*
  * Allocate common chunk into the user virtual memory area
  */
-extern inline void *
+static inline void *
 user_area_alloc(user_area_t *user_area, e2k_size_t size, unsigned long flags)
 {
 	return user_area_alloc_chunk(user_area, 0, size, 0,
 			flags & KVM_ALLOC_AREA_MAP_FLAGS);
 }
 
-extern inline void *
+static inline void *
 user_area_get(user_area_t *user_area, e2k_addr_t start, e2k_size_t size,
 		e2k_size_t align, unsigned long flags)
 {
@@ -85,7 +85,7 @@ user_area_get(user_area_t *user_area, e2k_addr_t start, e2k_size_t size,
 			flags & KVM_ALLOC_AREA_MAP_FLAGS);
 }
 
-extern inline void *
+static inline void *
 user_area_alloc_pages(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
@@ -93,7 +93,7 @@ user_area_alloc_pages(user_area_t *user_area, e2k_addr_t start,
 			flags & KVM_ALLOC_AREA_MAP_FLAGS | UA_VMAP_TO_KERNEL);
 }
 
-extern inline void *
+static inline void *
 user_area_alloc_present(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
@@ -101,14 +101,14 @@ user_area_alloc_present(user_area_t *user_area, e2k_addr_t start,
 			flags & KVM_ALLOC_AREA_MAP_FLAGS | UA_ALLOC_PRESENT);
 }
 
-extern inline void *
+static inline void *
 user_area_alloc_zeroed(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
 	return user_area_alloc_present(user_area, start, size, align, flags);
 }
 
-extern inline void *
+static inline void *
 user_area_alloc_locked(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
@@ -116,7 +116,7 @@ user_area_alloc_locked(user_area_t *user_area, e2k_addr_t start,
 			flags & KVM_ALLOC_AREA_MAP_FLAGS | UA_ALLOC_LOCKED);
 }
 
-extern inline void *
+static inline void *
 user_area_alloc_locked_pages(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {
@@ -125,7 +125,7 @@ user_area_alloc_locked_pages(user_area_t *user_area, e2k_addr_t start,
 					UA_VMAP_TO_KERNEL | UA_ALLOC_LOCKED);
 }
 
-extern inline void *
+static inline void *
 user_area_alloc_locked_present(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
 {

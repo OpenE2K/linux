@@ -191,45 +191,6 @@ kvm_has_vcpu_exc_recovery_point(struct kvm_vcpu *vcpu)
 	return kvm_has_vcpu_exception(vcpu, exc_recovery_point_mask);
 }
 
-/*
- * There are TIR_NUM(19) tir regs. Bits 64 - 56 is current tir nr
- * After each NATIVE_READ_TIR_LO_REG() we will read next tir.
- * For more info see instruction set doc.
- * Read tir hi/lo regs order is significant
- */
-static inline void
-restore_SBBP_TIRs(u64 sbbp[], e2k_tir_t TIRs[], int TIRs_num,
-		bool tir_fz, bool g_th)
-{
-	virt_ctrl_cu_t virt_ctrl_cu;
-	int i;
-
-	virt_ctrl_cu = READ_VIRT_CTRL_CU_REG();
-
-	/* Allow writing of TIRs and SBBP */
-	virt_ctrl_cu.tir_rst = 1;
-	WRITE_VIRT_CTRL_CU_REG(virt_ctrl_cu);
-
-	for (i = SBBP_ENTRIES_NUM - 1; i >= 0; i--)
-		NATIVE_WRITE_SBBP_REG_VALUE(sbbp[i]);
-
-#pragma loop count (2)
-	for (i = TIRs_num; i >= 0; i--) {
-		NATIVE_WRITE_TIR_HI_REG_VALUE(AW(TIRs[i].TIR_hi));
-		NATIVE_WRITE_TIR_LO_REG_VALUE(AW(TIRs[i].TIR_lo));
-	}
-
-	/* Keep guest TIRs frozen after GLAUNCH */
-	virt_ctrl_cu.VIRT_CTRL_CU_glnch_tir_fz = tir_fz;
-
-	/* Enter guest trap handler after GLAUNCH */
-	virt_ctrl_cu.VIRT_CTRL_CU_glnch_g_th = g_th;
-
-	/* Forbid writing of TIRs and SBBP */
-	virt_ctrl_cu.tir_rst = 0;
-	WRITE_VIRT_CTRL_CU_REG(virt_ctrl_cu);
-}
-
 static inline void kvm_clear_vcpu_trap_cellar(struct kvm_vcpu *vcpu)
 {
 	void *tc_kaddr = vcpu->arch.mmu.tc_kaddr;
@@ -388,7 +349,8 @@ kvm_inject_data_page_exc(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	u64 ip;
 
 	if (trap && trap->nr_TIRs >= 1 &&
-			(trap->TIRs[1].TIR_hi.exc & exc_data_page_mask)) {
+			(trap->TIRs[1].TIR_hi.exc &
+			(exc_data_page_mask | exc_recovery_point_mask))) {
 		/* Synchronous page fault */
 		ip = trap->TIRs[1].TIR_lo.TIR_lo_ip;
 	} else if (trap && trap->nr_TIRs >= 0 &&

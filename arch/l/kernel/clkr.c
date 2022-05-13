@@ -12,11 +12,6 @@
 #include <linux/sched.h>
 #include <linux/sched/clock.h>
 
-#include <asm-l/clkr.h>
-#ifdef CONFIG_E2K
-# include <asm/sclkr.h>
-#endif
-
 
 /* definitions */
 
@@ -25,10 +20,6 @@
 /* CPU frequency must be greater than this to avoid overflows on conversions */
 #define CYC2NS_MIN_CPU_FREQ \
 		((NSEC_PER_SEC << CYC2NS_SCALE) / ((1UL << 32) - 1UL))
-
-/* globals */
-
-struct clocksource clocksource_clkr;
 
 /* locals */
 
@@ -167,19 +158,7 @@ unsigned long long sched_clock(void)
 	unsigned long long ns;
 #ifdef CONFIG_CLKR_OFFSET
 	unsigned long flags;
-#endif
 
-#ifdef CONFIG_E2K
-# ifdef CONFIG_SCLKR_CLOCKSOURCE
-	if (use_sclkr_sched_clock())
-		return sclkr_sched_offset + raw_read_sclkr();
-# endif
-	if (clkr_unreliable)
-		return (unsigned long long)(jiffies - INITIAL_JIFFIES)
-					* (NSEC_PER_SEC / HZ);
-#endif
-
-#ifdef CONFIG_CLKR_OFFSET
 	/* Close interrupts to make sure that cpu does not
 	 * change after reading cycles. */
 	raw_local_irq_save(flags);
@@ -243,13 +222,9 @@ static void resume_clkr(struct clocksource *cs)
 		"You should probably adjust offset here.\n");
 }
 
-struct clocksource clocksource_clkr = {
+static struct clocksource clocksource_clkr = {
 	.name		= "clkr",
-#ifdef CONFIG_E2K
-	.rating		= 300,
-#else
 	.rating		= 100,
-#endif
 	.read		= read_clkr,
 	.resume		= resume_clkr,
 	.mask		= CLOCKSOURCE_MASK(64),
@@ -259,18 +234,6 @@ struct clocksource clocksource_clkr = {
 
 static int __init clkr_init(void)
 {
-#ifdef CONFIG_E2K
-	u8 mb_type = bootblock_virt->info.bios.mb_type;
-
-	/* SCLKR should be used on systems that support it.*/
-	if (machine.native_iset_ver >= E2K_ISET_V3)
-		return 0;
-
-	/* Sivuch has multiple motherboards without clock synchronization. */
-	if (mb_type != MB_TYPE_ES2_RTC_CY14B101P_MULTICLOCK)
-		clkr_unreliable = false;
-#endif
-
 	/* Sivuch has multiple motherboards without clock synchronization. */
 	if (num_online_nodes() <= 1)
 		clkr_unreliable = false;

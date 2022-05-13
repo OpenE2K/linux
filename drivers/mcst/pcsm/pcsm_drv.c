@@ -376,7 +376,7 @@ static ssize_t pmc_show_temp_max(struct device *dev,
 	char *buf)
 {
     struct pcsm_data *data = dev_get_drvdata(dev);
-    int index = 0;
+    int index;
     int ts_max = 0;
     int ts_count = 5;
 
@@ -384,7 +384,7 @@ static ssize_t pmc_show_temp_max(struct device *dev,
 	ts_count++;
     }
 
-    for (index; index < ts_count; index++) {
+    for (index = 0; index < ts_count; index++) {
 	term_ts_regs_t regs = { .word = sic_read_node_nbsr_reg(data->node,
 		PCSM_BASE_ADDR + ts_map[index].addr) };
 	int ts_val = TEMP_TO_HWMON(regs.temp);

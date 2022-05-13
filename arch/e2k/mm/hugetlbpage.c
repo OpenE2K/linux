@@ -40,14 +40,6 @@ huge_pte_alloc(struct mm_struct *mm, unsigned long addr, unsigned long sz)
 	}
 	pte = (pte_t *)pmd;
  
-	/*
-	 * Large page pte should point to the first of two pmd's.
-	 */
-	if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE) {
-		if (pte && pmd_index(addr) % 2)
-			pte--;
-	}
-
 	BUG_ON(pte && pte_present(*pte) && !pte_huge(*pte));
 
 	return pte;
@@ -70,14 +62,6 @@ huge_pte_offset(struct mm_struct *mm, unsigned long addr, unsigned long sz)
 	pmd = pmd_offset(pud, addr);
 	pte = (pte_t *)pmd;
 
-	/*
-	 * Large page pte should point to the first of two pmd's.
-	 */
-	if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE) {
-		if (pte && pmd_index(addr) % 2)
-			pte--;
-	}
-
 	return pte;
 }
 
@@ -93,8 +77,6 @@ set_huge_pte_at(struct mm_struct *mm, unsigned long address,
 	DebugHP("will set pte 0x%px = 0x%lx\n",
 		ptep, pte_val(entry));
 	set_pte_at(mm, address, ptep, entry);
-	if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE)
-		set_pte_at(mm, address, (++ptep), entry);
 }
 
 pte_t

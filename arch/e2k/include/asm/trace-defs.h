@@ -2,6 +2,7 @@
 #define _E2K_TRACE_DEFS_H_
 
 #include <linux/types.h>
+#include <linux/hugetlb.h>
 
 #include <asm/mmu_types.h>
 #include <asm/pgtable_def.h>
@@ -96,7 +97,7 @@ trace_get_dtlb_translation(struct mm_struct *mm, e2k_addr_t address,
 #define	mmu_print_pt_flags(entry, print, mmu_pt_v6) \
 		(mmu_pt_v6) ? E2K_TRACE_PRINT_PT_V6_FLAGS(entry, print) \
 				: \
-				E2K_TRACE_PRINT_PT_V2_FLAGS(entry, print)
+				E2K_TRACE_PRINT_PT_V3_FLAGS(entry, print)
 #define	print_pt_flags(entry, print)	\
 		mmu_print_pt_flags(entry, print, MMU_IS_PT_V6())
 
@@ -104,7 +105,7 @@ trace_get_dtlb_translation(struct mm_struct *mm, e2k_addr_t address,
 
 
 #define	mmu_print_dtlb_entry(entry, mmu_dtlb_v6) \
-		((mmu_dtlb_v6) ? E2K_TRACE_PRINT_DTLB_ENTRY_V2(entry) \
+		((mmu_dtlb_v6) ? E2K_TRACE_PRINT_DTLB_ENTRY_V3(entry) \
 				: \
 				E2K_TRACE_PRINT_DTLB_ENTRY_V6(entry))
 #define	print_dtlb_entry(entry)	\

@@ -178,7 +178,7 @@ static int __init e2k_idle_init(void)
 					  e2k_idle_driver.states[nr - 2].target_residency);
 		}
 		e2k_idle_driver.state_count = nr;
-	} else if (cpu_has(CPU_FEAT_ISET_V3)) {
+	} else {
 		e2k_idle_driver.states[0] = E2K_CPUIDLE_C1_STATE;
 		e2k_idle_driver.state_count = 1;
 
@@ -188,9 +188,6 @@ static int __init e2k_idle_init(void)
 			e2k_idle_driver.states[1] = E2K_CPUIDLE_C3_STATE;
 			e2k_idle_driver.state_count = 2;
 		}
-	} else {
-		e2k_idle_driver.states[0] = E2K_CPUIDLE_C1_STATE;
-		e2k_idle_driver.state_count = 1;
 	}
 	return cpuidle_register(&e2k_idle_driver, NULL);
 }

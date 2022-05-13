@@ -28,16 +28,21 @@
 #ifndef	CONFIG_KVM_GUEST_KERNEL
 /* it is native host kernel with virtualization support */
 /* or paravirtualized host and guest kernel */
+
+extern void kvm_host_machine_setup_regs_v3(host_machdep_t *);
+extern void kvm_host_machine_setup_regs_v6(host_machdep_t *);
+
 static inline void
 kvm_host_machine_setup(machdep_t *host_machine)
 {
-	machdep_t *node_mach;
 	int nid;
 
 	for_each_node_has_dup_kernel(nid) {
-		node_mach = the_node_machine(nid);
-		if (host_machine->native_iset_ver < E2K_ISET_V5) {
+		machdep_t *n_machine = the_node_machine(nid);
+		if (host_machine->native_iset_ver >= E2K_ISET_V6) {
+			kvm_host_machine_setup_regs_v6(&n_machine->host);
 		} else {
+			kvm_host_machine_setup_regs_v3(&n_machine->host);
 		}
 	}
 }

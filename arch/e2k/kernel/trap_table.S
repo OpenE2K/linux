@@ -11,6 +11,7 @@
 #include <asm/e2k_api.h>
 #include <asm/trap_table.h>
 #include <asm/trap_table.S.h>
+#include <asm/thread_info.h>
 
 .global	user_trap_handler;
 .global	kernel_trap_handler;
@@ -134,7 +135,7 @@ trap_handler_switched_stacks:
 			rrd %ilcr1, %dr15
 		}
 	ALTERNATIVE_3_OLDINSTR2
-		/* iset v2 version */
+		/* iset v3 version */
 		{
 			addd 0, 0, %dr14
 			addd 0, 0, %dr15
@@ -262,7 +263,7 @@ trap_handler_switched_stacks:
 	}
 	{
 	nop 1; /* getsp -> use */
-	getsp   -(PTRACE_SZOF + AAU_SZOF + TRAP_PTREGS_SZOF + 3 * 7), %dr0
+	getsp   -(PTRACE_SZOF + TRAP_PTREGS_SZOF), %dr0
 	}
 #ifdef CONFIG_CLW_ENABLE
 	{
@@ -564,26 +565,21 @@ compatibility_call:
 .size $native_ttable_entry4, . - $native_ttable_entry4
 
 
+.global fast_sys_calls_table_32;
 .global ttable_entry5;
+
 .section	.ttable_entry5, "ax",@progbits
 	.align	8
 	.type	ttable_entry5,@function
 ttable_entry5:
 	/* We want to just jump right to the handler without
 	 * doing anything, but at least we have to make sure
-	 * that the passed parameters are valid. */
+	 * that the passed parameters are valid:
+	 * dr0 - masked sys_num, dr1 - arg1, dr2 - arg2 */
 {
-	setwd	wsz = 0x4
+	setwd		wsz = 0x8
+	setbn		rbs = 0x4, rsz = 0x3, rcur = 0x0
 }
-
-	/* goto guest kernel system call table entry, */
-	/* if system call is from guest user */
-	/* %dr7: temporary register to read current_thread_info() */
-	/* %dr8, %dr9, %dr10: temporary registers */
-	/* %pred0, %pred1, %pred2: temporary predicates */
-	GOTO_GUEST_KERNEL_FAST_TTABLE 5, %dr7, %dr8, %dr9, %dr10,	\
-						%pred0, %pred1, %pred2
-
 {
 	/* If dr0 holds value with a bad tag, we will be SIGILL'ed.
 	 * If we are called with an empty register window (no %dr0
@@ -591,21 +587,72 @@ ttable_entry5:
 	andd,0		%dr0, NR_fast_syscalls_mask, %dr0
 }
 {
-	shld,0		%dr0, 3, %dr0
-	puttagd,2 	%dr1, 0, %dr1
+	/* Read pointer to host thread_info from osr0 reg */
+	rrd,0 		%osr0, %dr3
 }
-{
-	ldd,0		[fast_sys_calls_table_32 + %dr0], %dr3
-	sxt,1		6, %dr1, %dr0
-	puttagd,2	%dr2, 0, %dr2
-}
-{
-	ipd		2
-	movtd,0		%dr3, %ctpr1
 
-	sxt,1		6, %dr2, %dr1
+	/*
+	 * Check TS_HOST_AT_VCPU_MODE thread status flag.
+	 * If flag is not set - host syscall, if set - guest syscall
+	 */
+{
+	ldd,2		[ %dr3 + TI_STATUS ], %dr3
 }
-	ct		%ctpr1
+{
+	andd,0 		%dr3, TS_HOST_AT_VCPU_MODE, %dr3
+}
+{
+	cmpedb,0	%dr3, 0x0, %pred0
+	disp 		%ctpr1, compat_guest_syscall
+}
+{
+	ct 		%ctpr1 ? ~%pred0
+}
+	/*
+	 * This syscall is from host user, goto fast syscall handler
+	 * with 2 parameters. sys_num is index in fast_sys_calls_table_32
+	 */
+{
+	shld,0          %dr0, 3, %dr0
+}
+{
+	ldd,0 		[fast_sys_calls_table_32 + %dr0], %dr3
+	puttagd,2       %dr1, 0, %dr0
+}
+{
+	sxt,1           6, %dr0, %dr0
+	puttagd,2       %dr2, 0, %dr1
+}
+{
+	sxt,1		6, %dr1, %dr1
+	movtd           %dr3, %ctpr1
+}
+{
+	ct 		%ctpr1
+}
+compat_guest_syscall:
+#ifdef CONFIG_KVM_HOST_MODE
+	/*
+	 * This sycall is from guest user. Guest ttable entry handler
+	 * will be executed on current hw stack frame. Prepare parameters
+	 * for it:
+	 * %dr0 - sys_num, %dr1 - arg1, %dr2 - arg2
+	 * Call special handle_guest_fast_sys_call function to pass
+	 * control to guest ttable entry.
+	 */
+{
+	puttagd,2       %dr1, 0, %dr1
+	puttagd,5       %dr2, 0, %dr2
+}
+{
+	sxt,3		6, %dr1, %dr1
+	sxt,4		6, %dr2, %dr2
+	disp 		%ctpr1, handle_compat_guest_fast_sys_call
+}
+{
+	call		%ctpr1, wbs = 0x4
+}
+#endif /* CONFIG_KVM_HOST_MODE */
 .size	 $ttable_entry5, . -$ttable_entry5
 
 
@@ -618,19 +665,12 @@ ttable_entry5:
 ttable_entry6:
 	/* We want to just jump right to the handler without
 	 * doing anything, but at least we have to make sure
-	 * that the passed parameters are valid. */
+	 * that the passed parameters are valid:
+	 * dr0 - masked sys_num, dr1 - arg1, dr2 - arg2 */
 {
-	setwd		wsz = 0x4
+	setwd		wsz = 0x8
+	setbn		rbs = 0x4, rsz = 0x3, rcur = 0x0
 }
-
-	/* goto guest kernel system call table entry, */
-	/* if system call is from guest user */
-	/* %dr7: temporary register to read current_thread_info() */
-	/* %dr8, %dr9, %dr10: temporary registers */
-	/* %pred0, %pred1, %pred2: temporary predicates */
-	GOTO_GUEST_KERNEL_FAST_TTABLE 6, %dr7, %dr8, %dr9, %dr10,	\
-						%pred0, %pred1, %pred2
-
 {
 	/* If dr0 holds value with a bad tag, we will be SIGILL'ed.
 	 * If we are called with an empty register window (no %dr0
@@ -638,21 +678,86 @@ ttable_entry6:
 	andd,0		%dr0, NR_fast_syscalls_mask, %dr0
 }
 {
-	shld,0		%dr0, 3, %dr0
+	/* Read pointer to host thread_info from osr0 reg */
+	rrd,0 		%osr0, %dr3
 }
-{
-	ldd,0		[fast_sys_calls_table + %dr0], %dr3
-	puttagd,2 	%dr1, 0, %dr0
-}
-{
-	ipd		2
-	movtd,0		%dr3, %ctpr1
 
-	puttagd,2	%dr2, 0, %dr1
+	/*
+	 * Check TS_HOST_AT_VCPU_MODE thread status flag.
+	 * If flag is not set - host syscall, if set - guest syscall
+	 */
+{
+	ldd,2		[ %dr3 + TI_STATUS ], %dr3
 }
-	ct		%ctpr1
+{
+	andd,0 		%dr3, TS_HOST_AT_VCPU_MODE, %dr3
+}
+{
+	cmpedb,0	%dr3, 0x0, %pred0
+	disp 		%ctpr1, guest_syscall
+}
+{
+	ct 		%ctpr1 ? ~%pred0
+}
+	/*
+	 * This syscall is from host user, goto fast syscall handler
+	 * with 2 parameters. sys_num is index in fast_sys_calls_table
+	 */
+{
+	shld,0          %dr0, 3, %dr0
+}
+{
+	ldd,0 		[fast_sys_calls_table + %dr0], %dr3
+	puttagd,2       %dr1, 0, %dr0
+	puttagd,5	%dr2, 0, %dr1
+}
+{
+	movtd		%dr3, %ctpr1
+}
+{
+	ct 		%ctpr1
+}
+guest_syscall:
+#ifdef CONFIG_KVM_HOST_MODE
+	/*
+	 * This sycall is from guest user. Guest ttable entry handler
+	 * will be executed on current hw stack frame. Prepare parameters
+	 * for it:
+	 * %dr0 - sys_num, %dr1 - arg1, %dr2 - arg2
+	 * Call special handle_guest_fast_sys_call function to pass
+	 * control to guest ttable entry.
+	 */
+{
+	puttagd,2       %dr1, 0, %dr1
+	puttagd,5       %dr2, 0, %dr2
+	disp 		%ctpr1, handle_guest_fast_sys_call
+}
+{
+	call		%ctpr1, wbs = 0x4
+}
+#endif /* CONFIG_KVM_HOST_MODE */
 .size	 $ttable_entry6, . -$ttable_entry6
 
+#ifdef CONFIG_KVM_HOST_MODE
+/* Function to return to it from guest's fast syscall */
+.global $ret_from_fast_sys_call;
+
+.align 8
+.type ret_from_fast_sys_call,@function
+$ret_from_fast_sys_call:
+{
+	nop 3
+	addd,0,sm 0x0, %db[0], %dr3
+	return %ctpr3
+}
+{
+	addd,0,sm %dr3, 0x0, %dr0
+}
+{
+	ct %ctpr3
+}
+.size $ret_from_fast_sys_call, . - $ret_from_fast_sys_call
+#endif /* CONFIG_KVM_HOST_MODE */
 
 .global fast_sys_calls_table_128;
 .global ttable_entry7;

@@ -15,10 +15,11 @@
 #if	!defined(CONFIG_PARAVIRT_GUEST) && !defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is native kernel without any virtualization */
 /* it is native host kernel with virtualization support */
-static inline void
+static inline int
 get_mm_notifier_locked(struct mm_struct *mm)
 {
 	/* Do not need mmu notifier in native mode */
+	return 0;
 }
 #elif	defined(CONFIG_PARAVIRT_GUEST)
 /* it is paravirtualized host and guest kernel */

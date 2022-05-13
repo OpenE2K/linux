@@ -280,10 +280,6 @@ int __init ftrace_dyn_arch_init(void)
 void arch_ftrace_update_code(int command)
 {
 	ftrace_modify_all_code(command);
-
-	/* Use IPI if icache flush works only on local cpu */
-	if (!cpu_has(CPU_FEAT_FLUSH_DC_IC))
-		flush_icache_all();
 }
 
 # define SS_CT_SHIFT 5
@@ -321,6 +317,8 @@ static inline int e2k_modify_call(const unsigned long addr,
 		};
 		unsigned long instr_word;
 	} instruction;
+
+	unsigned long flush_addr = (unsigned long) __va(phys_ip);
 
 # if DEBUG_FTRACE_MODE
 	if (enable)
@@ -401,11 +399,7 @@ static inline int e2k_modify_call(const unsigned long addr,
 	/* Write the modified syllable. */
 	modify_instr_on_IP(ip, phys_ip, instruction.instr_word);
 
-	/* Flush the instruction cache for the node being modified */
-	if (cpu_has(CPU_FEAT_FLUSH_DC_IC)) {
-		unsigned long flush_addr = (unsigned long) __va(phys_ip);
-		flush_icache_range(flush_addr, flush_addr + 8);
-	}
+	flush_icache_range(flush_addr, flush_addr + 8);
 
 	return 0;
 }

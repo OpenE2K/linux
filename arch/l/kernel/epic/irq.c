@@ -81,7 +81,7 @@ void epic_init_system_handlers_table(void)
 			"cepic_epic_interrupt");
 
 #ifdef CONFIG_KVM_ASYNC_PF
-	if (cpu_has(CPU_FEAT_ISET_V6) && READ_CORE_MODE_REG().gmi) {
+	if (IS_HV_GM()) {
 		setup_PIC_vector_handler(ASYNC_PF_WAKE_VECTOR,
 				epic_pv_apf_wake, 1,
 				"async_pf_wake_interrupt");

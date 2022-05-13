@@ -129,6 +129,9 @@ static DECLARE_RWSEM(posix_sem);
 static struct kmem_cache *posix_objects = NULL;
 #endif /* CONFIG_HAVE_EL_POSIX_SYSCALL */
 
+int have_pps_mpv = 0;
+EXPORT_SYMBOL(have_pps_mpv);
+
 #ifdef CONFIG_MCST
 static DEFINE_RAW_SPINLOCK(rts_lock);
 long rts_mode = 0;	// hard realtime mode 0-unactive, 1-active
@@ -1050,6 +1053,8 @@ static int compat_el_timerfd_settime(int ufd, struct compat_itimerspec __user *t
 #endif
 #endif
 
+/*#define SHOW_WOKEN_TIME*/
+#ifdef SHOW_WOKEN_TIME
 int show_woken_time = 0;
 EXPORT_SYMBOL(show_woken_time);
 
@@ -1098,6 +1103,7 @@ static int __init proc_woken_init(void)
 	return 0;
 }
 module_init(proc_woken_init);
+#endif
 
 int  cpus_intcount[NR_CPUS];
 
@@ -1473,6 +1479,7 @@ long do_el_posix(int req, void __user *a1, void __user *a2,
         case EL_UNSET_MLOCK_CONTROL :
 		current->extra_flags &= ~RT_MLOCK_CONTROL;
                 break;
+#ifdef SHOW_WOKEN_TIME
 	case EL_GET_TIMES:
 	{
 		size_t sz = ((size_t)a2) / sizeof(long long);
@@ -1557,6 +1564,7 @@ long do_el_posix(int req, void __user *a1, void __user *a2,
 		}
 		break;
 	}
+#endif
 	case EL_USER_TICK: {
 			int interval_us = (int)(long long)a1;
 			do_postpone_tick(interval_us * 1000);
@@ -1773,7 +1781,13 @@ SYSCALL_DEFINE5(el_posix, int, req, void __user *, a1, void __user *, a2,
 {
 	return do_el_posix(req, a1, a2, a3, a4);
 }
-
+#if !defined(CONFIG_E2K) && !defined(CONFIG_E90S)
+asmlinkage long sys_el_posix(int req, void __user *a1, void __user *a2,
+				    void __user *a3, int a4)
+{
+	return do_el_posix(req, a1, a2, a3, a4);
+}
+#endif
 #ifdef CONFIG_COMPAT
 asmlinkage long compat_sys_el_posix(int req, void __user *a1, void __user *a2,
 				    void __user *a3, int a4)

@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -55,8 +55,6 @@
 
 #ifndef __gc_hal_kernel_context_h_
 #define __gc_hal_kernel_context_h_
-
-#include "gc_hal_kernel_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -87,8 +85,12 @@ typedef struct _gcsCONTEXT
     /* Context busy signal. */
     gctSIGNAL                   signal;
 
-    /* Physical address of the context buffer. */
-    gctPHYS_ADDR                physical;
+    /* Video memory of the context buffer. */
+    gckVIDMEM_NODE              videoMem;
+
+#if gcdCAPTURE_ONLY_MODE
+    gctUINT32                   handle;
+#endif
 
     /* Logical address of the context buffer. */
     gctUINT32_PTR               logical;
@@ -105,6 +107,12 @@ typedef struct _gcsCONTEXT
 
     /* Pointer to the first delta to be applied. */
     gcsSTATE_DELTA_PTR          delta;
+
+#if gcdENABLE_SW_PREEMPTION
+    /* Kernel delta. */
+    gcsSTATE_DELTA_PTR          kDelta;
+    gctUINT                     kDeltaCount;
+#endif
 
     /* Next context buffer. */
     gcsCONTEXT_PTR              next;
@@ -173,17 +181,24 @@ struct _gckCONTEXT
 
     gctUINT32                   pipeSelectBytes;
 
-    /* Hint array. */
-#if gcdSECURE_USER
-    gctBOOL_PTR                 hint;
-#endif
-
     gcsPROFILER_COUNTERS_PART1    latestProfiler_part1;
     gcsPROFILER_COUNTERS_PART1    histroyProfiler_part1;
     gcsPROFILER_COUNTERS_PART1    preProfiler_part1;
     gcsPROFILER_COUNTERS_PART2    latestProfiler_part2;
     gcsPROFILER_COUNTERS_PART2    histroyProfiler_part2;
     gcsPROFILER_COUNTERS_PART2    preProfiler_part2;
+
+#if gcdENABLE_SW_PREEMPTION
+    /* Kernel delta. */
+    gcsSTATE_DELTA_PTR            delta;
+    gcsSTATE_DELTA_PTR            deltaHead;
+
+    gcsSTATE_DELTA                prevDelta;
+    gcsSTATE_DELTA_PTR            prevDeltaPtr;
+    gcsSTATE_DELTA_RECORD_PTR     prevRecordArray;
+    gctUINT32 *                   prevMapEntryID;
+    gctUINT32 *                   prevMapEntryIndex;
+#endif
 };
 
 #ifdef __cplusplus

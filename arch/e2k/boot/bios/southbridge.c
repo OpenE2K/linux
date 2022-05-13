@@ -90,18 +90,16 @@ static void configure_iohub_apic(int domain)
 			IOAPIC_BASE_ADDRESS, ioapic_base);
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
 			IOAPIC_UPPER_ADDRESS, 0);
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
 				A2_BA0, ioapic_base);
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
 				A2_BUA0, 0);
 
 /* LAPICINT and SAPICINT should not be written on EPIC systems */
 #ifndef	CONFIG_BOOT_EPIC
 #ifdef	CONFIG_E2K_FULL_SIC
 	/* configure configuration space for sapic on BSP */
-#if	defined(CONFIG_ES2)
-	tmp = ES2_SAPICINT_BASE + (domain * APICINT_SIZE);
-#elif	defined(CONFIG_E2S)
+#if	defined(CONFIG_E2S)
 	tmp = E2S_SAPICINT_BASE + (domain * APICINT_SIZE);
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2)
 	tmp = E8C_SAPICINT_BASE + (domain * (APICINT_SIZE));
@@ -113,7 +111,7 @@ static void configure_iohub_apic(int domain)
 	tmp = E2C3_SAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
  #error	"Invalid e2k machine type"
-#endif	/* CONFIG_ES2 */
+#endif	/* CONFIG_E2S */
 	sapic_base = tmp & 0xffffffff;
 	sapic_upper32 = (tmp >> 32) & 0xffffffff;
 	DebugSB("configure_apic_system: --> to i2c & scrb (iohub)\n" 
@@ -123,15 +121,13 @@ static void configure_iohub_apic(int domain)
 				MSI_TRANSACTION_ADDRESS, sapic_base);
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
 				MSI_TRANSACTION_UPPER_ADDRESS, sapic_upper32);
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number, A2_BA1,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number, A2_BA1,
 						sapic_base);
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number, A2_BUA1,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number, A2_BUA1,
 						sapic_upper32);
 #endif	/* CONFIG_E2K_FULL_SIC */
 	/* configure configuration space for lapic on BSP */
-#if	defined(CONFIG_ES2)
-	tmp = ES2_LAPICINT_BASE + (domain * APICINT_SIZE);
-#elif	defined(CONFIG_E2S)
+#if	defined(CONFIG_E2S)
 	tmp = E2S_LAPICINT_BASE + (domain * APICINT_SIZE);
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2)
 	tmp = E8C_LAPICINT_BASE + (domain * (APICINT_SIZE));
@@ -145,7 +141,7 @@ static void configure_iohub_apic(int domain)
 	tmp = E2C3_LAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
  #error	"Invalid e2k machine type"
-#endif	/* CONFIG_ES2 */
+#endif	/* CONFIG_E2S */
 	lapic_base = tmp & 0xffffffff;
 	lapic_upper32 = (tmp >> 32) & 0xffffffff;
 	DebugSB("configure_apic_system: --> to i2c & scrb (iohub)\n"
@@ -163,9 +159,7 @@ static void configure_iohub_apic(int domain)
 #endif
 	
 	/* configure configuration space for ioapic on BSP */
-#if	defined(CONFIG_ES2)
-	tmp = ES2_IOAPICINT_BASE + (domain * APICINT_SIZE);
-#elif	defined(CONFIG_E2S)
+#if	defined(CONFIG_E2S)
 	tmp = E2S_IOAPICINT_BASE + (domain * APICINT_SIZE);
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2)
 	tmp = E8C_IOAPICINT_BASE + (domain * (APICINT_SIZE));
@@ -179,7 +173,7 @@ static void configure_iohub_apic(int domain)
 	tmp = E2C3_IOAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
  #error	"Invalid e2k machine type"
-#endif	/* CONFIG_ES2 */
+#endif	/* CONFIG_E2S */
 	ioapic_base = tmp & 0xffffffff;
 	ioapic_upper32 = (tmp >> 32) & 0xffffffff;
 	DebugSB("configure_apic_system: --> to i2c\n"
@@ -190,9 +184,9 @@ static void configure_iohub_apic(int domain)
 	DebugSB("configure_apic_system: NBSR ioapicint base  = 0x%x\n",
 		early_sic_read_node_nbsr_reg(0, SIC_rt_ioapicintb));
 #endif	/* CONFIG_E2K_LEGACY_SIC */
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
 				A2_BA2, ioapic_base);
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
 				A2_BUA2, ioapic_upper32);
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
 				IOAPIC_MESSAGE_BASE_ADDRESS, ioapic_base);
@@ -293,9 +287,9 @@ static void configure_iohub_system_timer(int domain)
 				SYSTEM_TIMER_BASE_ADDRESS, timer_base);
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
 				SYSTEM_TIMER_UPPER_ADDRESS, timer_upper32); 
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
 				A3_BA0, timer_base);
-	system_commutator_es2_ioh_write_dword(domain, dev->bus->number,
+	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
 				A3_BUA0, timer_upper32);
 	/* Disable WD timer */
 	AS_WORD(wd_control) = 0;

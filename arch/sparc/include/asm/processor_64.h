@@ -260,6 +260,19 @@ static inline void prefetchw(const void *x)
 int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap);
 
 #ifdef CONFIG_E90S
+void __fget_s_fpreg(void *to,   int reg);
+void __fset_s_fpreg(void *from, int reg);
+void __fget_d_fpreg(void *to,   int reg);
+void __fset_d_fpreg(void *from, int reg);
+void __fget_q_fpreg(void *to,   int reg);
+void __fset_q_fpreg(void *from, int reg);
+void get_xfsr(unsigned long *fsr);
+void set_xfsr(unsigned long *fsr);
+void __fpreg_add_s(void *s1, void *s2);
+void __fpreg_sub_s(void *s1, void *s2);
+void __fpreg_add_d(void *s1, void *s2);
+void __fpreg_sub_d(void *s1, void *s2);
+
 #define NUM_DUMP_FRAMES	64
 #endif /*CONFIG_E90S*/
 

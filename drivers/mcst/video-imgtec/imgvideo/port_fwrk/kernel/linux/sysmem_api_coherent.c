@@ -608,7 +608,7 @@ static int map_user(SYSMEMU_sPages *psPages, IMG_VOID *priv) {
 		* NOTE: We can use page->flags |= _PGMT_WC to override that (!?)
 		*/
 
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 		ret = vm_insert_page(vma, start, pfn_to_page(pfn));
 #else
 		ret = remap_pfn_range(vma, start, pfn, PAGE_SIZE, vma->vm_page_prot);

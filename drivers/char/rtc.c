@@ -860,8 +860,7 @@ static int __init rtc_init(void)
 #endif
 
 #ifdef CONFIG_E2K
-	if (HAS_MACHINE_E2K_IOHUB)
-		return -ENODEV;
+	return -ENODEV;
 #endif
 
 #ifdef CONFIG_SPARC32

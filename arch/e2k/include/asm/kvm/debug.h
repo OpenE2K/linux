@@ -12,6 +12,7 @@
 #include <asm/kvm/vcpu-regs-debug-inline.h>
 
 extern bool kvm_debug;
+extern bool kvm_ftrace_dump;
 
 /*
  * Some definitions to print/dump/show stacks
@@ -94,6 +95,18 @@ host_ftrace_dump(void)
 {
 	if (paravirt_enabled())
 		HYPERVISOR_ftrace_dump();
+}
+static inline void
+host_tracing_stop(void)
+{
+	if (paravirt_enabled())
+		HYPERVISOR_tracing_stop();
+}
+static inline void
+host_tracing_start(void)
+{
+	if (paravirt_enabled())
+		HYPERVISOR_tracing_start();
 }
 
 #include <asm/kvm/guest/debug.h>

@@ -48,9 +48,9 @@ int fast_sys_ni_syscall()
 __section(.ttable_entry6_table)
 const fast_system_call_func fast_sys_calls_table[NR_fast_syscalls] = {
 	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_gettimeofday),
-	FAST_SYSTEM_CALL_TBL_ENTRY(native_fast_sys_clock_gettime),
+	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_clock_gettime),
 	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_getcpu),
-	FAST_SYSTEM_CALL_TBL_ENTRY(native_fast_sys_siggetmask),
+	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_siggetmask),
 	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_getcontext),
 	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_set_return),
 	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_ni_syscall),
@@ -84,4 +84,3 @@ const fast_system_call_func fast_sys_calls_table_128[NR_fast_syscalls] = {
 	FAST_SYSTEM_CALL_TBL_ENTRY(fast_sys_ni_syscall),
 };
 #endif
-

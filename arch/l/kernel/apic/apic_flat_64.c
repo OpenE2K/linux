@@ -114,7 +114,7 @@ static void flat_send_IPI_all(int vector)
 	}
 }
 
-static unsigned int flat_get_apic_id(unsigned long x)
+static notrace_on_host unsigned int flat_get_apic_id(unsigned long x)
 {
 	unsigned int id;
 

@@ -379,6 +379,7 @@ extern int mp_find_iolink_io_apicid(int node, int link);
 extern int mp_fix_io_apicid(unsigned int src_apicid, unsigned int new_apicid);
 void mp_pci_add_resources(struct list_head *resources,
 			   struct iohub_sysdata *sd);
+extern int mp_iohubs_num;
 #else
 static inline int mp_fix_io_apicid(unsigned int src_apicid,
 				   unsigned int new_apicid)
@@ -629,6 +630,7 @@ static inline void physid_set_mask_of_physid(int physid, physid_mask_t *map)
 #define PHYSID_MASK_NONE	{ {[0 ... PHYSID_ARRAY_SIZE-1] = 0UL} }
 
 extern physid_mask_t phys_cpu_present_map;
+extern physid_mask_t phys_cpu_offline_map;
 
 #endif	/* __ASSEMBLY__ */
 

@@ -1,0 +1,16 @@
+#!/bin/bash
+
+KERNELRELEASE=xxKERNELRELEASExx
+
+[ x"$1" == x"upgrade" ] && exit 0
+[ x"$1" == x"failed-upgrade" ] && exit 0
+if [ "$1" = purge ]; then
+#	ff=`cd /lib/modules/$KERNELRELEASE; ls modules.*`
+#	for f in $ff; do
+#		[ x$f == xmodules.builtin ] && continue
+#		[ x$f == xmodules.order ] && continue
+#		rm -f /lib/modules/$KERNELRELEASE/$f
+#	done
+	rm -rf /lib/modules/$KERNELRELEASE
+fi
+exit 0

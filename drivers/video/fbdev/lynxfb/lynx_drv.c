@@ -335,7 +335,7 @@ static void lynxfb_ops_fillrect(struct fb_info *info,
 	rop = (region->rop != ROP_COPY) ? HW_ROP2_XOR : HW_ROP2_COPY;
 
 	myspin_lock(&share->slock);
-	share->accel.de_fillrect(&share->accel,
+	share->accel.de_fillrect(share,
 				 base, pitch, Bpp,
 				 region->dx, region->dy,
 				 region->width, region->height,
@@ -360,7 +360,7 @@ static void lynxfb_ops_copyarea(struct fb_info *info,
 	Bpp = info->var.bits_per_pixel >> 3;
 
 	myspin_lock(&share->slock);
-	share->accel.de_copyarea(&share->accel,
+	share->accel.de_copyarea(share,
 				 base, pitch, region->sx, region->sy,
 				 base, pitch, Bpp, region->dx, region->dy,
 				 region->width, region->height,
@@ -402,7 +402,7 @@ static void lynxfb_ops_imageblit(struct fb_info *info,
 	return;
       _do_work:
 	myspin_lock(&share->slock);
-	share->accel.de_imageblit(&share->accel,
+	share->accel.de_imageblit(share,
 				  image->data, image->width >> 3, 0,
 				  base, pitch, Bpp,
 				  image->dx, image->dy,
@@ -416,6 +416,7 @@ static int lynxfb_ops_pan_display(struct fb_var_screeninfo *var,
 {
 	struct lynxfb_par *par;
 	struct lynxfb_crtc *crtc;
+	struct lynx_share *share;
 	int ret;
 	ENTER();
 
@@ -425,7 +426,8 @@ static int lynxfb_ops_pan_display(struct fb_var_screeninfo *var,
 	ret = 0;
 	par = info->par;
 	crtc = &par->crtc;
-	ret = crtc->proc_panDisplay(crtc, var, info);
+	share = par->share;
+	ret = crtc->proc_panDisplay(share, crtc, var, info);
 
 	LEAVE(ret);
 }
@@ -889,9 +891,9 @@ static int lynxfb_ops_set_par(struct fb_info *info)
 		err_msg("pixel bpp format not satisfied\n.");
 		LEAVE(ret);
 	}
-	ret = crtc->proc_setMode(crtc, var, fix);
+	ret = crtc->proc_setMode(share, crtc, var, fix);
 	if (!ret)
-		ret = output->proc_setMode(output, var, fix);
+		ret = output->proc_setMode(share, output, var, fix);
 	LEAVE(ret);
 }
 static inline unsigned int chan_to_field(unsigned int chan,
@@ -909,11 +911,13 @@ static int lynxfb_ops_setcolreg(unsigned regno, unsigned red,
 	struct lynxfb_par *par;
 	struct lynxfb_crtc *crtc;
 	struct fb_var_screeninfo *var;
+	struct lynx_share *share;
 	int ret;
 
 	par = info->par;
 	crtc = &par->crtc;
 	var = &info->var;
+	share = par->share;
 	ret = 0;
 
 	dbg_msg("regno=%d, red=%d, green=%d, blue=%d\n", regno, red, green, blue);
@@ -931,7 +935,7 @@ static int lynxfb_ops_setcolreg(unsigned regno, unsigned red,
 		red >>= 8;
 		green >>= 8;
 		blue >>= 8;
-		ret = crtc->proc_setColReg(crtc, regno, red, green, blue);
+		ret = crtc->proc_setColReg(share, crtc, regno, red, green, blue);
 		goto exit;
 	}
 
@@ -960,12 +964,14 @@ static int lynxfb_ops_setcolreg(unsigned regno, unsigned red,
 static int lynxfb_ops_blank(int blank, struct fb_info *info)
 {
 	struct lynxfb_par *par;
+	struct lynx_share *share;
 	struct lynxfb_output *output;
 	ENTER();
 	dbg_msg("blank = %d.\n", blank);
 	par = info->par;
 	output = &par->output;
-	LEAVE(output->proc_setBLANK(output, blank));
+	share = par->share;
+	LEAVE(output->proc_setBLANK(share, output, blank));
 }
 static int sm750fb_set_drv(struct lynxfb_par *par)
 {

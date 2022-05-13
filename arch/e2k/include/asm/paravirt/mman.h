@@ -40,11 +40,11 @@ pv_unhost_guest_vmap_area(e2k_addr_t start, e2k_addr_t end)
 /*
  * Memory management mman
  */
-extern inline void pv_free_mm(struct mm_struct *mm)
+static inline void pv_free_mm(struct mm_struct *mm)
 {
 	pv_mmu_ops.free_mm(mm);
 }
-extern inline struct mm_struct *pv_mm_init(struct mm_struct *mm,
+static inline struct mm_struct *pv_mm_init(struct mm_struct *mm,
 						struct task_struct *p,
 						struct user_namespace *user_ns)
 {
@@ -70,7 +70,7 @@ static inline int pv_access_process_vm(struct task_struct *tsk,
 	return pv_mmu_ops.access_process_vm(tsk, addr, buf, len, gup_flags);
 }
 
-extern inline struct vmap_area *pv_alloc_vmap_area(unsigned long size,
+static inline struct vmap_area *pv_alloc_vmap_area(unsigned long size,
 				unsigned long align,
 				unsigned long vstart, unsigned long vend,
 				int node, gfp_t gfp_mask)
@@ -78,12 +78,12 @@ extern inline struct vmap_area *pv_alloc_vmap_area(unsigned long size,
 	return pv_mmu_ops.alloc_vmap_area(size, align, vstart, vend,
 							node, gfp_mask);
 }
-extern inline void pv__free_vmap_area(struct vmap_area *va)
+static inline void pv__free_vmap_area(struct vmap_area *va)
 {
 	pv_mmu_ops.__free_vmap_area(va);
 }
 #ifdef	CONFIG_SMP
-extern inline struct vm_struct **
+static inline struct vm_struct **
 pv_pcpu_get_vm_areas(const unsigned long *offsets,
 			const size_t *sizes, int nr_vms,
 			size_t align)
@@ -98,12 +98,12 @@ pv_free_pgd_range(struct mmu_gather *tlb,
 {
 	pv_mmu_ops.free_pgd_range(tlb, addr, end, floor, ceiling);
 }
-extern inline void pv_free_unmap_vmap_area(struct vmap_area *va)
+static inline void pv_free_unmap_vmap_area(struct vmap_area *va)
 {
 	pv_mmu_ops.free_unmap_vmap_area(va);
 }
 
-extern inline void pv_unmap_initmem(void *start, void *end)
+static inline void pv_unmap_initmem(void *start, void *end)
 {
 	if (pv_mmu_ops.unmap_initmem) {
 		pv_mmu_ops.unmap_initmem(start, end);

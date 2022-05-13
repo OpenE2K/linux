@@ -13,29 +13,28 @@ config E2K
 	select ARCH_HAS_PTE_SPECIAL
 	select ARCH_HAS_SET_MEMORY
 	select ARCH_HAS_SG_CHAIN
-	select ARCH_HAS_DMA_WRITE_COMBINE
-	select ARCH_INLINE_READ_LOCK if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_READ_LOCK_BH if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_READ_LOCK_IRQ if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_READ_LOCK_IRQSAVE if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_READ_UNLOCK if !PREEMPTION && !CPU_ES2
-	select ARCH_INLINE_READ_UNLOCK_BH if !PREEMPTION && !CPU_ES2
-	select ARCH_INLINE_READ_UNLOCK_IRQ if !PREEMPTION && !CPU_ES2
-	select ARCH_INLINE_READ_UNLOCK_IRQRESTORE if !PREEMPTION && !CPU_ES2
-	select ARCH_INLINE_WRITE_LOCK if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_WRITE_LOCK_BH if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_WRITE_LOCK_IRQ if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_WRITE_LOCK_IRQSAVE if !PREEMPTION && !CPU_ES2 && !CPU_E8C
+	select ARCH_INLINE_READ_LOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_LOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_LOCK_IRQ if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_LOCK_IRQSAVE if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_UNLOCK if !PREEMPTION
+	select ARCH_INLINE_READ_UNLOCK_BH if !PREEMPTION
+	select ARCH_INLINE_READ_UNLOCK_IRQ if !PREEMPTION
+	select ARCH_INLINE_READ_UNLOCK_IRQRESTORE if !PREEMPTION
+	select ARCH_INLINE_WRITE_LOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_WRITE_LOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_WRITE_LOCK_IRQ if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_WRITE_LOCK_IRQSAVE if !PREEMPTION && !CPU_E8C
 	select ARCH_INLINE_WRITE_UNLOCK if !PREEMPTION
 	select ARCH_INLINE_WRITE_UNLOCK_BH if !PREEMPTION
 	select ARCH_INLINE_WRITE_UNLOCK_IRQ if !PREEMPTION
 	select ARCH_INLINE_WRITE_UNLOCK_IRQRESTORE if !PREEMPTION
-	select ARCH_INLINE_SPIN_TRYLOCK if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_SPIN_TRYLOCK_BH if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_SPIN_LOCK if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_SPIN_LOCK_BH if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_SPIN_LOCK_IRQ if !PREEMPTION && !CPU_ES2 && !CPU_E8C
-	select ARCH_INLINE_SPIN_LOCK_IRQSAVE if !PREEMPTION && !CPU_ES2 && !CPU_E8C
+	select ARCH_INLINE_SPIN_TRYLOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_TRYLOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK_IRQ if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK_IRQSAVE if !PREEMPTION && !CPU_E8C
 	select ARCH_INLINE_SPIN_UNLOCK if !PREEMPTION
 	select ARCH_INLINE_SPIN_UNLOCK_BH if !PREEMPTION
 	select ARCH_INLINE_SPIN_UNLOCK_IRQ if !PREEMPTION
@@ -53,8 +52,7 @@ config E2K
 	select ARCH_WANT_IPC_PARSE_VERSION
 	select ARCH_WANT_OPTIONAL_GPIOLIB
 	select ARCH_WEAK_RELEASE_ACQUIRE
-	#Unaligned loads are broken on es2
-	select DCACHE_WORD_ACCESS if !CPU_ES2
+	select DCACHE_WORD_ACCESS
 	select GENERIC_IDLE_POLL_SETUP
 	select GENERIC_IRQ_PROBE
 	select GENERIC_IRQ_SHOW
@@ -74,14 +72,14 @@ config E2K
 	select HAVE_DEBUG_BUGVERBOSE
 	select HAVE_DEBUG_KMEMLEAK
 	select HAVE_DYNAMIC_FTRACE
-	#Unaligned loads are broken on es2
-	select HAVE_EFFICIENT_UNALIGNED_ACCESS if !CPU_ES2
+	select HAVE_EFFICIENT_UNALIGNED_ACCESS
 	select HAVE_FTRACE_MCOUNT_RECORD
 	select HAVE_FUNCTION_TRACER
 	select HAVE_FUNCTION_GRAPH_TRACER
 	select HAVE_FUTEX_CMPXCHG if FUTEX
 	select HAVE_HW_BREAKPOINT # Always on as it is used to implement ptrace
 	select HAVE_IDE
+	select HAVE_IOREMAP_PROT
 	#select HAVE_KERNEL_BZIP2 -- worse than XZ on e2k
 	select HAVE_KERNEL_GZIP # Stands between LZ4 and XZ
 	select HAVE_KERNEL_LZ4 # Fastest compression/decompression
@@ -117,7 +115,6 @@ config E2K
 	select ARCH_SUPPORTS_DEFERRED_STRUCT_PAGE_INIT
 	select IOMMU_DMA
 	select IOMMU_API
-	select DMA_REMAP
 	select THREAD_INFO_IN_TASK
 	select ARCH_HAS_STRICT_KERNEL_RWX
 	select ARCH_HAS_STRICT_MODULE_RWX
@@ -268,6 +265,9 @@ config ARCH_MMAP_RND_COMPAT_BITS_MIN
 config ARCH_MMAP_RND_COMPAT_BITS_MAX
 	default 16
 
+config ARCH_USES_PG_UNCACHED
+	def_bool y
+
 menu "Processor type and features"
 
 config E2K_MACHINE_SIC
@@ -301,32 +301,17 @@ config E2K_SIMULATOR
 	help
 	  You can choose this when you are working on a machine simulator.
 
-config CPU_ES2
-	def_bool !E2K_MACHINE
-	depends on !E2K_MINVER_V3
-	depends on !E2K_MINVER_V4
-	depends on !E2K_MINVER_V5
-	depends on !E2K_MINVER_V6
-
 config CPU_E2S
 	def_bool !E2K_MACHINE
-	depends on !E2K_MINVER_V4
-	depends on !E2K_MINVER_V5
-	depends on !E2K_MINVER_V6
 
 config CPU_E8C
 	def_bool !E2K_MACHINE
-	depends on !E2K_MINVER_V5
-	depends on !E2K_MINVER_V6
 
 config CPU_E1CP
 	def_bool !E2K_MACHINE
-	depends on !E2K_MINVER_V5
-	depends on !E2K_MINVER_V6
 
 config CPU_E8C2
 	def_bool !E2K_MACHINE
-	depends on !E2K_MINVER_V6
 
 config CPU_E12C
 	def_bool !E2K_MACHINE
@@ -341,7 +326,6 @@ config CPU_ISET
 	int
 	range 0 6
 	default 0 if !E2K_MACHINE
-	default 2 if E2K_ES2_DSP || E2K_ES2_RU
 	default 3 if E2K_E2S
 	default 4 if E2K_E8C || E2K_E1CP
 	default 5 if E2K_E8C2
@@ -358,35 +342,9 @@ config CPU_HW_CLEAR_RF
 config CPU_HWBUG_IBRANCH
 	def_bool CPU_ISET <= 5
 
-config CPU_HAS_FILL_INSTRUCTION
-	def_bool CPU_ISET >= 6
-
 choice
 	prompt "Subarchitecture Type"
         depends on E2K_MACHINE
-
-
-config E2K_ES2_DSP
-	bool "Elbrus e2c+ (Cubic, NUMA, 2 core, DSP, IOHUB, SIC)"
-	select CPU_ES2
-	help
-	  Support for Elbrus e2c+ (Cubic) systems.
-	  Say 'Y' here if this kernel is supposed to run on
-	  an Elbrus S2 (Cubic) system.
-	  Only choose this option if you have such a system and cannot run
-	  the kernel on other machines types,
-	  otherwise you should say N here.
-
-config E2K_ES2_RU
-	bool "Elbrus e2c (Micron, NUMA, 2 core, IOHUB, SIC)"
-	select CPU_ES2
-	help
-	  Support for Elbrus e2c (Micron) systems.
-	  Say 'Y' here if this kernel is supposed to run on
-	  an Elbrus e2c (Micron) system.
-	  Only choose this option if you have such a system and cannot run
-	  the kernel on other machines types,
-	  otherwise you should say N here.
 
 config E2K_E2S
 	bool "Elbrus 2S (NUMA, 4 core, IOHUB, SIC)"
@@ -460,61 +418,11 @@ config E2K_E2C3
 
 endchoice
 
-choice
-	prompt "Minimal supported E2K generation"
-	depends on !E2K_MACHINE
-	default E2K_MINVER_V3
-	help
-	  Support all Elbrus systems starting from selected architecture
-	  generation. This allows to have better optimized kernel without
-	  quirks for older systems.
-
-config E2K_MINVER_V2
-	bool "Elbrus v2 support"
-	help
-	  This options enables kernel with minimally supported Elbrus v2
-	  CPU architecture (Elbrus 2c, 2c+ and later).
-
-config E2K_MINVER_V3
-	bool "Elbrus v3"
-	help
-	  This options enables kernel with minimally supported Elbrus v3
-	  CPU architecture (Elbrus 4c and later).
-
-config E2K_MINVER_V4
-	bool "Elbrus v4"
-	help
-	  This options enables kernel with minimally supported Elbrus v4
-	  CPU architecture (Elbrus 8c, 1c+ and later).
-
-config E2K_MINVER_V5
-	bool "Elbrus v5"
-	help
-	  This options enables kernel with minimally supported Elbrus v5
-	  CPU architecture (Elbrus 8c2 and later).
-
-config E2K_MINVER_V6
-	bool "Elbrus v6"
-	help
-	  This options enables kernel with minimally supported Elbrus v6
-	  CPU architecture (Elbrus 12c, 16c, 2c3 and later).
-
-endchoice
-
-config E2K_MINVER
-	int
-	default 3 if E2K_MINVER_V3
-	default 4 if E2K_MINVER_V4
-	default 5 if E2K_MINVER_V5
-	default 6 if E2K_MINVER_V6
-	default 2
-
 menu "MMU Page Tables features"
 
 config MMU_PT_V6
 	bool "MMU Page Table V6 basic mode"
-	depends on !E2K_MACHINE || (!CPU_ES2 && !CPU_E2S && \
-				    !CPU_E8C && !CPU_E1CP && !CPU_E8C2)
+	depends on !E2K_MACHINE || (!CPU_E2S && !CPU_E8C && !CPU_E1CP && !CPU_E8C2)
 	default y
 	help
 	  Support for basic (new) structure of Page Tables entries.
@@ -525,8 +433,7 @@ config MMU_PT_V6
 
 config MMU_SEP_VIRT_SPACE
 	bool "MMU Separate Page Tables for kernel and users"
-	depends on !E2K_MACHINE || (!CPU_ES2 && !CPU_E2S && \
-				    !CPU_E8C && !CPU_E1CP && !CPU_E8C2)
+	depends on !E2K_MACHINE || (!CPU_E2S && !CPU_E8C && !CPU_E1CP && !CPU_E8C2)
 	default y
 	help
 	  Enables MMU Separate Page Tables for kernel and users.
@@ -584,16 +491,6 @@ config E16_CORE_SUPPORT
 	   can use compilator lcc-21 and kernel can be compiled in generic
 	   mode
 	   If you say Y then need compile only by lcc-23
-
-# Unknown bug of hardware or software while compiler lift up some operations
-# of load of data before call of spinlock function when data can be acceessed
-# only after call completion. In this case compiler use DAM to detect that data
-# were updated while spinlock completion and reload them if updated.
-# Turn off compiler optimization while bug is not detected and fixed.
-
-config SMP_DAM_BUG
-	bool
-	default SMP && CPU_ES2
 
 source "kernel/Kconfig.hz"
 
@@ -891,14 +788,6 @@ config CLW_ENABLE
         depends on PROTECTED_MODE
         default y
 
-config IPD_DISABLE
-	bool "Disable Instruction Cache prefetch for kernel"
-	help
-	   If you say 'Y' then Instruction Cache prefetch will be
-	   disable for kernel threads
-	   Otherwise two line of ICACHE prefetch will be set
-	default n
-
 config TC_STORAGE
 	bool "Store Table Cache default line"
 	help
@@ -1120,14 +1009,6 @@ config ENABLE_IOAPIC
 	default y
 	help
 	  Set southbridge XBCS register io apic enable.
-
-config ADC_DISABLE
-	bool "Disable second IO-link on e2c+ connected to ADC"
-	depends on BIOS
-	default n
-	help
-	  In some case second link is not connected to anywhere
-	  or not work properly
 
 config OPTIMIZE_REGISTERS_ACCESS
 	bool "Optimize registers access"

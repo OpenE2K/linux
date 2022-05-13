@@ -20,7 +20,7 @@
  */
 static inline long
 kvm_get_guest_time(struct kvm *kvm,
-			kvm_timespec_t *vcpu_ts, struct timespec *ts)
+			kvm_timespec_t *vcpu_ts, struct timespec64 *ts)
 {
 	long secs, nsecs;
 
@@ -37,7 +37,7 @@ kvm_get_guest_time(struct kvm *kvm,
 
 static inline void
 kvm_set_guest_time(struct kvm *kvm,
-			kvm_timespec_t *kvm_ts, struct timespec *ts)
+			kvm_timespec_t *kvm_ts, struct timespec64 *ts)
 {
 	long secs, nsecs;
 
@@ -51,7 +51,7 @@ kvm_set_guest_time(struct kvm *kvm,
 }
 
 static inline long
-kvm_get_guest_system_time(struct kvm *kvm, struct timespec *ts)
+kvm_get_guest_system_time(struct kvm *kvm, struct timespec64 *ts)
 {
 	kvm_timespec_t *sys_time;
 
@@ -60,7 +60,7 @@ kvm_get_guest_system_time(struct kvm *kvm, struct timespec *ts)
 }
 
 static inline void
-kvm_set_guest_system_time(struct kvm *kvm, struct timespec *ts)
+kvm_set_guest_system_time(struct kvm *kvm, struct timespec64 *ts)
 {
 	kvm_timespec_t *sys_time;
 
@@ -69,7 +69,7 @@ kvm_set_guest_system_time(struct kvm *kvm, struct timespec *ts)
 }
 
 static inline long
-kvm_get_guest_wall_time(struct kvm *kvm, struct timespec *ts)
+kvm_get_guest_wall_time(struct kvm *kvm, struct timespec64 *ts)
 {
 	kvm_timespec_t *wall_time;
 
@@ -78,7 +78,7 @@ kvm_get_guest_wall_time(struct kvm *kvm, struct timespec *ts)
 }
 
 static inline void
-kvm_set_guest_wall_time(struct kvm *kvm, struct timespec *ts)
+kvm_set_guest_wall_time(struct kvm *kvm, struct timespec64 *ts)
 {
 	kvm_timespec_t *wall_time;
 
@@ -89,7 +89,7 @@ kvm_set_guest_wall_time(struct kvm *kvm, struct timespec *ts)
 static inline void
 kvm_update_guest_wall_time(struct kvm *kvm)
 {
-	struct timespec ts;
+	struct timespec64 ts;
 
 	ts.tv_sec = mach_get_wallclock();
 	ts.tv_nsec = 0;
@@ -99,9 +99,9 @@ kvm_update_guest_wall_time(struct kvm *kvm)
 static inline void
 kvm_update_guest_system_time(struct kvm *kvm)
 {
-	struct timespec ts;
+	struct timespec64 ts;
 
-	ktime_get_ts(&ts);
+	ktime_get_real_ts64(&ts);
 	kvm_set_guest_system_time(kvm, &ts);
 }
 

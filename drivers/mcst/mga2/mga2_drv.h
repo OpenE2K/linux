@@ -291,6 +291,13 @@ static inline bool mga2_proto(struct mga2 *mga2)
 	return false;
 }
 
+static inline bool mga2_hdmi(struct mga2 *mga2)
+{
+	if (mga2->subdevice == MGA2_P2 || mga2->subdevice == MGA25)
+		return true;
+	return false;
+}
+
 extern int mga2_timeout_ms;
 static inline int mga2_timeout(struct mga2 *mga2)
 {

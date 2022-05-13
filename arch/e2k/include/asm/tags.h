@@ -12,7 +12,7 @@
 /* Internal tags list. Old style */
 #define	E2K_AP_ITAG		0x0
 #define	E2K_PL_ITAG		0x1
-#define	E2K_PL_V2_ITAG		0x0
+#define	E2K_PL_V3_ITAG		0x0
 #define	E2K_SAP_ITAG		0x4
 
 #define	ITAG_MASK		ULL(0x4000000040000000)

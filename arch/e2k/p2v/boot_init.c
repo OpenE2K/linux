@@ -292,50 +292,50 @@ boot_param("reset_sep_pt", boot_reset_mmu_separate_pt);
  * Disabling caches setup
  */
 
-unsigned long disable_caches = _MMU_CD_EN;
+unsigned long disable_caches = MMU_CR_CD_EN;
 #define boot_disable_caches	boot_get_vo_value(disable_caches)
 
 static int __init boot_disable_L1_setup(char *cmd)
 {
-	if (boot_disable_caches < _MMU_CD_D1_DIS)
-		boot_disable_caches = _MMU_CD_D1_DIS;
+	if (boot_disable_caches < MMU_CR_CD_D1_DIS)
+		boot_disable_caches = MMU_CR_CD_D1_DIS;
 	return 0;
 }
 boot_param("disL1", boot_disable_L1_setup);
 
 static int __init boot_disable_L2_setup(char *cmd)
 {
-	if (boot_disable_caches < _MMU_CD_D_DIS)
-		boot_disable_caches = _MMU_CD_D_DIS;
+	if (boot_disable_caches < MMU_CR_CD_D_DIS)
+		boot_disable_caches = MMU_CR_CD_D_DIS;
 	return 0;
 }
 boot_param("disL2", boot_disable_L2_setup);
 
 static int __init boot_disable_L3_setup(char *cmd)
 {
-	if (boot_disable_caches < _MMU_CD_DIS)
-		boot_disable_caches = _MMU_CD_DIS;
+	if (boot_disable_caches < MMU_CR_CD_DIS)
+		boot_disable_caches = MMU_CR_CD_DIS;
 	return 0;
 }
 boot_param("disL3", boot_disable_L3_setup);
 
-unsigned long disable_secondary_caches = 0;
+bool disable_secondary_caches = false;
 #define boot_disable_secondary_caches	\
 		boot_get_vo_value(disable_secondary_caches)
 
 static int __init boot_disable_LI_setup(char *cmd)
 {
-	boot_disable_secondary_caches = _MMU_CR_CR0_CD;
+	boot_disable_secondary_caches = true;
 	return 0;
 }
 boot_param("disLI", boot_disable_LI_setup);
 
-unsigned long disable_IP = _MMU_IPD_2_LINE;
+bool disable_IP = false;
 #define boot_disable_IP	boot_get_vo_value(disable_IP)
 
 static int __init boot_disable_IP_setup(char *cmd)
 {
-	boot_disable_IP = _MMU_IPD_DIS;
+	boot_disable_IP = true;
 	return 0;
 }
 boot_param("disIP", boot_disable_IP_setup);
@@ -2100,29 +2100,6 @@ boot_reserve_boot_memory(bool bsp, boot_info_t *boot_info)
 				"0x%x\n",
 				bank, area_base, area_size, PAGE_SIZE);
 		}
-
-		/* FIXME: the BOOT should do this */
-		if (boot_cpu_has(CPU_HWBUG_DMA_AT_APIC_ADDR)) {
-			area_base = APIC_DEFAULT_PHYS_BASE & 0x7fffFFFF;
-			area_size = PAGE_SIZE;
-			ret = boot_reserve_physmem(area_base, area_size,
-				hw_reserved_mem_type,
-				BOOT_ONLY_LOW_PHYS_MEM |
-					BOOT_IGNORE_AT_HIGH_PHYS_MEM |
-					BOOT_NOT_IGNORE_BUSY_BANK |
-					BOOT_IGNORE_BANK_NOT_FOUND);
-			if (ret != 0) {
-				BOOT_BUG_POINT("boot_reserve_boot_memory");
-				BOOT_BUG("Could not reserve HW bug area : "
-					"base addr 0x%lx size 0x%lx page "
-					"size 0x%x",
-					area_base, area_size, PAGE_SIZE);
-			}
-			boot_printk("The HW bug reserved area : "
-				"base addr 0x%lx size 0x%lx page size 0x%x\n",
-				area_base, area_size, PAGE_SIZE);
-		}
-
 	}
 }
 
@@ -3105,9 +3082,10 @@ boot_map_low_io_memory(void)
 		area_size = VGA_VRAM_SIZE;
 		area_virt_base =
 			(e2k_addr_t)__boot_va(area_phys_base);
-		ret = boot_map_phys_area(area_phys_base, area_size,
-			area_virt_base,
-			PAGE_X86_IO_PORTS, E2K_SMALL_PAGE_SIZE,
+		ret = boot_map_phys_area(area_phys_base, area_size, area_virt_base,
+			boot_cpu_has(CPU_FEAT_WC_LEGACY_VGA) ? PAGE_IO_MAP_WC
+							     : PAGE_IO_MAP,
+			E2K_SMALL_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
@@ -3159,7 +3137,7 @@ boot_map_high_io_memory(bool bsp)
 		area_virt_base = E2K_X86_IO_AREA_BASE;
 		ret = boot_map_phys_area(area_phys_base, area_size,
 			area_virt_base,
-			PAGE_X86_IO_PORTS, BOOT_E2K_X86_IO_PAGE_SIZE,
+			PAGE_IO_MAP, BOOT_E2K_X86_IO_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
@@ -3603,11 +3581,10 @@ boot_native_kernel_switch_to_virt(bool bsp, int cpuid,
 	e2k_usd_hi_t	usd_hi;
 	e2k_usbr_t	usbr;
 	unsigned long	loc_disable_caches = boot_disable_caches;
-	unsigned long	loc_disable_secondary_caches =
-					boot_disable_secondary_caches;
-	unsigned long	loc_disable_IP = boot_disable_IP;
+	bool		loc_disable_secondary_caches = boot_disable_secondary_caches;
+	bool		loc_disable_IP = boot_disable_IP;
 	bool		loc_enable_l2_cint = boot_enable_l2_cint;
-	unsigned long	mmu_cr = _MMU_CR_KERNEL;
+	e2k_mmu_cr_t	mmu_cr = MMU_CR_KERNEL;
 #ifdef	CONFIG_SMP
 	int	cpus_to_sync = boot_cpu_to_sync_num;
 	atomic_t *pv_ops_switched = boot_vp_to_pp(&boot_pv_ops_switched);
@@ -3685,18 +3662,12 @@ boot_native_kernel_switch_to_virt(bool bsp, int cpuid,
 	 * (write to the MMU control register enables TLB & TLU)
 	 */
 
-	if (loc_disable_caches != _MMU_CD_EN) {
-		mmu_cr &= ~_MMU_CR_CD_MASK;
-		mmu_cr |= (loc_disable_caches & _MMU_CR_CD_MASK);
-	}
-	if (loc_disable_secondary_caches) {
-		mmu_cr &= ~_MMU_CR_CR0_CD;
-		mmu_cr |= (loc_disable_secondary_caches & _MMU_CR_CR0_CD);
-	}
-	if (loc_disable_IP == _MMU_IPD_DIS) {
-		mmu_cr &= ~_MMU_CR_IPD_MASK;
-		mmu_cr |= (loc_disable_IP & _MMU_CR_IPD_MASK);
-	}
+	if (loc_disable_caches != MMU_CR_CD_EN)
+		mmu_cr.cd = loc_disable_caches;
+	if (loc_disable_secondary_caches)
+		mmu_cr.cr0_cd = 1;
+	if (loc_disable_IP)
+		mmu_cr.ipd = MMU_CR_IPD_DIS;
 
 	/* set L2 CRC control state */
 	boot_native_set_l2_crc_state(loc_enable_l2_cint);

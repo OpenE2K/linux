@@ -15,6 +15,7 @@
 #include <asm/mmu_context.h>
 #include <asm/switch_to.h>
 #include <asm/kvm/guest/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/signal.h>
 #include <asm/stacks.h>
 #include <asm/setup.h>
@@ -298,6 +299,87 @@ void kvm_define_kernel_hw_stacks_sizes(hw_stack_t *hw_stacks)
 	kvm_set_hw_pcs_user_size(hw_stacks, KVM_GUEST_KERNEL_PCS_SIZE);
 }
 
+void kvm_clean_pc_stack_zero_frame(void *addr, bool user)
+{
+	struct page *page;
+	e2k_mem_crs_t *pcs;
+	int ret;
+
+	/*
+	 * Guest user hardware stacks are mapped as privileged,
+	 * but guest kernel is running as not privileged.
+	 * Convert user address to virtual address of kernel page
+	 */
+	if (likely(user)) {
+		unsigned long u_addr, k_addr, offset;
+
+		u_addr = (unsigned long)addr;
+		page = get_user_addr_to_kernel_page(u_addr);
+		if (unlikely(IS_ERR_OR_NULL(page))) {
+			ret = (IS_ERR(page)) ? PTR_ERR(page) : -EINVAL;
+			goto failed;
+		}
+		offset = u_addr & ~PAGE_MASK;
+		k_addr = (unsigned long)page_address(page) + offset;
+		pcs = (e2k_mem_crs_t *)k_addr;
+	} else {
+		pcs = (e2k_mem_crs_t *)addr;
+	}
+
+	native_clean_pc_stack_zero_frame(pcs, user);
+
+	if (likely(user)) {
+		put_user_addr_to_kernel_page(page);
+	}
+	return;
+
+failed:
+	if (ret == -ERESTARTSYS)
+		/* there is/are pending fatal signal(s) */
+		/* and task should be killed some later */
+		return;
+
+	pr_err("%s(): failed to get kernel page of user address %px, error %d\n",
+		__func__, addr, ret);
+	send_sig(SIGKILL, current, 0);
+}
+
+e2k_cute_t *kvm_get_cut_entry_pointer(int cui, struct page **page_p)
+{
+	struct page *page;
+	unsigned long u_cute_p, k_cute_p, offset;
+	int ret;
+
+	u_cute_p = (unsigned long)native_get_cut_entry_pointer(cui);
+	page = get_user_addr_to_kernel_page(u_cute_p);
+	if (unlikely(IS_ERR_OR_NULL(page))) {
+		ret = (IS_ERR(page)) ? PTR_ERR(page) : -EINVAL;
+		goto failed;
+	}
+	offset = u_cute_p & ~PAGE_MASK;
+	k_cute_p = (unsigned long)page_address(page) + offset;
+
+	*page_p = page;
+	return (e2k_cute_t *)k_cute_p;
+
+failed:
+	if (ret == -ERESTARTSYS) {
+		/* there is/are pending fatal signal(s) */
+		/* and task should be killed some later */
+		;
+	} else {
+		pr_err("%s(): failed to get kernel page of user address %lx, "
+			"error %d\n",
+			__func__, u_cute_p, ret);
+	}
+	return NULL;
+}
+
+void kvm_put_cut_entry_pointer(struct page *page)
+{
+	put_user_addr_to_kernel_page(page);
+}
+
 int kvm_prepare_start_thread_frames(unsigned long entry, unsigned long sp)
 {
 	e2k_pcsp_lo_t	pcsp_lo;
@@ -573,6 +655,68 @@ out_k_stacks:
 	return ret;
 }
 
+int kvm_do_parse_chain_stack(int flags, struct task_struct *p,
+		parse_chain_fn_t func, void *arg, unsigned long delta_user,
+		unsigned long top, unsigned long bottom,
+		bool *interrupts_enabled, unsigned long *irq_flags)
+{
+	struct page *page;
+	e2k_size_t offset, len, parsed = 0, to_parse;
+	unsigned long k_top, k_bottom;
+	int ret;
+
+	if (top >= GUEST_PAGE_OFFSET) {
+		/* it is parsing withing addresses of the guest kernel stack, */
+		/* translation of guest user addresses in kernel do not need */
+		BUG_ON(bottom < GUEST_PAGE_OFFSET);
+		return ____parse_chain_stack(flags, p, func, arg,
+						delta_user, top, bottom,
+						interrupts_enabled, irq_flags);
+	}
+
+	/*
+	 * Guest kernel cannot access to/from guest user hardware stacks
+	 * because of these stacks are allocated at user space and
+	 * are mapped as privileged.
+	 * So it need translation user stack addresses to kernel pages
+	 * at which the stack is loaded
+	 */
+	BUG_ON(bottom > top + SZ_OF_CR);
+	if (bottom >= top) {
+		return 0;
+	}
+	to_parse = top - bottom;
+	do {
+		offset = (unsigned long)top & ~PAGE_MASK;
+		len = min(to_parse, (offset) ? offset : PAGE_SIZE);
+		page = get_user_addr_to_kernel_page((offset) ? top : top - 1);
+		if (unlikely(IS_ERR_OR_NULL(page))) {
+			ret = (IS_ERR(page)) ? PTR_ERR(page) : -EINVAL;
+			goto failed;
+		}
+
+		k_top = (unsigned long)page_address(page) + offset;
+		if (offset == 0)
+			k_top += PAGE_SIZE;
+		k_bottom = k_top - len;
+		delta_user = top - k_top;
+
+		ret = ____parse_chain_stack(flags, p, func, arg,
+					delta_user, k_top, k_bottom,
+					interrupts_enabled, irq_flags);
+		put_user_addr_to_kernel_page(page);
+		if (ret != 0)
+			break;
+		top -= len;
+		to_parse -= len;
+		parsed += len;
+	} while (top > bottom);
+
+failed:
+	return ret;
+
+}
+
 void __init kvm_bsp_switch_to_init_stack(void)
 {
 	kvm_task_info_t	task_info;
@@ -635,7 +779,10 @@ void kvm_setup_bsp_idle_task(int cpu)
 	BUG_ON(ti_idle != &init_task.thread_info);
 
 	ti_idle->gpid_nr = ret;
-	ti_idle->gmmid_nr = 0;	/* init mm should have GMMID == 0 */
+
+	/* init mm should have GMMID == 0 */
+	ti_idle->gmmid_nr = 0;
+	init_mm.gmmid_nr = 0;
 }
 
 /*
@@ -792,7 +939,7 @@ int kvm_clone_prepare_spilled_user_stacks(e2k_stacks_t *child_stacks,
 		pr_err("%s(): native clone/prepare user stacks failed, "
 			"error %d\n",
 			__func__, ret);
-		return ret;
+		goto out_error;
 	}
 
 	/*
@@ -892,9 +1039,9 @@ int kvm_clone_prepare_spilled_user_stacks(e2k_stacks_t *child_stacks,
 	BUG_ON(new_task->mm == NULL || new_task->mm->pgd == NULL);
 	BUG_ON(new_task->mm != current->mm);
 
-	down_write(&new_task->mm->mmap_sem);
-	kvm_get_mm_notifier_locked(new_task->mm);
-	up_write(&new_task->mm->mmap_sem);
+	ret = kvm_get_mm_notifier(new_task->mm);
+	if (ret != 0)
+		goto out_error;
 
 retry:
 	gpid_nr = HYPERVISOR_clone_guest_user_stacks(&task_info);
@@ -906,7 +1053,7 @@ retry:
 		pr_err("host could not clone stacks of new user thread, "
 			"error %d\n", gpid_nr);
 		ret = gpid_nr;
-		return ret;
+		goto out_error;
 	}
 	new_ti->gpid_nr = gpid_nr;
 	new_ti->gmmid_nr = current_thread_info()->gmmid_nr;
@@ -921,6 +1068,10 @@ retry:
 		debug_clone_guest = false;
 
 	return 0;
+
+out_error:
+	pr_warn("%s(): failed, error %d\n", __func__, ret);
+	return ret;
 }
 
 int kvm_copy_spilled_user_stacks(e2k_stacks_t *child_stacks,
@@ -1009,9 +1160,9 @@ int kvm_copy_spilled_user_stacks(e2k_stacks_t *child_stacks,
 
 	BUG_ON(new_task->mm == NULL || new_task->mm->pgd == NULL);
 
-	down_write(&new_task->mm->mmap_sem);
-	kvm_get_mm_notifier_locked(new_task->mm);
-	up_write(&new_task->mm->mmap_sem);
+	ret = kvm_get_mm_notifier(new_task->mm);
+	if (ret != 0)
+		goto out_error;
 
 	gmmu_info.opcode = CREATE_NEW_GMM_GMMU_OPC;
 	gmmu_info.u_pptb = __pa(new_task->mm->pgd);
@@ -1042,7 +1193,7 @@ retry:
 	return 0;
 
 out_error:
-	pr_err("%s(): failed, error %d\n", __func__, ret);
+	pr_warn("%s(): failed, error %d\n", __func__, ret);
 	return ret;
 }
 
@@ -1056,6 +1207,7 @@ void kvm_save_glob_regs(global_regs_t *gregs)
 	int ret;
 
 retry:
+	gregs->bgr = NATIVE_READ_BGR_REG();
 	ret = HYPERVISOR_get_guest_glob_regs(g_regs, GUEST_GREGS_MASK,
 				true,	/*dirty BGR */
 				NULL);
@@ -1085,6 +1237,7 @@ retry:
 		pr_err("%s(): could not set global registers state, "
 			"error %d\n", __func__, ret);
 	}
+	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 void kvm_save_glob_regs_dirty_bgr(global_regs_t *gregs)
 {
@@ -1092,6 +1245,7 @@ void kvm_save_glob_regs_dirty_bgr(global_regs_t *gregs)
 	int ret;
 
 retry:
+	gregs->bgr = NATIVE_READ_BGR_REG();
 	ret = HYPERVISOR_set_guest_glob_regs_dirty_bgr(g_regs,
 				GUEST_GREGS_MASK);
 	if (unlikely(ret == -EAGAIN)) {
@@ -1109,6 +1263,7 @@ void kvm_save_local_glob_regs(local_gregs_t *l_gregs, bool is_signal)
 	int ret;
 
 retry:
+	l_gregs->bgr = NATIVE_READ_BGR_REG();
 	ret = HYPERVISOR_get_guest_local_glob_regs(gregs, is_signal);
 	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not get local global registers state, "
@@ -1134,6 +1289,7 @@ retry:
 		pr_err("%s(): could not get local global registers state, "
 			"error %d\n", __func__, ret);
 	}
+	NATIVE_WRITE_BGR_REG(l_gregs->bgr);
 }
 
 void kvm_get_all_user_glob_regs(global_regs_t *gregs)

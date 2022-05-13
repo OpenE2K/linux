@@ -13,5 +13,4 @@ struct ucontext {
 	struct extra_ucontext	  uc_extra; /* for compatibility */
 };
 
-
 #endif /* _UAPI_E2K_UCONTEXT_H */

@@ -42,6 +42,9 @@
 #include <asm/set_memory.h>
 #include <asm/cpufeature.h>
 #endif
+#ifdef CONFIG_E2K
+#include <asm/set_memory.h>
+#endif
 #include <sound/core.h>
 #include <sound/initval.h>
 #include <sound/hdaudio.h>
@@ -195,7 +198,7 @@ module_param(align_buffer_size, bint, 0644);
 MODULE_PARM_DESC(align_buffer_size,
 		"Force buffer and period sizes to be multiple of 128 bytes.");
 
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 static int hda_snoop = -1;
 module_param_named(snoop, hda_snoop, bint, 0444);
 MODULE_PARM_DESC(snoop, "Enable/disable snooping");
@@ -1860,7 +1863,9 @@ static int azx_create(struct snd_card *card, struct pci_dev *pci,
 					"Error requesting mga2: %d\n", err);
 				snd_device_free(card, chip);
 				azx_free(chip);
-				return err;
+				/* request_module() can return positive
+				 * error value so do not propagate it. */
+				return -EINVAL;
 			}
 		}
 	}
@@ -2094,7 +2099,7 @@ static int disable_msi_reset_irq(struct azx *chip)
 static void pcm_mmap_prepare(struct snd_pcm_substream *substream,
 			     struct vm_area_struct *area)
 {
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 	struct azx_pcm *apcm = snd_pcm_substream_chip(substream);
 	struct azx *chip = apcm->chip;
 	if (chip->uc_buffer)

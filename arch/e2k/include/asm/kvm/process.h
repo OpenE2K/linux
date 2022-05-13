@@ -16,12 +16,11 @@
 #include <asm/kvm/switch.h>
 
 extern void kvm_clear_host_thread_info(thread_info_t *ti);
-extern gthread_info_t *create_guest_start_thread_info(struct kvm_vcpu *vcpu);
 extern int kvm_resume_vm_thread(void);
 
 extern int kvm_correct_guest_trap_return_ip(unsigned long return_ip);
 
-extern long return_pv_vcpu_syscall_fork(void);
+extern long return_pv_vcpu_syscall_fork(u64 sys_rval);
 
 /*
  * Is the CPU at guest Hardware Virtualized mode
@@ -64,8 +63,9 @@ kvm_host_update_vcpu_thread_context(struct task_struct **task,
 	struct thread_info **ti, struct pt_regs **regs,
 	struct gthread_info **gti, struct kvm_vcpu **vcpu)
 {
-	if (!test_thread_flag(TIF_VIRTUALIZED_GUEST))
-		/* ot is not VCPU thread */
+	if (likely(!(test_ts_flag(TS_HOST_AT_VCPU_MODE) ||
+				regs && kvm_test_intc_emul_flag(*regs))))
+		/* it is not VCPU thread */
 		return;
 	if ((ti != NULL) && (*ti == current_thread_info()))
 		/* thread is not changed, so need not updates */
@@ -200,12 +200,27 @@ void go2guest(long fn, bool priv_guest);
 
 #define	GET_GUEST_VCPU_STATE_POINTER(__vcpu)				\
 ({									\
-	e2k_addr_t vs = (e2k_addr_t)((__vcpu)->arch.vcpu_state);	\
+	(gva_t)((__vcpu)->arch.guest_vcpu_state);			\
+})
+
+#define	TO_GUEST_VCPU_STATE_PHYS_POINTER(__vcpu)			\
+({									\
+	gpa_t vs = (gpa_t)((__vcpu)->arch.vcpu_state);			\
 									\
 	vs = kvm_vcpu_hva_to_gpa(__vcpu, vs);				\
-	if (is_paging(__vcpu))						\
-		vs = (e2k_addr_t)__guest_va(vs);			\
-	vs;								\
+	(gva_t)vs;							\
+})
+
+#define	TO_GUEST_VCPU_STATE_POINTER(__vcpu)				\
+({									\
+	gpa_t vs;							\
+									\
+	vs = TO_GUEST_VCPU_STATE_PHYS_POINTER(__vcpu);			\
+	if (!IS_INVALID_GPA(vs)) {					\
+		if (is_paging(__vcpu))					\
+			vs = (gpa_t)__guest_va(vs);			\
+	}								\
+	(gva_t)vs;							\
 })
 
 #define	INIT_HOST_VCPU_STATE_GREG_COPY(__ti, __vcpu)			\
@@ -235,16 +250,7 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 		schedule();
 	}
 
-	if (has_signal) {
-		/*
-		 * This is guest VCPU interception emulation, but
-		 * there is (are) pending signal for host VCPU mode,
-		 * so it need switch to host VCPU mode to handle
-		 * signal and probably to kill VM
-		 */
-		WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_DISABLED));
-		pv_vcpu_switch_to_host_from_intc(current_thread_info());
-	} else if (likely(guest_trap_pending(current_thread_info()))) {
+	if (likely(guest_trap_pending(current_thread_info()))) {
 		/*
 		 * This is guest VCPU interception emulation and
 		 * there is (are) the guest trap(s) to handle
@@ -266,6 +272,16 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 	}
 
 	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_DISABLED));
+
+	if (has_signal) {
+		/*
+		 * This is guest VCPU interception emulation, but
+		 * there is (are) pending signal for host VCPU mode,
+		 * so it need switch to host VCPU mode to handle
+		 * signal and probably to kill VM
+		 */
+		pv_vcpu_switch_to_host_from_intc(current_thread_info());
+	}
 }
 
 #ifdef	CONFIG_SMP
@@ -314,6 +330,15 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 	SAVE_GUEST_KERNEL_GREGS_COPY_TO(k_gregs, g_gregs, false);	\
 })
 
+#define SET_PREEMPT_CNT_GUEST_KERNEL_GREGS_COPY(__gti, val)		\
+({									\
+	unsigned long cpu_reg;						\
+									\
+	cpu_reg = __gti->gk_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base;	\
+	set_cpu_preempt_reg(cpu_reg, val);				\
+	__gti->gk_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base = cpu_reg;	\
+})
+
 #ifdef	CONFIG_SMP
 #define	RESTORE_GUEST_KERNEL_GREGS_COPY_FROM(__k_gregs, __g_gregs,	\
 						only_kernel)		\
@@ -355,7 +380,7 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 #define	RESTORE_GUEST_KERNEL_GREGS_COPY(__ti, __gti, __vcpu)		\
 ({									\
 	kernel_gregs_t *k_gregs = &(__ti)->k_gregs;			\
-	kernel_gregs_t *g_gregs = &(__gti)->gu_gregs;			\
+	kernel_gregs_t *g_gregs = &(__gti)->gk_gregs;			\
 									\
 	RESTORE_GUEST_KERNEL_GREGS_COPY_FROM(k_gregs, g_gregs, true);	\
 	INIT_HOST_VCPU_STATE_GREG_COPY(__ti, __vcpu);			\

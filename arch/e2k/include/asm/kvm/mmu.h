@@ -9,6 +9,18 @@
 #include <asm/mmu_fault.h>
 #include <asm/kvm/pv-emul.h>
 
+#ifdef	CONFIG_VIRTUALIZATION
+
+static inline bool is_guest_user_gva(gva_t gva)
+{
+	return gva < GUEST_TASK_SIZE;
+}
+
+static inline bool is_guest_kernel_gva(gva_t gva)
+{
+	return gva >= GUEST_PAGE_OFFSET && gva < HOST_PAGE_OFFSET;
+}
+
 static inline bool is_ss(struct kvm_vcpu *vcpu)
 {
 	return false;
@@ -185,14 +197,33 @@ kvm_set_space_type_spt_u_root(struct kvm_vcpu *vcpu, hpa_t root)
 	kvm_set_space_type_spt_root(vcpu, root, true);
 }
 static inline hpa_t
+kvm_get_space_type_spt_gk_root(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.mmu.get_vcpu_sh_gk_pptb(vcpu);
+}
+static inline void
+kvm_set_space_type_spt_gk_root(struct kvm_vcpu *vcpu, hpa_t gk_root)
+{
+	vcpu->arch.mmu.set_vcpu_sh_gk_pptb(vcpu, gk_root);
+}
+static inline void
+kvm_set_vcpu_spt_u_pptb_context(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.mmu.set_vcpu_u_pptb_context(vcpu);
+}
+static inline hpa_t
 kvm_get_space_addr_spt_root(struct kvm_vcpu *vcpu, gva_t gva)
 {
-	if (!vcpu->arch.mmu.sep_virt_space) {
-		return vcpu->arch.mmu.get_vcpu_sh_u_pptb(vcpu);
-	} else if (unlikely(gva >= vcpu->arch.mmu.get_vcpu_os_vab(vcpu))) {
-		return vcpu->arch.mmu.get_vcpu_sh_os_pptb(vcpu);
+	if (likely(is_guest_user_gva(gva))) {
+		if (!vcpu->arch.mmu.sep_virt_space) {
+			return vcpu->arch.mmu.get_vcpu_sh_u_pptb(vcpu);
+		} else if (unlikely(gva >= vcpu->arch.mmu.get_vcpu_os_vab(vcpu))) {
+			return vcpu->arch.mmu.get_vcpu_sh_os_pptb(vcpu);
+		} else {
+			return vcpu->arch.mmu.get_vcpu_sh_u_pptb(vcpu);
+		}
 	} else {
-		return vcpu->arch.mmu.get_vcpu_sh_u_pptb(vcpu);
+		return kvm_mmu_get_init_gmm_root_hpa(vcpu->kvm);
 	}
 }
 static inline hpa_t
@@ -293,11 +324,19 @@ kvm_get_space_addr_spt_vptb(struct kvm_vcpu *vcpu, gva_t gva)
 #define	INVALID_GPA		((gpa_t)E2K_INVALID_PAGE)
 #define	IS_INVALID_GPA(gpa)	((gpa) == INVALID_GPA)
 
+#define	INVALID_GVA		((gva_t)E2K_INVALID_PAGE)
+#define	IS_INVALID_GVA(gpa)	((gpa) == INVALID_GVA)
+
 static inline struct kvm_mmu_page *page_header(hpa_t shadow_page)
 {
 	struct page *page = pfn_to_page(shadow_page >> PAGE_SHIFT);
 
 	return (struct kvm_mmu_page *)page_private(page);
+}
+
+static inline bool spte_same(pgprot_t pgd_a, pgprot_t pgd_b)
+{
+	return pgprot_val(pgd_a) == pgprot_val(pgd_b);
 }
 
 extern void kvm_get_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
@@ -363,8 +402,6 @@ extern int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 extern int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu,
 				struct pt_regs *regs, e2k_addr_t address,
 				tc_cond_t cond, unsigned int aa_no);
-extern long kvm_hv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
-				intc_info_mu_t *intc_info_mu);
 extern int kvm_mmu_instr_page_fault(struct kvm_vcpu *vcpu, gva_t address,
 				bool async_instr, u32 error_code);
 #else	/* ! CONFIG_KVM_SHADOW_PT_ENABLE */
@@ -409,8 +446,8 @@ kvm_mmu_instr_page_fault(struct kvm_vcpu *vcpu, gva_t address,
 #endif	/* CONFIG_KVM_SHADOW_PT_ENABLE */
 
 extern int kvm_guest_addr_to_host(void **addr);
-extern void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, int size,
-					bool need_inject);
+extern void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, bool is_write,
+					int size, bool need_inject);
 
 #ifdef	CONFIG_KVM_HOST_MODE
 /* it is native host kernel with virtualization support */
@@ -425,15 +462,17 @@ guest_addr_to_host(void **addr, const pt_regs_t *regs)
 	return kvm_guest_addr_to_host(addr);
 }
 static inline void *
-guest_ptr_to_host(void *ptr, int size, const pt_regs_t *regs)
+guest_ptr_to_host(void *ptr, bool is_write, int size, const pt_regs_t *regs)
 {
 	if (likely(!host_test_intc_emul_mode(regs))) {
 		/* faulted addres is not paravirtualized guest one */
 		return native_guest_ptr_to_host(ptr, size);
 	}
 
-	return kvm_guest_ptr_to_host_ptr(ptr, size, false);
+	return kvm_guest_ptr_to_host_ptr(ptr, is_write, size, false);
 }
 #endif	/* CONFIG_KVM_HOST_MODE */
+
+#endif	/* CONFIG_VIRTUALIZATION */
 
 #endif	/* __E2K_KVM_HOST_MMU_H */

@@ -253,6 +253,9 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 	unsigned long extent, next, old_end;
 	struct mmu_notifier_range range;
 	pmd_t *old_pmd, *new_pmd;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	unsigned long src_new_addr = new_addr;
+#endif
 
 	old_end = old_addr + len;
 	flush_cache_range(vma, old_addr, old_end);
@@ -325,7 +328,8 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 	 * exist yet and write invalid TLB entry (valid bit = 0)
 	 * So it need flush same TLB entries for all VM area
 	 */
-	flush_tlb_range_and_pgtables(new_vma->vm_mm, new_addr, new_addr + len);
+	flush_tlb_range_and_pgtables(new_vma->vm_mm,
+				     src_new_addr, src_new_addr + len);
 #endif
 
 	mmu_notifier_invalidate_range_end(&range);
@@ -456,7 +460,10 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 	return new_addr;
 }
 
-static struct vm_area_struct *vma_to_resize(unsigned long addr,
+#ifndef CONFIG_E2K
+static
+#endif
+struct vm_area_struct *vma_to_resize(unsigned long addr,
 	unsigned long old_len, unsigned long new_len, unsigned long *p)
 {
 	struct mm_struct *mm = current->mm;

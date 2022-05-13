@@ -143,8 +143,6 @@ static void e2k_virt_restart_machine(char *reason)
 		reason = "Restarting system...";
 	DebugKVMSH("started to %s on %s (%d)\n",
 		reason, current->comm, current->pid);
-	disable_nonboot_cpus();
-	e2k_virt_shutdown();
 	HYPERVISOR_kvm_shutdown(reason, KVM_SHUTDOWN_RESTART);
 }
 static void e2k_virt_reset_machine(char *reason)
@@ -152,6 +150,25 @@ static void e2k_virt_reset_machine(char *reason)
 	DebugKVMSH("started on %s (%d)\n", current->comm, current->pid);
 	e2k_virt_restart_machine("KVM reset");
 }
+
+#ifdef CONFIG_SMP
+void kvm_clock_off(void)
+{
+	unsigned long flags;
+
+	/* Make sure we do not race with `callin_go` write */
+	raw_all_irq_save(flags);
+	if (!cpumask_test_cpu(raw_smp_processor_id(), &callin_go))
+		e2k_virt_restart_machine("Restarting from kvm_clock_off()");
+	raw_all_irq_restore(flags);
+}
+
+void kvm_clock_on(int cpu)
+{
+	panic("%s(): CPU #%d cannot be called, probably is not implemented\n",
+		__func__, cpu);
+}
+#endif
 
 /*
  * Panicing.
@@ -208,6 +225,10 @@ e2k_virt_setup_arch(void)
 {
 	machine.setup_cpu_info = e2k_virt_setup_cpu_info;
 	kvm_sort_main_extable();
+
+	/* call only to set IP to goto in case of page fault on user address */
+	kvm_fast_tagged_memory_copy_user(NULL, NULL, 0, NULL, 0, 0, 0);
+	kvm_fast_tagged_memory_set_user(NULL, 0, 0, 0, NULL, 0);
 }
 
 int e2k_virt_get_vector_apic(void)
@@ -289,14 +310,14 @@ void setup_guest_interface(void)
 			node_mach->restore_gregs = restore_glob_regs_v5;
 			node_mach->restore_local_gregs =
 				restore_local_glob_regs_v5;
-		} else if (node_mach->native_iset_ver >= E2K_ISET_V2) {
-			node_mach->save_gregs = save_glob_regs_v2;
+		} else if (node_mach->native_iset_ver >= E2K_ISET_V3) {
+			node_mach->save_gregs = save_glob_regs_v3;
 			node_mach->save_gregs_dirty_bgr =
-				save_glob_regs_dirty_bgr_v2;
-			node_mach->save_local_gregs = save_local_glob_regs_v2;
-			node_mach->restore_gregs = restore_glob_regs_v2;
+				save_glob_regs_dirty_bgr_v3;
+			node_mach->save_local_gregs = save_local_glob_regs_v3;
+			node_mach->restore_gregs = restore_glob_regs_v3;
 			node_mach->restore_local_gregs =
-				restore_local_glob_regs_v2;
+				restore_local_glob_regs_v3;
 		} else {
 			BUG_ON(true);
 		}
@@ -334,6 +355,11 @@ e2k_virt_setup_machine(void)
 	machine.arch_reset	= e2k_virt_reset_machine;
 	machine.arch_halt	= e2k_virt_power_off;
 	machine.get_irq_vector	= e2k_virt_get_vector;
+
+#ifdef CONFIG_SMP
+	machine.clk_off = kvm_clock_off;
+	machine.clk_on = kvm_clock_on;
+#endif
 
 	setup_guest_interface();
 

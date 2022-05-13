@@ -623,6 +623,15 @@ static void user_instruction_dump(char *str, int len, unsigned int __user *pc)
 	len += snprintf(str + len, len, "\n");
 }
 
+static bool iommu_panic_off = 0;
+static int __init disable_iommu_panic(char *str)
+{
+	iommu_panic_off = 1;
+	return 1;
+}
+__setup("iommupanicoff", disable_iommu_panic);
+
+
 asmlinkage void do_async_data_error(struct pt_regs *regs)
 {
 	enum ctx_state prev_state = exception_enter();
@@ -724,9 +733,15 @@ asmlinkage void do_async_data_error(struct pt_regs *regs)
 			/*goto kill_user; FIXME: after bug 131913*/
 		}
 	}
+	if (iommu_panic_off) {
+		pr_emerg("%s", s);
+		goto out;
+	}
+
 	panic(s);
 /*kill_user:*/
 	die_if_kernel(s, regs);
+out:
 	exception_exit(prev_state);
 }
 

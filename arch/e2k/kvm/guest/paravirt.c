@@ -894,43 +894,25 @@ guest_extract_tags_32(u16 *dst, const void *src)
 }
 #ifdef	CONFIG_SMP
 
-static void
-do_smp_flush_tlb_all(void)
+static void do_flush_tlb_all(void)
 {
-	kvm_smp_flush_tlb_all();
+	kvm_flush_tlb_all();
 }
-static void
-do_smp_flush_tlb_mm(struct mm_struct *mm)
+static void do_flush_tlb_mm(struct mm_struct *mm)
 {
-	kvm_smp_flush_tlb_mm(mm);
+	kvm_flush_tlb_mm(mm);
 }
-static void
-do_smp_flush_tlb_page(struct vm_area_struct *vma, e2k_addr_t addr)
+static void do_flush_tlb_page(struct vm_area_struct *vma, e2k_addr_t addr)
 {
-	kvm_smp_flush_tlb_page(vma, addr);
+	kvm_flush_tlb_page(vma->vm_mm, addr);
 }
-static void
-do_smp_flush_tlb_range(struct mm_struct *mm, e2k_addr_t start, e2k_addr_t end)
+static void do_flush_tlb_mm_range(struct mm_struct *mm,
+		unsigned long start, unsigned long end,
+		unsigned long stride, u32 levels_mask)
 {
-	kvm_smp_flush_tlb_range(mm, start, end);
+	kvm_flush_tlb_mm_range(mm, start, end, stride, levels_mask);
 }
-static void
-do_smp_flush_pmd_tlb_range(struct mm_struct *mm, e2k_addr_t start,
-		e2k_addr_t end)
-{
-	kvm_smp_flush_pmd_tlb_range(mm, start, end);
-}
-static void
-do_smp_flush_tlb_range_and_pgtables(struct mm_struct *mm,
-				e2k_addr_t start, e2k_addr_t end)
-{
-	kvm_smp_flush_tlb_range_and_pgtables(mm, start, end);
-}
-static void
-do_smp_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
-{
-	kvm_smp_flush_icache_range(start, end);
-}
+
 static void
 do_smp_flush_icache_range_array(void *icache_range_arr)
 {
@@ -1166,14 +1148,6 @@ static const pv_cpu_ops_t kvm_cpu_ops __initdata = {
 	.csd_unlock = kvm_csd_unlock,
 	.setup_local_pic_virq = kvm_setup_pic_virq,
 	.startup_local_pic_virq = kvm_startup_pic_virq,
-	.smp_flush_tlb_all = do_smp_flush_tlb_all,
-	.smp_flush_tlb_mm = do_smp_flush_tlb_mm,
-	.smp_flush_tlb_page = do_smp_flush_tlb_page,
-	.smp_flush_tlb_range = do_smp_flush_tlb_range,
-	.smp_flush_pmd_tlb_range = do_smp_flush_pmd_tlb_range,
-	.smp_flush_tlb_range_and_pgtables =
-		do_smp_flush_tlb_range_and_pgtables,
-	.smp_flush_icache_range = do_smp_flush_icache_range,
 	.smp_flush_icache_range_array =
 		do_smp_flush_icache_range_array,
 	.smp_flush_icache_page = do_smp_flush_icache_page,
@@ -1181,6 +1155,10 @@ static const pv_cpu_ops_t kvm_cpu_ops __initdata = {
 	.smp_flush_icache_kernel_line =
 		do_smp_flush_icache_kernel_line,
 #endif	/* CONFIG_SMP */
+	.flush_tlb_all = do_flush_tlb_all,
+	.flush_tlb_mm = do_flush_tlb_mm,
+	.flush_tlb_page = do_flush_tlb_page,
+	.flush_tlb_mm_range = do_flush_tlb_mm_range,
 	.host_printk = kvm_host_printk,
 	.arch_spin_lock_slow = kvm_arch_spin_lock_slow,
 	.arch_spin_locked_slow = kvm_arch_spin_locked_slow,
@@ -1235,6 +1213,15 @@ static void
 kvm_FLUSH_DCACHE_LINE(e2k_addr_t virt_addr)
 {
 	kvm_flush_dcache_line(virt_addr);
+}
+
+/*
+ * Read DCACHE L1 fault_reg register
+ */
+static u64
+kvm_read_dcache_l1_fault_reg(void)
+{
+	return kvm_read_l1_fault_reg();
 }
 
 /*
@@ -1415,6 +1402,7 @@ pv_mmu_ops_t kvm_mmu_ops = {
 	.read_dtlb_reg = kvm_READ_DTLB_REG,
 	.flush_tlb_entry = kvm_FLUSH_TLB_ENTRY,
 	.flush_dcache_line = kvm_FLUSH_DCACHE_LINE,
+	.read_dcache_l1_fault_reg = kvm_read_dcache_l1_fault_reg,
 	.clear_dcache_l1_set = kvm_CLEAR_DCACHE_L1_SET,
 	.flush_dcache_range = kvm_flush_DCACHE_range,
 	.clear_dcache_l1_range = kvm_clear_DCACHE_L1_range,

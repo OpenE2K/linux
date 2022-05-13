@@ -269,8 +269,8 @@ extern	bootmem_areas_t		kernel_bootmem;
 #define init_x86_hw_size	kernel_bootmem.x86_hw.size
 
 extern unsigned long disable_caches;
-extern unsigned long disable_secondary_caches;
-extern unsigned long disable_IP;
+extern bool disable_secondary_caches;
+extern bool disable_IP;
 
 #ifdef	CONFIG_NUMA
 extern boot_spinlock_t __initdata boot_node_map_lock[MAX_NUMNODES];

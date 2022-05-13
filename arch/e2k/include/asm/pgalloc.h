@@ -250,7 +250,7 @@ pgd_populate_cpu_root_pt(struct mm_struct *mm, pgd_t *pgd)
 	}
 	if (pgd_val(*cpu_pgd) != pgd_val(*pgd)) {
 		*cpu_pgd = *pgd;
-		__flush_tlb_page(mm, (e2k_addr_t) cpu_pgd);
+		local_flush_tlb_page(mm, (e2k_addr_t) cpu_pgd);
 	}
 	DebugPT("CPU #%d set kernel root pgd %px to 0x%lx\n",
 		smp_processor_id(), cpu_pgd, pgd_val(*cpu_pgd));

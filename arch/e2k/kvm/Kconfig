@@ -19,13 +19,10 @@ menuconfig KVM
 	select SRCU
 	select MMU_NOTIFIER
 	select KVM_VFIO
-	select VFIO
-	select VFIO_PCI
-	select VFIO_PCI_VGA
 	select KVM_MMIO if KVM_HOST_MODE
 	# FIXME: Async page faults support is not yet implemented
 	# for Paravirt-2.0
-	select KVM_ASYNC_PF if KVM_HOST_MODE
+	select KVM_ASYNC_PF if KVM_HOST_MODE && KVM_HW_VIRTUALIZATION
 	select DIRECT_VIRQ_INJECTION
 	select PARAVIRT_SPINLOCKS if SMP
 
@@ -53,8 +50,8 @@ config KVM_PARAVIRTUALIZATION
 
 config KVM_HW_VIRTUALIZATION
 	bool "Hypervisor based on hardware virtualization and KVM support"
-	default y if CPU_ISET >= 6
-	select MMU_SEP_VIRT_SPACE if CPU_ISET >= 6
+	default y
+	depends on MMU_SEP_VIRT_SPACE
 	help
 	  Say Y here if machine hardware has virtualization support
 	  and to enable host kernel and hypervisor based on KVM
@@ -144,6 +141,53 @@ config KVM_PARAVIRT_TLB_FLUSH
 	  synchronized with guest page table when guest calls hypercall
 	  KVM_HCALL_FLUSH_TLB_RANGE
 
+config KVM_GVA_CACHE
+	bool "Enable caching of gva's to accelerate their translation on host side"
+	depends on KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE
+	default n
+	help
+	  Say Y to enable caching of guest virtual addresses in special cache on
+	  the host side to make further translation of these addresses faster.
+	  This option is useful for hypercalls, which copy data to/from guest
+	  addresses (copy guest stacks, reexecuting operations in tcellar)
+
+config KVM_GVA_CACHE_DEBUG
+	bool "Enable debug prints in functions for work with gva->gpa cache"
+	depends on KVM_GVA_CACHE
+	default n
+	help
+	  Say Y to enable debug prints for different events (lookups, hits,
+	  flushes, etc.) in functions for working with cache of guest
+	  virtual addresses on host side.
+
+config KVM_GVA_CACHE_STAT
+	bool "Collect statistics of working gva->gpa cache"
+	depends on KVM_GVA_CACHE && !KVM_GVA_CACHE_DEBUG
+	default n
+	help
+	  Say Y to collect detailed statistics (hit/miss rate, flushes, etc.) for
+	  cache of guest virtual addresses on host side. Statistics will be
+	  avialable through character device. Major of character device will be
+	  printed during boot of host kernel.
+
+choice
+	prompt "KVM guest kernel & user shadow PTs support type"
+	depends on KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE
+	default KVM_SHARED_GUEST_VIRT_SPACE
+
+config KVM_SHARED_GUEST_VIRT_SPACE
+	bool "Guest virtual memory is divided into two adjacent parts: user & kernel"
+	help
+	  Say Y here to have traditional one common guest virtual space
+	  divided into two adjacent parts:
+	    - lower addresses is user space
+	    - upper addresses is guest kernel space
+	  In this case a shadow PTs of the host for a guest user mappings
+	  do not contain translation for the virtual space of the guest
+	  kernel. This allows to exclude spontaneous and malicious access
+	  to the kernel space from user processes.
+endchoice
+
 config KVM_TDP_ENABLE
 	bool "Enable Two Dimensional Page Tables (gva->gpa->hpa) support"
 	depends on KVM_HOST_MODE && KVM_HW_VIRTUALIZATION
@@ -159,8 +203,7 @@ config KVM_TDP_ENABLE
 
 config KVM_NONPAGING_ENABLE
 	bool "Nonpaging mode of KVM MMU is enable"
-	depends on KVM_HOST_MODE && KVM_HW_VIRTUALIZATION
-	depends on KVM_SHADOW_PT_ENABLE
+	depends on KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE
 	default n
 	select KVM_HV_MMU
 	help
@@ -205,9 +248,21 @@ config KVM_SHADOW_PT
 	  If say N than only old style of software virtualization PTs
 	  support can be enabled for guest
 
+config DYNAMIC_PT_STRUCT
+	bool "Enable dynamic support of Page Tables structures"
+	depends on KVM_HV_MMU
+	default n
+	help
+	  Host should support all Page Tables structures dynamicaly.
+	  Otherwise, separate support will be created fot each possible
+	  version of the Page Tables structures.
+	  In the case of dynamical PT support the size of the kernel is reduced,
+	  but at the same time performance is reduced too.
+	  Other case suggests performance improvement and kernel size growth
+
 config E2K_VIRT
 	bool # Elbrus virtual (1 core, no NUMA, machine & IO - virtual)
-	depends on (KVM_GUEST_KERNEL && (E2K_MACHINE || E2K_MINVER >= 6))
+	depends on (KVM_GUEST_KERNEL && E2K_MACHINE)
 	default y
 	help
 	  Native machine to run such kernel can be any.

@@ -62,7 +62,7 @@ static void update_gfn_track(struct kvm *kvm, struct kvm_memory_slot *slot,
 {
 	int index, val;
 
-	index = kvm_gfn_to_index(kvm, gfn, slot->base_gfn, PT_PAGE_TABLE_LEVEL);
+	index = mmu_pt_gfn_to_index(kvm, gfn, slot->base_gfn, PT_PAGE_TABLE_LEVEL);
 
 	val = slot->arch.gfn_track[mode][index];
 
@@ -98,10 +98,10 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 	 * new track stops large page mapping for the
 	 * tracked page.
 	 */
-	kvm_mmu_gfn_disallow_lpage(kvm, slot, gfn);
+	mmu_pt_gfn_disallow_lpage(kvm, slot, gfn);
 
 	if (mode == KVM_PAGE_TRACK_WRITE)
-		if (kvm_mmu_slot_gfn_write_protect(kvm, slot, gfn))
+		if (mmu_pt_slot_gfn_write_protect(kvm, slot, gfn))
 			kvm_flush_remote_tlbs(kvm);
 }
 
@@ -131,7 +131,7 @@ void kvm_slot_page_track_remove_page(struct kvm *kvm,
 	 * allow large page mapping for the tracked page
 	 * after the tracker is gone.
 	 */
-	kvm_mmu_gfn_allow_lpage(kvm, slot, gfn);
+	mmu_pt_gfn_allow_lpage(kvm, slot, gfn);
 }
 
 /*
@@ -148,8 +148,7 @@ bool kvm_page_track_is_active(struct kvm *kvm, struct kvm_memory_slot *slot,
 	if (!slot)
 		return false;
 
-	index = kvm_gfn_to_index(kvm, gfn, slot->base_gfn,
-					PT_PAGE_TABLE_LEVEL);
+	index = mmu_pt_gfn_to_index(kvm, gfn, slot->base_gfn, PT_PAGE_TABLE_LEVEL);
 	return !!READ_ONCE(slot->arch.gfn_track[mode][index]);
 }
 
@@ -213,7 +212,7 @@ kvm_page_track_unregister_notifier(struct kvm *kvm,
  * interested in by itself.
  */
 void kvm_page_track_write(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
-				gpa_t gpa, const u8 *new, int bytes)
+		gpa_t gpa, const u8 *new, int bytes, unsigned long flags)
 {
 	struct kvm_page_track_notifier_head *head;
 	struct kvm_page_track_notifier_node *n;
@@ -227,7 +226,7 @@ void kvm_page_track_write(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
 	idx = srcu_read_lock(&head->track_srcu);
 	hlist_for_each_entry_rcu(n, &head->track_notifier_list, node)
 		if (n->track_write)
-			n->track_write(vcpu, gmm, gpa, new, bytes);
+			n->track_write(vcpu, gmm, gpa, new, bytes, flags);
 	srcu_read_unlock(&head->track_srcu, idx);
 }
 

@@ -133,66 +133,6 @@ typedef	union virt_ctrl_mu {
 #define	VIRT_CTRL_MU_sh_pt_en		sh_pt_en
 #define	VIRT_CTRL_MU_reg	word	/* [63: 0] - entire register */
 
-/* Bits mask of VIRT_CTRL_MU fields and flags */
-#define VIRT_CTRL_MU_ENV_C_MASK		\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_evn_c = -1, }.word)
-#define VIRT_CTRL_MU_RR_MMU_CR_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_mmu_cr = 1, }.word)
-#define VIRT_CTRL_MU_RR_U_PPTB_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_pptb = 1, }.word)
-#define VIRT_CTRL_MU_RR_U_VPTB_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_vptb = 1, }.word)
-#define VIRT_CTRL_MU_RR_APIC_BASE_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_apic_base = 1, }.word)
-#define VIRT_CTRL_MU_RR_MTRR_PAT_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_mtrr_pat = 1, }.word)
-#define VIRT_CTRL_MU_RR_PH_PCI_B_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_ph_pci_b = 1, }.word)
-#define VIRT_CTRL_MU_RR_DBG_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_dbg = 1, }.word)
-#define VIRT_CTRL_MU_RR_DBG1_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rr_dbg1 = 1, }.word)
-#define VIRT_CTRL_MU_RW_MMU_CR_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_mmu_cr = 1, }.word)
-#define VIRT_CTRL_MU_RW_U_PPTB_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_pptb = 1, }.word)
-#define VIRT_CTRL_MU_RW_U_VPTB_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_vptb = 1, }.word)
-#define VIRT_CTRL_MU_RW_APIC_BASE_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_apic_base = 1, }.word)
-#define VIRT_CTRL_MU_RW_MTRR_PAT_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_mtrr_pat = 1, }.word)
-#define VIRT_CTRL_MU_RW_PH_PCI_B_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_ph_pci_b = 1, }.word)
-#define VIRT_CTRL_MU_RW_DBG_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_dbg = 1, }.word)
-#define VIRT_CTRL_MU_RW_DBG1_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_rw_dbg1 = 1, }.word)
-#define VIRT_CTRL_MU_PMA_MASK		\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_pma = 1, }.word)
-#define VIRT_CTRL_MU_FL_DC_MASK		\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_dc = 1, }.word)
-#define VIRT_CTRL_MU_FL_DCL_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_dcl = 1, }.word)
-#define VIRT_CTRL_MU_FL_IC_MASK		\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_ic = 1, }.word)
-#define VIRT_CTRL_MU_FL_ICL_U_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_icl_u = 1, }.word)
-#define VIRT_CTRL_MU_FL_ICL_P_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_icl_p = 1, }.word)
-#define VIRT_CTRL_MU_FL_TLB_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_tlb = 1, }.word)
-#define VIRT_CTRL_MU_FL_TLBPG_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_tlbpg = 1, }.word)
-#define VIRT_CTRL_MU_FL_TLB2PG_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_fl_tlb2pg = 1, }.word)
-#define VIRT_CTRL_MU_PRB_ENTRY_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_prb_entry = 1, }.word)
-#define VIRT_CTRL_MU_GP_PT_EN_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_gp_pt_en = 1, }.word)
-#define VIRT_CTRL_MU_SH_PT_EN_MASK	\
-		((virt_ctrl_mu_t) { .VIRT_CTRL_MU_sh_pt_en = 1, }.word)
-
 typedef union {
 	struct {
 		u64 event_code		: 8;

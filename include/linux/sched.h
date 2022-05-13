@@ -1717,7 +1717,9 @@ static inline void dec_unbound_tasks(void) {}
 
 #ifdef CONFIG_MCST
 extern long do_change_rts_mode_mask(long mode, long mask);
+#ifdef SHOW_WOKEN_TIME
 extern int show_woken_time;
+#endif
 # if defined(CONFIG_SCLKR_CLOCKSOURCE)
 extern struct clocksource clocksource_sclkr;
 extern int sclkr_unstable;

@@ -17,7 +17,6 @@
 
 #include <uapi/asm/kexec.h>
 
-#include <asm/console.h>
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
 #include <asm/sic_regs.h>
@@ -493,6 +492,7 @@ static noinline void __switch_to_phys__
 kexec_switch_to_phys(struct smp_kexec_reboot_param *p)
 {
 	bootmem_areas_t		*bootmem = &kernel_bootmem;
+	pcsp_struct_t		pcsp = {{ 0 }};
 	e2k_rwap_lo_struct_t	reg_lo;
 	e2k_rwap_hi_struct_t	reg_hi;
 	e2k_rwap_lo_struct_t	stack_reg_lo;
@@ -524,21 +524,15 @@ kexec_switch_to_phys(struct smp_kexec_reboot_param *p)
 	/*
 	 * Take into account PCS guard page from ttable_entry12
 	 */
-	reg_lo.PCSP_lo_half = 0;
 #ifndef	CONFIG_SMP
-	reg_lo.PCSP_lo_base = bootmem->boot_pcs.phys;
+	pcsp.base = bootmem->boot_pcs.phys;
+	pcsp.size = bootmem->boot_pcs.size + PAGE_SIZE;
 #else
-	reg_lo.PCSP_lo_base = bootmem->boot_pcs[cpuid].phys;
+	pcsp.base = bootmem->boot_pcs[cpuid].phys;
+	pcsp.size = bootmem->boot_pcs[cpuid].size + PAGE_SIZE;
 #endif
-	reg_lo._PCSP_lo_rw = E2K_PCSR_RW_PROTECTIONS;
-	reg_hi.PCSP_hi_half = 0;
-#ifndef	CONFIG_SMP
-	reg_hi.PCSP_hi_size = bootmem->boot_pcs.size + PAGE_SIZE;
-#else
-	reg_hi.PCSP_hi_size = bootmem->boot_pcs[cpuid].size + PAGE_SIZE;
-#endif
-	reg_hi.PCSP_hi_ind = 0;
-	NATIVE_NV_WRITE_PCSP_REG(reg_hi, reg_lo);
+	pcsp.rw = E2K_PCSR_RW_PROTECTIONS;
+	NATIVE_NV_WRITE_PCSP_REG(pcsp.hi, pcsp.lo);
 
 #ifndef	CONFIG_SMP
 	bootmem->boot_stack.phys_offset = bootmem->boot_stack.size;
@@ -768,8 +762,9 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 		DebugKE("failed to copy kexec_reboot_param struct from user\n");
 		return -EFAULT;
 	}
-	DebugKE("cmdline=0x%llx cmdline_size=%d image=0x%llx image_size=0x%llx\n",
-		p.cmdline, p.cmdline_size, p.image, p.image_size);
+	DebugKE("cmdline=0x%llx cmdline_size=%d image=0x%llx image_size=0x%llx initrd=0x%llx initrd_size=0x%llx\n",
+		p.cmdline, p.cmdline_size, p.image, p.image_size,
+		p.initrd, p.initrd_size);
 
 	if (p.cmdline_size >= KSTRMAX_SIZE_EX) {
 		DebugKE("cmdline_size %d > %d\n",

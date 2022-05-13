@@ -20,6 +20,7 @@
 #include "ddk750_reg.h"
 #include "ddk750_swi2c.h"
 #include "ddk750_power.h"
+#include "lynx_drv.h"
 
 
 /*******************************************************************
@@ -117,25 +118,25 @@ static void swI2CWait(void)
  *      signal because the i2c will fail when other device try to drive the
  *      signal due to SM50x will drive the signal to always high.
  */
-void swI2CSCL(unsigned char value)
+void swI2CSCL(struct lynx_share *share, unsigned char value)
 {
 	unsigned long ulGPIOData;
 	unsigned long ulGPIODirection;
 
-	ulGPIODirection = PEEK32(g_i2cClkGPIODataDirReg);
+	ulGPIODirection = PEEK32(share->pvReg, g_i2cClkGPIODataDirReg);
 	if (value) {		/* High */
 		/* Set direction as input. This will automatically pull the signal up. */
 		ulGPIODirection &= ~(1 << g_i2cClockGPIO);
-		POKE32(g_i2cClkGPIODataDirReg, ulGPIODirection);
+		POKE32(share->pvReg, g_i2cClkGPIODataDirReg, ulGPIODirection);
 	} else {		/* Low */
 		/* Set the signal down */
-		ulGPIOData = PEEK32(g_i2cClkGPIODataReg);
+		ulGPIOData = PEEK32(share->pvReg, g_i2cClkGPIODataReg);
 		ulGPIOData &= ~(1 << g_i2cClockGPIO);
-		POKE32(g_i2cClkGPIODataReg, ulGPIOData);
+		POKE32(share->pvReg, g_i2cClkGPIODataReg, ulGPIOData);
 
 		/* Set direction as output */
 		ulGPIODirection |= (1 << g_i2cClockGPIO);
-		POKE32(g_i2cClkGPIODataDirReg, ulGPIODirection);
+		POKE32(share->pvReg, g_i2cClkGPIODataDirReg, ulGPIODirection);
 	}
 }
 
@@ -151,25 +152,25 @@ void swI2CSCL(unsigned char value)
  *      signal because the i2c will fail when other device try to drive the
  *      signal due to SM50x will drive the signal to always high.
  */
-void swI2CSDA(unsigned char value)
+void swI2CSDA(struct lynx_share *share, unsigned char value)
 {
 	unsigned long ulGPIOData;
 	unsigned long ulGPIODirection;
 
-	ulGPIODirection = PEEK32(g_i2cDataGPIODataDirReg);
+	ulGPIODirection = PEEK32(share->pvReg, g_i2cDataGPIODataDirReg);
 	if (value) {		/* High */
 		/* Set direction as input. This will automatically pull the signal up. */
 		ulGPIODirection &= ~(1 << g_i2cDataGPIO);
-		POKE32(g_i2cDataGPIODataDirReg, ulGPIODirection);
+		POKE32(share->pvReg, g_i2cDataGPIODataDirReg, ulGPIODirection);
 	} else {		/* Low */
 		/* Set the signal down */
-		ulGPIOData = PEEK32(g_i2cDataGPIODataReg);
+		ulGPIOData = PEEK32(share->pvReg, g_i2cDataGPIODataReg);
 		ulGPIOData &= ~(1 << g_i2cDataGPIO);
-		POKE32(g_i2cDataGPIODataReg, ulGPIOData);
+		POKE32(share->pvReg, g_i2cDataGPIODataReg, ulGPIOData);
 
 		/* Set direction as output */
 		ulGPIODirection |= (1 << g_i2cDataGPIO);
-		POKE32(g_i2cDataGPIODataDirReg, ulGPIODirection);
+		POKE32(share->pvReg, g_i2cDataGPIODataDirReg, ulGPIODirection);
 	}
 }
 
@@ -179,21 +180,21 @@ void swI2CSDA(unsigned char value)
  *  Return Value:
  *      The SDA data bit sent by the Slave
  */
-static unsigned char swI2CReadSDA(void)
+static unsigned char swI2CReadSDA(struct lynx_share *share)
 {
 	unsigned long ulGPIODirection;
 	unsigned long ulGPIOData;
 
 	/* Make sure that the direction is input (High) */
-	ulGPIODirection = PEEK32(g_i2cDataGPIODataDirReg);
+	ulGPIODirection = PEEK32(share->pvReg, g_i2cDataGPIODataDirReg);
 	if ((ulGPIODirection & (1 << g_i2cDataGPIO))
 	    != (~(1 << g_i2cDataGPIO))) {
 		ulGPIODirection &= ~(1 << g_i2cDataGPIO);
-		POKE32(g_i2cDataGPIODataDirReg, ulGPIODirection);
+		POKE32(share->pvReg, g_i2cDataGPIODataDirReg, ulGPIODirection);
 	}
 
 	/* Now read the SDA line */
-	ulGPIOData = PEEK32(g_i2cDataGPIODataReg);
+	ulGPIOData = PEEK32(share->pvReg, g_i2cDataGPIODataReg);
 	if (ulGPIOData & (1 << g_i2cDataGPIO))
 		return 1;
 	else
@@ -211,23 +212,23 @@ static void swI2CAck(void)
 /*
  *  This function sends the start command to the slave device
  */
-void swI2CStart(void)
+void swI2CStart(struct lynx_share *share)
 {
 	/* Start I2C */
-	swI2CSDA(1);
-	swI2CSCL(1);
-	swI2CSDA(0);
+	swI2CSDA(share, 1);
+	swI2CSCL(share, 1);
+	swI2CSDA(share, 0);
 }
 
 /*
  *  This function sends the stop command to the slave device
  */
-void swI2CStop(void)
+void swI2CStop(struct lynx_share *share)
 {
 	/* Stop the I2C */
-	swI2CSCL(1);
-	swI2CSDA(0);
-	swI2CSDA(1);
+	swI2CSCL(share, 1);
+	swI2CSDA(share, 0);
+	swI2CSDA(share, 1);
 }
 
 /*
@@ -240,7 +241,7 @@ void swI2CStop(void)
  *       0   - Success
  *      -1   - Fail to write byte
  */
-long swI2CWriteByte(unsigned char data)
+long swI2CWriteByte(struct lynx_share *share, unsigned char data)
 {
 	unsigned char value = data;
 	int i;
@@ -248,18 +249,18 @@ long swI2CWriteByte(unsigned char data)
 	/* Sending the data bit by bit */
 	for (i = 0; i < 8; i++) {
 		/* Set SCL to low */
-		swI2CSCL(0);
+		swI2CSCL(share, 0);
 
 		/* Send data bit */
 		if ((value & 0x80) != 0)
-			swI2CSDA(1);
+			swI2CSDA(share, 1);
 		else
-			swI2CSDA(0);
+			swI2CSDA(share, 0);
 
 		swI2CWait();
 
 		/* Toggle clk line to one */
-		swI2CSCL(1);
+		swI2CSCL(share, 1);
 		swI2CWait();
 
 		/* Shift byte to be sent */
@@ -267,28 +268,28 @@ long swI2CWriteByte(unsigned char data)
 	}
 
 	/* Set the SCL Low and SDA High (prepare to get input) */
-	swI2CSCL(0);
-	swI2CSDA(1);
+	swI2CSCL(share, 0);
+	swI2CSDA(share, 1);
 
 	/* Set the SCL High for ack */
 	swI2CWait();
-	swI2CSCL(1);
+	swI2CSCL(share, 1);
 	swI2CWait();
 
 	/* Read SDA, until SDA==0 */
 	for (i = 0; i < 0xff; i++) {
-		if (!swI2CReadSDA())
+		if (!swI2CReadSDA(share))
 			break;
 
-		swI2CSCL(0);
+		swI2CSCL(share, 0);
 		swI2CWait();
-		swI2CSCL(1);
+		swI2CSCL(share, 1);
 		swI2CWait();
 	}
 
 	/* Set the SCL Low and SDA High */
-	swI2CSCL(0);
-	swI2CSDA(1);
+	swI2CSCL(share, 0);
+	swI2CSDA(share, 1);
 
 	if (i < 0xff)
 		return 0;
@@ -306,31 +307,31 @@ long swI2CWriteByte(unsigned char data)
  *  Return Value:
  *      One byte data read from the Slave device
  */
-unsigned char swI2CReadByte(unsigned char ack)
+unsigned char swI2CReadByte(struct lynx_share *share, unsigned char ack)
 {
 	int i;
 	unsigned char data = 0;
 
 	for (i = 7; i >= 0; i--) {
 		/* Set the SCL to Low and SDA to High (Input) */
-		swI2CSCL(0);
-		swI2CSDA(1);
+		swI2CSCL(share, 0);
+		swI2CSDA(share, 1);
 		swI2CWait();
 
 		/* Set the SCL High */
-		swI2CSCL(1);
+		swI2CSCL(share, 1);
 		swI2CWait();
 
 		/* Read data bits from SDA */
-		data |= (swI2CReadSDA() << i);
+		data |= (swI2CReadSDA(share) << i);
 	}
 
 	if (ack)
 		swI2CAck();
 
 	/* Set the SCL Low and SDA High */
-	swI2CSCL(0);
-	swI2CSDA(1);
+	swI2CSCL(share, 0);
+	swI2CSDA(share, 1);
 
 	return data;
 }
@@ -346,7 +347,8 @@ unsigned char swI2CReadByte(unsigned char ack)
  *      -1   - Fail to initialize the i2c
  *       0   - Success
  */
-long swI2CInit_SM750LE(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
+long swI2CInit_SM750LE(struct lynx_share *share,
+				unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
 {
 	int i;
 
@@ -368,7 +370,7 @@ long swI2CInit_SM750LE(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
 
 	/* Clear the i2c lines. */
 	for (i = 0; i < 9; i++)
-		swI2CStop();
+		swI2CStop(share);
 
 	return 0;
 }
@@ -384,7 +386,8 @@ long swI2CInit_SM750LE(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
  *      -1   - Fail to initialize the i2c
  *       0   - Success
  */
-long swI2CInit(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
+long swI2CInit(struct lynx_share *share,
+				unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
 {
 	int i;
 
@@ -392,8 +395,8 @@ long swI2CInit(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
 	if ((i2cClkGPIO > 31) || (i2cDataGPIO > 31))
 		return -1;
 
-	if (getChipType() == SM750LE)
-		return swI2CInit_SM750LE(i2cClkGPIO, i2cDataGPIO);
+	if (getChipType(share) == SM750LE)
+		return swI2CInit_SM750LE(share, i2cClkGPIO, i2cDataGPIO);
 
 	/* Initialize the GPIO pin for the i2c Clock Register */
 	g_i2cClkGPIOMuxReg = GPIO_MUX;
@@ -412,17 +415,17 @@ long swI2CInit(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
 	g_i2cDataGPIO = i2cDataGPIO;
 
 	/* Enable the GPIO pins for the i2c Clock and Data (GPIO MUX) */
-	POKE32(g_i2cClkGPIOMuxReg,
-	       PEEK32(g_i2cClkGPIOMuxReg) & ~(1 << g_i2cClockGPIO));
-	POKE32(g_i2cDataGPIOMuxReg,
-	       PEEK32(g_i2cDataGPIOMuxReg) & ~(1 << g_i2cDataGPIO));
+	POKE32(share->pvReg, g_i2cClkGPIOMuxReg,
+	       PEEK32(share->pvReg, g_i2cClkGPIOMuxReg) & ~(1 << g_i2cClockGPIO));
+	POKE32(share->pvReg, g_i2cDataGPIOMuxReg,
+	       PEEK32(share->pvReg, g_i2cDataGPIOMuxReg) & ~(1 << g_i2cDataGPIO));
 
 	/* Enable GPIO power */
-	enableGPIO(1);
+	enableGPIO(share, 1);
 
 	/* Clear the i2c lines. */
 	for (i = 0; i < 9; i++)
-		swI2CStop();
+		swI2CStop(share);
 
 	return 0;
 }
@@ -438,27 +441,28 @@ long swI2CInit(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO)
  *  Return Value:
  *      Register value
  */
-unsigned char swI2CReadReg(unsigned char deviceAddress,
-			   unsigned char registerIndex)
+unsigned char swI2CReadReg(struct lynx_share *share,
+				unsigned char deviceAddress,
+				unsigned char registerIndex)
 {
 	unsigned char data;
 
 	/* Send the Start signal */
-	swI2CStart();
+	swI2CStart(share);
 
 	/* Send the device address */
-	swI2CWriteByte(deviceAddress);
+	swI2CWriteByte(share, deviceAddress);
 
 	/* Send the register index */
-	swI2CWriteByte(registerIndex);
+	swI2CWriteByte(share, registerIndex);
 
 	/* Get the bus again and get the data from the device read address */
-	swI2CStart();
-	swI2CWriteByte(deviceAddress + 1);
-	data = swI2CReadByte(1);
+	swI2CStart(share);
+	swI2CWriteByte(share, deviceAddress + 1);
+	data = swI2CReadByte(share, 1);
 
 	/* Stop swI2C and release the bus */
-	swI2CStop();
+	swI2CStop(share);
 
 	return data;
 }
@@ -476,25 +480,25 @@ unsigned char swI2CReadReg(unsigned char deviceAddress,
  *          0   - Success
  *         -1   - Fail
  */
-long swI2CWriteReg(unsigned char deviceAddress,
+long swI2CWriteReg(struct lynx_share *share, unsigned char deviceAddress,
 		   unsigned char registerIndex, unsigned char data)
 {
 	long returnValue = 0;
 
 	/* Send the Start signal */
-	swI2CStart();
+	swI2CStart(share);
 
 	/* Send the device address and read the data. All should return success
 	   in order for the writing processed to be successful
 	 */
-	if ((swI2CWriteByte(deviceAddress) != 0) ||
-	    (swI2CWriteByte(registerIndex) != 0) ||
-	    (swI2CWriteByte(data) != 0)) {
+	if ((swI2CWriteByte(share, deviceAddress) != 0) ||
+	    (swI2CWriteByte(share, registerIndex) != 0) ||
+	    (swI2CWriteByte(share, data) != 0)) {
 		returnValue = -1;
 	}
 
 	/* Stop i2c and release the bus */
-	swI2CStop();
+	swI2CStop(share);
 
 	return returnValue;
 }

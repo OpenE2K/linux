@@ -140,13 +140,14 @@ get_va_tlb_state(tlb_line_state_t *tlb, e2k_addr_t addr, bool large_page)
 	tlb->huge = large_page;
 
 	for (set_no = 0; set_no < NATIVE_TLB_SETS_NUM; set_no++) {
-		set_state = &tlb->sets[set_no];
 		tlb_tag_t tlb_tag;
 		pte_t tlb_entry;
+
+		set_state = &tlb->sets[set_no];
 		tlb_tag = get_va_tlb_set_tag(addr, set_no, large_page);
 		tlb_entry = get_va_tlb_set_entry(addr, set_no, large_page);
 		set_state->tlb_tag = tlb_tag;
-		set_state->tlb_entry;
+		set_state->tlb_entry = tlb_entry;
 	}
 }
 

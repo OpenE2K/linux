@@ -24,6 +24,7 @@
 #include <asm/kvm/runstate.h>
 #include <asm/kvm/switch.h>
 #include <asm/kvm/async_pf.h>
+#include <asm/kvm/ctx_signal_stacks.h>
 
 #include "process.h"
 #include "cpu.h"
@@ -34,6 +35,7 @@
 #include "time.h"
 #include "pic.h"
 
+#include "mmutrace-e2k.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -104,6 +106,15 @@
 #define	DebugSIG(fmt, args...)						\
 ({									\
 	if (DEBUG_SIGNAL_MODE)						\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_SIGNAL_STACK_MODE
+#undef	DebugSIGST
+#define	DEBUG_SIGNAL_STACK_MODE	0	/* signal stack debug */
+#define	DebugSIGST(fmt, args...)					\
+({									\
+	if (DEBUG_SIGNAL_STACK_MODE)					\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -250,6 +261,15 @@ bool debug_clone_guest = false;
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_FREE_SIGNAL_STACK_MODE
+#undef	DebugFreeSS
+#define	DEBUG_FREE_SIGNAL_STACK_MODE	0	/* release of signal stack */
+#define	DebugFreeSS(fmt, args...)					\
+({									\
+	if (DEBUG_FREE_SIGNAL_STACK_MODE)				\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 #undef	DEBUG_KVM_SIG_HANDLER_MODE
 #undef	DebugSIGH
 #define	DEBUG_KVM_SIG_HANDLER_MODE	0	/* signal handler debug */
@@ -304,23 +324,119 @@ as_guest_entry_start(unsigned long arg0, unsigned long arg1,
 }
 #endif	/* CONFIG_KVM_HOST_MODE */
 
-/**
- * The function return bool value - should this guest kernel thread be stopped
- * now?
- *
- * When someone calls kvm_guest_vcpu_thread_stop() on your kthread, it will be
- * woken and this will return true.
- */
-bool kvm_guest_vcpu_thread_should_stop(struct kvm_vcpu *vcpu)
+static void setup_vcpu_boot_stacks(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 {
-	BUG_ON(vcpu == NULL);
-	BUG_ON(!vcpu->arch.is_hv && vcpu->arch.host_task != current);
-	return vcpu->arch.should_stop ||
-		vcpu->kvm->arch.halted ||
-		vcpu->kvm->arch.reboot;
+	thread_info_t	*ti = current_thread_info();
+	vcpu_boot_stack_t *boot_stacks;
+	e2k_stacks_t	*boot_regs;
+	data_stack_t	*data_stack;
+	hw_stack_t	*hw_stacks;
+	/* FIXME: all addresses of stacks should be physical, if guest */
+	/* will be launched at nonpaging mode. */
+	/* It should be done while stacks allocation, but may be not done */
+	/* and then need do it here */
+	bool		nonpaging = !is_paging(vcpu);
+	e2k_addr_t	stack_addr;
+	e2k_usd_lo_t	usd_lo;
+	e2k_psp_lo_t	psp_lo;
+	e2k_pcsp_lo_t	pcsp_lo;
+
+	boot_stacks = &vcpu->arch.boot_stacks;
+	boot_regs = &boot_stacks->regs.stacks;
+	data_stack = &gti->data_stack;
+	hw_stacks = &gti->hw_stacks;
+	stack_addr = GET_VCPU_BOOT_CS_BASE(boot_stacks);
+	if (nonpaging && stack_addr >= GUEST_PAGE_OFFSET) {
+		/* see FIXME above */
+		stack_addr = __guest_pa(stack_addr);
+		SET_VCPU_BOOT_CS_BASE(boot_stacks, stack_addr);
+	}
+	data_stack->bottom = stack_addr;
+	stack_addr = GET_VCPU_BOOT_CS_TOP(boot_stacks);
+	if (nonpaging && stack_addr >= GUEST_PAGE_OFFSET) {
+		/* see FIXME above */
+		stack_addr = __guest_pa(stack_addr);
+		SET_VCPU_BOOT_CS_TOP(boot_stacks, stack_addr);
+		boot_regs->top = stack_addr;
+	}
+	data_stack->top = stack_addr;
+	data_stack->size = GET_VCPU_BOOT_CS_SIZE(boot_stacks);
+	gti->stack = current->stack;
+	gti->stack_regs.stacks.top =
+		(u64)gti->stack + KERNEL_C_STACK_SIZE;
+	gti->stack_regs.stacks.usd_lo = ti->k_usd_lo;
+	gti->stack_regs.stacks.usd_hi = ti->k_usd_hi;
+	usd_lo = boot_regs->usd_lo;
+	if (nonpaging && usd_lo.USD_lo_base >= GUEST_PAGE_OFFSET) {
+		/* see FIXME above */
+		usd_lo.USD_lo_base = __guest_pa(usd_lo.USD_lo_base);
+		boot_regs->usd_lo = usd_lo;
+	}
+	gti->stack_regs.stacks.u_usd_lo = usd_lo;
+	gti->stack_regs.stacks.u_usd_hi = boot_regs->usd_hi;
+	gti->stack_regs.stacks.u_top = GET_VCPU_BOOT_CS_TOP(boot_stacks);
+	DebugKVMSTUP("guest kernel start thread GPID #%d\n",
+		gti->gpid->nid.nr);
+	DebugKVMSTUP("guest data stack bottom 0x%lx, top 0x%lx, size 0x%lx\n",
+		data_stack->bottom, data_stack->top, data_stack->size);
+	DebugKVMSTUP("guest data stack USD: base 0x%llx size 0x%x\n",
+		gti->stack_regs.stacks.u_usd_lo.USD_lo_base,
+		gti->stack_regs.stacks.u_usd_hi.USD_hi_size);
+	DebugKVMSTUP("host  data stack bottom 0x%lx\n",
+		gti->stack);
+
+	*hw_stacks = ti->u_hw_stack;
+	hw_stacks->ps = boot_stacks->ps;
+	hw_stacks->pcs = boot_stacks->pcs;
+
+	stack_addr = (e2k_addr_t)GET_VCPU_BOOT_PS_BASE(boot_stacks);
+	if (nonpaging && stack_addr >= GUEST_PAGE_OFFSET) {
+		/* see FIXME above */
+		stack_addr = __guest_pa(stack_addr);
+		SET_VCPU_BOOT_PS_BASE(boot_stacks, (void *)stack_addr);
+		SET_PS_BASE(hw_stacks, (void *)stack_addr);
+	}
+	psp_lo = boot_regs->psp_lo;
+	if (nonpaging && psp_lo.PSP_lo_base >= GUEST_PAGE_OFFSET) {
+		/* see FIXME above */
+		psp_lo.PSP_lo_base = __guest_pa(psp_lo.PSP_lo_base);
+		boot_regs->psp_lo = psp_lo;
+	}
+	gti->stack_regs.stacks.psp_lo = psp_lo;
+	gti->stack_regs.stacks.psp_hi = boot_regs->psp_hi;
+
+	stack_addr = (e2k_addr_t)GET_VCPU_BOOT_PCS_BASE(boot_stacks);
+	if (nonpaging && stack_addr >= GUEST_PAGE_OFFSET) {
+		/* see FIXME above */
+		stack_addr = __guest_pa(stack_addr);
+		SET_VCPU_BOOT_PCS_BASE(boot_stacks, (void *)stack_addr);
+		SET_PCS_BASE(hw_stacks, (void *)stack_addr);
+	}
+	pcsp_lo = boot_regs->pcsp_lo;
+	if (nonpaging && pcsp_lo.PCSP_lo_base >= GUEST_PAGE_OFFSET) {
+		/* see FIXME above */
+		pcsp_lo.PCSP_lo_base = __guest_pa(pcsp_lo.PCSP_lo_base);
+		boot_regs->pcsp_lo = pcsp_lo;
+	}
+	gti->stack_regs.stacks.pcsp_lo = pcsp_lo;
+	gti->stack_regs.stacks.pcsp_hi = boot_regs->pcsp_hi;
+	DebugKVMSTUP("guest procedure stack base 0x%lx, size 0x%lx\n",
+		GET_PS_BASE(hw_stacks),
+		kvm_get_guest_hw_ps_user_size(hw_stacks));
+	DebugKVMSTUP("guest procedure chain stack base 0x%lx, size 0x%lx\n",
+		GET_PCS_BASE(hw_stacks),
+		kvm_get_guest_hw_pcs_user_size(hw_stacks));
+	DebugKVMSTUP("guest procedure stack PSP: base 0x%llx size 0x%x ind 0x%x\n",
+		gti->stack_regs.stacks.psp_lo.PSP_lo_base,
+		gti->stack_regs.stacks.psp_hi.PSP_hi_size,
+		gti->stack_regs.stacks.psp_hi.PSP_hi_ind);
+	DebugKVMSTUP("guest procedure chain stack PCSP: base 0x%llx size 0x%x ind 0x%x\n",
+		gti->stack_regs.stacks.pcsp_lo.PCSP_lo_base,
+		gti->stack_regs.stacks.pcsp_hi.PCSP_hi_size,
+		gti->stack_regs.stacks.pcsp_hi.PCSP_hi_ind);
 }
 
-gthread_info_t *create_guest_start_thread_info(struct kvm_vcpu *vcpu)
+static gthread_info_t *create_guest_start_thread_info(struct kvm_vcpu *vcpu)
 {
 	gthread_info_t	*gthread_info;
 
@@ -335,6 +451,8 @@ gthread_info_t *create_guest_start_thread_info(struct kvm_vcpu *vcpu)
 	set_gti_thread_flag(gthread_info, GTIF_VCPU_START_THREAD);
 	set_gti_thread_flag(gthread_info, GTIF_KERNEL_THREAD);
 	kvm_gmm_get(vcpu, gthread_info, pv_vcpu_get_init_gmm(vcpu));
+	trace_kvm_gmm_get("get gmm for guest kernel start thread",
+		vcpu, gthread_info, pv_vcpu_get_init_gmm(vcpu));
 	pv_vcpu_set_active_gmm(vcpu, pv_vcpu_get_init_gmm(vcpu));
 	setup_vcpu_boot_stacks(vcpu, gthread_info);
 	return gthread_info;
@@ -475,6 +593,12 @@ static int prepare_pv_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 
 struct tty_struct *kvm_tty = NULL;
 
+static void kvm_reset_vcpu_thread(struct kvm_vcpu *vcpu)
+{
+	INIT_LIST_HEAD(&current_thread_info()->tasks_to_spin);
+	current_thread_info()->gti_to_spin = NULL;
+}
+
 int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu)
 {
 	char name[80];
@@ -484,32 +608,35 @@ int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu)
 	set_task_comm(current, name);
 	vcpu->arch.host_task = current;
 
-	INIT_LIST_HEAD(&current_thread_info()->tasks_to_spin);
-	current_thread_info()->gti_to_spin = NULL;
+	kvm_reset_vcpu_thread(vcpu);
 
-	DebugKVM("VCPU %d will be run as thread %s (%d) pgd %px\n",
-		vcpu->vcpu_id, current->comm, current->pid, current->mm->pgd);
-
+	DebugKVM("VCPU %d will be run as thread %px %s (%d) pgd %px\n",
+		vcpu->vcpu_id, current, current->comm, current->pid,
+		current->mm->pgd);
 	return 0;
 }
 
-int hv_vcpu_start_thread(struct kvm_vcpu *vcpu)
+int hv_vcpu_setup_thread(struct kvm_vcpu *vcpu)
 {
-	return kvm_init_vcpu_thread(vcpu);
+	return 0;
 }
 
-int pv_vcpu_start_thread(struct kvm_vcpu *vcpu)
+int pv_vcpu_setup_thread(struct kvm_vcpu *vcpu)
 {
 	gthread_info_t	*gthread_info;
 	int ret;
 
-	ret = kvm_init_vcpu_thread(vcpu);
-	if (ret) {
-		pr_err("%s(): could not init start thread for VCPU #%d "
-			"error %d\n",
-			__func__, vcpu->vcpu_id, ret);
-		goto out_failed;
+	pv_vcpu_clear_gti(vcpu);
+	pv_vcpu_clear_gmm(vcpu);
+
+	mutex_lock(&vcpu->kvm->lock);
+	if (unlikely(pv_mmu_get_init_gmm(vcpu->kvm) == NULL)) {
+		ret = kvm_pv_init_gmm_create(vcpu->kvm);
+		if (ret)
+			goto out_unlock;
 	}
+	mutex_unlock(&vcpu->kvm->lock);
+
 	gthread_info = create_guest_start_thread_info(vcpu);
 	if (gthread_info == NULL) {
 		pr_err("%s() could not create guest start thread info "
@@ -522,8 +649,55 @@ int pv_vcpu_start_thread(struct kvm_vcpu *vcpu)
 
 	return 0;
 
+out_unlock:
+	mutex_unlock(&vcpu->kvm->lock);
 out_failed:
 	return ret;
+}
+
+/*
+ * FIXME: QEMU should pass physical addresses for entry IP and
+ * for any addresses info into arguments list to pass to guest.
+ * The function convert virtual physical adresses to physical
+ * to enable VCPU startup at nonpaging mode
+ */
+void prepare_vcpu_startup_args(struct kvm_vcpu *vcpu)
+{
+	unsigned long entry_IP;
+	u64 *args;
+	int args_num, arg;
+	unsigned long long arg_value;
+
+
+	DebugKVMSTUP("started on VCPU #%d\n", vcpu->vcpu_id);
+
+	if (is_paging(vcpu)) {
+		DebugKVMSTUP("there is paging mode, nothing convertions "
+			"need\n");
+		return;
+	}
+	args_num = vcpu->arch.args_num;
+	entry_IP = (unsigned long)vcpu->arch.entry_point;
+
+	if (entry_IP >= GUEST_PAGE_OFFSET) {
+		entry_IP = __guest_pa(entry_IP);
+		vcpu->arch.entry_point = (void *)entry_IP;
+	}
+	DebugKVMSTUP("VCPU startup entry point at %px\n", (void *)entry_IP);
+
+	args = vcpu->arch.args;
+
+	/* prepare VCPU startup function arguments */
+#pragma loop count (2)
+	for (arg = 0; arg < args_num; arg++) {
+		arg_value = args[arg];
+		if (arg_value >= GUEST_PAGE_OFFSET) {
+			arg_value = __guest_pa(arg_value);
+			args[arg] = arg_value;
+		}
+		DebugKVMSTUP("   arg[%d] is 0x%016llx\n",
+			arg, arg_value);
+	}
 }
 
 int kvm_prepare_pv_vcpu_start_stacks(struct kvm_vcpu *vcpu)
@@ -599,6 +773,78 @@ out_free:
 	goto out;
 }
 
+static void free_guest_thread_signal_stack(struct kvm *kvm, gthread_info_t *gti)
+{
+	int trap_no, syscall_no;
+	int frame;
+
+	trap_no = atomic_read(&gti->signal.traps_num);
+	syscall_no = atomic_read(&gti->signal.syscall_num);
+	if (likely(trap_no == 0 && syscall_no == 0)) {
+		/* nothing active trap or system calls frames of signal stack */
+		goto free_stack_mmap;
+	}
+	for (frame = 0; frame < trap_no + syscall_no; frame++) {
+		pop_the_signal_stack(&gti->signal.stack);
+	}
+	atomic_set(&gti->signal.traps_num, 0);
+	atomic_set(&gti->signal.in_work, 0);
+	atomic_set(&gti->signal.syscall_num, 0);
+	atomic_set(&gti->signal.in_syscall, 0);
+
+free_stack_mmap:
+	KVM_BUG_ON(gti->signal.stack.used != 0);
+	if (gti->signal.stack.size != 0) {
+		if (trap_no != 0 || syscall_no != 0) {
+			DebugFreeSS("release gti #%d signal stack %d + %d frames "
+				"at %px size 0x%lx\n",
+				gti->gpid->nid.nr, trap_no, syscall_no,
+				(void *)gti->signal.stack.base,
+				gti->signal.stack.size);
+		}
+		free_signal_stack(&gti->signal.stack);
+		if (gti->curr_ctx_key) {
+			remove_gst_ctx_signal_stack(gti->curr_ctx_key);
+			gti->curr_ctx_key = 0;
+		}
+	}
+	KVM_BUG_ON(gti->signal.stack.base != 0);
+}
+
+void vcpu_clear_signal_stack(struct kvm_vcpu *vcpu)
+{
+	kvm_host_context_t *host_ctxt;
+	int trap_no, syscall_no;
+	unsigned long size;
+
+	KVM_BUG_ON(current_thread_info()->vcpu != vcpu);
+
+	host_ctxt = &vcpu->arch.host_ctxt;
+
+	/*
+	 * All signal stacks have been already released
+	 * during removal of guest thread info structures
+	 */
+	trap_no = atomic_read(&host_ctxt->signal.traps_num);
+	syscall_no = atomic_read(&host_ctxt->signal.syscall_num);
+	size = current_thread_info()->signal_stack.size;
+
+	if (trap_no != 0 || syscall_no != 0 || size != 0) {
+		DebugFreeSS("VCPU #%d signal stack %d + %d frames "
+			"at %px, size 0x%lx\n",
+			vcpu->vcpu_id, trap_no, syscall_no,
+			(void *)current_thread_info()->signal_stack.base, size);
+	}
+
+	atomic_set(&host_ctxt->signal.traps_num, 0);
+	atomic_set(&host_ctxt->signal.in_work, 0);
+	atomic_set(&host_ctxt->signal.syscall_num, 0);
+	atomic_set(&host_ctxt->signal.in_syscall, 0);
+	current_thread_info()->signal_stack.base = 0;
+	current_thread_info()->signal_stack.size = 0;
+	current_thread_info()->signal_stack.used = 0;
+}
+
 /*
  * Clear guest thread info structure from old user task,
  * while sys_execve() of new user task
@@ -620,6 +866,7 @@ static void __free_guest_thread_info(struct kvm *kvm, gthread_info_t *gti,
 {
 	DebugKVMTI("started for GPID %d\n", gti->gpid->nid.nr);
 
+	KVM_BUG_ON(gti->gmm != NULL);
 	if (likely(!lock_done)) {
 		kvm_free_gpid(gti->gpid, &kvm->arch.gpid_table);
 	} else {
@@ -667,19 +914,32 @@ int kvm_pv_guest_thread_info_init(struct kvm *kvm)
 	return ret;
 }
 
-void kvm_pv_guest_thread_info_destroy(struct kvm *kvm)
+void kvm_pv_guest_thread_info_reset(struct kvm *kvm)
+{
+	DebugKVMTI("started\n");
+
+	kvm_gpidmap_reset(kvm, &kvm->arch.gpid_table);
+}
+
+void kvm_pv_guest_thread_info_free(struct kvm *kvm)
 {
 	gpid_t *gpid;
 	struct hlist_node *next;
-	unsigned long flags;
 	int i;
 
 	DebugKVMTI("started\n");
-	gpid_table_lock_irqsave(&kvm->arch.gpid_table, flags);
+	gpid_table_lock(&kvm->arch.gpid_table);
 	for_each_guest_thread_info(gpid, i, next, &kvm->arch.gpid_table) {
+		free_guest_thread_signal_stack(kvm, gpid->gthread_info);
 		do_free_guest_thread_info(kvm, gpid->gthread_info);
 	}
-	gpid_table_unlock_irqrestore(&kvm->arch.gpid_table, flags);
+	gpid_table_unlock(&kvm->arch.gpid_table);
+}
+
+void kvm_pv_guest_thread_info_destroy(struct kvm *kvm)
+{
+	DebugKVMTI("started\n");
+	kvm_pv_guest_thread_info_free(kvm);
 	kmem_cache_destroy(kvm->arch.gti_cachep);
 	kvm->arch.gti_cachep = NULL;
 	kvm_gpidmap_destroy(&kvm->arch.gpid_table);
@@ -1048,6 +1308,99 @@ failed:
 	return RETURN_TO_HOST_APP_HCRET;
 }
 
+static int kvm_mmu_enable_shadow_paging(struct kvm_vcpu *vcpu)
+{
+	e2k_mmu_cr_t mmu_cr;
+	bool sh_mmu_cr_paging;
+	int r;
+
+	KVM_BUG_ON(!is_shadow_paging(vcpu));
+
+	r = vcpu_read_mmu_cr_reg(vcpu, &mmu_cr);
+	if (r != 0) {
+		pr_err("%s(): could not read SH_MMU_CR register, error %d\n",
+			__func__, r);
+		return r;
+	}
+
+	sh_mmu_cr_paging = mmu_cr.tlb_en;
+
+	if (unlikely(sh_mmu_cr_paging)) {
+		pr_err("%s() : paging is already enabled\n", __func__);
+		return 0;
+	}
+
+	if (unlikely(is_paging_flag(vcpu))) {
+		/* guest MMU paging has been disabled */
+		pr_err("%s(): guest paging is turned OFF SH_MMU_CR 0x%llx\n",
+			__func__, AW(mmu_cr));
+		KVM_BUG_ON(true);
+		return -EBUSY;
+	}
+
+	mmu_cr.tlb_en = 1;
+	r = vcpu_write_mmu_cr_reg(vcpu, mmu_cr);
+	if (r != 0)  {
+		pr_err("%s() : could not enable paging on VCPU #%d, error %d\n",
+			__func__, vcpu->vcpu_id, r);
+		return r;
+	}
+
+	return 0;
+}
+
+static int vcpu_init_os_cu_hw_ctxt(struct kvm_vcpu *vcpu,
+		kvm_task_info_t *user_info)
+{
+	struct kvm_hw_cpu_context *hw_ctxt = &vcpu->arch.hw_ctxt;
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
+	e2k_oscud_lo_t oscud_lo;
+	e2k_oscud_hi_t oscud_hi;
+	e2k_osgd_lo_t osgd_lo;
+	e2k_osgd_hi_t osgd_hi;
+	e2k_cutd_t oscutd;
+	e2k_cuir_t oscuir;
+	e2k_addr_t guest_cut;
+
+	oscud_lo.OSCUD_lo_half = 0;
+	oscud_lo.OSCUD_lo_base = user_info->cud_base;
+	oscud_hi.OSCUD_hi_half = 0;
+	oscud_hi.OSCUD_hi_size = user_info->cud_size;
+	hw_ctxt->sh_oscud_lo = oscud_lo;
+	hw_ctxt->sh_oscud_hi = oscud_hi;
+	/* switch guest CUT (kernel image) to virtual address */
+	vcpu->arch.guest_base = (char *)user_info->cud_base;
+	vcpu->arch.trap_entry = (char *)user_info->cud_base +
+					vcpu->arch.trap_offset;
+
+	osgd_lo.OSGD_lo_half = 0;
+	osgd_lo.OSGD_lo_base = user_info->gd_base;
+	osgd_hi.OSGD_hi_half = 0;
+	osgd_hi.OSGD_hi_size = user_info->gd_size;
+	hw_ctxt->sh_osgd_lo = osgd_lo;
+	hw_ctxt->sh_osgd_hi = osgd_hi;
+
+	guest_cut = user_info->cut_base;
+	oscutd.CUTD_reg = 0;
+	oscutd.CUTD_base = guest_cut;
+	hw_ctxt->sh_oscutd = oscutd;
+	if (vcpu->arch.is_hv) {
+		sw_ctxt->cutd = oscutd;	/* for kernel CUTD == OSCUTD */
+	}
+
+	oscuir.CUIR_reg = user_info->cui;
+	hw_ctxt->sh_oscuir = oscuir;
+
+	if (vcpu->arch.is_hv) {
+		/* set OC CU conteext on shadow registers */
+		preempt_disable();
+		hv_vcpu_write_os_cu_hw_ctxt_to_registers(vcpu, hw_ctxt);
+		preempt_enable();
+	}
+
+	return 0;
+}
+
 int kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 		kvm_task_info_t __user *task_info, guest_hw_stack_t *stack_regs,
 		void (*func)(void *data, void *arg1, void *arg2),
@@ -1104,7 +1457,7 @@ int kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 		if (vcpu->arch.is_hv) {
 			/* set guest stacks registers to new guest kernel */
 			/* stacks (hw context) */
-			kvm_update_guest_stacks_registers(vcpu, stack_regs);
+			kvm_hv_update_guest_stacks_registers(vcpu, stack_regs);
 
 			/* update local data stack pointers */
 			/* (software context) */
@@ -1129,6 +1482,14 @@ int kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 
 		/* restore global register pointer to VCPU state */
 		/* from now it should be virtual address */
+		vcpu->arch.guest_vcpu_state = TO_GUEST_VCPU_STATE_POINTER(vcpu);
+		if (IS_INVALID_GPA(vcpu->arch.guest_vcpu_state)) {
+			pr_err("%s() : could not convert GPA of VCPU state "
+				"struct to virtual pointer\n",
+				__func__);
+			ret = -ENOMEM;
+			goto failed;
+		}
 		INIT_HOST_VCPU_STATE_GREG_COPY(current_thread_info(), vcpu);
 		/* all addresses into VCPU state too */
 		guest_pv_vcpu_state_to_paging(vcpu);
@@ -1342,6 +1703,8 @@ int kvm_copy_guest_kernel_stacks(struct kvm_vcpu *vcpu,
 		cur_ti->u_stack.size);
 
 	kvm_gmm_get(vcpu, gti, pv_vcpu_get_init_gmm(vcpu));
+	trace_kvm_gmm_get("get init gmm for new guest kernel thread",
+		vcpu, gti, pv_vcpu_get_init_gmm(vcpu));
 
 	/* FIXME: here should be copy of host kernel frames and guest pt_regs */
 	/* from source process to new cloned process for recursive case of */
@@ -1375,6 +1738,7 @@ out_free_gti:
 
 int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 {
+	struct kvm *kvm = vcpu->kvm;
 	gthread_info_t *gti;
 	gthread_info_t *cur_gti;
 	gmm_struct_t *gmm;
@@ -1386,7 +1750,7 @@ int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 			__func__, gpid_nr);
 		return 0;
 	}
-	gti = kvm_get_guest_thread_info(vcpu->kvm, gpid_nr);
+	gti = kvm_get_guest_thread_info(kvm, gpid_nr);
 	if (gti == NULL) {
 		pr_alert("%s(): could not find guest thread GPID #%d\n",
 			__func__, gpid_nr);
@@ -1410,32 +1774,48 @@ int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 		return -EEXIST;
 	}
 
+	/* sinhronization is need here, because of destroy_gmm_u_context() */
+	/* can remove reference to gmm from gti too */
+	gpid_table_lock(&kvm->arch.gpid_table);
 	if (likely(!test_gti_thread_flag(gti, GTIF_KERNEL_THREAD))) {
 		gmm = gti->gmm;
 	} else {
 		gmm = pv_vcpu_get_init_gmm(vcpu);
 	}
-	KVM_BUG_ON(gmm == NULL);
-	gmmid_nr = gmm->nid.nr;
-	if (!pv_vcpu_is_init_gmm(vcpu, gmm) &&
-			!test_gti_thread_flag(gti, GTIF_USER_THREAD) &&
-				(gmm == pv_vcpu_get_gmm(vcpu) ||
-				gmm == pv_vcpu_get_active_gmm(vcpu))) {
-		pr_err("%s(): guest tries to release current active "
-			"gmm GMMID #%d\n",
-			__func__, gmm->nid.nr);
-		return -EBUSY;
-	}
-
-	if (kvm_gmm_put(vcpu->kvm, gti) == 0) {
-		DebugFRTASK("gmm GMMID #%d was released\n", gmmid_nr);
-	} else {
-		if (!kthread) {
-			DebugFRTASK("gmm GMMID #%d cannot be released\n",
-				gmmid_nr);
+	if (likely(gmm != NULL)) {
+		gmmid_nr = gmm->id;
+		if (unlikely(!pv_vcpu_is_init_gmm(vcpu, gmm) &&
+				!test_gti_thread_flag(gti, GTIF_USER_THREAD) &&
+					(gmm == pv_vcpu_get_gmm(vcpu) ||
+					gmm == pv_vcpu_get_active_gmm(vcpu)))) {
+			gpid_table_unlock(&kvm->arch.gpid_table);
+			pr_err("%s(): guest tries to release current active "
+				"gmm GMMID #%d\n",
+				__func__, gmm->nid.nr);
+			return -EBUSY;
 		}
+
+		if (kvm_gmm_only_put(kvm, gti) == 0) {
+			DebugFRTASK("gmm GMMID #%d was released\n", gmmid_nr);
+		} else {
+			if (!kthread) {
+				DebugFRTASK("gmm GMMID #%d cannot be released\n",
+					gmmid_nr);
+			}
+		}
+		trace_kvm_gmm_put("put gmm of released guest task struct",
+			vcpu, gti, gmm);
+	} else {
+		/* gmm has been already dereferenced and released */
+		trace_kvm_gmm_put("gmm of released guest task struct has been "
+			"already released",
+			vcpu, gti, gmm);
 	}
-	free_guest_thread_info(vcpu->kvm, gti);
+	gpid_table_unlock(&kvm->arch.gpid_table);
+
+	free_guest_thread_signal_stack(kvm, gti);
+
+	free_guest_thread_info(kvm, gti);
 
 	if (!kthread)
 		DebugFRTASK("task GPID #%d released successfully\n", gpid_nr);
@@ -1499,12 +1879,79 @@ int kvm_switch_to_guest_new_user(struct kvm_vcpu *vcpu,
 
 	if (syscall) {
 		syscall_handler_trampoline_start(vcpu, 0);
+		/* delete system call stack from signal stack */
+		(void)pop_signal_stack();
 	}
 
 	return 0;
 
 failed:
 	return ret;
+}
+
+static signal_stack_context_t __user *
+dup_process_signal_stack(struct kvm_vcpu *vcpu, gthread_info_t *gti,
+			 bool only_cur_frame)
+{
+	struct thread_info *ti = current_thread_info();
+	unsigned long used, stack_size, stack_base, base_from;
+	unsigned long ts_flag;
+	int ret;
+
+	BUG_ON(gti->signal.stack.base != 0);
+	BUG_ON(ti->signal_stack.base == 0);
+
+	/* allocate space for new signal stack */
+	if (unlikely(only_cur_frame)) {
+		used = sizeof(signal_stack_context_t);
+		BUG_ON(ti->signal_stack.used < used);
+		/* copy only one current frame of the process stack */
+		base_from = ti->signal_stack.base + ti->signal_stack.used - used;
+	} else {
+		used = ti->signal_stack.used;
+		BUG_ON(used == 0);
+		/* copy all frames of the process stack */
+		base_from = ti->signal_stack.base;
+	}
+	BUG_ON(used > ti->signal_stack.size);
+
+	stack_size = round_up(used, PAGE_SIZE);
+	stack_base = allocate_signal_stack(stack_size);
+	if (IS_ERR_VALUE(stack_base)) {
+		gti->signal.stack.size = 0;
+		gti->signal.stack.used = 0;
+		return ERR_PTR(stack_base);
+	}
+	gti->signal.stack.base = stack_base;
+	gti->signal.stack.size = stack_size;
+	gti->signal.stack.used = used;
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret = raw_copy_in_user((signal_stack_context_t __user *)stack_base,
+			(signal_stack_context_t __user *)base_from, used);
+	clear_ts_flag(ts_flag);
+	if (ret != 0) {
+		pr_err("%s(): could not copy signal stack from %px to %px, "
+			"error %d\n",
+			__func__, (void *)base_from, (void *)stack_base, ret);
+		return ERR_PTR(ret);
+	}
+	if (likely(!only_cur_frame)) {
+		atomic_set(&gti->signal.traps_num,
+			atomic_read(&vcpu->arch.host_ctxt.signal.traps_num));
+		atomic_set(&gti->signal.in_work,
+			atomic_read(&vcpu->arch.host_ctxt.signal.in_work));
+		atomic_set(&gti->signal.syscall_num,
+			atomic_read(&vcpu->arch.host_ctxt.signal.syscall_num));
+		atomic_set(&gti->signal.in_syscall,
+			atomic_read(&vcpu->arch.host_ctxt.signal.in_syscall));
+	} else {
+		atomic_set(&gti->signal.traps_num, 0);
+		atomic_set(&gti->signal.in_work, 0);
+		atomic_set(&gti->signal.syscall_num, 1);
+		atomic_set(&gti->signal.in_syscall, 1);
+	}
+	return (signal_stack_context_t *)stack_base;
 }
 
 static int prepare_pv_vcpu_last_user_crs(struct kvm_vcpu *vcpu,
@@ -1619,26 +2066,28 @@ static int prepare_pv_vcpu_ret_from_fork_frame(struct kvm_vcpu *vcpu,
 }
 
 /*
- * End of copy_thread() for guest user process (clone_user_stack()):
+ * End of copy_thread() for guest user process (copy_user_stack()):
  */
 int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 			kvm_task_info_t __user *task_info,
 			vcpu_gmmu_info_t __user *gmmu_info)
 {
 	struct kvm	*kvm = vcpu->kvm;
-	pt_regs_t	*cur_regs, *regs;
+	pt_regs_t	__user *u_regs;
+	struct trap_pt_regs __user *u_trap;
 	gthread_info_t	*cur_gti;
 	gthread_info_t	*gti;
 	gmm_struct_t	*gmm;
+	signal_stack_context_t __user *new_signal_stack;
 	guest_hw_stack_t *stack_regs;
 	e2k_stacks_t	*new_stacks;
 	e2k_mem_crs_t	*new_crs;
 	kvm_task_info_t	user_info;
-	e2k_addr_t	sbr;
+	e2k_addr_t	sbr, saved_sbr;
 	e2k_size_t	us_size;
 	vcpu_gmmu_info_t gmm_info;
 	gpa_t		u_pptb;
-	int		gmmid_nr;
+	int		gmmid_nr, saved_kernel_entry;
 	int		ret;
 
 	ret = kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
@@ -1676,14 +2125,39 @@ int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 	}
 	gmmid_nr = gmm->nid.nr;
 	kvm_gmm_get(vcpu, gti, gmm);
+	trace_kvm_gmm_get("get new gmm for new guest user process",
+		vcpu, gti, gmm);
 
 	cur_gti = pv_vcpu_get_gti(vcpu);
 	BUG_ON(cur_gti == NULL);
 
-	cur_regs = &cur_gti->fork_regs;
-	regs = &gti->fork_regs;
-	KVM_BUG_ON(!is_sys_call_pt_regs(cur_regs));
-	*regs = *cur_regs;
+	new_signal_stack = dup_process_signal_stack(vcpu, gti, true);
+	if (unlikely(IS_ERR(new_signal_stack)))
+		return PTR_ERR(new_signal_stack);
+
+	/* Copy hash table with guest context signal stacks */
+	gmm->ctx_stacks = copy_gst_ctx_sig_stacks_ht();
+	/* Current ctx's key remains the same */
+	gti->curr_ctx_key = cur_gti->curr_ctx_key;
+
+	if (gti->curr_ctx_key) {
+		/* Add current ctx's signal stack to copied hash table */
+		ret = add_gst_ctx_signal_stack(gmm->ctx_stacks,
+						&gti->signal.stack,
+						gti->curr_ctx_key,
+						CTX_STACK_BUSY);
+		if (ret)
+			return ret;
+	}
+
+	u_regs = gti_signal_pt_regs_first(gti);
+	if (__get_user(u_trap, &u_regs->trap) ||
+			__get_user(saved_kernel_entry, &u_regs->kernel_entry))
+		return -EFAULT;
+
+	/* Check !is_sys_call_pt_regs(regs), but taking into
+	 * account that we cannot access 'u_regs' directly. */
+	KVM_BUG_ON(u_trap || !saved_kernel_entry);
 
 	stack_regs = &gti->stack_regs;
 	new_stacks = &stack_regs->stacks;
@@ -1700,7 +2174,9 @@ int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 
 	us_size = user_info.u_us_size;
 	sbr = user_info.u_us_base + us_size;	/* top of stack */
-	if (unlikely(regs->stacks.top != sbr)) {
+	if (__get_user(saved_sbr, &u_regs->stacks.top))
+		return -EFAULT;
+	if (unlikely(saved_sbr != sbr)) {
 		e2k_usd_lo_t	usd_lo;
 		e2k_usd_hi_t	usd_hi;
 
@@ -1712,9 +2188,11 @@ int kvm_copy_guest_user_stacks(struct kvm_vcpu *vcpu,
 		usd_lo.USD_lo_base = user_info.u_us_base +
 						user_info.u_sp_offset;
 		sbr = round_up(sbr, E2K_ALIGN_STACK_BASE_REG);
-		regs->stacks.top = sbr;
-		regs->stacks.usd_hi = usd_hi;
-		regs->stacks.usd_lo = usd_lo;
+		if (__put_user(sbr, &u_regs->stacks.top) ||
+				__put_user(AW(usd_hi), &AW(u_regs->stacks.usd_hi)) ||
+				__put_user(AW(usd_lo), &AW(u_regs->stacks.usd_lo)))
+			return -EFAULT;
+
 		DebugKVMCPY("new local guest user data stack base 0x%llx "
 			"size 0x%x top 0x%lx\n",
 			usd_lo.USD_lo_base, usd_hi.USD_hi_size, sbr);
@@ -1812,9 +2290,11 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 			kvm_task_info_t __user *task_info)
 {
 	struct kvm	*kvm = vcpu->kvm;
-	pt_regs_t	*cur_regs, *regs;
+	pt_regs_t	__user *u_regs;
+	struct trap_pt_regs __user *u_trap;
 	gthread_info_t	*cur_gti, *gti;
 	gmm_struct_t	*gmm;
+	signal_stack_context_t __user *new_signal_stack;
 	guest_hw_stack_t *stack_regs;
 	e2k_stacks_t	*new_stacks;
 	e2k_mem_crs_t	*new_crs;
@@ -1827,7 +2307,7 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	e2k_psp_hi_t	psp_hi;
 	e2k_pcsp_lo_t	pcsp_lo;
 	e2k_pcsp_hi_t	pcsp_hi;
-	int		ret;
+	int		ret, saved_kernel_entry;
 
 	ret = kvm_vcpu_copy_from_guest(vcpu, &user_info, task_info,
 						sizeof(*task_info));
@@ -1853,6 +2333,8 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	gmm = cur_gti->gmm;
 	BUG_ON(gmm == NULL);
 	kvm_gmm_get(vcpu, gti, gmm);
+	trace_kvm_gmm_get("get gmm for new guest user thread",
+		vcpu, gti, gmm);
 
 	/*
 	 * Mark the parent & child processes as user threads
@@ -1861,10 +2343,18 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	set_gti_thread_flag(cur_gti, GTIF_USER_THREAD);
 	set_gti_thread_flag(gti, GTIF_USER_THREAD);
 
-	cur_regs = &cur_gti->fork_regs;
-	regs = &gti->fork_regs;
-	KVM_BUG_ON(!is_sys_call_pt_regs(cur_regs));
-	*regs = *cur_regs;
+	new_signal_stack = dup_process_signal_stack(vcpu, gti, true);
+	if (unlikely(IS_ERR(new_signal_stack)))
+		return PTR_ERR(new_signal_stack);
+
+	u_regs = gti_signal_pt_regs_first(gti);
+	if (__get_user(u_trap, &u_regs->trap) ||
+			__get_user(saved_kernel_entry, &u_regs->kernel_entry))
+		return -EFAULT;
+
+	/* Check !is_sys_call_pt_regs(regs), but taking into
+	 * account that we cannot access 'u_regs' directly. */
+	KVM_BUG_ON(u_trap || !saved_kernel_entry);
 
 	stack_regs = &gti->stack_regs;
 	new_stacks = &stack_regs->stacks;
@@ -1885,9 +2375,10 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	usd_hi.USD_hi_size = user_info.u_sp_offset;
 	usd_lo.USD_lo_base = user_info.u_us_base + user_info.u_sp_offset;
 	sbr = round_up(sbr, E2K_ALIGN_STACK_BASE_REG);
-	regs->stacks.top = sbr;
-	regs->stacks.usd_hi = usd_hi;
-	regs->stacks.usd_lo = usd_lo;
+	if (__put_user(sbr, &u_regs->stacks.top) ||
+			__put_user(AW(usd_hi), &AW(u_regs->stacks.usd_hi)) ||
+			__put_user(AW(usd_lo), &AW(u_regs->stacks.usd_lo)))
+		return -EFAULT;
 	DebugKVMCLN("local guest user data stack base 0x%llx size 0x%x "
 		"top 0x%lx\n",
 		 usd_lo.USD_lo_base, usd_hi.USD_hi_size, sbr);
@@ -1897,8 +2388,9 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	psp_hi.PSP_hi_size = user_info.u_ps_size;
 	psp_hi.PSP_hi_ind  = user_info.u_ps_ind;
 	psp_lo.PSP_lo_base = user_info.u_ps_base;
-	regs->stacks.psp_hi = psp_hi;
-	regs->stacks.psp_lo = psp_lo;
+	if (__put_user(AW(psp_hi), &AW(u_regs->stacks.psp_hi)) ||
+			__put_user(AW(psp_lo), &AW(u_regs->stacks.psp_lo)))
+		return -EFAULT;
 	DebugKVMCLN("new guest user procedure stack from 0x%llx size 0x%x "
 		"ind 0x%x\n",
 		psp_lo.PSP_lo_base, psp_hi.PSP_hi_size, psp_hi.PSP_hi_ind);
@@ -1908,8 +2400,9 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	pcsp_hi.PCSP_hi_size = user_info.u_pcs_size;
 	pcsp_hi.PCSP_hi_ind  = user_info.u_pcs_ind;
 	pcsp_lo.PCSP_lo_base = user_info.u_pcs_base;
-	regs->stacks.pcsp_hi = pcsp_hi;
-	regs->stacks.pcsp_lo = pcsp_lo;
+	if (__put_user(AW(pcsp_hi), &AW(u_regs->stacks.pcsp_hi)) ||
+			__put_user(AW(pcsp_lo), &AW(u_regs->stacks.pcsp_lo)))
+		return -EFAULT;
 	DebugKVMCLN("new guest user chain stack from 0x%llx size 0x%x "
 		"ind 0x%x\n",
 		pcsp_lo.PCSP_lo_base, pcsp_hi.PCSP_hi_size,
@@ -1970,7 +2463,9 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	return gti->gpid->nid.nr;
 
 out_free_gmm:
-	kvm_gmm_put(kvm, gti);
+	kvm_gmm_only_put(kvm, gti);
+	trace_kvm_gmm_put("clone guest user stacks failed, so release gmm",
+		vcpu, gti, gmm);
 
 	free_guest_thread_info(kvm, gti);
 
@@ -2054,8 +2549,255 @@ int kvm_sig_handler_return(struct kvm_vcpu *vcpu, kvm_stacks_info_t *regs_info,
 	return ret;
 }
 
+static inline void remove_signal_stack_frame(struct kvm_vcpu *vcpu,
+			inject_caller_t from, int frames_num,
+			int *skip_frames, int *skip_traps, int *skip_syscalls)
+{
+
+	if (from == FROM_PV_VCPU_TRAP_INJECT) {
+		*skip_traps = *skip_traps + 1;
+		KVM_BUG_ON(*skip_traps >= frames_num);
+	} else if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
+		*skip_syscalls = *skip_syscalls + 1;
+		KVM_BUG_ON(*skip_syscalls >= frames_num);
+	} else {
+		KVM_BUG_ON(true);
+	}
+	*skip_frames = *skip_frames + 1;
+	KVM_BUG_ON(*skip_frames >= frames_num);
+	KVM_BUG_ON(*skip_traps + *skip_syscalls != *skip_frames);
+	DebugSIGST("signal stack : should be skipped %d frames "
+		"(%d traps + %d syscalls)\n",
+		*skip_frames, *skip_traps, *skip_syscalls);
+}
+
+
+static inline int get_signal_stack_stack_regs(struct kvm_vcpu *vcpu,
+			struct signal_stack_context __user *context,
+			e2k_stacks_t *stacks, e2k_mem_crs_t *crs,
+			inject_caller_t *inject_from, int frame_no)
+{
+	pv_vcpu_ctxt_t *vcpu_ctxt;
+	unsigned long ts_flag;
+	inject_caller_t from;
+	int ret;
+
+	vcpu_ctxt = &context->vcpu_ctxt;
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret = __copy_from_user(stacks, &context->regs.stacks, sizeof(*stacks));
+	ret |= __copy_from_user(crs, &context->regs.crs, sizeof(*crs));
+	ret |= __get_user(from, &vcpu_ctxt->inject_from);
+	clear_ts_flag(ts_flag);
+	if (ret) {
+		pr_err("%s(): copying stack frame #%d failed, error %d\n",
+			__func__, frame_no, ret);
+		return ret;
+	}
+
+	*inject_from = from;
+
+	DebugSIGST("frame #%d %s PCSP base 0x%llx ind 0x%x size 0x%x\n",
+		frame_no,
+		(from == FROM_PV_VCPU_TRAP_INJECT) ? "trap" : "syscall",
+		stacks->pcsp_lo.PCSP_lo_base,
+		stacks->pcsp_hi.PCSP_hi_ind,
+		stacks->pcsp_hi.PCSP_hi_size);
+	DebugSIGST("          PSP  base 0x%llx ind 0x%x size 0x%x\n",
+		stacks->psp_lo.PSP_lo_base,
+		stacks->psp_hi.PSP_hi_ind,
+		stacks->psp_hi.PSP_hi_size);
+	DebugSIGST("          USD  base 0x%llx ind 0x%x top 0x%lx\n",
+		stacks->usd_lo.USD_lo_base,
+		stacks->usd_hi.USD_hi_size,
+		stacks->top);
+
+	return 0;
+}
+
+static inline int calculate_goal_signal_stack(struct kvm_vcpu *vcpu,
+			struct signal_stack_context __user *from_context,
+			e2k_stacks_t *to_stacks, e2k_mem_crs_t *to_crs)
+{
+	struct thread_info *ti = current_thread_info();
+	struct signal_stack_context __user *context, *sig_context;
+	e2k_stacks_t sig_stacks;
+	e2k_mem_crs_t sig_crs;
+	kvm_host_context_t *host_ctxt;
+	pv_vcpu_ctxt_t *vcpu_ctxt;
+	inject_caller_t from, sig_from;
+	u64 goal_pcsp_frame, sig_pcsp_frame;
+	u64 goal_psp_frame, sig_psp_frame, psp_frame;
+	unsigned long ts_flag;
+	int traps_num, syscalls_num, frames_num, frame_no;
+	int skip_frames, skip_traps, skip_syscalls;
+	int ret;
+
+	KVM_BUG_ON(ti->vcpu != vcpu);
+
+	host_ctxt = &vcpu->arch.host_ctxt;
+	sig_context = NULL;
+
+	traps_num = atomic_read(&host_ctxt->signal.traps_num);
+	syscalls_num = atomic_read(&host_ctxt->signal.syscall_num);
+	frames_num = traps_num + syscalls_num;
+	frame_no = frames_num;
+	skip_frames = 0;
+	skip_traps = 0;
+	skip_syscalls = 0;
+
+	DebugSIGST("signal stack at 0x%lx size 0x%lx, used 0x%lx, frames %d "
+		"(%d traps + %d syscalls)\n",
+		ti->signal_stack.base, ti->signal_stack.size,
+		ti->signal_stack.used,
+		frames_num, traps_num, syscalls_num);
+	DebugSIGST("target frame: PCSP base 0x%llx ind 0x%x size 0x%x\n",
+		to_stacks->pcsp_lo.PCSP_lo_base,
+		to_stacks->pcsp_hi.PCSP_hi_ind, to_stacks->pcsp_hi.PCSP_hi_size);
+	DebugSIGST("              PSP  base 0x%llx ind 0x%x size 0x%x\n",
+		to_stacks->psp_lo.PSP_lo_base,
+		to_stacks->psp_hi.PSP_hi_ind, to_stacks->psp_hi.PSP_hi_size);
+	DebugSIGST("              USD  base 0x%llx size 0x%x top 0x%lx\n",
+		to_stacks->usd_lo.USD_lo_base,
+		to_stacks->usd_hi.USD_hi_size, to_stacks->top);
+
+	goal_pcsp_frame = to_stacks->pcsp_lo.PCSP_lo_base +
+				to_stacks->pcsp_hi.PCSP_hi_ind;
+	goal_psp_frame = to_stacks->psp_lo.PSP_lo_base +
+				to_stacks->psp_hi.PSP_hi_ind;
+
+	ret = get_signal_stack_stack_regs(vcpu, from_context,
+			&sig_stacks, &sig_crs, &from, frame_no);
+	if (ret) {
+		pr_err("%s(): copying stack frame #%d failed, error %d\n",
+			__func__, frame_no, ret);
+		return ret;
+	}
+
+	context = get_prev_signal_stack(from_context);
+	if (likely(context != NULL)) {
+		frame_no--;
+	}
+
+	do {
+		if (unlikely(context == NULL)) {
+			if (from_context == NULL) {
+				pr_err("%s(): could not find target frame, "
+					"signal stack has been empty\n",
+					__func__);
+				return -EINVAL;
+			}
+			/* previous frame is last and can be used as target */
+			DebugSIGST("stack is now empty, previous frame #%d "
+				"was last and should be used as target\n",
+				frame_no);
+			break;
+		}
+
+		ret = get_signal_stack_stack_regs(vcpu, context,
+				&sig_stacks, &sig_crs, &from, frame_no);
+		if (ret) {
+			pr_err("%s(): copying stack frame #%d failed, error %d\n",
+				__func__, frame_no, ret);
+			return ret;
+		}
+		sig_pcsp_frame = sig_stacks.pcsp_lo.PCSP_lo_base +
+				 sig_stacks.pcsp_hi.PCSP_hi_ind;
+		psp_frame = sig_stacks.psp_lo.PSP_lo_base +
+				sig_stacks.psp_hi.PSP_hi_ind;
+		if (goal_pcsp_frame == sig_pcsp_frame) {
+			DebugSIGST("frame #%d base 0x%llx is equal to goal "
+				"frame base and can be used as target\n",
+				frame_no, sig_pcsp_frame);
+			if (sig_context != NULL) {
+				/* previous frame should be removed */
+				remove_signal_stack_frame(vcpu,
+					sig_from, frames_num, &skip_frames,
+					&skip_traps, &skip_syscalls);
+			}
+			sig_context = context;
+			sig_psp_frame = psp_frame;
+			sig_from = from;
+			break;
+		} else if (goal_pcsp_frame < sig_pcsp_frame) {
+			/* probably next frame is more appropriate as target */
+			if (sig_context != NULL) {
+				DebugSIGST("the current frame #%d is higher then "
+					"goal, but previous frame was even higher "
+					"so it should be removed\n",
+					frame_no);
+				remove_signal_stack_frame(vcpu,
+					sig_from, frames_num, &skip_frames,
+					&skip_traps, &skip_syscalls);
+			}
+			sig_context = context;
+			sig_psp_frame = psp_frame;
+			sig_from = from;
+			context = get_prev_signal_stack(sig_context);
+			if (context != NULL) {
+				frame_no--;
+			}
+			continue;
+		} else {
+			/* the current frame is lower on the stack, and previous */
+			/* one was higher, therefore, the previous frame is most */
+			/* suitable as target */
+			if (sig_context == NULL) {
+				pr_err("%s(): could not find target frame, "
+					"all frames are lower then goal\n",
+					__func__);
+				return -EINVAL;
+			}
+			break;
+		}
+	} while (true);
+
+	if (sig_context == NULL) {
+		DebugSIGST("signal stack contains %d frames "
+			"(%d traps + %d syscalls), nothing to skip\n",
+			frame_no, traps_num - skip_traps,
+			syscalls_num - skip_syscalls);
+		KVM_BUG_ON(skip_frames != 0 || skip_traps != 0 ||
+				skip_syscalls != 0);
+		return 0;
+	}
+
+	if (sig_psp_frame < goal_psp_frame) {
+		pr_err("%s(): PCSP frame is found as goal, but PSP frame "
+			"is lower 0x%llx != 0x%llx, it is bad\n",
+			__func__, sig_psp_frame, goal_psp_frame);
+	}
+
+	/* target frame should be removed instead of top frame */
+	remove_signal_stack_frame(vcpu, sig_from, frames_num,
+			&skip_frames, &skip_traps, &skip_syscalls);
+
+	vcpu_ctxt = &from_context->vcpu_ctxt;
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret |= __put_user(skip_frames, &vcpu_ctxt->skip_frames);
+	ret |= __put_user(skip_traps, &vcpu_ctxt->skip_traps);
+	ret |= __put_user(skip_syscalls, &vcpu_ctxt->skip_syscalls);
+	clear_ts_flag(ts_flag);
+	if (ret) {
+		pr_err("%s(): saving stack frame counters to skip failed, "
+			"error %d\n",
+			__func__, ret);
+		return ret;
+	}
+
+	DebugSIGST("should be skipped %d frames : %d traps + %d syscalls and stay "
+		"%d frames : %d traps + %d syscalls\n",
+		vcpu_ctxt->skip_frames,
+		vcpu_ctxt->skip_traps, vcpu_ctxt->skip_syscalls,
+		frame_no, traps_num - skip_traps, syscalls_num - skip_syscalls);
+
+	return 0;
+}
+
 int kvm_long_jump_return(struct kvm_vcpu *vcpu,
-				kvm_long_jump_info_t *regs_info)
+			kvm_long_jump_info_t *regs_info,
+			bool switch_stack, u64 to_key)
 {
 	kvm_long_jump_info_t user_info;
 	struct signal_stack_context __user *context;
@@ -2072,7 +2814,55 @@ int kvm_long_jump_return(struct kvm_vcpu *vcpu,
 		return ret;
 	}
 
+	stacks.top = user_info.top;
+	stacks.usd_lo.USD_lo_half = user_info.usd_lo;
+	stacks.usd_hi.USD_hi_half = user_info.usd_hi;
+	DebugLJMP("data stack new: top 0x%lx base 0x%llx size 0x%x\n",
+		stacks.top, stacks.usd_lo.USD_lo_base,
+		stacks.usd_hi.USD_hi_size);
+
+	stacks.psp_lo.PSP_lo_half = user_info.psp_lo;
+	stacks.psp_hi.PSP_hi_half = user_info.psp_hi;
+	stacks.pshtp.PSHTP_reg = user_info.pshtp;
+	DebugLJMP("procedure stack new: base 0x%llx size 0x%x ind 0x%x "
+		"PSHTP 0x%llx\n",
+		stacks.psp_lo.PSP_lo_base,
+		stacks.psp_hi.PSP_hi_size,
+		stacks.psp_hi.PSP_hi_ind,
+		stacks.pshtp.PSHTP_reg);
+
+	stacks.pcsp_lo.PCSP_lo_half = user_info.pcsp_lo;
+	stacks.pcsp_hi.PCSP_hi_half = user_info.pcsp_hi;
+	stacks.pcshtp = user_info.pcshtp;
+	DebugLJMP("chain stack new: base 0x%llx size 0x%x ind 0x%x "
+		"PCSHTP 0x%x\n",
+		stacks.pcsp_lo.PCSP_lo_base,
+		stacks.pcsp_hi.PCSP_hi_size,
+		stacks.pcsp_hi.PCSP_hi_ind,
+		stacks.pcshtp);
+
+	crs.cr0_lo.CR0_lo_half = user_info.cr0_lo;
+	crs.cr0_hi.CR0_hi_half = user_info.cr0_hi;
+	crs.cr1_lo.CR1_lo_half = user_info.cr1_lo;
+	crs.cr1_hi.CR1_hi_half = user_info.cr1_hi;
+	DebugLJMP("chain CR0-CR1 : IP 0x%llx wbs 0x%x wpsz 0x%x wfx %d\n",
+		crs.cr0_hi.CR0_hi_IP,
+		crs.cr1_lo.CR1_lo_wbs,
+		crs.cr1_lo.CR1_lo_wpsz,
+		crs.cr1_lo.CR1_lo_wfx);
+
+	/* Switch guest's context signal stack if hw stacks are switched */
+	if (switch_stack) {
+		ret = switch_gst_ctx_signal_stack(to_key);
+		if (!ret)
+			goto failed;
+	}
+
 	context = get_signal_stack();
+
+	ret = calculate_goal_signal_stack(vcpu, context, &stacks, &crs);
+	if (ret != 0)
+		goto failed;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 
@@ -2137,6 +2927,9 @@ int kvm_long_jump_return(struct kvm_vcpu *vcpu,
 		goto failed;
 	}
 
+	if (switch_stack)
+		NATIVE_CLEAR_DAM;
+
 	return 0;
 
 failed:
@@ -2145,7 +2938,7 @@ failed:
 	return ret;
 }
 
-void kvm_guest_vcpu_common_idle(struct kvm_vcpu *vcpu,
+long kvm_guest_vcpu_common_idle(struct kvm_vcpu *vcpu,
 				long timeout, bool interruptable)
 {
 	long out;
@@ -2154,15 +2947,12 @@ void kvm_guest_vcpu_common_idle(struct kvm_vcpu *vcpu,
 
 	BUG_ON(!vcpu->arch.is_hv && vcpu->arch.host_task == NULL);
 
-	if (kvm_guest_vcpu_thread_should_stop(vcpu))
-		goto need_stopped;
-
 	BUG_ON(vcpu->arch.on_idle);
 	BUG_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_in_hcall);
 	if (kvm_test_pending_virqs(vcpu)) {
 		/* guest has pending VIRQs, so complete idle mode right now */
 		/* to inject interrupt while hypercall return */
-		return;
+		return 0;
 	}
 	kvm_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_blocked);
 	vcpu->arch.on_idle = interruptable;
@@ -2188,13 +2978,7 @@ void kvm_guest_vcpu_common_idle(struct kvm_vcpu *vcpu,
 		DebugKVMIDLE("VCPU %d waked up on timeout\n",
 			vcpu->vcpu_id);
 	}
-need_stopped:
-	if (kvm_guest_vcpu_thread_should_stop(vcpu)) {
-		DebugKVMSH("guest VCPU #%d should be stopped\n",
-			vcpu->vcpu_id);
-		kvm_spare_host_vcpu_release(vcpu);
-		do_exit(-EINTR);
-	}
+	return 0;
 }
 
 /*
@@ -2350,7 +3134,7 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void __user *msg,
 		hva_msg = 0;
 	}
 	if (hva_msg == 0) {
-		DebugKVMSH("could not copy string from user\n");
+		DebugKVMSH("need not copy string from user\n");
 		buf = NULL;
 	} else {
 		ret = copy_from_user(buffer, (char *)hva_msg, count);
@@ -2365,7 +3149,7 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void __user *msg,
 	}
 	switch (reason) {
 	case KVM_SHUTDOWN_POWEROFF:
-		exit_reason = KVM_EXIT_SHUTDOWN;
+		exit_reason = KVM_EXIT_E2K_SHUTDOWN;
 		todo = "power off";
 		break;
 	case KVM_SHUTDOWN_RESTART:
@@ -2377,7 +3161,7 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void __user *msg,
 		todo = "panic";
 		break;
 	default:
-		exit_reason = KVM_EXIT_UNKNOWN;
+		exit_reason = KVM_EXIT_E2K_UNKNOWN;
 		todo = "???";
 		break;
 	}
@@ -2388,8 +3172,7 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void __user *msg,
 		/* but it is not yet implemented here */
 	}
 
-	vcpu->arch.exit_reason = EXIT_SHUTDOWN;
-	vcpu->run->exit_reason = exit_reason;
+	vcpu->arch.exit_shutdown_terminate = exit_reason;
 
 	DebugKVMSH("VCPU #%d thread exits\n", vcpu->vcpu_id);
 
@@ -2478,8 +3261,22 @@ do_wait_for_print_vcpu_stack(struct kvm_vcpu *vcpu)
 	kvm_pic_sysrq_deliver(vcpu);
 	DebugGST("goto wait on bit of completion on for VCPU #%d\n",
 		vcpu->vcpu_id);
-	wait_on_bit_action((void *)&vcpu->requests, KVM_REG_SHOW_STATE,
-				wait_for_discard, TASK_KILLABLE);
+
+	do {
+		int r;
+
+		r = wait_on_bit_timeout((void *)&vcpu->requests,
+				KVM_REG_SHOW_STATE, TASK_KILLABLE, 1);
+		if (r == 0)
+			break;
+		r = wait_for_discard(NULL, TASK_KILLABLE);
+		if (r == 0) {
+			kvm_vcpu_yield_to(vcpu);
+		} else {
+			break;
+		}
+	} while (true);
+
 	DO_DUMP_VCPU_STACK(vcpu) = false;
 	DebugGST("waiting is completed for VCPU #%d\n", vcpu->vcpu_id);
 }
@@ -2525,6 +3322,27 @@ do_wait_for_print_all_guest_stacks(struct kvm *kvm)
 	}
 	mutex_unlock(&kvm->lock);
 }
+/* Send SYSRQ to vcpu 0 and exit */
+static inline void
+do_nowait_print_all_guest_stacks(struct kvm *kvm)
+{
+	struct kvm_vcpu *vcpu;
+
+	mutex_lock(&kvm->lock);
+	vcpu = kvm_get_vcpu(kvm, 0);
+	if (vcpu == NULL) {
+		mutex_unlock(&kvm->lock);
+		DebugGST("nothing VCPUs detected\n");
+		return;
+	}
+	kvm_pic_sysrq_deliver(vcpu);
+	if (!test_and_clear_kvm_mode_flag(kvm, KVMF_IN_SHOW_STATE)) {
+		mutex_unlock(&kvm->lock);
+		DebugGST("show of KVM state was not started\n");
+		return;
+	}
+	mutex_unlock(&kvm->lock);
+}
 void wait_for_print_all_guest_stacks(struct work_struct *work)
 {
 	struct kvm *kvm;
@@ -2542,7 +3360,10 @@ void wait_for_print_all_guest_stacks(struct work_struct *work)
 				"in progress\n", kvm->arch.vmid.nr);
 			continue;
 		}
-		do_wait_for_print_all_guest_stacks(kvm);
+		if (kvm->arch.is_hv)
+			do_nowait_print_all_guest_stacks(kvm);
+		else
+			do_wait_for_print_all_guest_stacks(kvm);
 	}
 	mutex_unlock(&kvm_lock);
 }
@@ -2590,6 +3411,9 @@ deferred_print_vcpu_stack(struct kvm_vcpu *vcpu)
 }
 void kvm_print_vcpu_stack(struct kvm_vcpu *vcpu)
 {
+	if (!kvm_debug)
+		return;
+
 	DebugGST("started for VCPU #%d\n", vcpu->vcpu_id);
 	deferred_print_vcpu_stack(vcpu);
 }
@@ -2605,6 +3429,9 @@ deferred_print_all_guest_stacks(void)
 
 void kvm_print_all_vm_stacks(void)
 {
+	if (!kvm_debug)
+		return;
+
 	mutex_lock(&kvm_lock);
 	if (list_empty(&vm_list)) {
 		mutex_unlock(&kvm_lock);
@@ -2613,4 +3440,27 @@ void kvm_print_all_vm_stacks(void)
 	}
 	deferred_print_all_guest_stacks();
 	mutex_unlock(&kvm_lock);
+}
+
+unsigned long kvm_add_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key,
+					bool is_main)
+{
+	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+	gmm_struct_t *gmm = gti->gmm;
+	struct signal_stack *signal_stack =
+			&current_thread_info()->signal_stack;
+
+	if (likely(!is_main)) {
+		return add_gst_ctx_signal_stack(gmm->ctx_stacks, NULL,
+						key, CTX_STACK_READY);
+	} else {
+		return add_gst_ctx_signal_stack(gmm->ctx_stacks, signal_stack,
+						key, CTX_STACK_BUSY);
+		gti->curr_ctx_key = key;
+	}
+}
+
+void kvm_remove_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key)
+{
+	remove_gst_ctx_signal_stack(key);
 }

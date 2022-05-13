@@ -21,6 +21,7 @@ struct ma_chunk {
 
 static int AllocMemory(MemallocParams *p, struct file *filp);
 static int FreeMemory(u64 busaddr, struct file *filp);
+static int mem2alloc_mmap(struct file *filp, struct vm_area_struct *vma);
 
 static long mem2alloc_ioctl(struct file *filp, unsigned int cmd,
 			   unsigned long _arg)
@@ -96,7 +97,9 @@ static struct file_operations mem2alloc_fops = {
 	.open = mem2alloc_open,
 	.release = mem2alloc_release,
 	.compat_ioctl = mem2alloc_ioctl,
-	.unlocked_ioctl = mem2alloc_ioctl
+	.unlocked_ioctl = mem2alloc_ioctl,
+	.mmap = mem2alloc_mmap
+
 };
 
 int __init mem2alloc_init(void)
@@ -205,6 +208,26 @@ static int FreeMemory(u64 busaddr, struct file *filp)
 
 	return r;
 }
+
+static int mem2alloc_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    struct ma_chunk *entry = filp->private_data;
+
+    if (entry == NULL)
+    {
+        return -EINVAL;
+    }
+
+    vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+
+    if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, vma->vm_end - vma->vm_start,
+                        vma->vm_page_prot))
+    {
+       return -EAGAIN;
+    }
+	return 0;
+}
+
 
 module_init(mem2alloc_init);
 module_exit(mem2alloc_cleanup);

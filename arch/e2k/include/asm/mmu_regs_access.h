@@ -168,6 +168,12 @@ extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
 		NATIVE_FLUSH_DCACHE_LINE_OFFSET((virt_addr), (offset))
 
 /*
+ * Read DCACHE L1 fault_reg register
+ */
+#define	READ_L1_FAULT_REG()						\
+		NATIVE_READ_L1_FAULT_REG()
+
+/*
  * Clear DCACHE L1 set
  */
 #define	CLEAR_DCACHE_L1_SET(virt_addr, set)				\

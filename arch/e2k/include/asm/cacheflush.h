@@ -64,13 +64,11 @@ extern void native_flush_icache_page(struct vm_area_struct *vma,
 #define	flush_icache_page(vma, page)	__flush_icache_page(vma, page)
 
 #define	smp_flush_icache_all()
-#define	native_smp_flush_icache_range(start, end)
 #define	native_smp_flush_icache_range_array(icache_range_arr)
 #define	native_smp_flush_icache_page(vma, page)
 #define	native_smp_flush_icache_kernel_line(addr)
 #else	/* CONFIG_SMP */
 extern void smp_flush_icache_all(void);
-extern void native_smp_flush_icache_range(e2k_addr_t start, e2k_addr_t end);
 extern void native_smp_flush_icache_range_array(
 			icache_range_array_t *icache_range_arr);
 extern void native_smp_flush_icache_page(struct vm_area_struct *vma,
@@ -78,24 +76,9 @@ extern void native_smp_flush_icache_page(struct vm_area_struct *vma,
 extern void native_smp_flush_icache_kernel_line(e2k_addr_t addr);
 
 #define flush_icache_all()		smp_flush_icache_all()
-
-#define	flush_icache_range(start, end)			\
-({							\
-	if (cpu_has(CPU_FEAT_FLUSH_DC_IC))		\
-		__flush_icache_range(start, end);	\
-	else						\
-		smp_flush_icache_range(start, end);	\
-})
-
+#define	flush_icache_range(start, end)	__flush_icache_range(start, end);
 #define flush_icache_range_array	smp_flush_icache_range_array
-
-#define	flush_icache_page(vma, page)			\
-({							\
-	if (cpu_has(CPU_FEAT_FLUSH_DC_IC))		\
-		__flush_icache_page(vma, page);		\
-	else						\
-		smp_flush_icache_page(vma, page);	\
-})
+#define	flush_icache_page(vma, page)	__flush_icache_page(vma, page);
 
 #endif	/* ! (CONFIG_SMP) */
 
@@ -161,11 +144,6 @@ native_clear_DCACHE_L1_range(void *virt_addr, size_t len)
 #else	/* ! CONFIG_PARAVIRT_GUEST && ! CONFIG_KVM_GUEST_KERNEL */
 /* it is native kernel without virtualization support */
 /* or native kernel with virtualization support */
-static inline void
-smp_flush_icache_range(e2k_addr_t start, e2k_addr_t end)
-{
-	native_smp_flush_icache_range(start, end);
-}
 static inline void
 smp_flush_icache_range_array(icache_range_array_t *icache_range_arr)
 {

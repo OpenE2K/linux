@@ -21,40 +21,21 @@ int boot_get_e2k_machine_id(void)
 	mdl = idr.IDR_mdl;
 	BootDebugSIC("boot_get_e2k_machine_id() CPU model is %d, IDR 0x%llx\n",
 		mdl, idr.IDR_reg);
-#if CONFIG_E2K_MINVER == 2
-	if (mdl == IDR_ES2_DSP_MDL) {
-		mach_id = MACHINE_ID_ES2_DSP;
-	} else if (mdl == IDR_ES2_RU_MDL) {
-		mach_id = MACHINE_ID_ES2_RU;
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 3
 	if (mdl == IDR_E2S_MDL) {
 		mach_id = MACHINE_ID_E2S;
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 4
-	if (mdl == IDR_E8C_MDL) {
+	} else if (mdl == IDR_E8C_MDL) {
 		mach_id = MACHINE_ID_E8C;
 	} else if (mdl == IDR_E1CP_MDL) {
 		mach_id = MACHINE_ID_E1CP;
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 5
-	if (mdl == IDR_E8C2_MDL) {
+	} else if (mdl == IDR_E8C2_MDL) {
 		mach_id = MACHINE_ID_E8C2;
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 6
-	if (mdl == IDR_E12C_MDL) {
+	} else if (mdl == IDR_E12C_MDL) {
 		mach_id = MACHINE_ID_E12C;
 	} else if (mdl == IDR_E16C_MDL) {
 		mach_id = MACHINE_ID_E16C;
 	} else if (mdl == IDR_E2C3_MDL) {
 		mach_id = MACHINE_ID_E2C3;
-	} else
-#endif
-	{
+	} else {
 		BootDebugSIC("Undefined CPU model number %d\n", mdl);
 		return MACHINE_ID_NONE;
 	}

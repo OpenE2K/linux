@@ -195,29 +195,10 @@ typedef struct bootblock_struct {
 	boot_times_t	boot_times;		/* boot load times */
 	__u16		kernel_flags;		/* kernel flags, boot should */
 						/* not modify it */
-	__u8		reserved2;		/* reserved2 */
-
-	__u8	cnt_points_num_deprecated;	/* number of control points */
-						/* all memory will be devided */
-						/* on this number of parts */
-	__u8	cur_cnt_point_deprecated;	/* current # of active */
-						/* control point (running */
-						/* part) */
-	__u8	mem_cnt_points_deprecated;	/* number of started control */
-						/* points (ready in the memory) */
-	__u8	disk_cnt_points_deprecated;	/* number of control points */
-						/* saved on the disk (ready  */
-						/* to be loaded from disk) */
-	__u8	cnt_points_created_deprecated;	/* all control points created */
-						/* in the memory and on disk */
-	__u64	dump_sector_deprecated;		/* start sector # to dump */
-						/* physical memory */
-	__u64	cnt_point_sector_deprecated;	/* start sector # to save */
-						/* restore control points */
-	__u16	dump_dev_deprecated;		/* disk # to dump memory */
-	__u16	cnt_point_dev_deprecated;	/* disk # for save/restore */
-						/* control point */
-
+	__u16		reserved2;		/* reserved2 */
+	__u32		reserved3;		/* reserved3 */
+	__u64		reserved4[2];		/* reserved4 */
+	__u32		reserved5;		/* reserved5 */
 	__u16		boot_flags;		/* boot flags: if non */
 						/* zero then this structure */
 						/* is recovery info */
@@ -267,7 +248,7 @@ extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure */
 #define	SIMULATOR_MACH_FLAG		0x0001	/* system is running on */
 						/* simulator */
 #define	PROTOTYPE_MACH_FLAG_DEPRECATED	0x0002	/* machine is prototype */
-#define	IOHUB_MACH_FLAG			0x0004	/* machine has IOHUB */
+#define	IOHUB_MACH_FLAG_DEPRECATED	0x0004	/* machine has IOHUB */
 #define OLDMGA_MACH_FLAG		0x0008	/* MGA card has old firmware */
 #define MULTILINK_MACH_FLAG		0x0010	/* some nodes are connected */
 						/* by sevral IP links */

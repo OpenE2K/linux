@@ -32,6 +32,20 @@ native_guest_ptr_to_host(void *ptr, int size)
 	return ptr;
 }
 
+static inline bool
+native_ftype_has_sw_fault(tc_fault_type_t ftype)
+{
+	/* software faults are not used by native & host kernel */
+	/* but software bit can be set by hardware and it is wrong */
+	return !ftype_test_is_kvm_fault_injected(ftype);
+}
+
+static inline bool
+native_ftype_test_sw_fault(tc_fault_type_t ftype)
+{
+	return false;
+}
+
 static inline void
 native_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
 		u32 data_tag, u64 st_rec_opc, u64 data_ext, u32 data_ext_tag,
@@ -142,6 +156,19 @@ extern e2k_addr_t print_address_ptes(pgd_t *pgdp, e2k_addr_t address,
 #if	!defined(CONFIG_PARAVIRT_GUEST) && !defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is native kernel without any virtualization */
 /* or it is native host kernel with virtualization support */
+
+static inline bool
+ftype_has_sw_fault(tc_fault_type_t ftype)
+{
+	return native_ftype_has_sw_fault(ftype);
+}
+
+static inline bool
+ftype_test_sw_fault(tc_fault_type_t ftype)
+{
+	return native_ftype_test_sw_fault(ftype);
+}
+
 static inline void
 recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data, u32 data_tag,
 		u64 st_rec_opc, u64 data_ext, u32 data_ext_tag, u64 opc_ext,
@@ -212,7 +239,8 @@ static inline int guest_addr_to_host(void **addr, const pt_regs_t *regs)
 	return native_guest_addr_to_host(addr);
 }
 
-static inline void *guest_ptr_to_host(void *ptr, int size, const pt_regs_t *regs)
+static inline void *guest_ptr_to_host(void *ptr, bool is_write,
+				int size, const pt_regs_t *regs)
 {
 	return native_guest_ptr_to_host(ptr, size);
 }

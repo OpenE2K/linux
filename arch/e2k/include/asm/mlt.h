@@ -3,11 +3,9 @@
 
 #include <asm/cpu_regs_types.h>
 #include <asm/types.h>
-#include <asm/es2.h>
 
 
-#define	NATIVE_MLT_SIZE		(machine.mlt_size)
-#define NATIVE_MAX_MLT_SIZE	ES2_MLT_SIZE
+#define	NATIVE_MLT_SIZE		16
 
 #define REG_MLT_N_SHIFT		7
 #define	REG_MLT_DW_SHIFT	5
@@ -18,7 +16,7 @@
 
 typedef unsigned long	e2k_mlt_line_t;
 
-typedef struct e2k_mlt_dw0_v2_fields
+typedef struct e2k_mlt_dw0_v3_fields
 {
 	e2k_mlt_line_t	resc		: 4;	/* [3:0] */
 	e2k_mlt_line_t	mask		: 8;	/* [11:4] */
@@ -29,7 +27,7 @@ typedef struct e2k_mlt_dw0_v2_fields
 	e2k_mlt_line_t	hit		: 1;	/* [52] */
 	e2k_mlt_line_t	val		: 1;	/* [53] */
 	e2k_mlt_line_t	unresolved	: 10; 	/* [63:54] */
-} e2k_mlt_dw0_v2_fields_t;
+} e2k_mlt_dw0_v3_fields_t;
 
 typedef struct e2k_mlt_dw0_v6_fields
 {
@@ -45,7 +43,7 @@ typedef struct e2k_mlt_dw0_v6_fields
 /* One reg (string) in MLT table */
 typedef struct e2k_mlt_entry {
 	union {
-		e2k_mlt_dw0_v2_fields_t	v2_fields;
+		e2k_mlt_dw0_v3_fields_t	v3_fields;
 		e2k_mlt_dw0_v6_fields_t	v6_fields;
 		e2k_mlt_line_t		word;
 	} dw0;
@@ -60,8 +58,8 @@ typedef struct e2k_mlt_entry {
 } e2k_mlt_entry_t;
 
 typedef struct e2k_mlt {
-	int num;	/* number of entries in the MLT */
-	e2k_mlt_entry_t mlt[NATIVE_MAX_MLT_SIZE];	/* valid MLT entries */
+	int num;				/* number of entries in the MLT */
+	e2k_mlt_entry_t mlt[NATIVE_MLT_SIZE];	/* valid MLT entries */
 } e2k_mlt_t;
 
 #define	NATIVE_READ_MLT_REG(addr) \

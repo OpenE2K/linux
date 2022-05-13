@@ -18,25 +18,32 @@
 #include <linux/export.h>
 #include <linux/sched.h>
 
+#include <asm/tlb.h>
 #include <asm/thread_info.h>
 #include <asm/processor.h>
 #include <asm/io.h>
 #include <asm/e90s.h>
 
-#define R2000P_MAX_STATES	4
-
 /* ASI Regs: */
 #define E90S_R2000_PWRCTRL_REG_ADDR	0x38
 
+static struct platform_device *e90s_idle_pdev;
 
-static struct platform_device *pdev;
+static void e90s_enter_c6(void)
+{
+	struct mm_struct *mm;
+	save_and_clear_fpu();
+	__e90s_enter_c6();
+	mm = current->active_mm;
+	tsb_context_switch_ctx(mm, CTX_HWBITS(mm->context));
+	local_irq_enable();
+}
 
 static int e90s_enter_idle(struct cpuidle_device *dev,
 				struct cpuidle_driver *drv, int index)
 {
 	int state;
 
-	local_irq_enable();
 	switch (index) {
 	case 0: return index;
 	case 1:
@@ -47,11 +54,13 @@ static int e90s_enter_idle(struct cpuidle_device *dev,
 		break;
 	case 3:
 		state = 6;	/* Note: for R2000 index < 3 */
-		break;
+		e90s_enter_c6();
+		return index;
 	default:
 		return -1;
 	}
-	writeq_asi(state, E90S_R2000_PWRCTRL_REG_ADDR, ASI_LSU_CONTROL);
+	local_irq_enable();
+	writeq_asi(state, E90S_R2000_PWRCTRL_REG_ADDR, ASI_DCU_CONTROL_REG);
 	return index;
 }
 
@@ -86,25 +95,17 @@ static struct cpuidle_driver e90s_idle_driver = {
 		.name			= "C6",
 		.desc			= "Reduces CPU voltage down to 0 V",
 	},
-	.state_count = R2000P_MAX_STATES, /* will be reset for R2000 */
+	.state_count = 2, /* will be adjusted later */
 };
 
 /* Initialize CPU idle by registering the idle states */
 static int e90s_cpuidle_probe(struct platform_device *pdev)
 {
-	int rev = get_cpu_revision();
-	if (rev < 0x10)
-		return -EINVAL;
-	if (rev < 0x20) /* walk around bug 123699 */
-		e90s_idle_driver.state_count = 2;
 	return cpuidle_register(&e90s_idle_driver, NULL);
 }
 
 static int e90s_cpuidle_remove(struct platform_device *pdev)
 {
-	int rev = get_cpu_revision();
-	if (rev < 0x10)
-		return -EINVAL;
 	cpuidle_unregister(&e90s_idle_driver);
 	return 0;
 }
@@ -115,21 +116,31 @@ static struct platform_driver e90s_cpuidle_driver = {
 	.driver = {
 		   .name = "e90s_cpuidle",
 		   .owner = THIS_MODULE,
-		   },
+	},
 };
 
 static int __init e90s_cpuidle_init(void)
 {
 	int rc;
-	int rev = get_cpu_revision();
-	if (rev < 0x10)
-		return -ENODEV;
-	pdev = platform_device_alloc("e90s_cpuidle", 0);
-	if (!pdev)
+	/* see head_64.S */
+	BUILD_BUG_ON(sizeof(system_state) != 4 || SYSTEM_BOOTING != 0);
+	switch (e90s_get_cpu_type()) {
+	case E90S_CPU_R1000:
+		return 0;
+	case E90S_CPU_R2000:
+		if (get_cpu_revision() > 0x18) /* bug 123699 */
+			e90s_idle_driver.state_count = 3;
+		break;
+	case E90S_CPU_R2000P:
+		e90s_idle_driver.state_count = 4;
+		break;
+	}
+
+	e90s_idle_pdev = platform_device_alloc("e90s_cpuidle", 0);
+	if (!e90s_idle_pdev)
 		return -ENOMEM;
 
-
-	rc = platform_device_add(pdev);
+	rc = platform_device_add(e90s_idle_pdev);
 	if (rc) {
 		rc = -ENODEV;
 		goto undo_platform_dev_alloc;
@@ -140,18 +151,18 @@ static int __init e90s_cpuidle_init(void)
 	return 0;
 
 undo_platform_dev_add:
-	platform_device_del(pdev);
+	platform_device_del(e90s_idle_pdev);
 undo_platform_dev_alloc:
-	platform_device_put(pdev);
+	platform_device_put(e90s_idle_pdev);
 	return rc;
 }
 
 static void __exit e90s_cpuidle_exit(void)
 {
 	platform_driver_unregister(&e90s_cpuidle_driver);
-	if (pdev) {
-		platform_device_del(pdev);
-		platform_device_put(pdev);
+	if (e90s_idle_pdev) {
+		platform_device_del(e90s_idle_pdev);
+		platform_device_put(e90s_idle_pdev);
 	}
 }
 

@@ -942,49 +942,30 @@ sparc_ramdisk_image64:
 	.word	_end
 
 sparc64_boot:
-#ifdef CONFIG_SMP
-	rdpr	%ver, %g1
-	srlx	%g1, 24, %g1
-	and	%g1, 0xff, %g1
-	cmp	%g1, 0x20
-	bl	2f
-	 nop
-	set	CEPIC_CTRL, %g1
-	lduwa	[%g1]ASI_EPIC, %g1
-	andcc	%g1, CEPIC_CTRL_BSP_CORE, %g0
-	bz	1f
-	 nop
-	b	3f
-	 nop
-2:	set	APIC_BSP, %g1
-	lduwa	[%g1]ASI_LAPIC, %g1
-	andcc	%g1, APIC_BSP_IS_BSP, %g0
-	bz	1f
-	 nop
-3:
-#endif
-	/* Boot E90S pass bootblock pointer in %o2, save it */
-	set	bootblock, %g1
-	stx	%o2, [%g1]
-
-1:
 	/* Initialize processor registers */
 	wrpr    0, %tl
-	wrpr    PSTATE_PRIV, %pstate
-	wr      %g0, 1<<2, %fprs
+	wrpr    PSTATE_PRIV|PSTATE_PEF, %pstate
+	wr      %g0, 0, %fprs
 	wr      %g0, 0, %ccr
-	wr      %g0, 0, %asi
-#ifndef CONFIG_MCST
-	setx    0, %g1, %g2
-	wrpr    %g2, %tick
-	setx    0, %g1, %g2
-	mov	%g2, %asr24
-#endif
+	wr	%g0, ASI_P, %asi
+
+	/* E90S-boot passes bootblock pointer in %o2 */
+	mov	%o2, %g7
+
 	mov     0x1, %g2
 	sllx    %g2, 63, %g2
-	mov     %g2, %asr23
-	mov     %g2, %asr25
-	mov     %g0, %y
+
+	rd	%tick, %g1
+	andn	%g1, %g2, %g1
+	wrpr	%g1, %tick /* Let the user get at TICK too. */
+
+	rd	%asr24, %g1
+	andn	%g1, %g2, %g1
+	wr	%g1, %asr24 /* Let the user get at STICK too. */
+
+	mov     %g2, %asr23 /*  TICK_COMPARE: disable interrupt */
+	mov     %g2, %asr25 /* STICK_COMPARE: disable interrupt */
+	mov     0, %y
 	wrpr    0xf, %pil
 	wrpr    0, %cwp
 	wrpr    6, %cansave
@@ -1028,11 +1009,11 @@ sparc64_boot:
 	stxa	%g0, [%g0] ASI_AFSR
 	stxa	%g0, [%g0] ASI_AFAR
 
-/* Clear tlb*/
+/* Clear tlb */
 	mov     0x80, %g1
 	stxa    %g0, [%g1]ASI_IMMU_DEMAP
 	stxa    %g0, [%g1]ASI_DMMU_DEMAP
-	
+
 	/* Set ctx 0 */
 	mov	PRIMARY_CONTEXT, %g1
 	stxa	%g0, [%g1] ASI_DMMU
@@ -1060,25 +1041,53 @@ sparc64_boot:
 	stxa	%g0, [%g1] ASI_DMMU
 	stxa	%g0, [%g1] ASI_IMMU
 
-	setx DCU_ME|DCU_RE|DCU_HPE|DCU_SPE|DCU_SL|DCU_WE|DCU_DM|DCU_IM|DCU_DC|DCU_IC, %g2, %g7
+	/*
+	 * Set MCNTL register to enable STLB for N Kb pages and
+	 * E90S TSBRP type
+	 */
+	set	E90S_MCNTL_IRM_DEFAULT | E90S_MCNTL_DRM01_DEFAULT | E90S_MCNTL_DRM23_DEFAULT, %g1
+	set	E90S_MCNTL, %g2
+	stxa    %g1, [%g2]ASI_DCU_CONTROL_REG
+
+	/* Set jump prediction area size */
+	set	0x10, %g1
+	ldxa	[%g1]ASI_IIU_INST_TRAP, %g2
+#ifdef	CONFIG_SPARC64_PAGE_SIZE_64KB
+	or	%g2, 1 << 8, %g2
+#else
+	andn	%g2, 1 << 8, %g2
+#endif
+	stxa    %g2, [%g1]ASI_IIU_INST_TRAP
+	stxa	%g0, [%g0] ASI_IC_TAG
+
+#ifndef	CONFIG_RMO
+	set	E90S_DBGJMP, %g1
+	ldxa	[%g1]ASI_DCU_CONTROL_REG, %g2
+	set	DBGJMP_MM_MASK, %g3
+	andn	%g2, %g3, %g2
+	or	%g2, DBGJMP_MM_PSTATE_MM, %g2
+	membar	#Sync
+	stxa    %g2, [%g1]ASI_DCU_CONTROL_REG
+	membar	#Sync
+#endif	/*CONFIG_RMO*/
+
+	setx DCU_ME|DCU_RE|DCU_HPE|DCU_SPE|DCU_SL|DCU_WE|DCU_DM|DCU_IM|DCU_DC|DCU_IC, %g2, %g1
 	set 1f, %l0
 	call  %l0
-	 stxa	%g7, [%g0] ASI_DCU_CONTROL_REG
+	 stxa	%g1, [%g0] ASI_DCU_CONTROL_REG
 1:
 	membar	#Sync
 
 cheetah_boot:
-	/*
-	 * Make sure we are in privileged mode, have address masking,
-         * using the ordinary globals and have enabled floating
-         * point.
-	 *
-	 * Again, typically PROM has left %pil at 13 or similar, and
-	 * (PSTATE_PRIV | PSTATE_PEF | PSTATE_IE) in %pstate.
-         */
-	wrpr    %g0, (PSTATE_PRIV|PSTATE_PEF|PSTATE_IE), %pstate
-	wr	%g0, 0, %fprs
+	call default_check_phys_apicid_online
+	 nop
+	brz	%o0, 1f
+	 nop
 
+	sethi	%hi(__e90s_exit_c6), %g1
+	jmpl	%g1 + %lo(__e90s_exit_c6), %g0
+	 nop
+1:
 #ifdef CONFIG_SMP
 	rdpr	%ver, %g1
 	srlx	%g1, 24, %g1
@@ -1101,8 +1110,10 @@ cheetah_boot:
 3:	call	sparc64_cpu_startup
 	 nop
 #endif
+1:	set	bootblock, %g1
+	stx	%g7, [%g1] /* save bootblock pointer */
 
-1:	call	cheetah_tlb_fixup
+	call	cheetah_tlb_fixup
 	 nop
 
 	__REF
@@ -1175,42 +1186,6 @@ cheetah_tlb_fixup:
 setup_trap_table:
 	save	%sp, -192, %sp
 
-	/* Force interrupts to be disabled. */
-	rdpr	%pstate, %o1
-	andn	%o1, PSTATE_IE, %o1
-	wrpr	%o1, 0x0, %pstate
-	wrpr	%g0, 15, %pil
-
-	/*
-	 * Set MCNTL register to enable STLB for N Kb pages and
-	 * E90S TSBRP type
-	 */
-	set	E90S_MCNTL_IRM_DEFAULT | E90S_MCNTL_DRM01_DEFAULT | E90S_MCNTL_DRM23_DEFAULT, %g1
-	set	E90S_MCNTL, %g2
-	stxa    %g1, [%g2]ASI_DCU_CONTROL_REG
-
-	/* Set jump prediction area size */
-	set	0x10, %g1
-	ldxa	[%g1]ASI_IIU_INST_TRAP, %g2
-#ifdef	CONFIG_SPARC64_PAGE_SIZE_64KB
-	or	%g2, 1 << 8, %g2
-#else
-	andn	%g2, 1 << 8, %g2
-#endif
-	stxa    %g2, [%g1]ASI_IIU_INST_TRAP
-	stxa	%g0, [%g0] ASI_IC_TAG
-
-#ifndef	CONFIG_RMO
-	set	E90S_DBGJMP, %g1
-	ldxa	[%g1]ASI_DCU_CONTROL_REG, %g2
-	set	DBGJMP_MM_MASK, %g3
-	andn	%g2, %g3, %g2
-	or	%g2, DBGJMP_MM_PSTATE_MM, %g2
-	membar	#Sync
-	stxa    %g2, [%g1]ASI_DCU_CONTROL_REG
-	membar	#Sync
-#endif	/*CONFIG_RMO*/
-
 	set	sparc64_ttable_tl0, %o0
 	wrpr	%o0, %tba
 
@@ -1229,28 +1204,9 @@ setup_trap_table:
 	sllx	%o0, SMP_CACHE_BYTES_SHIFT, %g1
 	add	%g6, %g1, %g6
 
-	wrpr	%o1, 0, %pstate
-
-	/* Kill PROM timer */
-	sethi	%hi(0x80000000), %o2
-	sllx	%o2, 32, %o2
-	wr	%o2, 0, %tick_cmpr
-
-	/* Disable STICK_INT interrupts. */
-
-	sethi	%hi(0x80000000), %o2
-	sllx	%o2, 32, %o2
-	wr	%o2, %asr25
-
-	/* Now we can turn interrupts back on. */
-#if	1 /* hardware error workaround: timer interrupts are active after */
-	/* machine reset/power on */
-	rdpr	%pstate, %o1
+	wrpr	%g0, PIL_NORMAL_MAX, %pil
 	or	%o1, PSTATE_IE, %o1
-	wrpr	%o1, 0, %pstate
-#endif	/* 0 hardware error workaround: timer interrupts are active after */
-	/* machine reset/power on */
-	wrpr	%g0, 0x0, %pil
+	wrpr	%o1, %pstate
 
 	ret
 	 restore

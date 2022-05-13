@@ -19,7 +19,7 @@
 #include <asm/pgtable_types.h>
 #include <asm/machdep.h>
 #include <asm/page.h>
-#include <asm/pgtable-v2.h>
+#include <asm/pgtable-v3.h>
 #include <asm/pgtable-v6.h>
 #include <asm/p2v/boot_v2p.h>
 
@@ -36,11 +36,53 @@ do { \
 
 #ifndef __ASSEMBLY__
 
+
+/* See comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
+enum page_cache_mode {
+	PCM_WB,
+	PCM_WC,
+	PCM_UC,
+	PCM_UNKNOWN
+};
+
+extern bool use_pcie_no_snoop;
+
+/*
+ * Returns PTE memory type for RAM pages taking
+ * into account PCIe No Snoop supoport.
+ */
+static inline pte_mem_type_t memtype2pte_mem_type(enum page_cache_mode memtype)
+{
+	/*
+	 * Make sure to use coherent mapping if PCIe No Snoop is not supported
+	 * as in that case device memory accesses are always coherent.
+	 */
+	switch (memtype) {
+	case PCM_WB:
+	case PCM_UNKNOWN:
+		return GEN_CACHE_MT;
+	case PCM_WC:
+		/* See comment before check_cacheflush_on_remap(), part 3 */
+		if (cpu_has(CPU_HWBUG_PCIE_NOSNOOP_PARTIAL))
+			return GEN_NON_CACHE_MT;
+		return (use_pcie_no_snoop) ? EXT_PREFETCH_MT : GEN_NON_CACHE_MT;
+	case PCM_UC:
+		/* See comment before check_cacheflush_on_remap(), part 3 */
+		if (cpu_has(CPU_HWBUG_PCIE_NOSNOOP_PARTIAL))
+			return GEN_NON_CACHE_ORDERED_MT;
+		return (use_pcie_no_snoop) ? EXT_NON_PREFETCH_MT
+					   : GEN_NON_CACHE_ORDERED_MT;
+	default:
+		WARN_ONCE(1, "Got an impossible value for enum, some type error in kernel?");
+		return GEN_NON_CACHE_MT;
+	}
+}
+
 /* max. number of physical address bits (architected) */
 static inline int
 mmu_max_phys_addr_bits(bool mmu_pt_v6)
 {
-	return (mmu_pt_v6) ? E2K_MAX_PHYS_BITS_V6 : E2K_MAX_PHYS_BITS_V2;
+	return (mmu_pt_v6) ? E2K_MAX_PHYS_BITS_V6 : E2K_MAX_PHYS_BITS_V3;
 }
 static inline int
 e2k_max_phys_addr_bits(void)
@@ -135,27 +177,6 @@ get_pte_level_page_size(void)
 	return get_e2k_pt_level_page_size(E2K_PTE_LEVEL_NUM);
 }
 
-static inline int
-get_e2k_pt_level_huge_ptes_num(int level_id)
-{
-	return get_pt_struct_level_huge_ptes_num(&pgtable_struct, level_id);
-}
-static inline int
-get_pgd_level_huge_ptes_num(void)
-{
-	return get_e2k_pt_level_huge_ptes_num(E2K_PGD_LEVEL_NUM);
-}
-static inline int
-get_pud_level_huge_ptes_num(void)
-{
-	return get_e2k_pt_level_huge_ptes_num(E2K_PUD_LEVEL_NUM);
-}
-static inline int
-get_pmd_level_huge_ptes_num(void)
-{
-	return get_e2k_pt_level_huge_ptes_num(E2K_PMD_LEVEL_NUM);
-}
-
 /*
  * PTE format
  */
@@ -166,7 +187,7 @@ mmu_phys_addr_to_pte_pfn(e2k_addr_t phys_addr, bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return _PAGE_PADDR_TO_PFN_V6(phys_addr);
 	else
-		return _PAGE_PADDR_TO_PFN_V2(phys_addr);
+		return _PAGE_PADDR_TO_PFN_V3(phys_addr);
 }
 static inline e2k_addr_t
 mmu_pte_pfn_to_phys_addr(pteval_t pte_val, bool mmu_pt_v6)
@@ -174,7 +195,7 @@ mmu_pte_pfn_to_phys_addr(pteval_t pte_val, bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return _PAGE_PFN_TO_PADDR_V6(pte_val);
 	else
-		return _PAGE_PFN_TO_PADDR_V2(pte_val);
+		return _PAGE_PFN_TO_PADDR_V3(pte_val);
 }
 
 static inline pteval_t
@@ -198,7 +219,7 @@ mmu_kernel_protected_text_pte_val(pteval_t kernel_text_pte_val, e2k_addr_t cui,
 		return convert_kernel_text_pte_val_v6_to_protected(
 						kernel_text_pte_val);
 	else
-		return convert_kernel_text_pte_val_v2_to_protected(
+		return convert_kernel_text_pte_val_v3_to_protected(
 						kernel_text_pte_val, cui);
 }
 static inline pteval_t
@@ -216,7 +237,7 @@ static inline enum pte_mem_type get_pte_val_memory_type(pteval_t pte_val)
 	if (MMU_IS_PT_V6())
 		return get_pte_val_v6_memory_type(pte_val);
 	else
-		return get_pte_val_v2_memory_type(pte_val);
+		return get_pte_val_v3_memory_type(pte_val);
 }
 static inline pteval_t set_pte_val_memory_type(pteval_t pte_val,
 		pte_mem_type_t memory_type)
@@ -224,7 +245,7 @@ static inline pteval_t set_pte_val_memory_type(pteval_t pte_val,
 	if (MMU_IS_PT_V6())
 		return set_pte_val_v6_memory_type(pte_val, memory_type);
 	else
-		return set_pte_val_v2_memory_type(pte_val, memory_type);
+		return set_pte_val_v3_memory_type(pte_val, memory_type);
 }
 #define	_PAGE_GET_MEM_TYPE(pte_val)	\
 		get_pte_val_memory_type(pte_val)
@@ -237,7 +258,7 @@ mmu_fill_pte_val_flags(const uni_pteval_t uni_flags, bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return fill_pte_val_v6_flags(uni_flags);
 	else
-		return fill_pte_val_v2_flags(uni_flags);
+		return fill_pte_val_v3_flags(uni_flags);
 }
 static inline pteval_t
 mmu_get_pte_val_flags(pteval_t pte_val, const uni_pteval_t uni_flags,
@@ -246,7 +267,7 @@ mmu_get_pte_val_flags(pteval_t pte_val, const uni_pteval_t uni_flags,
 	if (mmu_pt_v6)
 		return get_pte_val_v6_flags(pte_val, uni_flags);
 	else
-		return get_pte_val_v2_flags(pte_val, uni_flags);
+		return get_pte_val_v3_flags(pte_val, uni_flags);
 }
 static inline bool
 mmu_test_pte_val_flags(pteval_t pte_val, const uni_pteval_t uni_flags,
@@ -261,7 +282,7 @@ mmu_set_pte_val_flags(pteval_t pte_val, const uni_pteval_t uni_flags,
 	if (mmu_pt_v6)
 		return set_pte_val_v6_flags(pte_val, uni_flags);
 	else
-		return set_pte_val_v2_flags(pte_val, uni_flags);
+		return set_pte_val_v3_flags(pte_val, uni_flags);
 }
 static inline pteval_t
 mmu_clear_pte_val_flags(pteval_t pte_val, const uni_pteval_t uni_flags,
@@ -270,7 +291,7 @@ mmu_clear_pte_val_flags(pteval_t pte_val, const uni_pteval_t uni_flags,
 	if (mmu_pt_v6)
 		return clear_pte_val_v6_flags(pte_val, uni_flags);
 	else
-		return clear_pte_val_v2_flags(pte_val, uni_flags);
+		return clear_pte_val_v3_flags(pte_val, uni_flags);
 }
 static __must_check inline pteval_t
 fill_pte_val_flags(const uni_pteval_t uni_flags)
@@ -309,7 +330,7 @@ mmu_get_pte_val_changeable_mask(bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return get_pte_val_v6_changeable_mask();
 	else
-		return get_pte_val_v2_changeable_mask();
+		return get_pte_val_v3_changeable_mask();
 }
 static inline pteval_t
 mmu_get_huge_pte_val_changeable_mask(bool mmu_pt_v6)
@@ -317,7 +338,7 @@ mmu_get_huge_pte_val_changeable_mask(bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return get_huge_pte_val_v6_changeable_mask();
 	else
-		return get_huge_pte_val_v2_changeable_mask();
+		return get_huge_pte_val_v3_changeable_mask();
 }
 static inline pteval_t
 mmu_get_pte_val_reduceable_mask(bool mmu_pt_v6)
@@ -325,7 +346,7 @@ mmu_get_pte_val_reduceable_mask(bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return get_pte_val_v6_reduceable_mask();
 	else
-		return get_pte_val_v2_reduceable_mask();
+		return get_pte_val_v3_reduceable_mask();
 }
 static inline pteval_t
 mmu_get_pte_val_restricted_mask(bool mmu_pt_v6)
@@ -333,7 +354,7 @@ mmu_get_pte_val_restricted_mask(bool mmu_pt_v6)
 	if (mmu_pt_v6)
 		return get_pte_val_v6_restricted_mask();
 	else
-		return get_pte_val_v2_restricted_mask();
+		return get_pte_val_v3_restricted_mask();
 }
 static inline pteval_t
 get_pte_val_changeable_mask(void)
@@ -431,10 +452,10 @@ get_pte_val_restricted_mask(void)
 
 #define _PAGE_KERNEL_RX_NOT_GLOB	\
 		_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				 UNI_PAGE_PRIV | UNI_PAGE_HW_ACCESS)
+				 UNI_PAGE_PRIV | UNI_PAGE_ACCESSED)
 #define _PAGE_KERNEL_RO_NOT_GLOB	\
 		_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				UNI_PAGE_PRIV | UNI_PAGE_HW_ACCESS | \
+				UNI_PAGE_PRIV | UNI_PAGE_ACCESSED | \
 				UNI_PAGE_NON_EX)
 #define _PAGE_KERNEL_RWX_NOT_GLOB	\
 		_PAGE_SET(_PAGE_KERNEL_RX_NOT_GLOB, \
@@ -477,8 +498,8 @@ get_pte_val_restricted_mask(void)
 #define _PAGE_IO_MAP_BASE	_PAGE_KERNEL_RW
 #define _PAGE_IO_MAP		\
 		_PAGE_SET_MEM_TYPE(_PAGE_IO_MAP_BASE, EXT_NON_PREFETCH_MT)
-#define _PAGE_IO_PORTS		\
-		_PAGE_SET_MEM_TYPE(_PAGE_IO_MAP_BASE, EXT_NON_PREFETCH_MT)
+#define _PAGE_IO_MAP_WC		\
+		_PAGE_SET_MEM_TYPE(_PAGE_IO_MAP_BASE, EXT_PREFETCH_MT)
 
 #define _PAGE_KERNEL_SWITCHING_IMAGE	\
 		_PAGE_SET_MEM_TYPE(_PAGE_KERNEL_RX_NOT_GLOB, EXT_CONFIG_MT)
@@ -492,7 +513,7 @@ get_pte_val_restricted_mask(void)
 			UNI_PAGE_WRITE | UNI_PAGE_DIRTY | UNI_PAGE_NON_EX)
 #define _PAGE_USER_RO_ACCESSED	\
 		_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-			UNI_PAGE_HW_ACCESS | UNI_PAGE_NON_EX)
+			UNI_PAGE_ACCESSED | UNI_PAGE_NON_EX)
 
 #define PAGE_KERNEL		__pgprot(_PAGE_KERNEL)
 #define PAGE_KERNEL_RO		__pgprot(_PAGE_KERNEL_RO)
@@ -544,9 +565,8 @@ get_pte_val_restricted_mask(void)
 #define PAGE_CNTP_MAPPED_MEM	\
 		__pgprot(_PAGE_SET(_PAGE_KERNEL_IMAGE, UNI_PAGE_NON_EX))
 
-#define PAGE_X86_IO_PORTS	__pgprot(_PAGE_IO_PORTS)
-
 #define PAGE_IO_MAP		__pgprot(_PAGE_IO_MAP)
+#define PAGE_IO_MAP_WC		__pgprot(_PAGE_IO_MAP_WC)
 
 #define	PAGE_KERNEL_SWITCHING_TEXT	__pgprot(_PAGE_KERNEL_SWITCHING_IMAGE)
 #define	PAGE_KERNEL_SWITCHING_DATA	\
@@ -558,29 +578,26 @@ get_pte_val_restricted_mask(void)
 
 #define PAGE_SHARED		\
 		__pgprot(_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				UNI_PAGE_HW_ACCESS | UNI_PAGE_SW_ACCESS | \
-				UNI_PAGE_WRITE | UNI_PAGE_NON_EX))
+				UNI_PAGE_ACCESSED | UNI_PAGE_WRITE | \
+				UNI_PAGE_NON_EX))
 #define PAGE_SHARED_EX		\
 		__pgprot(_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				UNI_PAGE_HW_ACCESS | UNI_PAGE_SW_ACCESS | \
-				UNI_PAGE_WRITE))
+				UNI_PAGE_ACCESSED | UNI_PAGE_WRITE))
 #define	PAGE_COPY_NEX		\
 		__pgprot(_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				UNI_PAGE_HW_ACCESS | UNI_PAGE_SW_ACCESS | \
-				UNI_PAGE_NON_EX))
+				UNI_PAGE_ACCESSED | UNI_PAGE_NON_EX))
 #define	PAGE_COPY_EX		\
 		__pgprot(_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				UNI_PAGE_HW_ACCESS | UNI_PAGE_SW_ACCESS))
+				UNI_PAGE_ACCESSED))
 
 #define	PAGE_COPY		PAGE_COPY_NEX
 
 #define PAGE_READONLY		\
 		__pgprot(_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				UNI_PAGE_HW_ACCESS | UNI_PAGE_SW_ACCESS | \
-				UNI_PAGE_NON_EX))
+				UNI_PAGE_ACCESSED | UNI_PAGE_NON_EX))
 #define PAGE_EXECUTABLE		\
 		__pgprot(_PAGE_INIT(UNI_PAGE_PRESENT | UNI_PAGE_VALID | \
-				UNI_PAGE_HW_ACCESS | UNI_PAGE_SW_ACCESS))
+				UNI_PAGE_ACCESSED))
 
 /*
  * PAGE_NONE is used for NUMA hinting faults and should be valid.
@@ -588,10 +605,10 @@ get_pte_val_restricted_mask(void)
  */
 #define	PAGE_ENPTY		__pgprot(0ULL)
 #define PAGE_NONE		\
-		__pgprot(_PAGE_INIT(UNI_PAGE_PROTNONE | UNI_PAGE_HW_ACCESS | \
+		__pgprot(_PAGE_INIT(UNI_PAGE_PROTNONE | UNI_PAGE_ACCESSED | \
 					UNI_PAGE_VALID))
 #define PAGE_NONE_INVALID	\
-		__pgprot(_PAGE_INIT(UNI_PAGE_PROTNONE | UNI_PAGE_HW_ACCESS))
+		__pgprot(_PAGE_INIT(UNI_PAGE_PROTNONE | UNI_PAGE_ACCESSED))
 
 #define PAGE_INT_PR		\
 		__pgprot(_PAGE_INIT(UNI_PAGE_INT_PR))
@@ -781,6 +798,8 @@ static inline pgdval_t pgd_user_flags(pgd_t pgd)
 	return pgd_val(pgd) & PGD_USER_FLAGS_MASK;
 }
 
+#define pte_pgprot(x) __pgprot(pte_flags(x))
+
 /*
  * Extract pfn from pte.
  */
@@ -921,7 +940,7 @@ static inline int pmd_protnone(pmd_t pmd)
 #define is_mt_wb(mt) \
 ({ \
 	u64 __im_mt = (mt); \
-	(__im_mt == GEN_CACHE_MT || __im_mt == EXT_CACHE_MT); \
+	(__im_mt == GEN_CACHE_MT); \
 })
 #define is_mt_wc(mt) \
 ({ \
@@ -941,20 +960,15 @@ static inline int pmd_protnone(pmd_t pmd)
 })
 #define is_mt_external(mt) (!is_mt_general(mt))
 
-static inline pgprot_t set_general_mt(pgprot_t prot)
+static inline pgprot_t __must_check set_general_mt(pgprot_t prot)
 {
 	pte_mem_type_t mt = get_pte_val_memory_type(pgprot_val(prot));
 
 	switch (mt) {
-	case EXT_CACHE_MT:
-		prot = __pgprot(set_pte_val_memory_type(pgprot_val(prot),
-					GEN_CACHE_MT));
-		break;
 	case EXT_NON_PREFETCH_MT:
 		/* pgprot_device() case */
 	case EXT_PREFETCH_MT:
 	case EXT_CONFIG_MT:
-		mt = GEN_NON_CACHE_MT;
 		prot = __pgprot(set_pte_val_memory_type(pgprot_val(prot),
 					GEN_NON_CACHE_MT));
 		break;
@@ -974,15 +988,11 @@ static inline pgprot_t set_general_mt(pgprot_t prot)
 	return prot;
 }
 
-static inline pgprot_t set_external_mt(pgprot_t prot)
+static inline pgprot_t __must_check set_external_mt(pgprot_t prot)
 {
 	pte_mem_type_t mt = get_pte_val_memory_type(pgprot_val(prot));
 
 	switch (mt) {
-	case GEN_CACHE_MT:
-		prot = __pgprot(set_pte_val_memory_type(pgprot_val(prot),
-					EXT_CACHE_MT));
-		break;
 	case GEN_NON_CACHE_MT:
 		/* pgprot_writecombine() and pgprot_writethrough() case */
 		prot = __pgprot(set_pte_val_memory_type(pgprot_val(prot),
@@ -997,7 +1007,6 @@ static inline pgprot_t set_external_mt(pgprot_t prot)
 		/* pgprot_device() case */
 	case EXT_PREFETCH_MT:
 	case EXT_CONFIG_MT:
-	case EXT_CACHE_MT:
 		break;
 	default:
 		WARN_ON_ONCE(1);
@@ -1049,13 +1058,17 @@ static inline int pmd_bad(pmd_t pmd)
 		(is_huge_pmd_level() && _PAGE_TEST_HUGE(pmd_val(pmd)))
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+#define	PMD_THP_INVALIDATE_FLAGS	(UNI_PAGE_PRESENT | UNI_PAGE_PROTNONE)
+
 #define has_transparent_hugepage has_transparent_hugepage
-static inline int has_transparent_hugepage(void)
-{
-	return cpu_has(CPU_FEAT_ISET_V3);
+static inline int has_transparent_hugepage(void)                                                               
+{                                                                                      
+	return true;
 }
 
 #define pmd_trans_huge(pmd)		user_pmd_huge(pmd)
+#else	/* !CONFIG_TRANSPARENT_HUGEPAGE */
+#define PMD_THP_INVALIDATE_FLAGS	0UL
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
 /*
@@ -1083,8 +1096,7 @@ static inline int has_transparent_hugepage(void)
 #define pmd_mk_present_valid(pmd) (__pmd(_PAGE_SET(pmd_val(pmd), \
 				   UNI_PAGE_PRESENT | UNI_PAGE_VALID)))
 #define pmd_mknotpresent(pmd)	\
-		(__pmd(_PAGE_CLEAR(pmd_val(pmd), \
-				UNI_PAGE_PRESENT | UNI_PAGE_PROTNONE)))
+		(__pmd(_PAGE_CLEAR(pmd_val(pmd), PMD_THP_INVALIDATE_FLAGS)))
 #define pmd_mknot_present_valid(pmd) (__pmd(_PAGE_CLEAR(pmd_val(pmd), \
 		 UNI_PAGE_PRESENT | UNI_PAGE_PROTNONE | UNI_PAGE_VALID)))
 #define pmd_mknotvalid(pmd)	(__pmd(_PAGE_CLEAR_VALID(pmd_val(pmd))))
@@ -1098,24 +1110,27 @@ static inline int has_transparent_hugepage(void)
 				UNI_PAGE_PRIV | UNI_PAGE_GLOBAL)))
 static inline pmd_t pmd_mk_wb(pmd_t pmd)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pmd_val(pmd))))
-		return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), EXT_CACHE_MT));
-	else
-		return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), GEN_CACHE_MT));
+	return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), GEN_CACHE_MT));
 }
 static inline pmd_t pmd_mk_wc(pmd_t pmd)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pmd_val(pmd))))
-		return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), EXT_PREFETCH_MT));
-	else
-		return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), GEN_NON_CACHE_MT));
+	pte_mem_type_t mt;
+	if (is_mt_external(_PAGE_GET_MEM_TYPE(pmd_val(pmd)))) {
+		mt = EXT_PREFETCH_MT;
+	} else {
+		mt = memtype2pte_mem_type(PCM_WC);
+	}
+	return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), mt));
 }
 static inline pmd_t pmd_mk_uc(pmd_t pmd)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pmd_val(pmd))))
-		return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), EXT_NON_PREFETCH_MT));
-	else
-		return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), GEN_NON_CACHE_ORDERED_MT));
+	pte_mem_type_t mt;
+	if (is_mt_external(_PAGE_GET_MEM_TYPE(pmd_val(pmd)))) {
+		mt = EXT_NON_PREFETCH_MT;
+	} else {
+		mt = memtype2pte_mem_type(PCM_UC);
+	}
+	return __pmd(_PAGE_SET_MEM_TYPE(pmd_val(pmd), mt));
 }
 
 #ifndef	CONFIG_MAKE_ALL_PAGES_VALID
@@ -1159,24 +1174,27 @@ static inline int pud_bad(pud_t pud)
 #define pud_mknotvalid(pud)	(__pud(_PAGE_CLEAR_VALID(pud_val(pud))))
 static inline pud_t pud_mk_wb(pud_t pud)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pud_val(pud))))
-		return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), EXT_CACHE_MT));
-	else
-		return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), GEN_CACHE_MT));
+	return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), GEN_CACHE_MT));
 }
 static inline pud_t pud_mk_wc(pud_t pud)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pud_val(pud))))
-		return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), EXT_PREFETCH_MT));
-	else
-		return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), GEN_NON_CACHE_MT));
+	pte_mem_type_t mt;
+	if (is_mt_external(_PAGE_GET_MEM_TYPE(pud_val(pud)))) {
+		mt = EXT_PREFETCH_MT;
+	} else {
+		mt = memtype2pte_mem_type(PCM_WC);
+	}
+	return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), mt));
 }
 static inline pud_t pud_mk_uc(pud_t pud)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pud_val(pud))))
-		return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), EXT_NON_PREFETCH_MT));
-	else
-		return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), GEN_NON_CACHE_ORDERED_MT));
+	pte_mem_type_t mt;
+	if (is_mt_external(_PAGE_GET_MEM_TYPE(pud_val(pud)))) {
+		mt = EXT_NON_PREFETCH_MT;
+	} else {
+		mt = memtype2pte_mem_type(PCM_UC);
+	}
+	return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), mt));
 }
 
 #ifndef	CONFIG_MAKE_ALL_PAGES_VALID
@@ -1239,24 +1257,27 @@ static inline int pgd_bad(pgd_t pgd)
 #define pte_mknotvalid(pte)	(__pte(_PAGE_CLEAR_VALID(pte_val(pte))))
 static inline pte_t pte_mk_wb(pte_t pte)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pte_val(pte))))
-		return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), EXT_CACHE_MT));
-	else
-		return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), GEN_CACHE_MT));
+	return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), GEN_CACHE_MT));
 }
 static inline pte_t pte_mk_wc(pte_t pte)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pte_val(pte))))
-		return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), EXT_PREFETCH_MT));
-	else
-		return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), GEN_NON_CACHE_MT));
+	pte_mem_type_t mt;
+	if (is_mt_external(_PAGE_GET_MEM_TYPE(pte_val(pte)))) {
+		mt = EXT_PREFETCH_MT;
+	} else {
+		mt = memtype2pte_mem_type(PCM_WC);
+	}
+	return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), mt));
 }
 static inline pte_t pte_mk_uc(pte_t pte)
 {
-	if (is_mt_external(_PAGE_GET_MEM_TYPE(pte_val(pte))))
-		return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), EXT_NON_PREFETCH_MT));
-	else
-		return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), GEN_NON_CACHE_ORDERED_MT));
+	pte_mem_type_t mt;
+	if (is_mt_external(_PAGE_GET_MEM_TYPE(pte_val(pte)))) {
+		mt = EXT_NON_PREFETCH_MT;
+	} else {
+		mt = memtype2pte_mem_type(PCM_UC);
+	}
+	return __pte(_PAGE_SET_MEM_TYPE(pte_val(pte), mt));
 }
 
 /*

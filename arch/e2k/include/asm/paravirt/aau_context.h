@@ -61,10 +61,10 @@
 	}								\
 })
 
-#define PV_SAVE_AALDIS_V2(regs)						\
+#define PV_SAVE_AALDIS_V3(regs)						\
 ({									\
 	if (!paravirt_enabled()) {					\
-		NATIVE_SAVE_AALDIS_V2(regs);				\
+		NATIVE_SAVE_AALDIS_V3(regs);				\
 	} else {							\
 		KVM_SAVE_AALDIS(regs);					\
 	}								\
@@ -105,10 +105,10 @@
 	}								\
 })
 
-#define PV_GET_ARRAY_DESCRIPTORS_V2(aau_context)			\
+#define PV_GET_ARRAY_DESCRIPTORS_V3(aau_context)			\
 ({									\
 	if (!paravirt_enabled()) {					\
-		NATIVE_GET_ARRAY_DESCRIPTORS_V2(aau_context);		\
+		NATIVE_GET_ARRAY_DESCRIPTORS_V3(aau_context);		\
 	} else {							\
 		kvm_get_array_descriptors(aau_context);			\
 	}								\
@@ -131,10 +131,10 @@
 	}								\
 })
 
-#define PV_GET_SYNCHRONOUS_PART_V2(aau_context)				\
+#define PV_GET_SYNCHRONOUS_PART_V3(aau_context)				\
 ({									\
 	if (!paravirt_enabled()) {					\
-		NATIVE_GET_SYNCHRONOUS_PART_V2(aau_context);		\
+		NATIVE_GET_SYNCHRONOUS_PART_V3(aau_context);		\
 	} else {							\
 		kvm_get_synchronous_part(aau_context);			\
 	}								\
@@ -148,27 +148,27 @@
 	}								\
 })
 
-#define PV_GET_AAU_CONTEXT_V2(aau_context)				\
+#define PV_GET_AAU_CONTEXT_V3(aau_context, aasr)			\
 ({									\
 	if (!paravirt_enabled()) {					\
-		NATIVE_GET_AAU_CONTEXT_V2(aau_context);			\
+		NATIVE_GET_AAU_CONTEXT_V3(aau_context, aasr);		\
 	} else {							\
-		kvm_get_aau_context(aau_context);			\
+		kvm_get_aau_context(aau_context, aasr);			\
 	}								\
 })
-#define PV_GET_AAU_CONTEXT_V5(aau_context)				\
+#define PV_GET_AAU_CONTEXT_V5(aau_context, aasr)			\
 ({									\
 	if (!paravirt_enabled()) {					\
-		NATIVE_GET_AAU_CONTEXT_V5(aau_context);			\
+		NATIVE_GET_AAU_CONTEXT_V5(aau_context, aasr);		\
 	} else {							\
-		kvm_get_aau_context(aau_context);			\
+		kvm_get_aau_context(aau_context, aasr);			\
 	}								\
 })
 
 static inline void
-pv_get_array_descriptors_v2(e2k_aau_t *context)
+pv_get_array_descriptors_v3(e2k_aau_t *context)
 {
-	PV_GET_ARRAY_DESCRIPTORS_V2(context);
+	PV_GET_ARRAY_DESCRIPTORS_V3(context);
 }
 static inline void
 pv_get_array_descriptors_v5(e2k_aau_t *context)
@@ -177,9 +177,9 @@ pv_get_array_descriptors_v5(e2k_aau_t *context)
 }
 
 static inline void
-pv_get_synchronous_part_v2(e2k_aau_t *context)
+pv_get_synchronous_part_v3(e2k_aau_t *context)
 {
-	PV_GET_SYNCHRONOUS_PART_V2(context);
+	PV_GET_SYNCHRONOUS_PART_V3(context);
 }
 static inline void
 pv_get_synchronous_part_v5(e2k_aau_t *context)
@@ -192,9 +192,9 @@ pv_get_synchronous_part_v5(e2k_aau_t *context)
  * and comparison with aasr.iab was taken.
  */
 static inline void
-pv_get_aau_context_v2(e2k_aau_t *context)
+pv_get_aau_context_v3(e2k_aau_t *context)
 {
-	PV_GET_AAU_CONTEXT_V2(context);
+	PV_GET_AAU_CONTEXT_V3(context);
 }
 static inline void
 pv_get_aau_context_v5(e2k_aau_t *context)
@@ -221,8 +221,8 @@ pv_get_aau_context_v5(e2k_aau_t *context)
 #define RESTORE_AADS(aau_regs)	\
 		PV_RESTORE_AADS(aau_regs)
 
-#define SAVE_AALDIS_V2(regs)	\
-		PV_SAVE_AALDIS_V2(regs)
+#define SAVE_AALDIS_V3(regs)	\
+		PV_SAVE_AALDIS_V3(regs)
 #define SAVE_AALDIS_V5(regs)	\
 		PV_SAVE_AALDIS_V5(regs)
 
@@ -235,18 +235,18 @@ pv_get_aau_context_v5(e2k_aau_t *context)
 #define SAVE_AAU_REGS_FOR_PTRACE(regs, ti)	\
 		PV_SAVE_AAU_REGS_FOR_PTRACE(regs, ti)
 
-#define GET_ARRAY_DESCRIPTORS_V2(aau_context)	\
-		PV_GET_ARRAY_DESCRIPTORS_V2(aau_context)
+#define GET_ARRAY_DESCRIPTORS_V3(aau_context)	\
+		PV_GET_ARRAY_DESCRIPTORS_V3(aau_context)
 #define GET_ARRAY_DESCRIPTORS_V5(aau_context)	\
 		PV_GET_ARRAY_DESCRIPTORS_V5(aau_context)
 
-#define	GET_SYNCHRONOUS_PART_V2(aau_context)	\
-		PV_GET_SYNCHRONOUS_PART_V2(aau_context)
+#define	GET_SYNCHRONOUS_PART_V3(aau_context)	\
+		PV_GET_SYNCHRONOUS_PART_V3(aau_context)
 #define	GET_SYNCHRONOUS_PART_V5(aau_context)	\
 		PV_GET_SYNCHRONOUS_PART_V5(aau_context)
 
-#define	GET_AAU_CONTEXT_V2(context)	\
-		PV_GET_AAU_CONTEXT_V2(context)
+#define	GET_AAU_CONTEXT_V3(context)	\
+		PV_GET_AAU_CONTEXT_V3(context)
 #define	GET_AAU_CONTEXT_V5(context)	\
 		PV_GET_AAU_CONTEXT_V5(context)
 

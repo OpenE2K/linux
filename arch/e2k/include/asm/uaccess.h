@@ -242,6 +242,13 @@ extern unsigned long raw_copy_from_user(void *to, const void *from,
 					unsigned long n);
 extern unsigned long raw_copy_in_user(void *to, const void *from,
 				      unsigned long n);
+extern unsigned long copy_aligned_user_tagged_memory(void __user *to,
+			const void __user *from, size_t len, size_t *copied,
+			unsigned long strd_opcode, unsigned long ldrd_opcode,
+			bool prefetch);
+extern unsigned long set_aligned_user_tagged_memory(void __user *addr, size_t len,
+			unsigned long dw, unsigned long tag,
+			size_t *cleared, u64 strd_opcode);
 
 #define INLINE_COPY_FROM_USER
 #define INLINE_COPY_TO_USER
@@ -282,6 +289,41 @@ unsigned long copy_from_user_with_tags(void *to, const void __user *from,
 
 	return n;
 }
+
+#if	defined(CONFIG_PARAVIRT_GUEST)
+/* paravirtualized kernel (host and guest) */
+#include <asm/paravirt/uaccess.h>
+#elif	defined(CONFIG_KVM_GUEST_KERNEL)
+/* It is native guest kernel (without paravirtualization) */
+#include <asm/kvm/guest/uaccess.h>
+#elif	defined(CONFIG_VIRTUALIZATION) || !defined(CONFIG_VIRTUALIZATION)
+/* native kernel with virtualization support */
+/* native kernel without virtualization support */
+
+#define	__get_priv_user(x, ptr)		__get_user(x, ptr)
+#define __put_priv_user(x, ptr)		__put_user(x, ptr)
+#define	get_priv_user(x, ptr)		get_user(x, ptr)
+#define	put_priv_user(x, ptr)		put_user(x, ptr)
+
+#define __copy_to_priv_user		__copy_to_user
+#define __copy_from_priv_user		__copy_from_user
+#define __copy_to_priv_user_with_tags	__copy_to_user_with_tags
+#define __copy_from_priv_user_with_tags	__copy_from_user_with_tags
+
+static inline
+unsigned long copy_to_priv_user_with_tags(void __user *to, const void *from,
+					  unsigned long n)
+{
+	return copy_to_user_with_tags(to, from, n);
+}
+
+static inline
+unsigned long copy_from_priv_user_with_tags(void *to, const void __user *from,
+					    unsigned long n)
+{
+	return copy_from_user_with_tags(to, from, n);
+}
+#endif	/* CONFIG_PARAVIRT_GUEST */
 
 #define strlen_user(str) strnlen_user(str, ~0UL >> 1)
 long strnlen_user(const char __user *str, long count) __pure;
@@ -364,9 +406,9 @@ static inline int PUT_USER_AP(e2k_ptr_t *ptr, u64 base,
         return 0;
 }
 
-static inline int PUT_USER_PL_V2(e2k_pl_lo_t *plp, u64 entry)
+static inline int PUT_USER_PL_V3(e2k_pl_lo_t *plp, u64 entry)
 {
-	e2k_pl_lo_t tmp = MAKE_PL_V2(entry).lo;
+	e2k_pl_lo_t tmp = MAKE_PL_V3(entry).lo;
 
 	if ((long)plp & (sizeof(e2k_pl_lo_t) - 1)) {
 		/* not aligned */
@@ -414,7 +456,7 @@ static inline int CPU_PUT_USER_PL(e2k_pl_t *plp, u64 entry, u32 cui,
 		int ret = put_user(0UL, &plp->PLHI_value);
 		if (ret)
 			return ret;
-		return PUT_USER_PL_V2(&plp->PLLO_item, entry);
+		return PUT_USER_PL_V3(&plp->PLLO_item, entry);
 	}
 }
 

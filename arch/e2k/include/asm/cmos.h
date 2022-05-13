@@ -11,24 +11,13 @@
 
 static inline char mc146818_cmos_read(char addr)
 {
-	if (HAS_MACHINE_E2K_IOHUB) {
-		WARN_ONCE(1, "Warning: CMOS_READ attempted on a machine without a functioning CMOS\n");
-		return 0;
-	}
-
-	outb_p((addr),RTC_PORT(0));
-	return inb_p(RTC_PORT(1));
+	WARN_ONCE(1, "Warning: CMOS_READ attempted on a machine without a functioning CMOS\n");
+	return 0;
 }
 
 static inline void mc146818_cmos_write(char val, char addr)
 {
-	if (HAS_MACHINE_E2K_IOHUB) {
-		WARN_ONCE(1, "Warning: CMOS_WRITE attempted on a machine without a functioning CMOS\n");
-		return;
-	}
-
-	outb_p(addr, RTC_PORT(0));
-	outb_p(val, RTC_PORT(1));
+	WARN_ONCE(1, "Warning: CMOS_WRITE attempted on a machine without a functioning CMOS\n");
 }
 
 #define CMOS_READ(addr) mc146818_cmos_read(addr)

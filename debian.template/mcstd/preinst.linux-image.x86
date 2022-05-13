@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+KERNELRELEASE=xxKERNELRELEASExx
+exit 0

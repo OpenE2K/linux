@@ -21,7 +21,8 @@
 
 /* dvi chip stuffs structros */
 
-typedef long (*PFN_DVICTRL_INIT) (unsigned char edgeSelect,
+typedef long (*PFN_DVICTRL_INIT) (struct lynx_share *share,
+				unsigned char edgeSelect,
 				  unsigned char busSelect,
 				  unsigned char dualEdgeClkSelect,
 				  unsigned char hsyncEnable,
@@ -33,8 +34,8 @@ typedef long (*PFN_DVICTRL_INIT) (unsigned char edgeSelect,
 				  unsigned char pllFilterValue);
 typedef void (*PFN_DVICTRL_RESETCHIP) (void);
 typedef char *(*PFN_DVICTRL_GETCHIPSTRING) (void);
-typedef unsigned short (*PFN_DVICTRL_GETVENDORID) (void);
-typedef unsigned short (*PFN_DVICTRL_GETDEVICEID) (void);
+typedef unsigned short (*PFN_DVICTRL_GETVENDORID) (struct lynx_share *share);
+typedef unsigned short (*PFN_DVICTRL_GETDEVICEID) (struct lynx_share *share);
 typedef void (*PFN_DVICTRL_SETPOWER) (unsigned char powerUp);
 typedef void (*PFN_DVICTRL_HOTPLUGDETECTION) (unsigned char enableHotPlug);
 typedef unsigned char (*PFN_DVICTRL_ISCONNECTED) (void);
@@ -61,7 +62,8 @@ typedef struct _dvi_ctrl_device_t {
 
 
 /* dvi functions prototype */
-int dviInit(unsigned char edgeSelect,
+int dviInit(struct lynx_share *share,
+		unsigned char edgeSelect,
 	    unsigned char busSelect,
 	    unsigned char dualEdgeClkSelect,
 	    unsigned char hsyncEnable,
@@ -71,8 +73,8 @@ int dviInit(unsigned char edgeSelect,
 	    unsigned char continuousSyncEnable,
 	    unsigned char pllFilterEnable, unsigned char pllFilterValue);
 
-unsigned short dviGetVendorID(void);
-unsigned short dviGetDeviceID(void);
+unsigned short dviGetVendorID(struct lynx_share *share);
+unsigned short dviGetDeviceID(struct lynx_share *share);
 
 
 

@@ -32,6 +32,7 @@
 #endif /* CONFIG_PROTECTED_MODE */
 #include <asm/traps.h>
 #include <asm/e2k_debug.h>
+#include <asm/kvm/ctx_signal_stacks.h>
 
 #undef	DEBUG_SIG_MODE
 #undef	DebugSig
@@ -130,27 +131,27 @@ static inline int setup_frame(struct sigcontext __user *sigc,
 	char	tag;
 	int	sc_need_rstrt = 0;
 
-	rval = __put_user(AS_WORD(user_regs->crs.cr0_lo), &sigc->cr0_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->crs.cr0_hi),
-				    &sigc->cr0_hi);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->crs.cr1_lo),
-				    &sigc->cr1_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->crs.cr1_hi),
-				    &sigc->cr1_hi);
+	rval = __put_priv_user(AS_WORD(user_regs->crs.cr0_lo), &sigc->cr0_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr0_hi),
+					 &sigc->cr0_hi);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr1_lo),
+					 &sigc->cr1_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr1_hi),
+					 &sigc->cr1_hi);
 	
-	rval = (rval) ?: __put_user(user_regs->stacks.top, &sigc->sbr);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.usd_lo),
-				    &sigc->usd_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.usd_hi),
-				    &sigc->usd_hi);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.psp_lo),
-				    &sigc->psp_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.psp_hi),
-				    &sigc->psp_hi);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.pcsp_lo),
-				    &sigc->pcsp_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.pcsp_hi),
-				    &sigc->pcsp_hi);
+	rval = (rval) ?: __put_priv_user(user_regs->stacks.top, &sigc->sbr);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.usd_lo),
+					 &sigc->usd_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.usd_hi),
+					 &sigc->usd_hi);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.psp_lo),
+					 &sigc->psp_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.psp_hi),
+					 &sigc->psp_hi);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.pcsp_lo),
+					 &sigc->pcsp_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.pcsp_hi),
+					 &sigc->pcsp_hi);
 
         /* for binary compiler */
 	if (unlikely(TASK_IS_BINCO(current))) {
@@ -158,11 +159,11 @@ static inline int setup_frame(struct sigcontext __user *sigc,
 		int mlt_num = trap ? trap->mlt_state.num : 0;
 #endif
 
-		rval = (rval) ?: __put_user(
+		rval = (rval) ?: __put_priv_user(
 					AS_WORD(current_thread_info()->upsr),
 					&sigc->upsr);
-		rval = (rval) ?: __put_user(user_regs->rpr_hi, &sigc->rpr_hi);
-		rval = (rval) ?: __put_user(user_regs->rpr_lo, &sigc->rpr_lo);
+		rval = (rval) ?: __put_priv_user(user_regs->rpr_hi, &sigc->rpr_hi);
+		rval = (rval) ?: __put_priv_user(user_regs->rpr_lo, &sigc->rpr_lo);
 
 		/* copy MLT */
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
@@ -172,10 +173,10 @@ static inline int setup_frame(struct sigcontext __user *sigc,
 					sizeof(e2k_mlt_entry_t) * mlt_num))
 				rval |= -EFAULT;
 		}
-		if (!rval && (mlt_num < NATIVE_MAX_MLT_SIZE)) {
+		if (!rval && (mlt_num < NATIVE_MLT_SIZE)) {
 			if (clear_user((void *)&sigc->mlt[mlt_num * 3],
 					sizeof(e2k_mlt_entry_t) *
-					(NATIVE_MAX_MLT_SIZE - mlt_num)))
+					(NATIVE_MLT_SIZE - mlt_num)))
 				rval |= -EFAULT;
 		}
 #endif
@@ -185,61 +186,61 @@ static inline int setup_frame(struct sigcontext __user *sigc,
 		u64 data;
 
 		for (i = 0; i < min(MAX_TC_SIZE, HW_TC_SIZE); i++) {
-			rval = (rval) ?: __put_user(trap->tcellar[i].address,
-						    &sigc->trap_cell_addr[i]);
-			rval = (rval) ?: __put_user(trap->tcellar[i].data,
-						    &sigc->trap_cell_val[i]);
-			rval = (rval) ?: __put_user(
+			rval = (rval) ?: __put_priv_user(trap->tcellar[i].address,
+							 &sigc->trap_cell_addr[i]);
+			rval = (rval) ?: __put_priv_user(trap->tcellar[i].data,
+							&sigc->trap_cell_val[i]);
+			rval = (rval) ?: __put_priv_user(
 						trap->tcellar[i].condition.word,
 						&sigc->trap_cell_info[i]);
 			load_value_and_tagd(
 					&trap->tcellar[i].data, &data, &tag);
-			rval = (rval) ?: __put_user(tag,
-						    &sigc->trap_cell_tag[i]);
+			rval = (rval) ?: __put_priv_user(tag,
+							 &sigc->trap_cell_tag[i]);
 		}
 
 		/* TIR */
-		rval = (rval) ?: __put_user(trap->nr_TIRs, &sigc->nr_TIRs);
+		rval = (rval) ?: __put_priv_user(trap->nr_TIRs, &sigc->nr_TIRs);
 		for (i = 0; i <= trap->nr_TIRs; i++) {
-			rval = (rval) ?: __put_user(
+			rval = (rval) ?: __put_priv_user(
 						trap->TIRs[i].TIR_hi.TIR_hi_reg,
 						&sigc->tir_hi[i]);
-			rval = (rval) ?: __put_user(
+			rval = (rval) ?: __put_priv_user(
 						trap->TIRs[i].TIR_lo.TIR_lo_reg,
 						&sigc->tir_lo[i]);
 		}
 
-		rval = (rval) ?: __put_user(trap->tc_count / 3,
-					    &extra->tc_count);
-		rval = (rval) ?: __put_user(trap->curr_cnt, &extra->curr_cnt);
+		rval = (rval) ?: __put_priv_user(trap->tc_count / 3,
+						 &extra->tc_count);
+		rval = (rval) ?: __put_priv_user(trap->curr_cnt, &extra->curr_cnt);
 	} else {
-		rval = (rval) ?: __put_user(0, &sigc->nr_TIRs);
-		rval = (rval) ?: __put_user(0ULL, &sigc->tir_hi[0]);
-		rval = (rval) ?: __put_user(0ULL, &sigc->tir_lo[0]);
-		rval = (rval) ?: __put_user(0, &extra->tc_count);
-		rval = (rval) ?: __put_user(-1, &extra->curr_cnt);
+		rval = (rval) ?: __put_priv_user(0, &sigc->nr_TIRs);
+		rval = (rval) ?: __put_priv_user(0ULL, &sigc->tir_hi[0]);
+		rval = (rval) ?: __put_priv_user(0ULL, &sigc->tir_lo[0]);
+		rval = (rval) ?: __put_priv_user(0, &extra->tc_count);
+		rval = (rval) ?: __put_priv_user(-1, &extra->curr_cnt);
 	}
 
-	rval = (rval) ?: __put_user(AW(user_regs->ctpr1), &extra->ctpr1);
-	rval = (rval) ?: __put_user(AW(user_regs->ctpr2), &extra->ctpr2);
-	rval = (rval) ?: __put_user(AW(user_regs->ctpr3), &extra->ctpr3);
+	rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr1), &extra->ctpr1);
+	rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr2), &extra->ctpr2);
+	rval = (rval) ?: __put_priv_user(AW(user_regs->ctpr3), &extra->ctpr3);
 
 	if (from_syscall(user_regs) &&
 			((user_regs->sys_rval == -ERESTARTNOINTR) ||
 			 (user_regs->sys_rval == -ERESTARTSYS) &&
 			 (ka->sa.sa_flags & SA_RESTART)))
 		sc_need_rstrt = 1;
-	rval = (rval) ?: __put_user(sc_need_rstrt, &extra->sc_need_rstrt);
+	rval = (rval) ?: __put_priv_user(sc_need_rstrt, &extra->sc_need_rstrt);
 
 	/* size of saved extra elements */
-	rval = (rval) ?: __put_user(sizeof(struct extra_ucontext) - sizeof(int),
-				    &extra->sizeof_extra_uc);
+	rval = (rval) ?: __put_priv_user(sizeof(struct extra_ucontext) - sizeof(int),
+					 &extra->sizeof_extra_uc);
 
 	/* DAM */
 	SAVE_DAM(current_thread_info()->dam);
 	for (i = 0; i < DAM_ENTRIES_NUM; i++)
-		rval = (rval) ?: __put_user(current_thread_info()->dam[i],
-					    &sigc->dam[i]);
+		rval = (rval) ?: __put_priv_user(current_thread_info()->dam[i],
+						 &sigc->dam[i]);
 
 	return rval;
 }
@@ -250,27 +251,27 @@ static inline int setup_prot_frame(struct sigcontext_prot *sigc,
 {
 	int rval;
 
-	rval = __put_user(AS_WORD(user_regs->crs.cr0_lo), &sigc->cr0_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->crs.cr0_hi),
-				    &sigc->cr0_hi);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->crs.cr1_lo),
-				    &sigc->cr1_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->crs.cr1_hi),
-				    &sigc->cr1_hi);
+	rval = __put_priv_user(AS_WORD(user_regs->crs.cr0_lo), &sigc->cr0_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr0_hi),
+					 &sigc->cr0_hi);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr1_lo),
+					 &sigc->cr1_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr1_hi),
+					 &sigc->cr1_hi);
 
-	rval = (rval) ?: __put_user(user_regs->stacks.top, &sigc->sbr);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.usd_lo),
-				    &sigc->usd_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.usd_hi),
-				    &sigc->usd_hi);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.psp_lo),
-				    &sigc->psp_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.psp_hi),
-				    &sigc->psp_hi);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.pcsp_lo),
-				    &sigc->pcsp_lo);
-	rval = (rval) ?: __put_user(AS_WORD(user_regs->stacks.pcsp_hi),
-				    &sigc->pcsp_hi);
+	rval = (rval) ?: __put_priv_user(user_regs->stacks.top, &sigc->sbr);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.usd_lo),
+					 &sigc->usd_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.usd_hi),
+					 &sigc->usd_hi);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.psp_lo),
+					 &sigc->psp_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.psp_hi),
+					 &sigc->psp_hi);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.pcsp_lo),
+					 &sigc->pcsp_lo);
+	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.pcsp_hi),
+					 &sigc->pcsp_hi);
 
 	return rval;
 }
@@ -356,8 +357,8 @@ static inline int copy_siginfo_to_user_prot(rt_sigframe_t __user *frame,
 				&siginfo_ptr->si_ptr, ptr, sigval_prot_ptr,
 				*(u64 __user *)sigval_prot_ptr);
 		}
-		ret = __put_user((u64 __user)ptr,
-				 (u64 __user *)sigval_prot_ptr);
+		ret = __put_priv_user((u64 __user)ptr,
+				      (u64 __user *)sigval_prot_ptr);
 	} else {
 		/*
 		 * Simply adding tags to user_ptr_lo/_hi and
@@ -405,34 +406,34 @@ static inline int setup_rt_frame(rt_sigframe_t __user *frame,
 		e2k_ptr_t ss_sp;
 
 		ret = setup_prot_frame(&frame->uc_prot.uc_mcontext, regs);
-		ret = (ret) ?: __copy_to_user(&frame->uc_prot.uc_sigmask,
-					      set, sizeof(*set));
+		ret = (ret) ?: __copy_to_priv_user(&frame->uc_prot.uc_sigmask,
+						   set, sizeof(*set));
 
 		AW(ss_sp).lo = MAKE_AP_LO(current->sas_ss_sp,
 				current->sas_ss_size, 0, 3);
 		AW(ss_sp).hi = MAKE_AP_HI(current->sas_ss_sp,
 				current->sas_ss_size, 0, 3);
-		ret = (ret) ?: __put_user(AW(ss_sp).lo,
+		ret = (ret) ?: __put_priv_user(AW(ss_sp).lo,
 					&AW(frame->uc_prot.uc_stack.ss_sp).lo);
-		ret = (ret) ?: __put_user(AW(ss_sp).hi,
+		ret = (ret) ?: __put_priv_user(AW(ss_sp).hi,
 					&AW(frame->uc_prot.uc_stack.ss_sp).hi);
-		ret = (ret) ?: __put_user(sas_ss_flags(
+		ret = (ret) ?: __put_priv_user(sas_ss_flags(
 						AS(regs->stacks.usd_lo).base),
 					&frame->uc_prot.uc_stack.ss_flags);
-		ret = (ret) ?: __put_user(current->sas_ss_size,
+		ret = (ret) ?: __put_priv_user(current->sas_ss_size,
 					&frame->uc_prot.uc_stack.ss_size);
 	} else if (!(current->thread.flags & E2K_FLAG_32BIT)) {
 		ret = setup_frame(&frame->uc.uc_mcontext,
 				&frame->uc.uc_extra, regs);
-		ret = (ret) ?: __copy_to_user(&frame->uc.uc_sigmask,
-					      set, sizeof(*set));
+		ret = (ret) ?: __copy_to_priv_user(&frame->uc.uc_sigmask,
+						   set, sizeof(*set));
 		ret = (ret) ?: __save_altstack(&frame->uc.uc_stack,
 					AS(regs->stacks.usd_lo).base);
 	} else {
 		ret = setup_frame(&frame->uc_32.uc_mcontext,
 				&frame->uc_32.uc_extra, regs);
-		ret = (ret) ?: __copy_to_user(&frame->uc_32.uc_sigmask,
-					      cset, sizeof(*cset));
+		ret = (ret) ?: __copy_to_priv_user(&frame->uc_32.uc_sigmask,
+						   cset, sizeof(*cset));
 		ret = (ret) ?: __compat_save_altstack(&frame->uc_32.uc_stack,
 					AS(regs->stacks.usd_lo).base);
 	}
@@ -445,13 +446,13 @@ static inline int setup_rt_frame(rt_sigframe_t __user *frame,
 
 	if (TASK_IS_PROTECTED(current)) {
 		ret = (ret) ?: copy_siginfo_to_user_prot(frame, info);
-		ret = (ret) ?: __put_user(0, &frame->uc_prot.uc_flags);
-		ret = (ret) ?: __put_user(0, &AW(frame->uc_prot.uc_link).lo);
-		ret = (ret) ?: __put_user(0, &AW(frame->uc_prot.uc_link).hi);
+		ret = (ret) ?: __put_priv_user(0, &frame->uc_prot.uc_flags);
+		ret = (ret) ?: __put_priv_user(0, &AW(frame->uc_prot.uc_link).lo);
+		ret = (ret) ?: __put_priv_user(0, &AW(frame->uc_prot.uc_link).hi);
 	} else if (!(current->thread.flags & E2K_FLAG_32BIT)) {
 		ret = (ret) ?: copy_siginfo_to_user(&frame->info, info);
-		ret = (ret) ?: __put_user(0, &frame->uc.uc_flags);
-		ret = (ret) ?: __put_user(0, &frame->uc.uc_link);
+		ret = (ret) ?: __put_priv_user(0, &frame->uc.uc_flags);
+		ret = (ret) ?: __put_priv_user(0, &frame->uc.uc_link);
 	} else {
 		if (current->thread.flags & E2K_FLAG_64BIT_BINCO)
 			ret = (ret) ?: copy_siginfo_to_user(&frame->info, info);
@@ -459,8 +460,8 @@ static inline int setup_rt_frame(rt_sigframe_t __user *frame,
 			ret = (ret) ?: copy_siginfo_to_user32(
 						&frame->compat_info, info);
 
-		ret = (ret) ?: __put_user(0, &frame->uc_32.uc_flags);
-		ret = (ret) ?: __put_user(0, &frame->uc_32.uc_link);
+		ret = (ret) ?: __put_priv_user(0, &frame->uc_32.uc_flags);
+		ret = (ret) ?: __put_priv_user(0, &frame->uc_32.uc_link);
 	}
 
 	DebugHS("ret=%d info=0x%lx  info->si_value: [int]=%d [ptr]=0x%llx\n",
@@ -676,38 +677,39 @@ static int copy_context_to_signal_stack(
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 
-	ret = __copy_to_user_with_tags(&context->regs, regs, sizeof(*regs));
+	ret = __copy_to_priv_user_with_tags(&context->regs, regs, sizeof(*regs));
 
 	if (regs->trap) {
-		ret = ret ?: __copy_to_user_with_tags(&context->trap,
+		ret = ret ?: __copy_to_priv_user_with_tags(&context->trap,
 					regs->trap, sizeof(*regs->trap));
 		/* This pointer must not be accessed directly since signal
 		 * stack could be reallocated (use signal_pt_regs_to_trap()
 		 * instead), so put bogus value in it to help catch errors. */
-		ret = ret ?: __put_user((void *) 1, &context->regs.trap);
+		ret = ret ?: __put_priv_user((void *) 1, &context->regs.trap);
 
 		if (regs->trap->sbbp) {
-			ret = ret ?: __copy_to_user(&context->sbbp, regs->trap->sbbp,
+			ret = ret ?: __copy_to_priv_user(&context->sbbp,
+					regs->trap->sbbp,
 					sizeof(regs->trap->sbbp[0]) * SBBP_ENTRIES_NUM);
-			ret = ret ?: __put_user(context->sbbp,
+			ret = ret ?: __put_priv_user(context->sbbp,
 						&context->trap.sbbp);
 		}
 	}
 
 	if (regs->aau_context) {
-		ret = ret ?: __copy_to_user(&context->aau_regs,
+		ret = ret ?: __copy_to_priv_user(&context->aau_regs,
 				regs->aau_context, sizeof(*regs->aau_context));
 		/* This pointer must not be accessed directly since signal
 		 * stack could be reallocated, so put bogus value in it to
 		 * help catch errors. */
-		ret = ret ?: __put_user((void *) 1, &context->regs.aau_context);
+		ret = ret ?: __put_priv_user((void *) 1, &context->regs.aau_context);
 	}
 
-	ret = ret ?: __copy_to_user(&context->sigact, &ksig->ka,
-				    sizeof(ksig->ka));
+	ret = ret ?: __copy_to_priv_user(&context->sigact, &ksig->ka,
+					 sizeof(ksig->ka));
 
 	if (l_gregs) {
-		ret = ret ?: __copy_to_user_with_tags(&context->l_gregs,
+		ret = ret ?: __copy_to_priv_user_with_tags(&context->l_gregs,
 				l_gregs, sizeof(*l_gregs));
 	}
 
@@ -751,6 +753,36 @@ void sighandler_trampoline_continue(void)
 }
 
 /**
+ * allocate_signal_stack - allocate space for the signal stack
+ *			   to store interrupted user context
+ * @size: size of signal stack can be for a few context frames and
+ *	  should be the page size aligned
+ *
+ * We use privileged area at the end of user space since we have
+ * to save privileged structures such as trap cellar or CTPRs.
+ */
+unsigned long allocate_signal_stack(unsigned long size)
+{
+	unsigned long ti_flags = TS_MMAP_PRIVILEGED | TS_MMAP_SIGNAL_STACK;
+	unsigned long address;
+
+	BUG_ON(size != round_up(size, PAGE_SIZE));
+
+	current_thread_info()->status |= ti_flags;
+	address = vm_mmap_notkillable(NULL, USER_HW_STACKS_BASE,
+				size, PROT_READ | PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, 0);
+	current_thread_info()->status &= ~ti_flags;
+
+	if (IS_ERR_VALUE(address)) {
+		pr_err("%s(): could not allocate stack size 0x%lx "
+			"vm_mmap returned %ld\n",
+			__func__, size, address);
+	}
+	return address;
+}
+
+/**
  * push_signal_stack - make sure there is enough space in the signal stack
  *		       to store interrupted user context
  *
@@ -781,17 +813,10 @@ static struct signal_stack_context __user *push_signal_stack(void)
 	 * Allocate if this is the first signal
 	 */
 	if (!ti->signal_stack.base) {
-		unsigned long ti_flags = TS_MMAP_PRIVILEGED |
-					 TS_MMAP_SIGNAL_STACK;
-
-		ti->status |= ti_flags;
-		address = vm_mmap_notkillable(NULL, USER_HW_STACKS_BASE,
-				context_size, PROT_READ | PROT_WRITE,
-				MAP_PRIVATE | MAP_ANONYMOUS, 0);
-		ti->status &= ~ti_flags;
-
-		if (IS_ERR_VALUE(address))
+		address = allocate_signal_stack(context_size);
+		if (IS_ERR_VALUE(address)) {
 			return ERR_PTR(address);
+		}
 
 		ti->signal_stack.base = address;
 		ti->signal_stack.size = context_size;
@@ -805,8 +830,14 @@ static struct signal_stack_context __user *push_signal_stack(void)
 	 */
 	address = remap_e2k_stack(ti->signal_stack.base, ti->signal_stack.size,
 			ti->signal_stack.size + context_size, false);
-	if (IS_ERR_VALUE(address))
+	if (IS_ERR_VALUE(address)) {
+		pr_err("%s(): stack base 0x%lx size 0x%lx used 0x%lx context "
+			"size 0x%lx vm_mmap returned %ld\n",
+			__func__, ti->signal_stack.base, ti->signal_stack.size,
+			ti->signal_stack.used, context_size,
+			address);
 		return ERR_PTR(address);
+	}
 
 	ti->signal_stack.base = address;
 	ti->signal_stack.size += context_size;
@@ -821,31 +852,87 @@ static struct signal_stack_context __user *push_signal_stack(void)
 /**
  * pop_signal_stack - counterpart to push_signal_stack()
  */
-static struct signal_stack_context __user *do_get_signal_stack(bool push)
+static struct signal_stack_context __user *
+do_get_signal_stack(struct signal_stack *signal_stack, bool push)
 {
-	struct thread_info *ti = current_thread_info();
 	struct signal_stack_context __user *context;
-	unsigned long used = ti->signal_stack.used;
+	unsigned long used = signal_stack->used;
 
+	if (used == 0) {
+		/* signal stacks is empty */
+		return NULL;
+	}
 	if (WARN_ON_ONCE(used < sizeof(*context)))
 		do_exit(SIGKILL);
 
 	used -= sizeof(*context);
 	context = (struct signal_stack_context __user *)
-				(ti->signal_stack.base + used);
+				(signal_stack->base + used);
 	if (push) {
-		ti->signal_stack.used = used;
+		signal_stack->used = used;
 	}
 
 	return context;
 }
+
+static struct signal_stack_context __user *
+do_get_prev_signal_stack(struct signal_stack *signal_stack,
+			 struct signal_stack_context __user *context)
+{
+	struct signal_stack_context __user *prev_context;
+	unsigned long used = signal_stack->used;
+
+	if (used == 0) {
+		/* signal stacks is empty */
+		return NULL;
+	}
+	if (WARN_ON_ONCE(used < sizeof(*context)))
+		do_exit(SIGKILL);
+	if (WARN_ON_ONCE((unsigned long)context < signal_stack->base ||
+				(unsigned long)context + sizeof(*context) >
+						signal_stack->base + used))
+		do_exit(SIGKILL);
+
+	used = (unsigned long)context - signal_stack->base;
+	if (used == 0) {
+		/* signal stacks is empty */
+		return NULL;
+	}
+	if (WARN_ON_ONCE(used < sizeof(*context)))
+		do_exit(SIGKILL);
+
+	used -= sizeof(*context);
+
+	prev_context = (struct signal_stack_context __user *)
+				(signal_stack->base + used);
+
+	return prev_context;
+}
+struct signal_stack_context __user *
+get_the_signal_stack(struct signal_stack *signal_stack)
+{
+	return do_get_signal_stack(signal_stack, false);
+}
 struct signal_stack_context __user *get_signal_stack(void)
 {
-	return do_get_signal_stack(false);
+	return get_the_signal_stack(&current_thread_info()->signal_stack);
+}
+
+struct signal_stack_context __user *
+get_prev_signal_stack(struct signal_stack_context __user *context)
+{
+	return do_get_prev_signal_stack(&current_thread_info()->signal_stack,
+					context);
+}
+
+struct signal_stack_context __user *
+pop_the_signal_stack(struct signal_stack *signal_stack)
+{
+	return do_get_signal_stack(signal_stack, true);
 }
 struct signal_stack_context __user *pop_signal_stack(void)
 {
-	return do_get_signal_stack(true);
+	return pop_the_signal_stack(&current_thread_info()->signal_stack);
 }
 
 /**
@@ -900,6 +987,22 @@ int setup_signal_stack(struct pt_regs *regs, bool is_signal)
 	return ret;
 }
 
+/*
+ * Reserve space for guest's context on signal stack.
+ * guest's context will be restored in these space
+ * in return_from_makecontext_trampoline
+ */
+int reserve_signal_stack(void)
+{
+	struct signal_stack_context __user *context = push_signal_stack();
+
+	if (IS_ERR(context))
+		return PTR_ERR(context);
+
+	return 0;
+}
+
+
 static int prepare_sighandler_trampoline(struct e2k_stacks *stacks)
 {
 	e2k_mem_crs_t *k_crs, crs;
@@ -944,10 +1047,9 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 	void *uc, *u_si;
 	u64 u_si_size, uc_size;
 	size_t pframe_size;
-	unsigned long reg1_offset;
+	unsigned long reg1_offset, top;
 	e2k_usd_lo_t usd_lo;
 	e2k_usd_hi_t usd_hi;
-	e2k_sbr_t sbr;
 	int ret;
 
 	/*
@@ -996,19 +1098,23 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 
 	/*
 	 * Update data stack
+	 *
+	 * "top" calculation here should correspond to "ss_sp"
+	 * calculation in signal_rt_frame_setup() since we locate
+	 * rt_sigframe_t in do_sigreturn() by checking "top".
 	 */
 	usd_hi = stacks->usd_hi;
 	AS(usd_hi).size = ti->u_stack.size;
-	AW(sbr) = ti->u_stack.top;
+	top = round_down(ti->u_stack.top, E2K_ALIGN_STACK);
 
 	if (!TASK_IS_PROTECTED(current)) {
 		usd_lo = stacks->usd_lo;
-		AS(usd_lo).base = ti->u_stack.top;
+		AS(usd_lo).base = top;
 	} else {
 		e2k_pusd_lo_t pusd_lo;
 
 		AW(pusd_lo) = AW(stacks->usd_lo);
-		AS(pusd_lo).base = ti->u_stack.top & 0xffffffffULL;
+		AS(pusd_lo).base = top & 0xffffffffULL;
 		AS(pusd_lo).p = 1;
 		AS(pusd_lo).psl += 1; /* signal handler */
 
@@ -1017,7 +1123,7 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 
 	stacks->usd_lo = usd_lo;
 	stacks->usd_hi = usd_hi;
-	stacks->top = round_up(AW(sbr), E2K_ALIGN_STACK_BASE_REG);
+	stacks->top = top;
 
 	/*
 	 * Update procedure stack
@@ -1080,7 +1186,7 @@ static int copy_sighandler_frame(struct e2k_stacks *stacks,
 	pframe_size = (TASK_IS_PROTECTED(current)) ? (32 * 8) : (16 * 8);
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = __copy_to_user_with_tags(u_pframe, pframe, pframe_size);
+	ret = __copy_to_priv_user_with_tags(u_pframe, pframe, pframe_size);
 	clear_ts_flag(ts_flag);
 	if (ret)
 		return -EFAULT;
@@ -1372,8 +1478,8 @@ static int get_data_stack_from_signal_regs(unsigned long corrected_frame_addr,
 		e2k_stacks_t stacks;
 		unsigned long delta;
 
-		if (__copy_from_user(&stacks, &u_regs->stacks,
-					sizeof(stacks))) {
+		if (__copy_from_priv_user(&stacks, &u_regs->stacks,
+					  sizeof(stacks))) {
 			SIGDEBUG_PRINT("SIGKILL. could not read signal stack\n");
 			force_sig(SIGKILL);
 			ret = -EFAULT;
@@ -1612,11 +1718,11 @@ static int longjmp_check_goal_frame(const struct e2k_stacks *stacks,
 		int res;
 
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-		res = __get_user(AW(cr1_lo), &AW(u_cframe->cr1_lo));
+		res = __get_priv_user(AW(cr1_lo), &AW(u_cframe->cr1_lo));
 		clear_ts_flag(ts_flag);
 
 		if (res) {
-			SIGDEBUG_PRINT("SIGKILL. longjmp(): __get_user() fault\n");
+			SIGDEBUG_PRINT("SIGKILL. longjmp(): __get_priv_user() fault\n");
 			ret = -EFAULT;
 			goto out;
 		}
@@ -1723,17 +1829,13 @@ static void longjmp_update_hw_stacks(e2k_stacks_t *stacks,
 		stacks->pcsp_hi.PCSP_hi_ind, stacks->pcshtp);
 }
 
-static int longjmp_switch_to_new_context(pt_regs_t *regs, pt_regs_t *new_regs,
-		u64 dstack_sp, u64 dstack_free, u64 dstack_top)
+int native_longjmp_copy_user_to_kernel_hw_stacks(pt_regs_t *regs,
+						 pt_regs_t *new_regs)
 {
 	e2k_stacks_t *new_stacks = &new_regs->stacks;
 	e2k_mem_crs_t *k_crs;
 	e2k_mem_crs_t __user *u_cframe;
-	unsigned long flags;
 	int ret;
-
-	if (WARN_ON_ONCE(AS(new_stacks->pcsp_hi).ind < SZ_OF_CR))
-		do_exit(SIGKILL);
 
 	/*
 	 * Copy 2 last frames into chain stack - the first one for
@@ -1746,20 +1848,42 @@ static int longjmp_switch_to_new_context(pt_regs_t *regs, pt_regs_t *new_regs,
 	k_crs = (e2k_mem_crs_t *) AS(current_thread_info()->k_pcsp_lo).base;
 	u_cframe = (void __user *) (AS(new_stacks->pcsp_lo).base +
 				    AS(new_stacks->pcsp_hi).ind);
-	/* Do all of the updates under closed interrupts so that
-	 * we still see consistent stack state from interrupt
-	 * handler in case an interrupt arrives here. */
-	raw_all_irq_save(flags);
-	ret = __copy_user_to_current_hw_stack(k_crs, u_cframe - 1,
+	ret = copy_user_to_current_hw_stack(k_crs, u_cframe - 1,
 					    sizeof(*k_crs), new_regs, true);
-	if (ret) {
-		SIGDEBUG_PRINT("SIGKILL. lcngjmp(): copy_user_to_current_hw_stack() fault\n");
+	if (ret)
 		goto out;
-	}
 
 	new_stacks->pcshtp = SZ_OF_CR;
 	NATIVE_FLUSHC;
 	*(k_crs + 1) = new_regs->crs;
+
+out:
+	return ret;
+}
+
+static int longjmp_switch_to_new_context(pt_regs_t *regs, pt_regs_t *new_regs,
+		u64 dstack_sp, u64 dstack_free, u64 dstack_top)
+{
+	e2k_stacks_t *new_stacks = &new_regs->stacks;
+	unsigned long flags;
+	int ret;
+
+	if (WARN_ON_ONCE(AS(new_stacks->pcsp_hi).ind < SZ_OF_CR))
+		do_exit(SIGKILL);
+
+	/*
+	 * Do all of the updates under closed interrupts so that
+	 * we still see consistent stack state from interrupt
+	 * handler in case an interrupt arrives here.
+	 */
+	raw_all_irq_save(flags);
+
+	ret = longjmp_copy_user_to_kernel_hw_stacks(regs, new_regs);
+	if (ret) {
+		SIGDEBUG_PRINT("SIGKILL. lcngjmp(): copy user stacks to kernel "
+			"current_hw_stack() fault\n");
+		goto out;
+	}
 
 	current_thread_info()->u_stack.bottom = dstack_sp - dstack_free;
 	current_thread_info()->u_stack.top = dstack_top;
@@ -1801,7 +1925,7 @@ static void longjmp_update_dstack(struct e2k_stacks *stacks, u64 dstack_sp,
 		 * in user procedure
 		 */
 		if ((AS(pusd_lo).psl - 1) * SZ_OF_CR > AS(jmp_pcsp_hi).ind) {
-			pr_info_ratelimited(" BAD in longjmp() jmp_pcsp_hi.ind : 0x%d jmp_psl=%d\n",
+			pr_info_ratelimited(" BAD in longjmp() jmp_pcsp_hi.ind : 0x%x jmp_psl=%d\n",
 					AS(jmp_pcsp_hi).ind, AS(pusd_lo).psl);
 		}
 		delete_records(AS(pusd_lo).psl);
@@ -1893,7 +2017,7 @@ long do_longjmp(u64 retval, u64 jmp_sigmask, e2k_cr0_hi_t jmp_cr0_hi,
 	if (ret)
 		return ret;
 
-	ret = complete_long_jump(&new_regs);
+	ret = complete_long_jump(&new_regs, false, 0);
 	if (ret)
 		return ret;
 
@@ -2016,7 +2140,7 @@ long protected_sys_rt_sigaction(int sig,
 				old_ka.sa.sa_handler != SIG_IGN) {
 			if (IS_CPU_ISET_V6())
 				return -ENOSYS;
-			rval = PUT_USER_PL_V2(&oact->sa_handler,
+			rval = PUT_USER_PL_V3(&oact->sa_handler,
 					   (u64)old_ka.sa.sa_handler);
 		} else {
 			rval = put_user((u64)old_ka.sa.sa_handler,

@@ -103,8 +103,7 @@ static struct cpufreq_frequency_table *pcs_l_calc_freq_tables(int node,
 		 (divFmax - divFmin + 2)), GFP_KERNEL);
 
 	for (divF = divFmin; divF < MAX_STATES && divF <= divFmax; divF++) {
-		table[divFi].frequency =
-		    GET_FREQ(divF, f_plls[node]);
+		table[divFi].frequency = GET_FREQ(divF, f_plls[node]);
 		table[divFi++].driver_data = divF;
 	}
 
@@ -115,10 +114,11 @@ static struct cpufreq_frequency_table *pcs_l_calc_freq_tables(int node,
 
 int get_idx_by_n_sys(int n_sys)
 {
-	return (n_sys < 20) ? n_sys - 10 : (n_sys < 32) ? 9 + (n_sys - 20) / 2 : 14;
+	return n_sys - 8;
 }
 
-int n_sys[] = {10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 32};
+int n_sys[] = {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+	       20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
 int f_base_rev0[] = {900, 1000, 1050, 1100, 1125, 1175, 1200, 1300};
 int f_base_rev1[] = {900, 1000, 1100, 1200, 1300, 1400, 1500, 1550};
 
@@ -263,12 +263,12 @@ static int pcs_l_cpufreq_setpolicy(struct cpufreq_policy *policy)
 
 static int get_f_pll(int node)
 {
-	int addr = EFUSE_START_ADDR;
+	int addr;
 	int f_pll = DEFAULT_F_PLL;
 	uint64_t data[4];
 	int i = 0;
 
-	for (addr; addr < EFUSE_END_ADDR; addr++) {
+	for (addr = EFUSE_START_ADDR; addr < EFUSE_END_ADDR; addr++) {
 		efuse_data_t efuse_data;
 #ifdef DEBUG
 		print_efuse_data(&efuse_data);

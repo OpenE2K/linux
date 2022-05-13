@@ -9,18 +9,17 @@
 #include <asm/e2k_api.h>
 #include <asm/cpu_regs_types.h>
 #include <asm/kvm/cpu_hv_regs_types.h>
+#include <asm/machdep.h>
 
 /*
  * Virtualization control registers
  */
-#define	READ_VIRT_CTRL_CU_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(virt_ctrl_cu)
+#define	READ_VIRT_CTRL_CU_REG() \
+	((virt_ctrl_cu_t) { .word = NATIVE_GET_DSREG_CLOSED(virt_ctrl_cu) })
 /* Bug #127239: on some CPUs "rwd %virt_ctrl_cu" instruction must also
  * contain a NOP.  This is already accomplished by using delay "5" here. */
-#define	WRITE_VIRT_CTRL_CU_REG_VALUE(virt_ctrl)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(virt_ctrl_cu, virt_ctrl, 5)
-#define	READ_VIRT_CTRL_CU_REG()		read_VIRT_CTRL_CU_reg()
-#define	WRITE_VIRT_CTRL_CU_REG(virt_ctrl)	\
-		write_VIRT_CTRL_CU_reg(virt_ctrl)
+#define	WRITE_VIRT_CTRL_CU_REG(v) \
+	NATIVE_SET_DSREG_CLOSED_NOEXC(virt_ctrl_cu, ((virt_ctrl_cu_t) (v)).word, 5)
 
 /* Shadow CPU registers */
 
@@ -170,6 +169,7 @@
 
 #define	WRITE_SH_OSCUTD_REG_VALUE(CUTD_value)	\
 		NATIVE_SET_DSREG_CLOSED_NOEXC(sh_oscutd, CUTD_value, 7)
+#define	WRITE_SH_OSCUTD_REG(value) WRITE_SH_OSCUTD_REG_VALUE(AW(value))
 
 /*
  * Read/write word Compilation Unit Index Register (SH_OSCUIR)
@@ -178,6 +178,7 @@
 
 #define	WRITE_SH_OSCUIR_REG_VALUE(CUIR_value)	\
 		NATIVE_SET_DSREG_CLOSED_NOEXC(sh_oscuir, CUIR_value, 7)
+#define	WRITE_SH_OSCUIR_REG(value) WRITE_SH_OSCUIR_REG_VALUE(AW(value))
 
 /*
  * Read/Write Processor Core Mode Register (SH_CORE_MODE)
@@ -186,242 +187,37 @@
 #define	WRITE_SH_CORE_MODE_REG_VALUE(modes)	\
 		NATIVE_SET_SREG_CLOSED_NOEXC(sh_core_mode, modes, 5)
 
-extern unsigned long read_VIRT_CTRL_CU_reg_value(void);
-extern void write_VIRT_CTRL_CU_reg_value(unsigned long value);
-extern unsigned int read_SH_CORE_MODE_reg_value(void);
-extern void write_SH_CORE_MODE_reg_value(unsigned int value);
-extern unsigned long read_SH_PSP_LO_reg_value(void);
-extern unsigned long read_SH_PSP_HI_reg_value(void);
-extern void write_SH_PSP_LO_reg_value(unsigned long value);
-extern void write_SH_PSP_HI_reg_value(unsigned long value);
-extern unsigned long read_BU_PSP_LO_reg_value(void);
-extern unsigned long read_BU_PSP_HI_reg_value(void);
-extern void write_BU_PSP_LO_reg_value(unsigned long value);
-extern void write_BU_PSP_HI_reg_value(unsigned long value);
-extern unsigned long read_SH_PSHTP_reg_value(void);
-extern void write_SH_PSHTP_reg_value(unsigned long value);
-extern unsigned long read_SH_PCSP_LO_reg_value(void);
-extern unsigned long read_SH_PCSP_HI_reg_value(void);
-extern void write_SH_PCSP_LO_reg_value(unsigned long value);
-extern void write_SH_PCSP_HI_reg_value(unsigned long value);
-extern unsigned long read_BU_PCSP_LO_reg_value(void);
-extern unsigned long read_BU_PCSP_HI_reg_value(void);
-extern void write_BU_PCSP_LO_reg_value(unsigned long value);
-extern void write_BU_PCSP_HI_reg_value(unsigned long value);
-extern int read_SH_PCSHTP_reg_value(void);
-extern void write_SH_PCSHTP_reg_value(int value);
-extern unsigned long read_SH_WD_reg_value(void);
-extern void write_SH_WD_reg_value(unsigned long value);
-extern unsigned long read_SH_OSCUD_LO_reg_value(void);
-extern unsigned long read_SH_OSCUD_HI_reg_value(void);
-extern void write_SH_OSCUD_LO_reg_value(unsigned long value);
-extern void write_SH_OSCUD_HI_reg_value(unsigned long value);
-extern unsigned long read_SH_OSGD_LO_reg_value(void);
-extern unsigned long read_SH_OSGD_HI_reg_value(void);
-extern void write_SH_OSGD_LO_reg_value(unsigned long value);
-extern void write_SH_OSGD_HI_reg_value(unsigned long value);
-extern unsigned long read_SH_OSCUTD_reg_value(void);
-extern void write_SH_OSCUTD_reg_value(unsigned long value);
-extern unsigned int read_SH_OSCUIR_reg_value(void);
-extern void write_SH_OSCUIR_reg_value(unsigned int value);
-extern unsigned long read_SH_OSR0_reg_value(void);
-extern void write_SH_OSR0_reg_value(unsigned long value);
-
-static inline virt_ctrl_cu_t read_VIRT_CTRL_CU_reg(void)
-{
-	virt_ctrl_cu_t virt_ctrl;
-
-	virt_ctrl.VIRT_CTRL_CU_reg = read_VIRT_CTRL_CU_reg_value();
-	return virt_ctrl;
-}
-static inline void write_VIRT_CTRL_CU_reg(virt_ctrl_cu_t virt_ctrl)
-{
-	write_VIRT_CTRL_CU_reg_value(virt_ctrl.VIRT_CTRL_CU_reg);
-}
-
-static inline e2k_psp_lo_t read_SH_PSP_LO_reg(void)
-{
-	e2k_psp_lo_t psp_lo;
-
-	psp_lo.PSP_lo_half = read_SH_PSP_LO_reg_value();
-	return psp_lo;
-}
-static inline e2k_psp_hi_t read_SH_PSP_HI_reg(void)
-{
-	e2k_psp_hi_t psp_hi;
-
-	psp_hi.PSP_hi_half = read_SH_PSP_HI_reg_value();
-	return psp_hi;
-}
-static inline void write_SH_PSP_LO_reg(e2k_psp_lo_t psp_lo)
-{
-	write_SH_PSP_LO_reg_value(psp_lo.PSP_lo_half);
-}
-static inline void write_SH_PSP_HI_reg(e2k_psp_hi_t psp_hi)
-{
-	write_SH_PSP_HI_reg_value(psp_hi.PSP_hi_half);
-}
-
-static inline e2k_pcsp_lo_t read_SH_PCSP_LO_reg(void)
-{
-	e2k_pcsp_lo_t pcsp_lo;
-
-	pcsp_lo.PCSP_lo_half = read_SH_PCSP_LO_reg_value();
-	return pcsp_lo;
-}
-static inline e2k_pcsp_hi_t read_SH_PCSP_HI_reg(void)
-{
-	e2k_pcsp_hi_t pcsp_hi;
-
-	pcsp_hi.PCSP_hi_half = read_SH_PCSP_HI_reg_value();
-	return pcsp_hi;
-}
-static inline void write_SH_PCSP_LO_reg(e2k_pcsp_lo_t pcsp_lo)
-{
-	write_SH_PCSP_LO_reg_value(pcsp_lo.PCSP_lo_half);
-}
-static inline void write_SH_PCSP_HI_reg(e2k_pcsp_hi_t pcsp_hi)
-{
-	write_SH_PCSP_HI_reg_value(pcsp_hi.PCSP_hi_half);
-}
-
-static inline e2k_psp_lo_t read_BU_PSP_LO_reg(void)
-{
-	e2k_psp_lo_t psp_lo;
-
-	psp_lo.PSP_lo_half = read_BU_PSP_LO_reg_value();
-	return psp_lo;
-}
-static inline e2k_psp_hi_t read_BU_PSP_HI_reg(void)
-{
-	e2k_psp_hi_t psp_hi;
-
-	psp_hi.PSP_hi_half = read_BU_PSP_HI_reg_value();
-	return psp_hi;
-}
-static inline void write_BU_PSP_LO_reg(e2k_psp_lo_t psp_lo)
-{
-	write_BU_PSP_LO_reg_value(psp_lo.PSP_lo_half);
-}
-static inline void write_BU_PSP_HI_reg(e2k_psp_hi_t psp_hi)
-{
-	write_BU_PSP_HI_reg_value(psp_hi.PSP_hi_half);
-}
-
-static inline e2k_pcsp_lo_t read_BU_PCSP_LO_reg(void)
-{
-	e2k_pcsp_lo_t pcsp_lo;
-
-	pcsp_lo.PCSP_lo_half = read_BU_PCSP_LO_reg_value();
-	return pcsp_lo;
-}
-static inline e2k_pcsp_hi_t read_BU_PCSP_HI_reg(void)
-{
-	e2k_pcsp_hi_t pcsp_hi;
-
-	pcsp_hi.PCSP_hi_half = read_BU_PCSP_HI_reg_value();
-	return pcsp_hi;
-}
-static inline void write_BU_PCSP_LO_reg(e2k_pcsp_lo_t pcsp_lo)
-{
-	write_BU_PCSP_LO_reg_value(pcsp_lo.PCSP_lo_half);
-}
-static inline void write_BU_PCSP_HI_reg(e2k_pcsp_hi_t pcsp_hi)
-{
-	write_BU_PCSP_HI_reg_value(pcsp_hi.PCSP_hi_half);
-}
-
-static inline e2k_oscud_lo_t read_SH_OSCUD_LO_reg(void)
-{
-	e2k_oscud_lo_t oscud_lo;
-
-	oscud_lo.OSCUD_lo_half = read_SH_OSCUD_LO_reg_value();
-	return oscud_lo;
-}
-static inline e2k_oscud_hi_t read_SH_OSCUD_HI_reg(void)
-{
-	e2k_oscud_hi_t oscud_hi;
-
-	oscud_hi.OSCUD_hi_half = read_SH_OSCUD_HI_reg_value();
-	return oscud_hi;
-}
-static inline void write_SH_OSCUD_LO_reg(e2k_oscud_lo_t oscud_lo)
-{
-	write_SH_OSCUD_LO_reg_value(oscud_lo.OSCUD_lo_half);
-}
-static inline void write_SH_OSCUD_HI_reg(e2k_oscud_hi_t oscud_hi)
-{
-	write_SH_OSCUD_HI_reg_value(oscud_hi.OSCUD_hi_half);
-}
-
-static inline e2k_osgd_lo_t read_SH_OSGD_LO_reg(void)
-{
-	e2k_osgd_lo_t osgd_lo;
-
-	osgd_lo.OSGD_lo_half = read_SH_OSGD_LO_reg_value();
-	return osgd_lo;
-}
-static inline e2k_osgd_hi_t read_SH_OSGD_HI_reg(void)
-{
-	e2k_osgd_hi_t osgd_hi;
-
-	osgd_hi.OSGD_hi_half = read_SH_OSGD_HI_reg_value();
-	return osgd_hi;
-}
-static inline void write_SH_OSGD_LO_reg(e2k_osgd_lo_t osgd_lo)
-{
-	write_SH_OSGD_LO_reg_value(osgd_lo.OSGD_lo_half);
-}
-static inline void write_SH_OSGD_HI_reg(e2k_osgd_hi_t osgd_hi)
-{
-	write_SH_OSGD_HI_reg_value(osgd_hi.OSGD_hi_half);
-}
-
-static inline e2k_cutd_t read_SH_OSCUTD_reg(void)
-{
-	e2k_cutd_t cutd;
-
-	cutd.CUTD_reg = read_SH_OSCUTD_reg_value();
-	return cutd;
-}
-static inline void write_SH_OSCUTD_reg(e2k_cutd_t cutd)
-{
-	write_SH_OSCUTD_reg_value(cutd.CUTD_reg);
-}
-
-static inline e2k_cuir_t read_SH_OSCUIR_reg(void)
-{
-	e2k_cuir_t cuir;
-
-	cuir.CUIR_reg = read_SH_OSCUIR_reg_value();
-	return cuir;
-}
-static inline void write_SH_OSCUIR_reg(e2k_cuir_t cuir)
-{
-	write_SH_OSCUIR_reg_value(cuir.CUIR_reg);
-}
-
+#ifdef CONFIG_VIRTUALIZATION
 static inline e2k_core_mode_t read_SH_CORE_MODE_reg(void)
 {
 	e2k_core_mode_t core_mode;
-
-	core_mode.CORE_MODE_reg = read_SH_CORE_MODE_reg_value();
+	core_mode.CORE_MODE_reg = machine.host.read_SH_CORE_MODE();
 	return core_mode;
 }
 static inline void write_SH_CORE_MODE_reg(e2k_core_mode_t core_mode)
 {
-	write_SH_CORE_MODE_reg_value(core_mode.CORE_MODE_reg);
+	machine.host.write_SH_CORE_MODE(core_mode.CORE_MODE_reg);
 }
+#endif /* CONFIG_VIRTUALIZATION */
 
 #define	READ_G_PREEMPT_TMR_REG() \
-		((e2k_g_preempt_tmr_t) NATIVE_GET_SREG_CLOSED(g_preempt_tmr))
+		((g_preempt_tmr_t) NATIVE_GET_DSREG_CLOSED(g_preempt_tmr))
 #define	WRITE_G_PREEMPT_TMR_REG(x) \
-		NATIVE_SET_SREG_CLOSED_NOEXC(g_preempt_tmr, AW(x), 5)
+		NATIVE_SET_DSREG_CLOSED_NOEXC(g_preempt_tmr, AW(x), 5)
 
 #define READ_INTC_PTR_CU() NATIVE_GET_DSREG_CLOSED(intc_ptr_cu)
 #define READ_INTC_INFO_CU() NATIVE_GET_DSREG_CLOSED(intc_info_cu)
 #define WRITE_INTC_INFO_CU(x) \
 		NATIVE_SET_DSREG_CLOSED_NOEXC(intc_info_cu, x, 5)
+
+/* Clear INTC_INFO_CU header and INTC_PTR_CU */
+static inline void clear_intc_info_cu(void)
+{
+	READ_INTC_PTR_CU();
+	WRITE_INTC_INFO_CU(0ULL);
+	WRITE_INTC_INFO_CU(0ULL);
+	READ_INTC_PTR_CU();
+}
 
 static inline void save_intc_info_cu(intc_info_cu_t *info, int *num)
 {
@@ -440,14 +236,8 @@ static inline void save_intc_info_cu(intc_info_cu_t *info, int *num)
 		return;
 	}
 
-	/*
-	 * CU header should be cleared --- fg@mcst.ru
-	 */
 	AW(info->header.lo) = READ_INTC_INFO_CU();
 	AW(info->header.hi) = READ_INTC_INFO_CU();
-	READ_INTC_PTR_CU();
-	WRITE_INTC_INFO_CU(0ULL);
-	WRITE_INTC_INFO_CU(0ULL);
 	info_ptr -= 2;
 
 	/*
@@ -467,17 +257,16 @@ static inline void restore_intc_info_cu(const intc_info_cu_t *info, int num)
 {
 	int i;
 
-	/*
-	 * 1) Clear the hardware pointer
-	 */
+	/* Clear the pointer, in case we just migrated to new cpu */
 	READ_INTC_PTR_CU();
-	if (num == -1)
+
+	/* Header will be cleared by hardware during GLAUNCH */
+	if (num == -1 || num == 0)
 		return;
 
 	/*
-	 * 2) Write the registers
-	 *
-	 * CU header should be cleared --- fg@mcst.ru
+	 * Restore intercepted events. Header flags aren't used for reexecution,
+	 * so restore 0 in header.
 	 */
 	WRITE_INTC_INFO_CU(0ULL);
 	WRITE_INTC_INFO_CU(0ULL);

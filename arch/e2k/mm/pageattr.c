@@ -2,6 +2,7 @@
 #include <linux/gfp.h>
 #include <linux/sched.h>
 #include <asm/l-iommu.h>
+#include <asm/page.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
@@ -146,11 +147,10 @@ split_one_pmd_page(pmd_t *pmdp, e2k_addr_t phys_page, pte_t *pte_page)
 	new = mk_pmd_phys(__pa(pte_page), PAGE_KERNEL_PTE);
 	native_set_pmd(pmdp, new);
 }
-void split_simple_pmd_page(pgprot_t *ptp, pte_t *ptes[MAX_NUM_HUGE_PTES])
+void split_simple_pmd_page(pgprot_t *ptp, pte_t *ptes)
 {
 	const pt_level_t *pmd_level = get_pt_level_on_id(E2K_PMD_LEVEL_NUM);
 	pte_t *ptep;
-	pte_t *pte_page;
 	e2k_addr_t phys_page;
 
 	if (pmd_level->get_huge_pte != NULL) {
@@ -159,98 +159,43 @@ void split_simple_pmd_page(pgprot_t *ptp, pte_t *ptes[MAX_NUM_HUGE_PTES])
 		ptep = (pte_t *)ptp;
 	}
 	phys_page = pte_pfn(*ptep) << PAGE_SHIFT;
-	pte_page = *ptes;
-	split_one_pmd_page((pmd_t *)ptep, phys_page, pte_page);
-}
-void split_multiple_pmd_page(pgprot_t *ptp, pte_t *ptes[MAX_NUM_HUGE_PTES])
-{
-	const pt_level_t *pmd_level = get_pt_level_on_id(E2K_PMD_LEVEL_NUM);
-	pte_t *ptep;
-	pte_t *pte_page;
-	e2k_addr_t phys_page;
-	int ptes_num;
-	int no;
-
-	ptes_num = get_pt_level_huge_ptes_num(pmd_level);
-	if (pmd_level->get_huge_pte != NULL) {
-		ptep = pmd_level->get_huge_pte(0, ptp);
-	} else {
-		/* first pte is always multiple ptes size */
-		ptep = (pte_t *)(((e2k_addr_t)ptp) &
-					~((sizeof(*ptp) * ptes_num) - 1));
-	}
-	phys_page = pte_pfn(*ptep) << PAGE_SHIFT;
-	for (no = 0; no < ptes_num; no++) {
-		pte_page = ptes[no];
-		split_one_pmd_page((pmd_t *)ptep, phys_page, pte_page);
-		/* next page table entry */
-		ptep++;
-		phys_page += PMD_SIZE;
-	}
+	split_one_pmd_page((pmd_t *)ptep, phys_page, ptes);
 }
 
 static inline void
-free_pmd_huge_ptes_pages(int node, pte_t *ptes[MAX_NUM_HUGE_PTES], int ptes_num)
+free_pmd_huge_ptes_pages(int node, pte_t *ptes)
 {
-	int no;
-
-	for (no = 0; no < ptes_num; no++) {
-		sma_free_page(node, ptes[no]);
-		ptes[no] = NULL;
-	}
+	sma_free_page(node, ptes);
+	ptes = NULL;
 }
-static inline int
-alloc_pmd_huge_ptes_pages(int node, pte_t *ptes[MAX_NUM_HUGE_PTES])
+static inline pte_t *
+alloc_pmd_huge_ptes_pages(int node)
 {
-	int ptes_num;
-	int no;
-
-	ptes_num = get_e2k_pt_level_huge_ptes_num(E2K_PMD_LEVEL_NUM);
-	BUG_ON(ptes_num > MAX_NUM_HUGE_PTES);
-	for (no = 0; no < ptes_num; no++) {
-		pte_t *ptep;
-
-		ptep = sma_alloc_page(node);
-		if (unlikely(ptep == NULL))
-			break;
-		ptes[no] = ptep;
-	}
-	if (likely(no >= ptes_num))
-		return ptes_num;
-
-	free_pmd_huge_ptes_pages(node, ptes, no);
-	return -ENOMEM;
+	return sma_alloc_page(node);
 }
 
 /* FIXME; split is not fully implemented for guest kernel */
 /* Guest kernel should register spliting on host */
 static int split_pmd_page(int node, pmd_t *pmdp)
 {
-	pte_t *ptes[MAX_NUM_HUGE_PTES];
+	pte_t *ptes;
 	const pt_level_t *pmd_level = get_pt_level_on_id(E2K_PMD_LEVEL_NUM);
-	int ptes_num;
 	bool was_updated = false;
 
-	ptes_num = alloc_pmd_huge_ptes_pages(node, ptes);
-	if (unlikely(ptes_num < 0))
-		return ptes_num;
+	ptes = alloc_pmd_huge_ptes_pages(node);
+	if (unlikely(!ptes))
+		return -ENOMEM;
 
 	/* Re-read `*pmdp' again under spinlock */
 	raw_spin_lock(&sma_lock);
-	if (!kernel_pmd_huge(*pmdp)) {
+	if (!kernel_pmd_huge(*pmdp))
 		was_updated = true;
-	} else {
-
-		if (pmd_level->split_pt_page != NULL) {
-			pmd_level->split_pt_page((pgprot_t *)pmdp, ptes);
-		} else {
-			split_simple_pmd_page((pgprot_t *)pmdp, ptes);
-		}
-	}
+	else
+		split_simple_pmd_page((pgprot_t *)pmdp, ptes);
 	raw_spin_unlock(&sma_lock);
 
 	if (was_updated)
-		free_pmd_huge_ptes_pages(node, ptes, ptes_num);
+		free_pmd_huge_ptes_pages(node, ptes);
 
 	return 0;
 }
@@ -365,21 +310,7 @@ void map_pud_huge_page_to_simple_pmds(pgprot_t *pmd_page, e2k_addr_t phys_page,
 		phys_page += PMD_SIZE;
 	}
 }
-void map_pud_huge_page_to_multiple_pmds(pgprot_t *pmd_page,
-			e2k_addr_t phys_page, pgprot_t pgprot)
-{
-	int ptes_num = get_e2k_pt_level_huge_ptes_num(E2K_PMD_LEVEL_NUM);
-	pmd_t pmd;
-	int i, no;
 
-	for (i = 0; i < PTRS_PER_PMD; i += ptes_num) {
-		pmd = mk_pmd_phys(phys_page, pgprot);
-		for (no = 0; no < ptes_num; no++) {
-			((pmd_t *)pmd_page)[i + no] = pmd;
-		}
-		phys_page += (PMD_SIZE * ptes_num);
-	}
-}
 static void
 split_one_pud_page(pud_t *pudp, pmd_t *pmd_page)
 {
@@ -390,12 +321,7 @@ split_one_pud_page(pud_t *pudp, pmd_t *pmd_page)
 
 	phys_page = pud_pfn(*pudp) << PAGE_SHIFT;
 	pgprot_val(pgprot) = _PAGE_CLEAR(pud_val(*pudp), UNI_PAGE_PFN);
-	if (pud_level->map_pt_huge_page_to_prev_level != NULL)
-		pud_level->map_pt_huge_page_to_prev_level((pgprot_t *)pmd_page,
-							phys_page, pgprot);
-	else
-		map_pud_huge_page_to_simple_pmds((pgprot_t *)pmd_page,
-							phys_page, pgprot);
+	map_pud_huge_page_to_simple_pmds((pgprot_t *)pmd_page, phys_page, pgprot);
 
 	smp_wmb(); /* make pmd visible before pud */
 	new = mk_pud_phys(__pa(pmd_page), PAGE_KERNEL_PMD);
@@ -526,11 +452,6 @@ static int walk_pud_level(int node, pgd_t *pgd, unsigned long addr,
 	return ret;
 }
 
-static void sma_flush_tlb_ipi(void *unused)
-{
-	__flush_tlb_all();
-}
-
 static int set_memory_attr(unsigned long start, unsigned long end,
 			   enum sma_mode mode)
 {
@@ -554,7 +475,8 @@ static int set_memory_attr(unsigned long start, unsigned long end,
 	 * Get rid of potentially aliasing lazily unmapped vm areas that may
 	 * have permissions set that deviate from the ones we are setting here.
 	 */
-	vm_unmap_aliases();
+	if (mode == SMA_WB_MT || mode == SMA_WC_MT || mode == SMA_UC_MT)
+		vm_unmap_aliases();
 
 	for_each_node_has_dup_kernel(node) {
 		addr = start;
@@ -575,27 +497,9 @@ static int set_memory_attr(unsigned long start, unsigned long end,
 
 	if (IS_ENABLED(CONFIG_KVM_GUEST_MODE) &&
 			!IS_ENABLED(CONFIG_KVM_SHADOW_PT) || need_flush) {
-		/*
-		 * Sometimes allocators are called under closed
-		 * interrupts, so do not use on_each_cpu() here.
-		 */
-		nmi_on_each_cpu(sma_flush_tlb_ipi, NULL, 1, 0);
-
-		/*
-		 * gpu-imgtec expects the caches to be dropped when remapping
-		 * to WC/UC (see _ApplyOSPagesAttribute()).
-		 *
-		 * Also (#134896):
-		 * 1) When remapping memory from General/WB/WC to External/UC
-		 * we must flush previous cache contents so that they won't
-		 * overwrite RAM contents later.
-		 * 2) When remapping memory from External/UC to General/WB/WC
-		 * it is possible that hardware prefetcher has loaded some of
-		 * its older contents into cache so it must be flushed.
-		 */
-		if (mode == SMA_UC_MT || mode == SMA_WC_MT ||
-				cpu_has(CPU_FEAT_HW_PREFETCHER) && mode == SMA_WB_MT)
-			write_back_cache_range(start, end - start);
+		/* Sometimes allocators are called under closed interrupts
+		 * so use NMI version of flush_tlb_kernel_range() here. */
+		flush_tlb_kernel_range_nmi(start, end);
 	}
 
 	return 0;
@@ -660,51 +564,72 @@ bool kernel_page_present(struct page *page)
 
 #define CPA_PAGES_ARRAY 1
 
-static int change_page_attr(unsigned long addr, int numpages,
-		enum sma_mode mode, int flags, struct page **pages)
+typedef int (*set_memory_attr_fn)(unsigned long addr, int numpages);
+
+static int change_page_attr(struct page **pages, int numpages,
+		enum sma_mode mode, set_memory_attr_fn handler)
 {
-	int i = 0;
+	unsigned long batch_addr;
+	int i, batch_size = 0;
 
-	if (!(flags & CPA_PAGES_ARRAY)) {
-		if (addr & ~PAGE_MASK) {
-			addr &= PAGE_MASK;
-			WARN_ON_ONCE(1);
+	for (i = 0; i < numpages; i++) {
+		unsigned long addr = (unsigned long) page_address(pages[i]);
+
+		if (batch_size == 0) {
+			/* Start a new batch of physically contiguous pages */
+			batch_addr = addr;
+			batch_size = 1;
+		} else if (addr == batch_addr + batch_size * PAGE_SIZE) {
+			/* Add another page to the batch */
+			batch_size += 1;
+		} else {
+			/* Next page is not physically contiguous with current
+			 * batch, so process the batch and start a new one */
+			int ret = handler(batch_addr, batch_size);
+			if (ret)
+				return ret;
+			batch_addr = addr;
+			batch_size = 1;
 		}
-
-		return set_memory_attr(addr, addr + numpages * PAGE_SIZE, mode);
 	}
 
-	for (i; i < numpages; i++) {
-		int err;
-
-		addr = (unsigned long)page_address(pages[i]);
-
-		if (err = set_memory_attr(addr, addr + PAGE_SIZE, mode)) {
-			WARN_ON_ONCE(1);
-			return err;
-		}
-	}
+	if (batch_size)
+		return handler(batch_addr, batch_size);
 
 	return 0;
 }
 
-/* Mapping device memory as UC disables cache coherency since v6.
- *
- * Mapping RAM as UC keeps cache coherency on but beware that
- * there must not exist any aliases for the remapped memory,
- * otherwise speculative access at an alias address could load
- * data into cache and consequent stores and loads will work with
- * cache instead of memory.
- *
- * set_memory_uc() itself does NOT take care of cache flushing as
- * on e2k everything is coherent including DMA, thus the flush is
- * needed on one device only: Imagination video card on e2c3. */
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
 int set_memory_uc(unsigned long addr, int numpages)
 {
-	return change_page_attr(addr, numpages, SMA_UC_MT, 0, NULL);
+	bool cache_flush_needed;
+	int ret;
+
+	/* memtype_reserve() expects a contiguous physical area as it
+	 * does in x86 implementation which this all is based on */
+	if (addr < PAGE_OFFSET || addr >= PAGE_OFFSET + MAX_PM_SIZE) {
+		WARN_ONCE(1, "set_memory_uc() expects a contiguous physical area.\n"
+			"For discontiguous areas please use set_pages_array_uc()\n");
+		return -EINVAL;
+	}
+
+	ret = memtype_reserve(__pa(addr), __pa(addr) + numpages * PAGE_SIZE,
+				  PCM_UC, &cache_flush_needed);
+	if (ret)
+		return ret;
+
+	ret = set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_UC_MT);
+	if (ret)
+		memtype_free(__pa(addr), __pa(addr) + numpages * PAGE_SIZE);
+
+	if (cache_flush_needed)
+		write_back_cache_range(addr, numpages * PAGE_SIZE);
+
+	return 0;
 }
 EXPORT_SYMBOL(set_memory_uc);
 
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
 int set_pages_uc(struct page *page, int numpages)
 {
 	unsigned long addr = (unsigned long)page_address(page);
@@ -713,30 +638,48 @@ int set_pages_uc(struct page *page, int numpages)
 }
 EXPORT_SYMBOL(set_pages_uc);
 
-int set_pages_array_uc(struct page **pages, int addrinarray)
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
+int set_pages_array_uc(struct page **pages, int numpages)
 {
-	return change_page_attr(0, addrinarray, SMA_UC_MT,
-				CPA_PAGES_ARRAY, pages);
+	return change_page_attr(pages, numpages, SMA_UC_MT, &set_memory_uc);
 }
 EXPORT_SYMBOL(set_pages_array_uc);
 
-/* Mapping device memory as WC disables cache coherency since v6.
- *
- * Mapping RAM as WC keeps cache coherency on but beware that
- * there must not exist any aliases for the remapped memory,
- * otherwise speculative access at an alias address could load
- * data into cache and consequent stores and loads will work with
- * cache instead of memory.
- *
- * set_memory_wc() itself does NOT take care of cache flushing as
- * on e2k everything is coherent including DMA, thus the flush is
- * needed on one device only: Imagination video card on e2c3. */
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
 int set_memory_wc(unsigned long addr, int numpages)
 {
-	return change_page_attr(addr, numpages, SMA_WC_MT, 0, NULL);
+	bool cache_flush_needed;
+	int ret;
+
+	/* memtype_reserve() expects a contiguous physical area as it
+	 * does in x86 implementation which this all is based on */
+	if (addr < PAGE_OFFSET || addr >= PAGE_OFFSET + MAX_PM_SIZE) {
+		WARN_ONCE(1, "set_memory_wc() expects a contiguous physical area.\n"
+			"For discontiguous areas please use set_pages_array_wc()\n");
+		return -EINVAL;
+	}
+
+	/* CONFIG_DMA_REMAP makes dma_alloc_coherent() return
+	 * discontiguous memory area which is not supported here */
+	BUILD_BUG_ON(IS_ENABLED(CONFIG_DMA_REMAP));
+
+	ret = memtype_reserve(__pa(addr), __pa(addr) + numpages * PAGE_SIZE,
+				  PCM_WC, &cache_flush_needed);
+	if (ret)
+		return ret;
+
+	ret = set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_WC_MT);
+	if (ret)
+		memtype_free(__pa(addr), __pa(addr) + numpages * PAGE_SIZE);
+
+	if (cache_flush_needed)
+		write_back_cache_range(addr, numpages * PAGE_SIZE);
+
+	return 0;
 }
 EXPORT_SYMBOL(set_memory_wc);
 
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
 int set_pages_wc(struct page *page, int numpages)
 {
 	unsigned long addr = (unsigned long)page_address(page);
@@ -745,19 +688,41 @@ int set_pages_wc(struct page *page, int numpages)
 }
 EXPORT_SYMBOL(set_pages_wc);
 
-int set_pages_array_wc(struct page **pages, int addrinarray)
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
+int set_pages_array_wc(struct page **pages, int numpages)
 {
-	return change_page_attr(0, addrinarray, SMA_WC_MT,
-				CPA_PAGES_ARRAY, pages);
+	return change_page_attr(pages, numpages, SMA_WC_MT, &set_memory_wc);
 }
 EXPORT_SYMBOL(set_pages_array_wc);
 
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
 int set_memory_wb(unsigned long addr, int numpages)
 {
-	return change_page_attr(addr, numpages, SMA_WB_MT, 0, NULL);
+	bool call_memtype_free;
+	int ret;
+
+	/* memtype_free() expects a contiguous physical area as it
+	 * does in x86 implementation which this all is based on */
+	if (addr < PAGE_OFFSET || addr >= PAGE_OFFSET + MAX_PM_SIZE) {
+		WARN_ONCE(1, "set_memory_wb() expects a contiguous physical area.\n"
+			"For discontiguous areas please use set_pages_array_wb()\n");
+		return -EINVAL;
+	}
+
+	call_memtype_free = memtype_free_cacheflush(addr,
+					addr + numpages * PAGE_SIZE);
+
+	ret = set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_WB_MT);
+	if (ret)
+		return ret;
+
+	if (call_memtype_free)
+		memtype_free(__pa(addr), __pa(addr) + numpages * PAGE_SIZE);
+	return 0;
 }
 EXPORT_SYMBOL(set_memory_wb);
 
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
 int set_pages_wb(struct page *page, int numpages)
 {
 	unsigned long addr = (unsigned long)page_address(page);
@@ -766,9 +731,55 @@ int set_pages_wb(struct page *page, int numpages)
 }
 EXPORT_SYMBOL(set_pages_wb);
 
-int set_pages_array_wb(struct page **pages, int addrinarray)
+/* For usage see comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
+int set_pages_array_wb(struct page **pages, int numpages)
 {
-	return change_page_attr(0, addrinarray, SMA_WB_MT,
-				CPA_PAGES_ARRAY, pages);
+	return change_page_attr(pages, numpages, SMA_WB_MT, &set_memory_wb);
 }
 EXPORT_SYMBOL(set_pages_array_wb);
+
+#ifdef HAVE_ARCH_FREE_PAGE
+/* Check that the freed page has WB cache attribute set in linear mapping */
+void arch_free_page(struct page *page, int order)
+{
+	pte_mem_type_t mt;
+	pgd_t *pgdp;
+	pud_t *pudp;
+	pmd_t *pmdp;
+	pte_t *ptep;
+	unsigned long address = (unsigned long) page_address(page);
+
+	pgdp = pgd_offset_k(address);
+	if (pgd_none(*pgdp))
+		return;
+	if (kernel_pgd_huge(*pgdp)) {
+		mt = _PAGE_GET_MEM_TYPE(pgd_val(*pgdp));
+		goto check_mt;
+	}
+
+	pudp = pud_offset(pgdp, address);
+	if (pud_none(*pudp))
+		return;
+	if (kernel_pud_huge(*pudp)) {
+		mt = _PAGE_GET_MEM_TYPE(pud_val(*pudp));
+		goto check_mt;
+	}
+
+	pmdp = pmd_offset(pudp, address);
+	if (pmd_none(*pmdp))
+		return;
+	if (kernel_pmd_huge(*pmdp)) {
+		mt = _PAGE_GET_MEM_TYPE(pmd_val(*pmdp));
+		goto check_mt;
+	}
+
+	ptep = pte_offset_kernel(pmdp, address);
+	if (pte_none(*ptep))
+		return;
+	mt = _PAGE_GET_MEM_TYPE(pte_val(*ptep));
+
+check_mt:
+	WARN_ONCE(mt != GEN_CACHE_MT, "The freed page is mapped with %d memory type instead of writeback. Did you forget to call set_memory_wb()/set_pages_array_wb() before freeing it?\n",
+			mt);
+}
+#endif

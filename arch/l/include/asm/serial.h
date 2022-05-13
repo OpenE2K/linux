@@ -23,15 +23,6 @@
 #define STD_COM4_FLAGS UPF_BOOT_AUTOCONF
 #endif
 
-#ifdef CONFIG_E2K
-#define SERIAL_PORT_DFNS						\
-	/* UART CLK   PORT IRQ     FLAGS        */			\
-	{ 0, BASE_BAUD, 0x3F8, 4, STD_COM_FLAGS }, 	/* ttyS0 */	\
-	{ 0, BASE_BAUD, 0x2F8, 3, STD_COM_FLAGS },	/* ttyS1 */	\
-	{ 0, BASE_BAUD, 0x3E8, 4, STD_COM_FLAGS },	/* ttyS2 */	\
-	{ 0, BASE_BAUD, 0x2E8, 3, STD_COM4_FLAGS },	/* ttyS3 */
-#endif
-
 #define	AM85C30_RES_Tx_P	0x28
 #define AM85C30_EXT_INT_ENAB	0x01
 #define AM85C30_TxINT_ENAB	0x02

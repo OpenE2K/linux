@@ -49,10 +49,8 @@
 							/* the small pages */
 
 /* Size of pages where the kernel is loaded */
-#define	E2K_KERNEL_PAGE_SIZE		(cpu_has(CPU_HWBUG_LARGE_PAGES) ? \
-				E2K_SMALL_PAGE_SIZE : E2K_LARGE_PAGE_SIZE)
-#define	BOOT_E2K_KERNEL_PAGE_SIZE	(boot_cpu_has(CPU_HWBUG_LARGE_PAGES) ? \
-				E2K_SMALL_PAGE_SIZE : BOOT_E2K_LARGE_PAGE_SIZE)
+#define	E2K_KERNEL_PAGE_SIZE		E2K_LARGE_PAGE_SIZE
+#define	BOOT_E2K_KERNEL_PAGE_SIZE	BOOT_E2K_LARGE_PAGE_SIZE
 
 							/* Equal map of phys */
 							/* to virt addresses */
@@ -124,12 +122,10 @@
 
 /* Size of pages to map physical memory */
 #define	E2K_MAPPED_PHYS_MEM_PAGE_SIZE	\
-		((cpu_has(CPU_HWBUG_LARGE_PAGES) || \
-		  IS_ENABLED(CONFIG_DEBUG_PAGEALLOC)) ? \
+		(IS_ENABLED(CONFIG_DEBUG_PAGEALLOC) ? \
 				E2K_SMALL_PAGE_SIZE : E2K_LARGE_PAGE_SIZE)
 #define	BOOT_E2K_MAPPED_PHYS_MEM_PAGE_SIZE \
-		((boot_cpu_has(CPU_HWBUG_LARGE_PAGES) || \
-		  IS_ENABLED(CONFIG_DEBUG_PAGEALLOC)) ? \
+		(IS_ENABLED(CONFIG_DEBUG_PAGEALLOC) ? \
 				E2K_SMALL_PAGE_SIZE : BOOT_E2K_LARGE_PAGE_SIZE)
 
 /*

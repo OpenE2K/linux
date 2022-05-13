@@ -3,15 +3,15 @@
 
 #ifdef __KERNEL__
 
-extern void kvm_get_mm_notifier_locked(struct mm_struct *mm);
+extern int kvm_get_mm_notifier_locked(struct mm_struct *mm);
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */
-static inline void
+static inline int
 get_mm_notifier_locked(struct mm_struct *mm)
 {
 	/* create mm notifier to trace some events over mm */
-	kvm_get_mm_notifier_locked(mm);
+	return kvm_get_mm_notifier_locked(mm);
 }
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 

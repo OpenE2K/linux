@@ -1,6 +1,11 @@
 #ifndef __ASM_E2K_IOMMU_H
 #define __ASM_E2K_IOMMU_H
 
+#ifdef CONFIG_EPIC
+extern void e2k_iommu_error_interrupt(void);
+#else
+static inline void e2k_iommu_error_interrupt(void) {}
+#endif
 
 extern int iommu_panic_off;
 extern void e2k_iommu_error_interrupt(void);

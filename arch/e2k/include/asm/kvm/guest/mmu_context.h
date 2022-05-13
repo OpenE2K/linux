@@ -7,7 +7,8 @@
 
 extern void kvm_activate_mm(struct mm_struct *active_mm,
 						struct mm_struct *mm);
-extern void kvm_get_mm_notifier_locked(struct mm_struct *mm);
+extern int kvm_get_mm_notifier(struct mm_struct *mm);
+extern int kvm_get_mm_notifier_locked(struct mm_struct *mm);
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */

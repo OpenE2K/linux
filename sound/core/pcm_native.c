@@ -3237,7 +3237,7 @@ static __poll_t snd_pcm_poll(struct file *file, poll_table *wait)
  * Only on coherent architectures, we can mmap the status and the control records
  * for effcient data transfer.  On others, we have to use HWSYNC ioctl...
  */
-#if defined(CONFIG_X86) || defined(CONFIG_PPC) || defined(CONFIG_ALPHA)
+#if defined(CONFIG_X86) || defined(CONFIG_PPC) || defined(CONFIG_ALPHA) || defined(CONFIG_E2K)
 /*
  * mmap status record
  */
@@ -3360,6 +3360,10 @@ static inline struct page *
 snd_pcm_default_page_ops(struct snd_pcm_substream *substream, unsigned long ofs)
 {
 	void *vaddr = substream->runtime->dma_area + ofs;
+#ifdef CONFIG_MCST
+	if (is_vmalloc_addr(vaddr))
+		return vmalloc_to_page(vaddr);
+#endif
 	return virt_to_page(vaddr);
 }
 

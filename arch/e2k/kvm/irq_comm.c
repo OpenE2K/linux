@@ -103,6 +103,7 @@ inline static bool kvm_is_dm_lowest_prio(struct kvm_lapic_irq *irq)
 }
 
 
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 static u32 convert_apic_to_epic_dlvm(u32 apic_dlvm)
 {
 	u32 epic_dlvm;
@@ -185,6 +186,7 @@ int kvm_irq_delivery_to_hw_apic(struct kvm *kvm, struct kvm_lapic *src,
 
 	return kvm_irq_delivery_to_hw_epic(kvm, src_id, &irq_epic);
 }
+#endif
 
 int kvm_irq_delivery_to_sw_apic(struct kvm *kvm, struct kvm_lapic *src,
 		struct kvm_lapic_irq *irq)
@@ -419,6 +421,30 @@ static void kvm_wake_up_irq(struct kvm_vcpu *vcpu)
 	kvm_vcpu_wake_up(vcpu);
 }
 
+int kvm_irq_delivery_to_sw_epic(struct kvm *kvm, int src,
+		struct kvm_cepic_irq *irq)
+{
+	int i;
+	int cepic_id;
+	struct kvm_vcpu *vcpu;
+
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		cepic_id = kvm_epic_id(vcpu->arch.epic);
+		if (kvm_epic_match_dest(cepic_id, src, irq->shorthand,
+					irq->dest_id)) {
+			int ret = kvm_epic_set_irq(vcpu, irq);
+
+			if (ret >= 0) {
+				kvm_wake_up_irq(vcpu);
+			}
+			return ret;
+		}
+	}
+
+	return -1;
+}
+
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
 //TODO fix this and all other delivery functions to return 0 on success and proper errno on error
 static int kvm_irq_delivery_to_hw_epic_single(struct kvm_vcpu *vcpu,
 		const struct kvm_cepic_irq *irq)
@@ -526,7 +552,6 @@ int kvm_hw_epic_sysrq_deliver(struct kvm_vcpu *vcpu)
 }
 
 #ifdef CONFIG_KVM_ASYNC_PF
-
 int kvm_hw_epic_async_pf_wake_deliver(struct kvm_vcpu *vcpu)
 {
 	struct kvm_cepic_irq irq;
@@ -539,31 +564,7 @@ int kvm_hw_epic_async_pf_wake_deliver(struct kvm_vcpu *vcpu)
 
 	return kvm_irq_delivery_to_hw_epic(vcpu->kvm, vcpu->vcpu_id, &irq);
 }
-
 #endif /* CONFIG_KVM_ASYNC_PF */
-
-int kvm_irq_delivery_to_sw_epic(struct kvm *kvm, int src,
-		struct kvm_cepic_irq *irq)
-{
-	int i;
-	int cepic_id;
-	struct kvm_vcpu *vcpu;
-
-	kvm_for_each_vcpu(i, vcpu, kvm) {
-		cepic_id = kvm_epic_id(vcpu->arch.epic);
-		if (kvm_epic_match_dest(cepic_id, src, irq->shorthand,
-					irq->dest_id)) {
-			int ret = kvm_epic_set_irq(vcpu, irq);
-
-			if (ret >= 0) {
-				kvm_wake_up_irq(vcpu);
-			}
-			return ret;
-		}
-	}
-
-	return -1;
-}
 
 void kvm_int_violat_delivery_to_hw_epic(struct kvm *kvm)
 {
@@ -601,6 +602,12 @@ void kvm_deliver_cepic_epic_interrupt(void)
 
 	kvm_irq_delivery_to_epic(kvm, src, &irq);
 }
+#else
+void kvm_int_violat_delivery_to_hw_epic(struct kvm *kvm)
+{
+	/* Nothing to do */
+}
+#endif /* CONFIG_KVM_HW_VIRTUALIZATION */
 
 int kvm_cpu_has_pending_apic_timer(struct kvm_vcpu *vcpu)
 {
@@ -680,12 +687,14 @@ int kvm_set_epic_msi(struct kvm_kernel_irq_routing_entry *e,
 int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
 		struct kvm *kvm, int irq_source_id, int level, bool line_status)
 {
+	u64 address = (u64) e->msi.address_hi << 32 | e->msi.address_lo;
+
 	DebugIRQ("IRQ #%d level %d line status %d\n",
 		irq_source_id, level, line_status);
 	if (!level)
 		return -1;
 
-	trace_kvm_msi_set_irq(e->msi.address_lo, e->msi.data);
+	trace_kvm_msi_set_irq(address, e->msi.data);
 
 	return kvm_set_pic_msi(e, kvm, irq_source_id, level, line_status);
 }

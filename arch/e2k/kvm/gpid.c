@@ -111,6 +111,13 @@ int kvm_gpidmap_init(struct kvm *kvm, kvm_gpid_table_t *gpid_table,
 	return 0;
 }
 
+void kvm_gpidmap_reset(struct kvm *kvm, kvm_gpid_table_t *gpid_table)
+{
+	DebugKVM("started\n");
+	kvm_nidmap_reset(gpid_table,
+			 -1	/* init_task gpid #0 will be allocated first */);
+}
+
 void kvm_gpidmap_destroy(kvm_gpid_table_t *gpid_table)
 {
 	gpid_t *gpid;

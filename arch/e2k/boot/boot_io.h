@@ -37,14 +37,14 @@ extern void bios_conf_outw(int domain, unsigned char bus, u16 halwword,
 			unsigned long port);
 extern void bios_conf_outl(int domain, unsigned char bus, u32 word,
 			unsigned long port);
-extern u8 bios_ioh_e3s_inb(int domain, unsigned char bus, unsigned long port);
-extern u16 bios_ioh_e3s_inw(int domain, unsigned char bus, unsigned long port);
-extern u32 bios_ioh_e3s_inl(int domain, unsigned char bus, unsigned long port);
-extern void bios_ioh_e3s_outb(int domain, unsigned char bus, unsigned char byte,
+extern u8 bios_ioh_e2s_inb(int domain, unsigned char bus, unsigned long port);
+extern u16 bios_ioh_e2s_inw(int domain, unsigned char bus, unsigned long port);
+extern u32 bios_ioh_e2s_inl(int domain, unsigned char bus, unsigned long port);
+extern void bios_ioh_e2s_outb(int domain, unsigned char bus, unsigned char byte,
 			unsigned long port);
-extern void bios_ioh_e3s_outw(int domain, unsigned char bus, u16 halfword,
+extern void bios_ioh_e2s_outw(int domain, unsigned char bus, u16 halfword,
 			unsigned long port);
-extern void bios_ioh_e3s_outl(int domain, unsigned char bus, u32 word,
+extern void bios_ioh_e2s_outl(int domain, unsigned char bus, u32 word,
 			unsigned long port);
 
 #endif	/* CONFIG_E2K_SIC */

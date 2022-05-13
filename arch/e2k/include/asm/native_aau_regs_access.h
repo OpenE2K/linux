@@ -35,31 +35,31 @@
 		NATIVE_GET_AAUQREG(&AWP(mem_p), reg_mn)
 #define NATIVE_GET_AAU_AADS(reg1, reg2, reg3, reg4, mem_p) \
 		NATIVE_GET_AAUQREGS(&AWP(mem_p), reg1, reg2, reg3, reg4)
-#define NATIVE_GET_AAU_AAIND_V2(reg_mnemonic)		\
+#define NATIVE_GET_AAU_AAIND_V3(reg_mnemonic)		\
 		NATIVE_GET_AAUREG(reg_mnemonic, 2)
 #define NATIVE_GET_AAU_AAIND_V5(reg_mnemonic)		\
 		NATIVE_GET_AAUDREG(reg_mnemonic, 2)
-#define NATIVE_GET_AAU_AAINDS_V2(reg1, reg2, val1, val2)	\
+#define NATIVE_GET_AAU_AAINDS_V3(reg1, reg2, val1, val2)	\
 		NATIVE_GET_AAUREGS(reg1, reg2, val1, val2)
 #define NATIVE_GET_AAU_AAINDS_V5(reg1, reg2, val1, val2)	\
 		NATIVE_GET_AAUDREGS(reg1, reg2, val1, val2)
 #define NATIVE_GET_AAU_AAIND_TAG()			\
 		NATIVE_GET_AAUREG(aaind_tag, 2)
-#define NATIVE_GET_AAU_AAINCR_V2(reg_mnemonic)		\
+#define NATIVE_GET_AAU_AAINCR_V3(reg_mnemonic)		\
 		NATIVE_GET_AAUREG(reg_mnemonic, 2)
 #define NATIVE_GET_AAU_AAINCR_V5(reg_mnemonic)		\
 		NATIVE_GET_AAUDREG(reg_mnemonic, 2)
-#define NATIVE_GET_AAU_AAINCRS_V2(reg1, reg2, val1, val2)	\
+#define NATIVE_GET_AAU_AAINCRS_V3(reg1, reg2, val1, val2)	\
 		NATIVE_GET_AAUREGS(reg1, reg2, val1, val2)
 #define NATIVE_GET_AAU_AAINCRS_V5(reg1, reg2, val1, val2)	\
 		NATIVE_GET_AAUDREGS(reg1, reg2, val1, val2)
 #define NATIVE_GET_AAU_AAINCR_TAG()			\
 		NATIVE_GET_AAUREG(aaincr_tag, 2)
-#define NATIVE_GET_AAU_AASTI_V2(reg_mnemonic)		\
+#define NATIVE_GET_AAU_AASTI_V3(reg_mnemonic)		\
 		NATIVE_GET_AAUREG(reg_mnemonic, 2)
 #define NATIVE_GET_AAU_AASTI_V5(reg_mnemonic)		\
 		NATIVE_GET_AAUDREG(reg_mnemonic, 2)
-#define NATIVE_GET_AAU_AASTIS_V2(reg1, reg2, val1, val2)	\
+#define NATIVE_GET_AAU_AASTIS_V3(reg1, reg2, val1, val2)	\
 		NATIVE_GET_AAUREGS(reg1, reg2, val1, val2)
 #define NATIVE_GET_AAU_AASTIS_V5(reg1, reg2, val1, val2)	\
 		NATIVE_GET_AAUDREGS(reg1, reg2, val1, val2)
@@ -69,7 +69,7 @@
 		NATIVE_GET_AAUREG(aasr, 2)
 #define NATIVE_GET_AAU_AAFSTR()				\
 		NATIVE_GET_AAUREG(aafstr, 5)
-#define NATIVE_GET_AAU_AALDI_V2(reg_mn, lval, rval)	\
+#define NATIVE_GET_AAU_AALDI_V3(reg_mn, lval, rval)	\
 		NATIVE_GET_AAUREGS(reg_mn, reg_mn, lval, rval)
 #define NATIVE_GET_AAU_AALDI_V5(reg_mn, lval, rval)	\
 		NATIVE_GET_AAUDREGS(reg_mn, reg_mn, lval, rval)
@@ -136,7 +136,7 @@ static __always_inline void native_write_aasr_reg_value(u32 reg_value)
 {
 	NATIVE_SET_AAU_AASR(reg_value);
 }
-static inline u32 native_read_aafstr_reg_value(void)
+static __always_inline u32 native_read_aafstr_reg_value(void)
 {
 	return NATIVE_GET_AAU_AAFSTR();
 }
@@ -157,25 +157,25 @@ static __always_inline void native_write_aasr_reg(e2k_aasr_t aasr)
 	NATIVE_SET_AAU_AASR(AW(aasr));
 }
 
-static inline u32 native_read_aaind_reg_value_v2(int AAIND_no)
+static inline u32 native_read_aaind_reg_value_v3(int AAIND_no)
 {
 	switch (AAIND_no) {
-	case  0: return NATIVE_GET_AAU_AAIND_V2(aaind0);
-	case  1: return NATIVE_GET_AAU_AAIND_V2(aaind1);
-	case  2: return NATIVE_GET_AAU_AAIND_V2(aaind2);
-	case  3: return NATIVE_GET_AAU_AAIND_V2(aaind3);
-	case  4: return NATIVE_GET_AAU_AAIND_V2(aaind4);
-	case  5: return NATIVE_GET_AAU_AAIND_V2(aaind5);
-	case  6: return NATIVE_GET_AAU_AAIND_V2(aaind6);
-	case  7: return NATIVE_GET_AAU_AAIND_V2(aaind7);
-	case  8: return NATIVE_GET_AAU_AAIND_V2(aaind8);
-	case  9: return NATIVE_GET_AAU_AAIND_V2(aaind9);
-	case 10: return NATIVE_GET_AAU_AAIND_V2(aaind10);
-	case 11: return NATIVE_GET_AAU_AAIND_V2(aaind11);
-	case 12: return NATIVE_GET_AAU_AAIND_V2(aaind12);
-	case 13: return NATIVE_GET_AAU_AAIND_V2(aaind13);
-	case 14: return NATIVE_GET_AAU_AAIND_V2(aaind14);
-	case 15: return NATIVE_GET_AAU_AAIND_V2(aaind15);
+	case  0: return NATIVE_GET_AAU_AAIND_V3(aaind0);
+	case  1: return NATIVE_GET_AAU_AAIND_V3(aaind1);
+	case  2: return NATIVE_GET_AAU_AAIND_V3(aaind2);
+	case  3: return NATIVE_GET_AAU_AAIND_V3(aaind3);
+	case  4: return NATIVE_GET_AAU_AAIND_V3(aaind4);
+	case  5: return NATIVE_GET_AAU_AAIND_V3(aaind5);
+	case  6: return NATIVE_GET_AAU_AAIND_V3(aaind6);
+	case  7: return NATIVE_GET_AAU_AAIND_V3(aaind7);
+	case  8: return NATIVE_GET_AAU_AAIND_V3(aaind8);
+	case  9: return NATIVE_GET_AAU_AAIND_V3(aaind9);
+	case 10: return NATIVE_GET_AAU_AAIND_V3(aaind10);
+	case 11: return NATIVE_GET_AAU_AAIND_V3(aaind11);
+	case 12: return NATIVE_GET_AAU_AAIND_V3(aaind12);
+	case 13: return NATIVE_GET_AAU_AAIND_V3(aaind13);
+	case 14: return NATIVE_GET_AAU_AAIND_V3(aaind14);
+	case 15: return NATIVE_GET_AAU_AAIND_V3(aaind15);
 	default:
 		BUG_AAU();
 		 return 0;
@@ -336,20 +336,20 @@ static inline void native_write_aaind_reg_value(int AAIND_no, u64 reg_value)
 		value2 = 0; \
 	} \
 })
-#define NATIVE_READ_AAINDS_PAIR_VALUE_V2(AAINDs_pair, lo_value, hi_value) \
-		PREFIX_READ_AAINDS_PAIR_VALUE(NATIVE, native, V2, v2, \
+#define NATIVE_READ_AAINDS_PAIR_VALUE_V3(AAINDs_pair, lo_value, hi_value) \
+		PREFIX_READ_AAINDS_PAIR_VALUE(NATIVE, native, V3, v3, \
 					AAINDs_pair, lo_value, hi_value)
 #define NATIVE_READ_AAINDS_PAIR_VALUE_V5(AAINDs_pair, lo_value, hi_value) \
 		PREFIX_READ_AAINDS_PAIR_VALUE(NATIVE, native, V5, v5, \
 					AAINDs_pair, lo_value, hi_value)
-#define PREFIX_READ_AAIND_REG15_AND_TAGS_VALUE_V2(PV_TYPE, pv_type, \
+#define PREFIX_READ_AAIND_REG15_AND_TAGS_VALUE_V3(PV_TYPE, pv_type, \
 					reg_value, tags_value) \
 ({ \
-	PV_TYPE##_GET_AAU_AAINDS_V2(aaind15, aaind_tag, \
+	PV_TYPE##_GET_AAU_AAINDS_V3(aaind15, aaind_tag, \
 					reg_value, tags_value); \
 })
-#define NATIVE_READ_AAIND_REG15_AND_TAGS_VALUE_V2(reg_value, tags_value) \
-		PREFIX_READ_AAIND_REG15_AND_TAGS_VALUE_V2(NATIVE, native, \
+#define NATIVE_READ_AAIND_REG15_AND_TAGS_VALUE_V3(reg_value, tags_value) \
+		PREFIX_READ_AAIND_REG15_AND_TAGS_VALUE_V3(NATIVE, native, \
 					reg_value, tags_value)
 #define PREFIX_READ_AAIND_REG15_AND_TAGS_VALUE_V5(PV_TYPE, pv_type, \
 					reg_value, tags_value) \
@@ -423,17 +423,17 @@ static inline void native_write_aaind_tags_reg_value(u32 reg_value)
 {
 	NATIVE_SET_AAU_AAIND_TAG(reg_value);
 }
-static inline u32 native_read_aaincr_reg_value_v2(int AAINCR_no)
+static inline u32 native_read_aaincr_reg_value_v3(int AAINCR_no)
 {
 	switch (AAINCR_no) {
-	case  0: return NATIVE_GET_AAU_AAINCR_V2(aaincr0);
-	case  1: return NATIVE_GET_AAU_AAINCR_V2(aaincr1);
-	case  2: return NATIVE_GET_AAU_AAINCR_V2(aaincr2);
-	case  3: return NATIVE_GET_AAU_AAINCR_V2(aaincr3);
-	case  4: return NATIVE_GET_AAU_AAINCR_V2(aaincr4);
-	case  5: return NATIVE_GET_AAU_AAINCR_V2(aaincr5);
-	case  6: return NATIVE_GET_AAU_AAINCR_V2(aaincr6);
-	case  7: return NATIVE_GET_AAU_AAINCR_V2(aaincr7);
+	case  0: return NATIVE_GET_AAU_AAINCR_V3(aaincr0);
+	case  1: return NATIVE_GET_AAU_AAINCR_V3(aaincr1);
+	case  2: return NATIVE_GET_AAU_AAINCR_V3(aaincr2);
+	case  3: return NATIVE_GET_AAU_AAINCR_V3(aaincr3);
+	case  4: return NATIVE_GET_AAU_AAINCR_V3(aaincr4);
+	case  5: return NATIVE_GET_AAU_AAINCR_V3(aaincr5);
+	case  6: return NATIVE_GET_AAU_AAINCR_V3(aaincr6);
+	case  7: return NATIVE_GET_AAU_AAINCR_V3(aaincr7);
 	default:
 		BUG_AAU();
 		return 0;
@@ -537,20 +537,20 @@ static inline void native_write_aaincr_tags_reg_value(u32 reg_value)
 		 value2 = 0; \
 	} \
 })
-#define	NATIVE_READ_AAINCRS_PAIR_VALUE_V2(AAINCRs_pair, lo_value, hi_value) \
-		PREFIX_READ_AAINCRS_PAIR_VALUE(NATIVE, native, V2, v2, \
+#define	NATIVE_READ_AAINCRS_PAIR_VALUE_V3(AAINCRs_pair, lo_value, hi_value) \
+		PREFIX_READ_AAINCRS_PAIR_VALUE(NATIVE, native, V3, v3, \
 					AAINCRs_pair, lo_value, hi_value)
 #define	NATIVE_READ_AAINCRS_PAIR_VALUE_V5(AAINCRs_pair, lo_value, hi_value) \
 		PREFIX_READ_AAINCRS_PAIR_VALUE(NATIVE, native, V5, v5, \
 					AAINCRs_pair, lo_value, hi_value)
-#define PREFIX_READ_AAINCR_REG7_AND_TAGS_VALUE_V2(PV_TYPE, pv_type, \
+#define PREFIX_READ_AAINCR_REG7_AND_TAGS_VALUE_V3(PV_TYPE, pv_type, \
 					reg_value, tags_value) \
 ({ \
-	PV_TYPE##_GET_AAU_AAINCRS_V2(aaincr7, aaincr_tag, \
+	PV_TYPE##_GET_AAU_AAINCRS_V3(aaincr7, aaincr_tag, \
 					reg_value, tags_value); \
 })
-#define NATIVE_READ_AAINCR_REG7_AND_TAGS_VALUE_V2(reg_value, tags_value) \
-		PREFIX_READ_AAINCR_REG7_AND_TAGS_VALUE_V2(NATIVE, native, \
+#define NATIVE_READ_AAINCR_REG7_AND_TAGS_VALUE_V3(reg_value, tags_value) \
+		PREFIX_READ_AAINCR_REG7_AND_TAGS_VALUE_V3(NATIVE, native, \
 					reg_value, tags_value)
 #define PREFIX_READ_AAINCR_REG7_AND_TAGS_VALUE_V5(PV_TYPE, pv_type, \
 					reg_value, tags_value) \
@@ -592,25 +592,25 @@ native_write_aaincrs_pair_value(int AAINCRs_pair, u64 lo_value, u64 hi_value)
 	}
 }
 
-static inline u32 native_read_aasti_reg_value_v2(int AASTI_no)
+static inline u32 native_read_aasti_reg_value_v3(int AASTI_no)
 {
 	switch (AASTI_no) {
-	case  0: return NATIVE_GET_AAU_AASTI_V2(aasti0);
-	case  1: return NATIVE_GET_AAU_AASTI_V2(aasti1);
-	case  2: return NATIVE_GET_AAU_AASTI_V2(aasti2);
-	case  3: return NATIVE_GET_AAU_AASTI_V2(aasti3);
-	case  4: return NATIVE_GET_AAU_AASTI_V2(aasti4);
-	case  5: return NATIVE_GET_AAU_AASTI_V2(aasti5);
-	case  6: return NATIVE_GET_AAU_AASTI_V2(aasti6);
-	case  7: return NATIVE_GET_AAU_AASTI_V2(aasti7);
-	case  8: return NATIVE_GET_AAU_AASTI_V2(aasti8);
-	case  9: return NATIVE_GET_AAU_AASTI_V2(aasti9);
-	case 10: return NATIVE_GET_AAU_AASTI_V2(aasti10);
-	case 11: return NATIVE_GET_AAU_AASTI_V2(aasti11);
-	case 12: return NATIVE_GET_AAU_AASTI_V2(aasti12);
-	case 13: return NATIVE_GET_AAU_AASTI_V2(aasti13);
-	case 14: return NATIVE_GET_AAU_AASTI_V2(aasti14);
-	case 15: return NATIVE_GET_AAU_AASTI_V2(aasti15);
+	case  0: return NATIVE_GET_AAU_AASTI_V3(aasti0);
+	case  1: return NATIVE_GET_AAU_AASTI_V3(aasti1);
+	case  2: return NATIVE_GET_AAU_AASTI_V3(aasti2);
+	case  3: return NATIVE_GET_AAU_AASTI_V3(aasti3);
+	case  4: return NATIVE_GET_AAU_AASTI_V3(aasti4);
+	case  5: return NATIVE_GET_AAU_AASTI_V3(aasti5);
+	case  6: return NATIVE_GET_AAU_AASTI_V3(aasti6);
+	case  7: return NATIVE_GET_AAU_AASTI_V3(aasti7);
+	case  8: return NATIVE_GET_AAU_AASTI_V3(aasti8);
+	case  9: return NATIVE_GET_AAU_AASTI_V3(aasti9);
+	case 10: return NATIVE_GET_AAU_AASTI_V3(aasti10);
+	case 11: return NATIVE_GET_AAU_AASTI_V3(aasti11);
+	case 12: return NATIVE_GET_AAU_AASTI_V3(aasti12);
+	case 13: return NATIVE_GET_AAU_AASTI_V3(aasti13);
+	case 14: return NATIVE_GET_AAU_AASTI_V3(aasti14);
+	case 15: return NATIVE_GET_AAU_AASTI_V3(aasti15);
 	default:
 		BUG_AAU();
 		return 0;
@@ -778,8 +778,8 @@ static inline void native_write_aasti_tags_reg_value(u32 reg_value)
 		value2 = 0; \
 	} \
 })
-#define	NATIVE_READ_AASTIS_PAIR_VALUE_V2(AASTIs_pair, lo_value, hi_value) \
-		PREFIX_READ_AASTIS_PAIR_VALUE(NATIVE, native, V2, v2, \
+#define	NATIVE_READ_AASTIS_PAIR_VALUE_V3(AASTIs_pair, lo_value, hi_value) \
+		PREFIX_READ_AASTIS_PAIR_VALUE(NATIVE, native, V3, v3, \
 					AASTIs_pair, lo_value, hi_value)
 #define	NATIVE_READ_AASTIS_PAIR_VALUE_V5(AASTIs_pair, lo_value, hi_value) \
 		PREFIX_READ_AASTIS_PAIR_VALUE(NATIVE, native, V5, v5, \
@@ -948,19 +948,19 @@ native_write_aastis_pair_value(int AASTIs_pair, u64 lo_value, u64 hi_value)
 		value2 = 0; \
 	} \
 })
-#define	NATIVE_READ_AALDI_REG_VALUE_V2(AALDI_no, value1, value2) \
-		PREFIX_READ_AALDI_REG_VALUE(NATIVE, native, V2, v2, \
+#define	NATIVE_READ_AALDI_REG_VALUE_V3(AALDI_no, value1, value2) \
+		PREFIX_READ_AALDI_REG_VALUE(NATIVE, native, V3, v3, \
 					AALDI_no, value1, value2)
 #define	NATIVE_READ_AALDI_REG_VALUE_V5(AALDI_no, value1, value2) \
 		PREFIX_READ_AALDI_REG_VALUE(NATIVE, native, V5, v5, \
 					AALDI_no, value1, value2)
 
 static inline void
-native_read_aaldi_reg_value_v2(int AALDI_no, u64 *l_value, u64 *r_value)
+native_read_aaldi_reg_value_v3(int AALDI_no, u64 *l_value, u64 *r_value)
 {
 	u32 value1, value2;
 
-	NATIVE_READ_AALDI_REG_VALUE_V2(AALDI_no, value1, value2);
+	NATIVE_READ_AALDI_REG_VALUE_V3(AALDI_no, value1, value2);
 	*l_value = value1;
 	*r_value = value2;
 }
@@ -1130,7 +1130,7 @@ native_read_aaldas_reg_value(int AALDAs_no, u32 *l_value, u32 *r_value)
 	*r_value = value2;
 }
 
-static inline void
+static __always_inline void
 native_write_aaldas_reg_value(int AALDAs_no, u32 l_value, u32 r_value)
 {
 	switch (AALDAs_no) {
@@ -1164,7 +1164,8 @@ native_write_aaldas_reg_value(int AALDAs_no, u32 l_value, u32 r_value)
 		r_value = 0;
 	}
 }
-static inline void native_read_aaldm_reg_value(u32 *lo_value, u32 *hi_value)
+static __always_inline void native_read_aaldm_reg_value(u32 *lo_value,
+		u32 *hi_value)
 {
 	u32 value1, value2;
 
@@ -1173,19 +1174,20 @@ static inline void native_read_aaldm_reg_value(u32 *lo_value, u32 *hi_value)
 	*hi_value = value2;
 }
 static __always_inline void native_write_aaldm_reg_value(u32 lo_value,
-						u32 hi_value)
+		u32 hi_value)
 {
 	NATIVE_SET_AAU_AALDM(lo_value, hi_value);
 }
-static inline void native_read_aaldm_reg(e2k_aaldm_t *aaldm)
+static __always_inline void native_read_aaldm_reg(e2k_aaldm_t *aaldm)
 {
 	native_read_aaldm_reg_value(&aaldm->lo, &aaldm->hi);
 }
-static __always_inline void native_write_aaldm_reg(e2k_aaldm_t *aaldm)
+static __always_inline void native_write_aaldm_reg(e2k_aaldm_t aaldm)
 {
-	native_write_aaldm_reg_value(aaldm->lo, aaldm->hi);
+	native_write_aaldm_reg_value(aaldm.lo, aaldm.hi);
 }
-static inline void native_read_aaldv_reg_value(u32 *lo_value, u32 *hi_value)
+static __always_inline void native_read_aaldv_reg_value(u32 *lo_value,
+		u32 *hi_value)
 {
 	u32 value1, value2;
 
@@ -1194,17 +1196,17 @@ static inline void native_read_aaldv_reg_value(u32 *lo_value, u32 *hi_value)
 	*hi_value = value2;
 }
 static __always_inline void native_write_aaldv_reg_value(u32 lo_value,
-						u32 hi_value)
+		u32 hi_value)
 {
 	NATIVE_SET_AAU_AALDV(lo_value, hi_value);
 }
-static inline void native_read_aaldv_reg(e2k_aaldv_t *aaldv)
+static __always_inline void native_read_aaldv_reg(e2k_aaldv_t *aaldv)
 {
 	native_read_aaldv_reg_value(&aaldv->lo, &aaldv->hi);
 }
-static __always_inline void native_write_aaldv_reg(e2k_aaldv_t *aaldv)
+static __always_inline void native_write_aaldv_reg(e2k_aaldv_t aaldv)
 {
-	native_write_aaldv_reg_value(aaldv->lo, aaldv->hi);
+	native_write_aaldv_reg_value(aaldv.lo, aaldv.hi);
 }
 
 static inline void native_read_aad_reg(int AAD_no, e2k_aadj_t *mem_p)
@@ -1448,7 +1450,7 @@ static __always_inline void native_read_aads_4_reg(int AADs_no, e2k_aadj_t *mem_
 }
 
 static __always_inline void native_write_aads_4_reg(int AADs_no,
-						e2k_aadj_t *mem_p)
+		e2k_aadj_t *mem_p)
 {
 	switch (AADs_no) {
 	case  0:

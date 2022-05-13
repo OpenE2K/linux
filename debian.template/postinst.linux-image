@@ -1,0 +1,184 @@
+#!/bin/bash
+
+debopt="$1"
+optv="$2"
+
+KERNELRELEASE=xxKERNELRELEASExx
+OSLUP="linux-$KERNELRELEASE"
+BOOTIMAGE=image-$KERNELRELEASE
+INITRD=initrd-${KERNELRELEASE}.img
+SYSTEMMAP=System.map-${KERNELRELEASE}
+
+BOOTCONF=/boot/boot.conf
+FMODULES=/etc/modules-$KERNELRELEASE
+FINITRD=/boot/$INITRD
+FSTAB=/etc/fstab
+
+if [ x"$debopt" == x"configure" ] && [ x"$optv" != x ]; then
+	/sbin/depmod -b / $KERNELRELEASE
+        [ $? -ne 0 ] && exit 1
+	exit 0
+fi
+[ x"$debopt" == x"abort-upgrade" ] && exit 0
+[ x"$debopt" == x"abort-remove" ] && exit 0
+################################################################################
+# create ramfs
+################################################################################
+add_ramfs()
+{
+	[ x"$DONT_MAKE_INITRAMFS" == xYES ] && return
+	if [ -f $FINITRD ] && [ x"$debopt" == x"abort-remove" ]; then
+#		echo "WARNING: $FINITRD exists, skipping."
+		return
+	fi
+	#backup will be automaticly generated
+	if [ -e /etc/debian_version ]; then
+		/usr/sbin/mkinitramfs -k ${KERNELRELEASE} -o ${FINITRD}
+	else
+		/usr/sbin/mkinitramfs -k ${KERNELRELEASE}
+	fi
+	if [ $? -ne 0 ] ; then
+		echo "ERROR: ramfs error."
+		exit 1
+	fi
+}
+################################################################################
+# create /etc/modules-<kernelrelease>
+################################################################################
+add_modules()
+{
+	if [ -f "$FMODULES" ]; then
+#		echo "WARNING: $FMODULES exists, skipping."
+		return
+	fi
+	mkdir -p `dirname "$FMODULES"`
+
+	mver="$(uname -r)"
+#	mver="${mver#*-elbrus.}"
+	fmod0=`find '/etc' '/etc/sysconfig' -maxdepth 1 -type f -name "modules-${mver}"`
+	declare -A mod0=()
+
+	[[ -z "$fmod0" ]] \
+	|| while read -r modline; do
+		read -r mod _ <<<"$modline"
+		[[ "$mod" != '#'* ]] && mod0["$mod"]="$modline"
+	done 0<"$fmod0"
+
+	dmod="/lib/modules/$KERNELRELEASE/kernel"
+	for mod in `find "$dmod" -name '*\.ko' -printf '%f\n' | LC_ALL=C sort -V | xargs basename -a -s '.ko'`; do
+		[[ -n "${mod0[$mod]+Y}" ]] && echo "${mod0[$mod]}" \
+		|| echo "# $mod"
+	done 1>"$FMODULES"
+}
+add_depmod()
+{
+#	/sbin/depmod -b / $KERNELRELEASE -F $SYSTEMMAP_PATH
+	/sbin/depmod -b / $KERNELRELEASE
+	[ $? -ne 0 ] && exit 1
+}
+################################################################################
+# create/update boot.conf
+################################################################################
+backup_bootconf()
+{
+	d=`date +%g%m%d%H%M`
+	cp $BOOTCONF ${BOOTCONF}.$d
+}
+add_bootconf()
+{
+	if [ ! -f $FSTAB ]; then
+		echo "ERROR: cannot access $FSTAB"
+		exit 1
+	fi
+cat > $BOOTCONF << EOF
+default=$OSLUP
+timeout=3
+
+########################
+
+EOF
+}
+add_label()
+{	
+	ROOTDEV=`cat $FSTAB | grep -E '[[:space:]]/[[:space:]]' | grep -v "^[[:space:]]*#" | awk '{print $1}'`
+	BOOTDEV=`cat $FSTAB | grep -E '[[:space:]]/boot[[:space:]]' | grep -v "^[[:space:]]*#" | awk '{print $1}'`
+	if [ x"$BOOTDEV" == x ]; then
+		BOOTDEV=$ROOTDEV
+		BOOTIMAGE_PATH=/boot/${BOOTIMAGE}
+		INITRD_PATH=/boot/${INITRD}
+		SYSTEMMAP_PATH=/boot/$SYSTEMMAP
+		[ ! -e /$BOOTCONF ] && ln -s -r $BOOTCONF /
+	else
+		BOOTIMAGE_PATH=/${BOOTIMAGE}
+		INITRD_PATH=/${INITRD}
+		SYSTEMMAP_PATH=/$SYSTEMMAP
+	fi
+	if [ -n  "`echo ${BOOTDEV} | grep 'UUID'`" ] ; then
+		BOOTUUID=`echo $BOOTDEV | sed 's/UUID=//g'`
+		BOOTDEV=`blkid -U $BOOTUUID`
+	fi
+	PARTNUM=`echo $BOOTDEV | grep -o "[0-9]*"`
+	BOOTPART=`expr $PARTNUM - 1`
+	CURRENT_CMDLINE=`cat /proc/cmdline | sed 's/AUTO_NET_INST//g' | sed 's/REBOOT//g' | sed 's/DHCLIENT//g' | sed -E 's/SERVER_IP=([0-9\./ ]){1,}//g' | sed -e 's/root=[^[:space:]]*//g'`
+	CMDLINE="${CURRENT_CMDLINE} root=$ROOTDEV"
+
+if [ x"$DONT_MAKE_INITRAMFS" == xYES ]; then
+cat >> $BOOTCONF << EOF
+label=$OSLUP
+	partition=$BOOTPART
+	image=$BOOTIMAGE_PATH
+	cmdline=$CMDLINE
+EOF
+else
+cat >> $BOOTCONF << EOF
+label=$OSLUP
+	partition=$BOOTPART
+	image=$BOOTIMAGE_PATH
+	initrd=$INITRD_PATH
+	cmdline=$CMDLINE
+EOF
+fi
+}
+delete_label()
+{
+	n1=`cat $BOOTCONF | sed -e 's/[\t ]*//g' | sed -e 's/#.*//g' | grep -n "label=${OSLUP}" | sed 's/:.*//g'`
+	n2=`cat $BOOTCONF | sed -e 's/[\t ]*//g' | sed -e 's/#.*//g' | grep -n "label=" | sed -n "/label=${OSLUP}/{n;p;}" | sed 's/:.*//g'`
+	if [ x"$n2" == x ]; then
+		n2=`cat $BOOTCONF | wc -l`
+	else
+		(( n2-- ))
+	fi
+	sed -i "${n1},${n2}d" $BOOTCONF
+}
+default_label()
+{
+	sed -i "s/^default=.*/default=${OSLUP}/" $BOOTCONF
+}
+oslup_label()
+{
+	cat $BOOTCONF | sed -e 's/[\t ]*//g' | grep -v "^#" | sed -e 's/#.*//g' | grep "^label=${OSLUP}$" >/dev/null 2>&1
+	if [ $? -eq 0 ]; then
+#		echo "WARNING: boot.conf label=$OSLUP exists, skipping."
+#		return
+		delete_label
+	fi
+	add_label
+	default_label
+}
+oslup_bootconf()
+{
+	[[ "$KERNELRELEASE" == *"guest"* ]] && return
+	if [ -f $BOOTCONF ]; then
+		backup_bootconf
+		oslup_label
+	else
+		add_bootconf
+		add_label
+	fi
+}
+################################################################################
+add_depmod
+add_ramfs
+oslup_bootconf
+add_modules
+exit 0

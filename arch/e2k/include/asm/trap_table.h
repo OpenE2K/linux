@@ -34,14 +34,16 @@ typedef long (*ttable_entry_args_t)(int sys_num, ...);
 static inline bool
 is_gdb_breakpoint_trap(struct pt_regs *regs)
 {
-	u64 *instr = (u64 *)GET_IP_CR0_HI(regs->crs.cr0_hi);
-	u64 sylab;
+	u64 *instr = (u64 *) GET_IP_CR0_HI(regs->crs.cr0_hi);
+	u64 val;
 
-	host_get_user(sylab, instr, regs);
-	return (sylab & GDB_BREAKPOINT_STUB_MASK) == GDB_BREAKPOINT_STUB;
+	if (host_get_user(val, instr, regs))
+		return false;
+	return (val & GDB_BREAKPOINT_STUB_MASK) == GDB_BREAKPOINT_STUB;
 }
 
 extern void kernel_stack_overflow(unsigned int overflows);
+extern void kernel_data_stack_overflow(void);
 
 static inline void native_clear_fork_child_pt_regs(struct pt_regs *childregs)
 {
@@ -86,7 +88,7 @@ native_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
-	(void)do_page_fault(regs, address, condition, mask, 0);
+	(void)do_page_fault(regs, address, condition, mask, 0, NULL);
 	return 0;
 }
 
@@ -156,6 +158,10 @@ extern SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 			long arg1, long arg2, long arg3, long arg4,
 			long arg5, long arg6, struct pt_regs *regs);
 
+extern void notrace handle_guest_fast_sys_call(void);
+extern void notrace handle_compat_guest_fast_sys_call(void);
+extern void notrace handle_prot_guest_fast_sys_call(void);
+
 extern const system_call_func sys_call_table[NR_syscalls];
 extern const system_call_func sys_call_table_32[NR_syscalls];
 extern const protected_system_call_func sys_call_table_entry8[NR_syscalls];
@@ -166,7 +172,10 @@ extern const system_call_func sys_call_table_deprecated[NR_syscalls];
 /* it is native kernel without any virtualization */
 /* or it is host kernel with virtualization support */
 
-#define	FILL_HARDWARE_STACKS()	NATIVE_FILL_HARDWARE_STACKS()
+#define	FILL_HARDWARE_STACKS__HW()	NATIVE_FILL_HARDWARE_STACKS__HW()
+#define	FILL_HARDWARE_STACKS__SW(sw_fill_sequel)	\
+		NATIVE_FILL_HARDWARE_STACKS__SW(sw_fill_sequel)
+
 
 static inline void clear_fork_child_pt_regs(struct pt_regs *childregs)
 {

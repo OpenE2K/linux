@@ -22,6 +22,6 @@ void restore_processor_state(void)
 {
 	if (use_sclkr_sched_clock()) {
 		atomic64_set(&prev_sclkr.res, 0);
-		sclkr_sched_offset = suspended_sched_clock_value - raw_read_sclkr();
+		sclkr_sched_offset = suspended_sched_clock_value - read_sclkr_nosync();
 	}
 }

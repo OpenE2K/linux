@@ -276,7 +276,7 @@ void setup_stack_print()
 static int careful_tagged_copy(void *dst, void *src, unsigned long sz)
 {
 	SET_USR_PFAULT("$.recovery_memcpy_fault");
-	fast_tagged_memory_copy(dst, src, sz,
+	fast_tagged_memory_copy_user(dst, src, sz, NULL,
 			TAGGED_MEM_STORE_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 			TAGGED_MEM_LOAD_REC_OPC |
@@ -1154,12 +1154,11 @@ void print_tc_record(const trap_cellar_t *tcellar, int num)
 	       "                 chan  0x%x, se   0x%x, pm  0x%x\n" 
 	       "                 fault_type 0x%x:\n"
 	       "                    intl_res_bits = %d MLT_trap     = %d\n"
-	       "                    ph_pr_page	   = %d page_bound   = %d\n"
+	       "                    ph_pr_page	  = %d global_sp    = %d\n"
 	       "                    io_page       = %d isys_page    = %d\n"
 	       "                    prot_page     = %d priv_page    = %d\n"
 	       "                    illegal_page  = %d nwrite_page  = %d\n"
 	       "                    page_miss     = %d ph_bound     = %d\n"
-	       "                    global_sp     = %d\n"
 	       "                 miss_lvl 0x%x, num_align 0x%x, empt    0x%x\n"
 	       "                 clw      0x%x, rcv       0x%x  dst_rcv 0x%x\n",
 	       num,
@@ -1179,12 +1178,11 @@ void print_tc_record(const trap_cellar_t *tcellar, int num)
 	       (u32)AS(tcellar->condition).pm,
 	       (u32)AS(tcellar->condition).fault_type,
 	       (u32)AS(ftype).intl_res_bits,	(u32)(AS(ftype).exc_mem_lock),
-	       (u32)AS(ftype).ph_pr_page,	(u32)AS(ftype).page_bound,
+	       (u32)AS(ftype).ph_pr_page,	(u32)AS(ftype).global_sp,
 	       (u32)AS(ftype).io_page,		(u32)AS(ftype).isys_page,
 	       (u32)AS(ftype).prot_page,	(u32)AS(ftype).priv_page,
 	       (u32)AS(ftype).illegal_page,	(u32)AS(ftype).nwrite_page,
 	       (u32)AS(ftype).page_miss,	(u32)AS(ftype).ph_bound,
-	       (u32)AS(ftype).global_sp,
 	       (u32)AS(tcellar->condition).miss_lvl, 
 	       (u32)AS(tcellar->condition).num_align, 
 	       (u32)AS(tcellar->condition).empt, 
@@ -1203,6 +1201,24 @@ void print_all_TC(const trap_cellar_t *TC, int TC_count)
 	printk("TRAP CELLAR all %d records:\n", TC_count / 3);
 	for (i = 0; i < TC_count / 3; i++)
 		print_tc_record(&TC[i], i);
+}
+
+void print_SBBP_pt_regs(const struct trap_pt_regs *trap)
+{
+	int i;
+
+	if (unlikely(trap->sbbp == NULL))
+		return;
+
+	for (i = 0; i < SBBP_ENTRIES_NUM; i += 4) {
+		pr_alert("sbbp%-2d  0x%-12llx 0x%-12llx 0x%-12llx 0x%-12llx\n",
+			i,
+			trap->sbbp[i + 0],
+			trap->sbbp[i + 1],
+			trap->sbbp[i + 2],
+			trap->sbbp[i + 3]);
+	}
+
 }
 
 /*
@@ -1266,6 +1282,9 @@ void print_pt_regs(const pt_regs_t *regs)
 			regs->trap, regs->aau_context);
 
 		exceptions = print_all_TIRs(trap->TIRs, trap->nr_TIRs);
+		if (regs->trap && regs->trap->sbbp) {
+			print_SBBP_pt_regs(trap);
+		}
 		print_all_TC(trap->tcellar, trap->tc_count);
 		if (exceptions & exc_data_debug_mask) {
 			pr_info("ddbcr 0x%llx, ddmcr 0x%llx, ddbsr 0x%llx\n",
@@ -1432,7 +1451,7 @@ static int get_chain_frame(e2k_mem_crs_t *dst, e2k_mem_crs_t *src,
 }
 
 notrace
-static int ____parse_chain_stack(int flags, struct task_struct *p,
+int ____parse_chain_stack(int flags, struct task_struct *p,
 		parse_chain_fn_t func, void *arg, unsigned long delta_user,
 		unsigned long top, unsigned long bottom,
 		bool *interrupts_enabled, unsigned long *irq_flags)
@@ -1547,7 +1566,7 @@ static int __parse_chain_stack(int flags, struct task_struct *p,
 				     AS(regs->stacks.pcsp_hi).ind -
 				     spilled_to_kernel -
 				     AS(current_thread_info()->k_pcsp_lo).base;
-			ret = ____parse_chain_stack(flags, p, func, arg,
+			ret = do_parse_chain_stack(flags, p, func, arg,
 					delta_user, pcs_base + user_size,
 					pcs_base, &interrupts_enabled, &irq_flags);
 			if (ret)
@@ -1594,7 +1613,7 @@ static int __parse_chain_stack(int flags, struct task_struct *p,
 
 	/* The very last frame does not have any useful information */
 	actual_base += SZ_OF_CR;
-	return ____parse_chain_stack(flags, p, func, arg, 0, pcs_base + pcs_ind,
+	return do_parse_chain_stack(flags, p, func, arg, 0, pcs_base + pcs_ind,
 			actual_base, &interrupts_enabled, &irq_flags);
 }
 
@@ -1720,16 +1739,13 @@ static DEFINE_RAW_SPINLOCK(print_stack_lock);
  * @show_reg_window: print local registers?
  */
 noinline void
-print_stack_frames(struct task_struct *task, struct pt_regs *pt_regs,
+print_stack_frames(struct task_struct *task, const struct pt_regs *pt_regs,
 		   int show_reg_window)
 {
 	unsigned long flags;
 	int cpu;
 	bool used;
 	struct stack_regs *stack_regs;
-
-	/* if this is guest, stop tracing in host to avoid buffer overwrite */
-	host_ftrace_stop();
 
 	if (!task)
 		task = current;
@@ -1741,6 +1757,10 @@ print_stack_frames(struct task_struct *task, struct pt_regs *pt_regs,
 		if (task != current)
 			return;
 	}
+
+	/* if this is guest, stop tracing in host to avoid buffer overwrite */
+	if (task == current)
+		host_ftrace_stop();
 
 	/*
 	 * stack_regs_cache[] is protected by IRQ-disable
@@ -1784,39 +1804,44 @@ print_stack_frames(struct task_struct *task, struct pt_regs *pt_regs,
 	clear_bit(PRINT_FUNCY_STACK_WORKS_BIT, &task->thread.flags);
 }
 
-static inline void print_funcy_ip(u64 addr, u64 cr_base, u64 cr_ind,
-		struct task_struct *task, u64 orig_base)
+static void print_ip(u64 addr, u64 cr_base, u64 cr_ind,
+		struct task_struct *task, u64 orig_base, bool *is_guest)
 {
 	unsigned long start_addr;
 	char buf[64];
 	int traced = 0;
 
-	if (addr < TASK_SIZE) {
+	if (*is_guest) {
+		pr_alert("  0x%-12llx   <guest>\n", addr);
+	} else if (addr < TASK_SIZE) {
 		if (!get_addr_name(addr, buf, sizeof(buf),
 					&start_addr, task->mm)) {
-			pr_alert("  0x%-12llx   %s (@0x%lx)\n", addr,
-					buf, start_addr);
+			pr_alert("  0x%-12llx   %s (@0x%lx)\n", addr, buf, start_addr);
 		} else {
 			pr_alert("  0x%-12llx   <anonymous>\n", addr);
 		}
-
-		return;
-	}
-
+	} else {
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
-	if (task->ret_stack) {
-		int index;
-		for (index = 0; index <= task->curr_ret_stack; index++)
-			if (task->ret_stack[index].fp == orig_base + cr_ind) {
-				addr = task->ret_stack[index].ret;
-				traced = 1;
-				break;
-			}
-	}
+		if (task->ret_stack) {
+			int index;
+			for (index = 0; index <= task->curr_ret_stack; index++)
+				if (task->ret_stack[index].fp == orig_base + cr_ind) {
+					addr = task->ret_stack[index].ret;
+					traced = 1;
+					break;
+				}
+		}
 #endif
+		pr_alert("  0x%-12llx   %pF%s", addr, (void *) addr,
+				(traced) ? " (traced)" : "");
+	}
 
-	pr_alert("  0x%-12llx   %pF%s", addr, (void *) addr,
-			(traced) ? " (traced)" : "");
+	if (addr >= (unsigned long) __entry_handlers_hcalls_start &&
+			addr < (unsigned long) __entry_handlers_hcalls_end) {
+		/* This is a hypercall, so frames below belong to guest
+		 * and their translation cannot be trusted. */
+		*is_guest = true;
+	}
 }
 
 /* This function allocates memory necessary to print
@@ -1991,6 +2016,7 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 	int last_user_windows = 2;
 	int i;
 	int timeout = is_prototype() ? 150000 : 30000;
+	bool is_guest = false;
 
 	if (!regs->valid) {
 		pr_alert(" BUG print_chain_stack pid=%d valid=0\n",
@@ -2089,8 +2115,8 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 		} else {
 			orig_chain_base = regs->orig_base_chain_stack_u;
 		}
-		print_funcy_ip(AS(crs.cr0_hi).ip << 3, new_chain_base, cr_ind,
-				task, orig_chain_base);
+		print_ip(AS(crs.cr0_hi).ip << 3, new_chain_base, cr_ind,
+				task, orig_chain_base, &is_guest);
 
 		if (show_reg_window) {
 			psp_ind -= AS(crs.cr1_lo).wbs * EXT_4_NR_SZ;
@@ -3155,6 +3181,14 @@ static long read_current_chain_stack(void __user *buf,
 	ret = parse_chain_stack(PCS_USER, NULL, __read_current_chain_stack, &args);
 	if (IS_ERR_VALUE(ret))
 		return ret;
+
+	if (src == (unsigned long) GET_PCS_BASE(&current_thread_info()->u_hw_stack)) {
+		e2k_mem_crs_t crs;
+		memset(&crs, 0, sizeof(crs));
+		crs.cr1_lo.pm = 1;
+		if (copy_to_user(buf, &crs, SZ_OF_CR))
+			return -EFAULT;
+	}
 
 	return 0;
 }

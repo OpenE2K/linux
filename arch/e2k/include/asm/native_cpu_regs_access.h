@@ -160,13 +160,13 @@
 #define	NATIVE_NV_READ_CR1_HI_REG_VALUE()	NATIVE_GET_DSREG_OPEN(cr1.hi)
 
 #define	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG_VALUE(CR0_lo_value) \
-		NATIVE_SET_DSREG_OPEN_NOIRQ(cr0.lo, CR0_lo_value)
+		NATIVE_SET_CR_CLOSED_NOEXC(cr0.lo, CR0_lo_value)
 #define	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG_VALUE(CR0_hi_value) \
-		NATIVE_SET_DSREG_OPEN_NOIRQ(cr0.hi, CR0_hi_value)
+		NATIVE_SET_CR_CLOSED_NOEXC(cr0.hi, CR0_hi_value)
 #define	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG_VALUE(CR1_lo_value) \
-		NATIVE_SET_DSREG_OPEN_NOIRQ(cr1.lo, CR1_lo_value)
+		NATIVE_SET_CR_CLOSED_NOEXC(cr1.lo, CR1_lo_value)
 #define	NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(CR1_hi_value) \
-		NATIVE_SET_DSREG_OPEN_NOIRQ(cr1.hi, CR1_hi_value)
+		NATIVE_SET_CR_CLOSED_NOEXC(cr1.hi, CR1_hi_value)
 
 /*
  * Read/write word Procedure Chain Stack Harware Top Pointer (PCSHTP)

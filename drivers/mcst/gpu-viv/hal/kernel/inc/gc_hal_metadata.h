@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -66,33 +66,6 @@ extern "C" {
 
 #define VIV_VIDMEM_METADATA_MAGIC __FOURCC('v', 'i', 'v', 'm')
 
-/* Compressed format now was defined same as dec400d, should be general. */
-typedef enum _VIV_COMPRESS_FMT
-{
-    _VIV_CFMT_ARGB8 = 0,
-    _VIV_CFMT_XRGB8,
-    _VIV_CFMT_AYUV,
-    _VIV_CFMT_UYVY,
-    _VIV_CFMT_YUY2,
-    _VIV_CFMT_YUV_ONLY,
-    _VIV_CFMT_UV_MIX,
-    _VIV_CFMT_ARGB4,
-    _VIV_CFMT_XRGB4,
-    _VIV_CFMT_A1R5G5B5,
-    _VIV_CFMT_X1R5G5B5,
-    _VIV_CFMT_R5G6B5,
-    _VIV_CFMT_Z24S8,
-    _VIV_CFMT_Z24,
-    _VIV_CFMT_Z16,
-    _VIV_CFMT_A2R10G10B10,
-    _VIV_CFMT_BAYER,
-    _VIV_CFMT_SIGNED_BAYER,
-    _VIV_CFMT_VAA16,
-    _VIV_CFMT_S8,
-
-    _VIV_CFMT_MAX,
-} _VIV_COMPRESS_FMT;
-
 /* Metadata for cross-device fd share with additional (ts) info. */
 typedef struct _VIV_VIDMEM_METADATA
 {
@@ -100,6 +73,9 @@ typedef struct _VIV_VIDMEM_METADATA
 
     int32_t  ts_fd;
     void *   ts_dma_buf;
+#ifdef gcdANDROID
+    dma_addr_t ts_address;
+#endif
 
     uint32_t fc_enabled;
     uint32_t fc_value;

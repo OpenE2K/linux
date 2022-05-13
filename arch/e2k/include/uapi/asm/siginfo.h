@@ -4,7 +4,6 @@
 #include <linux/types.h>
 #include <asm/signal.h>
 
-#define __ARCH_SI_PREAMBLE_SIZE	(4 * sizeof(int))
 #define __ARCH_SI_TRAPNO
 #define __ARCH_SI_BAND_T int
 
@@ -12,13 +11,6 @@
 
 #define SI_PAD_SIZE32	((SI_MAX_SIZE/sizeof(int)) - 3)
 #define SIGEV_PAD_SIZE32 ((SIGEV_MAX_SIZE/sizeof(int)) - 3)
-
-/*
- * SIGSEGV si_codes
- */
-#define SEGV_BOUNDS	3  /* Bounds overflow */
-#undef	NSIGSEGV
-#define NSIGSEGV	3
 
 /*
  * SIGTRAP si_codes

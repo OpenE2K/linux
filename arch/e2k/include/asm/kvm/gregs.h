@@ -6,6 +6,7 @@
 #include <asm/machdep.h>
 #include <asm/glob_regs.h>
 #include <asm/ptrace.h>
+#include <asm/e2k_debug.h>
 
 #ifdef	CONFIG_VIRTUALIZATION
 /* It is native host guest kernel with virtualization support */
@@ -108,6 +109,33 @@
 	ONLY_RESTORE_KERNEL_GREGS(task__, cpu_id__, cpu_off__);		\
 })
 
+#define HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu)			\
+({									\
+	machine.save_kernel_gregs(&vcpu->arch.host_ctxt.k_gregs);	\
+									\
+	u64 guest_vs = GET_GUEST_VCPU_STATE_POINTER(vcpu);		\
+	HOST_ONLY_RESTORE_VCPU_STATE_GREG(guest_vs);			\
+})
+
+#define HOST_VCPU_STATE_REG_RESTORE(host_ti)				\
+({									\
+	struct kvm_vcpu *vcpu = host_ti->vcpu;				\
+									\
+	copy_k_gregs_to_k_gregs(&host_ti->k_gregs_light,		\
+				&vcpu->arch.host_ctxt.k_gregs);		\
+})
+
+#define HOST_VCPU_STATE_COPY_SWITCH_TO_GUEST(vcpu, __ti)		\
+({									\
+	gthread_info_t *_gti = pv_vcpu_get_gti(vcpu);			\
+	kernel_gregs_t *k_gregs = &(__ti)->k_gregs;			\
+	kernel_gregs_t *gk_gregs = &(_gti)->gk_gregs;			\
+	u64 guest_vs;							\
+									\
+	HOST_ONLY_COPY_FROM_VCPU_STATE_GREG(gk_gregs, guest_vs);	\
+	HOST_ONLY_COPY_TO_VCPU_STATE_GREG(k_gregs, guest_vs);		\
+})
+
 #define	HOST_RESTORE_KERNEL_GREGS_AS_LIGHT(_ti) \
 		HOST_RESTORE_HOST_GREGS_FROM(&(_ti)->k_gregs_light, false)
 
@@ -130,42 +158,5 @@
 /* It is native host kernel without any virtualization */
 /* not used */
 #endif	/* CONFIG_VIRTUALIZATION */
-
-static inline void
-copy_h_gregs_to_gregs(global_regs_t *dst, const host_gregs_t *src)
-{
-	tagged_memcpy_8(&dst->g[HOST_GREGS_PAIRS_START], src->g,
-			sizeof(src->g));
-}
-
-static inline void
-copy_h_gregs_to_h_gregs(host_gregs_t *dst, const host_gregs_t *src)
-{
-	tagged_memcpy_8(dst->g, src->g, sizeof(src->g));
-}
-
-static inline void
-get_h_gregs_from_gregs(host_gregs_t *dst, const global_regs_t *src)
-{
-	tagged_memcpy_8(dst->g, &src->g[HOST_GREGS_PAIRS_START],
-			sizeof(dst->g));
-}
-
-static inline void
-copy_h_gregs_to_l_gregs(local_gregs_t *dst, const host_gregs_t *src)
-{
-	BUG_ON(HOST_GREGS_PAIRS_START < LOCAL_GREGS_START);
-	tagged_memcpy_8(&dst->g[HOST_GREGS_PAIRS_START - LOCAL_GREGS_START],
-			src->g, sizeof(src->g));
-}
-
-static inline void
-get_h_gregs_from_l_regs(host_gregs_t *dst, const local_gregs_t *src)
-{
-	BUG_ON(HOST_GREGS_PAIRS_START < LOCAL_GREGS_START);
-	tagged_memcpy_8(dst->g,
-			&src->g[HOST_GREGS_PAIRS_START - LOCAL_GREGS_START],
-			sizeof(dst->g));
-}
 
 #endif	/* _E2K_ASM_KVM_GREGS_H */

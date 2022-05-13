@@ -93,11 +93,6 @@ static inline void native_set_kernel_CUTD(void)
 	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(k_cutd);
 }
 
-#define NATIVE_CLEAR_DAM	\
-({ \
-	NATIVE_SET_MMUREG(dam_inv, 0); \
-})
-
 /*
  * Macros to save and restore registers.
  */
@@ -251,9 +246,9 @@ static inline void native_save_user_only_regs(struct sw_regs *sw_regs)
 				nolo_greg,				\
 				nohi_greg,				\
 				iset)
-#define	SAVE_GREGS_PAIR_V2(gregs, nolo_save, nohi_save,			\
+#define	SAVE_GREGS_PAIR_V3(gregs, nolo_save, nohi_save,			\
 				nolo_greg, nohi_greg)			\
-		NATIVE_SAVE_GREG_V2(&(gregs)[nolo_save],		\
+		NATIVE_SAVE_GREG_V3(&(gregs)[nolo_save],		\
 				&(gregs)[nohi_save],			\
 				nolo_greg,				\
 				nohi_greg)
@@ -383,9 +378,9 @@ do {									\
 					nolo_greg,			\
 					nohi_greg,			\
 					iset)
-#define	RESTORE_GREGS_PAIR_V2(gregs, nolo_save, nohi_save,		\
+#define	RESTORE_GREGS_PAIR_V3(gregs, nolo_save, nohi_save,		\
 					nolo_greg, nohi_greg)		\
-		NATIVE_RESTORE_GREG_V2(&(gregs)[nolo_save],		\
+		NATIVE_RESTORE_GREG_V3(&(gregs)[nolo_save],		\
 					&(gregs)[nohi_save],		\
 					nolo_greg,			\
 					nohi_greg)
@@ -538,6 +533,8 @@ do {									\
 		E2K_SET_GREGS_TO_THREAD(gbase, g_u, gt_u);		\
 })
 
+#define NATIVE_CLEAR_DAM	NATIVE_SET_MMUREG(dam_inv, 0)
+
 #if defined(CONFIG_PARAVIRT_GUEST)
 #include <asm/paravirt/regs_state.h>
 #elif defined(CONFIG_KVM_GUEST_KERNEL)
@@ -549,6 +546,8 @@ do {									\
 
 #define SET_GREGS_TO_THREAD(gbase, g_user, gtag_user)           \
 	NATIVE_SET_GREGS_TO_THREAD(gbase, g_user, gtag_user)
+
+#define CLEAR_DAM	NATIVE_CLEAR_DAM
 
 #endif /* !CONFIG_PARAVIRT_GUEST && !CONFIG_KVM_GUEST_KERNEL */
 
@@ -1110,11 +1109,7 @@ NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 static inline void
 NATIVE_SAVE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 {
-#ifdef CONFIG_VIRTUALIZATION
-	const int task_is_binco = TASK_IS_BINCO(task) || task_thread_info(task)->virt_machine;
-#else
 	const int task_is_binco = TASK_IS_BINCO(task);
-#endif
 	struct mm_struct *mm = task->mm;
 	struct sw_regs *sw_regs = &task->thread.sw_regs;
 	save_gregs_fn_t save_gregs_dirty_bgr_fn = machine.save_gregs_dirty_bgr;
@@ -1184,8 +1179,7 @@ NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 	NATIVE_CLEAR_DAM;
 
 	if (unlikely(task_is_binco)) {
-		if (machine.flushts)
-			machine.flushts();
+		E2K_FLUSHTS;
 		NATIVE_RESTORE_INTEL_REGS(sw_regs);
 	}
 }
@@ -1206,11 +1200,7 @@ NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
 	e2k_cr0_hi_t cr0_hi = sw_regs->crs.cr0_hi;
 	e2k_cr1_lo_t cr1_lo = sw_regs->crs.cr1_lo;
 	e2k_cr1_hi_t cr1_hi = sw_regs->crs.cr1_hi;
-#ifdef CONFIG_VIRTUALIZATION
-	const int task_is_binco = TASK_IS_BINCO(task) || ti->virt_machine;
-#else
 	const int task_is_binco = TASK_IS_BINCO(task);
-#endif
 	struct mm_struct *mm = task->mm;
 	restore_gregs_fn_t restore_gregs_fn = machine.restore_gregs;
 
@@ -1247,6 +1237,7 @@ NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
 		e2k_addr_t pcs_base, e2k_size_t pcs_size,
 		e2k_addr_t ds_base, e2k_size_t ds_size)
 {
+	pcsp_struct_t pcsp = {{ 0 }};
 	e2k_rwap_lo_struct_t	reg_lo;
 	e2k_rwap_hi_struct_t	reg_hi;
 	e2k_rwap_lo_struct_t	stack_reg_lo;
@@ -1265,13 +1256,10 @@ NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
 	reg_hi.PSP_hi_size = ps_size;
 	reg_hi.PSP_hi_ind = 0;
 	NATIVE_NV_WRITE_PSP_REG(reg_hi, reg_lo);
-	reg_lo.PCSP_lo_half = 0;
-	reg_lo.PCSP_lo_base = pcs_base;
-	reg_lo._PCSP_lo_rw = E2K_PCSR_RW_PROTECTIONS;
-	reg_hi.PCSP_hi_half = 0;
-	reg_hi.PCSP_hi_size = pcs_size;
-	reg_hi.PCSP_hi_ind = 0;
-	NATIVE_NV_WRITE_PCSP_REG(reg_hi, reg_lo);
+	pcsp.base = pcs_base;
+	pcsp.size = pcs_size;
+	pcsp.rw = E2K_PCSR_RW_PROTECTIONS;
+	NATIVE_NV_WRITE_PCSP_REG(pcsp.hi, pcsp.lo);
 
 
 	/*

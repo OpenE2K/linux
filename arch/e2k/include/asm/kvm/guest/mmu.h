@@ -8,6 +8,19 @@
 #include <asm/tlb_regs_types.h>
 #include <asm/mmu_fault.h>
 
+static inline bool
+kvm_ftype_has_sw_fault(tc_fault_type_t ftype)
+{
+	/* host KVM can pass software fault for guest kernel */
+	return ftype_test_is_kvm_fault_injected(ftype) || true;
+}
+
+static inline bool
+kvm_ftype_test_sw_fault(tc_fault_type_t ftype)
+{
+	return ftype_test_is_kvm_fault_injected(ftype);
+}
+
 extern void kvm_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
 		u32 data_tag, u64 st_rec_opc, u64 data_ext, u32 data_ext_tag,
 		u64 opc_ext, int chan, int qp_store, int atomic_store);
@@ -37,14 +50,9 @@ static inline bool
 kvm_is_guest_kernel_gregs(struct thread_info *ti,
 				unsigned greg_num_d, u64 **greg_copy)
 {
-	if (HOST_KERNEL_GREGS_PAIR_MASK == 0 ||
-			!(HOST_KERNEL_GREGS_PAIR_MASK & (1UL << greg_num_d)))
-		/* register is not used by host and guest */
-		/* to support virtualization */
-		return false;
-
-	*greg_copy = ti->h_gregs.g[greg_num_d - HOST_GREGS_PAIRS_START].xreg;
-	return true;
+	/* no additional register are used by host and guest */
+	/* to support virtualization */
+	return false;
 }
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
@@ -56,10 +64,22 @@ guest_addr_to_host(void **addr, const pt_regs_t *regs)
 }
 
 static inline void *
-guest_ptr_to_host(void *ptr, int size, const pt_regs_t *regs)
+guest_ptr_to_host(void *ptr, bool is_write, int size, const pt_regs_t *regs)
 {
 	/* there are not any guests, so nothing convertion */
 	return native_guest_ptr_to_host(ptr, size);
+}
+
+static inline bool
+ftype_has_sw_fault(tc_fault_type_t ftype)
+{
+	return kvm_ftype_has_sw_fault(ftype);
+}
+
+static inline bool
+ftype_test_sw_fault(tc_fault_type_t ftype)
+{
+	return kvm_ftype_test_sw_fault(ftype);
 }
 
 static inline bool

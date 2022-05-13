@@ -570,7 +570,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 					Dprintk("PCI #%d: bios_pci_scan_bus: "
 						"setup iohub for buses\n",
 						domain);
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, bus->number, B1_BN,
 						buses);
 				} else if (dev->device ==
@@ -628,7 +628,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 					PCI_DEVICE_ID_MCST_VIRT_PCI_BRIDGE) &&
 					(dev->device !=
 					PCI_DEVICE_ID_MCST_PCIE_BRIDGE)) {
-					system_commutator_es2_ioh_write_dword(
+					system_commutator_e2s_ioh_write_dword(
 						domain, bus->number, B1_BN,
 						buses);
 				}

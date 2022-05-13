@@ -18,8 +18,8 @@
 *******************************************************************/
 #ifndef LYNXDRV_H_
 #define LYNXDRV_H_
-
-
+#include <linux/version.h>
+#include <linux/fb.h>
 #define DEBUG		0
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 17)
@@ -101,6 +101,7 @@ typedef int pm_message_t;
 #define PADDING(align, data) (((data)+(align)-1)&(~((align)-1)))
 extern int smi_indent;
 
+struct lynx_share;
 
 struct lynx_accel {
 	/* base virtual address of DPR registers */
@@ -111,17 +112,17 @@ struct lynx_accel {
 	/* function fointers */
 	void (*de_init) (struct lynx_accel *);
 
-	int (*de_wait) (void);	/* see if hardware ready to work */
+	int (*de_wait) (struct lynx_share *share);	/* see if hardware ready to work */
 
-	int (*de_fillrect) (struct lynx_accel *, u32, u32, u32,
-			    u32, u32, u32, u32, u32, u32);
+	int (*de_fillrect) (struct lynx_share *,
+				u32, u32, u32, u32, u32, u32, u32, u32, u32);
 
-	int (*de_copyarea) (struct lynx_accel *, u32, u32, u32, u32,
-			    u32, u32, u32, u32, u32, u32, u32, u32);
+	int (*de_copyarea) (struct lynx_share *share,
+				u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 
-	int (*de_imageblit) (struct lynx_accel *, const char *, u32, u32,
-			     u32, u32, u32, u32, u32, u32, u32, u32, u32,
-			     u32);
+	int (*de_imageblit) (struct lynx_share *,
+				const char *, u32, u32, u32, u32, u32, u32, u32,
+				u32, u32, u32, u32, u32);
 
 };
 
@@ -199,17 +200,20 @@ struct lynxfb_crtc {
 
 	void *priv;
 
-	int (*proc_setMode) (struct lynxfb_crtc *,
+	int (*proc_setMode) (struct lynx_share *,
+				struct lynxfb_crtc *,
 			     struct fb_var_screeninfo *,
 			     struct fb_fix_screeninfo *);
 
 	int (*proc_checkMode) (struct lynxfb_crtc *,
 			       struct fb_var_screeninfo *);
-	int (*proc_setColReg) (struct lynxfb_crtc *, ushort, ushort,
+	int (*proc_setColReg) (struct lynx_share *,
+					struct lynxfb_crtc *, ushort, ushort,
 			       ushort, ushort);
 	void (*clear) (struct lynxfb_crtc *);
 	/* pan display */
-	int (*proc_panDisplay) (struct lynxfb_crtc *,
+	int (*proc_panDisplay) (struct lynx_share *,
+				struct lynxfb_crtc *,
 				const struct fb_var_screeninfo *,
 				const struct fb_info *);
 	/* cursor information */
@@ -233,13 +237,14 @@ struct lynxfb_output {
 	 */
 	void *priv;
 
-	int (*proc_setMode) (struct lynxfb_output *,
+	int (*proc_setMode) (struct lynx_share *,
+				struct lynxfb_output *,
 			     struct fb_var_screeninfo *,
 			     struct fb_fix_screeninfo *);
 
 	int (*proc_checkMode) (struct lynxfb_output *,
 			       struct fb_var_screeninfo *);
-	int (*proc_setBLANK) (struct lynxfb_output *, int);
+	int (*proc_setBLANK) (struct lynx_share *, struct lynxfb_output *, int);
 	void (*clear) (struct lynxfb_output *);
 };
 

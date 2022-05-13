@@ -27,8 +27,8 @@
 		     E2K_TC_TYPE_EMPT | E2K_TC_TYPE_CLW)
 
 #define E2K_FAULT_TYPE_GLOBAL_SP	(1ULL << 0)
-#define E2K_FAULT_TYPE_PAGE_BOUND	(1ULL << 1)
-#define E2K_FAULT_TYPE_EXC_MEM_LOCK	(1ULL << 2)
+#define E2K_FAULT_TYPE_EXC_MEM_LOCK__ILLEGAL_SMPH (1ULL << 1)
+#define E2K_FAULT_TYPE_EXC_MEM_LOCK__MEM_LOCK	  (1ULL << 2)
 #define E2K_FAULT_TYPE_PH_PR_PAGE	(1ULL << 3)
 #define E2K_FAULT_TYPE_IO_PAGE		(1ULL << 4)
 #define E2K_FAULT_TYPE_ISYS_PAGE	(1ULL << 5)
@@ -104,8 +104,10 @@ TRACE_EVENT(
 			),
 		__print_flags(AS((tc_cond_t) __entry->condition).fault_type, "|",
 				{ E2K_FAULT_TYPE_GLOBAL_SP, "global_sp" },
-				{ E2K_FAULT_TYPE_PAGE_BOUND, "page_bound" },
-				{ E2K_FAULT_TYPE_EXC_MEM_LOCK, "exc_mem_lock" },
+				{ E2K_FAULT_TYPE_EXC_MEM_LOCK__ILLEGAL_SMPH,
+						"exc_mem_lock.illegal_smph" },
+				{ E2K_FAULT_TYPE_EXC_MEM_LOCK__MEM_LOCK,
+						"exc_mem_lock.mem_lock" },
 				{ E2K_FAULT_TYPE_PH_PR_PAGE, "ph_pr_page" },
 				{ E2K_FAULT_TYPE_IO_PAGE, "io_page" },
 				{ E2K_FAULT_TYPE_ISYS_PAGE, "isys_page" },

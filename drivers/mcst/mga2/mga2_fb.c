@@ -10,6 +10,7 @@
 #include <linux/init.h>
 #include <linux/circ_buf.h>
 #include <linux/swiotlb.h>
+#include <drm/ttm/ttm_bo_driver.h>
 
 #include "mga2_drv.h"
 

@@ -337,6 +337,19 @@ static void kvm_read_wallclock(struct timespec64 *ts)
 	} while (sec != time_info->wall_time.tv_sec);
 }
 
+static void kvm_get_host_timeofday(struct timespec64 *ts)
+{
+	kvm_time_t *time_info = kvm_vcpu_time_info();
+	long sec;
+
+	do {
+		sec = time_info->sys_time.tv_sec;
+		ts->tv_sec = sec;
+		ts->tv_nsec = time_info->sys_time.tv_nsec;
+		rmb();	/* wait for all read completed */
+	} while (sec != time_info->sys_time.tv_sec);
+}
+
 u64 kvm_clocksource_read(void)
 {
 	kvm_time_t *time_info = kvm_vcpu_time_info();
@@ -734,10 +747,18 @@ __init void kvm_time_init_clocksource(void)
 
 __init void kvm_time_init(void)
 {
+	struct timespec64 tp;
+
+	kvm_setup_boot_local_pic_virq();
+
 	native_time_init();
 
 	if (IS_HV_GM())
 		return;
+
+	/* Set initial system time with full resolution */
+	kvm_get_host_timeofday(&tp);
+	do_settimeofday64(&tp);
 
 	timer_interrupt_set = true;
 	if (timer_interrupt_set)

@@ -412,8 +412,8 @@ static inline long
 kvm_check_guest_active_cr_mem_item(e2k_addr_t base, e2k_addr_t cr_ind,
 							e2k_addr_t cr_item)
 {
-	e2k_psp_lo_t	pcsp_lo;
-	e2k_psp_hi_t	pcsp_hi;
+	e2k_pcsp_lo_t	pcsp_lo;
+	e2k_pcsp_hi_t	pcsp_hi;
 	e2k_pcshtp_t	pcshtp;
 	unsigned long	pcs_bound;
 
@@ -468,6 +468,22 @@ kvm_put_guest_active_cr_mem_item(unsigned long cr_value,
 	native_put_active_cr_mem_value(cr_value, base, cr_ind, cr_item);
 	return 0;
 }
+static inline long
+kvm_update_guest_kernel_crs(e2k_mem_crs_t *crs, e2k_mem_crs_t *prev_crs,
+			e2k_mem_crs_t *p_prev_crs)
+{
+	e2k_mem_crs_t *k_crs = (e2k_mem_crs_t *)
+			NATIVE_NV_READ_PCSP_LO_REG().base;
+
+	raw_all_irq_disable();
+	E2K_FLUSHC;
+	*p_prev_crs = k_crs[0];
+	k_crs[0] = *prev_crs;
+	k_crs[1] = *crs;
+	raw_all_irq_enable();
+
+	return 0;
+}
 
 /*
  * These functions for host kernel, see comment about virtualization at
@@ -508,7 +524,6 @@ extern int kvm_copy_hw_stacks_frames(struct kvm_vcpu *vcpu,
 extern void kvm_arch_vcpu_to_wait(struct kvm_vcpu *vcpu);
 extern void kvm_arch_vcpu_to_run(struct kvm_vcpu *vcpu);
 
-extern int kvm_start_vcpu_thread(struct kvm_vcpu *vcpu);
 extern int kvm_start_pv_guest(struct kvm_vcpu *vcpu);
 extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 		e2k_mem_ps_t *ps_frames, e2k_mem_crs_t *pcs_frames,
@@ -516,12 +531,10 @@ extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 		e2k_size_t usd_size, e2k_size_t *ps_ind, e2k_size_t *pcs_ind,
 		int cui, bool kernel);
 extern int kvm_prepare_pv_vcpu_start_stacks(struct kvm_vcpu *vcpu);
-extern int vcpu_init_os_cu_hw_ctxt(struct kvm_vcpu *vcpu,
-					kvm_task_info_t *user_info);
 
 extern int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu);
-extern int hv_vcpu_start_thread(struct kvm_vcpu *vcpu);
-extern int pv_vcpu_start_thread(struct kvm_vcpu *vcpu);
+extern int hv_vcpu_setup_thread(struct kvm_vcpu *vcpu);
+extern int pv_vcpu_setup_thread(struct kvm_vcpu *vcpu);
 
 extern int kvm_switch_guest_kernel_stacks(struct kvm_vcpu *vcpu,
 			kvm_task_info_t __user *task_info, char *entry_point,
@@ -534,7 +547,6 @@ extern int kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 		void *data, void *arg1, void *arg2);
 extern void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu);
 extern void kvm_spare_host_vcpu_release(struct kvm_vcpu *vcpu);
-extern bool kvm_guest_vcpu_thread_should_stop(struct kvm_vcpu *vcpu);
 extern void kvm_guest_vcpu_thread_stop(struct kvm_vcpu *vcpu);
 extern void kvm_guest_vcpu_thread_restart(struct kvm_vcpu *vcpu);
 extern int kvm_copy_guest_kernel_stacks(struct kvm_vcpu *vcpu,
@@ -552,12 +564,11 @@ extern int kvm_sig_handler_return(struct kvm_vcpu *vcpu,
 		kvm_stacks_info_t *regs_info, unsigned long sigreturn_entry,
 		long sys_rval, guest_hw_stack_t *stack_regs);
 extern int kvm_long_jump_return(struct kvm_vcpu *vcpu,
-				kvm_long_jump_info_t *regs_info);
-extern void kvm_guest_vcpu_common_idle(struct kvm_vcpu *vcpu,
+				kvm_long_jump_info_t *regs_info,
+				bool switch_stack, u64 to_key);
+extern long kvm_guest_vcpu_common_idle(struct kvm_vcpu *vcpu,
 					long timeout, bool interruptable);
 extern void kvm_guest_vcpu_relax(void);
-
-extern void kvm_init_kernel_intc(struct kvm_vcpu *vcpu);
 
 #ifdef	CONFIG_SMP
 extern int kvm_activate_host_vcpu(struct kvm *kvm, int vcpu_id);
@@ -568,13 +579,13 @@ extern void kvm_pv_wait(struct kvm *kvm, struct kvm_vcpu *vcpu);
 extern void kvm_pv_kick(struct kvm *kvm, int hard_cpu_id);
 
 extern void prepare_vcpu_startup_args(struct kvm_vcpu *vcpu);
-extern void setup_vcpu_boot_stacks(struct kvm_vcpu *vcpu,
-						gthread_info_t *gti);
+extern void vcpu_clear_signal_stack(struct kvm_vcpu *vcpu);
 
 #ifdef	CONFIG_KVM_HW_VIRTUALIZATION
 extern int kvm_start_hv_guest(struct kvm_vcpu *vcpu);
 extern void prepare_bu_stacks_to_startup_vcpu(struct kvm_vcpu *);
 extern int startup_hv_vcpu(struct kvm_vcpu *);
+extern void kvm_init_kernel_intc(struct kvm_vcpu *vcpu);
 #else	/* ! CONFIG_KVM_HW_VIRTUALIZATION */
 static inline int kvm_start_hv_guest(struct kvm_vcpu *vcpu)
 {
@@ -592,6 +603,7 @@ startup_hv_vcpu(struct kvm_vcpu *vcpu)
 {
 	return -ENOTSUPP;
 }
+static inline void kvm_init_kernel_intc(struct kvm_vcpu *vcpu) { }
 #endif	/* CONFIG_KVM_HW_VIRTUALIZATION */
 
 extern long kvm_guest_shutdown(struct kvm_vcpu *vcpu,
@@ -609,6 +621,8 @@ extern int kvm_apply_updated_psp_bounds(struct kvm_vcpu *vcpu,
 extern int kvm_apply_updated_pcsp_bounds(struct kvm_vcpu *vcpu,
 		unsigned long base, unsigned long size,
 		unsigned long start, unsigned long end, unsigned long delta);
+extern int kvm_apply_updated_usd_bounds(struct kvm_vcpu *vcpu,
+		unsigned long base, unsigned long delta, bool incr);
 
 /**
  * user_hw_stacks_copy - copy guest user hardware stacks that have been
@@ -669,7 +683,7 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 			"host %px to guest kernel %px, size 0x%lx\n",
 			src, dst, pcs_size);
 		ret = user_hw_stack_frames_copy(dst, src, pcs_size, regs,
-						k_pcsp_hi.PCSP_hi_ind, true);
+					k_pcsp_hi.PCSP_hi_ind - pcs_off, true);
 		if (ret)
 			return ret;
 		g_pcsp_hi.PCSP_hi_ind += pcs_size;
@@ -695,7 +709,7 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 			"host %px to guest kernel %px, size 0x%lx\n",
 			src, dst, ps_size);
 		ret = user_hw_stack_frames_copy(dst, src, ps_size, regs,
-						k_psp_hi.PSP_hi_ind, false);
+					k_psp_hi.PSP_hi_ind - ps_off, false);
 		if (ret)
 			return ret;
 		g_psp_hi.PSP_hi_ind += ps_size;
@@ -728,6 +742,33 @@ pv_vcpu_user_hw_stacks_copy_crs(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
 	g_stacks->pcsp_hi.PCSP_hi_ind += SZ_OF_CR;
 	DebugGUST("guest kernel chain stack index is now 0x%x\n",
 		g_stacks->pcsp_hi.PCSP_hi_ind);
+	return 0;
+}
+
+static inline int
+pv_vcpu_user_hw_stacks_copy_ps_frames(struct kvm_vcpu *vcpu,
+				e2k_stacks_t *g_stacks, pt_regs_t *regs,
+				e2k_mem_ps_t *ps_frames, int num_frames)
+{
+	void __user *u_psframe;
+	int ret;
+	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+
+	u_psframe = (void __user *) g_stacks->psp_lo.PSP_lo_base +
+				  g_stacks->psp_hi.PSP_hi_ind;
+	DebugGUST("copy #%d user ps frames from %px to guest kernel "
+		"procedure stack %p (base 0x%llx + ind 0x%x)\n",
+		num_frames, ps_frames, u_psframe,
+		g_stacks->psp_lo.PSP_lo_base, g_stacks->psp_hi.PSP_hi_ind);
+	ret = copy_e2k_stack_to_user(u_psframe, ps_frames,
+			sizeof(e2k_mem_ps_t) * num_frames, regs);
+	if (unlikely(ret))
+		return ret;
+
+	g_stacks->psp_hi.PSP_hi_ind += sizeof(e2k_mem_ps_t) * num_frames;
+	DebugGUST("guest kernel procedure stack index is now 0x%x\n",
+		g_stacks->psp_hi.PSP_hi_ind);
+
 	return 0;
 }
 
@@ -782,7 +823,7 @@ static inline int pv_vcpu_user_hw_stacks_copy_full(struct kvm_vcpu *vcpu,
 	 * this way we can later FILL using return trick (otherwise there
 	 * would be no space in chain stack for the trick).
 	 */
-	collapse_kernel_hw_stacks(g_stacks);
+	collapse_kernel_hw_stacks(regs, g_stacks);
 
 	/*
 	 * Copy saved %cr registers
@@ -833,5 +874,10 @@ pv_vcpu_user_crs_copy_to_kernel(struct kvm_vcpu *vcpu,
 
 	return 0;
 }
+
+unsigned long kvm_add_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key,
+					bool is_main);
+
+void kvm_remove_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key);
 
 #endif	/* __KVM_PROCESS_H */

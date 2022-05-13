@@ -161,6 +161,10 @@ typedef struct {
 	size_t cached_stacks_size;
 } mm_context_t;
 
+#define INIT_MM_CONTEXT(mm) \
+	.context = { \
+		.cut_mask_lock = __MUTEX_INITIALIZER(mm.context.cut_mask_lock), \
+	} \
 
 /* Version for fast syscalls, so it must be inlined.
  * Must be used only for current. */
@@ -222,5 +226,7 @@ extern unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 		unsigned long new_addr, unsigned long new_len, bool *locked,
 		struct vm_userfaultfd_ctx *uf, struct list_head *uf_unmap_early,
 		struct list_head *uf_unmap);
+extern struct vm_area_struct *vma_to_resize(unsigned long addr,
+	unsigned long old_len, unsigned long new_len, unsigned long *p);
 
 #endif /* _E2K_MMU_H_ */

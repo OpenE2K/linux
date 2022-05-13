@@ -105,15 +105,13 @@ struct resource standard_io_resources[] = {
 };
 
 #define MACH_TYPE_NAME_UNKNOWN		0
-#define MACH_TYPE_NAME_ES2_DSP		1
-#define MACH_TYPE_NAME_ES2_RU		2
-#define MACH_TYPE_NAME_E2S		3
-#define MACH_TYPE_NAME_E8C		4
-#define MACH_TYPE_NAME_E1CP		5
-#define MACH_TYPE_NAME_E8C2		6
-#define MACH_TYPE_NAME_E12C		7
-#define MACH_TYPE_NAME_E16C		8
-#define MACH_TYPE_NAME_E2C3		9
+#define MACH_TYPE_NAME_E2S		1
+#define MACH_TYPE_NAME_E8C		2
+#define MACH_TYPE_NAME_E1CP		3
+#define MACH_TYPE_NAME_E8C2		4
+#define MACH_TYPE_NAME_E12C		5
+#define MACH_TYPE_NAME_E16C		6
+#define MACH_TYPE_NAME_E2C3		7
 
 /*
  * Machine type names.
@@ -121,8 +119,6 @@ struct resource standard_io_resources[] = {
  */
 static const char const *native_cpu_type_name[] = {
 	"unknown",
-	"e2c+",
-	"e2c",
 	"e2s",
 	"e8c",
 	"e1c+",
@@ -133,8 +129,6 @@ static const char const *native_cpu_type_name[] = {
 };
 static const char const *native_mach_type_name[] = {
 	"unknown",
-	"Elbrus-e2k-e2c+",
-	"Elbrus-e2k-e2c",
 	"Elbrus-e2k-e2s",
 	"Elbrus-e2k-e8c",
 	"Elbrus-e2k-e1c+",
@@ -156,23 +150,10 @@ int e2k_get_machine_type_name(int mach_id)
 	int mach_type;
 
 	switch (mach_id) {
-#if CONFIG_E2K_MINVER == 2
-	case MACHINE_ID_ES2_DSP_LMS:
-	case MACHINE_ID_ES2_DSP:
-		mach_type = MACH_TYPE_NAME_ES2_DSP;
-		break;
-	case MACHINE_ID_ES2_RU_LMS:
-	case MACHINE_ID_ES2_RU:
-		mach_type = MACH_TYPE_NAME_ES2_RU;
-		break;
-#endif
-#if CONFIG_E2K_MINVER <= 3
 	case MACHINE_ID_E2S_LMS:
 	case MACHINE_ID_E2S:
 		mach_type = MACH_TYPE_NAME_E2S;
 		break;
-#endif
-#if CONFIG_E2K_MINVER <= 4
 	case MACHINE_ID_E8C_LMS:
 	case MACHINE_ID_E8C:
 		mach_type = MACH_TYPE_NAME_E8C;
@@ -181,14 +162,10 @@ int e2k_get_machine_type_name(int mach_id)
 	case MACHINE_ID_E1CP:
 		mach_type = MACH_TYPE_NAME_E1CP;
 		break;
-#endif
-#if CONFIG_E2K_MINVER <= 5
 	case MACHINE_ID_E8C2_LMS:
 	case MACHINE_ID_E8C2:
 		mach_type = MACH_TYPE_NAME_E8C2;
 		break;
-#endif
-#if CONFIG_E2K_MINVER <= 6
 	case MACHINE_ID_E12C_LMS:
 	case MACHINE_ID_E12C:
 		mach_type = MACH_TYPE_NAME_E12C;
@@ -201,7 +178,6 @@ int e2k_get_machine_type_name(int mach_id)
 	case MACHINE_ID_E2C3:
 		mach_type = MACH_TYPE_NAME_E2C3;
 		break;
-#endif /* CONFIG_E2K_MINVER */
 	default:
 		panic("setup_arch(): !!! UNKNOWN MACHINE TYPE !!!");
 		mach_type = MACH_TYPE_NAME_UNKNOWN;
@@ -243,11 +219,9 @@ void native_print_machine_type_info(void)
 	const char *cpu_type = "?????????????";
 
 	cpu_type = native_get_cpu_type_name();
-	pr_cont("NATIVE MACHINE TYPE: %s %s %s %s, ID %04x, REVISION: %03x, "
+	pr_cont("NATIVE MACHINE TYPE: %s %s, ID %04x, REVISION: %03x, "
 		"ISET #%d",
 		cpu_type,
-		(NATIVE_HAS_MACHINE_E2K_DSP) ? "DSP" : "",
-		(NATIVE_HAS_MACHINE_E2K_IOHUB) ? "IOHUB" : "",
 		(NATIVE_IS_MACHINE_SIM) ? "LMS" : "",
 		native_machine_id,
 		machine.native_rev, machine.native_iset_ver);
@@ -308,30 +282,6 @@ max_node_iolinks_num_setup(char *str)
 	return 1;
 }
 __setup("nodeiolinks=", max_node_iolinks_num_setup);
-
-int eldsp_disable = 0;
-EXPORT_SYMBOL(eldsp_disable);
-static int __init
-eldsp_disable_setup(char *str)
-{
-	eldsp_disable = 1;
-	if (IS_MACHINE_ES2) {
-		int nid;
-		e2k_pwr_mgr_t pwr_mgr;
-
-		for_each_online_node(nid) {
-			pwr_mgr.E2K_PWR_MGR0_reg =
-				early_sic_read_node_nbsr_reg(nid, SIC_pwr_mgr);
-			pwr_mgr.E2K_PWR_MGR0_ic_clk = 0;
-			early_sic_write_node_nbsr_reg(nid, SIC_pwr_mgr,
-						pwr_mgr.E2K_PWR_MGR0_reg);
-		}
-	}
-
-	return 1;
-}
-__setup("eldsp-off", eldsp_disable_setup);
-
 
 #if defined (CONFIG_SMP) && defined (CONFIG_HAVE_SETUP_PER_CPU_AREA)
 unsigned long __nodedata __per_cpu_offset[NR_CPUS];
@@ -578,46 +528,6 @@ notrace void cpu_clear_feature(struct machdep *machine, int feature)
 	clear_bit(feature, machine->cpu_features);
 }
 
-
-static int __init check_hwbug_atomic(void)
-{
-	int node, cpu, nodes_num, cpus_num, node_with_many_cpus;
-	cpumask_t node_cpus;
-
-	if (!cpu_has(CPU_HWBUG_ATOMIC))
-		return 0;
-
-	/*
-	 * Now that SMP has been initialized check again
-	 * that this hardware bug can really happen.
-	 *
-	 * Conditions:
-	 * 1. There must be more than 1 node present.
-	 * 2. There must be a node with more than 1 cpu.
-	 */
-
-	node_with_many_cpus = false;
-	nodes_num = 0;
-	for_each_online_node(node) {
-		++nodes_num;
-
-		cpus_num = 0;
-		for_each_cpu_of_node(node, cpu, node_cpus)
-			++cpus_num;
-
-		if (cpus_num > 1)
-			node_with_many_cpus = true;
-	}
-
-	if (nodes_num > 1 && node_with_many_cpus)
-		pr_alert("NOTE: workaround for hardware bug in atomics is enabled\n");
-	else
-		cpu_clear_feature(&machine, CPU_HWBUG_ATOMIC);
-
-	return 0;
-}
-arch_initcall(check_hwbug_atomic);
-
 static int __init check_hwbug_iommu(void)
 {
 	int node;
@@ -702,7 +612,6 @@ void __init e2k_start_kernel()
 
 void __init setup_arch(char **cmdline_p)
 {
-	int i;
 	extern int panic_timeout;
 	char c = ' ', *to = command_line, *from = boot_command_line;
 	int len = 0;
@@ -828,13 +737,6 @@ void __init setup_arch(char **cmdline_p)
 
 	thread_init();
 
-	/* request I/O space for devices used on all i[345]86 PCs */
-	if (!HAS_MACHINE_E2K_IOHUB) {
-		for (i = 0; i < STANDARD_IO_RESOURCES; i++)
-			request_resource(&ioport_resource,
-						standard_io_resources+i);
-	}
-
 #ifdef CONFIG_BLK_DEV_INITRD
 	ROOT_DEV = MKDEV(RAMDISK_MAJOR, 0);
 #endif
@@ -874,10 +776,8 @@ void __init setup_arch(char **cmdline_p)
 	arch_clock_setup();
 
 #ifdef CONFIG_NET
-	if (HAS_MACHINE_E2K_IOHUB) {
-		extern int e1000;
-		e1000 = 1;
-	}
+	extern int e1000;
+	e1000 = 1;
 #endif
 
 	late_time_init = e2k_late_time_init;
@@ -910,7 +810,7 @@ void store_cpu_info(int cpu)
 
 	c->mmu_last_context = CTX_FIRST_VERSION;
 	/* Flush TLB when reusing context after hotplug */
-	__flush_tlb_all();
+	local_flush_tlb_all();
 #endif
 }
 
@@ -919,7 +819,7 @@ static int __init boot_store_cpu_info(void)
 	/* Final full version of the data */
 	store_cpu_info(0);
 
-	pr_alert("Processor frequency %llu\n", cpu_data[0].proc_freq);
+	pr_info("Processor frequency %llu\n", cpu_data[0].proc_freq);
 
 	return 0;
 }
@@ -1019,13 +919,8 @@ static ssize_t ipd_show(struct device *dev,
 			    struct device_attribute *attr,
 			    char *buf)
 {
-	u64 mmu_cr;
-	int ipd;
-
-	mmu_cr = get_MMU_CR();
-	ipd = (mmu_cr & _MMU_CR_IPD_MASK) >> _MMU_CR_IPD_SHIFT;
-
-	return sprintf(buf, "%d\n", ipd);
+	e2k_mmu_cr_t mmu_cr = get_MMU_CR();
+	return sprintf(buf, "%d\n", mmu_cr.ipd);
 }
 
 static ssize_t ipd_store(struct device *dev,
@@ -1033,7 +928,7 @@ static ssize_t ipd_store(struct device *dev,
 			     const char *buf, size_t count)
 {
 	int ipd;
-	u64 mmu_cr = get_MMU_CR();
+	e2k_mmu_cr_t mmu_cr = get_MMU_CR();
 
 	if (kstrtoint(buf, 0, &ipd) < 0)
 		return -EINVAL;
@@ -1041,11 +936,7 @@ static ssize_t ipd_store(struct device *dev,
 	if (ipd != 0 && ipd != 1)
 		return -EINVAL;
 
-	if (ipd)
-		mmu_cr |= _MMU_CR_IPD_MASK;
-	else
-		mmu_cr &= ~_MMU_CR_IPD_MASK;
-
+	mmu_cr.ipd = ipd;
 	set_MMU_CR(mmu_cr);
 
 	return count;
@@ -1151,7 +1042,7 @@ static DEVICE_ATTR_RW(l2_ctrl_ext);
 
 
 
-static struct attribute *e2k_default_attrs_v2[] = {
+static struct attribute *e2k_default_attrs_v3[] = {
 	&dev_attr_ipd.attr,
 	&dev_attr_cu_hw0.attr,
 	NULL
@@ -1167,8 +1058,8 @@ static struct attribute *e2k_default_attrs_v6[] = {
 	NULL
 };
 
-static struct attribute_group e2k_attr_group_v2 = {
-	.attrs = e2k_default_attrs_v2,
+static struct attribute_group e2k_attr_group_v3 = {
+	.attrs = e2k_default_attrs_v3,
 	.name = "e2k"
 };
 
@@ -1187,7 +1078,7 @@ static __init int e2k_add_sysfs(void)
 	int ret;
 
 	ret = sysfs_create_group(&cpu_subsys.dev_root->kobj,
-			&e2k_attr_group_v2);
+			&e2k_attr_group_v3);
 	if (ret)
 		return ret;
 

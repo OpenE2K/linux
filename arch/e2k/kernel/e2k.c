@@ -13,7 +13,6 @@
 #include <asm/boot_recovery.h>
 #include <asm/e2k.h>
 #include <asm/e2k_sic.h>
-#include <asm/es2.h>
 #include <asm/e2s.h>
 #include <asm/e8c.h>
 #include <asm/e1cp.h>
@@ -21,6 +20,7 @@
 #include <asm/e16c.h>
 #include <asm/e12c.h>
 #include <asm/e2c3.h>
+#include <asm/hw_irq.h>
 #include <asm/byteorder.h>
 #include <asm/machdep_numa.h>
 #include <asm/traps.h>
@@ -122,29 +122,6 @@ int native_show_cpuinfo(struct seq_file *m, void *v)
 int	rdma_present = 0;
 EXPORT_SYMBOL(rdma_present);
 
-#if IS_ENABLED(CONFIG_ELDSP)
-void (*eldsp_interrupt_p)(struct pt_regs *regs) = NULL;
-EXPORT_SYMBOL(eldsp_interrupt_p);
-
-void eldsp_interrupt(struct pt_regs *regs)
-{
-	static int int_eldsp_error = 0;
-
-	ack_APIC_irq();
-	irq_enter();
-	if (eldsp_interrupt_p) {
-		eldsp_interrupt_p(regs);
-	} else {
-		if (!int_eldsp_error)
-			printk("eldsp: attempt calling null handler\n");
-		int_eldsp_error++;
-	}
-	inc_irq_stat(irq_eldsp_count);
-	irq_exit();
-}
-#endif
-
-
 int iommu_panic_off = 0;
 
 static int __init
@@ -193,12 +170,13 @@ static void iommu_interrupt(struct pt_regs *regs)
 			fsr, fsr2);
 
 	debug_dma_dump_mappings(NULL);
+
+	irq_exit();
+
 	if (iommu_panic_off)
 		pr_emerg("%s", str);
 	else
 		panic(str);
-
-	irq_exit();
 }
 
 #ifdef	CONFIG_EPIC
@@ -361,9 +339,7 @@ void __init
 native_setup_machine(void)
 {
 #ifdef	CONFIG_E2K_MACHINE
-# if defined(CONFIG_E2K_ES2_DSP) || defined(CONFIG_E2K_ES2_RU)
-	es2_setup_machine();
-# elif defined(CONFIG_E2K_E2S)
+# if defined(CONFIG_E2K_E2S)
 	e2s_setup_machine();
 # elif defined(CONFIG_E2K_E8C)
 	e8c_setup_machine();
@@ -383,21 +359,10 @@ native_setup_machine(void)
 #else	/* ! CONFIG_E2K_MACHINE */
 	switch (machine.native_id)
 	{
-#if CONFIG_E2K_MINVER == 2
-		case MACHINE_ID_ES2_DSP_LMS:
-		case MACHINE_ID_ES2_RU_LMS:
-		case MACHINE_ID_ES2_DSP:
-		case MACHINE_ID_ES2_RU:
-			es2_setup_machine();
-			break;
-#endif
-#if CONFIG_E2K_MINVER <= 3
 		case MACHINE_ID_E2S_LMS:
 		case MACHINE_ID_E2S:
 			e2s_setup_machine();
 			break;
-#endif
-#if CONFIG_E2K_MINVER <= 4
 		case MACHINE_ID_E8C_LMS:
 		case MACHINE_ID_E8C:
 			e8c_setup_machine();
@@ -406,14 +371,10 @@ native_setup_machine(void)
 		case MACHINE_ID_E1CP:
 			e1cp_setup_machine();
 			break;
-#endif
-#if CONFIG_E2K_MINVER <= 5
 		case MACHINE_ID_E8C2_LMS:
 		case MACHINE_ID_E8C2:
 			e8c2_setup_machine();
 			break;
-#endif
-#if CONFIG_E2K_MINVER <= 6
 		case MACHINE_ID_E12C_LMS:
 		case MACHINE_ID_E12C:
 			e12c_setup_machine();
@@ -426,7 +387,6 @@ native_setup_machine(void)
 		case MACHINE_ID_E2C3:
 			e2c3_setup_machine();
 			break;
-#endif  /* CONFIG_E2K_MINVER */
 		default:
 			panic("setup_arch(): !!! UNKNOWN MACHINE TYPE !!!\n");
 			machine.setup_arch = NULL;

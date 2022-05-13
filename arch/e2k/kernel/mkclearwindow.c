@@ -16,9 +16,11 @@ enum {
 
 
 static int return_printed;
-static void print_header(int rbs, int rsz, int type)
+static void print_header(int wsz, int rbs, int rsz, int type)
 {
 	printf(B "{" E);
+	if (!(type == TYPE_SETBN))
+		printf(B "setwd wsz=%d" E, wsz);
 	printf(B "setbn rbs=%d, rsz=%d, rcur=0" E, rbs, rsz);
 	if ((type == TYPE_SYSCALL || type == TYPE_SYSCALL_PROT) &&
 			!return_printed) {
@@ -51,12 +53,18 @@ static void print_clear_macro(char *name, int regs, int type)
 	switch (type) {
 	case TYPE_INTERRUPT:
 		keep = 0;
+		if (regs < FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE)
+			regs = FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE;
 		break;
 	case TYPE_SYSCALL:
 		keep = 1;
+		if (regs < FINISH_SYSCALL_SW_FILL_SIZE)
+			regs = FINISH_SYSCALL_SW_FILL_SIZE;
 		break;
 	case TYPE_SYSCALL_PROT:
 		keep = 4;
+		if (regs < FINISH_SYSCALL_SW_FILL_SIZE)
+			regs = FINISH_SYSCALL_SW_FILL_SIZE;
 		break;
 	default:
 		exit(1);
@@ -74,11 +82,11 @@ static void print_clear_macro(char *name, int regs, int type)
 	for (i = 0; i < regs; i++) {
 		if (i == 0) {
 			bn = 0;
-			print_header(0, (regs < 64) ? (regs - 1) : 63, type);
+			print_header(regs, 0, (regs < 64) ? (regs - 1) : 63, type);
 		}
 		if (i == 63) {
 			bn = 0;
-			print_header(63, regs - 63 - 1, TYPE_SETBN);
+			print_header(regs, 63, regs - 63 - 1, TYPE_SETBN);
 		}
 		if ((bn % 3) == 0)
 			printf(B "{" E);

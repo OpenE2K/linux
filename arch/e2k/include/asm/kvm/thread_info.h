@@ -147,10 +147,10 @@ typedef struct gthread_info {
 	vcpu_l_gregs_t	l_gregs;	/* guest user "local" global */
 					/* registers to save updated on page */
 					/* fault values */
-	kernel_gregs_t	gk_gregs;	/* guest kernel global resiters state */
+	kernel_gregs_t	gk_gregs;	/* guest kernel global registers state */
 					/* some registers can be updated only */
 					/* after migration to other VCPU */
-	kernel_gregs_t	gu_gregs;	/* guest user global resiters state */
+	kernel_gregs_t	gu_gregs;	/* guest user global regitsers state */
 					/* only for global registers which */
 					/* used by the guest kernel for its */
 					/* own purposes */
@@ -179,6 +179,7 @@ typedef struct gthread_info {
 					/* on host */
 					/* NULL for guest kernel threads */
 	hpa_t nonp_root_hpa;		/* physical base of nonpaging root PT */
+	u64 curr_ctx_key;		/* Key of curr context signal stack */
 	bool gmm_in_release;		/* guest mm is releasing (exit_mm()) */
 
 	/* following fields should be updated for each multi-stack process */
@@ -331,6 +332,20 @@ static inline int test_gti_thread_flag(gthread_info_t *gti, int flag)
 {
 	return test_the_flag(&gti->flags, flag);
 }
+
+#define gti_signal_pt_regs_first(__gti) \
+({ \
+	struct pt_regs __user *__sig_regs; \
+	if (__gti->signal.stack.used) { \
+		__sig_regs = &((struct signal_stack_context __user *) \
+				(__gti->signal.stack.base + \
+				 __gti->signal.stack.used - \
+				 sizeof(struct signal_stack_context)))->regs; \
+	} else { \
+		__sig_regs = NULL; \
+	} \
+	__sig_regs; \
+})
 
 /*
  * Hardware stacks bounds control
@@ -534,6 +549,8 @@ get_next_gpt_regs(thread_info_t *ti, gpt_regs_t *gregs)
 }
 
 extern int kvm_pv_guest_thread_info_init(struct kvm *kvm);
+extern void kvm_pv_guest_thread_info_reset(struct kvm *kvm);
+extern void kvm_pv_guest_thread_info_free(struct kvm *kvm);
 extern void kvm_pv_guest_thread_info_destroy(struct kvm *kvm);
 extern void kvm_pv_clear_guest_thread_info(gthread_info_t *gthread_info);
 

@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -52,6 +52,7 @@
 *
 *****************************************************************************/
 
+
 #include <linux/pci.h>
 
 #include "gc_hal_kernel_linux.h"
@@ -64,12 +65,12 @@
 
 static struct platform_device *mcst_dev;
 
-/******************************************************************************* 
-** 
-**  adjustParam 
-** 
-**  Override content of arguments, if a argument is not changed here, it will 
-**  keep as default value or value set by insmod command line. 
+/*******************************************************************************
+**
+**  adjustParam
+**
+**  Override content of arguments, if a argument is not changed here, it will
+**  keep as default value or value set by insmod command line.
 */
 static gceSTATUS
 _AdjustParam (
@@ -77,46 +78,41 @@ _AdjustParam (
     OUT gcsMODULE_PARAMETERS *Args
     )
 {
-       struct pci_dev *pdev; 
+       struct pci_dev *pdev;
        if (!mcst_dev || !mcst_dev->dev.parent)
           return gcvSTATUS_NOT_FOUND;
 
        pdev = to_pci_dev(mcst_dev->dev.parent);
-       Args->irqLine = pdev->irq;
+       Args->irqs[gcvCORE_MAJOR] = pdev->irq;
 
-       Args->registerMemBase = pci_resource_start(pdev, GC2500_BAR);
-       Args->registerMemSize = pci_resource_len(pdev, GC2500_BAR);
-#if 0
-       Args->contiguousBase = pci_resource_start(pdev, VRAM_BAR);
-       Args->contiguousSize = pci_resource_len(pdev, VRAM_BAR);  */
-#else
+       Args->registerBases[gcvCORE_MAJOR] = pci_resource_start(pdev, GC2500_BAR);
+       Args->registerSizes[gcvCORE_MAJOR] = pci_resource_len(pdev, GC2500_BAR);
        Args->contiguousSize = (128 << 20); /* Do not forget set CONFIG_FORCE_MAX_ZONEORDER=16 ! */
-#endif
        Args->bankSize = 65536;
 
        return gcvSTATUS_OK;
 }
 
-static struct soc_platform_ops mcst_ops =
+static struct _gcsPLATFORM_OPERATIONS mcst_ops =
 {
     .adjustParam = _AdjustParam,
 };
 
-static struct soc_platform mcst_platform =
+static struct _gcsPLATFORM mcst_platform =
 {
     .name = __FILE__,
     .ops  = &mcst_ops,
     .flagBits = gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS,
 };
 
-int soc_platform_init(struct platform_driver *pdrv,
-            struct soc_platform **platform)
+int gckPLATFORM_Init(struct platform_driver *pdrv,
+            struct _gcsPLATFORM **platform)
 {
     int ret;
     struct pci_dev *pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
                              PCI_DEVICE_ID_MCST_MGA2, NULL);
     if (!pdev)
-	return -ENODEV;
+        return -ENODEV;
 
     mcst_dev = platform_device_alloc(pdrv->driver.name, -1);
 
@@ -132,7 +128,7 @@ int soc_platform_init(struct platform_driver *pdrv,
         goto put_dev;
     }
 
-     set_dma_ops(&mcst_dev->dev, get_dma_ops(&pdev->dev));
+    set_dma_ops(&mcst_dev->dev, get_dma_ops(&pdev->dev));
     *platform = &mcst_platform;
     return 0;
 
@@ -142,7 +138,7 @@ put_dev:
     return ret;
 }
 
-int soc_platform_terminate(struct soc_platform *platform)
+int gckPLATFORM_Terminate(struct _gcsPLATFORM *platform)
 {
     if (mcst_dev) {
         pci_dev_put(to_pci_dev(mcst_dev->dev.parent));

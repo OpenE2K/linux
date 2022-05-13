@@ -9,6 +9,56 @@
 #include "mmu.h"
 #include "gaccess.h"
 
+static inline long
+kvm_fast_guest_kernel_tagged_memory_copy(struct kvm_vcpu *vcpu,
+		void *dst, const void *src, size_t len, size_t *copied,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	long ret;
+
+	if (unlikely(!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)dst) ||
+			!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)src))) {
+		/* only guest kernel memory areas can be copied */
+		ret = -EINVAL;
+		goto failed;
+	}
+
+	kvm_vcpu_set_dont_inject(vcpu);
+	ret = copy_aligned_user_tagged_memory(dst, src, len, copied,
+				strd_opcode, ldrd_opcode, prefetch);
+	kvm_vcpu_reset_dont_inject(vcpu);
+	if (likely(ret == 0))
+		return ret;
+
+failed:
+	return ret;
+}
+
+static inline long
+kvm_fast_guest_kernel_tagged_memory_set(struct kvm_vcpu *vcpu,
+		void *addr, u64 val, u64 tag, size_t len, size_t *cleared,
+		u64 strd_opcode)
+{
+	long ret;
+
+	if (unlikely(!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)addr))) {
+		/* only guest kernel memory areas can be set */
+		ret = -EINVAL;
+		goto failed;
+	}
+
+	kvm_vcpu_set_dont_inject(vcpu);
+	ret = set_aligned_user_tagged_memory(addr, val, tag, len,
+					     cleared, strd_opcode);
+	kvm_vcpu_reset_dont_inject(vcpu);
+	if (likely(ret == 0))
+		return ret;
+
+failed:
+	return ret;
+}
+
 /*
  * optimized copy memory along with tags
  * using privileged LD/ST recovery operations
@@ -17,7 +67,7 @@
  */
 static inline long
 kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
-		void *dst, const void *src, size_t len,
+		void *dst, const void *src, size_t len, size_t *copied,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
 {
@@ -38,7 +88,7 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 		LD_ST_REC_OPC_mas(ldst_rec_op) = MAS_LOAD_OPERATION;
 		ldrd_opcode = LD_ST_REC_OPC_reg(ldst_rec_op);
 	}
-	LD_ST_REC_OPC_reg(ldst_rec_op) = strd_opcode;
+	LD_ST_REC_OPC_reg(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
 	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
 		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
 		if (!IS_GUEST_PHYS_ADDRESS((e2k_addr_t)dst)) {
@@ -52,7 +102,7 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 		LD_ST_REC_OPC_mas(ldst_rec_op) = MAS_STORE_OPERATION;
 		strd_opcode = LD_ST_REC_OPC_reg(ldst_rec_op);
 	}
-	return kvm_vcpu_copy_guest_virt_system(vcpu, dst, src, len,
+	return kvm_vcpu_copy_guest_virt_system(vcpu, dst, src, len, copied,
 				strd_opcode, ldrd_opcode, prefetch);
 
 failed:
@@ -61,7 +111,8 @@ failed:
 
 static inline long
 kvm_fast_guest_tagged_memory_set(struct kvm_vcpu *vcpu,
-		void *addr, u64 val, u64 tag, size_t len, u64 strd_opcode)
+		void *addr, u64 val, u64 tag, size_t len, size_t *cleared,
+		u64 strd_opcode)
 {
 	ldst_rec_op_t ldst_rec_op;
 	int ret;
@@ -77,7 +128,56 @@ kvm_fast_guest_tagged_memory_set(struct kvm_vcpu *vcpu,
 		strd_opcode = LD_ST_REC_OPC_reg(ldst_rec_op);
 	}
 	return kvm_vcpu_set_guest_virt_system(vcpu, addr, val, tag, len,
-						strd_opcode);
+						cleared, strd_opcode);
+
+failed:
+	return ret;
+}
+
+static inline long
+kvm_fast_guest_user_tagged_memory_copy(struct kvm_vcpu *vcpu,
+		void *dst, const void *src, size_t len, size_t *copied,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	ldst_rec_op_t ldst_rec_op;
+	int ret;
+
+	LD_ST_REC_OPC_reg(ldst_rec_op) = ldrd_opcode;
+	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
+		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+		ret = -EFAULT;
+		goto failed;
+	}
+	LD_ST_REC_OPC_reg(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
+	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
+		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+		ret = -EFAULT;
+		goto failed;
+	}
+	return kvm_vcpu_copy_guest_user_virt_system(vcpu, dst, src, len, copied,
+				strd_opcode, ldrd_opcode, prefetch);
+
+failed:
+	return ret;
+}
+
+static inline long
+kvm_fast_guest_user_tagged_memory_set(struct kvm_vcpu *vcpu,
+		void *addr, u64 val, u64 tag, size_t len, size_t *cleared,
+		u64 strd_opcode)
+{
+	ldst_rec_op_t ldst_rec_op;
+	int ret;
+
+	LD_ST_REC_OPC_reg(ldst_rec_op) = strd_opcode;
+	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
+		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+		ret = -EFAULT;
+		goto failed;
+	}
+	return kvm_vcpu_set_guest_user_virt_system(vcpu, addr, val, tag, len,
+						   cleared, strd_opcode);
 
 failed:
 	return ret;
@@ -95,17 +195,8 @@ kvm_fast_tagged_guest_memory_copy(struct kvm_vcpu *vcpu,
 		size_t len, unsigned long strd_opcode,
 		unsigned long ldrd_opcode, int prefetch)
 {
-	return kvm_fast_guest_tagged_memory_copy(vcpu, dst, src, len,
+	return kvm_fast_guest_tagged_memory_copy(vcpu, dst, src, len, NULL,
 			strd_opcode, ldrd_opcode, prefetch);
-}
-
-static inline long
-kvm_fast_tagged_guest_memory_set(struct kvm_vcpu *vcpu,
-		void *addr, u64 val, u64 tag,
-		size_t len, u64 strd_opcode)
-{
-	return kvm_fast_guest_tagged_memory_set(vcpu, addr, val, tag, len,
-						strd_opcode);
 }
 
 static inline long
@@ -117,7 +208,7 @@ kvm_copy_from_to_user_with_tags(struct kvm_vcpu *vcpu,
 	unsigned long ld_opcode = TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT;
 
-	return kvm_vcpu_copy_guest_virt_system(vcpu, dst, src, len,
+	return kvm_vcpu_copy_guest_virt_system(vcpu, dst, src, len, NULL,
 				st_opcode, ld_opcode, 0);
 }
 

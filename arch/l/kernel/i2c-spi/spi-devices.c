@@ -49,13 +49,8 @@ static int is_cy14b101p_exist(void)
 	switch (mbtype) {
 	case 0: /* use cy14b101p by default */
 #ifdef CONFIG_E2K
-	case MB_TYPE_ES2_MBCUB_C:
-	case MB_TYPE_ES2_PLATO1:
-	case MB_TYPE_ES2_RTC_CY14B101P:
-	case MB_TYPE_ES2_RTC_CY14B101P_MULTICLOCK:
 	case MB_TYPE_E1CP_IOHUB2_RAZBRAKOVSCHIK:
 	case MB_TYPE_E1CP_PMC:
-	case MB_TYPE_ES2_EL2S4:
 #endif
 #ifdef CONFIG_E90S
 	case MB_TYPE_E90S_SIVUCH2:
@@ -64,9 +59,7 @@ static int is_cy14b101p_exist(void)
 		return 1;
 	default:
 #ifdef CONFIG_E2K
-		if (mbtype >= MB_TYPE_ES2_EL2S4) {
-			return 1;
-		}
+		return 1;
 #endif
 #ifdef CONFIG_E90S
 		if (mbtype >= MB_TYPE_E90S_CY14B101P) {

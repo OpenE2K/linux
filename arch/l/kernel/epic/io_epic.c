@@ -411,9 +411,6 @@ static bool irqchip_is_ioepic(struct irq_chip *chip);
 #ifdef CONFIG_SMP
 static void irq_complete_move_vector(struct epic_irq_cfg *cfg, unsigned int vector)
 {
-	if (likely(!cfg->move_in_progress))
-		return;
-
 	/*
 	 * When the first interrupt reaches the new CPU destination, we can
 	 * safely clean up the table on the old one
@@ -428,6 +425,9 @@ static void irq_complete_move_vector(struct epic_irq_cfg *cfg, unsigned int vect
 
 static void irq_complete_move(struct epic_irq_cfg *cfg)
 {
+	if (likely(!cfg->move_in_progress))
+		return;
+
 #if defined CONFIG_E2K
 	irq_complete_move_vector(cfg, get_irq_regs()->interrupt_vector);
 #elif defined CONFIG_E90S
@@ -448,7 +448,7 @@ void epic_irq_force_complete_move(struct irq_desc *desc)
 
 	irq = data->irq;
 	cfg = irq_data_get_irq_chip_data(data);
-	if (cfg)
+	if (unlikely(cfg && cfg->move_in_progress))
 		irq_complete_move_vector(cfg, cfg->vector);
 }
 

@@ -1,7 +1,7 @@
 #ifndef _E2K_MAS_H_
 #define _E2K_MAS_H_
 
-#include <asm/types.h>
+#include <linux/types.h>
 
 #include <uapi/asm/mas.h>
 

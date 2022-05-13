@@ -139,21 +139,26 @@ void kvm_csd_lock_wait(call_single_data_t *data)
 {
 	int ret;
 
-	if (!(data->flags & CSD_FLAG_LOCK))
-		return kvm_csd_lock_try_wait(data);
-	while (data->flags & CSD_FLAG_LOCK) {
+	do {
 		ret = HYPERVISOR_guest_csd_lock_wait(data);
 		if (ret == -EBUSY) {
 			/* other VCPUs cannot handle IPI, try show all stacks */
 			show_state();
 			panic("could not handle IPI by all VCPUs\n");
 		}
-	}
+	} while (smp_load_acquire(&data->flags) & CSD_FLAG_LOCK);
 }
 
 void kvm_csd_lock(call_single_data_t *data)
 {
-	kvm_csd_lock_try_wait(data);
+	if (likely(!(smp_load_acquire(&data->flags) & CSD_FLAG_LOCK))) {
+		/* lock should be already released and in the host queue */
+		/* and need be unqueued or lock is free */
+		kvm_csd_lock_try_wait(data);
+	} else {
+		/* lock has been taken and need wait for release */
+		kvm_csd_lock_wait(data);
+	}
 
 	/*
 	 * prevent CPU from reordering the above assignment
@@ -212,6 +217,7 @@ void kvm_setup_local_apic_virq(unsigned int cpuid)
 }
 void kvm_startup_local_apic_virq(unsigned int cpuid)
 {
+	kvm_setup_secondary_lapic_virq(cpuid);
 	setup_secondary_APIC_clock();
 	store_cpu_info(cpuid);
 
@@ -232,10 +238,5 @@ void kvm_startup_epic_virq(unsigned int cpuid)
 	/* complete creation of idle task fot this virtual CPU */
 	init_idle(current, cpuid);
 }
-
-static __init int kvm_setup_boot_pic_virq(void)
-{
-	return kvm_setup_boot_local_pic_virq();
-}
-early_initcall(kvm_setup_boot_pic_virq);
 #endif
+

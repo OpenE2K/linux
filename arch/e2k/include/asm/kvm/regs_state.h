@@ -28,35 +28,35 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-#define	DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V2(gregs)			\
-		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V2, GUEST_GREGS_MASK)
+#define	DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V3(gregs)			\
+		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V3, GUEST_GREGS_MASK)
 #define	DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V5(gregs)			\
 		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V5, GUEST_GREGS_MASK)
 
-#define	DO_SAVE_GREGS_EXCEPT_HOST_V2(gregs)			\
-		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V2, GUEST_GREGS_MASK)
+#define	DO_SAVE_GREGS_EXCEPT_HOST_V3(gregs)			\
+		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V3, GUEST_GREGS_MASK)
 #define	DO_SAVE_GREGS_EXCEPT_HOST_V5(gregs)			\
 		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V5, GUEST_GREGS_MASK)
 
-#define	DO_SAVE_GUEST_LOCAL_GREGS_EXCEPT_KERNEL_V2(gregs)		\
-		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V2,		\
+#define	DO_SAVE_GUEST_LOCAL_GREGS_EXCEPT_KERNEL_V3(gregs)		\
+		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V3,		\
 			GLOBAL_GREGS_USER_MASK | GUEST_GREGS_MASK)
 #define	DO_SAVE_GUEST_LOCAL_GREGS_EXCEPT_KERNEL_V5(gregs)		\
 		DO_SAVE_GREGS_ON_MASK(gregs, E2K_ISET_V5,		\
 			GLOBAL_GREGS_USER_MASK | GUEST_GREGS_MASK)
 
-#define	DO_RESTORE_GUEST_GREGS_EXCEPT_KERNEL_V2(gregs)			\
-		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V2, GUEST_GREGS_MASK)
+#define	DO_RESTORE_GUEST_GREGS_EXCEPT_KERNEL_V3(gregs)			\
+		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V3, GUEST_GREGS_MASK)
 #define	DO_RESTORE_GUEST_GREGS_EXCEPT_KERNEL_V5(gregs)			\
 		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V5, GUEST_GREGS_MASK)
 
-#define	DO_RESTORE_GREGS_EXCEPT_HOST_V2(gregs)				\
-		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V2, GUEST_GREGS_MASK)
+#define	DO_RESTORE_GREGS_EXCEPT_HOST_V3(gregs)				\
+		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V3, GUEST_GREGS_MASK)
 #define	DO_RESTORE_GREGS_EXCEPT_HOST_V5(gregs)				\
 		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V5, GUEST_GREGS_MASK)
 
-#define	DO_RESTORE_GUEST_LOCAL_GREGS_EXCEPT_KERNEL_V2(gregs)		\
-		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V2,		\
+#define	DO_RESTORE_GUEST_LOCAL_GREGS_EXCEPT_KERNEL_V3(gregs)		\
+		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V3,		\
 			GLOBAL_GREGS_USER_MASK | GUEST_GREGS_MASK)
 #define	DO_RESTORE_GUEST_LOCAL_GREGS_EXCEPT_KERNEL_V5(gregs)		\
 		DO_RESTORE_GREGS_ON_MASK(gregs, E2K_ISET_V5,		\
@@ -69,9 +69,9 @@
 		(machine.host.restore_guest_gregs(gregs))
 #elif	CONFIG_E2K_ISET_VER < 5
 #define	SAVE_GUEST_GREGS_EXCEPT_KERNEL(gregs)				\
-		DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V2((gregs)->g)
+		DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V3((gregs)->g)
 #define	RESTORE_GUEST_GREGS_EXCEPT_KERNEL(gregs)			\
-		DO_RESTORE_GUEST_GREGS_EXCEPT_KERNEL_V2((gregs)->g)
+		DO_RESTORE_GUEST_GREGS_EXCEPT_KERNEL_V3((gregs)->g)
 #else	/* CONFIG_E2K_ISET_VER >= 5 */
 #define	SAVE_GUEST_GREGS_EXCEPT_KERNEL(gregs)				\
 		DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V5((gregs)->g)
@@ -251,22 +251,6 @@
 							__gregs->g);	\
 		if (save_upsr) {					\
 			SAVE_GUEST_USER_UPSR_AT_GTI(__ti, __gti);	\
-		}							\
-	}								\
-})
-#define	RESTORE_GUEST_USER_REGS_AT_TI(thread_info, gthread_info, restore_upsr) \
-({									\
-	thread_info_t *__ti = (thread_info);				\
-	gthread_info_t *__gti = (gthread_info);				\
-	host_gregs_t *__greg_pair = &__ti->h_gregs;			\
-	global_regs_t *__gregs = &__gti->gregs;				\
-									\
-	if (test_ti_thread_flag(__ti, TIF_VIRTUALIZED_GUEST)) {		\
-		RESTORE_GUEST_KERNEL_GREGS_AT_TI(__ti, __gti, __gregs);	\
-		RESTORE_GUEST_HOST_GREGS_AT_TI(__greg_pair->g,		\
-							__gregs->g);	\
-		if (restore_upsr) {					\
-			RESTORE_GUEST_USER_UPSR_AT_TI(__ti, __gti);	\
 		}							\
 	}								\
 })

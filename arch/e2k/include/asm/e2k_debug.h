@@ -32,7 +32,7 @@
 })
 
 extern void print_stack_frames(struct task_struct *task,
-		struct pt_regs *pt_regs, int show_reg_window) __cold;
+		const struct pt_regs *pt_regs, int show_reg_window) __cold;
 extern void print_mmap(struct task_struct *task) __cold;
 extern void print_va_tlb(e2k_addr_t addr, int large_page) __cold;
 extern void print_all_TC(const trap_cellar_t *TC, int TC_count) __cold;
@@ -85,6 +85,20 @@ typedef int (*parse_chain_fn_t)(e2k_mem_crs_t *crs,
 extern notrace long parse_chain_stack(int flags, struct task_struct *p,
 				parse_chain_fn_t func, void *arg);
 
+extern notrace int ____parse_chain_stack(int flags, struct task_struct *p,
+			parse_chain_fn_t func, void *arg, unsigned long delta_user,
+			unsigned long top, unsigned long bottom,
+			bool *interrupts_enabled, unsigned long *irq_flags);
+
+static inline int
+native_do_parse_chain_stack(int flags, struct task_struct *p,
+		parse_chain_fn_t func, void *arg, unsigned long delta_user,
+		unsigned long top, unsigned long bottom,
+		bool *interrupts_enabled, unsigned long *irq_flags)
+{
+	return ____parse_chain_stack(flags, p, func, arg, delta_user, top, bottom,
+					interrupts_enabled, irq_flags);
+}
 
 extern	void	*kernel_symtab;
 extern	long	kernel_symtab_size;
@@ -207,6 +221,23 @@ extern int print_window_regs;
 extern int debug_datastack;
 #endif
 
+#ifndef	CONFIG_KVM_GUEST_KERNEL
+/* it is native kernel without any virtualization */
+/* or it is native host kernel with virtualization support */
+/* or it is paravirtualized host and guest kernel */
+
+static inline int
+do_parse_chain_stack(int flags, struct task_struct *p,
+		parse_chain_fn_t func, void *arg, unsigned long delta_user,
+		unsigned long top, unsigned long bottom,
+		bool *interrupts_enabled, unsigned long *irq_flags)
+{
+	return native_do_parse_chain_stack(flags, p, func, arg, delta_user,
+						top, bottom,
+						interrupts_enabled, irq_flags);
+}
+#endif	/* !CONFIG_KVM_GUEST_KERNEL */
+
 #ifndef	CONFIG_VIRTUALIZATION
 /* it is native kernel without any virtualization */
 #define GET_PHYS_ADDR(task, addr)	NATIVE_GET_PHYS_ADDR(task, addr)
@@ -241,6 +272,16 @@ host_ftrace_stop(void)
 }
 static inline void
 host_ftrace_dump(void)
+{
+	return;
+}
+static inline void
+host_tracing_stop(void)
+{
+	return;
+}
+static inline void
+host_tracing_start(void)
 {
 	return;
 }
@@ -444,12 +485,11 @@ static inline void print_tc_state(const trap_cellar_t *tcellar, int num)
 	       " chan  = 0x%x, se   = 0x%x, pm  = 0x%x\n\n" 
 	       " fault_type = 0x%x:\n"
 	       "  intl_res_bits	   = %d MLT_trap         = %d\n"
-	       "  ph_pr_page	   = %d page_bound       = %d\n"
+	       "  ph_pr_page	   = %d global_sp        = %d\n"
 	       "  io_page          = %d isys_page        = %d\n"
 	       "  prot_page        = %d priv_page        = %d\n"
 	       "  illegal_page     = %d nwrite_page      = %d\n"
 	       "  page_miss        = %d ph_bound         = %d\n"
-	       "  global_sp        = %d\n\n"
 	       " miss_lvl = 0x%x, num_align = 0x%x, empt    = 0x%x\n"
 	       " clw      = 0x%x, rcv       = 0x%x  dst_rcv = 0x%x\n"
 	       "----------------------------------------------------"
@@ -471,12 +511,11 @@ static inline void print_tc_state(const trap_cellar_t *tcellar, int num)
 	       (u32)AS(tcellar->condition).pm,
 	       (u32)AS(tcellar->condition).fault_type,
 	       (u32)AS(ftype).intl_res_bits,	(u32)(AS(ftype).exc_mem_lock),
-	       (u32)AS(ftype).ph_pr_page,	(u32)AS(ftype).page_bound,
+	       (u32)AS(ftype).ph_pr_page,	(u32)AS(ftype).global_sp,
 	       (u32)AS(ftype).io_page,		(u32)AS(ftype).isys_page,
 	       (u32)AS(ftype).prot_page,	(u32)AS(ftype).priv_page,
 	       (u32)AS(ftype).illegal_page,	(u32)AS(ftype).nwrite_page,
 	       (u32)AS(ftype).page_miss,	(u32)AS(ftype).ph_bound,
-	       (u32)AS(ftype).global_sp,
 	       (u32)AS(tcellar->condition).miss_lvl, 
 	       (u32)AS(tcellar->condition).num_align, 
 	       (u32)AS(tcellar->condition).empt, 
@@ -605,7 +644,7 @@ static inline int set_hardware_data_breakpoint(u64 addr, u64 size,
 		e2k_dibcr_t dibcr;
 
 		dibcr = READ_DIBCR_REG();
-		AS(dibcr).stop = 1;
+		dibcr.stop = 1;
 		WRITE_DIBCR_REG(dibcr);
 	}
 
@@ -744,17 +783,16 @@ print_aau_regs(char *str, e2k_aau_t *context, struct pt_regs *regs,
 		"ctpr2          = 0x%llx\n"
 		"lsr            = 0x%llx\n"
 		"ilcr           = 0x%llx\n",
-		AW(context->aasr),
-		AAU_NULL(context->aasr) ? "NULL" :
-		AAU_READY(context->aasr) ? "READY" :
-		AAU_ACTIVE(context->aasr) ? "ACTIVE" :
-		AAU_STOPPED(context->aasr) ? "STOPPED":
+		AW(regs->aasr),
+		AAU_NULL(regs->aasr) ? "NULL" :
+		AAU_READY(regs->aasr) ? "READY" :
+		AAU_ACTIVE(regs->aasr) ? "ACTIVE" :
+		AAU_STOPPED(regs->aasr) ? "STOPPED" :
 						"undefined",
-		AS(context->aasr).iab,
-		AS(context->aasr).stb,
+		regs->aasr.iab, regs->aasr.stb,
 		AW(regs->ctpr2), regs->lsr, regs->ilcr);
 
-	if (AAU_STOPPED(context->aasr)) {
+	if (AAU_STOPPED(regs->aasr)) {
 		pr_info("aaldv          = 0x%llx\n"
 			"aaldm          = 0x%llx\n",
 			AW(context->aaldv), AW(context->aaldm));
@@ -765,7 +803,7 @@ print_aau_regs(char *str, e2k_aau_t *context, struct pt_regs *regs,
 			"AALDM will not be printed\n");
 	}
 
-	if (AS(context->aasr).iab) {
+	if (regs->aasr.iab) {
 		for (i = 0; i < 32; i++) {
 			pr_info("aad[%d].hi = 0x%llx ", i,
 					AW(context->aads[i]).hi);
@@ -792,7 +830,7 @@ print_aau_regs(char *str, e2k_aau_t *context, struct pt_regs *regs,
 			"AAINCR, AAINCR_TAGS\n");
 	}
 
-	if (AS(context->aasr).stb) {
+	if (regs->aasr.stb) {
 		for (i = 0; i < 16; i++) {
 			pr_info("aasti[%d] = 0x%llx\n", i, (old_iset) ?
 					(u64) (u32) context->aastis[i] :
@@ -833,6 +871,18 @@ do { \
 		pr_info("%s (pid=%d): " format, \
 				current->comm, current->pid, ##__VA_ARGS__); \
 } while (0)
+
+extern void __debug_signal_print(const char *message,
+		struct pt_regs *regs, bool print_stack) __cold;
+
+static inline void debug_signal_print(const char *message,
+		struct pt_regs *regs, bool print_stack)
+{
+	if (likely(!debug_signal))
+		return;
+
+	__debug_signal_print(message, regs, print_stack);
+}
 
 extern int debug_trap;
 

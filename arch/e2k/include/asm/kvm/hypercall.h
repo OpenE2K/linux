@@ -38,9 +38,9 @@
 
 #include <asm/e2k_api.h>
 #include <asm/cpu_regs_types.h>
-#include <asm/machdep.h>
 #include <asm/trap_def.h>
 #include <asm/kvm/guest/cpu.h>
+#include <asm/kvm/proc_context_types.h>
 
 #ifdef	CONFIG_KVM_GUEST_HW_HCALL
 extern unsigned long light_hw_hypercall(unsigned long nr,
@@ -247,6 +247,20 @@ static inline unsigned long generic_hypercall6(unsigned long nr,
 #define	KVM_HCALL_SWITCH_TO_EXPANDED_PROC_STACK	31
 /* notify host kernel aboout switch to updated procedure chain stack on guest */
 #define	KVM_HCALL_SWITCH_TO_EXPANDED_CHAIN_STACK 32
+/* return back to guest user from fast syscall handler */
+#define KVM_HCALL_RETURN_FROM_FAST_SYSCALL	33
+/* change return ip in user stack */
+#define KVM_HCALL_SET_RETURN_USER_IP		34
+#define KVM_HCALL_TRACING_START			35
+#define	KVM_HCALL_TRACING_STOP			36
+/* fast guest kernel tagged memory copy */
+#define	KVM_HCALL_FAST_KERNEL_TAGGED_MEMORY_COPY 40
+/* fast guest kernel tagged memory set */
+#define	KVM_HCALL_FAST_KERNEL_TAGGED_MEMORY_SET  41
+/* update last 2 frmaes on guest kernel stack */
+#define KVM_HCALL_UPDATE_GUEST_KERNEL_CRS	42
+
+#define KVM_LIGHT_HCALLS_NUM			43
 
 typedef struct kvm_hw_stacks_flush {
 	unsigned long psp_lo;
@@ -396,7 +410,6 @@ HYPERVISOR_inject_interrupt(void)
 {
 	return light_hypercall0(KVM_HCALL_INJECT_INTERRUPT);
 }
-extern unsigned long kvm_hypervisor_inject_interrupt(void);
 static inline unsigned long
 HYPERVISOR_virqs_handled(void)
 {
@@ -473,6 +486,53 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 			delta_size, delta_offset, (unsigned long)decr_gk_pcs);
 }
 
+static inline unsigned long
+HYPERVISOR_return_from_fast_syscall(long ret_val)
+{
+	return light_hypercall1(KVM_HCALL_RETURN_FROM_FAST_SYSCALL, ret_val);
+}
+
+static inline unsigned long
+HYPERVISOR_set_return_user_ip(u64 gti, u64 ip, int flags)
+{
+	return light_hypercall3(KVM_HCALL_SET_RETURN_USER_IP, gti,
+				ip, flags);
+}
+static inline void
+HYPERVISOR_tracing_start(void)
+{
+	light_hypercall0(KVM_HCALL_TRACING_START);
+}
+static inline void
+HYPERVISOR_tracing_stop(void)
+{
+	light_hypercall0(KVM_HCALL_TRACING_STOP);
+}
+static inline unsigned long
+HYPERVISOR_fast_kernel_tagged_memory_copy(void *dst, const void *src, size_t len,
+			unsigned long strd_opcode, unsigned long ldrd_opcode,
+			int prefetch)
+{
+	return light_hypercall6(KVM_HCALL_FAST_KERNEL_TAGGED_MEMORY_COPY,
+			(unsigned long)dst, (unsigned long)src,
+			len, strd_opcode, ldrd_opcode, prefetch);
+}
+static inline unsigned long
+HYPERVISOR_fast_kernel_tagged_memory_set(void *addr, u64 val, u64 tag, size_t len,
+					 u64 strd_opcode)
+{
+	return light_hypercall5(KVM_HCALL_FAST_KERNEL_TAGGED_MEMORY_SET,
+			(unsigned long)addr, val, tag, len, strd_opcode);
+}
+static inline unsigned long
+HYPERVISOR_update_guest_kernel_crs(e2k_mem_crs_t *crs, e2k_mem_crs_t *prev_crs,
+				e2k_mem_crs_t *p_prev_crs)
+{
+	return light_hypercall3(KVM_HCALL_UPDATE_GUEST_KERNEL_CRS,
+			(unsigned long)crs, (unsigned long)prev_crs,
+			(unsigned long)p_prev_crs);
+}
+
 /*
  * KVM hypervisor (host) <-> guest generic hypercalls list
  */
@@ -488,6 +548,9 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 #define	KVM_HCALL_COMPLETE_LONG_JUMP	12	/* long jump completion */
 #define	KVM_HCALL_LAUNCH_SIG_HANDLER	14	/* launch guest user signal */
 						/* handler */
+#define	KVM_HCALL_APPLY_USD_BOUNDS	15	/* update user data */
+						/* stack pointers after stack */
+						/* bounds handling */
 #define	KVM_HCALL_SWITCH_TO_VIRT_MODE	16	/* switch from physical to */
 						/* virtual addresses mode */
 						/* (enable paging, TLB, TLU) */
@@ -607,10 +670,7 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 						/* value and tag to global */
 						/* register */
 #define	KVM_HCALL_MOVE_TAGGED_GUEST_DATA 114	/* move data value from to */
-#define	KVM_HCALL_FAST_TAGGED_GUEST_MEMORY_COPY 115
-						/* fast tagged memory copy */
-#define	KVM_HCALL_FAST_TAGGED_GUEST_MEMORY_SET  116
-						/* fast tagged memory set */
+#define	KVM_HCALL_COPY_IN_USER_WITH_TAGS 115	/* tagged guest memory copy */
 #define	KVM_HCALL_FAST_TAGGED_MEMORY_COPY 117	/* fast tagged memory copy */
 #define	KVM_HCALL_FAST_TAGGED_MEMORY_SET  118	/* fast tagged memory set */
 #define	KVM_HCALL_SHUTDOWN		120	/* shutdown of guest */
@@ -619,6 +679,10 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 #define	KVM_HCALL_FTRACE_DUMP		123	/* dump host's ftrace buffer */
 #define	KVM_HCALL_DUMP_COMPLETION	125	/* show state or dump all */
 						/* stacks is completed */
+#define	KVM_HCALL_FAST_TAGGED_MEMORY_COPY_USER 127 /* fast tagged memory copy */
+						   /* to/from user */
+#define	KVM_HCALL_FAST_TAGGED_MEMORY_SET_USER  128 /* fast tagged memory set */
+						   /* at user */
 
 #define	KVM_HCALL_HOST_PRINTK		130	/* guest printk() on host */
 #define	KVM_HCALL_PRINT_GUEST_KERNEL_PTES 131	/* dump guest kernel address */
@@ -629,10 +693,10 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 #define KVM_HCALL_PV_ENABLE_ASYNC_PF		133 /* enable async pf */
 						    /* on current vcpu */
 #endif /* CONFIG_KVM_ASYNC_PF */
-#define KVM_HCALL_FLUSH_TLB_RANGE	134 /* sync given address range */
-					/* in page tables and flush tlb */
-#define KVM_HCALL_SYNC_ADDR_RANGE	135 /* sync ptes in page */
-					/* tables without flushing tlb */
+#define KVM_HCALL_MMU_PV_FLUSH_TLB	134	/* sync host's shadow PTs */
+						/* and flush tlb */
+#define KVM_HCALL_SYNC_ADDR_RANGE	135	/* sync host's shadow PTs */
+						/* without flushing tlb */
 #define	KVM_HCALL_GET_SPT_TRANSLATION	137	/* get full translation of guest */
 						/* address at shadow PTs */
 #define	KVM_HCALL_RECOVERY_FAULTED_TAGGED_STORE 141
@@ -648,6 +712,17 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 						/* recovery faulted load */
 						/* value and tag to global */
 						/* register */
+#define KVM_HCALL_PREPARE_MKCTXT_HW_USER_STACKS	145
+
+#define KVM_HCALL_ADD_CTX_SIGNAL_STACK		146
+						/* create separate */
+						/* signal stack for context */
+						/* on host side */
+#define KVM_HCALL_REMOVE_CTX_SIGNAL_STACK	147
+						/* remove signal stack for */
+						/* context on host side */
+
+#define KVM_GENERIC_HCALLS_NUM			148
 
 
 /*
@@ -821,7 +896,7 @@ typedef struct vcpu_gmmu_info {
 	bool		sep_virt_space;	/* guest use separate PTs for */
 					/* OS and user virtual spaces */
 	bool		pt_v6;		/* guest PTs are of v6 format */
-	unsigned long	mmu_cr;		/* MMU control register */
+	e2k_mmu_cr_t	mmu_cr;		/* MMU control register */
 	unsigned long	pid;		/* MMU PID (context) register */
 	unsigned long	trap_cellar;	/* MMU trap cellar base */
 	unsigned long	u_pptb;		/* physical base of user (for */
@@ -863,10 +938,13 @@ HYPERVISOR_set_clockevent(unsigned long delta)
 }
 
 static inline unsigned long
-HYPERVISOR_complete_long_jump(kvm_long_jump_info_t *regs_state)
+HYPERVISOR_complete_long_jump(kvm_long_jump_info_t *regs_state,
+				bool switch_stack, u64 to_key)
 {
-	return generic_hypercall1(KVM_HCALL_COMPLETE_LONG_JUMP,
-				  (unsigned long)regs_state);
+	return generic_hypercall3(KVM_HCALL_COMPLETE_LONG_JUMP,
+				(unsigned long)regs_state,
+				(unsigned long)switch_stack,
+				(unsigned long)to_key);
 }
 
 static inline unsigned long
@@ -892,6 +970,14 @@ HYPERVISOR_apply_pcsp_bounds(unsigned long base, unsigned long size,
 	return generic_hypercall5(KVM_HCALL_APPLY_PCSP_BOUNDS,
 				base, size, start, end, delta);
 }
+
+static inline unsigned long
+HYPERVISOR_apply_usd_bounds(unsigned long top, unsigned long delta, bool incr)
+{
+	return generic_hypercall3(KVM_HCALL_APPLY_USD_BOUNDS,
+				  top, delta, incr);
+}
+
 static inline unsigned long
 HYPERVISOR_correct_trap_return_ip(unsigned long return_ip)
 {
@@ -1181,20 +1267,11 @@ HYPERVISOR_move_tagged_guest_data(int word_size,
 				word_size, addr_from, addr_to);
 }
 static inline unsigned long
-HYPERVISOR_fast_tagged_guest_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+HYPERVISOR_copy_in_user_with_tags(void __user *dst, const void __user *src,
+					unsigned long size)
 {
-	return generic_hypercall6(KVM_HCALL_FAST_TAGGED_GUEST_MEMORY_COPY,
-			(unsigned long)dst, (unsigned long)src,
-			len, strd_opcode, ldrd_opcode, prefetch);
-}
-static inline unsigned long
-HYPERVISOR_fast_tagged_guest_memory_set(void *addr, u64 val, u64 tag,
-		size_t len, u64 strd_opcode)
-{
-	return generic_hypercall5(KVM_HCALL_FAST_TAGGED_GUEST_MEMORY_SET,
-			(unsigned long)addr, val, tag, len, strd_opcode);
+	return generic_hypercall3(KVM_HCALL_COPY_IN_USER_WITH_TAGS,
+			(unsigned long)dst, (unsigned long)src, size);
 }
 
 static inline unsigned long
@@ -1490,11 +1567,32 @@ HYPERVISOR_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
 			len, strd_opcode, ldrd_opcode, prefetch);
 }
 static inline unsigned long
+HYPERVISOR_fast_tagged_memory_copy_user(void *dst, const void *src,
+		size_t len, size_t *copied,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	return generic_hypercall6(KVM_HCALL_FAST_TAGGED_MEMORY_COPY_USER,
+			(unsigned long)dst, (unsigned long)src,
+			len, (unsigned long)copied,
+			strd_opcode |
+				LDST_PREFETCH_FLAG_SET((unsigned long)!!prefetch),
+			ldrd_opcode);
+}
+static inline unsigned long
 HYPERVISOR_fast_tagged_memory_set(void *addr, u64 val, u64 tag,
 		size_t len, u64 strd_opcode)
 {
 	return generic_hypercall5(KVM_HCALL_FAST_TAGGED_MEMORY_SET,
 			(unsigned long)addr, val, tag, len, strd_opcode);
+}
+static inline unsigned long
+HYPERVISOR_fast_tagged_memory_set_user(void *addr, u64 val, u64 tag,
+		size_t len, size_t *cleared, u64 strd_opcode)
+{
+	return generic_hypercall6(KVM_HCALL_FAST_TAGGED_MEMORY_SET_USER,
+			(unsigned long)addr, val, tag, len,
+			(unsigned long)cleared, strd_opcode);
 }
 #ifdef CONFIG_KVM_ASYNC_PF
 static inline int HYPERVISOR_pv_enable_async_pf(u64 apf_reason_gpa,
@@ -1505,11 +1603,45 @@ static inline int HYPERVISOR_pv_enable_async_pf(u64 apf_reason_gpa,
 					apf_ready_vector, irq_controller);
 }
 #endif /* CONFIG_KVM_ASYNC_PF */
-static inline unsigned long
-HYPERVISOR_flush_tlb_range(e2k_addr_t start_gva, e2k_addr_t end_gva)
+static inline int
+HYPERVISOR_prepare_mkctxt_hw_user_stacks(kvm_proc_ctxt_hw_stacks_t *hw_stacks)
 {
-	return generic_hypercall2(KVM_HCALL_FLUSH_TLB_RANGE,
-			start_gva, end_gva);
+	return generic_hypercall1(KVM_HCALL_PREPARE_MKCTXT_HW_USER_STACKS,
+				(unsigned long)hw_stacks);
+}
+
+
+/*
+ * The structure to flush guest virtual space at the host shadow PTs
+ */
+
+typedef enum mmu_flush_tlb_op {
+	undefined_tlb_op = 0,		/* undefined type of flush */
+	flush_all_tlb_op,		/* flush all TLB */
+	flush_mm_page_tlb_op,		/* flush a single page from TLB */
+	flush_tlb_range_tlb_op,		/* flush a range of pages */
+	flush_mm_tlb_op,		/* flush a specified user mapping */
+	flush_pmd_range_tlb_op,		/* same as a range of pages, but for pmd's */
+	flush_pt_range_tlb_op,		/* flush a range of pages and page tables */
+	flush_kernel_range_tlb_op,	/* flush a kernel range of pages */
+	flush_mm_range_tlb_op,		/* flush mm range of pages and page tables */
+} mmu_flush_tlb_op_t;
+
+typedef struct mmu_spt_flush {
+	mmu_flush_tlb_op_t	opc;	/* flush type (see above) */
+	int			gmm_id;	/* gmm ID */
+	unsigned long		start;	/* affress or start of range */
+	unsigned long		end;	/* end address of range */
+	unsigned long		stride;	/* step at pagw tables entries */
+	unsigned	levels_mask;	/* at which levels have been  */
+					/* cleared entries */
+} mmu_spt_flush_t;
+
+static inline unsigned long
+HYPERVISOR_mmu_pv_flush_tlb(mmu_spt_flush_t *flush_info)
+{
+	return generic_hypercall1(KVM_HCALL_MMU_PV_FLUSH_TLB,
+			(unsigned long)flush_info);
 }
 static inline void
 HYPERVISOR_sync_addr_range(e2k_addr_t start_gva, e2k_addr_t end_gva)
@@ -1536,6 +1668,19 @@ static inline unsigned long
 HYPERVISOR_wait_for_virq(int virq, bool in_progress)
 {
 	return generic_hypercall2(KVM_HCALL_WAIT_FOR_VIRQ, virq, in_progress);
+}
+
+static inline unsigned long
+HYPERVISOR_add_ctx_signal_stack(u64 key, bool is_main)
+{
+	return generic_hypercall2(KVM_HCALL_ADD_CTX_SIGNAL_STACK,
+				key, is_main);
+}
+
+static inline void
+HYPERVISOR_remove_ctx_signal_stack(u64 key)
+{
+	generic_hypercall1(KVM_HCALL_REMOVE_CTX_SIGNAL_STACK, key);
 }
 
 #endif /* _ASM_E2K_HYPERCALL_H */

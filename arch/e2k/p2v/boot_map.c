@@ -131,9 +131,8 @@ boot_get_huge_pte(e2k_addr_t virt_addr, pgprot_t *ptp, const pt_level_t *pt_leve
 			boot_get_pt_level_id(pt_level));
 		return (pte_t *)-1;
 	}
-	if (likely(pt_level->boot_get_huge_pte == NULL))
-		return (pte_t *)ptp;
-	return pt_level->boot_get_huge_pte(virt_addr, ptp);
+
+	return (pte_t *)ptp;
 }
 
 static inline bool
@@ -163,58 +162,8 @@ init_get_huge_pte(e2k_addr_t virt_addr, pgprot_t *ptp, const pt_level_t *pt_leve
 			get_pt_level_id(pt_level));
 		return (pte_t *)-1;
 	}
-	if (likely(pt_level->init_get_huge_pte == NULL))
-		return (pte_t *)ptp;
-	return pt_level->init_get_huge_pte(virt_addr, ptp);
-}
 
-pte_t * __init_recv
-boot_get_double_huge_pte(e2k_addr_t addr, pgprot_t *ptp)
-{
-	/*
-	 * In this case virtual page occupied two sequential
-	 * entries in page table directory level
-	 */
-
-	/* first pte is always even */
-	return (pte_t *)(((e2k_addr_t)ptp) & ~((sizeof(*ptp) * 2) - 1));
-}
-
-pte_t * __init_recv
-boot_get_common_huge_pte(e2k_addr_t addr, pgprot_t *ptp)
-{
 	return (pte_t *)ptp;
-}
-
-void __init_recv
-boot_set_double_pte(e2k_addr_t addr, pte_t *ptep, pte_t pte, bool host_map)
-{
-	/*
-	 * In this case virtual page occupied two sequential
-	 * entries in page table directory level
-	 * All two pte's (pmd's) should be set to identical
-	 * entries
-	 */
-	DebugMAV("boot_set_double_pte() will set pte 0x%px to 0x%lx for "
-		"address 0x%lx %s mapping\n",
-		ptep, pte_val(pte), addr,
-		(host_map) ? "host" : "native");
-
-	/* first pte is always even */
-	ptep = (pte_t *)(((e2k_addr_t)ptep) & ~((sizeof(*ptep) * 2) - 1));
-
-	boot_set_pte_kernel(addr, ptep, pte);
-	boot_set_pte_kernel(addr, ++ptep, pte);
-}
-
-void __init_recv
-boot_set_common_pte(e2k_addr_t addr, pte_t *ptep, pte_t pte, bool host_map)
-{
-	DebugMAV("boot_set_common_pte() will set pte 0x%px to 0x%lx for "
-		"address 0x%lx %s mapping\n",
-		ptep, pte_val(pte), addr,
-		(host_map) ? "host" : "native");
-	boot_set_pte_kernel(addr, ptep, pte);
 }
 
 static inline __init_recv void
@@ -226,27 +175,17 @@ boot_set_pte(e2k_addr_t addr, pte_t *ptep, pte_t pte, const pt_level_t *pt_level
 			"table entries (pte)\n",
 			boot_get_pt_level_id(pt_level));
 	}
+
 	if (pt_level->is_huge)
 		pte = pte_set_large_size(pte);
 	else
 		pte = pte_set_small_size(pte);
-	if (pt_level->boot_set_pte != NULL) {
-		pt_level->boot_set_pte(addr, ptep, pte, host_map);
-	} else {
-		boot_set_common_pte(addr, ptep, pte, host_map);
-	}
-}
 
-pte_t * __init_recv
-init_get_double_huge_pte(e2k_addr_t addr, pgprot_t *ptp)
-{
-	return boot_get_double_huge_pte(addr, ptp);
-}
-
-pte_t * __init_recv
-init_get_common_huge_pte(e2k_addr_t addr, pgprot_t *ptp)
-{
-	return boot_get_common_huge_pte(addr, ptp);
+	DebugMAV("boot_set_pte() will set pte 0x%px to 0x%lx for "
+		"address 0x%lx %s mapping\n",
+		ptep, pte_val(pte), addr,
+		(host_map) ? "host" : "native");
+	boot_set_pte_kernel(addr, ptep, pte);
 }
 
 /*
@@ -308,26 +247,6 @@ init_get_pte(e2k_addr_t virt_addr, const pt_level_t *pt_level)
 	return ptep;
 }
 
-void __init_recv
-init_double_pte_clear(pte_t *ptep)
-{
-	/*
-	 * In this case virtual page occupied two sequential
-	 * entries in page table directory level
-	 * All two pte's (ptd's) should be cleared
-	 */
-	/* first pte is always even */
-	ptep = (pte_t *)(((e2k_addr_t)ptep) & ~((sizeof(*ptep) * 2) - 1));
-
-	pte_clear_kernel(ptep);
-	pte_clear_kernel(++ptep);
-}
-void __init_recv
-init_common_pte_clear(pte_t *ptep)
-{
-	pte_clear_kernel(ptep);
-}
-
 static void inline
 init_pte_clear(pte_t *ptep, const pt_level_t *pt_level)
 {
@@ -336,11 +255,8 @@ init_pte_clear(pte_t *ptep, const pt_level_t *pt_level)
 			"table entries (pte)\n",
 			get_pt_level_id(pt_level));
 	}
-	if (pt_level->init_pte_clear != NULL) {
-		pt_level->init_pte_clear(ptep);
-	} else {
-		init_common_pte_clear(ptep);
-	}
+
+	pte_clear_kernel(ptep);
 }
 
 #ifdef	CONFIG_NUMA
@@ -732,8 +648,8 @@ boot_tlb_contents_simul_init(e2k_tlb_t *tlb)
 	int	line;
 	int	set;
 
-	for (line = 0; line < BOOT_NATIVE_TLB_LINES_NUM; line++) {
-		for (set = 0; set < BOOT_NATIVE_TLB_SETS_NUM; set++) {
+	for (line = 0; line < NATIVE_TLB_LINES_NUM; line++) {
+		for (set = 0; set < NATIVE_TLB_SETS_NUM; set++) {
 			tlb->lines[line].sets[set].virt_addr = 0;
 			tlb->lines[line].sets[set].valid_bit = 0;
 		}
@@ -1044,7 +960,7 @@ boot_find_equal_addr_tlb(e2k_addr_t address, e2k_tlb_t *tlb,
 			"entries_num is %d, return (1)\n", tlb->entries_num);
 		return (1);
 	}
-	line = BOOT_VADDR_TO_TLB_LINE_NUM(address, large_page_flag);
+	line = VADDR_TO_TLB_LINE_NUM(address, large_page_flag);
 	tlb_line = &tlb->lines[line];
 	DebugME("boot_find_equal_addr_tlb() TLB line is %d\n", line);
 	if (tlb_line->sets_num == 0) {
@@ -1151,7 +1067,7 @@ boot_get_tlb_empty_set(e2k_addr_t address, e2k_tlb_t *tlb,
 	DebugME("boot_get_tlb_empty_set() started for addr 0x%lx "
 		"large page flag is %d\n",
 		address, large_page_flag);
-	line = BOOT_VADDR_TO_TLB_LINE_NUM(address, large_page_flag);
+	line = VADDR_TO_TLB_LINE_NUM(address, large_page_flag);
 	tlb_line = &tlb->lines[line];
 	DebugME("boot_get_tlb_empty_set() TLB line is %d occupied sets "
 		"num is %d\n",
@@ -1217,7 +1133,7 @@ boot_write_pte_to_tlb(pte_t pte, tlb_tag_t prot_flags, e2k_addr_t virt_addr,
 	 * Create and write tag to the matching TLB tag register 
 	 */
 	tlb_addr = tlb_addr_tag_access;
-	tlb_addr = boot_tlb_addr_set_vaddr_line_num(tlb_addr, virt_addr,
+	tlb_addr = tlb_addr_set_vaddr_line_num(tlb_addr, virt_addr,
 			large_page_flag);
 	set_num = boot_get_tlb_empty_set(virt_addr, tlb, pt_level);
 	if (set_num < 0) {
@@ -1225,7 +1141,7 @@ boot_write_pte_to_tlb(pte_t pte, tlb_tag_t prot_flags, e2k_addr_t virt_addr,
 				virt_addr);
 		return (1);
 	}
-	tlb_addr = boot_tlb_addr_set_set_num(tlb_addr, set_num);
+	tlb_addr = tlb_addr_set_set_num(tlb_addr, set_num);
 	tlb_tag = mk_tlb_tag_vaddr(virt_addr, prot_flags);
 	write_DTLB_tag_reg(tlb_addr, tlb_tag);
 

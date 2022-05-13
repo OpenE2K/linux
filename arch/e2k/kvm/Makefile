@@ -19,10 +19,13 @@ kvm-$(CONFIG_KVM_HOST_MODE)	+= pt-structs.o switch.o \
 				   irq_comm.o timer.o virq.o io.o \
 				   user_area.o nid.o vmid.o gpid.o \
 				   hypercalls.o process.o ttable.o \
-				   trap_table.o cpu.o mm.o mmu_flush.o \
+				   trap_table.o cpu.o mm.o mmu-flush.o \
 				   boot_spinlock.o spinlock.o \
 				   runstate.o complete.o \
-				   sic-nbsr.o lt.o spmc.o gaccess.o debug.o
+				   sic-nbsr.o lt.o spmc.o gaccess.o debug.o \
+				   proc_context_stacks.o ctx_signal_stacks.o
+kvm-$(CONFIG_KVM_GVA_CACHE)	+= gva_cache.o
+kvm-$(CONFIG_KVM_GVA_CACHE_STAT) += gva_cache_stat.o
 kvm-y				+= kvm-e2k.o
 obj-y				+= cpu/
 
@@ -44,11 +47,12 @@ CFLAGS_REMOVE_ttable.o := -fprofile-generate-kernel
 # -fno-dam - hardware bug 124206 workaround
 CFLAGS_REMOVE_hv_cpu.o = $(CFLAGS_ALL_CPUS)
 CFLAGS_hv_cpu.o := -march=elbrus-v6 -fexclude-ctpr2 -fno-dam
-CFLAGS_REMOVE_intercepts.o = $(CFLAGS_ALL_CPUS)
-CFLAGS_intercepts.o := -march=elbrus-v6
+CFLAGS_REMOVE_hv_intercepts.o = $(CFLAGS_ALL_CPUS)
+CFLAGS_hv_intercepts.o := -march=elbrus-v6
 
-kvm-$(CONFIG_KVM_HW_VIRTUALIZATION) += hv_cpu.o hv_mmu.o intercepts.o
+kvm-$(CONFIG_KVM_HW_VIRTUALIZATION) += hv_cpu.o hv_mmu.o hv_intercepts.o
 
+kvm-y += intercepts.o
 ifeq ($(CONFIG_KVM_PARAVIRTUALIZATION),y)
 kvm-y += mmu-pv.o
 ifeq ($(CONFIG_KVM_SHADOW_PT_ENABLE),y)
@@ -56,7 +60,18 @@ kvm-y += mmu-pv-spt.o
 endif	# CONFIG_KVM_SHADOW_PT_ENABLE
 endif	# CONFIG_KVM_PARAVIRTUALIZATION
 
-kvm-$(CONFIG_KVM_HV_MMU) += mmu-e2k.o page_track.o
+ifeq ($(CONFIG_DYNAMIC_PT_STRUCT),y)
+kvm-y	+= mmu-pt-dynamic.o
+else	# !CONFIG_DYNAMIC_PT_STRUCT
+kvm-y	+= mmu-pt-v3.o
+kvm-y	+= mmu-pt-v5.o
+kvm-y	+= mmu-pt-v6.o
+kvm-y	+= mmu-pt-v6-v5.o
+kvm-y	+= mmu-pt-v6-gp.o
+endif	# CONFIG_DYNAMIC_PT_STRUCT
+
+kvm-$(CONFIG_KVM_HV_MMU) += mmu-e2k.o
+kvm-$(CONFIG_KVM_HV_MMU) += page_track.o
 
 endif	# CONFIG_KVM_HOST_MODE
 

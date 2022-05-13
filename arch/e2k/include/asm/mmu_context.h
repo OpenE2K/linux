@@ -58,9 +58,6 @@ extern unsigned long		mmu_last_context;
 #define my_cpu_last_context1(num_cpu)	mmu_last_context
 #endif /* CONFIG_SMP */
 
-extern int arch_dup_mmap(struct mm_struct *oldmm, struct mm_struct *mm);
-extern void arch_exit_mmap(struct mm_struct *mm);
-
 static inline void
 reload_context_mask(unsigned long mask)
 {
@@ -159,29 +156,11 @@ reload_mmu_context(struct mm_struct *mm)
 	reload_context_mask(ctx);
 	raw_all_irq_restore(flags);
 }
-static inline void
-invalidate_mmu_context(struct mm_struct *mm)
-{
-	int cpu = raw_smp_processor_id();
-#ifdef CONFIG_SMP
-	/*
-	 * Remove this cpu from mm_cpumask. This might be
-	 * needed, for example, after sys_io_setup() if the
-	 * kernel thread which was using this mm received
-	 * flush ipi (unuse_mm() does not clear mm_cpumask).
-	 * And maybe there are other such places where
-	 * a kernel thread uses user mm.
-	 */
-	cpumask_clear_cpu(cpu, mm_cpumask(mm));
-#endif
-	mm->context.cpumsk[cpu] = 0;
-}
 
-extern	inline void
+static inline void
 enter_lazy_tlb (struct mm_struct *mm, struct task_struct *tsk)
 {
 }
-
 
 extern int __init_new_context(struct task_struct *p, struct mm_struct *mm,
 		mm_context_t *context);
@@ -246,7 +225,8 @@ reload_root_pgd(pgd_t *pgd)
 #endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 	}
 }
-extern	inline void
+
+static inline void
 reload_root_pt(struct mm_struct *mm)
 {
 	pgd_t *pgd;
@@ -260,6 +240,7 @@ reload_root_pt(struct mm_struct *mm)
 	}
 	reload_root_pgd(pgd);
 }
+
 /*
  * Force the kernel root page table pointer reload.
  */
@@ -464,15 +445,12 @@ set_kernel_MMU_state(void)
 }
 
 #ifdef	CONFIG_SECONDARY_SPACE_SUPPORT
-extern	inline void
-set_secondary_space_MMU_state(void)
+static inline void set_secondary_space_MMU_state(void)
 {
-	unsigned long mmu_cr;
-
-	mmu_cr = get_MMU_CR();
-	mmu_cr |= _MMU_CR_UPT_EN;
+	e2k_mmu_cr_t mmu_cr = get_MMU_CR();
+	mmu_cr.upt = 1;
 	if (machine.native_iset_ver >= E2K_ISET_V5)
-		mmu_cr |= _MMU_CR_SNXE;
+		mmu_cr.snxe = 1;
 	set_MMU_CR(mmu_cr);
 }
 #else	/* ! CONFIG_SECONDARY_SPACE_SUPPORT */

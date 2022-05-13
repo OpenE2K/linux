@@ -26,51 +26,53 @@
  * Trap Info Register: the numbers of exceptions
  */
 
-#define	exc_illegal_opcode_num		0	/* 00 */
-#define	exc_priv_action_num		1	/* 01 */
-#define	exc_fp_disabled_num		2	/* 02 */
-#define	exc_fp_stack_u_num		3	/* 03 */
-#define	exc_d_interrupt_num		4	/* 04 */
-#define	exc_diag_ct_cond_num		5	/* 05 */
-#define	exc_diag_instr_addr_num		6	/* 06 */
-#define	exc_illegal_instr_addr_num	7	/* 07 */
-#define	exc_instr_debug_num		8	/* 08 */
-#define	exc_window_bounds_num		9	/* 09 */
-#define	exc_user_stack_bounds_num	10	/* 10 */
-#define	exc_proc_stack_bounds_num	11	/* 11 */
-#define	exc_chain_stack_bounds_num	12	/* 12 */
-#define	exc_fp_stack_o_num		13	/* 13 */
-#define	exc_diag_cond_num		14	/* 14 */
-#define	exc_diag_operand_num		15	/* 15 */
-#define	exc_illegal_operand_num		16	/* 16 */
-#define	exc_array_bounds_num		17	/* 17 */
-#define	exc_access_rights_num		18	/* 18 */
-#define	exc_addr_not_aligned_num	19	/* 19 */
-#define	exc_instr_page_miss_num		20	/* 20 */
-#define	exc_instr_page_prot_num		21	/* 21 */
-#define	exc_ainstr_page_miss_num	22	/* 22 */
-#define	exc_ainstr_page_prot_num	23	/* 23 */
-#define	exc_last_wish_num		24	/* 24 */
-#define	exc_base_not_aligned_num	25	/* 25 */
-#define	exc_software_trap_num		26	/* 26 */
+#define	exc_illegal_opcode_num		0
+#define	exc_priv_action_num		1
+#define	exc_fp_disabled_num		2
+#define	exc_fp_stack_u_num		3
+#define	exc_d_interrupt_num		4
+#define	exc_diag_ct_cond_num		5
+#define	exc_diag_instr_addr_num		6
+#define	exc_illegal_instr_addr_num	7
+#define	exc_instr_debug_num		8
+#define	exc_window_bounds_num		9
+#define	exc_user_stack_bounds_num	10
+#define	exc_proc_stack_bounds_num	11
+#define	exc_chain_stack_bounds_num	12
+#define	exc_fp_stack_o_num		13
+#define	exc_diag_cond_num		14
+#define	exc_diag_operand_num		15
+#define	exc_illegal_operand_num		16
+#define	exc_array_bounds_num		17
+#define	exc_access_rights_num		18
+#define	exc_addr_not_aligned_num	19
+#define	exc_instr_page_miss_num		20
+#define	exc_instr_page_prot_num		21
+#define	exc_ainstr_page_miss_num	22
+#define	exc_ainstr_page_prot_num	23
+#define	exc_last_wish_num		24
+#define	exc_base_not_aligned_num	25
+#define	exc_software_trap_num		26
 
-#define	exc_data_debug_num		28	/* 28 */
-#define	exc_data_page_num		29	/* 29 */
+#define	exc_data_debug_num		28
+#define	exc_data_page_num		29
 
-#define	exc_recovery_point_num		31	/* 31 */
-#define	exc_interrupt_num		32	/* 32 */
-#define	exc_nm_interrupt_num		33	/* 33 */
-#define	exc_div_num			34	/* 34 */
-#define	exc_fp_num			35	/* 35 */
-#define	exc_mem_lock_num		36	/* 36 */
-#define	exc_mem_lock_as_num		37	/* 37 */
-#define	exc_data_error_num		38	/* 38 */
-#define	exc_mem_error_out_cpu_num	38	/* 38 */
-#define	exc_mem_error_MAU_num		39	/* 39 */
-#define	exc_mem_error_L2_num		40	/* 40 */
-#define	exc_mem_error_L1_35_num		41	/* 41 */
-#define	exc_mem_error_L1_02_num		42	/* 42 */
-#define	exc_mem_error_ICACHE_num	43	/* 43 */
+#define	core_dump_num			30
+
+#define	exc_recovery_point_num		31
+#define	exc_interrupt_num		32
+#define	exc_nm_interrupt_num		33
+#define	exc_div_num			34
+#define	exc_fp_num			35
+#define	exc_mem_lock_num		36
+#define	exc_mem_lock_as_num		37
+#define	exc_data_error_num		38
+#define	exc_mem_error_out_cpu_num	38
+#define	exc_mem_error_MAU_num		39
+#define	exc_mem_error_L2_num		40
+#define	exc_mem_error_L1_35_num		41
+#define	exc_mem_error_L1_02_num		42
+#define	exc_mem_error_ICACHE_num	43
 
 #define	exc_max_num			43
 
@@ -79,7 +81,6 @@
 #define	exc_mova_ch_2_num		54	/* [54] TIR.aa.[2] */
 #define	exc_mova_ch_3_num		55	/* [55] TIR.aa.[3] */
 
-#define	core_dump_num			38	/* 38 */
 #define	masked_hw_stack_bounds_num	60	/* hardware stacks bounds */
 						/* trap is occured but masked */
 

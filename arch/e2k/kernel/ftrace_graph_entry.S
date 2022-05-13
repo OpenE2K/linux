@@ -1,4 +1,5 @@
 #include <generated/asm-offsets.h>
+#include <asm/alternative-asm.h>
 
 /*
  * This function cannot be implemented in C because we don't know whether
@@ -118,7 +119,16 @@ return_to_hook:
 #endif
 	/* Order is important: first we change cr0.hi
 	 * and then use it in return. */
+ALTERNATIVE_1_ALTINSTR
+/* CPU_HWBUG_INTC_CR_WRITE version */
+{
+	wait ma_c=1
 	rwd %db[0], %cr0.hi
+}
+ALTERNATIVE_2_OLDINSTR
+/* Default version */
+	rwd %db[0], %cr0.hi
+ALTERNATIVE_3_FEATURE(CPU_HWBUG_INTC_CR_WRITE)
 {
 	nop 4
 	ipd 2

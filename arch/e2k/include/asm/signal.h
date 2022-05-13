@@ -90,45 +90,19 @@ struct as_sa_handler_arg;
 #define ptrace_signal_deliver() do { } while (0)
 
 
-#define	DO_SDBGPRINT(message)						\
-do {									\
-	e2k_tir_lo_t	tir_lo;						\
-	void *cr_ip, *tir_ip;						\
-									\
-	tir_lo.TIR_lo_reg = (regs)->trap->TIR_lo;			\
-									\
-	tir_ip = (void *)tir_lo.TIR_lo_ip;				\
-	cr_ip = (void *)GET_IP_CR0_HI((regs)->crs.cr0_hi);		\
-									\
-	if (tir_ip == cr_ip)						\
-		pr_info("%s: IP=%px %s(pid=%d)\n",			\
-			message, tir_ip, current->comm,			\
-			current->pid);					\
-	else								\
-		pr_info("%s: IP=%px(interrupt IP=%px) %s(pid=%d)\n",	\
-			message, tir_ip, cr_ip, current->comm,		\
-			current->pid);					\
-} while (false)
-
-#define	SDBGPRINT(message)		\
-do {					\
-	if (debug_signal)		\
-		DO_SDBGPRINT(message);	\
-} while (0)
-
-#define	SDBGPRINT_WITH_STACK(message)	\
-do {					\
-	if (debug_signal) {		\
-		DO_SDBGPRINT(message);	\
-		dump_stack();		\
-	}				\
-} while (0)
-
 struct signal_stack;
+extern unsigned long allocate_signal_stack(unsigned long size);
 extern void free_signal_stack(struct signal_stack *signal_stack);
+extern struct signal_stack_context __user *
+			get_the_signal_stack(struct signal_stack *signal_stack);
+extern struct signal_stack_context __user *
+			pop_the_signal_stack(struct signal_stack *signal_stack);
 extern struct signal_stack_context __user *pop_signal_stack(void);
 extern struct signal_stack_context __user *get_signal_stack(void);
+extern struct signal_stack_context __user *
+		get_prev_signal_stack(struct signal_stack_context __user *context);
 extern int setup_signal_stack(struct pt_regs *regs, bool is_signal);
+extern int reserve_signal_stack(void);
 
 #define	GET_SIG_RESTORE_STACK(ti, sbr, usd_lo, usd_hi) \
 do { \
@@ -152,10 +126,31 @@ extern int prepare_sighandler_frame(struct e2k_stacks *stacks,
 
 extern int native_signal_setup(struct pt_regs *regs);
 
-static inline int native_complete_long_jump(struct pt_regs *regs)
+extern int native_longjmp_copy_user_to_kernel_hw_stacks(struct pt_regs *regs,
+							struct pt_regs *new_regs);
+
+static inline int native_complete_long_jump(void)
 {
 	/* nithing to do for native kernel & host */
 	return 0;
+}
+
+static inline void native_update_kernel_crs(e2k_mem_crs_t *k_crs,
+				e2k_mem_crs_t *crs, e2k_mem_crs_t *prev_crs,
+				e2k_mem_crs_t *p_prev_crs)
+{
+	*p_prev_crs = k_crs[0];
+	k_crs[0] = *prev_crs;
+	k_crs[1] = *crs;
+}
+
+static inline int native_add_ctx_signal_stack(u64 key, bool is_main)
+{
+	return 0;
+}
+
+static inline void native_remove_ctx_signal_stack(u64 key)
+{
 }
 
 extern long do_sigreturn(void);
@@ -199,10 +194,31 @@ static inline int signal_setup(struct pt_regs *regs)
 	return native_signal_setup(regs);
 }
 
-static inline int complete_long_jump(struct pt_regs *regs)
+static inline int longjmp_copy_user_to_kernel_hw_stacks(struct pt_regs *regs,
+							struct pt_regs *new_regs)
 {
-	return native_complete_long_jump(regs);
+	return native_longjmp_copy_user_to_kernel_hw_stacks(regs, new_regs);
 }
+
+static inline int complete_long_jump(struct pt_regs *regs, bool switch_stack,
+					u64 to_key)
+{
+	return native_complete_long_jump();
+}
+static inline void update_kernel_crs(e2k_mem_crs_t *k_crs, e2k_mem_crs_t *crs,
+			e2k_mem_crs_t *prev_crs, e2k_mem_crs_t *p_prev_crs)
+{
+	native_update_kernel_crs(k_crs, crs, prev_crs, p_prev_crs);
+}
+static inline int add_ctx_signal_stack(u64 key, bool is_main)
+{
+	return native_add_ctx_signal_stack(key, is_main);
+}
+static inline void remove_ctx_signal_stack(u64 key)
+{
+	native_remove_ctx_signal_stack(key);
+}
+
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 

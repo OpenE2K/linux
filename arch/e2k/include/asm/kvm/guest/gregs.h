@@ -22,13 +22,13 @@
 #define	KVM_SAVE_HOST_GREGS(__ti)					\
 ({									\
 	if (IS_HV_GM()) {						\
-		DO_SAVE_VCPU_STATE_GREGS_V2(__ti->h_gregs.g);		\
+		DO_SAVE_VCPU_STATE_GREGS_V3(__ti->h_gregs.g);		\
 	}								\
 })
 #define	KVM_RESTORE_HOST_GREGS(__ti)					\
 ({									\
 	if (IS_HV_GM()) {						\
-		DO_RESTORE_VCPU_STATE_GREGS_V2(__ti->h_gregs.g);	\
+		DO_RESTORE_VCPU_STATE_GREGS_V3(__ti->h_gregs.g);	\
 	}								\
 })
 #else	/* CONFIG_E2K_ISET_VER >= 5 */

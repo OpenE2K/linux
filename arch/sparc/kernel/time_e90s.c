@@ -76,25 +76,6 @@ void __init time_init(void)
 {
 	int ret;
 
-	/* Let the user get at STICK too. */
-	__asm__ __volatile__(
-		"	rd	%%stick, %%g2\n"
-		"	andn	%%g2, %0, %%g2\n"
-		"	wr	%%g2, 0, %%asr24"
-		: /* no outputs */
-		: "r" (TICK_PRIV_BIT)
-		: "g1", "g2");
-	/* Let the user get at TICK too.
-	 * If you will set TICK_PRIV_BIT add
-	 * 'return ret & ~TICK_PRIV_BIT' in get_cycles() */
-	__asm__ __volatile__(
-		"	rd	%%tick, %%g2\n"
-		"	andn	%%g2, %0, %%g2\n"
-		"	wrpr	%%g2, 0, %%tick"
-		: /* no outputs */
-		: "r" (TICK_PRIV_BIT)
-		: "g1", "g2");
-
 	setup_lt_timer();
 	
 	ret = setup_irq(0, &irq0);

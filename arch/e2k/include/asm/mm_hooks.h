@@ -8,6 +8,9 @@
 
 #include <asm/kvm/mm_hooks.h>
 
+extern int arch_dup_mmap(struct mm_struct *oldmm, struct mm_struct *mm);
+extern void arch_exit_mmap(struct mm_struct *mm);
+
 static inline void arch_unmap(struct mm_struct *mm,
 			unsigned long start, unsigned long end)
 {
@@ -16,7 +19,12 @@ static inline void arch_unmap(struct mm_struct *mm,
 static inline void arch_bprm_mm_init(struct mm_struct *mm,
 				     struct vm_area_struct *vma)
 {
-	get_mm_notifier_locked(mm);
+}
+
+static inline int arch_bprm_mm_init_locked(struct mm_struct *mm,
+				     struct vm_area_struct *vma)
+{
+	return get_mm_notifier_locked(mm);
 }
 
 static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,

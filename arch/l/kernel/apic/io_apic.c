@@ -2770,31 +2770,34 @@ unlock:
 	l_irq_exit();
 }
 
-static void irq_complete_move_vector(struct irq_cfg *cfg, unsigned vector)
+static void irq_complete_move_vector(struct irq_cfg *cfg, int vec_eq)
 {
-	unsigned me;
+	unsigned int vector;
 
-	if (likely(!cfg->move_in_progress))
-		return;
-
-	me = smp_processor_id();
-
-	if (vector == cfg->vector && cpumask_test_cpu(me, cfg->domain))
-		send_cleanup_vector(cfg);
+	if (cpumask_test_cpu(smp_processor_id(), cfg->domain)) {
+		if (!vec_eq) {
+			vector =
+#if defined CONFIG_E2K
+			(unsigned int) get_irq_regs()->interrupt_vector;
+#elif defined CONFIG_E90S
+			(unsigned int)
+				e90s_irq_pending[smp_processor_id()].vector;
+#else
+			~get_irq_regs()->orig_ax;
+#endif
+			vec_eq = vector == cfg->vector;
+		}
+		if (vec_eq)
+			send_cleanup_vector(cfg);
+	}
 }
 
 static void irq_complete_move(struct irq_cfg *cfg)
 {
-#if defined CONFIG_E2K
-	irq_complete_move_vector(cfg, (unsigned int)
-			get_irq_regs()->interrupt_vector);
-#elif defined CONFIG_E90S
-	irq_complete_move_vector(cfg, (unsigned int)
-			e90s_irq_pending[smp_processor_id()].vector);
-#else
+	if (likely(!cfg->move_in_progress))
+		return;
 
-	irq_complete_move_vector(cfg, ~get_irq_regs()->orig_ax);
-#endif
+	irq_complete_move_vector(cfg, 0);
 }
 
 void apic_irq_force_complete_move(struct irq_desc *desc)
@@ -2808,8 +2811,8 @@ void apic_irq_force_complete_move(struct irq_desc *desc)
 
 	irq = data->irq;
 	cfg = irq_data_get_irq_chip_data(data);
-	if (cfg)
-		irq_complete_move_vector(cfg, cfg->vector);
+	if (unlikely(cfg && cfg->move_in_progress))
+		irq_complete_move_vector(cfg, 1);
 }
 #else
 static inline void irq_complete_move(struct irq_cfg *cfg) { }
@@ -4500,6 +4503,7 @@ static void quirk_pci_msi(struct pci_dev *pdev)
 {
 	struct iohub_sysdata *sd = pdev->bus->sysdata;
 	int gen, rev = pdev->revision;
+	u64 address;
 
 	if (pdev->device == PCI_DEVICE_ID_MCST_I2CSPI) {
 		gen = 0;
@@ -4518,10 +4522,11 @@ static void quirk_pci_msi(struct pci_dev *pdev)
 		sd->eioh_revision = rev;
 	}
 	/*
-	 * If IOHub2 is connected to EIOHub, use RT_MSI address instead of
-	 * the address from IOAPIC BARs
+	 * Use RT_MSI address instead of the address from IOAPIC BARs if:
+	 * - IOHub2 is plugged into an EPIC machine
+	 * - EIOHub is plugged into an APIC machine (paravirt. guest)
 	 */
-	if (cpu_has_epic()) {
+	if (cpu_has_epic() || gen >= 2) {
 		get_io_epic_msi(dev_to_node(&pdev->dev),
 			 &sd->pci_msi_addr_lo, &sd->pci_msi_addr_hi);
 	} else if (gen < 2) {
@@ -4530,8 +4535,10 @@ static void quirk_pci_msi(struct pci_dev *pdev)
 		pci_read_config_dword(pdev, MSI_HI_ADDRESS,
 			&sd->pci_msi_addr_hi);
 	}
-	dev_info(&pdev->dev, "MSI address at: %x; IOHUB generation: %d, "
-		"revision: %x\n", sd->pci_msi_addr_lo, gen, rev);
+
+	address = (u64) sd->pci_msi_addr_hi << 32 | sd->pci_msi_addr_lo;
+	dev_info(&pdev->dev, "MSI address at: %llx; IOHUB generation: %d, "
+		"revision: %x\n", address, gen, rev);
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ELBRUS,
 			  PCI_DEVICE_ID_MCST_I2CSPI, quirk_pci_msi);

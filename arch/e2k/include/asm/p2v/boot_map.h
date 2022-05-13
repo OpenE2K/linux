@@ -28,7 +28,7 @@ typedef	struct e2k_tlb_line {		/* a line of TLB */
 					/* the line */
 } e2k_tlb_line_t;
 typedef	struct e2k_tlb {		/* all TLB */
-	e2k_tlb_line_t	lines[NATIVE_MAX_TLB_LINES_NUM];
+	e2k_tlb_line_t	lines[NATIVE_TLB_LINES_NUM];
 	int		entries_num;	/* number of valid entries in */
 					/* the TLB */
 } e2k_tlb_t;
@@ -59,24 +59,6 @@ extern void	boot_init_mapping(void);
 #ifdef	CONFIG_NUMA
 extern void	boot_node_init_mapping(void);
 #endif	/* CONFIG_NUMA */
-
-/* Page Tables common structure interface's functions */
-extern pte_t * __init_recv
-boot_get_double_huge_pte(e2k_addr_t addr, pgprot_t *ptp);
-extern pte_t * __init_recv
-boot_get_common_huge_pte(e2k_addr_t addr, pgprot_t *ptp);
-extern void __init_recv
-boot_set_double_pte(e2k_addr_t addr, pte_t *ptep, pte_t pte, bool host_map);
-extern void __init_recv
-boot_set_common_pte(e2k_addr_t addr, pte_t *ptep, pte_t pte, bool host_map);
-extern pte_t * __init_recv
-init_get_double_huge_pte(e2k_addr_t addr, pgprot_t *ptp);
-extern pte_t * __init_recv
-init_get_common_huge_pte(e2k_addr_t addr, pgprot_t *ptp);
-extern void __init_recv
-init_double_pte_clear(pte_t *ptep);
-extern void __init_recv
-init_common_pte_clear(pte_t *ptep);
 
 extern long boot_map_phys_area(e2k_addr_t phys_area_addr,
 			e2k_size_t phys_area_size, e2k_addr_t area_virt_addr,

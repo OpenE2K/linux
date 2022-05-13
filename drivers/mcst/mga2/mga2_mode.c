@@ -94,7 +94,7 @@ static void __mga2_vid_dpms(struct drm_crtc *crtc,
 	struct mga2 *mga2 = crtc->dev->dev_private;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	void __iomem *vid_regs = mga2->regs + mga2->info->vid_regs_base +
-			 	mga2_get_vid(connector) * MGA2_VID0_SZ;
+				mga2_get_vid(connector) * MGA2_VID0_SZ;
 	u32 omux = rvidc(MUX);
 	u32 mux = omux & ~(MGA2_VID_B_MUX_ALL << MGA2_VID_B_MUX_OFFSET);
 	u32 ctrl = rvidc(CTRL) & ~MGA2_VID0_B_ENABLE;
@@ -160,7 +160,7 @@ static void __mga2_vid_dpms(struct drm_crtc *crtc,
 	rvidc(RESYNC_CTRL);
 
 	/* FIXME: workaround for hw bug: vertical lines at gradient stipes */
-	if (mode == DRM_MODE_DPMS_ON &&
+	if (mga2_p2(mga2) && mode == DRM_MODE_DPMS_ON &&
 			connector->connector_type == DRM_MODE_CONNECTOR_LVDS) {
 		writel(LVDS_01 | (0 << MGA2_VID3_B_ADDR_OFFSET), mga2->regs + MGA2_VID3_BITCTRL);
 		writel(LVDS_00 | (1 << MGA2_VID3_B_ADDR_OFFSET), mga2->regs + MGA2_VID3_BITCTRL);
@@ -261,7 +261,8 @@ static void __mga25_vid_dpms(struct drm_crtc *crtc,
 	if (mode == DRM_MODE_DPMS_ON)
 		wvidc(ctrl | MGA2_VID0_B_ENABLE, CTRL);
 
-	if (mode == DRM_MODE_DPMS_ON &&
+	/*hw bug 130094, comment 9*/
+	if (mga25(mga2) && mode == DRM_MODE_DPMS_ON &&
 			connector->connector_type == DRM_MODE_CONNECTOR_LVDS) {
 		char v[] = {
 			19,  4,  5,  6,  7,  8,  9,
@@ -731,7 +732,7 @@ static int mga25_int_pll_set_pixclock(struct drm_crtc *crtc,
 	struct mga2 *mga2 = crtc->dev->dev_private;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	struct mga2_clk clk = {};
-	int ret;
+	int ret = 0;
 	if (mga2_proto(mga2))
 		goto out;
 	ret = __mga2_calc_int_pll(&clk, clock_khz * 1000, d, div, CLN16FF);
@@ -1070,7 +1071,7 @@ static void mga2_crtc_atomic_enable(struct drm_crtc *crtc,
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	//1. Установить синхронный сброс в регистре MGA2_DC*_CTRL.
 	wcrtc(MGA2_DC_CTRL_SOFT_RESET | MGA2_DC_CTRL_DEFAULT, CTRL);
-	mga2_crtc_mode_set(crtc, &crtc->state->adjusted_mode);
+	WARN_ON(mga2_crtc_mode_set(crtc, &crtc->state->adjusted_mode));
 	drm_crtc_vblank_on(crtc);
 }
 

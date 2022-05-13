@@ -16,9 +16,7 @@
 OUTPUT_FORMAT("elf64-e2k", "elf64-e2k", "elf64-e2k")
 
 #ifdef	CONFIG_E2K_MACHINE
- #if defined(CONFIG_E2K_ES2_DSP) || defined(CONFIG_E2K_ES2_RU)
- OUTPUT_ARCH(elbrus-v2)
- #elif defined(CONFIG_E2K_E2S)
+ #if defined(CONFIG_E2K_E2S)
  OUTPUT_ARCH(elbrus-v3)
  #elif defined(CONFIG_E2K_E8C)
  OUTPUT_ARCH(elbrus-v4)
@@ -157,6 +155,9 @@ SECTIONS
 		__entry_handlers_start = .;
 		ENTRY_TEXT
 		IRQENTRY_TEXT
+		__entry_handlers_hcalls_start = .;
+		*(.text.entry_hcalls)
+		__entry_handlers_hcalls_end = .;
 		__entry_handlers_end = .;
 		HEAD_TEXT
 #ifdef CONFIG_KPROBES

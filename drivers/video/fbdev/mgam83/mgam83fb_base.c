@@ -785,9 +785,7 @@ static int mgam83fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	if (off < len) {
 		DEBUG_MMAP_MSG("mgam83fb_mmap: given off corresponds to fbmem\n");
 #ifdef CONFIG_E2K
-		vma->vm_page_prot = (cpu_has(CPU_FEAT_WC_PCI_PREFETCH)) ?
-				pgprot_writecombine(vma->vm_page_prot) :
-				pgprot_noncached(vma->vm_page_prot);
+		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 #endif
 	}
 

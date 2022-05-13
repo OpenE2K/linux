@@ -50,6 +50,10 @@
 
 #ifdef	CONFIG_VIRTUALIZATION
 
+#ifndef	__ASSEMBLY__
+#include <asm/kvm/guest.h>
+#endif	/* !__ASSEMBLY__ */
+
 #define	HOST_KERNEL_PHYS_MEM_VIRT_BASE	HOST_PAGE_OFFSET  /* 0x0000c000 ... */
 #define	GUEST_KERNEL_PHYS_MEM_VIRT_BASE	GUEST_PAGE_OFFSET /* 0x00002000 ... */
 #define	GUEST_IO_PORTS_VIRT_BASE	0x00003f7e7e000000UL
@@ -84,7 +88,8 @@
 
 /* Macros defines VRAM for one VCPU or VIRQ VCPU, */
 /* but VRAM should be created for all VCPU and VIRQ VCPU */
-#define	GUEST_ONE_VCPU_VRAM_SIZE	(4 *4096)	/* 4 pages */
+#define	GUEST_ONE_VCPU_VRAM_SIZE	sizeof(kvm_vcpu_state_t)
+#define	HOST_INFO_VCPU_VRAM_SIZE	sizeof(kvm_host_info_t)
 #define	GUEST_VCPU_VRAM_PHYS_BASE	0x000000ff00000000UL
 #define	GUEST_MAX_VCPU_VRAM_SIZE	0x0000000001000000UL
 #define GUEST_VCPU_VRAM_VIRT_BASE	\

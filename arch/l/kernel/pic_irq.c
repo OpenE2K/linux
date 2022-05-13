@@ -10,6 +10,7 @@
 #include <linux/cpu.h>
 #include <linux/irq.h>
 #include <linux/irqdesc.h>
+#include <linux/msi.h>
 #include <asm/irq_regs.h>
 
 #include <trace/events/irq.h>
@@ -123,14 +124,6 @@ int arch_show_interrupts(struct seq_file *p, int prec)
 		seq_printf(p, "%10u ", irq_stats(j)->irq_rdma_count);
 	seq_printf(p, "  RDMA interrupts\n");
 # endif
-# if IS_ENABLED(CONFIG_ELDSP)
-	if (IS_MACHINE_ES2) {
-		seq_printf(p, "v%*d: ", prec - 1, LVT3_INTERRUPT_VECTOR);
-		for_each_online_cpu(j)
-			seq_printf(p, "%10u ", irq_stats(j)->irq_eldsp_count);
-		seq_printf(p, "  Elbrus DSP interrupts\n");
-	}
-# endif
 #endif
 	seq_printf(p, "%*s: %10u\n", prec, "ERR", atomic_read(&irq_err_count));
 	seq_printf(p, "%*s: %10u\n", prec, "MIS", atomic_read(&irq_mis_count));
@@ -211,11 +204,6 @@ u64 arch_irq_stat_cpu(unsigned int cpu)
 # if IS_ENABLED(CONFIG_RDMA) || IS_ENABLED(CONFIG_RDMA_SIC) || \
      IS_ENABLED(CONFIG_RDMA_NET)
 	sum += irq_stats(cpu)->irq_rdma_count;
-# endif
-# if IS_ENABLED(CONFIG_ELDSP)
-	if (IS_MACHINE_ES2) {
-		sum += irq_stats(cpu)->irq_eldsp_count;
-	}
 # endif
 #endif
 
@@ -380,12 +368,22 @@ int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	return setup_msi_irqs_pic(dev, nvec, type);
 }
 
+void arch_teardown_msi_irqs(struct pci_dev *dev)
+{
+	default_teardown_msi_irqs(dev);
+}
+
 void arch_teardown_msi_irq(unsigned int irq)
 {
 	teardown_msi_irq_pic(irq);
 }
 
-int hard_smp_processor_id(void)
+void arch_restore_msi_irqs(struct pci_dev *dev)
+{
+	default_restore_msi_irqs(dev);
+}
+
+notrace_on_host int hard_smp_processor_id(void)
 {
 	return read_pic_id();
 }

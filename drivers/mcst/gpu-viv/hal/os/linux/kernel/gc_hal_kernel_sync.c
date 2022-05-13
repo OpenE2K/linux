@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -236,7 +236,7 @@ struct viv_sync_timeline * viv_sync_timeline_create(const char *name, gckOS Os)
     if (!timeline)
         return NULL;
 
-    strncpy(timeline->name, name, sizeof(timeline->name));
+    strncpy(timeline->name, name, sizeof(timeline->name) - 1);
     timeline->context = dma_fence_context_alloc(1);
     atomic64_set(&timeline->seqno, 0);
     timeline->os = Os;
@@ -349,7 +349,10 @@ struct dma_fence * viv_fence_create(struct viv_sync_timeline *timeline,
 
     if (!signal->done) {
         signal->fence = (struct dma_fence*)fence;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,9,68)
         dma_fence_get((struct dma_fence*)fence);
+#endif
     }
 
     spin_unlock(&signal->lock);

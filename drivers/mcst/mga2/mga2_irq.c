@@ -182,11 +182,17 @@ void mga2_driver_irq_preinstall(struct drm_device *drm)
 int mga2_driver_irq_postinstall(struct drm_device *drm)
 {
 	struct mga2 *mga2 = drm->dev_private;
-	u32 v = MGA2_INT_B_V1HDMI | MGA2_INT_B_V2HDMI;
-	if (mga25(mga2)) {
-		v = MGA2_INT_B_SETRST |
-			MGA25_INT_B_V1HDMI | MGA25_INT_B_V2HDMI;
+	u32 v = 0;
+
+	switch (mga2->subdevice) {
+	case MGA2_P2:
+		v = MGA2_INT_B_V1HDMI | MGA2_INT_B_V2HDMI;
+		break;
+	case MGA25:
+		v = MGA25_INT_B_V1HDMI | MGA25_INT_B_V2HDMI;
+		break;
 	}
+
 	mga2_enable_irq(mga2, v);
 	return 0;
 }

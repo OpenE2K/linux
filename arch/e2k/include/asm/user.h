@@ -14,12 +14,12 @@
 #define __CHECK_KERNEL      0x1234567887654321ULL
 #define MLT_NUM (16 * 3)
 
-/* FIXME comments
- * ATTENTION!!! Any change should be sumited to debuger
+/*
+ * ATTENTION!!! Any change should be submitted to debugger
  */
 
 struct user_regs_struct {
-	unsigned long long sizeof_struct;     // interface with debuger
+	unsigned long long sizeof_struct;     /* interface with debugger */
 	unsigned long long g[32];
 
 	unsigned long long psr;

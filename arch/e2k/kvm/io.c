@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/init.h>
+#include <linux/syscalls.h>
 #include <linux/tty.h>
 #include <linux/kvm_host.h>
 #include <kvm/iodev.h>
@@ -127,7 +128,8 @@ static spmc_pm1_cnt_t reg_spmc_pm1_cnt;
 
 static void kvm_i2c_spi_conf_write(struct kvm_vcpu *vcpu, gpa_t conf, gpa_t addr, u32 value)
 {
-	WARN_ON(!conf);
+	if (!conf)
+		return;
 
 	if (addr == (conf + PCI_SOFT_RESET_CONTROL) && value & L_SOFTWARE_RESET) {
 		vcpu->arch.exit_shutdown_terminate = KVM_EXIT_E2K_RESTART;
@@ -138,13 +140,14 @@ static void kvm_i2c_spi_conf_write(struct kvm_vcpu *vcpu, gpa_t conf, gpa_t addr
 
 static void kvm_spmc_conf_write(struct kvm_vcpu *vcpu, gpa_t conf, gpa_t addr, u32 value)
 {
-	WARN_ON(!conf);
+	if (!conf)
+		return;
 
 	if (addr == (conf + SPMC_PM1_CNT_OFF)) {
 		reg_spmc_pm1_cnt.reg = value;
 		if (reg_spmc_pm1_cnt.sci_en == 1 && reg_spmc_pm1_cnt.slp_typx == 5 &&
 				reg_spmc_pm1_cnt.slp_en == 1) {
-			vcpu->arch.exit_shutdown_terminate = KVM_EXIT_SHUTDOWN;
+			vcpu->arch.exit_shutdown_terminate = KVM_EXIT_E2K_SHUTDOWN;
 			DebugMMIOSHUTDOWN("set HALT spmc probe\n");
 			return;
 		}
@@ -787,7 +790,6 @@ long kvm_guest_console_io(struct kvm_vcpu *vcpu,
 		int io_cmd, int count, char __user *str)
 {
 	char buffer[512];
-	struct tty_struct *tty;
 	long ret;
 
 	DebugKVMIO("%s console: count 0x%x, string %px\n",
@@ -801,6 +803,8 @@ long kvm_guest_console_io(struct kvm_vcpu *vcpu,
 		count = sizeof(buffer) - 1;
 	}
 	if (io_cmd == CONSOLEIO_write) {
+		struct file *fstdout;
+
 		ret = kvm_vcpu_copy_from_guest(vcpu, buffer, str, count);
 		if (ret) {
 			DebugKVMIO("could not copy string from user, err %ld\n",
@@ -808,15 +812,14 @@ long kvm_guest_console_io(struct kvm_vcpu *vcpu,
 			count = ret;
 			goto out;
 		}
-		buffer[count] = '\0';
-		tty = get_current_tty();
-		if (!tty) {
-			DebugKVMIO("could not get current tty of guest\n");
-			pr_err("%s", buffer);
-			goto out;
+
+		fstdout = fget(1);
+		if (!fstdout) {
+			pr_err_ratelimited("Error in KVM_HCALL_CONSOLE_IO: stdout is not available\n");
+		} else {
+			kernel_write(fstdout, buffer, count, 0);
+			fput(fstdout);
 		}
-		tty_write_message(tty, buffer);
-		tty_kref_put(tty);
 	} else {
 		/* read from console */
 		DebugKVMIO("read string from console is not supported\n");

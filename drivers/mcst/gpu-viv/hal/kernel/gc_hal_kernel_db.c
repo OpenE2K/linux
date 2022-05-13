@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -101,7 +101,7 @@ gckKERNEL_FindDatabase(
     gctSIZE_T slot;
     gctBOOL acquired = gcvFALSE;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d LastProcessID=%d",
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d LastProcessID=%d",
                    Kernel, ProcessID, LastProcessID);
 
     /* Compute the hash for the database. */
@@ -200,7 +200,7 @@ gckKERNEL_DeinitDatabase(
     IN gcsDATABASE_PTR Database
     )
 {
-    gcmkHEADER_ARG("Kernel=0x%x Database=0x%x", Kernel, Database);
+    gcmkHEADER_ARG("Kernel=%p Database=%p", Kernel, Database);
 
     if (Database)
     {
@@ -224,14 +224,6 @@ gckKERNEL_DeinitDatabase(
             gcmkVERIFY_OK(gckOS_DeleteMutex(Kernel->os, Database->handleDatabaseMutex));
             Database->handleDatabaseMutex = gcvNULL;
         }
-
-#if gcdPROCESS_ADDRESS_SPACE
-        if (Database->mmu)
-        {
-            gcmkONERROR(gckEVENT_DestroyMmu(Kernel->eventObj, Database->mmu, gcvKERNEL_PIXEL));
-            Database->mmu = gcvNULL;
-        }
-#endif
     }
 
     gcmkFOOTER_NO();
@@ -270,7 +262,7 @@ gckKERNEL_NewRecord(
     gctBOOL acquired = gcvFALSE;
     gcsDATABASE_RECORD_PTR record = gcvNULL;
 
-    gcmkHEADER_ARG("Kernel=0x%x Database=0x%x", Kernel, Database);
+    gcmkHEADER_ARG("Kernel=%p Database=%p", Kernel, Database);
 
     /* Acquire the database mutex. */
     gcmkONERROR(
@@ -364,7 +356,7 @@ gckKERNEL_DeleteRecord(
     gcsDATABASE_RECORD_PTR record, previous;
     gctUINT32 slot = _GetSlot(Database, Data);
 
-    gcmkHEADER_ARG("Kernel=0x%x Database=0x%x Type=%d Data=0x%x",
+    gcmkHEADER_ARG("Kernel=%p Database=%p Type=%d Data=%p",
                    Kernel, Database, Type, Data);
 
     /* Acquire the database mutex. */
@@ -473,7 +465,7 @@ gckKERNEL_FindRecord(
     gcsDATABASE_RECORD_PTR record;
     gctUINT32 slot = _GetSlot(Database, Data);
 
-    gcmkHEADER_ARG("Kernel=0x%x Database=0x%x Type=%d Data=0x%x",
+    gcmkHEADER_ARG("Kernel=%p Database=%p Type=%d Data=%p",
                    Kernel, Database, Type, Data);
 
     /* Acquire the database mutex. */
@@ -594,7 +586,7 @@ gckKERNEL_CreateProcessDB(
     gctSIZE_T slot;
     gctUINT32 i;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d", Kernel, ProcessID);
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d", Kernel, ProcessID);
 
     /* Compute the hash for the database. */
     slot = ProcessID % gcmCOUNTOF(Kernel->db->db);
@@ -651,29 +643,33 @@ gckKERNEL_CreateProcessDB(
     database->vidMem.bytes              = 0;
     database->vidMem.maxBytes           = 0;
     database->vidMem.totalBytes         = 0;
+    database->vidMem.freeCount          = 0;
+    database->vidMem.allocCount         = 0;
+
     database->nonPaged.bytes            = 0;
     database->nonPaged.maxBytes         = 0;
     database->nonPaged.totalBytes       = 0;
-    database->contiguous.bytes          = 0;
-    database->contiguous.maxBytes       = 0;
-    database->contiguous.totalBytes     = 0;
+    database->nonPaged.freeCount        = 0;
+    database->nonPaged.allocCount       = 0;
+
     database->mapMemory.bytes           = 0;
     database->mapMemory.maxBytes        = 0;
     database->mapMemory.totalBytes      = 0;
-    database->mapUserMemory.bytes       = 0;
-    database->mapUserMemory.maxBytes    = 0;
-    database->mapUserMemory.totalBytes  = 0;
+    database->mapMemory.freeCount       = 0;
+    database->mapMemory.allocCount      = 0;
 
     for (i = 0; i < gcmCOUNTOF(database->list); i++)
     {
         database->list[i] = gcvNULL;
     }
 
-    for (i = 0; i < gcvSURF_NUM_TYPES; i++)
+    for (i = 0; i < gcvVIDMEM_TYPE_COUNT; i++)
     {
         database->vidMemType[i].bytes = 0;
         database->vidMemType[i].maxBytes = 0;
         database->vidMemType[i].totalBytes = 0;
+        database->vidMemType[i].freeCount = 0;
+        database->vidMemType[i].allocCount = 0;
     }
 
     for (i = 0; i < gcvPOOL_NUMBER_OF_POOLS; i++)
@@ -681,6 +677,8 @@ gckKERNEL_CreateProcessDB(
         database->vidMemPool[i].bytes = 0;
         database->vidMemPool[i].maxBytes = 0;
         database->vidMemPool[i].totalBytes = 0;
+        database->vidMemPool[i].freeCount = 0;
+        database->vidMemPool[i].allocCount = 0;
     }
 
     gcmkASSERT(database->refs == gcvNULL);
@@ -688,62 +686,10 @@ gckKERNEL_CreateProcessDB(
     gcmkONERROR(gckOS_AtomSet(Kernel->os, database->refs, 1));
 
     gcmkASSERT(database->handleDatabase == gcvNULL);
-    gcmkONERROR(gckKERNEL_CreateIntegerDatabase(Kernel, &database->handleDatabase));
+    gcmkONERROR(gckKERNEL_CreateIntegerDatabase(Kernel, 64, &database->handleDatabase));
 
     gcmkASSERT(database->handleDatabaseMutex == gcvNULL);
     gcmkONERROR(gckOS_CreateMutex(Kernel->os, &database->handleDatabaseMutex));
-
-#if gcdPROCESS_ADDRESS_SPACE
-    gcmkASSERT(database->mmu == gcvNULL);
-    gcmkONERROR(gckMMU_Construct(Kernel, gcdMMU_SIZE, &database->mmu));
-#endif
-
-#if gcdSECURE_USER
-    {
-        gctINT idx;
-        gcskSECURE_CACHE * cache = &database->cache;
-
-        /* Setup the linked list of cache nodes. */
-        for (idx = 1; idx <= gcdSECURE_CACHE_SLOTS; ++idx)
-        {
-            cache->cache[idx].logical = gcvNULL;
-
-#if gcdSECURE_CACHE_METHOD != gcdSECURE_CACHE_TABLE
-            cache->cache[idx].prev = &cache->cache[idx - 1];
-            cache->cache[idx].next = &cache->cache[idx + 1];
-#   endif
-#if gcdSECURE_CACHE_METHOD == gcdSECURE_CACHE_HASH
-            cache->cache[idx].nextHash = gcvNULL;
-            cache->cache[idx].prevHash = gcvNULL;
-#   endif
-        }
-
-#if gcdSECURE_CACHE_METHOD != gcdSECURE_CACHE_TABLE
-        /* Setup the head and tail of the cache. */
-        cache->cache[0].next    = &cache->cache[1];
-        cache->cache[0].prev    = &cache->cache[gcdSECURE_CACHE_SLOTS];
-        cache->cache[0].logical = gcvNULL;
-
-        /* Fix up the head and tail pointers. */
-        cache->cache[0].next->prev = &cache->cache[0];
-        cache->cache[0].prev->next = &cache->cache[0];
-#   endif
-
-#if gcdSECURE_CACHE_METHOD == gcdSECURE_CACHE_HASH
-        /* Zero out the hash table. */
-        for (idx = 0; idx < gcmCOUNTOF(cache->hash); ++idx)
-        {
-            cache->hash[idx].logical  = gcvNULL;
-            cache->hash[idx].nextHash = gcvNULL;
-        }
-#   endif
-
-        /* Initialize cache index. */
-        cache->cacheIndex = gcvNULL;
-        cache->cacheFree  = 1;
-        cache->cacheStamp = 0;
-    }
-#endif
 
     /* Insert the database into the hash. */
     database->next = Kernel->db->db[slot];
@@ -825,8 +771,8 @@ gckKERNEL_AddProcessDB(
     gctUINT32 vidMemType;
     gcePOOL vidMemPool;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d Type=%d Pointer=0x%x "
-                   "Physical=0x%x Size=%lu",
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d Type=%d Pointer=%p "
+                   "Physical=%p Size=%lu",
                    Kernel, ProcessID, Type, Pointer, Physical, Size);
 
     /* Verify the arguments. */
@@ -898,8 +844,16 @@ gckKERNEL_AddProcessDB(
         return gcvSTATUS_OK;
     }
 
+#if gcdENABLE_SW_PREEMPTION
+    if (Type == gcvDB_PRIORITY)
+    {
+        gctUINT32 id = gcmPTR2INT32(Pointer);
+        Kernel->priorityDBCreated[id] = gcvTRUE;
+    }
+#else
     /* Verify the arguments. */
     gcmkVERIFY_ARGUMENT(Pointer != gcvNULL);
+#endif
 
     /* Find the database. */
     gcmkONERROR(gckKERNEL_FindDatabase(Kernel, ProcessID, gcvFALSE, &database));
@@ -1033,7 +987,7 @@ gckKERNEL_RemoveProcessDB(
     gctUINT32 vidMemType;
     gcePOOL vidMemPool;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d Type=%d Pointer=0x%x",
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d Type=%d Pointer=%p",
                    Kernel, ProcessID, Type, Pointer);
 
     /* Verify the arguments. */
@@ -1140,7 +1094,7 @@ gckKERNEL_FindProcessDB(
     gceSTATUS status;
     gcsDATABASE_PTR database;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d Type=%d Pointer=0x%x",
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d Type=%d Pointer=%p",
                    Kernel, ProcessID, ThreadID, Type, Pointer);
 
     /* Verify the arguments. */
@@ -1198,7 +1152,7 @@ gckKERNEL_DestroyProcessDB(
     gctSIZE_T slot;
     gctUINT32 i;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d", Kernel, ProcessID);
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d", Kernel, ProcessID);
 
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Kernel, gcvOBJ_KERNEL);
@@ -1241,6 +1195,10 @@ gckKERNEL_DestroyProcessDB(
         gcmkONERROR(gcvSTATUS_NOT_FOUND);
     }
 
+#if gcdCAPTURE_ONLY_MODE
+    gcmkPRINT("Capture only mode: The max allocation from System Pool is %llu bytes", database->vidMemPool[gcvPOOL_SYSTEM].maxBytes);
+#endif
+
     /* Cannot remove the database from the hash list
     ** since later records deinit need to access from the hash
     */
@@ -1257,22 +1215,13 @@ gckKERNEL_DestroyProcessDB(
                    ProcessID, database->nonPaged.totalBytes,
                    database->nonPaged.maxBytes);
     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_DATABASE,
-                   "DB(%d): Contiguous: total=%lu max=%lu",
-                   ProcessID, database->contiguous.totalBytes,
-                   database->contiguous.maxBytes);
-    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_DATABASE,
                    "DB(%d): Idle time=%llu",
                    ProcessID, Kernel->db->idleTime);
     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_DATABASE,
                    "DB(%d): Map: total=%lu max=%lu",
                    ProcessID, database->mapMemory.totalBytes,
                    database->mapMemory.maxBytes);
-    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_DATABASE,
-                   "DB(%d): Map: total=%lu max=%lu",
-                   ProcessID, database->mapUserMemory.totalBytes,
-                   database->mapUserMemory.maxBytes);
 
-    if (database->list != gcvNULL)
     {
         gcmkTRACE_ZONE(gcvLEVEL_WARNING, gcvZONE_DATABASE,
                        "Process %d has entries in its database:",
@@ -1318,57 +1267,17 @@ gckKERNEL_DestroyProcessDB(
 
             case gcvDB_NON_PAGED:
                 physical = gcmNAME_TO_PTR(record->physical);
-                /* Unmap user logical memory first. */
-                status = gckOS_UnmapUserLogical(Kernel->os,
-                                                physical,
-                                                record->bytes,
-                                                record->data);
 
                 /* Free the non paged memory. */
-                status = gckEVENT_FreeNonPagedMemory(record->kernel->eventObj,
-                                                     record->bytes,
-                                                     physical,
-                                                     record->data,
-                                                     gcvKERNEL_PIXEL);
+                status = gckOS_FreeNonPagedMemory(Kernel->os,
+                                                  physical,
+                                                  record->data,
+                                                  record->bytes);
+
                 gcmRELEASE_NAME(record->physical);
 
                 gcmkTRACE_ZONE(gcvLEVEL_WARNING, gcvZONE_DATABASE,
                                "DB: NON_PAGED 0x%x, bytes=%lu (status=%d)",
-                               record->data, record->bytes, status);
-                break;
-
-            case gcvDB_COMMAND_BUFFER:
-                /* Free the command buffer. */
-                status = gckEVENT_DestroyVirtualCommandBuffer(record->kernel->eventObj,
-                                                              record->bytes,
-                                                              gcmNAME_TO_PTR(record->physical),
-                                                              record->data,
-                                                              gcvKERNEL_PIXEL);
-                gcmRELEASE_NAME(record->physical);
-
-                gcmkTRACE_ZONE(gcvLEVEL_WARNING, gcvZONE_DATABASE,
-                               "DB: COMMAND_BUFFER 0x%x, bytes=%lu (status=%d)",
-                               record->data, record->bytes, status);
-                break;
-
-            case gcvDB_CONTIGUOUS:
-                physical = gcmNAME_TO_PTR(record->physical);
-                /* Unmap user logical memory first. */
-                status = gckOS_UnmapUserLogical(Kernel->os,
-                                                physical,
-                                                record->bytes,
-                                                record->data);
-
-                /* Free the contiguous memory. */
-                status = gckEVENT_FreeContiguousMemory(record->kernel->eventObj,
-                                                       record->bytes,
-                                                       physical,
-                                                       record->data,
-                                                       gcvKERNEL_PIXEL);
-                gcmRELEASE_NAME(record->physical);
-
-                gcmkTRACE_ZONE(gcvLEVEL_WARNING, gcvZONE_DATABASE,
-                               "DB: CONTIGUOUS 0x%x bytes=%lu (status=%d)",
                                record->data, record->bytes, status);
                 break;
 
@@ -1394,26 +1303,32 @@ gckKERNEL_DestroyProcessDB(
                                                       handle,
                                                       &nodeObject));
 
+                /* Unlock CPU. */
+                gcmkVERIFY_OK(gckVIDMEM_NODE_UnlockCPU(
+                    record->kernel, nodeObject, ProcessID, gcvTRUE, gcvFALSE));
+
                 /* Unlock what we still locked */
-                status = gckVIDMEM_Unlock(record->kernel,
-                                          nodeObject,
-                                          nodeObject->type,
-                                          &asynchronous);
+                status = gckVIDMEM_NODE_Unlock(record->kernel,
+                                               nodeObject,
+                                               ProcessID,
+                                               &asynchronous);
 
                 {
+                    /* Deref handle. */
                     gcmkVERIFY_OK(gckVIDMEM_HANDLE_Dereference(record->kernel,
                                                                ProcessID,
                                                                handle));
 
                     if (gcmIS_SUCCESS(status) && (gcvTRUE == asynchronous))
                     {
+                        /* Schedule unlock: will unlock and deref node later. */
                         status = gckEVENT_Unlock(record->kernel->eventObj,
                                                  gcvKERNEL_PIXEL,
-                                                 nodeObject,
-                                                 nodeObject->type);
+                                                 nodeObject);
                     }
                     else
                     {
+                        /* Deref node */
                         gcmkVERIFY_OK(gckVIDMEM_NODE_Dereference(record->kernel,
                                                                  nodeObject));
                     }
@@ -1446,20 +1361,6 @@ gckKERNEL_DestroyProcessDB(
                                gcmPTR2INT32(record->data), status);
                 break;
 
-            case gcvDB_MAP_USER_MEMORY:
-                status = gckOS_UnmapUserMemory(Kernel->os,
-                                               Kernel->core,
-                                               record->physical,
-                                               record->bytes,
-                                               gcmNAME_TO_PTR(record->data),
-                                               0);
-                gcmRELEASE_NAME(record->data);
-
-                gcmkTRACE_ZONE(gcvLEVEL_WARNING, gcvZONE_DATABASE,
-                               "DB: MAP USER MEMORY %d (status=%d)",
-                               gcmPTR2INT32(record->data), status);
-                break;
-
             case gcvDB_SHBUF:
                 /* Free shared buffer. */
                 status = gckKERNEL_DestroyShBuffer(record->kernel,
@@ -1469,6 +1370,56 @@ gckKERNEL_DestroyProcessDB(
                                "DB: SHBUF %u (status=%d)",
                                (gctUINT32)(gctUINTPTR_T) record->data, status);
                 break;
+
+#if gcdENABLE_SW_PREEMPTION
+            case gcvDB_PRIORITY:
+                /* Commit done and trigger the lower priority queue. */
+                {
+                    gctUINT32 priorityID = gcmPTR2INT32(record->data);
+                    gceHARDWARE_TYPE type = Kernel->hardware->type;
+                    gctUINT32 id = 0;
+
+                    if (priorityID >= gcdMAX_PRIORITY_QUEUE_NUM)
+                    {
+                        gcmkPRINT("Galcore Info: get an error priority.");
+                        break;
+                    }
+
+                    Kernel->priorityDBCreated[priorityID] = gcvFALSE;
+
+                    gcmkVERIFY_OK(gckOS_AtomGet(Kernel->os, Kernel->device->atomPriorityID, &id));
+
+                    if (id > 0 && priorityID == id)
+                    {
+                        gcmkVERIFY_OK(gckOS_AtomDecrement(Kernel->os, Kernel->device->atomPriorityID, &id));
+                        while (--id)
+                        {
+                            gcmkVERIFY_OK(gckOS_AcquireMutex(Kernel->os, Kernel->priorityQueueMutex[id], gcvINFINITE));
+                            if (!Kernel->priorityQueues[id] || !Kernel->priorityQueues[id]->head)
+                            {
+                                gcmkVERIFY_OK(gckOS_AtomDecrement(Kernel->os, kernel->device->atomPriorityID, &id));
+                            }
+
+                            gcmkVERIFY_OK(gckOS_ReleaseMutex(Kernel->os, Kernel->priorityQueueMutex[id]));
+                        }
+                    }
+
+                    if (type == gcvHARDWARE_3D || type == gcvHARDWARE_3D2D || type == gcvHARDWARE_VIP)
+                    {
+                        gckKERNEL kernel = gcvNULL;
+                        gctINT i;
+
+                        for (i = 0; i < Kernel->device->coreNum; i++)
+                        {
+                            kernel = Kernel->device->coreInfoArray[i].kernel;
+
+                            gcmkVERIFY_OK(gckOS_ReleaseSemaphoreEx(kernel->os, kernel->preemptSema));
+                        }
+                    }
+                }
+
+                break;
+#endif
 
             default:
                 gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_DATABASE,
@@ -1485,6 +1436,8 @@ gckKERNEL_DestroyProcessDB(
                                                gcvNULL));
         }
     }
+
+    gcmkONERROR(gckKERNEL_DestroyProcessReservedUserMap(Kernel, ProcessID));
 
     /* Acquire the database mutex. */
     gcmkONERROR(gckOS_AcquireMutex(Kernel->os, Kernel->db->dbMutex, gcvINFINITE));
@@ -1583,7 +1536,7 @@ gckKERNEL_QueryProcessDB(
     gcsDATABASE_PTR database;
     gcePOOL vidMemPool;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d Type=%d Info=0x%x",
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d Type=%d Info=%p",
                    Kernel, ProcessID, Type, Info);
 
     /* Verify the arguments. */
@@ -1641,12 +1594,6 @@ gckKERNEL_QueryProcessDB(
                                   gcmSIZEOF(database->mapMemory));
         break;
 
-    case gcvDB_MAP_USER_MEMORY:
-        gckOS_MemCopy(&Info->counters,
-                                  &database->mapUserMemory,
-                                  gcmSIZEOF(database->mapUserMemory));
-        break;
-
     default:
         break;
     }
@@ -1674,7 +1621,7 @@ gckKERNEL_FindHandleDatbase(
     gceSTATUS status;
     gcsDATABASE_PTR database;
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d",
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d",
                    Kernel, ProcessID);
 
     /* Verify the arguments. */
@@ -1696,82 +1643,6 @@ OnError:
     return status;
 }
 
-#if gcdPROCESS_ADDRESS_SPACE
-gceSTATUS
-gckKERNEL_GetProcessMMU(
-    IN gckKERNEL Kernel,
-    OUT gckMMU * Mmu
-    )
-{
-    gceSTATUS status;
-    gcsDATABASE_PTR database;
-    gctUINT32 processID;
-
-    gcmkONERROR(gckOS_GetProcessID(&processID));
-
-    gcmkONERROR(gckKERNEL_FindDatabase(Kernel, processID, gcvFALSE, &database));
-
-    *Mmu = database->mmu;
-
-    return gcvSTATUS_OK;
-
-OnError:
-    return status;
-}
-#endif
-
-#if gcdSECURE_USER
-/*******************************************************************************
-**  gckKERNEL_GetProcessDBCache
-**
-**  Get teh secure cache from a process database.
-**
-**  INPUT:
-**
-**      gckKERNEL Kernel
-**          Pointer to a gckKERNEL object.
-**
-**      gctUINT32 ProcessID
-**          Process ID used to identify the database.
-**
-**  OUTPUT:
-**
-**      gcskSECURE_CACHE_PTR * Cache
-**          Pointer to a variable that receives the secure cache pointer.
-*/
-gceSTATUS
-gckKERNEL_GetProcessDBCache(
-    IN gckKERNEL Kernel,
-    IN gctUINT32 ProcessID,
-    OUT gcskSECURE_CACHE_PTR * Cache
-    )
-{
-    gceSTATUS status;
-    gcsDATABASE_PTR database;
-
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d", Kernel, ProcessID);
-
-    /* Verify the arguments. */
-    gcmkVERIFY_OBJECT(Kernel, gcvOBJ_KERNEL);
-    gcmkVERIFY_ARGUMENT(Cache != gcvNULL);
-
-    /* Find the database. */
-    gcmkONERROR(gckKERNEL_FindDatabase(Kernel, ProcessID, gcvFALSE, &database));
-
-    /* Return the pointer to the cache. */
-    *Cache = &database->cache;
-
-    /* Success. */
-    gcmkFOOTER_ARG("*Cache=0x%x", *Cache);
-    return gcvSTATUS_OK;
-
-OnError:
-    /* Return the status. */
-    gcmkFOOTER();
-    return status;
-}
-#endif
-
 gceSTATUS
 gckKERNEL_DumpProcessDB(
     IN gckKERNEL Kernel
@@ -1781,7 +1652,7 @@ gckKERNEL_DumpProcessDB(
     gctINT i, pid;
     gctUINT8 name[24];
 
-    gcmkHEADER_ARG("Kernel=0x%x", Kernel);
+    gcmkHEADER_ARG("Kernel=%p", Kernel);
 
     /* Acquire the database mutex. */
     gcmkVERIFY_OK(
@@ -1840,8 +1711,8 @@ gckKERNEL_DumpVidMemUsage(
     gcsDATABASE_COUNTERS * counter;
     gctUINT32 i = 0;
 
-    static gctCONST_STRING surfaceTypes[] = {
-        "UNKNOWN",
+    static gctCONST_STRING vidmemTypes[] = {
+        "GENERIC",
         "INDEX",
         "VERTEX",
         "TEXTURE",
@@ -1857,10 +1728,14 @@ gckKERNEL_DumpVidMemUsage(
         "TXDESC",
         "FENCE",
         "TFBHEADER",
+        "COMMAND",
     };
 
-    gcmkHEADER_ARG("Kernel=0x%x ProcessID=%d",
+    gcmkHEADER_ARG("Kernel=%p ProcessID=%d",
                    Kernel, ProcessID);
+
+    gcmSTATIC_ASSERT(gcmCOUNTOF(vidmemTypes) == gcvVIDMEM_TYPE_COUNT,
+                     "Video memory type mismatch");
 
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Kernel, gcvOBJ_KERNEL);
@@ -1876,11 +1751,11 @@ gckKERNEL_DumpVidMemUsage(
 
     _DumpCounter(counter, "Total Video Memory");
 
-    for (i = 0; i < gcvSURF_NUM_TYPES; i++)
+    for (i = 0; i < gcvVIDMEM_TYPE_COUNT; i++)
     {
         counter = &database->vidMemType[i];
 
-        _DumpCounter(counter, surfaceTypes[i]);
+        _DumpCounter(counter, vidmemTypes[i]);
     }
 
     /* Success. */

@@ -7,6 +7,7 @@
 #include <linux/kvm.h>
 
 #include <asm/kvm/nid.h>
+#include <asm/kvm/gva_cache.h>
 
 #define	GMMID_MAX_LIMIT		(GPID_MAX_LIMIT)
 #define RESERVED_GMMIDS		1	/* 0 is reserved for init_mm */
@@ -26,6 +27,7 @@
 typedef struct gmm_struct {
 	kvm_nid_t nid;			/* numeric ID of the host agent */
 					/* of guest mm structure */
+	int id;				/* same as nid.nr */
 	atomic_t mm_count;		/* How many references to guest mm */
 					/* shared mm */
 #ifdef	CONFIG_GUEST_MM_SPT_LIST
@@ -35,10 +37,13 @@ typedef struct gmm_struct {
 	size_t total_released;		/* total number of allocated and */
 					/* released SPs through list */
 #endif	/* CONFIG_GUEST_MM_SPT_LIST */
-#ifdef	CONFIG_KVM_HV_MMU
 	hpa_t root_hpa;			/* physical base of root shadow PT */
 					/* for guest mm on host */
+					/* to access only to user space */
+	hpa_t gk_root_hpa;		/* root shadow PT for guest kernel */
+					/* to access to user & kernel spaces */
 	gfn_t root_gpa;			/* 'physical' base of guest root PT */
+#ifdef	CONFIG_KVM_HV_MMU
 	gpa_t os_pptb;			/* guest kernel root PT physical base */
 	gpa_t u_pptb;			/* guest user root PT physical base */
 	gva_t os_vptb;			/* guest kernel root PT virtual base */
@@ -52,10 +57,25 @@ typedef struct gmm_struct {
 					/* the guest mm */
 	cpumask_t cpu_vm_mask;		/* mask of CPUs where the mm is */
 					/* in use or was some early */
+	gva_cache_t *gva_cache;		/* gva -> gpa,hva cache */
+	struct rhashtable *ctx_stacks;	/* hash table with signal stacks */
+					/* for contexts created by guest */
 } gmm_struct_t;
 
 /* same as accessor for struct mm_struct's cpu_vm_mask but for guest mm */
-#define gmm_cpumask(gmm) (&(gmm)->cpu_vm_mask)
+static inline void gmm_init_cpumask(gmm_struct_t *gmm)
+{
+	unsigned long cpu_vm_mask = (unsigned long)gmm;
+
+	cpu_vm_mask += offsetof(gmm_struct_t, cpu_vm_mask);
+	cpumask_clear((struct cpumask *)cpu_vm_mask);
+}
+
+/* Future-safe accessor for struct mm_struct's cpu_vm_mask. */
+static inline cpumask_t *gmm_cpumask(gmm_struct_t *gmm)
+{
+	return (struct cpumask *)&gmm->cpu_vm_mask;
+}
 
 typedef struct kvm_nid_table gmmid_table_t;
 
@@ -66,7 +86,10 @@ struct kvm;
 extern int kvm_guest_mm_drop(struct kvm_vcpu *vcpu, int gmmid_nr);
 extern int kvm_activate_guest_mm(struct kvm_vcpu *vcpu,
 			int active_gmmid_nr, int gmmid_nr, gpa_t u_phys_ptb);
+extern int kvm_pv_init_gmm_create(struct kvm *kvm);
 extern int kvm_guest_pv_mm_init(struct kvm *kvm);
+extern void kvm_guest_pv_mm_reset(struct kvm *kvm);
+extern void kvm_guest_pv_mm_free(struct kvm *kvm);
 extern void kvm_guest_pv_mm_destroy(struct kvm *kvm);
 
 #define	for_each_guest_mm(gmm, entry, next, gmmid_table)	\
@@ -75,6 +98,8 @@ extern void kvm_guest_pv_mm_destroy(struct kvm *kvm);
 #define gmmid_entry(ptr)	container_of(ptr, gmm_struct_t, nid)
 #define	gmmid_table_lock(gmmid_table)	\
 		nid_table_lock(gmmid_table)
+#define	gmmid_table_trylock(gmmid_table)	\
+		nid_table_trylock(gmmid_table)
 #define	gmmid_table_unlock(gmmid_table)	\
 		nid_table_unlock(gmmid_table)
 #define	gmmid_table_lock_irq(gmmid_table)	\

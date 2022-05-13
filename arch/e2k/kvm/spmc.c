@@ -93,6 +93,15 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_SPMC_SHUTDOWN_MODE
+#undef	DebugSHUTDOWN
+#define	DEBUG_SPMC_SHUTDOWN_MODE	0	/* SPMC shutdown debugging */
+#define	DebugSHUTDOWN(fmt, args...)					\
+({									\
+	if (DEBUG_SPMC_SHUTDOWN_MODE || kvm_debug)			\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 #undef	VERBOSE_DEBUG_SPMC_REGS_MODE
 #undef	DebugREGS
 #define	VERBOSE_DEBUG_SPMC_REGS_MODE	0	/* SPMC registers verbode */
@@ -479,24 +488,29 @@ static void spmc_check_sci(struct kvm_spmc *spmc)
 	}
 }
 
-static void update_sleep_state(struct kvm_spmc *spmc)
+static void update_sleep_state(struct kvm_vcpu *vcpu, struct kvm_spmc *spmc)
 {
 	if (kvm_spmc_sleep_state_enable(spmc)) {
-		switch (kvm_spmc_sleep_state(spmc)) {
+		spmc->s_state = kvm_spmc_sleep_state(spmc);
+
+		switch (spmc->s_state) {
+		case SPMC_S0_SLEEP_STATE:
+			spmc->g_state = SPMC_G0_STATE;
+			break;
 		case SPMC_S3_SLEEP_STATE:
 		case SPMC_S4_SLEEP_STATE:
-		case SPMC_S5_SLEEP_STATE:
 			spmc->g_state = SPMC_G1_STATE;
-			spmc->s_state = kvm_spmc_sleep_state(spmc);
-
-			pr_err("%s(): sleep state %d support is not yet "
-				"supported\n",
+			pr_err("%s(): unimplemented sleep state %d\n",
 				__func__, spmc->s_state);
-
+			break;
+		case SPMC_S5_SLEEP_STATE:
+			spmc->g_state = SPMC_G2_STATE;
+			vcpu->arch.exit_shutdown_terminate = KVM_EXIT_E2K_SHUTDOWN;
+			DebugSHUTDOWN("SPMC shutdown\n");
 			break;
 		default:
-			spmc->g_state = SPMC_G1_STATE;
-			spmc->s_state = SPMC_S0_SLEEP_STATE;
+			pr_err("%s(): unknown sleep state %d\n",
+				__func__, spmc->s_state);
 			break;
 		}
 		reset_sleep_state_enable(spmc);
@@ -772,7 +786,7 @@ static int spmc_conf_io_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 			spmc->regs.pm1_control.slp_en = pm_control.slp_en;
 			reg = spmc->regs.pm1_control.reg;
 			reg_name = "PM1 Control";
-			update_sleep_state(spmc);
+			update_sleep_state(vcpu, spmc);
 			break;
 		}
 		case SPMC_ATNSUS_CNT_OFF:
@@ -968,7 +982,7 @@ static void kvm_spmc_reset(struct kvm_spmc *spmc)
 	spmc_set_reg(spmc, SPMC_ATNSUS_CNT_OFF, 0x00370000);
 	spmc_set_reg(spmc, SPMC_PURST_CNT_OFF, 0x00370000);
 
-	spmc->sci_state == false;
+	spmc->sci_state = false;
 	spmc->s_state = SPMC_S0_SLEEP_STATE;
 	spmc->g_state = SPMC_G0_STATE;
 
@@ -1036,9 +1050,7 @@ int kvm_spmc_set_base(struct kvm *kvm, int node_id, unsigned long conf_base)
 	int ret;
 
 	if (spmc == NULL) {
-		kvm_create_spmc(kvm, node_id,
-			((cpu_freq_hz + (USEC_PER_SEC - 1)) / USEC_PER_SEC) *
-				USEC_PER_SEC,
+		kvm_create_spmc(kvm, node_id, cpu_freq_hz,
 			EIOH_SPMC_PM_TIMER_FREQ	/* only SPMC of EIOHub */
 						/* is now supported */);
 		spmc = kvm_get_spmc(kvm, node_id);

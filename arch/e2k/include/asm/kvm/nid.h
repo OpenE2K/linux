@@ -45,7 +45,23 @@ extern void kvm_do_free_nid(kvm_nid_t *nid, struct kvm_nid_table *nid_table);
 extern void kvm_free_nid(kvm_nid_t *nid, struct kvm_nid_table *nid_table);
 extern int kvm_nidmap_init(struct kvm_nid_table *nid_table,
 		int nid_max_limit, int reserved_nids, int last_nid);
+extern void kvm_nidmap_reset(struct kvm_nid_table *nid_table, int last_nid);
 extern void kvm_nidmap_destroy(struct kvm_nid_table *nid_table);
+
+static inline kvm_nid_t *
+kvm_do_find_nid(struct kvm_nid_table *nid_table, int nid_nr, int hash_index)
+{
+	kvm_nid_t *nid;
+
+	hlist_for_each_entry(nid,
+			&(nid_table->nid_hash[hash_index]),
+			nid_chain) {
+		if (nid->nr == nid_nr) {
+			return nid;
+		}
+	}
+	return NULL;
+}
 
 static inline kvm_nid_t *
 kvm_find_nid(struct kvm_nid_table *nid_table, int nid_nr, int hash_index)
@@ -54,17 +70,9 @@ kvm_find_nid(struct kvm_nid_table *nid_table, int nid_nr, int hash_index)
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&nid_table->nidmap_lock, flags);
-	hlist_for_each_entry(nid,
-			&(nid_table->nid_hash[hash_index]),
-			nid_chain) {
-		if (nid->nr == nid_nr) {
-			raw_spin_unlock_irqrestore(&nid_table->nidmap_lock,
-							flags);
-			return nid;
-		}
-	}
+	nid = kvm_do_find_nid(nid_table, nid_nr, hash_index);
 	raw_spin_unlock_irqrestore(&nid_table->nidmap_lock, flags);
-	return NULL;
+	return nid;
 }
 
 #define	for_each_guest_nid_node(node, entry, next, nid_table,	\
@@ -75,6 +83,8 @@ kvm_find_nid(struct kvm_nid_table *nid_table, int nid_nr, int hash_index)
 			nid_hlist_member)
 #define	nid_table_lock(nid_table)	\
 		raw_spin_lock(&(nid_table)->nidmap_lock)
+#define	nid_table_trylock(nid_table)	\
+		raw_spin_trylock(&(nid_table)->nidmap_lock)
 #define	nid_table_unlock(nid_table)	\
 		raw_spin_unlock(&(nid_table)->nidmap_lock)
 #define	nid_table_lock_irq(nid_table)	\

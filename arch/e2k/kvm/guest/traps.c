@@ -21,6 +21,7 @@
 #include <asm/nmi.h>
 #include <asm/e2k_debug.h>
 
+#include <asm/kvm/guest/trace-hw-stacks.h>
 #include <asm/kvm/guest/traps.h>
 
 #ifdef CONFIG_USE_AAU
@@ -78,7 +79,6 @@
 	if (DEBUG_KVM_MMIO_MODE)					\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
-
 
 /*
  * The function handles page fault trap on address inside guest kernel:
@@ -216,6 +216,20 @@ int kvm_host_apply_pcsp_delta_to_signal_stack(unsigned long base,
 	ret = HYPERVISOR_apply_pcsp_bounds(base, size, start, end, delta);
 	if (ret != 0) {
 		pr_err("%s(): could not apply updated chain stack "
+			"boundaries, error %d\n",
+			__func__, ret);
+	}
+	return ret;
+}
+
+int kvm_host_apply_usd_delta_to_signal_stack(unsigned long top,
+					unsigned long delta, bool incr)
+{
+	int ret;
+
+	ret = HYPERVISOR_apply_usd_bounds(top, delta, incr);
+	if (ret != 0) {
+		pr_err("%s(): could not apply updated user data stack "
 			"boundaries, error %d\n",
 			__func__, ret);
 	}

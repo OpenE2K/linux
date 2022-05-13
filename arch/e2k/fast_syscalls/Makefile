@@ -7,7 +7,7 @@ ORIG_CFLAGS := $(subst $(space)-fprofile-generate-kernel$(space),$(space),$(ORIG
 ORIG_CFLAGS := $(subst $(space)-fprofile-use="$(PROFILE_USE)"$(space),$(space),$(ORIG_CFLAGS))
 KBUILD_CFLAGS = $(ORIG_CFLAGS)
 
-obj-y += fast_clock_gettime.o fast_syscalls.o clkr.o sclkr.o
+obj-y += fast_clock_gettime.o fast_syscalls.o sclkr.o
 obj-y += fast_getcpu.o fast_siggetmask.o \
 		fast_getcontext.o fast_set_return.o
 obj-$(CONFIG_COMPAT) += compat.o

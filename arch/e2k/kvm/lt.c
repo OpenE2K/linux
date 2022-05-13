@@ -1278,9 +1278,7 @@ int kvm_lt_set_base(struct kvm *kvm, int node_id, unsigned long new_base)
 		lt_freq = 500000;
 
 	if (lt == NULL) {
-		kvm_create_lt(kvm, node_id,
-			((cpu_freq_hz + (USEC_PER_SEC - 1)) / USEC_PER_SEC) *
-				USEC_PER_SEC,
+		kvm_create_lt(kvm, node_id, cpu_freq_hz,
 			lt_freq	/* now fixed, but is better to pass */
 				/* qemu as machine parameter and */
 				/* repass from qemu to KVM through ioctl() */);

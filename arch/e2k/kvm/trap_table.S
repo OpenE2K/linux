@@ -437,6 +437,28 @@ syscall_handler_switched_stacks:
 }
 .size $syscall_handler_trampoline, . - $syscall_handler_trampoline
 
+.global host_mkctxt_trampoline
+.section ".entry.text", "ax"
+.type host_mkctxt_trampoline,@function
+host_mkctxt_trampoline:
+	HANDLER_TRAMPOLINE %ctpr2, 11, host_mkctxt_trampoline_continue, 4
+host_mkctxt_switched_stacks:
+{
+	setsft;
+}
+.size $host_mkctxt_trampoline, . - $host_mkctxt_trampoline
+
+.global return_pv_vcpu_from_mkctxt
+.section ".entry.text", "ax"
+.type return_pv_vcpu_from_mkctxt,@function
+return_pv_vcpu_from_mkctxt:
+	HANDLER_TRAMPOLINE %ctpr2, 11, return_pv_vcpu_from_mkctxt_continue, 4
+return_pv_vcpu_from_mkctxt_switched_stacks:
+{
+	setsft;
+}
+.size $return_pv_vcpu_from_mkctxt, . - $return_pv_vcpu_from_mkctxt
+
 .global syscall_fork_trampoline
 .section ".entry.text", "ax"
 .type syscall_fork_trampoline,@function

@@ -134,7 +134,9 @@ extern unsigned int load_threshold;
 int spmc_get_temp_cur0(void) { return SPMC_TEMP_BAD_VALUE; }
 #endif /* CONFIG_L_PMC || CONFIG_S2_PMC */
 
-
+#if defined(CONFIG_PMC_R2KP)
+uint32_t r2kp_get_freq_mult(int cpu);
+#endif
 
 #endif /* __L_ASM_PMC_H__ */
 

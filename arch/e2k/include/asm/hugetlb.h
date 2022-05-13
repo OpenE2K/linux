@@ -46,8 +46,6 @@ static inline void huge_ptep_set_wrprotect(struct mm_struct *mm,
 					   unsigned long addr, pte_t *ptep)
 {
 	ptep_set_wrprotect(mm, addr, ptep);
-	if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE)
-		ptep_set_wrprotect(mm, addr, ++ptep);
 }
 
 #define __HAVE_ARCH_HUGE_PTEP_SET_ACCESS_FLAGS
@@ -58,8 +56,6 @@ static inline int huge_ptep_set_access_flags(struct vm_area_struct *vma,
 	int changed = !pte_same(*ptep, pte);
 	if (changed) {
 		set_pte_at(vma->vm_mm, addr, ptep, pte);
-		if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE)
-			set_pte_at(vma->vm_mm, addr, ++ptep, pte);
 		flush_tlb_range(vma, addr, addr + PMD_SIZE);
 	}
 	return changed;
@@ -75,8 +71,6 @@ static inline void huge_pte_clear(struct mm_struct *mm, unsigned long address,
 	 * All two pte's (pmd's) should be cleared.
 	 */
 	pte_clear(mm, address, page_table);
-	if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE)
-		pte_clear(mm, address, (++page_table));
 }
 
 #define __HAVE_ARCH_HUGE_PTEP_GET_AND_CLEAR

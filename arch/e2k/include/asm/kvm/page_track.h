@@ -1,11 +1,21 @@
 #ifndef _ASM_E2K_KVM_PAGE_TRACK_H
 #define _ASM_E2K_KVM_PAGE_TRACK_H
 
-#ifdef	CONFIG_KVM_HV_MMU
 enum kvm_page_track_mode {
 	KVM_PAGE_TRACK_WRITE,
 	KVM_PAGE_TRACK_MAX,
 };
+
+/*
+ * @flags argument of track_write() function to clarify the possible
+ * reason fow writing at protected area
+ */
+#define	THP_INVALIDATE_WR_TRACK		0x0001UL	/* to invalidate PT huge */
+							/* entry at THP mode */
+#define	NUMA_BALANCING_WR_TRACK		0x0010UL	/* to migrate from one */
+							/* NUMA node to other */
+
+#ifdef	CONFIG_KVM_HV_MMU
 
 /*
  * The notifier represented by @kvm_page_track_notifier_node is linked into
@@ -32,7 +42,7 @@ struct kvm_page_track_notifier_node {
 	 * @bytes: the written length.
 	 */
 	void (*track_write)(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
-				gpa_t gpa, const u8 *new, int bytes);
+			gpa_t gpa, const u8 *new, int bytes, unsigned long flags);
 	/*
 	 * It is called when memory slot is being moved or removed
 	 * users can drop write-protection for the pages in that memory slot
@@ -69,7 +79,7 @@ void
 kvm_page_track_unregister_notifier(struct kvm *kvm,
 				   struct kvm_page_track_notifier_node *n);
 void kvm_page_track_write(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
-				gpa_t gpa, const u8 *new, int bytes);
+		gpa_t gpa, const u8 *new, int bytes, unsigned long flags);
 void kvm_page_track_flush_slot(struct kvm *kvm, struct kvm_memory_slot *slot);
 #else	/* ! CONFIG_KVM_HV_MMU */
 static inline void kvm_page_track_init(struct kvm *kvm)

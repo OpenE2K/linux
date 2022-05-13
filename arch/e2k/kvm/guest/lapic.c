@@ -24,7 +24,7 @@
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
-#define	DEBUG_KVM_MODE	1	/* kernel virtual machine debugging */
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
 #define	DebugKVM(fmt, args...)						\
 ({									\
 	if (DEBUG_KVM_MODE)						\
@@ -196,6 +196,11 @@ success:
 __init int kvm_setup_boot_lapic_virq(void)
 {
 	return kvm_do_setup_lapic_virq(true, raw_smp_processor_id());
+}
+
+int kvm_setup_secondary_lapic_virq(unsigned int cpuid)
+{
+	return kvm_do_setup_lapic_virq(false, cpuid);
 }
 
 static int

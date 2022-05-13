@@ -6,11 +6,54 @@
 
 #include <asm/types.h>
 #include <asm/cpu_regs_types.h>
-#include <asm/cpu_regs_access.h>
 
 #ifndef __ASSEMBLY__
 #include <asm/e2k_api.h>
-#include <asm/e2k.h>
+
+/*
+ * Read Core Mode Register (CORE_MODE) to the structure
+ * Register fields access:		fff = AS_STRACT(CORE_MODE).xxx
+ * Register entire access:		reg_entire = AS_WORD(CORE_MODE)
+ */
+#define	NATIVE_READ_CORE_MODE_REG() \
+({ \
+	e2k_core_mode_t CORE_MODE; \
+	CORE_MODE.CORE_MODE_reg = NATIVE_READ_CORE_MODE_REG_VALUE(); \
+	CORE_MODE; \
+})
+#define	READ_CORE_MODE_REG() \
+({ \
+	e2k_core_mode_t CORE_MODE; \
+	CORE_MODE.CORE_MODE_reg = READ_CORE_MODE_REG_VALUE(); \
+	CORE_MODE; \
+})
+#define	BOOT_READ_CORE_MODE_REG() \
+({ \
+	e2k_core_mode_t CORE_MODE; \
+	CORE_MODE.CORE_MODE_reg = BOOT_READ_CORE_MODE_REG_VALUE(); \
+	CORE_MODE; \
+})
+
+/* Fix header dependency hell.  cpu_regs_access.h eventually includes
+ * macros for paravirtualized guest which in turn rely on IS_HV_GM(),
+ * and IS_HV_GM() relies in READ_CORE_MODE_REG() defined in this file. */
+#include <asm/cpu_regs_access.h>
+
+/*
+ * Write Core Mode Register (CORE_MODE) from the structure
+ * Register fields filling:		AS_STRACT(CORE_MODE).xxx = fff
+ * Register entire filling:		AS_WORD(CORE_MODE) = CORE_MODE_value
+ */
+#define	NATIVE_WRITE_CORE_MODE_REG(CORE_MODE)	\
+		NATIVE_WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
+#define	BOOT_NATIVE_WRITE_CORE_MODE_REG(CORE_MODE)	\
+		BOOT_NATIVE_WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
+#define	WRITE_CORE_MODE_REG(CORE_MODE)		\
+		WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
+#define	BOOT_WRITE_CORE_MODE_REG(CORE_MODE)	\
+		BOOT_WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
+
+
 
 #define	NATIVE_STRIP_PCSHTP_WINDOW()	NATIVE_WRITE_PCSHTP_REG_SVALUE(0)
 #define	STRIP_PCSHTP_WINDOW()		WRITE_PCSHTP_REG_SVALUE(0)
@@ -3304,44 +3347,6 @@ read_CUIR_reg(void)
 {
 	return READ_CUIR_REG();
 }
-
-/*
- * Read Core Mode Register (CORE_MODE) to the structure
- * Register fields access:		fff = AS_STRACT(CORE_MODE).xxx
- * Register entire access:		reg_entire = AS_WORD(CORE_MODE)
- */
-#define	NATIVE_READ_CORE_MODE_REG() \
-({ \
-	e2k_core_mode_t CORE_MODE; \
-	CORE_MODE.CORE_MODE_reg = NATIVE_READ_CORE_MODE_REG_VALUE(); \
-	CORE_MODE; \
-})
-#define	READ_CORE_MODE_REG() \
-({ \
-	e2k_core_mode_t CORE_MODE; \
-	CORE_MODE.CORE_MODE_reg = READ_CORE_MODE_REG_VALUE(); \
-	CORE_MODE; \
-})
-#define	BOOT_READ_CORE_MODE_REG() \
-({ \
-	e2k_core_mode_t CORE_MODE; \
-	CORE_MODE.CORE_MODE_reg = BOOT_READ_CORE_MODE_REG_VALUE(); \
-	CORE_MODE; \
-})
-
-/*
- * Write Core Mode Register (CORE_MODE) from the structure
- * Register fields filling:		AS_STRACT(CORE_MODE).xxx = fff
- * Register entire filling:		AS_WORD(CORE_MODE) = CORE_MODE_value
- */
-#define	NATIVE_WRITE_CORE_MODE_REG(CORE_MODE)	\
-		NATIVE_WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
-#define	BOOT_NATIVE_WRITE_CORE_MODE_REG(CORE_MODE)	\
-		BOOT_NATIVE_WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
-#define	WRITE_CORE_MODE_REG(CORE_MODE)		\
-		WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
-#define	BOOT_WRITE_CORE_MODE_REG(CORE_MODE)	\
-		BOOT_WRITE_CORE_MODE_REG_VALUE(CORE_MODE.CORE_MODE_reg)
 
 /*
  * Read word Processor State Register (PSR) to the structure

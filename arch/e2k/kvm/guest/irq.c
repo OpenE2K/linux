@@ -40,7 +40,7 @@
 
 #undef	DEBUG_DIRECT_IRQ_MODE
 #undef	DebugDIRQ
-#define	DEBUG_DIRECT_IRQ_MODE	1	/* direct IRQ injection debugging */
+#define	DEBUG_DIRECT_IRQ_MODE	0	/* direct IRQ injection debugging */
 #define	DebugDIRQ(fmt, args...)						\
 ({									\
 	if (DEBUG_DIRECT_IRQ_MODE)					\
@@ -363,9 +363,3 @@ __init void kvm_virqs_init(int cpu)
 	regs = this_cpu_ptr(&vcpu_virq_regs);
 	memset(regs, 0, sizeof(*regs));
 }
-
-notrace unsigned long kvm_hypervisor_inject_interrupt(void)
-{
-	return HYPERVISOR_inject_interrupt();
-}
-EXPORT_SYMBOL(kvm_hypervisor_inject_interrupt);

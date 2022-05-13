@@ -3,6 +3,8 @@
 
 #ifdef __KERNEL__
 
+extern bool use_pcie_no_snoop;
+
 #define HAVE_PCI_LEGACY			1
 #define HAVE_MULTIROOT_BUS_PCI_DOMAINS	1	/* each IOHUB has own */
 						/* config space */
@@ -40,6 +42,7 @@ struct pci_raw_ops {
 
 extern struct pci_raw_ops *raw_pci_ops;
 
+#define ARCH_GENERIC_PCI_MMAP_RESOURCE	1
 #define HAVE_PCI_MMAP
 #define arch_can_pci_mmap_wc()	1
 
@@ -48,6 +51,7 @@ extern struct pci_raw_ops *raw_pci_ops;
 
 /* generic pci stuff */
 #include <asm-generic/pci.h>
+
 #endif  /* __KERNEL__ */
 
 #endif /* _E2K_PCI_H */

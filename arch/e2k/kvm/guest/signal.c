@@ -122,13 +122,6 @@ int kvm_signal_setup(struct pt_regs *regs)
 	u64 pframe[32];
 	int ret;
 
-	ret = signal_rt_frame_setup(regs);
-	if (ret != 0) {
-		pr_err("%s(): setup signal rt frame failed, error %d\n",
-			__func__, ret);
-		return ret;
-	}
-
 	/*
 	 * Copy user's part of kernel hardware stacks into user
 	 */
@@ -147,13 +140,26 @@ int kvm_signal_setup(struct pt_regs *regs)
 	 * although a copy in memory may be needed
 	 */
 	ret = kvm_copy_injected_pcs_frames_to_user(regs, 2);
-	if (ret != 0) {
-		pr_err("%s(): could not restore user hardware stacks frames\n",
-			__func__);
+	if (unlikely(ret != 0)) {
+		if (likely(ret == -ERESTARTSYS)) {
+			/* there is fatal signal to kill the process */
+			;
+		} else {
+			pr_err("%s(): could not restore user hardware stacks "
+				"frames\n",
+				__func__);
+		}
 		return ret;
 	}
 
-	collapse_kernel_hw_stacks(stacks);
+	collapse_kernel_hw_stacks(regs, stacks);
+
+	ret = signal_rt_frame_setup(regs);
+	if (ret != 0) {
+		pr_err("%s(): setup signal rt frame failed, error %d\n",
+			__func__, ret);
+		return ret;
+	}
 
 	/*
 	 * After having called setup_signal_stack() we must unroll signal
@@ -212,7 +218,26 @@ free_signal_stack:
 	return ret;
 }
 
-int kvm_complete_long_jump(struct pt_regs *regs)
+int kvm_longjmp_copy_user_to_kernel_hw_stacks(pt_regs_t *regs, pt_regs_t *new_regs)
+{
+	e2k_stacks_t *new_stacks = &new_regs->stacks;
+	int ret;
+
+	ret = native_longjmp_copy_user_to_kernel_hw_stacks(regs, new_regs);
+	if (ret)
+		goto out;
+
+	if (regs->copyed.pcs_size != 0) {
+		/* the user chain frames at the kernel stack has been updated, */
+		/* so it need update size of updated part of user stack frames */
+		regs->copyed.pcs_size = PCSHTP_SIGN_EXTEND(new_stacks->pcshtp);
+	}
+
+out:
+	return ret;
+}
+
+int kvm_complete_long_jump(struct pt_regs *regs, bool switch_stack, u64 to_key)
 {
 	kvm_long_jump_info_t regs_info;
 	int ret;
@@ -234,7 +259,7 @@ int kvm_complete_long_jump(struct pt_regs *regs)
 	regs_info.cr1_hi = regs->crs.cr1_hi.CR1_hi_half;
 
 retry:
-	ret = HYPERVISOR_complete_long_jump(&regs_info);
+	ret = HYPERVISOR_complete_long_jump(&regs_info, switch_stack, to_key);
 	if (unlikely(ret == -EAGAIN)) {
 		pr_err("%s(): could not complete long jump on host, "
 			"error %d, retry\n",
@@ -247,4 +272,20 @@ retry:
 		force_sig(SIGKILL);
 	}
 	return ret;
+}
+
+void kvm_update_kernel_crs(e2k_mem_crs_t *crs, e2k_mem_crs_t *prev_crs,
+			e2k_mem_crs_t *p_prev_crs)
+{
+	HYPERVISOR_update_guest_kernel_crs(crs, prev_crs, p_prev_crs);
+}
+
+int kvm_add_ctx_signal_stack(u64 key, bool is_main)
+{
+	return HYPERVISOR_add_ctx_signal_stack(key, is_main);
+}
+
+void kvm_remove_ctx_signal_stack(u64 key)
+{
+	HYPERVISOR_remove_ctx_signal_stack(key);
 }

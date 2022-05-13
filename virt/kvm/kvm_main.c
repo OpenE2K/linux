@@ -175,6 +175,13 @@ __weak void kvm_arch_mmu_notifier_invalidate_range(struct kvm *kvm,
 {
 }
 
+#ifdef	CONFIG_E2K
+__weak void kvm_arch_mmu_notifier_invalidate_range_end(struct kvm *kvm,
+					const struct mmu_notifier_range *range)
+{
+}
+#endif	/* CONFIG_E2K */
+
 bool kvm_is_zone_device_pfn(kvm_pfn_t pfn)
 {
 	/*
@@ -481,6 +488,9 @@ static void kvm_mmu_notifier_invalidate_range_end(struct mmu_notifier *mn,
 	spin_unlock(&kvm->mmu_lock);
 
 	BUG_ON(kvm->mmu_notifier_count < 0);
+#ifdef	CONFIG_E2K
+	kvm_arch_mmu_notifier_invalidate_range_end(kvm, range);
+#endif	/* CONFIG_E2K */
 }
 
 static int kvm_mmu_notifier_clear_flush_young(struct mmu_notifier *mn,

@@ -2752,8 +2752,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xf144140,	/*	recvmmsg 349		iPiiP	*/
 					0, 0, 0, 0, 0, 0 },
-	{ 0x0,		/*	cnt_point 350			ni_syscall */
-					0, 0, 0, 0, 0, 0 },
+	{ 0x0,	/*	reserved	350	*/ 0, 0, 0, 0, 0, 0 },
 	{ 0xffff440,	/* timerfd_create 351		ii	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0xff11440,	/* timerfd_settime 352		iiPP	*/

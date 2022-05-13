@@ -20,6 +20,7 @@
 #include "ddk750_reg.h"
 #include "ddk750_chip.h"
 #include "ddk750_power.h"
+#include "lynx_drv.h"
 typedef struct _pllcalparam {
 	unsigned char power;	/* d : 0~ 6 */
 	unsigned char pod;
@@ -28,14 +29,14 @@ typedef struct _pllcalparam {
 } pllcalparam;
 
 
-logical_chip_type_t getChipType()
+logical_chip_type_t getChipType(struct lynx_share *share)
 {
 	unsigned short physicalID;
 	unsigned char physicalRev;
 	logical_chip_type_t chip;
 
-	physicalID = devId750;	/* either 0x718 or 0x750 */
-	physicalRev = revId750;
+	physicalID = share->devid;	/* either 0x718 or 0x750 */
+	physicalRev = share->revid;
 
 	if (physicalID == 0x718) {
 		chip = SM718;
@@ -69,7 +70,8 @@ inline unsigned int calcPLL(pll_value_t * pPLL)
 	    twoToPowerOfx(pPLL->OD) / twoToPowerOfx(pPLL->POD);
 }
 
-unsigned int getPllValue(clock_type_t clockType, pll_value_t * pPLL)
+unsigned int getPllValue(struct lynx_share *share,
+			clock_type_t clockType, pll_value_t *pPLL)
 {
 	unsigned int ulPllReg = 0;
 
@@ -78,19 +80,19 @@ unsigned int getPllValue(clock_type_t clockType, pll_value_t * pPLL)
 
 	switch (clockType) {
 	case MXCLK_PLL:
-		ulPllReg = PEEK32(MXCLK_PLL_CTRL);
+		ulPllReg = PEEK32(share->pvReg, MXCLK_PLL_CTRL);
 		break;
 	case PRIMARY_PLL:
-		ulPllReg = PEEK32(PANEL_PLL_CTRL);
+		ulPllReg = PEEK32(share->pvReg, PANEL_PLL_CTRL);
 		break;
 	case SECONDARY_PLL:
-		ulPllReg = PEEK32(CRT_PLL_CTRL);
+		ulPllReg = PEEK32(share->pvReg, CRT_PLL_CTRL);
 		break;
 	case VGA0_PLL:
-		ulPllReg = PEEK32(VGA_PLL0_CTRL);
+		ulPllReg = PEEK32(share->pvReg, VGA_PLL0_CTRL);
 		break;
 	case VGA1_PLL:
-		ulPllReg = PEEK32(VGA_PLL1_CTRL);
+		ulPllReg = PEEK32(share->pvReg, VGA_PLL1_CTRL);
 		break;
 	}
 	pPLL->M = 255 & (ulPllReg >> PANEL_PLL_CTRL_M_LSB);
@@ -102,13 +104,13 @@ unsigned int getPllValue(clock_type_t clockType, pll_value_t * pPLL)
 }
 
 
-unsigned int getChipClock()
+unsigned int getChipClock(struct lynx_share *share)
 {
 	pll_value_t pll;
-	if (getChipType() == SM750LE)
+	if (getChipType(share) == SM750LE)
 		return MHz(130);
 
-	return getPllValue(MXCLK_PLL, &pll);
+	return getPllValue(share, MXCLK_PLL, &pll);
 }
 
 
@@ -117,13 +119,13 @@ unsigned int getChipClock()
  *
  * Input: Frequency to be set.
  */
-void setChipClock(unsigned int frequency)
+void setChipClock(struct lynx_share *share, unsigned int frequency)
 {
 	pll_value_t pll;
 	unsigned int ulActualMxClk;
 
 	/* Cheok_0509: For SM750LE, the chip clock is fixed. Nothing to set. */
-	if (getChipType() == SM750LE)
+	if (getChipType(share) == SM750LE)
 		return;
 
 
@@ -139,21 +141,21 @@ void setChipClock(unsigned int frequency)
 		 * Sometime, the chip cannot set up the exact clock required by User.
 		 * Return value from calcPllValue() gives the actual possible clock.
 		 */
-		ulActualMxClk = calcPllValue(frequency, &pll);
+		ulActualMxClk = calcPllValue(share, frequency, &pll);
 
 		/* Master Clock Control: MXCLK_PLL */
-		POKE32(MXCLK_PLL_CTRL, formatPllReg(&pll));
+		POKE32(share->pvReg, MXCLK_PLL_CTRL, formatPllReg(&pll));
 	}
 }
 
 
 
-void setMemoryClock(unsigned int frequency)
+void setMemoryClock(struct lynx_share *share, unsigned int frequency)
 {
 	unsigned int ulReg, divisor;
 
 	/* Cheok_0509: For SM750LE, the memory clock is fixed. Nothing to set. */
-	if (getChipType() == SM750LE)
+	if (getChipType(share) == SM750LE)
 		return;
 
 	if (frequency != 0) {
@@ -163,9 +165,9 @@ void setMemoryClock(unsigned int frequency)
 			frequency = MHz(336);
 		/* Calculate the divisor */
 		divisor =
-		    (unsigned int) roundedDiv(getChipClock(), frequency);
+		    (unsigned int) roundedDiv(getChipClock(share), frequency);
 		/* Set the corresponding divisor in the register. */
-		ulReg = PEEK32(CURRENT_GATE);
+		ulReg = PEEK32(share->pvReg, CURRENT_GATE);
 		switch (divisor) {
 		default:
 		case 1:
@@ -182,7 +184,7 @@ void setMemoryClock(unsigned int frequency)
 			ulReg = ulReg | (3 << CURRENT_GATE_M2XCLK_LSB);
 			break;
 		}
-		setCurrentGate(ulReg);
+		setCurrentGate(share, ulReg);
 	}
 }
 
@@ -195,12 +197,12 @@ void setMemoryClock(unsigned int frequency)
  * NOTE:
  *      The maximum frequency the engine can run is 168MHz.
  */
-void setMasterClock(unsigned int frequency)
+void setMasterClock(struct lynx_share *share, unsigned int frequency)
 {
 	unsigned int ulReg, divisor;
 
 	/* Cheok_0509: For SM750LE, the memory clock is fixed. Nothing to set. */
-	if (getChipType() == SM750LE)
+	if (getChipType(share) == SM750LE)
 		return;
 
 	if (frequency != 0) {
@@ -210,9 +212,9 @@ void setMasterClock(unsigned int frequency)
 			frequency = MHz(190);
 		/* Calculate the divisor */
 		divisor =
-		    (unsigned int) roundedDiv(getChipClock(), frequency);
+		    (unsigned int) roundedDiv(getChipClock(share), frequency);
 		/* Set the corresponding divisor in the register. */
-		ulReg = PEEK32(CURRENT_GATE);
+		ulReg = PEEK32(share->pvReg, CURRENT_GATE);
 		switch (divisor) {
 		default:
 		case 3:
@@ -229,27 +231,27 @@ void setMasterClock(unsigned int frequency)
 			ulReg = ulReg | (3 << CURRENT_GATE_MCLK_LSB);
 			break;
 		}
-		setCurrentGate(ulReg);
+		setCurrentGate(share, ulReg);
 	}
 }
 
 
-unsigned int ddk750_getVMSize()
+unsigned int ddk750_getVMSize(struct lynx_share *share)
 {
 	unsigned int reg;
 	unsigned int data;
 
 	/* sm750le only use 64 mb memory */
-	if (getChipType() == SM750LE)
+	if (getChipType(share) == SM750LE)
 		return MB(64);
 
 	/* for 750, always use power mode0 */
-	reg = PEEK32(MODE0_GATE);
+	reg = PEEK32(share->pvReg, MODE0_GATE);
 	reg = reg | (1 << MODE0_GATE_GPIO_LSB);
-	POKE32(MODE0_GATE, reg);
+	POKE32(share->pvReg, MODE0_GATE, reg);
 
 	/* get frame buffer size from GPIO */
-	reg = 3 & (PEEK32(MISC_CTRL) >> MISC_CTRL_LOCALMEM_SIZE_LSB);
+	reg = 3 & (PEEK32(share->pvReg, MISC_CTRL) >> MISC_CTRL_LOCALMEM_SIZE_LSB);
 	switch (reg) {
 	case MISC_CTRL_LOCALMEM_SIZE_8M:
 		data = MB(8);
@@ -271,28 +273,28 @@ unsigned int ddk750_getVMSize()
 
 }
 
-int ddk750_initHw(initchip_param_t * pInitParam)
+int ddk750_initHw(struct lynx_share *share, initchip_param_t *pInitParam)
 {
 
 	unsigned int ulReg;
 
 	if (pInitParam->powerMode != 0)
 		pInitParam->powerMode = 0;
-	setPowerMode(pInitParam->powerMode);
+	setPowerMode(share, pInitParam->powerMode);
 
 	/* Enable display power gate & LOCALMEM power gate */
-	ulReg = PEEK32(CURRENT_GATE);
+	ulReg = PEEK32(share->pvReg, CURRENT_GATE);
 	ulReg = ulReg | (1 << CURRENT_GATE_DISPLAY_LSB);
 	ulReg = ulReg | (1 << CURRENT_GATE_LOCALMEM_LSB);
-	setCurrentGate(ulReg);
+	setCurrentGate(share, ulReg);
 
-	if (getChipType() != SM750LE) {
+	if (getChipType(share) != SM750LE) {
 		/*      set panel pll and graphic mode via mmio_88 */
-		ulReg = PEEK32(VGA_CONFIGURATION);
+		ulReg = PEEK32(share->pvReg, VGA_CONFIGURATION);
 		ulReg = ulReg | (1 << VGA_CONFIGURATION_PLL_LSB);
 		ulReg = ulReg | (1 << VGA_CONFIGURATION_MODE_LSB);
 
-		POKE32(VGA_CONFIGURATION, ulReg);
+		POKE32(share->pvReg, VGA_CONFIGURATION, ulReg);
 	} else {
 #if defined(__i386__) || defined(__x86_64__)
 		/* set graphic mode via IO method */
@@ -302,13 +304,13 @@ int ddk750_initHw(initchip_param_t * pInitParam)
 	}
 
 	/* Set the Main Chip Clock */
-	setChipClock(MHz((unsigned int) pInitParam->chipClock));
+	setChipClock(share, MHz((unsigned int) pInitParam->chipClock));
 
 	/* Set up memory clock. */
-	setMemoryClock(MHz(pInitParam->memClock));
+	setMemoryClock(share, MHz(pInitParam->memClock));
 
 	/* Set up master clock */
-	setMasterClock(MHz(pInitParam->masterClock));
+	setMasterClock(share, MHz(pInitParam->masterClock));
 
 
 	/* Reset the memory controller. If the memory controller is not reset in SM750,
@@ -316,40 +318,40 @@ int ddk750_initHw(initchip_param_t * pInitParam)
 	   The memory should be resetted after changing the MXCLK.
 	 */
 	if (pInitParam->resetMemory == 1) {
-		ulReg = PEEK32(MISC_CTRL);
+		ulReg = PEEK32(share->pvReg, MISC_CTRL);
 		ulReg = ulReg & (~(1 << MISC_CTRL_LOCALMEM_RESET_LSB));
-		POKE32(MISC_CTRL, ulReg);
+		POKE32(share->pvReg, MISC_CTRL, ulReg);
 
 		ulReg = ulReg | (1 << MISC_CTRL_LOCALMEM_RESET_LSB);
-		POKE32(MISC_CTRL, ulReg);
+		POKE32(share->pvReg, MISC_CTRL, ulReg);
 	}
 
 	if (pInitParam->setAllEngOff == 1) {
-		enable2DEngine(0);
+		enable2DEngine(share, 0);
 
 		/* Disable Overlay, if a former application left it on */
-		ulReg = PEEK32(VIDEO_DISPLAY_CTRL);
+		ulReg = PEEK32(share->pvReg, VIDEO_DISPLAY_CTRL);
 		ulReg = ulReg & (~(1 << VIDEO_DISPLAY_CTRL_PLANE_LSB));
-		POKE32(VIDEO_DISPLAY_CTRL, ulReg);
+		POKE32(share->pvReg, VIDEO_DISPLAY_CTRL, ulReg);
 
 		/* Disable video alpha, if a former application left it on */
-		ulReg = PEEK32(VIDEO_ALPHA_DISPLAY_CTRL);
+		ulReg = PEEK32(share->pvReg, VIDEO_ALPHA_DISPLAY_CTRL);
 		ulReg =
 		    ulReg & (~(1 << VIDEO_ALPHA_DISPLAY_CTRL_PLANE_LSB));
-		POKE32(VIDEO_ALPHA_DISPLAY_CTRL, ulReg);
+		POKE32(share->pvReg, VIDEO_ALPHA_DISPLAY_CTRL, ulReg);
 
 		/* Disable alpha plane, if a former application left it on */
-		ulReg = PEEK32(ALPHA_DISPLAY_CTRL);
+		ulReg = PEEK32(share->pvReg, ALPHA_DISPLAY_CTRL);
 		ulReg = ulReg & (~(1 << ALPHA_DISPLAY_CTRL_PLANE_LSB));
-		POKE32(ALPHA_DISPLAY_CTRL, ulReg);
+		POKE32(share->pvReg, ALPHA_DISPLAY_CTRL, ulReg);
 
 		/* Disable DMA Channel, if a former application left it on */
-		ulReg = PEEK32(DMA_ABORT_INTERRUPT);
+		ulReg = PEEK32(share->pvReg, DMA_ABORT_INTERRUPT);
 		ulReg = ulReg | (1 << DMA_ABORT_INTERRUPT_ABORT_1_LSB);
-		POKE32(DMA_ABORT_INTERRUPT, ulReg);
+		POKE32(share->pvReg, DMA_ABORT_INTERRUPT, ulReg);
 
 		/* Disable DMA Power, if a former application left it on */
-		enableDMA(0);
+		enableDMA(share, 0);
 	}
 
 	/* We can add more initialization as needed. */
@@ -373,7 +375,8 @@ int ddk750_initHw(initchip_param_t * pInitParam)
    M = {1,...,255}
    N = {2,...,15}
    */
-unsigned int calcPllValue(unsigned int request_orig, pll_value_t * pll)
+unsigned int calcPllValue(struct lynx_share *share,
+				unsigned int request_orig, pll_value_t *pll)
 {
 	/* used for primary and secondary channel pixel clock pll */
 	static pllcalparam xparm_PIXEL[] = {
@@ -404,7 +407,7 @@ unsigned int calcPllValue(unsigned int request_orig, pll_value_t * pll)
 	pllcalparam *xparm;
 
 
-	if (getChipType() == SM750LE) {
+	if (getChipType(share) == SM750LE) {
 		/* SM750LE don't have prgrammable PLL and M/N values to work on.
 		   Just return the requested clock. */
 		return request_orig;

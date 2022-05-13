@@ -119,6 +119,13 @@ IF_HAVE_PG_IDLE(PG_idle,		"idle"		)
 #define __VM_ARCH_SPECIFIC_1 {VM_SAO,     "sao"           }
 #elif defined(CONFIG_PARISC) || defined(CONFIG_IA64)
 #define __VM_ARCH_SPECIFIC_1 {VM_GROWSUP,	"growsup"	}
+#elif defined(CONFIG_E2K)
+#define __VM_ARCH_SPECIFIC_1 \
+	{ VM_MEMTYPE_TRACKED,	"memtype_tracked" }, \
+	{ VM_HW_STACK_PS,	"procedure_stack" }, \
+	{ VM_HW_STACK_PCS,	"chain_stack" }, \
+	{ VM_SIGNAL_STACK,	"signal_stack" }, \
+	{ VM_PRIVILEGED,	"priv" }
 #elif !defined(CONFIG_MMU)
 #define __VM_ARCH_SPECIFIC_1 {VM_MAPPED_COPY,"mappedcopy"	}
 #else

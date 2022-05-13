@@ -36,6 +36,7 @@ extern void kvm_free_gpid(gpid_t *gpid, kvm_gpid_table_t *gpid_table);
 extern int kvm_gpidmap_init(struct kvm *kvm, kvm_gpid_table_t *gpid_table,
 			kvm_nidmap_t *gpid_nidmap, int gpidmap_entries,
 			struct hlist_head *gpid_hash, int gpid_hash_bits);
+extern void kvm_gpidmap_reset(struct kvm *kvm, kvm_gpid_table_t *gpid_table);
 extern void kvm_gpidmap_destroy(kvm_gpid_table_t *gpid_table);
 
 #define	for_each_guest_thread_info(gpid, entry, next, gpid_table)	\

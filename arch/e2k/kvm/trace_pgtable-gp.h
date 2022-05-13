@@ -36,10 +36,9 @@
 			{ EXT_PREFETCH_MT,	"External Prefetchable" }, \
 			{ EXT_NON_PREFETCH_MT,	"External nonPrefetchable" }, \
 			{ EXT_CONFIG_MT,	"External Configuration" }, \
-			{ EXT_CACHE_MT,		"External Cached (same as GC in hardware)" }, \
 			{ 2,			"Reserved-2" }, \
 			{ 3,			"Reserved-3" }, \
 			{ 5,			"Reserved-5" })) \
-		: "" \
+		: ""
 
 #endif /* _TRACE_E2K_PGTABLE_GP_H */

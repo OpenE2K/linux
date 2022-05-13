@@ -515,9 +515,13 @@ e2k_addr_t sys_malloc(size_t size)
 	addr = (e2k_addr_t)(x1 + x);
 	set_used(curr_subpool, chsz, mypool);
         if (curr_subpool->mainp >= curr_subpool->size) {
+		listpoolhdr_t __user *p = (listpoolhdr_t *) head->next;
+		u32 tmp;
                 mypool->mainp += sizeof(subpoolhdr_t);
-                ((listpoolhdr_t*)head->next)->mainp += sizeof(subpoolhdr_t);
-        }    
+		if (get_user(tmp, &p->mainp) ||
+				put_user(tmp + sizeof(subpoolhdr_t), &p->mainp))
+			return -EFAULT;
+	}
  	allpools->allused += chsz;
 	allpools->allreal += size;
 out:        
@@ -771,8 +775,7 @@ int mem_set_empty_tagged_dw(void __user *ptr, s64 size, u64 dw)
 	return 0;
 }
 
-/* Must be no page faults in a function called from TRY_USR_PFAULT block */
-__always_inline
+__always_inline /* Avoid page faults in a function called from TRY_USR_PFAULT block */
 static void find_data_in_list(struct rb_root_cached *areas,
 		e2k_ptr_t data, unsigned long ptr, unsigned long offset,
 		bool kernel_stack)
@@ -945,8 +948,6 @@ static int clean_descriptors_pte_range(pmd_t *pmd, unsigned long addr,
 	struct rb_root_cached *areas = walk->private;
 	const struct vm_area_struct *vma = walk->vma;
 	bool proc_stack = !!(vma->vm_flags & VM_HW_STACK_PS);
-	const pte_t *pte;
-	spinlock_t *ptl;
 	int ret = 0;
 
 	if (pmd_none(*pmd))
@@ -957,16 +958,16 @@ static int clean_descriptors_pte_range(pmd_t *pmd, unsigned long addr,
 		goto out;
 	}
 
-	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
-	for (; addr != end; pte++, addr += PAGE_SIZE) {
+	for (; addr != end; addr += PAGE_SIZE) {
+		const pte_t *pte = pte_offset_map(pmd, addr);
 		if (!pte_none(*pte)) {
 			ret = clean_descriptors_range_user(areas, addr,
 					addr + PAGE_SIZE, proc_stack);
 			if (ret)
 				goto out;
 		}
+		pte_unmap(pte);
 	}
-	pte_unmap_unlock(pte - 1, ptl);
 
 out:
 	cond_resched();

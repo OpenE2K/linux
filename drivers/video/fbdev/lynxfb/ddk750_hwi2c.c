@@ -32,23 +32,23 @@
 #define HWI2C_WAIT_TIMEOUT_US              USEC_PER_SEC
 
 
-int hwI2CInit(unsigned char busSpeedMode)
+int hwI2CInit(struct lynx_share *share, unsigned char busSpeedMode)
 {
 	unsigned int value;
 
 	/* Enable GPIO 30 & 31 as IIC clock & data */
-	value = PEEK32(GPIO_MUX);
+	value = PEEK32(share->pvReg, GPIO_MUX);
 
 	value |= (1 << GPIO_MUX_30_LSB) | (1 << GPIO_MUX_31_LSB);
-	POKE32(GPIO_MUX, value);
+	POKE32(share->pvReg, GPIO_MUX, value);
 
 	/* Enable Hardware I2C power.
 	   TODO: Check if we need to enable GPIO power?
 	 */
-	enableI2C(1);
+	enableI2C(share, 1);
 
 	/* Enable the I2C Controller and set the bus speed mode */
-	value = PEEK8(I2C_CTRL);
+	value = PEEK8(share->pvReg, I2C_CTRL);
 
 	if (busSpeedMode == 0)
 		value &= ~(1 << I2C_CTRL_MODE_LSB);
@@ -56,41 +56,41 @@ int hwI2CInit(unsigned char busSpeedMode)
 		value |= 1 << I2C_CTRL_MODE_LSB;
 	value |= 1 << I2C_CTRL_EN_LSB;
 
-	POKE8(I2C_CTRL, value);
+	POKE8(share->pvReg, I2C_CTRL, value);
 
 	return 0;
 }
 
 
-void hwI2CClose(void)
+void hwI2CClose(struct lynx_share *share)
 {
 	unsigned int value;
 
 	/* Disable I2C controller */
-	value = PEEK8(I2C_CTRL);
+	value = PEEK8(share->pvReg, I2C_CTRL);
 
 	value &= ~(1 << I2C_CTRL_EN_LSB);
-	POKE8(I2C_CTRL, value);
+	POKE8(share->pvReg, I2C_CTRL, value);
 
 	/* Disable I2C Power */
-	enableI2C(0);
+	enableI2C(share, 0);
 
 	/* Set GPIO 30 & 31 back as GPIO pins */
-	value = PEEK32(GPIO_MUX);
+	value = PEEK32(share->pvReg, GPIO_MUX);
 	value &= ~(1 << GPIO_MUX_30_LSB);
 	value &= ~(1 << GPIO_MUX_31_LSB);
-	POKE32(GPIO_MUX, value);
+	POKE32(share->pvReg, GPIO_MUX, value);
 }
 
 
-long hwI2CWaitTXDone(void)
+long hwI2CWaitTXDone(struct lynx_share *share)
 {
 	unsigned int timeout;
 
 	/* Wait until the transfer is completed. */
 	timeout = HWI2C_WAIT_TIMEOUT_US;
 
-	while (((1 & (PEEK8(I2C_STATUS) >> I2C_STATUS_TX_LSB)) !=
+	while (((1 & (PEEK8(share->pvReg, I2C_STATUS) >> I2C_STATUS_TX_LSB)) !=
 		I2C_STATUS_TX_COMPLETED) && (timeout != 0)) {
 		udelay(1);
 		timeout--;
@@ -118,14 +118,15 @@ long hwI2CWaitTXDone(void)
  *  Return Value:
  *      Total number of bytes those are actually written.
  */
-unsigned int hwI2CWriteData(unsigned char deviceAddress,
+unsigned int hwI2CWriteData(struct lynx_share *share,
+				unsigned char deviceAddress,
 			    unsigned int length, unsigned char *pBuffer)
 {
 	unsigned char count, i;
 	unsigned int totalBytes = 0;
 
 	/* Set the Device Address */
-	POKE8(I2C_SLAVE_ADDRESS, deviceAddress & ~0x01);
+	POKE8(share->pvReg, I2C_SLAVE_ADDRESS, deviceAddress & ~0x01);
 
 	/* Write data.
 	 * Note:
@@ -133,31 +134,31 @@ unsigned int hwI2CWriteData(unsigned char deviceAddress,
 	 */
 	do {
 		/* Reset I2C by writing 0 to I2C_RESET register to clear the previous status. */
-		POKE8(I2C_RESET, 0);
+		POKE8(share->pvReg, I2C_RESET, 0);
 
 		/* Set the number of bytes to be written */
 		if (length < MAX_HWI2C_FIFO)
 			count = length - 1;
 		else
 			count = MAX_HWI2C_FIFO - 1;
-		POKE8(I2C_BYTE_COUNT, count);
+		POKE8(share->pvReg, I2C_BYTE_COUNT, count);
 
 		/* Move the data to the I2C data register */
 		for (i = 0; i <= count; i++) {
 #ifdef __BIG_ENDIAN
-			POKE8(I2C_DATA0 + (i & ~3) - i % 4, *pBuffer++);
+			POKE8(share->pvReg, I2C_DATA0 + (i & ~3) - i % 4, *pBuffer++);
 #else
-			POKE8(I2C_DATA0 + i, *pBuffer++);
+			POKE8(share->pvReg, I2C_DATA0 + i, *pBuffer++);
 #endif
 		}
 
 		/* Start the I2C */
 
-		POKE8(I2C_CTRL,
-		       PEEK8(I2C_CTRL) | (1 << I2C_CTRL_CTRL_LSB));
+		POKE8(share->pvReg, I2C_CTRL,
+		       PEEK8(share->pvReg, I2C_CTRL) | (1 << I2C_CTRL_CTRL_LSB));
 
 		/* Wait until the transfer is completed. */
-		if (hwI2CWaitTXDone() != 0)
+		if (hwI2CWaitTXDone(share) != 0)
 			break;
 
 		/* Substract length */
@@ -188,14 +189,15 @@ unsigned int hwI2CWriteData(unsigned char deviceAddress,
  *  Return Value:
  *      Total number of actual bytes read from the slave device
  */
-unsigned int hwI2CReadData(unsigned char deviceAddress,
+unsigned int hwI2CReadData(struct lynx_share *share,
+				unsigned char deviceAddress,
 			   unsigned int length, unsigned char *pBuffer)
 {
 	unsigned char count, i;
 	unsigned int totalBytes = 0;
 
 	/* Set the Device Address */
-	POKE8(I2C_SLAVE_ADDRESS, deviceAddress | 0x01);
+	POKE8(share->pvReg, I2C_SLAVE_ADDRESS, deviceAddress | 0x01);
 
 	/* Read data and save them to the buffer.
 	 * Note:
@@ -203,26 +205,26 @@ unsigned int hwI2CReadData(unsigned char deviceAddress,
 	 */
 	do {
 		/* Reset I2C by writing 0 to I2C_RESET register to clear all the status. */
-		POKE8(I2C_RESET, 0);
+		POKE8(share->pvReg, I2C_RESET, 0);
 
 		/* Set the number of bytes to be read */
 		if (length <= MAX_HWI2C_FIFO)
 			count = length - 1;
 		else
 			count = MAX_HWI2C_FIFO - 1;
-		POKE8(I2C_BYTE_COUNT, count);
+		POKE8(share->pvReg, I2C_BYTE_COUNT, count);
 
 		/* Start the I2C */
-		POKE8(I2C_CTRL,
-		       PEEK8(I2C_CTRL) | (1 << I2C_CTRL_CTRL_LSB));
+		POKE8(share->pvReg, I2C_CTRL,
+		       PEEK8(share->pvReg, I2C_CTRL) | (1 << I2C_CTRL_CTRL_LSB));
 
 		/* Wait until transaction done. */
-		if (hwI2CWaitTXDone() != 0)
+		if (hwI2CWaitTXDone(share) != 0)
 			break;
 
 		/* Save the data to the given buffer */
 		for (i = 0; i <= count; i++)
-			*pBuffer++ = PEEK8(I2C_DATA0 + i);
+			*pBuffer++ = PEEK8(share->pvReg, I2C_DATA0 + i);
 
 		/* Substract length by 16 */
 		length -= (count + 1);
@@ -249,13 +251,14 @@ unsigned int hwI2CReadData(unsigned char deviceAddress,
  *  Return Value:
  *      Register value
  */
-unsigned char hwI2CReadReg(unsigned char deviceAddress,
+unsigned char hwI2CReadReg(struct lynx_share *share,
+				unsigned char deviceAddress,
 			   unsigned char registerIndex)
 {
 	unsigned char value = (0xFF);
 
-	if (hwI2CWriteData(deviceAddress, 1, &registerIndex) == 1)
-		hwI2CReadData(deviceAddress, 1, &value);
+	if (hwI2CWriteData(share, deviceAddress, 1, &registerIndex) == 1)
+		hwI2CReadData(share, deviceAddress, 1, &value);
 
 	return value;
 }
@@ -277,7 +280,7 @@ unsigned char hwI2CReadReg(unsigned char deviceAddress,
  *          0   - Success
  *         -1   - Fail
  */
-int hwI2CWriteReg(unsigned char deviceAddress,
+int hwI2CWriteReg(struct lynx_share *share, unsigned char deviceAddress,
 		  unsigned char registerIndex, unsigned char data)
 {
 	unsigned char value[2];
@@ -285,7 +288,7 @@ int hwI2CWriteReg(unsigned char deviceAddress,
 	value[0] = registerIndex;
 	value[1] = data;
 
-	if (hwI2CWriteData(deviceAddress, 2, value) == 2)
+	if (hwI2CWriteData(share, deviceAddress, 2, value) == 2)
 		return 0;
 
 	return -1;

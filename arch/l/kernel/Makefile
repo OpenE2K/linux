@@ -3,10 +3,9 @@
 # /arch/l/kernel
 #
 obj-y += l-i2c2.o l-iommu.o procshow.o mpparse.o setup.o procregs.o \
-	l-mcmonitor.o l-uncached.o
+	l-mcmonitor.o l-uncached.o pic_irq.o cpufreq.o clk_rt.o
 obj-y += apic/
 obj-y += pmc/
-obj-y += pic_irq.o cpufreq.o
 
 obj-$(CONFIG_L_EARLY_PRINTK) += console.o
 obj-$(CONFIG_NVRAM_PANIC) += panic2nvram.o
@@ -15,7 +14,6 @@ obj-$(CONFIG_L_SIC_IPLINK_OFF) += procipcc2.o
 obj-$(CONFIG_L_MMPD) += procmmpddiag.o
 obj-$(CONFIG_SERIAL_AM85C30_CONSOLE) += am85c30.o
 obj-$(CONFIG_CLKR_CLOCKSOURCE) += clkr.o
-obj-y += clk_rt.o
 
 obj-$(CONFIG_IOHUB_GPIO) += gpio.o
 obj-$(CONFIG_BOOT_TRACE) += boot_profiling.o

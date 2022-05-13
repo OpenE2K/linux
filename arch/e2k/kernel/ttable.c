@@ -104,6 +104,7 @@ do {	\
 
 #include <asm/kvm/runstate.h>
 #include <asm/kvm/switch.h>
+#include <asm/fast_syscalls.h>
 
 #include <asm/regs_state.h>
 
@@ -360,7 +361,7 @@ static __interrupt notrace void dump_debug_info_no_stack(void)
 	dump_puts("\n    bottom = 0x");
 	dump_u64_no_stack((u64)thread_info_task(ti)->stack);
 
-	COPY_STACKS_TO_MEMORY();
+	NATIVE_FLUSHC;
 
 	pcsp_hi = NATIVE_NV_READ_PCSP_HI_REG();
 	pcsp_lo = NATIVE_NV_READ_PCSP_LO_REG();
@@ -499,8 +500,7 @@ static void kernel_hw_stack_fatal_error(struct pt_regs *regs,
 
 int cf_max_fill_return __read_mostly = 16 * 0x10;
 
-#ifndef CONFIG_CPU_HAS_FILL_INSTRUCTION
-
+/* Used in !CPU_FEAT_FILL_INSTRUCTION case */
 const fill_handler_t fill_handlers_table[E2K_MAXSR] = {
 	&fill_handler_0, &fill_handler_1, &fill_handler_2,
 	&fill_handler_3, &fill_handler_4, &fill_handler_5,
@@ -565,19 +565,26 @@ static int init_cf_fill_depth(void)
 	unsigned long flags;
 	u64 cf_fill_depth;
 
+	if (cpu_has(CPU_FEAT_FILLC)) {
+		if (cpu_has(CPU_FEAT_FILLR))
+			pr_info("Using FILLC/FILLR instructions\n");
+		else
+			pr_info("Using FILLC instruction\n");
+		return 0;
+	}
+
 	raw_all_irq_save(flags);
 	cf_fill_depth = cf_fill_call(E2K_MAXCR_q / 2);
 	raw_all_irq_restore(flags);
 
 	cf_max_fill_return = cf_fill_depth + 32;
 
-	pr_info("CF FILL depth: %d quadro registers\n",
+	pr_info("Using software emulation of FILLC instruction, CF FILL depth: %d quadro registers\n",
 			cf_max_fill_return / 16);
 
 	return 0;
 }
 pure_initcall(init_cf_fill_depth);
-#endif	/* !CONFIG_CPU_HAS_FILL_INSTRUCTION */
 
 /*
  * Do work marked by TIF_NOTIFY_RESUME
@@ -629,19 +636,18 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #endif
 
 #ifdef CONFIG_USE_AAU
-	aau_regs = pt_regs_to_aau_regs(regs);
-	regs->aau_context = aau_regs;
-
 	/*
 	 * We are not using ctpr2 here (compiling with -fexclude-ctpr2)
 	 * thus reading of AASR, AALDV, AALDM can be done at any
 	 * point before the first call.
 	 *
+	 * This is placed before saving trap cellar since saving is done
+	 * with 'mmurr' instruction which requires AAU to be stopped.
+	 *
 	 * Usage of ctpr2 here is not possible since AALDA and AALDI
 	 * registers would be zeroed.
 	 */
 	aasr = native_read_aasr_reg();
-	SWITCH_GUEST_AAU_AASR(&aasr, aau_regs, test_ts_flag(TS_HOST_AT_VCPU_MODE));
 #endif /* CONFIG_USE_AAU */
 
 	/*
@@ -678,12 +684,27 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * Put some distance between reading AASR (above) and using it here
 	 * since reading of AAU registers is slow.
 	 *
-	 * This is placed before saving trap cellar since it is done using
-	 * 'mmurr' instruction which requires AAU to be stopped.
-	 *
 	 * Do this before saving %sbbp as it uses 'alc' and thus zeroes %aaldm.
 	 */
-	NATIVE_SAVE_AAU_MASK_REGS(aau_regs, aasr);
+	aasr = aasr_parse(aasr);
+	regs->aasr = aasr;
+	/* We cannot rely on %aasr value since interception could have
+	 * happened in guest user before "bap" or in guest trap handler
+	 * before restoring %aasr, so we must save all AAU registers.
+	 * Several macroses use %aasr to determine, which registers to
+	 * save/restore, so pass worst-case %aasr to them directly
+	 * while saving the actual guest value to regs->aasr. */
+	if (IS_ENABLED(CONFIG_KVM_PARAVIRTUALIZATION) &&
+			test_ts_flag(TS_HOST_AT_VCPU_MODE))
+		aasr = E2K_FULL_AASR;
+
+	if (aau_has_state(aasr)) {
+		aau_regs = __builtin_alloca(sizeof(*aau_regs));
+		NATIVE_SAVE_AAU_MASK_REGS(aau_regs, aasr);
+	} else {
+		aau_regs = NULL;
+	}
+	regs->aau_context = aau_regs;
 #endif
 
 	/*
@@ -724,7 +745,7 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 
 #ifdef CONFIG_USE_AAU
 	/* It's important to save AAD before all call operations. */
-	if (unlikely(AS(aasr).iab))
+	if (unlikely(aasr.iab))
 		NATIVE_SAVE_AADS(aau_regs);
 
 	/*
@@ -781,8 +802,7 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		machine.get_and_invalidate_MLT_context(&trap->mlt_state);
 
 		/* Check if this was a trap in generations mode. */
-		if (rpr_lo && (cpu_has(CPU_FEAT_ISET_V3) || trap->mlt_state.num) &&
-				cr0_hi >= current_thread_info()->rp_start &&
+		if (rpr_lo && cr0_hi >= current_thread_info()->rp_start &&
 				cr0_hi < current_thread_info()->rp_end)
 			trap->flags |= TRAP_RP_FLAG;
 	} else {
@@ -802,8 +822,8 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		current->stack + KERNEL_C_STACK_SIZE);
 
 #ifdef CONFIG_USE_AAU
-	if (aau_working(aau_regs))
-		machine.get_aau_context(aau_regs);
+	if (aau_working(aasr))
+		machine.get_aau_context(aau_regs, aasr);
 #endif
 #ifdef CONFIG_CLI_CHECK_TIME
 	tt0_prolog_ticks(E2K_GET_DSREG(clkr) - start_tick);
@@ -837,6 +857,33 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 }
 
 /*
+ * We can only get here if either FILLC or FILLR isn't supported.
+ * Otherwise finish_user_trap_handler_switched_stacks is called directly.
+ */
+void notrace __noreturn
+finish_user_trap_handler_sw_fill(void)
+{
+	struct pt_regs *regs;
+	struct trap_pt_regs *trap;
+	struct e2k_aau_context *aau_regs;
+	restore_caller_t from;
+	bool from_paravirt_guest;
+
+	user_hw_stacks_restore__sw_sequel();
+
+	from = current->thread.fill.from;
+	from_paravirt_guest = current->thread.fill.from_paravirt_guest;
+
+	regs = current_thread_info()->pt_regs;
+	aau_regs = regs->aau_context;
+	trap = regs->trap;
+
+	finish_user_trap_handler_switched_stacks(regs, trap, aau_regs, from, from_paravirt_guest);
+
+	unreachable();
+}
+
+/*
  * Trap occured on kernel function and on kernel's stacks
  * So it does not need to switch to kernel stacks
  */
@@ -851,6 +898,11 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	register e2k_clock_t	clock = NATIVE_READ_CLKR_REG_VALUE();
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 	e2k_cr0_hi_t cr0_hi;
+#ifdef CONFIG_USE_AAU
+	e2k_aalda_t *aaldas;
+	e2k_aau_t *aau_regs;
+	e2k_aasr_t aasr;
+#endif
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
 	register trap_times_t	*trap_times;
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
@@ -868,11 +920,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	register long start_tick = NATIVE_READ_CLKR_REG_VALUE();
 #endif
 
-	/* No atomic/DAM operations are allowed before this point.
-	 * Note that we cannot do this before saving AAU. */
-	if (cpu_has(CPU_HWBUG_L1I_STOPS_WORKING))
-		E2K_DISP_CTPRS();
-
 	trap = pt_regs_to_trap_regs(regs);
 	trap->flags = 0;
 	regs->trap = trap;
@@ -882,8 +929,19 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #endif
 
 #ifdef CONFIG_USE_AAU
-	regs->aau_context = NULL;
-#endif
+	/*
+	 * We are not using ctpr2 here (compiling with -fexclude-ctpr2)
+	 * thus reading of AASR, AALDV, AALDM can be done at any
+	 * point before the first call.
+	 *
+	 * Usage of ctpr2 here is not possible since AALDA and AALDI
+	 * registers would be zeroed.
+	 *
+	 * This is placed before saving trap cellar since it is done using
+	 * 'mmurr' instruction which requires AAU to be stopped.
+	 */
+	aasr = native_read_aasr_reg();
+#endif /* CONFIG_USE_AAU */
 
 	/*
 	 * All actual pt_regs structures of the process are queued.
@@ -914,6 +972,24 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, false	/* user mode trap */);
 
+#ifdef CONFIG_USE_AAU
+	/*
+	 * Put some distance between reading AASR (above) and using it here
+	 * since reading of AAU registers is slow.
+	 *
+	 * Do this before saving %sbbp as it uses 'alc' and thus zeroes %aaldm.
+	 */
+	aasr = aasr_parse(aasr);
+	regs->aasr = aasr;
+	if (aau_has_state(aasr)) {
+		aau_regs = __builtin_alloca(sizeof(*aau_regs));
+		NATIVE_SAVE_AAU_MASK_REGS(aau_regs, aasr);
+	} else {
+		aau_regs = NULL;
+	}
+	regs->aau_context = aau_regs;
+#endif
+
 	/*
 	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
 	 * so it must be read before TIRs.
@@ -937,9 +1013,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 					     exc_proc_stack_bounds_mask));
         info_save_tir_reg(clock);
 
-	/* Update run state info, if trap occured on guest kernel */
-	SET_RUNSTATE_IN_KERNEL_TRAP(to_save_runstate);
-
 	if (exceptions & have_tc_exc_mask) {
 		kstack_pf_addr = NATIVE_SAVE_TRAP_CELLAR(regs, trap);
 	} else {
@@ -961,6 +1034,39 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	UNFREEZE_TIRs();
 
 	cr0_hi = regs->crs.cr0_hi;
+
+#ifdef CONFIG_USE_AAU
+	/* It's important to save AAD before all call operations. */
+	if (unlikely(aasr.iab))
+		NATIVE_SAVE_AADS(aau_regs);
+
+	/*
+	 * If AAU fault happened read aalda/aaldi/aafstr here,
+	 * before some call zeroes them.
+	 */
+	if (unlikely(trap->TIRs[0].TIR_hi.TIR_hi_aa))
+		aau_regs->aafstr = native_read_aafstr_reg_value();
+
+	/*
+	 * Function calls are allowed from this point on,
+	 * mark it with a compiler barrier.
+	 */
+	barrier();
+
+	/* Since iset v6 %aaldi must be saved too */
+	if (machine.native_iset_ver >= E2K_ISET_V6 &&
+	    unlikely(AAU_STOPPED(aasr)))
+		NATIVE_SAVE_AALDIS(aau_regs->aaldi);
+#endif
+
+	/* No atomic/DAM operations are allowed before this point.
+	 * Note that we cannot do this before saving AAU. */
+	if (cpu_has(CPU_HWBUG_L1I_STOPS_WORKING))
+		E2K_DISP_CTPRS();
+
+	/* Update run state info, if trap occured on guest kernel */
+	SET_RUNSTATE_IN_KERNEL_TRAP(to_save_runstate);
+
 	psp_hi = regs->stacks.psp_hi;
 	pcsp_hi = regs->stacks.pcsp_hi;
 
@@ -977,6 +1083,11 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	CHECK_PT_REGS_CHAIN(regs,
 		NATIVE_NV_READ_USD_LO_REG().USD_lo_base,
 		current->stack + KERNEL_C_STACK_SIZE);
+
+#ifdef CONFIG_USE_AAU
+	if (aau_working(aasr))
+		machine.get_aau_context(aau_regs, aasr);
+#endif
 
 	if (unlikely(hw_overflow || kstack_pf_addr)) {
 		/* Assume that no function calls has been done until this
@@ -1028,8 +1139,16 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		/* Check again under closed interrupts to avoid races */
 		if (likely(need_resched() && !host_is_at_HV_GM_mode()))
 			preempt_schedule_irq();
-		else
-			raw_all_irq_restore(flags);
+		raw_all_irq_restore(flags);
+	}
+#endif
+
+#ifdef CONFIG_USE_AAU
+	if (unlikely(AAU_STOPPED(aasr))) {
+		aaldas = __builtin_alloca(AALDAS_REGS_NUM * sizeof(aaldas[0]));
+		machine.calculate_aau_aaldis_aaldas(regs, aaldas, aau_regs);
+	} else {
+		aaldas = NULL;
 	}
 #endif
 
@@ -1084,8 +1203,46 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		WRITE_CR1_LO_REG(cr1_lo);
 	}
 
-	NATIVE_RESTORE_COMMON_REGS(regs);
-	E2K_DONE();
+#ifdef CONFIG_USE_AAU
+	native_clear_apb();
+	if (cpu_has(CPU_HWBUG_AAU_AALDV))
+		__E2K_WAIT(_ma_c);
+	if (aau_working(aasr)) {
+		native_set_aau_context(aau_regs, current_thread_info()->aalda, aasr);
+
+		/*
+		 * It's important to restore AAD after
+		 * all return operations.
+		 */
+		if (aasr.iab)
+			NATIVE_RESTORE_AADS(aau_regs);
+	}
+
+	/*
+	 * There must not be any branches after restoring ctpr register
+	 * because of HW bug, so this 'if' is done before restoring %ctpr2
+	 * (actually it belongs to set_aau_aaldis_aaldas()).
+	 *
+	 * RESTORE_COMMON_REGS() must be called before RESTORE_AAU_MASK_REGS()
+	 * because of ctpr2 and AAU registers restoring dependencies.
+	 */
+	if (likely(!AAU_STOPPED(aasr))) {
+#endif
+		NATIVE_RESTORE_COMMON_REGS(regs);
+#ifdef CONFIG_USE_AAU
+		NATIVE_RESTORE_AAU_MASK_REGS((e2k_aaldm_t) { .word = 0 },
+				(e2k_aaldv_t) { .word = 0 }, aasr);
+#endif
+		E2K_DONE();
+#ifdef CONFIG_USE_AAU
+	} else {
+		NATIVE_RESTORE_COMMON_REGS(regs);
+		native_set_aau_aaldis_aaldas(aaldas, aau_regs);
+		NATIVE_RESTORE_AAU_MASK_REGS(aau_regs->aaldm,
+				aau_regs->aaldv, aasr);
+		E2K_DONE();
+	}
+#endif
 }
 
 
@@ -3340,10 +3497,6 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 		wd.psize = 0x40;
 		WRITE_WD_REG(wd);
 	}
-	DbgSCP("\nsys_num = %lld: tags = 0x%llx, arg1 = 0x%lx, arg2 = 0x%lx, arg3 = 0x%lx, arg4 = 0x%lx\n"
-		"\targ5 = 0x%lx, arg6 = 0x%lx, arg7 = 0x%lx, arg8 = 0x%lx, arg9 = 0x%lx, arg10 = 0x%lx\n",
-		sys_num, tags, arg1, arg2, arg3, arg4,
-		arg5, arg6, arg7, arg8, arg9, arg10);
 
 #ifdef CONFIG_E2K_PROFILING
 	read_ticks(clock1);
@@ -3369,6 +3522,10 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	current_thread_info()->pt_regs = regs;
 	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_ENABLED));
 
+	DbgSCP("\nsys_num = %lld: tags = 0x%llx, arg1 = 0x%lx, arg2 = 0x%lx, arg3 = 0x%lx, arg4 = 0x%lx\n"
+		"\targ5 = 0x%lx, arg6 = 0x%lx, arg7 = 0x%lx, arg8 = 0x%lx, arg9 = 0x%lx, arg10 = 0x%lx\n",
+		sys_num, tags, arg1, arg2, arg3, arg4,
+		arg5, arg6, arg7, arg8, arg9, arg10);
 	DbgSCP("_NR_ %lld/%s start: mask=0x%x current %px pid %d\n", sys_num,
 		(sys_num < NR_syscalls) ? sys_call_ID_to_name[sys_num] : "sys_ni_syscall",
 		mask, current, current->pid);
@@ -3700,25 +3857,25 @@ static long do_protected_syscall(unsigned long sys_num, const long arg1,
 		rval |= PUT_USER_AP(&umdd->mdd_got, kmdd.got_addr,
 				    kmdd.got_len, 0, RW_ENABLE);
 		if (kmdd.init_got_point)
-			rval |= PUT_USER_PL_V2(&umdd->mdd_init_got,
+			rval |= PUT_USER_PL_V3(&umdd->mdd_init_got,
 						kmdd.init_got_point);
 		else
 			rval |= put_user(0L, &umdd->mdd_init_got.word);
 
 		if (kmdd.entry_point)
-			rval |= PUT_USER_PL_V2(&umdd->mdd_start,
+			rval |= PUT_USER_PL_V3(&umdd->mdd_start,
 						kmdd.entry_point);
 		else
 			rval |= put_user(0L, &umdd->mdd_start.word);
 
 		if (kmdd.init_point)
-			rval |= PUT_USER_PL_V2(&umdd->mdd_init,
+			rval |= PUT_USER_PL_V3(&umdd->mdd_init,
 						kmdd.init_point);
 		else
 			rval |= put_user(0L, &umdd->mdd_init.word);
 
 		if (kmdd.fini_point)
-			rval |= PUT_USER_PL_V2(&umdd->mdd_fini,
+			rval |= PUT_USER_PL_V3(&umdd->mdd_fini,
 						kmdd.fini_point);
 		else
 			rval |= put_user(0L, &umdd->mdd_fini.word);
@@ -4360,7 +4517,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 {
 	unsigned long ti_flags = current_thread_info()->flags;
 	long rval;
-	bool ts_host_at_vcpu_mode = ts_host_at_vcpu_mode();
+	bool guest_enter, ts_host_at_vcpu_mode = ts_host_at_vcpu_mode();
 
 	check_cli();
 	info_save_stack_reg(NATIVE_READ_CLKR_REG_VALUE());
@@ -4368,6 +4525,9 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 
 	SAVE_STACK_REGS(regs, current_thread_info(), true, false);
 	init_pt_regs_for_syscall(regs);
+	/* Switch back to host page tables under closed interrupts
+	 * (before we can be rescheduled from an interrupt). */
+	guest_enter = guest_syscall_enter(regs, ts_host_at_vcpu_mode);
 	/* Make sure current_pt_regs() works properly by initializing
 	 * pt_regs pointer before enabling any interrupts. */
 	current_thread_info()->pt_regs = regs;
@@ -4375,11 +4535,12 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 
 	SAVE_SYSCALL_ARGS(regs, arg1, arg2, arg3, arg4, arg5, arg6);
 
-	if (guest_syscall_enter(regs, ts_host_at_vcpu_mode)) {
+	if (unlikely(guest_enter)) {
 		/* the system call is from guest and syscall is injecting */
+		pv_vcpu_syscall_intc(current_thread_info(), regs);
 		current_thread_info()->pt_regs = NULL;
 		guest_syscall_inject(current_thread_info(), regs);
-		return (SYS_RET_TYPE)0;
+		unreachable();
 	}
 
 	Dbg1SC(regs->sys_num, "_NR_ %d current %px pid %d name %s\n"
@@ -4404,14 +4565,12 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 		RESTORE_SYSCALL_ARGS(regs, regs->sys_num,
 				     arg1, arg2, arg3, arg4, arg5, arg6);
 
-		if (rval != -1)
+		if (rval != -1) {
 			rval = sys_call((unsigned long) arg1, (unsigned long) arg2,
 					(unsigned long) arg3, (unsigned long) arg4,
 					(unsigned long) arg5, (unsigned long) arg6);
-		else
-			rval = -EPERM;
-
-		SAVE_SYSCALL_RVAL(regs, rval);
+			SAVE_SYSCALL_RVAL(regs, rval);
+		}
 
 		/* Trace syscall exit */
 		syscall_trace_leave(regs);
@@ -4429,6 +4588,30 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 	finish_syscall(regs, FROM_SYSCALL_N_PROT, true);
 }
 
+/*
+ * We can only get here if either FILLC or FILLR isn't supported.
+ * Otherwise finish_syscall_switched_stacks is called directly.
+ */
+void notrace __noreturn
+finish_syscall_sw_fill(void)
+{
+	struct pt_regs *regs;
+	restore_caller_t from;
+	bool return_to_user;
+	bool ts_host_at_vcpu_mode;
+
+	user_hw_stacks_restore__sw_sequel();
+
+	regs = current_thread_info()->pt_regs;
+	from = current->thread.fill.from;
+	return_to_user = current->thread.fill.return_to_user;
+	ts_host_at_vcpu_mode = current->thread.fill.ts_host_at_vcpu_mode;
+
+	finish_syscall_switched_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
+
+	unreachable();
+}
+
 __section(".entry.text")
 int copy_context_from_signal_stack(struct local_gregs *l_gregs,
 		struct pt_regs *regs, struct trap_pt_regs *trap, u64 *sbbp,
@@ -4442,34 +4625,34 @@ int copy_context_from_signal_stack(struct local_gregs *l_gregs,
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 
-	ret = __copy_from_user_with_tags(regs, &context->regs, sizeof(*regs));
+	ret = __copy_from_priv_user_with_tags(regs, &context->regs, sizeof(*regs));
 
-	if (regs->trap) {
-		ret = ret ?: __copy_from_user_with_tags(trap, &context->trap,
-							sizeof(*trap));
+	if (likely(trap && regs->trap)) {
+		ret = ret ?: __copy_from_priv_user_with_tags(trap, &context->trap,
+								sizeof(*trap));
 		regs->trap = trap;
 
-		if (trap->sbbp) {
-			ret = ret ?: __copy_from_user(sbbp, &context->sbbp,
+		if (likely(sbbp && trap->sbbp)) {
+			ret = ret ?: __copy_from_priv_user(sbbp, &context->sbbp,
 					sizeof(sbbp[0]) * SBBP_ENTRIES_NUM);
 			trap->sbbp = sbbp;
 		}
 	}
 
-	if (regs->aau_context) {
-		ret = ret ?: __copy_from_user(aau_context, &context->aau_regs,
-					      sizeof(*aau_context));
+	if (likely(aau_context && regs->aau_context)) {
+		ret = ret ?: __copy_from_priv_user(aau_context, &context->aau_regs,
+						   sizeof(*aau_context));
 		regs->aau_context = aau_context;
 	}
 
 	if (ka) {
-		ret = ret ?: __copy_from_user(ka, &context->sigact,
-						sizeof(*ka));
+		ret = ret ?: __copy_from_priv_user(ka, &context->sigact,
+							sizeof(*ka));
 	}
 
-	if (!TASK_IS_BINCO(current)) {
-		ret = ret ?: __copy_from_user(l_gregs, &context->l_gregs,
-				sizeof(*l_gregs));
+	if (likely(l_gregs && !TASK_IS_BINCO(current))) {
+		ret = ret ?: __copy_from_priv_user(l_gregs, &context->l_gregs,
+							sizeof(*l_gregs));
 	}
 
 	clear_ts_flag(ts_flag);
@@ -4740,7 +4923,7 @@ notrace long do_sigreturn(void)
 		restore_local_glob_regs(&l_gregs, true);
 
 	if (!from_syscall(&regs)) {
-		BUG_ON(!regs.trap || !regs.aau_context || regs.kernel_entry);
+		BUG_ON(!regs.trap || regs.kernel_entry);
 
 		finish_user_trap_handler(&regs, FROM_USER_TRAP | FROM_SIGRETURN);
 	} else {
@@ -4798,8 +4981,50 @@ notrace long return_pv_vcpu_syscall(void)
 }
 
 __section(".entry.text")
-notrace long return_pv_vcpu_syscall_fork(void)
+notrace long return_pv_vcpu_syscall_fork(u64 sys_rval)
 {
-	pv_vcpu_return_from_fork();
+	pv_vcpu_return_from_fork(sys_rval);
 	return 0;
 }
+
+__section(".entry.text")
+notrace void pv_vcpu_mkctxt_trampoline_inject(void)
+{
+	guest_mkctxt_trampoline_inject();
+}
+
+__section(".entry.text")
+notrace void pv_vcpu_mkctxt_complete(void)
+{
+	guest_mkctxt_complete();
+}
+
+/*
+ * We can only get here if either FILLC or FILLR isn't supported.
+ * Otherwise return_to_injected_syscall_switched_stacks is called directly.
+ */
+void notrace __noreturn return_to_injected_syscall_sw_fill(void)
+{
+	user_hw_stacks_restore__sw_sequel();
+
+	return_to_injected_syscall_switched_stacks();
+
+	unreachable();
+}
+
+u64 finish_user_trap_handler_sw_fill_wsz __read_mostly = 0;
+u64 finish_syscall_sw_fill_wsz __read_mostly = 0;
+u64 return_to_injected_syscall_sw_fill_wsz __read_mostly = 0;
+
+static int initialize_sw_fill_window_size(void)
+{
+	if (cpu_has(CPU_FEAT_FILLC) && cpu_has(CPU_FEAT_FILLR))
+		return 0;
+
+	finish_user_trap_handler_sw_fill_wsz = (u64)FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE;
+	finish_syscall_sw_fill_wsz = (u64)FINISH_SYSCALL_SW_FILL_SIZE;
+	return_to_injected_syscall_sw_fill_wsz = (u64)RETURN_TO_INJECTED_SYSCALL_SW_FILL_SIZE;
+
+	return 0;
+}
+arch_initcall(initialize_sw_fill_window_size);

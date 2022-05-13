@@ -16,6 +16,7 @@
 typedef void (*exc_function)(struct pt_regs *regs);
 extern const exc_function exc_tbl[];
 extern const char *exc_tbl_name[];
+union pf_mode;
 
 #define S_SIG(regs, signo, trapno, code)				       \
 do {									       \
@@ -45,7 +46,8 @@ extern int handle_proc_stack_bounds(struct e2k_stacks *stacks,
 extern int handle_chain_stack_bounds(struct e2k_stacks *stacks,
 		struct trap_pt_regs *trap);
 extern int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
-		tc_cond_t condition, tc_mask_t mask, const int instr_page);
+		tc_cond_t condition, tc_mask_t mask, const int instr_page,
+		union pf_mode *mode_p);
 #ifdef CONFIG_KVM_ASYNC_PF
 extern void do_pv_apf_wake(struct pt_regs *regs);
 #endif /* */
@@ -53,6 +55,7 @@ extern void do_trap_cellar(struct pt_regs *regs, int only_system_tc);
 
 extern irqreturn_t native_do_interrupt(struct pt_regs *regs);
 extern void do_nm_interrupt(struct pt_regs *regs);
+extern void do_mem_error(struct pt_regs *regs);
 extern void native_instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 					const int async_instr);
 
@@ -126,8 +129,10 @@ static inline void kernel_trap_mask_init(void)
 {
 	WRITE_OSEM_REG(user_trap_init());
 #ifdef CONFIG_KVM_HOST_MODE
-	machine.rwd(E2K_REG_HCEM, user_hcall_init());
-	machine.rwd(E2K_REG_HCEB, (unsigned long) __hypercalls_begin);
+	if (!paravirt_enabled()) {
+		machine.rwd(E2K_REG_HCEM, user_hcall_init());
+		machine.rwd(E2K_REG_HCEB, (unsigned long) __hypercalls_begin);
+	}
 #endif
 }
 
@@ -144,6 +149,14 @@ static inline int
 native_host_apply_pcsp_delta_to_signal_stack(unsigned long base,
 			unsigned long size, unsigned long start,
 			unsigned long end, unsigned long delta)
+{
+	/* native & host kernel cannot be paravirtualized guest */
+	return 0;
+}
+
+static inline int
+native_host_apply_usd_delta_to_signal_stack(unsigned long top,
+					unsigned long delta, bool incr)
 {
 	/* native & host kernel cannot be paravirtualized guest */
 	return 0;
@@ -212,6 +225,8 @@ extern int apply_psp_delta_to_signal_stack(unsigned long base,
 extern int apply_pcsp_delta_to_signal_stack(unsigned long base,
 		unsigned long size, unsigned long start, unsigned long end,
 		unsigned long delta);
+extern int apply_usd_delta_to_signal_stack(unsigned long top, unsigned long delta,
+		bool incr, unsigned long *chain_stack_border);
 
 static inline int host_apply_psp_delta_to_signal_stack(unsigned long base,
 			unsigned long size, unsigned long start,
@@ -227,6 +242,12 @@ static inline int host_apply_pcsp_delta_to_signal_stack(unsigned long base,
 {
 	return native_host_apply_pcsp_delta_to_signal_stack(base, size,
 							start, end, delta);
+}
+
+static inline int host_apply_usd_delta_to_signal_stack(unsigned long top,
+					unsigned long delta, bool incr)
+{
+	return native_host_apply_usd_delta_to_signal_stack(top, delta, incr);
 }
 
 static inline unsigned long

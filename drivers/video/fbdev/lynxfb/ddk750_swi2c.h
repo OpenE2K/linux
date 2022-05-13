@@ -34,7 +34,8 @@
  *      -1   - Fail to initialize the i2c
  *       0   - Success
  */
-long swI2CInit(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO);
+long swI2CInit(struct lynx_share *share,
+				unsigned char i2cClkGPIO, unsigned char i2cDataGPIO);
 
 /*
  *  This function reads the slave device's register
@@ -47,8 +48,9 @@ long swI2CInit(unsigned char i2cClkGPIO, unsigned char i2cDataGPIO);
  *  Return Value:
  *      Register value
  */
-unsigned char swI2CReadReg(unsigned char deviceAddress,
-			   unsigned char registerIndex);
+unsigned char swI2CReadReg(struct lynx_share *share,
+				unsigned char deviceAddress,
+				unsigned char registerIndex);
 
 /*
  *  This function writes a value to the slave device's register
@@ -63,7 +65,7 @@ unsigned char swI2CReadReg(unsigned char deviceAddress,
  *          0   - Success
  *         -1   - Fail
  */
-long swI2CWriteReg(unsigned char deviceAddress,
+long swI2CWriteReg(struct lynx_share *share, unsigned char deviceAddress,
 		   unsigned char registerIndex, unsigned char data);
 
 /*
@@ -77,7 +79,7 @@ long swI2CWriteReg(unsigned char deviceAddress,
  *  Parameters:
  *      value	- Bit value to set to the SCL or SDA (0 = low, 1 = high)
  */
-void swI2CSCL(unsigned char value);
+void swI2CSCL(struct lynx_share *share, unsigned char value);
 
 /*
  *  This function set/reset the SDA GPIO pin
@@ -85,6 +87,6 @@ void swI2CSCL(unsigned char value);
  *  Parameters:
  *      value	- Bit value to set to the SCL or SDA (0 = low, 1 = high)
  */
-void swI2CSDA(unsigned char value);
+void swI2CSDA(struct lynx_share *share, unsigned char value);
 
 #endif				/* _SWI2C_H_ */

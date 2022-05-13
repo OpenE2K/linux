@@ -338,6 +338,8 @@ extern unsigned int kobjsize(const void *objp);
 # define VM_SPARC_ADI	VM_ARCH_1	/* Uses ADI tag for access control */
 # define VM_ARCH_CLEAR	VM_SPARC_ADI
 # define VM_INVEND	VM_ARCH_1	/* Invert Endianness    */
+#elif defined(CONFIG_E2K)
+# define VM_MEMTYPE_TRACKED VM_ARCH_1
 #elif !defined(CONFIG_MMU)
 # define VM_MAPPED_COPY	VM_ARCH_1	/* T if mapped copy of data (nommu mmap) */
 #endif

@@ -102,7 +102,7 @@ kvm_set_guest_cepic_virqs_num(struct kvm_vcpu *vcpu, int count)
 	atomic_set(&cepic->virqs_num, count);
 }
 static inline void
-kvm_init_guest_cepic_virqs_num(struct kvm_vcpu *vcpu)
+kvm_reset_guest_cepic_virqs_num(struct kvm_vcpu *vcpu)
 {
 	kvm_set_guest_cepic_virqs_num(vcpu, 0);
 }

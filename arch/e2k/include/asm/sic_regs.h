@@ -196,7 +196,7 @@
 #define SIC_MC_SIZE		(machine.sic_mc_size)
 
 #define SIC_mc0_ecc		0x400
-#define SIC_mc1_ecc		(machine.sic_mc1_ecc)
+#define SIC_mc1_ecc		0x440
 #define SIC_mc2_ecc		0x480
 #define SIC_mc3_ecc		0x4c0
 
@@ -508,21 +508,21 @@ typedef union {
 /*
  *   Read/Write RT_LCFGj Regs
  */
-#define ES2_CLN_BITS	4	/* 4 bits - cluster # */
+#define E2S_CLN_BITS	4	/* 4 bits - cluster # */
 #define E8C_CLN_BITS	2	/* 2 bits - cluster # */
-#if	defined(CONFIG_ES2) || defined(CONFIG_E2S)
-#define	E2K_MAX_CL_NUM	((1 << ES2_CLN_BITS) - 1)
+#if	defined(CONFIG_E2S)
+#define	E2K_MAX_CL_NUM	((1 << E2S_CLN_BITS) - 1)
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2)
 #define	E2K_MAX_CL_NUM	((1 << E8C_CLN_BITS) - 1)
 #elif	defined(CONFIG_E12C) || defined(CONFIG_E16C) || defined(CONFIG_E2C3)
 #define	E2K_MAX_CL_NUM	0	/* Cluster number field was deleted */
-#endif	/* CONFIG_ES2 || CONFIG_E2S */
+#endif	/* CONFIG_E2S */
 
 /* SCCFG */
 #define SIC_sccfg	0xc00
 
 typedef	unsigned int	e2k_rt_lcfg_t;	/* Read/write pointer (32 bits) */
-typedef	struct es2_rt_lcfg_fields {
+typedef	struct e2s_rt_lcfg_fields {
 	e2k_rt_lcfg_t   vp	:  1;			/* [0] */
 	e2k_rt_lcfg_t   vb	:  1;			/* [1] */
 	e2k_rt_lcfg_t   vics	:  1;			/* [2] */
@@ -530,7 +530,7 @@ typedef	struct es2_rt_lcfg_fields {
 	e2k_rt_lcfg_t   pln	:  2;			/* [5:4] */
 	e2k_rt_lcfg_t   cln	:  4;			/* [9:6] */
 	e2k_rt_lcfg_t   unused	:  22;			/* [31:10] */
-} es2_rt_lcfg_fields_t;
+} e2s_rt_lcfg_fields_t;
 typedef	struct e8c_rt_lcfg_fields {
 	e2k_rt_lcfg_t   vp	:  1;			/* [0] */
 	e2k_rt_lcfg_t   vb	:  1;			/* [1] */
@@ -540,28 +540,19 @@ typedef	struct e8c_rt_lcfg_fields {
 	e2k_rt_lcfg_t   cln	:  2;			/* [7:6] */
 	e2k_rt_lcfg_t   unused	:  24;			/* [31:8] */
 } e8c_rt_lcfg_fields_t;
-typedef es2_rt_lcfg_fields_t	e2s_rt_lcfg_fields_t;
 typedef	union e2k_rt_lcfg_struct {		/* Structure of lower word */
-	es2_rt_lcfg_fields_t	es2_fields;	/* as fields */
+	e2s_rt_lcfg_fields_t	e2s_fields;	/* as fields */
 	e8c_rt_lcfg_fields_t	e8c_fields;	/* as fields */
 	e2k_rt_lcfg_t		word;		/* as entire register */
 } e2k_rt_lcfg_struct_t;
 
-#define	ES2_RT_LCFG_vp(__reg)	((__reg).es2_fields.vp)
-#define	ES2_RT_LCFG_vb(__reg)	((__reg).es2_fields.vb)
-#define	ES2_RT_LCFG_vics(__reg)	((__reg).es2_fields.vics)
-#define	ES2_RT_LCFG_vio(__reg)	((__reg).es2_fields.vio)
-#define	ES2_RT_LCFG_pln(__reg)	((__reg).es2_fields.pln)
-#define	ES2_RT_LCFG_cln(__reg)	((__reg).es2_fields.cln)
-#define	ES2_RT_LCFG_reg(__reg)	((__reg).word)
-
-#define	E2S_RT_LCFG_vp		ES2_RT_LCFG_vp
-#define	E2S_RT_LCFG_vb		ES2_RT_LCFG_vb
-#define	E2S_RT_LCFG_vics	ES2_RT_LCFG_vics
-#define	E2S_RT_LCFG_vio		ES2_RT_LCFG_vio
-#define	E2S_RT_LCFG_pln		ES2_RT_LCFG_pln
-#define	E2S_RT_LCFG_cln		ES2_RT_LCFG_cln
-#define	E2S_RT_LCFG_reg		ES2_RT_LCFG_reg
+#define	E2S_RT_LCFG_vp(__reg)	((__reg).e2s_fields.vp)
+#define	E2S_RT_LCFG_vb(__reg)	((__reg).e2s_fields.vb)
+#define	E2S_RT_LCFG_vics(__reg)	((__reg).e2s_fields.vics)
+#define	E2S_RT_LCFG_vio(__reg)	((__reg).e2s_fields.vio)
+#define	E2S_RT_LCFG_pln(__reg)	((__reg).e2s_fields.pln)
+#define	E2S_RT_LCFG_cln(__reg)	((__reg).e2s_fields.cln)
+#define	E2S_RT_LCFG_reg(__reg)	((__reg).word)
 
 #define	E8C_RT_LCFG_vp(__reg)	((__reg).e8c_fields.vp)
 #define	E8C_RT_LCFG_vb(__reg)	((__reg).e8c_fields.vb)
@@ -580,21 +571,21 @@ typedef	union e2k_rt_lcfg_struct {		/* Structure of lower word */
 #define	E12C_RT_LCFG_cln(__reg)	E8C_RT_LCFG_cln(__reg)
 #define	E12C_RT_LCFG_reg(__reg)	E8C_RT_LCFG_reg(__reg)
 
-#define	E2K_RT_LCFG_vp		ES2_RT_LCFG_vp
-#define	E2K_RT_LCFG_vb		ES2_RT_LCFG_vb
-#define	E2K_RT_LCFG_vics	ES2_RT_LCFG_vics
-#define	E2K_RT_LCFG_vio		ES2_RT_LCFG_vio
-#if	defined(CONFIG_ES2) || defined(CONFIG_E2S)
-#define	E2K_RT_LCFG_pln		ES2_RT_LCFG_pln
-#define	E2K_RT_LCFG_cln		ES2_RT_LCFG_cln
+#define	E2K_RT_LCFG_vp		E2S_RT_LCFG_vp
+#define	E2K_RT_LCFG_vb		E2S_RT_LCFG_vb
+#define	E2K_RT_LCFG_vics	E2S_RT_LCFG_vics
+#define	E2K_RT_LCFG_vio		E2S_RT_LCFG_vio
+#if	defined(CONFIG_E2S)
+#define	E2K_RT_LCFG_pln		E2S_RT_LCFG_pln
+#define	E2K_RT_LCFG_cln		E2S_RT_LCFG_cln
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2)
 #define	E2K_RT_LCFG_pln		E8C_RT_LCFG_pln
 #define	E2K_RT_LCFG_cln		E8C_RT_LCFG_cln
 #elif	defined(CONFIG_E12C) || defined(CONFIG_E16C) || defined(CONFIG_E2C3)
 #define	E2K_RT_LCFG_pln		E12C_RT_LCFG_pln
 #define	E2K_RT_LCFG_cln		E12C_RT_LCFG_cln
-#endif	/* CONFIG_ES2 || CONFIG_E2S */
-#define	E2K_RT_LCFG_reg		ES2_RT_LCFG_reg
+#endif	/* CONFIG_E2S */
+#define	E2K_RT_LCFG_reg		E2S_RT_LCFG_reg
 
 /*
  *   Read/Write RT_PCIIOj Regs
@@ -773,7 +764,7 @@ typedef	union e2k_rt_msi_h_struct {		/* Structure of higher word */
  *   Read/Write ST_P Regs
  */
 typedef	unsigned int	e2k_st_p_t;		/* Read/write pointer (32 bits) */
-typedef	struct es2_st_p_fields {
+typedef	struct e2s_st_p_fields {
 	e2k_st_p_t   	type 		: 4;		/* [3:0] */
 	e2k_st_p_t	id		: 8;		/* [11:4] */
 	e2k_st_p_t   	pn	 	: 8;		/* [19:12] */
@@ -781,44 +772,35 @@ typedef	struct es2_st_p_fields {
 	e2k_st_p_t   	pl_val 		: 3;		/* [23:21] */
 	e2k_st_p_t   	mlc 		: 1;		/* [24] */
 	e2k_st_p_t   	unused 		: 7;		/* [31:25] */
-} es2_st_p_fields_t;
-typedef es2_st_p_fields_t	e2s_st_p_fields_t;
-typedef es2_st_p_fields_t	e8c_st_p_fields_t;
+} e2s_st_p_fields_t;
+typedef e2s_st_p_fields_t	e8c_st_p_fields_t;
 typedef	union e2k_st_p_struct {			/* Structure of lower word */
-	es2_st_p_fields_t	es2_fields;	/* as fields for es2 */
+	e2s_st_p_fields_t	e2s_fields;	/* as fields for e2s */
 	e2k_st_p_t		word;		/* as entire register */
 } e2k_st_p_struct_t;
 
-#define	ES2_ST_P_type		es2_fields.type
-#define	ES2_ST_P_id		es2_fields.id
-#define	ES2_ST_P_coh_on		es2_fields.coh_on
-#define	ES2_ST_P_pl_val		es2_fields.pl_val
-#define	ES2_ST_P_mlc		es2_fields.mlc
-#define	ES2_ST_P_pn		es2_fields.pn
-#define	ES2_ST_P_reg		word
+#define	E2S_ST_P_type		e2s_fields.type
+#define	E2S_ST_P_id		e2s_fields.id
+#define	E2S_ST_P_coh_on		e2s_fields.coh_on
+#define	E2S_ST_P_pl_val		e2s_fields.pl_val
+#define	E2S_ST_P_mlc		e2s_fields.mlc
+#define	E2S_ST_P_pn		e2s_fields.pn 
+#define	E2S_ST_P_reg		word
 
-#define	E2S_ST_P_type		ES2_ST_P_type
-#define	E2S_ST_P_id		ES2_ST_P_id
-#define	E2S_ST_P_coh_on		ES2_ST_P_coh_on
-#define	E2S_ST_P_pl_val		ES2_ST_P_pl_val
-#define	E2S_ST_P_mlc		ES2_ST_P_mlc
-#define	E2S_ST_P_pn		ES2_ST_P_pn
-#define	E2S_ST_P_reg		ES2_ST_P_reg
+#define	E8C_ST_P_type		E2S_ST_P_type
+#define	E8C_ST_P_id		E2S_ST_P_id
+#define	E8C_ST_P_coh_on		E2S_ST_P_coh_on
+#define	E8C_ST_P_pl_val		E2S_ST_P_pl_val
+#define	E8C_ST_P_mlc		E2S_ST_P_mlc
+#define	E8C_ST_P_pn		E2S_ST_P_pn
+#define	E8C_ST_P_reg		E2S_ST_P_reg
 
-#define	E8C_ST_P_type		ES2_ST_P_type
-#define	E8C_ST_P_id		ES2_ST_P_id
-#define	E8C_ST_P_coh_on		ES2_ST_P_coh_on
-#define	E8C_ST_P_pl_val		ES2_ST_P_pl_val
-#define	E8C_ST_P_mlc		ES2_ST_P_mlc
-#define	E8C_ST_P_pn		ES2_ST_P_pn
-#define	E8C_ST_P_reg		ES2_ST_P_reg
+#define	E2K_ST_P_type		E2S_ST_P_type
+#define	E2K_ST_P_reg		E2S_ST_P_reg
 
-#define	E2K_ST_P_type		ES2_ST_P_type
-#define	E2K_ST_P_reg		ES2_ST_P_reg
-
-#define	E2K_ST_P_pl_val		ES2_ST_P_pl_val
-#define	E2K_ST_P_mlc		ES2_ST_P_mlc
-#define	E2K_ST_P_pn		ES2_ST_P_pn
+#define	E2K_ST_P_pl_val		E2S_ST_P_pl_val
+#define	E2K_ST_P_mlc		E2S_ST_P_mlc
+#define	E2K_ST_P_pn		E2S_ST_P_pn
 
 /*
  *   ST_CORE core state register
@@ -855,13 +837,6 @@ typedef	union {
 #define	E2K_ST_CORE_stop_dbg(__reg)	((__reg).fields.stop_dbg)
 #define	E2K_ST_CORE_clk_off(__reg)	((__reg).fields.clk_off)
 #define	E2K_ST_CORE_reg(__reg)		((__reg).word)
-
-#define	ES2_ST_CORE_val		E2K_ST_CORE_val
-#define	ES2_ST_CORE_wait_init	E2K_ST_CORE_wait_init
-#define	ES2_ST_CORE_wait_trap	E2K_ST_CORE_wait_trap
-#define	ES2_ST_CORE_stop_dbg	E2K_ST_CORE_stop_dbg
-#define	ES2_ST_CORE_clk_off	E2K_ST_CORE_clk_off
-#define	ES2_ST_CORE_reg		E2K_ST_CORE_reg
 
 #define	E2S_ST_CORE_val		E2K_ST_CORE_val
 #define	E2S_ST_CORE_wait_init	E2K_ST_CORE_wait_init

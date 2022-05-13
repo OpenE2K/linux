@@ -487,12 +487,10 @@ static inline int __iolinklist_parse(const char *buf, iolinkmask_t *dstp, int nb
 			(link) = iolink_domain_to_link((domain)))
 #else /* MAX_NUMIOLINKS == 1 */
 #define for_each_iolink_mask(domain, mask)				\
-		if (HAS_MACHINE_E2K_IOHUB)				\
-			for ((domain) = 0; (domain) < 1; (domain)++)
+		for ((domain) = 0; (domain) < 1; (domain)++)
 #define for_each_node_iolink_mask(domain, node, link, mask)		\
-		if (HAS_MACHINE_E2K_IOHUB)				\
-			for ((domain) = 0, (node) = 0, (link) = 0;	\
-				(domain) < 1; (domain)++)
+		for ((domain) = 0, (node) = 0, (link) = 0;		\
+			(domain) < 1; (domain)++)
 #endif /* MAX_NUMIOLINKS */
 
 /*

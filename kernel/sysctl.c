@@ -71,7 +71,9 @@
 #include <linux/bpf.h>
 #include <linux/mount.h>
 #include <linux/userfaultfd_k.h>
-
+#ifdef CONFIG_MCST
+#include <linux/interrupt.h>
+#endif
 #include "../lib/kstrtox.h"
 
 #include <linux/uaccess.h>
@@ -120,9 +122,6 @@ extern int latencytop_enabled;
 extern unsigned int sysctl_nr_open_min, sysctl_nr_open_max;
 #ifndef CONFIG_MMU
 extern int sysctl_nr_trim_pages;
-#endif
-#ifdef CONFIG_USER_NS
-extern int sysctl_userns_restrict;
 #endif
 
 /* Constants used for minimum and  maximum */
@@ -390,6 +389,15 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#if defined(CONFIG_IRQ_FORCED_THREADING) && !defined(CONFIG_PREEMPT_RT)
+	{
+		.procname	= "force_irqthreads",
+		.data		= &force_irqthreads,
+		.maxlen		= sizeof(bool),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 #endif
 #if defined(CONFIG_SCHED_DEBUG) || defined(CONFIG_MCST)
 	{
@@ -992,17 +1000,6 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec_minmax_sysadmin,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= &two,
-	},
-#endif
-#ifdef CONFIG_USER_NS
-	{
-		.procname	= "userns_restrict",
-		.data		= &sysctl_userns_restrict,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-                .extra1         = SYSCTL_ZERO,
-                .extra2         = SYSCTL_ONE,
 	},
 #endif
 	{

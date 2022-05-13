@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -179,11 +179,11 @@ gckOS_FreeAllocators(
 }
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION (3,6,0)) || \
-	(LINUX_VERSION_CODE < KERNEL_VERSION (5,4,0) && \
-		!defined (ARCH_HAS_SG_CHAIN) && \
-		!defined (CONFIG_ARCH_HAS_SG_CHAIN)) || \
-	(LINUX_VERSION_CODE >= KERNEL_VERSION (5,4,0) && \
-		defined (CONFIG_ARCH_NO_SG_CHAIN))
+        (LINUX_VERSION_CODE < KERNEL_VERSION (5,4,0) && \
+                !defined (ARCH_HAS_SG_CHAIN) && \
+                !defined (CONFIG_ARCH_HAS_SG_CHAIN)) || \
+        (LINUX_VERSION_CODE >= KERNEL_VERSION (5,4,0) && \
+                defined (CONFIG_ARCH_NO_SG_CHAIN))
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,23)
 static inline void sg_set_page(struct scatterlist *sg, struct page *page,

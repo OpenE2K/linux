@@ -66,8 +66,11 @@ typedef	struct kvm_cpu_regs {
 	u64		CPU_SBBP[SBBP_ENTRIES_NUM];
 	e2k_wd_t	CPU_WD;		/* Window Descriptor Register */
 	e2k_bgr_t	CPU_BGR;	/* Base Global Register */
+	e2k_aasr_t	CPU_AASR;
 	e2k_lsr_t	CPU_LSR;	/* Loop Status Register */
+	e2k_lsr_t	CPU_LSR1;	/* */
 	e2k_ilcr_t	CPU_ILCR;	/* Initial Loop Counters Register */
+	e2k_ilcr_t	CPU_ILCR1;	/* */
 	e2k_rpr_lo_t	CPU_RPR_lo;	/* Recovery point register */
 	e2k_rpr_hi_t	CPU_RPR_hi;
 	e2k_cutd_t	CPU_OSCUTD;	/* CUTD Register of OS */

@@ -102,7 +102,7 @@ static int mga25_append_desc(struct mga2 *mga2, struct mga2_gem_object *mo)
 	int h = mga2->head;
 	struct desc1 *c = mo ? (struct desc1 *)mo->vaddr : &mga2->desc1[h];
 	dma_addr_t dma_addr = mo ? mo->dma_addr :
-			cpu_to_le64(mga2->desc1_dma + h * sizeof(*c));
+			mga2->desc1_dma + h * sizeof(*c);
 	struct desc0 *d = &mga2->desc0[h];
 	u64 v;
 
@@ -121,7 +121,7 @@ static int mga25_append_desc(struct mga2 *mga2, struct mga2_gem_object *mo)
 		MGA2_INT_B_SETRST | MGA25_INT_B_SOFTINT;
 	d->val2 = cpu_to_le64(v);
 
-	mga2->ring[h] = dma_addr;
+	mga2->ring[h] = cpu_to_le64(dma_addr);
 	mga2->head = circ_inc(h);
 	mga2->fence_seqno++;
 	wfb(mga2->head, MGA2_AUC2_HEADTAIL);
@@ -188,17 +188,19 @@ static struct mga2_gem_object *mga2_auc_ioctl(struct drm_device *drm,
 		drm_gem_object_put_unlocked(o);
 		a = to_mga2_obj(o)->dma_addr;
 		for (i = 0; i < nr; i++) {
-			u32 offset;
+			u32 offset, v;
 			if (get_user(offset, &b->offset[i])) {
 				ret = -EFAULT;
 				goto out;
 			}
 			offset /= sizeof(*desc);
-			if (desc[offset] >= o->size) {
+			v = le32_to_cpu(desc[offset]);
+			if (v >= o->size) {
 				ret = -EINVAL;
 				goto out;
 			}
-			desc[offset] += reltype ? a >> 32 : a;
+			v += reltype ? a >> 32 : a;
+			desc[offset] = cpu_to_le32(v);
 		}
 		resv = &to_mga2_obj(o)->resv;
 		dma_resv_lock(resv, NULL);

@@ -130,8 +130,6 @@ extern void video_bios(void);
 #define	PROBE_EXT_MEM_LIMIT	(CONFIG_EXT_MEMLIMIT * _1MB)
 
 #define LO_MEMORY_START			0x00000000000ULL
-#define	ES2_HI_MEMORY_START		0x00400000000ULL
-#define	ES2_HI_MEMORY_NODE_MAX_SIZE	0x02000000000ULL
 #define	E2S_HI_MEMORY_START		0x02000000000ULL
 #define	E2S_HI_MEMORY_NODE_MAX_SIZE	0x02000000000ULL
 #define	E8C_HI_MEMORY_START		E2S_HI_MEMORY_START
@@ -142,9 +140,6 @@ extern void video_bios(void);
 #if	defined(CONFIG_E1CP)
  #define HI_MEMORY_START		E2S_HI_MEMORY_START
  #define HI_MEMORY_NODE_MAX_SIZE	E2S_HI_MEMORY_NODE_MAX_SIZE
-#elif	defined(CONFIG_ES2)
- #define HI_MEMORY_START		ES2_HI_MEMORY_START
- #define HI_MEMORY_NODE_MAX_SIZE	ES2_HI_MEMORY_NODE_MAX_SIZE
 #elif	defined(CONFIG_E2S)
  #define HI_MEMORY_START		E2S_HI_MEMORY_START
  #define HI_MEMORY_NODE_MAX_SIZE	E2S_HI_MEMORY_NODE_MAX_SIZE
@@ -811,9 +806,6 @@ if (st_p.E2K_ST_P_pl_val & 0x1){ // 001 - CPU 1 is present
 		/*****************************/
 		/*#####################################################*/
 		/* configure own link CPU 1 to own ioapic space */
-#if	defined(CONFIG_ES2)
-		/* configure own link CPU 1 to own ioapic #1 space */
-#endif	/* CONFIG_ES2 */
 		/* configure link CPU 1 to pcim space through CPU 0 */
 		/* configure link CPU 1 to mlo space through CPU 0 */
 		AS_WORD(rt_mlo) = NATIVE_GET_SICREG(rt_mlo0, 0, 0);
@@ -2643,15 +2635,6 @@ void jump(void)
 					 * end[20:12] = bgn[20:12]
 					 * end[11:0] = 0xfff  */
 	NATIVE_SET_SICREG(rt_ioapic0, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#if	defined(CONFIG_ES2)
-	/* Configure second IOAPIC for BSP */
-	AS_WORD(rt_ioapic) = NATIVE_GET_SICREG(rt_ioapic10, E2K_MAX_CL_NUM, 0);
-	DebugRT("jump: rt_ioapic10 = 0x%x\n", AS_WORD(rt_ioapic));
-	AS_STRUCT(rt_ioapic).bgn = 0x4; /* 0x00_fec0_4000-0x00_fec0_4fff Align = 4k
-					 * end[20:12] = bgn[20:12]
-					 * end[11:0] = 0xfff  */
-	NATIVE_SET_SICREG(rt_ioapic10, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#endif	/* CONFIG_ES2 */
 	
 	/* Configure IOAPIC link for NODE 1 FIXME: may be used in future */
 	AS_WORD(rt_ioapic) = NATIVE_GET_SICREG(rt_ioapic1, E2K_MAX_CL_NUM, 0);
@@ -2660,15 +2643,6 @@ void jump(void)
 					 * end[20:12] = bgn[20:12]
 					 * end[11:0] = 0xfff  */
 	NATIVE_SET_SICREG(rt_ioapic1, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#if	defined(CONFIG_ES2)
-	/* Configure second IOAPIC for NODE 1 */
-	AS_WORD(rt_ioapic) = NATIVE_GET_SICREG(rt_ioapic11, E2K_MAX_CL_NUM, 0);
-	DebugRT("jump: rt_ioapic11 = 0x%x\n", AS_WORD(rt_ioapic));
-	AS_STRUCT(rt_ioapic).bgn = 0x5; /* 0x00_fec0_5000-0x00_fec0_5fff Align = 4k
-					 * end[20:12] = bgn[20:12]
-					 * end[11:0] = 0xfff  */
-	NATIVE_SET_SICREG(rt_ioapic11, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#endif	/* CONFIG_ES2 */
 	
 	/* Configure IOAPIC link for NODE 2 FIXME: may be used in future */
 	AS_WORD(rt_ioapic) = NATIVE_GET_SICREG(rt_ioapic2, E2K_MAX_CL_NUM, 0);
@@ -2677,15 +2651,6 @@ void jump(void)
 					 * end[20:12] = bgn[20:12]
 					 * end[11:0] = 0xfff  */
 	NATIVE_SET_SICREG(rt_ioapic2, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#if	defined(CONFIG_ES2)
-	/* Configure second IOAPIC for NODE 2 */
-	AS_WORD(rt_ioapic) = NATIVE_GET_SICREG(rt_ioapic12, E2K_MAX_CL_NUM, 0);
-	DebugRT("jump: rt_ioapic12 = 0x%x\n", AS_WORD(rt_ioapic));
-	AS_STRUCT(rt_ioapic).bgn = 0x6; /* 0x00_fec0_6000-0x00_fec0_6fff Align = 4k
-					 * end[20:12] = bgn[20:12]
-					 * end[11:0] = 0xfff  */
-	NATIVE_SET_SICREG(rt_ioapic12, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#endif	/* CONFIG_ES2 */
 
 	/* Configure IOAPIC link for NODE 3 FIXME: may be used in future */
 	AS_WORD(rt_ioapic) = NATIVE_GET_SICREG(rt_ioapic3, E2K_MAX_CL_NUM, 0);
@@ -2694,15 +2659,6 @@ void jump(void)
 					 * end[20:12] = bgn[20:12]
 					 * end[11:0] = 0xfff  */
 	NATIVE_SET_SICREG(rt_ioapic3, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#if	defined(CONFIG_ES2)
-	/* Configure second IOAPIC for NODE 3 */
-	AS_WORD(rt_ioapic) = NATIVE_GET_SICREG(rt_ioapic13, E2K_MAX_CL_NUM, 0);
-	DebugRT("jump: rt_ioapic13 = 0x%x\n", AS_WORD(rt_ioapic));
-	AS_STRUCT(rt_ioapic).bgn = 0x7; /* 0x00_fec0_7000-0x00_fec0_7fff Align = 4k
-					 * end[20:12] = bgn[20:12]
-					 * end[11:0] = 0xfff  */
-	NATIVE_SET_SICREG(rt_ioapic13, AS_WORD(rt_ioapic), E2K_MAX_CL_NUM, 0);
-#endif	/* CONFIG_ES2 */
 
 	/* Configure PCIM for BSP. The only BSP has access to PCIM, and other cpus through BSP */
 	/* so we leave rt_pcim 1,2,3 closed by default */
@@ -2741,8 +2697,8 @@ void jump(void)
 					   own # and total CPU number */
 #if	defined(CONFIG_E1CP)
 	max_cpus_num = E1CP_NR_NODE_CPUS;
-#elif	defined(CONFIG_ES2) || defined(CONFIG_E2C3)
-	max_cpus_num = ES2_NR_NODE_CPUS;
+#elif	defined(CONFIG_E2C3)
+	max_cpus_num = E2C3_NR_NODE_CPUS;
 #elif	defined(CONFIG_E2S)
 	max_cpus_num = E2S_NR_NODE_CPUS;
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2)
@@ -2943,13 +2899,7 @@ void jump(void)
 			(int)bios_strlen(BIOS_INFO_SIGNATURE) + 1);
 		memcpy(bios_info->boot_ver, BOOT_VER_STR,
 			(int)bios_strlen(BOOT_VER_STR) + 1);
-		if (NATIVE_IS_MACHINE_ES2 || NATIVE_IS_MACHINE_ES2_DSP) {
-			bios_info->chipset_type = CHIPSET_TYPE_IOHUB;
-			bios_info->cpu_type = CPU_TYPE_ES2_DSP;
-		} else if (NATIVE_IS_MACHINE_ES2_RU) {
-			bios_info->chipset_type = CHIPSET_TYPE_IOHUB;
-			bios_info->cpu_type = CPU_TYPE_ES2_RU;
-		} else if (NATIVE_IS_MACHINE_E2S) {
+		if (NATIVE_IS_MACHINE_E2S) {
 			bios_info->chipset_type = CHIPSET_TYPE_IOHUB;
 			bios_info->cpu_type = CPU_TYPE_E2S;
 		} else if (NATIVE_IS_MACHINE_E8C) {

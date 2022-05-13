@@ -22,6 +22,7 @@
 #include <linux/kvm_para.h>
 #include <linux/kvm_types.h>
 #include <asm/cpu_regs_types.h>
+#include <asm/mmu_regs_types.h>
 #include <asm/kvm/cpu_hv_regs_types.h>
 #include <asm/kvm/mmu_hv_regs_types.h>
 #include <asm/apicdef.h>
@@ -106,12 +107,6 @@ kvm_is_hw_pv_vm_available(void)
 /* memory slots that does not exposed to userspace */
 #define KVM_PRIVATE_MEM_SLOTS	4
 
-#undef E2K_INVALID_PAGE
-#define E2K_INVALID_PAGE	(~(hpa_t)0)
-
-#define UNMAPPED_GVA		(~(gpa_t)0)
-#define	arch_is_error_gpa(gpa)	((gpa_t)(gpa) == UNMAPPED_GVA)
-
 /*
  * See include/linux/kvm_host.h
  * For the normal pfn, the highest 12 bits should be zero,
@@ -176,6 +171,9 @@ void kvm_arch_async_page_ready(struct kvm_vcpu *vcpu,
 
 struct kvm_vcpu;
 struct kvm;
+
+struct kvm_mmu_pages;
+struct kvm_shadow_trans;
 
 extern struct mutex kvm_lock;
 extern struct list_head vm_list;
@@ -299,6 +297,7 @@ typedef struct kvm_mmu_memory_cache {
 	struct kmem_cache *kmem_cache;
 	int nobjs;
 	void *objects[KVM_NR_MEM_OBJS];
+	const char *name;
 } kvm_mmu_memory_cache_t;
 
 /*
@@ -339,13 +338,22 @@ typedef union kvm_mmu_root_flags {
 	struct {
 		unsigned has_host_pgds:1;
 		unsigned has_guest_pgds:1;
-		unsigned unused:30;
+		unsigned nonpaging:1;
+		unsigned unused:29;
 	};
 } kvm_mmu_root_flags_t;
 
 typedef struct kvm_rmap_head {
 	unsigned long val;
 } kvm_rmap_head_t;
+
+/* make pte_list_desc fit well in cache line */
+#define PTE_LIST_EXT	3
+
+typedef struct pte_list_desc {
+	pgprot_t *sptes[PTE_LIST_EXT];
+	struct pte_list_desc *more;
+} pte_list_desc_t;
 
 typedef struct kvm_mmu_page {
 	struct list_head link;
@@ -361,6 +369,9 @@ typedef struct kvm_mmu_page {
 
 	pgprot_t *spt;
 	gva_t gva;	/* the shadow PT map guest virtual addresses from */
+	/* hold the gpa of guest huge page table entry */
+	/* for direct shadow page table level */
+	gpa_t huge_gpt_gpa;
 	/* hold the gfn of each spte inside spt */
 	gfn_t *gfns;
 	bool unsync;
@@ -390,8 +401,8 @@ typedef struct kvm_mmu_page {
 	atomic_t write_flooding_count;
 #ifdef	CONFIG_GUEST_MM_SPT_LIST
 	struct list_head gmm_entry;	/* entry at the gmm list of SPs */
-	gmm_struct_t *gmm;		/* the gmm in whose list the entry */
 #endif	/* CONFIG_GUEST_MM_SPT_LIST */
+	gmm_struct_t *gmm;		/* the gmm in whose list the entry */
 } kvm_mmu_page_t;
 
 /* page fault handling results */
@@ -404,9 +415,20 @@ typedef enum pf_res {
 	PFRES_RETRY,		/* page fault is not handled and can */
 				/* be retried on guest or should be handled */
 				/* from begining by hypervisor */
+	PFRES_RETRY_MEM,	/* not enough memory to handle */
+	PFRES_DONT_INJECT,	/* page ault should be injected to the guest */
+				/* but injection is prohibited */
 } pf_res_t;
 
 struct kvm_arch_exception;
+struct kvm_rmap_head;
+
+/* The return value indicates if tlb flush on all vcpus is needed. */
+typedef bool (*slot_level_handler)(struct kvm *kvm,
+					struct kvm_rmap_head *rmap_head);
+
+typedef const pt_struct_t * (*get_pt_struct_func_t)(struct kvm *kvm);
+typedef const pt_struct_t * (*get_vcpu_pt_struct_func_t)(struct kvm_vcpu *vcpu);
 
 /*
  * e2k supports 2 types of virtual space:
@@ -428,7 +450,8 @@ struct kvm_arch_exception;
  * The kvm_mmu structure abstracts the details of the current mmu mode.
  */
 typedef struct kvm_mmu {
-	hpa_t	sh_u_root_hpa;	/* shadow PT root for user (and probably OS) */
+	hpa_t	sh_u_root_hpa;	/* shadow PT root for user for guest user running */
+	hpa_t	sh_gk_root_hpa;	/* shadow PT root for user for guest kernel -''- */
 	hpa_t	sh_os_root_hpa;	/* shadow PT root for OS (separate spoaces) */
 	hpa_t	gp_root_hpa;	/* physical base of root PT to translate */
 				/* guest physical addresses */
@@ -488,10 +511,10 @@ typedef struct kvm_mmu {
 
 	/* MMU interceptions control registers state */
 	virt_ctrl_mu_t	virt_ctrl_mu;
-	mmu_reg_t	g_w_imask_mmu_cr;
+	e2k_mmu_cr_t	g_w_imask_mmu_cr;
 
 	/* MMU shadow control registers initial state */
-	mmu_reg_t	init_sh_mmu_cr;
+	e2k_mmu_cr_t	init_sh_mmu_cr;
 	mmu_reg_t	init_sh_pid;
 
 	/* Can have large pages at levels 2..last_nonleaf_level-1. */
@@ -501,6 +524,7 @@ typedef struct kvm_mmu {
 	bool (*is_paging)(struct kvm_vcpu *vcpu);
 	void (*set_vcpu_u_pptb)(struct kvm_vcpu *vcpu, pgprotval_t base);
 	void (*set_vcpu_sh_u_pptb)(struct kvm_vcpu *vcpu, hpa_t root);
+	void (*set_vcpu_sh_gk_pptb)(struct kvm_vcpu *vcpu, hpa_t gk_root);
 	void (*set_vcpu_os_pptb)(struct kvm_vcpu *vcpu, pgprotval_t base);
 	void (*set_vcpu_sh_os_pptb)(struct kvm_vcpu *vcpu, hpa_t root);
 	void (*set_vcpu_u_vptb)(struct kvm_vcpu *vcpu, gva_t base);
@@ -511,6 +535,7 @@ typedef struct kvm_mmu {
 	void (*set_vcpu_gp_pptb)(struct kvm_vcpu *vcpu, hpa_t root);
 	pgprotval_t (*get_vcpu_u_pptb)(struct kvm_vcpu *vcpu);
 	hpa_t (*get_vcpu_sh_u_pptb)(struct kvm_vcpu *vcpu);
+	hpa_t (*get_vcpu_sh_gk_pptb)(struct kvm_vcpu *vcpu);
 	pgprotval_t (*get_vcpu_os_pptb)(struct kvm_vcpu *vcpu);
 	hpa_t (*get_vcpu_sh_os_pptb)(struct kvm_vcpu *vcpu);
 	gva_t (*get_vcpu_u_vptb)(struct kvm_vcpu *vcpu);
@@ -520,6 +545,7 @@ typedef struct kvm_mmu {
 	gva_t (*get_vcpu_os_vab)(struct kvm_vcpu *vcpu);
 	hpa_t (*get_vcpu_gp_pptb)(struct kvm_vcpu *vcpu);
 	void (*set_vcpu_pt_context)(struct kvm_vcpu *vcpu, unsigned flags);
+	void (*set_vcpu_u_pptb_context)(struct kvm_vcpu *vcpu);
 	void (*init_vcpu_ptb)(struct kvm_vcpu *vcpu);
 	pgprotval_t (*get_vcpu_context_u_pptb)(struct kvm_vcpu *vcpu);
 	gva_t (*get_vcpu_context_u_vptb)(struct kvm_vcpu *vcpu);
@@ -528,21 +554,138 @@ typedef struct kvm_mmu {
 	gva_t (*get_vcpu_context_os_vab)(struct kvm_vcpu *vcpu);
 	hpa_t (*get_vcpu_context_gp_pptb)(struct kvm_vcpu *vcpu);
 	pgprotval_t (*get_vcpu_pdpte)(struct kvm_vcpu *vcpu, int index);
+
+	/* MMU page tables management functions */
 	pf_res_t (*page_fault)(struct kvm_vcpu *vcpu, gva_t gva, u32 err,
 			  bool prefault, gfn_t *gfn, kvm_pfn_t *pfn);
 	void (*inject_page_fault)(struct kvm_vcpu *vcpu,
 				  struct kvm_arch_exception *fault);
 	gpa_t (*gva_to_gpa)(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
-			    struct kvm_arch_exception *exception);
-	gpa_t (*translate_gpa)(struct kvm_vcpu *vcpu, gpa_t gpa, u32 access,
-			       struct kvm_arch_exception *exception);
-	void (*update_pte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
+			    struct kvm_arch_exception *exception,
+			    gw_attr_t *gw_res);
+	void (*update_spte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 			   pgprot_t *spte, const void *pte);
-	void (*sync_gva)(struct kvm_vcpu *vcpu, gva_t gva);
-	void (*sync_gva_range)(struct kvm_vcpu *vcpu, gva_t gva_start,
-					gva_t gva_end, bool flush_tlb);
+	int (*sync_gva)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, gva_t gva);
+	long (*sync_gva_range)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+				gva_t gva_start, gva_t gva_end);
 	int (*sync_page)(struct kvm_vcpu *vcpu, kvm_mmu_page_t *sp);
 } kvm_mmu_t;
+
+/*
+ * MMU page tables interface
+ */
+typedef struct kvm_mmu_pt_ops {
+	/* host page table structure to support guest MMU and PTs can be */
+	/* different in common case */
+	const pt_struct_t *host_pt_struct;	/* abstractions for details */
+					/* of the host page table structure */
+	const pt_struct_t *guest_pt_struct;	/* abstractions for details */
+					/* of the guest page table structure */
+	const pt_struct_t *gp_pt_struct;	/* abstractions for details */
+					/* of the guest physical page table */
+					/* structure, if is enable */
+	get_pt_struct_func_t get_host_pt_struct;
+	get_vcpu_pt_struct_func_t get_vcpu_pt_struct;
+	get_pt_struct_func_t get_gp_pt_struct;
+
+	/* MMU page tables management functions */
+	pgprotval_t (*get_spte_valid_mask)(struct kvm *kvm);
+	pgprotval_t (*get_spte_pfn_mask)(struct kvm *kvm);
+	gfn_t (*kvm_gfn_to_index)(struct kvm *kvm, gfn_t gfn, gfn_t base_gfn,
+				  int level_id);
+	bool (*kvm_is_thp_gpmd_invalidate)(struct kvm_vcpu *vcpu,
+				pgprot_t old_gpmd,  pgprot_t new_gpmd);
+	void (*kvm_vmlpt_kernel_spte_set)(struct kvm *kvm, pgprot_t *spte,
+					  pgprot_t *root);
+	void (*kvm_vmlpt_user_spte_set)(struct kvm *kvm, pgprot_t *spte,
+					pgprot_t *root);
+	void (*mmu_gfn_disallow_lpage)(struct kvm *kvm,
+				struct kvm_memory_slot *slot, gfn_t gfn);
+	void (*mmu_gfn_allow_lpage)(struct kvm *kvm,
+				struct kvm_memory_slot *slot, gfn_t gfn);
+	bool (*rmap_write_protect)(struct kvm_vcpu *vcpu, u64 gfn);
+	int (*mmu_unsync_walk)(struct kvm *kvm, kvm_mmu_page_t *sp,
+			       struct kvm_mmu_pages *pvec, int pt_entries_level);
+	bool (*mmu_slot_gfn_write_protect)(struct kvm *kvm,
+				struct kvm_memory_slot *slot, u64 gfn);
+	void (*account_shadowed)(struct kvm *kvm, struct kvm_mmu_page *sp);
+	void (*unaccount_shadowed)(struct kvm *kvm, struct kvm_mmu_page *sp);
+	int (*walk_shadow_pts)(struct kvm_vcpu *vcpu, gva_t addr,
+				struct kvm_shadow_trans *st, hpa_t spt_root);
+	pf_res_t (*nonpaging_page_fault)(struct kvm_vcpu *vcpu, gva_t gva,
+				u32 error_code, bool prefault,
+				gfn_t *gfnp, kvm_pfn_t *pfnp);
+	pgprot_t (*nonpaging_gpa_to_pte)(struct kvm_vcpu *vcpu, gva_t addr);
+	long (*kvm_hv_mmu_page_fault)(struct kvm_vcpu *vcpu, struct pt_regs *regs,
+				      intc_info_mu_t *intc_info_mu);
+	void (*kvm_mmu_pte_write)(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
+				  gpa_t gpa, const u8 *new, int bytes,
+				  unsigned long flags);
+	int (*sync_shadow_pt_range)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+			hpa_t spt_root, gva_t start, gva_t end,
+			gpa_t guest_root, gva_t vptb);
+	int (*shadow_pt_protection_fault)(struct kvm_vcpu *vcpu,
+					  gpa_t addr, kvm_mmu_page_t *sp);
+	void (*direct_unmap_prefixed_mmio_gfn)(struct kvm *kvm, gfn_t gfn);
+	void (*kvm_mmu_free_page)(struct kvm *kvm, struct kvm_mmu_page *sp);
+	void (*copy_guest_shadow_root_range)(struct kvm_vcpu *vcpu,
+			gmm_struct_t *gmm, pgprot_t *dst_root, pgprot_t *src_root,
+			int start_index, int end_index);
+	void (*switch_kernel_pgd_range)(struct kvm_vcpu *vcpu, int cpu);
+	void (*zap_linked_children)(struct kvm *kvm, pgprot_t *root_spt,
+				    int start_index, int end_index);
+	void (*mark_parents_unsync)(struct kvm *kvm, kvm_mmu_page_t *sp);
+	int (*prepare_zap_page)(struct kvm *kvm, struct kvm_mmu_page *sp,
+				struct list_head *invalid_list);
+	int (*unmap_hva_range)(struct kvm *kvm, unsigned long start,
+				unsigned long end, unsigned flags);
+	int (*set_spte_hva)(struct kvm *kvm, unsigned long hva, pte_t pte);
+	int (*age_hva)(struct kvm *kvm, unsigned long start, unsigned long end);
+	int (*test_age_hva)(struct kvm *kvm, unsigned long hva);
+	void (*arch_mmu_enable_log_dirty_pt_masked)(struct kvm *kvm,
+					struct kvm_memory_slot *slot,
+					gfn_t gfn_offset, unsigned long mask);
+	bool (*slot_handle_ptes_level_range)(struct kvm *kvm,
+			const struct kvm_memory_slot *memslot,
+			slot_level_handler fn, int start_level, int end_level,
+			gfn_t start_gfn, gfn_t end_gfn, bool lock_flush_tlb);
+	bool (*slot_handle_rmap_write_protect)(struct kvm *kvm,
+			const struct kvm_memory_slot *memslot,
+			slot_level_handler fn, bool lock_flush_tlb);
+	bool (*slot_handle_collapsible_sptes)(struct kvm *kvm,
+			const struct kvm_memory_slot *memslot,
+			slot_level_handler fn, bool lock_flush_tlb);
+	bool (*slot_handle_clear_dirty)(struct kvm *kvm,
+			const struct kvm_memory_slot *memslot,
+			slot_level_handler fn, bool lock_flush_tlb);
+	bool (*slot_handle_largepage_remove_write_access)(struct kvm *kvm,
+			const struct kvm_memory_slot *memslot,
+			slot_level_handler fn, bool lock_flush_tlb);
+	bool (*slot_handle_set_dirty)(struct kvm *kvm,
+			const struct kvm_memory_slot *memslot,
+			slot_level_handler fn, bool lock_flush_tlb);
+
+	/* MMU flush interface */
+	void (*mmu_flush_spte_tlb_range)(struct kvm_vcpu *vcpu,
+					pgprot_t *sptep, int level);
+	void (*mmu_flush_large_spte_tlb_range)(struct kvm_vcpu *vcpu,
+					pgprot_t *sptep);
+	void (*mmu_flush_shadow_pt_level_tlb)(struct kvm *kvm,
+					pgprot_t *sptep, pgprot_t old_spte);
+
+	/* MMU interafce init functions */
+	void (*mmu_init_vcpu_pt_struct)(struct kvm_vcpu *vcpu);
+	void (*kvm_init_mmu_pt_structs)(struct kvm *kvm);
+	void (*kvm_init_nonpaging_pt_structs)(struct kvm *kvm, hpa_t root);
+	void (*setup_shadow_pt_structs)(struct kvm_vcpu *vcpu);
+	void (*setup_tdp_pt_structs)(struct kvm_vcpu *vcpu);
+	void (*kvm_init_mmu_spt_context)(struct kvm_vcpu *vcpu,
+						struct kvm_mmu *context);
+	void (*kvm_init_mmu_tdp_context)(struct kvm_vcpu *vcpu,
+						struct kvm_mmu *context);
+	void (*kvm_init_mmu_nonpaging_context)(struct kvm_vcpu *vcpu,
+						struct kvm_mmu *context);
+} kvm_mmu_pt_ops_t;
 
 typedef struct intc_mu_state {
 	unsigned long notifier_seq;	/* 'mmu_notifier_seq' state before */
@@ -642,6 +785,8 @@ typedef struct kvm_guest_virq {
 typedef struct kvm_sw_cpu_context {
 	int osem;
 	bool in_hypercall;
+	bool in_fast_syscall;
+	bool dont_inject;
 
 	e2k_usd_lo_t usd_lo;
 	e2k_usd_hi_t usd_hi;
@@ -668,6 +813,8 @@ typedef struct kvm_sw_cpu_context {
 
 	e2k_mem_crs_t	crs;	/* only for PV guest */
 
+	long ret_value;		/* return value from hypercall to guest */
+
 	/*
 	 * TODO here goes stuff that can be not switched
 	 * on hypercalls if we do not support calling QEMU from them
@@ -692,19 +839,19 @@ typedef struct kvm_sw_cpu_context {
 	global_regs_t host_gregs;
 	kernel_gregs_t vcpu_k_gregs;
 	kernel_gregs_t host_k_gregs;
-	host_gregs_t vcpu_h_gregs;
-	host_gregs_t host_h_gregs;
 #endif	/* CONFIG_GREGS_CONTEXT */
 
 	e2k_cutd_t cutd;
 
 	/* guest (hypervisor shadow) user page table bases: */
-	mmu_reg_t	sh_u_pptb;	/* physical */
+	mmu_reg_t	sh_u_pptb;	/* physical (for user running) */
 	mmu_reg_t	sh_u_vptb;	/* and virtual */
 	mmu_reg_t	tc_hpa;		/* host physical base of VCPU */
 					/* trap cellar */
 	mmu_reg_t	trap_count;
+	bool		no_switch_pt;	/* do not switch PT registers */
 
+	/* Monitors and breakpoints */
 	e2k_dibcr_t	dibcr;
 	e2k_ddbcr_t	ddbcr;
 	e2k_dibsr_t	dibsr;
@@ -723,9 +870,11 @@ typedef struct kvm_sw_cpu_context {
 	u64		ddbar1;
 	u64		ddbar2;
 	u64		ddbar3;
+	e2k_dimtp_t	dimtp;
 
 #ifdef CONFIG_USE_AAU
 	e2k_aau_t aau_context;
+	e2k_aasr_t aasr;
 #endif
 
 	u64 cs_lo;
@@ -823,7 +972,7 @@ typedef struct kvm_hw_cpu_context {
 	e2k_pcsp_lo_t bu_pcsp_lo;
 	e2k_pcsp_hi_t bu_pcsp_hi;
 
-	mmu_reg_t sh_mmu_cr;
+	e2k_mmu_cr_t sh_mmu_cr;
 	mmu_reg_t sh_pid;
 	mmu_reg_t sh_os_pptb;
 	mmu_reg_t gp_pptb;
@@ -842,7 +991,7 @@ typedef struct kvm_hw_cpu_context {
 
 	virt_ctrl_cu_t virt_ctrl_cu;
 	virt_ctrl_mu_t virt_ctrl_mu;
-	mmu_reg_t g_w_imask_mmu_cr;
+	e2k_mmu_cr_t g_w_imask_mmu_cr;
 
 	struct kvm_epic_page *cepic;
 
@@ -905,6 +1054,8 @@ typedef struct kvm_host_context {
 	unsigned	osem;	/* OSEM register state */
 	/* the host kernel's signal/trap stack of contexts */
 	kvm_signal_context_t signal;
+	/* kgregs of host kernel */
+	struct kernel_gregs     k_gregs;
 } kvm_host_context_t;
 
 #ifdef CONFIG_KVM_ASYNC_PF
@@ -934,6 +1085,9 @@ struct kvm_vcpu_arch {
 	kvm_vcpu_state_t *kmap_vcpu_state;	/* alias of VCPU state */
 						/* mapped into kernel VM */
 						/* space */
+	gva_t		guest_vcpu_state;	/* alias of VCPU state */
+						/* mapped into guest kernel VM */
+						/* to access from guest */
 	e2k_cute_t *guest_cut;
 	e2k_addr_t guest_phys_base;	/* guest image (kernel) physical base */
 	char *guest_base;		/* guest image (kernel) virtual base */
@@ -1010,13 +1164,12 @@ struct kvm_vcpu_arch {
 					/* spin lock/unlock */
 	bool unhalted;			/* VCPU was woken up by pv_kick */
 	bool halted;			/* VCPU is halted */
+	bool reboot;			/* VCPU is rebooted */
 	bool on_idle;			/* VCPU is on idle waiting for some */
 					/* events for guest */
 	bool on_spinlock;		/* VCPU is on slow spinlock waiting */
 	bool on_csd_lock;		/* VCPU is waiting for csd unlocking */
 					/* (IPI completion) */
-	bool should_stop;		/* guest VCPU thread should be */
-					/* stopped and completed */
 	bool virq_wish;			/* trap 'last wish' is injection to */
 					/* pass pending VIRQs to guest */
 	bool virq_injected;		/* interrupt is injected to handle */
@@ -1048,17 +1201,6 @@ struct kvm_vcpu_arch {
 	int64_t ioport_data_size;	/* max size of IO port data area */
 	uint32_t notifier_io;		/* IO request notifier */
 
-	bool in_exit_req;			/* VCPU is waiting for exit */
-						/* request completion */
-						/* exit request in progress */
-	struct completion exit_req_done;	/* exit request is completed */
-
-	struct list_head exit_reqs_list;	/* exit requests list head */
-						/* used only on main VCPU */
-	struct list_head exit_req;		/* the VCPU exit request */
-	raw_spinlock_t exit_reqs_lock;		/* to lock list of exit */
-						/* requests */
-
 	struct work_struct dump_work;		/* to schedule work to dump */
 						/* guest VCPU state */
 
@@ -1087,9 +1229,10 @@ struct kvm_vcpu_arch {
 
 	int node_id;
 	int hard_cpu_id;
+
+	u64 gst_mkctxt_trampoline;
 };
 
-#ifdef	CONFIG_KVM_HV_MMU
 typedef struct kvm_lpage_info {
 	int disallow_lpage;
 } kvm_lpage_info_t;
@@ -1097,22 +1240,10 @@ typedef struct kvm_lpage_info {
 typedef struct kvm_arch_memory_slot {
 	kvm_rmap_head_t		*rmap[KVM_NR_PAGE_SIZES];
 	kvm_lpage_info_t	*lpage_info[KVM_NR_PAGE_SIZES - 1];
+	unsigned long		page_size;
 	kvm_mem_guest_t		guest_areas;
 	unsigned short		*gfn_track[KVM_PAGE_TRACK_MAX];
 } kvm_arch_memory_slot_t;
-#else	/* ! CONFIG_KVM_HV_MMU */
-struct kvm_lpage_info {
-	int write_count;
-};
-
-struct kvm_arch_memory_slot {
-	unsigned long *rmap;
-	struct kvm_lpage_info *lpage_info[KVM_NR_PAGE_SIZES - 1];
-	kvm_mem_guest_t guest_areas;
-};
-
-extern struct file_operations kvm_vm_fops;
-#endif	/* CONFIG_KVM_HV_MMU */
 
 /*
  * e2k-arch vcpu->requests bit members
@@ -1125,9 +1256,15 @@ extern struct file_operations kvm_vm_fops;
 						/* after show state of VCPU */
 						/* completion */
 #define	KVM_REQ_KICK			18	/* VCPU should be kicked */
-#define KVM_REQ_VIRQS_INJECTED		20	/* pending VIRQs injected */
+#define	KVM_REQ_ADDR_FLUSH		19	/* local flush the TLB address */
+#define	KVM_REQ_SYNC_INIT_SPT_ROOT	20	/* it need sync guest kernel */
+						/* copies of root PT */
+#define	KVM_REQ_SYNC_GMM_SPT_ROOT	21	/* it need sync guest user */
+						/* copies of root PT */
+#define KVM_REQ_VIRQS_INJECTED		22	/* pending VIRQs injected */
 #define KVM_REQ_SCAN_IOAPIC		23	/* scan IO-APIC */
 #define KVM_REQ_SCAN_IOEPIC		24	/* scan IO-EPIC */
+#define	KVM_REQ_TO_COREDUMP		25	/* pending coredump request */
 
 #define kvm_set_pending_virqs(vcpu)	\
 		set_bit(KVM_REQ_PENDING_VIRQS, (void *)&vcpu->requests)
@@ -1154,15 +1291,20 @@ do { \
 	if (test_and_clear_bit(KVM_REG_SHOW_STATE, (void *)&vcpu->requests)) \
 		wake_up_bit((void *)&vcpu->requests, KVM_REG_SHOW_STATE); \
 } while (false)
+#define kvm_set_request_to_coredump(vcpu)	\
+		kvm_make_request(KVM_REQ_TO_COREDUMP, vcpu)
+#define	kvm_clear_request_to_coredump(vcpu)	\
+		kvm_clear_request(KVM_REQ_TO_COREDUMP, vcpu)
+#define	kvm_test_request_to_coredump(vcpu)	\
+		kvm_test_request(KVM_REQ_TO_COREDUMP, vcpu)
+#define	kvm_test_and_clear_request_to_coredump(vcpu)	\
+		kvm_check_request(KVM_REQ_TO_COREDUMP, vcpu)
 
 struct kvm_irq_mask_notifier {
 	void (*func)(struct kvm_irq_mask_notifier *kimn, bool masked);
 	int irq;
 	struct hlist_node link;
 };
-
-typedef const pt_struct_t * (*get_pt_struct_func_t)(struct kvm *kvm);
-typedef const pt_struct_t * (*get_vcpu_pt_struct_func_t)(struct kvm_vcpu *vcpu);
 
 struct irq_remap_table {
 	bool enabled;
@@ -1175,6 +1317,8 @@ struct irq_remap_table {
 	gpa_t gpa;
 	struct pci_dev *vfio_dev;
 };
+
+#define KVM_ARCH_WANT_MMU_NOTIFIER
 
 struct kvm_arch {
 	unsigned long vm_type;	/* virtual machine type */
@@ -1192,6 +1336,7 @@ struct kvm_arch {
 	bool tdp_enable;	/* two dimensional paging is supported */
 				/* by hardware MMU and hypervisor */
 	bool shadow_pt_set_up;	/* shadow PT was set up, skip setup on other VCPUs */
+	atomic_t vcpus_to_reset;	/* atomic counter of VCPUs ready to reset */
 	kvm_mem_alias_t aliases[KVM_ALIAS_SLOTS];
 	kvm_kernel_shadow_t shadows[KVM_SHADOW_SLOTS];
 	kvm_nidmap_t gpid_nidmap[GPIDMAP_ENTRIES];
@@ -1203,19 +1348,6 @@ struct kvm_arch {
 	struct hlist_head gmmid_hash[GMMID_HASH_SIZE];
 	gmmid_table_t gmmid_table;
 	gmm_struct_t *init_gmm;		/* host agent of guest kernel mm */
-
-	/* host page table structure to support guest MMU and PTs can be */
-	/* different in common case */
-	const pt_struct_t *host_pt_struct;	/* abstractions for details */
-					/* of the host page table structure */
-	const pt_struct_t *guest_pt_struct;	/* abstractions for details */
-					/* of the guest page table structure */
-	const pt_struct_t *gp_pt_struct;	/* abstractions for details */
-					/* of the guest physical page table */
-					/* structure, if is enable */
-	get_pt_struct_func_t get_host_pt_struct;
-	get_vcpu_pt_struct_func_t get_vcpu_pt_struct;
-	get_pt_struct_func_t get_gp_pt_struct;
 
 #ifdef	CONFIG_KVM_HV_MMU
 	/* MMU nonpaging mode */
@@ -1234,6 +1366,8 @@ struct kvm_arch {
 	struct kvm_page_track_notifier_node mmu_sp_tracker;
 	struct kvm_page_track_notifier_head track_notifier_head;
 #endif	/* CONFIG_KVM_HV_MMU */
+
+	kvm_mmu_pt_ops_t mmu_pt_ops;	/* MMU PTs interface */
 
 	kvm_host_info_t *host_info;	/* host machine and kernel INFO */
 	kvm_host_info_t *kmap_host_info; /* host machine and kernel INFO */
@@ -1296,6 +1430,10 @@ struct kvm_arch {
 	/* sign of reboot VM, true - reboot */
 	bool reboot;
 
+#ifdef	KVM_ARCH_WANT_MMU_NOTIFIER
+	struct swait_queue_head mmu_wq;
+#endif	/* KVM_ARCH_WANT_MMU_NOTIFIER */
+
 	/* lock to update num_sclkr_run and common sh_sclkm3
 	 * for all vcpu-s of the guest */
 	raw_spinlock_t sh_sclkr_lock;
@@ -1340,6 +1478,8 @@ struct kvm_arch_async_pf {
 					/* and has shadow image address */
 #define	KVMF_VCPU_STARTED	1	/* VCPUs (one or more) is started */
 					/* VM real active */
+#define	KVMF_ARCH_API_TAKEN	4	/* ioctl() to get KVM arch api version */
+					/* was received (to break old versions) */
 #define	KVMF_IN_SHOW_STATE	8	/* show state of KVM (print all */
 					/* stacks) is in progress */
 #define	KVMF_NATIVE_KERNEL	32	/* guest is running native */
@@ -1349,6 +1489,7 @@ struct kvm_arch_async_pf {
 #define	KVMF_LINTEL		40	/* guest is running LIntel */
 #define	KVMF_PARAVIRT_GUEST_MASK	(1UL << KVMF_PARAVIRT_GUEST)
 #define	KVMF_VCPU_STARTED_MASK		(1UL << KVMF_VCPU_STARTED)
+#define	KVMF_ARCH_API_TAKEN_MASK	(1UL << KVMF_ARCH_API_TAKEN)
 #define	KVMF_IN_SHOW_STATE_MASK		(1UL << KVMF_IN_SHOW_STATE)
 #define	KVMF_NATIVE_KERNEL_MASK		(1UL << KVMF_NATIVE_KERNEL)
 #define	KVMF_PARAVIRT_KERNEL_MASK	(1UL << KVMF_PARAVIRT_KERNEL)
@@ -1410,13 +1551,43 @@ static inline void kvm_arch_vcpu_block_finish(struct kvm_vcpu *vcpu)
 #define	SEP_VIRT_ROOT_PT_FLAG	(1U << SEP_VIRT_ROOT_PT_BIT)
 #define	DONT_SYNC_ROOT_PT_FLAG	(1U << DONT_SYNC_ROOT_PT_BIT)
 
-#define KVM_ARCH_WANT_MMU_NOTIFIER
+typedef enum mmu_retry {
+	NO_MMU_RETRY = 0,
+	WAIT_FOR_MMU_RETRY,
+	DO_MMU_RETRY,
+} mmu_retry_t;
 
 #ifdef	KVM_ARCH_WANT_MMU_NOTIFIER
-int kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end, unsigned flags);
-int kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
-int kvm_age_hva(struct kvm *kvm, unsigned long start, unsigned long end);
-int kvm_test_age_hva(struct kvm *kvm, unsigned long hva);
+int mmu_pt_unmap_hva_range(struct kvm *kvm, unsigned long start,
+				unsigned long end, unsigned flags);
+int mmu_pt_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
+int mmu_pt_age_hva(struct kvm *kvm, unsigned long start, unsigned long end);
+int mmu_pt_test_age_hva(struct kvm *kvm, unsigned long hva);
+
+static inline int
+kvm_unmap_hva_range(struct kvm *kvm, unsigned long start, unsigned long end,
+		    unsigned flags)
+{
+	return mmu_pt_unmap_hva_range(kvm, start, end, flags);
+}
+
+static inline int
+kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte)
+{
+	return mmu_pt_set_spte_hva(kvm, hva, pte);
+}
+
+static inline int
+kvm_age_hva(struct kvm *kvm, unsigned long start, unsigned long end)
+{
+	return mmu_pt_age_hva(kvm, start, end);
+}
+
+static inline int
+kvm_test_age_hva(struct kvm *kvm, unsigned long hva)
+{
+	return mmu_pt_test_age_hva(kvm, hva);
+}
 #endif	/* KVM_ARCH_WANT_MMU_NOTIFIER */
 
 extern void kvm_fire_mask_notifiers(struct kvm *kvm, int irq, bool mask);
@@ -1471,5 +1642,14 @@ static inline void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu) { }
 
 extern struct work_struct kvm_dump_stacks;
 extern void wait_for_print_all_guest_stacks(struct work_struct *work);
+
+typedef enum kvm_e2k_from {
+	FROM_GENERIC_HYPERCALL,
+	FROM_LIGHT_HYPERCALL,
+	FROM_PV_INTERCEPT,
+	FROM_HV_INTERCEPT,
+	FROM_VCPU_LOAD,
+	FROM_VCPU_PUT
+} kvm_e2k_from_t;
 
 #endif /* _ASM_E2K_KVM_HOST_H */

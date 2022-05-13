@@ -3,8 +3,7 @@
 #include <asm/e2k_api.h>
 #include <asm/machdep.h>
 
-#define	BOOT_E2K_X86_IO_PAGE_SIZE (boot_cpu_has(CPU_HWBUG_LARGE_PAGES) ? \
-				E2K_SMALL_PAGE_SIZE : BOOT_E2K_LARGE_PAGE_SIZE)
+#define	BOOT_E2K_X86_IO_PAGE_SIZE 	BOOT_E2K_LARGE_PAGE_SIZE
 #define BOOT_X86_IO_AREA_PHYS_BASE	(boot_machine.x86_io_area_base)
 #define BOOT_X86_IO_AREA_PHYS_SIZE	(boot_machine.x86_io_area_size)
 

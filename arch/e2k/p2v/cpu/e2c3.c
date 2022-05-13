@@ -24,17 +24,6 @@ void boot_e2c3_setup_arch(void)
 	boot_machine.pcicfg_area_phys_base = E2C3_PCICFG_AREA_PHYS_BASE;
 	boot_machine.pcicfg_area_size = E2C3_PCICFG_AREA_SIZE;
 	boot_machine.nsr_area_phys_base = E2C3_NSR_AREA_PHYS_BASE;
-	boot_machine.nbsr_area_offset = E2C3_NBSR_AREA_OFFSET;
-	boot_machine.nbsr_area_size = E2C3_NBSR_AREA_SIZE;
-	boot_machine.copsr_area_phys_base = E2C3_COPSR_AREA_PHYS_BASE;
-	boot_machine.copsr_area_size = E2C3_COPSR_AREA_SIZE;
-	boot_machine.mlt_size = E2C3_MLT_SIZE;
-	boot_machine.tlb_lines_bits_num = E2C3_TLB_LINES_BITS_NUM;
-	boot_machine.tlb_addr_line_num = E2C3_TLB_ADDR_LINE_NUM;
-	boot_machine.tlb_addr_line_num2 = E2C3_TLB_ADDR_LINE_NUM2;
-	boot_machine.tlb_addr_line_num_shift2 = E2C3_TLB_ADDR_LINE_NUM_SHIFT2;
-	boot_machine.tlb_addr_set_num = E2C3_TLB_ADDR_SET_NUM;
-	boot_machine.tlb_addr_set_num_shift = E2C3_TLB_ADDR_SET_NUM_SHIFT;
 	boot_machine.sic_mc_size = E2C3_SIC_MC_SIZE;
 	boot_machine.sic_mc_count = E2C3_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = 0;	/* no MC1_ECC reg */

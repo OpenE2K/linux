@@ -20,7 +20,7 @@
 #include "ddk750_reg.h"
 #include "ddk750_mode.h"
 #include "ddk750_chip.h"
-
+#include "lynx_drv.h"
 /*
    SM750LE only:
    This function takes care extra registers and bit fields required to set
@@ -30,8 +30,8 @@
    HW only supports 7 predefined pixel clocks, and clock select is
    in bit 29:27 of	Display Control register.
    */
-static unsigned long displayControlAdjust_SM750LE(mode_parameter_t *
-						  pModeParam,
+static unsigned long displayControlAdjust_SM750LE(struct lynx_share *share,
+						mode_parameter_t *pModeParam,
 						  unsigned long
 						  dispControl)
 {
@@ -45,15 +45,15 @@ static unsigned long displayControlAdjust_SM750LE(mode_parameter_t *
 	   Note that normal SM750/SM718 only use those two register for
 	   auto-centering mode.
 	 */
-	POKE32(CRT_AUTO_CENTERING_TL,
+	POKE32(share->pvReg, CRT_AUTO_CENTERING_TL,
 	       (~(0x7FF << CRT_AUTO_CENTERING_TL_TOP_LSB)) &
 	       (~(0x7FF << CRT_AUTO_CENTERING_TL_LEFT_LSB)));
 
 	/*clear */
-	POKE32(CRT_AUTO_CENTERING_BR,
+	POKE32(share->pvReg, CRT_AUTO_CENTERING_BR,
 	       (~(0x7FF << CRT_AUTO_CENTERING_BR_BOTTOM_LSB)) |
 	       (~(0x7FF << CRT_AUTO_CENTERING_BR_RIGHT_LSB)));
-	POKE32(CRT_AUTO_CENTERING_BR,
+	POKE32(share->pvReg, CRT_AUTO_CENTERING_BR,
 	       ((y - 1) << CRT_AUTO_CENTERING_BR_BOTTOM_LSB) |
 	       ((x - 1) << CRT_AUTO_CENTERING_BR_RIGHT_LSB));
 	/* Clear bit 29:27 of display control register */
@@ -90,7 +90,7 @@ static unsigned long displayControlAdjust_SM750LE(mode_parameter_t *
 
 	/* Set bit 14 of display controller */
 	dispControl |= 1 << CRT_DISPLAY_CTRL_CLOCK_PHASE_LSB;
-	POKE32(CRT_DISPLAY_CTRL, dispControl);
+	POKE32(share->pvReg, CRT_DISPLAY_CTRL, dispControl);
 
 	return dispControl;
 
@@ -99,34 +99,34 @@ static unsigned long displayControlAdjust_SM750LE(mode_parameter_t *
 
 
 /* only timing related registers will be  programed */
-static int programModeRegisters(mode_parameter_t * pModeParam,
-				pll_value_t * pll)
+static int programModeRegisters(struct lynx_share *share,
+				mode_parameter_t *pModeParam, pll_value_t *pll)
 {
 	int ret = 0;
 	int cnt = 0;
 	unsigned int ulTmpValue, ulReg;
 	if (pll->clockType == SECONDARY_PLL) {
 		/* programe secondary pixel clock */
-		POKE32(CRT_PLL_CTRL, formatPllReg(pll));
-		POKE32(CRT_HORIZONTAL_TOTAL,
+		POKE32(share->pvReg, CRT_PLL_CTRL, formatPllReg(pll));
+		POKE32(share->pvReg, CRT_HORIZONTAL_TOTAL,
 		       ((pModeParam->horizontal_total -
 			 1) << CRT_HORIZONTAL_TOTAL_TOTAL_LSB)
 		       | ((pModeParam->horizontal_display_end - 1) <<
 			  CRT_HORIZONTAL_TOTAL_DISPLAY_END_LSB));
 
-		POKE32(CRT_HORIZONTAL_SYNC,
+		POKE32(share->pvReg, CRT_HORIZONTAL_SYNC,
 		       (pModeParam->
 			horizontal_sync_width <<
 			CRT_HORIZONTAL_SYNC_WIDTH_LSB)
 		       | ((pModeParam->horizontal_sync_start - 1) <<
 			  CRT_HORIZONTAL_SYNC_START_LSB));
 
-		POKE32(CRT_VERTICAL_TOTAL,
+		POKE32(share->pvReg, CRT_VERTICAL_TOTAL,
 		       ((pModeParam->vertical_total -
 			 1) << CRT_VERTICAL_TOTAL_TOTAL_LSB)
 		       | ((pModeParam->vertical_display_end - 1) <<
 			  CRT_VERTICAL_TOTAL_DISPLAY_END_LSB));
-		POKE32(CRT_VERTICAL_SYNC,
+		POKE32(share->pvReg, CRT_VERTICAL_SYNC,
 		       (pModeParam->
 			vertical_sync_height <<
 			CRT_VERTICAL_SYNC_HEIGHT_LSB)
@@ -144,41 +144,41 @@ static int programModeRegisters(mode_parameter_t * pModeParam,
 		    | (1 << CRT_DISPLAY_CTRL_TIMING_LSB) | (1 <<
 							    CRT_DISPLAY_CTRL_PLANE_LSB);
 
-		if (getChipType() == SM750LE) {
-			displayControlAdjust_SM750LE(pModeParam,
+		if (getChipType(share) == SM750LE) {
+			displayControlAdjust_SM750LE(share, pModeParam,
 						     ulTmpValue);
 		} else {
-			ulReg = PEEK32(CRT_DISPLAY_CTRL)
+			ulReg = PEEK32(share->pvReg, CRT_DISPLAY_CTRL)
 			    & (~(1 << CRT_DISPLAY_CTRL_VSYNC_PHASE_LSB))
 			    & (~(1 << CRT_DISPLAY_CTRL_HSYNC_PHASE_LSB))
 			    & (~(1 << CRT_DISPLAY_CTRL_TIMING_LSB))
 			    & (~(1 << CRT_DISPLAY_CTRL_PLANE_LSB));
-			POKE32(CRT_DISPLAY_CTRL, ulTmpValue | ulReg);
+			POKE32(share->pvReg, CRT_DISPLAY_CTRL, ulTmpValue | ulReg);
 		}
 
 	} else if (pll->clockType == PRIMARY_PLL) {
 		unsigned int ulReservedBits;
-		POKE32(PANEL_PLL_CTRL, formatPllReg(pll));
-		POKE32(PANEL_HORIZONTAL_TOTAL,
+		POKE32(share->pvReg, PANEL_PLL_CTRL, formatPllReg(pll));
+		POKE32(share->pvReg, PANEL_HORIZONTAL_TOTAL,
 		       ((pModeParam->horizontal_total -
 			 1) << PANEL_HORIZONTAL_TOTAL_TOTAL_LSB)
 		       | ((pModeParam->horizontal_display_end - 1) <<
 			  PANEL_HORIZONTAL_TOTAL_DISPLAY_END_LSB));
 
-		POKE32(PANEL_HORIZONTAL_SYNC,
+		POKE32(share->pvReg, PANEL_HORIZONTAL_SYNC,
 		       (pModeParam->
 			horizontal_sync_width <<
 			PANEL_HORIZONTAL_SYNC_WIDTH_LSB)
 		       | ((pModeParam->horizontal_sync_start - 1) <<
 			  PANEL_HORIZONTAL_SYNC_START_LSB));
 
-		POKE32(PANEL_VERTICAL_TOTAL,
+		POKE32(share->pvReg, PANEL_VERTICAL_TOTAL,
 		       ((pModeParam->vertical_total - 1)
 				       << PANEL_VERTICAL_TOTAL_TOTAL_LSB)
 		       | ((pModeParam->vertical_display_end - 1) <<
 			  PANEL_VERTICAL_TOTAL_DISPLAY_END_LSB));
 
-		POKE32(PANEL_VERTICAL_SYNC,
+		POKE32(share->pvReg, PANEL_VERTICAL_SYNC,
 		       (pModeParam->vertical_sync_height <<
 			PANEL_VERTICAL_SYNC_HEIGHT_LSB)
 		       | ((pModeParam->vertical_sync_start - 1) <<
@@ -197,7 +197,7 @@ static int programModeRegisters(mode_parameter_t * pModeParam,
 								     PANEL_DISPLAY_CTRL_RESERVED_2_MASK_LSB)
 		    | (1 << PANEL_DISPLAY_CTRL_RESERVED_3_MASK_LSB) | (1 <<
 								       PANEL_DISPLAY_CTRL_VSYNC_LSB);
-		ulReg = (PEEK32(PANEL_DISPLAY_CTRL) & ~ulReservedBits)
+		ulReg = (PEEK32(share->pvReg, PANEL_DISPLAY_CTRL) & ~ulReservedBits)
 		    & (~(1 << PANEL_DISPLAY_CTRL_CLOCK_PHASE_LSB))
 		    & (~(1 << PANEL_DISPLAY_CTRL_VSYNC_PHASE_LSB))
 		    & (~(1 << PANEL_DISPLAY_CTRL_HSYNC_PHASE_LSB))
@@ -212,14 +212,14 @@ static int programModeRegisters(mode_parameter_t * pModeParam,
 		 *       next vertical sync to turn on/off the plane.
 		 */
 
-		POKE32(PANEL_DISPLAY_CTRL, ulTmpValue | ulReg);
+		POKE32(share->pvReg, PANEL_DISPLAY_CTRL, ulTmpValue | ulReg);
 
-		while ((PEEK32(PANEL_DISPLAY_CTRL) & ~ulReservedBits) !=
+		while ((PEEK32(share->pvReg, PANEL_DISPLAY_CTRL) & ~ulReservedBits) !=
 		       (ulTmpValue | ulReg)) {
 			cnt++;
 			if (cnt > 1000)
 				break;
-			POKE32(PANEL_DISPLAY_CTRL, ulTmpValue | ulReg);
+			POKE32(share->pvReg, PANEL_DISPLAY_CTRL, ulTmpValue | ulReg);
 		}
 
 	} else {
@@ -228,19 +228,20 @@ static int programModeRegisters(mode_parameter_t * pModeParam,
 	return ret;
 }
 
-int ddk750_setModeTiming(mode_parameter_t * parm, clock_type_t clock)
+int ddk750_setModeTiming(struct lynx_share *share,
+				mode_parameter_t *parm, clock_type_t clock)
 {
 	pll_value_t pll;
 	unsigned int uiActualPixelClk;
 	pll.inputFreq = DEFAULT_INPUT_CLOCK;
 	pll.clockType = clock;
 
-	uiActualPixelClk = calcPllValue(parm->pixel_clock, &pll);
-	if (getChipType() == SM750LE) {
+	uiActualPixelClk = calcPllValue(share, parm->pixel_clock, &pll);
+	if (getChipType(share) == SM750LE) {
 		/* set graphic mode via IO method */
 		outb_p(0x88, 0x3d4);
 		outb_p(0x06, 0x3d5);
 	}
-	programModeRegisters(parm, &pll);
+	programModeRegisters(share, parm, &pll);
 	return 0;
 }

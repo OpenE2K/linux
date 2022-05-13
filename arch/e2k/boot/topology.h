@@ -5,7 +5,6 @@
 #ifdef	CONFIG_NUMA
 #include <linux/cpumask.h>
 #endif	/* CONFIG_NUMA */
-#include <asm/es2.h>
 #include <asm/e2s.h>
 #include <asm/e8c.h>
 #include <asm/e8c2.h>
@@ -24,9 +23,7 @@
 
 #undef	E2K_NODE_IOLINKS
 
-#if	defined(CONFIG_ES2)
-#define	E2K_NODE_IOLINKS	ES2_NODE_IOLINKS
-#elif	defined(CONFIG_E2S)
+#if	defined(CONFIG_E2S)
 #define	E2K_NODE_IOLINKS	E2S_NODE_IOLINKS
 #elif	defined(CONFIG_E8C)
 #define	E2K_NODE_IOLINKS	E8C_NODE_IOLINKS

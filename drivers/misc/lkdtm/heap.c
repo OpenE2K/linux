@@ -128,7 +128,6 @@ void lkdtm_READ_AFTER_FREE(void)
 			return;
 		}
 		lock_page(page);
-		bio->bi_iter.bi_sector = map_swap_page(page, &bdev);
 		bio->bi_iter.bi_sector = test_sntz_sect;
 		bio_set_dev(bio, bdev);
 		bio_add_page(bio, page, PAGE_SIZE, 0);

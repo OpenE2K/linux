@@ -143,6 +143,15 @@ extern bool debug_guest_ust;
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_KVM_COREDUMP_MODE
+#undef	DebugCDUMP
+#define	DEBUG_KVM_COREDUMP_MODE	1	/* coredump VCPUs state debugging */
+#define	DebugCDUMP(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_COREDUMP_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 /* FIXME: the follow define only to debug, delete after completion and */
 /* turn on __interrupt atribute */
 #undef	DEBUG_GTI
@@ -290,7 +299,8 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 		/* nothing pending VIRQs to pass to guest */
 		goto out_unlock;
 	}
-	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) > 1) {
+	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) -
+			atomic_read(&vcpu->arch.host_ctxt.signal.in_work) > 1) {
 		/* VCPU is now at trap handling, probably VIRQs will */
 		/* handled too, if not, pending VIRQs will be passed later */
 		goto some_later;
@@ -343,6 +353,30 @@ out_unlock:
 	raw_spin_unlock(&vcpu->kvm->arch.virq_lock);
 	return 0;
 }
+
+static bool kvm_coredump_in_progress = false;
+static atomic_t kvm_coredump_in_progress_num = ATOMIC_INIT(0);
+
+static void kvm_complete_request_to_coredump(struct kvm *kvm)
+{
+	struct kvm_vcpu *vcpu;
+	int in_coredump = 0;
+	int i;
+
+	mutex_lock(&kvm->lock);
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		if (kvm_test_request_to_coredump(vcpu)) {
+			in_coredump++;
+		}
+	}
+	mutex_unlock(&kvm->lock);
+	if (in_coredump <= 0) {
+		if (atomic_dec_return(&kvm_coredump_in_progress_num) <= 0) {
+			kvm_coredump_in_progress = false;
+		}
+	}
+}
+
 unsigned long kvm_pass_coredump_trap_to_guest(struct kvm_vcpu *vcpu,
 							struct pt_regs *regs)
 {
@@ -350,12 +384,41 @@ unsigned long kvm_pass_coredump_trap_to_guest(struct kvm_vcpu *vcpu,
 	e2k_tir_lo_t tir_lo;
 	int tir_no;
 
-	if (regs->traps_to_guest != 0 || !kvm_check_is_guest_TIRs_empty(vcpu)) {
-		pr_err("%s(): TIRs is not empty, TIR[0] : 0x%016llx\n",
-			__func__,
-			kvm_get_guest_vcpu_TIR_hi(vcpu, 0).TIR_hi_reg);
-		WARN_ON(true);
-		kvm_reset_guest_vcpu_TIRs_num(vcpu);
+	if (regs->traps_to_guest != 0 && !is_injected_guest_coredump(regs) ||
+			!kvm_check_is_guest_TIRs_empty(vcpu) ||
+				kvm_guest_vcpu_irqs_disabled(vcpu,
+					kvm_get_guest_vcpu_UPSR_value(vcpu),
+					kvm_get_guest_vcpu_PSR_value(vcpu))) {
+		if (regs->traps_to_guest != 0 &&
+					!is_injected_guest_coredump(regs)) {
+			pr_err("%s(): there is other trap(s) passed to "
+				"guest 0x%016lx\n",
+				__func__, regs->traps_to_guest);
+		}
+		if (!kvm_check_is_guest_TIRs_empty(vcpu)) {
+			pr_err("%s(): guest TIRs is not empty, handling in progress "
+				"TIR[0].hi : 0x%016llx\n",
+				__func__,
+				kvm_get_guest_vcpu_TIR_hi(vcpu, 0).TIR_hi_reg);
+		}
+		if (kvm_guest_vcpu_irqs_disabled(vcpu,
+					kvm_get_guest_vcpu_UPSR_value(vcpu),
+					kvm_get_guest_vcpu_PSR_value(vcpu))) {
+			pr_err("%s(): guest IRQs disabled, coredump cannot "
+				"be passed right now, PSR 0x%x UPSR 0x%x\n",
+				__func__,
+				kvm_get_guest_vcpu_PSR_value(vcpu),
+				kvm_get_guest_vcpu_UPSR_value(vcpu));
+		}
+		if (unlikely(kvm_test_request_to_coredump(vcpu))) {
+			pr_err("%s(): coredump request has been already suspended\n",
+				__func__);
+		} else {
+			kvm_set_request_to_coredump(vcpu);
+		}
+		/* coredump trap cannot be passed, but was suspended */
+		/* to inject some later */
+		return 0;
 	}
 	/* empty TIRs is signal to do coredump */
 	tir_lo.TIR_lo_reg = GET_CLEAR_TIR_LO(0);
@@ -363,9 +426,37 @@ unsigned long kvm_pass_coredump_trap_to_guest(struct kvm_vcpu *vcpu,
 	tir_no = 0;
 	kvm_update_vcpu_intc_TIR(vcpu, tir_no, tir_hi, tir_lo);
 	regs->traps_to_guest |= core_dump_mask;
+	kvm_clear_request_to_coredump(vcpu);
 	DebugKVMVGT("trap is set to guest TIRs #0 hi 0x%016llx lo 0x%016llx\n",
 		tir_hi.TIR_hi_reg, tir_lo.TIR_lo_reg);
+	kvm_complete_request_to_coredump(vcpu->kvm);
 	return core_dump_mask;
+}
+
+void kvm_pass_coredump_to_all_vm(struct pt_regs *regs)
+{
+	struct kvm *kvm;
+
+	mutex_lock(&kvm_lock);
+	if (likely(list_empty(&vm_list))) {
+		DebugCDUMP("nothing VM detected\n");
+		goto out;
+	}
+	if (kvm_coredump_in_progress) {
+		DebugCDUMP("CPU #%d coredump is already in progress\n",
+			smp_processor_id());
+		goto out;
+	}
+	kvm_coredump_in_progress = true;
+	list_for_each_entry(kvm, &vm_list, vm_list) {
+		DebugCDUMP("CPU #%d started for VM #%d\n",
+			smp_processor_id(), kvm->arch.vmid.nr);
+		kvm_make_all_cpus_request(kvm, KVM_REQ_TO_COREDUMP);
+		atomic_inc(&kvm_coredump_in_progress_num);
+	}
+
+out:
+	mutex_unlock(&kvm_lock);
 }
 
 /*
@@ -464,6 +555,8 @@ unsigned long kvm_pass_page_fault_to_guest(struct pt_regs *regs,
 
 	KVM_BUG_ON(!kvm_test_intc_emul_flag(regs));
 
+	regs->dont_inject = kvm_vcpu_test_and_clear_dont_inject(vcpu);
+
 	pfres = 0;
 	if (!is_paging(vcpu))
 		pfres |= KVM_SHADOW_NONP_PF_MASK;
@@ -485,6 +578,11 @@ unsigned long kvm_pass_page_fault_to_guest(struct pt_regs *regs,
 		/* page fault is injected to guest, and wiil be */
 		/* handled by guest */
 		return KVM_TRAP_IS_PASSED(trap->nr_trap);
+	}
+	if (ret == 3) {
+		/* page fault does not be injected to guest, and wiil be */
+		/* handled by host */
+		return KVM_NOT_GUEST_TRAP_RESULT;
 	}
 
 	/* could not handle, so host should to do it */
@@ -774,6 +872,21 @@ int kvm_apply_updated_pcsp_bounds(struct kvm_vcpu *vcpu,
 	ret = apply_pcsp_delta_to_signal_stack(base, size, start, end, delta);
 	if (ret != 0) {
 		pr_err("%s(): could not apply updated chain stack "
+			"boundaries, error %d\n",
+			__func__, ret);
+	}
+	return ret;
+}
+
+int kvm_apply_updated_usd_bounds(struct kvm_vcpu *vcpu,
+		unsigned long top, unsigned long delta, bool incr)
+{
+	int ret;
+	unsigned long chain_stack_border = 0;
+
+	ret = apply_usd_delta_to_signal_stack(top, delta, incr, &chain_stack_border);
+	if (ret != 0) {
+		pr_err("%s(): could not apply updated user data stack "
 			"boundaries, error %d\n",
 			__func__, ret);
 	}
@@ -1098,4 +1211,71 @@ int kvm_copy_hw_stacks_frames(struct kvm_vcpu *vcpu,
 	}
 
 	return 0;
+}
+
+/*
+ * Prepare chain stack frame for guest fast syscall ttable entry handler
+ * - change return ip to guest ttable entry
+ * - Change psr to user (unprivilidged)
+ */
+__section(.entry_handlers)
+static inline void prepare_guest_fast_ttable_entry_crs(struct kvm_vcpu *vcpu,
+							u64 trap_num)
+{
+	u64 gst_fast_sys_call_trap = ((u64) vcpu->arch.trap_entry) +
+				trap_num * E2K_SYSCALL_TRAP_ENTRY_SIZE;
+
+	/* Get current parameters of top chain stack frame */
+	e2k_cr0_lo_t cr0_lo = READ_CR0_LO_REG();
+	e2k_cr0_hi_t cr0_hi = READ_CR0_HI_REG();
+	e2k_cr1_lo_t cr1_lo = READ_CR1_LO_REG();
+	e2k_cr1_hi_t cr1_hi = READ_CR1_HI_REG();
+
+	/*
+	 * Correct ip and psr value in top chain stack frame
+	 * to return to guest ttable entry in unprivlidged mode
+	 */
+	AS(cr0_lo).pf = -1ULL;
+	AS(cr0_hi).ip = gst_fast_sys_call_trap >> 3;
+	AS(cr1_lo).psr = AW(E2K_USER_INITIAL_PSR);
+	AS(cr1_lo).cui = KERNEL_CODES_INDEX;
+
+	/* Write back new chain stack frame parameters to cr */
+	WRITE_CR0_LO_REG(cr0_lo);
+	WRITE_CR0_HI_REG(cr0_hi);
+	WRITE_CR1_LO_REG(cr1_lo);
+	WRITE_CR1_HI_REG(cr1_hi);
+
+	return;
+}
+
+/* Special host-side handler for fast guest syscalls */
+__section(.entry_handlers)
+void notrace handle_guest_fast_sys_call(void)
+{
+	struct thread_info *ti = NATIVE_READ_CURRENT_REG();
+	struct kvm_vcpu *vcpu = ti->vcpu;
+
+	pv_mmu_switch_to_fast_sys_call(vcpu, ti);
+	HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu);
+	prepare_guest_fast_ttable_entry_crs(vcpu,
+			GUEST_FAST_SYSCALL_TRAP_NUM);
+
+	/* Pass control to guest fast syscall ttable entry */
+	return;
+}
+
+/* Special host-side handler for compat fast guest syscalls */
+__section(.entry_handlers)
+void notrace handle_compat_guest_fast_sys_call(void)
+{
+	struct thread_info *ti = NATIVE_READ_CURRENT_REG();
+	struct kvm_vcpu *vcpu = ti->vcpu;
+
+	pv_mmu_switch_to_fast_sys_call(vcpu, ti);
+	HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu);
+	prepare_guest_fast_ttable_entry_crs(vcpu,
+			GUEST_COMPAT_FAST_SYSCALL_TRAP_NUM);
+
+	/* Pass control to guest compat fast syscall ttable entry */
 }

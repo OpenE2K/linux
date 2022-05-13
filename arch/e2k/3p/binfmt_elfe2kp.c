@@ -663,9 +663,8 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 	 * Load the module into memory.
 	 */
 	if (uc_allocend) {
-		start_code_addr
-			= do_mmap_elf(NULL, 0, PAGE_ALIGN(uc_allocend),
-				PROT_NONE,  MAP_PRIVATE | MAP_FIRST32, 0);
+		start_code_addr = do_mmap_elf(NULL, 0, PAGE_ALIGN(uc_allocend),
+				PROT_NONE, MAP_PRIVATE | MAP_FIRST32 | MAP_DENYWRITE, 0);
 		if (BAD_ADDR(start_code_addr)) {
 			retval = (int) (long) start_code_addr;
 			return retval;
@@ -673,9 +672,8 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 	}
 
 	if (ud_allocend) {
-		start_data_addr
-			= do_mmap_elf(NULL, 0, PAGE_ALIGN(ud_allocend),
-				PROT_NONE,  MAP_PRIVATE | MAP_FIRST32, 0);
+		start_data_addr = do_mmap_elf(NULL, 0, PAGE_ALIGN(ud_allocend),
+				PROT_NONE, MAP_PRIVATE | MAP_FIRST32 | MAP_DENYWRITE, 0);
 		if (BAD_ADDR(start_data_addr))
 			return (int) (long) start_data_addr;
 	}
@@ -703,7 +701,7 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 	}
 
 	for ( prog_p = elf_phdr, i  = 0; i < elf->e_phnum; i++,  prog_p++) {
-		unsigned mapflag = MAP_PRIVATE | MAP_FIRST32 | MAP_FIXED;
+		unsigned mapflag = MAP_PRIVATE | MAP_DENYWRITE | MAP_FIRST32 | MAP_FIXED;
 		unsigned long start_aligned, start, end, map_addr;
 		unsigned long offset;
 		
@@ -870,14 +868,13 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 				 * section.
 				 */
 				down_write(&mm->mmap_sem);
-				vma = find_vma(mm, start_zeropage - PAGE_SIZE);
+				vma = find_vma_prev(mm, start_zeropage - PAGE_SIZE, &prev);
 				if (!vma) {
 					up_write(&mm->mmap_sem);
 					return -EFAULT;
 				}
 				oldflags = vma->vm_flags;
 				newflags = oldflags | VM_WRITE;
-				prev = NULL;
 				if (newflags != oldflags &&
 				    mprotect_fixup(vma, &prev,
 						   start_zeropage - PAGE_SIZE,
@@ -894,14 +891,10 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 
 				if (newflags != oldflags) {
 					down_write(&mm->mmap_sem);
-					vma = find_vma(mm,
-						       (start_zeropage
-							- PAGE_SIZE));
-					prev = NULL;
+					vma = find_vma_prev(mm, start_zeropage - PAGE_SIZE, &prev);
 					if (!vma ||
 					    mprotect_fixup(vma, &prev,
-							   (start_zeropage
-							    - PAGE_SIZE),
+							   start_zeropage - PAGE_SIZE,
 							   start_zeropage,
 							   oldflags) != 0) {
 						up_write(&mm->mmap_sem);
@@ -916,10 +909,10 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 			 */
 			if (end_zero > start_zeropage) {
 				ulretval = do_mmap_elf(NULL, start_zeropage,
-						       end_zero - start_zeropage,
-						       prot,
-						       MAP_PRIVATE | MAP_FIRST32 | MAP_FIXED,
-						       0);
+						end_zero - start_zeropage, prot,
+						MAP_PRIVATE | MAP_FIRST32 |
+							MAP_FIXED | MAP_DENYWRITE,
+						0);
 				if (ulretval != start_zeropage) {
 					DBPL("could not map space for zero pages, "
 					     "errno #%d.\n",
@@ -1255,42 +1248,16 @@ out:
 
 long sys_load_cu(char *name, kmdd_t *mdd)
 {
-	struct file * file;
-	struct path path;
-	int error;
+	int ret;
 
-	error = user_path_at(AT_FDCWD, name, LOOKUP_FOLLOW, &path);	
-	if (error) {
-		goto out;
-	}
-	error = -EINVAL;
-	if (!S_ISREG(path.dentry->d_inode->i_mode)) {
-		goto exit;
-	}
-	error = inode_permission(path.dentry->d_inode, MAY_READ);
-	if (error) {
-		goto exit;
-	}
-	file = dentry_open(&path, O_RDONLY, current_cred());
-	if (IS_ERR(file)) {
-		error = PTR_ERR(file);
-		goto exit;
-	}
-	error = -ENOEXEC;
-	if (file->f_op == NULL) {
-		fput(file);
-		goto exit;
-	}
+	struct file *file = open_exec(name);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
 
-	error = e2p_load_cu_file(file, NULL, NULL, mdd, NULL, NULL);
-
+	ret = e2p_load_cu_file(file, NULL, NULL, mdd, NULL, NULL);
+	allow_write_access(file);
 	fput(file);
-
-out:
-  	return error;
-exit:
-	path_put(&path);
-	goto out;
+	return ret;
 }
 
 long sys_unload_cu(unsigned long glob_base, size_t glob_size)

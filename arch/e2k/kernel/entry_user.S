@@ -4,6 +4,7 @@
 #include <asm/trap_table.h>
 #include <asm/head.h>
 #include <asm/sections.h>
+#include <asm/alternative-asm.h>
 
 /*
  * Functions to deal with execve()
@@ -33,6 +34,22 @@ $switch_to_user_func:
 	{
 		ord %dr4, %dr5, %dr4
 	}
+ALTERNATIVE_1_ALTINSTR
+/* CPU_HWBUG_INTC_CR_WRITE version */
+	{
+		nop 4
+
+		/* Correct value in %cr1.hi (currently it holds
+		 * user data stack size while cr0.hi holds kernel IP) */
+		wait ma_c=1
+		rwd %dr4, %cr1.hi
+
+		addd 0, %dr1, %db[0]	/* start_func */
+		addd 0, %dr2, %db[1]	/* us_size */
+		addd 0, %dr3, %db[2]	/* cui */
+	}
+ALTERNATIVE_2_OLDINSTR
+/* Default version */
 	{
 		nop 4
 
@@ -44,6 +61,7 @@ $switch_to_user_func:
 		addd 0, %dr2, %db[1]	/* us_size */
 		addd 0, %dr3, %db[2]	/* cui */
 	}
+ALTERNATIVE_3_FEATURE(CPU_HWBUG_INTC_CR_WRITE)
 	{
 		/* Clear kernel information from user's registers */
 		addd 0, 0, %db[3]
@@ -84,6 +102,22 @@ $protected_switch_to_user_func:
 	{
 		ord %dr5, %dr6, %dr5
 	}
+ALTERNATIVE_1_ALTINSTR
+/* CPU_HWBUG_INTC_CR_WRITE version */
+	{
+		nop	4
+
+		/* Correct value in %cr1.hi (currently it holds
+		 * user data stack size while cr0.hi holds kernel IP) */
+		wait ma_c=1
+		rwd %dr5, %cr1.hi
+
+		addd 0,	%dr2, %db[0]	/* start_func */
+		addd 0,	%dr3, %db[1]	/* us_size */
+		addd 0,	%dr4, %db[2]	/* cui */
+	}
+ALTERNATIVE_2_OLDINSTR
+/* Default version */
 	{
 		nop	4
 
@@ -95,6 +129,7 @@ $protected_switch_to_user_func:
 		addd 0,	%dr3, %db[1]	/* us_size */
 		addd 0,	%dr4, %db[2]	/* cui */
 	}
+ALTERNATIVE_3_FEATURE(CPU_HWBUG_INTC_CR_WRITE)
 
 	/*
 	 * Set `rtld_fini' parameter to NULL so that the main executable's

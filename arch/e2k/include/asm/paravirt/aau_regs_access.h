@@ -70,10 +70,10 @@ pv_write_aasr_reg(e2k_aasr_t aasr)
 #include <asm/kvm/aau_regs_access.h>
 
 static inline u32
-pv_read_aaind_reg_value_v2(int AAIND_no)
+pv_read_aaind_reg_value_v3(int AAIND_no)
 {
 	if (!paravirt_enabled())
-		return native_read_aaind_reg_value_v2(AAIND_no);
+		return native_read_aaind_reg_value_v3(AAIND_no);
 	else
 		return kvm_read_aaind_reg_value(AAIND_no);
 }
@@ -95,12 +95,12 @@ pv_write_aaind_reg_value(int AAIND_no, u64 reg_value)
 }
 
 static inline void
-pv_read_aainds_pair_value_v2(int AAINDs_pair, u64 *lo_value, u64 *hi_value)
+pv_read_aainds_pair_value_v3(int AAINDs_pair, u64 *lo_value, u64 *hi_value)
 {
 	if (!paravirt_enabled()) {
 		u32 value1, value2;
 
-		NATIVE_READ_AAINDS_PAIR_VALUE_V2(AAINDs_pair, value1, value2);
+		NATIVE_READ_AAINDS_PAIR_VALUE_V3(AAINDs_pair, value1, value2);
 		*lo_value = value1;
 		*hi_value = value2;
 	} else {
@@ -149,7 +149,7 @@ static inline u32
 pv_read_aaincr_reg_value(int AAINCR_no)
 {
 	if (!paravirt_enabled())
-		return native_read_aaincr_reg_value_v2(AAINCR_no);
+		return native_read_aaincr_reg_value_v3(AAINCR_no);
 	else
 		return kvm_read_aaincr_reg_value(AAINCR_no);
 }
@@ -187,12 +187,12 @@ pv_write_aaincr_tags_reg_value(u32 reg_value)
 }
 
 static inline void
-pv_read_aaincrs_pair_value_v2(int AAINCRs_pair, u64 *lo_value, u64 *hi_value)
+pv_read_aaincrs_pair_value_v3(int AAINCRs_pair, u64 *lo_value, u64 *hi_value)
 {
 	if (!paravirt_enabled()) {
 		u32 value1, value2;
 
-		NATIVE_READ_AAINCRS_PAIR_VALUE_V2(AAINCRs_pair, value1, value2);
+		NATIVE_READ_AAINCRS_PAIR_VALUE_V3(AAINCRs_pair, value1, value2);
 		*lo_value = value1;
 		*hi_value = value2;
 	} else {
@@ -226,10 +226,10 @@ pv_write_aaincrs_pair_value(int AAINCRs_pair, u64 lo_value, u64 hi_value)
 						lo_value, hi_value);
 }
 static inline u32
-pv_read_aasti_reg_value_v2(int AASTI_no)
+pv_read_aasti_reg_value_v3(int AASTI_no)
 {
 	if (!paravirt_enabled())
-		return native_read_aasti_reg_value_v2(AASTI_no);
+		return native_read_aasti_reg_value_v3(AASTI_no);
 	else
 		return kvm_read_aasti_reg_value(AASTI_no);
 }
@@ -267,12 +267,12 @@ pv_write_aasti_tags_reg_value(u32 reg_value)
 }
 
 static inline void
-pv_read_aastis_pair_value_v2(int AASTIs_pair, u64 *lo_value, u64 *hi_value)
+pv_read_aastis_pair_value_v3(int AASTIs_pair, u64 *lo_value, u64 *hi_value)
 {
 	if (!paravirt_enabled()) {
 		u32 value1, value2;
 
-		NATIVE_READ_AASTIS_PAIR_VALUE_V2(AASTIs_pair, value1, value2);
+		NATIVE_READ_AASTIS_PAIR_VALUE_V3(AASTIs_pair, value1, value2);
 		*lo_value = value1;
 		*hi_value = value2;
 	} else {
@@ -303,10 +303,10 @@ pv_write_aastis_pair_value(int AASTIs_pair, u64 lo_value, u64 hi_value)
 }
 
 static inline void
-pv_read_aaldi_reg_value_v2(int AALDI_no, u64 *l_value, u64 *r_value)
+pv_read_aaldi_reg_value_v3(int AALDI_no, u64 *l_value, u64 *r_value)
 {
 	if (!paravirt_enabled())
-		native_read_aaldi_reg_value_v2(AALDI_no, l_value, r_value);
+		native_read_aaldi_reg_value_v3(AALDI_no, l_value, r_value);
 	else
 		kvm_read_aaldi_reg_value(AALDI_no, l_value, r_value);
 }
@@ -370,7 +370,7 @@ pv_read_aaldm_reg(e2k_aaldm_t *aaldm)
 		kvm_read_aaldm_reg(aaldm);
 }
 static inline void
-pv_write_aaldm_reg(e2k_aaldm_t *aaldm)
+pv_write_aaldm_reg(e2k_aaldm_t aaldm)
 {
 	if (!paravirt_enabled())
 		native_write_aaldm_reg(aaldm);
@@ -402,7 +402,7 @@ pv_read_aaldv_reg(e2k_aaldv_t *aaldv)
 		kvm_read_aaldv_reg(aaldv);
 }
 static inline void
-pv_write_aaldv_reg(e2k_aaldv_t *aaldv)
+pv_write_aaldv_reg(e2k_aaldv_t aaldv)
 {
 	if (!paravirt_enabled())
 		native_write_aaldv_reg(aaldv);
@@ -491,9 +491,9 @@ read_aaldm_reg(e2k_aaldm_t *aaldm)
 	pv_read_aaldm_reg_value(&aaldm->lo, &aaldm->hi);
 }
 static inline void
-write_aaldm_reg(e2k_aaldm_t *aaldm)
+write_aaldm_reg(e2k_aaldm_t aaldm)
 {
-	pv_write_aaldm_reg_value(aaldm->lo, aaldm->hi);
+	pv_write_aaldm_reg_value(aaldm.lo, aaldm.hi);
 }
 static inline void
 read_aaldv_reg(e2k_aaldv_t *aaldv)
@@ -501,9 +501,9 @@ read_aaldv_reg(e2k_aaldv_t *aaldv)
 	pv_read_aaldv_reg_value(&aaldv->lo, &aaldv->hi);
 }
 static inline void
-write_aaldv_reg(e2k_aaldv_t *aaldv)
+write_aaldv_reg(e2k_aaldv_t aaldv)
 {
-	pv_write_aaldm_reg_value(aaldv->lo, aaldv->hi);
+	pv_write_aaldm_reg_value(aaldv.lo, aaldv.hi);
 }
 
 #endif	/* CONFIG_PARAVIRT_GUEST */

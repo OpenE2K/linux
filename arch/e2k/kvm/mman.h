@@ -34,7 +34,7 @@
 #define	DebugSPGMM(fmt, args...)					\
 ({									\
 	if (DEBUG_KVM_SP_LIST_GMM_MODE) {				\
-		if (DEBUG_EXCLUDE_INIT_GMM && gmm->nid.nr == 0) {	\
+		if (DEBUG_EXCLUDE_INIT_GMM && gmm->id == 0) {	\
 			;						\
 		} else {						\
 			pr_info("%s(): " fmt, __func__, ##args);	\
@@ -63,16 +63,20 @@ extern void gmm_drop(struct kvm *kvm, gmm_struct_t *gmm);
 
 static inline void free_gmm(struct kvm *kvm, gmm_struct_t *gmm)
 {
-	do_free_gmm(kvm, gmm, &kvm->arch.gmmid_table);
+	gmmid_table_t *gmmid_table = &kvm->arch.gmmid_table;
+
+	kvm_do_free_nid(&gmm->nid, gmmid_table);
+	do_free_gmm(kvm, gmm, gmmid_table);
 }
 
 static inline void kvm_free_gmm(struct kvm *kvm, gmm_struct_t *gmm)
 {
-	unsigned long flags;
+	gmmid_table_t *gmmid_table = &kvm->arch.gmmid_table;
 
-	gmmid_table_lock_irqsave(&kvm->arch.gmmid_table, flags);
-	free_gmm(kvm, gmm);
-	gmmid_table_unlock_irqrestore(&kvm->arch.gmmid_table, flags);
+	gmmid_table_lock(gmmid_table);
+	kvm_do_free_nid(&gmm->nid, gmmid_table);
+	gmmid_table_unlock(gmmid_table);
+	do_free_gmm(kvm, gmm, gmmid_table);
 }
 
 static inline void do_gmm_get(gmm_struct_t *gmm)
@@ -89,19 +93,25 @@ static inline void kvm_gmm_get(struct kvm_vcpu *vcpu, gthread_info_t *gti,
 		gti->gmm_in_release = false;
 	}
 	DebugGMM("GPID #%d guest mm #%d at %px has now %d users\n",
-		gti->gpid->nid.nr, gmm->nid.nr, gmm,
+		gti->gpid->nid.nr, gmm->id, gmm,
 		atomic_read(&gmm->mm_count));
 }
 static inline int do_gmm_put(struct kvm *kvm, gmm_struct_t *gmm)
 {
 	int count;
 
+	count = atomic_read(&gmm->mm_count);
+	if (unlikely(count <= 0)) {
+		pr_err("%s(): gmm #%d user's counter %d is already empty\n",
+			__func__, gmm->id, count);
+		return 0;
+	}
 	count = atomic_dec_return(&gmm->mm_count);
-	KVM_BUG_ON(count <= 0);
+	KVM_BUG_ON(count < 0);
 	return count;
 }
 static inline int kvm_do_gmm_put(struct kvm *kvm, gthread_info_t *gti,
-				 bool only_put)
+				 bool only_put, bool drop_and_free)
 {
 	gmm_struct_t *gmm;
 	int count;
@@ -112,12 +122,15 @@ static inline int kvm_do_gmm_put(struct kvm *kvm, gthread_info_t *gti,
 		gmm = pv_mmu_get_init_gmm(kvm);
 	}
 	DebugGMM("started for guest thread GPID #%d, gmm #%d users %d\n",
-		gti->gpid->nid.nr, gmm->nid.nr, atomic_read(&gmm->mm_count));
+		gti->gpid->nid.nr, gmm->id, atomic_read(&gmm->mm_count));
 
 	count = do_gmm_put(kvm, gmm);
 	gti->gmm = NULL;
 	if (!only_put && count == 1) {
 		/* nothing users gmm has now, so can be released */
+		if (drop_and_free) {
+			gmm_drop(kvm, gmm);
+		}
 		kvm_free_gmm(kvm, gmm);
 		count--;
 	}
@@ -125,11 +138,15 @@ static inline int kvm_do_gmm_put(struct kvm *kvm, gthread_info_t *gti,
 }
 static inline int kvm_gmm_put(struct kvm *kvm, gthread_info_t *gti)
 {
-	return kvm_do_gmm_put(kvm, gti, false);
+	return kvm_do_gmm_put(kvm, gti, false, false);
 }
 static inline int kvm_gmm_only_put(struct kvm *kvm, gthread_info_t *gti)
 {
-	return kvm_do_gmm_put(kvm, gti, true);
+	return kvm_do_gmm_put(kvm, gti, true, false);
+}
+static inline int kvm_gmm_put_and_drop(struct kvm *kvm, gthread_info_t *gti)
+{
+	return kvm_do_gmm_put(kvm, gti, false, true);
 }
 
 static inline void kvm_check_pgd(pgd_t *pgd)
@@ -185,6 +202,7 @@ static inline bool kvm_is_not_empty_gmm_spt_list(gmm_struct_t *gmm)
 static inline void
 kvm_add_sp_to_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
 {
+	KVM_BUG_ON(sp->gmm != NULL);
 	KVM_BUG_ON(!list_empty(&sp->gmm_entry));
 
 	spin_lock(&gmm->spt_list_lock);
@@ -196,7 +214,7 @@ kvm_add_sp_to_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
 	KVM_BUG_ON(gmm->spt_list_size <= 0);
 
 	DebugSPGMM("gmm #%d : SP #%ld for GFN 0x%llx, role 0x%x GVA 0x%lx\n",
-		gmm->nid.nr, gmm->spt_list_size - 1, sp->gfn, sp->role.word,
+		gmm->id, gmm->spt_list_size - 1, sp->gfn, sp->role.word,
 		sp->gva);
 }
 static inline void
@@ -210,21 +228,6 @@ kvm_try_add_sp_to_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
 		}
 	}
 	kvm_add_sp_to_gmm_list(gmm, sp);
-}
-static inline void
-kvm_init_root_gmm_spt_list(gmm_struct_t *gmm, struct kvm_mmu_page *root_sp)
-{
-	kvm_add_sp_to_gmm_list(gmm, root_sp);
-}
-static inline void
-kvm_set_root_gmm_spt_list(gmm_struct_t *gmm)
-{
-	struct kvm_mmu_page *sp;
-
-	KVM_BUG_ON(!VALID_PAGE(gmm->root_hpa));
-
-	sp = page_header(gmm->root_hpa);
-	kvm_init_root_gmm_spt_list(gmm, sp);
 }
 static inline void
 kvm_delete_sp_from_the_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
@@ -243,55 +246,8 @@ kvm_delete_sp_from_the_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
 	KVM_BUG_ON(gmm->spt_list_size < 0);
 
 	DebugSPGMM("gmm #%d : SP #%ld for GFN 0x%llx, role 0x%x GVA 0x%lx\n",
-		gmm->nid.nr, gmm->spt_list_size, sp->gfn, sp->role.word,
+		gmm->id, gmm->spt_list_size, sp->gfn, sp->role.word,
 		sp->gva);
-}
-static inline void
-kvm_delete_sp_from_gmm_list(struct kvm_mmu_page *sp)
-{
-	gmm_struct_t *gmm;
-
-	gmm = sp->gmm;
-	if (sp->role.direct && gmm == NULL)
-		return;
-
-	kvm_delete_sp_from_the_gmm_list(gmm, sp);
-}
-static inline gmm_struct_t *
-kvm_get_page_fault_gmm(struct kvm_vcpu *vcpu, u32 error_code)
-{
-	gmm_struct_t *gmm;
-
-	if (vcpu->arch.is_hv)
-		return NULL;
-
-	if (error_code & PFERR_USER_MASK) {
-		gmm = pv_vcpu_get_gmm(vcpu);
-	} else {
-		gmm = pv_vcpu_get_init_gmm(vcpu);
-	}
-
-	KVM_BUG_ON(gmm == NULL);
-
-	return gmm;
-}
-static inline gmm_struct_t *
-kvm_get_faulted_addr_gmm(struct kvm_vcpu *vcpu, gva_t faulted_gva)
-{
-	gmm_struct_t *gmm;
-
-	if (vcpu->arch.is_hv)
-		return NULL;
-
-	if (faulted_gva < GUEST_TASK_SIZE) {
-		gmm = pv_vcpu_get_gmm(vcpu);
-	} else {
-		gmm = pv_vcpu_get_init_gmm(vcpu);
-	}
-
-	KVM_BUG_ON(gmm == NULL);
-
-	return gmm;
 }
 static inline void
 kvm_delete_gmm_sp_list(struct kvm *kvm, gmm_struct_t *gmm)
@@ -301,19 +257,20 @@ kvm_delete_gmm_sp_list(struct kvm *kvm, gmm_struct_t *gmm)
 	if (kvm_is_empty_gmm_spt_list(gmm))
 		return;
 
-	DebugFGMM("gmm #%d before SP list release has 0x%lx SPs\n",
-		gmm->nid.nr, gmm->spt_list_size);
+	DebugFGMM("gmm %px before SP list release has 0x%lx SPs\n",
+		gmm, gmm->spt_list_size);
 
 	list_for_each_entry_safe(sp, nsp, &gmm->spt_list, gmm_entry) {
-		DebugFGMM("gmm #%d : SP #%ld for GFN 0x%llx, role 0x%x "
+		DebugFGMM("gmm %px : SP #%ld for GFN 0x%llx, role 0x%x "
 			"GVA 0x%lx\n",
-			gmm->nid.nr, gmm->spt_list_size, sp->gfn,
+			gmm, gmm->spt_list_size, sp->gfn,
 			sp->role.word, sp->gva);
-		kvm_mmu_free_page(kvm, sp);
+		E2K_LMS_HALT_OK;
+		mmu_pt_free_page(kvm, sp);
 	}
 
-	DebugFGMM("gmm #%d after release has 0x%lx SPs, total released 0x%lx\n",
-		gmm->nid.nr, gmm->spt_list_size, gmm->total_released);
+	DebugFGMM("gmm %px after release has 0x%lx SPs, total released 0x%lx\n",
+		gmm, gmm->spt_list_size, gmm->total_released);
 }
 #else	/* !CONFIG_GUEST_MM_SPT_LIST */
 static inline size_t kvm_get_gmm_spt_list_size(gmm_struct_t *gmm)
@@ -327,6 +284,7 @@ static inline size_t kvm_get_gmm_spt_total_released(gmm_struct_t *gmm)
 static inline void
 kvm_init_sp_gmm_entry(struct kvm_mmu_page *sp)
 {
+	sp->gmm = NULL;
 }
 static inline bool kvm_is_empty_gmm_spt_list(gmm_struct_t *gmm)
 {
@@ -340,41 +298,75 @@ static inline bool kvm_is_not_empty_gmm_spt_list(gmm_struct_t *gmm)
 static inline void
 kvm_add_sp_to_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
 {
+	KVM_BUG_ON(sp->gmm != NULL);
+	sp->gmm = gmm;
 }
 static inline void
 kvm_try_add_sp_to_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
 {
-}
-static inline void
-kvm_set_root_gmm_spt_list(gmm_struct_t *gmm)
-{
-}
-static inline void
-kvm_init_root_gmm_spt_list(gmm_struct_t *gmm, struct kvm_mmu_page *root_sp)
-{
+	if (sp->gmm == gmm) {
+		/* the gmm is the one it need */
+		return;
+	}
+	kvm_add_sp_to_gmm_list(gmm, sp);
 }
 static inline void
 kvm_delete_sp_from_the_gmm_list(gmm_struct_t *gmm, struct kvm_mmu_page *sp)
 {
-}
-static inline void
-kvm_delete_sp_from_gmm_list(struct kvm_mmu_page *sp)
-{
-}
-static inline gmm_struct_t *
-kvm_get_page_fault_gmm(struct kvm_vcpu *vcpu, u32 error_code)
-{
-	return NULL;
-}
-static inline gmm_struct_t *
-kvm_get_faulted_addr_gmm(struct kvm_vcpu *vcpu, gva_t faulted_gva)
-{
-	return NULL;
+	KVM_BUG_ON(sp->gmm != gmm);
+
+	sp->gmm = NULL;
 }
 static inline void
 kvm_delete_gmm_sp_list(struct kvm *kvm, gmm_struct_t *gmm)
 {
 }
 #endif	/* CONFIG_GUEST_MM_SPT_LIST */
+
+static inline gmm_struct_t *
+kvm_try_get_sp_gmm(struct kvm_mmu_page *sp)
+{
+	return sp->gmm;
+}
+static inline gmm_struct_t *
+kvm_get_sp_gmm(struct kvm_mmu_page *sp)
+{
+	gmm_struct_t *gmm = kvm_try_get_sp_gmm(sp);
+
+	KVM_BUG_ON(gmm == NULL);
+
+	return gmm;
+}
+static inline void
+kvm_init_root_gmm_spt_list(gmm_struct_t *gmm, struct kvm_mmu_page *root_sp)
+{
+	kvm_add_sp_to_gmm_list(gmm, root_sp);
+}
+static inline void
+kvm_try_init_root_gmm_spt_list(gmm_struct_t *gmm, struct kvm_mmu_page *root_sp)
+{
+	kvm_try_add_sp_to_gmm_list(gmm, root_sp);
+}
+static inline void
+kvm_set_root_gmm_spt_list(gmm_struct_t *gmm)
+{
+	struct kvm_mmu_page *sp;
+
+	KVM_BUG_ON(!VALID_PAGE(gmm->root_hpa));
+
+	sp = page_header(gmm->root_hpa);
+	kvm_init_root_gmm_spt_list(gmm, sp);
+}
+static inline void
+kvm_delete_sp_from_gmm_list(struct kvm_mmu_page *sp)
+{
+	gmm_struct_t *gmm;
+
+	gmm = sp->gmm;
+	if (sp->role.direct && gmm == NULL)
+		return;
+
+	kvm_delete_sp_from_the_gmm_list(gmm, sp);
+}
 
 #endif	/* __KVM_E2K_MMAN_H */

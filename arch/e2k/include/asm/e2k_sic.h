@@ -10,29 +10,25 @@
 #include <asm/e2k.h>
 #include <asm/e2k_api.h>
 #include <asm/mas.h>
-#include <asm/es2.h>
 #include <asm/e2s.h>
 #include <asm/e8c.h>
 #include <asm/e16c.h>
 #include <asm/e12c.h>
 #include <asm/e2c3.h>
 
+
 /*
  * NBR area configuration
  */
 #define	E2K_NSR_AREA_PHYS_BASE		(machine.get_nsr_area_phys_base())
-#define	E2K_NSR_AREA_SIZE		(machine.nbsr_area_size)
-#define	E2K_NBSR_OFFSET			(machine.nbsr_area_offset)
-#define	E2K_NBSR_SIZE			(machine.nbsr_area_size)
-#define	E2K_COPSR_AREA_PHYS_BASE	(machine.copsr_area_phys_base)
-#define	E2K_COPSR_AREA_SIZE		(machine.copsr_area_size)
+#define	E2K_NSR_AREA_SIZE		0x0000000000100000UL
+#define	E2K_NBSR_OFFSET			0x0000000000000000UL
+#define	E2K_NBSR_SIZE			E2K_NSR_AREA_SIZE
 
 #define	BOOT_NSR_AREA_PHYS_BASE		(boot_machine.nsr_area_phys_base)
-#define	BOOT_NSR_AREA_SIZE		(boot_machine.nbsr_area_size)
-#define	BOOT_NBSR_OFFSET		(boot_machine.nbsr_area_offset)
-#define	BOOT_NBSR_SIZE			(boot_machine.nbsr_area_size)
-#define	BOOT_COPSR_AREA_PHYS_BASE	(boot_machine.copsr_area_phys_base)
-#define	BOOT_COPSR_AREA_SIZE		(boot_machine.copsr_area_size)
+#define	BOOT_NSR_AREA_SIZE		E2K_NSR_AREA_SIZE
+#define	BOOT_NBSR_OFFSET		E2K_NBSR_OFFSET
+#define	BOOT_NBSR_SIZE			E2K_NBSR_SIZE
 
 /*
  * Nodes system registers area - NSR = { NSR0 ... NSRj ... }
@@ -62,13 +58,6 @@
 #define	BOOT_THE_NODE_NBSR_PHYS_BASE(node)	\
 		((unsigned char *)(BOOT_THE_NODE_NSR_PHYS_BASE(node) + \
 						BOOT_NODE_NBSR_OFFSET))
-
-/*
- * Nodes system coprocessors registers area - COPSR = { COPSR0 ... COPSRj ... }
- */
-#define	NODE_COPSR_SIZE			E2K_COPSR_AREA_SIZE
-#define	THE_NODE_COPSR_PHYS_BASE(node)	\
-		(E2K_COPSR_AREA_PHYS_BASE + (node * NODE_COPSR_SIZE))
 
 extern unsigned char *nodes_nbsr_base[MAX_NUMNODES];
 extern phys_addr_t nodes_nbsr_phys_base[MAX_NUMNODES];

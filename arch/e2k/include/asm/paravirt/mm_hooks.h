@@ -4,9 +4,10 @@
 #ifdef __KERNEL__
 
 #ifdef	CONFIG_PARAVIRT_GUEST
-static inline void
+static inline int
 get_mm_notifier_locked(struct mm_struct *mm)
 {
+	return 0;
 }
 #endif /* CONFIG_PARAVIRT_GUEST */
 

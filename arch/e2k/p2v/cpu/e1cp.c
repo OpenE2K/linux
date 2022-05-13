@@ -20,20 +20,9 @@ void boot_e1cp_setup_arch(void)
 	/* should be only after machine.pcicfg_area-* setting */
 	boot_machine.nsr_area_phys_base = boot_get_legacy_nbsr_base();
 
-	boot_machine.nbsr_area_offset = E1CP_NBSR_AREA_OFFSET;
-	boot_machine.nbsr_area_size = E1CP_NBSR_AREA_SIZE;
-	boot_machine.copsr_area_phys_base = 0;
-	boot_machine.copsr_area_size = 0;
-	boot_machine.mlt_size = E1CP_MLT_SIZE;
-	boot_machine.tlb_lines_bits_num = E1CP_TLB_LINES_BITS_NUM;
-	boot_machine.tlb_addr_line_num = E1CP_TLB_ADDR_LINE_NUM;
-	boot_machine.tlb_addr_line_num2 = E1CP_TLB_ADDR_LINE_NUM2;
-	boot_machine.tlb_addr_line_num_shift2 = E1CP_TLB_ADDR_LINE_NUM_SHIFT2;
-	boot_machine.tlb_addr_set_num = E1CP_TLB_ADDR_SET_NUM;
-	boot_machine.tlb_addr_set_num_shift = E1CP_TLB_ADDR_SET_NUM_SHIFT;
 	boot_machine.sic_mc_size = 0;
 	boot_machine.sic_mc_count = E1CP_SIC_MC_COUNT;
-	boot_machine.sic_mc1_ecc = E1CP_SIC_MC1_ECC;
+	boot_machine.sic_mc1_ecc = SIC_mc1_ecc;
 	boot_machine.sic_io_str1 = SIC_io_str_hi;
 }
 

@@ -76,58 +76,6 @@ typedef	union virt_ctrl_cu {
 						/* restore */
 #define	VIRT_CTRL_CU_reg	word		/* [63: 0] - entire register */
 
-/* Bits mask of VIRT_CTRL_CU fields and flags */
-#define VIRT_CTRL_CU_ENV_C_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_evn_c = -1, }.word)
-#define VIRT_CTRL_CU_RR_IDR_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rr_idr = 1, }.word)
-#define VIRT_CTRL_CU_RR_CLKR_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rr_clkr = 1, }.word)
-#define VIRT_CTRL_CU_RR_SCLKR_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rr_sclkr = 1, }.word)
-#define VIRT_CTRL_CU_RR_DBG_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rr_dbg = 1, }.word)
-#define VIRT_CTRL_CU_RW_CORE_MODE_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rw_core_mode = 1, }.word)
-#define VIRT_CTRL_CU_RW_CLKR_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rw_clkr = 1, }.word)
-#define VIRT_CTRL_CU_RW_SCLKR_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rw_sclkr = 1, }.word)
-#define VIRT_CTRL_CU_RW_SCLKM3_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rw_sclkm3 = 1, }.word)
-#define VIRT_CTRL_CU_RW_DBG_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_rw_dbg = 1, }.word)
-#define VIRT_CTRL_CU_HCEM_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_hcem = 1, }.word)
-#define VIRT_CTRL_CU_VIRT_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_virt = 1, }.word)
-#define VIRT_CTRL_CU_STOP_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_stop = 1, }.word)
-#define VIRT_CTRL_CU_EXC_C_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_c = -1, }.word)
-#define VIRT_CTRL_CU_EXC_INSTR_DEBUG_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_instr_debug = 1, }.word)
-#define VIRT_CTRL_CU_EXC_DATA_DEBUG_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_data_debug = 1, }.word)
-#define VIRT_CTRL_CU_EXC_INSTR_PAGE_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_instr_page = 1, }.word)
-#define VIRT_CTRL_CU_EXC_DATA_PAGE_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_data_page = 1, }.word)
-#define VIRT_CTRL_CU_EXC_MOVA_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_mova = 1, }.word)
-#define VIRT_CTRL_CU_EXC_INTERRUPT_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_interrupt = 1, }.word)
-#define VIRT_CTRL_CU_EXC_NM_INTERRUPT_MASK	\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_exc_nm_interrupt = 1, }.word)
-#define VIRT_CTRL_CU_GLNCH_MASK			\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_glnch = -1, }.word)
-#define VIRT_CTRL_CU_GLNCH_G_TH_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_glnch_g_th = 1, }.word)
-#define VIRT_CTRL_CU_GLNCH_TIR_FZ_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_glnch_tir_fz = 1, }.word)
-#define VIRT_CTRL_CU_TIR_RST_MASK		\
-		((virt_ctrl_cu_t) { .VIRT_CTRL_CU_tir_rst = 1, }.word)
-
 #endif /* ! __ASSEMBLY__ */
 
 #define	INTC_CU_COND_EVENT_NO		0

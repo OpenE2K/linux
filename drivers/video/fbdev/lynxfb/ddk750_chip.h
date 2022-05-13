@@ -22,7 +22,7 @@
 #ifndef SM750LE_REVISION_ID
 #define SM750LE_REVISION_ID ((unsigned char)0xfe)
 #endif
-
+struct lynx_share;
 /* This is all the chips recognized by this library */
 typedef enum _logical_chip_type_t {
 	SM_UNKNOWN,
@@ -78,18 +78,20 @@ typedef struct _initchip_param_t {
 } initchip_param_t;
 
 
-logical_chip_type_t getChipType(void);
-unsigned int calcPllValue(unsigned int request, pll_value_t * pll);
+logical_chip_type_t getChipType(struct lynx_share *share);
+unsigned int calcPllValue(struct lynx_share *share,
+				unsigned int request, pll_value_t *pll);
 unsigned int calcPllValue2(unsigned int, pll_value_t *);
 unsigned int formatPllReg(pll_value_t * pPLL);
 void ddk750_set_mmio(volatile unsigned char *, unsigned short, unsigned char);
-unsigned int ddk750_getVMSize(void);
-int ddk750_initHw(initchip_param_t *);
-unsigned int getPllValue(clock_type_t clockType, pll_value_t * pPLL);
-unsigned int getChipClock(void);
-void setChipClock(unsigned int);
-void setMemoryClock(unsigned int frequency);
-void setMasterClock(unsigned int frequency);
+unsigned int ddk750_getVMSize(struct lynx_share *share);
+int ddk750_initHw(struct lynx_share *share, initchip_param_t *);
+unsigned int getPllValue(struct lynx_share *share,
+		clock_type_t clockType, pll_value_t *pPLL);
+unsigned int getChipClock(struct lynx_share *share);
+void setChipClock(struct lynx_share *share, unsigned int);
+void setMemoryClock(struct lynx_share *share, unsigned int frequency);
+void setMasterClock(struct lynx_share *share, unsigned int frequency);
 
 
 #endif

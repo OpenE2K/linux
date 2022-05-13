@@ -19,6 +19,8 @@
 #include "user_area.h"
 #include "mmu.h"
 
+#undef	USER_AREA_LOCX_ENABLE
+
 #undef	DEBUG_USER_AREA_MODE
 #undef	DebugUA
 #define	DEBUG_USER_AREA_MODE	0	/* processes */
@@ -35,6 +37,15 @@
 ({									\
 	if (DEBUG_KERNEL_AREA_MODE)					\
 		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_USER_AREA_LOCX_MODE
+#undef	DebugLOCX
+#define	DEBUG_USER_AREA_LOCX_MODE	0	/* locking guest area */
+#define	DebugLOCX(fmt, args...)						\
+({									\
+	if (DEBUG_USER_AREA_LOCX_MODE || kvm_debug)			\
+		pr_warn_once("%s(): " fmt, __func__, ##args);		\
 })
 
 /*
@@ -1018,7 +1029,7 @@ static inline void user_area_free_chunk_alloc(user_chunk_t *area_chunk)
 		user_area_free_chunk_locked(area_chunk);
 	if (area_chunk->flags & USER_AREA_VMAPPED)
 		user_area_free_chunk_vmapped(area_chunk);
-	else if (area_chunk->flags & USER_AREA_PRESENT)
+	if (area_chunk->flags & USER_AREA_PRESENT)
 		user_area_free_present_chunk(area_chunk);
 }
 
@@ -1161,13 +1172,25 @@ void *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 	}
 	area_chunk->flags |= add_flags;
 	if (flags & UA_ALLOC_LOCKED) {
+#ifndef	USER_AREA_LOCX_ENABLE
+		DebugLOCX("do not lock guest area from 0x%lx to 0x%lx "
+			"make only present\n",
+			area_chunk->start,
+			area_chunk->start + area_chunk->size);
+		ret = user_area_do_present_chunk(area_chunk);
+#else	/* USER_AREA_LOCX_ENABLE */
 		ret = sys_mlock(area_chunk->start, area_chunk->size);
+#endif	/* !USER_AREA_LOCX_ENABLE */
 		if (ret < 0) {
 			DebugUA("user_area_alloc_present() could not "
-				"lock area\n");
+				"lock/present area\n");
 			goto out_free_alloc;
 		}
+#ifndef	USER_AREA_LOCX_ENABLE
+		area_chunk->flags |= USER_AREA_PRESENT;
+#else	/* USER_AREA_LOCX_ENABLE */
 		area_chunk->flags |= USER_AREA_LOCKED;
+#endif	/* !USER_AREA_LOCX_ENABLE */
 	}
 
 	user_area_insert_busy_chunk(user_area, area_chunk);

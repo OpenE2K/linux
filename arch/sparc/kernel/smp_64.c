@@ -1464,6 +1464,11 @@ static unsigned long send_cpu_poke(int cpu)
 
 void smp_send_reschedule(int cpu)
 {
+#if defined(CONFIG_MCST) && defined(SHOW_WOKEN_TIME)
+	if (show_woken_time > 1 && system_state == SYSTEM_RUNNING) {
+		current->intr_sc = getns64timeofday();
+	}
+#endif
 	if (cpu == smp_processor_id()) {
 		WARN_ON_ONCE(preemptible());
 		set_softint(1 << PIL_SMP_RECEIVE_SIGNAL);

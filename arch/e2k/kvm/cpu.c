@@ -116,6 +116,16 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#undef	DEBUG_INTC_CU_REG_MODE
+#undef	DebugCUREG
+#define	DEBUG_INTC_CU_REG_MODE	0	/* CPU reguster access intercept */
+					/* events debug mode */
+#define	DebugCUREG(fmt, args...)					\
+({									\
+	if (DEBUG_INTC_CU_REG_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 #undef	DEBUG_PV_SYSCALL_MODE
 #define	DEBUG_PV_SYSCALL_MODE	0	/* syscall injection debugging */
 
@@ -125,11 +135,21 @@ extern bool debug_guest_ust;
 #define	debug_guest_ust	false
 #endif	/* DEBUG_PV_UST_MODE || DEBUG_PV_SYSCALL_MODE */
 
+#undef	DEBUG_KVM_STARTUP_MODE
+#undef	DebugKVMSTUP
+#define	DEBUG_KVM_STARTUP_MODE	0	/* VCPU startup debugging */
+#define	DebugKVMSTUP(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_STARTUP_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 bool debug_guest_user_stacks = false;
+
+int __nodedata slt_disable;
 
 void kvm_set_pv_vcpu_kernel_image(struct kvm_vcpu *vcpu)
 {
-	bool nonpaging = !is_paging(vcpu);
 	e2k_oscud_lo_t oscud_lo;
 	e2k_oscud_hi_t oscud_hi;
 	e2k_osgd_lo_t osgd_lo;
@@ -138,8 +158,11 @@ void kvm_set_pv_vcpu_kernel_image(struct kvm_vcpu *vcpu)
 	e2k_addr_t base;
 	e2k_cutd_t cutd;
 
+	if (vcpu->arch.vcpu_state == NULL)
+		return;
+
 	oscud_lo.OSCUD_lo_half = 0;
-	oscud_lo.OSCUD_lo_base = (u64)vcpu->arch.guest_base;
+	oscud_lo.OSCUD_lo_base = (u64)vcpu->arch.guest_phys_base;
 	oscud_hi.OSCUD_hi_half = 0;
 	oscud_hi.OSCUD_hi_size = vcpu->arch.guest_size;
 	kvm_set_guest_vcpu_OSCUD(vcpu, oscud_hi, oscud_lo);
@@ -150,7 +173,7 @@ void kvm_set_pv_vcpu_kernel_image(struct kvm_vcpu *vcpu)
 		oscud_lo.CUD_lo_base, oscud_hi.CUD_hi_size);
 
 	osgd_lo.OSGD_lo_half = 0;
-	osgd_lo.OSGD_lo_base = (u64)vcpu->arch.guest_base;
+	osgd_lo.OSGD_lo_base = (u64)vcpu->arch.guest_phys_base;
 	osgd_hi.OSGD_hi_half = 0;
 	osgd_hi.OSGD_hi_size = vcpu->arch.guest_size;
 	kvm_set_guest_vcpu_OSGD(vcpu, osgd_hi, osgd_lo);
@@ -171,7 +194,7 @@ void kvm_set_pv_vcpu_kernel_image(struct kvm_vcpu *vcpu)
 		cutd.CUTD_base);
 }
 
-void kvm_init_cpu_state(struct kvm_vcpu *vcpu)
+void kvm_reset_cpu_state(struct kvm_vcpu *vcpu)
 {
 	{
 		u64 osr0;
@@ -199,7 +222,30 @@ void kvm_init_cpu_state(struct kvm_vcpu *vcpu)
 	kvm_reset_guest_vcpu_regs_status(vcpu);
 }
 
-void kvm_init_cpu_state_idr(struct kvm_vcpu *vcpu)
+e2k_idr_t kvm_vcpu_get_idr(struct kvm_vcpu *vcpu)
+{
+	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
+	e2k_idr_t idr = read_IDR_reg();
+
+	if (guest_info->is_stranger) {
+		/* update IDR in accordance with guest machine CPUs type */
+		idr.IDR_mdl = guest_info->cpu_mdl;
+		idr.IDR_rev = guest_info->cpu_rev;
+		idr.IDR_ms_core = vcpu->vcpu_id;
+		idr.IDR_ms_pn = 0; /* FIXME: is not implemented NUMA node id */
+		if (unlikely(guest_info->cpu_iset < E2K_ISET_V3)) {
+			/* set IDR.hw_virt to mark guest mode because of */
+			/* CPUs of iset V2 have not CORE_MODE register */
+			idr.IDR_ms_hw_virt = vcpu->kvm->arch.is_hv;
+		}
+
+		DebugCUREG("guest IDR was changed: 0x%llx\n", idr.IDR_reg);
+	}
+
+	return idr;
+}
+
+void kvm_reset_cpu_state_idr(struct kvm_vcpu *vcpu)
 {
 	e2k_idr_t idr = kvm_vcpu_get_idr(vcpu);
 
@@ -276,7 +322,7 @@ void write_hw_ctxt_to_pv_vcpu_registers(struct kvm_vcpu *vcpu,
 		"U_VPTB:     value 0x%lx\n"
 		"GID:        value 0x%llx\n",
 		vcpu->vcpu_id,
-		hw_ctxt->sh_mmu_cr, hw_ctxt->sh_pid,
+		AW(hw_ctxt->sh_mmu_cr), hw_ctxt->sh_pid,
 		mmu->get_vcpu_gp_pptb(vcpu),
 		mmu->get_vcpu_context_u_pptb(vcpu),
 		mmu->get_vcpu_context_u_vptb(vcpu),
@@ -296,6 +342,135 @@ void write_hw_ctxt_to_pv_vcpu_registers(struct kvm_vcpu *vcpu,
 		hw_ctxt->sh_core_mode.CORE_MODE_reg,
 		(hw_ctxt->sh_core_mode.CORE_MODE_gmi) ? "true" : "false",
 		(hw_ctxt->sh_core_mode.CORE_MODE_hci) ? "true" : "false");
+}
+
+void kvm_dump_shadow_u_pptb(struct kvm_vcpu *vcpu, const char *title)
+{
+	struct kvm_mmu *mmu = &vcpu->arch.mmu;
+
+	DebugSHC("%s"
+		"   sh_U_PPTB:  value 0x%lx\n"
+		"   sh_U_VPTB:  value 0x%lx\n"
+		"   U_PPTB:     value 0x%lx\n"
+		"   U_VPTB:     value 0x%lx\n"
+		"   SH_PID:     value 0x%llx\n",
+		title,
+		mmu->get_vcpu_context_u_pptb(vcpu),
+		mmu->get_vcpu_context_u_vptb(vcpu),
+		mmu->get_vcpu_u_pptb(vcpu),
+		mmu->get_vcpu_u_vptb(vcpu),
+		read_guest_PID_reg(vcpu));
+}
+
+void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
+		e2k_mem_ps_t *ps_frames, e2k_mem_crs_t *pcs_frames,
+		u64 *args, int args_num, char *entry_point, e2k_psr_t psr,
+		e2k_size_t usd_size, e2k_size_t *ps_ind, e2k_size_t *pcs_ind,
+		int cui, bool kernel)
+{
+	e2k_cr0_lo_t cr0_lo;
+	e2k_cr0_hi_t cr0_hi;
+	e2k_cr1_lo_t cr1_lo;
+	e2k_cr1_hi_t cr1_hi;
+	unsigned long entry_IP;
+	bool priv_guest = vcpu->arch.is_hv;
+	int arg;
+	int wbs;
+
+	DebugKVMSTUP("started on VCPU #%d\n", vcpu->vcpu_id);
+
+	entry_IP = (unsigned long)entry_point;
+
+	wbs = (sizeof(*args) * 2 * args_num + (EXT_4_NR_SZ - 1)) / EXT_4_NR_SZ;
+
+	/* pcs[0] frame can be empty, because of it should not be returns */
+	/* to here and it is used only to fill into current CR registers */
+	/* while function on the next frame pcs[1] is running */
+	pcs_frames[0].cr0_lo.CR0_lo_pf = -1;
+	pcs_frames[0].cr0_hi.CR0_hi_ip = 0;
+	pcs_frames[0].cr1_lo.CR1_lo_half = 0;
+	pcs_frames[0].cr1_hi.CR1_hi_half = 0;
+
+	/* guest is user of host for pv, GLAUNCH set PSR for hv */
+	if (priv_guest) {
+		/* guest should be run at privileged mode */
+		psr.PSR_pm = 1;
+	} else {
+		/* guest is not privileged user task of host */
+		psr.PSR_pm = 0;
+	}
+
+	/* Prepare pcs[1] frame, it is frame of VCPU start function */
+	/* Important only only IP (as start of function) */
+	cr0_lo.CR0_lo_half = 0;
+	cr0_lo.CR0_lo_pf = -1;
+	cr0_hi.CR0_hi_half = 0;
+	cr0_hi.CR0_hi_IP = entry_IP;
+	cr1_lo.CR1_lo_half = 0;
+	cr1_lo.CR1_lo_psr = psr.PSR_reg;
+	cr1_lo.CR1_lo_wbs = wbs;
+	cr1_lo.CR1_lo_wpsz = cr1_lo.CR1_lo_wbs;
+	cr1_lo.CR1_lo_cui = cui;
+	if (!cpu_has(CPU_FEAT_ISET_V6))
+		cr1_lo.CR1_lo_ic = kernel;
+
+	cr1_hi.CR1_hi_half = 0;
+	cr1_hi.CR1_hi_ussz = usd_size / 16;
+	pcs_frames[1].cr0_lo = cr0_lo;
+	pcs_frames[1].cr0_hi = cr0_hi;
+	pcs_frames[1].cr1_lo = cr1_lo;
+	pcs_frames[1].cr1_hi = cr1_hi;
+
+	DebugKVMSTUP("VCPU start PCS[1]: IP %pF wbs 0x%x\n",
+		(void *)(pcs_frames[1].cr0_hi.CR0_hi_ip << 3),
+		pcs_frames[1].cr1_lo.CR1_lo_wbs * EXT_4_NR_SZ);
+	DebugKVMSTUP("   PCS[%d] CR0 lo: 0x%016llx  hi: 0x%016llx\n",
+		1, pcs_frames[1].cr0_lo.CR0_lo_half,
+		pcs_frames[1].cr0_hi.CR0_hi_half);
+	DebugKVMSTUP("   PCS[%d] CR1 lo: 0x%016llx  hi: 0x%016llx\n",
+		1, pcs_frames[1].cr1_lo.CR1_lo_half,
+		pcs_frames[1].cr1_hi.CR1_hi_half);
+	DebugKVMSTUP("   PCS[%d] CR0 lo: 0x%016llx  hi: 0x%016llx\n",
+		0, pcs_frames[0].cr0_lo.CR0_lo_half,
+		pcs_frames[0].cr0_hi.CR0_hi_half);
+	DebugKVMSTUP("   PCS[%d] CR1 lo: 0x%016llx  hi: 0x%016llx\n",
+		0, pcs_frames[0].cr1_lo.CR1_lo_half,
+		pcs_frames[0].cr1_hi.CR1_hi_half);
+
+	/* prepare procedure stack frame ps[0] for pcs[1] should contain */
+	/* VCPU start function arguments */
+#pragma loop count (2)
+	for (arg = 0; arg < args_num; arg++) {
+		int frame = (arg * sizeof(*args)) / (EXT_4_NR_SZ / 2);
+		bool lo = (arg & 0x1) == 0x0;
+		unsigned long long arg_value;
+
+		arg_value = args[arg];
+
+		if (machine.native_iset_ver < E2K_ISET_V5) {
+			if (lo)
+				ps_frames[frame].v3.word_lo = arg_value;
+			else
+				ps_frames[frame].v3.word_hi = arg_value;
+			/* Skip frame[2] and frame[3] - they hold */
+			/* extended data not used by kernel */
+		} else {
+			if (lo)
+				ps_frames[frame].v5.word_lo = arg_value;
+			else
+				ps_frames[frame].v5.word_hi = arg_value;
+			/* Skip frame[1] and frame[3] - they hold */
+			/* extended data not used by kernel */
+		}
+		DebugKVMSTUP("   PS[%d].%s is 0x%016llx\n",
+			frame, (lo) ? "lo" : "hi", arg_value);
+	}
+
+	/* set stacks pointers indexes */
+	*ps_ind = wbs * EXT_4_NR_SZ;
+	*pcs_ind = 2 * SZ_OF_CR;
+	DebugKVMSTUP("stacks PS.ind 0x%lx PCS.ind 0x%lx\n",
+		*ps_ind, *pcs_ind);
 }
 
 void kvm_init_pv_vcpu_intc_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs)
@@ -321,6 +496,8 @@ void kvm_init_pv_vcpu_intc_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 
 	/* replace stacks->top value with real register SBR state */
 	regs->stacks.top = regs->g_stacks.top;
+
+	pv_vcpu_check_trap_in_fast_syscall(vcpu, regs);
 }
 
 noinline __interrupt void
@@ -361,6 +538,14 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 	/* disable all IRQs in UPSR to switch mmu context */
 	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
 
+	/*
+	 * Ensure we set mode to IN_GUEST_MODE after we disable
+	 * interrupts and before the final VCPU requests check.
+	 * See the comment in kvm_vcpu_exiting_guest_mode() and
+	 * Documentation/virt/kvm/vcpu-requests.rst
+	 */
+	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
+
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 
 	if (unlikely(!(flags & FROM_HYPERCALL_SWITCH))) {
@@ -371,10 +556,15 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 		sw_ctxt->host_usd_hi = NATIVE_NV_READ_USD_HI_REG();
 	}
 
-	__guest_enter(current_thread_info(), &vcpu->arch, flags);
+	/* set flags of return type to guest kernel or guest user: */
+	/* now it is to kernel */
+	host_return_to_guest_kernel(current_thread_info());
 
-	/* switch host MMU to VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu);
+	/* switch host MMU to VCPU MMU context: */
+	/* it is to kernel for now */
+	kvm_switch_to_guest_mmu_pid(vcpu, current_thread_info());
+
+	__guest_enter(current_thread_info(), &vcpu->arch, flags);
 
 	if (flags & FROM_HYPERCALL_SWITCH) {
 		int users;
@@ -441,9 +631,18 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 	e2k_psp_hi_t psp_hi;
 	e2k_pcsp_lo_t pcsp_lo;
 	e2k_pcsp_hi_t pcsp_hi;
+	long ret_value;
 	bool is_pv_guest = true;
 
 	is_pv_guest = false;
+
+	/*
+	 * It is important if there was before switching from hypercall
+	 * to vcpu-host mode and now return to vcpu-guest mode,
+	 * so it is return value of hypercall
+	 */
+	ret_value = sw_ctxt->ret_value;
+	sw_ctxt->ret_value = 0;	/* this value should not be used by vcpu-host */
 
 	cr0_lo = sw_ctxt->crs.cr0_lo;
 	cr0_hi = sw_ctxt->crs.cr0_hi;
@@ -454,21 +653,33 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 	pcsp_lo = hw_ctxt->sh_pcsp_lo;
 	pcsp_hi = hw_ctxt->sh_pcsp_hi;
 
-	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
-
 	/* Switch IRQ control to PSR and disable MI/NMIs */
 	/* disable all IRQs in UPSR to switch mmu context */
 	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
+
+	/*
+	 * Ensure we set mode to IN_GUEST_MODE after we disable
+	 * interrupts and before the final VCPU requests check.
+	 * See the comment in kvm_vcpu_exiting_guest_mode() and
+	 * Documentation/virt/kvm/vcpu-requests.rst
+	 */
+	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
+
+	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 
 	/* save host VCPU data stack pointer registers */
 	sw_ctxt->host_sbr = NATIVE_NV_READ_SBR_REG();
 	sw_ctxt->host_usd_lo = NATIVE_NV_READ_USD_LO_REG();
 	sw_ctxt->host_usd_hi = NATIVE_NV_READ_USD_HI_REG();
 
-	__guest_enter(ti, &vcpu->arch, switch_flags);
+	/* set flags of return type to guest kernel or guest user: */
+	/* now it is to kernel */
+	host_return_to_guest_kernel(ti);
 
 	/* switch host MMU to VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu);
+	kvm_switch_to_guest_mmu_pid(vcpu, ti);
+
+	__guest_enter(ti, &vcpu->arch, switch_flags);
 
 	/* from now the host process is at paravirtualized guest (VCPU) mode */
 	set_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE);
@@ -519,7 +730,7 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 	NATIVE_NV_WRITE_PCSP_REG(pcsp_hi, pcsp_lo);
 
 	KVM_COND_GOTO_RETURN_TO_PARAVIRT_GUEST(is_pv_guest, 0);
-	return 0;
+	return ret_value;
 }
 
 notrace noinline __interrupt void
@@ -532,7 +743,8 @@ pv_vcpu_switch_to_host_from_intc(thread_info_t *ti)
 	(void) switch_to_host_pv_vcpu_mode(ti, vcpu, false /* from vcpu-guest */,
 			FULL_CONTEXT_SWITCH | DONT_AAU_CONTEXT_SWITCH |
 			DONT_SAVE_KGREGS_SWITCH | DONT_MMU_CONTEXT_SWITCH |
-			DONT_TRAP_MASK_SWITCH);
+			DONT_TRAP_MASK_SWITCH,
+			0	/* return value should not be used */);
 }
 
 notrace noinline __interrupt void
@@ -552,9 +764,10 @@ void kvm_emulate_pv_vcpu_intc(thread_info_t *ti, pt_regs_t *regs,
 	do_emulate_pv_vcpu_intc(ti, regs, trap);
 }
 
-void return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs)
+void return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs,
+				restore_caller_t from)
 {
-	do_return_from_pv_vcpu_intc(ti, regs);
+	do_return_from_pv_vcpu_intc(ti, regs, from);
 }
 
 static notrace __always_inline void inject_handler_trampoline(void)
@@ -582,10 +795,11 @@ static notrace __always_inline void inject_handler_trampoline(void)
 notrace noinline __interrupt __section(".entry.text")
 void trap_handler_trampoline_continue(void)
 {
+	inject_handler_trampoline();
+
 	/* return to hypervisor context */
 	return_from_pv_vcpu_inject(current_thread_info()->vcpu);
 
-	inject_handler_trampoline();
 	E2K_JUMP(return_pv_vcpu_trap);
 }
 
@@ -594,11 +808,11 @@ void syscall_handler_trampoline_continue(u64 sys_rval)
 {
 	struct kvm_vcpu *vcpu;
 
+	inject_handler_trampoline();
+
 	vcpu = current_thread_info()->vcpu;
 	/* return to hypervisor context */
 	return_from_pv_vcpu_inject(vcpu);
-
-	inject_handler_trampoline();
 
 	syscall_handler_trampoline_start(vcpu, sys_rval);
 
@@ -606,22 +820,47 @@ void syscall_handler_trampoline_continue(u64 sys_rval)
 }
 
 notrace noinline __interrupt __section(".entry.text")
-void syscall_fork_trampoline_continue(u64 sys_rval)
+void host_mkctxt_trampoline_continue(void)
 {
 	struct kvm_vcpu *vcpu;
-	gthread_info_t *gti;
+
+	inject_handler_trampoline();
 
 	vcpu = current_thread_info()->vcpu;
 	/* return to hypervisor context */
 	return_from_pv_vcpu_inject(vcpu);
 
-	gti = pv_vcpu_get_gti(vcpu);
-	KVM_BUG_ON(!is_sys_call_pt_regs(&gti->fork_regs));
-	gti->fork_regs.sys_rval = sys_rval;
+	E2K_JUMP(pv_vcpu_mkctxt_trampoline_inject);
+}
+
+notrace noinline __interrupt __section(".entry.text")
+void return_pv_vcpu_from_mkctxt_continue(void)
+{
+	struct kvm_vcpu *vcpu;
 
 	inject_handler_trampoline();
 
-	E2K_JUMP(return_pv_vcpu_syscall_fork);
+	vcpu = current_thread_info()->vcpu;
+	/* return to hypervisor context */
+	return_from_pv_vcpu_inject(vcpu);
+
+	E2K_JUMP(pv_vcpu_mkctxt_complete);
+}
+
+notrace noinline __interrupt __section(".entry.text")
+void syscall_fork_trampoline_continue(u64 sys_rval)
+{
+	struct kvm_vcpu *vcpu;
+
+	inject_handler_trampoline();
+
+	vcpu = current_thread_info()->vcpu;
+	/* return to hypervisor context */
+	return_from_pv_vcpu_inject(vcpu);
+
+	syscall_fork_handler_trampoline_start(vcpu);
+
+	E2K_JUMP_WITH_ARG(return_pv_vcpu_syscall_fork, sys_rval);
 }
 
 static void fill_pv_vcpu_handler_trampoline(struct kvm_vcpu *vcpu,
@@ -653,41 +892,55 @@ static void fill_pv_vcpu_handler_trampoline(struct kvm_vcpu *vcpu,
 	crs->cr1_hi.CR1_hi_ussz = pv_vcpu_get_gti(vcpu)->us_size >> 4;
 }
 
-static void prepare_pv_vcpu_inject_handler_trampoline(struct kvm_vcpu *vcpu,
-				e2k_stacks_t *stacks, inject_caller_t from,
-				bool guest_user)
+static int prepare_pv_vcpu_inject_handler_trampoline(struct kvm_vcpu *vcpu,
+				pt_regs_t *regs, e2k_stacks_t *stacks,
+				inject_caller_t from, bool guest_user)
 {
 	e2k_mem_crs_t *k_crs, crs;
+	e2k_pcsp_lo_t k_pcsp_lo;
 	unsigned long flags;
+	int ret;
 
 	/*
 	 * Prepare 'sighandler_trampoline' frame
 	 */
 	fill_pv_vcpu_handler_trampoline(vcpu, &crs, from);
 
-	/*
-	 * Copy the new frame into chain stack
-	 *
-	 * See user_hw_stacks_copy_full() for an explanation why this frame
-	 * is located at (AS(ti->k_pcsp_lo).base).
-	 */
-	k_crs = (e2k_mem_crs_t *)current_thread_info()->k_pcsp_lo.PCSP_lo_base;
+	if (likely(stacks->pcshtp > 0 || !guest_user)) {
+		/*
+		 * Copy the new frame into host chain stack because of top guest
+		 * frame was spilled to guest's kernel stack and can be replaced
+		 * at host's kernel stack by the trampoline frame
+		 *
+		 * See user_hw_stacks_copy_full() for an explanation why this frame
+		 * is located at (AS(ti->k_pcsp_lo).base).
+		 */
+		k_pcsp_lo = current_thread_info()->k_pcsp_lo;
+		k_crs = (e2k_mem_crs_t *)k_pcsp_lo.PCSP_lo_base;
 
-	raw_all_irq_save(flags);
-	E2K_FLUSHC;
-	/* User frame from *k_crs has been copied to userspace */
-	/* already in user_hw_stacks_copy_full() */
-	*k_crs = crs;
-	raw_all_irq_restore(flags);
+		raw_all_irq_save(flags);
+		E2K_FLUSHC;
+		/* User frame from *k_crs has been copied to userspace */
+		/* already in user_hw_stacks_copy_full() */
+		*k_crs = crs;
+		raw_all_irq_restore(flags);
 
-	if (unlikely(stacks->pcshtp > 0)) {
-		/* top guest frame was spilled to memory */
-		/* and is replaced at by the trampoline frame */
 		stacks->pcsp_hi.PCSP_hi_ind += SZ_OF_CR;
+		ret = 0;
+	} else {
+		/*
+		 * k_crs frame of the kernel chain stack has not free and
+		 * trampoline frame can be located only at the top of
+		 * guest chain stack
+		 */
+		ret = pv_vcpu_user_hw_stacks_copy_crs(vcpu, stacks, regs, &crs);
 	}
+
 	DebugUST("set trampoline CRS at bottom of host stack from %px, "
-		"increase guest kernel chain index 0x%x\n",
-		k_crs, stacks->pcsp_hi.PCSP_hi_ind);
+		"increase guest kernel chain index 0x%x, error %d\n",
+		k_crs, stacks->pcsp_hi.PCSP_hi_ind, ret);
+
+	return ret;
 }
 
 static int prepare_pv_vcpu_inject_handler_frame(struct kvm_vcpu *vcpu,
@@ -733,12 +986,22 @@ static int prepare_pv_vcpu_inject_handler_frame(struct kvm_vcpu *vcpu,
 
 	raw_all_irq_save(flags);
 	E2K_FLUSHC;
-	*(k_crs + 1) = *crs;
+	if (unlikely(PCSHTP_SIGN_EXTEND(stacks->pcshtp) == 0)) {
+		/*
+		 * The host kernel chain stack has only one guest frame:
+		 * the guest's frame of user system call point
+		 */
+		*k_crs = *crs;
+	} else {
+		/* there are two frames of guest's user at bottom of host */
+		++k_crs;
+		*k_crs = *crs;
+	}
 	raw_all_irq_restore(flags);
 	DebugUST("set trap handler chain frame at bottom of host stack "
 		"from %px and CRS at %px to return to handler instead of "
 		"trap point\n",
-		k_crs + 1, crs);
+		k_crs, crs);
 
 	/* See comment in user_hw_stacks_copy_full() */
 	/* but guest user chain stack can be empty */
@@ -777,9 +1040,9 @@ static int prepare_pv_vcpu_syscall_handler_frame(struct kvm_vcpu *vcpu,
 
 		if (machine.native_iset_ver < E2K_ISET_V5) {
 			if (lo)
-				ps_frames[frame].v2.word_lo = arg_value;
+				ps_frames[frame].v3.word_lo = arg_value;
 			else
-				ps_frames[frame].v2.word_hi = arg_value;
+				ps_frames[frame].v3.word_hi = arg_value;
 			/* Skip frame[2] and frame[3] - they hold */
 			/* extended data not used by kernel */
 		} else {
@@ -842,19 +1105,28 @@ static int prepare_pv_vcpu_syscall_handler_frame(struct kvm_vcpu *vcpu,
 	 * See user_hw_stacks_copy_full() for an explanation why this frame
 	 * is located at (AS(ti->k_pcsp_lo).base + SZ_OF_CR).
 	 */
+	KVM_BUG_ON(PCSHTP_SIGN_EXTEND(g_stacks->pcshtp) > SZ_OF_CR);
 	k_crs = (e2k_mem_crs_t *)current_thread_info()->k_pcsp_lo.PCSP_lo_base;
 
 	raw_all_irq_save(flags);
 	E2K_FLUSHC;
-	*(k_crs + 1) = *crs;
+	if (unlikely(PCSHTP_SIGN_EXTEND(g_stacks->pcshtp) == 0)) {
+		/*
+		 * The host kernel chain stack has only one guest frame:
+		 * the guest's frame of user system call point
+		 */
+		*k_crs = *crs;
+	} else {
+		/* there are two frames of guest's user at bottom of host */
+		++k_crs;
+		*k_crs = *crs;
+	}
 	raw_all_irq_restore(flags);
+
 	DebugUST("set trap handler chain frame at bottom of host stack "
 		"from %px and CRS at %px to return to handler instead of "
 		"trap point\n",
-		k_crs + 1, crs);
-
-	/* See comment in user_hw_stacks_copy_full() */
-	BUG_ON(PCSHTP_SIGN_EXTEND(g_stacks->pcshtp) != SZ_OF_CR);
+		k_crs, crs);
 
 	return 0;
 }
@@ -867,7 +1139,7 @@ static int prepare_pv_vcpu_syscall_handler_frame(struct kvm_vcpu *vcpu,
 static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 					inject_caller_t from)
 {
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+	gthread_info_t *gti;
 	struct signal_stack_context __user *context;
 	pv_vcpu_ctxt_t __user *vcpu_ctxt;
 	kvm_host_context_t *host_ctxt;
@@ -896,11 +1168,15 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 
 	ret = setup_signal_stack(regs, false);
 	if (unlikely(ret)) {
-		pr_err("%s(): could not create alt stack to save context, "
+		pr_err("%s(): could not create signal stack to save context, "
 			"error %d\n",
 			__func__, ret);
 		return ret;
 	}
+	gti = pv_vcpu_get_gti(vcpu);
+	gti->signal.stack.base = current_thread_info()->signal_stack.base;
+	gti->signal.stack.size = current_thread_info()->signal_stack.size;
+	gti->signal.stack.used = current_thread_info()->signal_stack.used;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 
@@ -918,6 +1194,9 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		KVM_BUG_ON(true);
 	}
 	ret |= __put_user(false, &vcpu_ctxt->in_sig_handler);
+	ret |= __put_user(0, &vcpu_ctxt->skip_frames);
+	ret |= __put_user(0, &vcpu_ctxt->skip_traps);
+	ret |= __put_user(0, &vcpu_ctxt->skip_syscalls);
 
 	/* emulate guest VCPU PSR state after trap */
 	guest_psr = kvm_emulate_guest_vcpu_psr_trap(vcpu, &irq_under_upsr);
@@ -983,12 +1262,14 @@ static int setup_pv_vcpu_trap(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	 * create fake kernel frame in user's chain stack
 	 */
 	if (guest_user) {
-		prepare_pv_vcpu_inject_handler_trampoline(vcpu,
+		ret = prepare_pv_vcpu_inject_handler_trampoline(vcpu, regs,
 			&regs->g_stacks, FROM_PV_VCPU_TRAP_INJECT, true);
 	} else {
-		prepare_pv_vcpu_inject_handler_trampoline(vcpu,
+		ret = prepare_pv_vcpu_inject_handler_trampoline(vcpu, regs,
 			&regs->stacks, FROM_PV_VCPU_TRAP_INJECT, false);
 	}
+	if (ret)
+		goto free_signal_stack;
 
 	/*
 	 * guest's trap handler frame should be the last in stacks
@@ -1024,8 +1305,57 @@ free_signal_stack:
 	return ret;
 }
 
+/*
+ * Returns true if all traps are fake and cleared or they were not at all
+ */
+static bool clear_pv_vcpu_fake_traps(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+{
+	e2k_tir_lo_t tir_lo;
+	e2k_tir_hi_t tir_hi;
+	bool is_fake = false;
+
+	if (kvm_check_is_vcpu_intc_TIRs_empty(vcpu)) {
+		/* nothing traps */
+		return true;
+	}
+	if (kvm_get_vcpu_intc_TIRs_num(vcpu) > 0) {
+		/* too many traps to ba as fake */
+		return false;
+	}
+	tir_hi = kvm_get_vcpu_intc_TIR_hi(vcpu, 0);
+	tir_lo = kvm_get_vcpu_intc_TIR_lo(vcpu, 0);
+	if (tir_hi.exc == exc_proc_stack_bounds_mask &&
+		tir_lo.TIR_lo_ip == kvm_get_pv_vcpu_ttable_base(vcpu)) {
+		/* it is fake procedure stack bounds trap */
+		/* on guest's trap handler start instruction */
+		is_fake = true;
+	}
+
+	if (!is_fake) {
+		/* there is (are) not fake traps */
+		return false;
+	}
+
+	/* all traps is (are) fake and can be cleared */
+	kvm_clear_vcpu_intc_TIRs_num(vcpu);
+	regs->traps_to_guest = 0;
+	kvm_clear_vcpu_guest_stacks_pending(vcpu, regs);
+	return true;
+}
+
+static void print_injected_TIRs(struct kvm_vcpu *vcpu)
+{
+	int TIRs_num = kvm_get_guest_vcpu_TIRs_num(vcpu);
+
+	pr_err("TIRs already injected to guest:\n");
+	print_all_TIRs(vcpu->arch.kmap_vcpu_state->cpu.regs.CPU_TIRs, TIRs_num);
+	pr_err("TIRs to now inject to guest:\n");
+	print_all_TIRs(vcpu->arch.intc_ctxt.TIRs, vcpu->arch.intc_ctxt.nr_TIRs);
+}
+
 void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 {
+	static bool __section(".data.once") __warned;
 	struct kvm_vcpu *vcpu;
 	int failed;
 	int TIRs_num;
@@ -1036,29 +1366,43 @@ void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 	KVM_BUG_ON(vcpu->arch.sw_ctxt.in_hypercall);
 
 	TIRs_num = kvm_get_guest_vcpu_TIRs_num(vcpu);
-	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) > 1) {
-		pr_debug("%s() recursive trap injection, already %d trap(s), "
-			"in work %d\n",
+	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) -
+			atomic_read(&vcpu->arch.host_ctxt.signal.in_work) > 1) {
+		pr_debug("%s() recursive trap injection, already %d trap(s), in work %d\n",
 			__func__,
 			atomic_read(&vcpu->arch.host_ctxt.signal.traps_num),
 			atomic_read(&vcpu->arch.host_ctxt.signal.in_work));
 		if (TIRs_num >= 0) {
-			pr_err("%s(): guest trap handler did not have time "
-				"to read %d TIRs of previous injection\n",
-				__func__, TIRs_num);
-			KVM_BUG_ON(true);
+			if (!__warned) {
+				__warned = true;
+				WARN(1, "%s(): guest trap handler did not have time "
+					"to read %d TIRs of previous injection\n",
+					__func__, TIRs_num);
+				print_injected_TIRs(vcpu);
+			}
+			goto out_to_kill;
 		}
-	} else {
-		if (TIRs_num >= 0) {
-			pr_err("%s(): new trap before previous TIRs read\n",
-				__func__);
-			print_all_TIRs(regs->trap->TIRs, regs->trap->nr_TIRs);
-			print_pt_regs(regs);
-			print_all_TIRs(vcpu->arch.kmap_vcpu_state->
-							cpu.regs.CPU_TIRs,
-					TIRs_num);
-			do_exit(SIGKILL);
+	} else if (TIRs_num >= 0) {
+		bool is_fake = clear_pv_vcpu_fake_traps(vcpu, regs);
+
+		if (!__warned) {
+			__warned = true;
+			if (is_fake) {
+				/* all new traps are fake, ignore its */
+				WARN(1, "%s(): a new trap(s) before previous trap's "
+					"TIRs has been read by guest\n"
+					"The trap(s) is considered as fake "
+					"and ignored for injection\n", __func__);
+				print_injected_TIRs(vcpu);
+				print_all_TIRs(regs->trap->TIRs, regs->trap->nr_TIRs);
+				return;
+			} else {
+				WARN(1, "%s(): a new trap(s) before previous trap's "
+					"TIRs has been read by guest\n", __func__);
+				print_injected_TIRs(vcpu);
+			}
 		}
+		goto out_to_kill;
 	}
 
 	kvm_clear_vcpu_guest_stacks_pending(vcpu, regs);
@@ -1067,12 +1411,16 @@ void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 	kvm_set_pv_vcpu_trap_cellar(vcpu);
 	kvm_set_pv_vcpu_trap_context(vcpu, regs);
 
+	kvm_clear_guest_traps_wish(vcpu);
+
 	failed = setup_pv_vcpu_trap(vcpu, regs);
+	if (failed)
+		goto out_to_kill;
 
-	if (failed) {
-		do_exit(SIGKILL);
-	}
+	return;
 
+out_to_kill:
+	force_sig(SIGKILL);
 }
 
 static int setup_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
@@ -1094,7 +1442,6 @@ static int setup_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 #endif
 
 	KVM_BUG_ON(!is_sys_call_pt_regs(regs));
-	gti->fork_regs = *regs;
 
 	if (!regs->g_stacks_valid) {
 		prepare_pv_vcpu_inject_stacks(vcpu, regs);
@@ -1119,8 +1466,10 @@ static int setup_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	 * We want user to return to inject_handler_trampoline so
 	 * create fake kernel frame in user's chain stack
 	 */
-	prepare_pv_vcpu_inject_handler_trampoline(vcpu, &regs->g_stacks,
-				FROM_PV_VCPU_SYSCALL_INJECT, true);
+	ret = prepare_pv_vcpu_inject_handler_trampoline(vcpu, regs,
+			&regs->g_stacks, FROM_PV_VCPU_SYSCALL_INJECT, true);
+	if (ret)
+		goto free_signal_stack;
 
 	/*
 	 * guest's trap handler frame should be the last in stacks
@@ -1298,12 +1647,24 @@ switch_to_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
 	/* disable all IRQs in UPSR to switch mmu context */
 	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
 
+	/*
+	 * Ensure we set mode to IN_GUEST_MODE after we disable
+	 * interrupts and before the final VCPU requests check.
+	 * See the comment in kvm_vcpu_exiting_guest_mode() and
+	 * Documentation/virt/kvm/vcpu-requests.rst
+	 */
+	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
+
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 
-	__guest_enter(current_thread_info(), &vcpu->arch, 0);
+	/* set flags of return type to guest kernel or guest user: */
+	/* it is to kernel for now */
+	host_return_to_guest_kernel(current_thread_info());
 
 	/* switch host MMU to VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu);
+	kvm_switch_to_guest_mmu_pid(vcpu, current_thread_info());
+
+	__guest_enter(current_thread_info(), &vcpu->arch, 0);
 
 	/* from now the host process is at paravirtualized guest (VCPU) mode */
 	set_ts_flag(TS_HOST_AT_VCPU_MODE);
@@ -1380,36 +1741,18 @@ fault:
 	do_exit(SIGKILL);
 }
 
-/*
- * The function should return bool 'is the system call from guest?'
- */
-bool pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs)
+void host_pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs)
 {
 	struct kvm_vcpu *vcpu = ti->vcpu;
 
-	preempt_disable();
-
-	/* disable all IRQs to switch mmu context */
-	raw_all_irq_disable();
-
-	__guest_exit(ti, &vcpu->arch, 0);
-
-	/* return to hypervisor MMU context to emulate intercept */
-	kvm_switch_to_host_mmu_pid(current->mm);
-
-	kvm_set_intc_emul_flag(regs);
-
-	raw_all_irq_enable();
-
-	preempt_enable();
-
 	/* replace stacks->top value with real register SBR state */
 	regs->stacks.top = regs->g_stacks.top;
+
+	pv_vcpu_check_trap_in_fast_syscall(vcpu, regs);
+
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
 
 	insert_pv_vcpu_syscall(vcpu, regs);
-
-	return true;	/* it is system call from guest */
 }
 
 static inline unsigned long
@@ -1514,18 +1857,6 @@ copy_k_gregs_to_guest_gregs(__user unsigned long *g_gregs[2],
 #endif	/* CONFIG_GREGS_CONTEXT */
 
 static inline int
-copy_h_gregs_to_guest_gregs(__user unsigned long *g_gregs[2],
-				global_regs_t *h_gregs)
-{
-	host_gregs_t *host_gregs;
-
-	return copy_gregs_to_guest_gregs(
-				&g_gregs[HOST_GREGS_PAIRS_START],
-				&h_gregs->g[HOST_GREGS_PAIRS_START],
-				sizeof(host_gregs->g));
-}
-
-static inline int
 copy_kernel_gregs_to_guest_gregs(__user unsigned long *g_gregs[2],
 				kernel_gregs_t *k_gregs)
 {
@@ -1536,23 +1867,10 @@ copy_kernel_gregs_to_guest_gregs(__user unsigned long *g_gregs[2],
 }
 
 static inline int
-copy_host_gregs_to_guest_gregs(__user unsigned long *g_gregs[2],
-				host_gregs_t *h_gregs)
+copy_local_gregs_to_guest_l_gregs(__user unsigned long *g_l_gregs[2],
+				  local_gregs_t *k_l_gregs)
 {
-	return copy_gregs_to_guest_gregs(
-				&g_gregs[HOST_GREGS_PAIRS_START],
-				h_gregs->g,
-				sizeof(h_gregs->g));
-}
-
-static inline int
-copy_gregs_to_guest_local_gregs(__user unsigned long *l_gregs[2],
-				global_regs_t *gregs)
-{
-	local_gregs_t *local_regs;
-
-	if (copy_to_user_with_tags(l_gregs, &gregs->g[LOCAL_GREGS_START],
-					sizeof(local_regs->g))) {
+	if (copy_to_user_with_tags(g_l_gregs, k_l_gregs, sizeof(k_l_gregs))) {
 		DebugKVM("could not copy local global registers to user\n");
 		return -EFAULT;
 	}
@@ -1579,15 +1897,32 @@ copy_guest_k_gregs_to_guest_gregs(global_regs_t *g_gregs,
 }
 #endif	/* CONFIG_GREGS_CONTEXT */
 
-static inline void
-copy_guest_h_gregs_to_guest_gregs(global_regs_t *g_gregs,
-					host_gregs_t *h_gregs)
+static int copy_k_gregs_from_sig_context(kernel_gregs_t *k_gregs,
+				struct signal_stack_context __user *context)
 {
-	host_gregs_t *host_gregs;
+	unsigned long ts_flag;
+	int ret;
 
-	tagged_memcpy_8(&g_gregs->g[HOST_GREGS_PAIRS_START],
-			&h_gregs->g[HOST_VCPU_STATE_GREGS_PAIRS_INDEX_LO],
-			sizeof(host_gregs->g));
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret = __copy_from_user_with_tags(k_gregs, &context->l_gregs,
+					 sizeof(*k_gregs));
+	clear_ts_flag(ts_flag);
+
+	return (ret) ? -EFAULT : 0;
+}
+
+static int copy_k_gregs_to_sig_context(struct signal_stack_context __user *context,
+					kernel_gregs_t *k_gregs)
+{
+	unsigned long ts_flag;
+	int ret;
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret = __copy_to_user_with_tags(&context->l_gregs, k_gregs,
+					sizeof(*k_gregs));
+	clear_ts_flag(ts_flag);
+
+	return (ret) ? -EFAULT : 0;
 }
 
 unsigned long
@@ -1596,10 +1931,12 @@ kvm_get_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 				bool is_signal)
 {
 	thread_info_t *ti = current_thread_info();
-	global_regs_t gregs;
+	struct signal_stack_context __user *context;
+	local_gregs_t k_l_gregs;
 	unsigned long **l_gregs = u_l_gregs;
 	hva_t hva;
 	kvm_arch_exception_t exception;
+	int ret;
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)l_gregs, true, &exception);
 	if (kvm_is_error_hva(hva)) {
@@ -1610,16 +1947,31 @@ kvm_get_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 	}
 
 	l_gregs = (void *)hva;
-	preempt_disable();	/* to restore on one CPU */
-	if (is_signal)
-		machine.save_gregs_on_mask(&gregs,
-				   true,	/* dirty BGR */
-				   GLOBAL_GREGS_USER_MASK  | GUEST_GREGS_MASK);
-	preempt_enable();
-	if (KERNEL_GREGS_MAX_MASK & LOCAL_GREGS_USER_MASK) {
-		copy_guest_k_gregs_to_guest_gregs(&gregs, &ti->k_gregs);
+
+	context = get_signal_stack();
+	if (unlikely(context == NULL)) {
+		if (likely(is_signal)) {
+			pr_err("%s(): signal stack is empty, so nothing signals "
+				"can be\n", __func__);
+			return -EINVAL;
+		}
 	}
-	return copy_gregs_to_guest_local_gregs(l_gregs, &gregs);
+	if (likely(context != NULL)) {
+		kernel_gregs_t *k_gregs = (kernel_gregs_t *)&k_l_gregs;
+
+		/* only "kernel" user local global registers can be at context */
+		ret = copy_k_gregs_from_sig_context(k_gregs, context);
+		if (ret)
+			return ret;
+	} else {
+		copy_k_gregs_to_l_gregs(&k_l_gregs, &ti->k_gregs);
+	}
+
+	preempt_disable();	/* to restore on one CPU */
+	machine.save_local_gregs(&k_l_gregs, is_signal);
+	preempt_enable();
+
+	return copy_local_gregs_to_guest_l_gregs(l_gregs, &k_l_gregs);
 }
 
 int kvm_get_all_guest_glob_regs(struct kvm_vcpu *vcpu,
@@ -1646,7 +1998,6 @@ int kvm_get_all_guest_glob_regs(struct kvm_vcpu *vcpu,
 	if (ret)
 		return ret;
 	ret = copy_kernel_gregs_to_guest_gregs(gregs, &ti->k_gregs);
-	ret |= copy_host_gregs_to_guest_gregs(gregs, &ti->h_gregs);
 	return ret;
 }
 
@@ -1691,6 +2042,9 @@ kvm_set_guest_glob_regs(struct kvm_vcpu *vcpu,
 
 	preempt_disable();	/* to restore on one CPU */
 	if (ret == 0) {
+		if (!dirty_bgr) {
+			gregs.bgr = NATIVE_READ_BGR_REG();
+		}
 		machine.restore_gregs_on_mask(&gregs, dirty_bgr,
 						not_set_gregs_mask);
 		DebugKVM("set %ld global registers of guest\n",
@@ -1719,16 +2073,6 @@ copy_k_gregs_from_guest_gregs(kernel_gregs_t *k_gregs, global_regs_t *g_gregs)
 #endif	/* CONFIG_GREGS_CONTEXT */
 
 static inline void
-copy_h_gregs_from_guest_gregs(host_gregs_t *h_gregs, global_regs_t *g_gregs)
-{
-	host_gregs_t *host_gregs;
-
-	tagged_memcpy_8(&h_gregs->g[HOST_VCPU_STATE_GREGS_PAIRS_INDEX_LO],
-				&g_gregs->g[HOST_GREGS_PAIRS_START],
-				sizeof(host_gregs->g));
-}
-
-static inline void
 copy_local_gregs_from_guest_gregs(global_regs_t *l_gregs,
 					global_regs_t *g_gregs)
 {
@@ -1740,13 +2084,10 @@ copy_local_gregs_from_guest_gregs(global_regs_t *l_gregs,
 }
 
 static inline int
-copy_guest_local_gregs_to_gregs(global_regs_t *gregs,
-				__user unsigned long *l_gregs[2])
+copy_guest_local_gregs_to_l_gregs(local_gregs_t *k_l_gregs,
+				  __user unsigned long *u_l_gregs[2])
 {
-	local_gregs_t *local_regs;
-
-	if (copy_from_user_with_tags(&gregs->g[LOCAL_GREGS_START], l_gregs,
-					sizeof(local_regs->g))) {
+	if (copy_from_user_with_tags(k_l_gregs, u_l_gregs, sizeof(k_l_gregs))) {
 		DebugKVM("could not copy local global registers from user\n");
 		return -EFAULT;
 	}
@@ -1784,7 +2125,8 @@ kvm_set_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 				bool is_signal)
 {
 	thread_info_t *ti = current_thread_info();
-	global_regs_t gregs;
+	struct signal_stack_context __user *context;
+	local_gregs_t k_l_gregs;
 	unsigned long **l_gregs = u_l_gregs;
 	hva_t hva;
 	int ret;
@@ -1799,23 +2141,35 @@ kvm_set_guest_local_glob_regs(struct kvm_vcpu *vcpu,
 	}
 
 	l_gregs = (void *)hva;
-	ret = copy_guest_local_gregs_to_gregs(&gregs, l_gregs);
+	ret = copy_guest_local_gregs_to_l_gregs(&k_l_gregs, l_gregs);
 	if (ret != 0)
 		return ret;
 
-	if (KERNEL_GREGS_MAX_MASK & LOCAL_GREGS_USER_MASK) {
-		copy_k_gregs_from_guest_gregs(&ti->k_gregs, &gregs);
+	context = get_signal_stack();
+	if (unlikely(context == NULL)) {
+		if (likely(is_signal)) {
+			pr_err("%s(): signal stack is empty, so nothing signals "
+				"can be\n", __func__);
+			return -EINVAL;
+		}
 	}
-	if (HOST_KERNEL_GREGS_MASK & LOCAL_GREGS_USER_MASK) {
-		copy_h_gregs_from_guest_gregs(&ti->h_gregs, &gregs);
+	if (likely(context != NULL)) {
+		kernel_gregs_t *k_gregs = (kernel_gregs_t *)&k_l_gregs;
+
+		/* only "kernel" user local global registers can be at context */
+		ret = copy_k_gregs_to_sig_context(context, k_gregs);
+		if (ret)
+			return ret;
+	} else {
+		get_k_gregs_from_l_regs(&ti->k_gregs, &k_l_gregs);
 	}
+
 	preempt_disable();	/* to restore on one CPU */
-	if (is_signal)
-		machine.restore_gregs_on_mask(&gregs,
-			true,	/* dirty BGR */
-			GLOBAL_GREGS_USER_MASK | GUEST_GREGS_MASK);
+	k_l_gregs.bgr = NATIVE_READ_BGR_REG();
+	machine.restore_local_gregs(&k_l_gregs, is_signal);
 	preempt_enable();
-	return ret;
+
+	return 0;
 }
 
 #ifdef	CONFIG_KVM_HOST_MODE
@@ -2164,8 +2518,8 @@ int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
 	/* FIXME: tags are not copied */
 	for (frame = 0; frame < ps_frame_size / EXT_4_NR_SZ; frame++) {
 		if (machine.native_iset_ver < E2K_ISET_V5) {
-			ps[frame].v2.word_lo = ps_frame[frame].word_lo;
-			ps[frame].v2.word_hi = ps_frame[frame].word_hi;
+			ps[frame].v3.word_lo = ps_frame[frame].word_lo;
+			ps[frame].v3.word_hi = ps_frame[frame].word_hi;
 			/* Skip frame[2] and frame[3] - they hold */
 			/* extended data not used by kernel */
 		} else {
@@ -2413,3 +2767,110 @@ int kvm_patch_guest_data_and_chain_stacks(struct kvm_vcpu *vcpu,
 					u_pcs_patch, pcs_frames);
 	return ret;
 }
+
+void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt,
+					 int is_active)
+{
+	u64 b_dimar0, b_dimar1, b_ddmar0, b_ddmar1, b_dibar0, b_dibar1,
+	    b_dibar2, b_dibar3, b_ddbar0, b_ddbar1, b_ddbar2, b_ddbar3,
+	    a_dimar0, a_dimar1, a_ddmar0, a_ddmar1, a_dibar0, a_dibar1,
+	    a_dibar2, a_dibar3, a_ddbar0, a_ddbar1, a_ddbar2, a_ddbar3;
+	e2k_dimcr_t b_dimcr, a_dimcr;
+	e2k_ddmcr_t b_ddmcr, a_ddmcr;
+	e2k_dibcr_t b_dibcr, a_dibcr;
+	e2k_dibsr_t b_dibsr, a_dibsr;
+	e2k_ddbcr_t b_ddbcr, a_ddbcr;
+	e2k_ddbsr_t b_ddbsr, a_ddbsr;
+	e2k_dimtp_t b_dimtp, a_dimtp;
+
+	b_dibcr = sw_ctxt->dibcr;
+	b_ddbcr = sw_ctxt->ddbcr;
+	b_dibsr = sw_ctxt->dibsr;
+	b_ddbsr = sw_ctxt->ddbsr;
+	b_dimcr = sw_ctxt->dimcr;
+	b_ddmcr = sw_ctxt->ddmcr;
+	b_dibar0 = sw_ctxt->dibar0;
+	b_dibar1 = sw_ctxt->dibar1;
+	b_dibar2 = sw_ctxt->dibar2;
+	b_dibar3 = sw_ctxt->dibar3;
+	b_ddbar0 = sw_ctxt->ddbar0;
+	b_ddbar1 = sw_ctxt->ddbar1;
+	b_ddbar2 = sw_ctxt->ddbar2;
+	b_ddbar3 = sw_ctxt->ddbar3;
+	b_dimar0 = sw_ctxt->dimar0;
+	b_dimar1 = sw_ctxt->dimar1;
+	b_ddmar0 = sw_ctxt->ddmar0;
+	b_ddmar1 = sw_ctxt->ddmar1;
+	b_dimtp = sw_ctxt->dimtp;
+
+	a_dibcr = NATIVE_READ_DIBCR_REG();
+	a_ddbcr = NATIVE_READ_DDBCR_REG();
+	a_dibsr = NATIVE_READ_DIBSR_REG();
+	a_ddbsr = NATIVE_READ_DDBSR_REG();
+	a_dimcr = NATIVE_READ_DIMCR_REG();
+	a_ddmcr = NATIVE_READ_DDMCR_REG();
+	a_dibar0 = NATIVE_READ_DIBAR0_REG_VALUE();
+	a_dibar1 = NATIVE_READ_DIBAR1_REG_VALUE();
+	a_dibar2 = NATIVE_READ_DIBAR2_REG_VALUE();
+	a_dibar3 = NATIVE_READ_DIBAR3_REG_VALUE();
+	a_ddbar0 = NATIVE_READ_DDBAR0_REG_VALUE();
+	a_ddbar1 = NATIVE_READ_DDBAR1_REG_VALUE();
+	a_ddbar2 = NATIVE_READ_DDBAR2_REG_VALUE();
+	a_ddbar3 = NATIVE_READ_DDBAR3_REG_VALUE();
+	a_ddmar0 = NATIVE_READ_DDMAR0_REG_VALUE();
+	a_ddmar1 = NATIVE_READ_DDMAR1_REG_VALUE();
+	a_dimar0 = NATIVE_READ_DIMAR0_REG_VALUE();
+	a_dimar1 = NATIVE_READ_DIMAR1_REG_VALUE();
+	if (machine.save_dimtp)
+		machine.save_dimtp(&a_dimtp);
+
+	if (is_active) {
+		/* These two must be written first to disable monitoring */
+		NATIVE_WRITE_DIBCR_REG(b_dibcr);
+		NATIVE_WRITE_DDBCR_REG(b_ddbcr);
+	}
+	NATIVE_WRITE_DIBAR0_REG_VALUE(b_dibar0);
+	NATIVE_WRITE_DIBAR1_REG_VALUE(b_dibar1);
+	NATIVE_WRITE_DIBAR2_REG_VALUE(b_dibar2);
+	NATIVE_WRITE_DIBAR3_REG_VALUE(b_dibar3);
+	NATIVE_WRITE_DDBAR0_REG_VALUE(b_ddbar0);
+	NATIVE_WRITE_DDBAR1_REG_VALUE(b_ddbar1);
+	NATIVE_WRITE_DDBAR2_REG_VALUE(b_ddbar2);
+	NATIVE_WRITE_DDBAR3_REG_VALUE(b_ddbar3);
+	NATIVE_WRITE_DDMAR0_REG_VALUE(b_ddmar0);
+	NATIVE_WRITE_DDMAR1_REG_VALUE(b_ddmar1);
+	NATIVE_WRITE_DIMAR0_REG_VALUE(b_dimar0);
+	NATIVE_WRITE_DIMAR1_REG_VALUE(b_dimar1);
+	NATIVE_WRITE_DIBSR_REG(b_dibsr);
+	NATIVE_WRITE_DDBSR_REG(b_ddbsr);
+	NATIVE_WRITE_DIMCR_REG(b_dimcr);
+	NATIVE_WRITE_DDMCR_REG(b_ddmcr);
+	if (!is_active) {
+		/* These two must be written last to enable monitoring */
+		NATIVE_WRITE_DIBCR_REG(b_dibcr);
+		NATIVE_WRITE_DDBCR_REG(b_ddbcr);
+	}
+	if (machine.restore_dimtp)
+		machine.restore_dimtp(&b_dimtp);
+
+	sw_ctxt->dibcr = a_dibcr;
+	sw_ctxt->ddbcr = a_ddbcr;
+	sw_ctxt->dibsr = a_dibsr;
+	sw_ctxt->ddbsr = a_ddbsr;
+	sw_ctxt->dimcr = a_dimcr;
+	sw_ctxt->ddmcr = a_ddmcr;
+	sw_ctxt->dibar0 = a_dibar0;
+	sw_ctxt->dibar1 = a_dibar1;
+	sw_ctxt->dibar2 = a_dibar2;
+	sw_ctxt->dibar3 = a_dibar3;
+	sw_ctxt->ddbar0 = a_ddbar0;
+	sw_ctxt->ddbar1 = a_ddbar1;
+	sw_ctxt->ddbar2 = a_ddbar2;
+	sw_ctxt->ddbar3 = a_ddbar3;
+	sw_ctxt->ddmar0 = a_ddmar0;
+	sw_ctxt->ddmar1 = a_ddmar1;
+	sw_ctxt->dimar0 = a_dimar0;
+	sw_ctxt->dimar1 = a_dimar1;
+	sw_ctxt->dimtp = a_dimtp;
+}
+

@@ -20,12 +20,12 @@
 		)) : "(none)", \
 	(print) ? (__print_flags(entry & (_PAGE_PV_V6 | _PAGE_NON_EX_V6 | \
 					  _PAGE_W_V6 | _PAGE_D_V6 | \
-					  _PAGE_A_HW_V6), "|", \
+					  _PAGE_A_V6), "|", \
 			{ _PAGE_PV_V6,		"privileged" }, \
 			{ _PAGE_NON_EX_V6,	"non_executable" }, \
 			{ _PAGE_W_V6,		"writable" }, \
 			{ _PAGE_D_V6,		"dirty" }, \
-			{ _PAGE_A_HW_V6,	"accessed" } \
+			{ _PAGE_A_V6,		"accessed" } \
 		)) : "(none)", \
 	(print && entry != -1ULL && (entry & ~_PAGE_VALID_V6)) ? \
 		(__print_symbolic(_PAGE_MT_GET_VAL(entry), \
@@ -36,10 +36,9 @@
 			{ EXT_PREFETCH_MT,	"External Prefetchable" }, \
 			{ EXT_NON_PREFETCH_MT,	"External nonPrefetchable" }, \
 			{ EXT_CONFIG_MT,	"External Configuration" }, \
-			{ EXT_CACHE_MT,		"External Cached (same as GC in hardware)" }, \
 			{ 2,			"Reserved-2" }, \
 			{ 3,			"Reserved-3" }, \
 			{ 5,			"Reserved-5" })) \
-		: "" \
+		: ""
 
 #endif /* _TRACE_E2K_PGTABLE_V6_H */

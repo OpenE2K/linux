@@ -2164,6 +2164,12 @@ struct vm_struct *find_vm_area(const void *addr)
 
 	return va->vm;
 }
+#ifdef CONFIG_MCST
+/* unified_map_um() needs it.
+ * See: drivers/mcst/video-imgtec/linux/mem_man/img_mem_unified.c
+ */
+EXPORT_SYMBOL_GPL(find_vm_area);
+#endif /*CONFIG_MCST*/
 
 #if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
 struct vm_struct *find_io_vm_area(const void *addr)

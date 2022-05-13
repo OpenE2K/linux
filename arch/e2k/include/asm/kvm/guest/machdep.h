@@ -17,13 +17,6 @@ typedef struct guest_machdep {
 	/* guest interface functions */
 } guest_machdep_t;
 
-#ifdef	CONFIG_KVM_GUEST_KERNEL
-/* It is pure guest kernel (not paravirtualized based on pv_ops) */
-typedef struct host_machdep {
-	/* nothing to support and do */
-} host_machdep_t;
-#endif	/* CONFIG_KVM_GUEST_KERNEL */
-
 #endif	/* CONFIG_VIRTUALIZATION */
 #endif /* __KERNEL__ */
 

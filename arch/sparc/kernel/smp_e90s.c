@@ -104,8 +104,14 @@ void smp_bogo(struct seq_file *m)
 		switch (e90s_get_cpu_type()) {
 		case E90S_CPU_R2000:
 			ctick = s2_get_freq_mult(i) *
-					cpu_data(i).clock_tick;
+				 cpu_data(i).clock_tick / 100;
 			break;
+#if defined(CONFIG_PMC_R2KP)
+		case E90S_CPU_R2000P:
+			/* r2kp_get_freq_mult() returns MHz */
+			ctick = r2kp_get_freq_mult(i) * 1000000;
+			break;
+#endif
 		default:
 			ctick = cpu_data(i).clock_tick;
 		}
@@ -191,23 +197,6 @@ void smp_callin(void)
 	calibrate_delay();
 	smp_store_cpu_info(cpuid);
 
-	/* Let the user get at STICK too. */
-	__asm__ __volatile__("	rd	%%stick, %%g2\n"
-			 "	andn	%%g2, %0, %%g2\n"
-			"	wr	%%g2, 0, %%stick"
-		:	/* no outputs */
-		: "r" (TICK_PRIV_BIT)
-		: "g1", "g2");
-	/* Let the user get at TICK too.
-	 * If you will set TICK_PRIV_BIT add
-	 * 'return ret & ~TICK_PRIV_BIT' in get_cycles() */
-	__asm__ __volatile__("	rd	%%tick, %%g2\n"
-			"	andn	%%g2, %0, %%g2\n"
-			"	wrpr	%%g2, 0, %%tick"
-		:	/* no outputs */
-		: "r" (TICK_PRIV_BIT)
-		: "g1", "g2");
-
 	if (cpu_has_epic()) {
 		setup_cepic();
 	} else {
@@ -236,6 +225,7 @@ void smp_callin(void)
 	notify_cpu_starting(cpuid);
 
 	__setup_vector_irq(cpuid);
+	physid_clear(hard_smp_processor_id(), phys_cpu_offline_map);
 	set_cpu_online(cpuid, true);
 
 	/* idle thread is expected to have preempt disabled */
@@ -507,6 +497,33 @@ void smp_synchronize_one_tick(int cpu)
 	raw_spin_unlock_irqrestore(&itc_sync_lock, flags);
 }
 
+static void setup_node_interrupts(int node)
+{
+	u32 mm = 0, m;
+	u32 v = nbsr_readl(NBSR_INT_CFG, node);
+	const struct cpumask *mask = cpumask_of_node(node);
+	int c = cpumask_first(mask);
+	c = cpu_physical_id(c) % e90s_max_nr_node_cpus();
+	m = 1 << c % E90S_R1000_MAX_NR_NODE_CPUS;
+	if (c < E90S_R1000_MAX_NR_NODE_CPUS) {
+		mm |= m << NBSR_INTCFG_IommuAerrMask_OFFSET;
+		mm |= m << NBSR_INTCFG_IommuScMask_OFFSET;
+	} else {
+		mm |= m << NBSR_INTCFG_IommuAerrMask2_OFFSET;
+		mm |= m << NBSR_INTCFG_IommuScMask2_OFFSET;
+	}
+	v &= ~(NBSR_INTCFG_CLUSTER_MASK <<
+			NBSR_INTCFG_IommuAerrMask_OFFSET);
+	v &= ~(NBSR_INTCFG_CLUSTER_MASK <<
+			NBSR_INTCFG_IommuAerrMask2_OFFSET);
+	v &= ~(NBSR_INTCFG_CLUSTER_MASK <<
+			NBSR_INTCFG_IommuScMask_OFFSET);
+	v &= ~(NBSR_INTCFG_CLUSTER_MASK <<
+			NBSR_INTCFG_IommuScMask2_OFFSET);
+	v |= mm;
+	nbsr_writel(v, NBSR_INT_CFG, node);
+}
+
 void __init smp_cpus_done(unsigned int max_cpus)
 {
 	int i;
@@ -518,6 +535,8 @@ void __init smp_cpus_done(unsigned int max_cpus)
 	}
 	setup_ioapic_dest();
 	smp_fill_in_sib_core_maps();
+	for_each_online_node(i)
+		setup_node_interrupts(i);
 }
 
 void smp_fetch_global_regs(void)
@@ -666,6 +685,7 @@ static void stop_this_cpu(void *dummy)
 {
 	/* Remove this CPU */
 	set_cpu_online(smp_processor_id(), false);
+	physid_set(hard_smp_processor_id(), phys_cpu_offline_map);
 
 	local_irq_disable();
 	while (1)
@@ -846,6 +866,7 @@ void cpu_play_dead(void)
 int __cpu_disable(void)
 {
 	lock_vector_lock();
+	physid_set(hard_smp_processor_id(), phys_cpu_offline_map);
 	set_cpu_online(raw_smp_processor_id(), false);
 	unlock_vector_lock();
 #if 0

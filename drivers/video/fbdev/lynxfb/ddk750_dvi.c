@@ -21,6 +21,7 @@
 #include "ddk750_reg.h"
 #include "ddk750_dvi.h"
 #include "ddk750_sii164.h"
+#include "lynx_drv.h"
 
 
 /* This global variable contains all the supported driver and its corresponding
@@ -46,7 +47,8 @@ static dvi_ctrl_device_t g_dcftSupportedDviController[] = {
 };
 
 
-int dviInit(unsigned char edgeSelect,
+int dviInit(struct lynx_share *share,
+		unsigned char edgeSelect,
 	    unsigned char busSelect,
 	    unsigned char dualEdgeClkSelect,
 	    unsigned char hsyncEnable,
@@ -59,7 +61,8 @@ int dviInit(unsigned char edgeSelect,
 	dvi_ctrl_device_t *pCurrentDviCtrl;
 	pCurrentDviCtrl = g_dcftSupportedDviController;
 	if (pCurrentDviCtrl->pfnInit != NULL) {
-		return pCurrentDviCtrl->pfnInit(edgeSelect, busSelect,
+		return pCurrentDviCtrl->pfnInit(share,
+						edgeSelect, busSelect,
 						dualEdgeClkSelect,
 						hsyncEnable, vsyncEnable,
 						deskewEnable,
@@ -79,14 +82,14 @@ int dviInit(unsigned char edgeSelect,
  *  Output:
  *      Vendor ID
  */
-unsigned short dviGetVendorID()
+unsigned short dviGetVendorID(struct lynx_share *share)
 {
 	dvi_ctrl_device_t *pCurrentDviCtrl;
 
 	/*pCurrentDviCtrl = getDviCtrl(); */
 	pCurrentDviCtrl = g_dcftSupportedDviController;
 	if (pCurrentDviCtrl != (dvi_ctrl_device_t *) 0)
-		return pCurrentDviCtrl->pfnGetVendorId();
+		return pCurrentDviCtrl->pfnGetVendorId(share);
 
 	return 0x0000;
 }
@@ -99,14 +102,14 @@ unsigned short dviGetVendorID()
  *  Output:
  *      Device ID
  */
-unsigned short dviGetDeviceID()
+unsigned short dviGetDeviceID(struct lynx_share *share)
 {
 	dvi_ctrl_device_t *pCurrentDviCtrl;
 
 	/*    pCurrentDviCtrl = getDviCtrl(); */
 	pCurrentDviCtrl = g_dcftSupportedDviController;
 	if (pCurrentDviCtrl != (dvi_ctrl_device_t *) 0)
-		return pCurrentDviCtrl->pfnGetDeviceId();
+		return pCurrentDviCtrl->pfnGetDeviceId(share);
 
 	return 0x0000;
 }

@@ -97,22 +97,12 @@ ttable_entry12(int n, bootblock_struct_t *bootblock)
 /*
  * Native/guest VM indicator
  */
-static inline bool boot_is_guest_hv_vm(struct machdep *mach)
+static bool boot_is_guest_hv_vm(struct machdep *mach)
 {
-	if (likely(mach->native_iset_ver > E2K_ISET_V2)) {
-		/* there is CPU register CORE_MODE to check 'gmi' */
-		e2k_core_mode_t CORE;
+	e2k_core_mode_t CORE;
 
-		CORE.CORE_MODE_reg = boot_native_read_CORE_MODE_reg_value();
-		return !!CORE.CORE_MODE_gmi;
-	} else {
-		/* host set IDR.hw_virt instead of CORE_MODE.gmi */
-		/* (this field is reserved on iset V2) */
-		e2k_idr_t IDR;
-
-		IDR.IDR_reg = boot_native_read_IDR_reg_value();
-		return !!IDR.hw_virt;
-	}
+	CORE.CORE_MODE_reg = boot_native_read_CORE_MODE_reg_value();
+	return !!CORE.CORE_MODE_gmi;
 }
 
 static void boot_setup_machine_cpu_features(struct machdep *machine)
@@ -120,6 +110,7 @@ static void boot_setup_machine_cpu_features(struct machdep *machine)
 	int cpu = machine->native_id & MACHINE_ID_CPU_TYPE_MASK;
 	int revision = machine->native_rev;
 	int iset_ver = machine->native_iset_ver;
+	bool is_hardware_guest;
 	int guest_cpu;
 	cpuhas_initcall_t *fn, *start, *end, *fnv;
 
@@ -129,12 +120,20 @@ static void boot_setup_machine_cpu_features(struct machdep *machine)
 	guest_cpu = cpu;
 #endif
 
+	if (iset_ver >= E2K_ISET_V6) {
+		e2k_core_mode_t core_mode;
+		core_mode.word = boot_rrd_v6(E2K_REG_CORE_MODE);
+		is_hardware_guest = core_mode.gmi;
+	} else {
+		is_hardware_guest = false;
+	}
+
 	start = (cpuhas_initcall_t *) __cpuhas_initcalls;
 	end = (cpuhas_initcall_t *) __cpuhas_initcalls_end;
 	fn = boot_vp_to_pp(start);
 	for (fnv = start; fnv < end; fnv++, fn++)
 		boot_func_to_pp(*fn)(cpu, revision, iset_ver, guest_cpu,
-				     machine);
+				     is_hardware_guest, machine);
 }
 
 void __init_recv boot_setup_iset_features(struct machdep *machine)
@@ -145,14 +144,14 @@ void __init_recv boot_setup_iset_features(struct machdep *machine)
 
 #ifdef CONFIG_GREGS_CONTEXT
 	if (machine->native_iset_ver < E2K_ISET_V5) {
-		machine->save_kernel_gregs = &save_kernel_gregs_v2;
-		machine->save_gregs = &save_gregs_v2;
-		machine->save_local_gregs = &save_local_gregs_v2;
-		machine->save_gregs_dirty_bgr = &save_gregs_dirty_bgr_v2;
-		machine->save_gregs_on_mask = &save_gregs_on_mask_v2;
-		machine->restore_gregs = &restore_gregs_v2;
-		machine->restore_local_gregs = &restore_local_gregs_v2;
-		machine->restore_gregs_on_mask = &restore_gregs_on_mask_v2;
+		machine->save_kernel_gregs = &save_kernel_gregs_v3;
+		machine->save_gregs = &save_gregs_v3;
+		machine->save_local_gregs = &save_local_gregs_v3;
+		machine->save_gregs_dirty_bgr = &save_gregs_dirty_bgr_v3;
+		machine->save_gregs_on_mask = &save_gregs_on_mask_v3;
+		machine->restore_gregs = &restore_gregs_v3;
+		machine->restore_local_gregs = &restore_local_gregs_v3;
+		machine->restore_gregs_on_mask = &restore_gregs_on_mask_v3;
 	} else {
 		machine->save_kernel_gregs = &save_kernel_gregs_v5;
 		machine->save_gregs = &save_gregs_v5;
@@ -168,10 +167,10 @@ void __init_recv boot_setup_iset_features(struct machdep *machine)
 #ifdef CONFIG_USE_AAU
 	if (machine->native_iset_ver < E2K_ISET_V5) {
 		machine->calculate_aau_aaldis_aaldas =
-				&calculate_aau_aaldis_aaldas_v2;
-		machine->do_aau_fault = &do_aau_fault_v2;
-		machine->save_aaldi = &save_aaldi_v2;
-		machine->get_aau_context = &get_aau_context_v2;
+				&calculate_aau_aaldis_aaldas_v3;
+		machine->do_aau_fault = &do_aau_fault_v3;
+		machine->save_aaldi = &save_aaldi_v3;
+		machine->get_aau_context = &get_aau_context_v3;
 	} else if (machine->native_iset_ver == E2K_ISET_V5) {
 		machine->calculate_aau_aaldis_aaldas =
 				&calculate_aau_aaldis_aaldas_v5;
@@ -187,33 +186,18 @@ void __init_recv boot_setup_iset_features(struct machdep *machine)
 	}
 #endif
 
-#ifdef	CONFIG_SECONDARY_SPACE_SUPPORT
-	machine->flushts = ((machine->native_iset_ver < E2K_ISET_V3) ?
-				NULL : &flushts_v3);
-#endif
-
 #ifdef CONFIG_MLT_STORAGE
-	if (machine->native_iset_ver >= E2K_ISET_V6) {
-		machine->invalidate_MLT = &invalidate_MLT_v3;
+	machine->invalidate_MLT = &invalidate_MLT_v3;
+
+	if (machine->native_iset_ver >= E2K_ISET_V6)
 		machine->get_and_invalidate_MLT_context =
 				&get_and_invalidate_MLT_context_v6;
-	} else if (machine->native_iset_ver >= E2K_ISET_V3) {
-		machine->invalidate_MLT = &invalidate_MLT_v3;
+	else
 		machine->get_and_invalidate_MLT_context =
 				&get_and_invalidate_MLT_context_v3;
-	} else {
-		machine->invalidate_MLT = &invalidate_MLT_v2;
-		machine->get_and_invalidate_MLT_context =
-				&get_and_invalidate_MLT_context_v2;
-	}
 #endif
 
-	if (machine->native_iset_ver == E2K_ISET_V2) {
-		machine->rrd = &rrd_v2;
-		machine->rwd = &rwd_v2;
-		machine->boot_rrd = &boot_rrd_v2;
-		machine->boot_rwd = &boot_rwd_v2;
-	} else if (machine->native_iset_ver < E2K_ISET_V6) {
+	if (machine->native_iset_ver < E2K_ISET_V6) {
 		machine->rrd = &rrd_v3;
 		machine->rwd = &rwd_v3;
 		machine->boot_rrd = &boot_rrd_v3;
@@ -231,8 +215,8 @@ void __init_recv boot_setup_iset_features(struct machdep *machine)
 	}
 
 	if (machine->native_iset_ver < E2K_ISET_V5) {
-		machine->get_cu_hw1 = &native_get_cu_hw1_v2;
-		machine->set_cu_hw1 = &native_set_cu_hw1_v2;
+		machine->get_cu_hw1 = &native_get_cu_hw1_v3;
+		machine->set_cu_hw1 = &native_set_cu_hw1_v3;
 	} else {
 		machine->get_cu_hw1 = &native_get_cu_hw1_v5;
 		machine->set_cu_hw1 = &native_set_cu_hw1_v5;
@@ -241,18 +225,15 @@ void __init_recv boot_setup_iset_features(struct machdep *machine)
 	if (machine->native_iset_ver >= E2K_ISET_V6) {
 		machine->C1_enter = C1_enter_v6;
 		machine->C3_enter = C3_enter_v6;
-	} else if (machine->native_iset_ver >= E2K_ISET_V3) {
-		machine->C1_enter = C1_enter_v2;
+	} else  {
+		machine->C1_enter = C1_enter_v3;
 		machine->C3_enter = C3_enter_v3;
-	} else {
-		machine->C1_enter = C1_enter_v2;
 	}
 
 #ifdef CONFIG_SMP
-	if (machine->native_iset_ver >= E2K_ISET_V3) {
-		machine->clk_off = clock_off_v3;
-		machine->clk_on = clock_on_v3;
-	}
+	/* FIXME: virtualize clk_off/clk_on and remove them from machdep_t */
+	machine->clk_off = native_clock_off_v3;
+	machine->clk_on = native_clock_on_v3;
 #endif
 }
 
@@ -262,35 +243,16 @@ boot_common_setup_arch_mmu(struct machdep *machine, pt_struct_t *pt_struct)
 	pt_level_t *pmd_level;
 	pt_level_t *pud_level;
 
-	if (boot_machine_has(machine, CPU_HWBUG_PAGE_A))
-		pt_struct->accessed_mask = _PAGE_A_SW_V2;
-
 	pmd_level = &pt_struct->levels[E2K_PMD_LEVEL_NUM];
 	pud_level = &pt_struct->levels[E2K_PUD_LEVEL_NUM];
-	if (machine->native_iset_ver >= E2K_ISET_V3) {
-		pmd_level->page_size = E2K_2M_PAGE_SIZE;
-		pmd_level->page_shift = PMD_SHIFT;
-		pmd_level->page_offset = ~PMD_MASK;
-		pmd_level->huge_ptes = 1;
-	} else {
-		pmd_level->page_size = E2K_4M_PAGE_SIZE;
-		pmd_level->page_shift = PMD_SHIFT + 1;
-		pmd_level->page_offset = E2K_4M_PAGE_SIZE - 1;
-		pmd_level->huge_ptes = 2;
-		pmd_level->boot_set_pte = boot_vp_to_pp(&boot_set_double_pte);
-		pmd_level->boot_get_huge_pte =
-				boot_vp_to_pp(&boot_get_double_huge_pte);
-		pmd_level->init_pte_clear = &init_double_pte_clear;
-		pmd_level->init_get_huge_pte = &init_get_double_huge_pte;
-		pmd_level->split_pt_page = &split_multiple_pmd_page;
 
-		pud_level->map_pt_huge_page_to_prev_level =
-				&map_pud_huge_page_to_multiple_pmds;
-	}
+	pmd_level->page_size = E2K_2M_PAGE_SIZE;
+	pmd_level->page_shift = PMD_SHIFT;
+	pmd_level->page_offset = ~PMD_MASK;
+
 	if (machine->native_iset_ver >= E2K_ISET_V5) {
 
 		pud_level->is_huge = true;
-		pud_level->huge_ptes = 1;
 		pud_level->dtlb_type = FULL_ASSOCIATIVE_DTLB_TYPE;
 	}
 }
@@ -298,9 +260,7 @@ boot_common_setup_arch_mmu(struct machdep *machine, pt_struct_t *pt_struct)
 void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 {
 #ifdef	CONFIG_E2K_MACHINE
-#if defined(CONFIG_E2K_ES2_DSP) || defined(CONFIG_E2K_ES2_RU)
-	boot_es2_setup_arch();
-#elif defined(CONFIG_E2K_E2S)
+#if defined(CONFIG_E2K_E2S)
 	boot_e2s_setup_arch();
 #elif defined(CONFIG_E2K_E8C)
 	boot_e8c_setup_arch();
@@ -319,48 +279,26 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 #endif
 #else	/* ! CONFIG_E2K_MACHINE */
 	int		simul_flag;
-	int		iohub_flag;
 	int		mach_id = 0;
 
 	simul_flag = bootblock->info.mach_flags & SIMULATOR_MACH_FLAG;
-	iohub_flag = bootblock->info.mach_flags & IOHUB_MACH_FLAG;
 	if (simul_flag)
 		mach_id |= MACHINE_ID_SIMUL;
-	if (iohub_flag)
-		mach_id |= MACHINE_ID_E2K_IOHUB;
 
 	mach_id |= boot_get_e2k_machine_id();
-#if CONFIG_E2K_MINVER == 2
-	if (mach_id == MACHINE_ID_ES2_DSP_LMS ||
-			mach_id == MACHINE_ID_ES2_RU_LMS ||
-			mach_id == MACHINE_ID_ES2_DSP ||
-			mach_id == MACHINE_ID_ES2_RU) {
-		boot_es2_setup_arch();
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 3
 	if (mach_id == MACHINE_ID_E2S_LMS ||
 			mach_id == MACHINE_ID_E2S) {
 		boot_e2s_setup_arch();
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 4
-	if (mach_id == MACHINE_ID_E8C_LMS ||
+	} else if (mach_id == MACHINE_ID_E8C_LMS ||
 			mach_id == MACHINE_ID_E8C) {
 		boot_e8c_setup_arch();
 	} else if (mach_id == MACHINE_ID_E1CP_LMS ||
 			mach_id == MACHINE_ID_E1CP) {
 		boot_e1cp_setup_arch();
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 5
-	if (mach_id == MACHINE_ID_E8C2_LMS ||
+	} else if (mach_id == MACHINE_ID_E8C2_LMS ||
 			mach_id == MACHINE_ID_E8C2) {
 		boot_e8c2_setup_arch();
-	} else
-#endif
-#if CONFIG_E2K_MINVER <= 6
-	if (mach_id == MACHINE_ID_E12C_LMS ||
+	} else if (mach_id == MACHINE_ID_E12C_LMS ||
 			mach_id == MACHINE_ID_E12C) {
 		boot_e12c_setup_arch();
 	} else if (mach_id == MACHINE_ID_E16C_LMS ||
@@ -370,7 +308,6 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 			mach_id == MACHINE_ID_E2C3) {
 		boot_e2c3_setup_arch();
 	}
-#endif /* CONFIG_E2K_MINVER */
 
 	boot_native_machine_id = mach_id;
 #endif /* CONFIG_E2K_MACHINE */
@@ -616,19 +553,19 @@ boot_init_sequel(bool bsp, int cpuid, int cpus_to_sync)
 #ifdef	CONFIG_SMP
 	if (bsp) {
 #endif	/* CONFIG_SMP */
-		if (disable_caches != _MMU_CD_EN) {
-			if (disable_caches == _MMU_CD_D1_DIS)
+		if (disable_caches != MMU_CR_CD_EN) {
+			if (disable_caches == MMU_CR_CD_D1_DIS)
 				pr_info("Disable L1 cache\n");
-			else if (disable_caches == _MMU_CD_D_DIS)
+			else if (disable_caches == MMU_CR_CD_D_DIS)
 				pr_info("Disable L1 and L2 caches\n");
-			else if (disable_caches == _MMU_CD_DIS)
+			else if (disable_caches == MMU_CR_CD_DIS)
 				pr_info("Disable L1, L2 and L3 caches\n");
 		}
 		if (disable_secondary_caches)
 			pr_info("Disable secondary INTEL caches\n");
-		if (disable_IP == _MMU_IPD_DIS)
+		if (disable_IP)
 			pr_info("Disable IB prefetch\n");
-		DebugB("MMU CR 0x%llx\n", READ_MMU_CR());
+		DebugB("MMU CR 0x%llx\n", AW(READ_MMU_CR()));
 #ifdef	CONFIG_SMP
 	}
 #endif	/* CONFIG_SMP */
@@ -743,17 +680,6 @@ boot_startup(bool bsp, bootblock_struct_t *bootblock)
 
 	/* early setup CPU # */
 	boot_smp_set_processor_id(boot_early_pic_read_id());
-
-	/* Try to determine automatically if we are under virtualization */
-#ifndef CONFIG_CPU_ES2
-	if (bsp) {
-		e2k_core_mode_t core_mode;
-
-		AW(core_mode) = NATIVE_READ_CORE_MODE_REG_VALUE();
-		if (core_mode.gmi)
-			boot_machine.native_iset_ver = E2K_ISET_V6;
-	}
-#endif
 
 #if defined(CONFIG_SERIAL_BOOT_PRINTK)
 	if (!recovery) {

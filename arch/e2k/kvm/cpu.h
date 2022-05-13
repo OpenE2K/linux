@@ -53,20 +53,17 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-extern void kvm_init_cpu_state(struct kvm_vcpu *vcpu);
-extern void kvm_set_vcpu_kernel_image(struct kvm_vcpu *vcpu,
-			char *kernel_base, unsigned long kernel_size);
+extern void kvm_reset_cpu_state(struct kvm_vcpu *vcpu);
 extern void kvm_set_pv_vcpu_kernel_image(struct kvm_vcpu *vcpu);
 extern void write_hw_ctxt_to_pv_vcpu_registers(struct kvm_vcpu *vcpu,
 				const struct kvm_hw_cpu_context *hw_ctxt,
 				const struct kvm_sw_cpu_context *sw_ctxt);
-extern void init_hw_ctxt(struct kvm_vcpu *vcpu);
 extern noinline __interrupt void startup_pv_vcpu(struct kvm_vcpu *vcpu,
 						 guest_hw_stack_t *stack_regs,
 						 unsigned flags);
 extern noinline __interrupt unsigned long launch_pv_vcpu(struct kvm_vcpu *vcpu,
 						unsigned switch_flags);
-extern void kvm_init_cpu_state_idr(struct kvm_vcpu *vcpu);
+extern void kvm_reset_cpu_state_idr(struct kvm_vcpu *vcpu);
 extern e2k_idr_t kvm_vcpu_get_idr(struct kvm_vcpu *vcpu);
 
 /* guest kernel trap table base address: ttable0 */
@@ -233,6 +230,79 @@ as_paravirt_guest_entry(unsigned long arg0, unsigned long arg1,
 }
 #endif	/* CONFIG_KVM_HOST_MODE */
 
+static __always_inline bool
+pv_vcpu_trap_from_guest_kernel(pt_regs_t *regs)
+{
+	return regs && from_trap(regs) && call_from_guest_kernel(regs);
+}
+
+static __always_inline bool
+pv_vcpu_syscall_from_guest_kernel(pt_regs_t *regs)
+{
+	return regs && from_syscall(regs) && call_from_guest_kernel(regs);
+}
+
+static __always_inline bool
+pv_vcpu_syscall_in_user_mode(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+{
+	return !pv_vcpu_syscall_from_guest_kernel(regs);
+}
+
+static __always_inline bool
+pv_vcpu_trap_in_fast_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+{
+	return regs && regs->in_fast_syscall;
+}
+
+static __always_inline void
+pv_vcpu_check_trap_in_fast_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+{
+	if (unlikely(vcpu->arch.sw_ctxt.in_fast_syscall)) {
+		/*
+		 * Trap or system call instead of unsuccessful fast system call
+		 * occurs when guest fast system call is handling.
+		 * Save the flag of that in the regs and clear at the sw_ctxt
+		 * to enable recursive traps.
+		 * The flag should be restored while trap handling completion
+		 */
+		regs->in_fast_syscall = true;
+		vcpu->arch.sw_ctxt.in_fast_syscall = false;
+	}
+}
+
+static __always_inline void
+host_return_from_fast_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+{
+	/* it need restore flag of fast system call at sw_ctxt */
+	/* and clear at regs */
+	KVM_BUG_ON(!regs->in_fast_syscall);
+	KVM_BUG_ON(vcpu->arch.sw_ctxt.in_fast_syscall);
+	vcpu->arch.sw_ctxt.in_fast_syscall = true;
+	regs->in_fast_syscall = false;
+}
+
+static __always_inline void
+host_return_to_fast_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+{
+	/* it need keep flag of fast system call at regs */
+	/* and flag should remain as cleared at regs */
+	KVM_BUG_ON(!regs->in_fast_syscall);
+	KVM_BUG_ON(vcpu->arch.sw_ctxt.in_fast_syscall);
+}
+
+static __always_inline bool
+pv_vcpu_trap_in_user_mode(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+{
+	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+
+	if (likely(regs->is_guest_user)) {
+		return true;
+	} else {
+		return !(test_gti_thread_flag(gti, GTIF_KERNEL_THREAD) ||
+				pv_vcpu_trap_on_guest_kernel(regs));
+	}
+}
+
 static inline int get_pv_vcpu_traps_num(struct kvm_vcpu *vcpu)
 {
 	kvm_host_context_t *host_ctxt = &vcpu->arch.host_ctxt;
@@ -338,11 +408,14 @@ do_emulate_pv_vcpu_intc(thread_info_t *ti, pt_regs_t *regs,
 	__guest_exit(ti, &vcpu->arch, DONT_AAU_CONTEXT_SWITCH);
 
 	/* return to hypervisor MMU context to emulate hw intercept */
-	kvm_switch_to_host_mmu_pid(current->mm);
+	kvm_switch_to_host_mmu_pid(vcpu, current->mm);
 
 	kvm_set_intc_emul_flag(regs);
 
 	kvm_init_pv_vcpu_intc_handling(vcpu, regs);
+
+	vcpu->mode = OUTSIDE_GUEST_MODE;
+	smp_wmb();	/* See the comment in kvm_vcpu_exiting_guest_mode() */
 
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
 }
@@ -355,23 +428,146 @@ return_from_pv_vcpu_inject(struct kvm_vcpu *vcpu)
 	/* return to hypervisor context */
 	__guest_exit(current_thread_info(), &vcpu->arch, 0);
 	/* return to hypervisor MMU context */
-	kvm_switch_to_host_mmu_pid(current->mm);
+	kvm_switch_to_host_mmu_pid(vcpu, current->mm);
+
+	vcpu->mode = OUTSIDE_GUEST_MODE;
+	smp_wmb();	/* See the comment in kvm_vcpu_exiting_guest_mode() */
 }
 
 static __always_inline void
-do_return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs)
+host_return_to_guest_kernel(struct thread_info *ti)
+{
+	/* return to guest kernel to handle trap/system call/sigreturn */
+	/* or trap was on guest kernel and return to guest kernel */
+	clear_ti_status_flag(ti, TS_HOST_TO_GUEST_USER);
+	/* MMU context (pid) can be keeped */
+	clear_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID);
+}
+
+static __always_inline void
+host_return_to_guest_user(struct thread_info *ti, bool new_context)
+{
+	/* return to guest user after injected trap/system call/exec new user */
+	/* handling completion by guest kernel */
+	set_ti_status_flag(ti, TS_HOST_TO_GUEST_USER);
+
+	if (likely(!new_context)) {
+		/* MMU context (pid) will be the same */
+		/* and old contexts can be keeped */
+		clear_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID);
+	} else {
+		/* MMU context should be switched to flush TLB */
+		/* entries of guest kernel to disable access to kernel space */
+		set_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID);
+	}
+}
+
+static __always_inline void
+do_return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs,
+				restore_caller_t from)
 {
 	struct kvm_vcpu *vcpu = ti->vcpu;
 
+	/*
+	 * Ensure we set mode to IN_GUEST_MODE after we disable
+	 * interrupts and before the final VCPU requests check.
+	 * See the comment in kvm_vcpu_exiting_guest_mode() and
+	 * Documentation/virt/kvm/vcpu-requests.rst
+	 */
+	smp_store_mb(vcpu->mode, IN_GUEST_MODE);
+
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
+
+	if (unlikely(pv_vcpu_trap_in_fast_syscall(vcpu, regs))) {
+		/* it is host trap on fast system call handler of guest kernel */
+		/* or return from system call caused by guest kernel */
+		/* instead of unsuccessful fast system call */
+
+		/* in any case return should be to guest kernel, which */
+		/* should issue light hypercall to complete fast system call */
+		host_return_to_guest_kernel(ti);
+		if (from & FROM_PV_VCPU_MODE) {
+			/* return to guest kernel after completion of */
+			/* injected trap or system call instead of */
+			/* unsuccessful fast system call */
+			host_return_from_fast_syscall(vcpu, regs);
+		} else if (host_return_to_injected_guest_syscall(ti, regs) ||
+				host_return_to_injected_guest_trap(ti, regs)) {
+			/* return to injected trap/system call to handle its */
+			/* by guest kernel handler */
+			host_return_to_fast_syscall(vcpu, regs);
+		} else {
+			/* return to guest kernel after trap handling */
+			/* completion by host itself */
+			host_return_from_fast_syscall(vcpu, regs);
+		}
+	} else if (pv_vcpu_trap_in_user_mode(vcpu, regs)) {
+		/* trap/system call was on guest user and return */
+		/* to guest user to continue execution */
+		if (from & FROM_PV_VCPU_MODE) {
+			/* return to guest user after injected trap/system call */
+			/* handling completion by guest kernel */
+			/* or exec new user */
+			host_return_to_guest_user(ti, false);
+		} else if (host_return_to_injected_guest_syscall(ti, regs) ||
+				host_return_to_injected_guest_trap(ti, regs)) {
+			/* return to injected trap/system call to handle its */
+			/* by guest kernel handler */
+			/* MMU context should be keeped */
+			host_return_to_guest_kernel(ti);
+		} else {
+			/* return to guest user after trap handling completion */
+			/* by host */
+			/* MMU context can be keeped to do not flush TLB */
+			clear_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID);
+			host_return_to_guest_user(ti, true);
+		}
+	} else {
+		host_return_to_guest_kernel(ti);
+	}
+
+	/* switch host MMU to guest VCPU MMU context */
+	kvm_switch_to_guest_mmu_pid(vcpu, ti);
 
 	__guest_enter(ti, &vcpu->arch, DONT_AAU_CONTEXT_SWITCH);
 
-	/* switch host MMU to guest VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu);
-
 	/* from now the host process is at paravirtualized guest (VCPU) mode */
 	set_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE);
+}
+
+static __always_inline void
+pv_mmu_switch_to_fast_sys_call(struct kvm_vcpu *vcpu, thread_info_t *ti)
+{
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
+	mmu_reg_t gk_pptb = kvm_get_space_type_spt_gk_root(vcpu);
+
+	host_return_to_guest_kernel(ti);
+	sw_ctxt->in_fast_syscall = true;
+
+	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
+		pgd_t *pgd = (pgd_t *) __va(gk_pptb);
+		copy_user_pgd_to_kernel_root_pt(pgd);
+	} else {
+		NATIVE_WRITE_MMU_U_PPTB_REG(gk_pptb);
+	}
+}
+
+static __always_inline void
+pv_mmu_switch_from_fast_sys_call(struct kvm_vcpu *vcpu, thread_info_t *ti)
+{
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
+	mmu_reg_t u_pptb = kvm_get_space_type_spt_u_root(vcpu);
+
+	KVM_BUG_ON(!sw_ctxt->in_fast_syscall);
+	host_return_to_guest_user(ti, true);
+	sw_ctxt->in_fast_syscall = false;
+
+	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
+		pgd_t *pgd = (pgd_t *) __va(u_pptb);
+		copy_user_pgd_to_kernel_root_pt(pgd);
+	} else {
+		NATIVE_WRITE_MMU_U_PPTB_REG(u_pptb);
+	}
 }
 
 static __always_inline void
@@ -411,10 +607,6 @@ syscall_handler_trampoline_start(struct kvm_vcpu *vcpu, u64 sys_rval)
 	KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) <= 0);
 	KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) !=
 			atomic_read(&host_ctxt->signal.in_syscall));
-	/* FIXME: the follow checker is correct only without */
-	/* support of guest user signal handlers
-	KVM_BUG_ON(atomic_read(&host_ctxt->signal.traps_num) > 0);
-	 */
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 	ret = __get_user(in_sig_handler, &vcpu_ctxt->in_sig_handler);
@@ -443,6 +635,35 @@ syscall_handler_trampoline_start(struct kvm_vcpu *vcpu, u64 sys_rval)
 }
 
 static __always_inline void
+remove_skipped_signal_stack_frames(struct kvm_vcpu *vcpu, thread_info_t *ti,
+		pv_vcpu_ctxt_t *vcpu_ctxt, kvm_host_context_t *host_ctxt)
+{
+	if (unlikely(vcpu_ctxt->skip_frames == 0))
+		return;
+
+	ti->signal_stack.used -= vcpu_ctxt->skip_frames *
+					sizeof(struct signal_stack_context);
+	if (WARN_ON_ONCE((s64)ti->signal_stack.used < 0))
+		ti->signal_stack.used = 0;
+
+	KVM_BUG_ON(atomic_read(&host_ctxt->signal.traps_num) !=
+			atomic_read(&host_ctxt->signal.in_work));
+	if (vcpu_ctxt->skip_traps) {
+		atomic_sub(vcpu_ctxt->skip_traps, &host_ctxt->signal.traps_num);
+		atomic_sub(vcpu_ctxt->skip_traps, &host_ctxt->signal.in_work);
+		KVM_BUG_ON(atomic_read(&host_ctxt->signal.traps_num) < 0);
+	}
+
+	KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) !=
+			atomic_read(&host_ctxt->signal.in_syscall));
+	if (vcpu_ctxt->skip_syscalls) {
+		atomic_sub(vcpu_ctxt->skip_syscalls, &host_ctxt->signal.syscall_num);
+		atomic_sub(vcpu_ctxt->skip_syscalls, &host_ctxt->signal.in_syscall);
+		KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) < 0);
+	}
+}
+
+static __always_inline void
 syscall_handler_trampoline_finish(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 		pv_vcpu_ctxt_t *vcpu_ctxt, kvm_host_context_t *host_ctxt)
 {
@@ -451,10 +672,49 @@ syscall_handler_trampoline_finish(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 	KVM_BUG_ON(vcpu_ctxt->inject_from != FROM_PV_VCPU_SYSCALL_INJECT);
 	KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) !=
 				atomic_read(&host_ctxt->signal.in_syscall));
+	if (vcpu_ctxt->skip_frames > 0) {
+		/* there are a few signal frames to remove (after long jump) */
+		remove_skipped_signal_stack_frames(vcpu, current_thread_info(),
+						   vcpu_ctxt, host_ctxt);
+	}
 
 	/* emulate restore of guest VCPU PSR state after return from syscall */
 	kvm_emulate_guest_vcpu_psr_done(vcpu, vcpu_ctxt->guest_psr,
 					vcpu_ctxt->irq_under_upsr);
+}
+
+static __always_inline notrace void
+syscall_fork_handler_trampoline_start(struct kvm_vcpu *vcpu)
+{
+	struct signal_stack_context __user *context;
+	pv_vcpu_ctxt_t __user *vcpu_ctxt;
+	kvm_host_context_t *host_ctxt = &vcpu->arch.host_ctxt;
+	bool in_sig_handler;
+	unsigned long ts_flag;
+	int ret;
+
+	context = get_signal_stack();
+	vcpu_ctxt = &context->vcpu_ctxt;
+
+	KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) <= 0);
+	KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) !=
+			atomic_read(&host_ctxt->signal.in_syscall));
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret = __get_user(in_sig_handler, &vcpu_ctxt->in_sig_handler);
+	clear_ts_flag(ts_flag);
+	if (ret) {
+		user_exit();
+		do_exit(SIGKILL);
+	}
+	if (unlikely(in_sig_handler)) {
+		/* restore copy of global register of vcpu state pointer, */
+		/* which could be spoiled by guest user signal handler running */
+		HOST_VCPU_STATE_COPY_SWITCH_TO_GUEST(vcpu, current_thread_info());
+	}
+
+	atomic_dec(&host_ctxt->signal.syscall_num);
+	atomic_dec(&host_ctxt->signal.in_syscall);
 }
 
 extern long call_guest_ttable_entry(int sys_num,
@@ -887,30 +1147,6 @@ kvm_pv_is_vcpu_on_host_stacks(struct kvm_vcpu *vcpu)
 }
 
 static __always_inline bool
-pv_vcpu_syscall_in_user_mode(struct kvm_vcpu *vcpu)
-{
-	pt_regs_t *regs = current_thread_info()->pt_regs;
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
-	kvm_host_context_t *host_ctxt;
-
-	host_ctxt = &vcpu->arch.host_ctxt;
-	return !(test_gti_thread_flag(gti, GTIF_KERNEL_THREAD) ||
-			pv_vcpu_trap_on_guest_kernel(regs));
-}
-
-static __always_inline bool
-pv_vcpu_trap_in_user_mode(struct kvm_vcpu *vcpu)
-{
-	pt_regs_t *regs = current_thread_info()->pt_regs;
-	gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
-	kvm_host_context_t *host_ctxt;
-
-	host_ctxt = &vcpu->arch.host_ctxt;
-	return !(test_gti_thread_flag(gti, GTIF_KERNEL_THREAD) ||
-			pv_vcpu_trap_on_guest_kernel(regs));
-}
-
-static __always_inline bool
 kvm_inject_vcpu_exit(struct kvm_vcpu *vcpu)
 {
 	WARN_ON(vcpu->arch.vm_exit_wish);
@@ -934,10 +1170,63 @@ kvm_inject_guest_traps_wish(struct kvm_vcpu *vcpu, int trap_no)
 	vcpu->arch.trap_wish = true;
 }
 
+static __always_inline void
+kvm_clear_guest_traps_wish(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.trap_wish = false;
+}
+
+static __always_inline void
+kvm_inject_guest_coredump_wish(struct kvm_vcpu *vcpu)
+{
+	kvm_inject_guest_traps_wish(vcpu, core_dump_num);
+}
+
+static __always_inline void
+kvm_clear_guest_coredump_wish(struct kvm_vcpu *vcpu)
+{
+	kvm_clear_guest_traps_wish(vcpu);
+}
+
 static __always_inline bool
 kvm_is_need_inject_guest_traps(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.trap_wish;
+}
+
+static __always_inline bool
+kvm_is_need_inject_coredump(struct kvm_vcpu *vcpu,
+			    unsigned long upsr, unsigned long psr)
+{
+	if (likely(!kvm_test_request_to_coredump(vcpu)))
+		return false;
+
+	if (unlikely(kvm_is_need_inject_guest_traps(vcpu))) {
+		/* there is/are some other traps injected to guest, */
+		/* coredump trap assumes no other traps */
+		return false;
+	}
+	if (kvm_guest_vcpu_irqs_disabled(vcpu, upsr, psr)) {
+		/* guest IRQs disabled, coredump cannot be passed right now */
+		return false;
+	}
+	kvm_inject_guest_coredump_wish(vcpu);
+	return true;
+}
+
+static inline void init_pv_vcpu_intc_ctxt(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.from_pv_intc = false;
+
+	vcpu->arch.on_idle = false;
+	vcpu->arch.on_spinlock = false;
+	vcpu->arch.on_csd_lock = false;
+
+	vcpu->arch.virq_wish = false;
+	vcpu->arch.vm_exit_wish = false;
+	kvm_clear_guest_traps_wish(vcpu);
+	vcpu->arch.trap_mask_wish = 0;
+	vcpu->arch.on_virqs_handling = false;
 }
 
 static __always_inline bool
@@ -949,7 +1238,8 @@ kvm_try_inject_event_wish(struct kvm_vcpu *vcpu, struct thread_info *ti,
 	/* probably need inject VM exit to handle exit reason by QEMU */
 	need_inject |= kvm_is_need_inject_vcpu_exit(vcpu);
 
-	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) > 1) {
+	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) -
+			atomic_read(&vcpu->arch.host_ctxt.signal.in_work) > 1) {
 		/* there is (are) already traps to handle by guest */
 		/* FIXME: interrupts probavly can be added to guest TIRs, */
 		/* if guest did not yet read its */
@@ -959,6 +1249,10 @@ kvm_try_inject_event_wish(struct kvm_vcpu *vcpu, struct thread_info *ti,
 	need_inject |= kvm_is_need_inject_guest_traps(vcpu);
 	/* probably need inject virtual interrupts */
 	need_inject |= kvm_try_inject_direct_guest_virqs(vcpu, ti, upsr, psr);
+	if (!need_inject) {
+		/* probably need inject coredump trap to show VCPU state */
+		need_inject |= kvm_is_need_inject_coredump(vcpu, upsr, psr);
+	}
 
 out:
 	return need_inject;
@@ -967,7 +1261,7 @@ out:
 /* See at arch/include/asm/switch.h  the 'switch_flags' argument values */
 static  __always_inline __interrupt unsigned long
 switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
-			bool from_hypercall, unsigned switch_flags)
+		bool from_hypercall, unsigned switch_flags, long ret_value)
 {
 	struct kvm_hw_cpu_context *hw_ctxt = &vcpu->arch.hw_ctxt;
 	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
@@ -982,13 +1276,14 @@ switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
 	e2k_usd_lo_t usd_lo;
 	e2k_usd_hi_t usd_hi;
 	e2k_sbr_t sbr;
+	long now_ret;
 
 	if (from_hypercall) {
 		KVM_BUG_ON(!test_and_clear_ti_status_flag(ti,
 						TS_HOST_AT_VCPU_MODE));
 		__guest_exit(ti, &vcpu->arch, switch_flags);
 		/* return to hypervisor MMU context to emulate hw intercept */
-		kvm_switch_to_host_mmu_pid(thread_info_task(ti)->mm);
+		kvm_switch_to_host_mmu_pid(vcpu, thread_info_task(ti)->mm);
 	} else {
 		/* switch from interception emulation mode to host vcpu mode */
 		KVM_BUG_ON(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
@@ -1009,7 +1304,23 @@ switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
 		sw_ctxt->host_usd_hi = usd_hi;
 	}
 
+	if (from_hypercall) {
+		vcpu->mode = OUTSIDE_GUEST_MODE;
+
+		smp_wmb(); /* See the comment in kvm_vcpu_exiting_guest_mode() */
+	} else {
+		KVM_BUG_ON(vcpu->mode == IN_GUEST_MODE);
+	}
+
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
+
+	/*
+	 * Save the return value of hypercall to vcpu-guest,
+	 * this value should be return by vcpu-host to vcpu-guest
+	 * at launch VCPU
+	 */
+	now_ret = sw_ctxt->ret_value;
+	sw_ctxt->ret_value = ret_value;
 
 	cr0_lo = sw_ctxt->crs.cr0_lo;
 	cr0_hi = sw_ctxt->crs.cr0_hi;
@@ -1056,7 +1367,7 @@ switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
 	NATIVE_NV_WRITE_PSP_REG(psp_hi, psp_lo);
 	NATIVE_NV_WRITE_PCSP_REG(pcsp_hi, pcsp_lo);
 
-	return 0;
+	return now_ret;
 }
 
 /* See at arch/include/asm/switch.h  the 'switch_flags' argument values */
@@ -1143,10 +1454,11 @@ return_to_intc_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
 }
 
 static  __always_inline __interrupt unsigned long
-pv_vcpu_return_to_host(thread_info_t *ti, struct kvm_vcpu *vcpu)
+pv_vcpu_return_to_host(thread_info_t *ti, struct kvm_vcpu *vcpu, long ret_value)
 {
 	return switch_to_host_pv_vcpu_mode(ti, vcpu, true /* from hypercall */,
-				FULL_CONTEXT_SWITCH | USD_CONTEXT_SWITCH);
+				FULL_CONTEXT_SWITCH | USD_CONTEXT_SWITCH,
+				ret_value);
 }
 
 /*
@@ -1271,13 +1583,12 @@ save_guest_trap_aau_regs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 
 	trap = pt_regs_to_trap_regs(regs);
 	regs->trap = trap;
-	aau = pt_regs_to_aau_regs(regs);
-	regs->aau_context = aau;
-	aasr = aau->aasr;
+	aau = regs->aau_context;
+	aasr = regs->aasr;
 	kvm_set_guest_vcpu_aasr(vcpu, aasr);
-	kvm_set_guest_vcpu_aaldm(vcpu, aau->aaldm);
-	kvm_set_guest_vcpu_aaldv(vcpu, aau->aaldv);
-	if (AS(aasr).iab)
+	kvm_set_guest_vcpu_aaldm(vcpu, (aau) ? aau->aaldm : (e2k_aaldm_t) { .word = 0 });
+	kvm_set_guest_vcpu_aaldv(vcpu, (aau) ? aau->aaldv : (e2k_aaldv_t) { .word = 0 });
+	if (aasr.iab)
 		kvm_copy_to_guest_vcpu_aads(vcpu, aau->aads);
 	for (i = 0; i <= trap->nr_TIRs; i++) {
 		if (GET_AA_TIRS(trap->TIRs[i].TIR_hi.TIR_hi_reg)) {
@@ -1290,7 +1601,7 @@ save_guest_trap_aau_regs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 		kvm_set_guest_vcpu_aafstr_value(vcpu, aau->aafstr);
 	}
 
-	if (AS(aasr).iab) {
+	if (aasr.iab) {
 		/* get descriptors & auxiliary registers */
 		kvm_copy_to_guest_vcpu_aainds(vcpu, aau->aainds);
 		kvm_set_guest_vcpu_aaind_tags_value(vcpu, aau->aaind_tags);
@@ -1298,7 +1609,7 @@ save_guest_trap_aau_regs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 		kvm_set_guest_vcpu_aaincr_tags_value(vcpu, aau->aaincr_tags);
 	}
 
-	if (AS(aasr).stb) {
+	if (aasr.stb) {
 		/* get synchronous part of APB */
 		kvm_copy_to_guest_vcpu_aastis(vcpu, aau->aastis);
 		kvm_set_guest_vcpu_aasti_tags_value(vcpu, aau->aasti_tags);
@@ -1350,7 +1661,9 @@ save_guest_trap_cpu_regs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	kvm_set_guest_vcpu_CTPR3(vcpu, regs->ctpr3);
 	/* Cycles control registers */
 	kvm_set_guest_vcpu_LSR(vcpu, regs->lsr);
+	kvm_set_guest_vcpu_LSR1(vcpu, regs->lsr1);
 	kvm_set_guest_vcpu_ILCR(vcpu, regs->ilcr);
+	kvm_set_guest_vcpu_ILCR1(vcpu, regs->ilcr1);
 	/* set UPSR as before trap */
 	kvm_set_guest_vcpu_UPSR(vcpu, current_thread_info()->upsr);
 }
@@ -1423,7 +1736,7 @@ kvm_set_pv_vcpu_SBBP_TIRs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 		TIR_lo = kvm_get_vcpu_intc_TIR_lo(vcpu, TIR_no);
 		mask |= kvm_update_guest_vcpu_TIR(vcpu, TIR_no, TIR_hi, TIR_lo);
 	}
-	regs->traps_to_guest = mask;
+	regs->traps_to_guest |= mask;
 	kvm_clear_vcpu_intc_TIRs_num(vcpu);
 
 	kvm_copy_guest_vcpu_SBBP(vcpu, regs->trap->sbbp);
@@ -1514,6 +1827,8 @@ kvm_init_pv_vcpu_trap_handling(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	}
 	kvm_clear_vcpu_trap_cellar(vcpu);
 }
+
+extern void kvm_dump_shadow_u_pptb(struct kvm_vcpu *vcpu, const char *title);
 
 /*
  * The function updates PSP registers base/size/index/offset and
@@ -1623,5 +1938,34 @@ kvm_update_guest_chain_stack(hw_stack_area_t *new_pcs, long delta_ind)
 }
 #undef printk
 #undef panic
+
+#ifdef CONFIG_KVM_HW_VIRTUALIZATION
+extern void kvm_hv_update_guest_stacks_registers(struct kvm_vcpu *vcpu,
+						guest_hw_stack_t *stack_regs);
+extern void hv_vcpu_write_os_cu_hw_ctxt_to_registers(struct kvm_vcpu *vcpu,
+				const struct kvm_hw_cpu_context *hw_ctxt);
+extern int kvm_prepare_hv_vcpu_start_stacks(struct kvm_vcpu *vcpu);
+extern void init_hv_vcpu_intc_ctxt(struct kvm_vcpu *vcpu);
+extern void write_hw_ctxt_to_hv_vcpu_registers(struct kvm_vcpu *vcpu,
+				const struct kvm_hw_cpu_context *hw_ctxt,
+				const struct kvm_sw_cpu_context *sw_ctxt);
+extern void kvm_hv_setup_mmu_spt_context(struct kvm_vcpu *vcpu);
+extern void init_backup_hw_ctxt(struct kvm_vcpu *vcpu);
+#else
+static inline void kvm_hv_update_guest_stacks_registers(
+		struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs) { }
+static inline void hv_vcpu_write_os_cu_hw_ctxt_to_registers(struct kvm_vcpu *vcpu,
+		const struct kvm_hw_cpu_context *hw_ctxt) { }
+static inline int kvm_prepare_hv_vcpu_start_stacks(struct kvm_vcpu *vcpu)
+{
+	return -EOPNOTSUPP;
+}
+static inline void init_hv_vcpu_intc_ctxt(struct kvm_vcpu *vcpu) { }
+static inline void write_hw_ctxt_to_hv_vcpu_registers(struct kvm_vcpu *vcpu,
+				const struct kvm_hw_cpu_context *hw_ctxt,
+				const struct kvm_sw_cpu_context *sw_ctxt) { }
+static inline void kvm_hv_setup_mmu_spt_context(struct kvm_vcpu *vcpu) { }
+static inline void init_backup_hw_ctxt(struct kvm_vcpu *vcpu) { }
+#endif
 
 #endif	/* __KVM_E2K_CPU_H */

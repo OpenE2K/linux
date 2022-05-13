@@ -29,30 +29,30 @@
 
 
  /* software control endianess */
-#define __PEEK32(addr) __raw_readl((addr) + mmio750)
-#define __POKE32(addr, data) __raw_writel((data), (addr) + mmio750)
+#define __PEEK32(pvReg, addr) __raw_readl((addr) + pvReg)
+#define __POKE32(pvReg, addr, data) __raw_writel((data), (addr) + pvReg)
 
-#define PEEK8(addr) __raw_readb((addr) + mmio750)
-#define POKE8(addr, data) __raw_writeb((data), (addr) + mmio750)
+#define PEEK8(pvReg, addr) __raw_readb((addr) + pvReg)
+#define POKE8(pvReg, addr, data) __raw_writeb((data), (addr) + pvReg)
 
 /*#define DEBUG_REGS*/
 
 #ifdef DEBUG_REGS
-#define PEEK32(__offset)				\
+#define PEEK32(pvReg, __offset)				\
 ({							\
-	unsigned __val = __PEEK32(__offset);		\
+	unsigned __val = __PEEK32(pvReg, __offset);		\
 	printk(KERN_DEBUG"R: %x: %x: %s\t%s:%d\n",	\
 		(u32)(__offset), __val, # __offset,	\
 			__func__, __LINE__);		\
 	__val;						\
 })
 
-#define POKE32(__offset, __val)	do {			\
+#define POKE32(pvReg, __offset, __val)	do {			\
 	unsigned __val2 = __val;			\
 	printk(KERN_DEBUG"W: %x: %x: %s\t%s:%d\n",	\
 		(u32)(__offset), __val2, # __offset,	\
 		__func__, __LINE__);			\
-	__POKE32(__offset, __val2);			\
+	__POKE32(pvReg, __offset, __val2);			\
 } while (0)
 
 #else

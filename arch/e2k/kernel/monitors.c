@@ -85,25 +85,6 @@ struct monitors_events_range {
 	unsigned short end;
 };
 
-#define DDM0_EVENTS_RANGE_COUNT_V2	7
-#define DDM1_EVENTS_RANGE_COUNT_V2	7
-#define DIM_EVENTS_RANGE_COUNT_V2	9
-
-static struct monitors_events_range ddm0_monitors_events_list_v2[] = {
-	{0x00, 0x03}, {0x10, 0x16}, {0x20, 0x21}, {0x30, 0x3a}, {0x40, 0x46},
-	{0x48, 0x4f}, {0x70, 0x72}
-};
-
-static struct monitors_events_range ddm1_monitors_events_list_v2[] = {
-	{0x00, 0x02}, {0x10, 0x17}, {0x20, 0x21}, {0x30, 0x3a}, {0x40, 0x48},
-	{0x4a, 0x4f}, {0x70, 0x72}
-};
-
-static struct monitors_events_range dim_monitors_events_list_v2[] = {
-	{0x00, 0x0a}, {0x10, 0x1f}, {0x20, 0x26}, {0x30, 0x3c}, {0x40, 0x4a},
-	{0x50, 0x5a}, {0x60, 0x69}, {0x70, 0x74}, {0x7c, 0x7e}
-};
-
 #define DDM0_EVENTS_RANGE_COUNT_V3	7
 #define DDM1_EVENTS_RANGE_COUNT_V3	6
 #define DIM_EVENTS_RANGE_COUNT_V3	9
@@ -321,8 +302,7 @@ static DEFINE_RAW_SPINLOCK(ipccmonitors_lock);
 
 #define IOCCMONITORS_SETTINGS_STR_MAX_SIZE	16
 
-#define HAS_MACHINE_IOCCMONITORS				\
-	(IS_MACHINE_ES2 || IS_MACHINE_E2S || IS_MACHINE_E1CP)
+#define HAS_MACHINE_IOCCMONITORS		(IS_MACHINE_E2S || IS_MACHINE_E1CP)
 
 struct ioccmonitors_info {
 	unsigned short	event;
@@ -2416,9 +2396,6 @@ static const struct file_operations ioccmonitors_events_proc_fops = {
 static void monitors_init(void)
 {
 	switch (machine.native_iset_ver) {
-	case E2K_ISET_V2:
-		setup_monitors(2);
-		break;
 	case E2K_ISET_V3:
 	case E2K_ISET_V4:
 		setup_monitors(3);

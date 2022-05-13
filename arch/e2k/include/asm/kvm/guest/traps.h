@@ -40,6 +40,8 @@ extern int kvm_host_apply_psp_delta_to_signal_stack(unsigned long base,
 extern int kvm_host_apply_pcsp_delta_to_signal_stack(unsigned long base,
 			unsigned long size, unsigned long start,
 			unsigned long end, unsigned long delta);
+extern int kvm_host_apply_usd_delta_to_signal_stack(unsigned long top,
+					unsigned long delta, bool incr);
 
 static inline unsigned long
 kvm_mmio_page_fault(struct pt_regs *regs, trap_cellar_t *tcellar)
@@ -106,6 +108,16 @@ static inline int host_apply_pcsp_delta_to_signal_stack(unsigned long base,
 	}
 	return kvm_host_apply_pcsp_delta_to_signal_stack(base, size,
 							start, end, delta);
+}
+
+static inline int host_apply_usd_delta_to_signal_stack(unsigned long top,
+					unsigned long delta, bool incr)
+{
+	if (IS_HV_GM()) {
+		return native_host_apply_usd_delta_to_signal_stack(top, delta,
+								   incr);
+	}
+	return kvm_host_apply_usd_delta_to_signal_stack(top, delta, incr);
 }
 
 static inline void

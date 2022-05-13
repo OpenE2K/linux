@@ -78,7 +78,7 @@ do { \
 /*
  * store_release() - same as __smp_store_release but acts on device accesses too
  */
-#define store_release_v2 __smp_store_release
+#define store_release_v3 __smp_store_release
 #define store_release_v6(p, v) \
 do { \
 	__typeof__(*(p)) __sr6_v = (v); \
@@ -95,7 +95,7 @@ do { \
 	if (cpu_has(CPU_FEAT_ISET_V6)) \
 		store_release_v6((p), (v)); \
 	else \
-		store_release_v2((p), (v)); \
+		store_release_v3((p), (v)); \
 } while (0)
 
 #if CONFIG_CPU_ISET >= 6

@@ -17,9 +17,13 @@
 
 #include <asm/sic_regs.h>
 #include <asm/io_epic.h>
+#include <asm/epic.h>
 #include <asm/e2k-iommu.h>
 #include <asm/e2k_debug.h>
+
 #include <asm-l/swiotlb.h>
+#include <asm-l/epic.h>
+
 #include <trace/events/iommu.h>
 
 #undef	DEBUG_PASSTHROUGH_MODE
@@ -335,7 +339,7 @@ union iommu_cmd_c {
 	} __packed bits;
 };
 
-static u32 e2k_iommu_read(unsigned int node, int iommu, unsigned long addr)
+static u32 __attribute__ ((unused)) e2k_iommu_read(unsigned int node, int iommu, unsigned long addr)
 {
 	if (iommu) /* for embedded devices */
 		addr += E2K_IOMMU_EMBEDDED_OFFSET +
@@ -752,6 +756,8 @@ void e2k_iommu_error_interrupt(void)
 	int node = numa_node_id(), i;
 	char str[1024];
 
+	l_irq_enter();
+
 	if (node < 0)
 		node = 0;
 
@@ -774,11 +780,15 @@ void e2k_iommu_error_interrupt(void)
 
 	debug_dma_dump_mappings(NULL);
 
+	ack_epic_irq();
+	irq_exit();
+
 	if (iommu_panic_off)
 		pr_emerg("%s", str);
 	else
 		panic(str);
 }
+
 /*
  * This function checks if the driver got a valid device from the caller to
  * avoid dereferencing invalid pointers.
@@ -893,11 +903,55 @@ static char *e2k_iommu_cfg_for_device(char *str, bool disable)
 	return str;
 }
 
+#ifdef CONFIG_KVM_HOST_MODE
+/* Handle intercepted guest writes and reads */
+void e2k_iommu_guest_write_ctrl(u32 reg_value)
+{
+	if (reg_value & IOMMU_CTRL_ENAB)
+		DebugPT("e2k-iommu: guest enabled IOMMU support %s\n",
+			reg_value & IOMMU_CTRL_DEV_TABLE_EN ?
+			"with device table enabled: passthrough not supported" :
+			"with device table disabled: passthrough supported");
+}
+
+void e2k_iommu_flush_guest(struct kvm *kvm, u64 command)
+{
+	struct irq_remap_table *irt = kvm->arch.irt;
+	u32 edid = (u32) kvm->arch.vmid.nr | E2K_IOMMU_EDID_GUEST_MASK;
+	struct device *dev;
+	struct e2k_iommu *iommu;
+	union iommu_cmd_c reg;
+
+	dev = &irt->vfio_dev->dev;
+	iommu = dev_to_iommu(dev);
+
+	reg.raw = command;
+
+	if (!reg.bits.rs) {
+		pr_err("e2k-iommu: ignore guests's command without cmd_c.rs\n");
+		return;
+	}
+
+	switch (reg.bits.code) {
+	case FL_PTE:
+		e2k_iommu_flush(iommu, reg.bits.addr << IO_PAGE_SHIFT, edid,
+			FL_PTE);
+		break;
+	case FL_ALL:
+		e2k_iommu_flush(iommu, 0, edid, FL_ID);
+		break;
+	default:
+		pr_err("e2k-iommu: ignore unsupported guest's command %d\n",
+			reg.bits.code);
+		break;
+	}
+}
+
 void e2k_iommu_virt_enable(int node)
 {
 	unsigned int val;
 
-	DebugPT("e2k_iommu: enabling virtualization support (node %d)\n", node);
+	DebugPT("e2k-iommu: enabling virtualization support (node %d)\n", node);
 
 	val = e2k_iommu_read(node, 0, E2K_IOMMU_CTRL);
 	if (!(val & IOMMU_CTRL_GT_EN)) {
@@ -907,17 +961,7 @@ void e2k_iommu_virt_enable(int node)
 
 }
 
-/* Handle intercepted guest writes and reads */
-void e2k_iommu_guest_write_ctrl(u32 reg_value)
-{
-	if (reg_value & IOMMU_CTRL_ENAB)
-		DebugPT("e2k_iommu: guest enabled IOMMU support %s\n",
-			reg_value & IOMMU_CTRL_DEV_TABLE_EN ?
-			"with device table enabled: passthrough not supported" :
-			"with device table disabled: passthrough supported");
-}
-
-/* Enable second level of DMA translation */
+/* Enable second level of guest DMA translation */
 void e2k_iommu_setup_guest_2d_dte(struct kvm *kvm, u64 g_page_table)
 {
 	struct irq_remap_table *irt = kvm->arch.irt;
@@ -948,38 +992,35 @@ void e2k_iommu_setup_guest_2d_dte(struct kvm *kvm, u64 g_page_table)
 	e2k_iommu_flush_domain(domain);
 }
 
-void e2k_iommu_flush_guest(struct kvm *kvm, u64 command)
+/* Enable first level of guest DMA translation and interrupt translation */
+static int e2k_iommu_setup_guest_dte(struct device *dev, int node,
+		struct e2k_iommu_domain *domain, struct dte *dteval)
 {
-	struct irq_remap_table *irt = kvm->arch.irt;
-	u32 edid = (u32) kvm->arch.vmid.nr | E2K_IOMMU_EDID_GUEST_MASK;
-	struct device *dev;
-	struct e2k_iommu *iommu;
-	union iommu_cmd_c reg;
+	struct kvm *kvm = dev->archdata.kvm;
+	unsigned long int_table;
 
-	dev = &irt->vfio_dev->dev;
-	iommu = dev_to_iommu(dev);
+	/* Should be initialized in kvm_setup_passthrough() */
+	if (!kvm)
+		return -EINVAL;
 
-	reg.raw = command;
+	e2k_iommu_virt_enable(node);
 
-	if (!reg.bits.rs) {
-		pr_err("e2k_iommu: ignore guests's command without cmd_c.rs\n");
-		return;
-	}
+	domain->id = (unsigned int) kvm->arch.vmid.nr | E2K_IOMMU_EDID_GUEST_MASK;
 
-	switch (reg.bits.code) {
-	case FL_PTE:
-		e2k_iommu_flush(iommu, reg.bits.addr << IO_PAGE_SHIFT, edid,
-			FL_PTE);
-		break;
-	case FL_ALL:
-		e2k_iommu_flush(iommu, 0, edid, FL_ID);
-		break;
-	default:
-		pr_err("e2k_iommu: ignore unsupported guest's command %d\n",
-			reg.bits.code);
-		break;
-	}
+	int_table = __pa(page_address(kvm->arch.epic_pages));
+	dteval->int_table = int_table >> IO_PAGE_SHIFT;
+	dteval->id = kvm->arch.vmid.nr;
+	dteval->guest = 1;
+
+	return 0;
 }
+#else
+static int e2k_iommu_setup_guest_dte(struct device *dev, int node,
+		struct e2k_iommu_domain *domain, struct dte *dteval)
+{
+	return -EINVAL;
+}
+#endif
 
 #ifdef CONFIG_PM
 static int e2k_iommu_suspend(void)
@@ -1213,23 +1254,10 @@ static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 		d->pgtable = i->default_pgtable;
 
 		if (iommu_domain->type == IOMMU_DOMAIN_UNMANAGED) {
-			struct kvm *kvm = dev->archdata.kvm;
-			unsigned long int_table;
-			u32 edid;
-
-			/* Should be initialized in kvm_setup_passthrough() */
-			BUG_ON(!kvm);
-
-			int_table = __pa(page_address(kvm->arch.epic_pages));
-			edid = (u32) kvm->arch.vmid.nr |
-				E2K_IOMMU_EDID_GUEST_MASK;
-
-			e2k_iommu_virt_enable(i->node);
-			dteval.int_table = int_table >> IO_PAGE_SHIFT;
-			dteval.id = kvm->arch.vmid.nr;
-			dteval.guest = 1;
-
-			d->id = edid;
+			if (e2k_iommu_setup_guest_dte(dev, i->node, d, &dteval)) {
+				mutex_unlock(&d->mutex);
+				return -EINVAL;
+			}
 		} else {
 			d->id = iommu_group_id(dev->iommu_group);
 		}
@@ -1425,7 +1453,8 @@ static void e2k_iommu_get_resv_regions(struct device *dev,
 		return;
 	list_add_tail(&region->list, head);
 
-	iommu_dma_get_resv_regions(dev, head);
+	if (dev_iommu_fwspec_get(dev))
+		iommu_dma_get_resv_regions(dev, head);
 }
 
 static void e2k_iommu_put_resv_regions(struct device *dev,

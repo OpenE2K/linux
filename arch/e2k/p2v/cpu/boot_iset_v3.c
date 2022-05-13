@@ -20,3 +20,7 @@ void boot_rwd_v3(int reg, unsigned long value)
 	}
 }
 
+notrace unsigned long boot_native_read_IDR_reg_value()
+{
+	return NATIVE_READ_IDR_REG_VALUE();
+}

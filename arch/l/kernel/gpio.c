@@ -139,16 +139,12 @@ static int register_l_gpio_bound_devices(void)
 
 	int err = 0;
 
-	if (HAS_MACHINE_E2K_IOHUB) {
+	/* Only power button is available today: */
 #if IS_ENABLED(CONFIG_INPUT_LTC2954)
-		/* Only power button is available today: */
-
-		err = platform_device_register(&ltc2954_dev);
-		if (err < 0)
-			printk(KERN_ERR "failed to register "
-			       "ltc2954 device\n");
+	err = platform_device_register(&ltc2954_dev);
+	if (err < 0)
+		pr_err("failed to register ltc2954 device\n");
 #endif /* CONFIG_INPUT_LTC2954_BUTTON */
-	}
 
 	return err;
 }

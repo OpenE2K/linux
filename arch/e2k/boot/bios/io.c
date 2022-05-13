@@ -16,8 +16,6 @@
 
 #ifdef CONFIG_E2K_SIC
 
-#define es2_domain_pci_conf_base(domain) (ES2_PCICFG_AREA_PHYS_BASE + \
-		ES2_PCICFG_AREA_SIZE * ((unsigned long) domain))
 #define e2s_domain_pci_conf_base(domain) (E2S_PCICFG_AREA_PHYS_BASE + \
 		E2S_PCICFG_AREA_SIZE * ((unsigned long) domain))
 #define e8c_domain_pci_conf_base(domain) (E8C_PCICFG_AREA_PHYS_BASE + \
@@ -36,9 +34,7 @@ static inline unsigned long bios_get_domain_pci_conf_base(unsigned int domain)
 {
 	unsigned long conf_base;
 
-#if	defined(CONFIG_ES2)
-	conf_base = es2_domain_pci_conf_base(domain);
-#elif	defined(CONFIG_E2S)
+#if	defined(CONFIG_E2S)
 	conf_base = e2s_domain_pci_conf_base(domain);
 #elif	defined(CONFIG_E8C)
 	conf_base = e8c_domain_pci_conf_base(domain);
@@ -124,7 +120,7 @@ void bios_conf_outb(int domain, unsigned char bus, unsigned char byte,
 
 	DebugIO("conf_outb exited.\n");
 }
-void bios_ioh_e3s_outb(int domain, unsigned char bus, unsigned char byte,
+void bios_ioh_e2s_outb(int domain, unsigned char bus, unsigned char byte,
 				unsigned long port)
 {
 	unsigned long addr;
@@ -132,11 +128,11 @@ void bios_ioh_e3s_outb(int domain, unsigned char bus, unsigned char byte,
 	addr = IOHUB_SCRB_DOMAIN_START(domain);
 	addr += port;
 	NATIVE_WRITE_MAS_B(addr, byte, MAS_IOADDR);
-	DebugIOH("ioh_e3s_outb write 0x%x to domain %d bus 0x%x, port = 0x%x.\n",
+	DebugIOH("ioh_e2s_outb write 0x%x to domain %d bus 0x%x, port = 0x%x.\n",
 		byte, domain, bus, addr);
 }
 
-u8 bios_ioh_e3s_inb(int domain, unsigned char bus, unsigned long port)
+u8 bios_ioh_e2s_inb(int domain, unsigned char bus, unsigned long port)
 {
 	unsigned long addr;
 	u8 byte;
@@ -144,7 +140,7 @@ u8 bios_ioh_e3s_inb(int domain, unsigned char bus, unsigned long port)
 	addr = IOHUB_SCRB_DOMAIN_START(domain);
 	addr += port;
 	byte = NATIVE_READ_MAS_B(addr, MAS_IOADDR);
-	DebugIOH("bios_ioh_e3s_inb() read 0x%x from domain %d bus 0x%x, "
+	DebugIOH("bios_ioh_e2s_inb() read 0x%x from domain %d bus 0x%x, "
 		"port = 0x%x\n",
 		byte, domain, bus, addr);
 	return (byte);
@@ -174,7 +170,7 @@ void bios_conf_outw(int domain, unsigned char bus, u16 halfword,
 	DebugIO("conf_outw exited.\n");
 }
 
-void bios_ioh_e3s_outw(int domain, unsigned char bus, u16 halfword,
+void bios_ioh_e2s_outw(int domain, unsigned char bus, u16 halfword,
 			unsigned long port)
 {
 	unsigned long addr;
@@ -182,11 +178,11 @@ void bios_ioh_e3s_outw(int domain, unsigned char bus, u16 halfword,
 	addr = IOHUB_SCRB_DOMAIN_START(domain);
 	addr += port;
 	NATIVE_WRITE_MAS_H(addr, halfword, MAS_IOADDR);
-	DebugIOH("ioh_e3s_outw write 0x%x to domain %d bus 0x%x, port = 0x%x\n",
+	DebugIOH("ioh_e2s_outw write 0x%x to domain %d bus 0x%x, port = 0x%x\n",
 		halfword, domain, bus, addr);
 }
 
-u16 bios_ioh_e3s_inw(int domain, unsigned char bus, unsigned long port)
+u16 bios_ioh_e2s_inw(int domain, unsigned char bus, unsigned long port)
 {
 	unsigned long addr;
 	u16 halfword;
@@ -194,7 +190,7 @@ u16 bios_ioh_e3s_inw(int domain, unsigned char bus, unsigned long port)
 	addr = IOHUB_SCRB_DOMAIN_START(domain);
 	addr += port;
 	halfword = NATIVE_READ_MAS_B(addr, MAS_IOADDR);
-	DebugIOH("bios_ioh_e3s_inw() read 0x%x from domain %d bus 0x%x, "
+	DebugIOH("bios_ioh_e2s_inw() read 0x%x from domain %d bus 0x%x, "
 		"port = 0x%x\n",
 		halfword, domain, bus, addr);
 	return (halfword);
@@ -289,7 +285,7 @@ u32 bios_conf_inl(int domain, unsigned char bus, unsigned long port)
 	return word;
 }
 
-void bios_ioh_e3s_outl(int domain, unsigned char bus, u32 word,
+void bios_ioh_e2s_outl(int domain, unsigned char bus, u32 word,
 			unsigned long port)
 {
 	unsigned long addr;
@@ -297,11 +293,11 @@ void bios_ioh_e3s_outl(int domain, unsigned char bus, u32 word,
 	addr = IOHUB_SCRB_DOMAIN_START(domain);
 	addr += port;
 	NATIVE_WRITE_MAS_W(addr, word, MAS_IOADDR);
-	DebugIOH("ioh_e3s_outl write 0x%x to domain %d bus 0x%x, port = 0x%x\n",
+	DebugIOH("ioh_e2s_outl write 0x%x to domain %d bus 0x%x, port = 0x%x\n",
 		word, domain, bus, addr);
 }
 
-u32 bios_ioh_e3s_inl(int domain, unsigned char bus, unsigned long port)
+u32 bios_ioh_e2s_inl(int domain, unsigned char bus, unsigned long port)
 {
 	unsigned long addr;
 	u32 word;
@@ -309,7 +305,7 @@ u32 bios_ioh_e3s_inl(int domain, unsigned char bus, unsigned long port)
 	addr = IOHUB_SCRB_DOMAIN_START(domain);
 	addr += port;
 	word = NATIVE_READ_MAS_W(addr, MAS_IOADDR);
-	DebugIOH("bios_ioh_e3s_inl read 0x%x from domain %d bus 0x%x, "
+	DebugIOH("bios_ioh_e2s_inl read 0x%x from domain %d bus 0x%x, "
 		"port = 0x%x\n",
 		word, domain, bus, addr);
 	return (word);

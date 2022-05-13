@@ -1529,9 +1529,8 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 			}
 		}
+		return 0;
 #endif // CONFIG_MCST_SELF_TEST
-
-			return 0;
 	case MPVIO_SEND_INTR:
 	{
 		int current_out, reg_num;
@@ -1966,7 +1965,8 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 #endif
 		dbgmpv("%s() cmd=%d Beg refer_cnt =%u cycl= %lu\n",
 			__func__, cmd,
-			mpv_read_regl(mpv_st, 0x18), get_cycles());
+			mpv_read_regl(mpv_st, 0x18),
+			(long unsigned int)get_cycles());
 		dbgmpv("%s() cmd=%d Beg gen_period_reg[%d] \t0x%x =0x%x"
 				" mod=0x%x raw_intrv=0x%lld arg=0x%lld\n",
 			__func__, cmd, bus, mpv_st->gen_period_reg[bus],
@@ -2345,7 +2345,8 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		dbgmpv("%s() cmd=%d Beg refer_cnt =%u cycl= %lu\n",
 			__func__, cmd,
-			mpv_read_regl(mpv_st, 0x18), get_cycles());
+			mpv_read_regl(mpv_st, 0x18),
+			(long unsigned int)get_cycles());
 		dbgmpv("%s() cmd=%d Beg gen_period_reg[%d] \t0x%x =0x%x"
 				" mod=0x%x raw_intrv=0x%x arg=0x%x\n",
 			__func__, cmd, bus, mpv_st->gen_period_reg[bus],
@@ -2448,14 +2449,17 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			pr_err("MPVIO_SEND_ETHER %d > 3\n", ether_mode);
 			return -EINVAL;
 		}
-		if (ether_mode)
+		if (ether_mode) {
 			mpv_write_regl(mpv_st, mpv_st->gen_mode_reg,
 				(mpv_read_regl(mpv_st, mpv_st->gen_mode_reg) &
 					0x3f) | (bus << 6));
-		else
+			have_pps_mpv = 1;
+		} else {
 			mpv_write_regl(mpv_st, mpv_st->gen_mode_reg,
 				(mpv_read_regl(mpv_st, mpv_st->gen_mode_reg) &
 					0x3f) | (3 << 6));
+			have_pps_mpv = 0;
+		}
 		return 0;
 	}
 	case MPVIO_SET_TIMEOUT: {

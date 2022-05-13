@@ -274,8 +274,10 @@ static void serial8250_backup_timeout(struct timer_list *t)
 	 * Must disable interrupts or else we risk racing with the interrupt
 	 * based handler.
 	 */
-	if (up->port.irq)
-		ier = serial8250_clear_IER(up);
+	if (up->port.irq) {
+		ier = serial_in(up, UART_IER);
+		serial_out(up, UART_IER, 0);
+	}
 
 	iir = serial_in(up, UART_IIR);
 
@@ -298,7 +300,7 @@ static void serial8250_backup_timeout(struct timer_list *t)
 		serial8250_tx_chars(up);
 
 	if (up->port.irq)
-		serial8250_set_IER(up, ier);
+		serial_out(up, UART_IER, ier);
 
 	spin_unlock_irqrestore(&up->port.lock, flags);
 
@@ -492,9 +494,7 @@ static inline void serial8250_apply_quirks(struct uart_8250_port *up)
 
 static void __init serial8250_isa_init_ports(void)
 {
-#ifndef CONFIG_E2K
 	struct uart_8250_port *up;
-#endif
 	static int first = 1;
 	int i, irqflag = 0;
 
@@ -534,7 +534,6 @@ static void __init serial8250_isa_init_ports(void)
 	if (share_irqs)
 		irqflag = IRQF_SHARED;
 
-#ifndef CONFIG_E2K
 	for (i = 0, up = serial8250_ports;
 	     i < ARRAY_SIZE(old_serial_port) && i < nr_uarts;
 	     i++, up++) {
@@ -554,7 +553,6 @@ static void __init serial8250_isa_init_ports(void)
 		if (serial8250_isa_config != NULL)
 			serial8250_isa_config(i, &up->port, &up->capabilities);
 	}
-#endif
 }
 
 static void __init
@@ -579,14 +577,6 @@ serial8250_register_ports(struct uart_driver *drv, struct device *dev)
 }
 
 #ifdef CONFIG_SERIAL_8250_CONSOLE
-
-static void univ8250_console_write_atomic(struct console *co, const char *s,
-					  unsigned int count)
-{
-	struct uart_8250_port *up = &serial8250_ports[co->index];
-
-	serial8250_console_write_atomic(up, s, count);
-}
 
 static void univ8250_console_write(struct console *co, const char *s,
 				   unsigned int count)
@@ -672,24 +662,12 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
 }
 
 static struct console univ8250_console = {
-#ifdef CONFIG_E90S
-	/* mpkm support. weerf@mcst.ru */
-	.name		= "ttyM",
-#else
 	.name		= "ttyS",
-#endif
-	.write_atomic	= univ8250_console_write_atomic,
 	.write		= univ8250_console_write,
 	.device		= uart_console_device,
 	.setup		= univ8250_console_setup,
 	.match		= univ8250_console_match,
-#if defined(CONFIG_E2K) && defined(CONFIG_EARLY_DUMP_CONSOLE)
-	/* On E2K there is an early console which is set up by boot,
-	 * so remove CON_PRINTBUFFER. */
-	.flags		= CON_ANYTIME,
-#else
 	.flags		= CON_PRINTBUFFER | CON_ANYTIME,
-#endif
 	.index		= -1,
 	.data		= &serial8250_reg,
 };
@@ -713,9 +691,9 @@ console_initcall(univ8250_console_init);
 static struct uart_driver serial8250_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "serial",
-#ifdef CONFIG_E90S
+#ifdef CONFIG_MCST
 	.dev_name		= "ttyM",
-	.major			= 44,
+	.major			= MCST_AUX_TTY_MAJOR,
 	.minor			= 0,
 #else
 	.dev_name		= "ttyS",
@@ -1175,44 +1153,19 @@ void serial8250_unregister_port(int line)
 }
 EXPORT_SYMBOL(serial8250_unregister_port);
 
-#ifdef CONFIG_MCST
-void serial8250_get_reg(int *major , int *minor)
-{
-	*major = serial8250_reg.major;
-	*minor = serial8250_reg.minor;
-}
-EXPORT_SYMBOL(serial8250_get_reg);
-#endif
-
 static int __init serial8250_init(void)
 {
-#if defined(CONFIG_E2K) && defined(CONFIG_SERIAL_8250_CONSOLE)
-	static const char *dev_H = "ttyM";
-#endif
 	int ret;
 
 	if (nr_uarts == 0)
 		return -ENODEV;
-
-#if defined(CONFIG_E2K) && defined(CONFIG_SERIAL_8250_CONSOLE)
-	/*
-	 * mpkm support
-	 */
-
-	strcpy(univ8250_console.name, dev_H);
-
-	univ8250_console.name[strlen(dev_H)] = 0;
-	serial8250_reg.dev_name = dev_H;
-	serial8250_reg.major = 44;
-	serial8250_reg.minor = 0;
-#endif
 
 	serial8250_isa_init_ports();
 
 	pr_info("Serial: 8250/16550 driver, %d ports, IRQ sharing %sabled\n",
 		nr_uarts, share_irqs ? "en" : "dis");
 
-#if defined(CONFIG_SPARC) && !defined(CONFIG_E90S)
+#ifdef CONFIG_SERIAL_SUNCORE
 	ret = sunserial_register_minors(&serial8250_reg, UART_NR);
 #else
 	serial8250_reg.nr = UART_NR;
@@ -1248,7 +1201,7 @@ put_dev:
 unreg_pnp:
 	serial8250_pnp_exit();
 unreg_uart_drv:
-#if defined(CONFIG_SPARC) && !defined(CONFIG_E90S)
+#ifdef CONFIG_SERIAL_SUNCORE
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);
@@ -1273,7 +1226,7 @@ static void __exit serial8250_exit(void)
 
 	serial8250_pnp_exit();
 
-#if defined(CONFIG_SPARC) && !defined(CONFIG_E90S)
+#ifdef CONFIG_SERIAL_SUNCORE
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);
@@ -1299,7 +1252,11 @@ MODULE_PARM_DESC(skip_txen_test, "Skip checking for the TXEN bug at init time");
 module_param_hw_array(probe_rsa, ulong, ioport, &probe_rsa_count, 0444);
 MODULE_PARM_DESC(probe_rsa, "Probe I/O ports for RSA");
 #endif
+#ifdef CONFIG_MCST
+MODULE_ALIAS_CHARDEV_MAJOR(MCST_AUX_TTY_MAJOR);
+#else
 MODULE_ALIAS_CHARDEV_MAJOR(TTY_MAJOR);
+#endif
 
 #ifdef CONFIG_SERIAL_8250_DEPRECATED_OPTIONS
 #ifndef MODULE

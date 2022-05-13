@@ -106,7 +106,7 @@ extern swap_page_info_t* get_swap_info_from_page(struct page* page);
 extern void free_swap_info_struct(swap_page_info_t* info);
 
 #ifdef CONFIG_SOFTWARE_SWAP_TAGS
-extern inline void
+static inline void
 remove_swap_info_from_page(struct page* page) {
 	swap_page_info_t *info;
         do {
@@ -141,7 +141,7 @@ extern int do_tag_munmap(struct mm_struct *mm, e2k_addr_t data_addr,
  * Argument 'len' specifies saved area size in bytes, so it should be
  * quad-word * 8 multiple
  */
-extern inline int
+static inline int
 do_save_mem_area_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr, e2k_size_t len,
 	int copy_data, e2k_addr_t copy_addr)
 {
@@ -231,20 +231,20 @@ do_save_mem_area_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr, e2k_size_t len
 	return all_tags_is_numeric;
 }
 
-extern inline int
+static inline int
 save_mem_area_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr,
 	e2k_size_t len)
 {
 	return do_save_mem_area_tags(data_addr, tags_addr, len, 0, 0);
 }
 
-extern inline int
+static inline int
 save_mem_page_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr)
 {
 	return save_mem_area_tags(data_addr, tags_addr, PAGE_SIZE);
 }
 
-extern inline int
+static inline int
 save_mem_data_page_tags(struct mm_struct *mm, e2k_addr_t data_addr)
 {
 	e2k_addr_t tags_addr;
@@ -265,7 +265,7 @@ save_mem_data_page_tags(struct mm_struct *mm, e2k_addr_t data_addr)
  * Argument 'len' specifies restored area size in bytes, so it should be
  * quad-word * 8 multiple
  */
-extern inline void
+static inline void
 do_restore_mem_area_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr,
 	e2k_size_t len, int copy_data, e2k_addr_t copy_addr)
 {
@@ -331,20 +331,20 @@ do_restore_mem_area_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr,
 	DebugTM("finished with data addr 0x%px tag "
 		"addr 0x%px\n", data_area, tags_area);
 }
-extern inline void
+static inline void
 restore_mem_area_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr,
 	e2k_size_t len)
 {
 	do_restore_mem_area_tags(data_addr, tags_addr, len, 0, 0);
 }
 
-extern inline void
+static inline void
 restore_mem_page_tags(e2k_addr_t data_addr, e2k_addr_t tags_addr)
 {
 	restore_mem_area_tags(data_addr, tags_addr, PAGE_SIZE);
 }
 
-extern inline int
+static inline int
 restore_mem_data_page_tags(struct mm_struct *mm, e2k_addr_t data_addr)
 {
 	e2k_addr_t tags_addr;
@@ -363,13 +363,13 @@ extern int save_swapped_page_tags(struct mm_struct *mm,
 extern int restore_swapped_page_tags(struct mm_struct *mm,
 		struct page *swapped_page, e2k_addr_t data_addr);
 
-extern inline int
+static inline int
 save_swapped_page_tags2(swap_page_info_t* info, struct page* page) {
 	return save_swapped_page_tags(info->mm, page, info->addr);
 }
 
 #ifdef CONFIG_SOFTWARE_SWAP_TAGS
-extern inline int
+static inline int
 save_swapped_page_tags_from_page(struct page* page) {
 	int ret = 0;
 	swap_page_info_t* info;

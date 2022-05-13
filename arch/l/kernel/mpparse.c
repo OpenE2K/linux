@@ -53,7 +53,7 @@ int __initdata max_node_iolinks = 1;
  */
 static mpc_config_iolink_t mp_iolinks[MAX_NUMIOLINKS];
 static int mp_iolinks_num = 0;
-static int mp_iohubs_num = 0;
+int mp_iohubs_num = 0;
 static int mp_rdmas_num = 0;
 
 mpc_config_timer_t mp_timers[MAX_MP_TIMERS];
@@ -581,7 +581,7 @@ MP_construct_default_iolinks(void)
 
 	printk("BOOT did not pass IOLINKs info, construct default table\n");
 #ifdef	__e2k__
-	if (!(HAS_MACHINE_E2K_IOHUB) || boot_info == NULL) {
+	if (!boot_info) {
 		/* only one IO controller (south bridge) PIIX4 */
 		/* on single node # 0 */
 		mp_iolink.mpc_type = MP_IOLINK;
@@ -638,29 +638,6 @@ MP_construct_default_iolinks(void)
 		mp_iolink.apicid = apicid;
 		iolinks_count ++;
 		MP_iolink_info(&mp_iolink);
-#ifdef	__e2k__
-		if (IS_MACHINE_ES2) {
-			/* there is second IO link on each node */
-			if (!early_iohub_online(node, 1))
-				continue;
-			if (iolinks_count >= max_iolinks)
-				break;
-			if (max_node_iolinks <= 1)
-				continue;
-			mp_iolink.link = 1;
-			mp_iolink.bus_min = 1;
-			mp_iolink.bus_max = 1;
-			if (nr_ioapics <= iolinks_count) {
-				apicid = MP_construct_dup_ioapic(node, 1);
-				MP_construct_dup_intsrc(apicid, node, 1);
-			} else {
-				apicid = mpc_ioapic_id(iolinks_count);
-			}
-			mp_iolink.apicid = apicid;
-			iolinks_count ++;
-			MP_iolink_info(&mp_iolink);
-		}
-#endif	/* __e2k__ */
 	}
 }
 
@@ -829,10 +806,9 @@ static inline void __init
 MP_construct_default_timer(void)
 {
 	mpc_config_timer_t mp_timer;
+
 #ifdef CONFIG_E2K
-	if (get_machine_id() != MACHINE_ID_ES2_DSP_LMS &&
-			get_machine_id() != MACHINE_ID_ES2_RU_LMS)
-		return;
+	return;
 #endif
 	mp_timer.mpc_type = MP_TIMER;
 	mp_timer.mpc_timertype = MP_LT_TYPE;

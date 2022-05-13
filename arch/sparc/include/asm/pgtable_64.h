@@ -471,7 +471,10 @@ static inline pte_t pte_mkclean(pte_t pte)
 #define pgprot_writecombine pgprot_writecombine
 static inline pgprot_t pgprot_writecombine(pgprot_t prot)
 {
-	unsigned long val = pgprot_val(prot);
+	unsigned long val;
+	if (e90s_get_cpu_type() <= E90S_CPU_R2000)
+		return prot;
+	val = pgprot_val(prot);
 	val &= ~(_PAGE_CP_4U | _PAGE_CV_4U);
 	val |= _PAGE_E90S_WC_4U;
 	return __pgprot(val);

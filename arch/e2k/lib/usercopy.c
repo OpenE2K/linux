@@ -267,7 +267,6 @@ EXPORT_SYMBOL(strnlen_user);
 noinline unsigned long raw_copy_from_user(void *_to,
 		const void __user *_from, unsigned long _size)
 {
-	int hwbug = cpu_has(CPU_HWBUG_UNALIGNED_LOADS);
 	const void __user *volatile from = _from;
 	void __user *volatile to = _to;
 	volatile unsigned long size = _size;
@@ -282,11 +281,6 @@ noinline unsigned long raw_copy_from_user(void *_to,
 		u32 tmp4;
 		u16 tmp2;
 		u8 tmp1;
-
-		if (hwbug) {
-			prefetch_nospec_range((void *) src, size);
-			E2K_WAIT(_ld_c);
-		}
 
 		if (unlikely(n < 16))
 			goto copy_tail;
@@ -322,13 +316,13 @@ noinline unsigned long raw_copy_from_user(void *_to,
 
 			if (likely(length)) {
 				SET_USR_PFAULT("$.recovery_memcpy_fault");
-				copied = fast_tagged_memory_copy((void *)dst,
-					(void *)src, length,
+				copied = fast_tagged_memory_copy_user((void *)dst,
+					(void *)src, length, &copied,
 					LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT |
 					MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 					LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT |
 					MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-					!hwbug);
+					true);
 				RESTORE_USR_PFAULT;
 			}
 
@@ -429,7 +423,6 @@ EXPORT_SYMBOL(raw_copy_from_user);
 noinline unsigned long raw_copy_in_user(void __user *_to,
 		const void __user *_from, unsigned long _size)
 {
-	int hwbug = cpu_has(CPU_HWBUG_UNALIGNED_LOADS);
 	const void __user *volatile from = _from;
 	void __user *volatile to = _to;
 	volatile unsigned long size = _size;
@@ -444,11 +437,6 @@ noinline unsigned long raw_copy_in_user(void __user *_to,
 		u32 tmp4;
 		u16 tmp2;
 		u8 tmp1;
-
-		if (hwbug) {
-			prefetch_nospec_range((void *) src, size);
-			E2K_WAIT(_ld_c);
-		}
 
 		if (unlikely(n < 16))
 			goto copy_tail;
@@ -493,13 +481,13 @@ noinline unsigned long raw_copy_in_user(void __user *_to,
 
 			if (likely(length)) {
 				SET_USR_PFAULT("$.recovery_memcpy_fault");
-				copied = fast_tagged_memory_copy((void *)dst,
-					(void *)src, length,
+				copied = fast_tagged_memory_copy_user((void *)dst,
+					(void *)src, length, &copied,
 					LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT |
 					MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 					LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT |
 					MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-					!hwbug);
+					true);
 				RESTORE_USR_PFAULT;
 			}
 
@@ -570,6 +558,90 @@ fallback:;
 }
 EXPORT_SYMBOL(raw_copy_in_user);
 
+/*
+ * All arguments must be aligned
+ */
+unsigned long copy_aligned_user_tagged_memory(void __user *to,
+			const void __user *from, size_t len, size_t *copiedp,
+			unsigned long strd_opcode, unsigned long ldrd_opcode,
+			bool prefetch)
+{
+	void *volatile dst = to;
+	const void *volatile src = from;
+	volatile unsigned long n = len;
+	size_t copied = 0;
+
+	if (unlikely(((long)dst & 0x7) || (n & 0x7))) {
+		pr_err("%s() dst %px or length %lx is not double-word "
+			"aligned\n",
+			__func__, dst, n);
+		return -EINVAL;
+	}
+
+	if (copiedp != NULL)
+		*copiedp = 0;
+
+	TRY_USR_PFAULT {
+		if (prefetch) {
+			prefetch_nospec_range((void *)from, n);
+			E2K_WAIT(_ld_c);
+		}
+
+		do {
+			size_t length = (n >= 2 * 8192) ? 8192 : (n & ~0x7UL);
+
+			copied = 0;
+			SET_USR_PFAULT("$.recovery_memcpy_fault");
+			copied = fast_tagged_memory_copy_user(dst, src, length,
+					copiedp, strd_opcode, ldrd_opcode, prefetch);
+			RESTORE_USR_PFAULT;
+
+			n -= copied;
+
+			src += copied;
+			dst += copied;
+			if (copiedp != NULL)
+				*copiedp = len - n;
+
+			if (unlikely(copied != length))
+				break;
+		} while (unlikely(n > 0));
+	} CATCH_USR_PFAULT {
+		if (copiedp != NULL)
+			*copiedp += (len - n);
+		return -EFAULT;
+	} END_USR_PFAULT
+
+	return n;
+}
+
+/*
+ * All arguments must be aligned
+ */
+unsigned long set_aligned_user_tagged_memory(void __user *addr,
+			unsigned long dw, unsigned long tag, size_t len,
+			size_t *clearedp, u64 strd_opcode)
+{
+	size_t cleared = 0;
+
+	if (unlikely(((long)addr & 0x7) || (len & 0x7))) {
+		pr_err("%s(): dst %px or length %lx is not double-word "
+			"aligned\n",
+			__func__, addr, len);
+		return -EINVAL;
+	}
+
+	TRY_USR_PFAULT {
+		SET_USR_PFAULT("$.recovery_memset_fault");
+		cleared = fast_tagged_memory_set_user(addr, dw, tag, len, clearedp,
+							strd_opcode);
+		RESTORE_USR_PFAULT;
+	} CATCH_USR_PFAULT {
+		return -EFAULT;
+	} END_USR_PFAULT
+
+	return len - cleared;
+}
 
 /*
  * All arguments must be aligned
@@ -577,7 +649,6 @@ EXPORT_SYMBOL(raw_copy_in_user);
 unsigned long __copy_user_with_tags(void *to, const void *from,
 				    unsigned long _n)
 {
-	int hwbug = cpu_has(CPU_HWBUG_UNALIGNED_LOADS);
 	void *volatile dst = to;
 	const void *volatile src = from;
 	volatile unsigned long n = _n;
@@ -589,22 +660,18 @@ unsigned long __copy_user_with_tags(void *to, const void *from,
 	}
 
 	TRY_USR_PFAULT {
-		if (hwbug) {
-			prefetch_nospec_range((void *) from, n);
-			E2K_WAIT(_ld_c);
-		}
-
 		do {
 			size_t length = (n >= 2 * 8192) ? 8192 : (n & ~0x7UL);
 			size_t copied;
 
 			SET_USR_PFAULT("$.recovery_memcpy_fault");
-			copied = fast_tagged_memory_copy(dst, src, length,
+			copied = fast_tagged_memory_copy_user(dst, src, length,
+				&copied,
 				TAGGED_MEM_STORE_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 				TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				!hwbug);
+				true);
 			RESTORE_USR_PFAULT;
 
 			n -= copied;
@@ -627,7 +694,7 @@ unsigned long __copy_user_with_tags(void *to, const void *from,
 unsigned long __fill_user_with_tags(void *to, unsigned long n,
 		unsigned long tag, unsigned long dw)
 {
-	unsigned long cleared;
+	size_t cleared;
 
 	if (unlikely(((long) to & 0x7) || (n & 0x7))) {
 		DebugUA(" clear_user_with_tags to=%px n=%ld\n", to, n);
@@ -635,7 +702,7 @@ unsigned long __fill_user_with_tags(void *to, unsigned long n,
 	}
 
 	SET_USR_PFAULT("$.recovery_memset_fault");
-	cleared = fast_tagged_memory_set(to, dw, tag, n,
+	cleared = fast_tagged_memory_set_user(to, dw, tag, n, &cleared,
 			TAGGED_MEM_STORE_REC_OPC |
 			MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT);
 	RESTORE_USR_PFAULT;

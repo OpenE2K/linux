@@ -5,7 +5,7 @@
 subdir-ccflags-y := -Werror -Wswitch -Wenum-compare
 
 obj-y	 := init.o fault.o mmap.o mmu.o memory.o ioremap.o pageattr.o \
-	    pgtable.o
+	    pgtable.o tlbflush.o
 
 obj-$(CONFIG_SOFTWARE_SWAP_TAGS) += tag_mem.o
 obj-$(CONFIG_SWAP) += page_io.o

@@ -10,6 +10,7 @@
 #include <linux/types.h>
 #include <linux/kvm_host.h>
 #include <asm/e2k_api.h>
+#include <asm/machdep.h>
 
 #include <asm/mmu_regs_types.h>
 #include <asm/mmu_regs_access.h>
@@ -21,8 +22,11 @@
 
 #ifndef __ASSEMBLY__
 
-#define	READ_VIRT_CTRL_MU_REG_VALUE()	NATIVE_GET_MMUREG(virt_ctrl_mu)
-#define	WRITE_VIRT_CTRL_MU_REG_VALUE(val) NATIVE_SET_MMUREG(virt_ctrl_mu, (val))
+#define	READ_VIRT_CTRL_MU_REG() \
+	((virt_ctrl_mu_t) { .word = NATIVE_GET_MMUREG(virt_ctrl_mu) })
+#define	WRITE_VIRT_CTRL_MU_REG_VALUE(v) NATIVE_SET_MMUREG(virt_ctrl_mu, (v))
+#define	WRITE_VIRT_CTRL_MU_REG(v) \
+	NATIVE_SET_MMUREG(virt_ctrl_mu, ((virt_ctrl_mu_t) (v)).word)
 
 #define	READ_G_W_IMASK_MMU_CR_REG_VALUE()	\
 		NATIVE_GET_MMUREG(g_w_imask_mmu_cr)
@@ -200,119 +204,100 @@ kvm_get_intc_info_mu_is_updated(struct kvm_vcpu *vcpu)
 #define	READ_SH_MMU_CR_REG_VALUE()	NATIVE_GET_MMUREG(sh_mmu_cr)
 #define	WRITE_SH_MMU_CR_REG_VALUE(val)	NATIVE_SET_MMUREG(sh_mmu_cr, (val))
 
-extern unsigned long read_VIRT_CTRL_MU_reg_value(void);
-extern void write_VIRT_CTRL_MU_reg_value(unsigned long value);
-extern unsigned long read_GID_reg_value(void);
-extern void write_GID_reg_value(unsigned long value);
-extern unsigned long read_GP_VPTB_reg_value(void);
-extern void write_GP_VPTB_reg_value(unsigned long value);
-extern unsigned long read_GP_PPTB_reg_value(void);
-extern void write_GP_PPTB_reg_value(unsigned long value);
-extern unsigned long read_SH_OS_PPTB_reg_value(void);
-extern void write_SH_OS_PPTB_reg_value(unsigned long value);
-extern unsigned long read_SH_OS_VPTB_reg_value(void);
-extern void write_SH_OS_VPTB_reg_value(unsigned long value);
-extern unsigned long read_SH_OS_VAB_reg_value(void);
-extern void write_SH_OS_VAB_reg_value(unsigned long value);
-extern unsigned long read_SH_PID_reg_value(void);
-extern void write_SH_PID_reg_value(unsigned long value);
-extern unsigned long read_SH_MMU_CR_reg_value(void);
-extern void write_SH_MMU_CR_reg_value(unsigned long value);
-extern unsigned long read_G_W_IMASK_MMU_CR_reg_value(void);
-extern void write_G_W_IMASK_MMU_CR_reg_value(unsigned long value);
-
+#ifdef CONFIG_VIRTUALIZATION
 static inline virt_ctrl_mu_t read_VIRT_CTRL_MU_reg(void)
 {
 	virt_ctrl_mu_t virt_ctrl;
 
-	virt_ctrl.VIRT_CTRL_MU_reg = read_VIRT_CTRL_MU_reg_value();
+	virt_ctrl.VIRT_CTRL_MU_reg = machine.host.read_VIRT_CTRL_MU();
 	return virt_ctrl;
 }
 static inline void write_VIRT_CTRL_MU_reg(virt_ctrl_mu_t virt_ctrl)
 {
-	write_VIRT_CTRL_MU_reg_value(virt_ctrl.VIRT_CTRL_MU_reg);
+	machine.host.write_VIRT_CTRL_MU(virt_ctrl.VIRT_CTRL_MU_reg);
 }
 
 static inline unsigned int read_GID_reg(void)
 {
-	return read_GID_reg_value();
+	return machine.host.read_GID();
 }
 static inline void write_GID_reg(unsigned int mmu_gid)
 {
-	write_GID_reg_value(MMU_GID(mmu_gid));
+	machine.host.write_GID(MMU_GID(mmu_gid));
 }
 
-static inline mmu_reg_t read_SH_MMU_CR_reg(void)
+static inline e2k_mmu_cr_t read_SH_MMU_CR_reg(void)
 {
-	return __mmu_reg(read_SH_MMU_CR_reg_value());
+	return (e2k_mmu_cr_t) { .word = machine.host.read_SH_MMU_CR() };
 }
-static inline void write_SH_MMU_CR_reg(mmu_reg_t mmu_cr)
+static inline void write_SH_MMU_CR_reg(e2k_mmu_cr_t mmu_cr)
 {
-	write_SH_MMU_CR_reg_value(mmu_reg_val(mmu_cr));
+	machine.host.write_SH_MMU_CR(AW(mmu_cr));
 }
 
-static inline mmu_reg_t read_G_W_IMASK_MMU_CR_reg(void)
+static inline e2k_mmu_cr_t read_G_W_IMASK_MMU_CR_reg(void)
 {
-	return __mmu_reg(read_G_W_IMASK_MMU_CR_reg_value());
+	return (e2k_mmu_cr_t) { .word = machine.host.read_G_W_IMASK_MMU_CR() };
 }
-static inline void write_G_W_IMASK_MMU_CR_reg(mmu_reg_t mmu_cr_mask)
+static inline void write_G_W_IMASK_MMU_CR_reg(e2k_mmu_cr_t mmu_cr_mask)
 {
-	write_G_W_IMASK_MMU_CR_reg_value(mmu_reg_val(mmu_cr_mask));
+	machine.host.write_G_W_IMASK_MMU_CR(AW(mmu_cr_mask));
 }
 
 static inline unsigned int read_SH_PID_reg(void)
 {
-	return read_SH_PID_reg_value();
+	return machine.host.read_SH_PID();
 }
 static inline void write_SH_PID_reg(unsigned int mmu_pid)
 {
-	write_SH_PID_reg_value(MMU_PID(mmu_pid));
+	machine.host.write_SH_PID(MMU_PID(mmu_pid));
 }
 
 static inline e2k_addr_t read_SH_OS_PPTB_reg(void)
 {
-	return read_SH_OS_PPTB_reg_value();
+	return machine.host.read_SH_OS_PPTB();
 }
 static inline void write_SH_OS_PPTB_reg(e2k_addr_t phys_addr)
 {
-	write_SH_OS_PPTB_reg_value(MMU_ADDR_TO_PPTB(phys_addr));
+	machine.host.write_SH_OS_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
 }
 
 static inline e2k_addr_t read_SH_OS_VPTB_reg(void)
 {
-	return read_SH_OS_VPTB_reg_value();
+	return machine.host.read_SH_OS_VPTB();
 }
 static inline void write_SH_OS_VPTB_reg(e2k_addr_t virt_addr)
 {
-	write_SH_OS_VPTB_reg_value(MMU_ADDR_TO_VPTB(virt_addr));
+	machine.host.write_SH_OS_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
 }
 
 static inline e2k_addr_t read_GP_PPTB_reg(void)
 {
-	return read_GP_PPTB_reg_value();
+	return machine.host.read_GP_PPTB();
 }
 static inline void write_GP_PPTB_reg(e2k_addr_t phys_addr)
 {
-	write_GP_PPTB_reg_value(MMU_ADDR_TO_PPTB(phys_addr));
+	machine.host.write_GP_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
 }
 
 static inline e2k_addr_t read_GP_VPTB_reg(void)
 {
-	return read_GP_VPTB_reg_value();
+	return machine.host.read_GP_VPTB();
 }
 static inline void write_GP_VPTB_reg(e2k_addr_t virt_addr)
 {
-	write_GP_VPTB_reg_value(MMU_ADDR_TO_VPTB(virt_addr));
+	machine.host.write_GP_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
 }
 
 static inline e2k_addr_t read_SH_OS_VAB_reg(void)
 {
-	return read_SH_OS_VAB_reg_value();
+	return machine.host.read_SH_OS_VAB();
 }
 static inline void write_SH_OS_VAB_reg(e2k_addr_t virt_addr)
 {
-	write_SH_OS_VAB_reg_value(MMU_ADDR_TO_VAB(virt_addr));
+	machine.host.write_SH_OS_VAB(MMU_ADDR_TO_VAB(virt_addr));
 }
+#endif /* CONFIG_VIRTUALIZATION */
 #endif /* ! __ASSEMBLY__ */
 
 #endif  /* _E2K_KVM_MMU_HV_REGS_ACCESS_H_ */

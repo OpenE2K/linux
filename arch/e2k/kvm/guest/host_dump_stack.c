@@ -201,12 +201,11 @@ void host_print_tc_record(const trap_cellar_t *tcellar, int num)
 		"                 chan  0x%x, se   0x%x, pm  0x%x\n"
 		"                 fault_type 0x%x:\n"
 		"                    intl_res_bits = %d MLT_trap     = %d\n"
-		"                    ph_pr_page	   = %d page_bound   = %d\n"
+		"                    ph_pr_page	   = %d global_sp    = %d\n"
 		"                    io_page       = %d isys_page    = %d\n"
 		"                    prot_page     = %d priv_page    = %d\n"
 		"                    illegal_page  = %d nwrite_page  = %d\n"
 		"                    page_miss     = %d ph_bound     = %d\n"
-		"                    global_sp     = %d\n"
 		"                 miss_lvl 0x%x, num_align 0x%x, empt    0x%x\n"
 		"                 clw      0x%x, rcv       0x%x  dst_rcv 0x%x\n",
 		num,
@@ -226,12 +225,11 @@ void host_print_tc_record(const trap_cellar_t *tcellar, int num)
 		(u32)AS(tcellar->condition).pm,
 		(u32)AS(tcellar->condition).fault_type,
 		(u32)AS(ftype).intl_res_bits,	(u32)(AS(ftype).exc_mem_lock),
-		(u32)AS(ftype).ph_pr_page,	(u32)AS(ftype).page_bound,
+		(u32)AS(ftype).ph_pr_page,	(u32)AS(ftype).global_sp,
 		(u32)AS(ftype).io_page,		(u32)AS(ftype).isys_page,
 		(u32)AS(ftype).prot_page,	(u32)AS(ftype).priv_page,
 		(u32)AS(ftype).illegal_page,	(u32)AS(ftype).nwrite_page,
 		(u32)AS(ftype).page_miss,	(u32)AS(ftype).ph_bound,
-		(u32)AS(ftype).global_sp,
 		(u32)AS(tcellar->condition).miss_lvl,
 		(u32)AS(tcellar->condition).num_align,
 		(u32)AS(tcellar->condition).empt,

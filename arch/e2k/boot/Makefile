@@ -30,39 +30,35 @@ KBUILD_AFLAGS += -DCONFIG_E2K_SIC
 
 FLAGS_EPIC_EIOH := -DCONFIG_BOOT_EPIC -DCONFIG_EIOH
 
-ifeq ($(CONFIG_ES2),y)
-	KBUILD_CFLAGS += -DCONFIG_ES2 -DCONFIG_E2K_FULL_SIC
-	KBUILD_AFLAGS += -DCONFIG_ES2 -DCONFIG_E2K_FULL_SIC
-else
- ifeq ($(CONFIG_E2S),y)
+ifeq ($(CONFIG_E2S),y)
 	KBUILD_CFLAGS += -DCONFIG_E2S -DCONFIG_E2K_FULL_SIC
 	KBUILD_AFLAGS += -DCONFIG_E2S -DCONFIG_E2K_FULL_SIC
- else
-  ifeq ($(CONFIG_E8C),y)
+else
+ ifeq ($(CONFIG_E8C),y)
 	KBUILD_CFLAGS += -DCONFIG_E8C \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2
 	KBUILD_AFLAGS += -DCONFIG_E8C \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2
-  else
-   ifeq ($(CONFIG_E1CP),y)
+ else
+  ifeq ($(CONFIG_E1CP),y)
 	KBUILD_CFLAGS += -DCONFIG_E1CP \
 			 -DCONFIG_E2K_LEGACY_SIC \
 			 -DCONFIG_L_IOH2
 	KBUILD_AFLAGS += -DCONFIG_E1CP \
 			 -DCONFIG_E2K_LEGACY_SIC \
 			 -DCONFIG_L_IOH2
-   else
-    ifeq ($(CONFIG_E8C2),y)
+  else
+   ifeq ($(CONFIG_E8C2),y)
 	KBUILD_CFLAGS += -DCONFIG_E8C2 \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2
 	KBUILD_AFLAGS += -DCONFIG_E8C2 \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2
-    else
-     ifeq ($(CONFIG_E12C),y)
+   else
+    ifeq ($(CONFIG_E12C),y)
 	KBUILD_CFLAGS += -DCONFIG_E12C \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2 \
@@ -71,8 +67,8 @@ else
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2 \
 			 $(FLAGS_EPIC_EIOH)
-     else
-      ifeq ($(CONFIG_E16C),y)
+    else
+     ifeq ($(CONFIG_E16C),y)
 	KBUILD_CFLAGS += -DCONFIG_E16C \
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2 \
@@ -81,8 +77,8 @@ else
 			 -DCONFIG_E2K_FULL_SIC \
 			 -DCONFIG_L_IOH2 \
 			 $(FLAGS_EPIC_EIOH)
-      else
-       ifeq ($(CONFIG_E2C3),y)
+     else
+      ifeq ($(CONFIG_E2C3),y)
 	 KBUILD_CFLAGS += -DCONFIG_E2C3 \
 			  -DCONFIG_E2K_FULL_SIC \
 			  -DCONFIG_L_IOH2 \
@@ -91,7 +87,6 @@ else
 			  -DCONFIG_E2K_FULL_SIC \
 			  -DCONFIG_L_IOH2 \
 			 $(FLAGS_EPIC_EIOH)
-       endif
       endif
      endif
     endif

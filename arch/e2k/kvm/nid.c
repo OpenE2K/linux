@@ -190,6 +190,15 @@ int kvm_nidmap_init(struct kvm_nid_table *nid_table,
 	return 0;
 }
 
+void kvm_nidmap_reset(struct kvm_nid_table *nid_table, int last_nid)
+{
+	DebugKVM("started\n");
+	raw_spin_lock_irq(&nid_table->nidmap_lock);
+	nid_table->last_nid = last_nid;
+	nidhash_init(nid_table);
+	raw_spin_unlock_irq(&nid_table->nidmap_lock);
+}
+
 static void nidmap_release(struct kvm_nid_table *nid_table)
 {
 	kvm_nidmap_t *map;

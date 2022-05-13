@@ -359,7 +359,7 @@
 435	common	clone3			__x64_sys_clone3/ptregs
 
 # MCST extentions
-400	common	el_posix		__x64_sys_el_posix
+500	common	el_posix		__x64_sys_el_posix
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

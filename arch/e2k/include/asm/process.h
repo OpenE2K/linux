@@ -398,6 +398,17 @@ static inline int is_privileged_range(e2k_addr_t start, e2k_addr_t end)
 
 extern	int do_update_vm_area_flags(e2k_addr_t start, e2k_size_t len,
 		vm_flags_t flags_to_set, vm_flags_t flags_to_clear);
+
+static inline e2k_cute_t *native_get_cut_entry_pointer(int cui)
+{
+	return (e2k_cute_t *) USER_CUT_AREA_BASE + cui;
+}
+
+static inline void native_put_cut_entry_pointer(struct page *page)
+{
+	/* nothing to do */
+}
+
 extern	int create_cut_entry(int tcount,
 			      unsigned long code_base, unsigned  code_sz,
 			      unsigned long glob_base, unsigned  glob_sz);
@@ -406,6 +417,8 @@ extern  int free_cut_entry(unsigned long glob_base, size_t glob_sz,
 extern	void  fill_cut_entry(e2k_cute_t *cute_p,
 		unsigned long code_base, unsigned  code_sz,
 		unsigned long glob_base, unsigned  glob_sz);
+
+extern void native_clean_pc_stack_zero_frame(void *addr, bool user);
 
 extern int alloc_user_hw_stacks(hw_stack_t *hw_stacks, size_t p_size, size_t pc_size);
 extern void free_user_hw_stacks(hw_stack_t *hw_stacks);
@@ -726,19 +739,6 @@ atomic_save_all_stacks_regs(e2k_stacks_t *stacks, e2k_cr1_hi_t *cr1_hi_p)
 				}					      \
 })
 
-typedef enum restore_caller {
-	FROM_SYSCALL_N_PROT = 1 << 1,
-	FROM_SYSCALL_PROT_8 = 1 << 2,
-	FROM_SYSCALL_PROT_10 = 1 << 3,
-	FROM_USER_TRAP = 1 << 4,
-	FROM_SIGRETURN = 1 << 5,
-	FROM_RET_FROM_FORK = 1 << 6,
-	FROM_MAKECONTEXT = 1 << 7,
-	FROM_RETURN_PV_VCPU_TRAP = 1 << 8,
-	FROM_PV_VCPU_SYSCALL = 1 << 10,
-	FROM_PV_VCPU_SYSFORK = 1 << 11,
-} restore_caller_t;
-
 #define	FROM_PV_VCPU_MODE	(FROM_RETURN_PV_VCPU_TRAP | \
 					FROM_PV_VCPU_SYSCALL | \
 						FROM_PV_VCPU_SYSFORK)
@@ -761,7 +761,10 @@ static inline bool host_is_at_HV_GM_mode(void)
 #define	clear_vm_thread_flags()		/* virtual machines is not supported */
 					/* nothing to clear */
 
-#define	GET_PARAVIRT_GUEST_MODE(pv_guest, regs)	/* nothing to do */
+#define	GET_PARAVIRT_GUEST_MODE(pv_guest, regs)				\
+({									\
+	(pv_guest) = false;						\
+})
 
 #define	UPDATE_VCPU_THREAD_CONTEXT(__task, __ti, __regs, __gti, __vcpu)	\
 		NATIVE_UPDATE_VCPU_THREAD_CONTEXT(__task, __ti, __regs, \
@@ -946,6 +949,22 @@ extern e2k_addr_t get_nested_kernel_IP(pt_regs_t *regs, int n);
 #define COND_GOTO_DONE_TO_PARAVIRT_GUEST(cond)
 
 #define	ONLY_SET_GUEST_GREGS(ti)	NATIVE_ONLY_SET_GUEST_GREGS(ti)
+
+static inline void
+clean_pc_stack_zero_frame(void *addr, bool user)
+{
+	native_clean_pc_stack_zero_frame(addr, user);
+}
+
+static inline e2k_cute_t *get_cut_entry_pointer(int cui, struct page **page)
+{
+	return native_get_cut_entry_pointer(cui);
+}
+
+static inline void put_cut_entry_pointer(struct page *page)
+{
+	native_put_cut_entry_pointer(page);
+}
 
 static inline void
 restore_wd_register_psize(e2k_wd_t wd_from)

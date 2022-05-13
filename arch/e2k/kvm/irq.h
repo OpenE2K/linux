@@ -229,7 +229,7 @@ kvm_try_inject_direct_guest_virqs(struct kvm_vcpu *vcpu, struct thread_info *ti,
 		return false;
 	}
 
-	BUG_ON(vcpu->arch.virq_wish);
+	WARN_ON(vcpu->arch.virq_wish);
 	vcpu->arch.virq_wish = true;
 	return true;
 }

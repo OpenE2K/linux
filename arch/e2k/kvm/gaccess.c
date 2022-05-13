@@ -103,8 +103,8 @@ static int kvm_vcpu_read_guest_phys_helper(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-void kvm_vcpu_inject_page_fault(struct kvm_vcpu *vcpu, void *addr,
-				   kvm_arch_exception_t *exception)
+static void kvm_vcpu_do_inject_page_fault(struct kvm_vcpu *vcpu, void *addr,
+			kvm_arch_exception_t *exception, bool copy_user)
 {
 	trap_cellar_t tcellar;
 	tc_cond_t cond;
@@ -129,6 +129,9 @@ void kvm_vcpu_inject_page_fault(struct kvm_vcpu *vcpu, void *addr,
 	AS(cond).fault_type = AW(ftype);
 	AS(cond).chan = 1;
 
+	/* should be after setting 'fault type' field */
+	cond = tc_set_as_kvm_injected(cond, copy_user);
+
 	tcellar.address = (e2k_addr_t)addr;
 	tcellar.condition = cond;
 	tcellar.data = 0;
@@ -136,6 +139,18 @@ void kvm_vcpu_inject_page_fault(struct kvm_vcpu *vcpu, void *addr,
 	kvm_inject_pv_vcpu_tc_entry(vcpu, &tcellar);
 	kvm_inject_data_page_exc_on_IP(vcpu, exception->ip);
 	kvm_inject_guest_traps_wish(vcpu, exc_data_page_num);
+}
+
+void kvm_vcpu_inject_page_fault(struct kvm_vcpu *vcpu, void *addr,
+				kvm_arch_exception_t *exception)
+{
+	kvm_vcpu_do_inject_page_fault(vcpu, addr, exception, false);
+}
+
+static void kvm_vcpu_inject_copy_user_page_fault(struct kvm_vcpu *vcpu, void *addr,
+			kvm_arch_exception_t *exception, bool copy_user)
+{
+	kvm_vcpu_do_inject_page_fault(vcpu, addr, exception, copy_user);
 }
 
 /* can be used for instruction fetching */
@@ -290,13 +305,15 @@ int kvm_vcpu_write_guest_system(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-long kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
-		void *addr, u64 val, u64 tag, size_t size, u64 strd_opcode)
+static long kvm_vcpu_do_set_guest_virt_system(struct kvm_vcpu *vcpu,
+		void *addr, u64 val, u64 tag, size_t size, size_t *cleared,
+		u64 strd_opcode, bool copy_user)
 {
 	size_t len = size;
 	long set = 0;
 	unsigned long memset_ret;
 	kvm_arch_exception_t exception;
+	long ret;
 
 	while (len) {
 		void *haddr;
@@ -308,42 +325,85 @@ long kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
 		if (kvm_is_error_hva(hva)) {
 			DebugKVM("failed to find GPA for dst %lx GVA, "
 				"inject page fault to guest\n", addr);
-			kvm_vcpu_inject_page_fault(vcpu, (void *)addr,
-						&exception);
-			return -EAGAIN;
+			kvm_vcpu_inject_copy_user_page_fault(vcpu, (void *)addr,
+						&exception, copy_user);
+			ret = -EAGAIN;
+			goto return_fault;
 		}
 
 		haddr = (void *)hva;
 		offset = hva & ~PAGE_MASK;
 		towrite = min(len, (unsigned)PAGE_SIZE - offset);
 
-		if (!access_ok(haddr, towrite))
-			return -EFAULT;
+		if (!access_ok(haddr, towrite)) {
+			ret = -EFAULT;
+			goto return_fault;
+		}
 		SET_USR_PFAULT("$.recovery_memset_fault");
 		memset_ret = recovery_memset_8(haddr, val, tag,
 						towrite, strd_opcode);
-		if (RESTORE_USR_PFAULT)
-			return -EFAULT;
+		if (RESTORE_USR_PFAULT) {
+			ret = -EFAULT;
+			goto return_fault;
+		}
 		if (memset_ret < towrite) {
 			pr_err("%s(): could not set data to guest virt "
 				"addr %px host addr %px, size 0x%lx, "
 				"error %ld\n", __func__, addr, haddr,
 				towrite, memset_ret);
-			return set;
+			goto return_cleared_bytes;
 		}
 
 		len -= towrite;
 		addr += towrite;
 		set += towrite;
 	}
+
+return_cleared_bytes:
+	if (cleared != NULL) {
+		if (unlikely(kvm_vcpu_copy_to_guest(vcpu, cleared, &set,
+							sizeof(*cleared)))) {
+			pr_err("%s(): copy number of cleared bytes to guest "
+				"failed\n", __func__);
+			return -EFAULT;
+		}
+	}
 	return set;
+
+return_fault:
+	if (cleared != NULL) {
+		if (unlikely(kvm_vcpu_copy_to_guest(vcpu, cleared, &set,
+							sizeof(*cleared)))) {
+			pr_err("%s(): copy number of cleared bytes to guest "
+				"failed\n", __func__);
+			return -EFAULT;
+		}
+	}
+	return ret;
+}
+
+long kvm_vcpu_set_guest_virt_system(struct kvm_vcpu *vcpu,
+		void *addr, u64 val, u64 tag, size_t size, size_t *cleared,
+		u64 strd_opcode)
+{
+	return kvm_vcpu_do_set_guest_virt_system(vcpu, addr, val, tag, size,
+				cleared, strd_opcode, false);
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_set_guest_virt_system);
 
+long kvm_vcpu_set_guest_user_virt_system(struct kvm_vcpu *vcpu,
+		void *addr, u64 val, u64 tag, size_t size, size_t *cleared,
+		u64 strd_opcode)
+{
+	return kvm_vcpu_do_set_guest_virt_system(vcpu, addr, val, tag, size,
+				cleared, strd_opcode, true);
+}
+
 static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
-			void __user *dst, const void __user *src, size_t size,
+			void __user *dst, const void __user *src,
+			size_t size, size_t *copied_p,
 			unsigned long strd_opcode, unsigned long ldrd_opcode,
-			int prefetch, int ALIGN)
+			int prefetch, int ALIGN, bool copy_user)
 {
 	size_t len = size;
 	long copied = 0;
@@ -354,6 +414,7 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 	bool is_dst_len = true, is_src_len = true;
 	unsigned long memcpy_ret;
 	kvm_arch_exception_t exception;
+	long ret;
 
 	/* src can be not aligned */
 	off = (u64)src & (ALIGN - 1);
@@ -377,9 +438,10 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 			if (kvm_is_error_hva(hva_dst)) {
 				DebugCOPY("failed to find GPA for dst %lx GVA,"
 					" inject page fault to guest\n", dst);
-				kvm_vcpu_inject_page_fault(vcpu, (void *)dst,
-								&exception);
-				return -EAGAIN;
+				kvm_vcpu_inject_copy_user_page_fault(vcpu,
+					(void *)dst, &exception, copy_user);
+				ret = -EAGAIN;
+				goto return_fault;
 			}
 
 			haddr_dst = (void *)hva_dst;
@@ -397,9 +459,10 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 			if (kvm_is_error_hva(hva_src)) {
 				DebugCOPY("failed to find GPA for dst %lx GVA,"
 					" inject page fault to guest\n", src);
-				kvm_vcpu_inject_page_fault(vcpu, (void *)src,
-								&exception);
-				return -EAGAIN;
+				kvm_vcpu_inject_copy_user_page_fault(vcpu,
+					(void *)src, &exception, copy_user);
+				ret = -EAGAIN;
+				goto return_fault;
 			}
 
 			haddr_src = (void *)hva_src;
@@ -415,8 +478,10 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 				 */
 				KVM_BUG_ON(to_dst < off);
 				ret = copy_in_user(haddr_dst, haddr_src, off);
-				if (ret)
-					return -EFAULT;
+				if (ret) {
+					ret = -EFAULT;
+					goto return_fault;
+				}
 				DebugCOPY("copy %d page off bytes from %px "
 					"to %px\n",
 					off, haddr_src, haddr_dst);
@@ -451,8 +516,6 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 		}
 
 		if (unlikely(to_src < ALIGN && tail != 0)) {
-			int ret;
-
 			/*
 			 * Current src address crosses the page boundaries
 			 * and the remaining' tail' bytes at the ending of the
@@ -461,8 +524,10 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 			KVM_BUG_ON(to_src != 0);
 			KVM_BUG_ON(to_dst < tail);
 			ret = copy_in_user(haddr_dst, haddr_src, tail);
-			if (ret)
-				return -EFAULT;
+			if (ret) {
+				ret = -EFAULT;
+				goto return_fault;
+			}
 			DebugCOPY("copy %d page tail bytes from %px to %px\n",
 				tail, haddr_src, haddr_dst);
 			len -= tail;
@@ -503,8 +568,10 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 			/* fast copy 'ALIGN'-bytes aligned and */
 			/* within one page dst and src areas */
 			if (!access_ok(haddr_dst, towrite) ||
-					!access_ok(haddr_src, towrite))
-				return -EFAULT;
+					!access_ok(haddr_src, towrite)) {
+				ret = -EFAULT;
+				goto return_fault;
+			}
 
 			if (trace_host_copy_hva_area_enabled())
 				trace_host_copy_hva_area(haddr_dst, haddr_src,
@@ -514,8 +581,10 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 			memcpy_ret = recovery_memcpy_8(haddr_dst, haddr_src,
 					towrite, strd_opcode, ldrd_opcode,
 					prefetch);
-			if (RESTORE_USR_PFAULT)
-				return -EFAULT;
+			if (RESTORE_USR_PFAULT) {
+				ret = -EFAULT;
+				goto return_fault;
+			}
 			if (trace_host_hva_area_line_enabled()) {
 				trace_host_hva_area((u64 *)haddr_src, memcpy_ret);
 				trace_host_hva_area((u64 *)haddr_dst, memcpy_ret);
@@ -527,7 +596,7 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 					"size 0x%x, error %ld\n",
 					__func__, dst, haddr_dst,
 					src, haddr_src, towrite, memcpy_ret);
-				return copied;
+				goto return_copied_bytes;
 			}
 
 			len -= towrite;
@@ -549,16 +618,37 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 	KVM_BUG_ON(src != src_arg + size);
 	KVM_BUG_ON(dst != dst_arg + size);
 
+return_copied_bytes:
+	if (copied_p != NULL) {
+		if (unlikely(kvm_vcpu_copy_to_guest(vcpu, copied_p, &copied,
+							sizeof(*copied_p)))) {
+			pr_err("%s(): copy number of copied bytes to guest "
+				"failed\n", __func__);
+			return -EFAULT;
+		}
+	}
 	return copied;
+
+return_fault:
+	if (copied_p != NULL) {
+		if (unlikely(kvm_vcpu_copy_to_guest(vcpu, copied_p, &copied,
+							sizeof(*copied_p)))) {
+			pr_err("%s(): copy number of copied bytes to guest "
+				"failed\n", __func__);
+			return -EFAULT;
+		}
+	}
+	return ret;
 }
 
 long kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
-		void __user *dst, const void __user *src, size_t size,
+		void __user *dst, const void __user *src,
+		size_t size, size_t *copied,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
 {
-	return copy_aligned_guest_virt_system(vcpu, dst, src, size,
-				strd_opcode, ldrd_opcode, prefetch, 8);
+	return copy_aligned_guest_virt_system(vcpu, dst, src, size, copied,
+				strd_opcode, ldrd_opcode, prefetch, 8, false);
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_virt_system);
 
@@ -567,10 +657,31 @@ long kvm_vcpu_copy_guest_virt_system_16(struct kvm_vcpu *vcpu,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
 {
-	return copy_aligned_guest_virt_system(vcpu, dst, src, size,
-				strd_opcode, ldrd_opcode, prefetch, 16);
+	return copy_aligned_guest_virt_system(vcpu, dst, src, size, NULL,
+				strd_opcode, ldrd_opcode, prefetch, 16, false);
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_virt_system_16);
+
+long kvm_vcpu_copy_guest_user_virt_system(struct kvm_vcpu *vcpu,
+		void __user *dst, const void __user *src,
+		size_t size, size_t *copied,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	return copy_aligned_guest_virt_system(vcpu, dst, src, size, copied,
+				strd_opcode, ldrd_opcode, prefetch, 8, true);
+}
+EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_user_virt_system);
+
+long kvm_vcpu_copy_guest_user_virt_system_16(struct kvm_vcpu *vcpu,
+		void __user *dst, const void __user *src, size_t size,
+		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		int prefetch)
+{
+	return copy_aligned_guest_virt_system(vcpu, dst, src, size, NULL,
+				strd_opcode, ldrd_opcode, prefetch, 16, true);
+}
+EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_user_virt_system_16);
 
 static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 		void *host, void __user *guest, size_t size, bool to_host,
@@ -841,21 +952,109 @@ int kvm_vcpu_copy_host_from_guest(struct kvm_vcpu *vcpu,
 unsigned long kvm_copy_in_user_with_tags(void __user *to,
 			const void __user *from, unsigned long n)
 {
-	int ret;
+	void __user *dst_addr, *src_addr;
+	unsigned long len, head, tail, quad;
+	long ret;
 
-	ret = kvm_vcpu_copy_guest_virt_system(current_thread_info()->vcpu,
-			to, (void __user *)from, n,
+	dst_addr = to;
+	src_addr = (void __user *)from;
+	len = n;
+
+	/* dst can be not quad aligned, but it must be aligned
+	 * when copying with tags */
+	head = (16 - ((unsigned long) dst_addr & 0xf)) & 0xf;
+	head = min(head, len);
+	ret = copy_aligned_guest_virt_system(current_thread_info()->vcpu,
+			dst_addr, src_addr, head, NULL,
 			TAGGED_MEM_STORE_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 			TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			true /* prefetch */);
-	if (likely(ret == n)) {
-		return 0;
-	} else {
-		/* copying failed or not all was copyed */
+			false /* prefetch */, 1, false);
+	if (ret < 0) {
+		if (ret != -EAGAIN) {
+			pr_err("%s(): head copying from %px to %px 0x%lx bytes "
+				"failed with error %ld\n",
+				__func__, src_addr, dst_addr, head, ret);
+		}
+		return ret;
+	} else if (ret != head) {
+		pr_err("%s(): head copying from %px to %px 0x%lx bytes failed, "
+			"only %ld bytes were copied\n",
+			__func__, src_addr, dst_addr, head, ret);
 		return ret;
 	}
+
+	dst_addr += head;
+	src_addr += head;
+	len -= head;
+
+	if (unlikely(len == 0))
+		goto out;
+	if (len < 16)
+		goto tail_copy;
+
+	/* now dst & size should be quad aligned */
+	KVM_BUG_ON(((u64)dst_addr & (16 - 1)) != 0);
+	tail = len & (16 - 1);
+	quad = len - tail;
+	if (unlikely(quad == 0))
+		goto tail_copy;
+
+	ret = copy_aligned_guest_virt_system(current_thread_info()->vcpu,
+			dst_addr, src_addr, quad, NULL,
+			TAGGED_MEM_STORE_REC_OPC |
+				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
+			TAGGED_MEM_LOAD_REC_OPC |
+				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
+			true /* prefetch */, 16, false);
+	if (ret < 0) {
+		if (ret != -EAGAIN) {
+			pr_err("%s(): aligned copying from %px to %px 0x%lx bytes "
+				"failed with error %ld\n",
+				__func__, src_addr, dst_addr, quad, ret);
+		}
+		return ret;
+	} else if (ret != quad) {
+		pr_err("%s(): aligned copying from %px to %px 0x%lx bytes failed, "
+			"only %ld bytes were copied\n",
+			__func__, src_addr, dst_addr, quad, ret);
+		return ret;
+	}
+
+	dst_addr += quad;
+	src_addr += quad;
+	len -= quad;
+
+tail_copy:
+	if (likely(len == 0))
+		goto out;
+
+	KVM_BUG_ON(len >= 16);
+
+	ret = copy_aligned_guest_virt_system(current_thread_info()->vcpu,
+			dst_addr, src_addr, len, NULL,
+			TAGGED_MEM_STORE_REC_OPC |
+				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
+			TAGGED_MEM_LOAD_REC_OPC |
+				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
+			false /* prefetch */, 1, false);
+	if (ret < 0) {
+		if (ret != -EAGAIN) {
+			pr_err("%s(): tail copying from %px to %px 0x%lx bytes "
+				"failed with error %ld\n",
+				__func__, src_addr, dst_addr, len, ret);
+		}
+		return ret;
+	} else if (ret != len) {
+		pr_err("%s(): tail copying from %px to %px 0x%lx bytes failed, "
+			"only %ld bytes were copied\n",
+			__func__, src_addr, dst_addr, len, ret);
+		return ret;
+	}
+
+out:
+	return 0;
 }
 
 unsigned long kvm_copy_to_user_with_tags(void *__user to,

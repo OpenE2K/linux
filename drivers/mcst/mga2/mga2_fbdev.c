@@ -754,14 +754,15 @@ static int mga2_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 
 	if (mga2_has_vram(mga2) || mga2_use_uncached(mga2)) {
 		phys_addr_t start = mo->node.start;
-		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+		vma->vm_page_prot = ttm_io_prot(TTM_PL_FLAG_WC,
+					vma->vm_page_prot);
 		if (mga2_use_uncached(mga2)) {
 			start = (phys_addr_t)mo->vaddr;
 			WARN(!IS_ENABLED(CONFIG_E90S), "FIXME:start\n");
 		}
 		ret = vm_iomap_memory(vma, start, vm_size);
 	} else {
-		ret = dma_mmap_wc(mga2->drm->dev, vma, mo->vaddr,
+		ret = dma_mmap_coherent(mga2->drm->dev, vma, mo->vaddr,
 					mo->dma_addr, vm_size);
 	}
 

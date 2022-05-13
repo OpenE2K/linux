@@ -60,6 +60,18 @@ kvm_pt_get_and_xchg_atomic(struct mm_struct *mm, unsigned long addr,
 }
 
 static inline pgprotval_t
+kvm_pt_get_and_xchg_relaxed(struct mm_struct *mm, unsigned long addr,
+			pgprotval_t newval, pgprot_t *pgprot)
+{
+	if (IS_HV_MMU_TDP()) {
+		return native_pt_get_and_xchg_relaxed(newval, &pgprot->pgprot);
+	} else {
+		return pgprot_val(kvm_pt_atomic_update(mm, addr, pgprot,
+				ATOMIC_GET_AND_XCHG, newval));
+	}
+}
+
+static inline pgprotval_t
 kvm_pt_clear_relaxed_atomic(pgprotval_t prot_mask, pgprot_t *pgprot)
 {
 	if (IS_HV_MMU_TDP()) {
@@ -109,6 +121,13 @@ pt_get_and_xchg_atomic(struct mm_struct *mm, unsigned long addr,
 				pgprotval_t newval, pgprot_t *pgprot)
 {
 	return kvm_pt_get_and_xchg_atomic(mm, addr, newval, pgprot);
+}
+
+static inline pgprotval_t
+pt_get_and_xchg_relaxed(struct mm_struct *mm, unsigned long addr,
+				pgprotval_t newval, pgprot_t *pgprot)
+{
+	return kvm_pt_get_and_xchg_relaxed(mm, addr, newval, pgprot);
 }
 
 static inline pgprotval_t

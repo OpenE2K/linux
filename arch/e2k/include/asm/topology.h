@@ -7,7 +7,6 @@
 #endif	/* CONFIG_NUMA */
 #include <asm/smp.h>
 #include <asm/e2k.h>
-#include <asm/es2.h>
 #include <asm/e2s.h>
 #include <asm/e8c.h>
 #include <asm/e1cp.h>

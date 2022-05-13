@@ -8,9 +8,9 @@
 #define MPV_KPI2_DEVID		0x8014
 #define MPV_KPI2A_DEVID		0x8025
 #define MPV4_DEVID		0x8023
-#define MPV_KPI2		1
+#define MPV_KPI2		1	/* DEVID=8014 2 irq lines */
 #define MPV_4			2
-#define MPV_KPI2A		3
+#define MPV_KPI2A		3	/* DEVID=8025 3 irq lines */
 
 #define MAX_MPV_INSTANCES	16
 

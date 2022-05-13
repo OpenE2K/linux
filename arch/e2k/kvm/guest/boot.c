@@ -113,10 +113,12 @@ void boot_kvm_setup_machine_id(bootblock_struct_t *bootblock)
 	boot_machine.guest.iset_ver = boot_machine.native_iset_ver;
 
 #ifdef	CONFIG_E2K_MACHINE
-	if (boot_guest_machine_id != boot_native_machine_id)
+	if ((boot_guest_machine_id & ~MACHINE_ID_SIMUL) !=
+			(boot_native_machine_id & ~MACHINE_ID_SIMUL))
 		BOOT_BUG("Guest kernel arch does not match QEMU parameter arch");
 
-	if (boot_native_machine_id != kvm_vcpu_host_machine_id())
+	if ((boot_native_machine_id & ~MACHINE_ID_SIMUL) !=
+			(kvm_vcpu_host_machine_id() & ~MACHINE_ID_SIMUL))
 		BOOT_BUG("Guest kernel arch does not match host arch");
 #else
 	boot_native_machine_id = kvm_vcpu_host_machine_id();
@@ -536,11 +538,11 @@ boot_kvm_map_needful_to_equal_virt_area(e2k_addr_t stack_top_addr)
 void boot_kvm_set_kernel_MMU_state_before(void)
 {
 	vcpu_gmmu_info_t gmmu_info;
-	mmu_reg_t mmu_cr = _MMU_CR_KERNEL;
 	int ret;
 
+	gmmu_info.mmu_cr = MMU_CR_KERNEL;
 	/* translation (TLB enable) will be turn ON later */
-	gmmu_info.mmu_cr = mmu_cr & ~_MMU_CR_TLB_EN;
+	gmmu_info.mmu_cr.tlb_en = 0;
 	gmmu_info.pid = MMU_KERNEL_CONTEXT;
 	gmmu_info.trap_cellar = (unsigned long)boot_kernel_trap_cellar;
 	DebugMMU("will set MMU_CR 0x%llx PID 0x%llx TRAP_CELLAR at %p\n",
@@ -807,8 +809,8 @@ boot_kvm_switch_to_virt(bool bsp, int cpuid,
 
 void __init boot_kvm_clear_bss(void)
 {
-	e2k_size_t		size;
-	unsigned long		*bss_p;
+	e2k_size_t	size;
+	unsigned long	*bss_p;
 
 	bss_p = (unsigned long *)(&__bss_start);
 	bss_p = boot_kvm_va_to_pa(bss_p);

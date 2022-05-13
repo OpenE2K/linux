@@ -26,59 +26,59 @@ typedef enum _DPMS_t {
 	crtDPMS_OFF = 0x3,
 } DPMS_t;
 
-#define setDAC(off) do {	\
-	unsigned __v = PEEK32(MISC_CTRL) & ~(1 << MISC_CTRL_DAC_POWER_LSB);\
-	POKE32(MISC_CTRL, __v | (off << MISC_CTRL_DAC_POWER_LSB));	\
+#define setDAC(pvReg, off) do {	\
+	unsigned __v = PEEK32(pvReg, MISC_CTRL) & ~(1 << MISC_CTRL_DAC_POWER_LSB);\
+	POKE32(pvReg, MISC_CTRL, __v | (off << MISC_CTRL_DAC_POWER_LSB));	\
 } while (0)
 
-void ddk750_setDPMS(DPMS_t);
+void ddk750_setDPMS(struct lynx_share *share, DPMS_t);
 
-unsigned int getPowerMode(void);
+unsigned int getPowerMode(struct lynx_share *share);
 
 /*
  * This function sets the current power mode
  */
-void setPowerMode(unsigned int powerMode);
+void setPowerMode(struct lynx_share *share, unsigned int powerMode);
 
 /*
  * This function sets current gate
  */
-void setCurrentGate(unsigned int gate);
+void setCurrentGate(struct lynx_share *share, unsigned int gate);
 
 /*
  * This function enable/disable the 2D engine.
  */
-void enable2DEngine(unsigned int enable);
+void enable2DEngine(struct lynx_share *share, unsigned int enable);
 
 /*
  * This function enable/disable the ZV Port
  */
-void enableZVPort(unsigned int enable);
+void enableZVPort(struct lynx_share *share, unsigned int enable);
 
 /*
  * This function enable/disable the DMA Engine
  */
-void enableDMA(unsigned int enable);
+void enableDMA(struct lynx_share *share, unsigned int enable);
 
 /*
  * This function enable/disable the GPIO Engine
  */
-void enableGPIO(unsigned int enable);
+void enableGPIO(struct lynx_share *share, unsigned int enable);
 
 /*
  * This function enable/disable the PWM Engine
  */
-void enablePWM(unsigned int enable);
+void enablePWM(struct lynx_share *share, unsigned int enable);
 
 /*
  * This function enable/disable the I2C Engine
  */
-void enableI2C(unsigned int enable);
+void enableI2C(struct lynx_share *share, unsigned int enable);
 
 /*
  * This function enable/disable the SSP.
  */
-void enableSSP(unsigned int enable);
+void enableSSP(struct lynx_share *share, unsigned int enable);
 
 
 #endif

@@ -195,46 +195,6 @@ EXPORT_SYMBOL(memset);
 
 
 #ifdef __HAVE_ARCH_MEMCPY
-static __always_inline void aligned_memcpy(char *__restrict dst,
-		const char *__restrict src, size_t n)
-{
-	int i;
-
-	if (IS_ALIGNED((unsigned long) src, 4) &&
-	    IS_ALIGNED((unsigned long) dst, 4)) {
-		u32 *dst32 = (u32 *) dst;
-		u32 *src32 = (u32 *) src;
-
-		for (i = 0; i < n / 4; i++)
-			dst32[i] = src32[i];
-
-		dst += n & ~0x3UL;
-		src += n & ~0x3UL;
-		for (i = 0; i < (n & 0x3); i++)
-			dst[i] = src[i];
-	} else if (IS_ALIGNED((unsigned long) src, 2) &&
-		   IS_ALIGNED((unsigned long) dst, 2)) {
-		u16 *dst16 = (u16 *) dst;
-		u16 *src16 = (u16 *) src;
-
-		for (i = 0; i < n / 2; i++)
-			dst16[i] = src16[i];
-
-		if (n & 1)
-			dst[n - 1] = src[n - 1];
-	} else {
-		for (i = 0; i < n; i++)
-			dst[i] = src[i];
-	}
-}
-
-
-#if !defined(CONFIG_BOOT_E2K)
-# define HAS_HWBUG_UNALIGNED_LOADS unlikely(cpu_has(CPU_HWBUG_UNALIGNED_LOADS))
-#else
-# define HAS_HWBUG_UNALIGNED_LOADS IS_ENABLED(CONFIG_CPU_ES2)
-#endif
-
 static __always_inline void smallest_memcpy(char *__restrict dst,
 		const char *__restrict src, size_t n)
 {
@@ -254,9 +214,8 @@ static __always_inline void smallest_memcpy(char *__restrict dst,
 		*(u8 *) (dst + n14) = *(u8 *) (src + n14);
 }
 
-void *__memcpy(void *dst, const void *src, size_t n)
+notrace_on_host void *__memcpy(void *dst, const void *src, size_t n)
 {
-	int hwbug = HAS_HWBUG_UNALIGNED_LOADS;
 	void *const orig_dst = dst;
 	unsigned long head, tail, head1, head3, head7,
 			tail8, tail12, tail14;
@@ -265,23 +224,6 @@ void *__memcpy(void *dst, const void *src, size_t n)
 	u16 head_val2, tail_val2;
 	u8 head_val1, tail_val1;
 	size_t length, orig_n = n;
-
-	if (hwbug) {
-		/*
-		 * bug 103351 comment 46 - try to avoid unaligned accesses
-		 */
-		if (!IS_ALIGNED((unsigned long) src, 8) ||
-		    !IS_ALIGNED((unsigned long) dst, 8)) {
-			/* can't use the optimized loop below */
-			aligned_memcpy(dst, src, n);
-
-			return orig_dst;
-		}
-
-		prefetch_nospec_range(src, n);
-
-		__E2K_WAIT(_ld_c);
-	}
 
 	if (unlikely(n < 16)) {
 		smallest_memcpy(dst, src, n);
@@ -329,7 +271,7 @@ void *__memcpy(void *dst, const void *src, size_t n)
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 				TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				!hwbug);
+				true);
 		}
 
 		src += length;
@@ -381,134 +323,6 @@ EXPORT_SYMBOL(memcpy);
 /* Kernel's decompressor and built-in boot do not use the code below,
  * so keep things simple with this #ifndef */
 # ifndef BOOT
-static void __memcpy_from_io_slow(void *__restrict dst,
-				 const volatile void *__restrict src, size_t n)
-{
-	unsigned long head, tail, head1, head2, head3, head4, head7, head8,
-			head15, head16, tail1, tail2, tail4, tail6;
-	u64 head_val8, head_val16_lo, head_val16_hi;
-	u32 head_val4, tail_val4;
-	u16 head_val2, tail_val2;
-	u8 head_val1, tail_val1;
-
-	if (unlikely(n < 32)) {
-		int i;
-
-		for (i = 0; i < n; i++) {
-			WRITE_ONCE(((u8 *) dst)[i],
-					READ_ONCE(((u8 *) src)[i]));
-			__E2K_WAIT(_st_c);
-		}
-
-		return;
-	}
-
-	/* Copy the head */
-
-	head = 32 - ((unsigned long) src & 0x1fUL);
-
-	head1 = (unsigned long) src & 1;	/* src & 1 == head & 1 */
-	head2 = head & 2;
-	head3 = head & 3;
-	head4 = head & 4;
-	head7 = head & 7;
-	head8 = head & 8;
-	head15 = head & 15;
-	head16 = head & 16;
-
-	if (head1) {
-		head_val1 = READ_ONCE(*(u8 *) src);
-		__E2K_WAIT(_ld_c);
-	}
-	if (head2) {
-		head_val2 = READ_ONCE(*(u16 *) (src + head1));
-		__E2K_WAIT(_ld_c);
-	}
-	if (head4) {
-		head_val4 = READ_ONCE(*(u32 *) (src + head3));
-		__E2K_WAIT(_ld_c);
-	}
-	if (head8) {
-		head_val8 = READ_ONCE(*(u64 *) (src + head7));
-		__E2K_WAIT(_ld_c);
-	}
-	if (head16) {
-		head_val16_lo = READ_ONCE(*(u64 *) (src + head15));
-		__E2K_WAIT(_ld_c);
-		head_val16_hi = READ_ONCE(*(u64 *) (src + head15 + 8));
-		__E2K_WAIT(_ld_c);
-	}
-
-	if (head1) {
-		WRITE_ONCE(*(u8 *) dst, head_val1);
-		__E2K_WAIT(_st_c);
-	}
-	if (head2) {
-		WRITE_ONCE(*(u16 *) (dst + head1), head_val2);
-		__E2K_WAIT(_st_c);
-	}
-	if (head4) {
-		WRITE_ONCE(*(u32 *) (dst + head3), head_val4);
-		__E2K_WAIT(_st_c);
-	}
-	if (head8) {
-		WRITE_ONCE(*(u64 *) (dst + head7), head_val8);
-		__E2K_WAIT(_st_c);
-	}
-	if (head16) {
-		WRITE_ONCE(*(u64 *) (dst + head15), head_val16_lo);
-		__E2K_WAIT(_st_c);
-		WRITE_ONCE(*(u64 *) (dst + head15 + 8), head_val16_hi);
-		__E2K_WAIT(_st_c);
-	}
-
-	dst += head & 0x1f;
-	src = PTR_ALIGN(src, 32);
-	n -= head & 0x1f;
-
-	while (n >= 8) {
-		WRITE_ONCE(*(u64 *) dst, READ_ONCE(*(u64 *) src));
-		__E2K_WAIT(_st_c);
-		n -= 8;
-		src += 8;
-		dst += 8;
-	}
-
-	/* Copy the tail */
-	tail = n;
-
-	tail1 = tail & 1;
-	tail2 = tail & 2;
-	tail4 = tail & 4;
-	tail6 = tail & 6;
-
-	if (tail4) {
-		tail_val4 = READ_ONCE(*(u32 *) src);
-		__E2K_WAIT(_ld_c);
-	}
-	if (tail2) {
-		tail_val2 = READ_ONCE(*(u16 *) (src + tail4));
-		__E2K_WAIT(_ld_c);
-	}
-	if (tail1) {
-		tail_val1 = READ_ONCE(*(u8 *) (src + tail6));
-		__E2K_WAIT(_ld_c);
-	}
-
-	if (tail4) {
-		WRITE_ONCE(*(u32 *) dst, tail_val4);
-		__E2K_WAIT(_st_c);
-	}
-	if (tail2) {
-		WRITE_ONCE(*(u16 *) (dst + tail4), tail_val2);
-		__E2K_WAIT(_st_c);
-	}
-	if (tail1) {
-		WRITE_ONCE(*(u8 *) (dst + tail6), tail_val1);
-		__E2K_WAIT(_st_c);
-	}
-}
-
 /*
  * __memcpy_fromio() - the same as __memcpy() but with ordered loads
  * and disabled prefetch. Also makes sure that loads from the same
@@ -523,11 +337,6 @@ void __memcpy_fromio(void *__restrict dst, const volatile void __iomem *__restri
 	u32 head_val4, tail_val4;
 	u16 head_val2, tail_val2;
 	u8 head_val1, tail_val1;
-
-	if (unlikely(cpu_has(CPU_HWBUG_PIO_READS))) {
-		__memcpy_from_io_slow(dst, src, n);
-		return;
-	}
 
 	if (unlikely(n < 32)) {
 		int i;
@@ -700,7 +509,6 @@ static __always_inline void smallest_memcpy_toio(volatile char *__restrict dst,
  */
 void __memcpy_toio(volatile void __iomem *__restrict dst, const void *__restrict src, size_t n)
 {
-	int hwbug = HAS_HWBUG_UNALIGNED_LOADS;
 	unsigned long head, tail, head1, head2, head3, head4, head7, head8,
 			tail1, tail2, tail4, tail6;
 	u64 tmp8;
@@ -712,11 +520,6 @@ void __memcpy_toio(volatile void __iomem *__restrict dst, const void *__restrict
 		smallest_memcpy_toio(dst, src, n);
 
 		return;
-	}
-
-	if (hwbug) {
-		prefetch_nospec_range(src, n);
-		__E2K_WAIT(_ld_c);
 	}
 
 	/* Copy the head */
@@ -762,7 +565,7 @@ void __memcpy_toio(volatile void __iomem *__restrict dst, const void *__restrict
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 				TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				!hwbug);
+				true);
 
 		src += length;
 		dst += length;
@@ -800,17 +603,10 @@ EXPORT_SYMBOL(__memcpy_toio);
  */
 void __tagged_memcpy_8(void *dst, const void *src, size_t n)
 {
-	int hwbug = HAS_HWBUG_UNALIGNED_LOADS;
-
 	WARN_ONCE(((unsigned long) dst & 0x7) || ((unsigned long) src & 0x7) ||
 			((unsigned long) n & 0x7),
 		"BUG: bad parameters in tagged_memcpy_8: %lx %lx %lx\n",
 		dst, src, n);
-
-	if (hwbug) {
-		prefetch_nospec_range(src, n);
-		__E2K_WAIT(_ld_c);
-	}
 
 	/* Both src and dst are 8-bytes aligned. */
 	for (;;) {
@@ -821,7 +617,7 @@ void __tagged_memcpy_8(void *dst, const void *src, size_t n)
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 				TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				!hwbug);
+				true);
 			n -= 8192;
 			src += 8192;
 			dst += 8192;
@@ -831,7 +627,7 @@ void __tagged_memcpy_8(void *dst, const void *src, size_t n)
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
 				TAGGED_MEM_LOAD_REC_OPC |
 				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				!hwbug);
+				true);
 			break;
 		}
 	};

@@ -1258,4 +1258,60 @@ xcall_dump_stack_chain:
         /* Has to be a non-v9 branch due to the large distance. */
         b               rtrap_xcall
          ldx            [%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
+
+#define E90S_R2000_PWRCTRL_REG_ADDR	0x38
+
+	.globl  __e90s_enter_c6
+	.type		__e90s_enter_c6,#function
+__e90s_enter_c6:
+	save	%sp, -128, %sp
+	wrpr    %g0, (PSTATE_PRIV|PSTATE_PEF), %pstate
+	flushw
+	stx	%i6, [%sp + STACK_BIAS + 0x70]
+	stx	%i7, [%sp + STACK_BIAS + 0x78]
+	rdpr	%tick, %g2
+	stx	%g2, [%sp + STACK_BIAS + 0x80]
+	rdpr	%wstate, %o5
+	stx	%o6, [%g6 + TI_KSP]
+	stb	%o5, [%g6 + TI_WSTATE]
+	rdpr	%cwp, %o5
+	stb	%o5, [%g6 + TI_CWP]
+
+	/* cpu will be in c3 state until all other cpus of the cluster have gone
+	 * in c6 too, then all cluster goes into c6. So we have to unmask irqs
+	 * in order to be woken up from c3. */
+	wrpr    %g0, (PSTATE_PRIV|PSTATE_PEF|PSTATE_IE), %pstate
+	wrpr		%g0, 0, %pil
+
+	set	6, %g1 /* C6 */
+	set	E90S_R2000_PWRCTRL_REG_ADDR, %g2
+	stxa	%g1, [%g2] ASI_DCU_CONTROL_REG
+	ret
+	 restore
+	.size		__e90s_enter_c6,.-__e90s_enter_c6
+
+	.globl  __e90s_exit_c6
+	.type		__e90s_exit_c6,#function
+__e90s_exit_c6:
+	TRAP_LOAD_THREAD_REG(%g6, %g1)
+	call	setup_trap_table
+	 nop
+	ldub	[%g6 + TI_CWP], %g1
+	wrpr	%g1, %cwp
+	ldx	[%g6 + TI_KSP], %o6
+	ldub	[%g6 + TI_WSTATE], %o5
+	ldub	[%g6 + TI_NEW_CHILD], %o7
+	wrpr	%o5, 0x0, %wstate
+	ldx	[%sp + STACK_BIAS + 0x70], %i6
+	ldx	[%sp + STACK_BIAS + 0x78], %i7
+	ldx	[%sp + STACK_BIAS + 0x80], %g2
+	wrpr	%g2, %tick
+	ldx	[%g6 + TI_TASK], %g4
+	LOAD_PER_CPU_BASE(%g5, %g6, %g1, %g2, %g3)
+
+	wrpr    %g0, (PSTATE_PRIV|PSTATE_PEF|PSTATE_IE), %pstate
+	ret
+	 restore
+	.size		__e90s_exit_c6,.-__e90s_exit_c6
+
 #endif /*CONFIG_E90S*/

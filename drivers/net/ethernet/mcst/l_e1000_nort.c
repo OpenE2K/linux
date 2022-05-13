@@ -23,6 +23,7 @@
 #include <linux/timecounter.h>		/* for IEEE 1588 */
 #include <linux/net_tstamp.h>		/* for IEEE 1588 */
 #include <linux/ptp_clock_kernel.h>	/* for IEEE 1588 */
+#include <linux/pps_kernel.h>		/* for IEEE 1588 */
 #include <linux/phy.h>
 #include <linux/irq.h>
 
@@ -293,7 +294,6 @@ MODULE_PARM_DESC(rx_copybreak, "copy breakpoint for copy-only-tiny-frames");
 
 
 /** TITLE: PHC stuff */
-
 /**
  * le1000_phc_adjfreq - adjust the frequency of the hardware clock
  * @ptp: ptp clock structure
@@ -1350,6 +1350,7 @@ static void napi_wq_worker(struct work_struct *work)
 {
 	napi_work_t *napi_work1 = container_of(work, napi_work_t, work);
 
+	set_thread_flag(TIF_NAPI_WORK);
 	netif_receive_skb_list(&napi_work1->napi_list);
 	clear_thread_flag(TIF_NAPI_WORK);
 	kfree((void *)work);
@@ -3411,7 +3412,8 @@ static int e1000_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor_id);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device_id);
 	if (vendor_id == PCI_VENDOR_ID_MCST_TMP &&
-	    device_id == PCI_DEVICE_ID_MCST_ETH) {
+	    device_id == PCI_DEVICE_ID_MCST_ETH &&
+		have_pps_mpv) {
 		ep->csr_1588 = ATME | TMCE;
 		ep->ptp_clock_info = le1000_ptp_clock_info;
 		ep->ptp_clock = ptp_clock_register(&ep->ptp_clock_info,

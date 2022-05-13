@@ -83,8 +83,6 @@ int hw_sm750_map(struct lynx_share *share, struct pci_dev *pdev)
 	share->accel.dprBase = share->pvReg + DE_BASE_ADDR_TYPE1;
 	share->accel.dpPortBase = share->pvReg + DE_PORT_ADDR_TYPE1;
 
-	ddk750_set_mmio(share->pvReg, share->devid, share->revid);
-
 	share->vidmem_start = pci_resource_start(pdev, 0);
 	/* don't use pdev_resource[x].end - resource[x].start to
 	 * calculate the resource size, its only the maximum available
@@ -119,7 +117,7 @@ int hw_sm750_inithw(struct lynx_share *share, struct pci_dev *pdev)
 	spec_share = container_of(share, struct sm750_share, share);
 	parm = &spec_share->state.initParm;
 	if (parm->chip_clk == 0)
-		parm->chip_clk = (getChipType() == SM750LE) ?
+		parm->chip_clk = (getChipType(share) == SM750LE) ?
 		    DEFAULT_SM750LE_CHIP_CLOCK : DEFAULT_SM750_CHIP_CLOCK;
 
 	if (parm->mem_clk == 0)
@@ -138,40 +136,41 @@ int hw_sm750_inithw(struct lynx_share *share, struct pci_dev *pdev)
 	Endian) into this register before programming any other register
 	on the chip.
 */
-		r = le32_to_cpu(PEEK32(HOST_CONTROL));
-		POKE32(HOST_CONTROL, ~0);
-		POKE32(HOST_CONTROL, r | (1<<HOST_CONTROL_BIG_ENDIANESS_LSB));
+		r = le32_to_cpu(PEEK32(share->pvReg, HOST_CONTROL));
+		POKE32(share->pvReg, HOST_CONTROL, ~0);
+		POKE32(share->pvReg, HOST_CONTROL,
+					r | (1<<HOST_CONTROL_BIG_ENDIANESS_LSB));
 	}
 #endif	/*__BIG_ENDIAN*/
 
-	ddk750_initHw((initchip_param_t *) & spec_share->state.initParm);
+	ddk750_initHw(share, ((initchip_param_t *) & spec_share->state.initParm));
 	/* for sm718, open pci burst */
 	if (share->devid == 0x718) {
-		POKE32(SYSTEM_CTRL,
-		       PEEK32(SYSTEM_CTRL) | (1 <<
+		POKE32(share->pvReg, SYSTEM_CTRL,
+		       PEEK32(share->pvReg, SYSTEM_CTRL) | (1 <<
 					      SYSTEM_CTRL_PCI_BURST_LSB));
 	}
 
 	/* sm750 use sii164, it can be setup with default value
 	 * by on power, so initDVIDisp can be skipped */
 
-	if (getChipType() != SM750LE) {
+	if (getChipType(share) != SM750LE) {
 		/* does user need CRT ? */
 		if (spec_share->state.nocrt) {
-			POKE32(MISC_CTRL,
-			       PEEK32(MISC_CTRL) |
+			POKE32(share->pvReg, MISC_CTRL,
+			       PEEK32(share->pvReg, MISC_CTRL) |
 			       (1 << MISC_CTRL_DAC_POWER_LSB));
 			/* shut off dpms */
-			POKE32(SYSTEM_CTRL,
-			       PEEK32(SYSTEM_CTRL) |
+			POKE32(share->pvReg, SYSTEM_CTRL,
+			       PEEK32(share->pvReg, SYSTEM_CTRL) |
 			       (3 << SYSTEM_CTRL_DPMS_LSB));
 		} else {
-			POKE32(MISC_CTRL,
-			       PEEK32(MISC_CTRL) &
+			POKE32(share->pvReg, MISC_CTRL,
+			       PEEK32(share->pvReg, MISC_CTRL) &
 			       (~(1 << MISC_CTRL_DAC_POWER_LSB)));
 			/* turn on dpms */
-			POKE32(SYSTEM_CTRL,
-			       PEEK32(SYSTEM_CTRL) &
+			POKE32(share->pvReg, SYSTEM_CTRL,
+			       PEEK32(share->pvReg, SYSTEM_CTRL) &
 			       (~(3 << SYSTEM_CTRL_DPMS_LSB)));
 		}
 
@@ -179,11 +178,11 @@ int hw_sm750_inithw(struct lynx_share *share, struct pci_dev *pdev)
 		case sm750_doubleTFT:
 		case sm750_24TFT:
 		case sm750_dualTFT:
-			POKE32(PANEL_DISPLAY_CTRL,
-			       PEEK32(PANEL_DISPLAY_CTRL) &
+			POKE32(share->pvReg, PANEL_DISPLAY_CTRL,
+			       PEEK32(share->pvReg, PANEL_DISPLAY_CTRL) &
 			       (~(3 << PANEL_DISPLAY_CTRL_TFT_DISP_LSB)));
-			POKE32(PANEL_DISPLAY_CTRL,
-			       PEEK32(PANEL_DISPLAY_CTRL) |
+			POKE32(share->pvReg, PANEL_DISPLAY_CTRL,
+			       PEEK32(share->pvReg, PANEL_DISPLAY_CTRL) |
 			       (spec_share->state.
 				pnltype <<
 				PANEL_DISPLAY_CTRL_TFT_DISP_LSB));
@@ -194,20 +193,20 @@ int hw_sm750_inithw(struct lynx_share *share, struct pci_dev *pdev)
 		/* Set up GPIO for software I2C to program DVI chip in the
 		   Xilinx SP605 board, in order to have video signal.
 		 */
-		swI2CInit(0, 1);
+		swI2CInit(share, 0, 1);
 
 
 		/* Customer may NOT use CH7301 DVI chip, which has to be
 		   initialized differently.
 		 */
-		if (swI2CReadReg(0xec, 0x4a) == 0x95) {
+		if (swI2CReadReg(share, 0xec, 0x4a) == 0x95) {
 			/* The following register values for CH7301 are from
 			   Chrontel app note and our experiment.
 			 */
 			inf_msg("yes, CH7301 DVI chip found\n");
-			swI2CWriteReg(0xec, 0x1d, 0x16);
-			swI2CWriteReg(0xec, 0x21, 0x9);
-			swI2CWriteReg(0xec, 0x49, 0xC0);
+			swI2CWriteReg(share, 0xec, 0x1d, 0x16);
+			swI2CWriteReg(share, 0xec, 0x21, 0x9);
+			swI2CWriteReg(share, 0xec, 0x49, 0xC0);
 			inf_msg("okay, CH7301 DVI chip setup done\n");
 		}
 	}
@@ -217,7 +216,7 @@ int hw_sm750_inithw(struct lynx_share *share, struct pci_dev *pdev)
 		hw_sm750_initAccel(share);
 	}
 
-	ddk750_initDVIDisp();
+	ddk750_initDVIDisp(share);
 
 	LEAVE(0);
 }
@@ -227,7 +226,7 @@ resource_size_t hw_sm750_getVMSize(struct lynx_share *share)
 {
 	resource_size_t ret;
 	ENTER();
-	ret = ddk750_getVMSize();
+	ret = ddk750_getVMSize(share);
 	LEAVE(ret);
 }
 
@@ -241,8 +240,9 @@ int hw_sm750_output_checkMode(struct lynxfb_output *output,
 }
 
 
-int hw_sm750_output_setMode(struct lynxfb_output *output,
-			    struct fb_var_screeninfo *var,
+int hw_sm750_output_setMode(struct lynx_share *share,
+			    struct lynxfb_output *output,
+				struct fb_var_screeninfo *var,
 			    struct fb_fix_screeninfo *fix)
 {
 	int ret;
@@ -254,7 +254,7 @@ int hw_sm750_output_setMode(struct lynxfb_output *output,
 	channel = *output->channel;
 
 
-	if (getChipType() != SM750LE) {
+	if (getChipType(share) != SM750LE) {
 		if (channel == sm750_primary) {
 			dbg_msg("primary channel\n");
 			if (output->paths & sm750_panel)
@@ -270,13 +270,13 @@ int hw_sm750_output_setMode(struct lynxfb_output *output,
 				dispSet |= do_CRT_SEC;
 
 		}
-		ddk750_setLogicalDispOut(dispSet);
+		ddk750_setLogicalDispOut(share, dispSet);
 	} else {
 		/* just open DISPLAY_CONTROL_750LE register bit 3:0 */
 		u32 reg;
-		reg = PEEK32(DISPLAY_CONTROL_750LE);
+		reg = PEEK32(share->pvReg, DISPLAY_CONTROL_750LE);
 		reg |= 0xf;
-		POKE32(DISPLAY_CONTROL_750LE, reg);
+		POKE32(share->pvReg, DISPLAY_CONTROL_750LE, reg);
 	}
 
 	dbg_msg("ddk setlogicdispout done\n");
@@ -319,7 +319,8 @@ int hw_sm750_crtc_checkMode(struct lynxfb_crtc *crtc,
 /*
    set the controller's mode for @crtc charged with @var and @fix parameters
    */
-int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
+int hw_sm750_crtc_setMode(struct lynx_share *share,
+				struct lynxfb_crtc *crtc,
 			  struct fb_var_screeninfo *var,
 			  struct fb_fix_screeninfo *fix)
 {
@@ -327,13 +328,9 @@ int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
 	u32 reg;
 	mode_parameter_t modparm;
 	clock_type_t clock;
-	struct lynx_share *share;
-	struct lynxfb_par *par;
 
 	ENTER();
 	ret = 0;
-	par = container_of(crtc, struct lynxfb_par, crtc);
-	share = par->share;
 
 	if (!share->accel_off) {
 		/* set 2d engine pixel format according to mode bpp */
@@ -381,7 +378,7 @@ int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
 		clock = SECONDARY_PLL;
 
 	dbg_msg("Request pixel clock = %lu\n", modparm.pixel_clock);
-	ret = ddk750_setModeTiming(&modparm, clock);
+	ret = ddk750_setModeTiming(share, &modparm, clock);
 	if (ret) {
 		err_msg("Set mode timing failed\n");
 		goto exit;
@@ -389,51 +386,51 @@ int hw_sm750_crtc_setMode(struct lynxfb_crtc *crtc,
 
 	if (crtc->channel != sm750_secondary) {
 		/* set pitch, offset , width, start address , etc... */
-		POKE32(PANEL_FB_ADDRESS,
+		POKE32(share->pvReg, PANEL_FB_ADDRESS,
 		       crtc->oScreen << PANEL_FB_ADDRESS_ADDRESS_LSB);
 		reg = var->xres * (var->bits_per_pixel >> 3);
 		/* crtc->channel is not equal to par->index on numeric, be aware of that */
 		reg = PADDING(crtc->line_pad, reg);
-		POKE32(PANEL_FB_WIDTH,
+		POKE32(share->pvReg, PANEL_FB_WIDTH,
 		       (reg << PANEL_FB_WIDTH_WIDTH_LSB) |
 		       (fix->line_length << PANEL_FB_WIDTH_OFFSET_LSB));
 
-		POKE32(PANEL_WINDOW_WIDTH,
+		POKE32(share->pvReg, PANEL_WINDOW_WIDTH,
 		       ((var->xres - 1) << PANEL_WINDOW_WIDTH_WIDTH_LSB) |
 		       (var->xoffset << PANEL_WINDOW_WIDTH_X_LSB));
 
-		POKE32(PANEL_WINDOW_HEIGHT, ((var->yres_virtual - 1) <<
+		POKE32(share->pvReg, PANEL_WINDOW_HEIGHT, ((var->yres_virtual - 1) <<
 				PANEL_WINDOW_HEIGHT_HEIGHT_LSB) |
 			(var->yoffset << PANEL_WINDOW_HEIGHT_Y_LSB));
 
-		POKE32(PANEL_PLANE_TL, 0);
+		POKE32(share->pvReg, PANEL_PLANE_TL, 0);
 
-		POKE32(PANEL_PLANE_BR,
+		POKE32(share->pvReg, PANEL_PLANE_BR,
 		       ((var->yres - 1) << PANEL_PLANE_BR_BOTTOM_LSB) |
 		       ((var->xres - 1) << PANEL_PLANE_BR_RIGHT_LSB));
 
 		/* set pixel format */
-		reg = PEEK32(PANEL_DISPLAY_CTRL);
-		POKE32(PANEL_DISPLAY_CTRL,
+		reg = PEEK32(share->pvReg, PANEL_DISPLAY_CTRL);
+		POKE32(share->pvReg, PANEL_DISPLAY_CTRL,
 		       (reg & (~(3 << PANEL_DISPLAY_CTRL_FORMAT_LSB))) |
 		       ((var->bits_per_pixel >> 4) <<
 			PANEL_DISPLAY_CTRL_FORMAT_LSB));
 	} else {
 		/* not implemented now */
-		POKE32(CRT_FB_ADDRESS, crtc->oScreen);
+		POKE32(share->pvReg, CRT_FB_ADDRESS, crtc->oScreen);
 		reg = var->xres * (var->bits_per_pixel >> 3);
 		/* crtc->channel is not equal to par->index on numeric, be aware of that */
 		reg = PADDING(crtc->line_pad, reg);
-		POKE32(CRT_FB_WIDTH,
+		POKE32(share->pvReg, CRT_FB_WIDTH,
 		       (reg << CRT_FB_WIDTH_WIDTH_LSB) |
 		       (fix->line_length << CRT_FB_WIDTH_OFFSET_LSB));
 
 		/* SET PIXEL FORMAT */
-		reg = PEEK32(CRT_DISPLAY_CTRL);
+		reg = PEEK32(share->pvReg, CRT_DISPLAY_CTRL);
 		reg |=
 		    (var->
 		     bits_per_pixel >> 4) << CRT_DISPLAY_CTRL_FORMAT_LSB;
-		POKE32(CRT_DISPLAY_CTRL, reg);
+		POKE32(share->pvReg, CRT_DISPLAY_CTRL, reg);
 	}
 
 
@@ -447,16 +444,17 @@ void hw_sm750_crtc_clear(struct lynxfb_crtc *crtc)
 	LEAVE();
 }
 
-int hw_sm750_setColReg(struct lynxfb_crtc *crtc, ushort index,
-		       ushort red, ushort green, ushort blue)
+int hw_sm750_setColReg(struct lynx_share *share, struct lynxfb_crtc *crtc,
+				ushort index, ushort red, ushort green, ushort blue)
 {
 	static unsigned int add[] = { PANEL_PALETTE_RAM, CRT_PALETTE_RAM };
-	POKE32(add[crtc->channel] + index * 4,
+	POKE32(share->pvReg, add[crtc->channel] + index * 4,
 	       (red << 16) | (green << 8) | blue);
 	return 0;
 }
 
-int hw_sm750le_setBLANK(struct lynxfb_output *output, int blank)
+int hw_sm750le_setBLANK(struct lynx_share *share,
+				struct lynxfb_output *output, int blank)
 {
 	int dpms, crtdb;
 	ENTER();
@@ -504,19 +502,20 @@ int hw_sm750le_setBLANK(struct lynxfb_output *output, int blank)
 	}
 
 	if (output->paths & sm750_crt) {
-		POKE32(CRT_DISPLAY_CTRL,
-		       (PEEK32(CRT_DISPLAY_CTRL) &
+		POKE32(share->pvReg, CRT_DISPLAY_CTRL,
+		       (PEEK32(share->pvReg, CRT_DISPLAY_CTRL) &
 		       (~(3 << CRT_DISPLAY_CTRL_DPMS_LSB))) | (dpms <<
 							      CRT_DISPLAY_CTRL_DPMS_LSB));
-		POKE32(CRT_DISPLAY_CTRL,
-		       (PEEK32(CRT_DISPLAY_CTRL) &
+		POKE32(share->pvReg, CRT_DISPLAY_CTRL,
+		       (PEEK32(share->pvReg, CRT_DISPLAY_CTRL) &
 		       (~(1 << CRT_DISPLAY_CTRL_BLANK_LSB))) | (crtdb <<
 							       CRT_DISPLAY_CTRL_BLANK_LSB));
 	}
 	LEAVE(0);
 }
 
-int hw_sm750_setBLANK(struct lynxfb_output *output, int blank)
+int hw_sm750_setBLANK(struct lynx_share *share,
+				struct lynxfb_output *output, int blank)
 {
 	unsigned int dpms, pps, crtdb;
 	ENTER();
@@ -571,18 +570,19 @@ int hw_sm750_setBLANK(struct lynxfb_output *output, int blank)
 	}
 
 	if (output->paths & sm750_crt) {
-		POKE32(SYSTEM_CTRL,
-		       (PEEK32(SYSTEM_CTRL) & (~(3 << SYSTEM_CTRL_DPMS_LSB)))
+		POKE32(share->pvReg, SYSTEM_CTRL,
+		       (PEEK32(share->pvReg, SYSTEM_CTRL) &
+						(~(3 << SYSTEM_CTRL_DPMS_LSB)))
 		       | (dpms << SYSTEM_CTRL_DPMS_LSB));
-		POKE32(CRT_DISPLAY_CTRL,
-		       (PEEK32(CRT_DISPLAY_CTRL) &
+		POKE32(share->pvReg, CRT_DISPLAY_CTRL,
+		       (PEEK32(share->pvReg, CRT_DISPLAY_CTRL) &
 		       (~(1 << CRT_DISPLAY_CTRL_BLANK_LSB)))
 		       | (crtdb << CRT_DISPLAY_CTRL_BLANK_LSB));
 	}
 
 	if (output->paths & sm750_panel) {
-		POKE32(PANEL_DISPLAY_CTRL,
-		       (PEEK32(PANEL_DISPLAY_CTRL) &
+		POKE32(share->pvReg, PANEL_DISPLAY_CTRL,
+		       (PEEK32(share->pvReg, PANEL_DISPLAY_CTRL) &
 		       (~(1 << PANEL_DISPLAY_CTRL_DATA_LSB)))
 		       | (pps << PANEL_DISPLAY_CTRL_DATA_LSB));
 	}
@@ -594,37 +594,37 @@ int hw_sm750_setBLANK(struct lynxfb_output *output, int blank)
 void hw_sm750_initAccel(struct lynx_share *share)
 {
 	u32 reg;
-	enable2DEngine(1);
+	enable2DEngine(share, 1);
 
-	if (getChipType() == SM750LE) {
-		reg = PEEK32(DE_STATE1);
+	if (getChipType(share) == SM750LE) {
+		reg = PEEK32(share->pvReg, DE_STATE1);
 		reg |= 1 << DE_STATE1_DE_ABORT_LSB;
-		POKE32(DE_STATE1, reg);
+		POKE32(share->pvReg, DE_STATE1, reg);
 
-		reg = PEEK32(DE_STATE1);
+		reg = PEEK32(share->pvReg, DE_STATE1);
 		reg &= ~(1 << DE_STATE1_DE_ABORT_LSB);
-		POKE32(DE_STATE1, reg);
+		POKE32(share->pvReg, DE_STATE1, reg);
 
 	} else {
 		/* engine reset */
-		reg = PEEK32(SYSTEM_CTRL);
+		reg = PEEK32(share->pvReg, SYSTEM_CTRL);
 		reg |= 1 << SYSTEM_CTRL_DE_ABORT_LSB;
-		POKE32(SYSTEM_CTRL, reg);
+		POKE32(share->pvReg, SYSTEM_CTRL, reg);
 
-		reg = PEEK32(SYSTEM_CTRL);
+		reg = PEEK32(share->pvReg, SYSTEM_CTRL);
 		reg &= ~(1 << SYSTEM_CTRL_DE_ABORT_LSB);
-		POKE32(SYSTEM_CTRL, reg);
+		POKE32(share->pvReg, SYSTEM_CTRL, reg);
 	}
 
 	/* call 2d init */
 	share->accel.de_init(&share->accel);
 }
 
-int hw_sm750le_deWait()
+int hw_sm750le_deWait(struct lynx_share *share)
 {
 	int i = 0x10000000;
 	while (i--) {
-		unsigned int dwVal = PEEK32(DE_STATE2);
+		unsigned int dwVal = PEEK32(share->pvReg, DE_STATE2);
 		if (((1 & (dwVal >> DE_STATE2_DE_STATUS_LSB)) ==
 		     DE_STATE2_DE_STATUS_IDLE)
 		    && ((1 & (dwVal >> DE_STATE2_DE_FIFO_LSB)) ==
@@ -639,11 +639,11 @@ int hw_sm750le_deWait()
 }
 
 
-int hw_sm750_deWait()
+int hw_sm750_deWait(struct lynx_share *share)
 {
 	int i = 0x10000000;
 	while (i--) {
-		unsigned int dwVal = PEEK32(SYSTEM_CTRL);
+		unsigned int dwVal = PEEK32(share->pvReg, SYSTEM_CTRL);
 		if (((1 & (dwVal >> SYSTEM_CTRL_DE_STATUS_LSB)) ==
 		     SYSTEM_CTRL_DE_STATUS_IDLE)
 		    && ((1 & (dwVal >> SYSTEM_CTRL_DE_FIFO_LSB)) ==
@@ -657,7 +657,8 @@ int hw_sm750_deWait()
 	return -1;
 }
 
-int hw_sm750_pan_display(struct lynxfb_crtc *crtc,
+int hw_sm750_pan_display(struct lynx_share *share,
+			struct lynxfb_crtc *crtc,
 			 const struct fb_var_screeninfo *var,
 			 const struct fb_info *info)
 {
@@ -671,13 +672,13 @@ int hw_sm750_pan_display(struct lynxfb_crtc *crtc,
 	    ((var->xoffset * var->bits_per_pixel) >> 3);
 	total += crtc->oScreen;
 	if (crtc->channel == sm750_primary) {
-		POKE32(PANEL_FB_ADDRESS,
-		       (PEEK32(PANEL_FB_ADDRESS) &
+		POKE32(share->pvReg, PANEL_FB_ADDRESS,
+		       (PEEK32(share->pvReg, PANEL_FB_ADDRESS) &
 		       (~(0x3ffffff << PANEL_FB_ADDRESS_ADDRESS_LSB))) |
 		       (total << PANEL_FB_ADDRESS_ADDRESS_LSB));
 	} else {
-		POKE32(CRT_FB_ADDRESS,
-		       (PEEK32(CRT_FB_ADDRESS) &
+		POKE32(share->pvReg, CRT_FB_ADDRESS,
+		       (PEEK32(share->pvReg, CRT_FB_ADDRESS) &
 		       (~(0x3ffffff << CRT_FB_ADDRESS_ADDRESS_LSB))) |
 		       (total << CRT_FB_ADDRESS_ADDRESS_LSB));
 	}

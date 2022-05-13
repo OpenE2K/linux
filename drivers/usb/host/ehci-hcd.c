@@ -6,6 +6,9 @@
  *
  * Copyright (c) 2000-2004 by David Brownell
  */
+#ifdef CONFIG_MCST
+#define DEBUG
+#endif
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/dmapool.h>

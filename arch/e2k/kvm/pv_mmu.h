@@ -15,7 +15,7 @@
  * from appropriate field at the structures
  */
 
-static inline mmu_reg_t read_pv_MMU_CR_reg(struct kvm_vcpu *vcpu)
+static inline e2k_mmu_cr_t read_pv_MMU_CR_reg(struct kvm_vcpu *vcpu)
 {
 	struct kvm_hw_cpu_context *hw_ctxt = &vcpu->arch.hw_ctxt;
 
@@ -23,7 +23,7 @@ static inline mmu_reg_t read_pv_MMU_CR_reg(struct kvm_vcpu *vcpu)
 }
 
 static inline void
-write_pv_MMU_CR_reg(struct kvm_vcpu *vcpu, mmu_reg_t value)
+write_pv_MMU_CR_reg(struct kvm_vcpu *vcpu, e2k_mmu_cr_t value)
 {
 }
 

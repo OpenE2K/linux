@@ -105,7 +105,7 @@ typedef enum spmc_sleep_state {
 typedef enum spmc_g_state {
 	SPMC_G0_STATE	= 0,	/* G0 */
 	SPMC_G1_STATE	= 1,	/* G1 */
-	SPMC_G2_state	= 2,	/* G2 */
+	SPMC_G2_STATE	= 2,	/* G2 */
 } spmc_g_state_t;
 
 typedef enum spmc_irq_map {

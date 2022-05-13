@@ -18,7 +18,6 @@
 #include <asm/bitops.h>
 #include <asm/mpspec.h>
 #include <asm/glob_regs.h>
-#include <asm/es2.h>
 #include <asm/e2s.h>
 #endif /* !ASSEMBLY */
 #endif /* CONFIG_L_LOCAL_APIC */

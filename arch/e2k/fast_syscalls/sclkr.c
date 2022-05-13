@@ -38,12 +38,13 @@ __section(".entry.text")
 notrace __interrupt
 u64 fast_syscall_read_sclkr(void)
 {
-	u64 sclkr, freq;
+	u64 sclkr;
+	u32 freq;
 	struct thread_info *const ti = READ_SCURRENT_REG();
 	e2k_sclkm1_t sclkm1;
 #ifdef DEBUG_SCLKR_FREQ
-	u64 this_prev_freq;
-	u64 *prev_freq_ptr;
+	u32 this_prev_freq;
+	u32 *prev_freq_ptr;
 
 	prev_freq_ptr = &per_cpu(prev_freq, ti->cpu);
 	this_prev_freq = *prev_freq_ptr;
@@ -62,5 +63,5 @@ u64 fast_syscall_read_sclkr(void)
 	*prev_freq_ptr = freq;
 #endif
 
-	return sclkr_to_ns(sclkr, freq);
+	return sclkr2ns(sclkr, freq, true);
 }

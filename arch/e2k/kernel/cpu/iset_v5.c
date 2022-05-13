@@ -7,6 +7,7 @@
 #include <asm/atomic_api.h>
 #include <asm/cpu_regs.h>
 #include <asm/head.h>
+#include <asm/kdebug.h>
 #include <asm/regs_state.h>
 #include <asm/tags.h>
 #include <asm/traps.h>
@@ -15,9 +16,9 @@
 #include <asm/kvm/uaccess.h>
 
 /******************************* DEBUG DEFINES ********************************/
-#undef        DEBUG_PF_MODE
-#define       DEBUG_PF_MODE           0       /* Page fault */
-#define DebugPF(...)          DebugPrint(DEBUG_PF_MODE ,##__VA_ARGS__)
+#undef	DEBUG_PF_MODE
+#define	DEBUG_PF_MODE	0	/* Page fault */
+#define	DebugPF(...)	DebugPrint(DEBUG_PF_MODE ,##__VA_ARGS__)
 /******************************************************************************/
 
 u64 native_get_cu_hw1_v5()
@@ -161,13 +162,11 @@ static inline u64 signext(u64 val, int nr)
 /* calculate current array prefetch buffer indices values
  * (see chapter 1.10.2 in "Scheduling") */
 void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
-		struct thread_info *ti, e2k_aau_t *context)
+		e2k_aalda_t *aaldas, e2k_aau_t *context)
 {
+	bool user;
 	u64 areas, area_num, iter_count;
-	e2k_aalda_t *aaldas = ti->aalda;
 	u64 *aaldis = context->aaldi;
-	/* get_user() is used here */
-	WARN_ON_ONCE(regs && __raw_irqs_disabled());
 
 	memset(aaldas, 0, AALDAS_REGS_NUM * sizeof(aaldas[0]));
 	memset(aaldis, 0, AALDIS_REGS_NUM * sizeof(aaldis[0]));
@@ -175,6 +174,11 @@ void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
 	/* It is first guest run to set initial state of AAU */
 	if (unlikely(!regs))
 		return;
+
+	user = user_mode(regs);
+
+	/* get_user() is used here */
+	WARN_ON_ONCE(user && __raw_irqs_disabled());
 
 	/* See bug 33621 comment 2 and bug 52350 comment 29 */
 	iter_count = regs->ilcr1 - regs->lsr1;
@@ -196,6 +200,7 @@ void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
 		e2k_fapb_instr_t fapb;
 		e2k_aalda_t tmp_aalda;
 		u64 step, ind, iter;
+		int ret;
 
 		if (!(AW(context->aaldv) & (1UL << area_num)))
 			continue;
@@ -216,34 +221,14 @@ void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
 					(AS(regs->ctpr2).ta_base + 8 +
 						16 * (area_num - 32));
 
-# if __LCC__ >= 120
-		/*
-		 * tmp is used to avoid compiler issue with passing
-		 * union's fields into inline asm. Bug 76907.
-		 */
-		u64 tmp;
-		long ret_get_user;
-
-		ret_get_user = host_get_user(tmp, (u64 *)fapb_addr, regs);
-
-		if (ret_get_user) {
-			if (ret_get_user == -EAGAIN)
+		if (!user) {
+			fapb = *fapb_addr;
+		} else if ((ret = host_get_user(AW(fapb), (u64 *) fapb_addr, regs))) {
+			if (ret == -EAGAIN)
 				break;
-			else
-				goto die;
+			force_sig(SIGSEGV);
+			return;
 		}
-		fapb.word = tmp;
-# else
-		long ret_get_user;
-
-		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
-		if (ret_get_user) {
-			if (ret_get_user == -EAGAIN)
-				break;
-			else
-				goto die;
-		}
-# endif
 
 		if (area_num >= 32 && AS(fapb).dpl) {
 			/* See bug #53880 */
@@ -275,23 +260,18 @@ void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
 
 		aaldis[area_num] = ind;
 	}
-
-	return;
-
-die:
-	force_sig(SIGSEGV);
 }
 
 /* See chapter 1.10.3 in "Scheduling" */
 void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 {
+	bool user = user_mode(regs);
 	const e2k_aau_t	*const aau_regs = regs->aau_context;
 	u32		aafstr = aau_regs->aafstr;
 	unsigned int	aa_bit = 0;
 	u64		iter_count;
 	tc_cond_t	condition;
 	tc_mask_t	mask;
-	long ret_get_user;
 
 	regs->trap->nr_page_fault_exc = exc_data_page_num;
 
@@ -321,9 +301,8 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 			goto next_area;
 
 		area_num = (aafstr >> 1) & 0x3f;
-		DebugPF("do_aau_fault: got interrupt on %d mova channel, "
-			"area %lld\n",
-			aa_bit, area_num);
+		DebugPF("do_aau_fault: got interrupt on %d mova channel, area %lld\n",
+				aa_bit, area_num);
 
 		if (area_num < 32)
 			fapb_addr = (e2k_fapb_instr_t *)(AS(regs->ctpr2).ta_base
@@ -332,35 +311,33 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 			fapb_addr = (e2k_fapb_instr_t *)(AS(regs->ctpr2).ta_base
 					+ 16 * (area_num - 32) + 8);
 
-		ret_get_user = host_get_user(AW(fapb), (u64 *)fapb_addr, regs);
-		if (ret_get_user) {
-			if (ret_get_user == -EAGAIN)
+		if (!user) {
+			fapb = *fapb_addr;
+		} else if ((ret = host_get_user(AW(fapb), (u64 *) fapb_addr, regs))) {
+			if (ret == -EAGAIN)
 				break;
-			else
-				goto die;
+			goto die;
 		}
 
 		if (area_num >= 32 && AS(fapb).dpl) {
 			/* See bug #53880 */
-			pr_notice_once("%s [%d]: AAU is working in dpl mode "
-				"(FAPB at %px)\n",
-				current->comm, current->pid, fapb_addr);
+			pr_notice_once("%s [%d]: AAU is working in dpl mode (FAPB at %px)\n",
+					current->comm, current->pid, fapb_addr);
 			area_num -= 32;
 			fapb_addr -= 1;
-			ret_get_user = host_get_user(AW(fapb),
-						(u64 *)fapb_addr, regs);
-			if (ret_get_user) {
-				if (ret_get_user == -EAGAIN)
+			if (!user) {
+				fapb = *fapb_addr;
+			} else if ((ret = host_get_user(AW(fapb),
+					(u64 *) fapb_addr, regs))) {
+				if (ret == -EAGAIN)
 					break;
-				else
-					goto die;
+				goto die;
 			}
 		}
 
-		if (!AS(aau_regs->aasr).iab) {
-			WARN_ONCE(1, "%s [%d]: AAU fault happened but iab in "
-				"AASR register was not set\n",
-				current->comm, current->pid);
+		if (!regs->aasr.iab) {
+			WARN_ONCE(1, "%s [%d]: AAU fault happened but iab in AASR register was not set\n",
+					current->comm, current->pid);
 			goto die;
 		}
 
@@ -383,18 +360,15 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 		}
 		addr2 = addr1 + mrng - 1;
 		if (unlikely((addr1 & ~E2K_VA_MASK) || (addr2 & ~E2K_VA_MASK))){
-			pr_notice_once("Bad address: addr 0x%llx, "
-				"ind 0x%llx, mrng 0x%llx,"
-				" step 0x%llx, fapb 0x%llx\n",
-				addr1, ind, mrng, step,
-				(unsigned long long)AW(fapb));
+			pr_notice_once("Bad address: addr 0x%llx, ind 0x%llx, mrng 0x%llx, step 0x%llx, fapb 0x%llx\n",
+					addr1, ind, mrng, step,
+					(unsigned long long)AW(fapb));
 
 			addr1 &= E2K_VA_MASK;
 			addr2 &= E2K_VA_MASK;
 		}
-		DebugPF("do_aau_fault: address1 = 0x%llx, address2 = 0x%llx, "
-			"mrng=%lld\n",
-			addr1, addr2, mrng);
+		DebugPF("do_aau_fault: address1 = 0x%llx, address2 = 0x%llx, mrng=%lld\n",
+				addr1, addr2, mrng);
 
 		ret = do_aau_page_fault(regs, addr1, condition, mask, aa_bit);
 		if (ret) {
@@ -429,12 +403,15 @@ next_area:
 	}
 
 	DebugPF("do_aau_fault: exit aau fault handler, TICKS = %ld\n",
-		get_cycles());
+			get_cycles());
 
 	return;
 
 die:
-	force_sig(SIGSEGV);
+	if (user)
+		force_sig(SIGSEGV);
+	else
+		die("AAU error", regs, 0);
 }
 
 notrace void save_aaldi_v5(u64 *aaldis)
@@ -446,9 +423,9 @@ notrace void save_aaldi_v5(u64 *aaldis)
  * It's taken that aasr was get earlier(from get_aau_context caller)
  * and comparison with aasr.iab was taken.
  */
-notrace void get_aau_context_v5(e2k_aau_t *context)
+notrace void get_aau_context_v5(e2k_aau_t *context, e2k_aasr_t aasr)
 {
-	GET_AAU_CONTEXT_V5(context);
+	GET_AAU_CONTEXT_V5(context, aasr);
 }
 #endif /* CONFIG_USE_AAU */
 

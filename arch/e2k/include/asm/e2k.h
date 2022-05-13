@@ -8,7 +8,6 @@
 #include <asm/e2k_api.h>
 #include <asm/sections.h>
 #include <asm/e2s.h>
-#include <asm/es2.h>
 #include <asm/e8c.h>
 #include <asm/e1cp.h>
 #include <asm/e8c2.h>
@@ -20,37 +19,26 @@
 #define	MACHINE_ID_CPU_TYPE_MASK	0x000f
 #define	MACHINE_ID_SIMUL		0x0010
 #define	MACHINE_ID_E2K_FULL_SIC		0x0020
-#define MACHINE_ID_E2K_IOHUB		0x0040
-#define MACHINE_ID_L_IOMMU		0x0080
-#define	MACHINE_ID_E2K_LEGACY_SIC	0x0100	/* host bridge & legacy NBSR */
-#define	MACHINE_ID_E2K_VIRT_IO		0x0400	/* machine is virtual and */
+#define MACHINE_ID_L_IOMMU		0x0040
+#define	MACHINE_ID_E2K_LEGACY_SIC	0x0080	/* host bridge & legacy NBSR */
+#define	MACHINE_ID_E2K_VIRT_IO		0x0100	/* machine is virtual and */
 						/* IO simulates on user level */
 						/* (for example by QEMU) */
-#define	MACHINE_ID_HW_VIRT		0x4000	/* hardware virtualized VM */
-#define	MACHINE_ID_VIRT			0x8000	/* soft paravirtualized VM */
-#define MACHINE_ID_E2K_IOMMU		0x10000
+#define	MACHINE_ID_HW_VIRT		0x0200	/* hardware virtualized VM */
+#define	MACHINE_ID_VIRT			0x0400	/* soft paravirtualized VM */
+#define MACHINE_ID_E2K_IOMMU		0x0800
 
-#define	MACHINE_ID_ES2_DSP		(IDR_ES2_DSP_MDL | \
-						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB)
-#define	MACHINE_ID_ES2_RU		(IDR_ES2_RU_MDL | \
-						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB)
 #define	MACHINE_ID_E2S			(IDR_E2S_MDL | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_L_IOMMU)
 #define	MACHINE_ID_E8C			(IDR_E8C_MDL | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_L_IOMMU)
 #define	MACHINE_ID_E1CP			(IDR_E1CP_MDL | \
 						MACHINE_ID_E2K_LEGACY_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_L_IOMMU)
 #define	MACHINE_ID_E8C2			(IDR_E8C2_MDL | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_L_IOMMU)
 /*
  * IO_* NBSRs are absent in models with EIOHub. Using LEGACY_SIC with FULL_SIC
@@ -60,33 +48,25 @@
 #define	MACHINE_ID_E12C			(IDR_E12C_MDL | \
 						MACHINE_ID_E2K_LEGACY_SIC | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_E2K_IOMMU)
 #define	MACHINE_ID_E16C			(IDR_E16C_MDL | \
 						MACHINE_ID_E2K_LEGACY_SIC | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_E2K_IOMMU)
 #define	MACHINE_ID_E2C3			(IDR_E2C3_MDL | \
 						MACHINE_ID_E2K_LEGACY_SIC | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_E2K_IOMMU)
 #define	MACHINE_ID_E2K_VIRT		(IDR_E2K_VIRT_MDL | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_E2K_VIRT_IO)
 #define	MACHINE_ID_E2K_HW_VIRT		(IDR_E2K_VIRT_MDL | \
 						MACHINE_ID_HW_VIRT | \
 						MACHINE_ID_E2K_LEGACY_SIC | \
 						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOHUB | \
 						MACHINE_ID_E2K_IOMMU | \
 						MACHINE_ID_E2K_VIRT_IO)
 
-#define	MACHINE_ID_ES2_DSP_LMS		(MACHINE_ID_ES2_DSP |	\
-						MACHINE_ID_SIMUL)
-#define	MACHINE_ID_ES2_RU_LMS		(MACHINE_ID_ES2_RU | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E2S_LMS		(MACHINE_ID_E2S | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E8C_LMS		(MACHINE_ID_E8C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E1CP_LMS		(MACHINE_ID_E1CP | MACHINE_ID_SIMUL)
@@ -95,8 +75,6 @@
 #define	MACHINE_ID_E16C_LMS		(MACHINE_ID_E16C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E2C3_LMS		(MACHINE_ID_E2C3 | MACHINE_ID_SIMUL)
 
-#define	MACHINE_ID_VIRT_ES2_DSP		(MACHINE_ID_ES2_DSP | MACHINE_ID_VIRT)
-#define	MACHINE_ID_VIRT_ES2_RU		(MACHINE_ID_ES2_RU | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E2S		(MACHINE_ID_E2S | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E8C		(MACHINE_ID_E8C | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E1CP		(MACHINE_ID_E1CP | MACHINE_ID_VIRT)
@@ -112,11 +90,7 @@
 #endif
 
 #ifdef	CONFIG_E2K_MACHINE
- #if	defined(CONFIG_E2K_ES2_DSP)
-  #define native_machine_id	(MACHINE_ID_ES2_DSP | MACHINE_SIMUL_FLAG)
- #elif	defined(CONFIG_E2K_ES2_RU)
-  #define native_machine_id	(MACHINE_ID_ES2_RU | MACHINE_SIMUL_FLAG)
- #elif	defined(CONFIG_E2K_E2S)
+ #if	defined(CONFIG_E2K_E2S)
   #define native_machine_id	(MACHINE_ID_E2S | MACHINE_SIMUL_FLAG)
  #elif	defined(CONFIG_E2K_E8C)
   #define native_machine_id	(MACHINE_ID_E8C | MACHINE_SIMUL_FLAG)
@@ -133,8 +107,6 @@
  #else
   #	error "E2K MACHINE type does not defined"
  #endif
-#elif	defined(CONFIG_ES2)	/* can be defined only for tiny boot on lms */
- #define	native_machine_id	MACHINE_ID_ES2_DSP_LMS
 #elif	defined(CONFIG_E2S)	/* can be defined only for tiny boot on lms */
  #define	native_machine_id	MACHINE_ID_E2S_LMS
 #elif	defined(CONFIG_E8C)	/* can be defined only for tiny boot on lms */
@@ -162,13 +134,6 @@ extern const char *native_get_mach_type_name(void);
 
 extern void e2k_init_IRQ(void);
 
-#define	IS_THE_MACHINE_ES2_DSP(mach_id)	\
-		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_ES2_DSP_MDL)
-#define	IS_THE_MACHINE_ES2_RU(mach_id)	\
-		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_ES2_RU_MDL)
-#define	IS_THE_MACHINE_ES2(mach_id)	\
-		((IS_THE_MACHINE_ES2_DSP(mach_id)) ||	\
-			(IS_THE_MACHINE_ES2_RU(mach_id)))
 #define	IS_THE_MACHINE_E2S(mach_id)	\
 		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E2S_MDL)
 #define	IS_THE_MACHINE_E8C(mach_id)	\
@@ -189,12 +154,8 @@ extern void e2k_init_IRQ(void);
 #define	IS_THE_MACHINE_SIM(mach_id)	\
 		(((mach_id) & MACHINE_ID_SIMUL) != 0)
 
-#define	HAS_THE_MACHINE_E2K_DSP(mach_id)	\
-		(IS_THE_MACHINE_ES2_DSP(mach_id))
 #define	HAS_THE_MACHINE_E2K_FULL_SIC(mach_id)	\
 		(((mach_id) & MACHINE_ID_E2K_FULL_SIC) != 0)
-#define HAS_THE_MACHINE_E2K_IOHUB(mach_id)	\
-		(((mach_id) & MACHINE_ID_E2K_IOHUB) != 0)
 #define HAS_THE_MACHINE_L_IOMMU(mach_id)	\
 		(((mach_id) & MACHINE_ID_L_IOMMU) != 0)
 #define HAS_THE_MACHINE_E2K_IOMMU(mach_id)	\
@@ -205,12 +166,6 @@ extern void e2k_init_IRQ(void);
 		(HAS_THE_MACHINE_E2K_FULL_SIC(mach_id) || \
 			HAS_THE_MACHINE_E2K_LEGACY_SIC(mach_id))
 
-#define	NATIVE_IS_MACHINE_ES2_DSP	\
-		IS_THE_MACHINE_ES2_DSP(native_machine_id)
-#define	NATIVE_IS_MACHINE_ES2_RU	\
-		IS_THE_MACHINE_ES2_RU(native_machine_id)
-#define	NATIVE_IS_MACHINE_ES2		\
-		IS_THE_MACHINE_ES2(native_machine_id)
 #define	NATIVE_IS_MACHINE_E2S		\
 		IS_THE_MACHINE_E2S(native_machine_id)
 #define	NATIVE_IS_MACHINE_E8C		\
@@ -227,13 +182,6 @@ extern void e2k_init_IRQ(void);
 		IS_THE_MACHINE_E2C3(native_machine_id)
 #define	NATIVE_IS_MACHINE_E2K_VIRT	(false)
 
-#define	BOOT_NATIVE_IS_MACHINE_ES2_DSP	\
-		IS_THE_MACHINE_ES2_DSP(boot_native_machine_id)
-#define	BOOT_NATIVE_IS_MACHINE_ES2_RU	\
-		IS_THE_MACHINE_ES2_RU(boot_native_machine_id)
-#define	BOOT_NATIVE_IS_MACHINE_ES2	\
-		((BOOT_NATIVE_IS_MACHINE_ES2_DSP) || \
-			(BOOT_NATIVE_IS_MACHINE_ES2_RU))
 #define	BOOT_NATIVE_IS_MACHINE_E2S	\
 		IS_THE_MACHINE_E2S(boot_native_machine_id)
 #define	BOOT_NATIVE_IS_MACHINE_E8C	\
@@ -253,12 +201,8 @@ extern void e2k_init_IRQ(void);
 #define	NATIVE_IS_MACHINE_SIM		\
 		IS_THE_MACHINE_SIM(native_machine_id)
 
-#define	NATIVE_HAS_MACHINE_E2K_DSP	\
-		HAS_THE_MACHINE_E2K_DSP(native_machine_id)
 #define	NATIVE_HAS_MACHINE_E2K_FULL_SIC	\
 		HAS_THE_MACHINE_E2K_FULL_SIC(native_machine_id)
-#define NATIVE_HAS_MACHINE_E2K_IOHUB	\
-		HAS_THE_MACHINE_E2K_IOHUB(native_machine_id)
 #define NATIVE_HAS_MACHINE_E2K_IOMMU	\
 		HAS_THE_MACHINE_E2K_IOMMU(native_machine_id)
 #define	NATIVE_HAS_MACHINE_E2K_LEGACY_SIC	\
@@ -269,12 +213,8 @@ extern void e2k_init_IRQ(void);
 #define	BOOT_NATIVE_IS_MACHINE_SIM	\
 		IS_THE_MACHINE_SIM(boot_native_machine_id)
 
-#define	BOOT_NATIVE_HAS_MACHINE_E2K_DSP	\
-		HAS_THE_MACHINE_E2K_DSP(boot_native_machine_id)
 #define	BOOT_NATIVE_HAS_MACHINE_E2K_FULL_SIC	\
 		HAS_THE_MACHINE_E2K_FULL_SIC(boot_native_machine_id)
-#define BOOT_NATIVE_HAS_MACHINE_E2K_IOHUB	\
-		HAS_THE_MACHINE_E2K_IOHUB(boot_native_machine_id)
 #define	BOOT_NATIVE_HAS_MACHINE_E2K_LEGACY_SIC	\
 		HAS_THE_MACHINE_E2K_LEGACY_SIC(boot_native_machine_id)
 #define	BOOT_NATIVE_HAS_MACHINE_L_SIC		\
@@ -307,12 +247,6 @@ static inline void set_mach_type_id(void)
 
 #endif	/* ! CONFIG_KVM_GUEST_KERNEL */
 
-#define	IS_MACHINE_ES2_DSP	\
-		IS_THE_MACHINE_ES2_DSP(get_machine_id())
-#define	IS_MACHINE_ES2_RU	\
-		IS_THE_MACHINE_ES2_RU(get_machine_id())
-#define	IS_MACHINE_ES2		\
-		IS_THE_MACHINE_ES2(get_machine_id())
 #define	IS_MACHINE_E2S		\
 		IS_THE_MACHINE_E2S(get_machine_id())
 #define	IS_MACHINE_E8C		\
@@ -330,12 +264,8 @@ static inline void set_mach_type_id(void)
 #define IS_MACHINE_E2K_VIRT	\
 		IS_THE_MACHINE_E2K_VIRT(get_machine_id())
 
-#define	HAS_MACHINE_E2K_DSP	\
-		HAS_THE_MACHINE_E2K_DSP(get_machine_id())
 #define	HAS_MACHINE_E2K_FULL_SIC	\
 		HAS_THE_MACHINE_E2K_FULL_SIC(get_machine_id())
-#define HAS_MACHINE_E2K_IOHUB	\
-		HAS_THE_MACHINE_E2K_IOHUB(get_machine_id())
 #define HAS_MACHINE_L_IOMMU	\
 		HAS_THE_MACHINE_L_IOMMU(get_machine_id())
 #define HAS_MACHINE_E2K_IOMMU	\
@@ -345,12 +275,6 @@ static inline void set_mach_type_id(void)
 #define	HAS_MACHINE_L_SIC	\
 		HAS_THE_MACHINE_L_SIC(get_machine_id())
 
-#define	BOOT_IS_MACHINE_ES2_DSP	\
-		IS_THE_MACHINE_ES2_DSP(boot_get_machine_id())
-#define	BOOT_IS_MACHINE_ES2_RU	\
-		IS_THE_MACHINE_ES2_RU(boot_get_machine_id())
-#define	BOOT_IS_MACHINE_ES2	\
-		IS_THE_MACHINE_ES2(boot_get_machine_id())
 #define	BOOT_IS_MACHINE_E2S	\
 		IS_THE_MACHINE_E2S(boot_get_machine_id())
 #define	BOOT_IS_MACHINE_E8C	\
@@ -368,12 +292,8 @@ static inline void set_mach_type_id(void)
 #define BOOT_IS_MACHINE_VIRT	\
 		IS_THE_MACHINE_VIRT(boot_get_machine_id())
 
-#define	BOOT_HAS_MACHINE_E2K_DSP	\
-		HAS_THE_MACHINE_E2K_DSP(boot_get_machine_id())
 #define	BOOT_HAS_MACHINE_E2K_FULL_SIC	\
 		HAS_THE_MACHINE_E2K_FULL_SIC(boot_get_machine_id())
-#define BOOT_HAS_MACHINE_E2K_IOHUB	\
-		HAS_THE_MACHINE_E2K_IOHUB(boot_get_machine_id())
 #define BOOT_HAS_MACHINE_L_IOMMU	\
 		HAS_THE_MACHINE_L_IOMMU(boot_get_machine_id())
 #define BOOT_HAS_MACHINE_E2K_IOMMU	\

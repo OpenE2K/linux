@@ -28,6 +28,7 @@ OFFSET(TSK_IRQ_ENTER_CLK, task_struct, thread_info.irq_enter_clk);
 OFFSET(TSK_UPSR, task_struct, thread_info.upsr);
 
 OFFSET(TI_FLAGS, thread_info, flags);
+OFFSET(TI_STATUS, thread_info, status);
 OFFSET(TI_K_USD_LO, thread_info, k_usd_lo);
 OFFSET(TI_K_USD_HI, thread_info, k_usd_hi);
 OFFSET(TI_K_PSP_LO, thread_info, k_psp_lo);
@@ -121,7 +122,6 @@ OFFSET(TI_KERNEL_IMAGE_PGD, thread_info, kernel_image_pgd);
 OFFSET(TI_SHADOW_IMAGE_PGD, thread_info, shadow_image_pgd);
 OFFSET(TI_GTHREAD_INFO, thread_info, gthread_info);
 OFFSET(TI_VCPU, thread_info, vcpu);
-OFFSET(TI_HOST_GREGS_TO_VIRT, thread_info, h_gregs.g);
 
 OFFSET(GLOB_REG_BASE, e2k_greg, base);
 OFFSET(GLOB_REG_EXT, e2k_greg, ext);
@@ -203,9 +203,6 @@ OFFSET(G_ST_SBR, e2k_stacks, top);
 
 DEFINE(PTRACE_SZOF, sizeof (struct pt_regs));
 DEFINE(TRAP_PTREGS_SZOF, sizeof(struct trap_pt_regs));
-#ifdef CONFIG_USE_AAU
-DEFINE(AAU_SZOF, sizeof(e2k_aau_t));
-#endif
 DEFINE(PT_PTRACED, PT_PTRACED);
 DEFINE(E2K_FLAG_32BIT, E2K_FLAG_32BIT);
 DEFINE(MAX_NR_CPUS, NR_CPUS);
@@ -218,6 +215,7 @@ DEFINE(KERNEL_P_STACK_SIZE, KERNEL_P_STACK_SIZE);
 DEFINE(KERNEL_PC_STACK_SIZE, KERNEL_PC_STACK_SIZE);
 DEFINE(KERNEL_STACKS_SIZE, KERNEL_STACKS_SIZE);
 DEFINE(CPU_HWBUG_USD_ALIGNMENT, CPU_HWBUG_USD_ALIGNMENT);
+DEFINE(CPU_HWBUG_INTC_CR_WRITE, CPU_HWBUG_INTC_CR_WRITE);
 DEFINE(CPU_FEAT_TRAP_V5, CPU_FEAT_TRAP_V5);
 DEFINE(CPU_FEAT_TRAP_V6, CPU_FEAT_TRAP_V6);
 DEFINE(CPU_FEAT_QPREG, CPU_FEAT_QPREG);

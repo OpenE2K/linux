@@ -2115,7 +2115,7 @@ static int uar_mmap(struct mlx5_ib_dev *dev, enum mlx5_ib_mmap_cmd cmd,
 #if defined(CONFIG_X86)
 		if (!pat_enabled())
 			return -EPERM;
-#elif !(defined(CONFIG_PPC) || (defined(CONFIG_ARM) && defined(CONFIG_MMU)))
+#elif !(defined(CONFIG_PPC) || defined(CONFIG_E2K) || (defined(CONFIG_ARM) && defined(CONFIG_MMU)))
 			return -EPERM;
 #endif
 	/* fall through */

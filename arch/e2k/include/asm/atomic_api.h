@@ -37,7 +37,7 @@ register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(SMP_CPU_ID
 # define NATIVE_HWBUG_AFTER_LD_ACQ_ADDRESS	\
 		(NATIVE_READ_IP_REG_VALUE() & ~0x3fUL)
 # define NATIVE_HWBUG_AFTER_LD_ACQ_CPU 0
-# if (!defined(CONFIG_E2K_MACHINE) && CONFIG_E2K_MINVER <= 4) || defined(CONFIG_E2K_E8C)
+# if !defined(CONFIG_E2K_MACHINE) || defined(CONFIG_E2K_E8C)
 #  define NATIVE_HAS_HWBUG_AFTER_LD_ACQ_ADDRESS 1
 # else
 #  define NATIVE_HAS_HWBUG_AFTER_LD_ACQ_ADDRESS 0
@@ -52,7 +52,7 @@ register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(SMP_CPU_ID
 
 #endif
 
-#if (!defined CONFIG_E2K_MACHINE && CONFIG_E2K_MINVER <= 4) || defined CONFIG_E2K_E8C
+#if !defined CONFIG_E2K_MACHINE || defined CONFIG_E2K_E8C
 /* Define these here to avoid include hell... */
 # define _UPSR_IE      0x20U
 # define _UPSR_NMIE    0x80U

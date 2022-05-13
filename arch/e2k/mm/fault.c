@@ -184,11 +184,16 @@ __setup("debug_pagef", pagef_setup);
 
 typedef union pf_mode {
 	struct {
-		u32 write	: 1;
-		u32 spec	: 1;
-		u32 user	: 1;
-		u32 root	: 1;
-		u32 empty	: 1;
+		u32 write		: 1;
+		u32 spec		: 1;
+		u32 user		: 1;
+		u32 root		: 1;
+		u32 empty		: 1;
+		u32 priv		: 1;
+		u32 as_kvm_injected	: 1;
+		u32 as_kvm_passed	: 1;
+		u32 as_kvm_copy_user	: 1;
+		u32 host_dont_inject	: 1;
 	};
 	u32 word;
 } pf_mode_t;
@@ -588,13 +593,13 @@ static const char *get_memory_type_string(pte_t pte)
 	if (MMU_IS_PT_V6())
 		return memory_types_v6[_PAGE_MT_GET_VAL(pte_val(pte))];
 
-	if (!(pte_val(pte) & ~_PAGE_VALID_V2))
+	if (!(pte_val(pte) & ~_PAGE_VALID_V3))
 		return "";
 
-	if ((pte_val(pte) & _PAGE_CD_MASK_V2) != _PAGE_CD_MASK_V2)
+	if ((pte_val(pte) & _PAGE_CD_MASK_V3) != _PAGE_CD_MASK_V3)
 		return "cacheable";
 
-	if ((pte_val(pte) & _PAGE_PWT_V2))
+	if ((pte_val(pte) & _PAGE_PWT_V3))
 		return "uncacheable";
 	else
 		return "write_combine";
@@ -680,6 +685,9 @@ huge_pte:
 				pte, pte_val(*pte), address);
 	} else if (!pte_present(*pte)) {
 		pr_alert("PTE  0x%px = 0x%016lx is pte of not present page for address 0x%016lx\n",
+				pte, pte_val(*pte), address);
+	} else if (pte_protnone(*pte)) {
+		pr_alert("PTE  0x%px = 0x%016lx valid & not present (migrate) page for address 0x%016lx\n",
 				pte, pte_val(*pte), address);
 	} else {
 		pr_alert("PTE  0x%px = 0x%016lx %s & present for address 0x%016lx %s\n",
@@ -1024,6 +1032,95 @@ static int terminate_CLW_operation(const struct pt_regs *regs)
 }
 #endif	/* CONFIG_CLW_ENABLE */
 
+int apply_usd_delta_to_signal_stack(unsigned long top, unsigned long delta_sp,
+				    bool incr, unsigned long *chain_stack_border)
+{
+	struct pt_regs __user *u_regs;
+	unsigned long ts_flag;
+	unsigned long u_top, u_bottom;
+	e2k_usd_hi_t usd_hi;
+	e2k_usd_lo_t usd_lo;
+	e2k_cr1_hi_t cr1_hi;
+	int regs_num = 0;
+	int ret = 0;
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	signal_pt_regs_for_each(u_regs) {
+		ret = __get_priv_user(u_top, &u_regs->stacks.top);
+		if (ret)
+			break;
+
+		ret = __get_priv_user(AW(usd_hi), &AW(u_regs->stacks.usd_hi));
+		if (ret)
+			break;
+		ret = __get_priv_user(AW(usd_lo), &AW(u_regs->stacks.usd_lo));
+		if (ret)
+			break;
+		u_bottom = usd_lo.USD_lo_base - usd_hi.USD_hi_size - delta_sp;
+
+		/*
+		 * alt stack
+		 */
+		if (top > u_top || top < u_bottom) {
+			e2k_pcsp_lo_t pcsp_lo;
+			e2k_pcsp_hi_t pcsp_hi;
+
+			ret = __get_priv_user(AW(pcsp_lo), &AW(u_regs->stacks.pcsp_lo));
+			if (ret)
+				break;
+
+			ret = __get_priv_user(AW(pcsp_hi), &AW(u_regs->stacks.pcsp_hi));
+			if (ret)
+				break;
+
+			*chain_stack_border = pcsp_lo.PCSP_lo_base + pcsp_hi.PCSP_hi_ind + 0x20;
+			break;
+		}
+
+		if (incr)
+			usd_hi.USD_hi_size += delta_sp;
+		else
+			usd_hi.USD_hi_size -= delta_sp;
+
+		ret = __put_priv_user(AW(usd_hi), &AW(u_regs->stacks.usd_hi));
+		if (ret)
+			break;
+
+		ret = __get_priv_user(AW(cr1_hi), &AW(u_regs->crs.cr1_hi));
+		if (ret)
+			break;
+
+		if (incr)
+			AS(cr1_hi).ussz += (delta_sp >> 4);
+		else
+			AS(cr1_hi).ussz -= (delta_sp >> 4);
+
+		ret = __put_priv_user(AW(cr1_hi), &AW(u_regs->crs.cr1_hi));
+		if (ret)
+			break;
+
+		++regs_num;
+	}
+	clear_ts_flag(ts_flag);
+
+	if (ret == 0) {
+		DebugUS("%d pt_regs structures (USD & CR1_hi.ussz) were corrected "
+			"to update user stack sizes\n",
+			regs_num);
+	} else {
+		pr_err("%s(): failed, error %d\n", __func__, ret);
+		return ret;
+	}
+
+	/*
+	 * The follow call is actual only for paravirtualized
+	 * guest to correct signal stack on host
+	 */
+	ret = host_apply_usd_delta_to_signal_stack(top, delta_sp, incr);
+
+	return ret;
+}
+
 
 /*
  * To increment or decrease user data stack size we need to update
@@ -1031,11 +1128,9 @@ static int terminate_CLW_operation(const struct pt_regs *regs)
  * (CR1_hi.ussz field) into all user pt_regs structures of the process
  */
 static int fix_all_user_stack_pt_regs(pt_regs_t *regs, e2k_size_t delta_sp,
-				      bool incr)
+				      bool incr, e2k_addr_t *chain_stack_border)
 {
-	unsigned long ts_flag;
 	int ret = 0, regs_num = 0;
-	struct pt_regs __user *u_regs;
 	e2k_usd_hi_t usd_hi;
 	e2k_cr1_hi_t cr1_hi;
 
@@ -1059,44 +1154,16 @@ static int fix_all_user_stack_pt_regs(pt_regs_t *regs, e2k_size_t delta_sp,
 
 	++regs_num;
 
+	DebugUS("%d pt_regs structures (USD & CR1_hi.ussz) were corrected "
+		"to update user stack sizes\n",
+		regs_num);
+
 	/*
 	 * All other user pt_regs (except current, i.e. thread_info->pt_regs)
 	 * are located in current thread's signal stack in userspace.
 	 */
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	signal_pt_regs_for_each(u_regs) {
-		ret = __get_user(AW(usd_hi), &AW(u_regs->stacks.usd_hi));
-		if (ret)
-			break;
-
-		if (incr)
-			usd_hi.USD_hi_size += delta_sp;
-		else
-			usd_hi.USD_hi_size -= delta_sp;
-
-		ret = __put_user(AW(usd_hi), &AW(u_regs->stacks.usd_hi));
-		if (ret)
-			break;
-
-		ret = __get_user(AW(cr1_hi), &AW(u_regs->crs.cr1_hi));
-		if (ret)
-			break;
-
-		if (incr)
-			AS(cr1_hi).ussz += (delta_sp >> 4);
-		else
-			AS(cr1_hi).ussz -= (delta_sp >> 4);
-
-		ret = __put_user(AW(cr1_hi), &AW(u_regs->crs.cr1_hi));
-		if (ret)
-			break;
-
-		++regs_num;
-	}
-	clear_ts_flag(ts_flag);
-
-	DebugUS("%d pt_regs structures (USD & CR1_hi.ussz) were corrected to decrement user stack sizes\n",
-		regs_num);
+	ret = apply_usd_delta_to_signal_stack(regs->stacks.top, delta_sp, incr,
+				chain_stack_border);
 
 	return ret;
 }
@@ -1108,6 +1175,7 @@ struct update_chain_params {
 	unsigned long prev_size;
 	unsigned long corrected_size;
 	unsigned long prev_frame_addr;
+	unsigned long chain_stack_border;
 	bool incr;
 };
 
@@ -1139,6 +1207,9 @@ static int update_chain_stack_ussz(e2k_mem_crs_t *frame,
 	if (frames_type == user_frame_type) {
 		unsigned long next_size, hw_delta, real_delta;
 		int correction;
+
+		if (corrected_frame_addr < params->chain_stack_border)
+			return 1;
 
 		params->corrected_size += 0x100000000L *
 				getsp_adj_get_correction(corrected_frame_addr);
@@ -1205,8 +1276,8 @@ next:
 	return 0;
 }
 
-static int fix_all_chain_stack_sz(e2k_size_t delta_sp,
-			stack_frame_t frames_type, bool incr)
+static int fix_all_chain_stack_sz(e2k_size_t delta_sp, stack_frame_t frames_type,
+			bool incr, unsigned long chain_stack_border)
 {
 	struct update_chain_params params;
 	long ret;
@@ -1223,6 +1294,7 @@ static int fix_all_chain_stack_sz(e2k_size_t delta_sp,
 	params.corrected_size = 0;
 	params.prev_frame_addr = -1UL;
 	params.incr = incr;
+	params.chain_stack_border = chain_stack_border;
 
 	ret = parse_chain_stack(PCS_USER, NULL, update_chain_stack_ussz, &params);
 
@@ -1238,6 +1310,7 @@ static int fix_all_chain_stack_sz(e2k_size_t delta_sp,
 int constrict_user_data_stack(struct pt_regs *regs, unsigned long incr)
 {
 	thread_info_t	*ti = current_thread_info();
+	e2k_addr_t	chain_stack_border = 0;
 	u64		sp, stack_size;
 	int		ret;
 
@@ -1257,11 +1330,12 @@ int constrict_user_data_stack(struct pt_regs *regs, unsigned long incr)
 		return -ENOMEM;
 	}
 
-	ret = fix_all_user_stack_pt_regs(regs, stack_size, false);
+	ret = fix_all_user_stack_pt_regs(regs, stack_size, false, &chain_stack_border);
 	if (ret)
 		return ret;
 
-	if (ret = fix_all_chain_stack_sz(stack_size, user_frame_type, false)) {
+	if (ret = fix_all_chain_stack_sz(stack_size, user_frame_type, false,
+			chain_stack_border)) {
 		pr_info_ratelimited("constrict_user_data_stack(): could not correct user stack sizes in chain stack: ret %d\n",
 				ret);
 		return ret;
@@ -1294,6 +1368,7 @@ int expand_user_data_stack(struct pt_regs *regs, unsigned long incr)
 	struct mm_struct *mm = current->mm;
 	u64 sp, new_bottom, stack_size, new_size;
 	struct vm_area_struct *vma, *v, *prev;
+	e2k_addr_t chain_stack_border = 0;
 	int ret;
 
 	if (usd_cannot_be_expanded(regs)) {
@@ -1378,14 +1453,16 @@ int expand_user_data_stack(struct pt_regs *regs, unsigned long incr)
 	 * and in the chain registers (CR1_hi.ussz field)
 	 * in all user pt_regs structures of the process.
 	 */
-	ret = fix_all_user_stack_pt_regs(regs, new_size - stack_size, true);
+	ret = fix_all_user_stack_pt_regs(regs, new_size - stack_size, true,
+				&chain_stack_border);
 	if (ret)
 		return ret;
 
 	/*
 	 * Correct cr1_hi.ussz fields for all functions in the PCSP
 	 */
-	ret = fix_all_chain_stack_sz(new_size - stack_size, user_frame_type, true);
+	ret = fix_all_chain_stack_sz(new_size - stack_size, user_frame_type,
+				true, chain_stack_border);
 	if (ret) {
 		pr_info_ratelimited("expand_user_data_stack(): could not correct user stack sizes in chain stack: ret %d\n",
 			ret);
@@ -1441,7 +1518,7 @@ unsigned long remap_e2k_stack(unsigned long addr,
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma, *next_vma;
-	unsigned long ret, ts_flag, new_addr,
+	unsigned long ret, ts_flag, charged, new_addr,
 			end = addr + old_size, new_end = addr + new_size;
 	struct vm_userfaultfd_ctx uf = NULL_VM_UFFD_CTX;
 	LIST_HEAD(uf_unmap_early);
@@ -1455,9 +1532,11 @@ unsigned long remap_e2k_stack(unsigned long addr,
 	/*
 	 * Try to expand without remapping
 	 */
-	vma = find_vma(mm, end - 1);
-	BUG_ON(!vma || vma->vm_start > end - 1);
-	BUG_ON(vma->vm_flags & (VM_DONTEXPAND | VM_PFNMAP));
+	vma = vma_to_resize(addr, old_size, new_size, &charged);
+	if (WARN_ON_ONCE(IS_ERR(vma))) {
+		ret = PTR_ERR(vma);
+		goto out_unlock;
+	}
 
 	if (vma->vm_end == end &&
 	    (!vma->vm_next || vma->vm_next->vm_start >= new_end)) {
@@ -1483,6 +1562,8 @@ unsigned long remap_e2k_stack(unsigned long addr,
 		}
 	}
 
+	vm_unacct_memory(charged);
+
 	/*
 	 * Remap all vmas
 	 */
@@ -1490,6 +1571,10 @@ unsigned long remap_e2k_stack(unsigned long addr,
 			new_size, 0, MAP_PRIVATE | MAP_ANONYMOUS);
 	if (IS_ERR_VALUE(new_addr)) {
 		ret = new_addr;
+		pr_err("%s(): could not get unmapped area after 0x%lx "
+			"size 0x%lx, error %ld\n",
+			__func__, (after) ? addr : USER_HW_STACKS_BASE,
+			new_size, new_addr);
 		goto out_unlock;
 	}
 
@@ -1523,6 +1608,10 @@ unsigned long remap_e2k_stack(unsigned long addr,
 				&uf, &uf_unmap_early, &uf_unmap);
 		if (IS_ERR_VALUE(ret)) {
 			do_munmap(mm, new_addr, new_size, &uf_unmap);
+			pr_err("%s(): could not mremap_to from 0x%lx to 0x%lx "
+				"size 0x%lx, error %ld\n",
+				__func__, remap_from, remap_to, remap_to_size,
+				ret);
 			goto out_unlock;
 		}
 	}
@@ -1682,19 +1771,19 @@ static int apply_delta_to_signal_cellar(struct pt_regs __user *u_regs,
 	if (IS_ERR_OR_NULL(u_trap))
 		return PTR_ERR_OR_ZERO(u_trap);
 
-	if (__get_user(tc_count, &u_trap->tc_count))
+	if (__get_priv_user(tc_count, &u_trap->tc_count))
 		return -EFAULT;
 
 	for (cnt = 0; 3 * cnt < tc_count; cnt++) {
 		unsigned long address;
 
-		if (__get_user(address, &u_trap->tcellar[cnt].address))
+		if (__get_priv_user(address, &u_trap->tcellar[cnt].address))
 			return -EFAULT;
 
 		/* Hardware stack accesses are aligned */
 		if (address >= start && address < end) {
-			if (__put_user(address + delta,
-				       &u_trap->tcellar[cnt].address))
+			if (__put_priv_user(address + delta,
+					    &u_trap->tcellar[cnt].address))
 				return -EFAULT;
 		}
 	}
@@ -1722,9 +1811,9 @@ int apply_psp_delta_to_signal_stack(unsigned long base, unsigned long size,
 				break;
 		}
 
-		ret = __get_user(AW(psp_lo), &AW(u_regs->stacks.psp_lo));
-		ret = (ret) ?: __get_user(AW(psp_hi),
-					  &AW(u_regs->stacks.psp_hi));
+		ret = __get_priv_user(AW(psp_lo), &AW(u_regs->stacks.psp_lo));
+		ret = (ret) ?: __get_priv_user(AW(psp_hi),
+					       &AW(u_regs->stacks.psp_hi));
 		if (ret)
 			break;
 
@@ -1733,9 +1822,9 @@ int apply_psp_delta_to_signal_stack(unsigned long base, unsigned long size,
 		new_fp = AS(psp_lo).base + AS(psp_hi).ind + delta;
 		__update_psp_regs(base, size, new_fp, &psp_lo, &psp_hi);
 
-		ret = __put_user(AW(psp_hi), &AW(u_regs->stacks.psp_hi));
-		ret = (ret) ?: __put_user(AW(psp_lo),
-					  &AW(u_regs->stacks.psp_lo));
+		ret = __put_priv_user(AW(psp_hi), &AW(u_regs->stacks.psp_hi));
+		ret = (ret) ?: __put_priv_user(AW(psp_lo),
+					       &AW(u_regs->stacks.psp_lo));
 		if (ret)
 			break;
 	}
@@ -1764,9 +1853,9 @@ int apply_pcsp_delta_to_signal_stack(unsigned long base, unsigned long size,
 				break;
 		}
 
-		ret = __get_user(AW(pcsp_lo), &AW(u_regs->stacks.pcsp_lo));
-		ret = (ret) ?: __get_user(AW(pcsp_hi),
-					  &AW(u_regs->stacks.pcsp_hi));
+		ret = __get_priv_user(AW(pcsp_lo), &AW(u_regs->stacks.pcsp_lo));
+		ret = (ret) ?: __get_priv_user(AW(pcsp_hi),
+					       &AW(u_regs->stacks.pcsp_hi));
 		if (ret)
 			break;
 
@@ -1775,9 +1864,9 @@ int apply_pcsp_delta_to_signal_stack(unsigned long base, unsigned long size,
 		new_fp = AS(pcsp_lo).base + AS(pcsp_hi).ind + delta;
 		__update_pcsp_regs(base, size, new_fp, &pcsp_lo, &pcsp_hi);
 
-		ret = __put_user(AW(pcsp_hi), &AW(u_regs->stacks.pcsp_hi));
-		ret = (ret) ?: __put_user(AW(pcsp_lo),
-					  &AW(u_regs->stacks.pcsp_lo));
+		ret = __put_priv_user(AW(pcsp_hi), &AW(u_regs->stacks.pcsp_hi));
+		ret = (ret) ?: __put_priv_user(AW(pcsp_lo),
+					       &AW(u_regs->stacks.pcsp_lo));
 		if (ret)
 			break;
 	}
@@ -1976,6 +2065,36 @@ static inline unsigned long get_fault_ip(struct pt_regs *regs)
 	return tir_lo.TIR_lo_ip;
 }
 
+static inline bool
+is_injected_to_reexecute(struct pt_regs *regs)
+{
+	struct pt_regs		*pregs = regs->next;
+	struct trap_pt_regs	*ptrap = pregs->trap;
+
+	/*
+	 * Check if we are in the nested exception that appeared while
+	 * executing execute_mmu_operations()
+	 */
+	if (likely(!(pregs && pregs->flags.exec_mmu_op))) {
+		return false;
+	}
+
+	/*
+	 * It can be only on paravirtualized guest
+	 * This page fault has been injected by host to translate gva->hva
+	 * to reexecute previous faulted load/store recovery operation
+	 */
+	if (unlikely(!ptrap))
+		panic("do_trap_cellar() previous pt_regs are not from trap\n");
+
+	if (unlikely(!user_mode(pregs) &&
+			!current_thread_info()->usr_pfault_jump &&
+			!search_exception_tables(get_fault_ip(pregs))))
+		panic("do_trap_cellar() previous pt_regs are not user's\n");
+
+	return true;
+}
+
 static inline int
 copy_nested_tc_records(struct pt_regs *regs,
 		trap_cellar_t *tcellar, unsigned int tc_count)
@@ -1994,6 +2113,17 @@ copy_nested_tc_records(struct pt_regs *regs,
 			!current_thread_info()->usr_pfault_jump &&
 			!search_exception_tables(get_fault_ip(pregs))))
 		panic("do_trap_cellar() previous pt_regs are not user's\n");
+
+	/*
+	 * It can be only on paravirtualized guest
+	 * This page fault has been injected by host to translate gva->hva
+	 * and to reexecute previous faulted load/store recovery operation
+	 */
+	if (unlikely(tc_test_is_as_kvm_injected(tcellar[0].condition))) {
+		DbgTC("page fault injected by host to reexecute load/store\n");
+		BUG_ON(tc_count != 3);
+		return 0;
+	}
 
 	/*
 	 * We suppose that there could be only one record in
@@ -2231,7 +2361,7 @@ static int handle_spill_fill(struct pt_regs *regs, trap_cellar_t *tcellar,
 
 	if (call_pf) {
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-		ret = do_page_fault(regs, address, condition, mask, 0);
+		ret = do_page_fault(regs, address, condition, mask, 0, NULL);
 		clear_ts_flag(ts_flag);
 		if (ret != PFR_SUCCESS)
 			goto fail_sigsegv;
@@ -2308,6 +2438,7 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 	int			ignore_request = 0;
 	int			skip = 0;
 	unsigned long		to_complete = 0;
+	pf_mode_t		mode = {word: 0};
 	int			srp_flag = 0, store_flag;
 	e2k_addr_t		srp_ip;
 	/* store recovery point in RPR */
@@ -2405,7 +2536,8 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 						tcellar[clw_first].address,
 						tcellar[clw_first].condition,
 						tcellar[clw_first].mask,
-						false	/* instr page */);
+						false	/* instr page */,
+						&mode);
 					if (rval == PFR_SIGPENDING) {
 						DebugCLW("BAD CLW AREA\n");
 						return;
@@ -2552,14 +2684,14 @@ repeat:
 			unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 			rval = do_page_fault(regs, tcellar[cnt].address,
 					tcellar[cnt].condition,
-					tcellar[cnt].mask, 0);
+					tcellar[cnt].mask, 0, &mode);
 			clear_ts_flag(ts_flag);
 		} else if (AS(ftype).exc_mem_lock) {
 			DbgTC("do_trap_cellar: exc_mem_lock\n");
 			if (!trap->from_sigreturn) {
-				S_SIG(regs, SIGBUS, exc_mem_lock_num,
-					BUS_OBJERR);
-				SDBGPRINT("SIGBUS. Memory lock signaled");
+				S_SIG(regs, SIGBUS, exc_mem_lock_num, BUS_OBJERR);
+				debug_signal_print("SIGBUS. Memory lock signaled",
+						regs, false);
 				break;
 			}
 			/*
@@ -2580,7 +2712,7 @@ repeat:
 				rpr_srp_flag = 1;
 			rval = do_page_fault(regs, tcellar[cnt].address,
 					tcellar[cnt].condition,
-					tcellar[cnt].mask, 0);
+					tcellar[cnt].mask, 0, &mode);
 			store_flag = 1;
 		} else {
 			unsigned long old_address = tcellar[cnt].address;
@@ -2613,7 +2745,7 @@ repeat:
 			} else {
 				rval = do_page_fault(regs, tcellar[cnt].address,
 						tcellar[cnt].condition,
-						tcellar[cnt].mask, 0);
+						tcellar[cnt].mask, 0, &mode);
 
 				if (rval == PFR_SUCCESS && !async) {
 					if (AS(tcellar[cnt].condition).store)
@@ -2638,8 +2770,7 @@ handled:
 		case PFR_SIGPENDING:
 			/* 
 			 * Either BAD AREA, so SIGSEGV or SIGBUS and maybe
-			 * a sighandler, or SIGBUS due to page_bound in lock
-			 * trap on load/store, or after invalidating unaligned
+			 * a sighandler, or SIGBUS after invalidating unaligned
 			 * MLT entry on lock trap on store PF handling.
 			 */
 			DbgTC("BAD AREA\n");
@@ -2649,7 +2780,8 @@ handled:
 			 * just invalidate diagnostic tag in reg if load. */
 			if (!AS(tcellar[cnt].condition).store)
 				execute_mmu_operations(&tcellar[cnt],
-						next_tcellar, regs, 1, 0, NULL, NULL);
+						next_tcellar, regs, 1, 0,
+						NULL, NULL, !!mode.priv);
 
 			/* No need to execute the following user loads/stores */
 			trap->ignore_user_tc = true;
@@ -2698,7 +2830,7 @@ handled:
 				e2k_addr_t addr;
 				rval = execute_mmu_operations(&tcellar[cnt],
 						next_tcellar, regs, 0,
-						&addr, NULL, NULL);
+						&addr, NULL, NULL, !!mode.priv);
 
 #ifdef CONFIG_PROTECTED_MODE
 				/*
@@ -2736,7 +2868,8 @@ handled:
 			DbgTC("kernel address has been detected in Trap Cellar for cnt %d\n",
 					cnt);
 			rval = execute_mmu_operations(&tcellar[cnt],
-					next_tcellar, regs, 0, 0, NULL, NULL);
+					next_tcellar, regs, 0, 0, NULL, NULL,
+					!!mode.priv);
 			DbgTC("execute_mmu_operations() finished for kernel addr 0x%lx cnt %d rval %d\n",
 				tcellar[cnt].address, cnt, rval);
 			if (rval == EXEC_MMU_STOP) {
@@ -2757,7 +2890,7 @@ handled:
 			} else {
 				rval = execute_mmu_operations(&tcellar[cnt],
 						next_tcellar, regs, 0,
-						&addr, NULL, NULL);
+						&addr, NULL, NULL, !!mode.priv);
 			}
 
 			DebugKVMPF("execute_mmu_operations() finished for cnt %d rval %d addr=%lx\n",
@@ -2803,6 +2936,85 @@ static inline int is_spec_load_fault(union pf_mode mode)
 	return mode.spec && !mode.write;
 }
 
+static inline union pf_mode set_kvm_fault_injected(tc_cond_t condition,
+						   pf_mode_t mode)
+{
+	mode.as_kvm_injected = tc_test_is_as_kvm_injected(condition);
+	return mode;
+}
+
+static inline union pf_mode set_kvm_fault_passed(tc_cond_t condition,
+						 pf_mode_t mode)
+{
+	mode.as_kvm_passed = tc_test_is_as_kvm_passed(condition);
+	return mode;
+}
+
+static inline union pf_mode set_kvm_copy_user(tc_cond_t condition,
+						   pf_mode_t mode)
+{
+	mode.as_kvm_copy_user = tc_test_is_as_kvm_copy_user(condition);
+	return mode;
+}
+
+static inline union pf_mode set_kvm_fault_mode(tc_cond_t condition,
+					       pf_mode_t mode)
+{
+	if (tc_test_is_as_kvm_injected(condition)) {
+		mode = set_kvm_fault_injected(condition, mode);
+		mode = set_kvm_copy_user(condition, mode);
+	} else if (tc_test_is_as_kvm_passed(condition)) {
+		mode = set_kvm_fault_passed(condition, mode);
+	}
+	return mode;
+}
+
+static inline union pf_mode set_kvm_dont_inject_mode(pt_regs_t *regs,
+						     pf_mode_t mode)
+{
+	if (likely(!host_test_dont_inject(regs)))
+		return mode;
+
+	mode.host_dont_inject = true;
+	return mode;
+}
+
+/*
+ * KVM injected page fault for the guest only to eliminate the reason
+ * of the fault without memory access to load/store
+ */
+static inline bool is_kvm_fault_injected(union pf_mode mode)
+{
+	return !!mode.as_kvm_injected;
+}
+
+/*
+ * KVM injected page fault for the guest to eliminate the reason of the fault
+ * and to recover the load/store operation that caused page fault
+ */
+static inline bool is_kvm_fault_passed(union pf_mode mode)
+{
+	return !!mode.as_kvm_passed;
+}
+
+/*
+ * KVM injected page fault for the guest only:
+ *  1) to eliminate the reason of the fault without memory access to load/store
+ *  2) to mark copy to/from guest user space with enabled page faults
+ */
+static inline bool is_kvm_copy_user(union pf_mode mode)
+{
+	return !!mode.as_kvm_copy_user;
+}
+
+/*
+ * Any KVM injection mode
+ */
+static inline bool is_kvm_fault_mode(union pf_mode mode)
+{
+	return is_kvm_fault_injected(mode) || is_kvm_fault_passed(mode);
+}
+
 /*
  * Is the operation a semi-speculative load? If yes, the address
  * could be any value. Ignore this record. The needed diagnostic
@@ -2822,7 +3034,7 @@ static int handle_spec_load_fault(unsigned long address, struct pt_regs *regs,
 		 * speculative accesses won't trigger a page fault anymnore).
 		 */
 		DebugPF("will flush bad address TLB\n");
-		__flush_tlb_page_and_pgtables(current->mm, address);
+		local_flush_tlb_page_and_pgtables(current->mm, address);
 	}
 #endif
 
@@ -2941,10 +3153,11 @@ static int pf_force_sig_info(int si_signo, int si_code, unsigned long address,
 {
 	struct trap_pt_regs *trap = regs->trap;
 
-	if (si_signo == SIGBUS)
-		SDBGPRINT("SIGBUS. Page fault");
-	else if (si_signo == SIGSEGV)
-		SDBGPRINT("SIGSEGV. Page fault");
+	if (si_signo == SIGBUS) {
+		debug_signal_print("SIGBUS. Page fault", regs, false);
+	} else if (si_signo == SIGSEGV) {
+		debug_signal_print("SIGSEGV. Page fault", regs, false);
+	}
 
 	PFDBGPRINT("Signal %d for address 0x%lx", si_signo, address);
 
@@ -3043,12 +3256,6 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 		spinlock_t *ptl;
 		if (vma && is_vm_hugetlb_page(vma)) {
 			pte_t *huge_pte = (pte_t *) pmd;
-
-			if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE) {
-				if (huge_pte && pmd_index(addr) % 2)
-					huge_pte--;
-			}
-
 			ptl = huge_pte_lockptr(hstate_vma(vma), mm, huge_pte);
 		} else {
 			ptl = pmd_lockptr(mm, pmd);
@@ -3058,14 +3265,6 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 		if (pmd_none(*pmd) && pmd_valid(*pmd)) {
 			pmd_t entry = pmd_mknotvalid(*pmd);
 			set_pmd_at(mm, addr, pmd, entry);
-		}
-		if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE &&
-				vma && is_vm_hugetlb_page(vma)) {
-			pmd = (pmd_index(addr) % 2) ? pmd - 1 : pmd + 1;
-			if (pmd_none(*pmd) && pmd_valid(*pmd)) {
-				pmd_t entry = pmd_mknotvalid(*pmd);
-				set_pmd_at(mm, addr, pmd, entry);
-			}
 		}
 		spin_unlock(ptl);
 		goto out_success;
@@ -3153,6 +3352,14 @@ static int clear_valid_on_spec_load(unsigned long address,
 	if (!is_spec_load_fault(mode))
 		return 0;
 
+	/* Area for page tables in virtual memory is special and
+	 * it never maps actual user memory and still we can get
+	 * page fault on it (because it's self-mapping), so skip. */
+	if (MMU_IS_SEPARATE_PT() &&
+	    address >= MMU_SEPARATE_USER_VPTB &&
+	    address < MMU_SEPARATE_USER_VPTB + PGDIR_SIZE)
+		return 0;
+
 	ret = clear_valid_on_spec_load_one(vma, address, regs, unlocked);
 	if (ret || *unlocked)
 		return ret;
@@ -3196,6 +3403,11 @@ static int bad_area(unsigned long address, struct pt_regs *regs, union pf_mode m
 	if (ret)
 		return ret;
 
+	if (unlikely(is_kvm_fault_injected(mode))) {
+		if (is_injected_to_reexecute(regs) || !is_kvm_copy_user(mode))
+			goto force_sig;
+	}
+
 	if (!mode.user && address >= TASK_SIZE)
 		return no_context(address, regs, mode);
 
@@ -3210,6 +3422,7 @@ static int bad_area(unsigned long address, struct pt_regs *regs, union pf_mode m
 	if (likely(show_unhandled_signals))
 		show_signal_msg(regs, address, current);
 
+force_sig:
 	return pf_force_sig_info(SIGSEGV, si_code, address, regs);
 }
 
@@ -3225,8 +3438,8 @@ static int access_error(struct vm_area_struct *vma, unsigned long address,
 				PFDBGPRINT("Page is not writable");
 			return 1;
 		}
-	} else if (unlikely(!(vma->vm_flags & (VM_READ | VM_EXEC |
-					       VM_WRITE)))) {
+	} else if (unlikely(!(vma->vm_flags &
+			(VM_READ | VM_EXEC | VM_WRITE)))) {
 		/* Check read permissions */
 		if (!is_spec_load_fault(mode))
 			PFDBGPRINT("Page is PROT_NONE");
@@ -3241,9 +3454,12 @@ static int access_error(struct vm_area_struct *vma, unsigned long address,
 
 	/* Check privilege level */
 	if (unlikely((vma->vm_flags & VM_PRIVILEGED) &&
-		     !test_ts_flag(TS_KERNEL_SYSCALL))) {
-		if (!is_spec_load_fault(mode))
+		     (!test_ts_flag(TS_KERNEL_SYSCALL) ||
+				!kernel_is_privileged()) &&
+					!is_kvm_fault_mode(mode))) {
+		if (!is_spec_load_fault(mode)) {
 			PFDBGPRINT("Page is privileged");
+		}
 		return 1;
 	}
 
@@ -3439,15 +3655,6 @@ int pf_on_page_boundary(unsigned long address, tc_cond_t cond)
 	if (tc_cond_is_special_mmu_aau(cond))
 		return false;
 
-	/*
-	 * Always manually check for page boundary crossing.
-	 * ftype.page_bound field is not reliable enough:
-	 *
-	 * 1) "ftype" field is present only in the first tcellar entry.
-	 * 2) "page_bound" is shadowed by "page_miss", "nwrite_page", etc.
-	 * 3) It was removed in iset V3.
-	 */
-
 	DebugNAO("not aligned operation with address 0x%lx fmt %d size %d bytes\n",
 		address, TC_COND_FMT_FULL(cond), size);
 
@@ -3470,16 +3677,10 @@ static int handle_kernel_address(unsigned long address, struct pt_regs *regs,
 	if (address >= VMALLOC_START && address < VMALLOC_END)
 		return vmalloc_fault(address, regs, ftype, mode);
 
-	/*
-	 * Handle 'page bound' on kernel address: if access
-	 * address intersects page boundary then hardware
-	 * causes 'page fault' trap (this was removed in iset V3).
-	 */
-	if (AS(ftype).page_bound) {
-		DebugPF("kernel page bound: addr 0x%lx\n",
-				address);
-		return PFR_SUCCESS;
-	}
+#ifdef	CONFIG_KVM_GUEST_KERNEL
+	if (unlikely(address >= GUEST_VMEMMAP_START && address < GUEST_VMEMMAP_END))
+		return PFR_KVM_KERNEL_ADDRESS;
+#endif	/* CONFIG_KVM_GUEST_KERNEL */
 
 	/*
 	 * Check that it was the kernel address that caused the page fault
@@ -3592,7 +3793,7 @@ static int nested_page_fault_injected(void)
 
 int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
-		const int instr_page)
+		const int instr_page, pf_mode_t *mode_p)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
@@ -3605,6 +3806,7 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	vm_fault_t major = 0;
 
+	DebugPF("started for addr 0x%lx\n", address);
 #ifdef CONFIG_KVM_ASYNC_PF
 	/*
 	 * If physical page was swapped out by host, than
@@ -3613,6 +3815,7 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	 */
 	if (pv_apf_read_and_reset_reason() == KVM_APF_PAGE_IN_SWAP) {
 		pv_apf_wait();
+		DebugPF("apf waiting for addr 0x%lx\n", address);
 		return PFR_IGNORE;
 	}
 #endif /* CONFIG_KVM_ASYNC_PF */
@@ -3629,6 +3832,10 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	mode.user = user_mode(regs);
 	mode.root = AS(condition).root;
 	mode.empty = !mode.write && !AS(condition).vr && !AS(condition).vl;
+	mode = set_kvm_fault_mode(condition, mode);
+	mode = set_kvm_dont_inject_mode(regs, mode);
+	if (likely(mode_p != NULL))
+		*mode_p = mode;
 
 	if (AS(condition).num_align) {
 		if (!qp)
@@ -3671,10 +3878,11 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	if (address >= TASK_SIZE)
 		return handle_kernel_address(address, regs, mode, ftype);
 
-	if (!mm || faulthandler_disabled())
+	if (unlikely(!mm || faulthandler_disabled() || mode.host_dont_inject))
 		return no_context(address, regs, mode);
 
-	if (pf_on_page_boundary(address, condition)) {
+	if (pf_on_page_boundary(address, condition) &&
+			!unlikely(tc_test_is_as_kvm_injected(condition))) {
 		unsigned long pf_address;
 
 		if (is_spurious_qp_store(mode.write, address, fmt,
@@ -3704,6 +3912,7 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	 */
 	if (unlikely(!down_read_trylock(&mm->mmap_sem))) {
 		if (!user_mode(regs) &&
+				!is_kvm_fault_injected(mode) &&
 				!current_thread_info()->usr_pfault_jump &&
 				!search_exception_tables(get_fault_ip(regs))) {
 			/* It is kernel code where we do not expect faults */
@@ -3803,8 +4012,8 @@ retry:
 
 		if (!(AS(ftype).page_miss || AS(ftype).priv_page ||
 				AS(ftype).global_sp || AS(ftype).nwrite_page ||
-				AS(ftype).page_bound ||
-				AS(ftype).illegal_page)) {
+				AS(ftype).illegal_page ||
+				ftype_test_sw_fault(ftype))) {
 			PFDBGPRINT("trap with bad fault type for valid address ft:0x%x, wr:%d",
 					AW(ftype), AS(ftype).nwrite_page);
 			if (debug_pagefault) {
@@ -3826,12 +4035,18 @@ good_area:
 	DebugPF("have good vm_area\n");
 
 	/* We use bitwise OR for performance */
-	if (unlikely(AS(ftype).exc_mem_lock | AS(ftype).ph_pr_page |
+	if (unlikely((AS(ftype).exc_mem_lock | AS(ftype).ph_pr_page |
 		     AS(ftype).io_page | AS(ftype).prot_page |
-		     AS(ftype).intl_res_bits | AS(ftype).isys_page |
-		     AS(ftype).ph_bound)) {
+		     AS(ftype).isys_page | AS(ftype).ph_bound) ||
+		     !ftype_has_sw_fault(ftype))) {
 		PFDBGPRINT("Bad fault type 0x%x", AW(ftype));
 		goto force_sigbus;
+	}
+
+	if (unlikely((vma->vm_flags & VM_PRIVILEGED))) {
+		mode.priv = 1;
+		if (likely(mode_p != NULL))
+			*mode_p = mode;
 	}
 
 	if (AS(ftype).nwrite_page) {
@@ -3910,8 +4125,9 @@ good_area:
 				      1, regs, address);
 		}
 
-		if (fault == VM_FAULT_NOPAGE)
-			sync_addr_range(address, address);
+		if (fault == VM_FAULT_NOPAGE) {
+			sync_mm_addr(address);
+		}
 
 		--addr_num;
 		if (unlikely(addr_num > 0)) {
@@ -3939,8 +4155,8 @@ good_area:
 	 * after putting the valid bit back into the pte.
 	 */
 	if (vma->vm_ops && AS(ftype).illegal_page)
-		__flush_tlb_range(vma->vm_mm, address,
-				  address + E2K_MAX_FORMAT);
+		local_flush_tlb_mm_range(mm, address, address + E2K_MAX_FORMAT,
+				PAGE_SIZE, FLUSH_TLB_LEVELS_LAST);
 
 	up_read(&mm->mmap_sem);
 	DebugPF("handle_mm_fault() finished\n");
@@ -3961,9 +4177,7 @@ force_sigbus:
  * 1) We should recover LOAD operation with MAS == FILL_OPERATION
  * to load the value with tags. In protected mode any value has tag.
  *
- * 2) Avoid exc_illegal_opcode on e2c+
- *
- * 3) Do not lock SLT
+ * 2) Do not lock SLT
  */
 static unsigned int get_recovery_mas(tc_cond_t condition, int fmt)
 {
@@ -4011,22 +4225,6 @@ static unsigned int get_recovery_mas(tc_cond_t condition, int fmt)
 				chan <= 1 && !store &&
 				mas == _MAS_MODE_LOAD_OP_WAIT_1)
 			return _MAS_MODE_LOAD_OPERATION;
-	}
-
-
-	if (AS(opcode).npsp ||
-	    !(current->thread.flags & E2K_FLAG_PROTECTED_MODE)) {
-		/*
-		 * On e2c+ unprotected qword "check" and "check&unlock"
-		 * instructions generated exc_illegal_opcode, use workaround.
-		 */
-		if (machine.native_iset_ver <= E2K_ISET_V2 &&
-				AS(opcode).fmt == LDST_QWORD_FMT &&
-				(mod == _MAS_MODE_LOAD_OP_UNLOCK ||
-				 mod == _MAS_MODE_LOAD_OP_CHECK))
-			return _MAS_MODE_LOAD_OPERATION;
-
-		return mas;
 	}
 
 	/*
@@ -4140,7 +4338,8 @@ static void recovery_store_with_bytes(unsigned long address,
 static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 		const trap_cellar_t *tcellar, const trap_cellar_t *next_tcellar,
 		e2k_addr_t address, e2k_addr_t address_hi_hva,
-		int fmt, int chan, unsigned long hva_page_offset)
+		int fmt, int chan, unsigned long hva_page_offset,
+		bool priv_user)
 {
 	bool big_endian, qp_store, q_store, atomic_qp_store, atomic_q_store,
 	     atomic_store, aligned_16 = IS_ALIGNED(address, 16);
@@ -4216,6 +4415,7 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 	ld_rec_opc.mas = MAS_BYPASS_ALL_CACHES | MAS_FILL_OPERATION;
 	ld_rec_opc.fmt = LDST_QWORD_FMT;
 	ld_rec_opc.index = 0;
+	ld_rec_opc.pm = priv_user;
 
 	recovery_faulted_load((e2k_addr_t)&tcellar->data,
 				&data, &data_tag, AW(ld_rec_opc), 0,
@@ -4268,6 +4468,7 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 	st_opc_ext = st_rec_opc;
 	st_opc_ext.mask = tcellar->mask.mask_hi;
 	st_opc_ext.index = 8;
+	st_rec_opc.pm = priv_user;
 
 	/* For big endian case should swap the two operations. */
 	if (atomic_q_store && big_endian) {
@@ -4282,18 +4483,6 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 			tc_cond_to_size(tcellar->condition),
 			tc_fmt_has_valid_mask(fmt) ? tcellar->mask.mask_lo : 0xff,
 			tc_fmt_has_valid_mask(fmt) ? tcellar->mask.mask_hi : 0xff);
-	} else if (IS_MACHINE_ES2 && AS(tcellar->condition).page_bound) {
-		/*
-		 * 1) Page bound exception exists on e2c+ only.
-		 * 2) bug 118398: handle unaligned qp store with masked out
-		 * bytes landing in not existent page.
-		 */
-
-		/* v2 only: page_bound exception */
-		int length = min(8, 1 << (fmt - 1));
-
-		recovery_store_with_bytes(address, 0, 0, data, 0,
-				st_rec_opc, chan, length, 0xff, 0);
 	} else if (is_spurious_qp_store(true, address,
 			fmt, tcellar->mask, NULL)) {
 		/* Since v6: qp store with spurious fault, repeating the whole
@@ -4665,7 +4854,8 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 		trap_cellar_t *tcellar, trap_cellar_t *next_tcellar, int zeroing,
 		unsigned long address, unsigned long address_hi_hva,
 		unsigned long radr, int fmt, int chan, unsigned greg_recovery,
-		unsigned greg_num_d, e2k_addr_t *adr, unsigned long hva_page_offset)
+		unsigned greg_num_d, e2k_addr_t *adr, unsigned long hva_page_offset,
+		bool priv_user)
 {
 	ldst_rec_op_t	ld_rec_opc;
 	unsigned	vr = AS(tcellar->condition).vr;
@@ -4749,6 +4939,7 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 		ldrd_fmt = fmt & 0x7;
 	ld_rec_opc.fmt = ldrd_fmt;
 	ld_rec_opc.fmt_h = !!atomic_load;
+	ld_rec_opc.pm = priv_user;
 
 	ACCESS_CONTROL_DISABLE_AND_SAVE(upsr_to_save);
 
@@ -4903,13 +5094,14 @@ check_spill_fill_recovery(tc_cond_t cond, e2k_addr_t address, bool s_f,
 }
 
 static enum exec_mmu_ret convert_pv_gva_to_hva(unsigned long *address_hva_p,
-		unsigned long address, size_t size, const struct pt_regs *regs)
+				bool is_write, unsigned long address,
+				size_t size, const struct pt_regs *regs)
 {
-	void *address_hva = guest_ptr_to_host((void *) address, size, regs);
+	void *address_hva = guest_ptr_to_host((void *) address, is_write,
+						size, regs);
 
 	if (unlikely(IS_ERR(address_hva))) {
-		pr_err("%s(): could not convert page fault addr 0x%lx "
-			"to recovery format, error %ld\n",
+		pr_err_ratelimited("%s(): could not convert page fault addr 0x%lx to recovery format, error %ld\n",
 			__func__, address, PTR_ERR(address_hva));
 		if (PTR_ERR(address_hva) == -EAGAIN)
 			return EXEC_MMU_REPEAT;
@@ -4930,7 +5122,8 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 					struct pt_regs *regs),
 		enum exec_mmu_ret (*calculate_rf_frame)(struct pt_regs *regs,
 					tc_cond_t cond, u64 **radr,
-					bool *load_to_rf))
+					bool *load_to_rf),
+		bool priv_user)
 {
 	unsigned long	flags, hva_page_offset = 0;
 	tc_cond_t	cond = tcellar->condition;
@@ -4941,6 +5134,12 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 	DbgEXMMU("started\n");
 	DebugPtR(regs);
 
+	if (unlikely(tc_test_is_as_kvm_injected(cond))) {
+		/* fault is injected by KVM for guest only to eliminate */
+		/* a page fault reason and load/store is fake operation */
+		return EXEC_MMU_SUCCESS;
+	}
+
 #ifdef CONFIG_PROTECTED_MODE
 	/*
 	 * for multithreading of protected mode
@@ -4950,8 +5149,6 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 	if (adr)
 		*adr = 0;
 #endif /* CONFIG_PROTECTED_MODE */
-
-	regs->flags.exec_mmu_op = 1;
 
 	fmt = TC_COND_FMT_FULL(cond);
 	BUG_ON(fmt == 6 || fmt == 0 || fmt > 7 && fmt < 0xd || fmt == 0xe ||
@@ -4972,6 +5169,15 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 
 	store = AS(cond).store;
 
+	if (likely(is_spill_fill_recovery == NULL)) {
+		is_s_f = check_spill_fill_recovery(cond, tcellar->address,
+				IS_SPILL(tcellar[0]), regs);
+	} else {
+		is_s_f = is_spill_fill_recovery(cond, address,
+				IS_SPILL(tcellar[0]), regs);
+	}
+
+
 	/*
 	 * 1) In some case faulted address should be converted to some other
 	 * one to enable recovery on the current MMU context.  For example,
@@ -4985,12 +5191,19 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 	 * code from 1) above is simpler (does not require duplicating
 	 * functionality).
 	 */
-	if (host_test_intc_emul_mode(regs) && !(tcellar->flags & TC_IS_HVA_FLAG) ||
-			IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
+	if (unlikely(zeroing)) {
+		/* ignore all address convertion */
+		;
+	} else if (host_test_intc_emul_mode(regs) &&
+				!(tcellar->flags & TC_IS_HVA_FLAG) ||
+					IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
 		unsigned long address_lo_hva;
 		int size = tc_cond_to_size(cond);
 		int size_lo = min(PAGE_SIZE - offset_in_page(address), size);
-		ret = convert_pv_gva_to_hva(&address_lo_hva, address, size_lo, regs);
+		bool is_write = is_s_f || store;
+
+		ret = convert_pv_gva_to_hva(&address_lo_hva, is_write,
+					address, size_lo, regs);
 		if (ret != EXEC_MMU_SUCCESS)
 			return ret;
 
@@ -5004,8 +5217,9 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 		if (pf_on_page_boundary(address, cond) &&
 		    !is_spurious_qp_store(store, address, fmt, tcellar->mask, NULL)) {
 			unsigned long address_hi_hva;
-			ret = convert_pv_gva_to_hva(&address_hi_hva,
-					PAGE_ALIGN(address), size - size_lo, regs);
+			ret = convert_pv_gva_to_hva(&address_hi_hva, is_write,
+					PAGE_ALIGN(address), size - size_lo,
+					regs);
 			if (ret != EXEC_MMU_SUCCESS)
 				return ret;
 
@@ -5016,19 +5230,13 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 		address = address_lo_hva;
 	}
 
-	if (likely(is_spill_fill_recovery == NULL)) {
-		is_s_f = check_spill_fill_recovery(cond, tcellar->address,
-						IS_SPILL(tcellar[0]), regs);
-	} else {
-		is_s_f = is_spill_fill_recovery(cond, address,
-						IS_SPILL(tcellar[0]), regs);
-	}
 	if (is_s_f)
 		store = 1;
 
 	chan = AS(cond).chan;
 	BUG_ON((unsigned int) chan > 3 || store && !(chan & 1));
 
+	regs->flags.exec_mmu_op = 1;
 
 	raw_all_irq_save(flags);
 	if (store) {
@@ -5038,7 +5246,7 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 		 * data must be stored, data is data ;-) 
 		 */
 		ret = do_recovery_store(regs, tcellar, next_tcellar, address,
-				address_hi, fmt, chan, hva_page_offset);
+				address_hi, fmt, chan, hva_page_offset, priv_user);
 	} else {
 		/*
 		 * Here we perform a load operation which is more difficult
@@ -5073,7 +5281,7 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 					zeroing, address, address_hi,
 					(unsigned long) radr, fmt, chan,
 					greg_recovery, greg_num_d,
-					adr, hva_page_offset);
+					adr, hva_page_offset, priv_user);
 
 			/*
 			 * Restore BGR register to recover rotatable state

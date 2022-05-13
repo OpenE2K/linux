@@ -226,16 +226,21 @@ mmu_set_tc_entry(struct kvm_vcpu *vcpu, int tc_no,
 	kvm_write_pv_vcpu_mmu_tc_entry(vcpu, tc_no, address, condition, data);
 }
 
-void kvm_init_mmu_state(struct kvm_vcpu *vcpu)
+void kvm_reset_mmu_state(struct kvm_vcpu *vcpu)
 {
 	DebugKVM("started for VCPU %d\n", vcpu->vcpu_id);
 
 	kvm_write_pv_vcpu_MMU_CR_reg(vcpu, MMU_CR_KERNEL_OFF);
-	DebugKVM("set MMU_CR to init state 0x%lx\n",
-		mmu_reg_val(MMU_CR_KERNEL_OFF));
+	DebugKVM("set MMU_CR to init state 0x%llx\n",
+			AW(MMU_CR_KERNEL_OFF));
 
 	kvm_write_pv_vcpu_mmu_US_CL_D_reg(vcpu, true);
 	DebugKVM("set MMU_US_CL_D to init disable state\n");
+}
+
+void kvm_init_mmu_state(struct kvm_vcpu *vcpu)
+{
+	kvm_reset_mmu_state(vcpu);
 }
 
 unsigned int kvm_get_guest_vcpu_mmu_trap_count(struct kvm_vcpu *vcpu)
@@ -282,8 +287,7 @@ int kvm_init_vcpu_root_pt(struct kvm_vcpu *vcpu)
 		DebugKVM("guest kernel is not paravirtualized image\n");
 		return 0;
 	}
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-	if (!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL) {
+	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
 		/* Host kernel has duplicated images on some nodes */
 		/* so use separate root PGD for each CPU */
 		/* It need not more separate PGD for each VCPU */
@@ -293,7 +297,6 @@ int kvm_init_vcpu_root_pt(struct kvm_vcpu *vcpu)
 			"separate root PT for each CPU\n");
 		return 0;
 	}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 	pgd = pgd_alloc(current->mm);
 	if (unlikely(pgd == NULL)) {
 		DebugKVM("could not allocate root PGD of VCPU #%d\n",
@@ -852,7 +855,8 @@ kvm_guest_user_address_to_pva(struct task_struct *task, e2k_addr_t address)
 	}
 	if (!is_paging(vcpu)) {
 		/* Nonpaging mode: it is guest physical address */
-		pte_val(pte) = pgprot_val(nonpaging_gpa_to_pte(vcpu, address));
+		pte_val(pte) = pgprot_val(mmu_pt_nonpaging_gpa_to_pte(vcpu,
+								address));
 		gmm = pv_vcpu_get_init_gmm(vcpu);
 		goto host_mapped;
 	}
@@ -989,9 +993,14 @@ long kvm_recovery_faulted_tagged_guest_store(struct kvm_vcpu *vcpu,
 	}
 	address = hva;
 
-	native_recovery_faulted_tagged_store(address, wr_data, arg.tag,
+	TRY_USR_PFAULT {
+		native_recovery_faulted_tagged_store(address, wr_data, arg.tag,
 			st_rec_opc, data_ext, arg.tag_ext, opc_ext,
 			arg.chan, arg.qp, arg.atomic);
+	} CATCH_USR_PFAULT {
+		return -EFAULT;
+	} END_USR_PFAULT
+
 	return 0;
 }
 long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu, e2k_addr_t address,
@@ -1033,12 +1042,18 @@ long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu, e2k_addr_t address,
 	}
 	data_tag = (u8 *)hva;
 
-	native_recovery_faulted_load(address, ld_val, data_tag,
+	TRY_USR_PFAULT {
+		native_recovery_faulted_load(address, ld_val, data_tag,
 						ld_rec_opc, chan);
+	} CATCH_USR_PFAULT {
+		return -EFAULT;
+	} END_USR_PFAULT
+
 	DebugKVMREC("loaded data 0x%llx tag 0x%x from address 0x%lx\n",
 		*ld_val, *data_tag, address);
 	return 0;
 }
+
 long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 		e2k_addr_t addr_from, e2k_addr_t addr_to, e2k_addr_t addr_to_hi,
 		u64 ld_rec_opc, u64 _arg, u32 first_time)
@@ -1083,9 +1098,14 @@ long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 		addr_to_hi = hva;
 	}
 
-	native_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
+	TRY_USR_PFAULT {
+		native_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
 			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic,
 			first_time);
+	} CATCH_USR_PFAULT {
+		return -EFAULT;
+	} END_USR_PFAULT
+
 	DebugKVMREC("loaded data 0x%llx from address 0x%lx\n",
 		*((u64 *)addr_to), addr_from);
 	return 0;
@@ -1140,9 +1160,13 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 		saved_greg_hi = hva;
 	}
 
-	native_recovery_faulted_load_to_greg(address, greg_num_d, arg.vr,
+	TRY_USR_PFAULT {
+		native_recovery_faulted_load_to_greg(address, greg_num_d, arg.vr,
 			ld_rec_opc, arg.chan, arg.qp, arg.atomic,
 			(u64 *)saved_greg_lo, (u64 *)saved_greg_hi);
+	} CATCH_USR_PFAULT {
+		return -EFAULT;
+	} END_USR_PFAULT
 
 	if (!(LOCAL_GREGS_USER_MASK & (1UL << greg_num_d))) {
 		/* it is not "local" global register */
@@ -1164,15 +1188,27 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 		addr_hi = &addr_lo[1];
 	else
 		addr_hi = &addr_lo[2];
+
 	if ((u64 *)saved_greg_lo != NULL) {
-		native_recovery_faulted_move(saved_greg_lo,
-			(u64)addr_lo, (u64)addr_hi,
-			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic, 1);
+		TRY_USR_PFAULT {
+			native_recovery_faulted_move(saved_greg_lo,
+				(u64)addr_lo, (u64)addr_hi,
+				arg.vr, ld_rec_opc, arg.chan, arg.qp,
+				arg.atomic, 1);
+		} CATCH_USR_PFAULT {
+			return -EFAULT;
+		} END_USR_PFAULT
 	} else {
-		native_recovery_faulted_move(address,
-			(u64)addr_lo, (u64)addr_hi,
-			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic, 1);
+		TRY_USR_PFAULT {
+			native_recovery_faulted_move(address,
+				(u64)addr_lo, (u64)addr_hi,
+				arg.vr, ld_rec_opc, arg.chan, arg.qp,
+				arg.atomic, 1);
+		} CATCH_USR_PFAULT {
+			return -EFAULT;
+		} END_USR_PFAULT
 	}
+
 	l_gregs->updated |= (1UL << greg_num_d);
 
 	return 0;
@@ -1251,19 +1287,24 @@ long kvm_move_tagged_guest_data(struct kvm_vcpu *vcpu,
 	DebugKVMREC("guest address to 0x%lx converted to hva 0x%lx\n",
 		addr_to, hva_to);
 
-	switch (word_size) {
-	case sizeof(u32):
-		native_move_tagged_word(hva_from, hva_to);
-		break;
-	case sizeof(u64):
-		native_move_tagged_dword(hva_from, hva_to);
-		break;
-	case sizeof(u64) * 2:
-		native_move_tagged_qword(hva_from, hva_to);
-		break;
-	default:
-		return -EINVAL;
-	}
+	TRY_USR_PFAULT {
+		switch (word_size) {
+		case sizeof(u32):
+			native_move_tagged_word(hva_from, hva_to);
+			break;
+		case sizeof(u64):
+			native_move_tagged_dword(hva_from, hva_to);
+			break;
+		case sizeof(u64) * 2:
+			native_move_tagged_qword(hva_from, hva_to);
+			break;
+		default:
+			return -EINVAL;
+		}
+	} CATCH_USR_PFAULT {
+		return -EFAULT;
+	} END_USR_PFAULT
+
 	return 0;
 }
 

@@ -98,9 +98,9 @@ kvm_write_pv_MMU_CR_reg(mmu_reg_t *mmu_regs, mmu_reg_t mmu_cr)
 	kvm_write_pv_mmu_reg(mmu_regs, MMU_ADDR_CR, mmu_cr);
 }
 static inline void
-kvm_write_pv_vcpu_MMU_CR_reg(struct kvm_vcpu *vcpu, mmu_reg_t mmu_cr)
+kvm_write_pv_vcpu_MMU_CR_reg(struct kvm_vcpu *vcpu, e2k_mmu_cr_t mmu_cr)
 {
-	kvm_write_pv_vcpu_mmu_reg(vcpu, MMU_ADDR_CR, mmu_cr);
+	kvm_write_pv_vcpu_mmu_reg(vcpu, MMU_ADDR_CR, AW(mmu_cr));
 }
 
 static inline unsigned int

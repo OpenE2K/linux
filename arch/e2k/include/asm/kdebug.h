@@ -11,12 +11,6 @@ enum die_val {
 	DIE_BREAKPOINT
 };
 
-extern void printk_address(unsigned long address, int reliable);
-extern void show_trace(struct task_struct *t, struct pt_regs *regs,
-		       unsigned long *sp, unsigned long bp);
-extern void __show_regs(struct pt_regs *regs, int all);
-extern void show_regs(struct pt_regs *regs);
-extern unsigned long oops_begin(void);
-extern void oops_end(unsigned long, struct pt_regs *, int signr);
+extern void die(const char *str, struct pt_regs *regs, long err) __cold;
 
 #endif /* _ASM_E2K_KDEBUG_H */

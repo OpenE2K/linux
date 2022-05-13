@@ -594,8 +594,7 @@ static struct page *get_tag_swap_page(int wr, struct page *page, int *NO_READ)
 	int type = get_swp_type(page);
 	int size;
 	struct page *writing_page;
-	spinlock_t *lock;
-	unsigned long flags;
+	struct mutex *lock;
 
 	curr_tag_page_table = &tags_swap_table[type];
 	size = curr_tag_page_table->size[wr];
@@ -612,7 +611,7 @@ static struct page *get_tag_swap_page(int wr, struct page *page, int *NO_READ)
 	COUNT = 0;
 	WR = wr;
 	while (1) {
-	    spin_lock_irqsave(lock, flags);
+	    mutex_lock(lock);
 	    ind = *ptr_ind;
 	    for (i = 0; i < size; i++) {
 		res = ptr_page[ind];
@@ -634,7 +633,7 @@ static struct page *get_tag_swap_page(int wr, struct page *page, int *NO_READ)
 				   page_address(writing_page), PAGE_SIZE/8);
 			    *NO_READ = 1;
 			}
-			spin_unlock_irqrestore(lock, flags);
+			mutex_unlock(lock);
 #ifdef DEBUG_TAG_PAGE
 			if (COUNT) {
 				print_all_tag_swap_pages();
@@ -644,7 +643,7 @@ static struct page *get_tag_swap_page(int wr, struct page *page, int *NO_READ)
 		}
 	    }
 	    *ptr_ind = (ind + 1) % size;
-	    spin_unlock_irqrestore(lock, flags);
+	    mutex_unlock(lock);
 	    LOOP_ENTRY++;
 	    COUNT++;
 	    if (wr && total_swapcache_pages() >= size) {
@@ -657,7 +656,7 @@ static struct page *get_tag_swap_page(int wr, struct page *page, int *NO_READ)
 	    }
 	}
 	/* !!! unreachable place */
-	spin_unlock_irqrestore(lock, flags);
+	mutex_unlock(lock);
 	panic(" +++ERRROR %s CLEAR=%d WRITING=%d\n",
 	      current->comm, CLEAR, WRITING);
 	return NULL;
@@ -779,7 +778,7 @@ void e2k_swap_setup(int type, int block_size)
 	DebugTM("swap_setup() Initializing swap, type is %d, "
 	       "block_size is  %d\n", type, block_size);
 	curr_tag_page_table->size[1] = TAGS_PAGES;
-	spin_lock_init(&curr_tag_page_table->lock_pages);
+	mutex_init(&curr_tag_page_table->lock_pages);
 	curr_tag_page_table->pages =
 		kmalloc(TAGS_PAGES * sizeof(void *), GFP_KERNEL);
 #ifdef CONFIG_MAGIC_SYSRQ
@@ -797,7 +796,7 @@ void e2k_swap_setup(int type, int block_size)
 	/*
 	 * for reading swap
 	 */
-	spin_lock_init(&curr_tag_page_table->lock_read_pages);
+	mutex_init(&curr_tag_page_table->lock_read_pages);
 	curr_tag_page_table->read_pages =
 		kmalloc(TAGS_READ_PAGES * sizeof(void *), GFP_KERNEL);
 	curr_tag_page_table->size[0] = TAGS_READ_PAGES;
@@ -827,21 +826,19 @@ static void tags_swap_free(struct swap_info_struct *sis)
 	vfree(tag_swap_map);
 }
 
-static struct page *swap_free_pages[TAGS_PAGES + TAGS_READ_PAGES];
-
 void e2k_remove_swap(struct swap_info_struct *sis)
 {
 	int i;
 	struct page *page;
 	struct tags_swap_page_table *curr_tag_page_table =
 					&tags_swap_table[sis->type];
-	int ind_swap_free_pages = 0;
 	struct page **tbl_write_pages;
 	struct page **tbl_read_pages;
 
 	DebugTM("e2k_remove_swap\n");
-	spin_lock(&(curr_tag_page_table->lock_pages));
-	spin_lock(&(curr_tag_page_table->lock_read_pages));
+
+	mutex_lock(&(curr_tag_page_table->lock_pages));
+	mutex_lock(&(curr_tag_page_table->lock_read_pages));
 
 	for (i = 0; i < TAGS_PAGES; i++) {
 		page = curr_tag_page_table->pages[i];
@@ -856,8 +853,9 @@ void e2k_remove_swap(struct swap_info_struct *sis)
 			wait_on_page_bit(page, PG_locked);
 		}
 		put_page(page);
-		swap_free_pages[ind_swap_free_pages++] = page;
+		__free_page(page);
 	}
+
 	for (i = 0; i < TAGS_READ_PAGES; i++) {
 		page = curr_tag_page_table->read_pages[i];
 		if (!page) {
@@ -871,21 +869,19 @@ void e2k_remove_swap(struct swap_info_struct *sis)
 		ClearPageSwapCache(page);
 		clear_bit_unlock(PG_locked, &page->flags);
 		put_page(page);
-		swap_free_pages[ind_swap_free_pages++] = page;
+		__free_page(page);
 	}
+
 	tbl_write_pages = curr_tag_page_table->pages;
 	curr_tag_page_table->pages = NULL;
 	tbl_read_pages = curr_tag_page_table->read_pages;
 	curr_tag_page_table->read_pages = NULL;
-
-	spin_unlock(&(curr_tag_page_table->lock_read_pages));
-	spin_unlock(&(curr_tag_page_table->lock_pages));
-	/* can not use free() under spin_lock */
-	for (i = 0; i < ind_swap_free_pages; i++) {
-		__free_page(swap_free_pages[i]);
-	}
 	kfree(tbl_read_pages);
 	kfree(tbl_write_pages);
+
+	mutex_unlock(&(curr_tag_page_table->lock_read_pages));
+	mutex_unlock(&(curr_tag_page_table->lock_pages));
+
 	tags_swap_free(sis);
 }
 
@@ -947,15 +943,15 @@ void free_page_with_tags(u8 *p)
 	kfree(p);
 }
 
-void get_page_with_tags(u8 *dst, u8 *src, int *tag_length)
+void get_page_with_tags(u8 **dst, u8 *src, int *tag_length)
 {
 	int res;
 
-	dst = alloc_page_with_tags();
-	BUG_ON(!dst);
+	*dst = alloc_page_with_tags();
+	BUG_ON(!*dst);
 
-	copy_tagged_page(dst, src);
-	res = save_tags_from_data((u64 *)dst, (u8 *)(dst+PAGE_SIZE));
+	copy_tagged_page(*dst, src);
+	res = save_tags_from_data((u64 *)*dst, (u8 *)(*dst + PAGE_SIZE));
 	*tag_length = (res) ? TAGS_BYTES_PER_PAGE : 0;
 
 	return;

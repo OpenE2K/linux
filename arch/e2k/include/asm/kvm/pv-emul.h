@@ -10,6 +10,8 @@
 
 #include <asm/ptrace.h>
 
+enum restore_caller;
+
 #ifdef	CONFIG_VIRTUALIZATION
 static __always_inline void
 kvm_set_intc_emul_flag(pt_regs_t *regs)
@@ -126,12 +128,50 @@ extern void insert_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu,
 
 extern void kvm_emulate_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs,
 					trap_pt_regs_t *trap);
-extern void return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs);
-extern bool pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs);
+extern void return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs,
+					enum restore_caller from);
 
 static inline bool kvm_vcpu_in_hypercall(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.sw_ctxt.in_hypercall;
+}
+
+static inline void kvm_vcpu_set_dont_inject(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.sw_ctxt.dont_inject = true;
+}
+
+static inline void kvm_vcpu_reset_dont_inject(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.sw_ctxt.dont_inject = false;
+}
+
+static inline bool kvm_vcpu_test_dont_inject(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.sw_ctxt.dont_inject;
+}
+
+static inline bool kvm_vcpu_test_and_clear_dont_inject(struct kvm_vcpu *vcpu)
+{
+	if (likely(!kvm_vcpu_test_dont_inject(vcpu)))
+		return false;
+
+	kvm_vcpu_reset_dont_inject(vcpu);
+	return true;
+}
+
+static inline bool host_test_dont_inject(pt_regs_t *regs)
+{
+	return host_test_intc_emul_mode(regs) && regs->dont_inject;
+}
+
+static inline void pv_vcpu_clear_gti(struct kvm_vcpu *vcpu)
+{
+	if (likely(!vcpu->arch.is_hv && vcpu->arch.is_pv)) {
+		vcpu->arch.gti = NULL;
+	} else {
+		KVM_BUG_ON(true);
+	}
 }
 
 static inline gthread_info_t *pv_vcpu_get_gti(struct kvm_vcpu *vcpu)
@@ -168,6 +208,21 @@ static inline gmm_struct_t *pv_mmu_get_init_gmm(struct kvm *kvm)
 	return kvm->arch.init_gmm;
 }
 
+static inline void pv_mmu_clear_init_gmm(struct kvm *kvm)
+{
+	kvm->arch.init_gmm = NULL;
+}
+
+static inline bool pv_mmu_is_init_gmm(struct kvm *kvm, gmm_struct_t *gmm)
+{
+	if (likely(!kvm->arch.is_hv && kvm->arch.is_pv)) {
+		return gmm == pv_mmu_get_init_gmm(kvm);
+	} else {
+		KVM_BUG_ON(true);
+	}
+	return false;
+}
+
 static inline gmm_struct_t *pv_vcpu_get_init_gmm(struct kvm_vcpu *vcpu)
 {
 	return pv_mmu_get_init_gmm(vcpu->kvm);
@@ -175,12 +230,7 @@ static inline gmm_struct_t *pv_vcpu_get_init_gmm(struct kvm_vcpu *vcpu)
 
 static inline bool pv_vcpu_is_init_gmm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
-	if (likely(!vcpu->arch.is_hv && vcpu->arch.is_pv)) {
-		return gmm == pv_vcpu_get_init_gmm(vcpu);
-	} else {
-		KVM_BUG_ON(true);
-	}
-	return false;
+	return pv_mmu_is_init_gmm(vcpu->kvm, gmm);
 }
 
 static inline void pv_vcpu_clear_gmm(struct kvm_vcpu *vcpu)
@@ -238,10 +288,23 @@ pv_vcpu_set_active_gmm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 		KVM_BUG_ON(true);
 	}
 }
+static inline hpa_t
+kvm_mmu_get_init_gmm_root_hpa(struct kvm *kvm)
+{
+	gmm_struct_t *init_gmm = pv_mmu_get_init_gmm(kvm);
+
+	GTI_BUG_ON(init_gmm == NULL);
+	return init_gmm->root_hpa;
+}
 
 static inline mm_context_t *pv_vcpu_get_gmm_context(struct kvm_vcpu *vcpu)
 {
 	return &pv_vcpu_get_gmm(vcpu)->context;
+}
+
+static inline cpumask_t *pv_vcpu_get_gmm_cpumask(struct kvm_vcpu *vcpu)
+{
+	return gmm_cpumask(pv_vcpu_get_gmm(vcpu));
 }
 
 #else	/* !CONFIG_VIRTUALIZATION */
@@ -276,6 +339,11 @@ static inline void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 }
 
 static inline bool kvm_vcpu_in_hypercall(struct kvm_vcpu *vcpu)
+{
+	return false;
+}
+
+static inline bool host_test_dont_inject(pt_regs_t *regs)
 {
 	return false;
 }

@@ -19,28 +19,30 @@
 #include "ddk750_help.h"
 #include "ddk750_reg.h"
 #include "ddk750_power.h"
+#include "lynx_drv.h"
 
-void ddk750_setDPMS(DPMS_t state)
+void ddk750_setDPMS(struct lynx_share *share, DPMS_t state)
 {
 	unsigned int value;
-	if (getChipType() == SM750LE) {
-		value = PEEK32(CRT_DISPLAY_CTRL);
+	if (getChipType(share) == SM750LE) {
+		value = PEEK32(share->pvReg, CRT_DISPLAY_CTRL);
 		value &= (~(3 << CRT_DISPLAY_CTRL_DPMS_LSB));
-		POKE32(CRT_DISPLAY_CTRL,
+		POKE32(share->pvReg, CRT_DISPLAY_CTRL,
 		       value | (state << CRT_DISPLAY_CTRL_DPMS_LSB));
 	} else {
-		value = PEEK32(SYSTEM_CTRL);
+		value = PEEK32(share->pvReg, SYSTEM_CTRL);
 		value &= (~(3 << SYSTEM_CTRL_DPMS_LSB));
 		value |= state << SYSTEM_CTRL_DPMS_LSB;
-		POKE32(SYSTEM_CTRL, value);
+		POKE32(share->pvReg, SYSTEM_CTRL, value);
 	}
 }
 
-unsigned int getPowerMode()
+unsigned int getPowerMode(struct lynx_share *share)
 {
-	if (getChipType() == SM750LE)
+	if (getChipType(share) == SM750LE)
 		return 0;
-	return 2 & (PEEK32(POWER_MODE_CTRL) >> POWER_MODE_CTRL_MODE_LSB);
+	return 2 & (PEEK32(share->pvReg, POWER_MODE_CTRL)
+					>> POWER_MODE_CTRL_MODE_LSB);
 }
 
 
@@ -48,13 +50,13 @@ unsigned int getPowerMode()
  * SM50x can operate in one of three modes: 0, 1 or Sleep.
  * On hardware reset, power mode 0 is default.
  */
-void setPowerMode(unsigned int powerMode)
+void setPowerMode(struct lynx_share *share, unsigned int powerMode)
 {
 	unsigned int control_value = 0;
 
-	control_value = PEEK32(POWER_MODE_CTRL);
+	control_value = PEEK32(share->pvReg, POWER_MODE_CTRL);
 	control_value &= (~(3 << POWER_MODE_CTRL_MODE_LSB));
-	if (getChipType() == SM750LE)
+	if (getChipType(share) == SM750LE)
 		return;
 
 	switch (powerMode) {
@@ -89,16 +91,16 @@ void setPowerMode(unsigned int powerMode)
 	}
 
 	/* Program new power mode. */
-	POKE32(POWER_MODE_CTRL, control_value);
+	POKE32(share->pvReg, POWER_MODE_CTRL, control_value);
 }
 
-void setCurrentGate(unsigned int gate)
+void setCurrentGate(struct lynx_share *share, unsigned int gate)
 {
 	unsigned int gate_reg;
 	unsigned int mode;
 
 	/* Get current power mode. */
-	mode = getPowerMode();
+	mode = getPowerMode(share);
 
 	switch (mode) {
 	case POWER_MODE_CTRL_MODE_MODE0:
@@ -113,7 +115,7 @@ void setCurrentGate(unsigned int gate)
 		gate_reg = MODE0_GATE;
 		break;
 	}
-	POKE32(gate_reg, gate);
+	POKE32(share->pvReg, gate_reg, gate);
 }
 
 
@@ -121,11 +123,11 @@ void setCurrentGate(unsigned int gate)
 /*
  * This function enable/disable the 2D engine.
  */
-void enable2DEngine(unsigned int enable)
+void enable2DEngine(struct lynx_share *share, unsigned int enable)
 {
 	uint32_t gate;
 
-	gate = PEEK32(CURRENT_GATE);
+	gate = PEEK32(share->pvReg, CURRENT_GATE);
 	if (enable) {
 		gate |= 1 << CURRENT_GATE_DE_LSB;
 		gate |= 1 << CURRENT_GATE_CSC_LSB;
@@ -133,19 +135,19 @@ void enable2DEngine(unsigned int enable)
 		gate &= (~(1 << CURRENT_GATE_DE_LSB));
 		gate &= (~(1 << CURRENT_GATE_CSC_LSB));
 	}
-	setCurrentGate(gate);
+	setCurrentGate(share, gate);
 }
 
 
 /*
  * This function enable/disable the ZV Port.
  */
-void enableZVPort(unsigned int enable)
+void enableZVPort(struct lynx_share *share, unsigned int enable)
 {
 	uint32_t gate;
 
 	/* Enable ZV Port Gate */
-	gate = PEEK32(CURRENT_GATE);
+	gate = PEEK32(share->pvReg, CURRENT_GATE);
 	if (enable) {
 		gate |= 1 << CURRENT_GATE_ZVPORT_LSB;
 
@@ -158,85 +160,85 @@ void enableZVPort(unsigned int enable)
 		gate &= (~(1 << CURRENT_GATE_ZVPORT_LSB));
 	}
 
-	setCurrentGate(gate);
+	setCurrentGate(share, gate);
 }
 
 
-void enableSSP(unsigned int enable)
+void enableSSP(struct lynx_share *share, unsigned int enable)
 {
 	uint32_t gate;
 
 	/* Enable SSP Gate */
-	gate = PEEK32(CURRENT_GATE);
+	gate = PEEK32(share->pvReg, CURRENT_GATE);
 	if (enable)
 		gate |= 1 << CURRENT_GATE_SSP_LSB;
 	else
 		gate &= (~(1 << CURRENT_GATE_SSP_LSB));
 
-	setCurrentGate(gate);
+	setCurrentGate(share, gate);
 }
 
-void enableDMA(unsigned int enable)
+void enableDMA(struct lynx_share *share, unsigned int enable)
 {
 	uint32_t gate;
 
 	/* Enable DMA Gate */
-	gate = PEEK32(CURRENT_GATE);
+	gate = PEEK32(share->pvReg, CURRENT_GATE);
 	if (enable)
 		gate |= 1 << CURRENT_GATE_DMA_LSB;
 	else
 		gate &= (~(1 << CURRENT_GATE_DMA_LSB));
 
-	setCurrentGate(gate);
+	setCurrentGate(share, gate);
 }
 
 /*
  * This function enable/disable the GPIO Engine
  */
-void enableGPIO(unsigned int enable)
+void enableGPIO(struct lynx_share *share, unsigned int enable)
 {
 	uint32_t gate;
 
 	/* Enable GPIO Gate */
-	gate = PEEK32(CURRENT_GATE);
+	gate = PEEK32(share->pvReg, CURRENT_GATE);
 	if (enable)
 		gate |= 1 << CURRENT_GATE_GPIO_LSB;
 	else
 		gate &= (~(1 << CURRENT_GATE_GPIO_LSB));
 
-	setCurrentGate(gate);
+	setCurrentGate(share, gate);
 }
 
 /*
  * This function enable/disable the PWM Engine
  */
-void enablePWM(unsigned int enable)
+void enablePWM(struct lynx_share *share, unsigned int enable)
 {
 	uint32_t gate;
 
 	/* Enable PWM Gate */
-	gate = PEEK32(CURRENT_GATE);
+	gate = PEEK32(share->pvReg, CURRENT_GATE);
 	if (enable)
 		gate |= 1 << CURRENT_GATE_PWM_LSB;
 	else
 		gate &= (~(1 << CURRENT_GATE_PWM_LSB));
 
-	setCurrentGate(gate);
+	setCurrentGate(share, gate);
 }
 
 /*
  * This function enable/disable the I2C Engine
  */
-void enableI2C(unsigned int enable)
+void enableI2C(struct lynx_share *share, unsigned int enable)
 {
 	uint32_t gate;
 
 	/* Enable I2C Gate */
-	gate = PEEK32(CURRENT_GATE);
+	gate = PEEK32(share->pvReg, CURRENT_GATE);
 	if (enable)
 		gate |= 1 << CURRENT_GATE_I2C_LSB;
 	else
 		gate &= (~(1 << CURRENT_GATE_I2C_LSB));
 
-	setCurrentGate(gate);
+	setCurrentGate(share, gate);
 }

@@ -37,15 +37,14 @@ static inline void queued_spin_unlock(struct qspinlock *lock)
 
 static __always_inline void pv_wait(u8 *ptr, u8 val)
 {
-	if (cpu_has(CPU_FEAT_ISET_V6) && READ_CORE_MODE_REG().gmi &&
-			READ_ONCE(*ptr) == val)
+	if (IS_HV_GM() && READ_ONCE(*ptr) == val)
 		HYPERVISOR_pv_wait();
 }
 
 
 static __always_inline void pv_kick(int cpu)
 {
-	if (cpu_has(CPU_FEAT_ISET_V6) && READ_CORE_MODE_REG().gmi)
+	if (IS_HV_GM())
 		HYPERVISOR_pv_kick(cpu);
 }
 
@@ -68,7 +67,7 @@ extern void __pv_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 extern void native_queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 static inline void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
-	if (cpu_has(CPU_FEAT_ISET_V6) && READ_CORE_MODE_REG().gmi)
+	if (IS_HV_GM())
 		__pv_queued_spin_lock_slowpath(lock, val);
 	else
 		native_queued_spin_lock_slowpath(lock, val);
@@ -79,7 +78,7 @@ extern void __pv_queued_spin_unlock(struct qspinlock *lock);
 # define queued_spin_unlock queued_spin_unlock
 static inline void queued_spin_unlock(struct qspinlock *lock)
 {
-	if (cpu_has(CPU_FEAT_ISET_V6) && READ_CORE_MODE_REG().gmi)
+	if (IS_HV_GM())
 		__pv_queued_spin_unlock(lock);
 	else
 		native_queued_spin_unlock(lock);

@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -64,11 +64,6 @@ extern "C" {
 ************************ Command Buffer and Event Objects **********************
 \******************************************************************************/
 
-/* The number of context buffers per user. */
-#define gcdCONTEXT_BUFFER_COUNT 2
-
-#define gcdRENDER_FENCE_LENGTH                      (6 * gcmSIZEOF(gctUINT32))
-#define gcdBLT_FENCE_LENGTH                         (10 * gcmSIZEOF(gctUINT32))
 #define gcdRESERVED_FLUSHCACHE_LENGTH               (2 * gcmSIZEOF(gctUINT32))
 #define gcdRESERVED_PAUSE_OQ_LENGTH                 (2 * gcmSIZEOF(gctUINT32))
 #define gcdRESERVED_PAUSE_XFBWRITTEN_QUERY_LENGTH   (4 * gcmSIZEOF(gctUINT32))
@@ -76,96 +71,11 @@ extern "C" {
 #define gcdRESERVED_PAUSE_XFB_LENGTH                (2 * gcmSIZEOF(gctUINT32))
 #define gcdRESERVED_HW_FENCE_32BIT                  (4 * gcmSIZEOF(gctUINT32))
 #define gcdRESERVED_HW_FENCE_64BIT                  (6 * gcmSIZEOF(gctUINT32))
-#define gcdRESERVED_PAUSE_PROBE_LENGTH              (TOTAL_PROBE_NUMBER * 2 * gcmSIZEOF(gctUINT32))
 
 #define gcdRESUME_OQ_LENGTH                         (2 * gcmSIZEOF(gctUINT32))
 #define gcdRESUME_XFBWRITTEN_QUERY_LENGTH           (4 * gcmSIZEOF(gctUINT32))
 #define gcdRESUME_PRIMGEN_QUERY_LENGTH              (4 * gcmSIZEOF(gctUINT32))
 #define gcdRESUME_XFB_LENGH                         (2 * gcmSIZEOF(gctUINT32))
-#define gcdRESUME_PROBE_LENGH                       (TOTAL_PROBE_NUMBER * 2 * gcmSIZEOF(gctUINT32))
-
-
-/* State delta record. */
-typedef struct _gcsSTATE_DELTA_RECORD * gcsSTATE_DELTA_RECORD_PTR;
-typedef struct _gcsSTATE_DELTA_RECORD
-{
-    /* State address. */
-    gctUINT                     address;
-
-    /* State mask. */
-    gctUINT32                   mask;
-
-    /* State data. */
-    gctUINT32                   data;
-}
-gcsSTATE_DELTA_RECORD;
-
-/* State delta. */
-typedef struct _gcsSTATE_DELTA
-{
-    /* For debugging: the number of delta in the order of creation. */
-    gctUINT                     num;
-
-    /* Main state delta ID. Every time state delta structure gets reinitialized,
-       main ID is incremented. If main state ID overflows, all map entry IDs get
-       reinitialized to make sure there is no potential erroneous match after
-       the overflow.*/
-    gctUINT                     id;
-
-    /* The number of contexts pending modification by the delta. */
-    gctINT                      refCount;
-
-    /* Vertex element count for the delta buffer. */
-    gctUINT                     elementCount;
-
-    /* Number of states currently stored in the record array. */
-    gctUINT                     recordCount;
-
-    /* Record array; holds all modified states in gcsSTATE_DELTA_RECORD. */
-    gctUINT64                   recordArray;
-
-    /* Map entry ID is used for map entry validation. If map entry ID does not
-       match the main state delta ID, the entry and the corresponding state are
-       considered not in use. */
-    gctUINT64                   mapEntryID;
-    gctUINT                     mapEntryIDSize;
-
-    /* If the map entry ID matches the main state delta ID, index points to
-       the state record in the record array. */
-    gctUINT64                   mapEntryIndex;
-
-    /* Previous and next state deltas in gcsSTATE_DELTA. */
-    gctUINT64                   prev;
-    gctUINT64                   next;
-}
-gcsSTATE_DELTA;
-
-#define gcdPATCH_LIST_SIZE      1024
-
-/* Command buffer patch record. */
-typedef struct _gcsPATCH
-{
-    /* Handle of a video memory node. */
-    gctUINT32                   handle;
-
-    /* Flag */
-    gctUINT32                   flag;
-}
-gcsPATCH;
-
-/* List of patches for the command buffer. */
-typedef struct _gcsPATCH_LIST
-{
-    /* Array of patch records. */
-    struct _gcsPATCH            patch[gcdPATCH_LIST_SIZE];
-
-    /* Number of patches in the array. */
-    gctUINT                     count;
-
-    /* Next item in the list. */
-    struct _gcsPATCH_LIST       *next;
-}
-gcsPATCH_LIST;
 
 #define FENCE_NODE_LIST_INIT_COUNT         100
 
@@ -195,6 +105,43 @@ typedef struct _gcsFENCE_LIST
 gcsFENCE_LIST;
 
 /* Command buffer object. */
+/*
+ * Initial (before put commands):
+ *
+ *    +-------------------------------------------
+ * ...|reservedHead|
+ *    +-------------------------------------------
+ *    ^            ^
+ *    |            |
+ * startOffset   offset
+ *
+ *
+ * After put command, in commit:
+ *
+ *    +------------------------------------------+
+ * .. |reservedHead| .. commands .. |reservedTail| ..
+ *    +------------------------------------------+
+ *    ^                             ^
+ *    |                             |
+ * startOffset                    offset
+ *
+ *
+ * Commit done, becomes initial state:
+ *
+ *    +------------------------------------------+-----------------
+ * .. |reservedHead| .. commands .. |reservedTail|reservedHead| ..
+ *    +------------------------------------------+-----------------
+ *                                               ^            ^
+ *                                               |            |
+ *                                          startOffset    offset
+ *
+ * reservedHead:
+ * Select pipe commands.
+ *
+ * reservedTail:
+ * Link, Fence, ChipEnable
+ *
+ */
 struct _gcoCMDBUF
 {
     /* The object. */
@@ -211,11 +158,15 @@ struct _gcoCMDBUF
     gctBOOL                     using2D;
     gctBOOL                     using3D;
 
-    /* Size of reserved tail for each commit. */
+    /* Size of reserved head and tail for each commit. */
+    gctUINT32                   reservedHead;
     gctUINT32                   reservedTail;
 
-    /* Physical address of command buffer. Just a name. */
-    gctUINT32                   physical;
+    /* Video memory handle of command buffer. */
+    gctUINT32                   videoMemNode;
+
+    /* GPU address of command buffer. */
+    gctUINT32                   address;
 
     /* Logical address of command buffer. */
     gctUINT64                   logical;
@@ -236,23 +187,10 @@ struct _gcoCMDBUF
     gctUINT64                   lastReserve;
     gctUINT32                   lastOffset;
 
-#if gcdSECURE_USER
-    /* Hint array for the current command buffer. */
-    gctUINT                     hintArraySize;
-    gctUINT64                   hintArray;
-    gctUINT64                   hintArrayTail;
-#endif
-
     /* Last load state command location and hardware address. */
     gctUINT64                   lastLoadStatePtr;
     gctUINT32                   lastLoadStateAddress;
     gctUINT32                   lastLoadStateCount;
-
-    /* List of patches. */
-    gctUINT64                   patchHead;
-
-    /* Link to next gcoCMDBUF object in one commit. */
-    gctUINT64                   nextCMDBUF;
 
     /*
     * Put pointer type member after this line.
@@ -270,16 +208,6 @@ struct _gcoCMDBUF
     gctUINT32                   mirrorCount;
 };
 
-typedef struct _gcsQUEUE
-{
-    /* Pointer to next gcsQUEUE structure in gcsQUEUE. */
-    gctUINT64                   next;
-
-    /* Event information. */
-    gcsHAL_INTERFACE            iface;
-}
-gcsQUEUE;
-
 /* Event queue. */
 struct _gcoQUEUE
 {
@@ -290,20 +218,30 @@ struct _gcoQUEUE
     gcsQUEUE_PTR                head;
     gcsQUEUE_PTR                tail;
 
-    /* chunks of the records. */
-    gctPOINTER                  chunks;
-
     /* List of free records. */
     gcsQUEUE_PTR                freeList;
+
+    /* chunks of the records. */
+    gcsQUEUE_CHUNK *            chunks;
 
     #define gcdIN_QUEUE_RECORD_LIMIT 16
     /* Number of records currently in queue */
     gctUINT32                   recordCount;
+    /* Number of records which release resource currently in queue */
+    gctUINT32                   tmpBufferRecordCount;
 
     /* Max size of pending unlock node in vidmem pool not committed */
     gctUINT                     maxUnlockBytes;
 
     gceENGINE                   engine;
+
+    /* Pointer to gcoHARDWARE object. */
+    gcoHARDWARE                 hardware;
+
+#if gcdENABLE_SW_PREEMPTION
+    gctUINT                     priorityID;
+    gctBOOL                     topPriority;
+#endif
 };
 
 struct _gcsTEMPCMDBUF

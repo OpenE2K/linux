@@ -421,6 +421,7 @@ void __init start_early_boot(void)
 		v |= smp_processor_id();
 		apic_write(APIC_LVT0, v);
 	}
+	physid_clear(hard_smp_processor_id(), phys_cpu_offline_map);
 	per_cpu_patch();
 	start_kernel();
 }

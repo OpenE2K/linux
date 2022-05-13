@@ -104,7 +104,7 @@ loader:
 	ldw,0	[%dr1], %r2			// load cpu_count
 	adds,0	%r2, 1, %r2			// cpu_count ++
 	stw,2	%r2, [%dr1]			// save cpu_count
-	sxt,0	6, %r2, %dr2			// ES2 AP CPU #
+	sxt,0	6, %r2, %dr2			// AP CPU #
 #endif	/* CONFIG_E2K_SIC */
 	shld,0	%dr2, 2, %dr2
 	stw,2	%r0, [%dr2 + all_pic_ids]
