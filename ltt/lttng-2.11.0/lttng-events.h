@@ -717,7 +717,7 @@ int lttng_add_vppid_to_ctx(struct lttng_ctx **ctx);
 int lttng_add_hostname_to_ctx(struct lttng_ctx **ctx);
 int lttng_add_interruptible_to_ctx(struct lttng_ctx **ctx);
 int lttng_add_need_reschedule_to_ctx(struct lttng_ctx **ctx);
-#if defined(CONFIG_PREEMPT_RT_FULL) || defined(CONFIG_PREEMPT)
+#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT)
 int lttng_add_preemptible_to_ctx(struct lttng_ctx **ctx);
 #else
 static inline
@@ -726,7 +726,7 @@ int lttng_add_preemptible_to_ctx(struct lttng_ctx **ctx)
 	return -ENOSYS;
 }
 #endif
-#ifdef CONFIG_PREEMPT_RT_FULL
+#ifdef CONFIG_PREEMPT_RT
 int lttng_add_migratable_to_ctx(struct lttng_ctx **ctx);
 #else
 static inline
