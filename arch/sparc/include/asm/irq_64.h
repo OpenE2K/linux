@@ -11,10 +11,25 @@
 #include <linux/linkage.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/interrupt.h>
 #include <asm/pil.h>
 #include <asm/ptrace.h>
 
+#ifdef CONFIG_E90S
+
+
+#include <asm/irq_vectors.h>
+
+struct e90s_irq_pending {
+	unsigned vector;
+} __aligned(SMP_CACHE_BYTES);
+extern struct e90s_irq_pending e90s_irq_pending[NR_CPUS];
+
+#define irq_canonicalize(irq)	(irq)
+
+#define l_irq_enter()
+#define l_irq_exit()
+
+#else /*CONFIG_E90S*/
 /* IMAP/ICLR register defines */
 #define IMAP_VALID		0x80000000UL	/* IRQ Enabled		*/
 #define IMAP_TID_UPA		0x7c000000UL	/* UPA TargetID		*/
@@ -61,6 +76,7 @@ void sun4u_destroy_msi(unsigned int irq);
 unsigned int irq_alloc(unsigned int dev_handle, unsigned int dev_ino);
 void irq_free(unsigned int irq);
 
+#endif /*CONFIG_E90S*/
 void __init init_IRQ(void);
 void fixup_irqs(void);
 

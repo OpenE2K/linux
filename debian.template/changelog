@@ -1,0 +1,6 @@
+linux (xxRKERNELVERSIONxx) unstable; urgency=low
+
+  * Build the package for OS Linux Elbrus.
+
+ -- MCST Kernel Team <os@mcst.ru>  Sun, 04 Dec 2016 22:15:45 +0300
+

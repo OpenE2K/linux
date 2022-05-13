@@ -40,6 +40,9 @@
 #include <linux/init_task.h>
 #include <linux/uaccess.h>
 
+
+#ifdef CONFIG_MCST
+#endif
 #include "internal.h"
 #include "mount.h"
 
@@ -307,6 +310,8 @@ static int acl_permission_check(struct inode *inode, int mask)
 			mode >>= 3;
 	}
 
+#ifdef CONFIG_MCST
+#endif /* CONFIG_MCST */	
 	/*
 	 * If the DACs are ok we don't need any capability check.
 	 */
@@ -429,6 +434,7 @@ int inode_permission(struct inode *inode, int mask)
 	retval = sb_permission(inode->i_sb, inode, mask);
 	if (retval)
 		return retval;
+
 
 	if (unlikely(mask & MAY_WRITE)) {
 		/*

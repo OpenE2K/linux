@@ -14975,6 +14975,14 @@ S:	Maintained
 F:	Documentation/hwmon/emc2103.rst
 F:	drivers/hwmon/emc2103.c
 
+SMSC EMC2305 HARDWARE MONITOR DRIVER
+M:	Reinhard Pfau <pfau@gdsys.de>
+L:	lm-sensors@lm-sensors.org
+S:	Maintained
+F:	Documentation/hwmon/emc2305
+F:	Documentation/devicetree/bindings/hwmon/emc2305.txt
+F:	drivers/mcst/emc/emc2305.c
+
 SMSC SCH5627 HARDWARE MONITOR DRIVER
 M:	Hans de Goede <hdegoede@redhat.com>
 L:	linux-hwmon@vger.kernel.org
@@ -15400,6 +15408,14 @@ M:	Ian Abbott <abbotti@mev.co.uk>
 M:	H Hartley Sweeten <hsweeten@visionengravers.com>
 S:	Odd Fixes
 F:	drivers/staging/comedi/
+
+STAGING - CRYSTAL HD VIDEO DECODER
+M:	Naren Sankar <nsankar@broadcom.com>
+M:	Jarod Wilson <jarod@wilsonet.com>
+M:	Scott Davilla <davilla@4pi.com>
+M:	Manu Abraham <abraham.manu@gmail.com>
+S:	Odd Fixes
+F:	drivers/staging/crystalhd/
 
 STAGING - FIELDBUS SUBSYSTEM
 M:	Sven Van Asbroeck <TheSven73@gmail.com>
@@ -16689,6 +16705,15 @@ S:	Supported
 F:	include/linux/visorbus.h
 F:	drivers/visorbus/
 F:	drivers/staging/unisys/
+
+UNION FILE SYSTEM
+M:	Erez Zadok <ezk@cs.sunysb.edu>
+L:	unionfs@filesystems.org
+W:	http://unionfs.filesystems.org/
+T:	git git://git.fsl.cs.sunysb.edu/unionfs-latest.git
+S:	Maintained
+F:	Documentation/filesystems/unionfs/
+F:	fs/unionfs/
 
 UNIVERSAL FLASH STORAGE HOST CONTROLLER DRIVER
 R:	Alim Akhtar <alim.akhtar@samsung.com>

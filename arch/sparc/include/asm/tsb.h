@@ -51,6 +51,18 @@
 #define TSB_TAG_INVALID_BIT	46
 #define TSB_TAG_INVALID_HIGH	(1 << (TSB_TAG_INVALID_BIT - 32))
 
+#ifdef	CONFIG_RMO
+#define TSB_MEMBAR	membar	#StoreStore
+#else	/* CONFIG_RMO */
+#define TSB_MEMBAR
+#endif	/* CONFIG_RMO */
+
+#ifdef	CONFIG_RMO
+#define TSB_MEMBAR	membar	#StoreStore
+#else	/* CONFIG_RMO */
+#define TSB_MEMBAR
+#endif	/* CONFIG_RMO */
+
 /* Some cpus support physical address quad loads.  We want to use
  * those if possible so we don't need to hard-lock the TSB mapping
  * into the TLB.  We encode some instruction patching in order to
@@ -127,11 +139,13 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	cmp	REG1, REG2;		\
 	bne,pn	%icc, 99b;		\
 	 nop;				\
+	TSB_MEMBAR
 
 #define TSB_WRITE(TSB, TTE, TAG) \
 	add	TSB, 0x8, TSB;   \
 	TSB_STORE(TSB, TTE);     \
 	sub	TSB, 0x8, TSB;   \
+	TSB_MEMBAR;              \
 	TSB_STORE(TSB, TAG);
 
 	/* Do a kernel page table walk.  Leaves valid PTE value in
@@ -151,7 +165,7 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	 * bit 23, for 8MB per PMD) we must propagate bit 22 for a
 	 * 4MB huge page.  For huge PUDs (which fall on bit 33, for
 	 * 8GB per PUD), we have to accommodate 256MB and 2GB huge
-	 * pages.  So for those we propagate bits 32 to 28.
+	 * pages.  So for those we propagate bits 32 to 22.
 	 */
 #define KERN_PGTABLE_WALK(VADDR, REG1, REG2, FAIL_LABEL)	\
 	sethi		%hi(swapper_pg_dir), REG1; \
@@ -170,7 +184,7 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	brz,pn		REG1, FAIL_LABEL; \
 	 sllx		REG2, 32, REG2; \
 	andcc		REG1, REG2, %g0; \
-	sethi		%hi(0xf8000000), REG2; \
+	sethi		%hi(0xffe00000), REG2; \
 	bne,pt		%xcc, 697f; \
 	 sllx		REG2, 1, REG2; \
 	sllx		VADDR, 64 - (PMD_SHIFT + PMD_BITS), REG2; \

@@ -56,8 +56,11 @@ EXPORT_SYMBOL(ceph_file_layout_to_legacy);
 
 int ceph_flags_to_mode(int flags)
 {
+#ifdef CONFIG_MCST
+	int mode = 0;
+#else
 	int mode;
-
+#endif
 #ifdef O_DIRECTORY  /* fixme */
 	if ((flags & O_DIRECTORY) == O_DIRECTORY)
 		return CEPH_FILE_MODE_PIN;

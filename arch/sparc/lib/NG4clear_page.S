@@ -28,3 +28,5 @@ NG4clear_user_page:	/* %o0=dest, %o1=vaddr */
 	 nop
 	.size		NG4clear_page,.-NG4clear_page
 	.size		NG4clear_user_page,.-NG4clear_user_page
+
+

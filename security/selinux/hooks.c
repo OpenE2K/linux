@@ -3674,9 +3674,9 @@ static int default_noexec;
 static int file_map_prot_check(struct file *file, unsigned long prot, int shared)
 {
 	const struct cred *cred = current_cred();
-	u32 sid = cred_sid(cred);
 	int rc = 0;
-
+#if !defined(CONFIG_E2K) && !defined(CONFIG_SPARC)
+	u32 sid = cred_sid(cred);
 	if (default_noexec &&
 	    (prot & PROT_EXEC) && (!file || IS_PRIVATE(file_inode(file)) ||
 				   (!shared && (prot & PROT_WRITE)))) {
@@ -3691,6 +3691,7 @@ static int file_map_prot_check(struct file *file, unsigned long prot, int shared
 		if (rc)
 			goto error;
 	}
+#endif
 
 	if (file) {
 		/* read access is always possible with a mapping */
@@ -3706,7 +3707,9 @@ static int file_map_prot_check(struct file *file, unsigned long prot, int shared
 		return file_has_perm(cred, file, av);
 	}
 
+#if !defined(CONFIG_E2K) && !defined(CONFIG_SPARC)
 error:
+#endif
 	return rc;
 }
 
@@ -3750,12 +3753,15 @@ static int selinux_file_mprotect(struct vm_area_struct *vma,
 				 unsigned long reqprot,
 				 unsigned long prot)
 {
+#if !defined(CONFIG_E2K) && !defined(CONFIG_SPARC)
 	const struct cred *cred = current_cred();
 	u32 sid = cred_sid(cred);
+#endif
 
 	if (selinux_state.checkreqprot)
 		prot = reqprot;
 
+#if !defined(CONFIG_E2K) && !defined(CONFIG_SPARC)
 	if (default_noexec &&
 	    (prot & PROT_EXEC) && !(vma->vm_flags & VM_EXEC)) {
 		int rc = 0;
@@ -3784,6 +3790,7 @@ static int selinux_file_mprotect(struct vm_area_struct *vma,
 		if (rc)
 			return rc;
 	}
+#endif
 
 	return file_map_prot_check(vma->vm_file, prot, vma->vm_flags&VM_SHARED);
 }
@@ -4752,7 +4759,11 @@ static int selinux_socket_connect_helper(struct socket *sock,
 		struct sockaddr_in *addr4 = NULL;
 		struct sockaddr_in6 *addr6 = NULL;
 		unsigned short snum;
+#ifndef CONFIG_MCST
 		u32 sid, perm;
+#else
+		u32 sid, uninitialized_var(perm);
+#endif
 
 		/* sctp_connectx(3) calls via selinux_sctp_bind_connect()
 		 * that validates multiple connect addresses. Because of this

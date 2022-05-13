@@ -5780,7 +5780,14 @@ u32 pcie_bandwidth_available(struct pci_dev *dev, struct pci_dev **limiting_dev,
 			if (width)
 				*width = next_width;
 		}
-
+#if defined(CONFIG_E90S) || defined(CONFIG_E2K)
+		/* Do do look higher then root port: it is the top of
+		 * the hierarchy */
+		if (pci_is_pcie(dev) && (pci_pcie_type(dev) ==
+					PCI_EXP_TYPE_ROOT_PORT)) {
+			break;
+		}
+#endif
 		dev = pci_upstream_bridge(dev);
 	}
 

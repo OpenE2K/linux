@@ -3237,7 +3237,7 @@ static __poll_t snd_pcm_poll(struct file *file, poll_table *wait)
  * Only on coherent architectures, we can mmap the status and the control records
  * for effcient data transfer.  On others, we have to use HWSYNC ioctl...
  */
-#if defined(CONFIG_X86) || defined(CONFIG_PPC) || defined(CONFIG_ALPHA)
+#if defined(CONFIG_X86) || defined(CONFIG_PPC) || defined(CONFIG_ALPHA) || defined(CONFIG_E2K)
 /*
  * mmap status record
  */
@@ -3360,6 +3360,10 @@ static inline struct page *
 snd_pcm_default_page_ops(struct snd_pcm_substream *substream, unsigned long ofs)
 {
 	void *vaddr = substream->runtime->dma_area + ofs;
+#ifdef CONFIG_MCST
+	if (is_vmalloc_addr(vaddr))
+		return vmalloc_to_page(vaddr);
+#endif
 	return virt_to_page(vaddr);
 }
 
@@ -3428,6 +3432,7 @@ int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 	}
 #endif /* CONFIG_GENERIC_ALLOCATOR */
 #ifndef CONFIG_X86 /* for avoiding warnings arch/x86/mm/pat.c */
+#ifndef CONFIG_E2K /* for avoiding semispec access to uncached area */
 	if (IS_ENABLED(CONFIG_HAS_DMA) && !substream->ops->page &&
 	    (substream->dma_buffer.dev.type == SNDRV_DMA_TYPE_DEV ||
 	     substream->dma_buffer.dev.type == SNDRV_DMA_TYPE_DEV_UC))
@@ -3436,6 +3441,7 @@ int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 					 substream->runtime->dma_area,
 					 substream->runtime->dma_addr,
 					 substream->runtime->dma_bytes);
+#endif /* CONFIG_E2K */
 #endif /* CONFIG_X86 */
 	/* mmap with fault handler */
 	area->vm_ops = &snd_pcm_vm_ops_data_fault;

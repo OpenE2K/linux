@@ -81,6 +81,31 @@
  * but that if any of the bits that fall off the right hand side
  * were one then we always set the LSbit.
  */
+#define _FP_FRAC_SRST_4(X,S,N,size)			\
+  do {							\
+    _FP_I_TYPE _up, _down, _skip, _i;			\
+    _FP_W_TYPE _s;					\
+    _skip = (N) / _FP_W_TYPE_SIZE;			\
+    _down = (N) % _FP_W_TYPE_SIZE;			\
+    _up = _FP_W_TYPE_SIZE - _down;			\
+    for (_s = _i = 0; _i < _skip; ++_i)			\
+      _s |= X##_f[_i];					\
+    if (!_down)						\
+      for (_i = 0; _i <= 3-_skip; ++_i)			\
+	X##_f[_i] = X##_f[_i+_skip];			\
+    else						\
+      {							\
+	_s |= X##_f[_i] << _up;				\
+	for (_i = 0; _i < 3-_skip; ++_i)		\
+	  X##_f[_i] = X##_f[_i+_skip] >> _down		\
+		      | X##_f[_i+_skip+1] << _up;	\
+	X##_f[_i++] = X##_f[3] >> _down;		\
+      }							\
+    for (; _i < 4; ++_i)				\
+      X##_f[_i] = 0;					\
+    S = (_s != 0);					\
+  } while (0)
+
 #define _FP_FRAC_SRS_4(X,N,size)					\
   do {									\
     _FP_I_TYPE _up, _down, _skip, _i;					\

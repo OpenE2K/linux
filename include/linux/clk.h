@@ -798,7 +798,11 @@ static inline int __must_check devm_clk_bulk_get_all(struct device *dev,
 static inline struct clk *devm_get_clk_from_child(struct device *dev,
 				struct device_node *np, const char *con_id)
 {
+#ifdef CONFIG_MCST
+	return ERR_PTR(-ENOENT);
+#else
 	return NULL;
+#endif
 }
 
 static inline void clk_put(struct clk *clk) {}

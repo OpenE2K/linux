@@ -433,6 +433,12 @@ static char *log_dict(const struct printk_log *msg)
 static void printk_emergency(char *buffer, int level, u64 ts_nsec, u16 cpu,
 			     char *text, u16 text_len);
 
+#ifdef CONFIG_MCST
+#ifdef CONFIG_NVRAM_PANIC
+extern void write_to_nvram_panic_area(const char *str, int len);
+#endif
+#endif
+
 /* insert record into the buffer, discard old ones, update heads */
 static int log_store(u32 caller_id, int facility, int level,
 		     enum log_flags flags, u64 ts_nsec, u16 cpu,
@@ -455,7 +461,15 @@ static int log_store(u32 caller_id, int facility, int level,
 		prb_inc_lost(&printk_rb);
 		return 0;
 	}
-
+#ifdef CONFIG_MCST
+#ifdef CONFIG_NVRAM_PANIC
+	if (smp_processor_id() == atomic_read(&panic_cpu)) {
+		write_to_nvram_panic_area(text, text_len);
+		if (flags & LOG_NEWLINE)
+			write_to_nvram_panic_area("\n", 1);
+	}
+#endif
+#endif	
 	/* fill message */
 	msg = (struct printk_log *)rbuf;
 	memcpy(log_text(msg), text, text_len);
@@ -2373,6 +2387,10 @@ void console_flush_on_panic(enum con_flush_mode mode)
 	 * console? What if the printk kthread is still alive?
 	 */
 }
+#ifdef CONFIG_E2K
+//TODO switch to __bug_table and remove this
+EXPORT_SYMBOL(console_flush_on_panic);
+#endif
 
 /*
  * Return the console tty driver structure and its associated index

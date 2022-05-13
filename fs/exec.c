@@ -274,6 +274,11 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 
 	mm->stack_vm = mm->total_vm = 1;
 	arch_bprm_mm_init(mm, vma);
+#if	defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+	err = arch_bprm_mm_init_locked(mm, vma);
+	if (err)
+		goto err;
+#endif
 	up_write(&mm->mmap_sem);
 	bprm->p = vma->vm_end - sizeof(void *);
 	return 0;

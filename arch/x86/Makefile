@@ -4,12 +4,12 @@
 # select defconfig based on actual architecture
 ifeq ($(ARCH),x86)
   ifeq ($(shell uname -m),x86_64)
-        KBUILD_DEFCONFIG := x86_64_defconfig
+        KBUILD_DEFCONFIG ?= x86_64_defconfig
   else
-        KBUILD_DEFCONFIG := i386_defconfig
+        KBUILD_DEFCONFIG ?= i386_defconfig
   endif
 else
-        KBUILD_DEFCONFIG := $(ARCH)_defconfig
+        KBUILD_DEFCONFIG ?= $(ARCH)_defconfig
 endif
 
 # For gcc stack alignment is specified with -mpreferred-stack-boundary,
@@ -295,6 +295,10 @@ $(BOOT_TARGETS): vmlinux
 PHONY += install
 install:
 	$(Q)$(MAKE) $(build)=$(boot) $@
+
+PHONY += build-install
+build-install:
+	$(CONFIG_SHELL) scripts/gen-osl-build -l $(srctree) -m $(MODLIB)
 
 PHONY += vdso_install
 vdso_install:

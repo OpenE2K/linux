@@ -6,6 +6,9 @@
  * Copyright (C) 2011-2013 Freescale Semiconductor, Inc.
  * Copyright (C) 2010, Guennadi Liakhovetski <g.liakhovetski@gmx.de>
  */
+#ifdef CONFIG_MCST
+#define DEBUG
+#endif
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -31,7 +34,7 @@
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_scdc_helper.h>
-
+#include <drm/drm_crtc_helper.h>
 #include "dw-hdmi-audio.h"
 #include "dw-hdmi-cec.h"
 #include "dw-hdmi.h"
@@ -140,8 +143,10 @@ struct dw_hdmi {
 	struct platform_device *audio;
 	struct platform_device *cec;
 	struct device *dev;
+#ifndef CONFIG_MCST
 	struct clk *isfr_clk;
 	struct clk *iahb_clk;
+#endif
 	struct clk *cec_clk;
 	struct dw_hdmi_i2c *i2c;
 
@@ -202,12 +207,12 @@ struct dw_hdmi {
 	(HDMI_PHY_RX_SENSE0 | HDMI_PHY_RX_SENSE1 | \
 	 HDMI_PHY_RX_SENSE2 | HDMI_PHY_RX_SENSE3)
 
-static inline void hdmi_writeb(struct dw_hdmi *hdmi, u8 val, int offset)
+static inline void __hdmi_writeb(struct dw_hdmi *hdmi, u8 val, int offset)
 {
 	regmap_write(hdmi->regm, offset << hdmi->reg_shift, val);
 }
 
-static inline u8 hdmi_readb(struct dw_hdmi *hdmi, int offset)
+static inline u8 __hdmi_readb(struct dw_hdmi *hdmi, int offset)
 {
 	unsigned int val = 0;
 
@@ -216,16 +221,43 @@ static inline u8 hdmi_readb(struct dw_hdmi *hdmi, int offset)
 	return val;
 }
 
-static void hdmi_modb(struct dw_hdmi *hdmi, u8 data, u8 mask, unsigned reg)
+static void __hdmi_modb(struct dw_hdmi *hdmi, u8 data, u8 mask, unsigned reg)
 {
 	regmap_update_bits(hdmi->regm, reg << hdmi->reg_shift, mask, data);
 }
 
-static void hdmi_mask_writeb(struct dw_hdmi *hdmi, u8 data, unsigned int reg,
-			     u8 shift, u8 mask)
-{
-	hdmi_modb(hdmi, data << shift, mask, reg);
-}
+#ifdef DEBUG
+#define hdmi_writeb(_hdmi, _val, _offset) do {			\
+	unsigned _val2 = _val;					\
+	DRM_DEBUG("%s: wr: %s (%x): 0x%02x\n", dev_name(hdmi->dev),	\
+			#_offset, _offset, _val2);		\
+	__hdmi_writeb(_hdmi, _val, _offset);			\
+} while (0)
+
+#define hdmi_readb(_hdmi, _offset)			\
+({							\
+	u8 _val = __hdmi_readb(_hdmi, _offset);		\
+	DRM_DEBUG("%s: rd: %s (%x): 0x%02x\n", dev_name(hdmi->dev),	\
+			#_offset, _offset, _val);		\
+	_val;						\
+})
+
+#define hdmi_modb(hdmi, data, mask, _reg) do {			\
+	unsigned _val2 = data;					\
+	unsigned _m = mask;					\
+	DRM_DEBUG("%s: md: %s (%x): 0x%02x (mask %x)\n", dev_name(hdmi->dev),\
+			#_reg, _reg, _val2, _m);		\
+	__hdmi_modb(hdmi, data, _m, _reg);			\
+} while (0)
+
+#else
+#define hdmi_writeb __hdmi_writeb
+#define hdmi_readb  __hdmi_readb
+#define hdmi_modb  __hdmi_modb
+#endif
+
+#define hdmi_mask_writeb(__hdmi, __data, __reg, __shift, __mask)	\
+		hdmi_modb(__hdmi, (__data) << (__shift), __mask, __reg)
 
 static void dw_hdmi_i2c_init(struct dw_hdmi *hdmi)
 {
@@ -601,9 +633,13 @@ static void hdmi_set_clk_regenerator(struct dw_hdmi *hdmi,
 	n = hdmi_compute_n(sample_rate, pixel_clk);
 
 	config3 = hdmi_readb(hdmi, HDMI_CONFIG3_ID);
-
+#ifdef CONFIG_MCST
+	/* CTS needs to be computed for AHB & GPAUD */
+	if (config3 & (HDMI_CONFIG3_AHBAUDDMA | HDMI_CONFIG3_GPAUD)) {
+#else
 	/* Only compute CTS when using internal AHB audio */
 	if (config3 & HDMI_CONFIG3_AHBAUDDMA) {
+#endif
 		/*
 		 * Compute the CTS value from the N value.  Note that CTS and N
 		 * can be up to 20 bits in total, so we need 64-bit math.  Also
@@ -627,6 +663,10 @@ static void hdmi_set_clk_regenerator(struct dw_hdmi *hdmi,
 	hdmi->audio_n = n;
 	hdmi->audio_cts = cts;
 	hdmi_set_cts_n(hdmi, cts, hdmi->audio_enable ? n : 0);
+#ifdef CONFIG_MCST /*FIXME:*/
+	if (config3 & HDMI_CONFIG3_GPAUD) /* i2s: enable 2 channels */
+		hdmi_writeb(hdmi, 3, HDMI_GP_CONF1);
+#endif
 	spin_unlock_irq(&hdmi->audio_lock);
 }
 
@@ -1144,31 +1184,46 @@ static bool hdmi_phy_wait_i2c_done(struct dw_hdmi *hdmi, int msec)
 {
 	u32 val;
 
-	while ((val = hdmi_readb(hdmi, HDMI_IH_I2CMPHY_STAT0) & 0x3) == 0) {
+	while ((val = __hdmi_readb(hdmi, HDMI_IH_I2CMPHY_STAT0) & 0x3) == 0) {
 		if (msec-- == 0)
 			return false;
 		udelay(1000);
 	}
-	hdmi_writeb(hdmi, val, HDMI_IH_I2CMPHY_STAT0);
+	__hdmi_writeb(hdmi, val, HDMI_IH_I2CMPHY_STAT0);
 
 	return true;
 }
 
-void dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
+void __dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
 			   unsigned char addr)
 {
-	hdmi_writeb(hdmi, 0xFF, HDMI_IH_I2CMPHY_STAT0);
-	hdmi_writeb(hdmi, addr, HDMI_PHY_I2CM_ADDRESS_ADDR);
-	hdmi_writeb(hdmi, (unsigned char)(data >> 8),
+	__hdmi_writeb(hdmi, 0xFF, HDMI_IH_I2CMPHY_STAT0);
+	__hdmi_writeb(hdmi, addr, HDMI_PHY_I2CM_ADDRESS_ADDR);
+	__hdmi_writeb(hdmi, (unsigned char)(data >> 8),
 		    HDMI_PHY_I2CM_DATAO_1_ADDR);
-	hdmi_writeb(hdmi, (unsigned char)(data >> 0),
+	__hdmi_writeb(hdmi, (unsigned char)(data >> 0),
 		    HDMI_PHY_I2CM_DATAO_0_ADDR);
-	hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_WRITE,
+	__hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_WRITE,
 		    HDMI_PHY_I2CM_OPERATION_ADDR);
-	hdmi_phy_wait_i2c_done(hdmi, 1000);
+	WARN_ON(!hdmi_phy_wait_i2c_done(hdmi, 1000));
 }
-EXPORT_SYMBOL_GPL(dw_hdmi_phy_i2c_write);
+EXPORT_SYMBOL_GPL(__dw_hdmi_phy_i2c_write);
 
+#ifdef CONFIG_MCST
+unsigned short __dw_hdmi_phy_i2c_read(struct dw_hdmi *hdmi, unsigned char addr)
+{
+	unsigned short v;
+	__hdmi_writeb(hdmi, 0xFF, HDMI_IH_I2CMPHY_STAT0);
+	__hdmi_writeb(hdmi, addr, HDMI_PHY_I2CM_ADDRESS_ADDR);
+	__hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_READ,
+		    HDMI_PHY_I2CM_OPERATION_ADDR);
+	WARN_ON(!hdmi_phy_wait_i2c_done(hdmi, 1000));
+	v = __hdmi_readb(hdmi, HDMI_PHY_I2CM_DATAI_0_ADDR);
+	v |= __hdmi_readb(hdmi,  HDMI_PHY_I2CM_DATAI_1_ADDR) << 8;
+	return v;
+}
+EXPORT_SYMBOL_GPL(__dw_hdmi_phy_i2c_read);
+#endif
 /* Filter out invalid setups to avoid configuring SCDC and scrambling */
 static bool dw_hdmi_support_scdc(struct dw_hdmi *hdmi)
 {
@@ -1279,8 +1334,18 @@ static void dw_hdmi_phy_sel_interface_control(struct dw_hdmi *hdmi, u8 enable)
 void dw_hdmi_phy_reset(struct dw_hdmi *hdmi)
 {
 	/* PHY reset. The reset signal is active high on Gen2 PHYs. */
+#ifdef CONFIG_MCST
+	if (hdmi->version == 0x200a) { /* e1c+ */
+		hdmi_writeb(hdmi, 0, HDMI_MC_PHYRSTZ);
+		hdmi_writeb(hdmi, HDMI_MC_PHYRSTZ_PHYRSTZ, HDMI_MC_PHYRSTZ);
+	} else {
+		hdmi_writeb(hdmi, HDMI_MC_PHYRSTZ_PHYRSTZ, HDMI_MC_PHYRSTZ);
+		hdmi_writeb(hdmi, 0, HDMI_MC_PHYRSTZ);
+	}
+#else
 	hdmi_writeb(hdmi, HDMI_MC_PHYRSTZ_PHYRSTZ, HDMI_MC_PHYRSTZ);
 	hdmi_writeb(hdmi, 0, HDMI_MC_PHYRSTZ);
+#endif
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_phy_reset);
 
@@ -1314,7 +1379,6 @@ static void dw_hdmi_phy_power_off(struct dw_hdmi *hdmi)
 		val = hdmi_readb(hdmi, HDMI_PHY_STAT0);
 		if (!(val & HDMI_PHY_TX_PHY_LOCK))
 			break;
-
 		usleep_range(1000, 2000);
 	}
 
@@ -1323,6 +1387,10 @@ static void dw_hdmi_phy_power_off(struct dw_hdmi *hdmi)
 	else
 		dev_dbg(hdmi->dev, "PHY powered down in %u iterations\n", i);
 
+#ifdef CONFIG_MCST
+	/* gen2 tx power off */
+	/*dw_hdmi_phy_gen2_txpwron(hdmi, 0);*/
+#endif
 	dw_hdmi_phy_gen2_pddq(hdmi, 1);
 }
 
@@ -1419,6 +1487,352 @@ static int hdmi_phy_configure_dwc_hdmi_3d_tx(struct dw_hdmi *hdmi,
 	return 0;
 }
 
+#ifdef CONFIG_MCST
+static const unsigned hdmi_clock[] = {
+	13.5    * 1000 * 1000,
+	25.175  * 1000 * 1000,
+	27      * 1000 * 1000,
+	50.35   * 1000 * 1000,
+	54      * 1000 * 1000,
+	59.4    * 1000 * 1000,
+	72      * 1000 * 1000,
+	74.25   * 1000 * 1000,
+	100.7   * 1000 * 1000,
+	108     * 1000 * 1000,
+	118.8   * 1000 * 1000,
+	144     * 1000 * 1000,
+	148.5   * 1000 * 1000,
+	216     * 1000 * 1000,
+	237.6   * 1000 * 1000,
+	297     * 1000 * 1000,
+	340     * 1000 * 1000,
+};
+
+enum {
+	HDMI_PHY_PREP_DIV,
+	HDMI_PHY_MPLL_N_CNTRL,
+	HDMI_PHY_PLL_N_CNTRL,
+	HDMI_PHY_PIXEL_REP,
+	HDMI_PHY_CLR_DPTH,
+	HDMI_PHY_PLL_PROP_CNTRL,
+	HDMI_PHY_PLL_INT_CNTRL,
+	HDMI_PHY_PLL_GMP_CNTRL,
+	HDMI_PHY_MPLL_PROP_CNTRL,
+	HDMI_PHY_MPLL_INT_CNTRL,
+	HDMI_PHY_MPLL_GMP_CNTRL,
+
+	HDMI_PHY_NR
+};
+
+static const u8 hdmi_phy_signals[ARRAY_SIZE(hdmi_clock)][2][4][HDMI_PHY_NR] = {
+{
+	{
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}, {
+ /*REP2_8BPP_13p5*/   { 0x0, 0x3, 0x3, 0x0, 0x3, 0x3, 0x2, 0x0, 0x4, 0x3, 0x0 },
+ /*REP2_10BPP_13p5*/  { 0x1, 0x3, 0x3, 0x4, 0x1, 0x3, 0x2, 0x0, 0x4, 0x3, 0x0 },
+ /*REP2_12BPP_13p5*/  { 0x2, 0x3, 0x3, 0x4, 0x2, 0x3, 0x2, 0x0, 0x3, 0x1, 0x0 },
+ /*REP2_16BPP_13p5*/  { 0x3, 0x2, 0x3, 0x1, 0x3, 0x3, 0x2, 0x0, 0x4, 0x7, 0x1 },
+	},
+}, {
+	{
+ /*REP1_8BPP_25p175*/ { 0x0, 0x3, 0x3, 0x0, 0x0, 0x3, 0x2, 0x0, 0x4, 0x3, 0x0 },
+ /*REP1_10BPP_25p175*/{ 0x1, 0x3, 0x3, 0x0, 0x1, 0x3, 0x2, 0x0, 0x4, 0x3, 0x0 },
+ /*REP1_12BPP_25p175*/{ 0x2, 0x3, 0x3, 0x0, 0x2, 0x3, 0x2, 0x0, 0x3, 0x1, 0x0 },
+ /*REP1_16BPP_25p175*/{ 0x3, 0x2, 0x2, 0x0, 0x3, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_27*/     { 0x0, 0x3, 0x3, 0x0, 0x0, 0x3, 0x2, 0x0, 0x4, 0x3, 0x0 },
+ /*REP1_10BPP_27*/    { 0x1, 0x3, 0x3, 0x0, 0x1, 0x3, 0x2, 0x0, 0x4, 0x3, 0x0 },
+ /*REP1_12BPP_27*/    { 0x2, 0x3, 0x3, 0x0, 0x2, 0x3, 0x2, 0x0, 0x3, 0x1, 0x0 },
+ /*REP1_16BPP_27*/    { 0x3, 0x2, 0x2, 0x0, 0x3, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+	}, {
+ /*REP2_8BPP_27*/     { 0x0, 0x2, 0x2, 0x0, 0x3, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+ /*REP2_10BPP_27*/    { 0x1, 0x2, 0x3, 0x1, 0x1, 0x3, 0x2, 0x0, 0x4, 0x7, 0x1 },
+ /*REP2_12BPP_27*/    { 0x2, 0x2, 0x3, 0x1, 0x2, 0x3, 0x2, 0x0, 0x3, 0x6, 0x1 },
+ /*REP2_16BPP_27*/    { 0x3, 0x1, 0x2, 0x1, 0x3, 0x3, 0x2, 0x1, 0x5, 0x1, 0x2 },
+	}
+}, {
+	{
+ /*REP1_8BPP_50p35*/  { 0x0, 0x2, 0x2, 0x0, 0x0, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+ /*REP1_10BPP_50p35*/ { 0x1, 0x2, 0x2, 0x0, 0x1, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+ /*REP1_12BPP_50p35*/ { 0x2, 0x2, 0x2, 0x0, 0x2, 0x3, 0x2, 0x1, 0x3, 0x6, 0x1 },
+ /*REP1_16BPP_50p35*/ { 0x3, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	 {
+ /*REP1_8BPP_54*/     { 0x0, 0x2, 0x2, 0x0, 0x0, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+ /*REP1_10BPP_54*/    { 0x1, 0x2, 0x2, 0x0, 0x1, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+ /*REP1_12BPP_54*/    { 0x2, 0x2, 0x2, 0x0, 0x2, 0x3, 0x2, 0x1, 0x3, 0x6, 0x1 },
+ /*REP1_16BPP_54*/    { 0x3, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+	}, {
+ /*REP2_8BPP_54*/     { 0x0, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP2_10BPP_54*/    { 0x1, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP2_12BPP_54*/    { 0x2, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP2_16BPP_54*/    { 0x3, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+	}
+}, {
+	{
+ /*REP1_8BPP_59p4*/   { 0x0, 0x2, 0x2, 0x0, 0x0, 0x3, 0x2, 0x1, 0x4, 0x7, 0x1 },
+ /*REP1_10BPP_59p4*/  { 0x1, 0x2, 0x2, 0x0, 0x1, 0x3, 0x2, 0x1, 0x3, 0x6, 0x1 },
+ /*REP1_12BPP_59p4*/  { 0x2, 0x2, 0x2, 0x0, 0x2, 0x3, 0x2, 0x1, 0x3, 0x6, 0x1 },
+ /*REP1_16BPP_59p4*/  { 0x3, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_72*/     { 0x0, 0x2, 0x2, 0x0, 0x0, 0x3, 0x2, 0x1, 0x3, 0x6, 0x1 },
+ /*REP1_10BPP_72*/    { 0x1, 0x2, 0x2, 0x0, 0x1, 0x3, 0x2, 0x1, 0x3, 0x6, 0x1 },
+ /*REP1_12BPP_72*/    { 0x2, 0x1, 0x1, 0x0, 0x2, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_16BPP_72*/    { 0x3, 0x1, 0x1, 0x0, 0x3, 0x3, 0x2, 0x2, 0x3, 0x6, 0x2 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_74p25*/  { 0x0, 0x2, 0x2, 0x0, 0x0, 0x3, 0x2, 0x1, 0x3, 0x6, 0x1 },
+ /*REP1_10BPP_74p25*/ { 0x1, 0x1, 0x2, 0x0, 0x1, 0x3, 0x2, 0x2, 0x5, 0x7, 0x2 },
+ /*REP1_12BPP_74p25*/ { 0x2, 0x1, 0x2, 0x0, 0x2, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_16BPP_74p25*/ { 0x3, 0x1, 0x2, 0x0, 0x3, 0x3, 0x2, 0x2, 0x3, 0x6, 0x2 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	 {
+ /*REP1_8BPP_100p7*/  { 0x0, 0x1, 0x1, 0x0, 0x0, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_10BPP_100p7*/ { 0x1, 0x1, 0x1, 0x0, 0x1, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_12BPP_100p7*/ { 0x2, 0x1, 0x1, 0x0, 0x2, 0x3, 0x2, 0x2, 0x3, 0x6, 0x2 },
+ /*REP1_16BPP_100p7*/ { 0x3, 0x0, 0x0, 0x0, 0x3, 0x3, 0x2, 0x3, 0x5, 0x1, 0x3 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_108*/    { 0x0, 0x1, 0x1, 0x0, 0x0, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_10BPP_108*/   { 0x1, 0x1, 0x1, 0x0, 0x1, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_12BPP_108*/   { 0x2, 0x1, 0x1, 0x0, 0x2, 0x3, 0x2, 0x2, 0x3, 0x6, 0x2 },
+ /*REP1_16BPP_108*/   { 0x3, 0x0, 0x0, 0x0, 0x3, 0x3, 0x2, 0x3, 0x5, 0x1, 0x3 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_118p8*/  { 0x0, 0x1, 0x1, 0x0, 0x0, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_10BPP_118p8*/ { 0x1, 0x1, 0x1, 0x0, 0x1, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_12BPP_118p8*/ { 0x2, 0x1, 0x1, 0x0, 0x2, 0x3, 0x2, 0x2, 0x3, 0x6, 0x2 },
+ /*REP1_16BPP_118p8*/ { 0x3, 0x0, 0x0, 0x0, 0x3, 0x3, 0x2, 0x3, 0x5, 0x1, 0x3 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_144*/    { 0x0, 0x1, 0x1, 0x0, 0x0, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_10BPP_144*/   { 0x1, 0x1, 0x1, 0x0, 0x1, 0x3, 0x2, 0x2, 0x5, 0x1, 0x2 },
+ /*REP1_12BPP_144*/   { 0x2, 0x0, 0x0, 0x0, 0x2, 0x3, 0x2, 0x3, 0x3, 0x7, 0x3 },
+ /*REP1_16BPP_144*/   { 0x3, 0x0, 0x0, 0x0, 0x3, 0x3, 0x2, 0x3, 0x5, 0x1, 0x3 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_148p5*/  { 0x0, 0x1, 0x1, 0x0, 0x0, 0x3, 0x2, 0x2, 0x3, 0x6, 0x2 },
+ /*REP1_10BPP_148p5*/ { 0x1, 0x0, 0x0, 0x0, 0x1, 0x3, 0x2, 0x3, 0x5, 0x7, 0x3 },
+ /*REP1_12BPP_148p5*/ { 0x2, 0x0, 0x0, 0x0, 0x2, 0x3, 0x2, 0x3, 0x5, 0x1, 0x3 },
+ /*REP1_16BPP_148p5*/ { 0x3, 0x0, 0x0, 0x0, 0x3, 0x3, 0x2, 0x3, 0x3, 0x7, 0x3 },
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_216*/    { 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x2, 0x3, 0x3, 0x6, 0x3 },
+ /*REP1_10BPP_216*/   { 0x1, 0x0, 0x0, 0x0, 0x1, 0x3, 0x2, 0x3, 0x3, 0x6, 0x3 },
+ /*REP1_12BPP_216*/   { 0x2, 0x0, 0x0, 0x0, 0x2, 0x3, 0x2, 0x3, 0x5, 0x1, 0x3 },
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_237p6*/  { 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x2, 0x3, 0x3, 0x6, 0x3 },
+ /*REP1_10BPP_237p6*/ { 0x1, 0x0, 0x0, 0x0, 0x1, 0x3, 0x2, 0x3, 0x3, 0x6, 0x3 },
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_297*/    { 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x2, 0x3, 0x3, 0x7, 0x3 },
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+}, {
+	{
+ /*REP1_8BPP_340*/    { 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x2, 0x3, 0x3, 0x7, 0x3 },
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}, {
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+ /*not supported*/    { 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+	}
+},
+};
+
+enum {
+	HDMI_PHY_CDEPTH_REP_DIV = 0x6,
+	HDMI_PHY_CURRCTRL = 0x10,
+	HDMI_PHY_GMPCTRL = 0x15,
+	HDMI_PHY_PWRCTRL = 0x0
+};
+#define CK_SYMON	(1 << 0)
+#define SYMON	(1 << 1)
+#define TRAON	(1 << 2)
+#define TRBON	(1 << 3)
+
+static int hdmi_plls_configure(struct dw_hdmi *hdmi,
+			      unsigned char res)
+{
+	unsigned rep = hdmi->hdmi_data.video_mode.mpixelrepetitionoutput;
+	unsigned clk = hdmi->hdmi_data.video_mode.mpixelclock;
+	unsigned short val;
+	int i, r;
+	unsigned clkk = clk / 1000;
+	unsigned sup_tx_lvl = 0, sup_ck_lvl = 0,
+		cksymtxctrl = 0;
+
+
+	switch (res) {
+	case 8:
+		r = 0;
+		break;
+	case 10:
+		r = 1;
+		break;
+	case 12:
+		r = 2;
+		break;
+	case 16:
+		r = 3;
+		break;
+	default:
+		goto err;
+	}
+	for (i = 0; clk > hdmi_clock[i] && i < ARRAY_SIZE(hdmi_clock); i++)
+		;
+
+	if (i == ARRAY_SIZE(hdmi_clock))
+		goto err;
+
+	val = (u16)hdmi_phy_signals[i][rep][r][HDMI_PHY_CLR_DPTH]           |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_PIXEL_REP] << 2)    |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_PLL_N_CNTRL] << 5)  |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_MPLL_N_CNTRL] << 7) |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_PREP_DIV] << 13);
+	dw_hdmi_phy_i2c_write(hdmi, val, HDMI_PHY_CDEPTH_REP_DIV);
+
+	val = (u16)hdmi_phy_signals[i][rep][r][HDMI_PHY_PLL_INT_CNTRL]         |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_PLL_PROP_CNTRL] << 3)  |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_MPLL_INT_CNTRL] << 6)  |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_MPLL_PROP_CNTRL] << 9);
+	dw_hdmi_phy_i2c_write(hdmi, val, HDMI_PHY_CURRCTRL);
+
+	val = (u16)hdmi_phy_signals[i][rep][r][HDMI_PHY_MPLL_GMP_CNTRL]      |
+		(hdmi_phy_signals[i][rep][r][HDMI_PHY_PLL_GMP_CNTRL] << 2);
+	dw_hdmi_phy_i2c_write(hdmi, val, HDMI_PHY_GMPCTRL);
+
+	dev_dbg(hdmi->dev, "Pixel clock %d, res %d, pixel repetition %d\n",
+		 clk, res, rep);
+
+	dw_hdmi_phy_i2c_write(hdmi, 0x0000, 0x13);  /* PLLPHBYCTRL */
+
+	/* RESISTANCE TERM 66.67 Ohm Cfg */
+	dw_hdmi_phy_i2c_write(hdmi, 0x0002, 0x19);  /* TXTERM */
+
+	if (clkk <= 148500) {
+		sup_tx_lvl = 0x11;
+	} else if (clkk <= 297 * 1000) {
+		sup_tx_lvl = 0x0a;
+		cksymtxctrl |= TRBON;
+	} else if (clkk <= 340 * 1000) {
+		sup_tx_lvl = 0x8;
+		cksymtxctrl |= TRBON;
+	}
+
+	sup_ck_lvl = sup_tx_lvl;
+	/* VLEVCTRL */
+	dw_hdmi_phy_i2c_write(hdmi, (sup_tx_lvl << 5) | sup_ck_lvl, 0x0E);
+
+	/* CKSYMTXCTRL */
+	cksymtxctrl |= SYMON | TRAON | CK_SYMON;
+	dw_hdmi_phy_i2c_write(hdmi, cksymtxctrl, 0x09);
+
+	dw_hdmi_phy_i2c_write(hdmi, 0x0007, 0x17);
+#if 0
+	/* REMOVE CLK TERM */
+	dw_hdmi_phy_i2c_write(hdmi, 0x8000, 0x05);  /* CKCALCTRL */
+#endif
+	return 0;
+err:
+	dev_err(hdmi->dev, "Pixel clock %d, res %d, pixel repetition %d -"
+		" unsupported by HDMI\n", clk, res, rep);
+	return -EINVAL;
+}
+#endif	/*CONFIG_MCST*/
+ 
 static int hdmi_phy_configure(struct dw_hdmi *hdmi)
 {
 	const struct dw_hdmi_phy_data *phy = hdmi->phy.data;
@@ -1441,17 +1855,27 @@ static int hdmi_phy_configure(struct dw_hdmi *hdmi)
 
 	dw_hdmi_phy_i2c_set_addr(hdmi, HDMI_PHY_I2CM_SLAVE_ADDR_PHY_GEN2);
 
+#ifdef CONFIG_MCST
+	if (hdmi->version == 0x200a) { /* e1c+ */
+		if (hdmi_plls_configure(hdmi, 8))
+			return -EINVAL;
+		goto out;
+	}
+#endif
 	/* Write to the PHY as configured by the platform */
 	if (pdata->configure_phy)
 		ret = pdata->configure_phy(hdmi, pdata, mpixelclock);
 	else
 		ret = phy->configure(hdmi, pdata, mpixelclock);
 	if (ret) {
-		dev_err(hdmi->dev, "PHY configuration failed (clock %lu)\n",
-			mpixelclock);
+		dev_err(hdmi->dev, "PHY configuration failed (%d, clock %lu)\n",
+			ret, mpixelclock);
 		return ret;
 	}
 
+#ifdef CONFIG_MCST
+out:
+#endif
 	/* Wait for resuming transmission of TMDS clock and data */
 	if (mtmdsclock > HDMI14_MAX_TMDSCLK)
 		msleep(100);
@@ -2025,11 +2449,14 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	/* HDMI Initialization Step B.1 */
 	hdmi_av_composer(hdmi, mode);
 
+#ifndef CONFIG_MCST /* too early: monitor sometimes fails to determine
+			correct resolution (bug 132357).*/
 	/* HDMI Initializateion Step B.2 */
 	ret = hdmi->phy.ops->init(hdmi, hdmi->phy.data, &hdmi->previous_mode);
 	if (ret)
 		return ret;
 	hdmi->phy.enabled = true;
+#endif
 
 	/* HDMI Initialization Step B.3 */
 	dw_hdmi_enable_video_path(hdmi);
@@ -2039,6 +2466,10 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 
 		/* HDMI Initialization Step E - Configure audio */
 		hdmi_clk_regenerator_update_pixel_clock(hdmi);
+#ifdef CONFIG_MCST /*FIXME:*/
+		if (hdmi->version == 0x214a) /* e2c3 */
+			dw_hdmi_set_channel_count(hdmi, 2);
+#endif
 		hdmi_enable_audio_clk(hdmi, hdmi->audio_enable);
 	}
 
@@ -2056,6 +2487,13 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	hdmi_video_packetize(hdmi);
 	hdmi_video_csc(hdmi);
 	hdmi_video_sample(hdmi);
+#ifdef CONFIG_MCST
+	/* HDMI Initialization Step D.3 */
+	ret = hdmi->phy.ops->init(hdmi, hdmi->phy.data, &hdmi->previous_mode);
+	if (ret)
+		return ret;
+	hdmi->phy.enabled = true;
+#endif
 	hdmi_tx_hdcp_config(hdmi);
 
 	dw_hdmi_clear_overflow(hdmi);
@@ -2209,7 +2647,8 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 		ret = drm_add_edid_modes(connector, edid);
 		kfree(edid);
 	} else {
-		dev_dbg(hdmi->dev, "failed to get edid\n");
+		dev_dbg(hdmi->dev, "failed to get edid (%s:%d)\n",
+			hdmi->ddc->name, hdmi->ddc->nr);
 	}
 
 	return ret;
@@ -2228,6 +2667,7 @@ static void dw_hdmi_connector_force(struct drm_connector *connector)
 }
 
 static const struct drm_connector_funcs dw_hdmi_connector_funcs = {
+	.dpms = drm_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.detect = dw_hdmi_connector_detect,
 	.destroy = drm_connector_cleanup,
@@ -2374,7 +2814,7 @@ static irqreturn_t dw_hdmi_hardirq(int irq, void *dev_id)
 	if (hdmi->i2c)
 		ret = dw_hdmi_i2c_irq(hdmi);
 
-	intr_stat = hdmi_readb(hdmi, HDMI_IH_PHY_STAT0);
+	intr_stat = __hdmi_readb(hdmi, HDMI_IH_PHY_STAT0);
 	if (intr_stat) {
 		hdmi_writeb(hdmi, ~0, HDMI_IH_MUTE_PHY_STAT0);
 		return IRQ_WAKE_THREAD;
@@ -2516,7 +2956,7 @@ static int dw_hdmi_detect_phy(struct dw_hdmi *hdmi)
 	phy_type = hdmi->plat_data->phy_force_vendor ?
 				DW_HDMI_PHY_VENDOR_PHY :
 				hdmi_readb(hdmi, HDMI_CONFIG2_ID);
-
+#ifndef CONFIG_MCST
 	if (phy_type == DW_HDMI_PHY_VENDOR_PHY) {
 		/* Vendor PHYs require support from the glue layer. */
 		if (!hdmi->plat_data->phy_ops || !hdmi->plat_data->phy_name) {
@@ -2530,21 +2970,21 @@ static int dw_hdmi_detect_phy(struct dw_hdmi *hdmi)
 		hdmi->phy.name = hdmi->plat_data->phy_name;
 		return 0;
 	}
-
+#endif
 	/* Synopsys PHYs are handled internally. */
 	for (i = 0; i < ARRAY_SIZE(dw_hdmi_phys); ++i) {
 		if (dw_hdmi_phys[i].type == phy_type) {
 			hdmi->phy.ops = &dw_hdmi_synopsys_phy_ops;
 			hdmi->phy.name = dw_hdmi_phys[i].name;
 			hdmi->phy.data = (void *)&dw_hdmi_phys[i];
-
+#ifndef CONFIG_MCST
 			if (!dw_hdmi_phys[i].configure &&
 			    !hdmi->plat_data->configure_phy) {
 				dev_err(hdmi->dev, "%s requires platform support\n",
 					hdmi->phy.name);
 				return -ENODEV;
 			}
-
+#endif
 			return 0;
 		}
 	}
@@ -2570,8 +3010,8 @@ static void dw_hdmi_cec_disable(struct dw_hdmi *hdmi)
 }
 
 static const struct dw_hdmi_cec_ops dw_hdmi_cec_ops = {
-	.write = hdmi_writeb,
-	.read = hdmi_readb,
+	.write = __hdmi_writeb,
+	.read = __hdmi_readb,
 	.enable = dw_hdmi_cec_enable,
 	.disable = dw_hdmi_cec_disable,
 };
@@ -2605,6 +3045,29 @@ static void dw_hdmi_init_hw(struct dw_hdmi *hdmi)
 		hdmi->phy.ops->setup_hpd(hdmi, hdmi->phy.data);
 }
 
+#ifdef CONFIG_MCST
+static int dev_is_type(struct device *dev, void *data)
+{
+	struct device **d = data;
+	if (dev->type == &i2c_adapter_type) {
+		get_device(dev);
+		*d = dev;
+		return 1;
+	}
+	return device_for_each_child(dev, d, dev_is_type);
+}
+
+static struct device *dev_find_type(struct device *parent)
+{
+	struct device *d = NULL;
+	if (dev_is_type(parent, &d)) {
+		return d;
+	}
+	device_for_each_child(parent, &d, dev_is_type);
+	return d;
+}
+#endif	/*CONFIG_MCST*/
+
 static struct dw_hdmi *
 __dw_hdmi_probe(struct platform_device *pdev,
 		const struct dw_hdmi_plat_data *plat_data)
@@ -2616,6 +3079,9 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	struct dw_hdmi_cec_data cec;
 	struct dw_hdmi *hdmi;
 	struct resource *iores = NULL;
+#ifdef CONFIG_MCST
+	struct device *ddc_dev;
+#endif	/*CONFIG_MCST*/
 	int irq;
 	int ret;
 	u32 val = 1;
@@ -2650,6 +3116,10 @@ __dw_hdmi_probe(struct platform_device *pdev,
 			return ERR_PTR(-EPROBE_DEFER);
 		}
 
+#ifdef CONFIG_MCST
+	} else if ((ddc_dev = dev_find_type(hdmi->dev))) {
+		hdmi->ddc = to_i2c_adapter(ddc_dev);
+#endif	/*CONFIG_MCST*/
 	} else {
 		dev_dbg(hdmi->dev, "no ddc property found\n");
 	}
@@ -2658,6 +3128,10 @@ __dw_hdmi_probe(struct platform_device *pdev,
 		const struct regmap_config *reg_config;
 
 		of_property_read_u32(np, "reg-io-width", &val);
+#ifdef CONFIG_MCST
+	hdmi->audio_enable = true;
+	val = 4;
+#endif	/*CONFIG_MCST*/
 		switch (val) {
 		case 4:
 			reg_config = &hdmi_regmap_32bit_config;
@@ -2688,6 +3162,7 @@ __dw_hdmi_probe(struct platform_device *pdev,
 		hdmi->regm = plat_data->regm;
 	}
 
+#ifndef CONFIG_MCST
 	hdmi->isfr_clk = devm_clk_get(hdmi->dev, "isfr");
 	if (IS_ERR(hdmi->isfr_clk)) {
 		ret = PTR_ERR(hdmi->isfr_clk);
@@ -2713,6 +3188,7 @@ __dw_hdmi_probe(struct platform_device *pdev,
 		dev_err(hdmi->dev, "Cannot enable HDMI iahb clock: %d\n", ret);
 		goto err_isfr;
 	}
+#endif	/*CONFIG_MCST*/
 
 	hdmi->cec_clk = devm_clk_get(hdmi->dev, "cec");
 	if (PTR_ERR(hdmi->cec_clk) == -ENOENT) {
@@ -2836,8 +3312,13 @@ __dw_hdmi_probe(struct platform_device *pdev,
 
 		audio.hdmi	= hdmi;
 		audio.eld	= hdmi->connector.eld;
+#ifdef CONFIG_MCST
+		audio.write	= __hdmi_writeb;
+		audio.read	= __hdmi_readb;
+#else
 		audio.write	= hdmi_writeb;
 		audio.read	= hdmi_readb;
+#endif	/*CONFIG_MCST*/
 		hdmi->enable_audio = dw_hdmi_i2s_audio_enable;
 		hdmi->disable_audio = dw_hdmi_i2s_audio_disable;
 
@@ -2864,6 +3345,7 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	return hdmi;
 
 err_iahb:
+#ifndef CONFIG_MCST
 	if (hdmi->i2c) {
 		i2c_del_adapter(&hdmi->i2c->adap);
 		hdmi->ddc = NULL;
@@ -2874,6 +3356,7 @@ err_iahb:
 		clk_disable_unprepare(hdmi->cec_clk);
 err_isfr:
 	clk_disable_unprepare(hdmi->isfr_clk);
+#endif	/*CONFIG_MCST*/
 err_res:
 	i2c_put_adapter(hdmi->ddc);
 
@@ -2890,6 +3373,9 @@ static void __dw_hdmi_remove(struct dw_hdmi *hdmi)
 	/* Disable all interrupts */
 	hdmi_writeb(hdmi, ~0, HDMI_IH_MUTE_PHY_STAT0);
 
+#ifdef CONFIG_MCST
+	put_device(&hdmi->ddc->dev);
+#else
 	clk_disable_unprepare(hdmi->iahb_clk);
 	clk_disable_unprepare(hdmi->isfr_clk);
 	if (hdmi->cec_clk)
@@ -2899,6 +3385,7 @@ static void __dw_hdmi_remove(struct dw_hdmi *hdmi)
 		i2c_del_adapter(&hdmi->i2c->adap);
 	else
 		i2c_put_adapter(hdmi->ddc);
+#endif	/*CONFIG_MCST*/
 }
 
 /* -----------------------------------------------------------------------------

@@ -362,6 +362,9 @@ static void print_other_cpu_stall(unsigned long gp_seq)
 	int ndetected = 0;
 	struct rcu_node *rnp;
 	long totqlen = 0;
+#ifdef CONFIG_MCST
+        static int state_dumped;
+#endif
 
 	/* Kick and suppress, if so configured. */
 	rcu_stall_kick_kthreads();
@@ -409,7 +412,16 @@ static void print_other_cpu_stall(unsigned long gp_seq)
 			       READ_ONCE(jiffies_till_next_fqs),
 			       rcu_get_root()->qsmask);
 			/* In this case, the current CPU might be at fault. */
+#ifdef CONFIG_MCST
+			if (!state_dumped &&
+					(long)(jiffies - rcu_state.gp_start) >
+					5 * rcu_jiffies_till_stall_check()) {
+				state_dumped = 1;
+				show_state();
+			}
+#else
 			sched_show_task(current);
+#endif
 		}
 	}
 	/* Rewrite if needed in case of slow consoles. */

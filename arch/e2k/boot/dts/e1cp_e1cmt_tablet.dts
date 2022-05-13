@@ -1,0 +1,212 @@
+/*
+ * E1CMT
+ * TVGI.469555.374
+ * (Tablet)
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+/*#include <dt-bindings/interrupt-controller/irq.h>*/
+/*#include <dt-bindings/gpio/gpio.h>*/
+
+/ {
+	/* version = ""; */
+	model = "e1c+,mcst,e1cmt,tablet";
+	compatible = "mcst,e1cmt";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD2:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN Control (X1)";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "IOHUB Temp";
+			};
+		};
+
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			pca9534@20 {
+				/* gpio/gpio-pca953x.ko (DD20:PCA9534PW) */
+				compatible = "nxp,pca9534";
+				reg = <0x20>;
+				label = "spmc_gpio";
+
+				gpio-controller;
+				ngpios = <8>;
+				#gpio-cells = <2>;
+				gpio-line-names =
+					"SPMC_BATLOW_3V3#",
+					"SPMC_AC_PWR_PRSNT_3V3",
+					"none",
+					"none",
+					"none",
+					"none",
+					"none",
+					"none";
+			};
+		};
+
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* Pressure Sensor */
+			bmp280@76 {
+				/* iio/pressure/bmp280.ko (DA14:BMP280) */
+				compatible = "bosch,bmp280";
+				reg = <0x76>;
+				label = "pressure sensor";
+			};
+
+			/* Light Sensor */
+			opt3001@44 {
+				/* iio/light/opt3001.ko (DD17:OPT3001DNPT) */
+				compatible = "ti,opt3001";
+				reg = <0x44>;
+				label = "light sensor";
+			};
+
+			/* (DA17:L96) - GPS @20, @21 */
+		};
+
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* Battery Management unit */
+			bq40z60@b {
+				/* power/supply/sbs-batterypow.ko (DA11:BQ40Z60RHBT) */
+				compatible = "sbs,sbs-battery";
+				reg = <0xb>;
+				label = "battery management";
+
+				sbs,i2c-retry-count = <2>;
+				sbs,poll-retry-count = <10>;
+				/* sbs,battery-detect-gpios = <&gpio0 ? 0>; */
+			};
+
+			/* (X5:DF52-4S-0.8H(21)) */
+		};
+	};
+
+	/* PMBUS I2C */
+	pmc_i2c {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "pmc_i2c";
+		label = "pmbus i2c";
+
+		/* touchscreen sensor */
+		gt9110@14 {
+			/* input/touchscreen/goodix.ko (X2:DD???:) */
+			compatible = "goodix,gt9110";
+			reg = <0x14>;
+			label = "touchscreen";
+
+			interrupt-parent = <&gpio0>;
+			/*interrupts = <0 0>;*/
+			irq-gpios = <&gpio0 0 0>; /* TS_INT GPIO_ACTIVE_HIGH */
+			reset-gpios = <&gpio0 1 0>; /* TS_RST GPIO_ACTIVE_HIGH */
+			/*
+			touchscreen-inverted-x = 0;
+			touchscreen-inverted-y = 0;
+			touchscreen-swapped-x-y = 0;
+			*/
+		};
+
+		/* 9 Axis MEMS MotionTracking - is 2 in 1 package: */
+		icm20948@69 {
+			/* FIXME: use new driver */
+			/* 1) 3-axis accelerometer, 3-axis gyroscope */
+			/* iio/imu/inv_mpu6050/inv-mpu6050-i2c.ko (DD16:ICM-20948) */
+			compatible = "invensense,mpu9255"; /* mpu9250 ? */
+			reg = <0x69>;
+			label = "accelerometer, gyroscope";
+
+			interrupt-parent = <&gpio0>;
+			/* irq-gpios = <&gpio0 2 1>; /* INT_ICM GPIO_ACTIVE_LOW */
+			interrupts = <2 8>; /* INT_ICM IRQ_TYPE_LEVEL_LOW */
+			/*mount-matrix = x0, y0, z0, x1, y1, z1, x2, y2, z2;*/
+			i2c-gate {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				akm8963@c {
+					/* ak8975.ko (DD16:ICM-20948) */
+					compatible = "ak,ak8975";
+					reg = <0x0c>;
+					label = "compass";
+				};
+			};
+		};
+
+		/* (DD29:IT6251FN) - LVDS to DisplayPort 1.1a Transmitter
+		 * error!?! --> connect to I2C_GFX3_DDC_1V8 (TP11, TP12)
+		 */
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			/* DD23:S25FL064P0XNFI001) */
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			/* (DD24:CY14B101PA-SFXI) */
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+
+	/* IOHUB2 GPIO */
+	gpio0:l_gpio@0 {
+		compatible = "mcst,gpio";
+		reg = <0x0>;
+		label = "L-GPIO";
+
+		gpio-controller;
+		ngpios = <32>;
+		#gpio-cells = <2>;
+		gpio-line-names =
+			/*  0.. 1 */ "TS_INT", "TS_RST", /* touchscreen */
+			/*  2.. 3 */ "INT_ICM", "nc", /* MotionTracking */
+			/*  4.. 7 */ "GPSPPS", "TP10", "S3", "S4",
+			/*  8..11 */ "nc", "nc", "nc", "nc",
+			/* 12..15 */ "nc", "nc", "nc", "nc",
+			/* 16..19 */ "nc", "nc", "nc", "nc",
+			/* 20..23 */ "nc", "nc", "nc", "nc",
+			/* 24..27 */ "nc", "nc", "nc", "nc",
+			/* 28..31 */ "nc", "nc", "nc", "nc";
+	};
+};

@@ -11,9 +11,9 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/capability.h>
-#include <linux/fs.h> 
-#include <linux/mm.h> 
-#include <linux/file.h> 
+#include <linux/fs.h>
+#include <linux/mm.h>
+#include <linux/file.h>
 #include <linux/signal.h>
 #include <linux/resource.h>
 #include <linux/times.h>
@@ -236,3 +236,192 @@ COMPAT_SYSCALL_DEFINE6(fallocate, int, fd, int, mode, u32, offhi, u32, offlo,
 	return ksys_fallocate(fd, mode, ((loff_t)offhi << 32) | offlo,
 			      ((loff_t)lenhi << 32) | lenlo);
 }
+
+#ifdef CONFIG_MCST
+
+#define ATOMIC_HASH_SIZE        256
+#define ATOMIC_HASH(a)  (&__sys_atomic_hash[((unsigned long) a) &\
+				(ATOMIC_HASH_SIZE-1)])
+
+static raw_spinlock_t __sys_atomic_hash[ATOMIC_HASH_SIZE] = {
+	[0 ... (ATOMIC_HASH_SIZE - 1)] = __RAW_SPIN_LOCK_UNLOCKED(sys_atomic)
+};
+
+enum {
+	ATOMIC_XCHG = 0,
+	ATOMIC_CMPXCHG = 1,
+	ATOMIC_ADD = 2
+};
+
+static void force_sigbus_at(void __user *addr)
+{
+	force_sig_fault(SIGBUS, BUS_ADRERR, addr, 0);
+}
+
+static void force_sigsegv_at(void __user *addr)
+{
+	force_sig_fault(SIGSEGV, 0, addr, 0);
+}
+
+asmlinkage long sys_atomic(int req, int size, void __user *addr,
+			   s32 arg1, s32 arg2, void __user *old)
+{
+	struct mm_struct *mm = current->mm;
+	unsigned long flags;
+	long rval;
+	s32 val32 = 0;
+	s16 val16 = 0;
+	s8 val8 = 0;
+
+	__chk_user_ptr(addr);
+	__chk_user_ptr(old);
+
+	if (unlikely(!access_ok(addr, size))) {
+		force_sigsegv_at(addr);
+
+		return -EFAULT;
+	}
+
+	if (unlikely(!access_ok(old, size))) {
+		force_sigsegv_at(old);
+
+		return -EFAULT;
+	}
+
+	if (unlikely(!IS_ALIGNED((unsigned long)addr, size) ||
+		     !IS_ALIGNED((unsigned long)old, size))) {
+		force_sigbus_at(IS_ALIGNED((unsigned long)addr, size) ?
+				old : addr);
+
+		return -EFAULT;
+	}
+
+again:
+	raw_spin_lock_irqsave(ATOMIC_HASH(addr), flags);
+
+	switch (__builtin_expect(size, 4)) {
+	case 1:
+		switch (req) {
+		case ATOMIC_XCHG:
+			if (unlikely(__get_user(val8, (s8 *) addr)
+				     || __put_user((s8) arg1, (s8 *) addr)))
+				goto handle_fault;
+			break;
+		case ATOMIC_CMPXCHG:
+			if (unlikely(__get_user(val8, (s8 *) addr)))
+				goto handle_fault;
+
+			if (val8 == (s8) arg1)
+				if (unlikely(__put_user((s8) arg2,
+							(s8 *) addr)))
+					goto handle_fault;
+			break;
+		case ATOMIC_ADD:
+			if (unlikely(__get_user(val8, (s8 *) addr)
+				     || __put_user(val8 + (s8) arg1,
+						   (s8 *) addr)))
+				goto handle_fault;
+			break;
+		default:
+			val8 = -EINVAL;
+			break;
+		}
+		break;
+	case 2:
+		switch (req) {
+		case ATOMIC_XCHG:
+			if (unlikely(__get_user(val16, (s16 *) addr) ||
+				     __put_user((s16) arg1, (s16 *) addr)))
+				goto handle_fault;
+			break;
+		case ATOMIC_CMPXCHG:
+			if (unlikely(__get_user(val16, (s16 *) addr)))
+				goto handle_fault;
+
+			if (val16 == (s16) arg1)
+				if (unlikely(__put_user((s16) arg2,
+							(s16 *) addr)))
+					goto handle_fault;
+			break;
+		case ATOMIC_ADD:
+			if (unlikely(__get_user(val16, (s16 *) addr)
+				     || __put_user(val16 + (s16) arg1,
+						   (s16 *) addr)))
+				goto handle_fault;
+			break;
+		default:
+			val16 = -EINVAL;
+			break;
+		}
+		break;
+	case 4:
+		switch (req) {
+		case ATOMIC_XCHG:
+			if (unlikely(__get_user(val32, (s32 *) addr) ||
+				     __put_user((s32) arg1, (s32 *) addr)))
+				goto handle_fault;
+			break;
+		case ATOMIC_CMPXCHG:
+			if (unlikely(__get_user(val32, (s32 *) addr)))
+				goto handle_fault;
+
+			if (val32 == (s32) arg1)
+				if (unlikely(__put_user((s32) arg2,
+							(s32 *) addr)))
+					goto handle_fault;
+			break;
+		case ATOMIC_ADD:
+			if (unlikely(__get_user(val32, (s32 *) addr)
+				     || __put_user(val32 + (s32) arg1,
+						   (s32 *) addr)))
+				goto handle_fault;
+			break;
+		default:
+			val32 = -EINVAL;
+			break;
+		}
+		break;
+	default:
+		raw_spin_unlock_irqrestore(ATOMIC_HASH(addr), flags);
+		return -EINVAL;
+	}
+	raw_spin_unlock_irqrestore(ATOMIC_HASH(addr), flags);
+
+	switch (size) {
+	case 1:
+		rval = put_user(val8, (s8 *) old);
+		break;
+	case 2:
+		rval = put_user(val16, (s16 *) old);
+		break;
+	case 4:
+		rval = put_user(val32, (s32 *) old);
+		break;
+	default:
+		pr_notice_ratelimited("sys_atomic: bad size %d passed\n", size);
+		rval = -EINVAL;
+		break;
+	}
+
+	if (rval)
+		force_sigsegv_at(old);
+
+	return rval;
+
+handle_fault:
+	raw_spin_unlock_irqrestore(ATOMIC_HASH(addr), flags);
+
+	down_read(&mm->mmap_sem);
+	rval = get_user_pages((unsigned long)addr,
+			      1, FOLL_WRITE, NULL, NULL);
+	up_read(&mm->mmap_sem);
+
+	if (rval < 0) {
+		force_sigsegv_at(addr);
+
+		return rval;
+	}
+
+	goto again;
+}
+#endif /* CONFIG_MCST */

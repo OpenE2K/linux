@@ -33,6 +33,9 @@
 
 #include <asm/utrap.h>
 #include <asm/unistd.h>
+#ifdef CONFIG_E90S
+#include <uapi/asm/perfctr.h>
+#endif /* CONFIG_E90S */
 
 #include "entry.h"
 #include "kernel.h"
@@ -432,6 +435,27 @@ SYSCALL_DEFINE1(sparc64_personality, unsigned long, personality)
 	return ret;
 }
 
+#ifdef CONFIG_MCST
+/* ltp tests required such error code, as other archs */
+int sparc_mmap_check(unsigned long addr, unsigned long len)
+{
+	if (test_thread_flag(TIF_32BIT)) {
+		if (len >= STACK_TOP32)
+			return -ENOMEM;
+
+		if (addr > STACK_TOP32 - len)
+			return -ENOMEM;
+	} else {
+		if (len >= VA_EXCLUDE_START)
+			return -ENOMEM;
+
+		if (invalid_64bit_range(addr, len))
+			return -ENOMEM;
+	}
+
+	return 0;
+}
+#else
 int sparc_mmap_check(unsigned long addr, unsigned long len)
 {
 	if (test_thread_flag(TIF_32BIT)) {
@@ -450,7 +474,7 @@ int sparc_mmap_check(unsigned long addr, unsigned long len)
 
 	return 0;
 }
-
+#endif
 /* Linux version of mmap */
 SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags, unsigned long, fd,
@@ -701,6 +725,91 @@ SYSCALL_DEFINE5(rt_sigaction, int, sig, const struct sigaction __user *, act,
 
 	return ret;
 }
+
+#ifdef CONFIG_E90S
+static int kill_ok_by_cred(struct task_struct *t)
+{
+	const struct cred *cred = current_cred();
+	const struct cred *tcred = __task_cred(t);
+
+	if (uid_eq(cred->euid, tcred->suid) ||
+	    uid_eq(cred->euid, tcred->uid)  ||
+	    uid_eq(cred->uid,  tcred->suid) ||
+	    uid_eq(cred->uid,  tcred->uid))
+		return 1;
+
+	if (ns_capable(tcred->user_ns, CAP_KILL))
+		return 1;
+
+	return 0;
+}
+
+SYSCALL_DEFINE4(perfctr, int, opcode, unsigned long, arg0,
+		unsigned long, arg1, unsigned long, arg2)
+{
+	int err = 0;
+	struct task_struct *t;
+	struct thread_info *ti;
+	
+	rcu_read_lock();
+	t = find_task_by_vpid(arg0);
+	rcu_read_unlock();
+	if(!t)
+		return -EINVAL;
+	if (!kill_ok_by_cred(t))
+		return -EPERM;
+
+	ti = task_thread_info(t);
+
+	switch(opcode) {
+	case E90S_PERFCTR_WRITE_AND_ON:
+		clear_ti_thread_flag(ti, TIF_PERFCTR);
+		err |= copy_from_user(ti->kernel_cnt, (void __user *)arg1,
+			       sizeof(ti->kernel_cnt));
+		err |= copy_from_user(ti->pcr_regs,  (void __user *)arg2,
+			       sizeof(ti->pcr_regs));
+		if(ti  == current_thread_info()) {
+			write_perfctrs(ti->pcr_regs, ti->kernel_cnt);
+		} else {
+			set_ti_thread_flag(ti, TIF_FIRST_READ_PIC);
+		}
+		set_ti_thread_flag(ti, TIF_PERFCTR);
+		break;
+
+	case E90S_PERFCTR_OFF:
+		err = -EINVAL;
+		if (test_ti_thread_flag(ti, TIF_PERFCTR)) {
+			if(ti  == current_thread_info())
+				wr_pcr(0);
+			clear_ti_thread_flag(ti, TIF_PERFCTR);
+			clear_ti_thread_flag(ti, TIF_FIRST_READ_PIC);
+			memset(ti->pcr_regs, 0, sizeof(ti->pcr_regs));
+			err = 0;
+		}
+		break;
+
+	case E90S_PERFCTR_READ: {
+		if (!test_ti_thread_flag(ti, TIF_PERFCTR)) {
+			err = -EINVAL;
+			break;
+		}
+		if(ti  == current_thread_info())
+			read_perfctrs(ti->kernel_cnt);
+		if(arg1)
+			err |= copy_to_user((void __user *)arg1, ti->kernel_cnt, 
+			       sizeof(ti->kernel_cnt));
+		if(arg2)
+			err |= copy_to_user((void __user *)arg2, ti->pcr_regs,
+			       sizeof(ti->pcr_regs));
+		break;
+	}
+	default:
+		err = -EINVAL;
+		break;
+	};
+	return err;
+}
+#endif /* CONFIG_E90S */
 
 SYSCALL_DEFINE0(kern_features)
 {

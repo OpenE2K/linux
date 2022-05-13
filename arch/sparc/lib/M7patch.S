@@ -28,7 +28,11 @@
 ENTRY(m7_patch_copyops)
 	NG_DO_PATCH(memcpy, M7memcpy)
 	NG_DO_PATCH(raw_copy_from_user, M7copy_from_user)
+#ifdef CONFIG_MCST
+	NG_DO_PATCH(_raw_copy_to_user, M7copy_to_user)
+#else
 	NG_DO_PATCH(raw_copy_to_user, M7copy_to_user)
+#endif /* CONFIG_MCST */
 	retl
 	 nop
 ENDPROC(m7_patch_copyops)

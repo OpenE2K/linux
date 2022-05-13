@@ -910,6 +910,7 @@ static const char *const section_white_list[] =
 	".fmt_slot*",			/* EZchip */
 	".gnu.lto*",
 	".discard.*",
+	".line",	/* e2k: lcc does not generate .line */
 	NULL
 };
 

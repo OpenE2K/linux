@@ -688,7 +688,11 @@ int iwpm_send_mapinfo(u8 nl_client, int iwpm_pid)
 	int i = 0, nlmsg_bytes = 0;
 	unsigned long flags;
 	const char *err_str = "";
+#if defined CONFIG_MCST && defined __LCC__
+	int ret = 0;
+#else
 	int ret;
+#endif
 
 	skb = dev_alloc_skb(NLMSG_GOODSIZE);
 	if (!skb) {

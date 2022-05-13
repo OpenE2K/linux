@@ -280,6 +280,25 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 		}
 	}
 
+#ifdef	CONFIG_E2K
+	/*
+	 * It is important for guest mode running. Guest kernel is not loaded
+	 * by boot loader or some other bios. So resources of PCI devices are
+	 * not allocated or assigned and it should be made by kernel itself.
+	 */
+	if (res->flags & IORESOURCE_IO) {
+		if (l64 == 0 && sz64 != 0) {
+			res->flags |= IORESOURCE_UNSET;
+			res->start = 0;
+			res->end = sz64;
+			dev_printk(KERN_DEBUG, &dev->dev, "reg 0x%x: initial "
+				"IO BAR value 0x%04llx:0x%04llx is unset\n",
+				pos, l64, sz64);
+			goto out;
+		}
+	}
+#endif	/* CONFIG_E2K */
+
 	region.start = l64;
 	region.end = l64 + sz64 - 1;
 
@@ -2761,13 +2780,20 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
 {
 	unsigned int used_buses, normal_bridges = 0, hotplug_bridges = 0;
 	unsigned int start = bus->busn_res.start;
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	unsigned int cmax, max = start;
+#else
 	unsigned int devfn, fn, cmax, max = start;
+#endif
 	struct pci_dev *dev;
+#if !defined(CONFIG_E2K) && !defined(CONFIG_E90S)
 	int nr_devs;
+#endif
 
 	dev_dbg(&bus->dev, "scanning bus\n");
 
 	/* Go find them, Rover! */
+#if !defined(CONFIG_E2K) && !defined(CONFIG_E90S)
 	for (devfn = 0; devfn < 256; devfn += 8) {
 		nr_devs = pci_scan_slot(bus, devfn);
 
@@ -2784,6 +2810,7 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
 			}
 		}
 	}
+#endif
 
 	/* Reserve buses for SR-IOV capability */
 	used_buses = pci_iov_bus_range(bus);
@@ -2897,11 +2924,39 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
  * Scans devices below @bus including subordinate buses. Returns new
  * subordinate number including all the found devices.
  */
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+unsigned int pci_scan_root_child_bus(struct pci_bus *bus)
+#else
 unsigned int pci_scan_child_bus(struct pci_bus *bus)
+#endif
 {
 	return pci_scan_child_bus_extend(bus, 0);
 }
 EXPORT_SYMBOL_GPL(pci_scan_child_bus);
+
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+/*
+ * The next function pci_scan_root_child_bus() have to be updated
+ * to support commonroot bus domains on e2k && e90s arch
+ */
+static void pci_scan_bus_slots(struct pci_bus *bus)
+{
+	unsigned int devfn;
+
+	/* Go find them, Rover! */
+	for (devfn = 0; devfn < 256; devfn += 8)
+		pci_scan_slot(bus, devfn);
+}
+
+/* Implemented support of multiple PCI domains on e90s. IO link of any
+ * node (not only BSP) now can be connected to IOHUB. atic@mcst.ru */
+unsigned int pci_scan_child_bus(struct pci_bus *bus)
+{
+	pci_scan_bus_slots(bus);
+
+	return pci_scan_root_child_bus(bus);
+}
+#endif
 
 /**
  * pcibios_root_bridge_prepare - Platform-specific host bridge setup

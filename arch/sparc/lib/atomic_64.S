@@ -9,6 +9,19 @@
 #include <asm/backoff.h>
 #include <asm/export.h>
 
+#if defined(CONFIG_MCST) && defined(CONFIG_RMO) && defined(CONFIG_SMP)
+	/* On SMP we need to use memory barriers to ensure
+	 * correct memory operation ordering, nop these out
+	 * for uniprocessor.
+	 */
+#define ATOMIC_PRE_BARRIER	membar #StoreLoad | #LoadLoad;
+#define ATOMIC_POST_BARRIER	\
+	membar #StoreLoad | #StoreStore;
+#else
+#define ATOMIC_PRE_BARRIER
+#define ATOMIC_POST_BARRIER
+#endif	/* CONFIG_RMO & CONFIG_SMP*/
+
 	.text
 
 	/* Three versions of the atomic routines, one that
@@ -36,12 +49,14 @@ EXPORT_SYMBOL(atomic_##op);
 #define ATOMIC_OP_RETURN(op)						\
 ENTRY(atomic_##op##_return) /* %o0 = increment, %o1 = atomic_ptr */	\
 	BACKOFF_SETUP(%o2);						\
+	ATOMIC_PRE_BARRIER						\
 1:	lduw	[%o1], %g1;						\
 	op	%g1, %o0, %g7;						\
 	cas	[%o1], %g1, %g7;					\
 	cmp	%g1, %g7;						\
 	bne,pn	%icc, BACKOFF_LABEL(2f, 1b);				\
 	 op	%g1, %o0, %g1;						\
+	ATOMIC_POST_BARRIER						\
 	retl;								\
 	 sra	%g1, 0, %o0;						\
 2:	BACKOFF_SPIN(%o2, %o3, 1b);					\
@@ -102,12 +117,14 @@ EXPORT_SYMBOL(atomic64_##op);
 #define ATOMIC64_OP_RETURN(op)						\
 ENTRY(atomic64_##op##_return) /* %o0 = increment, %o1 = atomic_ptr */	\
 	BACKOFF_SETUP(%o2);						\
+	ATOMIC_PRE_BARRIER						\
 1:	ldx	[%o1], %g1;						\
 	op	%g1, %o0, %g7;						\
 	casx	[%o1], %g1, %g7;					\
 	cmp	%g1, %g7;						\
 	bne,pn	%xcc, BACKOFF_LABEL(2f, 1b);				\
 	 nop;								\
+	ATOMIC_POST_BARRIER						\
 	retl;								\
 	 op	%g1, %o0, %o0;						\
 2:	BACKOFF_SPIN(%o2, %o3, 1b);					\
@@ -116,6 +133,7 @@ EXPORT_SYMBOL(atomic64_##op##_return);
 
 #define ATOMIC64_FETCH_OP(op)						\
 ENTRY(atomic64_fetch_##op) /* %o0 = increment, %o1 = atomic_ptr */	\
+	ATOMIC_PRE_BARRIER						\
 	BACKOFF_SETUP(%o2);						\
 1:	ldx	[%o1], %g1;						\
 	op	%g1, %o0, %g7;						\
@@ -123,6 +141,7 @@ ENTRY(atomic64_fetch_##op) /* %o0 = increment, %o1 = atomic_ptr */	\
 	cmp	%g1, %g7;						\
 	bne,pn	%xcc, BACKOFF_LABEL(2f, 1b);				\
 	 nop;								\
+	ATOMIC_POST_BARRIER						\
 	retl;								\
 	 mov	%g1, %o0;						\
 2:	BACKOFF_SPIN(%o2, %o3, 1b);					\
@@ -152,6 +171,7 @@ ATOMIC64_FETCH_OP(xor)
 
 ENTRY(atomic64_dec_if_positive) /* %o0 = atomic_ptr */
 	BACKOFF_SETUP(%o2)
+	ATOMIC_PRE_BARRIER
 1:	ldx	[%o0], %g1
 	brlez,pn %g1, 3f
 	 sub	%g1, 1, %g7
@@ -159,6 +179,7 @@ ENTRY(atomic64_dec_if_positive) /* %o0 = atomic_ptr */
 	cmp	%g1, %g7
 	bne,pn	%xcc, BACKOFF_LABEL(2f, 1b)
 	 nop
+	ATOMIC_POST_BARRIER
 3:	retl
 	 sub	%g1, 1, %o0
 2:	BACKOFF_SPIN(%o2, %o3, 1b)

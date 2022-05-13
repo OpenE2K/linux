@@ -200,6 +200,9 @@ cat << EOF
 #define __IGNORE__sysctl
 #define __IGNORE_arch_prctl
 #define __IGNORE_nfsservctl
+#define __IGNORE_pkey_mprotect
+#define __IGNORE_pkey_alloc
+#define __IGNORE_pkey_free
 
 /* ... including the "new" 32-bit uid syscalls */
 #define __IGNORE_lchown32

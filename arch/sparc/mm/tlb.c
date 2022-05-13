@@ -26,6 +26,9 @@ void flush_tlb_pending(void)
 	struct tlb_batch *tb = &get_cpu_var(tlb_batch);
 	struct mm_struct *mm = tb->mm;
 
+#ifdef CONFIG_WATCH_PREEMPT
+	this_cpu_or(nowatch_set, NOPWATCH_EXITMM);
+#endif
 	if (!tb->tlb_nr)
 		goto out;
 
@@ -51,10 +54,13 @@ out:
 	put_cpu_var(tlb_batch);
 }
 
+
+#ifndef CONFIG_MCST_RT
 void arch_enter_lazy_mmu_mode(void)
 {
-	struct tlb_batch *tb = this_cpu_ptr(&tlb_batch);
-
+	struct tlb_batch *tb;
+	migrate_disable();
+	tb = this_cpu_ptr(&tlb_batch);
 	tb->active = 1;
 }
 
@@ -65,11 +71,42 @@ void arch_leave_lazy_mmu_mode(void)
 	if (tb->tlb_nr)
 		flush_tlb_pending();
 	tb->active = 0;
+	migrate_enable();
 }
+
+#endif  /* CONFIG_MCST_RT */
+
+#ifdef CONFIG_PREEMPTION
+void check_lazy_mmu_end(void)
+{
+	struct tlb_batch *tb = this_cpu_ptr(&tlb_batch);
+	if (tb->active) {
+		current_thread_info()->status |= TS_LAZY_MMU;
+		tb->active = 0;
+	}
+}
+
+void check_lazy_mmu_begin(void)
+{
+	if (current_thread_info()->status & TS_LAZY_MMU) {
+		struct tlb_batch *tb = this_cpu_ptr(&tlb_batch);
+		current_thread_info()->status &= ~TS_LAZY_MMU;
+		tb->active = 1;
+	}
+}
+#endif	/*CONFIG_PREEMPTION*/
+
 
 static void tlb_batch_add_one(struct mm_struct *mm, unsigned long vaddr,
 			      bool exec, unsigned int hugepage_shift)
 {
+#ifdef CONFIG_MCST_RT
+	vaddr &= PAGE_MASK;
+	if (exec)
+		vaddr |= 0x1UL;
+	flush_tsb_user_page(mm, vaddr, hugepage_shift);
+	global_flush_tlb_page(mm, vaddr);
+#else
 	struct tlb_batch *tb = &get_cpu_var(tlb_batch);
 	unsigned long nr;
 
@@ -108,6 +145,7 @@ static void tlb_batch_add_one(struct mm_struct *mm, unsigned long vaddr,
 
 out:
 	put_cpu_var(tlb_batch);
+#endif
 }
 
 void tlb_batch_add(struct mm_struct *mm, unsigned long vaddr,
@@ -138,7 +176,7 @@ void tlb_batch_add(struct mm_struct *mm, unsigned long vaddr,
 	}
 
 no_cache_flush:
-	if (!fullmm)
+	if (!fullmm && !mm->context.is_exit_mmap)
 		tlb_batch_add_one(mm, vaddr, pte_exec(orig), hugepage_shift);
 }
 
@@ -246,7 +284,11 @@ pmd_t pmdp_invalidate(struct vm_area_struct *vma, unsigned long address,
 {
 	pmd_t old, entry;
 
+#if defined(CONFIG_E90S) && defined(CONFIG_NUMA_BALANCING)
+	entry = __pmd(pmd_val(*pmdp) & ~(_PAGE_VALID | _PAGE_PROTNONE));
+#else
 	entry = __pmd(pmd_val(*pmdp) & ~_PAGE_VALID);
+#endif
 	old = pmdp_establish(vma, address, pmdp, entry);
 	flush_tlb_range(vma, address, address + HPAGE_PMD_SIZE);
 

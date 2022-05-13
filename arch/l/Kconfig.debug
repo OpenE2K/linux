@@ -1,0 +1,19 @@
+menu "Elbrus architecture kernel hacking"
+
+config BOOT_TRACE
+	bool "Profile boot process"
+	depends on ARCH_BOOT_TRACE_POSSIBLE
+	default n
+	---help---
+	  If this option is enabled, some time statictics will be collected
+	  during boot. They are available in the proc filesystem in
+	  /proc/loadtime_kernel and /proc/loadtime.
+
+config BOOT_TRACE_THRESHOLD
+	int "Threshold in milliseconds"
+	depends on BOOT_TRACE
+	default 100
+	---help---
+	  Minimum delta between events for them to be printed.
+
+endmenu

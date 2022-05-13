@@ -76,7 +76,11 @@
 
 struct epoll_event {
 	__poll_t events;
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	void *data;
+#else
 	__u64 data;
+#endif
 } EPOLL_PACKED;
 
 #ifdef CONFIG_PM_SLEEP

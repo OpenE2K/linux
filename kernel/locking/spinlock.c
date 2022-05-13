@@ -186,6 +186,12 @@ void __lockfunc _raw_spin_unlock(raw_spinlock_t *lock)
 	__raw_spin_unlock(lock);
 }
 EXPORT_SYMBOL(_raw_spin_unlock);
+
+void __lockfunc _raw_spin_unlock_no_resched(raw_spinlock_t *lock)
+{
+	__raw_spin_unlock_no_resched(lock);
+}
+EXPORT_SYMBOL(_raw_spin_unlock_no_resched);
 #endif
 
 #ifndef CONFIG_INLINE_SPIN_UNLOCK_IRQRESTORE
@@ -202,6 +208,12 @@ void __lockfunc _raw_spin_unlock_irq(raw_spinlock_t *lock)
 	__raw_spin_unlock_irq(lock);
 }
 EXPORT_SYMBOL(_raw_spin_unlock_irq);
+
+void __lockfunc _raw_spin_unlock_irq_no_resched(raw_spinlock_t *lock)
+{
+	__raw_spin_unlock_irq_no_resched(lock);
+}
+EXPORT_SYMBOL(_raw_spin_unlock_irq_no_resched);
 #endif
 
 #ifndef CONFIG_INLINE_SPIN_UNLOCK_BH

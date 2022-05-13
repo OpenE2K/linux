@@ -51,6 +51,7 @@
 #include <drm/radeon_drm.h>
 
 #include "radeon_drv.h"
+#include "radeon_mode.h"
 
 /*
  * KMS wrapper.
@@ -192,6 +193,7 @@ int radeon_dpm = -1;
 int radeon_aspm = -1;
 int radeon_runtime_pm = -1;
 int radeon_hard_reset = 0;
+int radeon_fbdev_accel = 1;
 int radeon_vm_size = 8;
 int radeon_vm_block_size = -1;
 int radeon_deep_color = 0;
@@ -268,6 +270,9 @@ module_param_named(runpm, radeon_runtime_pm, int, 0444);
 
 MODULE_PARM_DESC(hard_reset, "PCI config reset (1 = force enable, 0 = disable (default))");
 module_param_named(hard_reset, radeon_hard_reset, int, 0444);
+
+MODULE_PARM_DESC(fbdev_accel, "Disable/Enable linux console framebuffer acceleration");
+module_param_named(fbdev_accel, radeon_fbdev_accel, int, 0444);
 
 MODULE_PARM_DESC(vm_size, "VM address space size in gigabytes (default 4GB)");
 module_param_named(vm_size, radeon_vm_size, int, 0444);
@@ -413,7 +418,7 @@ radeon_pci_remove(struct pci_dev *pdev)
 static void
 radeon_pci_shutdown(struct pci_dev *pdev)
 {
-#ifdef CONFIG_PPC64
+#if defined(CONFIG_PPC64) || defined(CONFIG_MCST)
 	struct drm_device *ddev = pci_get_drvdata(pdev);
 #endif
 
@@ -423,7 +428,7 @@ radeon_pci_shutdown(struct pci_dev *pdev)
 	if (radeon_device_is_virtual())
 		radeon_pci_remove(pdev);
 
-#ifdef CONFIG_PPC64
+#if defined(CONFIG_PPC64) || defined(CONFIG_MCST)
 	/* Some adapters need to be suspended before a
 	 * shutdown occurs in order to prevent an error
 	 * during kexec.
@@ -556,7 +561,7 @@ long radeon_drm_ioctl(struct file *filp,
 	}
 
 	ret = drm_ioctl(filp, cmd, arg);
-	
+
 	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
 	return ret;

@@ -1,0 +1,124 @@
+/*
+ * MBE1C-PC
+ * TVGI.469555.331
+ * (101-PC)
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+
+/ {
+	/* version = ""; */
+	model = "e1c+,mcst,mbe1c-pc,101-pc";
+	compatible = "mcst,mbe1c-pc";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD9:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN Control (X29)";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "IOHUB Temp";
+			};
+
+			/* (X32, X33) DIMMs: 0x18 0x1A */
+		};
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			/* empty */
+		};
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* empty */
+		};
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* config SENSORS_PMBUS */
+			pdt012@10 {
+				/* hwmon/pmbus/pmbus.ko (DA3:PDT012A0X3) */
+				compatible = "pmbus";
+				reg = <0x10>;
+				label = "+1V0_P8";
+			};
+			pdt012@14 {
+				/* hwmon/pmbus/pmbus.ko (DA4:PDT012A0X3) */
+				compatible = "pmbus";
+				reg = <0x14>;
+				label = "+2V5_IOH";
+			};
+		};
+	};
+
+	/* PMBUS I2C */
+	pmc_i2c {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "pmc_i2c";
+		label = "pmbus i2c";
+
+		/* config SENSORS_PMBUS */
+		udt020@10 {
+			/* hwmon/pmbus/pmbus.ko (DA6:UDT020A0X3-SRZ) */
+			compatible = "pmbus";
+			reg = <0x10>;
+			label = "+0V9_CPU";
+		};
+		udt020@13 {
+			/* hwmon/pmbus/pmbus.ko (DA7:UDT020A0X3-SRZ) */
+			compatible = "pmbus";
+			reg = <0x13>;
+			label = "+PWR_MC";
+		};
+		pdt012@14 {
+			/* hwmon/pmbus/pmbus.ko (DA5:PDT012A0X3) */
+			compatible = "pmbus";
+			reg = <0x14>;
+			label = "+1V8_CPU";
+		};
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+};

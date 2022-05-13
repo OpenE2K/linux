@@ -1,0 +1,263 @@
+Source: linux
+Maintainer: MCST Kernel Team <os@mcst.ru>
+
+Package: linux-image-xxKERNELRELEASE-e2kxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e2kxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e3sxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e2kxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e2c3xx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e2c3xx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e2cpxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e2cpxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e2sxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e2sxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e8cxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e8cxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e8c2xx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e8c2xx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e1cpxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e1cpxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e12cxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e12cxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e16cxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e16cxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with Elbrus processors
+
+Package: linux-image-xxKERNELRELEASE-e90xx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e90xx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel 5.4 and modules for use on PCs with sparc processors
+
+Package: linux-image-xxKERNELRELEASE-e90sxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Provides: linux-image, linux-modules-xxKERNELRELEASE-e90sxx
+Depends: initramfs-tools
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with sparc64 processors
+
+Package: linux-image-xxKERNELRELEASE-x86xx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with one or more processors
+
+Package: linux-image-xxKERNELRELEASE-x86_64xx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Recommends: linux-firmware (>= 4~)
+Description: The Linux kernel xxLINUXVERSIONxx and modules for use on PCs with AMD64, Intel 64 processors
+
+Package: vmlinux-xxKERNELRELEASExx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Description: - no description -
+
+Package: linux-qemu-xxKERNELRELEASExx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Description: - no description -
+
+Package: linux-firmware
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Description: Binary firmware for various drivers in the Linux kernel xxLINUXVERSIONxx
+
+Package: linux-libc-dev
+Architecture: linux-any
+Section: devel
+Priority: optional
+Provides: linux-kernel-headers
+Description: Linux support headers for userspace development
+ This package provides userspaces headers from the Linux kernel.  These
+ headers are used by the installed headers for GNU libc and other system
+ libraries.
+
+Package: linux-headers-xxKERNELVERSIONxx-commonxxSUFFIXCOMMONxx
+Architecture: all
+Section: kernel
+Priority: optional
+Description: Common header files for Linux xxKERNELVERSIONxx
+ This package provides the common kernel header files for Linux kernel
+ version xxKERNELVERSIONxx, generally used for building out-of-tree kernel modules.
+ To obtain a complete set of headers you also need to install the
+ linux-headers-xxKERNELVERSIONxx-(flavour) package, matching the flavour of the
+ kernel you intend the build for.
+
+Package: linux-headers-xxKERNELRELEASExx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Depends: linux-headers-xxKERNELVERSIONxx-commonxxSUFFIXCOMMONxx (= xxPKGVER_LINUX_HEADERS_COMMONxx), linux-kbuildxxSUFFIXKBUILDxx-xxLINUXVERSIONxx
+Description: Header files for Linux xxKERNELRELEASExx
+ This package provides the architecture-specific kernel header files for
+ Linux kernel xxKERNELRELEASExx, generally used for building out-of-tree kernel
+ modules.  These files are going to be installed into
+ /usr/src/linux-headers-xxKERNELRELEASExx, and can be used for building modules
+ that load into the kernel provided by the linux-image-xxKERNELRELEASExx
+ package.
+
+Package: linux-kbuildxxSUFFIXKBUILDxx-xxLINUXVERSIONxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Depends: glibc
+Description: Kbuild infrastructure for Linux xxLINUXVERSIONxx
+ This package provides the kbuild infrastructure for the headers packages
+ for Linux kernel version xxLINUXVERSIONxx.
+
+Package: linux-kbuildxxSUFFIXKBUILDxx-xxKERNELRELEASExx
+Architecture: linux-any
+Section: devel
+Priority: optional
+Depends: linux-image-xxKERNELRELEASExx
+Description: Kbuild infrastructure for Linux xxLINUXVERSIONxx
+ This package provides the kbuild infrastructure and the architecture-
+ specific kernel header files for Linux kernel xxKERNELRELEASExx,
+ generally used for building out-of-tree kernel modules.
+ These files will be installed into /lib/modules/xxKERNELRELEASExx/build
+
+Package: linux-perfxxSUFFIXPERFxx-xxLINUXVERSIONxx
+Architecture: linux-any
+Section: devel
+Priority: optional
+Depends: glibc
+Description: Performance analysis tools for Linux xxLINUXVERSIONxx
+ This package contains the 'perf' performance analysis tools for Linux
+ kernel version xxLINUXVERSIONxx.
+
+Package: linux-imagexxSUFFIXMETALINUXxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Depends: linux-image-xxKERNELRELEASExx (= xxPKGVER_LINUX_IMAGExx)
+Description: The Linux kernel xxMETACONFxx configuration (meta-package)
+
+Package: linux-qemuxxSUFFIXMETALINUXxx
+Architecture: linux-any
+Section: kernel
+Priority: optional
+Depends: linux-qemu-xxKERNELRELEASExx (= xxPKGVER_LINUX_IMAGExx)
+Description: The Linux qemu kernel xxMETACONFxx configuration (meta-package)
+
+Package: linux-headersxxSUFFIXMETALINUXxx
+Architecture: linux-any
+Section: devel
+Priority: optional
+Depends: linux-headers-xxKERNELRELEASExx
+Description: Header files for Linux xxMETACONFxx configuration (meta-package)
+
+Package: linux-perfxxSUFFIXPERFxx
+Architecture: linux-any
+Section: devel
+Priority: optional
+Depends: linux-perfxxSUFFIXPERFxx-xxLINUXVERSIONxx (= xxPKGVER_LINUX_PERFxx)
+Description: Performance analysis tools for Linux (meta-package)
+
+# Depends: libc6 (>= 2.7), libcpupower1 (>= 4.7~rc2-1~exp1), libpci3 (>= 1:3.5.2-1)
+Package: linux-cpupower
+Architecture: linux-any
+Depends: glibc, libcpupower1 (= xxPKGVER_LINUX_PERFxx)
+Section: devel
+Priority: optional
+Description: CPU power management tools for Linux
+
+Package: libcpupower1
+Architecture: linux-any
+Depends: glibc
+Section: libs
+Priority: optional
+Description: CPU frequency and voltage scaling tools for Linux (libraries)
+ libcpupower is a library for inspecting and controlling cpufreq and
+ cpuidle tunables.
+
+Package: libcpupower-dev
+Architecture: linux-any
+Depends: libcpupower1 (= xxPKGVER_LINUX_PERFxx)
+Conflicts: libcpufreq-dev
+Replaces: libcpufreq-dev
+Provides: libcpufreq-dev
+Section: libdevel
+Priority: optional
+Description: CPU frequency and voltage scaling tools for Linux (development files)
+ This package contains the 'power/cpupower' headers and library shared
+ objects.
+

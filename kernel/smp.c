@@ -23,10 +23,14 @@
 
 #include "smpboot.h"
 
+#ifndef	CONFIG_E2K
+/* this description moved to arch/e2k/include/asm/smp.h */
+/* do not forgot update there, if will be updated here */
 enum {
 	CSD_FLAG_LOCK		= 0x01,
 	CSD_FLAG_SYNCHRONOUS	= 0x02,
 };
+#endif	/* CONFIG_E2K */
 
 struct call_function_data {
 	call_single_data_t	__percpu *csd;
@@ -104,12 +108,20 @@ void __init call_function_init(void)
  * previous function call. For multi-cpu calls its even more interesting
  * as we'll have to ensure no other cpu is observing our csd.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_csd_lock_wait(struct __call_single_data *csd)
+#else
 static __always_inline void csd_lock_wait(struct __call_single_data *csd)
+#endif
 {
 	smp_cond_load_acquire(&csd->flags, !(VAL & CSD_FLAG_LOCK));
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_csd_lock(struct __call_single_data *csd)
+#else
 static __always_inline void csd_lock(struct __call_single_data *csd)
+#endif
 {
 	csd_lock_wait(csd);
 	csd->flags |= CSD_FLAG_LOCK;
@@ -122,7 +134,19 @@ static __always_inline void csd_lock(struct __call_single_data *csd)
 	smp_wmb();
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_arch_csd_lock_async(call_single_data_t *csd)
+{
+	csd->flags = CSD_FLAG_LOCK;
+	smp_wmb();
+}
+#endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_csd_unlock(struct __call_single_data *csd)
+#else
 static __always_inline void csd_unlock(struct __call_single_data *csd)
+#endif
 {
 	WARN_ON(!(csd->flags & CSD_FLAG_LOCK));
 
@@ -342,8 +366,12 @@ int smp_call_function_single_async(int cpu, struct __call_single_data *csd)
 	if (WARN_ON_ONCE(csd->flags & CSD_FLAG_LOCK))
 		csd_lock_wait(csd);
 
+#if	defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+	arch_csd_lock_async(csd);
+#else	/* ! CONFIG_E2K || ! CONFIG_VIRTUALIZATION */
 	csd->flags = CSD_FLAG_LOCK;
 	smp_wmb();
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 
 	err = generic_exec_single(cpu, csd, csd->func, csd->info);
 	preempt_enable();

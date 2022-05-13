@@ -386,7 +386,15 @@ size_t ZSTD_copyCCtx(ZSTD_CCtx *dstCCtx, const ZSTD_CCtx *srcCCtx, unsigned long
 		memcpy(dstCCtx->offcodeCTable, srcCCtx->offcodeCTable, sizeof(dstCCtx->offcodeCTable));
 	}
 	if (srcCCtx->flagStaticHufTable) {
+#ifdef CONFIG_E2K
+		/*
+		 * We could delete this, when fast __builtin_memcpy() appears
+		 * or e2k memcpy doesn't use __alignof().
+		 */
+		memcpy((void *) dstCCtx->hufTable, srcCCtx->hufTable, 256 * 4);
+#else
 		memcpy(dstCCtx->hufTable, srcCCtx->hufTable, 256 * 4);
+#endif
 	}
 
 	return 0;

@@ -1,0 +1,41 @@
+#!/bin/sh
+KERNELRELEASE=xxKERNELRELEASExx
+FINITRD=/boot/initrd-${KERNELRELEASE}.img
+FMODULES=/etc/modules-$KERNELRELEASE
+if [ x"$1" == x"configure" ] && [ x"$2" != x ]; then
+	/sbin/depmod -b / $KERNELRELEASE || exit 1
+	if [ ! -e $FINITRD ]; then
+		/usr/sbin/mkinitramfs -k $KERNELRELEASE || exit 1
+	fi
+	exit 0
+fi
+[ x"$1" == x"abort-upgrade" ] && exit 0
+[ x"$1" == x"abort-remove" ] && exit 0
+add_modules()
+{
+	[ -f $FMODULES ] && return
+	mver="$(uname -r)"
+	[ -f "/etc/modules-${mver}" ] && fmod0="/etc/modules-${mver}"
+	[ x"$fmod0" == x ] && [ -f "/etc/sysconfig/modules-${mver}" ] && fmod0="/etc/sysconfig/modules-${mver}"
+	if [ x"$fmod0" == x ]; then
+		mver="$(echo ${mver} | sed -e 's/.*-elbrus.//')"
+		[ -f "/etc/sysconfig/modules-${mver}" ] && fmod0="/etc/sysconfig/modules-${mver}"
+	fi
+	dmod=/lib/modules/$KERNELRELEASE/kernel
+	for mod in `find $dmod -name "*\.ko" | grep -o '[^\/]*$' | sed -e 's/\.ko$//g'`; do
+		if [ x"$fmod0" == x ]; then
+			echo "# $mod"
+		else
+			cat $fmod0 | grep "^[[:space:]]*${mod}[[:space:]]"
+			r1=$?
+			cat $fmod0 | grep "^[[:space:]]*${mod}$"
+			r2=$?
+			[ $r1 -ne 0 -a $r2 -ne 0 ] && echo "# $mod"
+		fi
+	done  >$FMODULES
+}
+/sbin/depmod -b / $KERNELRELEASE || exit 1
+/usr/sbin/mkinitramfs -k $KERNELRELEASE || exit 1
+LC_ALL=C /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
+add_modules
+exit 0

@@ -42,6 +42,10 @@
 
 #include <linux/pci_ids.h>
 
+#if defined(CONFIG_MCST) && defined(CONFIG_PCI_MSI)
+#define MCST_MSIX
+#endif
+
 /*
  * The PCI interface treats multi-function devices as independent
  * devices.  The slot/function address of each device is encoded
@@ -446,6 +450,9 @@ struct pci_dev {
 #endif
 #ifdef CONFIG_PCI_MSI
 	const struct attribute_group **msi_irq_groups;
+#ifdef MCST_MSIX
+	void __iomem *mcst_msix_cap_base;
+#endif
 #endif
 	struct pci_vpd *vpd;
 #ifdef CONFIG_PCI_ATS
@@ -606,6 +613,9 @@ struct pci_bus {
 	unsigned int		is_added:1;
 };
 
+#ifdef CONFIG_MCST
+#define pci_bus_b(n)	list_entry(n, struct pci_bus, node)
+#endif
 #define to_pci_bus(n)	container_of(n, struct pci_bus, dev)
 
 static inline u16 pci_dev_id(struct pci_dev *dev)

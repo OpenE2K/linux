@@ -1935,6 +1935,10 @@ int amdgpu_vm_clear_freed(struct amdgpu_device *adev,
 	struct dma_fence *f = NULL;
 	int r;
 
+#ifdef CONFIG_MCST
+	mutex_lock(&adev->lock_reset);
+#endif
+
 	while (!list_empty(&vm->freed)) {
 		mapping = list_first_entry(&vm->freed,
 			struct amdgpu_bo_va_mapping, list);
@@ -1950,6 +1954,9 @@ int amdgpu_vm_clear_freed(struct amdgpu_device *adev,
 		amdgpu_vm_free_mapping(adev, vm, mapping, f);
 		if (r) {
 			dma_fence_put(f);
+#ifdef CONFIG_MCST
+			mutex_unlock(&adev->lock_reset);
+#endif
 			return r;
 		}
 	}
@@ -1960,6 +1967,10 @@ int amdgpu_vm_clear_freed(struct amdgpu_device *adev,
 	} else {
 		dma_fence_put(f);
 	}
+
+#ifdef CONFIG_MCST
+	mutex_unlock(&adev->lock_reset);
+#endif
 
 	return 0;
 

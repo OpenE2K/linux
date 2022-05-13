@@ -356,7 +356,9 @@ do_fptrap_after_fsr:
 	.word		661b
 	stxa		%g2, [%g3] ASI_MMU
 	.previous
-
+#ifdef CONFIG_E90S_NO_FPREGS_SAVE
+	mov		SECONDARY_CONTEXT, %g1
+#else
 	membar		#Sync
 	add		%g6, TI_FPREGS, %g2
 	andcc		%g1, FPRS_DL, %g0
@@ -371,7 +373,7 @@ do_fptrap_after_fsr:
 	stda		%f48, [%g2 + %g3] ASI_BLK_S
 5:	mov		SECONDARY_CONTEXT, %g1
 	membar		#Sync
-
+#endif
 661:	stxa		%g5, [%g1] ASI_DMMU
 	.section	.sun4v_1insn_patch, "ax"
 	.word		661b
@@ -379,6 +381,146 @@ do_fptrap_after_fsr:
 	.previous
 
 	membar		#Sync
+#ifdef CONFIG_E90S_NO_FPREGS_SAVE
+	/* Disable interrupts to make sure no memcpy will be called */
+	rdpr	%pil, %g2
+	ba,pt		%xcc, etrap_irq
+	 wrpr	%g0, PIL_NORMAL_MAX, %pil
+#else
 	ba,pt		%xcc, etrap
 	 wr		%g0, 0, %fprs
+#endif
 	.size		do_fptrap,.-do_fptrap
+
+#ifdef CONFIG_E90S
+#define GS(_reg) retl; st %f##_reg, [%o0]
+#define SS(_reg) retl; ld [%o0], %f##_reg
+#define GD(_reg) retl; std %f##_reg, [%o0]
+#define SD(_reg) retl; ldd [%o0], %f##_reg
+#define GQ(_reg) retl; stq %f##_reg, [%o0]
+#define SQ(_reg) retl; ldq [%o0], %f##_reg
+
+	.globl		__get_s_fpreg
+	.type		__get_s_fpreg,#function
+__get_s_fpreg:
+	set	1f, %o2
+	sll	%o1, 3, %o1
+	jmp	%o2 + %o1
+	 nop
+1:	GS(0);   GS(1);  GS(2);  GS(3);  GS(4);  GS(5);  GS(6);  GS(7);
+	GS(8);   GS(9); GS(10); GS(11); GS(12); GS(13); GS(14); GS(15);
+	GS(16); GS(17); GS(18); GS(19); GS(20); GS(21); GS(22); GS(23);
+	GS(24); GS(25); GS(26); GS(27); GS(28); GS(29); GS(30); GS(31);
+	.size		__get_s_fpreg,.-__get_s_fpreg
+
+	.globl		__set_s_fpreg
+	.type		__set_s_fpreg,#function
+__set_s_fpreg:
+	set	1f, %o2
+	sll	%o1, 3, %o1
+	jmp	%o2 + %o1
+	 nop
+1:	SS(0);   SS(1);  SS(2);  SS(3);  SS(4);  SS(5);  SS(6);  SS(7);
+	SS(8);   SS(9); SS(10); SS(11); SS(12); SS(13); SS(14); SS(15);
+	SS(16); SS(17); SS(18); SS(19); SS(20); SS(21); SS(22); SS(23);
+	SS(24); SS(25); SS(26); SS(27); SS(28); SS(29); SS(30); SS(31);
+	.size		__set_s_fpreg,.-__set_s_fpreg
+
+	.globl		__get_d_fpreg
+	.type		__get_d_fpreg,#function
+__get_d_fpreg:
+	set	1f, %o2
+	sll	%o1, 2, %o1
+	jmp	%o2 + %o1
+	 nop
+1:	 GD(0);  GD(2);  GD(4);  GD(6);  GD(8); GD(10); GD(12); GD(14);
+	GD(16); GD(18); GD(20); GD(22); GD(24); GD(26); GD(28); GD(30);
+	GD(32); GD(34); GD(36); GD(38); GD(40); GD(42); GD(44); GD(46);
+	GD(48); GD(50); GD(52); GD(54); GD(56); GD(58); GD(60); GD(62);
+	.size		__get_d_fpreg,.-__get_d_fpreg
+
+	.globl		__set_d_fpreg
+	.type		__set_d_fpreg,#function
+__set_d_fpreg:
+	set	1f, %o2
+	sll	%o1, 2, %o1
+	jmp	%o2 + %o1
+	 nop
+1:	 SD(0);  SD(2);  SD(4);  SD(6);  SD(8); SD(10); SD(12); SD(14);
+	SD(16); SD(18); SD(20); SD(22); SD(24); SD(26); SD(28); SD(30);
+	SD(32); SD(34); SD(36); SD(38); SD(40); SD(42); SD(44); SD(46);
+	SD(48); SD(50); SD(52); SD(54); SD(56); SD(58); SD(60); SD(62);
+	.size		__set_d_fpreg,.-__set_d_fpreg
+
+	.globl		__get_q_fpreg
+	.type		__get_q_fpreg,#function
+__get_q_fpreg:
+	set	1f, %o2
+	sll	%o1, 1, %o1
+	jmp	%o2 + %o1
+	 nop
+1:	 GQ(0);  GQ(4);  GQ(8); GQ(12); GQ(16); GQ(20); GQ(24); GQ(28);
+	GQ(32); GQ(36); GQ(40); GQ(44); GQ(48); GQ(52); GQ(56); GQ(60);
+	.size		__get_q_fpreg,.-__get_q_fpreg
+
+	.globl		__set_q_fpreg
+	.type		__set_q_fpreg,#function
+__set_q_fpreg:
+	set	1f, %o2
+	sll	%o1, 1, %o1
+	jmp	%o2 + %o1
+	 nop
+1:	 SQ(0);  SQ(4);  SQ(8); SQ(12); SQ(16); SQ(20); SQ(24); SQ(28);
+	SQ(32); SQ(36); SQ(40); SQ(44); SQ(48); SQ(52); SQ(56); SQ(60);
+	.size		__set_q_fpreg,.-__set_q_fpreg
+
+	.globl  get_xfsr
+	.type		get_xfsr,#function
+get_xfsr:
+	retl
+	 stx	%fsr, [%o0]
+	.size		get_xfsr,.-get_xfsr
+
+	.globl  set_xfsr
+	.type		set_xfsr,#function
+set_xfsr:
+	retl
+	 ldx	[%o0], %fsr
+	.size		set_xfsr,.-set_xfsr
+
+	.globl  __fpreg_add_s
+	.type		__fpreg_add_s,#function
+__fpreg_add_s:
+	ld	[%o0], %f0
+	ld	[%o1], %f2
+	retl
+	 fadds	%f0, %f2, %f0
+	.size		__fpreg_add_s,.-__fpreg_add_s
+
+	.globl  __fpreg_sub_s
+	.type		__fpreg_sub_s,#function
+__fpreg_sub_s:
+	ld	[%o0], %f0
+	ld	[%o1], %f2
+	retl
+	 fsubs	%f0, %f2, %f0
+	.size		__fpreg_sub_s,.-__fpreg_sub_s
+
+	.globl  __fpreg_add_d
+	.type		__fpreg_add_d,#function
+__fpreg_add_d:
+	ldd	[%o0], %f0
+	ldd	[%o1], %f2
+	retl
+	 faddd	%f0, %f2, %f0
+	.size		__fpreg_add_d,.-__fpreg_add_d
+
+	.globl  __fpreg_sub_d
+	.type		__fpreg_sub_d,#function
+__fpreg_sub_d:
+	ldd	[%o0], %f0
+	ldd	[%o1], %f2
+	retl
+	 fsubd	%f0, %f2, %f0
+	.size		__fpreg_sub_d,.-__fpreg_sub_d
+#endif /*CONFIG_E90S*/

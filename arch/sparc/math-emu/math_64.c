@@ -67,6 +67,11 @@
 #define FITOS	0x0c4 /* Only Ultra-III generates this. */
 #endif
 #define FITOD	0x0c8 /* Only Ultra-III generates this. */
+#ifdef CONFIG_E90S
+#define PFADDS	0x040
+#define PFSUBS	0x044
+#define PFMULS	0x048
+#endif
 /* FPOP2 */
 #define FCMPQ	0x053
 #define FCMPEQ	0x057
@@ -82,6 +87,22 @@
 #define FMOVQNZ	0x0a7
 #define FMOVQGZ	0x0c7
 #define FMOVQGE 0x0e7
+#ifdef CONFIG_E90S
+ /* FMA-fused opcode */
+#define FMADDS	((0<<7 | 1<<5) >> 5)
+#define FMADDD	((0<<7 | 2<<5) >> 5)
+#define FMSUBS	((1<<7 | 1<<5) >> 5)
+#define FMSUBD	((1<<7 | 2<<5) >> 5)
+#define FNMADDS	((3<<7 | 1<<5) >> 5)
+#define FNMADDD	((3<<7 | 2<<5) >> 5)
+#define FNMSUBS	((2<<7 | 1<<5) >> 5)
+#define FNMSUBD	((2<<7 | 2<<5) >> 5)
+
+#define PFMADDS		((0<<7) >> 5)
+#define PFMSUBS		((1<<7) >> 5)
+#define PFNMADDS	((3<<7) >> 5)
+#define PFNMSUBS	((2<<7) >> 5)
+#endif
 
 #define FSR_TEM_SHIFT	23UL
 #define FSR_TEM_MASK	(0x1fUL << FSR_TEM_SHIFT)
@@ -98,6 +119,726 @@
  *
  * We return 0 if a SIGFPE should be sent, 1 otherwise.
  */
+#ifdef CONFIG_E90S_NO_FPREGS_SAVE
+static inline int record_exception(struct pt_regs *regs, int eflag, u64 fsr)
+{
+	int would_trap;
+
+	/* Determine if this exception would have generated a trap. */
+	would_trap = (fsr & ((long)eflag << FSR_TEM_SHIFT)) != 0UL;
+
+	/* If trapping, we only want to signal one bit. */
+	if(would_trap != 0) {
+		eflag &= ((fsr & FSR_TEM_MASK) >> FSR_TEM_SHIFT);
+		if((eflag & (eflag - 1)) != 0) {
+			if(eflag & FP_EX_INVALID)
+				eflag = FP_EX_INVALID;
+			else if(eflag & FP_EX_OVERFLOW)
+				eflag = FP_EX_OVERFLOW;
+			else if(eflag & FP_EX_UNDERFLOW)
+				eflag = FP_EX_UNDERFLOW;
+			else if(eflag & FP_EX_DIVZERO)
+				eflag = FP_EX_DIVZERO;
+			else if(eflag & FP_EX_INEXACT)
+				eflag = FP_EX_INEXACT;
+		}
+	}
+
+	/* Set CEXC, here is the rule:
+	 *
+	 *    In general all FPU ops will set one and only one
+	 *    bit in the CEXC field, this is always the case
+	 *    when the IEEE exception trap is enabled in TEM.
+	 */
+	fsr &= ~(FSR_CEXC_MASK);
+	fsr |= ((long)eflag << FSR_CEXC_SHIFT);
+
+	/* Set the AEXC field, rule is:
+	 *
+	 *    If a trap would not be generated, the
+	 *    CEXC just generated is OR'd into the
+	 *    existing value of AEXC.
+	 */
+	if(would_trap == 0)
+		fsr |= ((long)eflag << FSR_AEXC_SHIFT);
+
+	/* If trapping, indicate fault trap type IEEE. */
+	if(would_trap != 0)
+		fsr |= (1UL << 14);
+
+	current_thread_info()->xfsr[0] = fsr;
+	set_xfsr(&fsr);
+
+	/* If we will not trap, advance the program counter over
+	 * the instruction being handled.
+	 */
+	if(would_trap == 0) {
+		regs->tpc = regs->tnpc;
+		regs->tnpc += 4;
+	}
+
+	return (would_trap ? 0 : 1);
+}
+
+typedef union {
+	u32 s;
+	u64 d;
+	u64 q[2];
+} *argp;
+
+#define get_fpreg(a, r, s) do {					\
+	if (0) printk(KERN_DEBUG "r" #s ": %px: %d %s:%d\n",	\
+				a, r, __func__, __LINE__);	\
+	__get_##s##_fpreg(a, r);				\
+} while (0)
+
+#define set_fpreg(a, r, s) do {					\
+	if (0) printk(KERN_DEBUG "w" #s ": %px: %d %s:%d\n",	\
+				a, r, __func__, __LINE__);	\
+	__set_##s##_fpreg(a, r);				\
+} while (0)
+
+#define get_s_fpreg(a, r) get_fpreg(a, r, s)
+#define get_d_fpreg(a, r) get_fpreg(a, r, d)
+#define get_q_fpreg(a, r) get_fpreg(a, r, q)
+
+#define set_s_fpreg(a, r) set_fpreg(a, r, s)
+#define set_d_fpreg(a, r) set_fpreg(a, r, d)
+#define set_q_fpreg(a, r) set_fpreg(a, r, q)
+
+static unsigned long fpreg_add_s(argp rs1, argp rs2, argp rd,
+					 int s1, int s2)
+{
+	unsigned long f0, f2, xfsr;
+	if (s1 != 0)
+		get_s_fpreg(&f0, 0);
+	if (s2 != 2)
+		get_s_fpreg(&f2, 2);
+	__fpreg_add_s(rs1, rs2);
+	get_xfsr(&xfsr);
+	get_s_fpreg(rd, 0);
+	if (s1 != 0)
+		set_s_fpreg(&f0, 0);
+	if (s2 != 2)
+		set_s_fpreg(&f2, 2);
+	return xfsr;
+}
+
+static unsigned long fpreg_sub_s(argp rs1, argp rs2, argp rd,
+					 int s1, int s2)
+{
+	unsigned long f0, f2, xfsr;
+	if (s1 != 0)
+		get_s_fpreg(&f0, 0);
+	if (s2 != 2)
+		get_s_fpreg(&f2, 2);
+	__fpreg_sub_s(rs1, rs2);
+	get_xfsr(&xfsr);
+	get_s_fpreg(rd, 0);
+	if (s1 != 0)
+		set_s_fpreg(&f0, 0);
+	if (s2 != 2)
+		set_s_fpreg(&f2, 2);
+	return xfsr;
+}
+
+static unsigned long fpreg_add_d(argp rs1, argp rs2, argp rd,
+					 int s1, int s2)
+{
+	unsigned long f0, f2, xfsr;
+	if (s1 != 0)
+		get_d_fpreg(&f0, 0);
+	if (s2 != 2)
+		get_d_fpreg(&f2, 2);
+	__fpreg_add_d(rs1, rs2);
+	get_xfsr(&xfsr);
+	get_d_fpreg(rd, 0);
+	if (s1 != 0)
+		set_d_fpreg(&f0, 0);
+	if (s2 != 2)
+		set_d_fpreg(&f2, 2);
+	return xfsr;
+}
+
+static unsigned long fpreg_sub_d(argp rs1, argp rs2, argp rd,
+					 int s1, int s2)
+{
+	unsigned long f0, f2, xfsr;
+	if (s1 != 0)
+		get_d_fpreg(&f0, 0);
+	if (s2 != 2)
+		get_d_fpreg(&f2, 2);
+	__fpreg_sub_d(rs1, rs2);
+	get_xfsr(&xfsr);
+	get_d_fpreg(rd, 0);
+	if (s1 != 0)
+		set_d_fpreg(&f0, 0);
+	if (s2 != 2)
+		set_d_fpreg(&f2, 2);
+	return xfsr;
+}
+
+int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap)
+{
+	unsigned long pc = regs->tpc;
+	unsigned long tstate = regs->tstate;
+	u32 insn = 0;
+	int type = 0;
+	/* ftt tells which ftt it may happen in, r is rd, b is rs2 and a is rs1. The *u arg tells
+	   whether the argument should be packed/unpacked (0 - do not unpack/pack, 1 - unpack/pack)
+	   non-u args tells the size of the argument (0 - no argument, 1 - single, 2 - double, 3 - quad */
+#define TYPE(ftt, r, ru, b, bu, a, au) type = (au << 2) | (a << 0) | (bu << 5) | (b << 3) | (ru << 8) | (r << 6) | (ftt << 9)
+	int freg;
+	FP_DECL_EX;
+	FP_DECL_S(SA); FP_DECL_S(SB); FP_DECL_S(SR);
+	FP_DECL_D(DA); FP_DECL_D(DB); FP_DECL_D(DR);
+	FP_DECL_Q(QA); FP_DECL_Q(QB); FP_DECL_Q(QR);
+	int IR;
+	long XR, xfsr;
+
+	/* Do not use functions which call memcpy (printk & etc):
+	 * memcpy use float register file */
+	xfsr = current_thread_info()->xfsr[0];
+	if (tstate & TSTATE_PRIV)
+		die_if_kernel("unfinished/unimplemented FPop from kernel", regs);
+	perf_sw_event(PERF_COUNT_SW_EMULATION_FAULTS, 1, regs, 0);
+
+	if (test_thread_flag(TIF_32BIT))
+		pc = (u32)pc;
+	if (get_user(insn, (u32 __user *) pc) != -EFAULT) {
+		if ((insn & 0xc1f80000) == 0x81a00000) /* FPOP1 */ {
+			switch ((insn >> 5) & 0x1ff) {
+			/* QUAD - ftt == 3 */
+			case FMOVQ:
+			case FNEGQ:
+			case FABSQ: TYPE(3,3,0,3,0,0,0); break;
+			case FSQRTQ: TYPE(3,3,1,3,1,0,0); break;
+			case FADDQ:
+			case FSUBQ:
+			case FMULQ:
+			case FDIVQ: TYPE(3,3,1,3,1,3,1); break;
+			case FDMULQ: TYPE(3,3,1,2,1,2,1); break;
+			case FQTOX: TYPE(3,2,0,3,1,0,0); break;
+			case FXTOQ: TYPE(3,3,1,2,0,0,0); break;
+			case FQTOS: TYPE(3,1,1,3,1,0,0); break;
+			case FQTOD: TYPE(3,2,1,3,1,0,0); break;
+			case FITOQ: TYPE(3,3,1,1,0,0,0); break;
+			case FSTOQ: TYPE(3,3,1,1,1,0,0); break;
+			case FDTOQ: TYPE(3,3,1,2,1,0,0); break;
+			case FQTOI: TYPE(3,1,0,3,1,0,0); break;
+
+			/* We can get either unimplemented or unfinished
+			 * for these cases.  Pre-Niagara systems generate
+			 * unfinished fpop for SUBNORMAL cases, and Niagara
+			 * always gives unimplemented fpop for fsqrt{s,d}.
+			 */
+			case FSQRTS: {
+				unsigned long x = xfsr;
+
+				x = (x >> 14) & 0x7;
+				TYPE(x,1,1,1,1,0,0);
+				break;
+			}
+
+			case FSQRTD: {
+				unsigned long x = xfsr;
+
+				x = (x >> 14) & 0x7;
+				TYPE(x,2,1,2,1,0,0);
+				break;
+			}
+
+			/* SUBNORMAL - ftt == 2 */
+			case FADDD:
+			case FSUBD:
+			case FMULD:
+			case FDIVD: TYPE(2,2,1,2,1,2,1); break;
+			case FADDS:
+			case FSUBS:
+			case FMULS:
+			case FDIVS: TYPE(2,1,1,1,1,1,1); break;
+			case FSMULD: TYPE(2,2,1,1,1,1,1); break;
+			case FSTOX: TYPE(2,2,0,1,1,0,0); break;
+			case FDTOX: TYPE(2,2,0,2,1,0,0); break;
+			case FDTOS: TYPE(2,1,1,2,1,0,0); break;
+			case FSTOD: TYPE(2,2,1,1,1,0,0); break;
+			case FSTOI: TYPE(2,1,0,1,1,0,0); break;
+			case FDTOI: TYPE(2,1,0,2,1,0,0); break;
+
+			/* Only Ultra-III generates these */
+			case FXTOS: TYPE(2,1,1,2,0,0,0); break;
+			case FXTOD: TYPE(2,2,1,2,0,0,0); break;
+#if 0			/* Optimized inline in sparc64/kernel/entry.S */
+			case FITOS: TYPE(2,1,1,1,0,0,0); break;
+#endif
+			case FITOD: TYPE(2,2,1,1,0,0,0); break;
+#ifdef CONFIG_E90S
+			default:{
+				int s1 = (insn >> 14)  & 0x1f;
+				int s2 = (insn >> 0)  & 0x1f;
+				int d = (insn >> 25) & 0x1f;
+				FP_DECL_S(SA2); FP_DECL_S(SB2); FP_DECL_S(SR2);
+				unsigned op = (insn >> 5) & 0x1ff;
+ 				if(op != PFADDS && op != PFSUBS && op != PFMULS)
+					break;
+				s1 = ((s1 & 1) << 5) | (s1 & 0x1e);
+				s2 = ((s2 & 1) << 5) | (s2 & 0x1e);
+				d  = ((d & 1) << 5) | (d & 0x1e);
+				argp rs1 = (argp)&f->regs[s1];
+				argp rs2 = (argp)&f->regs[s2];
+				argp rd  = (argp)&f->regs[d];
+				argp rs12 = (argp)&f->regs[s1 + 1];
+				argp rs22 = (argp)&f->regs[s2 + 1];
+				argp rd2  = (argp)&f->regs[d + 1];
+				/* operands are packed in double register */
+				get_d_fpreg(rs1, s1);
+				get_d_fpreg(rs2, s2);
+
+				FP_UNPACK_SP(SA, rs1); FP_UNPACK_SP(SB, rs2);
+				FP_UNPACK_SP(SA2, rs12); FP_UNPACK_SP(SB2, rs22);
+
+				switch (op) {
+					case PFADDS:
+						FP_ADD_S(SR, SA, SB); FP_ADD_S(SR2, SA2, SB2); break;
+					case PFSUBS:
+						FP_SUB_S(SR, SA, SB); FP_SUB_S(SR2, SA2, SB2); break;
+					case PFMULS:
+						FP_MUL_S(SR, SA, SB); FP_MUL_S(SR2, SA2, SB2); break;
+				default:
+					goto err;
+				}
+
+				if (!FP_INHIBIT_RESULTS) {
+					FP_PACK_SP (rd, SR); FP_PACK_SP (rd2, SR2);
+					set_d_fpreg(rd, d);
+				}
+				goto success;
+			}
+#endif	/*CONFIG_E90S*/
+			}
+		}
+		else if ((insn & 0xc1f80000) == 0x81a80000) /* FPOP2 */ {
+			IR = 2;
+			switch ((insn >> 5) & 0x1ff) {
+			case FCMPQ: TYPE(3,0,0,3,1,3,1); break;
+			case FCMPEQ: TYPE(3,0,0,3,1,3,1); break;
+			/* Now the conditional fmovq support */
+			case FMOVQ0:
+			case FMOVQ1:
+			case FMOVQ2:
+			case FMOVQ3:
+				/* fmovq %fccX, %fY, %fZ */
+				if (!((insn >> 11) & 3))
+					XR = xfsr >> 10;
+				else
+					XR = xfsr >> (30 + ((insn >> 10) & 0x6));
+				XR &= 3;
+				IR = 0;
+				switch ((insn >> 14) & 0x7) {
+				/* case 0: IR = 0; break; */			/* Never */
+				case 1: if (XR) IR = 1; break;			/* Not Equal */
+				case 2: if (XR == 1 || XR == 2) IR = 1; break;	/* Less or Greater */
+				case 3: if (XR & 1) IR = 1; break;		/* Unordered or Less */
+				case 4: if (XR == 1) IR = 1; break;		/* Less */
+				case 5: if (XR & 2) IR = 1; break;		/* Unordered or Greater */
+				case 6: if (XR == 2) IR = 1; break;		/* Greater */
+				case 7: if (XR == 3) IR = 1; break;		/* Unordered */
+				}
+				if ((insn >> 14) & 8)
+					IR ^= 1;
+				break;
+			case FMOVQI:
+			case FMOVQX:
+				/* fmovq %[ix]cc, %fY, %fZ */
+				XR = regs->tstate >> 32;
+				if ((insn >> 5) & 0x80)
+					XR >>= 4;
+				XR &= 0xf;
+				IR = 0;
+				freg = ((XR >> 2) ^ XR) & 2;
+				switch ((insn >> 14) & 0x7) {
+				/* case 0: IR = 0; break; */			/* Never */
+				case 1: if (XR & 4) IR = 1; break;		/* Equal */
+				case 2: if ((XR & 4) || freg) IR = 1; break;	/* Less or Equal */
+				case 3: if (freg) IR = 1; break;		/* Less */
+				case 4: if (XR & 5) IR = 1; break;		/* Less or Equal Unsigned */
+				case 5: if (XR & 1) IR = 1; break;		/* Carry Set */
+				case 6: if (XR & 8) IR = 1; break;		/* Negative */
+				case 7: if (XR & 2) IR = 1; break;		/* Overflow Set */
+				}
+				if ((insn >> 14) & 8)
+					IR ^= 1;
+				break;
+			case FMOVQZ:
+			case FMOVQLE:
+			case FMOVQLZ:
+			case FMOVQNZ:
+			case FMOVQGZ:
+			case FMOVQGE:
+				freg = (insn >> 14) & 0x1f;
+				if (!freg)
+					XR = 0;
+				else if (freg < 16)
+					XR = regs->u_regs[freg];
+				else if (!test_thread_64bit_stack(regs->u_regs[UREG_FP])) {
+					struct reg_window32 __user *win32;
+					flushw_user ();
+					win32 = (struct reg_window32 __user *)((unsigned long)((u32)regs->u_regs[UREG_FP]));
+					get_user(XR, &win32->locals[freg - 16]);
+				} else {
+					struct reg_window __user *win;
+					flushw_user ();
+					win = (struct reg_window __user *)(regs->u_regs[UREG_FP] + STACK_BIAS);
+					get_user(XR, &win->locals[freg - 16]);
+				}
+				IR = 0;
+				switch ((insn >> 10) & 3) {
+				case 1: if (!XR) IR = 1; break;			/* Register Zero */
+				case 2: if (XR <= 0) IR = 1; break;		/* Register Less Than or Equal to Zero */
+				case 3: if (XR < 0) IR = 1; break;		/* Register Less Than Zero */
+				}
+				if ((insn >> 10) & 4)
+					IR ^= 1;
+				break;
+			}
+			if (IR == 0) {
+				/* The fmov test was false. Do a nop instead */
+				xfsr &= ~(FSR_CEXC_MASK);
+				regs->tpc = regs->tnpc;
+				regs->tnpc += 4;
+				return 1;
+			} else if (IR == 1) {
+				/* Change the instruction into plain fmovq */
+				insn = (insn & 0x3e00001f) | 0x81a00060;
+				TYPE(3,3,0,3,0,0,0);
+			}
+		}
+#ifdef CONFIG_E90S
+		else if ((insn & 0xc1f80000) == 0x81b80000) /* FMA-fused opcode */ {
+			FP_DECL_S(SC); FP_DECL_S(SE);
+			FP_DECL_S(SA2); FP_DECL_S(SB2); FP_DECL_S(SC2); FP_DECL_S(SR2);
+			FP_DECL_D(DC); FP_DECL_D(DE);
+			int s1 = (insn >> 14)  & 0x1f;
+			int s2 = (insn >> 0)  & 0x1f;
+			int s3 = (insn >> 9)  & 0x1f;
+			int d  = (insn >> 25) & 0x1f;
+			argp rs1, rs2, rs3, rd;
+			argp rs12, rs22, rs32, rd2;
+			u64 e;
+			argp re  = (argp)&e;
+
+			switch ((insn >> 5) & 3) {
+			case 2: s1 = ((s1 & 1) << 5) | (s1 & 0x1e);
+				s2 = ((s2 & 1) << 5) | (s2 & 0x1e);
+				s3 = ((s3 & 1) << 5) | (s3 & 0x1e);
+				d  = ((d & 1) << 5) | (d & 0x1e);
+				rs1 = (argp)&f->regs[s1];
+				rs2 = (argp)&f->regs[s2];
+				rs3 = (argp)&f->regs[s3];
+				rd  = (argp)&f->regs[d];
+
+				get_d_fpreg(rs1, s1);
+				get_d_fpreg(rs2, s2);
+				get_d_fpreg(rs3, s3);
+				FP_UNPACK_DP (DA, rs1); FP_UNPACK_DP (DB, rs2);
+				FP_UNPACK_DP (DC, rs3);
+				break;
+
+			case 1:	rs1 = (argp)&f->regs[s1];
+				rs2 = (argp)&f->regs[s2];
+				rs3 = (argp)&f->regs[s3];
+				rd  = (argp)&f->regs[d];
+				get_s_fpreg(rs1, s1);
+				get_s_fpreg(rs2, s2);
+				get_s_fpreg(rs3, s3);
+				FP_UNPACK_SP (SA, rs1); FP_UNPACK_SP (SB, rs2);
+				FP_UNPACK_SP (SC, rs3); break;
+			case 0: /* Only packed operation. We should treat reg
+				 number as a double */
+				s1 = ((s1 & 1) << 5) | (s1 & 0x1e);
+				s2 = ((s2 & 1) << 5) | (s2 & 0x1e);
+				s3 = ((s3 & 1) << 5) | (s3 & 0x1e);
+				d  = ((d & 1) << 5) | (d & 0x1e);
+				rs1 = (argp)&f->regs[s1];
+				rs2 = (argp)&f->regs[s2];
+				rs3 = (argp)&f->regs[s3];
+				rd  = (argp)&f->regs[d];
+				rs12 = (argp)&f->regs[s1 + 1];
+				rs22 = (argp)&f->regs[s2 + 1];
+				rs32 = (argp)&f->regs[s3 + 1];
+				rd2  = (argp)&f->regs[d + 1];
+
+				get_d_fpreg(rs1, s1);
+				get_d_fpreg(rs2, s2);
+				get_d_fpreg(rs3, s3);
+				FP_UNPACK_SP (SA, rs1); FP_UNPACK_SP (SB, rs2); FP_UNPACK_SP (SC, rs3);
+				FP_UNPACK_SP (SA2, rs12); FP_UNPACK_SP (SB2, rs22); FP_UNPACK_SP (SC2, rs32);
+				break;
+			default:
+				goto err;
+			}
+
+			switch ((insn >> 5) & 0xf) {
+				case FMADDS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_add_s(re, rs3, rd, d, s3);
+					break;
+				case FMADDD:
+					FP_MUL_D(DE, DA, DB);
+					FP_PACK_DP(re, DE); /* round DE */
+					xfsr = fpreg_add_d(re, rs3, rd, d, s3);
+					break;
+				case FMSUBS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_sub_s(re, rs3, rd, d, s3);
+					break;
+				case FMSUBD:
+					FP_MUL_D(DE, DA, DB);
+					FP_PACK_DP(re, DE); /* round DE */
+					xfsr = fpreg_sub_d(re, rs3, rd, d, s3);
+					break;
+				case FNMADDS: /* rd <- -rs1 x rs2 - rs3 (sic!) */
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_sub_s(re, rs3, rd, d, s3);
+					break;
+				case FNMADDD: /* rd <- -rs1 x rs2 - rs3 (sic!) */
+					FP_MUL_D(DE, DA, DB);
+					FP_NEG_D(DE, DE);
+					FP_PACK_DP(re, DE); /* round DE */
+					xfsr = fpreg_sub_d(re, rs3, rd, d, s3);
+					break;
+				case FNMSUBS: /* rd <- -rs1 x rs2 + rs3 (sic!) */
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_add_s(re, rs3, rd, d, s3);
+					break;
+				case FNMSUBD: /* rd <- -rs1 x rs2 + rs3 (sic!) */
+					FP_MUL_D(DE, DA, DB);
+					FP_NEG_D(DE, DE);
+					FP_PACK_DP(re, DE); /* round DE */
+					xfsr = fpreg_add_d(re, rs3, rd, d, s3);
+					break;
+				case PFMADDS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_add_s(re, rs3, rd, d, s3);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_add_s(re, rs32, rd2, d, s3 + 1);
+					break;
+				case PFMSUBS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_sub_s(re, rs3, rd, d, s3);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_sub_s(re, rs32, rd2, d, s3 + 1);
+					break;
+				case PFNMADDS:	/* rd <- -rs1 x rs2 - rs3 (sic!) */
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_sub_s(re, rs3, rd, d, s3);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_sub_s(re, rs32, rd, d, s3 + 1);
+					break;
+				case PFNMSUBS:	/* rd <- -rs1 x rs2 + rs3 (sic!) */
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_add_s(re, rs3, rd, d, s3);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					xfsr = fpreg_add_s(re, rs32, rd2, d, s3 + 1);
+					break;
+				default:
+					goto err;
+			}
+
+			if(!FP_INHIBIT_RESULTS) switch((insn >> 5) & 3) {
+				case 2: set_d_fpreg(rd, d);
+					break;
+				case 1: set_s_fpreg(rd, d);
+					break;
+				case 0: set_d_fpreg(rd, d);
+					break;
+				default:
+					goto err;
+			}
+			goto success;
+		}
+#endif	/*CONFIG_E90S*/
+	}
+	if (type) {
+		argp rs1 = NULL, rs2 = NULL, rd = NULL;
+
+		/* Starting with UltraSPARC-T2, the cpu does not set the FP Trap
+		 * Type field in the %fsr to unimplemented_FPop.  Nor does it
+		 * use the fp_exception_other trap.  Instead it signals an
+		 * illegal instruction and leaves the FP trap type field of
+		 * the %fsr unchanged.
+		 */
+		if (!illegal_insn_trap) {
+			int ftt = (xfsr >> 14) & 0x7;
+			if (ftt != (type >> 9))
+				goto err;
+		}
+		xfsr &= ~0x1c000;
+		freg = ((insn >> 14) & 0x1f);
+		switch (type & 0x3) {
+		case 3: if (freg & 2) {
+				xfsr |= (6 << 14) /* invalid_fp_register */;
+				goto err;
+			}
+		case 2: freg = ((freg & 1) << 5) | (freg & 0x1e);
+		case 1: rs1 = (argp)&f->regs[freg];
+			break;
+		}
+		switch (type & 0x7) {
+		case 7: get_q_fpreg(rs1, freg);
+			FP_UNPACK_QP (QA, rs1); break;
+		case 6: get_d_fpreg(rs1, freg);
+			FP_UNPACK_DP (DA, rs1); break;
+		case 5: get_s_fpreg(rs1, freg);
+			FP_UNPACK_SP (SA, rs1); break;
+		}
+		freg = (insn & 0x1f);
+		switch ((type >> 3) & 0x3) {
+		case 3: if (freg & 2) {
+				xfsr |= (6 << 14) /* invalid_fp_register */;
+				goto err;
+			}
+		case 2: freg = ((freg & 1) << 5) | (freg & 0x1e);
+		case 1: rs2 = (argp)&f->regs[freg];
+			break;
+		}
+		switch ((type >> 3) & 0x7) {
+		case 7: get_q_fpreg(rs2, freg); FP_UNPACK_QP (QB, rs2); break;
+		case 6: get_d_fpreg(rs2, freg); FP_UNPACK_DP (DB, rs2); break;
+		case 5: get_s_fpreg(rs2, freg); FP_UNPACK_SP (SB, rs2); break;
+		}
+		freg = ((insn >> 25) & 0x1f);
+		switch ((type >> 6) & 0x3) {
+		case 3: if (freg & 2) {
+				xfsr |= (6 << 14) /* invalid_fp_register */;
+				goto err;
+			}
+		case 2: freg = ((freg & 1) << 5) | (freg & 0x1e);
+		case 1: rd = (argp)&f->regs[freg];
+			break;
+		}
+
+		switch ((insn >> 5) & 0x1ff) {
+		/* + */
+		case FADDS: FP_ADD_S (SR, SA, SB); break;
+		case FADDD: FP_ADD_D (DR, DA, DB); break;
+		case FADDQ: FP_ADD_Q (QR, QA, QB); break;
+		/* - */
+		case FSUBS: FP_SUB_S (SR, SA, SB); break;
+		case FSUBD: FP_SUB_D (DR, DA, DB); break;
+		case FSUBQ: FP_SUB_Q (QR, QA, QB); break;
+		/* * */
+		case FMULS: FP_MUL_S (SR, SA, SB); break;
+		case FSMULD: FP_CONV (D, S, 1, 1, DA, SA);
+			     FP_CONV (D, S, 1, 1, DB, SB);
+		case FMULD: FP_MUL_D (DR, DA, DB); break;
+		case FDMULQ: FP_CONV (Q, D, 2, 1, QA, DA);
+			     FP_CONV (Q, D, 2, 1, QB, DB);
+		case FMULQ: FP_MUL_Q (QR, QA, QB); break;
+		/* / */
+		case FDIVS: FP_DIV_S (SR, SA, SB); break;
+		case FDIVD: FP_DIV_D (DR, DA, DB); break;
+		case FDIVQ: FP_DIV_Q (QR, QA, QB); break;
+		/* sqrt */
+		case FSQRTS: FP_SQRT_S (SR, SB); break;
+		case FSQRTD: FP_SQRT_D (DR, DB); break;
+		case FSQRTQ: FP_SQRT_Q (QR, QB); break;
+		/* mov */
+		case FMOVQ: rd->q[0] = rs2->q[0]; rd->q[1] = rs2->q[1]; break;
+		case FABSQ: rd->q[0] = rs2->q[0] & 0x7fffffffffffffffUL; rd->q[1] = rs2->q[1]; break;
+		case FNEGQ: rd->q[0] = rs2->q[0] ^ 0x8000000000000000UL; rd->q[1] = rs2->q[1]; break;
+		/* float to int */
+		case FSTOI: FP_TO_INT_S (IR, SB, 32, 1); break;
+		case FDTOI: FP_TO_INT_D (IR, DB, 32, 1); break;
+		case FQTOI: FP_TO_INT_Q (IR, QB, 32, 1); break;
+		case FSTOX: FP_TO_INT_S (XR, SB, 64, 1); break;
+		case FDTOX: FP_TO_INT_D (XR, DB, 64, 1); break;
+		case FQTOX: FP_TO_INT_Q (XR, QB, 64, 1); break;
+		/* int to float */
+		case FITOQ: IR = rs2->s; FP_FROM_INT_Q (QR, IR, 32, int); break;
+		case FXTOQ: XR = rs2->d; FP_FROM_INT_Q (QR, XR, 64, long); break;
+		/* Only Ultra-III generates these */
+		case FXTOS: XR = rs2->d; FP_FROM_INT_S (SR, XR, 64, long); break;
+		case FXTOD: XR = rs2->d; FP_FROM_INT_D (DR, XR, 64, long); break;
+#if 0		/* Optimized inline in sparc64/kernel/entry.S */
+		case FITOS: IR = rs2->s; FP_FROM_INT_S (SR, IR, 32, int); break;
+#endif
+		case FITOD: IR = rs2->s; FP_FROM_INT_D (DR, IR, 32, int); break;
+		/* float to float */
+		case FSTOD: FP_CONV (D, S, 1, 1, DR, SB); break;
+		case FSTOQ: FP_CONV (Q, S, 2, 1, QR, SB); break;
+		case FDTOQ: FP_CONV (Q, D, 2, 1, QR, DB); break;
+		case FDTOS: FP_CONV (S, D, 1, 1, SR, DB); break;
+		case FQTOS: FP_CONV (S, Q, 1, 2, SR, QB); break;
+		case FQTOD: FP_CONV (D, Q, 1, 2, DR, QB); break;
+		/* comparison */
+		case FCMPQ:
+		case FCMPEQ:
+			FP_CMP_Q(XR, QB, QA, 3);
+			if (XR == 3 &&
+			    (((insn >> 5) & 0x1ff) == FCMPEQ ||
+			     FP_ISSIGNAN_Q(QA) ||
+			     FP_ISSIGNAN_Q(QB)))
+				FP_SET_EXCEPTION (FP_EX_INVALID);
+		}
+		if (!FP_INHIBIT_RESULTS) {
+			switch ((type >> 6) & 0x7) {
+			case 0:
+				if (XR == -1) XR = 2;
+				switch (freg & 3) {
+				/* fcc0, 1, 2, 3 */
+				case 0: xfsr &= ~0xc00; xfsr |= (XR << 10); break;
+				case 1: xfsr &= ~0x300000000UL; xfsr |= (XR << 32); break;
+				case 2: xfsr &= ~0xc00000000UL; xfsr |= (XR << 34); break;
+				case 3: xfsr &= ~0x3000000000UL; xfsr |= (XR << 36); break;
+				}
+				break;
+			case 1: rd->s = IR; set_s_fpreg(rd, freg); break;
+			case 2: rd->d = XR; set_d_fpreg(rd, freg); break;
+			case 5: FP_PACK_SP (rd, SR); set_s_fpreg(rd, freg); break;
+			case 6: FP_PACK_DP (rd, DR); set_d_fpreg(rd, freg); break;
+			case 7: FP_PACK_QP (rd, QR); set_d_fpreg(rd, freg);break;
+			}
+		}
+#ifdef CONFIG_E90S
+success:
+#endif
+		if(_fex != 0)
+			return record_exception(regs, _fex, xfsr);
+
+		/* Success and no exceptions detected. */
+		current_thread_info()->xfsr[0] &= ~(FSR_CEXC_MASK);
+		xfsr &= ~(FSR_CEXC_MASK);
+		set_xfsr(&xfsr);
+		regs->tpc = regs->tnpc;
+		regs->tnpc += 4;
+		return 1;
+	}
+err:	return 0;
+}
+#else /*CONFIG_E90S_NO_FPREGS_SAVE*/
 static inline int record_exception(struct pt_regs *regs, int eflag)
 {
 	u64 fsr = current_thread_info()->xfsr[0];
@@ -256,6 +997,47 @@ int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap)
 			case FITOS: TYPE(2,1,1,1,0,0,0); break;
 #endif
 			case FITOD: TYPE(2,2,1,1,0,0,0); break;
+#ifdef CONFIG_E90S
+			default:{
+				int s1 = (insn >> 14)  & 0x1f;
+				int s2 = (insn >> 0)  & 0x1f;
+				int d = (insn >> 25) & 0x1f;
+				FP_DECL_S(SA2); FP_DECL_S(SB2); FP_DECL_S(SR2);
+				unsigned op = (insn >> 5) & 0x1ff;
+ 				if(op != PFADDS && op != PFSUBS && op != PFMULS)
+					break;
+				s1 = ((s1 & 1) << 5) | (s1 & 0x1e);
+				s2 = ((s2 & 1) << 5) | (s2 & 0x1e);
+				d  = ((d & 1) << 5) | (d & 0x1e);
+				argp rs1 = (argp)&f->regs[s1];
+				argp rs2 = (argp)&f->regs[s2];
+				argp rd  = (argp)&f->regs[d];
+				argp rs12 = (argp)&f->regs[s1 + 1];
+				argp rs22 = (argp)&f->regs[s2 + 1];
+				argp rd2  = (argp)&f->regs[d + 1];
+
+				FP_UNPACK_SP(SA, rs1); FP_UNPACK_SP(SB, rs2);
+				FP_UNPACK_SP(SA2, rs12); FP_UNPACK_SP(SB2, rs22);
+
+				switch (op) {
+					case PFADDS:
+						FP_ADD_S(SR, SA, SB); FP_ADD_S(SR2, SA2, SB2); break;
+					case PFSUBS: 
+						FP_SUB_S(SR, SA, SB); FP_SUB_S(SR2, SA2, SB2); break;
+					case PFMULS: 
+						FP_MUL_S(SR, SA, SB); FP_MUL_S(SR2, SA2, SB2); break;
+				default:
+					goto err;
+				}
+
+				if (!FP_INHIBIT_RESULTS) {
+					FP_PACK_SP (rd, SR); FP_PACK_SP (rd2, SR2);
+				}
+				flags = (d < 32) ? FPRS_DL : FPRS_DU; 
+				current_thread_info()->fpsaved[0] |= flags;
+				goto success;
+			}
+#endif	/*CONFIG_E90S*/
 			}
 		}
 		else if ((insn & 0xc1f80000) == 0x81a80000) /* FPOP2 */ {
@@ -354,6 +1136,177 @@ int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap)
 				TYPE(3,3,0,3,0,0,0); 
 			}
 		}
+#ifdef CONFIG_E90S
+		else if ((insn & 0xc1f80000) == 0x81b80000) /* FMA-fused opcode */ {
+			FP_DECL_S(SC); FP_DECL_S(SE); 
+			FP_DECL_S(SA2); FP_DECL_S(SB2); FP_DECL_S(SC2); FP_DECL_S(SR2);
+			FP_DECL_D(DC); FP_DECL_D(DE);
+			argp rs12, rs22, rs32, rd2;
+			u64 e;
+			int s1 = (insn >> 14)  & 0x1f;
+			int s2 = (insn >> 0)  & 0x1f;
+			int s3 = (insn >> 9)  & 0x1f;
+			int d  = (insn >> 25) & 0x1f;
+			argp rs1 = (argp)&f->regs[s1];
+			argp rs2 = (argp)&f->regs[s2];
+			argp rs3 = (argp)&f->regs[s3];
+			argp rd  = (argp)&f->regs[d];
+			argp re  = (argp)&e;
+
+			switch ((insn >> 5) & 3) {
+			case 2: 
+				s1 = ((s1 & 1) << 5) | (s1 & 0x1e);
+				s2 = ((s2 & 1) << 5) | (s2 & 0x1e);
+				s3 = ((s3 & 1) << 5) | (s3 & 0x1e);
+				d  = ((d & 1) << 5) | (d & 0x1e);
+				rs1 = (argp)&f->regs[s1];
+				rs2 = (argp)&f->regs[s2];
+				rs3 = (argp)&f->regs[s3];
+				rd  = (argp)&f->regs[d];
+				FP_UNPACK_DP (DA, rs1); FP_UNPACK_DP (DB, rs2);
+				FP_UNPACK_DP (DC, rs3);
+				break;
+
+			case 1: FP_UNPACK_SP (SA, rs1); FP_UNPACK_SP (SB, rs2);
+				FP_UNPACK_SP (SC, rs3); break;
+			case 0: /* Only packed operation. We should treat reg
+				 number as a double */
+				s1 = ((s1 & 1) << 5) | (s1 & 0x1e);
+				s2 = ((s2 & 1) << 5) | (s2 & 0x1e);
+				s3 = ((s3 & 1) << 5) | (s3 & 0x1e);
+				d  = ((d & 1) << 5) | (d & 0x1e);
+				rs1 = (argp)&f->regs[s1];
+				rs2 = (argp)&f->regs[s2];
+				rs3 = (argp)&f->regs[s3];
+				rd  = (argp)&f->regs[d];
+				rs12 = (argp)&f->regs[s1 + 1];
+				rs22 = (argp)&f->regs[s2 + 1];
+				rs32 = (argp)&f->regs[s3 + 1];
+				rd2  = (argp)&f->regs[d + 1];
+				FP_UNPACK_SP (SA, rs1); FP_UNPACK_SP (SB, rs2); FP_UNPACK_SP (SC, rs3);
+				FP_UNPACK_SP (SA2, rs12); FP_UNPACK_SP (SB2, rs22); FP_UNPACK_SP (SC2, rs32);
+				break;
+			default: 
+				goto err;
+			}
+	
+			switch ((insn >> 5) & 0xf) {
+				case FMADDS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re); 
+					FP_ADD_S(SR, SE, SC);
+					break;
+				case FMADDD:
+					FP_MUL_D(DE, DA, DB);
+					FP_PACK_DP(re, DE); /* round DE */
+					FP_UNPACK_DP(DE, re);
+					FP_ADD_D(DR, DE, DC);
+					break;
+				case FMSUBS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_SUB_S(SR, SE, SC);
+					break;
+				case FMSUBD:
+					FP_MUL_D(DE, DA, DB);
+					FP_PACK_DP(re, DE); /* round DE */
+					FP_UNPACK_DP(DE, re);
+					FP_SUB_D(DR, DE, DC);
+					break;
+				case FNMADDS:
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_SUB_S(SR, SE, SC);
+					break;
+				case FNMADDD:
+					FP_MUL_D(DE, DA, DB);
+					FP_NEG_D(DE, DE);
+					FP_PACK_DP(re, DE); /* round DE */
+					FP_UNPACK_DP(DE, re);
+					FP_SUB_D(DR, DE, DC);
+					break;
+				case FNMSUBS:
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_ADD_S(SR, SE, SC);
+					break;
+				case FNMSUBD:
+					FP_MUL_D(DE, DA, DB);
+					FP_NEG_D(DE, DE);
+					FP_PACK_DP(re, DE); /* round DE */
+					FP_UNPACK_DP(DE, re);
+					FP_ADD_D(DR, DE, DC);
+					break;
+				case PFMADDS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_ADD_S(SR, SE, SC);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_ADD_S(SR2, SE, SC2);
+					break;
+				case PFMSUBS:
+					FP_MUL_S(SE, SA, SB);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_SUB_S(SR, SE, SC);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_SUB_S(SR2, SE, SC2);
+					break;
+				case PFNMADDS:	/* rd <- -rs1 x rs2 - rs3 (sic!) */
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_SUB_S(SR, SE, SC);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_SUB_S(SR2, SE, SC2);
+					break;
+				case PFNMSUBS:	/* rd <- -rs1 x rs2 + rs3 (sic!) */
+					FP_MUL_S(SE, SA, SB);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_ADD_S(SR, SE, SC);
+
+					FP_MUL_S(SE, SA2, SB2);
+					FP_NEG_S(SE, SE);
+					FP_PACK_SP(re, SE); /* round SE */
+					FP_UNPACK_SP(SE, re);
+					FP_ADD_S(SR2, SE, SC2);
+					break;
+				default:
+					goto err;
+			}
+	
+			if(!FP_INHIBIT_RESULTS) switch((insn >> 5) & 3) {
+				case 2: FP_PACK_DP(rd, DR); break;
+				case 1: FP_PACK_SP(rd, SR); break;
+				case 0: FP_PACK_SP(rd, SR); FP_PACK_SP(rd2, SR2); break;
+				default: 
+					goto err;
+			}
+			flags = (d < 32) ? FPRS_DL : FPRS_DU; 
+			current_thread_info()->fpsaved[0] |= flags;
+			goto success;
+		}
+#endif	/*CONFIG_E90S*/
 	}
 	if (type) {
 		argp rs1 = NULL, rs2 = NULL, rd = NULL;
@@ -511,7 +1464,9 @@ int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap)
 			case 7: FP_PACK_QP (rd, QR); break;
 			}
 		}
-
+#ifdef CONFIG_E90S
+success:
+#endif
 		if(_fex != 0)
 			return record_exception(regs, _fex);
 
@@ -523,3 +1478,4 @@ int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap)
 	}
 err:	return 0;
 }
+#endif /*CONFIG_E90S_NO_FPREGS_SAVE*/

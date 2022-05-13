@@ -68,9 +68,25 @@ static const u32 cfb_tab16_le[] = {
 static const u32 cfb_tab32[] = {
 	0x00000000, 0xffffffff
 };
+#if defined(CONFIG_MCST) && defined(CONFIG_E90S) /* hack for sm768 */
+#  define FB_WRITEL(_v, _addr)	do {			\
+	u32 _l = _v;					\
+	volatile void __iomem *_a = _addr;		\
+	if (fb_be_math(p))				\
+		 fb_writel(_l, _a);			\
+	else						\
+		 writel(_l, _a);			\
+} while (0)
 
-#define FB_WRITEL fb_writel
-#define FB_READL  fb_readl
+#  define FB_READL(_addr)	({			\
+	const volatile void __iomem *_a = _addr;	\
+	fb_be_math(p) ?					\
+		 fb_readl(_a) : readl(_a);		\
+})
+#else
+#  define FB_WRITEL fb_writel
+#  define FB_READL  fb_readl
+#endif
 
 static inline void color_imageblit(const struct fb_image *image, 
 				   struct fb_info *p, u8 __iomem *dst1, 

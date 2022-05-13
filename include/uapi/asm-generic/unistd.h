@@ -851,8 +851,17 @@ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
 __SYSCALL(__NR_clone3, sys_clone3)
 #endif
 
+#ifdef CONFIG_MCST
+#define	__NR_el_posix		500
+__SYSCALL(__NR_el_posix, sys_el_posix)
+#define	__NR_macctl		501
+__SYSCALL(__NR_macctl, sys_macctl)
+#undef __NR_syscalls
+#define __NR_syscalls 502
+#else
 #undef __NR_syscalls
 #define __NR_syscalls 436
+#endif     /* CONFIG_MCST */
 
 /*
  * 32 bit systems traditionally used different

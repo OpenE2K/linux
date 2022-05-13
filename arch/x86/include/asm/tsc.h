@@ -29,6 +29,45 @@ static inline cycles_t get_cycles(void)
 
 	return rdtsc();
 }
+#ifdef CONFIG_MCST
+#define	UNSET_CPU_FREQ	((u32)(-1))
+extern u32 cpu_freq_hz;
+
+static inline long long cycles_2nsec(cycles_t cycles)
+{
+#if BITS_PER_LONG == 64
+	return cycles * 1000 / (cpu_freq_hz / 1000000);
+#else
+	long long long_res = cycles * 1000;
+	do_div(long_res, (cpu_freq_hz / 1000000));
+	return long_res;
+#endif /* BITS_PER_LONG */
+}
+
+static inline long long cycles_2usec(cycles_t cycles)
+{
+#if BITS_PER_LONG == 64
+	return cycles / (cpu_freq_hz / 1000000);
+#else
+	long long long_res = cycles;
+	do_div(long_res, (cpu_freq_hz / 1000000));
+	return long_res;
+#endif /* BITS_PER_LONG */
+}
+
+static inline cycles_t usecs_2cycles(long long usecs)
+{
+#if BITS_PER_LONG == 64
+	return usecs * cpu_freq_hz / 1000000;
+#else
+	long long long_res = usecs * cpu_freq_hz;
+	do_div(long_res, 1000000);
+        return long_res;
+#endif /* BITS_PER_LONG */
+}
+
+#endif /* CONFIG_MCST */
+
 
 extern struct system_counterval_t convert_art_to_tsc(u64 art);
 extern struct system_counterval_t convert_art_ns_to_tsc(u64 art_ns);

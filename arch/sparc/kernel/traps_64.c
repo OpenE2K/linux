@@ -23,6 +23,8 @@
 #include <linux/reboot.h>
 #include <linux/gfp.h>
 #include <linux/context_tracking.h>
+#include <linux/ratelimit.h>
+#include <linux/perf_event.h>
 
 #include <asm/smp.h>
 #include <asm/delay.h>
@@ -46,6 +48,7 @@
 #include <asm/memctrl.h>
 #include <asm/cacheflush.h>
 #include <asm/setup.h>
+#include <asm/cpudata.h>
 
 #include "entry.h"
 #include "kernel.h"
@@ -114,7 +117,7 @@ void bad_trap(struct pt_regs *regs, long lvl)
 void bad_trap_tl1(struct pt_regs *regs, long lvl)
 {
 	char buffer[36];
-	
+
 	if (notify_die(DIE_TRAP_TL1, "bad trap tl1", regs,
 		       0, lvl, SIGTRAP) == NOTIFY_STOP)
 		return;
@@ -146,10 +149,16 @@ static int sprintf_dimm(int synd_code, unsigned long paddr, char *buf, int bufle
 	if (dimm_handler) {
 		ret = dimm_handler(synd_code, paddr, buf, buflen);
 	} else if (tlb_type == spitfire) {
+#ifdef CONFIG_OF
+#ifndef CONFIG_E90S
 		if (prom_getunumber(synd_code, paddr, buf, buflen) == -1)
 			ret = -EINVAL;
 		else
 			ret = 0;
+#endif /* E90S */
+#else
+		ret = -ENODEV;
+#endif /* CONFIG_OF */
 	} else
 		ret = -ENODEV;
 	spin_unlock_irqrestore(&dimm_handler_lock, flags);
@@ -406,7 +415,7 @@ void sun4v_data_access_exception_tl1(struct pt_regs *regs, unsigned long addr, u
 	sun4v_data_access_exception(regs, addr, type_ctx);
 }
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 #include "pci_impl.h"
 #endif
 
@@ -582,7 +591,7 @@ void spitfire_access_error(struct pt_regs *regs, unsigned long status_encoded, u
 	udbl = (status_encoded & SFSTAT_UDBL_MASK) >> SFSTAT_UDBL_SHIFT;
 	udbh = (status_encoded & SFSTAT_UDBH_MASK) >> SFSTAT_UDBH_SHIFT;
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 	if (tt == TRAP_TYPE_DAE &&
 	    pci_poke_in_progress && pci_poke_cpu == smp_processor_id()) {
 		spitfire_clean_and_reenable_l1_caches();
@@ -1429,6 +1438,9 @@ static int cheetah_fix_ce(unsigned long physaddr)
 	__asm__ __volatile__("ldxa	[%0] %3, %%g0\n\t"
 			     "ldxa	[%1] %3, %%g0\n\t"
 			     "casxa	[%2] %3, %%g0, %%g0\n\t"
+#ifdef	CONFIG_RMO
+			     "membar	#StoreLoad | #StoreStore\n\t"
+#endif	/* CONFIG_RMO */
 			     "ldxa	[%0] %3, %%g0\n\t"
 			     "ldxa	[%1] %3, %%g0\n\t"
 			     "membar	#Sync"
@@ -1575,7 +1587,7 @@ void cheetah_deferred_handler(struct pt_regs *regs, unsigned long afsr, unsigned
 	struct cheetah_err_info local_snapshot, *p;
 	int recoverable, is_memory;
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 	/* Check for the special PCI poke sequence. */
 	if (pci_poke_in_progress && pci_poke_cpu == smp_processor_id()) {
 		cheetah_flush_icache();
@@ -1763,7 +1775,7 @@ void cheetah_deferred_handler(struct pt_regs *regs, unsigned long afsr, unsigned
  * Bit1:	0=recoverable,1=unrecoverable
  *
  * The hardware has disabled both the I-cache and D-cache in
- * the %dcr register.  
+ * the %dcr register.
  */
 void cheetah_plus_parity_error(int type, struct pt_regs *regs)
 {
@@ -1799,6 +1811,7 @@ void cheetah_plus_parity_error(int type, struct pt_regs *regs)
 	printk(KERN_WARNING "TPC<%pS>\n", (void *) regs->tpc);
 }
 
+#ifdef	CONFIG_SPARC64_SUN4V
 struct sun4v_error_entry {
 	/* Unique error handle */
 /*0x00*/u64		err_handle;
@@ -1956,7 +1969,7 @@ static void sun4v_report_real_raddr(const char *pfx, struct pt_regs *regs)
 
 	insn = *(unsigned int *) regs->tpc;
 
-	addr = compute_effective_address(regs, insn, 0);
+	compute_effective_address(regs, insn, 0, &addr);
 
 	printk("%s: insn effective address [0x%016llx]\n",
 	       pfx, addr);
@@ -2140,12 +2153,14 @@ void sun4v_resum_overflow(struct pt_regs *regs)
 static unsigned long sun4v_get_vaddr(struct pt_regs *regs)
 {
 	unsigned int insn;
+	unsigned long addr = 0;
 
 	if (!copy_from_user(&insn, (void __user *)regs->tpc, 4)) {
 		return compute_effective_address(regs, insn,
-						 (insn >> 25) & 0x1f);
+						(insn >> 25) & 0x1f,
+						&addr);
 	}
-	return 0;
+	return addr;
 }
 
 /* Attempt to handle non-resumable errors generated from userspace.
@@ -2222,7 +2237,7 @@ void sun4v_nonresum_error(struct pt_regs *regs, unsigned long offset)
 		return;
 	}
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_SPARC64_PCI
 	/* Check for the special PCI poke sequence. */
 	if (pci_poke_in_progress && pci_poke_cpu == cpu) {
 		pci_poke_faulted = 1;
@@ -2313,6 +2328,7 @@ void hypervisor_tlbop_error_xcall(unsigned long err, unsigned long op)
 	printk(KERN_CRIT "SUN4V: XCALL TLB hv call error %lu for op %lu\n",
 	       err, op);
 }
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 static void do_fpe_common(struct pt_regs *regs)
 {
@@ -2438,10 +2454,10 @@ static void user_instruction_dump(unsigned int __user *pc)
 {
 	int i;
 	unsigned int buf[9];
-	
+
 	if ((((unsigned long) pc) & 3))
 		return;
-		
+
 	if (copy_from_user(buf, pc - 3, sizeof(buf)))
 		return;
 
@@ -2474,8 +2490,14 @@ void show_stack(struct task_struct *tsk, unsigned long *_ksp)
 		flushw_all();
 
 	fp = ksp + STACK_BIAS;
-
+#ifdef CONFIG_MCST
+	if (tsk == current) {
+		pr_info("%s", linux_banner);
+	}
+		pr_info("Call Trace %d - %s:\n", tsk->pid, tsk->comm);
+#else
 	printk("Call Trace:\n");
+#endif
 	do {
 		struct sparc_stackf *sf;
 		struct pt_regs *regs;
@@ -2508,7 +2530,11 @@ void show_stack(struct task_struct *tsk, unsigned long *_ksp)
 			}
 		}
 #endif
+#if defined(CONFIG_E90S)
+	} while (++count < NUM_DUMP_FRAMES);
+#else
 	} while (++count < 16);
+#endif
 }
 
 static inline struct reg_window *kernel_stack_up(struct reg_window *rw)
@@ -2521,11 +2547,72 @@ static inline struct reg_window *kernel_stack_up(struct reg_window *rw)
 	return (struct reg_window *) (fp + STACK_BIAS);
 }
 
+#ifdef CONFIG_MCST
+static int __die_if_kernel(char *str, struct pt_regs *regs)
+{
+	static int die_counter;
+
+	/* Amuse the user. */
+	pr_alert(
+"              \\|/ ____ \\|/\n"
+"              \"@'/ .. \\`@\"\n"
+"              /_| \\__/ |_\\\n"
+"                 \\__U_/\n");
+
+	pr_alert("%s(%d): %s [#%d]\n", current->comm,
+		 task_pid_nr(current), str, ++die_counter);
+
+	if (notify_die(DIE_OOPS, str, regs, 0, 255, SIGSEGV) == NOTIFY_STOP)
+		return 1;
+	__asm__ __volatile__("flushw");
+	show_regs(regs);
+	if (regs->tstate & TSTATE_PRIV) {
+		instruction_dump((unsigned int *) regs->tpc);
+	} else {
+		if (test_thread_flag(TIF_32BIT)) {
+			regs->tpc &= 0xffffffff;
+			regs->tnpc &= 0xffffffff;
+		}
+		user_instruction_dump((unsigned int __user *) regs->tpc);
+	}
+	if (regs->tstate & TSTATE_PRIV)
+		show_state();
+	return 0;
+}
+
+void __noreturn die_if_kernel(char *str, struct pt_regs *regs)
+{
+	unsigned long flags;
+	int ret;
+	static DEFINE_RAW_SPINLOCK(die_lock);
+
+	oops_enter();
+	raw_spin_lock_irqsave(&die_lock, flags);
+	console_verbose();
+	bust_spinlocks(1);
+	ret = __die_if_kernel(str, regs);
+	bust_spinlocks(0);
+	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
+	raw_spin_unlock_irqrestore(&die_lock, flags);
+	oops_exit();
+
+	if (in_nmi())
+		panic("Fatal exception in non-maskable interrupt");
+	if (in_interrupt())
+		panic("Fatal exception in interrupt");
+	if (panic_on_oops)
+		panic("Fatal exception");
+
+	if (regs->tstate & TSTATE_PRIV)
+		do_exit(SIGKILL);
+	do_exit(SIGSEGV);
+}
+#else
 void __noreturn die_if_kernel(char *str, struct pt_regs *regs)
 {
 	static int die_counter;
 	int count = 0;
-	
+
 	/* Amuse the user. */
 	printk(
 "              \\|/ ____ \\|/\n"
@@ -2554,24 +2641,304 @@ void __noreturn die_if_kernel(char *str, struct pt_regs *regs)
 
 			rw = kernel_stack_up(rw);
 		}
-		instruction_dump ((unsigned int *) regs->tpc);
+		instruction_dump((unsigned int *) regs->tpc);
 	} else {
 		if (test_thread_flag(TIF_32BIT)) {
 			regs->tpc &= 0xffffffff;
 			regs->tnpc &= 0xffffffff;
 		}
-		user_instruction_dump ((unsigned int __user *) regs->tpc);
+		user_instruction_dump((unsigned int __user *) regs->tpc);
 	}
-	if (panic_on_oops)
-		panic("Fatal exception");
-	if (regs->tstate & TSTATE_PRIV)
+	if (regs->tstate & TSTATE_PRIV) {
 		do_exit(SIGKILL);
+	}
 	do_exit(SIGSEGV);
 }
+#endif
 EXPORT_SYMBOL(die_if_kernel);
 
 #define VIS_OPCODE_MASK	((0x3 << 30) | (0x3f << 19))
 #define VIS_OPCODE_VAL	((0x2 << 30) | (0x36 << 19))
+
+#ifdef CONFIG_MCST
+
+static inline void maybe_flush_windows(unsigned int rs1, unsigned int rs2,
+					unsigned int rd, int from_kernel)
+{
+	if (rs2 >= 16 || rs1 >= 16 || rd >= 16) {
+		if (from_kernel != 0)
+			__asm__ __volatile__("flushw");
+		else
+			flushw_user();
+	}
+}
+
+static inline int fetch_reg(struct pt_regs *regs, int reg,
+				unsigned long *val)
+{
+	unsigned long value = 0, fp;
+	int ret = 0;
+
+	if (reg < 16) {
+		*val = !reg ? 0 : regs->u_regs[reg];
+		return 0;
+	}
+
+	fp = regs->u_regs[UREG_FP];
+
+	if (regs->tstate & TSTATE_PRIV) {
+		struct reg_window *win;
+		win = (struct reg_window *)(fp + STACK_BIAS);
+		value = win->locals[reg - 16];
+	} else if (!test_thread_64bit_stack(fp)) {
+		struct reg_window32 __user *win32;
+		win32 = (struct reg_window32 __user *)
+				((unsigned long)((u32)fp));
+		ret = get_user(value, &win32->locals[reg - 16]);
+	} else {
+		struct reg_window __user *win;
+		win = (struct reg_window __user *)(fp + STACK_BIAS);
+		ret = get_user(value, &win->locals[reg - 16]);
+	}
+
+	*val = value;
+	return ret;
+}
+
+static inline int put_reg(struct pt_regs *regs, int reg,
+				unsigned long val)
+{
+	int err = 0;
+	unsigned long fp = regs->u_regs[UREG_FP];
+	if (reg < 16) {
+		if (reg)
+			regs->u_regs[reg] = val;
+	} else if (regs->tstate & TSTATE_PRIV) {
+		struct reg_window *win;
+		win = (struct reg_window *)(fp + STACK_BIAS);
+		win->locals[reg - 16] = val;
+	} else if (!test_thread_64bit_stack(fp)) {
+		struct reg_window32 __user *win32;
+		win32 = (struct reg_window32 __user *)
+			((unsigned long)((u32)fp));
+		err = put_user(val, &win32->locals[reg - 16]);
+	} else {
+		struct reg_window __user *win;
+		win = (struct reg_window __user *)(fp + STACK_BIAS);
+		err = put_user(val, &win->locals[reg - 16]);
+	}
+	return err;
+}
+
+static uint32_t e90s___div64_32(uint64_t *n, uint32_t base)
+{
+	uint64_t rem = *n;
+	uint64_t b = base;
+	uint64_t res, d = 1;
+	uint32_t high = rem >> 32;
+
+	/* Reduce the thing a bit first */
+	res = 0;
+	if (high >= base) {
+		high /= base;
+		res = (uint64_t) high << 32;
+		rem -= (uint64_t) (high*base) << 32;
+	}
+
+	while ((int64_t)b > 0 && b < rem) {
+		b = b+b;
+		d = d+d;
+	}
+
+	do {
+		if (rem >= b) {
+			rem -= b;
+			res += d;
+		}
+		b >>= 1;
+		d >>= 1;
+	} while (d);
+
+	*n = res;
+	return rem;
+}
+
+# define e90s_do_div(n, base) ({				\
+	uint32_t __base = (base);			\
+	uint32_t __rem;					\
+	(void)(((typeof((n)) *)0) == ((uint64_t *)0));	\
+	if (likely(((n) >> 32) == 0)) {			\
+		__rem = (uint32_t)(n) % __base;		\
+		(n) = (uint32_t)(n) / __base;		\
+	} else						\
+		__rem = e90s___div64_32(&(n), __base);	\
+	__rem;						\
+})
+
+static inline u64 e90s_div_u64_rem(u64 dividend, u32 divisor, u32 *remainder)
+{
+	*remainder = e90s_do_div(dividend, divisor);
+	return dividend;
+}
+
+static inline u64 e90s_div_u64(u64 dividend, u32 divisor)
+{
+	u32 remainder;
+	return e90s_div_u64_rem(dividend, divisor, &remainder);
+}
+
+static u64 e90s_div64_u64(u64 dividend, u64 divisor)
+{
+	u32 high = divisor >> 32;
+	u64 quot;
+
+	if (high == 0) {
+		quot = e90s_div_u64(dividend, divisor);
+	} else {
+		int n = 1 + fls(high);
+		quot = e90s_div_u64(dividend >> n, divisor >> n);
+
+		if (quot != 0)
+			quot--;
+		if ((dividend - quot * divisor) >= divisor)
+			quot++;
+	}
+
+	return quot;
+}
+
+static s64 e90s_div64_s64(s64 dividend, s64 divisor)
+{
+	s64 quot, t;
+
+	quot = e90s_div64_u64(abs(dividend), abs(divisor));
+	t = (dividend ^ divisor) >> 63;
+
+	return (quot ^ t) - t;
+}
+
+static inline void advance(struct pt_regs *regs)
+{
+	regs->tpc = regs->tnpc;
+	regs->tnpc += 4;
+	if (test_thread_flag(TIF_32BIT)) {
+		regs->tpc &= 0xffffffff;
+		regs->tnpc &= 0xffffffff;
+	}
+}
+
+#define OP_ARITH	2
+
+#define OP3_UDIVX	0x0d
+#define OP3_SDIVX	0x2d
+
+#define	OP3_UDIV	0x0e
+#define	OP3_SDIV	0x0f
+#define	OP3_UDIVCC	0x1e
+#define	OP3_SDIVCC	0x1f
+
+/* sysctl hooks */
+int instruction_emulation_warning;
+
+static int __init parse_instruction_emulation_warning(char *arg)
+{
+	instruction_emulation_warning = 1;
+	return 0;
+}
+early_param("emu_warn", parse_instruction_emulation_warning);
+
+static int e90s_emu_div(struct pt_regs *regs, u32 insn)
+{
+	static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL,
+					DEFAULT_RATELIMIT_BURST);
+	int err, overflow = 0;
+	unsigned long tstate =
+			regs->tstate & ~(TSTATE_XCC | TSTATE_ICC);
+	unsigned long pc = regs->tpc;
+	unsigned long dividend = 0, divisor = 0, result;
+	unsigned op3 = (insn >> 19) & 0x3f;
+	int sign = (op3 == OP3_UDIVX) || (op3 == OP3_UDIV) ||
+			 (op3 == OP3_UDIVCC) ? 0 : 1;
+	int cc = (op3 == OP3_UDIVCC) || (op3 == OP3_SDIVCC) ? 1 : 0;
+	int div64_32 = cc || (op3 == OP3_UDIV) || (op3 == OP3_UDIV) ? 1 : 0;
+	int rd = (insn >> 25) & 0x1f;
+	int rs1 = (insn >> 14) & 0x1f;
+	int rs2 = (insn >> 13) & 1 ? rs1 : insn & 0x1f;
+	int from_kernel = regs->tstate & TSTATE_PRIV ? 1 : 0;
+
+	maybe_flush_windows(rs1, rs2, rd, from_kernel);
+
+	if ((err = fetch_reg(regs, rs1, &dividend)))
+		goto out;
+
+	if (div64_32)
+		dividend |= (unsigned long)regs->y << 32;
+
+	if ((insn >> 13) & 1) {
+		divisor = insn & 0x1fff;
+	} else {
+		if ((err = fetch_reg(regs, rs2, &divisor)))
+			goto out;
+	}
+	if (divisor == 0) {
+		err = SIGFPE;
+		goto out;
+	}
+	result = sign ? e90s_div64_s64(dividend, divisor) :
+			e90s_div64_u64(dividend, divisor);
+
+	if (div64_32) {
+		if (sign) {
+			long r = (long)result;
+			if (r > (1L << 31) - 1) {
+				overflow = 1;
+				result = (1L << 31) - 1;
+			} else if (r < -(1L << 31)) {
+				overflow = 1;
+				result = -(1L << 31);
+			}
+		} else {
+			if (result >= (1L << 32) - 1) {
+				overflow = 1;
+				result = (1L << 32) - 1;
+			}
+		}
+	}
+
+	if (cc) {
+		unsigned long r = result;
+		if (r & (1 << 31))
+			tstate |= TSTATE_INEG;
+		if ((r & 0xffffFFFF) == 0)
+			tstate |= TSTATE_IZERO;
+		if (overflow)
+			tstate |= TSTATE_IOVFL;
+
+		if (r & (1UL << 61))
+			tstate |= TSTATE_XNEG;
+		if (r == 0)
+			tstate |= TSTATE_XZERO;
+	}
+
+	if (instruction_emulation_warning && __ratelimit(&rs)) {
+		pr_warn("%s illegal div instruction trap:"
+			" pc: %lx insn:%08x\n"
+			"\t\t\tsign:%d rd:%d: "
+			"%016lx / %016lx = %lx\n",
+			regs->tstate & TSTATE_PRIV ? "Kernel" : "User",
+			pc, insn,
+			sign, rd,
+			dividend, divisor, result);
+		show_regs(regs);
+	}
+
+	if (!(err = put_reg(regs, rd, result)))
+		advance(regs);
+	regs->tstate = tstate;
+out:
+	return err;
+}
+#endif	/*CONFIG_MCST*/
 
 void do_illegal_instruction(struct pt_regs *regs)
 {
@@ -2579,16 +2946,44 @@ void do_illegal_instruction(struct pt_regs *regs)
 	unsigned long pc = regs->tpc;
 	unsigned long tstate = regs->tstate;
 	u32 insn;
+#ifdef CONFIG_MCST
+	u32 optype, op3;
+#endif
 
 	if (notify_die(DIE_TRAP, "illegal instruction", regs,
 		       0, 0x10, SIGILL) == NOTIFY_STOP)
 		goto out;
 
-	if (tstate & TSTATE_PRIV)
+	if (tstate & TSTATE_PRIV) {
+#ifdef CONFIG_MCST
+		int r;
+		insn = *((u32 *)pc);
+		optype = (insn >> 30) & 0x3;
+		op3 = (insn >> 19) & 0x3f;
+		if (optype == OP_ARITH) switch (op3) {
+		case OP3_SDIVX:
+		case OP3_UDIVX:
+			perf_sw_event(PERF_COUNT_SW_EMULATION_FAULTS,
+				      1, regs, 0);
+			r = e90s_emu_div(regs, insn);
+			if (r == 0)
+				goto out;
+			if (r == SIGFPE)
+				die_if_kernel("Kernel divide by zero", regs);
+			break;
+		}
+
+		if (insn == 0) {
+			show_state();
+		}
+#endif
 		die_if_kernel("Kernel illegal instruction", regs);
+	}
 	if (test_thread_flag(TIF_32BIT))
 		pc = (u32)pc;
 	if (get_user(insn, (u32 __user *) pc) != -EFAULT) {
+		optype = (insn >> 30) & 0x3;
+		op3 = (insn >> 19) & 0x3f;
 		if ((insn & 0xc1ffc000) == 0x81700000) /* POPC */ {
 			if (handle_popc(insn, regs))
 				goto out;
@@ -2596,6 +2991,7 @@ void do_illegal_instruction(struct pt_regs *regs)
 			if (handle_ldf_stq(insn, regs))
 				goto out;
 		} else if (tlb_type == hypervisor) {
+#ifdef	CONFIG_SPARC64_SUN4V
 			if ((insn & VIS_OPCODE_MASK) == VIS_OPCODE_VAL) {
 				if (!vis_emul(regs, insn))
 					goto out;
@@ -2610,13 +3006,41 @@ void do_illegal_instruction(struct pt_regs *regs)
 				if (do_mathemu(regs, f, true))
 					goto out;
 			}
+#endif	/*CONFIG_SPARC64_SUN4V*/
 		}
+#ifdef CONFIG_MCST
+		 else if (optype == OP_ARITH) {
+			int r;
+			switch (op3) {
+			case OP3_SDIVX:
+			case OP3_UDIVX:
+			case OP3_SDIV:
+			case OP3_UDIV:
+			case OP3_SDIVCC:
+			case OP3_UDIVCC:
+				perf_sw_event(PERF_COUNT_SW_EMULATION_FAULTS,
+					1, regs, 0);
+				r = e90s_emu_div(regs, insn);
+				if (r == 0)
+					goto out;
+				if (r == SIGFPE) {
+					force_sig_fault(SIGFPE, FPE_INTDIV, (void __user *)pc, 0);
+					goto out;
+				}
+				break;
+			}
+		}
+#endif
 	}
 	force_sig_fault(SIGILL, ILL_ILLOPC, (void __user *)pc, 0);
 out:
 	exception_exit(prev_state);
 }
 
+#ifdef CONFIG_MCST
+int user_unaligned_trap(struct pt_regs *regs, unsigned int insn,
+			void __user *addr);
+#endif
 void mem_address_unaligned(struct pt_regs *regs, unsigned long sfar, unsigned long sfsr)
 {
 	enum ctx_state prev_state = exception_enter();
@@ -2628,10 +3052,18 @@ void mem_address_unaligned(struct pt_regs *regs, unsigned long sfar, unsigned lo
 	if (regs->tstate & TSTATE_PRIV) {
 		kernel_unaligned_trap(regs, *((unsigned int *)regs->tpc));
 		goto out;
-	}
-	if (is_no_fault_exception(regs))
-		return;
+#ifdef CONFIG_MCST
+	} else {
+		unsigned int insn;
+		if (!get_user(insn, (u32 __user *)regs->tpc) &&
+				!user_unaligned_trap(regs, insn,
+					(void __user *)sfar)) {
+			goto out;
+		}
+#endif
 
+
+	}
 	force_sig_fault(SIGBUS, BUS_ADRALN, (void __user *)sfar, 0);
 out:
 	exception_exit(prev_state);
@@ -2832,7 +3264,11 @@ EXPORT_SYMBOL(trap_block);
  */
 void notrace init_cur_cpu_trap(struct thread_info *t)
 {
+#ifdef CONFIG_E90S
+	int cpu = smp_processor_id();
+#else
 	int cpu = hard_smp_processor_id();
+#endif
 	struct trap_per_cpu *p = &trap_block[cpu];
 
 	p->thread = t;
@@ -2871,6 +3307,8 @@ void __init trap_init(void)
 					      kern_una_regs) ||
 		     TI_KUNA_INSN != offsetof(struct thread_info,
 					      kern_una_insn) ||
+		     TI_LAZY_COUNT != offsetof(struct thread_info,
+					      preempt_lazy_count) ||
 		     TI_FPREGS != offsetof(struct thread_info, fpregs) ||
 		     (TI_FPREGS & (64 - 1)));
 

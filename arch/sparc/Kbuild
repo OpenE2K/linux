@@ -8,4 +8,6 @@ obj-y += mm/
 obj-y += math-emu/
 obj-y += net/
 obj-y += crypto/
+ifndef CONFIG_E90S
 obj-$(CONFIG_SPARC64) += vdso/
+endif

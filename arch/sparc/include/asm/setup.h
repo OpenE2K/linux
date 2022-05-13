@@ -9,6 +9,10 @@
 
 #include <uapi/asm/setup.h>
 
+#ifdef CONFIG_E90S
+#include <asm-l/setup.h>
+#endif
+
 extern char reboot_command[];
 
 #ifdef CONFIG_SPARC32
@@ -49,11 +53,13 @@ unsigned long safe_compute_effective_address(struct pt_regs *, unsigned int);
 #endif
 
 #ifdef CONFIG_SPARC64
+#ifndef CONFIG_E90S
 void __init start_early_boot(void);
+#endif
 
 /* unaligned_64.c */
 int handle_ldf_stq(u32 insn, struct pt_regs *regs);
-void handle_ld_nf(u32 insn, struct pt_regs *regs);
+int handle_ld_nf(u32 insn, struct pt_regs *regs);
 
 /* init_64.c */
 extern atomic_t dcpage_flushes;

@@ -274,8 +274,10 @@ static void serial8250_backup_timeout(struct timer_list *t)
 	 * Must disable interrupts or else we risk racing with the interrupt
 	 * based handler.
 	 */
-	if (up->port.irq)
-		ier = serial8250_clear_IER(up);
+	if (up->port.irq) {
+		ier = serial_in(up, UART_IER);
+		serial_out(up, UART_IER, 0);
+	}
 
 	iir = serial_in(up, UART_IIR);
 
@@ -298,7 +300,7 @@ static void serial8250_backup_timeout(struct timer_list *t)
 		serial8250_tx_chars(up);
 
 	if (up->port.irq)
-		serial8250_set_IER(up, ier);
+		serial_out(up, UART_IER, ier);
 
 	spin_unlock_irqrestore(&up->port.lock, flags);
 
@@ -576,14 +578,6 @@ serial8250_register_ports(struct uart_driver *drv, struct device *dev)
 
 #ifdef CONFIG_SERIAL_8250_CONSOLE
 
-static void univ8250_console_write_atomic(struct console *co, const char *s,
-					  unsigned int count)
-{
-	struct uart_8250_port *up = &serial8250_ports[co->index];
-
-	serial8250_console_write_atomic(up, s, count);
-}
-
 static void univ8250_console_write(struct console *co, const char *s,
 				   unsigned int count)
 {
@@ -669,7 +663,6 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
 
 static struct console univ8250_console = {
 	.name		= "ttyS",
-	.write_atomic	= univ8250_console_write_atomic,
 	.write		= univ8250_console_write,
 	.device		= uart_console_device,
 	.setup		= univ8250_console_setup,
@@ -698,9 +691,15 @@ console_initcall(univ8250_console_init);
 static struct uart_driver serial8250_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "serial",
+#ifdef CONFIG_MCST
+	.dev_name		= "ttyM",
+	.major			= MCST_AUX_TTY_MAJOR,
+	.minor			= 0,
+#else
 	.dev_name		= "ttyS",
 	.major			= TTY_MAJOR,
 	.minor			= 64,
+#endif
 	.cons			= SERIAL8250_CONSOLE,
 };
 
@@ -1166,7 +1165,7 @@ static int __init serial8250_init(void)
 	pr_info("Serial: 8250/16550 driver, %d ports, IRQ sharing %sabled\n",
 		nr_uarts, share_irqs ? "en" : "dis");
 
-#ifdef CONFIG_SPARC
+#ifdef CONFIG_SERIAL_SUNCORE
 	ret = sunserial_register_minors(&serial8250_reg, UART_NR);
 #else
 	serial8250_reg.nr = UART_NR;
@@ -1202,7 +1201,7 @@ put_dev:
 unreg_pnp:
 	serial8250_pnp_exit();
 unreg_uart_drv:
-#ifdef CONFIG_SPARC
+#ifdef CONFIG_SERIAL_SUNCORE
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);
@@ -1227,7 +1226,7 @@ static void __exit serial8250_exit(void)
 
 	serial8250_pnp_exit();
 
-#ifdef CONFIG_SPARC
+#ifdef CONFIG_SERIAL_SUNCORE
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);
@@ -1253,7 +1252,11 @@ MODULE_PARM_DESC(skip_txen_test, "Skip checking for the TXEN bug at init time");
 module_param_hw_array(probe_rsa, ulong, ioport, &probe_rsa_count, 0444);
 MODULE_PARM_DESC(probe_rsa, "Probe I/O ports for RSA");
 #endif
+#ifdef CONFIG_MCST
+MODULE_ALIAS_CHARDEV_MAJOR(MCST_AUX_TTY_MAJOR);
+#else
 MODULE_ALIAS_CHARDEV_MAJOR(TTY_MAJOR);
+#endif
 
 #ifdef CONFIG_SERIAL_8250_DEPRECATED_OPTIONS
 #ifndef MODULE

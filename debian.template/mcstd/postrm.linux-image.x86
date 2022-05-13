@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+KERNELRELEASE=xxKERNELRELEASExx
+FINITRD=/boot/initrd-${KERNELRELEASE}.img
+[ x"$1" == x"upgrade" ] && exit 0
+[ x"$1" == x"failed-upgrade" ] && exit 0
+if [ "$1" = purge ]; then
+	rm -rf /lib/modules/$KERNELRELEASE
+	rm -f $FINITRD
+fi
+if [ "$1" = remove ]; then
+	rm -f $FINITRD
+fi
+LC_ALL=C /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
+exit 0

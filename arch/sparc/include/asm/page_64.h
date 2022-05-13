@@ -12,7 +12,7 @@
 /* Flushing for D-cache alias handling is only needed if
  * the page size is smaller than 16K.
  */
-#if PAGE_SHIFT < 14
+#if PAGE_SHIFT < 14 && !defined(CONFIG_E90S)
 #define DCACHE_ALIASING_POSSIBLE
 #endif
 
@@ -31,6 +31,8 @@
 #define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
 #define REAL_HPAGE_PER_HPAGE	(_AC(1,UL) << (HPAGE_SHIFT - REAL_HPAGE_SHIFT))
 #define HUGE_MAX_HSTATE		5
+#else
+#define HPAGE_SIZE		(_AC(1,UL) << PAGE_SHIFT)
 #endif
 
 #ifndef __ASSEMBLY__
@@ -67,7 +69,11 @@ void copy_highpage(struct page *to, struct page *from);
 #ifdef STRICT_MM_TYPECHECKS
 /* These are used to make use of C type-checking.. */
 typedef struct { unsigned long pte; } pte_t;
+#ifndef CONFIG_E90S
 typedef struct { unsigned long iopte; } iopte_t;
+#else
+typedef struct { unsigned iopte; } iopte_t;
+#endif
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pud; } pud_t;
 typedef struct { unsigned long pgd; } pgd_t;
@@ -90,7 +96,11 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 #else
 /* .. while these make it easier on the compiler */
 typedef unsigned long pte_t;
+#ifndef CONFIG_E90S
 typedef unsigned long iopte_t;
+#else
+typedef unsigned iopte_t;
+#endif
 typedef unsigned long pmd_t;
 typedef unsigned long pud_t;
 typedef unsigned long pgd_t;
@@ -137,7 +147,11 @@ extern unsigned long PAGE_OFFSET;
  * largest value we can support is whatever "KPGD_SHIFT + KPTE_BITS"
  * evaluates to.
  */
+#ifdef CONFIG_E90S
+#define MAX_PHYS_ADDRESS_BITS	40
+#else
 #define MAX_PHYS_ADDRESS_BITS	53
+#endif
 
 #define ILOG2_4MB		22
 #define ILOG2_256MB		28

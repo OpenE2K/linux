@@ -45,6 +45,7 @@ static inline const char * const *arch_get_ima_policy(void)
 #endif
 
 #else
+
 static inline int ima_bprm_check(struct linux_binprm *bprm)
 {
 	return 0;

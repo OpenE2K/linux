@@ -105,6 +105,7 @@ extern int radeon_dpm;
 extern int radeon_aspm;
 extern int radeon_runtime_pm;
 extern int radeon_hard_reset;
+extern int radeon_fbdev_accel;
 extern int radeon_vm_size;
 extern int radeon_vm_block_size;
 extern int radeon_deep_color;
@@ -986,19 +987,19 @@ struct radeon_rlc {
 	/* for power gating */
 	struct radeon_bo	*save_restore_obj;
 	uint64_t		save_restore_gpu_addr;
-	volatile uint32_t	*sr_ptr;
+	uint32_t __iomem	*sr_ptr;
 	const u32               *reg_list;
 	u32                     reg_list_size;
 	/* for clear state */
 	struct radeon_bo	*clear_state_obj;
 	uint64_t		clear_state_gpu_addr;
-	volatile uint32_t	*cs_ptr;
+	uint32_t __iomem	*cs_ptr;
 	const struct cs_section_def   *cs_data;
 	u32                     clear_state_size;
 	/* for cp tables */
 	struct radeon_bo	*cp_table_obj;
 	uint64_t		cp_table_gpu_addr;
-	volatile uint32_t	*cp_table_ptr;
+	uint32_t __iomem	*cp_table_ptr;
 	u32                     cp_table_size;
 };
 
@@ -2386,6 +2387,7 @@ struct radeon_device {
 	uint32_t			bios_scratch[RADEON_BIOS_NUM_SCRATCH];
 	struct radeon_wb		wb;
 	struct radeon_dummy_page	dummy_page;
+	struct radeon_dummy_page	dummy_page2;
 	bool				shutdown;
 	bool				need_swiotlb;
 	bool				accel_working;

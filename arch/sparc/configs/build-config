@@ -1,0 +1,131 @@
+#!/bin/bash
+scname=`basename $0`
+scdir=`dirname $0`
+conf_script=./scripts/config
+conf_path=./arch/sparc/configs
+[ "`uname -m`" != "sparc64" ] && export ARCH=sparc64
+Confs()
+{
+cat <<EOF
+ e90s_nort e90s_rt e90s_nn e90s_nnrt
+EOF
+}
+CONFS=`Confs | sed -e 's/$/ /g'`
+###############################################################################
+KnownConfs()
+{
+echo "Known <conf>s:"
+Confs
+}
+usage()
+{
+	echo "incorrect param: $1"
+	echo "usage: $scname [--def] --conf <conf> [--file <anyname>_defconfig] [CC=<cc>]" >&2
+	exit 1
+}
+Usage() {
+	cat >&2 <<EOL
+Usage:
+        $scname [--def] --conf <conf> [--output_directory/-o <path>] [--file <anyname>_defconfig]
+
+Generate .config or|and <defconfig> files for some kernel configuration
+from arch/sparc/configs/sparc64_defconfig | arch/sparc/configs/rt_sparc64_defconfig
+
+<defconfig>: ./arch/sparc/configs/<anyname>_defconfig
+             (default: ./arch/sparc/configs/gen_<conf>_defconfig)
+
+1. To generate <defconfig> file
+   $scname --def --conf <conf> [--file <anyname>_defconfig]
+2. To generate .config and <defconfig>
+   $scname --conf <conf> --file <anyname>_defconfig
+3. To generate .config only
+   $scname --conf <conf>
+4. To generate .config only in separate directory
+   $scname --conf <conf> -o <output directory>
+
+EOL
+KnownConfs
+exit 0
+}
+tmpf=tmp_$$_defconfig
+cleanup()
+{
+	rm -f $conf_path/$tmpf
+}
+localversion()
+{
+	l=`echo $DCONF | sed -e 's/_/-/' -e 's/nort//' -e 's/-$//'`
+	$conf_script --file $OUTPUT_DIR/.config --set-str CONFIG_LOCALVERSION "-${l}" \
+	|| exit 1
+}
+###############################################################################
+conf_nn()
+{
+	$conf_script $OPTFILE \
+	-d CONFIG_NUMA -u CONFIG_NUMA_BALANCING -u CONFIG_NUMA_BALANCING_DEFAULT_ENABLED \
+	|| exit 1
+}
+e90s_nort()  { :; }
+e90s_rt()    { :; }
+e90s_nn()    { conf_nn; }
+e90s_nnrt()  { conf_nn; }
+###############################################################################
+trap "cleanup" 1 2 3 6 15 EXIT
+OUTPUT_DIR=.
+while [ "$1" != "" ] ; do
+	opt="$1"
+	shift
+	case "$opt" in
+	--def|-d) def_flg=0;;
+	--conf|-c) [ x"$DCONF" != x ] && usage; DCONF="$1"; shift;;
+	--file|-f) [ x"$DFILE" != x ] && usage; DFILE="$1"; shift;;
+	--output_directory|-o) OUTPUT_DIR="$1"; shift;;
+	CC=*) optcc="$opt";;
+	V=*) optv="$opt";;
+	--help|-h) Usage;;
+	*) echo "incorrect param: $opt"; Usage;;
+	esac
+done
+[ x"$DCONF" == x ] && Usage
+if [[ "$CONFS" != *" $DCONF "* ]]; then
+	echo "unknown <conf>: $DCONF"
+	KnownConfs
+	exit 1
+fi
+# additional configuration files to use
+ADDITIONAL_CONFIGS="mcst.config"
+if [[ "$DCONF" == *"_rt"* ]] || [[ "$DCONF" == *"_nnrt"* ]]; then
+	ADDITIONAL_CONFIGS+=" mcst_rt.config "
+fi
+# src defconfig
+SFILE=$conf_path/sparc64_defconfig
+# dst defconfig
+if [ x"$DFILE" == x ]; then
+	DFILENAME=$tmpf
+	[ x$def_flg == x0 ] && DFILENAME=gen_${DCONF}_defconfig
+else
+	if [[ $DFILE != *"_defconfig" ]]; then
+		usage "incorrect defconfig file name: $DFILE"
+	fi
+	DFILENAME=$DFILE
+fi
+DFILE=$conf_path/$DFILENAME
+OPTFILE="--file $DFILE"
+
+cd $scdir/../../.. || exit 1
+pwd
+echo "ARCH=$ARCH"
+echo "$DCONF $DFILENAME $DFILE $SFILE"
+echo "$OPTFILE"
+#exit 0
+
+# Generate defconfig
+cp $SFILE $DFILE || exit 1
+$DCONF
+[ x$def_flg == x0 ] && exit 0
+
+# Generate .config; silence configs merging output by adding >/dev/null
+make O=$OUTPUT_DIR $DFILENAME $ADDITIONAL_CONFIGS $optcc $optv >/dev/null || exit 1
+localversion
+make O=$OUTPUT_DIR olddefconfig $optcc $optv
+exit $?

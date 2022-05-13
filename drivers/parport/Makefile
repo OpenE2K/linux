@@ -3,6 +3,20 @@
 # Makefile for the kernel Parallel port device drivers.
 #
 
+
+ifeq ($(CONFIG_E2K),y)
+EXTRA_CFLAGS += -D_WORKAROUND_MCST_PP 
+EXTRA_CFLAGS += -D_WORKAROUND_MCST_PP 
+endif
+ifeq ($(CONFIG_E90),y)
+EXTRA_CFLAGS += -D_WORKAROUND_MCST_PP 
+EXTRA_CFLAGS += -D_WORKAROUND_MCST_PP 
+endif
+ifeq ($(CONFIG_E90S),y)
+EXTRA_CFLAGS += -D_WORKAROUND_MCST_PP 
+EXTRA_CFLAGS += -D_WORKAROUND_MCST_PP 
+endif
+
 parport-objs	:= share.o ieee1284.o ieee1284_ops.o procfs.o
 
 ifeq ($(CONFIG_PARPORT_1284),y)
@@ -11,6 +25,7 @@ endif
 
 obj-$(CONFIG_PARPORT)		+= parport.o
 obj-$(CONFIG_PARPORT_PC)	+= parport_pc.o
+obj-$(CONFIG_PARPORT_MCST)	+= parport_mcst.o
 obj-$(CONFIG_PARPORT_SERIAL)	+= parport_serial.o
 obj-$(CONFIG_PARPORT_PC_PCMCIA) += parport_cs.o
 obj-$(CONFIG_PARPORT_AMIGA)	+= parport_amiga.o

@@ -33,7 +33,7 @@
 
 #include <linux/mm.h>
 
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 
 #include <asm/set_memory.h>
 

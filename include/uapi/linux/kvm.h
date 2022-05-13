@@ -305,6 +305,13 @@ struct kvm_run {
 			__u32 len;
 			__u8  is_write;
 		} mmio;
+#ifdef	CONFIG_E2K
+		/* KVM_EXIT_E2K_NOTIFY_IO */
+		struct {
+			__u32 io;
+			__u32 pad;
+		} notifier;
+#endif	/* CONFIG_E2K */
 		/* KVM_EXIT_HYPERCALL */
 		struct {
 			__u64 nr;

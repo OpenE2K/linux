@@ -20,7 +20,11 @@
 	.text;			\
 	.align 4;
 
+#ifdef CONFIG_MCST
+#define FUNC_NAME		_raw_copy_to_user
+#else
 #define FUNC_NAME		raw_copy_to_user
+#endif /* CONFIG_MCST */
 #define STORE(type,src,addr)	type##a src, [addr] ASI_AIUS
 #define STORE_BLK(src,addr)	stda src, [addr] ASI_BLK_AIUS
 #define EX_RETVAL(x)		0

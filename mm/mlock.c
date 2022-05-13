@@ -23,6 +23,9 @@
 #include <linux/hugetlb.h>
 #include <linux/memcontrol.h>
 #include <linux/mm_inline.h>
+#ifdef CONFIG_MCST
+#include <uapi/linux/mcst_rt.h>
+#endif
 
 #include "internal.h"
 
@@ -822,6 +825,16 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 	if (!ret && (flags & MCL_CURRENT))
 		mm_populate(0, TASK_SIZE);
 
+#ifdef CONFIG_MCST
+	if (current->extra_flags & RT_MLOCK_CONTROL) {
+		/* RT task done mlockall() and need to check PF occurence */
+		if ((flags & MCL_CURRENT) && !(flags & MCL_ONFAULT)) {
+			down_write(&current->mm->mmap_sem);
+			current->mm->extra_vm_flags |=  VM_MLOCK_DONE;
+			up_write(&current->mm->mmap_sem);
+		}
+	}
+#endif  /* CONFIG_MCST */
 	return ret;
 }
 
@@ -832,6 +845,11 @@ SYSCALL_DEFINE0(munlockall)
 	if (down_write_killable(&current->mm->mmap_sem))
 		return -EINTR;
 	ret = apply_mlockall_flags(0);
+#ifdef CONFIG_MCST
+	if (current->extra_flags & RT_MLOCK_CONTROL) {
+		current->mm->extra_vm_flags &= ~VM_MLOCK_DONE;
+	}
+#endif /* CONFIG_MCST */
 	up_write(&current->mm->mmap_sem);
 	return ret;
 }

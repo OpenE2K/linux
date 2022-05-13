@@ -112,7 +112,10 @@ static bool param_check_unsafe(const struct kernel_param *kp)
 	return true;
 }
 
-static int parse_one(char *param,
+#ifndef CONFIG_E2K
+static
+#endif
+int parse_one(char *param,
 		     char *val,
 		     const char *doing,
 		     const struct kernel_param *params,

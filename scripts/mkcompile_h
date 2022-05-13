@@ -74,7 +74,12 @@ UTS_TRUNCATE="cut -b -$UTS_LEN"
   echo \#define LINUX_COMPILE_BY \"`echo $LINUX_COMPILE_BY | $UTS_TRUNCATE`\"
   echo \#define LINUX_COMPILE_HOST \"`echo $LINUX_COMPILE_HOST | $UTS_TRUNCATE`\"
 
-  echo \#define LINUX_COMPILER \"`$CC -v 2>&1 | grep ' version ' | sed 's/[[:space:]]*$//'`\"
+  cc=`$CC -v 2>&1 | head -n 1 | head -c 3`
+  if [ x"$cc" = xlcc ]; then
+	echo \#define LINUX_COMPILER \"`$CC -v 2>&1 | head -n 1 | sed 's/[[:space:]]*$//'`\"
+  else
+	echo \#define LINUX_COMPILER \"`$CC -v 2>&1 | grep ' version ' | sed 's/[[:space:]]*$//'`\"
+  fi
 } > .tmpcompile
 
 # Only replace the real compile.h if the new one is different,

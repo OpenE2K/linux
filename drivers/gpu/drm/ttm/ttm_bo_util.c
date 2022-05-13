@@ -261,7 +261,7 @@ static int ttm_copy_io_page(void *dst, void *src, unsigned long page)
 	return 0;
 }
 
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 #define __ttm_kmap_atomic_prot(__page, __prot) kmap_atomic_prot(__page, __prot)
 #define __ttm_kunmap_atomic(__addr) kunmap_atomic(__addr)
 #else
@@ -539,14 +539,23 @@ pgprot_t ttm_io_prot(uint32_t caching_flags, pgprot_t tmp)
 		tmp = pgprot_noncached(tmp);
 #endif
 #if defined(__ia64__) || defined(__arm__) || defined(__aarch64__) || \
-    defined(__powerpc__) || defined(__mips__)
+    defined(__powerpc__) || defined(__mips__) || defined(__e2k__)
 	if (caching_flags & TTM_PL_FLAG_WC)
 		tmp = pgprot_writecombine(tmp);
 	else
 		tmp = pgprot_noncached(tmp);
 #endif
 #if defined(__sparc__)
+#if defined(CONFIG_MCST) && defined(CONFIG_E90S)
+	if (e90s_get_cpu_type() > E90S_CPU_R2000 &&
+			caching_flags & TTM_PL_FLAG_WC) {
+		tmp = pgprot_writecombine(tmp);
+	} else {
+		tmp = pgprot_noncached(tmp);
+	}
+#else
 	tmp = pgprot_noncached(tmp);
+#endif
 #endif
 	return tmp;
 }

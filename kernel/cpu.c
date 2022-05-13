@@ -2418,6 +2418,12 @@ EXPORT_SYMBOL(__cpu_possible_mask);
 struct cpumask __cpu_online_mask __read_mostly;
 EXPORT_SYMBOL(__cpu_online_mask);
 
+#ifdef CONFIG_MCST
+static DECLARE_BITMAP(rt_cpu_bits, CONFIG_NR_CPUS) __read_mostly = {0UL};
+struct cpumask *rt_cpu_mask = to_cpumask(rt_cpu_bits);
+EXPORT_SYMBOL(rt_cpu_mask);
+#endif
+
 struct cpumask __cpu_present_mask __read_mostly;
 EXPORT_SYMBOL(__cpu_present_mask);
 

@@ -385,7 +385,11 @@ static int regcache_rbtree_write(struct regmap *map, unsigned int reg,
 		regcache_rbtree_set_register(map, rbnode, reg_tmp, value);
 	} else {
 		unsigned int base_reg, top_reg;
+#ifdef __LCC__
+		unsigned int new_base_reg = UINT_MAX, new_top_reg = UINT_MAX;
+#else
 		unsigned int new_base_reg, new_top_reg;
+#endif
 		unsigned int min, max;
 		unsigned int max_dist;
 		unsigned int dist, best_dist = UINT_MAX;

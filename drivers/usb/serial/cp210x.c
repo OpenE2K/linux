@@ -23,6 +23,9 @@
 #include <linux/gpio/driver.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
+#ifdef CONFIG_MCST
+# include <linux/pinctrl/pinconf-generic.h>
+#endif
 
 #define DRIVER_DESC "Silicon Labs CP210x RS232 serial adaptor driver"
 

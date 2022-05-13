@@ -10,10 +10,16 @@
 static inline unsigned long
 __cmpxchg_u32(volatile int *m, int old, int new)
 {
+#ifndef	CONFIG_RMO
 	__asm__ __volatile__("cas [%2], %3, %0"
-			     : "=&r" (new)
-			     : "0" (new), "r" (m), "r" (old)
-			     : "memory");
+#else	/* CONFIG_RMO */
+			__asm__ __volatile__("membar #StoreLoad | #LoadLoad\n"
+			"cas [%2], %3, %0\n\t"
+			"membar #StoreLoad | #StoreStore"
+#endif	/* CONFIG_RMO */
+	: "=&r" (new)
+	: "0" (new), "r" (m), "r" (old)
+	: "memory");
 
 	return new;
 }
@@ -23,12 +29,18 @@ static inline unsigned long xchg32(__volatile__ unsigned int *m, unsigned int va
 	unsigned long tmp1, tmp2;
 
 	__asm__ __volatile__(
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #LoadLoad\n"
+#endif	/* CONFIG_RMO */
 "	mov		%0, %1\n"
 "1:	lduw		[%4], %2\n"
 "	cas		[%4], %2, %0\n"
 "	cmp		%2, %0\n"
 "	bne,a,pn	%%icc, 1b\n"
 "	 mov		%1, %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 	: "=&r" (val), "=&r" (tmp1), "=&r" (tmp2)
 	: "0" (val), "r" (m)
 	: "cc", "memory");
@@ -40,12 +52,18 @@ static inline unsigned long xchg64(__volatile__ unsigned long *m, unsigned long 
 	unsigned long tmp1, tmp2;
 
 	__asm__ __volatile__(
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #LoadLoad\n"
+#endif	/* CONFIG_RMO */
 "	mov		%0, %1\n"
 "1:	ldx		[%4], %2\n"
 "	casx		[%4], %2, %0\n"
 "	cmp		%2, %0\n"
 "	bne,a,pn	%%xcc, 1b\n"
 "	 mov		%1, %0\n"
+#ifdef	CONFIG_RMO
+"	membar		#StoreLoad | #StoreStore\n"
+#endif	/* CONFIG_RMO */
 	: "=&r" (val), "=&r" (tmp1), "=&r" (tmp2)
 	: "0" (val), "r" (m)
 	: "cc", "memory");
@@ -110,11 +128,16 @@ static inline unsigned long __xchg(unsigned long x, __volatile__ void * ptr,
 
 #include <asm-generic/cmpxchg-local.h>
 
-
 static inline unsigned long
 __cmpxchg_u64(volatile long *m, unsigned long old, unsigned long new)
 {
+#ifndef	CONFIG_RMO
 	__asm__ __volatile__("casx [%2], %3, %0"
+#else	/* CONFIG_RMO */
+	__asm__ __volatile__("membar #StoreLoad | #LoadLoad\n"
+			     "casx [%2], %3, %0\n\t"
+			     "membar #StoreLoad | #StoreStore"
+#endif	/* CONFIG_RMO */
 			     : "=&r" (new)
 			     : "0" (new), "r" (m), "r" (old)
 			     : "memory");
@@ -128,7 +151,7 @@ __cmpxchg_u64(volatile long *m, unsigned long old, unsigned long new)
  * The XOR is handy for reversing the bits for big-endian byte order
  */
 static inline unsigned long
-__cmpxchg_u8(volatile unsigned char *m, unsigned char old, unsigned char new)
+		__cmpxchg_u8(volatile unsigned char *m, unsigned char old, unsigned char new)
 {
 	unsigned long maddr = (unsigned long)m;
 	int bit_shift = (((unsigned long)m & 3) ^ 3) << 3;
@@ -142,7 +165,7 @@ __cmpxchg_u8(volatile unsigned char *m, unsigned char old, unsigned char new)
 		old32 = (load32 & ~mask) | (old << bit_shift);
 		load32 = __cmpxchg_u32(ptr, old32, new32);
 		if (load32 == old32)
-			return old;
+				return old;
 		load = (load32 & mask) >> bit_shift;
 	} while (load == old);
 

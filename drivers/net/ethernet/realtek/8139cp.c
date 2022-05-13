@@ -342,7 +342,8 @@ struct cp_private {
 	unsigned		tx_tail;
 	struct cp_desc		*tx_ring;
 	struct sk_buff		*tx_skb[CP_TX_RING_SIZE];
-	u32			tx_opts[CP_TX_RING_SIZE];
+	u32                     tx_opts[CP_TX_RING_SIZE];
+	unsigned short		tx_len[CP_TX_RING_SIZE];
 
 	unsigned		rx_buf_sz;
 	unsigned		wol_enabled : 1; /* Is Wake-on-LAN enabled? */
@@ -665,8 +666,7 @@ static void cp_tx (struct cp_private *cp)
 		BUG_ON(!skb);
 
 		dma_unmap_single(&cp->pdev->dev, le64_to_cpu(txd->addr),
-				 cp->tx_opts[tx_tail] & 0xffff,
-				 PCI_DMA_TODEVICE);
+				 cp->tx_len[tx_tail], PCI_DMA_TODEVICE);
 
 		if (status & LastFrag) {
 			if (status & (TxError | TxFIFOUnder)) {
@@ -795,6 +795,7 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 		wmb();
 
 		cp->tx_skb[entry] = skb;
+		cp->tx_len[entry] = len;
 		cp->tx_opts[entry] = opts1;
 		netif_dbg(cp, tx_queued, cp->dev, "tx queued, slot %d, skblen %d\n",
 			  entry, skb->len);
@@ -815,6 +816,7 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 			goto out_dma_error;
 
 		cp->tx_skb[entry] = skb;
+		cp->tx_len[entry] = first_len;
 
 		for (frag = 0; frag < skb_shinfo(skb)->nr_frags; frag++) {
 			const skb_frag_t *this_frag = &skb_shinfo(skb)->frags[frag];
@@ -849,6 +851,7 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 
 			cp->tx_opts[entry] = ctrl;
 			cp->tx_skb[entry] = skb;
+			cp->tx_len[entry] = len;
 		}
 
 		txd = &cp->tx_ring[first_entry];
@@ -1150,8 +1153,8 @@ static void cp_clean_rings (struct cp_private *cp)
 
 			desc = cp->tx_ring + i;
 			dma_unmap_single(&cp->pdev->dev,le64_to_cpu(desc->addr),
-					 le32_to_cpu(desc->opts1) & 0xffff,
-					 PCI_DMA_TODEVICE);
+					cp->tx_len[i],
+					PCI_DMA_TODEVICE);
 			if (le32_to_cpu(desc->opts1) & LastFrag)
 				dev_kfree_skb_any(skb);
 			cp->dev->stats.tx_dropped++;
