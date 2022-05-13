@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: (GPL-2.0 or LGPL-2.1)
+
+config LTTNG
+	tristate "LTTng support"
+	select TRACING
+	help
+	  LTTng is an open source tracing framework for Linux.
+
+	  See https://lttng.org/
+
+	  To compile as a set of modules, choose M here. To compile into
+	  the Linux kernel image, choose Y.
+
+	  If unsure, say N.
+
+source "lttng/tests/Kconfig"
