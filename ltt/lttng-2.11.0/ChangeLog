@@ -1,0 +1,1123 @@
+2021-01-11 (National Clean Off Your Desk Day) LTTng modules 2.11.7
+	* fix: adjust version range for trace_find_free_extent()
+	* fix: backport of fix: tracepoint: Optimize using static_call() (v5.10)
+	* Revert "fix: include order for older kernels"
+	* fix: backport of fix: ext4: fast commit recovery path (v5.10)
+	* Improve the release script
+	* Add release maintainer script
+	* fix: include order for older kernels
+	* fix: tracepoint: Optimize using static_call() (v5.10)
+	* fix: KVM: x86/mmu: Return unique RET_PF_* values if the fault was fixed (v5.10)
+	* fix: kvm: x86/mmu: Add TDP MMU PF handler (v5.10)
+	* fix: KVM: x86: Add intr/vectoring info and error code to kvm_exit tracepoint (v5.10)
+	* fix: ext4: fast commit recovery path (v5.10)
+	* fix: btrfs: make ordered extent tracepoint take btrfs_inode (v5.10)
+	* fix: btrfs: tracepoints: output proper root owner for trace_find_free_extent() (v5.10)
+	* fix: objtool: Rename frame.h -> objtool.h (v5.10)
+	* fix: strncpy equals destination size warning
+
+2020-10-05 (National Get Funky Day) LTTng modules 2.11.6
+	* Cleanup: lttng-syscalls: silence warning about uninitialized bitmap variable
+	* fix: backport 'Add 'kernel_read' wrapper for kernels < v4.14'
+	* Add 'kernel_read' wrapper for kernels < v4.14
+	* fix: Use 'kernel_read' to read from procfs
+	* fix: don't allow userspace copy to read kernel memory
+	* fix: Add a 1MB limit to lttng_strlen_user_inatomic
+	* fix: Adjust ranges for Ubuntu 4.15.0-119 kernel
+	* fix: Adjust ranges for Ubuntu HWE 5.0 kernels
+	* Fix: system call filter table
+	* fix: version ranges for ext4_discard_preallocations and writeback_queue_io
+	* fix: writeback: Fix sync livelock due to b_dirty_time processing (v5.9)
+	* fix: writeback: Drop I_DIRTY_TIME_EXPIRE (v5.9)
+	* fix: removal of [smp_]read_barrier_depends (v5.9)
+	* fix: ext4: indicate via a block bitmap read is prefetched… (v5.9)
+	* fix: ext4: limit the length of per-inode prealloc list (v5.9)
+	* fix: KVM: x86/mmu: Make kvm_mmu_page definition and accessor internal-only (v5.9)
+	* fix: Move mmutrace.h into the mmu/ sub-directory (v5.9)
+	* Kconfig: fix dependency issue when building in-tree without CONFIG_FTRACE
+
+2020-08-04 (National Chocolate Chip Cookie Day) LTTng modules 2.11.5
+	* fix: no __lttng_vmalloc_node_range() prior to v2.6.38
+	* Fix: Lock metadata cache on session destroy
+	* Fix: metadata stream leak, missing list removal and locking
+	* Fix: coherent state not changed atomically with metadata written
+	* fix: include module.h for EXPORT_SYMBOL_GPL
+	* fix: __lttng_vmalloc_node_range const caller introduced in v3.6
+	* fix: version range for overflow_callback
+	* fix: global_dirty_limit was introduced in v3.1
+	* fix: wrapper_uprobe_unregister is a void function
+	* fix: prior to v4.0, __vmalloc_node_range had no vm_flags param
+	* fix: vmalloc on v5.8 without KALLSYMS
+	* Detect missing symbols used with kallsyms_lookup at compile time
+	* Use exported symbol bdevname() instead of disk_name()
+	* Add git-review config
+	* fix: mm: remove vmalloc_sync_(un)mappings() (v5.8)
+	* fix: backport of block_bio_complete for <= v2.6.38
+	* fix: mm/writeback: discard NR_UNSTABLE_NFS, use NR_WRITEBACK (v5.8)
+	* fix: block: remove the error argument to the block_bio_complete (v5.8)
+	* fix: pipe_buf_operations rework (v5.8)
+
+2020-06-02 (National Leave the Office Early Day (or Simply Stay Home ?) LTTng modules 2.11.4
+	* Fix: Implement RING_BUFFER_GET_NEXT_SUBBUF_METADATA_CHECK
+	* fix: vmalloc_sync_mappings was backported to v5.5.12
+	* Update: Additional kernel ranges for vmalloc_sync_mappings
+	* Update: Use vmalloc_sync_mappings for stable kernels
+	* Fix: Use vmalloc_sync_mappings on kernel 5.6 as well
+	* fix: add missing guid_t type to wrapper
+	* Fix: missing wrapper rename to wrapper_vmalloc_sync_mappings
+	* Update for kernel 5.7: use vmalloc_sync_mappings on kernels >= 5.7
+	* Unbreak LTTng for kernel 5.7
+	* Move lttng wrappers into own module
+	* Introduce lttng_guid_gen wrapper for kernels >= 5.7.0
+	* Drop uuid.h wrapper
+	* instrumentation: update x86 kvm instrumentation for kernel >= 5.7.0
+	* instrumentation: update mm_vmscan for kernel >= 5.7.0
+
+2020-04-08 (The Day After National Beer Day) LTTng modules 2.11.3
+	* fix: uaccess wrapper for CentOS >= 4.18.0-147
+	* fix: ext4 instrumentation for CentOS >= 4.18.0-147
+	* fix: signal instrumentation for CentOS >= 4.18.0-147
+	* fix: kvm instrumentation for CentOS >= 4.18.0-147
+	* fix: rcu instrumentation for CentOS >= 4.18.0-80
+	* Fix: update kvm instrumentation for Ubuntu 5.3.0-45
+	* Fix: update kvm instrumentation for Ubuntu 5.3.0-43
+	* Fix: update kvm instrumentation for Ubuntu 4.15.0-92
+	* Remove lttng-ftrace integration
+	* Remove dependency on kallsyms for splice_to_pipe (kernel 4.2+)
+	* Remove dependency on kallsyms for irq_to_desc (kernel 3.4+)
+	* Remove work-around for signed tracepoint module tainting (kernel 3.15+)
+
+2020-02-25 (National Chocolate Covered Nut Day) LTTng modules 2.11.2
+	* Fix: rcu: Fix data-race due to atomic_t copy-by-value (5.5.6, 5.4.22)
+	* fix: workqueue: add worker function to workqueue_execute_end tracepoint (v5.6)
+	* fix: media: v4l2: abstract timeval handling in v4l2_buffer (v5.6)
+	* fix: rcu: Remove kfree_rcu() special casing and lazy-callback (v5.6)
+	* fix: rcu: Fix data-race due to atomic_t copy-by-value (v5.6)
+	* fix: btrfs: make btrfs_ordered_extent naming consistent (v5.6)
+	* fix: KVM: x86: Use gpa_t for cr2/gpa to fix TDP support on 32-bit (v5.6)
+	* fix: proc: decouple proc from VFS with "struct proc_ops" (v5.6)
+	* fix: y2038: hide timeval/timespec/itimerval/itimerspec types (v5.6)
+	* fix: use timespec64 on kernels that have it
+	* fix: move lttng_close_on_exec to proper wrapper
+	* fix: 'struct timex' removed upstream (v5.6)
+	* Fix: statedump: check task_active_pid_ns return value for NULL
+	* Fix: lttng-syscalls.c: marking wrong syscall probe as unregistered
+
+2020-01-29 (National Puzzle Day) LTTng modules 2.11.1
+	* fix: function prototype in wrapper/mm.h
+	* sunrpc: introduce lttng_get_clid helper
+	* Fix: sunrpc: use signed integer for client id
+	* Fix: sunrpc: null rpc_clnt dereference in rpc_task_queued tracepoint
+	* Fix: SUNRPC: Fix oops when trace sunrpc_task events in nfs client
+	* fix: ext4: Reserve revoke credits for freed blocks (v5.5)
+	* fix: btrfs: tracepoints: constify all pointers (v5.5)
+	* fix: btrfs block group struct refactor (v5.5)
+	* fix: y2038: itimer: change implementation to timespec64 (v5.5)
+	* Update .gitignore from upstream
+	* Fix: LTTNG_KERNEL_ADD_CALLSITE: Handle unknown event type
+
+2019-10-17 (Wear Something Gaudy Day) LTTng modules 2.11.0
+	* (no change)
+
+2019-10-11 (National Sausage Pizza Day) LTTng modules 2.11.0-rc7
+	* Fix: btrfs: move basic block_group definitions to their own header (v5.4)
+	* Cleanup: Silence gcc fall-through warning
+	* Fix: update sched prev_state instrumentation for upstream kernel
+
+2019-09-07 (Walter White's Anniversary) LTTng modules 2.11.0-rc6
+	* Fix: gcc-9.1 stack frame size warning
+	* Introduce LTTNG_KERNEL_SESSION_SET_CREATION_TIME
+	* Add metadata env fields
+	* Introduce LTTNG_KERNEL_SESSION_SET_NAME
+	* Fix: do not use diagnostic pragma when GCC version is lower than 4.6.0
+	* Fix: missing define when not building with gcc
+	* Fix: lttng-tracepoint module notifier should return NOTIFY_OK
+
+2019-06-12 (National Peanut Butter Cookie Day) LTTng modules 2.11.0-rc5
+	* Fix: Don't print ring-buffer's records count when it is not used
+	* Fix: do not set quiescent state on channel destroy
+	* Fix: ring_buffer_frontend.c: init read timer with uninitialized flags
+	* Introduce callstack stackwalk implementation header
+	* Prepare callstack common code for stackwalk
+	* Introduce callstack legacy implementation header
+	* fix: random: only read from /dev/random after its pool has received 128 bits (v5.2)
+	* fix: mm: move recent_rotated pages calculation to shrink_inactive_list() (v5.2)
+	* fix: mm/vmscan: simplify trace_reclaim_flags and trace_shrink_flags (v5.2)
+	* fix: mm/vmscan: drop may_writepage and classzone_idx from direct reclaim begin template (v5.2)
+	* fix: timer/trace: Improve timer tracing (v5.2)
+	* Cleanup: bitfields: streamline use of underscores
+	* Silence compiler "always false comparison" warning
+	* Fix: bitfield: shift undefined/implementation defined behaviors
+	* Fix: timestamp_end field should include all events within sub-buffer
+	* Fix: Remove start and number from syscall_get_arguments() args (v5.1)
+	* lttng abi documentation: clarify getter usage requirements
+	* Fix: don't access packet header for stream_id and stream_instance_id getters
+	* Fix: atomic_long_add_unless() returns a boolean
+	* Fix: Revert "KVM: MMU: show mmu_valid_gen..." (v5.1)
+	* Fix: pipe: stop using ->can_merge (v5.1)
+	* Fix: rcu: Remove wrapper definitions for obsolete RCU... (v5.1)
+	* Fix: mm: create the new vm_fault_t type (v5.1)
+	* Fix: extra-version-git.sh redirect stderr to /dev/null
+
+2019-03-12 (Homer Simpson Birthday) LTTng modules 2.11.0-rc4
+	* Fix: timer instrumentation for RHEL 7.6
+
+2019-03-12 (Homer Simpson Birthday) LTTng modules 2.11.0-rc3
+	* Move timekeeping blacklisting to a header file
+	* Blacklist: kprobe for arm
+	* Cleanup: tp mempool: Remove logically dead code
+	* Fix: btrfs: Remove fsid/metadata_fsid fields from btrfs_info
+	* Fix: SUNRPC: Simplify defining common RPC trace events (v5.0)
+	* Fix: Replace pointer values with task->tk_pid and rpc_clnt->cl_clid
+	* Fix: Remove 'type' argument from access_ok() function (v5.0)
+	* Add missing SPDX license identifiers to uprobes
+	* Fix: ext4: adjust reserved cluster count when removing extents (v4.20)
+	* Fix: signal: Remove SEND_SIG_FORCED (v4.20)
+	* Fix: signal: Distinguish between kernel_siginfo and siginfo (v4.20)
+
+2018-11-01 (National Men Make Dinner Day) LTTng modules 2.11.0-rc2
+	* Fix: update kvm instrumentation for SLES12 SP2 LTSS >= 4.4.121-92.92
+	* Fix: Add missing const to lttng_tracepoint_ptr_deref prototype
+	* Fix: adapt to kernel relative references
+	* Fix: implicit declarations caused by buffer size checks.
+	* Prevent allocation of buffers if exceeding available memory
+	* Fix: btrfs instrumentation namespacing
+	* Fix: Convert rcu tracepointis to gp_seq (v4.19)
+	* Fix: tracing: Centralize preemptirq tracepoints (4.19)
+	* Fix: net: expose sk wmem in sock_exceed_buf_limit tracepoint (4.19)
+	* Fix: access migrate_disable field directly
+	* Fix: out of memory error handling
+
+2018-09-05 (Be Late for Something Day) LTTng modules 2.11.0-rc1
+	* Fix: uprobes: missing break in lttng_event_ioctl()
+	* Fix: ACCESS_ONCE was removed in 4.15, use READ_ONCE instead
+	* Fix: instruction pointer has different names across arch
+	* Fix: build failures when CONFIG_UPROBES is absent
+	* uprobe: Support multiple call sites for the same uprobe event
+	* uprobe: Receive file descriptor from session instead of path to file
+	* uprobe: Mark uprobe event as registered
+	* Add uprobes support
+	* Fix: adjust SLE version ranges to build with SP2 and SP3
+	* Fix: Allow alphanumeric characters in SLE version
+	* Fix: Adjust range for SuSE 4.4.103-92 kernels
+	* Cleanup: move to kernel style SPDX license identifiers
+	* Cleanup: move scripts to subdirectory
+	* Cleanup: modinfo keys
+	* Add extra version information framework
+	* Revert "Add btrfs file item tracepoints"
+	* Fix: btrfs: Remove unnecessary fs_info parameter
+	* Fix: btrfs: use fs_info for btrfs_handle_em_exist tracepoint
+	* Fix: asoc: Remove snd_soc_cache_sync() implementation
+	* Fix: asoc: fix printing jack name
+	* Fix: asoc: Consolidate path trace events
+	* Fix: ASoC level IO tracing removed upstream
+	* Enable userspace callstack contexts only on x86
+	* Prevent re-entrancy in callstack-user context
+	* Callstack context: bump number of entries to 128
+	* Fix: callstack context alignment calculation
+	* Cleanup callstack context
+	* Fix callstack context: write empty sequence if no stack trace
+	* Fix: callstack context: false-sharing, bad memory size allocation
+	* callstack context: use delimiter when stack is incomplete
+	* Cleanup callstack context
+	* Add kernel and user callstack contexts
+	* Assign CPU id before saving the context size
+	* Define max nesting count constant
+	* Compute variable sized context length
+	* Pass arguments for context size computation
+	* Add 9p probe
+	* Update delayed ref tracepoints for v3.12
+	* Add btrfs file item tracepoints
+	* Add btrfs tracepoint for em's EEXIST case
+	* Fix: dyntick field added to trace_rcu_dyntick in v4.16
+	* Fix: BUILD_BUG_ON with compile time constant on < v2.6.38
+	* Fix: lttng filter validator ERANGE error handling
+	* Fix: filter interpreter: use LTTNG_SIZE_MAX
+	* Filter: add FILTER_OP_RETURN_S64 instruction
+	* Perform bitwise ops on unsigned types
+	* Filter: catch shift undefined behavior
+	* Filter: add lshift, rshift, bit not ops
+	* Filter: index array, sequences, implement bitwise binary operators
+	* Fix: pid tracker should track "pgid" for noargs probes
+	* lttng-tp-mempool: perform node-local allocation
+	* Fix: update RCU instrumentation for 4.17
+	* Fix: sunrpc instrumentation for 4.17
+	* Fix: use struct reclaim_stat in mm_vmscan_lru_shrink_inactive for 4.17
+	* Fix: Add gfp_flags arg to mm_vmscan_kswapd_wake for 4.17
+	* Update: kvm instrumentation for ubuntu 4.13.0-38
+	* Fix: update kvm instrumentation for Ubuntu 3.13.0-144
+	* Fix: btrfs instrumentation namespacing
+	* Cleanup: comment about CONFIG_HOTPLUG_CPU ifdef
+	* Fix: do not use CONFIG_HOTPLUG_CPU for the new hotplug API
+	* Fix: update kvm instrumentation for 4.1.50+
+	* Use the memory pool instead of kmalloc
+	* Create a memory pool for temporary tracepoint probes storage
+	* Fix: use proper pid_ns in the process statedump
+	* Fix: add variable quoting to shell scripts
+	* Update: kvm instrumentation for fedora 4.14.13-300
+	* Fix: Add Fedora version macros
+	* Add preemptirq instrumentation
+	* Clean-up: fix stale #endif comments
+	* Command to dump the metadata cache again
+	* Add a new /dev/lttng-logger interface
+	* Fix: update btrfs instrumentation for SuSE 4.4.114-92
+	* Fix: update block instrumentation for SuSE 4.4.114-92
+	* Fix: update rcu instrumentation for v4.16
+	* Fix: update vmscan instrumentation for v4.16
+	* Fix: update timer instrumentation on 4.16 and 4.14-rt
+	* Update kvm instrumentation for debian kernel 4.14.0-3
+	* Fix: network instrumentation protocol enum
+	* Fix: update btrfs instrumentation for SuSE 4.4.103-6
+	* Fix: update block instrumentation for SuSE 4.4.73-5
+	* Fix: global_dirty_limit for kernel v4.2 and up
+	* Fix: network instrumentation handling of corrupted TCP headers
+	* Fix: add missing uaccess.h include from kstrtox.h wrapper
+	* Update: kvm instrumentation for 4.14.14+, 4.9.77+, 4.4.112+
+	* Fix: btrfs_delayed_ref_head was unwired since v3.12
+	* Update kvm instrumentation for debian kernel 4.9.65-3
+	* Fix: debian kernel version parsing
+	* Fix: block instrumentation 4.14+ NULL pointer dereference
+	* Update: kvm instrumentation for 3.16.52 and 3.2.97
+	* Fix: kvm instrumentation for 4.15
+	* Update sock instrumentation for 4.15
+	* Update kvm instrumentation for 4.15
+	* Fix: ACCESS_ONCE() removed in kernel 4.15
+	* Fix: sched instrumentation on stable RT kernels
+	* timer API transition for kernel 4.15
+	* Fix: Don't nest get online cpus
+	* Fix: lttng_channel_syscall_mask() bool use in bitfield
+	* Fix: update kmem instrumentation for kernel 4.15
+	* Fix: lttng_kvmalloc helper NULL pointer OOPS
+	* Update version to 2.11.0-pre
+	* Fix: lttng-logger get_user_pages_fast error handling
+	* Fix: update block instrumentation for 4.14 kernel
+	* Revert "Fix: update block instrumentation for kernel 4.14"
+	* Fix: version check error in btrfs instrumentation
+	* Fix: update btrfs instrumentation for kernel 4.14
+	* Fix: update writeback instrumentation for kernel 4.14
+	* Fix: update block instrumentation for kernel 4.14
+	* Fix: vmalloc wrapper on kernel < 2.6.38
+	* Fix: vmalloc wrapper on kernel >= 4.12
+	* Add kmalloc failover to vmalloc
+	* Fix: mmap: caches aliased on virtual addresses
+	* Fix: update ext4 instrumentation for kernel 4.13
+	* Fix: Sleeping function called from invalid context
+	* Fix: sched for v4.11.5-rt1
+	* Make vim users life easier
+	* Rename Makefile.ABI.workarounds to Kbuild.common
+	* Fix: handle missing ftrace header on v4.12
+	* Fix: pid tracker should track "pgid"
+	* Cleanup: typo in lttng pid tracker
+	* Fix: Build ftrace probe on kernels prior to 4.12
+	* Fix: update ftrace probe for kernel 4.12
+	* Fix: update block instrumentation for kernel 4.12
+	* Calculate context length outside of retry loop
+	* Fix: Add support for 4.9.27-rt18 kernel
+	* Fix: update btrfs instrumentation for kernel 4.12
+	* Fix: update ringbuffer for kernel 4.12
+	* Fix: update sched instrumentation for kernel 4.12
+	* Fix: ext3 was completely removed from the kernel in v4.3
+	* Fix: NULL pointer dereference of THIS_MODULE with built-in modules
+	* Fix: add "flush empty" ioctl for stream intersection
+	* Revert "Fix: flush empty packets on snapshot channel"
+	* Revert "Fix: don't perform extra flush on metadata channel"
+
+2017-05-05 (International Tuba Day) LTTng modules 2.10.0-rc1
+	* Fix: remove CONFIG_KALLSYMS_ALL warning on clean
+	* Add RING_BUFFER_SNAPSHOT_SAMPLE_POSITIONS command
+	* Fix: Always build vmscan probe
+	* Cleanup: formatting in strutils_star_glob_match explanation
+	* Fix: introduce LTTNG_SIZE_MAX for older kernels
+	* Use SIZE_MAX instead of -1ULL for size_t parameter
+	* filter: use SIZE_MAX for size_t
+	* Fix: out of bound array access in filter code
+	* Add support for star globbing patterns in event names
+	* Filtering: add support for star-only globbing patterns
+	* Add string utilities
+	* lttng-abi.c: cleanup whitespaces
+	* Fix: use of uninitialized ret value in lttng_abi_open_metadata_stream
+	* Fix: kref changes for kernel 4.11
+	* Fix: atomic_add_unless() returns true/false rather than prior value
+	* Fix: timers cputime_t arguments replaced by ull in kernel 4.11
+	* Fix: update scsi instrumentation for kernel 4.11
+	* Fix: changes to the vm_op fault cb prototype in libringbuffer
+	* Fix: update btrfs instrumentation for kernel 4.11
+	* Fix: update mm_vmscan instrumentation for kernel 4.11
+	* Fix: section mismatch warning caused by __exit annotation
+	* socketpair: extend syscall socketpair tracing information
+	* Remove events/mainline unused headers
+	* update event README
+	* Fix: nmi-safe clock on 32-bit systems
+	* Fix: only include linux/cpuhotplug.h for kernels >= 4.10
+	* Fix: 4.10 hotplug adaptation backward compat
+	* Fix: 4.10 btrfs instrumentation update backward compat
+	* Update btrfs instrumentation for 4.10 kernel
+	* Adapt lttng-modules to Linux 4.10 cpu hotplug state machine
+	* btrfs instrumentation: update to 4.10 kernel
+	* timer instrumentation: adapt to ktime_t without union
+	* Add load/unload messages to kernel log
+	* Update version to 2.10.0-pre
+	* Fix: asoc instrumentation for RHEL 7.3
+	* Fix: SCSI instrumentation for SLES12 SP2
+	* Add SUSE Linux Enterprise kernel version tests
+	* Filter code relicensing to MIT license
+	* Add task cpu in process statedump
+	* Performance: add missing unlikely in reserve
+	* Fix: preemptible and migratable context error handling
+	* Fix: bump stable kernel version ranges for clock work-around
+
+2016-10-07 (National Frappé Day) LTTng modules 2.9.0-rc1
+	* Fix: i2c: support kernels < 3.15
+	* Fix: show warning for broken clock work-around
+	* Bump minor ABI version
+	* Fix: work-around upstream Linux timekeeping bug
+	* Add support for i2c tracepoints
+	* Cleanup: makefile version checks with single "ge"
+	* Performance: special-case NULL in lttng_strlen_user_inatomic
+	* Fix: lttng_inline_memcpy does not take a __user argument
+	* Performance: implement lttng_inline_memcpy
+	* Performance: cache the backend pages pointer in context
+	* Cleanup: libringbuffer: remove duplicate pointer chasing in slow paths
+	* Performance: Only dereference commit index once
+	* Performance: Mark channel and buffer event disabled check unlikely
+	* Performance: Relax atomicity constraints for crash handling
+	* Performance: mark ring buffer do_copy callers always inline
+	* Performance: mark lib_ring_buffer_write always inline
+	* Kconfig: select TRACEPOINTS when built-in
+	* Performance: disable event counting by default
+	* Fix: handle large number of pages or subbuffers per buffer
+	* Fix: unregister cpu hotplug notifier on buffer alloc error
+	* Fix: sa_family is of type unsigned short
+	* Fix: check for sizeof sa_family to save sa_family in accept and connect
+	* Fix: use printk_once() for wrapper warning messages
+	* Fix: btrfs instrumentation for 4.8 kernel
+	* Fix: update mm_vmscan instrumentation for kernel 4.8
+	* Fix: napi instrumentation for 4.8 kernels
+	* Fix: update block instrumentation to compile on 4.8 kernels
+	* Cleanup: reuse code in accept() and accept4() instrumentation
+	* Add x86-64 override for accept4 syscall
+	* Fix: timer wrapper: support kernels >= 4.8
+	* Performance: split check deliver fast/slow paths
+	* Fix: x86-64 accept instrumentation
+	* Fix: Add support for 4.6.4-rt8 kernel
+	* Fix: update scsi instrumentation for 4.7+ kernels
+	* Fix: Use fs_initcall instead of rootfs_initcall
+	* Fix: Add kernel configuration for lttng clock plugin
+	* Fix: the clock plugin must be initiated before first use of the clock
+	* Fix: tests/Kbuild for older kernels
+	* Cleanup: __dynamic_len_idx set but not used warning
+	* Cleanup: coding style and comments of net.h
+	* net: Add TCP header data to net_* tracepoints
+	* net: Add IPv4/IPv6 header data to net_* tracepoints
+	* Fix: endianness for the container type of enum
+	* enumeration autoincrement: use if/else logic
+	* Cleanup trailing whitespaces
+	* lttng-test probe: test ctf_enum_auto()
+	* Add ctf_enum_auto() for autoincrementing enumeration values
+	* Implement session statedump command
+	* Fix: annotate bytecode interpreter for kernel stack validator
+	* Update version to 2.9.0-pre
+	* Fix: ring buffer: honor switch parameter type in remote switch
+	* Fix: only flush non-metadata channels
+	* Fix: don't perform extra flush on metadata channel
+	* select, poll and epoll_wait overrides on ARM 32-bit
+	* Fix: flush empty packets on snapshot channel
+	* Fix: do not generate packet at destroy after stop
+	* Fix: compat ioctl for flush/get metadata version
+	* Fix: ctf_string() should handle NULL pointers
+	* Fix: portability: no arith on void pointer
+	* Fix: add missing tests/Kbuild
+	* Test clock override plugin
+	* Fix: add modules target to base Makefile
+	* Fix: make clean does not include dot-config
+	* Fix: trigger build error if CONFIG_TRACEPOINTS is not set
+	* Documentation: document that CONFIG_MODULES not required when builtin
+	* Fix: add missing errno include in random wrapper
+	* Fix: mm_page_alloc_extfrag instrumentation for kernel 3.16.35
+	* Fix: copy_from_user size when limited allocation
+	* Extract the payload of epoll_wait/epoll_pwait
+	* Extract the payload for epoll_ctl
+	* Extract the FDs and flags from poll and ppoll
+	* Extract the FD sets in select and pselect6
+	* Add ctf_integer_bitfield_type
+	* Implement enumeration type
+	* Implement custom field support
+	* Implement variant type
+	* Implement shadow stack for dynamic len
+	* libringbuffer: implement event too big API
+	* Implement structure, compound array/sequence types
+	* Fix: integer endianness metadata generation
+	* Fix: endianness of integers received by filter
+	* Fix: writeback probe on RHEL >= 3.10.0-327.10.1
+	* Fix: RHEL kernel 3.10.0-327.13.1 compat
+	* Fix: ctf_user_integer should not trigger page fault
+	* Fix: lib_ring_buffer_copy_from_user_inatomic error handling
+	* Add comment describing ioctl number duplication
+	* Fix: remove unused gfpflags.h from btrfs and compaction instrumentation
+	* Fix: Remove dead code from filter interpreter
+	* Fix: x86 kvm mmutrace instrumentation for kernel < 3.6
+	* Fix: mm_vmscan instrumentation: remove unused gfpflags.h include
+	* Fix: use of uninitialized ret value in lttng_abi_create_event
+	* Fix: kmem instrumentation: remove unused gfpflags.h include
+	* Fix: 4.6 kernel: use in_compat_syscall
+	* Fix: use BUG_ON instead of accessing array subscript above array bounds
+	* Fix: Add granularity to RHEL kernel version checks
+
+2016-03-18 (Awkward Moments Day) LTTng modules 2.8.0-rc1
+	* Bump minor tracer ABI version
+	* Fix: build against out-of-tree kernel build
+	* probes/Kbuild: remove upper level header path
+	* Move leftover relative include paths to system paths
+	* syscall instrumentation: use system headers
+	* tracepoint event instrumentation: use system headers
+	* Use system include path in wrappers
+	* libs: use system include paths
+	* Use system header paths in core implementation files
+	* Use system include paths in root directory headers
+	* Use system include paths in probes
+	* Update gitignore
+	* Use system include paths in lttng-types.h
+	* Use system include paths in lttng-tracepoint-event-impl.h
+	* Use system include path in probes/define_trace.h
+	* Use system include paths in probes/lttng-tracepoint-event-impl.h
+	* Rename probes/lttng-events.h to probes/lttng-tracepoint-event-impl.h
+	* Add makefile directory to include path
+	* Fix: event ctx get size should be after chan ctx
+	* Fix: filter interpreter with userspace strings
+	* Fix: rename kvm x86 TRACE_SYSTEM to avoid name clash
+	* Fix: format address fields as hexadecimal
+	* PowerPC-64 ABIv1: add build error if KALLSYMS_ALL is missing
+	* Fix: system call instrumentation overrides
+	* Fix: page_alloc wrapper incorrect parenthesis
+	* Fix: system call tracing for arm-64 compat !CONFIG_UID16
+	* Fix: add struct user_msghdr forward declaration for older kernels
+	* Cleanup: Remove unused lttng-types module
+	* Fix: add missing versions and init call for page_alloc wrapper
+	* Fix: Define lttng-tracer metadata only once
+	* Fix: Add CONFIG_LTTNG to modules_install target
+	* Fix: Use kbuild env instead of a custom var KERNELDIR
+	* Update clock offset comment
+	* clock offset: print negative value in metadata
+	* Fix: handle negative clock offset
+	* Fix: sched instrumentation for 4.1-rt11
+	* Add RT patch version macros
+	* Expect filter context identifiers starting with $ctx.
+	* ARM64: wire up compat system calls
+	* Add support for arm64 syscalls
+	* Fix: Ubuntu kernel range for block_rq_complete
+	* Fix: Ubuntu kernel range for mm_page_alloc_extfrag
+	* Fix: update vmscan instrumentation for kernel 4.5
+	* Fix: check reference counts for overflow
+	* Fix: RHEL 7.2 scsi instrumentation
+	* Fix: RHEL 7.2 kvm instrumentation
+	* Kconfig: describe both module and in-kernel compilation options
+	* Add comments and indentation to Makefile
+	* Add support for built-in kernel build
+	* Rename sub makefiles to Kbuild
+	* Cleanup sub makefiles
+	* Make goals configurable with CONFIG_LTTNG
+	* Fix: Use generic raw_irqs_disabled_flags
+	* Fix: Use MAX_RT_PRIO offset in sched_wakeup_template
+	* Fix: update sched instrumentation for kernel 4.4.0
+	* Bump version number for development branch
+	* Fix: interruptible context: reversed logic
+	* Contexts for RT debugging
+	* Fix: instrumentation: v4lv2 missing include
+	* Fix: header size larger than 256 bytes
+	* Instrument x86 page faults
+	* Fix: irq_vectors TRACE_SYSTEM name
+	* Instrument x86_irq_vectors
+	* Fix: tracepoint listing misses last loaded probe
+	* Fix: lttng trace-clock needs to disable preemption
+	* Tracepoint event: add "TP_code_post()"
+	* Implement array and sequence bitfields
+	* Fix: kmem: add mm.h include
+	* Add page frame number (pfn) to kmem page events
+	* Use pfn rather than struct page in ring buffer array
+	* Implement clock plugin support
+	* Command to regenerate the metadata of a session
+	* Fix: writeback instrumentation update for 4.3 Linux kernel
+	* Fix: update sched wakeup instrumentation for 4.3 kernel
+	* Fix: lttng-test build failure for kernels < 3.0
+	* Use 3.18 syscall instrumentation for MIPS32
+	* Update the MIPS32 syscall instrumentation to 3.18
+	* Fix: Move pipe override to the arch specific pointers_override.h
+	* Implement lttng test module
+	* Cleanup: remove logically dead code
+	* Fix: filter validator use after free
+	* Fix: use after free in channel release
+	* Fix: non-enabler events should be disabled by default
+	* Fix: build failure on 2.6.36
+	* Cleanup: split bdi_dirty_ratelimit with ifdef into separate macros
+	* Fix: writeback instrumentation for 4.2 kernels
+	* Fix: mm_page_alloc_extfrag instrumentation for kernel 3.18.10
+	* Add stream instance id to the packet header
+	* Add a packet sequence number
+	* Fix: kmem probe with Ubuntu 3.13 kernels
+	* Fix: disable kvm probe if lapic.h isn't found
+	* Fix: timer instrumentation for 4.2 kernels
+	* Fix: ext4 instrumentation for 4.2 kernels
+	* Fix: kvm instrumentation for 4.2 kernels
+	* Fix: allow LTTng to be built within kernel tree
+
+2015-07-15 (Pet Fire Safety Day) LTTng modules 2.7.0-rc1
+	* Fix: Building the event list fails on fragmented memory
+	* Fix: use after free on metadata cache reallocation
+	* Fix: version checks for kernel 4.0
+	* Fix: Incorrect Ubuntu kernel patchlevel
+	* Fix: cpu-id context should use int type
+	* Implement cpu-id context
+	* Implement cpu_id context for filtering
+	* Fix: context printk mismatch on error
+	* Cleanup: misleading comment about deferrable timer
+	* Fix: arm-32 build
+	* Fix: Update kmem event for Ubuntu's 3.16 kernel
+	* Fix: RHEL 7.1 block instrumentation
+	* Fix: add RHEL version macros
+	* Fix: add missing parenthesis in ubuntu version check
+	* Fix: remove regmap instrumentation for kernels < 4.1
+	* Fix: Update kmem event for recent Ubuntu kernel
+	* Fix: missing statedump end event when block device listing available
+	* Fix: don't generate incorrect macros for debian/ubuntu version check
+	* Revert "Fix: build against Ubuntu kernels"
+	* Fix: build against Ubuntu kernels
+	* Add namespace info in sched_fork and statedump
+	* Fix: ext4 instrumentation: flags parameter did not exist prior to 3.11
+	* Fix: printk instrumentation: remove "condition" tracepoints
+	* Fix: regmap build against kernel 4.0 kernel headers
+	* Add mmu_valid_gen field to mmutrace events
+	* Fix: add missing x86 mmutrace kernel header include
+	* Fix: x86 mmutrace event extra field for kernels >= 3.11
+	* Fix: remove execute flag from kvm.h file
+	* Fix: build x86 kvm probes on kernels >= 4.1-rc1
+	* Fix: compilation on 4.1-rc1 kernel, remove unused WB_WORK_REASON
+	* Fix: 4.1-rc1 Linux build and regmap instrumentation
+	* Fix: don't clash with older Debian kernel versions
+	* Fix: update get_pfnblock_flags_mask wrapper for debian kernels
+	* Fix: discover Debian API
+	* Fix: Update README.md to match reality: kernels >= 2.6.36 are supported
+	* Fix: atomic.h wrapper for kernels < 2.6.37
+	* Fix: disable x86 kvm instrumentation for kernels < 2.6.38
+	* Fix: add missing types.h include for older kernels
+	* Fix: add hlist lttng wrappers
+	* Fix: add struct file_handle forward declaration
+	* Fix: string length calculation reversed user vs kernel args
+	* Fix: use lttng_rcu_dereference within lttng-syscalls.c
+	* Fix: add lttng rcu wrapper to allow tracing RCU
+	* Fix: double-unlock of session mutex
+	* Fix: check that class and instance prototype match
+	* Fix: lttng-events.h check function takes void
+	* Fix: regmap instrumentation for Linux 3.19.4 and 4.0
+	* Fix: kernels >= 2.6.33 put utsrelease.h in generated/
+	* Fix: Include utsrelease.h in lttng-kernel-version.h
+	* Fix: ext4 ext4_da_write_pages instrumentation for kernels < 3.11.0
+	* Fix: old kernels need module.h included before vermagic.h
+	* Fix: net instrumentation for kernels 2.6.39 and below
+	* Fix: version condition in makefile
+	* Implement wrapper around get_pfnblock_flags_mask
+	* Be more restrictive in provider name check
+	* Fix: net instrumentation namespacing
+	* Fix: compaction instrumentation namespacing
+	* Fix: Support 4.x kernel versions in Makefile
+	* Fix: remove stale TP_STRUCT_entry from kvm instrumentation
+	* Fix: add missing module.h include to lttng-probe-user.c
+	* Fix: use lttng hlist wrapper in wildcard and filter
+	* Fix: namespace asoc and kmem instrumentation
+	* Fix: update instrumentation after wildcard rebase
+	* Fix: lttng_abi_syscall_list does not need to be exported
+	* Migrate ARM, powerpc, MIPS syscall instrumentation to TP_FIELDS
+	* Remove now unused syscalls.h from lttng-modules
+	* Filter: start with enabler "disabled"
+	* Fix coverity warning about sizeof(void **) != sizeof(void *)
+	* Fix length type and text sequence base
+	* Fix: TP_FIELDS: add missing headers
+	* Migrate syscall instrumentation to TP_FIELDS
+	* Migrate tracepoint instrumentation to TP_FIELDS
+	* Implement filtering infrastructure
+	* syscall wildcards: apply syscall filtering
+	* Implement syscall wildcard support
+	* Implement tracepoint wildcard support
+	* Namespace all tracepoints
+	* Implement list.h wrapper for hlist in older kernels
+	* Implement listing of pid tracker content
+	* Implement PID tracking
+	* Fix: mm_page_alloc_extfrag instrumentation for kernel 3.14.36
+	* Fix: update writeback instrumentation for kernel 4.0+
+	* Fix: compaction mm_compaction_isolate_template update for Linux 4.0+
+	* Fix: kmem instrumentation update for mm_page_alloc_extfrag kernel 3.19.2+
+	* Fix: kmem instrumentation: mm_page_alloc extfrag change_ownership field
+	* Fix: missing parenthesis in offset_align_floor
+	* Fix: implement time.h wrapper for FD_ISSET
+	* Fix: update sched instrumentation for 3.19+ kernels
+	* Fix: update rcu instrumentation for 3.19+ kernels
+	* Fix: update scsi instrumentation for 3.19+ kernels
+	* Fix: update module instrumentation for 3.19+ kernels
+	* Fix: Add f_dentry wrapper for 3.19+ kernels
+	* Fix: introduce lttng_get_unused_fd() wrapper for 3.19 kernels
+	* Fix: lttng_this_cpu_ptr wrapper for kernel 3.19+
+	* Fix: Update btrfs instrumentation for 3.18 Linux kernel
+	* Fix compile error on kernel 3.0.101 with CONFIG_PERF_EVENTS
+	* Conditional compilation introduced by lttng-modules commit
+	* Fix: compaction instrumentation update for 3.14.x stable kernels
+	* Fix: context alignment not properly handled
+	* Fix compilation on Linux kernel >= 3.18.0
+	* Fix: build for architectures without HAVE_SYSCALL_TRACEPOINTS
+
+2014-10-20 LTTng modules 2.6.0-rc1
+	* Expose lttng-modules ABI version ioctl
+	* Fix: syscall list ioctl number conflict
+	* lttng-modules: fix build for non-x86
+	* Fix: syscall listing of session
+	* Print build warning when writeback probe is disabled
+	* Add atomic.h wrapper for before/after atomic
+	* Fix compilation on Ubuntu 14.10
+	* Fix: export name as text array in writeback
+	* Cleanup: remove unused trace_clock_read32()
+	* Use 3.17 ktime_get_mono_fast_ns() new API
+	* Check for stale version.h files
+	* Fix: compile lttng_statedump_process_ns on Ubuntu
+	* Reverse version check logic in lttng_statedump_process_ns
+	* Fix block_rq_complete TP on Ubuntu kernel
+	* Introduce macros to check Ubuntu kernel version
+	* Sync writeback tracepoints from mainline
+	* Fix: redefinition of DEFINE_WRITEBACK_EVENT
+	* Fix: hander negative get_syscall_nr return value
+	* Fix: statedump: close_on_exec flag backward compat
+	* Fix instrumentation of vmscan for older kernels
+	* Fix: older kernels (3.2.x) don't undefine TRACE_SYSTEM
+	* Fix: syscall listing: handle "enable all syscall"
+	* Fix: don't allow disabling syscalls when none are enabled
+	* Fix: syscall: fail disable all if all already disabled
+	* Fix: syscall filtering: NULL pointer deref
+	* Cleanup: list syscall without syscall_entry prefix
+	* Fix: syscall_list_show NULL pointer deref
+	* implement syscall mask getter
+	* Cleanup: lttng-abi.h coding style
+	* syscall listing: show syscall ID
+	* Allow events with same name to be enabled for each channel
+	* ABI: use enable a syscall ABI field name
+	* Implement syscall listing
+	* Fix: tracepoint list anonymous file name
+	* Fix: syscall filtering: disable all syscalls
+	* syscall tracing: input/output parameter handling for all arch
+	* lttng-get-syscall-inout.sh depends on bash
+	* Fix generate syscall header script: add missing escape char
+	* syscall instrumentation: handle copy_from_user return value
+	* Rename LTTng syscall instrumentation macros
+	* Rename LTTng instrumentation macros
+	* Extract input/output arguments from accept and connect syscalls
+	* syscall: extract pipe and pipe2 output args
+	* Remove sys_ prefix from syscall names
+	* System call inout/output arg processing
+	* Update syscall inout table
+	* Add syscall inout table
+	* Extract syscall exit ret value on x86 32/64
+	* Extract system call exit return value
+	* Syscall filtering: apply to syscall exit
+	* System call filtering
+	* asoc.h: fix build with v3.17 kernel
+	* Fix: lttng-modules teardown NULL pointer OOPS
+	* Fix: handle concurrent flush vs get_next_subbuf on metadata cache
+	* Modernize README using Markdown
+	* Fix: OOT lttng_logger tracepoint not visible with signed kernels
+	* Add cscope to gitignore
+	* Update kvm instrumentation: compile on 3.17-rc1
+	* Update statedump to 3.17 nsproxy locking
+	* Fix: noargs probes should calculate alignment and event length
+	* Update compaction instrumentation to 3.16 kernel
+	* Update vmscan instrumentation to 3.16 kernel
+
+2014-07-16 (Take Your Poet to Work Day) LTTng modules 2.5.0
+	* (no change)
+
+2014-06-27 LTTng modules 2.5.0-rc2
+	* Fix: statedump: check whether "files" is NULL, RCU semantic fix
+	* Fix: statedump handle oom case, handle errors
+	* Fix: correct typo in kernel version number
+	* Fix: blktrace instrumentation for backported branches
+	* Fix: statedump block devices OOPS
+
+2014-05-28 (International Hamburger Day) LTTng modules 2.5.0-rc1
+	* Add TID field to some block_* events
+	* Fix: refuse overwrite mode buffers with less than two subbuffers
+	* Fix: lttng modules system call generation script
+	* Dump FD flags and mode on state dump
+	* Fix: incorrect rwbs field type in block_bio_queue
+	* Fix: blktrace instrumentation for v3.2.58+ stable branch
+	* Fix: pass proper args when writing commit counter
+	* Cleanup: lib ringbuffer: pagecpy has unsigned semantic
+	* Fix: allow racy tracepoint string input from kernel and userspace
+	* Statedump event for block devices
+	* Fix: update v4l2 instrumentation to 3.15 kernel
+	* Fix: ext4 update instrumentation to 3.15 kernel
+	* Fix: update block instrumentation to 3.15 kernel
+	* Fix: module instrumentation: update to 3.15 kernel
+	* Adapt to 3.15 tracepoint API
+	* Kernel 3.15 don't define map unmap for pipe
+	* Fix: add missing module version in v4l2 probe
+	* Add V4L2 instrumentation
+	* Fix: rcu instrumentation: add const qualifier to char pointers
+	* Fix: add missing module version information
+	* Use kernel 3.13 syscall tables for MIPS32
+	* Add MIPS32 syscalls extracted from a 3.13 kernel
+	* Fix: block instrumentation: < 3.14 don't have bi_iter
+	* Fix: update btrfs instrumentation to kernel 3.14
+	* Fix: update block layer instrumentation to kernel 3.14
+	* Fix: remove __exit annotation
+	* Fix file permissions for lttng-statedump-impl.c
+	* LTTng logger ABI
+
+2014-02-28 (Public Sleeping Day) LTTng modules 2.4.0
+	* Fix: load state dump even if work-around lookup fails
+	* Cleanup: fix comment
+	* Fix: correctly version kvm events to build against v3.0 kernel
+	* Add extraversion (e.g. -rc4) to lttng-tracer modinfo
+
+2014-02-14 LTTng modules 2.4.0-rc4
+	* Fix: use after free in ring buffer clients
+	* Fix: Add statedump exit so module is not permanent
+	* Cleanup: move callback init to static initialization
+	* Fix: OOT lttng-statedump tracepoints not visible with signed kernels
+
+2014-01-29 LTTng modules 2.4.0-rc3
+	* Fix: tracepoint event name mapping at unregister
+	* Fix: tracepoint name remapping
+	* Fix: enable event error path memory corruption
+	* Update kvm instrumentation to Linux 3.13
+	* Update sched instrumentation to Linux 3.13
+	* Fix: provide more precise error report for enable event
+	* Fix: quote event name in metadata
+	* Add version info to lttng-tracer.ko modinfo
+
+2013-12-10 LTTng modules 2.4.0-rc2
+	* Fix: client_packet_header() uses wrong packet
+	* Cleanup: fix typo in ring buffer backend comment
+	* Fix: handle unknown event type parameter
+	* Fix: eliminate timestamp overlap between packets
+	* gcc blacklist: only apply when building with gcc
+	* Blacklist ARM gcc 4.8.0, 4.8.1, 4.8.2
+
+2013-11-15 LTTng modules 2.4.0-rc1
+	* Update ext4 instrumentation to Linux 3.12
+	* Update RCU instrumentation to Linux 3.12
+	* Update btrfs instrumentation to 3.12 kernel
+	* Update vmscan instrumentation to Linux 3.12
+	* update: kmem instrumentation 3.12 kernel support
+	* lttng-statedump-impl: Use generic hard irqs for Linux >= 3.12
+	* lttng-statedump-impl: Fix lttng_list_interrupts for empty implementation
+	* Import fix from LTSI: 3.4+ RT kernels use CONFIG_PREEMPT_RT_FULL
+	* Add new tracepoint in KVM
+	* Blacklist kernels 3.10.13 and 3.11.2
+	* LTTng trace-clock: shrink kernel blacklist
+	* Metadata flush writes data from the cache
+	* Per-stream ioctl to get the current timestamp
+	* LTTng ringbuffer ABI calls for index generation
+	* Prepare LTTng override of ring buffer fops
+	* Blacklist Linux kernels 3.10+
+
+2013-09-03 LTTng modules 2.3.0
+	* Fix: metadata stream should not reference session
+	* Fix: btrfs: support 3.11 Linux kernel
+	* statedump: remove KERN_DEBUG messages
+	* Fix: ext4: add missing tracepoints for 3.11 kernel
+	* Fix: ext4: Linux 3.11 support
+	* Fix: ext3: 3.11 Linux support
+	* Fix: statedump nsproxy 3.11 Linux support
+
+2013-08-30 LTTng modules 2.3.0-rc2
+	* Fix: metadata lttng channel refcount
+	* README: lttng-modules incompatible with lttng 0.x patchset
+
+2013-07-17 LTTng modules 2.3.0-rc1
+	* Fix: kvm x86 probes side-effect
+	* Fix: allow get/put subbuf in loop for metadata stream
+	* Add support for kvm x86 specific tracepoints
+	* Add mainline headers for kvm x86 tracepoints
+	* Remove old 3.0.4 x86-64 extracted syscall info
+	* Point the x86-64 overrides to newly extracted 3.10-rc7 files
+	* Add syscalls extracted files from a 3.10-rc7 kernel
+	* Improve documentation of the syscall extractor script
+	* Fix: double length of __dynamic_len array
+	* Fix printk instrumentation
+	* Introduce __dynamic_array_enc_ext_2() and tp_memcpy_dyn_2()
+	* Fix: ring buffer: get_subbuf() checks should be performed on "consumed" parameter
+	* Fix: SWITCH_FLUSH new sub-buffer checks
+	* Fix: ring buffer: handle concurrent update in nested buffer wrap around check
+	* Cleanup: lib_ring_buffer_switch_new_end() only calls subbuffer_set_data_size()
+	* Revert "Cleanup: ring buffer: remove lib_ring_buffer_switch_new_end()"
+	* Fix: handle writes of length 0
+	* Fix: ring buffer: RING_BUFFER_FLUSH ioctl buffer corruption
+	* Cleanup: ring buffer: remove lib_ring_buffer_switch_new_end()
+	* print warning and return -EBUSY on double get_subbuf()
+	* Add header to fix compilation of syscalls-extractor on 3.9 kernel
+	* Fix: don't do 0 byte event reservation
+	* Document that payload size need to be greater than 0
+	* Fix build and load against linux-2.6.33.x
+	* Fix: add missing CONFIG_COMPAT around lib_ring_buffer_compat_ioctl
+	* Metadata cache and multiple metadata channels
+	* fix block instrumentation probe signature mismatch for 3.9.x kernels
+	* fix: block instrumentation: NULL pointer dereference
+	* Update rcu instrumentation to 3.9.[0-4]
+	* Fix CPU hotplug section mismatches
+	* Add system calls definitions for powerpc-32
+	* Remove bashism in lttng-syscalls-generate-headers.sh
+	* Update ARM (32 bit) syscall tracepoints to 3.4
+
+2013-05-09 LTTng modules 2.2.0-rc2
+	* Remove useless lttng_metadata probe
+	* Fix: warning kvm_trace_exit_reason redefined for 3.9 kernel
+	* Fix: 3.9.0 block layer instrumentation build
+	* Revert "Stop build if CONFIG_TRACEPOINTS is not set"
+	* Stop build if CONFIG_TRACEPOINTS is not set
+	* Add comments to endifs.
+	* Fix: remove ARM set_tls system call override
+	* Cleanup: arm sys_mmap whitespace
+	* Clean up using global_dirty_limit wrapper for writeback probe
+
+2013-03-29 LTTng modules 2.2.0-rc1
+	* Update README
+	* Fix: vmscan instrumentation build
+	* writeback instrumentation: remove duplicated structures
+	* block: update instrumentation to 3.9 rc kernel
+	* rcu: update to 3.9 rc kernel instrumentation
+	* workqueue instrumentation: remove duplicated structures
+	* Rename odd event names
+	* Introduce API to remap event names exposed by LTTng
+	* lttng-module: sched.h: Fix compilation on 3.9 kernel
+	* Fix Linux 3.8 btrfs probe warning
+	* Fix Linux 3.8 ext4 probe support
+	* Fix 3.8 kernel support: namespace lttng_is_signed_type()
+	* Fix: don't flush-final for offset 0 if reader is on sub-buffer
+	* instrumentation sched: add missing fork pid info
+	* Fix check in lttng_strlen_user_inatomic
+	* instrumentation: sync with Linux commit a1ce392
+	* Fix: statedump: missing locking, use lttng_iterate_fd
+	* Implement lttng_iterate_fd wrapper
+	* Instrumentation cleanup: kmem events should print hex pointers
+	* Fix compilation of ext4 and btrfs tracepoints on 2.6.40 kernels
+	* Fix: statedump hang/too early completion due to logic error
+	* Fix: statedump hang due to incorrect wait/wakeup use
+	* put_ulong calls in lib_ring_buffer_compat_ioctl() should be compat
+	* wrapper/perf.h: Fix kernel version condition
+	* Add new kernel probes instrumentation
+	* Update kernel probes to more detailed match to kernel versions
+	* Fix possible kernel build errors with linux-patches
+	* Add missing MIT license text to 3 files under this license
+	* Update sites using kernel version checking macro to new range
+	* Make upper bound of kernel version checking macro exclusive
+	* sock instrumentation: fix fields to get referenced values
+	* ext3 instrumentation: fix of assignment code conversion
+	* sched instrumentation: rename "pid" fields in sched_process_exec
+	* Remove remaining semicolons in TP_fast_assign blocks
+	* Fix compilation for 3.0 kernels that are named 2.6.40
+	* Fix compilation for 3.0 branch (>= 3.0.39)
+	* Add kernel version checking macro
+	* Remove semicolons in TP_fast_assign blocks
+	* Add ifdefs to net probe to support Linux 2.6.39
+	* Add kernel probes for supplementary subsystems
+	* Check if interrupt action name is not null in statedump
+	* Fix exec instrumentation: only for kernels 3.4.0 and higher
+	* Add TRACE_EVENT(sched_process_exec) to sched.h
+	* lib/ringbuffer/frontend_api.h: Include linux/prefetch.h.
+	* Fix warning with 3.6.0 kernel
+	* ABI with support for compat 32/64 bits
+	* Perform calculation on bit size in 64-bit
+	* Use uint64_t for packet header content size and packet size
+	* Fix: compat layer only on supported architectures
+	* Fix ring buffer 32/64 bits compat
+	* Fix cleanup: move lttng-tracer-core.h include to lib ringbuffer config.h
+	* Fix ring_buffer_frontend.c: missing include lttng-tracer-core.h
+	* Fix: statedump missing check for NULL namespace
+
+2012-09-10 LTTng modules 2.1.0-rc1
+	* fix timestamps on architectures without CONFIG_KTIME_SCALAR
+	* Support for linux kernels 2.6.32 through 2.6.37
+	* Document limitation of vppid and ppid context wrt eventual RCU instrumentation
+	* Cleanup: no need to hold RCU read-side lock when reading current nsproxy
+	* Add env hostname information
+	* Fix: lttng_statedump_process_state for each PID NS has infinite loop
+	* lttng_statedump_process_state for each PID NS
+	* Support the hostname context
+	* Fix: statedump namespaced pid, tid and ppid
+	* Fix: statedump: disable vm maps enumeration
+	* Fix: ensure userspace accesses are done with _inatomic
+	* Fix: vppid context should test for current nsproxy
+	* Add MIPS system call support
+	* Change mode of lttng-syscalls-generate-headers.sh to 755
+	* cleanup: fix typo in syscall instrumentation header
+	* Cleanup: remove trailing whitespace in README
+	* trace event: introduce TP_MODULE_NOAUTOLOAD and TP_MODULE_NOINIT
+	* LTTng: probe-statedump: add #include <linux/sched.h>
+	* fix: signal_generate event should print utf8 for comm field
+	* Makes write operation a parameter for tp_memcpy macro
+	* Add coding style document
+	* Update instrumentation/events README file
+	* Add makefile target for preprocessor
+	* Fix: free_event_id check should compare unsigned int with -1U
+	* Use unsigned long type for events discarded counter
+	* Fix: update signal instrumentation for 3.4 kernel
+	* LTTng Modules ARM syscall instrumentation
+	* Fix: generate header missing echo -e for escape chars
+	* Fix: add missing uaccess.h include (for ARM)
+	* README: Document that CONFIG_MODULES is required
+	* Fix: README typo
+	* Fix: document required and optional kernel config options in README
+
+2012-03-29 LTTng modules 2.0.1
+	* Fix: is_compat_task !CONFIG_COMPAT compile error on kernels >= 3.3
+
+2012-03-20 LTTng modules 2.0.0
+	* First STABLE version
+	* Add version name
+
+2012-03-20 LTTng modules 2.0.0-rc4
+	* Update README and add version name place-holder
+
+2012-03-16 LTTng modules 2.0.0-rc3
+	* Fix clock offset 32-bit multiplication overflow
+	* Fix : wrong assign of fd in state dump
+	* License cleanup, ifdef namespace cleanup
+	* Fix: ensure power of 2 check handles 64-bit size_t entirely
+
+2012-03-02 LTTng modules 2.0.0-rc2
+	* Fix: dmesg printout should not print metadata warnings
+	* Fix: use transport name as channel name
+	* Fix: Return -EINVAL instead of print warning if non power of 2 size/num_subbuf
+
+2012-02-20 LTTng modules 2.0.0-rc1
+	* Standardize version across toolchain
+	* statedump: Use old macro name for kernel 2.6.38
+
+2012-02-16 LTTng modules 2.0-pre15
+	* Add timer instrumentation
+	* fix: need to undef mainline define
+	* fix: Include signal.h instead of irq.h for prototype match check
+	* Add signal instrumentation
+
+2012-02-16 LTTng modules 2.0-pre14
+	* syscall tracing: sys_getcpu
+	* Add sys_clone x86 instrumentation
+	* statedump: fix include circular dep
+	* Implement state dump
+
+2012-02-09 LTTng modules 2.0-pre13
+	* Update README
+	* environment: write sysname, release, version, domain to metadata
+	* Allow open /proc/lttng for read & write
+
+2012-02-02 LTTng modules 2.0-pre12
+	* Add x86 32/64 execve syscall instrumentation override
+	* Remove unused defines
+	* Add padding to ABI
+	* Use LTTNG_KERNEL_SYM_NAME_LEN
+	* Update version to 1.9.9
+	* Add missing double-quotes to clock uuid
+	* clock: read bootid as clock monotonic ID
+	* Fix comment
+	* Cleanup comment
+	* clock: output clock description in metadata
+	* Properly fix the timekeeping overflow detection
+	* Fix init bug
+	* rename lib-ring-buffer to lttng-lib-ring-buffer
+	* Remove #warning
+	* Mass rename: ltt_*/ltt-* to LTTNG_*/LTTNG-*
+	* Update TODO
+	* Update TODO
+	* Remove debugfs file (keep only proc file)
+	* Rename lttng-debugfs-abi files to lttng-abi
+
+2011-12-13 LTTng modules 2.0-pre11
+	* Fix OOPS caused by reference of config pointer
+	* Gather detailed info from x86 64 32-bit compat syscall instrumentation
+	* lttng lib: ring buffer move null pointer check to open
+	* lttng lib: ring buffer remove duplicate null pointer
+	* lttng lib: ring buffer: remove stale null-pointer
+	* lttng wrapper: add missing include to kallsyms wrapper
+	* lttng: cleanup one-bit signed bitfields
+	* Add TODO file
+	* Update symbol name length max size to 256
+	* Fix last modifications to string_from_user operations
+	* Document that depmod needs to be executed by hand
+	* Fix strlen_user fault space reservation
+	* Fix tp_copy_string_from_user handling of faults
+	* Disable block layer tracing support for kernels < 2.6.38
+	* lttng context: perf counter, fix 32-bit vs 64-bit field size bug
+	* Update trace clock warning to match the current development plan
+	* ringbuffer: make ring buffer printk less verbose
+	* Makefile: do not run depmod manually
+
+2011-09-30 LTTng modules 2.0-pre10
+	* x86-32: override sys_mmap syscall instrumentation
+	* Fix cast warning
+
+2011-09-29 LTTng modules 2.0-pre9
+	* x86 32 syscalls: fix !CONFIG_UID16
+	* Use __string_from_user
+	* Add __string_from_user
+	* Rename "comm" context to "procname"
+	* Fetch "type" name field for mount syscall
+	* Create common override file for all architectures
+	* Shrink stack size usage
+	* Cleanup: remove unused lttng-compat-syscalls.c file
+	* Support detailed compat syscalls on x86_64
+	* Fix syscall table
+	* Add disabled compat syscalls detail (work in progress)
+	* Add config compat support for detailed x86_32 syscalls
+	* Handle newer 3.1+ perf API
+	* Add dummy x86-32 override headers
+	* Bind x86-32 syscall headers
+	* Add x86-32 syscall headers
+	* Add check for KALLSYMS_ALL in syscall extraction script
+	* Automate string extraction for syscalls
+	* Automate syscall filename/pathname extraction
+	* Add exit to ring_buffer_frontend so module is unloadable
+	* Add sys_open filename (x86_64)
+	* Add missing memcpy callback
+	* copy_from_user and memset
+	* Add missing alignment after header write
+	* lib ring buffer: add frontend init as module_init
+	* lib ring buffer frontend: add missing lock initialization
+	* ARM: Set bit 0 for thumb mode in kallsyms_lookup_name returned address (missing file)
+	* ARM: Set bit 0 for thumb mode in kallsyms_lookup_name returned address
+	* Create override for sys_mmap
+	* Rename syscalls -> syscall in LTTng ABI
+	* Use different event name for compat syscalls
+	* Allow trace syscall table override
+	* Add dummy override files
+	* syscall detail: add override capability
+	* Add pointer pretty-print heuristics
+	* Add __field_hex
+	* Rename sys exit errno into ret
+	* Enable detailed syscalls only for native x86_64
+	* Use "unknown" for compat syscalls
+	* Disable x86-64 specific detailed syscalls for now, until we deal with 32-bit compat
+	* Fix syscall exit
+	* Fix sys exit
+	* Only enable detailed syscalls for x86_64 for now
+	* Merge unknown syscall method with extended detail method
+	* Add underscore prefix before event names
+	* Add syscalls pointers detailed syscall tracing
+	* Use perl for regexp
+	* Support generation of syscall probes for those with pointers
+	* Support detailed syscalls with 0 arguments
+	* detailed syscall tracing (work in progress)
+	* Expose /proc/lttng file
+	* Implement detailed syscall event probe
+	* Disable perf build for < 2.6.33 kernels
+	* Syscall detail mode: generate syscall table
+	* block instrumentation: write cmd as hex sequence
+	* lttng-events TRACE_EVENT generator cleanup
+	* block layer instrumentation: fix cmd field
+	* Remove 0 args syscalls for now from type-aware syscall cb generator
+	* Generate trace syscall table macros
+	* Put syscall tracing without arg types back in place
+	* Detailed system call tracing (TRACE_EVENT() generation for integer support)
+	* lttng events probes: don't clash with "ctx" variable name
+	* lib ring buffer must take private pointer copy before decrementing refcount
+
+2011-08-16 LTTng modules 2.0-pre8
+	* Fix metadata buffer wait/wakeup
+
+2011-08-12 LTTng modules 2.0-pre7
+	* Add missing module refcount to lttng_tracepoint_list_fops
+	* Add license info about lib/ringbuffer/ring_buffer_mmap.c being GPLv2
