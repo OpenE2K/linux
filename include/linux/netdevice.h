@@ -1431,9 +1431,9 @@ struct net_device_ops {
 	int			(*ndo_change_proto_down)(struct net_device *dev,
 							 bool proto_down);
 	int			(*ndo_fill_metadata_dst)(struct net_device *dev,
-						       struct sk_buff *skb);
+							struct sk_buff *skb);
 	void			(*ndo_set_rx_headroom)(struct net_device *dev,
-						       int needed_headroom);
+							int needed_headroom);
 	int			(*ndo_bpf)(struct net_device *dev,
 					   struct netdev_bpf *bpf);
 	int			(*ndo_xdp_xmit)(struct net_device *dev, int n,
@@ -1442,6 +1442,10 @@ struct net_device_ops {
 	int			(*ndo_xsk_wakeup)(struct net_device *dev,
 						  u32 queue_id, u32 flags);
 	struct devlink_port *	(*ndo_get_devlink_port)(struct net_device *dev);
+
+#ifdef CONFIG_MCST_RT
+	int                     ndo_unlocked_ioctl;
+#endif
 };
 
 /**
@@ -2077,6 +2081,13 @@ struct net_device {
 	unsigned		wol_enabled:1;
 };
 #define to_net_dev(d) container_of(d, struct net_device, dev)
+
+#ifdef CONFIG_MCST
+static inline bool napi_scheduled(struct napi_struct *n)
+{
+	return !!test_bit(NAPI_STATE_SCHED, &n->state);
+}
+#endif /* CONFIG_MCST */
 
 static inline bool netif_elide_gro(const struct net_device *dev)
 {
@@ -3912,6 +3923,9 @@ enum {
 	NETIF_MSG_PKTDATA	= 0x1000,
 	NETIF_MSG_HW		= 0x2000,
 	NETIF_MSG_WOL		= 0x4000,
+#ifdef CONFIG_MCST
+	NETIF_MSG_1588		= 0x8000,
+#endif
 };
 
 #define netif_msg_drv(p)	((p)->msg_enable & NETIF_MSG_DRV)
@@ -3929,6 +3943,11 @@ enum {
 #define netif_msg_pktdata(p)	((p)->msg_enable & NETIF_MSG_PKTDATA)
 #define netif_msg_hw(p)		((p)->msg_enable & NETIF_MSG_HW)
 #define netif_msg_wol(p)	((p)->msg_enable & NETIF_MSG_WOL)
+#ifdef CONFIG_MCST
+#define netif_msg_1588(p)	((p)->msg_enable & NETIF_MSG_1588)
+#else
+#define netif_msg_1588(p)	(0)
+#endif
 
 static inline u32 netif_msg_init(int debug_value, int default_msg_enable_bits)
 {

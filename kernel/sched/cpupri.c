@@ -208,7 +208,11 @@ int cpupri_init(struct cpupri *cp)
 			goto cleanup;
 	}
 
+#ifdef CONFIG_MCST_RT_SMP
+	cp->cpu_to_pri = kcalloc(UNBOUND_CPU + 1, sizeof(int), GFP_KERNEL);
+#else
 	cp->cpu_to_pri = kcalloc(nr_cpu_ids, sizeof(int), GFP_KERNEL);
+#endif
 	if (!cp->cpu_to_pri)
 		goto cleanup;
 

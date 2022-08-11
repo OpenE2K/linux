@@ -46,6 +46,22 @@ choice
 	 1000 Hz is the preferred choice for desktop systems and other
 	 systems requiring fast interactive responses to events.
 
+	config HZ_10
+		bool "10 HZ"
+	depends on MCST && E2K	# only under CONFIG_MCST && CONFIG_E2K
+	help
+	 10 Hz is a typical choice for simulator e2k arch.
+	 Such a low HZ due to the low frequency of simulated hardware.
+
+	config HZ_20
+		bool "20 HZ"
+	depends on MCST		# only under CONFIG_MCST
+	help
+	 20 Hz is a typical choice for simulator e2k/x86 arch.
+	 It is the minimum HZ value for x86 to do not cause an overflow
+	 of 16 bits 'PIT_LATCH' (PIT timer counter).
+	 Such a low HZ due to the low frequency of simulated hardware.
+
 endchoice
 
 config HZ
@@ -54,6 +70,8 @@ config HZ
 	default 250 if HZ_250
 	default 300 if HZ_300
 	default 1000 if HZ_1000
+	default 10 if HZ_10		# only under CONFIG_MCST && CONFIG_E2K
+	default 20 if HZ_20		# only under CONFIG_MCST
 
 config SCHED_HRTICK
 	def_bool HIGH_RES_TIMERS

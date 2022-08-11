@@ -1488,6 +1488,15 @@ int radeon_device_init(struct radeon_device *rdev,
 		mutex_unlock(&rdev->pm.mutex);
 	}
 
+#ifdef CONFIG_E2K
+	if (cpu_has(CPU_HWBUG_BAD_RESET)) {
+		if (rdev->accel_working)
+			radeon_test_moves(rdev);
+		else
+			DRM_INFO("radeon: acceleration disabled, "
+				"skipping reset tests\n");
+	}
+#endif
 	if ((radeon_testing & 1)) {
 		if (rdev->accel_working)
 			radeon_test_moves(rdev);
@@ -1505,6 +1514,19 @@ int radeon_device_init(struct radeon_device *rdev,
 			radeon_benchmark(rdev, radeon_benchmarking);
 		else
 			DRM_INFO("radeon: acceleration disabled, skipping benchmarks\n");
+	}
+	rdev->dummy_page2.page = alloc_page(GFP_DMA32 |
+						GFP_KERNEL | __GFP_ZERO);
+	if (rdev->dummy_page2.page == NULL)
+		return -ENOMEM;
+	rdev->dummy_page2.addr = pci_map_page(rdev->pdev,
+					rdev->dummy_page2.page,
+					0, PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
+	if (pci_dma_mapping_error(rdev->pdev, rdev->dummy_page2.addr)) {
+		dev_err(&rdev->pdev->dev, "Failed to DMA MAP the dummy page\n");
+		__free_page(rdev->dummy_page2.page);
+		rdev->dummy_page2.page = NULL;
+		return -ENOMEM;
 	}
 	return 0;
 
@@ -1576,7 +1598,13 @@ int radeon_suspend_kms(struct drm_device *dev, bool suspend,
 
 	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
-
+#ifdef CONFIG_MCST
+	if (fbcon) { /* suspend the fbdev before turning off the card */
+		console_lock();
+		radeon_fbdev_set_suspend(rdev, 1);
+		console_unlock();
+	}
+#endif
 	drm_kms_helper_poll_disable(dev);
 
 	drm_modeset_lock_all(dev);
@@ -1624,6 +1652,13 @@ int radeon_suspend_kms(struct drm_device *dev, bool suspend,
 			/* delay GPU reset to resume */
 			radeon_fence_driver_force_completion(rdev, i);
 		}
+#ifdef CONFIG_MCST
+		/* cancel lockup_work to prevent access to registers
+		 * of suspended card */
+		if (rdev->fence_drv[i].initialized)
+			cancel_delayed_work_sync(&rdev->
+					fence_drv[i].lockup_work);
+#endif
 	}
 
 	radeon_save_bios_scratch_regs(rdev);
@@ -1647,12 +1682,13 @@ int radeon_suspend_kms(struct drm_device *dev, bool suspend,
 		pci_disable_device(dev->pdev);
 		pci_set_power_state(dev->pdev, PCI_D3hot);
 	}
-
+#ifndef CONFIG_MCST
 	if (fbcon) {
 		console_lock();
 		radeon_fbdev_set_suspend(rdev, 1);
 		console_unlock();
 	}
+#endif
 	return 0;
 }
 

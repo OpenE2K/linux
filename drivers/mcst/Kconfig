@@ -1,0 +1,198 @@
+menu "Elbrus MCST Device Drivers"
+
+#config DDI
+#	tristate "Drivers Device Interface (Solaris) support "
+#	default m
+
+config DRM_MGA2
+	tristate "MGA2 video adapter"
+	depends on PCI && DRM && (E2K || E90S)
+	default m
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select VIDEOMODE_HELPERS
+	select DRM_KMS_HELPER
+	select DRM_KMS_FB_HELPER
+	select DRM_IMX_HDMI
+	select DRM_DW_HDMI_CEC
+	select DRM_I2C_SIL164
+	select DRM_PANEL_LVDS
+	select BACKLIGHT_PWM
+
+config MGA2_PWM
+        tristate "MGA2 pulse-width modulation (PWM) driver"
+        depends on PWM
+        default m
+
+config MGA2_GPIO
+        tristate "MGA2 GPIO driver"
+        depends on GPIOLIB
+        default m
+
+config MSPS
+	tristate "MSPS driver"
+	depends on E2K && NUMA
+	default m
+	help
+	    Driver for MSPS - needed for connect external ADC with our VK.
+
+config ELDSP
+	tristate "Elbrus DSP driver"
+	depends on E2K && CPU_ES2
+	default m
+	help
+	  Driver for Elbrus DSP (eldsp), older name "DSP Cube".
+
+config MPV
+	tristate "MPV driver"
+	depends on MCST && PCI
+
+config MGPM
+        tristate "MGPM PCI driver"
+        depends on PCI
+
+config MMRM
+	tristate "MMRM PCI driver"
+	depends on PCI
+	help
+	  Driver for MMR (Manchester code) on PCI".
+
+config MOKM
+    tristate "MOKM PCI driver"
+    depends on PCI
+
+
+config RDMA
+	tristate "RDMA driver"
+	depends on E2K
+	default m
+
+config RDMA_SIC
+	tristate "RDMA_SIC driver"
+	depends on (E2K || E90S) && NUMA
+	default m
+
+config RDMA_M
+	tristate "RDMA_M driver"
+	depends on (E2K || E90S) && NUMA
+	default m
+
+config MOKX
+	tristate "MOKX driver"
+	depends on E2K && NUMA
+	default m
+
+config WD
+	bool "WD driver"
+	depends on E2K
+	help
+	  System work(watchdog) control manager.
+	  /dev/watchdog major 10 minor 130
+
+config DMP_ASSIST
+	tristate "DMP_ASSIST driver"
+	depends on E2K && RECOVERY
+	---help---
+	  Pseudo-driver for online support dump-analyzer activity.
+	  Needs ....dump_analyze_cmd= ... in cmdline.
+
+config LPTOUTS
+	tristate "GPIO via LPT"
+	depends on PARPORT_MCST
+	default m
+	---help---
+	You should say Y here if you have a BCVM-INEUM module.
+	To compile this driver as a module, choose M here: the
+	module will be called lptous.
+
+config M2MLC
+	tristate "M2MLC driver"
+        depends on PCI
+	default m
+	---help---
+	  Driver for Node Interconnect Controller.
+
+config APKPWR
+	tristate "APKPWR driver"
+	depends on I2C
+	default m
+	---help---
+	  Driver for MUP-4C power supply module (used in APK-NT4C and APK-PC4C).
+
+config MEM2ALLOC
+	tristate "DMA memory allocator"
+	default m
+	---help---
+	  DMA memory allocator.
+
+config HANTRODEC
+	tristate "Google hantrodec VP9 driver"
+	default m
+	---help---
+	  Google VP9 driver.
+
+config BIGE
+	tristate "Google bige VP9 encoder driver"
+	default m
+	select UIO
+	---help---
+	  Google VP9 encoder driver.
+
+config E8CPCS
+	tristate "E8C Power Control System (PCS) hwmon driver"
+	depends on E2K && (E2K_E8C || E2K_E8C2 || E2K_MINVER <= 5)
+	default m
+
+config PCSM
+	tristate "Power Control System (PCS) for e8c* and e2c3 system's"
+	depends on E2K
+	default m
+	---help---
+	  Needed for power management system (based on e1c+ or other)
+
+config IMGTEC
+	tristate "Imagination codec driver"
+	depends on E2K
+	default m
+	select BUS_MASTERING
+	select VXD_FPGA
+	---help---
+	  Imagination codec driver.
+
+config BUS_MASTERING
+        def_bool y
+        depends on IMGTEC
+
+config VXD_FPGA
+        def_bool y
+        depends on IMGTEC
+
+source "drivers/mcst/gpu-imgtec/Kconfig"
+
+source "drivers/mcst/gpu-viv/Kconfig"
+
+source "drivers/mcst/smi/Kconfig"
+
+config SMI_PWM
+	tristate "Silicon Motion pulse-width modulation (PWM) driver"
+        depends on PWM
+	default m
+
+config SMI_GPIO
+	tristate "Silicon Motion GPIO driver"
+        depends on GPIOLIB
+	select GPIOLIB_IRQCHIP
+	default m
+
+config SENSORS_EMC2305
+	tristate "SMSC EMC2305"
+	depends on I2C
+	help
+	  If you say yes here you get support for the SMSC EMC2305/EMC2303
+	  fan controller chips.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called emc2305.
+
+endmenu

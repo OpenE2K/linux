@@ -850,8 +850,12 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
  *   constant expressions (to avoid tripping VLA warnings in stack
  *   allocation usage).
  */
+#if !defined(CONFIG_MCST) || !defined(__LCC__)
 #define __typecheck(x, y) \
 		(!!(sizeof((typeof(x) *)1 == (typeof(y) *)1)))
+#else
+#define __typecheck(x, y)	(1)
+#endif
 
 /*
  * This returns a constant expression while determining if an argument is

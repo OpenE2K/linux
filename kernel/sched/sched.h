@@ -900,6 +900,10 @@ struct rq {
 	 */
 	unsigned long		nr_uninterruptible;
 
+#ifdef CONFIG_MCST_RT_SMP
+	unsigned long mcst_rt_timestamp;
+#endif
+
 	struct task_struct	*curr;
 	struct task_struct	*idle;
 	struct task_struct	*stop;
@@ -1051,7 +1055,50 @@ static inline void update_idle_core(struct rq *rq) { }
 
 DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
+#ifndef CONFIG_MCST_RT_SMP
 #define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
+#define DEBUG_MCST_SMP(fmt, ...)
+#else
+extern struct rq *g_rq;
+extern struct rq *node_rq[];
+
+static inline int mcst_rt_rq(struct rq *rq)
+{
+	int ret = 0;
+#ifdef CONFIG_MCST_RT_GRQ
+	ret |= (rq->cpu == UNBOUND_CPU);
+#endif
+
+#ifdef CONFIG_MCST_RT_NUMA
+	ret |= (rq->cpu >= NR_CPUS && rq->cpu < UNBOUND_CPU);
+#endif
+	return ret;
+}
+
+static inline struct rq *cpu_rq(int cpu)
+{
+	struct rq *rq = NULL;
+
+	if (cpu < NR_CPUS)
+		rq = &per_cpu(runqueues, cpu);
+#ifdef CONFIG_MCST_RT_GRQ
+	else if (cpu == UNBOUND_CPU)
+		rq = g_rq;
+#endif
+#ifdef CONFIG_MCST_RT_NUMA
+	else if (cpu >= NR_CPUS && cpu < UNBOUND_CPU)
+		rq = node_rq[cpu-NR_CPUS];
+#endif
+	return rq;
+}
+
+#define DO_DEBUG_MCST_SMP	0
+#define DEBUG_MCST_SMP(fmt, ...)	\
+	if (DO_DEBUG_MCST_SMP) {	\
+		printk_deferred("%s: " fmt, __func__, __VA_ARGS__);	\
+	}
+#endif /* !CONFIG_MCST_RT_SMP */
+
 #define this_rq()		this_cpu_ptr(&runqueues)
 #define task_rq(p)		cpu_rq(task_cpu(p))
 #define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
@@ -1635,8 +1682,55 @@ static inline int task_current(struct rq *rq, struct task_struct *p)
 	return rq->curr == p;
 }
 
+#ifdef CONFIG_MCST_RT_SMP
+extern void deactivate_task(struct rq *rq, struct task_struct *p, int flags);
+extern void activate_task(struct rq *rq, struct task_struct *p, int flags);
+static inline void finish_mcst_rt_switch(struct rq *rq,
+					struct task_struct *prev)
+{
+	if (likely(!mcst_rt_affinity(prev))) {
+		return;
+	}
+	BUG_ON(!rt_task(prev));
+	if (unlikely(prev->state == TASK_DEAD)) {
+		prev->mcst_smp_cpu = 0;
+		return;
+	}
+#ifdef __ARCH_WANT_UNLOCKED_CTXSW
+	raw_spin_lock(&rq->lock);
+#endif
+	if (prev->on_rq) {
+		struct rq *dst_rq = NULL;
+#ifdef CONFIG_MCST_RT_GRQ
+		if (task_unbound(prev))
+			dst_rq = g_rq;
+#endif
+#ifdef CONFIG_MCST_RT_NUMA
+		if (!task_unbound(prev))
+			dst_rq = node_rq[prev->mcst_smp_cpu-NR_CPUS];
+#endif
+		BUG_ON(!dst_rq);
+
+		raw_spin_lock(&dst_rq->lock);
+		deactivate_task(rq, prev, 0);
+		set_task_cpu(prev, dst_rq->cpu);
+		activate_task(dst_rq, prev, 0);
+		raw_spin_unlock(&dst_rq->lock);
+	} else {
+		 __set_task_cpu(prev, prev->mcst_smp_cpu);
+	}
+
+#ifdef __ARCH_WANT_UNLOCKED_CTXSW
+	raw_spin_unlock(&rq->lock);
+#endif
+}
+#endif /* CONFIG_MCST_RT_SMP */
+
 static inline int task_running(struct rq *rq, struct task_struct *p)
 {
+#ifdef CONFIG_MCST_RT_SMP
+	finish_mcst_rt_switch(rq, p);
+#endif
 #ifdef CONFIG_SMP
 	return p->on_cpu;
 #else
@@ -1975,8 +2069,13 @@ extern void deactivate_task(struct rq *rq, struct task_struct *p, int flags);
 
 extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SYSCTL)
+extern unsigned int sysctl_sched_nr_migrate;
+extern unsigned int sysctl_sched_migration_cost;
+#else
 extern const_debug unsigned int sysctl_sched_nr_migrate;
 extern const_debug unsigned int sysctl_sched_migration_cost;
+#endif
 
 #ifdef CONFIG_SCHED_HRTICK
 

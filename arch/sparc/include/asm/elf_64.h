@@ -59,6 +59,9 @@
 #define R_SPARC_7		43
 #define R_SPARC_5		44
 #define R_SPARC_6		45
+#ifdef CONFIG_MCST
+#define R_SPARC_UA64		54
+#endif  /*CONFIG_MCST*/
 
 /* Bits present in AT_HWCAP, primarily for Sparc32.  */
 #define HWCAP_SPARC_FLUSH       0x00000001
@@ -214,6 +217,15 @@ do {	if ((ex).e_ident[EI_CLASS] == ELFCLASS32)	\
 
 extern unsigned int vdso_enabled;
 
+#ifdef CONFIG_E90S
+#define	ARCH_DLINFO							\
+do {									\
+	extern struct adi_config adi_state;				\
+	NEW_AUX_ENT(AT_ADI_BLKSZ, adi_state.caps.blksz);		\
+	NEW_AUX_ENT(AT_ADI_NBITS, adi_state.caps.nbits);		\
+	NEW_AUX_ENT(AT_ADI_UEONADI, adi_state.caps.ue_on_adi);		\
+} while (0)
+#else
 #define	ARCH_DLINFO							\
 do {									\
 	extern struct adi_config adi_state;				\
@@ -224,10 +236,12 @@ do {									\
 	NEW_AUX_ENT(AT_ADI_NBITS, adi_state.caps.nbits);		\
 	NEW_AUX_ENT(AT_ADI_UEONADI, adi_state.caps.ue_on_adi);		\
 } while (0)
+#endif
 
 struct linux_binprm;
-
+#ifndef CONFIG_E90S
 #define ARCH_HAS_SETUP_ADDITIONAL_PAGES	1
 extern int arch_setup_additional_pages(struct linux_binprm *bprm,
 					int uses_interp);
+#endif
 #endif /* !(__ASM_SPARC64_ELF_H) */

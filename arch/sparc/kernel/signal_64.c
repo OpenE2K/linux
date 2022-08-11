@@ -51,6 +51,7 @@ asmlinkage void sparc64_set_context(struct pt_regs *regs)
 	int err;
 
 	synchronize_user_stack();
+
 	if (get_thread_wsaved()					||
 	    (((unsigned long)ucp) & (sizeof(unsigned long)-1))	||
 	    (!__access_ok(ucp, sizeof(*ucp))))

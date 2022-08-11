@@ -45,6 +45,9 @@ struct netlbl_domhsh_walk_arg {
 	u32 seq;
 };
 
+/* Accept unlabeled packets flag */
+static u8 netlabel_mgmt_s0_flg = 0;
+
 /* NetLabel Generic NETLINK CIPSOv4 family */
 static struct genl_family netlbl_mgmt_gnl_family;
 
@@ -56,11 +59,47 @@ static const struct nla_policy netlbl_mgmt_genl_policy[NLBL_MGMT_A_MAX + 1] = {
 	[NLBL_MGMT_A_CV4DOI] = { .type = NLA_U32 },
 	[NLBL_MGMT_A_FAMILY] = { .type = NLA_U16 },
 	[NLBL_MGMT_A_CLPDOI] = { .type = NLA_U32 },
+	[NLBL_MGMT_A_S0] = { .type = NLA_U8 },
 };
 
 /*
  * Helper Functions
  */
+
+/**
+ * netlbl_mgmt_s0_flg - Get the state of the s0 mark flag
+ */
+int netlbl_mgmt_s0_flg(void)
+{
+    return netlabel_mgmt_s0_flg;
+}
+
+/**
+ * netlbl_mgmt_s0_update  - Set the s0 mark flag
+ * @value: desired value
+ * @audit_info: NetLabel audit information
+ *
+ * Description:
+ * Set the value of the s0 mark flag to @value.
+ *
+ */
+static void netlbl_mgmt_s0_update(u8 value,
+                                        struct netlbl_audit *audit_info)
+{
+       struct audit_buffer *audit_buf;
+       u8 old_val;
+
+       old_val = netlabel_mgmt_s0_flg;
+       netlabel_mgmt_s0_flg = value;
+       // XXX: change type
+       audit_buf = netlbl_audit_start_common(AUDIT_MAC_UNLBL_ALLOW,
+                                             audit_info);
+       if (audit_buf != NULL) {
+               audit_log_format(audit_buf,
+                                " mark_s0=%u old=%u", value, old_val);
+               audit_log_end(audit_buf);
+       }
+}
 
 /**
  * netlbl_mgmt_add - Handle an ADD message
@@ -407,6 +446,73 @@ static int netlbl_mgmt_listentry(struct sk_buff *skb,
 /*
  * NetLabel Command Handlers
  */
+
+/**
+ * netlbl_mgmt_s0_set - Handle an s0 mark message
+ * @skb: the NETLINK buffer
+ * @info: the Generic NETLINK info block
+ *
+ * Description:
+ * Process a user generated s0 mark message and set the accept flag accordingly.
+ * Returns zero on success, negative values on failure.
+ *
+ */
+static int netlbl_mgmt_s0_set(struct sk_buff *skb, struct genl_info *info)
+{
+	u8 value;
+	struct netlbl_audit audit_info;
+
+	if (info->attrs[NLBL_MGMT_A_S0]) {
+		value = nla_get_u8(info->attrs[NLBL_MGMT_A_S0]);
+		if (value == 1 || value == 0) {
+			netlbl_netlink_auditinfo(skb, &audit_info);
+			netlbl_mgmt_s0_update(value, &audit_info);
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+/**
+ * netlbl_mgmt_s0_get - Handle an s0 mark message
+ * @skb: the NETLINK buffer
+ * @info: the Generic NETLINK info block
+ *
+ * Description:
+ * Process a user generated s0 mark message and respond with the current status.
+ * Returns zero on success, negative values on failure.
+ *
+ */
+static int netlbl_mgmt_s0_get(struct sk_buff *skb, struct genl_info *info)
+{
+	int ret_val = -EINVAL;
+	struct sk_buff *ans_skb;
+	void *data;
+
+	ans_skb = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+	if (ans_skb == NULL)
+	        goto list_failure;
+	data = genlmsg_put_reply(ans_skb, info, &netlbl_mgmt_gnl_family,
+	                         0, NLBL_MGMT_C_S0_GET);
+	if (data == NULL) {
+	        ret_val = -ENOMEM;
+	        goto list_failure;
+	}
+
+	ret_val = nla_put_u8(ans_skb,
+	                     NLBL_MGMT_A_S0,
+	                     netlabel_mgmt_s0_flg);
+	if (ret_val != 0)
+	        goto list_failure;
+
+	genlmsg_end(ans_skb, data);
+	return genlmsg_reply(ans_skb, info);
+
+list_failure:
+	kfree_skb(ans_skb);
+	return ret_val;
+}
 
 /**
  * netlbl_mgmt_add - Handle an ADD message
@@ -815,6 +921,20 @@ static const struct genl_ops netlbl_mgmt_genl_ops[] = {
 	.doit = netlbl_mgmt_version,
 	.dumpit = NULL,
 	},
+	{
+	.cmd = NLBL_MGMT_C_S0_GET,
+	.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+	.flags = 0,
+	.doit = netlbl_mgmt_s0_get,
+	.dumpit = NULL,
+	},
+	{
+	.cmd = NLBL_MGMT_C_S0_SET,
+	.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+	.flags = GENL_ADMIN_PERM,
+	.doit = netlbl_mgmt_s0_set,
+	.dumpit = NULL,
+	},
 };
 
 static struct genl_family netlbl_mgmt_gnl_family __ro_after_init = {
@@ -842,5 +962,10 @@ static struct genl_family netlbl_mgmt_gnl_family __ro_after_init = {
  */
 int __init netlbl_mgmt_genl_init(void)
 {
+	struct netlbl_audit audit_info;
+
+	/* set default s0 mark flag */
+	netlbl_mgmt_s0_update(1, &audit_info);
+
 	return genl_register_family(&netlbl_mgmt_gnl_family);
 }

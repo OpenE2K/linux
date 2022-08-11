@@ -25,6 +25,9 @@
 #define PIL_SMP_CALL_FUNC_SNGL	6
 #define PIL_DEFERRED_PCR_WORK	7
 #define PIL_KGDB_CAPTURE	8
+#ifdef CONFIG_E90S
+#define PIL_E90S_ASYNC_ERR	13
+#endif /*CONFIG_E90S*/
 #define PIL_NORMAL_MAX		14
 #define PIL_NMI			15
 

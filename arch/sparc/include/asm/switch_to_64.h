@@ -9,6 +9,35 @@ do {						\
 	flushw_all();				\
 } while (0)
 
+#ifdef CONFIG_E90S
+#define PERFCTR_END() do {						\
+	if (test_thread_flag(TIF_PERFCTR)) {				\
+		if (!test_thread_flag(TIF_FIRST_READ_PIC))		\
+			read_and_stop_perfctrs(current_thread_info()->kernel_cnt);\
+		else {							\
+			clear_thread_flag(TIF_FIRST_READ_PIC);		\
+		}							\
+}} while(0)
+#define PERFCTR_BEGIN() do {						\
+	if (test_thread_flag(TIF_PERFCTR)) {				\
+		clear_thread_flag(TIF_FIRST_READ_PIC);			\
+		write_perfctrs(current_thread_info()->pcr_regs,		\
+ 				current_thread_info()->kernel_cnt);	\
+	} else {							\
+		wr_pcr(0);						\
+	}								\
+} while(0)
+
+#endif /* CONFIG_E90S */
+
+#ifdef CONFIG_PREEMPTION
+void check_lazy_mmu_end(void);
+void check_lazy_mmu_begin(void);
+#else	/*!CONFIG_PREEMPTION*/
+static inline void check_lazy_mmu_end(void) {}
+static inline void check_lazy_mmu_begin(void) {}
+#endif	/*CONFIG_PREEMPTION*/
+
 	/* See what happens when you design the chip correctly?
 	 *
 	 * We tell gcc we clobber all non-fixed-usage registers except
@@ -19,7 +48,9 @@ do {						\
 	 * and 2 stores in this critical code path.  -DaveM
 	 */
 #define switch_to(prev, next, last)					\
-do {	save_and_clear_fpu();						\
+do {	check_lazy_mmu_end();						\
+	PERFCTR_END();							\
+	save_and_clear_fpu();						\
 	/* If you are tempted to conditionalize the following */	\
 	/* so that ASI is only written if it changes, think again. */	\
 	__asm__ __volatile__("wr %%g0, %0, %%asi"			\
@@ -64,6 +95,8 @@ do {	save_and_clear_fpu();						\
 	        "l1", "l2", "l3", "l4", "l5", "l6", "l7",		\
 	  "i0", "i1", "i2", "i3", "i4", "i5",				\
 	  "o0", "o1", "o2", "o3", "o4", "o5",       "o7");		\
+	check_lazy_mmu_begin();						\
+	PERFCTR_BEGIN();						\
 } while(0)
 
 void synchronize_user_stack(void);

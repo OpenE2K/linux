@@ -179,7 +179,11 @@ static inline long get_delta (long *rt, long *master)
 	for (i = 0; i < NUM_ITERS; i++) {
 		t0 = tick_ops->get_tick();
 		go[MASTER] = 1;
+#ifndef	CONFIG_RMO
 		membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+		membar_storeload();
+#endif	/* CONFIG_RMO */
 		while (!(tm = go[SLAVE]))
 			rmb();
 		go[SLAVE] = 0;
@@ -271,7 +275,11 @@ static void smp_synchronize_one_tick(int cpu)
 
 	/* now let the client proceed into his loop */
 	go[MASTER] = 0;
+#ifndef	CONFIG_RMO
 	membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+	membar_storeload();
+#endif	/* CONFIG_RMO */
 
 	raw_spin_lock_irqsave(&itc_sync_lock, flags);
 	{
@@ -281,7 +289,11 @@ static void smp_synchronize_one_tick(int cpu)
 			go[MASTER] = 0;
 			wmb();
 			go[SLAVE] = tick_ops->get_tick();
+#ifndef	CONFIG_RMO
 			membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+			membar_storeload();
+#endif	/* CONFIG_RMO */
 		}
 	}
 	raw_spin_unlock_irqrestore(&itc_sync_lock, flags);
@@ -1142,6 +1154,9 @@ void smp_capture(void)
 		       smp_processor_id());
 #endif
 		penguins_are_doing_time = 1;
+#ifdef	CONFIG_RMO
+		membar_storestore_loadstore();
+#endif	/* CONFIG_RMO */
 		atomic_inc(&smp_capture_registry);
 		smp_cross_call(&xcall_capture, 0, 0, 0);
 		while (atomic_read(&smp_capture_registry) != ncpus)
@@ -1161,7 +1176,11 @@ void smp_release(void)
 		       smp_processor_id());
 #endif
 		penguins_are_doing_time = 0;
+#ifndef	CONFIG_RMO
 		membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+		membar_storeload_storestore();
+#endif	/* CONFIG_RMO */
 		atomic_dec(&smp_capture_registry);
 	}
 }
@@ -1180,7 +1199,11 @@ void __irq_entry smp_penguin_jailcell(int irq, struct pt_regs *regs)
 	__asm__ __volatile__("flushw");
 	prom_world(1);
 	atomic_inc(&smp_capture_registry);
+#ifndef	CONFIG_RMO
 	membar_safe("#StoreLoad");
+#else	/* CONFIG_RMO */
+	membar_storeload_storestore();
+#endif	/* CONFIG_RMO */
 	while (penguins_are_doing_time)
 		rmb();
 	atomic_dec(&smp_capture_registry);
@@ -1444,48 +1467,10 @@ void smp_send_reschedule(int cpu)
 	if (cpu == smp_processor_id()) {
 		WARN_ON_ONCE(preemptible());
 		set_softint(1 << PIL_SMP_RECEIVE_SIGNAL);
-		return;
+	} else {
+		xcall_deliver((u64) &xcall_receive_signal,
+			      0, 0, cpumask_of(cpu));
 	}
-
-	/* Use cpu poke to resume idle cpu if supported. */
-	if (cpu_poke && idle_cpu(cpu)) {
-		unsigned long ret;
-
-		ret = send_cpu_poke(cpu);
-		if (ret == HV_EOK)
-			return;
-	}
-
-	/* Use IPI in following cases:
-	 * - cpu poke not supported
-	 * - cpu not idle
-	 * - send_cpu_poke() returns with error
-	 */
-	send_cpu_ipi(cpu);
-}
-
-void smp_init_cpu_poke(void)
-{
-	unsigned long major;
-	unsigned long minor;
-	int ret;
-
-	if (tlb_type != hypervisor)
-		return;
-
-	ret = sun4v_hvapi_get(HV_GRP_CORE, &major, &minor);
-	if (ret) {
-		pr_debug("HV_GRP_CORE is not registered\n");
-		return;
-	}
-
-	if (major == 1 && minor >= 6) {
-		/* CPU POKE is registered. */
-		cpu_poke = true;
-		return;
-	}
-
-	pr_debug("CPU_POKE not supported\n");
 }
 
 void __irq_entry smp_receive_signal_client(int irq, struct pt_regs *regs)

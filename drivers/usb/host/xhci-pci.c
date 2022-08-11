@@ -280,6 +280,13 @@ static void xhci_pci_quirks(struct device *dev, struct xhci_hcd *xhci)
 	     pdev->device == PCI_DEVICE_ID_ASMEDIA_3242_XHCI))
 		xhci->quirks |= XHCI_NO_64BIT_SUPPORT;
 
+#ifdef CONFIG_MCST /* bug 128906 */
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+	    pdev->device == PCI_DEVICE_ID_MCST_USB_3_0 &&
+	    iohub_generation(pdev) == 2 && iohub_revision(pdev) == 0)
+		xhci->quirks |= XHCI_NO_64BIT_SUPPORT;
+#endif
+
 	if (pdev->vendor == PCI_VENDOR_ID_ASMEDIA &&
 		pdev->device == PCI_DEVICE_ID_ASMEDIA_1042A_XHCI)
 		xhci->quirks |= XHCI_ASMEDIA_MODIFY_FLOWCONTROL;

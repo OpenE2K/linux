@@ -1,0 +1,459 @@
+/*
+ * support for the Mcst Pevm based board
+ *
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+
+/ {
+	version = "apk-pc4c v1.0 2018-03-16";
+	model = "e4c, apk-pc4c, notebook";
+	compatible = "mcst,apk-pc4c";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD22:LM96163CISD) - CPU_TERM */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "COM: CPU Temp Sensor";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "CPU Temp";
+				/* no fan control */
+			};
+			ltm4676@40 {
+				/* hwmon/pmbus/ltc2978.ko (LTM4676IY) - +3V3out / +1V0out */
+				compatible = "lltc,ltm4676";
+				reg = <0x40>;
+				label = "COM: +3V3out / +1V0out";
+				regulators {
+					vout0 {
+						regulator-name = "COM:3V3";
+					};
+					vout1 {
+						regulator-name = "COM:1V0";
+					};
+				};
+			};
+			ltm4676@4f {
+				/* hwmon/pmbus/ltc2978.ko (LTM4676IY) - +1V5out / +1V2out */
+				compatible = "lltc,ltm4676";
+				reg = <0x4f>;
+				label = "COM: RAM-1V5 / IOHUB-1V2";
+				regulators {
+					vout0 {
+						regulator-name = "IOHUB-1V5";
+					};
+					vout1 {
+						regulator-name = "IOHUB-1V2";
+					};
+				};
+			};
+			ltc4151@6a {
+				/* hwmon/ltc4151.ko (LTC4551IDD) - TERM_LTM / +12V_CPU */
+				compatible = "lltc,ltc4151";
+				reg = <0x6a>;
+				shunt-resistor-micro-ohms = <20000>;
+				label = "COM: TERM_LTM / +12V_CPU";
+			};
+			/*
+			pca9534@20 {
+				compatible = "nxp,pca9534"; //driver: gpio/gpio-pca953x
+				reg = <0x20>;
+			};
+			pca9534@21 {
+				compatible = "nxp,pca9534"; //driver: gpio/gpio-pca953x
+				reg = <0x21>;
+			};
+			*/
+		};
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD24:LM96163CISD) - board temp */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "COM: Board Temp Sensor";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "not connected";
+				/* no fan control */
+			};
+		};
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+			/* (PEX8624-BB50BIF) - PCIe switch */
+		};
+		i2c@3 {
+			/* COMexpress:SMB */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+			i2c-mux@44 {
+				/* i2c/muxes/i2c-mux-ltc4306.ko (LTC4306) - I2C MUX */
+				#address-cells = <1>;
+				#size-cells = <0>;
+				compatible = "lltc,ltc4306";
+				reg = <0x44>;
+				/* i2c-mux-idle-disconnect; */
+				i2c@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+					/* E8860 MXM Radeon video */
+				};
+				i2c@1 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+					/* mPCI-E (WiFi+BT) */
+				};
+				i2c@2 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <2>;
+					/* mPCI-E (Exp) */
+				};
+				i2c@3 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <3>;
+					apkpwr@5a {
+						/* mcst/apkpwr.ko [X13:PowerIn] */
+						#address-cells = <1>;
+						#size-cells = <0>;
+						compatible = "mcst,apkpwr";
+						reg = <0x5a>;
+						label = "MPN power in";
+					};
+				};
+			};
+			i2c-mux@58 {
+				/* i2c/muxes/i2c-mux-ltc4306.ko (LTC4306) - I2C MUX */
+				#address-cells = <1>;
+				#size-cells = <0>;
+				compatible = "lltc,ltc4306";
+				reg = <0x58>;
+				/* i2c-mux-idle-disconnect; */
+				i2c@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+					gpi1:pca9534@20 {
+						/* gpio/gpio-pca953x.ko (DD14:PCA9534PW) - DiscretIn#1 */
+						compatible = "nxp,pca9534";
+						reg = <0x20>;
+						label = "DiscretIn#1";
+						gpio-controller;
+						/* FUTURE: (now interrupt support not compiled in)
+						interrupt-parent = <&gpio?>;
+						interrupts = <?? IRQ_TYPE_LEVEL_LOW>;
+						*/
+						ngpios = <8>;
+						#gpio-cells = <2>;
+						/* use gpio_keys to control lines 0..4 */
+						gpio-line-names = "wifi_btn", "avia_btn", "pwm_btn", "tpad_btn", "cover_down",
+								  "PRSNT_L", "PRSNT_R", "NT_FLAG";
+					};
+					gpi2:pca9534@21 {
+						/* gpio/gpio-pca953x.ko (DD6:PCA9534PW) - DiscretIn#2 */
+						compatible = "nxp,pca9534";
+						reg = <0x21>;
+						label = "DiscretIn#2";
+						gpio-controller;
+						/* FUTURE: (now interrupt support not compiled in)
+						interrupt-parent = <&gpio?>;
+						interrupts = <?? IRQ_TYPE_LEVEL_LOW>;
+						*/
+						ngpios = <6>;
+						#gpio-cells = <2>;
+						gpio-line-names = "PWR_ALERT", "CASE_ALERT", "COVER_ALERT",
+								  "CPU_OVERH", "TH_OVERH", "HDD_ALERT";
+					};
+					gpo1:pca9534@22 {
+						/* gpio/gpio-pca953x.ko (DD5:PCA9534) - DiscretOut#1 */
+						compatible = "nxp,pca9534";
+						reg = <0x22>;
+						label = "DiscretOut#1";
+						gpio-controller;
+						/* FUTURE: (now interrupt support not compiled in)
+						interrupt-parent = <&gpio?>;
+						interrupts = <?? IRQ_TYPE_LEVEL_LOW>;
+						*/
+						ngpios = <8>;
+						#gpio-cells = <2>;
+						/* use gpio_leds to control this lines */
+						gpio-line-names = "wifi_led", "bluetooth_led", "pwm_r_led", "pwm_g_led",
+								  "tpad_off_led", "cam_act_led", "numlock_led", "capslock_led";
+					};
+					gpo2:pca9534@23 {
+						/* gpio/gpio-pca953x.ko (DD7:PCA9534) - DiscretOut#2 */
+						compatible = "nxp,pca9534";
+						reg = <0x23>;
+						label = "DiscretOut#2";
+						gpio-controller;
+						/* FUTURE: (now interrupt support not compiled in)
+						interrupt-parent = <&gpio?>;
+						interrupts = <?? IRQ_TYPE_LEVEL_LOW>;
+						*/
+						ngpios = <4>;
+						#gpio-cells = <2>;
+						/* use gpio_leds to control line 0 and gpio to other */
+						gpio-line-names = "sata_led",
+								  "PWR_LEVEL", "RS_232_EN", "WIFI_DIS";
+						rs232_en {
+							gpio-hog;
+							gpios = <2 0>;
+							output-low;
+							line-name = "RS_232_EN";
+							/* use IOHUB-GPIO for this function */
+						};
+					};
+				};
+				i2c@1 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+					lm95245@18 {
+						/* hwmon/lm95245.ko (DD54:LM95245CIMM) - TEMP_CASE + MXM */
+						compatible = "national,lm95245";
+						reg = <0x18>;
+						label = "MB: TEMP_CASE / MXM";
+						// TODO: in reg 0xBF clear bit 3 (lm95245.pdf, p.20)
+					};
+					lm95245@4c {
+						/* hwmon/lm95245.ko (DD55:LM95245CIMM) - TEMP_COVER */
+						compatible = "national,lm95245";
+						reg = <0x4c>;
+						label = "MB: TEMP_COVER";
+						// TODO: in reg 0xBF clear bit 3 (lm95245.pdf, p.20)
+					};
+					lm95245@29 {
+						/* hwmon/lm95245.ko (DD56:LM95245CIMM) - TEMP_HDD */
+						compatible = "national,lm95245";
+						reg = <0x29>;
+						label = "MB: TEMP_HDD";
+						// TODO: in reg 0xBF clear bit 3 (lm95245.pdf, p.20)
+					};
+					ltm4676@40 {
+						/* hwmon/pmbus/ltc2978.ko (DA1:LTM4676IY) - DC/DC 5V & 3V3 */
+						compatible = "lltc,ltm4676";
+						reg = <0x40>;
+						label = "MB: DC/DC 5V & 3V3";
+						regulators {
+							vout0 {
+								regulator-name = "MB-5V";
+							};
+							vout1 {
+								regulator-name = "MB-3V3";
+							};
+						};
+					};
+				};
+				i2c@2 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <2>;
+					ptn3460@20 {
+						/* gpu/drm/bridge/nxp-ptn3460.ko (DD54:LM95245CIMM) - DP2LVDS */
+						compatible = "nxp,ptn3460";
+						reg = <0x20>;
+						label = "DP2LVDS";
+						powerdown-gpio = <&gpio 0 1 0 0>; /* PD_N pin */
+						reset-gpio = <&gpio 0 1 0 0>; /* RST_N pin */
+						edid-emulation = <1>;
+							/* edid-emulation:
+							|   0   |  1024x768  | NXP Generic      |
+							|   1   |  1920x1080 | NXP Generic      |
+							|   2   |  1920x1080 | NXP Generic      |
+							|   3   |  1600x900  | Samsung LTM200KT |
+							|   4   |  1920x1080 | Samsung LTM230HT |
+							|   5   |  1366x768  | NXP Generic      |
+							|   6   |  1600x900  | ChiMei M215HGE   |
+							*/
+						ports {
+							#address-cells = <1>;
+							#size-cells = <0>;
+							port@0 {
+								reg = <0>;
+								bridge_out:endpoint {
+									remote-endpoint = <&panel_in>;
+								};
+							};
+						};
+					};
+				};
+				i2c@3 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <3>;
+				};
+			};
+		};
+	};
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		boot@0 {
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <16000000>;
+		};
+		rtc-cy14b101p@1 {
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <16000000>;
+		};
+	};
+	gpio0:l_gpio@0 {
+		compatible = "mcst,gpio";
+		reg = <0x0>;
+		label = "L-GPIO";
+		gpio-controller;
+		ngpios = <16>;
+		#gpio-cells = <2>;
+		gpio-line-names = "nc", "nc", "nc", "nc", "nc",
+				  "GPI0.PWR_NMI", "GPI1.I2C_INT",
+				  "GPI2.TP14", "GPI3.TP15",
+				  "GPO0.PWR_KILL", "GPO1.RS232_EN1",
+				  "GPO2.TP16", "GPO3.TP17",
+				  "nc", "nc", "nc";
+	};
+
+	gpio_leds {
+		compatible = "gpio-leds";
+		/* DiscretOut#1: */
+		wifi_led {
+			gpios = <&gpo1 0 0>; /* (F3) */
+			linux,default-trigger = "rfkill0";
+			label = "wifi:green";
+		};
+		avia_led {
+			gpios = <&gpo1 1 0>; /* (F1) */
+			linux,default-trigger = "rfkill1";
+			label = "bluetooth:green";
+		};
+		pwm_r_led {
+			gpios = <&gpo1 2 0>; /* (F4) */
+			linux,default-trigger = "none";
+			default-state = "on";
+			label = "pwm_r:yellow";
+		};
+		pwm_g_led {
+			gpios = <&gpo1 3 0>; /* (F4) */
+			linux,default-trigger = "none";
+			default-state = "off";
+			label = "pwm_g:green";
+		};
+		tpad_off_led {
+			gpios = <&gpo1 4 0>; /* (F2) */
+			linux,default-trigger = "none";
+			default-state = "off";
+			label = "tpad_off:red";
+		};
+		cam_act_led {
+			gpios = <&gpo1 5 0>;
+			linux,default-trigger = "none";
+			default-state = "off";
+			label = "cam_act:yellow";
+		};
+		numlock_led {
+			gpios = <&gpo1 6 0>;
+			linux,default-trigger = "kbd-numlock";
+			label = "numlock:green";
+		};
+		capslock_led {
+			gpios = <&gpo1 7 0>;
+			linux,default-trigger = "kbd-capslock";
+			label = "capslock:green";
+		};
+		/* DiscretOut#2: */
+		sata_led {
+			gpios = <&gpo2 0 0>;
+			linux,default-trigger = "disk-activity";
+			label = "sata:yellow";
+		};
+	};
+	gpio_keys_polled {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "gpio-keys-polled";
+		poll-interval = <250>;
+		/*autorepeat;*/
+		wifi_btn {
+			gpios = <&gpi1 0 0>; /* [F3] */
+			linux,code = <238>; /* KEY_WLAN */
+			debounce-interval = <10>;
+			label = "wifi_btn";
+		};
+		avia_btn {
+			gpios = <&gpi1 1 0>; /* [F1] */
+			linux,code = <247>; /* KEY_RFKILL */
+			debounce-interval = <10>;
+			label = "avia_btn";
+		};
+		pwm_btn {
+			gpios = <&gpi1 2 0>; /* [F4] */
+			linux,code = <243>; /* KEY_BRIGHTNESS_CYCLE */
+			debounce-interval = <10>;
+			label = "pwm_btn";
+		};
+		tpad_btn {
+			gpios = <&gpi1 3 0>; /* [F2] */
+			linux,code = <0x212>; /* KEY_TOUCHPAD_TOGGLE */
+			debounce-interval = <10>;
+			label = "tpad_btn";
+		};
+		cover_down {
+			gpios = <&gpi1 4 0>; /* case closed */
+			linux,code = <245>; /* KEY_DISPLAY_OFF */
+			debounce-interval = <10>;
+			label = "cover_down";
+		};
+		power {
+			gpios = <&gpio0 5 0>;
+			linux,code = <116>; /* KEY_POWER */
+			debounce-interval = <10>;
+			label = "Power-key";
+		};
+	};
+
+	/* stub */
+	gpio:gpio-controller {
+		gpio-controller;
+		ngpios = <2>;
+		#gpio-cells = <2>;
+		line_0 {
+			gpio-hog;
+			gpios = <0 0>;
+			output-low;
+		};
+		line_1 {
+			gpio-hog;
+			gpios = <1 0>;
+			output-high;
+		};
+	};
+	port {
+		panel_in: endpoint {
+			remote-endpoint = <&bridge_out>;
+		};
+	};
+};

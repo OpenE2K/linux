@@ -29,7 +29,7 @@
 16	32	lchown			sys_lchown16
 16	64	lchown			sys_lchown
 17	common	brk			sys_brk
-18	common	perfctr			sys_nis_syscall
+18	common	perfctr			sys_perfctr
 19	common	lseek			sys_lseek			compat_sys_lseek
 20	common	getpid			sys_getpid
 21	common	capget			sys_capget
@@ -481,3 +481,4 @@
 433	common	fspick				sys_fspick
 434	common	pidfd_open			sys_pidfd_open
 # 435 reserved for clone3
+498	common el_posix				sys_el_posix

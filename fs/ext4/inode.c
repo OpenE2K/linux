@@ -48,6 +48,7 @@
 
 #include <trace/events/ext4.h>
 
+
 #define MPAGE_DA_EXTENT_TAIL 0x01
 
 static __u32 ext4_inode_csum(struct inode *inode, struct ext4_inode *raw,
@@ -4211,35 +4212,6 @@ int ext4_can_truncate(struct inode *inode)
 	return 0;
 }
 
-/*
- * We have to make sure i_disksize gets properly updated before we truncate
- * page cache due to hole punching or zero range. Otherwise i_disksize update
- * can get lost as it may have been postponed to submission of writeback but
- * that will never happen after we truncate page cache.
- */
-int ext4_update_disksize_before_punch(struct inode *inode, loff_t offset,
-				      loff_t len)
-{
-	handle_t *handle;
-	loff_t size = i_size_read(inode);
-
-	WARN_ON(!inode_is_locked(inode));
-	if (offset > size || offset + len < size)
-		return 0;
-
-	if (EXT4_I(inode)->i_disksize >= size)
-		return 0;
-
-	handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
-	if (IS_ERR(handle))
-		return PTR_ERR(handle);
-	ext4_update_i_disksize(inode, size);
-	ext4_mark_inode_dirty(handle, inode);
-	ext4_journal_stop(handle);
-
-	return 0;
-}
-
 static void ext4_wait_dax_page(struct ext4_inode_info *ei)
 {
 	up_write(&ei->i_mmap_sem);
@@ -4269,6 +4241,36 @@ int ext4_break_layouts(struct inode *inode)
 
 	return error;
 }
+
+/*
+ * We have to make sure i_disksize gets properly updated before we truncate
+ * page cache due to hole punching or zero range. Otherwise i_disksize update
+ * can get lost as it may have been postponed to submission of writeback but
+ * that will never happen after we truncate page cache.
+ */
+int ext4_update_disksize_before_punch(struct inode *inode, loff_t offset,
+				      loff_t len)
+{
+	handle_t *handle;
+	loff_t size = i_size_read(inode);
+
+	WARN_ON(!inode_is_locked(inode));
+	if (offset > size || offset + len < size)
+		return 0;
+
+	if (EXT4_I(inode)->i_disksize >= size)
+		return 0;
+
+	handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
+	ext4_update_i_disksize(inode, size);
+	ext4_mark_inode_dirty(handle, inode);
+	ext4_journal_stop(handle);
+
+	return 0;
+}
+
 
 /*
  * ext4_punch_hole: punches a hole in a file by releasing the blocks
@@ -4368,6 +4370,7 @@ int ext4_punch_hole(struct inode *inode, loff_t offset, loff_t length)
 		truncate_pagecache_range(inode, first_block_offset,
 					 last_block_offset);
 	}
+
 
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS))
 		credits = ext4_writepage_trans_blocks(inode);
@@ -4504,6 +4507,7 @@ int ext4_truncate(struct inode *inode)
 
 	if (inode->i_size == 0 && !test_opt(inode->i_sb, NO_AUTO_DA_ALLOC))
 		ext4_set_inode_state(inode, EXT4_STATE_DA_ALLOC_CLOSE);
+
 
 	if (ext4_has_inline_data(inode)) {
 		int has_inline = 1;

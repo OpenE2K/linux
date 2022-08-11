@@ -1,0 +1,184 @@
+/*
+ * P2P8-SIP-S1
+ * TVGI.469555.371 ver.1
+ * Razbrakovshik
+ */
+/dts-v1/;
+
+/*#include <dt-bindings/input/input.h>*/
+
+/ {
+	/* version = ""; */
+	model = "e1c+,mcst,p2p8-sip-s1,razbrakovshik";
+	compatible = "mcst,p2p8-sip-s1";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD75:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN Control (X27)";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "IOHUB Temp";
+			};
+		};
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			spmc_gpio:pca9534@20 {
+				/* gpio/gpio-pca953x.ko (DD74:PCA9534PW) */
+				compatible = "nxp,pca9534";
+				reg = <0x20>;
+				label = "spmc_gpio";
+				gpio-controller;
+				ngpios = <8>;
+				#gpio-cells = <2>;
+				gpio-line-names =
+					"SPMC_BATLOW_3V3#",
+					"SPMC_AC_PWR_PRSNT_3V3",
+					"none",
+					"none",
+					"none",
+					"none",
+					"none",
+					"none";
+			};
+		};
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			pe1_p8_gpio:pca9534@21 {
+				/* gpio/gpio-pca953x.ko (DD112:PCA9534PW) */
+				compatible = "nxp,pca9534";
+				reg = <0x21>;
+				label = "PE1_P8_GPIO";
+				gpio-controller;
+				ngpios = <8>;
+				#gpio-cells = <2>;
+				gpio-line-names =
+					"CTRL_PE1_PRSNT0#",
+					"CTRL_PE1_PRSNT1#",
+					"CTRL_PE1_PRSNT2#",
+					"CTRL_PE1_PRSNT3#",
+					"CTRL_PCIE_X1_1_CONNECT",
+					"CTRL_PCIE_X1_23_CONNECT",
+					"none",
+					"none";
+			};
+		};
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* config SENSORS_PMBUS */
+			pdt012@10 {
+				/* hwmon/pmbus/pmbus.ko (DA16:PDT012A0X3) */
+				compatible = "pmbus";
+				reg = <0x10>;
+				label = "+1V0_P8";
+			};
+			pdt012@12 {
+				/* hwmon/pmbus/pmbus.ko (DA33:PDT012A0X3) */
+				compatible = "pmbus";
+				reg = <0x12>;
+				label = "+3V0_P8";
+			};
+			pdt012@14 {
+				/* hwmon/pmbus/pmbus.ko (DA15:PDT012A0X3) */
+				compatible = "pmbus";
+				reg = <0x14>;
+				label = "+2V5_P8";
+			};
+		};
+	};
+
+	/* PMBUS I2C */
+	pmc_i2c {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "pmc_i2c";
+		label = "pmbus i2c";
+
+		/* config SENSORS_PMBUS */
+		pdt012@10 {
+			/* hwmon/pmbus/pmbus.ko (DA7:PDT012A0X3) */
+			compatible = "pmbus";
+			reg = <0x10>;
+			label = "+0V9_NB";
+		};
+		pdt012@11 {
+			/* hwmon/pmbus/pmbus.ko (DA8:PDT012A0X3) */
+			compatible = "pmbus";
+			reg = <0x11>;
+			label = "+PWR_3D";
+		};
+		pdt012@12 {
+			/* hwmon/pmbus/pmbus.ko (DA9:PDT012A0X3) */
+			compatible = "pmbus";
+			reg = <0x12>;
+			label = "+PWR_CORE";
+		};
+		udt020@13 {
+			/* hwmon/pmbus/pmbus.ko (DA1:UDT020A0X3) */
+			compatible = "pmbus";
+			reg = <0x13>;
+			label = "+PWR_MC";
+		};
+		pdt012@14 {
+			/* hwmon/pmbus/pmbus.ko (DA10:PDT012A0X3) */
+			compatible = "pmbus";
+			reg = <0x14>;
+			label = "+1V8_P2";
+		};
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+		spidev@2 {
+			compatible = "mcst,boot"; // run spidev wo WARN
+			reg = <2>;
+			spi-max-frequency = <50000000>;
+		};
+		spidev@3 {
+			compatible = "mcst,boot"; // run spidev wo WARN
+			reg = <3>;
+			spi-max-frequency = <50000000>;
+		};
+	};
+};

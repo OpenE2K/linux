@@ -13,6 +13,9 @@
 #include <linux/export.h>
 #include <asm/cacheflush.h>
 #include <asm/pgtable.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+#include <asm/pgalloc.h>
+#endif
 
 #ifdef CONFIG_HAVE_ARCH_HUGE_VMAP
 static int __read_mostly ioremap_p4d_capable;
@@ -214,18 +217,32 @@ int ioremap_page_range(unsigned long addr,
 	unsigned long start;
 	unsigned long next;
 	int err;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int nid = numa_node_id();
+#endif
 
 	might_sleep();
 	BUG_ON(addr >= end);
 
 	start = addr;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	pgd = node_pgd_offset_kernel(nid, addr);
+#else
 	pgd = pgd_offset_k(addr);
+#endif
 	do {
 		next = pgd_addr_end(addr, end);
 		err = ioremap_p4d_range(pgd, addr, next, phys_addr, prot);
 		if (err)
 			break;
 	} while (pgd++, phys_addr += (next - addr), addr = next, addr != end);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (all_other_nodes_map_vm_area(nid, start, end - start)) {
+		panic("Could not map VM area from addr 0x%lx to 0x%lx on all numa nodes\n",
+			start, end);
+	}
+#endif
 
 	flush_cache_vmap(start, end);
 

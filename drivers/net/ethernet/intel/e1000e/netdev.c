@@ -2108,7 +2108,11 @@ static int e1000_request_msix(struct e1000_adapter *adapter)
 	else
 		memcpy(adapter->rx_ring->name, netdev->name, IFNAMSIZ);
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  e1000_intr_msix_rx, 0, adapter->rx_ring->name,
+			  e1000_intr_msix_rx, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD
+#endif
+			, adapter->rx_ring->name,
 			  netdev);
 	if (err)
 		return err;
@@ -2124,8 +2128,11 @@ static int e1000_request_msix(struct e1000_adapter *adapter)
 	else
 		memcpy(adapter->tx_ring->name, netdev->name, IFNAMSIZ);
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  e1000_intr_msix_tx, 0, adapter->tx_ring->name,
-			  netdev);
+			  e1000_intr_msix_tx, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD
+#endif
+			, adapter->tx_ring->name, netdev);
 	if (err)
 		return err;
 	adapter->tx_ring->itr_register = adapter->hw.hw_addr +
@@ -2134,7 +2141,11 @@ static int e1000_request_msix(struct e1000_adapter *adapter)
 	vector++;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  e1000_msix_other, 0, netdev->name, netdev);
+			  e1000_msix_other, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD
+#endif
+			, netdev->name, netdev);
 	if (err)
 		return err;
 
@@ -2164,8 +2175,11 @@ static int e1000_request_irq(struct e1000_adapter *adapter)
 		e1000e_set_interrupt_capability(adapter);
 	}
 	if (adapter->flags & FLAG_MSI_ENABLED) {
-		err = request_irq(adapter->pdev->irq, e1000_intr_msi, 0,
-				  netdev->name, netdev);
+		err = request_irq(adapter->pdev->irq, e1000_intr_msi, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD
+#endif
+			, netdev->name, netdev);
 		if (!err)
 			return err;
 
@@ -2174,8 +2188,11 @@ static int e1000_request_irq(struct e1000_adapter *adapter)
 		adapter->int_mode = E1000E_INT_MODE_LEGACY;
 	}
 
-	err = request_irq(adapter->pdev->irq, e1000_intr, IRQF_SHARED,
-			  netdev->name, netdev);
+	err = request_irq(adapter->pdev->irq, e1000_intr, IRQF_SHARED
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD
+#endif
+			, netdev->name, netdev);
 	if (err)
 		e_err("Unable to allocate interrupt, Error: %d\n", err);
 
@@ -2611,8 +2628,9 @@ void e1000e_write_itr(struct e1000_adapter *adapter, u32 itr)
 	if (adapter->msix_entries) {
 		int vector;
 
-		for (vector = 0; vector < adapter->num_vectors; vector++)
+		for (vector = 0; vector < adapter->num_vectors; vector++) {
 			writel(new_itr, hw->hw_addr + E1000_EITR_82574(vector));
+		}
 	} else {
 		ew32(ITR, new_itr);
 	}
@@ -4508,8 +4526,11 @@ static int e1000_test_msi_interrupt(struct e1000_adapter *adapter)
 	if (err)
 		goto msi_test_failed;
 
-	err = request_irq(adapter->pdev->irq, e1000_intr_msi_test, 0,
-			  netdev->name, netdev);
+	err = request_irq(adapter->pdev->irq, e1000_intr_msi_test, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD
+#endif
+			, netdev->name, netdev);
 	if (err) {
 		pci_disable_msi(adapter->pdev);
 		goto msi_test_failed;
@@ -7141,6 +7162,9 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	adapter->flags2 = ei->flags2;
 	adapter->hw.adapter = adapter;
 	adapter->hw.mac.type = ei->mac;
+#ifdef CONFIG_MCST
+	adapter->hw.has_nvram = -1;
+#endif
 	adapter->max_hw_frame_size = ei->max_hw_frame_size;
 	adapter->msg_enable = netif_msg_init(debug, DEFAULT_MSG_ENABLE);
 

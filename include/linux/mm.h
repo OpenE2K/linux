@@ -28,6 +28,10 @@
 #include <linux/overflow.h>
 #include <linux/sizes.h>
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	extern int mem_san;
+#endif
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
@@ -74,6 +78,10 @@ static inline void totalram_pages_set(long val)
 {
 	atomic_long_set(&_totalram_pages, val);
 }
+
+#if defined(CONFIG_MCST) && !defined(CONFIG_X86_64)
+extern unsigned long totalram_real_pages;
+#endif
 
 extern void * high_memory;
 extern int page_cluster;
@@ -329,6 +337,7 @@ extern unsigned int kobjsize(const void *objp);
 #elif defined(CONFIG_SPARC64)
 # define VM_SPARC_ADI	VM_ARCH_1	/* Uses ADI tag for access control */
 # define VM_ARCH_CLEAR	VM_SPARC_ADI
+# define VM_INVEND	VM_ARCH_1	/* Invert Endianness    */
 #elif !defined(CONFIG_MMU)
 # define VM_MAPPED_COPY	VM_ARCH_1	/* T if mapped copy of data (nommu mmap) */
 #endif
@@ -1539,6 +1548,13 @@ static inline void unmap_shared_mapping_range(struct address_space *mapping,
 {
 	unmap_mapping_range(mapping, holebegin, holelen, 0);
 }
+
+#ifdef CONFIG_E2K
+extern pmd_t *pmd_alloc_cont(struct mm_struct *mm, pud_t *pud,
+			     unsigned long address);
+extern pte_t *pte_alloc_cont(struct mm_struct *mm, pmd_t *pmd,
+			     unsigned long address, spinlock_t **ptlp);
+#endif
 
 extern int access_process_vm(struct task_struct *tsk, unsigned long addr,
 		void *buf, int len, unsigned int gup_flags);

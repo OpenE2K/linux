@@ -45,6 +45,9 @@ enum auxtrace_type {
 	PERF_AUXTRACE_CS_ETM,
 	PERF_AUXTRACE_ARM_SPE,
 	PERF_AUXTRACE_S390_CPUMSF,
+#ifdef __e2k__
+	PERF_AUXTRACE_E2K_DIMTP,
+#endif
 };
 
 enum itrace_period_type {

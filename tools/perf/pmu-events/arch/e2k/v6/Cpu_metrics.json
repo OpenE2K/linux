@@ -1,0 +1,50 @@
+[
+    {
+        "MetricExpr": "100 * L1_LD_HIT / L1_LD_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l1_ld_hit_rate",
+        "BriefDescription": "процент попаданий чтений в L1 = l1_ld_hit / l1_ld_query",
+    },
+    {
+        "MetricExpr": "100 * L1_ST_HIT / L1_ST_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l1_st_hit_rate",
+        "BriefDescription": "процент попаданий записей в L1 = l1_st_hit / l1_st_query",
+    },
+    {
+        "MetricExpr": "100 * (L2_LD_QUERY - L2_LD_MISS) / L2_LD_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l2_ld_hit_rate",
+        "BriefDescription": "процент попаданий чтений в L2 = (l2_ld_query - l2_ld_miss) / l2_ld_query",
+    },
+    {
+        "MetricExpr": "100 * L2_ST_HIT / L2_ST_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l2_st_hit_rate",
+        "BriefDescription": "процент попаданий записей в L2 = l2_st_hit / l2_st_query",
+    },
+    {
+        "MetricExpr": "100 * DTLB_HIT / DTLB_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "dtlb_hit_rate",
+        "BriefDescription": "процент попаданий чтений и записей в DTLB = dtlb_hit / dtlb_query",
+    },
+    {
+        "MetricExpr": "100 * (DTLB_LD_QUERY - DTLB_LD_MISS) / DTLB_LD_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "dtlb_ld_hit_rate",
+        "BriefDescription": "процент попаданий чтений в DTLB = (dtlb_ld_query - dtlb_ld_miss) / dtlb_ld_query",
+    },
+    {
+        "MetricExpr": "100 * (DTLB_ST_QUERY - DTLB_ST_MISS) / DTLB_ST_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "dtlb_st_hit_rate",
+        "BriefDescription": "процент попаданий записей в DTLB = (dtlb_st_query - dtlb_st_miss) / dtlb_st_query",
+    },
+    {
+        "MetricExpr": "100 * (CYCLES - IB_NO_COMMAND) / CYCLES",
+        "MetricGroup": "hit_rate",
+        "MetricName": "ib_hit_rate",
+        "BriefDescription": "процент попаданий в IB = (cycles - ib_no_command) / cycles",
+    },
+]

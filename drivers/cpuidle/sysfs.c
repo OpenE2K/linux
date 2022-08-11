@@ -18,6 +18,15 @@
 
 #include "cpuidle.h"
 
+#if CONFIG_MCST
+static unsigned int sysfs_switch = 1;
+static int __init cpuidle_sysfs_setup(char *str)
+{
+	sysfs_switch = simple_strtol(str, NULL, 10);
+	return 1;
+}
+__setup("cpuidle_sysfs_switch=", cpuidle_sysfs_setup);
+#else
 static unsigned int sysfs_switch;
 static int __init cpuidle_sysfs_setup(char *unused)
 {
@@ -25,6 +34,7 @@ static int __init cpuidle_sysfs_setup(char *unused)
 	return 1;
 }
 __setup("cpuidle_sysfs_switch", cpuidle_sysfs_setup);
+#endif
 
 static ssize_t show_available_governors(struct device *dev,
 					struct device_attribute *attr,
@@ -291,6 +301,23 @@ static ssize_t show_state_##_name(struct cpuidle_state *state, \
 		return sprintf(buf, "<null>\n");\
 	return sprintf(buf, "%s\n", state->_name);\
 }
+#ifdef CONFIG_MCST
+#define define_store_state_ui_function(_name) \
+static ssize_t store_state_##_name(struct cpuidle_state *state, \
+				   struct cpuidle_state_usage *state_usage, \
+				   const char *buf, size_t size)	\
+{ \
+	unsigned int value; \
+	int err; \
+	if (!capable(CAP_SYS_ADMIN)) \
+		return -EPERM; \
+	err = kstrtouint(buf, 0, &value); \
+	if (err) \
+		return err; \
+	state->_name = value; \
+	return size; \
+}
+#endif
 
 define_show_state_function(exit_latency)
 define_show_state_function(target_residency)
@@ -306,8 +333,13 @@ define_show_state_ull_function(below)
 
 define_one_state_ro(name, show_state_name);
 define_one_state_ro(desc, show_state_desc);
-define_one_state_ro(latency, show_state_exit_latency);
-define_one_state_ro(residency, show_state_target_residency);
+#ifdef CONFIG_MCST
+define_store_state_ui_function(target_residency)
+define_store_state_ui_function(exit_latency)
+define_one_state_rw(latency, show_state_exit_latency, store_state_exit_latency);
+define_one_state_rw(residency, show_state_target_residency,
+				store_state_target_residency);
+#endif
 define_one_state_ro(power, show_state_power_usage);
 define_one_state_ro(usage, show_state_usage);
 define_one_state_ro(time, show_state_time);

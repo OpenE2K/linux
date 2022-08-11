@@ -1,0 +1,8 @@
+
+### e2k virtualization
+
+unifdef-y += guest/
+
+unifdef-y += guest.h
+unifdef-y += threads.h
+

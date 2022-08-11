@@ -269,6 +269,11 @@ __u32 sysctl_wmem_max __read_mostly = SK_WMEM_MAX;
 EXPORT_SYMBOL(sysctl_wmem_max);
 __u32 sysctl_rmem_max __read_mostly = SK_RMEM_MAX;
 EXPORT_SYMBOL(sysctl_rmem_max);
+#ifdef CONFIG_MCST
+/* Is added to decrease 'InErrors' in cat /proc/net/snmp | grep Udp\: */
+__u32 sysctl_sock_minrcvbuf __read_mostly = SOCK_MIN_RCVBUF;
+EXPORT_SYMBOL(sysctl_sock_minrcvbuf);
+#endif
 __u32 sysctl_wmem_default __read_mostly = SK_WMEM_MAX;
 __u32 sysctl_rmem_default __read_mostly = SK_RMEM_MAX;
 
@@ -832,8 +837,19 @@ set_rcvbuf:
 		 * returning the value we actually used in getsockopt
 		 * is the most desirable behavior.
 		 */
+#ifdef CONFIG_MCST
+		WRITE_ONCE(sk->sk_rcvbuf,
+			   max_t(int, val * 2, sysctl_sock_minrcvbuf));
+#if 0
+		pr_warn("SO_RCVBUF val*2=%d sysctl_rmem_max=%d "
+				"sysctl_sock_minrcvbuf=%d sk_rcvbuf=%d\n",
+			val * 2, sysctl_rmem_max, sysctl_sock_minrcvbuf,
+			sk->sk_rcvbuf);
+#endif
+#else
 		WRITE_ONCE(sk->sk_rcvbuf,
 			   max_t(int, val * 2, SOCK_MIN_RCVBUF));
+#endif
 		break;
 
 	case SO_RCVBUFFORCE:
@@ -2955,6 +2971,10 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 	sk->sk_pacing_rate = ~0UL;
 	WRITE_ONCE(sk->sk_pacing_shift, 10);
 	sk->sk_incoming_cpu = -1;
+#ifdef CONFIG_MCST
+	sk->udp_snd_tm = ktime_set(0, 0);
+	sk->udp_snd_num = 0;
+#endif
 
 	sk_rx_queue_clear(sk);
 	/*

@@ -17,6 +17,11 @@
 #include <asm/cacheflush.h>
 #include <asm/hypervisor.h>
 #include <asm/cpudata.h>
+#ifdef CONFIG_E90S
+#include <asm/ttable.h>
+#include <asm/e90s.h>
+#include <asm/epicdef.h>
+#endif /*CONFIG_E90S*/
 
 	/* Basically, most of the Spitfire vs. Cheetah madness
 	 * has to do with the fact that Cheetah does not support
@@ -52,6 +57,9 @@ __flush_tlb_mm:		/* 19 insns */
 	nop
 	nop
 	nop
+#ifdef CONFIG_MCST
+	nop
+#endif
 
 	.align		32
 	.globl		__flush_tlb_page
@@ -190,6 +198,9 @@ __spitfire_flush_tlb_mm_slow:
 	.align		32
 	.globl		__flush_icache_page
 __flush_icache_page:	/* %o0 = phys_page */
+#ifdef	CONFIG_RMO
+	membar		#StoreStore
+#endif	/* CONFIG_RMO */
 	srlx		%o0, PAGE_SHIFT, %o0
 	sethi		%hi(PAGE_OFFSET), %g1
 	sllx		%o0, PAGE_SHIFT, %o0
@@ -268,6 +279,63 @@ __cheetah_flush_tlb_mm: /* 19 insns */
 	retl
 	 wrpr		%g7, 0x0, %pstate
 
+#ifdef CONFIG_MCST
+__e90s_r2000_with_bug_flush_tlb_mm: /* 20 insns */
+	/* %o0=(ctx & TAG_CONTEXT_BITS), %o1=SECONDARY_CONTEXT */
+	rdpr		%pstate, %g7
+	andn		%g7, PSTATE_IE, %g2
+	wrpr		%g2, 0x0, %pstate
+	wrpr		%g0, 1, %tl
+	mov		PRIMARY_CONTEXT, %o2
+	mov		0x40, %g3
+	mov		0x90, %o3
+	ldxa		[%o2] ASI_DMMU, %g2
+	srlx		%g2, CTX_PGSZ1_NUC_SHIFT, %o1
+	sllx		%o1, CTX_PGSZ1_NUC_SHIFT, %o1
+	or		%o0, %o1, %o0	/* Preserve nucleus page size fields */
+	stxa		%o0, [%o2] ASI_DMMU
+	stxa		%g0, [%g3] ASI_DMMU_DEMAP
+	stxa		%g0, [%o3] ASI_IMMU_DEMAP
+	stxa		%g2, [%o2] ASI_DMMU
+	sethi		%hi(KERNBASE), %o2
+	flush		%o2
+	wrpr		%g0, 0, %tl
+	retl
+	 wrpr		%g7, 0x0, %pstate
+
+e90_fix_fast_instruction_access_MMU_miss_hw_bug: /* 3 * 8 insns */
+	rdpr	%tl, %g1
+	cmp	%g1, 2
+	bne	1f
+	nop
+	wrpr	1, %tl
+	nop
+	retry
+	nop
+
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+
+1:	BTRAPTL1(0x64)
+
+e90_fix_tt0_hw_bug: /* 8 insns */
+	rdpr	%tpc, %g7
+	brz	%g7, 1f
+	 nop
+	retry
+
+	nop
+1:	udiv	%g0, %g0, %g0
+	nop
+	nop
+#endif
+
 __cheetah_flush_tlb_page:	/* 22 insns */
 	/* %o0 = context, %o1 = vaddr */
 	rdpr		%pstate, %g7
@@ -284,7 +352,7 @@ __cheetah_flush_tlb_page:	/* 22 insns */
 	be,pn		%icc, 1f
 	 andn		%o1, 1, %o3
 	stxa		%g0, [%o3] ASI_IMMU_DEMAP
-1:	stxa		%g0, [%o3] ASI_DMMU_DEMAP	
+1:	stxa		%g0, [%o3] ASI_DMMU_DEMAP
 	membar		#Sync
 	stxa		%g2, [%o4] ASI_DMMU
 	sethi		%hi(KERNBASE), %o4
@@ -312,7 +380,7 @@ __cheetah_flush_tlb_pending:	/* 27 insns */
 	be,pn		%icc, 2f
 	 andn		%o3, 1, %o3
 	stxa		%g0, [%o3] ASI_IMMU_DEMAP
-2:	stxa		%g0, [%o3] ASI_DMMU_DEMAP	
+2:	stxa		%g0, [%o3] ASI_DMMU_DEMAP
 	membar		#Sync
 	brnz,pt		%o1, 1b
 	 nop
@@ -372,6 +440,7 @@ __cheetah_flush_dcache_page: /* 11 insns */
 	 nop
 #endif /* DCACHE_ALIASING_POSSIBLE */
 
+#ifdef	CONFIG_SPARC64_SUN4V
 	/* Hypervisor specific versions, patched at boot time.  */
 __hypervisor_tlb_tl0_error:
 	save		%sp, -192, %sp
@@ -500,6 +569,7 @@ __hypervisor_flush_dcache_page:	/* 2 insns */
 	retl
 	 nop
 #endif
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 tlb_patch_one:
 1:	lduw		[%o1], %g1
@@ -521,7 +591,7 @@ tlb_patch_one:
 	 *   %g1	address arg 1	(tlb page and range flushes)
 	 *   %g7	address arg 2	(tlb range flush only)
 	 *
-	 *   %g6	scratch 1
+	 *   %g6	scratch 1  (unusable for e90s)
 	 *   %g2	scratch 2
 	 *   %g3	scratch 3
 	 *   %g4	scratch 4
@@ -553,6 +623,32 @@ xcall_flush_tlb_mm:	/* 24 insns */
 	nop
 	nop
 	nop
+
+#ifdef CONFIG_E90S
+	.align		32
+__e90s_r2000_with_bug_xcall_flush_tlb_mm:	/* 21 insns */
+	mov		PRIMARY_CONTEXT, %g2
+	ldxa		[%g2] ASI_DMMU, %g3
+	srlx		%g3, CTX_PGSZ1_NUC_SHIFT, %g4
+	sllx		%g4, CTX_PGSZ1_NUC_SHIFT, %g4
+	or		%g5, %g4, %g5	/* Preserve nucleus page size fields */
+	stxa		%g5, [%g2] ASI_DMMU
+	mov		0x40, %g4
+	mov		0x90, %g5
+	stxa		%g0, [%g4] ASI_DMMU_DEMAP
+	stxa		%g0, [%g5] ASI_IMMU_DEMAP
+	stxa		%g3, [%g2] ASI_DMMU
+	retry
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+#endif
 
 	.globl		xcall_flush_tlb_page
 xcall_flush_tlb_page:	/* 20 insns */
@@ -633,11 +729,13 @@ xcall_sync_tick:
 
 661:	rdpr		%pstate, %g2
 	wrpr		%g2, PSTATE_IG | PSTATE_AG, %pstate
+#ifdef	CONFIG_SPARC64_SUN4V
 	.section	.sun4v_2insn_patch, "ax"
 	.word		661b
 	nop
 	nop
 	.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	rdpr		%pil, %g2
 	wrpr		%g0, PIL_NORMAL_MAX, %pil
@@ -680,6 +778,9 @@ xcall_fetch_glob_regs:
 	sllx		%g2, TRAP_BLOCK_SZ_SHIFT, %g2
 	add		%g7, %g2, %g7
 	ldx		[%g7 + TRAP_PER_CPU_THREAD], %g3
+#ifdef	CONFIG_RMO
+	membar		#StoreStore
+#endif	/* CONFIG_RMO */
 	stx		%g3, [%g1 + GR_SNAP_THREAD]
 	retry
 
@@ -838,6 +939,7 @@ xcall_flush_dcache_page_spitfire: /* %g1 == physical page address
 	nop
 	nop
 
+#ifdef	CONFIG_SPARC64_SUN4V
 	/* %g5:	error
 	 * %g6:	tlb op
 	 */
@@ -892,64 +994,43 @@ __hypervisor_xcall_flush_tlb_page: /* 20 insns */
 	sllx		%o0, PAGE_SHIFT, %o0
 	ta		HV_MMU_UNMAP_ADDR_TRAP
 	mov		HV_MMU_UNMAP_ADDR_TRAP, %g6
-	brnz,a,pn	%o0, 1f
+	brnz,a,pn	%o0, __hypervisor_tlb_xcall_error
 	 mov		%o0, %g5
 	mov		%g2, %o0
 	mov		%g3, %o1
 	mov		%g4, %o2
 	membar		#Sync
 	retry
-1:	sethi		%hi(__hypervisor_tlb_xcall_error), %g4
-	jmpl		%g4 + %lo(__hypervisor_tlb_xcall_error), %g0
-	 nop
 
 	.globl		__hypervisor_xcall_flush_tlb_kernel_range
-__hypervisor_xcall_flush_tlb_kernel_range: /* 44 insns */
+__hypervisor_xcall_flush_tlb_kernel_range: /* 25 insns */
 	/* %g1=start, %g7=end, g2,g3,g4,g5,g6=scratch */
 	sethi		%hi(PAGE_SIZE - 1), %g2
 	or		%g2, %lo(PAGE_SIZE - 1), %g2
 	andn		%g1, %g2, %g1
 	andn		%g7, %g2, %g7
 	sub		%g7, %g1, %g3
-	srlx		%g3, 18, %g7
 	add		%g2, 1, %g2
 	sub		%g3, %g2, %g3
 	mov		%o0, %g2
 	mov		%o1, %g4
-	brnz,pn		%g7, 2f
-	 mov		%o2, %g7
+	mov		%o2, %g7
 1:	add		%g1, %g3, %o0	/* ARG0: virtual address */
 	mov		0, %o1		/* ARG1: mmu context */
 	mov		HV_MMU_ALL, %o2	/* ARG2: flags */
 	ta		HV_MMU_UNMAP_ADDR_TRAP
 	mov		HV_MMU_UNMAP_ADDR_TRAP, %g6
-	brnz,pn		%o0, 1f
+	brnz,pn		%o0, __hypervisor_tlb_xcall_error
 	 mov		%o0, %g5
 	sethi		%hi(PAGE_SIZE), %o2
 	brnz,pt		%g3, 1b
 	 sub		%g3, %o2, %g3
-5:	mov		%g2, %o0
+	mov		%g2, %o0
 	mov		%g4, %o1
 	mov		%g7, %o2
 	membar		#Sync
 	retry
-1:	sethi		%hi(__hypervisor_tlb_xcall_error), %g4
-	jmpl		%g4 + %lo(__hypervisor_tlb_xcall_error), %g0
-	 nop
-2:	mov		%o3, %g1
-	mov		%o5, %g3
-	mov		0, %o0		/* ARG0: CPU lists unimplemented */
-	mov		0, %o1		/* ARG1: CPU lists unimplemented */
-	mov		0, %o2		/* ARG2: mmu context == nucleus */
-	mov		HV_MMU_ALL, %o3	/* ARG3: flags */
-	mov		HV_FAST_MMU_DEMAP_CTX, %o5
-	ta		HV_FAST_TRAP
-	mov		%g1, %o3
-	brz,pt		%o0, 5b
-	 mov		%g3, %o5
-	mov		HV_FAST_MMU_DEMAP_CTX, %g6
-	ba,pt		%xcc, 1b
-	 clr		%g5
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 	/* These just get rescheduled to PIL vectors. */
 	.globl		xcall_call_function
@@ -985,13 +1066,70 @@ xcall_kgdb_capture:
 cheetah_patch_cachetlbops:
 	save		%sp, -128, %sp
 
+#ifdef CONFIG_E90S
+	rdpr		%ver, %o3
+	srlx		%o3, 24, %o3
+	and		%o3, 0xff, %o3
+	cmp		%o3, 0x11	/* r2000, revision 1 */
+	bne		1f
+	 set		__flush_tlb_mm, %o0
+	set		__e90s_r2000_with_bug_flush_tlb_mm, %o1
+	call		tlb_patch_one
+	 mov		20, %o2
+#ifdef CONFIG_SMP
+	set		xcall_flush_tlb_mm, %o0
+	set		__e90s_r2000_with_bug_xcall_flush_tlb_mm, %o1
+	call		tlb_patch_one
+	 mov		21, %o2
+#endif
+	set		sparc64_ttable_tl0, %o0
+	set		e90_fix_tt0_hw_bug, %o1
+	call		tlb_patch_one
+	 mov		8, %o2
+
+	b,a 		2f
+1:
+	cmp		%o3, 0x20	/* r2000p */
+	bl		3f
+	 nop
+	set		rtrap_irq, %o0
+	set		r2000p_rtrap_irq, %o1
+	call		tlb_patch_one
+	 mov		2, %o2
+
+#define BRANCH_ALWAYS	0x10680000
+#define NOP		0x01000000
+#define GEN_DO_PATCH(OLD, NEW)	\
+	sethi	%hi(NEW), %g1; \
+	or	%g1, %lo(NEW), %g1; \
+	sethi	%hi(OLD), %g2; \
+	or	%g2, %lo(OLD), %g2; \
+	sub	%g1, %g2, %g1; \
+	sethi	%hi(BRANCH_ALWAYS), %g3; \
+	sll	%g1, 11, %g1; \
+	srl	%g1, 11 + 2, %g1; \
+	or	%g3, %lo(BRANCH_ALWAYS), %g3; \
+	or	%g3, %g1, %g3; \
+	stw	%g3, [%g2]; \
+	sethi	%hi(NOP), %g3; \
+	or	%g3, %lo(NOP), %g3; \
+	stw	%g3, [%g2 + 0x4]; \
+	flush	%g2;
+
+	GEN_DO_PATCH(tl0_ivec, r2000p_do_ivec)
+	GEN_DO_PATCH(tl1_ivec, r2000p_do_ivec)
+
+3:
+#endif /*CONFIG_E90S*/
 	sethi		%hi(__flush_tlb_mm), %o0
 	or		%o0, %lo(__flush_tlb_mm), %o0
 	sethi		%hi(__cheetah_flush_tlb_mm), %o1
 	or		%o1, %lo(__cheetah_flush_tlb_mm), %o1
 	call		tlb_patch_one
 	 mov		19, %o2
-
+#ifdef CONFIG_E90S
+2:
+#endif
 	sethi		%hi(__flush_tlb_page), %o0
 	or		%o0, %lo(__flush_tlb_page), %o0
 	sethi		%hi(__cheetah_flush_tlb_page), %o1
@@ -1034,6 +1172,7 @@ cheetah_patch_cachetlbops:
 	ret
 	 restore
 
+#ifdef	CONFIG_SPARC64_SUN4V
 	.globl		hypervisor_patch_cachetlbops
 hypervisor_patch_cachetlbops:
 	save		%sp, -128, %sp
@@ -1100,3 +1239,23 @@ hypervisor_patch_cachetlbops:
 
 	ret
 	 restore
+#endif	/*CONFIG_SPARC64_SUN4V*/
+
+
+#ifdef CONFIG_E90S
+        .globl          xcall_dump_stack_chain
+xcall_dump_stack_chain:
+        rdpr            %pstate, %g2
+        wrpr            %g2, PSTATE_IG | PSTATE_AG, %pstate
+        rdpr            %pil, %g2
+        wrpr            %g0, 15, %pil
+        sethi           %hi(110f), %g7
+        b,pt            %xcc, etrap_irq
+110:     or             %g7, %lo(110b), %g7
+        call            dump_backtrace_smp
+         add            %sp, PTREGS_OFF, %o0
+        clr             %l6
+        /* Has to be a non-v9 branch due to the large distance. */
+        b               rtrap_xcall
+         ldx            [%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
+#endif /*CONFIG_E90S*/

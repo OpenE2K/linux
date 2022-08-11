@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #ifndef ___ASM_SPARC_PCI_H
 #define ___ASM_SPARC_PCI_H
+#ifdef CONFIG_E90S
+#include <asm/pci_e90s.h>
+#else
 
 
 /* Can be used to override the logic in pci_scan_bus for skipping
@@ -48,5 +51,5 @@ static inline int pci_get_legacy_ide_irq(struct pci_dev *dev, int channel)
 #else
 #include <asm-generic/pci.h>
 #endif
-
-#endif /* ___ASM_SPARC_PCI_H */
+#endif /* CONFIG_E90S */
+#endif  /* ___ASM_SPARC_PCI_H */

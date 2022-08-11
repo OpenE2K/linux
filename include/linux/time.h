@@ -39,6 +39,9 @@ struct itimerval;
 extern int do_setitimer(int which, struct itimerval *value,
 			struct itimerval *ovalue);
 extern int do_getitimer(int which, struct itimerval *value);
+#ifdef CONFIG_MCST
+extern s64 getns64timeofday(void);
+#endif
 
 extern long do_utimes(int dfd, const char __user *filename, struct timespec64 *times, int flags);
 

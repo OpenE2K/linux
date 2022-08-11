@@ -319,6 +319,21 @@ config DEFAULT_MMAP_MIN_ADDR
 	  This value can be changed after boot using the
 	  /proc/sys/vm/mmap_min_addr tunable.
 
+config MEMORY_SANITIZE
+	bool "Sanitize all freed memory"
+	help
+	  By saying Y here the kernel will erase memory pages by filling patterns
+	  as soon as they are freed. This in turn reduces the lifetime of data
+	  stored in the pages.
+	
+	  Add smem to your kernel parameters to enable this feature:
+	    - smem or smem=0 for zeroing pages
+	    - smem=1 or smem=2 for filling pages by random patterns
+	      (1 or 2 passes accordingly)
+
+	  Note that this feature does not protect data stored in live pages,
+	  e.g., process memory swapped to disk may stay there for a long time.
+
 config ARCH_SUPPORTS_MEMORY_FAILURE
 	bool
 

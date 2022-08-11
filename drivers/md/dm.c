@@ -1082,6 +1082,8 @@ int dm_set_target_max_io_len(struct dm_target *ti, sector_t len)
 }
 EXPORT_SYMBOL_GPL(dm_set_target_max_io_len);
 
+#if !defined(CONFIG_MCST) || !defined(__LCC__) || defined(CONFIG_DAX_DRIVER)
+/* bug #121767 */
 static struct dm_target *dm_dax_get_live_target(struct mapped_device *md,
 						sector_t sector, int *srcu_idx)
 	__acquires(md->io_barrier)
@@ -1194,6 +1196,7 @@ static size_t dm_dax_copy_to_iter(struct dax_device *dax_dev, pgoff_t pgoff,
 
 	return ret;
 }
+#endif
 
 /*
  * A target may call dm_accept_partial_bio only from the map routine.  It is
@@ -1908,7 +1911,10 @@ static int next_free_minor(int *minor)
 }
 
 static const struct block_device_operations dm_blk_dops;
+#if !defined(CONFIG_MCST) || !defined(__LCC__) || defined(CONFIG_DAX_DRIVER)
+/* bug #121767 */
 static const struct dax_operations dm_dax_ops;
+#endif
 
 static void dm_wq_work(struct work_struct *work);
 
@@ -2027,12 +2033,15 @@ static struct mapped_device *alloc_dev(int minor)
 	md->disk->private_data = md;
 	sprintf(md->disk->disk_name, "dm-%d", minor);
 
+#if !defined(CONFIG_MCST) || !defined(__LCC__) || defined(CONFIG_DAX_DRIVER)
+	/* bug #121767 */
 	if (IS_ENABLED(CONFIG_DAX_DRIVER)) {
 		md->dax_dev = alloc_dax(md, md->disk->disk_name,
 					&dm_dax_ops, 0);
 		if (!md->dax_dev)
 			goto bad;
 	}
+#endif
 
 	add_disk_no_queue_reg(md->disk);
 	format_dev_t(md->name, MKDEV(_major, minor));
@@ -3280,12 +3289,15 @@ static const struct block_device_operations dm_blk_dops = {
 	.owner = THIS_MODULE
 };
 
+#if !defined(CONFIG_MCST) || !defined(__LCC__) || defined(CONFIG_DAX_DRIVER)
+/* bug #121767 */
 static const struct dax_operations dm_dax_ops = {
 	.direct_access = dm_dax_direct_access,
 	.dax_supported = dm_dax_supported,
 	.copy_from_iter = dm_dax_copy_from_iter,
 	.copy_to_iter = dm_dax_copy_to_iter,
 };
+#endif
 
 /*
  * module hooks

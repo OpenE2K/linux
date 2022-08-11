@@ -20,6 +20,10 @@
 #include <linux/regmap.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_MCST
+#include <linux/pinctrl/pinconf-generic.h>
+#endif
+
 #define LTC4305_MAX_NCHANS 2
 #define LTC4306_MAX_NCHANS 4
 

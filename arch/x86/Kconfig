@@ -228,6 +228,7 @@ config X86
 	select VIRT_TO_BUS
 	select X86_FEATURE_NAMES		if PROC_FS
 	select PROC_PID_ARCH_STATUS		if PROC_FS
+	select MCST
 
 config INSTRUCTION_DECODER
 	def_bool y
@@ -1066,6 +1067,10 @@ config SCHED_MC_PRIO
 	  This feature will have no effect on CPUs without this feature.
 
 	  If unsure say Y here.
+
+config MCST
+	bool "MCST additions"
+	default y
 
 config UP_LATE_INIT
        def_bool y

@@ -1,0 +1,3 @@
+perf-y += header.o
+
+perf-$(CONFIG_AUXTRACE) += pmu.o auxtrace.o

@@ -3479,6 +3479,9 @@ static u64 mem_cgroup_read_u64(struct cgroup_subsys_state *css,
 		return (u64)memcg->soft_limit * PAGE_SIZE;
 	default:
 		BUG();
+#ifdef __LCC__
+		return 0;
+#endif
 	}
 }
 

@@ -3216,7 +3216,11 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
 			      unsigned int count)
 {
 	struct uart_port *port = &up->port;
+#if defined(CONFIG_MCST) && defined(__LCC__)
+	unsigned long uninitialized_var(flags);
+#else
 	unsigned long flags;
+#endif
 	unsigned int ier;
 
 	touch_nmi_watchdog();

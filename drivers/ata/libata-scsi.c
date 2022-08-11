@@ -33,6 +33,9 @@
 #include <linux/hdreg.h>
 #include <linux/uaccess.h>
 #include <linux/suspend.h>
+#ifdef CONFIG_MCST
+#include "../scsi/scsi_priv.h"
+#endif
 #include <asm/unaligned.h>
 #include <linux/ioprio.h>
 
@@ -264,7 +267,11 @@ static ssize_t ata_ncq_prio_enable_show(struct device *device,
 	struct scsi_device *sdev = to_scsi_device(device);
 	struct ata_port *ap;
 	struct ata_device *dev;
+#ifndef CONFIG_MCST
 	bool ncq_prio_enable;
+#else
+	bool uninitialized_var(ncq_prio_enable);
+#endif
 	int rc = 0;
 
 	ap = ata_shost_to_port(sdev->host);
@@ -4312,6 +4319,89 @@ static inline void ata_scsi_dump_cdb(struct ata_port *ap,
 #endif
 }
 
+#ifdef CONFIG_MCST
+static unsigned l_read_buffer_capacity(struct ata_device *dev,
+					u32 *b_len, u32 *avalible)
+{
+	__u32 buf[3];
+	unsigned ret;
+	struct ata_taskfile tf;
+	char cdb[] = { GPCMD_READ_BUFFER_CAPACITY, 0, 0, 0,
+			0, 0, 0, 0,
+			sizeof(buf), 0,
+	};
+
+	ata_tf_init(dev, &tf);
+	tf.flags = ATA_TFLAG_ISADDR | ATA_TFLAG_DEVICE;
+	tf.command = ATA_CMD_PACKET;
+	tf.protocol = ATAPI_PROT_PIO;
+	tf.lbam = sizeof(buf);
+
+	ret = ata_exec_internal(dev, &tf, cdb, DMA_FROM_DEVICE,
+				buf, sizeof(buf), 0);
+
+	*b_len = be32_to_cpu(buf[1]);
+	*avalible = be32_to_cpu(buf[2]);
+
+	return ret;
+}
+
+static int __l_atapi_wait_for_buffer(struct ata_device *dev, u32 len)
+{
+	u32 b_len, avalible;
+	unsigned ret;
+	unsigned long timeout = jiffies + msecs_to_jiffies(60000);
+
+	do {
+		ret = l_read_buffer_capacity(dev, &b_len, &avalible);
+		if (ret)
+			goto out;
+
+		if (avalible > len)
+			goto out;
+
+		ret = -ETIME;
+		msleep(50);
+	} while (!time_after(jiffies, timeout));
+out:
+	return ret;
+}
+
+static void _l_atapi_wait_for_buffer(void *data, async_cookie_t cookie)
+{
+	struct scsi_cmnd *cmd = data;
+	struct scsi_device *scsidev = cmd->device;
+	struct ata_port *ap = ata_shost_to_port(scsidev->host);
+	struct ata_device *dev = ata_scsi_find_dev(ap, scsidev);
+
+	if (!dev)
+		goto out;
+
+	if (in_atomic() || irqs_disabled()) {
+		pr_warn("l_atapi_wait_for_buffer: atomic context\n");
+		goto out;
+	}
+	if (ap->ops->error_handler)
+		ata_eh_acquire(ap);
+	__l_atapi_wait_for_buffer(dev, scsi_bufflen(cmd));
+	if (ap->ops->error_handler)
+		ata_eh_release(ap);
+	dev->flags &= ~ATA_DFLAG_ATAPI_CHECK_BUFFER;
+out:
+	scsi_internal_device_unblock_nowait(cmd->device, SDEV_RUNNING);
+}
+
+static void l_atapi_wait_for_buffer(struct ata_device *dev,
+				struct scsi_cmnd *cmd)
+{
+	/* handle hw bug: controller deadlocks if device returns error,
+		 so let's wait for a buffer */
+
+	scsi_internal_device_block_nowait(cmd->device);
+	async_schedule(_l_atapi_wait_for_buffer, cmd);
+}
+#endif
+
 static inline int __ata_scsi_queuecmd(struct scsi_cmnd *scmd,
 				      struct ata_device *dev)
 {
@@ -4346,7 +4436,22 @@ static inline int __ata_scsi_queuecmd(struct scsi_cmnd *scmd,
 			xlat_func = ata_get_xlat_func(dev, scsi_op);
 		}
 	}
-
+#ifdef CONFIG_MCST
+	if (xlat_func && dev->horkage & ATA_HORKAGE_FIX_ERROR_ON_WRITE) {
+		if (scsi_op == WRITE_6 ||
+			scsi_op == WRITE_10 ||
+			scsi_op == WRITE_16) {
+			if (dev->flags & ATA_DFLAG_ATAPI_CHECK_BUFFER) {
+				l_atapi_wait_for_buffer(dev, scmd);
+				return SCSI_MLQUEUE_DEVICE_BUSY;
+			} else {
+				dev->flags |= ATA_DFLAG_ATAPI_CHECK_BUFFER;
+			}
+		} else {
+				dev->flags &= ATA_DFLAG_ATAPI_CHECK_BUFFER;
+		}
+	}
+#endif
 	if (xlat_func)
 		rc = ata_scsi_translate(dev, scmd, xlat_func);
 	else

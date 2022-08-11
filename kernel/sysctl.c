@@ -56,6 +56,9 @@
 #include <linux/reboot.h>
 #include <linux/ftrace.h>
 #include <linux/perf_event.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#include <asm/sclkr.h>
+#endif
 #include <linux/kprobes.h>
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
@@ -118,10 +121,16 @@ extern unsigned int sysctl_nr_open_min, sysctl_nr_open_max;
 #ifndef CONFIG_MMU
 extern int sysctl_nr_trim_pages;
 #endif
+#ifdef CONFIG_USER_NS
+extern int sysctl_userns_restrict;
+#endif
 
 /* Constants used for minimum and  maximum */
 #ifdef CONFIG_LOCKUP_DETECTOR
 static int sixty = 60;
+#endif
+#ifdef CONFIG_MCST
+extern int shadow_console;
 #endif
 
 static int __maybe_unused neg_one = -1;
@@ -163,12 +172,34 @@ static unsigned long hung_task_timeout_max = (LONG_MAX/HZ);
 #ifdef CONFIG_SPARC
 #endif
 
+#ifdef CONFIG_SPARC64
+extern int sysctl_tsb_ratio;
+#ifdef CONFIG_MCST
+extern int instruction_emulation_warning;
+#endif
+#endif
+
 #ifdef CONFIG_PARISC
 extern int pwrsw_enabled;
 #endif
 
 #ifdef CONFIG_SYSCTL_ARCH_UNALIGN_ALLOW
 extern int unaligned_enabled;
+#endif
+
+#ifdef CONFIG_E2K
+extern int debug_signal;
+extern int debug_trap;
+extern int debug_userstack;
+extern int debug_pagefault;
+extern int debug_semi_spec;
+extern int print_window_regs;
+extern int debug_protected_mode;
+extern void set_protected_mode_flags(void);
+# ifdef CONFIG_DATA_STACK_WINDOW
+extern int debug_datastack;
+# endif
+int fake_sysctl_compact_unevictable_allowed;
 #endif
 
 #ifdef CONFIG_IA64
@@ -305,7 +336,7 @@ static struct ctl_table sysctl_base_table[] = {
 	{ }
 };
 
-#ifdef CONFIG_SCHED_DEBUG
+#if defined(CONFIG_SCHED_DEBUG) || defined(CONFIG_MCST)
 static int min_sched_granularity_ns = 100000;		/* 100 usecs */
 static int max_sched_granularity_ns = NSEC_PER_SEC;	/* 1 second */
 static int min_wakeup_granularity_ns;			/* 0 usecs */
@@ -329,7 +360,16 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
-#ifdef CONFIG_SCHED_DEBUG
+#ifdef CONFIG_MCST
+	{
+		.procname	= "sched_min_ns_no_migrate",
+		.data		= &sysctl_sched_min_ns_no_migrate,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
+#if defined(CONFIG_SCHED_DEBUG) || defined(CONFIG_MCST)
 	{
 		.procname	= "sched_min_granularity_ns",
 		.data		= &sysctl_sched_min_granularity,
@@ -624,6 +664,15 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_MCST
+	{
+		.procname	= "instruction-emulation-warning",
+		.data		= &instruction_emulation_warning,
+		.maxlen		= sizeof (int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 #endif
 #ifdef CONFIG_PARISC
 	{
@@ -669,6 +718,22 @@ static struct ctl_table kern_table[] = {
 	},
 #endif
 #ifdef CONFIG_TRACING
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_STACKS_TRACER)
+	{
+		.procname	= "stack_tracer_enabled",
+		.data		= &stack_tracer_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= stack_trace_sysctl,
+	},
+	{
+		.procname	= "stack_tracer_kernel_only",
+		.data		= &stack_tracer_kernel_only,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{
 		.procname	= "ftrace_dump_on_oops",
 		.data		= &ftrace_dump_on_oops,
@@ -905,6 +970,17 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec_minmax_sysadmin,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= &two,
+	},
+#endif
+#ifdef CONFIG_USER_NS
+	{
+		.procname	= "userns_restrict",
+		.data		= &sysctl_userns_restrict,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+                .extra1         = SYSCTL_ZERO,
+                .extra2         = SYSCTL_ONE,
 	},
 #endif
 	{
@@ -1170,6 +1246,15 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dostring,
 	},
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	{
+		.procname	= "sclkr_src",
+		.data		= &sclkr_src,
+		.maxlen		= SCLKR_SRC_LEN,
+		.mode		= 0644,
+		.proc_handler	= proc_sclkr,
+	},
+#endif
 #ifdef CONFIG_KEYS
 	{
 		.procname	= "keys",
@@ -1331,6 +1416,22 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_MCST
+	{
+		.procname	= "oom_kill_root_task",
+		.data		= &sysctl_oom_kill_root_task,
+		.maxlen		= sizeof(sysctl_oom_kill_root_task),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "oom_no_create_task",
+		.data		= &sysctl_oom_no_create_new_task,
+		.maxlen		= sizeof(sysctl_oom_no_create_new_task),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif /* CONFIG_MCST */
 	{
 		.procname	= "overcommit_ratio",
 		.data		= &sysctl_overcommit_ratio,
@@ -1371,8 +1472,8 @@ static struct ctl_table vm_table[] = {
 		.extra1		= &one_ul,
 	},
 	{
-		.procname	= "dirty_ratio",
-		.data		= &vm_dirty_ratio,
+	.procname	= "dirty_ratio",
+	.data		= &vm_dirty_ratio,
 		.maxlen		= sizeof(vm_dirty_ratio),
 		.mode		= 0644,
 		.proc_handler	= dirty_ratio_handler,
@@ -1495,7 +1596,12 @@ static struct ctl_table vm_table[] = {
 	},
 	{
 		.procname	= "compact_unevictable_allowed",
+#ifdef CONFIG_E2K
+		/* Do not allow user to hang kernel */
+		.data		= &fake_sysctl_compact_unevictable_allowed,
+#else
 		.data		= &sysctl_compact_unevictable_allowed,
+#endif
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax_warn_RT_change,
@@ -1504,7 +1610,7 @@ static struct ctl_table vm_table[] = {
 	},
 
 #endif /* CONFIG_COMPACTION */
-	{
+		{
 		.procname	= "min_free_kbytes",
 		.data		= &min_free_kbytes,
 		.maxlen		= sizeof(min_free_kbytes),
@@ -1957,6 +2063,24 @@ static struct ctl_table fs_table[] = {
 	{ }
 };
 
+#ifdef CONFIG_E2K
+static int set_protected_mode(struct ctl_table *table, int write,
+				void __user *buffer, size_t *lenp,
+				loff_t *ppos)
+{
+	int error;
+
+	error = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (error)
+		return error;
+
+	if (write)
+		set_protected_mode_flags();
+
+	return 0;
+}
+#endif /* CONFIG_E2K */
+
 static struct ctl_table debug_table[] = {
 #ifdef CONFIG_SYSCTL_EXCEPTION_TRACE
 	{
@@ -1978,6 +2102,66 @@ static struct ctl_table debug_table[] = {
 		.extra2		= SYSCTL_ONE,
 	},
 #endif
+#ifdef CONFIG_E2K
+	{
+		.procname	= "trap_regs",
+		.data		= &debug_trap,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+        },
+	{
+		.procname	= "sigdebug",
+		.data		= &debug_signal,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "userstack",
+		.data		= &debug_userstack,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "pagefault",
+		.data		= &debug_pagefault,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "semispec",
+		.data		= &debug_semi_spec,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "windowregs",
+		.data		= &print_window_regs,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "no_stack_prot",
+		.data		= &debug_protected_mode,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= set_protected_mode
+	},
+# ifdef CONFIG_DATA_STACK_WINDOW
+	{
+		.procname	= "datastack",
+		.data		= &debug_datastack,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+# endif
+#endif /* CONFIG_E2K */
 	{ }
 };
 

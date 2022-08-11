@@ -2,7 +2,7 @@
 VERSION = 5
 PATCHLEVEL = 4
 SUBLEVEL = 163
-EXTRAVERSION =
+EXTRAVERSION = -2.23
 NAME = Kleptomaniac Octopus
 
 # *DOCUMENTATION*
@@ -422,6 +422,16 @@ OBJSIZE		= llvm-size
 STRIP		= llvm-strip
 else
 CC		= $(CROSS_COMPILE)gcc
+ifeq  ($(call cc-lcc-yn),y)
+LD              := $(shell $(CC) -print-prog-name=ld)
+AR		:= $(shell $(CC) -print-prog-name=ar)
+NM		:= $(shell $(CC) -print-prog-name=nm)
+OBJCOPY		:= $(shell $(CC) -print-prog-name=objcopy)
+OBJDUMP		:= $(shell $(CC) -print-prog-name=objdump)
+READELF		:= $(shell $(CC) -print-prog-name=readelf)
+OBJSIZE		:= $(shell $(CC) -print-prog-name=size)
+STRIP		:= $(shell $(CC) -print-prog-name=strip)
+else
 LD		= $(CROSS_COMPILE)ld
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -430,6 +440,7 @@ OBJDUMP		= $(CROSS_COMPILE)objdump
 READELF		= $(CROSS_COMPILE)readelf
 OBJSIZE		= $(CROSS_COMPILE)size
 STRIP		= $(CROSS_COMPILE)strip
+endif
 endif
 PAHOLE		= pahole
 LEX		= flex
@@ -447,7 +458,7 @@ KBZIP2		= bzip2
 KLZOP		= lzop
 LZMA		= lzma
 LZ4		= lz4c
-XZ		= xz
+XZ		= xz 
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void -Wno-unknown-attribute $(CF)
@@ -458,6 +469,8 @@ LDFLAGS_MODULE  =
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
 LDFLAGS_vmlinux =
+
+-include .kernelvariables
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
@@ -477,11 +490,22 @@ LINUXINCLUDE    := \
 		$(USERINCLUDE)
 
 KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
+ifeq  ($(call cc-lcc-yn),y)
+# Although lcc-1.24 supports -fshort-wchar many users are still
+# using lcc-1.23, so when they compile kernel modules themselves
+# we must avoid passing "-fshort-wchar" to it.
 KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
-		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
+		   -fno-strict-aliasing -fno-common -fno-PIE \
 		   -Werror=implicit-function-declaration -Werror=implicit-int \
 		   -Werror=return-type -Wno-format-security \
 		   -std=gnu89
+else
+KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
+		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
+		   -Werror=implicit-function-declaration -Werror=implicit-int \
+		   -Wno-format-security \
+		   -std=gnu89
+endif
 KBUILD_CPPFLAGS := -D__KERNEL__
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
@@ -649,9 +673,14 @@ endif # KBUILD_EXTMOD
 # Defaults to vmlinux, but the arch makefile usually adds further targets
 all: vmlinux
 
+ifneq  ($(call cc-lcc-yn),y)
 CFLAGS_GCOV	:= -fprofile-arcs -ftest-coverage \
 	$(call cc-option,-fno-tree-loop-im) \
 	$(call cc-disable-warning,maybe-uninitialized,)
+else
+CFLAGS_GCOV	:= -fprofile-arcs -ftest-coverage \
+	$(call cc-disable-warning,maybe-uninitialized,)
+endif
 export CFLAGS_GCOV
 
 # The arch Makefiles can override CC_FLAGS_FTRACE. We may also append it later.
@@ -890,8 +919,13 @@ KBUILD_CFLAGS += $(call cc-disable-warning, restrict)
 # Enabled with W=2, disabled by default as noisy
 KBUILD_CFLAGS += $(call cc-disable-warning, maybe-uninitialized)
 
+# MCST: The original gcc bug which caused introduction of -fno-strict-overflow
+# (optimizing away pointer overflow checking) does not exist in lcc, and this
+# option prohibits many compiler optimizations.
+ifneq  ($(call cc-lcc-yn),y)
 # disable invalid "can't wrap" optimizations for signed / pointers
 KBUILD_CFLAGS	+= $(call cc-option,-fno-strict-overflow)
+endif
 
 # clang sets -fmerge-all-constants by default as optimization, but this
 # is non-conforming behavior for C and in fact breaks the kernel, so we
@@ -1036,7 +1070,7 @@ PHONY += prepare0
 export MODORDER := $(extmod-prefix)modules.order
 
 ifeq ($(KBUILD_EXTMOD),)
-core-y		+= kernel/ certs/ mm/ fs/ ipc/ security/ crypto/ block/
+core-y		+= kernel/ certs/ mm/ fs/ ipc/ security/ crypto/ block/ ltt/
 
 vmlinux-dirs	:= $(patsubst %/,%,$(filter %/, $(init-y) $(init-m) \
 		     $(core-y) $(core-m) $(drivers-y) $(drivers-m) \

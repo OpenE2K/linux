@@ -33,6 +33,10 @@
 #include <linux/rseq.h>
 #include <asm/kmap_types.h>
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+#include <linux/el_posix.h>
+#endif
+
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
 struct backing_dev_info;
@@ -550,7 +554,9 @@ struct sched_dl_entity {
 	 * overruns.
 	 */
 	unsigned int			dl_throttled      : 1;
+#if !defined(CONFIG_MCST)
 	unsigned int			dl_boosted        : 1;
+#endif
 	unsigned int			dl_yielded        : 1;
 	unsigned int			dl_non_contending : 1;
 	unsigned int			dl_overrun	  : 1;
@@ -569,6 +575,15 @@ struct sched_dl_entity {
 	 * time.
 	 */
 	struct hrtimer inactive_timer;
+
+#if defined(CONFIG_MCST) && defined(CONFIG_RT_MUTEXES)
+	/*
+	 * Priority Inheritance. When a DEADLINE scheduling entity is boosted
+	 * pi_se points to the donor, otherwise points to the dl_se it belongs
+	 * to (the original one/itself).
+	 */
+	struct sched_dl_entity *pi_se;
+#endif
 };
 
 #ifdef CONFIG_UCLAMP_TASK
@@ -650,6 +665,9 @@ struct task_struct {
 	refcount_t			usage;
 	/* Per task flags (PF_*), defined further below: */
 	unsigned int			flags;
+#ifdef CONFIG_MCST              /* for RT_MLOCK_CONTROL */
+	unsigned int extra_flags;
+#endif
 	unsigned int			ptrace;
 
 #ifdef CONFIG_SMP
@@ -744,6 +762,10 @@ struct task_struct {
 #ifdef CONFIG_SMP
 	struct plist_node		pushable_tasks;
 	struct rb_node			pushable_dl_tasks;
+#endif
+
+#ifdef CONFIG_MCST_RT_SMP
+	int mcst_smp_cpu;
 #endif
 
 	struct mm_struct		*mm;
@@ -1282,6 +1304,31 @@ struct task_struct {
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 	unsigned long			task_state_change;
 #endif
+#ifdef CONFIG_MCST
+	int	irq_to_be_proc;		   /* irq to be processed on wake up */
+	struct timer_list	t_timer;   /* to implement RT-alarm */
+	unsigned long long	wakeup_tm; /* clock_source of last wakeup */
+	unsigned long long wakeup_wkr_tm;  /* cl_source of lw for  wakeuper */
+	unsigned long long sched_enter_tm; /* cl_source of schedule enter */
+	unsigned long long sched_lock_tm;  /* clock_source of  */
+	unsigned long long cntx_swb_tm;	   /* context switch begine */
+	unsigned long long cntx_swe_tm;	   /* context switch end */
+	unsigned long long waken_tm; /* cl_source of lw for it's wakeuper */
+	unsigned long long intr_w;   /* clock of last intr on wake up cpu */
+	unsigned long long intr_s;   /* clock of last intr on scheduled cpu */
+	unsigned long long intr_sc;  /* clock of last scheduler intr */
+	unsigned long	   last_ipi_prmt_enable;
+	unsigned long	   my_last_ipi_prmt_enable;
+	cycles_t	   last_tm_on_cpu;
+	struct rt_mutex	   *wait_on_rtmutex;
+#ifndef CONFIG_PREEMPT_RT
+	struct mutex	   *wait_on_mutex;
+#endif
+#endif
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	struct el_posix_data	el_posix;
+	void			*pobjs;
+#endif
 	int				pagefault_disabled;
 #ifdef CONFIG_MMU
 	struct task_struct		*oom_reaper_list;
@@ -1509,6 +1556,9 @@ extern struct pid *cad_pid;
 #define PF_MEMALLOC_NOCMA	0x10000000	/* All allocation request will have _GFP_MOVABLE cleared */
 #define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+#ifdef CONFIG_MCST
+#define RT_MLOCK_CONTROL	0x00000008	/* prohibit new mmap() & PF occurence */
+#endif
 
 /*
  * Only the _current_ task can read/write to tsk->flags, but other
@@ -1621,6 +1671,46 @@ static inline int set_cpus_allowed_ptr(struct task_struct *p, const struct cpuma
 		return -EINVAL;
 	return 0;
 }
+#endif
+
+#ifdef CONFIG_MCST_RT_SMP
+#define UNBOUND_CPU (NR_CPUS + MAX_NUMNODES)
+static inline int mcst_rt_affinity(struct task_struct *tsk)
+{
+	int ret = 0;
+#ifdef CONFIG_MCST_RT_GRQ
+	ret |= (tsk->mcst_smp_cpu == UNBOUND_CPU);
+#endif
+
+#ifdef CONFIG_MCST_RT_NUMA
+	ret |= (tsk->mcst_smp_cpu < UNBOUND_CPU &&
+		tsk->mcst_smp_cpu >= NR_CPUS);
+#endif
+	WARN_ON_ONCE(ret && !tsk->mm && !(tsk->flags & PF_EXITING));
+
+	return ret;
+}
+static inline int task_unbound(struct task_struct *tsk)
+{
+	return tsk->mcst_smp_cpu == UNBOUND_CPU;
+}
+static inline void dec_unbound_tasks(void)
+{
+	extern atomic_t num_unbound;
+	atomic_dec(&num_unbound);
+}
+#else
+#define mcst_rt_affinity(a) 0
+static inline void dec_unbound_tasks(void) {}
+#endif /* CONFIG_MCST_RT_SMP */
+
+#ifdef CONFIG_MCST
+extern long do_change_rts_mode_mask(long mode, long mask);
+extern int show_woken_time;
+# if defined(CONFIG_SCLKR_CLOCKSOURCE)
+extern struct clocksource clocksource_sclkr;
+extern int sclkr_unstable;
+# endif
 #endif
 
 extern int yield_to(struct task_struct *p, bool preempt);
@@ -1994,6 +2084,55 @@ extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 
 #ifndef TASK_SIZE_OF
 #define TASK_SIZE_OF(tsk)	TASK_SIZE
+#endif
+
+#ifdef CONFIG_MCST
+extern int mcst_rt_prio(struct task_struct *tsk);
+
+/*
+ * This struct and defines are used to calculate all cpu_times(switch_to, )
+ * New fields may be added in stucture below
+ * To init fields - sched.c
+ * To print fields  - dintr_proc_show (file fs/proc/dintr_time.c
+ */
+typedef struct {
+	long long	curr_time_switch_to;
+	long long	max_time_switch_to;
+	long long	min_time_switch_to;
+} cpu_times_t;
+
+extern cpu_times_t cpu_times[];
+
+#define SWITCH_CPU (NR_CPUS + MAX_NUMNODES + 1)
+
+extern void el_resched_cpu(int cpu);
+
+#define DINTR_TIMER_WASNT_USE	0
+#define DINTR_TIMER_RUNNING	1
+#define DINTR_TIMER_STOPPED	2
+
+extern int dintr_timer_state;
+DECLARE_PER_CPU(unsigned long, dintr_time_min);
+DECLARE_PER_CPU(unsigned long, dintr_time_max);
+
+extern void idle_check_delayed_works(int cpu);
+extern void wakeup_delayed_posix_timer(int cpu);
+extern void wakeup_delayed_softirq(int cpu);
+
+/* Possible values for modes see <linux/mcst_rt.h>. search RTCPU */
+DECLARE_PER_CPU(int, delayed_posix_timer);
+DECLARE_PER_CPU(int, delayed_softirq);
+
+#define my_rt_cpu_data	 (&per_cpu(rt_cpu_data, raw_smp_processor_id()))
+#define rt_cpu_data(cpu) (&per_cpu(rt_cpu_data, cpu))
+
+extern long rts_mode;
+DECLARE_PER_CPU(unsigned long, last_intr_clock);
+DECLARE_PER_CPU(unsigned long, prev_intr_clock);
+
+# ifdef CONFIG_WATCH_PREEMPT
+DECLARE_PER_CPU(u32, nowatch_set);
+# endif
 #endif
 
 #ifdef CONFIG_RSEQ

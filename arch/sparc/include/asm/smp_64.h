@@ -40,10 +40,13 @@ void scheduler_poke(void);
 void arch_send_call_function_single_ipi(int cpu);
 void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 
+#if defined(CONFIG_E90S) && defined(CONFIG_SMP)
+extern void smp_show_backtrace_all_cpus(void);
+#endif
+
 /*
  *	General functions that each host system must provide.
  */
-
 int hard_smp_processor_id(void);
 #define raw_smp_processor_id() (current_thread_info()->cpu)
 

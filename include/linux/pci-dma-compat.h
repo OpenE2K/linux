@@ -13,6 +13,14 @@
 #define PCI_DMA_FROMDEVICE	DMA_FROM_DEVICE
 #define PCI_DMA_NONE		DMA_NONE
 
+#ifdef CONFIG_MCST
+static inline int
+pci_dma_supported(struct pci_dev *hwdev, u64 mask)
+{
+	return dma_supported(hwdev == NULL ? NULL : &hwdev->dev, mask);
+}
+#endif
+
 static inline void *
 pci_alloc_consistent(struct pci_dev *hwdev, size_t size,
 		     dma_addr_t *dma_handle)

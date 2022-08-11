@@ -268,6 +268,9 @@ enum {
 	AZX_DRIVER_TERA,
 	AZX_DRIVER_CTX,
 	AZX_DRIVER_CTHDA,
+#ifdef CONFIG_MCST
+	AZX_DRIVER_IOHUB2,
+#endif /* CONFIG_MCST */
 	AZX_DRIVER_CMEDIA,
 	AZX_DRIVER_ZHAOXIN,
 	AZX_DRIVER_GENERIC,
@@ -390,6 +393,9 @@ static char *driver_short_names[] = {
 	[AZX_DRIVER_CTHDA] = "HDA Creative",
 	[AZX_DRIVER_CMEDIA] = "HDA C-Media",
 	[AZX_DRIVER_ZHAOXIN] = "HDA Zhaoxin",
+#ifdef CONFIG_MCST
+	[AZX_DRIVER_IOHUB2] = "HDA MCST",
+#endif /* CONFIG_MCST */
 	[AZX_DRIVER_GENERIC] = "HD-Audio Generic",
 };
 
@@ -1740,6 +1746,11 @@ static int default_bdl_pos_adj(struct azx *chip)
 	case AZX_DRIVER_ICH:
 	case AZX_DRIVER_PCH:
 		return 1;
+#ifdef CONFIG_MCST
+	case AZX_DRIVER_IOHUB2:
+		/* iohub2 hda have problems with short buffers */
+		return 0;
+#endif /* CONFIG_MCST */
 	default:
 		return 32;
 	}
@@ -1832,6 +1843,27 @@ static int azx_create(struct snd_card *card, struct pci_dev *pci,
 		azx_free(chip);
 		return err;
 	}
+
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+	if (pci->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pci->device == PCI_DEVICE_ID_MCST_HDA) {
+		/* read codec twice to fix hardware syncronization error. */
+		if (iohub_generation(pci) == 1 &&
+				iohub_revision(pci) < 2) {
+			chip->bus.needs_retry_on_codec_write = 1;
+		}
+		if (pci->revision == 2) { /* with hdmi-codec */
+			/* let mga2 to initialize hdmi cores */
+			if ((err = request_module("mga2"))) {
+				dev_err(card->dev,
+					"Error requesting mga2: %d\n", err);
+				snd_device_free(card, chip);
+				azx_free(chip);
+				return err;
+			}
+		}
+	}
+#endif
 
 	/* continue probing in work context as may trigger request module */
 	INIT_WORK(&hda->probe_work, azx_probe_work);
@@ -2414,6 +2446,10 @@ static void azx_shutdown(struct pci_dev *pci)
 
 /* PCI IDs */
 static const struct pci_device_id azx_ids[] = {
+#ifdef CONFIG_MCST
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_HDA),
+		      .driver_data = AZX_DRIVER_IOHUB2 },
+#endif /* CONFIG_MCST */
 	/* CPT */
 	{ PCI_DEVICE(0x8086, 0x1c20),
 	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH_NOPM },

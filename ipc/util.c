@@ -67,6 +67,8 @@
 
 #include <asm/unistd.h>
 
+#include <asm/unistd.h>
+
 #include "util.h"
 
 struct ipc_proc_iface {

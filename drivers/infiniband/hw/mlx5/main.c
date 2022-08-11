@@ -5696,6 +5696,9 @@ static int mlx5_ib_counter_dealloc(struct rdma_counter *counter)
 	return mlx5_core_dealloc_q_counter(dev->mdev, counter->id);
 }
 
+#if !defined(CONFIG_MCST) || !defined(__LCC__) || \
+	defined(CONFIG_MLX5_CORE_IPOIB)
+/* bug #121767 */
 static int mlx5_ib_rn_get_params(struct ib_device *device, u8 port_num,
 				 enum rdma_netdev_t type,
 				 struct rdma_netdev_alloc_params *params)
@@ -5705,6 +5708,7 @@ static int mlx5_ib_rn_get_params(struct ib_device *device, u8 port_num,
 
 	return mlx5_rdma_rn_get_params(to_mdev(device)->mdev, device, params);
 }
+#endif
 
 static void delay_drop_debugfs_cleanup(struct mlx5_ib_dev *dev)
 {
@@ -6306,9 +6310,13 @@ static const struct ib_device_ops mlx5_ib_dev_flow_ipsec_ops = {
 	.modify_flow_action_esp = mlx5_ib_modify_flow_action_esp,
 };
 
+#if !defined(CONFIG_MCST) || !defined(__LCC__) || \
+	defined(CONFIG_MLX5_CORE_IPOIB)
+/* bug #121767 */
 static const struct ib_device_ops mlx5_ib_dev_ipoib_enhanced_ops = {
 	.rdma_netdev_get_params = mlx5_ib_rn_get_params,
 };
+#endif
 
 static const struct ib_device_ops mlx5_ib_dev_sriov_ops = {
 	.get_vf_config = mlx5_ib_get_vf_config,
@@ -6374,10 +6382,14 @@ static int mlx5_ib_stage_caps_init(struct mlx5_ib_dev *dev)
 		(1ull << IB_USER_VERBS_EX_CMD_CREATE_FLOW)	|
 		(1ull << IB_USER_VERBS_EX_CMD_DESTROY_FLOW);
 
+#if !defined(CONFIG_MCST) || !defined(__LCC__) || \
+	defined(CONFIG_MLX5_CORE_IPOIB)
+	/* bug #121767 */
 	if (MLX5_CAP_GEN(mdev, ipoib_enhanced_offloads) &&
 	    IS_ENABLED(CONFIG_MLX5_CORE_IPOIB))
 		ib_set_device_ops(&dev->ib_dev,
 				  &mlx5_ib_dev_ipoib_enhanced_ops);
+#endif
 
 	if (mlx5_core_is_pf(mdev))
 		ib_set_device_ops(&dev->ib_dev, &mlx5_ib_dev_sriov_ops);

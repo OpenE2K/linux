@@ -43,7 +43,22 @@
 #define _FP_FRAC_SRL_1(X,N)	(X##_f >>= N)
 
 /* Right shift with sticky-lsb.  */
+#define _FP_FRAC_SRST_1(X,S,N,sz)	__FP_FRAC_SRST_1(X##_f, S, N, sz)
 #define _FP_FRAC_SRS_1(X,N,sz)	__FP_FRAC_SRS_1(X##_f, N, sz)
+
+#define __FP_FRAC_SRST_1(X,S,N,sz)			\
+do {							\
+  S = (__builtin_constant_p(N) && (N) == 1		\
+       ? X & 1 : (X << (_FP_W_TYPE_SIZE - (N))) != 0);	\
+  X = X >> (N);						\
+} while (0)
+
+#define __FP_FRAC_SRST_1(X,S,N,sz)			\
+do {							\
+  S = (__builtin_constant_p(N) && (N) == 1		\
+       ? X & 1 : (X << (_FP_W_TYPE_SIZE - (N))) != 0);	\
+  X = X >> (N);						\
+} while (0)
 
 #define __FP_FRAC_SRS_1(X,N,sz)						\
    (X = (X >> (N) | (__builtin_constant_p(N) && (N) == 1		\

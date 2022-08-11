@@ -13,6 +13,10 @@
 #include <linux/module.h>
 #include <linux/log2.h>
 #include <linux/workqueue.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#include <linux/delay.h>
+#include <asm/sclkr.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/rtc.h>
@@ -126,6 +130,9 @@ EXPORT_SYMBOL_GPL(rtc_read_time);
 int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 {
 	int err, uie;
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	int rtc_sclkr_clocksource = 0;
+#endif
 
 	err = rtc_valid_tm(tm);
 	if (err != 0)
@@ -152,12 +159,27 @@ int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 	if (err)
 		return err;
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	if (strcmp(curr_clocksource->name, "sclkr") == 0 &&
+				sclkr_mode == SCLKR_RTC) {
+		override_clocksource("lt", sizeof("lt"));
+		rtc_sclkr_clocksource = 1;
+	}
+#endif
+
 	if (!rtc->ops)
 		err = -ENODEV;
 	else if (rtc->ops->set_time)
 		err = rtc->ops->set_time(rtc->dev.parent, tm);
 	else
 		err = -EINVAL;
+
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	if (rtc_sclkr_clocksource) {
+		schedule_timeout_interruptible(2 * HZ);
+		override_clocksource("sclkr", sizeof("sclkr"));
+	}
+#endif
 
 	pm_stay_awake(rtc->dev.parent);
 	mutex_unlock(&rtc->ops_lock);

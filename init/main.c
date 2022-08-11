@@ -101,6 +101,10 @@
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
 
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+#include <asm/boot_profiling.h>
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/initcall.h>
 
@@ -547,7 +551,11 @@ static void __init report_meminit(void)
 /*
  * Set up kernel memory allocators
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+static void __init init_mm_init(void)
+#else
 static void __init mm_init(void)
+#endif
 {
 	/*
 	 * page_ext requires contiguous pages,
@@ -626,7 +634,17 @@ asmlinkage __visible void __init start_kernel(void)
 	vfs_caches_init_early();
 	sort_main_extable();
 	trap_init();
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+	BOOT_TRACEPOINT("Calling mm_init()");
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+	init_mm_init();
+#else
 	mm_init();
+#endif
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+	BOOT_TRACEPOINT("mm_init() finished");
+#endif
 
 	ftrace_init();
 
@@ -1006,7 +1024,15 @@ static void __init do_initcall_level(int level)
 
 	trace_initcall_level(initcall_level_names[level]);
 	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+	{
+		BOOT_TRACEPOINT("Initcall %ps started", *fn);
+#endif
 		do_one_initcall(initcall_from_entry(fn));
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+		BOOT_TRACEPOINT("Initcall %ps finished", *fn);
+	}
+#endif
 }
 
 static void __init do_initcalls(void)
@@ -1040,10 +1066,21 @@ static void __init do_pre_smp_initcalls(void)
 
 	trace_initcall_level("early");
 	for (fn = __initcall_start; fn < __initcall0_start; fn++)
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+	{
+		BOOT_TRACEPOINT("Early initcall %pS started", *fn);
+#endif
 		do_one_initcall(initcall_from_entry(fn));
+#if defined CONFIG_MCST && defined CONFIG_BOOT_TRACE
+		BOOT_TRACEPOINT("Early initcall %pS finished", *fn);
+	}
+#endif
 }
 
-static int run_init_process(const char *init_filename)
+#if !defined CONFIG_E2K || !defined CONFIG_RECOVERY
+static
+#endif
+int run_init_process(const char *init_filename)
 {
 	argv_init[0] = init_filename;
 	pr_info("Run %s as init process\n", init_filename);
@@ -1135,7 +1172,9 @@ static int __ref kernel_init(void *unused)
 		pr_err("Failed to execute %s (error %d)\n",
 		       ramdisk_execute_command, ret);
 	}
-
+#ifdef CONFIG_MCST
+	pr_alert("%s", linux_banner);
+#endif
 	/*
 	 * We try each of these until one succeeds.
 	 *
@@ -1150,6 +1189,9 @@ static int __ref kernel_init(void *unused)
 		      execute_command, ret);
 	}
 	if (!try_to_run_init_process("/sbin/init") ||
+#ifdef CONFIG_MCST
+	    !try_to_run_init_process("/mcst/bin/init") ||
+#endif
 	    !try_to_run_init_process("/etc/init") ||
 	    !try_to_run_init_process("/bin/init") ||
 	    !try_to_run_init_process("/bin/sh"))

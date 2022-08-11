@@ -21,6 +21,7 @@
 #include <linux/sched.h>
 #include <linux/sched/clock.h>
 #include <linux/ktime.h>
+#include <linux/delay.h>
 #include <linux/trace_clock.h>
 
 /*
@@ -31,8 +32,10 @@
  */
 u64 notrace trace_clock_local(void)
 {
+#if defined CONFIG_MCST && defined CONFIG_E90S
+	return get_cycles()* NSEC_PER_SEC /(HZ *loops_per_jiffy); 
+#else
 	u64 clock;
-
 	/*
 	 * sched_clock() is an architecture implemented, fast, scalable,
 	 * lockless clock. It is not guaranteed to be coherent across
@@ -43,6 +46,7 @@ u64 notrace trace_clock_local(void)
 	preempt_enable_notrace();
 
 	return clock;
+#endif
 }
 EXPORT_SYMBOL_GPL(trace_clock_local);
 

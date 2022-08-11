@@ -61,10 +61,14 @@ unsigned long real_hard_smp_processor_id(void);
 
 struct cpuid_patch_entry {
 	unsigned int	addr;
+#ifdef CONFIG_E90S
+	unsigned int	r2000p[3];
+#else
 	unsigned int	cheetah_safari[4];
 	unsigned int	cheetah_jbus[4];
 	unsigned int	starfire[4];
 	unsigned int	sun4v[4];
+#endif
 };
 extern struct cpuid_patch_entry __cpuid_patch, __cpuid_patch_end;
 
@@ -115,6 +119,27 @@ extern struct sun4v_2insn_patch_entry __sun_m7_2insn_patch,
 
 #include <asm/scratchpad.h>
 
+
+#ifdef CONFIG_E90S
+#ifdef __KERNEL__
+#include <asm-l/apicdef.h>
+#endif
+
+#define __GET_CPUID(REG)				\
+	/* r1000 implementation (default). */		\
+661:	mov	APIC_LVT0, REG;		 		\
+	lduwa	[REG] ASI_LAPIC, REG;			\
+	and	REG, APIC_VECTOR_MASK, REG;		\
+	.section	.cpuid_patch, "ax";		\
+	/* Instruction location. */			\
+	.word		661b;				\
+	/* r2000p implementation. */			\
+	set	CEPIC_ID, REG;		 		\
+	lduwa	[REG] ASI_EPIC, REG;			\
+	nop;						\
+	.previous;
+
+#else /*CONFIG_E90S*/
 #define __GET_CPUID(REG)				\
 	/* Spitfire implementation (default). */	\
 661:	ldxa		[%g0] ASI_UPA_CONFIG, REG;	\
@@ -145,6 +170,7 @@ extern struct sun4v_2insn_patch_entry __sun_m7_2insn_patch,
 	nop;						\
 	nop;						\
 	.previous;
+#endif /*CONFIG_E90S*/
 
 #ifdef CONFIG_SMP
 

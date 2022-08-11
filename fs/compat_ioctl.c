@@ -522,6 +522,9 @@ static unsigned int ioctl_pointer[] = {
 /* compatible ioctls first */
 /* Little t */
 COMPATIBLE_IOCTL(TIOCOUTQ)
+#ifdef CONFIG_MCST
+COMPATIBLE_IOCTL(TIODUMPREGS)
+#endif
 /* Little f */
 COMPATIBLE_IOCTL(FIOCLEX)
 COMPATIBLE_IOCTL(FIONCLEX)

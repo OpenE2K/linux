@@ -64,4 +64,23 @@ static inline int atomic_xchg(atomic_t *v, int new)
 s64 atomic64_dec_if_positive(atomic64_t *v);
 #define atomic64_dec_if_positive atomic64_dec_if_positive
 
+#ifdef	CONFIG_RMO
+#ifdef CONFIG_SMP
+#define smp_mb__before_atomic_dec()	membar_storeload_loadload();
+#define smp_mb__after_atomic_dec()	membar_storeload_storestore();
+#define smp_mb__before_atomic_inc()	membar_storeload_loadload();
+#define smp_mb__after_atomic_inc()	membar_storeload_storestore();
+#else
+#define smp_mb__before_atomic_dec()	barrier()
+#define smp_mb__after_atomic_dec()	barrier()
+#define smp_mb__before_atomic_inc()	barrier()
+#define smp_mb__after_atomic_inc()	barrier()
+#endif
+#else	/* CONFIG_RMO */
+#define smp_mb__before_atomic_dec()	barrier()
+#define smp_mb__after_atomic_dec()	barrier()
+#define smp_mb__before_atomic_inc()	barrier()
+#define smp_mb__after_atomic_inc()	barrier()
+#endif	/* CONFIG_RMO */
+
 #endif /* !(__ARCH_SPARC64_ATOMIC__) */

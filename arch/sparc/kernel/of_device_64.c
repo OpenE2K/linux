@@ -11,6 +11,7 @@
 #include <linux/irq.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <asm/spitfire.h>
 
 #include "of_device_common.h"
@@ -699,10 +700,18 @@ static void __init scan_tree(struct device_node *dp, struct device *parent)
 	}
 }
 
+static struct of_device_id __initdata e90s_ids[] = {
+	{ .compatible = "simple-bus", },
+	{},
+};
+
 static int __init scan_of_devices(void)
 {
 	struct device_node *root = of_find_node_by_path("/");
 	struct platform_device *parent;
+#ifdef CONFIG_E90S
+	return of_platform_bus_probe(NULL, e90s_ids, NULL);
+#endif
 
 	parent = scan_one_device(root, NULL);
 	if (!parent)

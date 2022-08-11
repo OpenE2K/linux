@@ -74,6 +74,13 @@ config EDAC_GHES
 
 	  In doubt, say 'Y'.
 
+config EDAC_E2K
+	tristate "E2K (e1c+, e8c*)"
+	depends on E2K
+	help
+	  Support for error detection and correction of DRAM ECC errors on
+	  the E2K families (e1c+, e8c, e8c2) of memory controllers.
+
 config EDAC_AMD64
 	tristate "AMD64 (Opteron, Athlon64)"
 	depends on AMD_NB && EDAC_DECODE_MCE

@@ -513,6 +513,11 @@ struct sock {
 	struct bpf_sk_storage __rcu	*sk_bpf_storage;
 #endif
 	struct rcu_head		sk_rcu;
+#ifdef CONFIG_MCST
+	int udp_snd_num;
+	int udp_snd_sz;
+	ktime_t udp_snd_tm;
+#endif
 };
 
 enum sk_pacing {
@@ -2576,6 +2581,9 @@ void sk_get_meminfo(const struct sock *sk, u32 *meminfo);
 
 extern __u32 sysctl_wmem_max;
 extern __u32 sysctl_rmem_max;
+#ifdef CONFIG_MCST
+extern __u32 sysctl_sock_minrcvbuf;
+#endif
 
 extern int sysctl_tstamp_allow_data;
 extern int sysctl_optmem_max;

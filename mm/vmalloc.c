@@ -41,6 +41,9 @@
 #include <asm/shmparam.h>
 
 #include "internal.h"
+#ifdef CONFIG_E2K
+#include <asm/pgalloc.h> /* For pmd_alloc_kernel() and friends */
+#endif
 
 struct vfree_deferred {
 	struct llist_head list;
@@ -126,6 +129,9 @@ static void vunmap_page_range(unsigned long addr, unsigned long end)
 {
 	pgd_t *pgd;
 	unsigned long next;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	unsigned long start = addr;
+#endif
 
 	BUG_ON(addr >= end);
 	pgd = pgd_offset_k(addr);
@@ -135,6 +141,10 @@ static void vunmap_page_range(unsigned long addr, unsigned long end)
 			continue;
 		vunmap_p4d_range(pgd, addr, next);
 	} while (pgd++, addr = next, addr != end);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	all_nodes_unmap_kernel_vm_area_noflush(start, end);
+#endif
 }
 
 static int vmap_pte_range(pmd_t *pmd, unsigned long addr,
@@ -228,15 +238,28 @@ static int vmap_page_range_noflush(unsigned long start, unsigned long end,
 	unsigned long addr = start;
 	int err = 0;
 	int nr = 0;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int nid = numa_node_id();
+#endif
 
 	BUG_ON(addr >= end);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	pgd = node_pgd_offset_kernel(nid, addr);
+#else
 	pgd = pgd_offset_k(addr);
+#endif
 	do {
 		next = pgd_addr_end(addr, end);
 		err = vmap_p4d_range(pgd, addr, next, prot, pages, &nr);
 		if (err)
 			return err;
 	} while (pgd++, addr = next, addr != end);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (all_other_nodes_map_vm_area(nid, start, end - start)) {
+		panic("Could not map VM area from addr 0x%lx to 0x%lx on all numa nodes\n",
+			start, end);
+	}
+#endif
 
 	return nr;
 }
@@ -2142,6 +2165,25 @@ struct vm_struct *find_vm_area(const void *addr)
 	return va->vm;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+struct vm_struct *find_io_vm_area(const void *addr)
+{
+	struct vmap_area *va;
+	unsigned long flags;
+	bool locked;
+
+	locked = spin_trylock_irqsave(&vmap_area_lock, flags);
+	va = __find_vmap_area((unsigned long)addr);
+	if (locked)
+		spin_unlock_irqrestore(&vmap_area_lock, flags);
+
+	if (!va)
+		return NULL;
+
+	return va->vm;
+}
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
+
 /**
  * remove_vm_area - find and remove a continuous kernel virtual area
  * @addr:	    base address
@@ -3374,7 +3416,7 @@ retry:
 	/* insert all vm's */
 	for (area = 0; area < nr_vms; area++)
 		setup_vmalloc_vm(vms[area], vas[area], VM_ALLOC,
-				 pcpu_get_vm_areas);
+				  pcpu_get_vm_areas);
 
 	kfree(vas);
 	return vms;

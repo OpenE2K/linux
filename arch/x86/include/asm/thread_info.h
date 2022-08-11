@@ -58,6 +58,9 @@ struct thread_info {
 	u32			status;		/* thread synchronous flags */
 	int			preempt_lazy_count;	/* 0 => lazy preemptable
 							  <0 => BUG */
+#ifdef CONFIG_MCST
+	long long	irq_enter_clk;	/* CPU clock when irq enter was */
+#endif
 };
 
 #define INIT_THREAD_INFO(tsk)			\
@@ -111,6 +114,9 @@ struct thread_info {
 #define TIF_ADDR32		29	/* 32-bit address space on 64 bits */
 #define TIF_X32			30	/* 32-bit native x86-64 binary */
 #define TIF_FSCHECK		31	/* Check FS is USER_DS on return */
+#ifdef CONFIG_MCST
+#define TIF_NAPI_WORK		32	/* napi_wq_worker() is running MCST addition */
+#endif
 
 #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)
@@ -141,6 +147,9 @@ struct thread_info {
 #define _TIF_ADDR32		(1 << TIF_ADDR32)
 #define _TIF_X32		(1 << TIF_X32)
 #define _TIF_FSCHECK		(1 << TIF_FSCHECK)
+#ifdef CONFIG_MCST
+#define _TIF_NAPI_WORK		(1 << TIF_NAPI_WORK)
+#endif
 
 /*
  * work to do in syscall_trace_enter().  Also includes TIF_NOHZ for

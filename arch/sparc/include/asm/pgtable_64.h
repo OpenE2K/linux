@@ -126,8 +126,13 @@ bool kern_addr_valid(unsigned long addr);
 #define _PAGE_IE_4U	  _AC(0x0800000000000000,UL) /* Invert Endianness    */
 #define _PAGE_SOFT2_4U	  _AC(0x07FC000000000000,UL) /* Software bits, set 2 */
 #define _PAGE_SPECIAL_4U  _AC(0x0200000000000000,UL) /* Special page         */
-#define _PAGE_PMD_HUGE_4U _AC(0x0100000000000000,UL) /* Huge page            */
+#define _PAGE_PMD_HUGE_4U _AC(0x0100000000000000,UL) /* Huge page            */            */
+#ifdef CONFIG_E90S
+#define _PAGE_E90S_WC_4U  _AC(0x0002000000000000,UL) /* Write-combine        */
+
+#else
 #define _PAGE_RES1_4U	  _AC(0x0002000000000000,UL) /* Reserved             */
+#endif
 #define _PAGE_SZ32MB_4U	  _AC(0x0001000000000000,UL) /* (Panther) 32MB page  */
 #define _PAGE_SZ256MB_4U  _AC(0x2001000000000000,UL) /* (Panther) 256MB page */
 #define _PAGE_SZALL_4U	  _AC(0x6001000000000000,UL) /* All pgsz bits        */
@@ -141,6 +146,11 @@ bool kern_addr_valid(unsigned long addr);
 #define _PAGE_READ_4U	  _AC(0x0000000000000200,UL) /* Readable SW Bit      */
 #define _PAGE_WRITE_4U	  _AC(0x0000000000000100,UL) /* Writable SW Bit      */
 #define _PAGE_PRESENT_4U  _AC(0x0000000000000080,UL) /* Present              */
+#ifdef CONFIG_E90S
+#define        _PAGE_PRESENT   _PAGE_PRESENT_4U        
+#define        _PAGE_ACCESSED  _PAGE_ACCESSED_4U
+#define _PAGE_PROTNONE	  _AC(0x0000000000000200, UL) /* For numa balancing  */
+#endif
 #define _PAGE_L_4U	  _AC(0x0000000000000040,UL) /* Locked TTE           */
 #define _PAGE_CP_4U	  _AC(0x0000000000000020,UL) /* Cacheable in P-Cache */
 #define _PAGE_CV_4U	  _AC(0x0000000000000010,UL) /* Cacheable in V-Cache */
@@ -189,7 +199,6 @@ bool kern_addr_valid(unsigned long addr);
 
 #define _PAGE_SZHUGE_4U	_PAGE_SZ4MB_4U
 #define _PAGE_SZHUGE_4V	_PAGE_SZ4MB_4V
-
 /* These are actually filled in at boot time by sun4{u,v}_pgprot_init() */
 #define __P000	__pgprot(0)
 #define __P001	__pgprot(0)
@@ -210,6 +219,12 @@ bool kern_addr_valid(unsigned long addr);
 #define __S111	__pgprot(0)
 
 #ifndef __ASSEMBLY__
+#ifdef CONFIG_MCST
+#define pte_flags pte_val
+#define pmd_flags pmd_val
+typedef unsigned long pteval_t;
+typedef unsigned long pmdval_t;
+#endif
 
 pte_t mk_pte_io(unsigned long, pgprot_t, int, unsigned long);
 
@@ -438,6 +453,30 @@ static inline bool is_hugetlb_pte(pte_t pte)
 }
 #endif
 
+#ifdef CONFIG_E90S
+/* We don't need patching for SUN4V */
+
+static inline pte_t pte_mkdirty(pte_t pte)
+{
+	unsigned long val = pte_val(pte) | (_PAGE_MODIFIED_4U | _PAGE_W_4U);
+	return __pte(val);
+}
+
+static inline pte_t pte_mkclean(pte_t pte)
+{
+	unsigned long val = pte_val(pte) & ~(_PAGE_MODIFIED_4U | _PAGE_W_4U);
+	return __pte(val);
+}
+
+#define pgprot_writecombine pgprot_writecombine
+static inline pgprot_t pgprot_writecombine(pgprot_t prot)
+{
+	unsigned long val = pgprot_val(prot);
+	val &= ~(_PAGE_CP_4U | _PAGE_CV_4U);
+	val |= _PAGE_E90S_WC_4U;
+	return __pgprot(val);
+}
+#else /* CONFIG_E90S */
 static inline pte_t pte_mkdirty(pte_t pte)
 {
 	unsigned long val = pte_val(pte), tmp;
@@ -485,7 +524,7 @@ static inline pte_t pte_mkclean(pte_t pte)
 
 	return __pte(val);
 }
-
+#endif /* CONFIG_E90S */
 static inline pte_t pte_mkwrite(pte_t pte)
 {
 	unsigned long val = pte_val(pte), mask;
@@ -603,7 +642,13 @@ static inline unsigned long pte_young(pte_t pte)
 
 	return (pte_val(pte) & mask);
 }
-
+#ifdef CONFIG_E90S
+/* We don't need patching for SUN4V */ 
+static inline unsigned long pte_dirty(pte_t pte)
+{
+	return (pte_val(pte) & _PAGE_MODIFIED_4U);
+}
+#else
 static inline unsigned long pte_dirty(pte_t pte)
 {
 	unsigned long mask;
@@ -621,7 +666,7 @@ static inline unsigned long pte_dirty(pte_t pte)
 
 	return (pte_val(pte) & mask);
 }
-
+#endif /* CONFIG_E90S */
 static inline unsigned long pte_write(pte_t pte)
 {
 	unsigned long mask;
@@ -656,6 +701,40 @@ static inline unsigned long pte_exec(pte_t pte)
 	return (pte_val(pte) & mask);
 }
 
+#define pte_accessible pte_accessible
+static inline unsigned long pte_accessible(struct mm_struct *mm, pte_t a)
+{
+	return pte_val(a) & (_PAGE_VALID);
+}
+#ifdef CONFIG_E90S
+#ifdef CONFIG_NUMA_BALANCING
+#define PAGE_NONE __pgprot(_PAGE_PROTNONE | _PAGE_ACCESSED)
+/*
+ * These return true for PAGE_NONE too but the kernel does not care.
+ * See the comment in include/asm-generic/pgtable.h
+ */
+static inline int pte_protnone(pte_t pte)
+{
+	return (pte_val(pte) & (_PAGE_PRESENT | _PAGE_PROTNONE)) ==
+		_PAGE_PROTNONE;
+}
+static inline int pmd_protnone(pmd_t pmd)
+{
+	return (pmd_val(pmd) & (_PAGE_PRESENT | _PAGE_PROTNONE)) ==
+		_PAGE_PROTNONE;
+}
+
+static inline unsigned long pte_present(pte_t pte)
+{
+	return (pte_val(pte) & (_PAGE_PRESENT_4U | _PAGE_PROTNONE)); 
+}
+#else /* !CONFIG_NUMA_BALANCING */
+static inline unsigned long pte_present(pte_t pte)
+{
+	return (pte_val(pte) & (_PAGE_PRESENT_4U)); 
+}
+#endif /* CONFIG_NUMA_BALANCING */
+#else /* !CONFIG_E90S */
 static inline unsigned long pte_present(pte_t pte)
 {
 	unsigned long val = pte_val(pte);
@@ -668,15 +747,14 @@ static inline unsigned long pte_present(pte_t pte)
 	"	.previous\n"
 	: "=r" (val)
 	: "0" (val), "i" (_PAGE_PRESENT_4U), "i" (_PAGE_PRESENT_4V));
-
 	return val;
 }
 
-#define pte_accessible pte_accessible
 static inline unsigned long pte_accessible(struct mm_struct *mm, pte_t a)
 {
 	return pte_val(a) & _PAGE_VALID;
 }
+#endif /* CONFIG_E90S */
 
 static inline unsigned long pte_special(pte_t pte)
 {
@@ -804,8 +882,18 @@ static inline int pmd_present(pmd_t pmd)
  * the top bits outside of the range of any physical address size we
  * support are clear as well.  We also validate the physical itself.
  */
+#if defined( CONFIG_E90S) && defined(CONFIG_NUMA_BALANCING)
+static inline int pmd_bad(pmd_t pmd)
+{
+        /* pmd_numa check */
+        if ((pmd_val(pmd) & (_PAGE_PROTNONE|_PAGE_PRESENT_4U)) == _PAGE_PROTNONE)
+                return 0;
+        return (pmd_val(pmd) & ~PAGE_MASK);
+}
+#else
 #define pmd_bad(pmd)			(pmd_val(pmd) & ~PAGE_MASK)
-
+#endif
+#define pmd_bad(pmd)			(pmd_val(pmd) & ~PAGE_MASK)
 #define pud_none(pud)			(!pud_val(pud))
 
 #define pud_bad(pud)			(pud_val(pud) & ~PAGE_MASK)
@@ -1049,9 +1137,10 @@ static inline void arch_do_swap_page(struct mm_struct *mm,
 	 */
 	if (pte_none(oldpte))
 		return;
-
+#ifndef CONFIG_E90S
 	if (adi_state.enabled && (pte_val(pte) & _PAGE_MCD_4V))
 		adi_restore_tags(mm, vma, addr, pte);
+#endif
 }
 
 #define __HAVE_ARCH_UNMAP_ONE
@@ -1059,8 +1148,10 @@ static inline int arch_unmap_one(struct mm_struct *mm,
 				 struct vm_area_struct *vma,
 				 unsigned long addr, pte_t oldpte)
 {
+#ifndef CONFIG_E90S
 	if (adi_state.enabled && (pte_val(oldpte) & _PAGE_MCD_4V))
 		return adi_save_tags(mm, vma, addr, oldpte);
+#endif
 	return 0;
 }
 

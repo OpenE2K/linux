@@ -1123,6 +1123,50 @@ static void local_apic_timer_interrupt(void)
 	evt->event_handler(evt);
 }
 
+#ifdef CONFIG_MCST
+DEFINE_PER_CPU(long long, next_rt_intr) = 0;
+EXPORT_SYMBOL(next_rt_intr);
+
+#define DELTA_NS	(NSEC_PER_SEC / HZ / 2)
+
+void do_postpone_tick(int to_next_rt_ns)
+{
+	int cpu;
+	long long cur_time = ktime_to_ns(ktime_get());
+	long long next_tm;
+	unsigned long	flags;
+	struct pt_regs regs_new;
+	struct pt_regs *old_regs;
+
+	local_irq_save(flags);
+	cpu = smp_processor_id();
+	next_tm = per_cpu(next_rt_intr, cpu);
+	if (to_next_rt_ns) {
+		per_cpu(next_rt_intr, cpu) = cur_time + to_next_rt_ns;
+	} else{
+		per_cpu(next_rt_intr, cpu) = 0;
+	}
+#if 0
+	trace_printk("DOPOSTP old_nx-cur=%lld cur=%lld nx=%lld\n",
+		next_tm - cur_time, cur_time, cur_time + to_next_rt_ns);
+#endif
+	if (next_tm == 1) {
+		/* FIXME next line has long run time and may be deleted */
+		memset(&regs_new, 0, sizeof(struct pt_regs));
+		/* need to get answer to user_mod() only */
+		regs_new.cs = 3;
+		old_regs = set_irq_regs(&regs_new);
+		irq_enter();
+		local_apic_timer_interrupt();
+		irq_exit();
+		set_irq_regs(old_regs);
+	}
+	local_irq_restore(flags);
+}
+EXPORT_SYMBOL(do_postpone_tick);
+
+#endif
+
 /*
  * Local APIC timer interrupt. This is the most natural way for doing
  * local interrupts, but local timer interrupts can be emulated by
@@ -1134,6 +1178,32 @@ static void local_apic_timer_interrupt(void)
 __visible void __irq_entry smp_apic_timer_interrupt(struct pt_regs *regs)
 {
 	struct pt_regs *old_regs = set_irq_regs(regs);
+
+#ifdef CONFIG_MCST
+	int cpu;
+	long long cur_time;
+	long long next_time;
+
+	cpu = smp_processor_id();
+	next_time = per_cpu(next_rt_intr, cpu);
+
+		if (next_time) {
+			cur_time = ktime_to_ns(ktime_get());
+			if (cur_time > next_time + DELTA_NS) {
+				per_cpu(next_rt_intr, cpu) = 0;
+			} else if (cur_time > next_time - DELTA_NS &&
+					cur_time < next_time + DELTA_NS) {
+				/* set 1 -- must do timer later
+				 * in do_postpone_tick() */
+				per_cpu(next_rt_intr, cpu) = 1;
+				/* if do_postpone_tick() will not called: */
+				ack_APIC_irq();
+				apic_write(APIC_TMICT,
+					usecs_2cycles(USEC_PER_SEC / HZ));
+				return;
+			}
+		}
+#endif
 
 	/*
 	 * NOTE! We'd better ACK the irq immediately,

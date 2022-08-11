@@ -204,7 +204,7 @@ static const struct dmi_system_id inverted_x_screen[] = {
  * @buf: raw write data buffer.
  * @len: length of the buffer to write
  */
-static int goodix_i2c_read(struct i2c_client *client,
+static int __goodix_i2c_read(struct i2c_client *client,
 			   u16 reg, u8 *buf, int len)
 {
 	struct i2c_msg msgs[2];
@@ -233,7 +233,7 @@ static int goodix_i2c_read(struct i2c_client *client,
  * @buf: raw data buffer to write.
  * @len: length of the buffer to write
  */
-static int goodix_i2c_write(struct i2c_client *client, u16 reg, const u8 *buf,
+static int __goodix_i2c_write(struct i2c_client *client, u16 reg, const u8 *buf,
 			    unsigned len)
 {
 	u8 *addr_buf;
@@ -257,6 +257,24 @@ static int goodix_i2c_write(struct i2c_client *client, u16 reg, const u8 *buf,
 	kfree(addr_buf);
 	return ret < 0 ? ret : (ret != 1 ? -EIO : 0);
 }
+
+#define goodix_i2c_read(c,r,b,l)				\
+({								\
+	unsigned __val = __goodix_i2c_read(c,r,b,l);		\
+	int __l = l;						\
+	dev_dbg(&c->dev, "R%d: %x: %s\t%s:%d\n", 		\
+			__l, __val, # r, __func__, __LINE__);	\
+	__val;							\
+})
+
+#define goodix_i2c_write(c,r,b,l)				\
+({								\
+	unsigned __val = __goodix_i2c_write(c,r,b,l);		\
+	int __l = l;						\
+	dev_dbg(&c->dev, "W%d: %x: %s\t%s:%d\n", 		\
+			__l, __val, # r, __func__, __LINE__);	\
+	__val;							\
+})
 
 static int goodix_i2c_write_u8(struct i2c_client *client, u16 reg, u8 value)
 {
@@ -335,7 +353,7 @@ static int goodix_ts_read_input_report(struct goodix_ts_data *ts, u8 *data)
 	 * The Goodix panel will send spurious interrupts after a
 	 * 'finger up' event, which will always cause a timeout.
 	 */
-	return 0;
+	return -ENOMSG;
 }
 
 static void goodix_ts_report_touch_8b(struct goodix_ts_data *ts, u8 *coor_data)
@@ -931,7 +949,10 @@ static int goodix_ts_probe(struct i2c_client *client,
 			return error;
 		}
 	}
-
+#ifdef CONFIG_MCST
+	if (ts->gpiod_int)
+		client->irq = gpiod_to_irq(ts->gpiod_int);
+#endif
 	error = goodix_i2c_test(client);
 	if (error) {
 		dev_err(&client->dev, "I2C communication failure: %d\n", error);

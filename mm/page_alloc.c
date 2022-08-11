@@ -135,6 +135,11 @@ EXPORT_SYMBOL(_totalram_pages);
 unsigned long totalreserve_pages __read_mostly;
 unsigned long totalcma_pages __read_mostly;
 
+#if defined(CONFIG_MCST) && !defined(CONFIG_X86_64)
+unsigned long totalram_real_pages __read_mostly;
+EXPORT_SYMBOL(totalram_real_pages);
+#endif
+
 int percpu_pagelist_fraction;
 gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
 #ifdef CONFIG_INIT_ON_ALLOC_DEFAULT_ON
@@ -1132,6 +1137,174 @@ static void kernel_init_free_pages(struct page *page, int numpages)
 		clear_highpage(page + i);
 }
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+int mem_san = 0;
+EXPORT_SYMBOL(mem_san);
+
+static int __init set_memory_sanitize(char *s)
+{
+	if (!strcmp(s, "1"))
+		mem_san = 1;
+	else
+		mem_san = 0;
+	return 1;
+}
+__setup("memory_sanitize=", set_memory_sanitize);
+#endif
+
+#ifdef CONFIG_MEMORY_SANITIZE
+#include <linux/random.h>
+
+#define SANITIZE_MEMORY_MAX_PASSES 2
+
+static bool sanitize_memory __read_mostly = false;
+static unsigned int sanitize_memory_level __read_mostly = 0;
+
+#ifdef CONFIG_SYSFS
+#include <linux/sysfs.h>
+
+static unsigned long sanitize_memory_count;
+
+static ssize_t sanitize_memory_count_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%lu\n", sanitize_memory_count);
+}
+
+static ssize_t sanitize_memory_level_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	buf[0] = sanitize_memory_level + '0';
+	buf[1] = '\n';
+	buf[2] = '\0';
+	return 2;
+}
+
+static struct kobj_attribute sanitize_memory_count_attr = {
+	.attr = {.name = "count", .mode = 0444},
+	.show = sanitize_memory_count_show,
+};
+
+static struct kobj_attribute sanitize_memory_level_attr = {
+	.attr = {.name = "level", .mode = 0444},
+	.show = sanitize_memory_level_show,
+};
+
+static struct attribute *sanitize_memory_attrs[] = {
+	&sanitize_memory_count_attr.attr,
+	&sanitize_memory_level_attr.attr,
+	NULL,
+};
+
+static struct attribute_group sanitize_memory_attr_group = {
+	.attrs = sanitize_memory_attrs,
+	.name = "sanitize_memory",
+};
+
+static int __init sanitize_memory_sysfs_init(void)
+{
+	if (sanitize_memory_count && sysfs_create_group(mm_kobj, &sanitize_memory_attr_group)) {
+		pr_err("Sanitize memory: can't create sysfs\n");
+		return 1;
+	}
+	return 0;
+}
+
+late_initcall(sanitize_memory_sysfs_init);
+
+static inline void inc_sanitize_memory_count(unsigned long i)
+{
+	sanitize_memory_count += i;
+};
+#else
+static inline void inc_sanitize_memory_count(unsigned long i) {};
+#endif
+
+static int __init sanitize_memory_setup(char *s)
+{
+	sanitize_memory_level = *s -'0';
+	if (sanitize_memory_level > SANITIZE_MEMORY_MAX_PASSES)
+		sanitize_memory_level = 0;
+	sanitize_memory = true;
+	pr_info("Sanitize memory: enabled, level=%u\n", sanitize_memory_level);
+	return 1;
+}
+
+__setup("smem", sanitize_memory_setup);
+__setup_param("smem=", sanitize_memory_setup_eq, sanitize_memory_setup, 0);
+
+static void fill_highmem_zero(struct page *page, unsigned int order)
+{
+	struct page *p;
+	unsigned long index = 1UL << order;
+
+	inc_sanitize_memory_count(index);
+	for (p = page + index - 1; index; index--, p--) {
+		unsigned long flags;
+
+		local_irq_save(flags);
+		clear_highpage(p);
+		local_irq_restore(flags);
+	}
+}
+
+static inline void fill_page_pattern(unsigned long *p, unsigned int pattern)
+{
+#if BITS_PER_LONG == 32
+	unsigned long pl = pattern;
+#else
+	unsigned long pl = ((unsigned long)pattern << 32) | pattern;
+#endif
+#ifdef CONFIG_X86
+	unsigned long d;
+
+	asm volatile(
+		"rep stos %0,%%es:(%1)"
+		: "=&a" (d), "=&D" (d), "=&c" (d)
+		: "0" (pattern), "1" (p), "2" (PAGE_SIZE / sizeof(pl))
+		: "memory");
+#else
+	int i;
+
+	for (i = PAGE_SIZE / sizeof(pl); i; i--, p++)
+		*p = pl;
+#endif
+}
+
+static void fill_highmem_pattern(struct page *page, unsigned int order)
+{
+	struct page *p;
+	int i;
+	unsigned long index = 1UL << order;
+	unsigned int pattern[sanitize_memory_level];
+
+	for (i = 0; i < sanitize_memory_level; i++)
+		pattern[i] = get_random_int();
+	inc_sanitize_memory_count(index);
+	for (p = page + index - 1; index; index--, p--) {
+		void *kaddr;
+		unsigned long flags;
+
+		local_irq_save(flags);
+		kaddr = kmap_atomic(p);
+		for (i = 0; i < sanitize_memory_level; i++)
+			fill_page_pattern(kaddr, pattern[i]);
+		kunmap_atomic(kaddr);
+		local_irq_restore(flags);
+	}
+}
+
+static void fill_highmem(struct page *page, unsigned int order)
+{
+	if (sanitize_memory) {
+		if (sanitize_memory_level)
+			fill_highmem_pattern(page, order);
+		else
+			fill_highmem_zero(page, order);
+	}
+}
+#else
+static inline void fill_highmem(struct page *page, unsigned long order){};
+#endif
+
 static __always_inline bool free_pages_prepare(struct page *page,
 					unsigned int order, bool check_free)
 {
@@ -1182,8 +1355,17 @@ static __always_inline bool free_pages_prepare(struct page *page,
 		debug_check_no_obj_freed(page_address(page),
 					   PAGE_SIZE << order);
 	}
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	if (mem_san) {
+		unsigned long index = 1UL << order;
+		for (; index; --index)
+			sanitize_highpage(page + index - 1);
+	}
+#endif
 	if (want_init_on_free())
 		kernel_init_free_pages(page, 1 << order);
+
+	fill_highmem(page, order);
 
 	kernel_poison_pages(page, 1 << order, 0);
 	/*
@@ -3820,6 +4002,13 @@ try_this_zone:
 static void warn_alloc_show_mem(gfp_t gfp_mask, nodemask_t *nodemask)
 {
 	unsigned int filter = SHOW_MEM_FILTER_NODES;
+#ifdef CONFIG_MCST
+	static atomic_t show = ATOMIC_INIT(0);
+
+	if (atomic_cmpxchg(&show, 0, 1)) {
+		return;
+	}
+#endif
 
 	/*
 	 * This documents exceptions given to allocations in certain
@@ -3834,6 +4023,10 @@ static void warn_alloc_show_mem(gfp_t gfp_mask, nodemask_t *nodemask)
 		filter &= ~SHOW_MEM_FILTER_NODES;
 
 	show_mem(filter, nodemask);
+
+#ifdef CONFIG_MCST
+	atomic_set(&show, 0);
+#endif
 }
 
 void warn_alloc(gfp_t gfp_mask, nodemask_t *nodemask, const char *fmt, ...)
@@ -5095,7 +5288,11 @@ EXPORT_SYMBOL(alloc_pages_exact);
  *
  * Return: pointer to the allocated area or %NULL in case of error.
  */
+#ifdef CONFIG_E2K
+void * alloc_pages_exact_nid(int nid, size_t size, gfp_t gfp_mask)
+#else
 void * __meminit alloc_pages_exact_nid(int nid, size_t size, gfp_t gfp_mask)
+#endif
 {
 	unsigned int order = get_order(size);
 	struct page *p;

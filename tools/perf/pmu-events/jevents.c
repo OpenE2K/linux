@@ -240,6 +240,12 @@ static struct map {
 	{ "hisi_sccl,hha", "hisi_sccl,hha" },
 	{ "hisi_sccl,l3c", "hisi_sccl,l3c" },
 	{ "L3PMC", "amd_l3" },
+#ifdef __e2k__
+	{ "sic_0_MCM", "sic_0_MCM" },
+	{ "sic_1_MCM", "sic_1_MCM" },
+	{ "sic_2_MCM", "sic_2_MCM" },
+	{ "sic_3_MCM", "sic_3_MCM" },
+#endif
 	{}
 };
 
@@ -1128,7 +1134,8 @@ int main(int argc, char *argv[])
 		/* Make build fail */
 		fclose(eventsfp);
 		free_arch_std_events();
-		return 1;
+		ret = 1;
+		goto out_free_mapfile;
 	} else if (rc) {
 		goto empty_map;
 	}
@@ -1141,8 +1148,7 @@ int main(int argc, char *argv[])
 		/* Make build fail */
 		fclose(eventsfp);
 		free_arch_std_events();
-		ret = 1;
-		goto out_free_mapfile;
+		return 1;
 	} else if (rc) {
 		goto empty_map;
 	}

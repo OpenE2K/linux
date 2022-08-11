@@ -22,6 +22,9 @@
 #include <linux/pvclock_gtod.h>
 #include <linux/compiler.h>
 #include <linux/audit.h>
+#ifdef CONFIG_MCST
+#include <linux/mcst_rt.h>
+#endif
 
 #include "tick-internal.h"
 #include "ntp_internal.h"
@@ -51,6 +54,10 @@ static struct {
 };
 
 static DEFINE_RAW_SPINLOCK(timekeeper_lock);
+#ifndef CONFIG_E2K
+static
+#endif
+seqcount_t timekeeper_seq;
 static struct timekeeper shadow_timekeeper;
 
 /**
@@ -744,6 +751,25 @@ void ktime_get_real_ts64(struct timespec64 *ts)
 }
 EXPORT_SYMBOL(ktime_get_real_ts64);
 
+#ifdef CONFIG_MCST
+s64 getns64timeofday()
+{
+	struct timekeeper *tk = &tk_core.timekeeper;
+	ktime_t base;
+	unsigned long seq;
+	s64 nsecs = 0;
+
+	do {
+		seq = read_seqcount_begin(&tk_core.seq);
+		base = tk->tkr_mono.base;
+		nsecs = timekeeping_get_ns(&tk->tkr_mono);
+
+	} while (read_seqcount_retry(&tk_core.seq, seq));
+	return base + nsecs;
+}
+EXPORT_SYMBOL(getns64timeofday);
+#endif
+
 ktime_t ktime_get(void)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
@@ -1229,7 +1255,13 @@ int do_settimeofday64(const struct timespec64 *ts)
 
 	if (!timespec64_valid_settod(ts))
 		return -EINVAL;
+#ifdef CONFIG_MCST
+	if (rts_act_mask & RTS_NO_SETTIME)
+		return -EPERM;
 
+	pr_warn("%s/-%d: settimeofday %lld s %ld ns\n",
+		current->comm, current->pid, ts->tv_sec, ts->tv_nsec);
+#endif
 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
 	write_seqcount_begin(&tk_core.seq);
 
@@ -2387,6 +2419,22 @@ void hardpps(const struct timespec64 *phase_ts, const struct timespec64 *raw_ts)
 }
 EXPORT_SYMBOL(hardpps);
 #endif /* CONFIG_NTP_PPS */
+
+#ifdef CONFIG_MCST
+extern void update_tmstatus_for_ntp(int *status, int reset, int set)
+{
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&timekeeper_lock, flags);
+	write_seqcount_begin(&timekeeper_seq);
+
+	*status &= ~reset;
+	*status |= set;
+
+	write_seqcount_end(&timekeeper_seq);
+	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
+}
+#endif
 
 /**
  * xtime_update() - advances the timekeeping infrastructure

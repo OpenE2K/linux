@@ -128,7 +128,28 @@ TRACE_EVENT(unmap,
 			__entry->iova, __entry->size, __entry->unmapped_size
 	)
 );
+#ifdef CONFIG_MCST
+TRACE_EVENT(flush,
 
+	TP_PROTO(int id, unsigned long iova),
+
+	TP_ARGS(id, iova),
+
+	TP_STRUCT__entry(
+		__field(int, id)
+		__field(u64, iova)
+	),
+
+	TP_fast_assign(
+		__entry->id = id;
+		__entry->iova = iova;
+	),
+
+	TP_printk("IOMMU: id=%x iova=%016llx",
+			__entry->id, __entry->iova
+	)
+);
+#endif
 DECLARE_EVENT_CLASS(iommu_error,
 
 	TP_PROTO(struct device *dev, unsigned long iova, int flags),

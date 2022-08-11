@@ -1,0 +1,16 @@
+header-y += ddi.h
+header-y += define.h
+header-y += dsp_io.h
+header-y += gpio_ac97.h
+header-y += kmng.h
+header-y += mcst_selftest.h
+header-y += mgpm.h
+header-y += mgpm_io.h
+header-y += mokm.h
+header-y += mpk.h
+header-y += mpv_io.h
+header-y += msps_io.h
+header-y += mvp_def.h
+header-y += rdma_user_intf.h
+header-y += user_intf.h
+header-y += gpio.h

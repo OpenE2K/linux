@@ -55,6 +55,9 @@
 #include <linux/rmap.h>
 #include <linux/export.h>
 #include <linux/delayacct.h>
+#ifdef CONFIG_MCST
+#include <linux/delay.h>
+#endif
 #include <linux/init.h>
 #include <linux/pfn_t.h>
 #include <linux/writeback.h>
@@ -71,6 +74,9 @@
 #include <linux/dax.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
+#ifdef CONFIG_MCST
+#include <linux/mcst_rt.h>
+#endif
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -310,7 +316,9 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 		return;
 
 	p4d = p4d_offset(pgd, start);
+#ifndef CONFIG_E2K
 	pgd_clear(pgd);
+#endif
 	p4d_free_tlb(tlb, p4d, start);
 }
 
@@ -799,7 +807,11 @@ static int copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 {
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *src_ptl, *uninitialized_var(dst_ptl);
+#else
 	spinlock_t *src_ptl, *dst_ptl;
+#endif
 	int progress = 0;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
@@ -1448,7 +1460,11 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 	struct mm_struct *mm = vma->vm_mm;
 	int retval;
 	pte_t *pte;
+#ifdef CONFIG_MCST
+	spinlock_t *uninitialized_var(ptl);
+#else
 	spinlock_t *ptl;
+#endif
 
 	retval = -EINVAL;
 	if (PageAnon(page) || PageSlab(page) || page_has_type(page))
@@ -1816,7 +1832,11 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long pfn, pgprot_t prot)
 {
 	pte_t *pte, *mapped_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *uninitialized_var(ptl);
+#else
 	spinlock_t *ptl;
+#endif
 	int err = 0;
 
 	mapped_pte = pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
@@ -2132,7 +2152,12 @@ int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 	if (WARN_ON(addr >= end))
 		return -EINVAL;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	BUG_ON(mm != &init_mm);
+	pgd = node_pgd_offset_kernel(numa_node_id(), addr);
+#else
 	pgd = pgd_offset(mm, addr);
+#endif
 	do {
 		next = pgd_addr_end(addr, end);
 		err = apply_to_p4d_range(mm, pgd, addr, next, fn, data);
@@ -4055,6 +4080,17 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	pgd_t *pgd;
 	p4d_t *p4d;
 	vm_fault_t ret;
+
+#ifdef CONFIG_MCST
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* Attempt to allocate page when VM_MLOCK_DONE set */
+		/* for gracefully exit() */
+		mm->extra_vm_flags &= ~VM_MLOCK_DONE;
+		pr_err("Attempt to allocate page when VM_MLOCK_DONE"
+				"(after mlockall())\n");
+		return VM_FAULT_SIGBUS;
+	}
+#endif  /* CONFIG_MCST */
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);

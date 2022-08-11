@@ -435,8 +435,13 @@ void __init anon_vma_init(void)
 	anon_vma_cachep = kmem_cache_create("anon_vma", sizeof(struct anon_vma),
 			0, SLAB_TYPESAFE_BY_RCU|SLAB_PANIC|SLAB_ACCOUNT,
 			anon_vma_ctor);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	anon_vma_chain_cachep = KMEM_CACHE(anon_vma_chain,
+			SLAB_PANIC|SLAB_ACCOUNT | SLAB_NO_SANITIZE);
+#else
 	anon_vma_chain_cachep = KMEM_CACHE(anon_vma_chain,
 			SLAB_PANIC|SLAB_ACCOUNT);
+#endif
 }
 
 /*
@@ -1348,7 +1353,12 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	struct page *subpage;
 	bool ret = true;
 	struct mmu_notifier_range range;
+#ifdef CONFIG_MCST
+	/* Fix compilation warning */
+	enum ttu_flags flags = (enum ttu_flags)(unsigned long)arg;
+#else
 	enum ttu_flags flags = (enum ttu_flags)arg;
+#endif
 
 	/*
 	 * When racing against e.g. zap_pte_range() on another cpu,

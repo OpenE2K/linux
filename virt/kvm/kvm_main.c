@@ -67,6 +67,15 @@
 /* Worst case buffer size needed for holding an integer. */
 #define ITOA_MAX_LEN 12
 
+#undef	DEBUG_KVM_MODE
+#undef	DebugKVM
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
+#define	DebugKVM(fmt, args...)						\
+({									\
+	if (DEBUG_KVM_MODE)						\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
 
@@ -107,7 +116,11 @@ static atomic_t hardware_enable_failed;
 struct kmem_cache *kvm_vcpu_cache;
 EXPORT_SYMBOL_GPL(kvm_vcpu_cache);
 
+#ifndef	CONFIG_E2K
 static __read_mostly struct preempt_ops kvm_preempt_ops;
+#else	/* CONFIG_E2K */
+__read_mostly struct preempt_ops kvm_preempt_ops;
+#endif	/* ! CONFIG_E2K */
 
 struct dentry *kvm_debugfs_dir;
 EXPORT_SYMBOL_GPL(kvm_debugfs_dir);
@@ -198,7 +211,11 @@ void vcpu_load(struct kvm_vcpu *vcpu)
 {
 	int cpu = get_cpu();
 	preempt_notifier_register(&vcpu->preempt_notifier);
+#ifndef	CONFIG_E2K
 	kvm_arch_vcpu_load(vcpu, cpu);
+#else	/* CONFIG_E2K */
+	kvm_arch_vcpu_load(vcpu, cpu, false /* from schedule ? */);
+#endif	/* ! CONFIG_E2K */
 	put_cpu();
 }
 EXPORT_SYMBOL_GPL(vcpu_load);
@@ -206,7 +223,11 @@ EXPORT_SYMBOL_GPL(vcpu_load);
 void vcpu_put(struct kvm_vcpu *vcpu)
 {
 	preempt_disable();
+#ifndef	CONFIG_E2K
 	kvm_arch_vcpu_put(vcpu);
+#else	/* CONFIG_E2K */
+	kvm_arch_vcpu_put(vcpu, false /* from schedule ? */);
+#endif	/* ! CONFIG_E2K */
 	preempt_notifier_unregister(&vcpu->preempt_notifier);
 	preempt_enable();
 }
@@ -952,6 +973,10 @@ static int check_memory_region_flags(const struct kvm_userspace_memory_region *m
 #ifdef __KVM_HAVE_READONLY_MEM
 	valid_flags |= KVM_MEM_READONLY;
 #endif
+#ifdef	CONFIG_E2K
+	/* FIXME: memory type should be implemented as ADDRESS SPACE TYPE */
+	valid_flags |= (KVM_MEM_TYPE_MASK | KVM_MEM_ADD_TYPE);
+#endif	/* CONFIG_E2K */
 
 	if (mem->flags & ~valid_flags)
 		return -EINVAL;
@@ -1015,6 +1040,8 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	int as_id, id;
 	enum kvm_mr_change change;
 
+	DebugKVM("started for phys addr 0x%llx user addr 0x%llx size 0x%llx\n",
+		mem->guest_phys_addr, mem->userspace_addr, mem->memory_size);
 	r = check_memory_region_flags(mem);
 	if (r)
 		goto out;
@@ -1043,6 +1070,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	slot = id_to_memslot(__kvm_memslots(kvm, as_id), id);
 	base_gfn = mem->guest_phys_addr >> PAGE_SHIFT;
 	npages = mem->memory_size >> PAGE_SHIFT;
+	DebugKVM("memory slot ID %d at %p\n", id, slot);
 
 	if (npages > KVM_MEM_MAX_NR_PAGES)
 		goto out;
@@ -1115,6 +1143,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	if (!slots)
 		goto out_free;
 	memcpy(slots, __kvm_memslots(kvm, as_id), sizeof(struct kvm_memslots));
+	DebugKVM("created memory slots table at %p\n", slots);
 
 	if ((change == KVM_MR_DELETE) || (change == KVM_MR_MOVE)) {
 		slot = id_to_memslot(slots, id);
@@ -1163,6 +1192,7 @@ out_slots:
 out_free:
 	kvm_free_memslot(kvm, &new, &old);
 out:
+	DebugKVM("returns with error %d\n", r);
 	return r;
 }
 EXPORT_SYMBOL_GPL(__kvm_set_memory_region);
@@ -2780,6 +2810,8 @@ static const struct vm_operations_struct kvm_vcpu_vm_ops = {
 
 static int kvm_vcpu_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	DebugKVM("started for VMA start 0x%lx end 0x%lx\n",
+		vma->vm_start, vma->vm_end);
 	vma->vm_ops = &kvm_vcpu_vm_ops;
 	return 0;
 }
@@ -3325,7 +3357,7 @@ static int kvm_ioctl_create_device(struct kvm *kvm,
 	return 0;
 }
 
-static long kvm_vm_ioctl_check_extension_generic(struct kvm *kvm, long arg)
+static long kvm_vm_ioctl_check_extension_generic(struct kvm *kvm, int arg)
 {
 	switch (arg) {
 	case KVM_CAP_USER_MEMORY:
@@ -3648,7 +3680,11 @@ static long kvm_vm_compat_ioctl(struct file *filp,
 }
 #endif
 
+#ifdef	CONFIG_E2K
+struct file_operations kvm_vm_fops = {
+#else	/* ! CONFIG_E2K */
 static struct file_operations kvm_vm_fops = {
+#endif	/* CONFIG_E2K */
 	.release        = kvm_vm_release,
 	.unlocked_ioctl = kvm_vm_ioctl,
 	.llseek		= noop_llseek,
@@ -4454,7 +4490,11 @@ static void kvm_sched_in(struct preempt_notifier *pn, int cpu)
 
 	kvm_arch_sched_in(vcpu, cpu);
 
+#ifndef	CONFIG_E2K
 	kvm_arch_vcpu_load(vcpu, cpu);
+#else	/* CONFIG_E2K */
+	kvm_arch_vcpu_load(vcpu, cpu, true /* from schedule ? */);
+#endif	/* ! CONFIG_E2K */
 }
 
 static void kvm_sched_out(struct preempt_notifier *pn,
@@ -4466,7 +4506,11 @@ static void kvm_sched_out(struct preempt_notifier *pn,
 		WRITE_ONCE(vcpu->preempted, true);
 		WRITE_ONCE(vcpu->ready, true);
 	}
+#ifndef	CONFIG_E2K
 	kvm_arch_vcpu_put(vcpu);
+#else	/* CONFIG_E2K */
+	kvm_arch_vcpu_put(vcpu, true /* from schedule ? */);
+#endif	/* ! CONFIG_E2K */
 }
 
 static void check_processor_compat(void *rtn)

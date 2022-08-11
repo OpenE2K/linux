@@ -110,6 +110,7 @@ IF_HAVE_PG_IDLE(PG_idle,		"idle"		)
 #define show_page_flags(flags)						\
 	(flags) ? __print_flags(flags, "|",				\
 	__def_pageflag_names						\
+	__def_pageflag_separator					\
 	) : "none"
 
 #if defined(CONFIG_X86)

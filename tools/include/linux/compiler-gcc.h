@@ -40,5 +40,7 @@
 #define __scanf(a, b)	__attribute__((format(scanf, a, b)))
 
 #if GCC_VERSION >= 50100
+#if !defined(__LCC__) || __LCC__ >= 125 /* MCST bug #109676 */
 #define COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW 1
+#endif
 #endif

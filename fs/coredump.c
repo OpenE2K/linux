@@ -51,6 +51,9 @@
 #include "internal.h"
 
 #include <trace/events/sched.h>
+#ifdef CONFIG_E2K
+#include <asm/coredump.h>
+#endif /* CONFIG_E2K */
 
 int core_uses_pid;
 unsigned int core_pipe_limit;
@@ -499,6 +502,9 @@ static void coredump_finish(struct mm_struct *mm, bool core_dumped)
 		wake_up_process(task);
 	}
 
+#ifdef CONFIG_E2K
+	clear_delayed_free_hw_stacks(mm);
+#endif /* CONFIG_E2K */
 	mm->core_state = NULL;
 }
 
