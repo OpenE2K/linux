@@ -114,24 +114,11 @@ typedef struct old_pcs_area {
 #define	USER_P_STACK_INIT_SIZE	(4 * PAGE_SIZE)
 #define	USER_PC_STACK_INIT_SIZE	PAGE_SIZE
 
-/*
- * Software user stack for 64-bit mode.
- */
-#define USER64_C_STACK_BYTE_INCR	(4 * PAGE_SIZE)		/* 4 pages */
-#define	USER64_STACK_TOP		(USER_PC_STACKS_BASE)
-
-/*
- * Software user stack for 32-bit mode.
- */
-#define USER32_C_STACK_BYTE_INCR	(4 * PAGE_SIZE)		/* 4 pages */
-#define	USER32_STACK_TOP		(TASK32_SIZE)
-
-/*
- * These macro definitions are to unify 32- and 64-bit user stack
- * handling procedures.
- */
-#define USER_C_STACK_BYTE_INCR (current->thread.flags & E2K_FLAG_32BIT ? \
-		USER32_C_STACK_BYTE_INCR : USER64_C_STACK_BYTE_INCR)
+#define USER_C_STACK_BYTE_INCR	(4 * PAGE_SIZE)
+/* Software user stack for 64-bit mode. */
+#define	USER64_STACK_TOP	USER_PC_STACKS_BASE
+/* Software user stack for 32-bit mode. */
+#define	USER32_STACK_TOP	TASK32_SIZE
 
 /*
  * This macro definition is to limit deafault user stack size

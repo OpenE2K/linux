@@ -16,6 +16,7 @@
 #include <asm/trap_def.h>
 #include <asm/trap_table.h>
 #include <asm/sclkr.h>
+#include <asm/kvm_host.h>
 #include <asm/kvm/uaccess.h>
 #include <asm/kvm/trace_kvm_hv.h>
 
@@ -72,8 +73,12 @@ void save_dimtp_v6(e2k_dimtp_t *dimtp)
 
 void restore_dimtp_v6(const e2k_dimtp_t *dimtp)
 {
-	NATIVE_SET_DSREG_CLOSED_NOEXC(dimtp.lo, dimtp->lo, 4);
-	NATIVE_SET_DSREG_CLOSED_NOEXC(dimtp.hi, dimtp->hi, 4);
+	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi, dimtp->lo, dimtp->hi, 4);
+}
+
+void clear_dimtp_v6(void)
+{
+	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi, 0ull, 0ull, 4);
 }
 
 #ifdef CONFIG_MLT_STORAGE
@@ -154,16 +159,26 @@ static void clear_guest_epic(void)
 static void save_epic_context(struct kvm_vcpu_arch *vcpu)
 {
 	epic_page_t *cepic = vcpu->hw_ctxt.cepic;
+	union cepic_epic_int reg_epic_int;
 	unsigned int i;
-	union cepic_cir epic_reg_cir;
+
+	/* Shuld not happen: scheduler is always called with open interrupts
+	 * so CEPIC_EPIC_INT must have been delivered before calling vcpu_put
+	 * (and in case we are in kvm_arch_vcpu_blocking() - it is also called
+	 * with open interrupts). */
+	reg_epic_int.raw = epic_read_w(CEPIC_EPIC_INT);
+	WARN_ON_ONCE(reg_epic_int.bits.stat);
+
+	kvm_epic_timer_stop(false);
+	kvm_epic_invalidate_dat(vcpu);
 
 	cepic->ctrl = epic_read_guest_w(CEPIC_CTRL);
 	cepic->id = epic_read_guest_w(CEPIC_ID);
 	cepic->cpr = epic_read_guest_w(CEPIC_CPR);
 	cepic->esr = epic_read_guest_w(CEPIC_ESR);
-	cepic->esr2 = epic_read_guest_w(CEPIC_ESR2);
-	cepic->icr = epic_read_guest_d(CEPIC_ICR);
-	cepic->timer_lvtt = epic_read_guest_w(CEPIC_TIMER_LVTT);
+	cepic->esr2.raw = epic_read_guest_w(CEPIC_ESR2);
+	cepic->icr.raw = epic_read_guest_d(CEPIC_ICR);
+	cepic->timer_lvtt.raw = epic_read_guest_w(CEPIC_TIMER_LVTT);
 	cepic->timer_init = epic_read_guest_w(CEPIC_TIMER_INIT);
 	cepic->timer_cur = epic_read_guest_w(CEPIC_TIMER_CUR);
 	cepic->timer_div = epic_read_guest_w(CEPIC_TIMER_DIV);
@@ -172,17 +187,25 @@ static void save_epic_context(struct kvm_vcpu_arch *vcpu)
 
 	/* Save PMIRR, PNMIRR, ESR_NEW and CIR, and clear them in hardware */
 	for (i = 0; i < CEPIC_PMIRR_NR_DREGS; i++) {
-		atomic64_or(epic_read_guest_d(CEPIC_PMIRR + i * 8),
-			&cepic->pmirr[i]);
-		if (cepic->pmirr[i].counter)
-			trace_save_pmirr(i, cepic->pmirr[i].counter);
+		u64 pmirr_reg = epic_read_guest_d(CEPIC_PMIRR + i * 8);
+		u64 pmirr_old = atomic64_fetch_or(pmirr_reg, &cepic->pmirr[i]);
+		u64 pmirr_new = pmirr_old | pmirr_reg;
+		if (pmirr_new)
+			trace_save_pmirr(i, pmirr_new);
 	}
 	atomic_or(epic_read_guest_w(CEPIC_PNMIRR), &cepic->pnmirr);
+	if (cepic->pnmirr.counter)
+		trace_save_pnmirr(cepic->pnmirr.counter);
+
 	atomic_or(epic_read_guest_w(CEPIC_ESR_NEW), &cepic->esr_new);
-	cepic->cir = epic_read_guest_w(CEPIC_CIR);
-	epic_reg_cir.raw = cepic->cir;
-	if (epic_reg_cir.bits.stat)
-		trace_save_cir(cepic->cir);
+	cepic->cir.raw = epic_read_guest_w(CEPIC_CIR);
+	if (cepic->cir.bits.stat)
+		trace_save_cir(cepic->cir.raw);
+
+	WARN_ONCE(cepic->icr.bits.stat || cepic->esr2.bits.stat ||
+			cepic->timer_lvtt.bits.stat,
+			"CEPIC stat bit is set upon guest saving: icr 0x%llx, esr2 0x%x, timer_lvtt 0x%x",
+			cepic->icr.raw, cepic->esr2.raw, cepic->timer_lvtt.raw);
 
 	clear_guest_epic();
 }
@@ -190,30 +213,30 @@ static void save_epic_context(struct kvm_vcpu_arch *vcpu)
 static void restore_epic_context(const struct kvm_vcpu_arch *vcpu)
 {
 	epic_page_t *cepic = vcpu->hw_ctxt.cepic;
-	unsigned int i, j;
-	unsigned long epic_pmirr, epic_pnmirr;
-	union cepic_cir epic_reg_cir;
+	unsigned int i, j, epic_pnmirr;
+	unsigned long epic_pmirr;
+
+	kvm_hv_epic_load(arch_to_vcpu(vcpu));
 
 	/*
 	 * If cir.stat = 1, then cir.vect should be raised in PMIRR instead
-	 * CEPIC_CIR is not resotred here to avoid overwriting another interrupt
+	 * CEPIC_CIR is not restored here to avoid overwriting another interrupt
 	 */
-	epic_reg_cir.raw = cepic->cir;
-	if (epic_reg_cir.bits.stat) {
-		unsigned int vector = epic_reg_cir.bits.vect;
+	if (cepic->cir.bits.stat) {
+		unsigned int vector = cepic->cir.bits.vect;
 
-		trace_restore_cir(cepic->cir);
+		trace_restore_cir(cepic->cir.raw);
 		set_bit(vector & 0x3f,
 				(void *)&cepic->pmirr[vector >> 6].counter);
-		cepic->cir = 0;
+		cepic->cir.raw = 0;
 	}
 	epic_write_guest_w(CEPIC_CTRL, cepic->ctrl);
 	epic_write_guest_w(CEPIC_ID, cepic->id);
 	epic_write_guest_w(CEPIC_CPR, cepic->cpr);
 	epic_write_guest_w(CEPIC_ESR, cepic->esr);
-	epic_write_guest_w(CEPIC_ESR2, cepic->esr2);
-	epic_write_guest_d(CEPIC_ICR, cepic->icr);
-	epic_write_guest_w(CEPIC_TIMER_LVTT, cepic->timer_lvtt);
+	epic_write_guest_w(CEPIC_ESR2, cepic->esr2.raw);
+	epic_write_guest_d(CEPIC_ICR, cepic->icr.raw);
+	epic_write_guest_w(CEPIC_TIMER_LVTT, cepic->timer_lvtt.raw);
 	epic_write_guest_w(CEPIC_TIMER_INIT, cepic->timer_init);
 	epic_write_guest_w(CEPIC_TIMER_CUR, cepic->timer_cur);
 	epic_write_guest_w(CEPIC_TIMER_DIV, cepic->timer_div);
@@ -237,8 +260,10 @@ static void restore_epic_context(const struct kvm_vcpu_arch *vcpu)
 		}
 	}
 	epic_pnmirr = cepic->pnmirr.counter;
-	if (epic_pnmirr)
+	if (epic_pnmirr) {
 		atomic_set(&cepic->pnmirr, 0);
+		trace_restore_pnmirr(epic_pnmirr);
+	}
 	if (epic_bgi_mode) {
 		for (j = 5; j < 14; j++)
 			if (cepic->pnmirr_byte[j]) {
@@ -249,6 +274,19 @@ static void restore_epic_context(const struct kvm_vcpu_arch *vcpu)
 	epic_write_w(CEPIC_PNMIRR_OR, epic_pnmirr);
 	epic_write_w(CEPIC_ESR_NEW_OR, cepic->esr_new.counter);
 	cepic->esr_new.counter = 0;
+
+	kvm_epic_timer_start();
+	kvm_epic_enable_int();
+}
+
+void kvm_epic_vcpu_blocking(struct kvm_vcpu_arch *vcpu)
+{
+	save_epic_context(vcpu);
+}
+
+void kvm_epic_vcpu_unblocking(struct kvm_vcpu_arch *vcpu)
+{
+	restore_epic_context(vcpu);
 }
 
 void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
@@ -326,8 +364,10 @@ void save_kvm_context_v6(struct kvm_vcpu_arch *vcpu)
 
 	/*
 	 * CEPIC context
+	 * See comment before kvm_arch_vcpu_blocking() for details
+	 * about KVM_MP_STATE_HALTED
 	 */
-	if (cpu_has(CPU_FEAT_EPIC))
+	if (cpu_has(CPU_FEAT_EPIC) && vcpu->mp_state != KVM_MP_STATE_HALTED)
 		save_epic_context(vcpu);
 
 	/*
@@ -424,7 +464,7 @@ void restore_kvm_context_v6(const struct kvm_vcpu_arch *vcpu)
 	/*
 	 * CEPIC context
 	 */
-	if (cpu_has(CPU_FEAT_EPIC))
+	if (cpu_has(CPU_FEAT_EPIC) && vcpu->mp_state != KVM_MP_STATE_HALTED)
 		restore_epic_context(vcpu);
 
 	/*
@@ -479,10 +519,10 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 		get_cycles(), aa_field, aafstr);
 
 	/* condition.store = 0
-	 * condition.spec = 0
 	 * condition.fault_type = 0 */
 	AW(condition) = 0;
 	AS(condition).fmt = LDST_BYTE_FMT;
+	AS(condition).spec = 1;
 	AW(mask) = 0;
 
 	while (aa_bit < 4) {
@@ -607,14 +647,21 @@ static void __cpuidle mem_wait_idle(void)
 	NATIVE_READ_MAS_D_CH(&current_thread_info()->flags,
 			MAS_WATCH_FOR_MODIFICATION_V6, 0);
 	if (!need_resched())
-		E2K_WAIT_V6(_mem_mod | _int);
+		E2K_WAIT(_mem_mod | _int);
 }
 
 void __cpuidle C1_enter_v6(void)
 {
-	if (!current_set_polling_and_test())
+	if (IS_HV_GM()) {
+		/* Do not set TIF_POLLING_NRFLAG in guest since
+		 * "wait int" here will be intercepted and guest
+		 * will be put to sleep. */
 		mem_wait_idle();
-	current_clr_polling();
+	} else {
+		if (!current_set_polling_and_test())
+			mem_wait_idle();
+		current_clr_polling();
+	}
 }
 
 void __cpuidle C3_enter_v6(void)
@@ -633,8 +680,7 @@ void __cpuidle C3_enter_v6(void)
 	if (cpu_has(CPU_HWBUG_E16C_SLEEP)) {
 		freq_core_sleep_t fr_state;
 		do {
-			fr_state.word = sic_read_node_nbsr_reg(numa_node_id(),
-					PMC_FREQ_CORE_N_SLEEP(smp_processor_id()));
+			fr_state.word = sic_read_node_nbsr_reg(node, reg);
 		} while (fr_state.status != 0 /* C0 */);
 	}
 

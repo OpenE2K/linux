@@ -227,6 +227,7 @@ void __init_recv boot_setup_iset_features(struct machdep *machine)
 		machine->restore_kvm_context = &restore_kvm_context_v6;
 		machine->save_dimtp = &save_dimtp_v6;
 		machine->restore_dimtp = &restore_dimtp_v6;
+		machine->clear_dimtp = &clear_dimtp_v6;
 	}
 
 	if (machine->native_iset_ver < E2K_ISET_V5) {
@@ -329,24 +330,37 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 		mach_id |= MACHINE_ID_E2K_IOHUB;
 
 	mach_id |= boot_get_e2k_machine_id();
+#if CONFIG_E2K_MINVER == 2
 	if (mach_id == MACHINE_ID_ES2_DSP_LMS ||
 			mach_id == MACHINE_ID_ES2_RU_LMS ||
 			mach_id == MACHINE_ID_ES2_DSP ||
 			mach_id == MACHINE_ID_ES2_RU) {
 		boot_es2_setup_arch();
-	} else if (mach_id == MACHINE_ID_E2S_LMS ||
+	} else
+#endif
+#if CONFIG_E2K_MINVER <= 3
+	if (mach_id == MACHINE_ID_E2S_LMS ||
 			mach_id == MACHINE_ID_E2S) {
 		boot_e2s_setup_arch();
-	} else if (mach_id == MACHINE_ID_E8C_LMS ||
+	} else
+#endif
+#if CONFIG_E2K_MINVER <= 4
+	if (mach_id == MACHINE_ID_E8C_LMS ||
 			mach_id == MACHINE_ID_E8C) {
 		boot_e8c_setup_arch();
 	} else if (mach_id == MACHINE_ID_E1CP_LMS ||
 			mach_id == MACHINE_ID_E1CP) {
 		boot_e1cp_setup_arch();
-	} else if (mach_id == MACHINE_ID_E8C2_LMS ||
+	} else
+#endif
+#if CONFIG_E2K_MINVER <= 5
+	if (mach_id == MACHINE_ID_E8C2_LMS ||
 			mach_id == MACHINE_ID_E8C2) {
 		boot_e8c2_setup_arch();
-	} else if (mach_id == MACHINE_ID_E12C_LMS ||
+	} else
+#endif
+#if CONFIG_E2K_MINVER <= 6
+	if (mach_id == MACHINE_ID_E12C_LMS ||
 			mach_id == MACHINE_ID_E12C) {
 		boot_e12c_setup_arch();
 	} else if (mach_id == MACHINE_ID_E16C_LMS ||
@@ -356,6 +370,7 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 			mach_id == MACHINE_ID_E2C3) {
 		boot_e2c3_setup_arch();
 	}
+#endif /* CONFIG_E2K_MINVER */
 
 	boot_native_machine_id = mach_id;
 #endif /* CONFIG_E2K_MACHINE */
@@ -896,10 +911,13 @@ void __init init_start_kernel_init(bool bsp, int cpuid)
 {
 	setup_stack_print();
 
-	if (bsp)
+	if (bsp) {
+		init_preempt_count_resched(INIT_PREEMPT_COUNT, false);
 		e2k_start_kernel();
-	else
+	} else {
+		init_preempt_count_resched(PREEMPT_ENABLED, false);
 		e2k_start_secondary(cpuid);
+	}
 
 	/*
 	 * Never should be here

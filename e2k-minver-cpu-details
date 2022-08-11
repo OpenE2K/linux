@@ -1,0 +1,32 @@
+Universal E2K kernels use CONFIG_E2K_MINVER* in order to build generic
+kernels able to run on different E2K CPUs. In general this follows
+places where E2K_MACHINE is being used to disable bug workarounds
+or features needed *only* for older generations:
+
+The following are places where E2K_MACHINE is being used and where
+and why it is modifiend for E2K_MINVER* when necessary:
+
+arch/e2k/Kconfig                        add E2K_MINVER, enable v3 by default
+arch/e2k/Makefile                       none
+arch/e2k/configs/*                      skipped [no effect]
+arch/e2k/include/asm/atomic_api.h       v4 (e8c only) workaround
+arch/e2k/include/asm/cache.h            none (all cache shifts are equal now)
+arch/e2k/include/asm/e2k.h              none
+arch/e2k/include/asm/e2k_api.h          v3 only bug workaround hooks with penalty
+arch/e2k/include/asm/e2k_sic.h          none
+arch/e2k/include/asm/machdep.h          none (E2K_MACHINE triggers static check using next argument)
+arch/e2k/include/asm/p2v/boot_head.h    none
+arch/e2k/include/asm/simul.h            none
+arch/e2k/kernel/Makefile                use elbrus-v$(CONFIG_E2K_MINVER) optimizations instead of v2
+arch/e2k/kernel/cpu/Makefile            drop support for CPUs below E2K_MINVER
+arch/e2k/kernel/e2k.c                   drop support for CPUs below E2K_MINVER
+arch/e2k/kernel/setup.c                 drop support for CPUs below E2K_MINVER
+arch/e2k/kernel/ttable-inline.h         v2 only workaround
+arch/e2k/kernel/vmlinux.lds.S           none
+arch/e2k/kvm/Kconfig                    v6+ (kvm guest support)
+arch/e2k/kvm/guest/boot.c               none
+arch/e2k/kvm/guest/e2k_virt.c           none
+arch/e2k/p2v/boot_e2k_sic.c             drop support for CPUs below E2K_MINVER
+arch/e2k/p2v/boot_head.c                drop support for CPUs below E2K_MINVER
+arch/e2k/p2v/cpu/Makefile               drop support for CPUs below E2K_MINVER
+kernel/locking/rtmutex.c                v2..v4 specific mutexes

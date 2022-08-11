@@ -194,6 +194,9 @@ static void sunlance_remove(struct pci_dev *pdev)
 {
 	struct lance_private *lp = dev_get_drvdata(&pdev->dev);
 
+#ifdef CONFIG_SYSCTL
+	unregister_sysctl_table(lp->ctl_table_header);
+#endif /* CONFIG_SYSCTL */
 	dev_set_drvdata(&pdev->dev, NULL);
 	unregister_netdev(lp->dev);
         lance_free_hwresources(lp);

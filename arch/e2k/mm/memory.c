@@ -63,16 +63,22 @@
 
 void print_va_tlb(e2k_addr_t addr, int large_page)
 {
-	int set;
-	for (set = 0; set < NATIVE_TLB_SETS_NUM; set++) {
+	tlb_line_state_t tlb;
+	tlb_set_state_t *set;
+	int set_no;
+
+	get_va_tlb_state(&tlb, addr, large_page);
+
+	for (set_no = 0; set_no < NATIVE_TLB_SETS_NUM; set_no++) {
 		tlb_tag_t tlb_tag;
 		pte_t tlb_entry;
-		tlb_tag = read_DTLB_va_tag_reg(addr, set, large_page);
-		pte_val(tlb_entry) = read_DTLB_va_entry_reg(addr, set,
-								large_page);
+
+		set = &tlb.sets[set_no];
+		tlb_tag = set->tlb_tag;
+		tlb_entry = set->tlb_entry;
 		printk("TLB addr 0x%lx : set #%d tag 0x%016lx entry "
 			"0x%016lx\n",
-			addr, set, tlb_tag_val(tlb_tag), pte_val(tlb_entry));
+			addr, set_no, tlb_tag_val(tlb_tag), pte_val(tlb_entry));
 	}
 }
 
@@ -345,7 +351,6 @@ static int e2k_make_single_pmd_valid(struct vm_area_struct *vma, pmd_t *pmd,
 		 address, pmd, (set_invalid) ? "invalidate" : "validate");
 
 	if (hpage) {
-		struct hstate *h = hstate_vma(vma);
 		pte_t *huge_pte = (pte_t *) pmd;
 
 		if (E2K_LARGE_PAGE_SIZE == E2K_4M_PAGE_SIZE) {
@@ -353,8 +358,7 @@ static int e2k_make_single_pmd_valid(struct vm_area_struct *vma, pmd_t *pmd,
 				huge_pte--;
 		}
 
-		ptl = huge_pte_lockptr(h, mm, huge_pte);
-
+		ptl = huge_pte_lockptr(hstate_vma(vma), mm, huge_pte);
 	} else {
 		ptl = pmd_lockptr(mm, pmd);
 	}

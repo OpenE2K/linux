@@ -1,14 +1,6 @@
 #ifndef _E2K_TLB_H
 #define _E2K_TLB_H
 
-#include <linux/swap.h>
-
-
-static inline void __tlb_remove_table(void *_table)
-{
-	free_page_and_swap_cache((struct page *)_table);
-}
-
 #define tlb_flush(tlb)							\
 {									\
 	if (!(tlb)->fullmm && !(tlb)->need_flush_all)			\

@@ -118,7 +118,14 @@ extern long protected_sys_futex(const unsigned long __user uaddr,
 			 const unsigned long __user uaddr2,
 			 const unsigned long	val3,
 			 const struct pt_regs	*regs);
-extern long protected_sys_getgroups(const unsigned long a1, /* size */
+extern long protected_sys_getgroups(const long		a1, /* size */
+			    const unsigned long __user a2, /* list[] */
+			    const unsigned long unused3,
+			    const unsigned long unused4,
+			    const unsigned long unused5,
+			    const unsigned long unused6,
+			    const struct pt_regs  *regs);
+extern long protected_sys_setgroups(const long		a1, /* size */
 			    const unsigned long __user a2, /* list[] */
 			    const unsigned long unused3,
 			    const unsigned long unused4,
@@ -256,13 +263,13 @@ extern long protected_sys_olduselib(const unsigned long __user a1, /* library */
 	/* NB> 'olduselib' is obsolete syscall; unsupported in CPU ISET V6 */
 extern long protected_sys_uselib(const unsigned long __user a1, /* library */
 				 const unsigned long __user a2); /* umdd */
-extern long protected_sys_sigaltstack(const unsigned long __user a1,  /* ss */
-				const unsigned long __user a2, /* oss */
-				const unsigned long	unused3,
-				const unsigned long	unused4,
-				const unsigned long	unused5,
-				const unsigned long	unused6,
-				const struct pt_regs	*regs);
+extern long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
+					stack_prot_t __user *old_ss_128,
+				      const unsigned long	unused3,
+				      const unsigned long	unused4,
+				      const unsigned long	unused5,
+				      const unsigned long	unused6,
+				      const struct pt_regs	*regs);
 extern long protected_sys_unuselib(const unsigned long	__user a1, /* addr */
 			const unsigned long	a2,
 			const unsigned long	a3,
@@ -335,6 +342,13 @@ extern long protected_sys_ioctl(const int		fd,		/* a1 */
 				const unsigned long	unused5,
 				const unsigned long	unused6,
 				const struct pt_regs	*regs);
+extern long protected_sys_bpf(const int cmd,			/* a1 */
+			      const unsigned long __user attr,	/* a2 */
+			      const unsigned int size,		/* a3 */
+			      const unsigned long unused4,
+			      const unsigned long unused5,
+			      const unsigned long unused6,
+			      const struct pt_regs *regs);
 extern long protected_sys_epoll_ctl(const unsigned long epfd,	/* a1 */
 				    const unsigned long op,	/* a2 */
 				    const unsigned long fd,	/* a3 */

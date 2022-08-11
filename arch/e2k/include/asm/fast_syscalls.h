@@ -240,7 +240,7 @@ FAST_SYS_CLOCK_GETTIME(const clockid_t which_clock, struct timespec __user *tp)
 	struct thread_info *const ti = READ_CURRENT_REG();
 	int r;
 
-	prefetchw(&fsys_data);
+	prefetch_nospec(&fsys_data);
 
 #ifdef	CONFIG_KVM_HOST_MODE
 	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))

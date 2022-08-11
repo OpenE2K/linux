@@ -1,8 +1,9 @@
 #ifndef _E2K_MMU_TYPES_H_
 #define _E2K_MMU_TYPES_H_
 
+#include <linux/compiler.h>
 #include <linux/types.h>
-
+#include <asm/mas.h>
 #include <uapi/asm/iset_ver.h>
 
 #ifndef	__ASSEMBLY__
@@ -29,8 +30,8 @@ typedef struct { pgprotval_t pgprot; } pgprot_t;
 #define pgprot_val(x)	((x).pgprot)
 
 #define __pte(x)	((pte_t) { (x) } )
-#define __pmd(x)	((pmd_t) { (x) } )
 #define __pud(x)	((pud_t) { (x) } )
+#define __pmd(x)	((pmd_t) { (x) } )
 #define __pgd(x)	((pgd_t) { (x) } )
 #define __pgprot(x)	((pgprot_t) { (x) } )
 
@@ -499,18 +500,68 @@ typedef union mmu_tc_cond_dword {
 } mmu_tc_cond_dword_t;
 
 typedef union {
+	struct {
+		u64 dst		:10;	// [0-9]
+		u64 opcode	:6;	// [10-15]
+		u64 r0		:1;	// [16]
+		u64 store	:1;	// [17]
+		u64 mode_80	:1;	// [18]
+		u64 s_f		:1;	// [19]
+		u64 mas		:7;	// [20-26]
+		u64 root	:1;	// [27]
+		u64 scal	:1;	// [28]
+		u64 sru		:1;	// [29]
+		u64 spec	:1;	// [30]
+		u64 pm		:1;	// [31]
+		u64 chan	:2;	// [32-33]
+		u64 r1		:1;	// [34]
+		u64 fault_type :13;	// [35-47]
+		u64 miss_lvl	:2;	// [48-49]
+		u64 num_align	:1;	// [50]
+		u64 empt	:1;	// [51]
+		u64 clw		:1;	// [52]
+		u64 dst_rcv	:10;	// [53-62]
+		u64 rcv		:1;	// [63]
+	};
+	struct {
+		u64 address	:8;	// [0-7]
+		u64 vr		:1;	// [8]
+		u64 vl		:1;	// [9]
+		u64 fmt		:3;	// [10-12]
+		/* Be careful: npsp=1 => access is not protected,
+		 * but npsp=0 does not mean that access is protected. */
+		u64 npsp	:1;	// [13]
+		u64 fmtc	:2;	// [14-15]
+		u64 ___x1	:19;	// [34-16]
+		u64 global_sp	:1;	/* [35] */
+		u64 page_bound	:1;	/* [36] */
+		u64 exc_mem_lock :1;	/* [37] */
+		u64 ph_pr_page	:1;	/* [38] */
+		u64 io_page	:1;	/* [39] */
+		u64 isys_page	:1;	/* [40] */
+		u64 prot_page	:1;	/* [41] */
+		u64 priv_page	:1;	/* [42] */
+		u64 illegal_page :1;	/* [43] */
+		u64 nwrite_page	:1;	/* [44] */
+		u64 page_miss	:1;	/* [45] */
+		u64 ph_bound	:1;	/* [46] */
+		u64 intl_res_bits :1;	/* [47] */
+		u64 ___x0	:5;	/* [52:48] */
+		u64 dst_ind	:8;	/* [60:53] */
+		u64 ___x2	:3;	/* [63-61] */
+	};
 	u64 word;
 	union mmu_tc_cond_dword fields;
 } tc_cond_t;
 
-#define TC_COND_FMT_FULL(cond) (AS(cond).fmt | (AS(cond).fmtc << 3))
+#define TC_COND_FMT_FULL(cond) (cond.fmt | (cond.fmtc << 3))
 
 static inline bool tc_cond_is_special_mmu_aau(tc_cond_t cond)
 {
-	unsigned int mas = AS(cond).mas;
-	int chan = AS(cond).chan;
-	int store = AS(cond).store;
-	int spec_mode = AS(cond).spec;
+	unsigned int mas = cond.mas;
+	int chan = cond.chan;
+	int store = cond.store;
+	int spec_mode = cond.spec;
 
 	if (unlikely(is_mas_special_mmu_aau(mas) && (store ||
 			!store && !spec_mode && (chan == 1 || chan == 3))))
@@ -521,36 +572,36 @@ static inline bool tc_cond_is_special_mmu_aau(tc_cond_t cond)
 
 static inline bool tc_cond_is_check_ld(tc_cond_t cond)
 {
-	unsigned int mas = AS(cond).mas;
-	int store = AS(cond).store;
-	int spec_mode = AS(cond).spec;
+	unsigned int mas = cond.mas;
+	int store = cond.store;
+	int spec_mode = cond.spec;
 
 	return is_mas_check(mas) && !spec_mode && !store;
 }
 
 static inline bool tc_cond_is_check_unlock_ld(tc_cond_t cond)
 {
-	unsigned int mas = AS(cond).mas;
-	int store = AS(cond).store;
-	int spec_mode = AS(cond).spec;
+	unsigned int mas = cond.mas;
+	int store = cond.store;
+	int spec_mode = cond.spec;
 
 	return is_mas_check_unlock(mas) && !spec_mode && !store;
 }
 
 static inline bool tc_cond_is_lock_check_ld(tc_cond_t cond)
 {
-	unsigned int mas = AS(cond).mas;
-	int store = AS(cond).store;
-	int spec_mode = AS(cond).spec;
+	unsigned int mas = cond.mas;
+	int store = cond.store;
+	int spec_mode = cond.spec;
 
 	return is_mas_lock_check(mas) && spec_mode && !store;
 }
 
 static inline bool tc_cond_is_spec_lock_check_ld(tc_cond_t cond)
 {
-	unsigned int mas = AS(cond).mas;
-	int store = AS(cond).store;
-	int spec_mode = AS(cond).spec;
+	unsigned int mas = cond.mas;
+	int store = cond.store;
+	int spec_mode = cond.spec;
 
 	return is_mas_spec_lock_check(mas) && spec_mode && !store;
 }
@@ -567,7 +618,7 @@ static inline int tc_cond_to_size(tc_cond_t cond)
 	if (fmt == LDST_QP_FMT || fmt == TC_FMT_QPWORD_Q) {
 		size = 16;
 	} else if (fmt == LDST_QWORD_FMT || fmt == TC_FMT_QWORD_QP) {
-		if (AS(cond).chan == 0 || AS(cond).chan == 2)
+		if (cond.chan == 0 || cond.chan == 2)
 			size = 16;
 		else
 			size = 8;
@@ -619,11 +670,11 @@ ldst_chan_num_to_chan_opc(int chan_opc)
 static inline bool
 tc_cond_load_has_store_semantics(tc_cond_t condition, unsigned iset_ver)
 {
-	const unsigned mas = AS(condition).mas;
+	const unsigned mas = condition.mas;
 	const unsigned mod = (mas & MAS_MOD_MASK) >> MAS_MOD_SHIFT;
-	const unsigned chan = AS(condition).chan;
-	const bool root = AS(condition).root;
-	const bool spec = AS(condition).spec;
+	const unsigned chan = condition.chan;
+	const bool root = condition.root;
+	const bool spec = condition.spec;
 
 	if (chan != 0)
 		return false;
@@ -644,9 +695,9 @@ tc_cond_load_has_store_semantics(tc_cond_t condition, unsigned iset_ver)
 static inline bool
 tc_cond_is_store(tc_cond_t condition, unsigned iset_ver)
 {
-	const unsigned mas = AS(condition).mas;
+	const unsigned mas = condition.mas;
 
-	if (AS(condition).store && (mas != MAS_DCACHE_LINE_FLUSH))
+	if (condition.store && (mas != MAS_DCACHE_LINE_FLUSH))
 		return true;
 	return tc_cond_load_has_store_semantics(condition, iset_ver);
 }
@@ -704,7 +755,7 @@ typedef struct {
 static inline bool is_record_asynchronous(tc_cond_t cond)
 {
 	/* We use bitwise OR for performance */
-	return AS(cond).mode_80 | AS(cond).s_f | AS(cond).sru | AS(cond).clw;
+	return cond.mode_80 | cond.s_f | cond.sru | cond.clw;
 }
 
 /**

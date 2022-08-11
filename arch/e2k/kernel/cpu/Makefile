@@ -12,15 +12,6 @@ CFLAGS_iset_v5.o := -march=elbrus-v5
 CFLAGS_iset_v6.o := -march=elbrus-v6
 AFLAGS_recovery_string_v5.o := -march=elbrus-v5
 
-CFLAGS_REMOVE_boot_iset_v2.o += -pg
-CFLAGS_boot_iset_v2.o += -DE2K_P2V -fno-ld-spec
-
-CFLAGS_REMOVE_boot_iset_v3.o += -pg
-CFLAGS_boot_iset_v3.o += -DE2K_P2V -fno-ld-spec
-
-CFLAGS_REMOVE_boot_iset_v6.o += -pg
-CFLAGS_boot_iset_v6.o += -DE2K_P2V -fno-ld-spec
-
 ifdef CONFIG_FUNCTION_TRACER
 # Do not profile debug and lowlevel utilities
 CFLAGS_REMOVE_es2.o = -pg
@@ -52,7 +43,13 @@ CFLAGS_e8c2.o			= $(CFLAGS_E8C2)
 CFLAGS_e12c.o			= $(CFLAGS_E12C)
 CFLAGS_e16c.o			= $(CFLAGS_E16C)
 CFLAGS_e2c3.o			= $(CFLAGS_E2C3)
-obj-y				+= es2.o e2s.o e8c.o e1cp.o e8c2.o e12c.o \
-				   e16c.o e2c3.o
+obj-$(CONFIG_CPU_E2S)	+= e2s.o
+obj-$(CONFIG_CPU_ES2)	+= es2.o
+obj-$(CONFIG_CPU_E8C)	+= e8c.o
+obj-$(CONFIG_CPU_E1CP)	+= e1cp.o
+obj-$(CONFIG_CPU_E8C2)	+= e8c2.o
+obj-$(CONFIG_CPU_E12C)	+= e12c.o
+obj-$(CONFIG_CPU_E16C)	+= e16c.o
+obj-$(CONFIG_CPU_E2C3)	+= e2c3.o
 endif
 

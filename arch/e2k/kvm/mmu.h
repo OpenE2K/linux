@@ -12,6 +12,7 @@
 #include <linux/uaccess.h>
 #include <asm/vga.h>
 #include <asm/e2k_sic.h>
+#include <asm/e2k_debug.h>
 #include <asm/kvm/hypercall.h>
 #include <asm/kvm/mmu.h>
 
@@ -41,10 +42,10 @@
 
 #undef	DEBUG_PT_STRUCT_MODE
 #undef	DebugPTS
-#define	DEBUG_PT_STRUCT_MODE	1	/* page tables structure debugging */
+#define	DEBUG_PT_STRUCT_MODE	0	/* page tables structure debugging */
 #define	DebugPTS(fmt, args...)					\
 ({									\
-	if (DEBUG_PT_STRUCT_MODE)					\
+	if (DEBUG_PT_STRUCT_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -575,6 +576,16 @@ static inline void kvm_vcpu_flush_tlb(struct kvm_vcpu *vcpu)
 	__flush_icache_all();
 }
 
+typedef struct kvm_spt_entry {
+	pgprot_t *sptep;
+	pgprot_t spte;
+} kvm_spt_entry_t;
+typedef struct kvm_shadow_trans {
+	e2k_addr_t addr;
+	kvm_spt_entry_t pt_entries[E2K_PT_LEVELS_NUM + 1];
+	int last_level;
+} kvm_shadow_trans_t;
+
 typedef struct kvm_shadow_walk_iterator {
 	e2k_addr_t addr;
 	hpa_t shadow_addr;
@@ -604,6 +615,9 @@ void shadow_walk_next(struct kvm_shadow_walk_iterator *iterator);
 					true;				\
 				});					\
 				__shadow_walk_next(&(_walker), spte))
+
+extern int kvm_get_va_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
+				mmu_spt_trans_t __user *user_trans_info);
 
 /*
  * Return values of handle_mmio_page_fault:
@@ -685,8 +699,8 @@ extern int handle_mmio_page_fault(struct kvm_vcpu *vcpu, u64 addr, gfn_t *gfn,
 extern void kvm_init_shadow_mmu(struct kvm_vcpu *vcpu);
 extern void kvm_init_shadow_tdp_mmu(struct kvm_vcpu *vcpu, bool execonly);
 extern pgprot_t *kvm_hva_to_pte(e2k_addr_t address);
-extern int e2k_shadow_pt_protection_fault(struct kvm_vcpu *vcpu, gpa_t addr,
-						kvm_mmu_page_t *sp);
+extern int e2k_shadow_pt_protection_fault(struct kvm_vcpu *vcpu,
+			struct gmm_struct *gmm, gpa_t addr, kvm_mmu_page_t *sp);
 extern int kvm_prefetch_mmu_area(struct kvm_vcpu *vcpu,
 			gva_t start, gva_t end, u32 error_code);
 extern gpa_t e2k_gva_to_gpa(struct kvm_vcpu *vcpu, gva_t vaddr, u32 access,
@@ -783,7 +797,8 @@ kvm_prepare_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		new_pgd = (pgd_t *)__va(root);
 		init_pgd = kvm_mmu_get_init_gmm_root(vcpu->kvm);
 
-		copy_kernel_pgd_range(new_pgd, current->mm->pgd);
+		KVM_BUG_ON(vcpu->cpu < 0);
+		copy_kernel_pgd_range(new_pgd, cpu_kernel_root_pt);
 
 		src_root = (pgprot_t *)init_pgd;
 		if (init_pgd != NULL)
@@ -832,7 +847,8 @@ mmu_pv_prepare_spt_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, hpa_t root)
 	/* copy kernel part of root page table entries to enable host */
 	/* traps and hypercalls on guest */
 	new_pgd = (pgd_t *)__va(root);
-	copy_kernel_pgd_range(new_pgd, current->mm->pgd);
+	KVM_BUG_ON(vcpu->cpu < 0);
+	copy_kernel_pgd_range(new_pgd, cpu_kernel_root_pt);
 
 	src_root = (pgprot_t *)kvm_mmu_get_init_gmm_root(vcpu->kvm);
 	KVM_BUG_ON(src_root == NULL);
@@ -1208,8 +1224,9 @@ static inline int kvm_mmu_populate_area(struct kvm *kvm,
 
 extern int kvm_pv_mmu_ptep_get_and_clear(struct kvm_vcpu *vcpu, gpa_t gpa,
 				void __user *old_gpte, int as_valid);
-extern int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, gpa_t gpa,
-			void __user *old_gpte, pt_atomic_op_t atomic_op,
+extern int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, int gmmid_nr,
+			gpa_t gpa, void __user *old_gpte,
+			pt_atomic_op_t atomic_op,
 			unsigned long prot_mask);
 extern void mmu_free_spt_root(struct kvm_vcpu *vcpu, hpa_t root_hpa);
 extern void mmu_release_spt_root(struct kvm_vcpu *vcpu, hpa_t root_hpa);

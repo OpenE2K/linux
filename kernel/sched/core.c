@@ -2916,6 +2916,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		/* move from rtCPU task which is bounded to any CPU */
 		cpumask_var_t new_mask;
 		if (!alloc_cpumask_var(&new_mask, GFP_KERNEL)) {
+			preempt_enable();
 			return -ENOMEM;
 		}
 		cpumask_copy(new_mask, &p->cpus_mask);
@@ -3071,9 +3072,9 @@ out_mcst_rt:
 	ttwu_do_activate(rq, p, 0, &rf);
 	__task_rq_unlock(rq, &rf);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
-	if (mcst_rt_rq(rq)) {
-			try_to_run_mcst_rt_task(p, rq->cpu);
-	}
+	if (mcst_rt_rq(rq))
+		try_to_run_mcst_rt_task(p, rq->cpu);
+	preempt_enable();
 	return success;
 #endif /* CONFIG_MCST_RT_SMP */
 }
@@ -5083,20 +5084,36 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 		if (!dl_prio(p->normal_prio) ||
 		    (pi_task && dl_prio(pi_task->prio) &&
 		     dl_entity_preempt(&pi_task->dl, &p->dl))) {
+#ifndef CONFIG_MCST
 			p->dl.dl_boosted = 1;
+#else
+			p->dl.pi_se = pi_task->dl.pi_se;
+#endif
 			queue_flag |= ENQUEUE_REPLENISH;
 		} else
+#ifndef CONFIG_MCST
 			p->dl.dl_boosted = 0;
+#else
+			p->dl.pi_se = &p->dl;
+#endif
 		p->sched_class = &dl_sched_class;
 	} else if (rt_prio(prio)) {
 		if (dl_prio(oldprio))
+#ifndef CONFIG_MCST
 			p->dl.dl_boosted = 0;
+#else
+			p->dl.pi_se = &p->dl;
+#endif
 		if (oldprio < prio)
 			queue_flag |= ENQUEUE_HEAD;
 		p->sched_class = &rt_sched_class;
 	} else {
 		if (dl_prio(oldprio))
+#ifndef CONFIG_MCST
 			p->dl.dl_boosted = 0;
+#else
+			p->dl.pi_se = &p->dl;
+#endif
 		if (rt_prio(oldprio))
 			p->rt.timeout = 0;
 		p->sched_class = &fair_sched_class;

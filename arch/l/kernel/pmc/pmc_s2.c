@@ -24,20 +24,12 @@
 #endif /* S2_PMC_DEBUG */
 
 struct l_pmc l_pmc[MAX_NUM_PMCS];
-//struct cpufreq_driver pmc_l_cpufreq_driver;
 
 /*
  *  Global storage for NBSR_NODE_CFG_INFO, same for all nodes,
  *  initialized in s2_pmc_init
  */
 unsigned int bfs_bypass_val;
-
-
-/* cpufreq subsystem: */
-struct cpufreq_frequency_table pmc_l_freqs[MAX_PSTATES];
-/* available frequencies */
-struct cpufreq_frequency_table
-			pmc_l_available_freqs[MAX_AV_PSTATES];
 
 /**
  * s2_reg_to_addr - convert PMC register name to matching arrdess
@@ -101,6 +93,14 @@ unsigned s2_get_freq_mult(int cpu)
 	freq = Fcpu(Fbfs, Mii_inv, Nii);
 	return freq;
 }
+
+#ifdef CONFIG_CPU_FREQ
+
+/* cpufreq subsystem: */
+struct cpufreq_frequency_table pmc_l_freqs[MAX_PSTATES];
+/* available frequencies */
+struct cpufreq_frequency_table
+			pmc_l_available_freqs[MAX_AV_PSTATES];
 
 int pmc_l_cpufreq_init(struct cpufreq_policy *policy)
 {
@@ -196,3 +196,4 @@ int pmc_l_cpufreq_init(struct cpufreq_policy *policy)
 	}
 	return result;
 }
+#endif /* CONFIG_CPU_FREQ */

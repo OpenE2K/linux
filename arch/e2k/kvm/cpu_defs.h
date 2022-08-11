@@ -585,6 +585,16 @@ kvm_get_guest_vcpu_SBR_value(struct kvm_vcpu *vcpu)
 {
 	return CPU_GET_DSREG(vcpu, SBR.SBR_reg);
 }
+static inline e2k_sbr_t
+kvm_get_guest_vcpu_SBR(struct kvm_vcpu *vcpu)
+{
+	e2k_sbr_t sbr;
+
+	sbr.SBR_reg = 0;
+	sbr.SBR_base = kvm_get_guest_vcpu_SBR_value(vcpu);
+
+	return sbr;
+}
 
 static inline void
 kvm_set_guest_vcpu_CUD_lo(struct kvm_vcpu *vcpu, e2k_cud_lo_t CUD_lo)

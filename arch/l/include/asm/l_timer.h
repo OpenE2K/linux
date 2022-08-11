@@ -46,6 +46,7 @@ typedef	struct lt_regs {
 
 extern unsigned long long	lt_phys_base;
 extern lt_regs_t		*lt_regs;
+extern long lt_clock_rate;
 
 extern void setup_lt_timer(void);
 extern int __init init_lt_clocksource(void);

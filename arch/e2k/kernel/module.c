@@ -54,8 +54,10 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 		v = sym->st_value + rel[i].r_addend;
 
 		switch (ELF64_R_TYPE(rel[i].r_info) & 0xff) {
-		case R_E2K_NONE:
+		case R_E2K_32_ABS:
+			*loc32 = v;
 			break;
+
 		case R_E2K_64_ABS:
 			*location = v;
 			break;

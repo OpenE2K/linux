@@ -59,6 +59,10 @@ u32 mxgbe_led_gpio = 0;
 module_param_named(led_gpio, mxgbe_led_gpio, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(led_gpio, "Enable led as gpio (default: 0)");
 
+int mxgbe_status = 2;
+module_param_named(status, mxgbe_status, int, 0444);
+MODULE_PARM_DESC(status, "0 - disable, 1 - enable, other - use devtree");
+
 
 /**
  * Module parameters checker
@@ -209,7 +213,7 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 	} else {
 		l_set_ethernet_macaddr(pdev, (char *)&priv->MAC);
 	}
-	dev_info(&pdev->dev, "MAC = %012llX\n", priv->MAC);
+	dev_info(&pdev->dev, "MAC = %012llX\n", be64_to_cpu(priv->MAC << 16));
 
 	/* GPIO */
 	err = mxgbe_gpio_probe(priv);

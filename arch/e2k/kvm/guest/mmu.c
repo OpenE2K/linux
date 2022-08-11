@@ -170,9 +170,9 @@ pgprot_t kvm_pt_atomic_update(struct mm_struct *mm,
 			unsigned long addr, pgprot_t *ptp,
 			pt_atomic_op_t atomic_op, pgprotval_t prot_mask)
 {
-	int gmmid_nr = current_thread_info()->gmmid_nr;
 	pgprot_t oldptval;
 	gpa_t gpa;
+	int gmmid_nr;
 	int ret;
 
 	DebugKVMPTE("started for address 0x%lx\n", addr);
@@ -206,7 +206,6 @@ pgprot_t kvm_pt_atomic_update(struct mm_struct *mm,
 		break;
 	}
 	case ATOMIC_TEST_AND_CLEAR_YOUNG:
-	case ATOMIC_MODIFY_START:
 	case ATOMIC_SET_WRPROTECT: {
 		pte_t pteval = __pte(pgprot_val(oldptval));
 
@@ -223,12 +222,14 @@ pgprot_t kvm_pt_atomic_update(struct mm_struct *mm,
 	}
 
 	gpa = __pa(ptp);
+	gmmid_nr = mm->gmmid_nr;
+
 	if (mm != &init_mm && mm != current->mm) {
 		DebugKVMPTE("mm %px id #%d is not current mm %px id #%d "
 			"for addr 0x%lx\n",
 			mm, gmmid_nr,
 			current->mm,
-			(current->mm) ? gmmid_nr : -1, addr);
+			(current->mm) ? current->mm->gmmid_nr : 0, addr);
 	} else if (mm != &init_mm) {
 		DebugKVMPTE("current mm %px id #%d, addr 0x%lx\n",
 			mm, gmmid_nr, addr);
@@ -245,7 +246,8 @@ pgprot_t kvm_pt_atomic_update(struct mm_struct *mm,
 			__func__, mm, gmmid_nr, addr);
 	}
 
-	ret = HYPERVISOR_pt_atomic_update(gpa, &oldptval, atomic_op, prot_mask);
+	ret = HYPERVISOR_pt_atomic_update(gmmid_nr, gpa, &oldptval, atomic_op,
+						prot_mask);
 	if (ret) {
 		panic("%s(): could not update guest pte by host, error %d\n",
 			__func__, ret);
@@ -270,7 +272,7 @@ pgprot_t kvm_pt_atomic_clear_relaxed(pgprotval_t ptot_mask, pgprot_t *pgprot)
 	}
 
 	gpa = __pa(pgprot);
-	ret = HYPERVISOR_pt_atomic_update(gpa, &oldptval,
+	ret = HYPERVISOR_pt_atomic_update(-1, gpa, &oldptval,
 				ATOMIC_TEST_AND_CLEAR_RELAXED, ptot_mask);
 	if (ret) {
 		panic("%s(): could not update guest pte by host, error %d\n",
@@ -348,12 +350,12 @@ static const struct mmu_notifier_ops kvm_mmu_notifier_ops = {
 	.free_notifier = kvm_free_notifier,
 };
 
-void kvm_get_mm_notifier(thread_info_t *ti, struct mm_struct *mm)
+void kvm_get_mm_notifier_locked(struct mm_struct *mm)
 {
 	struct mmu_notifier *mn;
 
 	/* create mm notifier to trace some events over mm */
-	mn = mmu_notifier_get(&kvm_mmu_notifier_ops, mm);
+	mn = mmu_notifier_get_locked(&kvm_mmu_notifier_ops, mm);
 	if (IS_ERR(mn)) {
 		panic("%s(): %s (%d) ; could not create mm notifier, "
 			"error %ld\n",
@@ -389,9 +391,6 @@ void kvm_activate_mm(struct mm_struct *active_mm, struct mm_struct *mm)
 		DebugAMM("active mm %px GMMID %d\n", active_mm, ammid_nr);
 	}
 	native_activate_mm(active_mm, mm);
-
-	/* create mm notifier to trace some events over mm */
-	kvm_get_mm_notifier(current_thread_info(), mm);
 
 	/* FIXME: it need implement separate kernel and user root PTs */
 	phys_ptb = __pa(mm->pgd);

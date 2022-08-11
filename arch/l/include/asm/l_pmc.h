@@ -124,7 +124,7 @@ struct l_pmc {
 
 extern struct l_pmc l_pmc[MAX_NUM_PMCS];
 
-#if defined(CONFIG_L_PMC) || defined(CONFIG_S2_PMC)
+#if defined(CONFIG_L_PMC_MODULE) || defined(CONFIG_L_PMC) || defined(CONFIG_S2_PMC)
 extern int spmc_get_temp_cur0(void);
 int pmc_l_gpufreq_set_scale(unsigned char scale);
 int pmc_l_gpufreq_get_scale(void);

@@ -31,6 +31,5 @@ void boot_e8c_setup_arch(void)
 	boot_machine.sic_mc_count = E8C_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = E8C_SIC_MC1_ECC;
 	boot_machine.sic_io_str1 = 0;
-	boot_machine.clock_tick_rate = E8C_CLOCK_TICK_RATE;
 }
 

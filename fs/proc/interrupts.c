@@ -36,7 +36,7 @@ static const struct seq_operations int_seq_ops = {
 
 static int __init proc_interrupts_init(void)
 {
-	proc_create_seq("interrupts", 0, NULL, &int_seq_ops);
+	proc_create_seq("interrupts", S_IRUSR, NULL, &int_seq_ops);
 	return 0;
 }
 fs_initcall(proc_interrupts_init);

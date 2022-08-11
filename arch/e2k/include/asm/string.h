@@ -58,8 +58,8 @@ static inline int _memcmp(const void *s1, const void *s2, size_t n)
 		}
 	}
 
-	E2K_PREFETCH_L2(s1);
-	E2K_PREFETCH_L2(s2);
+	E2K_PREFETCH_L1_SPEC(s1);
+	E2K_PREFETCH_L1_SPEC(s1);
 	return __memcmp(s1, s2, n);
 }
 
@@ -228,7 +228,7 @@ static inline void *_memcpy(void *__restrict dst,
 			*(u8 *) (dst + (n & ~0x1UL)) =
 					*(u8 *) (src + (n & ~0x1UL));
 	} else {
-		E2K_PREFETCH_L2(src);
+		E2K_PREFETCH_L2_SPEC(src);
 		__memcpy(dst, src, n);
 	}
 
@@ -421,7 +421,7 @@ static inline void native_tagged_memcpy_8(void *__restrict dst,
 		else
 			E2K_TAGGED_MEMMOVE_8(dst, src);
 	} else {
-		E2K_PREFETCH_L2(src);
+		E2K_PREFETCH_L2_SPEC(src);
 
 		__tagged_memcpy_8(dst, src, n);
 	}
@@ -432,13 +432,7 @@ static inline void native_tagged_memcpy_8(void *__restrict dst,
  *
  * All parameters must be 8-bytes aligned.
  */
-#ifdef	CONFIG_BOOT_E2K
-#define tagged_memcpy_8(dst, src, n)					\
-({									\
-	native_tagged_memcpy_8(dst, src, n,				\
-			__alignof(*(dst)), __alignof(*(src)));		\
-})
-#elif defined(CONFIG_PARAVIRT_GUEST)
+#if defined(CONFIG_PARAVIRT_GUEST)
 #include <asm/paravirt/string.h>
 #elif defined(CONFIG_KVM_GUEST_KERNEL)
 #include <asm/kvm/guest/string.h>
@@ -453,23 +447,7 @@ static inline void native_tagged_memcpy_8(void *__restrict dst,
 extern void boot_fast_memcpy(void *, const void *, size_t);
 extern notrace void boot_fast_memset(void *s_va, long c, size_t count);
 
-#ifdef	CONFIG_BOOT_E2K
-/* own small bios (boot loader) for kernel */
-static inline unsigned long
-fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
-{
-	return native_fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
-}
-static inline unsigned long
-fast_tagged_memory_set(void *addr, u64 val, u64 tag,
-		size_t len, u64 strd_opcode)
-{
-	return native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
-}
-#elif	defined(CONFIG_PARAVIRT_GUEST)
+#if	defined(CONFIG_PARAVIRT_GUEST)
 /* it is paravirtualized host/guest kernel */
 #include <asm/paravirt/string.h>
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)

@@ -135,7 +135,8 @@ do { \
 	/* Reserve 64 bytes for kernel per C calling convention */ \
 	u64 used_dstack_size = round_up(64, E2K_ALIGN_STACK); \
  \
-	sbr = (u64)thread_info_task(ti)->stack + KERNEL_C_STACK_SIZE; \
+	sbr = (u64)thread_info_task(ti)->stack + KERNEL_C_STACK_SIZE + \
+						 KERNEL_C_STACK_OFFSET; \
 	AW(usd_lo) = AW((ti)->k_usd_lo); \
 	AW(usd_hi) = AW((ti)->k_usd_hi); \
 	AS(usd_lo).base -= used_dstack_size; \

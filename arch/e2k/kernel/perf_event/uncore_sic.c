@@ -7,9 +7,9 @@
 #include <asm/perf_event_uncore.h>
 
 
-static struct e2k_uncore *e2k_uncore_ipcc;
-static struct e2k_uncore *e2k_uncore_iocc;
-static struct e2k_uncore *e2k_uncore_sic;
+static struct e2k_uncore *e2k_uncore_ipcc[MAX_NUMNODES][SIC_IPCC_LINKS_COUNT];
+static struct e2k_uncore *e2k_uncore_iocc[MAX_NUMNODES][SIC_IO_LINKS_COUNT];
+static struct e2k_uncore *e2k_uncore_sic[MAX_NUMNODES];
 
 typedef union {
 	struct {
@@ -409,43 +409,39 @@ int __init register_ipcc_pmus()
 {
 	int node, cnt, counters = 1;
 
-	e2k_uncore_ipcc = kzalloc((sizeof(struct e2k_uncore) +
-			           counters * sizeof(void *)) *
-				nr_node_ids * SIC_IPCC_LINKS_COUNT, GFP_KERNEL);
-	if (!e2k_uncore_ipcc)
-		return -ENOMEM;
-
 	for_each_online_node(node)
 	for (cnt = 0; cnt < SIC_IPCC_LINKS_COUNT; cnt++) {
-		int i = node * SIC_IPCC_LINKS_COUNT + cnt;
+		struct e2k_uncore *uncore = kzalloc(sizeof(struct e2k_uncore) +
+				counters * sizeof(void *), GFP_KERNEL);
+		if (!uncore)
+			return -ENOMEM;
 
-		e2k_uncore_ipcc[i].type = E2K_UNCORE_IPCC;
+		uncore->type = E2K_UNCORE_IPCC;
 
-		e2k_uncore_ipcc[i].pmu.attr_groups	=
-			(const struct attribute_group **)e2k_ipcc_attr_group;
-		e2k_uncore_ipcc[i].pmu.task_ctx_nr	= perf_invalid_context,
-		e2k_uncore_ipcc[i].pmu.event_init	= e2k_uncore_event_init,
-		e2k_uncore_ipcc[i].pmu.add		= e2k_uncore_add,
-		e2k_uncore_ipcc[i].pmu.del		= e2k_uncore_del,
-		e2k_uncore_ipcc[i].pmu.start		= e2k_uncore_start,
-		e2k_uncore_ipcc[i].pmu.stop		= e2k_uncore_stop,
-		e2k_uncore_ipcc[i].pmu.read		= e2k_uncore_read,
+		uncore->pmu.attr_groups	=
+			(const struct attribute_group **) e2k_ipcc_attr_group;
+		uncore->pmu.task_ctx_nr	= perf_invalid_context;
+		uncore->pmu.event_init	= e2k_uncore_event_init;
+		uncore->pmu.add		= e2k_uncore_add;
+		uncore->pmu.del		= e2k_uncore_del;
+		uncore->pmu.start	= e2k_uncore_start;
+		uncore->pmu.stop	= e2k_uncore_stop;
+		uncore->pmu.read	= e2k_uncore_read;
 
-		e2k_uncore_ipcc[i].get_event = sic_get_event;
+		uncore->get_event = sic_get_event;
 
-		e2k_uncore_ipcc[i].reg_ops = &ipcc_reg_ops;
-		e2k_uncore_ipcc[i].num_counters = counters;
+		uncore->reg_ops = &ipcc_reg_ops;
+		uncore->num_counters = counters;
 
-		e2k_uncore_ipcc[i].node = node;
-		e2k_uncore_ipcc[i].idx_at_node = cnt;
+		uncore->node = node;
+		uncore->idx_at_node = cnt;
 
-		e2k_uncore_ipcc[i].valid_events = ipcc_valid_events;
+		uncore->valid_events = ipcc_valid_events;
 
-		snprintf(e2k_uncore_ipcc[i].name, UNCORE_PMU_NAME_LEN,
-				"ipcc_%d_%d", node, cnt);
+		snprintf(uncore->name, UNCORE_PMU_NAME_LEN, "ipcc_%d_%d", node, cnt);
 
-		perf_pmu_register(&e2k_uncore_ipcc[i].pmu,
-				e2k_uncore_ipcc[i].name, -1);
+		e2k_uncore_ipcc[node][cnt] = uncore;
+		perf_pmu_register(&uncore->pmu, uncore->name, -1);
 	}
 
 	return 0;
@@ -455,43 +451,39 @@ int __init register_iocc_pmus()
 {
 	int node, cnt, counters = 1;
 
-	e2k_uncore_iocc = kzalloc((sizeof(struct e2k_uncore) +
-			           counters * sizeof(void *)) *
-				  nr_node_ids * SIC_IO_LINKS_COUNT, GFP_KERNEL);
-	if (!e2k_uncore_iocc)
-		return -ENOMEM;
-
 	for_each_online_node(node)
 	for (cnt = 0; cnt < SIC_IO_LINKS_COUNT; cnt++) {
-		int i = node * SIC_IO_LINKS_COUNT + cnt;
+		struct e2k_uncore *uncore = kzalloc(sizeof(struct e2k_uncore) +
+				counters * sizeof(void *), GFP_KERNEL);
+		if (!uncore)
+			return -ENOMEM;
 
-		e2k_uncore_iocc[i].type = E2K_UNCORE_IOCC;
+		uncore->type = E2K_UNCORE_IOCC;
 
-		e2k_uncore_iocc[i].pmu.attr_groups	=
-			(const struct attribute_group **)e2k_iocc_attr_group;
-		e2k_uncore_iocc[i].pmu.task_ctx_nr	= perf_invalid_context,
-		e2k_uncore_iocc[i].pmu.event_init	= e2k_uncore_event_init;
-		e2k_uncore_iocc[i].pmu.add		= e2k_uncore_add;
-		e2k_uncore_iocc[i].pmu.del		= e2k_uncore_del;
-		e2k_uncore_iocc[i].pmu.start		= e2k_uncore_start;
-		e2k_uncore_iocc[i].pmu.stop		= e2k_uncore_stop;
-		e2k_uncore_iocc[i].pmu.read		= e2k_uncore_read;
+		uncore->pmu.attr_groups	=
+			(const struct attribute_group **) e2k_iocc_attr_group;
+		uncore->pmu.task_ctx_nr	= perf_invalid_context,
+		uncore->pmu.event_init	= e2k_uncore_event_init;
+		uncore->pmu.add		= e2k_uncore_add;
+		uncore->pmu.del		= e2k_uncore_del;
+		uncore->pmu.start	= e2k_uncore_start;
+		uncore->pmu.stop	= e2k_uncore_stop;
+		uncore->pmu.read	= e2k_uncore_read;
 
-		e2k_uncore_iocc[i].get_event = sic_get_event;
+		uncore->get_event = sic_get_event;
 
-		e2k_uncore_iocc[i].reg_ops = &iocc_reg_ops;
-		e2k_uncore_iocc[i].num_counters = counters;
+		uncore->reg_ops = &iocc_reg_ops;
+		uncore->num_counters = counters;
 
-		e2k_uncore_iocc[i].node = node;
-		e2k_uncore_iocc[i].idx_at_node = cnt;
+		uncore->node = node;
+		uncore->idx_at_node = cnt;
 
-		e2k_uncore_iocc[i].valid_events = iocc_valid_events;
+		uncore->valid_events = iocc_valid_events;
 
-		snprintf(e2k_uncore_iocc[i].name, UNCORE_PMU_NAME_LEN,
-				"iocc_%d_%d", node, cnt);
+		snprintf(uncore->name, UNCORE_PMU_NAME_LEN, "iocc_%d_%d", node, cnt);
 
-		perf_pmu_register(&e2k_uncore_iocc[i].pmu,
-				e2k_uncore_iocc[i].name, -1);
+		e2k_uncore_iocc[node][cnt] = uncore;
+		perf_pmu_register(&uncore->pmu, uncore->name, -1);
 	}
 
 	return 0;
@@ -519,9 +511,9 @@ static int sic_validate_event(struct e2k_uncore *uncore,
 					cpu);
 			return -EINVAL;
 		}
-		if (cpu_to_node(cpu) != e2k_uncore_sic->node) {
+		if (cpu_to_node(cpu) != uncore->node) {
 			pr_info_ratelimited("uncore_sic: cpu %lld does not exist on node %d\n",
-					cpu, e2k_uncore_sic->node);
+					cpu, uncore->node);
 			return -EINVAL;
 		}
 	}
@@ -529,15 +521,15 @@ static int sic_validate_event(struct e2k_uncore *uncore,
 	return 0;
 }
 
-static int sic_add_event(struct perf_event *event)
+static int sic_add_event(struct e2k_uncore *uncore, struct perf_event *event)
 {
 	sic_config_attr_t config = { .word = event->hw.config };
 	u64 event_id = config.event;
 	int i;
 
 	/* validate against running counters */
-	for (i = 0; i < e2k_uncore_sic->num_counters; i++) {
-		struct perf_event *event2 = READ_ONCE(e2k_uncore_sic->events[i]);
+	for (i = 0; i < uncore->num_counters; i++) {
+		struct perf_event *event2 = READ_ONCE(uncore->events[i]);
 		sic_config_attr_t config2;
 
 		if (!event2)
@@ -562,8 +554,8 @@ static int sic_add_event(struct perf_event *event)
 	}
 
 	/* take the first available slot */
-	for (i = 0; i < e2k_uncore_sic->num_counters; i++) {
-		if (cmpxchg(&e2k_uncore_sic->events[i], NULL, event) == NULL) {
+	for (i = 0; i < uncore->num_counters; i++) {
+		if (cmpxchg(&uncore->events[i], NULL, event) == NULL) {
 			event->hw.idx = i;
 			return 0;
 		}
@@ -576,58 +568,51 @@ int __init register_sic_pmus()
 {
 	int i, counters = 2;
 
-	e2k_uncore_sic = kzalloc((sizeof(struct e2k_uncore) +
-			          counters * sizeof(void *)) * nr_node_ids,
-				 GFP_KERNEL);
-	if (!e2k_uncore_sic)
-		return -ENOMEM;
-
 	for_each_online_node(i) {
-		e2k_uncore_sic[i].type = E2K_UNCORE_SIC;
+		struct e2k_uncore *uncore = kzalloc(sizeof(struct e2k_uncore) +
+				counters * sizeof(void *), GFP_KERNEL);
+		if (!uncore)
+			return -ENOMEM;
 
-		e2k_uncore_sic[i].pmu.event_init	= e2k_uncore_event_init,
-		e2k_uncore_sic[i].pmu.task_ctx_nr	= perf_invalid_context,
-		e2k_uncore_sic[i].pmu.add		= e2k_uncore_add;
-		e2k_uncore_sic[i].pmu.del		= e2k_uncore_del;
-		e2k_uncore_sic[i].pmu.start		= e2k_uncore_start;
-		e2k_uncore_sic[i].pmu.stop		= e2k_uncore_stop;
-		e2k_uncore_sic[i].pmu.read		= e2k_uncore_read;
+		uncore->type = E2K_UNCORE_SIC;
 
-		e2k_uncore_sic[i].get_event = sic_get_event;
-		e2k_uncore_sic[i].add_event = sic_add_event;
-		e2k_uncore_sic[i].validate_event = sic_validate_event;
+		uncore->pmu.event_init	= e2k_uncore_event_init,
+		uncore->pmu.task_ctx_nr	= perf_invalid_context,
+		uncore->pmu.add		= e2k_uncore_add;
+		uncore->pmu.del		= e2k_uncore_del;
+		uncore->pmu.start		= e2k_uncore_start;
+		uncore->pmu.stop		= e2k_uncore_stop;
+		uncore->pmu.read		= e2k_uncore_read;
 
-		e2k_uncore_sic[i].reg_ops = &sic_reg_ops;
-		e2k_uncore_sic[i].num_counters = counters;
+		uncore->get_event = sic_get_event;
+		uncore->add_event = sic_add_event;
+		uncore->validate_event = sic_validate_event;
 
-		e2k_uncore_sic[i].node = i;
+		uncore->reg_ops = &sic_reg_ops;
+		uncore->num_counters = counters;
+
+		uncore->node = i;
 
 		if (E2K_UNCORE_HAS_SIC_L3)
-			e2k_sic_MCM_format_group.attrs =
-					e2k_mcm_with_l3_format_attr;
+			e2k_sic_MCM_format_group.attrs = e2k_mcm_with_l3_format_attr;
 		else
-			e2k_sic_MCM_format_group.attrs =
-					e2k_mcm_wo_l3_format_attr;
+			e2k_sic_MCM_format_group.attrs = e2k_mcm_wo_l3_format_attr;
 
 		if (IS_MACHINE_E2S)
-			e2k_uncore_sic[i].valid_events =
-					sic_MCM_e4c_valid_events;
+			uncore->valid_events = sic_MCM_e4c_valid_events;
 		else if (IS_MACHINE_E8C)
-			e2k_uncore_sic[i].valid_events =
-					sic_MCM_e8c_valid_events;
+			uncore->valid_events = sic_MCM_e8c_valid_events;
 		else if (IS_MACHINE_E8C2)
-			e2k_uncore_sic[i].valid_events =
-					sic_MCM_e8c2_valid_events;
+			uncore->valid_events = sic_MCM_e8c2_valid_events;
 		else
 			BUG();
 
-		e2k_uncore_sic[i].pmu.attr_groups = e2k_sic_MCM_attr_group;
+		uncore->pmu.attr_groups = e2k_sic_MCM_attr_group;
 
-		snprintf(e2k_uncore_sic[i].name, UNCORE_PMU_NAME_LEN,
-				"sic_%d_MCM", i);
+		snprintf(uncore->name, UNCORE_PMU_NAME_LEN, "sic_%d_MCM", i);
 
-		perf_pmu_register(&e2k_uncore_sic[i].pmu,
-				  e2k_uncore_sic[i].name, -1);
+		e2k_uncore_sic[i] = uncore;
+		perf_pmu_register(&uncore->pmu, uncore->name, -1);
 	}
 
 	return 0;

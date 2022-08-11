@@ -1,6 +1,3 @@
-#undef TRACE_SYSTEM
-#define TRACE_SYSTEM e2k
-
 #if !defined(_TRACE_E2K_PGTABLE_V2_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_E2K_PGTABLE_V2_H
 

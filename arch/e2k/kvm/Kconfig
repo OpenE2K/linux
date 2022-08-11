@@ -54,7 +54,7 @@ config KVM_PARAVIRTUALIZATION
 config KVM_HW_VIRTUALIZATION
 	bool "Hypervisor based on hardware virtualization and KVM support"
 	default y if CPU_ISET >= 6
-	select MMU_SEP_VIRT_SPACE
+	select MMU_SEP_VIRT_SPACE if CPU_ISET >= 6
 	help
 	  Say Y here if machine hardware has virtualization support
 	  and to enable host kernel and hypervisor based on KVM
@@ -207,7 +207,7 @@ config KVM_SHADOW_PT
 
 config E2K_VIRT
 	bool # Elbrus virtual (1 core, no NUMA, machine & IO - virtual)
-	depends on (KVM_GUEST_KERNEL && E2K_MACHINE)
+	depends on (KVM_GUEST_KERNEL && (E2K_MACHINE || E2K_MINVER >= 6))
 	default y
 	help
 	  Native machine to run such kernel can be any.

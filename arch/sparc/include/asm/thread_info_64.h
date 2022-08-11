@@ -63,6 +63,8 @@ struct thread_info {
 	struct pt_regs		*kern_una_regs;
 	unsigned int		kern_una_insn;
 
+	int			preempt_lazy_count;	/* 0 => lazy preemptable
+							  <0 => BUG */
 #ifdef CONFIG_MCST
 	unsigned int		epic_core_priority;
 	long long               irq_enter_clk;
@@ -102,10 +104,11 @@ struct thread_info {
 #define TI_XFSR		0x00000430
 #define TI_KUNA_REGS	0x00000468
 #define TI_KUNA_INSN	0x00000470
+#define TI_LAZY_COUNT	0x00000474
 #ifndef CONFIG_E90S
-#define TI_FPREGS	0x00000480
-#else /* CONFIG_E90S */
 #define TI_FPREGS	0x000004c0
+#else /* CONFIG_E90S */
+#define TI_FPREGS	0x00000500
 #endif /* CONFIG_E90S */
 
 /* We embed this in the uppermost byte of thread_info->flags */
@@ -135,6 +138,7 @@ struct thread_info {
 	.task		=	&tsk,			\
 	.current_ds	=	ASI_P,			\
 	.preempt_count	=	INIT_PREEMPT_COUNT,	\
+	.preempt_lazy_count =	0,			\
 	.status		=	TS_UNALIGN_SIGBUS,	\
 }
 #else /* !CONFIG_MCST */
@@ -143,6 +147,7 @@ struct thread_info {
 	.task		=	&tsk,			\
 	.current_ds	=	ASI_P,			\
 	.preempt_count	=	INIT_PREEMPT_COUNT,	\
+	.preempt_lazy_count =	0,			\
 }
 #endif
 
@@ -229,6 +234,10 @@ extern struct thread_info *current_thread_info(void);
 #endif /* CONFIG_E90S */
 #define TIF_MEMDIE		13	/* is terminating due to OOM killer */
 #define TIF_POLLING_NRFLAG	14
+#define TIF_NEED_RESCHED_LAZY	15	/* lazy rescheduling necessary */
+#ifdef CONFIG_MCST
+#define TIF_NAPI_WORK		31	/* napi_wq_worker() is running MCST addition */
+#endif
 
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1<<TIF_NOTIFY_RESUME)
@@ -242,6 +251,10 @@ extern struct thread_info *current_thread_info(void);
 #define _TIF_SYSCALL_AUDIT	(1<<TIF_SYSCALL_AUDIT)
 #define _TIF_SYSCALL_TRACEPOINT	(1<<TIF_SYSCALL_TRACEPOINT)
 #define _TIF_POLLING_NRFLAG	(1<<TIF_POLLING_NRFLAG)
+#define _TIF_NEED_RESCHED_LAZY	(1<<TIF_NEED_RESCHED_LAZY)
+#ifdef CONFIG_MCST
+#define _TIF_NAPI_WORK		(1 << TIF_NAPI_WORK)
+#endif
 
 #define _TIF_USER_WORK_MASK	((0xff << TI_FLAG_WSAVED_SHIFT) | \
 				 _TIF_DO_NOTIFY_RESUME_MASK | \

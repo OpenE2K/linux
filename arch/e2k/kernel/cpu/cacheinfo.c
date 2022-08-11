@@ -101,15 +101,14 @@ static void ci_leaf_init(struct cacheinfo *this_leaf,
 	num_sets /= this_leaf->ways_of_associativity;
 	this_leaf->number_of_sets = num_sets;
 
-	/* Bug 128032: to prevent double cache prints in lscpu, we have to disable sysfs for
-	 * shared caches, like it is done on s390 (they do it for nested virtualization) */
-	if (ci->private) {
+	if (ci->private)
 		cpumask_set_cpu(cpu, &this_leaf->shared_cpu_map);
-		this_leaf->disable_sysfs = false;
-	} else {
+	else
 		cpumask_copy(&this_leaf->shared_cpu_map, cpu_cpu_mask(cpu));
-		this_leaf->disable_sysfs = true;
-	}
+
+	/* Unlike s390, we do not disable sysfs for shared caches */
+	this_leaf->disable_sysfs = false;
+	this_leaf->priv = (void *)ci;
 }
 
 int init_cache_level(unsigned int cpu)
@@ -198,16 +197,17 @@ void show_cacheinfo(struct seq_file *m)
 {
 	struct cpu_cacheinfo *this_cpu_ci;
 	struct cacheinfo *cache;
+	const struct e2k_cache_info *ci;
 	int idx;
 
 	this_cpu_ci = get_cpu_cacheinfo(cpumask_any(cpu_online_mask));
 	for (idx = 0; idx < this_cpu_ci->num_leaves; idx++) {
 		cache = this_cpu_ci->info_list + idx;
+		ci = cache->priv;
 		seq_printf(m, "cache%-11d: ", idx);
 		seq_printf(m, "level=%d ", cache->level);
 		seq_printf(m, "type=%s ", cache_type_string[cache->type]);
-		seq_printf(m, "scope=%s ",
-			cache->disable_sysfs ? "Shared" : "Private");
+		seq_printf(m, "scope=%s ", ci->private ? "Private" : "Shared");
 		seq_printf(m, "size=%dK ", cache->size >> 10);
 		seq_printf(m, "line_size=%u ", cache->coherency_line_size);
 		seq_printf(m, "associativity=%d", cache->ways_of_associativity);

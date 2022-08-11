@@ -41,12 +41,25 @@
 	 *     For full ones see <asm/protected_syscalls.h>.
 	 */
 #undef DbgSCP
+#if defined(CONFIG_THREAD_INFO_IN_TASK) && defined(CONFIG_SMP)
 #define DbgSCP(fmt, ...) \
 do { \
 	if (current->mm->context.pm_sc_debug_mode \
 		& PM_SC_DBG_MODE_COMPLEX_WRAPPERS) \
-		pr_info("%s: " fmt, __func__,  ##__VA_ARGS__); \
+		pr_info("%s [%.3d#%d]: %s: " fmt, current->comm, \
+				current->cpu, current->pid, \
+				__func__,  ##__VA_ARGS__); \
 } while (0)
+#else /* no 'cpu' field in 'struct task_struct' */
+#define DbgSCP(fmt, ...) \
+do { \
+	if (current->mm->context.pm_sc_debug_mode \
+		& PM_SC_DBG_MODE_COMPLEX_WRAPPERS) \
+		pr_info("%s [#%d]: %s: " fmt, current->comm, \
+				current->pid, \
+				__func__,  ##__VA_ARGS__); \
+} while (0)
+#endif /* no 'cpu' field in 'struct task_struct' */
 
 #undef DbgSCP_ERROR
 #define DbgSCP_ERROR(fmt, ...) \
@@ -54,7 +67,8 @@ do { \
 	if ((current->mm->context.pm_sc_debug_mode & \
 		(PM_SC_DBG_MODE_CHECK | PM_SC_DBG_MODE_NO_ERR_MESSAGES)) == \
 			PM_SC_DBG_MODE_CHECK) \
-		pr_err(fmt, ##__VA_ARGS__); \
+		pr_info("%s [%d]: " fmt, current->comm, current->pid, \
+			##__VA_ARGS__); \
 } while (0)
 
 #undef DbgSCP_ERR
@@ -67,7 +81,8 @@ do { \
 	if (current->mm->context.pm_sc_debug_mode & PM_SC_DBG_MODE_CHECK \
 		&& !(current->mm->context.pm_sc_debug_mode \
 					& PM_SC_DBG_MODE_NO_ERR_MESSAGES)) \
-		pr_alert("%s: " fmt, __func__,  ##__VA_ARGS__); \
+		pr_info("%s [%d]: " fmt, current->comm, current->pid, \
+			##__VA_ARGS__); \
 } while (0)
 
 #undef DbgSCP_WARN
@@ -76,7 +91,8 @@ do { \
 	if (current->mm->context.pm_sc_debug_mode & PM_SC_DBG_MODE_CHECK \
 		&& !(current->mm->context.pm_sc_debug_mode \
 					& PM_SC_DBG_MODE_NO_ERR_MESSAGES)) \
-		pr_warn("%s: " fmt, __func__,  ##__VA_ARGS__); \
+		pr_info("%s [%d]: " fmt, current->comm, current->pid, \
+			##__VA_ARGS__); \
 } while (0)
 
 #undef PM_SYSCALL_WARN_ONLY
@@ -88,19 +104,31 @@ do { \
 
 #define get_user_space(x)	arch_compat_alloc_user_space(x)
 
-#define ARG_TAG(i)	((tags >> (4*(i))) & 0xF)
-#define ARG_TAGS(i)	((tags >> (4*(i))) & 0xFF)
-#define NOT_PTR(i)	(ARG_TAGS(i) != ETAGAPQ)
-#define NULL_PTR(i) ((ARG_TAG(i) == E2K_NULLPTR_ETAG) && (arg##i == 0))
+/* NB> 'n' below is syscall argument number;
+ *     'i' - is register number.
+ */
+#define PROT_SC_ARG_TAGS(n)	((regs->tags >> 8*(n)) & 0xff)
+#define NOT_PTR(n)	(PROT_SC_ARG_TAGS(n) != ETAGAPQ)
+#define NULL_PTR(n, i) ((((regs->tags >> (8*(n))) & 0xf) == E2K_NULLPTR_ETAG) \
+							&& (arg##i == 0))
 
 #define DESCRIPTOR_SIZE	16
+
+	#define FATAL_ERR_READ "FATAL ERROR: failed to read from 0x%lx !!!\n"
+#define FATAL_ERR_WRITE "FATAL ERROR: failed to write at 0x%lx !!!\n"
+
+
+static inline unsigned long ptr128_to_64(e2k_ptr_t dscr)
+{
+	return dscr.fields.ap.base + dscr.fields.ap.curptr;
+}
 
 
 /*
  * Counts the number of descriptors in array, which is terminated by NULL
  * (For counting of elements in argv and envp arrays)
  */
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 static int count_descriptors(long __user *prot_array, const int prot_array_size)
 {
 	int i;
@@ -257,10 +285,19 @@ int pm_sc_debug_envp_check(mm_context_t *context)
 	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_DEBUG);
 	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_COMPLEX_WRAPPERS);
 	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_CHECK);
-	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_WARN_ONLY);
 	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_CONV_STRUCT);
 	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_SIGNALS);
 	CHECK_DEBUG_MASK(PM_SC_DBG_MODE_NO_ERR_MESSAGES);
+	/* Protected mode setup: */
+	mask = check_debug_mask("PM_SC_DBG_MODE_WARN_ONLY",
+				48, PM_SC_DBG_MODE_WARN_ONLY);
+	if (mask) {
+		if (mask & PROTECTED_MODE_SOFT) /* positive mask */
+			context->pm_sc_debug_mode |= mask;
+		else /* negative mask */
+			context->pm_sc_debug_mode &= mask;
+	}
+	CHECK_DEBUG_MASK(PROTECTED_MODE_SOFT);
 	/* libc mmu control stuff: */
 	CHECK_DEBUG_MASK(PM_MM_CHECK_4_DANGLING_POINTERS);
 	CHECK_DEBUG_MASK(PM_MM_EMPTYING_FREED_POINTERS);
@@ -289,17 +326,47 @@ int arch_init_pm_sc_debug_mode(const int debug_mask)
 	return context->pm_sc_debug_mode & debug_mask;
 }
 
+void pm_deliver_exception(int signo, int code, int errno)
+/* Sometimes we need to deliver exception to end up execution of the current thread: */
+{
+	struct kernel_siginfo info;
 
-static long __user *convert_msghdr(long __user *prot_msghdr,
-				   unsigned int size,
-				   const char *syscall_name)
+	clear_siginfo(&info);
+	info.si_signo = signo;	/* f.e. SIGILL */
+	info.si_code = code;	/* f.e. ILL_ILLOPN - "illegal operand" */
+	info.si_errno = errno;	/* f.e. -EINVAL */
+
+	if (force_sig_info(&info))
+		pr_alert("Failed to deliver exception at %s:%d\n",
+			 __FILE__, __LINE__);
+}
+
+
+struct protected_user_msghdr {
+	e2k_ptr_t	msg_name;	/* ptr to socket address structure */
+	int		msg_namelen;	/* size of socket address structure */
+	unsigned long	pad_align1;	/* placeholder to align next prot ptr */
+	e2k_ptr_t	msg_iov;	/* scatter/gather array */
+	__kernel_size_t msg_iovlen;	/* # elements in msg_iov */
+	unsigned long	pad_align2;	/* placeholder to align next prot ptr */
+	e2k_ptr_t	msg_control;	/* ancillary data */
+	__kernel_size_t msg_controllen;	/* ancillary data buffer length */
+	unsigned int    msg_flags;	/* flags on received message */
+};
+
+static struct user_msghdr __user *convert_msghdr(
+			struct protected_user_msghdr __user *prot_msghdr,
+			unsigned int			size,
+			const char			*syscall_name,
+			void			__user	*user_buff)
 /* Converts user msghdr structure from protected to regular structure format.
- * Outputs converted structure (allocated in user space).
+ * Outputs converted structure (allocated in user space if (user_buff == NULL)).
  * 'prot_msghdr' - protected message header structure.
  * 'size' - size of the input structure.
+ * 'user_buff' - buffer for converted structure in user space.
  */
 {
-	long __user *args;
+	long __user *args = (long *) user_buff;
 	struct user_msghdr __user *converted_msghdr = NULL;
 	struct iovec __user *converted_iovec;
 	int err_mh, err_iov;
@@ -317,13 +384,14 @@ static long __user *convert_msghdr(long __user *prot_msghdr,
 	 * converted with saving results in these structures
 	 */
 
-	 /* Allocating space on user stack for converted structures: */
-	args = get_user_space(sizeof(struct user_msghdr) +
-				sizeof(struct iovec));
+	/* Allocating space on user stack for converted structures: */
+	if (!args)
+		args = get_user_space(sizeof(struct user_msghdr) +
+					sizeof(struct iovec));
 
 	/* Convert struct msghdr: */
 	converted_msghdr = (struct user_msghdr *) args;
-	err_mh = convert_array_3(prot_msghdr, (long *) converted_msghdr,
+	err_mh = convert_array_3((long *)prot_msghdr, (long *) converted_msghdr,
 				SIZE_MSGHDR, 7, 1, MASK_MSGHDR_TYPE,
 				MASK_MSGHDR_ALIGN, MASK_MSGHDR_RW,
 				CONV_ARR_WRONG_DSCR_FLD);
@@ -334,8 +402,7 @@ static long __user *convert_msghdr(long __user *prot_msghdr,
 	if (converted_msghdr->msg_iov) {
 		/* Convert struct iovec from msghdr->msg_iov */
 		converted_iovec = (struct iovec *)
-					((char *)converted_msghdr +
-					sizeof(struct user_msghdr));
+			((char *)converted_msghdr + sizeof(struct user_msghdr));
 		err_iov = convert_array_3((long *) converted_msghdr->msg_iov,
 					  (long *) converted_iovec,
 					  SIZE_IOVEC, 2, 1, MASK_IOVEC_TYPE,
@@ -346,85 +413,138 @@ static long __user *convert_msghdr(long __user *prot_msghdr,
 				     syscall_name);
 		}
 	} else {
-			DbgSCP_ALERT("Empty struct iovec in msghdr (syscall \'%s\')\n",
-				     syscall_name);
-			converted_iovec = NULL;
+		DbgSCP_ALERT("Empty struct iovec in msghdr (syscall \'%s\')\n",
+			     syscall_name);
+		converted_iovec = NULL;
 	}
 
 	/* Assign converted iovec pointer to converted msghdr structure: */
 	converted_msghdr->msg_iov = converted_iovec;
 
-	return args;
+	return (struct user_msghdr *) args;
 }
 
 
-
-notrace __section(.entry_handlers)
-long protected_sys_sigaltstack(const unsigned long __user a1,  /* ss */
-				const unsigned long __user a2, /* oss */
-				const unsigned long	a3, /* not used */
-				const unsigned long	a4, /* not used */
-				const unsigned long	a5, /* not used */
-				const unsigned long	a6, /* not used */
+notrace __section(".entry.text")
+long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
+					stack_prot_t __user *old_ss_128,
+				const unsigned long	unused3,
+				const unsigned long	unused4,
+				const unsigned long	unused5,
+				const unsigned long	unused6,
 				const struct pt_regs	*regs)
 {
-#define SIGALTSTACK_MASK_TYPE     0x13
-#define SIGALTSTACK_MASK_ALIGN    0x17
-#define SIGALTSTACK_STRING1 "Bad 1-st stack descriptor for sigaltstack\n"
-#define SIGALTSTACK_STRING2 "Bad 2-st stack descriptor for sigaltstack\n"
-	void *ss = NULL;
-	void *old_ss = NULL;
-	unsigned int size = 0, size2 = 0;
+#define SIGALTST_MASK_TYPE     0x103
+#define SIGALTST_MASK_ALIGN    0x113
+#define SIGALTST_ERR1 "Both 'ss' and 'old_ss' arguments to sigaltstack() are empty\n"
+#define SIGALTST_ERR2 "Bad 'ss' descriptor for sigaltstack()\n"
+#define SIGALTST_ERRSIZE "Size of 'ss' arg (%d) is less than required by 'ss_size' field (%zd)\n"
+#define SIGALTST_ERRWRITE "Failed to update 'old_ss' descriptor; error code = %d\n"
+	stack_t *ss = NULL;
+	stack_t *old_ss = NULL;
+	unsigned long lo, hi;
+	unsigned int size = 0, size1 = 0, size2 = 0;
 	long rval = -EINVAL; /* syscall return value */
 
-	if (!a1 && !a2)
-		return -EINVAL;
+	if (!ss_128 && !old_ss_128)
+		DbgSCP_WARN(SIGALTST_ERR1);
+	/* NB> Currently syscall returns OK if both args are empty */
 
-	if (a1) {
-		size = e2k_ptr_size(regs->args[1], regs->args[2],
-				    sizeof(stack_t));
-		if (!size)
+	if (ss_128) {
+		size1 = e2k_ptr_size(regs->args[1], regs->args[2],
+				     sizeof(stack_prot_t));
+		if (!size1)
 			return -EINVAL;
+		size = size1;
 	}
-
-	if (a2) {
+	if (old_ss_128) {
 		size2 = e2k_ptr_size(regs->args[3], regs->args[4],
-				     sizeof(stack_t));
+				     sizeof(stack_prot_t));
 		if (!size2)
 			return -EINVAL;
+		size += sizeof(stack_t);
+	}
+	if (size) {
+		void *buf;
+
+		buf = get_user_space(size);
+		if (ss_128)
+			ss = buf;
+		if (old_ss_128)
+			old_ss = buf + size1;
 	}
 
-	ss = get_user_space(size + size2);
-
-	if (a1) {
-		/* Struct ss contains pointer in the first field */
-		rval = convert_array((long *) a1, ss, size, 3, 1,
-			SIGALTSTACK_MASK_TYPE, SIGALTSTACK_MASK_ALIGN);
+	if (ss_128) {
+		/* Struct 'ss_128' contains pointer in the first field */
+		rval = get_pm_struct_simple((long *) ss_128, (long *) ss, size1,
+				3, 1, SIGALTST_MASK_TYPE, SIGALTST_MASK_ALIGN);
 		if (rval) {
-			DbgSCP_ALERT(SIGALTSTACK_STRING1);
+			DbgSCP_ALERT(SIGALTST_ERR2);
 			return rval;
+		}
+		/* Checking stack size for correctness: */
+		rval = get_user(hi, &ss_128->ss_sp.word.hi);
+		if (rval) {
+			DbgSCP_ALERT(FATAL_ERR_READ,
+				     (long) &ss_128->ss_sp.word.hi);
+			return rval;
+		}
+		size2 = e2k_ptr_size(0L /*lo*/, hi, 0);
+		if (size2 < ss->ss_size) {
+			DbgSCP_ALERT(SIGALTST_ERRSIZE, size2, ss->ss_size);
+			return -EINVAL;
 		}
 	}
 
-	if (a2) {
-		old_ss = ss + size;
-		/* Struct old_ss contains pointer in the first field */
-		rval = convert_array((long *) a2, old_ss, size2, 3, 1,
-			SIGALTSTACK_MASK_TYPE, SIGALTSTACK_MASK_ALIGN);
-		if (rval) {
-			DbgSCP_ALERT(SIGALTSTACK_STRING2);
-			return rval;
+	rval = sys_sigaltstack(ss, old_ss);
+
+	if (old_ss_128) {
+		/* Updating 'old_ss_128': */
+		e2k_ptr_t dscr;
+		int ret;
+
+		if (old_ss->ss_sp) {
+			/* Constructing descriptor for protected 'ss_sp': */
+			lo = make_ap_lo((e2k_addr_t) old_ss->ss_sp,
+					old_ss->ss_size, 0, RW_ENABLE);
+			hi = make_ap_hi((e2k_addr_t) old_ss->ss_sp,
+					old_ss->ss_size, 0, RW_ENABLE);
+			NATIVE_STORE_VALUE_WITH_TAG(&AWP(&dscr).hi, hi,
+						    E2K_AP_HI_ETAG);
+			NATIVE_STORE_VALUE_WITH_TAG(&AWP(&dscr).lo, lo,
+						    E2K_AP_LO_ETAG);
+
+			ret = copy_to_user_with_tags(&old_ss_128->ss_sp, &dscr,
+						     sizeof(dscr));
+			if (ret)
+				ret = -EFAULT;
+		} else {
+			/* Zeroing protected 'ss_sp' field: */
+			ret = put_user(0L, &old_ss_128->ss_sp.word.lo);
+			ret |= put_user(0L, &old_ss_128->ss_sp.word.hi);
+		}
+
+		ret |= put_user(old_ss->ss_flags, &old_ss_128->ss_flags);
+		ret |= put_user(old_ss->ss_size, &old_ss_128->ss_size);
+
+		if (!rval)
+			rval = ret;
+
+		if (ret) {
+			DbgSCP_ALERT(SIGALTST_ERRWRITE, ret);
+		} else {
+			DbgSCP("old_ss_128: sp=0x%lx:0x%lx flags=0x%x size=0x%zx\n",
+				old_ss_128->ss_sp.word.lo,
+				old_ss_128->ss_sp.word.hi,
+				old_ss_128->ss_flags, old_ss_128->ss_size);
 		}
 	}
-
-	rval = sys_sigaltstack((stack_t *) ss,
-			       (stack_t *) old_ss);
 
 	return rval;
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_clean_descriptors(void __user *addr,
 				     unsigned long	size,
 				     const unsigned long flags,
@@ -464,7 +584,7 @@ long protected_sys_clean_descriptors(void __user *addr,
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_clone(const unsigned long	a1,	/* flags */
 			 const unsigned long	a2,	/* new_stackptr */
 			 const unsigned long __user a3,/* parent_tidptr */
@@ -496,10 +616,8 @@ long protected_sys_clone(const unsigned long	a1,	/* flags */
 							sizeof(int));
 		/* Check that the pointer is good. */
 		if (!tls_size) {
-			long tags = regs->tags >> 4;
-
 			DbgSCP_ALERT(" Bad TLS pointer: size=%d, tags=%lx\n",
-				     tls_size, ARG_TAGS(9));
+				     tls_size, PROT_SC_ARG_TAGS(5));
 			return -EINVAL;
 		}
 	}
@@ -530,7 +648,7 @@ long protected_sys_clone(const unsigned long	a1,	/* flags */
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_execve(const unsigned long __user a1,/* filename*/
 			  const unsigned long __user a2,/* argv[] */
 			  const unsigned long __user a3,/* envp[] */
@@ -635,7 +753,7 @@ long protected_sys_execve(const unsigned long __user a1,/* filename*/
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_execveat(const unsigned long dirfd,		/*a1 */
 			    const unsigned long __user pathname,/* a2 */
 			    const unsigned long __user argv,	/* a3 */
@@ -737,7 +855,7 @@ long protected_sys_execveat(const unsigned long dirfd,		/*a1 */
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_futex(const unsigned long __user a1,	/* uaddr */
 			 const unsigned long	a2,	/* futex_op */
 			 const unsigned long	a3,	/* val */
@@ -750,7 +868,6 @@ long protected_sys_futex(const unsigned long __user a1,	/* uaddr */
 	int cmd;
 	unsigned long a4 = la4;
 	unsigned long __user a5 = la5;
-	long tags;
 	long sys_num;
 	long rval = 0; /* syscall return value */
 
@@ -764,9 +881,8 @@ long protected_sys_futex(const unsigned long __user a1,	/* uaddr */
 		 */
 		unsigned long arg7 = regs->args[7];
 
-		tags = regs->tags >> 4;
 		sys_num = regs->sys_num;
-		if (NOT_PTR(7) && !NULL_PTR(7)) {
+		if (NOT_PTR(4) && !NULL_PTR(4, 7)) {
 			DbgSCP_ALERT("7 8" ERROR_MESSAGE_FUTEX, sys_num);
 			rval = -EINVAL;
 		}
@@ -779,9 +895,8 @@ long protected_sys_futex(const unsigned long __user a1,	/* uaddr */
 		 */
 		unsigned long arg9 = regs->args[9];
 
-		tags = regs->tags >> 4;
 		sys_num = regs->sys_num;
-		if (NOT_PTR(9) && !NULL_PTR(9)) {
+		if (NOT_PTR(5) && !NULL_PTR(5, 9)) {
 			DbgSCP_ALERT("9 10" ERROR_MESSAGE_FUTEX, sys_num);
 			rval = -EINVAL;
 		}
@@ -792,8 +907,8 @@ long protected_sys_futex(const unsigned long __user a1,	/* uaddr */
 }
 
 
-notrace __section(.entry_handlers)
-long protected_sys_getgroups(const unsigned long       a1, /* size */
+notrace __section(".entry.text")
+long protected_sys_getgroups(const long			a1, /* size */
 			    const unsigned long __user a2, /* list[] */
 			    const unsigned long unused3,
 			    const unsigned long unused4,
@@ -804,20 +919,70 @@ long protected_sys_getgroups(const unsigned long       a1, /* size */
 	long rval; /* syscall return value */
 	unsigned int bufsize;
 
-	DbgSCP(" (size=%lu, list[]=0x%lx) ", a1, a2);
+	DbgSCP(" (size=%ld, list[]=0x%lx) ", a1, a2);
 
+	if (a1 < 0) {
+		DbgSCP_ALERT(
+			"Wrong 'size' (%ld) in getgroups()\n", a1);
+		return -EINVAL;
+	}
+	if (a2 && (PROT_SC_ARG_TAGS(2) != ETAGAPQ)) {
+		DbgSCP_ALERT(
+			"Not a pointer in arg #2 in getgroups()\n");
+		return -EFAULT;
+	}
 	/*
 	 * Here we check that list size is enough to receive 'size' gid's:
 	 */
 	bufsize = e2k_ptr_size(regs->args[3], regs->args[4], 0);
 	if (bufsize < (a1 * sizeof(gid_t))) {
 		DbgSCP_ALERT(
-			"Insufficient list size in getgroups: %d < %zu\n",
+			"Insufficient list size in getgroups(): %d < %zu\n",
 				bufsize, (size_t)(a1 * sizeof(gid_t)));
 		return -EINVAL;
 	}
 
 	rval = sys_getgroups(a1, (gid_t *) a2);
+	DbgSCP("rval = %ld\n", rval);
+	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_setgroups(const long			a1, /* size */
+			     const unsigned long __user a2, /* list[] */
+			     const unsigned long unused3,
+			     const unsigned long unused4,
+			     const unsigned long unused5,
+			     const unsigned long unused6,
+			     const struct pt_regs	*regs)
+{
+	long rval; /* syscall return value */
+	unsigned int bufsize;
+
+	DbgSCP(" (size=%ld, list[]=0x%lx) ", a1, a2);
+
+	if (a1 < 0) {
+		DbgSCP_ALERT(
+			"Wrong 'size' (%ld) in setgroups()\n", a1);
+		return -EINVAL;
+	}
+	if (a2 && (PROT_SC_ARG_TAGS(2) != ETAGAPQ)) {
+		DbgSCP_ALERT(
+			"Not a pointer in arg #2 in setgroups()\n");
+		return -EFAULT;
+	}
+	/*
+	 * Here we check that list size is enough to receive 'size' gid's:
+	 */
+	bufsize = e2k_ptr_size(regs->args[3], regs->args[4], 0);
+	if (bufsize < (a1 * sizeof(gid_t))) {
+		DbgSCP_ALERT(
+			"Insufficient list size in setgroups(): %d < %zu\n",
+				bufsize, (size_t)(a1 * sizeof(gid_t)));
+		return -EINVAL;
+	}
+
+	rval = sys_setgroups(a1, (gid_t *) a2);
 	DbgSCP("rval = %ld\n", rval);
 	return rval;
 }
@@ -870,7 +1035,7 @@ long __user *convert_prot_iovec_struct(const unsigned long __user iov,
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_readv(const unsigned long        a1, /* fd */
 			 const unsigned long __user a2, /* iov */
 			 const unsigned long        a3, /* iovcnt */
@@ -905,7 +1070,7 @@ long protected_sys_readv(const unsigned long        a1, /* fd */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_preadv(const unsigned long        a1, /* fd */
 			  const unsigned long __user a2, /* iov */
 			  const unsigned long        a3, /* iovcnt */
@@ -929,7 +1094,7 @@ long protected_sys_preadv(const unsigned long        a1, /* fd */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_writev(const unsigned long        a1, /* fd */
 			  const unsigned long __user a2, /* iov */
 			  const unsigned long        a3, /* iovcnt */
@@ -956,7 +1121,7 @@ long protected_sys_writev(const unsigned long        a1, /* fd */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_pwritev(const unsigned long        a1, /* fd */
 			   const unsigned long __user a2, /* iov */
 			   const unsigned long        a3, /* iovcnt */
@@ -980,7 +1145,7 @@ long protected_sys_pwritev(const unsigned long        a1, /* fd */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_preadv2(const unsigned long        a1, /* fd */
 			  const unsigned long __user a2, /* iov */
 			  const unsigned long        a3, /* iovcnt */
@@ -1005,7 +1170,7 @@ long protected_sys_preadv2(const unsigned long        a1, /* fd */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_pwritev2(const unsigned long        a1, /* fd */
 			   const unsigned long __user a2, /* iov */
 			   const unsigned long        a3, /* iovcnt */
@@ -1031,7 +1196,7 @@ long protected_sys_pwritev2(const unsigned long        a1, /* fd */
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_sysctl(const unsigned long __user arg1)
 {
 #define	SYSCTL_ARGS_STRUCT_SIZE 88; /* size of the protected structure used */
@@ -1056,7 +1221,7 @@ long protected_sys_sysctl(const unsigned long __user arg1)
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_olduselib(const unsigned long __user a1, /* library */
 			const unsigned long __user a2) /* umdd */
 {
@@ -1111,7 +1276,7 @@ long protected_sys_olduselib(const unsigned long __user a1, /* library */
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_uselib(const unsigned long __user a1, /* library */
 			const unsigned long __user a2) /* umdd */
 {
@@ -1227,7 +1392,7 @@ nr_mremap_err:
  * This function calculates mask/align type arguments to process
  *                               the structure by 'convert+array'.
  */
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 				int *fields)
 {
@@ -1239,32 +1404,38 @@ static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 		/* err = sys_socket(a[0], a[1], a[2]); */
 		break;
 	case SYS_BIND:
-		*mask_type = 0x1d;
-		*mask_align = 0x1f;
-		*fields = 3;
 		/* err = sys_bind(a[0],				*/
 		/*	(struct sockaddr __user *) a[1], a[2]); */
-		break;
 	case SYS_CONNECT:
+		/* err = sys_connect(a[0],			*/
+		/*	(struct sockaddr __user *) a[1], a[2]); */
 		*mask_type = 0x1d;
 		*mask_align = 0x1f;
 		*fields = 3;
-		/* err = sys_connect(a[0],			*/
-		/*	(struct sockaddr __user *) a[1], a[2]); */
 		break;
 	case SYS_LISTEN:
+		/* err = sys_listen(a[0], a[1]); */
+	case SYS_SHUTDOWN:
+		/* err = sys_shutdown(a[0], a[1]); */
 		*mask_type = 0x5;
 		*mask_align = 0x5;
 		*fields = 2;
-		/* err = sys_listen(a[0], a[1]); */
 		break;
 	case SYS_ACCEPT:
-		*mask_type = 0x3d;
-		*mask_align = 0x3f;
-		*fields = 3;
 		/* err = sys_accept(a[0],				*/
 		/*		(struct sockaddr __user *) a[1],	*/
 		/*		(int __user*) a[2]);			*/
+	case SYS_GETSOCKNAME:
+		/* err = sys_getsockname(a[0],				*/
+		/*		(struct sockaddr __user*) a[1],		*/
+		/*		(int __user *) a[2]);			*/
+	case SYS_GETPEERNAME:
+		/* err = sys_getpeername(a[0],				*/
+		/*		(struct sockaddr __user *) a[1],	*/
+		/*		(int __user *)a[2]);			*/
+		*mask_type = 0x3d;
+		*mask_align = 0x3f;
+		*fields = 3;
 		break;
 	case SYS_ACCEPT4:
 		*mask_type = 0x7d;
@@ -1274,22 +1445,6 @@ static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 		/*		(struct sockaddr __user *) a[1],	*/
 		/*		(int	__user*)	a[2]		*/
 		/*		int			a[3]);		*/
-		break;
-	case SYS_GETSOCKNAME:
-		*mask_type = 0x3d;
-		*mask_align = 0x3f;
-		*fields = 3;
-		/* err = sys_getsockname(a[0],			*/
-		/*	(struct sockaddr __user*) a[1],		*/
-		/*	(int __user *) a[2]);			*/
-		break;
-	case SYS_GETPEERNAME:
-		*mask_type = 0x3d;
-		*mask_align = 0x3f;
-		*fields = 3;
-		/* err = sys_getpeername(a[0],				*/
-		/*		(struct sockaddr __user *) a[1],	*/
-		/*		(int __user *)a[2]);			*/
 		break;
 	case SYS_SOCKETPAIR:
 		*mask_type = 0xd5;
@@ -1327,12 +1482,6 @@ static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 		/*		a[3], (struct sockaddr __user *) a[4],	*/
 		/*		(int __user *) a[5]);			*/
 		break;
-	case SYS_SHUTDOWN:
-		*mask_type = 0x5;
-		*mask_align = 0x5;
-		*fields = 2;
-		/* err = sys_shutdown(a[0], a[1]); */
-		break;
 	case SYS_SETSOCKOPT:
 		*mask_type = 0x1d5;
 		*mask_align = 0x1f5;
@@ -1348,18 +1497,14 @@ static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 		/*	(char __user *) a[3], (int __user *)a[4]);	*/
 		break;
 	case SYS_SENDMSG:
-		*mask_type = 0x1d;
-		*mask_align = 0x1f;
-		*fields = 3;
 		/* err = sys_sendmsg(a[0],				*/
 		/*		(struct msghdr __user *) a[1], a[2]);	*/
-		break;
 	case SYS_RECVMSG:
+		/* err = sys_recvmsg(a[0],				*/
+		/*		(struct msghdr __user *) a[1], a[2]);	*/
 		*mask_type = 0x1d;
 		*mask_align = 0x1f;
 		*fields = 3;
-		/* err = sys_recvmsg(a[0],			*/
-		/*	(struct msghdr __user *) a[1], a[2]);	*/
 		break;
 	default:
 		DbgSCP("Empty masks used for socketcall #%ld\n", call);
@@ -1370,7 +1515,7 @@ static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 	}
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_socketcall(const unsigned long        a1, /* call */
 			      const unsigned long __user a2, /* args */
 			      const unsigned long unused3,
@@ -1384,7 +1529,7 @@ long protected_sys_socketcall(const unsigned long        a1, /* call */
 	long mask_type, mask_align;
 	int fields;
 	long rval; /* syscall return value */
-	long __user *prot_msghdr;
+	struct protected_user_msghdr __user *prot_msghdr;
 	struct user_msghdr __user *converted_msghdr;
 
 	get_socketcall_mask(a1, &mask_type, &mask_align, &fields);
@@ -1407,17 +1552,6 @@ long protected_sys_socketcall(const unsigned long        a1, /* call */
 	 * for syscalls recvmsg/sendmsg
 	 */
 	if ((a1 == SYS_SENDMSG) || (a1 == SYS_RECVMSG)) {
-#define MASK_IOVEC_TYPE      0x7    /* mask for converting of struct iovec */
-#define MASK_IOVEC_ALIGN     0xf    /* alignment mask for struct iovec */
-#define SIZE_IOVEC           32     /* size of struct iovec in user space */
-		/*
-		 * Structures user_msghdr and iovec contain pointers
-		 * inside, therefore they need to be additionally
-		 * converted with saving results in these structures
-		 */
-		struct iovec __user *converted_iovec;
-		int err_mh, err_iov;
-
 		/*
 		 * Allocate space on user stack for additional
 		 * structures for saving of converted parameters
@@ -1434,44 +1568,17 @@ long protected_sys_socketcall(const unsigned long        a1, /* call */
 			goto err_out_bad_array;
 
 		/* Convert struct msghdr from args[1] */
-		prot_msghdr = (long *) args[1];
+		prot_msghdr = (struct protected_user_msghdr *) args[1];
 		converted_msghdr = (struct user_msghdr *) (args + (fields));
 		if (prot_msghdr) {
+			converted_msghdr = convert_msghdr(prot_msghdr,
+				SIZE_MSGHDR, "socketcall", converted_msghdr);
+			/* Set args[1] to pointer to converted structure */
 			args[1] = (long) converted_msghdr;
-			err_mh = convert_array_3(prot_msghdr,
-					(long *) converted_msghdr,
-					SIZE_MSGHDR, 7, 1, MASK_MSGHDR_TYPE,
-					MASK_MSGHDR_ALIGN, MASK_MSGHDR_RW,
-					CONV_ARR_WRONG_DSCR_FLD);
-			if (err_mh)
-				DbgSCP_ALERT("Bad user_msghdr in args[1]\n");
 		} else {
 			args[1] = 0;
 			DbgSCP_ALERT("Empty user_msghdr in args[1]\n");
-			goto run_syscall;
 		}
-
-		if (converted_msghdr->msg_iov) {
-			/* Convert struct iovec from msghdr->msg_iov */
-			converted_iovec = (struct iovec *)
-						((char *)converted_msghdr +
-						sizeof(struct user_msghdr));
-			err_iov = convert_array_3(
-					(long *) converted_msghdr->msg_iov,
-					(long *) converted_iovec,
-					SIZE_IOVEC, 2, 1, MASK_IOVEC_TYPE,
-					MASK_IOVEC_ALIGN, 0,
-					CONV_ARR_WRONG_DSCR_FLD);
-			if (err_iov)
-				DbgSCP_ALERT("Bad struct iovec in msghdr\n");
-		} else {
-			DbgSCP_ALERT("Empty struct iovec in msghdr\n");
-			converted_iovec = NULL;
-		}
-
-		/* Assign args[1] to pointers to converted structures */
-		converted_msghdr->msg_iov = converted_iovec;
-
 	/* Other socketcalls */
 	} else {
 		if (fields) {
@@ -1491,24 +1598,26 @@ long protected_sys_socketcall(const unsigned long        a1, /* call */
 		}
 	}
 
-	/*
-	 * Call socketcall handler function with passing of
-	 * arguments to it
-	 */
-run_syscall:
+	/* Calling regular socketcall function with converted arguments: */
 	rval = sys_socketcall((int) a1, (unsigned long *) args);
 
 	if (!rval && (a1 == SYS_RECVMSG)) {
-#define PROT_MSG_FLAGS_FIELD_OFFSET 11
+		long ret;
 		/* Updating the msg_flags field @ user space: */
 		DbgSCP("Socket call RECVMSG returned msg_flags: 0x%x\n",
 		       converted_msghdr->msg_flags);
-		rval = copy_to_user(prot_msghdr + PROT_MSG_FLAGS_FIELD_OFFSET,
-					&converted_msghdr->msg_flags,
-					sizeof(converted_msghdr->msg_flags));
-		if (rval) {
-			DbgSCP_ERR("Socket call RECVMSG: faled to return msg_flags\n");
-			rval = -EFAULT;
+		rval = put_user(converted_msghdr->msg_flags,
+				&prot_msghdr->msg_flags);
+		if (rval)
+			DbgSCP_ERR("Socket call RECVMSG: faled to return 'msg_flags'\n");
+		/* Updating the 'controllen' field @ user space: */
+		DbgSCP("Socket call RECVMSG returned 'controllen': %ld\n",
+		       converted_msghdr->msg_controllen);
+		ret = put_user(converted_msghdr->msg_controllen,
+				&prot_msghdr->msg_controllen);
+		if (ret) {
+			DbgSCP_ERR("Socket call RECVMSG failed to return 'controllen'\n");
+			rval = ret;
 		}
 	}
 
@@ -1520,33 +1629,9 @@ err_out_bad_array:
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_sendmsg(const unsigned long		sockfd,
 			   const unsigned long __user msg,
-			   const unsigned long		flags,
-			   const unsigned long unused4,
-			   const unsigned long unused5,
-			   const unsigned long unused6,
-			   const struct pt_regs		*regs)
-{
-	unsigned int size;
-	long rval; /* syscall return value */
-	long __user *converted_msghdr;
-
-	size = e2k_ptr_size(regs->args[3], regs->args[4], 1 /*min_size*/);
-	converted_msghdr = convert_msghdr((long *) msg, size, "sendmsg");
-
-	 /* Call socketcall handler function: */
-	rval = sys_sendmsg(sockfd, (struct user_msghdr *) converted_msghdr,
-			   flags);
-
-	DbgSCP(" returned %ld\n", rval);
-	return rval;
-}
-
-notrace __section(.entry_handlers)
-long protected_sys_recvmsg(const unsigned long		socket,
-			   const unsigned long __user message,
 			   const unsigned long		flags,
 			   const unsigned long unused4,
 			   const unsigned long unused5,
@@ -1558,23 +1643,56 @@ long protected_sys_recvmsg(const unsigned long		socket,
 	struct user_msghdr __user *converted_msghdr;
 
 	size = e2k_ptr_size(regs->args[3], regs->args[4], 1 /*min_size*/);
-	converted_msghdr = (struct user_msghdr *)
-			convert_msghdr((long *) message, size, "recvmsg");
+	converted_msghdr = convert_msghdr((struct protected_user_msghdr *) msg,
+					  size, "sendmsg", NULL);
+
+	 /* Call socketcall handler function: */
+	rval = sys_sendmsg(sockfd, converted_msghdr, flags);
+
+	DbgSCP(" returned %ld\n", rval);
+	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_recvmsg(const unsigned long		socket,
+			   const unsigned long __user message,
+			   const unsigned long		flags,
+			   const unsigned long unused4,
+			   const unsigned long unused5,
+			   const unsigned long unused6,
+			   const struct pt_regs		*regs)
+{
+	unsigned int size;
+	long rval; /* syscall return value */
+	struct user_msghdr __user *converted_msghdr;
+	struct protected_user_msghdr __user *prot_msghdr =
+					(struct protected_user_msghdr *)message;
+
+	size = e2k_ptr_size(regs->args[3], regs->args[4], 1 /*min_size*/);
+	converted_msghdr = convert_msghdr(prot_msghdr, size, "recvmsg", NULL);
 
 	 /* Call socketcall handler function: */
 	rval = sys_recvmsg(socket, converted_msghdr, flags);
 
-	if (!rval) {
-		/* Updating the msg_flags field @ user space: */
-		DbgSCP("Socket call 'recvmsg' returned msg_flags: 0x%x\n",
+	if (rval >= 0) {
+		long ret;
+		/* Updating the 'msg_flags' field @ user space: */
+		DbgSCP("Syscall recvmsg() returned msg_flags: 0x%x\n",
 		       converted_msghdr->msg_flags);
-		rval = copy_to_user((void *)
-					(message + PROT_MSG_FLAGS_FIELD_OFFSET),
-					&converted_msghdr->msg_flags,
-					sizeof(converted_msghdr->msg_flags));
-		if (rval) {
-			DbgSCP_ERR("Socket call 'recvmsg' faled to return msg_flags\n");
-			rval = -EFAULT;
+		ret = put_user(converted_msghdr->msg_flags,
+				&prot_msghdr->msg_flags);
+		if (ret) {
+			DbgSCP_ERR("Protected recvmsg() failed to return 'msg_flags'\n");
+			rval = ret;
+		}
+		/* Updating the 'controllen' field @ user space: */
+		DbgSCP("Syscall recvmsg() returned 'controllen': %ld\n",
+		       converted_msghdr->msg_controllen);
+		ret = put_user(converted_msghdr->msg_controllen,
+				&prot_msghdr->msg_controllen);
+		if (ret) {
+			DbgSCP_ERR("Protected recvmsg() failed to return 'controllen'\n");
+			rval = ret;
 		}
 	}
 
@@ -1744,7 +1862,7 @@ static long update_prot_mmsghdr_struct(long __user *mmsghdr_arr,
 #define PROTECTED_MMSGHDR_SIZE(vlen) \
 			(PROT_MMSGHDR_SIZE * vlen)
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_sendmmsg(const unsigned long		sockfd,
 			    const unsigned long __user msgvec,
 			    const unsigned long		vlen, /* vector lngth */
@@ -1809,7 +1927,7 @@ long protected_sys_sendmmsg(const unsigned long		sockfd,
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_recvmmsg(const unsigned long		sockfd,
 			    const unsigned long __user msgvec,
 			    const unsigned long		vlen, /* vector lngth */
@@ -1871,7 +1989,7 @@ long protected_sys_recvmmsg(const unsigned long		sockfd,
  * to convert protected array of arguments to the corresponding sys_ipc syscall.
  * NB> Elements of the array are normally of types long and descriptor.
  */
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 static inline void get_ipc_mask(long call, long *mask_type, long *mask_align,
 				int *fields)
 {
@@ -1961,13 +2079,53 @@ static long process_shmat_syscall_result(const int shmid, const int shmflg,
 	return rval;
 }
 
-#define MASK_SEMUN_PTR_TYPE  0x3 /* mask for union semun with pointer */
-#define MASK_SEMUN_PTR_ALIGN 0x3 /* alignment mask for union semun with ptr */
-#define SEMUN_STR_SIZE       16  /* size of union semun */
-#define MASK_SEMUN_INT_TYPE  0x0 /* mask for union semun with int */
-#define MASK_SEMUN_INT_ALIGN 0x3 /* alignment mask for union semun with int */
+static int semctl_ptr128_to_64(unsigned long __user semun_ptr128,
+			       unsigned long __user semun_ptr64)
+/* Union semun may contain descriptor; if so replacing it with 64-bit pointer. */
+{
+	e2k_ptr_t descr;
+	unsigned long ptr64;
+	int tag, tag_hi;
+	int rval = 0; /* syscall return value */
 
-notrace __section(.entry_handlers)
+	if (!semun_ptr128 || !semun_ptr64) {
+		DbgSCP("Empty semun pointer\n");
+		return -EINVAL;
+	}
+
+	/* Check for descriptor in semun_ptr128: */
+TRY_USR_PFAULT {
+
+	NATIVE_LOAD_VAL_AND_TAGD(semun_ptr128, descr.word.lo, tag);
+	if (tag) /* not 'int' */
+		NATIVE_LOAD_VAL_AND_TAGD(semun_ptr128 + 8, descr.word.hi, tag_hi);
+
+} CATCH_USR_PFAULT {
+	DbgSCP_ALERT(FATAL_ERR_READ, semun_ptr128);
+	rval = -EFAULT;
+	goto out;
+} END_USR_PFAULT
+
+	if ((tag != E2K_AP_LO_ETAG) || (tag_hi != E2K_AP_HI_ETAG)) {
+		DbgSCP_WARN("Semun ptr 0x%lx doesn't contain descriptor\n",
+		       semun_ptr128);
+		rval = -EFAULT;
+		goto out;
+	}
+
+	/* replacing descriptor with 64-bit pointer: */
+	ptr64 = ptr128_to_64(descr);
+	if (put_user(ptr64, (long *) semun_ptr64)) {
+		DbgSCP_ALERT(FATAL_ERR_WRITE, semun_ptr64);
+		rval = -EFAULT;
+	}
+out:
+	DbgSCP("returned %d\n", rval);
+	return rval;
+}
+
+
+notrace __section(".entry.text")
 long protected_sys_semctl(const long	semid,	/* a1 */
 			  const long	semnum,	/* a2 */
 			  const long	cmd,	/* a3 */
@@ -1977,15 +2135,8 @@ long protected_sys_semctl(const long	semid,	/* a1 */
 			  const struct pt_regs	*regs)
 {
 	union semun *converted_semun;
-	unsigned long fourth = 0; /* fourth arg to 'semctl' syscall */
+	unsigned long __user fourth = 0; /* fourth arg to 'semctl' syscall */
 	long rval; /* syscall return value */
-
-	/*
-	 * Union semun (4-th parameter) contains pointers
-	 * inside, therefore they need to be additionally
-	 * converted depended on corresponding types
-	 */
-	converted_semun = get_user_space(sizeof(union semun));
 
 	/* Fields of union semun depend on the 'cmd' parameter */
 	switch (cmd & ~IPC_64) {
@@ -2002,7 +2153,12 @@ long protected_sys_semctl(const long	semid,	/* a1 */
 			DbgSCP_ERR(" Bad semun parameter for semctl");
 			return -EINVAL;
 		}
-		fourth = ptr;
+		/* Union semun (4-th arg) contains pointer */
+		converted_semun = get_user_space(sizeof(union semun));
+		rval = semctl_ptr128_to_64(ptr, (unsigned long) converted_semun);
+		if (rval)
+			goto out;
+		fourth = (unsigned long) converted_semun;
 		break;
 	/* Int value in union semun required */
 	case SETVAL:
@@ -2017,13 +2173,13 @@ long protected_sys_semctl(const long	semid,	/* a1 */
 		semid, semnum, cmd, fourth);
 
 	rval = sys_old_semctl((int) semid, (int) semnum, (int) cmd, fourth);
-
+out:
 	DbgSCP("(%d) returned %ld\n", (int) cmd, rval);
 	return rval;
 }
 
 /* long sys_shmat(int shmid, char __user *shmaddr, int shmflg); */
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_shmat(const long		shmid,		/* a1 */
 			 const unsigned long __user shmaddr,	/* a2 */
 			 const long		shmflg,		/* a3 */
@@ -2078,7 +2234,7 @@ err_out:
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_ipc(const unsigned long	call,	/* a1 */
 		       const long		first,	/* a2 */
 		       const unsigned long	second,	/* a3 */
@@ -2114,8 +2270,6 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 		 */
 		union semun *converted_semun;
 
-		converted_semun = get_user_space(sizeof(union semun));
-
 		/* Fields of union semun depend on cmd parameter */
 		switch (third & ~IPC_64) {
 		/* Pointer in union semun required */
@@ -2129,15 +2283,10 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 		case SETALL:
 			if (!ptr)
 				return -EINVAL;
-			rval = convert_array((long *) ptr,
-					(long *) converted_semun,
-					SEMUN_STR_SIZE, 1, 1,
-					MASK_SEMUN_PTR_TYPE,
-					MASK_SEMUN_PTR_ALIGN);
-			if (rval) {
-				DbgSCP_ERR(" Bad semun parameter for semctl");
-				return -EINVAL;
-			}
+			converted_semun = get_user_space(sizeof(union semun));
+			rval = semctl_ptr128_to_64(ptr, (unsigned long) converted_semun);
+			if (rval)
+				goto out;
 			/*
 			 * Assign args[3] to pointer to
 			 * converted union
@@ -2146,20 +2295,8 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 			break;
 		/* Int value in union semun required */
 		case SETVAL:
-			rval = convert_array((long *) ptr,
-					(long *) converted_semun,
-					SEMUN_STR_SIZE, 1, 1,
-					MASK_SEMUN_INT_TYPE,
-					MASK_SEMUN_INT_ALIGN);
-			if (rval) {
-				DbgSCP_ERR(" Bad semun parameter for semctl");
-				return -EINVAL;
-			}
-			/*
-			 * Assign args[3] to pointer to
-			 * converted union
-			 */
-			fourth = (void *) converted_semun;
+			/* Int value for SETVAL */
+			fourth = (void *) ptr;
 			break;
 		/* No union semun as argument */
 		default:
@@ -2221,19 +2358,18 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 			(int) second /*shmflg*/,
 			(ulong *) third /**raddr*/);
 	}
-
+out:
 	DbgSCP("(%d) returned %ld\n", (int) call, rval);
 	return rval;
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 static long prot_sys_mmap(const unsigned long start,
 		const unsigned long length, const unsigned long prot,
 		const unsigned long flags, const unsigned long fd,
 		const unsigned long offset, const int offset_in_bytes,
 		struct pt_regs *regs)
 {
-	unsigned long length2map;
 	long rval = -EINVAL; /* syscall return value */
 	e2k_addr_t base;
 	unsigned int enable = 0;
@@ -2246,11 +2382,10 @@ static long prot_sys_mmap(const unsigned long start,
 	if (!length)
 		goto nr_mmap_out;
 
-	length2map = offset_in_bytes ? length : (length * 0x1000);
-	if (length2map > 0x7fffffffL) {
+	if (length > 0x7fffffffL) {
 		/* NB> For details on this limitation see bug #99875 */
 		DbgSCP_ERR("trying to map %ld (0x%lx) bytes\n",
-			   length2map, length2map);
+			   length, length);
 		DbgSCP_WARN("cannot allocate over 2**31 bytes (2Gb) in protected mode\n");
 		/* NB> We cannot simply return error code as
 		 *     this syscall returns structured result.
@@ -2277,18 +2412,11 @@ static long prot_sys_mmap(const unsigned long start,
 		DbgSCP_WARN("\tbase = 0x%lx  size = 0x%lx  prot = 0\n",
 				(unsigned long)base, length);
 	}
-#if 0
 	if (prot & PROT_READ)
 		enable |= R_ENABLE;
 	if (prot & PROT_WRITE)
 		enable |= W_ENABLE;
-#endif
-/*
- * NB> Syscall mprotect() can change access rights at any moment.
- *	To avoid access right discrepancy between descriptor and memory
- *	page protection mechanism, we enable 'rw' descriptor fields anyway.
- */
-	enable = R_ENABLE | W_ENABLE;
+
 	rval1 = make_ap_lo(base, length, 0, enable);
 	rval2 = make_ap_hi(base, length, 0, enable);
 	rv1_tag = E2K_AP_LO_ETAG;
@@ -2305,7 +2433,7 @@ nr_mmap_out:
 	return rval;
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 long protected_sys_mmap(const unsigned long	a1, /* start */
 			const unsigned long	a2, /* length */
 			const unsigned long	a3, /* prot */
@@ -2317,7 +2445,7 @@ long protected_sys_mmap(const unsigned long	a1, /* start */
 	return prot_sys_mmap(a1, a2, a3, a4, a5, a6, 1, regs);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 long protected_sys_mmap2(const unsigned long	a1, /* start */
 			const unsigned long	a2, /* length */
 			const unsigned long	a3, /* prot */
@@ -2330,7 +2458,7 @@ long protected_sys_mmap2(const unsigned long	a1, /* start */
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_unuselib(const unsigned long	a1, /* address of module */
 			const unsigned long	a2,
 			const unsigned long	a3,
@@ -2363,7 +2491,7 @@ long protected_sys_unuselib(const unsigned long	a1, /* address of module */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_munmap(const unsigned long __user a1, /* addr */
 			  const unsigned long        a2, /* length */
 			  const unsigned long unused3,
@@ -2399,7 +2527,7 @@ long protected_sys_munmap(const unsigned long __user a1, /* addr */
 
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_get_backtrace(const unsigned long __user buf, /* a1 */
 				 size_t count, size_t skip,      /* a2,3 */
 				 unsigned long flags,            /* a4 */
@@ -2420,7 +2548,7 @@ long protected_sys_get_backtrace(const unsigned long __user buf, /* a1 */
 	return sys_get_backtrace((unsigned long *) buf, count, skip, flags);
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_set_backtrace(const unsigned long __user buf, /* a1 */
 				 size_t count, size_t skip,      /* a2,3 */
 				 unsigned long flags,            /* a4 */
@@ -2442,7 +2570,7 @@ long protected_sys_set_backtrace(const unsigned long __user buf, /* a1 */
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_set_robust_list(const unsigned long __user listhead, /* a1 */
 				 const size_t len,	/* a2 */
 				 const unsigned long unused3,
@@ -2477,7 +2605,7 @@ long protected_sys_set_robust_list(const unsigned long __user listhead, /* a1 */
 	return 0;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_get_robust_list(const unsigned long pid,
 				 unsigned long __user head_ptr,
 				 unsigned long __user len_ptr)
@@ -2581,7 +2709,7 @@ err_unlock:
 #define BAD_IOVEC_STR_MSG \
 	"Bad %s iovec structure in protected %s\n"
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 static
 long protected_sys_process_vm_readwritev(const unsigned long pid,
 				 const struct iovec __user *lvec,
@@ -2651,7 +2779,7 @@ long protected_sys_process_vm_readwritev(const unsigned long pid,
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_process_vm_readv(const unsigned long          pid, /* a1 */
 				    const struct iovec __user  *lvec, /* a2 */
 				    unsigned long            liovcnt, /* a3 */
@@ -2666,7 +2794,7 @@ long protected_sys_process_vm_readv(const unsigned long          pid, /* a1 */
 						   flags, regs, 0);
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_process_vm_writev(const unsigned long         pid, /* a1 */
 				     const struct iovec __user *lvec, /* a2 */
 				     unsigned long           liovcnt, /* a3 */
@@ -2682,7 +2810,7 @@ long protected_sys_process_vm_writev(const unsigned long         pid, /* a1 */
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_vmsplice(int				fd,      /* a1 */
 			 const struct iovec __user	*iov,    /* a2 */
 			 unsigned long			nr_segs, /* a3 */
@@ -2723,7 +2851,7 @@ err_out:
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_keyctl(const int	operation,
 			const unsigned long	arg2,
 			const unsigned long	arg3,
@@ -2780,7 +2908,7 @@ long protected_sys_keyctl(const int	operation,
 }
 
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_prctl(const int	option,
 			const unsigned long	arg2,
 			const unsigned long	arg3,
@@ -2836,7 +2964,7 @@ long protected_sys_prctl(const int	option,
 	return sys_prctl(option, arg2, arg3, arg4, arg5);
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_ioctl(const int fd,				/* a1 */
 			 const unsigned long request,		/* a2 */
 			 const unsigned long __user argp,	/* a3 */
@@ -2893,8 +3021,7 @@ long protected_sys_ioctl(const int fd,				/* a1 */
 TRY_USR_PFAULT {
 		NATIVE_LOAD_VAL_AND_TAGW((int *) ifc128, ifc_len128, tag);
 } CATCH_USR_PFAULT {
-#define ERR_FATAL_READ "FATAL ERROR: failed to read from 0x%lx !!!\n"
-		DbgSCP_ALERT(ERR_FATAL_READ, (long) argp);
+		DbgSCP_ALERT(FATAL_ERR_READ, (long) argp);
 		return -EINVAL;
 } END_USR_PFAULT
 
@@ -2979,10 +3106,225 @@ TRY_USR_PFAULT {
 
 		break;
 	}
+	case SIOCETHTOOL: {
+		/* Pointer to user128's struct ifreq */
+		void __user *ifr128 = (void *) argp;
+		/* Pointer to converted struct ifreq */
+		struct ifreq *ifr64;
+		long stack_size;
+		void __user *useraddr;
+		u32 ethcmd;
+		/* All errors here are of ours, so we are responsible for
+		 * not supporting all these ioctls. Let's respond as
+		 * 'Not supported' for any errors here.
+		 */
+		rval =  -EOPNOTSUPP;
+
+		/* Check descriptor's size of user128's struct ifreq. */
+		size = e2k_ptr_size(regs->args[5], regs->args[6], 0);
+		if (size < STRUCT_IFREQ_PROT_SIZE) {
+			DbgSCP_ALERT("ifreq size is too small: %d < %d\n",
+				     size, STRUCT_IFREQ_PROT_SIZE);
+			return rval;
+		}
+
+		/* Allocate a stack to convert 'ifr128' to 64 bit mode.
+		 * People say that 'stack_size' MUST be multiple of 16,
+		 * otherwise get_user_space may deliver non-aligned space.
+		 */
+		stack_size = (sizeof(struct ifreq) + 15) & ~0xf;
+		ifr64 = get_user_space(stack_size);
+
+		/* Convert a ifr128 to ifr64: struct {long; long; descr} */
+		if (get_pm_struct_simple((
+				long __user *) ifr128, (long __user *)ifr64,
+				STRUCT_IFREQ_PROT_SIZE, 3, 1, 0x311, 0x311)) {
+			return rval;
+		}
+
+		useraddr = ifr64->ifr_data;
+
+		if (copy_from_user(&ethcmd, useraddr, sizeof(ethcmd)))
+			return rval;
+
+		switch (ethcmd) {
+		case ETHTOOL_GRXCLSRLALL:
+		case ETHTOOL_GRXRINGS:
+		case ETHTOOL_GRXCLSRLCNT:
+		case ETHTOOL_GRXCLSRULE:
+		case ETHTOOL_SRXCLSRLINS:
+		case ETHTOOL_SRXCLSRLDEL:
+			/* Most ethtool structures are defined without padding.
+			 * Unfortunately struct ethtool_rxnfc is an exception.
+			 * A special processing is required. Not supported
+			 * right now.
+			 */
+			return rval;
+		default:
+			rval = sys_ioctl(fd, request, (unsigned long) ifr64);
+		}
+		break;
+	}
 	default:
 		rval = sys_ioctl(fd, request, (unsigned long) argp);
 	}
 
+	return rval;
+}
+
+
+notrace __section(".entry.text")
+long protected_sys_bpf(const int cmd,			/* a1 */
+		       const unsigned long __user attr,	/* a2 */
+		       const unsigned int size,		/* a3 */
+			 const unsigned long unused4,
+			 const unsigned long unused5,
+			 const unsigned long unused6,
+			 const struct pt_regs *regs)
+{
+#define BPF_ERR_BAD_ATTR "Bad arg 'attr' (0x%lx) in syscall bpf(%d)"
+#define BPF_ERR_BAD_CMD "Bad arg 'cmd' in syscall bpf(%d)"
+#define BPF_ERR_CMD_NOT_SUPPORTED "BPF command 'cmd=%d' not supported yet"
+	unsigned long __user *attr_64 = (unsigned long *) attr;
+	unsigned int size_128, size_64 = sizeof(union bpf_attr);
+	long rval = 0;
+
+	DbgSCP("(cmd=0x%x, attr=0x%lx, size=%d) tags=0x%lx\n",
+	       cmd, attr, size, regs->tags);
+
+	if (attr) {
+		int tag = (regs->tags >> 16 /*2x8*/) & 0xff;
+
+		if ((tag == ETAGAPQ) || (tag == ETAGPLD) || (tag == ETAGPLQ)) {
+			size_128 = e2k_ptr_size(regs->args[3], regs->args[4], 0);
+			if ((size_64 > size) || (size_128 < size)) {
+				DbgSCP_ALERT(BPF_ERR_BAD_ATTR, attr, cmd);
+				rval = -EINVAL;
+				goto out;
+			}
+		}
+		attr_64 = get_user_space(size);
+		/* NB> BPF requires unused attr fields must be zeroed! */
+		memset(attr_64, 0, size);
+		switch (cmd) {
+		case BPF_MAP_CREATE:
+		case BPF_PROG_ATTACH:
+		case BPF_PROG_DETACH:
+		case BPF_PROG_GET_NEXT_ID:
+		case BPF_MAP_GET_NEXT_ID:
+		case BPF_PROG_GET_FD_BY_ID:
+		case BPF_MAP_GET_FD_BY_ID:
+		case BPF_RAW_TRACEPOINT_OPEN:
+			/* No pointer in 'attr' for these commands */
+			attr_64 = (unsigned long *) attr;
+			break;
+
+		case BPF_MAP_LOOKUP_ELEM:
+		case BPF_MAP_UPDATE_ELEM:
+		case BPF_MAP_DELETE_ELEM:
+		case BPF_MAP_LOOKUP_AND_DELETE_ELEM:
+		case BPF_MAP_GET_NEXT_KEY:
+#define BPF_MAP_x_ELEM_FIELDS	4
+#define BPF_MAP_x_ELEM_MTYPE	0x1330
+#define BPF_MAP_x_ELEM_MALIGN	0x1333
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_MAP_x_ELEM_FIELDS, 1/*items*/,
+					BPF_MAP_x_ELEM_MTYPE,
+					BPF_MAP_x_ELEM_MALIGN);
+			break;
+
+		case BPF_PROG_LOAD:
+#define BPF_PROG_LOAD_FIELDS	14
+#define BPF_PROG_LOAD_MTYPE	0x03131111131331
+#define BPF_PROG_LOAD_MALIGN	0x03333111133333
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_PROG_LOAD_FIELDS, 1/*items*/,
+					BPF_PROG_LOAD_MTYPE,
+					BPF_PROG_LOAD_MALIGN);
+			break;
+
+		case BPF_OBJ_PIN:
+		case BPF_OBJ_GET:
+#define BPF_OBJ_x_FIELDS	2
+#define BPF_OBJ_x_MTYPE		0x13
+#define BPF_OBJ_x_MALIGN	0x13
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_OBJ_x_FIELDS, 1/*items*/,
+					BPF_OBJ_x_MTYPE,
+					BPF_OBJ_x_MALIGN);
+			break;
+
+		case BPF_PROG_TEST_RUN:
+#define BPF_PTEST_RUN_FIELDS	8
+#define BPF_PTEST_RUN_MTYPE	0x33113311
+#define BPF_PTEST_RUN_MALIGN	0x33113311
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_PTEST_RUN_FIELDS, 1/*items*/,
+					BPF_PTEST_RUN_MTYPE,
+					BPF_PTEST_RUN_MALIGN);
+			break;
+
+		case BPF_OBJ_GET_INFO_BY_FD:
+#define BPF_OBJ_GET_INFO_FIELDS	2
+#define BPF_OBJ_GET_INFO_MTYPE	0x31
+#define BPF_OBJ_GET_INFO_MALIGN	0x33
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_OBJ_GET_INFO_FIELDS, 1/*items*/,
+					BPF_OBJ_GET_INFO_MTYPE,
+					BPF_OBJ_GET_INFO_MALIGN);
+			break;
+
+		case BPF_PROG_QUERY:
+#define BPF_PROG_QUERY_FIELDS	4
+#define BPF_PROG_QUERY_MTYPE	0x0311
+#define BPF_PROG_QUERY_MALIGN	0x1311
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_PROG_QUERY_FIELDS, 1/*items*/,
+					BPF_PROG_QUERY_MTYPE,
+					BPF_PROG_QUERY_MALIGN);
+			break;
+
+		case BPF_BTF_LOAD:
+#define BPF_BTF_LOAD_FIELDS	4
+#define BPF_BTF_LOAD_MTYPE	0x0133
+#define BPF_BTF_LOAD_MALIGN	0x1133
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_BTF_LOAD_FIELDS, 1/*items*/,
+					BPF_BTF_LOAD_MTYPE,
+					BPF_BTF_LOAD_MALIGN);
+			break;
+
+		case BPF_TASK_FD_QUERY:
+#define BPF_TASK_FD_QUERY_FIELDS	6
+#define BPF_TASK_FD_QUERY_MTYPE		0x111311
+#define BPF_TASK_FD_QUERY_MALIGN	0x1113311
+			rval = get_pm_struct_simple((long *)attr, attr_64, size,
+					BPF_TASK_FD_QUERY_FIELDS, 1/*items*/,
+					BPF_TASK_FD_QUERY_MTYPE,
+					BPF_TASK_FD_QUERY_MALIGN);
+			break;
+
+		case BPF_BTF_GET_FD_BY_ID:
+		case BPF_MAP_FREEZE:
+		case BPF_BTF_GET_NEXT_ID:
+			DbgSCP_ALERT(BPF_ERR_CMD_NOT_SUPPORTED, cmd);
+			rval = -ENOTSUPP;
+			goto out;
+
+		default:
+			DbgSCP_ALERT(BPF_ERR_BAD_CMD, cmd);
+			rval = -EINVAL;
+			goto out;
+		}
+		if (rval) {
+			DbgSCP_ALERT(BPF_ERR_BAD_ATTR, attr, cmd);
+			goto out;
+		}
+	}
+	rval = sys_bpf(cmd, (union bpf_attr *) attr_64, size_64);
+
+out:
+	DbgSCP("\treturned %ld\n", rval);
 	return rval;
 }
 
@@ -3091,7 +3433,7 @@ static int update_epoll_event(void __user *event, void *kevent, int count)
 	return ret; /* # fields updated */
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_epoll_ctl(const unsigned long epfd,	/* a1 */
 			     const unsigned long op,	/* a2 */
 			     const unsigned long fd,	/* a3 */
@@ -3113,7 +3455,7 @@ long protected_sys_epoll_ctl(const unsigned long epfd,	/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_epoll_wait(const unsigned long epfd,		/* a1 */
 			      void __user	*event,		/* a2 */
 			      const long	maxevents,	/* a3 */
@@ -3154,7 +3496,7 @@ long protected_sys_epoll_wait(const unsigned long epfd,		/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_epoll_pwait(const unsigned long epfd,	/* a1 */
 			       void __user	*event,		/* a2 */
 			       const long	maxevents,	/* a3 */
@@ -3195,7 +3537,7 @@ long protected_sys_epoll_pwait(const unsigned long epfd,	/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_pselect6(const long		nfds,		/* a1 */
 			    const unsigned long readfds,	/* a2 */
 			    const unsigned long writefds,	/* a3 */
@@ -3294,8 +3636,7 @@ TRY_USR_PFAULT {
 	NATIVE_LOAD_VAL_AND_TAGD((prot_siginfo + SIGVAL_OFFSET_HI),
 				 descr_hi, tag_hi);
 } CATCH_USR_PFAULT {
-#define ERR_PROT_SIGINFO "FATAL ERROR: failed to read from 0x%lx !!!\n"
-		DbgSCP_ALERT(ERR_PROT_SIGINFO, (long) (prot_siginfo + 4));
+		DbgSCP_ALERT(FATAL_ERR_READ, (long) (prot_siginfo + 4));
 		converted_siginfo = NULL;
 		rval = -EFAULT;
 		goto out;
@@ -3435,7 +3776,6 @@ unsigned long get_siginfo_mask_on_siginfo(const unsigned long __user usiginfo)
 
 	if (get_user(signo, (int *) usiginfo)
 		|| get_user(code, (int *) (usiginfo + 8))) {
-#define FATAL_ERR_READ "FATAL ERROR: failed to read from 0x%lx !!!\n"
 		DbgSCP_ALERT(FATAL_ERR_READ, (long) usiginfo);
 		return 0L;
 	}
@@ -3446,7 +3786,7 @@ unsigned long get_siginfo_mask_on_siginfo(const unsigned long __user usiginfo)
 	return mask;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_rt_sigqueueinfo(const long			tgid,	/* a1 */
 				   const long			sig,	/* a2 */
 				   const unsigned long __user usiginfo, /* a3 */
@@ -3485,7 +3825,7 @@ long protected_sys_rt_sigqueueinfo(const long			tgid,	/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_rt_tgsigqueueinfo(const long			tgid,	/* a1 */
 				     const long			tid,	/* a2 */
 				     const long			sig,	/* a3 */
@@ -3524,7 +3864,7 @@ long protected_sys_rt_tgsigqueueinfo(const long			tgid,	/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_pidfd_send_signal(const long			pidfd,	/* a1 */
 				     const long			sig,	/* a2 */
 				     const unsigned long __user info,	/* a3 */
@@ -3573,7 +3913,7 @@ long protected_sys_pidfd_send_signal(const long			pidfd,	/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_waitid(const long		which,		/* a1 */
 			  const long		pid,		/* a2 */
 			  const unsigned long __user *infop,	/* a3 */
@@ -3610,7 +3950,7 @@ long protected_sys_waitid(const long		which,		/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_io_uring_register(const unsigned long	fd,	/* a1 */
 				     const unsigned long	opcode,	/* a2 */
 				     const unsigned long __user arg,	/* a3 */
@@ -3648,7 +3988,7 @@ long protected_sys_io_uring_register(const unsigned long	fd,	/* a1 */
 	return rval;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 long protected_sys_kexec_load(const unsigned long	entry,		/* a1 */
 			      const unsigned long	nr_segments,	/* a2 */
 			      const unsigned long __user segments,	/* a3 */

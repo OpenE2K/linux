@@ -926,8 +926,7 @@ static void pcsm_dbgfs_exit(struct pcsm_data *data)
 
 static struct pcsm_data *pcsm_update_device(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct pcsm_data *data = i2c_get_clientdata(client);
+	struct pcsm_data *data = dev_get_drvdata(dev);
 
 	pcsm_update_data(data);
 
@@ -938,8 +937,11 @@ static ssize_t show_cpuinfo(struct device *dev,
 			struct device_attribute *devattr,
 			char *buf)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct pcsm_data *data = i2c_get_clientdata(client);
+	struct pcsm_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+
+	data->model = pcsm_read_byte(client, PMCM_REG(PMCM_RO_INFO_LO));
+	data->revision = pcsm_read_byte(client, PMCM_REG(PMCM_RO_INFO_HI));
 	/*
 	  id              : 0xb
 	  cpu family      : 6
@@ -947,7 +949,7 @@ static ssize_t show_cpuinfo(struct device *dev,
 	  model name      : E16C
 	  revision        : 0
 	*/
-	return sprintf(buf,
+	return snprintf(buf, PAGE_SIZE - 1,
 		       "id\t\t: 0x%x\n"			\
 /*		       "cpu family\t: %d\n"		\ */
 		       "model\t\t: %d\n"		\

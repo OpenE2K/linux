@@ -160,7 +160,7 @@ static void do_fault_siginfo(int code, int sig, struct pt_regs *regs,
 			     unsigned long fault_addr, unsigned int insn,
 			     int fault_code)
 {
-	unsigned long addr;
+	unsigned long addr = 0xdeadbeef;
 
 	if (fault_code & FAULT_CODE_ITLB) {
 		addr = regs->tpc;
@@ -170,7 +170,7 @@ static void do_fault_siginfo(int code, int sig, struct pt_regs *regs,
 		 * time provided address which may only have page granularity.
 		 */
 		if (insn)
-			addr = compute_effective_address(regs, insn, 0);
+			compute_effective_address(regs, insn, 0, &addr);
 		else
 			addr = fault_addr;
 	}
@@ -228,7 +228,6 @@ static void __kprobes do_kernel_fault(struct pt_regs *regs, int si_code,
 			return;
 		}
 	}
-		
 	/* Is this in ex_table? */
 	if (regs->tstate & TSTATE_PRIV) {
 		const struct exception_table_entry *entry;
@@ -595,8 +594,38 @@ static void __e90s_iommu_error_interrupt(char *str, int len, int iommu,
 			bus, slot, func, fsr);
 }
 
+
+static void instruction_dump(char *str, int len, unsigned int *pc)
+{
+	int i;
+	if ((((unsigned long) pc) & 3))
+		return;
+	len += snprintf(str + len, len, "Instruction DUMP:");
+	for (i = -3; i < 6; i++) {
+		len += snprintf(str + len, len,
+			"%c%08x%c", i ? ' ' : '<', pc[i], i ? ' ' : '>');
+	}
+	len += snprintf(str + len, len, "\n");
+}
+
+static void user_instruction_dump(char *str, int len, unsigned int __user *pc)
+{
+	int i;
+	unsigned int instr;
+	if ((((unsigned long) pc) & 3))
+		return;
+	len += snprintf(str + len, len, "Instruction DUMP:");
+	for (i = -3; i < 6; i++) {
+		instr = get_user_insn((unsigned long) pc + i * 4);
+		len += snprintf(str + len, len,
+			"%c%08x%c", i ? ' ' : '<', instr, i ? ' ' : '>');
+	}
+	len += snprintf(str + len, len, "\n");
+}
+
 asmlinkage void do_async_data_error(struct pt_regs *regs)
 {
+	enum ctx_state prev_state = exception_enter();
 	unsigned long asfr = readq_asi(0, ASI_AFSR);
 	unsigned long afar = readq_asi(0, ASI_AFAR);
 	unsigned long l2_fsr = readq_asi(L2_FSR, ASI_CONFIG);
@@ -678,8 +707,27 @@ asmlinkage void do_async_data_error(struct pt_regs *regs)
 		}
 	} else {
 		show_regs(regs);
+
+		if (regs->tstate & TSTATE_PRIV) {
+			instruction_dump(s + len, sizeof(s) - len, (unsigned int *)regs->tpc);
+		} else {
+			if (test_thread_flag(TIF_32BIT)) {
+				regs->tpc &= 0xffffffff;
+				regs->tnpc &= 0xffffffff;
+			}
+			user_instruction_dump(s + len, sizeof(s) - len,
+					      (unsigned int __user *) regs->tpc);
+			writeq_asi(0, 0, ASI_AFSR);
+			writeq_asi(0, 0, ASI_AFAR);
+			writeq_asi(0, L2_FSR, ASI_CONFIG);
+			writeq_asi(0, L2_FAR, ASI_CONFIG);
+			/*goto kill_user; FIXME: after bug 131913*/
+		}
 	}
 	panic(s);
+/*kill_user:*/
+	die_if_kernel(s, regs);
+	exception_exit(prev_state);
 }
 
 asmlinkage void do_e90s_data_access_error(struct pt_regs *regs)

@@ -419,4 +419,6 @@ static inline void set_mach_type_id(void)
 
 extern unsigned long machine_serial_num;
 
+#define ELBRUS_CPU_VENDOR	"Elbrus-MCST"
+
 #endif /* _ASM_E2K_H_ */

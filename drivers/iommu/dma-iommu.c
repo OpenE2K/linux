@@ -669,11 +669,6 @@ static bool l_dom_iova_hi(unsigned long iova)
 	return iova & (~0UL << 32) ? true : false;
 }
 
-static struct idr *l_dom_get_idr(struct iommu_domain *d, unsigned long iova)
-{
-	return l_dom_iova_hi(iova) ? &d->idr_hi : &d->idr_lo;
-}
-
 static unsigned l_dom_page_indx(struct iommu_domain *d, unsigned long iova)
 {
 	if (!l_dom_iova_hi(iova))
@@ -682,18 +677,18 @@ static unsigned l_dom_page_indx(struct iommu_domain *d, unsigned long iova)
 	return (iova - d->map_base) / IO_PAGE_SIZE;
 }
 
-
-static phys_addr_t l_dom_lookup_id(struct iommu_domain *d,
+static phys_addr_t l_dom_lookup_buffer(struct iommu_domain *d,
 				     unsigned long iova)
 {
 	void *p;
 	unsigned long flags;
-	struct idr *idr = l_dom_get_idr(d, iova);
 	unsigned i = l_dom_page_indx(d, iova);
+	if (!l_dom_iova_hi(iova))
+		return d->orig_phys_lo[i];
 
-	idr_lock_irqsave(idr, flags);
-	p = idr_find(idr, i);
-	idr_unlock_irqrestore(idr, flags);
+	read_lock_irqsave(&d->lock_hi, flags);
+	p = idr_find(&d->idr_hi, i);
+	read_unlock_irqrestore(&d->lock_hi, flags);
 
 	return (phys_addr_t)p;
 }
@@ -706,7 +701,7 @@ static void __l_sync_single(struct iommu_domain *d,
 	phys_addr_t orig_phys, phys;
 	unsigned offset = offset_in_page(iova);
 
-	orig_phys = l_dom_lookup_id(d, iova);
+	orig_phys = l_dom_lookup_buffer(d, iova);
 	if (!orig_phys)
 		return;
 
@@ -743,6 +738,8 @@ static void l_sync_single(struct iommu_domain *d,
 				enum dma_data_direction dir,
 				enum dma_sync_target target)
 {
+	if (!l_iommu_supported())
+		return;
 	do {
 		unsigned this_step = min((IO_PAGE_SIZE -
 						offset_in_iopage(iova)), sz);

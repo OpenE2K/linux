@@ -4,7 +4,6 @@
 #include <asm/mas.h>
 #include <asm/kvm/guest/boot.h>
 
-#define	E2K_VIRT_CPU_VENDOR	"Elbrus-MCST"
 #define	E2K_VIRT_CPU_FAMILY	0xff
 #define	E2K_VIRT_CPU_MODEL	IDR_E2K_VIRT_MDL
 #define	E2K_VIRT_CPU_REVISION	16	/* 2016 year */

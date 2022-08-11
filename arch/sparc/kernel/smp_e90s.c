@@ -98,22 +98,23 @@ void smp_info(struct seq_file *m)
 
 void smp_bogo(struct seq_file *m)
 {
-	int i = 0;
-	if (e90s_get_cpu_type() != E90S_CPU_R2000) {
+	int i;
+	unsigned long ctick;
+	for_each_online_cpu(i) {
+		switch (e90s_get_cpu_type()) {
+		case E90S_CPU_R2000:
+			ctick = s2_get_freq_mult(i) *
+					cpu_data(i).clock_tick;
+			break;
+		default:
+			ctick = cpu_data(i).clock_tick;
+		}
 		seq_printf(m,
 			   "Cpu%dClkTck\t: %016lx\n"
 			   "Cpu%d MHz\t: %lu.%02lu\n",
-			   i, cpu_data(i).clock_tick,
-			   i, cpu_data(i).clock_tick / 1000000,
-			   cpu_data(i).clock_tick % 1000000);
-	} else { /* R2000 with PMC */
-		for_each_online_cpu(i)
-		seq_printf(m,
-			"Cpu%dClkTck\t: %016lx\n"
-			"Cpu%d MHz\t: %lu.%02lu\n",
-			i, cpu_data(i).clock_tick,
-			i, s2_get_freq_mult(i)*cpu_data(i).clock_tick / 100000000,
-			s2_get_freq_mult(i)*cpu_data(i).clock_tick % 100000000);
+			   i, ctick,
+			   i, ctick / 1000000,
+			   ctick % 1000000);
 	}
 }
 
@@ -274,9 +275,8 @@ atomic_t tlb_call_finished;
 static int smp_tlb_call_function(struct tlb_call_data_struct *info,
 				 const cpumask_t *cpu_mask)
 {
-	int cpus = 0, i, print_once = 1;
+	int cpus = 0, this_cpu, i, print_once = 1;
 	cpumask_t mask = *cpu_mask;
-	int this_cpu = smp_processor_id();
 	int vec = cpu_has_epic() ?
 		EPIC_INVALIDATE_TLB_VECTOR : INVALIDATE_TLB_VECTOR;
 
@@ -284,6 +284,7 @@ static int smp_tlb_call_function(struct tlb_call_data_struct *info,
 	raw_spin_lock(&tlb_call_lock);
 	memcpy(&tlb_call_data, info, sizeof(tlb_call_data));
 	atomic_set(&tlb_call_finished, 0);
+	this_cpu = smp_processor_id();
 	cpumask_clear_cpu(this_cpu, &mask);
 	cpus = cpumask_weight(&mask);
 

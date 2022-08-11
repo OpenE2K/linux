@@ -3,7 +3,7 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int fast_sys_set_return(u64 ip, int flags)
 {
 	struct thread_info *const ti = READ_CURRENT_REG();

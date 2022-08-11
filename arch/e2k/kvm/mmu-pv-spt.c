@@ -44,10 +44,10 @@
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
-#define	DEBUG_KVM_MODE	1	/* kernel virtual machine debugging */
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
 #define	DebugKVM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_MODE)						\
+	if (DEBUG_KVM_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -98,10 +98,10 @@
 
 #undef	DEBUG_KVM_TO_VIRT_MODE
 #undef	DebugTOVM
-#define	DEBUG_KVM_TO_VIRT_MODE	1	/* switch guest to virtual mode */
+#define	DEBUG_KVM_TO_VIRT_MODE	0	/* switch guest to virtual mode */
 #define	DebugTOVM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_TO_VIRT_MODE)					\
+	if (DEBUG_KVM_TO_VIRT_MODE || kvm_debug)			\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -200,11 +200,8 @@ void kvm_init_gmm_root_pt(struct kvm *kvm, gmm_struct_t *new_gmm)
 
 void kvm_fill_init_root_pt(struct kvm *kvm)
 {
-	pgd_t *init_pgd;
 	pgd_t *root;
 
-	init_pgd = current->mm->pgd;
-	KVM_BUG_ON(init_pgd == NULL);
 	root = kvm_mmu_get_init_gmm_root(kvm);
 	if (root == NULL)
 		/* is not yet created and valid */
@@ -212,7 +209,7 @@ void kvm_fill_init_root_pt(struct kvm *kvm)
 
 	/* copy kernel part of root page table entries to enable host */
 	/* traps and hypercalls on guest */
-	copy_kernel_pgd_range(root, init_pgd);
+	copy_kernel_pgd_range(root, cpu_kernel_root_pt);
 }
 
 void release_gmm_root_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
@@ -721,6 +718,7 @@ int kvm_pv_prepare_guest_mm(struct kvm_vcpu *vcpu,
 	int ret;
 
 	new_gmm->u_pptb = u_phys_ptb;
+	new_gmm->u_vptb = pv_vcpu_get_init_gmm(vcpu)->u_vptb;
 	DebugKVMSWH("VCPU #%d guest user mm #%d root PT base: 0x%llx\n",
 		vcpu->vcpu_id, new_gmm->nid.nr, u_phys_ptb);
 
@@ -779,7 +777,7 @@ int write_to_guest_pt_phys(struct kvm_vcpu *vcpu, gpa_t gpa,
 			__func__, gpte, pgprot_val(*gpte), gpa);
 		return ret;
 	}
-	kvm_page_track_write(vcpu, gpa, (const void *)gpte, bytes);
+	kvm_page_track_write(vcpu, NULL, gpa, (const void *)gpte, bytes);
 
 	return 1;	/* fault handled and recovered */
 }
@@ -1311,12 +1309,13 @@ failed:
 	return NULL;
 }
 
-int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu,
+int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, int gmmid_nr,
 		gpa_t gpa, void __user *old_gpt,
 		pt_atomic_op_t atomic_op, unsigned long prot_mask)
 {
 	gfn_t gfn;
 	struct page *page = NULL;
+	struct gmm_struct *gmm;
 	pgprot_t old_pt;
 	pgprot_t new_pt;
 	char *kaddr;
@@ -1355,16 +1354,11 @@ int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu,
 	case ATOMIC_GET_AND_CLEAR:
 		pgprot_val(old_pt) =
 			native_pt_get_and_clear_atomic((pgprotval_t *)kaddr);
-		pgprot_val(new_pt) = _PAGE_INIT_VALID;
+		pgprot_val(new_pt) = pgprot_val(old_pt) & _PAGE_INIT_VALID;
 		break;
 	case ATOMIC_SET_WRPROTECT:
 		pgprot_val(old_pt) =
 			native_pt_set_wrprotect_atomic((pgprotval_t *)kaddr);
-		pgprot_val(new_pt) = pgprot_val(*(pgprot_t *)kaddr);
-		break;
-	case ATOMIC_MODIFY_START:
-		pgprot_val(old_pt) =
-			native_pt_modify_prot_atomic((pgprotval_t *)kaddr);
 		pgprot_val(new_pt) = pgprot_val(*(pgprot_t *)kaddr);
 		break;
 	case ATOMIC_TEST_AND_CLEAR_YOUNG:
@@ -1391,7 +1385,23 @@ int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu,
 		kaddr, pgprot_val(old_pt), pgprot_val(new_pt));
 
 	kvm_vcpu_mark_page_dirty(vcpu, gfn);
-	kvm_page_track_write(vcpu, gpa, (const void *)&new_pt,
+
+	if (likely(gmmid_nr >= 0 &&
+			gmmid_nr != pv_vcpu_get_init_gmm(vcpu)->nid.nr)) {
+		gmm = kvm_find_gmmid(&vcpu->kvm->arch.gmmid_table,
+						gmmid_nr);
+		if (gmm == NULL) {
+			pr_err("%s(): could not find gmm #%d\n",
+				__func__, gmmid_nr);
+			ret = -EINVAL;
+			goto failed_unmap;
+		}
+	} else {
+		/* gmm is kernel thread init_gmm */
+		gmm = pv_vcpu_get_init_gmm(vcpu);
+	}
+
+	kvm_page_track_write(vcpu, gmm, gpa, (const void *)&new_pt,
 				sizeof(pgprot_t));
 
 	ret = kvm_vcpu_copy_to_guest(vcpu, old_gpt, &old_pt,

@@ -1,9 +1,6 @@
 /*
  * Elbrus I2C controller support
  *
- * Note: we assume there can only be one I2C_SPI device in domain 0, with one
- * SMBus interface on i2c bus 0.
- *
  * Copyright (C) 2011-2012 Evgeny Kravstunov <kravtsunov_e@mcst.ru>,
  *                         Pavel Panteleev <panteleev_p@mcst.ru>
  *
@@ -141,18 +138,9 @@ static int i2c_adapters_per_controller = 4;
  * bus collision. Limit number of retries. */
 #define MAX_RETRIES	100
 
-/* I2C adapter */
-#ifdef CONFIG_OF
-LIST_HEAD(i2c_adapters_list);
-struct adapter_entry {
-	struct list_head list;
-	struct i2c_adapter adap;
-	int domain;
-};
-#endif
-
 struct l_i2c {
 	struct i2c_adapter adapter[I2C_MAX_BUSSES];
+	unsigned bus_speed[I2C_MAX_BUSSES];
 	struct platform_device *pdev;
 	void __iomem *cbase;
 	void __iomem *dbase;
@@ -523,8 +511,8 @@ static s32 l_smbus_xfer(struct i2c_adapter *adap, u16 addr,
 	} while (ret == -EAGAIN && retries < MAX_RETRIES);
 
 	if (ret == -EAGAIN)
-		dev_err(&adap->dev, "l_i2c_xfer: Failed to fix i2c bus"
-					"collision. Retries %d\n", retries);
+		dev_err(&adap->dev, "l_i2c_xfer: Failed to fix i2c bus "
+					"collisions. Retries %d\n", retries);
 	return ret;
 }
 
@@ -580,7 +568,7 @@ static int __l_i2c_xfer(struct i2c_adapter *adap,
 			   struct i2c_msg *p, int num)
 {
 	int i, ret = 0;
-	/* Controller can't send pmsg in a single transaction, so
+	/* Controller can't send pmsg in a single transaction,
 	 * so split it into num transactions in hope
 	 * that slave will handle them.
 	 */
@@ -640,23 +628,27 @@ static const struct i2c_adapter_quirks l_i2c_quirks = {
 
 static void l_i2c_init_hw(struct l_i2c *l_i2c)
 {
+	int i;
+	unsigned mode = I2C_INTERRUPT_ENABLE;
 	/* Reset status bits: write ones to RW1C bits of I2C Status. */
 	w_i2c(r_i2c(SMBSTATUS), SMBSTATUS);
-	/* Set all I2C buses to standart mode (100 kHz). Other values should
-	  * be set only for specific motherboard type.
-	 */
-	w_i2c(I2C_INTERRUPT_ENABLE, SMBMODE);
+
+	for (i = 0; i < i2c_adapters_per_controller; i++) {
+		unsigned speed = l_i2c->bus_speed[i], m = 0;
+		int k = i == 4 ? 1 : 0;
+		if (speed >= 1000 * 1000)
+			m = I2C_BUS_0_FASTPLUS;
+		else if (speed >= 400 * 1000)
+			m = I2C_BUS_0_FAST;
+		mode |= m << (k + i * I2C_BUS_1_MODE_SHIFT);
+	}
+
+	w_i2c(mode, SMBMODE);
 }
 
 static int l_i2c_probe(struct platform_device *pdev)
 {
 	int ret = 0;
-#ifdef CONFIG_OF
-	struct adapter_entry *to_del;
-	struct adapter_entry *curr;
-	struct adapter_entry *next;
-	struct  adapter_entry *entry;
-#endif /* CONFIG_OF */
 	int i;
 	int id;
 	struct resource *r;
@@ -664,7 +656,7 @@ static int l_i2c_probe(struct platform_device *pdev)
 	if (!l_i2c)
 		return -ENOMEM;
 
-	if (to_pci_dev(pdev->dev.parent)->device  == PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI) {
+	if (to_pci_dev(pdev->dev.parent)->device == PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI) {
 		i2c_adapters_per_controller = 5;
 	}
 
@@ -686,158 +678,57 @@ static int l_i2c_probe(struct platform_device *pdev)
 
 	l_i2c->pdev = pdev;
 	init_completion(&l_i2c->xfer_complete);
-	l_i2c_init_hw(l_i2c);
 
-#ifdef CONFIG_OF
-	if (devtree_detected) {
-		const __be32 *child_reg;
-		int child_id;
-		struct device_node *child;
-		struct device_node *i2c_node = of_find_compatible_node(
-							NULL, NULL, "l_i2c");
-		while (i2c_node) {
-			const __be32 *i2c_reg = of_get_property(
-							i2c_node, "reg", NULL);
-			if (!i2c_reg) {
-				i2c_node = of_find_compatible_node(
-						i2c_node, NULL, "l_i2c");
-				continue;
-			}
-			id = be32_to_cpu(*i2c_reg);
-			if (id != pdev->id) {
-				i2c_node = of_find_compatible_node(
-						i2c_node, NULL, "l_i2c");
-				continue;
-			}
+	for (i = 0; i < i2c_adapters_per_controller; i++) {
+		char s[64];
+		struct i2c_adapter *i2c = &l_i2c->adapter[i];
+		id = pdev->id * i2c_adapters_per_controller + i;
+		/* set up the sysfs linkage to our parent device */
+		i2c->dev.parent = &pdev->dev;
+		sprintf(s, "/l_i2c@%d/i2c@%d", pdev->id, i);
+		i2c->dev.of_node = of_find_node_by_path(s);
+		/* init adapter himself */
+		i2c->owner = THIS_MODULE;
+		i2c->class = (I2C_CLASS_HWMON | I2C_CLASS_SPD);
+		i2c->algo = &l_i2c_algorithm;
+		i2c->quirks = &l_i2c_quirks;
+		i2c->nr = id;
+		/* Max. transaction should take:
+		 * (I2C_MAX_TRANS_BYTES + 2) * 10 bit / 100kHz = 6600 us.
+		 * Round it up to 10 ms. */
+		i2c->timeout = msecs_to_jiffies(10);
+		of_property_read_u32(i2c->dev.of_node,
+				"clock-frequency", &l_i2c->bus_speed[i]);
+		strlcpy(i2c->name, "l_i2c", sizeof(i2c->name));
 
-			for_each_child_of_node(i2c_node, child) {
-				child_reg = of_get_property(
-							child, "reg", NULL);
-				if (!child_reg) {
-					continue;
-				}
-				child_id = be32_to_cpu(*child_reg);
-				entry = kzalloc(sizeof(struct adapter_entry),
-						GFP_KERNEL);
-				/* set up the sysfs linkage
-							to our parent device */
-				entry->adap.dev.parent = &pdev->dev;
-
-				/* init adapter himself */
-				entry->adap.owner = THIS_MODULE;
-				entry->adap.class = (I2C_CLASS_HWMON |
-								I2C_CLASS_SPD);
-				entry->adap.algo = &l_i2c_algorithm;
-				entry->adap.quirks = &l_i2c_quirks;
-				entry->adap.nr = child_id;
-
-				entry->domain = pdev->id;
-
-				/* add link to device tree node */
-				entry->adap.dev.of_node = child;
-
-				strlcpy(entry->adap.name, "l_i2c",
-						sizeof(entry->adap.name));
-				list_add_tail(&entry->list, &i2c_adapters_list);
-
-
-				if ((ret = i2c_add_numbered_adapter(
-							&entry->adap))) {
-					dev_err(&pdev->dev, "failed to register"
-						" I2C adapter %d!\n", child_id);
-					goto cleanup;
-				} else {
-					dev_info(&pdev->dev, "I2C adapter %d "
-						"registered\n", child_id);
-
-					i2c_set_adapdata(&entry->adap, l_i2c);
-				}
-			}
-			i2c_node = of_find_compatible_node(
-						i2c_node, NULL, "l_i2c");
+		if ((ret = i2c_add_numbered_adapter(i2c))) {
+			dev_err(&pdev->dev, "failed to register "
+					"I2C adapter %d!\n", id);
+			goto cleanup;
 		}
-	} else {
-#endif /* CONFIG_OF */
-		for (i = 0; i < i2c_adapters_per_controller; i++) {
-			struct i2c_adapter *i2c = &l_i2c->adapter[i];
-			id = pdev->id * i2c_adapters_per_controller + i;
 
-			/* set up the sysfs linkage to our parent device */
-			i2c->dev.parent = &pdev->dev;
-			/* init adapter himself */
-			i2c->owner = THIS_MODULE;
-			i2c->class = (I2C_CLASS_HWMON | I2C_CLASS_SPD);
-			i2c->algo = &l_i2c_algorithm;
-			i2c->quirks = &l_i2c_quirks;
-			i2c->nr = id;
-			strlcpy(i2c->name, "l_i2c", sizeof(i2c->name));
+		i2c_set_adapdata(i2c, l_i2c);
 
-			if ((ret = i2c_add_numbered_adapter(i2c))) {
-				dev_err(&pdev->dev, "failed to register "
-						"I2C adapter %d!\n", id);
-				goto cleanup;
-			}
-
-			i2c_set_adapdata(i2c, l_i2c);
-
-			dev_info(&pdev->dev, "I2C adapter %d registered\n", id);
-		}
-#ifdef CONFIG_OF
+		dev_info(&pdev->dev, "I2C adapter %d registered\n", id);
 	}
-#endif /* CONFIG_OF */
 
 	platform_set_drvdata(pdev, l_i2c);
+	l_i2c_init_hw(l_i2c);
 
 	return ret;
 
 cleanup:
-#ifdef CONFIG_OF
-	if (devtree_detected) {
-		to_del = NULL;
-		list_for_each_entry_safe(curr, next, &i2c_adapters_list, list) {
-			kfree(to_del);
-			/*entry = list_entry(curr,struct adapter_entry, list);*/
-			list_del(&curr->list);
-			to_del = curr;
-			i2c_del_adapter(&curr->adap);
-		}
-		kfree(to_del);
-	} else {
-#endif /* CONFIG_OF */
 	for (i = 0; i < i2c_adapters_per_controller; i++)
 		i2c_del_adapter(&l_i2c->adapter[i]);
-#ifdef CONFIG_OF
-	}
-#endif /* CONFIG_OF */
-
 	return ret;
 }
 
 static int l_i2c_remove(struct platform_device *pdev)
 {
 	struct l_i2c *l_i2c = platform_get_drvdata(pdev);
-#ifdef CONFIG_OF
-	if (devtree_detected) {
-		struct adapter_entry *to_del = NULL;
-		struct adapter_entry *curr;
-		struct adapter_entry *next;
-		list_for_each_entry_safe(curr, next, &i2c_adapters_list, list) {
-			kfree(to_del);
-			to_del = NULL;
-			if (curr->domain == pdev->id) {
-				i2c_del_adapter(&curr->adap);
-				to_del = curr;
-			}
-		}
-		kfree(to_del);
-	} else {
-#endif /* CONFIG_OF */
 	int i;
 	for (i = 0; i < i2c_adapters_per_controller; i++)
 		i2c_del_adapter(&l_i2c->adapter[i]);
-#ifdef CONFIG_OF
-	}
-#endif /* CONFIG_OF */
 	kfree(l_i2c);
 	return 0;
 }

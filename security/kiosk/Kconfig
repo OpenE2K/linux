@@ -1,0 +1,9 @@
+config SECURITY_KIOSK
+	bool "kiosk module"
+	depends on SECURITY
+	default n
+	help
+	  Implements "Kiosk mode", in which user can be restricted to run anything
+	  not permitted by admin.
+
+	  If you are unsure how to answer this question, answer N.

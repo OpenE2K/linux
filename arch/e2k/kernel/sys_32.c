@@ -15,11 +15,12 @@
 #include <linux/sysctl.h>
 #include <linux/unistd.h>
 #include <linux/compat.h>
-
 #include <linux/uaccess.h>
+
 #include <asm/siginfo.h>
 #include <asm/process.h>
 #include <asm/mmu_context.h>
+#include <asm/ptrace.h>
 
 
 /* warning: next two assume little endian */
@@ -86,7 +87,7 @@ asmlinkage long sys32_ftruncate64(unsigned int fd,
 long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 	compat_ulong_t caddr, compat_ulong_t cdata)
 {
-	return arch_ptrace(child, (long)request, (long)caddr, (long)cdata);
+	return common_ptrace(child, (long)request, (long)caddr, (long)cdata, true);
 }
 
 

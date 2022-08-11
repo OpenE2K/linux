@@ -187,6 +187,9 @@ typedef struct _PMR_OSPAGEARRAY_DATA_ {
 	IMG_BOOL bOnDemand;
 	IMG_BOOL bUnpinned; /* Should be protected by page pool lock */
 	IMG_BOOL bIsCMA; /* Is CMA memory allocated via DMA framework */
+#ifdef CONFIG_MCST
+	IMG_BOOL bIsFast;
+#endif
 
 	/*
 	  The cache mode of the PMR. Additionally carrying the CPU-Cache-Clean
@@ -1376,9 +1379,7 @@ _AllocOSPageArray(PVRSRV_DEVICE_NODE *psDevNode,
 	PMR_OSPAGEARRAY_DATA *psPageArrayData;
 	IMG_UINT64 ui64DmaMask = 0;
 	PVR_UNREFERENCED_PARAMETER(ui32NumPhysChunks);
-#ifdef CONFIG_MCST
-	BUG_ON(!bIsCMA);
-#endif
+
 	/* Use of cast below is justified by the assertion that follows to
 	 * prove that no significant bits have been truncated */
 	uiNumOSPageSizeVirtPages = (IMG_UINT32) (((uiSize - 1) >> PAGE_SHIFT) + 1);
@@ -1455,7 +1456,9 @@ _AllocOSPageArray(PVRSRV_DEVICE_NODE *psDevNode,
 	psPageArrayData->bPoisonOnFree = bPoisonOnFree;
 	psPageArrayData->bPoisonOnAlloc = bPoisonOnAlloc;
 	psPageArrayData->ui32CPUCacheFlags = ui32CPUCacheFlags;
-
+#ifdef CONFIG_MCST
+	psPageArrayData->bIsFast = IMG_FALSE;
+#endif
 	/* Indicate whether this is an allocation with default caching attribute (i.e cached) or not */
 	if (PVRSRV_CHECK_CPU_UNCACHED(ui32CPUCacheFlags) ||
 		PVRSRV_CHECK_CPU_WRITE_COMBINE(ui32CPUCacheFlags))
@@ -1666,6 +1669,7 @@ _AllocOSPage_CMA(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 {
 #ifdef CONFIG_MCST
 	struct pci_dev *pdev = NULL;
+	unsigned long attrs = 0;
 #else
 	IMG_UINT32 uiAllocIsMisaligned;
 #endif
@@ -1682,21 +1686,25 @@ _AllocOSPage_CMA(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 		dev = &pdev->dev;
 	}
 
-	virt_addr = dma_alloc_coherent(dev,
+	if (psPageArrayData->uiLog2AllocPageSize != PAGE_SHIFT)
+		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+
+	virt_addr = dma_alloc_attrs(dev,
 			alloc_size,
 			&bus_addr,
-			gfp_flags);
+			gfp_flags, attrs);
 
 	pci_dev_put(pdev);
 	if (virt_addr == NULL) {
 		EnableOOMKiller();
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
+	BUG_ON(psPageArrayData->uiLog2AllocPageSize != PAGE_SHIFT &&
+			 is_vmalloc_addr(virt_addr));
 	page = osmem_get_page(virt_addr);
-	
 	/*FIXME: Why this alignment is needed for? */
 	/*BUG_ON(DMA_GET_ADDR(bus_addr) & ((PAGE_SIZE<<ui32MinOrder)-1));*/
-#else
+#else /* CONFIG_MCST */
 	do
 	{
 		DisableOOMKiller();
@@ -1836,7 +1844,7 @@ _AllocOSPage(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 {
 	struct page *psPage;
 	IMG_UINT32 ui32Count;
-#ifdef CONFIG_MCST			
+#ifdef CONFIG_MCST
 	BUG();
 #endif
 	/* Sanity check. If it fails we write into the wrong places in the array. */
@@ -1922,8 +1930,13 @@ static inline void _DecrMemAllocStat_UmaPages(size_t uiSize, IMG_PID uiPid)
  * The maximum order requested is increased if all max order allocations were successful.
  * If any request fails we reduce the max order.
  */
+#ifdef CONFIG_MCST
+static PVRSRV_ERROR
+_AllocOSPages_Fast_wo_iommu(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+#else
 static PVRSRV_ERROR
 _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+#endif
 {
 	PVRSRV_ERROR eError;
 	IMG_UINT32 uiArrayIndex = 0;
@@ -2219,7 +2232,93 @@ e_free_pages:
 		return eError;
 	}
 }
+#ifdef CONFIG_MCST
+static PVRSRV_ERROR
+_AllocOSPages_Fast_w_iommu(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+{
+	PVRSRV_ERROR eError;
+	void *va;
+	dma_addr_t	dma_addr;
+	struct page **pages = NULL;
+	IMG_UINT32 ui32MinOrder = psPageArrayData->uiLog2AllocPageSize - PAGE_SHIFT;
+	struct device *dev = psPageArrayData->psDevNode->psDevConfig->pvOSDevice;
+	gfp_t gfp_flags = _GetGFPFlags(ui32MinOrder ? psPageArrayData->bZero : IMG_FALSE, /* Zero all pages later as batch */
+					psPageArrayData->psDevNode);
+	unsigned nr_pages = psPageArrayData->uiTotalNumOSPages;
+	unsigned long size = nr_pages * PAGE_SIZE;
+	unsigned long attrs = 0;
+	BUILD_BUG_ON(!IS_ENABLED(CONFIG_DMA_REMAP));
+	if (psPageArrayData->uiLog2AllocPageSize != PAGE_SHIFT)
+		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
 
+	if (!dev) {/*FIXME:*/
+		struct pci_dev *pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650, NULL);
+		dev = &pdev->dev;
+	}
+	va = dma_alloc_attrs(dev, size, &dma_addr, gfp_flags, attrs);
+
+	if (!va) {
+		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
+		goto alloc_page_failed;
+	}
+	if (is_vmalloc_addr(va)) {
+		pages = dma_common_find_pages(va);
+		BUG_ON(!pages);
+		BUG_ON(psPageArrayData->uiLog2AllocPageSize != PAGE_SHIFT);
+		memcpy(psPageArrayData->pagearray,
+		       pages, nr_pages * sizeof(pages));
+	} else {
+		int i;
+		int nr = (1 << ui32MinOrder);
+		struct page *p = virt_to_page(va);
+		pages = vmalloc(nr_pages * sizeof(*pages));
+		if (!pages)
+			goto e_free_pages;
+		for (i = 0; i < nr_pages; i++)
+			pages[i] = nth_page(p, i);
+		for (i = 0; i < nr_pages / nr; i++)
+			psPageArrayData->pagearray[i] = nth_page(p, i * nr);
+	}
+	/* Do the cache management as required */
+	eError = _ApplyOSPagesAttribute(psPageArrayData->psDevNode,
+			pages,
+			nr_pages,
+			psPageArrayData->bZero,
+			psPageArrayData->ui32CPUCacheFlags);
+	if (eError != PVRSRV_OK)
+		goto e_free_pages;
+	/* Update metadata */
+	psPageArrayData->iNumOSPagesAllocated = psPageArrayData->uiTotalNumOSPages;
+
+	psPageArrayData->dmavirtarray[0] = va;
+	psPageArrayData->dmaphysarray[0] = dma_addr;
+	psPageArrayData->bIsFast = IMG_TRUE;
+	return PVRSRV_OK;
+/* Error path */
+e_free_pages:
+	if (!is_vmalloc_addr(va))
+		vfree(pages);
+	dma_free_coherent(dev, size, va, dma_addr);
+alloc_page_failed:
+	return eError;
+}
+
+static PVRSRV_ERROR
+_AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+{
+	struct device *dev = psPageArrayData->psDevNode->psDevConfig->pvOSDevice;
+	if (!dev) {/*FIXME:*/
+		struct pci_dev *pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650, NULL);
+		dev = &pdev->dev;
+	}
+	return device_iommu_mapped(dev) ?
+		_AllocOSPages_Fast_w_iommu(psPageArrayData) :
+		_AllocOSPages_Fast_wo_iommu(psPageArrayData);
+		
+}
+#endif /*CONFIG_MCST*/
 /* Allocation of OS pages: This function is used for sparse allocations.
  *
  * Sparse allocations provide only a proportion of sparse physical backing within the total
@@ -2244,7 +2343,9 @@ _AllocOSPages_Sparse(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 	  * store pages that need their cache attribute changed on x86*/
 	struct page **ppsTempPageArray;
 	IMG_UINT32 uiTempPageArrayIndex = 0;
-
+#ifdef CONFIG_MCST
+	BUG_ON(psPageArrayData->bIsFast);
+#endif
 	/* Allocate the temporary page array that we need here to receive pages
 	 * from the pool and to store pages that need their caching attributes changed.
 	 * Allocate number of OS pages to be able to use the attribute function later. */
@@ -2561,13 +2662,16 @@ _FreeOSPage_CMA(struct device *dev,
 {
 #ifdef CONFIG_MCST
 	struct pci_dev *pdev = NULL;
+	unsigned long attrs = 0;
 	if (!dev) { /*FIXME:*/
 		pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
 			PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650, NULL);
 	}
+	if (uiOrder != 0)
+		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
 	/* Since we always allocate through CMA the below cases are not suitable */
-	dma_free_coherent(dev, alloc_size, virt_addr,
-			DMA_GET_ADDR(dev_addr));
+	dma_free_attrs(dev, alloc_size, virt_addr,
+			DMA_GET_ADDR(dev_addr), attrs);
 	pci_dev_put(pdev);
 	return;
 #else
@@ -2843,8 +2947,13 @@ exit_ok:
 }
 
 /* Free all the pages in a page array */
+#ifdef CONFIG_MCST
+static PVRSRV_ERROR
+_FreeOSPages_Fast_wo_iommu(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+#else
 static PVRSRV_ERROR
 _FreeOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+#endif
 {
 	IMG_BOOL bSuccess;
 	IMG_UINT32 i;
@@ -2941,6 +3050,66 @@ exit_ok:
 	psPageArrayData->iNumOSPagesAllocated = 0;
 	return PVRSRV_OK;
 }
+
+#ifdef CONFIG_MCST
+static PVRSRV_ERROR
+_FreeOSPages_Fast_w_iommu(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+{
+	unsigned long attrs = 0;
+	struct page **pages;
+	PVRSRV_ERROR ret = PVRSRV_OK;
+	bool big_pages = psPageArrayData->uiLog2AllocPageSize != PAGE_SHIFT;
+	struct device *dev = psPageArrayData->psDevNode->psDevConfig->pvOSDevice;
+	unsigned nr_pages = psPageArrayData->uiTotalNumOSPages;
+	unsigned long size = nr_pages * PAGE_SIZE;
+	void *va = psPageArrayData->dmavirtarray[0];
+	dma_addr_t dma_addr = psPageArrayData->dmaphysarray[0];
+	if (!dev) {/*FIXME:*/
+		struct pci_dev *pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650, NULL);
+		dev = &pdev->dev;
+	}
+	if (big_pages)
+		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+
+	dma_free_attrs(dev, size, va, dma_addr, attrs);
+	if (!psPageArrayData->bUnsetMemoryType)
+		return PVRSRV_OK;
+	if (big_pages) {
+		int i;
+		struct page *p = virt_to_page(va);
+		BUG_ON(is_vmalloc_addr(va));
+		pages = vmalloc(nr_pages * sizeof(*pages));
+		if (!pages)
+			return PVRSRV_ERROR_OUT_OF_MEMORY;
+		for (i = 0; i < nr_pages; i++)
+			pages[i] = nth_page(p, i);
+	} else {
+		pages = psPageArrayData->pagearray;
+	}
+	if (WARN_ON(set_pages_array_wb(pages, nr_pages)))
+		ret = PVRSRV_ERROR_PMR_NO_KERNEL_MAPPING;
+	if (big_pages)
+		vfree(pages);
+
+	return PVRSRV_OK;
+}
+
+static PVRSRV_ERROR
+_FreeOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
+{
+	struct device *dev = psPageArrayData->psDevNode->psDevConfig->pvOSDevice;
+
+	if (!dev) {/*FIXME:*/
+		struct pci_dev *pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650, NULL);
+		dev = &pdev->dev;
+	}
+	return device_iommu_mapped(dev) ?
+		_FreeOSPages_Fast_w_iommu(psPageArrayData) :
+		_FreeOSPages_Fast_wo_iommu(psPageArrayData);
+}
+#endif /*CONFIG_MCST*/
 
 /* Free pages from a page array.
  * Takes care of mem stats and chooses correct free path depending on parameters. */
@@ -3070,12 +3239,14 @@ static IMG_DEV_PHYADDR GetOffsetPA(const PMR_OSPAGEARRAY_DATA *psOSPageArrayData
 	PVR_ASSERT(ui32InPageOffset < (1U << ui32Log2AllocPageSize));
 #ifdef CONFIG_MCST
 	/* PMRSysPhysAddrOSMem() is misnamed. It must return DevAddr. */
-	sPA.uiAddr = psOSPageArrayData->dmaphysarray[ui32PageIndex];
+	sPA.uiAddr = psOSPageArrayData->bIsFast ?
+		psOSPageArrayData->dmaphysarray[0] + ui32Offset :
+		psOSPageArrayData->dmaphysarray[ui32PageIndex] + ui32InPageOffset;
 	BUG_ON(!sPA.uiAddr);
 #else
 	sPA.uiAddr = page_to_phys(psOSPageArrayData->pagearray[ui32PageIndex]);
-#endif
 	sPA.uiAddr += ui32InPageOffset;
+#endif
 
 	return sPA;
 }
@@ -3461,7 +3632,9 @@ PMRChangeSparseMemOSMem(PMR_IMPL_PRIVDATA pPriv,
 	IMG_UINT32 uiFreepgidx;
 	IMG_UINT32 uiOrder = psPMRPageArrayData->uiLog2AllocPageSize - PAGE_SHIFT;
 	IMG_BOOL bCMA = psPMRPageArrayData->bIsCMA;
-
+#ifdef CONFIG_MCST
+	BUG_ON(psPMRPageArrayData->bIsFast);
+#endif
 
 	/* Check SPARSE flags and calculate pages to allocate and free */
 	if (SPARSE_RESIZE_BOTH == (uiFlags & SPARSE_RESIZE_BOTH))
@@ -3719,15 +3892,19 @@ static PVRSRV_ERROR PMRMMapOSMem(PMR_IMPL_PRIVDATA pvPriv,
 {
 	PVRSRV_ERROR eError;
 	PMR_OSPAGEARRAY_DATA *psPageArrayData = pvPriv;
-	PVRSRV_DEVICE_NODE *psDevNode = PMR_DeviceNode(psPMR);
+	PVRSRV_DEVICE_NODE *psDevNode = PMR_DeviceNode(psPMR); 	
+	PMR_MAPPING_TABLE *psMappingTable = PMR_GetMappigTable(psPMR);
 	IMG_UINT32 ui32CPUCacheFlags;
 	pgprot_t sPageProt;
 	struct page **ppsPageArray = psPageArrayData->pagearray;
 	struct vm_area_struct *ps_vma = pOSMMapData;
-	IMG_UINT32 uiNumPages = psPageArrayData->iNumOSPagesAllocated;
+	ps_vma->vm_pgoff = 0; /*XXX: user sets something wrong */
+	IMG_UINT32 uiNumPages = psPageArrayData->iNumOSPagesAllocated, i;
+	IMG_BOOL bIsSparse = (psMappingTable->ui32NumVirtChunks !=
+			psMappingTable->ui32NumPhysChunks ||
+			psMappingTable->ui32NumVirtChunks > 1) ?
+					IMG_TRUE : IMG_FALSE;
 	int err;
-	ps_vma->vm_pgoff = 0; /*XXX: user sets something whrong */
-	ps_vma->vm_end = ps_vma->vm_start + uiNumPages * PAGE_SIZE;
 	if (((ps_vma->vm_flags & VM_WRITE) != 0) &&
 		((ps_vma->vm_flags & VM_SHARED) == 0))
 	{
@@ -3739,6 +3916,7 @@ static PVRSRV_ERROR PMRMMapOSMem(PMR_IMPL_PRIVDATA pvPriv,
 	{
 		goto e0;
 	}
+	BUG_ON(bIsSparse && psMappingTable->uiChunkSize != (1 << psPageArrayData->uiLog2AllocPageSize));
 
 	sPageProt = vm_get_page_prot(ps_vma->vm_flags);
 
@@ -3791,10 +3969,29 @@ static PVRSRV_ERROR PMRMMapOSMem(PMR_IMPL_PRIVDATA pvPriv,
 
 	/* Don't allow mapping to be inherited across a process fork */
 	ps_vma->vm_flags |= VM_DONTCOPY;
-
-	err = vm_map_pages(ps_vma, ppsPageArray, uiNumPages);
-	if (err)
-		return PVRSRV_ERROR_BAD_MAPPING;
+	if (psMappingTable->ui32NumVirtChunks == 1) {
+		err = vm_map_pages(ps_vma, ppsPageArray, uiNumPages);
+		if (WARN_ON(err)) {
+			eError = PVRSRV_ERROR_BAD_MAPPING;
+			goto err;
+		}
+	} else {
+		for (i = 0; i < psMappingTable->ui32NumVirtChunks; i++) {
+			IMG_DEVMEM_OFFSET_T uiOffset;
+			IMG_UINT32 j = psMappingTable->aui32Translation[i];
+			if (j == TRANSLATION_INVALID)
+				continue;
+			uiOffset = i * psMappingTable->uiChunkSize;
+			err = remap_pfn_range(ps_vma, ps_vma->vm_start + uiOffset,
+					page_to_pfn(ppsPageArray[j]),
+					psMappingTable->uiChunkSize,
+					ps_vma->vm_page_prot);
+			if (WARN_ON(err)) {
+				eError = PVRSRV_ERROR_BAD_MAPPING;
+				goto err;
+			}
+		}
+	}
 
 #if defined(PVRSRV_ENABLE_LINUX_MMAP_STATS)
 	MMapStatsAddOrUpdatePMR(psPMR, ps_vma->vm_end - ps_vma->vm_start);

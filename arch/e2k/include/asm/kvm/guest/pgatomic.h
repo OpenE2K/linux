@@ -83,24 +83,6 @@ kvm_pt_clear_young_atomic(struct mm_struct *mm,
 					_PAGE_INIT_ACCESSED));
 	}
 }
-
-static inline pgprotval_t
-kvm_pt_modify_prot_atomic(struct mm_struct *mm,
-				unsigned long addr, pgprot_t *pgprot)
-{
-	if (IS_HV_MMU_TDP()) {
-		return native_pt_modify_prot_atomic(&pgprot->pgprot);
-	} else {
-		return pgprot_val(kvm_pt_atomic_update(mm, addr, pgprot,
-					ATOMIC_MODIFY_START,
-					_PAGE_INIT_VALID));
-	}
-}
-static inline pte_t kvm_ptep_get_and_clear_to_move(struct mm_struct *mm,
-					unsigned long addr, pte_t *ptep)
-{
-	return __pte(kvm_pt_get_and_clear_atomic(mm, addr, (pgprot_t *)ptep));
-}
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
  #error	"CONFIG_KVM_SHADOW_PT should be set for guest paravirtualized kernel"
 #endif	/* CONFIG_KVM_SHADOW_PT */
@@ -140,19 +122,6 @@ pt_clear_young_atomic(struct mm_struct *mm,
 			unsigned long addr, pgprot_t *pgprot)
 {
 	return kvm_pt_clear_young_atomic(mm, addr, pgprot);
-}
-
-static inline pgprotval_t
-pt_modify_prot_atomic(struct mm_struct *mm,
-			unsigned long addr, pgprot_t *pgprot)
-{
-	return kvm_pt_modify_prot_atomic(mm, addr, pgprot);
-}
-
-static inline pte_t ptep_get_and_clear_to_move(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-	return kvm_ptep_get_and_clear_to_move(mm, addr, ptep);
 }
 
 static inline pte_t get_pte_for_address(struct vm_area_struct *vma,

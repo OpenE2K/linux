@@ -134,7 +134,7 @@ extern void smp_trace_call_function_single_interrupt(struct pt_regs *regs);
 extern void do_nmi(struct pt_regs * regs);
 extern void l_init_system_handlers_table(void);
 extern void epic_init_system_handlers_table(void);
-extern void setup_APIC_vector_handler(int vector,
+extern void setup_PIC_vector_handler(int vector,
 		void (*handler)(struct pt_regs *), bool system, char *name);
 extern void do_IRQ(struct pt_regs * regs, unsigned int vector);
 

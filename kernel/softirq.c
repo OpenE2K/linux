@@ -291,7 +291,12 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 		 * Run softirq if any pending. And do it in its own stack
 		 * as we may be calling this deep in a task call stack already.
 		 */
+#ifdef CONFIG_MCST  /* napi_wq_worker() is as in_interrupt() */
+		if (!test_thread_flag(TIF_NAPI_WORK))
+			do_softirq();
+#else
 		do_softirq();
+#endif
 	}
 
 	preempt_count_dec();
@@ -490,8 +495,22 @@ void irq_enter(void)
 
 static inline void invoke_softirq(void)
 {
+#if defined(CONFIG_E90S) && defined(CONFIG_MCST) && defined(CONFIG_FTRACE)
+	struct task_struct *tsk = __this_cpu_read(ksoftirqd);
+	if (this_cpu_read(softirq_counter))
+		return;
+	if (tsk) {
+		wakeup_softirqd();
+	} else { /* avoid deadlock at boottime, when ksoftirqd is not up yet */
+		preempt_disable();
+		__do_softirq();
+		preempt_enable_no_resched();
+	}
+#else
 	if (this_cpu_read(softirq_counter) == 0)
 		wakeup_softirqd();
+#endif
+
 }
 
 #else

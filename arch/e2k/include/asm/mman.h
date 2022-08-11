@@ -80,7 +80,7 @@ static inline pgprot_t arch_vm_get_page_prot(unsigned long vm_flags)
 	page_prot = vm_flags & VM_CUI;
 
 	if (vm_flags & VM_PRIVILEGED)
-		_PAGE_SET_PRIV(page_prot);
+		page_prot = _PAGE_SET_PRIV(page_prot);
 
 	return __pgprot(page_prot);
 }
@@ -121,7 +121,7 @@ enum exec_mmu_ret {
 };
 extern enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 		trap_cellar_t *next_tcellar, struct pt_regs *regs,
-		int rg, int zeroing, e2k_addr_t *addr,
+		int zeroing, e2k_addr_t *addr,
 		bool (*is_spill_fill_recovery)(tc_cond_t cond,
 					e2k_addr_t address, bool s_f,
 					struct pt_regs *regs),

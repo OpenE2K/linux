@@ -599,14 +599,27 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA2, thaw_m
 #define PCI_MCST_CFG	0x40
 #define PCI_MCST_RESET		(1 << 6)
 #define PCI_MCST_IOMMU_DSBL	(1 << 5)
+
+#define  MGA2_INTLEVEL          0x00008
+#define  MGA2_INTMODE           0x0000C
+#       define MGA2_INT_B_SETRST (1U << 31)
+#       define MGA25_INT_B_HDA1         (1 << 28)
+#       define MGA25_INT_B_HDA2         (1 << 29)
+
 /*
  * disable iommu translation to prevent iommu fault at vga-console
 */
 static void mga25_disable_iommu_translation(struct pci_dev *dev)
 {
+	u32 v = MGA2_INT_B_SETRST | MGA25_INT_B_HDA1 | MGA25_INT_B_HDA2;
+	void __iomem *b = (void *)pci_resource_start(dev, 0) + 0x1c00;
 	u8 tmp;
 	pci_read_config_byte(dev, PCI_MCST_CFG, &tmp);
 	pci_write_config_byte(dev, PCI_MCST_CFG, tmp | PCI_MCST_IOMMU_DSBL);
+
+	/*enable hda interrupts*/
+	boot_writel(v, b + MGA2_INTLEVEL);
+	boot_writel(v, b + MGA2_INTMODE);
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA25,
 			  mga25_disable_iommu_translation);

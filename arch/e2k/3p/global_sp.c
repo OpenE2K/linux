@@ -317,9 +317,10 @@ static int __set_last_wish_all(e2k_mem_crs_t *frame,
 /*
  * set last_wish for all procedures which psl < l_psl
  */
-static int set_last_wish_all(struct pt_regs *regs, int l_psl, int p_psl)
+static long set_last_wish_all(struct pt_regs *regs, int l_psl, int p_psl)
 {
-	int ret, skip = p_psl - l_psl;
+	int skip = p_psl - l_psl;
+	long ret;
 
 	if (p_psl == l_psl)
 		AS(regs->crs.cr1_lo).lw = 1;
@@ -1083,7 +1084,7 @@ static void new_record(global_store_t *list, struct pt_regs *regs,
 		new->orig_psr_lw = AS_STRUCT(psr).lw;
 	} else {
 		struct change_lw_args args;
-		int ret;
+		long ret;
 
 		DbgTC("l_psl != p_psl\n");
 		CHECK_SIZE("new_record", new)
@@ -1146,7 +1147,7 @@ static void update_record(global_store_t *record,
 		}
 	} else {
 		struct change_lw_args args;
-		int ret;
+		long ret;
 
 		DbgTC("l_psl != p_psl\n");
                 CHECK_SIZE("update_record",record);
@@ -1172,7 +1173,7 @@ static void update_record(global_store_t *record,
 		record->orig_psr_lw = AS_STRUCT(psr).lw;
 	} else {
 		struct change_lw_args args;
-		int ret;
+		long ret;
 
 		DbgTC("l_psl != p_psl\n");
                 CHECK_SIZE("update_record1",record);
@@ -1326,7 +1327,7 @@ int do_global_sp(struct pt_regs *regs, trap_cellar_t *tcellar)
 				}
 			} else {
 				struct change_lw_args args;
-				int ret;
+				long ret;
 
 				CHECK_SIZE("do_global_sp ", 1);
 				args.set = false;

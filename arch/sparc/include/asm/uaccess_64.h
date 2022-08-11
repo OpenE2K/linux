@@ -214,8 +214,9 @@ unsigned long __must_check __clear_user(void __user *, unsigned long);
 __must_check long strnlen_user(const char __user *str, long n);
 
 struct pt_regs;
-unsigned long compute_effective_address(struct pt_regs *,
+int compute_effective_address(struct pt_regs *,
 					unsigned int insn,
-					unsigned int rd);
+					unsigned int rd,
+					unsigned long *addr);
 
 #endif /* _ASM_UACCESS_H */

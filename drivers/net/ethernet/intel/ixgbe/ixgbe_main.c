@@ -170,6 +170,7 @@ MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION("Intel(R) 10 Gigabit PCI Express Network Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_VERSION(DRV_VERSION);
+MODULE_ALIAS("ixgbe-int");
 
 static struct workqueue_struct *ixgbe_wq;
 
@@ -6505,8 +6506,10 @@ int ixgbe_setup_tx_resources(struct ixgbe_ring *tx_ring)
 	/* round up to nearest 4K */
 	tx_ring->size = tx_ring->count * sizeof(union ixgbe_adv_tx_desc);
 	tx_ring->size = ALIGN(tx_ring->size, 4096);
-
-	set_dev_node(dev, ring_node);
+#ifdef CONFIG_E2K
+	if (!l_iommu_has_numa_bug())
+#endif
+		set_dev_node(dev, ring_node);
 	tx_ring->desc = dma_alloc_coherent(dev,
 					   tx_ring->size,
 					   &tx_ring->dma,
@@ -6600,7 +6603,10 @@ int ixgbe_setup_rx_resources(struct ixgbe_adapter *adapter,
 	rx_ring->size = rx_ring->count * sizeof(union ixgbe_adv_rx_desc);
 	rx_ring->size = ALIGN(rx_ring->size, 4096);
 
-	set_dev_node(dev, ring_node);
+#ifdef CONFIG_E2K
+	if (!l_iommu_has_numa_bug())
+#endif
+		set_dev_node(dev, ring_node);
 	rx_ring->desc = dma_alloc_coherent(dev,
 					   rx_ring->size,
 					   &rx_ring->dma,

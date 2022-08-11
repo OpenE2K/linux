@@ -64,6 +64,9 @@
 
 /* MC monitors */
 #define MC_CH		0x400
+#define MC_CFG		0x418
+#define MC_OPMB		0x424
+#define MC_ECC		0x440
 #define MC_STATUS	0x44c
 #define MC_MON_CTL	0x450
 #define MC_MON_CTR0	0x454
@@ -73,18 +76,22 @@
 /* HMU monitors */
 #define HMU_MIC		0xd00
 #define HMU_MCR		0xd14
+#define HMU0_INT	0xd40
 #define HMU0_MAR0_LO	0xd44
 #define HMU0_MAR0_HI	0xd48
 #define HMU0_MAR1_LO	0xd4c
 #define HMU0_MAR1_HI	0xd50
+#define HMU1_INT	0xd70
 #define HMU1_MAR0_LO	0xd74
 #define HMU1_MAR0_HI	0xd78
 #define HMU1_MAR1_LO	0xd7c
 #define HMU1_MAR1_HI	0xd80
+#define HMU2_INT	0xda0
 #define HMU2_MAR0_LO	0xda4
 #define HMU2_MAR0_HI	0xda8
 #define HMU2_MAR1_LO	0xdac
 #define HMU2_MAR1_HI	0xdb0
+#define HMU3_INT	0xdd0
 #define HMU3_MAR0_LO	0xdd4
 #define HMU3_MAR0_HI	0xdd8
 #define HMU3_MAR1_LO	0xddc

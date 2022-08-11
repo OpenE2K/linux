@@ -29,8 +29,9 @@
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
 #include <linux/math64.h>
-#include <asm/kvm/runstate.h>
 #include <linux/pci.h>
+#include <asm/kvm/runstate.h>
+#include <asm/e2k_debug.h>
 #include <asm/sclkr.h>  /* get  redpill value*/
 
 #include "ioepic.h"
@@ -113,10 +114,10 @@ static bool wd_debug = false;
 
 #undef	DEBUG_MMIO_SHUTDOWN_MODE
 #undef	DebugMMIOSHUTDOWN
-#define	DEBUG_MMIO_SHUTDOWN_MODE	1	/* MMIO shutdown debugging */
+#define	DEBUG_MMIO_SHUTDOWN_MODE	0	/* MMIO shutdown debugging */
 #define	DebugMMIOSHUTDOWN(fmt, args...)					\
 ({									\
-	if (DEBUG_MMIO_SHUTDOWN_MODE)					\
+	if (DEBUG_MMIO_SHUTDOWN_MODE || kvm_debug)			\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 

@@ -22,7 +22,9 @@
 	__typeof__(_type) *_name##_early_ptr __refdata = _name##_early_map
 
 #define EXPORT_EARLY_PER_CPU_SYMBOL(_name)			\
-	EXPORT_PER_CPU_SYMBOL(_name)
+	EXPORT_PER_CPU_SYMBOL(_name);				\
+	EXPORT_PER_CPU_SYMBOL(_name##_early_ptr);		\
+	EXPORT_PER_CPU_SYMBOL(_name##_early_map);
 
 #define DECLARE_EARLY_PER_CPU(_type, _name)			\
 	DECLARE_PER_CPU(_type, _name);				\

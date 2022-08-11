@@ -110,13 +110,6 @@ static inline kvm_time_t *kvm_vcpu_time_info(void)
 	host_info = kvm_get_host_info();
 	return &host_info->time;
 }
-static inline int kvm_vcpu_host_clock_rate(void)
-{
-	kvm_host_info_t *host_info;
-
-	host_info = kvm_get_host_info();
-	return host_info->clock_rate;
-}
 
 /*
  * Basic functions to access to local APIC state on guest.

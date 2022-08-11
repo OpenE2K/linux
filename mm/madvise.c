@@ -753,13 +753,7 @@ static int madvise_free_single_vma(struct vm_area_struct *vma,
 static long madvise_dontneed_single_vma(struct vm_area_struct *vma,
 					unsigned long start, unsigned long end)
 {
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-	set_ts_flag(TS_KEEP_PAGES_VALID);
-#endif
 	zap_page_range(vma, start, end - start);
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-	clear_ts_flag(TS_KEEP_PAGES_VALID);
-#endif
 	return 0;
 }
 

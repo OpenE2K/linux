@@ -13,6 +13,7 @@
 #include <asm/e2k_sic.h>
 #include <asm/process.h>
 #include <asm/kvm/sge.h>
+#include <asm/tlbflush.h>
 #include <asm/traps.h> /* user_trap_init() */
 #include <asm/trap_table.h>
 #include <asm/switch_to.h>
@@ -49,7 +50,6 @@
 #include <asm/kvm/guest/host_printk.h>
 #include <asm/kvm/guest/fast_syscalls.h>
 #include <asm/kvm/guest/smp.h>
-#include <asm/kvm/guest/tlbflush.h>
 #include <asm/kvm/guest/cacheflush.h>
 
 #include "paravirt.h"
@@ -1438,7 +1438,6 @@ pv_mmu_ops_t kvm_mmu_ops = {
 	.write_pud_at = do_write_pud_at,
 	.write_pgd_at = do_write_pgd_at,
 	.ptep_get_and_clear = do_pv_ptep_get_and_clear,
-	.ptep_get_and_clear_as_valid = kvm_ptep_get_and_clear_as_valid,
 	.ptep_wrprotect_atomic = kvm_ptep_wrprotect_atomic,
 	.get_pte_for_address = kvm_get_pte_for_address,
 	.remap_area_pages = kvm_remap_area_pages,

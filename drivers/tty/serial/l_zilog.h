@@ -26,8 +26,6 @@
 //#define BPS_TO_BRG(bps, freq) ((((freq) + (bps)) / (2 * (bps))) - 2)
 #define BPS_TO_BRG(bps, freq, xN) (((freq) / (xN) / (bps)) - 2)
 
-#define PCI_DEVICE_ID_PAR_SER	0x8000
-
 #define	PCI_DEVICE_BAR_ZILOG	1	/* BAR # with PCI IO memory base */
 #define	ZILOG_IO_MEMORY_SIZE	0x1000	/* max size of PCI IO memory */
 #define	ZILOG_IRQ_DEFAULT	3	/* default IRQ # */

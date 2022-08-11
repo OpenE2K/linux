@@ -1091,6 +1091,79 @@ TRACE_EVENT(
 );
 
 TRACE_EVENT(
+	guest_switch_to,
+
+	TP_PROTO(struct kvm_vcpu *vcpu, int gpid_from, int gmmid_from,
+		 int gpid_to, int gmmid_to, struct sw_regs *next_gsw),
+
+	TP_ARGS(vcpu, gpid_from, gmmid_from, gpid_to, gmmid_to, next_gsw),
+
+	TP_STRUCT__entry(
+		__field(	int,		vcpu_id		)
+		__field(	int,		gpid_from	)
+		__field(	int,		gmmid_from	)
+		__field(	int,		gpid_to		)
+		__field(	int,		gmmid_to	)
+		__field(	e2k_addr_t,	top		)
+		__field_struct(	e2k_usd_lo_t,	usd_lo		)
+		__field_struct(	e2k_usd_hi_t,	usd_hi		)
+		__field_struct(	e2k_psp_lo_t,	psp_lo		)
+		__field_struct(	e2k_psp_hi_t,	psp_hi		)
+		__field_struct(	e2k_pcsp_lo_t,	pcsp_lo		)
+		__field_struct(	e2k_pcsp_hi_t,	pcsp_hi		)
+		__field(	pgprotval_t,	u_pptb		)
+		__field(	gva_t,		u_vptb		)
+		__field(	hpa_t,		root		)
+		__field(	u64,		mmu_pptb	)
+		__field(	u64,		mmu_pid		)
+		__field(	u64,		ctxt_pid	)
+	),
+
+	TP_fast_assign(
+		__entry->vcpu_id = vcpu->vcpu_id;
+		__entry->gpid_from = gpid_from;
+		__entry->gmmid_from = gmmid_from;
+		__entry->gpid_to = gpid_to;
+		__entry->gmmid_to = gmmid_to;
+		__entry->top = next_gsw->top;
+		__entry->usd_lo = next_gsw->usd_lo;
+		__entry->usd_hi = next_gsw->usd_hi;
+		__entry->psp_lo = next_gsw->psp_lo;
+		__entry->psp_hi = next_gsw->psp_hi;
+		__entry->pcsp_lo = next_gsw->pcsp_lo;
+		__entry->pcsp_hi = next_gsw->pcsp_hi;
+		__entry->u_pptb = vcpu->arch.mmu.get_vcpu_u_pptb(vcpu);
+		__entry->u_vptb = vcpu->arch.mmu.get_vcpu_sh_u_vptb(vcpu);
+		__entry->root = kvm_get_space_type_spt_u_root(vcpu);
+		__entry->mmu_pptb = get_mmu_u_pptb_reg();
+		__entry->mmu_pid = get_mmu_pid_reg();
+		__entry->ctxt_pid = kvm_get_guest_mmu_pid(vcpu);
+	),
+
+	TP_printk("VCPU #%d: switch from gpid #%d gmm #%d to gpid #%d gmm #%d\n"
+		"        USD:  base 0x%llx size 0x%x top at 0x%lx\n"
+		"        PSP:  base 0x%llx ind 0x%x size 0x%x\n"
+		"        PCSP: base 0x%llx ind 0x%x size 0x%x\n"
+		"        MMU:  u_pptb 0x%lx u_vptb 0x%lx sh_pptb 0x%llx\n"
+		"              mmu_upptb 0x%llx mmu_pid 0x%llx ctxt pid 0x%llx",
+		__entry->vcpu_id,
+		__entry->gpid_from, __entry->gmmid_from,
+		__entry->gpid_to, __entry->gmmid_to,
+		__entry->usd_lo.USD_lo_base,
+		__entry->usd_hi.USD_hi_size,
+		__entry->top,
+		__entry->psp_lo.PSP_lo_base,
+		__entry->psp_hi.PSP_hi_ind,
+		__entry->psp_hi.PSP_hi_size,
+		__entry->pcsp_lo.PCSP_lo_base,
+		__entry->pcsp_hi.PCSP_hi_ind,
+		__entry->pcsp_hi.PCSP_hi_size,
+		__entry->u_pptb, __entry->u_vptb, __entry->root,
+		__entry->mmu_pptb, __entry->mmu_pid, __entry->ctxt_pid
+	)
+);
+
+TRACE_EVENT(
 	vcpu_put,
 
 	TP_PROTO(int vcpu, int cpu),

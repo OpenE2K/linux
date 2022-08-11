@@ -35,18 +35,12 @@ extern int hw_breakpoint_exceptions_notify(
 extern void hw_breakpoint_pmu_read(struct perf_event *bp);
 
 #ifdef	CONFIG_HAVE_HW_BREAKPOINT
-extern int bp_data_overflow_handle(struct pt_regs *regs);
-extern int bp_instr_overflow_handle(struct pt_regs *regs);
+extern void bp_data_overflow_handle(struct pt_regs *regs);
+extern void bp_instr_overflow_handle(struct pt_regs *regs);
 extern void clear_ptrace_hw_breakpoint(struct task_struct *tsk);
 #else	/* ! CONFIG_HAVE_HW_BREAKPOINT */
-static inline int bp_data_overflow_handle(struct pt_regs *regs)
-{
-	return 0;
-}
-static inline int bp_instr_overflow_handle(struct pt_regs *regs)
-{
-	return 0;
-}
+static inline void bp_data_overflow_handle(struct pt_regs *regs) { }
+static inline void bp_instr_overflow_handle(struct pt_regs *regs) { }
 static inline void clear_ptrace_hw_breakpoint(struct task_struct *tsk) {}
 #endif	/* CONFIG_HAVE_HW_BREAKPOINT */
 

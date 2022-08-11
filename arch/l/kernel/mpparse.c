@@ -226,8 +226,27 @@ static void __init MP_ioapic_info (struct mpc_ioapic *m)
 #ifdef	CONFIG_EPIC
 static void __init MP_ioepic_info(struct mpc_ioepic *m)
 {
-	mp_register_ioepic(m->epicver, m->epicid, m->nodeid, m->epicaddr,
-		gsi_top);
+	mp_register_ioepic(m->epicver, m->epicid, m->nodeid, m->epicaddr, gsi_top);
+}
+
+/*
+ * Find an mpc_iolink structure with matching IO-EPIC id. Get PCI bus of EIOHub / IOEPIC
+ * from bus_min field.
+ * This requires boot to pass all mpc_iolinks before mpc_ioepics.
+ */
+int __init mp_ioepic_find_bus(int ioepic_id)
+{
+	mpc_config_iolink_t *iolink;
+	int i;
+
+	for (i = 0; i < mp_iolinks_num; i++) {
+		iolink = &mp_iolinks[i];
+		if (iolink->apicid == ioepic_id)
+			return iolink->bus_min;
+	}
+
+	pr_warn("%s(): failed to find PCI bus of IOEPIC id %d\n", __func__, ioepic_id);
+	return 1;
 }
 #else
 static void __init MP_ioepic_info(struct mpc_ioepic *m)

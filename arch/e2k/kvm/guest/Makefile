@@ -48,8 +48,13 @@ endef
 # patched CPU registers access now is not used, but can be need in future
 #FORCE : include/generated/kvm-asm-offsets.h
 
-BOOT_CFLAGS_REMOVE = -pg
-BOOT_CFLAGS_ADD = -fno-ld-spec -DE2K_P2V
+BOOT_CFLAGS_REMOVE := -pg
+BOOT_CFLAGS_ADD := -DE2K_P2V
+ifeq ($(call cc-option-yn,-fno-semi-spec-ld -fno-spec-ld),y)
+	BOOT_CFLAGS_ADD += -fno-semi-spec-ld -fno-spec-ld
+else
+	BOOT_CFLAGS_ADD += -fno-ld-spec
+endif
 
 CFLAGS_ttable.o += -Wframe-larger-than=4096
 CFLAGS_REMOVE_ttable.o = $(BOOT_CFLAGS_REMOVE)

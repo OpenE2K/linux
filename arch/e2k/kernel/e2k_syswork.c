@@ -26,6 +26,7 @@
 #include <asm/regs_state.h>
 #include <asm/e2k.h>
 #include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/processor.h>
 #include <asm/traps.h>
 #include <asm/mmu_context.h>
@@ -398,23 +399,45 @@ static void copy_trap_stack_regs(const struct pt_regs *limit_regs,
 	}
 }
 
-static int copy_user_hardware_stack(void *dst, void *src, u64 sz)
+static unsigned long copy_user_hardware_stack(void *dst, void *src, u64 sz)
 {
+	unsigned long n;
 	int ret;
 
 	/* We are currently on reserve stacks which means
 	 * that this function is trying to access kernel's stacks */
 	if (on_reserve_stacks())
-		return careful_tagged_copy(dst, src, sz);
+		if (careful_tagged_copy(dst, src, sz))
+			return sz;
 
-	/* Trying to handle page fault for user hardware stack
-	 * might lead to accessing swap which is not a good idea
-	 * if we want to reliably print stack */
-	pagefault_disable();
-	ret = copy_e2k_stack_from_user(dst, src, sz, NULL);
-	pagefault_enable();
+	n = (u64)src + sz - PAGE_ALIGN_UP((u64)src + sz);
+	if (n == 0)
+		n = PAGE_SIZE;
+	n = min(n, sz);
 
-	return ret;
+	src = src + sz - n;
+	dst = dst + sz - n;
+
+	while (sz > 0) {
+		/* Trying to handle page fault for user hardware stack
+		 * might lead to accessing swap which is not a good idea
+		 * if we want to reliably print stack */
+		pagefault_disable();
+		ret = copy_e2k_stack_from_user(dst, src, n, NULL);
+		pagefault_enable();
+
+		if (ret)
+			return sz;
+
+		sz -= n;
+		n = min(sz, PAGE_SIZE);
+		src -= n;
+		dst -= n;
+	}
+
+	WARN_ON(sz);
+
+	return 0;
 }
 
 static void copy_proc_stack_regs(const struct pt_regs *limit_regs,
@@ -480,6 +503,8 @@ static void copy_proc_stack_regs(const struct pt_regs *limit_regs,
 				GET_PSHTP_MEM_INDEX(pt_regs->stacks.pshtp) : 0;
 	}
 	if (pt_regs) {
+		unsigned long copied;
+
 		src = (void *) AS(pt_regs->stacks.psp_lo).base;
 		sz = AS(pt_regs->stacks.psp_hi).ind -
 				GET_PSHTP_MEM_INDEX(pt_regs->stacks.pshtp);
@@ -491,12 +516,14 @@ static void copy_proc_stack_regs(const struct pt_regs *limit_regs,
 		}
 		dst = regs->base_psp_stack - sz;
 
-		if (!copy_user_hardware_stack(dst, src, sz)) {
-			regs->base_psp_stack -= sz;
-			regs->size_psp_stack += sz;
-			regs->orig_base_psp_stack_k -= sz;
-			regs->orig_base_psp_stack_u = (u64) src;
-			regs->user_size_psp_stack += (on_reserve_stacks()) ? 0 : sz;
+		copied = sz - copy_user_hardware_stack(dst, src, sz);
+
+		if (copied) {
+			regs->base_psp_stack -= copied;
+			regs->size_psp_stack += copied;
+			regs->orig_base_psp_stack_k -= copied;
+			regs->orig_base_psp_stack_u = (u64) src + sz - copied;
+			regs->user_size_psp_stack += (on_reserve_stacks()) ? 0 : copied;
 		} else {
 			regs->orig_base_psp_stack_u = 0;
 		}
@@ -510,7 +537,7 @@ static int copy_chain_stack_regs(const struct pt_regs *limit_regs,
 {
 	const struct pt_regs *pt_regs;
 	void *dst, *src;
-	u64 sz;
+	u64 sz, free_dst_sz = SIZE_CHAIN_STACK;
 
 	if (!regs->chain_stack_cache) {
 		regs->base_chain_stack = NULL;
@@ -527,8 +554,7 @@ static int copy_chain_stack_regs(const struct pt_regs *limit_regs,
 					AS(limit_regs->stacks.pcsp_lo).base +
 					AS(limit_regs->stacks.pcsp_hi).ind - sz;
 		} else {
-			sz = min((unsigned long) AS(regs->pcsp_hi).ind,
-				 SIZE_CHAIN_STACK);
+			sz = min((u64) AS(regs->pcsp_hi).ind, free_dst_sz);
 			regs->orig_base_chain_stack_k = (u64) src;
 		}
 	} else if (limit_regs &&
@@ -540,12 +566,11 @@ static int copy_chain_stack_regs(const struct pt_regs *limit_regs,
 		regs->orig_base_chain_stack_k = (u64) src;
 	} else {
 		/* Trying to get all stacks; start with kernel. */
-		sz = min((unsigned long) AS(regs->pcsp_hi).ind,
-			 SIZE_CHAIN_STACK);
+		sz = min((u64) AS(regs->pcsp_hi).ind, free_dst_sz);
 		src = (void *) AS(regs->pcsp_lo).base;
 		regs->orig_base_chain_stack_k = (u64) src;
 	}
-	dst = regs->chain_stack_cache + SIZE_CHAIN_STACK - sz;
+	dst = regs->chain_stack_cache + free_dst_sz - sz;
 
 	if (careful_tagged_copy(dst, src, sz)) {
 		pr_alert("WARNING current chain stack not available at %px\n",
@@ -612,6 +637,7 @@ static int copy_chain_stack_regs(const struct pt_regs *limit_regs,
 noinline void copy_stack_regs(struct task_struct *task,
 		const struct pt_regs *limit_regs, struct stack_regs *regs)
 {
+	struct sw_regs *sw_regs;
 	int i;
 	void *dst, *src;
 	u64 sz;
@@ -683,43 +709,34 @@ noinline void copy_stack_regs(struct task_struct *task,
 	}
 
 #ifdef CONFIG_SMP
-again:
-#endif
-        /* SAVE regs */
-	if(!task_curr(task)) {
-		struct sw_regs *sw_regs;
-		struct thread_info *ti;
-
-copy_sw_regs:
-		ti = task_thread_info(task);
-		sw_regs = &task->thread.sw_regs;
-
-		regs->crs = sw_regs->crs;
-		regs->pcsp_lo = sw_regs->pcsp_lo;
-		regs->pcsp_hi = sw_regs->pcsp_hi;
-		regs->psp_lo  = sw_regs->psp_lo;
-		regs->psp_hi  = sw_regs->psp_hi;
-#ifdef CONFIG_DATA_STACK_WINDOW
-		regs->base_k_data_stack = NULL;
-#endif
-	} else {
-#ifdef CONFIG_SMP
-		/* get regs using NMI, try several times */
+	while (task_curr(task)) {
+		/* get regs using NMI */
 		if (-ESRCH == get_cpu_regs_nmi(task_cpu(task), task, regs))
-			goto again;
+			continue;
 		if (regs->valid)
 			return;
-#endif
 
 		/* Still no luck, fall back to sw_regs */
 		pr_alert(" * * * * * * * * * ATTENTION * * * * * * * * *\n"
-			 "Could not get task %d [%s] stack using NMI,\n"
+			 "Could not get %s[%d] stack using NMI,\n"
 			 "used sw_regs instead. The stack is unreliable!\n"
 			 " * * * * * * * * * * * * * * * * * * * * * * *\n",
-			task->pid, task->comm);
+			task->comm, task->pid);
 
-		goto copy_sw_regs;
-        }
+		break;
+	}
+#endif
+
+	sw_regs = &task->thread.sw_regs;
+
+	regs->crs = sw_regs->crs;
+	regs->pcsp_lo = sw_regs->pcsp_lo;
+	regs->pcsp_hi = sw_regs->pcsp_hi;
+	regs->psp_lo  = sw_regs->psp_lo;
+	regs->psp_hi  = sw_regs->psp_hi;
+#ifdef CONFIG_DATA_STACK_WINDOW
+	regs->base_k_data_stack = NULL;
+#endif
 
 	/*
 	 * We are here. This means that NMI failed and we will be
@@ -1041,11 +1058,12 @@ static void print_reg_window(u64 window_base, int window_size,
 					(u16) ext_lo, brX1_name, dreg + 1,
 					tag_hi, qreg_hi, (u16) ext_hi);
 			} else {
-				pr_alert("     %sr%-3d: %hhx 0x%016llx   ext: %hhx %016llx\n"
-					 "     %sr%-3d: %hhx 0x%016llx   ext: %hhx %016llx\n",
+				pr_alert("     %sr%-3d: %hhx 0x%016llx   ext: %hhx %016llx\n",
 					brX1_name, dreg + 1, tag_hi, qreg_hi,
-					tag_ext_hi, ext_hi, brX0_name, dreg,
-					tag_lo, qreg_lo, tag_ext_lo, ext_lo);
+					tag_ext_hi, ext_hi);
+				pr_alert("     %sr%-3d: %hhx 0x%016llx   ext: %hhx %016llx\n",
+					brX0_name, dreg, tag_lo, qreg_lo,
+					tag_ext_lo, ext_lo);
 			}
 		} else {
 			pr_alert("     %sr%-3d: %hhx 0x%016llx    %sr%-3d: %hhx 0x%016llx\n",
@@ -1203,10 +1221,14 @@ void print_pt_regs(const pt_regs_t *regs)
 	pr_info("usd: base 0x%llx, size 0x%x, p %d, sbr: 0x%lx\n", regs->stacks.usd_lo.USD_lo_base,
 		regs->stacks.usd_hi.USD_hi_size, regs->stacks.usd_lo.USD_lo_p, regs->stacks.top);
 
-	pr_info("psp: base %llx, ind %x, size %x\n", AS(regs->stacks.psp_lo).base,
-		AS(regs->stacks.psp_hi).ind, AS(regs->stacks.psp_hi).size);
-	pr_info("pcsp: base %llx, ind %x, size %x\n", AS(regs->stacks.pcsp_lo).base,
-		AS(regs->stacks.pcsp_hi).ind, AS(regs->stacks.pcsp_hi).size);
+	pr_info("psp: base %llx, ind %x, size %x PSHTP ind 0x%llx\n",
+		AS(regs->stacks.psp_lo).base,
+		AS(regs->stacks.psp_hi).ind, AS(regs->stacks.psp_hi).size,
+		GET_PSHTP_MEM_INDEX(regs->stacks.pshtp));
+	pr_info("pcsp: base %llx, ind %x, size %x PCSHTP ind 0x%llx\n",
+		AS(regs->stacks.pcsp_lo).base,
+		AS(regs->stacks.pcsp_hi).ind, AS(regs->stacks.pcsp_hi).size,
+		PCSHTP_SIGN_EXTEND(regs->stacks.pcshtp));
 
 	pr_info("cr0.lo: pf 0x%llx, cr0.hi: ip 0x%llx\n",
 		AS(crs->cr0_lo).pf, AS(crs->cr0_hi).ip << 3);
@@ -1589,8 +1611,8 @@ static int __parse_chain_stack(int flags, struct task_struct *p,
  * IMPORTANT: if @func wants to modify frame contents it must flush
  * chain stack if "flush_needed" is set.
  */
-notrace noinline int parse_chain_stack(int flags, struct task_struct *p,
-				       parse_chain_fn_t func, void *arg)
+notrace noinline long parse_chain_stack(int flags, struct task_struct *p,
+					parse_chain_fn_t func, void *arg)
 {
 	int ret;
 
@@ -1877,7 +1899,8 @@ static void nmi_set_no_stack_prot(void *arg)
 
 void set_protected_mode_flags(void)
 {
-	on_each_cpu(nmi_set_no_stack_prot, (void *) debug_protected_mode, 1);
+	on_each_cpu(nmi_set_no_stack_prot,
+		(void *) (long) debug_protected_mode, 1);
 }
 
 /* bug 115090: always set %core_mode.no_stack_prot */
@@ -2252,10 +2275,10 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 				load_value_and_tagd(&regs->gregs.g[i + 1].ext,
 					&ext_hi_val, &ext_hi_tag);
 
-				pr_alert("       g%-3d: %hhx %016llx   ext: %hhx %016llx\n"
-					 "       g%-3d: %hhx %016llx   ext: %hhx %016llx\n",
+				pr_alert("       g%-3d: %hhx %016llx   ext: %hhx %016llx\n",
 						i, tag_lo, val_lo,
-						ext_lo_tag, ext_lo_val,
+						ext_lo_tag, ext_lo_val);
+				pr_alert("       g%-3d: %hhx %016llx   ext: %hhx %016llx\n",
 						i + 1, tag_hi, val_hi,
 						ext_hi_tag, ext_hi_val);
 			}
@@ -2945,7 +2968,7 @@ static int __get_cr(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 static long get_cr(long num, long __user *cr_storage)
 {
 	struct get_cr_args args;
-	int ret;
+	long ret;
 
 	DebugGC("get_cr num:0x%lx cr_storage:%px\n", num, cr_storage);
 
@@ -3118,7 +3141,7 @@ static long read_current_chain_stack(void __user *buf,
 		unsigned long src, unsigned long size)
 {
 	struct copy_chain_args args;
-	int ret;
+	long ret;
 
 	if (!IS_ALIGNED(src, SZ_OF_CR) || !IS_ALIGNED(size, SZ_OF_CR)) {
 		DebugACCVM("src or size is not aligned\n");
@@ -3140,7 +3163,7 @@ long write_current_chain_stack(unsigned long dst, void __user *buf,
 		unsigned long size)
 {
 	struct copy_chain_args args;
-	int ret;
+	long ret;
 
 	if (!IS_ALIGNED(dst, 8) || !IS_ALIGNED(size, 8)) {
 		DebugACCVM("dst or size is not aligned\n");
@@ -3288,7 +3311,7 @@ long copy_current_proc_stack(void __user *buf, void __user *p_stack,
 {
 	struct copy_proc_args args;
 	unsigned long ps_spilled_size;
-	int ret;
+	long ret;
 
 	raw_all_irq_disable();
 	/* Dump procedure stack frames to memory */

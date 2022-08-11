@@ -52,10 +52,10 @@
 
 #undef	DEBUG_MMIO_SHUTDOWN_MODE
 #undef	DebugMMIOSHUTDOWN
-#define	DEBUG_MMIO_SHUTDOWN_MODE	1	/* MMIO shutdown debugging */
+#define	DEBUG_MMIO_SHUTDOWN_MODE	0	/* MMIO shutdown debugging */
 #define	DebugMMIOSHUTDOWN(fmt, args...)					\
 ({									\
-	if (DEBUG_MMIO_SHUTDOWN_MODE)					\
+	if (DEBUG_MMIO_SHUTDOWN_MODE || kvm_debug)			\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 

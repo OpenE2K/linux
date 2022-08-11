@@ -142,9 +142,6 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 	if (step == 8 && ip == -1ULL || step != 8 && ip == 0xffffffffULL)
 		ip = (u64) &sys_backtrace_return;
 
-	if (!is_privileged_return(ip) && !access_ok(ip, 8))
-		return -EFAULT;
-
 	if (!is_privileged_return(prev_ip) && (!pvma ||
 			pvma->vm_start > prev_ip || pvma->vm_end <= prev_ip)) {
 		pvma = find_vma(current->mm, prev_ip);
@@ -152,36 +149,40 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 			return -ESRCH;
 		args->pvma = pvma;
 	}
-	if (!is_privileged_return(ip) && (!vma ||
-			vma->vm_start > ip || vma->vm_end <= ip)) {
-		if (ip >= pvma->vm_start && ip < pvma->vm_end) {
-			vma = pvma;
-		} else {
-			vma = find_vma(current->mm, ip);
-			if (!vma || ip < vma->vm_start)
-				return -ESRCH;
+
+	if (!is_privileged_return(ip)) {
+		if (!access_ok(ip, 8))
+			return -EFAULT;
+
+		if (!vma || vma->vm_start > ip || vma->vm_end <= ip) {
+			if (ip >= pvma->vm_start && ip < pvma->vm_end) {
+				vma = pvma;
+			} else {
+				vma = find_vma(current->mm, ip);
+				if (!vma || ip < vma->vm_start)
+					return -ESRCH;
+			}
+			args->vma = vma;
 		}
-		args->vma = vma;
+
+		/* Forbid changing of special return value into normal
+		 * one - to avoid cases when user changes to special and
+		 * back to normal function to avoid security checks. */
+		if (is_privileged_return(prev_ip))
+			return -EPERM;
+
+		/* Check that the permissions are the same - i.e. if
+		 * the original was not writable then the new instruction
+		 * is not writable too. */
+		if ((pvma->vm_flags & (VM_READ|VM_WRITE|VM_EXEC)) ^
+		     (vma->vm_flags & (VM_READ|VM_WRITE|VM_EXEC)))
+			return -EPERM;
+
+		/* Check that the exception handling code
+		 * resides in the same executable. */
+		if (pvma->vm_file != vma->vm_file)
+			return -EPERM;
 	}
-
-	/* Forbid changing of special return value into normal
-	 * one - to avoid cases when user changes to special and
-	 * back to normal function to avoid security checks. */
-	if (is_privileged_return(prev_ip) && !is_privileged_return(ip))
-		return -EPERM;
-
-	/* Check that the permissions are the same - i.e. if
-	 * the original was not writable then the new instruction
-	 * is not writable too. */
-	if (!is_privileged_return(ip) &&
-	    (pvma->vm_flags & (VM_READ|VM_WRITE|VM_EXEC)) ^
-	     (vma->vm_flags & (VM_READ|VM_WRITE|VM_EXEC)))
-		return -EPERM;
-
-	/* Check that the exception handling code
-	 * resides in the same executable. */
-	if (!is_privileged_return(ip) && pvma->vm_file != vma->vm_file)
-		return -EPERM;
 
 	cr0_hi = frame->cr0_hi;
 	cr1_lo = frame->cr1_lo;

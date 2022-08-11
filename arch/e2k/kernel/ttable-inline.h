@@ -15,6 +15,7 @@
 #include <asm/glob_regs.h>
 #include <asm/mmu_regs_types.h>
 #include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/kvm/switch.h>
 
 #include "ttable-help.h"
@@ -256,8 +257,8 @@ user_hw_stacks_restore(struct pt_regs *regs, e2k_stacks_t *stacks,
 	WRITE_CR1_LO_REG(new_cr1_lo);
 	WRITE_CR1_HI_REG(new_cr1_hi);
 
-	E2K_PREFETCH_L1(&current->thread.fill.cr0_hi);
-	E2K_PREFETCH_L1(&current->thread.fill.return_to_user);
+	prefetch_nospec(&current->thread.fill.cr0_hi);
+	prefetch_nospec(&current->thread.fill.return_to_user);
 
 	/*
 	 * To make hardware issue a FILL we have to make stack empty first
@@ -540,7 +541,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 
 	read_ticks(start_tick);
 
-#if !defined CONFIG_E2K_MACHINE || defined CONFIG_E2K_ES2_DSP || \
+#if (!defined CONFIG_E2K_MACHINE && defined CONFIG_E2K_MINVER_V2) || defined CONFIG_E2K_ES2_DSP || \
 		defined CONFIG_E2K_ES2_RU
 	/* Hardware bug 71610 workaround */
 	if (cpu_has(CPU_HWBUG_ATOMIC) &&
@@ -790,6 +791,13 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from,
 
 	if (!(from & (FROM_SYSCALL_N_PROT | FROM_PV_VCPU_SYSCALL | FROM_PV_VCPU_SYSFORK)))
 		ENABLE_US_CLW();
+
+	if (cpu_has(CPU_HWBUG_VIRT_PSIZE_INTERCEPTION) &&
+			(from & FROM_SYSCALL_PROT_8)) {
+		e2k_wd_t wd = READ_WD_REG();
+		wd.psize = 0x80;
+		WRITE_WD_REG(wd);
+	}
 
 	/* %gN-%gN+3 must be restored last as they hold pointers to current */
 	/* now N=16 (see asm/glob_regs.h) */

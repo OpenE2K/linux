@@ -47,13 +47,6 @@ static inline bool native_sge_is_set(void)
 }
 
 #ifdef CONFIG_E2K_PROFILING
-
-#define boot_smp_processor_id_() \
-		(((e2k_addr_t)current_thread_info() >= TASK_SIZE) ? \
-			smp_processor_id() \
-			: \
-			((long)READ_CURRENT_REG_VALUE()))
- 
 typedef struct {
                                                 // FIRST ELEMENT
         long max_disable_interrupt;             // max #ticks of disable_interrupt
@@ -87,7 +80,7 @@ extern disable_interrupt_t disable_interrupt[NR_CPUS];
 #define add_info_interrupt(n, ticks)					\
 ({	long t; int cpu;						\
 	t = NATIVE_READ_CLKR_REG_VALUE() - ticks;			\
-	cpu = boot_smp_processor_id_();					\
+	cpu = boot_smp_processor_id();					\
 	disable_interrupt[cpu].interrupts[n]++;				\
 	disable_interrupt[cpu].interrupts_time[n] += t;			\
 	if (t > disable_interrupt[cpu].max_interrupts_time[n]) {	\
@@ -148,7 +141,7 @@ extern system_info_t system_info[NR_CPUS];
 extern int enable_collect_interrupt_ticks;
 #define collect_disable_interrupt_ticks()                       \
 ({  int  cpu;                                                   \
-    cpu = boot_smp_processor_id_();                             \
+    cpu = boot_smp_processor_id();                              \
     if (system_info[cpu].max_disabled_interrupt.begin_time >0){ \
        store_max_time_in_system_info(                           \
          system_info[cpu].max_disabled_interrupt.begin_time,    \
@@ -161,13 +154,13 @@ extern int enable_collect_interrupt_ticks;
       store_begin_ip_in_system_info(max_disabled_interrupt)
 
 #define store_do_irq_ticks()						\
-({	int  cpu = boot_smp_processor_id_();				\
+({	int  cpu = boot_smp_processor_id();				\
 	disable_interrupt[cpu].clk_of_do_irq = NATIVE_READ_CLKR_REG_VALUE(); \
 })
 
 #define	define_time_of_do_irq(N)					\
 ({	long t; int  cpu;						\
-	cpu = boot_smp_processor_id_();					\
+	cpu = boot_smp_processor_id();					\
 	t = NATIVE_READ_CLKR_REG_VALUE() -				\
 			disable_interrupt[cpu].clk_of_do_irq;		\
 	disable_interrupt[cpu].do_irq_time[N] += t;			\
@@ -202,7 +195,7 @@ extern int enable_collect_interrupt_ticks;
 ({	long t; int  cpu;						\
 	register e2k_cr0_hi_t cr0_hi;					\
 	if (enable_collect_interrupt_ticks) {				\
-		cpu = boot_smp_processor_id_();				\
+		cpu = boot_smp_processor_id();				\
 		t = NATIVE_READ_CLKR_REG_VALUE();			\
 		AS_WORD(cr0_hi) = NATIVE_NV_READ_CR0_HI_REG_VALUE();	\
 		system_info[cpu].FIELD.begin_time = tick;		\
@@ -215,7 +208,7 @@ extern int enable_collect_interrupt_ticks;
 ({									\
 	int cpu;							\
 	register e2k_cr0_hi_t cr0_hi;					\
-	cpu = boot_smp_processor_id_();					\
+	cpu = boot_smp_processor_id();					\
 	disable_interrupt[cpu].clk = NATIVE_READ_CLKR_REG_VALUE();	\
 	cr0_hi = NATIVE_NV_READ_CR0_HI_REG_VALUE();			\
 	system_info[cpu].FIELD.beg_ip = NATIVE_READ_IP_REG_VALUE();	\
@@ -239,7 +232,7 @@ extern int enable_collect_interrupt_ticks;
 ({									\
 	int cpu;							\
 	register e2k_cr0_hi_t cr0_hi;					\
-	cpu = boot_smp_processor_id_();					\
+	cpu = boot_smp_processor_id();					\
 	cr0_hi = NATIVE_NV_READ_CR0_HI_REG_VALUE();			\
 	system_info[cpu].FIELD.beg_ip = mutex->ip;			\
 	system_info[cpu].FIELD.beg_parent_ip = mutex->caller;		\
@@ -252,7 +245,7 @@ extern int enable_collect_interrupt_ticks;
 ({									\
 	long t; int cpu;						\
 	register e2k_cr0_hi_t cr0_hi;					\
-	cpu = boot_smp_processor_id_();					\
+	cpu = boot_smp_processor_id();					\
 	if (enable_collect_interrupt_ticks) {				\
 		t = NATIVE_READ_CLKR_REG_VALUE()-system_info[cpu].	\
 							FIELD.begin_time; \
@@ -281,7 +274,7 @@ extern long TIME;
 ({									\
 	long t; int cpu;						\
 	register e2k_cr0_hi_t cr0_hi;					\
-	cpu = boot_smp_processor_id_();					\
+	cpu = boot_smp_processor_id();					\
 	t = NATIVE_READ_CLKR_REG_VALUE()-tick;				\
 	if (enable_collect_interrupt_ticks) {				\
 		system_info[cpu].FIELD.number++;			\

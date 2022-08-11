@@ -59,6 +59,16 @@ static inline void __pic_setup_vector_irq(int cpu)
 		__apic_setup_vector_irq(cpu);
 }
 
+extern void fixup_irqs_epic(void);
+extern void fixup_irqs_apic(void);
+static inline void fixup_irqs_pic(void)
+{
+	if (nr_ioepics)
+		fixup_irqs_epic();
+	if (nr_ioapics)
+		fixup_irqs_apic();
+}
+
 extern void print_IO_APICs(void);
 extern void print_IO_EPICs(void);
 static inline void print_IO_PICs(void)
@@ -94,6 +104,12 @@ extern void __apic_setup_vector_irq(int cpu);
 static inline void __pic_setup_vector_irq(int cpu)
 {
 	__apic_setup_vector_irq(cpu);
+}
+
+extern void fixup_irqs_apic(void);
+static inline void fixup_irqs_pic(void)
+{
+	fixup_irqs_apic();
 }
 
 extern void print_IO_APICs(void);

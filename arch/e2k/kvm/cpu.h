@@ -347,7 +347,7 @@ do_emulate_pv_vcpu_intc(thread_info_t *ti, pt_regs_t *regs,
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
 }
 
-static __always_inline void
+static notrace __always_inline void
 return_from_pv_vcpu_inject(struct kvm_vcpu *vcpu)
 {
 	KVM_BUG_ON(!test_and_clear_ts_flag(TS_HOST_AT_VCPU_MODE));
@@ -395,7 +395,7 @@ trap_handler_trampoline_finish(struct kvm_vcpu *vcpu,
 	atomic_dec(&host_ctxt->signal.in_work);
 }
 
-static __always_inline void
+static notrace __always_inline void
 syscall_handler_trampoline_start(struct kvm_vcpu *vcpu, u64 sys_rval)
 {
 	struct signal_stack_context __user *context;
@@ -543,7 +543,7 @@ save_guest_sys_call_user_regs(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 static inline void restore_guest_sys_call_stack_regs(thread_info_t *ti,
 			struct kvm_vcpu *vcpu,
 			e2k_usd_lo_t usd_lo, e2k_usd_hi_t usd_hi,
-			e2k_addr_t sbr)
+			e2k_addr_t sbr_base)
 {
 	unsigned long regs_status = kvm_get_guest_vcpu_regs_status(vcpu);
 	bool hw_frame_updated = false;
@@ -558,10 +558,13 @@ static inline void restore_guest_sys_call_stack_regs(thread_info_t *ti,
 	e2k_pcshtp_t cur_pcshtp;
 	e2k_size_t new_ind;
 	e2k_size_t cur_ind;
+	e2k_sbr_t sbr;
+
+	sbr.SBR_reg = 0;
+	sbr.SBR_base = sbr_base;
 
 	if (!KVM_TEST_UPDATED_CPU_REGS_FLAGS(regs_status)) {
-		NATIVE_NV_WRITE_SBR_REG_VALUE(sbr);
-		NATIVE_NV_WRITE_USD_REG(usd_hi, usd_lo);
+		NATIVE_NV_WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo);
 		return;
 	}
 
@@ -574,13 +577,11 @@ static inline void restore_guest_sys_call_stack_regs(thread_info_t *ti,
 	if (!(DEBUG_HOST_ACTIVATION_MODE || DEBUG_GREGS_MODE || DEBUG_GTI)) {
 		if (KVM_TEST_UPDATED_CPU_REGS_FLAG(regs_status,
 						USD_UPDATED_CPU_REGS)) {
-			NATIVE_NV_WRITE_SBR_REG_VALUE(
-				kvm_get_guest_vcpu_SBR_value(vcpu));
-			NATIVE_NV_WRITE_USD_REG(kvm_get_guest_vcpu_USD_hi(vcpu),
+			NATIVE_NV_WRITE_USBR_USD_REG(kvm_get_guest_vcpu_SBR(vcpu),
+					kvm_get_guest_vcpu_USD_hi(vcpu),
 					kvm_get_guest_vcpu_USD_lo(vcpu));
 		} else {
-			NATIVE_NV_WRITE_SBR_REG_VALUE(sbr);
-			NATIVE_NV_WRITE_USD_REG(usd_hi, usd_lo);
+			NATIVE_NV_WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo);
 		}
 	}
 	if (KVM_TEST_UPDATED_CPU_REGS_FLAG(regs_status,
@@ -705,13 +706,11 @@ debug_exit:
 	if ((DEBUG_HOST_ACTIVATION_MODE || DEBUG_GREGS_MODE || DEBUG_GTI)) {
 		if (KVM_TEST_UPDATED_CPU_REGS_FLAG(regs_status,
 						USD_UPDATED_CPU_REGS)) {
-			NATIVE_NV_WRITE_SBR_REG_VALUE(
-				kvm_get_guest_vcpu_SBR_value(vcpu));
-			NATIVE_NV_WRITE_USD_REG(kvm_get_guest_vcpu_USD_hi(vcpu),
+			NATIVE_NV_WRITE_USBR_USD_REG(kvm_get_guest_vcpu_SBR(vcpu),
+					kvm_get_guest_vcpu_USD_hi(vcpu),
 					kvm_get_guest_vcpu_USD_lo(vcpu));
 		} else {
-			NATIVE_NV_WRITE_SBR_REG_VALUE(sbr);
-			NATIVE_NV_WRITE_USD_REG(usd_hi, usd_lo);
+			NATIVE_NV_WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo);
 		}
 	}
 }
@@ -984,8 +983,6 @@ switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
 	e2k_usd_hi_t usd_hi;
 	e2k_sbr_t sbr;
 
-	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
-
 	if (from_hypercall) {
 		KVM_BUG_ON(!test_and_clear_ti_status_flag(ti,
 						TS_HOST_AT_VCPU_MODE));
@@ -1011,6 +1008,8 @@ switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
 		sw_ctxt->host_usd_lo = usd_lo;
 		sw_ctxt->host_usd_hi = usd_hi;
 	}
+
+	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
 
 	cr0_lo = sw_ctxt->crs.cr0_lo;
 	cr0_hi = sw_ctxt->crs.cr0_hi;

@@ -24,8 +24,7 @@
 #define BB_CTRL_CMD_START		(0x1<<31)
 #define BB_CTRL_CMD_ABORT		(0x1<<30)
 
-#define BB_CTRL_HALFWORD_TWISTER	(0x1<<24)
-#define BB_CTRL_BYTES_TWISTER		(0x1<<23)
+
 #define BB_CTRL_BITS_IN_BYTE_TWISTER	(0x1<<22)
 
 #define BB_CTRL_DDMA_EN			(0x1<<21)
@@ -277,7 +276,7 @@ static const struct dma_fence_ops mga2_fence_ops = {
 
 static void __mga2_update_ptr(struct mga2 *mga2)
 {
-	if (mga25(mga2))
+	if (mga25(mga2) && !mga2->bctrl_active)
 		auc2_update_ptr(mga2);
 	else
 		bctrl_update_ptr(mga2);
@@ -347,7 +346,7 @@ static int __get_free_desc(struct mga2 *mga2)
 	}
 	h = mga2->head;
 	fence = &mga2->mga2_fence[h];
-	seqno = atomic_inc_return(&mga2->fence_seqno) - 1;
+	seqno = mga2->fence_seqno;
 	BUG_ON(h != seqno % MGA2_RING_SIZE);
 	dma_fence_init(fence, &mga2_fence_ops, &mga2->fence_lock, 0, seqno);
 
@@ -369,9 +368,13 @@ static int get_free_desc(struct mga2 *mga2)
 
 static int append_desc(struct mga2 *mga2, struct mga2_gem_object *mo)
 {
-	if (mga2->flags & MGA2_BCTRL_OFF) {
+	if (mga2->flags & MGA2_BCTRL_OFF)
 		return 0;
+	if (mga25(mga2) && mga2->bctrl_active) {
+		mga2_update_ptr(mga2);
+		mga2->bctrl_active = false;
 	}
+
 	if (mga25(mga2))
 		return mga25_append_desc(mga2, mo);
 
@@ -523,6 +526,8 @@ static void mga2_hw_imageblit(struct mga2 *mga2, dma_addr_t pSrcbuf,	/* pointer 
 	switch (Bpp) {
 	case 4:
 		cbpp = BB_CTRL_BPP_32;
+		fColor = cpu_to_le32(fColor);
+		bColor = cpu_to_le32(bColor);
 		break;
 	case 3:
 		cbpp = BB_CTRL_BPP_24;
@@ -749,13 +754,14 @@ static int mga2_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 
 	if (mga2_has_vram(mga2) || mga2_use_uncached(mga2)) {
 		phys_addr_t start = mo->node.start;
+		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 		if (mga2_use_uncached(mga2)) {
 			start = (phys_addr_t)mo->vaddr;
 			WARN(!IS_ENABLED(CONFIG_E90S), "FIXME:start\n");
 		}
 		ret = vm_iomap_memory(vma, start, vm_size);
 	} else {
-		ret = dma_mmap_coherent(mga2->drm->dev, vma, mo->vaddr,
+		ret = dma_mmap_wc(mga2->drm->dev, vma, mo->vaddr,
 					mo->dma_addr, vm_size);
 	}
 

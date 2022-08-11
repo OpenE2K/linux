@@ -1,5 +1,6 @@
 #include <linux/clockchips.h>
 #include <linux/irq.h>
+#include <linux/syscore_ops.h>
 
 #include <asm/epic.h>
 #include <asm/smp.h>
@@ -32,6 +33,10 @@ bool disable_epic_timer;
 bool epic_debug = false;
 
 bool epic_bgi_mode;
+
+/* Enable pcsm_adjust daemon from kernel cmdline */
+bool pcsm_adjust_enable;
+EXPORT_SYMBOL(pcsm_adjust_enable);
 
 /*
  * The value written to CEPIC_TIMER_INIT register, that corresponds to HZ timer
@@ -238,30 +243,30 @@ static void __epic_smp_error_interrupt(void)
 	ack_epic_irq();
 	atomic_inc(&irq_err_count);
 
-	epic_printk("EPIC error on CPU%d: 0x%x", smp_processor_id(), reg.raw);
+	printk(KERN_INFO "EPIC error on CPU%d: 0x%x", smp_processor_id(), reg.raw);
 
 	if (reg.bits.rq_addr_err)
-		epic_printk(KERN_CONT " : Illegal addr");
+		printk(KERN_CONT " : Illegal regsiter address");
 
 	if (reg.bits.rq_virt_err)
-		epic_printk(KERN_CONT " : Illegal virt request");
+		printk(KERN_CONT " : Illegal virt request (virt disabled)");
 
 	if (reg.bits.rq_cop_err)
-		epic_printk(KERN_CONT " : Illegal opcode");
+		printk(KERN_CONT " : Illegal opcode");
 
 	if (reg.bits.ms_gstid_err)
-		epic_printk(KERN_CONT " : Illegal guest id");
+		printk(KERN_CONT " : Illegal guest id");
 
 	if (reg.bits.ms_virt_err)
-		epic_printk(KERN_CONT " : Illegal message (virt disabled)");
+		printk(KERN_CONT " : Illegal virt message (virt disabled)");
 
 	if (reg.bits.ms_err)
-		epic_printk(KERN_CONT " : Illegal message");
+		printk(KERN_CONT " : Illegal message");
 
 	if (reg.bits.ms_icr_err)
-		epic_printk(KERN_CONT " : Illegal write to CEPIC_ICR");
+		printk(KERN_CONT " : Illegal write to CEPIC_ICR");
 
-	epic_printk(KERN_CONT "\n");
+	printk(KERN_CONT "\n");
 }
 
 __visible void epic_smp_error_interrupt(struct pt_regs *regs)
@@ -316,7 +321,7 @@ __visible void epic_pv_apf_wake(struct pt_regs *regs)
 }
 #endif /* CONFIG_KVM_ASYNC_PF */
 
-void __init set_cepic_timer_frequency(unsigned int freq)
+static void set_cepic_timer_frequency(unsigned int freq)
 {
 	/*
 	 * Boot should have passed CEPIC timer frequency in MP table
@@ -327,7 +332,8 @@ void __init set_cepic_timer_frequency(unsigned int freq)
 		freq = 100000000; /* 100 MHz */
 	}
 
-	pr_warn("CEPIC timer frequency is %d MHz\n", freq / 1000000);
+	pr_info_once("EPIC timer frequency is %d.%d MHz\n",
+			freq / 1000000, freq % 1000000 / 100000);
 	cepic_timer_freq = freq;
 }
 
@@ -667,94 +673,94 @@ static void save_cepic(void *cepic_regs)
 
 static void print_saved_cepic(int cpu, struct saved_cepic_regs *regs)
 {
-	epic_printk("Printing CEPIC contents on CPU#%d:\n", cpu);
+	pr_info("Printing CEPIC contents on CPU#%d:\n", cpu);
 	pr_info("... CEPIC_ID: 0x%x\n", regs->cepic_id);
-	epic_printk("... CEPIC_CPR: 0x%x\n", regs->cepic_cpr);
-	epic_printk("... CEPIC_ESR: 0x%x\n", regs->cepic_esr);
-	epic_printk("... CEPIC_ESR2: 0x%x\n", regs->cepic_esr2);
+	pr_info("... CEPIC_CPR: 0x%x\n", regs->cepic_cpr);
+	pr_info("... CEPIC_ESR: 0x%x\n", regs->cepic_esr);
+	pr_info("... CEPIC_ESR2: 0x%x\n", regs->cepic_esr2);
 
 	/* CEPIC_EOI is write-only */
 
-	epic_printk("... CEPIC_CIR: 0x%x\n", regs->cepic_cir);
+	pr_info("... CEPIC_CIR: 0x%x\n", regs->cepic_cir);
 
 	/* Reading CEPIC_PNMIRR starts NMI handling */
 
-	epic_printk("... CEPIC_ICR: 0x%x\n", regs->cepic_icr);
-	epic_printk("... CEPIC_ICR2: 0x%x\n", regs->cepic_icr2);
-	epic_printk("... CEPIC_TIMER_LVTT: 0x%x\n", regs->cepic_timer_lvtt);
-	epic_printk("... CEPIC_TIMER_INIT: 0x%x\n", regs->cepic_timer_init);
-	epic_printk("... CEPIC_TIMER_CUR: 0x%x\n", regs->cepic_timer_cur);
-	epic_printk("... CEPIC_TIMER_DIV: 0x%x\n", regs->cepic_timer_div);
-	epic_printk("... CEPIC_NM_TIMER_LVTT: 0x%x\n",
+	pr_info("... CEPIC_ICR: 0x%x\n", regs->cepic_icr);
+	pr_info("... CEPIC_ICR2: 0x%x\n", regs->cepic_icr2);
+	pr_info("... CEPIC_TIMER_LVTT: 0x%x\n", regs->cepic_timer_lvtt);
+	pr_info("... CEPIC_TIMER_INIT: 0x%x\n", regs->cepic_timer_init);
+	pr_info("... CEPIC_TIMER_CUR: 0x%x\n", regs->cepic_timer_cur);
+	pr_info("... CEPIC_TIMER_DIV: 0x%x\n", regs->cepic_timer_div);
+	pr_info("... CEPIC_NM_TIMER_LVTT: 0x%x\n",
 			regs->cepic_nm_timer_lvtt);
-	epic_printk("... CEPIC_NM_TIMER_INIT: 0x%x\n",
+	pr_info("... CEPIC_NM_TIMER_INIT: 0x%x\n",
 			regs->cepic_nm_timer_init);
-	epic_printk("... CEPIC_NM_TIMER_CUR: 0x%x\n", regs->cepic_nm_timer_cur);
-	epic_printk("... CEPIC_NM_TIMER_DIV: 0x%x\n", regs->cepic_nm_timer_div);
-	epic_printk("... CEPIC_SVR: 0x%x\n", regs->cepic_svr);
-	epic_printk("... CEPIC_PNMIRR_MASK: 0x%x\n", regs->cepic_pnmirr_mask);
+	pr_info("... CEPIC_NM_TIMER_CUR: 0x%x\n", regs->cepic_nm_timer_cur);
+	pr_info("... CEPIC_NM_TIMER_DIV: 0x%x\n", regs->cepic_nm_timer_div);
+	pr_info("... CEPIC_SVR: 0x%x\n", regs->cepic_svr);
+	pr_info("... CEPIC_PNMIRR_MASK: 0x%x\n", regs->cepic_pnmirr_mask);
 }
 
 static void print_cepic(void *dummy)
 {
 	unsigned int v;
 
-	epic_printk("Printing CEPIC contents on CPU#%d:\n",
+	pr_info("Printing CEPIC contents on CPU#%d:\n",
 		smp_processor_id());
 	v = epic_read_w(CEPIC_ID);
 	pr_info("... CEPIC_ID: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_CPR);
-	epic_printk("... CEPIC_CPR: 0x%x\n", v);
+	pr_info("... CEPIC_CPR: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_ESR);
-	epic_printk("... CEPIC_ESR: 0x%x\n", v);
+	pr_info("... CEPIC_ESR: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_ESR2);
-	epic_printk("... CEPIC_ESR2: 0x%x\n", v);
+	pr_info("... CEPIC_ESR2: 0x%x\n", v);
 
 	/* CEPIC_EOI is write-only */
 
 	v = epic_read_w(CEPIC_CIR);
-	epic_printk("... CEPIC_CIR: 0x%x\n", v);
+	pr_info("... CEPIC_CIR: 0x%x\n", v);
 
 	/* Reading CEPIC_PNMIRR starts NMI handling */
 
 	v = epic_read_w(CEPIC_ICR);
-	epic_printk("... CEPIC_ICR: 0x%x\n", v);
+	pr_info("... CEPIC_ICR: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_ICR2);
-	epic_printk("... CEPIC_ICR2: 0x%x\n", v);
+	pr_info("... CEPIC_ICR2: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_TIMER_LVTT);
-	epic_printk("... CEPIC_TIMER_LVTT: 0x%x\n", v);
+	pr_info("... CEPIC_TIMER_LVTT: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_TIMER_INIT);
-	epic_printk("... CEPIC_TIMER_INIT: 0x%x\n", v);
+	pr_info("... CEPIC_TIMER_INIT: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_TIMER_CUR);
-	epic_printk("... CEPIC_TIMER_CUR: 0x%x\n", v);
+	pr_info("... CEPIC_TIMER_CUR: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_TIMER_DIV);
-	epic_printk("... CEPIC_TIMER_DIV: 0x%x\n", v);
+	pr_info("... CEPIC_TIMER_DIV: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_NM_TIMER_LVTT);
-	epic_printk("... CEPIC_NM_TIMER_LVTT: 0x%x\n", v);
+	pr_info("... CEPIC_NM_TIMER_LVTT: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_NM_TIMER_INIT);
-	epic_printk("... CEPIC_NM_TIMER_INIT: 0x%x\n", v);
+	pr_info("... CEPIC_NM_TIMER_INIT: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_NM_TIMER_CUR);
-	epic_printk("... CEPIC_NM_TIMER_CUR: 0x%x\n", v);
+	pr_info("... CEPIC_NM_TIMER_CUR: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_NM_TIMER_DIV);
-	epic_printk("... CEPIC_NM_TIMER_DIV: 0x%x\n", v);
+	pr_info("... CEPIC_NM_TIMER_DIV: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_SVR);
-	epic_printk("... CEPIC_SVR: 0x%x\n", v);
+	pr_info("... CEPIC_SVR: 0x%x\n", v);
 
 	v = epic_read_w(CEPIC_PNMIRR_MASK);
-	epic_printk("... CEPIC_PNMIRR_MASK: 0x%x\n", v);
+	pr_info("... CEPIC_PNMIRR_MASK: 0x%x\n", v);
 }
 
 static void print_prepics(void)
@@ -763,40 +769,40 @@ static void print_prepics(void)
 	unsigned int v;
 
 	for_each_online_node(node) {
-		epic_printk("Printing PREPIC#%d:\n", node);
+		pr_info("Printing PREPIC#%d:\n", node);
 
 		v = prepic_node_read_w(node, SIC_prepic_version);
-		epic_printk("... PREPIC_VERSION: 0x%x\n", v);
+		pr_info("... PREPIC_VERSION: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_ctrl);
-		epic_printk("... PREPIC_CTRL: 0x%x\n", v);
+		pr_info("... PREPIC_CTRL: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_id);
-		epic_printk("... PREPIC_ID: 0x%x\n", v);
+		pr_info("... PREPIC_ID: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_ctrl2);
-		epic_printk("... PREPIC_CTRL2: 0x%x\n", v);
+		pr_info("... PREPIC_CTRL2: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_err_int);
-		epic_printk("... PREPIC_ERR_INT: 0x%x\n", v);
+		pr_info("... PREPIC_ERR_INT: 0x%x\n", v);
 #ifdef CONFIG_E2K
 		v = prepic_node_read_w(node, SIC_prepic_linp0);
-		epic_printk("... PREPIC_LINP0: 0x%x\n", v);
+		pr_info("... PREPIC_LINP0: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_linp1);
-		epic_printk("... PREPIC_LINP1: 0x%x\n", v);
+		pr_info("... PREPIC_LINP1: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_linp2);
-		epic_printk("... PREPIC_LINP2: 0x%x\n", v);
+		pr_info("... PREPIC_LINP2: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_linp3);
-		epic_printk("... PREPIC_LINP3: 0x%x\n", v);
+		pr_info("... PREPIC_LINP3: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_linp4);
-		epic_printk("... PREPIC_LINP4: 0x%x\n", v);
+		pr_info("... PREPIC_LINP4: 0x%x\n", v);
 
 		v = prepic_node_read_w(node, SIC_prepic_linp5);
-		epic_printk("... PREPIC_LINP5: 0x%x\n", v);
+		pr_info("... PREPIC_LINP5: 0x%x\n", v);
 #endif
 	}
 }
@@ -850,6 +856,13 @@ static int __init epic_set_bgi_mode(char *arg)
 	return 0;
 }
 early_param("epic_bgi_mode", epic_set_bgi_mode);
+
+static int __init pcsm_set_adjust(char *arg)
+{
+	pcsm_adjust_enable = true;
+	return 0;
+}
+early_param("pcsm_adjust", pcsm_set_adjust);
 
 /*
  * EPIC Masked interrupt handling starts with reading CEPIC_VECT_INTA.
@@ -915,7 +928,11 @@ __visible void epic_uncore_interrupt(struct pt_regs *regs)
 {
 	l_irq_enter();
 
-	pr_err("EPIC: received uncore interrupt on core %d\n",
+#ifdef CONFIG_E2K
+	do_sic_error_interrupt();
+#endif
+
+	panic("EPIC: received uncore interrupt on core %d\n",
 		smp_processor_id());
 
 	ack_epic_irq();
@@ -944,13 +961,91 @@ __visible void epic_hc_interrupt(struct pt_regs *regs)
 	l_irq_exit();
 }
 
+static const struct pcs_handle *pcs_handle_epic;
+
+void register_pcs_handle(const struct pcs_handle *handle)
+{
+	if (pcs_handle_epic) {
+	    pr_err("PCS: handle is already registered\n");
+	    return;
+	}
+
+	pcs_handle_epic = handle;
+}
+EXPORT_SYMBOL(register_pcs_handle);
+
+void unregister_pcs_handle(void)
+{
+	pcs_handle_epic = NULL;
+}
+EXPORT_SYMBOL(unregister_pcs_handle);
+
 __visible void epic_pcs_interrupt(struct pt_regs *regs)
 {
 	l_irq_enter();
 
-	pr_err("EPIC: received pcs interrupt on core %d\n",
-		smp_processor_id());
+	if (pcs_handle_epic)
+		pcs_handle_epic->pcs_interrupt();
+
+	if (epic_debug)
+		pr_err("EPIC: received pcs interrupt on core %d\n",
+			smp_processor_id());
 
 	ack_epic_irq();
 	l_irq_exit();
 }
+
+
+/*
+ * Power management
+ */
+#ifdef CONFIG_PM
+static int cepic_suspend(void)
+{
+	union cepic_ctrl reg_ctrl;
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	/* Disable CEPIC */
+	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
+	reg_ctrl.bits.soft_en = 0;
+	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+
+	local_irq_restore(flags);
+
+	return 0;
+}
+
+static void cepic_resume(void)
+{
+	union cepic_ctrl reg_ctrl;
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	/* Enable CEPIC */
+	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
+	reg_ctrl.bits.soft_en = 1;
+	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+
+	local_irq_restore(flags);
+}
+
+static struct syscore_ops cepic_syscore_ops = {
+	.resume		= cepic_resume,
+	.suspend	= cepic_suspend,
+};
+
+static int __init init_cepic_sysfs(void)
+{
+	/* XXX: remove suspend/resume procs if !apic_pm_state.active? */
+	if (cpu_has_epic())
+		register_syscore_ops(&cepic_syscore_ops);
+
+	return 0;
+}
+
+/* local apic needs to resume before other devices access its registers. */
+core_initcall(init_cepic_sysfs);
+#endif	/* CONFIG_PM */

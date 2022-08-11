@@ -1913,7 +1913,7 @@ static int serial_zilog_resume(struct pci_dev *dev)
 
 static const struct pci_device_id zilog_pci_table[] = {
 	{
-		.vendor = PCI_VENDOR_ID_INTEL,
+		.vendor = PCI_VENDOR_ID_ELBRUS,
 		.device = PCI_DEVICE_ID_PAR_SER,
 		.subvendor = PCI_ANY_ID,
 		.subdevice = PCI_ANY_ID,

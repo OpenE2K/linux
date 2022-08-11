@@ -252,7 +252,10 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_stat64),	/* 195 , in libc used in ptr32 mode */
 	SYSTEM_CALL_TBL_ENTRY(sys_lstat64),     /* in libc used in ptr32 mode */
 	SYSTEM_CALL_TBL_ENTRY(sys_fstat64),     /* in libc used in ptr32 mode */
-	
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_lchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_getuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getgid),	/* 200 */
@@ -260,8 +263,13 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_getegid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setreuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setregid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_pidfd_send_signal),	/* 205 */
 	SYSTEM_CALL_TBL_ENTRY(sys_pidfd_open),
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_fchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_setresuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getresuid),
@@ -272,6 +280,7 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_setgid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsuid),	/* 215 */
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsgid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_pivot_root),
 	SYSTEM_CALL_TBL_ENTRY(sys_mincore),
 	SYSTEM_CALL_TBL_ENTRY(sys_madvise),
@@ -552,7 +561,7 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_setuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_stime32),	/* 25 */
-	SYSTEM_CALL_TBL_ENTRY(sys_ptrace),
+	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_ptrace),
 	SYSTEM_CALL_TBL_ENTRY(sys_alarm),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* old sys_fstat() */
 	SYSTEM_CALL_TBL_ENTRY(sys_pause),
@@ -731,7 +740,10 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_stat64),	/* 195 , in libc used in ptr32 mode */
 	SYSTEM_CALL_TBL_ENTRY(sys_lstat64),     /* in libc used in ptr32 mode */
 	SYSTEM_CALL_TBL_ENTRY(sys_fstat64),     /* in libc used in ptr32 mode */
-	
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_lchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_getuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getgid),	/* 200 */
@@ -739,8 +751,13 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_getegid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setreuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setregid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_pidfd_send_signal),	/* 205 */
 	SYSTEM_CALL_TBL_ENTRY(sys_pidfd_open),
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_fchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_setresuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getresuid),
@@ -751,6 +768,7 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_setgid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsuid),	/* 215 */
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsgid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_pivot_root),
 	SYSTEM_CALL_TBL_ENTRY(sys_mincore),
 	SYSTEM_CALL_TBL_ENTRY(sys_madvise),
@@ -1234,7 +1252,10 @@ const system_call_func sys_protcall_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),		// sys_stat64
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),		// sys_lstat64
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),		// sys_fstat64
-	
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_lchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_getuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getgid),	/* 200 */
@@ -1242,8 +1263,13 @@ const system_call_func sys_protcall_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_getegid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setreuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setregid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 205 */
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_fchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_setresuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getresuid),
@@ -1254,6 +1280,7 @@ const system_call_func sys_protcall_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_setgid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsuid),	/* 215 */
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsgid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_pivot_root),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),		// sys_mincore
 	SYSTEM_CALL_TBL_ENTRY(sys_madvise),
@@ -1581,7 +1608,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_gettimeofday),
 	PROT_SYSCALL_TBL_ENTRY(sys_settimeofday),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_getgroups),	/* 80 */
-	PROT_SYSCALL_TBL_ENTRY(sys_setgroups),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_setgroups),
 	PROT_SYSCALL_TBL_ENTRY(sys_select),
 	PROT_SYSCALL_TBL_ENTRY(sys_symlink),
 	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),	/* old sys_lstat() */
@@ -1706,6 +1733,9 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_lstat64),
 	PROT_SYSCALL_TBL_ENTRY(sys_fstat64),
 
+	/*
+	 * They are used for back compatibility
+	 */
 	PROT_SYSCALL_TBL_ENTRY(sys_lchown),
 	PROT_SYSCALL_TBL_ENTRY(sys_getuid),
 	PROT_SYSCALL_TBL_ENTRY(sys_getgid),	/* 200 */
@@ -1713,8 +1743,13 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_getegid),
 	PROT_SYSCALL_TBL_ENTRY(sys_setreuid),
 	PROT_SYSCALL_TBL_ENTRY(sys_setregid),
+
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_pidfd_send_signal), /* 205 */
 	PROT_SYSCALL_TBL_ENTRY(sys_pidfd_open),
+
+	/*
+	 * They are used for back compatibility
+	 */
 	PROT_SYSCALL_TBL_ENTRY(sys_fchown),
 	PROT_SYSCALL_TBL_ENTRY(sys_setresuid),
 	PROT_SYSCALL_TBL_ENTRY(sys_getresuid),
@@ -1725,6 +1760,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_setgid),
 	PROT_SYSCALL_TBL_ENTRY(sys_setfsuid),	/* 215 */
 	PROT_SYSCALL_TBL_ENTRY(sys_setfsgid),
+
 	PROT_SYSCALL_TBL_ENTRY(sys_pivot_root),
 	PROT_SYSCALL_TBL_ENTRY(sys_mincore),
 	PROT_SYSCALL_TBL_ENTRY(sys_madvise),
@@ -1919,7 +1955,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(sys_renameat2),
 	PROT_SYSCALL_TBL_ENTRY(sys_getrandom),
 	PROT_SYSCALL_TBL_ENTRY(sys_memfd_create),
-	PROT_SYSCALL_TBL_ENTRY(sys_bpf),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_bpf),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_execveat),
 	PROT_SYSCALL_TBL_ENTRY(sys_userfaultfd),
 	PROT_SYSCALL_TBL_ENTRY(sys_membarrier),		/* 390 */
@@ -2195,7 +2231,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xff14440,	/*	reboot	88		iiiP	*/
 					0, 0, 0, 0, 0, 0 },
-	{ 0xfffff10,	/*	readdir	89		P	*/
+	{ 0xfff4140,	/*	readdir	89		iPi	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0x0000020,	/*	mmap	90		?LLLLL	*/
 					0, 0, 0, 0, 0, 0 },
@@ -2267,7 +2303,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xfffff10,	/*	adjtimex	124	PX	*/
 					216, 0, 0, 0, 0, 0 },
-	{ 0xfff0010,	/*	mprotect	125	PLL	*/
+	{ 0xfff0011,	/*	mprotect	125	PLL	*/
 					-2, 0, 0, 0, 0, 0 },
 	{ 0xfff1140,	/*	sigprocmask	126	iPP	*/
 					0, 8, 8, 0, 0, 0 },
@@ -2577,7 +2613,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xfff1440,	/*	shmctl	279		iiP	*/
 					0, 0, 40, 0, 0, 0 },
-	{ 0xfff4140,	/*	shmat	280		iPi	*/
+	{ 0xfff4240,	/*	shmat	280		i?i	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0xfffff10,	/*	shmdt	281		P	*/
 					0, 0, 0, 0, 0, 0 },
@@ -2666,7 +2702,7 @@ const struct syscall_attrs sys_protcall_args[NR_syscalls] = {
 					0, 0, 0, 0, 0, 0 },
 	{ 0xff41110,	/* request_key	324		PPPi	*/
 					0, 0, 0, 0, 0, 0 },
-	{ 0xff22240,	/*	keyctl	325		i???	*/
+	{ 0xf222240,	/*	keyctl	325		i????	*/
 					0, 0, 0, 0, 0, 0 },
 	{ 0x0,		/*	mcst_rt	326			ni_syscall */
 					0, 0, 0, 0, 0, 0 },
@@ -3564,7 +3600,10 @@ const system_call_func sys_call_table_deprecated[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_stat64),	/* 195 , in libc used in ptr32 mode */
 	SYSTEM_CALL_TBL_ENTRY(sys_lstat64),     /* in libc used in ptr32 mode */
 	SYSTEM_CALL_TBL_ENTRY(sys_fstat64),     /* in libc used in ptr32 mode */
-	
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_lchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_getuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getgid),	/* 200 */
@@ -3572,8 +3611,13 @@ const system_call_func sys_call_table_deprecated[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_getegid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setreuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setregid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 205 */
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
+
+	/*
+	 * They are used for back compatibility
+	 */
 	SYSTEM_CALL_TBL_ENTRY(sys_fchown),
 	SYSTEM_CALL_TBL_ENTRY(sys_setresuid),
 	SYSTEM_CALL_TBL_ENTRY(sys_getresuid),
@@ -3584,6 +3628,7 @@ const system_call_func sys_call_table_deprecated[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_setgid),
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsuid),	/* 215 */
 	SYSTEM_CALL_TBL_ENTRY(sys_setfsgid),
+
 	SYSTEM_CALL_TBL_ENTRY(sys_pivot_root),
 	SYSTEM_CALL_TBL_ENTRY(sys_mincore),
 	SYSTEM_CALL_TBL_ENTRY(sys_madvise),

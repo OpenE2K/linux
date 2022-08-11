@@ -210,13 +210,10 @@ void arch_uninstall_hw_breakpoint(struct perf_event *bp)
 }
 
 
-int bp_data_overflow_handle(struct pt_regs *regs)
+void bp_data_overflow_handle(struct pt_regs *regs)
 {
-	unsigned long flags;
 	e2k_ddbsr_t ddbsr;
 	int bp_num, handled = 0;
-
-	raw_all_irq_save(flags);
 
 	ddbsr = READ_DDBSR_REG();
 
@@ -251,11 +248,6 @@ int bp_data_overflow_handle(struct pt_regs *regs)
 
 	if (handled)
 		WRITE_DDBSR_REG(ddbsr);
-
-	raw_all_irq_restore(flags);
-
-	return !(AS(ddbsr).m0 || AS(ddbsr).m1 ||
-		 AS(ddbsr).b0 || AS(ddbsr).b1 || AS(ddbsr).b2 || AS(ddbsr).b3);
 }
 
 static int __set_single_step_breakpoint(e2k_mem_crs_t *frame,
@@ -280,10 +272,10 @@ static int __set_single_step_breakpoint(e2k_mem_crs_t *frame,
 	return 1;
 }
 
-static int set_single_step_breakpoint(struct pt_regs *regs)
+static void set_single_step_breakpoint(struct pt_regs *regs)
 {
 	u64 target_frame;
-	int ret;
+	long ret;
 
 	target_frame = AS(regs->stacks.pcsp_lo).base +
 		       AS(regs->stacks.pcsp_hi).ind;
@@ -296,32 +288,26 @@ static int set_single_step_breakpoint(struct pt_regs *regs)
 		pr_info("Could not set single step breakpoint in current chain stack, PCSP: 0x%llx 0x%llx\n",
 			AW(regs->stacks.pcsp_lo), AW(regs->stacks.pcsp_hi));
 		force_sig(SIGKILL);
-		return ret;
 	}
-
-	return 0;
 }
 
-int bp_instr_overflow_handle(struct pt_regs *regs)
+void bp_instr_overflow_handle(struct pt_regs *regs)
 {
-	unsigned long flags;
 	e2k_dibsr_t dibsr;
 	int bp_num, handled = 0, set_singlestep = 0;
-
-	raw_all_irq_save(flags);
 
 	dibsr = READ_DIBSR_REG();
 
 	/*
 	 * Re-arm handled breakpoints if needed
 	 */
-	if (AS(dibsr).ss) {
+	if (dibsr.ss) {
 		if (test_ts_flag(TS_SINGLESTEP_USER)) {
 			/* User set this singlestep, rearm it since on
 			 * e2k 'ss' bit is cleared by hardware after
 			 * delivering interrupt. */
 			set_singlestep = 1;
-			AS(dibsr).ss = 0;
+			dibsr.ss = 0;
 			++handled;
 			/* If user does a system call then exc_instr_debug will
 			 * arrive on the first instruction of kernel entry,
@@ -353,7 +339,7 @@ int bp_instr_overflow_handle(struct pt_regs *regs)
 				info->ss = 0;
 
 				++handled;
-				AS(dibsr).ss = 0;
+				dibsr.ss = 0;
 			}
 			rcu_read_unlock();
 		}
@@ -397,19 +383,12 @@ int bp_instr_overflow_handle(struct pt_regs *regs)
 	if (handled)
 		WRITE_DIBSR_REG(dibsr);
 
-	raw_all_irq_restore(flags);
-
 	/*
 	 * Set "single step" breakpoint - we cannot just return because
 	 * instruction breakpoint generates a _synchronous_ exception.
 	 */
 	if (set_singlestep)
-		if (set_single_step_breakpoint(regs))
-			return 1;
-
-	return !(AS(dibsr).m0 || AS(dibsr).m1 || AS(dibsr).ss ||
-		 AS(dibsr).b0 || AS(dibsr).b1 || AS(dibsr).b2 ||
-		 AS(dibsr).b3 || AS(dibsr).ss);
+		set_single_step_breakpoint(regs);
 }
 
 int hw_breakpoint_exceptions_notify(

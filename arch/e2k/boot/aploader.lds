@@ -80,6 +80,10 @@ SECTIONS {
   /* Sections to be discarded */
   /DISCARD/ : {
 		*(.info)
+		/* Do not bother with updating alternatives in boot,
+		 * just discard the sections to reduce binary size. */
+		*(.altinstructions)
+		*(.altinstr_replacement)
 	}
 
 	__bios_start_code  = ADDR(.text);

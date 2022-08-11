@@ -8,7 +8,16 @@ GCOV_PROFILE := n
 
 # remove profile flags
 ORIG_CFLAGS := $(KBUILD_CFLAGS)
-KBUILD_CFLAGS = $(subst -pg,,$(ORIG_CFLAGS)) -DE2K_P2V -fno-ld-spec
+KBUILD_CFLAGS = $(subst -pg,,$(ORIG_CFLAGS)) -DE2K_P2V
+
+#TODO LCC_125 LCC_126: remove fno-ld-spec everywhere through kernel and
+#use -f[no-]semi-spec-ld -f[no-]loop-apb everywhere unconditionaly when
+#removing support for lcc-1.25
+ifeq ($(call cc-option-yn,-fno-semi-spec-ld -fno-spec-ld),y)
+	KBUILD_CFLAGS += -fno-semi-spec-ld -fno-spec-ld
+else
+	KBUILD_CFLAGS += -fno-ld-spec
+endif
 
 empty:=
 space:= $(empty) $(empty)

@@ -1750,19 +1750,8 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	/* Clear old maps */
 	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
 			      &rb_parent)) {
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		int ret;
-		if (vm_flags & VM_PAGESVALID)
-			set_ts_flag(TS_KEEP_PAGES_VALID);
-		ret = do_munmap(mm, addr, len, uf);
-		if (vm_flags & VM_PAGESVALID)
-			clear_ts_flag(TS_KEEP_PAGES_VALID);
-		if (ret)
-			return -ENOMEM;
-#else
 		if (do_munmap(mm, addr, len, uf))
 			return -ENOMEM;
-#endif
 	}
 
 	/*
@@ -3078,17 +3067,8 @@ static int do_brk_flags(unsigned long addr, unsigned long len, unsigned long fla
 	 */
 	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
 			      &rb_parent)) {
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		int ret;
-		set_ts_flag(TS_KEEP_PAGES_VALID);
-		ret = do_munmap(mm, addr, len, uf);
-		clear_ts_flag(TS_KEEP_PAGES_VALID);
-		if (ret)
-			return -ENOMEM;
-#else
 		if (do_munmap(mm, addr, len, uf))
 			return -ENOMEM;
-#endif
 	}
 
 	/* Check against address space limits *after* clearing old maps... */

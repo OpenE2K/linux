@@ -13,13 +13,13 @@
 
 #include <linux/mm.h>
 #include <asm/mmu_regs.h>
-#include <asm/kvm/guest/tlbflush.h>
 #include <asm/kvm/hypercall.h>
 #include <asm/debug_print.h>
 #include <asm/mmu_context.h>
 #include <asm/page.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
+#include <asm/tlbflush.h>
 
 #undef	DEBUG_TLB_MODE
 #undef	DebugTLB

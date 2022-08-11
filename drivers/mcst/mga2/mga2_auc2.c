@@ -31,6 +31,7 @@ struct auc2_st {
 struct desc0 {
 	u64	next;
 	u64	val;
+	u64	val2;
 } __packed;
 
 #define	DESC1_NOT_LAST			(1UL << 63)
@@ -111,14 +112,18 @@ static int mga25_append_desc(struct mga2 *mga2, struct mga2_gem_object *mo)
 	c->next = cpu_to_le64(mga2->desc0_dma + h * sizeof(*d));
 
 	memset(d, 0, sizeof(*d));
-	v = DESC0_WAIT_BLITER_STOP1 | DESC0_WAIT_BLITER_STOP1 |
+	v = DESC0_WAIT_BLITER_STOP0 | DESC0_NOT_LAST |
+		((((u64)MGA2_AUC2_DUMMY) / 4) << DESC0_REG_OFFSET);
+	d->val = cpu_to_le64(v);
+	v = DESC0_WAIT_BLITER_STOP1 |
 		((((u64)mga2->info->int_regs_base + MGA2_INTREQ) / 4)
 			<< DESC0_REG_OFFSET) |
 		MGA2_INT_B_SETRST | MGA25_INT_B_SOFTINT;
-	d->val = cpu_to_le64(v);
+	d->val2 = cpu_to_le64(v);
 
 	mga2->ring[h] = dma_addr;
 	mga2->head = circ_inc(h);
+	mga2->fence_seqno++;
 	wfb(mga2->head, MGA2_AUC2_HEADTAIL);
 
 	return ret;
@@ -141,13 +146,17 @@ static struct mga2_gem_object *mga2_auc_ioctl(struct drm_device *drm,
 
 	head = get_free_desc(mga2);
 	if (head < 0) {
-		ret = -ENOMEM;
+		ret = -ENOSPC;
 		goto out;
 	}
 	if (!(gobj = drm_gem_object_lookup(file, udesc->desc_handle))) {
 		ret = -ENOENT;
 		goto out;
 	}
+	/* drop reference from lookup -
+	 fence is used for reference control */
+	drm_gem_object_put_unlocked(gobj);
+
 	mo = to_mga2_obj(gobj);
 	if (mo->write_domain != MGA2_GEM_DOMAIN_CPU) {
 		ret = -EINVAL;
@@ -174,18 +183,19 @@ static struct mga2_gem_object *mga2_auc_ioctl(struct drm_device *drm,
 			ret = -ENOENT;
 			goto out;
 		}
+		/* drop reference from lookup -
+		 fence is used for reference control */
+		drm_gem_object_put_unlocked(o);
 		a = to_mga2_obj(o)->dma_addr;
 		for (i = 0; i < nr; i++) {
 			u32 offset;
 			if (get_user(offset, &b->offset[i])) {
 				ret = -EFAULT;
-				drm_gem_object_put_unlocked(o);
 				goto out;
 			}
 			offset /= sizeof(*desc);
 			if (desc[offset] >= o->size) {
 				ret = -EINVAL;
-				drm_gem_object_put_unlocked(o);
 				goto out;
 			}
 			desc[offset] += reltype ? a >> 32 : a;
@@ -199,7 +209,6 @@ static struct mga2_gem_object *mga2_auc_ioctl(struct drm_device *drm,
 		if (0)
 			DRM_DEBUG("add fence %lld to %lx\n", fence->seqno, a);
 
-		drm_gem_object_put_unlocked(o);
 		p += sizeof(*b) + nr * sizeof(u32);
 		b = (struct drm_mga2_buffers __user *)p;
 	}
@@ -210,7 +219,6 @@ static struct mga2_gem_object *mga2_auc_ioctl(struct drm_device *drm,
 		dma_resv_add_shared_fence(resv, fence);
 	dma_resv_unlock(resv);
 out:
-	drm_gem_object_put_unlocked(gobj);
 	return ret ? ERR_PTR(ret) : mo;
 }
 
@@ -223,7 +231,7 @@ int mga2_auc2_ioctl(struct drm_device *drm, void *data, struct drm_file *file)
 		return -ENODEV;
 	if (mga2->flags & MGA2_BCTRL_OFF)
 		return -ENODEV;
-		
+
 	mutex_lock(&mga2->bctrl_mu);
 
 	mo = mga2_auc_ioctl(drm, data, file);

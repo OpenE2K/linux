@@ -24,10 +24,10 @@
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
-#define	DEBUG_KVM_MODE	1	/* kernel virtual machine debugging */
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
 #define	DebugKVM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_MODE)						\
+	if (DEBUG_KVM_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -357,8 +357,6 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 	usd_hi = stack_regs->stacks.usd_hi;
 	cutd = stack_regs->cutd;
 
-	preempt_disable();
-
 	/* return interrupts control to PSR and disable all IRQs */
 	/* disable all IRQs in UPSR to switch mmu context */
 	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
@@ -389,8 +387,6 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 
 	/* set guest UPSR to initial state */
 	NATIVE_WRITE_UPSR_REG(sw_ctxt->upsr);
-
-	preempt_enable();
 
 	/*
 	 * Optimization to do not flush chain stack.
@@ -460,8 +456,6 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 
-	preempt_disable();
-
 	/* Switch IRQ control to PSR and disable MI/NMIs */
 	/* disable all IRQs in UPSR to switch mmu context */
 	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
@@ -487,8 +481,6 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 		KVM_BUG_ON(users != 0);
 	}
 	KVM_BUG_ON(host_hypercall_exit(vcpu));
-
-	preempt_enable();
 
 	NATIVE_FLUSHCPU;	/* spill all host hardware stacks */
 
@@ -565,7 +557,7 @@ void return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs)
 	do_return_from_pv_vcpu_intc(ti, regs);
 }
 
-static __always_inline void inject_handler_trampoline(void)
+static notrace __always_inline void inject_handler_trampoline(void)
 {
 	e2k_addr_t sbr;
 	e2k_usd_lo_t usd_lo;
@@ -587,7 +579,7 @@ static __always_inline void inject_handler_trampoline(void)
 	SET_KERNEL_UPSR_WITH_DISABLED_NMI();
 }
 
-notrace noinline __interrupt __section(.entry_handlers)
+notrace noinline __interrupt __section(".entry.text")
 void trap_handler_trampoline_continue(void)
 {
 	/* return to hypervisor context */
@@ -597,7 +589,7 @@ void trap_handler_trampoline_continue(void)
 	E2K_JUMP(return_pv_vcpu_trap);
 }
 
-notrace noinline __interrupt __section(.entry_handlers)
+notrace noinline __interrupt __section(".entry.text")
 void syscall_handler_trampoline_continue(u64 sys_rval)
 {
 	struct kvm_vcpu *vcpu;
@@ -606,14 +598,14 @@ void syscall_handler_trampoline_continue(u64 sys_rval)
 	/* return to hypervisor context */
 	return_from_pv_vcpu_inject(vcpu);
 
-	syscall_handler_trampoline_start(vcpu, sys_rval);
-
 	inject_handler_trampoline();
+
+	syscall_handler_trampoline_start(vcpu, sys_rval);
 
 	E2K_JUMP(return_pv_vcpu_syscall);
 }
 
-notrace noinline __interrupt __section(.entry_handlers)
+notrace noinline __interrupt __section(".entry.text")
 void syscall_fork_trampoline_continue(u64 sys_rval)
 {
 	struct kvm_vcpu *vcpu;
@@ -979,7 +971,7 @@ static int setup_pv_vcpu_trap(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	if (guest_user) {
 		ret = pv_vcpu_user_hw_stacks_copy_full(vcpu, regs);
 	} else {
-		ret = user_hw_stacks_copy_full(&regs->stacks, regs, &regs->crs);
+		ret = do_user_hw_stacks_copy_full(&regs->stacks, regs, &regs->crs);
 		if (!ret)
 			AS(regs->stacks.pcsp_hi).ind += SZ_OF_CR;
 	}
@@ -1302,8 +1294,6 @@ switch_to_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
 	usd_hi = g_stacks->usd_hi;
 	cutd = vcpu->arch.hw_ctxt.sh_oscutd;
 
-	preempt_disable();
-
 	/* return interrupts control to PSR and disable all IRQs */
 	/* disable all IRQs in UPSR to switch mmu context */
 	NATIVE_RETURN_TO_KERNEL_UPSR(E2K_KERNEL_UPSR_DISABLED_ALL);
@@ -1323,8 +1313,6 @@ switch_to_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
 
 	/* Restore guest kernel & host (vcpu state) global registers */
 	HOST_RESTORE_GUEST_KERNEL_GREGS(pv_vcpu_get_gti(vcpu));
-
-	preempt_enable();
 
 	/*
 	 * Optimization to do not flush chain stack.
@@ -1349,8 +1337,7 @@ switch_to_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
 	 */
 	E2K_WAIT(_ma_c);
 
-	NATIVE_NV_WRITE_SBR_REG(sbr);
-	NATIVE_NV_WRITE_USD_REG(usd_hi, usd_lo);
+	NATIVE_NV_WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo);
 
 	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
 

@@ -15,7 +15,7 @@
 /*
  * e2k relocation types
  */
-#define R_E2K_NONE		0
+#define R_E2K_32_ABS		0
 #define R_E2K_32_PC		2
 #define R_E2K_64_ABS		50	/* Direct 64 bit */
 #define R_E2K_64_ABS_LIT	51	/* Direct 64 bit for LTS syllable */

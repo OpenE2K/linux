@@ -4,7 +4,7 @@
 
 #ifdef __KERNEL__
 
-#include <asm/types.h>
+#include <linux/types.h>
 
 #ifndef __ASSEMBLY__
 
@@ -991,29 +991,26 @@ typedef	union instr_hs {
 		u32 __pad	: 14;
 		u32 c0		: 1;	/* CS0 */
 		u32 c1		: 1;	/* CS1 */
-		u32 __pad2	: 16;
+		u32 __pad2	: 4;
+		u32 ale0	: 1;
+		u32 ale1	: 1;
+		u32 ale2	: 1;
+		u32 ale3	: 1;
+		u32 ale4	: 1;
+		u32 ale5	: 1;
+		u32 al0		: 1;
+		u32 al1		: 1;
+		u32 al2		: 1;
+		u32 al3		: 1;
+		u32 al4		: 1;
+		u32 al5		: 1;
 	};
-	struct {
-		u32 mdl	: 4;
-		u32 lng	: 3;
-		u32 nop	: 3;
-		u32 lm	: 1;
-		u32 x	: 1;
-		u32 s	: 1;
-		u32 sw	: 1;
-		u32 c	: 2;
-		u32 cd	: 2;
-		u32 pl	: 2;
-		u32 ale	: 6;
-		u32 al	: 6;
-	} fields;
-	instr_syl_t		word;		/* as entire syllable	*/
+	instr_syl_t word;		/* as entire syllable	*/
 } instr_hs_t;
 
 #define E2K_INSTR_HS_LNG_MASK	0x70
 
-#define	E2K_GET_INSTR_SIZE(hs)	\
-		((AS_STRUCT(hs).lng + 1) * sizeof(instr_item_t))
+#define	E2K_GET_INSTR_SIZE(hs)	((hs.lng + 1) * sizeof(instr_item_t))
 
 /*
  * Stubs sullable structure
@@ -1037,23 +1034,6 @@ typedef	union instr_ss {
 		u32	eap	:  1;	/*    [29] end array prefetch */
 		u32	ipd	:  2;	/* [31:30] instruction prefetch depth */
 	};
-	struct {
-		u32	ctcond	:  9;
-		u32	x	:  1;
-		u32	ctop	:  2;
-		u32	aa	:  4;
-		u32	alc	:  2;
-		u32	abp	:  2;
-		u32	xx	:  1;
-		u32	abn	:  2;
-		u32	abg	:  2;
-		u32	xxx	:  1;
-		u32	vfdi	:  1;
-		u32	srp	:  1;
-		u32	bap	:  1;
-		u32	eap	:  1;
-		u32	ipd	:  2;
-	} fields;
 	instr_syl_t	word;		/* as entire syllable	*/
 } instr_ss_t;
 
@@ -1061,38 +1041,44 @@ typedef	union instr_ss {
  * ALU syllables structure
  */
 
-typedef	struct instr_alsf2_fields {
-	u32	dst	:  8;	/* [ 7: 0] destination */
-	u32	src2	:  8;	/* [15: 8] source register #2 */
-	u32	opce	:  8;	/* [23:16] opcode extension */
-	u32	cop	:  7;	/* [30:24] code of operation */
-	u32	spec	:  1;	/*    [31] speculative mode */
-} instr_alsf2_fields_t;
-
-typedef	union instr_alsf2 {
-	instr_alsf2_fields_t	fields;		/* as fields		*/
-	instr_syl_t		word;		/* as entire syllable	*/
-} instr_alsf2_t;
-
-typedef	union instr_als {
-	instr_alsf2_fields_t	f2;		/* as fields		*/
-	instr_syl_t		word;		/* as entire syllable	*/
+typedef	union {
+	union {
+		struct {
+			u32 dst  : 8; /* [ 7: 0] destination */
+			u32 src2 : 8; /* [15: 8] source register #2 */
+			u32 opce : 8; /* [23:16] opcode extension */
+			u32 cop  : 7; /* [30:24] code of operation */
+			u32 spec : 1; /*    [31] speculative mode */
+		};
+		struct {
+			u32     : 24;
+			u32 opc : 8;
+		};
+	} alf2;
+	instr_syl_t word;		/* as entire syllable	*/
 } instr_als_t;
 
-typedef	struct instr_alesf2_fields {
-	u32	opce	:  8;	/* [ 7: 0] opcode 2 extension */
-	u32	opc2	:  8;	/* [15: 8] opcode 2 */
-} instr_alesf2_fields_t;
-
-typedef	union instr_alesf2 {
-	instr_alesf2_fields_t	fields;		/* as fields		*/
-	instr_semisyl_t		word;		/* as entire syllable	*/
-} instr_alesf2_t;
-
 typedef	union instr_ales {
-	instr_alesf2_fields_t	f2;		/* as fields		*/
-	instr_semisyl_t		word;		/* as entire syllable	*/
+	struct {
+		u16 src3 :  8;
+		u16 opc2 :  8;
+	} alef1;
+	struct {
+		u16 opce :  8;
+		u16 opc2 :  8;
+	} alef2;
+	instr_semisyl_t word;		/* as entire syllable	*/
 } instr_ales_t;
+
+typedef union {
+	struct {
+		u8 __pad : 5;
+		u8 rt5 : 1;
+		u8 rt6 : 1;
+		u8 rt7 : 1;
+	};
+	u8 word;
+} instr_src_t;
 
 #define INSTR_SRC2_GREG_VALUE		0xe0
 #define INSTR_SRC2_GREG_MASK		0xe0
@@ -1176,6 +1162,7 @@ typedef	union {
 } instr_cs1_t;
 
 #define CS1_OPC_SETEI	2
+#define CS1_OPC_WAIT	3
 #define CS1_OPC_CALL	5
 
 
@@ -1226,6 +1213,15 @@ struct e2k_wd_fields {
 
 /* Current window descriptor (WD) */
 typedef	union e2k_wd {
+	struct {
+		u64		: 3;
+		u64 base_d	: E2K_WD_SIZE - 3;
+		u64		: 16 - E2K_WD_SIZE + 3;
+		u64 size_d	: E2K_WD_SIZE - 3;
+		u64		: 16 - E2K_WD_SIZE + 3;
+		u64 psize_d	: E2K_WD_SIZE - 3;
+		u64		: 32 - E2K_WD_SIZE;
+	};
 	struct {
 		u64 base    : E2K_WD_SIZE;	/* [10: 0] window base: */
 						/* %r0 physical address */
@@ -1388,6 +1384,13 @@ typedef	struct e2k_br_fields {	/* Structure of br reg */
 	u32	pcur	: 5;		/* [27:23]	*/
 } e2k_br_fields_t;
 typedef	union e2k_br {
+	struct {
+		u32 rbs  : 6;
+		u32 rsz  : 6;
+		u32 rcur : 6;
+		u32 psz  : 5;
+		u32 pcur : 5;
+	};
 	e2k_br_fields_t	fields;		/* as fields		*/
 	u32		word;		/* as entire register	*/
 } e2k_br_t;
@@ -1397,6 +1400,11 @@ typedef	union e2k_br {
 #define	BR_psz		fields.psz
 #define	BR_pcur		fields.pcur
 #define	BR_reg		word
+
+static inline int br_rsz_full_d(e2k_br_t br)
+{
+	return 2 * (br.rsz + 1);
+}
 
 /* see 5.25.1. */
 
@@ -1456,11 +1464,15 @@ typedef	union e2k_bgr {
 
 /* CR0 */
 
-typedef	struct e2k_cr0_hi_fields {	/* Structure of cr0_hi chain reg */
+typedef	struct {	/* Structure of cr0_hi chain reg */
 	u64	unused	: 3;		/* [ 2: 0]	*/
 	u64	ip	: 61;		/* [63: 3]	*/
 } e2k_cr0_hi_fields_t;
-typedef	union e2k_cr0_hi {
+typedef	union {
+	struct {
+		u64    : 3;
+		u64 ip : 61;
+	};
 	e2k_cr0_hi_fields_t	fields;	/* as fields		*/
 	u64			word;	/* as entire register	*/
 } e2k_cr0_hi_t;
@@ -1468,10 +1480,10 @@ typedef	union e2k_cr0_hi {
 #define	CR0_hi_half	word		/* [63: 0] - entire high */
 #define	CR0_hi_IP	CR0_hi_half	/* [63: 0] - IP */
 
-typedef	struct e2k_cr0_lo_fields {	/* Structure of cr0_lo chain reg */
+typedef	struct {	/* Structure of cr0_lo chain reg */
 	u64	pf	: 64;		/* [63: 0]	*/
 } e2k_cr0_lo_fields_t;
-typedef	union e2k_cr0_lo {
+typedef	union {
 	e2k_cr0_lo_fields_t	fields;	/* as fields		*/
 	u64			word;	/* as entire register	*/
 } e2k_cr0_lo_t;
@@ -1480,7 +1492,7 @@ typedef	union e2k_cr0_lo {
 
 /* CR1 */
 
-typedef	union e2k_cr1_hi_fields {	/* Structure of cr1_hi chain reg */
+typedef	union {	/* Structure of cr1_hi chain reg */
 	struct {
 		u64 br		: 28;	/* [27: 0]	*/
 		u64 unused	: 7;	/* [34:28]	*/
@@ -1496,7 +1508,21 @@ typedef	union e2k_cr1_hi_fields {	/* Structure of cr1_hi chain reg */
 		u64 __x1	: 36;	/* [63:28]	*/
 	};
 } e2k_cr1_hi_fields_t;
-typedef	union e2k_cr1_hi {
+typedef	union {
+	struct {
+		u64 br   : 28;
+		u64      : 7;
+		u64 wdbl : 1;
+		u64 ussz : 28;
+	};
+	struct {
+		u64 rbs  : 6;
+		u64 rsz  : 6;
+		u64 rcur : 6;
+		u64 psz  : 5;
+		u64 pcur : 5;
+		u64      : 36;
+	};
 	e2k_cr1_hi_fields_t	fields;	/* as fields		*/
 	u64			word;	/* as entire register	*/
 } e2k_cr1_hi_t;
@@ -1510,7 +1536,7 @@ typedef	union e2k_cr1_hi {
 #define	CR1_hi_pcur	fields.pcur	/* [27:23] - current of rotate preds */
 #define	CR1_hi_half	word		/* [63: 0] - entire high */
 
-typedef union e2k_cr1_lo_fields {	/* Structure of cr1_lo chain reg */
+typedef union {	/* Structure of cr1_lo chain reg */
 	struct {
 		u64 unused1	: 16;	/* [15:0]	*/
 		u64 ein		:  8;	/* [23:16]	*/
@@ -1535,7 +1561,29 @@ typedef union e2k_cr1_lo_fields {	/* Structure of cr1_lo chain reg */
 					/*	enable */
 	};
 } e2k_cr1_lo_fields_t;
-typedef	union e2k_cr1_lo {
+typedef	union {
+	struct {
+		u64      : 16;
+		u64 ein  :  8;
+		u64 ss   :  1;
+		u64 wfx  :  1;
+		u64 wpsz :  7;
+		u64 wbs  :  7;
+		u64 cuir : 17;
+		u64 psr  :  7;
+	};
+	struct {
+		u64       : 40;
+		u64 cui   : 16;
+		u64 ic    : 1; /* iset <= v5 */
+		u64 pm    : 1;
+		u64 ie    : 1;
+		u64 sge   : 1;
+		u64 lw    : 1;
+		u64 uie   : 1;
+		u64 nmie  : 1;
+		u64 unmie : 1;
+	};
 	e2k_cr1_lo_fields_t	fields;	/* as fields		*/
 	u64			word;	/* as entire register	*/
 } e2k_cr1_lo_t;
@@ -1655,7 +1703,7 @@ typedef	union {
 
 
 /* PSR */
-typedef	struct e2k_psr_fields {	/* Structure of psr reg */
+typedef	struct {
 	u32	pm	:  1;		/* [ 0]		*/
 	u32	ie	:  1;		/* [ 1]		*/
 	u32	sge	:  1;		/* [ 2]		*/
@@ -1666,7 +1714,17 @@ typedef	struct e2k_psr_fields {	/* Structure of psr reg */
 					/*	enable */
 	u32	unused	: 25;		/* [31: 7]	*/
 } e2k_psr_fields_t;
-typedef	union e2k_psr {
+typedef	union {
+	struct {
+		u32 pm    : 1;
+		u32 ie    : 1;
+		u32 sge   : 1;
+		u32 lw    : 1;
+		u32 uie   : 1;
+		u32 nmie  : 1;
+		u32 unmie : 1;
+		u32       : 25;
+	};
 	e2k_psr_fields_t	fields;	/* as fields		*/
 	u32			word;	/* as entire register	*/
 } e2k_psr_t;
@@ -1899,6 +1957,35 @@ typedef	struct e2k_mem_crstack {
  */
 #define	EXT_4_NR_SZ	((4 * 4) * 2)
 #define	SZ_OF_CR	sizeof(e2k_mem_crs_t)
+
+
+typedef union {
+	struct {
+		u64 trwm_itag       : 3;
+		u64 trwm_idata      : 3;
+		u64 trwm_cf         : 3;
+		u64 ib_snoop_dsbl   : 1;
+		u64 bist_cf         : 1;
+		u64 bist_tu         : 1;
+		u64 bist_itag       : 1;
+		u64 bist_itlbtag    : 1;
+		u64 bist_itlbdata   : 1;
+		u64 bist_idata_nm   : 4;
+		u64 bist_idata_cnt  : 10;
+		u64 pipe_frz_dsbl   : 1; /* Since iset v5 */
+		u64 rf_clean_dsbl   : 1;
+		/* iset v6 */
+		u64 virt_dsbl       : 1;
+		u64 upt_sec_ad_shift_dsbl : 1;
+		u64 pdct_stat_enbl  : 1;
+		u64 pdct_dyn_enbl   : 1;
+		u64 pdct_rbr_enbl   : 1;
+		u64 pdct_ret_enbl   : 1;
+		u64 pdct_retst_enbl : 1;
+		u64 pdct_cond_enbl  : 1;
+	};
+	u64 word;
+} e2k_cu_hw0_t;
 
 
 /*
@@ -2241,6 +2328,7 @@ typedef	union e2k_fpsr {
 #define	FPSR_reg	word
 
 typedef	union {
+	u32 half_word[2];
 	struct {
 		u32 user    : 1;
 		u32 system  : 1;
@@ -2258,6 +2346,12 @@ typedef	union {
 	u64 word;
 } e2k_dimcr_t;
 #define	DIMCR_reg	word
+
+static inline bool dimcr_enabled(e2k_dimcr_t dimcr, int monitor)
+{
+	return (monitor == 0) ? (AS(dimcr)[0].user || AS(dimcr)[0].system)
+			      : (AS(dimcr)[1].user || AS(dimcr)[1].system);
+}
 
 typedef union {
 	struct {
@@ -2324,7 +2418,7 @@ typedef union {
 
 #define E2K_DIBCR_MASK(cp_num) (0x3ULL << ((cp_num) * 2))
 
-typedef union {
+typedef union e2k_dimtp {
 	struct {
 		struct {
 			u64 base   : E2K_VA_SIZE;
@@ -2355,24 +2449,6 @@ typedef struct e2k_svd_gregs_struct {
 	u8	tag;			/* any time too */
 } e2k_svd_gregs_t;
 
-/* CU_HW0 register */
-#define	_CU_HW0_TRWM_ITAG_MASK		   0x000000007 /* IB tag */
-#define	_CU_HW0_TRWM_IDATA_MASK		   0x000000038 /* IB data */
-#define	_CU_HW0_TRWM_CF_MASK		   0x0000001c0 /* Chain File */
-#define _CU_HW0_IB_SNOOP_DISABLE_MASK	   0x000000200 /* Disable IB snooping */
-#define	_CU_HW0_BIST_CF_MASK		   0x000000400 /* Chain File */
-#define	_CU_HW0_BIST_TU_MASK		   0x000000800 /* Trap Unit */
-#define	_CU_HW0_BIST_ITAG_MASK		   0x000001000 /* IB tag */
-#define	_CU_HW0_BIST_ITLB_TAG_MASK	   0x000002000 /* ITLB tag */
-#define	_CU_HW0_BIST_ITLB_DATA_MASK	   0x000004000 /* ITLB data */
-#define	_CU_HW0_BIST_IDATA_NM_MASK	   0x000078000 /* IB data */
-#define	_CU_HW0_BIST_IDATA_CNT_MASK	   0x01ff80000 /* IB tag */
-#define	_CU_HW0_PIPE_FROST_DISABLE_MASK	   0x020000000 /* Instruction pipe */
-#define	_CU_HW0_RF_CLEAN_DISABLE_MASK	   0x040000000 /* Register File */
-#define _CU_HW0_VIRT_DISABLE_MASK	   0x080000000 /* Disable hardware */
-						       /* virtualization support */
-#define	_CU_HW0_UPT_SEC_AD_SHIFT_DSBL_MASK 0x100000000 /* Disable address shift in */
-						       /* MMU_CR.upt mode */
 
 struct hw_stacks {
 	e2k_psp_lo_t	psp_lo;

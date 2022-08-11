@@ -5,6 +5,7 @@
 #include <linux/mm.h>
 #include <linux/kvm_host.h>
 #include <asm/mman.h>
+#include <asm/e2k_debug.h>
 
 #undef	DEBUG_KVM_MM_MODE
 #undef	DebugKVMMM
@@ -43,11 +44,11 @@
 
 #undef	DEBUG_KVM_FREE_GMM_SP_MODE
 #undef	DebugFGMM
-#define	DEBUG_KVM_FREE_GMM_SP_MODE	1	/* guest mm SPs freeing */
+#define	DEBUG_KVM_FREE_GMM_SP_MODE	0	/* guest mm SPs freeing */
 						/* debug */
 #define	DebugFGMM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_FREE_GMM_SP_MODE)					\
+	if (DEBUG_KVM_FREE_GMM_SP_MODE || kvm_debug)			\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 

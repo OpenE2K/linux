@@ -28,11 +28,23 @@
 	 * For full ones see <asm/protected_syscalls.h>.
 	 */
 #undef DbgSCP
+#if defined(CONFIG_THREAD_INFO_IN_TASK) && defined(CONFIG_SMP)
 #define DbgSCP(fmt, ...) \
 do { \
 	if (pm_sc_debug_mode & PM_SC_DBG_MODE_CONV_STRUCT) \
-		pr_info("%s: " fmt, __func__,  ##__VA_ARGS__); \
+		pr_info("%s [%.3d#%d]: %s: " fmt, current->comm, \
+				current->cpu, current->pid, \
+				__func__,  ##__VA_ARGS__); \
 } while (0)
+#else /* no 'cpu' field in 'struct task_struct' */
+#define DbgSCP(fmt, ...) \
+do { \
+	if (pm_sc_debug_mode & PM_SC_DBG_MODE_CONV_STRUCT) \
+		pr_info("%s [#%d]: %s: " fmt, current->comm, \
+				current->pid, \
+				__func__,  ##__VA_ARGS__); \
+} while (0)
+#endif /* no 'cpu' field in 'struct task_struct' */
 
 #undef DbgSCP_ERRMSG
 #define DbgSCP_ERRMSG(ErrMsgHeader, fmt, ...) \
@@ -40,7 +52,8 @@ do { \
 	if (pm_sc_debug_mode & PM_SC_DBG_MODE_CHECK \
 		&& !(current->mm->context.pm_sc_debug_mode \
 					& PM_SC_DBG_MODE_NO_ERR_MESSAGES)) \
-		pr_err("%s: " fmt, ErrMsgHeader, ##__VA_ARGS__); \
+		pr_err("%s [%d]:: %s: " fmt, current->comm, current->pid, \
+				ErrMsgHeader, ##__VA_ARGS__); \
 } while (0)
 
 #undef DbgSCP_ERR
@@ -52,7 +65,8 @@ do { \
 	if (pm_sc_debug_mode & PM_SC_DBG_MODE_CHECK \
 		&& !(current->mm->context.pm_sc_debug_mode \
 					& PM_SC_DBG_MODE_NO_ERR_MESSAGES)) \
-		pr_alert("%s: " fmt, __func__,  ##__VA_ARGS__); \
+		pr_alert("%s [%d]:: %s(): " fmt, current->comm, current->pid, \
+				__func__,  ##__VA_ARGS__); \
 } while (0)
 
 #undef DbgSCP_WARN
@@ -61,7 +75,8 @@ do { \
 	if (pm_sc_debug_mode & PM_SC_DBG_MODE_CHECK \
 		&& !(current->mm->context.pm_sc_debug_mode \
 					& PM_SC_DBG_MODE_NO_ERR_MESSAGES)) \
-		pr_warn("%s: " fmt, __func__,  ##__VA_ARGS__); \
+		pr_alert("%s [%d]:: %s(): " fmt, current->comm, current->pid, \
+				__func__,  ##__VA_ARGS__); \
 } while (0)
 
 #undef PM_SYSCALL_WARN_ONLY
@@ -161,9 +176,7 @@ extern int get_pm_struct(long __user *prot_array,
 			 const long mask_align, const long mask_rw,
 			 const int rval_mode)
 {
-#define MAX_LOCAL_ARGS 32
-
-/* Field type, 2 bits: (mask_type & 0x3) */
+/* Field type, 4 bits: (mask_type & 0xf) */
 #define _INT_FIELD		0x0  /* int value */
 #define _LONG_FIELD		0x1  /* long value */
 #define _FUNC_FIELD		0x2  /* pointer to function */
@@ -172,7 +185,7 @@ extern int get_pm_struct(long __user *prot_array,
 #define _LONG_PTR_FIELD		0x5  /* long or pointer value */
 #define _PTR__FUNC_FIELD	0x6  /* descriptor or func.ptr */
 #define _TAG_DEFINED_FIELD	0x7  /* everything is possible */
-#define _UNINITIALIZED_FIELD 0x8 /* tag may be ETAGEWS or ETAGEWD */
+#define _UNINITIALIZED_FIELD	0x8 /* tag may be ETAGEWS or ETAGEWD */
 
 /* Alignment of the NEXT! field, 2 bits: mask_align & 0x3 */
 #define _INT_ALIGN      0x0  /* next field aligned as int (to 4 bytes) */
@@ -183,20 +196,18 @@ extern int get_pm_struct(long __user *prot_array,
 #define _READABLE       0x1  /* field gets read by syscall */
 #define _WRITEABLE      0x2  /* field gets updated by syscall */
 
-	int tmp_array[MAX_LOCAL_ARGS];
 	int struct_len, prot_len;
 	int elem_type, alignment;
 	long pat_type, pat_align, pat_rw, val_long;
-	int *tmp;
-	int *ptr_from;
-	int *ptr_to;
+	int __user *ptr_from;
+	int __user *ptr_to;
 	int user_mode = 0;
 	int may_be_uninitialized;
-	unsigned long noncopied;
 	unsigned long pm_sc_debug_mode = current->mm->context.pm_sc_debug_mode;
 	int misaligned_ptr_from = 0; /* normally ptr_from must be aligned */
 	int rval = 0; /* result of the function */
 	int failed_2_write = 0;
+	int val_int, tag;
 	int i, j;
 
 	DbgSCP("struct128 = 0x%lx, struct64 = 0x%lx, size = %d\n",
@@ -210,7 +221,7 @@ extern int get_pm_struct(long __user *prot_array,
 	}
 
 	/* Check main parameters for validity */
-	if (!new_array || !fields || !items) {
+	if (!new_array || !fields || (items <= 0)) {
 		DbgSCP_ERR("pid#%d: Wrong parameters for convert_array\n",
 			current->pid);
 		return -EINVAL;
@@ -271,40 +282,37 @@ extern int get_pm_struct(long __user *prot_array,
 		return -EFAULT;
 	}
 
-	/* Allocate tmp array for converting if original array is too large */
-	if (prot_len > MAX_LOCAL_ARGS * sizeof(int))
-		tmp = kmalloc(prot_len, GFP_KERNEL);
-	else
-		tmp = tmp_array;
-
-	/* Copy original array with tags to tmp array for converting */
-	noncopied = copy_from_user_with_tags(tmp, prot_array, prot_len);
-	if (noncopied) {
-		if (prot_len > MAX_LOCAL_ARGS * sizeof(int))
-			kfree(tmp);
-		DbgSCP("copy_from_user_with_tags(tmp=0x%lx, len=%d) returned %lu\n",
-		       (long) tmp, prot_len, noncopied);
-		DbgSCP_ERR("pid#%d Copying original array with tags failed\n",
-			current->pid);
-		rval = -EFAULT;
-		goto out;
-	}
-
 	if (arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_CONV_STRUCT)) {
 		/* Displaying input (protected) array: */
-		ptr_to = tmp;
-		pr_info("convert_128bit_struct: sizeof(struct128/tmp=0x%lx) = %zd (words):\n",
-			(long) tmp, items * (struct_len / sizeof(int)));
+		long *lptr = kmalloc(prot_len + 16, GFP_KERNEL);
+		long *mem_lptr = lptr;
+
+		/* NB> Alignment required not to lose tags */
+		lptr = (long *) (((uintptr_t) lptr + 15) & ~0xf);
+		/* Copy original array with tags to tmp array for converting */
+		if (copy_from_user_with_tags(lptr, prot_array, prot_len)) {
+			DbgSCP_ERR("pid#%d Copying original array (0x%lx : %d) failed\n",
+				   current->pid, (long) lptr, prot_len);
+			kfree(lptr);
+			rval = -EFAULT;
+			goto out;
+		}
+		pr_info("get_pm_struct: sizeof(struct128) = %zd (words):\n",
+			items * (struct_len / sizeof(int)));
 		if (items > 1)
 			pr_info("[array size: %d]\n", items);
 		for (j = 0; j < items; j++) {
 			if (items > 1)
 				pr_info("[element #%d]\n", j);
-			for (i = 0; i < (struct_len / sizeof(int)); i++) {
-				pr_info("\t0x%.8x\n", *ptr_to);
-				ptr_to++;
+			for (i = 0; i < (struct_len / sizeof(long)); i++) {
+				NATIVE_LOAD_VAL_AND_TAGD((long *) lptr,
+							val_long, tag);
+				pr_info("\t[0x%x] 0x%.8x.%.8x\n", tag,
+					(int)(*lptr >> 32), (int)*lptr);
+				lptr++;
 			}
 		}
+		kfree(mem_lptr);
 	}
 
 	/* Check ptr_to: user or kernel address */
@@ -317,22 +325,20 @@ TRY_USR_PFAULT {
 
 	/* Detailed analysis of data encoded in the input structure(s): */
 	for (i = 0; i < items; i++) {
-		ptr_from = tmp + struct_len * i / sizeof(int);
+		ptr_from = (int *)((uintptr_t) prot_array + struct_len * i);
 		pat_type = mask_type;
 		pat_align = mask_align;
 		pat_rw = mask_rw;
 
 		/* Handle each entry in the strcut */
 		for (j = 0; j < fields; j++) {
-			int val_int;
-			int tag;
 
 			elem_type = pat_type & 0x7;
 			may_be_uninitialized = pat_type & _UNINITIALIZED_FIELD;
-
+/*
 			DbgSCP("round %d: type=%d from=0x%lx  to=0x%lx\n",
 			       j, elem_type, (long)ptr_from, (long)ptr_to);
-
+*/
 			/* Load the field by type specified in mask_type */
 load_current_element:
 			switch (elem_type) {
@@ -369,8 +375,17 @@ load_current_element:
 					if (rval_mode & CONV_ARR_WRONG_INT_FLD)
 						rval = -EFAULT;
 				}
-				PUT_USER_OR_KERNEL(user_mode,
+				if ((long)ptr_to & 1) { /* write at higher word */
+					PUT_USER_OR_KERNEL(user_mode,
 						(int *) ptr_to, val_int);
+				} else { /* write at lower word */
+					/* NB> To avoid trash in higher word,
+					 *     we save it as long val.
+					 */
+					val_long = (long) val_int;
+					PUT_USER_OR_KERNEL(user_mode,
+						(long *) ptr_to, val_long);
+				}
 
 				/* Move on ptr_from and ptr_to: */
 				ptr_from++;
@@ -539,8 +554,6 @@ eo_ptr_field:
 			}
 			default:
 				/* Otherwise it is something invalid. */
-				if (prot_len > MAX_LOCAL_ARGS * sizeof(int))
-					kfree(tmp);
 				return -EFAULT;
 			}
 
@@ -550,10 +563,10 @@ eo_ptr_field:
 						(alignment + 1) * sizeof(int));
 			if (alignment)
 				ptr_to = align_ptr_up(ptr_to, 8); /* 64 bit */
-
+/*
 			DbgSCP("alignment=%d   from->0x%lx  to->0x%lx\n",
 			       alignment, (long)ptr_from, (long)ptr_to);
-
+*/
 			/* Moving on structure field masks: */
 			pat_type >>= 4;
 			pat_align >>= 4;
@@ -637,8 +650,6 @@ out:
 		DbgSCP_ALERT(ERR_FATAL_WRITE, (long) ptr_to, j /*field*/);
 
 	}
-	if (prot_len > MAX_LOCAL_ARGS * sizeof(int))
-		kfree(tmp);
 
 	return rval;
 }

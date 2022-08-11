@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <string.h>
 #include <linux/perf_event.h>
+#include <linux/zalloc.h>
 
 #include "../../util/debug.h"
 #include "../../util/e2k-dimtp.h"

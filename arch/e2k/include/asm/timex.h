@@ -8,9 +8,6 @@
 
 #include <asm/e2k_api.h>
 
-/* Note that this is lt_timer tick rate. */
-#define CLOCK_TICK_RATE	(machine.clock_tick_rate)
-
 typedef unsigned long cycles_t;
 
 #define ARCH_HAS_READ_CURRENT_TIMER

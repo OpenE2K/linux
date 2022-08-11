@@ -15,6 +15,13 @@ extern int apic_get_vector(void);
 #include <asm/epic.h>
 #include <asm/machdep.h>
 
+#define pic_printk(v, s, a...) \
+do { \
+	if (cpu_has_epic()) \
+		epic_printk(s, a); \
+	else \
+		apic_printk(v, s, a); \
+} while (0)
 
 static inline unsigned int read_pic_id(void)
 {
@@ -116,6 +123,17 @@ static inline void pic_send_reschedule(int cpu)
 		epic_smp_send_reschedule(cpu);
 	else
 		apic_smp_send_reschedule(cpu);
+}
+
+struct irq_desc;
+extern void apic_irq_force_complete_move(struct irq_desc *desc);
+extern void epic_irq_force_complete_move(struct irq_desc *desc);
+static inline void pic_irq_force_complete_move(struct irq_desc *desc)
+{
+	if (cpu_has_epic())
+		epic_irq_force_complete_move(desc);
+	else
+		apic_irq_force_complete_move(desc);
 }
 #endif
 
@@ -273,6 +291,7 @@ static inline void pic_irq_work_raise(void)
 	apic_irq_work_raise();
 }
 
+#ifdef CONFIG_SMP
 extern void apic_send_call_function_ipi_mask(const struct cpumask *mask);
 static inline void pic_send_call_function_ipi_mask(const struct cpumask *mask)
 {
@@ -290,6 +309,14 @@ static inline void pic_send_reschedule(int cpu)
 {
 	apic_smp_send_reschedule(cpu);
 }
+
+struct irq_desc;
+extern void apic_irq_force_complete_move(struct irq_desc *desc);
+static inline void pic_irq_force_complete_move(struct irq_desc *desc)
+{
+	apic_irq_force_complete_move(desc);
+}
+#endif /* CONFIG_SMP */
 
 struct pt_regs;
 extern noinline notrace void apic_do_nmi(struct pt_regs *regs);

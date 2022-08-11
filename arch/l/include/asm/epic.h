@@ -67,6 +67,11 @@ static inline bool read_epic_bsp(void)
 	return reg.bits.bsp_core;
 }
 
+static inline u32 epic_vector_prio(u32 vector)
+{
+	return 1 + ((vector >> 8) & 0x3);
+}
+
 extern void __init_recv setup_prepic(void);
 extern void ack_epic_irq(void);
 extern void epic_send_IPI(unsigned int dest_id, int vector);
@@ -77,11 +82,19 @@ extern void epic_send_IPI_mask_allbutself(const struct cpumask *mask,
 extern void epic_wait_icr_idle(void);
 extern void clear_cepic(void);
 
+extern bool pcsm_adjust_enable;
+
+struct pcs_handle {
+	void (*pcs_interrupt)(void);
+};
+
+extern void register_pcs_handle(const struct pcs_handle *handle);
+extern void unregister_pcs_handle(void);
+
 extern __visible void epic_smp_timer_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_spurious_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_error_interrupt(struct pt_regs *regs);
 extern __visible void prepic_smp_error_interrupt(struct pt_regs *regs);
-extern __visible void epic_smp_irq_move_cleanup_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_irq_work_interrupt(struct pt_regs *regs);
 extern __visible void cepic_epic_interrupt(struct pt_regs *regs);
 extern __visible void epic_hc_emerg_interrupt(struct pt_regs *regs);
@@ -94,6 +107,7 @@ extern __visible void epic_pcs_interrupt(struct pt_regs *regs);
 extern __visible void epic_pv_apf_wake(struct pt_regs *regs);
 #endif /* CONFIG_KVM_ASYNC_PF */
 #ifdef CONFIG_SMP
+extern __visible void epic_smp_irq_move_cleanup_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_reschedule_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_call_function_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_call_function_single_interrupt(

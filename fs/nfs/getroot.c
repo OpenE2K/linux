@@ -65,7 +65,7 @@ static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *i
  * get an NFS2/NFS3 root dentry from the root filehandle
  */
 struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
-			    const char *devname)
+			   const char *devname)
 {
 	struct nfs_server *server = NFS_SB(sb);
 	struct nfs_fsinfo fsinfo;
@@ -83,6 +83,7 @@ struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 		kfree(name);
 		return ERR_PTR(-ENOMEM);
 	}
+
 
 	error = server->nfs_client->rpc_ops->getroot(server, mntfh, &fsinfo);
 	if (error < 0) {
@@ -126,4 +127,5 @@ out:
 	kfree(name);
 	nfs_free_fattr(fsinfo.fattr);
 	return ret;
+
 }

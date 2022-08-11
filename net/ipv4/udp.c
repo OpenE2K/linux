@@ -1257,8 +1257,7 @@ out_free:
 				delts_us < 1000000 &&
 				sk->udp_snd_sz / sk->udp_snd_num <
 							snd_lim_sz) {
-				usleep_range(delts_us,
-					delts_us + delts_us >> 3);
+				usleep_range(delts_us + 200, delts_us + 500);
 			}
 			sk->udp_snd_num = 0;
 			sk->udp_snd_sz = 0;
@@ -2049,6 +2048,10 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 {
 	struct udp_sock *up = udp_sk(sk);
 	int is_udplite = IS_UDPLITE(sk);
+#ifdef CONFIG_MCST
+	unsigned long flags;
+	int napi_work = 0;
+#endif
 
 	/*
 	 *	Charge it to the socket, dropping if the queue is full.
@@ -2138,6 +2141,10 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 
 	ipv4_pktinfo_prepare(sk, skb);
 	return __udp_queue_rcv_skb(sk, skb);
+#ifdef CONFIG_MCST
+	if (napi_work)
+		local_irq_restore(flags);
+#endif
 
 csum_error:
 	__UDP_INC_STATS(sock_net(sk), UDP_MIB_CSUMERRORS, is_udplite);

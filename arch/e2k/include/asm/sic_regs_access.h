@@ -77,6 +77,9 @@ boot_sic_write_node_nbsr_reg(int node_id, int reg_offset, unsigned int reg_val)
 unsigned int sic_get_mc_ecc(int node, int num);
 void sic_set_mc_ecc(int node, int num, unsigned int reg_value);
 
+unsigned int sic_get_mc_opmb(int node, int num);
+unsigned int sic_get_mc_cfg(int node, int num);
+
 unsigned int sic_get_ipcc_csr(int node, int num);
 void sic_set_ipcc_csr(int node, int num, unsigned int val);
 

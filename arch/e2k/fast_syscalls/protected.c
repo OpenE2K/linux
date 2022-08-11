@@ -33,7 +33,7 @@ unsigned long e2k_ptr_ptr(long low, long hiw, unsigned int min_size,
 }
 
 static inline
-unsigned long e2k_ptr_size(long low, long hiw, unsigned int min_size)
+unsigned int e2k_ptr_size(long low, long hiw, unsigned int min_size)
 {
 	e2k_ptr_hi_t hi;
 	unsigned int ptr_size;
@@ -120,7 +120,7 @@ extern long ttable_entry8(int sys_num,
 	__ret; \
 })
 
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int protected_fast_sys_clock_gettime(u32 tags, clockid_t which_clock,
 		u64 arg3, u64 arg4, u64 arg5)
 {
@@ -145,7 +145,7 @@ int protected_fast_sys_clock_gettime(u32 tags, clockid_t which_clock,
 	return ret;
 }
 
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int protected_fast_sys_gettimeofday(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 arg5)
 {
 	const struct thread_info *ti = READ_CURRENT_REG();
@@ -153,7 +153,7 @@ int protected_fast_sys_gettimeofday(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 
 	struct timezone __user *tz;
 	int size, ret;
 
-	prefetchw(&fsys_data);
+	prefetch_nospec(&fsys_data);
 
 	GET_PTR(tv, size, 2, 3, sizeof(struct timeval), 1, ti);
 	if (!size)
@@ -187,7 +187,7 @@ int protected_fast_sys_gettimeofday(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 
 }
 
 
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int protected_fast_sys_getcpu(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 arg5)
 {
 	const struct thread_info *ti = READ_CURRENT_REG();
@@ -222,7 +222,7 @@ int protected_fast_sys_getcpu(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 arg5)
 #if _NSIG != 64
 # error We read u64 value here...
 #endif
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int protected_fast_sys_siggetmask(u32 tags, u64 arg2, u64 arg3, size_t sigsetsize)
 {
 	const struct thread_info *ti = READ_CURRENT_REG();
@@ -252,7 +252,7 @@ int protected_fast_sys_siggetmask(u32 tags, u64 arg2, u64 arg3, size_t sigsetsiz
 #if _NSIG != 64
 # error We read u64 value here...
 #endif
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int protected_fast_sys_getcontext(u32 tags, u64 arg2, u64 arg3, size_t sigsetsize)
 {
 	const struct thread_info *ti = READ_CURRENT_REG();

@@ -18,8 +18,18 @@
 #include <asm/sic_regs.h>
 #include <asm/io_epic.h>
 #include <asm/e2k-iommu.h>
+#include <asm/e2k_debug.h>
 #include <asm-l/swiotlb.h>
 #include <trace/events/iommu.h>
+
+#undef	DEBUG_PASSTHROUGH_MODE
+#undef	DebugPT
+#define	DEBUG_PASSTHROUGH_MODE	0	/* IOMMU Passthrough debugging */
+#define	DebugPT(fmt, args...)					\
+({								\
+	if (DEBUG_PASSTHROUGH_MODE || kvm_debug)		\
+		pr_info("%s(): " fmt, __func__, ##args);	\
+})
 
 #define E2K_DTE_MAX_BUS_NR	(1 << 8)
 #define E2K_DTE_ENTRIES_NR	(E2K_DTE_MAX_BUS_NR * 256)
@@ -887,7 +897,7 @@ void e2k_iommu_virt_enable(int node)
 {
 	unsigned int val;
 
-	pr_info("e2k_iommu: enabling virtualization support (node %d)\n", node);
+	DebugPT("e2k_iommu: enabling virtualization support (node %d)\n", node);
 
 	val = e2k_iommu_read(node, 0, E2K_IOMMU_CTRL);
 	if (!(val & IOMMU_CTRL_GT_EN)) {
@@ -901,7 +911,7 @@ void e2k_iommu_virt_enable(int node)
 void e2k_iommu_guest_write_ctrl(u32 reg_value)
 {
 	if (reg_value & IOMMU_CTRL_ENAB)
-		pr_info("e2k_iommu: guest enabled IOMMU support %s\n",
+		DebugPT("e2k_iommu: guest enabled IOMMU support %s\n",
 			reg_value & IOMMU_CTRL_DEV_TABLE_EN ?
 			"with device table enabled: passthrough not supported" :
 			"with device table disabled: passthrough supported");
@@ -974,12 +984,31 @@ void e2k_iommu_flush_guest(struct kvm *kvm, u64 command)
 #ifdef CONFIG_PM
 static int e2k_iommu_suspend(void)
 {
+	struct pci_bus *bus;
+
+	list_for_each_entry(bus, &pci_root_buses, node) {
+		struct iohub_sysdata *sd = bus->sysdata;
+		struct e2k_iommu *i = sd->l_iommu;
+		if (i) {
+			/* Just stop the IOMMU.  All the necessary flushing is
+			 * done when re-initializing it in e2k_iommu_init_hw() */
+			e2k_iommu_write(i->node, 0, E2K_IOMMU_CTRL);
+		}
+	}
+
 	return 0;
 }
 
 static void e2k_iommu_resume(void)
 {
-	//TODO
+	struct pci_bus *bus;
+
+	list_for_each_entry(bus, &pci_root_buses, node) {
+		struct iohub_sysdata *sd = bus->sysdata;
+		struct e2k_iommu *i = sd->l_iommu;
+		if (i)
+			e2k_iommu_init_hw(i);
+	}
 }
 
 static struct syscore_ops e2k_iommu_syscore_ops = {
@@ -1318,7 +1347,7 @@ static struct iommu_group *e2k_iommu_device_group(struct device *dev)
 	i = dev_to_iommu(dev);
 
 	if (i->default_group)
-		return i->default_group;
+		return iommu_group_ref_get(i->default_group);
 	if (e2k_iommu_no_domains) {
 		unsigned long flags;
 		spin_lock_irqsave(&i->lock, flags);
@@ -1328,7 +1357,7 @@ static struct iommu_group *e2k_iommu_device_group(struct device *dev)
 	}
 	if (!dev_is_pci(dev)) {
 		p = e2k_dev_to_parent_pcidev(dev);
-		return p->dev.iommu_group;
+		return iommu_group_ref_get(p->dev.iommu_group);
 	}
 	/* hw bug: ohci uses ehci device-id, so put them to one group */
 	p = to_pci_dev(dev);
@@ -1343,7 +1372,7 @@ static struct iommu_group *e2k_iommu_device_group(struct device *dev)
 		if (!pdev)
 			return NULL;
 		if (pdev->dev.iommu_group)
-			return pdev->dev.iommu_group;
+			return iommu_group_ref_get(pdev->dev.iommu_group);
 		else
 			generic_device_group(dev);
 	}

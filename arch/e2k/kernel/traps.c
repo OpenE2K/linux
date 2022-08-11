@@ -245,6 +245,14 @@ static int __init debug_trap_setup(char *str)
 }
 __setup("trap_regs", debug_trap_setup);
 
+int sig_on_mem_err = 0;
+static int __init sig_on_mem_err_setup(char *str)
+{
+	sig_on_mem_err = 1;
+	return 1;
+}
+__setup("sig_on_mem_err", sig_on_mem_err_setup);
+
 void __init trap_init(void)
 {
 }
@@ -436,8 +444,7 @@ handle_nm_exceptions(struct pt_regs *regs, e2k_tir_t *TIRs, u64 nmi)
  * Noinline because we update %cr1_lo.psr (so that interrupts are
  * enabled in caller).
  */
-__section(.entry_handlers)
-noinline
+noinline __irq_entry
 notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 {
 	struct trap_pt_regs *trap = regs->trap;
@@ -666,6 +673,8 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 		for (nr_intrpt = __ffs64(TIR_hi); TIR_hi != 0;
 				TIR_hi &= ~(1UL << nr_intrpt),
 						nr_intrpt = __ffs64(TIR_hi)) {
+			BUG_ON(nr_intrpt >= sizeof(exc_tbl)/sizeof(exc_tbl[0]));
+
 			if ((1UL << nr_intrpt) & (non_maskable_exc_mask |
 						  exc_interrupt_mask))
 				continue;
@@ -776,29 +785,29 @@ static void do_illegal_opcode(struct pt_regs *regs)
 		thread_info->times_num, thread_info->times_index);
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 
-	if (is_kprobe_break1_trap(regs)) {
-		notify_die(DIE_BREAKPOINT, "break", regs, 0,
-					exc_illegal_opcode_num, SIGTRAP);
-		return;
-	}
-
 	if (!user_mode(regs)) {
-		u32 *ip = (u32 *) AS(regs->trap->TIRs[0].TIR_lo).base;
+		u32 *ip;
 
+		if (is_kprobe_break1_trap(regs)) {
+			notify_die(DIE_BREAKPOINT, "break", regs, 0,
+						exc_illegal_opcode_num, SIGTRAP);
+			return;
+		}
+
+		ip = (u32 *) AS(regs->trap->TIRs[0].TIR_lo).base;
 		pr_alert("*0x%llx = 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",
 				(u64) ip, ip[0], ip[1], ip[2], ip[3],
 				ip[4], ip[5], ip[6], ip[7]);
 		die("illegal_opcode trap in kernel mode", regs, 0);
-	}
-	die_if_init("illegal_opcode trap in init process", regs, SIGILL);
-
-	if (is_gdb_breakpoint_trap(regs)) {
-		S_SIG(regs, SIGTRAP, exc_illegal_opcode_num, TRAP_BRKPT);
-		CHK_DEBUGGER(0, SIGTRAP, SIGTRAP, 0xF, regs, )
 	} else {
-		S_SIG(regs, SIGILL, exc_illegal_opcode_num, ILL_ILLOPC);
-		SDBGPRINT_WITH_STACK("SIGILL. illegal_opcode");
-		CHK_DEBUGGER(0, SIGILL, SIGILL, 0xF, regs, )
+		die_if_init("illegal_opcode trap in init process", regs, SIGILL);
+
+		if (is_gdb_breakpoint_trap(regs)) {
+			S_SIG(regs, SIGTRAP, exc_illegal_opcode_num, TRAP_BRKPT);
+		} else {
+			S_SIG(regs, SIGILL, exc_illegal_opcode_num, ILL_ILLOPC);
+			SDBGPRINT_WITH_STACK("SIGILL. illegal_opcode");
+		}
 	}
 }
 
@@ -884,57 +893,47 @@ static void do_illegal_instr_addr(struct pt_regs *regs)
 	}
 }
 
-static int dimtp_overflow_handle(struct pt_regs *regs)
-{
-	e2k_dimcr_t dimcr;
-	e2k_dibsr_t dibsr;
-	int handled = 0, mode;
-
-	dimcr = READ_DIMCR_REG();
-	dibsr = READ_DIBSR_REG();
-
-	mode = dimcr.mode;
-	if (AS(dibsr).m0 && (mode == 2 || mode == 3 ||
-			     mode >= 8 && mode <= 13)) {
-		S_SIG(regs, SIGTRAP, exc_instr_debug_num, TRAP_HWBKPT);
-		handled = 1;
-	}
-
-	return handled;
-}
-
 static notrace void do_instr_debug(struct pt_regs *regs)
 {
-	int handled;
+	e2k_dibsr_t dibsr;
+	e2k_dimcr_t dimcr;
 
 	nmi_enter();
+
+	dimcr = dimcr_pause();
 
 	/* Make sure gdb sees the new value */
 	current->thread.sw_regs.dibsr = READ_DIBSR_REG();
 
+	/* Call registered handlers */
 	if (!user_mode(regs))
 		kprobe_instr_debug_handle(regs);
+	bp_instr_overflow_handle(regs);
+	perf_instr_overflow_handle(regs);
 
-	handled = perf_instr_overflow_handle(regs);
-	handled |= bp_instr_overflow_handle(regs);
+	/* Send SIGTRAP if this was from ptrace */
+	dibsr = READ_DIBSR_REG();
+	if (dibsr.m0 || dibsr.m1 || dibsr.ss || dibsr.b0 ||
+			dibsr.b1 || dibsr.b2 || dibsr.b3) {
+		/* ptrace works in user space only */
+		if ((current->flags & PF_KTHREAD) || !user_mode(regs))
+			die("instr_debug trap in kernel mode", regs, 0);
+		S_SIG(regs, SIGTRAP, exc_instr_debug_num, TRAP_HWBKPT);
+		/* #24785 Customer asks us to avoid this annoying message
+		SDBGPRINT("SIGTRAP. Stop on breakpoint"); */
 
-	if (handled)
-		goto out;
+		dibsr.m0 = 0;
+		dibsr.m1 = 0;
+		dibsr.b0 = 0;
+		dibsr.b1 = 0;
+		dibsr.b2 = 0;
+		dibsr.b3 = 0;
+		dibsr.ss = 0;
+		WRITE_DIBSR_REG(dibsr);
+	}
 
-	if (dimtp_overflow_handle(regs))
-		goto out;
+	dimcr_continue(dimcr);
 
-	die_if_kernel("instr_debug trap in kernel mode", regs, 0);
-	die_if_init("instr_debug trap in init process", regs, SIGTRAP);
-	S_SIG(regs, SIGTRAP, exc_instr_debug_num, TRAP_HWBKPT);
-
-#if 0	/* #24785 Customer asks us to avoid this annoying message */
-	SDBGPRINT("SIGTRAP. Stop on breakpoint");
-#endif	/* #24785 */
-
-	CHK_DEBUGGER(8, SIGTRAP, SIGTRAP, 0xF, regs, )
-
-out:
 	nmi_exit();
 }
 
@@ -1028,31 +1027,35 @@ static void force_sigsegv_array_bounds(struct pt_regs *user_regs)
 
 static void do_array_bounds(struct pt_regs *regs)
 {
-	struct trap_pt_regs *trap = regs->trap;
-
-	if (user_mode(regs) && regs->stacks.usd_lo.USD_lo_base < TASK_SIZE) {
-		int incr;
-		int res = parse_getsp_operation(trap, &incr);
-
-		if (res == GETSP_OP_INCREMENT) {
-			if (expand_user_data_stack(regs, (unsigned int) incr)) {
-				force_sigsegv_array_bounds(regs);
-				SDBGPRINT_WITH_STACK("SIGSEGV. expand on array_bounds");
-			}
-			return;
-		} else if (res == GETSP_OP_DECREMENT) {
-			if (constrict_user_data_stack(regs, incr)) {
-				force_sig(SIGSEGV);
-				SDBGPRINT_WITH_STACK("SIGSEGV. constrict on array_bounds");
-			}
-			return;
-		}
-	}
+	void __user *fault_addr;
+	int incr;
 
 	die_if_kernel("array_bounds trap in kernel mode\n", regs, 0);
-	die_if_init("array_bounds trap in init process", regs, 0);
-	S_SIG(regs, SIGSEGV, exc_array_bounds_num, SEGV_BOUNDS);
-	SDBGPRINT_WITH_STACK("SIGSEGV. array_bounds");
+
+	switch (parse_getsp_operation(regs, &incr, &fault_addr)) {
+	case GETSP_OP_INCREMENT:
+		if (expand_user_data_stack(regs, (unsigned int) incr)) {
+			force_sigsegv_array_bounds(regs);
+			SDBGPRINT_WITH_STACK("SIGSEGV. expand on array_bounds");
+		}
+		break;
+	case GETSP_OP_DECREMENT:
+		if (constrict_user_data_stack(regs, incr)) {
+			force_sig(SIGSEGV);
+			SDBGPRINT_WITH_STACK("SIGSEGV. constrict on array_bounds");
+		}
+		break;
+	case GETSP_OP_SIGSEGV:
+		force_sig_fault(SIGSEGV, SEGV_BOUNDS, fault_addr, exc_array_bounds_num);
+		SDBGPRINT_WITH_STACK("SIGSEGV. array_bounds - could not read getsp instruction");
+		break;
+	case GETSP_OP_FAIL:
+		S_SIG(regs, SIGSEGV, exc_array_bounds_num, SEGV_BOUNDS);
+		SDBGPRINT_WITH_STACK("SIGSEGV. array_bounds on not a getsp instruction");
+		break;
+	default:
+		BUG();
+	}
 }
 
 static void do_access_rights(struct pt_regs *regs)
@@ -1342,50 +1345,59 @@ static void do_software_trap(struct pt_regs *regs)
 
 static notrace void do_data_debug(struct pt_regs *regs)
 {
+	e2k_ddbsr_t ddbsr;
+	e2k_ddmcr_t ddmcr;
+
 	nmi_enter();
+
+	ddmcr = ddmcr_pause();
 
 	/* Make sure gdb sees the new value */
 	current->thread.sw_regs.ddbsr = READ_DDBSR_REG();
 
-	if (perf_data_overflow_handle(regs))
-		goto out;
+	/* Call registered handlers */
+	bp_data_overflow_handle(regs);
+	perf_data_overflow_handle(regs);
 
-	if (bp_data_overflow_handle(regs))
-		goto out;
-
-	if (kernel_mode(regs)) {
-		struct pt_regs *pregs = regs->next;
-		const struct exception_table_entry *fixup;
-		bool from_execute_mmu_op;
-
+	ddbsr = READ_DDBSR_REG();
+	if (ddbsr.m0 || ddbsr.m1 || ddbsr.b0 || ddbsr.b1 || ddbsr.b2 || ddbsr.b3) {
 		if (DATA_BREAKPOINT_ON) {
 			/* data breakpoint occured */
 			dump_stack();
 			goto out;
 		}
 
-		/* get_user/put_user case: */
-		fixup = search_exception_tables(
-				regs->trap->TIRs[1].TIR_lo.TIR_lo_ip);
+		/* ptrace works in user space only */
+		if ((current->flags & PF_KTHREAD) || !user_mode(regs)) {
+			struct pt_regs *pregs = regs->next;
+			const struct exception_table_entry *fixup;
+			bool from_execute_mmu_op;
 
-		from_execute_mmu_op = (pregs && pregs->flags.exec_mmu_op);
+			/* get_user/put_user case: */
+			fixup = search_exception_tables(
+					regs->trap->TIRs[1].TIR_lo.TIR_lo_ip);
+			from_execute_mmu_op = (pregs && pregs->flags.exec_mmu_op);
 
-		if (!current_thread_info()->usr_pfault_jump &&
-				!fixup && !from_execute_mmu_op)
-			die("data_debug trap in kernel mode", regs, 0);
+			if (!current_thread_info()->usr_pfault_jump &&
+					!fixup && !from_execute_mmu_op)
+				die("data_debug trap in kernel mode", regs, 0);
+		}
+		S_SIG(regs, SIGTRAP, exc_data_debug_num, TRAP_HWBKPT);
+		/* #24785 Customer asks us to avoid this annoying message
+		SDBGPRINT("SIGTRAP. Stop on watchpoint"); */
+
+		ddbsr.m0 = 0;
+		ddbsr.m1 = 0;
+		ddbsr.b0 = 0;
+		ddbsr.b1 = 0;
+		ddbsr.b2 = 0;
+		ddbsr.b3 = 0;
+		WRITE_DDBSR_REG(ddbsr);
 	}
 
-	die_if_init("data_debug trap in init process", regs, SIGTRAP);
-
-	S_SIG(regs, SIGTRAP, exc_data_debug_num, TRAP_HWBKPT);
-
-#if 0	/* #24785 Customer asks us to avoid this annoying message */
-	SDBGPRINT("SIGTRAP. Stop on watchpoint");
-#endif	/* #24785 */
-
-	CHK_DEBUGGER(28, SIGTRAP, SIGTRAP, 0xF, regs, )
-
 out:
+	ddmcr_continue(ddmcr);
+
 	nmi_exit();
 }
 
@@ -1414,7 +1426,7 @@ static void do_recovery_point(struct pt_regs *regs)
 		return do_unknown_exc(regs);
 
 	if (!user_mode(regs)) {
-		/* We do not warn about ".entry_handlers" section because
+		/* We do not warn about ".entry.text" section because
 		 * there are places in it where it is legal to receive
 		 * exc_recovery_point: between kernel entry (syscall entry,
 		 * signal and makecontext trampolines) and up to "crp"
@@ -1430,9 +1442,10 @@ static void do_recovery_point(struct pt_regs *regs)
 		}
 		return;
 	}
-	if (!(TASK_IS_BINCO(current) && cpu_has(CPU_FEAT_ISET_V6)))
+	if (!(TASK_IS_BINCO(current) && cpu_has(CPU_FEAT_ISET_V6))) {
 		S_SIG(regs, SIGBUS, exc_recovery_point_num, BUS_OBJERR);
-	SDBGPRINT("SIGBUS. do_recovery_point_exc");
+		SDBGPRINT("SIGBUS. exc_recovery_point");
+	}
 }
 
 static notrace void __cpuidle return_from_cpuidle(void) { }
@@ -1624,9 +1637,10 @@ static notrace void do_mem_lock_as(struct pt_regs *regs)
 	nmi_exit();
 }
 
-__noreturn static void do_mem_error(struct pt_regs *regs)
+static void do_mem_error(struct pt_regs *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
+	int trapno = 0;
 	e2k_tir_hi_t tir_hi;
 	e2k_tir_lo_t tir_lo;
 	char *s;
@@ -1636,21 +1650,27 @@ __noreturn static void do_mem_error(struct pt_regs *regs)
 
 	switch (tir_hi.TIR_hi_exc & exc_mem_error_mask) {
 	case exc_mem_error_ICACHE_mask:
+		trapno = exc_mem_error_ICACHE_num;
 		s = "ICACHE";
 		break;
 	case exc_mem_error_L1_02_mask:
+		trapno = exc_mem_error_L1_02_num;
 		s = "L1 chanel 0, 2";
 		break;
 	case exc_mem_error_L1_35_mask:
+		trapno = exc_mem_error_L1_35_num;
 		s = "L1 chanel 3, 5";
 		break;
 	case exc_mem_error_L2_mask:
+		trapno = exc_mem_error_L2_num;
 		s = "L2";
 		break;
 	case exc_mem_error_MAU_mask:
+		trapno = exc_mem_error_MAU_num;
 		s = "MAU";
 		break;
 	case exc_mem_error_out_cpu_mask:
+		trapno = exc_mem_error_out_cpu_num;
 		s = "out cpu";
 		break;
 	default:
@@ -1658,10 +1678,15 @@ __noreturn static void do_mem_error(struct pt_regs *regs)
 		break;
 	}
 
-	panic("EXCEPTION: exc_mem_error TIR_hi.exc 0x%016llx (%s) TIR_lo.ip "
-		"0x%016llx on cpu %d\n",
-		tir_hi.TIR_hi_exc, s, tir_lo.TIR_lo_ip,
-		raw_smp_processor_id());
+	if (likely(!sig_on_mem_err)) {
+		panic("EXCEPTION: exc_mem_error TIR_hi.exc 0x%016llx (%s) TIR_lo.ip "
+			"0x%016llx on cpu %d\n",
+			tir_hi.TIR_hi_exc, s, tir_lo.TIR_lo_ip,
+			raw_smp_processor_id());
+	} else {
+		S_SIG(regs, SIGUSR2, trapno, SI_KERNEL);
+		SDBGPRINT("SIGUSR2. exc_mem_error");
+	}
 }
 
 static void do_data_error(struct pt_regs *regs)

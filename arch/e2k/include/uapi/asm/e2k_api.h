@@ -104,7 +104,7 @@ typedef void *__e2k_ptr_t;
 
 #ifndef	__ASSEMBLY__
 
-typedef unsigned long long __e2k_syscall_arg_t;
+typedef unsigned long __e2k_syscall_arg_t;
 
 #define E2K_SYSCALL_CLOBBERS \
 		"ctpr1", "ctpr2", "ctpr3", \

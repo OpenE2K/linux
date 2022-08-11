@@ -97,10 +97,10 @@ module_param(dbg, bool, 0644);
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
-#define	DEBUG_KVM_MODE	1	/* kernel virtual machine debugging */
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
 #define	DebugKVM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_MODE)						\
+	if (DEBUG_KVM_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -195,6 +195,16 @@ bool sync_dbg = false;
 #define	DebugSPF(fmt, args...)						\
 ({									\
 	if (DEBUG_KVM_PAGE_FAULT_MODE) {				\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+	}								\
+})
+
+#undef	DEBUG_KVM_SPT_WALK_MODE
+#undef	DebugWSPT
+#define	DEBUG_KVM_SPT_WALK_MODE	0	/* walk all SPT levels */
+#define	DebugWSPT(fmt, args...)						\
+({									\
+	if (DEBUG_KVM_SPT_WALK_MODE) {					\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 	}								\
 })
@@ -295,10 +305,10 @@ bool sync_dbg = false;
 
 #undef	DEBUG_KVM_FLOOD_MODE
 #undef	DebugFLOOD
-#define	DEBUG_KVM_FLOOD_MODE	1	/* host SP flood support */
+#define	DEBUG_KVM_FLOOD_MODE	0	/* host SP flood support */
 #define	DebugFLOOD(fmt, args...)					\
 ({									\
-	if (DEBUG_KVM_FLOOD_MODE)					\
+	if (DEBUG_KVM_FLOOD_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -386,6 +396,8 @@ static struct kmem_cache *mmu_page_header_cache;
 static struct percpu_counter kvm_total_used_mmu_pages;
 
 static pgprot_t set_spte_pfn(struct kvm *kvm, pgprot_t spte, kvm_pfn_t pfn);
+static int e2k_walk_shadow_pts(struct kvm_vcpu *vcpu, gva_t addr,
+				kvm_shadow_trans_t *st, hpa_t spt_root);
 
 static void mmu_spte_set(struct kvm *kvm, pgprot_t *sptep, pgprot_t spte);
 static void mmu_free_roots(struct kvm_vcpu *vcpu, unsigned flags);
@@ -1120,19 +1132,19 @@ static int is_nx(struct kvm_vcpu *vcpu)
 
 static int is_smap(struct kvm_vcpu *vcpu)
 {
-	pr_err("FIXME: %s() secondary PT is not supported\n", __func__);
+	pr_err_once("FIXME: %s() secondary PT is not supported\n", __func__);
 	return false;
 }
 
 static int is_smep(struct kvm_vcpu *vcpu)
 {
-	pr_err("FIXME: %s() secondary PT is not supported\n", __func__);
+	pr_err_once("FIXME: %s() secondary PT is not supported\n", __func__);
 	return false;
 }
 
 static int is_smm(struct kvm_vcpu *vcpu)
 {
-	pr_err("FIXME: %s() secondary PT is not supported\n", __func__);
+	pr_err_once("FIXME: %s() secondary PT is not supported\n", __func__);
 	return false;
 }
 
@@ -3838,6 +3850,98 @@ static bool prepare_zap_oldest_mmu_page(struct kvm *kvm,
 	return (zapped > 0) ? true : false;
 }
 
+void kvm_get_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
+	pgdval_t *pgd, pudval_t *pud, pmdval_t *pmd, pteval_t *pte, int *pt_level)
+{
+	kvm_shadow_trans_t st;
+	pgprot_t spte;
+	int level, level_off;
+
+	KVM_BUG_ON(address >= NATIVE_TASK_SIZE);
+
+	spin_lock(&vcpu->kvm->mmu_lock);
+
+	level_off = e2k_walk_shadow_pts(vcpu, address, &st, E2K_INVALID_PAGE);
+	*pt_level = E2K_PGD_LEVEL_NUM + 1;
+
+	for (level = E2K_PT_LEVELS_NUM; level > level_off; level--) {
+
+		spte = st.pt_entries[level].spte;
+		if (level == E2K_PGD_LEVEL_NUM) {
+			*pgd = pgprot_val(spte);
+			if (likely(!pgd_huge(__pgd(*pgd)) &&
+					!pgd_none(__pgd(*pgd)) &&
+						!pgd_bad(__pgd(*pgd)))) {
+				continue;
+			}
+			*pt_level = E2K_PGD_LEVEL_NUM;
+			break;
+		}
+
+		if (level == E2K_PUD_LEVEL_NUM) {
+			*pud = pgprot_val(spte);
+			if (likely(!pud_huge(__pud(*pud)) &&
+					!pud_none(__pud(*pud)) &&
+						!pud_bad(__pud(*pud)))) {
+				continue;
+			}
+			*pt_level = E2K_PUD_LEVEL_NUM;
+			break;
+		}
+
+		if (level == E2K_PMD_LEVEL_NUM) {
+			*pmd = pgprot_val(spte);
+			if (likely(!pmd_huge(__pmd(*pmd)) &&
+					!pmd_none(__pmd(*pmd)) &&
+						!pmd_bad(__pmd(*pmd)))) {
+				continue;
+			}
+			*pt_level = E2K_PMD_LEVEL_NUM;
+			break;
+		}
+
+		if (level == E2K_PTE_LEVEL_NUM) {
+			*pte = pgprot_val(spte);
+			*pt_level = E2K_PTE_LEVEL_NUM;
+			break;
+		}
+	}
+	spin_unlock(&vcpu->kvm->mmu_lock);
+}
+
+int kvm_get_va_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
+				mmu_spt_trans_t __user *user_trans_info)
+{
+	mmu_spt_trans_t trans_info;
+	int ret;
+
+	kvm_get_spt_translation(vcpu, address,
+		&trans_info.pgd, &trans_info.pud, &trans_info.pmd,
+		&trans_info.pte, &trans_info.pt_levels);
+
+	ret = kvm_vcpu_copy_to_guest(vcpu, user_trans_info, &trans_info,
+					sizeof(trans_info));
+	if (unlikely(ret < 0)) {
+		pr_err("%s(): could not copy info to user, error %d\n",
+			__func__, ret);
+		return ret;
+	}
+	return 0;
+}
+
+unsigned long kvm_get_gva_to_hva(struct kvm_vcpu *vcpu, gva_t gva)
+{
+	unsigned long hva;
+
+	hva = kvm_vcpu_gva_to_hva(vcpu, gva, true, NULL);
+	if (kvm_is_error_hva(hva)) {
+		pr_err("%s(): failed to convert GVA 0x%lx to HVA\n",
+			__func__, gva);
+		hva = 0;
+	}
+	return hva;
+}
+
 /*
  * Changing the number of mmu pages allocated to the vm
  * Note: if goal_nr_mmu_pages is too small, you will get dead lock
@@ -6516,7 +6620,6 @@ int reexecute_load_and_wait_page_fault(struct kvm_vcpu *vcpu,
 	e2k_addr_t address;
 	tc_cond_t cond;
 	e2k_addr_t hva;
-	int rg;
 	trap_cellar_t *next_tcellar;
 	struct kvm_mmu_page *sp;
 	LIST_HEAD(invalid_list);
@@ -6534,7 +6637,6 @@ int reexecute_load_and_wait_page_fault(struct kvm_vcpu *vcpu,
 
 	address = tcellar->address;
 	cond = tcellar->condition;
-	rg = AS(cond).address;
 
 	hva = kvm_vcpu_gfn_to_hva(vcpu, gfn);
 	if (kvm_is_error_hva(hva)) {
@@ -6554,7 +6656,7 @@ int reexecute_load_and_wait_page_fault(struct kvm_vcpu *vcpu,
 	} else {
 		next_tcellar = NULL;
 	}
-	r = execute_mmu_operations(tcellar, next_tcellar, regs, rg, 0, NULL,
+	r = execute_mmu_operations(tcellar, next_tcellar, regs, 0, NULL,
 			NULL, /*&check_guest_spill_fill_recovery,*/
 			NULL /*&calculate_guest_recovery_load_to_rf_frame*/);
 	DebugREEXEC("reexecution of %s and wait: address 0x%lx, hva 0x%lx "
@@ -6790,7 +6892,6 @@ long kvm_hv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	}
 	if (pfres == PFRES_NO_ERR) {
 		e2k_addr_t hva;
-		int rg = AS(cond).address;
 		kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
 		trap_cellar_t *next_tcellar;
 
@@ -6825,7 +6926,7 @@ long kvm_hv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 			next_tcellar = NULL;
 		}
 		r = execute_mmu_operations((trap_cellar_t *)&intc_info_mu->gva,
-				next_tcellar, regs, rg, 0, NULL,
+				next_tcellar, regs, 0, NULL,
 				&check_guest_spill_fill_recovery,
 				&calculate_guest_recovery_load_to_rf_frame);
 		if (r != EXEC_MMU_SUCCESS)
@@ -7142,9 +7243,7 @@ bool kvm_arch_can_inject_async_page_present(struct kvm_vcpu *vcpu)
 	}
 
 	return vcpu->arch.apf.enabled &&
-		!kvm_test_request(KVM_REQ_PENDING_IRQS, vcpu) &&
-		(guest_apf_reason == KVM_APF_NO) &&
-		(guest_apf_id == 0);
+			guest_apf_reason == KVM_APF_NO && guest_apf_id == 0;
 }
 
 #endif /* CONFIG_KVM_ASYNC_PF */
@@ -8294,7 +8393,6 @@ static void kvm_invalidate_all_roots(struct kvm *kvm)
 	struct kvm_vcpu *vcpu;
 	int r;
 
-	mutex_lock(&kvm->lock);
 	kvm_for_each_vcpu(r, vcpu, kvm) {
 		kvm_set_gp_phys_root(vcpu, E2K_INVALID_PAGE);
 		if (is_shadow_paging(vcpu)) {
@@ -8302,10 +8400,9 @@ static void kvm_invalidate_all_roots(struct kvm *kvm)
 			kvm_set_space_type_spt_os_root(vcpu, E2K_INVALID_PAGE);
 		}
 	}
-	mutex_unlock(&kvm->lock);
 }
 
-static void mmu_pte_write_new_pte(struct kvm_vcpu *vcpu,
+static void mmu_pte_write_new_pte(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
 				  struct kvm_mmu_page *sp, pgprot_t *spte,
 				  gpa_t gpa, const void *new)
 {
@@ -8318,7 +8415,7 @@ static void mmu_pte_write_new_pte(struct kvm_vcpu *vcpu,
 		DebugPTE("PT level %d is not pte level, it need set pde\n",
 			sp->role.level);
 		spin_unlock(&vcpu->kvm->mmu_lock);
-		ret = e2k_shadow_pt_protection_fault(vcpu, gpa, sp);
+		ret = e2k_shadow_pt_protection_fault(vcpu, gmm, gpa, sp);
 		KVM_BUG_ON(ret < 0);
 		DebugPTE("set PDE spte at %px == 0x%lx\n",
 			spte, pgprot_val(*spte));
@@ -8382,51 +8479,6 @@ static pgprotval_t mmu_pte_write_fetch_gpte(struct kvm_vcpu *vcpu, gpa_t *gpa,
 	return gentry;
 }
 
-/*
- * If we're seeing too many writes to a page, it may no longer be a page table,
- * or we may be forking, in which case it is better to unmap the page.
- */
-static bool detect_write_flooding(struct kvm_mmu_page *sp)
-{
-	/*
-	 * Skip write-flooding detected for the sp whose level is 1, because
-	 * it can become unsync, then the guest page is not write-protected.
-	 */
-	if (sp->role.level == PT_PAGE_TABLE_LEVEL)
-		return false;
-
-	atomic_inc(&sp->write_flooding_count);
-	return atomic_read(&sp->write_flooding_count) >= PT64_ENT_PER_PAGE;
-}
-
-/*
- * Misaligned accesses are too much trouble to fix up; also, they usually
- * indicate a page is not used as a page table.
- */
-static bool detect_write_misaligned(struct kvm_mmu_page *sp, gpa_t gpa,
-				    int bytes)
-{
-	unsigned offset, pte_size, misaligned;
-
-	pgprintk("misaligned: gpa %llx bytes %d role %x\n",
-		 gpa, bytes, sp->role.word);
-
-	offset = offset_in_page(gpa);
-	pte_size = sp->role.cr4_pae ? 8 : 4;
-
-	/*
-	 * Sometimes, the OS only writes the last one bytes to update status
-	 * bits, for example, in linux, andb instruction is used in clear_bit().
-	 */
-	if (!(offset & (pte_size - 1)) && bytes == 1)
-		return false;
-
-	misaligned = (offset ^ (offset + bytes - 1)) & ~(pte_size - 1);
-	misaligned |= bytes < 4;
-
-	return misaligned;
-}
-
 static pgprot_t *get_written_sptes(struct kvm_mmu_page *sp, gpa_t gpa,
 					int *nspte)
 {
@@ -8459,8 +8511,8 @@ static pgprot_t *get_written_sptes(struct kvm_mmu_page *sp, gpa_t gpa,
 	return spte;
 }
 
-static void kvm_mmu_pte_write(struct kvm_vcpu *vcpu, gpa_t gpa,
-			      const u8 *new, int bytes)
+static void kvm_mmu_pte_write(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
+				gpa_t gpa, const u8 *new, int bytes)
 {
 	gfn_t gfn = gpa_to_gfn(gpa), new_gfn;
 	struct kvm_mmu_page *sp;
@@ -8514,13 +8566,6 @@ static void kvm_mmu_pte_write(struct kvm_vcpu *vcpu, gpa_t gpa,
 		DebugPTE("found SP at %px mapped gva from 0x%lx, gfn 0x%llx\n",
 			sp, sp->gva, gfn);
 
-		if (detect_write_misaligned(sp, gpa, bytes) ||
-		      detect_write_flooding(sp)) {
-			kvm_mmu_prepare_zap_page(vcpu->kvm, sp, &invalid_list);
-			++vcpu->kvm->stat.mmu_flooded;
-			continue;
-		}
-
 		spte = get_written_sptes(sp, gpa, &npte);
 		if (!spte)
 			continue;
@@ -8537,7 +8582,7 @@ static void kvm_mmu_pte_write(struct kvm_vcpu *vcpu, gpa_t gpa,
 			if (gentry &&
 			      !((sp->role.word ^ vcpu->arch.mmu.base_role.word)
 			      & mask.word) && rmap_can_add(vcpu)) {
-				mmu_pte_write_new_pte(vcpu, sp, spte,
+				mmu_pte_write_new_pte(vcpu, gmm, sp, spte,
 							gpa, &gentry);
 			}
 			if (child && (child->gfn != new_gfn)) {
@@ -9401,11 +9446,8 @@ static int setup_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	mmu_set_host_pt_struct_func(kvm, &kvm_mmu_get_host_pt_struct);
 	mmu_set_vcpu_pt_struct_func(kvm, &kvm_mmu_get_vcpu_pt_struct);
 
-	preempt_disable();	/* to avoid schedule() when VCPU root */
-				/* PT is cleared and not set */
 	ret = kvm_mmu_load(vcpu, gmm, flags);
 	if (ret) {
-		preempt_enable();
 		pr_err("%s(): could not create support of VCPU #%d MMU\n",
 			__func__, vcpu->vcpu_id);
 		return ret;
@@ -9422,8 +9464,6 @@ static int setup_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		kvm_prepare_shadow_root(vcpu, gmm, os_root, gp_root,
 			vcpu->arch.mmu.get_vcpu_sh_os_vptb(vcpu));
 	}
-
-	preempt_enable();
 
 	return 0;
 }
@@ -9740,8 +9780,6 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	KVM_BUG_ON(gmm == NULL);
 	KVM_BUG_ON(VALID_PAGE(gmm->root_hpa));
 
-	preempt_disable();	/* to avoid schedule() when VCPU root */
-				/* PT is cleared and not set */
 	if (likely(mmu->u_context_on)) {
 		/* unload previous MMU PT and context before load new */
 		kvm_mmu_unload(vcpu, U_ROOT_PT_FLAG);
@@ -9764,7 +9802,6 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	mmu->set_vcpu_u_pptb(vcpu, u_phys_ptb);
 	ret = kvm_mmu_load(vcpu, gmm, U_ROOT_PT_FLAG | DONT_SYNC_ROOT_PT_FLAG);
 	if (ret) {
-		preempt_enable();
 		pr_err("%s(): could not load MMU support of VCPU #%d\n",
 			__func__, vcpu->vcpu_id);
 		ret = -ENOMEM;
@@ -9789,8 +9826,6 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	} else {
 		sync_end = HOST_TASK_SIZE;
 	}
-
-	preempt_enable();
 
 	ret = e2k_sync_shadow_pt_range(vcpu, gmm, root, sync_start, sync_end,
 			u_phys_ptb, mmu->get_vcpu_sh_u_vptb(vcpu));
@@ -9822,9 +9857,6 @@ static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 
 	KVM_BUG_ON(!is_shadow_paging(vcpu));
 
-	preempt_disable();	/* to avoid schedule() when VCPU root */
-				/* PT is cleared and not set */
-
 	/* unload previous MMU PT and context before load new */
 	kvm_mmu_unload(vcpu, flags);
 
@@ -9841,7 +9873,7 @@ static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	ret = kvm_mmu_load(vcpu, gmm, flags);
 	if (ret) {
 		pr_err("%s(): could not load new shadow PT\n", __func__);
-		goto failed_preempt;
+		goto failed;
 	}
 
 	root = kvm_get_space_type_spt_u_root(vcpu);
@@ -9855,8 +9887,6 @@ static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 					mmu->get_vcpu_sh_u_vptb(vcpu));
 	}
 
-	preempt_enable();
-
 	ret = kvm_sync_shadow_u_root(vcpu, gmm, false);
 	if (ret) {
 		pr_err("%s(): could not sync host shadow PT and guest "
@@ -9867,8 +9897,6 @@ static int switch_shadow_pptb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 
 	return 0;
 
-failed_preempt:
-	preempt_enable();
 failed:
 	return ret;
 }
@@ -10185,10 +10213,7 @@ int kvm_hv_setup_shadow_paging(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 	}
 	mutex_unlock(&vcpu->kvm->slots_lock);
 	if (!mmu_is_load) {
-		preempt_disable();	/* to avoid schedule() when VCPU root */
-					/* PT is cleared and not set */
 		kvm_mmu_load(vcpu, gmm, flags);
-		preempt_enable();
 	}
 
 	kvm_setup_mmu_spt_context(vcpu);

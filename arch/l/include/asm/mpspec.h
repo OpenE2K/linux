@@ -371,6 +371,7 @@ typedef struct mpc_gpio_act {
 struct iohub_sysdata;
 void mp_pci_add_resources(struct list_head *resources,
 			   struct iohub_sysdata *sd);
+extern int __init mp_ioepic_find_bus(int ioepic_id);
 #ifdef	CONFIG_IOHUB_DOMAINS
 struct iohub_sysdata;
 extern int mp_find_iolink_root_busnum(int node, int link);

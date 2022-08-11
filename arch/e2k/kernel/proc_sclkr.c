@@ -15,6 +15,7 @@
 
 char sclkr_src[SCLKR_SRC_LEN] = "no"; /* no, ext, rtc, int */
 int sclkr_mode = -1;
+EXPORT_SYMBOL_GPL(sclkr_mode);
 
 static int sclkr_set(int cmdline)
 {
@@ -42,7 +43,7 @@ static int sclkr_set(int cmdline)
 		sclkr_mode = new_sclkr_mode;
 	} else {
 		sclkregistask = kthread_run(sclk_register,
-			(void *)new_sclkr_mode, "sclkregister");
+			(void *) (long) new_sclkr_mode, "sclkregister");
 		if (IS_ERR(sclkregistask)) {
 			ret = PTR_ERR(sclkregistask);
 			pr_err(KERN_ERR "Failed to start sclk register thread,"

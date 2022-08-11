@@ -9,6 +9,7 @@
 #define _E2K_TRAPS_H
 
 #include <linux/interrupt.h>
+#include <asm/hw_irq.h>
 #include <asm/ptrace.h>
 #include <asm/trap_def.h>
 
@@ -61,15 +62,16 @@ extern int constrict_user_data_stack(struct pt_regs *regs, unsigned long incr);
 extern int expand_user_data_stack(struct pt_regs *regs, unsigned long incr);
 extern void do_notify_resume(struct pt_regs *regs);
 
-extern int parse_getsp_operation(struct trap_pt_regs *regs, int *incr);
-
 extern void coredump_in_future(void);
 
-enum {
-	GETSP_OP_IGNORE,
+enum getsp_action {
+	GETSP_OP_FAIL = 1,
+	GETSP_OP_SIGSEGV,
 	GETSP_OP_INCREMENT,
 	GETSP_OP_DECREMENT
 };
+extern enum getsp_action parse_getsp_operation(const struct pt_regs *regs,
+		int *incr, void __user **fault_addr);
 
 static inline unsigned int user_trap_init(void)
 {
@@ -164,7 +166,7 @@ native_init_guest_system_handlers_table(void)
 {
 	if (paravirt_enabled()) {
 		/* It is native guest */
-		setup_APIC_vector_handler(SYSRQ_SHOWSTATE_EPIC_VECTOR,
+		setup_PIC_vector_handler(SYSRQ_SHOWSTATE_EPIC_VECTOR,
 			native_sysrq_showstate_interrupt, 1,
 			"native_sysrq_showstate_interrupt");
 	}

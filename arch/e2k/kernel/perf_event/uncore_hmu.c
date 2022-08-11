@@ -6,7 +6,7 @@
 #include <asm/sic_regs.h>
 #include <asm/perf_event_uncore.h>
 
-static struct e2k_uncore *e2k_uncore_hmu;
+static struct e2k_uncore *e2k_uncore_hmu[MAX_NUMNODES];
 
 typedef union {
 	struct {
@@ -300,14 +300,14 @@ static int hmu_validate_event(struct e2k_uncore *uncore,
 	return 0;
 }
 
-static int hmu_add_event(struct perf_event *event)
+static int hmu_add_event(struct e2k_uncore *uncore, struct perf_event *event)
 {
 	hmu_config_attr_t config = { .word = event->hw.config };
 	int i;
 
 	/* validate against running counters */
-	for (i = 0; i < e2k_uncore_hmu->num_counters; i++) {
-		struct perf_event *event2 = READ_ONCE(e2k_uncore_hmu->events[i]);
+	for (i = 0; i < uncore->num_counters; i++) {
+		struct perf_event *event2 = READ_ONCE(uncore->events[i]);
 		hmu_config_attr_t config2;
 
 		if (!event2)
@@ -340,8 +340,8 @@ static int hmu_add_event(struct perf_event *event)
 	}
 
 	/* take the first available slot */
-	for (i = 0; i < e2k_uncore_hmu->num_counters; i++) {
-		if (cmpxchg(&e2k_uncore_hmu->events[i], NULL, event) == NULL) {
+	for (i = 0; i < uncore->num_counters; i++) {
+		if (cmpxchg(&uncore->events[i], NULL, event) == NULL) {
 			event->hw.idx = i;
 			return 0;
 		}
@@ -354,40 +354,38 @@ int __init register_hmu_pmus()
 {
 	int i, counters = 2;
 
-	e2k_uncore_hmu = kzalloc((sizeof(struct e2k_uncore) +
-			          counters * sizeof(void *)) * nr_node_ids,
-				 GFP_KERNEL);
-	if (!e2k_uncore_hmu)
-		return -ENOMEM;
-
 	for_each_online_node(i) {
-		e2k_uncore_hmu[i].type = E2K_UNCORE_HMU;
+		struct e2k_uncore *uncore = kzalloc(sizeof(struct e2k_uncore) +
+				counters * sizeof(void *), GFP_KERNEL);
+		if (!uncore)
+			return -ENOMEM;
 
-		e2k_uncore_hmu[i].pmu.event_init	= e2k_uncore_event_init,
-		e2k_uncore_hmu[i].pmu.task_ctx_nr	= perf_invalid_context,
-		e2k_uncore_hmu[i].pmu.add		= e2k_uncore_add;
-		e2k_uncore_hmu[i].pmu.del		= e2k_uncore_del;
-		e2k_uncore_hmu[i].pmu.start		= e2k_uncore_start;
-		e2k_uncore_hmu[i].pmu.stop		= e2k_uncore_stop;
-		e2k_uncore_hmu[i].pmu.read		= e2k_uncore_read;
+		uncore->type = E2K_UNCORE_HMU;
 
-		e2k_uncore_hmu[i].get_event = hmu_get_event;
-		e2k_uncore_hmu[i].add_event = hmu_add_event;
-		e2k_uncore_hmu[i].validate_event = hmu_validate_event;
+		uncore->pmu.event_init	= e2k_uncore_event_init,
+		uncore->pmu.task_ctx_nr	= perf_invalid_context,
+		uncore->pmu.add		= e2k_uncore_add;
+		uncore->pmu.del		= e2k_uncore_del;
+		uncore->pmu.start	= e2k_uncore_start;
+		uncore->pmu.stop	= e2k_uncore_stop;
+		uncore->pmu.read	= e2k_uncore_read;
 
-		e2k_uncore_hmu[i].reg_ops = &hmu_reg_ops;
-		e2k_uncore_hmu[i].num_counters = counters;
+		uncore->get_event = hmu_get_event;
+		uncore->add_event = hmu_add_event;
+		uncore->validate_event = hmu_validate_event;
 
-		e2k_uncore_hmu[i].node = i;
+		uncore->reg_ops = &hmu_reg_ops;
+		uncore->num_counters = counters;
 
-		e2k_uncore_hmu[i].valid_events = hmu_mcr_valid_events;
-		e2k_uncore_hmu[i].pmu.attr_groups = hmu_mcr_attr_group;
+		uncore->node = i;
 
-		snprintf(e2k_uncore_hmu[i].name, UNCORE_PMU_NAME_LEN,
-				"uncore_hmu_%d", i);
+		uncore->valid_events = hmu_mcr_valid_events;
+		uncore->pmu.attr_groups = hmu_mcr_attr_group;
 
-		perf_pmu_register(&e2k_uncore_hmu[i].pmu,
-				e2k_uncore_hmu[i].name, -1);
+		snprintf(uncore->name, UNCORE_PMU_NAME_LEN, "uncore_hmu_%d", i);
+
+		e2k_uncore_hmu[i] = uncore;
+		perf_pmu_register(&uncore->pmu, uncore->name, -1);
 	}
 
 	return 0;

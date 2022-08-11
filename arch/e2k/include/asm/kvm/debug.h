@@ -11,6 +11,8 @@
 #include <linux/types.h>
 #include <asm/kvm/vcpu-regs-debug-inline.h>
 
+extern bool kvm_debug;
+
 /*
  * Some definitions to print/dump/show stacks
  */

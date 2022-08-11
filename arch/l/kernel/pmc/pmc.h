@@ -95,6 +95,8 @@ extern struct cpufreq_frequency_table
 			pmc_l_3d_clk1x_available_freqs[E1CP_MAX_AV_PSTATES];
 extern struct cpufreq_frequency_table
 			pmc_l_3d_clkSh_available_freqs[E1CP_MAX_AV_PSTATES];
+/* dvfs subsystem */
+extern struct regulator *vout_regulator;
 
 #endif /* CONFIG_E90S */
 

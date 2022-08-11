@@ -131,7 +131,7 @@ kvm_fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
 
 static inline void kvm_tagged_memcpy_8(void *dst, const void *src, size_t n)
 {
-	E2K_PREFETCH_L2(src);
+	E2K_PREFETCH_L1_SPEC(src);
 
 	__tagged_memcpy_8(dst, src, n);
 }

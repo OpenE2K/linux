@@ -6,6 +6,8 @@
 #ifndef _ASM_E2K_MM_HOOKS_H
 #define _ASM_E2K_MM_HOOKS_H
 
+#include <asm/kvm/mm_hooks.h>
+
 static inline void arch_unmap(struct mm_struct *mm,
 			unsigned long start, unsigned long end)
 {
@@ -14,6 +16,7 @@ static inline void arch_unmap(struct mm_struct *mm,
 static inline void arch_bprm_mm_init(struct mm_struct *mm,
 				     struct vm_area_struct *vma)
 {
+	get_mm_notifier_locked(mm);
 }
 
 static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,

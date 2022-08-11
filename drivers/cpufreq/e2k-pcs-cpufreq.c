@@ -5,13 +5,17 @@
 #include <linux/err.h>
 #include <linux/cpufreq.h>
 #include <linux/topology.h>
+#include <asm/pci.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 
 #define M_BFS 3
 #define N_BFS 16
 #define MAX_STATES (M_BFS*N_BFS)
-#define DEFAULT_F_PLL 2000 /* Mhz */
+#define DEFAULT_F_PLL	2000
+#define MAX_F_PLL	2000
+#define MIN_F_PLL	600
+#define F_REF		100
 
 #define EFUSE_START_ADDR    0x0
 #define EFUSE_END_ADDR	    0xff
@@ -27,222 +31,397 @@
 
 #define EFUSE_DATA_SIZE	    21
 
-#define GET_OD(data) ((OD_MASK << OD_OFFSET) & data)
-#define GET_NR(data) ((NR_MASK << NR_OFFSET) & data)
+#define get_od(data) (OD_MASK & (data >> OD_OFFSET))
+#define get_nr(data) (NR_MASK & (data >> NR_OFFSET))
 
-struct cpufreq_frequency_table pcs_l_freqs[MAX_STATES + 1];
+#define MAX_NODE 4
+#define MAX_CORE 16
+
+static int f_plls[MAX_NODE];
+
+struct pcs_data {
+	int div_max;
+	int div_min;
+	struct cpufreq_frequency_table *table;
+};
+
+struct pcs_data *cpufreq_pcs_data[MAX_NODE][MAX_CORE];
 
 typedef union {
-    struct {
-	u32 sign	: 1;
-	u32 disable	: 1;
-	u32 parity	: 1;
-	u32 addr	: 7;
-	u32 broadcast	: 1;
-	u32 data	: 21;
-    };
-    u32 word;
+	struct {
+		u32 data:21;
+		u32 broadcast:1;
+		u32 addr:7;
+		u32 parity:1;
+		u32 disable:1;
+		u32 sign:1;
+	};
+	u32 word;
 } efuse_data_t;
 
-static inline int get_nf(uint64_t *data)
+static inline bool check_bfs_bypass(int node)
 {
-    uint64_t val = 0;
-    val += (((NF_MASK_LO << NF_OFFSET_LO) & data[0]) >> NF_OFFSET_LO);
-    val += data[1] << (EFUSE_DATA_SIZE - NF_OFFSET_LO);
-    val += data[2] << (EFUSE_DATA_SIZE * 2 - NF_OFFSET_LO);
-    val += ((NF_MASK_HI << NF_OFFSET_HI) & data[3]) << (EFUSE_DATA_SIZE * 3 - NF_OFFSET_LO);
+	pcs_ctrl3_t ctrl;
 
-    return val;
+	ctrl.word = sic_read_node_nbsr_reg(node, SIC_pcs_ctrl3);
+
+	return (ctrl.bfs_freq == 8);
 }
 
-#define GET_FREQ(div, pll) (16000*pll/(1 << div/16)/(div%16 + 16)) /* Khz */
-
-static void pcs_l_calc_freq_tables(int f_pll)
+static inline int get_pcs_mode(int node)
 {
-    int divF = 0;
+	pcs_ctrl1_t ctrl;
 
-    for (divF; divF < MAX_STATES; divF++) {
-	pcs_l_freqs[divF].frequency = GET_FREQ(divF, f_pll);
-	pcs_l_freqs[divF].driver_data = divF;
-    }
+	ctrl.word = sic_read_node_nbsr_reg(node, SIC_pcs_ctrl1);
 
-    pcs_l_freqs[divF].frequency = CPUFREQ_TABLE_END;
+	return ctrl.pcs_mode;
+}
+
+static inline int64_t get_nf(uint64_t *data)
+{
+	int64_t val = 0;
+	val += (NF_MASK_LO & (data[0] >> NF_OFFSET_LO));
+	val += data[1] << (EFUSE_DATA_SIZE - NF_OFFSET_LO);
+	val += data[2] << (EFUSE_DATA_SIZE * 2 - NF_OFFSET_LO);
+	val +=
+	    ((NF_MASK_HI << NF_OFFSET_HI) & data[3]) << (EFUSE_DATA_SIZE * 3 -
+							 NF_OFFSET_LO);
+
+	return val;
+}
+
+#define GET_FREQ(div, pll) (16000*pll/(1 << div/16)/(div%16 + 16))	/* Khz */
+
+static struct cpufreq_frequency_table *pcs_l_calc_freq_tables(int node,
+	int divFmin, int divFmax)
+{
+	int divF;
+	int divFi = 0;
+
+	struct cpufreq_frequency_table *table = kzalloc(
+		(sizeof(struct cpufreq_frequency_table) *
+		 (divFmax - divFmin + 2)), GFP_KERNEL);
+
+	for (divF = divFmin; divF < MAX_STATES && divF <= divFmax; divF++) {
+		table[divFi].frequency =
+		    GET_FREQ(divF, f_plls[node]);
+		table[divFi++].driver_data = divF;
+	}
+
+	table[divFi].frequency = CPUFREQ_TABLE_END;
+
+	return table;
+}
+
+int get_idx_by_n_sys(int n_sys)
+{
+	return (n_sys < 20) ? n_sys - 10 : (n_sys < 32) ? 9 + (n_sys - 20) / 2 : 14;
+}
+
+int n_sys[] = {10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 32};
+int f_base_rev0[] = {900, 1000, 1050, 1100, 1125, 1175, 1200, 1300};
+int f_base_rev1[] = {900, 1000, 1100, 1200, 1300, 1400, 1500, 1550};
+
+static struct cpufreq_frequency_table *pcs_l_calc_freq_tables_e8c2(int node,
+	int divFmin, int divFmax)
+{
+	struct cpufreq_frequency_table *table;
+	int i, ii = 0;
+	int f_base = 0;
+	e2k_idr_t IDR;
+	pcs_ctrl3_t ctrl;
+
+	if (divFmin > divFmax) {
+		pr_err("%s: invalid params", __func__);
+		return NULL;
+	}
+
+	table = kzalloc((sizeof(struct cpufreq_frequency_table) *
+				(ARRAY_SIZE(n_sys) + 1)),
+				GFP_KERNEL);
+
+	ctrl.word = sic_read_node_nbsr_reg(node, SIC_pcs_ctrl3);
+
+	IDR = read_IDR_reg();
+
+	if (!IDR.IDR_rev)
+		f_base = f_base_rev0[ctrl.pll_mode];
+	else
+		f_base = f_base_rev1[ctrl.pll_mode];
+
+	for (i = 0; i < ARRAY_SIZE(n_sys); i++) {
+		int freq = f_base * 16000 / n_sys[i];
+
+		if (n_sys[i] >= divFmin && n_sys[i] <= divFmax) {
+			table[ii].frequency = freq;
+			table[ii].driver_data = n_sys[i];
+			ii++;
+		}
+	}
+
+	table[ii].frequency = CPUFREQ_TABLE_END;
+
+	return table;
 }
 
 #ifdef DEBUG
 static void print_pmc_freq_core_mon(freq_core_mon_t *mon)
 {
-    printk(KERN_DEBUG "freq_core_mon:\n"
-    "\tdivF_curr	%d\n"
-    "\tdivF_target	%d\n"
-    "\tdivF_limit_hi	%d\n"
-    "\tdivF_limit_lo	%d\n"
-    "\tdivF_init	%d\n"
-    "\tbfs_bypass	%d\n",
-    mon->divF_curr,
-    mon->divF_target,
-    mon->divF_limit_hi,
-    mon->divF_limit_lo,
-    mon->divF_init,
-    mon->bfs_bypass);
+	printk(KERN_DEBUG "freq_core_mon:\n"
+	       "\tdivF_curr	%d\n"
+	       "\tdivF_target	%d\n"
+	       "\tdivF_limit_hi	%d\n"
+	       "\tdivF_limit_lo	%d\n"
+	       "\tdivF_init	%d\n"
+	       "\tbfs_bypass	%d\n",
+	       mon->divF_curr,
+	       mon->divF_target,
+	       mon->divF_limit_hi,
+	       mon->divF_limit_lo, mon->divF_init, mon->bfs_bypass);
 }
 
 static void print_pmc_freq_core_sleep(freq_core_sleep_t *sleep)
 {
-    printk(KERN_DEBUG "freq_core_sleep:\n"
-    "\tcmd		%d\n"
-    "\tstatus		%d\n"
-    "\tctrl_enable	%d\n"
-    "\talter_disable	%d\n"
-    "\tbfs_bypass	%d\n"
-    "\tpin_en		%d\n",
-    sleep->cmd,
-    sleep->status,
-    sleep->ctrl_enable,
-    sleep->alter_disable,
-    sleep->bfs_bypass,
-    sleep->pin_en);
+	printk(KERN_DEBUG "freq_core_sleep:\n"
+	       "\tcmd		%d\n"
+	       "\tstatus		%d\n"
+	       "\tctrl_enable	%d\n"
+	       "\talter_disable	%d\n"
+	       "\tbfs_bypass	%d\n"
+	       "\tpin_en		%d\n",
+	       sleep->cmd,
+	       sleep->status,
+	       sleep->ctrl_enable,
+	       sleep->alter_disable, sleep->bfs_bypass, sleep->pin_en);
 }
 
 static void print_efuse_data(efuse_data_t *efuse_data)
 {
-    printk(KERN_DEBUG "efuse_data:\n"
-    "\tsign	    %d\n"
-    "\tdisable	    %d\n"
-    "\tparity	    %d\n"
-    "\taddr	    %d\n"
-    "\tbroadcast    %d\n"
-    "\tdata	    %d\n",
-    efuse_data->sign,
-    efuse_data->disable,
-    efuse_data->parity,
-    efuse_data->addr,
-    efuse_data->broadcast,
-    efuse_data->data);
+	printk(KERN_DEBUG "efuse_data:\n"
+	       "\tsign	    %d\n"
+	       "\tdisable	    %d\n"
+	       "\tparity	    %d\n"
+	       "\taddr	    0x%x\n"
+	       "\tbroadcast    %d\n"
+	       "\tdata	    0x%x\n",
+	       efuse_data->sign,
+	       efuse_data->disable,
+	       efuse_data->parity,
+	       efuse_data->addr, efuse_data->broadcast, efuse_data->data);
 }
 #endif
 
+static unsigned int pcs_l_cpufreq_get_e8c2(unsigned int cpu)
+{
+	int node = cpu_to_node(cpu);
+	int core = cpu_to_cpuid(cpu) % cpu_max_cores_num();
+	struct cpufreq_frequency_table *table =
+	    cpufreq_pcs_data[node][core]->table;
+	int target_idx = 0;
+	pcs_ctrl1_t ctrl;
+
+	ctrl.word = sic_read_node_nbsr_reg(node, SIC_pcs_ctrl1);
+
+	target_idx = get_idx_by_n_sys(ctrl.n) - get_idx_by_n_sys(table[0].driver_data);
+
+	return cpufreq_pcs_data[node][core]->table[target_idx].frequency;
+}
+
+static unsigned int pcs_l_cpufreq_get_e16c(unsigned int cpu)
+{
+	freq_core_mon_t mon;
+	int core = cpu_to_cpuid(cpu) % cpu_max_cores_num();
+	int node = cpu_to_node(cpu);
+	struct pcs_data *pcs_data = cpufreq_pcs_data[node][core];
+
+	mon.word = sic_read_node_nbsr_reg(node, PMC_FREQ_CORE_N_MON(core));
+	WARN_ON_ONCE(mon.divF_curr < pcs_data->div_min || mon.divF_curr > pcs_data->div_max);
+
+	return pcs_data->table[mon.divF_curr - pcs_data->div_min].frequency;
+}
+
 static unsigned int pcs_l_cpufreq_get(unsigned int cpu)
 {
-    freq_core_mon_t mon;
-    int core = cpu_to_cpuid(cpu) % cpu_max_cores_num();
-    int node = cpu_to_node(cpu);
+	if (IS_MACHINE_E8C2)
+		return pcs_l_cpufreq_get_e8c2(cpu);
 
-    mon.word = sic_read_node_nbsr_reg(node, PMC_FREQ_CORE_N_MON(core));
-
-    return pcs_l_freqs[mon.divF_curr].frequency;
+	return pcs_l_cpufreq_get_e16c(cpu);
 }
 
-static int pcs_l_cpufreq_setpolicy (struct cpufreq_policy *policy)
+static int pcs_l_cpufreq_setpolicy(struct cpufreq_policy *policy)
 {
-    /* TODO */
-    switch (policy->policy) {
-    case CPUFREQ_POLICY_PERFORMANCE:
-	break;
-    case CPUFREQ_POLICY_POWERSAVE:
-	break;
-    }
+	/* TODO */
+	switch (policy->policy) {
+	case CPUFREQ_POLICY_PERFORMANCE:
+		break;
+	case CPUFREQ_POLICY_POWERSAVE:
+		break;
+	}
 
-    return 0;
-}
-
-static int pcs_l_cpufreq_verify_policy(struct cpufreq_policy_data *policy)
-{
-    return cpufreq_frequency_table_verify(policy, pcs_l_freqs);
+	return 0;
 }
 
 static int get_f_pll(int node)
 {
-    /* TODO */
-    int addr = EFUSE_START_ADDR;
-    int f_pll = DEFAULT_F_PLL;
-    uint64_t data[4];
-    int i = 0;
+	int addr = EFUSE_START_ADDR;
+	int f_pll = DEFAULT_F_PLL;
+	uint64_t data[4];
+	int i = 0;
 
-    for (addr; addr < EFUSE_END_ADDR; addr++) {
-	efuse_data_t efuse_data;
-
-	sic_write_node_nbsr_reg(node, EFUSE_RAM_ADDR, addr);
-	efuse_data.word =  sic_read_node_nbsr_reg(node, EFUSE_RAM_DATA);
-
-	if (efuse_data.sign && !efuse_data.disable && efuse_data.broadcast &&
-		(efuse_data.addr >= 0x46 && efuse_data.addr <= 0x49)) {
-	    data[i++] = efuse_data.data;
+	for (addr; addr < EFUSE_END_ADDR; addr++) {
+		efuse_data_t efuse_data;
 #ifdef DEBUG
-	    print_efuse_data(&efuse_data);
+		print_efuse_data(&efuse_data);
 #endif
+		sic_write_node_nbsr_reg(node, EFUSE_RAM_ADDR, addr);
+		efuse_data.word = sic_read_node_nbsr_reg(node, EFUSE_RAM_DATA);
+		if (efuse_data.sign && !efuse_data.disable
+		    && efuse_data.broadcast && (efuse_data.addr >= 0x45)
+		    && (efuse_data.addr <= 0x48)) {
+			data[i++] = efuse_data.data;
+		}
 	}
-    }
 
-    if (i == 4) {
-	int nr = GET_NR(data[3]);
-	int nf = get_nf(data);
-	int od = GET_OD(data[0]);
+	if (i == 4) {
+		int64_t nr = get_nr(data[3]);
+		int64_t nf = get_nf(data);
+		int64_t od = get_od(data[0]);
 
-	f_pll = nf/(1LL<<33)*(nr+1)*(od+1);
-    }
+		int f_pll_calc = F_REF * nf / ((1LL << 33) * (nr + 1) * (od + 1));
 
-    return DEFAULT_F_PLL;
+		if (f_pll_calc >= MIN_F_PLL && f_pll_calc <= MAX_F_PLL)
+			f_pll = f_pll_calc;
+	}
+
+	return f_pll;
+}
+
+static struct pcs_data *get_pcs_data(int node, int core)
+{
+	freq_core_mon_t mon;
+	struct pcs_data *data;
+
+	data = kzalloc(sizeof(struct pcs_data), GFP_KERNEL);
+
+	mon.word = sic_read_node_nbsr_reg(node, PMC_FREQ_CORE_N_MON(core));
+
+	data->div_max = mon.divF_limit_hi;
+	data->div_min = mon.divF_init;
+	data->table = pcs_l_calc_freq_tables(node,
+		mon.divF_init, mon.divF_limit_hi);
+
+	return data;
+}
+
+static struct pcs_data *get_pcs_data_e8c2(int node)
+{
+	pcs_ctrl1_t ctrl;
+	struct pcs_data *data;
+
+	data = kzalloc(sizeof(struct pcs_data), GFP_KERNEL);
+
+	ctrl.word = sic_read_node_nbsr_reg(node, SIC_pcs_ctrl1);
+
+	data->div_min = ctrl.n_fmin;
+	data->div_max = ctrl.n;
+	data->table = pcs_l_calc_freq_tables_e8c2(node, ctrl.n, ctrl.n_fmin);
+
+	return data;
 }
 
 static int pcs_l_cpufreq_init(struct cpufreq_policy *policy)
 {
-    freq_core_mon_t mon;
-    int core = cpu_to_cpuid(policy->cpu) % cpu_max_cores_num();
-    int node = cpu_to_node(policy->cpu);
+	int node = cpu_to_node(policy->cpu);
+	int core = cpu_to_cpuid(policy->cpu) % cpu_max_cores_num();
+	struct pcs_data *data = cpufreq_pcs_data[node][core];
 
-    mon.word = sic_read_node_nbsr_reg(node, PMC_FREQ_CORE_N_MON(core));
+	policy->max = data->table[data->div_max].frequency;
+	policy->min = data->table[data->div_min].frequency;
 
-    pcs_l_calc_freq_tables(get_f_pll(node));
+	policy->cur = pcs_l_cpufreq_get(policy->cpu);
+	policy->freq_table = data->table;
+	policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
 
-    policy->max = pcs_l_freqs[mon.divF_limit_hi].frequency;
-    policy->min = pcs_l_freqs[mon.divF_limit_lo].frequency;
+	cpumask_set_cpu(policy->cpu, policy->cpus);
 
-    policy->cur = pcs_l_cpufreq_get(policy->cpu);
-    policy->freq_table = pcs_l_freqs;
-    policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
-
-    cpumask_set_cpu(policy->cpu, policy->cpus);
-
-    return 0;
+	return 0;
 }
 
 static int pcs_l_cpufreq_exit(struct cpufreq_policy *policy)
 {
-    return 0;
+	return 0;
 }
 
 static struct freq_attr *pcs_l_cpufreq_attr[] = {
-    &cpufreq_freq_attr_scaling_available_freqs,
-    NULL,
+	&cpufreq_freq_attr_scaling_available_freqs,
+	NULL,
 };
 
 static struct cpufreq_driver pcs_cpufreq_driver = {
-    .init	= pcs_l_cpufreq_init,
-    .verify	= pcs_l_cpufreq_verify_policy,
-    .setpolicy	= pcs_l_cpufreq_setpolicy,
-    .exit	= pcs_l_cpufreq_exit,
-    .get	= pcs_l_cpufreq_get,
-    .name	= "pcs_cpufreq",
-    .attr	= pcs_l_cpufreq_attr,
+	.init = pcs_l_cpufreq_init,
+	.verify = cpufreq_generic_frequency_table_verify,
+	.setpolicy = pcs_l_cpufreq_setpolicy,
+	.exit = pcs_l_cpufreq_exit,
+	.get = pcs_l_cpufreq_get,
+	.name = "pcs_cpufreq",
+	.attr = pcs_l_cpufreq_attr,
 };
 
 static int __init pcs_cpufreq_probe(void)
 {
-    if (IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C) {
-	if (cpufreq_register_driver(&pcs_cpufreq_driver)) {
-	    pr_err("ERROR: %s: %d\n", __FUNCTION__, __LINE__);
-	}
-    }
+	/* cpufreq driver is disabled on guest as it is host's
+	 * responsibility to adjust CPU frequency. */
+	bool use_cpufreq = !IS_HV_GM() && !IS_ENABLED(CONFIG_KVM_GUEST_KERNEL);
 
-    return 0;
+	if ((IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C ||
+		    IS_MACHINE_E8C2) && use_cpufreq && !is_prototype()) {
+
+		int node;
+		int core;
+
+		for_each_online_node(node) {
+			if (IS_MACHINE_E8C2) {
+				struct pcs_data *data;
+
+				if (check_bfs_bypass(node)) {
+					pr_err("cpufreq: CPU pins encode BFS bypass mode (bfs_freq==8),"
+						" that is why program frequency control is unavailable on node %d!", node);
+					continue;
+				}
+
+				if (get_pcs_mode(node) < 4)
+					pr_err("cpufreq: throttling is disabled on node %d", node);
+
+				data = get_pcs_data_e8c2(node);
+
+				for (core = 0; core < cpu_max_cores_num(); core++)
+					cpufreq_pcs_data[node][core] = data;
+			} else {
+				f_plls[node] = get_f_pll(node);
+
+				for (core = 0; core < cpu_max_cores_num(); core++)
+					cpufreq_pcs_data[node][core] = get_pcs_data(node, core);
+			}
+		}
+
+		if (cpufreq_register_driver(&pcs_cpufreq_driver)) {
+			pr_err("ERROR: %s: %d\n", __func__, __LINE__);
+		}
+	}
+
+	return 0;
 }
 
 static void __exit pcs_cpufreq_remove(void)
 {
-    if (IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C) {
-	cpufreq_unregister_driver(&pcs_cpufreq_driver);
-    }
+	/* cpufreq driver is disabled on guest as it is host's
+	 * responsibility to adjust CPU frequency. */
+	bool use_cpufreq = !IS_HV_GM() && !IS_ENABLED(CONFIG_KVM_GUEST_KERNEL);
+
+	if ((IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C ||
+		    IS_MACHINE_E8C2) && use_cpufreq && !is_prototype()) {
+		cpufreq_unregister_driver(&pcs_cpufreq_driver);
+	}
 }
 
 MODULE_AUTHOR("Arseniy.A.Demidov@mcst.ru");

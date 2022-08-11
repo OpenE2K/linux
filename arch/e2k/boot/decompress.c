@@ -9,6 +9,7 @@
 #include <asm/head.h>
 #include <asm/string.h>
 #include <asm/mpspec.h>
+#include <asm/kvm/hypercall.h>
 
 #define BOOT_HEAP_SIZE	0x1000000
 static unsigned long free_mem_ptr;
@@ -50,6 +51,7 @@ do { \
 
 /* Symbols defined by linker scripts */
 extern char _bss[], _ebss[];
+extern char _got[], _egot[];
 extern char _kernel[], _ekernel[];
 extern char _start[], _end[];
 extern char __orig_kernel_size[];
@@ -68,10 +70,11 @@ struct board_mem {
 };
 
 /*
- * Put `unpacking_in_progress' into compiler-initialized
- * .data section so that all processors can access it
+ * Put 'got_updating_in_progress' and 'unpacking_in_progress' into
+ * compiler-initialized .data section so that all processors can access it
  * before .bss section is cleared.
  */
+static int got_updating_in_progress = 1;
 static int unpacking_in_progress = 1;
 
 static boot_info_t *boot_info;
@@ -80,10 +83,38 @@ static unsigned long kernel_address;
 
 static unsigned long io_area_phys_base;
 
-static e2k_idr_t read_idr(void)
+#ifdef CONFIG_KVM_GUEST_KERNEL
+#define	STARTUP_TTABLE_ENTRY_OFFSET	0x10000
+
+static unsigned long
+dec_guest_mmio(unsigned long addr, u64 value, u8 size, u8 is_write)
 {
-	return native_read_IDR_reg();
+	unsigned long data[1];
+
+	if (is_write)
+		data[0] = value;
+
+	assert(!HYPERVISOR_guest_mmio_request(addr, data, size, is_write));
+
+	return data[0];
 }
+
+static void dec_writeb(u8 b, void __iomem *addr)
+{
+	dec_guest_mmio((unsigned long) addr, b, 1, 1);
+}
+
+static u8 dec_readb(void __iomem *addr)
+{
+	return dec_guest_mmio((unsigned long) addr, 0, 1, 0);
+}
+
+static u32 dec_readl(void __iomem *addr)
+{
+	return dec_guest_mmio((unsigned long) addr, 0, 4, 0);
+}
+#else
+#define	STARTUP_TTABLE_ENTRY_OFFSET	0x6000
 
 static void dec_writeb(u8 b, void __iomem *addr)
 {
@@ -99,6 +130,7 @@ static u32 dec_readl(void __iomem *addr)
 {
 	return NATIVE_READ_MAS_W((unsigned long) addr, MAS_IOADDR);
 }
+#endif
 
 static inline u8 am85c30_com_inb_command(u64 iomem_addr, u8 reg_num)
 {
@@ -434,7 +466,6 @@ static void boot_reserve_mp_table(boot_info_t *bootinfo, struct board_mem *bm)
 static void reserve_memory(boot_info_t *bootinfo, struct board_mem *bm)
 {
 	unsigned long area_base, area_size;
-	unsigned long load_offset;
 	psp_struct_t	PSP = {{{0}}, {{0}}};
 	pcsp_struct_t	PCSP  = {{{0}}, {{0}}};
 	e2k_usbr_t	USBR = {{0}};
@@ -443,8 +474,7 @@ static void reserve_memory(boot_info_t *bootinfo, struct board_mem *bm)
 
 	reserve_memory_area(bm, 0, PAGE_SIZE, 0, "0-page");
 
-	load_offset = AS(NATIVE_READ_OSCUD_LO_REG()).base - 0x10000;
-	reserve_memory_area(bm, (unsigned long) _start + load_offset,
+	reserve_memory_area(bm, (unsigned long)_start,
 			(unsigned long) (_end - _start), 0, "kernel image");
 
 	reserve_memory_area(bm, 640 * 1024 /* ROM, VGA ... */,
@@ -465,11 +495,11 @@ static void reserve_memory(boot_info_t *bootinfo, struct board_mem *bm)
 
 	boot_reserve_mp_table(bootinfo, bm);
 
-	PSP = NATIVE_NV_READ_PSP_REG();
+	PSP = READ_PSP_REG();
 	reserve_memory_area(bm, PSP.PSP_base, PSP.PSP_size, 1,
 			"kernel boot-time procedures stack");
 
-	PCSP = NATIVE_NV_READ_PCSP_REG();
+	PCSP = READ_PCSP_REG();
 	reserve_memory_area(bm, PCSP.PCSP_base, PCSP.PCSP_size, 1,
 			"kernel boot-time procedure chain stack");
 
@@ -521,35 +551,28 @@ static __always_inline void jump_to_image(unsigned long kernel_address,
 	 * Before jumping we must correct %oscud and %cud
 	 * registers which contain kernel entry address.
 	 */
-	oscud_lo = NATIVE_READ_OSCUD_LO_REG();
+	oscud_lo = READ_OSCUD_LO_REG();
 	AS(oscud_lo).base = kernel_address;
-	NATIVE_WRITE_OSCUD_LO_REG(oscud_lo);
-	NATIVE_WRITE_CUD_LO_REG(oscud_lo);
+	WRITE_OSCUD_LO_REG(oscud_lo);
+	WRITE_CUD_LO_REG(oscud_lo);
 
-	E2K_JUMP_ABSOLUTE_WITH_ARGUMENTS_2(kernel_address + 0x6000,
+	E2K_JUMP_ABSOLUTE_WITH_ARGUMENTS_2(kernel_address + STARTUP_TTABLE_ENTRY_OFFSET,
 					   n, bootblock);
 }
 
 static struct board_mem memory;
+extern int machdep_setup_features(int cpu, int revision);
 
-__section(.boot_entry)
-void decompress_kernel(int n, bootblock_struct_t *bootblock)
+/*
+ * Now we can use global variables (i.e. machine) and linker defined symbols (i.e. _bss)
+ */
+noinline void decompress_kernel_updated_got(int n, bootblock_struct_t *bootblock,
+				int bsp, e2k_idr_t idr, unsigned long orig_kernel_size)
 {
-	unsigned long load_offset;
 	struct board_mem *bm = &memory;
-	e2k_idr_t idr;
 	int ret;
 
-	/*
-	 * Only bootstrap processor proceeds to unpacking
-	 */
-	idr = read_idr();
-	if (idr.mdl >= IDR_E12C_MDL)
-		ret = dec_epic_is_bsp();
-	else
-		ret = dec_apic_is_bsp();
-
-	if (!ret) {
+	if (!bsp) {
 		while (unpacking_in_progress)
 			E2K_NOP(7);
 		/* Barrier between reading `unpacking_in_progress'
@@ -559,18 +582,21 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 	}
 
 	/*
-	 * Clear .bss ASAP
+	 * Setup machine features
 	 */
-	load_offset = AS(NATIVE_READ_OSCUD_LO_REG()).base - 0x10000;
+	assert(!machdep_setup_features(idr.IDR_mdl, idr.IDR_rev));
 
-	memset(_bss + load_offset, 0, _ebss - _bss);
+	/*
+	 * Clear .bss (guest variant uses machine)
+	 */
+	memset(_bss, 0, _ebss - _bss);
 
 	/*
 	 * Initialize console and say hello
 	 */
 	boot_info = &bootblock->info;
 
-	if (read_idr().mdl == IDR_E1CP_MDL)
+	if (read_IDR_reg().mdl == IDR_E1CP_MDL)
 		io_area_phys_base = E2K_LEGACY_SIC_IO_AREA_PHYS_BASE;
 	else
 		io_area_phys_base = E2K_FULL_SIC_IO_AREA_PHYS_BASE;
@@ -579,7 +605,7 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 
 #ifdef DEBUG
 	puts("Cleared .bss at 0x");
-	put_u64((unsigned long) _bss + load_offset, false);
+	put_u64(_bss, false);
 	puts(", size 0x");
 	put_u64(_ebss - _bss, true);
 #endif
@@ -612,19 +638,19 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 	 * Decompress the kernel
 	 */
 	kernel_address = find_free_memory(bm,
-			(unsigned long) __orig_kernel_size, 0x400000);
+			orig_kernel_size, 0x400000);
 	if (IS_ERR_VALUE(kernel_address))
 		error_loop("ERROR: could not find free memory area to unpack kernel to\n");
 
 	puts("Unpacking 0x");
-	put_u64((u64) __orig_kernel_size, false);
+	put_u64(orig_kernel_size, false);
 	puts(" bytes from 0x");
-	put_u64((unsigned long) _kernel + load_offset, false);
+	put_u64((unsigned long)_kernel, false);
 	puts(" to 0x");
 	put_u64(kernel_address, false);
 	puts("...\n");
 
-	ret = __decompress(_kernel + load_offset, _ekernel - _kernel, NULL,
+	ret = __decompress(_kernel, _ekernel - _kernel, NULL,
 			   NULL, (char *) kernel_address, 0, NULL, error);
 	if (ret)
 		error_loop("ERROR: failed to unpack kernel\n");
@@ -635,7 +661,7 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 	 * Tell others they can proceed
 	 */
 	bootblock->info.kernel_base = kernel_address;
-	bootblock->info.kernel_size = (unsigned long) __orig_kernel_size;
+	bootblock->info.kernel_size = orig_kernel_size;
 	smp_wmb(); /* Wait for unpacked kernel and bootblock changes */
 	unpacking_in_progress = 0;
 
@@ -643,4 +669,52 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 	 * Jump to the kernel
 	 */
 	jump_to_image(kernel_address, n, bootblock);
+}
+
+/*
+ * Updating GOT should be done in a separate function. Otherwise compiler might put
+ * GOT load before GOT update (even ignoring the memory clobbers).
+ * Using global variables isn't allowed here.
+ */
+__section(.boot_entry)
+void decompress_kernel(int n, bootblock_struct_t *bootblock)
+{
+	unsigned long load_offset, got, egot, addr;
+	unsigned long orig_kernel_size = 0;
+	e2k_idr_t idr;
+	int bsp;
+
+	/*
+	 * Only bootstrap processor proceeds to unpacking
+	 */
+	idr = read_IDR_reg();
+
+	if (idr.mdl >= IDR_E12C_MDL)
+		bsp = dec_epic_is_bsp();
+	else
+		bsp = dec_apic_is_bsp();
+
+	if (!bsp) {
+		while (got_updating_in_progress)
+			E2K_NOP(7);
+		/* Barrier between reading `got_updating_in_progress'
+		 * and reading GOT */
+		smp_rmb();
+	} else {
+		load_offset = AS(READ_OSCUD_LO_REG()).base - 0x10000;
+		got = (unsigned long)_got + load_offset;
+		egot = (unsigned long)_egot + load_offset;
+
+		/* orig_kernel_size should not be shifted by load_offset */
+		orig_kernel_size = (unsigned long)__orig_kernel_size;
+
+		/* Update GOT */
+		for (addr = got; addr < egot; addr += 8)
+			*((unsigned long *)addr) += load_offset;
+
+		smp_wmb(); /* Wait for GOT changes */
+		got_updating_in_progress = 0;
+	}
+
+	decompress_kernel_updated_got(n, bootblock, bsp, idr, orig_kernel_size);
 }

@@ -23,6 +23,7 @@
 
 static struct kmem_cache *user_ns_cachep __read_mostly;
 static DEFINE_MUTEX(userns_state_mutex);
+int sysctl_userns_restrict __read_mostly = 1;
 
 static bool new_idmap_permitted(const struct file *file,
 				struct user_namespace *ns, int cap_setid,
@@ -99,6 +100,10 @@ int create_user_ns(struct cred *new)
 	ret = -EPERM;
 	if (!kuid_has_mapping(parent_ns, owner) ||
 	    !kgid_has_mapping(parent_ns, group))
+		goto fail_dec;
+	if (sysctl_userns_restrict && !(capable(CAP_SYS_ADMIN) &&
+					capable(CAP_SETUID) &&
+					capable(CAP_SETGID)))
 		goto fail_dec;
 
 	ret = -ENOMEM;

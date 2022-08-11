@@ -96,8 +96,9 @@ struct iommu_domain {
 	void *iova_cookie;
 #ifdef CONFIG_MCST /* support CPU_HWBUG_CANNOT_DO_DMA_IN_NEIGHBOUR_NODE*/
 	unsigned long map_base;
-	struct idr idr_lo;
+	unsigned long *orig_phys_lo;
 	struct idr idr_hi;
+	rwlock_t lock_hi;
 #endif
 };
 

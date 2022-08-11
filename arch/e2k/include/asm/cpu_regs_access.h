@@ -134,6 +134,8 @@
 		NATIVE_WRITE_OSGD_LO_REG_VALUE(OSGD_lo_value)
 #define	BOOT_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value)			\
 		NATIVE_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value)
+#define WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
+		NATIVE_WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value)
 
 /*
  * Read/write low/high double-word Compilation Unit Register (CUD)
@@ -393,7 +395,7 @@
 /*
  * Read double-word CPU current Instruction Pointer register (IP)
  */
-#define	READ_IP_REG_VALUE()		NATIVE_NV_READ_IP_REG_VALUE()
+#define	READ_IP_REG_VALUE()		NATIVE_READ_IP_REG_VALUE()
 
 /*
  * Read debug and monitors regigisters

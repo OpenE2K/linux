@@ -114,7 +114,7 @@ static const struct file_operations l2read_proc_fops = {
 	.write   = l2read_write,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
-	.release = seq_release
+	.release = single_release
 };
 
 
@@ -177,7 +177,7 @@ static const struct file_operations l2write_proc_fops = {
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.write   = l2write_write,
-	.release = seq_release
+	.release = single_release
 };
 
 
@@ -240,7 +240,7 @@ static const struct file_operations ldrd_proc_fops = {
 	.write   = ldrd_write,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
-	.release = seq_release
+	.release = single_release
 };
 
 #endif
@@ -458,7 +458,7 @@ static const struct file_operations sicwrite_proc_fops = {
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.write   = sicwrite_write,
-	.release = seq_release
+	.release = single_release
 };
 
 

@@ -61,18 +61,14 @@ static inline int is_kprobe_break1_trap(struct pt_regs *regs)
 		return *instr == KPROBE_BREAK_1;
 }
 
-extern int kprobe_instr_debug_handle(struct pt_regs *);
-
+extern void kprobe_instr_debug_handle(struct pt_regs *);
 #else
 static inline int is_kprobe_break1_trap(struct pt_regs *regs)
 {
 	return false;
 }
 
-static inline int kprobe_instr_debug_handle(struct pt_regs *regs)
-{
-	return 0;
-}
+static inline void kprobe_instr_debug_handle(struct pt_regs *regs) { }
 #endif /* #ifdef CONFIG_KPROBES */
 
 #ifdef CONFIG_KRETPROBES

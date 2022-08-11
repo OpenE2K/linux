@@ -12,7 +12,6 @@
 #include <linux/irqflags.h>
 #include <linux/mman.h>
 
-#include <asm/alternative.h>
 #include <asm/cpu_regs.h>
 #include <asm/e2k_syswork.h>
 #include <asm/getsp_adj.h>
@@ -20,6 +19,7 @@
 #include <asm/gregs.h>
 #include <linux/uaccess.h>
 #include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/trap_table.h>
 #include <asm/regs_state.h>
 #include <asm/ucontext.h>
@@ -657,7 +657,7 @@ void return_to_the_func(long fn, bool system_fn)
 #endif
 	E2K_CLEAR_RF_112();
 }
-noinline notrace __interrupt __section(.entry_handlers)
+noinline notrace __interrupt __section(".entry.text")
 void go2guest(long fn, bool priv_guest)
 {
 	return_to_the_func(fn, priv_guest);
@@ -719,7 +719,7 @@ static int copy_context_to_signal_stack(
 /*
  * Follow function is sutable for native, host and guest kernels
  */
-notrace noinline __interrupt __section(.entry_handlers)
+notrace noinline __interrupt __section(".entry.text")
 void sighandler_trampoline_continue(void)
 {
 	e2k_addr_t sbr;
@@ -900,24 +900,20 @@ int setup_signal_stack(struct pt_regs *regs, bool is_signal)
 	return ret;
 }
 
-static void prepare_sighandler_trampoline(struct e2k_stacks *stacks)
+static int prepare_sighandler_trampoline(struct e2k_stacks *stacks)
 {
 	e2k_mem_crs_t *k_crs, crs;
 	unsigned long flags;
+	int ret;
 
 	/*
 	 * Prepare 'sighandler_trampoline' frame
 	 */
-	memset(&crs, 0, sizeof(crs));
-
-	AS(crs.cr0_lo).pf = -1ULL;
-	AS(crs.cr0_hi).ip = (u64) sighandler_trampoline >> 3;
-	AS(crs.cr1_lo).psr = AW(E2K_KERNEL_PSR_DISABLED);
-	AS(crs.cr1_lo).cui = KERNEL_CODES_INDEX;
-	if (machine.native_iset_ver < E2K_ISET_V6)
-		AS(crs.cr1_lo).ic = 1;
-	AS(crs.cr1_lo).wbs = 0;
-	AS(crs.cr1_hi).ussz = current_thread_info()->u_stack.size / 16;
+	ret = chain_stack_frame_init(&crs, sighandler_trampoline,
+			current_thread_info()->u_stack.size,
+			E2K_KERNEL_PSR_DISABLED, 0, 0, false);
+	if (ret)
+		return ret;
 
 	/*
 	 * Copy the new frame into chain stack
@@ -935,6 +931,8 @@ static void prepare_sighandler_trampoline(struct e2k_stacks *stacks)
 	/* OK, now account for the new frame in *k_crs. */
 	AS(stacks->pcsp_hi).ind += SZ_OF_CR;
 	raw_all_irq_restore(flags);
+
+	return 0;
 }
 
 int prepare_sighandler_frame(struct e2k_stacks *stacks,
@@ -950,7 +948,7 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 	e2k_usd_lo_t usd_lo;
 	e2k_usd_hi_t usd_hi;
 	e2k_sbr_t sbr;
-	int cui;
+	int ret;
 
 	/*
 	 * Calculate ucontext/siginfo address
@@ -1019,7 +1017,7 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 
 	stacks->usd_lo = usd_lo;
 	stacks->usd_hi = usd_hi;
-	stacks->top = AW(sbr);
+	stacks->top = round_up(AW(sbr), E2K_ALIGN_STACK_BASE_REG);
 
 	/*
 	 * Update procedure stack
@@ -1054,23 +1052,16 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 	/*
 	 * Update chain stack
 	 */
-	memset(crs, 0, sizeof(*crs));
+	ret = chain_stack_frame_init(crs, ksig->ka.sa.sa_handler, AS(usd_hi).size,
+			E2K_USER_INITIAL_PSR, pframe_size / EXT_4_NR_SZ,
+			(pframe_size / EXT_4_NR_SZ) / 2, true);
+	if (ret)
+		return ret;
 
-	cui = find_cui_by_ip((unsigned long) ksig->ka.sa.sa_handler);
-	if (cui < 0)
-		return cui;
-
+	/*
+	 * Flush CUT cache after modification of CUT (#117859)
+	 */
 	WRITE_CUTD_REG(READ_CUTD_REG());
-
-	AS(crs->cr0_lo).pf = -1ULL;
-	AS(crs->cr0_hi).ip = (u64) ksig->ka.sa.sa_handler >> 3;
-	AS(crs->cr1_lo).psr = AW(E2K_USER_INITIAL_PSR);
-	AS(crs->cr1_lo).cui = cui;
-	if (machine.native_iset_ver < E2K_ISET_V6)
-		AS(crs->cr1_lo).ic = 0;
-	AS(crs->cr1_lo).wbs = pframe_size / EXT_4_NR_SZ;
-	AS(crs->cr1_lo).wpsz = (pframe_size / EXT_4_NR_SZ) / 2;
-	AS(crs->cr1_hi).ussz = AS(usd_hi).size / 16;
 
 	return 0;
 }
@@ -1127,7 +1118,7 @@ int signal_rt_frame_setup(pt_regs_t *regs)
 	register struct k_sigaction	*ka = &ti->ksig.ka;
 	register kernel_siginfo_t	*info = &ti->ksig.info;
 	register rt_sigframe_t __user	*rt_sigframe;
-	u64 ss_sp, ss_stk_size, tmp;
+	u64 ss_sp, ss_stk_size, tmp_sp, tmp_sz;
 
 	DebugHS("start addr %lx regs %px fn %lx\n",
 		(trap) ? trap->tcellar[trap->curr_cnt].address : 0UL,
@@ -1174,15 +1165,17 @@ int signal_rt_frame_setup(pt_regs_t *regs)
 		if (ss_stk_size < sizeof(rt_sigframe_t))
 			return -EFAULT;
 	} else if (ss_stk_size < sizeof(rt_sigframe_t)) {
+		u64 incr;
+
 		DebugHS("user stack size 0x%llx < 0x%lx needed to pass "
 			"signal info and context\n",
 				ss_stk_size, sizeof(rt_sigframe_t));
 
-		if (expand_user_data_stack(regs,
-				sizeof(rt_sigframe_t) - ss_stk_size)) {
-			pr_info_ratelimited("[%d] %s: user data stack "
-				"overflow\n",
-					current->pid, current->comm);
+		incr = sizeof(rt_sigframe_t) - ss_stk_size + PAGE_SIZE;
+		incr = round_up(incr, E2K_ALIGN_STACK_BASE_REG);
+		if (expand_user_data_stack(regs, incr)) {
+			pr_info_ratelimited("[%d] %s: user data stack overflow\n",
+				current->pid, current->comm);
 			return -EFAULT;
 		}
 
@@ -1193,10 +1186,12 @@ int signal_rt_frame_setup(pt_regs_t *regs)
 			ss_sp, ss_stk_size);
 	}
 
-	tmp = ss_sp;
+	tmp_sp = ss_sp;
+	tmp_sz = ss_stk_size;
 	ss_sp -= sizeof(rt_sigframe_t);
 	ss_sp = round_down(ss_sp, E2K_ALIGN_STACK);
-	ss_stk_size -= (tmp - ss_sp);
+	ss_stk_size -= (tmp_sp - ss_sp);
+	BUG_ON(ss_stk_size >= tmp_sz || ss_sp >= tmp_sp);
 
 	rt_sigframe = (rt_sigframe_t *) ss_sp;
 	DebugHS("rt_sigframe %px\n", rt_sigframe);
@@ -1243,7 +1238,7 @@ int native_signal_setup(struct pt_regs *regs)
 	/*
 	 * Copy user's part of kernel hardware stacks into user
 	 */
-	ret = user_hw_stacks_copy_full(&regs->stacks, regs, &regs->crs);
+	ret = do_user_hw_stacks_copy_full(&regs->stacks, regs, &regs->crs);
 	if (ret)
 		goto free_signal_stack;
 
@@ -1251,15 +1246,15 @@ int native_signal_setup(struct pt_regs *regs)
 	 * We want user to return to sighandler_trampoline so
 	 * create fake kernel frame in user's chain stack
 	 */
-	prepare_sighandler_trampoline(&regs->stacks);
+	ret = prepare_sighandler_trampoline(&regs->stacks);
+	if (ret)
+		goto free_signal_stack;
 
 	/*
 	 * User's signal handler frame should be the last in stacks
 	 */
 	ret = prepare_sighandler_frame(&regs->stacks, pframe, &regs->crs);
-	if (ret)
-		goto free_signal_stack;
-	ret = copy_sighandler_frame(&regs->stacks, pframe, &regs->crs);
+	ret = ret ?: copy_sighandler_frame(&regs->stacks, pframe, &regs->crs);
 	if (ret)
 		goto free_signal_stack;
 
@@ -1515,7 +1510,7 @@ static int unwind_stack(e2k_pcsp_lo_t jmp_pcsp_lo, e2k_pcsp_hi_t jmp_pcsp_hi,
 {
 	unsigned long jmp_frame_address, delta;
 	struct unwind_stack_args args;
-	int ret;
+	long ret;
 
 	/* Calculate the starting parameters of data stack */
 	calculate_e2k_dstack_parameters(stacks, dstack_sp,
@@ -1585,7 +1580,8 @@ out_unlock:
 	up_read(&mm->mmap_sem);
 
 	if (ret) {
-		SIGDEBUG_PRINT("SIGKILL. longjmp(): old and new IPs have different permissions\n");
+		SIGDEBUG_PRINT("SIGKILL. longjmp(): old (0x%llx) and new (0x%llx) IPs have different permissions\n",
+				old_ip, new_ip);
 		force_sig(SIGKILL);
 	}
 	return ret;
@@ -1672,20 +1668,29 @@ static int longjmp_restore_user_frame_state(e2k_mem_crs_t *crs,
 	 * application changes 'psize' in this particular way. */
 	if (jmp_psize != AS(wd).psize) {
 		SIGDEBUG_PRINT("SIGKILL. longjmp(): corrupted setjmp_buf: wd.psize != system call psize (4)\n");
-		force_sig(SIGKILL);
-		return -EINVAL;
+		goto out;
 	}
 
-	/* Restore 'wbs' along with other frame parameters */
-	crs->cr1_lo = jmp_cr1_lo;
+	if (jmp_cr1_lo.pm) {
+		SIGDEBUG_PRINT("SIGKILL. longjmp(): corrupted setjmp_buf: cr1_lo = 0x%llx\n",
+				AW(jmp_cr1_lo));
+		goto out;
+	}
 
 	/*
-	 * Restore other fields
+	 * Restore target frame parameters
 	 */
-	AS(crs->cr0_hi).ip = AS(jmp_cr0_hi).ip;
-	AS(crs->cr1_hi).br = jmp_br;
+	crs->cr0_hi.ip = jmp_cr0_hi.ip;
+	crs->cr1_lo.wfx = jmp_cr1_lo.wfx;
+	crs->cr1_lo.wpsz = jmp_cr1_lo.wpsz;
+	crs->cr1_lo.wbs = jmp_cr1_lo.wbs;
+	crs->cr1_hi.br = jmp_br;
 
 	return 0;
+
+out:
+	force_sig(SIGKILL);
+	return -EINVAL;
 }
 
 static void longjmp_update_hw_stacks(e2k_stacks_t *stacks,
@@ -1811,7 +1816,7 @@ static void longjmp_update_dstack(struct e2k_stacks *stacks, u64 dstack_sp,
 long do_longjmp(u64 retval, u64 jmp_sigmask, e2k_cr0_hi_t jmp_cr0_hi,
 		e2k_cr1_lo_t jmp_cr1_lo, e2k_pcsp_lo_t jmp_pcsp_lo,
 		e2k_pcsp_hi_t jmp_pcsp_hi, u32 jmp_br, u32 jmp_psize,
-		u32 fpcr, u32 fpsr, u32 pfpfr, bool restore_fpu)
+		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr, bool restore_fpu)
 {
 	thread_info_t *ti = current_thread_info();
 	pt_regs_t new_regs, *regs = ti->pt_regs;
@@ -1823,7 +1828,7 @@ long do_longjmp(u64 retval, u64 jmp_sigmask, e2k_cr0_hi_t jmp_cr0_hi,
 	 * Copy user's part from kernel stacks back to user.
 	 * This also removes any need to FILL before return to user.
 	 */
-	ret = user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
+	ret = do_user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
 	if (ret)
 		return ret;
 
@@ -1898,9 +1903,9 @@ long do_longjmp(u64 retval, u64 jmp_sigmask, e2k_cr0_hi_t jmp_cr0_hi,
 	}
 
 	if (restore_fpu) {
-		WRITE_FPCR_REG_VALUE(fpcr);
-		WRITE_FPSR_REG_VALUE(fpsr);
-		WRITE_PFPFR_REG_VALUE(pfpfr);
+		WRITE_FPCR_REG(fpcr);
+		WRITE_FPSR_REG(fpsr);
+		WRITE_PFPFR_REG(pfpfr);
 	}
 
 	DebugSLJ("jump point new CR1: wbs 0x%x, wpsz 0x%x, wfx %d\n"
@@ -1945,7 +1950,9 @@ long sys_e2k_longjmp2(struct jmp_info __user *env, u64 retval)
 			(e2k_cr1_lo_t) jmp_info.cr1lo,
 			(e2k_pcsp_lo_t) jmp_info.pcsplo, (e2k_pcsp_hi_t)
 			(jmp_info.pcsphi + PCSHTP_SIGN_EXTEND(jmp_info.pcshtp)),
-			jmp_info.br, jmp_psize, 0, 0, 0, 0);
+			jmp_info.br, jmp_psize, (e2k_fpcr_t) { .word = 0},
+			(e2k_fpsr_t) { .word = 0 }, (e2k_pfpfr_t) { .word = 0},
+			false);
 }
 
 #ifdef CONFIG_PROTECTED_MODE

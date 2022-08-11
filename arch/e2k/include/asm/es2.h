@@ -17,13 +17,8 @@ struct pt_regs;
 
 extern void boot_es2_setup_arch(void);
 extern void es2_setup_machine(void);
-extern void setup_APIC_vector_handler(int vector,
-		void (*handler)(struct pt_regs *), bool system, char *name);
 extern void eldsp_interrupt(struct pt_regs *regs);
 #endif
-
-#define	ES2_CPU_VENDOR			"Elbrus-MCST"
-#define	ES2_CPU_FAMILY			4
 
 #define	ES2_NR_NODE_CPUS		2
 #define	ES2_MAX_NR_NODE_CPUS		4

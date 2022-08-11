@@ -48,7 +48,7 @@ OFFSET(TSK_TI_G_TASK, task_struct,
 	thread_info.k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].base);
 OFFSET(TSK_TI_G_MY_CPU_OFFSET, task_struct,
 	thread_info.k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_G_CPU_ID, task_struct,
+OFFSET(TSK_TI_G_CPU_ID_PREEMPT, task_struct,
 	thread_info.k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base);
 OFFSET(TSK_TI_G_VCPU_STATE_EXT, task_struct,
 	thread_info.k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].ext);
@@ -56,7 +56,7 @@ OFFSET(TSK_TI_G_TASK_EXT, task_struct,
 	thread_info.k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].ext);
 OFFSET(TSK_TI_G_MY_CPU_OFFSET_EXT, task_struct,
 	thread_info.k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_G_CPU_ID_EXT, task_struct,
+OFFSET(TSK_TI_G_CPU_ID_PREEMPT_EXT, task_struct,
 	thread_info.k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].ext);
 
 OFFSET(TSK_TI_TMP_G_VCPU_STATE, task_struct,
@@ -65,7 +65,7 @@ OFFSET(TSK_TI_TMP_G_TASK, task_struct,
 	thread_info.tmp_k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].base);
 OFFSET(TSK_TI_TMP_G_MY_CPU_OFFSET, task_struct,
 	thread_info.tmp_k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].base);
-OFFSET(TSK_TI_TMP_G_CPU_ID, task_struct,
+OFFSET(TSK_TI_TMP_G_CPU_ID_PREEMPT, task_struct,
 	thread_info.tmp_k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base);
 OFFSET(TSK_TI_TMP_G_VCPU_STATE_EXT, task_struct,
 	thread_info.tmp_k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].ext);
@@ -73,7 +73,7 @@ OFFSET(TSK_TI_TMP_G_TASK_EXT, task_struct,
 	thread_info.tmp_k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].ext);
 OFFSET(TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, task_struct,
 	thread_info.tmp_k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].ext);
-OFFSET(TSK_TI_TMP_G_CPU_ID_EXT, task_struct,
+OFFSET(TSK_TI_TMP_G_CPU_ID_PREEMPT_EXT, task_struct,
 	thread_info.tmp_k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].ext);
 #ifdef	CONFIG_VIRTUALIZATION
 OFFSET(TI_VCPU, thread_info, vcpu);
@@ -84,14 +84,14 @@ OFFSET(TI_G_VCPU_STATE, thread_info,
 OFFSET(TI_G_TASK, thread_info, k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].base);
 OFFSET(TI_G_MY_CPU_OFFSET, thread_info,
 		k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].base);
-OFFSET(TI_G_CPU_ID, thread_info, k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base);
+OFFSET(TI_G_CPU_ID_PREEMPT, thread_info, k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].base);
 OFFSET(TI_G_VCPU_STATE_EXT, thread_info,
 		k_gregs.g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].ext);
 OFFSET(TI_G_TASK_EXT, thread_info,
 		k_gregs.g[CURRENT_TASK_GREGS_PAIRS_INDEX].ext);
 OFFSET(TI_G_MY_CPU_OFFSET_EXT, thread_info,
 		k_gregs.g[MY_CPU_OFFSET_GREGS_PAIRS_INDEX].ext);
-OFFSET(TI_G_CPU_ID_EXT, thread_info,
+OFFSET(TI_G_CPU_ID_PREEMPT_EXT, thread_info,
 		k_gregs.g[SMP_CPU_ID_GREGS_PAIRS_INDEX].ext);
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
@@ -136,6 +136,16 @@ OFFSET(VCPU_ARCH_CTXT_SAVED_VALID, kvm_vcpu, arch.sw_ctxt.saved.valid);
 OFFSET(VCPU_ARCH_CTXT_SAVED_SBR, kvm_vcpu, arch.sw_ctxt.saved.sbr);
 OFFSET(VCPU_ARCH_CTXT_SAVED_USD_HI, kvm_vcpu, arch.sw_ctxt.saved.usd_hi);
 OFFSET(VCPU_ARCH_CTXT_SAVED_USD_LO, kvm_vcpu, arch.sw_ctxt.saved.usd_lo);
+
+#ifdef	CONFIG_CLW_ENABLE
+OFFSET(VCPU_ARCH_CTXT_US_CL_D, kvm_vcpu, arch.sw_ctxt.us_cl_d);
+OFFSET(VCPU_ARCH_CTXT_US_CL_B, kvm_vcpu, arch.sw_ctxt.us_cl_b);
+OFFSET(VCPU_ARCH_CTXT_US_CL_UP, kvm_vcpu, arch.sw_ctxt.us_cl_up);
+OFFSET(VCPU_ARCH_CTXT_US_CL_M0, kvm_vcpu, arch.sw_ctxt.us_cl_m0);
+OFFSET(VCPU_ARCH_CTXT_US_CL_M1, kvm_vcpu, arch.sw_ctxt.us_cl_m1);
+OFFSET(VCPU_ARCH_CTXT_US_CL_M2, kvm_vcpu, arch.sw_ctxt.us_cl_m2);
+OFFSET(VCPU_ARCH_CTXT_US_CL_M3, kvm_vcpu, arch.sw_ctxt.us_cl_m3);
+#endif
 #endif	/* CONFIG_VIRTUALIZATION */
 
 OFFSET(PT_TRAP, pt_regs, trap);
@@ -207,6 +217,7 @@ DEFINE(KERNEL_C_STACK_SIZE, KERNEL_C_STACK_SIZE);
 DEFINE(KERNEL_P_STACK_SIZE, KERNEL_P_STACK_SIZE);
 DEFINE(KERNEL_PC_STACK_SIZE, KERNEL_PC_STACK_SIZE);
 DEFINE(KERNEL_STACKS_SIZE, KERNEL_STACKS_SIZE);
+DEFINE(CPU_HWBUG_USD_ALIGNMENT, CPU_HWBUG_USD_ALIGNMENT);
 DEFINE(CPU_FEAT_TRAP_V5, CPU_FEAT_TRAP_V5);
 DEFINE(CPU_FEAT_TRAP_V6, CPU_FEAT_TRAP_V6);
 DEFINE(CPU_FEAT_QPREG, CPU_FEAT_QPREG);
@@ -218,6 +229,10 @@ DEFINE(TSK_TI_STACK_DELTA, offsetof(struct task_struct, stack) -
 #ifdef CONFIG_SMP
 DEFINE(TSK_TI_CPU_DELTA, offsetof(struct task_struct, cpu) -
 	offsetof(struct task_struct, thread_info));
+#endif
+#ifdef CONFIG_PREEMPT_LAZY
+OFFSET(TASK_TI_flags, task_struct, thread_info.flags);
+OFFSET(TASK_TI_preempt_lazy_count, task_struct, thread_info.preempt_lazy_count);
 #endif
 
 }

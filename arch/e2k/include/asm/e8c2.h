@@ -15,13 +15,8 @@ struct pt_regs;
 
 extern void boot_e8c2_setup_arch(void);
 extern void e8c2_setup_machine(void);
-extern void setup_APIC_vector_handler(int vector,
-		void (*handler)(struct pt_regs *), bool system, char *name);
 extern void sic_error_interrupt(struct pt_regs *regs);
 #endif
-
-#define	E8C2_CPU_VENDOR			ES2_CPU_VENDOR
-#define	E8C2_CPU_FAMILY			5
 
 #define	E8C2_NR_NODE_CPUS		E8C_NR_NODE_CPUS
 #define	E8C2_MAX_NR_NODE_CPUS		E8C_MAX_NR_NODE_CPUS

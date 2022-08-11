@@ -298,24 +298,6 @@ void kvm_define_kernel_hw_stacks_sizes(hw_stack_t *hw_stacks)
 	kvm_set_hw_pcs_user_size(hw_stacks, KVM_GUEST_KERNEL_PCS_SIZE);
 }
 
-void kvm_vcpu_boot_thread_init(struct task_struct *boot_task)
-{
-	thread_info_t	*boot_ti = task_thread_info(boot_task);
-	int ret;
-
-	/* FIXME: Probably it will be needed some later to register on host */
-	/* some parameters or stacks pointers of guest kernel VCPU process */
-	ret = HYPERVISOR_get_vcpu_start_thread();
-	if (ret < 0) {
-		panic("%s(): Could not get registration of guest VCPU booting "
-			"process on host, error %d\n",
-			__func__, ret);
-	}
-	/* boot_ti->gpid_nr = gpid_nr; */
-	DebugKVM("VCPU #%d booting thread was registered on host\n",
-		smp_processor_id());
-}
-
 int kvm_prepare_start_thread_frames(unsigned long entry, unsigned long sp)
 {
 	e2k_pcsp_lo_t	pcsp_lo;
@@ -909,7 +891,10 @@ int kvm_clone_prepare_spilled_user_stacks(e2k_stacks_t *child_stacks,
 
 	BUG_ON(new_task->mm == NULL || new_task->mm->pgd == NULL);
 	BUG_ON(new_task->mm != current->mm);
-	kvm_get_mm_notifier(new_ti, new_task->mm);
+
+	down_write(&new_task->mm->mmap_sem);
+	kvm_get_mm_notifier_locked(new_task->mm);
+	up_write(&new_task->mm->mmap_sem);
 
 retry:
 	gpid_nr = HYPERVISOR_clone_guest_user_stacks(&task_info);
@@ -1023,7 +1008,11 @@ int kvm_copy_spilled_user_stacks(e2k_stacks_t *child_stacks,
 						KERNEL_C_STACK_OFFSET);
 
 	BUG_ON(new_task->mm == NULL || new_task->mm->pgd == NULL);
-	kvm_get_mm_notifier(new_ti, new_task->mm);
+
+	down_write(&new_task->mm->mmap_sem);
+	kvm_get_mm_notifier_locked(new_task->mm);
+	up_write(&new_task->mm->mmap_sem);
+
 	gmmu_info.opcode = CREATE_NEW_GMM_GMMU_OPC;
 	gmmu_info.u_pptb = __pa(new_task->mm->pgd);
 

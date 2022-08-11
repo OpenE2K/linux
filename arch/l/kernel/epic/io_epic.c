@@ -6,6 +6,7 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/compiler.h>
+#include <linux/delay.h>
 #include <linux/export.h>
 #include <linux/syscore_ops.h>
 #include <linux/irq.h>
@@ -38,7 +39,13 @@ static struct ioepic {
 	/* Number of IRQ routing registers */
 	int nr_registers;
 	/* IO-EPIC config */
-	struct mpc_ioepic mp_config;
+	struct {
+		unsigned char epicver;
+		unsigned short epicid;
+		unsigned short nodeid;
+		unsigned short bus;
+		unsigned long epicaddr;
+	} mp_config;
 	/* IO-EPIC gsi routing info */
 	struct mp_ioepic_gsi gsi_config;
 	/* Saved state during suspend/resume */
@@ -103,6 +110,11 @@ static bool ioepic_has_fast_eoi(int ioepic_idx)
 int mpc_ioepic_nodeid(int ioepic_idx)
 {
 	return ioepics[ioepic_idx].mp_config.nodeid;
+}
+
+int mpc_ioepic_bus(int ioepic_idx)
+{
+	return ioepics[ioepic_idx].mp_config.bus;
 }
 
 unsigned long mpc_ioepic_addr(int ioepic_idx)
@@ -394,27 +406,19 @@ static void __target_IO_EPIC_irq(struct epic_irq_cfg *cfg, unsigned int dest)
 		__unmask_ioepic_pin(epic, pin);
 }
 
-static void irq_complete_move(struct epic_irq_cfg *cfg)
-{
-	unsigned int me, vector;
+static bool irqchip_is_ioepic(struct irq_chip *chip);
 
+#ifdef CONFIG_SMP
+static void irq_complete_move_vector(struct epic_irq_cfg *cfg, unsigned int vector)
+{
 	if (likely(!cfg->move_in_progress))
 		return;
 
-	me = smp_processor_id();
-
-#if defined CONFIG_E2K
-	vector = get_irq_regs()->interrupt_vector;
-#elif defined CONFIG_E90S
-	vector = e90s_irq_pending[me].vector;
-#else
-#error fixme
-#endif
 	/*
 	 * When the first interrupt reaches the new CPU destination, we can
 	 * safely clean up the table on the old one
 	 */
-	if (vector == cfg->vector && me == cfg->dest) {
+	if (vector == cfg->vector && smp_processor_id() == cfg->dest) {
 		cfg->move_in_progress = 0;
 		epic_send_IPI(cfg->old_dest, IRQ_MOVE_CLEANUP_VECTOR);
 		epic_printk("Finished moving vector 0x%x to CPU %d\n",
@@ -422,7 +426,31 @@ static void irq_complete_move(struct epic_irq_cfg *cfg)
 	}
 }
 
-static bool irqchip_is_ioepic(struct irq_chip *chip);
+static void irq_complete_move(struct epic_irq_cfg *cfg)
+{
+#if defined CONFIG_E2K
+	irq_complete_move_vector(cfg, get_irq_regs()->interrupt_vector);
+#elif defined CONFIG_E90S
+	irq_complete_move_vector(cfg, e90s_irq_pending[smp_processor_id()].vector);
+#else
+#error fixme
+#endif
+}
+
+void epic_irq_force_complete_move(struct irq_desc *desc)
+{
+	struct irq_data *data = irq_desc_get_irq_data(desc);
+	struct epic_irq_cfg *cfg;
+	unsigned int irq;
+
+	if (!data)
+		return;
+
+	irq = data->irq;
+	cfg = irq_data_get_irq_chip_data(data);
+	if (cfg)
+		irq_complete_move_vector(cfg, cfg->vector);
+}
 
 /* Handler of IRQ move cleanup */
 asmlinkage void epic_smp_irq_move_cleanup_interrupt(struct pt_regs *regs)
@@ -508,6 +536,9 @@ unlock:
 
 	l_irq_exit();
 }
+#else
+static inline void irq_complete_move(struct epic_irq_cfg *cfg) { }
+#endif /* CONFIG_SMP */
 
 static void ack_epic_edge(struct irq_data *data)
 {
@@ -616,7 +647,7 @@ static inline void ioepic_irqd_unmask(struct irq_data *data,
 
 static void ack_epic_level(struct irq_data *data)
 {
-	struct epic_irq_cfg *cfg = data->chip_data;
+	struct epic_irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 	bool masked;
 
 	irq_complete_move(cfg);
@@ -674,7 +705,7 @@ next:
 		if (vector == current_vector)
 			continue;
 
-		/* This vector was already taken by setup_APIC_vector_handler */
+		/* This vector was already taken by setup_PIC_vector_handler */
 		if (test_bit(vector, used_vectors))
 			goto next;
 
@@ -720,7 +751,7 @@ static int epic_assign_irq_vector(int irq, struct epic_irq_cfg *cfg,
 int __ioepic_set_affinity(struct irq_data *data, const struct cpumask *mask,
 			  unsigned int *dest_id)
 {
-	struct epic_irq_cfg *cfg = data->chip_data;
+	struct epic_irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 	unsigned int irq = data->irq;
 	int err;
 
@@ -765,7 +796,7 @@ static int native_ioepic_set_affinity(struct irq_data *data,
 
 static int ioepic_retrigger_irq(struct irq_data *data)
 {
-	struct epic_irq_cfg *cfg = data->chip_data;
+	struct epic_irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&vector_lock, flags);
@@ -975,9 +1006,9 @@ static void setup_ioepic_irq(unsigned int irq, struct epic_irq_cfg *cfg,
 		return;
 	}
 
-	epic_printk("IOEPIC[%d]: Set routing entry (%d-%d -> 0x%x -> IRQ %d Mode:%i Dest:%d)\n",
+	epic_printk("IOEPIC[%d]: Set routing entry (%d-%d -> 0x%x -> IRQ %d Mode:%i Dest:%d SID:0x%x)\n",
 		    attr->ioepic, mpc_ioepic_id(attr->ioepic), attr->ioepic_pin,
-		    cfg->vector, irq, attr->trigger, cfg->dest);
+		    cfg->vector, irq, attr->trigger, cfg->dest, attr->rid);
 
 	if (native_setup_ioepic_entry(attr->ioepic, irq, &entry, cfg->dest,
 						cfg->vector, attr)) {
@@ -1058,14 +1089,29 @@ static int pin_2_irq(int idx, int epic, int pin)
 	return irq;
 }
 
-static unsigned int irq_requester_id(int idx)
+/*
+ * Only two types of MP-table interrupts are supported: mp_FixINT and mp_INT.
+ * mp_FixINT are interrupts from EIOHub devices, directly connected to IOEPIC.
+ * mp_INT are PCI INTx (boot passes them for each bus, QEMU also passes them for virtio).
+ * Boot also passes mp_INT for system timer.
+ *
+ * mp_FixINT always passes correct bus in srcbus and devfn in srcbusirq fields.
+ * mp_INT may pass incorrect bus (ISA for system timer) or incorrect devfn (for INTx).
+ */
+
+#define	I2C_SPI_IOEPIC_DEVFN	PCI_DEVFN(2, 1)
+static unsigned int irq_requester_id(int idx, int epic)
 {
-	int bus = mp_irqs[idx].srcbus;
-	int devfn = mp_irqs[idx].srcbusirq;
+	int bus, devfn;
 	union IO_EPIC_REQ_ID rid;
 
-	if (test_bit(bus, mp_bus_not_pci))
-		return 0;
+	if (mp_irqs[idx].irqtype == mp_FixINT) {
+		bus = mp_irqs[idx].srcbus;
+		devfn = mp_irqs[idx].srcbusirq;
+	} else {
+		bus = mpc_ioepic_bus(epic);
+		devfn = I2C_SPI_IOEPIC_DEVFN;
+	}
 
 	rid.raw = 0;
 	rid.bits.bus = bus;
@@ -1073,6 +1119,15 @@ static unsigned int irq_requester_id(int idx)
 	rid.bits.fn = PCI_FUNC(devfn);
 
 	return rid.raw;
+}
+
+static void __init io_epic_reset_pin(unsigned int epic, unsigned int pin)
+{
+	/* These registers are not reset by hardware */
+	io_epic_write(epic, IOEPIC_INT_RID(pin), 0);
+	io_epic_write(epic, IOEPIC_TABLE_MSG_DATA(pin), 0);
+	io_epic_write(epic, IOEPIC_TABLE_ADDR_HIGH(pin), 0);
+	io_epic_write(epic, IOEPIC_TABLE_ADDR_LOW(pin), 0);
 }
 
 static void __init __setup_io_epic_irqs(unsigned int ioepic_idx)
@@ -1086,12 +1141,14 @@ static void __init __setup_io_epic_irqs(unsigned int ioepic_idx)
 		if (idx == -1)
 			idx = find_irq_entry(ioepic_idx, pin, mp_FixINT);
 
-		if (idx == -1)
+		if (idx == -1) {
+			io_epic_reset_pin(ioepic_idx, pin);
 			continue;
+		}
 
 		irq = pin_2_irq(idx, ioepic_idx, pin);
 		trigger = irq_trigger(idx);
-		req_id = irq_requester_id(idx);
+		req_id = irq_requester_id(idx, ioepic_idx);
 
 		if (pin < IO_EPIC_NR_REGS && trigger != pin_to_trigger[pin])
 			epic_printk("IOEPIC%d, pin %d: trigger type mismatch\n",
@@ -1112,24 +1169,6 @@ static void __init setup_io_epic_irqs(void)
 
 	for (ioepic_idx = 0; ioepic_idx < nr_ioepics; ioepic_idx++)
 		__setup_io_epic_irqs(ioepic_idx);
-}
-
-static inline void init_io_epic_traps(void)
-{
-	struct epic_irq_cfg *cfg;
-	unsigned int irq;
-
-	epic_printk("Initializing IO-EPIC traps\n");
-	for_each_active_irq(irq) {
-		if (!irqchip_is_ioepic(irq_get_chip(irq)))
-			continue;
-
-		cfg = irq_get_chip_data(irq);
-		if (cfg && !cfg->vector) {
-			epic_printk("Setting no_irq_chip for IRQ %u\n", irq);
-			irq_set_chip(irq, &no_irq_chip);
-		}
-	}
 }
 
 /*
@@ -1158,7 +1197,6 @@ void __init setup_io_epic(void)
 	 */
 	setup_ioepic_ids_from_mpc_nocheck();
 	setup_io_epic_irqs();
-	init_io_epic_traps();
 	alloc_ioepic_saved_registers();
 	/* FIXME skipping pcibios_irq_init() on guest (for passthrough) */
 	if (paravirt_enabled())
@@ -1187,7 +1225,6 @@ void __init mp_register_ioepic(int ver, int id, int node, unsigned long address,
 		return;
 	}
 
-	ioepics[idx].mp_config.type = MP_IOEPIC;
 	ioepics[idx].mp_config.epicaddr = address;
 
 	raw_spin_lock_irqsave(&ioepic_lock, flags);
@@ -1198,10 +1235,12 @@ void __init mp_register_ioepic(int ver, int id, int node, unsigned long address,
 	if (reg_id.raw == -1 && reg_version.raw == -1)
 		pr_warn("IO-EPIC (mpc_id %d) is unusable\n", id);
 
-	/* Get id and node_id from MP-table; get version from the register */
+	/* Get id, node and PCI bus from MP-table; get version from the register */
 	ioepics[idx].mp_config.epicid = id;
 	ioepics[idx].mp_config.nodeid = node;
 	ioepics[idx].mp_config.epicver = reg_version.bits.version;
+	ioepics[idx].mp_config.bus = mp_ioepic_find_bus(id);
+
 	/*
 	 * Build basic GSI lookup table to facilitate gsi->io_epic lookups
 	 * and to prevent reprogramming of IO-EPIC pins (PCI GSIs).
@@ -1218,8 +1257,8 @@ void __init mp_register_ioepic(int ver, int id, int node, unsigned long address,
 	if (gsi_cfg->gsi_end >= gsi_top)
 		gsi_top = gsi_cfg->gsi_end + 1;
 
-	pr_info("IOEPIC[%d]: epic_id %d, node %d, version %d, address 0x%lx, entries %d, GSI %d-%d\n",
-		idx, id, node, reg_version.bits.version, address,
+	pr_info("IOEPIC[%d]: epic_id %d, node %d, bus %d, version %d, address 0x%lx, entries %d, GSI %d-%d\n",
+		idx, id, node, mpc_ioepic_bus(idx), reg_version.bits.version, address,
 		reg_version.bits.entries, gsi_cfg->gsi_base, gsi_cfg->gsi_end);
 
 	nr_ioepics++;
@@ -1406,16 +1445,16 @@ void native_io_epic_print_entries(unsigned int epic, unsigned int nr_entries)
 {
 	int i;
 
-	epic_printk("NR Dest Mask Trig Stat Deli Vect  Sid\n");
+	pr_info("NR Dest Mask Trig Stat Deli Vect  Sid\n");
 
 	for (i = 0; i < nr_entries; i++) {
 		struct IO_EPIC_route_entry entry;
 
 		entry = ioepic_read_entry(epic, i);
 
-		epic_printk("%-2d %-4d %1d    %1d    %1d    %1d    0x%-3x 0x%-4x\n",
+		pr_info("%-2d %-4d %1d    %1d    %1d    %1d    0x%-3x 0x%-4x\n",
 			i,
-			entry.addr_low.bits.dst,
+			cepic_id_full_to_short(entry.addr_low.bits.dst),
 			entry.int_ctrl.bits.mask,
 			entry.int_ctrl.bits.trigger,
 			entry.int_ctrl.bits.delivery_status,
@@ -1436,19 +1475,19 @@ void print_IO_EPIC(int ioepic_idx)
 	reg_version.raw = io_epic_read(ioepic_idx, IOEPIC_VERSION);
 	raw_spin_unlock_irqrestore(&ioepic_lock, flags);
 
-	epic_printk("Printing the registers of IO-EPIC#%d:\n",
+	pr_info("Printing the registers of IO-EPIC#%d:\n",
 		mpc_ioepic_id(ioepic_idx));
-	epic_printk(".... IOEPIC_ID: 0x%x\n", reg_id.raw);
-	epic_printk("....... physical IOEPIC id: %d\n", reg_id.bits.id);
-	epic_printk("....... node id: %d\n", reg_id.bits.nodeid);
+	pr_info(".... IOEPIC_ID: 0x%x\n", reg_id.raw);
+	pr_info("....... physical IOEPIC id: %d\n", reg_id.bits.id);
+	pr_info("....... node id: %d\n", reg_id.bits.nodeid);
 
-	epic_printk(".... IOEPIC_VERSION: 0x%x\n", reg_version.raw);
-	epic_printk("....... max redirection entries: %d\n",
+	pr_info(".... IOEPIC_VERSION: 0x%x\n", reg_version.raw);
+	pr_info("....... max redirection entries: %d\n",
 		reg_version.bits.entries);
-	epic_printk("....... IO EPIC version: 0x%x\n",
+	pr_info("....... IO EPIC version: 0x%x\n",
 		reg_version.bits.version);
 
-	epic_printk(".... IRQ redirection table:\n");
+	pr_info(".... IRQ redirection table:\n");
 
 	native_io_epic_print_entries(ioepic_idx,
 		ioepics[ioepic_idx].nr_registers);
@@ -1461,16 +1500,16 @@ void print_IO_EPICs(void)
 	unsigned int irq;
 	struct irq_chip *chip;
 
-	epic_printk("Number of MP IRQ sources: %d\n", mp_irq_entries);
+	pr_info("Number of MP IRQ sources: %d\n", mp_irq_entries);
 	for (ioepic_idx = 0; ioepic_idx < nr_ioepics; ioepic_idx++)
-		epic_printk("Number of IO-EPIC #%d registers: %d.\n",
+		pr_info("Number of IO-EPIC #%d registers: %d.\n",
 		       mpc_ioepic_id(ioepic_idx),
 		       ioepics[ioepic_idx].nr_registers);
 
 	for (ioepic_idx = 0; ioepic_idx < nr_ioepics; ioepic_idx++)
 		print_IO_EPIC(ioepic_idx);
 
-	epic_printk("IRQ -> ioepic:pin\n");
+	pr_info("IRQ -> ioepic:pin\n");
 	for_each_active_irq(irq) {
 		chip = irq_get_chip(irq);
 		if (chip != &ioepic_chip)
@@ -1479,14 +1518,14 @@ void print_IO_EPICs(void)
 		cfg = irq_get_chip_data(irq);
 		if (!cfg)
 			continue;
-		epic_printk("%d -> %d:%d\n", irq, cfg->epic, cfg->pin);
+		pr_info("%d -> %d:%d\n", irq, cfg->epic, cfg->pin);
 	}
 }
 
 static inline void mask_msi_ioepic_irq(struct irq_data *data)
 {
 	unsigned long flags;
-	struct irq_cfg *cfg = data->chip_data;
+	struct irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 
 	raw_spin_lock_irqsave(&ioepic_lock, flags);
 	__mask_ioepic_pin(ioapic_cfg_get_idx(cfg), ioapic_cfg_get_pin(cfg));
@@ -1496,7 +1535,7 @@ static inline void mask_msi_ioepic_irq(struct irq_data *data)
 static inline void unmask_msi_ioepic_irq(struct irq_data *data)
 {
 	unsigned long flags;
-	struct irq_cfg *cfg = data->chip_data;
+	struct irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 
 	raw_spin_lock_irqsave(&ioepic_lock, flags);
 	__unmask_ioepic_pin(ioapic_cfg_get_idx(cfg), ioapic_cfg_get_pin(cfg));
@@ -1511,7 +1550,7 @@ void ack_msi_ioepic_edge(struct irq_data *data)
 
 void ack_msi_ioepic_level(struct irq_data *data)
 {
-	struct irq_cfg *cfg = data->chip_data;
+	struct irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 
 	ack_apic_edge(data);
 	ioepic_level_eoi(ioapic_cfg_get_idx(cfg), ioapic_cfg_get_pin(cfg));
@@ -1554,7 +1593,7 @@ msi_ioepic_set_affinity(struct irq_data *data, const struct cpumask *mask,
 {
 	unsigned int dest;
 	unsigned long flags;
-	struct irq_cfg *cfg = data->chip_data;
+	struct irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 	unsigned int pin = ioapic_cfg_get_pin(cfg);
 	unsigned int epic = ioapic_cfg_get_idx(cfg);
 	int ret;
@@ -2211,7 +2250,7 @@ static int
 epic_msi_set_affinity(struct irq_data *data, const struct cpumask *mask,
 			bool force)
 {
-	struct epic_irq_cfg *cfg = data->chip_data;
+	struct epic_irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 	struct msi_msg msg;
 	unsigned int dest;
 
@@ -2318,3 +2357,38 @@ static bool irqchip_is_ioepic(struct irq_chip *chip)
 	return chip == &ioepic_chip || chip == &msi_chip;
 }
 
+void fixup_irqs_epic(void)
+{
+	unsigned int vector;
+
+	/*
+	 * We can remove mdelay() and then send spuriuous interrupts to
+	 * new cpu targets for all the irqs that were handled previously by
+	 * this cpu. While it works, I have seen spurious interrupt messages
+	 * (nothing wrong but still...).
+	 *
+	 * So for now, retain mdelay(1) and check the IRR and then send those
+	 * interrupts to new targets as this cpu is already offlined...
+	 */
+	mdelay(1);
+
+	for (vector = FIRST_EXTERNAL_VECTOR; vector < NR_VECTORS; vector++) {
+		unsigned int irr;
+
+		if (__this_cpu_read(vector_irq[vector]) < 0)
+			continue;
+
+		irr = epic_read_w(CEPIC_PMIRR + vector / 32 * 0x4);
+		if (irr  & (1 << (vector % 32))) {
+			unsigned int irq = __this_cpu_read(vector_irq[vector]);
+			struct irq_desc *desc = irq_to_desc(irq);
+			struct irq_data *data = irq_desc_get_irq_data(desc);
+			struct irq_chip *chip = irq_data_get_irq_chip(data);
+			raw_spin_lock(&desc->lock);
+			if (chip->irq_retrigger)
+				chip->irq_retrigger(data);
+			raw_spin_unlock(&desc->lock);
+		}
+		__this_cpu_write(vector_irq[vector], -1);
+	}
+}

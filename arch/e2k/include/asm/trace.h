@@ -15,6 +15,7 @@
 #include <asm/trace-mmu-dtlb-v2.h>
 #include <asm/trace-mmu-dtlb-v6.h>
 #include <asm/trap_def.h>
+#include <asm/trace-defs.h>
 
 #define E2K_TC_TYPE_STORE	(1ULL << 17)
 #define E2K_TC_TYPE_S_F		(1ULL << 19)
@@ -125,25 +126,6 @@ TRACE_EVENT(
 			))
 );
 
-#define	mmu_print_pt_flags(entry, print, mmu_pt_v6) \
-		(mmu_pt_v6) ? E2K_TRACE_PRINT_PT_V6_FLAGS(entry, print) \
-				: \
-				E2K_TRACE_PRINT_PT_V2_FLAGS(entry, print)
-#define	print_pt_flags(entry, print)	\
-		mmu_print_pt_flags(entry, print, MMU_IS_PT_V6())
-
-#define	E2K_TRACE_PRINT_PT_FLAGS(entry, print)	print_pt_flags(entry, print)
-
-
-#define	mmu_print_dtlb_entry(entry, mmu_dtlb_v6) \
-		((mmu_dtlb_v6) ? E2K_TRACE_PRINT_DTLB_ENTRY_V2(entry) \
-				: \
-				E2K_TRACE_PRINT_DTLB_ENTRY_V6(entry))
-#define	print_dtlb_entry(entry)	\
-		mmu_print_dtlb_entry(entry, MMU_IS_DTLB_V6())
-
-#define	E2K_TRACE_PRINT_DTLB(entry)	print_dtlb_entry(entry)
-
 TRACE_EVENT(
 	unhandled_page_fault,
 
@@ -157,91 +139,19 @@ TRACE_EVENT(
 		__field(	u64,		dtlb_pud	)
 		__field(	u64,		dtlb_pmd	)
 		__field(	u64,		dtlb_pte	)
-		__field(	u64,		pgd		)
-		__field(	u64,		pud		)
-		__field(	u64,		pmd		)
-		__field(	u64,		pte		)
+		__field(	pgdval_t,	pgd		)
+		__field(	pudval_t,	pud		)
+		__field(	pmdval_t,	pmd		)
+		__field(	pteval_t,	pte		)
 		__field(	int,		pt_level	)
 	),
 
 	TP_fast_assign(
-		pgd_t *pgdp;
-		pud_t *pudp;
-		pmd_t *pmdp;
-		pte_t *ptep;
-
 		__entry->address = address;
 
-		/*
-		 * Save page table entries
-		 */
-		__entry->pt_level = 0;
-
-		if (address < TASK_SIZE) {
-			struct mm_struct *mm = current->mm;
-
-			pgdp = pgd_offset(mm, address);
-
-			__entry->pgd = pgd_val(*pgdp);
-			__entry->pt_level = 1;
-
-			if (!pgd_huge(*pgdp) && !pgd_none(*pgdp) &&
-			    !pgd_bad(*pgdp)) {
-				pudp = pud_offset(pgdp, address);
-
-				__entry->pud = pud_val(*pudp);
-				__entry->pt_level = 2;
-
-				if (!pud_huge(*pudp) && !pud_none(*pudp) &&
-				    !pud_bad(*pudp)) {
-					pmdp = pmd_offset(pudp, address);
-
-					__entry->pmd = pmd_val(*pmdp);
-					__entry->pt_level = 3;
-
-					if (!pmd_huge(*pmdp) &&
-					    !pmd_none(*pmdp) &&
-					    !pmd_bad(*pmdp)) {
-						ptep = pte_offset_map(pmdp,
-								address);
-
-						__entry->pte = pte_val(*ptep);
-						__entry->pt_level = 4;
-					}
-				}
-			}
-		} else {
-			pgdp = pgd_offset_k(address);
-
-			__entry->pgd = pgd_val(*pgdp);
-			__entry->pt_level = 1;
-
-			if (!kernel_pgd_huge(*pgdp) &&
-			    !pgd_none(*pgdp) && !pgd_bad(*pgdp)) {
-				pudp = pud_offset(pgdp, address);
-
-				__entry->pud = pud_val(*pudp);
-				__entry->pt_level = 2;
-
-				if (!kernel_pud_huge(*pudp) &&
-				    !pud_none(*pudp) && !pud_bad(*pudp)) {
-					pmdp = pmd_offset(pudp, address);
-
-					__entry->pmd = pmd_val(*pmdp);
-					__entry->pt_level = 3;
-
-					if (!kernel_pmd_huge(*pmdp) &&
-					    !pmd_none(*pmdp) &&
-					    !pmd_bad(*pmdp)) {
-						ptep = pte_offset_kernel(pmdp,
-								address);
-
-						__entry->pte = pte_val(*ptep);
-						__entry->pt_level = 4;
-					}
-				}
-			}
-		}
+		trace_get_va_translation(current->mm, address,
+			&__entry->pgd, &__entry->pud, &__entry->pmd,
+			&__entry->pte, &__entry->pt_level);
 
 		/*
 		 * Save DTLB entries.
@@ -249,30 +159,21 @@ TRACE_EVENT(
 		 * Do not access not existing entries to avoid
 		 * creating "empty" records in DTLB for no reason.
 		 */
-		__entry->dtlb_entry = get_MMU_DTLB_ENTRY(address);
-
-		if (__entry->pt_level >= 2)
-			__entry->dtlb_pud = get_MMU_DTLB_ENTRY(
-					pud_virt_offset(address));
-
-		if (__entry->pt_level >= 3)
-			__entry->dtlb_pmd = get_MMU_DTLB_ENTRY(
-					pmd_virt_offset(address));
-
-		if (__entry->pt_level >= 4)
-			__entry->dtlb_pte = get_MMU_DTLB_ENTRY(
-					pte_virt_offset(address));
+		trace_get_dtlb_translation(current->mm, address,
+			&__entry->dtlb_entry, &__entry->dtlb_pud,
+			&__entry->dtlb_pmd, &__entry->dtlb_pte,
+			__entry->pt_level);
 	),
 
 	TP_printk("\n"
 		"Page table for address 0x%lx (all f's are returned if the entry has not been read)\n"
-		"  pgd 0x%llx: %s\n"
+		"  pgd 0x%lx: %s\n"
 		"    Access mode: %s%s\n"
-		"  pud 0x%llx: %s\n"
+		"  pud 0x%lx: %s\n"
 		"    Access mode: %s%s\n"
-		"  pmd 0x%llx: %s\n"
+		"  pmd 0x%lx: %s\n"
 		"    Access mode: %s%s\n"
-		"  pte 0x%llx: %s\n"
+		"  pte 0x%lx: %s\n"
 		"    Access mode: %s%s\n"
 		"Probed DTLB entries:\n"
 		"  pud address entry 0x%llx: %s\n"
@@ -281,22 +182,26 @@ TRACE_EVENT(
 		"      address entry 0x%llx: %s"
 		,
 		__entry->address,
-		(__entry->pt_level >= 1) ? __entry->pgd : -1ULL,
-		E2K_TRACE_PRINT_PT_FLAGS(__entry->pgd, __entry->pt_level >= 1),
-		(__entry->pt_level >= 2) ? __entry->pud : -1ULL,
-		E2K_TRACE_PRINT_PT_FLAGS(__entry->pud, __entry->pt_level >= 2),
-		(__entry->pt_level >= 3) ? __entry->pmd : -1ULL,
-		E2K_TRACE_PRINT_PT_FLAGS(__entry->pmd, __entry->pt_level >= 3),
-		(__entry->pt_level >= 4) ? __entry->pte : -1ULL,
-		E2K_TRACE_PRINT_PT_FLAGS(__entry->pte, __entry->pt_level >= 4),
-		(__entry->pt_level >= 2) ? __entry->dtlb_pud : -1ULL,
-		(__entry->pt_level >= 2) ?
+		(__entry->pt_level <= E2K_PGD_LEVEL_NUM) ? __entry->pgd : -1UL,
+		E2K_TRACE_PRINT_PT_FLAGS(__entry->pgd,
+				__entry->pt_level <= E2K_PGD_LEVEL_NUM),
+		(__entry->pt_level <= E2K_PUD_LEVEL_NUM) ? __entry->pud : -1UL,
+		E2K_TRACE_PRINT_PT_FLAGS(__entry->pud,
+				__entry->pt_level <= E2K_PUD_LEVEL_NUM),
+		(__entry->pt_level <= E2K_PMD_LEVEL_NUM) ? __entry->pmd : -1UL,
+		E2K_TRACE_PRINT_PT_FLAGS(__entry->pmd,
+				__entry->pt_level <= E2K_PMD_LEVEL_NUM),
+		(__entry->pt_level <= E2K_PTE_LEVEL_NUM) ? __entry->pte : -1UL,
+		E2K_TRACE_PRINT_PT_FLAGS(__entry->pte,
+				__entry->pt_level <= E2K_PTE_LEVEL_NUM),
+		(__entry->pt_level <= E2K_PUD_LEVEL_NUM) ? __entry->dtlb_pud : -1ULL,
+		(__entry->pt_level <= E2K_PUD_LEVEL_NUM) ?
 			E2K_TRACE_PRINT_DTLB(__entry->dtlb_pud) : "(not read)",
-		(__entry->pt_level >= 3) ? __entry->dtlb_pmd : -1ULL,
-		(__entry->pt_level >= 3) ?
+		(__entry->pt_level <= E2K_PMD_LEVEL_NUM) ? __entry->dtlb_pmd : -1ULL,
+		(__entry->pt_level <= E2K_PMD_LEVEL_NUM) ?
 			E2K_TRACE_PRINT_DTLB(__entry->dtlb_pmd) : "(not read)",
-		(__entry->pt_level >= 4) ? __entry->dtlb_pte : -1ULL,
-		(__entry->pt_level >= 4) ?
+		(__entry->pt_level <= E2K_PTE_LEVEL_NUM) ? __entry->dtlb_pte : -1ULL,
+		(__entry->pt_level <= E2K_PTE_LEVEL_NUM) ?
 			E2K_TRACE_PRINT_DTLB(__entry->dtlb_pte) : "(not read)",
 		__entry->dtlb_entry,
 		E2K_TRACE_PRINT_DTLB(__entry->dtlb_entry))
@@ -387,6 +292,64 @@ TRACE_EVENT(
 		__entry->tir_lo & E2K_VA_MASK,
 		(__entry->tir_hi & TIRHI_ALS_MASK) >> TIRHI_ALS_SHIFT,
 		E2K_TRACE_PRINT_TIR_HI(__entry->tir_hi)
+		)
+);
+
+/* How many last IPs are saved in hardware TIR_lo trace for debugging */
+#define TIR_HW_TRACE_LENGTH 512
+/* How many IPs to save to ring buffer in one event. Limited because:
+ * 1) It is assumed by ring buffer internals that events are small.
+ * 2) When dumping events with [ftrace_dump_on_oops] we are limited
+ *    by printk() which outputs ~1000 symbols (LOG_LINE_MAX) at maximum. */
+#define TIR_TRACE_LENGTH 16
+#define TIR_TRACE_PARTS 32
+
+/* Output last IPs executed before a trap _without_
+ * regions that executed with frozen TIRs (i.e.
+ * without trap entry up to UNFREEZE_TIRs() call). */
+TRACE_EVENT(
+	tir_ip_trace,
+
+	TP_PROTO(int part),
+
+	TP_ARGS(part),
+
+	TP_STRUCT__entry(
+		__field(int,	part)
+		__array(void *, ip,	TIR_TRACE_LENGTH)
+	),
+
+	TP_fast_assign(
+		int i;
+
+		BUILD_BUG_ON(TIR_TRACE_PARTS * TIR_TRACE_LENGTH != TIR_HW_TRACE_LENGTH);
+		BUG_ON(part < 1 || part > TIR_TRACE_PARTS);
+		__entry->part = part;
+
+		for (i = 0; i < TIR_TRACE_LENGTH; i++) {
+			e2k_tir_lo_t tir_lo;
+
+			/* Read additional debug TIRs */
+			NATIVE_READ_TIR_HI_REG();
+			tir_lo = NATIVE_READ_TIR_LO_REG();
+
+			__entry->ip[i] = (void *) tir_lo.TIR_lo_ip;
+		}
+
+		/* For TP_printk below */
+		BUILD_BUG_ON(TIR_TRACE_LENGTH != 16);
+	),
+
+	TP_printk("last %d IPs (part %d/%d):\n"
+		"  %pS %pS %pS %pS\n"
+		"  %pS %pS %pS %pS\n"
+		"  %pS %pS %pS %pS\n"
+		"  %pS %pS %pS %pS\n",
+		TIR_TRACE_LENGTH * TIR_TRACE_PARTS, __entry->part, TIR_TRACE_PARTS,
+		__entry->ip[0], __entry->ip[1], __entry->ip[2], __entry->ip[3],
+		__entry->ip[4], __entry->ip[5], __entry->ip[6], __entry->ip[7],
+		__entry->ip[8], __entry->ip[9], __entry->ip[10], __entry->ip[11],
+		__entry->ip[12], __entry->ip[13], __entry->ip[14], __entry->ip[15]
 		)
 );
 

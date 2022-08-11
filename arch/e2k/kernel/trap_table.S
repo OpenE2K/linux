@@ -57,7 +57,7 @@ ttable_entry0:
 		{
 			stgdq,sm %qg18, 0, TSK_TI_TMP_G_MY_CPU_OFFSET
 			qpswitchd,1,sm GCPUOFFSET, GCPUOFFSET
-			qpswitchd,4,sm GCPUID, GCPUID
+			qpswitchd,4,sm GCPUID_PREEMPT, GCPUID_PREEMPT
 		}
 	ALTERNATIVE_2_OLDINSTR
 		/* Original instruction - save only 16 bits */
@@ -72,7 +72,7 @@ ttable_entry0:
 			stgdq,sm %qg18, 0, TSK_TI_TMP_G_MY_CPU_OFFSET
 			nop 2
 			movfi,1 GCPUOFFSET, GCPUOFFSET
-			movfi,4 GCPUID, GCPUID
+			movfi,4 GCPUID_PREEMPT, GCPUID_PREEMPT
 		}
 	ALTERNATIVE_3_FEATURE(CPU_FEAT_QPREG)
 
@@ -84,7 +84,7 @@ ttable_entry0:
 	}
 	{
 		rrd %osr0, GVCPUSTATE
-		stgdq,sm %qg18, 0, TSK_TI_TMP_G_CPU_ID
+		stgdq,sm %qg18, 0, TSK_TI_TMP_G_CPU_ID_PREEMPT
 	}
 	{
 		rrd %psp.hi, GCURTASK
@@ -212,21 +212,33 @@ trap_handler_switched_stacks:
 	}
 
 	/* Switch to kernel local data stack */
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_HWBUG_USD_ALIGNMENT version */
+		{
+		/* sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET */
+		rwd	%dr1, %sbr
+		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK, %dr30
+		ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK_EXT, %dr31
+		nop 1;
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Default version */
+		{
+		/* sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET */
+		rwd	%dr1, %sbr
+		ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK, %dr30
+		ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK_EXT, %dr31
+		}
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT)
 	{
-	/* sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET */
-	rwd	%dr1, %sbr
-	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK, %dr30
-	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_TASK_EXT, %dr31
-	}
-	{
-	rwd	%dr22, %usd.hi;
+	rwd	%dr23, %usd.lo
 	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_MY_CPU_OFFSET, %dr32
 	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, %dr33
 	}
 	{
-	rwd	%dr23, %usd.lo
-	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID, %dr34
-	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID_EXT, %dr35
+	rwd	%dr22, %usd.hi;
+	ldrd,2 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID_PREEMPT, %dr34
+	ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | TSK_TI_TMP_G_CPU_ID_PREEMPT_EXT, %dr35
 	}
 	{
 	rrd	%lsr, %dr16
@@ -245,8 +257,8 @@ trap_handler_switched_stacks:
 	strd,5 %dr33, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_MY_CPU_OFFSET_EXT
 	}
 	{
-	strd,2 %dr34, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID
-	strd,5 %dr35, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_EXT
+	strd,2 %dr34, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_PREEMPT
+	strd,5 %dr35, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_PREEMPT_EXT
 	}
 	{
 	nop 1; /* getsp -> use */
@@ -292,7 +304,7 @@ trap_handler_switched_stacks:
 	{
 	std	%dr14, [%dr0 + PT_LSR1]
 	std	%dr15, [%dr0 + PT_ILCR1]
-	SMP_ONLY(shld,3 GCPUID, 3, GCPUOFFSET)
+	SMP_ONLY(shld,3 GCPUID_PREEMPT, 3, GCPUOFFSET)
 	}
 	{
 	std	%dr17, [%dr0 + PT_CTPR1_HI]
@@ -311,16 +323,14 @@ trap_handler_switched_stacks:
 	ipd 2
 	disp	%ctpr1, kernel_trap_handler;
 	getsp   -(PTRACE_SZOF + TRAP_PTREGS_SZOF + 2 * 7), %dr0 ? ~ %pred1
-	SMP_ONLY(shld,4 GCPUID, 3, GCPUOFFSET)
 	}
 	{
 	rrd	%lsr, %dr16
+	ibranch kernel_data_stack_overflow ? %pred1
 	}
 	{
 	rrd	%ilcr, %dr4;
 	std,2	%dr6, [%dr0 + PT_CTRP1] ;	// regs->ctpr1 = ctpr1
-	SMP_ONLY(ldd,5 GCPUOFFSET, __per_cpu_offset, GCPUOFFSET)
-	ibranch kernel_data_stack_overflow ? %pred1
 	}
 	{
 	std,2	%dr5, [%dr0 + PT_CTRP2] ;	// regs->ctpr2 = ctpr2
@@ -404,21 +414,33 @@ trap_handler_switched_stacks:
 			       KERNEL_C_STACK_OFFSET, %dr10;		\
 		ldd,5	[sys_call_table + %dr14], %dr14 ? %pred3;	\
 	}								\
+	ALTERNATIVE_1_ALTINSTR						\
+		/* CPU_HWBUG_USD_ALIGNMENT version */			\
+		{							\
+			rwd	%dr10, %sbr;				\
+			cmpesb,1 FORMAT_32, 1, %pred2; 	/* 32 bit system call */ \
+			puttagd,2 %dr2, 0, %dr2;			\
+			addd,4 sys_ni_syscall, %dr14 ? ~ %pred3;	\
+			nop 1;						\
+		}							\
+	ALTERNATIVE_2_OLDINSTR						\
+		/* Default version */					\
+		{							\
+			rwd	%dr10, %sbr;				\
+			cmpesb,1 FORMAT_32, 1, %pred2; 	/* 32 bit system call */ \
+			puttagd,2 %dr2, 0, %dr2;			\
+			addd,4 sys_ni_syscall, %dr14 ? ~ %pred3;	\
+		}							\
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT)			\
 	{								\
-		rwd	%dr10, %sbr;					\
-		cmpesb,1 FORMAT_32, 1, %pred2; 	/* 32 bit system call */ \
-		puttagd,2 %dr2, 0, %dr2;				\
-		addd,4 sys_ni_syscall, %dr14 ? ~ %pred3;		\
-	}								\
-	{								\
-		rwd	%dr8, %usd.hi;					\
+		rwd	%dr9, %usd.lo;					\
 		PREPARE_CLW_VAL(%dr18);					\
 		puttagd,2 %dr3, 0, %dr3;				\
 		puttagd,5 %dr4, 0, %dr4;				\
 	}								\
 	{								\
 		nop 3; /* rwd %usd -> getsp */				\
-		rwd	%dr9, %usd.lo;					\
+		rwd	%dr8, %usd.hi;					\
 		PREPARE_CLW_ADDR(%dr17);				\
 		puttagd,5 %dr5, 0, %dr5;				\
 	}								\
@@ -455,7 +477,7 @@ trap_handler_switched_stacks:
 	}								\
 	{								\
 		stw,2	%r8, [ %dr7 + PT_KERNEL_ENTRY ];		\
-		SMP_ONLY(shld,4 GCPUID, 3, GCPUOFFSET);			\
+		SMP_ONLY(shld,4 GCPUID_PREEMPT, 3, GCPUOFFSET);		\
 		/* regs->g_stacks.sbr/top = %sbr */			\
 		PV_VCPU(std	%dr21, [%dr7 + PT_G_STACK+G_ST_SBR]);	\
 	}								\
@@ -765,22 +787,35 @@ ttable_entry8:
 		std,2	%dr28, 0, [%dr26] MAS_MMU_REG
 	}
 	/* Switch to kernel local data stack */
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_HWBUG_USD_ALIGNMENT version */
+		{
+			rwd	%dr1, %sbr
+			gettagd,2 %dr8, %r23
+			gettagd,5 %dr9, %r24
+			ors,1 %r17, %r19, %r19
+			ors,4 %r18, %r20, %r20
+			nop 1
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Default version */
+		{
+			rwd	%dr1, %sbr
+			gettagd,2 %dr8, %r23
+			gettagd,5 %dr9, %r24
+			ors,1 %r17, %r19, %r19
+			ors,4 %r18, %r20, %r20
+		}
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT)
 	{
-		rwd	%dr1, %sbr
-		gettagd,2 %dr8, %r23
-		gettagd,5 %dr9, %r24
-		ors,1 %r17, %r19, %r19
-		ors,4 %r18, %r20, %r20
-	}
-	{
-		rwd	%dr25, %usd.hi
+		rwd	%dr27, %usd.lo
 		gettagd,2 %dr10, %r17
 		gettagd,5 %dr11, %r18
 		sxt,1 6, %r21, %dr21
 		sxt,4 6, %r22, %dr22
 	}
 	{
-		rwd	%dr27, %usd.lo
+		rwd	%dr25, %usd.hi
 		sxt,3 6, %r0, %dr0
 		puttagd,2 %dr2, 0, %dr2
 		puttagd,5 %dr3, 0, %dr3
@@ -829,7 +864,7 @@ ttable_entry8:
 	 * size of the register window for C functions is only 8 dregs). */
 	{
 		getsp   -PTRACE_SZOF, %dr14;
-		SMP_ONLY(shld,3 GCPUID, 3, GCPUOFFSET)
+		SMP_ONLY(shld,3 GCPUID_PREEMPT, 3, GCPUOFFSET)
 
 		puttagd,2 %dr8, 0, %dr8
 		puttagd,5 %dr9, 0, %dr9
@@ -1000,14 +1035,23 @@ ttable_entry10:
 	{
 		addd,1 %dr11, KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET, %dr12
 	}
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_HWBUG_USD_ALIGNMENT version */
+		{
+			rwd	%dr12, %sbr
+			nop 1
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Default version */
+		{
+			rwd	%dr12, %sbr
+		}
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT)
 	{
-		rwd	%dr12, %sbr
+		rwd	%dr10, %usd.lo
 	}
 	{
 		rwd	%dr9, %usd.hi
-	}
-	{
-		rwd	%dr10, %usd.lo
 	}
 	{
 		rrs	%upsr, %r20
@@ -1022,7 +1066,7 @@ ttable_entry10:
 	 * size of the register window for C functions is only 8 dregs). */
 	{
 		getsp	-(6 * 8), %dr9
-		SMP_ONLY(shld,1 GCPUID, 3, GCPUOFFSET)
+		SMP_ONLY(shld,1 GCPUID_PREEMPT, 3, GCPUOFFSET)
 	}
 	{
 		stw %r20, GCURTASK, TSK_UPSR
@@ -1072,7 +1116,7 @@ osgd_to_gd:
 
 .global sighandler_trampoline
 
-.section ".entry_handlers", "ax"
+.section ".entry.text", "ax"
 .type sighandler_trampoline,@function
 sighandler_trampoline:
 	HANDLER_TRAMPOLINE	%ctpr2, 11, sighandler_trampoline_continue, 0
@@ -1080,8 +1124,16 @@ sighandler_trampoline:
 
 .global makecontext_trampoline
 
-.section ".entry_handlers", "ax"
+.section ".entry.text", "ax"
 .type makecontext_trampoline,@function
 makecontext_trampoline:
 	HANDLER_TRAMPOLINE	%ctpr2, 11, makecontext_trampoline_continue, 4
 .size $makecontext_trampoline, . - $makecontext_trampoline
+
+.global makecontext_trampoline_protected
+
+.section ".entry.text", "ax"
+.type makecontext_trampoline_protected,@function
+makecontext_trampoline_protected:
+    HANDLER_TRAMPOLINE    %ctpr2, 11, makecontext_trampoline_continue, 8
+.size $makecontext_trampoline_protected, . - $makecontext_trampoline_protected

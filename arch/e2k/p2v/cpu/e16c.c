@@ -39,6 +39,5 @@ void boot_e16c_setup_arch(void)
 	boot_machine.sic_mc_count = E16C_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = 0;	/* no MC1_ECC reg */
 	boot_machine.sic_io_str1 = 0;	/* no IO_STR1 reg */
-	boot_machine.clock_tick_rate = E16C_CLOCK_TICK_RATE;
 }
 

@@ -471,7 +471,7 @@ success:
 	/*
 	 * we may need to change valid bits in 2 cases:
 	 *
-	 * 1) !prot_none -> prot_none - must remove the valid bit to avoid
+	 * 1) !prot_none -> prot_none - can remove the valid bit to avoid
 	 * performance loss when semispeculative loads hit this area.
 	 *
 	 * 2) prot_none -> !prot_none - must set the valid bit for

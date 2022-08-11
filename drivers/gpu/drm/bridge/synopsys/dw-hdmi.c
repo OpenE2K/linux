@@ -633,9 +633,13 @@ static void hdmi_set_clk_regenerator(struct dw_hdmi *hdmi,
 	n = hdmi_compute_n(sample_rate, pixel_clk);
 
 	config3 = hdmi_readb(hdmi, HDMI_CONFIG3_ID);
-
+#ifdef CONFIG_MCST
+	/* CTS needs to be computed for AHB & GPAUD */
+	if (config3 & (HDMI_CONFIG3_AHBAUDDMA | HDMI_CONFIG3_GPAUD)) {
+#else
 	/* Only compute CTS when using internal AHB audio */
 	if (config3 & HDMI_CONFIG3_AHBAUDDMA) {
+#endif
 		/*
 		 * Compute the CTS value from the N value.  Note that CTS and N
 		 * can be up to 20 bits in total, so we need 64-bit math.  Also
@@ -659,6 +663,10 @@ static void hdmi_set_clk_regenerator(struct dw_hdmi *hdmi,
 	hdmi->audio_n = n;
 	hdmi->audio_cts = cts;
 	hdmi_set_cts_n(hdmi, cts, hdmi->audio_enable ? n : 0);
+#ifdef CONFIG_MCST /*FIXME:*/
+	if (config3 & HDMI_CONFIG3_GPAUD) /* i2s: enable 2 channels */
+		hdmi_writeb(hdmi, 3, HDMI_GP_CONF1);
+#endif
 	spin_unlock_irq(&hdmi->audio_lock);
 }
 
@@ -669,7 +677,6 @@ static void hdmi_init_clk_regenerator(struct dw_hdmi *hdmi)
 	mutex_unlock(&hdmi->audio_mutex);
 }
 
-#ifndef CONFIG_MCST
 static void hdmi_clk_regenerator_update_pixel_clock(struct dw_hdmi *hdmi)
 {
 	mutex_lock(&hdmi->audio_mutex);
@@ -677,7 +684,6 @@ static void hdmi_clk_regenerator_update_pixel_clock(struct dw_hdmi *hdmi)
 				 hdmi->sample_rate);
 	mutex_unlock(&hdmi->audio_mutex);
 }
-#endif
 
 void dw_hdmi_set_sample_rate(struct dw_hdmi *hdmi, unsigned int rate)
 {
@@ -725,7 +731,6 @@ void dw_hdmi_set_channel_allocation(struct dw_hdmi *hdmi, unsigned int ca)
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_set_channel_allocation);
 
-#ifndef CONFIG_MCST
 static void hdmi_enable_audio_clk(struct dw_hdmi *hdmi, bool enable)
 {
 	if (enable)
@@ -755,7 +760,6 @@ static void dw_hdmi_i2s_audio_disable(struct dw_hdmi *hdmi)
 {
 	hdmi_enable_audio_clk(hdmi, false);
 }
-#endif
 
 void dw_hdmi_audio_enable(struct dw_hdmi *hdmi)
 {
@@ -2445,24 +2449,29 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	/* HDMI Initialization Step B.1 */
 	hdmi_av_composer(hdmi, mode);
 
+#ifndef CONFIG_MCST /* too early: monitor sometimes fails to determine
+			correct resolution (bug 132357).*/
 	/* HDMI Initializateion Step B.2 */
 	ret = hdmi->phy.ops->init(hdmi, hdmi->phy.data, &hdmi->previous_mode);
 	if (ret)
 		return ret;
 	hdmi->phy.enabled = true;
+#endif
 
 	/* HDMI Initialization Step B.3 */
 	dw_hdmi_enable_video_path(hdmi);
 
-#ifndef CONFIG_MCST
 	if (hdmi->sink_has_audio) {
 		dev_dbg(hdmi->dev, "sink has audio support\n");
 
 		/* HDMI Initialization Step E - Configure audio */
 		hdmi_clk_regenerator_update_pixel_clock(hdmi);
+#ifdef CONFIG_MCST /*FIXME:*/
+		if (hdmi->version == 0x214a) /* e2c3 */
+			dw_hdmi_set_channel_count(hdmi, 2);
+#endif
 		hdmi_enable_audio_clk(hdmi, hdmi->audio_enable);
 	}
-#endif
 
 	/* not for DVI mode */
 	if (hdmi->sink_is_hdmi) {
@@ -2478,6 +2487,13 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	hdmi_video_packetize(hdmi);
 	hdmi_video_csc(hdmi);
 	hdmi_video_sample(hdmi);
+#ifdef CONFIG_MCST
+	/* HDMI Initialization Step D.3 */
+	ret = hdmi->phy.ops->init(hdmi, hdmi->phy.data, &hdmi->previous_mode);
+	if (ret)
+		return ret;
+	hdmi->phy.enabled = true;
+#endif
 	hdmi_tx_hdcp_config(hdmi);
 
 	dw_hdmi_clear_overflow(hdmi);
@@ -2940,7 +2956,6 @@ static int dw_hdmi_detect_phy(struct dw_hdmi *hdmi)
 	phy_type = hdmi->plat_data->phy_force_vendor ?
 				DW_HDMI_PHY_VENDOR_PHY :
 				hdmi_readb(hdmi, HDMI_CONFIG2_ID);
-
 #ifndef CONFIG_MCST
 	if (phy_type == DW_HDMI_PHY_VENDOR_PHY) {
 		/* Vendor PHYs require support from the glue layer. */
@@ -2956,14 +2971,12 @@ static int dw_hdmi_detect_phy(struct dw_hdmi *hdmi)
 		return 0;
 	}
 #endif
-
 	/* Synopsys PHYs are handled internally. */
 	for (i = 0; i < ARRAY_SIZE(dw_hdmi_phys); ++i) {
 		if (dw_hdmi_phys[i].type == phy_type) {
 			hdmi->phy.ops = &dw_hdmi_synopsys_phy_ops;
 			hdmi->phy.name = dw_hdmi_phys[i].name;
 			hdmi->phy.data = (void *)&dw_hdmi_phys[i];
-
 #ifndef CONFIG_MCST
 			if (!dw_hdmi_phys[i].configure &&
 			    !hdmi->plat_data->configure_phy) {
@@ -2972,7 +2985,6 @@ static int dw_hdmi_detect_phy(struct dw_hdmi *hdmi)
 				return -ENODEV;
 			}
 #endif
-
 			return 0;
 		}
 	}
@@ -3064,9 +3076,7 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	struct device_node *np = dev->of_node;
 	struct platform_device_info pdevinfo;
 	struct device_node *ddc_node;
-#ifndef CONFIG_MCST
 	struct dw_hdmi_cec_data cec;
-#endif	/*CONFIG_MCST*/
 	struct dw_hdmi *hdmi;
 	struct resource *iores = NULL;
 #ifdef CONFIG_MCST
@@ -3077,10 +3087,8 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	u32 val = 1;
 	u8 prod_id0;
 	u8 prod_id1;
-#ifndef CONFIG_MCST
 	u8 config0;
 	u8 config3;
-#endif	/*CONFIG_MCST*/
 
 	hdmi = devm_kzalloc(dev, sizeof(*hdmi), GFP_KERNEL);
 	if (!hdmi)
@@ -3121,6 +3129,7 @@ __dw_hdmi_probe(struct platform_device *pdev,
 
 		of_property_read_u32(np, "reg-io-width", &val);
 #ifdef CONFIG_MCST
+	hdmi->audio_enable = true;
 	val = 4;
 #endif	/*CONFIG_MCST*/
 		switch (val) {
@@ -3279,7 +3288,6 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	pdevinfo.parent = dev;
 	pdevinfo.id = PLATFORM_DEVID_AUTO;
 
-#ifndef CONFIG_MCST
 	config0 = hdmi_readb(hdmi, HDMI_CONFIG0_ID);
 	config3 = hdmi_readb(hdmi, HDMI_CONFIG3_ID);
 
@@ -3304,8 +3312,13 @@ __dw_hdmi_probe(struct platform_device *pdev,
 
 		audio.hdmi	= hdmi;
 		audio.eld	= hdmi->connector.eld;
+#ifdef CONFIG_MCST
+		audio.write	= __hdmi_writeb;
+		audio.read	= __hdmi_readb;
+#else
 		audio.write	= hdmi_writeb;
 		audio.read	= hdmi_readb;
+#endif	/*CONFIG_MCST*/
 		hdmi->enable_audio = dw_hdmi_i2s_audio_enable;
 		hdmi->disable_audio = dw_hdmi_i2s_audio_disable;
 
@@ -3328,7 +3341,6 @@ __dw_hdmi_probe(struct platform_device *pdev,
 
 		hdmi->cec = platform_device_register_full(&pdevinfo);
 	}
-#endif	/*CONFIG_MCST*/
 
 	return hdmi;
 

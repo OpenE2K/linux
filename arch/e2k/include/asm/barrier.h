@@ -9,12 +9,12 @@
 #if CONFIG_CPU_ISET >= 6
 /* Cannot use this on V5 because of load-after-store dependencies -
  * compiled kernel won't honour them */
-# define mb()	E2K_WAIT_V6(_st_c | _ld_c | _sas | _sal | _las | _lal)
+# define mb()	E2K_WAIT(_st_c | _ld_c | _sas | _sal | _las | _lal)
 #else
 # define mb()	E2K_WAIT(_st_c | _ld_c)
 #endif
-#define wmb()	E2K_WAIT_ST_C_SAS()
-#define rmb()	E2K_WAIT_LD_C_LAL()
+#define wmb()	E2K_WAIT(_st_c | _sas)
+#define rmb()	E2K_WAIT(_ld_c | _lal)
 
 /*
  * For smp_* variants add _mt modifier
@@ -22,12 +22,12 @@
 #if CONFIG_CPU_ISET >= 6
 /* Cannot use this on V5 because of load-after-store dependencies -
  * compiled kernel won't honour them */
-# define __smp_mb() E2K_WAIT_V6(_st_c | _ld_c | _sas | _sal | _las | _lal | _mt)
+# define __smp_mb() E2K_WAIT(_st_c | _ld_c | _sas | _sal | _las | _lal | _mt)
 #else
 # define __smp_mb() E2K_WAIT(_st_c | _ld_c)
 #endif
-#define __smp_wmb() E2K_WAIT_ST_C_SAS_MT()
-#define __smp_rmb() E2K_WAIT_LD_C_LAL_MT()
+#define __smp_wmb() E2K_WAIT(_st_c | _sas | _mt)
+#define __smp_rmb() E2K_WAIT(_ld_c | _lal | _mt)
 
 #define dma_rmb() __smp_rmb()
 #define dma_wmb() __smp_wmb()
@@ -37,7 +37,7 @@
 
 #if CONFIG_CPU_ISET >= 5
 # define __smp_mb__after_atomic()	barrier()
-# define __smp_mb__before_atomic()	E2K_WAIT_ST_C_SAS_LD_C_SAL_MT()
+# define __smp_mb__before_atomic()	E2K_WAIT(_st_c | _las | _ld_c | _lal | _mt)
 #elif CONFIG_CPU_ISET >= 3
 /* Atomic operations are serializing since e2s */
 # define __smp_mb__after_atomic() \
@@ -70,7 +70,7 @@ do { \
 	compiletime_assert(sizeof(*p) == 1 || sizeof(*p) == 2 || \
 			sizeof(*p) == 4 || sizeof(*p) == 8, \
 			"Need native word sized stores/loads for atomicity."); \
-	E2K_WAIT_ST_C_SAS_LD_C_SAL_MT(); \
+	E2K_WAIT(_st_c | _sas | _ld_c | _sal | _mt); \
 	WRITE_ONCE(*(p), (v)); \
 } while (0)
 #endif /* CONFIG_CPU_ISET >= 6 */

@@ -6,9 +6,6 @@
  *
  * Copyright (c) 2000-2004 by David Brownell
  */
-#ifdef CONFIG_MCST
-#define DEBUG
-#endif
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/dmapool.h>
@@ -636,9 +633,7 @@ static int ehci_run (struct usb_hcd *hcd)
 	 * be started before the port switching actions could complete.
 	 */
 	down_write(&ehci_cf_port_reset_rwsem);
-
 	ehci->rh_state = EHCI_RH_RUNNING;
-
 	ehci_writel(ehci, FLAG_CF, &ehci->regs->configured_flag);
 
 	/* Wait until HC become operational */

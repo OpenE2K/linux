@@ -58,10 +58,8 @@
 	NATIVE_WRITE_OSGD_HI_REG_VALUE(OSGD_hi.OSGD_hi_half); \
 })
 #define	NATIVE_WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
-({ \
-	NATIVE_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value); \
-	NATIVE_WRITE_OSGD_LO_REG_VALUE(OSGD_lo_value); \
-})
+	NATIVE_SET_DSREGS_CLOSED_NOEXC(osgd.lo, osgd.hi, \
+			OSGD_lo_value, OSGD_hi_value, 5)
 #define	NATIVE_WRITE_OSGD_REG(OSGD_hi, OSGD_lo) \
 ({ \
 	NATIVE_WRITE_OSGD_REG_VALUE(OSGD_hi.OSGD_hi_half, \
@@ -246,19 +244,12 @@ native_read_TIR_hi_reg(void)
 		NATIVE_SET_DSREG_OPEN(usd.lo, USD_lo_value)
 #define	NATIVE_NV_WRITE_USD_HI_REG_VALUE(USD_hi_value) \
 		NATIVE_SET_DSREG_OPEN(usd.hi, USD_hi_value)
-#define	NATIVE_NV_WRITE_USD_REG_VALUE(USD_hi_value, USD_lo_value) \
-({ \
-	NATIVE_NV_WRITE_USD_HI_REG_VALUE(USD_hi_value); \
-	NATIVE_NV_WRITE_USD_LO_REG_VALUE(USD_lo_value); \
-})
-#define	NATIVE_NV_WRITE_USD_REG(USD_hi, USD_lo) \
-({ \
-	NATIVE_NV_WRITE_USD_REG_VALUE(USD_hi.USD_hi_half, USD_lo.USD_lo_half); \
-})
 
 #define	NATIVE_NV_WRITE_USBR_USD_REG_VALUE(usbr, usd_hi, usd_lo) \
 do { \
 	NATIVE_NV_WRITE_USBR_REG_VALUE(usbr); \
+	if (cpu_has(CPU_HWBUG_USD_ALIGNMENT)) \
+		NATIVE_NV_WRITE_USD_LO_REG_VALUE(usd_lo); \
 	NATIVE_NV_WRITE_USD_HI_REG_VALUE(usd_hi); \
 	NATIVE_NV_WRITE_USD_LO_REG_VALUE(usd_lo); \
 } while (0)
@@ -266,6 +257,8 @@ do { \
 #define	NATIVE_NV_WRITE_USBR_USD_REG(usbr, usd_hi, usd_lo) \
 do { \
 	NATIVE_NV_WRITE_USBR_REG(usbr); \
+	if (cpu_has(CPU_HWBUG_USD_ALIGNMENT)) \
+		NATIVE_NV_WRITE_USD_LO_REG(usd_lo); \
 	NATIVE_NV_WRITE_USD_HI_REG(usd_hi); \
 	NATIVE_NV_WRITE_USD_LO_REG(usd_lo); \
 } while (0)
@@ -347,8 +340,13 @@ do { \
  */
 #define	NATIVE_READ_BGR_REG_VALUE()		NATIVE_GET_SREG_OPEN(bgr)
 
+#if __LCC__ > 126 || __LCC__ == 126 && __LCC_MINOR__ >= 7
+#define	NATIVE_WRITE_BGR_REG_VALUE(BGR_value)	\
+		NATIVE_SET_SREG_OPEN(bgr, BGR_value)
+#else
 #define	NATIVE_WRITE_BGR_REG_VALUE(BGR_value)	\
 		NATIVE_SET_SREG_CLOSED_NOEXC(bgr, BGR_value, 5)
+#endif
 
 /*
  * Read CPU current clock register (CLKR)
@@ -409,8 +407,7 @@ extern void native_write_SCLKM2_reg_value(unsigned long reg_value);
 /*
  * Read double-word CPU current Instruction Pointer register (IP)
  */
-#define	NATIVE_READ_IP_REG_VALUE()	NATIVE_GET_DSREG_CLOSED(ip)
-#define	NATIVE_NV_READ_IP_REG_VALUE()	NATIVE_GET_DSREG_OPEN(ip)
+#define	NATIVE_READ_IP_REG_VALUE()	NATIVE_GET_DSREG_OPEN(ip)
 
 /*
  * Read debug and monitors registers
@@ -429,20 +426,62 @@ extern void native_write_SCLKM2_reg_value(unsigned long reg_value);
 		NATIVE_SET_SREG_CLOSED_NOEXC(dibcr, DIBCR_value, 4)
 #define	NATIVE_WRITE_DIBSR_REG_VALUE(DIBSR_value)	\
 		NATIVE_SET_SREG_CLOSED_NOEXC(dibsr, DIBSR_value, 4)
-#define	NATIVE_WRITE_DIMCR_REG_VALUE(DIMCR_value)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(dimcr, DIMCR_value, 4)
+
+static inline bool is_event_pipe_frz_sensitive(int event)
+{
+	return event == 0x2e ||
+			event >= 0x30 && event <= 0x3d ||
+			event >= 0x48 && event <= 0x4a ||
+			event >= 0x58 && event <= 0x5a ||
+			event >= 0x68 && event <= 0x69;
+}
+
+static inline bool is_dimcr_pipe_frz_sensitive(e2k_dimcr_t dimcr)
+{
+	return dimcr_enabled(dimcr, 0) &&
+			is_event_pipe_frz_sensitive(AS(dimcr)[0].event) ||
+			dimcr_enabled(dimcr, 1) &&
+			is_event_pipe_frz_sensitive(AS(dimcr)[1].event);
+}
+
+#define	NATIVE_WRITE_DIMCR_REG_VALUE(DIMCR_value) \
+do { \
+	e2k_dimcr_t __new_value = { .word = (DIMCR_value) }; \
+ \
+	if (cpu_has(CPU_HWBUG_PIPELINE_FREEZE_MONITORS)) { \
+		e2k_dimcr_t __old_value = { .word = NATIVE_READ_DIMCR_REG_VALUE() }; \
+		bool __old_sensitive = is_dimcr_pipe_frz_sensitive(__old_value); \
+		bool __new_sensitive = is_dimcr_pipe_frz_sensitive(__new_value); \
+ \
+		if (__old_sensitive != __new_sensitive) { \
+			unsigned long flags; \
+ \
+			raw_all_irq_save(flags); \
+ \
+			e2k_cu_hw0_t cu_hw0 = { .word = NATIVE_READ_CU_HW0_REG_VALUE() }; \
+			cu_hw0.pipe_frz_dsbl = (__new_sensitive) ? 1 : 0; \
+			NATIVE_WRITE_CU_HW0_REG_VALUE(cu_hw0.word); \
+ \
+			raw_all_irq_restore(flags); \
+		} \
+	} \
+ \
+	/* 6 cycles delay guarantess that all counting \
+	 * is stopped and %dibsr is updated accordingly. */ \
+	NATIVE_SET_DSREG_CLOSED_NOEXC(dimcr, AW(__new_value), 5); \
+} while (0)
 #define	NATIVE_WRITE_DIBAR0_REG_VALUE(DIBAR0_value)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(dibar0, DIBAR0_value, 4)
+		NATIVE_SET_DSREG_OPEN(dibar0, DIBAR0_value)
 #define	NATIVE_WRITE_DIBAR1_REG_VALUE(DIBAR1_value)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(dibar1, DIBAR1_value, 4)
+		NATIVE_SET_DSREG_OPEN(dibar1, DIBAR1_value)
 #define	NATIVE_WRITE_DIBAR2_REG_VALUE(DIBAR2_value)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(dibar2, DIBAR2_value, 4)
+		NATIVE_SET_DSREG_OPEN(dibar2, DIBAR2_value)
 #define	NATIVE_WRITE_DIBAR3_REG_VALUE(DIBAR3_value)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(dibar3, DIBAR3_value, 4)
+		NATIVE_SET_DSREG_OPEN(dibar3, DIBAR3_value)
 #define	NATIVE_WRITE_DIMAR0_REG_VALUE(DIMAR0_value)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(dimar0, DIMAR0_value, 4)
+		NATIVE_SET_DSREG_OPEN(dimar0, DIMAR0_value)
 #define	NATIVE_WRITE_DIMAR1_REG_VALUE(DIMAR1_value)	\
-		NATIVE_SET_DSREG_CLOSED_NOEXC(dimar1, DIMAR1_value, 4)
+		NATIVE_SET_DSREG_OPEN(dimar1, DIMAR1_value)
 
 /*
  * Read/write double-word Compilation Unit Table Register (CUTD/OSCUTD)
@@ -471,7 +510,7 @@ extern void native_write_SCLKM2_reg_value(unsigned long reg_value);
 #define	NATIVE_NV_READ_PSR_REG_VALUE()	NATIVE_GET_SREG_OPEN(psr)
 
 #define	NATIVE_WRITE_PSR_REG_VALUE(PSR_value)	\
-		NATIVE_SET_SREG_CLOSED_EXC(psr, PSR_value, 5)
+		NATIVE_SET_SREG_OPEN(psr, PSR_value)
 #define	NATIVE_WRITE_PSR_IRQ_BARRIER(psr_val)	\
 		NATIVE_SET_PSR_IRQ_BARRIER(psr_val)
 
@@ -486,7 +525,7 @@ extern void native_write_SCLKM2_reg_value(unsigned long reg_value);
  */
 #define	NATIVE_NV_READ_UPSR_REG_VALUE()	NATIVE_GET_DSREG_OPEN(upsr)
 #define	NATIVE_WRITE_UPSR_REG_VALUE(UPSR_value)	\
-		NATIVE_SET_SREG_CLOSED_EXC(upsr, UPSR_value, 4)
+		NATIVE_SET_SREG_OPEN(upsr, UPSR_value)
 #define	NATIVE_WRITE_UPSR_IRQ_BARRIER(upsr_val)	\
 		NATIVE_SET_UPSR_IRQ_BARRIER(upsr_val)
 

@@ -38,10 +38,10 @@
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
-#define	DEBUG_KVM_MODE	1	/* kernel virtual machine debugging */
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
 #define	DebugKVM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_MODE)						\
+	if (DEBUG_KVM_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -220,10 +220,10 @@
 
 #undef	DEBUG_PF_EXC_RPR_MODE
 #undef	DebugEXCRPR
-#define	DEBUG_PF_EXC_RPR_MODE	1	/* page fault at recovery mode debug */
+#define	DEBUG_PF_EXC_RPR_MODE	0	/* page fault at recovery mode debug */
 #define	DebugEXCRPR(fmt, args...)					\
 ({									\
-	if (DEBUG_PF_EXC_RPR_MODE)					\
+	if (DEBUG_PF_EXC_RPR_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -1793,10 +1793,15 @@ static int handle_cu_cond_events(struct kvm_vcpu *vcpu,
 
 static int wait_trap_intc_cu(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
-	DebugWTR("intercept on wait trap is occured\n");
-
-	KVM_BUG_ON(vcpu->arch.on_idle);
-	vcpu->arch.on_idle = true;
+	/* Go to scheduler to wait for a wake up event. */
+	DebugWTR("VCPU #%d interception on wait trap, block and wait for wake up\n",
+			vcpu->vcpu_id);
+	vcpu->arch.mp_state = KVM_MP_STATE_HALTED;
+	kvm_vcpu_block(vcpu);
+	kvm_check_request(KVM_REQ_UNHALT, vcpu);
+	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
+	vcpu->arch.unhalted = false;
+	DebugWTR("VCPU #%d has been woken up, so run guest again\n", vcpu->vcpu_id);
 
 	return 0;
 }
@@ -2762,6 +2767,7 @@ out:
  * userspace.
  * Each intercept handler should return same as the function
  */
+noinline /* So that caller's %psr restoring works as intended */
 int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 {
 	struct pt_regs regs;
@@ -2954,7 +2960,7 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	 */
 	INIT_KERNEL_UPSR_REG(false	/* enable IRQs */,
 				false	/* disable NMI */);
-	SWITCH_IRQ_TO_UPSR(false	/* set CR1_LO.psr */);
+	SWITCH_IRQ_TO_UPSR(true	/* set CR1_LO.psr */);
 	trace_hardirqs_off();
 
 	/*
@@ -2982,8 +2988,17 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 
 	/*
 	 * 5) Open maskable interrupts
+	 *
+	 * Nasty hack here: we want to make sure that CEPIC_EPIC_INT interrupt
+	 * is always delivered to the current context, otherwise it is very
+	 * hard to handle synchronization.  The problem is that a concurrent
+	 * interrupts's handler might do a reschedule here:
+	 *   kernel_trap_handler() -> preempt_schedule_irq().
+	 * So we disable preemption while all interrupts are being handled.
 	 */
+	preempt_disable();
 	local_irq_enable();
+	preempt_enable();
 
 	/*
 	 * 6) Handle MU exceptions. Currently we handle only those

@@ -284,7 +284,7 @@ noinline unsigned long raw_copy_from_user(void *_to,
 		u8 tmp1;
 
 		if (hwbug) {
-			prefetchw_range((void *) src, size);
+			prefetch_nospec_range((void *) src, size);
 			E2K_WAIT(_ld_c);
 		}
 
@@ -446,7 +446,7 @@ noinline unsigned long raw_copy_in_user(void __user *_to,
 		u8 tmp1;
 
 		if (hwbug) {
-			prefetchw_range((void *) src, size);
+			prefetch_nospec_range((void *) src, size);
 			E2K_WAIT(_ld_c);
 		}
 
@@ -590,7 +590,7 @@ unsigned long __copy_user_with_tags(void *to, const void *from,
 
 	TRY_USR_PFAULT {
 		if (hwbug) {
-			prefetchw_range((void *) from, n);
+			prefetch_nospec_range((void *) from, n);
 			E2K_WAIT(_ld_c);
 		}
 

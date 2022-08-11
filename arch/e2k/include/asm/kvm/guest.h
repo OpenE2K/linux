@@ -235,7 +235,6 @@ typedef struct kvm_host_info {
 	unsigned long	features;	/* KVM and hypervisor features */
 					/* see details <asm/kvm/hypervisor.h> */
 	kvm_time_t	time;		/* current host time state */
-	int		clock_rate;	/* clock tick frequency */
 } kvm_host_info_t;
 
 /*

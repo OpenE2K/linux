@@ -19,7 +19,6 @@
 
 #include <linux/types.h>
 #include <linux/kernel.h>
-#include <asm/alternative.h>
 #include <asm/cpu_regs_types.h>
 #include <asm/e2k_api.h>
 #include <asm/aau_regs_types.h>

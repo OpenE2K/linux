@@ -376,6 +376,10 @@ static void vgacon_init(struct vc_data *c, int init)
 	 */
 	c->vc_can_do_color = vga_can_do_color;
 
+#ifdef CONFIG_MCST
+	c->vc_font.height = c->vc_cell_height = vga_video_font_height;
+#endif
+
 	/* set dimensions manually if init != 0 since vc_resize() will fail */
 	if (init) {
 		c->vc_cols = vga_video_num_columns;
@@ -384,7 +388,9 @@ static void vgacon_init(struct vc_data *c, int init)
 		vc_resize(c, vga_video_num_columns, vga_video_num_lines);
 
 	c->vc_scan_lines = vga_scan_lines;
+#ifndef CONFIG_MCST
 	c->vc_font.height = c->vc_cell_height = vga_video_font_height;
+#endif
 	c->vc_complement_mask = 0x7700;
 	if (vga_512_chars)
 		c->vc_hi_font_mask = 0x0800;

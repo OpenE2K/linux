@@ -334,141 +334,24 @@ static void mxgbe_pcs_first_init(mxgbe_priv_t *priv)
 		udelay(1);
 	}
 	if (i >= 500)
-		dev_warn(&priv->pdev->dev, "could not reset pcs\n");
-
+		dev_warn(&priv->pdev->dev,
+			 "could not reset pcs at first init\n");
 
 	/* Disable Clause 73 Auto-Negotiation */
 	/* RSTRT_AN to 1'h0 / LPM to 1'h0 / AN_EN to 1'h0
 	 * EXT_NP_CTL to 1'h1 / AN_RST to 1'h0 */
 	/*
-	mxgbe_pcs_write(priv,
-			SR_AN_CTRL,
-			0x2000);
+	mxgbe_pcs_write(priv, SR_AN_CTRL, 0x2000);
 	*/
 
 	/* Disable Clause 72 Auto-Negotiation */
 	/* RS_TR to 1'h0 / TR_EN to 1'h1 */
 	/*
-	mxgbe_pcs_write(priv,
-			SR_PMA_KR_PMD_CTRL,
-			0x0002);
+	mxgbe_pcs_write(priv, SR_PMA_KR_PMD_CTRL, 0x0002);
 	*/
-#if 0
-	mxgbe_pcs_write(priv,
-			SR_PMA_KR_PMD_CTRL,
-			0x0000);
 
-	/* Check PCS_TYPE_SEL to 4'h0 */
-	val = mxgbe_pcs_read(priv, SR_XS_PCS_CTRL2);
-	if (val & 0xF != 0) {
-		dev_warn(&priv->pdev->dev, "wrong PCS_TYPE_SEL\n");
-		/* SET PCS_TYPE_SEL to 4'h0 */
-		mxgbe_pcs_write(priv, SR_XS_PCS_CTRL2, 0x0000);
-	} else {
-		dev_dbg(&priv->pdev->dev, "PCS_TYPE_SEL - Ok\n");
-	}
-
-	/* DET_RX_REQ_0 to 1'h0, VBOOST_EN_0 to 1'h1, VBOOST_LVL to 3'h5,
-	 * TX_CLK_RDY_0 to 1'h1 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1510);
-
-	/* TX_REQ_0 to 1'h0, TX_LPD_0 to 1'h0, TX0_WIDTH to 2'h3 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0300);
-
-	/* TX0_RATE to 3'h0 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,
-			     0x0000);
-
-	/* RX_REQ_0 to 1'h0, RX_LPD_0 to 1'h0, RX0_WIDTH to 2'h3 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0300);
-
-	/* LOS_TRSHLD_0 3'h3 --> 3'h1 / LOS_TRSHLD_1 3'h0 / LOS_TRSHLD_2 3'h0
-	 * LOS_TRSHLD_3 3'h0 / LOS_LFPS_EN_0 1'h0 / LOS_LFPS_EN_3_1 3'h0 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0001);
-
-	/* RX0_RATE to 2'h0 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0000);
-#endif
-
-	/* CTLE_BOOST_0 to 5'hA, CTLE_POLE_0 to 3'h6, VGA2_GAIN_0 to 4'h7,
-	 * VGA1_GAIN_0 to 4'h7 */
 	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77CA);
-
-#if 0
-	/* CONT_ADAPT_0 to 1'h1 / CONT_OFF_CAN_0 to 1'h1 / SEQ_EQ_EN to 1'h0
-	 * PING_PONG_EN to 1'h0 / SELF_MAIN_EN to 1'h0
-	 * RX_EQ_STRT_CTRL to 1'h0 / RX_AD_REQ to 1'h0 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0011);
-
-	/* AFE_EN_0 to 1'h1, DFE_EN_0 to 1'h1 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0011);
-
-	/* MPLLA_MULTIPLIER to 8'h21
-	 * MPLLA_CAL_DISABLE to 1'h0 */
-	mxgbe_pcs_write(priv,
-			VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0,
-			0x0021);
-
-	/* MPLLA_SSC_EN, MPLLA_SSC_RANGE, MPLLA_SSC_CLK_SEL,
-	 * MPLLA_FRACN_CTRL = 0 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_MPLLA_CTRL1,
-			0x0000);
-
-	/* MPLLA_DIV_MULT, MPLLA_DIV_CLK_EN,
-	 * MPLLA_DIV8_CLK_EN = 0
-	 * MPLLA_DIV10_CLK_EN to 1'h1,
-	 * MPLLA_DIV16P5_CLK_EN to 1'h1 */
-	mxgbe_pcs_write(priv,
-			VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2,
-			0x0600);
-#endif
-
-	/* MPLLA_BANDWIDTH to 11'h4 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_MPLLA_CTRL3,
-			0x0004);
-
-#if 0
-	/* MPLLB_MULTIPLIER to 8'h21 --> 40,
-	 * MPLLB_CAL_DISABLE to 1'h0 */
-	mxgbe_pcs_write(priv,
-			VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0,
-			0x0040);
-
-	/* MPLLB_SSC_EN to 1'h0 / MPLLB_SSC_RANGE to 3'h0
-	 * MPLLB_SSC_CLK_SEL to 3'h0 / MPLLB_FRACN_CTRL to 9'h0 */
-	mxgbe_pcs_write(priv,
-			VR_XS_PMA_Gen5_12G_MPLLB_CTRL1,
-			0x0000);
-
-	/* MPLLB_DIV_MULT to 7'h0 / MPLLB_DIV_CLK_EN to 1'h0
-	 * MPLLB_DIV8_CLK_EN to 1'h0 / MPLLB_DIV10_CLK_EN to 1'h1 */
-	mxgbe_pcs_write(priv,
-			VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2,
-			0x0200);
-
-	/* MPLLB_BANDWIDTH to 11'h4 --> 7 */
-	mxgbe_pcs_write(priv,
-			VR_XS_PMA_Gen5_12G_MPLLB_CTRL3,
-			0x0007);
-
-	/* TX2RX_LB_EN_0 to 1'h0, RX2TX_LB_EN_0 to 1'h0, RX_VREF_CTRL to 5'h11,
-	 * RTUNE_REQ to 1'h0, CR_PARA_SEL to 1'h1, PLL_CTRL to 1'h0*/
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
-
-	/* REF_CLK_EN to 1'h1, REF_USE_PAD to 1'h0,
-	 * REF_CLK_DIV2 to 1'h0,
-	 * REF_RANGE to 3'h6, REF_MPLLA_DIV2 to 1'h1,
-	 * REF_MPLLB_DIV2 to 1'h1,
-	 * REF_RPT_CLK_EN to 1'h0 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
-			     0x00f1);
-
-	/* VCO_LD_VAL_0 to 13'h549 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0549);
-
-	/* VCO_REF_LD_0 to 6'h29 */
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x0029);
-#endif
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_MPLLA_CTRL3, 0x0004);
 
 #if 1
 	/* Soft Reset */

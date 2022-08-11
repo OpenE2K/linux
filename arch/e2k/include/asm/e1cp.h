@@ -13,9 +13,6 @@ extern void boot_e1cp_setup_arch(void);
 extern void e1cp_setup_machine(void);
 #endif
 
-#define	E1CP_CPU_VENDOR			ES2_CPU_VENDOR
-#define	E1CP_CPU_FAMILY			ES2_CPU_FAMILY
-
 #define E1CP_NR_NODE_CPUS		1
 #define E1CP_MAX_NR_NODE_CPUS		E1CP_NR_NODE_CPUS
 

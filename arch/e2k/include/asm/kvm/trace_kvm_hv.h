@@ -369,6 +369,42 @@ TRACE_EVENT(
 );
 
 TRACE_EVENT(
+	save_pnmirr,
+
+	TP_PROTO(u32 val),
+
+	TP_ARGS(val),
+
+	TP_STRUCT__entry(
+		__field(	u32,	val	)
+	),
+
+	TP_fast_assign(
+		__entry->val = val;
+	),
+
+	TP_printk("pnmirr val 0x%x\n", __entry->val)
+);
+
+TRACE_EVENT(
+	restore_pnmirr,
+
+	TP_PROTO(u32 val),
+
+	TP_ARGS(val),
+
+	TP_STRUCT__entry(
+		__field(	u32,	val	)
+	),
+
+	TP_fast_assign(
+		__entry->val = val;
+	),
+
+	TP_printk("pnmirr val 0x%x\n", __entry->val)
+);
+
+TRACE_EVENT(
 	save_cir,
 
 	TP_PROTO(u32 cir),

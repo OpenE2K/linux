@@ -24,20 +24,20 @@ int native_fast_sys_clock_gettime(const clockid_t which_clock,
 	return FAST_SYS_CLOCK_GETTIME(which_clock, tp);
 }
 
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int native_do_fast_gettimeofday(struct timeval *tv)
 {
 	return DO_FAST_GETTIMEOFDAY(tv);
 }
 
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int fast_sys_gettimeofday(struct timeval __user *__restrict tv,
 		struct timezone __user *__restrict tz)
 {
 	struct thread_info *const ti = READ_CURRENT_REG();
 	int ret;
 
-	prefetchw(&fsys_data);
+	prefetch_nospec(&fsys_data);
 
 #ifdef	CONFIG_KVM_HOST_MODE
 	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))

@@ -31,6 +31,5 @@ void boot_es2_setup_arch(void)
 	boot_machine.sic_mc_count = ES2_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = ES2_SIC_MC1_ECC;
 	boot_machine.sic_io_str1 = SIC_io_str1;
-	boot_machine.clock_tick_rate = ES2_CLOCK_TICK_RATE;
 }
 

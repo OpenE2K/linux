@@ -48,7 +48,7 @@
 		rrd %rpr.lo, GCPUOFFSET; \
 	} \
 	{ \
-		rrd %rpr.hi, GCPUID; \
+		rrd %rpr.hi, GCPUID_PREEMPT; \
 		/* Disable load/store generations */ \
 		crp; \
 	} \
@@ -56,7 +56,8 @@
 
 /*
  * This assumes that GVCPUSTATE points to current_thread_info()
- * and %psp.hi has been read into GCURTASK
+ * and %psp.hi has been read into GCURTASK.
+ * %pred0 == true if this is a kernel trap handler.
  *
  * %pred0 - set to "true" if PSP/PCSP should be switched.
  * %pred1 - set to "true" if RPR should be restored.
@@ -81,19 +82,20 @@
 		__VA_ARGS__ \
 	} \
 	{ \
-		rwd GCPUID, %rpr.hi ? %pred1; \
-		ldd,2 GVCPUSTATE, TI_K_PCSP_LO, GCPUID; \
+		rwd GCPUID_PREEMPT, %rpr.hi ? %pred1; \
+		ldd,2 GVCPUSTATE, TI_K_PCSP_LO, GCPUID_PREEMPT; \
 	} \
 	{ \
 		rrd %psp.lo, GCURTASK ? %pred0; \
 		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PSP_HI ? %pred0; \
-		SMP_ONLY(ldgdw,5 0, TSK_TI_CPU_DELTA, GCPUID ? ~ %pred0;) \
+		SMP_ONLY(ldgdd,5 0, TSK_TI_TMP_G_MY_CPU_OFFSET_EXT, GCPUID_PREEMPT ? ~ %pred0;) \
 	} \
 	{ \
 		rrd %pcsp.hi, GCURTASK ? %pred0; \
 		stgdd,2 GCURTASK, 0, TSK_TI_TMP_U_PSP_LO ? %pred0; \
 		/* Nothing to do if this is kernel (%pred0 == false) */ \
 		subd,1 GVCPUSTATE, TSK_TI, GCURTASK ? ~ %pred0; \
+		SMP_ONLY(ldgdd,5 0, TSK_TI_TMP_G_MY_CPU_OFFSET, GCPUOFFSET ? ~ %pred0;) \
 		ibranch trap_handler_switched_stacks ? ~ %pred0; \
 	} \
 	{ \
@@ -106,9 +108,9 @@
 		ldrd,5 GVCPUSTATE, TAGGED_MEM_LOAD_REC_OPC | PREFIX##G_MY_CPU_OFFSET_EXT, GCPUOFFSET; \
 	} \
 	{ \
-		rwd GCPUID, %pcsp.lo; \
+		rwd GCPUID_PREEMPT, %pcsp.lo; \
 		ldd,2 GVCPUSTATE, TI_K_PSP_HI, GCURTASK; \
-		ldrd,5 GVCPUSTATE, TAGGED_MEM_LOAD_REC_OPC | PREFIX##G_VCPU_STATE_EXT, GCPUID; \
+		ldrd,5 GVCPUSTATE, TAGGED_MEM_LOAD_REC_OPC | PREFIX##G_VCPU_STATE_EXT, GCPUID_PREEMPT; \
 	} \
 	{ \
 		rwd GCURTASK, %psp.hi; \
@@ -121,12 +123,12 @@
 		rrd %pshtp, GCURTASK; \
 	} \
 	{ \
-		ldrd,3 GVCPUSTATE, TAGGED_MEM_LOAD_REC_OPC | PREFIX##G_CPU_ID, GCPUOFFSET; \
-		strd,5 GCPUOFFSET, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_CPU_ID; \
+		ldrd,3 GVCPUSTATE, TAGGED_MEM_LOAD_REC_OPC | PREFIX##G_CPU_ID_PREEMPT, GCPUOFFSET; \
+		strd,5 GCPUOFFSET, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_CPU_ID_PREEMPT; \
 	} \
 	{ \
-		ldrd,3 GVCPUSTATE, TAGGED_MEM_LOAD_REC_OPC | PREFIX##G_TASK, GCPUID; \
-		strd,5 GCPUID, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_TASK; \
+		ldrd,3 GVCPUSTATE, TAGGED_MEM_LOAD_REC_OPC | PREFIX##G_TASK, GCPUID_PREEMPT; \
+		strd,5 GCPUID_PREEMPT, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_TASK; \
 	} \
 	{ \
 		nop 2; /* ld -> use  */ \
@@ -139,20 +141,21 @@
 		strd,5 GCPUOFFSET, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_MY_CPU_OFFSET_EXT; \
 	} \
 	{ \
-		SMP_ONLY(ldw,3 GVCPUSTATE, TSK_TI_CPU_DELTA, GCPUID;) \
-		strd,5 GCPUID, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_VCPU_STATE_EXT; \
+		SMP_ONLY(ldw,3 GVCPUSTATE, TSK_TI_CPU_DELTA, GCPUID_PREEMPT;) \
+		strd,5 GCPUID_PREEMPT, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_VCPU_STATE_EXT; \
 	}
 
 .macro	HANDLER_TRAMPOLINE ctprN, scallN, fn, wbsL
 /* Force load OSGD->GD. Alternative is to use non-0 CUI for kernel */
 {
-	nop
 	sdisp	\ctprN, \scallN
 }
+	/* CPU_HWBUG_VIRT_PSIZE_INTERCEPTION */
+	{ nop } { nop } { nop } { nop }
 	call	\ctprN, wbs=\wbsL
 	disp	\ctprN, \fn
 	SWITCH_HW_STACKS_FROM_USER()
-	SMP_ONLY(shld,1	GCPUID, 3, GCPUOFFSET)
+	SMP_ONLY(shld,1	GCPUID_PREEMPT, 3, GCPUOFFSET)
 {
 	SMP_ONLY(ldd,2	[ __per_cpu_offset + GCPUOFFSET ], GCPUOFFSET)
 	ct	\ctprN

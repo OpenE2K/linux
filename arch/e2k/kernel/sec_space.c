@@ -24,13 +24,14 @@
 
 void set_upt_sec_ad_shift_dsbl(void *arg)
 {
-	u64 cu_hw0 = READ_CU_HW0_REG_VALUE();
-	u64 set = (u64)arg;
+	unsigned long flags;
+	e2k_cu_hw0_t cu_hw0;
 
-	cu_hw0 = set ? (cu_hw0 | _CU_HW0_UPT_SEC_AD_SHIFT_DSBL_MASK) :
-		       (cu_hw0 & ~_CU_HW0_UPT_SEC_AD_SHIFT_DSBL_MASK);
-
-	WRITE_CU_HW0_REG_VALUE(cu_hw0);
+	raw_all_irq_save(flags);
+	cu_hw0 = READ_CU_HW0_REG();
+	cu_hw0.upt_sec_ad_shift_dsbl = (arg) ? 1 : 0;
+	WRITE_CU_HW0_REG(cu_hw0);
+	raw_all_irq_restore(flags);
 }
 
 s64 sys_el_binary(s64 work, s64 arg2, s64 arg3, s64 arg4)
@@ -124,13 +125,10 @@ s64 sys_el_binary(s64 work, s64 arg2, s64 arg3, s64 arg4)
 		break;
 	case SET_IC_NEED_FLUSH_ON_SWITCH:
 		DebugSS("SET_IC_NEED_FLUSH_ON_SWITCH: set = %lld\n", arg2);
-		if (arg2) {
-			WARN_ON(ti->last_ic_flush_cpu >= 0);
+		if (arg2)
 			ti->last_ic_flush_cpu = smp_processor_id();
-		} else {
-			WARN_ON(ti->last_ic_flush_cpu != smp_processor_id());
+		else
 			ti->last_ic_flush_cpu = -1;
-		}
 		res = 0;
 		break;
 	case SET_UPT_SEC_AD_SHIFT_DSBL:
@@ -145,8 +143,8 @@ s64 sys_el_binary(s64 work, s64 arg2, s64 arg3, s64 arg4)
 		DebugSS("SET_UPT_AEC_AD_SHIFT_DSBL\n");
 		res = -EPERM;
 		if (machine.native_iset_ver >= E2K_ISET_V6) {
-			u64 cu_hw0 = READ_CU_HW0_REG_VALUE();
-			res = (cu_hw0 & _CU_HW0_UPT_SEC_AD_SHIFT_DSBL_MASK) ? 1 : 0;
+			e2k_cu_hw0_t cu_hw0 = READ_CU_HW0_REG();
+			res = cu_hw0.upt_sec_ad_shift_dsbl;
 		}
 		break;
 	default:

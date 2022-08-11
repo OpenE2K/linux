@@ -71,8 +71,8 @@ CFLAGS_REMOVE_ttable_tmp.o := -fprofile-generate-kernel
 
 CFLAGS_ptrace.o += -Wframe-larger-than=12288
 
-obj-y	+=	trap_table.o ttable.o page_tables.o process.o entry_user.o \
-		signal.o io.o setup.o time.o sys_e2k.o traps.o \
+obj-y	+=	trap_table.o ttable.o page_tables.o process.o copy-hw-stacks.o \
+		entry_user.o signal.o io.o setup.o time.o sys_e2k.o traps.o \
 		systable.o ptrace.o e2k_syswork.o sys_32.o $(GDBSTART) \
 		proc_context.o backtrace.o trace_clock.o topology.o \
 		rtc.o e2k.o trace.o nmi.o getsp.o e2k-iommu.o alternative.o \
@@ -90,7 +90,7 @@ obj-y				+= cpu/
 
 ifeq ($(CONFIG_E2K_MACHINE),y)
 else
-CFLAGS_e2k_sic.o		= $(CFLAGS_E2K_SIC)
+#CFLAGS_e2k_sic.o		= $(CFLAGS_E2K_SIC)
 endif
 obj-y				+= e2k_sic.o
 
@@ -129,12 +129,20 @@ obj-$(CONFIG_FUNCTION_GRAPH_TRACER) += ftrace_graph_entry.o
 obj-$(CONFIG_STACKTRACE)        += stacktrace.o
 obj-$(CONFIG_E2K_STACKS_TRACER) += trace_stack.o
 obj-$(CONFIG_HOTPLUG_CPU) += hotplug-cpu.o
+ifeq ($(PROFILE_GENERATE), 1)
 obj-$(CONFIG_EPROF_KERNEL) += libeprof/
+endif
 obj-$(CONFIG_OF) += devtree.o
 obj-$(CONFIG_E2K_KEXEC) += kexec.o
 
 # For E2K_WAIT_ALL and atomic operations support on phys memory
-CFLAGS_kexec.o += -DE2K_P2V -fno-ld-spec
+CFLAGS_kexec.o += -DE2K_P2V
+ifeq ($(call cc-option-yn,-fno-semi-spec-ld -fno-spec-ld),y)
+	CFLAGS_kexec.o += -fno-semi-spec-ld -fno-spec-ld
+else
+	CFLAGS_kexec.o += -fno-ld-spec
+endif
+
 GCOV_PROFILE_kexec.o := n # Since it disables virtual memory
 
 kernelclean:	dummy

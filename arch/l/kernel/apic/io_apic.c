@@ -2693,7 +2693,7 @@ int ioapic_retrigger_irq(struct irq_data *data)
  */
 
 #ifdef CONFIG_SMP
-void send_cleanup_vector(struct irq_cfg *cfg)
+static void send_cleanup_vector(struct irq_cfg *cfg)
 {
 	cpumask_var_t cleanup_mask;
 
@@ -2770,7 +2770,7 @@ unlock:
 	l_irq_exit();
 }
 
-static void __irq_complete_move(struct irq_cfg *cfg, unsigned vector)
+static void irq_complete_move_vector(struct irq_cfg *cfg, unsigned vector)
 {
 	unsigned me;
 
@@ -2786,18 +2786,18 @@ static void __irq_complete_move(struct irq_cfg *cfg, unsigned vector)
 static void irq_complete_move(struct irq_cfg *cfg)
 {
 #if defined CONFIG_E2K
-	__irq_complete_move(cfg, (unsigned int)
+	irq_complete_move_vector(cfg, (unsigned int)
 			get_irq_regs()->interrupt_vector);
 #elif defined CONFIG_E90S
-	__irq_complete_move(cfg, (unsigned int)
+	irq_complete_move_vector(cfg, (unsigned int)
 			e90s_irq_pending[smp_processor_id()].vector);
 #else
 
-	__irq_complete_move(cfg, ~get_irq_regs()->orig_ax);
+	irq_complete_move_vector(cfg, ~get_irq_regs()->orig_ax);
 #endif
 }
 
-void irq_force_complete_move(struct irq_desc *desc)
+void apic_irq_force_complete_move(struct irq_desc *desc)
 {
 	struct irq_data *data = irq_desc_get_irq_data(desc);
 	struct irq_cfg *cfg;
@@ -2807,12 +2807,9 @@ void irq_force_complete_move(struct irq_desc *desc)
 		return;
 
 	irq = data->irq;
- 
-	cfg = irq_get_chip_data(irq);
-	if (!cfg)
-		return;
-
-	__irq_complete_move(cfg, cfg->vector);
+	cfg = irq_data_get_irq_chip_data(data);
+	if (cfg)
+		irq_complete_move_vector(cfg, cfg->vector);
 }
 #else
 static inline void irq_complete_move(struct irq_cfg *cfg) { }
@@ -2946,9 +2943,9 @@ static bool io_apic_level_ack_pending(struct irq_cfg *cfg)
 static inline bool ioapic_irqd_mask(struct irq_data *data, struct irq_cfg *cfg)
 {
 	/* If we are moving the irq we need to mask it */
-	if (unlikely(irqd_is_setaffinity_pending(data) &&
-		     !irqd_irq_inprogress(data))) {
-		mask_ioapic(cfg);
+	if (unlikely(irqd_is_setaffinity_pending(data))) {
+		if (!irqd_irq_masked(data))
+			mask_ioapic(cfg);
 		return true;
 	}
 	return false;
@@ -2986,7 +2983,9 @@ static inline void ioapic_irqd_unmask(struct irq_data *data,
 		 */
 		if (!io_apic_level_ack_pending(cfg))
 			irq_move_masked_irq(data);
-		unmask_ioapic(cfg);
+		/* If the IRQ is masked in the core, leave it: */
+		if (!irqd_irq_masked(data))
+			unmask_ioapic(cfg);
 	}
 }
 #else
@@ -4553,4 +4552,40 @@ unsigned int ioapic_cfg_get_pin(struct irq_cfg *cfg)
 unsigned int ioapic_cfg_get_idx(struct irq_cfg *cfg)
 {
 	return cfg->irq_2_pin->apic;
+}
+
+void fixup_irqs_apic(void)
+{
+	unsigned int vector;
+
+	/*
+	 * We can remove mdelay() and then send spuriuous interrupts to
+	 * new cpu targets for all the irqs that were handled previously by
+	 * this cpu. While it works, I have seen spurious interrupt messages
+	 * (nothing wrong but still...).
+	 *
+	 * So for now, retain mdelay(1) and check the IRR and then send those
+	 * interrupts to new targets as this cpu is already offlined...
+	 */
+	mdelay(1);
+
+	for (vector = FIRST_EXTERNAL_VECTOR; vector < NR_VECTORS; vector++) {
+		unsigned int irr;
+
+		if (__this_cpu_read(vector_irq[vector]) < 0)
+			continue;
+
+		irr = apic_read(APIC_IRR + (vector / 32 * 0x10));
+		if (irr  & (1 << (vector % 32))) {
+			unsigned int irq = __this_cpu_read(vector_irq[vector]);
+			struct irq_desc *desc = irq_to_desc(irq);
+			struct irq_data *data = irq_desc_get_irq_data(desc);
+			struct irq_chip *chip = irq_data_get_irq_chip(data);
+			raw_spin_lock(&desc->lock);
+			if (chip->irq_retrigger)
+				chip->irq_retrigger(data);
+			raw_spin_unlock(&desc->lock);
+		}
+		__this_cpu_write(vector_irq[vector], -1);
+	}
 }

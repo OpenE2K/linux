@@ -97,10 +97,13 @@ void kvm_set_mach_type_id(void)
 static void
 e2k_virt_setup_cpu_info(cpuinfo_e2k_t *cpu_info)
 {
-	strncpy(cpu_info->vendor, E2K_VIRT_CPU_VENDOR, 16);
+	e2k_idr_t IDR;
+
+	IDR = read_IDR_reg();
+	strncpy(cpu_info->vendor, ELBRUS_CPU_VENDOR, 16);
 	cpu_info->family = E2K_VIRT_CPU_FAMILY;
-	cpu_info->model  = E2K_VIRT_CPU_MODEL;
-	cpu_info->revision = E2K_VIRT_CPU_REVISION;
+	cpu_info->model  = IDR.IDR_mdl;
+	cpu_info->revision = IDR.IDR_rev;
 }
 
 void e2k_virt_shutdown(void)

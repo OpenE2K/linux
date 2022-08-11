@@ -15,13 +15,8 @@ struct pt_regs;
 
 extern void boot_e2s_setup_arch(void);
 extern void e2s_setup_machine(void);
-extern void setup_APIC_vector_handler(int vector,
-		void (*handler)(struct pt_regs *), bool system, char *name);
 extern void sic_error_interrupt(struct pt_regs *regs);
 #endif
-
-#define	E2S_CPU_VENDOR			ES2_CPU_VENDOR
-#define	E2S_CPU_FAMILY			ES2_CPU_FAMILY
 
 #define	E2S_NR_NODE_CPUS		4
 #define	E2S_MAX_NR_NODE_CPUS		E2S_NR_NODE_CPUS

@@ -22,6 +22,7 @@
 #include <asm/trap_table.h>
 #include <asm/hw_stacks.h>
 #include <asm/regs_state.h>
+#include <asm/copy-hw-stacks.h>
 
 #include <asm/kvm/mm.h>
 #include <asm/kvm/thread_info.h>
@@ -302,12 +303,13 @@ kvm_get_guest_thread_info(struct kvm *kvm, int gpid_nr)
 
 #define	RETURN_TO_GUEST_KERNEL_DATA_STACK(__ti, __g_usd_size)		\
 ({									\
+	e2k_sbr_t	sbr = { { 0 } };				\
 	e2k_usd_lo_t	usd_lo = { { 0 } };				\
 	e2k_usd_hi_t	usd_hi = { { 0 } };				\
-	NATIVE_NV_WRITE_SBR_REG_VALUE((__ti)->u_stack.top);		\
+	sbr.SBR_base = (__ti)->u_stack.top;				\
 	usd_hi.USD_hi_size = (__g_usd_size);				\
 	usd_lo.USD_lo_base = (__ti)->u_stack.bottom + (__g_usd_size);	\
-	NATIVE_NV_WRITE_USD_REG(usd_hi, usd_lo);			\
+	NATIVE_NV_WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo);		\
 })
 
 #define	KVM_SAVE_GUEST_KERNEL_GREGS_FROM_TI(__ti,			\
@@ -498,20 +500,6 @@ static __always_inline void
 kvm_set_guest_hw_pcs_user_size(hw_stack_t *hw_stacks, e2k_size_t u_pcs_size)
 {
 	set_hw_pcs_user_size(hw_stacks, u_pcs_size);
-}
-
-static __always_inline long
-kvm_get_vcpu_start_thread(void)
-{
-	/* FIXME: Probably it will be needed some later to register on host */
-	/* some parameters or stacks pointers of guest kernel VCPU process */
-	return 0;
-}
-static inline int kvm_start_vcpu_guest_thread(struct kvm_vcpu *vcpu,
-					struct task_struct *host_task)
-{
-	panic("%s(): the function was deleted\n", __func__);
-	return -EINVAL;
 }
 
 extern int kvm_copy_hw_stacks_frames(struct kvm_vcpu *vcpu,

@@ -31,6 +31,8 @@
 #include <linux/mman.h>
 #include <linux/sched/idle.h>
 #include <linux/security.h>
+#include <linux/mmu_context.h>
+#include <linux/sched/mm.h>
 
 #include <trace/events/power.h>
 
@@ -39,6 +41,7 @@
 #include <asm/cpu.h>
 #include <asm/getsp_adj.h>
 #include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/a.out.h>
 #include <asm/mmu_context.h>
 #include <asm/pgalloc.h>
@@ -149,6 +152,15 @@ extern bool debug_clone_guest;
 #define	DEBUG_CORE_DUMP		0	/* coredump */
 #define DebugCD(...)		DebugPrint(DEBUG_CORE_DUMP, ##__VA_ARGS__)
 
+
+struct user_stack_free_work {
+	unsigned long		stack_base;
+	e2k_size_t		max_stack_size;
+	struct mm_struct	*mm;
+	struct delayed_work	work;
+};
+
+
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
 	memcpy(dst, src, sizeof(*dst));
@@ -213,14 +225,21 @@ static void clean_pc_stack_zero_frame(void *addr, bool user)
 unsigned long *__alloc_thread_stack_node(int node)
 {
 	void *address;
+	struct page *page;
 
-	address = alloc_pages_exact_nid(node, THREAD_SIZE,
-			GFP_KERNEL_ACCOUNT | __GFP_NORETRY | __GFP_NOWARN);
+	//TODO when arch-indep. part is fixed switch back to
+	//alloc_pages_exact_nid() instead to not waste memory.
+	page = alloc_pages_node(node,
+			GFP_KERNEL_ACCOUNT | __GFP_NORETRY | __GFP_NOWARN,
+			THREAD_SIZE_ORDER);
+	address = (page) ? page_address(page) : NULL;
+#ifdef CONFIG_VMAP_STACK
 	if (!address)
 		address = __vmalloc_node_range(THREAD_SIZE, THREAD_ALIGN,
 				VMALLOC_START, VMALLOC_END, GFP_KERNEL_ACCOUNT,
 				PAGE_KERNEL, 0, node,
 				__builtin_return_address(0));
+#endif
 
 	if (cpu_has(CPU_HWBUG_FALSE_SS) && address)
 		clean_pc_stack_zero_frame(address + KERNEL_PC_STACK_OFFSET, false);
@@ -233,15 +252,22 @@ unsigned long *alloc_thread_stack_node(struct task_struct *task, int node)
 {
 	unsigned long *stack = __alloc_thread_stack_node(node);
 	task->stack = stack;
+#ifdef CONFIG_VMAP_STACK
+	task->stack_vm_area = find_vm_area(stack);
+#endif
 	return stack;
 }
 
 void __free_thread_stack(void *address)
 {
+#ifdef CONFIG_VMAP_STACK
 	if (!is_vmalloc_addr(address))
-		free_pages_exact(address, THREAD_SIZE);
+		__free_pages(virt_to_page(address), THREAD_SIZE_ORDER);
 	else
 		vfree(address);
+#else
+	free_pages_exact(address, THREAD_SIZE);
+#endif
 }
 
 void free_thread_stack(struct task_struct *task)
@@ -260,6 +286,44 @@ void free_thread_stack(struct task_struct *task)
 
 	__free_thread_stack(task->stack);
 	task->stack = NULL;
+#ifdef CONFIG_VMAP_STACK
+	task->stack_vm_area = NULL;
+#endif
+}
+
+int free_vm_stack_cache(unsigned int cpu)
+{
+	return 0;
+}
+
+static void user_stack_free_work_fn(struct work_struct *work)
+{
+	struct user_stack_free_work *w;
+	unsigned long stack_base;
+	e2k_size_t max_stack_size;
+	struct mm_struct *mm;
+	int ret;
+
+	w = container_of(to_delayed_work(work), typeof(*w), work);
+	stack_base = w->stack_base;
+	max_stack_size = w->max_stack_size;
+	mm = w->mm;
+
+	use_mm(mm);
+	ret = vm_munmap_notkillable(stack_base, max_stack_size);
+	DebugHS("stack base 0x%lx max stack size 0x%lx, munmap returned %d\n",
+		stack_base, max_stack_size, ret);
+	unuse_mm(mm);
+
+	if (ret == 0) {
+		kfree(w);
+		mmput(mm);
+	} else if (ret == -ENOMEM) {
+		queue_delayed_work(system_long_wq, to_delayed_work(work),
+			msecs_to_jiffies(MSEC_PER_SEC));
+	} else {
+		BUG();
+	}
 }
 
 static void free_user_stack(void *stack_base, e2k_size_t max_stack_size)
@@ -269,7 +333,23 @@ static void free_user_stack(void *stack_base, e2k_size_t max_stack_size)
 	ret = vm_munmap_notkillable((unsigned long) stack_base, max_stack_size);
 	DebugHS("stack base 0x%llx max stack size 0x%lx, munmap returned %d\n",
 			(u64) stack_base, max_stack_size, ret);
-	BUG_ON(ret);
+	if (ret == -ENOMEM) {
+		struct user_stack_free_work *work = kmalloc(sizeof(*work), GFP_KERNEL);
+
+		BUG_ON(!work);
+
+		work->stack_base = (unsigned long) stack_base;
+		work->max_stack_size = max_stack_size;
+		work->mm = current->mm;
+
+		mmget(current->mm);
+
+		INIT_DELAYED_WORK(&work->work, user_stack_free_work_fn);
+		queue_delayed_work(system_long_wq, &work->work,
+			msecs_to_jiffies(MSEC_PER_SEC));
+	} else if (ret != 0) {
+		BUG();
+	}
 }
 
 static void *alloc_user_hard_stack(size_t stack_size,
@@ -742,7 +822,7 @@ native_goto_new_user_hard_stk(e2k_stacks_t *stacks)
 
 #define printk printk_fixed_args
 #define panic panic_fixed_args
-__section(.entry_handlers)
+__section(".entry.text")
 notrace noinline __interrupt void
 do_switch_to_user_func(start_fn start_func, e2k_size_t us_size, int cui)
 {
@@ -1093,13 +1173,18 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 
 	/*
 	 * We don't return to handle_sys_call() so call
-	 * syscall_trace_leave() manually.
+	 * syscall_trace_leave() and co manually.
 	 */
 	if (unlikely(ti->flags & _TIF_WORK_SYSCALL_TRACE)) {
 		struct pt_regs *regs = current_pt_regs();
 
-		if (regs && user_mode(regs))
+		if (regs && user_mode(regs)) {
+			if (!TASK_IS_PROTECTED(current))
+				SAVE_SYSCALL_RVAL(regs, 0);
+			else
+				SAVE_PSYSCALL_RVAL(regs, 0, 0, 0, 0, 0, 0);
 			syscall_trace_leave(regs);
+		}
 	}
 
 	/*
@@ -1557,7 +1642,8 @@ int native_copy_kernel_stacks(struct task_struct *new_task,
 	e2k_mem_crs_t crs;
 	e2k_psr_t psr;
 	unsigned long *p_frame, reserved_frame_size;
-	e2k_mem_crs_t *c_frame;
+	e2k_mem_crs_t *c_frames;
+	int ret;
 
 	/*
 	 * How kernel thread creation works.
@@ -1591,23 +1677,17 @@ int native_copy_kernel_stacks(struct task_struct *new_task,
 	/*
 	 * Prepare @fn's frame in chain stack.
 	 */
-	memset(&crs, 0, sizeof(crs));
-
-	AS(crs.cr0_lo).pf = -1ULL;
-	AS(crs.cr0_hi).ip = fn >> 3;
 	psr = NATIVE_NV_READ_PSR_REG();
 	/* function kernel_thread() can be started from trap to dump */
 	/* all stacks state on VMs and VCPUs */
 	BUG_ON((psr.PSR_sge == 0) && !current_is_in_trap());
-	AS(crs.cr1_lo).psr = AW(psr);
-	AS(crs.cr1_lo).cui = KERNEL_CODES_INDEX;
-	AS(crs.cr1_lo).ic = !cpu_has(CPU_FEAT_ISET_V6);
-	AS(crs.cr1_lo).wbs = 1;
-	AS(crs.cr1_hi).ussz = AS(new_sw_regs->usd_hi).size / 16;
+	ret = chain_stack_frame_init(&crs, (void *) fn,
+			AS(new_sw_regs->usd_hi).size, psr, 1, 0, false);
+	if (ret)
+		return ret;
 
-	c_frame = (e2k_mem_crs_t *) (AS(new_sw_regs->pcsp_lo).base +
-				     2 * SZ_OF_CR);
-	*c_frame = crs;
+	c_frames = (e2k_mem_crs_t *) AS(new_sw_regs->pcsp_lo).base;
+	c_frames[2] = crs;
 
 	/*
 	 * Prepare frame to catch errors
@@ -1615,8 +1695,7 @@ int native_copy_kernel_stacks(struct task_struct *new_task,
 	AS(crs.cr0_hi).ip = (u64) reserved_frame >> 3;
 	AS(crs.cr1_lo).wbs = reserved_frame_size / EXT_4_NR_SZ;
 
-	c_frame = (e2k_mem_crs_t *) (AS(new_sw_regs->pcsp_lo).base + SZ_OF_CR);
-	*c_frame = crs;
+	c_frames[1] = crs;
 
 	memset((void *) AS(new_sw_regs->psp_lo).base, 0, reserved_frame_size);
 
@@ -1699,6 +1778,7 @@ void clear_thread_info(struct task_struct *task)
 #if defined(CONFIG_SECONDARY_SPACE_SUPPORT)
 	thread_info->rp_start = 0;
 	thread_info->rp_end = 0;
+	thread_info->last_ic_flush_cpu = -1;
 #endif
 
 #if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
@@ -2195,7 +2275,7 @@ void native_deactivate_mm(struct task_struct *dead_task, struct mm_struct *mm)
 	 * There may be coredump in progress
 	 */
 	if (regs)
-		user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
+		do_user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
 
 #ifdef CONFIG_MLT_STORAGE
 	/*
@@ -2589,6 +2669,54 @@ SYSCALL_DEFINE5(arch_prctl, int, option,
 		break;
 	}
 	return error;
+}
+
+/**
+ * chain_stack_frame_init - initialize chain stack frame for current
+ *			    task from provided parameters
+ * @crs - frame to initialize
+ * @fn_ptr - IP to return to
+ * @dstack_size - free size of data stack _after_ return
+ * @wbs - cr1_lo.wbs value
+ * @wpsz - cr1_lo.wpsz value
+ * @user - execute in user or kernel mode
+ *
+ * We could try to derive @user and cui from @fn_ptr by comparing it
+ * to TASK_SIZE but we must not: if user controls @fn_ptr value then
+ * this would be a security hole.
+ */
+int chain_stack_frame_init(e2k_mem_crs_t *crs, void *fn_ptr,
+		size_t dstack_size, e2k_psr_t psr,
+		int wbs, int wpsz, bool user)
+{
+	unsigned long fn = (unsigned long) fn_ptr;
+
+	if (user && psr.pm)
+		return -EPERM;
+
+	memset(crs, 0, sizeof(*crs));
+
+	AS(crs->cr0_lo).pf = -1ULL;
+	AS(crs->cr0_hi).ip = fn >> 3;
+	AS(crs->cr1_lo).psr = AW(psr);
+	AS(crs->cr1_lo).wbs = wbs;
+	AS(crs->cr1_lo).wpsz = wpsz;
+	AS(crs->cr1_hi).ussz = dstack_size / 16;
+
+	if (user) {
+		int cui = find_cui_by_ip(fn);
+		if (cui < 0)
+			return cui;
+		if (machine.native_iset_ver < E2K_ISET_V6)
+			AS(crs->cr1_lo).ic = 0;
+		AS(crs->cr1_lo).cui = cui;
+	} else {
+		if (machine.native_iset_ver < E2K_ISET_V6)
+			AS(crs->cr1_lo).ic = 1;
+		AS(crs->cr1_lo).cui = KERNEL_CODES_INDEX;
+	}
+
+	return 0;
 }
 
 #ifdef CONFIG_PREEMPT_RT

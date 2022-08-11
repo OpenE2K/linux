@@ -85,12 +85,6 @@ static inline void queued_spin_unlock(struct qspinlock *lock)
 		native_queued_spin_unlock(lock);
 }
 
-# define vcpu_is_preempted vcpu_is_preempted
-static inline bool vcpu_is_preempted(long cpu)
-{
-	return false;
-}
-
 #endif /* !CONFIG_PARAVIRT_SPINLOCKS */
 
 #include <asm-generic/qspinlock.h>

@@ -28,5 +28,10 @@ SECTIONS {
 		arch/e2k/boot/cpiggy.o(.rodata)
 		_ekernel = .;
 	}
+	.got : {
+		_got = .;
+		*(.got)
+		_egot = .;
+	}
 	_end = .;
 }

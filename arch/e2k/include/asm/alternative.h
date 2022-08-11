@@ -177,14 +177,19 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
  * oldinstr is padded with jump and nops at compile time if altinstr is
  * longer. altinstr is padded with jump and nops at run-time during patching.
  */
-#define alternative(oldinstr, altinstr, facility, clobbers...) \
-	asm volatile (ALTERNATIVE(oldinstr, altinstr, facility) \
-			::: clobbers)
+#define alternative(oldinstr, altinstr, _facility, clobbers...) \
+	_Pragma("no_asm_inline") \
+	asm volatile (ALTERNATIVE(oldinstr, altinstr, %[facility]) \
+			:: [facility] "i" (_facility) : clobbers)
 
-#define alternative_2(oldinstr, altinstr1, facility1, altinstr2, facility2) \
-	asm volatile (ALTERNATIVE_2(oldinstr, altinstr1, facility1, \
-				    altinstr2, facility2) \
-			::: clobbers)
+#define alternative_2(oldinstr, altinstr1, _facility1, altinstr2, _facility2) \
+	_Pragma("no_asm_inline") \
+	asm volatile (ALTERNATIVE_2(oldinstr, altinstr1, %[facility1], \
+				    altinstr2, %[facility2]) \
+			: \
+			: [facility1] "i" (_facility1), \
+			  [facility2] "i" (_facility2) \
+			: clobbers)
 
 /*
  * How to use:

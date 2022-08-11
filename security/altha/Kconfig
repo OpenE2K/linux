@@ -1,0 +1,11 @@
+config SECURITY_ALTHA
+	bool "AltHa security module"
+	depends on SECURITY
+	default n
+	help
+	  Some hardening options:
+	    * ignore SUID on binaries (with exceptions possible);
+	    * prevent running selected script interprers in interactive move;
+	    * WxorX for filesystems (with exceptions possible);
+
+	  If you are unsure how to answer this question, answer N.

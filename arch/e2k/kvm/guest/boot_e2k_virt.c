@@ -42,7 +42,6 @@ boot_e2k_virt_setup_arch(void)
 	boot_machine.max_nr_node_cpus = E2K_VIRT_MAX_NR_NODE_CPUS;
 	boot_machine.nr_node_cpus = E2K_VIRT_NR_NODE_CPUS;
 	boot_machine.node_iolinks = E2K_VIRT_NODE_IOLINKS;
-	boot_machine.clock_tick_rate = kvm_vcpu_host_clock_rate();
 }
 
 /*

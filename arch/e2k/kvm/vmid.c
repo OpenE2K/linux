@@ -7,14 +7,15 @@
 #include <linux/mm.h>
 #include <linux/export.h>
 #include <linux/init.h>
+#include <asm/e2k_debug.h>
 #include "vmid.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
-#define	DEBUG_KVM_MODE	1	/* kernel virtual machine debugging */
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
 #define	DebugKVM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_MODE)						\
+	if (DEBUG_KVM_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 

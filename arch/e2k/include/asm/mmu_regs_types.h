@@ -733,6 +733,7 @@ typedef	unsigned long			clw_reg_t;
 #ifndef	__ASSEMBLY__
 
 typedef union {
+	u32 half_word[2];
 	struct {               /* structure of register */
 		u32 user    : 1;     /*  [ 0: 0] */
 		u32 system  : 1;     /*  [ 1: 1] */
@@ -755,7 +756,10 @@ typedef union {
 		u64 unus9 : 4;
 		u64 b3    : 8;
 		u64 unu10 : 4;
-		u64 unu11 : 16;
+		u64 unu11 : 1;
+		u64 m0    : 1;
+		u64 m1    : 1;
+		u64 unu12 : 13;
 	};
 	union {
 		struct {

@@ -17,7 +17,8 @@ LD	= $(shell $(CC) -print-prog-name=ld)
 OBJCOPY	= $(shell $(CC) -print-prog-name=objcopy)
 
 KBUILD_CFLAGS += -fkernel -gline -masm-inline $(call cc-option,-fforbid-fp) \
-		 $(call cc-option,-fmax-errors=5) $(call cc-option,-fno-loop-apb)
+		 $(call cc-option,-fmax-errors=5) $(call cc-option,-fno-loop-apb) \
+		 -fno-ident
 
 ifeq ($(PROFILE_GENERATE), 1)
 KBUILD_CFLAGS += -fprofile-generate-kernel
@@ -47,7 +48,7 @@ ifdef CONFIG_SMP_DAM_BUG
  KBUILD_CFLAGS += -fno-dam-call
 endif
 
-CFLAGS_GENERIC	:= -march=elbrus-v2
+CFLAGS_GENERIC	:= -march=elbrus-v$(CONFIG_E2K_MINVER)
 CFLAGS_ES2	:= -mtune=elbrus-2c+
 CFLAGS_E2S	:= -mtune=elbrus-4c
 CFLAGS_E8C	:= -mtune=elbrus-8c

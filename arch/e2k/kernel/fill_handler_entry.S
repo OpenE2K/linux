@@ -1,6 +1,6 @@
 #include <asm/trap_table.h>
 
-.section ".entry_handlers", "ax"
+.section ".entry.text", "ax"
 
 .global fill_handler_0
 fill_handler_0:

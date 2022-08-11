@@ -34,7 +34,7 @@
 #define READ_SSCLKM3_REG()	READ_SCLKM3_REG()
 #define READ_SCURRENT_REG()	READ_CURRENT_REG()
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 u64 fast_syscall_read_sclkr(void)
 {

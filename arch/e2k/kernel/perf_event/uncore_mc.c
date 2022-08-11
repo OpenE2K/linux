@@ -7,7 +7,7 @@
 #include <asm/perf_event_uncore.h>
 
 static u8 mc_enabled[MAX_NUMNODES] __read_mostly;
-static struct e2k_uncore *e2k_uncore_mc;
+static struct e2k_uncore *e2k_uncore_mc[MAX_NUMNODES];
 
 typedef union {
 	struct {
@@ -230,14 +230,14 @@ static int mc_validate_event(struct e2k_uncore *uncore,
 	return 0;
 }
 
-static int mc_add_event(struct perf_event *event)
+static int mc_add_event(struct e2k_uncore *uncore, struct perf_event *event)
 {
 	mc_config_attr_t config = { .word = event->hw.config }, config2;
 	int i, empty_slot = -1, used_counter = -1;
 
 	/* validate against running counters */
-	for (i = 0; i < e2k_uncore_mc->num_counters; i++) {
-		struct perf_event *event2 = READ_ONCE(e2k_uncore_mc->events[i]);
+	for (i = 0; i < uncore->num_counters; i++) {
+		struct perf_event *event2 = READ_ONCE(uncore->events[i]);
 
 		if (!event2) {
 			empty_slot = i;
@@ -255,7 +255,7 @@ static int mc_add_event(struct perf_event *event)
 	config.counter = !used_counter;
 	event->hw.config = AW(config);
 
-	if (cmpxchg(&e2k_uncore_mc->events[empty_slot], NULL, event) != NULL)
+	if (cmpxchg(&uncore->events[empty_slot], NULL, event) != NULL)
 		return -ENOSPC;
 
 	event->hw.idx = empty_slot;
@@ -267,44 +267,42 @@ int __init register_mc_pmus()
 {
 	int i, counters = 2;
 
-	e2k_uncore_mc = kzalloc((sizeof(struct e2k_uncore) +
-			          counters * sizeof(void *)) * nr_node_ids,
-				 GFP_KERNEL);
-	if (!e2k_uncore_mc)
-		return -ENOMEM;
-
 	for_each_online_node(i) {
 		e2k_hmu_mic_t hmu_mic;
+		struct e2k_uncore *uncore = kzalloc(sizeof(struct e2k_uncore) +
+				counters * sizeof(void *), GFP_KERNEL);
+		if (!uncore)
+			return -ENOMEM;
 
-		e2k_uncore_mc[i].type = E2K_UNCORE_MC;
+		uncore->type = E2K_UNCORE_MC;
 
-		e2k_uncore_mc[i].pmu.event_init	= e2k_uncore_event_init,
-		e2k_uncore_mc[i].pmu.task_ctx_nr	= perf_invalid_context,
-		e2k_uncore_mc[i].pmu.add		= e2k_uncore_add;
-		e2k_uncore_mc[i].pmu.del		= e2k_uncore_del;
-		e2k_uncore_mc[i].pmu.start		= e2k_uncore_start;
-		e2k_uncore_mc[i].pmu.stop		= e2k_uncore_stop;
-		e2k_uncore_mc[i].pmu.read		= e2k_uncore_read;
+		uncore->pmu.event_init	= e2k_uncore_event_init;
+		uncore->pmu.task_ctx_nr	= perf_invalid_context;
+		uncore->pmu.add		= e2k_uncore_add;
+		uncore->pmu.del		= e2k_uncore_del;
+		uncore->pmu.start	= e2k_uncore_start;
+		uncore->pmu.stop	= e2k_uncore_stop;
+		uncore->pmu.read	= e2k_uncore_read;
 
-		e2k_uncore_mc[i].get_event = mc_get_event;
-		e2k_uncore_mc[i].add_event = mc_add_event;
-		e2k_uncore_mc[i].validate_event = mc_validate_event;
+		uncore->get_event = mc_get_event;
+		uncore->add_event = mc_add_event;
+		uncore->validate_event = mc_validate_event;
 
-		e2k_uncore_mc[i].reg_ops = &mc_reg_ops;
-		e2k_uncore_mc[i].num_counters = counters;
+		uncore->reg_ops = &mc_reg_ops;
+		uncore->num_counters = counters;
 
-		e2k_uncore_mc[i].node = i;
+		uncore->node = i;
 		AW(hmu_mic) = sic_read_node_nbsr_reg(i, HMU_MIC);
 		mc_enabled[i] = hmu_mic.mcen;
 
-		e2k_uncore_mc[i].valid_events = mc_valid_events;
-		e2k_uncore_mc[i].pmu.attr_groups = mc_attr_group;
+		uncore->valid_events = mc_valid_events;
+		uncore->pmu.attr_groups = mc_attr_group;
 
-		snprintf(e2k_uncore_mc[i].name, UNCORE_PMU_NAME_LEN,
+		snprintf(uncore->name, UNCORE_PMU_NAME_LEN,
 				"uncore_mc_%d", i);
 
-		perf_pmu_register(&e2k_uncore_mc[i].pmu,
-				e2k_uncore_mc[i].name, -1);
+		e2k_uncore_mc[i] = uncore;
+		perf_pmu_register(&uncore->pmu, uncore->name, -1);
 	}
 
 	return 0;

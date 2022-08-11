@@ -15,12 +15,7 @@ struct pt_regs;
 
 extern void boot_e12c_setup_arch(void);
 extern void e12c_setup_machine(void);
-extern void setup_APIC_vector_handler(int vector,
-		void (*handler)(struct pt_regs *), bool system, char *name);
 #endif
-
-#define	E12C_CPU_VENDOR			ES2_CPU_VENDOR
-#define	E12C_CPU_FAMILY			E16C_CPU_FAMILY
 
 #define	E12C_NR_NODE_CPUS		12
 #define	E12C_MAX_NR_NODE_CPUS		16

@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/irq.h>
 #include <linux/io.h>
+#include <linux/of.h>
 #include <linux/pci.h>
 #include <linux/sysfs.h>
 #include <linux/proc_fs.h>
@@ -817,9 +818,11 @@ static struct notifier_block l_power_notifier = {
 static int __init acpi_spmc_probe(struct pci_dev *pdev,
 				  struct acpi_spmc_data *c)
 {
-	int err;
+	struct device_node *np;
+	int err, ret;
 	char *dsc = "SCI";
 	unsigned x;
+	u32 prop;
 
 	err = pci_enable_device(pdev);
 	if (err)
@@ -844,6 +847,44 @@ static int __init acpi_spmc_probe(struct pci_dev *pdev,
 	pci_read_config_dword(pdev, ACPI_SPMC_USB_CNTRL, &x);
 	pci_write_config_dword(pdev, ACPI_SPMC_USB_CNTRL,
 				x | ACPI_SPMC_USB_CNTRL_WAKEUP_EN);
+
+	np = of_find_node_by_name(NULL, "acpi-spmc");
+	if (np) {
+		/* 5) SCI value from device tree (enable or disable) */
+		ret = of_property_read_u32(np, "sci", &prop);
+		if ((!ret) && (prop < 2)) {
+			pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &x);
+			if (prop)
+				x |= ACPI_SPMC_ONE_MASK(SPMC_PM1_CNT_SCI_EN);
+			else
+				x &= ~(ACPI_SPMC_ONE_MASK(SPMC_PM1_CNT_SCI_EN));
+			pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, x);
+		}
+		/* 6) PWRBTN value from device tree (enable or disable) */
+		ret = of_property_read_u32(np, "pwrbtn", &prop);
+		if ((!ret) && (prop < 2)) {
+			pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_EN, &x);
+			if (prop)
+				x |= ACPI_SPMC_ONE_MASK(SPMC_PM1_EN_PWRBTN_EN);
+			else
+				x &= ~(ACPI_SPMC_ONE_MASK(SPMC_PM1_EN_PWRBTN_EN));
+			pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_EN, x);
+		}
+		/* 7) SLPTYP value from device tree (0-5) */
+		ret = of_property_read_u32(np, "slptyp", &prop);
+		if ((!ret) && (prop <= SLP_TYP_S5)) {
+			pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &x);
+			x &= ~(ACPI_SPMC_SET_SLP_TYP(0x7));
+			x |= (ACPI_SPMC_SET_SLP_TYP((unsigned int)prop));
+			x |= (ACPI_SPMC_ONE_MASK(SPMC_PM1_CNT_SLP_EN));
+			pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, x);
+		}
+	} else {
+		/* 8) PWRBTN enable without device tree */
+		pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_EN, &x);
+		x |= ACPI_SPMC_ONE_MASK(SPMC_PM1_EN_PWRBTN_EN);
+		pci_write_config_dword(c->pdev, ACPI_SPMC_PM1_EN, x);
+	}
 
 	/* register sysfs entries */
 	err = sysfs_create_group(&pdev->dev.kobj, &acpi_spmc_attr_group);

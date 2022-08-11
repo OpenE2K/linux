@@ -13,7 +13,7 @@
  *
  * Unlike the other clocks, this is not in nanoseconds.
  */
-__section(.entry_handlers)
+__section(".entry.text")
 notrace u64 trace_clock_e2k_clkr(void)
 {
 	return get_cycles();

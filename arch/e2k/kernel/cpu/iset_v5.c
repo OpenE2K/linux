@@ -31,7 +31,7 @@ void native_set_cu_hw1_v5(u64 cu_hw1)
 	E2K_WAIT_ALL;
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_local_gregs_v5(struct local_gregs *gregs, bool is_signal)
 {
@@ -42,7 +42,7 @@ void save_local_gregs_v5(struct local_gregs *gregs, bool is_signal)
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_kernel_gregs_v5(struct kernel_gregs *gregs)
 {
@@ -80,7 +80,7 @@ void save_gregs_on_mask_v5(struct global_regs *gregs, bool dirty_bgr,
 		NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_gregs_v5(struct global_regs *gregs)
 {
@@ -90,7 +90,7 @@ void save_gregs_v5(struct global_regs *gregs)
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_gregs_dirty_bgr_v5(struct global_regs *gregs)
 {
@@ -99,7 +99,7 @@ void save_gregs_dirty_bgr_v5(struct global_regs *gregs)
 	SAVE_GREGS(gregs->g, true, E2K_ISET_V5);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void restore_local_gregs_v5(const struct local_gregs *gregs, bool is_signal)
 {
@@ -135,7 +135,7 @@ void restore_gregs_on_mask_v5(struct global_regs *gregs, bool dirty_bgr,
 		NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void restore_gregs_v5(const struct global_regs *gregs)
 {
@@ -305,10 +305,10 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 		get_cycles(), aa_field, aafstr);
 
 	/* condition.store = 0
-	 * condition.spec = 0
 	 * condition.fault_type = 0 */
 	AW(condition) = 0;
 	AS(condition).fmt = LDST_BYTE_FMT;
+	AS(condition).spec = 1;
 	AW(mask) = 0;
 
 	while (aa_bit < 4) {
@@ -437,7 +437,7 @@ die:
 	force_sig(SIGSEGV);
 }
 
-void save_aaldi_v5(u64 *aaldis)
+notrace void save_aaldi_v5(u64 *aaldis)
 {
 	SAVE_AALDIS_V5(aaldis);
 }
@@ -446,7 +446,7 @@ void save_aaldi_v5(u64 *aaldis)
  * It's taken that aasr was get earlier(from get_aau_context caller)
  * and comparison with aasr.iab was taken.
  */
-void get_aau_context_v5(e2k_aau_t *context)
+notrace void get_aau_context_v5(e2k_aau_t *context)
 {
 	GET_AAU_CONTEXT_V5(context);
 }

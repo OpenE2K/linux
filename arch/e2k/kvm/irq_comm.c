@@ -223,23 +223,26 @@ int kvm_irq_delivery_to_sw_apic(struct kvm *kvm, struct kvm_lapic *src,
 }
 
 /* VCPU is not running now. Set bit in the PMIRR copy in hw context */
-int kvm_hw_epic_set_irq_vector(struct kvm_vcpu *vcpu, unsigned int vector)
+static int kvm_hw_epic_set_irq_vector(struct kvm_vcpu *vcpu, unsigned int vector)
 {
-	unsigned int epic_pmirr = vector >> 6;
-
-	if (vector >= 1024 || vector == 0) {
+	if (vector >= CEPIC_PMIRR_NR_BITS || vector == 0) {
 		pr_err("Error: Invalid EPIC vector value %u\n", vector);
 		return -1;
 	}
 
-	set_bit(vector & 0x3f,
-		(void *)&vcpu->arch.hw_ctxt.cepic->pmirr[epic_pmirr]);
+	if (unlikely(epic_bgi_mode)) {
+		vcpu->arch.hw_ctxt.cepic->pmirr_byte[vector] = 1;
+	} else {
+		unsigned int epic_pmirr = vector >> 6;
+		atomic64_or(BIT_ULL_MASK(vector & 0x3f),
+			    &vcpu->arch.hw_ctxt.cepic->pmirr[epic_pmirr]);
+	}
 
 	return 1;
 }
 
 /* VCPU is not running now. Set bit in the PNMIRR copy in hw context */
-int kvm_hw_epic_set_smi(struct kvm_vcpu *vcpu)
+static int kvm_hw_epic_set_smi(struct kvm_vcpu *vcpu)
 {
 	union cepic_pnmirr reg;
 
@@ -251,7 +254,7 @@ int kvm_hw_epic_set_smi(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-int kvm_hw_epic_set_nm_special(struct kvm_vcpu *vcpu)
+static int kvm_hw_epic_set_nm_special(struct kvm_vcpu *vcpu)
 {
 	union cepic_pnmirr reg;
 
@@ -263,7 +266,7 @@ int kvm_hw_epic_set_nm_special(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-int kvm_hw_epic_set_nmi(struct kvm_vcpu *vcpu)
+static int kvm_hw_epic_set_nmi(struct kvm_vcpu *vcpu)
 {
 	union cepic_pnmirr reg;
 
@@ -275,7 +278,7 @@ int kvm_hw_epic_set_nmi(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-int kvm_hw_epic_set_init(struct kvm_vcpu *vcpu)
+static int kvm_hw_epic_set_init(struct kvm_vcpu *vcpu)
 {
 	union cepic_pnmirr reg;
 
@@ -287,7 +290,7 @@ int kvm_hw_epic_set_init(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-int kvm_hw_epic_set_startup(struct kvm_vcpu *vcpu, unsigned int vector)
+static int kvm_hw_epic_set_startup(struct kvm_vcpu *vcpu, unsigned int vector)
 {
 	union cepic_pnmirr reg;
 
@@ -330,7 +333,7 @@ int kvm_hw_epic_deliver_to_pirr(struct kvm_vcpu *vcpu, unsigned int vector,
 	}
 }
 
-u32 kvm_vcpu_to_full_cepic_id(struct kvm_vcpu *vcpu)
+u32 kvm_vcpu_to_full_cepic_id(const struct kvm_vcpu *vcpu)
 {
 	union cepic_id epic_reg_id;
 
@@ -406,47 +409,103 @@ int kvm_epic_match_dest(int cepic_id, int src, int short_hand, int dest)
 
 static void kvm_wake_up_irq(struct kvm_vcpu *vcpu)
 {
-	if (!kvm_test_request(KVM_REQ_PENDING_IRQS, vcpu)) {
-		kvm_make_request(KVM_REQ_PENDING_IRQS, vcpu);
-	}
-	KVM_BUG_ON(vcpu->arch.host_task == NULL);
-	if (vcpu->arch.host_task != current) {
-		wake_up_process(vcpu->arch.host_task);
-	}
+	/* There is no need to kick the target vcpu into hypervisor mode:
+	 * - if it is running in guest mode then hardware EPIC support will
+	 *   deliver the interrupt directly to guest's EPIC and trigger
+	 *   interrupt (kernel mode) in guest;
+	 * - if it is running in QEMU mode/preempted or halted then
+	 *   kvm_vcpu_wake_up() will correspondingly either do nothing
+	 *   or unhalt it. */
+	kvm_vcpu_wake_up(vcpu);
 }
 
+//TODO fix this and all other delivery functions to return 0 on success and proper errno on error
+static int kvm_irq_delivery_to_hw_epic_single(struct kvm_vcpu *vcpu,
+		const struct kvm_cepic_irq *irq)
+{
+	unsigned long flags;
+	bool dat_active;
+	int ret;
+
+	raw_spin_lock_irqsave(&vcpu->arch.epic_dat_lock, flags);
+	dat_active = vcpu->arch.epic_dat_active;
+	trace_irq_delivery(irq->vector, irq->delivery_mode,
+			vcpu->vcpu_id, vcpu->arch.epic_dat_active);
+
+	if (dat_active) {
+		ret = kvm_hw_epic_deliver_to_icr(vcpu,
+				irq->vector, irq->delivery_mode);
+		/*
+		 * Although kvm_irq_delivery_*() functions do set the
+		 * required condition for the target VCPU wake up
+		 * (either in P[N]MIRR in memory or in registers),
+		 * there might be a race if we do not wait for ICR.stat:
+		 *
+		 *       VCPU0                        VCPU1
+		 * --------------------------------------------------------
+		 * DAT is active
+		 *                          Sees that epic_dat_active()
+		 *                          is true and calls
+		 *                          kvm_hw_epic_deliver_to_icr()
+		 *
+		 *                          Sends an IPI through ICR,
+		 *                          it hits in DAT and sends
+		 *                          message to target PREPIC
+		 * invalidates DAT in all
+		 * PREPICs (while IPI is
+		 * still in flight)
+		 *
+		 * Checks for pending
+		 * interrupts in
+		 * kvm_arch_vcpu_runnable()
+		 *
+		 * Goes to sleep
+		 *                          IPI finally arrives at
+		 *                          target PREPIC and sets
+		 *                          corresponding bit in
+		 *                          memory PMIRR
+		 *
+		 * In the end VCPU0 is sleeping and does not know
+		 * about the pending IPI.
+		 */
+		epic_wait_icr_idle();
+	} else {
+		ret = kvm_hw_epic_deliver_to_pirr(vcpu,
+				irq->vector, irq->delivery_mode);
+	}
+	raw_spin_unlock_irqrestore(&vcpu->arch.epic_dat_lock, flags);
+
+	if (ret == 1) {
+		/* In [dat_active] case the target vcpu will see
+		* the interrupt in kvm_vcpu_check_block() (see
+		* comment before kvm_arch_vcpu_blocking()). */
+		if (!dat_active)
+			kvm_wake_up_irq(vcpu);
+	}
+
+	return ret;
+}
 
 int kvm_irq_delivery_to_hw_epic(struct kvm *kvm, int src,
-		struct kvm_cepic_irq *irq)
+		const struct kvm_cepic_irq *irq)
 {
-	int i;
 	struct kvm_vcpu *vcpu;
-	unsigned long flags;
-	int cepic_id;
-	int ret;
 	bool delivered = false;
+	int i, cepic_id;
+	int shorthand = irq->shorthand, dest_id = irq->dest_id;
 
 	kvm_for_each_vcpu(i, vcpu, kvm) {
 		cepic_id = kvm_vcpu_to_full_cepic_id(vcpu);
-		if (kvm_epic_match_dest(cepic_id, src, irq->shorthand,
-				irq->dest_id)) {
-			raw_spin_lock_irqsave(&vcpu->arch.epic_dam_lock, flags);
+		if (!kvm_epic_match_dest(cepic_id, src, shorthand, dest_id))
+			continue;
 
-			trace_irq_delivery(irq->vector, irq->delivery_mode,
-				vcpu->vcpu_id, vcpu->arch.epic_dam_active);
-			if (vcpu->arch.epic_dam_active)
-				ret = kvm_hw_epic_deliver_to_icr(vcpu,
-					irq->vector, irq->delivery_mode);
-			else
-				ret = kvm_hw_epic_deliver_to_pirr(vcpu,
-					irq->vector, irq->delivery_mode);
-			raw_spin_unlock_irqrestore(&vcpu->arch.epic_dam_lock,
-				flags);
-
-			if (ret == 1) {
-				delivered = true;
+		if (kvm_irq_delivery_to_hw_epic_single(vcpu, irq) == 1) {
+			delivered = true;
+			/* Stop if there is a single destination */
+			if (shorthand == CEPIC_ICR_DST_FULL ||
+					shorthand == CEPIC_ICR_DST_SELF) {
+				break;
 			}
-			kvm_wake_up_irq(vcpu);
 		}
 	}
 
@@ -460,7 +519,7 @@ int kvm_hw_epic_sysrq_deliver(struct kvm_vcpu *vcpu)
 	irq.vector = SYSRQ_SHOWSTATE_EPIC_VECTOR;
 	irq.delivery_mode = CEPIC_ICR_DLVM_FIXED_EXT;
 	irq.trig_mode = 0; /* Edge */
-	irq.shorthand = 0;
+	irq.shorthand = CEPIC_ICR_DST_FULL;
 	irq.dest_id = kvm_vcpu_to_full_cepic_id(vcpu);
 
 	return kvm_irq_delivery_to_hw_epic(vcpu->kvm, 0, &irq);
@@ -522,26 +581,17 @@ void kvm_deliver_cepic_epic_interrupt(void)
 	union cepic_epic_int2 reg;
 	struct kvm *kvm;
 	u32 src = cepic_id_short_to_full(read_epic_id());
+	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
 
 	reg.raw = epic_read_d(CEPIC_EPIC_INT2);
 
-	/* Find struct kvm with matching id */
-	mutex_lock(&kvm_lock);
-	if (list_empty(&vm_list)) {
-		mutex_unlock(&kvm_lock);
-		pr_err("Received CEPIC_EPIC_INT while no guests are running\n");
+	if (WARN_ONCE(!vcpu, "vcpu is NULL inside CEPIC_EPIC_INT handler"))
 		return;
-	}
-	list_for_each_entry(kvm, &vm_list, vm_list) {
-		if (kvm->arch.vmid.nr == reg.bits.gst_id)
-			break;
-	}
-	mutex_unlock(&kvm_lock);
 
-	/*
-	 * This might be faster ?
-	 * kvm = current_thread_info()->vcpu->kvm;
-	 */
+	kvm = vcpu->kvm;
+	if (WARN_ONCE(kvm->arch.vmid.nr != reg.bits.gst_id,
+			"Received CEPIC_EPIC_INT with bad gst_id %d\n", reg.bits.gst_id))
+		return;
 
 	irq.dest_id = reg.bits.gst_dst;
 	irq.vector = reg.bits.vect;
@@ -576,7 +626,7 @@ int kvm_cpu_has_pending_epic_timer(struct kvm_vcpu *vcpu)
 
 	pmirr = epic_read_guest_d(CEPIC_PMIRR + (CEPIC_TIMER_VECTOR >> 6) * 8);
 
-	return test_bit(CEPIC_TIMER_VECTOR & 0x3f, (void *)&pmirr);
+	return !!(pmirr & (1ULL << (CEPIC_TIMER_VECTOR & 0x3f)));
 }
 
 /*

@@ -123,7 +123,7 @@
 	shld	%dr0, 32, %dr0 ? \ptmp0;
 }
 {
-	SMP_ONLY(shld,1 GCPUID, 3, GCPUOFFSET ? \ptmp0)
+	SMP_ONLY(shld,1 GCPUID_PREEMPT, 3, GCPUOFFSET ? \ptmp0)
 	puttagd	%dr3, 0, %dr3 ? \ptmp0;
 	puttagd	%dr4, 0, %dr4 ? \ptmp0;
 	ord	%dr0, \entry_num, %dr0 ? \ptmp0;
@@ -141,6 +141,9 @@
 	puttagd	%dr7, 0, %dr7 ? \ptmp0;
 	ibranch	goto_guest_kernel_ttable_C ? \ptmp0;
 }
+#ifdef CONFIG_CPU_HWBUG_IBRANCH
+	{nop} {nop}
+#endif
 .endm	/* GOTO_GUEST_KERNEL_TTABLE */
 
 # ifdef CONFIG_PARAVIRT_GUEST

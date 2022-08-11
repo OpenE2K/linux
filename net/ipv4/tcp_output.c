@@ -2523,7 +2523,8 @@ bool tcp_schedule_loss_probe(struct sock *sk, bool advancing_rto)
 	 */
 	if (tp->srtt_us) {
 		timeout = usecs_to_jiffies(tp->srtt_us >> 2);
-		if (tp->packets_out == 1)
+		if (tp->packets_out == 1 &&
+				!sock_net(sk)->ipv4.sysctl_tcp_fast_tlp)
 			timeout += TCP_RTO_MIN;
 		else
 			timeout += TCP_TIMEOUT_MIN;

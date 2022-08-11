@@ -58,9 +58,11 @@ struct mga2 {
 	unsigned long base_freq;
 	unsigned long vram_paddr;
 	struct drm_mm vram_mm;
+	struct mutex  vram_mu;
 
 	struct mutex bctrl_mu;
 	struct bctrl *bctrl;
+	bool bctrl_active;
 	dma_addr_t bctrl_dma;
 	int head, tail;
 
@@ -76,7 +78,7 @@ struct mga2 {
 	dma_addr_t desc0_dma;
 	struct dma_fence mga2_fence[MGA2_RING_SIZE];
 	spinlock_t fence_lock;
-	atomic_t fence_seqno;
+	unsigned fence_seqno;
 
 	atomic_t ring_int;
 
@@ -289,25 +291,12 @@ static inline bool mga2_proto(struct mga2 *mga2)
 	return false;
 }
 
+extern int mga2_timeout_ms;
 static inline int mga2_timeout(struct mga2 *mga2)
 {
-	int timeout_msec = 1000;
-	switch (mga2->subdevice) {
-	case MGA2_PCI_PROTO:
-		timeout_msec *= 10;
-		break;
-	case MGA25_PCI_PROTO:
-	case MGA26_PCI_PROTO:
-	case MGA26_PROTO:
-		timeout_msec *= 100;
-		break;
-	case MGA2_P2_PROTO:
-	case MGA25_PROTO:
-		timeout_msec *= 1000;
-		break;
-	}
-	return timeout_msec;
+	return mga2_timeout_ms;
 }
+
 
 struct mga2_clk {
 	int nr, od, nb;

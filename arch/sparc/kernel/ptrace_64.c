@@ -972,7 +972,9 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 		break;
 
 	case PTRACE_READTEXT:
+#ifndef CONFIG_MCST  /* bug 135261 */
 	case PTRACE_READDATA:
+#endif
 		ret = ptrace_readdata(child, addr,
 				      (char __user *)addr2, data);
 		if (ret == data)
@@ -1069,7 +1071,9 @@ long arch_ptrace(struct task_struct *child, long request,
 		break;
 
 	case PTRACE_READTEXT:
+#ifndef CONFIG_MCST  /* bug 135261 */
 	case PTRACE_READDATA:
+#endif
 		ret = ptrace_readdata(child, addr, addr2p, data);
 		if (ret == data)
 			ret = 0;

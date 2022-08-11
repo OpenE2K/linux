@@ -197,7 +197,7 @@ static int cy14b101p_set_time(struct device *dev, struct rtc_time *time)
                 time->tm_mon, time->tm_year, time->tm_wday);
 #if defined(CONFIG_MCST)
 	if (rtc4clk_src &&  pps_debug & 1) {
-		pr_warning("cy14b101p_set_time while RTC is for clocksource. "
+		dev_warn(dev, "cy14b101p_set_time while RTC is for clocksource."
 			" %02d.%02d.%d %02d:%02d:%02d\n",
 			time->tm_mday, time->tm_mon + 1,
 			time->tm_year + 1900,
@@ -277,7 +277,7 @@ static int cy14b101p_ioctl(struct device *dev, unsigned cmd, unsigned long arg)
         }
 #if defined(CONFIG_MCST)
 	if (rtc4clk_src) {
-		pr_warning("cy14b101p_ioctl: "
+		dev_warn(dev, "cy14b101p_ioctl: "
 			"RTC is used for clocksource. "
 			"Alarm functionality is disabled\n");
 		return -EINVAL;
@@ -300,7 +300,7 @@ static int cy14b101p_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
         int             ret;
 #if defined(CONFIG_MCST)
 	if (rtc4clk_src) {
-		pr_warning("cy14b101p_set_alarm: "
+		dev_warn(dev, "cy14b101p_set_alarm: "
 			"RTC is used for clocksource. "
 			"Alarm functionality is disabled\n");
 		return -EINVAL;
@@ -392,7 +392,7 @@ static void cy14b101p_work(struct work_struct *work)
 
 #if defined(CONFIG_MCST)
 	if (rtc4clk_src) {
-		pr_warning("cy14b101p_work: "
+		dev_warn(&spi->dev, "cy14b101p_work: "
 			"RTC is used for clocksource. "
 			"Alarm functionality is disabled\n");
 		return;
@@ -753,20 +753,20 @@ static int cy14b101p_probe(struct spi_device *spi)
 	}
 	ret = cy14b101p_read_rtc(dev, CY14B101P_CAL, &cy_register);
 	if (ret < 0) {
-		pr_err("read rtc CY14B101P_CAL is failed\n");
+		dev_err(dev, "read rtc CY14B101P_CAL is failed\n");
 		goto fail1;
 	}
 	if (cy_register & CY14B101P_OSCEN) {
-		pr_err("rtc CY14B101P ERROR oscillator is stopped: OSCEN=1\n");
+		dev_err(dev, "rtc CY14B101P ERROR oscillator is stopped: OSCEN=1\n");
 	}
 	ret = cy14b101p_read_rtc(dev, CY14B101P_FLAGS, &cy_register);
 	if (ret < 0) {
-		pr_err("read rtc CY14B101P_FLAGS is failed\n");
+		dev_err(dev, "read rtc CY14B101P_FLAGS is failed\n");
 		goto fail1;
 	}
 	if (cy_register & CY14B101P_OSCF) {
 		cy14b101p_get_time(dev, &time);
-		pr_err("rtc CY14B101P Oscillator Fail Flag is set. "
+		dev_err(dev, "rtc CY14B101P Oscillator Fail Flag is set. "
 			"rtc= %d-%02d-%02d %02d:%02d:%02d  UTC. "
 			" Sleeping 2 secs for oscillator run.\n",
 			time.tm_year + 1900, time.tm_mon + 1, time.tm_mday,
@@ -790,7 +790,7 @@ static int cy14b101p_probe(struct spi_device *spi)
 			(void *)SCLKR_RTC, "sclkregister");
 		if (IS_ERR(sclkregistask)) {
 			error = PTR_ERR(sclkregistask);
-			pr_err(KERN_ERR "Failed to start"
+			dev_err(dev, "Failed to start"
 				" sclk register"
 				" thread, error: %d\n", error);
 			return error;
@@ -798,7 +798,7 @@ static int cy14b101p_probe(struct spi_device *spi)
 		rtc4clk_src = 1;
 		((struct rtc_class_ops *)
 			cy14b101p->rtc->ops)->set_alarm = NULL;
-		pr_warning("RTC is used for clocksource. "
+		dev_warn(dev, "RTC is used for clocksource. "
 			"Alarm functionality is disabled\n");
 		return 0;
 	}
@@ -819,7 +819,7 @@ static int cy14b101p_probe(struct spi_device *spi)
 				(void *)CLK_RT_RTC, "clk_rt_register");
 			if (IS_ERR(clk_rt_registask)) {
 				error = PTR_ERR(clk_rt_registask);
-				pr_err(KERN_ERR "Failed to start"
+				dev_warn(dev, "Failed to start"
 					" clk_rt register"
 					" thread, error: %d\n", error);
 				return error;
@@ -828,7 +828,7 @@ static int cy14b101p_probe(struct spi_device *spi)
 		rtc4clk_src = 1;
 		((struct rtc_class_ops *)
 			cy14b101p->rtc->ops)->set_alarm = NULL;
-		pr_warning("RTC is used for clocksource. "
+		dev_warn(dev, "RTC is used for clocksource. "
 			"Alarm functionality is disabled\n");
 		return 0;
 	}
@@ -861,7 +861,7 @@ static int cy14b101p_probe(struct spi_device *spi)
 		device_set_wakeup_capable(dev, 1);
 		device_wakeup_enable(dev);
 	} else {
-		pr_warn("%s(): spi->irq is unset so RTC irq and "
+		dev_warn(dev, "%s(): spi->irq is unset so RTC irq and "
 			"CLOCK_REALTIME_ALARM is unsupported\n", __func__);
 		cy14b101p->rtc->uie_unsupported = 1;
 	}
@@ -877,13 +877,13 @@ fail0:
 #ifdef CONFIG_PM
 static int cy14b101p_rtc_suspend(struct device *dev)
 {
-	pr_warn("DEBUG: cy14b101p_rtc_suspend.\n");
+	dev_warn(dev, "DEBUG: cy14b101p_rtc_suspend.\n");
 	return 0;
 }
 
 static int cy14b101p_rtc_resume(struct device *dev)
 {
-	pr_warn("DEBUG: cy14b101p_rtc_resume.\n");
+	dev_warn(dev, "DEBUG: cy14b101p_rtc_resume.\n");
 	/* TODO Enable the alarm if it should be enabled */
 	return 0;
 }

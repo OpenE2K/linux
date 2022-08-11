@@ -28,14 +28,17 @@
 #define MGA2_DC_B_EXT_TXT		(1 << 31)
 #define MGA2_DC_B_BGR			(0x24 << 4)
 #define MGA2_DC_B_RGB			(6 << 4)
-#define MGA2_DC_B_32BPP_FMT		(1 << 3)
-#define MGA2_DC_B_16BPP_FMT		(1 << 2)
+#define MGA2_DC_B_RGBX_FMT		(2 << 2)
+
+#define MGA2_DC_B_1555_FMT		(0 << 2)
+#define MGA2_DC_B_565_FMT		(1 << 2)
+#define MGA2_DC_B_4444_FMT		(2 << 2)
+#define MGA2_DC_B_RGB_16SWAP		(2 << 4)
+
 #define MGA2_DC_B_8BPP			0
 #define MGA2_DC_B_16BPP			1
 #define MGA2_DC_B_24BPP			2
 #define MGA2_DC_B_32BPP			3
-
-#define MGA2_DC_B_COLOR_ORDER	MGA2_DC_B_RGB
 
 #define	 MGA2_DC0_WSTART	0x00030	/* текущий стартовый адрес экрана (R/O) */
 #define	 MGA2_DC0_WOFFS		0x00034	/* текущий шаг строк экрана (R/O) */

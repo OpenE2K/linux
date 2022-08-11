@@ -240,7 +240,7 @@ is_kernel_data_stack_bounds(bool on_kernel, e2k_usd_lo_t usd_lo)
 
 #define	GCURTASK	DO_GET_GREG_MEMONIC(CURRENT_TASK_GREG)
 #define	GCPUOFFSET	DO_GET_GREG_MEMONIC(MY_CPU_OFFSET_GREG)
-#define	GCPUID		DO_GET_GREG_MEMONIC(SMP_CPU_ID_GREG)
+#define	GCPUID_PREEMPT	DO_GET_GREG_MEMONIC(SMP_CPU_ID_GREG)
 /* Macroses for virtualization support on assembler */
 #define	GVCPUSTATE	DO_GET_GREG_MEMONIC(GUEST_VCPU_STATE_GREG)
 
@@ -249,7 +249,8 @@ is_kernel_data_stack_bounds(bool on_kernel, e2k_usd_lo_t usd_lo)
 #include <asm/kvm/trap_table.h>
 
 #ifndef __ASSEMBLY__
-static inline void init_pt_regs_for_syscall(struct pt_regs *regs)
+__always_inline /* For CPU_HWBUG_VIRT_PSIZE_INTERCEPTION */
+static void init_pt_regs_for_syscall(struct pt_regs *regs)
 {
 	regs->next = NULL;
 	regs->trap = NULL;

@@ -121,7 +121,7 @@ static void __init initialize_C2_state(void *unused)
 		sic_write_node_nbsr_reg(node, PMC_FREQ_C2, new_divF);
 }
 
-/* TODO: C3 is temporarily disabled, this allows to force it */
+/* Force C3 on if it is disabled on current hardware */
 static bool force_C3;
 static int __init force_C3_setup(char *__unused)
 {
@@ -136,17 +136,23 @@ __setup("force_C3", force_C3_setup);
 /* Initialize CPU idle by registering the idle states */
 static int __init e2k_idle_init(void)
 {
+	/* C2/C3 states are disabled on guest as they will
+	 * just cause a lot of unnecessary interceptions. */
+	bool use_deep_states = !IS_HV_GM() && !IS_ENABLED(CONFIG_KVM_GUEST_KERNEL);
+
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
 		int nr = 0;
 
+		/* Enable C1 state */
 		if (!idle_nomwait) {
-			int cpu, divF_min = INT_MAX, divF_max = 0;
-
-			/* Enable C1 state */
 			e2k_idle_driver.states[nr] = E2K_CPUIDLE_C1_STATE;
 			nr += 1;
+		}
 
-			/* Enable C2 state if hardware limits are sane */
+		/* Enable C2 state */
+		if (use_deep_states && !idle_nomwait) {
+			int cpu, divF_min = INT_MAX, divF_max = 0;
+
 			on_each_cpu(initialize_C2_state, NULL, 1);
 			for_each_online_cpu(cpu) {
 				divF_min = min(divF_min, cpu_divF[cpu]);
@@ -154,6 +160,7 @@ static int __init e2k_idle_init(void)
 			}
 			pr_info("Chosen C2 state dividers range 0x%x:0x%x\n",
 					divF_min, divF_max);
+
 			if (divF_min) {
 				e2k_idle_driver.states[nr] = E2K_CPUIDLE_C2_STATE(
 						(divF_min + divF_max) / 2);
@@ -163,11 +170,8 @@ static int __init e2k_idle_init(void)
 			}
 		}
 
-		/* Enable C3 state everywhere except pure paravrit guest:
-		 * old C3 state would just cause interceptions. */
-		/* TODO bug 130748: temporarily disable C3 on e12c/e16c/e2c3 until bug is fixed,
-		 * can be forced back on with "force_C3" in cmdline */
-		if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) && force_C3) {
+		/* Enable C3 state */
+		if (use_deep_states && (!cpu_has(CPU_HWBUG_C3) || force_C3)) {
 			e2k_idle_driver.states[nr] = E2K_CPUIDLE_C3_STATE;
 			nr += 1;
 			WARN_ON(nr > 1 && e2k_idle_driver.states[nr - 1].target_residency <=
@@ -180,7 +184,7 @@ static int __init e2k_idle_init(void)
 
 		/* TODO bug 130433: temporarily disable C3 on e1c+ until bug is fixed,
 		 * can be forced back on with "force_C3" in cmdline */
-		if (!IS_MACHINE_E1CP || force_C3) {
+		if (use_deep_states && (!IS_MACHINE_E1CP || force_C3)) {
 			e2k_idle_driver.states[1] = E2K_CPUIDLE_C3_STATE;
 			e2k_idle_driver.state_count = 2;
 		}

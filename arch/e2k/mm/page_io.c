@@ -935,24 +935,32 @@ static struct page *tag_swap_readpage(struct page *page)
 	return tag_page;
 }
 
-/* onle for compress & decompress */
+/* only for compress & decompress */
 #ifdef CONFIG_ZSWAP
+u8 *alloc_page_with_tags(void)
+{
+	return kmalloc(PAGE_SIZE * 2, GFP_KERNEL);
+}
+
+void free_page_with_tags(u8 *p)
+{
+	kfree(p);
+}
 
 void get_page_with_tags(u8 *dst, u8 *src, int *tag_length)
 {
 	int res;
 
+	dst = alloc_page_with_tags();
+	BUG_ON(!dst);
+
 	copy_tagged_page(dst, src);
 	res = save_tags_from_data((u64 *)dst, (u8 *)(dst+PAGE_SIZE));
-	if (res == 0) {
-		*tag_length = 0;
-	} else {
-		*tag_length = TAGS_BYTES_PER_PAGE;
-	}
+	*tag_length = (res) ? TAGS_BYTES_PER_PAGE : 0;
+
 	return;
 }
-
-#endif /* CONFIG_ZSWAP */
+#endif
 
 static int  was_write_tag_page(struct page *page)
 {

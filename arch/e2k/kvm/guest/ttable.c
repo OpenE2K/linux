@@ -10,6 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/syscalls.h>
 #include <asm/fast_syscalls.h>
 #include <asm/ptrace.h>
@@ -29,6 +30,11 @@
 #include <asm/kvm/guest/traps.h>
 #include <asm/kvm/guest/trap_table.h>
 #include <asm/kvm/guest/regs_state.h>
+
+#include <trace/events/kvm.h>
+
+#define CREATE_TRACE_POINTS
+#include <asm/kvm/guest/trace-hw-stacks.h>
 
 #include "cpu.h"
 #include "traps.h"
@@ -443,14 +449,13 @@ int kvm_trap_handler(void)
 	pt_regs_t	*regs = &pt_regs;
 	thread_info_t	*thread_info = KVM_READ_CURRENT_REG();
 	unsigned long	exceptions;
+	unsigned long	irq_flags;
 	e2k_psr_t	user_psr;
 	bool		irqs_under_upsr;
 	bool		in_user_mode;
 	bool		has_irqs = false;
 	int		save_sbbp;
 	struct task_struct *task = thread_info_task(thread_info);
-
-	preempt_disable();
 
 	DebugGT("started\n");
 
@@ -477,6 +482,7 @@ int kvm_trap_handler(void)
 	KVM_SWITCH_TO_KERNEL_UPSR(user_psr, thread_info->upsr, irqs_under_upsr,
 					false,	/* enable IRQs */
 					false);	/* disable nmi */
+	raw_local_irq_save(irq_flags);
 
 	/*
 	 * Setup guest kernel global registers, pointer to the VCPU state
@@ -545,7 +551,7 @@ int kvm_trap_handler(void)
 	if (DEBUG_GUEST_TRAPS)
 		print_pt_regs(regs);
 
-	preempt_enable();
+	raw_local_irq_restore(irq_flags);
 
 	if (unlikely(trap.nr_TIRs < 0)) {
 		/* guest has nothing traps and handler was called only */

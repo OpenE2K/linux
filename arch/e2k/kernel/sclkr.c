@@ -6,18 +6,19 @@
  * Copyright (C) MCST 2015 Leonid Ananiev (leoan@mcst.ru)
  */
 
-#include <linux/percpu.h>
 #include <linux/clocksource.h>
-#include <linux/kthread.h>
-#include <linux/delay.h>
-#include <linux/kernel.h>
-#include <linux/pci.h>
-#include <linux/rtc.h>
 #include <linux/cpuidle.h>
-#include <asm/sclkr.h>
+#include <linux/delay.h>
+#include <linux/freezer.h>
+#include <linux/kernel.h>
+#include <linux/kthread.h>
+#include <linux/pci.h>
+#include <linux/percpu.h>
+#include <linux/rtc.h>
 #include <linux/sched/clock.h>
 
 #include <asm/pic.h>
+#include <asm/sclkr.h>
 
 /* #define SET_SCLKR_TIME1970 */
 #define SCLKR_CHECKUP	1
@@ -100,12 +101,11 @@ static u64 read_sclkr(struct clocksource *cs)
 	if (unlikely(sclkr_mode != SCLKR_INT && !sclkm1.mode ||
 			!sclkm1.sw || !freq)) {
 		pr_alert("WARNING: sclkr clocksource error.\n"
-			"CPU%02d sclkr= %lld.%09lld sec (raw=.%09lld), freq=%llu Hz, sclkm1=0x%llx sclkr_mode=%d\n"
+			"CPU%02d sclkr=.%09lld, freq=%llu Hz, sclkm1=0x%llx, sclkr_mode=%d\n"
 			"There is no PulsePerSecond signal.\n"
 			"Set sclkr=no in cmdline\n",
-			raw_smp_processor_id(), sclkr >> 32,
-			((u64) (u32) sclkr) * NSEC_PER_SEC / freq,
-			(u64) (u32) sclkr, freq, AW(sclkm1), sclkr_mode);
+			raw_smp_processor_id(), (u64) (u32) sclkr, freq,
+			AW(sclkm1), sclkr_mode);
 		panic("read_sclkr: ERROR");
 	}
 #ifdef DEBUG_SCLKR_FREQ
@@ -250,6 +250,31 @@ int watch4sclkr(void *arg)
 	return 0;
 }
 
+static void check_training_finished(void *arg)
+{
+	bool *finished = arg;
+	e2k_sclkm1_t sclkm1 = READ_SSCLKM1_REG();
+	if (sclkm1.trn || !sclkm1.mode)
+		*finished = false;
+}
+
+static bool is_training_finished_all_cpus(void)
+{
+	bool finished = true;
+	on_each_cpu(check_training_finished, (void *) &finished, 1);
+	return finished;
+}
+
+static bool wait_for_cleared_trn(const long max_timeout)
+{
+	const int single_wait = 10;
+	int waited = 0;
+	while (!is_training_finished_all_cpus() && waited < max_timeout) {
+		schedule_timeout_uninterruptible(single_wait);
+		waited += single_wait;
+	}
+	return !is_training_finished_all_cpus();
+}
 
 noinline int sclk_register(void *new_sclkr_src_arg)
 {
@@ -262,6 +287,11 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 	struct timespec64 ts;
 	unsigned long flags;
 	int cpu;
+	const long max_timeout = 3 * HZ;
+	bool timedout;
+
+	/* Make sure this kthread and suspend/resume do not run simultaneously */
+	set_freezable();
 
 	if (basic_freq_hz == 1) { /* was not call to basic_freq_setup() */
 		if (is_prototype()) {
@@ -313,7 +343,7 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 				sclkr_lo = READ_SSCLKR_REG() & SCLKR_LO;
 			}
 		}
-		pr_info("sclkr clocksource registation at internal mode\n");
+		pr_info("sclkr clocksource registration at internal mode\n");
 		sclkm1 = (e2k_sclkm1_t) { .sw = 1, .mdiv = 1,
 						.div = basic_freq_hz };
 		/* .mode = 0 -- internel */
@@ -330,18 +360,18 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 			"(%d Mhz)\n",
 			READ_SSCLKM1_REG().div,
 			(READ_SSCLKM1_REG().div + 1) / 1000000);
-		if (!do_watch4sclkr)
-			return 0;
-		if (num_online_nodes() >= 1) {
-			for_each_online_cpu(cpu) {
-				sclkr_w_thread = kthread_create(watch4sclkr,
-					NULL, "watch4sclkr/%d", cpu);
-				if (WARN_ON(!sclkr_w_thread)) {
-					pr_cont("kthread_create(watch4sclkr) "
-					"FAILED\n");
+		if (do_watch4sclkr) {
+			if (num_online_nodes() >= 1) {
+				for_each_online_cpu(cpu) {
+					sclkr_w_thread = kthread_create(watch4sclkr,
+							NULL, "watch4sclkr/%d", cpu);
+					if (WARN_ON(!sclkr_w_thread)) {
+						pr_cont("kthread_create(watch4sclkr) "
+						"FAILED\n");
+					}
+					kthread_bind(sclkr_w_thread, cpu);
+					wake_up_process(sclkr_w_thread);
 				}
-				kthread_bind(sclkr_w_thread, cpu);
-				wake_up_process(sclkr_w_thread);
 			}
 		}
 		return 0;
@@ -376,13 +406,16 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 	raw_all_irq_restore(flags);
 	/* .mode = 1 -- for RTC or externel sync */
 	sclkm1 = (e2k_sclkm1_t) { .sw = 1, .trn = 1, .mode = 1 };
+
+	/* Hardware won't clear 'trn' bit if CPU clock is disabled
+	 * so we pause cpuidle until sclkr initialization completes. */
 	cpuidle_pause_and_lock();
 	on_each_cpu(sclkr_set_mode, (void *) AW(sclkm1), 1);
-	pr_info("Set sclkm1.mode=1 done in all CPUs sclkr=%lld.%09llu sec,"
-		" last sclkm1.div=%d,\nWating for sclkm1.trn==0\n",
+	pr_info("Set sclkm1.mode=1 done in all CPUs sclkr=%lld.%09llu sec, last sclkm1.div=%d\n"
+		"Waiting for sclkm1.trn==0\n",
 		READ_SSCLKR_REG() >> 32,
-		((unsigned long long)READ_SSCLKR_REG() &
-				SCLKR_LO) * NSEC_PER_SEC / freq, READ_SSCLKM1_REG().div);
+		((u64) READ_SSCLKR_REG() & SCLKR_LO) * NSEC_PER_SEC / freq,
+		READ_SSCLKM1_REG().div);
 	/* SCLKR synchronized by RTC is for monotonic time coherent across CPUs
 	 * It may leap due to hwclock command */
 	if (new_sclkr_mode != SCLKR_RTC) {
@@ -392,18 +425,18 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 		sclk_set_range((void *)range);
 		smp_call_function(sclk_set_range, (void *)range, 1);
 	}
-#define WAIT_TRNOFF 3	/* sec */
 	mutex_unlock(&sclkr_set_lock);
-	schedule_timeout_interruptible(WAIT_TRNOFF * HZ);
-	sclkm1 = READ_SSCLKM1_REG();
+
+	timedout = wait_for_cleared_trn(max_timeout);
 	cpuidle_resume_and_unlock();
-	if (sclkm1.trn || !sclkm1.mode)
+	if (timedout)
 		goto sclkr_no;
+
 	sclkr_all = READ_SSCLKR_REG();
 	sclkr_lo = sclkr_all & SCLKR_LO;
 	freq = READ_SSCLKM1_REG().div;
 	ktime_get_real_ts64(&ts);
-	pr_info("sclkr clocksource registation at cpu %d "
+	pr_info("sclkr clocksource registration at cpu %d "
 		"sclkr=%lld.%09llu sec, getnstod =%lld.%09ld "
 		"fr=%u Hz, ext=%d swOK=%d range= %lld:%lld\n",
 		raw_smp_processor_id(), sclkr_all >> 32,
@@ -449,22 +482,27 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 	mutex_unlock(&sclkr_set_lock);
 	return 0;
 sclkr_no:
-	panic("There is no pulse per second signal from RTC during %d secs, "
-		"tell your hw vendor.\n"
-		"As a temporary workaround you can try setting "
-		"\"sclkr=int nohlt\" in kernel cmdline "
-		"on a single-socket system\n"
-		"and \"sclkr=no\" on a multi-socket system.\n"
-		"sclkm1=0x%llx (sw=%d, trn=%d mode=%d mdiv=%d "
-		"div or freq =%d )\n"
-		"sclkm2= 0x%llx safe_lo=%u=%llu%% basic_freq_hz=%lld "
-		"sclkr_lo_swch=%d\n", WAIT_TRNOFF,
-		READ_SSCLKM1_REG().word, READ_SSCLKM1_REG().sw,
-		READ_SSCLKM1_REG().trn, READ_SSCLKM1_REG().mode,
-		READ_SSCLKM1_REG().mdiv, READ_SSCLKM1_REG().div,
-		READ_SSCLKM2_REG(),
-		safe_lo, (long long)safe_lo * 100 / freq,
-		basic_freq_hz, sclkr_lo_swch);
+	do {
+		pr_err("There is no pulse per second signal from RTC during %ld "
+			" secs, tell your hw vendor.\n"
+			"As a temporary workaround you can try setting "
+			"\"sclkr=int nohlt\" in kernel cmdline "
+			"on a single-socket system\n"
+			"and \"sclkr=no\" on a multi-socket system.\n"
+			"If RTC is not ticking then set the time in boot.\n"
+			"sclkm1=0x%llx (sw=%d, trn=%d mode=%d mdiv=%d "
+			"div or freq =%d )\n"
+			"sclkm2= 0x%llx safe_lo=%u=%llu%% basic_freq_hz=%lld "
+			"sclkr_lo_swch=%d\n", max_timeout,
+			READ_SSCLKM1_REG().word, READ_SSCLKM1_REG().sw,
+			READ_SSCLKM1_REG().trn, READ_SSCLKM1_REG().mode,
+			READ_SSCLKM1_REG().mdiv, READ_SSCLKM1_REG().div,
+			READ_SSCLKM2_REG(),
+			safe_lo, (long long)safe_lo * 100 / freq,
+			basic_freq_hz, sclkr_lo_swch);
+		schedule_timeout_interruptible(MAX_SCHEDULE_TIMEOUT);
+	} while (1);
+	return -1;
 }
 EXPORT_SYMBOL(sclk_register);
 

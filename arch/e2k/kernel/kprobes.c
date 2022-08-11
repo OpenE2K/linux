@@ -317,7 +317,7 @@ no_kprobe:
 	return 0;
 }
 
-int __kprobes kprobe_instr_debug_handle(struct pt_regs *regs)
+void __kprobes kprobe_instr_debug_handle(struct pt_regs *regs)
 {
 	struct kprobe *cur = kprobe_running();
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
@@ -327,7 +327,7 @@ int __kprobes kprobe_instr_debug_handle(struct pt_regs *regs)
 	bool singlestep;
 
 	if (!cur || kcb->kprobe_status != KPROBE_HIT_SS)
-		return 0;
+		return;
 
 	/*
 	 * Make sure another overflow does not happen while
@@ -360,7 +360,7 @@ int __kprobes kprobe_instr_debug_handle(struct pt_regs *regs)
 	raw_all_irq_restore(flags);
 
 	if (!singlestep)
-		return 0;
+		return;
 
 	if (cur->post_handler) {
 		kcb->kprobe_status = KPROBE_HIT_SSDONE;
@@ -370,8 +370,6 @@ int __kprobes kprobe_instr_debug_handle(struct pt_regs *regs)
 	resume_execution(cur, regs);
 	reset_current_kprobe();
 	preempt_enable_no_resched();
-
-	return 1;
 }
 
 int __kprobes kprobe_fault_handler(struct pt_regs *regs, int trapnr)

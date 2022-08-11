@@ -72,7 +72,7 @@ static struct irqaction irq0  = {
 void __init native_time_init(void)
 {
 	int ret;
-	DebugTM("entered. LATCH is 0x%x\n", LATCH);
+	DebugTM("entered\n");
 
 	/* Initialize external timer */
 	setup_lt_timer();

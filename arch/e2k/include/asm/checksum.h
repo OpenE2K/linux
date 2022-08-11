@@ -112,7 +112,7 @@ static inline __wsum csum_partial(const void *buff, int len, __wsum sum)
 			!cpu_has(CPU_HWBUG_UNALIGNED_LOADS)) {
 		sum = csum_add(sum, ip_fast_csum_nofold_maybe_unaligned(buff, len >> 2));
 	} else {
-		E2K_PREFETCH_L1((__force void *) buff);
+		prefetch((__force void *) buff);
 		sum = __csum_partial(buff, len, sum);
 	}
 	return sum;

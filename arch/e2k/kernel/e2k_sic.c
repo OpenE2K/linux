@@ -10,6 +10,7 @@
 #include <asm/e2k_api.h>
 #include <asm/e2k.h>
 #include <asm/e2k_sic.h>
+#include <asm/nbsr_v6_regs.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/iolinkmask.h>
@@ -52,7 +53,7 @@ sic_read_node_mc_nbsr_reg(int node, int channel, int reg_offset)
 
 	if (machine.native_iset_ver >= E2K_ISET_V6) {
 		raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
-		sic_write_node_nbsr_reg(node, SIC_mc_ch, channel);
+		sic_write_node_nbsr_reg(node, MC_CH, channel);
 	}
 
 	reg_val = sic_read_node_nbsr_reg(node, reg_offset);
@@ -70,7 +71,7 @@ sic_write_node_mc_nbsr_reg(int node, int channel, int reg_offset, unsigned int r
 
 	if (machine.native_iset_ver >= E2K_ISET_V6) {
 		raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
-		sic_write_node_nbsr_reg(node, SIC_mc_ch, channel);
+		sic_write_node_nbsr_reg(node, MC_CH, channel);
 	}
 
 	sic_write_node_nbsr_reg(node, reg_offset, reg_value);
@@ -93,7 +94,7 @@ static int sic_mc_ecc_reg_offset(int node, int num)
 			return SIC_mc3_ecc;
 		};
 	} else {
-		return SIC_mc_ecc;
+		return MC_ECC;
 	}
 
 	return 0;
@@ -117,6 +118,69 @@ void sic_set_mc_ecc(int node, int num, unsigned int reg_value)
 	if (reg_offset = sic_mc_ecc_reg_offset(node, num))
 		sic_write_node_mc_nbsr_reg(node, num, reg_offset, reg_value);
 }
+
+
+static int sic_mc_opmb_reg_offset(int node, int num)
+{
+	if (machine.native_iset_ver < E2K_ISET_V6) {
+		switch (num) {
+		case 0:
+			return SIC_mc0_opmb;
+		case 1:
+			return SIC_mc1_opmb;
+		case 2:
+			return SIC_mc2_opmb;
+		case 3:
+			return SIC_mc3_opmb;
+		};
+	} else {
+		return MC_OPMB;
+	}
+
+	return 0;
+}
+
+unsigned int sic_get_mc_opmb(int node, int num)
+{
+	int reg_offset;
+
+	if (reg_offset = sic_mc_opmb_reg_offset(node, num))
+		return sic_read_node_mc_nbsr_reg(node, num, reg_offset);
+
+	return 0;
+}
+EXPORT_SYMBOL(sic_get_mc_opmb);
+
+static int sic_mc_cfg_reg_offset(int node, int num)
+{
+	if (machine.native_iset_ver < E2K_ISET_V6) {
+		switch (num) {
+		case 0:
+			return SIC_mc0_cfg;
+		case 1:
+			return SIC_mc1_cfg;
+		case 2:
+			return SIC_mc2_cfg;
+		case 3:
+			return SIC_mc3_cfg;
+		};
+	} else {
+		return MC_CFG;
+	}
+
+	return 0;
+}
+
+unsigned int sic_get_mc_cfg(int node, int num)
+{
+	int reg_offset;
+
+	if (reg_offset = sic_mc_cfg_reg_offset(node, num))
+		return sic_read_node_mc_nbsr_reg(node, num, reg_offset);
+
+	return 0;
+}
+EXPORT_SYMBOL(sic_get_mc_cfg);
 
 static int sic_ipcc_csr_reg_offset(int num)
 {
@@ -505,7 +569,7 @@ static void __init create_nodes_io_config(void)
 			} else {
 				printk(" OFF 0x%08x", rdma.E2K_RDMA_CS_reg);
 			}
-		}	
+		}
 		if (link_on) {
 			int ab_type = io_link.E2K_IOL_CSR_abtype;
 			printk(" connected to");
@@ -542,23 +606,22 @@ static void sic_mc_regs_dump(int node)
 	if (machine.native_iset_ver < E2K_ISET_V6) {
 		int offset = SIC_MC_BASE;
 
-		pr_err("MC registers dump:\n");
+		pr_emerg("MC registers dump:\n");
 		for (; offset < SIC_MC_BASE + SIC_MC_SIZE; offset += 4)
-			pr_err("%x ", sic_read_node_nbsr_reg(node, offset));
-		pr_err("\n");
+			pr_emerg("%x ", sic_read_node_nbsr_reg(node, offset));
+		pr_emerg("\n");
 	} else {
-		u32 hmu_mic = sic_read_node_nbsr_reg(node, SIC_hmu_mic);
+		u32 hmu_mic = sic_read_node_nbsr_reg(node, HMU_MIC);
 		int i = 0;
 
-		pr_err("HMU_MIC 0x%x\n", hmu_mic);
+		pr_emerg("HMU_MIC 0x%x\n", hmu_mic);
 
 		hmu_mic = (hmu_mic & 0xff000000) >> 24;
 
 		for (; i < SIC_MAX_MC_COUNT; i++) {
 			if (hmu_mic & (1 << i)) {
-				pr_err("MC_STATUS[%d] 0x%x",
-					i,
-					sic_read_node_mc_nbsr_reg(node, i, SIC_mc_status));
+				pr_emerg("MC_STATUS[%d] 0x%x", i,
+					sic_read_node_mc_nbsr_reg(node, i, MC_STATUS));
 			}
 		}
 	}
@@ -566,28 +629,25 @@ static void sic_mc_regs_dump(int node)
 
 static void sic_hmu_regs_dump(int node)
 {
-	pr_err("HMU0_INT 0x%x HMU1_INT 0x%x HMU2_INT 0x%x HMU3_INT 0x%x\n",
-		sic_read_node_nbsr_reg(node, SIC_hmu0_int),
-		sic_read_node_nbsr_reg(node, SIC_hmu1_int),
-		sic_read_node_nbsr_reg(node, SIC_hmu2_int),
-		sic_read_node_nbsr_reg(node, SIC_hmu3_int));
+	pr_emerg("HMU0_INT 0x%x HMU1_INT 0x%x HMU2_INT 0x%x HMU3_INT 0x%x\n",
+		sic_read_node_nbsr_reg(node, HMU0_INT),
+		sic_read_node_nbsr_reg(node, HMU1_INT),
+		sic_read_node_nbsr_reg(node, HMU2_INT),
+		sic_read_node_nbsr_reg(node, HMU3_INT));
 }
 
-void sic_error_interrupt(struct pt_regs *regs)
+void do_sic_error_interrupt(void)
 {
 	int node;
 	unsigned long flags;
 
-	ack_pic_irq();
-	irq_enter();
-
 	if (!raw_spin_trylock_irqsave(&sic_error_lock, flags))
-		goto out;
+		return;
 
 	for_each_online_node(node) {
-		pr_err("----- NODE%d -----\n", node);
+		pr_emerg("----- NODE%d -----\n", node);
 
-		pr_err("%s_INT=0x%x\n",
+		pr_emerg("%s_INT=0x%x\n",
 			(machine.native_iset_ver < E2K_ISET_V6) ? "SIC" : "XMU",
 			sic_read_node_nbsr_reg(node, SIC_sic_int));
 
@@ -598,10 +658,17 @@ void sic_error_interrupt(struct pt_regs *regs)
 	}
 
 	raw_spin_unlock_irqrestore(&sic_error_lock, flags);
+}
+
+void sic_error_interrupt(struct pt_regs *regs)
+{
+	ack_pic_irq();
+	irq_enter();
+
+	do_sic_error_interrupt();
 
 	panic("SIC error interrupt received on CPU%d:\n",
 		smp_processor_id());
 
-out:
 	irq_exit();
 }

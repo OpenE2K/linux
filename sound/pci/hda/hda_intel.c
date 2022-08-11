@@ -1845,14 +1845,23 @@ static int azx_create(struct snd_card *card, struct pci_dev *pci,
 	}
 
 #if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
-	{
-		struct pci_dev *pci = chip->pci;
+	if (pci->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pci->device == PCI_DEVICE_ID_MCST_HDA) {
 		/* read codec twice to fix hardware syncronization error. */
-		if (pci->vendor == PCI_VENDOR_ID_MCST_TMP &&
-				pci->device == PCI_DEVICE_ID_MCST_HDA &&
-				iohub_generation(pci) == 1 &&
-				iohub_revision(pci) < 2)
+		if (iohub_generation(pci) == 1 &&
+				iohub_revision(pci) < 2) {
 			chip->bus.needs_retry_on_codec_write = 1;
+		}
+		if (pci->revision == 2) { /* with hdmi-codec */
+			/* let mga2 to initialize hdmi cores */
+			if ((err = request_module("mga2"))) {
+				dev_err(card->dev,
+					"Error requesting mga2: %d\n", err);
+				snd_device_free(card, chip);
+				azx_free(chip);
+				return err;
+			}
+		}
 	}
 #endif
 

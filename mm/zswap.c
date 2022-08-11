@@ -1009,7 +1009,7 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 	gfp_t gfp;
 #ifdef CONFIG_E2K
 	int tag_length = 0;
-	u8 *src_tags;
+	u8 *src_with_tags;
 #endif /* CONFIG_E2K */
 
 	/* THP isn't supported */
@@ -1076,12 +1076,12 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 	tfm = *this_cpu_ptr(entry->pool->tfm);
 	src = kmap_atomic(page);
 #ifdef CONFIG_E2K
-	src_tags = get_page_with_tags(src, &tag_length);
+	get_page_with_tags(src_with_tags, src, &tag_length);
 	entry->tag_length = tag_length;
 	dlen =  tag_length + PAGE_SIZE;
-	ret = crypto_comp_compress(tfm, src_tags,
+	ret = crypto_comp_compress(tfm, src_with_tags,
 			   tag_length + PAGE_SIZE, dst, &dlen);
-	free_page_with_tags(src_tags);
+	free_page_with_tags(src_with_tags);
 #else
 	ret = crypto_comp_compress(tfm, src, PAGE_SIZE, dst, &dlen);
 #endif /* CONFIG_E2K */
@@ -1188,7 +1188,7 @@ static int zswap_frontswap_load(unsigned type, pgoff_t offset,
 	if (entry->tag_length) {
 		u8 *src_with_tags;
 
-		src_with_tags = get_2page_with_tags();
+		src_with_tags = alloc_page_with_tags();
 		dlen = PAGE_SIZE + entry->tag_length;
 		ret = crypto_comp_decompress(tfm, src,
 				entry->length, src_with_tags, &dlen);

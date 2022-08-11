@@ -153,9 +153,11 @@ boot_recovery_sequel(bool bsp, int cpuid, int cpus_to_sync)
 	DebugR("'current' task pointer is set to initial kernel task structure virtual address 0x%px size 0x%lx\n",
 		current_thread_info(), sizeof(union thread_union));
 
+	/* This also clears preempt_count and PREEMPT_NEED_RESCHED */
+	E2K_SET_DGREG_NV(SMP_CPU_ID_GREG, 0);
 #ifdef	CONFIG_SMP
 	current->cpu = cpu;
-	E2K_SET_DGREG_NV(SMP_CPU_ID_GREG, (u64)cpu);
+	set_smp_processor_id(cpu);
 	init_reset_smp_processors_num();
 #endif	/* CONFIG_SMP */
 

@@ -1969,7 +1969,7 @@ static void sun4v_report_real_raddr(const char *pfx, struct pt_regs *regs)
 
 	insn = *(unsigned int *) regs->tpc;
 
-	addr = compute_effective_address(regs, insn, 0);
+	compute_effective_address(regs, insn, 0, &addr);
 
 	printk("%s: insn effective address [0x%016llx]\n",
 	       pfx, addr);
@@ -2153,12 +2153,14 @@ void sun4v_resum_overflow(struct pt_regs *regs)
 static unsigned long sun4v_get_vaddr(struct pt_regs *regs)
 {
 	unsigned int insn;
+	unsigned long addr = 0;
 
 	if (!copy_from_user(&insn, (void __user *)regs->tpc, 4)) {
 		return compute_effective_address(regs, insn,
-						 (insn >> 25) & 0x1f);
+						(insn >> 25) & 0x1f,
+						&addr);
 	}
-	return 0;
+	return addr;
 }
 
 /* Attempt to handle non-resumable errors generated from userspace.
@@ -3305,6 +3307,8 @@ void __init trap_init(void)
 					      kern_una_regs) ||
 		     TI_KUNA_INSN != offsetof(struct thread_info,
 					      kern_una_insn) ||
+		     TI_LAZY_COUNT != offsetof(struct thread_info,
+					      preempt_lazy_count) ||
 		     TI_FPREGS != offsetof(struct thread_info, fpregs) ||
 		     (TI_FPREGS & (64 - 1)));
 

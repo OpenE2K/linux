@@ -178,10 +178,10 @@
 
 #undef	DEBUG_KVM_SHUTDOWN_MODE
 #undef	DebugKVMSH
-#define	DEBUG_KVM_SHUTDOWN_MODE	1	/* KVM shutdown debugging */
+#define	DEBUG_KVM_SHUTDOWN_MODE	0	/* KVM shutdown debugging */
 #define	DebugKVMSH(fmt, args...)					\
 ({									\
-	if (DEBUG_KVM_SHUTDOWN_MODE)					\
+	if (DEBUG_KVM_SHUTDOWN_MODE || kvm_debug)			\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -2253,6 +2253,7 @@ void kvm_pv_wait(struct kvm *kvm, struct kvm_vcpu *vcpu)
 
 	/* Update arch-dependent state of vcpu */
 	kvm_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_blocked);
+	/* For PV guest */
 	vcpu->arch.on_idle = true;
 
 	vcpu->arch.mp_state = KVM_MP_STATE_HALTED;
@@ -2292,7 +2293,7 @@ void kvm_pv_kick(struct kvm *kvm, int hard_cpu_id)
 	vcpu_to->arch.unhalted = true;
 
 	/* Send wake up to target vcpu thread */
-	kvm_vcpu_kick(vcpu_to);
+	kvm_vcpu_wake_up(vcpu_to);
 
 	/* Yield our cpu to woken vcpu_to thread if possible */
 	kvm_vcpu_yield_to(vcpu_to);

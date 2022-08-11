@@ -9,10 +9,10 @@
 
 #define DRIVER_NAME		"mga2"
 #define DRIVER_DESC		"DRM driver for MCST MGA2"
-#define DRIVER_DATE		"20190219"
+#define DRIVER_DATE		"20210728"
 
 #define DRIVER_MAJOR		1
-#define DRIVER_MINOR		1
+#define DRIVER_MINOR		2
 #define DRIVER_PATCHLEVEL	0
 
 static struct drm_driver driver;
@@ -100,7 +100,7 @@ static int mga2_info_ioctl(struct drm_device *dev, void *data, struct drm_file *
 		const struct drm_mm_node *entry = NULL;
 		u64 total_used = 0, total_free = 0, total = 0;
 	
-		total_free += entry->hole_size;
+		total_free += mm->head_node.hole_size;
 
 		drm_mm_for_each_node(entry, mm) {
 			total_used += entry->size;
@@ -179,11 +179,19 @@ out:
 
 static SIMPLE_DEV_PM_OPS(mga2_pm_ops, mga2_suspend, mga2_resume);
 
+static void mga2_pci_shutdown(struct pci_dev *pdev)
+{
+	struct drm_device *drm = pci_get_drvdata(pdev);
+	/* prevent dma during reboot & kexec */
+	mga2_reset(drm);
+}
+
 static struct pci_driver mga2_pci_driver = {
 	.name = DRIVER_NAME,
 	.id_table = pciidlist,
 	.probe = mga2_pci_probe,
 	.remove = mga2_pci_remove,
+	.shutdown = mga2_pci_shutdown,
 	.driver.pm = &mga2_pm_ops,
 };
 
@@ -222,7 +230,7 @@ static struct drm_driver driver = {
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
 
-	.gem_free_object = mga2_gem_free_object,
+	.gem_free_object_unlocked = mga2_gem_free_object,
 	.gem_vm_ops = &mga2_gem_vm_ops,
 
 	.dumb_create = mga2_dumb_create,

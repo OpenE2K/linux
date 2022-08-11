@@ -99,17 +99,25 @@
 
 .global	vcpus_state;
 
-.macro	SET_VCPU_STATE_GREGS drti, predSAVE, drtmp
-	ldw	[ \drti + TSK_TI_CPU_DELTA ], \drtmp ? \predSAVE /* VCPU # */
-	shld	\drtmp, 3, \drtmp ? \predSAVE
-	ldd	[ \drtmp + vcpus_state ], GVCPUSTATE ? \predSAVE
-.endm	/* SET_VCPU_STATE_GREGS */
-
+#ifdef CONFIG_SMP
 .macro	SET_VCPU_STATE_GREGS_UNCOND drti, drtmp
 	ldw	[ \drti + TSK_TI_CPU_DELTA ], \drtmp	/* VCPU # */
 	shld	\drtmp, 3, \drtmp
 	ldd	[ \drtmp + vcpus_state ], GVCPUSTATE
 .endm	/* SET_VCPU_STATE_GREGS */
+.macro	SET_VCPU_STATE_GREGS drti, predSAVE, drtmp
+	ldw	[ \drti + TSK_TI_CPU_DELTA ], \drtmp ? \predSAVE /* VCPU # */
+	shld	\drtmp, 3, \drtmp ? \predSAVE
+	ldd	[ \drtmp + vcpus_state ], GVCPUSTATE ? \predSAVE
+.endm	/* SET_VCPU_STATE_GREGS */
+#else
+.macro	SET_VCPU_STATE_GREGS_UNCOND drti, drtmp
+	ldd	[ 0 + vcpus_state ], GVCPUSTATE
+.endm	/* SET_VCPU_STATE_GREGS */
+.macro	SET_VCPU_STATE_GREGS drti, predSAVE, drtmp
+	ldd	[ 0 + vcpus_state ], GVCPUSTATE ? \predSAVE
+.endm	/* SET_VCPU_STATE_GREGS */
+#endif
 
 .macro	SAVE_HOST_GREGS_TO_VIRT_V2 drti, predSAVE, drtmp, rtmp0, rtmp1
 		SAVE_HOST_GREGS_V2 \drti, \predSAVE, \drtmp, \rtmp0, \rtmp1

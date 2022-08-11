@@ -82,7 +82,7 @@ struct e2k_uncore {
 	struct e2k_uncore_valid_events *valid_events;
 	int (*validate_event)(struct e2k_uncore *, struct hw_perf_event *);
 	u64 (*get_event)(struct hw_perf_event *);
-	int (*add_event)(struct perf_event *);
+	int (*add_event)(struct e2k_uncore *, struct perf_event *);
 
 	struct e2k_uncore_reg_ops *reg_ops;
 	struct pmu pmu;

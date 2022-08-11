@@ -61,6 +61,11 @@ static struct monitors_info	monitors[MONITORS_COUNT];
 
 int monitors_used __read_mostly = 0;
 
+#undef DIM0
+#undef DIM1
+#undef DDM0
+#undef DDM1
+
 enum {
 	DIM0,
 	DIM1,
@@ -101,7 +106,7 @@ static struct monitors_events_range dim_monitors_events_list_v2[] = {
 
 #define DDM0_EVENTS_RANGE_COUNT_V3	7
 #define DDM1_EVENTS_RANGE_COUNT_V3	6
-#define DIM_EVENTS_RANGE_COUNT_V3	10
+#define DIM_EVENTS_RANGE_COUNT_V3	9
 
 static struct monitors_events_range ddm0_monitors_events_list_v3[] = {
 	{0x00, 0x03}, {0x10, 0x19}, {0x20, 0x24}, {0x30, 0x3a}, {0x40, 0x46},
@@ -114,13 +119,13 @@ static struct monitors_events_range ddm1_monitors_events_list_v3[] = {
 };
 
 static struct monitors_events_range dim_monitors_events_list_v3[] = {
-	{0x00, 0x03}, {0x07, 0x0a}, {0x0f, 0x1f}, {0x20, 0x26}, {0x30, 0x3d},
-	{0x40, 0x4a}, {0x50, 0x5a}, {0x60, 0x69}, {0x70, 0x74}, {0x7c, 0x7e}
+	{0x00, 0x03}, {0x07, 0x0a}, {0x0f, 0x26}, {0x30, 0x3d}, {0x40, 0x4a},
+	{0x50, 0x5a}, {0x60, 0x69}, {0x70, 0x74}, {0x7c, 0x7e}
 };
 
 #define DDM0_EVENTS_RANGE_COUNT_V5	6
 #define DDM1_EVENTS_RANGE_COUNT_V5	7
-#define DIM_EVENTS_RANGE_COUNT_V5	11
+#define DIM_EVENTS_RANGE_COUNT_V5	9
 
 static struct monitors_events_range ddm0_monitors_events_list_v5[] = {
 	{0x00, 0x04}, {0x10, 0x19}, {0x20, 0x24}, {0x30, 0x3a}, {0x40, 0x48},
@@ -133,10 +138,33 @@ static struct monitors_events_range ddm1_monitors_events_list_v5[] = {
 };
 
 static struct monitors_events_range dim_monitors_events_list_v5[] = {
-	{0x00, 0x03}, {0x07, 0x0a}, {0x0f, 0x1f}, {0x20, 0x26}, {0x2d, 0x2f},
-	{0x30, 0x3d}, {0x40, 0x4a}, {0x50, 0x5a}, {0x60, 0x69}, {0x70, 0x74},
-	{0x7c, 0x7e}
+	{0x00, 0x03}, {0x07, 0x0a}, {0x0f, 0x26}, {0x2d, 0x3d}, {0x40, 0x4a},
+	{0x50, 0x5a}, {0x60, 0x69}, {0x70, 0x74}, {0x7c, 0x7e}
 };
+
+
+
+
+#define DDM0_EVENTS_RANGE_COUNT_V6	5
+#define DDM1_EVENTS_RANGE_COUNT_V6	6
+#define DIM_EVENTS_RANGE_COUNT_V6	5
+
+static struct monitors_events_range ddm0_monitors_events_list_v6[] = {
+	{0x00, 0x07}, {0x10, 0x1c}, {0x20, 0x24}, {0x30, 0x3a}, {0x40, 0x4f},
+};
+
+static struct monitors_events_range ddm1_monitors_events_list_v6[] = {
+	{0x00, 0x07}, {0x10, 0x1c}, {0x20, 0x24}, {0x30, 0x3a}, {0x40, 0x4b},
+	{0x4d, 0x4f}
+};
+
+static struct monitors_events_range dim_monitors_events_list_v6[] = {
+	{0x00, 0x03}, {0x07, 0x0a}, {0x0f, 0x27}, {0x2d, 0x74}, {0x7c, 0x7e}
+};
+
+
+
+
 
 static struct monitors_events_range *ddm0_monitors_events_list;
 static struct monitors_events_range *ddm1_monitors_events_list;
@@ -2369,39 +2397,37 @@ static const struct file_operations ioccmonitors_events_proc_fops = {
  * Init
  */
 
+#define setup_monitors(iset)						\
+({									\
+	ddm0_monitors_events_list = ddm0_monitors_events_list_v##iset;	\
+	ddm1_monitors_events_list = ddm1_monitors_events_list_v##iset;	\
+	dim_monitors_events_list = dim_monitors_events_list_v##iset;	\
+	ddm0_monitors_events_range_count =				\
+		sizeof(ddm0_monitors_events_list_v##iset) /		\
+		sizeof(struct monitors_events_range);			\
+	ddm1_monitors_events_range_count =				\
+		sizeof(ddm1_monitors_events_list_v##iset) /		\
+		sizeof(struct monitors_events_range);			\
+	dim_monitors_events_range_count =				\
+		sizeof(dim_monitors_events_list_v##iset) /		\
+		sizeof(struct monitors_events_range);			\
+})
+
 static void monitors_init(void)
 {
 	switch (machine.native_iset_ver) {
 	case E2K_ISET_V2:
-		ddm0_monitors_events_list = ddm0_monitors_events_list_v2;
-		ddm1_monitors_events_list = ddm1_monitors_events_list_v2;
-		dim_monitors_events_list = dim_monitors_events_list_v2;
-		ddm0_monitors_events_range_count = DDM0_EVENTS_RANGE_COUNT_V2;
-		ddm1_monitors_events_range_count = DDM1_EVENTS_RANGE_COUNT_V2;
-		dim_monitors_events_range_count = DIM_EVENTS_RANGE_COUNT_V2;
+		setup_monitors(2);
 		break;
 	case E2K_ISET_V3:
 	case E2K_ISET_V4:
-		ddm0_monitors_events_list = ddm0_monitors_events_list_v3;
-		ddm1_monitors_events_list = ddm1_monitors_events_list_v3;
-		dim_monitors_events_list = dim_monitors_events_list_v3;
-		ddm0_monitors_events_range_count = DDM0_EVENTS_RANGE_COUNT_V3;
-		ddm1_monitors_events_range_count = DDM1_EVENTS_RANGE_COUNT_V3;
-		dim_monitors_events_range_count = DIM_EVENTS_RANGE_COUNT_V3;
+		setup_monitors(3);
 		break;
 	case E2K_ISET_V5:
+		setup_monitors(5);
+		break;
 	case E2K_ISET_V6:
-		ddm0_monitors_events_list = ddm0_monitors_events_list_v5;
-		ddm1_monitors_events_list = ddm1_monitors_events_list_v5;
-		dim_monitors_events_list = dim_monitors_events_list_v5;
-		ddm0_monitors_events_range_count = DDM0_EVENTS_RANGE_COUNT_V5;
-		ddm1_monitors_events_range_count = DDM1_EVENTS_RANGE_COUNT_V5;
-		dim_monitors_events_range_count = DIM_EVENTS_RANGE_COUNT_V5;
-		if (machine.native_iset_ver == E2K_ISET_V6) {
-			pr_err("FIXME: %s(): monitors not fully implemented "
-				"for iset V6\n",
-				__func__);
-		}
+		setup_monitors(6);
 		break;
 	default:
 		BUG();

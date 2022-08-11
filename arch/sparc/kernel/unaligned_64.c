@@ -71,6 +71,7 @@ static inline int decode_access_size(struct pt_regs *regs, unsigned int insn)
 	else if (tmp == 2)
 		return 2;
 	else {
+		return 0; /* it is possible (r1000 bug 47278) */
 		printk("Impossible unaligned trap. insn=%08x\n", insn);
 		die_if_kernel("Byte sized unaligned access?!?!", regs);
 
@@ -117,12 +118,16 @@ static inline long sign_extend_imm13(long imm)
 	return imm << 51 >> 51;
 }
 
-static unsigned long fetch_reg(unsigned int reg, struct pt_regs *regs)
+static inline int fetch_reg(struct pt_regs *regs, int reg,
+				unsigned long *val)
 {
-	unsigned long value, fp;
+	unsigned long value = 0, fp;
+	int ret = 0;
 
-	if (reg < 16)
-		return (!reg ? 0 : regs->u_regs[reg]);
+	if (reg < 16) {
+		*val = !reg ? 0 : regs->u_regs[reg];
+		return 0;
+	}
 
 	fp = regs->u_regs[UREG_FP];
 
@@ -132,14 +137,17 @@ static unsigned long fetch_reg(unsigned int reg, struct pt_regs *regs)
 		value = win->locals[reg - 16];
 	} else if (!test_thread_64bit_stack(fp)) {
 		struct reg_window32 __user *win32;
-		win32 = (struct reg_window32 __user *)((unsigned long)((u32)fp));
-		get_user(value, &win32->locals[reg - 16]);
+		win32 = (struct reg_window32 __user *)
+				((unsigned long)((u32)fp));
+		ret = get_user(value, &win32->locals[reg - 16]);
 	} else {
 		struct reg_window __user *win;
 		win = (struct reg_window __user *)(fp + STACK_BIAS);
-		get_user(value, &win->locals[reg - 16]);
+		ret = get_user(value, &win->locals[reg - 16]);
 	}
-	return value;
+
+	*val = value;
+	return ret;
 }
 
 static unsigned long *fetch_reg_addr(unsigned int reg, struct pt_regs *regs)
@@ -166,26 +174,39 @@ static unsigned long *fetch_reg_addr(unsigned int reg, struct pt_regs *regs)
 	}
 }
 
-unsigned long compute_effective_address(struct pt_regs *regs,
-					unsigned int insn, unsigned int rd)
+int compute_effective_address(struct pt_regs *regs,
+					unsigned int insn, unsigned int rd,
+					unsigned long *address)
 {
 	int from_kernel = (regs->tstate & TSTATE_PRIV) != 0;
 	unsigned int rs1 = (insn >> 14) & 0x1f;
 	unsigned int rs2 = insn & 0x1f;
-	unsigned long addr;
+	unsigned long addr, offset;
+	int ret;
 
 	if (insn & 0x2000) {
-		maybe_flush_windows(rs1, 0, rd, from_kernel);
-		addr = (fetch_reg(rs1, regs) + sign_extend_imm13(insn));
+		maybe_flush_windows(rs1, 0, 0, from_kernel);
+		ret = fetch_reg(regs, rs1, &addr);
+		if (ret)
+			goto out;
+		addr += sign_extend_imm13(insn);
 	} else {
-		maybe_flush_windows(rs1, rs2, rd, from_kernel);
-		addr = (fetch_reg(rs1, regs) + fetch_reg(rs2, regs));
+		maybe_flush_windows(rs1, rs2, 0, from_kernel);
+		ret = fetch_reg(regs, rs1, &addr);
+		if (ret)
+			goto out;
+		ret = fetch_reg(regs, rs2, &offset);
+		if (ret)
+			goto out;
+		addr += offset;
 	}
 
 	if (!from_kernel && test_thread_flag(TIF_32BIT))
 		addr &= 0xffffffff;
 
-	return addr;
+	*address = addr;
+out:
+	return ret;
 }
 
 /* This is just to make gcc think die_if_kernel does return... */
@@ -206,12 +227,18 @@ static inline int do_int_store(int reg_num, int size, unsigned long *dst_addr,
 	unsigned long zero = 0;
 	unsigned long *src_val_p = &zero;
 	unsigned long src_val;
+	int ret = 0;
 
 	if (size == 16) {
+		unsigned long v;
 		size = 8;
-		zero = (((long)(reg_num ?
-		        (unsigned int)fetch_reg(reg_num, regs) : 0)) << 32) |
-			(unsigned int)fetch_reg(reg_num + 1, regs);
+		ret = fetch_reg(regs, reg_num, &zero);
+		if (ret)
+			goto out;
+		fetch_reg(regs, reg_num + 1, &v);
+		if (ret)
+			goto out;
+		zero = (zero << 32) | v;
 	} else if (reg_num) {
 		src_val_p = fetch_reg_addr(reg_num, regs);
 	}
@@ -234,6 +261,8 @@ static inline int do_int_store(int reg_num, int size, unsigned long *dst_addr,
 		}
 	}
 	return __do_int_store(dst_addr, size, src_val, asi);
+out:
+	return ret;
 }
 
 static inline void advance(struct pt_regs *regs)
@@ -264,10 +293,10 @@ static void kernel_mna_trap_fault(int fixup_tstate_asi)
 
 	entry = search_exception_tables(regs->tpc);
 	if (!entry) {
-		unsigned long address;
+		unsigned long address = 0;
 
-		address = compute_effective_address(regs, insn,
-						    ((insn >> 25) & 0x1f));
+		compute_effective_address(regs, insn,
+				((insn >> 25) & 0x1f), &address);
         	if (address < PAGE_SIZE) {
                 	printk(KERN_ALERT "Unable to handle kernel NULL "
 			       "pointer dereference in mna handler");
@@ -311,16 +340,24 @@ static inline int do_user_int_store(int reg_num, int size,
 	unsigned long zero = 0;
 	unsigned long *src_val_p = &zero;
 	unsigned long src_val;
+	int ret = 0;
 
 	if (size == 16) {
+		unsigned long v;
 		size = 8;
-		zero = (((long)(reg_num ?
-			(unsigned)fetch_reg(reg_num, regs) : 0)) << 32) |
-			(unsigned)fetch_reg(reg_num + 1, regs);
+		ret = fetch_reg(regs, reg_num, &zero);
+		if (ret)
+			goto out;
+		fetch_reg(regs, reg_num + 1, &v);
+		if (ret)
+			goto out;
+		zero = (zero << 32) | v;
 		src_val = *src_val_p;
 	} else if (reg_num) {
 		src_val_p = fetch_reg_addr(reg_num, regs);
-		get_user(src_val, src_val_p);
+		ret = get_user(src_val, src_val_p);
+		if (ret)
+			goto out;
 	}
 	if (unlikely(asi != orig_asi)) {
 		switch (size) {
@@ -340,6 +377,8 @@ static inline int do_user_int_store(int reg_num, int size,
 		}
 	}
 	return __do_int_store(dst_addr, size, src_val, asi);
+out:
+	return ret;
 }
 
 static int write_user(unsigned long val, void  __user *addr,
@@ -567,10 +606,9 @@ asmlinkage int user_unaligned_trap(struct pt_regs *regs, unsigned int insn,
 			regs->tpc, sign, sz, flt, rd);
 	}
 
-	if (sz < 0)
-		goto kill_user;
-
 	if ((current_thread_info()->status & TS_UNALIGN_SIGBUS))
+		goto kill_user;
+	if (sz <= 0 || sz > 8)
 		goto kill_user;
 
 	perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1,
@@ -607,7 +645,8 @@ asmlinkage int user_unaligned_trap(struct pt_regs *regs, unsigned int insn,
 			if (fetch_fp_reg(regs, rd, &val, sz))
 				goto kill_user;
 		} else {
-			val = fetch_reg(rd, regs);
+			if (fetch_reg(regs, rd, &val))
+				goto kill_user;
 		}
 		if (write_user(val, addr, sz, swab))
 			goto kill_user;
@@ -669,8 +708,10 @@ asmlinkage void kernel_unaligned_trap(struct pt_regs *regs, unsigned int insn)
 		unsigned long addr, *reg_addr;
 		int err;
 
-		addr = compute_effective_address(regs, insn,
-						 ((insn >> 25) & 0x1f));
+		err = compute_effective_address(regs, insn,
+						 ((insn >> 25) & 0x1f), &addr);
+		if (err)
+			goto err;
 
 		if (asi == ASI_AIUS &&
 			!(current_thread_info()->status & TS_UNALIGN_NOPRINT)) {
@@ -728,6 +769,7 @@ asmlinkage void kernel_unaligned_trap(struct pt_regs *regs, unsigned int insn)
 			panic("Impossible kernel unaligned trap.");
 			/* Not reached... */
 		}
+err:
 		if (unlikely(err)) {
 			if (asi == ASI_AIUS)
 				kernel_mna_trap_fault(0);
@@ -743,7 +785,7 @@ int handle_popc(u32 insn, struct pt_regs *regs)
 {
 	int from_kernel = (regs->tstate & TSTATE_PRIV) != 0;
 	int ret, rd = ((insn >> 25) & 0x1f);
-	u64 value;
+	unsigned long value;
 
 	perf_sw_event(PERF_COUNT_SW_EMULATION_FAULTS, 1, regs, 0);
 	if (insn & 0x2000) {
@@ -751,7 +793,8 @@ int handle_popc(u32 insn, struct pt_regs *regs)
 		value = sign_extend_imm13(insn);
 	} else {
 		maybe_flush_windows(0, insn & 0x1f, rd, from_kernel);
-		value = fetch_reg(insn & 0x1f, regs);
+		if (fetch_reg(regs, insn & 0x1f, &value))
+			return 0;
 	}
 	ret = hweight64(value);
 	if (rd < 16) {
@@ -763,11 +806,13 @@ int handle_popc(u32 insn, struct pt_regs *regs)
 		if (!test_thread_64bit_stack(fp)) {
 			struct reg_window32 __user *win32;
 			win32 = (struct reg_window32 __user *)((unsigned long)((u32)fp));
-			put_user(ret, &win32->locals[rd - 16]);
+			if (put_user(ret, &win32->locals[rd - 16]))
+				return 0;
 		} else {
 			struct reg_window __user *win;
 			win = (struct reg_window __user *)(fp + STACK_BIAS);
-			put_user(ret, &win->locals[rd - 16]);
+			if (put_user(ret, &win->locals[rd - 16]))
+				return 0;
 		}
 	}
 	advance(regs);
@@ -782,12 +827,15 @@ extern void sun4v_data_access_exception(struct pt_regs *regs,
 
 int handle_ldf_stq(u32 insn, struct pt_regs *regs)
 {
-	unsigned long addr = compute_effective_address(regs, insn, 0);
+	unsigned long addr;
 	int freg;
 	struct fpustate *f = FPUSTATE;
 	int asi = decode_asi(insn, regs);
-	int flag;
+	int flag, ret;
 
+	ret = compute_effective_address(regs, insn, 0, &addr);
+	if (ret)
+		return 0;
 	perf_sw_event(PERF_COUNT_SW_EMULATION_FAULTS, 1, regs, 0);
 
 	save_and_clear_fpu();
@@ -913,11 +961,12 @@ int handle_ldf_stq(u32 insn, struct pt_regs *regs)
 	return 1;
 }
 
-void handle_ld_nf(u32 insn, struct pt_regs *regs)
+int handle_ld_nf(u32 insn, struct pt_regs *regs)
 {
 	int rd = ((insn >> 25) & 0x1f);
 	int from_kernel = (regs->tstate & TSTATE_PRIV) != 0;
 	unsigned long *reg;
+	int ret = 0;
 
 	perf_sw_event(PERF_COUNT_SW_EMULATION_FAULTS, 1, regs, 0);
 
@@ -928,15 +977,24 @@ void handle_ld_nf(u32 insn, struct pt_regs *regs)
 		if ((insn & 0x780000) == 0x180000)
 			reg[1] = 0;
 	} else if (!test_thread_64bit_stack(regs->u_regs[UREG_FP])) {
-		put_user(0, (int __user *) reg);
+		ret = put_user(0, (int __user *) reg);
+		if (ret)
+			return ret;
 		if ((insn & 0x780000) == 0x180000)
-			put_user(0, ((int __user *) reg) + 1);
+			ret = put_user(0, ((int __user *) reg) + 1);
+		if (ret)
+			return ret;
 	} else {
-		put_user(0, (unsigned long __user *) reg);
+		ret = put_user(0, (unsigned long __user *) reg);
+		if (ret)
+			return ret;
 		if ((insn & 0x780000) == 0x180000)
-			put_user(0, (unsigned long __user *) reg + 1);
+			ret = put_user(0, (unsigned long __user *) reg + 1);
+		if (ret)
+			return ret;
 	}
 	advance(regs);
+	return ret;
 }
 
 void handle_lddfmna(struct pt_regs *regs, unsigned long sfar, unsigned long sfsr)
@@ -964,7 +1022,7 @@ void handle_lddfmna(struct pt_regs *regs, unsigned long sfar, unsigned long sfsr
 	perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, regs, sfar);
 	if (test_thread_flag(TIF_32BIT))
 		pc = (u32)pc;
-	if (get_user(insn, (u32 __user *) pc) != -EFAULT) {
+	if (!get_user(insn, (u32 __user *) pc)) {
 		int asi = decode_asi(insn, regs);
 		u32 first, second;
 		int err;
@@ -1040,7 +1098,7 @@ void handle_stdfmna(struct pt_regs *regs, unsigned long sfar, unsigned long sfsr
 	perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, regs, sfar);
 	if (test_thread_flag(TIF_32BIT))
 		pc = (u32)pc;
-	if (get_user(insn, (u32 __user *) pc) != -EFAULT) {
+	if (!get_user(insn, (u32 __user *) pc)) {
 		int asi = decode_asi(insn, regs);
 		freg = ((insn >> 25) & 0x1e) | ((insn >> 20) & 0x20);
 		value = 0;

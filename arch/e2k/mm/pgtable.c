@@ -41,44 +41,6 @@ void track_pfn_insert(struct vm_area_struct *vma, pgprot_t *prot, pfn_t pfn)
 	}
 }
 
-
-#if defined CONFIG_TRANSPARENT_HUGEPAGE && defined CONFIG_MAKE_ALL_PAGES_VALID
-/* This one is called from many places when collapsing a huge pmd,
- * so always keep the valid bit */
-pmd_t pmdp_collapse_flush(struct vm_area_struct *vma, unsigned long address,
-			  pmd_t *pmdp)
-{
-	/*
-	 * pmd and hugepage pte format are same. So we could
-	 * use the same function.
-	 */
-	pmd_t pmd;
-
-	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
-	VM_BUG_ON(pmd_trans_huge(*pmdp));
-	pmd = pmdp_huge_get_and_clear_as_valid(vma->vm_mm, address, pmdp);
-
-	/* collapse entails shooting down ptes not pmd */
-	flush_tlb_range(vma, address, address + HPAGE_PMD_SIZE);
-	return pmd;
-}
-
-/* This one is called from many places when splitting a huge pmd,
- * so always keep the valid bit */
-pmd_t pmdp_huge_clear_flush(struct vm_area_struct *vma, unsigned long address,
-			    pmd_t *pmdp)
-{
-	pmd_t pmd;
-
-	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
-	VM_BUG_ON(!pmd_trans_huge(*pmdp) && !pmd_devmap(*pmdp));
-	pmd = pmdp_huge_get_and_clear_as_valid(vma->vm_mm, address, pmdp);
-
-	flush_pmd_tlb_range(vma, address, address + HPAGE_PMD_SIZE);
-	return pmd;
-}
-#endif
-
 /*
  * Used to set accessed or dirty bits in the page table entries
  * on other architectures. On e2k, the accessed and dirty bits

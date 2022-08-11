@@ -19,6 +19,8 @@
 #define clk_rt_clocksource_register()	\
 	__clocksource_register(&clocksource_clk_rt)
 #define MASK_32	0xffffffff
+#define NPT_MASK	0x8000000000000000LL
+#define SOFT_OK_MASK	0x4000000000000000LL
 
 int clk_rt_mode = CLK_RT_RTC;
 EXPORT_SYMBOL(clk_rt_mode);
@@ -37,7 +39,7 @@ static int __init clk_rt_setup(char *s)
 		return -EINVAL;
 	}
 
-	if (e90s_get_cpu_type() == E90S_CPU_R2000 && s) {
+	if (get_cpu_revision() >= 0x10 && s) {
 		if (!strcmp(s, "ext")) {
 			reg_task = kthread_run(clk_rt_register,
 				(void *)CLK_RT_EXT, "clk_rt_register");
@@ -84,6 +86,14 @@ static inline void write_rt_div(u64 rt_div_v)
 			     : "r" (rt_div_v));
 };
 
+static inline int soft_ok(void)
+{
+	if (get_cpu_revision() >= 0x12)
+		return ((read_rt_div() & SOFT_OK_MASK) != 0);
+	else
+		return ((read_rt_div() & NPT_MASK) == 0);
+}
+
 /* Use an aligned structure to make it occupy a whole cache line */
 struct {
 	u64 res;
@@ -108,9 +118,9 @@ static u64 read_clk_rt(struct clocksource *cs)
 	clk_rt_sec = clk_rt_v >> 32;
 	freq = read_rt_div() & MASK_32;
 
-	if ((read_rt_div() & 0x8000000000000000LL) != 0) {
-		pr_err("clk_rt perm=1 clk_rt_sec=%lld"
-			" clk_rt_lo=%lld read_rt_div=0x%lx\n",
+	if (!soft_ok()) {
+		pr_err_once("ERROR: clocksource clk_rt is not initialised"
+			" clk_rt_sec=%lld clk_rt_lo=%lld read_rt_div=0x%lx\n",
 			clk_rt_sec, clk_rt_lo, read_rt_div());
 		raw_local_irq_restore(flags);
 		return 0;
@@ -202,10 +212,14 @@ void clk_rt_wr_seconds(void *arg)
 #endif
 }
 
-void clk_rt_set_perm(void *arg)
+void set_soft_ok(void *arg)
 {
-	u64 rt_div_v = read_rt_div();
-	write_rt_div(rt_div_v & MASK_32);
+	if (get_cpu_revision() >= 0x12) {
+		write_rt_div(SOFT_OK_MASK);
+	} else {		/* set NPT to zero - clk_rt init is OK */
+		u64 rt_div_v = read_rt_div();
+		write_rt_div(read_rt_div() & MASK_32);
+	}
 }
 
 noinline int clk_rt_register(void *new_clk_rt_src_arg)
@@ -278,8 +292,8 @@ noinline int clk_rt_register(void *new_clk_rt_src_arg)
 	/* timeout 2 second after seconds writing into CLK_RT
 	   until rt_div will be correct */
 	schedule_timeout_interruptible(3 * HZ);
-	smp_call_function(clk_rt_set_perm, NULL, 1);
-	clk_rt_set_perm(NULL);
+	smp_call_function(set_soft_ok, NULL, 1);
+	set_soft_ok(NULL);
 	clk_rt_clocksource_register();
 	return 0;
 }

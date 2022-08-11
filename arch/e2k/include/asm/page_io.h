@@ -46,6 +46,8 @@ extern void e2k_remove_swap(struct swap_info_struct *sis);
 extern void restore_tags_for_data(u64 *, u8 *);
 extern u32 save_tags_from_data(u64 *, u8 *);
 extern void get_page_with_tags(u8 *, u8 *, int *);
+extern u8 *alloc_page_with_tags(void);
+extern void free_page_with_tags(u8 *);
 extern int  check_tags(unsigned type, unsigned long beg, unsigned long end);
 
 #endif //_E2K_PAGE_IO_H

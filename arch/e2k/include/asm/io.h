@@ -192,11 +192,11 @@ static inline void native_writeq(u64 value, volatile void __iomem *addr)
  */
 
 #if CONFIG_CPU_ISET >= 6
-# define __io_par() E2K_WAIT_V6(_ld_c | _sal | _lal)
-# define __io_pbw() E2K_WAIT_V6(_st_c | _sas | _ld_c | _sal)
+# define __io_par() __E2K_WAIT(_ld_c | _sal | _lal)
+# define __io_pbw() __E2K_WAIT(_st_c | _sas | _ld_c | _sal)
 /* Not required by documentation, but this is how
  * x86 works and how most of the drivers are tested. */
-# define __io_paw() E2K_WAIT_V6(_st_c | _sas)
+# define __io_paw() __E2K_WAIT(_st_c | _sas)
 #else
 # define __io_par() \
 do { \

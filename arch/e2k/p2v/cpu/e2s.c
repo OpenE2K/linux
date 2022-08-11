@@ -31,6 +31,5 @@ void boot_e2s_setup_arch(void)
 	boot_machine.sic_mc_count = E2S_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = E2S_SIC_MC1_ECC;
 	boot_machine.sic_io_str1 = SIC_io_str_hi;
-	boot_machine.clock_tick_rate = E2S_CLOCK_TICK_RATE;
 }
 

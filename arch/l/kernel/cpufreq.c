@@ -6,16 +6,18 @@
 #include <asm/timex.h>
 #include <asm-l/l_timer.h>
 
-#if defined CONFIG_E2K && defined CONFIG_CPU_IDLE
+#ifdef CONFIG_E2K
+# ifdef CONFIG_CPU_IDLE
 static void wait_C2_exit(void)
 {
 	cycles_t lt_tick_before = lt_read();
 	/* Wait for 100us to make sure this CPU has exited from C2 state */
-	while (lt_read() - lt_tick_before < CLOCK_TICK_RATE / 10000)
+	while (lt_read() - lt_tick_before < lt_clock_rate / 10000)
 		barrier();
 }
-#else
+# else
 static void wait_C2_exit(void) { }
+# endif
 #endif
 
 static void measure_cpu_freq_ipi(void *arg)
@@ -39,7 +41,7 @@ static void measure_cpu_freq_ipi(void *arg)
 	raw_all_irq_restore(flags);
 #endif
 
-	while (lt_read() - lt_tick_before < CLOCK_TICK_RATE / 1000)
+	while (lt_read() - lt_tick_before < lt_clock_rate / 1000)
 		barrier();
 
 #ifdef CONFIG_E2K
@@ -51,7 +53,7 @@ static void measure_cpu_freq_ipi(void *arg)
 	raw_all_irq_restore(flags);
 #endif
 
-	*freq = (cpu_tick_after - cpu_tick_before) * CLOCK_TICK_RATE /
+	*freq = (cpu_tick_after - cpu_tick_before) * lt_clock_rate /
 		(lt_tick_after - lt_tick_before);
 }
 

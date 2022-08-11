@@ -155,9 +155,9 @@ SECTIONS
 #endif	/* CONFIG_KVM_HOST_MODE */
 
 		__entry_handlers_start = .;
-		*(.entry_handlers)
+		ENTRY_TEXT
+		IRQENTRY_TEXT
 		__entry_handlers_end = .;
-                IRQENTRY_TEXT
 		HEAD_TEXT
 #ifdef CONFIG_KPROBES
 		KPROBES_TEXT
@@ -173,6 +173,11 @@ SECTIONS
 		LOCK_TEXT
 		CPUIDLE_TEXT
 		*(.fixup)
+#ifdef CONFIG_CPU_HWBUG_IBRANCH
+		/* Add NOPs after ibranch in .fixup section */
+		QUAD(0)
+		QUAD(0)
+#endif
 		*(.gnu.warning)
 #ifdef CONFIG_E2K_KEXEC
 		. = ALIGN(PAGE_SIZE);

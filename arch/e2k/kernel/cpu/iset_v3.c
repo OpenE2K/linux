@@ -105,13 +105,34 @@ void native_write_SCLKM2_reg_value(unsigned long reg_value)
 }
 
 __section(".C3_wait_trap.text")
-static noinline void C3_wait_trap(bool nmi_only)
+static noinline notrace void C3_wait_trap(bool nmi_only)
 {
 	e2k_st_core_t st_core;
 	int cpuid = read_pic_id();
 	int reg = SIC_st_core(cpuid % cpu_max_cores_num());
 	int node = numa_node_id();
 	phys_addr_t nbsr_phys = sic_get_node_nbsr_phys_base(node);
+
+	/* Only NMIs that go through APIC are allowed: if we receive local
+	 * NMI (or just a local exception) hardware will block.  So here we
+	 * disable all other sources (and reenable them in handle_wtrap());
+	 * it must be done under all closed interrupts so that handle_wtrap()
+	 * does not try to read uninitalized values from [current->thread.C3].
+	 *
+	 * Newer processors have a much better "wait int" interface that
+	 * doesn't have this problem (and some others) and should be used
+	 * instead. */
+	WARN_ON_ONCE(!raw_all_irqs_disabled());
+	NATIVE_SET_MMUREG(mlt_inv, 0);
+	current->thread.C3.ddbcr = READ_DDBCR_REG();
+	current->thread.C3.dibcr = READ_DIBCR_REG();
+	current->thread.C3.ddmcr = READ_DDMCR_REG();
+	current->thread.C3.dimcr = READ_DIMCR_REG();
+
+	WRITE_DDBCR_REG_VALUE(0);
+	WRITE_DIBCR_REG_VALUE(0);
+	WRITE_DDMCR_REG_VALUE(0);
+	WRITE_DIMCR_REG_VALUE(0);
 
 	AW(st_core) = sic_read_node_nbsr_reg(node, reg);
 	st_core.val = 0;
@@ -125,20 +146,6 @@ static noinline void C3_wait_trap(bool nmi_only)
 	else
 		local_irq_enable();
 
-	/* Only NMIs that go through APIC are allowed: if we receive local
-	 * NMI (or just a local exception) hardware will block.  So here we
-	 * disable all other sources (and reenable them in handle_wtrap()). */
-	NATIVE_SET_MMUREG(mlt_inv, 0);
-	current->thread.C3.ddbcr = READ_DDBCR_REG();
-	current->thread.C3.dibcr = READ_DIBCR_REG();
-	current->thread.C3.ddmcr = READ_DDMCR_REG();
-	current->thread.C3.dimcr = READ_DIMCR_REG();
-
-	WRITE_DDBCR_REG_VALUE(0);
-	WRITE_DIBCR_REG_VALUE(0);
-	WRITE_DDMCR_REG_VALUE(0);
-	WRITE_DIMCR_REG_VALUE(0);
-
 	C3_WAIT_TRAP_V3(AW(st_core), nbsr_phys + reg);
 	/* Will not get here */
 }
@@ -146,6 +153,7 @@ static noinline void C3_wait_trap(bool nmi_only)
 void __cpuidle C3_enter_v3(void)
 {
 	WARN_ON_ONCE(!irqs_disabled());
+	raw_all_irq_disable();
 	C3_wait_trap(false);
 	local_irq_disable();
 }

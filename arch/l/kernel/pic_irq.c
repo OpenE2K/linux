@@ -48,7 +48,7 @@ EXPORT_PER_CPU_SYMBOL(irq_stat);
 int first_system_vector = NR_VECTORS - 1;
 
 __init_recv
-void setup_APIC_vector_handler(int vector,
+void setup_PIC_vector_handler(int vector,
 		void (*handler)(struct pt_regs *), bool system, char *name)
 {
 	if (test_bit(vector, used_vectors) || interrupt[vector])
@@ -305,6 +305,11 @@ void arch_send_call_function_single_ipi(int cpu)
 void smp_send_reschedule(int cpu)
 {
 	pic_send_reschedule(cpu);
+}
+
+void irq_force_complete_move(struct irq_desc *desc)
+{
+	pic_irq_force_complete_move(desc);
 }
 #endif
 

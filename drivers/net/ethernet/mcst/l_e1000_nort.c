@@ -24,6 +24,7 @@
 #include <linux/net_tstamp.h>		/* for IEEE 1588 */
 #include <linux/ptp_clock_kernel.h>	/* for IEEE 1588 */
 #include <linux/phy.h>
+#include <linux/irq.h>
 
 #ifndef MODULE
 #undef CONFIG_DEBUG_FS
@@ -1006,6 +1007,9 @@ static void e1000_print_phy(struct e1000_private *ep, u32 id)
 	} else if ((id & MICREL_PHY_ID_MASK) == PHY_ID_KSZ9031) {
 		dev_info(&pdev->dev,
 			 "found phy id 0x%08X - Micrel KSZ9031\n", id);
+	} else if ((id & MICREL_PHY_ID_MASK) == PHY_ID_KSZ9021) {
+		dev_info(&pdev->dev,
+			 "found phy id 0x%08X - Micrel KSZ9021\n", id);
 	} else if ((id & NATSEMI_PHY_ID_MASK) == DP83865_PHY_ID) {
 		dev_info(&pdev->dev,
 			 "found phy id 0x%08X - NatSemi DP83865\n", id);
@@ -1156,8 +1160,11 @@ static int e1000_init_ring(struct net_device *dev)
 		if (ep->rx_dma_addr[i] == 0)
 			ep->rx_dma_addr[i] = pci_map_single(ep->pci_dev,
 							rx_skbuff->data,
-							(PKT_BUF_SZ + CRC_SZ),
+							(PKT_BUF_SZ + CRC_SZ) + 2,
 							PCI_DMA_FROMDEVICE);
+
+		if (WARN_ON(pci_dma_mapping_error(ep->pci_dev, ep->rx_dma_addr[i])))
+			return -1;
 		rxr->base = cpu_to_le32((u32)(ep->rx_dma_addr[i]));
 		rxr->buf_length = cpu_to_le16(-(PKT_BUF_SZ + CRC_SZ));
 		wmb(); /*Make sure owner changes after all others are visible*/
@@ -1344,6 +1351,7 @@ static void napi_wq_worker(struct work_struct *work)
 	napi_work_t *napi_work1 = container_of(work, napi_work_t, work);
 
 	netif_receive_skb_list(&napi_work1->napi_list);
+	clear_thread_flag(TIF_NAPI_WORK);
 	kfree((void *)work);
 }
 
@@ -1478,7 +1486,7 @@ static int e1000_rx(struct e1000_private *ep, int budget)
 				skb = ep->rx_skbuff[entry];
 				pci_unmap_single(ep->pci_dev,
 						 ep->rx_dma_addr[entry],
-						 (PKT_BUF_SZ + CRC_SZ),
+						 (PKT_BUF_SZ + CRC_SZ + 2),
 						 PCI_DMA_FROMDEVICE);
 				skb_put(skb, pkt_len);
 				ep->rx_skbuff[entry] = newskb;

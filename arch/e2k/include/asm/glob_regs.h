@@ -9,8 +9,6 @@
 
 #ifdef __KERNEL__
 
-#include <linux/types.h>
-
 /*
  * MAP of global registers using for the user purposes
  */

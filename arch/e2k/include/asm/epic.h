@@ -11,6 +11,8 @@
 
 #ifndef __ASSEMBLY__
 
+void do_sic_error_interrupt(void);
+
 static inline bool cpu_has_epic(void)
 {
 	if (cpu_has(CPU_FEAT_EPIC))

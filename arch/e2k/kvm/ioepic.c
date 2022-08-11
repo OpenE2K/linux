@@ -9,6 +9,7 @@
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/current.h>
+#include <asm/e2k_debug.h>
 #include <trace/events/kvm.h>
 #include <asm/kvm/trace_kvm.h>
 
@@ -34,12 +35,21 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-#undef	DEBUG_COALESCED_IRQ
+#undef	DEBUG_COALESCED_IRQ_MODE
 #undef	DebugCIRQ
 #define	DEBUG_COALESCED_IRQ_MODE	0	/* Coalesced IRQ debugging */
 #define	DebugCIRQ(fmt, args...)						\
 ({									\
 	if (DEBUG_COALESCED_IRQ_MODE)					\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_IOEPIC_MODE
+#undef	DebugIOEPIC
+#define	DEBUG_IOEPIC_MODE	0	/* IOEPIC base debugging */
+#define	DebugIOEPIC(fmt, args...)					\
+({									\
+	if (DEBUG_IOEPIC_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -475,12 +485,12 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base, int node_id)
 		return -ENODEV;
 	}
 	if (ioepic->base_address == new_base) {
-		pr_info("%s(): IOEPIC base 0x%lx is the same, "
+		DebugIOEPIC("%s(): IOEPIC base 0x%lx is the same, "
 			"so ignore update\n",
 			__func__, new_base);
 		return 0;
 	} else if (new_base == 0xffffffff) {
-		pr_info("%s(): ignore probing write to IOEPIC BAR\n", __func__);
+		DebugIOEPIC("%s(): ignore probing write to IOEPIC BAR\n", __func__);
 		return 0;
 	}
 

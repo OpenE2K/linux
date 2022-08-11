@@ -15,12 +15,7 @@ struct pt_regs;
 
 extern void boot_e2c3_setup_arch(void);
 extern void e2c3_setup_machine(void);
-extern void setup_APIC_vector_handler(int vector,
-		void (*handler)(struct pt_regs *), bool system, char *name);
 #endif
-
-#define	E2C3_CPU_VENDOR			ES2_CPU_VENDOR
-#define	E2C3_CPU_FAMILY			E16C_CPU_FAMILY
 
 #define	E2C3_NR_NODE_CPUS		2
 #define	E2C3_MAX_NR_NODE_CPUS		16

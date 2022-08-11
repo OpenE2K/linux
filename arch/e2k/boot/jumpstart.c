@@ -129,27 +129,37 @@ extern void video_bios(void);
 
 #define	PROBE_EXT_MEM_LIMIT	(CONFIG_EXT_MEMLIMIT * _1MB)
 
-#define LO_MEMORY_START		0x0000000000ULL
-#define	ES2_HI_MEMORY_START	0x0400000000ULL
-#define	E2S_HI_MEMORY_START	0x2000000000ULL
-#define	E8C_HI_MEMORY_START	E2S_HI_MEMORY_START
-#define	E16C_HI_MEMORY_START	0x10000000000ULL
-#define	HI_MEMORY_NODE_MAX_SIZE	0x10000000000ULL
+#define LO_MEMORY_START			0x00000000000ULL
+#define	ES2_HI_MEMORY_START		0x00400000000ULL
+#define	ES2_HI_MEMORY_NODE_MAX_SIZE	0x02000000000ULL
+#define	E2S_HI_MEMORY_START		0x02000000000ULL
+#define	E2S_HI_MEMORY_NODE_MAX_SIZE	0x02000000000ULL
+#define	E8C_HI_MEMORY_START		E2S_HI_MEMORY_START
+#define	E8C_HI_MEMORY_NODE_MAX_SIZE	E2S_HI_MEMORY_NODE_MAX_SIZE
+#define	E16C_HI_MEMORY_START		0x10000000000ULL
+#define	E16C_HI_MEMORY_NODE_MAX_SIZE	0x10000000000ULL
 
 #if	defined(CONFIG_E1CP)
- #define HI_MEMORY_START	E2S_HI_MEMORY_START
+ #define HI_MEMORY_START		E2S_HI_MEMORY_START
+ #define HI_MEMORY_NODE_MAX_SIZE	E2S_HI_MEMORY_NODE_MAX_SIZE
 #elif	defined(CONFIG_ES2)
- #define HI_MEMORY_START	ES2_HI_MEMORY_START
+ #define HI_MEMORY_START		ES2_HI_MEMORY_START
+ #define HI_MEMORY_NODE_MAX_SIZE	ES2_HI_MEMORY_NODE_MAX_SIZE
 #elif	defined(CONFIG_E2S)
- #define HI_MEMORY_START	E2S_HI_MEMORY_START
+ #define HI_MEMORY_START		E2S_HI_MEMORY_START
+ #define HI_MEMORY_NODE_MAX_SIZE	E2S_HI_MEMORY_NODE_MAX_SIZE
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2)
- #define HI_MEMORY_START	E8C_HI_MEMORY_START
+ #define HI_MEMORY_START		E8C_HI_MEMORY_START
+ #define HI_MEMORY_NODE_MAX_SIZE	E8C_HI_MEMORY_NODE_MAX_SIZE
 #elif	defined(CONFIG_E2C3)
- #define HI_MEMORY_START	E16C_HI_MEMORY_START
+ #define HI_MEMORY_START		E16C_HI_MEMORY_START
+ #define HI_MEMORY_NODE_MAX_SIZE	E16C_HI_MEMORY_NODE_MAX_SIZE
 #elif	defined(CONFIG_E12C)
- #define HI_MEMORY_START	E16C_HI_MEMORY_START
+ #define HI_MEMORY_START		E16C_HI_MEMORY_START
+ #define HI_MEMORY_NODE_MAX_SIZE	E16C_HI_MEMORY_NODE_MAX_SIZE
 #elif	defined(CONFIG_E16C)
- #define HI_MEMORY_START	E16C_HI_MEMORY_START
+ #define HI_MEMORY_START		E16C_HI_MEMORY_START
+ #define HI_MEMORY_NODE_MAX_SIZE	E16C_HI_MEMORY_NODE_MAX_SIZE
 #else
  #error	"Unknown MicroProcessor type"
 #endif
@@ -206,7 +216,7 @@ bios_strlen(const char *s)
 
 static inline u64 get_hi_memory_start(int node_id)
 {
-	return HI_MEMORY_START + (HI_MEMORY_NODE_MAX_SIZE * node_id);
+	return HI_MEMORY_START + (HI_MEMORY_START * node_id);
 }
 static inline u64 get_lo_memory_size(int node_id)
 {
@@ -522,17 +532,17 @@ probe_memory(boot_info_t *boot_info, int mhi_no, int node_on, int node_for)
 	hi_end = ALIGN_UP_TO_SIZE(address + size, E2K_SIC_SIZE_RT_MHI);
 	AS_STRUCT(rt_mhi).bgn = hi_start >> E2K_SIC_ALIGN_RT_MHI;
 	AS_STRUCT(rt_mhi).end = (hi_end - 1) >> E2K_SIC_ALIGN_RT_MHI;
-	set_rt_mhi(rt_mhi, mhi_no, node_on, node_for);
 	DebugMRT("set_memory_filters: on node #%d set rt_mhi%d to 0x%x\n",
 		node_on, mhi_no,
 		AS_WORD(get_rt_mhi(mhi_no, node_on, node_for)));
+	set_rt_mhi(rt_mhi, mhi_no, node_on, node_for);
 	if (mhi_no != 0) {
 		/* setup rt_mhi0 on node 'for' */
-		set_rt_mhi(rt_mhi, 0, node_for, node_for);
 		DebugMRT("set_memory_filters: on node #%d set rt_mhi%d "
 			"to 0x%x\n",
 			node_for, 0,
 			AS_WORD(get_rt_mhi(0, node_for, node_for)));
+		set_rt_mhi(rt_mhi, 0, node_for, node_for);
 	}
 	rom_printk("NODE #%d high memory router set from 0x%X to 0x%X\n",
 		node_on, hi_start, hi_end);

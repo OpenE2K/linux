@@ -77,10 +77,6 @@ void chck_tm_prmtdsbl(int val)
 		if (delta > __this_cpu_read(max_prmtdsbled)) {
 			__this_cpu_write(max_prmtdsbled, delta);
 		}
-#ifdef CONFIG_FTRACE
-		if (delta > 40000)
-			trace_printk("PREEMPT delta=%lld\n", delta);
-#endif
 		if (max_tm && delta > max_tm && num_dumps > 0) {
 			num_dumps--;
 			if (num_dumps <= 0) {

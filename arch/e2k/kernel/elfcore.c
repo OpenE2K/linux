@@ -8,7 +8,7 @@
 #include <linux/uaccess.h>
 
 #include <asm/elf.h>
-#include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 /*
  * from file binfmt_elf.c
  */
@@ -51,7 +51,7 @@ Elf64_Half elf_core_extra_phdrs(void)
 	 * Dump all user registers
 	 */
 	if (regs)
-		user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
+		do_user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
 
 	return current->mm->map_count;
 }

@@ -242,46 +242,44 @@ native_flush_ICACHE_all(void)
 /*
  * native MMU DEBUG registers access
  */
-#define	NATIVE_READ_MMU_DEBUG_REG(reg_mnemonic)	\
-		NATIVE_GET_MMUREG(reg_mnemonic)
-#define	NATIVE_WRITE_MMU_DEBUG_REG(reg_mnemonic, reg_value)	\
-		NATIVE_SET_MMUREG(reg_mnemonic, reg_value)
 #define	NATIVE_READ_DDBAR0_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddbar0)
+		NATIVE_GET_MMUREG(ddbar0)
 #define	NATIVE_READ_DDBAR1_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddbar1)
+		NATIVE_GET_MMUREG(ddbar1)
 #define	NATIVE_READ_DDBAR2_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddbar2)
+		NATIVE_GET_MMUREG(ddbar2)
 #define	NATIVE_READ_DDBAR3_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddbar3)
+		NATIVE_GET_MMUREG(ddbar3)
 #define	NATIVE_READ_DDBCR_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddbcr)
+		NATIVE_GET_MMUREG(ddbcr)
 #define	NATIVE_READ_DDBSR_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddbsr)
+		NATIVE_GET_MMUREG(ddbsr)
 #define	NATIVE_READ_DDMAR0_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddmar0)
+		NATIVE_GET_MMUREG(ddmar0)
 #define	NATIVE_READ_DDMAR1_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddmar1)
+		NATIVE_GET_MMUREG(ddmar1)
 #define	NATIVE_READ_DDMCR_REG_VALUE()	\
-		NATIVE_READ_MMU_DEBUG_REG(ddmcr)
+		NATIVE_GET_MMUREG(ddmcr)
 #define	NATIVE_WRITE_DDBAR0_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddbar0, value)
+		NATIVE_SET_MMUREG(ddbar0, value)
 #define	NATIVE_WRITE_DDBAR1_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddbar1, value)
+		NATIVE_SET_MMUREG(ddbar1, value)
 #define	NATIVE_WRITE_DDBAR2_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddbar2, value)
+		NATIVE_SET_MMUREG(ddbar2, value)
 #define	NATIVE_WRITE_DDBAR3_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddbar3, value)
+		NATIVE_SET_MMUREG(ddbar3, value)
 #define	NATIVE_WRITE_DDBCR_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddbcr, value)
+		NATIVE_SET_MMUREG(ddbcr, value)
 #define	NATIVE_WRITE_DDBSR_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddbsr, value)
+		NATIVE_SET_MMUREG(ddbsr, value)
 #define	NATIVE_WRITE_DDMAR0_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddmar0, value)
+		NATIVE_SET_MMUREG(ddmar0, value)
 #define	NATIVE_WRITE_DDMAR1_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddmar1, value)
+		NATIVE_SET_MMUREG(ddmar1, value)
+/* 4 cycles delay guarantess that all counting
+ * is stopped and %ddbsr is updated accordingly. */
 #define	NATIVE_WRITE_DDMCR_REG_VALUE(value)	\
-		NATIVE_WRITE_MMU_DEBUG_REG(ddmcr, value)
+		NATIVE_SET_MMUREG_CLOSED(ddmcr, value, 3)
 
 #define	NATIVE_READ_DDBAR0_REG()	\
 		NATIVE_READ_DDBAR0_REG_VALUE()

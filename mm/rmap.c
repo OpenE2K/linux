@@ -916,11 +916,7 @@ static bool page_mkclean_one(struct page *page, struct vm_area_struct *vma,
 				continue;
 
 			flush_cache_page(vma, address, pte_pfn(*pte));
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-			entry = ptep_clear_flush_as_valid(vma, address, pte);
-#else
 			entry = ptep_clear_flush(vma, address, pte);
-#endif
 			entry = pte_wrprotect(entry);
 			entry = pte_mkclean(entry);
 			set_pte_at(vma->vm_mm, address, pte, entry);
@@ -1533,12 +1529,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
 			set_tlb_ubc_flush_pending(mm, pte_dirty(pteval));
 		} else {
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-			pteval = ptep_clear_flush_as_valid(
-						vma, address, pvmw.pte);
-#else
 			pteval = ptep_clear_flush(vma, address, pvmw.pte);
-#endif
 		}
 
 		/* Move the dirty bit to the page. Now the pte is gone. */

@@ -56,6 +56,9 @@ static const struct iommu_ops l_iommu_ops;
 #define l_iommu_enable_embedded_iommus(node)	do {} while (0)
 #endif
 
+/* iohub, iohub2 supports only 56-bit of virtual address */
+#define L_IOMMU_VA_MASK		((1UL << 56) - 1)
+
 /*
  * These give mapping size of each iommu pte/tlb.
  */
@@ -170,11 +173,6 @@ static bool l_dom_iova_hi(unsigned long iova)
 	return iova & (~0UL << 32) ? true : false;
 }
 
-static struct idr *l_dom_get_idr(struct iommu_domain *d, unsigned long iova)
-{
-	return l_dom_iova_hi(iova) ? &d->idr_hi : &d->idr_lo;
-}
-
 static unsigned l_dom_page_indx(struct iommu_domain *d, unsigned long iova)
 {
 	if (!l_dom_iova_hi(iova))
@@ -183,50 +181,58 @@ static unsigned l_dom_page_indx(struct iommu_domain *d, unsigned long iova)
 	return (iova - d->map_base) / IO_PAGE_SIZE;
 }
 
-static int l_dom_alloc_id(struct iommu_domain *d,
+static int l_add_buffer(struct iommu_domain *d,
 		phys_addr_t phys, unsigned long iova)
 {
 	int ret;
 	unsigned long flags;
-	struct idr *idr = l_dom_get_idr(d, iova);
 	unsigned i = l_dom_page_indx(d, iova);
+	if (!l_dom_iova_hi(iova)) {
+		WARN_ON(d->orig_phys_lo[i]);
+		d->orig_phys_lo[i] = phys;
+		return 0;
+	}
 
 	idr_preload(GFP_ATOMIC);
-	idr_lock_irqsave(idr, flags);
-	ret = idr_alloc(idr, (void *)phys, i, i + 1, GFP_NOWAIT);
-	idr_unlock_irqrestore(idr, flags);
+	write_lock_irqsave(&d->lock_hi, flags);
+	ret = idr_alloc(&d->idr_hi, (void *)phys, i, i + 1, GFP_NOWAIT);
+	write_unlock_irqrestore(&d->lock_hi, flags);
 	idr_preload_end();
 
 	return ret;
 }
 
-static void l_dom_free_id(struct iommu_domain *d, unsigned long iova)
+static void l_remove_buffer(struct iommu_domain *d, unsigned long iova)
 {
 	unsigned long flags;
-	struct idr *idr = l_dom_get_idr(d, iova);
 	unsigned i = l_dom_page_indx(d, iova);
-
-	idr_lock_irqsave(idr, flags);
-	WARN_ON(idr_remove(idr, i) == NULL);
-	idr_unlock_irqrestore(idr, flags);
+	if (!l_dom_iova_hi(iova)) {
+		WARN_ON(!d->orig_phys_lo[i]);
+		d->orig_phys_lo[i] = 0;
+		return;
+	}
+	write_lock_irqsave(&d->lock_hi, flags);
+	WARN_ON(idr_remove(&d->idr_hi, i) == NULL);
+	write_unlock_irqrestore(&d->lock_hi, flags);
 }
 
-static phys_addr_t l_dom_lookup_id(struct iommu_domain *d,
+static phys_addr_t l_dom_lookup_buffer(struct iommu_domain *d,
 				     unsigned long iova)
 {
 	void *p;
 	unsigned long flags;
-	struct idr *idr = l_dom_get_idr(d, iova);
 	unsigned i = l_dom_page_indx(d, iova);
+	if (!l_dom_iova_hi(iova))
+		return d->orig_phys_lo[i];
 
-	idr_lock_irqsave(idr, flags);
-	p = idr_find(idr, i);
-	idr_unlock_irqrestore(idr, flags);
+	read_lock_irqsave(&d->lock_hi, flags);
+	p = idr_find(&d->idr_hi, i);
+	read_unlock_irqrestore(&d->lock_hi, flags);
 
 	return (phys_addr_t)p;
 }
 
-static phys_addr_t l_alloc_pages(struct iommu_domain *d, phys_addr_t orig_phys,
+static phys_addr_t l_alloc_buffer(struct iommu_domain *d, phys_addr_t orig_phys,
 				  size_t size, unsigned long iova, int node)
 {
 	int ret;
@@ -236,7 +242,7 @@ static phys_addr_t l_alloc_pages(struct iommu_domain *d, phys_addr_t orig_phys,
 	struct page *page = alloc_pages_node(node, gfp_mask, order);
 	if (!page)
 		return 0;
-	ret = l_dom_alloc_id(d, orig_phys, iova);
+	ret = l_add_buffer(d, orig_phys, iova);
 	if (ret < 0) {
 		__free_pages(page, order);
 		return 0;
@@ -244,16 +250,16 @@ static phys_addr_t l_alloc_pages(struct iommu_domain *d, phys_addr_t orig_phys,
 	return page_to_phys(page);
 }
 
-static void l_free_pages(struct iommu_domain *d, phys_addr_t phys,
+static void l_free_buffer(struct iommu_domain *d, phys_addr_t phys,
 				size_t size, unsigned long iova)
 {
-	phys_addr_t orig_paddr = l_dom_lookup_id(d, iova);
+	phys_addr_t orig_paddr = l_dom_lookup_buffer(d, iova);
 	int npages = iommu_num_pages(phys, size, IO_PAGE_SIZE);
 	int order = get_order(npages * IO_PAGE_SIZE);
 	if (!orig_paddr)
 		return;
 	__free_pages(phys_to_page(phys), order);
-	l_dom_free_id(d, iova);
+	l_remove_buffer(d, iova);
 }
 
 static struct pci_dev *l_dev_to_parent_pcidev(struct device *dev)
@@ -319,6 +325,7 @@ static int l_iommu_init_table(struct l_iommu_table *t, unsigned long win_sz,
 		goto fail;
 
 	t->map_base = (~0UL) << win_bits;
+	t->map_base &= L_IOMMU_VA_MASK;
 	if (win_bits <= 32)
 		t->map_base &= 0xFFFFffff;
 
@@ -329,6 +336,9 @@ fail:
 
 static void l_iommu_free_table(struct l_iommu_table *t)
 {
+	if (t->pgtable == NULL)
+		return;
+
 	t->pgtable = l_iommu_unmap_table(t->pgtable);
 	kfree(t->pgtable);
 	t->pgtable = NULL;
@@ -355,7 +365,7 @@ static int l_iommu_init_tables(struct l_iommu *iommu)
 					  win_sz, node);
 	} else {
 		ret = l_iommu_init_table(&iommu->table[IOMMU_LOW_TABLE],
-					  win_sz, iommu->node);
+					  win_sz, node);
 	}
 	if (ret)
 		goto fail;
@@ -437,8 +447,8 @@ DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R
 DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P, l_quirk_enable_local_iommu);
 
 static const struct pci_device_id l_devices_with_iommu[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P)},
 	{ }	/* terminate list */
@@ -448,15 +458,13 @@ static const unsigned l_iommu_devices_iommu_offset[] = {
 	0x2000,
 	0x2800,
 	0x2c00,
-	0x3000,
-	0x3000,
+	0x2c00,
 };
 
 static const struct l_iommu_device l_iommu_devices[] = {
 	{ 0x2000, 0x2400 },
 	{ 0x2800 },
 	{ 0x2c00 },
-	{ 0x3000 },
 };
 
 static LIST_HEAD(l_iommus);
@@ -576,13 +584,15 @@ static int l_iommu_map(struct iommu_domain *iommu_domain,
 		return -EINVAL;
 	if (WARN_ON(size ^ L_PGSIZE_BITMAP))
 		return -EINVAL;
+	if (WARN_ON(!d->iommu->table[IOMMU_LOW_TABLE].pgtable))
+		return -ENODEV;
 
 	/* If no access, then nothing to do */
 	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
 		return 0;
 
 	if (copy) {
-		phys = l_alloc_pages(iommu_domain, orig_phys, size, iova, node);
+		phys = l_alloc_buffer(iommu_domain, orig_phys, size, iova, node);
 		if (phys == 0)
 			return -ENOMEM;
 	}
@@ -611,7 +621,7 @@ static size_t l_iommu_unmap(struct iommu_domain *iommu_domain,
 	if (WARN_ON(size ^ L_PGSIZE_BITMAP))
 		return 0;
 	if (l_iommu_has_numa_bug()) {
-		l_free_pages(iommu_domain,
+		l_free_buffer(iommu_domain,
 			     iopte_to_pa(iopte_val(*ptep)), size, iova);
 	}
 
@@ -640,9 +650,27 @@ static void l_iommu_detach_device(struct iommu_domain *iommu_domain,
 static int l_iommu_attach_device(struct iommu_domain *iommu_domain,
 				   struct device *dev)
 {
+	int ret = 0;
+	unsigned o;
+	struct page *p;
 	struct l_iommu_domain *d = to_l_domain(iommu_domain);
-	d->iommu = dev->archdata.iommu;
-	return 0;
+	struct l_iommu *i = dev->archdata.iommu;
+	mutex_lock(&i->mutex);
+	if (l_iommu_has_numa_bug() && !iommu_domain->orig_phys_lo) {
+		o = get_order(MIN_IOMMU_WINSIZE / IO_PAGE_SIZE *
+				sizeof(*iommu_domain->orig_phys_lo));
+		p = alloc_pages_node(i->node,
+					__GFP_ZERO | GFP_KERNEL, o);
+
+		if (p)
+			iommu_domain->orig_phys_lo = page_address(p);
+		else
+			ret = -ENOMEM;
+	}
+	mutex_unlock(&i->mutex);
+
+	d->iommu = i;
+	return ret;
 }
 
 static struct iommu_domain *__l_iommu_domain_alloc(unsigned type, int node)
@@ -665,14 +693,16 @@ static struct iommu_domain *__l_iommu_domain_alloc(unsigned type, int node)
 		end   &= 0xffffFFFF;
 	} else {
 		start = 0;
+		end &= L_IOMMU_VA_MASK;
 	}
 	d->domain.geometry.aperture_start = start;
 	d->domain.geometry.aperture_end   = end;
 	d->domain.geometry.force_aperture = true;
 
-	idr_init(&d->domain.idr_lo);
 	idr_init(&d->domain.idr_hi);
+	rwlock_init(&d->domain.lock_hi);
 	d->domain.map_base = (~0UL) << win_bits;
+	d->domain.map_base &= L_IOMMU_VA_MASK;
 
 	return &d->domain;
 
@@ -690,10 +720,7 @@ static void l_iommu_domain_free(struct iommu_domain *iommu_domain)
 {
 	struct l_iommu_domain *d = to_l_domain(iommu_domain);
 	iommu_put_dma_cookie(iommu_domain);
-
-	idr_destroy(&d->domain.idr_lo);
 	idr_destroy(&d->domain.idr_hi);
-
 	kfree(d);
 }
 
@@ -737,7 +764,7 @@ static struct iommu_group *l_iommu_device_group(struct device *dev)
 	i = l_find_iommu(dev);
 	if (!i)
 		return NULL;
-	return i->default_group;
+	return iommu_group_ref_get(i->default_group);
 }
 
 static bool l_iommu_capable(enum iommu_cap cap)
@@ -768,7 +795,7 @@ static void l_iommu_get_resv_regions(struct device *dev,
 
 	if (l_iommu_win_sz > (1UL << 32)) {
 		unsigned long start = 1UL << 32;
-		unsigned long sz = ULONG_MAX  - l_iommu_win_sz + 1;
+		unsigned long sz = L_IOMMU_VA_MASK  - l_iommu_win_sz + 1;
 		/* remove space beetween 0xffffFFFF and map_base */
 		region = iommu_alloc_resv_region(start, sz,
 						prot, IOMMU_RESV_RESERVED);
@@ -886,6 +913,7 @@ static const struct dma_map_ops l_swiotlb_dma_ops = {
 	.map_sg = dma_direct_map_sg,
 	.unmap_sg = dma_direct_unmap_sg,
 	.mmap = l_dma_mmap,
+	.get_sgtable = dma_common_get_sgtable,
 	.sync_single_for_cpu = dma_direct_sync_single_for_cpu,
 	.sync_single_for_device = dma_direct_sync_single_for_device,
 	.sync_sg_for_cpu = dma_direct_sync_sg_for_cpu,
@@ -1035,8 +1063,14 @@ static int __init l_iommu_setup(char *str)
 		if (win_sz == 0)
 			l_use_swiotlb = 1;
 	}
-	if (l_iommu_has_numa_bug() && num_online_nodes() > 1)
-		l_use_swiotlb = 0; /*swiotlb does not support numa*/
+	if (l_iommu_has_numa_bug() && (
+#ifdef CONFIG_E2K
+			!IS_MACHINE_E16C &&
+#endif
+			num_online_nodes() > 1)) {
+		/*swiotlb does not support numa*/
+		l_use_swiotlb = 0;
+	}
 
 	win_sz = roundup_pow_of_two(win_sz);
 	if (win_sz > MAX_IOMMU_WINSIZE)
@@ -1079,8 +1113,8 @@ static int __init l_iommu_init(void)
 
 	list_for_each_entry(b, &pci_root_buses, node) {
 		int node = 0;
-		struct iohub_sysdata *sd = b->sysdata;
 #ifdef CONFIG_IOHUB_DOMAINS
+		struct iohub_sysdata *sd = b->sysdata;
 		node = sd->node;
 #endif
 		l_trim_pci_window(b);

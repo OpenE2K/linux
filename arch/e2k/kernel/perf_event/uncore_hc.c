@@ -6,7 +6,7 @@
 #include <asm/sic_regs.h>
 #include <asm/perf_event_uncore.h>
 
-static struct e2k_uncore *e2k_uncore_hc;
+static struct e2k_uncore *e2k_uncore_hc[MAX_NUMNODES];
 
 typedef union {
 	struct {
@@ -155,14 +155,14 @@ static u64 hc_get_event(struct hw_perf_event *hwc)
 	return config.event;
 }
 
-static int hc_add_event(struct perf_event *event)
+static int hc_add_event(struct e2k_uncore *uncore, struct perf_event *event)
 {
 	hc_config_attr_t config = { .word = event->hw.config }, config2;
 	int i, empty_slot = -1, used_counter = -1;
 
 	/* validate against running counters */
-	for (i = 0; i < e2k_uncore_hc->num_counters; i++) {
-		struct perf_event *event2 = READ_ONCE(e2k_uncore_hc->events[i]);
+	for (i = 0; i < uncore->num_counters; i++) {
+		struct perf_event *event2 = READ_ONCE(uncore->events[i]);
 
 		if (!event2) {
 			empty_slot = i;
@@ -180,7 +180,7 @@ static int hc_add_event(struct perf_event *event)
 	config.counter = !used_counter;
 	event->hw.config = AW(config);
 
-	if (cmpxchg(&e2k_uncore_hc->events[empty_slot], NULL, event) != NULL)
+	if (cmpxchg(&uncore->events[empty_slot], NULL, event) != NULL)
 		return -ENOSPC;
 
 	event->hw.idx = empty_slot;
@@ -192,39 +192,37 @@ int __init register_hc_pmus()
 {
 	int i, counters = 2;
 
-	e2k_uncore_hc = kzalloc((sizeof(struct e2k_uncore) +
-			          counters * sizeof(void *)) * nr_node_ids,
-				 GFP_KERNEL);
-	if (!e2k_uncore_hc)
-		return -ENOMEM;
-
 	for_each_online_node(i) {
-		e2k_uncore_hc[i].type = E2K_UNCORE_HC;
+		struct e2k_uncore *uncore = kzalloc(sizeof(struct e2k_uncore) +
+				counters * sizeof(void *), GFP_KERNEL);
+		if (!uncore)
+			return -ENOMEM;
 
-		e2k_uncore_hc[i].pmu.event_init	= e2k_uncore_event_init,
-		e2k_uncore_hc[i].pmu.task_ctx_nr	= perf_invalid_context,
-		e2k_uncore_hc[i].pmu.add		= e2k_uncore_add;
-		e2k_uncore_hc[i].pmu.del		= e2k_uncore_del;
-		e2k_uncore_hc[i].pmu.start		= e2k_uncore_start;
-		e2k_uncore_hc[i].pmu.stop		= e2k_uncore_stop;
-		e2k_uncore_hc[i].pmu.read		= e2k_uncore_read;
+		uncore->type = E2K_UNCORE_HC;
 
-		e2k_uncore_hc[i].get_event = hc_get_event;
-		e2k_uncore_hc[i].add_event = hc_add_event;
+		uncore->pmu.event_init	= e2k_uncore_event_init,
+		uncore->pmu.task_ctx_nr	= perf_invalid_context,
+		uncore->pmu.add		= e2k_uncore_add;
+		uncore->pmu.del		= e2k_uncore_del;
+		uncore->pmu.start	= e2k_uncore_start;
+		uncore->pmu.stop	= e2k_uncore_stop;
+		uncore->pmu.read	= e2k_uncore_read;
 
-		e2k_uncore_hc[i].reg_ops = &hc_reg_ops;
-		e2k_uncore_hc[i].num_counters = counters;
+		uncore->get_event = hc_get_event;
+		uncore->add_event = hc_add_event;
 
-		e2k_uncore_hc[i].node = i;
+		uncore->reg_ops = &hc_reg_ops;
+		uncore->num_counters = counters;
 
-		e2k_uncore_hc[i].valid_events = hc_mcr_valid_events;
-		e2k_uncore_hc[i].pmu.attr_groups = hc_mcr_attr_group;
+		uncore->node = i;
 
-		snprintf(e2k_uncore_hc[i].name, UNCORE_PMU_NAME_LEN,
-				"uncore_hc_%d", i);
+		uncore->valid_events = hc_mcr_valid_events;
+		uncore->pmu.attr_groups = hc_mcr_attr_group;
 
-		perf_pmu_register(&e2k_uncore_hc[i].pmu,
-				e2k_uncore_hc[i].name, -1);
+		snprintf(uncore->name, UNCORE_PMU_NAME_LEN, "uncore_hc_%d", i);
+
+		e2k_uncore_hc[i] = uncore;
+		perf_pmu_register(&uncore->pmu, uncore->name, -1);
 	}
 
 	return 0;

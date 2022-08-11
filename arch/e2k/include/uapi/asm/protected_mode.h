@@ -18,33 +18,33 @@
  *                   or use arch_prctl() syscall to setup debug mode.
  */
 /* Protected syscall debug mode initialized: */
-#define PM_SC_DBG_MODE_INIT		1
+#define PM_SC_DBG_MODE_INIT		0x0001
 /* Output debug info on system calls to system journal: */
-#define PM_SC_DBG_MODE_DEBUG		2
+#define PM_SC_DBG_MODE_DEBUG		0x0002
 /* Output debug info on protected complex syscall wrappers to system journal: */
-#define PM_SC_DBG_MODE_COMPLEX_WRAPPERS	4
+#define PM_SC_DBG_MODE_COMPLEX_WRAPPERS	0x0004
 /* Report issue to journal if syscall arg doesn't match expected format: */
-#define PM_SC_DBG_MODE_CHECK		8
-/* If error in arg format detected, don't block syscall but run it anyway: */
-#define PM_SC_DBG_MODE_WARN_ONLY	16
+#define PM_SC_DBG_MODE_CHECK		0x0008
+/* If error in arg format detected, don't block syscall and proceed with execution: */
+#define PROTECTED_MODE_SOFT		0x0010
 /* Output to journal debug info on converting structures in syscall args: */
-#define PM_SC_DBG_MODE_CONV_STRUCT	32
+#define PM_SC_DBG_MODE_CONV_STRUCT	0x0020
 /* Output to journal debug info related to signal manipulation: */
-#define PM_SC_DBG_MODE_SIGNALS		64
+#define PM_SC_DBG_MODE_SIGNALS		0x0040
 /* Don't output to journal warnings/alerts/errors (for better performance): */
-#define PM_SC_DBG_MODE_NO_ERR_MESSAGES	128
+#define PM_SC_DBG_MODE_NO_ERR_MESSAGES	0x0080
 
 /* libc specific mmu control stuff: */
 
 /* Enable check for dangling descriptors: */
-#define PM_MM_CHECK_4_DANGLING_POINTERS 256
+#define PM_MM_CHECK_4_DANGLING_POINTERS 0x1000
 /* Zeroing freed descriptor contents: */
-#define PM_MM_ZEROING_FREED_POINTERS    512
+#define PM_MM_ZEROING_FREED_POINTERS    0x2000
 /* Emptying freed descriptor contents / light check for dangling descriptors: */
-#define PM_MM_EMPTYING_FREED_POINTERS   1024
+#define PM_MM_EMPTYING_FREED_POINTERS   0x4000
 
 /* Enable all debug/diagnostic output to system journal: */
-#define PM_SC_DBG_MODE_ALL		0xff7f
+#define PM_SC_DBG_MODE_ALL		0xffff406f
 /* Disable debug/diagnostic output to system journal: */
 #define PM_SC_DBG_MODE_DISABLED		PM_SC_DBG_MODE_INIT
 
@@ -52,9 +52,10 @@
 	(current->mm->context.pm_sc_debug_mode & (mask))
 
 #define PM_SC_DBG_MODE_DEFAULT		(PM_SC_DBG_MODE_CHECK \
-					| PM_SC_DBG_MODE_WARN_ONLY \
 					| PM_MM_EMPTYING_FREED_POINTERS)
 
+/* For backward compatibility: */
+#define PM_SC_DBG_MODE_WARN_ONLY	PROTECTED_MODE_SOFT
 
 /*
  * Arch-specific options for arch_prctl() syscall:

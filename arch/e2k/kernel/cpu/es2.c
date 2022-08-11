@@ -4,6 +4,8 @@
 #include <asm/sic_regs.h>
 #include <asm/machdep_numa.h>
 
+#include <asm-l/hw_irq.h>
+
 static e2k_addr_t es2_get_nsr_area_phys_base(void)
 {
 	return ES2_NSR_AREA_PHYS_BASE;
@@ -12,7 +14,7 @@ static e2k_addr_t es2_get_nsr_area_phys_base(void)
 static void es2_setup_apic_vector_handlers(void)
 {
 #if defined(CONFIG_ELDSP) || defined(CONFIG_ELDSP_MODULE)
-	setup_APIC_vector_handler(LVT3_INTERRUPT_VECTOR, eldsp_interrupt, 1,
+	setup_PIC_vector_handler(LVT3_INTERRUPT_VECTOR, eldsp_interrupt, 1,
 		"eldsp_interrupt");
 #endif
 }
@@ -23,8 +25,8 @@ es2_setup_cpu_info(cpuinfo_e2k_t *cpu_info)
 	e2k_idr_t IDR;
 
 	IDR = read_IDR_reg();
-	strncpy(cpu_info->vendor, ES2_CPU_VENDOR, 16);
-	cpu_info->family = ES2_CPU_FAMILY;
+	strncpy(cpu_info->vendor, ELBRUS_CPU_VENDOR, 16);
+	cpu_info->family = ELBRUS_S_ISET;
 	cpu_info->model  = IDR.IDR_mdl;
 	cpu_info->revision = IDR.IDR_rev;
 }

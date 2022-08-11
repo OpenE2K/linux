@@ -211,8 +211,8 @@ MODULE_LICENSE("GPL");
 
 #define LE_MO_PROM      0x8000  /* Enable promiscuous mode */
 #define LE_MO_FULLBUF   0x400  /* Catch full pkt into buf before start xmit */
-#define LE_MO_TR128     0x800   /* Transmit birst 128/32 */
-#define LE_MO_RC128     0x1000  /* Receive birst  128/32 */
+#define LE_MO_TR128     0x800   /* Transmit burst 128/32 */
+#define LE_MO_RC128     0x1000  /* Receive burst  128/32 */
 
 #define	LE_C0_ERR	0x8000	/* Error: set if BAB, SQE, MISS or ME is set */
 #define	LE_C0_BABL	0x4000	/* BAB:  Babble: tx timeout. */
@@ -469,6 +469,11 @@ struct sunlance_access;
 #define DESK_WAIT_TIME 10
 #define LANCE_NAPI_WEIGHT 64
 
+typedef struct napi_work {
+	struct work_struct	work;
+	struct list_head	napi_list;
+} napi_work_t;
+
 struct lance_private {
        /* Lance RAP/RDP regs.          */
        struct {
@@ -493,6 +498,10 @@ struct lance_private {
 #endif
 #endif
 	struct napi_struct	napi;
+#ifdef CONFIG_SYSCTL
+	int			napi_cpu;
+	struct ctl_table_header	*ctl_table_header;
+#endif /* CONFIG_SYSCTL */
         raw_spinlock_t		lock;
         raw_spinlock_t		init_lock;
 	int		rx_new, tx_new;
@@ -609,9 +618,17 @@ static int sparc_lance_debug = 2;
 #define LANCE_ADDR(x) ((u32)(x) & ~(u32)0xff000000)
 
 
-static int start_tx_afterfill = 0; /* mfe start tx after buffer is filled */
-module_param(start_tx_afterfill, int, 0644);
-MODULE_PARM_DESC(start_tx_afterfill,"used for mfe start tx after buffer filled ");
+static bool start_tx_afterfill = true; /* mfe starts tx after buffer is filled */
+module_param(start_tx_afterfill, bool, 0644);
+MODULE_PARM_DESC(start_tx_afterfill, "used for mfe to start tx after buffer is filled");
+
+static bool lance_rx_burst_size_128 = true;
+module_param_named(rx_b128, lance_rx_burst_size_128, bool, 0644);
+MODULE_PARM_DESC(rx_b128, "set RX DMA burst size to 128 bytes");
+
+static bool lance_tx_burst_size_128 = false;
+module_param_named(tx_b128, lance_tx_burst_size_128, bool, 0644);
+MODULE_PARM_DESC(tx_b128, "set TX DMA burst size to 128 bytes");
 
 
 static u32 sunlance_read_mgio_csr(struct lance_private *lp){
@@ -1793,6 +1810,20 @@ static int init_restart_lance(struct lance_private *lp)
 	return 0;
 }
 
+static void napi_wq_worker(struct work_struct *work)
+{
+	struct sk_buff *skb, *skb_tmp;
+	napi_work_t *napi_work1 = container_of(work, napi_work_t, work);
+	struct list_head *napi_lst = &napi_work1->napi_list;
+
+	set_thread_flag(TIF_NAPI_WORK);
+	list_for_each_entry_safe(skb, skb_tmp, napi_lst, napi_skb_list) {
+		netif_receive_skb(skb);
+	}
+	clear_thread_flag(TIF_NAPI_WORK);
+	kfree((void *)work);
+}
+
 static int lance_rx_dvma(struct net_device *dev, int budget)
 {
 	struct lance_private *lp = netdev_priv(dev);
@@ -1801,6 +1832,20 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 	u8 bits;
 	int len, entry, work_done = 0;
 	struct sk_buff *skb;
+	napi_work_t *napi_work1;
+	int nacpu = lp->napi_cpu; /* use old value if lp->napi_cpu reseted */
+	int csr0;
+
+	if (nacpu >= 0) {
+		if (!cpu_online(nacpu)) { /* it was mistaken set of napi_cpu */
+			nacpu = -1;
+			lp->napi_cpu = -1;
+		} else {
+			napi_work1 = kmalloc(sizeof(napi_work_t), GFP_KERNEL);
+			INIT_WORK(&napi_work1->work, napi_wq_worker);
+			INIT_LIST_HEAD(&napi_work1->napi_list);
+		}
+	}
 
 #if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
         if (lp->calculate_t_max_loop && lp->t_start) {
@@ -1822,6 +1867,12 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 	for (rd = &ib->brx_ring [entry];
 	     !((bits = rd->rmd1_bits) & LE_R1_OWN);
 	     rd = &ib->brx_ring [entry]) {
+
+		csr0 = lance_readw(lp->lregs.rdp);
+		if (csr0 & LE_C0_MISS) {
+			dev->stats.rx_errors++;
+			lance_writew(csr0 & ~LE_C0_MISS, lp->lregs.rdp);
+		}
 
 	        if (work_done >= budget)
 			break;
@@ -1883,7 +1934,11 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 					 (unsigned char *)&(ib->rx_buf [entry][0]),
 					 len);
 			skb->protocol = eth_type_trans(skb, dev);
-                        netif_receive_skb(skb);
+			if (nacpu >= 0)
+				list_add_tail(&skb->napi_skb_list,
+						 &napi_work1->napi_list);
+			else
+				netif_receive_skb(skb);
 #ifdef CONFIG_MCST_RT
 complete :
 #endif
@@ -1897,6 +1952,11 @@ complete :
 		rd->rmd1_bits = LE_R1_OWN;
 		entry = RX_NEXT(entry);
 	}
+	/* You may want to set other cpu for napi processing to get high
+	 * performance by means of command e.g for cpu 1 anf for eth4
+	 * echo 1 > /proc/sys/dev/sunlance/napi_cpu/eth4 */
+	if (nacpu >= 0 && !list_empty(&napi_work1->napi_list))
+		queue_work_on(nacpu, system_wq, &napi_work1->work);
 
 	lp->rx_new = entry;
 	return work_done;
@@ -2415,12 +2475,15 @@ static int lance_open(struct net_device *dev)
 		lance_writel(0, &ib->filter[1]);
 	} else {
 		struct lance_init_block *ib = lp->init_block_mem;
-                if (start_tx_afterfill) {
-                    mode |= LE_MO_FULLBUF;
-                }
+		if (start_tx_afterfill)
+			mode |= LE_MO_FULLBUF;
+
 #if !defined(CONFIG_E90) && \
 	!(defined(SUNLANCE_BODY_FOR_SBUS) && defined(__e2k__))
-		mode |= LE_MO_TR128 | LE_MO_RC128;
+		if (lance_rx_burst_size_128)
+			mode |= LE_MO_RC128;
+		if (lance_tx_burst_size_128)
+			mode |= LE_MO_TR128;
 #endif
                 ib->mode = flip_16(mode);
 		ib->filter [0] = 0;
@@ -2725,16 +2788,6 @@ static void lance_load_multicast(struct net_device *dev)
 		lance_writel(val, &ib->filter[1]);
 	} else {
 		struct lance_init_block *ib = lp->init_block_mem;
-#if 0
-u16 mode = 0;
-		if (start_tx_afterfill) {
-			mode |= LE_MO_FULLBUF;
-		}
-#if !defined(CONFIG_E90)
-		mode |= LE_MO_TR128 | LE_MO_RC128;
-#endif
-		ib->mode = flip_16(mode);
-#endif
 		ib->filter [0] = val;
 		ib->filter [1] = val;
 	}
@@ -2879,6 +2932,10 @@ static const struct net_device_ops lance_ops = {
 
 static int lance_common_init(struct net_device *dev, struct lance_private *lp)
 {
+#ifdef CONFIG_SYSCTL
+	struct ctl_table *napi_cpu_table;
+	char buf[IFNAMSIZ];
+#endif
 	int phy_id, csr;
         lp->mii_if.full_duplex = 1;
         lp->mii_if.supports_gmii = 0;
@@ -2919,11 +2976,23 @@ static int lance_common_init(struct net_device *dev, struct lance_private *lp)
          * use a timer to try again later when necessary. -DaveM 
          */ 
         timer_setup(&lp->multicast_timer, lance_set_multicast_retry, 0);
-
         if (register_netdev(dev)) {
                 printk(KERN_ERR "SunLance: Cannot register device.\n");
                 return 1;
         }
+
+	lp->napi_cpu = -1;
+#ifdef CONFIG_SYSCTL
+	napi_cpu_table = kzalloc(sizeof(ctl_table) * 2, GFP_KERNEL);
+	strncpy(buf, netdev_name(dev), IFNAMSIZ);
+	napi_cpu_table->procname = kstrdup(buf, GFP_KERNEL);
+	napi_cpu_table->data = &lp->napi_cpu;
+	napi_cpu_table->maxlen = sizeof(lp->napi_cpu);
+	napi_cpu_table->mode = 0644;
+	napi_cpu_table->proc_handler = proc_dointvec;
+	lp->ctl_table_header = /* to unregister_sysctl_table() */
+		register_sysctl("dev/sunlance/napi_cpu", napi_cpu_table);
+#endif /* CONFIG_SYSCTL */
 
 	return 0;
 }

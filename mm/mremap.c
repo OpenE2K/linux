@@ -169,11 +169,7 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 #endif
 			continue;
 
-#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
-		pte = ptep_get_and_clear_to_move(mm, old_addr, old_pte);
-#else	/* ! CONFIG_E2K || ! CONFIG_VIRTUALIZATION */
 		pte = ptep_get_and_clear(mm, old_addr, old_pte);
-#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 		/*
 		 * If we are remapping a valid PTE, make sure
 		 * to flush TLB before we drop the PTL for the
@@ -189,11 +185,7 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 			force_flush = true;
 		pte = move_pte(pte, new_vma->vm_page_prot, old_addr, new_addr);
 		pte = move_soft_dirty_pte(pte);
-#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
-		set_pte_to_move_at(mm, new_addr, new_pte, pte);
-#else	/* ! CONFIG_E2K || ! CONFIG_VIRTUALIZATION */
 		set_pte_at(mm, new_addr, new_pte, pte);
-#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 	}
 
 	arch_leave_lazy_mmu_mode();
@@ -238,13 +230,7 @@ static bool move_normal_pmd(struct vm_area_struct *vma, unsigned long old_addr,
 
 	/* Clear the pmd */
 	pmd = *old_pmd;
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-	set_ts_flag(TS_KEEP_PAGES_VALID);
-#endif
 	pmd_clear(old_pmd);
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-	clear_ts_flag(TS_KEEP_PAGES_VALID);
-#endif
 
 	VM_BUG_ON(!pmd_none(*new_pmd));
 
@@ -274,16 +260,6 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 	mmu_notifier_range_init(&range, MMU_NOTIFY_UNMAP, 0, vma, vma->vm_mm,
 				old_addr, old_end);
 	mmu_notifier_invalidate_range_start(&range);
-
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-	/*
-	 * Semispeculative requests can access on virtual addresses
-	 * from this validated VM area while this addresses were not
-	 * exist yet and write invalid TLB entry (valid bit = 0)
-	 * So it need flush same TLB entries for all VM area
-	 */
-	flush_tlb_range_and_pgtables(new_vma->vm_mm, new_addr, new_addr + len);
-#endif
 
 	for (; old_addr < old_end; old_addr += extent, new_addr += extent) {
 		cond_resched();
@@ -341,6 +317,16 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 		move_ptes(vma, old_pmd, old_addr, old_addr + extent, new_vma,
 			  new_pmd, new_addr, need_rmap_locks);
 	}
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	/*
+	 * Semispeculative requests can access on virtual addresses
+	 * from this validated VM area while this addresses were not
+	 * exist yet and write invalid TLB entry (valid bit = 0)
+	 * So it need flush same TLB entries for all VM area
+	 */
+	flush_tlb_range_and_pgtables(new_vma->vm_mm, new_addr, new_addr + len);
+#endif
 
 	mmu_notifier_invalidate_range_end(&range);
 

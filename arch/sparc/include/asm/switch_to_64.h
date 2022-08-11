@@ -30,13 +30,13 @@ do {						\
 
 #endif /* CONFIG_E90S */
 
-#ifdef CONFIG_PREEMPT
+#ifdef CONFIG_PREEMPTION
 void check_lazy_mmu_end(void);
 void check_lazy_mmu_begin(void);
-#else	/*!CONFIG_PREEMPT*/
+#else	/*!CONFIG_PREEMPTION*/
 static inline void check_lazy_mmu_end(void) {}
 static inline void check_lazy_mmu_begin(void) {}
-#endif	/*CONFIG_PREEMPT*/
+#endif	/*CONFIG_PREEMPTION*/
 
 	/* See what happens when you design the chip correctly?
 	 *

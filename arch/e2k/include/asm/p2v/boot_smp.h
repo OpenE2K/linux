@@ -214,7 +214,11 @@ extern int	cpu_to_sync_num;	/* real number of CPUs to make */
 		boot_test_phys_cpu(cpu, *boot_phys_cpu_present_map_p)
 
 #define	boot_phys_cpu_present_num	boot_get_vo_value(phys_cpu_present_num)
-#define	boot_cpu_to_sync_num		boot_get_vo_value(cpu_to_sync_num)
+#ifdef CONFIG_SMP
+# define boot_cpu_to_sync_num		boot_get_vo_value(cpu_to_sync_num)
+#else
+# define boot_cpu_to_sync_num		0
+#endif
 
 #ifdef	CONFIG_NUMA
 extern atomic_t early_node_has_dup_kernel_num;

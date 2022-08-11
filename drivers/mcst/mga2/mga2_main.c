@@ -1,5 +1,6 @@
 #include "mga2_drv.h"
 
+#include <linux/console.h>
 #include <linux/component.h>
 #include <linux/dma-buf.h>
 #include <linux/regmap.h>
@@ -25,6 +26,9 @@ module_param_named(extpll, mga2_use_external_pll, bool, 0400);
 static s8 mga2_possible_crtc_mask[] = { [0 ... MGA2_MAX_CRTS_NR - 1] = -1 };
 module_param_array_named(crtc_mask, mga2_possible_crtc_mask, byte, NULL, 0400);
 MODULE_PARM_DESC(crtc_mask, "Override possible crtc mask");
+int mga2_timeout_ms = 10000;
+module_param_named(timeout, mga2_timeout_ms, int, 0644);
+MODULE_PARM_DESC(timeout, "blitter, AUC & BCTRL timeout in milliseconds");
 
 static struct gen_pool *mga2_uncached_pool;
 static unsigned long mga2_uncached_pool_first_pa;
@@ -347,21 +351,23 @@ void mga2_reset(struct drm_device *drm)
 	u32 o, d;
 	u16 cmd, vcfg, tmp;
 	struct mga2 *mga2 = drm->dev_private;
+	/* Lock vga-console to prevent e2c3 deadlock (bug 136108). */
+	console_lock();
+	/* HACK: save gpio state of mga2-gpio driver */
+	d = readl(mga2->regs + MGA2_VID3_GPIO_DIR);
+	o = readl(mga2->regs + MGA2_VID3_GPIO_OUT);
 	if (!mga2_p2(mga2)) {
 		u8 tmp;
 		pci_reset_function_locked(drm->pdev);
 		if (!mga25(mga2))
-			return;
+			goto out;
 		/* enable iommu translation */
 		pci_read_config_byte(drm->pdev, PCI_MCST_CFG, &tmp);
 		tmp &= ~(PCI_MCST_IOMMU_DSBL | PCI_MCST_IOMMU_BL_DSBL |
 				PCI_MCST_IOMMU_FB_DSBL);
 		pci_write_config_byte(drm->pdev, PCI_MCST_CFG, tmp);
-		return;
+		goto out;
 	}
-	/*HACK: save gpio state of mga2-gpio driver */
-	d = readl(mga2->regs + MGA2_VID3_GPIO_DIR);
-	o = readl(mga2->regs + MGA2_VID3_GPIO_OUT);
 #define PCI_VCFG	0x40
 #define PCI_MGA2_RESET	(1 << 2)
 	pci_read_config_word(drm->pdev, PCI_COMMAND, &cmd);
@@ -376,9 +382,10 @@ void mga2_reset(struct drm_device *drm)
 	udelay(1);
 	pci_write_config_word(drm->pdev, PCI_VCFG, vcfg);
 	pci_write_config_word(drm->pdev, PCI_COMMAND, cmd);
-
+out:
 	writel(d, mga2->regs + MGA2_VID3_GPIO_DIR);
 	writel(o, mga2->regs + MGA2_VID3_GPIO_OUT);
+	console_unlock();
 }
 
 static unsigned int mga2_drm_encoder_clones(struct drm_encoder *encoder)
@@ -458,6 +465,7 @@ int mga2_driver_load(struct drm_device *drm, unsigned long flags)
 	mga2->drm->dev->of_node =
 		of_find_compatible_node(NULL, NULL, "mcst,mga2");
 	mutex_init(&mga2->bctrl_mu);
+	mutex_init(&mga2->vram_mu);
 	spin_lock_init(&mga2->fence_lock);
 
 	mga2->subdevice = 0xffff;
@@ -845,12 +853,12 @@ struct drm_gem_object *mga2_gem_create(struct drm_device *drm,
 			goto fail;
 		}
 	} else {
-		mutex_lock(&mga2->drm->struct_mutex);
-		if ((ret = drm_mm_insert_node(&mga2->vram_mm, node, size))) {
-			mutex_unlock(&mga2->drm->struct_mutex);
+		mutex_lock(&mga2->vram_mu);
+		ret = drm_mm_insert_node(&mga2->vram_mm, node, size);
+		mutex_unlock(&mga2->vram_mu);
+		if (ret)
 			goto fail;
-		}
-		mutex_unlock(&mga2->drm->struct_mutex);
+
 		obj->dma_addr = node->start - mga2->vram_paddr;
 		obj->vaddr = ioremap_wc(node->start, size);
 		if (!obj->vaddr) {
@@ -922,8 +930,9 @@ void mga2_gem_free_object(struct drm_gem_object *gobj)
 			mga2_free_uncached(drm->dev, gobj->size,
 					mo->vaddr, mo->dma_addr);
 	} else {
-		WARN_ON_ONCE(!mutex_is_locked(&drm->struct_mutex));
+		mutex_lock(&mga2->vram_mu);
 		drm_mm_remove_node(node);
+		mutex_unlock(&mga2->vram_mu);
 		break;
 	}
 	case MGA2_GEM_DOMAIN_CPU: {
@@ -964,12 +973,9 @@ struct drm_gem_object *mga2_gem_create_with_handle(struct drm_file *file,
 
 	/* drop reference from allocate - handle holds it now. */
 	drm_gem_object_put_unlocked(gobj);
-	if (ret) {
-		drm_gem_object_put_unlocked(gobj);
+	if (ret)
 		return ERR_PTR(ret);
-	} else {
-		return gobj;
-	}
+	return gobj;
 }
 
 static int mga2_gem_object_mmap(struct drm_gem_object *gobj,
@@ -1327,9 +1333,10 @@ static int mga2_debugfs_gem_info(struct seq_file *m, void *data)
 	struct drm_info_node *node = (struct drm_info_node *)m->private;
 	struct drm_device *dev = node->minor->dev;
 	struct drm_file *file;
+	struct mga2 *mga2 = dev->dev_private;
 	int r;
 
-	r = mutex_lock_interruptible(&dev->struct_mutex);
+	r = mutex_lock_interruptible(&mga2->vram_mu);
 	if (r)
 		return r;
 
@@ -1353,7 +1360,7 @@ static int mga2_debugfs_gem_info(struct seq_file *m, void *data)
 		spin_unlock(&file->table_lock);
 	}
 
-	mutex_unlock(&dev->struct_mutex);
+	mutex_unlock(&mga2->vram_mu);
 	return 0;
 }
 

@@ -622,6 +622,7 @@ static void ahci_pci_save_initial_config(struct pci_dev *pdev,
 {
 #if defined(CONFIG_MCST) && defined(CONFIG_E2K)
 	if (cpu_has_epic() && iohub_generation(pdev) == 2 && /* Bug 127617 */
+			pdev->revision == 2 &&
 			pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
 			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
 		sys_mon_1_t r;

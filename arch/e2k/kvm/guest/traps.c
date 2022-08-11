@@ -408,10 +408,10 @@ void __init_recv kvm_init_system_handlers_table(void)
 void __init_recv kvm_init_system_handlers_table_apic(void)
 {
 	/* VIRQ vector to emulate SysRq on guest kernel */
-	setup_APIC_vector_handler(SYSRQ_SHOWSTATE_APIC_VECTOR,
+	setup_PIC_vector_handler(SYSRQ_SHOWSTATE_APIC_VECTOR,
 			kvm_sysrq_showstate_interrupt, 1,
 			"kvm_sysrq_showstate_interrupt");
-	setup_APIC_vector_handler(KVM_NMI_APIC_VECTOR,
+	setup_PIC_vector_handler(KVM_NMI_APIC_VECTOR,
 			(void (*)(struct pt_regs *))nmi_call_function_interrupt,
 			1,
 			"nmi_call_function_interrupt");
@@ -420,10 +420,10 @@ void __init_recv kvm_init_system_handlers_table_apic(void)
 void __init_recv kvm_init_system_handlers_table_epic(void)
 {
 	/* VIRQ vector to emulate SysRq on guest kernel */
-	setup_APIC_vector_handler(SYSRQ_SHOWSTATE_EPIC_VECTOR,
+	setup_PIC_vector_handler(SYSRQ_SHOWSTATE_EPIC_VECTOR,
 			kvm_sysrq_showstate_interrupt, 1,
 			"kvm_sysrq_showstate_interrupt");
-	setup_APIC_vector_handler(KVM_NMI_EPIC_VECTOR,
+	setup_PIC_vector_handler(KVM_NMI_EPIC_VECTOR,
 			(void (*)(struct pt_regs *))nmi_call_function_interrupt,
 			1,
 			"nmi_call_function_interrupt");

@@ -448,26 +448,56 @@ static void mga2_primary_atomic_disable(struct drm_plane *plane,
 
 static int mga2_format_to_primary(u32 format)
 {
-	int pixfmt = MGA2_DC_B_COLOR_ORDER;
+	int pixfmt;
 
 	switch (format) {
-	case DRM_FORMAT_ARGB8888:
+	case DRM_FORMAT_RGBX8888:
+	case DRM_FORMAT_BGRX8888:
 	case DRM_FORMAT_XRGB8888:
-		pixfmt |= MGA2_DC_B_32BPP;
-		break;
+	case DRM_FORMAT_XBGR8888:
+		pixfmt = MGA2_DC_B_32BPP;
+#ifdef __BIG_ENDIAN
+		pixfmt |= MGA2_DC_B_BGR | MGA2_DC_B_RGBX_FMT;
+#else
+		pixfmt |= MGA2_DC_B_RGB;
+#endif
+	break;
 	case DRM_FORMAT_RGB888:
-		pixfmt |= MGA2_DC_B_24BPP;
-		break;
-	case DRM_FORMAT_ARGB1555: /*FIXME: big endian */
-		pixfmt |= MGA2_DC_B_16BPP;
-		break;
-	case DRM_FORMAT_RGB565: /*FIXME: big endian */
-		pixfmt |= MGA2_DC_B_16BPP_FMT;
-		pixfmt |= MGA2_DC_B_16BPP;
-		break;
+	case DRM_FORMAT_BGR888:
+		pixfmt = MGA2_DC_B_24BPP;
+#ifdef __BIG_ENDIAN
+		pixfmt |= MGA2_DC_B_BGR | MGA2_DC_B_RGBX_FMT;
+#else
+		pixfmt |= MGA2_DC_B_RGB;
+#endif
+	break;
+	case DRM_FORMAT_RGB565:
+	case DRM_FORMAT_BGR565:
+		pixfmt = MGA2_DC_B_16BPP;
+		pixfmt |= MGA2_DC_B_565_FMT;
+#ifdef __BIG_ENDIAN
+		pixfmt |= MGA2_DC_B_RGB_16SWAP;
+#endif
+	break;
+	case DRM_FORMAT_XRGB1555:
+	case DRM_FORMAT_BGRX5551:
+		pixfmt = MGA2_DC_B_16BPP;
+		pixfmt |= MGA2_DC_B_565_FMT;
+#ifdef __BIG_ENDIAN
+		pixfmt |= MGA2_DC_B_RGB_16SWAP;
+#endif
+	break;
+	case DRM_FORMAT_XRGB4444:
+	case DRM_FORMAT_BGRX4444:
+		pixfmt = MGA2_DC_B_16BPP;
+		pixfmt |= MGA2_DC_B_4444_FMT;
+#ifdef __BIG_ENDIAN
+		pixfmt |= MGA2_DC_B_RGB_16SWAP;
+#endif
+	break;
 	case DRM_FORMAT_C8:
-		pixfmt |= MGA2_DC_B_8BPP;
-		break;
+		pixfmt = MGA2_DC_B_8BPP;
+	break;
 	default:
 		return -EINVAL;
 	}
@@ -541,11 +571,20 @@ static const struct drm_plane_funcs mga2_layer_funcs = {
 };
 
 static const uint32_t mga2_primary_formats[] = {
-	DRM_FORMAT_ARGB8888,
 	DRM_FORMAT_XRGB8888,
+	DRM_FORMAT_RGBX8888,
+	DRM_FORMAT_XBGR8888,
+	DRM_FORMAT_BGRX8888,
 	DRM_FORMAT_RGB888,
+	DRM_FORMAT_BGR888,
 	DRM_FORMAT_RGB565,
+	DRM_FORMAT_BGR565,
 	DRM_FORMAT_XRGB1555,
+	DRM_FORMAT_BGRX5551,
+#ifdef __BIG_ENDIAN
+	DRM_FORMAT_XRGB4444,
+	DRM_FORMAT_BGRX4444,
+#endif
 	DRM_FORMAT_C8,
 };
 

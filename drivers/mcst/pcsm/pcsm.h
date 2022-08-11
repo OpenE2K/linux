@@ -1,6 +1,8 @@
 #ifndef PCSM_H_
 #define PCSM_H_
 
+#define MAX_NODE 4
+
 #define PCSM_BASE_ADDR                  0x1000
 #define PVT_BASE_ADDR                   0x2000
 
@@ -60,6 +62,85 @@
 #define PCSM_RW_TACH_MAX_HI		0x2d
 #define PCSM_RW_ALERT_STATUS		0x2e
 
+#define PMC_SYS_EVENTS_POLLING		0x510
+#define PMC_SYS_EVENTS_MASK		0x514
+#define PMC_SYS_EVENTS_INT		0x518
+#define PMC_SYS_EVENTS_HW		0x51c
+#define PMC_SYS_EVENTS_CFG		0x520
+
+#define MC03_DIMM_EVENT		    (1 << 0)
+#define MC47_DIMM_EVENT		    (1 << 1)
+#define MC03_PWR_ALERT		    (1 << 2)
+#define MC47_PWR_ALERT		    (1 << 3)
+#define CPU_PWR_ALERT		    (1 << 4)
+#define MACHINE_PWR_ALERT	    (1 << 5)
+#define MACHINE_GEN_ALERT	    (1 << 6)
+#define PCS_FAN0_ALERT		    (1 << 7)
+#define PCS_FAN1_ALERT		    (1 << 8)
+#define TERM_NOMAX		    (1 << 9)
+#define TERM_FAULT		    (1 << 10)
+#define TERM_DIAG		    (1 << 11)
+#define CPU_HOT			    (1 << 12)
+#define TS_ALL_INT		    (1 << 13)
+#define TS_ALARMA		    (1 << 14)
+#define TS_ALARMB		    (1 << 15)
+#define VM_ALL_INT		    (1 << 16)
+#define VM_ALARMA		    (1 << 17)
+#define VM_ALARMB		    (1 << 18)
+#define PD_ALL_INT		    (1 << 19)
+#define PD_ALARMA		    (1 << 20)
+#define PD_ALARMB		    (1 << 21)
+#define MC03_THROTTLE		    (1 << 22)
+#define MC47_THROTTLE		    (1 << 23)
+#define CPU_FORCEPR		    (1 << 24)
+
+#define PCS_EVENTS_MAX			25
+
+#define CONTINUOUS_EVENTS_MASK		\
+	    (				\
+		MC03_DIMM_EVENT	    |	\
+		MC47_DIMM_EVENT	    |	\
+		MC03_PWR_ALERT	    |	\
+		MC47_PWR_ALERT	    |	\
+		CPU_PWR_ALERT	    |	\
+		MACHINE_PWR_ALERT   |	\
+		MACHINE_GEN_ALERT   |	\
+		PCS_FAN0_ALERT	    |	\
+		PCS_FAN1_ALERT	    |	\
+		TERM_NOMAX	    |	\
+		TERM_FAULT	    |	\
+		TERM_DIAG		\
+	    )
+
+#define THROTTLING_EVENTS_MASK		\
+	    (				\
+		CPU_HOT		    |	\
+		MC03_THROTTLE	    |	\
+		MC47_THROTTLE	    |	\
+		CPU_FORCEPR		\
+	    )
+
+#define ALARM_EVENTS_MASK		\
+	    (				\
+		TS_ALARMA	    |	\
+		TS_ALARMB	    |	\
+		VM_ALARMA	    |	\
+		VM_ALARMB		\
+	    )
+
+
+#define ALL_EVENTS_MASK			\
+	(CONTINUOUS_EVENTS_MASK | THROTTLING_EVENTS_MASK | ALARM_EVENTS_MASK)
+
+typedef struct event_info {
+	int count;
+	time64_t time;
+} event_info_t;
+
+event_info_t pcs_events[MAX_NODE][PCS_EVENTS_MAX];
+
+static int PCS_ADJUST_PERIOD = 300000; /* ms */
+
 #define PMC_FAN_CFG                     0x540
 
 /* */
@@ -105,6 +186,80 @@ enum vm_values {
 	VM4,
 	VM5,
 	VM6
+};
+
+enum ts_values {
+	TS1,
+	TS2,
+	TS3,
+	TS4,
+	TS5,
+	TS6,
+	TS7
+};
+
+struct ts {
+	char *name;
+	int addr;
+};
+
+static const struct ts ts_e16c_map[] = {
+	{"CORE_0",  PMC_TERM_TS5},
+	{"CORE_1",  PMC_TERM_TS1},
+	{"CORE_14", PMC_TERM_TS2},
+	{"CORE_15", PMC_TERM_TS3},
+	{"EIOH",    PMC_TERM_TS4},
+	{"TEST",    PMC_TERM_TS0},
+	{"Tmax",    PMC_TERM_TS6}
+};
+
+static const struct ts ts_e12c_map[] = {
+	{"CORE_0",  PMC_TERM_TS1},
+	{"CORE_1",  PMC_TERM_TS0},
+	{"CORE_10", PMC_TERM_TS2},
+	{"CORE_11", PMC_TERM_TS3},
+	{"EIOH",    PMC_TERM_TS4},
+	{"",	    PMC_TERM_TS5},
+	{"Tmax",    PMC_TERM_TS6}
+};
+
+static const struct ts ts_e2c3_map[] = {
+	{"CORE_0",  PMC_TERM_TS2},
+	{"CORE_1",  PMC_TERM_TS1},
+	{"MC0",	    PMC_TERM_TS3},
+	{"MC1",	    PMC_TERM_TS0},
+	{"EIOH",    PMC_TERM_TS4},
+	{"",	    PMC_TERM_TS5},
+	{"Tmax",    PMC_TERM_TS6}
+};
+
+
+static const char * const pmc_sys_events[] = {
+	"mc03_dimm_event",
+	"mc47_dimm_event",
+	"mc03_pwr_alert",
+	"mc47_pwr_alert",
+	"cpu_pwr_alert",
+	"machine_pwr_alert",
+	"machine_gen_alert",
+	"pcs_fan0_alert",
+	"pcs_fan1_alert",
+	"term_nomax",
+	"term_fault",
+	"term_diag",
+	"cpu_hot",
+	"ts_all_int",
+	"ts_alarma",
+	"ts_alarmb",
+	"vm_all_int",
+	"vm_alarma",
+	"vm_alarmb",
+	"pd_all_int",
+	"pd_alarma",
+	"pd_alarmb",
+	"mc03_throttle",
+	"mc47_throttle",
+	"cpu_forcepr"
 };
 
 int vm_table_e16c[VM_MAX_CHANNELS][VM_MAX_SENSORS] = {
@@ -195,5 +350,17 @@ typedef union pmc_term_ts_regs {
     };
     u32 word;
 } term_ts_regs_t;
+
+typedef union pwm_tach_control_regs {
+    struct {
+	u8 enable:	    1;
+	u8 valid:	    1;
+	u8 time_interval:   1;
+	u8 posedge:	    1;
+	u8 negedge:	    1;
+	u8 reserv:	    3;
+    };
+    u8 byte;
+} pwm_tach_control_regs_t;
 
 #endif /* _PCSM_H_ */

@@ -92,7 +92,7 @@ extern void ____trace_bprintk_fixed_args(unsigned long ip,
 long do_longjmp(u64 retval, u64 jmp_sigmask, e2k_cr0_hi_t jmp_cr0_hi,
 		e2k_cr1_lo_t jmp_cr1_lo, e2k_pcsp_lo_t jmp_pcsp_lo,
 		e2k_pcsp_hi_t jmp_pcsp_hi, u32 jmp_br, u32 jmp_psize,
-		u32 fpcr, u32 fpsr, u32 pfpfr, bool restore_fpu);
+		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr, bool restore_fpu);
 
 long write_current_chain_stack(unsigned long dst, void __user *buf,
 		unsigned long size);

@@ -278,7 +278,7 @@ void *__memcpy(void *dst, const void *src, size_t n)
 			return orig_dst;
 		}
 
-		prefetchw_range(src, n);
+		prefetch_nospec_range(src, n);
 
 		__E2K_WAIT(_ld_c);
 	}
@@ -715,7 +715,7 @@ void __memcpy_toio(volatile void __iomem *__restrict dst, const void *__restrict
 	}
 
 	if (hwbug) {
-		prefetchw_range(src, n);
+		prefetch_nospec_range(src, n);
 		__E2K_WAIT(_ld_c);
 	}
 
@@ -808,7 +808,7 @@ void __tagged_memcpy_8(void *dst, const void *src, size_t n)
 		dst, src, n);
 
 	if (hwbug) {
-		prefetchw_range(src, n);
+		prefetch_nospec_range(src, n);
 		__E2K_WAIT(_ld_c);
 	}
 
@@ -846,7 +846,7 @@ void *memmove(void *dst, const void *src, size_t count)
 	char *tmp;
 	const char *s;
 
-	prefetchw(src);
+	prefetch(src);
 
 	if (dst + count <= src || dst >= src + count)
 		return __memcpy(dst, src, count);

@@ -51,10 +51,10 @@ typedef struct thread_info {
 	unsigned long		flags;		/* low level flags */
 
 	unsigned long		status;		/* thread synchronous flags */
+	int			preempt_lazy_count;	/* 0 => lazy preemptable
+							  <0 => BUG */
 	long long		irq_enter_clk;	/* CPU clock when irq enter */
 						/* occured */
-	int			preempt_count;	/* 0 => preemptable, <0 */
-						/* => BUG */
 	mm_segment_t		addr_limit;	/* thread address space */
 	struct pt_regs		*pt_regs;	/* head of pt_regs */
 						/* structure queue: */
@@ -211,6 +211,7 @@ typedef struct thread_info {
 #define TIF_NOHZ		8
 #define TIF_SYSCALL_AUDIT	9	/* syscall auditing active */
 #define TIF_SECCOMP		10	/* secure computing */
+#define TIF_NEED_RESCHED_LAZY	11	/* lazy rescheduling necessary */
 #define	TIF_USD_NOT_EXPANDED	14	/* local data stack cannot be */
 					/* expanded (fixed size) */
 					/* not used yet */
@@ -241,6 +242,7 @@ typedef struct thread_info {
 					/* hypercall */
 /* End of flags only for virtualization support */
 #define TIF_SYSCALL_TRACEPOINT	30	/* syscall tracepoint instrumentation */
+#define TIF_NAPI_WORK		31	/* napi_wq_worker() is running */
 
 #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)
@@ -266,6 +268,7 @@ typedef struct thread_info {
 #define _TIF_LIGHT_HYPERCALL	(1 << TIF_LIGHT_HYPERCALL)
 #define _TIF_GENERIC_HYPERCALL	(1 << TIF_GENERIC_HYPERCALL)
 #define _TIF_SYSCALL_TRACEPOINT	(1 << TIF_SYSCALL_TRACEPOINT)
+#define _TIF_NAPI_WORK		(1 << TIF_NAPI_WORK)
 
 #define _TIF_WORK_SYSCALL_TRACE	(_TIF_SYSCALL_TRACE |		\
 				 _TIF_KERNEL_TRACE |		\
@@ -292,7 +295,6 @@ typedef struct thread_info {
  * have to worry about atomic accesses.
  */
 #define TS_DELAYED_SIG_HANDLING		0x00000001
-#define TS_KEEP_PAGES_VALID		0x00000002
 #define TS_MMAP_PRIVILEGED		0x00000004
 #define TS_MMAP_PS			0x00000008
 #define TS_MMAP_PCS			0x00000010
@@ -305,7 +307,8 @@ typedef struct thread_info {
  * and wait for interception (trap on PV mode) */
 #define	TS_HOST_AT_VCPU_MODE		0x00001000
 
-#define	THREAD_SIZE	KERNEL_STACKS_SIZE
+#define	THREAD_SIZE		KERNEL_STACKS_SIZE
+#define THREAD_SIZE_ORDER	order_base_2(KERNEL_STACKS_SIZE / PAGE_SIZE)
 
 #ifndef __ASSEMBLY__
 
@@ -401,12 +404,9 @@ void clear_g_list(struct thread_info *thread_info) { }
 
 /*
  * Macros/functions for gaining access to the thread information structure.
- *
- * preempt_count needs to be 1 initially, until the scheduler is functional.
  */
 #define INIT_THREAD_INFO(tsk)			\
 {						\
-	.preempt_count	= INIT_PREEMPT_COUNT,	\
 	.addr_limit	= KERNEL_DS,		\
 	.k_usd_lo = (e2k_usd_lo_t) { \
 		.word = (unsigned long) init_stack + \
@@ -417,6 +417,7 @@ void clear_g_list(struct thread_info *thread_info) { }
 	}, \
 	INIT_OLD_U_HW_STACKS			\
 	INIT_LAST_IC_FLUSH_CPU			\
+	.preempt_lazy_count = 0,		\
 }
 
 extern void arch_task_cache_init(void);
@@ -434,6 +435,7 @@ extern void clear_thread_info(struct task_struct *task);
 
 extern unsigned long *alloc_thread_stack_node(struct task_struct *, int);
 extern void free_thread_stack(struct task_struct *tsk);
+extern int free_vm_stack_cache(unsigned int cpu);
 #endif /* __ASSEMBLY__ */
 
 #endif /* __KERNEL__ */

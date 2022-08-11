@@ -329,11 +329,20 @@ struct sparc_stackf {
 
 /* Stuff for the ptrace system call */
 #define PTRACE_SPARC_DETACH       11
+#ifdef CONFIG_MCST  /* bug 135261 */
+ /* do not pollute user space, define as glibc does */
+#undef PTRACE_DETACH
+#define PTRACE_DETACH		  PTRACE_SPARC_DETACH
+#endif
 #define PTRACE_GETREGS            12
 #define PTRACE_SETREGS            13
 #define PTRACE_GETFPREGS          14
 #define PTRACE_SETFPREGS          15
+#ifdef CONFIG_MCST /* 16 used in linux/ptrace.h, define as glibc does */
+#define PTRACE_READDATA PTRACE_READTEXT
+#else
 #define PTRACE_READDATA           16
+#endif
 #define PTRACE_WRITEDATA          17
 #define PTRACE_READTEXT           18
 #define PTRACE_WRITETEXT          19

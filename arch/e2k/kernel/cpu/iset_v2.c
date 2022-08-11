@@ -40,7 +40,7 @@ void native_set_cu_hw1_v2(u64 cu_hw1)
 	panic("No %%cu_hw1 in instruction set v2\n");
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_local_gregs_v2(struct local_gregs *gregs, bool is_signal)
 {
@@ -51,7 +51,7 @@ void save_local_gregs_v2(struct local_gregs *gregs, bool is_signal)
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_kernel_gregs_v2(struct kernel_gregs *gregs)
 {
@@ -89,7 +89,7 @@ void save_gregs_on_mask_v2(struct global_regs *gregs, bool dirty_bgr,
 		NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_gregs_v2(struct global_regs *gregs)
 {
@@ -99,7 +99,7 @@ void save_gregs_v2(struct global_regs *gregs)
 	NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void save_gregs_dirty_bgr_v2(struct global_regs *gregs)
 {
@@ -108,7 +108,7 @@ void save_gregs_dirty_bgr_v2(struct global_regs *gregs)
 	SAVE_GREGS(gregs->g, true, E2K_ISET_V2);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void restore_local_gregs_v2(const struct local_gregs *gregs, bool is_signal)
 {
@@ -144,7 +144,7 @@ void restore_gregs_on_mask_v2(struct global_regs *gregs, bool dirty_bgr,
 		NATIVE_WRITE_BGR_REG(gregs->bgr);
 }
 
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 void restore_gregs_v2(const struct global_regs *gregs)
 {
@@ -328,10 +328,10 @@ void do_aau_fault_v2(int aa_field, struct pt_regs *regs)
 		aa_field, aau_regs->aasr.word, aafstr);
 
 	/* condition.store = 0
-	 * condition.spec = 0
 	 * condition.fault_type = 0 */
 	AW(condition) = 0;
 	AS(condition).fmt = LDST_BYTE_FMT;
+	AS(condition).spec = 1;
 	AW(mask) = 0;
 
 	while (aa_bit < 4) {
@@ -460,7 +460,7 @@ die:
 	force_sig(SIGSEGV);
 }
 
-void save_aaldi_v2(u64 *aaldis)
+notrace void save_aaldi_v2(u64 *aaldis)
 {
 	SAVE_AALDIS_V2(aaldis);
 }
@@ -469,7 +469,7 @@ void save_aaldi_v2(u64 *aaldis)
  * It's taken that aasr was get earlier(from get_aau_context caller)
  * and comparison with aasr.iab was taken.
  */
-void get_aau_context_v2(e2k_aau_t *context)
+notrace void get_aau_context_v2(e2k_aau_t *context)
 {
 	GET_AAU_CONTEXT_V2(context);
 }
@@ -539,7 +539,7 @@ void get_and_invalidate_MLT_context_v2(e2k_mlt_t *mlt_state)
 #endif
 
 __section(".C1_wait_trap.text")
-static noinline void C1_wait_trap(void)
+static noinline notrace void C1_wait_trap(void)
 {
 	/* Interrupts must be enabled in the ".wait_trap.text" section
 	 * so that the wakeup IRQ is not missed by handle_wtrap(). */

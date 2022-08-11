@@ -266,8 +266,9 @@ reload_root_pt(struct mm_struct *mm)
 static inline void
 set_root_pt(pgd_t *root_pt)
 {
-	BUG_ON(MMU_IS_SEPARATE_PT());
 	set_MMU_U_PPTB(__pa(root_pt));
+	if (MMU_IS_SEPARATE_PT())
+		set_MMU_OS_PPTB(__pa(root_pt));
 }
 
 /*

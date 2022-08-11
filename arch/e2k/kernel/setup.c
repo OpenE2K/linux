@@ -156,6 +156,7 @@ int e2k_get_machine_type_name(int mach_id)
 	int mach_type;
 
 	switch (mach_id) {
+#if CONFIG_E2K_MINVER == 2
 	case MACHINE_ID_ES2_DSP_LMS:
 	case MACHINE_ID_ES2_DSP:
 		mach_type = MACH_TYPE_NAME_ES2_DSP;
@@ -164,10 +165,14 @@ int e2k_get_machine_type_name(int mach_id)
 	case MACHINE_ID_ES2_RU:
 		mach_type = MACH_TYPE_NAME_ES2_RU;
 		break;
+#endif
+#if CONFIG_E2K_MINVER <= 3
 	case MACHINE_ID_E2S_LMS:
 	case MACHINE_ID_E2S:
 		mach_type = MACH_TYPE_NAME_E2S;
 		break;
+#endif
+#if CONFIG_E2K_MINVER <= 4
 	case MACHINE_ID_E8C_LMS:
 	case MACHINE_ID_E8C:
 		mach_type = MACH_TYPE_NAME_E8C;
@@ -176,10 +181,14 @@ int e2k_get_machine_type_name(int mach_id)
 	case MACHINE_ID_E1CP:
 		mach_type = MACH_TYPE_NAME_E1CP;
 		break;
+#endif
+#if CONFIG_E2K_MINVER <= 5
 	case MACHINE_ID_E8C2_LMS:
 	case MACHINE_ID_E8C2:
 		mach_type = MACH_TYPE_NAME_E8C2;
 		break;
+#endif
+#if CONFIG_E2K_MINVER <= 6
 	case MACHINE_ID_E12C_LMS:
 	case MACHINE_ID_E12C:
 		mach_type = MACH_TYPE_NAME_E12C;
@@ -192,6 +201,7 @@ int e2k_get_machine_type_name(int mach_id)
 	case MACHINE_ID_E2C3:
 		mach_type = MACH_TYPE_NAME_E2C3;
 		break;
+#endif /* CONFIG_E2K_MINVER */
 	default:
 		panic("setup_arch(): !!! UNKNOWN MACHINE TYPE !!!");
 		mach_type = MACH_TYPE_NAME_UNKNOWN;
@@ -1044,6 +1054,38 @@ static ssize_t ipd_store(struct device *dev,
 static DEVICE_ATTR_RW(ipd);
 
 /*
+ * Allow CU_HW0 setting under /sys/devices/system/cpu/e2k/cu_hw0
+ */
+
+static ssize_t cu_hw0_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	u64 cu_hw0 = NATIVE_READ_CU_HW0_REG_VALUE();
+
+	return sprintf(buf, "0x%llx\n", cu_hw0);
+}
+
+static ssize_t cu_hw0_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	unsigned long flags;
+	u64 cu_hw0;
+
+	if (kstrtoull(buf, 0, &cu_hw0) < 0)
+		return -EINVAL;
+
+	raw_all_irq_save(flags);
+	NATIVE_WRITE_CU_HW0_REG_VALUE(cu_hw0);
+	raw_all_irq_restore(flags);
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(cu_hw0);
+
+/*
  * Allow CU_HW1 setting under /sys/devices/system/cpu/e2k/cu_hw1
  */
 
@@ -1111,6 +1153,7 @@ static DEVICE_ATTR_RW(l2_ctrl_ext);
 
 static struct attribute *e2k_default_attrs_v2[] = {
 	&dev_attr_ipd.attr,
+	&dev_attr_cu_hw0.attr,
 	NULL
 };
 

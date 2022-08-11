@@ -11,18 +11,28 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/cpufreq.h>
 #include <linux/bits.h>
+#include <linux/kthread.h>
+#include <linux/jiffies.h>
+#include <linux/sched.h>
 
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
+#include <asm/epic.h>
 
 #include "pcsm.h"
 
+struct delayed_work pcsm_monitor;
+
 struct pcsm_data {
+	struct platform_device *pdev;
 	struct device *hdev;
 	int node;
 };
 
 int (*vm_table_type)[VM_MAX_SENSORS];
+struct pcsm_data *p_pcsm[MAX_NODE];
+
+static const struct ts *ts_map;
 
 #ifdef DEBUG
 static void print_pwm_regs(pwm_regs_t *regs)
@@ -107,42 +117,29 @@ static ssize_t show_fan(struct device *dev,
 	struct device_attribute *devattr,
 	char *buf)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
+    pwm_tach_control_regs_t control;
 
-    u8 instance = attr->index & 0x3;
-    u8 addr = attr->index >> 8;
+    int nr = attr->nr;
+    int addr = attr->index;
 
-    u8 val = read_pwm_data(data->node, instance, addr);
+    u8 val_lo = read_pwm_data(data->node, nr, addr);
+    u8 val_hi = read_pwm_data(data->node, nr, addr + 1);
 
-    return snprintf(buf, PAGE_SIZE - 1, "%d\n", PWM_TO_PROCENT(val));
+    u16 val = (val_hi << 8) + val_lo;
+
+    control.byte = read_pwm_data(data->node, nr, PCSM_MX_TACH_CTRL);
+
+    if (control.posedge + control.negedge > 0)
+	val = val * ((control.time_interval) ? 6 : 60) / (2 * (control.posedge + control.negedge));
+    else
+	val = 0;
+
+    return snprintf(buf, PAGE_SIZE - 1, "%d\n", val);
 }
 
-static ssize_t set_fan(struct device *dev,
-	struct device_attribute *devattr,
-	const char *buf, size_t count)
-{
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-    struct pcsm_data *data = dev_get_drvdata(dev);
-    unsigned long val;
-    int err;
-
-    u8 instance = attr->index & 0x3;
-    u8 addr = attr->index >> 8;
-
-    err = kstrtoul(buf, 10, &val);
-    if (err) {
-	return err;
-    }
-
-    val = clamp_val(PROCENT_TO_PWM(val), 0, 0x80);
-
-    write_pwm_data(data->node, instance, addr, val);
-
-    return count;
-}
-
-static int DIV_TO_REG(int val)
+static int DIV_TO_REG(unsigned long val)
 {
     int answer = 0;
 
@@ -157,19 +154,19 @@ static ssize_t show_fan_div(struct device *dev,
 	struct device_attribute *devattr,
 	char *buf)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
 
-    unsigned long val = read_pwm_data(data->node, attr->index & 0x3, PCSM_RW_TIME_INTERVAL);
+    unsigned long val = read_pwm_data(data->node, attr->nr, attr->index);
 
-    return snprintf(buf, PAGE_SIZE - 1, "%d\n", DIV_FROM_REG(val));
+    return snprintf(buf, PAGE_SIZE - 1, "%ld\n", DIV_FROM_REG(val));
 }
 
 static ssize_t set_fan_div(struct device *dev,
 	struct device_attribute *devattr,
 	const char *buf, size_t count)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
     unsigned long val;
 
@@ -180,8 +177,8 @@ static ssize_t set_fan_div(struct device *dev,
 
     val = clamp_val(PROCENT_TO_PWM(val), 0, 0x80);
 
-    write_pwm_data(data->node, attr->index & 0x3,
-	    PCSM_RW_TIME_INTERVAL, DIV_TO_REG(val));
+    write_pwm_data(data->node, attr->nr,
+	    attr->index, DIV_TO_REG(val));
 
     return count;
 }
@@ -191,12 +188,15 @@ static ssize_t show_pwm(struct device *dev,
 	struct device_attribute *devattr,
 	char *buf)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
 
-    u8 instance = attr->index & 0x3;
+    int nr = attr->nr;
+    int addr = attr->index;
 
-    u8 val = read_pwm_data(data->node, instance, PCSM_RW_PWM_CURRENT);
+    addr = addr ? addr : PCSM_RW_PWM_CURRENT;
+
+    u8 val = read_pwm_data(data->node, nr, addr);
 
     return snprintf(buf, PAGE_SIZE - 1, "%d\n", PWM_TO_PROCENT(val));
 }
@@ -206,12 +206,15 @@ static ssize_t set_pwm(struct device *dev,
 	struct device_attribute *devattr,
 	const char *buf, size_t count)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
     unsigned long val;
     int err;
 
-    u8 instance = attr->index & 0x3;
+    int nr = attr->nr;
+    int addr = attr->index;
+
+    addr = addr ? addr : PCSM_RW_PWM_FIXED;
 
     err = kstrtoul(buf, 10, &val);
     if (err) {
@@ -220,7 +223,7 @@ static ssize_t set_pwm(struct device *dev,
 
     val = clamp_val(val, 0, 0x80);
 
-    write_pwm_data(data->node, instance, PCSM_RW_PWM_FIXED, PROCENT_TO_PWM(val));
+    write_pwm_data(data->node, nr, addr, PROCENT_TO_PWM(val));
 
     return count;
 }
@@ -230,13 +233,13 @@ static ssize_t show_pwm_byte(struct device *dev,
 	struct device_attribute *devattr,
 	char *buf)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
 
-    u8 addr = attr->index >> 8;
-    u8 instance = attr->index & 0x3;
+    int nr = attr->nr;
+    int addr = attr->index;
 
-    u8 val = read_pwm_data(data->node, instance, addr);
+    u8 val = read_pwm_data(data->node, nr, addr);
 
     return snprintf(buf, PAGE_SIZE - 1, "0x%x\n", val);
 }
@@ -245,62 +248,51 @@ static ssize_t set_pwm_byte(struct device *dev,
 	struct device_attribute *devattr,
 	const char *buf, size_t count)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
     unsigned long val;
     int err;
 
-    u8 addr = attr->index >> 8;
-    u8 instance = attr->index & 0x3;
+    int nr = attr->nr;
+    int addr = attr->index;
 
     err = kstrtoul(buf, 10, &val);
     if (err) {
 	return err;
     }
 
-    write_pwm_data(data->node, instance, addr, val);
+    write_pwm_data(data->node, nr, addr, val);
 
     return count;
 }
 
-static ssize_t show_pwm_word(struct device *dev,
-	struct device_attribute *devattr,
-	char *buf)
-{
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-    struct pcsm_data *data = dev_get_drvdata(dev);
-
-    u8 addr = attr->index >> 8;
-    u8 instance = attr->index & 0x3;
-
-    u8 val_lo = read_pwm_data(data->node, instance, addr);
-    u8 val_hi = read_pwm_data(data->node, instance, addr + 1);
-
-    return snprintf(buf, PAGE_SIZE - 1, "0x%x\n", val_lo + (val_hi << 8));
-}
-
-static ssize_t set_pwm_word(struct device *dev,
+static ssize_t set_fan(struct device *dev,
 	struct device_attribute *devattr,
 	const char *buf, size_t count)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
     unsigned long val;
+    pwm_tach_control_regs_t control;
     int err;
 
-    u8 addr = attr->index >> 8;
-    u8 instance = attr->index & 0x3;
+    int nr = attr->nr;
+    int addr = attr->index;
 
     err = kstrtoul(buf, 10, &val);
     if (err) {
 	return err;
     }
 
+    control.byte = read_pwm_data(data->node, nr, PCSM_MX_TACH_CTRL);
+
+    val = val * 2 * (control.posedge + control.negedge) / ((control.time_interval) ? 6 : 60);
+
     u8 val_lo = val & 0xff;
     u8 val_hi = (val >> 8) & 0xff;
 
-    write_pwm_data(data->node, instance, addr, val_lo);
-    write_pwm_data(data->node, instance, addr + 1, val_hi);
+    write_pwm_data(data->node, nr, addr, val_lo);
+    write_pwm_data(data->node, nr, addr + 1, val_hi);
 
     return count;
 }
@@ -309,12 +301,13 @@ static ssize_t pwm_show_temp(struct device *dev,
 	struct device_attribute *devattr,
 	char *buf)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
 
-    u8 addr = attr->index >> 8;
-    u8 instance = attr->index & 0x3;
-    u8 temp = read_pwm_data(data->node, instance, addr);
+    int nr = attr->nr;
+    int addr = attr->index;
+
+    u8 temp = read_pwm_data(data->node, nr, addr);
 
     /* attr specific */
     if (temp < 0) {
@@ -337,13 +330,13 @@ static ssize_t pwm_set_temp(struct device *dev,
 	struct device_attribute *devattr,
 	const char *buf, size_t count)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
 
     unsigned long value;
 
-    u8 addr = attr->index >> 8;
-    u8 instance = attr->index & 0x3;
+    int nr = attr->nr;
+    int addr = attr->index;
     u8 temp;
 
     int err = kstrtoul(buf, 10, &value);
@@ -356,7 +349,7 @@ static ssize_t pwm_set_temp(struct device *dev,
     value = value / 1000;
     temp += value*2;
 
-    write_pwm_data(data->node, instance, addr, temp);
+    write_pwm_data(data->node, nr, addr, temp);
 
     return count;
 }
@@ -370,12 +363,38 @@ static ssize_t pmc_show_temp(struct device *dev,
     struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
 
-    int addr = attr->index;
+    int addr = ts_map[attr->index].addr;
 
     term_ts_regs_t regs = { .word = sic_read_node_nbsr_reg(data->node,
 	    PCSM_BASE_ADDR + addr) };
 
-    return snprintf(buf, PAGE_SIZE - 1, "0x%x\n", TEMP_TO_HWMON(regs.temp));
+    return snprintf(buf, PAGE_SIZE - 1, "%d\n", TEMP_TO_HWMON(regs.temp));
+}
+
+static ssize_t pmc_show_temp_max(struct device *dev,
+	struct device_attribute *devattr,
+	char *buf)
+{
+    struct pcsm_data *data = dev_get_drvdata(dev);
+    int index = 0;
+    int ts_max = 0;
+    int ts_count = 5;
+
+    if (IS_MACHINE_E16C) {
+	ts_count++;
+    }
+
+    for (index; index < ts_count; index++) {
+	term_ts_regs_t regs = { .word = sic_read_node_nbsr_reg(data->node,
+		PCSM_BASE_ADDR + ts_map[index].addr) };
+	int ts_val = TEMP_TO_HWMON(regs.temp);
+
+	if (ts_val > ts_max)
+	    ts_max = ts_val;
+    }
+
+
+    return snprintf(buf, PAGE_SIZE - 1, "%d\n", ts_max);
 }
 
 #define VREF    1213
@@ -519,7 +538,6 @@ static ssize_t pvt_show_vm_info(struct device *dev,
 {
     struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
     struct pcsm_data *data = dev_get_drvdata(dev);
-    int (*vm_table_type)[VM_MAX_SENSORS] = vm_table_e16c;
     int vm_table_val[VM_MAX_CHANNELS][VM_MAX_SENSORS];
     int ch, sn;
     int pos = 0;
@@ -564,12 +582,12 @@ static ssize_t pvt_show_vm_info(struct device *dev,
 }
 
 static const char * const input_names[] = {
-    [VM1] = "average Vcore",
-    [VM2] = "min     Vcore",
-    [VM3] = "max     Vcore",
-    [VM4] = "average Vddr",
-    [VM5] = "min     Vddr",
-    [VM6] = "max     Vddr",
+	[VM1] = "Vcore average",
+	[VM2] = "Vcore min",
+	[VM3] = "Vcore max",
+	[VM4] = "Vddr  average",
+	[VM5] = "Vddr  min",
+	[VM6] = "Vddr  max",
 };
 
 static ssize_t in_label_show(struct device *dev,
@@ -581,19 +599,124 @@ static ssize_t in_label_show(struct device *dev,
     return sprintf(buf, "%s\n", input_names[attr->index]);
 }
 
+static ssize_t ts_label_show(struct device *dev,
+	struct device_attribute *devattr,
+	char *buf)
+{
+    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+    const char *ts_name;
+
+    if (IS_MACHINE_E16C || IS_MACHINE_E12C || IS_MACHINE_E2C3)
+	ts_name = ts_map[attr->index].name;
+    else
+	ts_name = "unsupported CPU";
+
+    return sprintf(buf, "%s\n", ts_name);
+}
+
+static ssize_t show_pcs_adjust_period(struct device *dev,
+    struct device_attribute *devattr,
+    char *buf)
+{
+    return snprintf(buf, PAGE_SIZE - 1, "%d\n", PCS_ADJUST_PERIOD);
+}
+
+static ssize_t set_pcs_adjust_period(struct device *dev,
+	struct device_attribute *devattr,
+	const char *buf, size_t count)
+{
+    struct pcsm_data *data = dev_get_drvdata(dev);
+    unsigned long value;
+
+    int err = kstrtoul(buf, 10, &value);
+    if (err) {
+	return err;
+    }
+
+    PCS_ADJUST_PERIOD = value;
+
+    flush_delayed_work(&pcsm_monitor);
+
+    return count;
+}
+
+static ssize_t show_pcs_events(struct device *dev,
+    struct device_attribute *devattr,
+    char *buf)
+{
+    struct pcsm_data *data = dev_get_drvdata(dev);
+    int pos = 0;
+    int i = 0;
+
+    pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%-20s %-5s %-19s\n", "name", "count", "date");
+
+    for (i = 0; i < PCS_EVENTS_MAX; i++) {
+	    struct tm tm_event;
+
+	    if (pcs_events[data->node][i].count != 0) {
+		time64_to_tm(pcs_events[data->node][i].time, 0, &tm_event);
+
+		pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%-20s %5d %04ld-%02d-%02d %02d:%02d:%02d\n",
+			pmc_sys_events[i], pcs_events[data->node][i].count,
+			tm_event.tm_year + 1900, tm_event.tm_mon + 1, tm_event.tm_mday,
+			tm_event.tm_hour, tm_event.tm_min, tm_event.tm_sec);
+	    } else {
+		pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%-20s %25s\n", pmc_sys_events[i], "no");
+	    }
+    }
+
+    return pos;
+}
+
+void pcsm_interrupt(void)
+{
+    int node = numa_node_id(), i;
+    int reg = 0;
+
+    reg = sic_read_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_SYS_EVENTS_POLLING);
+
+    for (i = 0; i < PCS_EVENTS_MAX; i++) {
+	if (reg & (1 << i)) {
+	    pcs_events[node][i].count++;
+	    pcs_events[node][i].time = ktime_get_real_seconds();
+	}
+    }
+}
+
+#ifdef CONFIG_EPIC
+static void pcs_events_enable(int node)
+{
+    sic_write_node_nbsr_reg(node, PCSM_BASE_ADDR + PMC_SYS_EVENTS_MASK, ALL_EVENTS_MASK);
+}
+#endif
+
 #define MATTR (S_IWUSR | S_IRUGO)
 
 /* TEMP */
 static SENSOR_DEVICE_ATTR(temp1_input, MATTR,
-		pmc_show_temp, NULL, PMC_TERM_TS0);
+		pmc_show_temp, NULL, TS1);
 static SENSOR_DEVICE_ATTR(temp2_input, MATTR,
-		pmc_show_temp, NULL, PMC_TERM_TS1);
+		pmc_show_temp, NULL, TS2);
 static SENSOR_DEVICE_ATTR(temp3_input, MATTR,
-		pmc_show_temp, NULL, PMC_TERM_TS2);
+		pmc_show_temp, NULL, TS3);
 static SENSOR_DEVICE_ATTR(temp4_input, MATTR,
-		pmc_show_temp, NULL, PMC_TERM_TS3);
+		pmc_show_temp, NULL, TS4);
 static SENSOR_DEVICE_ATTR(temp5_input, MATTR,
-		pmc_show_temp, NULL, PMC_TERM_TS4);
+		pmc_show_temp, NULL, TS5);
+static SENSOR_DEVICE_ATTR(temp6_input, MATTR,
+		pmc_show_temp, NULL, TS6);
+static DEVICE_ATTR(temp7_input, MATTR,
+		pmc_show_temp_max, NULL);
+
+
+static SENSOR_DEVICE_ATTR_RO(temp1_label, ts_label, TS1);
+static SENSOR_DEVICE_ATTR_RO(temp2_label, ts_label, TS2);
+static SENSOR_DEVICE_ATTR_RO(temp3_label, ts_label, TS3);
+static SENSOR_DEVICE_ATTR_RO(temp4_label, ts_label, TS4);
+static SENSOR_DEVICE_ATTR_RO(temp5_label, ts_label, TS5);
+static SENSOR_DEVICE_ATTR_RO(temp6_label, ts_label, TS6);
+static SENSOR_DEVICE_ATTR_RO(temp7_label, ts_label, TS7);
+
 
 /* VOLT */
 static SENSOR_DEVICE_ATTR(in1_input, MATTR,
@@ -614,6 +737,10 @@ static SENSOR_DEVICE_ATTR(vcore_table, MATTR,
 		pvt_show_vm_info, NULL, INFO_ALL);
 static SENSOR_DEVICE_ATTR(vcore_brief, MATTR,
 		pvt_show_vm_info, NULL, INFO_BRIEF);
+static DEVICE_ATTR(pcs_events, MATTR,
+		show_pcs_events, NULL);
+static DEVICE_ATTR(pcs_adjust_period, MATTR,
+		show_pcs_adjust_period, set_pcs_adjust_period);
 
 static SENSOR_DEVICE_ATTR_RO(in1_label, in_label, VM1);
 static SENSOR_DEVICE_ATTR_RO(in2_label, in_label, VM2);
@@ -624,197 +751,178 @@ static SENSOR_DEVICE_ATTR_RO(in6_label, in_label, VM6);
 
 /* FIRST INSTANCE */
 /* FAN */
-static SENSOR_DEVICE_ATTR(fan1_min, MATTR,
-		show_fan, set_fan, FRST_INST + (PCSM_RW_PWM_MIN << 8));
-static SENSOR_DEVICE_ATTR(fan1_max, MATTR,
-		show_fan, set_fan, FRST_INST + (PCSM_RW_PWM_MAX << 8));
-static SENSOR_DEVICE_ATTR(fan1_input, MATTR,
-		show_fan, NULL, FRST_INST + (PCSM_RW_PWM_CURRENT << 8));
-static SENSOR_DEVICE_ATTR(fan1_div, MATTR,
-		show_fan_div, set_fan_div, FRST_INST + (PCSM_RW_TIME_INTERVAL << 8));
-static SENSOR_DEVICE_ATTR(fan1_target, MATTR,
-		NULL, set_fan, FRST_INST);
+static SENSOR_DEVICE_ATTR_2(fan1_min, MATTR,
+		show_fan, set_fan, FRST_INST, PCSM_RW_TACH_MIN_LO);
+static SENSOR_DEVICE_ATTR_2(fan1_max, MATTR,
+		show_fan, set_fan, FRST_INST, PCSM_RW_TACH_MAX_LO);
+static SENSOR_DEVICE_ATTR_2(fan1_input, MATTR,
+		show_fan, NULL, FRST_INST, PCSM_RO_TACH_LO);
+static SENSOR_DEVICE_ATTR_2(fan1_div, MATTR,
+		show_fan_div, set_fan_div, FRST_INST, PCSM_RW_TIME_INTERVAL);
+static SENSOR_DEVICE_ATTR_2(tach1_control, MATTR,
+		show_pwm_byte, set_pwm_byte, FRST_INST, PCSM_MX_TACH_CTRL);
 
 /* PWM */
-static SENSOR_DEVICE_ATTR(pwm1, MATTR,
-		show_pwm, set_pwm, FRST_INST);
-static SENSOR_DEVICE_ATTR(pwm1_mode, MATTR,
-		show_pwm_byte, set_pwm_byte, FRST_INST + (PCSM_RW_CONTROL << 8));
-
-/* TACH */
-static SENSOR_DEVICE_ATTR(tach1_cnt, MATTR,
-		show_pwm_word, set_pwm_word, FRST_INST + (PCSM_RO_TACH_LO << 8));
-static SENSOR_DEVICE_ATTR(tach1_control, MATTR,
-		show_pwm_byte, set_pwm_byte, FRST_INST + (PCSM_MX_TACH_CTRL << 8));
-static SENSOR_DEVICE_ATTR(tach1_min, MATTR,
-		show_pwm_word, set_pwm_word, FRST_INST + (PCSM_RW_TACH_MIN_LO << 8));
-static SENSOR_DEVICE_ATTR(tach1_max, MATTR,
-		show_pwm_word, set_pwm_word, FRST_INST + (PCSM_RW_TACH_MAX_LO << 8));
+static SENSOR_DEVICE_ATTR_2(pwm1, MATTR,
+		show_pwm, set_pwm, FRST_INST, 0);
+static SENSOR_DEVICE_ATTR_2(pwm1_mode, MATTR,
+		show_pwm_byte, set_pwm_byte, FRST_INST, PCSM_RW_CONTROL);
 
 /* ALERT */
-static SENSOR_DEVICE_ATTR(alert1_control, MATTR,
-		show_pwm_byte, set_pwm_byte, FRST_INST + (PCSM_RW_ALERT_CTRL << 8));
-static SENSOR_DEVICE_ATTR(alert1_status, MATTR,
-		show_pwm_byte, NULL, FRST_INST + (PCSM_RW_ALERT_STATUS << 8));
+static SENSOR_DEVICE_ATTR_2(alert1_control, MATTR,
+		show_pwm_byte, set_pwm_byte, FRST_INST, PCSM_RW_ALERT_CTRL);
+static SENSOR_DEVICE_ATTR_2(alert1_status, MATTR,
+		show_pwm_byte, set_pwm_byte, FRST_INST, PCSM_RW_ALERT_STATUS);
 
 /* AUTO POINTS */
-static SENSOR_DEVICE_ATTR(pwm1_auto_point1_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT0_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point1_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT0_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point1_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT0_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point2_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT1_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point2_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT1_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point2_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT1_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point3_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT2_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point3_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT2_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point3_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT2_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point4_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT3_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point4_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT3_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point4_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT3_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point5_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT4_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point5_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT4_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point5_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT4_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point6_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT5_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point6_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT5_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point6_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT5_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point7_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT6_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point7_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT6_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point7_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT6_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point8_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT7_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point8_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT7_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point8_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT7_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point9_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT8_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point9_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT8_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point9_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT8_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point10_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT9_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point10_pwm,  MATTR,
-		show_fan,  set_fan,  FRST_INST + (PCSM_RW_LUT9_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm1_auto_point10_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, FRST_INST + (PCSM_RW_LUT9_HYST << 8));
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point1_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT0_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point1_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT0_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point1_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT0_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point2_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT1_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point2_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT1_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point2_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT1_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point3_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT2_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point3_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT2_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point3_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT2_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point4_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT3_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point4_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT3_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point4_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT3_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point5_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT4_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point5_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT4_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point5_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT4_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point6_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT5_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point6_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT5_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point6_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT5_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point7_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT6_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point7_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT6_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point7_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT6_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point8_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT7_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point8_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT7_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point8_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT7_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point9_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT8_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point9_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT8_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point9_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT8_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point10_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT9_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point10_pwm, MATTR,
+		show_pwm,  set_pwm,  FRST_INST, PCSM_RW_LUT9_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm1_auto_point10_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, FRST_INST, PCSM_RW_LUT9_HYST);
 
 /* SECOND INSTANCE */
 /* FAN */
-static SENSOR_DEVICE_ATTR(fan2_min, MATTR,
-		show_fan, set_fan, SCND_INST + (PCSM_RW_PWM_MIN << 8));
-static SENSOR_DEVICE_ATTR(fan2_max, MATTR,
-		show_fan, set_fan, SCND_INST + (PCSM_RW_PWM_MAX << 8));
-static SENSOR_DEVICE_ATTR(fan2_input, MATTR,
-		show_fan, NULL, SCND_INST + (PCSM_RW_PWM_CURRENT << 8));
-static SENSOR_DEVICE_ATTR(fan2_div, MATTR,
-		show_fan_div, set_fan_div, SCND_INST + (PCSM_RW_TIME_INTERVAL << 8));
-static SENSOR_DEVICE_ATTR(fan2_target, MATTR,
-		NULL, set_fan, SCND_INST);
+static SENSOR_DEVICE_ATTR_2(fan2_min, MATTR,
+		show_fan, set_fan, SCND_INST, PCSM_RW_TACH_MIN_LO);
+static SENSOR_DEVICE_ATTR_2(fan2_max, MATTR,
+		show_fan, set_fan, SCND_INST, PCSM_RW_TACH_MAX_LO);
+static SENSOR_DEVICE_ATTR_2(fan2_input, MATTR,
+		show_fan, NULL, SCND_INST, PCSM_RO_TACH_LO);
+static SENSOR_DEVICE_ATTR_2(fan2_div, MATTR,
+		show_fan_div, set_fan_div, SCND_INST, PCSM_RW_TIME_INTERVAL);
+static SENSOR_DEVICE_ATTR_2(tach2_control, MATTR,
+		show_pwm_byte, set_pwm_byte, SCND_INST, PCSM_MX_TACH_CTRL);
 
 /* PWM */
-static SENSOR_DEVICE_ATTR(pwm2, MATTR,
-		show_pwm, set_pwm, SCND_INST);
-static SENSOR_DEVICE_ATTR(pwm2_mode, MATTR,
-		show_pwm_byte, set_pwm_byte, SCND_INST + (PCSM_RW_CONTROL << 8));
+static SENSOR_DEVICE_ATTR_2(pwm2, MATTR,
+		show_pwm, set_pwm, SCND_INST, 0);
+static SENSOR_DEVICE_ATTR_2(pwm2_mode, MATTR,
+		show_pwm_byte, set_pwm_byte, SCND_INST, PCSM_RW_CONTROL);
 
-/* TACH */
-static SENSOR_DEVICE_ATTR(tach2_cnt, MATTR,
-		show_pwm_word, set_pwm_word, SCND_INST + (PCSM_RO_TACH_LO << 8));
-static SENSOR_DEVICE_ATTR(tach2_control, MATTR,
-		show_pwm_byte, set_pwm_byte, SCND_INST + (PCSM_MX_TACH_CTRL << 8));
-static SENSOR_DEVICE_ATTR(tach2_min, MATTR,
-		show_pwm_word, set_pwm_word, SCND_INST + (PCSM_RW_TACH_MIN_LO << 8));
-static SENSOR_DEVICE_ATTR(tach2_max, MATTR,
-		show_pwm_word, set_pwm_word, SCND_INST + (PCSM_RW_TACH_MAX_LO << 8));
 
 /* ALERT */
-static SENSOR_DEVICE_ATTR(alert2_control, MATTR,
-		show_pwm_byte, set_pwm_byte, SCND_INST + (PCSM_RW_ALERT_CTRL << 8));
-static SENSOR_DEVICE_ATTR(alert2_status, MATTR,
-		show_pwm_byte, NULL, SCND_INST + (PCSM_RW_ALERT_STATUS << 8));
+static SENSOR_DEVICE_ATTR_2(alert2_control, MATTR,
+		show_pwm_byte, set_pwm_byte, SCND_INST, PCSM_RW_ALERT_CTRL);
+static SENSOR_DEVICE_ATTR_2(alert2_status, MATTR,
+		show_pwm_byte, set_pwm_byte, SCND_INST, PCSM_RW_ALERT_STATUS);
 
 /* AUTO POINTS */
-static SENSOR_DEVICE_ATTR(pwm2_auto_point1_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT0_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point1_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT0_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point1_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT0_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point2_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT1_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point2_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT1_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point2_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT1_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point3_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT2_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point3_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT2_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point3_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT2_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point4_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT3_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point4_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT3_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point4_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT3_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point5_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT4_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point5_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT4_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point5_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT4_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point6_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT5_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point6_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT5_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point6_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT5_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point7_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT6_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point7_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT6_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point7_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT6_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point8_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT7_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point8_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT7_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point8_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT7_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point9_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT8_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point9_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT8_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point9_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT8_HYST << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point10_temp,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT9_TEMP << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point10_pwm,  MATTR,
-		show_fan,  set_fan,  SCND_INST + (PCSM_RW_LUT9_PWM  << 8));
-static SENSOR_DEVICE_ATTR(pwm2_auto_point10_temp_hyst,  MATTR,
-		pwm_show_temp, pwm_set_temp, SCND_INST + (PCSM_RW_LUT9_HYST << 8));
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point1_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT0_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point1_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT0_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point1_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT0_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point2_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT1_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point2_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT1_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point2_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT1_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point3_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT2_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point3_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT2_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point3_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT2_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point4_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT3_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point4_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT3_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point4_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT3_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point5_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT4_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point5_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT4_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point5_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT4_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point6_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT5_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point6_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT5_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point6_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT5_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point7_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT6_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point7_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT6_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point7_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT6_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point8_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT7_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point8_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT7_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point8_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT7_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point9_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT8_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point9_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT8_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point9_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT8_HYST);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point10_temp, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT9_TEMP);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point10_pwm, MATTR,
+		show_pwm,  set_pwm, SCND_INST, PCSM_RW_LUT9_PWM);
+static SENSOR_DEVICE_ATTR_2(pwm2_auto_point10_temp_hyst, MATTR,
+		pwm_show_temp, pwm_set_temp, SCND_INST, PCSM_RW_LUT9_HYST);
 
 static struct attribute *temp_attrs[] = {
 	&sensor_dev_attr_temp1_input.dev_attr.attr,
@@ -822,11 +930,39 @@ static struct attribute *temp_attrs[] = {
 	&sensor_dev_attr_temp3_input.dev_attr.attr,
 	&sensor_dev_attr_temp4_input.dev_attr.attr,
 	&sensor_dev_attr_temp5_input.dev_attr.attr,
+	&sensor_dev_attr_temp1_label.dev_attr.attr,
+	&sensor_dev_attr_temp2_label.dev_attr.attr,
+	&sensor_dev_attr_temp3_label.dev_attr.attr,
+	&sensor_dev_attr_temp4_label.dev_attr.attr,
+	&sensor_dev_attr_temp5_label.dev_attr.attr,
+	&dev_attr_temp7_input.attr,
+	&sensor_dev_attr_temp7_label.dev_attr.attr,
 	NULL
 };
 
 static const struct attribute_group temp_group = {
 	.attrs = temp_attrs,
+};
+
+
+static struct attribute *temp_e16c_attrs[] = {
+	&sensor_dev_attr_temp6_input.dev_attr.attr,
+	&sensor_dev_attr_temp6_label.dev_attr.attr,
+	NULL
+};
+
+static const struct attribute_group temp_e16c_group = {
+	.attrs = temp_e16c_attrs,
+};
+
+static struct attribute *pcs_event_attrs[] = {
+	&dev_attr_pcs_events.attr,
+	&dev_attr_pcs_adjust_period.attr,
+	NULL
+};
+
+static const struct attribute_group pcs_event_group = {
+	.attrs = pcs_event_attrs,
 };
 
 static struct attribute *in_attrs[] = {
@@ -856,13 +992,9 @@ static struct attribute *pwm1_attrs[] = {
 	&sensor_dev_attr_fan1_max.dev_attr.attr,
 	&sensor_dev_attr_fan1_input.dev_attr.attr,
 	&sensor_dev_attr_fan1_div.dev_attr.attr,
-	&sensor_dev_attr_fan1_target.dev_attr.attr,
+	&sensor_dev_attr_tach1_control.dev_attr.attr,
 	&sensor_dev_attr_pwm1.dev_attr.attr,
 	&sensor_dev_attr_pwm1_mode.dev_attr.attr,
-	&sensor_dev_attr_tach1_cnt.dev_attr.attr,
-	&sensor_dev_attr_tach1_control.dev_attr.attr,
-	&sensor_dev_attr_tach1_min.dev_attr.attr,
-	&sensor_dev_attr_tach1_max.dev_attr.attr,
 	&sensor_dev_attr_alert1_control.dev_attr.attr,
 	&sensor_dev_attr_alert1_status.dev_attr.attr,
 	&sensor_dev_attr_pwm1_auto_point1_pwm.dev_attr.attr,
@@ -907,13 +1039,9 @@ static struct attribute *pwm2_attrs[] = {
 	&sensor_dev_attr_fan2_max.dev_attr.attr,
 	&sensor_dev_attr_fan2_input.dev_attr.attr,
 	&sensor_dev_attr_fan2_div.dev_attr.attr,
-	&sensor_dev_attr_fan2_target.dev_attr.attr,
+	&sensor_dev_attr_tach2_control.dev_attr.attr,
 	&sensor_dev_attr_pwm2.dev_attr.attr,
 	&sensor_dev_attr_pwm2_mode.dev_attr.attr,
-	&sensor_dev_attr_tach2_cnt.dev_attr.attr,
-	&sensor_dev_attr_tach2_control.dev_attr.attr,
-	&sensor_dev_attr_tach2_min.dev_attr.attr,
-	&sensor_dev_attr_tach2_max.dev_attr.attr,
 	&sensor_dev_attr_alert2_control.dev_attr.attr,
 	&sensor_dev_attr_alert2_status.dev_attr.attr,
 	&sensor_dev_attr_pwm2_auto_point1_pwm.dev_attr.attr,
@@ -953,11 +1081,25 @@ static const struct attribute_group pwm2_group = {
 	.attrs = pwm2_attrs,
 };
 
-static const struct attribute_group *pcsm_attr_groups[5];
+static const struct attribute_group *pcsm_attr_groups[7];
 
-#define	MAX_NODE	4
+#ifdef CONFIG_EPIC
+static void do_pcsm_monitor(struct work_struct *work)
+{
+	int node;
+	for_each_online_node(node) {
+		sic_write_node_nbsr_reg(node,
+			PCSM_BASE_ADDR + PMC_SYS_EVENTS_INT, ALL_EVENTS_MASK);
+	}
 
-struct device *hwmon_dev[MAX_NODE];
+	queue_delayed_work(system_power_efficient_wq, &pcsm_monitor,
+			   msecs_to_jiffies(PCS_ADJUST_PERIOD));
+}
+#endif
+
+static const struct pcs_handle handle = {
+    .pcs_interrupt = pcsm_interrupt
+};
 
 static int __init pcsm_probe(void)
 {
@@ -965,44 +1107,86 @@ static int __init pcsm_probe(void)
     struct pcsm_data *pcsm;
     struct device *dev = cpu_subsys.dev_root;
     int group = 0;
+    int error = 0;
 
     if (IS_MACHINE_E16C) {
 	vm_table_type = vm_table_e16c;
+	ts_map = ts_e16c_map;
     } else if (IS_MACHINE_E12C) {
 	vm_table_type = vm_table_e12c;
+	ts_map = ts_e12c_map;
     } else if (IS_MACHINE_E2C3) {
 	vm_table_type = vm_table_e2c3;
+	ts_map = ts_e2c3_map;
     }
 
     if (IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C) {
 	pcsm_attr_groups[group++] = &temp_group;
+
+	if (IS_MACHINE_E16C) {
+	    pcsm_attr_groups[group++] = &temp_e16c_group;
+	}
+
 	pcsm_attr_groups[group++] = &in_group;
 	pcsm_attr_groups[group++] = &pwm1_group;
+	pcsm_attr_groups[group++] = &pwm2_group;
 
-	if (IS_MACHINE_E12C || IS_MACHINE_E16C) {
-	    pcsm_attr_groups[group++] = &pwm2_group;
+#ifdef CONFIG_EPIC
+	if (pcsm_adjust_enable) {
+	    pcsm_attr_groups[group++] = &pcs_event_group;
 	}
+#endif
 
 	pcsm_attr_groups[group++] = NULL;
 
 	for_each_online_node(node) {
+	    struct platform_device *pdev =
+		platform_device_register_data(dev, "pcsm", node, NULL, 0);
+	    struct device *hwmon_dev = NULL;
+
+	    if (IS_ERR(pdev)) {
+		dev_err(dev, "failed to create PCS platform device");
+		return PTR_ERR(pdev);
+	    }
+
 	    pcsm = devm_kzalloc(dev, sizeof(*pcsm), GFP_KERNEL);
-	    if (!pcsm)
+	    if (!pcsm) {
+		platform_device_unregister(pdev);
 		return -ENOMEM;
+	    }
+
+	    pcsm->pdev = pdev;
 	    pcsm->node = node;
 
-	    hwmon_dev[node] = devm_hwmon_device_register_with_groups(dev,
+	    hwmon_dev = devm_hwmon_device_register_with_groups(&pdev->dev,
 		    KBUILD_MODNAME,
 		    pcsm,
 		    pcsm_attr_groups);
-	    if (IS_ERR(hwmon_dev))
-		return PTR_ERR(hwmon_dev);
 
-	    pcsm->hdev = hwmon_dev[node];
+	    if (IS_ERR(hwmon_dev)) {
+		platform_device_unregister(pdev);
+		return PTR_ERR(hwmon_dev);
+	    }
+
+	    pcsm->hdev = hwmon_dev;
+	    p_pcsm[node] = pcsm;
+
+#ifdef CONFIG_EPIC
+	    pcs_events_enable(node);
+
+	    if (pcsm_adjust_enable) {
+		register_pcs_handle(&handle);
+
+		INIT_DEFERRABLE_WORK(&pcsm_monitor, do_pcsm_monitor);
+
+		queue_delayed_work(system_power_efficient_wq, &pcsm_monitor, 0);
+	    }
+#endif
+
 	}
     }
 
-    return 0;
+    return error;
 } /* pcsm_probe */
 
 static void __exit pcsm_remove(void)
@@ -1011,8 +1195,16 @@ static void __exit pcsm_remove(void)
 	int node;
 
 	for_each_online_node(node) {
-	    sysfs_remove_groups(&hwmon_dev[node]->kobj, pcsm_attr_groups);
-	    hwmon_device_unregister(hwmon_dev[node]);
+
+#ifdef CONFIG_EPIC
+	    if (pcsm_adjust_enable) {
+		unregister_pcs_handle();
+		cancel_delayed_work(&pcsm_monitor);
+	    }
+#endif
+	    sysfs_remove_group(&p_pcsm[node]->hdev->kobj, pcsm_attr_groups[0]);
+	    hwmon_device_unregister(p_pcsm[node]->hdev);
+	    platform_device_unregister(p_pcsm[node]->pdev);
 	}
     }
 }

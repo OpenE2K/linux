@@ -261,7 +261,7 @@ boot_fast_memcpy(void *dst_va, const void *src_va, size_t n)
 		return;
 	}
 
-	prefetchw_range(src, n);
+	prefetch_nospec_range(src, n);
 	__E2K_WAIT(_ld_c);
 
 	/* Copy the head */

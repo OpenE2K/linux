@@ -4,7 +4,7 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int fast_sys_getcpu(unsigned __user *cpup, unsigned __user *nodep,
 		struct getcpu_cache __user *unused)
 {

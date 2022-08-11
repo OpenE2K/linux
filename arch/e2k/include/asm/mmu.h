@@ -179,9 +179,9 @@ extern long hw_context_lookup_pcsp_and_switch(e2k_pcsp_lo_t pcsp_lo,
 extern int hw_contexts_init(struct task_struct *p, mm_context_t *mm_context,
 		bool is_fork);
 extern void hw_contexts_destroy(mm_context_t *mm_context);
-extern long do_swapcontext(void __user *oucp, const void __user *ucp,
-		bool save_prev_ctx, int format);
+extern long swapcontext(const void __user *ucp, int format);
 extern void makecontext_trampoline(void);
+extern void makecontext_trampoline_protected(void);
 extern void makecontext_trampoline_continue(void);
 extern void hw_context_deactivate_mm(struct task_struct *dead_task);
 

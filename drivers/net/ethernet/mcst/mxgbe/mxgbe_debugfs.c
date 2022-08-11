@@ -599,8 +599,8 @@ const char *mxgbe_dbg_reg_name_phy[12] = {
 #else
 const char *mxgbe_dbg_reg_name_phy[50] = {
 	"SR_XS_PCS_CTRL1",
-	"define SR_XS_PCS_DEV_ID1",
-	"define SR_XS_PCS_DEV_ID2",
+	"SR_XS_PCS_DEV_ID1",
+	"SR_XS_PCS_DEV_ID2",
 	"SR_XS_PCS_CTRL2",
 	"VR_XS_PCS_DIG_CTRL1",
 	"SR_MII_CTRL",

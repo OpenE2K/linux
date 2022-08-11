@@ -86,6 +86,7 @@ kvm_mmu_set_init_gmm_root(struct kvm_vcpu *vcpu, hpa_t root)
 	}
 	gmm->u_pptb = vcpu->arch.mmu.get_vcpu_u_pptb(vcpu);
 	gmm->os_pptb = vcpu->arch.mmu.get_vcpu_os_pptb(vcpu);
+	gmm->u_vptb = vcpu->arch.mmu.get_vcpu_u_vptb(vcpu);
 }
 static inline pgd_t *
 kvm_mmu_get_gmm_root(struct gmm_struct *gmm)
@@ -208,15 +209,12 @@ switch_guest_pgd(pgd_t *next_pgd)
 		pgd_to_set = next_pgd;
 	}
 
+	KVM_BUG_ON(PCSHTP_SIGN_EXTEND(NATIVE_READ_PCSHTP_REG_SVALUE()) != 0);
+
 	reload_root_pgd(pgd_to_set);
 	/* FIXME: support of guest secondary space is not yet implemented
 	reload_secondary_page_dir(mm);
 	*/
-
-	/* any function call can fill old state of hardware stacks */
-	/* so after all calls do flush stacks again */
-	NATIVE_FLUSHCPU;
-	E2K_WAIT(_all_e);
 }
 
 #define	DO_NOT_USE_ACTIVE_GMM	/* turn OFF optimization */

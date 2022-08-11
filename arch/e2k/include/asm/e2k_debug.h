@@ -23,8 +23,6 @@
 #include <asm/e2k.h>
 #include <asm/pgtable_def.h>
 
-#define	CHK_DEBUGGER(trapnr, signr, error_code, address, regs, after)
-
 #define	IS_KERNEL_THREAD(task, mm) \
 ({ \
 	e2k_addr_t ps_base; \
@@ -84,8 +82,8 @@ typedef int (*parse_chain_fn_t)(e2k_mem_crs_t *crs,
 		int flags, void *arg);
 #define PCS_USER 0x1
 #define PCS_OPEN_IRQS 0x2
-extern notrace int parse_chain_stack(int flags, struct task_struct *p,
-				     parse_chain_fn_t func, void *arg);
+extern notrace long parse_chain_stack(int flags, struct task_struct *p,
+				parse_chain_fn_t func, void *arg);
 
 
 extern	void	*kernel_symtab;
@@ -200,8 +198,6 @@ extern void print_chain_stack(struct stack_regs *regs,
 				int show_reg_window);
 extern void copy_stack_regs(struct task_struct *task,
 		const struct pt_regs *limit_regs, struct stack_regs *regs);
-extern int parse_chain_stack(int flags, struct task_struct *p,
-				parse_chain_fn_t func, void *arg);
 
 extern struct stack_regs stack_regs_cache[NR_CPUS];
 extern int debug_userstack;
@@ -248,6 +244,8 @@ host_ftrace_dump(void)
 {
 	return;
 }
+
+static const bool kvm_debug = false;
 #else	/* CONFIG_VIRTUALIZATION */
 /* it is native host kernel with virtualization support */
 /* or it is paravirtualized host/guest kernel */

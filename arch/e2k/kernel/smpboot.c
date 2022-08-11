@@ -189,7 +189,7 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 	}
 #endif /* CONFIG_L_LOCAL_APIC */
 
-	E2K_SET_DGREG_NV(SMP_CPU_ID_GREG, cpu);
+	set_smp_processor_id(cpu);
 
 	/* By now percpu areas should have been initialized by BSP */
 	set_my_cpu_offset(__per_cpu_offset[cpu]);

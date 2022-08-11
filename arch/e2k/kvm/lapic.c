@@ -1689,7 +1689,7 @@ void kvm_lapic_set_vapic_addr(struct kvm_vcpu *vcpu, gpa_t vapic_addr)
 	vcpu->arch.apic->vapic_addr = vapic_addr;
 }
 
-bool kvm_vcpu_has_apic_interrupts(struct kvm_vcpu *vcpu)
+bool kvm_vcpu_has_apic_interrupts(const struct kvm_vcpu *vcpu)
 {
 	return !vcpu->arch.hcall_irqs_disabled && kvm_test_pending_virqs(vcpu);
 }

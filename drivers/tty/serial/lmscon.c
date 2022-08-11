@@ -267,7 +267,7 @@ static struct lms_port lms_ports[LMS_NPORTS] = {
 			.type		= PORT_MUX,
 			.irq		= 0,
 			.ops		= &lms_uart_ops,
-			.flags		= ASYNC_BOOT_AUTOCONF,
+			.flags		= 0,
 			.line		= 0,
 		},
 		.type		= 0,

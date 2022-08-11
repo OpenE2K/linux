@@ -104,17 +104,6 @@ config MCST_RT_NUMA
         default y
         select MCST_RT_SMP
 
-config NETDEV_THREADS
-	bool "Each net dev has personal softirq threads"
-	depends on MCST_RT
-	default n
-	help
-	  net devices don't use SOFTIRQ stuff (NET_TX_SOFTIRQ and
-	  NET_RX_SOFTIRQ not used). Each net device has it's own
-	  threads pair - one for receiving and one for transmitting. It's
-	  possible to bind these threads to CPU and assign priority
-	  for each thread separately.
-
 config PREEMPT_COUNT
        bool
 

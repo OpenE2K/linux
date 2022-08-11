@@ -106,9 +106,15 @@ extern void smp_cpus_recovery_done(unsigned int max_cpus);
  * This function is needed by all SMP systems. It must _always_ be valid
  * from the initial startup.
  */
-register unsigned long long __cpu_reg DO_ASM_GET_GREG_MEMONIC(
+register unsigned long long __cpu_preempt_reg DO_ASM_GET_GREG_MEMONIC(
 							SMP_CPU_ID_GREG);
-#define raw_smp_processor_id() ((unsigned int) __cpu_reg)
+#define raw_smp_processor_id() ((unsigned int) __cpu_preempt_reg)
+
+#define set_smp_processor_id(cpu) \
+do { \
+	__cpu_preempt_reg = (__cpu_preempt_reg & 0xffffffff00000000ull) | \
+			    ((u64) (u32) (cpu)); \
+} while (0)
 
 #endif /* !ASSEMBLY */
 

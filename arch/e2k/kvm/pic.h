@@ -11,12 +11,12 @@
  * QEMU
  */
 
-static inline bool kvm_is_epic(struct kvm *kvm)
+static inline bool kvm_is_epic(const struct kvm *kvm)
 {
 	return kvm->arch.is_epic;
 }
 
-static inline bool kvm_vcpu_is_epic(struct kvm_vcpu *vcpu)
+static inline bool kvm_vcpu_is_epic(const struct kvm_vcpu *vcpu)
 {
 	return kvm_is_epic(vcpu->kvm);
 }
@@ -113,7 +113,7 @@ static inline void kvm_pic_set_vapic_addr(struct kvm_vcpu *vcpu,
 
 /* Choose between software and hardware EPIC */
 extern int kvm_irq_delivery_to_hw_epic(struct kvm *kvm, int src,
-		struct kvm_cepic_irq *irq);
+		const struct kvm_cepic_irq *irq);
 extern int kvm_irq_delivery_to_sw_epic(struct kvm *kvm, int src,
 		struct kvm_cepic_irq *irq);
 static inline int kvm_irq_delivery_to_epic(struct kvm *kvm, int src,
@@ -177,9 +177,10 @@ static inline void kvm_free_local_pic(struct kvm_vcpu *vcpu)
 		kvm_free_lapic(vcpu);
 }
 
-extern bool kvm_vcpu_has_epic_interrupts(struct kvm_vcpu *vcpu);
-extern bool kvm_vcpu_has_apic_interrupts(struct kvm_vcpu *vcpu);
-static inline bool kvm_vcpu_has_pic_interrupts(struct kvm_vcpu *vcpu)
+extern bool kvm_dy_has_epic_interrupts(const struct kvm_vcpu *vcpu);
+extern bool kvm_vcpu_has_epic_interrupts(const struct kvm_vcpu *vcpu);
+extern bool kvm_vcpu_has_apic_interrupts(const struct kvm_vcpu *vcpu);
+static inline bool kvm_vcpu_has_pic_interrupts(const struct kvm_vcpu *vcpu)
 {
 	if (kvm_vcpu_is_epic(vcpu))
 		return kvm_vcpu_has_epic_interrupts(vcpu);
@@ -198,12 +199,12 @@ static inline int kvm_cpu_has_pending_pic_timer(struct kvm_vcpu *vcpu)
 }
 
 /* Choose between software and hardware LAPIC */
-static inline bool kvm_is_hw_apic(struct kvm *kvm)
+static inline bool kvm_is_hw_apic(const struct kvm *kvm)
 {
 	return kvm->arch.is_hv;
 }
 
-static inline bool kvm_vcpu_is_hw_apic(struct kvm_vcpu *vcpu)
+static inline bool kvm_vcpu_is_hw_apic(const struct kvm_vcpu *vcpu)
 {
 	return kvm_is_hw_apic(vcpu->kvm);
 }

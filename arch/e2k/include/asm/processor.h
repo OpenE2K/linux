@@ -256,16 +256,18 @@ unsigned long get_wchan(struct task_struct *p);
 #define ARCH_HAS_PREFETCH
 static inline void prefetch(const void *ptr)
 {
-	/* Use fully speculative load since ptr could be bad */
 	E2K_PREFETCH_L1_SPEC(ptr);
 }
 
 #define ARCH_HAS_PREFETCHW
 static inline void prefetchw(const void *ptr)
 {
-	/* prefetchw() is used when ptr is good, thus
-	 * we can use half-speculative load */
-	E2K_PREFETCH_L1(ptr);
+	E2K_PREFETCH_L1_SPEC(ptr);
+}
+
+static inline void prefetch_nospec(const void *ptr)
+{
+	E2K_PREFETCH_L1_NOSPEC(ptr);
 }
 
 #define prefetch_offset(ptr, offset) \
@@ -274,68 +276,67 @@ do { \
 	E2K_PREFETCH_L1_SPEC_OFFSET((ptr), (offset)); \
 } while (0)
 
-#define prefetchw_offset(ptr, offset) \
+#define prefetch_nospec_offset(ptr, offset) \
 do { \
-	E2K_PREFETCH_L2_OFFSET((ptr), (offset)); \
+	E2K_PREFETCH_L2_NOSPEC_OFFSET((ptr), (offset)); \
 } while (0)
 
 /*  Use L2 cache line size since we are prefetching to L2 */
 #define PREFETCH_STRIDE 64
 
-static __always_inline void prefetchw_range(const void *addr, size_t len)
+static __always_inline void prefetch_nospec_range(const void *addr, size_t len)
 {
-#ifdef ARCH_HAS_PREFETCHW
 	s64 i, rem, prefetched;
 
 	if (__builtin_constant_p(len) && len < 24 * PREFETCH_STRIDE) {
 		if (len > 0)
-			prefetchw(addr);
+			prefetch_nospec(addr);
 		if (len > PREFETCH_STRIDE)
-			prefetchw_offset(addr, PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, PREFETCH_STRIDE);
 		if (len > 2 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 2 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 2 * PREFETCH_STRIDE);
 		if (len > 3 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 3 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 3 * PREFETCH_STRIDE);
 		if (len > 4 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 4 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 4 * PREFETCH_STRIDE);
 		if (len > 5 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 5 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 5 * PREFETCH_STRIDE);
 		if (len > 6 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 6 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 6 * PREFETCH_STRIDE);
 		if (len > 7 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 7 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 7 * PREFETCH_STRIDE);
 		if (len > 8 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 8 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 8 * PREFETCH_STRIDE);
 		if (len > 9 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 9 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 9 * PREFETCH_STRIDE);
 		if (len > 10 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 10 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 10 * PREFETCH_STRIDE);
 		if (len > 11 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 11 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 11 * PREFETCH_STRIDE);
 		if (len > 12 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 12 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 12 * PREFETCH_STRIDE);
 		if (len > 13 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 13 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 13 * PREFETCH_STRIDE);
 		if (len > 14 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 14 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 14 * PREFETCH_STRIDE);
 		if (len > 15 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 15 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 15 * PREFETCH_STRIDE);
 		if (len > 16 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 16 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 16 * PREFETCH_STRIDE);
 		if (len > 17 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 17 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 17 * PREFETCH_STRIDE);
 		if (len > 18 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 18 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 18 * PREFETCH_STRIDE);
 		if (len > 19 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 19 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 19 * PREFETCH_STRIDE);
 		if (len > 20 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 20 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 20 * PREFETCH_STRIDE);
 		if (len > 21 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 21 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 21 * PREFETCH_STRIDE);
 		if (len > 22 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 22 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 22 * PREFETCH_STRIDE);
 		if (len > 23 * PREFETCH_STRIDE)
-			prefetchw_offset(addr, 23 * PREFETCH_STRIDE);
+			prefetch_nospec_offset(addr, 23 * PREFETCH_STRIDE);
 
 		return;
 	}
@@ -344,17 +345,16 @@ static __always_inline void prefetchw_range(const void *addr, size_t len)
 	prefetched = len / (4 * PREFETCH_STRIDE);
 
 	for (i = 0; i <= (s64) len - 256; i += 256)
-		E2K_PREFETCH_L2_256(addr + i);
+		E2K_PREFETCH_L2_NOSPEC_256(addr + i);
 
 	if (rem > 0)
-		prefetchw(addr + prefetched);
+		prefetch_nospec(addr + prefetched);
 	if (rem > PREFETCH_STRIDE)
-		prefetchw_offset(addr + prefetched, PREFETCH_STRIDE);
+		prefetch_nospec_offset(addr + prefetched, PREFETCH_STRIDE);
 	if (rem > 2 * PREFETCH_STRIDE)
-		prefetchw_offset(addr + prefetched, 2 * PREFETCH_STRIDE);
+		prefetch_nospec_offset(addr + prefetched, 2 * PREFETCH_STRIDE);
 	if (rem > 3 * PREFETCH_STRIDE)
-		prefetchw_offset(addr + prefetched, 3 * PREFETCH_STRIDE);
-#endif
+		prefetch_nospec_offset(addr + prefetched, 3 * PREFETCH_STRIDE);
 }
 
 extern u64 cacheinfo_get_l1d_line_size(void);

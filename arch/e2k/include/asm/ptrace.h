@@ -821,5 +821,8 @@ extern void syscall_trace_leave(struct pt_regs *regs);
 
 #define arch_has_single_step()	(1)
 
+extern long common_ptrace(struct task_struct *child, long request, unsigned long addr,
+		   unsigned long data, bool compat);
+
 #endif /* __ASSEMBLY__ */
 #endif /* _E2K_PTRACE_H */

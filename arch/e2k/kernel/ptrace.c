@@ -19,6 +19,7 @@
 #include <linux/audit.h>
 #include <linux/seccomp.h>
 #include <linux/sched/mm.h>
+#include <linux/compat.h>
 
 #include <asm/compat.h>
 #include <asm/gregs.h>
@@ -1503,8 +1504,8 @@ static int arch_ptrace_poke(struct task_struct *child,
 	}
 }
 
-long arch_ptrace(struct task_struct *child, long request,
-		 unsigned long addr, unsigned long data)
+long common_ptrace(struct task_struct *child, long request, unsigned long addr,
+		   unsigned long data, bool compat)
 {
 	struct user_regs_struct local_user_regs;
 	u8 tag;
@@ -1875,7 +1876,8 @@ long arch_ptrace(struct task_struct *child, long request,
 	}
 
 	default:
-		ret = ptrace_request(child, request, addr, data);
+		ret = (compat) ? compat_ptrace_request(child, request, addr, data) :
+				 ptrace_request(child, request, addr, data);
 		break;
 	}
 #ifdef DEBUG_PTRACE
@@ -1883,6 +1885,12 @@ long arch_ptrace(struct task_struct *child, long request,
 		printk("do_ptrace: FAIL: ret=%d\n", ret);
 #endif /* DEBUG_PTRACE */
 	return ret;
+}
+
+long arch_ptrace(struct task_struct *child, long request,
+		 unsigned long addr, unsigned long data)
+{
+	return common_ptrace(child, request, addr, data, false);
 }
 
 void user_enable_single_step(struct task_struct *child)
@@ -1915,7 +1923,7 @@ int syscall_trace_entry(struct pt_regs *regs)
 #ifdef CONFIG_MCST
 #ifdef CONFIG_HAVE_ARCH_SECCOMP_FILTER
 	/* do the secure computing check first */
-	secure_computing(NULL);
+	ret = secure_computing(NULL);
 #endif
 #endif
 	if (test_thread_flag(TIF_NOHZ))
@@ -1938,7 +1946,7 @@ void syscall_trace_leave(struct pt_regs *regs)
 	audit_syscall_exit(regs);
 
 	if (unlikely(test_thread_flag(TIF_SYSCALL_TRACEPOINT)))
-		trace_sys_exit(regs, regs->sys_num);
+		trace_sys_exit(regs, regs->sys_rval);
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall_exit(regs, 0);

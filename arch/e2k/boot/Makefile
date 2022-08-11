@@ -3,7 +3,13 @@ GCOV_PROFILE := n
 OBJCOPY		+= -O binary -R .note -R .comment -S
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 
-ccflags-y := -DCONFIG_BOOT_E2K -fno-ld-spec
+ccflags-y := -DCONFIG_BOOT_E2K
+ifeq ($(call cc-option-yn,-fno-semi-spec-ld -fno-spec-ld),y)
+	ccflags-y += -fno-semi-spec-ld -fno-spec-ld
+else
+	ccflags-y += -fno-ld-spec
+endif
+
 
 targets := vmlinux vmlinux.bin vmlinux.bin.gz vmlinux.bin.bz2 vmlinux.bin.xz \
 	   vmlinux.bin.lzma vmlinux.bin.lzo vmlinux.bin.lz4 cimage image \
@@ -124,7 +130,9 @@ ROM_LDFLAGS  = -e start -T $(TOPDIR)/$(ROMSCRIPT)
 # lcc option '-fvisibility=hidden' allows us to reduce
 # .got section size - this is a small optimization.
 CFLAGS_decompress.o += -fpic -fvisibility=hidden -DE2K_P2V -O4
+CFLAGS_machdep_fpic.o += -fpic -fvisibility=hidden -DE2K_P2V -O4
 CFLAGS_string_fpic.o += -fpic -fvisibility=hidden -DE2K_P2V -O4
+CFLAGS_string_guest_fpic.o += -fpic -fvisibility=hidden -DE2K_P2V -O4
 AFLAGS_recovery_string_fpic.o += -fpic -fvisibility=hidden -DE2K_P2V
 AFLAGS_REMOVE_recovery_string_v5_fpic.o = $(CFLAGS_ALL_CPUS)
 AFLAGS_recovery_string_v5_fpic.o += -march=elbrus-v5 -fpic \
@@ -132,7 +140,7 @@ AFLAGS_recovery_string_v5_fpic.o += -march=elbrus-v5 -fpic \
 
 CFLAGS_bootblock.o += -fno-toplevel-reorder
 
-targets += bootblock.o decompress.o string_fpic.o \
+targets += bootblock.o decompress.o machdep_fpic.o string_fpic.o \
 	   recovery_string_fpic.o recovery_string_v5_fpic.o
 
 TOPDIR = $(srctree)
@@ -281,12 +289,22 @@ LDFLAGS_image = -static -e gap -T $(srctree)/$(src)/boot.lds \
 $(obj)/image: $(obj)/bpiggy.o $(obj)/bootblock.o FORCE
 	$(call if_changed,ld)
 
-LDFLAGS_cimage = -static -e decompress_kernel -T $(srctree)/$(src)/compressed.lds \
+ifdef CONFIG_KVM_GUEST_KERNEL
+targets += string_guest_fpic.o
+STRING_GUEST_FPIC_O=$(obj)/string_guest_fpic.o
+COMPRESSED_SCRIPT=compressed_guest.lds
+else
+STRING_GUEST_FPIC_O=
+COMPRESSED_SCRIPT=compressed.lds
+endif
+
+LDFLAGS_cimage = -static -e decompress_kernel -T $(srctree)/$(src)/$(COMPRESSED_SCRIPT) \
  -defsym __orig_kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin) \
  -defsym __kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin$(suffix-y))
-$(obj)/cimage: $(obj)/cpiggy.o $(obj)/bootblock.o $(obj)/decompress.o \
-	       $(obj)/string_fpic.o $(obj)/recovery_string_fpic.o \
-	       $(obj)/recovery_string_v5_fpic.o FORCE
+$(obj)/cimage: $(obj)/cpiggy.o $(obj)/bootblock.o $(obj)/decompress.o  \
+	       $(obj)/string_fpic.o $(STRING_GUEST_FPIC_O) \
+	       $(obj)/recovery_string_fpic.o $(obj)/recovery_string_v5_fpic.o \
+	       $(obj)/machdep_fpic.o FORCE
 	$(call if_changed,ld)
 
 $(objtree)/image.boot: $(obj)/image FORCE

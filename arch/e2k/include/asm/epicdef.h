@@ -5,8 +5,8 @@
  * Constants for e2k EPICs (CEPIC, IOEPIC)
  */
 
-#define	IO_EPIC_DEFAULT_PHYS_BASE	0xfec00000
-#define	EPIC_DEFAULT_PHYS_BASE	0xfee00000
+#define	IO_EPIC_DEFAULT_PHYS_BASE	0xfec00000UL
+#define	EPIC_DEFAULT_PHYS_BASE		0xfee00000UL
 
 
 #include <asm-l/epicdef.h>

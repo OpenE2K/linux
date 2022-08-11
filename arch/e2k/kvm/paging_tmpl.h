@@ -747,6 +747,46 @@ static void FNAME(pte_prefetch)(struct kvm_vcpu *vcpu, guest_walker_t *gw,
 }
 
 /*
+ * Walk a shadow PT levels up to the all present levels in the paging hierarchy.
+ */
+static int e2k_walk_shadow_pts(struct kvm_vcpu *vcpu, gva_t addr,
+				kvm_shadow_trans_t *st, hpa_t spt_root)
+{
+	kvm_shadow_walk_iterator_t it;
+	int top_level;
+	top_level = vcpu->arch.mmu.root_level;
+
+	KVM_BUG_ON(!VALID_PAGE(kvm_get_space_addr_spt_root(vcpu, addr)));
+
+	DebugWSPT("started for guest addr 0x%lx\n", addr);
+
+	st->last_level = E2K_PT_LEVELS_NUM + 1;
+	st->addr = addr;
+
+	for ((!IS_E2K_INVALID_PAGE(spt_root)) ?
+			shadow_pt_walk_init(&it, vcpu, spt_root, addr)
+			:
+			shadow_walk_init(&it, vcpu, addr);
+		shadow_walk_okay(&it);
+			shadow_walk_next(&it)) {
+		st->pt_entries[it.level].sptep = it.sptep;
+		st->pt_entries[it.level].spte = *it.sptep;
+		DebugWSPT("shadow PT level #%d addr 0x%llx index 0x%x "
+			"sptep %px\n",
+			it.level, it.shadow_addr, it.index, it.sptep);
+		if (likely(is_shadow_present_pte(vcpu->kvm, *it.sptep))) {
+			st->last_level = it.level;
+			continue;
+		} else if (is_shadow_valid_pte(vcpu->kvm, *it.sptep)) {
+			st->last_level = it.level;
+			break;
+		}
+		break;
+	}
+	return it.level;
+}
+
+/*
  * Fetch a shadow PT levels up to the specified level in the paging hierarchy.
  */
 static int FNAME(fetch_shadow_pts)(struct kvm_vcpu *vcpu, gva_t addr,
@@ -1652,6 +1692,7 @@ static pf_res_t map_huge_page_to_spte(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	pf_res_t ret;
 	pgprot_t *pte_hva;
 	gfn_t table_gfn;
+	kvm_memory_slot_t *mem_slot;
 	kvm_pfn_t pfn = 0;
 	bool gfn_only_valid, is_guest_pt_area, force_pt_level = false;
 
@@ -1661,7 +1702,7 @@ static pf_res_t map_huge_page_to_spte(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 
 	/* Get number of sptes, which one spt level contains */
 	int sptes_num = PAGE_SIZE / sizeof(pt_element_t);
-	int ind, max_host_level, split_page_size;
+	int ind, split_page_size;
 
 	KVM_BUG_ON(split_to_level > level);
 
@@ -1684,9 +1725,9 @@ static pf_res_t map_huge_page_to_spte(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	 * If gfn belongs to the area of guest page table, then
 	 * map it by pages on level 1 in shadow page table
 	 */
+	split_to_level = PT_PAGE_TABLE_LEVEL;
 	if (is_guest_pt_area) {
 		force_pt_level = true;
-		split_to_level = PT_PAGE_TABLE_LEVEL;
 		DebugSYNCV("gva 0x%lx (gfn = 0x%llx) belongs to guest pt "
 			"area, split guest page on level #%d into pages "
 			"on level #%d\n",
@@ -1697,9 +1738,8 @@ static pf_res_t map_huge_page_to_spte(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		 * Get max mapping level of this gfn in host
 		 * page table (hva -> pfn)
 		 */
-		max_host_level = mapping_level(vcpu, guest_walker->gfn,
-						&force_pt_level);
-		split_to_level = min(level, max_host_level);
+		mem_slot = kvm_vcpu_gfn_to_memslot(vcpu, guest_walker->gfn);
+		force_pt_level = !memslot_valid_for_gpte(mem_slot, true);
 		DebugSYNCV("can split guest page on level #%d into pages on"
 			" level #%d , force = %s\n", level,
 			split_to_level, force_pt_level ? "yes" : "no");
@@ -2187,16 +2227,16 @@ static int FNAME(sync_shadow_pt_range)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 	return ret;
 }
 
-int FNAME(shadow_pt_protection_fault)(struct kvm_vcpu *vcpu, gpa_t addr,
-					kvm_mmu_page_t *sp)
+int FNAME(shadow_pt_protection_fault)(struct kvm_vcpu *vcpu,
+			struct gmm_struct *gmm, gpa_t addr, kvm_mmu_page_t *sp)
 {
 	gva_t start_gva, end_gva, vptb;
 	hpa_t root_hpa;
+	gpa_t guest_root;
 	int r;
 	unsigned index;
 	const pt_struct_t *gpt;
 	const pt_level_t *gpt_level;
-	gmm_struct_t *gmm;
 	int level;
 
 	DebugPTE("SP of protected PT at %px level %d, gfn 0x%llx, "
@@ -2214,14 +2254,21 @@ int FNAME(shadow_pt_protection_fault)(struct kvm_vcpu *vcpu, gpa_t addr,
 	DebugPTE("protected PT level #%d gva from 0x%lx to 0x%lx\n",
 		level, start_gva, end_gva);
 
-	root_hpa = kvm_get_space_addr_spt_root(vcpu, start_gva);
+	if (end_gva >= GUEST_TASK_SIZE) {
+		/* guest kernel address - update init_gmm */
+		gmm = pv_vcpu_get_init_gmm(vcpu);
+		KVM_BUG_ON(start_gva < GUEST_TASK_SIZE);
+	} else if (gmm == NULL) {
+		/* can be only current active gmm */
+		gmm = pv_vcpu_get_gmm(vcpu);
+	}
+	root_hpa = gmm->root_hpa;
 	KVM_BUG_ON(!VALID_PAGE(root_hpa));
-	KVM_BUG_ON(root_hpa != kvm_get_space_addr_spt_root(vcpu, end_gva));
-	vptb = kvm_get_space_addr_spt_vptb(vcpu, start_gva);
+	guest_root = gmm->u_pptb;
+	vptb = pv_vcpu_get_init_gmm(vcpu)->u_vptb;
 
-	gmm = kvm_get_faulted_addr_gmm(vcpu, start_gva);
 	r = FNAME(sync_shadow_pt_range)(vcpu, gmm, root_hpa,
-			start_gva, end_gva, E2K_INVALID_PAGE, vptb);
+			start_gva, end_gva, guest_root, vptb);
 	KVM_BUG_ON(r != 0);
 	return r;
 }

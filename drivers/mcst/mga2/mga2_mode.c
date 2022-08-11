@@ -728,9 +728,13 @@ static int mga25_int_pll_set_pixclock(struct drm_crtc *crtc,
 		const struct mga2_div *d, struct mga2_div *div)
 {
 	unsigned v;
+	struct mga2 *mga2 = crtc->dev->dev_private;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	struct mga2_clk clk = {};
-	int ret = __mga2_calc_int_pll(&clk, clock_khz * 1000, d, div, CLN16FF);
+	int ret;
+	if (mga2_proto(mga2))
+		goto out;
+	ret = __mga2_calc_int_pll(&clk, clock_khz * 1000, d, div, CLN16FF);
 	if (ret)
 		goto out;
 
@@ -811,8 +815,8 @@ static int __mga25_setup_clock(struct drm_crtc *crtc,
 		d = mga25_lvds_div[mga2->used_lvds_channels];
 		break;
 	case DRM_MODE_CONNECTOR_VGA:
-			div->pix = 2;
-			div->aux = 1;
+		div->pix = 2;
+		div->aux = 1;
 		break;
 	default:
 		BUG();

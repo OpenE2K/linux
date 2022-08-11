@@ -45,10 +45,10 @@
 
 #undef	DEBUG_KVM_SHUTDOWN_MODE
 #undef	DebugKVMSH
-#define	DEBUG_KVM_SHUTDOWN_MODE	1	/* KVM shutdown debugging */
+#define	DEBUG_KVM_SHUTDOWN_MODE	0	/* KVM shutdown debugging */
 #define	DebugKVMSH(fmt, args...)					\
 ({									\
-	if (DEBUG_KVM_SHUTDOWN_MODE)					\
+	if (DEBUG_KVM_SHUTDOWN_MODE || kvm_debug)			\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 

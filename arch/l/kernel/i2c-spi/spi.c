@@ -246,7 +246,7 @@ static int l_spi_set_mode_and_freq(struct spi_device *spi,
 		/* Frequency divider or SPI mode has changed */
 		mode &= ~L_SPI_DIVIDER_MASK;
 		mode |= n;
-		mode &= ~(L_SPI_MODE_MASK & L_SPI_MODE_IVN_CLK);
+		mode &= ~(L_SPI_MODE_MASK | L_SPI_MODE_IVN_CLK);
 		if (spi_mode == SPI_MODE_0) {
 			mode |= L_SPI_MODE_0;
 		} else if (spi_mode == SPI_MODE_1) {
@@ -662,26 +662,12 @@ static int l_spi_probe(struct platform_device *pdev)
 	u32 mode;
 	int freq_changed;
 	struct resource *res;
+	char s[64];
 
 	master = spi_alloc_master(&pdev->dev, sizeof(struct l_spi));
 	if (!master)
 		return -ENOMEM;
 
-#ifdef CONFIG_OF
-	{
-	struct device_node *spi_node = of_find_compatible_node(NULL, NULL,
-								"l_spi");
-	while (spi_node) {
-		const u32 *id = of_get_property(spi_node, "reg", NULL);
-		if (pdev->id == be32_to_cpu(*id)) {
-			master->dev.of_node = spi_node;
-			break;
-		}
-		spi_node = of_find_compatible_node(spi_node, NULL, "l_spi");
-	}
-	}
-
-#endif
 	l_spi = spi_master_get_devdata(master);
 	platform_set_drvdata(pdev, l_spi);
 
@@ -702,6 +688,8 @@ static int l_spi_probe(struct platform_device *pdev)
 		return PTR_ERR(l_spi->data);
 
 	master->bus_num = pdev->id;
+	sprintf(s, "/l_spi@%d", pdev->id);
+	master->dev.of_node = of_find_node_by_path(s);
 
 	master->num_chipselect = L_SPI_MAX_DEVICES;
 
@@ -711,9 +699,6 @@ static int l_spi_probe(struct platform_device *pdev)
 	master->setup = l_spi_setup;
 	master->transfer = l_spi_transfer;
 	master->cleanup = l_spi_cleanup;
-
-	/* Full duplex is not supported */
-	master->flags = SPI_MASTER_HALF_DUPLEX;
 	master->max_transfer_size = l_spi_max_transfer_size;
 
 	/* Wait for controller */
@@ -724,8 +709,7 @@ static int l_spi_probe(struct platform_device *pdev)
 	 * has 50 MHz speed after reset althouth SPI_MODE register
 	 * is set to 12.5 MHz since it's being worked around by boot. */
 	mode = l_spi_read(l_spi, L_SPI_MODE);
-	if (mode & L_SPI_FREQ_CHANGED)
-		/* Reset 'freq' field if it was set */
+	if (mode & L_SPI_FREQ_CHANGED) /* Reset 'freq' field if it was set */
 		l_spi_write(l_spi, mode, L_SPI_MODE);
 	mode &= ~L_SPI_FREQ_CHANGED;
 	mode = (mode & ~L_SPI_MODE_MASK) | L_SPI_MODE_0;

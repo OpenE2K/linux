@@ -1,11 +1,12 @@
-#include <drm/drm_probe_helper.h>
-
 #include "mga2_drv.h"
-
+#include <drm/drm_probe_helper.h>
+#include <video/videomode.h>
+#include <video/of_display_timing.h>
 
 struct mga2_vport {
 	struct drm_connector	connector;
 	struct drm_encoder	encoder;
+	struct display_timings *timings;
 	struct drm_panel	*panel;
 	struct i2c_adapter	*ddci2c;
 };
@@ -59,6 +60,40 @@ static int mga2_vport_add_cmdline_mode(struct drm_connector *connector)
 	return 1;
 }
 
+static unsigned int mga2_vport_get_timings_modes(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct mga2_vport *vp = drm_connector_to_mga2_vport(connector);
+	struct display_timings *timings = vp->timings;
+	unsigned i;
+	if (!timings)
+		return 0;
+
+	for (i = 0; i < timings->num_timings; i++) {
+		struct drm_display_mode *mode;
+		struct videomode vm;
+
+		if (videomode_from_timings(timings, &vm, i))
+			break;
+
+		mode = drm_mode_create(dev);
+		if (!mode)
+			break;
+
+		drm_display_mode_from_videomode(&vm, mode);
+
+		mode->type = DRM_MODE_TYPE_DRIVER;
+
+		if (timings->native_mode == i)
+			mode->type |= DRM_MODE_TYPE_PREFERRED;
+
+		drm_mode_set_name(mode);
+		drm_mode_probed_add(connector, mode);
+	}
+
+	return i;
+}
+
 static int mga2_vport_get_modes(struct drm_connector *connector)
 {
 	struct edid *edid;
@@ -66,10 +101,13 @@ static int mga2_vport_get_modes(struct drm_connector *connector)
 	int cnt = mga2_vport_add_cmdline_mode(connector);
 	if (cnt > 0)
 		return cnt;
+	cnt = mga2_vport_get_timings_modes(connector);
+	if (cnt > 0)
+		return cnt;
 	if (vp->panel)
 		return drm_panel_get_modes(vp->panel);
 	if (!vp->ddci2c)
-		return 0;
+		return -EINVAL;
 	edid = drm_get_edid(connector, vp->ddci2c);
 	drm_connector_update_edid_property(connector, edid);
 	return drm_add_edid_modes(connector, edid);
@@ -83,6 +121,8 @@ static void
 mga2_vport_connector_destroy(struct drm_connector *connector)
 {
 	struct mga2_vport *vp = drm_connector_to_mga2_vport(connector);
+	if (vp->timings)
+		display_timings_release(vp->timings);
 	if (vp->panel)
 		drm_panel_detach(vp->panel);
 	mga2_i2c_destroy(vp->ddci2c);
@@ -145,7 +185,9 @@ int mga2_common_connector_init(struct drm_device *drm,
 	ret = drm_of_find_panel_or_bridge(drm->dev->of_node, 0, 0,
 					  &vp->panel, NULL);
 	if (ret && connector_type == DRM_MODE_CONNECTOR_LVDS)
-		DRM_INFO("No panel or bridge found (%d)...\n", ret);
+		DRM_DEBUG("No panel or bridge found (%d)...\n", ret);
+	if (vp->panel)
+		vp->timings = of_get_display_timings(vp->panel->dev->of_node);
 
 	drm_encoder_helper_add(&vp->encoder,
 			       &mga2_vport_enc_helper_funcs);

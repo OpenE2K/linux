@@ -21,7 +21,7 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-static long LT_CLOCK_RATE = 10000000;
+long lt_clock_rate = 10000000;
 
 lt_regs_t *lt_regs = NULL;
 
@@ -120,12 +120,13 @@ get_lt_timer(void)
  * and programmed IOAPIC pin to receive interrupt on edge from 0 to 1
  */
 
+#define LT_LATCH ((lt_clock_rate + HZ/2) / HZ)	/* For divider */
 static int
 lt_set_periodic(struct clock_event_device *evt)
 {
 	DebugLT("started\n");
 	/* counter start value is from 1 to limit, so +1 */
-	writel(LT_WRITE_COUNTER_VALUE(LATCH / 2 + 1), &lt_regs->counter_limit);
+	writel(LT_WRITE_COUNTER_VALUE(LT_LATCH / 2 + 1), &lt_regs->counter_limit);
 	writel(LT_INVERT_COUNTER_CNTR_LAUNCH, &lt_regs->counter_cntr);
 	return 0;
 }
@@ -171,12 +172,12 @@ void __init setup_lt_timer(void)
 
 	if (is_prototype()) {
 		if (IS_ENABLED(CONFIG_E2K))
-			LT_CLOCK_RATE = 500000;
+			lt_clock_rate = 500000;
 	}
 
 	/* cpu_possible_mask() ? */
 	lt_ce.cpumask = cpumask_of(smp_processor_id());
-	lt_ce.mult = div_sc(LT_CLOCK_RATE, NSEC_PER_SEC, lt_ce.shift);
+	lt_ce.mult = div_sc(lt_clock_rate, NSEC_PER_SEC, lt_ce.shift);
 	lt_ce.max_delta_ns = clockevent_delta2ns(0xF423F, &lt_ce);
 	lt_ce.min_delta_ns = clockevent_delta2ns(0xF, &lt_ce);
 
@@ -237,7 +238,7 @@ int __init init_lt_clocksource(void)
 		goto out;
 	}
 
-	ret = clocksource_register_hz(&lt_cs, LT_CLOCK_RATE);
+	ret = clocksource_register_hz(&lt_cs, lt_clock_rate);
 	if (ret != 0) {
 		pr_err("%s(): clocksource registration failed, error %d\n",
 			__func__, ret);

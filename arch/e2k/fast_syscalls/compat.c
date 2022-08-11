@@ -25,7 +25,7 @@
 #define	ttable_entry1_sigprocmask(how, nset, oset)		\
 		goto_ttable_entry1_args4(__NR_sigprocmask, how, nset, oset)
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 int compat_fast_sys_clock_gettime(const clockid_t which_clock,
 		struct compat_timespec __user *__restrict tp)
 {
@@ -33,7 +33,7 @@ int compat_fast_sys_clock_gettime(const clockid_t which_clock,
 	struct timespec kts;
 	int ret;
 
-	prefetchw(&fsys_data);
+	prefetch_nospec(&fsys_data);
 
 #ifdef	CONFIG_KVM_HOST_MODE
 	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
@@ -55,7 +55,7 @@ int compat_fast_sys_clock_gettime(const clockid_t which_clock,
 	return ret;
 }
 
-notrace __section(.entry_handlers)
+notrace __section(".entry.text")
 int compat_fast_sys_gettimeofday(struct compat_timeval __user *__restrict tv,
 		struct timezone __user *__restrict tz)
 {
@@ -63,7 +63,7 @@ int compat_fast_sys_gettimeofday(struct compat_timeval __user *__restrict tv,
 	struct timeval ktv;
 	int ret;
 
-	prefetchw(&fsys_data);
+	prefetch_nospec(&fsys_data);
 
 #ifdef	CONFIG_KVM_HOST_MODE
 	if (unlikely(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
@@ -99,7 +99,7 @@ int compat_fast_sys_gettimeofday(struct compat_timeval __user *__restrict tv,
 #if _NSIG != 64
 # error We read u64 value here...
 #endif
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int compat_fast_sys_siggetmask(u32 __user *oset, size_t sigsetsize)
 {
 	struct thread_info *const ti = READ_CURRENT_REG();
@@ -135,7 +135,7 @@ int compat_fast_sys_siggetmask(u32 __user *oset, size_t sigsetsize)
 #if _NSIG != 64
 # error We read u64 value here...
 #endif
-notrace __interrupt __section(.entry_handlers)
+notrace __interrupt __section(".entry.text")
 int compat_fast_sys_getcontext(struct ucontext_32 __user *ucp,
 		size_t sigsetsize)
 {

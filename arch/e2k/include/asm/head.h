@@ -267,40 +267,4 @@
  */
 #define	E2K_KERNEL_CONTEXT		0x000
 
-/*
- * CPU 'WAIT' operation fields structure
- */
-#define	E2K_WAIT_OP_MA_C_MASK	0x20	/* wait for all previous memory */
-					/* access operatons complete */
-#define	E2K_WAIT_OP_FL_C_MASK	0x10	/* wait for all previous flush */
-					/* cache operatons complete */
-#define	E2K_WAIT_OP_LD_C_MASK	0x08	/* wait for all previous load */
-					/* operatons complete */
-#define	E2K_WAIT_OP_ST_C_MASK	0x04	/* wait for all previous store */
-					/* operatons complete */
-#define	E2K_WAIT_OP_ALL_E_MASK	0x02	/* wait for all previous operatons */
-					/* issue all possible exceptions */
-#define	E2K_WAIT_OP_ALL_C_MASK	0x01	/* wait for all previous operatons */
-					/* complete */
-
-/*
- * IMPORTANT NOTE!!!
- * Do not add 'sas' and 'sal' here, as they are modifiers
- * for st_c/ld_c which make them _less_ restrictive.
- */
-#define	E2K_WAIT_OP_ALL_MASK	(E2K_WAIT_OP_MA_C_MASK |	\
-				E2K_WAIT_OP_FL_C_MASK |		\
-				E2K_WAIT_OP_LD_C_MASK |		\
-				E2K_WAIT_OP_ST_C_MASK |		\
-				E2K_WAIT_OP_ALL_C_MASK |	\
-				E2K_WAIT_OP_ALL_E_MASK)
-
-#define	E2K_WAIT_MA		E2K_WAIT(E2K_WAIT_OP_MA_C_MASK)
-#define	E2K_WAIT_FLUSH		E2K_WAIT(E2K_WAIT_OP_FL_C_MASK)
-#define	E2K_WAIT_LD		E2K_WAIT(E2K_WAIT_OP_LD_C_MASK)
-#define	E2K_WAIT_ST		E2K_WAIT(E2K_WAIT_OP_ST_C_MASK)
-#define	E2K_WAIT_ALL_OP		E2K_WAIT(E2K_WAIT_OP_ALL_C_MASK)
-#define	E2K_WAIT_ALL_EX		E2K_WAIT(E2K_WAIT_OP_ALL_E_MASK)
-#define	E2K_WAIT_ALL		E2K_WAIT(E2K_WAIT_OP_ALL_MASK)
-
 #endif /* !(_E2K_HEAD_H) */

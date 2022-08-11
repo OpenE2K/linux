@@ -20,12 +20,6 @@ pv_set_pte_at(struct mm_struct *mm, unsigned long addr,
 	pv_write_pte_at(mm, addr, ptep, pteval, false, false);
 }
 static inline void
-pv_set_pte_to_move_at(struct mm_struct *mm, unsigned long addr,
-			pte_t *ptep, pte_t pteval)
-{
-	pv_write_pte_at(mm, addr, ptep, pteval, false, true);
-}
-static inline void
 pv_validate_pte_at(struct mm_struct *mm, unsigned long addr,
 			pte_t *ptep, pte_t pteval)
 {
@@ -107,16 +101,6 @@ static inline pte_t pv_ptep_get_and_clear(struct mm_struct *mm,
 {
 	return pv_mmu_ops.ptep_get_and_clear(mm, addr, ptep, false);
 }
-static inline pte_t pv_ptep_get_and_clear_to_move(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-	return pv_mmu_ops.ptep_get_and_clear(mm, addr, ptep, true);
-}
-static inline pte_t pv_ptep_get_and_clear_as_valid(struct mm_struct *mm,
-					unsigned long addr, pte_t *ptep)
-{
-	return pv_mmu_ops.ptep_get_and_clear_as_valid(mm, addr, ptep);
-}
 static inline void pv_ptep_wrprotect_atomic(struct mm_struct *mm,
 						e2k_addr_t addr, pte_t *ptep)
 {
@@ -140,12 +124,6 @@ set_pte_at(struct mm_struct *mm, unsigned long addr,
 			pte_t *ptep, pte_t pteval)
 {
 	pv_set_pte_at(mm, addr, ptep, pteval);
-}
-static inline void
-set_pte_to_move_at(struct mm_struct *mm, unsigned long addr,
-			pte_t *ptep, pte_t pteval)
-{
-	pv_set_pte_to_move_at(mm, addr, ptep, pteval);
 }
 static inline void
 validate_pte_at(struct mm_struct *mm, unsigned long addr,
@@ -214,16 +192,6 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 				pte_t *ptep)
 {
 	return pv_ptep_get_and_clear(mm, addr, ptep);
-}
-static inline pte_t ptep_get_and_clear_to_move(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-	return pv_ptep_get_and_clear_to_move(mm, addr, ptep);
-}
-static inline pte_t ptep_get_and_clear_as_valid(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-	return pv_ptep_get_and_clear_as_valid(mm, addr, ptep);
 }
 static inline void ptep_wrprotect_atomic(struct mm_struct *mm,
 						e2k_addr_t addr, pte_t *ptep)

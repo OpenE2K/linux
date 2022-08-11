@@ -1864,7 +1864,7 @@ static const struct sdhci_pci_fixes sdhci_amd = {
 };
 
 static const struct pci_device_id pci_ids[] = {
-#ifdef CONFIG_MCST
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
 	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_IDE_SDHCI)},
 #endif
 	SDHCI_PCI_DEVICE(RICOH, R5C822,  ricoh),
@@ -2298,8 +2298,10 @@ static int sdhci_pci_probe(struct pci_dev *pdev,
 	BUG_ON(pdev == NULL);
 	BUG_ON(ent == NULL);
 
-#ifdef CONFIG_MCST
-	if (pdev && !(pci_resource_flags(pdev, 5) & IORESOURCE_MEM))
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+		pdev->device == PCI_DEVICE_ID_MCST_IDE_SDHCI &&
+		!(pci_resource_flags(pdev, 5) & IORESOURCE_MEM))
 		/*device is configured as l_ide */
 		return -ENODEV;
 #endif
@@ -2307,7 +2309,7 @@ static int sdhci_pci_probe(struct pci_dev *pdev,
 	dev_info(&pdev->dev, "SDHCI controller found [%04x:%04x] (rev %x)\n",
 		 (int)pdev->vendor, (int)pdev->device, (int)pdev->revision);
 
-#ifdef CONFIG_MCST
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
 	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
 		pdev->device == PCI_DEVICE_ID_MCST_IDE_SDHCI) {
 		first_bar = 5;
@@ -2335,7 +2337,7 @@ static int sdhci_pci_probe(struct pci_dev *pdev,
 		dev_err(&pdev->dev, "Invalid first BAR. Aborting.\n");
 		return -ENODEV;
 	}
-#ifdef CONFIG_MCST
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
 	}
 #endif
 

@@ -404,6 +404,8 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 
 			haddr_src = (void *)hva_src;
 			if (unlikely(to_src < 0)) {
+				int ret;
+
 				/*
 				 * Current src address crosses the page
 				 * boundaries and 'tail' bytes at the ending
@@ -412,7 +414,8 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 				 * begining of the next page
 				 */
 				KVM_BUG_ON(to_dst < off);
-				if (copy_in_user(haddr_dst, haddr_src, off))
+				ret = copy_in_user(haddr_dst, haddr_src, off);
+				if (ret)
 					return -EFAULT;
 				DebugCOPY("copy %d page off bytes from %px "
 					"to %px\n",
@@ -448,6 +451,8 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 		}
 
 		if (unlikely(to_src < ALIGN && tail != 0)) {
+			int ret;
+
 			/*
 			 * Current src address crosses the page boundaries
 			 * and the remaining' tail' bytes at the ending of the
@@ -455,7 +460,8 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 			 */
 			KVM_BUG_ON(to_src != 0);
 			KVM_BUG_ON(to_dst < tail);
-			if (copy_in_user(haddr_dst, haddr_src, tail))
+			ret = copy_in_user(haddr_dst, haddr_src, tail);
+			if (ret)
 				return -EFAULT;
 			DebugCOPY("copy %d page tail bytes from %px to %px\n",
 				tail, haddr_src, haddr_dst);
@@ -499,12 +505,21 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 			if (!access_ok(haddr_dst, towrite) ||
 					!access_ok(haddr_src, towrite))
 				return -EFAULT;
+
+			if (trace_host_copy_hva_area_enabled())
+				trace_host_copy_hva_area(haddr_dst, haddr_src,
+							 towrite);
+
 			SET_USR_PFAULT("$.recovery_memcpy_fault");
 			memcpy_ret = recovery_memcpy_8(haddr_dst, haddr_src,
 					towrite, strd_opcode, ldrd_opcode,
 					prefetch);
 			if (RESTORE_USR_PFAULT)
 				return -EFAULT;
+			if (trace_host_hva_area_line_enabled()) {
+				trace_host_hva_area((u64 *)haddr_src, memcpy_ret);
+				trace_host_hva_area((u64 *)haddr_dst, memcpy_ret);
+			}
 			if (memcpy_ret < towrite) {
 				pr_err("%s(): could not copy data to guest "
 					"virt addr %px host addr %px, from "
@@ -587,7 +602,7 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 	/* copy not quad aligned head of transfered data */
 	while (head) {
 		hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
-						true, &exception);
+						!to_host, &exception);
 		if (kvm_is_error_hva(hva)) {
 			DebugHGCOPY("failed to find GPA for dst %lx GVA, "
 				"inject page fault to guest\n", guest);
@@ -607,10 +622,11 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 
 		DebugHGCOPY("copy head from %px to %px, size 0x%x\n",
 				src_addr, dst_addr, head_len);
-		if (to_host)
+		if (to_host) {
 			ret = copy_from_user(dst_addr, src_addr, head_len);
-		else
+		} else {
 			ret = copy_to_user(dst_addr, src_addr, head_len);
+		}
 		if (ret) {
 			pr_err("%s(): could not copy 0x%x bytes from %px to %px, not copied 0x%x bytes\n",
 				__func__, head_len, src_addr, dst_addr, ret);
@@ -644,7 +660,7 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 
 		if (hva_len == 0) {
 			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
-							true, &exception);
+							!to_host, &exception);
 			if (kvm_is_error_hva(hva)) {
 				DebugHGCOPY("failed to find GPA for dst %lx "
 					"GVA, inject page fault to guest\n",
@@ -704,7 +720,7 @@ quad_tail_copy:
 		do {
 			if (hva_len == 0) {
 				hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
-							true, &exception);
+							!to_host, &exception);
 				if (kvm_is_error_hva(hva)) {
 					DebugHGCOPY("failed to find GPA for "
 						"dst %lx GVA, inject page "
@@ -726,10 +742,11 @@ quad_tail_copy:
 			tail_len = min(quad_tail, hva_len);
 			DebugHGCOPY("copy quad tail from %px to %px, size 0x%x\n",
 				src_addr, dst_addr, tail_len);
-			if (to_host)
+			if (to_host) {
 				ret = copy_from_user(dst_addr, src_addr, tail_len);
-			else
+			} else {
 				ret = copy_to_user(dst_addr, src_addr, tail_len);
+			}
 			if (ret) {
 				pr_err("%s(): could not copy 0x%x bytes from %px to %px, not copied 0x%x bytes\n",
 					__func__, tail_len, src_addr, dst_addr, ret);
@@ -757,7 +774,7 @@ tail_copy:
 	do {
 		if (hva_len == 0) {
 			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
-						true, &exception);
+						!to_host, &exception);
 			if (kvm_is_error_hva(hva)) {
 				DebugHGCOPY("failed to find GPA for dst %lx "
 					"GVA, inject page fault to guest\n",
@@ -778,10 +795,11 @@ tail_copy:
 		tail_len = min(tail, hva_len);
 		DebugHGCOPY("copy tail from %px to %px, size 0x%x\n",
 			src_addr, dst_addr, tail_len);
-		if (to_host)
+		if (to_host) {
 			ret = copy_from_user(dst_addr, src_addr, tail_len);
-		else
+		} else {
 			ret = copy_to_user(dst_addr, src_addr, tail_len);
+		}
 		if (ret) {
 			pr_err("%s(): could not copy 0x%x bytes from %px to %px, not copied 0x%x bytes\n",
 				__func__, tail_len, src_addr, dst_addr, ret);
@@ -854,6 +872,7 @@ unsigned long kvm_copy_to_user_with_tags(void *__user to,
 
 	while (n) {
 		size_t left, copy_len, hva_off;
+		__user void *dst;
 
 		hva_t to_hva = kvm_vcpu_gva_to_hva(vcpu, (__force gva_t) to,
 						true, &exception);
@@ -874,7 +893,8 @@ unsigned long kvm_copy_to_user_with_tags(void *__user to,
 		/* We are working with guest kernel's stacks which are
 		 * located below usual hardware stacks area (USER_ADDR_MAX),
 		 * thus there is no need to bypass access_ok() check. */
-		left = copy_to_user_with_tags((__user void *) to_hva, from, copy_len);
+		dst = (__user void *) to_hva;
+		left = copy_to_user_with_tags(dst, from, copy_len);
 		if (unlikely(left)) {
 			pr_err("%s(): error: copied 0x%lx/0x%lx bytes from %px to %px\n",
 					__func__, copy_len - left, copy_len, from, to);

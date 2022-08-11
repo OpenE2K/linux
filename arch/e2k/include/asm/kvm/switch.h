@@ -11,6 +11,7 @@
 #include <asm/regs_state.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
+#include <asm/pgd.h>
 
 #define	DEBUG_UPSR_FP_DISABLE
 
@@ -101,8 +102,7 @@ native_guest_syscall_enter(struct pt_regs *regs)
 #ifdef	CONFIG_VIRTUALIZATION
 
 /*
- * For interceptions just switch actual registers with saved values
- * in 'sw_ctxt'.
+ * For interceptions just switch actual registers with saved values in 'sw_ctxt'.
  *
  * For hypercalls:
  * 1) Enter hypercall.
@@ -128,8 +128,7 @@ static inline void kvm_switch_stack_regs(struct kvm_sw_cpu_context *sw_ctxt,
 		AW(sbr) = NATIVE_NV_READ_SBR_REG_VALUE();
 	}
 
-	NATIVE_NV_WRITE_USBR_USD_REG(sw_ctxt->sbr,
-			sw_ctxt->usd_hi, sw_ctxt->usd_lo);
+	NATIVE_NV_WRITE_USBR_USD_REG(sw_ctxt->sbr, sw_ctxt->usd_hi, sw_ctxt->usd_lo);
 
 	if (ctxt_save) {
 		KVM_BUG_ON(sw_ctxt->saved.valid);
@@ -225,14 +224,27 @@ static inline void kvm_switch_mmu_regs(struct kvm_sw_cpu_context *sw_ctxt,
 static inline void kvm_switch_to_guest_mmu_pid(struct kvm_vcpu *vcpu)
 {
 	mm_context_t *gmm_context;
+	unsigned long mask;
 
 	gmm_context = pv_vcpu_get_gmm_context(vcpu);
-	reload_mmu_pid(gmm_context, smp_processor_id());
+	mask = get_mmu_pid(gmm_context, smp_processor_id());
+	reload_context_mask(mask);
+}
+
+static inline unsigned long kvm_get_guest_mmu_pid(struct kvm_vcpu *vcpu)
+{
+	mm_context_t *gmm_context;
+
+	gmm_context = pv_vcpu_get_gmm_context(vcpu);
+	return gmm_context->cpumsk[smp_processor_id()];
 }
 
 static inline void kvm_switch_to_host_mmu_pid(struct mm_struct *mm)
 {
-	reload_context(mm, smp_processor_id());
+	unsigned long mask;
+
+	mask = get_mmu_context(mm, smp_processor_id());
+	reload_context_mask(mask);
 }
 
 static inline void kvm_switch_debug_regs(struct kvm_sw_cpu_context *sw_ctxt,
@@ -479,6 +491,8 @@ static inline void host_guest_enter(struct thread_info *ti,
 	if (flags & DEBUG_REGS_SWITCH)
 		kvm_switch_debug_regs(sw_ctxt, true);
 
+	KVM_BUG_ON(vcpu->is_hv && !NATIVE_READ_MMU_US_CL_D());
+
 	/* Switch data stack after all function calls */
 	if (flags & USD_CONTEXT_SWITCH) {
 		if (!(flags & FROM_HYPERCALL_SWITCH) || !vcpu->is_hv) {
@@ -506,6 +520,8 @@ static inline void host_guest_enter_light(struct thread_info *ti,
 
 	kvm_switch_cu_regs(sw_ctxt);
 
+	KVM_BUG_ON(vcpu->is_hv && !NATIVE_READ_MMU_US_CL_D());
+
 	/* Switch data stack after all function calls */
 	if (!from_sdisp) {
 		if (!vcpu->is_hv) {
@@ -513,6 +529,7 @@ static inline void host_guest_enter_light(struct thread_info *ti,
 		} else {
 			/* restore saved source pointers of host stack */
 			kvm_switch_stack_regs(sw_ctxt, false, true);
+			kvm_switch_clw_regs(sw_ctxt, true);
 		}
 	}
 }
@@ -539,6 +556,8 @@ static inline void host_guest_exit(struct thread_info *ti,
 			kvm_switch_stack_regs(sw_ctxt, true, false);
 		}
 	}
+
+	KVM_BUG_ON(vcpu->is_hv && !NATIVE_READ_MMU_US_CL_D());
 
 	if (flags & FROM_HYPERCALL_SWITCH) {
 		/*
@@ -649,6 +668,8 @@ static inline void host_guest_exit_light(struct thread_info *ti,
 	KVM_BUG_ON(sw_ctxt->in_hypercall);
 	sw_ctxt->in_hypercall = true;
 
+	KVM_BUG_ON(vcpu->is_hv && !NATIVE_READ_MMU_US_CL_D());
+
 	HOST_SAVE_KERNEL_GREGS_AS_LIGHT(ti);
 	ONLY_SET_KERNEL_GREGS(ti);
 
@@ -723,6 +744,20 @@ pv_vcpu_switch_guest_host_context(struct kvm_vcpu *vcpu,
 {
 	pv_vcpu_save_host_context(vcpu, cur_gti);
 	pv_vcpu_restore_host_context(vcpu, next_gti);
+}
+
+static inline void
+pv_vcpu_switch_kernel_pgd_range(struct kvm_vcpu *vcpu, int cpu)
+{
+	hpa_t vcpu_root;
+
+	if (is_sep_virt_spaces(vcpu)) {
+		vcpu_root = kvm_get_space_type_spt_os_root(vcpu);
+	} else {
+		vcpu_root = kvm_get_space_type_spt_u_root(vcpu);
+	}
+
+	copy_kernel_pgd_range(__va(vcpu_root), cpu_kernel_root_pt);
 }
 
 static inline void pv_vcpu_switch_host_context(struct kvm_vcpu *vcpu)

@@ -537,14 +537,14 @@ do { \
  \
 	/* prefetch data to restore */ \
 	if (AS(aasr).stb) \
-		prefetchw_range(aau->aastis, sizeof(aau->aastis) + \
+		prefetch_nospec_range(aau->aastis, sizeof(aau->aastis) + \
 					     sizeof(aau->aasti_tags)); \
 	if (AS(aasr).iab) \
-		prefetchw_range(aau->aainds, sizeof(aau->aainds) + \
+		prefetch_nospec_range(aau->aainds, sizeof(aau->aainds) + \
 				sizeof(aau->aaind_tags) + sizeof(aau->aaincrs) + \
 				sizeof(aau->aaincr_tags) + sizeof(aau->aads)); \
 	if (AAU_STOPPED(aasr)) \
-		prefetchw_range(aau->aaldi, sizeof(aau->aaldi)); \
+		prefetch_nospec_range(aau->aaldi, sizeof(aau->aaldi)); \
  \
 	/* Make sure prefetches are issued */ \
 	barrier(); \

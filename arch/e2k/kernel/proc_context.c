@@ -8,7 +8,7 @@
  * as entries.
  *
  * 2. Contexts are a property of a process so the hash table is located
- * in 'mm_struct' structure.
+ * in 'mm_struct' structure (mm->context.hw_contexts).
  *
  * 3. There can be multiple contexts in userspace (think "struct ucontext")
  * associated with the same hardware stack (think "struct hw_context"),
@@ -17,8 +17,8 @@
  *
  * Forked child must be able to just copy kernel contexts without modifying
  * userspace. Thus using kernel pointers as a key is out of question.
- * So we will use whatever ends up in "pt_regs->stacks.sbr" with one caveat:
- * we skip altstack entries entirely and find the first sbr.
+ * So we will use whatever ends up in "pt_regs->stacks.sbr" as a key with
+ * one caveat: we skip altstack entries entirely and find the first sbr.
  *
  * 4. Stacks that are in use have hw_context->state set to prevent them
  * from being freed under our feet. This state is checked to make sure
@@ -29,16 +29,27 @@
  * apply.
  *
  * When we switch to a context that is on another hardware stack, we
- * save current context and then switch all registers.
+ * first save current context and switch all registers, then check if
+ * stack unwinding is necessary (and do a longjmp if it is).
  *
  * 6. When context created by makecontext() exits it should return
  * to the kernel trampoline which will switch to kernel data stack
  * and then switch to the context mentioned in uc_link or call do_exit().
  *
- * 7. The original context is not in the hash table, but we have to put
- * it there on the first switch.
+ * 7. The original context from main() is not in the hash table, but we
+ * have to put it there on the first switch.
  *
- * 8. Synchronization is based on Documentation/RCU/rcuref.txt, pattern C,
+ * 8. There are 2 ways defined in POSIX to save a context: getcontext()
+ * and swapcontext().  So on e2k user application calls into glibc which
+ * in turn makes a system call into kernel, and %cr registers contain
+ * information about glibc's frame and not the application's one.
+ *
+ * To work around this:
+ *  - sys_swapcontext will save %cr registers from the previous user's frame;
+ *  - fast_sys_getcontext does not save %cr registers, instead it is done in
+ *    glibc (because there is no performant way to do so in a fast syscall).
+ *
+ * 9. Synchronization is based on Documentation/RCU/rcuref.txt, pattern C,
  * with a twist: we need to mark current context "busy" so that no other
  * thread will use it simultaneously with current thread.
 
@@ -122,7 +133,7 @@ release_referenced() {
 #include <linux/context_tracking.h>
 
 #include <asm/cpu.h>
-#include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/getsp_adj.h>
 #include <asm/mmu_context.h>
 #include <asm/mmu.h>
@@ -196,7 +207,7 @@ static const struct rhashtable_params hash_params = {
 };
 
 
-notrace noinline __interrupt __section(.entry_handlers)
+notrace noinline __interrupt __section(".entry.text")
 void makecontext_trampoline_continue()
 {
 	if (TASK_IS_PROTECTED(current))
@@ -274,7 +285,7 @@ static struct hw_context *alloc_hw_context(bool main_context, size_t u_stk_size,
 				 get_hw_pcs_user_size(hw_stacks)))
 		goto free_context;
 
-	DebugCTX("allocated ctx %lx with key=0x%llx and user stacks p: %px, pc: %px\n",
+	DebugCTX("allocated ctx %lx with key=0x%lx and user stacks p: %px, pc: %px\n",
 		ctx, key, GET_PS_BASE(hw_stacks), GET_PCS_BASE(hw_stacks));
 
 	return ctx;
@@ -616,6 +627,10 @@ static int set_user_ap(void *ptr, unsigned long addr, size_t len)
 	return 0;
 }
 
+__always_inline /* For performance since some arguments are constants */
+static long do_swapcontext(void __user *oucp, const void __user *ucp,
+		bool save_prev_ctx, int format);
+
 long hw_context_lookup_pcsp_and_switch(e2k_pcsp_lo_t jmp_pcsp_lo,
 		e2k_usd_lo_t jmp_usd_lo)
 {
@@ -717,6 +732,7 @@ struct longjmp_regs {
 	e2k_pcsp_hi_t pcsp_hi;
 };
 
+
 /**
  * makecontext_prepare_user_stacks - set up all stacks for a user function execution
  * @ctx: hardware context
@@ -738,12 +754,12 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 {
 	struct pt_regs *regs = current_pt_regs();
 	e2k_stacks_t stacks;
-	e2k_mem_crs_t __user *cs_frame;
-	e2k_mem_crs_t crs;
+	e2k_mem_crs_t __user *cs_frames;
+	e2k_mem_crs_t crs_trampoline, crs_user;
 	void __user *ps_frame;
 	u64 args_registers_size, args_stack_size, func_frame_size;
 	unsigned long ts_flag, func_frame_ptr;
-	int ret, i, first_user_cui = 1;
+	int ret, i;
 
 	if (ALIGN(args_size, 16) + (protected ? 16 : 0) > u_stk_size)
 		return -EINVAL;
@@ -769,15 +785,15 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	/*
 	 * And this is space for user function and makecontext_trampoline()
 	 */
-	AS(stacks.psp_hi).ind = 8 * EXT_4_NR_SZ;
+	AS(stacks.psp_hi).ind = (protected ? 16 : 8) * EXT_4_NR_SZ;
 
-	ps_frame = GET_PS_BASE(&ctx->ti.u_hw_stack) + 4 * EXT_4_NR_SZ;
+	ps_frame = GET_PS_BASE(&ctx->ti.u_hw_stack) + (protected ? 8 : 4) * EXT_4_NR_SZ;
 
 	/*
 	 * Calculate user function frame's parameters.
 	 */
 	if (protected) {
-		args_registers_size = min(args_size, (u64) 64 - 16);
+		args_registers_size = min(args_size, (u64) 128 - 16);
 		/* Data stack must be 16-bytes aligned. */
 		func_frame_size = ALIGN(args_size, 16) + 16;
 	} else {
@@ -825,7 +841,7 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 		/*
 		 * Put descriptor of user function frame in %qr0.
 		 */
-		if (set_user_ap(ps_frame, func_frame_ptr, args_size))
+		if (set_user_ap(ps_frame, func_frame_ptr, args_size + 16))
 			return -EFAULT;
 		ps_frame += EXT_4_NR_SZ;
 	} else {
@@ -930,7 +946,8 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	if (args_stack_size) {
 		DebugCTX("Copying stack arguments to 0x%lx\n",
 				(void *) func_frame_ptr + 64);
-		if (copy_in_user_with_tags((void *) func_frame_ptr + 64,
+		if (copy_in_user_with_tags(
+				(void *) func_frame_ptr + (protected ? 128 : 64),
 				args + args_registers_size, args_stack_size))
 			return -EFAULT;
 	}
@@ -951,36 +968,34 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	ctx->ti.signal_stack.used = 0;
 
 	/*
-	 * Set chain stack for the trampoline
+	 * Set chain stack for the trampoline and user function
 	 */
-	cs_frame = (e2k_mem_crs_t __user *)
-			(GET_PCS_BASE(&ctx->ti.u_hw_stack) + 2 * SZ_OF_CR);
+	cs_frames = (e2k_mem_crs_t __user *) GET_PCS_BASE(&ctx->ti.u_hw_stack);
 
-	memset(&crs, 0, sizeof(crs));
-
-	AS(crs.cr0_lo).pf = -1ULL;
-	AS(crs.cr0_hi).ip = (u64) makecontext_trampoline >> 3;
-	AS(crs.cr1_lo).psr = AW(E2K_KERNEL_PSR_DISABLED);
-	AS(crs.cr1_lo).cui = KERNEL_CODES_INDEX;
-	if (machine.native_iset_ver < E2K_ISET_V6)
-		AS(crs.cr1_lo).ic = 1;
-	/* makecontext_trampoline()->do_longjmp()
-	 * expects parameter area size 4 */
-	AS(crs.cr1_lo).wbs = 4;
-	AS(crs.cr1_lo).wpsz = 4;
-	AS(crs.cr1_hi).ussz = KERNEL_C_STACK_SIZE / 16;
+	/* makecontext_trampoline()->do_longjmp() expects parameter area
+	 * size (cr1_lo.wbs/cr1_lo.wpsz) according to the C ABI: 4 or 8. */
+	ret = chain_stack_frame_init(&crs_trampoline, protected ?
+			makecontext_trampoline_protected : makecontext_trampoline,
+			KERNEL_C_STACK_SIZE, E2K_KERNEL_PSR_DISABLED,
+			protected ? 8 : 4, protected ? 8 : 4, false);
+	ret = ret ?: chain_stack_frame_init(&crs_user, func, AS(stacks.usd_hi).size,
+			E2K_USER_INITIAL_PSR, protected ? 8 : 4, protected ? 8 : 4, true);
+	if (ret)
+		return ret;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = __copy_to_user(cs_frame, &crs, sizeof(crs));
-	--cs_frame;
-	ret = (ret) ?: __clear_user(cs_frame, sizeof(*cs_frame));
+	ret = __clear_user(&cs_frames[1], SZ_OF_CR);
+	ret = ret ?: __copy_to_user(&cs_frames[2], &crs_trampoline, SZ_OF_CR);
+	ret = ret ?: __copy_to_user(&cs_frames[3], &crs_user, SZ_OF_CR);
 	clear_ts_flag(ts_flag);
 	if (ret)
 		return -EFAULT;
 
+	ctx->regs.crs = crs_user;
+
 	/* do_swapcontext() loads values from ctx->prev_ctx,
 	 * this way it's faster. */
-	ctx->prev_crs = crs;
+	ctx->prev_crs = crs_trampoline;
 
 	/*
 	 * Prepare new pt_regs
@@ -990,23 +1005,14 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 
 	ctx->regs.stacks = stacks;
 
-	/* Set chain stack for the user function */
-	memset(&ctx->regs.crs, 0, sizeof(crs));
-	AS(ctx->regs.crs.cr0_lo).pf = -1ULL;
-	AS(ctx->regs.crs.cr0_hi).ip = (unsigned long) func >> 3;
-	AS(ctx->regs.crs.cr1_lo).psr = AW(E2K_USER_INITIAL_PSR);
-	AS(ctx->regs.crs.cr1_lo).cui = first_user_cui;
-	AS(ctx->regs.crs.cr1_lo).wbs = 4;
-	AS(ctx->regs.crs.cr1_hi).ussz = AS(stacks.usd_hi).size / 16;
-
 	/*
 	 * Save parameters for jumping through sys_setcontext()->do_longjmp()
 	 */
 	user_regs->pcsp_lo = stacks.pcsp_lo;
 	user_regs->pcsp_hi = stacks.pcsp_hi;
-	user_regs->cr0_hi = ctx->regs.crs.cr0_hi;
-	user_regs->cr1_lo = ctx->regs.crs.cr1_lo;
-	user_regs->cr1_hi = ctx->regs.crs.cr1_hi;
+	user_regs->cr0_hi = ctx->prev_crs.cr0_hi;
+	user_regs->cr1_lo = ctx->prev_crs.cr1_lo;
+	user_regs->cr1_hi = ctx->prev_crs.cr1_hi;
 
 	return 0;
 }
@@ -1076,7 +1082,13 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 		ret |= __put_user(AW(user_regs->cr1_lo), &ucp_32->uc_mcontext.cr1_lo);
 		ret |= __put_user(AW(user_regs->cr1_hi), &ucp_32->uc_mcontext.cr1_hi);
 		ret |= __put_user(AW(user_regs->pcsp_lo), &ucp_32->uc_mcontext.pcsp_lo);
-		ret |= __put_user(AW(user_regs->pcsp_hi), &ucp_32->uc_mcontext.pcsp_hi);
+		/* Nasty hack: this is a new context so there is no point in
+		 * calling do_swapcontext() -> do_longjmp().  So we manually
+		 * subtract SZ_OF_CR here to avoid the call; it would've been
+		 * done otherwise because the newly created context does not
+		 * have glibc's swapcontext() function in it and the check
+		 * before the call would return false positive. */
+		ret |= __put_user(AW(user_regs->pcsp_hi) - SZ_OF_CR, &ucp_32->uc_mcontext.pcsp_hi);
 		ret |= __put_user(AW(fpcr), &ucp_32->uc_extra.fpcr);
 		ret |= __put_user(AW(fpsr), &ucp_32->uc_extra.fpsr);
 		ret |= __put_user(AW(pfpfr), &ucp_32->uc_extra.pfpfr);
@@ -1087,7 +1099,8 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 		ret |= __put_user(AW(user_regs->cr1_lo), &ucp_64->uc_mcontext.cr1_lo);
 		ret |= __put_user(AW(user_regs->cr1_hi), &ucp_64->uc_mcontext.cr1_hi);
 		ret |= __put_user(AW(user_regs->pcsp_lo), &ucp_64->uc_mcontext.pcsp_lo);
-		ret |= __put_user(AW(user_regs->pcsp_hi), &ucp_64->uc_mcontext.pcsp_hi);
+		/* See comment about SZ_OF_CR for 32-bit mode */
+		ret |= __put_user(AW(user_regs->pcsp_hi) - SZ_OF_CR, &ucp_64->uc_mcontext.pcsp_hi);
 		ret |= __put_user(AW(fpcr), &ucp_64->uc_extra.fpcr);
 		ret |= __put_user(AW(fpsr), &ucp_64->uc_extra.fpsr);
 		ret |= __put_user(AW(pfpfr), &ucp_64->uc_extra.pfpfr);
@@ -1098,7 +1111,8 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 		ret |= __put_user(AW(user_regs->cr1_lo), &ucp_128->uc_mcontext.cr1_lo);
 		ret |= __put_user(AW(user_regs->cr1_hi), &ucp_128->uc_mcontext.cr1_hi);
 		ret |= __put_user(AW(user_regs->pcsp_lo), &ucp_128->uc_mcontext.pcsp_lo);
-		ret |= __put_user(AW(user_regs->pcsp_hi), &ucp_128->uc_mcontext.pcsp_hi);
+		/* See comment about SZ_OF_CR for 32-bit mode */
+		ret |= __put_user(AW(user_regs->pcsp_hi) - SZ_OF_CR, &ucp_128->uc_mcontext.pcsp_hi);
 		ret |= __put_user(AW(fpcr), &ucp_128->uc_extra.fpcr);
 		ret |= __put_user(AW(fpsr), &ucp_128->uc_extra.fpsr);
 		ret |= __put_user(AW(pfpfr), &ucp_128->uc_extra.pfpfr);
@@ -1329,7 +1343,7 @@ static long do_freecontext(u64 key)
 
 	rcu_read_unlock();
 
-	DebugCTX("ctx %lx for key 0x%llx, ret %d\n", ctx, key, ret);
+	DebugCTX("ctx %lx for key 0x%llx, ret %ld\n", ctx, key, ret);
 	if (ret)
 		return ret;
 
@@ -1472,18 +1486,21 @@ static void switch_hw_contexts(struct pt_regs *__restrict regs,
 
 __always_inline
 static void save_ctx_32_bit(struct ucontext_32 __user *__restrict oucp,
-		u64 prev_key, e2k_fpcr_t fpcr, e2k_fpsr_t fpsr,
-		e2k_pfpfr_t pfpfr, sigset_t current_blocked_sigset)
+		u64 prev_key, e2k_mem_crs_t *__restrict k_crs,
+		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr,
+		sigset_t current_blocked_sigset)
 {
 	const struct pt_regs *regs = current_thread_info()->pt_regs;
 
 	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
 	oucp->uc_mcontext.sbr = prev_key;
-	oucp->uc_mcontext.cr0_hi = AW(regs->crs.cr0_hi);
-	oucp->uc_mcontext.cr1_lo = AW(regs->crs.cr1_lo);
-	oucp->uc_mcontext.cr1_hi = AW(regs->crs.cr1_hi);
+	oucp->uc_mcontext.cr0_hi = AW(k_crs->cr0_hi);
+	oucp->uc_mcontext.cr1_lo = AW(k_crs->cr1_lo);
+	oucp->uc_mcontext.cr1_hi = AW(k_crs->cr1_hi);
 	oucp->uc_mcontext.pcsp_lo = AW(regs->stacks.pcsp_lo);
-	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi);
+	/* We want stack to point to user frame that called us,
+	 * not to the glibc glue */
+	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi) - SZ_OF_CR;
 	oucp->uc_extra.fpcr = AW(fpcr);
 	oucp->uc_extra.fpsr = AW(fpsr);
 	oucp->uc_extra.pfpfr = AW(pfpfr);
@@ -1491,18 +1508,21 @@ static void save_ctx_32_bit(struct ucontext_32 __user *__restrict oucp,
 
 __always_inline
 static void save_ctx_64_bit(struct ucontext __user *__restrict oucp,
-		u64 prev_key, e2k_fpcr_t fpcr, e2k_fpsr_t fpsr,
-		e2k_pfpfr_t pfpfr, sigset_t current_blocked_sigset)
+		u64 prev_key, e2k_mem_crs_t *__restrict k_crs,
+		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr,
+		sigset_t current_blocked_sigset)
 {
 	const struct pt_regs *regs = current_thread_info()->pt_regs;
 
 	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
 	oucp->uc_mcontext.sbr = prev_key;
-	oucp->uc_mcontext.cr0_hi = AW(regs->crs.cr0_hi);
-	oucp->uc_mcontext.cr1_lo = AW(regs->crs.cr1_lo);
-	oucp->uc_mcontext.cr1_hi = AW(regs->crs.cr1_hi);
+	oucp->uc_mcontext.cr0_hi = AW(k_crs->cr0_hi);
+	oucp->uc_mcontext.cr1_lo = AW(k_crs->cr1_lo);
+	oucp->uc_mcontext.cr1_hi = AW(k_crs->cr1_hi);
 	oucp->uc_mcontext.pcsp_lo = AW(regs->stacks.pcsp_lo);
-	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi);
+	/* We want stack to point to user frame that called us,
+	 * not to the glibc glue */
+	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi) - SZ_OF_CR;
 	oucp->uc_extra.fpcr = AW(fpcr);
 	oucp->uc_extra.fpsr = AW(fpsr);
 	oucp->uc_extra.pfpfr = AW(pfpfr);
@@ -1510,18 +1530,21 @@ static void save_ctx_64_bit(struct ucontext __user *__restrict oucp,
 
 __always_inline
 static void save_ctx_128_bit(struct ucontext_prot __user *__restrict oucp,
-		u64 prev_key, e2k_fpcr_t fpcr, e2k_fpsr_t fpsr,
-		e2k_pfpfr_t pfpfr, sigset_t current_blocked_sigset)
+		u64 prev_key, e2k_mem_crs_t *__restrict k_crs,
+		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr,
+		sigset_t current_blocked_sigset)
 {
 	const struct pt_regs *regs = current_thread_info()->pt_regs;
 
 	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
 	oucp->uc_mcontext.sbr = prev_key;
-	oucp->uc_mcontext.cr0_hi = AW(regs->crs.cr0_hi);
-	oucp->uc_mcontext.cr1_lo = AW(regs->crs.cr1_lo);
-	oucp->uc_mcontext.cr1_hi = AW(regs->crs.cr1_hi);
+	oucp->uc_mcontext.cr0_hi = AW(k_crs->cr0_hi);
+	oucp->uc_mcontext.cr1_lo = AW(k_crs->cr1_lo);
+	oucp->uc_mcontext.cr1_hi = AW(k_crs->cr1_hi);
 	oucp->uc_mcontext.pcsp_lo = AW(regs->stacks.pcsp_lo);
-	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi);
+	/* We want stack to point to user frame that called us,
+	 * not to the glibc glue */
+	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi) - SZ_OF_CR;
 	oucp->uc_extra.fpcr = AW(fpcr);
 	oucp->uc_extra.fpsr = AW(fpsr);
 	oucp->uc_extra.pfpfr = AW(pfpfr);
@@ -1530,7 +1553,8 @@ static void save_ctx_128_bit(struct ucontext_prot __user *__restrict oucp,
 #if _NSIG != 64
 # error We read u64 value here...
 #endif
-inline long do_swapcontext(void __user *oucp, const void __user *ucp,
+__always_inline /* For performance since some arguments are constants */
+static long do_swapcontext(void __user *oucp, const void __user *ucp,
 		bool save_prev_ctx, int format)
 {
 	const struct ucontext_32 __user *ucp_32 = ucp;
@@ -1541,7 +1565,7 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 	struct ucontext_prot __user *oucp_128 = oucp;
 	u64 next_key, prev_key, sigset;
 	sigset_t k_sigset, current_blocked_sigset = current->blocked;
-	struct hw_context *next_ctx, *prev_ctx;
+	struct hw_context *prev_ctx;
 	mm_context_t *mm_context = &current->mm->context;
 	e2k_pcsp_lo_t pcsp_lo;
 	e2k_pcsp_hi_t pcsp_hi;
@@ -1555,6 +1579,8 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 	e2k_fpsr_t prev_fpsr = READ_FPSR_REG();
 	e2k_pfpfr_t prev_pfpfr = READ_PFPFR_REG();
 	struct pt_regs *regs = current_thread_info()->pt_regs;
+	e2k_mem_crs_t *__restrict k_crs = (e2k_mem_crs_t *__restrict)
+			AS(current_thread_info()->k_pcsp_lo).base;
 	int ret;
 
 	DebugCTX("oucp=%lx ucp=%lx started\n", oucp, ucp);
@@ -1634,7 +1660,23 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 	}
 
 	/*
-	 * 3) Save previous ucontext and load the next one.
+	 * 3) Save previous context's stack into userspace.
+	 *
+	 * This also ensures there is enough user data in the next context
+	 * to fill the bottom of kernel stack (where user data lies), and
+	 * SPILLs chain stack so that it can be saved in the next step
+	 * (see [k_crs]).
+	 */
+	ret = do_user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
+	if (unlikely(ret))
+		return ret;
+
+	if (WARN_ON_ONCE(GET_PSHTP_MEM_INDEX(regs->stacks.pshtp) ||
+			 PCSHTP_SIGN_EXTEND(regs->stacks.pcshtp) != SZ_OF_CR))
+		return -EINVAL;
+
+	/*
+	 * 4) Save previous ucontext and load the next one.
 	 */
 	TRY_USR_PFAULT {
 		if (format == CTX_32_BIT) {
@@ -1673,17 +1715,18 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 		}
 
 		if (save_prev_ctx) {
+			/* Frame at k_crs[0] was SPILLed at the previous step */
 			if (format == CTX_32_BIT) {
-				save_ctx_32_bit(oucp_32, prev_key, prev_fpcr,
-						prev_fpsr, prev_pfpfr,
+				save_ctx_32_bit(oucp_32, prev_key, k_crs,
+						prev_fpcr, prev_fpsr, prev_pfpfr,
 						current_blocked_sigset);
 			} else if (format == CTX_64_BIT) {
-				save_ctx_64_bit(oucp_64, prev_key, prev_fpcr,
-						prev_fpsr, prev_pfpfr,
+				save_ctx_64_bit(oucp_64, prev_key, k_crs,
+						prev_fpcr, prev_fpsr, prev_pfpfr,
 						current_blocked_sigset);
 			} else { /* CTX_128_BIT */
-				save_ctx_128_bit(oucp_128, prev_key, prev_fpcr,
-						prev_fpsr, prev_pfpfr,
+				save_ctx_128_bit(oucp_128, prev_key, k_crs,
+						prev_fpcr, prev_fpsr, prev_pfpfr,
 						current_blocked_sigset);
 			}
 		}
@@ -1694,38 +1737,35 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 	DebugCTX("prev_key %llx, next_key %llx\n", prev_key, next_key);
 
 	/*
-	 * 4) Do the switch
+	 * 5) Do the switch
 	 */
+	if (prev_key != next_key) {
+		struct hw_context *next_ctx;
 
-	/* Save previous context's stack into userspace.
-	 *
-	 * This also ensures there is enough user data in the next context
-	 * to fill the bottom of kernel stack (where user data lies). */
-	ret = user_hw_stacks_copy_full(&regs->stacks, regs, NULL);
-	if (unlikely(ret))
-		return ret;
+		next_ctx = hw_context_lookup_and_get(next_key, mm_context);
+		if (unlikely(IS_ERR(next_ctx)))
+			return PTR_ERR(next_ctx);
 
-	if (WARN_ON_ONCE(GET_PSHTP_MEM_INDEX(regs->stacks.pshtp) ||
-			 PCSHTP_SIGN_EXTEND(regs->stacks.pcshtp) != SZ_OF_CR))
-		return -EINVAL;
+		DebugCTX("switching from ctx %lx to ctx %lx\n", prev_ctx, next_ctx);
 
-	next_ctx = hw_context_lookup_and_get(next_key, mm_context);
-	if (unlikely(IS_ERR(next_ctx)))
-		return PTR_ERR(next_ctx);
+		switch_hw_contexts(regs, prev_ctx, next_ctx, fpcr, fpsr, pfpfr);
+		current_thread_info()->this_hw_context = next_ctx;
 
-	DebugCTX("switching from ctx %lx to ctx %lx\n", prev_ctx, next_ctx);
-
-	switch_hw_contexts(regs, prev_ctx, next_ctx, fpcr, fpsr, pfpfr);
-	current_thread_info()->this_hw_context = next_ctx;
-
-	(void) release_reference(prev_ctx, HWC_STATE_BUSY);
+		(void) release_reference(prev_ctx, HWC_STATE_BUSY);
+	}
 
 	/*
-	 * 5) Do we need to jump backwards in the new context?
+	 * 6) Do we need to jump backwards in the new context?
+	 *
+	 * Skip glibc glue by subtracting SZ_OF_CR (the same this is done
+	 * when saving context in getcontext() and for oucp in swapcontext())
 	 */
-	if (AS(regs->stacks.pcsp_lo).base + AS(regs->stacks.pcsp_hi).size !=
-			AS(pcsp_lo).base + AS(pcsp_hi).size ||
-			AW(cr0_hi) != AW(regs->crs.cr0_hi)) {
+	if (AS(regs->stacks.pcsp_lo).base + AS(regs->stacks.pcsp_hi).ind - SZ_OF_CR !=
+			AS(pcsp_lo).base + AS(pcsp_hi).ind ||
+			k_crs[0].cr0_hi.ip != cr0_hi.ip) {
+		/* Check if switch_hw_contexts() has restored FPU state already */
+		bool fpu_restored = (prev_key != next_key);
+
 		/* A hack to make do_longjmp() restore
 		 * blocked signals mask */
 		sigset |= sigmask(SIGKILL);
@@ -1733,9 +1773,10 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 		DebugCTX("calling longjmp\n");
 		/* There is no place in struct ucontext to save %wd.psize
 		 * without breaking ABI, so we assume C calling convention
-		 * value of 4 */
+		 * value of 4 (8 for protected mode). */
 		return do_longjmp(0, sigset, cr0_hi, cr1_lo, pcsp_lo, pcsp_hi,
-				AS(cr1_hi).br, 0x40, 0, 0, 0, 0);
+				AS(cr1_hi).br, format == CTX_128_BIT ? 0x80 : 0x40,
+				fpcr, fpsr, pfpfr, !fpu_restored);
 	}
 
 	k_sigset.sig[0] = sigset;
@@ -1743,6 +1784,11 @@ inline long do_swapcontext(void __user *oucp, const void __user *ucp,
 		set_current_blocked(&k_sigset);
 
 	return 0;
+}
+
+long swapcontext(const void __user *ucp, int format)
+{
+	return do_swapcontext(NULL, ucp, false, format);
 }
 
 long sys_swapcontext(struct ucontext __user *oucp,
@@ -1757,55 +1803,12 @@ long sys_swapcontext(struct ucontext __user *oucp,
 
 long sys_setcontext(const struct ucontext __user *ucp, int sigsetsize)
 {
-	int rval;
-	e2k_cr0_hi_t cr0_hi;
-	e2k_cr1_lo_t cr1_lo;
-	e2k_cr1_hi_t cr1_hi;
-	e2k_pcsp_lo_t pcsp_lo;
-	e2k_pcsp_hi_t pcsp_hi;
-	u64 sigmask, prev_key, next_key;
-	u32 fpcr, fpsr, pfpfr;
-
 	if (sigsetsize != sizeof(sigset_t))
 		return -EINVAL;
 
-	if (!access_ok(ucp, sizeof(struct ucontext)))
-		return -EFAULT;
-
-	rval = __get_user(next_key, &ucp->uc_mcontext.sbr);
-	if (rval)
-		return -EFAULT;
-
-	prev_key = context_current_key();
-	if (IS_ERR_VALUE(prev_key))
-		return prev_key;
-
-	DebugCTX("ucp=%lx current key=0x%lx next key=0x%lx\n",
+	DebugCTX("ucp=%lx current key=0x%llx next key=0x%llx\n",
 			ucp, prev_key, next_key);
-	if (prev_key != next_key)
-		return do_swapcontext(NULL, ucp, false, CTX_64_BIT);
-
-	rval = __copy_from_user(&sigmask, &ucp->uc_sigmask,
-			sizeof(ucp->uc_sigmask));
-	rval = (rval) ?: __get_user(AW(cr0_hi), &ucp->uc_mcontext.cr0_hi);
-	rval = (rval) ?: __get_user(AW(cr1_lo), &ucp->uc_mcontext.cr1_lo);
-	rval = (rval) ?: __get_user(AW(cr1_hi), &ucp->uc_mcontext.cr1_hi);
-	rval = (rval) ?: __get_user(AW(pcsp_lo), &ucp->uc_mcontext.pcsp_lo);
-	rval = (rval) ?: __get_user(AW(pcsp_hi), &ucp->uc_mcontext.pcsp_hi);
-	rval = (rval) ?: __get_user(fpcr, &ucp->uc_extra.fpcr);
-	rval = (rval) ?: __get_user(fpsr, &ucp->uc_extra.fpsr);
-	rval = (rval) ?: __get_user(pfpfr, &ucp->uc_extra.pfpfr);
-	if (rval)
-		return -EFAULT;
-
-	/* A hack to make do_longjmp() restore blocked signals mask */
-	sigmask |= sigmask(SIGKILL);
-
-	DebugCTX("calling longjmp\n");
-	/* There is no place in struct ucontext to save %wd.psize without
-	 * breaking ABI, so we assume C calling convention value of 4 */
-	return do_longjmp(0, sigmask, cr0_hi, cr1_lo, pcsp_lo, pcsp_hi,
-			AS(cr1_hi).br, 0x40, fpcr, fpsr, pfpfr, 1);
+	return do_swapcontext(NULL, ucp, false, CTX_64_BIT);
 }
 
 #ifdef CONFIG_COMPAT
@@ -1821,55 +1824,12 @@ long compat_sys_swapcontext(struct ucontext_32 __user *oucp,
 long compat_sys_setcontext(const struct ucontext_32 __user *ucp,
 		int sigsetsize)
 {
-	int rval;
-	e2k_cr0_hi_t cr0_hi;
-	e2k_cr1_lo_t cr1_lo;
-	e2k_cr1_hi_t cr1_hi;
-	e2k_pcsp_lo_t pcsp_lo;
-	e2k_pcsp_hi_t pcsp_hi;
-	u64 sigmask, prev_key, next_key;
-	u32 fpcr, fpsr, pfpfr;
-
 	if (sigsetsize != sizeof(sigset_t))
 		return -EINVAL;
 
-	if (!access_ok(ucp, sizeof(struct ucontext)))
-		return -EFAULT;
-
-	rval = __get_user(next_key, &ucp->uc_mcontext.sbr);
-	if (rval)
-		return -EFAULT;
-
-	prev_key = context_current_key();
-	if (IS_ERR_VALUE(prev_key))
-		return prev_key;
-
-	DebugCTX("ucp=%lx current key=0x%lx next key=0x%lx\n",
+	DebugCTX("ucp=%lx current key=0x%llx next key=0x%llx\n",
 			ucp, prev_key, next_key);
-	if (prev_key != next_key)
-		return do_swapcontext(NULL, ucp, false, CTX_32_BIT);
-
-	rval = __copy_from_user(&sigmask, &ucp->uc_sigmask,
-			sizeof(ucp->uc_sigmask));
-	rval = (rval) ?: __get_user(AW(cr0_hi), &ucp->uc_mcontext.cr0_hi);
-	rval = (rval) ?: __get_user(AW(cr1_lo), &ucp->uc_mcontext.cr1_lo);
-	rval = (rval) ?: __get_user(AW(cr1_hi), &ucp->uc_mcontext.cr1_hi);
-	rval = (rval) ?: __get_user(AW(pcsp_lo), &ucp->uc_mcontext.pcsp_lo);
-	rval = (rval) ?: __get_user(AW(pcsp_hi), &ucp->uc_mcontext.pcsp_hi);
-	rval = (rval) ?: __get_user(fpcr, &ucp->uc_extra.fpcr);
-	rval = (rval) ?: __get_user(fpsr, &ucp->uc_extra.fpsr);
-	rval = (rval) ?: __get_user(pfpfr, &ucp->uc_extra.pfpfr);
-	if (rval)
-		return -EFAULT;
-
-	/* A hack to make do_longjmp() restore blocked signals mask */
-	sigmask |= sigmask(SIGKILL);
-
-	DebugCTX("calling longjmp\n");
-	/* There is no place in struct ucontext to save %wd.psize without
-	 * breaking ABI, so we assume C calling convention value of 4 */
-	return do_longjmp(0, sigmask, cr0_hi, cr1_lo, pcsp_lo, pcsp_hi,
-			AS(cr1_hi).br, 0x40, fpcr, fpsr, pfpfr, 1);
+	return do_swapcontext(NULL, ucp, false, CTX_32_BIT);
 }
 #endif
 
@@ -1886,54 +1846,11 @@ long protected_sys_swapcontext(struct ucontext_prot __user *oucp,
 long protected_sys_setcontext(const struct ucontext_prot __user *ucp,
 		int sigsetsize)
 {
-	int rval;
-	e2k_cr0_hi_t cr0_hi;
-	e2k_cr1_lo_t cr1_lo;
-	e2k_cr1_hi_t cr1_hi;
-	e2k_pcsp_lo_t pcsp_lo;
-	e2k_pcsp_hi_t pcsp_hi;
-	u64 sigmask, prev_key, next_key;
-	u32 fpcr, fpsr, pfpfr;
-
 	if (sigsetsize != sizeof(sigset_t))
 		return -EINVAL;
 
-	if (!access_ok(ucp, sizeof(struct ucontext)))
-		return -EFAULT;
-
-	rval = __get_user(next_key, &ucp->uc_mcontext.sbr);
-	if (rval)
-		return -EFAULT;
-
-	prev_key = context_current_key();
-	if (IS_ERR_VALUE(prev_key))
-		return prev_key;
-
-	DebugCTX("ucp=%lx current key=0x%lx next key=0x%lx\n",
+	DebugCTX("ucp=%lx current key=0x%llx next key=0x%llx\n",
 			ucp, prev_key, next_key);
-	if (prev_key != next_key)
-		return do_swapcontext(NULL, ucp, false, CTX_128_BIT);
-
-	rval = __copy_from_user(&sigmask, &ucp->uc_sigmask,
-			sizeof(ucp->uc_sigmask));
-	rval = (rval) ?: __get_user(AW(cr0_hi), &ucp->uc_mcontext.cr0_hi);
-	rval = (rval) ?: __get_user(AW(cr1_lo), &ucp->uc_mcontext.cr1_lo);
-	rval = (rval) ?: __get_user(AW(cr1_hi), &ucp->uc_mcontext.cr1_hi);
-	rval = (rval) ?: __get_user(AW(pcsp_lo), &ucp->uc_mcontext.pcsp_lo);
-	rval = (rval) ?: __get_user(AW(pcsp_hi), &ucp->uc_mcontext.pcsp_hi);
-	rval = (rval) ?: __get_user(fpcr, &ucp->uc_extra.fpcr);
-	rval = (rval) ?: __get_user(fpsr, &ucp->uc_extra.fpsr);
-	rval = (rval) ?: __get_user(pfpfr, &ucp->uc_extra.pfpfr);
-	if (rval)
-		return -EFAULT;
-
-	/* A hack to make do_longjmp() restore blocked signals mask */
-	sigmask |= sigmask(SIGKILL);
-
-	DebugCTX("calling longjmp\n");
-	/* There is no place in struct ucontext to save %wd.psize without
-	 * breaking ABI, so we assume C calling convention value of 4 */
-	return do_longjmp(0, sigmask, cr0_hi, cr1_lo, pcsp_lo, pcsp_hi,
-			AS(cr1_hi).br, 0x40, fpcr, fpsr, pfpfr, 1);
+	return do_swapcontext(NULL, ucp, false, CTX_128_BIT);
 }
 #endif

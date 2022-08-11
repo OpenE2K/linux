@@ -38,7 +38,9 @@
 #include <asm/ptrace.h>
 #include <asm/io.h>
 #include <asm/e2k-iommu.h>
+#include <asm/e2k_debug.h>
 #include <asm/kvm.h>
+#include <asm/kvm_host.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
 #include <asm/kvm/mmu_hv_regs_types.h>
 #include <asm/kvm/runstate.h>
@@ -54,6 +56,7 @@
 #include <asm/kvm/trace_kvm.h>
 #include <asm/kvm/trace_kvm_pv.h>
 #include <asm/kvm/trace_kvm_hv.h>
+#undef	CREATE_TRACE_POINTS
 
 #include "user_area.h"
 #include "vmid.h"
@@ -73,10 +76,19 @@
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
-#define	DEBUG_KVM_MODE	1	/* kernel virtual machine debugging */
+#define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
 #define	DebugKVM(fmt, args...)						\
 ({									\
-	if (DEBUG_KVM_MODE)						\
+	if (DEBUG_KVM_MODE || kvm_debug)				\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_KVM_UNIMPL_MODE
+#undef	DebugUNIMPL
+#define	DEBUG_KVM_UNIMPL_MODE	0	/* unimplemeneted features debugging */
+#define	DebugUNIMPL(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_UNIMPL_MODE)					\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -136,10 +148,10 @@
 
 #undef	DEBUG_KVM_IOCTL_MODE
 #undef	DebugKVMIOCTL
-#define	DEBUG_KVM_IOCTL_MODE	1	/* kernel IOCTL debug */
+#define	DEBUG_KVM_IOCTL_MODE	0	/* kernel IOCTL debug */
 #define	DebugKVMIOCTL(fmt, args...)					\
 ({									\
-	if (DEBUG_KVM_IOCTL_MODE)					\
+	if (DEBUG_KVM_IOCTL_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -172,19 +184,19 @@
 
 #undef	DEBUG_KVM_SHUTDOWN_MODE
 #undef	DebugKVMSH
-#define	DEBUG_KVM_SHUTDOWN_MODE	1	/* KVM shutdown debugging */
+#define	DEBUG_KVM_SHUTDOWN_MODE	0	/* KVM shutdown debugging */
 #define	DebugKVMSH(fmt, args...)					\
 ({									\
-	if (DEBUG_KVM_SHUTDOWN_MODE)					\
+	if (DEBUG_KVM_SHUTDOWN_MODE || kvm_debug)			\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
 #undef	DEBUG_KVM_HV_MODE
 #undef	DebugKVMHV
-#define	DEBUG_KVM_HV_MODE	1	/* hardware virtualized VM debugging */
+#define	DEBUG_KVM_HV_MODE	0	/* hardware virtualized VM debugging */
 #define	DebugKVMHV(fmt, args...)					\
 ({									\
-	if (DEBUG_KVM_HV_MODE)						\
+	if (DEBUG_KVM_HV_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
@@ -229,7 +241,7 @@ static int init_guest_vcpu_state(struct kvm_vcpu *vcpu);
 static void kvm_wake_up_all_other_vcpu_host(struct kvm_vcpu *my_vcpu);
 
 struct kvm_stats_debugfs_item debugfs_entries[] = {
-	//TODO fill me
+	/* TODO fill me */
 	{ NULL }
 };
 
@@ -258,10 +270,7 @@ static bool kvm_cpu_has_hv_support(void)
 
 static bool kvm_cpu_hv_disabled(void)
 {
-	unsigned int CU_HW0;
-
-	CU_HW0 = READ_CU_HW0_REG_VALUE();
-	if (CU_HW0 & _CU_HW0_VIRT_DISABLE_MASK) {
+	if (READ_CU_HW0_REG().virt_dsbl) {
 		DebugKVM("CPUs hardware virtualization extensions "
 			"are disabled\n");
 		return true;
@@ -300,36 +309,44 @@ static bool kvm_is_hv_enable(void)
 	return true;
 }
 
-static void epic_virt_enable(void)
+/* Set up CEPIC_EPIC_INT (IPI delivery to inactive guest) */
+static void kvm_setup_cepic_epic_int(void)
+{
+	union cepic_epic_int epic_int;
+	union cepic_ctrl2 ctrl2;
+
+	epic_int.raw = 0;
+	epic_int.bits.vect = CEPIC_EPIC_INT_VECTOR;
+	epic_write_w(CEPIC_EPIC_INT, epic_int.raw);
+
+	/* Also enable automatic generation of CEPIC_EPIC_INT on
+	 * _current_ vcpu when IPI misses in DAT (i.e. when the
+	 * _target_ vcpu is not running) */
+	ctrl2.raw = epic_read_w(CEPIC_CTRL2);
+	ctrl2.bits.int_hv = 1;
+	epic_write_w(CEPIC_CTRL2, ctrl2.raw);
+}
+
+static cpumask_t kvm_e2k_hardware_enabled;
+
+static void prepic_set_virt_en(bool on)
 {
 	union prepic_ctrl2 reg_ctrl;
 	int node;
 
-	KVM_BUG_ON(!cpu_has(CPU_FEAT_EPIC));
-
 	reg_ctrl.raw = 0;
-	reg_ctrl.bits.virt_en = 1;
+	reg_ctrl.bits.virt_en = !!on;
 	if (epic_bgi_mode)
 		reg_ctrl.bits.bgi_mode = 1;
 
 	for_each_online_node(node)
 		prepic_node_write_w(node, SIC_prepic_ctrl2, reg_ctrl.raw);
 
-	DebugKVM("Enabled virtualization support in PREPIC. bgi_mode=%d\n",
-		epic_bgi_mode);
+	DebugKVM("%s virtualization support in PREPIC. bgi_mode=%d\n",
+			(on) ? "Enabled" : "Disabled", epic_bgi_mode);
 }
 
-/* Set up CEPIC_EPIC_INT (IPI delivery to inactive guest) */
-static void kvm_setup_cepic_epic_int(void)
-{
-	union cepic_epic_int reg;
-
-	reg.raw = 0;
-	reg.bits.vect = CEPIC_EPIC_INT_VECTOR;
-	epic_write_w(CEPIC_EPIC_INT, reg.raw);
-}
-
-static int kvm_hardware_virt_enable(void)
+static void kvm_hardware_virt_enable(void)
 {
 	e2k_core_mode_t CORE_MODE;
 
@@ -340,32 +357,40 @@ static int kvm_hardware_virt_enable(void)
 	CORE_MODE.CORE_MODE_hci = 1;
 	write_SH_CORE_MODE_reg_value(CORE_MODE.CORE_MODE_reg);
 
-	DebugKVM("KVM: CPU #%d: set guest CORE_MODE to indicate guest mode "
-		"on any VMs\n",
-		raw_smp_processor_id());
+	DebugKVM("KVM: CPU #%d: set guest CORE_MODE to indicate guest mode on any VMs\n",
+			raw_smp_processor_id());
 
 	if (cpu_has(CPU_FEAT_EPIC)) {
-		/* FIXME: epic_virt_enable() should be called once,
-		 * not on each CPU */
-		epic_virt_enable();
-		kvm_epic_timer_stop();
+		if (cpumask_empty(&kvm_e2k_hardware_enabled))
+			prepic_set_virt_en(true);
+
+		kvm_epic_timer_stop(true);
 		kvm_setup_cepic_epic_int();
 	}
 
-	return 0;
+	cpumask_set_cpu(raw_smp_processor_id(), &kvm_e2k_hardware_enabled);
+}
+
+static void kvm_hardware_virt_disable(void)
+{
+	cpumask_clear_cpu(raw_smp_processor_id(), &kvm_e2k_hardware_enabled);
+
+	if (cpu_has(CPU_FEAT_EPIC) && cpumask_empty(&kvm_e2k_hardware_enabled))
+		prepic_set_virt_en(false);
 }
 #else	/* ! CONFIG_KVM_HW_VIRTUALIZATION */
 static bool kvm_is_hv_enable(void)
 {
-	pr_err("KVM: hardware virtualization mode is turned OFF at "
-		"kernel config\n");
+	pr_err("KVM: hardware virtualization mode is turned OFF at kernel config\n");
 	return false;
 }
-static int kvm_hardware_virt_enable(void)
+static void kvm_hardware_virt_enable(void)
 {
-	pr_err("KVM: hardware virtualization mode is turned OFF at "
-		"kernel config\n");
-	return 0;
+	pr_err("KVM: hardware virtualization mode is turned OFF at kernel config\n");
+}
+static void kvm_hardware_virt_disable(void)
+{
+	pr_err("KVM: hardware virtualization mode is turned OFF at kernel config\n");
 }
 #endif	/* CONFIG_KVM_HW_VIRTUALIZATION */
 
@@ -390,13 +415,15 @@ int kvm_arch_hardware_enable(void)
 {
 	DebugKVM("started\n");
 	if (kvm_is_hv_vm_available() || kvm_is_hw_pv_vm_available())
-		return kvm_hardware_virt_enable();
+		kvm_hardware_virt_enable();
 	return 0;
 }
 
 void kvm_arch_hardware_disable(void)
 {
 	DebugKVM("started\n");
+	if (kvm_is_hv_vm_available() || kvm_is_hw_pv_vm_available())
+		kvm_hardware_virt_disable();
 }
 
 int kvm_arch_check_processor_compat(void)
@@ -1021,6 +1048,7 @@ static int create_vcpu_host_context(struct kvm_vcpu *vcpu)
 			__func__, vcpu->vcpu_id);
 		return -ENOMEM;
 	}
+	*stack = STACK_END_MAGIC;
 	host_ctxt->stack = stack;
 	addr = (unsigned long)stack;
 	host_ctxt->pt_regs = NULL;
@@ -1550,7 +1578,6 @@ again:
 		/* VM halted, terminate all VCPUs */
 		goto out;
 
-	preempt_disable();
 	local_irq_disable();
 
 	clear_bit(KVM_REQ_KICK, (void *) &vcpu->requests);
@@ -1570,7 +1597,6 @@ again:
 	}
 
 	local_irq_enable();
-	preempt_enable();
 
 	mutex_lock(&vcpu->kvm->slots_lock);
 
@@ -1910,6 +1936,8 @@ vm_fault_t kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf)
 
 static int kvm_alloc_epic_pages(struct kvm *kvm)
 {
+	unsigned long epic_gstbase;
+
 	if (kvm->arch.is_hv) {
 		DebugKVM("started to alloc pages for EPIC\n");
 
@@ -1920,6 +1948,11 @@ static int kvm_alloc_epic_pages(struct kvm *kvm)
 			DebugKVM("failed to alloc memory for EPIC\n");
 			return -ENOMEM;
 		}
+
+		epic_gstbase = (unsigned long)page_address(kvm->arch.epic_pages);
+
+		DebugKVM("EPIC gstbase for gstid %d is 0x%lx (PA 0x%lx)\n", kvm->arch.vmid.nr,
+			epic_gstbase, __pa(epic_gstbase));
 	}
 
 	return 0;
@@ -2263,7 +2296,6 @@ static void kvm_setup_host_info(struct kvm *kvm)
 	else
 		kvm->arch.kmap_host_info->mmu_support_pt_v6 = false;
 	setup_kvm_features(kvm);
-	kvm->arch.kmap_host_info->clock_rate = CLOCK_TICK_RATE;
 	kvm_update_guest_time(kvm);
 }
 
@@ -2417,8 +2449,8 @@ int kvm_vm_ioctl_irq_line(struct kvm *kvm, struct kvm_irq_level *irq_event,
 
 int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 {
-	DebugKVM("started for VCPU %d\n", vcpu->vcpu_id);
-	DebugKVM("does not implemented\n");
+	DebugUNIMPL("started for VCPU %d\n", vcpu->vcpu_id);
+	DebugUNIMPL("does not implemented\n");
 
 	return 0;
 }
@@ -2889,8 +2921,8 @@ int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu)
 		vcpu->arch.hw_ctxt.cepic = (epic_page_t *) (epic_gstbase +
 			(kvm_vcpu_to_full_cepic_id(vcpu) << PAGE_SHIFT));
 
-		raw_spin_lock_init(&vcpu->arch.epic_dam_lock);
-		vcpu->arch.epic_dam_active = false;
+		raw_spin_lock_init(&vcpu->arch.epic_dat_lock);
+		vcpu->arch.epic_dat_active = false;
 		kvm_init_cepic_idle_timer(vcpu);
 	}
 	vcpu->arch.exit_shutdown_terminate = 0;
@@ -3001,14 +3033,47 @@ int init_lapic_state(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
+/*
+ * VCPUs halt and wake ups are synchronized on e2k as follows:
+ *
+ *	VCPU0					VCPU1
+ * --------------------------------------------------------------
+ *  intercept "wait int"		Variant 1:
+ *  kvm_vcpu_block() {			  send IPI to VCPU0
+ *    kvm_arch_vcpu_blocking() {	  DAT hit -> write target CIR
+ *      clear DAT and save EPIC		  kvm_arch_vcpu_blocking will see CIR.stat
+ *    }
+ *    < ... >				Variant 2:
+ *    kvm_vcpu_check_block() {		  send IPI to VCPU0
+ *      check PMIRR/PNMIRR/CIR		  DAT miss -> generate interception
+ *      both in shadow registers	  cepic_epic_interrupt() {
+ *      and in memory			    kvm_irq_delivery_to_epic():
+ *    }					      either send through ICR if DAT
+ *    < ... >				      is active (i.e. Variant 1) or
+ *    kvm_arch_vcpu_unblocking() {	      write to PMIRR in memory where it
+ *      restore EPIC and activate DAT	      will be seen by kvm_vcpu_check_block()
+ *    }
+ *  }
+ *
+ * Saving and restoring EPIC in kvm_arch_vcpu_[un]blocking() is necessary
+ * because otherwise there is a race: "Variant 2" above could happen between
+ * the check in kvm_vcpu_check_block() and the consequent schedule() call, in
+ * which case VCPU0 will go sleep but VCPU1 will be sure that VCPU0 was woken.
+ */
 void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu)
 {
-	DebugKVMRUN("Unimplemented\n");
+	if (kvm_vcpu_is_epic(vcpu)) {
+		kvm_epic_vcpu_blocking(&vcpu->arch);
+		kvm_epic_start_idle_timer(vcpu);
+	}
 }
 
 void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu)
 {
-	DebugKVMRUN("Unimplemented\n");
+	if (kvm_vcpu_is_epic(vcpu)) {
+		kvm_epic_stop_idle_timer(vcpu);
+		kvm_epic_vcpu_unblocking(&vcpu->arch);
+	}
 }
 
 static int init_guest_boot_cut(struct kvm_vcpu *vcpu)
@@ -3404,8 +3469,6 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	if (kvm->arch.is_pv) {
 		kvm_guest_pv_mm_destroy(kvm);
 	}
-//	kvm_release_vm_pages(kvm);
-//	kvm_free_physmem(kvm);
 	kvm_boot_spinlock_destroy(kvm);
 	kvm_guest_spinlock_destroy(kvm);
 	kvm_guest_csd_lock_destroy(kvm);
@@ -3428,13 +3491,9 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 	set_bit(KVM_REQ_KICK, (void *) &vcpu->requests);
 
 	local_irq_save(flags);
-	if (vcpu->arch.is_hv) {
-		kvm_epic_timer_stop();
-		kvm_epic_invalidate_dat(vcpu);
+	if (vcpu->arch.is_hv)
 		machine.save_kvm_context(&vcpu->arch);
-		kvm_epic_check_int_status(&vcpu->arch);
-		kvm_epic_start_idle_timer(vcpu);
-	}
+
 	if (!schedule) {
 		machine.save_gregs_dirty_bgr(&vcpu->arch.sw_ctxt.vcpu_gregs);
 		copy_k_gregs_to_k_gregs(
@@ -3484,13 +3543,9 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu, bool schedule)
 	}
 	per_cpu(last_vcpu, cpu) = vcpu;
 
-	if (vcpu->arch.is_hv) {
-		kvm_epic_stop_idle_timer(vcpu);
-		kvm_hv_epic_load(vcpu);
+	if (vcpu->arch.is_hv)
 		machine.restore_kvm_context(&vcpu->arch);
-		kvm_epic_timer_start();
-		kvm_epic_enable_int();
-	}
+
 	if (!schedule) {
 		machine.save_gregs_dirty_bgr(&vcpu->arch.sw_ctxt.host_gregs);
 		copy_k_gregs_to_k_gregs(
@@ -3537,8 +3592,8 @@ static int kvm_vcpu_ioctl_set_lapic(struct kvm_vcpu *vcpu,
 
 int kvm_arch_vcpu_ioctl_get_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 {
-	DebugKVM("started for VCPU %d\n", vcpu->vcpu_id);
-	DebugKVM("does not implemented\n");
+	DebugUNIMPL("started for VCPU %d\n", vcpu->vcpu_id);
+	DebugUNIMPL("does not implemented\n");
 	return 0;
 }
 
@@ -4229,7 +4284,10 @@ void kvm_arch_flush_shadow_all(struct kvm *kvm)
 
 void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu)
 {
-	/* now is empty, probable can be implemented */
+	KVM_BUG_ON(vcpu->cpu < 0);
+
+	if (!vcpu->arch.is_hv && vcpu->cpu != cpu)
+		pv_vcpu_switch_kernel_pgd_range(vcpu, cpu);
 }
 
 long kvm_arch_ioctl_get_guest_address(unsigned long __user *addr)
@@ -4485,35 +4543,47 @@ gfn_t unalias_gfn(struct kvm *kvm, gfn_t gfn)
 	return gfn;
 }
 
-/* This is called from pv_wait hcall (CEPIC DAT is active) */
-bool kvm_vcpu_has_epic_interrupts(struct kvm_vcpu *vcpu)
+/* This is called either from another vcpu (CEPIC DAT is not active)
+ * or from current VCPU but inside of kvm_arch_vcpu_[un]blocking() pair
+ * (DAT is again inactive). */
+bool kvm_vcpu_has_epic_interrupts(const struct kvm_vcpu *vcpu)
 {
-	union cepic_cir reg_cir;
-	union cepic_pnmirr reg_pnmirr;
+	epic_page_t *cepic = vcpu->arch.hw_ctxt.cepic;
 
-	/* Check mi_gst by reading CEPIC_CIR.stat */
-	reg_cir.raw = epic_read_guest_w(CEPIC_CIR);
-	if (!vcpu->arch.hcall_irqs_disabled && reg_cir.bits.stat)
-		return true;
+	/* Check mi_gst by reading CEPIC_CIR.stat and PMIRR */
+	if (!vcpu->arch.hcall_irqs_disabled) {
+		if (cepic->cir.bits.stat)
+			return true;
+
+		if (unlikely(epic_bgi_mode)) {
+			if (memchr_inv(cepic->pmirr_byte, 0, sizeof(cepic->pmirr_byte) +
+					__must_be_array(cepic->pmirr_byte)))
+				return true;
+		} else {
+			if (memchr_inv(cepic->pmirr, 0, sizeof(cepic->pmirr) +
+					__must_be_array(cepic->pmirr)))
+				return true;
+		}
+	}
 
 	/* Check nmi_gst by reading CEPIC_PNMIRR */
-	reg_pnmirr.raw = epic_read_guest_w(CEPIC_PNMIRR);
-	if (reg_pnmirr.raw & CEPIC_PNMIRR_BIT_MASK)
+	if (cepic->pnmirr.counter & CEPIC_PNMIRR_BIT_MASK)
 		return true;
 
 	return false;
 }
 
-static inline bool kvm_vcpu_has_events(struct kvm_vcpu *vcpu)
-{
-	return kvm_vcpu_has_pic_interrupts(vcpu);
-}
-
+/* This is called from kvm_vcpu_block() -> kvm_vcpu_running(),
+ * so EPIC has been saved in kvm_arch_vcpu_blocking() already.
+ * See kvm_arch_vcpu_blocking() for details.
+ *
+ * Also this can be called from kvm_arch_dy_runnable(), in
+ * which case we also check values in memory. */
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu)
 {
 	DebugKVMRUN("started for VCPU %d\n", vcpu->vcpu_id);
-	return (vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE) ||
-		vcpu->arch.unhalted || kvm_vcpu_has_events(vcpu);
+	return vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE ||
+		vcpu->arch.unhalted || kvm_vcpu_has_pic_interrupts(vcpu);
 }
 
 int kvm_arch_vcpu_ioctl_get_mpstate(struct kvm_vcpu *vcpu,
@@ -4591,6 +4661,14 @@ static void __exit kvm_e2k_exit(void)
 {
 }
 #endif	/* CONFIG_KVM_HOST_MODE */
+
+bool kvm_debug = false;
+static int __init kvm_set_debug(char *arg)
+{
+	kvm_debug = true;
+	return 0;
+}
+early_param("kvm_debug", kvm_set_debug);
 
 module_init(kvm_e2k_init)
 module_exit(kvm_e2k_exit)

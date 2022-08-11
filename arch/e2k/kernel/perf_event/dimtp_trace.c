@@ -152,6 +152,14 @@ static int dimtp_event_init(struct perf_event *event)
 		return -EINVAL;
 	}
 
+	/*
+	 * Save configuration
+	 */
+	if (!event->attr.exclude_user)
+		event->hw.config |= ARCH_PERFMON_USR;
+	if (!event->attr.exclude_kernel)
+		event->hw.config |= ARCH_PERFMON_OS;
+
 	return 0;
 }
 
@@ -332,8 +340,8 @@ static void dimtp_start(struct perf_event *event, int flags)
 	AW(dimcr) = 0;
 	dimcr.mode = config.mode;
 	AS(dimcr)[0].event = config.event;
-	AS(dimcr)[0].user = !event->attr.exclude_user;
-	AS(dimcr)[0].system = !event->attr.exclude_kernel;
+	AS(dimcr)[0].user = !!(hwc->config & ARCH_PERFMON_USR);
+	AS(dimcr)[0].system = !!(hwc->config & ARCH_PERFMON_OS);
 	WRITE_DIMCR_REG(dimcr);
 }
 

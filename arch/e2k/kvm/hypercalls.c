@@ -15,6 +15,7 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/regs_state.h>
+#include <asm/tlb_regs_access.h>
 #include <asm/trap_table.h>
 #include <asm/process.h>
 
@@ -113,10 +114,12 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 	struct gmm_struct *next_gmm;
 	struct sw_regs	*cur_gsw;
 	struct sw_regs	*next_gsw;
+	int		cur_gmmid_nr = pv_vcpu_get_gmm(vcpu)->nid.nr;
 	e2k_upsr_t	upsr;
 	bool		migrated = false;
 	int		old_vcpu_id = -1;
 	int		gtask_is_binco;
+	u64 fpcr, fpsr, pfpfr;
 
 	DebugKVMSWH("started to switch from current GPID #%d to #%d GMM #%d\n",
 		cur_gti->gpid->nid.nr, gpid_nr, gmmid_nr);
@@ -203,6 +206,9 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 		cur_gsw->crs.cr1_hi.CR1_hi_half);
 
 	gtask_is_binco = cur_gti->task_is_binco;
+	AW(cur_gsw->fpcr) = NATIVE_NV_READ_FPCR_REG_VALUE();
+	AW(cur_gsw->fpsr) = NATIVE_NV_READ_FPSR_REG_VALUE();
+	AW(cur_gsw->pfpfr) = NATIVE_NV_READ_PFPFR_REG_VALUE();
 	NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(cur_gsw, gtask_is_binco,
 			false /* task traced */);
 
@@ -265,8 +271,14 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 		next_gsw->crs.cr1_hi.CR1_hi_half);
 
 	gtask_is_binco = next_gti->task_is_binco;
+	fpcr = AS_WORD(next_gsw->fpcr);
+	fpsr = AS_WORD(next_gsw->fpsr);
+	pfpfr = AS_WORD(next_gsw->pfpfr);
 	NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(next_gsw, gtask_is_binco,
 							false /* traced */);
+	NATIVE_NV_WRITE_FPCR_REG_VALUE(fpcr);
+	NATIVE_NV_WRITE_FPSR_REG_VALUE(fpsr);
+	NATIVE_NV_WRITE_PFPFR_REG_VALUE(pfpfr);
 
 	/* global registers should be restored by host */
 	if (next_gti->gmm != NULL && next_gti->gmm == next_gmm) {
@@ -296,6 +308,15 @@ kvm_switch_guest_thread_stacks(struct kvm_vcpu *vcpu, int gpid_nr, int gmmid_nr)
 		gpid_nr, old_vcpu_id, vcpu->vcpu_id,
 		current_thread_info()->signal_stack.used /
 			sizeof(struct signal_stack_context));
+
+	if (trace_guest_switch_to_enabled())
+		trace_guest_switch_to(vcpu, cur_gti->gpid->nid.nr, cur_gmmid_nr,
+					gpid_nr, gmmid_nr, next_gsw);
+
+	KVM_BUG_ON(vcpu->cpu < 0);
+
+	if (!vcpu->arch.is_hv)
+		pv_vcpu_switch_kernel_pgd_range(vcpu, vcpu->cpu);
 
 	return;
 }
@@ -393,7 +414,7 @@ static inline unsigned long update_wd_psise(unsigned long psize_value)
  *  - use data stack
  *  - call any function
  */
-unsigned long /* __interrupt */
+unsigned long notrace /* __interrupt */
 kvm_light_hcalls(unsigned long hcall_num,
 		unsigned long arg1, unsigned long arg2,
 		unsigned long arg3, unsigned long arg4,
@@ -476,6 +497,18 @@ kvm_light_hcalls(unsigned long hcall_num,
 					(kvm_hw_stacks_flush_t *)arg1);
 		}
 		break;
+	case KVM_HCALL_GET_TLB_SET_TAG:
+		ret = get_va_tlb_set_tag(arg1, (int)arg2, (bool)arg3);
+		break;
+	case KVM_HCALL_GET_TLB_SET_ENTRY:
+		ret = pte_val(get_va_tlb_set_entry(arg1, (int)arg2, (bool)arg3));
+		break;
+	case KVM_HCALL_GET_HOST_MMU_PPTB:
+		ret = get_mmu_u_pptb_reg();
+		break;
+	case KVM_HCALL_GET_HOST_MMU_PID:
+		ret = get_mmu_pid_reg();
+		break;
 	case KVM_HCALL_UPDATE_PCSP_HI:
 		update_pcsp_hi(arg1);
 		break;
@@ -527,9 +560,6 @@ kvm_light_hcalls(unsigned long hcall_num,
 		break;
 	case KVM_HCALL_GET_GUEST_RUNNING_TIME:
 		ret = kvm_get_guest_running_time(vcpu);
-		break;
-	case KVM_HCALL_GET_VCPU_START_THREAD:
-		ret = kvm_get_vcpu_start_thread();
 		break;
 	case KVM_HCALL_READ_DTLB_REG:
 		ret = kvm_read_guest_dtlb_reg(arg1);
@@ -745,7 +775,7 @@ static inline long outdated_hypercall(const char *hcall_name)
  * This is the core hypercall routine: where the Guest gets what it wants.
  * Or gets killed.  Or, in the case of KVM_HCALL_SHUTDOWN, both.
  */
-unsigned long
+notrace unsigned long
 kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 				unsigned long arg2, unsigned long arg3,
 				unsigned long arg4, unsigned long arg5,
@@ -864,14 +894,10 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		to_new_stacks = true;
 
 	cr1_lo = NATIVE_NV_READ_CR1_LO_REG();
-	/*
-	 * FIXME Bug 130066: paravirt spinlocks are currently broken, so wake VCPU with interrupts
-	 * even if its mask is closed
-	 * vcpu->arch.hcall_irqs_disabled = kvm_guest_vcpu_irqs_disabled(vcpu,
-	 *	vcpu->arch.is_hv ? AW(upsr_to_save) : kvm_get_guest_vcpu_UPSR_value(vcpu),
-	 *	cr1_lo.CR1_lo_psr);
-	 */
-	vcpu->arch.hcall_irqs_disabled = false;
+	vcpu->arch.hcall_irqs_disabled = kvm_guest_vcpu_irqs_disabled(vcpu,
+			vcpu->arch.is_hv ? AW(upsr_to_save)
+					 : kvm_get_guest_vcpu_UPSR_value(vcpu),
+			cr1_lo.CR1_lo_psr);
 
 	/* save guest stack state to return from hypercall */
 	cr1_hi = NATIVE_NV_READ_CR1_HI_REG();
@@ -1053,9 +1079,9 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 				arg2, arg3, arg4, arg5);
 		break;
 	case KVM_HCALL_PT_ATOMIC_UPDATE:
-		ret = kvm_pv_mmu_pt_atomic_update(vcpu, arg1,
-				(void __user *)arg2,
-				(pt_atomic_op_t)arg3, arg4);
+		ret = kvm_pv_mmu_pt_atomic_update(vcpu, (int)arg1,
+				arg2, (void __user *)arg3,
+				(pt_atomic_op_t)arg4, arg5);
 		break;
 	case KVM_HCALL_GUEST_MM_DROP:
 		ret = kvm_guest_mm_drop(vcpu, (int)arg1);
@@ -1131,6 +1157,10 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		ret = kvm_guest_printk_on_host(vcpu, (char __user *)arg1,
 						(int)arg2);
 		break;
+	case KVM_HCALL_GET_SPT_TRANSLATION:
+		ret = kvm_get_va_spt_translation(vcpu, arg1,
+					(mmu_spt_trans_t __user *)arg2);
+		break;
 	case KVM_HCALL_PRINT_GUEST_KERNEL_PTES:
 		ret = kvm_print_guest_kernel_ptes(arg1);
 		break;
@@ -1175,9 +1205,11 @@ kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 		to_host_vcpu = true;
 
 	raw_all_irq_disable();	/* all IRQs to switch mm context */
-
-	/* TODO call scheduler if requested for hypercalls - probably
-	 * for generic hypercalls only */
+	while (need_resched()) {
+		raw_all_irq_enable();
+		schedule();
+		raw_all_irq_disable();
+	}
 
 	/* It can be trap on hypercall handler (due to guest user address */
 	/* access while copy from/to user for example). So: */

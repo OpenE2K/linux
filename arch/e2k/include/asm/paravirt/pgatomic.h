@@ -68,17 +68,6 @@ pv_pt_clear_young_atomic(struct mm_struct *mm,
 	}
 }
 
-static inline pgprotval_t
-pv_pt_modify_prot_atomic(struct mm_struct *mm,
-			unsigned long addr, pgprot_t *pgprot)
-{
-	if (paravirt_enabled()) {
-		return kvm_pt_modify_prot_atomic(mm, addr, pgprot);
-	} else {
-		return native_pt_modify_prot_atomic(&pgprot->pgprot);
-	}
-}
-
 #if	defined(CONFIG_PARAVIRT_GUEST)
 /* It is paravirtualized host and guest kernel */
 
@@ -114,13 +103,6 @@ pt_clear_young_atomic(struct mm_struct *mm,
 			unsigned long addr, pgprot_t *pgprot)
 {
 	return pv_pt_clear_young_atomic(mm, addr, pgprot);
-}
-
-static inline pgprotval_t
-pt_modify_prot_atomic(struct mm_struct *mm,
-			unsigned long addr, pgprot_t *pgprot)
-{
-	return pv_pt_modify_prot_atomic(mm, addr, pgprot);
 }
 #endif	/* CONFIG_PARAVIRT_GUEST */
 

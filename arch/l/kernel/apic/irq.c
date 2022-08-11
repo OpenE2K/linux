@@ -72,47 +72,47 @@ void l_init_system_handlers_table(void)
 	 * The reschedule interrupt is a CPU-to-CPU reschedule-helper
 	 * IPI, driven by wakeup.
 	 */
-	setup_APIC_vector_handler(RESCHEDULE_VECTOR,
+	setup_PIC_vector_handler(RESCHEDULE_VECTOR,
 			smp_reschedule_interrupt, 1,
 			"smp_reschedule_interrupt");
 
 	/* IPI for generic function call */
-	setup_APIC_vector_handler(CALL_FUNCTION_VECTOR,
+	setup_PIC_vector_handler(CALL_FUNCTION_VECTOR,
 			smp_call_function_interrupt, 1,
 			"smp_call_function_interrupt");
 
 	/* IPI for generic single function call */
-	setup_APIC_vector_handler(CALL_FUNCTION_SINGLE_VECTOR,
+	setup_PIC_vector_handler(CALL_FUNCTION_SINGLE_VECTOR,
 			smp_call_function_single_interrupt, 1,
 			"smp_call_function_single_interrupt");
 
 	/* Low priority IPI to cleanup after moving an irq. */
-	setup_APIC_vector_handler(IRQ_MOVE_CLEANUP_VECTOR,
+	setup_PIC_vector_handler(IRQ_MOVE_CLEANUP_VECTOR,
 			smp_irq_move_cleanup_interrupt, 0,
 			"smp_irq_move_cleanup_interrupt");
 
 #endif
 	/* self generated IPI for local APIC timer */
-	setup_APIC_vector_handler(LOCAL_TIMER_VECTOR,
+	setup_PIC_vector_handler(LOCAL_TIMER_VECTOR,
 			smp_apic_timer_interrupt, 1,
 			"smp_apic_timer_interrupt");
 
 	/* IPI vectors for APIC spurious and error interrupts */
-	setup_APIC_vector_handler(SPURIOUS_APIC_VECTOR,
+	setup_PIC_vector_handler(SPURIOUS_APIC_VECTOR,
 			smp_spurious_interrupt, 1,
 			"smp_spurious_interrupt");
-	setup_APIC_vector_handler(ERROR_APIC_VECTOR,
+	setup_PIC_vector_handler(ERROR_APIC_VECTOR,
 			smp_error_interrupt, 1,
 			"smp_error_interrupt");
 
 #if IS_ENABLED(CONFIG_RDMA) || IS_ENABLED(CONFIG_RDMA_SIC) || \
     IS_ENABLED(CONFIG_RDMA_NET)
-	setup_APIC_vector_handler(RDMA_INTERRUPT_VECTOR,
+	setup_PIC_vector_handler(RDMA_INTERRUPT_VECTOR,
 			rdma_interrupt, 1,
 			"rdma_interrupt");
 #endif
 
-	setup_APIC_vector_handler(IRQ_WORK_VECTOR,
+	setup_PIC_vector_handler(IRQ_WORK_VECTOR,
 			smp_irq_work_interrupt, 1,
 			"smp_irq_work_interrupt");
 }

@@ -785,9 +785,9 @@ boot_kvm_switch_to_virt(bool bsp, int cpuid,
 
 	ret = HYPERVISOR_switch_to_virt_mode(&task_info,
 		(void (*)(void *, void *, void *))boot_init_sequel_func,
-					(void *)bsp,
-					(void *)cpuid,
-					(void *)cpus_to_sync);
+					(void *) (long) bsp,
+					(void *) (long) cpuid,
+					(void *) (long) cpus_to_sync);
 	if (ret) {
 		boot_panic("could not switch to new init kernel stacks,"
 			"error %d\n", ret);
@@ -797,7 +797,7 @@ boot_kvm_switch_to_virt(bool bsp, int cpuid,
 	kvm_stack_bounds_trap_enable();
 
 #ifdef CONFIG_KVM_GUEST_HW_PV
-	boot_init_sequel_func(bsp, cpuid, cpu_to_sync_num);
+	boot_init_sequel_func(bsp, cpuid, cpus_to_sync);
 #endif
 }
 

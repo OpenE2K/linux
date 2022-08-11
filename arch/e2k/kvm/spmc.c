@@ -29,6 +29,7 @@
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
 #include <linux/math64.h>
+#include <asm/e2k_debug.h>
 #include <asm/kvm/runstate.h>
 
 #include "ioepic.h"
@@ -67,19 +68,19 @@
 
 #undef	DEBUG_IRQ_MODE
 #undef	DebugIRQ
-#define	DEBUG_IRQ_MODE		1	/* IRQs debugging */
+#define	DEBUG_IRQ_MODE		0	/* IRQs debugging */
 #define	DebugIRQ(fmt, args...)						\
 ({									\
-	if (DEBUG_IRQ_MODE)						\
+	if (DEBUG_IRQ_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
 #undef	DEBUG_HR_TIMER_MODE
 #undef	DebugHRTM
-#define	DEBUG_HR_TIMER_MODE	1	/* high resolution timer debugging */
+#define	DEBUG_HR_TIMER_MODE	0	/* high resolution timer debugging */
 #define	DebugHRTM(fmt, args...)						\
 ({									\
-	if (DEBUG_HR_TIMER_MODE)					\
+	if (DEBUG_HR_TIMER_MODE || kvm_debug)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 

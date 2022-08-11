@@ -12,6 +12,7 @@
 #include <linux/smpboot.h>
 #include <linux/set_memory.h>
 #include <linux/sizes.h>
+#include <linux/suspend.h>
 
 #include <asm/p2v/boot_init.h>
 #include <asm/p2v/boot_phys.h>
@@ -513,9 +514,36 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 #endif	/* CONFIG_SPARSEMEM_VMEMMAP */
 
 /*
+ * CONFIG_SPARSEMEM_VMEMMAP has a drawback: it works only in big chunks of
+ * memory called "sections" with section size defined by SECTION_SIZE_BITS.
+ * It cannot be set low otherwise the memory usage by the sections array
+ * would be too high.
+ *
+ * As a result, VGA area [0xa0000-0xc0000] is reported as valid by pfn_valid()
+ * and attempted to be saved and restored by hibernation code.  Work around
+ * this by explicitly marking all non RAM areas as nosave.
+ *
+ * If pfn_valid() gets rid of legacy stuff like section_early() then this
+ * workaround will probably become unnecessary.
+ */
+static int __init mark_nonram_nosave(void)
+{
+	unsigned long spfn, epfn, prev = 0;
+	int i;
+
+	for_each_mem_pfn_range(i, MAX_NUMNODES, &spfn, &epfn, NULL) {
+		if (prev && prev < spfn)
+			register_nosave_region(prev, spfn);
+
+		prev = epfn;
+	}
+	return 0;
+}
+
+/*
  * Setup the page tables
  */
-void __init notrace  paging_init(void)
+void __init notrace paging_init(void)
 {
 	int	node;
 
@@ -531,6 +559,8 @@ void __init notrace  paging_init(void)
 	sparse_init();
 
 	zone_sizes_init();
+
+	mark_nonram_nosave();
 
 	for_each_node_has_dup_kernel(node) {
 		unsigned long addr = (unsigned long) empty_zero_page;

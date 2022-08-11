@@ -18,6 +18,7 @@
 #ifdef CONFIG_MCST
 #define iohub_revision(pdev)	255
 #define iohub_generation(pdev)	255
+#define is_prototype()		0
 #endif
 
 struct pci_sysdata {

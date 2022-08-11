@@ -9,7 +9,6 @@
 #include <linux/tracehook.h>
 #include <linux/mm.h>
 
-#include <asm/alternative.h>
 #include <asm/cpu_regs.h>
 #include <asm/e2k_syswork.h>
 #include <asm/getsp_adj.h>
@@ -17,6 +16,7 @@
 #include <asm/gregs.h>
 #include <linux/uaccess.h>
 #include <asm/process.h>
+#include <asm/copy-hw-stacks.h>
 #include <asm/trap_table.h>
 #include <asm/regs_state.h>
 #include <asm/ucontext.h>

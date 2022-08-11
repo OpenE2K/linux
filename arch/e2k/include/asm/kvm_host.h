@@ -744,6 +744,7 @@ typedef struct kvm_sw_cpu_context {
 	u64 rpr_hi;
 	u64 tcd;
 
+#ifdef CONFIG_CLW_ENABLE
 	mmu_reg_t us_cl_d;
 	clw_reg_t us_cl_b;
 	clw_reg_t us_cl_up;
@@ -751,6 +752,7 @@ typedef struct kvm_sw_cpu_context {
 	clw_reg_t us_cl_m1;
 	clw_reg_t us_cl_m2;
 	clw_reg_t us_cl_m3;
+#endif
 } kvm_sw_cpu_context_t;
 
 /*
@@ -991,9 +993,10 @@ struct kvm_vcpu_arch {
 	struct kvm_cepic *epic;
 
 	/* Hardware guest CEPIC support */
-	raw_spinlock_t epic_dam_lock;	/* lock to update dam_active */
-	bool epic_dam_active;
+	raw_spinlock_t epic_dat_lock;	/* lock to update dam_active */
+	bool epic_dat_active;
 	struct hrtimer cepic_idle;
+	ktime_t cepic_idle_start_time;
 
 	int mp_state;
 	int sipi_vector;
@@ -1116,8 +1119,6 @@ extern struct file_operations kvm_vm_fops;
  */
 #define KVM_REQ_TRIPLE_FAULT		10	/* FIXME: not implemented */
 #define KVM_REQ_MMU_SYNC		11	/* FIXME: not implemented */
-#define KVM_REQ_PENDING_IRQS		15	/* there are unhandled IRQs */
-						/* injected on VCPU */
 #define KVM_REQ_PENDING_VIRQS		16	/* there are unhandled VIRQs */
 						/* to inject on VCPU */
 #define	KVM_REG_SHOW_STATE		17	/* bit should be cleared */
@@ -1136,7 +1137,7 @@ extern struct file_operations kvm_vm_fops;
 #define	kvm_clear_pending_virqs(vcpu)	\
 		clear_bit(KVM_REQ_PENDING_VIRQS, (void *)&vcpu->requests)
 #define	kvm_test_pending_virqs(vcpu)	\
-		test_bit(KVM_REQ_PENDING_VIRQS, (void *)&vcpu->requests)
+		test_bit(KVM_REQ_PENDING_VIRQS, (const void *)&vcpu->requests)
 #define kvm_set_virqs_injected(vcpu)	\
 		set_bit(KVM_REQ_VIRQS_INJECTED, (void *)&vcpu->requests)
 #define	kvm_test_and_clear_virqs_injected(vcpu)	\
@@ -1314,6 +1315,13 @@ struct kvm_arch {
 	bool legacy_vga_passthrough;
 };
 
+static inline bool kvm_has_passthrough_device(const struct kvm_arch *kvm)
+{
+	if (!kvm->irt)
+		return false;
+	return kvm->irt->vfio_dev != NULL;
+}
+
 #ifdef CONFIG_KVM_ASYNC_PF
 
 /* Async page fault event descriptor */
@@ -1432,67 +1440,33 @@ extern void kvm_arch_async_page_present(struct kvm_vcpu *vcpu,
 			!defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is hypervisor or host with virtualization support */
 extern void kvm_hv_epic_load(struct kvm_vcpu *vcpu);
-extern void kvm_epic_invalidate_dat(struct kvm_vcpu *vcpu);
+extern void kvm_epic_invalidate_dat(struct kvm_vcpu_arch *vcpu);
 extern void kvm_epic_enable_int(void);
 extern void kvm_epic_timer_start(void);
-extern void kvm_epic_timer_stop(void);
+extern void kvm_epic_timer_stop(bool skip_check);
 extern void kvm_deliver_cepic_epic_interrupt(void);
-extern void kvm_epic_check_int_status(struct kvm_vcpu_arch *vcpu);
+extern void kvm_epic_vcpu_blocking(struct kvm_vcpu_arch *vcpu);
+extern void kvm_epic_vcpu_unblocking(struct kvm_vcpu_arch *vcpu);
 extern void kvm_init_cepic_idle_timer(struct kvm_vcpu *vcpu);
+
+#define	VCPU_IDLE_TIMEOUT	1
 extern void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu);
 extern void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu);
+
 #else	/* ! CONFIG_KVM_HW_VIRTUALIZATION || CONFIG_KVM_GUEST_KERNEL */
 /* it is host without virtualization support */
 /* or native paravirtualized guest */
-static inline void kvm_hv_epic_load(struct kvm_vcpu *vcpu)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_epic_invalidate_dat(struct kvm_vcpu *vcpu)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_epic_enable_int(void)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_epic_timer_start(void)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_epic_timer_stop(void)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_deliver_cepic_epic_interrupt(void)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_epic_check_int_status(struct kvm_vcpu_arch *vcpu)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_init_cepic_idle_timer(struct kvm_vcpu *vcpu)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu)
-{
-	/* nothing to do */
-}
-
-static inline void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu)
-{
-	/* nothing to do */
-}
+static inline void kvm_hv_epic_load(struct kvm_vcpu *vcpu) { }
+static inline void kvm_epic_invalidate_dat(struct kvm_vcpu_arch *vcpu) { }
+static inline void kvm_epic_enable_int(void) { }
+static inline void kvm_epic_vcpu_blocking(struct kvm_vcpu_arch *vcpu) { }
+static inline void kvm_epic_vcpu_unblocking(struct kvm_vcpu_arch *vcpu) { }
+static inline void kvm_epic_timer_start(void) { }
+static inline void kvm_epic_timer_stop(bool skip_check) { }
+static inline void kvm_deliver_cepic_epic_interrupt(void) { }
+static inline void kvm_init_cepic_idle_timer(struct kvm_vcpu *vcpu) { }
+static inline void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu) { }
+static inline void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu) { }
 #endif /* CONFIG_KVM_HW_VIRTUALIZATION && !CONFIG_KVM_GUEST_KERNEL */
 
 extern struct work_struct kvm_dump_stacks;

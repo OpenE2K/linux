@@ -63,9 +63,6 @@
 # define CHECK_STACK(x, reg)  
 # define CHECK_FLAGS(x)     
 #endif /* DEBUG_STACK_TRACE */
-#undef DEBUG_TRACE
-#define DEBUG_TRACE     0 
-#define Dbg_trace(fmt,args...) if (DEBUG_TRACE) {trace_printk(fmt,args);}
 
 /* for debugging */
 #define MAX_ONCE 10
@@ -344,7 +341,7 @@ static inline int e2k_modify_call(const unsigned long addr,
 	instruction.instr_word = read_instr_on_IP(ip, phys_ip);
 
 	/* Check that the stubs syllable is present. */
-	if (!AS(instruction.HS).s) {
+	if (!instruction.HS.s) {
 		pr_info("Instruction at %lx does not have stubs syllable!\n"
 				"Code: %llx\n", ip, *((u64 *) &instruction));
 		return -EINVAL;
@@ -352,7 +349,7 @@ static inline int e2k_modify_call(const unsigned long addr,
 
 	/* Sanity check: test that the CS1 syllable
 	 * (which contains actual call) is present. */
-	if (!(AS(instruction.HS).c & 2)) {
+	if (!(instruction.HS.c & 2)) {
 		pr_info("Instruction at %lx does not have CS1 syllable!\n"
 				"Code: %llx\n", ip, *((u64 *) &instruction));
 		return -EINVAL;
@@ -360,8 +357,7 @@ static inline int e2k_modify_call(const unsigned long addr,
 
 	if (enable) {
 		/* Check that the condition is not 1 already. */
-		if (((AS(instruction.SS).ctcond & SS_CT_MASK) >> SS_CT_SHIFT)
-				== 1) {
+		if (((instruction.SS.ctcond & SS_CT_MASK) >> SS_CT_SHIFT) == 1) {
 #ifdef CONFIG_STACKTRACE
 			/* FIXME */
 			extern struct stack_trace saved_trace_enabled;
@@ -376,11 +372,11 @@ static inline int e2k_modify_call(const unsigned long addr,
 		}
 
 		/* Set the condition to 1. */
-		AS(instruction.SS).ctcond &= ~SS_CT_MASK;
-		AS(instruction.SS).ctcond |= 1 << SS_CT_SHIFT;
+		instruction.SS.ctcond &= ~SS_CT_MASK;
+		instruction.SS.ctcond |= 1 << SS_CT_SHIFT;
 	} else {
 		/* Check that the condition is not 0 already. */
-		if ((AS(instruction.SS).ctcond & SS_CT_MASK) == 0) {
+		if ((instruction.SS.ctcond & SS_CT_MASK) == 0) {
 #ifdef CONFIG_STACKTRACE
 			/* FIXME */
 			extern struct stack_trace saved_trace_enabled;
@@ -399,7 +395,7 @@ static inline int e2k_modify_call(const unsigned long addr,
 		}
 
 		/* Set the condition to 0. */
-		AS(instruction.SS).ctcond &= ~SS_CT_MASK;
+		instruction.SS.ctcond &= ~SS_CT_MASK;
 	}
 
 	/* Write the modified syllable. */

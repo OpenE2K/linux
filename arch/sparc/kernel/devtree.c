@@ -106,7 +106,7 @@ int __init device_tree_init(void)
 		printk(KERN_INFO "DevTree: device tree size is %d\n", sz);
 	}
 
-	dt = memblock_alloc(sz, 0);
+	dt = memblock_alloc(sz, SMP_CACHE_BYTES);
 	if (dt == NULL) {
 		printk(KERN_ERR "DevTree: not enough memory\n");
 		devtree_detected = 0;

@@ -582,10 +582,19 @@ static int set_memory_attr(unsigned long start, unsigned long end,
 		nmi_on_each_cpu(sma_flush_tlb_ipi, NULL, 1, 0);
 
 		/*
-		 * gpu-imgtec expects the caches to be dropped
-		 * (see _ApplyOSPagesAttribute()).
+		 * gpu-imgtec expects the caches to be dropped when remapping
+		 * to WC/UC (see _ApplyOSPagesAttribute()).
+		 *
+		 * Also (#134896):
+		 * 1) When remapping memory from General/WB/WC to External/UC
+		 * we must flush previous cache contents so that they won't
+		 * overwrite RAM contents later.
+		 * 2) When remapping memory from External/UC to General/WB/WC
+		 * it is possible that hardware prefetcher has loaded some of
+		 * its older contents into cache so it must be flushed.
 		 */
-		if (mode == SMA_UC_MT || mode == SMA_WC_MT)
+		if (mode == SMA_UC_MT || mode == SMA_WC_MT ||
+				cpu_has(CPU_FEAT_HW_PREFETCHER) && mode == SMA_WB_MT)
 			write_back_cache_range(start, end - start);
 	}
 

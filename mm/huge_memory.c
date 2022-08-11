@@ -1901,11 +1901,7 @@ bool move_huge_pmd(struct vm_area_struct *vma, unsigned long old_addr,
 		new_ptl = pmd_lockptr(mm, new_pmd);
 		if (new_ptl != old_ptl)
 			spin_lock_nested(new_ptl, SINGLE_DEPTH_NESTING);
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		pmd = pmdp_huge_get_and_clear_as_valid(mm, old_addr, old_pmd);
-#else
 		pmd = pmdp_huge_get_and_clear(mm, old_addr, old_pmd);
-#endif
 		if (pmd_present(pmd))
 			force_flush = true;
 		VM_BUG_ON(!pmd_none(*new_pmd));

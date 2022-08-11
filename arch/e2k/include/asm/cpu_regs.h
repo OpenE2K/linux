@@ -504,11 +504,6 @@ write_OSGD_hi_reg(e2k_osgd_hi_t OSGD_hi)
  * from the high & low word structure
  */
 
-#define	WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
-({ \
-	WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value); \
-	WRITE_OSGD_LO_REG_VALUE(OSGD_lo_value); \
-})
 #define	BOOT_WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
 ({ \
 	BOOT_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value); \
@@ -2965,11 +2960,11 @@ native_boot_init_BGR_reg(void)
 /*
  * Read/Write Control Unit HardWare registers (CU_HW0/CU_HW1)
  */
-#define	READ_CU_HW0_REG()	READ_CU_HW0_REG_VALUE()
-#define	READ_CU_HW1_REG()	READ_CU_HW1_REG_VALUE()
+#define READ_CU_HW0_REG() ((e2k_cu_hw0_t) { .word = READ_CU_HW0_REG_VALUE() })
+#define READ_CU_HW1_REG() READ_CU_HW1_REG_VALUE()
 
-#define	WRITE_CU_HW0_REG(reg)	WRITE_CU_HW0_REG_VALUE(reg)
-#define	WRITE_CU_HW1_REG(reg)	WRITE_CU_HW1_REG_VALUE(reg)
+#define WRITE_CU_HW0_REG(reg)	WRITE_CU_HW0_REG_VALUE(reg.word)
+#define WRITE_CU_HW1_REG(reg)	WRITE_CU_HW1_REG_VALUE(reg)
 
 /*
  * Read low/high double-word Recovery point register (RPR)
@@ -3194,11 +3189,7 @@ write_DIBSR_reg(e2k_dibsr_t DIBSR)
 #define	NATIVE_WRITE_DIMCR_REG(DIMCR)	\
 		NATIVE_WRITE_DIMCR_REG_VALUE(DIMCR.DIMCR_reg)
 #define	WRITE_DIMCR_REG(DIMCR)	WRITE_DIMCR_REG_VALUE(DIMCR.DIMCR_reg)
-static inline void
-write_DIMCR_reg(e2k_dimcr_t DIMCR)
-{
-	WRITE_DIMCR_REG(DIMCR);
-}
+
 #define	NATIVE_WRITE_DIBAR0_REG(DIBAR0)	NATIVE_WRITE_DIBAR0_REG_VALUE(DIBAR0)
 #define	NATIVE_WRITE_DIBAR1_REG(DIBAR1)	NATIVE_WRITE_DIBAR1_REG_VALUE(DIBAR1)
 #define	NATIVE_WRITE_DIBAR2_REG(DIBAR2)	NATIVE_WRITE_DIBAR2_REG_VALUE(DIBAR2)

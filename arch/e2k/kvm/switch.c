@@ -2,7 +2,8 @@
 #include <asm/kvm/regs_state.h>
 #include <asm/kvm/switch.h>
 
-void host_syscall_guest_exit_trap(struct thread_info *ti, struct pt_regs *regs)
+notrace void host_syscall_guest_exit_trap(struct thread_info *ti,
+						struct pt_regs *regs)
 {
 	if (likely(!test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE)))
 		return;

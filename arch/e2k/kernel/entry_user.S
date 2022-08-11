@@ -119,6 +119,9 @@ $protected_switch_to_user_func:
 .global $sys_backtrace_return
 .type sys_backtrace_return,@function
 $sys_backtrace_return:
-	return %ctpr3
+	{
+		nop 3
+		return %ctpr3
+	}
 	ct %ctpr3
 .size $sys_backtrace_return, . - $sys_backtrace_return

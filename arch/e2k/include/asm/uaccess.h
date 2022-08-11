@@ -197,7 +197,8 @@ extern int __get_user_bad(void) __attribute__((noreturn));
 	const __typeof__(*(ptr)) __user *__gu_ptr = (ptr);		\
 	might_fault();							\
 	access_ok(__gu_ptr, sizeof(*__gu_ptr)) ?			\
-		__get_user((x), __gu_ptr) : -EFAULT;			\
+		__get_user((x), __gu_ptr) :                             \
+		((x) = (__typeof__(x)) 0, -EFAULT);                     \
 })
 
 

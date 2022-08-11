@@ -591,7 +591,7 @@ __flush_cpu_root_pt(void)
 		return;
 	if (!THERE_IS_DUP_KERNEL)
 		return;
-	if (current->active_mm == &init_mm)
+	if (current->active_mm == &init_mm || !current->active_mm)
 		return;
 	copy_user_pgd_to_kernel_root_pt(current->active_mm->pgd);
 }

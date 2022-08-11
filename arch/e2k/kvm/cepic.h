@@ -49,7 +49,7 @@ int kvm_epic_nmi_deliver(struct kvm_vcpu *vcpu);
 
 extern void kvm_print_EPIC_field(struct kvm_cepic *epic, int base);
 extern void kvm_print_local_EPIC(struct kvm_vcpu *vcpu);
-extern u32 kvm_vcpu_to_full_cepic_id(struct kvm_vcpu *vcpu);
+extern u32 kvm_vcpu_to_full_cepic_id(const struct kvm_vcpu *vcpu);
 
 /* From ioapic.h */
 int kvm_epic_match_dest(int cepic_id, int src, int short_hand, int dest);

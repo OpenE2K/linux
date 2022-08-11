@@ -10,6 +10,7 @@
 #include <linux/random.h>
 #include <linux/of_fdt.h>
 #include <linux/memblock.h>
+#include <linux/sort.h>
 #include <asm/bootinfo.h>
 #include <asm/io.h>
 #include <asm/console.h>
@@ -95,79 +96,116 @@ void __init l_setup_vga(void)
 		screen_info.orig_video_mode = boot_info->vga_mode;
 }
 
-#define L_MAC_SAVENUM 1
-#if (L_MAC_SAVENUM)
+
 #define L_MAC_MAX 32
-static int l_mac_last_n = 0;
-static unsigned char l_mac_addr5[L_MAC_MAX] = {-1};
-static char l_mac_bus_name[L_MAC_MAX][50] = { {0} };
-#endif
 static unsigned char l_base_mac_addr[6] = {0};
-char *mcst_mb_name;
-EXPORT_SYMBOL(mcst_mb_name);
+static int l_mac_last_nr = 0;
+
+static const struct pci_device_id l_iohub_eth_devices[] = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_E1000) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_ETH) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGB) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_XGBE) },
+	{ }	/* terminate list */
+};
+
+static struct l_pdev_mac {
+	unsigned char depth, domain, bus, slot, func;
+} *l_pdev_mac;
+
+static int l_cmp_pdev_mac(const void *_a, const void *_b)
+{
+	const struct l_pdev_mac *a = _a, *b = _b;
+	if (a->depth != b->depth)
+		return (int)a->depth - (int)b->depth;
+	if (a->domain != b->domain)
+		return (int)a->domain - (int)b->domain;
+	if (a->bus != b->bus)
+		return (int)a->bus - (int)b->bus;
+	if (a->slot != b->slot)
+		return (int)a->slot - (int)b->slot;
+	if (a->func != b->func)
+		return (int)a->func - (int)b->func;
+	WARN_ON(1);
+	return 0;
+}
+
+static int l_get_depth(struct pci_dev *pdev)
+{
+	int i = 0;
+	while ((pdev = pci_upstream_bridge(pdev)))
+		i++;
+	return i;
+}
+
+static int __init l_ethernet_mac_addr_init(void)
+{
+	int i = 0;
+	struct pci_dev *pdev = NULL;
+	const struct pci_device_id *ent;
+	struct l_pdev_mac *m = kmalloc(sizeof(*m) * L_MAC_MAX, GFP_KERNEL);
+	if (!m)
+		return -ENOMEM;
+	for_each_pci_dev(pdev) {
+		ent = pci_match_id(l_iohub_eth_devices, pdev);
+		if (!ent)
+			continue;
+		m[i].depth  = l_get_depth(pdev);
+		m[i].domain = pci_domain_nr(pdev->bus);
+		m[i].bus    = pdev->bus->number;
+		m[i].slot   = PCI_SLOT(pdev->devfn);
+		m[i].func   = PCI_FUNC(pdev->devfn);
+		i++;
+		if (WARN_ON(i == L_MAC_MAX))
+			break;
+	}
+	sort(m, i, sizeof(struct l_pdev_mac), l_cmp_pdev_mac, NULL);
+	l_mac_last_nr = i;
+	l_pdev_mac = m;
+	return 0;
+}
+/* Needs to be done after pci initialization which are subsys_initcall. */
+subsys_initcall_sync(l_ethernet_mac_addr_init);
 
 int l_set_ethernet_macaddr(struct pci_dev *pdev, char *macaddr)
 {
-	static int l_cards_without_mac = 1;
-	static int assigned_predefined_address = 0;
-	static raw_spinlock_t	my_spinlock =
-		__RAW_SPIN_LOCK_UNLOCKED(my_spinlock);
-	int i;
-	for (i = 0; i < 6; i++) {
+	static DEFINE_SPINLOCK(lock);
+	struct l_pdev_mac *m = l_pdev_mac;
+	int i, ret = 0;
+	for (i = 0; i < 6; i++)
 		macaddr[i] = l_base_mac_addr[i];
-	}
-	if (pdev && (((pdev->vendor == PCI_VENDOR_ID_ELBRUS &&
-                pdev->device == 0x4d45) ||
-                (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-                pdev->device == PCI_DEVICE_ID_MCST_ETH)) &&
-                (dev_to_node(&pdev->dev) <= 0) &&
-                !assigned_predefined_address)) {
-                /* It is iohub card. If it's first assign predefined */
-                /* address - l_base_mac_addr */
-                assigned_predefined_address = 1;
-		return 1;
-	}
-	raw_spin_lock_irq(&my_spinlock);
-#if (L_MAC_SAVENUM)
-	if (pdev) {
-		/* find prev mac for busname */
-		macaddr[5] = 0;
-		for (i = 0; i < l_mac_last_n; i++) {
-			if (0 == strcmp(dev_name(&pdev->dev),
-			    l_mac_bus_name[i])) {
-				macaddr[5] = l_mac_addr5[i];
-				pr_info("Saved MAC[5]:%02X for device %s\n",
-					l_mac_addr5[i],
-					dev_name(&pdev->dev));
-				break;
-			}
-		}
-		if (0 == macaddr[5]) {
-			macaddr[5] = (l_base_mac_addr[5] +
-				      l_cards_without_mac) & 0xff;
-			l_cards_without_mac++;
 
-			/* save mac and busname */
-			if (l_mac_last_n < L_MAC_MAX) {
-				l_mac_addr5[l_mac_last_n] = macaddr[5];
-				strcpy(l_mac_bus_name[l_mac_last_n],
-				       dev_name(&pdev->dev));
-				pr_info("Save MAC[5]:%02X for device %s\n",
-					l_mac_addr5[l_mac_last_n],
-					l_mac_bus_name[l_mac_last_n]);
-				l_mac_last_n += 1;
+	spin_lock_irq(&lock);
+	if (pdev) {
+		/* Find reserved mac-address for device */
+		for (i = 0; i < l_mac_last_nr; i++) {
+			if (m[i].domain == pci_domain_nr(pdev->bus) &&
+				m[i].bus == pdev->bus->number &&
+				m[i].slot == PCI_SLOT(pdev->devfn) &&
+				m[i].func == PCI_FUNC(pdev->devfn)) {
+				macaddr[5] += i;
+				goto out;
 			}
 		}
-	} else {
-		macaddr[5] += l_cards_without_mac & 0xff;
-		l_cards_without_mac++;
 	}
-#else
-	macaddr[5] += l_cards_without_mac & 0xff;
-	l_cards_without_mac++;
-#endif
-	raw_spin_unlock_irq(&my_spinlock);
-	return 0;
+	/*Try to assign mac-address */
+	if (l_mac_last_nr >= L_MAC_MAX) {
+		ret = -ENOSPC;
+		goto out;
+	}
+	i = l_mac_last_nr;
+	if (pdev) {
+		m[i].depth  = l_get_depth(pdev);
+		m[i].domain = pci_domain_nr(pdev->bus);
+		m[i].bus    = pdev->bus->number;
+		m[i].slot   = PCI_SLOT(pdev->devfn);
+		m[i].func   = PCI_FUNC(pdev->devfn);
+	}
+	macaddr[5] += i;
+	l_mac_last_nr++;
+out:
+	spin_unlock_irq(&lock);
+	return ret;
 }
 EXPORT_SYMBOL(l_set_ethernet_macaddr);
 
@@ -203,6 +241,8 @@ __setup("mach_mac=", machine_mac_addr_setup);
 
 #define MB_NAME_BODY_SZ	32
 static char mb_name_body[MB_NAME_BODY_SZ];
+char *mcst_mb_name;
+EXPORT_SYMBOL(mcst_mb_name);
 
 int __init l_setup_arch(void)
 {

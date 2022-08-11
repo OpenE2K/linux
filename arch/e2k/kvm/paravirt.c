@@ -1437,11 +1437,6 @@ static pte_t do_pv_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 {
 	return native_ptep_get_and_clear(mm, addr, ptep);
 }
-static pte_t do_pv_ptep_get_and_clear_as_valid(struct mm_struct *mm,
-					unsigned long addr, pte_t *ptep)
-{
-	return native_ptep_get_and_clear_as_valid(mm, addr, ptep);
-}
 static void do_ptep_wrprotect_atomic(struct mm_struct *mm,
 					e2k_addr_t addr, pte_t *ptep)
 {
@@ -1512,7 +1507,6 @@ static int do_set_memory_attr_on_host(e2k_addr_t start, e2k_addr_t end,
 	.write_pud_at = do_write_pud_at,				\
 	.write_pgd_at = do_write_pgd_at,				\
 	.ptep_get_and_clear = do_pv_ptep_get_and_clear,			\
-	.ptep_get_and_clear_as_valid = do_pv_ptep_get_and_clear_as_valid, \
 	.ptep_wrprotect_atomic = do_ptep_wrprotect_atomic,		\
 	.get_pte_for_address = do_get_pte_for_address,			\
 	.remap_area_pages = native_remap_area_pages,			\

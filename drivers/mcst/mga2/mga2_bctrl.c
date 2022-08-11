@@ -150,9 +150,10 @@ static int mga2_append_desc(struct mga2 *mga2, struct mga2_gem_object *mo)
 	struct bctrl_desc *last_fence = &mga2->bctrl->fence[l];
 	struct dma_fence *dfence = &mga2->mga2_fence[l];
 	u32 status;
+	u32 v = mga25(mga2) ? MGA25_INT_B_SOFTINT : MGA2_INT_B_SOFTINT;
 
 	fence_wdesc(0, circ_inc(h) << 16, MGA2_BCTRL_TAIL, 1, 0);
-	fence_wdesc(1, MGA2_INT_B_SETRST | MGA2_INT_B_SOFTINT,
+	fence_wdesc(1, MGA2_INT_B_SETRST | v,
 			mga2->info->int_regs_base + MGA2_INTREQ, 0, 1);
 
 	write_desc(fence, 0);
@@ -161,6 +162,7 @@ static int mga2_append_desc(struct mga2 *mga2, struct mga2_gem_object *mo)
 	write_desc(last_fence, addr);  /* link the descriptor */
 
 	mga2->head = circ_inc(h);
+	mga2->fence_seqno++;
 
 	/* mga2 writes desc first, then the status */
 	status = le32_to_cpu(READ_ONCE(base->status));
@@ -212,7 +214,7 @@ int mga2_debugfs_bctrl(struct seq_file *s, void *data)
 int __mga2fb_bctrl_hw_init(struct mga2 *mga2)
 {
 	u64 addr = mga2->bctrl_dma;
-	wfb(mga2->tail >> 16, MGA2_BCTRL_TAIL);
+	wfb(mga2->tail << 16, MGA2_BCTRL_TAIL);
 	wfb(addr, MGA2_BCTRL_LBASEPTR);
 	wfb(addr >> 32, MGA2_BCTRL_HBASEPTR);
 	return 0;
@@ -244,9 +246,14 @@ int mga2_bctrl_ioctl(struct drm_device *drm, void *data, struct drm_file *file)
 		return -ENODEV;
 
 	mutex_lock(&mga2->bctrl_mu);
-
 	if ((ret = __mga2_sync(mga2)))
 		goto out;
+
+	if (mga25(mga2) && !mga2->bctrl_active) {
+		mga2_update_ptr(mga2);
+		wfb(mga2->tail << 16, MGA2_BCTRL_TAIL);
+		mga2->bctrl_active = true;
+	}
 
 	mo = mga2_auc_ioctl(drm, data, file);
 	if (IS_ERR(mo)) {
@@ -254,7 +261,7 @@ int mga2_bctrl_ioctl(struct drm_device *drm, void *data, struct drm_file *file)
 		goto out;
 	}
 
-	append_desc(mga2, mo);
+	mga2_append_desc(mga2, mo);
 out:
 	mutex_unlock(&mga2->bctrl_mu);
 	return ret;

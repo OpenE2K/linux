@@ -14,13 +14,13 @@
 #include <linux/cpu.h>
 #include <linux/mod_devicetable.h>
 #include <linux/hwmon-sysfs.h>
+#include <linux/thermal.h>
 
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 
 
 #define DRIVER_VERSION		"1.2"
-#undef PCS_PLATFORM_DRIVER
 
 /* Regs index */
 #define PCS_CTRL5	0x0CC4
@@ -56,7 +56,9 @@ static const struct pcs_ctrl_info pcs_ctrls[] = {
 #define PCS_CTRL_MASK	0x0FFF
 
 struct pcs_data {
+	struct platform_device *pdev;
 	struct device *hdev;
+	struct thermal_zone_device *tz;
 	int node;
 };
 
@@ -231,23 +233,49 @@ static int create_pcs_group(struct device *dev)
 	return 0;
 }
 
+static int pcs_get_temp(void *data, int *temp)
+{
+	struct pcs_data *pcs = data;
+	int val;
+
+	val = sic_read_node_nbsr_reg(pcs->node, pcs_ctrls[8].offset);
+	val = (val >> pcs_ctrls[8].shift) & PCS_CTRL_MASK;
+
+	*temp = ((val << 20) / 0x100000) * 125;
+
+	return 0;
+}
+
+static const struct thermal_zone_of_device_ops pcs_tz_ops = {
+	.get_temp = pcs_get_temp,
+};
+
+static void pcs_init_thermal(struct pcs_data *pcs)
+{
+	struct platform_device *pdev = pcs->pdev;
+
+	pcs->tz = devm_thermal_zone_of_sensor_register(&pdev->dev,
+					 0, pcs, &pcs_tz_ops);
+	if (IS_ERR(pcs->tz)) {
+		dev_warn(&pdev->dev, "unable to register thermal sensor %ld\n",
+			 PTR_ERR(pcs->tz));
+	}
+}
+
 #define	MAX_NODE	4
 
-struct device *hwmon_dev[MAX_NODE];
+struct pcs_data *p_pcs[MAX_NODE];
 
-#ifndef PCS_PLATFORM_DRIVER
 static int __init pcs_probe(void)
-#else /* PCS_PLATFORM_DRIVER */
-static int pcs_probe(struct platform_device *pdev)
-#endif /* PCS_PLATFORM_DRIVER */
 {
 	int node;
+	struct device_node *np;
 	struct pcs_data *pcs;
-#ifdef PCS_PLATFORM_DRIVER
-	struct device *dev = &pdev->dev;
-#else /* !PCS_PLATFORM_DRIVER */
 	struct device *dev = cpu_subsys.dev_root;
+	struct platform_device *pdev;
+	struct device *hwmon_dev;
 	int ret;
+	char s[64];
 
 	if (machine.native_id != MACHINE_ID_E8C &&
 			machine.native_id != MACHINE_ID_E8C2)
@@ -265,21 +293,46 @@ static int pcs_probe(struct platform_device *pdev)
 	if (ret)
 		return -ENOMEM;
 
-#endif /* PCS_PLATFORM_DRIVER */
-
 	for_each_online_node(node) {
+		pdev = platform_device_register_data(dev, "pcs", node,
+								NULL, 0);
+		if (IS_ERR(pdev)) {
+			dev_err(dev, "failed to create PCS platform device");
+			return PTR_ERR(pdev);
+		}
 		pcs = devm_kzalloc(dev, sizeof(*pcs), GFP_KERNEL);
-		if (!pcs)
+		if (!pcs) {
+			platform_device_unregister(pdev);
 			return -ENOMEM;
+		}
+		/*
+		 * binding pcs thermal-zone block for each node from device tree with
+		 * pcs platform device registered above.
+		 */
+#ifdef CONFIG_OF
+		sprintf(s, "/pcs@%d", node);
+		np = of_find_node_by_path(s);
+		if (np)
+			pdev->dev.of_node = np;
+#endif
+		pcs->pdev = pdev;
 		pcs->node = node;
-		hwmon_dev[node] = devm_hwmon_device_register_with_groups(dev,
+		hwmon_dev = devm_hwmon_device_register_with_groups(&pdev->dev,
 								KBUILD_MODNAME,
 								pcs,
 								pcs_groups);
-		if (IS_ERR(hwmon_dev))
+		if (IS_ERR(hwmon_dev)) {
+			platform_device_unregister(pdev);
 			return PTR_ERR(hwmon_dev);
+		}
 
-		pcs->hdev = hwmon_dev[node];
+		pcs->hdev = hwmon_dev;
+		p_pcs[node] = pcs;
+
+#ifdef CONFIG_OF
+		if (np)
+			pcs_init_thermal(pcs);
+#endif
 
 		dev_info(dev, "node %d hwmon device enabled - %s",
 			 pcs->node, dev_name(pcs->hdev));
@@ -288,46 +341,19 @@ static int pcs_probe(struct platform_device *pdev)
 	return 0;
 } /* pcs_probe */
 
-#ifndef PCS_PLATFORM_DRIVER
 static void __exit pcs_remove(void)
-#else
-static void pcs_remove(struct platform_device *pdev)
-#endif
 {
 	int node;
 
 	for_each_online_node(node) {
-		sysfs_remove_group(&hwmon_dev[node]->kobj, &pcs_group);
-		hwmon_device_unregister(hwmon_dev[node]);
+		sysfs_remove_group(&p_pcs[node]->hdev->kobj, &pcs_group);
+		hwmon_device_unregister(p_pcs[node]->hdev);
+		platform_device_unregister(p_pcs[node]->pdev);
 	}
 }
 
-#ifndef PCS_PLATFORM_DRIVER
-
 module_init(pcs_probe);
 module_exit(pcs_remove);
-
-#else /* PCS_PLATFORM_DRIVER */
-
-static const struct of_device_id pcs_of_match[] = {
-	{.compatible = "mcst,l_pcs"},
-	{},
-};
-
-static struct platform_driver pcs_driver = {
-	.probe = pcs_probe,
-	.driver = {
-		.name = KBUILD_MODNAME,
-		.of_match_table = pcs_of_match,
-	},
-	.remove = pcs_remove,
-};
-
-module_platform_driver(pcs_driver);
-
-MODULE_DEVICE_TABLE(of, pcs_of_match);
-
-#endif /* PCS_PLATFORM_DRIVER */
 
 MODULE_AUTHOR("Andrey.V.Kalita@mcst.ru");
 MODULE_DESCRIPTION("e8c/e8c2 pcs driver");

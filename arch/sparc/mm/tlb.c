@@ -76,7 +76,7 @@ void arch_leave_lazy_mmu_mode(void)
 
 #endif  /* CONFIG_MCST_RT */
 
-#ifdef CONFIG_PREEMPT
+#ifdef CONFIG_PREEMPTION
 void check_lazy_mmu_end(void)
 {
 	struct tlb_batch *tb = this_cpu_ptr(&tlb_batch);
@@ -94,7 +94,7 @@ void check_lazy_mmu_begin(void)
 		tb->active = 1;
 	}
 }
-#endif	/*CONFIG_PREEMPT*/
+#endif	/*CONFIG_PREEMPTION*/
 
 
 static void tlb_batch_add_one(struct mm_struct *mm, unsigned long vaddr,

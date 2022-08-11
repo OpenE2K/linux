@@ -174,7 +174,7 @@ int e2k_uncore_add(struct perf_event *event, int flags)
 	/* if didn't find, take the first available counter */
 	hwc->idx = -1;
 	if (uncore->add_event) {
-		ret = uncore->add_event(event);
+		ret = uncore->add_event(uncore, event);
 		if (ret)
 			return ret;
 	} else {

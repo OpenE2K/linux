@@ -680,6 +680,10 @@ put_crs(e2k_mem_crs_t *crs, e2k_addr_t base, e2k_addr_t cr_ind)
 	return ret;
 }
 
+extern int chain_stack_frame_init(e2k_mem_crs_t *crs, void *fn_ptr,
+		size_t dstack_size, e2k_psr_t psr,
+		int wbs, int wpsz, bool user);
+
 extern void __update_psp_regs(unsigned long base, unsigned long size,
 				unsigned long new_fp,
 				e2k_psp_lo_t *psp_lo, e2k_psp_hi_t *psp_hi);

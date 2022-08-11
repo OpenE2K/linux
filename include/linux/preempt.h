@@ -191,9 +191,9 @@ extern void preempt_count_sub(int val);
 #  ifdef CONFIG_DEBUG_PREEMPT_COUNT
 #   define preempt_count_sub(val)                                         \
 	do {                                                            \
-		WARN_ONCE((val > *preempt_count_ptr()),                 \
+		WARN_ONCE((val > preempt_count()),                 \
 			"preempt count(0x%08x) < val(%d)\n",            \
-			*preempt_count_ptr(), val);                     \
+			preempt_count(), val);                     \
 		if (unlikely(do_watch_preempt_disable))                 \
 			chck_tm_prmtdsbl(val);                          \
 		__preempt_count_sub(val);                               \

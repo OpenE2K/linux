@@ -170,7 +170,7 @@ config L_PCI_QUIRKS
 
 config L_SIC_IPLINK_OFF
 	bool "MCST E2S: support for ipcc2 iplinks off"
-	depends on E2K
+	depends on CPU_E2S
 	select PROC_FS
 	default y
 	help
@@ -188,8 +188,10 @@ config L_MMPD
 
 config L_PMC
 	tristate "Elbrus-1C+ Power Management Controller"
-	depends on E2K && CPU_FREQ
-	default y # we need pmc_l_gpufreq_get_frequency() for galcore.ko
+	depends on E2K
+	select CPU_FREQ if !MCST_RT
+	select PM_OPP
+	default m
 	help
 	  Power Management Controller for Elbrus-1C+
 
@@ -197,7 +199,7 @@ config S2_PMC
 	bool "R2000 Power Management Controller (S2 PMC)"
 	depends on E90S
 	select CPU_IDLE  if !MCST_RT
-	select CPU_FREQ
+	select CPU_FREQ  if !MCST_RT
 	default y # we need s2_get_freq_mult() for r2000
 	help
 	 Power Management Controller (PMC) for MCST R2000 (E90S/SPARC v9) CPU

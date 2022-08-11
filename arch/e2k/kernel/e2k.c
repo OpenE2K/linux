@@ -107,7 +107,7 @@ int native_show_cpuinfo(struct seq_file *m, void *v)
 		"revision\t: %u\n"
 		"cpu MHz\t\t: %llu\n"
 		"bogomips\t: %llu.%02u\n\n",
-		cpu, c->family >= 5 ? ES2_CPU_VENDOR : mcst_mb_name,
+		cpu, c->family >= 5 ? ELBRUS_CPU_VENDOR : mcst_mb_name,
 		c->family, c->model, GET_CPU_TYPE_NAME(c->model),
 		c->revision, freq, 2 * freq, 0);
 
@@ -242,7 +242,7 @@ void __init e2k_init_IRQ_apic(void)
 	l_init_system_handlers_table();
 
 	if (l_iommu_supported())
-		setup_APIC_vector_handler(LVT3_INTERRUPT_VECTOR,
+		setup_PIC_vector_handler(LVT3_INTERRUPT_VECTOR,
 			iommu_interrupt, 1, "iommu_interrupt");
 
 	if (machine.setup_apic_vector_handlers)
@@ -383,16 +383,21 @@ native_setup_machine(void)
 #else	/* ! CONFIG_E2K_MACHINE */
 	switch (machine.native_id)
 	{
+#if CONFIG_E2K_MINVER == 2
 		case MACHINE_ID_ES2_DSP_LMS:
 		case MACHINE_ID_ES2_RU_LMS:
 		case MACHINE_ID_ES2_DSP:
 		case MACHINE_ID_ES2_RU:
 			es2_setup_machine();
 			break;
+#endif
+#if CONFIG_E2K_MINVER <= 3
 		case MACHINE_ID_E2S_LMS:
 		case MACHINE_ID_E2S:
 			e2s_setup_machine();
 			break;
+#endif
+#if CONFIG_E2K_MINVER <= 4
 		case MACHINE_ID_E8C_LMS:
 		case MACHINE_ID_E8C:
 			e8c_setup_machine();
@@ -401,10 +406,14 @@ native_setup_machine(void)
 		case MACHINE_ID_E1CP:
 			e1cp_setup_machine();
 			break;
+#endif
+#if CONFIG_E2K_MINVER <= 5
 		case MACHINE_ID_E8C2_LMS:
 		case MACHINE_ID_E8C2:
 			e8c2_setup_machine();
 			break;
+#endif
+#if CONFIG_E2K_MINVER <= 6
 		case MACHINE_ID_E12C_LMS:
 		case MACHINE_ID_E12C:
 			e12c_setup_machine();
@@ -417,6 +426,7 @@ native_setup_machine(void)
 		case MACHINE_ID_E2C3:
 			e2c3_setup_machine();
 			break;
+#endif  /* CONFIG_E2K_MINVER */
 		default:
 			panic("setup_arch(): !!! UNKNOWN MACHINE TYPE !!!\n");
 			machine.setup_arch = NULL;

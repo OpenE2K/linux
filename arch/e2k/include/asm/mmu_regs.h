@@ -707,9 +707,9 @@ boot_native_invalidate_CACHE_L12(void)
 static inline void
 native_raw_write_back_CACHE_L12(void)
 {
-	__E2K_WAIT(E2K_WAIT_OP_MA_C_MASK);
+	__E2K_WAIT(_ma_c);
 	NATIVE_FLUSH_CACHE_L12(_flush_op_write_back_cache_L12);
-	__E2K_WAIT(E2K_WAIT_OP_FL_C_MASK | E2K_WAIT_OP_MA_C_MASK);
+	__E2K_WAIT(_fl_c | _ma_c);
 }
 
 static inline void
@@ -727,9 +727,9 @@ write_back_CACHE_L12(void)
 static inline void
 native_raw_flush_TLB_all(void)
 {
-	__E2K_WAIT(E2K_WAIT_OP_ST_C_MASK);
+	__E2K_WAIT(_st_c);
 	NATIVE_FLUSH_TLB_ALL(_flush_op_tlb_all);
-	__E2K_WAIT(E2K_WAIT_OP_FL_C_MASK | E2K_WAIT_OP_MA_C_MASK);
+	__E2K_WAIT(_fl_c | _ma_c);
 }
 
 static inline void

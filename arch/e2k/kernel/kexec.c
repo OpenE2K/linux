@@ -40,10 +40,11 @@
 #undef	DEBUG_KEXEC_MODE
 #undef	DebugKE
 #define	DEBUG_KEXEC_MODE	0
-#define DebugKE(fmt, ...)						\
-		pr_err("%d %d %s: " fmt, raw_smp_processor_id(),	\
+#define DebugBootKE		if (DEBUG_KEXEC_MODE) do_boot_printk
+#define DebugKE(fmt, ...)							\
+		if (DEBUG_KEXEC_MODE)						\
+			pr_err("%d %d %s: " fmt, raw_smp_processor_id(),	\
 				current->pid, __func__, ##__VA_ARGS__)
-
 
 struct smp_kexec_reboot_param;
 typedef void (*kexec_reboot_func_ptr)(struct smp_kexec_reboot_param *);
@@ -278,7 +279,7 @@ static void boot_merge_kexec_mem(struct kexec_mem_ptr *mem)
 		return;
 
 	for (i = 0; i < mem->chunks_count; i++) {
-		DebugKE("copy 0x%x bytes from 0x%llx to 0x%llx\n",
+		DebugBootKE("copy 0x%x bytes from 0x%llx to 0x%llx\n",
 			mem->chunks[i].size, mem->chunks[i].start,
 			mem->phys_addr + offset);
 		boot_fast_memcpy((void *)(mem->phys_addr + offset),
@@ -371,7 +372,7 @@ static int find_continuous_initrd_mem(struct kexec_mem_ptr *initrd)
 
 static void boot_merge_initrd_mem(struct kexec_mem_ptr *initrd)
 {
-	DebugKE("merge chunks of initrd memory 0x%llx\n", initrd);
+	DebugBootKE("merge chunks of initrd memory 0x%llx\n", initrd);
 	return boot_merge_kexec_mem(initrd);
 }
 
@@ -415,7 +416,7 @@ static int find_continuous_kernel_code_mem(struct kexec_mem_ptr *image)
 
 static void boot_merge_kernel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("merge chunks of kernel code memory 0x%llx\n", image);
+	DebugBootKE("merge chunks of kernel code memory 0x%llx\n", image);
 	return boot_merge_kexec_mem(image);
 }
 
@@ -453,7 +454,7 @@ static int find_continuous_lintel_code_mem(struct kexec_mem_ptr *image)
 
 static void boot_merge_lintel_code_mem(struct kexec_mem_ptr *image)
 {
-	DebugKE("merge chunks of lintel code memory 0x%llx\n", image);
+	DebugBootKE("merge chunks of lintel code memory 0x%llx\n", image);
 	return boot_merge_kexec_mem(image);
 }
 
@@ -539,6 +540,30 @@ kexec_switch_to_phys(struct smp_kexec_reboot_param *p)
 	reg_hi.PCSP_hi_ind = 0;
 	NATIVE_NV_WRITE_PCSP_REG(reg_hi, reg_lo);
 
+#ifndef	CONFIG_SMP
+	bootmem->boot_stack.phys_offset = bootmem->boot_stack.size;
+#else
+	bootmem->boot_stack[cpuid].phys_offset =
+			bootmem->boot_stack[cpuid].size;
+#endif
+
+	stack_reg_lo.USD_lo_half = 0;
+	stack_reg_hi.USD_hi_half = 0;
+#ifndef	CONFIG_SMP
+	usbr.USBR_base = bootmem->boot_stack.phys + bootmem->boot_stack.size;
+	stack_reg_lo.USD_lo_base = bootmem->boot_stack.phys +
+					bootmem->boot_stack.phys_offset;
+	stack_reg_hi.USD_hi_size = bootmem->boot_stack.phys_offset;
+#else
+	usbr.USBR_base = bootmem->boot_stack[cpuid].phys +
+				bootmem->boot_stack[cpuid].size;
+	stack_reg_lo.USD_lo_base = bootmem->boot_stack[cpuid].phys +
+					bootmem->boot_stack[cpuid].phys_offset;
+	stack_reg_hi.USD_hi_size = bootmem->boot_stack[cpuid].phys_offset;
+#endif
+	stack_reg_lo.USD_lo_p = 0;
+	NATIVE_NV_WRITE_USBR_USD_REG(usbr, stack_reg_hi, stack_reg_lo);
+
 #ifndef	CONFIG_NUMA
 	reg_lo.CUD_lo_base = bootmem->text.phys;
 #else
@@ -558,42 +583,13 @@ kexec_switch_to_phys(struct smp_kexec_reboot_param *p)
 	NATIVE_WRITE_GD_LO_REG(reg_lo);
 	NATIVE_WRITE_OSGD_LO_REG(reg_lo);
 
-#ifndef	CONFIG_SMP
-	usbr.USBR_base = bootmem->boot_stack.phys + bootmem->boot_stack.size;
-#else
-	usbr.USBR_base = bootmem->boot_stack[cpuid].phys +
-				bootmem->boot_stack[cpuid].size;
-#endif
-	NATIVE_NV_WRITE_USBR_REG(usbr);
-
-#ifndef	CONFIG_SMP
-	bootmem->boot_stack.phys_offset = bootmem->boot_stack.size;
-#else
-	bootmem->boot_stack[cpuid].phys_offset =
-			bootmem->boot_stack[cpuid].size;
-#endif
-
-	stack_reg_lo.USD_lo_half = 0;
-	stack_reg_hi.USD_hi_half = 0;
-#ifndef	CONFIG_SMP
-	stack_reg_lo.USD_lo_base = bootmem->boot_stack.phys +
-					bootmem->boot_stack.phys_offset;
-	stack_reg_hi.USD_hi_size = bootmem->boot_stack.phys_offset;
-#else
-	stack_reg_lo.USD_lo_base = bootmem->boot_stack[cpuid].phys +
-					bootmem->boot_stack[cpuid].phys_offset;
-	stack_reg_hi.USD_hi_size = bootmem->boot_stack[cpuid].phys_offset;
-#endif
-	stack_reg_lo.USD_lo_p = 0;
-	NATIVE_NV_WRITE_USD_REG(stack_reg_hi, stack_reg_lo);
-
 	WRITE_CURRENT_REG_VALUE(cpuid);
 
 	E2K_CLEAR_CTPRS();
-	E2K_WAIT_ALL;
+	__E2K_WAIT_ALL;
 
 	NATIVE_WRITE_MMU_CR(MMU_CR_KERNEL_OFF);
-	E2K_WAIT_ALL;
+	__E2K_WAIT_ALL;
 
 	E2K_JUMP_ABSOLUTE_WITH_ARGUMENTS_1(p->reboot, p);
 }
@@ -694,7 +690,7 @@ static void boot_kexec_reboot_sequel(struct smp_kexec_reboot_param *p)
 
 	boot_sync_all_processors();
 
-	DebugKE("Jumping to ttable_entry12 of kernel base 0x%llx on cpu %ld\n",
+	DebugBootKE("Jumping to ttable_entry12 of kernel base 0x%llx on cpu %ld\n",
 		p->image->phys_addr, boot_smp_processor_id());
 
 	boot_kexec_setup_image_regs(bootblock, p->image->phys_addr);

@@ -155,7 +155,7 @@ static int rt_mutex_real_waiter(struct rt_mutex_waiter *waiter)
  */
 #ifndef CONFIG_DEBUG_RT_MUTEXES
 # define rt_mutex_cmpxchg_relaxed(l,c,n) (cmpxchg_relaxed(&l->owner, c, n) == c)
-#if defined CONFIG_E2K && (!defined CONFIG_E2K_MACHINE || \
+#if defined CONFIG_E2K && ((!defined CONFIG_E2K_MACHINE && CONFIG_E2K_MINVER <= 4) || \
     defined CONFIG_E2K_ES2_DSP || defined CONFIG_E2K_ES2_RU || \
     (defined CONFIG_E2K_E2S && defined CONFIG_NUMA) || \
     defined CONFIG_E2K_E8C)

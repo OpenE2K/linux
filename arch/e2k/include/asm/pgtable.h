@@ -39,15 +39,23 @@
 #define	set_pte(ptep, pteval) \
 		native_set_pte(ptep, pteval, false)
 #define set_pte_at(mm, addr, ptep, pteval) \
-		native_set_pte(ptep, pteval, false)
+do { \
+	trace_pt_update("set_pte_at: mm 0x%lx, addr 0x%lx, ptep 0x%lx, value 0x%lx\n", \
+			(mm), (addr), (ptep), pte_val(pteval)); \
+	native_set_pte(ptep, pteval, false); \
+} while (0)
 #define set_pte_not_present_at(mm, addr, ptep, pteval) \
-		native_set_pte(ptep, pteval, true)
-#define set_pte_to_move_at(mm, addr, ptep, pteval) \
-		native_set_pte_to_move(ptep, pteval)
+do { \
+	trace_pt_update("set_pte_not_present_at: mm 0x%lx, addr 0x%lx, ptep 0x%lx, value 0x%lx\n", \
+			(mm), (addr), (ptep), pte_val(pteval)); \
+	native_set_pte(ptep, pteval, true); \
+} while (0)
 #define validate_pte_at(mm, addr, ptep, pteval) \
-		native_set_pte_noflush(ptep, pteval)
-#define	ptep_get_and_clear_to_move(mm, addr, ptep) \
-		ptep_get_and_clear(mm, addr, ptep)
+do { \
+	trace_pt_update("validate_pte_at: mm 0x%lx, addr 0x%lx, ptep 0x%lx, value 0x%lx\n", \
+			(mm), (addr), (ptep), pte_val(pteval)); \
+	native_set_pte_noflush(ptep, pteval); \
+} while (0)
 #define	boot_set_pte_at(addr, ptep, pteval)	\
 		native_set_pte(ptep, pteval, false)
 #define	boot_set_pte_kernel(addr, ptep, pteval)	\
@@ -59,15 +67,25 @@
 ({ \
 	(void)(mm); \
 	(void)(addr); \
+	trace_pt_update("set_pmd_at: mm 0x%lx, addr 0x%lx, pmdp 0x%lx, value 0x%lx\n", \
+			(mm), (addr), (pmdp), pmd_val(pmdval)); \
 	native_set_pmd(pmdp, pmdval); \
 })
 #define validate_pmd_at(mm, addr, pmdp, pmdval)	\
-		native_set_pmd_noflush(pmdp, pmdval)
+do { \
+	trace_pt_update("validate_pmd_at: mm 0x%lx, addr 0x%lx, pmdp 0x%lx, value 0x%lx\n", \
+			(mm), (addr), (pmdp), pmd_val(pmdval)); \
+	native_set_pmd_noflush(pmdp, pmdval); \
+} while (0)
 
 #define	set_pud(pudp, pudval) \
 		native_set_pud(pudp, pudval)
 #define set_pud_at(mm, addr, pudp, pudval) \
-		native_set_pud(pudp, pudval)
+do { \
+	trace_pt_update("set_pud_at: mm 0x%lx, addr 0x%lx, pudp 0x%lx, value 0x%lx\n", \
+			(mm), (addr), (pudp), pud_val(pudval)); \
+	native_set_pud(pudp, pudval); \
+} while (0)
 #define validate_pud_at(mm, addr, pudp)	\
 		set_pud_at(mm, addr, pudp, __pud(_PAGE_INIT_VALID))
 #define invalidate_pud_at(mm, addr, pudp)	\
@@ -76,7 +94,11 @@
 #define	set_pgd(pgdp, pgdval) \
 		native_set_pgd(pgdp, pgdval)
 #define set_pgd_at(mm, addr, pgdp, pgdval) \
-		native_set_pgd(pgdp, pgdval)
+do { \
+	trace_pt_update("set_pgd_at: mm 0x%lx, addr 0x%lx, pgdp 0x%lx, value 0x%lx\n", \
+			(mm), (addr), (pgdp), pgd_val(pgdval)); \
+	native_set_pgd(pgdp, pgdval); \
+} while (0)
 #define validate_pgd_at(mm, addr, pgdp)	\
 		set_pgd_at(mm, addr, pgdp, __pgd(_PAGE_INIT_VALID))
 #define invalidate_pgd_at(mm, addr, pgdp)	\
@@ -106,10 +128,10 @@
 							PAGE_USER_PTE))
 #define pmd_clear(pmdp) \
 do { \
-	u64 __pmdval; \
-	__pmdval = (test_ts_flag(TS_KEEP_PAGES_VALID)) ? \
-					_PAGE_INIT_VALID : 0UL; \
-	native_set_pmd(pmdp, __pmd(__pmdval)); \
+	u64 __pmdval = _PAGE_INIT_VALID; \
+	trace_pt_update("pmd_clear: pmdp 0x%lx, value 0x%lx\n", \
+			(pmdp), _PAGE_INIT_VALID);		\
+	native_set_pmd(pmdp, __pmd(__pmdval));			\
 } while (0)
 
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
@@ -143,8 +165,7 @@ static inline unsigned long pgd_page_vaddr(pgd_t pgd)
 							PAGE_USER_PMD))
 static inline void pud_clear(pud_t *pud)
 {
-	pud_val(*pud) = (test_ts_flag(TS_KEEP_PAGES_VALID)) ?
-						_PAGE_INIT_VALID : 0UL;
+	pud_val(*pud) = _PAGE_INIT_VALID;
 }
 
 #define boot_pud_set_k(pudp, pmdp)	\
@@ -174,8 +195,7 @@ static void inline pgd_set_k(pgd_t *pgdp, pud_t *pudp)
 							PAGE_USER_PUD))
 static inline void pgd_clear_one(pgd_t *pgd)
 {
-	pgd_val(*pgd) = (test_ts_flag(TS_KEEP_PAGES_VALID)) ?
-						_PAGE_INIT_VALID : 0UL;
+	pgd_val(*pgd) = _PAGE_INIT_VALID;
 }
 
 
@@ -266,11 +286,6 @@ static __always_inline void native_set_pte(pte_t *ptep, pte_t pteval,
 	}
 }
 
-static inline void native_set_pte_to_move(pte_t *ptep, pte_t pteval)
-{
-	native_set_pte(ptep, pteval, false);
-}
-
 static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 {
 	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
@@ -303,7 +318,6 @@ static inline void native_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 }
 #else
 # define native_set_pte(ptep, pteval, known_not_present) (*(ptep) = (pteval))
-# define native_set_pte_to_move(ptep, pteval) native_set_pte(ptep, pteval, false)
 # define native_set_pmd(pmdp, pmdval)	(*(pmdp) = (pmdval))
 # define native_set_pud(pudp, pudval)	(*(pudp) = (pudval))
 # define native_set_pgd(pgdp, pgdval)	(*(pgdp) = (pgdval))
@@ -390,21 +404,6 @@ static inline void untrack_pfn_moved(struct vm_area_struct *vma)
 			/* 0x0000 f800 0000 0000 - for 64 bytes struct page */
 			/* 0x0000 fc00 0000 0000 - for 128 bytes struct page */
 
-#ifdef CONFIG_SMP
-static inline void
-ptep_wrprotect_atomic(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-	pt_set_wrprotect_atomic(mm, addr, (pgprot_t *)ptep);
-}
-#else	/* ! CONFIG_SMP */
-static inline void
-ptep_wrprotect_atomic(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-}
-#endif /* CONFIG_SMP */
-
 /*
  * The module space starts from end of resident kernel image and
  * both areas should be within 2 ** 30 bits of the virtual addresses.
@@ -418,8 +417,7 @@ ptep_wrprotect_atomic(struct mm_struct *mm,
 #define pte_clear_not_present_full(mm, addr, ptep, fullmm) \
 do { \
 	u64 __pteval; \
-	__pteval = (test_ts_flag(TS_KEEP_PAGES_VALID)) ? \
-					_PAGE_INIT_VALID : 0UL; \
+	__pteval = _PAGE_INIT_VALID; \
 	set_pte_not_present_at(mm, addr, ptep, __pte(__pteval)); \
 } while (0)
 
@@ -427,110 +425,50 @@ do { \
 #define pte_clear(mm, addr, ptep) \
 do { \
 	u64 __pteval; \
-	__pteval = (test_ts_flag(TS_KEEP_PAGES_VALID)) ? \
-					_PAGE_INIT_VALID : 0UL; \
+	__pteval = _PAGE_INIT_VALID; \
 	set_pte_at(mm, addr, ptep, __pte(__pteval)); \
 } while (0)
 
 #if !defined(CONFIG_BOOT_E2K) && !defined(E2K_P2V)
-static inline pte_t
-do_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+		unsigned long addr, pte_t *ptep)
 {
 	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
-	int mm_users;
+	int mm_users = atomic_read(&mm->mm_users);
 	pte_t oldpte;
+
 	prefetch_offset(ptep, PREFETCH_STRIDE);
-# ifdef CONFIG_SMP
-	u64 newval;
-
-	newval = (test_ts_flag(TS_KEEP_PAGES_VALID)) ?
-					_PAGE_INIT_VALID : 0UL;
-
-	oldpte = __pte(pt_get_and_xchg_atomic(mm, addr, newval,
-						(pgprot_t *)ptep));
-# else
-	oldpte = *ptep;
-	pte_clear(mm, addr, ptep);
-# endif
-
-	if (likely(mm != NULL))
-		mm_users = (atomic_read(&mm->mm_users) != 0);
-	else
-		/* kernel or guest process: users exist always */
-		mm_users = true;
+	if (mm == &init_mm) {
+		/* In kernel there is no swap or thp, valid page
+		 * is always mapped, so do not keep the valid bit.
+		 * This is important because in kernel we cannot
+		 * tolerate spurious page faults from h.-s. loads. */
+		oldpte = __pte(pt_get_and_xchg_atomic(mm, addr, 0ull, (pgprot_t *) ptep));
+	} else {
+		oldpte = __pte(pt_get_and_clear_atomic(mm, addr, (pgprot_t *) ptep));
+	}
 
 	/* mm_users check is for the fork() case: we do not
 	 * want to spend time flushing when we are exiting. */
-	if (have_flush_dc_ic && mm_users && pte_present_and_exec(oldpte))
-		flush_pte_from_ic(oldpte);
-
-	return oldpte;
-}
-
-static inline pte_t
-do_ptep_get_and_clear_as_valid(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
-	pte_t oldpte;
-
-	prefetch_offset(ptep, PREFETCH_STRIDE);
-# ifdef CONFIG_SMP
-	oldpte = __pte(pt_get_and_clear_atomic(mm, addr, (pgprot_t *)ptep));
-# else
-	oldpte = *ptep;
-	pte_val(*ptep) &= _PAGE_INIT_VALID;
-# endif
-
-	if (have_flush_dc_ic && pte_present_and_exec(oldpte))
+	if (have_flush_dc_ic && mm_users != 0 && pte_present_and_exec(oldpte))
 		flush_pte_from_ic(oldpte);
 
 	return oldpte;
 }
 #else
-static inline pte_t
-do_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+		unsigned long addr, pte_t *ptep)
 {
 	prefetch_offset(ptep, PREFETCH_STRIDE);
-# ifdef CONFIG_SMP
-	return __pte(pt_get_and_xchg_atomic(mm, addr, 0UL, (pgprot_t *)ptep));
-# else
-	pte_t pte = *ptep;
-	pte_clear(mm, addr, ptep);
-	return pte;
-# endif
-}
-
-static inline pte_t
-do_ptep_get_and_clear_as_valid(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep)
-{
-	pte_t oldpte;
-
-	prefetch_offset(ptep, PREFETCH_STRIDE);
-# ifdef CONFIG_SMP
-	oldpte = __pte(pt_get_and_clear_atomic(mm, addr, (pgprot_t *)ptep));
-# else
-	oldpte = *ptep;
-	pte_val(*ptep) &= _PAGE_INIT_VALID;
-# endif
-
-	return oldpte;
+	if (mm == &init_mm) {
+		/* In kernel there is no swap or thp, valid page
+		 * is always mapped, so do not keep the valid bit. */
+		return __pte(pt_get_and_xchg_atomic(mm, addr, 0ull, (pgprot_t *) ptep));
+	} else {
+		return __pte(pt_get_and_clear_atomic(mm, addr, (pgprot_t *) ptep));
+	}
 }
 #endif
-
-static inline pte_t
-ptep_get_and_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
-{
-	return do_ptep_get_and_clear(mm, addr, ptep);
-}
-
-static inline pte_t
-ptep_get_and_clear_as_valid(struct mm_struct *mm, unsigned long addr,
-				pte_t *ptep)
-{
-	return do_ptep_get_and_clear_as_valid(mm, addr, ptep);
-}
 
 #if defined(CONFIG_SPARSEMEM) && defined(CONFIG_SPARSEMEM_VMEMMAP)
 # define vmemmap	((struct page *)VMEMMAP_START)
@@ -680,7 +618,7 @@ pgd_clear(pgd_t *pgd)
 #define pte_offset_map(pmd, address) \
 ({ \
 	pte_t *__pom_pte = pte_offset_kernel((pmd), (address)); \
-	prefetchw(__pom_pte); \
+	prefetch_nospec(__pom_pte); \
 	__pom_pte; \
 })
 
@@ -753,18 +691,6 @@ native_do_get_pte_for_address(struct vm_area_struct *vma, e2k_addr_t address)
 	}
 }
 
-#ifdef CONFIG_SMP
-static inline int 
-test_and_clear_relaxed(pgprotval_t mask, pgprot_t *addr)
-{
-	pgprotval_t retval;
-
-	retval = pt_clear_relaxed_atomic(mask, addr);
-
-	return (retval & mask) != 0;
-}
-#endif /* CONFIG_SMP */
-
 static inline int
 ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long addr,
 				pte_t *ptep)
@@ -772,88 +698,62 @@ ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long addr,
 	pte_t pte;
 
 	prefetch_offset(ptep, PREFETCH_STRIDE);
-
-#ifdef CONFIG_SMP
 	pte_val(pte) = pt_clear_young_atomic(vma->vm_mm, addr,
 						(pgprot_t *)ptep);
 	return pte_young(pte);
-#else
-	pte = *ptep;
-	if (!pte_young(pte))
-		return 0;
-	set_pte_at(vma->vm_mm, addr, ptep, pte_mkold(pte));
-	return 1;
-#endif
 }
 
 static inline void
 ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
 	prefetch_offset(ptep, PREFETCH_STRIDE);
-#ifdef CONFIG_SMP
-	ptep_wrprotect_atomic(mm, addr, ptep);
-#else
-	pte_t pte = *ptep;
-	pte = pte_wrprotect(pte);
-	set_pte_at(mm, addr, ptep, pte);
-#endif
+	pt_set_wrprotect_atomic(mm, addr, (pgprot_t *) ptep);
 }
 
 extern int ptep_set_access_flags(struct vm_area_struct *vma,
 				 unsigned long address, pte_t *ptep,
 				 pte_t entry, int dirty);
 
-#ifdef CONFIG_MAKE_ALL_PAGES_VALID
-# define ptep_clear_flush_as_valid(__vma, __address, __ptep)		\
-({									\
-	pte_t __pte;							\
-	__pte = ptep_get_and_clear_as_valid((__vma)->vm_mm, __address, __ptep);\
-	flush_tlb_page(__vma, __address);				\
-	__pte;								\
-})
-#endif /* CONFIG_MAKE_ALL_PAGES_VALID */
-
 #define pgd_addr_bound(addr)	(((addr) + PGDIR_SIZE) & PGDIR_MASK)
 #define pud_addr_bound(addr)	(((addr) + PUD_SIZE) & PUD_MASK)
 #define pmd_addr_bound(addr)	(((addr) + PMD_SIZE) & PMD_MASK)
 
-#if defined CONFIG_TRANSPARENT_HUGEPAGE && defined CONFIG_MAKE_ALL_PAGES_VALID
-# define pmdp_collapse_flush pmdp_collapse_flush
-extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
-				 unsigned long address, pmd_t *pmdp);
-extern pmd_t pmdp_huge_clear_flush(struct vm_area_struct *vma,
-				   unsigned long address, pmd_t *pmdp);
-
+#if defined CONFIG_TRANSPARENT_HUGEPAGE
+# if !defined(CONFIG_BOOT_E2K) && !defined(E2K_P2V)
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 		unsigned long addr, pmd_t *pmdp)
 {
-# ifdef CONFIG_SMP
-	u64 newval;
+	int have_flush_dc_ic = cpu_has(CPU_FEAT_FLUSH_DC_IC);
+	int mm_users = atomic_read(&mm->mm_users);
+	pmd_t oldpmd;
 
-	newval = (test_ts_flag(TS_KEEP_PAGES_VALID)) ?
-					_PAGE_INIT_VALID : 0UL;
+	if (mm == &init_mm) {
+		/* See comment in ptep_get_and_clear() */
+		oldpmd = __pmd(pt_get_and_xchg_atomic(mm, addr, 0ull, (pgprot_t *) pmdp));
+	} else {
+		oldpmd = __pmd(pt_get_and_clear_atomic(mm, addr, (pgprot_t *) pmdp));
+	}
 
-	return __pmd(pt_get_and_xchg_atomic(mm, addr, newval,
-					    (pgprot_t *)pmdp));
-# else
-	pmd_t pmd = *pmdp;
-	pmd_clear(pmdp);
-	return pmd;
-# endif
+	/* mm_users check is for the fork() case: we do not
+	 * want to spend time flushing when we are exiting. */
+	if (have_flush_dc_ic && mm_users != 0 &&
+			pmd_present_and_exec_and_huge(oldpmd))
+		flush_pmd_from_ic(oldpmd);
+
+	return oldpmd;
 }
-
-static inline pmd_t pmdp_huge_get_and_clear_as_valid(struct mm_struct *mm,
+# else
+static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 		unsigned long addr, pmd_t *pmdp)
 {
-# ifdef CONFIG_SMP
-	return __pmd(pt_get_and_xchg_atomic(mm, addr, _PAGE_INIT_VALID,
-					    (pgprot_t *)pmdp));
-# else
-	pmd_t pmd = *pmdp;
-	set_pmd_at(mm, addr, pmdp, __pmd(_PAGE_INIT_VALID));
-	return pmd;
-# endif
+	if (mm == &init_mm) {
+		/* See comment in ptep_get_and_clear() */
+		return __pmd(pt_get_and_xchg_atomic(mm, addr, 0ull, (pgprot_t *) pmdp));
+	} else {
+		return __pmd(pt_get_and_clear_atomic(mm, addr, (pgprot_t *) pmdp));
+	}
 }
+# endif
 #endif
 
 /* interface functions to handle some things on the PT level */
@@ -872,90 +772,27 @@ extern void memmap_init(unsigned long size, int nid, unsigned long zone,
 #define flush_tlb_fix_spurious_fault(vma, address)	do { } while (0)
 
 #define __HAVE_ARCH_FLUSH_PMD_TLB_RANGE
-#define __HAVE_ARCH_PMD_WRITE
 #define __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS
 #define __HAVE_ARCH_PMDP_SET_ACCESS_FLAGS
 #define __HAVE_ARCH_PTE_CLEAR_NOT_PRESENT_FULL
-#define __HAVE_ARCH_PTEP_MODIFY_PROT_TRANSACTION
 #define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG
-#define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_DIRTY
 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR
 #define __HAVE_ARCH_PTEP_SET_WRPROTECT
 #define __HAVE_ARCH_PMDP_TEST_AND_CLEAR_YOUNG
-#define __HAVE_ARCH_PMDP_CLEAR_FLUSH
-#define __HAVE_ARCH_PMDP_GET_AND_CLEAR
 #define __HAVE_ARCH_PMDP_SET_WRPROTECT
-#define __HAVE_ARCH_PMDP_HUGE_CLEAR_FLUSH
 #define __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR
-#define __HAVE_ARCH_MEMMAP_INIT
 #define __HAVE_PFNMAP_TRACKING
 #include <asm-generic/pgtable.h>
 
-typedef enum pte_cmp {
-	PTE_SAME_CMP,
-	PTE_CHANGE_PFN_CMP,
-	PTE_CHANGE_PROTECTS_CMP,
-	PTE_CHANGE_FLAGS_CMP,
-	PTE_CHANGE_FLAGS_AND_PROTECTS_CMP,
-} pte_cmp_t;
-
-static inline pte_cmp_t pte_compare(pte_t src_pte, pte_t dst_pte)
-{
-	pteval_t src_pte_flags;
-	pteval_t dst_pte_flags;
-	pteval_t src_pte_protects;
-	pteval_t dst_pte_protects;
-
-	if (pte_same(src_pte, dst_pte))
-		return PTE_SAME_CMP;
-	if (pte_pfn(src_pte) != pte_pfn(dst_pte))
-		return PTE_CHANGE_PFN_CMP;
-	src_pte_flags = pte_only_flags(src_pte);
-	dst_pte_flags = pte_only_flags(dst_pte);
-	src_pte_protects = pte_only_protects(src_pte);
-	dst_pte_protects = pte_only_protects(dst_pte);
-	if (src_pte_flags == dst_pte_flags) {
-		if (src_pte_protects == dst_pte_protects)
-			return PTE_SAME_CMP;
-		else
-			return PTE_CHANGE_PROTECTS_CMP;
-	} else if (src_pte_protects == dst_pte_protects) {
-		return PTE_CHANGE_FLAGS_CMP;
-	} else {
-		return PTE_CHANGE_FLAGS_AND_PROTECTS_CMP;
-	}
-}
-
-static inline pte_t ptep_modify_prot_start(struct vm_area_struct *vma,
-					   unsigned long addr,
-					   pte_t *ptep)
-{
-	return __pte(pt_modify_prot_atomic(vma->vm_mm, addr, (pgprot_t *)ptep));
-}
-
-static inline void ptep_modify_prot_commit(struct vm_area_struct *vma,
-					   unsigned long addr,
-					   pte_t *ptep, pte_t old_pte, pte_t pte)
-{
-	__ptep_modify_prot_commit(vma, addr, ptep, pte);
-}
 
 static inline int pmdp_test_and_clear_young(struct vm_area_struct *vma,
 					    unsigned long addr, pmd_t *pmdp)
 {
 	pmd_t pmd;
 
-#ifdef CONFIG_SMP
 	pmd_val(pmd) = pt_clear_young_atomic(vma->vm_mm, addr,
 						(pgprot_t *)pmdp);
 	return pmd_young(pmd);
-#else
-	pmd = *pmdp;
-	if (!pmd_young(pmd))
-		return 0;
-	set_pmd_at(vma->vm_mm, addr, pmdp, pmd_mkold(pmd));
-	return 1;
-#endif
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE

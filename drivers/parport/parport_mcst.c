@@ -103,7 +103,6 @@
 #define	MCST_PP_IEE1284_IRQ	7	/* IRQ number on MCST IOHUB */
 
 #define PCI_DEVICE_ID_PARPORTMCST	0x8007
-#define PCI_VENDOR_ID_MCST		0x1fff
 
 #define NR_SUPERIOS 3
 static struct superio_struct {	/* For Super-IO chips autodetection */
@@ -122,7 +121,10 @@ static int pnp_registered_parport = 0;
 
 
 static struct pci_device_id l_parport_pci_tbl[] = {
-	{PCI_DEVICE(PCI_VENDOR_ID_MCST,
+	{PCI_DEVICE(PCI_VENDOR_ID_ELBRUS,
+		    PCI_DEVICE_ID_PAR_SER),
+	.driver_data = mcst_pp_iee1284},
+	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP,
 		    PCI_DEVICE_ID_PARPORTMCST),
 	.driver_data = mcst_pp_iee1284},
 	{PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP,

@@ -104,4 +104,50 @@ get_MMU_phys_addr(e2k_addr_t virt_addr)
 	return __probe_entry(GET_MMU_PHYS_ADDR(virt_addr));
 }
 
-#endif
+typedef struct tlb_set_state {
+	tlb_tag_t	tlb_tag;
+	pte_t		tlb_entry;
+} tlb_set_state_t;
+
+typedef struct tlb_line_state {
+	e2k_addr_t	va;
+	bool		huge;
+	tlb_set_state_t	sets[NATIVE_TLB_SETS_NUM];
+} tlb_line_state_t;
+
+static inline tlb_tag_t
+get_va_tlb_set_tag(e2k_addr_t addr, int set_no, bool large_page)
+{
+	return read_DTLB_va_tag_reg(addr, set_no, large_page);
+}
+
+static inline pte_t
+get_va_tlb_set_entry(e2k_addr_t addr, int set_no, bool large_page)
+{
+	pte_t tlb_entry;
+
+	pte_val(tlb_entry) = read_DTLB_va_entry_reg(addr, set_no, large_page);
+	return tlb_entry;
+}
+
+static inline void
+get_va_tlb_state(tlb_line_state_t *tlb, e2k_addr_t addr, bool large_page)
+{
+	tlb_set_state_t *set_state;
+	int set_no;
+
+	tlb->va = addr;
+	tlb->huge = large_page;
+
+	for (set_no = 0; set_no < NATIVE_TLB_SETS_NUM; set_no++) {
+		set_state = &tlb->sets[set_no];
+		tlb_tag_t tlb_tag;
+		pte_t tlb_entry;
+		tlb_tag = get_va_tlb_set_tag(addr, set_no, large_page);
+		tlb_entry = get_va_tlb_set_entry(addr, set_no, large_page);
+		set_state->tlb_tag = tlb_tag;
+		set_state->tlb_entry;
+	}
+}
+
+#endif	/* !_E2K_TLB_REGS_ACCESS_H_ */

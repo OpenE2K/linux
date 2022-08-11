@@ -179,6 +179,8 @@ pud_page_validate(pgd_t *pgdp, pud_t *pudp)
 
 	if (pgd_val(*pgdp) != _PAGE_INIT_VALID)
 		return;
+	trace_pt_update("Validating pud page at 0x%lx (pgd at 0x%lx = 0x%lx)\n",
+			pudp, pgdp, pgd_val(*pgdp));
 	for (i = 0; i < PTRS_PER_PUD; i++, pudp++) {
 		WARN_ON(pud_val(*pudp));
 		*pudp = __pud(_PAGE_INIT_VALID);
@@ -385,6 +387,8 @@ pmd_page_validate(pud_t *pudp, pmd_t *pmdp)
 	if (pud_val(*pudp) != _PAGE_INIT_VALID)
 		return;
 
+	trace_pt_update("Validating pmd page at 0x%lx (pud at 0x%lx = 0x%lx)\n",
+			pmdp, pudp, pud_val(*pudp));
 	for (i = 0; i < PTRS_PER_PMD; i++, pmdp++) {
 		WARN_ON(pmd_val(*pmdp));
 		*pmdp = __pmd(_PAGE_INIT_VALID);
@@ -453,6 +457,8 @@ pte_page_validate(pmd_t *pmdp, pte_t *ptep)
 	if (pmd_val(*pmdp) != _PAGE_INIT_VALID)
 		return;
 
+	trace_pt_update("Validating pte page at 0x%lx (pmd at 0x%lx = 0x%lx)\n",
+			ptep, pmdp, pmd_val(*pmdp));
 	for (i = 0; i < PTRS_PER_PTE; i++, ptep++)
 		*ptep = pte_mkvalid(*ptep);
 }

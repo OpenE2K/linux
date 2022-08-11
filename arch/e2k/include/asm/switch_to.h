@@ -55,7 +55,7 @@ do {						\
 
 #define prepare_arch_switch(next)		\
 do {						\
-	prefetchw_range(&next->thread.sw_regs,	\
+	prefetch_nospec_range(&next->thread.sw_regs,	\
 			offsetof(struct sw_regs, cs_lo)); \
         /* It works under CONFIG_MCST_RT */     \
         SAVE_CURR_TIME_SWITCH_TO;               \

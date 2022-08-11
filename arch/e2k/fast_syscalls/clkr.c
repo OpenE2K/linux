@@ -28,7 +28,7 @@
  * 3) Must not use 'current' and 'current_thread_info()' since
  * corresponding global registers are not set.
  * 4) Must not do any calls. */
-__section(.entry_handlers)
+__section(".entry.text")
 notrace __interrupt
 u64 fast_syscall_read_clkr(void)
 {

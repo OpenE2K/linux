@@ -85,7 +85,6 @@ void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
 
 
 DEFINE_PER_CPU(struct perf_event * [4], cpu_events);
-static DEFINE_PER_CPU(int, monitors_spurious);
 
 static struct pmu e2k_pmu;
 
@@ -115,7 +114,7 @@ static int handle_event(struct perf_event *event, struct pt_regs *regs)
 			return 0;
 	}
 
-	if (!(event->attr.exclude_idle && current->pid == 0))
+	if (!(event->attr.exclude_idle && is_idle_task(current)))
 		return perf_event_overflow(event, &data, regs);
 
 	return 0;
@@ -126,182 +125,158 @@ static s64 monitor_pause(struct perf_event *event,
 
 DEFINE_PER_CPU(u8, perf_monitors_used);
 
-int perf_data_overflow_handle(struct pt_regs *regs)
+void dimcr_continue(e2k_dimcr_t dimcr_old)
 {
-	unsigned long flags;
-	e2k_ddbsr_t ddbsr;
-	struct perf_event *event;
-	struct hw_perf_event *hwc;
-	s64 period;
-	int ret, handled = 1;
+	struct perf_event *event0, *event1;
+	e2k_dimcr_t dimcr;
+
+	event0 = __this_cpu_read(cpu_events[0]);
+	event1 = __this_cpu_read(cpu_events[1]);
 
 	/*
-	 * Make sure another overflow does not happen while
-	 * we are handling this one to avoid races.
+	 * Restart counting
 	 */
-	raw_all_irq_save(flags);
-
-	ddbsr = READ_DDBSR_REG();
-	if (!AS(ddbsr).m0 && !AS(ddbsr).m1)
-		pr_debug("perf: spurious exc_data_debug\n");
-
-	pr_debug("data overflow, ddbsr %llx\n", AW(ddbsr));
-
-	if (AS(ddbsr).m0) {
-		event = this_cpu_read(cpu_events[2]);
-
-		if (event && (__this_cpu_read(perf_monitors_used) & DDM0)) {
-			hwc = &event->hw;
-
-			ret = handle_event(event, regs);
-			if (ret)
-				monitor_pause(event, hwc, 0);
-
-			AS(ddbsr).m0 = 0;
-
-			period = hwc->sample_period;
-
-			WRITE_DDMAR0_REG(-period);
-
-			local64_set(&hwc->prev_count, period);
-
-			pr_debug("DDM0 event %lx %shandled, new period %lld\n",
-				event, (ret) ? "could not be " : "", period);
-		} else {
-			handled = !!(__this_cpu_read(monitors_spurious) & DDM0);
-		}
-	}
-
-	if (AS(ddbsr).m1) {
-		event = this_cpu_read(cpu_events[3]);
-
-		if (event && (__this_cpu_read(perf_monitors_used) & DDM1)) {
-			hwc = &event->hw;
-
-			ret = handle_event(event, regs);
-			if (ret)
-				monitor_pause(event, hwc, 0);
-
-			AS(ddbsr).m1 = 0;
-
-			period = hwc->sample_period;
-
-			WRITE_DDMAR1_REG(-period);
-
-			local64_set(&hwc->prev_count, period);
-
-			pr_debug("DDM1 event %lx %shandled, new period %lld\n",
-				event, (ret) ? "could not be " : "", period);
-		} else {
-			handled = !!(__this_cpu_read(monitors_spurious) & DDM1);
-		}
-	}
-
-	pr_debug("data overflow handled, ddmcr 0x%llx\n",
-			READ_DDMCR_REG_VALUE());
-
-	WRITE_DDBSR_REG(ddbsr);
-
-	raw_all_irq_restore(flags);
-
-	/* Check for breakpoints */
-	if (handled && (AS(ddbsr).b0 || AS(ddbsr).b1 ||
-			AS(ddbsr).b2 || AS(ddbsr).b3))
-		handled = 0;
-
-	return handled;
+	BUG_ON(event0 && event0->hw.idx != 0 || event1 && event1->hw.idx != 1);
+	dimcr = READ_DIMCR_REG();
+	AS(dimcr)[0].user = (!event0)
+			? AS(dimcr_old)[0].user
+			: (!(event0->hw.state & PERF_HES_STOPPED) &&
+			   (event0->hw.config & ARCH_PERFMON_USR));
+	AS(dimcr)[0].system = (!event0)
+			? AS(dimcr_old)[0].system
+			: (!(event0->hw.state & PERF_HES_STOPPED) &&
+			   (event0->hw.config & ARCH_PERFMON_OS));
+	AS(dimcr)[1].user = (!event1)
+			? AS(dimcr_old)[1].user
+			: (!(event1->hw.state & PERF_HES_STOPPED) &&
+			   (event1->hw.config & ARCH_PERFMON_USR));
+	AS(dimcr)[1].system = (!event1)
+			? AS(dimcr_old)[1].system
+			: (!(event1->hw.state & PERF_HES_STOPPED) &&
+			   (event1->hw.config & ARCH_PERFMON_OS));
+	WRITE_DIMCR_REG(dimcr);
 }
 
-int perf_instr_overflow_handle(struct pt_regs *regs)
+void ddmcr_continue(e2k_ddmcr_t ddmcr_old)
 {
-	unsigned long flags;
-	e2k_dibsr_t dibsr;
-	struct perf_event *event;
-	struct hw_perf_event *hwc;
-	s64 period;
-	int ret, handled = 1;
+	struct perf_event *event0, *event1;
+	e2k_ddmcr_t ddmcr;
+
+	event0 = __this_cpu_read(cpu_events[2]);
+	event1 = __this_cpu_read(cpu_events[3]);
 
 	/*
-	 * Make sure another overflow does not happen while
-	 * we are handling this one to avoid races.
+	 * Restart counting
 	 */
-	raw_all_irq_save(flags);
+	BUG_ON(event0 && event0->hw.idx != 0 || event1 && event1->hw.idx != 1);
+	ddmcr = READ_DDMCR_REG();
+	AS(ddmcr)[0].user = (!event0)
+			? AS(ddmcr_old)[0].user
+			: (!(event0->hw.state & PERF_HES_STOPPED) &&
+			   (event0->hw.config & ARCH_PERFMON_USR));
+	AS(ddmcr)[0].system = (!event0)
+			? AS(ddmcr_old)[0].system
+			: (!(event0->hw.state & PERF_HES_STOPPED) &&
+			   (event0->hw.config & ARCH_PERFMON_OS));
+	AS(ddmcr)[1].user = (!event1)
+			? AS(ddmcr_old)[1].user
+			: (!(event1->hw.state & PERF_HES_STOPPED) &&
+			   (event1->hw.config & ARCH_PERFMON_USR));
+	AS(ddmcr)[1].system = (!event1)
+			? AS(ddmcr_old)[1].system
+			: (!(event1->hw.state & PERF_HES_STOPPED) &&
+			   (event1->hw.config & ARCH_PERFMON_OS));
+	WRITE_DDMCR_REG(ddmcr);
+}
+
+static s64 handle_event_overflow(const char *name,
+		struct perf_event *event, struct pt_regs *regs)
+{
+	struct hw_perf_event *hwc = &event->hw;
+	s64 period;
+
+	int ret = handle_event(event, regs);
+	if (ret)
+		monitor_pause(event, hwc, 0);
+
+	period = hwc->sample_period;
+	local64_set(&hwc->prev_count, period);
+
+	pr_debug("%s event %lx %shandled, new period %lld\n",
+			name, event, (ret) ? "could not be " : "", period);
+
+	return period;
+}
+
+void perf_data_overflow_handle(struct pt_regs *regs)
+{
+	e2k_ddbsr_t ddbsr;
+	struct perf_event *event0, *event1;
+	u8 monitors_used;
+
+	monitors_used = __this_cpu_read(perf_monitors_used);
+	event0 = __this_cpu_read(cpu_events[2]);
+	event1 = __this_cpu_read(cpu_events[3]);
+
+	ddbsr = READ_DDBSR_REG();
+
+	pr_debug("data overflow, ddbsr %llx, monitors_used 0x%hhx, events 0x%lx/0x%lx\n",
+			AW(ddbsr), monitors_used, event0, event1);
+
+	if (ddbsr.m0 && event0 && (monitors_used & DDM0)) {
+		s64 period = handle_event_overflow("DDM0", event0, regs);
+		WRITE_DDMAR0_REG(-period);
+		ddbsr.m0 = 0;
+	}
+
+	if (ddbsr.m1 && event1 && (monitors_used & DDM1)) {
+		s64 period = handle_event_overflow("DDM1", event1, regs);
+		WRITE_DDMAR1_REG(-period);
+		ddbsr.m1 = 0;
+	}
+
+	/*
+	 * Clear status fields
+	 */
+	WRITE_DDBSR_REG(ddbsr);
+}
+
+void perf_instr_overflow_handle(struct pt_regs *regs)
+{
+	e2k_dibsr_t dibsr;
+	struct perf_event *event0, *event1;
+	u8 monitors_used;
+
+	monitors_used = __this_cpu_read(perf_monitors_used);
+	event0 = __this_cpu_read(cpu_events[0]);
+	event1 = __this_cpu_read(cpu_events[1]);
 
 	dibsr = READ_DIBSR_REG();
-	if (!AS(dibsr).m0 && !AS(dibsr).m1)
-		pr_debug("perf: spurious exc_instr_debug\n");
 
-	pr_debug("instr overflow, dibsr %x\n", AW(dibsr));
+	pr_debug("instr overflow, dibsr %x, monitors_used 0x%hhx, events 0x%lx/0x%lx\n",
+			AW(dibsr), monitors_used, event0, event1);
 
-	if (AS(dibsr).m0) {
-		event = this_cpu_read(cpu_events[0]);
-
-		if (event && (__this_cpu_read(perf_monitors_used) & DIM0)) {
-			/* This could be an event from DIMTP overflow */
-			if (event->pmu->type != e2k_pmu.type) {
-				dimtp_overflow(event);
-			} else {
-				hwc = &event->hw;
-
-				ret = handle_event(event, regs);
-				if (ret)
-					monitor_pause(event, hwc, 0);
-
-				period = hwc->sample_period;
-
-				WRITE_DIMAR0_REG_VALUE(-period);
-
-				local64_set(&hwc->prev_count, period);
-
-				pr_debug("DIM0 event %lx %shandled, new period %lld\n",
-					event, (ret) ? "could not be " : "",
-					period);
-			}
-
-			AS(dibsr).m0 = 0;
+	if (dibsr.m0 && event0 && (monitors_used & DIM0)) {
+		/* This could be an event from DIMTP overflow */
+		if (event0->pmu->type != e2k_pmu.type) {
+			dimtp_overflow(event0);
 		} else {
-			handled = !!(__this_cpu_read(monitors_spurious) & DIM0);
+			s64 period = handle_event_overflow("DIM0", event0, regs);
+			WRITE_DIMAR0_REG_VALUE(-period);
 		}
+		dibsr.m0 = 0;
 	}
 
-	if (AS(dibsr).m1) {
-		event = this_cpu_read(cpu_events[1]);
-
-		if (event && (__this_cpu_read(perf_monitors_used) & DIM1)) {
-			hwc = &event->hw;
-
-			ret = handle_event(event, regs);
-			if (ret)
-				monitor_pause(event, hwc, 0);
-
-			AS(dibsr).m1 = 0;
-
-			period = hwc->sample_period;
-
-			WRITE_DIMAR1_REG_VALUE(-period);
-
-			local64_set(&hwc->prev_count, period);
-
-			pr_debug("DIM1 event %lx %shandled, new period %lld\n",
-				event, (ret) ? "could not be " : "", period);
-		} else {
-			handled = !!(__this_cpu_read(monitors_spurious) & DIM1);
-		}
+	if (dibsr.m1 && event1 && (monitors_used & DIM1)) {
+		s64 period = handle_event_overflow("DIM1", event1, regs);
+		WRITE_DIMAR1_REG_VALUE(-period);
+		dibsr.m1 = 0;
 	}
 
-	pr_debug("instr overflow handled\n");
-
+	/*
+	 * Clear status fields
+	 */
 	WRITE_DIBSR_REG(dibsr);
-
-	raw_all_irq_restore(flags);
-
-	/* Check for breakpoints */
-	if (handled && (AS(dibsr).b0 || AS(dibsr).b1 ||
-			AS(dibsr).b2 || AS(dibsr).b3 ||
-			AS(dibsr).ss))
-		handled = 0;
-
-	return handled;
 }
 
 static void monitor_resume(struct hw_perf_event *hwc, int reload, s64 period)
@@ -319,7 +294,8 @@ static void monitor_resume(struct hw_perf_event *hwc, int reload, s64 period)
 	event_id = hwc->config & 0xff;
 	num = hwc->idx;
 
-	hwc->config |= ARCH_PERFMON_ENABLED;
+	/* Clear PERF_HES_STOPPED */
+	hwc->state = 0;
 
 	dibcr = READ_DIBCR_REG();
 	WARN_ON(AS(dibcr).stop);
@@ -387,7 +363,7 @@ static s64 monitor_pause(struct perf_event *event,
 	event_id = hwc->config & 0xff;
 	num = hwc->idx;
 
-	hwc->config &= ~ARCH_PERFMON_ENABLED;
+	hwc->state |= PERF_HES_STOPPED;
 
 	dibcr = READ_DIBCR_REG();
 	WARN_ON(AS(dibcr).stop);
@@ -403,14 +379,6 @@ static s64 monitor_pause(struct perf_event *event,
 		if (update) {
 			e2k_dibsr_t dibsr;
 
-			/* Order is important: read %dimar first and
-			 * %dibsr second. This protects from situation
-			 * when %dimar was updated with ip but
-			 * %dibsr.m has not been updated yet. */
-			left = (num == 1) ? READ_DIMAR1_REG_VALUE() :
-					    READ_DIMAR0_REG_VALUE();
-			left = -left;
-
 			dibsr = READ_DIBSR_REG();
 
 			overflow = (num == 1 && AS(dibsr).m1) ||
@@ -425,11 +393,14 @@ static s64 monitor_pause(struct perf_event *event,
 				else
 					AS(dibsr).m0 = 0;
 			} else {
+				left = (num == 1) ? READ_DIMAR1_REG_VALUE() :
+						    READ_DIMAR0_REG_VALUE();
+				left = -left;
+
 				pr_debug("event DIM%d: left %lld, dimcr 0x%llx/0x%llx, dibsr 0x%x/0x%x\n",
 						num, left, AW(dimcr),
 						READ_DIMCR_REG_VALUE(),
-						AW(dibsr),
-						READ_DIBSR_REG_VALUE());
+						AW(dibsr), READ_DIBSR_REG_VALUE());
 			}
 
 			/* We clear m0/m1 even if it is not set. The problem
@@ -550,7 +521,7 @@ static int monitor_enable(u32 monitor, u32 event_id, s64 period,
 
 		dimcr = READ_DIMCR_REG();
 		AS(dimcr)[num].user = run && (hwc->config & ARCH_PERFMON_USR) &&
-				      (hwc->config & ARCH_PERFMON_ENABLED);
+				      !(hwc->state & PERF_HES_STOPPED);
 		AS(dimcr)[num].system = 0;
 		AS(dimcr)[num].trap = 1;
 		AS(dimcr)[num].event = event_id;
@@ -580,7 +551,7 @@ static int monitor_enable(u32 monitor, u32 event_id, s64 period,
 		 * Start the monitor now that the preparations are done.
 		 */
 		if (run && (hwc->config & ARCH_PERFMON_OS) &&
-		    (hwc->config & ARCH_PERFMON_ENABLED)) {
+		    !(hwc->state & PERF_HES_STOPPED)) {
 			AS(dimcr)[num].system = 1;
 			WRITE_DIMCR_REG(dimcr);
 		}
@@ -614,7 +585,7 @@ static int monitor_enable(u32 monitor, u32 event_id, s64 period,
 
 		ddmcr = READ_DDMCR_REG();
 		AS(ddmcr)[num].user = run && (hwc->config & ARCH_PERFMON_USR) &&
-				      (hwc->config & ARCH_PERFMON_ENABLED);
+				      !(hwc->state & PERF_HES_STOPPED);
 		AS(ddmcr)[num].system = 0;
 		AS(ddmcr)[num].trap = 1;
 		AS(ddmcr)[num].event = event_id;
@@ -644,7 +615,7 @@ static int monitor_enable(u32 monitor, u32 event_id, s64 period,
 		 * Start the monitor now that the preparations are done.
 		 */
 		if (run && (hwc->config & ARCH_PERFMON_OS) &&
-		    (hwc->config & ARCH_PERFMON_ENABLED)) {
+		    !(hwc->state & PERF_HES_STOPPED)) {
 			AS(ddmcr)[num].system = 1;
 			WRITE_DDMCR_REG(ddmcr);
 		}
@@ -684,14 +655,13 @@ static s64 monitor_disable(struct hw_perf_event *hwc)
 		dimcr = READ_DIMCR_REG();
 		AS(dimcr)[num].user = 0;
 		AS(dimcr)[num].system = 0;
+		/* Note that writing of %dimcr has an important side effect:
+		 * it cancels any other pending exc_instr_debug that arrived
+		 * while we were still handling this one. */
 		WRITE_DIMCR_REG(dimcr);
 
 		raw_all_irq_save(flags);
 
-		/* Order is important: read %dimar first and
-		 * %dibsr second. This protects from situation
-		 * when %dimar was updated with ip but
-		 * %dibsr.m has not been updated yet. */
 		left = (num == 1) ? READ_DIMAR1_REG_VALUE() :
 				    READ_DIMAR0_REG_VALUE();
 		left = -left;
@@ -700,7 +670,6 @@ static s64 monitor_disable(struct hw_perf_event *hwc)
 
 		if (num == 1) {
 			__this_cpu_write(cpu_events[1], NULL);
-			__this_cpu_or(monitors_spurious, DIM1);
 
 			BUG_ON(!(__this_cpu_read(perf_monitors_used) & DIM1));
 			__this_cpu_and(perf_monitors_used, ~DIM1);
@@ -727,7 +696,6 @@ static s64 monitor_disable(struct hw_perf_event *hwc)
 			}
 		} else {
 			__this_cpu_write(cpu_events[0], NULL);
-			__this_cpu_or(monitors_spurious, DIM0);
 
 			BUG_ON(!(__this_cpu_read(perf_monitors_used) & DIM0));
 			__this_cpu_and(perf_monitors_used, ~DIM0);
@@ -753,6 +721,9 @@ static s64 monitor_disable(struct hw_perf_event *hwc)
 		ddmcr = READ_DDMCR_REG();
 		AS(ddmcr)[num].user = 0;
 		AS(ddmcr)[num].system = 0;
+		/* Note that writing of %ddmcr has an important side effect:
+		 * it cancels any other pending exc_data_debug that arrived
+		 * while we were still handling this one. */
 		WRITE_DDMCR_REG(ddmcr);
 
 		raw_all_irq_save(flags);
@@ -761,7 +732,6 @@ static s64 monitor_disable(struct hw_perf_event *hwc)
 
 		if (num == 1) {
 			__this_cpu_write(cpu_events[3], NULL);
-			__this_cpu_or(monitors_spurious, DDM1);
 
 			BUG_ON(!(__this_cpu_read(perf_monitors_used) & DDM1));
 			__this_cpu_and(perf_monitors_used, ~DDM1);
@@ -777,7 +747,6 @@ static s64 monitor_disable(struct hw_perf_event *hwc)
 			}
 		} else {
 			__this_cpu_write(cpu_events[2], NULL);
-			__this_cpu_or(monitors_spurious, DDM0);
 
 			BUG_ON(!(__this_cpu_read(perf_monitors_used) & DDM0));
 			__this_cpu_and(perf_monitors_used, ~DDM0);
@@ -1298,8 +1267,6 @@ int e2k_pmu_event_init(struct perf_event *event)
 	hwc->config = (monitor << 8) | event_id;
 	hwc->idx = (monitor == DIM0 || monitor == DDM0) ? 0 : 1;
 
-	hwc->config |= ARCH_PERFMON_ENABLED;
-
 	if (!event->attr.exclude_user)
 		hwc->config |= ARCH_PERFMON_USR;
 	if (!event->attr.exclude_kernel)
@@ -1338,8 +1305,10 @@ static void e2k_pmu_disable(struct pmu *pmu)
 
 	/*
 	 * Note: this does not stop monitors counting, so it is
-	 * possible to get interrupt _after_ monitor was disabled.
-	 * Such interrupt will be discarded as spurious.
+	 * possible to get interrupt from a monitor if it is not
+	 * disabled inside this pmu_disable/pmu_enable section.
+	 * For monitors that indeed are disabled the pending
+	 * interrupt is cleared when writing to %dimcr/%ddmcr.
 	 */
 	raw_all_irq_save(flags);
 
@@ -1357,16 +1326,9 @@ static void e2k_pmu_enable(struct pmu *pmu)
 	if (!count) {
 		unsigned long flags = __this_cpu_read(saved_flags);
 
-		preempt_disable();
-
 		/* Enable NMIs to get all interrupts that might
 		 * have arrived while we were disabling perf */
 		raw_all_irq_restore(flags);
-
-		/* After the handling of interrupts we can clear this */
-		__this_cpu_write(monitors_spurious, 0);
-
-		preempt_enable();
 
 		BUG_ON(raw_nmi_irqs_disabled_flags(flags));
 	}

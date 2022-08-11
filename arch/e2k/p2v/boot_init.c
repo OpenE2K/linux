@@ -3794,6 +3794,16 @@ boot_native_kernel_switch_to_virt(bool bsp, int cpuid,
 	boot_native_set_sge();
 
 	/*
+	 * Switch User Stack registers to virtual kernel stack addresses
+	 * The assumption is - stack allocation does not use GETSAP operation
+	 * but uses SP and FP pointers and allocates stack from end.
+	 * Set stack pointer to the very begining of initial stack to collapse
+	 * useless previuos stack frames
+	 */
+
+	NATIVE_NV_WRITE_USBR_USD_REG(usbr, usd_hi, usd_lo);
+
+	/*
 	 * Set Kernel 'text/data/bss' segment registers to consistent
 	 * virtual addresses
 	 */
@@ -3808,16 +3818,6 @@ boot_native_kernel_switch_to_virt(bool bsp, int cpuid,
 	 * Set CPU registers to point to kernel CUT & index
 	 */
 	native_set_kernel_CUTD();
-
-	/*
-	 * Switch User Stack registers to virtual kernel stack addresses
-	 * The assumption is - stack allocation does not use GETSAP operation
-	 * but uses SP and FP pointers and allocates stack from end.
-	 * Set stack pointer to the very begining of initial stack to collapse
-	 * useless previuos stack frames
-	 */
-
-	NATIVE_NV_WRITE_USBR_USD_REG(usbr, usd_hi, usd_lo);
 
 	__E2K_WAIT_ALL;
 

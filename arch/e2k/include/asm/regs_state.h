@@ -48,6 +48,7 @@
 #include <asm/monitors.h>
 #include <asm/mmu.h>
 #include <asm/mmu_regs.h>
+#include <asm/perf_event_types.h>
 #include <asm/system.h>
 #include <asm/ptrace.h>
 #include <asm/p2v/boot_head.h>
@@ -219,14 +220,6 @@ do {									\
 	NATIVE_DO_SAVE_MONITOR_COUNTERS(sw_regs);			\
 } while (0)
 
-/*
- * When we use monitor registers, we count monitor events for the whole system,
- * so DIMAR0, DIMAR1, DDMAR0 and DDMAR1 registers are not depend on process and
- * need not be saved while process switching. DIMCR and DDMCR registers are not
- * depend on process too, but they should be saved while process switching,
- * because they are used to determine monitoring start moment during monitor
- * events counting for a process.
- */
 static inline void native_save_user_only_regs(struct sw_regs *sw_regs)
 {
 	if (machine.save_dimtp)
@@ -897,7 +890,35 @@ get_all_user_glob_regs(global_regs_t *gregs)
 
 #endif	/* CONFIG_PARAVIRT_GUEST */
 
-#define NATIVE_DO_RESTORE_MONITOR_COUNTERS(sw_regs)			\
+#if CONFIG_CPU_ISET >= 6
+static inline void restore_dimtp(const e2k_dimtp_t *dimtp)
+{
+	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi,
+			dimtp->lo, dimtp->hi, 4);
+}
+static inline void clear_dimtp(void)
+{
+	NATIVE_SET_DSREGS_CLOSED_NOEXC(dimtp.lo, dimtp.hi, 0ull, 0ull, 4);
+}
+#elif CONFIG_CPU_ISET == 0
+static inline void restore_dimtp(const e2k_dimtp_t *dimtp)
+{
+	if (machine.restore_dimtp)
+		machine.restore_dimtp(dimtp);
+}
+static inline void clear_dimtp(void)
+{
+	if (machine.restore_dimtp) {
+		e2k_dimtp_t dimtp = {{ 0 }};
+		machine.restore_dimtp(&dimtp);
+	}
+}
+#else
+static inline void restore_dimtp(const e2k_dimtp_t *dimtp) { }
+static inline void clear_dimtp(void) { }
+#endif
+
+#define NATIVE_RESTORE_MONITOR_COUNTERS(sw_regs)			\
 do {									\
 	e2k_ddmcr_t ddmcr = sw_regs->ddmcr;				\
 	u64 ddmar0 = sw_regs->ddmar0;					\
@@ -906,19 +927,13 @@ do {									\
 	u64 dimar0 = sw_regs->dimar0;					\
 	u64 dimar1 = sw_regs->dimar1;					\
 									\
-	if (machine.restore_dimtp)					\
-		machine.restore_dimtp(&sw_regs->dimtp);			\
+	restore_dimtp(&sw_regs->dimtp);					\
 	NATIVE_WRITE_DDMAR0_REG_VALUE(ddmar0);				\
 	NATIVE_WRITE_DDMAR1_REG_VALUE(ddmar1);				\
 	NATIVE_WRITE_DIMAR0_REG_VALUE(dimar0);				\
 	NATIVE_WRITE_DIMAR1_REG_VALUE(dimar1);				\
 	NATIVE_WRITE_DDMCR_REG(ddmcr);					\
 	NATIVE_WRITE_DIMCR_REG(dimcr);					\
-} while (0)
-#define NATIVE_RESTORE_MONITOR_COUNTERS(task)				\
-do {									\
-	struct sw_regs *sw_regs = &task->thread.sw_regs;		\
-	NATIVE_DO_RESTORE_MONITOR_COUNTERS(sw_regs);			\
 } while (0)
 
 /*
@@ -942,32 +957,52 @@ static inline void native_restore_user_only_regs(struct sw_regs *sw_regs)
 	if (!MONITORING_IS_ACTIVE) {
 		NATIVE_WRITE_DIBSR_REG(dibsr);
 		NATIVE_WRITE_DDBSR_REG(ddbsr);
-		NATIVE_DO_RESTORE_MONITOR_COUNTERS(sw_regs);
+		NATIVE_RESTORE_MONITOR_COUNTERS(sw_regs);
 	}
 }
 
-#ifdef	CONFIG_PERF_EVENTS
-DECLARE_PER_CPU(u8, perf_monitors_used);
-DECLARE_PER_CPU(u8, perf_bps_used);
-# define is_perf_using_monitors	__this_cpu_read(perf_monitors_used)
-# define is_perf_using_bps	__this_cpu_read(perf_bps_used)
-#else	/* ! CONFIG_PERF_EVENTS */
-#define	is_perf_using_monitors	false
-#define	is_perf_using_bps	false
-#endif	/* CONFIG_PERF_EVENTS */
-
 static inline void native_clear_user_only_regs(void)
 {
-	if (!is_perf_using_bps) {
+	u8 monitors_used = perf_read_monitors_used();
+	u8 bps_used = perf_read_bps_used();
+	if (!bps_used) {
 		NATIVE_WRITE_DIBCR_REG_VALUE(0);
 		NATIVE_WRITE_DDBCR_REG_VALUE(0);
 	}
-	if (!MONITORING_IS_ACTIVE && !is_perf_using_monitors) {
-		NATIVE_WRITE_DIMCR_REG_VALUE(0);
-		NATIVE_WRITE_DIBSR_REG_VALUE(0);
-		NATIVE_WRITE_DDMCR_REG_VALUE(0);
-		NATIVE_WRITE_DDBSR_REG_VALUE(0);
+	if (!MONITORING_IS_ACTIVE) {
+		if (!monitors_used) {
+			NATIVE_WRITE_DIMCR_REG_VALUE(0);
+			NATIVE_WRITE_DIBSR_REG_VALUE(0);
+			NATIVE_WRITE_DDMCR_REG_VALUE(0);
+			NATIVE_WRITE_DDBSR_REG_VALUE(0);
+		} else {
+			e2k_dimcr_t dimcr = NATIVE_READ_DIMCR_REG();
+			e2k_ddmcr_t ddmcr = NATIVE_READ_DDMCR_REG();
+			e2k_dibsr_t dibsr = NATIVE_READ_DIBSR_REG();
+			e2k_ddbsr_t ddbsr = NATIVE_READ_DDBSR_REG();
+			if (!(monitors_used & DIM0)) {
+				dimcr.half_word[0] = 0;
+				dibsr.m0 = 0;
+			}
+			if (!(monitors_used & DIM1)) {
+				dimcr.half_word[1] = 0;
+				dibsr.m1 = 0;
+			}
+			if (!(monitors_used & DDM0)) {
+				ddmcr.half_word[0] = 0;
+				ddbsr.m0 = 0;
+			}
+			if (!(monitors_used & DDM1)) {
+				ddmcr.half_word[1] = 0;
+				ddbsr.m1 = 0;
+			}
+			NATIVE_WRITE_DIMCR_REG(dimcr);
+			NATIVE_WRITE_DDMCR_REG(ddmcr);
+			NATIVE_WRITE_DIBSR_REG(dibsr);
+			NATIVE_WRITE_DDBSR_REG(ddbsr);
+		}
 	}
+	clear_dimtp();
 }
 
 
@@ -1044,6 +1079,19 @@ static inline void native_clear_user_only_regs(void)
 /* Declarate here to prevent loop #include. */
 #define PT_PTRACED	0x00000001
 
+#ifdef CONFIG_MLT_STORAGE
+static inline void invalidate_MLT(void)
+{
+# if CONFIG_CPU_ISET >= 3
+	NATIVE_SET_MMUREG(mlt_inv, 0);
+# else
+	machine.invalidate_MLT();
+# endif
+}
+#else
+static inline void invalidate_MLT(void) { }
+#endif
+
 static inline void
 NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 		bool task_is_binco, bool task_traced)
@@ -1051,13 +1099,8 @@ NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 	if (unlikely(task_is_binco))
 		NATIVE_SAVE_INTEL_REGS((sw_regs));
 
-#ifdef CONFIG_MLT_STORAGE
-	machine.invalidate_MLT();
-#endif
+	invalidate_MLT();
 
-	AS_WORD(sw_regs->fpcr) = NATIVE_NV_READ_FPCR_REG_VALUE();
-	AS_WORD(sw_regs->fpsr) = NATIVE_NV_READ_FPSR_REG_VALUE();
-	AS_WORD(sw_regs->pfpfr)	= NATIVE_NV_READ_PFPFR_REG_VALUE();
 	sw_regs->cutd = NATIVE_NV_READ_CUTD_REG();
 
 	if (unlikely(task_traced))
@@ -1068,13 +1111,18 @@ static inline void
 NATIVE_SAVE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 {
 #ifdef CONFIG_VIRTUALIZATION
-	const int task_is_binco = TASK_IS_BINCO(task) || task_thread_info(task)->vcpu;
+	const int task_is_binco = TASK_IS_BINCO(task) || task_thread_info(task)->virt_machine;
 #else
 	const int task_is_binco = TASK_IS_BINCO(task);
 #endif
 	struct mm_struct *mm = task->mm;
 	struct sw_regs *sw_regs = &task->thread.sw_regs;
+	save_gregs_fn_t save_gregs_dirty_bgr_fn = machine.save_gregs_dirty_bgr;
+	e2k_fpcr_t fpcr = NATIVE_NV_READ_FPCR_REG();
+	e2k_fpsr_t fpsr = NATIVE_NV_READ_FPSR_REG();
+	e2k_pfpfr_t pfpfr = NATIVE_NV_READ_PFPFR_REG();
 
+	/* Make sure we do not call scheduler from NMI context */
 	WARN_ONCE(!AS(sw_regs->upsr).nmie,
 		  "Non-maskable interrupts are disabled\n");
 
@@ -1083,8 +1131,11 @@ NATIVE_SAVE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 			!!(task->ptrace & PT_PTRACED));
 
 	if (mm) {
+		sw_regs->fpcr = fpcr;
+		sw_regs->fpsr = fpsr;
+		sw_regs->pfpfr = pfpfr;
 #ifdef CONFIG_GREGS_CONTEXT
-		machine.save_gregs_dirty_bgr(&task->thread.sw_regs.gregs);
+		save_gregs_dirty_bgr_fn(&task->thread.sw_regs.gregs);
 #endif
 
 		/*
@@ -1121,20 +1172,14 @@ static inline void
 NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 					bool task_is_binco, bool task_traced)
 {
-	u64 fpcr = AS_WORD(sw_regs->fpcr);
-	u64 fpsr = AS_WORD(sw_regs->fpsr);
-	u64 pfpfr = AS_WORD(sw_regs->pfpfr);
-	u64 cutd = AS_WORD(sw_regs->cutd);
-
-	NATIVE_NV_WRITE_FPCR_REG_VALUE(fpcr);
-	NATIVE_NV_WRITE_FPSR_REG_VALUE(fpsr);
-	NATIVE_NV_WRITE_PFPFR_REG_VALUE(pfpfr);
-	NATIVE_NV_NOIRQ_WRITE_CUTD_REG_VALUE(cutd);
+	e2k_cutd_t cutd = sw_regs->cutd;
 
 	if (unlikely(task_traced))
 		native_restore_user_only_regs(sw_regs);
 	else	/* Do this always when we don't test prev_task->ptrace */
 		native_clear_user_only_regs();
+
+	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
 
 	NATIVE_CLEAR_DAM;
 
@@ -1144,6 +1189,7 @@ NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 		NATIVE_RESTORE_INTEL_REGS(sw_regs);
 	}
 }
+
 static inline void
 NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
 		struct thread_info *ti)
@@ -1156,13 +1202,17 @@ NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
 	u64 psp_hi = AS_WORD(sw_regs->psp_hi);
 	u64 pcsp_lo = AS_WORD(sw_regs->pcsp_lo);
 	u64 pcsp_hi = AS_WORD(sw_regs->pcsp_hi);
-	e2k_mem_crs_t crs = sw_regs->crs;
+	e2k_cr0_lo_t cr0_lo = sw_regs->crs.cr0_lo;
+	e2k_cr0_hi_t cr0_hi = sw_regs->crs.cr0_hi;
+	e2k_cr1_lo_t cr1_lo = sw_regs->crs.cr1_lo;
+	e2k_cr1_hi_t cr1_hi = sw_regs->crs.cr1_hi;
 #ifdef CONFIG_VIRTUALIZATION
-	const int task_is_binco = TASK_IS_BINCO(task) || ti->vcpu;
+	const int task_is_binco = TASK_IS_BINCO(task) || ti->virt_machine;
 #else
 	const int task_is_binco = TASK_IS_BINCO(task);
 #endif
 	struct mm_struct *mm = task->mm;
+	restore_gregs_fn_t restore_gregs_fn = machine.restore_gregs;
 
 	NATIVE_FLUSHCPU;
 
@@ -1170,18 +1220,26 @@ NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
 	NATIVE_NV_WRITE_PSP_REG_VALUE(psp_hi, psp_lo);
 	NATIVE_NV_WRITE_PCSP_REG_VALUE(pcsp_hi, pcsp_lo);
 
-	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(crs.cr0_lo);
-	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(crs.cr0_hi);
-	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(crs.cr1_lo);
-	NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG(crs.cr1_hi);
+	NATIVE_NV_NOIRQ_WRITE_CR0_LO_REG(cr0_lo);
+	NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(cr0_hi);
+	NATIVE_NV_NOIRQ_WRITE_CR1_LO_REG(cr1_lo);
+	NATIVE_NV_NOIRQ_WRITE_CR1_HI_REG(cr1_hi);
 
 	NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(sw_regs, task_is_binco,
-		(task->ptrace & PT_PTRACED) ? true : false);
+			!!(task->ptrace & PT_PTRACED));
+
+	if (mm) {
+		e2k_fpcr_t fpcr = sw_regs->fpcr;
+		e2k_fpsr_t fpsr = sw_regs->fpsr;
+		e2k_pfpfr_t pfpfr = sw_regs->pfpfr;
 
 #ifdef CONFIG_GREGS_CONTEXT
-	if (mm)
-		machine.restore_gregs(&task->thread.sw_regs.gregs);
+		restore_gregs_fn(&task->thread.sw_regs.gregs);
 #endif
+		NATIVE_NV_WRITE_FPCR_REG(fpcr);
+		NATIVE_NV_WRITE_FPSR_REG(fpsr);
+		NATIVE_NV_WRITE_PFPFR_REG(pfpfr);
+	}
 }
 
 static inline void
@@ -1249,7 +1307,7 @@ NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
 	unsigned long all_interrupts = 0;				\
 	do {								\
 		TIR_hi = NATIVE_READ_TIR_HI_REG_VALUE();		\
-		if (unlikely(from_intc && GET_NR_TIRS(TIR_hi) > 18UL))	\
+		if (unlikely(from_intc && GET_NR_TIRS(TIR_hi) >= TIR_NUM)) \
 			break;						\
 		TIR_lo = NATIVE_READ_TIR_LO_REG_VALUE();		\
 		++nr_TIRs;						\
@@ -1259,12 +1317,9 @@ NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
 	} while(GET_NR_TIRS(TIR_hi));					\
 	TIRs_num = nr_TIRs;						\
 									\
-	/* un-freeze the TIR's LIFO */					\
-	UNFREEZE_TIRs(TIR_lo);						\
-									\
 	all_interrupts & (exc_all_mask | aau_exc_mask);			\
 })
-#define UNFREEZE_TIRs(TIR_lo)	NATIVE_WRITE_TIR_LO_REG_VALUE(TIR_lo)
+#define UNFREEZE_TIRs()	NATIVE_WRITE_TIR_LO_REG_VALUE(0)
 #define SAVE_SBBP(sbbp) \
 do { \
 	int i; \
@@ -1277,16 +1332,15 @@ static inline void set_osgd_task_struct(struct task_struct *task)
 	e2k_gd_lo_t gd_lo;
 	e2k_gd_hi_t gd_hi;
 
-	BUG_ON(!IS_ALIGNED((u64) task, E2K_ALIGN_GLOBALS_SZ));
-
 	AW(gd_lo) = 0;
 	AW(gd_hi) = 0;
 	AS(gd_lo).base = (u64) task;
 	AS(gd_lo).rw = E2K_GD_RW_PROTECTIONS;
 	AS(gd_hi).size = round_up(sizeof(struct task_struct),
 				  E2K_ALIGN_GLOBALS_SZ);
-	WRITE_OSGD_LO_REG(gd_lo);
-	WRITE_OSGD_HI_REG(gd_hi);
+
+	BUG_ON(!IS_ALIGNED((u64) task, E2K_ALIGN_GLOBALS_SZ));
+	WRITE_OSGD_REG(gd_hi, gd_lo);
 	atomic_load_osgd_to_gd();
 }
 
@@ -1299,7 +1353,6 @@ native_set_current_thread_info(struct thread_info *thread,
 	set_osgd_task_struct(task);
 }
 
-
 static inline void
 set_current_thread_info(struct thread_info *thread, struct task_struct *task)
 {
@@ -1307,6 +1360,22 @@ set_current_thread_info(struct thread_info *thread, struct task_struct *task)
 	E2K_SET_DGREG_NV(CURRENT_TASK_GREG, task);
 	set_osgd_task_struct(task);
 }
+
+#define	SAVE_PSYSCALL_RVAL(regs, _rval, _rval1, _rval2, _rv1_tag,	\
+			   _rv2_tag, _return_desk)			\
+({									\
+	(regs)->sys_rval = (_rval);					\
+	(regs)->rval1 = (_rval1);					\
+	(regs)->rval2 = (_rval2);					\
+	(regs)->rv1_tag = (_rv1_tag);					\
+	(regs)->rv2_tag = (_rv2_tag);					\
+	(regs)->return_desk = (_return_desk);				\
+})
+
+#define	SAVE_SYSCALL_RVAL(regs, rval)					\
+({									\
+	(regs)->sys_rval = (rval);					\
+})
 
 #endif /* _E2K_REGS_STATE_H */
 

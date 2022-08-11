@@ -5,6 +5,7 @@
 #undef NATIVE_TASK_SIZE
 #undef	HOST_TASK_SIZE
 #undef	GUEST_TASK_SIZE
+#include <asm/alternative-asm.h>
 #include <asm/mmu_regs_types.h>
 #include <asm/cpu_regs_types.h>
 #include <asm/e2k_api.h>
@@ -19,6 +20,12 @@
 .global trap_handler_trampoline_continue;
 .global syscall_handler_trampoline_continue;
 .global syscall_fork_trampoline_continue;
+
+#ifdef CONFIG_CLW_ENABLE
+# define CLW_ONLY(...) __VA_ARGS__
+#else
+# define CLW_ONLY(...)
+#endif
 
 #define HCALL_WSZ 11
 
@@ -47,12 +54,10 @@ ttable_entry16:
 
 	// if (READ_SBR_REG() < NATIVE_TASK_SIZE) {
 	//	thread_info = current_thread_info();
+	//	sbr = current->stack +KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET
 	//	usd_lo = thread_info->k_usd_lo;
 	//	usd_hi = thread_info->k_usd_hi;
-	//	WRITE_USD_REG(usd_hi, usd_lo);
-	//	WRITE_SBR_REG_VALUE(
-	//		current->stack +
-	//			KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET);
+	//	WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo);
 	/*	FIXME: generic hypercalls do not increment hardware stacks now
 	//	psp_hi = READ_PSP_HI_REG();
 	//	pcsp_hi = READ_PCSP_HI_REG();
@@ -116,19 +121,29 @@ ttable_entry16:
 	puttagd,2 %dr5, 0, %dr5
 	puttagd,5 %dr6, 0, %dr6
 	}
-	// Switch to kernel local data stack
+	// Switch to kernel local data stack: WRITE_USBR_USD_REG(sbr, usd_hi, usd_lo)
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_HWBUG_USD_ALIGNMENT version */
+		{
+		rwd	%dr10, %sbr
+		sxt 6, %r0, %dr0
+		nop 1
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Default version */
+		/* CPU_HWBUG_USD_ALIGNMENT version */
+		{
+		rwd	%dr10, %sbr
+		sxt 6, %r0, %dr0
+		}
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT)
 	{
-		// sbr = stack + KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET
-	rwd	%dr10, %sbr			// WRITE_SBR_REG_VALUE(sbr)
-	sxt 6, %r0, %dr0
-	}
-	{
-	rwd	%dr8, %usd.hi			// WRITE_USD_REG(usd_hi, usd_lo)
+	rwd	%dr9, %usd.lo
 	andns	%dr13, PSR_SGE_AS, %dr13	// psr &= ~PSR_SGE;
 	}
 	{
 	nop 4 /* usd->getsp */
-	rwd	%dr9, %usd.lo
+	rwd	%dr8, %usd.hi
 	ord %dr0, %dr18, %dr0
 	std	%dr7, [ %dr19 + VCPU_ARCH_CTXT_SBR ]
 	}
@@ -187,6 +202,9 @@ bad_hcall:
 	addd 0, 0, %dr7
 	ONLY_SET_KERNEL_GREGS %dr7, %dr8, %dr9, %dr10
 	ibranch	dump_stack
+#ifdef CONFIG_CPU_HWBUG_IBRANCH
+	{nop} {nop}
+#endif
 	.size ttable_entry16, . -$ttable_entry16
 
 .global ttable_entry17
@@ -261,6 +279,7 @@ ttable_entry17:
  * lcc does not support setting __interrupt attribute on
  * kvm_light_hypercalls() - it is too complex - so just switch
  * the data stack the same way kvm_generic_hypercalls() does.
+ * Also switch clw context for protected mode (kvm_switch_clw_regs)
  */
 #define HW_HCALL(KERNEL_ENTRY) \
 	{ \
@@ -278,9 +297,12 @@ ttable_entry17:
 		/* Important: the first memory access in kernel is store. \
 		 * This is needed to flush SLT before trying to load anything. */ \
 		stw,sm %r0, [slt_disable + 0]; \
+		CLW_ONLY(addd,1 0, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO), %dr18); \
+		CLW_ONLY(addd,2 0, 1, %dr16) \
 	} \
 	{ \
 		rwd %dr20, %rpr.lo; \
+		CLW_ONLY(ldd,2 [%dr18], %dr12 MAS_MMU_REG) \
 	} \
 	{ \
 		nop 1; /* ldd */ \
@@ -288,38 +310,72 @@ ttable_entry17:
 		ldd,2 [%dr17 + TI_VCPU], %dr19; \
 	} \
 	{ \
+		CLW_ONLY(nop 2;) /* mmurw us_cl_d -> mmurr us_cl_* */ \
 		rrd %sbr, %dr7; \
 		puttagd,5 %dr0, 0, %dr0; \
+		CLW_ONLY(std,2 %dr16, [%dr18] MAS_MMU_REG) \
 	} \
 	{ \
 		rrd %usd.hi, %dr20; \
 		puttagd,2 %dr1, 0, %dr1; \
-		puttagd,5 %dr2, 0, %dr2; \
+		CLW_ONLY(mmurr,5 %us_cl_b, %dr13) \
 	} \
 	{ \
-		rrd %usd.lo, %dr21; \
-		puttagd,2 %dr3, 0, %dr3; \
-		puttagd,5 %dr4, 0, %dr4; \
+		puttagd,2 %dr2, 0, %dr2; \
+		CLW_ONLY(mmurr,5 %us_cl_up, %dr14) \
 	} \
 	{ \
-		nop 3; /* ldd */ \
 		ldd [%dr19 + VCPU_ARCH_CTXT_SBR], %dr10; \
 		ldd [%dr19 + VCPU_ARCH_CTXT_USD_HI], %dr8; \
 		ldd [%dr19 + VCPU_ARCH_CTXT_USD_LO], %dr9; \
 		ldb [%dr19 + VCPU_ARCH_CTXT_SAVED_VALID], %r11; \
 	} \
 	{ \
-		puttagd,2 %dr5, 0, %dr5; \
-		puttagd,5 %dr6, 0, %dr6; \
+		rrd %usd.lo, %dr21; \
+		puttagd,2 %dr3, 0, %dr3; \
+		CLW_ONLY(mmurr,5 %us_cl_m0, %dr15) \
 	} \
 	{ \
-		rwd %dr10, %sbr; \
+		puttagd,2 %dr4, 0, %dr4; \
+		CLW_ONLY(mmurr,5 %us_cl_m1, %dr16) \
+	} \
+	{ \
+		puttagd,2 %dr5, 0, %dr5; \
+		CLW_ONLY(mmurr,5 %us_cl_m2, %dr17) \
+	} \
+	{ \
+		puttagd,2 %dr6, 0, %dr6; \
+		CLW_ONLY(mmurr,5 %us_cl_m3, %dr18;) \
+	} \
+	{ \
+		CLW_ONLY(std %dr12, [ %dr19 + VCPU_ARCH_CTXT_US_CL_D ];) \
+		CLW_ONLY(std %dr13, [ %dr19 + VCPU_ARCH_CTXT_US_CL_B ];) \
+	} \
+	{ \
+		CLW_ONLY(std %dr14, [ %dr19 + VCPU_ARCH_CTXT_US_CL_UP ];) \
+		CLW_ONLY(std %dr15, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M0 ];) \
+	} \
+	ALTERNATIVE_1_ALTINSTR \
+		/* CPU_HWBUG_USD_ALIGNMENT version */ \
+		{ \
+			CLW_ONLY(std %dr16, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M1 ];) \
+			rwd %dr10, %sbr; \
+			nop 1; \
+		} \
+	ALTERNATIVE_2_OLDINSTR \
+		/* Default version */ \
+		{ \
+			CLW_ONLY(std %dr16, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M1 ];) \
+			rwd %dr10, %sbr; \
+		} \
+	ALTERNATIVE_3_FEATURE(CPU_HWBUG_USD_ALIGNMENT) \
+	{ \
+		rwd %dr9, %usd.lo; \
+		CLW_ONLY(std %dr17, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M2 ];) \
+		CLW_ONLY(std %dr18, [ %dr19 + VCPU_ARCH_CTXT_US_CL_M3 ];) \
 	} \
 	{ \
 		rwd %dr8, %usd.hi; \
-	} \
-	{ \
-		rwd %dr9, %usd.lo; \
 		nop 2; /* usd->getsp */ \
 		sxt 6, %r0, %dr0; \
 		std %dr7, [ %dr19 + VCPU_ARCH_CTXT_SBR ]; \
@@ -360,7 +416,7 @@ hcall_entry1:
 	.size hcall_entry1, . -$hcall_entry1
 
 .global trap_handler_trampoline
-.section ".entry_handlers", "ax"
+.section ".irqentry.text", "ax"
 .type trap_handler_trampoline,@function
 trap_handler_trampoline:
 	HANDLER_TRAMPOLINE %ctpr2, 11, trap_handler_trampoline_continue, 0
@@ -371,7 +427,7 @@ trap_handler_switched_stacks:
 .size $trap_handler_trampoline, . - $trap_handler_trampoline
 
 .global syscall_handler_trampoline
-.section ".entry_handlers", "ax"
+.section ".entry.text", "ax"
 .type syscall_handler_trampoline,@function
 syscall_handler_trampoline:
 	HANDLER_TRAMPOLINE %ctpr2, 11, syscall_handler_trampoline_continue, 1
@@ -382,7 +438,7 @@ syscall_handler_switched_stacks:
 .size $syscall_handler_trampoline, . - $syscall_handler_trampoline
 
 .global syscall_fork_trampoline
-.section ".entry_handlers", "ax"
+.section ".entry.text", "ax"
 .type syscall_fork_trampoline,@function
 syscall_fork_trampoline:
 	HANDLER_TRAMPOLINE %ctpr2, 11, syscall_fork_trampoline_continue, 1

@@ -30,7 +30,6 @@ typedef enum pt_atomic_op {
 	ATOMIC_GET_AND_XCHG,
 	ATOMIC_GET_AND_CLEAR,
 	ATOMIC_SET_WRPROTECT,
-	ATOMIC_MODIFY_START,
 	ATOMIC_TEST_AND_CLEAR_YOUNG,
 	ATOMIC_TEST_AND_CLEAR_RELAXED,
 } pt_atomic_op_t;
@@ -38,41 +37,50 @@ typedef enum pt_atomic_op {
 static inline pgprotval_t
 native_pt_set_wrprotect_atomic(pgprotval_t *pgprot)
 {
-	return __api_atomic_op(_PAGE_INIT_WRITEABLE, pgprot, d,
-				"andnd", RELAXED_MB);
+	pgprotval_t newval = __api_atomic_op(_PAGE_INIT_WRITEABLE, pgprot,
+					     d, "andnd", RELAXED_MB);
+	trace_pt_update("pt_set_wrprotect: entry at 0x%lx: -> 0x%lx\n",
+			pgprot, newval);
+	return newval;
 }
 
 static inline pgprotval_t
 native_pt_get_and_clear_atomic(pgprotval_t *pgprot)
 {
-	return __api_atomic_fetch_op(_PAGE_INIT_VALID, pgprot,
-					d, "andd", RELAXED_MB);
+	pgprotval_t oldval = __api_atomic_fetch_op(_PAGE_INIT_VALID, pgprot,
+						   d, "andd", RELAXED_MB);
+	trace_pt_update("pt_get_and_clear: entry at 0x%lx: 0x%lx -> 0x%lx\n",
+			pgprot, oldval, oldval & _PAGE_INIT_VALID);
+	return oldval;
 }
 
 static inline pgprotval_t
 native_pt_get_and_xchg_atomic(pgprotval_t newval, pgprotval_t *pgprot)
 {
-	return __api_xchg_return(newval, pgprot, d, RELAXED_MB);
+	pgprotval_t oldval = __api_xchg_return(newval, pgprot, d, RELAXED_MB);
+	trace_pt_update("pt_get_and_xchg: entry at 0x%lx: 0x%lx -> 0x%lx\n",
+			pgprot, oldval, newval);
+	return oldval;
 }
 
 static inline pgprotval_t
 native_pt_clear_relaxed_atomic(pgprotval_t mask, pgprotval_t *pgprot)
 {
-	return __api_atomic_fetch_op(mask, pgprot, d, "andnd", RELAXED_MB);
+	pgprotval_t oldval = __api_atomic_fetch_op(mask, pgprot, d,
+						   "andnd", RELAXED_MB);
+	trace_pt_update("pt_clear: entry at 0x%lx: 0x%lx -> 0x%lx\n",
+			pgprot, oldval, oldval & ~mask);
+	return oldval;
 }
 
 static inline pgprotval_t
 native_pt_clear_young_atomic(pgprotval_t *pgprot)
 {
-	return __api_atomic_fetch_op(_PAGE_INIT_ACCESSED, pgprot,
-					d, "andnd", RELAXED_MB);
-}
-
-static inline pgprotval_t
-native_pt_modify_prot_atomic(pgprotval_t *pgprot)
-{
-	return __api_atomic_fetch_op(_PAGE_INIT_VALID, pgprot,
-					d, "andd", RELAXED_MB);
+	pgprotval_t oldval = __api_atomic_fetch_op(_PAGE_INIT_ACCESSED, pgprot,
+						   d, "andnd", RELAXED_MB);
+	trace_pt_update("pt_clear_young: entry at 0x%lx: 0x%lx -> 0x%lx\n",
+			pgprot, oldval, oldval & ~_PAGE_INIT_ACCESSED);
+	return oldval;
 }
 
 #if	defined(CONFIG_KVM_GUEST_KERNEL)
@@ -117,13 +125,6 @@ pt_clear_young_atomic(struct mm_struct *mm,
 			unsigned long addr, pgprot_t *pgprot)
 {
 	return native_pt_clear_young_atomic(&pgprot->pgprot);
-}
-
-static inline pgprotval_t
-pt_modify_prot_atomic(struct mm_struct *mm,
-			unsigned long addr, pgprot_t *pgprot)
-{
-	return native_pt_modify_prot_atomic(&pgprot->pgprot);
 }
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 

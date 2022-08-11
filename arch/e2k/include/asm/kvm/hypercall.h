@@ -205,8 +205,10 @@ static inline unsigned long generic_hypercall6(unsigned long nr,
 						/* time (cycles) */
 #define	KVM_HCALL_GET_GUEST_RUNNING_TIME 6	/* get running time of guest */
 						/* VCPU at cycles */
-#define	KVM_HCALL_GET_VCPU_START_THREAD	8	/* register on host the guest */
-						/* kernel VCPU booting thread */
+#define	KVM_HCALL_GET_HOST_MMU_PPTB	7	/* get the host MMU PPTB register */
+						/* state */
+#define	KVM_HCALL_GET_TLB_SET_TAG	8	/* get tag of TLB line set */
+#define	KVM_HCALL_GET_TLB_SET_ENTRY	9	/* get entry of TLB line set */
 #define	KVM_HCALL_UPDATE_PSP_HI		10	/* write updated value to */
 						/* PSP_hi register */
 #define	KVM_HCALL_UPDATE_PCSP_HI	11	/* write updated value to */
@@ -215,6 +217,8 @@ static inline unsigned long generic_hypercall6(unsigned long nr,
 						/* guest as task */
 #define	KVM_HCALL_UPDATE_WD_PSIZE	13	/* write updated psize field */
 						/* to the WD register */
+#define	KVM_HCALL_GET_HOST_MMU_PID	14	/* get the host MMU PID register */
+						/* state */
 #define	KVM_HCALL_MOVE_TAGGED_DATA	15	/* move quad value from to */
 #define	KVM_HCALL_UNFREEZE_TRAPS	16	/* unfreeze TIRs & trap */
 						/* cellar */
@@ -303,9 +307,27 @@ HYPERVISOR_get_guest_running_time(void)
 }
 
 static inline unsigned long
-HYPERVISOR_get_vcpu_start_thread(void)
+HYPERVISOR_get_tlb_set_tag(e2k_addr_t va, int set_no, bool huge)
 {
-	return light_hypercall0(KVM_HCALL_GET_VCPU_START_THREAD);
+	return light_hypercall3(KVM_HCALL_GET_TLB_SET_TAG, va, set_no, huge);
+}
+
+static inline unsigned long
+HYPERVISOR_get_tlb_set_entry(e2k_addr_t va, int set_no, bool huge)
+{
+	return light_hypercall3(KVM_HCALL_GET_TLB_SET_ENTRY, va, set_no, huge);
+}
+
+static inline unsigned long
+HYPERVISOR_get_host_mmu_pptb(void)
+{
+	return light_hypercall0(KVM_HCALL_GET_HOST_MMU_PPTB);
+}
+
+static inline unsigned long
+HYPERVISOR_get_host_mmu_pid(void)
+{
+	return light_hypercall0(KVM_HCALL_GET_HOST_MMU_PID);
 }
 
 static inline unsigned long
@@ -611,6 +633,8 @@ HYPERVISOR_switch_to_expanded_guest_chain_stack(long delta_size,
 					/* in page tables and flush tlb */
 #define KVM_HCALL_SYNC_ADDR_RANGE	135 /* sync ptes in page */
 					/* tables without flushing tlb */
+#define	KVM_HCALL_GET_SPT_TRANSLATION	137	/* get full translation of guest */
+						/* address at shadow PTs */
 #define	KVM_HCALL_RECOVERY_FAULTED_TAGGED_STORE 141
 						/* recovery faulted store */
 						/* tagged value operations */
@@ -1252,10 +1276,11 @@ HYPERVISOR_guest_csd_lock_try_wait(void *lock)
 }
 
 static inline unsigned long
-HYPERVISOR_pt_atomic_update(unsigned long gpa, void __user *old_gpte,
-		unsigned atomic_op, unsigned long prot_mask)
+HYPERVISOR_pt_atomic_update(int gmmid_nr, unsigned long gpa,
+			void __user *old_gpte,
+			unsigned atomic_op, unsigned long prot_mask)
 {
-	return generic_hypercall4(KVM_HCALL_PT_ATOMIC_UPDATE,
+	return generic_hypercall5(KVM_HCALL_PT_ATOMIC_UPDATE, (int)gmmid_nr,
 			gpa, (unsigned long)old_gpte, atomic_op, prot_mask);
 }
 
@@ -1367,7 +1392,9 @@ extern void smp_send_refresh(void);
 static inline unsigned long
 HYPERVISOR_kvm_shutdown(void *msg, unsigned long reason)
 {
+#ifdef CONFIG_SMP
 	smp_send_refresh();
+#endif
 	return generic_hypercall2(KVM_HCALL_SHUTDOWN, (unsigned long)msg,
 					reason);
 }
@@ -1400,6 +1427,28 @@ HYPERVISOR_host_printk(char *msg, int size)
 	return generic_hypercall2(KVM_HCALL_HOST_PRINTK, (unsigned long)msg,
 					(unsigned long)size);
 }
+
+/*
+ * The guest virtual address info of full track of translation
+ * at the host shadow PTs
+ */
+
+typedef struct mmu_spt_trans {
+	int		pt_levels;	/* the last significant level of PT */
+	unsigned long	pgd;
+	unsigned long	pud;
+	unsigned long	pmd;
+	unsigned long	pte;
+} mmu_spt_trans_t;
+
+static inline unsigned long
+HYPERVISOR_get_spt_translation(e2k_addr_t address,
+				mmu_spt_trans_t __user *trans_info)
+{
+	return generic_hypercall2(KVM_HCALL_GET_SPT_TRANSLATION, address,
+					(unsigned long)trans_info);
+}
+
 static inline unsigned long
 HYPERVISOR_print_guest_kernel_ptes(e2k_addr_t address)
 {

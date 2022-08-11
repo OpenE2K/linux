@@ -132,10 +132,6 @@ enum net_device_flags {
 #define IFF_ECHO			IFF_ECHO
 #endif /* __UAPI_DEF_IF_NET_DEVICE_FLAGS_LOWER_UP_DORMANT_ECHO */
 
-/* #ifdef CONFIG_MCST */
-#define IFF_SPINWAIT	0x80000	/* dev_rx_action thread pools, not schedule */
-/* #endif */
-
 #define IFF_VOLATILE	(IFF_LOOPBACK|IFF_POINTOPOINT|IFF_BROADCAST|IFF_ECHO|\
 		IFF_MASTER|IFF_SLAVE|IFF_RUNNING|IFF_LOWER_UP|IFF_DORMANT)
 

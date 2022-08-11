@@ -79,9 +79,9 @@ union cepic_epic_int2 {
 			dlvm		:  3,
 			__reserved2	:  4,
 			gst_id		: 12,
-			__reserved3	: 12,
+			__reserved3	: 8,
 			gst_dst		: 10,
-			__reserved4	: 10;
+			__reserved4	: 14;
 	} __packed bits;
 };
 
@@ -323,12 +323,12 @@ typedef struct kvm_epic_page {
 	u32		id;
 	u32		cpr;
 	u32		esr;
-	u32		esr2;
-	u32		cir;
+	union cepic_esr2 esr2;
+	union cepic_cir cir;
 	atomic_t	esr_new;
 	u32		svr;
-	u64		icr;
-	u32		timer_lvtt;
+	union cepic_icr icr;
+	union cepic_timer_lvtt timer_lvtt;
 	u32		timer_init;
 	u32		timer_cur;
 	u32		timer_div;
@@ -338,13 +338,13 @@ typedef struct kvm_epic_page {
 	u32		nm_timer_div;
 	u32		pnmirr_mask;
 /*04c*/	u32		__reserved1[45];
-/*100*/	atomic64_t	pmirr[16];
+/*100*/	atomic64_t	pmirr[CEPIC_PMIRR_NR_DREGS];
 /*180*/	u32		__reserved2[24];
 /*1e0*/	atomic_t	pnmirr;
 	u32		__reserved3[263];
 /*600*/	u8		pnmirr_byte[16];
 /*610*/	u32		__reserved4[124];
-/*800*/	u8		pmirr_byte[1024];
+/*800*/	u8		pmirr_byte[CEPIC_PMIRR_NR_BITS];
 } epic_page_t;
 
 #elif defined(__BIG_ENDIAN)
@@ -417,9 +417,9 @@ union cepic_epic_int {
 union cepic_epic_int2 {
 	u64	raw;
 	struct	{
-		u64	__reserved4	: 10,
+		u64	__reserved4	: 14,
 			gst_dst		: 10,
-			__reserved3	: 12,
+			__reserved3	: 8,
 			gst_id		: 12,
 			__reserved2	:  4,
 			dlvm		:  3,

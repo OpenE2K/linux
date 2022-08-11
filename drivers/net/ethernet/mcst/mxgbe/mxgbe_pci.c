@@ -41,17 +41,23 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 	if (!pdev)
 		return -ENODEV;
 
-	/* check devtree config */
-	if (np) {
-		of_status_prop = of_get_property(np, "status", NULL);
-		if (!strcmp(of_status_prop, "okay")) {
-			dev_info(&pdev->dev, "device enabled in devtree\n");
+	/* check cmdline param */
+	if (mxgbe_status == 0) {
+		dev_warn(&pdev->dev, "device disabled in cmdline\n");
+		return -ENODEV;
+	} else if (mxgbe_status > 1) {
+		/* check devtree config */
+		if (np) {
+			of_status_prop = of_get_property(np, "status", NULL);
+			if (!strcmp(of_status_prop, "disabled")) {
+				dev_warn(&pdev->dev,
+					"device disabled in devicetree\n");
+				return -ENODEV;
+			}
 		} else {
-			dev_warn(&pdev->dev, "device disabled in devtree\n");
-			return -ENODEV;
+			dev_warn(&pdev->dev,
+				 "devicetree for node not found!\n");
 		}
-	} else {
-		dev_warn(&pdev->dev, "can't find node in devtree\n");
 	}
 
 	dev_info(&pdev->dev, "initializing PCI device %04x:%04x\n",

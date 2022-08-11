@@ -9,6 +9,9 @@
  *
  * PMC (Power Management Controller) for e2k (Processor-2)
  */
+
+#define pr_fmt(fmt) "%s: " fmt, __func__
+
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -26,8 +29,11 @@
 #include <linux/irq.h>
 #include <linux/node.h>
 #include <linux/cpu.h>
-#include <linux/platform_data/i2c-l-i2c2.h>
 #include <linux/platform_device.h>
+#include <linux/pm_opp.h>
+#include <linux/regulator/consumer.h>
+
+#ifdef CONFIG_CPU_FREQ
 
 #include <asm/pci.h>
 #include <asm/l_pmc.h>
@@ -46,8 +52,6 @@
 #define DebugPMC(...) do {} while (0)
 #endif /* DEBUG_PMC */
 
-struct l_pmc l_pmc[MAX_NUM_PMCS];
-void __iomem *pmc_cbase; /*Global for e1cp, init in pmc_l_cpufreq_init*/
 
 unsigned int bfs_bypass_val;
 static unsigned int gpu_scale;
@@ -57,6 +61,8 @@ struct cpufreq_frequency_table pmc_l_freqs[MAX_PSTATES];
 /* global available frequencies */
 struct cpufreq_frequency_table
 			pmc_l_available_freqs[MAX_AV_PSTATES];
+
+struct regulator *vout_regulator;
 
 static int pmc_l_gpufreq_get_state(void)
 {
@@ -370,49 +376,23 @@ static int pmc_l_init_wa_freq_tables(void)
 int pmc_l_cpufreq_init(struct cpufreq_policy *policy)
 {
 	int result = -ENODEV;
-	unsigned long covfid_status;
 	unsigned int hb_syscfg_val;
-	struct pci_dev *pdev = NULL;
-	struct resource r[] = {
-		{
-			.flags	= IORESOURCE_MEM,
-			.start	= PMC_I2C_REGS_BASE,
-			.end	= PMC_I2C_REGS_BASE + 0x20 - 1
-		},
-	};
-	struct l_i2c2_platform_data pmc_i2c = {
-		.bus_nr	         = 4,
-		.base_freq_hz    = 100 * 1000 * 1000,
-		.desired_freq_hz = 100 * 1000,
-	};
+	struct device *cpu_dev;
+	struct dev_pm_opp *opp;
 
-	pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
-				PCI_DEVICE_ID_MCST_HB,
-				pdev);
-	if (!pdev)
-		return result;
+	/* Dvfs init */
+	cpu_dev = get_cpu_device(policy->cpu);
 
-	result = pci_enable_device_mem(pdev);
-	if (result) {
-		pci_dev_put(pdev);
-		pr_err("pmc_l_cpufreq_init:"
-				" failed to enable pci mem device\n");
-		return result;
+	vout_regulator = regulator_get_exclusive(cpu_dev, "vout");
+	if (IS_ERR(vout_regulator)) {
+		pr_warn("didn't find vout regulator\n");
+		vout_regulator = NULL;
 	}
 
-	l_pmc[0].cntrl_base = pci_iomap(pdev, E1CP_PMC_BAR, 0);
-	l_pmc[0].pdev = pdev;
+	result = dev_pm_opp_of_add_table(cpu_dev);
+	if (result)
+		pr_warn("no OPP table for cpu%d\n", policy->cpu);
 
-	/* allocate freqs table */
-	pr_err("pmc_l_cpufreq_init: l_pmc[0]=%p", &l_pmc[0]);
-	pr_err("pmc_l_cpufreq_init: l_pmc[0].cntrl_base=%p\n",
-							l_pmc[0].cntrl_base);
-
-	pmc_cbase = l_pmc[0].cntrl_base;
-
-	covfid_status = __raw_readl(pmc_cbase + PMC_L_COVFID_STATUS_REG);
-	pr_err("pmc_l_cpufreq_init: covfid_status_lo = %lx\n",
-								covfid_status);
 
 	/* Initialize P_State_value_X:
 	 * 1) Check BFS bypass bit value in host brigde pci config space;
@@ -422,22 +402,20 @@ int pmc_l_cpufreq_init(struct cpufreq_policy *policy)
 	 */
 	pci_read_config_dword(l_pmc[0].pdev, HB_BFS_PCI_CONF_REG,
 							&bfs_bypass_val);
-	pr_err("pmc_l_cpufreq_init: BFS val = 0x%x bypass bit: 0x%x\n",
+	pr_err("BFS val = 0x%x bypass bit: 0x%x\n",
 			bfs_bypass_val, (bfs_bypass_val & HB_BFS_BYPASS_MASK));
 
 	hb_syscfg_val = bfs_bypass_val;
-	pr_err("pmc_l_cpufreq_init: HB SYSCFG val = 0x%x,"
-			" Frequency is %d MHz\n",
-			hb_syscfg_val,
+	pr_err("HB SYSCFG val = 0x%x, Frequency is %d MHz\n", hb_syscfg_val,
 			((E1CP_BASE_FREQ * ((hb_syscfg_val & 0xf) + 10)) / 2));
 
 	if (bfs_bypass_val & HB_BFS_BYPASS_MASK) {
 		/* WA case. */
-		pr_err("pmc_l_cpufreq_init: WA case\n");
+		pr_err("WA case\n");
 		pmc_l_init_wa_freq_tables();
 	} else {
 		/* Normal case. */
-		pr_err("pmc_l_cpufreq_init: Normal case\n");
+		pr_err("Normal case\n");
 
 		/*
 		 * Calculate FIDs - Frequencies table.
@@ -483,6 +461,19 @@ int pmc_l_cpufreq_init(struct cpufreq_policy *policy)
 	/* Get boot's frequency, that was set up by jumpers */
 	policy->cur = pmc_l_freqs[PMC_PSTATEVAL_REG0].frequency;
 
+	if (!result) {
+		opp = dev_pm_opp_find_freq_exact(
+			cpu_dev, policy->cur * 1000, true);
+
+		if (!IS_ERR(opp)) {
+			if (vout_regulator) {
+				regulator_set_voltage_tol(vout_regulator,
+					dev_pm_opp_get_voltage(opp), 0);
+			}
+			dev_pm_opp_put(opp);
+		}
+	}
+
 	if (bfs_bypass_val & HB_BFS_BYPASS_MASK)
 		cpufreq_generic_init(policy, pmc_l_freqs,
 			E1CP_TRANSITION_LATENCY);
@@ -490,20 +481,7 @@ int pmc_l_cpufreq_init(struct cpufreq_policy *policy)
 		cpufreq_generic_init(policy, pmc_l_available_freqs,
 			E1CP_TRANSITION_LATENCY);
 
-	/* Initialize I2C master */
-	
-	r[0].start += pci_resource_start(pdev, E1CP_PMC_BAR);
-	r[0].end   += pci_resource_start(pdev, E1CP_PMC_BAR);
-	
-	l_pmc[0].i2c_chan  =
-		platform_device_register_resndata(&l_pmc[0].pdev->dev,
-				"pmc-i2c", -1, r,
-				ARRAY_SIZE(r),
-				&pmc_i2c, sizeof(pmc_i2c));
-	if (l_pmc[0].i2c_chan == NULL) {
-		pr_err("pmc_l_cpufreq_init:"
-				" failed to initialize pmc_i2c master\n");
-	}
-
 	return 0;
 }
+
+#endif /* CONFIG_CPU_FREQ */

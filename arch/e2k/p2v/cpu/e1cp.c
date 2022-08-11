@@ -35,6 +35,5 @@ void boot_e1cp_setup_arch(void)
 	boot_machine.sic_mc_count = E1CP_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = E1CP_SIC_MC1_ECC;
 	boot_machine.sic_io_str1 = SIC_io_str_hi;
-	boot_machine.clock_tick_rate = E1CP_CLOCK_TICK_RATE;
 }
 

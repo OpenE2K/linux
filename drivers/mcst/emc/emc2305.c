@@ -43,6 +43,10 @@
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
+#ifdef CONFIG_MCST
+#include <linux/pwm.h>
+#include <linux/thermal.h>
+#endif
 
 /*
  * Addresses scanned.
@@ -132,7 +136,20 @@ struct emc2305_data {
 	struct mutex		update_lock;
 	int			fans;
 	struct emc2305_fan_data	fan[5];
+#ifdef CONFIG_MCST
+	struct i2c_client *client;
+	struct pwm_chip chip;
+#endif
 };
+
+#ifdef CONFIG_MCST
+#define MAX_PWM_DEVICES		5
+
+static inline struct emc2305_data *to_pwm(struct pwm_chip *chip)
+{
+	return container_of(chip, struct emc2305_data, chip);
+}
+#endif
 
 static int read_u8_from_i2c(struct i2c_client *client, u8 i2c_reg, u8 *output)
 {
@@ -723,8 +740,68 @@ static void emc2305_get_config(struct i2c_client *client)
 #ifdef CONFIG_OF
 	emc2305_config_of(client);
 #endif
-
 }
+
+#ifdef CONFIG_MCST
+static int emc2305_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
+				const struct pwm_state *state)
+{
+	struct emc2305_data *data = to_pwm(chip);
+	struct i2c_client *client = data->client;
+	const u8 reg_fan_conf1 = SEL_FAN(pwm->hwpwm, REG_FAN_CONFIGURATION_1);
+	int ret = -EINVAL;
+	u8 val;
+	u8 pwm_mode;
+
+	read_u8_from_i2c(client, reg_fan_conf1, &pwm_mode);
+	if (pwm_mode >> 7)
+		return -EPERM;
+
+	if (state->period > 1) {
+		mutex_lock(&data->update_lock);
+		val = state->duty_cycle * 255 / (state->period - 1);
+		val = clamp_val(val, 0, 255);
+		i2c_smbus_write_byte_data(client,
+					SEL_FAN(pwm->hwpwm, REG_FAN_SETTING), val);
+		mutex_unlock(&data->update_lock);
+	}
+
+	return ret;
+}
+
+static const struct pwm_ops emc2305_pwm_ops = {
+	.apply = emc2305_pwm_apply,
+	.owner = THIS_MODULE,
+};
+
+static void emc2305_pwm_remove(void *arg)
+{
+	struct emc2305_data *data = arg;
+
+	pwmchip_remove(&data->chip);
+}
+
+static void emc2305_init_pwm(struct emc2305_data *data)
+{
+	struct i2c_client *client = data->client;
+	int ret;
+
+	/* Initialize chip */
+
+	data->chip.dev = &client->dev;
+	data->chip.ops = &emc2305_pwm_ops;
+	data->chip.base = -1;
+	data->chip.npwm = MAX_PWM_DEVICES;
+
+	ret = pwmchip_add(&data->chip);
+	if (ret < 0) {
+		dev_err(&client->dev, "pwmchip_add() failed: %d\n", ret);
+		return;
+	}
+
+	devm_add_action(&client->dev, emc2305_pwm_remove, data);
+}
+#endif
 
 static int
 emc2305_probe(struct i2c_client *client, const struct i2c_device_id *id)
@@ -792,6 +869,11 @@ emc2305_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	dev_info(&client->dev, "%s: sensor '%s'\n",
 		 dev_name(data->hwmon_dev), client->name);
 
+#ifdef CONFIG_MCST
+	data->client = client;
+	if (IS_ENABLED(CONFIG_PWM))
+		emc2305_init_pwm(data);
+#endif
 	return 0;
 
 exit_remove_fans:

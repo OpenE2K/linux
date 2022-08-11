@@ -72,6 +72,15 @@ ifdef CONFIG_E90S
 # Elbrus common modules
 core-y                         += arch/l/
 drivers-$(CONFIG_PCI)          += arch/l/pci/
+# e90s can boot an image no larger then 16MiB
+define e90s_check_image_size
+	e=$$($(AWK) '$$3 == "_end" { print "0x"$$1 }' System.map);	\
+	d=$$((e - 0x1400000));						\
+	[ $$d -le 0 ] || { echo "Linux image too large (by $$d  bytes)" && \
+				false; }
+endef
+else
+e90s_check_image_size = true
 endif
 
 ifndef CONFIG_E90S
@@ -89,15 +98,8 @@ all: zImage
 
 image zImage uImage tftpboot.img vmlinux.aout: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
-	$(Q)$(AWK) '$$3 == "_end" { e = strtonum("0x"$$1) }		\
-		END { # e90s can boot an image no larger then 16MiB	\
-			d = e - strtonum("0x400000");			\
-			d = d - 16 * 1024 * 1024;			\
-			if (d > 0) {					\
- 			  print "  Linux image too large (by "		\
-				d " bytes)" > "/dev/stderr";		\
- 			  exit -1;					\
-		}  }' System.map
+	$(Q)$(call e90s_check_image_size)
+
 
 install:
 	$(Q)$(MAKE) $(build)=$(boot) $@

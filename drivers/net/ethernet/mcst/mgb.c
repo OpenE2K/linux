@@ -84,13 +84,17 @@ static int half_duplex;
 module_param_named(hd, half_duplex, int, 0444);
 MODULE_PARM_DESC(hd, "work in half duplex mode");
 
-static int an_clause_73;
+static int an_clause_73 = 0;
 module_param(an_clause_73, int, 0444);
-MODULE_PARM_DESC(hd, "use clause 37 autunegotiation");
+MODULE_PARM_DESC(an_clause_73, "use clause 73 autunegotiation");
 
 static int mpll_mode = -1;
 module_param_named(mpllmode, mpll_mode, int, 0444);
 MODULE_PARM_DESC(mpllmode, "PCS MPLL mode: 0-normal, 1-bifurcation, 2-2.5G");
+
+static int mgb_status = 2;
+module_param_named(status, mgb_status, int, 0444);
+MODULE_PARM_DESC(status, "0 - disable, 1 - enable, other - use devtree");
 
 
 static DEFINE_MUTEX(mgb_mutex);
@@ -1401,6 +1405,7 @@ static void mgb_sw_reset_mgio(struct mgb_private *ep)
 		/*r |= MG_OUTS;*/ /* TX_DISABLE */
 		mgb_write_mgio_csr(ep, r); /* software reset */
 		r &= ~MG_SRST; /* ~RST */
+		usleep_range(10, 20); /* reset delay */
 		mgb_write_mgio_csr(ep, r); /* wait for reset */
 		raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
 	}
@@ -1893,8 +1898,8 @@ static int mgb_phc_enable(struct ptp_clock_info *ptp,
 			  struct ptp_clock_request *rq, int on)
 {
 	if (rq->type == PTP_CLK_REQ_PPS) {
-		pr_warning(KBUILD_MODNAME ": %s: TODO: call to mpv pps init\n",
-			   __func__);
+		pr_warn(KBUILD_MODNAME ": %s: TODO: call to mpv pps init\n",
+			__func__);
 		/* mpv_set_pps(on);*/
 		return 0;
 	}
@@ -2042,8 +2047,12 @@ static void mgb_unset_queue(struct mgb_q *q)
 	}
 }
 
-static void mgb_unset_queues(struct mgb_private *ep)
+static void mgb_unset_queues(struct net_device *dev)
 {
+	struct mgb_private *ep = netdev_priv(dev);
+
+	netif_stop_queue(dev);
+
 	if (ep->mgb_qs[1]) {
 		mgb_unset_queue(ep->mgb_qs[1]);
 	}
@@ -2442,7 +2451,7 @@ static int mgb_open(struct net_device *dev)
 	}
 	rc = mgb_assign_irqs(dev);
 	if (rc) {
-		mgb_unset_queues(ep);
+		mgb_unset_queues(dev);
 		goto err;
 	}
 
@@ -2453,14 +2462,9 @@ static int mgb_open(struct net_device *dev)
 		goto err;
 	}
 
-	netif_napi_add(dev, &ep->mgb_qs[0]->napi,
-		mgb_poll, MGB_NAPI_WEIGHT);
 	napi_enable(&(ep->mgb_qs[0]->napi));
-	if (ep->mgb_qs[1]) {
-		netif_napi_add(dev, &ep->mgb_qs[1]->napi,
-			mgb_poll, MGB_NAPI_WEIGHT);
+	if (ep->mgb_qs[1])
 		napi_enable(&(ep->mgb_qs[1]->napi));
-	}
 
 	/* External PHY start */
 	if (dev->phydev) {
@@ -2484,7 +2488,7 @@ static int mgb_open(struct net_device *dev)
 
 err:
 	mgb_free_irqs(dev);
-	mgb_unset_queues(ep);
+	mgb_unset_queues(dev);
 
 	rc = -EFAULT;
 	if (netif_msg_ifup(ep))
@@ -2528,7 +2532,7 @@ static int mgb_close(struct net_device *dev)
 	}
 
 	mgb_free_irqs(dev);
-	mgb_unset_queues(ep);
+	mgb_unset_queues(dev);
 
 	mutex_unlock(&ep->mx);
 
@@ -4148,7 +4152,7 @@ static int mgb_set_ringparam(struct net_device *dev,
 		mutex_unlock(&ep->mx);
 		return -EBUSY;
 	}
-	mgb_unset_queues(ep);
+	mgb_unset_queues(dev);
 	ep->log_rx_buffs = log_rx_buffs;
 	ep->log_tx_buffs = log_tx_buffs;
 	mutex_unlock(&ep->mx);
@@ -4977,15 +4981,23 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	const char *of_status_prop = NULL;
 	const char *of_phymode_prop = NULL;
 
-	/* check devtree config */
-	if (np) {
-		of_status_prop = of_get_property(np, "status", NULL);
-		if (!strcmp(of_status_prop, "disabled")) {
-			dev_warn(&pdev->dev, "device disabled in devicetree\n");
-			return -ENODEV;
+	/* check cmdline param */
+	if (mgb_status == 0) {
+		dev_warn(&pdev->dev, "device disabled in cmdline\n");
+		return -ENODEV;
+	} else if (mgb_status > 1) {
+		/* check devtree config */
+		if (np) {
+			of_status_prop = of_get_property(np, "status", NULL);
+			if (!strcmp(of_status_prop, "disabled")) {
+				dev_warn(&pdev->dev,
+					"device disabled in devicetree\n");
+				return -ENODEV;
+			}
+		} else {
+			dev_warn(&pdev->dev,
+				 "devicetree for node not found!\n");
 		}
-	} else {
-		dev_warn(&pdev->dev, "devicetree for node not found!\n");
 	}
 
 	dev_info(&pdev->dev, "initializing PCI device %04x:%04x\n",
@@ -5071,6 +5083,8 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	mutex_init(&ep->mx);
 
 	l_set_ethernet_macaddr(pdev, dev->dev_addr);
+	dev_info(&pdev->dev, "MAC = %012llX\n",
+		 be64_to_cpu(*(u64 *)(dev->dev_addr) << 16));
 
 	mgb_write_e_csr(ep, STOP); /* Stop card */
 	/* Check for a valid station address */
@@ -5132,6 +5146,12 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	dev->ethtool_ops = &mgb_ethtool_ops;
 	dev->netdev_ops = &mgb_netdev_ops;
 	dev->watchdog_timeo = (5*HZ);
+
+	netif_napi_add(dev, &ep->mgb_qs[0]->napi,
+		mgb_poll, MGB_NAPI_WEIGHT);
+	if (ep->mgb_qs[1])
+		netif_napi_add(dev, &ep->mgb_qs[1]->napi,
+			mgb_poll, MGB_NAPI_WEIGHT);
 
 	/* check devtree config */
 	if (np) {
@@ -5364,7 +5384,7 @@ static int __init mgb_init_module(void)
 #ifdef CONFIG_DEBUG_FS
 	mgb_dbg_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
 	if (mgb_dbg_root == NULL)
-		pr_warning(KBUILD_MODNAME ": Init of debugfs failed\n");
+		pr_warn(KBUILD_MODNAME ": Init of debugfs failed\n");
 #endif /*CONFIG_DEBUG_FS*/
 
 	status = pci_register_driver(&mgb_driver);

@@ -11,6 +11,44 @@
 #include <asm/kvm/guest/string.h>
 #include <asm-generic/bug.h>
 
+
+#ifdef BOOT
+/* This file is included in kernel's builtin boot directly,
+ * undefine EXPORT_SYMBOL to avoid linking errors. */
+# undef EXPORT_SYMBOL
+# define EXPORT_SYMBOL(sym)
+# define DEBUG_DISABLE_BOOT 1
+#else
+# define DEBUG_DISABLE_BOOT 0
+#endif
+
+#undef	DEBUG_KVM_RETRY_MODE
+#undef	DebugRETRY
+#define	DEBUG_KVM_RETRY_MODE		0	/* memory copy retries debug */
+#define	DebugRETRY(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_RETRY_MODE && !DEBUG_DISABLE_BOOT)		\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_KVM_FAULT_MODE
+#undef	DebugFAULT
+#define	DEBUG_KVM_FAULT_MODE		0	/* memory copy page fault debug */
+#define	DebugFAULT(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_FAULT_MODE && !DEBUG_DISABLE_BOOT)		\
+		pr_info("%s(): " fmt, __func__, ##args);		\
+})
+
+#undef	DEBUG_KVM_EXTRACT_TAGS
+#undef	DebugEXTRACT
+#define	DEBUG_KVM_EXTRACT_TAGS		1	/* extract tags debug */
+#define	DebugEXTRACT(fmt, args...)					\
+({									\
+	if (DEBUG_KVM_EXTRACT_TAGS && !DEBUG_DISABLE_BOOT)		\
+		pr_err("%s(): " fmt, __func__, ##args);			\
+})
+
 #ifdef	DEBUG_GUEST_STRINGS
 /*
  * optimized copy memory along with tags
@@ -88,24 +126,24 @@ kvm_extract_tags_32(u16 *dst, const void *src)
 
 	if (IS_HOST_KERNEL_ADDRESS((e2k_addr_t)src) ||
 		IS_HOST_KERNEL_ADDRESS((e2k_addr_t)dst)) {
-		pr_err("%s(): could not extract tags from host kernel memory "
+		DebugEXTRACT("could not extract tags from host kernel memory "
 			"address %px to %px\n",
-			__func__, src, dst);
+			src, dst);
 	}
 	if (!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)src) ||
 		!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)dst)) {
-		pr_err("%s(): could not extract tags from user memory "
+		DebugEXTRACT("could not extract tags from user memory "
 			"address %px to %px\n",
-			__func__, src, dst);
+			src, dst);
 	}
 	if (likely(IS_HV_GM()))
 		ret = native_extract_tags_32(dst, src);
 	else
 		ret = kvm_do_extract_tags_32(dst, src);
 	if (ret) {
-		pr_err("%s(): could not extract tags from %px to %px, "
+		DebugEXTRACT("could not extract tags from %px to %px, "
 			"error %ld\n",
-			__func__, src, dst, ret);
+			src, dst, ret);
 	}
 	return ret;
 }

@@ -528,6 +528,39 @@ OnError:
     return status;
 }
 
+#ifdef CONFIG_MCST
+static void gckKERNEL_RemoveFromHash(
+    IN gckKERNEL Kernel,
+    IN gctSIZE_T slot,
+    IN gcsDATABASE_PTR database
+)
+{
+    gcsDATABASE_PTR db = gcvNULL, prev = gcvNULL;
+
+    /* Walk the hash list. */
+    for (db = Kernel->db->db[slot];
+         db != gcvNULL;
+         db = db->next)
+    {
+        if (db->processID == database->processID)
+        {
+            break;
+        }
+        prev = db;
+    }
+
+    /* Remove the database from the hash list. */
+    if (prev)
+    {
+        prev->next = database->next;
+    }
+    else
+    {
+        Kernel->db->db[slot] = database->next;
+    }
+}
+#endif
+
 /*******************************************************************************
 ***** Public API **************************************************************/
 
@@ -723,6 +756,10 @@ OnError:
     if (gcmIS_ERROR(status))
     {
         gcmkVERIFY_OK(gckKERNEL_DeinitDatabase(Kernel, database));
+
+#ifdef CONFIG_MCST
+        gckKERNEL_RemoveFromHash(Kernel, slot, database);
+#endif
 
         if (pointer)
         {

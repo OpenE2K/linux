@@ -592,8 +592,6 @@ typedef struct pv_mmu_ops {
 				pgd_t *pgdp, pgd_t pgdval, bool only_validate);
 	pte_t (*ptep_get_and_clear)(struct mm_struct *mm, unsigned long addr,
 				pte_t *ptep, bool to_move);
-	pte_t (*ptep_get_and_clear_as_valid)(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep);
 	void (*ptep_wrprotect_atomic)(struct mm_struct *mm,
 				e2k_addr_t addr, pte_t *ptep);
 	pte_t (*get_pte_for_address)(struct vm_area_struct *vma,

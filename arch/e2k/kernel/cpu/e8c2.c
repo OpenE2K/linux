@@ -3,6 +3,8 @@
 #include <asm/machdep_numa.h>
 #include <asm/pic.h>
 
+#include <asm-l/hw_irq.h>
+
 static e2k_addr_t e8c2_get_nsr_area_phys_base(void)
 {
 	return E8C2_NSR_AREA_PHYS_BASE;
@@ -10,7 +12,7 @@ static e2k_addr_t e8c2_get_nsr_area_phys_base(void)
 
 static void e8c2_setup_apic_vector_handlers(void)
 {
-	setup_APIC_vector_handler(LVT4_INTERRUPT_VECTOR, sic_error_interrupt, 1,
+	setup_PIC_vector_handler(LVT4_INTERRUPT_VECTOR, sic_error_interrupt, 1,
 		"sic_error_interrupt");
 }
 
@@ -20,8 +22,8 @@ e8c2_setup_cpu_info(cpuinfo_e2k_t *cpu_info)
 	e2k_idr_t IDR;
 
 	IDR = read_IDR_reg();
-	strncpy(cpu_info->vendor, E8C2_CPU_VENDOR, 16);
-	cpu_info->family = E8C2_CPU_FAMILY;
+	strncpy(cpu_info->vendor, ELBRUS_CPU_VENDOR, 16);
+	cpu_info->family = ELBRUS_8C2_ISET;
 	cpu_info->model  = IDR.IDR_mdl;
 	cpu_info->revision = IDR.IDR_rev;
 }

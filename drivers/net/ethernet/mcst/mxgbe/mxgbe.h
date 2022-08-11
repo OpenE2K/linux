@@ -76,6 +76,7 @@
 extern u32 mxgbe_debug_mask;
 extern u32 mxgbe_loopback_mode;
 extern u32 mxgbe_led_gpio;
+extern int mxgbe_status;
 
 
 /**

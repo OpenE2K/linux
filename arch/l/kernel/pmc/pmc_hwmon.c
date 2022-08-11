@@ -49,13 +49,7 @@ static void __iomem *hwmon_pmc_regs(struct device *dev)
 
 static void __iomem *pmc_regs(struct device *dev)
 {
-	int i, node = 1;
-	for (i = 0; i < MAX_NUMNODES; i++)
-		if (&node_devices[i]->dev == dev)
-			node = i;
-	if (WARN_ON(node == -1))
-		node = 0;
-	return __pmc_regs(node);
+	return __pmc_regs(dev_to_node(dev));
 }
 #else
 #define pmc_regs(dev)	 __pmc_regs(0)
@@ -751,6 +745,11 @@ static int pmc_l_probe(struct pci_dev *dev,
 {
 	int ret;
 
+	ret = sysfs_create_group(&(l_pmc[0].pdev)->dev.kobj,
+				&pmc_tmoortec_attr_group);
+	if (ret) {
+		return ret;
+	}
 	ret = pmc_l_thermal_probe(&l_pmc[0]);
 	return ret;
 }
@@ -804,7 +803,7 @@ int pmc_hwmon_init(void)
 #endif /* CONFIG_E90S */
 
 		/* Create platform device to be parent of hwmon dev */
-		vdev = platform_device_register_data(dev, "pmc", node,
+		vdev = platform_device_register_data(dev, "pmc_hwmon", node,
 								NULL, 0);
 		if (IS_ERR(vdev)) {
 			dev_err(dev, "failed to create PMC platform device");
@@ -885,8 +884,10 @@ int pmc_temp_sensors_init(void)
 			return err;
 		}
 	}
-#endif /* CONFIG_E90S */
+	return 0;
+#else /* E1C+ */
 	return pci_register_driver(&pmc_l_driver);
+#endif /* CONFIG_E90S */
 }
 
 void pmc_temp_sensors_exit(void)

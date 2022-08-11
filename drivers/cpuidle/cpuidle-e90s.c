@@ -23,7 +23,6 @@
 #include <asm/io.h>
 #include <asm/e90s.h>
 
-#define R2000_MAX_STATES	3
 #define R2000P_MAX_STATES	4
 
 /* ASI Regs: */
@@ -36,7 +35,6 @@ static int e90s_enter_idle(struct cpuidle_device *dev,
 				struct cpuidle_driver *drv, int index)
 {
 	int state;
-	unsigned rev;
 
 	local_irq_enable();
 	switch (index) {
@@ -45,11 +43,7 @@ static int e90s_enter_idle(struct cpuidle_device *dev,
 		state = 1;
 		break;
 	case 2:
-		rev = get_cpu_revision();
-		if (rev == 0x10)     /* walk around bug 123699 */
-			state = 1;
-		else
-			state = 3;
+		state = 3;
 		break;
 	case 3:
 		state = 6;	/* Note: for R2000 index < 3 */
@@ -73,8 +67,8 @@ static struct cpuidle_driver e90s_idle_driver = {
 	},
 	.states[1]		= {
 		.enter			= e90s_enter_idle,
-		.exit_latency		= 4,
-		.target_residency	= 2,
+		.exit_latency		= 10000,
+		.target_residency	= 10,
 		.name			= "C1",
 		.desc			= "Stop decoding only",
 	},
@@ -98,25 +92,20 @@ static struct cpuidle_driver e90s_idle_driver = {
 /* Initialize CPU idle by registering the idle states */
 static int e90s_cpuidle_probe(struct platform_device *pdev)
 {
-	switch (e90s_get_cpu_type()) {
-	case E90S_CPU_R2000:
-		e90s_idle_driver.state_count = R2000_MAX_STATES;
-	case E90S_CPU_R2000P:
-		return cpuidle_register(&e90s_idle_driver, NULL);
-	default:
+	int rev = get_cpu_revision();
+	if (rev < 0x10)
 		return -EINVAL;
-	}
+	if (rev < 0x20) /* walk around bug 123699 */
+		e90s_idle_driver.state_count = 2;
+	return cpuidle_register(&e90s_idle_driver, NULL);
 }
 
 static int e90s_cpuidle_remove(struct platform_device *pdev)
 {
-	switch (e90s_get_cpu_type()) {
-	case E90S_CPU_R2000:
-	case E90S_CPU_R2000P:
-		cpuidle_unregister(&e90s_idle_driver);
-	default:
+	int rev = get_cpu_revision();
+	if (rev < 0x10)
 		return -EINVAL;
-	}
+	cpuidle_unregister(&e90s_idle_driver);
 	return 0;
 }
 
@@ -132,14 +121,9 @@ static struct platform_driver e90s_cpuidle_driver = {
 static int __init e90s_cpuidle_init(void)
 {
 	int rc;
-
-	switch (e90s_get_cpu_type()) {
-	case E90S_CPU_R2000:
-	case E90S_CPU_R2000P:
-		break;
-	default:
+	int rev = get_cpu_revision();
+	if (rev < 0x10)
 		return -ENODEV;
-	}
 	pdev = platform_device_alloc("e90s_cpuidle", 0);
 	if (!pdev)
 		return -ENOMEM;
