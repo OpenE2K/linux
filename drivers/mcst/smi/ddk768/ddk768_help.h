@@ -8,9 +8,10 @@
 #include <linux/uaccess.h>
 #include <linux/delay.h>
 #include <drm/drmP.h>
+#include "../smi_drv.h"
 
-#define __PEEK32(addr) readl((addr)+mmio768)
-#define __POKE32(addr,data) writel((data),(addr)+mmio768)
+#define __PEEK32(mmio, addr) readl((addr)+mmio)
+#define __POKE32(mmio, addr, data) writel((data), (addr)+mmio)
 
 #define DEBUG_REGS
 
@@ -28,12 +29,12 @@
 #define		PEEK32		__PEEK32
 #endif
 
-#define POKE32(__offset, __val)	do {			\
+#define POKE32(mmio, __offset, __val)	do {			\
 	unsigned __val2 = __val;			\
 	DRM_DEBUG("W: %x: %x: %s\t%s:%d: %pf\n",	\
 		(u32)(__offset), __val2, # __offset,	\
 		__func__, __LINE__, __builtin_return_address(0));			\
-	__POKE32(__offset, __val2);			\
+	__POKE32(mmio, __offset, __val2);			\
 } while (0)
 
 
@@ -48,8 +49,8 @@
 #define __peekRegisterDWord __PEEK32
 #define __pokeRegisterDWord __POKE32
 
-#define peekRegisterByte(addr) readb((addr)+mmio768)
-#define pokeRegisterByte(addr,data) writeb((data),(addr)+mmio768)
+#define peekRegisterByte(mmio, addr) readb((addr)+mmio)
+#define pokeRegisterByte(mmio, addr, data) writeb((data), (addr)+mmio)
 
 /* Size of SM768 MMIO and memory */
 #define SM768_PCI_ALLOC_MMIO_SIZE       (2*1024*1024)

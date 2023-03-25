@@ -9,7 +9,6 @@
 extern void __init e2k_start_kernel(void);
 extern void __init native_setup_machine(void);
 extern void __init e2k_start_kernel_switched_stacks(void);
-extern void e2k_start_secondary_switched_stacks(int cpuid, int cpu);
 
 static inline void native_bsp_switch_to_init_stack(void)
 {

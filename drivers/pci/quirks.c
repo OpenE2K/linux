@@ -3899,7 +3899,7 @@ static int reset_chelsio_generic_dev(struct pci_dev *dev, int probe)
 	return 0;
 }
 
-#ifdef CONFIG_MCST
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
 #define PCI_MCST_CFG	0x40
 #define PCI_MCST_RESET	(1 << 6)
 static int reset_mcst_generic_dev(struct pci_dev *dev, int probe)
@@ -3914,7 +3914,7 @@ static int reset_mcst_generic_dev(struct pci_dev *dev, int probe)
 		return -ENOTTY;
 
 	pci_read_config_byte(dev, PCI_MCST_CFG, &tmp);
-	if (tmp & PCI_MCST_RESET || tmp == 0xff)
+	if (tmp & PCI_MCST_RESET)
 		return -ENOTTY;
 	/*
 	 * If this is the "probe" phase, return 0 indicating that we can
@@ -3935,6 +3935,19 @@ static int reset_mcst_generic_dev(struct pci_dev *dev, int probe)
 	WARN_ON(i == 100);
 	return 0;
 }
+
+/*
+ * MCST bridges reset everything instead of secondary bus reset
+ */
+static void quirk_mcst_no_bus_reset(struct pci_dev *dev)
+{
+	if (cpu_has(CPU_HWBUG_SECONDARY_BUS_RESET))
+		quirk_no_bus_reset(dev);
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIE_X16,
+			 quirk_mcst_no_bus_reset);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIE_X4,
+			 quirk_mcst_no_bus_reset);
 #endif
 
 #define PCI_DEVICE_ID_INTEL_82599_SFP_VF   0x10ed
@@ -4119,7 +4132,7 @@ static const struct pci_dev_reset_methods pci_dev_reset_methods[] = {
 		reset_chelsio_generic_dev },
 	{ PCI_VENDOR_ID_HUAWEI, PCI_DEVICE_ID_HINIC_VF,
 		reset_hinic_vf_dev },
-#ifdef CONFIG_MCST
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
 	{ PCI_VENDOR_ID_MCST_TMP, PCI_ANY_ID,
 		reset_mcst_generic_dev },
 #endif

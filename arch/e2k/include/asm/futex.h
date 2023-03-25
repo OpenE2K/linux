@@ -11,42 +11,34 @@
 #include <linux/uaccess.h>
 
 static inline int arch_futex_atomic_op_inuser(int op, int oparg, int *oval,
-		u32 __user *uaddr)
+					      u32 __user *uaddr)
 {
 	int oldval, ret = 0;
 
 	pagefault_disable();
-
-	TRY_USR_PFAULT {
-		switch (op) {
-		case FUTEX_OP_SET:
-			oldval = __api_xchg_return(oparg, uaddr, w, STRONG_MB);
-			break;
-		case FUTEX_OP_ADD:
-			oldval = __api_futex_atomic32_op("adds", oparg, uaddr);
-			break;
-		case FUTEX_OP_OR:
-			oldval = __api_futex_atomic32_op("ors", oparg, uaddr);
-			break;
-		case FUTEX_OP_ANDN:
-			oldval = __api_futex_atomic32_op("andns", oparg, uaddr);
-			break;
-		case FUTEX_OP_XOR:
-			oldval = __api_futex_atomic32_op("xors", oparg, uaddr);
-			break;
-		default:
-			oldval = 0;
-			ret = -ENOSYS;
-			break;
-		}
-	} CATCH_USR_PFAULT {
-		pagefault_enable();
-		DebugUAF("%s (%d) - %s : futex_atomic_op data fault "
-				"%px(%ld)\n" , __FILE__, __LINE__,
-				__FUNCTION__, (uaddr), (sizeof(*uaddr)));
-		return -EFAULT;
-	} END_USR_PFAULT
-
+	uaccess_enable();
+	switch (op) {
+	case FUTEX_OP_SET:
+		ret = __api_user_xchg(oparg, uaddr, w, STRONG_MB, oldval);
+		break;
+	case FUTEX_OP_ADD:
+		ret = __api_user_atomic32_op("adds", oparg, uaddr, STRONG_MB, oldval);
+		break;
+	case FUTEX_OP_OR:
+		ret = __api_user_atomic32_op("ors", oparg, uaddr, STRONG_MB, oldval);
+		break;
+	case FUTEX_OP_ANDN:
+		ret = __api_user_atomic32_op("andns", oparg, uaddr, STRONG_MB, oldval);
+		break;
+	case FUTEX_OP_XOR:
+		ret = __api_user_atomic32_op("xors", oparg, uaddr, STRONG_MB, oldval);
+		break;
+	default:
+		oldval = 0;
+		ret = -ENOSYS;
+		break;
+	}
+	uaccess_disable();
 	pagefault_enable();
 
 	if (!ret)
@@ -55,22 +47,19 @@ static inline int arch_futex_atomic_op_inuser(int op, int oparg, int *oval,
 	return ret;
 }
 
-static int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
-					 u32 oldval, u32 newval)
+static inline int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
+						u32 oldval, u32 newval)
 {
+	int ret;
+
 	if (!access_ok(uaddr, sizeof(int)))
 		return -EFAULT;
 
-	TRY_USR_PFAULT {
-		*uval = cmpxchg(uaddr, oldval, newval);
-	} CATCH_USR_PFAULT {
-		DebugUAF("%s (%d) - %s : futex_atomic_cmpxchg data fault "
-				"%px(%ld)\n", __FILE__, __LINE__,
-				__FUNCTION__, (uaddr), (sizeof(*uaddr)));
-		return -EFAULT;
-	} END_USR_PFAULT
+	uaccess_enable();
+	ret = __api_user_cmpxchg_word(oldval, newval, uaddr, STRONG_MB, *uval);
+	uaccess_disable();
 
-	return 0;
+	return ret;
 }
 
 #endif

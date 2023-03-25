@@ -6,6 +6,7 @@
 #include <asm/mmu_context.h>
 #include <asm/regs_state.h>
 #include <asm/page_io.h>
+#include <asm/set_memory.h>
 
 #define TAGS_PER_PAGE	(PAGE_SIZE / TAGS_BYTES_PER_PAGE)
 
@@ -139,24 +140,66 @@ void save_tag_for_pfn(unsigned long pfn)
 	tag_wp = tag_wp->next;
 }
 
+UACCESS_FN_DEFINE2(restore_tags_for_data, u64 *, datap, u8 *, tagp)
+{
+	int i;
+
+	for (i = 0; i < (int) TAGS_BYTES_PER_PAGE; i++) {
+		u64 data_lo = datap[2 * i], data_hi = datap[2 * i + 1];
+		u32 tag = (u32) tagp[i];
+
+		store_tagged_dword(&datap[2 * i], data_lo, tag);
+		store_tagged_dword(&datap[2 * i + 1], data_hi, tag >> 4);
+	}
+
+	return 0;
+}
+
+static void restore_tags_info(struct tags_info *t)
+{
+	unsigned long i;
+
+	/* Kernel image alias in page mapping area is write-protected
+	 * on every NUMA node (see mark_linear_kernel_alias_ro()). So
+	 * catch possible write page faults and open write access. */
+	pagefault_disable();
+
+	for (i = 0; i < ARRAY_SIZE(t->page); i++) {
+		void *to = t->page[i];
+		void *from = t->tags + i * TAGS_BYTES_PER_PAGE;
+
+		if (unlikely(!to))
+			break;
+
+		if (__UACCESS_FN_CALL(restore_tags_for_data, to, from)) {
+			int ret;
+
+			set_memory_rw((unsigned long) to, 1);
+			ret = __UACCESS_FN_CALL(restore_tags_for_data, to, from);
+			set_memory_ro((unsigned long) to, 1);
+
+			if (ret) {
+				pr_err("hibernation resume: page fault when restoring tags at 0x%lx\n",
+						to);
+				print_kernel_address_ptes((unsigned long) to);
+				continue;
+			}
+		}
+	}
+
+	pagefault_enable();
+}
+
 noinline /* To make sure we use stacks restored in restore_image() */
 static void restore_tags(void)
 {
 	struct tag_data *pk = e2k_tag_data;
+
 	for (pk = e2k_tag_data; pk; pk = pk->next) {
-		unsigned long i, j;
-		for (i = 0; i < ARRAY_SIZE(pk->tags_info); i++) {
-			struct tags_info *t = pk->tags_info;
-			for (j = 0; j < ARRAY_SIZE(t->page); j++) {
-				void *to = t->page[j];
-				void *from = t->tags + j * TAGS_BYTES_PER_PAGE;
-				if (!to)
-					goto out;
-				restore_tags_for_data(to, from);
-			}
-		}
+		unsigned long i;
+		for (i = 0; i < ARRAY_SIZE(pk->tags_info); i++)
+			restore_tags_info(pk->tags_info);
 	}
-out:;
 }
 
 /*
@@ -202,6 +245,7 @@ static inline void copy_image(void)
 		u64 *to = r64(&pbe->orig_address);
 		u64 *from = r64(&pbe->address);
 		int i;
+
 		for (i = 0; i < PAGE_SIZE / sizeof(*to); i++, to++, from++)
 			w64(r64(from), to);
 	}
@@ -237,7 +281,7 @@ static void restore_image(pgd_t *resume_pg_dir, struct pbe *restore_pblist)
 	 * switching to the interrupted task as end of recovery of the system
 	 */
 
-	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task, task_thread_info(task));
+	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task);
 
 	/* Start receiving NMIs again */
 	raw_local_irq_disable();
@@ -392,6 +436,13 @@ static int copy_page_tables(pgd_t *dst_pgd, unsigned long start,
 	unsigned long addr = start;
 	pgd_t *src_pgd = pgd_offset_k(start);
 
+	/* Avoid messing with self-pointing PGD */
+	if (end > KERNEL_VPTB_BASE_ADDR)
+		end = KERNEL_VPTB_BASE_ADDR;
+	/* Manually call PGD constructor since
+	 * get_safe_page() did not do it for us. */
+	pgd_ctor(&init_mm, numa_node_id(), dst_pgd);
+
 	dst_pgd = dst_pgd + pgd_index(start);
 	do {
 		next = pgd_addr_end(addr, end);
@@ -413,8 +464,7 @@ int swsusp_arch_resume(void)
 	if (!resume_pg_dir)
 		return -ENOMEM;
 
-	error = copy_page_tables(resume_pg_dir,
-					PAGE_OFFSET, 0x0001000000000000);
+	error = copy_page_tables(resume_pg_dir, PAGE_OFFSET, E2K_VA_END);
 	if (error)
 		return error;
 

@@ -3,7 +3,9 @@
 
 #include <linux/swab.h>
 
+#include <asm/bug.h>
 #include <asm/machdep.h>
+#include <asm/mmu_types.h>
 
 #define __HAVE_ARCH_STRNLEN
 extern size_t strnlen(const char *s, size_t count) __pure;
@@ -13,6 +15,9 @@ extern size_t strlen(const char *s) __pure;
 
 #define __HAVE_ARCH_MEMMOVE
 extern void *memmove(void *dst, const void *src, size_t count);
+
+#define __HAVE_ARCH_MEMCHR
+extern void *memchr(const void *s, int c, size_t n) __pure;
 
 #define __HAVE_ARCH_MEMCMP
 extern int __memcmp(const void *cs, const void *ct, size_t count) __pure;
@@ -171,9 +176,9 @@ static inline void *_memcpy(void *__restrict dst,
 		size_t n, const unsigned long dst_align)
 {
 #if defined E2K_P2V || defined CONFIG_BOOT_E2K
-	bool manual_inline = true;
+	bool unaligned_fast = (CONFIG_CPU_ISET >= 6);
 #else
-	bool manual_inline = (dst_align >= 8 || cpu_has(CPU_FEAT_ISET_V6));
+	bool unaligned_fast = cpu_has(CPU_FEAT_ISET_V6);
 #endif
 
 	/*
@@ -197,8 +202,9 @@ static inline void *_memcpy(void *__restrict dst,
 	 * alignment and do the copy with 8-bytes words.
 	 */
 
-	if (__builtin_constant_p(n) && n < 136 && manual_inline) {
-		/* Inline small memcpy's */
+	if (__builtin_constant_p(n) && (n <= 32 ||
+			n < 136 && (dst_align >= 8 || unaligned_fast))) {
+		/* Inline small memcpy's with constant size */
 		const u64 *__restrict l_src = src;
 		u64 *__restrict l_dst = dst;
 
@@ -328,36 +334,32 @@ extern unsigned long __recovery_memcpy_16(void *dst, const void *src, size_t len
  * optimized copy memory along with tags
  * using privileged LD/ST recovery operations
  */
-static inline unsigned long native_fast_tagged_memory_copy(
+static __can_be_priv_hypercall __always_inline unsigned long
+native_fast_tagged_memory_copy(
 		void *dst, const void *src, size_t len,
-		unsigned long strd_opcode,
-		unsigned long ldrd_opcode, int prefetch)
+		ldst_rec_op_t st_op, ldst_rec_op_t ld_op, int prefetch)
 {
 	unsigned long ret;
-	ldst_rec_op_t st_op, ld_op;
-
-	AW(st_op) = strd_opcode;
-	AW(ld_op) = ldrd_opcode;
 
 	if (CONFIG_CPU_ISET >= 5 && !st_op.fmt_h && !ld_op.fmt_h &&
 	    st_op.fmt == LDST_QWORD_FMT && ld_op.fmt == LDST_QWORD_FMT &&
 	    !((u64) dst & 0xf) && !((u64) src & 0xf) && !(len & 0xf)) {
 		ret = __recovery_memcpy_16(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+					   AW(st_op), AW(ld_op), prefetch);
 	} else {
 		ret = __recovery_memcpy_8(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+					  AW(st_op), AW(ld_op), prefetch);
 	}
 
-	if (HAS_HWBUG_WC_DAM &&
-			((strd_opcode >> LDST_REC_OPC_MAS_SHIFT) &
-			 MAS_BYPASS_ALL_CACHES) == MAS_BYPASS_ALL_CACHES)
+	if (HAS_HWBUG_WC_DAM && (st_op.mas & MAS_BYPASS_ALL_CACHES) ==
+				MAS_BYPASS_ALL_CACHES)
 		__E2K_WAIT(_st_c);
 
 	return ret;
 }
 
-static inline unsigned long native_fast_tagged_memory_set(
+static __can_be_priv_hypercall __always_inline unsigned long
+native_fast_tagged_memory_set(
 		void *addr, u64 val, u64 tag, size_t len, u64 strd_opcode)
 {
 	unsigned long ret;
@@ -383,28 +385,6 @@ static inline unsigned long native_fast_tagged_memory_set(
 #define boot_native_fast_tagged_memory_copy(...) recovery_memcpy_8(__VA_ARGS__)
 
 #define boot_native_fast_tagged_memory_set(...) recovery_memset_8(__VA_ARGS__)
-
-static inline int
-native_fast_tagged_memory_copy_to_user(void __user *dst, const void *src,
-		size_t len, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
-{
-	/* native kernel does not support any guests */
-	return native_fast_tagged_memory_copy((void *)dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
-}
-
-static inline int
-native_fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
-		size_t len, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
-{
-	/* native kernel does not support any guests */
-	return native_fast_tagged_memory_copy(dst, (const void *)src, len,
-				strd_opcode, ldrd_opcode, prefetch);
-}
 
 static inline unsigned long
 native_extract_tags_32(u16 *dst, const void *src)
@@ -477,21 +457,45 @@ extern notrace void boot_fast_memset(void *s_va, long c, size_t count);
  * optimized copy memory along with tags
  * using privileged LD/ST recovery operations
  */
-static inline unsigned long
-fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline void
+fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
-	return native_fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+	size_t copied = native_fast_tagged_memory_copy(dst, src, len,
+					strd_opcode, ldrd_opcode, prefetch);
+	BUG_ON(copied != len);
 }
-static inline unsigned long
-fast_tagged_memory_copy_user(void *dst, const void *src, size_t len, size_t *copied,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static __always_inline __must_check size_t
+fast_tagged_memory_copy_to_user(void __user *dst, const void *src, size_t len,
+		size_t *copied, int prefetch)
 {
-	return native_fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+	return native_fast_tagged_memory_copy((void __force *) dst, src, len,
+			strd_opcode, ldrd_opcode, prefetch);
+}
+static __always_inline __must_check size_t
+fast_tagged_memory_copy_from_user(void *dst, const void __user *src, size_t len,
+		size_t *copied, int prefetch)
+{
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+	return native_fast_tagged_memory_copy(dst, (void __force *) src, len,
+			strd_opcode, ldrd_opcode, prefetch);
+}
+static __always_inline __must_check size_t
+fast_tagged_memory_copy_in_user(void __user *dst, const void __user *src, size_t len,
+		size_t *copied, int prefetch)
+{
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+	return native_fast_tagged_memory_copy((void __force *)  dst, (void __force *) src,
+			len, strd_opcode, ldrd_opcode, prefetch);
 }
 static inline unsigned long
 fast_tagged_memory_set(void *addr, u64 val, u64 tag,
@@ -499,20 +503,22 @@ fast_tagged_memory_set(void *addr, u64 val, u64 tag,
 {
 	return native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
 }
-static inline unsigned long
-fast_tagged_memory_set_user(void *addr, u64 val, u64 tag,
+static __always_inline unsigned long
+fast_tagged_memory_set_user(void __user *addr, u64 val, u64 tag,
 		size_t len, size_t *cleared, u64 strd_opcode)
 {
-	return native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
+	return native_fast_tagged_memory_set((void __force *) addr, val,
+			tag, len, strd_opcode);
 }
 
 static inline unsigned long
-boot_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+boot_fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
-	return boot_native_fast_tagged_memory_copy(dst, src, len, strd_opcode,
-							ldrd_opcode, prefetch);
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t)
+		{ .fmt = LDST_QWORD_FMT, .mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+	return boot_native_fast_tagged_memory_copy(dst, src, len, AW(strd_opcode),
+						   AW(ldrd_opcode), prefetch);
 }
 static inline void
 boot_fast_tagged_memory_set(void *addr, u64 val, u64 tag,
@@ -525,29 +531,6 @@ extract_tags_32(u16 *dst, const void *src)
 {
 	return native_extract_tags_32(dst, src);
 }
-
-#ifndef	CONFIG_KVM_HOST_MODE
-/* it is native kernel without virtualization support */
-static inline int
-fast_tagged_memory_copy_to_user(void __user *dst, const void *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
-{
-	return native_fast_tagged_memory_copy_to_user(dst, src, len, regs,
-				strd_opcode, ldrd_opcode, prefetch);
-}
-
-static inline int
-fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
-{
-	return native_fast_tagged_memory_copy_from_user(dst, src, len, regs,
-				strd_opcode, ldrd_opcode, prefetch);
-}
-#endif	/* !CONFIG_KVM_HOST_MODE */
 
 #endif	/* CONFIG_PARAVIRT_GUEST */
 

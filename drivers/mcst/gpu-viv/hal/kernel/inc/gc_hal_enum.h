@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -107,7 +107,10 @@ typedef enum _gceOPTION
     gcvOPTION_OVX_ENABLE_NN_ZDP6,
     gcvOPTION_OVX_ENABLE_NN_STRIDE,
     gcvOPTION_OVX_USE_MULTI_DEVICES,
+    gcvOPTION_OVX_ENABLE_NN_DDR_BURST_SIZE_1024B,
+    gcvOPTION_OVX_ENABLE_NN_DDR_BURST_SIZE_512B,
     gcvOPTION_OVX_ENABLE_NN_DDR_BURST_SIZE_256B,
+    gcvOPTION_OVX_ENABLE_NN_DDR_BURST_SIZE_128B,
     gcvOPTION_OVX_ENABLE_NN_DDR_BURST_SIZE_64B,
 #endif
     /* Insert option above this comment only */
@@ -197,6 +200,8 @@ typedef enum _gceSURF_FLAG
     gcvSURF_FLAG_MULTI_NODE          = 0x8,
     /* surface no need do dither when resovle*/
     gcvSURF_FLAG_DITHER_DISABLED     = 0x10,
+    /* surface used a fake hal format */
+    gcvSURF_FLAG_FAKE_FORMAT         = 0x20,
 }
 gceSURF_FLAG;
 
@@ -425,6 +430,7 @@ typedef enum _gce2D_YUV_COLOR_MODE
 {
     gcv2D_YUV_601= 0,
     gcv2D_YUV_709,
+    gcv2D_YUV_2020,
     gcv2D_YUV_USER_DEFINED,
     gcv2D_YUV_USER_DEFINED_CLAMP,
 
@@ -867,6 +873,20 @@ typedef enum _gceTEXTURE_DS_TEX_MODE
     gcvTEXTURE_DS_TEXTURE_MODE_INVALID,
 }gceTEXTURE_DS_TEX_MODE;
 
+/* Texture stage */
+typedef enum _gceTEXTURE_STAGE
+{
+    gcvTEXTURE_STAGE_INVALID = -1,
+    gcvTEXTURE_STAGE_VS   = 0,
+    gcvTEXTURE_STAGE_TCS,
+    gcvTEXTURE_STAGE_TES,
+    gcvTEXTURE_STAGE_GS,
+    gcvTEXTURE_STAGE_FS,
+    gcvTEXTURE_STAGE_CS,
+
+    gcvTEXTURE_STAGE_LAST
+}gceTEXTURE_STAGE;
+
 /* Pixel output swizzle modes. */
 typedef enum _gcePIXEL_SWIZZLE
 {
@@ -919,13 +939,6 @@ typedef enum _gceMULTI_GPU_RENDERING_MODE
     gcvMULTI_GPU_RENDERING_MODE_INVALID
 }
 gceMULTI_GPU_RENDERING_MODE;
-
-typedef enum _gceMULTI_GPU_MODE
-{
-    gcvMULTI_GPU_MODE_COMBINED    = 0,
-    gcvMULTI_GPU_MODE_INDEPENDENT = 1
-}
-gceMULTI_GPU_MODE;
 
 typedef enum _gceMACHINECODE
 {
@@ -985,6 +998,7 @@ typedef enum _gceHW_FE_TYPE
     gcvHW_FE_WAIT_LINK,
     gcvHW_FE_ASYNC,
     gcvHW_FE_MULTI_CHANNEL,
+    gcvHW_FE_END,
 }
 gceHW_FE_TYPE;
 
@@ -1002,8 +1016,10 @@ gceMCFE_CHANNEL_TYPE;
 
 typedef enum _gcePAGE_TYPE
 {
-    gcvPAGE_TYPE_1M,
     gcvPAGE_TYPE_4K,
+    gcvPAGE_TYPE_64K,
+    gcvPAGE_TYPE_1M,
+    gcvPAGE_TYPE_16M,
 }
 gcePAGE_TYPE;
 
@@ -1667,7 +1683,8 @@ typedef enum _gceQueryType
     gcvQUERY_OCCLUSION = 0,
     gcvQUERY_XFB_WRITTEN = 1,
     gcvQUERY_PRIM_GENERATED = 2,
-    gcvQUERY_MAX_NUM = 3,
+    gcvQUERY_TIME_ELAPSED = 3,
+    gcvQUERY_MAX_NUM = 4,
 }
 gceQueryType;
 
@@ -1719,32 +1736,46 @@ typedef enum _gceATTRIB_SCHEME
     gcvATTRIB_SCHEME_USHORT_TO_UVEC4,
     gcvATTRIB_SCHEME_UINT_TO_UVEC4,
     gcvATTRIB_SCHEME_DOUBLE_TO_FLOAT,
+    gcvATTRIB_SCHEME_UBYTE_BGRA_TO_UBYTE_RGBA,
+    gcvATTRIB_SCHEME_2_10_10_10_REV_BGRA_TO_FLOAT_RGBA,
 } gceATTRIB_SCHEME;
 
 typedef enum _gceBUFOBJ_TYPE
 {
-    gcvBUFOBJ_TYPE_ARRAY_BUFFER = 1,
-    gcvBUFOBJ_TYPE_ELEMENT_ARRAY_BUFFER  = 2,
-    gcvBUFOBJ_TYPE_GENERIC_BUFFER = 100
+    gcvBUFOBJ_TYPE_ARRAY_BUFFER             = 1,
+    gcvBUFOBJ_TYPE_ELEMENT_ARRAY_BUFFER     = 2,
+    gcvBUFOBJ_TYPE_UNIFORM_BUFFER           = 3,
+    gcvBUFOBJ_TYPE_DRAW_INDIRECT_BUFFER     = 4,
+    gcvBUFOBJ_TYPE_XFB_BUFFER               = 5,
+    gcvBUFOBJ_TYPE_GENERIC_BUFFER           = 100
 
 } gceBUFOBJ_TYPE;
 
 typedef enum _gceBUFOBJ_USAGE
 {
-    gcvBUFOBJ_USAGE_STREAM_DRAW = 1,
-    gcvBUFOBJ_USAGE_STREAM_READ,
-    gcvBUFOBJ_USAGE_STREAM_COPY,
-    gcvBUFOBJ_USAGE_STATIC_DRAW,
-    gcvBUFOBJ_USAGE_STATIC_READ,
-    gcvBUFOBJ_USAGE_STATIC_COPY,
-    gcvBUFOBJ_USAGE_DYNAMIC_DRAW,
-    gcvBUFOBJ_USAGE_DYNAMIC_READ,
-    gcvBUFOBJ_USAGE_DYNAMIC_COPY,
+    gcvBUFOBJ_USAGE_NONE                                = 0x0,
+    gcvBUFOBJ_USAGE_STREAM_DRAW                         = 0x1,
+    gcvBUFOBJ_USAGE_STREAM_READ                         = 0x2,
+    gcvBUFOBJ_USAGE_STREAM_COPY                         = 0x3,
+    gcvBUFOBJ_USAGE_STATIC_DRAW                         = 0x4,
+    gcvBUFOBJ_USAGE_STATIC_READ                         = 0x5,
+    gcvBUFOBJ_USAGE_STATIC_COPY                         = 0x6,
+    gcvBUFOBJ_USAGE_DYNAMIC_DRAW                        = 0x7,
+    gcvBUFOBJ_USAGE_DYNAMIC_READ                        = 0x8,
+    gcvBUFOBJ_USAGE_DYNAMIC_COPY                        = 0x9,
 
+    /* Use 8bits to save the usage. */
+    gcvBUFOBJ_USAGE_MASK                                = 0xFF,
+
+    /* Some special flags. */
     /* special patch for optimaize performance,
     ** no fence and duplicate stream to ensure data correct
     */
-    gcvBUFOBJ_USAGE_DISABLE_FENCE_DYNAMIC_STREAM = 256
+    gcvBUFOBJ_USAGE_FLAG_DISABLE_FENCE_DYNAMIC_STREAM   = 0x100,
+
+    /* This buffer object is used by driver, so we need to copy the data to the logical memory. */
+    gcvBUFOBJ_USAGE_FLAG_DATA_USED_BY_DRIVER            = 0x200,
+
 } gceBUFOBJ_USAGE;
 
 /**
@@ -1830,17 +1861,17 @@ gcePATHTYPE;
 */
 typedef enum _gceVGCMD
 {
-    gcvVGCMD_END, /*  0: 0x00           */
-    gcvVGCMD_CLOSE, /*  1: 0x01         */
-    gcvVGCMD_MOVE, /*  2: 0x02          */
-    gcvVGCMD_MOVE_REL, /*  3: 0x03      */
-    gcvVGCMD_LINE, /*  4: 0x04          */
-    gcvVGCMD_LINE_REL, /*  5: 0x05      */
-    gcvVGCMD_QUAD, /*  6: 0x06     */
-    gcvVGCMD_QUAD_REL, /*  7: 0x07 */
-    gcvVGCMD_CUBIC, /*  8: 0x08         */
-    gcvVGCMD_CUBIC_REL, /*  9: 0x09     */
-    gcvVGCMD_BREAK, /* 10: 0x0A         */
+    gcvVGCMD_END, /*  0: GCCMD_TS_OPCODE_END           */
+    gcvVGCMD_CLOSE, /*  1: GCCMD_TS_OPCODE_CLOSE         */
+    gcvVGCMD_MOVE, /*  2: GCCMD_TS_OPCODE_MOVE          */
+    gcvVGCMD_MOVE_REL, /*  3: GCCMD_TS_OPCODE_MOVE_REL      */
+    gcvVGCMD_LINE, /*  4: GCCMD_TS_OPCODE_LINE          */
+    gcvVGCMD_LINE_REL, /*  5: GCCMD_TS_OPCODE_LINE_REL      */
+    gcvVGCMD_QUAD, /*  6: GCCMD_TS_OPCODE_QUADRATIC     */
+    gcvVGCMD_QUAD_REL, /*  7: GCCMD_TS_OPCODE_QUADRATIC_REL */
+    gcvVGCMD_CUBIC, /*  8: GCCMD_TS_OPCODE_CUBIC         */
+    gcvVGCMD_CUBIC_REL, /*  9: GCCMD_TS_OPCODE_CUBIC_REL     */
+    gcvVGCMD_BREAK, /* 10: GCCMD_TS_OPCODE_BREAK         */
     gcvVGCMD_HLINE, /* 11: ******* R E S E R V E D *******/
     gcvVGCMD_HLINE_REL, /* 12: ******* R E S E R V E D *******/
     gcvVGCMD_VLINE, /* 13: ******* R E S E R V E D *******/
@@ -2115,57 +2146,62 @@ enum
     gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS = 1 << 0,
 
     gcvPLATFORM_FLAG_IMX_MM           = 1 << 1,
+    gcvPLATFORM_FLAG_MSIX_ENABLED     = 1 << 2,
+	gcvPLATFORM_FLAG_PMC_POWER_ON     = 1 << 3,
 };
 
-/* No special needs. */
-#define gcvALLOC_FLAG_NONE                  0x00000000
+#if gcdUSE_CAPBUF
+typedef enum _gceCAPBUF_META_TYPE
+{
+    gcvCAPBUF_META_TYPE_BASE = 0,
+    gcvCAPBUF_META_TYPE_STATE_BUFFER = 0,
+    gcvCAPBUF_META_TYPE_DRAW_ID,
+    gcvCAPBUF_META_TYPE_SH_UNIFORM,
+    gcvCAPBUF_META_TYPE_VIP_SRAM,
+    gcvCAPBUF_META_TYPE_AXI_SRAM,
+    gcvCAPBUF_META_TYPE_PPU_PARAMETERS,
+    gcvCAPBUF_META_TYPE_VIP_SRAM_REMAP,
+    gcvCAPBUF_META_TYPE_AXI_SRAM_REMAP,
+    gcvCAPBUF_META_TYPE_IMAGE_PHYSICAL_ADDRESS,
+    gcvCAPBUF_META_TYPE_SH_INST_ADDRESS,
+    gcvCAPBUF_META_TYPE_SH_UNIFORM_ARGS_LOCAL_ADDRESS_SPACE,
+    gcvCAPBUF_META_TYPE_SH_UNIFORM_ARGS_CONSTANT_ADDRESS_SPACE,
+    gcvCAPBUF_META_TYPE_NN_TP_INST_ADDRESS,
+    /* Keep it at the end of the list. */
+    gcvCAPBUF_META_TYPE_COUNT
+}
+gceCAPBUF_META_TYPE;
 
-/* Physical contiguous. */
-#define gcvALLOC_FLAG_CONTIGUOUS            0x00000001
-/* Physical non contiguous. */
-#define gcvALLOC_FLAG_NON_CONTIGUOUS        0x00000002
+typedef enum _gceCAPBUF_SH_UNIFROM_ARGS
+{
+    gcvCAPBUF_SH_UNIFORM_ARGS_INVALID = 0,
+    gcvCAPBUF_SH_UNIFORM_ARGS_IMAGE_PHYSICAL_ADDRESS,
+    gcvCAPBUF_SH_UNIFORM_ARGS_LOCAL_ADDRESS_SPACE,
+    gcvCAPBUF_SH_UNIFORM_ARGS_CONSTANT_ADDRESS_SPACE,
+    /* Keep it at the end of the list. */
+    gcvCAPBUF_SH_UNIFORM_ARGS_COUNT
+}
+gceCAPBUF_SH_UNIFORM_ARGS;
 
-/* Should not swap out. */
-#define gcvALLOC_FLAG_NON_PAGED             0x00000004
+typedef enum _gceCAPBUF_PPU_PARAMETERS_INDEX
+{
+    gcvCAPBUF_PPU_GLOBAL_OFFSET_X = 0,
+    gcvCAPBUF_PPU_GLOBAL_OFFSET_Y,
+    gcvCAPBUF_PPU_GLOBAL_OFFSET_Z,
+    gcvCAPBUF_PPU_GLOBAL_SCALE_X,
+    gcvCAPBUF_PPU_GLOBAL_SCALE_Y,
+    gcvCAPBUF_PPU_GLOBAL_SCALE_Z,
+    gcvCAPBUF_PPU_GROUP_SIZE_X,
+    gcvCAPBUF_PPU_GROUP_SIZE_Y,
+    gcvCAPBUF_PPU_GROUP_SIZE_Z,
+    gcvCAPBUF_PPU_GROUP_COUNT_X,
+    gcvCAPBUF_PPU_GROUP_COUNT_Y,
+    gcvCAPBUF_PPU_GROUP_COUNT_Z,
+    gcvCAPBUF_PPU_PARAMETERS_COUNT
+}
+gceCAPBUF_PPU_GLOBALE_OFFSET_INDEX;
 
-/* CPU access explicitly needed. */
-#define gcvALLOC_FLAG_CPU_ACCESS            0x00000008
-/* Can be remapped as cacheable. */
-#define gcvALLOC_FLAG_CACHEABLE             0x00000010
-
-/* Need 32bit address. */
-#define gcvALLOC_FLAG_4GB_ADDR              0x00000020
-
-/* Secure buffer. */
-#define gcvALLOC_FLAG_SECURITY              0x00000040
-/* Can be exported as dmabuf-fd */
-#define gcvALLOC_FLAG_DMABUF_EXPORTABLE     0x00000080
-/* Do not try slow pools (gcvPOOL_VIRTUAL) */
-#define gcvALLOC_FLAG_FAST_POOLS            0x00000100
-
-/* Only accessed by GPU */
-#define gcvALLOC_FLAG_NON_CPU_ACCESS        0x00000200
-
-/* Import DMABUF. */
-#define gcvALLOC_FLAG_DMABUF                0x00001000
-/* Import USERMEMORY. */
-#define gcvALLOC_FLAG_USERMEMORY            0x00002000
-/* Import an External Buffer. */
-#define gcvALLOC_FLAG_EXTERNAL_MEMORY       0x00004000
-/* Import linux reserved memory. */
-#define gcvALLOC_FLAG_LINUX_RESERVED_MEM    0x00008000
-
-/* 1M pages unit allocation. */
-#define gcvALLOC_FLAG_1M_PAGES              0x00010000
-
-/* Non 1M pages unit allocation. */
-#define gcvALLOC_FLAG_4K_PAGES              0x00020000
-
-/* Real allocation happens when GPU page fault. */
-#define gcvALLOC_FLAG_ALLOC_ON_FAULT        0x01000000
-/* Alloc with memory limit. */
-#define gcvALLOC_FLAG_MEMLIMIT              0x02000000
-
+#endif
 
 /* GL_VIV internal usage */
 #ifndef GL_MAP_BUFFER_OBJ_VIV

@@ -41,7 +41,7 @@
 #define HPAGE_SHIFT			E2K_LARGE_PAGE_SHIFT
 #define HPAGE_SIZE			((1UL) << HPAGE_SHIFT)
 #define HUGETLB_PAGE_ORDER		(HPAGE_SHIFT - PAGE_SHIFT)
-
+#define HUGE_MAX_HSTATE			2
 
 #ifdef __KERNEL__
 
@@ -156,6 +156,10 @@ do { \
 #define copy_user_highpage(to, from, vaddr, vma) \
 		copy_page(page_address(to), page_address(from))
 
+#define __HAVE_ARCH_COPY_HIGHPAGE
+#define copy_highpage(to, from) \
+		copy_page(page_address(to), page_address(from))
+
 #define copy_tagged_page(to, from)	__tagged_memcpy_8(to, from, PAGE_SIZE)
 
 #define copy_page(to, from)		copy_tagged_page(to, from)
@@ -163,12 +167,33 @@ do { \
 
 typedef struct page *pgtable_t;
 
-#define __pa(x)			((e2k_addr_t)(x) - PAGE_OFFSET)
+
+/*
+ * Convert virtual address of kernel image to the corresponding physical address
+ */
+extern u64 kernel_voffset;
+
+#define __pa_symbol_nodebug(virt_addr) \
+	((phys_addr_t) ((unsigned long) (virt_addr) - kernel_voffset))
+#define __pa_lm_nodebug(x)	((phys_addr_t) ((unsigned long) (x) - PAGE_OFFSET))
+
+#ifdef CONFIG_DEBUG_VIRTUAL
+extern phys_addr_t __pa_symbol_debug(unsigned long);
+extern phys_addr_t __pa_lm_debug(unsigned long);
+# define __pa_symbol(vaddr) __pa_symbol_debug((unsigned long) (vaddr))
+# define __pa_lm(sym) __pa_lm_debug((unsigned long) (sym))
+#else
+# define __pa_symbol	__pa_symbol_nodebug
+# define __pa_lm	__pa_lm_nodebug
+#endif /* CONFIG_DEBUG_VIRTUAL */
+
+#define __pa(x) ({ \
+	unsigned long __x = (unsigned long) (x); \
+	(__x < E2K_KERNEL_IMAGE_AREA_BASE) ? __pa_lm(__x) : __pa_symbol(__x); \
+})
 #define __va(x)			((void *)((e2k_addr_t) (x) + PAGE_OFFSET))
 #define __boot_pa(x)		((e2k_addr_t)(x) - BOOT_PAGE_OFFSET)
 #define __boot_va(x)		((void *)((e2k_addr_t) (x) + BOOT_PAGE_OFFSET))
-
-#define __pa_symbol(x)		vpa_to_pa(kernel_va_to_pa((unsigned long) (x)))
 
 /*
  * PFNs are real physical page numbers.  However, mem_map only begins to record
@@ -181,29 +206,24 @@ struct page;
 
 extern struct page *e2k_virt_to_page(const void *kaddr);
 
-#define phys_to_page(kaddr)	pfn_to_page((kaddr) >> PAGE_SHIFT)
+#define phys_to_page(paddr)	pfn_to_page((paddr) >> PAGE_SHIFT)
 #define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)
 
-#define virt_to_page(kaddr)						\
-		(((e2k_addr_t)(kaddr) >= PAGE_OFFSET && 		\
-			(e2k_addr_t)(kaddr) < PAGE_OFFSET + MAX_PM_SIZE) ? \
-				phys_to_page(__pa(kaddr))		\
-				:					\
-				e2k_virt_to_page((void *) (kaddr)))
-
-
-#define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
-
-#define virt_to_phys		__pa
-#define phys_to_virt		__va
-
 #define virt_to_pfn(kaddr)	(__pa(kaddr) >> PAGE_SHIFT)
+#define pfn_to_virt(pfn)	__va((pfn) << PAGE_SHIFT)
+#define pfn_to_kaddr(pfn)	pfn_to_virt(pfn)
+
+/*
+ * virt_to_page(kaddr) returns a valid pointer if and only if
+ * virt_addr_valid(kaddr) returns true.
+ */
+#define virt_to_page(kaddr)	pfn_to_page(virt_to_pfn(kaddr))
+#define page_to_virt(page)	pfn_to_virt(page_to_pfn(page))
+extern bool __virt_addr_valid(unsigned long kaddr) __pure;
+#define virt_addr_valid(kaddr)  __virt_addr_valid((unsigned long) (kaddr))
 
 #define	page_valid(page)	pfn_valid(page_to_pfn(page))
-#define phys_addr_valid(addr)	pfn_valid((addr) >> PAGE_SHIFT)
-#define virt_addr_valid(kaddr)  ((e2k_addr_t)(kaddr) >= PAGE_OFFSET && \
-					pfn_valid(virt_to_pfn(kaddr)))
-#define kern_addr_valid(kaddr)	page_valid(virt_to_page(kaddr))
+extern int kern_addr_valid(unsigned long addr);
 
 #define	boot_pa(x)	((BOOT_READ_OSCUD_LO_REG().OSCUD_lo_base >= \
 								PAGE_OFFSET) \
@@ -218,15 +238,11 @@ extern struct page *e2k_virt_to_page(const void *kaddr);
  * E2K architecture additional vm_flags
  */
 
-#define VM_HW_STACK_PS	 0x00100000000UL /* procedure stack area */
-#define	VM_TAGMAPPED	 0x00200000000UL /* the tags area appropriate */
-					 /* to this data VM area was mapped */
-#define VM_HW_STACK_PCS	 0x00400000000UL /* chain stack area */
-#define	VM_WRITECOMBINED 0x00800000000UL
-#define VM_PRIVILEGED	 0x04000000000UL /* pages are privileged */
-#define	VM_MPDMA	 0x10000000000UL /* pages are under MPDMA */
-					 /* hardware protection */
-#define VM_SIGNAL_STACK	 0x20000000000UL /* Signal stack area */
+#define	VM_TAGMAPPED	 0x0000200000000000UL /* the tags area appropriate to */
+					      /* this data VM area was mapped */
+#define VM_SIGNAL_STACK	 0x0000400000000000UL /* Signal stack area */
+
+#define	VM_WRITECOMBINED 0x0000800000000000UL
 #define VM_CUI		 0xffff000000000000UL /* CUI for pages in VMA */
 #define VM_CUI_SHIFT	 48
 
@@ -390,7 +406,8 @@ static inline int get_order(unsigned long size)
 
 struct task_struct;
 
-extern e2k_addr_t node_kernel_address_to_phys(int node, e2k_addr_t address);
+extern phys_addr_t pgd_kernel_address_to_phys(pgd_t *pgd, e2k_addr_t addr);
+extern phys_addr_t node_kernel_address_to_phys(int node, e2k_addr_t address);
 extern e2k_addr_t user_address_to_pva(struct task_struct *tsk,
 		e2k_addr_t address);
 extern e2k_addr_t kernel_address_to_pva(e2k_addr_t address);

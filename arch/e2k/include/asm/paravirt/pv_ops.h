@@ -383,8 +383,7 @@ typedef struct pv_cpu_ops {
 	int (*fast_sys_siggetmask)(u64 __user *oset, size_t sigsetsize);
 
 	unsigned long (*fast_tagged_memory_copy)(void *dst, const void *src,
-			size_t len, unsigned long strd_opcode,
-			unsigned long ldrd_opcode, int prefetch);
+			size_t len, int prefetch);
 	unsigned long (*fast_tagged_memory_set)(void *addr, u64 val, u64 tag,
 		size_t len, u64 strd_opcode);
 	unsigned long (*extract_tags_32)(u16 *dst, const void *src);

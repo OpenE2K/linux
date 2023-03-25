@@ -70,8 +70,11 @@ static inline void KVM_WRITE_MMU_REG(mmu_addr_t mmu_addr, mmu_reg_t mmu_reg)
 	unsigned long mmu_reg_no = MMU_REG_NO_FROM_MMU_ADDR(mmu_addr);
 
 	GUEST_SET_MMU_REG(mmu_reg_no, mmu_reg);
-	if (IS_HV_GM())
+	if (IS_HV_GM()) {
+		/* to avoid privileged actions at conditinal branch */
+		E2K_CMD_SEPARATOR;
 		NATIVE_WRITE_MMU_REG(mmu_addr, mmu_reg);
+	}
 }
 
 static inline mmu_reg_t KVM_READ_MMU_REG(mmu_addr_t mmu_addr)
@@ -79,6 +82,8 @@ static inline mmu_reg_t KVM_READ_MMU_REG(mmu_addr_t mmu_addr)
 	unsigned long mmu_reg_no = MMU_REG_NO_FROM_MMU_ADDR(mmu_addr);
 
 	if (likely(IS_HV_GM())) {
+		/* to avoid privileged actions at conditinal branch */
+		E2K_CMD_SEPARATOR;
 		return (mmu_reg_t)NATIVE_READ_MMU_REG(mmu_addr);
 	} else {
 		return (mmu_reg_t)GUEST_GET_MMU_REG(mmu_reg_no);
@@ -388,6 +393,8 @@ static inline probe_entry_t
 KVM_ENTRY_PROBE_MMU_OP(e2k_addr_t virt_addr)
 {
 	if (IS_HV_GM()) {
+		/* to avoid privileged actions at conditinal branch */
+		E2K_CMD_SEPARATOR;
 		return NATIVE_ENTRY_PROBE_MMU_OP(virt_addr);
 	} else {
 		return kvm_mmu_entry_probe(virt_addr);

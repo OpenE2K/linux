@@ -524,7 +524,7 @@ void pvr_fence_fence_value_str(struct dma_fence *fence, char *str, int size)
 		u32 sync_addr;
 		(void)SyncPrimGetFirmwareAddr(pvr_fence->sync, &sync_addr);
 		snprintf(str, size,
-			 "%u: (%s%s) refs=%u, fwaddr=%#08x, cur=%#08x, nxt=%#08x, %s %s",
+			 "%llu: (%s%s) refs=%u, fwaddr=%#08x, cur=%#08x, nxt=%#08x, %s %s",
 			 pvr_fence->fence->seqno,
 			 test_bit(DMA_FENCE_FLAG_ENABLE_SIGNAL_BIT,
 				  &pvr_fence->fence->flags) ? "+" : "-",
@@ -539,7 +539,7 @@ void pvr_fence_fence_value_str(struct dma_fence *fence, char *str, int size)
 				 "(foreign)" : "");
 #else
 		snprintf(str, size,
-			 "%u: (%s%s) refs=%u, fwaddr=%#08x, cur=%#08x, nxt=%#08x, %s %s",
+			 "%llu: (%s%s) refs=%u, fwaddr=%#08x, cur=%#08x, nxt=%#08x, %s %s",
 			 pvr_fence->fence->seqno,
 			 test_bit(DMA_FENCE_FLAG_ENABLE_SIGNAL_BIT,
 				  &pvr_fence->fence->flags) ? "+" : "-",

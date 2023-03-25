@@ -98,22 +98,23 @@ void boot_kvm_setup_machine_id(bootblock_struct_t *bootblock)
 
 	boot_native_setup_machine_id(bootblock);
 
-	/* boot_machine now contains info from emulated IDR */
-
-	/*
+	/* boot_machine now contains info from emulated IDR.
+	 *
 	 * At this point we have three machine ids:
 	 * - boot_machine.native_id is determined by QEMU parameter
 	 * - kvm_vcpu_host_machine_id is host id
 	 * - boot_native_machine_id may be statically set when compiling guest
+	 *
+	 * Force use of v6 e2k-iommu, independent of guest architecture.
 	 */
-
-	boot_guest_machine_id = boot_machine.native_id;
-	boot_machine.guest.id = boot_guest_machine_id;
+	boot_guest_machine_id = boot_machine.native_id & ~MACHINE_ID_L_IOMMU |
+							MACHINE_ID_E2K_IOMMU;
+	boot_machine.guest.id = boot_machine.native_id;
 	boot_machine.guest.rev = boot_machine.native_rev;
 	boot_machine.guest.iset_ver = boot_machine.native_iset_ver;
 
 #ifdef	CONFIG_E2K_MACHINE
-	if ((boot_guest_machine_id & ~MACHINE_ID_SIMUL) !=
+	if ((boot_machine.guest.id & ~MACHINE_ID_SIMUL) !=
 			(boot_native_machine_id & ~MACHINE_ID_SIMUL))
 		BOOT_BUG("Guest kernel arch does not match QEMU parameter arch");
 
@@ -284,18 +285,11 @@ boot_kvm_reserve_vcpu_state(void)
 {
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	int		ret;
 
 	KVM_GET_VCPU_STATE_BASE(area_base);
 	area_size = sizeof(kvm_vcpu_state_t);
-	ret = boot_reserve_physmem(area_base, area_size, kernel_data_mem_type,
-		BOOT_NOT_IGNORE_BUSY_BANK);
-	if (ret != 0) {
-		BOOT_BUG("Could not reserve VCPU state area: "
-			"base addr 0x%lx size 0x%lx page size 0x%x",
-			area_base, area_size, PAGE_SIZE);
-	}
-
+	boot_reserve_physmem("VCPU state", area_base, area_size,
+			kernel_data_mem_type, BOOT_NOT_IGNORE_BUSY_BANK);
 	DebugKVM("The VCPU state reserved area: "
 			"base addr 0x%lx size 0x%lx page size 0x%x\n",
 			area_base, area_size, PAGE_SIZE);
@@ -310,19 +304,12 @@ boot_kvm_reserve_kernel_cut(void)
 	e2k_cutd_t	cutd;
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	int		ret;
 
 	cutd.CUTD_reg = BOOT_KVM_READ_OSCUTD_REG_VALUE();
 	area_base = cutd.CUTD_base;
 	area_size = sizeof(e2k_cute_t) * MAX_GUEST_CODES_UNITS;
-	ret = boot_reserve_physmem(area_base, area_size, kernel_data_mem_type,
-		BOOT_NOT_IGNORE_BUSY_BANK);
-	if (ret != 0) {
-		BOOT_BUG("Could not reserve kernel CUT area: "
-			"base addr 0x%lx size 0x%lx page size 0x%x",
-			area_base, area_size, PAGE_SIZE);
-	}
-
+	boot_reserve_physmem("kernel CUT", area_base, area_size,
+			kernel_data_mem_type, BOOT_NOT_IGNORE_BUSY_BANK);
 	DebugKVM("The kernel CUT reserved area: "
 			"base addr 0x%lx size 0x%lx page size 0x%x\n",
 			area_base, area_size, PAGE_SIZE);
@@ -336,18 +323,12 @@ boot_kvm_reserve_legacy_VGA_MEM(bool bsp)
 {
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	int		ret;
 
 	if (BOOT_IS_BSP(bsp)) {
 		area_base = VGA_VRAM_PHYS_BASE;
 		area_size = VGA_VRAM_SIZE;
-		ret = boot_reserve_physmem(area_base, area_size, hw_stripped_mem_type,
+		boot_reserve_physmem("VGA", area_base, area_size, hw_stripped_mem_type,
 			BOOT_NOT_IGNORE_BUSY_BANK | BOOT_IGNORE_BANK_NOT_FOUND);
-		if (ret != 0) {
-			BOOT_BUG("Could not reserve VGA MEM area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size, PAGE_SIZE);
-		}
 
 		DebugKVM("Legacy VGA MEM reserved area: "
 			"base addr 0x%lx size 0x%lx page size 0x%x\n",
@@ -438,91 +419,68 @@ static void __init boot_kvm_map_all_phys_memory(boot_info_t *boot_info)
 	 * All physical memory pages are mapped to virtual space starting
 	 * from 'PAGE_OFFSET'
 	 */
-
-#ifdef	CONFIG_SMP
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_mem_mapped)) {
-#endif	/* CONFIG_SMP */
-#ifdef	CONFIG_NUMA
-		if (!boot_node_has_dup_kernel()) {
-			DebugNUMA("boot_map_all_bootmem() node "
-				"has not own page table and will use "
-				"node #%d physical memory mapping\n",
-				boot_my_node_dup_kernel_nid);
-			goto no_mem_mapping;
-		} else {
-			DebugNUMA("boot_map_all_bootmem() will map all "
-				"physical memory\n");
-		}
-#endif	/* CONFIG_NUMA */
-		DebugKVM("The physical memory start address 0x%lx, "
-			"end 0x%lx\n",
-			boot_start_of_phys_memory,
-			boot_end_of_phys_memory);
-		area_phys_base = boot_pa_to_vpa(boot_start_of_phys_memory);
-		area_virt_base =
-			(e2k_addr_t)__boot_va(boot_start_of_phys_memory);
-		area_size = 0;
-		for (bank = 0; bank < L_MAX_NODE_PHYS_BANKS; bank++) {
-			if (!boot_info->nodes_mem[0].banks[bank].size)
-				break;
-			area_size += boot_info->nodes_mem[0].banks[bank].size;
-		}
-		ret = boot_map_physmem(PAGE_MAPPED_PHYS_MEM,
-					BOOT_E2K_MAPPED_PHYS_MEM_PAGE_SIZE);
-		if (ret <= 0) {
-			BOOT_BUG("Could not map physical memory area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				area_phys_base, area_size,
-				BOOT_E2K_MAPPED_PHYS_MEM_PAGE_SIZE,
-				area_virt_base);
-		}
-		DebugKVM("The physical memory area: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			area_phys_base, area_size, ret, area_virt_base,
-			BOOT_E2K_MAPPED_PHYS_MEM_PAGE_SIZE);
-#ifdef	CONFIG_NUMA
-no_mem_mapping:
-#endif	/* CONFIG_NUMA */
-#ifdef	CONFIG_SMP
-		BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_mem_mapped);
+	DebugKVM("The physical memory start address 0x%lx, end 0x%lx\n",
+		boot_start_of_phys_memory,
+		boot_end_of_phys_memory);
+	area_phys_base = boot_pa_to_vpa(boot_start_of_phys_memory);
+	area_virt_base =
+		(e2k_addr_t)__boot_va(boot_start_of_phys_memory);
+	area_size = 0;
+	for (bank = 0; bank < L_MAX_NODE_PHYS_BANKS; bank++) {
+		if (!boot_info->nodes_mem[0].banks[bank].size)
+			break;
+		area_size += boot_info->nodes_mem[0].banks[bank].size;
 	}
-#endif	/* CONFIG_SMP */
+	ret = boot_map_physmem(PAGE_MAPPED_PHYS_MEM,
+				BOOT_E2K_MAPPED_PHYS_MEM_PAGE_SIZE);
+	if (ret <= 0) {
+		BOOT_BUG("Could not map physical memory area: "
+			"base addr 0x%lx size 0x%lx page size 0x%x to "
+			"virtual addr 0x%lx",
+			area_phys_base, area_size,
+			BOOT_E2K_MAPPED_PHYS_MEM_PAGE_SIZE,
+			area_virt_base);
+	}
+	DebugKVM("The physical memory area: "
+		"base addr 0x%lx size 0x%lx is mapped to %d virtual "
+		"page(s) base addr 0x%lx page size 0x%x\n",
+		area_phys_base, area_size, ret, area_virt_base,
+		BOOT_E2K_MAPPED_PHYS_MEM_PAGE_SIZE);
 }
 
 void __init boot_kvm_map_all_bootmem(bool bsp, boot_info_t *boot_info)
 {
-
 	/* guest kernel image should be registered on host */
 	/* for paravirtualization mode without shadow PT support */
 	boot_host_kernel_image(bsp);
 
-	/*
-	 * Map the kernel image 'text/data/bss' segments.
-	 */
-	boot_map_kernel_image(populate_image_on_host);
+	if (BOOT_IS_BSP(bsp)) {
+		/*
+		* Map the kernel image 'text/data/bss' segments.
+		*/
+		boot_map_kernel_image(populate_image_on_host);
+
+
+		/*
+		* Map all available physical memory
+		*/
+		boot_kvm_map_all_phys_memory(boot_info);
+
+		/*
+		* Map all needed physical areas from boot-info.
+		*/
+		boot_map_all_bootinfo_areas(boot_info);
+
+		/*
+		* Map all available VRAM areas
+		*/
+		boot_kvm_map_vram_memory(boot_info);
+	}
 
 	/*
-	 * Map the kernel stacks
-	 */
+	* Map the kernel stacks
+	*/
 	boot_map_kernel_boot_stacks();
-
-	/*
-	 * Map all available physical memory
-	 */
-	boot_kvm_map_all_phys_memory(boot_info);
-
-	/*
-	 * Map all needed physical areas from boot-info.
-	 */
-	boot_map_all_bootinfo_areas(boot_info);
-
-	/*
-	 * Map all available VRAM areas
-	 */
-	boot_kvm_map_vram_memory(boot_info);
 }
 
 /*
@@ -544,9 +502,7 @@ void boot_kvm_set_kernel_MMU_state_before(void)
 	/* translation (TLB enable) will be turn ON later */
 	gmmu_info.mmu_cr.tlb_en = 0;
 	gmmu_info.pid = MMU_KERNEL_CONTEXT;
-	gmmu_info.trap_cellar = (unsigned long)boot_kernel_trap_cellar;
-	DebugMMU("will set MMU_CR 0x%llx PID 0x%llx TRAP_CELLAR at %p\n",
-		gmmu_info.mmu_cr, gmmu_info.pid, (void *)gmmu_info.trap_cellar);
+	DebugMMU("will set MMU_CR 0x%llx PID 0x%llx\n", gmmu_info.mmu_cr, gmmu_info.pid);
 
 	gmmu_info.sep_virt_space = MMU_IS_SEPARATE_PT();
 	gmmu_info.pt_v6 = MMU_IS_PT_V6();
@@ -661,9 +617,9 @@ boot_kvm_switch_to_virt(bool bsp, int cpuid,
 	 */
 	gd_lo = NATIVE_READ_OSGD_LO_REG();
 	gd_hi = NATIVE_READ_OSGD_HI_REG();
-	size = (e2k_addr_t)_edata_bss - (e2k_addr_t)_sdata;
+	size = (e2k_addr_t)_edata_bss - (e2k_addr_t)_sdata_bss;
 	size = ALIGN_TO_MASK(size, E2K_ALIGN_OS_GLOBALS_MASK);
-	gd_lo.OSCUD_lo_base = (e2k_addr_t)_sdata;
+	gd_lo.OSCUD_lo_base = (e2k_addr_t)_sdata_bss;
 	gd_hi.OSCUD_hi_size = size;
 
 	/* calculate virtual CUTD pointer */

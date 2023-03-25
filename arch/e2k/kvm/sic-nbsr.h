@@ -69,4 +69,8 @@ extern int nbsr_setup_pci_region(struct kvm *kvm, kvm_pci_region_t *pci_region);
 extern int kvm_get_nbsr_state(struct kvm *kvm,
 			struct kvm_guest_nbsr_state *nbsr, int node_id);
 
+static inline unsigned int offset_to_no(unsigned int reg_offset)
+{
+	return reg_offset / 4;
+}
 #endif	/* __KVM_SIC_NBSR_H */

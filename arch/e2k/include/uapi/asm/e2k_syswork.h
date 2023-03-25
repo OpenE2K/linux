@@ -20,8 +20,6 @@
 #define PRINT_REGS		6
 #define PRINT_ALL_MMAP		7
 #define FLUSH_CMD_CACHES	8
-#define SET_TAGS		17
-#define CHECK_TAGS		18
 #define IDE_INFO		20
 #define INSTR_EXEC		21
 #define IREQ_SET_TO_CPU		22

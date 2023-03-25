@@ -10,48 +10,43 @@
 
 #define ARCH_HAS_ATOMIC_CMPXCHG
 
-static int __el_atomic_cmpxchg(int *x, int *uaddr, int oldval, int newval)
+#define el_atomic_cmpxchg_acq(x, uaddr, oldval, newval) \
+		__el_atomic_cmpxchg_acq(&x, uaddr, oldval, newval)
+static int __el_atomic_cmpxchg_acq(int *x, int *uaddr, int oldval, int newval)
 {
-	int rval;
+	int ret;
 
-	TRY_USR_PFAULT {
-		*x = cmpxchg(uaddr, oldval, newval);
-		rval = 0;
-	} CATCH_USR_PFAULT {
-		DebugUAF("%s (%d) - %s : "
-			"el_atomic_cmpxchg data fault %px(%ld)\n",
-			__FILE__, __LINE__, __FUNCTION__,
-			(uaddr), (sizeof(*uaddr)));
-		rval = -EFAULT;
-	} END_USR_PFAULT
+	uaccess_enable();
+	ret = __api_user_cmpxchg_word(oldval, newval, uaddr, ACQUIRE_MB, *x);
+	uaccess_disable();
 
-	return rval;
+	return ret;
 }
 
-#define el_atomic_cmpxchg_acq(x, uaddr, oldval, newval) \
-		__el_atomic_cmpxchg(&x, uaddr, oldval, newval)
 #define el_atomic_cmpxchg_rel(x, uaddr, oldval, newval) \
-		__el_atomic_cmpxchg(&x, uaddr, oldval, newval)
+		__el_atomic_cmpxchg_rel(&x, uaddr, oldval, newval)
+static int __el_atomic_cmpxchg_rel(int *x, int *uaddr, int oldval, int newval)
+{
+	int ret;
+
+	uaccess_enable();
+	ret = __api_user_cmpxchg_word(oldval, newval, uaddr, RELEASE_MB, *x);
+	uaccess_disable();
+
+	return ret;
+}
 
 #define el_atomic_xchg_acq(x, uaddr, value) \
 		__el_atomic_xchg_acq(&x, uaddr, value)
-
 static int __el_atomic_xchg_acq(int *x, int *uaddr, const int value)
 {
-	int rval;
+	int ret;
 
-	TRY_USR_PFAULT {
-		*x = xchg(uaddr, value);
-		rval = 0;
-	} CATCH_USR_PFAULT {
-		DebugUAF("%s (%d) - %s : "
-			"el_atomic_xchg data fault %px(%ld)\n",
-			__FILE__, __LINE__, __FUNCTION__,
-			(uaddr), (sizeof(*uaddr)));
-		rval = -EFAULT;
-	} END_USR_PFAULT
+	uaccess_enable();
+	ret = __api_user_xchg(value, addr, w, ACQUIRE_MB, *x);
+	uaccess_disable();
 
-	return rval;
+	return ret;
 }
 
 #endif

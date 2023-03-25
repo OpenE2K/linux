@@ -82,9 +82,10 @@ typedef struct thread_info {
 
 	struct kernel_gregs	k_gregs;
 
+#ifdef CONFIG_KVM_HOST_MODE
 	struct kernel_gregs	k_gregs_light;
+#endif
 
-	struct restart_block	restart_block;
         e2k_upsr_t              upsr;           /* kernel upsr */
 
 	data_stack_t		u_stack;	/* User data stack info */
@@ -95,8 +96,6 @@ typedef struct thread_info {
 
 	struct list_head getsp_adj;
 
-	long		usr_pfault_jump;	/* where to jump if  */
-						/* copy_*_user has bad addr */
 	e2k_cutd_t		u_cutd;		/* Compilation Unit Table */
 						/* base (register) */
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
@@ -148,7 +147,6 @@ typedef struct thread_info {
 	unsigned long long dam[DAM_ENTRIES_NUM];
 	e2k_aalda_t	aalda[AALDAS_REGS_NUM];
 
-	bool		last_wish;
 	struct ksignal	ksig;
 
 	/* signal stack area is used to store interrupted context */
@@ -167,6 +165,9 @@ typedef struct thread_info {
 					/* virtual machine for */
 					/* paravirtualized guest */
 	struct kvm_vcpu *vcpu;		/* KVM VCPU state for host */
+	struct kvm_vcpu *is_vcpu;	/* process is kvm VCPU thread */
+					/* but now it is not active (scheduled) */
+					/* or is at vcpu-qemu mode */
 	unsigned long vcpu_state_base;	/* base of VCPU state fo guest */
 	int (*paravirt_page_prefault)	/* paravirtualized guest page */
 					/* prefault handler */
@@ -218,15 +219,8 @@ typedef struct thread_info {
 #define	TIF_MULTITHREADING	20	/* task is running as multithreading */
 					/* for example host/guest kernel main */
 					/* threads */
-#define	TIF_VIRTUALIZED_HOST	21	/* thread is host part of VCPU to run */
-					/* virtualized kernel */
-#define	TIF_VIRTUALIZED_GUEST	22	/* thread is guest part of VCPU */
-					/* to run virtualized kernel */
 #define	TIF_PARAVIRT_GUEST	23	/* user is paravitualized guest */
 					/* kernel */
-#define	TIF_PSEUDOTHREAD	24	/* the thread is pseudo only to run */
-					/* on VIRQ VCPU as starter of VIRQ */
-					/* handler */
 #define	TIF_VIRQS_ACTIVE	26	/* the thread is ready to inject */
 					/* VIRQS interrupt */
 #define	TIF_LIGHT_HYPERCALL	28	/* hypervisor is executing light */
@@ -253,8 +247,6 @@ typedef struct thread_info {
 #define _TIF_WILL_RESCHED	(1 << TIF_WILL_RESCHED)
 #define _TIF_VM_CREATED		(1 << TIF_VM_CREATED)
 #define _TIF_MULTITHREADING	(1 << TIF_MULTITHREADING)
-#define _TIF_VIRTUALIZED_HOST	(1 << TIF_VIRTUALIZED_HOST)
-#define _TIF_VIRTUALIZED_GUEST	(1 << TIF_VIRTUALIZED_GUEST)
 #define _TIF_PARAVIRT_GUEST	(1 << TIF_PARAVIRT_GUEST)
 #define _TIF_PSEUDOTHREAD	(1 << TIF_PSEUDOTHREAD)
 #define	_TIF_VIRQS_ACTIVE	(1 << TIF_VIRQS_ACTIVE)
@@ -287,7 +279,6 @@ typedef struct thread_info {
  * ever touches our thread-synchronous status, so we don't
  * have to worry about atomic accesses.
  */
-#define TS_DELAYED_SIG_HANDLING		0x00000001
 #define TS_MMAP_PRIVILEGED		0x00000004
 #define TS_MMAP_PS			0x00000008
 #define TS_MMAP_PCS			0x00000010
@@ -382,7 +373,7 @@ static inline void clear_g_list(struct thread_info *thread_info)
 	thread_info->lock = NULL;
 }
 #else /* CONFIG_PROTECTED_MODE */
-void clear_g_list(struct thread_info *thread_info) { }
+static inline void clear_g_list(struct thread_info *thread_info) { }
 #endif
 
 #define thread_info_task(ti)	\

@@ -873,12 +873,9 @@ kvm_restore_kernel_gregs_in_syscall(struct thread_info *ti)
 }
 
 static unsigned long
-guest_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+guest_fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
-	return kvm_fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+	return kvm_fast_tagged_memory_copy(dst, src, len, prefetch);
 }
 static unsigned long
 guest_fast_tagged_memory_set(void *addr, u64 val, u64 tag,

@@ -6,10 +6,12 @@
 #ifndef _E2K_KVM_TLBFLUSH_H
 #define _E2K_KVM_TLBFLUSH_H
 
-#include <linux/mm.h>
-#include <linux/kvm_host.h>
+#include <linux/mm_types.h>
+#include <asm/pgtable_types.h>
 
 #include <asm/kvm/hypercall.h>
+#include <asm/kvm/gpid.h>
+#include <asm/kvm/mm.h>
 
 /*
  * Guest VM support on host
@@ -20,6 +22,7 @@
  *  - flush_tlb_range(mm, start, end) flushes a range of pages
  */
 
+struct kvm_vcpu;
 extern void mmu_pv_flush_tlb_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			const e2k_addr_t start, const e2k_addr_t end);
 extern void mmu_pv_flush_cpu_root_pt_mm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm);
@@ -30,7 +33,7 @@ extern long kvm_pv_sync_and_flush_tlb(struct kvm_vcpu *vcpu,
 extern long kvm_pv_sync_addr_range(struct kvm_vcpu *vcpu,
 			gva_t start_gva, gva_t end_gva);
 
-extern void host_flush_shadow_pt_tlb_range(struct kvm_vcpu *vcpu,
+extern void host_flush_shadow_pt_tlb_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			gva_t start, gva_t end, pgprot_t spte, int level);
 
 extern void host_flush_shadow_pt_level_tlb(struct kvm *kvm, gmm_struct_t *gmm,

@@ -11,14 +11,15 @@
 #include <linux/bitmap.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
+#include <linux/nodemask.h>
 #include <linux/refcount.h>
 #include <linux/rhashtable-types.h>
-#include <linux/uaccess.h>
 
 #include <asm/mmu_types.h>
 #include <asm/umalloc.h>
 #include <asm/e2k_api.h>
 #include <asm/protected_mode.h>
+#include <asm/secondary_space.h>
 
 
 /* hw_context_lifetime.state possible values.
@@ -110,7 +111,40 @@ struct sival_ptr_list {
 #endif
 
 typedef struct {
-	unsigned long	cpumsk[NR_CPUS];
+#ifdef CONFIG_NUMA
+	/* In !CONFIG_NUMA case we use mm->pgd as other architectures.
+	 *
+	 * In CONFIG_NUMA case we have per-node _kernel_ page tables
+	 * (because kernel code and rodata sections are duplicated
+	 * across all nodes) and so we have MAX_NUMNODES versions of
+	 * pgd for each user application. If some node does not have
+	 * memory it will use memory of a node with neighboring number:
+	 * 0<-1, 0->1<-2 ... (n-1)->n<-(n+1) ... (nr_node_ids-1)->nr_node_ids
+	 *
+	 * Thus every pgd modification has to modify all these pgds
+	 * but that's OK as pgds are modified extremely rarely.
+	 *
+	 * Note that in !MMU_IS_SEPARATE_PT() case we copy kernel PGDs
+	 * to user (see pgd_ctor()), so these node_pgds() are needed for
+	 * user mm too. In MMU_IS_SEPARATE_PT() case no additional pgds
+	 * will be allocated besides the one in mm->pgd for user mm, so
+	 * pgds_nodemask will have just one corresponding bit set. */
+	pgd_t *node_pgds[MAX_NUMNODES];
+	/* Has one bit set for every distinct entry in 'node_pgds'
+	 * array (no duplicates here) */
+	nodemask_t pgds_nodemask;
+	/* Shows which pgd in 'node_pgds' corresponds to mm->pgd. */
+	int mm_pgd_node;
+# define for_each_node_mm_pgdmask(node, mm) \
+		for_each_node_mask((node), (mm)->context.pgds_nodemask)
+# define mm_node_pgd(mm, node) ((MMU_IS_SEPARATE_PT() && (mm) != &init_mm) ? \
+			(void) (node), (mm)->pgd : (mm)->context.node_pgds[node])
+#else
+# define for_each_node_mm_pgdmask(node, mm) for_each_node(node)
+# define mm_node_pgd(mm, node) ((void) (node), (mm)->pgd)
+#endif
+
+	u64		cpumsk[NR_CPUS];
 	atomic_t	cur_cui;	/* first free cui */
 	atomic_t	tstart;		/* first free type for TSD */
 	int		tcount;
@@ -159,11 +193,37 @@ typedef struct {
 	struct list_head cached_stacks;
 	spinlock_t cached_stacks_lock;
 	size_t cached_stacks_size;
+
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+	bin_comp_info_t	bincomp_info;	/* bin comp info */
+
+	bin_comp_fdt_t	*bincomp_fdt;	/* bin comp special file descriptors */
+	rwlock_t	bincomp_fdt_lock;
+#endif
 } mm_context_t;
+
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+# define INIT_BIN_COMP_MM_CONTEXT \
+	.bincomp_info.lock = __RW_LOCK_UNLOCKED(&mm.context.bincomp_info.lock), \
+	.bincomp_fdt_lock = __RW_LOCK_UNLOCKED(&mm.context.bincomp_fdt_lock),
+#else
+# define INIT_BIN_COMP_MM_CONTEXT
+#endif
+
+#ifdef CONFIG_NUMA
+/* Initially all nodes use the same pgd, later duplicate_kernel_image()
+ * will allocate and initialize all pgds properly. */
+# define INIT_MM_CONTEXT_NUMA(mm) \
+	.node_pgds[0 ... MAX_NUMNODES-1] = swapper_pg_dir,
+#else
+# define INIT_MM_CONTEXT_NUMA(mm)
+#endif
 
 #define INIT_MM_CONTEXT(mm) \
 	.context = { \
 		.cut_mask_lock = __MUTEX_INITIALIZER(mm.context.cut_mask_lock), \
+		INIT_BIN_COMP_MM_CONTEXT \
+		INIT_MM_CONTEXT_NUMA(mm) \
 	} \
 
 /* Version for fast syscalls, so it must be inlined.
@@ -228,5 +288,11 @@ extern unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 		struct list_head *uf_unmap);
 extern struct vm_area_struct *vma_to_resize(unsigned long addr,
 	unsigned long old_len, unsigned long new_len, unsigned long *p);
+
+#ifdef CONFIG_HALF_SPEC_LOADS_INJECTION
+extern void debug_inject_half_spec_loads(bool check);
+#else
+static inline void debug_inject_half_spec_loads(bool check) { }
+#endif
 
 #endif /* _E2K_MMU_H_ */

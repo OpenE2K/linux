@@ -55,7 +55,8 @@ TRACE_EVENT(
 
 		trace_get_va_translation(current->mm, (e2k_addr_t)dst,
 			&__entry->dst_pgd, &__entry->dst_pud, &__entry->dst_pmd,
-			&__entry->dst_pte, &__entry->dst_pt_level);
+			&__entry->dst_pte, &__entry->dst_pt_level,
+			PT_DTLB_TRANSLATION_AUTO);
 		trace_kvm_get_gva_spt_translation((e2k_addr_t)dst,
 			&__entry->dst_spt_pgd, &__entry->dst_spt_pud,
 			&__entry->dst_spt_pmd, &__entry->dst_spt_pte,
@@ -63,7 +64,8 @@ TRACE_EVENT(
 
 		trace_get_va_translation(current->mm, (e2k_addr_t)src,
 			&__entry->src_pgd, &__entry->src_pud, &__entry->src_pmd,
-			&__entry->src_pte, &__entry->src_pt_level);
+			&__entry->src_pte, &__entry->src_pt_level,
+			PT_DTLB_TRANSLATION_AUTO);
 		trace_kvm_get_gva_spt_translation((e2k_addr_t)src,
 			&__entry->src_spt_pgd, &__entry->src_spt_pud,
 			&__entry->src_spt_pmd, &__entry->src_spt_pte,
@@ -72,38 +74,26 @@ TRACE_EVENT(
 
 	TP_printk("copy %s stack guest user <- guest kernel: dst %px "
 		"src %px size %llx\n"
-		"   user guest dst %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"   user guest dst spt %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"   kernel guest  src %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"   kernel guest  src spt %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s",
+		"  user guest dst %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n"
+		"  user guest dst spt %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n"
+		"  kernel guest src %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n"
+		"  kernel guest src spt %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n",
 		(__entry->is_chain) ? "chain" : "procedure",
 		__entry->dst,
 		__entry->src,

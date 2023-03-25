@@ -13,7 +13,6 @@
 
 #include <asm/cpu_regs_access.h>
 #include <asm/bootinfo.h>
-#include <asm/numnodes.h>
 
 #ifndef __ASSEMBLY__
 
@@ -33,19 +32,9 @@ typedef	struct mem_area_desc {		/* an area descriptor */
 	e2k_size_t	virt_offset;	/* virtual offset of the area */
 } mem_area_desc_t;
 
-typedef	struct node_mem_area_desc {	/* node an area descriptor */
-	mem_area_desc_t nodes[L_MAX_MEM_NUMNODES];
-} node_mem_area_desc_t;
-
 typedef	struct bootmem_areas {		/* list of all areas */
-#ifndef	CONFIG_NUMA
 	mem_area_desc_t	text;		/* segment 'text' of kernel */
 	mem_area_desc_t	data;		/* segment 'data' of kernel */
-#else	/* CONFIG_NUMA */
-	node_mem_area_desc_t text;	/* nodes segment 'text' of kernel */
-	node_mem_area_desc_t dup_data;	/* nodes duplicated 'data' segment */
-	node_mem_area_desc_t data;	/* node segment 'data' of kernel */
-#endif	/* ! CONFIG_NUMA */
 #ifndef	CONFIG_SMP
 	/*
 	 * Boot-time stacks to switch from physical memory to virtual memory
@@ -82,7 +71,6 @@ extern unsigned long			totalram_real_pages;
 extern	bootmem_areas_t		kernel_bootmem;
 #define	boot_kernel_bootmem	boot_vp_to_pp(&kernel_bootmem)
 
-#ifndef	CONFIG_NUMA
 #define boot_text_phys_base	boot_get_vo_value(kernel_bootmem.text.phys)
 #define boot_text_virt_base	boot_get_vo_value(kernel_bootmem.text.virt)
 #define boot_text_size		boot_get_vo_value(kernel_bootmem.text.size)
@@ -90,41 +78,6 @@ extern	bootmem_areas_t		kernel_bootmem;
 #define boot_data_phys_base	boot_get_vo_value(kernel_bootmem.data.phys)
 #define boot_data_virt_base	boot_get_vo_value(kernel_bootmem.data.virt)
 #define boot_data_size		boot_get_vo_value(kernel_bootmem.data.size)
-#else	/* CONFIG_NUMA */
-#define boot_node_text_phys_base(nid)		\
-		boot_get_vo_value(kernel_bootmem.text.nodes[(nid)].phys)
-#define boot_node_text_virt_base(nid)		\
-		boot_get_vo_value(kernel_bootmem.text.nodes[(nid)].virt)
-#define boot_node_text_size(nid)		\
-		boot_get_vo_value(kernel_bootmem.text.nodes[(nid)].size)
-
-#define boot_node_dup_data_phys_base(nid)	\
-		boot_get_vo_value(kernel_bootmem.dup_data.nodes[(nid)].phys)
-#define boot_node_dup_data_virt_base(nid)	\
-		boot_get_vo_value(kernel_bootmem.dup_data.nodes[(nid)].virt)
-#define boot_node_dup_data_size(nid)		\
-		boot_get_vo_value(kernel_bootmem.dup_data.nodes[(nid)].size)
-#define boot_node_data_phys_base(nid)		\
-		boot_get_vo_value(kernel_bootmem.data.nodes[(nid)].phys)
-#define boot_node_data_virt_base(nid)		\
-		boot_get_vo_value(kernel_bootmem.data.nodes[(nid)].virt)
-#define boot_node_data_size(nid)		\
-		boot_get_vo_value(kernel_bootmem.data.nodes[(nid)].size)
-
-#define boot_text_phys_base	boot_node_text_phys_base(boot_numa_node_id())
-#define boot_text_virt_base	boot_node_text_virt_base(boot_numa_node_id())
-#define boot_text_size		boot_node_text_size(boot_numa_node_id())
-
-#define boot_dup_data_phys_base		\
-		boot_node_dup_data_phys_base(boot_numa_node_id())
-#define boot_dup_data_virt_base		\
-		boot_node_dup_data_virt_base(boot_numa_node_id())
-#define boot_dup_data_size		\
-		boot_node_dup_data_size(boot_numa_node_id())
-#define boot_data_phys_base	boot_node_data_phys_base(boot_numa_node_id())
-#define boot_data_virt_base	boot_node_data_virt_base(boot_numa_node_id())
-#define boot_data_size		boot_node_data_size(boot_numa_node_id())
-#endif	/* ! CONFIG_NUMA */
 
 #ifndef	CONFIG_SMP
 #define boot_boot_ps_phys_base	boot_get_vo_value(kernel_bootmem.boot_ps.phys)
@@ -272,16 +225,6 @@ extern unsigned long disable_caches;
 extern bool disable_secondary_caches;
 extern bool disable_IP;
 
-#ifdef	CONFIG_NUMA
-extern boot_spinlock_t __initdata boot_node_map_lock[MAX_NUMNODES];
-extern int __initdata node_mem_mapped[MAX_NUMNODES];
-#define	boot_node_mem_mapped					\
-		boot_get_vo_value(node_mem_mapped[boot_numa_node_id()])
-#else	/* ! CONFIG_NUMA */
-#define	boot_node_map_lock	SPIN_LOCK_UNLOCKED;
-#define	boot_node_mem_mapped	0
-#endif	/* CONFIG_NUMA */
-
 /*
  * Forwards of functions of Virtual memory support initialization
  */
@@ -304,7 +247,6 @@ extern void boot_map_kernel_image(bool populate_on_host);
 extern void boot_map_kernel_boot_stacks(void);
 extern void boot_map_all_phys_memory(void);
 extern void boot_map_all_bootinfo_areas(boot_info_t *boot_info);
-extern void init_mem_term(int cpuid);
 extern void boot_native_map_needful_to_equal_virt_area(
 						e2k_addr_t stack_top_addr);
 extern void boot_native_switch_to_virt(bool bsp, int cpuid,

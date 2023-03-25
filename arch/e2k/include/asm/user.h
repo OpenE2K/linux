@@ -170,6 +170,7 @@ struct user_regs_struct {
 
 	unsigned long long gext_v5[32];
 	unsigned char gext_tag_v5[32];
+
 /*
  * Not actual registers, but still useful information
  */
@@ -184,8 +185,19 @@ struct user_regs_struct {
 	unsigned long long ctpr1_hi;
 	unsigned long long ctpr2_hi;
 	unsigned long long ctpr3_hi;
+
+/*
+ * protected mode additions
+ */
+	long long	arg7;
+	long long	arg8;
+	long long	arg9;
+	long long	arg10;
+	long long	arg11;
+	long long	arg12;
+
 /* 
- * Please, include new fields below 
+ * Please, include new fields below and in all kernel branches
  */
 };
 

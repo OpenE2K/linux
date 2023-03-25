@@ -49,10 +49,17 @@
 
 #include "l_zilog.h"
 
-
 #if defined(CONFIG_SERIAL_AM85C30_CONSOLE)
 raw_spinlock_t *uap_a_reg_lock = NULL;
 #endif
+
+#ifdef CONFIG_SERIAL_L_ZILOG_CONSOLE
+static struct console l_zilog_console;
+#define L_ZILOG_CONSOLE	(&l_zilog_console)
+#else
+#define L_ZILOG_CONSOLE	(NULL)
+#endif
+
 
 static inline u8 read_zsreg(struct uart_zilog_port *port, u8 reg)
 {
@@ -938,6 +945,8 @@ static void zilog_shutdown(struct uart_port *port)
 
 	pmz_debug("zilog: shutdown()\n");
 
+	console_stop(L_ZILOG_CONSOLE);
+
 	spin_lock_irqsave(&port->lock, flags);
 
 	uap->flags &= ~PMACZILOG_FLAG_IS_OPEN;
@@ -1570,12 +1579,6 @@ static int serial_zilog_register_ports(struct pci_dev *dev)
 
 }
 
-#ifdef CONFIG_SERIAL_L_ZILOG_CONSOLE
-static struct console l_zilog_console;
-#define L_ZILOG_CONSOLE	&l_zilog_console
-#else
-#define L_ZILOG_CONSOLE	(NULL)
-#endif
 static struct uart_driver l_zilog_uart_reg = {
 	.owner		=	THIS_MODULE,
 	.driver_name	=	"serial_uart_zilog",
@@ -1775,7 +1778,9 @@ static int serial_zilog_probe(struct pci_dev *dev,
 	unsigned long irq_flags;
 
 	DebugZ("%s: serial_zilog_probe() started\n", pci_name(dev));
-	ret = pci_enable_device(dev);
+	 /* Bug 143381: boot does not assign io-bars,
+	    so enable only mem-bar */
+	ret = pci_enable_device_mem(dev);
 	if (ret) {
 		printk("Zilog: Unable to make enable device\n");
 		return ret;

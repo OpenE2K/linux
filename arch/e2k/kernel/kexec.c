@@ -3,7 +3,7 @@
  *
  * Elbrus kexec pseudo driver.
  *
- * Copyright (C) 2015-2020 Pavel V. Panteleev (panteleev_p@mcst.ru)
+ * Copyright (C) 2015-2022 Pavel V. Panteleev (panteleev_p@mcst.ru)
  */
 
 #include <linux/module.h>
@@ -14,40 +14,59 @@
 #include <linux/uaccess.h>
 #include <linux/memblock.h>
 #include <linux/fs.h>
+#include <linux/console.h>
+#include <linux/freezer.h>
 
 #include <uapi/asm/kexec.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
 #include <asm/sic_regs.h>
-#include <asm-l/hw_irq.h>
 #include <asm/boot_recovery.h>
-#include <asm/p2v/boot_init.h>
+#include <asm/iommu.h>
 #include <asm/pic.h>
-#include <asm/l-iommu.h>
+#include <asm/p2v/boot_init.h>
 
+#include <asm-l/hw_irq.h>
+#include <asm-l/io_pic.h>
+#include <asm-l/serial.h>
 
-#define IMAGE_KERNEL_CODE_OFFSET	0x10000
-#define IMAGE_BOOTBLOCK_OFFSET		0x100
-
-#define IMAGE_LINTEL_ENTRY_OFFSET	0x800
-
-#define KEXEC_CHUNKS_COUNT_MAX		16
-
-#define __switch_to_phys__	__attribute__((__section__(".switch_to_phys")))
 
 #undef	DEBUG_KEXEC_MODE
 #undef	DebugKE
 #define	DEBUG_KEXEC_MODE	0
 #define DebugBootKE		if (DEBUG_KEXEC_MODE) do_boot_printk
+#define DebugInitKE		if (DEBUG_KEXEC_MODE) dump_printk
 #define DebugKE(fmt, ...)							\
 		if (DEBUG_KEXEC_MODE)						\
 			pr_err("%d %d %s: " fmt, raw_smp_processor_id(),	\
 				current->pid, __func__, ##__VA_ARGS__)
 
+#define IMAGE_KERNEL_CODE_OFFSET	0x10000
+#define IMAGE_BOOTBLOCK_OFFSET		0x100
+#define IMAGE_LINTEL_ENTRY_OFFSET	0x800
+#define KEXEC_CHUNKS_COUNT_MAX		16
+
+#define	SCC_WR9_RESET_BASE	(1 << 7)
+#define	SCC_WR4_PARITY_NONE	(0 << 0)
+#define SCC_WR4_STOP_BITS_1	(1 << 2)
+#define	SCC_WR4_CLOCK_MODE_X16	(1 << 6)
+#define	SCC_WR7_XN_MODE_ENABLE	(1 << 7)
+#define	SCC_WR10_ENCODING_NRZ	(0 << 0)
+#define	SCC_WR11_TXCLK_BRG	(2 << 3)
+#define	SCC_WR11_RXCLK_BRG	(2 << 5)
+#define	SCC_WR14_BRG_ENABLE	(1 << 0)
+#define	SCC_WR14_BRG_SOURCE	(1 << 1)
+#define	SCC_WR3_RX_DATA		(3 << 6)
+#define	SCC_WR3_RX_ENABLE	(1 << 0)
+#define	SCC_WR5_TX_DATA		(3 << 5)
+#define	SCC_WR5_TX_ENABLE	(1 << 3)
+
+#define __switch_to_phys__	__attribute__((__section__(".switch_to_phys")))
+
+
 struct smp_kexec_reboot_param;
 typedef void (*kexec_reboot_func_ptr)(struct smp_kexec_reboot_param *);
-
 
 struct kexec_mem_chunk {
 	void *start;
@@ -60,6 +79,7 @@ struct kexec_mem_ptr {
 	u64  size;
 	u64  valid_size;
 	u64  phys_addr;
+	bool ready;
 };
 
 struct smp_kexec_reboot_param {
@@ -68,6 +88,7 @@ struct smp_kexec_reboot_param {
 	struct kexec_mem_ptr	*initrd;
 	kexec_reboot_func_ptr	reboot;
 };
+
 
 static DEFINE_MUTEX(kexec_mutex);
 
@@ -81,8 +102,7 @@ static void free_kexec_mem(struct kexec_mem_ptr *mem)
 	struct kexec_mem_chunk *chunk;
 	int i;
 
-	if (!mem->size)
-		return;
+	BUG_ON(!mem->size);
 
 	for (i = 0, chunk = mem->chunks; i < mem->chunks_count; i++, chunk++) {
 		DebugKE("free memory from 0x%llx of 0x%x bytes\n",
@@ -118,6 +138,7 @@ static int alloc_kexec_mem(struct kexec_mem_ptr *mem, u64 size)
 
 	mem->size = size;
 	mem->chunks_count = 0;
+	mem->ready = false;
 
 	chunk = mem->chunks;
 	chunk_size = (size < max_chunk_size) ? size : max_chunk_size;
@@ -218,8 +239,7 @@ static int find_continuous_kexec_mem(struct kexec_mem_ptr *mem, bool huge_align,
 	u64 end = memblock.current_limit;
 	int ret = 0;
 
-	if (!mem->size)
-		return 0;
+	BUG_ON(!mem->size);
 
 	if (lowmem) {
 		e2k_rt_mlo_struct_t mlo;
@@ -232,6 +252,18 @@ static int find_continuous_kexec_mem(struct kexec_mem_ptr *mem, bool huge_align,
 
 	DebugKE("find continuous address for kexec memory in range from 0x%llx to 0x%llx\n",
 		base, end);
+
+	if (mem->chunks_count == 1 && !lowmem ||
+			mem->chunks_count == 1 &&
+			(u64)mem->chunks[0].start > base &&
+			(u64)mem->chunks[0].start + mem->chunks[0].size < end) {
+		mem->phys_addr = virt_to_phys(mem->chunks[0].start);
+		mem->ready = true;
+		DebugKE("continuous address for kexec memory 0x%llx is 0x%llx\n",
+			mem, mem->phys_addr);
+		return 0;
+	}
+
 	mem->phys_addr =
 		memblock_find_in_range(base, end, mem->size, align);
 
@@ -256,15 +288,17 @@ static void kexec_mem_to_phys(struct kexec_mem_ptr *mem)
 {
 	int i;
 
-	if (!mem->size)
+	BUG_ON(!mem->size);
+
+	if (mem->ready)
 		return;
 
 	for (i = 0; i < mem->chunks_count; i++) {
-		DebugKE("converting chunk %d virt address 0x%llx\n",
+		DebugInitKE("converting chunk %d virt address 0x%llx\n",
 			i, mem->chunks[i].start);
 		mem->chunks[i].start =
 			(void *)virt_to_phys(mem->chunks[i].start);
-		DebugKE("chunk %d phys address 0x%llx\n",
+		DebugInitKE("chunk %d phys address 0x%llx\n",
 			i, mem->chunks[i].start);
 	}
 }
@@ -275,6 +309,9 @@ static void boot_merge_kexec_mem(struct kexec_mem_ptr *mem)
 	int i;
 
 	if (!mem->size)
+		BOOT_BUG("mem->size iz equal to zero\n");
+
+	if (mem->ready)
 		return;
 
 	for (i = 0; i < mem->chunks_count; i++) {
@@ -444,6 +481,12 @@ copy_lintel_code_mem(struct kexec_mem_ptr *to, const void __user *from)
 	return copy_kexec_mem_from_user(to, from);
 }
 
+static void unreserve_continuous_lintel_code_mem(struct kexec_mem_ptr *image)
+{
+	DebugKE("unreserve continuous memory for lintel code 0x%llx\n", image);
+	unreserve_continuous_kexec_mem(image);
+}
+
 static int find_continuous_lintel_code_mem(struct kexec_mem_ptr *image)
 {
 	DebugKE("try to find continuous memory for lintel code 0x%llx\n",
@@ -464,28 +507,28 @@ static void boot_merge_lintel_code_mem(struct kexec_mem_ptr *image)
 
 static void smp_kexec_reboot_param_to_phys(struct smp_kexec_reboot_param *p)
 {
-	DebugKE("converting smp param 0x%llx to phys\n", p);
+	DebugInitKE("converting smp param 0x%llx to phys\n", p);
 
-	DebugKE("converting bootblock virt address 0x%llx\n", p->bootblock);
+	DebugInitKE("converting bootblock virt address 0x%llx\n", p->bootblock);
 	p->bootblock = (void *)virt_to_phys(p->bootblock);
-	DebugKE("bootblock phys address 0x%llx\n", p->bootblock);
+	DebugInitKE("bootblock phys address 0x%llx\n", p->bootblock);
 
-	DebugKE("converting image virt address 0x%llx\n", p->image);
+	DebugInitKE("converting image virt address 0x%llx\n", p->image);
 	kexec_mem_to_phys(p->image);
 	p->image = (void *)virt_to_phys(p->image);
-	DebugKE("image phys address 0x%llx\n", p->image);
+	DebugInitKE("image phys address 0x%llx\n", p->image);
 
-	DebugKE("converting reboot virt address 0x%llx\n", p->reboot);
-	p->reboot = (kexec_reboot_func_ptr)kernel_va_to_pa(p->reboot);
-	DebugKE("reboot phys address 0x%llx\n", p->reboot);
+	DebugInitKE("converting reboot virt address 0x%llx\n", p->reboot);
+	p->reboot = (kexec_reboot_func_ptr) __pa_symbol(p->reboot);
+	DebugInitKE("reboot phys address 0x%llx\n", p->reboot);
 
 	if (!p->initrd)
 		return;
 
-	DebugKE("converting initrd virt address 0x%llx\n", p->initrd);
+	DebugInitKE("converting initrd virt address 0x%llx\n", p->initrd);
 	kexec_mem_to_phys(p->initrd);
 	p->initrd = (void *)virt_to_phys(p->initrd);
-	DebugKE("initrd phys address 0x%llx\n", p->initrd);
+	DebugInitKE("initrd phys address 0x%llx\n", p->initrd);
 }
 
 static noinline void __switch_to_phys__
@@ -497,6 +540,7 @@ kexec_switch_to_phys(struct smp_kexec_reboot_param *p)
 	e2k_rwap_hi_struct_t	reg_hi;
 	e2k_rwap_lo_struct_t	stack_reg_lo;
 	e2k_rwap_hi_struct_t	stack_reg_hi;
+	e2k_cutd_t		cutd;
 	e2k_usbr_t		usbr = { {0} };
 	int			cpuid = hard_smp_processor_id();
 
@@ -558,26 +602,22 @@ kexec_switch_to_phys(struct smp_kexec_reboot_param *p)
 	stack_reg_lo.USD_lo_p = 0;
 	NATIVE_NV_WRITE_USBR_USD_REG(usbr, stack_reg_hi, stack_reg_lo);
 
-#ifndef	CONFIG_NUMA
 	reg_lo.CUD_lo_base = bootmem->text.phys;
-#else
-	reg_lo.CUD_lo_base = bootmem->text.nodes[BOOT_BS_NODE_ID].phys;
-#endif
 	reg_lo._CUD_lo_rw = E2K_CUD_RW_PROTECTIONS;
 	reg_lo.CUD_lo_c = CUD_CFLAG_SET;
 	NATIVE_WRITE_CUD_LO_REG(reg_lo);
 	NATIVE_WRITE_OSCUD_LO_REG(reg_lo);
 
-#ifndef	CONFIG_NUMA
 	reg_lo.GD_lo_base = bootmem->data.phys;
-#else
-	reg_lo.GD_lo_base = bootmem->data.nodes[BOOT_BS_NODE_ID].phys;
-#endif
 	reg_lo._GD_lo_rw = E2K_GD_RW_PROTECTIONS;
 	NATIVE_WRITE_GD_LO_REG(reg_lo);
 	NATIVE_WRITE_OSGD_LO_REG(reg_lo);
 
 	WRITE_CURRENT_REG_VALUE(cpuid);
+
+	cutd.CUTD_reg = 0;
+	cutd.CUTD_base = (e2k_addr_t) boot_kernel_CUT;
+	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
 
 	E2K_CLEAR_CTPRS();
 	__E2K_WAIT_ALL;
@@ -593,9 +633,11 @@ static void do_kexec_reboot(void *info)
 	struct smp_kexec_reboot_param	*param = info;
 
 	all_irq_disable();
-	disable_local_APIC();
 
-	DebugKE("switch to phys memory started for smp param 0x%llx\n", param);
+	pic_disable();
+	fixup_irqs_pic();
+
+	DebugInitKE("switch to phys memory started for smp param 0x%llx\n", param);
 	kexec_switch_to_phys(
 		(struct smp_kexec_reboot_param *)virt_to_phys(param));
 }
@@ -625,6 +667,68 @@ static int reserve_stack_mem(u64 stack)
 		DebugKE("stack memory reserve failed\n");
 
 	return ret;
+}
+
+/*
+ * HW shutdown block
+ */
+
+static void kexec_writeb(u8 b, void __iomem *addr)
+{
+	NATIVE_WRITE_MAS_B((unsigned long) addr, b, MAS_IOADDR);
+}
+
+static void kexec_scc_outb_command(u64 iomem_addr, u8 reg_num, u8 val)
+{
+	kexec_writeb(reg_num, (void __iomem *)iomem_addr);
+	kexec_writeb(val, (void __iomem *)iomem_addr);
+}
+
+static void kexec_scc_init_port(u8 channel, u64 port)
+{
+	kexec_scc_outb_command(port, AM85C30_WR9, SCC_WR9_RESET_BASE >> channel);
+	kexec_scc_outb_command(port, AM85C30_WR1, 0x0);
+	kexec_scc_outb_command(port, AM85C30_WR4,
+		SCC_WR4_PARITY_NONE | SCC_WR4_STOP_BITS_1 | SCC_WR4_CLOCK_MODE_X16);
+	kexec_scc_outb_command(port, AM85C30_WR6, 0x15);
+	kexec_scc_outb_command(port, AM85C30_WR7, SCC_WR7_XN_MODE_ENABLE);
+	kexec_scc_outb_command(port, AM85C30_WR10, SCC_WR10_ENCODING_NRZ);
+	kexec_scc_outb_command(port, AM85C30_WR11,
+		SCC_WR11_TXCLK_BRG | SCC_WR11_RXCLK_BRG);
+	kexec_scc_outb_command(port, AM85C30_WR12, 0x0);
+	kexec_scc_outb_command(port, AM85C30_WR13, 0x0);
+	kexec_scc_outb_command(port, AM85C30_WR14,
+		SCC_WR14_BRG_ENABLE | SCC_WR14_BRG_SOURCE);
+	kexec_scc_outb_command(port, AM85C30_WR3,
+		SCC_WR3_RX_DATA | SCC_WR3_RX_ENABLE);
+	kexec_scc_outb_command(port, AM85C30_WR5,
+		SCC_WR5_TX_DATA | SCC_WR5_TX_ENABLE);
+}
+
+static void kexec_scc_init(u64 base)
+{
+	kexec_scc_init_port(0, base);
+	kexec_scc_init_port(1, base + 2);
+}
+
+static void kexec_hw_shutdown(bootblock_struct_t *bootblock)
+{
+	DebugKE("shutdown devices, point of noreturn\n");
+
+	/*
+	 * Give a time to prink kthread to print something
+	 */
+	if (DEBUG_KEXEC_MODE)
+		udelay(2000000);
+
+	suspend_console();
+
+	kernel_restart_prepare(NULL);
+	iommu_shutdown();
+
+	reset_io_pic();
+
+	kexec_scc_init(bootblock->info.serial_base);
 }
 
 
@@ -669,23 +773,21 @@ static void boot_kexec_reboot_sequel(struct smp_kexec_reboot_param *p)
 
 	boot_sync_all_processors();
 
-	/*
-	 * Be sure, these functions are properly working on phys memory
-	 */
-	flush_TLB_all();
-	flush_ICACHE_all();
-
-	boot_native_invalidate_CACHE_L12();
-
 	if (boot_early_pic_is_bsp()) {
 		boot_merge_initrd_mem(p->initrd);
 		boot_merge_kernel_code_mem(p->image);
 	}
 
-	boot_sync_all_processors();
-
 	DebugBootKE("Jumping to ttable_entry12 of kernel base 0x%llx on cpu %ld\n",
 		p->image->phys_addr, boot_smp_processor_id());
+
+	boot_sync_all_processors();
+
+	/*
+	 * Be sure, these functions are properly working on phys memory
+	 */
+	flush_TLB_all();
+	flush_ICACHE_all();
 
 	boot_kexec_setup_image_regs(bootblock, p->image->phys_addr);
 	boot_scall2(bootblock);
@@ -740,7 +842,7 @@ static int kexec_setup_bootblock(bootblock_struct_t *bootblock,
 	bootblock->info.kernel_base = image->phys_addr;
 
 	bootblock->info.ramdisk_base = initrd->phys_addr;
-	bootblock->info.ramdisk_size = initrd->size;
+	bootblock->info.ramdisk_size = initrd->valid_size;
 
 	return ret;
 }
@@ -785,9 +887,11 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 		(bootblock_struct_t *)(p.image + IMAGE_BOOTBLOCK_OFFSET);
 
 	read_USD_reg(&usd);
+	if (ret = reserve_stack_mem(virt_to_phys((void *)usd.USD_base)))
+		return ret;
 
 	if (ret = alloc_bootblock_mem(&bootblock))
-		return ret;
+		goto out_stack;
 
 	if (ret = alloc_kernel_code_mem(
 			p.image_size - IMAGE_KERNEL_CODE_OFFSET, &image))
@@ -806,11 +910,8 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 	if (ret = copy_initrd_mem(&initrd, p.initrd))
 		goto out_initrd;
 
-	if (ret = reserve_stack_mem(usd.USD_base))
-		goto out_initrd;
-
 	if (ret = find_continuous_kernel_code_mem(&image))
-		goto out_stack;
+		goto out_initrd;
 
 	if (ret = find_continuous_initrd_mem(&initrd))
 		goto out_code_cont;
@@ -822,10 +923,12 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 			&initrd, cmdline))
 		goto out_initrd_cont;
 
-	DebugKE("shutdown devices, point of noreturn\n");
-	kernel_restart_prepare(NULL);
-	l_iommu_stop_all();
-	disable_IO_APIC();
+	if (ret = freeze_processes()) {
+		ret = -EBUSY;
+		goto out_initrd_cont;
+	}
+
+	kexec_hw_shutdown(bootblock);
 
 	smp_param.bootblock = bootblock;
 	smp_param.image = &image;
@@ -843,14 +946,14 @@ out_initrd_cont:
 	unreserve_continuous_initrd_mem(&initrd);
 out_code_cont:
 	unreserve_continuous_kernel_code_mem(&image);
-out_stack:
-	unreserve_stack_mem(usd.USD_base);
 out_initrd:
 	free_initrd_mem(&initrd);
 out_code:
 	free_kernel_code_mem(&image);
 out_bootblock:
 	free_bootblock_mem(bootblock);
+out_stack:
+	unreserve_stack_mem(usd.USD_base);
 
 	return ret;
 }
@@ -868,21 +971,20 @@ static void boot_lintel_reboot_sequel(struct smp_kexec_reboot_param *p)
 
 	boot_sync_all_processors();
 
+	if (boot_early_pic_is_bsp())
+		boot_merge_lintel_code_mem(p->image);
+
+	DebugBootKE("Jumping to lintel entry 0x%llx on cpu %d\n",
+		jmp_addr, boot_early_pic_read_id());
+
+	boot_sync_all_processors();
+
 	/*
 	 * Be sure, these functions are properly working on phys memory
 	 */
 	flush_TLB_all();
 	flush_ICACHE_all();
 
-	boot_native_invalidate_CACHE_L12();
-
-	if (boot_early_pic_is_bsp())
-		boot_merge_lintel_code_mem(p->image);
-
-	boot_sync_all_processors();
-
-	DebugKE("Jumping to lintel entry 0x%llx on cpu %d\n",
-		jmp_addr, boot_early_pic_read_id());
 	E2K_MOVE_DREG_TO_DGREG(1, bootblock);
 	((void (*)(void))jmp_addr)();
 }
@@ -909,9 +1011,11 @@ static long lintel_reboot(struct lintel_reboot_param __user *param)
 		return -EINVAL;
 
 	read_USD_reg(&usd);
+	if (ret = reserve_stack_mem(virt_to_phys((void *)usd.USD_base)))
+		return ret;
 
 	if (ret = alloc_bootblock_mem(&bootblock))
-		return ret;
+		goto out_stack;
 
 	if (ret = alloc_lintel_code_mem(p.image_size, &image))
 		goto out_bootblock;
@@ -922,18 +1026,18 @@ static long lintel_reboot(struct lintel_reboot_param __user *param)
 	if (ret = copy_lintel_code_mem(&image, p.image))
 		goto out_code;
 
-	if (ret = reserve_stack_mem(usd.USD_base))
-		goto out_code;
-
 	if (ret = find_continuous_lintel_code_mem(&image))
-		goto out_stack;
+		goto out_code;
 
 	if (DEBUG_KEXEC_MODE)
 		__memblock_dump_all();
 
-	DebugKE("shutdown devices, point of noreturn\n");
-	kernel_restart_prepare(NULL);
-	disable_IO_APIC();
+	if (ret = freeze_processes()) {
+		ret = -EBUSY;
+		goto out_code_cont;
+	}
+
+	kexec_hw_shutdown(bootblock);
 
 	smp_param.bootblock = bootblock;
 	smp_param.image = &image;
@@ -947,12 +1051,14 @@ static long lintel_reboot(struct lintel_reboot_param __user *param)
 
 	BUG();
 
-out_stack:
-	unreserve_stack_mem(usd.USD_base);
+out_code_cont:
+	unreserve_continuous_lintel_code_mem(&image);
 out_code:
 	free_lintel_code_mem(&image);
 out_bootblock:
 	free_bootblock_mem(bootblock);
+out_stack:
+	unreserve_stack_mem(usd.USD_base);
 
 	return ret;
 }
@@ -969,6 +1075,9 @@ static long kexec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
 		return -EPERM;
+
+	if (num_present_cpus() != num_online_cpus())
+		return -EACCES;
 
 	if (!mutex_trylock(&kexec_mutex))
 		return -EBUSY;

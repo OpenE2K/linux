@@ -12,6 +12,8 @@
 #ifndef _DDK768_HWI2C_H_
 #define _DDK768_HWI2C_H_
 
+struct smi_device;
+
 #define MAX_HWI2C_FIFO 16
 #define HWI2C_WAIT_TIMEOUT 0x7FF
 
@@ -23,6 +25,7 @@
  *      -1   - Fail to initialize i2c
  */
 long ddk768_hwI2CInit(
+	struct smi_device *sdev,
     unsigned char i2cNumber //I2C0 or I2C1
 );
 
@@ -30,6 +33,7 @@ long ddk768_hwI2CInit(
  * This function close the hardware i2c 
  */
 void ddk768_hwI2CClose(
+	struct smi_device *sdev,
     unsigned char i2cNumber //I2C0 or I2C1
 );
 
@@ -43,6 +47,7 @@ void ddk768_hwI2CClose(
  *          The value of the register being read.
  */
 unsigned char ddk768_hwI2CReadReg(
+	struct smi_device *sdev,
     unsigned char i2cNumber, //I2C0 or I2C1
     unsigned char deviceAddress, 
     unsigned char registerIndex
@@ -60,6 +65,7 @@ unsigned char ddk768_hwI2CReadReg(
  *         -1   - Fail
  */
 long ddk768_hwI2CWriteReg(
+	struct smi_device *sdev,
     unsigned char i2cNumber, //I2C0 or I2C1
     unsigned char deviceAddress, 
     unsigned char registerIndex, 

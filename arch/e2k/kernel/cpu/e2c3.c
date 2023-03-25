@@ -1,6 +1,5 @@
 #include <asm/p2v/boot_head.h>
 #include <asm/e2k_sic.h>
-#include <asm/machdep_numa.h>
 #include <asm/pic.h>
 
 #include <asm-l/hw_irq.h>
@@ -25,25 +24,16 @@ e2c3_setup_cpu_info(cpuinfo_e2k_t *cpu_info)
 static void __init
 e2c3_setup_arch(void)
 {
-	int nid;
-
-	for_each_node_has_dup_kernel(nid) {
-		the_node_machine(nid)->setup_cpu_info = e2c3_setup_cpu_info;
-	}
+	machine.setup_cpu_info = e2c3_setup_cpu_info;
 }
 
 void __init
 e2c3_setup_machine(void)
 {
-	int nid;
-
-	for_each_node_has_dup_kernel(nid) {
-		the_node_machine(nid)->setup_arch = e2c3_setup_arch;
-		the_node_machine(nid)->arch_reset = NULL;
-		the_node_machine(nid)->arch_halt = NULL;
-		the_node_machine(nid)->get_irq_vector = pic_get_vector;
-		the_node_machine(nid)->get_nsr_area_phys_base =
-				e2c3_get_nsr_area_phys_base;
-		the_node_machine(nid)->setup_apic_vector_handlers = NULL;
-	}
+	machine.setup_arch = e2c3_setup_arch;
+	machine.arch_reset = NULL;
+	machine.arch_halt = NULL;
+	machine.get_irq_vector = pic_get_vector;
+	machine.get_nsr_area_phys_base = e2c3_get_nsr_area_phys_base;
+	machine.setup_apic_vector_handlers = NULL;
 }

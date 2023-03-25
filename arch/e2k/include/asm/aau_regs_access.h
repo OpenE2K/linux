@@ -535,16 +535,16 @@ do { \
  \
 	/* prefetch data to restore */ \
 	if (aasr.stb) \
-		prefetch_nospec_range(aau->aastis, sizeof(aau->aastis) + \
+		prefetchr_nospec_range(aau->aastis, sizeof(aau->aastis) + \
 					     sizeof(aau->aasti_tags)); \
 	if (aasr.iab) \
-		prefetch_nospec_range(aau->aainds, sizeof(aau->aainds) + \
+		prefetchr_nospec_range(aau->aainds, sizeof(aau->aainds) + \
 				sizeof(aau->aaind_tags) + sizeof(aau->aaincrs) + \
 				sizeof(aau->aaincr_tags) + sizeof(aau->aads)); \
 	if (AAU_STOPPED(aasr)) { \
-		prefetch_nospec_range(aau->aaldi, sizeof(aau->aaldi)); \
+		prefetchr_nospec_range(aau->aaldi, sizeof(aau->aaldi)); \
 		if (!cpu_has(CPU_FEAT_ISET_V6)) \
-			prefetch_nospec_range(aalda, sizeof(e2k_aalda_t) * AALDAS_REGS_NUM); \
+			prefetchr_nospec_range(aalda, sizeof(e2k_aalda_t) * AALDAS_REGS_NUM); \
 	} \
  \
 	/* Make sure prefetches are issued */ \

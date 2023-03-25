@@ -210,16 +210,22 @@ const char *arch_vma_name(struct vm_area_struct *vma)
 	return NULL;
 }
 
-void native_clean_pc_stack_zero_frame(void *addr, bool user)
+int native_clean_pc_stack_zero_frame(void *addr, bool user)
 {
 	unsigned long ts_flag;
 	e2k_mem_crs_t *pcs = addr;
+	int ret;
 
-	if (user)
+	if (user) {
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	__clear_user(pcs, sizeof(*pcs));
-	if (user)
+		ret = __clear_user(pcs, sizeof(*pcs)) ? -EFAULT : 0;
 		clear_ts_flag(ts_flag);
+	} else {
+		memset(pcs, 0, sizeof(*pcs));
+		ret = 0;
+	}
+
+	return ret;
 }
 
 unsigned long *__alloc_thread_stack_node(int node)
@@ -409,6 +415,18 @@ out_unmap:
 	return NULL;
 }
 
+static void free_user_p_stack(hw_stack_area_t *ps)
+{
+	free_user_stack(ps->base, get_hw_ps_area_user_size(ps));
+	ps->base = NULL;
+}
+
+static void free_user_pc_stack(hw_stack_area_t *pcs)
+{
+	free_user_stack(pcs->base, get_hw_pcs_area_user_size(pcs));
+	pcs->base = NULL;
+}
+
 static void alloc_user_p_stack(struct hw_stack_area *ps, size_t stack_area_size)
 {
 	ps->base = alloc_user_hard_stack(stack_area_size,
@@ -425,22 +443,13 @@ static void alloc_user_pc_stack(struct hw_stack_area *pcs, size_t stack_area_siz
 	if (!pcs->base)
 		return;
 
-	if (cpu_has(CPU_HWBUG_FALSE_SS))
-		clean_pc_stack_zero_frame(pcs->base, true);
+	if (cpu_has(CPU_HWBUG_FALSE_SS) &&
+			clean_pc_stack_zero_frame(pcs->base, true)) {
+		free_user_pc_stack(pcs);
+		return;
+	}
 
 	set_hw_pcs_area_user_size(pcs, stack_area_size);
-}
-
-static void free_user_p_stack(hw_stack_area_t *ps)
-{
-	free_user_stack(ps->base, get_hw_ps_area_user_size(ps));
-	ps->base = NULL;
-}
-
-static void free_user_pc_stack(hw_stack_area_t *pcs)
-{
-	free_user_stack(pcs->base, get_hw_pcs_area_user_size(pcs));
-	pcs->base = NULL;
 }
 
 struct cached_stacks_entry {
@@ -906,7 +915,7 @@ do_switch_to_user_func(start_fn start_func, e2k_size_t us_size, int cui)
 #endif
 
 #ifdef CONFIG_PROTECTED_MODE
-	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE) {
+	if (TASK_IS_PROTECTED(current)) {
 		usd_hi = NATIVE_NV_READ_USD_HI_REG();
 		usd_lo = NATIVE_NV_READ_USD_LO_REG();
 
@@ -940,12 +949,6 @@ do_switch_to_user_func(start_fn start_func, e2k_size_t us_size, int cui)
 	}
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 
-
-	/* Set global registers to empty state to prevent other user */
-	/* or kernel current pointers access */
-	INIT_G_REGS();
-
-
 	/*
 	 * User function will be executed under PSR interrupts control
 	 * and kernel should return interrupts mask control to PSR register
@@ -953,8 +956,21 @@ do_switch_to_user_func(start_fn start_func, e2k_size_t us_size, int cui)
 	 */
 	complete_switch_to_user_func();
 
-	/* Prevent kernel information leakage. 4 quadro registers
-	 * already contain user's parameters.*/
+	/* MMU registers must be written with not active CLW/AAU.
+	 *
+	 * Do this at the very end so that we can be sure that
+	 * compiler won't insert any half-speculative loads from
+	 * unknown address before return to user. Those loads would
+	 * be bad because they might hit into (valid && !present)
+	 * page and cause a page fault here where we don't expect it. */
+	uaccess_enable_irqs_off();
+
+	/* Set global registers to empty state to prevent other user */
+	/* or kernel current pointers access */
+	INIT_G_REGS();
+
+	/* Prevent kernel information leakage. C_ABI_PSIZE_UNPROT quadro
+	 * registers already contain user's parameters.*/
 #ifndef CONFIG_CPU_HW_CLEAR_RF
 # if E2K_MAXSR != 112
 #  error Must clear all registers here
@@ -965,18 +981,38 @@ do_switch_to_user_func(start_fn start_func, e2k_size_t us_size, int cui)
 #undef printk
 #undef panic
 
-void  fill_cut_entry(e2k_cute_t *cute_p,
-		unsigned long code_base, unsigned  code_sz,
-		unsigned long glob_base, unsigned  glob_sz)
+void fill_kernel_cut_entry(e2k_cute_t *cute_p, bool prot,
+		unsigned long code_base, unsigned code_sz,
+		unsigned long glob_base, unsigned glob_sz)
 {
-	CUTE_CUD_BASE(cute_p) = code_base;
-	CUTE_CUD_SIZE(cute_p) =
-		ALIGN_TO_MASK(code_sz, E2K_ALIGN_CODES_MASK);
-	CUTE_CUD_C(cute_p) = CUD_CFLAG_SET;
+	memset(cute_p, 0, sizeof(*cute_p));
+	cute_p->cud_base = code_base;
+	cute_p->cud_size = ALIGN_TO_MASK(code_sz, E2K_ALIGN_CODES_MASK);
+	cute_p->cud_c = CUD_CFLAG_SET;
+	cute_p->gd_base = glob_base;
+	cute_p->gd_size = ALIGN_TO_MASK(glob_sz, E2K_ALIGN_GLOBALS_MASK);
+	if (cpu_has(CPU_FEAT_ISET_V6))
+		cute_p->cud_prot = !!prot;
+}
 
-	CUTE_GD_BASE(cute_p) = glob_base;
-	CUTE_GD_SIZE(cute_p) =
-		ALIGN_TO_MASK(glob_sz, E2K_ALIGN_GLOBALS_MASK);
+int __must_check fill_user_cut_entry(e2k_cute_t __user *cute_p, bool prot,
+		unsigned long code_base, unsigned code_sz,
+		unsigned long glob_base, unsigned glob_sz,
+		unsigned long tsd_base, unsigned tsd_sz)
+{
+	unsigned long ts_flag;
+	e2k_cute_t cute;
+	int ret;
+
+	fill_kernel_cut_entry(&cute, prot, code_base, code_sz, glob_base, glob_sz);
+	cute.tsd_base = tsd_base;
+	cute.tsd_size = tsd_sz;
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	ret = __copy_to_user(cute_p, &cute, sizeof(cute));
+	clear_ts_flag(ts_flag);
+
+	return (ret) ? -EFAULT : 0;
 }
 
 int create_cut_entry(int tcount,
@@ -985,11 +1021,9 @@ int create_cut_entry(int tcount,
 {
 	struct mm_struct *mm = current->mm;
 	struct page *page;
-	register e2k_cute_t *cute_p;	/* register for workaround against */
-							/* gcc bug */
-	unsigned long ts_flag;
-	int free_cui;
-	int error = 0;
+	e2k_cute_t __user *cute_p;
+	unsigned long tsd_base;
+	int free_cui, ret;
 
 	if (TASK_IS_PROTECTED(current)) {
 		mutex_lock(&mm->context.cut_mask_lock);
@@ -1000,16 +1034,17 @@ int create_cut_entry(int tcount,
 				USER_CUT_AREA_SIZE/sizeof(e2k_cute_t), 1);
 
 		/* If no free cut entry found */
-		if (free_cui == USER_CUT_AREA_SIZE/sizeof(e2k_cute_t))
-			error = -EFAULT;
-		else
-			bitmap_set((unsigned long *) &mm->context.cut_mask,
-					free_cui, 1);
+		if (free_cui == USER_CUT_AREA_SIZE/sizeof(e2k_cute_t)) {
+			ret = -EFAULT;
+		} else {
+			__set_bit(free_cui, mm->context.cut_mask);
+			ret = 0;
+		}
 
 		mutex_unlock(&mm->context.cut_mask_lock);
 
-		if (error)
-			return error;
+		if (ret)
+			return ret;
 	} else {
 		/* not protected aplications should have zero CUI */
 		free_cui = USER_CODES_UNPROT_INDEX(current);
@@ -1017,91 +1052,82 @@ int create_cut_entry(int tcount,
 
 	/* Fill found cut entry by information about loaded module */
 	cute_p = get_cut_entry_pointer(free_cui, &page);
-	DebugCU("Create cut entry: cui = %d; tct = %d; code = 0x%lx: 0x%x; "
-		"data = 0x%lx : 0x%x\n", free_cui, tcount, code_base, code_sz,
-		glob_base, glob_sz);
-#ifdef CONFIG_PROTECTED_MODE
-	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE) {
+	DebugCU("Create cut entry: cui = %d; tct = %d; code = 0x%lx: 0x%x; data = 0x%lx : 0x%x\n",
+			free_cui, tcount, code_base, code_sz, glob_base, glob_sz);
+
+	if (TASK_IS_PROTECTED(current)) {
 		DebugCU("e2k_set_vmm_cui called for cui = %d; code 0x%lx : 0x%lx\n",
-			free_cui, code_base, code_base + code_sz);
-		error = e2k_set_vmm_cui(mm, free_cui, code_base,
+				free_cui, code_base, code_base + code_sz);
+		ret = e2k_set_vmm_cui(mm, free_cui, code_base,
 					 code_base + code_sz);
-		if (error)
-			goto failed;
+		if (ret)
+			goto out_put;
   	}
-#endif
 
-	/* cute_p is user address, read it carefully */
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	TRY_USR_PFAULT {
-		fill_cut_entry(cute_p, code_base, code_sz, glob_base, glob_sz);
-		CUTE_TSD_BASE(cute_p) =
-			atomic_add_return(tcount, &mm->context.tstart) - tcount;
-		CUTE_TSD_SIZE(cute_p) = tcount;
-	} CATCH_USR_PFAULT {
-		error = -EFAULT;
-	} END_USR_PFAULT
-	clear_ts_flag(ts_flag);
+	tsd_base = atomic_add_return(tcount, &mm->context.tstart) - tcount;
+	ret = fill_user_cut_entry(cute_p, TASK_IS_PROTECTED(current),
+			code_base, code_sz, glob_base, glob_sz, tsd_base, tcount);
+	if (ret)
+		goto out_put;
 
+out_put:
 	put_cut_entry_pointer(page);
 
-	/* If something was wrong with access to cut */
-	if (error)
-		return error;
-
-	return free_cui;
-
-failed:
-	put_cut_entry_pointer(page);
-	return error;
+	return (ret) ? ret : free_cui;
 }
 
 int free_cut_entry(unsigned long glob_base, size_t glob_sz,
 		unsigned long *code_base, size_t *code_sz)
 {
 	struct mm_struct *mm = current->mm;
-	register e2k_cute_t *cute_p;	/* register for workaround against */
-							/* gcc bug */
-	unsigned long ts_flag;
-	int cui;
-	int error = 0;
-	int removed_cui = -1;
+	int error, removed_cui = -1, cui;
 
 	/* Free cut entry with appropriate glob_base */
 	mutex_lock(&mm->context.cut_mask_lock);
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	TRY_USR_PFAULT {
-		for (cui = 1; cui < USER_CUT_AREA_SIZE/sizeof(e2k_cute_t); cui++) {
-			struct page *page;
+	for (cui = 1; cui < USER_CUT_AREA_SIZE/sizeof(e2k_cute_t); cui++) {
+		unsigned long ts_flag;
+		struct page *page;
+		e2k_cute_t cute;
+		e2k_cute_t *cute_p = get_cut_entry_pointer(cui, &page);
 
-			cute_p = get_cut_entry_pointer(cui, &page);
-			if (CUTE_GD_BASE(cute_p) == glob_base &&
-					CUTE_GD_SIZE(cute_p) == glob_sz) {
-				if (code_base)
-					*code_base = CUTE_CUD_BASE(cute_p);
-				if (code_sz)
-					*code_sz = CUTE_CUD_SIZE(cute_p);
-				fill_cut_entry(cute_p, 0, 0, 0, 0);
-				bitmap_clear((unsigned long *)
-					&mm->context.cut_mask, cui, 1);
-				removed_cui = cui;
-			}
+		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		error = __copy_from_user(&cute, cute_p, sizeof(cute));
+		clear_ts_flag(ts_flag);
+		if (error) {
 			put_cut_entry_pointer(page);
+			break;
 		}
-	} CATCH_USR_PFAULT {
-		error = -EFAULT;
-	} END_USR_PFAULT
-	clear_ts_flag(ts_flag);
+
+		if (cute.gd_base == glob_base && cute.gd_size == glob_sz) {
+			if (code_base)
+				*code_base = cute.cud_base;
+			if (code_sz)
+				*code_sz = cute.cud_size;
+			fill_kernel_cut_entry(&cute, false, 0, 0, 0, 0);
+
+			ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+			error = __copy_to_user(cute_p, &cute, sizeof(cute));
+			clear_ts_flag(ts_flag);
+			if (error) {
+				put_cut_entry_pointer(page);
+				break;
+			}
+
+			bitmap_clear((unsigned long *) &mm->context.cut_mask, cui, 1);
+			removed_cui = cui;
+		}
+
+		put_cut_entry_pointer(page);
+	}
 	mutex_unlock(&mm->context.cut_mask_lock);
 
 	/*
 	 * If cut entry with appropriate glob_base and glob_sz was not found
 	 */
 	if (removed_cui > 0) {
-		DebugCU("Free cut entry: cui = %d; ", removed_cui);
-		if (code_base && code_sz)
-			DebugCU("code = 0x%lx: 0x%lx; ", *code_base, *code_sz);
-		DebugCU("data = 0x%lx : 0x%lx\n", glob_base, glob_sz);
+		DebugCU("Free cut entry: cui = %d; code = 0x%lx: 0x%lx; data = 0x%lx : 0x%lx\n",
+				removed_cui, *code_base, *code_sz,
+				glob_base, glob_sz);
 	} else {
 		error = -EFAULT;
 	}
@@ -1126,7 +1152,10 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 	e2k_stacks_t	stacks;
 	e2k_usd_lo_t	usd_lo;
 	e2k_usd_hi_t	usd_hi;
-	unsigned long	u_stk_bottom, u_stk_sz, stack_top, base_lo, base_hi;
+	unsigned long	u_stk_bottom, u_stk_sz, stack_top;
+#ifdef CONFIG_PROTECTED_MODE
+	unsigned long base_lo, base_hi;
+#endif
 	hw_stack_t	hw_stacks;
 	e2k_cutd_t	cutd;
 	e2k_size_t	cut_size;
@@ -1190,6 +1219,7 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 		goto fatal_error;
 	}
 
+#ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
 		unsigned long *p_base_lo, *p_base_hi;
 
@@ -1206,10 +1236,11 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 			goto fatal_error;
 		}
 	}
+#endif
 
 	/*
-	* Set CU descriptor (register) to point to the CUT base.
-	*/
+	 * Set CU descriptor (register) to point to the CUT base.
+	 */
 	cutd.CUTD_base = USER_CUT_AREA_BASE;
 	ti->u_cutd = cutd;
 	WRITE_CUTD_REG(cutd);
@@ -1331,13 +1362,17 @@ do_sys_execve(unsigned long entry, unsigned long sp, int kernel)
 	NATIVE_WRITE_RPR_HI_REG_VALUE(0);
 	NATIVE_WRITE_RPR_LO_REG_VALUE(0);
 
+#ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
 		E2K_JUMP_WITH_ARGUMENTS(protected_switch_to_user_func, 5,
 					base_lo, base_hi, start, u_stk_sz, cui);
 	} else {
-		E2K_JUMP_WITH_ARGUMENTS(switch_to_user_func,
-				4, 0, start, u_stk_sz, cui);
+#endif
+		E2K_JUMP_WITH_ARGUMENTS(switch_to_user_func, 4,
+					0, start, u_stk_sz, cui);
+#ifdef CONFIG_PROTECTED_MODE
 	}
+#endif
 
 fatal_error:
 
@@ -1703,7 +1738,7 @@ int native_copy_kernel_stacks(struct task_struct *new_task,
 	 */
 	AS(new_sw_regs->pcsp_hi).ind = 3 * SZ_OF_CR;
 
-	reserved_frame_size = 4 * EXT_4_NR_SZ;
+	reserved_frame_size = C_ABI_PSIZE_UNPROT * EXT_4_NR_SZ;
 	AS(new_sw_regs->psp_hi).ind = EXT_4_NR_SZ + reserved_frame_size;
 
 	/*
@@ -2149,36 +2184,28 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 		} else {
 			u64 tls_lo = 0;
 			u64 tls_hi = 0;
-			u32 tls_lo_tag = 0;
-			u32 tls_hi_tag = 0;
+			u32 tls_tag = 0;
 			u64 args_ptr;
 
 			switch (regs->kernel_entry) {
 			case 8:
 				tls_lo = regs->args[9];
 				tls_hi = regs->args[10];
-				tls_lo_tag = regs->tags >> (4*10) & 0xf;
-				tls_hi_tag = regs->tags >> (4*11) & 0xf;
+				tls_tag = (regs->tags >> (4*10)) & 0xff;
 				break;
 			case 10:
 				args_ptr = __E2K_PTR_PTR(regs->args[4],
 						 regs->args[5], GET_SBR_HI());
 				/* Copy TLS argument with tags. */
-				TRY_USR_PFAULT {
-					NATIVE_LOAD_TAGGED_QWORD_AND_TAGS(
-						((u64 *) args_ptr) + 4,
-						tls_lo, tls_hi,
-						tls_lo_tag, tls_hi_tag);
-				} CATCH_USR_PFAULT {
-					pr_warn("Bad tls on entry10\n");
-				} END_USR_PFAULT
+				if (get_user_tagged_16(tls_lo, tls_hi, tls_tag,
+						((u64 *) args_ptr) + 4))
+					pr_info_ratelimited("Bad tls on entry10\n");
 				break;
 			default:
-				pr_warn("Unknown entry in tls copy\n");
+				pr_info_ratelimited("Unknown entry in tls copy\n");
 			}
-			__NATIVE_STORE_TAGGED_QWORD(
-				&new_sw_regs->gregs.g[12].base,
-				tls_lo, tls_hi, tls_lo_tag, tls_hi_tag, 16);
+			__NATIVE_STORE_TAGGED_QWORD(&new_sw_regs->gregs.g[12].base,
+					tls_lo, tls_hi, tls_tag, tls_tag >> 4, 16);
 		}
 	}
 
@@ -2598,7 +2625,12 @@ notrace
 struct task_struct *__switch_to(struct task_struct *prev,
 				struct task_struct *next)
 {
-	thread_info_t *next_ti = task_thread_info(next);
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+	const pgd_t *current_k_pgd;
+	int node = numa_node_id();
+	struct mm_struct *next_mm = next->mm;
+	pgd_t *next_pgd = NULL;
+#endif
 
 	/* Save interrupt mask state and disable NMIs */
 	UPSR_ALL_SAVE_AND_CLI(AW(prev->thread.sw_regs.upsr));
@@ -2606,8 +2638,32 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	NATIVE_SAVE_TASK_REGS_TO_SWITCH(prev);
 
 	native_set_current_thread_info(task_thread_info(next), next);
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+	if (!MMU_IS_SEPARATE_PT()) {
+		current_k_pgd = mm_node_pgd(&init_mm, node);
+		if (IS_ENABLED(CONFIG_NUMA) && next_mm) {
+			next_pgd = next_mm->pgd;
+		}
+	}
+#endif
 
-	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(next, next_ti);
+	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(next);
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+	if (!MMU_IS_SEPARATE_PT()) {
+		if (IS_ENABLED(CONFIG_NUMA) && next_pgd) {
+			/* Small optimization: update pgd for kernel entry
+			 * to point to current NUMA node's copy of kernel. */
+			unsigned long entry_index =
+					(unsigned long) __ttable_start >> PGDIR_SHIFT;
+			next_pgd[entry_index] = current_k_pgd[entry_index];
+		}
+
+		/* Update k_root_ptb in case [next] migrated to current NUMA
+		 * node from another node that uses different mm_node_pgd().
+		 * Also this initializes it for newly forked tasks. */
+		next->thread.regs.k_root_ptb = __pa(current_k_pgd);
+	}
+#endif
 
 	flush_ic_on_switch();
 
@@ -2635,17 +2691,21 @@ int find_cui_by_ip(unsigned long ip)
 
 	for_each_set_bit(i, mm->context.cut_mask,
 			USER_CUT_AREA_SIZE/sizeof(e2k_cute_t)) {
+		unsigned long ts_flag;
 		e2k_cute_dw0_t dw0;
 		e2k_cute_dw1_t dw1;
+		int ret;
 
-		if (__get_user(AW(dw0), &AW(cut[i].dw0)) ||
-		    __get_user(AW(dw1), &AW(cut[i].dw1))) {
+		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		ret = __get_user(AW(dw0), &AW(cut[i].dw0));
+		ret = ret ?: __get_user(AW(dw1), &AW(cut[i].dw1));
+		clear_ts_flag(ts_flag);
+		if (ret) {
 			cui = -EFAULT;
 			break;
 		}
 
-		if (ip >= AS(dw0).cud_base &&
-				ip < AS(dw0).cud_base + AS(dw1).cud_size) {
+		if (ip >= dw0.cud_base && ip < dw0.cud_base + dw1.cud_size) {
 			cui = i;
 			break;
 		}
@@ -2702,10 +2762,12 @@ SYSCALL_DEFINE5(arch_prctl, int, option,
 		break;
 #endif /* CONFIG_PROTECTED_MODE */
 	default:
+#ifdef CONFIG_PROTECTED_MODE
 		if (current->mm->context.pm_sc_debug_mode
 			& PM_SC_DBG_MODE_CHECK)
 			pr_err("Unknown option 0x%x in 'arch_prctl' syscall\n",
 				option);
+#endif /* CONFIG_PROTECTED_MODE */
 		error = -EINVAL;
 		break;
 	}

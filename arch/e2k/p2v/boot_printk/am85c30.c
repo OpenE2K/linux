@@ -30,13 +30,11 @@ static inline void
 am85c30_com_outb(u64 iomem_addr, u8 byte)
 {
  	boot_writeb(byte, (void __iomem *)iomem_addr);
-	wmb();	/* waiting for write to serial port completion */
 }
 
 static inline u8
 am85c30_com_inb(u64 iomem_addr)
 {
-	rmb();	/* waiting for read from serial port completion */
 	return boot_readb((void __iomem *)iomem_addr);
 }
 
@@ -44,7 +42,6 @@ static inline u8
 am85c30_com_inb_command(u64 iomem_addr, u8 reg_num)
 {
 	boot_writeb(reg_num, (void __iomem *)iomem_addr);
-	wmb();	/* waiting for write to serial port completion */
 	return boot_readb((void __iomem *)iomem_addr);
 }
 
@@ -52,9 +49,7 @@ static inline void
 am85c30_com_outb_command(u64 iomem_addr, u8 reg_num, u8 val)
 {
 	boot_writeb(reg_num, (void __iomem *)iomem_addr);
-	wmb();	/* waiting for write to serial port completion */
 	boot_writeb(val, (void __iomem *)iomem_addr);
-	wmb();	/* waiting for write to serial port completion */
 }
 
 static void
@@ -63,21 +58,21 @@ boot_am85c30_serial_putc(unsigned char c)
 	unsigned long port;
 	u8 cmd_saved;
 
-	port = boot_am85c30_com_port + 2 * boot_serial_boot_console_num;
+	port = boot_am85c30_com_port + 2 * boot_serial_dump_console_num;
 	cmd_saved = am85c30_com_inb_command(port, AM85C30_RR1);
 
-	am85c30_com_outb_command(port, AM85C30_RR1,
+	am85c30_com_outb_command(port, AM85C30_WR1,
 		cmd_saved & ~(AM85C30_EXT_INT_ENAB | AM85C30_TxINT_ENAB |
 							AM85C30_RxINT_MASK));
 
 	while ((am85c30_com_inb_command(port, AM85C30_RR0) & AM85C30_D2) == 0)
-		;
+		boot_cpu_relax();
 	am85c30_com_outb(port + 0x01, c);
 
 	while ((am85c30_com_inb_command(port, AM85C30_RR0) & AM85C30_D2) == 0)
-			;
-	am85c30_com_outb_command(port, AM85C30_RR0, AM85C30_RES_Tx_P);
-	am85c30_com_outb_command(port, AM85C30_RR1, cmd_saved);
+		boot_cpu_relax();
+	am85c30_com_outb_command(port, AM85C30_WR0, AM85C30_RES_Tx_P);
+	am85c30_com_outb_command(port, AM85C30_WR1, cmd_saved);
 }
 
 static unsigned char
@@ -85,9 +80,9 @@ boot_am85c30_serial_getc(void)
 {
 	unsigned long port;
 
-	port = boot_am85c30_com_port + 2 * boot_serial_boot_console_num;
+	port = boot_am85c30_com_port + 2 * boot_serial_dump_console_num;
 	while (((am85c30_com_inb_command(port, AM85C30_RR0)) & AM85C30_D0) == 0)
-		;
+		boot_cpu_relax();
 	return am85c30_com_inb(port + 0x01);
 }
 
@@ -106,9 +101,9 @@ boot_am85c30_init(void *serial_base)
 {
 	DebugSC("boot_am85c30_init() started\n");
 
-	if (serial_base == NULL) {
-		do_boot_printk("boot_am85c30_init() Serial console base IO "
-			"address is not passed by BIOS\n");
+	if (!serial_base || boot_serial_dump_console_num == SERIAL_DUMP_CONSOLE_DENY) {
+		do_boot_printk("boot_am85c30_init() Serial console base IO address is not"
+			" passed by BIOS or serial dump console is not allowed\n");
 		do_boot_printk("boot_am85c30_init() Serial console is not "
 			"enabled\n");
 		return (-ENODEV);

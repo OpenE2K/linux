@@ -47,8 +47,6 @@
  ******************************************************************************
  **/
 
-#define TX_QNUM_MAX_USE		TXQ_MAXNUM	/* max == TXQ_MAXNUM */
-#define RX_QNUM_MAX_USE		RXQ_MAXNUM	/* max == RXQ_MAXNUM */
 #define MSIX_MAC_IDX_NUM_USE	1	/* one vector for MAC irqs */
 
 #undef MSIX_COMPACTMODE		/* default undefined */
@@ -77,6 +75,7 @@ extern u32 mxgbe_debug_mask;
 extern u32 mxgbe_loopback_mode;
 extern u32 mxgbe_led_gpio;
 extern int mxgbe_status;
+extern int mxgbe_maxqueue;
 
 
 /**
@@ -164,12 +163,13 @@ struct mxgbe_queue {
 
 	raw_spinlock_t		lock;		/* lock .tail */
 	u16			tail;
+	u16			head;
 } ____cacheline_internodealigned_in_smp;
 
 typedef struct mxgbe_vector {
 	struct mxgbe_priv	*priv;
 
-	char			name[IFNAMSIZ + 8];
+	char			name[8 + IFNAMSIZ + 8 + 20];
 	int			irq;	/* requested irq / MSIX vector */
 
 	int			bidx;	/* MSIX_LUT table base event/index */
@@ -243,6 +243,7 @@ typedef struct mxgbe_priv {
 #ifdef CONFIG_DEBUG_FS
 	struct dentry		*mxgbe_dbg_board;
 	u32			reg_last_value;
+	char			dbg_name[IFNAMSIZ + 14];
 #endif /*CONFIG_DEBUG_FS*/
 
 	struct mxgbe_err_flags	rx_err_flags[RXQ_MAXNUM];

@@ -94,7 +94,7 @@ hdmi_interrupt_t;
 static hdmi_interrupt_t *g_pHdmiIntHandlers = ((hdmi_interrupt_t *)0);
 
 /* HDMI Interrupt Service Routine */
-void hdmiISR(
+void hdmiISR(struct smi_device *sdev,
     unsigned long status
 )
 {
@@ -110,15 +110,15 @@ void hdmiISR(
         if (PowerMode == PowerMode_A)
         {
             // PS mode a->b
-            HDMI_System_PD(PowerMode_B);
+            HDMI_System_PD(sdev, PowerMode_B);
             DelayMs(1);
         }
-        g_INT_94h = readHDMIRegister (X94_INT1_ST);
-        g_INT_95h = readHDMIRegister (X95_INT2_ST);
+        g_INT_94h = readHDMIRegister (sdev->rmmio, X94_INT1_ST);
+        g_INT_95h = readHDMIRegister (sdev->rmmio, X95_INT2_ST);
 
         // clear all interrupt status
-        writeHDMIRegister (X94_INT1_ST, 0xFF);
-        writeHDMIRegister (X95_INT2_ST, 0xFF);
+        writeHDMIRegister(sdev->rmmio, X94_INT1_ST, 0xFF);
+        writeHDMIRegister(sdev->rmmio, X95_INT2_ST, 0xFF);
     }            
 }
 
@@ -223,17 +223,18 @@ long unhookHDMIInterrupt(
  *  (MMIO base + 0x800C0) = 0x00008245
  *
  */
-void writeHDMIRegister(unsigned char addr, unsigned char value)
+void writeHDMIRegister(volatile unsigned char __iomem *rmmio,
+				unsigned char addr, unsigned char value)
 {
 
-    __pokeRegisterDWord(HDMI_CONFIG, 
+    __pokeRegisterDWord(rmmio, HDMI_CONFIG, 
         FIELD_SET(0, HDMI_CONFIG, WRITE, ENABLE) | 
         FIELD_VALUE(0, HDMI_CONFIG, DATA, value) | 
         FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, addr));
 
     DelayMs(1);
     
-    __pokeRegisterDWord(HDMI_CONFIG, 
+    __pokeRegisterDWord(rmmio, HDMI_CONFIG, 
         FIELD_VALUE(0, HDMI_CONFIG, DATA, value) | 
         FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, addr));
 
@@ -257,21 +258,23 @@ void writeHDMIRegister(unsigned char addr, unsigned char value)
  *  Value = (MMIO base + 0x800C0) =0x1845
  *
  */
-unsigned char readHDMIRegister(unsigned char addr)
+unsigned char readHDMIRegister(volatile unsigned char __iomem *rmmio,
+													unsigned char addr)
 {
     unsigned long value;
 
-    pokeRegisterDWord(HDMI_CONFIG, 
+    pokeRegisterDWord(rmmio, HDMI_CONFIG, 
         FIELD_SET(0, HDMI_CONFIG, READ, ENABLE) | 
         FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, addr));
     
     DelayMs(1);
     
-    __pokeRegisterDWord(HDMI_CONFIG, FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, addr));
+    __pokeRegisterDWord(rmmio, HDMI_CONFIG,
+					FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, addr));
     
     DelayMs(1);
 
-    value = __peekRegisterDWord(HDMI_CONFIG);
+    value = __peekRegisterDWord(rmmio, HDMI_CONFIG);
     
     return (unsigned char)((value >> 8) & 0xFF);
 }
@@ -288,10 +291,10 @@ unsigned char readHDMIRegister(unsigned char addr)
  *      None
  *  
  */
-void writeHDMIControlRegister(unsigned char value)
+void writeHDMIControlRegister(struct smi_device *sdev, unsigned char value)
 {
 
-    __pokeRegisterDWord(HDMI_CONTROL, value); 
+    __pokeRegisterDWord(sdev->rmmio, HDMI_CONTROL, value); 
     
 }
 
@@ -307,19 +310,19 @@ void writeHDMIControlRegister(unsigned char value)
  *      register value
  *
  */
-unsigned char readHDMIControlRegister(void)
+unsigned char readHDMIControlRegister(struct smi_device *sdev)
 {
     unsigned long value;
 
     // Need to write 0x800c0[7:0] (config address) to 00 first, otherwise could not read back
     // real value of HDMI control register. 
-    pokeRegisterDWord(HDMI_CONFIG, 
+    pokeRegisterDWord(sdev->rmmio, HDMI_CONFIG, 
         FIELD_SET(0, HDMI_CONFIG, READ, ENABLE) | 
         FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, 0));
     
     DelayMs(1);
     
-    value = peekRegisterDWord(HDMI_CONTROL);
+    value = peekRegisterDWord(sdev->rmmio, HDMI_CONTROL);
     
     return (unsigned char)(value & 0xFF);
 }
@@ -336,14 +339,15 @@ unsigned char readHDMIControlRegister(void)
  *      None
  *
  */
-void writeHdmiPHYRegister(unsigned char addr, unsigned char value)
+void writeHdmiPHYRegister(struct smi_device *sdev,
+						unsigned char addr, unsigned char value)
 {
-    writeHDMIRegister(addr, value);
+    writeHDMIRegister(sdev->rmmio, addr, value);
     
-    writeHDMIControlRegister(0x2D);     // PLLA/B reset
+    writeHDMIControlRegister(sdev, 0x2D);     // PLLA/B reset
     DelayMs(1);     // wait 100us
 
-    writeHDMIControlRegister(0x21);     // PLLA/B release
+    writeHDMIControlRegister(sdev, 0x21);     // PLLA/B release
     DelayMs(1);     // wait 1ms for PLL lock
 }
 
@@ -359,23 +363,23 @@ void writeHdmiPHYRegister(unsigned char addr, unsigned char value)
  *      None
  *
  */
-void setHDMIChannel(unsigned char Channel)
+void setHDMIChannel(struct smi_device *sdev, unsigned char Channel)
 {
     unsigned long value;
 
-    value = peekRegisterDWord(DISPLAY_CTRL);
+    value = peekRegisterDWord(sdev->rmmio, DISPLAY_CTRL);
         /* DOUBLE_PIXEL_CLOCK field is write only */
     if (FIELD_GET(value, DISPLAY_CTRL, PIXEL_CLOCK_SELECT))
 	value |= FIELD_SET(0, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
 
     if (Channel == 0)
     {
-        pokeRegisterDWord(DISPLAY_CTRL, 
+        pokeRegisterDWord(sdev->rmmio, DISPLAY_CTRL, 
             FIELD_SET(value, DISPLAY_CTRL, HDMI_SELECT, CHANNEL0));
     }
     else
     {
-        pokeRegisterDWord(DISPLAY_CTRL, 
+        pokeRegisterDWord(sdev->rmmio, DISPLAY_CTRL, 
             FIELD_SET(value, DISPLAY_CTRL, HDMI_SELECT, CHANNEL1));
     }
 
@@ -393,18 +397,18 @@ void setHDMIChannel(unsigned char Channel)
  *      None
  *
  */
-void enableHdmI2C(unsigned long enable)
+void enableHdmI2C(struct smi_device *sdev, unsigned long enable)
 {
     unsigned long value;
 
-    value = peekRegisterDWord(TEST_CONTROL);
+    value = peekRegisterDWord(sdev->rmmio, TEST_CONTROL);
 
     if (enable)
         value = FIELD_SET(value, TEST_CONTROL, I2C, HDMI);
     else
         value = FIELD_SET(value, TEST_CONTROL, I2C, I2C1);
 
-    pokeRegisterDWord(TEST_CONTROL, value);
+    pokeRegisterDWord(sdev->rmmio, TEST_CONTROL, value);
 }
 
 /*
@@ -419,7 +423,7 @@ void enableHdmI2C(unsigned long enable)
  *
  *  Linda: for debug purpose only
  */
-void HDMI_Dump_Registers (void)
+void HDMI_Dump_Registers (struct smi_device *sdev)
 {
     unsigned char i = 0, j = 0;
 
@@ -429,7 +433,7 @@ void HDMI_Dump_Registers (void)
     {
         printk("Offset 0x%02x:  ", (i * 8));
         for (j = 0; j < 8; j++)
-            printk("%02x  ", readHDMIRegister((j + i * 8)));
+            printk("%02x  ", readHDMIRegister(sdev->rmmio, (j + i * 8)));
         printk("\n");
     }
 }
@@ -443,18 +447,18 @@ void HDMI_Dump_Registers (void)
 // Parameters   : unsigned char mode. 4 modes available.
 //                  MODE_A (sleep), MODE_B (register access), MODE_D (clock), MODE_E (active).
 //
-void HDMI_System_PD (unsigned char mode) 
+void HDMI_System_PD(struct smi_device *sdev, unsigned char mode) 
 {
     PowerMode = mode;
 
     // PLL A/B Reset
     if (PowerMode != PowerMode_A)
     {
-        writeHDMIControlRegister (mode | 0x0C);
+        writeHDMIControlRegister(sdev, mode | 0x0C);
        	DelayMs(8);    // wait 8ms
     }
     // PLL A/B Release
-    writeHDMIControlRegister (mode);
+    writeHDMIControlRegister(sdev, mode);
     DelayMs(10);    // wait 10ms
 
 
@@ -471,59 +475,59 @@ void HDMI_System_PD (unsigned char mode)
  *      None
  *
  */
-void HDMI_Init(void)
+void HDMI_Init(struct smi_device *sdev)
 {
     unsigned char temp;
     
     // Enable HDMI clock
-     ddk768_enableHDMI(1);
+     ddk768_enableHDMI(sdev, 1);
     
     // select channel 0 to HDMI by default
-    setHDMIChannel(0);
+    setHDMIChannel(sdev, 0);
     
     // set INT polarity to Active High
-    temp = readHDMIControlRegister();
-    writeHDMIControlRegister (temp | 0x01);
+    temp = readHDMIControlRegister(sdev);
+    writeHDMIControlRegister(sdev, temp | 0x01);
     
     // Set to power mode B, in order to read/write to registers
-    HDMI_System_PD (PowerMode_B);
+    HDMI_System_PD(sdev, PowerMode_B);
     DelayMs(1);
 
     // Setting AVI InfoFrame
-    writeHDMIRegister (X5F_PACKET_INDEX, AVI_INFO_PACKET); // Index.6 AVI InfoFrame
-    writeHDMIRegister (X60_PACKET_HB0, 0x82); // HB0
-    writeHDMIRegister (X61_PACKET_HB1, 0x02); // HB1
-    writeHDMIRegister (X62_PACKET_HB2, 0x0D); // HB2
-    writeHDMIRegister (X63_PACKET_PB0, 0x16); // PB0
-    writeHDMIRegister (X64_PACKET_PB1, 0x00); // PB1
-    writeHDMIRegister (X65_PACKET_PB2, 0x00); // PB2
-    writeHDMIRegister (X66_PACKET_PB3, 0x12); // PB3
-    writeHDMIRegister (X67_PACKET_PB4, 0x00); // PB4
-    writeHDMIRegister (X68_PACKET_PB5, 0x00); // PB5
-    writeHDMIRegister (X69_PACKET_PB6, 0xe4); // PB6
-    writeHDMIRegister (X6A_PACKET_PB7, 0xb5); // PB7
-    writeHDMIRegister (X6B_PACKET_PB8, 0x4e); // PB8
-    writeHDMIRegister (X6C_PACKET_PB9, 0x59); // PB9
-    writeHDMIRegister (X6D_PACKET_PB10, 0xd2); // PB10
-    writeHDMIRegister (X6E_PACKET_PB11, 0xeb); // PB11
-    writeHDMIRegister (X6F_PACKET_PB12, 0x18); // PB12
-    writeHDMIRegister (X70_PACKET_PB13, 0x1d); // PB13
+    writeHDMIRegister (sdev->rmmio, X5F_PACKET_INDEX, AVI_INFO_PACKET); // Index.6 AVI InfoFrame
+    writeHDMIRegister (sdev->rmmio, X60_PACKET_HB0, 0x82); // HB0
+    writeHDMIRegister (sdev->rmmio, X61_PACKET_HB1, 0x02); // HB1
+    writeHDMIRegister (sdev->rmmio, X62_PACKET_HB2, 0x0D); // HB2
+    writeHDMIRegister (sdev->rmmio, X63_PACKET_PB0, 0x16); // PB0
+    writeHDMIRegister (sdev->rmmio, X64_PACKET_PB1, 0x00); // PB1
+    writeHDMIRegister (sdev->rmmio, X65_PACKET_PB2, 0x00); // PB2
+    writeHDMIRegister (sdev->rmmio, X66_PACKET_PB3, 0x12); // PB3
+    writeHDMIRegister (sdev->rmmio, X67_PACKET_PB4, 0x00); // PB4
+    writeHDMIRegister (sdev->rmmio, X68_PACKET_PB5, 0x00); // PB5
+    writeHDMIRegister (sdev->rmmio, X69_PACKET_PB6, 0xe4); // PB6
+    writeHDMIRegister (sdev->rmmio, X6A_PACKET_PB7, 0xb5); // PB7
+    writeHDMIRegister (sdev->rmmio, X6B_PACKET_PB8, 0x4e); // PB8
+    writeHDMIRegister (sdev->rmmio, X6C_PACKET_PB9, 0x59); // PB9
+    writeHDMIRegister (sdev->rmmio, X6D_PACKET_PB10, 0xd2); // PB10
+    writeHDMIRegister (sdev->rmmio, X6E_PACKET_PB11, 0xeb); // PB11
+    writeHDMIRegister (sdev->rmmio, X6F_PACKET_PB12, 0x18); // PB12
+    writeHDMIRegister (sdev->rmmio, X70_PACKET_PB13, 0x1d); // PB13
 
     // Setting Audio InfoFrame
-    writeHDMIRegister (X5F_PACKET_INDEX, AUDIO_INFO_PACKET); // Index.8 Audio
-    writeHDMIRegister (X60_PACKET_HB0, 0x84); // HB0
-    writeHDMIRegister (X61_PACKET_HB1, 0x01); // HB1
-    writeHDMIRegister (X62_PACKET_HB2, 0x0A); // HB2
-    writeHDMIRegister (X63_PACKET_PB0, 0x70); // PB0
-    writeHDMIRegister (X64_PACKET_PB1, 0x01); // PB1
-    writeHDMIRegister (X65_PACKET_PB2, 0x00); // PB2
-    writeHDMIRegister (X66_PACKET_PB3, 0x00); // PB3
-    writeHDMIRegister (X67_PACKET_PB4, 0x00); // PB4
-    writeHDMIRegister (X68_PACKET_PB5, 0x00); // PB5
+    writeHDMIRegister (sdev->rmmio, X5F_PACKET_INDEX, AUDIO_INFO_PACKET); // Index.8 Audio
+    writeHDMIRegister (sdev->rmmio, X60_PACKET_HB0, 0x84); // HB0
+    writeHDMIRegister (sdev->rmmio, X61_PACKET_HB1, 0x01); // HB1
+    writeHDMIRegister (sdev->rmmio, X62_PACKET_HB2, 0x0A); // HB2
+    writeHDMIRegister (sdev->rmmio, X63_PACKET_PB0, 0x70); // PB0
+    writeHDMIRegister (sdev->rmmio, X64_PACKET_PB1, 0x01); // PB1
+    writeHDMIRegister (sdev->rmmio, X65_PACKET_PB2, 0x00); // PB2
+    writeHDMIRegister (sdev->rmmio, X66_PACKET_PB3, 0x00); // PB3
+    writeHDMIRegister (sdev->rmmio, X67_PACKET_PB4, 0x00); // PB4
+    writeHDMIRegister (sdev->rmmio, X68_PACKET_PB5, 0x00); // PB5
 
     // init DDC bus frequency
-    writeHDMIRegister (X81_ISRC2_PB0, 0x20);
-    writeHDMIRegister (X82_ISRC2_PB1, 0x00);
+    writeHDMIRegister (sdev->rmmio, X81_ISRC2_PB0, 0x20);
+    writeHDMIRegister (sdev->rmmio, X82_ISRC2_PB1, 0x00);
 
     // Unmask MSENS detect interrupt. Hot plug interrupt is enough for hot-plug
     // detection, we don't need to detect both at the same time.
@@ -541,10 +545,10 @@ void HDMI_Init(void)
  *      None
  *
  */
-void HDMI_Control_Packet_Auto_Send (void)
+void HDMI_Control_Packet_Auto_Send(struct smi_device *sdev)
 {
-    writeHDMIRegister (X42_AUTO_CHECKSUM, 0x01);    // enable auto checksum
-    writeHDMIRegister (X40_CTRL_PKT_EN, 0x00);
+    writeHDMIRegister(sdev->rmmio, X42_AUTO_CHECKSUM, 0x01);    // enable auto checksum
+    writeHDMIRegister(sdev->rmmio, X40_CTRL_PKT_EN, 0x00);
 }
 
 /*
@@ -561,7 +565,8 @@ void HDMI_Control_Packet_Auto_Send (void)
  *      None
  *
  */
-void HDMI_Audio_Setting_44100Hz (mode_parameter_t *pModeParam)
+void HDMI_Audio_Setting_44100Hz (struct smi_device *sdev,
+							mode_parameter_t *pModeParam)
 {
     unsigned long N = 6272, CTS = 0;    // default N value is 6272
     unsigned char regValue = 0;
@@ -580,38 +585,38 @@ void HDMI_Audio_Setting_44100Hz (mode_parameter_t *pModeParam)
 
     // set N and CTS into registers
     regValue = (unsigned char)((N >> 16) & 0x0F);
-    writeHDMIRegister(X01_N19_16, regValue);
+    writeHDMIRegister(sdev->rmmio, X01_N19_16, regValue);
     regValue = (unsigned char)(N >> 8);
-    writeHDMIRegister(X02_N15_8, regValue);
+    writeHDMIRegister(sdev->rmmio, X02_N15_8, regValue);
     regValue = (unsigned char)N;
-    writeHDMIRegister(X03_N7_0, regValue);
+    writeHDMIRegister(sdev->rmmio, X03_N7_0, regValue);
 
     regValue = (unsigned char)((CTS >> 16) & 0x0F);
-    writeHDMIRegister(X07_CTS_EXT, regValue);
+    writeHDMIRegister(sdev->rmmio, X07_CTS_EXT, regValue);
     regValue = (unsigned char)(CTS >> 8);
-    writeHDMIRegister(X08_CTS_EXT, regValue);
+    writeHDMIRegister(sdev->rmmio, X08_CTS_EXT, regValue);
     regValue = (unsigned char)CTS;
-    writeHDMIRegister(X09_CTS_EXT, regValue);
+    writeHDMIRegister(sdev->rmmio, X09_CTS_EXT, regValue);
 
     // set audio setting registers
-    writeHDMIRegister(X0A_AUDIO_SOURCE, 0x00);      // internal CTS
-    writeHDMIRegister(X0B_AUDIO_SET2, 0x40);
-    writeHDMIRegister(X0C_I2S_MODE, 0x04);      // I2S 2ch (0x3C for 8ch) + I2S
+    writeHDMIRegister(sdev->rmmio, X0A_AUDIO_SOURCE, 0x00);      // internal CTS
+    writeHDMIRegister(sdev->rmmio, X0B_AUDIO_SET2, 0x40);
+    writeHDMIRegister(sdev->rmmio, X0C_I2S_MODE, 0x04);      // I2S 2ch (0x3C for 8ch) + I2S
     //writeHDMIRegister(X0D_DSD_MODE, 0x00);      // DSD audio disabled
-    writeHDMIRegister(X10_I2S_PINMODE, 0x00);      // I2S input pin swap
-    writeHDMIRegister(X11_ASTATUS1, 0x0F);      // Original frequency not indicated(defult)
-    writeHDMIRegister(X12_ASTATUS2, 0x22);
-    writeHDMIRegister(X13_CAT_CODE, 0x00);
-    writeHDMIRegister(X14_A_SOURCE, 0x02);
+    writeHDMIRegister(sdev->rmmio, X10_I2S_PINMODE, 0x00);      // I2S input pin swap
+    writeHDMIRegister(sdev->rmmio, X11_ASTATUS1, 0x0F);      // Original frequency not indicated(defult)
+    writeHDMIRegister(sdev->rmmio, X12_ASTATUS2, 0x22);
+    writeHDMIRegister(sdev->rmmio, X13_CAT_CODE, 0x00);
+    writeHDMIRegister(sdev->rmmio, X14_A_SOURCE, 0x02);
     
-    regValue = (readHDMIRegister(X15_AVSET1) & 0x0F);       // set freq 44.1kHz
-    writeHDMIRegister(X15_AVSET1, regValue);
+    regValue = (readHDMIRegister(sdev->rmmio, X15_AVSET1) & 0x0F);       // set freq 44.1kHz
+    writeHDMIRegister(sdev->rmmio, X15_AVSET1, regValue);
 
-    regValue = readHDMIRegister(X0A_AUDIO_SOURCE) & 0x9F;
-    writeHDMIRegister(X0A_AUDIO_SOURCE, regValue);      // dounsampling none (bit 6:5 = 00)
+    regValue = readHDMIRegister(sdev->rmmio, X0A_AUDIO_SOURCE) & 0x9F;
+    writeHDMIRegister(sdev->rmmio, X0A_AUDIO_SOURCE, regValue);      // dounsampling none (bit 6:5 = 00)
     
-    regValue = readHDMIRegister(X0A_AUDIO_SOURCE) & 0xF7;
-    writeHDMIRegister(X0A_AUDIO_SOURCE, regValue);      // disable SPDIF
+    regValue = readHDMIRegister(sdev->rmmio, X0A_AUDIO_SOURCE) & 0xF7;
+    writeHDMIRegister(sdev->rmmio, X0A_AUDIO_SOURCE, regValue);      // disable SPDIF
     
 }
 
@@ -629,13 +634,14 @@ void HDMI_Audio_Setting_44100Hz (mode_parameter_t *pModeParam)
  *      None
  *
  */
-void HDMI_Video_Setting (mode_parameter_t *pModeParam, bool isHDMI)
+void HDMI_Video_Setting (struct smi_device *sdev, 
+				mode_parameter_t *pModeParam, bool isHDMI)
 {
     unsigned long temp = 0;
     unsigned char regValue = 0;
 
     // video set timing
-    regValue = readHDMIRegister(X30_EXT_VPARAMS);
+    regValue = readHDMIRegister(sdev->rmmio, X30_EXT_VPARAMS);
     regValue &= 0xF2;
     regValue = 
         (pModeParam->vertical_sync_polarity == POS
@@ -645,63 +651,69 @@ void HDMI_Video_Setting (mode_parameter_t *pModeParam, bool isHDMI)
         ? FIELD_SET(regValue, X30_EXT_VPARAMS, HSYNC_PHASE, POS)
         : FIELD_SET(regValue, X30_EXT_VPARAMS, HSYNC_PHASE, NEG))
         | FIELD_SET(regValue, X30_EXT_VPARAMS, USE, EXTERNAL);
-    writeHDMIRegister(X30_EXT_VPARAMS, regValue);
+    writeHDMIRegister(sdev->rmmio, X30_EXT_VPARAMS, regValue);
 
-    writeHDMIRegister(X31_EXT_HTOTAL, (pModeParam->horizontal_total & 0xFF));   // horizontal total
-    writeHDMIRegister(X32_EXT_HTOTAL, (pModeParam->horizontal_total & 0xFF00)>>8);
+    writeHDMIRegister(sdev->rmmio, X31_EXT_HTOTAL,
+					(pModeParam->horizontal_total & 0xFF));   // horizontal total
+    writeHDMIRegister(sdev->rmmio, X32_EXT_HTOTAL,
+					(pModeParam->horizontal_total & 0xFF00)>>8);
 
     temp = pModeParam->horizontal_total - pModeParam->horizontal_display_end;   // horizontal blanking
-    writeHDMIRegister(X33_EXT_HBLANK, (temp & 0xFF));
-    writeHDMIRegister(X34_EXT_HBLANK, (temp & 0xFF00)>>8);
+    writeHDMIRegister(sdev->rmmio, X33_EXT_HBLANK, (temp & 0xFF));
+    writeHDMIRegister(sdev->rmmio, X34_EXT_HBLANK, (temp & 0xFF00)>>8);
 
     temp = pModeParam->horizontal_total - pModeParam->horizontal_sync_start;    // horizontal delay
-    writeHDMIRegister(X35_EXT_HDLY, (temp & 0xFF));
-    writeHDMIRegister(X36_EXT_HDLY, (temp & 0xFF00)>>8);
+    writeHDMIRegister(sdev->rmmio, X35_EXT_HDLY, (temp & 0xFF));
+    writeHDMIRegister(sdev->rmmio, X36_EXT_HDLY, (temp & 0xFF00)>>8);
 
-    writeHDMIRegister(X37_EXT_HS_DUR, (pModeParam->horizontal_sync_width & 0xFF));  // horizontal duration
-    writeHDMIRegister(X38_EXT_HS_DUR, (pModeParam->horizontal_sync_width & 0xFF00)>>8);
+    writeHDMIRegister(sdev->rmmio, X37_EXT_HS_DUR,
+					(pModeParam->horizontal_sync_width & 0xFF));  // horizontal duration
+    writeHDMIRegister(sdev->rmmio, X38_EXT_HS_DUR,
+					(pModeParam->horizontal_sync_width & 0xFF00)>>8);
 
-    writeHDMIRegister(X39_EXT_VTOTAL, (pModeParam->vertical_total & 0xFF)); // vertical total
-    writeHDMIRegister(X3A_EXT_VTOTAL, (pModeParam->vertical_total & 0xFF00)>>8);
+    writeHDMIRegister(sdev->rmmio, X39_EXT_VTOTAL,
+					(pModeParam->vertical_total & 0xFF)); // vertical total
+    writeHDMIRegister(sdev->rmmio, X3A_EXT_VTOTAL,
+					(pModeParam->vertical_total & 0xFF00)>>8);
 
     temp = pModeParam->vertical_total - pModeParam->vertical_display_end;   // vertical blanking
-    writeHDMIRegister(X3D_EXT_VBLANK, temp);
+    writeHDMIRegister(sdev->rmmio, X3D_EXT_VBLANK, temp);
 
     temp = pModeParam->vertical_total - pModeParam->vertical_sync_start;   // vertical delay
-    writeHDMIRegister(X3E_EXT_VDLY, temp);
+    writeHDMIRegister(sdev->rmmio, X3E_EXT_VDLY, temp);
 
-    writeHDMIRegister(X3F_EXT_VS_DUR, pModeParam->vertical_sync_height);    // vertical duration
+    writeHDMIRegister(sdev->rmmio, X3F_EXT_VS_DUR, pModeParam->vertical_sync_height);    // vertical duration
 
     // video set color - deep_color_8bit
-    regValue = readHDMIRegister(X17_DC_REG);
+    regValue = readHDMIRegister(sdev->rmmio, X17_DC_REG);
     regValue = (regValue & 0x3F) | 0x00;
-    writeHDMIRegister(X17_DC_REG, regValue);
+    writeHDMIRegister(sdev->rmmio, X17_DC_REG, regValue);
     
-    writeHDMIRegister(X16_VIDEO1, 0x30);
+    writeHDMIRegister(sdev->rmmio, X16_VIDEO1, 0x30);
 
     // video set format
-    regValue = (readHDMIRegister(X15_AVSET1) & 0xF0);
+    regValue = (readHDMIRegister(sdev->rmmio, X15_AVSET1) & 0xF0);
     regValue |= 0x01;       // set RGB & external DE
-    writeHDMIRegister(X15_AVSET1, regValue);
-    writeHDMIRegister(X3B_AVSET2, 0x40);
+    writeHDMIRegister(sdev->rmmio, X15_AVSET1, regValue);
+    writeHDMIRegister(sdev->rmmio, X3B_AVSET2, 0x40);
     //writeHDMIRegister(X40_CTRL_PKT_EN, 0x00);
     //writeHDMIRegister(X45_VIDEO2, 0x83);
-    writeHDMIRegister(X46_OUTPUT_OPTION, 0x04);
-    writeHDMIRegister(XD3_CSC_CONFIG1, 0x01);
+    writeHDMIRegister(sdev->rmmio, X46_OUTPUT_OPTION, 0x04);
+    writeHDMIRegister(sdev->rmmio, XD3_CSC_CONFIG1, 0x01);
 
     // video set output - setting to HDMI/DVI mode
-    regValue = readHDMIRegister(XAF_HDCP_CTRL);
+    regValue = readHDMIRegister(sdev->rmmio, XAF_HDCP_CTRL);
     if (isHDMI)
-        writeHDMIRegister(XAF_HDCP_CTRL, (regValue | 0x02));
+        writeHDMIRegister(sdev->rmmio, XAF_HDCP_CTRL, (regValue | 0x02));
     else
-        writeHDMIRegister(XAF_HDCP_CTRL, (regValue & 0xFD));
+        writeHDMIRegister(sdev->rmmio, XAF_HDCP_CTRL, (regValue & 0xFD));
 
     // set DDC bus access frequency control register based on pixel clock value (400kHz is preferred)
     // At mode_d/mode_e: 
     // DDC Bus access frequency = TDMS_CK input clock frequency / (register value) / 4
     temp = pModeParam ->pixel_clock / 4 / 400000;
-    writeHDMIRegister(X81_ISRC2_PB0, (temp & 0xFF));    // LSB
-    writeHDMIRegister(X82_ISRC2_PB1, (temp & 0xFF00)>>8);   // MSB
+    writeHDMIRegister(sdev->rmmio, X81_ISRC2_PB0, (temp & 0xFF));    // LSB
+    writeHDMIRegister(sdev->rmmio, X82_ISRC2_PB1, (temp & 0xFF00)>>8);   // MSB
     
 }
 
@@ -720,7 +732,8 @@ void HDMI_Video_Setting (mode_parameter_t *pModeParam, bool isHDMI)
  *      -1 - Error 
  *
  */
-long HDMI_PHY_Setting (mode_parameter_t *pModeParam)
+long HDMI_PHY_Setting(struct smi_device *sdev,
+					mode_parameter_t *pModeParam)
 {
     unsigned long clkIndex;
     hdmi_PHY_param_t *pPHYParamTable;
@@ -759,16 +772,26 @@ long HDMI_PHY_Setting (mode_parameter_t *pModeParam)
     pPHYParamTable = (hdmi_PHY_param_t *)gHdmiPHYParamTable;
     
     // load PHY parameters into registers
-    writeHdmiPHYRegister(X57_PHY_CTRL, pPHYParamTable[clkIndex].X57_PHY_value);
-    writeHdmiPHYRegister(X58_PHY_CTRL, pPHYParamTable[clkIndex].X58_PHY_value);
-    writeHdmiPHYRegister(X59_PHY_CTRL, pPHYParamTable[clkIndex].X59_PHY_value);
-    writeHdmiPHYRegister(X5A_PHY_CTRL, pPHYParamTable[clkIndex].X5A_PHY_value);
-    writeHdmiPHYRegister(X5B_PHY_CTRL, pPHYParamTable[clkIndex].X5B_PHY_value);
-    writeHdmiPHYRegister(X5C_PHY_CTRL, pPHYParamTable[clkIndex].X5C_PHY_value);
-    writeHdmiPHYRegister(X5D_PHY_CTRL, pPHYParamTable[clkIndex].X5D_PHY_value);
-    writeHdmiPHYRegister(X5E_PHY_CTRL, pPHYParamTable[clkIndex].X5E_PHY_value);
-    writeHdmiPHYRegister(X56_PHY_CTRL, pPHYParamTable[clkIndex].X56_PHY_value);
-    writeHdmiPHYRegister(X17_DC_REG, pPHYParamTable[clkIndex].X17_PHY_value);
+    writeHdmiPHYRegister(sdev, X57_PHY_CTRL,
+					pPHYParamTable[clkIndex].X57_PHY_value);
+    writeHdmiPHYRegister(sdev, X58_PHY_CTRL,
+					pPHYParamTable[clkIndex].X58_PHY_value);
+    writeHdmiPHYRegister(sdev, X59_PHY_CTRL,
+					pPHYParamTable[clkIndex].X59_PHY_value);
+    writeHdmiPHYRegister(sdev, X5A_PHY_CTRL,
+					pPHYParamTable[clkIndex].X5A_PHY_value);
+    writeHdmiPHYRegister(sdev, X5B_PHY_CTRL,
+					pPHYParamTable[clkIndex].X5B_PHY_value);
+    writeHdmiPHYRegister(sdev, X5C_PHY_CTRL,
+					pPHYParamTable[clkIndex].X5C_PHY_value);
+    writeHdmiPHYRegister(sdev, X5D_PHY_CTRL,
+					pPHYParamTable[clkIndex].X5D_PHY_value);
+    writeHdmiPHYRegister(sdev, X5E_PHY_CTRL,
+					pPHYParamTable[clkIndex].X5E_PHY_value);
+    writeHdmiPHYRegister(sdev, X56_PHY_CTRL,
+					pPHYParamTable[clkIndex].X56_PHY_value);
+    writeHdmiPHYRegister(sdev, X17_DC_REG,
+					pPHYParamTable[clkIndex].X17_PHY_value);
     
     return 0;
 }
@@ -788,7 +811,8 @@ long HDMI_PHY_Setting (mode_parameter_t *pModeParam)
  *      -1 - Error 
  *
  */
-long HDMI_Set_Mode (logicalMode_t *pLogicalMode, bool isHDMI)
+long HDMI_Set_Mode (struct smi_device *sdev,
+		logicalMode_t *pLogicalMode, bool isHDMI)
 {
     mode_parameter_t *pModeParam;
     unsigned char temp = 0;
@@ -797,7 +821,7 @@ long HDMI_Set_Mode (logicalMode_t *pLogicalMode, bool isHDMI)
     // set mode b
     if (PowerMode != PowerMode_B)
     {
-        HDMI_System_PD (PowerMode_B);
+        HDMI_System_PD(sdev, PowerMode_B);
     }
 
     // find mode parameters for input mode
@@ -806,60 +830,60 @@ long HDMI_Set_Mode (logicalMode_t *pLogicalMode, bool isHDMI)
         return -1;
 
     // set video param
-    HDMI_Video_Setting(pModeParam, isHDMI);
+    HDMI_Video_Setting(sdev, pModeParam, isHDMI);
 
     // set audio param
-    HDMI_Audio_Setting_44100Hz(pModeParam);
+    HDMI_Audio_Setting_44100Hz(sdev, pModeParam);
     
     // control packet auto send
-    HDMI_Control_Packet_Auto_Send();
+    HDMI_Control_Packet_Auto_Send(sdev);
 
     // set PHY param
-    ret = HDMI_PHY_Setting(pModeParam);
+    ret = HDMI_PHY_Setting(sdev, pModeParam);
     if (ret != 0)
     {
         return ret;
     }
 
     // disable video & audio output: write 11b to #45h[1:0]
-    temp = readHDMIRegister(X45_VIDEO2);
-    writeHDMIRegister(X45_VIDEO2, (temp | 0x03));
+    temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+    writeHDMIRegister(sdev->rmmio, X45_VIDEO2, (temp | 0x03));
 
     // set Channel # to HDMI
-    setHDMIChannel((unsigned char)pLogicalMode->dispCtrl);
+    setHDMIChannel(sdev, (unsigned char)pLogicalMode->dispCtrl);
     
     // mode b->d: (0x4d, 100us) -> (0x49, 100us) -> 0x41
     PowerMode = PowerMode_D;
-    writeHDMIControlRegister (PowerMode | 0x0C);
+    writeHDMIControlRegister(sdev, PowerMode | 0x0C);
     DelayMs (1);
-    writeHDMIControlRegister (PowerMode | 0x08);
+    writeHDMIControlRegister(sdev, PowerMode | 0x08);
     DelayMs (1);
-    writeHDMIControlRegister (PowerMode);
+    writeHDMIControlRegister(sdev, PowerMode);
     DelayMs (1);
 
     // mode d->e: 0x81
-    HDMI_System_PD (PowerMode_E);
+    HDMI_System_PD(sdev, PowerMode_E);
 
     if (AudioMode)
     {
         // enable video & audio output: write 00b to #45h[1:0]
-        temp = readHDMIRegister(X45_VIDEO2);
-        writeHDMIRegister(X45_VIDEO2, (temp & (~0x03)));
+        temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+        writeHDMIRegister(sdev->rmmio, X45_VIDEO2, (temp & (~0x03)));
 
         // Audio reset/release
         // Audio is mute after reset of audio is set.
         // Therefore, set it in the following procedures.
         //   Audio:  Save value of now => Audio Reset => Audio Active => Set value again
-        temp = readHDMIRegister(X45_VIDEO2);
-        writeHDMIRegister(X45_VIDEO2, temp | 0x04 );   // Reset
+        temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+        writeHDMIRegister(sdev->rmmio, X45_VIDEO2, temp | 0x04 );   // Reset
         DelayMs(1);                                    // Followed by 1ms wait time
-        writeHDMIRegister(X45_VIDEO2, temp & 0xFB );   // Reset Release and Audio Mute)
+        writeHDMIRegister(sdev->rmmio, X45_VIDEO2, temp & 0xFB );   // Reset Release and Audio Mute)
     }
     else
     {
         // enable video output: write 0b to #45h[0]
-        temp = readHDMIRegister(X45_VIDEO2);
-        writeHDMIRegister(X45_VIDEO2, (temp & (~0x01)));
+        temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+        writeHDMIRegister(sdev->rmmio, X45_VIDEO2, (temp & (~0x01)));
     }
 
 #if 0   // for debug only
@@ -868,7 +892,7 @@ long HDMI_Set_Mode (logicalMode_t *pLogicalMode, bool isHDMI)
     
     return 0;
 }
-void HDMI_Enable_Output(void)
+void HDMI_Enable_Output(struct smi_device *sdev)
 {
     unsigned char temp = 0;
 
@@ -878,29 +902,29 @@ void HDMI_Enable_Output(void)
 	if (PowerMode == PowerMode_B){
 	    // mode b->d: (0x4d, 100us) -> (0x49, 100us) -> 0x41
 	    PowerMode = PowerMode_D;
-	    writeHDMIControlRegister (PowerMode | 0x0C);
+	    writeHDMIControlRegister(sdev, PowerMode | 0x0C);
 	    DelayMs (1);
-	    writeHDMIControlRegister (PowerMode | 0x08);
+	    writeHDMIControlRegister(sdev, PowerMode | 0x08);
 	    DelayMs (1);
-	    writeHDMIControlRegister (PowerMode);
+	    writeHDMIControlRegister(sdev, PowerMode);
 	    DelayMs (1);
 
 	    // mode d->e: 0x81
-	    HDMI_System_PD (PowerMode_E);
+	    HDMI_System_PD(sdev, PowerMode_E);
 	}
 
     // enable video & audio output: write 00b to #45h[1:0]
-    temp = readHDMIRegister(X45_VIDEO2);
-    writeHDMIRegister(X45_VIDEO2, (temp & (~0x03)));
+    temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+    writeHDMIRegister(sdev->rmmio, X45_VIDEO2, (temp & (~0x03)));
     
     // Audio reset/release
     // Audio is mute after reset of audio is set.
     // Therefore, set it in the following procedures.
     //   Audio:  Save value of now => Audio Reset => Audio Active => Set value again
-    temp = readHDMIRegister(X45_VIDEO2);
-    writeHDMIRegister(X45_VIDEO2, temp | 0x04 );   // Reset
+    temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+    writeHDMIRegister(sdev->rmmio, X45_VIDEO2, temp | 0x04 );   // Reset
     DelayMs(1);                                    // Followed by 1ms wait time
-    writeHDMIRegister(X45_VIDEO2, temp & 0xFB );   // Reset Release and Audio Mute)
+    writeHDMIRegister(sdev->rmmio, X45_VIDEO2, temp & 0xFB );   // Reset Release and Audio Mute)
 
 #if 0   // for debug only
     HDMI_Dump_Registers();
@@ -924,22 +948,22 @@ void HDMI_Enable_Output(void)
  *      None
  *
  */
-void HDMI_Disable_Output (void)
+void HDMI_Disable_Output (struct smi_device *sdev)
 {
     unsigned char temp = 0;
     
     // disable video & audio output: write 11b to #45h[1:0]
-    temp = readHDMIRegister(X45_VIDEO2);
-    writeHDMIRegister(X45_VIDEO2, (temp | 0x03));
+    temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+    writeHDMIRegister(sdev->rmmio, X45_VIDEO2, (temp | 0x03));
 
     // audio reset: write 1b to #45h[2], followed by 500us wait time
-    temp = readHDMIRegister(X45_VIDEO2);
-    writeHDMIRegister(X45_VIDEO2, (temp | 0x04));
+    temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+    writeHDMIRegister(sdev->rmmio, X45_VIDEO2, (temp | 0x04));
     DelayMs(1);
 
     // PS mode e->d->b
-    HDMI_System_PD (PowerMode_D);
-    HDMI_System_PD (PowerMode_B);
+    HDMI_System_PD(sdev, PowerMode_D);
+    HDMI_System_PD(sdev, PowerMode_B);
 }
 
 /*
@@ -953,18 +977,18 @@ void HDMI_Disable_Output (void)
  *      None
  *
  */
-void HDMI_Unplugged (void)
+void HDMI_Unplugged (struct smi_device *sdev)
 {
     unsigned char temp = 0;
     
     // disable video & audio output: write 11b to #45h[1:0]
-    temp = readHDMIRegister(X45_VIDEO2);
-    writeHDMIRegister(X45_VIDEO2, (temp | 0x03));
+    temp = readHDMIRegister(sdev->rmmio, X45_VIDEO2);
+    writeHDMIRegister(sdev->rmmio, X45_VIDEO2, (temp | 0x03));
 
     // PS mode e->d->b->a
-    HDMI_System_PD (PowerMode_D);
-    HDMI_System_PD (PowerMode_B);
-    HDMI_System_PD (PowerMode_A);
+    HDMI_System_PD(sdev, PowerMode_D);
+    HDMI_System_PD(sdev, PowerMode_B);
+    HDMI_System_PD(sdev, PowerMode_A);
 }
 
 /*
@@ -981,15 +1005,15 @@ void HDMI_Unplugged (void)
  *      None
  *
  */
-void HDMI_Audio_Mute (void)
+void HDMI_Audio_Mute (volatile unsigned char __iomem *rmmio)
 {
     unsigned char temp = 0;
 
     if (PowerMode == PowerMode_E)
     {
         // disable audio output: write 1b to #45h[1]
-        temp = readHDMIRegister(X45_VIDEO2);
-        writeHDMIRegister(X45_VIDEO2, (temp | 0x02));
+        temp = readHDMIRegister(rmmio, X45_VIDEO2);
+        writeHDMIRegister(rmmio, X45_VIDEO2, (temp | 0x02));
     }
 
 	 AudioMode = Audio_Mute;
@@ -1009,24 +1033,24 @@ void HDMI_Audio_Mute (void)
  *      None
  *
  */
-void HDMI_Audio_Unmute (void)
+void HDMI_Audio_Unmute (volatile unsigned char __iomem *rmmio)
 {
     unsigned char temp = 0;
 
     if (PowerMode == PowerMode_E)
     {
         // enable audio output: write 0b to #45h[1]
-        temp = readHDMIRegister(X45_VIDEO2);
-        writeHDMIRegister(X45_VIDEO2, (temp & (~0x02)));
+        temp = readHDMIRegister(rmmio, X45_VIDEO2);
+        writeHDMIRegister(rmmio, X45_VIDEO2, (temp & (~0x02)));
 
         // Audio reset/release
         // Audio is mute after reset of audio is set.
         // Therefore, set it in the following procedures.
         //   Audio:  Save value of now => Audio Reset => Audio Active => Set value again
-        temp = readHDMIRegister(X45_VIDEO2);
-        writeHDMIRegister(X45_VIDEO2, temp | 0x04 );   // Reset
+        temp = readHDMIRegister(rmmio, X45_VIDEO2);
+        writeHDMIRegister(rmmio, X45_VIDEO2, temp | 0x04 );   // Reset
         DelayMs(1);                                    // Followed by 1ms wait time
-        writeHDMIRegister(X45_VIDEO2, temp & (~0x04) );   // Reset Release and Audio Mute)
+        writeHDMIRegister(rmmio, X45_VIDEO2, temp & (~0x04) );   // Reset Release and Audio Mute)
     }
 	AudioMode = Audio_Unmute;
 }
@@ -1042,21 +1066,22 @@ void HDMI_Audio_Unmute (void)
  *      Fisrt byte of HDMI EDID FIFO
  *
  */
-unsigned char HDMI_Edid_ReadFirstByte(void)
+unsigned char HDMI_Edid_ReadFirstByte(struct smi_device *sdev)
 {
     unsigned long value;
 
-    pokeRegisterDWord(HDMI_CONFIG, 
+    pokeRegisterDWord(sdev->rmmio, HDMI_CONFIG, 
         FIELD_SET(0, HDMI_CONFIG, READ, LATCH) | 
         FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, X80_EDID));
     
     DelayMs(1);
     
-    pokeRegisterDWord(HDMI_CONFIG, FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, X80_EDID));
+    pokeRegisterDWord(sdev->rmmio, HDMI_CONFIG,
+					FIELD_VALUE(0, HDMI_CONFIG, ADDRESS, X80_EDID));
     
     DelayMs(1);
     
-    value = peekRegisterDWord(HDMI_CONFIG);
+    value = peekRegisterDWord(sdev->rmmio, HDMI_CONFIG);
 
     return (unsigned char)((value >> 8) & 0xFF);
 }
@@ -1094,7 +1119,8 @@ BYTE HDMI_Edid_CheckSum (BYTE* array, unsigned long size)
  *      0 - exist block0 EDID (128 Bytes)
  *      1 - exist block0 & block1 EDID (256 Bytes)
  */
-long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
+long HDMI_Read_Edid(struct smi_device *sdev,
+				BYTE *pEDIDBuffer, unsigned long bufferSize)
 {
     BYTE byEDID_current = 0;
     BYTE byEDID_size = 0;
@@ -1116,24 +1142,24 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
     // PS mode a -> b if current power mode is in PS mode a
     if (PowerMode == PowerMode_A)
     {
-        HDMI_System_PD (PowerMode_B);
+        HDMI_System_PD(sdev, PowerMode_B);
     }
 
     // clear interrupt status before reading EDID
-    writeHDMIRegister (X94_INT1_ST, 0xFF);
-    writeHDMIRegister (X95_INT2_ST, 0xFF);
+    writeHDMIRegister(sdev->rmmio, X94_INT1_ST, 0xFF);
+    writeHDMIRegister(sdev->rmmio, X95_INT2_ST, 0xFF);
 
     // Enable EDID interrupt
-    regValue = readHDMIRegister (X92_INT_MASK1);
-    writeHDMIRegister (X92_INT_MASK1, (regValue | 0x06));
+    regValue = readHDMIRegister(sdev->rmmio, X92_INT_MASK1);
+    writeHDMIRegister(sdev->rmmio, X92_INT_MASK1, (regValue | 0x06));
 
     while(byEDID_finish == 0)
     {			
     	// Set EDID word address (set to 00h for the first 128 bytes)
-    	writeHDMIRegister (XC5_EDID_WD_ADDR, EDID_WORD);	
+    	writeHDMIRegister(sdev->rmmio, XC5_EDID_WD_ADDR, EDID_WORD);	
     	// Set EDID segment pointer 0
     	// (Regsiter write to XC4_SEG_PTR will start EDID reading)
-    	writeHDMIRegister (XC4_SEG_PTR, EDID_SEG);
+    	writeHDMIRegister(sdev->rmmio, XC4_SEG_PTR, EDID_SEG);
         
     	/* Hook the interrupt before going to the while */ 
         //hookHDMIInterrupt(HdmiHandler);
@@ -1143,29 +1169,31 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
     	{		
             retry--;
 
-            g_INT_94h = readHDMIRegister (X94_INT1_ST);
-            g_INT_95h = readHDMIRegister (X95_INT2_ST);	
+            g_INT_94h = readHDMIRegister(sdev->rmmio, X94_INT1_ST);
+            g_INT_95h = readHDMIRegister(sdev->rmmio, X95_INT2_ST);	
 
             // EDID ERR interrupt, or EDID not ready
             if ((g_INT_94h & EDID_ERR))
             {
                 // clear error interrupt 
-                writeHDMIRegister (X94_INT1_ST, 0xFF);
-                writeHDMIRegister (X95_INT2_ST, 0xFF);
+                writeHDMIRegister(sdev->rmmio, X94_INT1_ST, 0xFF);
+                writeHDMIRegister(sdev->rmmio, X95_INT2_ST, 0xFF);
                 DelayMs(1);
             }
             else if (g_INT_94h & EDID_RDY)
             {		
                 // clear ready interrupt 
-                writeHDMIRegister (X94_INT1_ST, 0xFF);
-                writeHDMIRegister (X95_INT2_ST, 0xFF);
+                writeHDMIRegister(sdev->rmmio, X94_INT1_ST, 0xFF);
+                writeHDMIRegister(sdev->rmmio, X95_INT2_ST, 0xFF);
                 
                 // Read EDID for current block (128bytes)         
-                gEdidBuffer[byEDID_current* 0x80] = HDMI_Edid_ReadFirstByte();
+                gEdidBuffer[byEDID_current* 0x80] =
+						HDMI_Edid_ReadFirstByte(sdev);
                 
                 for(i=1;i<128;i++)
                 {
-                    gEdidBuffer[byEDID_current* 0x80+i] = readHDMIRegister(X80_EDID);
+                    gEdidBuffer[byEDID_current* 0x80+i] =
+							readHDMIRegister(sdev->rmmio, X80_EDID);
                     DelayMs(1);
                 }
                 printk("EDID read finish\n");
@@ -1181,16 +1209,18 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
                     if (byEDID_current == 0)
                     {
                         // Disable EDID interrupt
-                        regValue = readHDMIRegister (X92_INT_MASK1);
-                        writeHDMIRegister (X92_INT_MASK1, (regValue & (~0x06)));
+						regValue = readHDMIRegister(sdev->rmmio, X92_INT_MASK1);
+						writeHDMIRegister(
+							sdev->rmmio, X92_INT_MASK1, (regValue & (~0x06)));
 
                         return (-1);
                     }
                     else
                     {
                         // Disable EDID interrupt
-                        regValue = readHDMIRegister (X92_INT_MASK1);
-                        writeHDMIRegister (X92_INT_MASK1, (regValue & (~0x06)));
+						regValue = readHDMIRegister(sdev->rmmio, X92_INT_MASK1);
+						writeHDMIRegister(
+							sdev->rmmio, X92_INT_MASK1, (regValue & (~0x06)));
 
                      //   DDKDEBUGPRINT((DISPLAY_LEVEL, "Return the first 128 bytes only.\n"));
                         // Copy 128 bytes data to the given buffer
@@ -1234,8 +1264,9 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
         {
             printk("Read HDMI EDID fail.\n");
             // Disable EDID interrupt
-            regValue = readHDMIRegister (X92_INT_MASK1);
-            writeHDMIRegister (X92_INT_MASK1, (regValue & (~0x06)));
+			regValue = readHDMIRegister(sdev->rmmio, X92_INT_MASK1);
+			writeHDMIRegister(sdev->rmmio, X92_INT_MASK1,
+									(regValue & (~0x06)));
             
             return (-1);
         }
@@ -1244,8 +1275,8 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
     }
                    	
     // Disable EDID interrupt
-    regValue = readHDMIRegister (X92_INT_MASK1);
-    writeHDMIRegister (X92_INT_MASK1, (regValue & (~0x06)));
+	regValue = readHDMIRegister(sdev->rmmio, X92_INT_MASK1);
+	writeHDMIRegister(sdev->rmmio, X92_INT_MASK1, (regValue & (~0x06)));
 
     // Copy data to the given buffer
    // printf("Copy buffer\n");
@@ -1294,20 +1325,22 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize)
  *      1 - plugged
  * 
  */
-BYTE HDMI_hotplug_check (void)
+BYTE HDMI_hotplug_check(struct smi_device *sdev)
 {
     BYTE STAT_DFh;
 
     // Wait time before check hot plug & MSENS pin status
     DelayMs (15);
 
-    STAT_DFh = readHDMIRegister (XDF_HPG_STATUS);
+	STAT_DFh = readHDMIRegister(sdev->rmmio, XDF_HPG_STATUS);
 
     if ((STAT_DFh & HPG_MSENS) == HPG_MSENS)        // HPD & MSENS status both high? 
     {
         // DDC I2C master controller reset ... ddc_ctrl_reset[bit4]
-        writeHDMIRegister (X3B_AVSET2, readHDMIRegister (X3B_AVSET2) | 0x10);
-        writeHDMIRegister (X3B_AVSET2, readHDMIRegister (X3B_AVSET2) & 0xEF);
+		writeHDMIRegister(sdev->rmmio, X3B_AVSET2,
+				readHDMIRegister(sdev->rmmio, X3B_AVSET2) | 0x10);
+		writeHDMIRegister(sdev->rmmio, X3B_AVSET2,
+				readHDMIRegister(sdev->rmmio, X3B_AVSET2) & 0xEF);
         
         return 1;
     }
@@ -1319,12 +1352,12 @@ BYTE HDMI_hotplug_check (void)
 }
 
 
-int hdmi_detect(void)
+int hdmi_detect(struct smi_device *sdev)
 {
     unsigned int intStatus;
 
 
-    intStatus = peekRegisterDWord(INT_STATUS);
+	intStatus = peekRegisterDWord(sdev->rmmio, INT_STATUS);
 	
     if (FIELD_GET(intStatus, INT_STATUS, HDMI) == INT_STATUS_HDMI_ACTIVE)
     {
@@ -1333,21 +1366,21 @@ int hdmi_detect(void)
         if (PowerMode == PowerMode_A)
         {
             // PS mode a->b
-            HDMI_System_PD(PowerMode_B);
+			HDMI_System_PD(sdev, PowerMode_B);
         }
 
         // Save interrupt status from the last interrupt
-        g_INT_94h = readHDMIRegister(X94_INT1_ST);
-        g_INT_95h = readHDMIRegister(X95_INT2_ST);
+		g_INT_94h = readHDMIRegister(sdev->rmmio, X94_INT1_ST);
+		g_INT_95h = readHDMIRegister(sdev->rmmio, X95_INT2_ST);
 
         // check if plug-in or plug-out detect
         if ((g_INT_94h & HPG_MSENS) == HPG_MSENS)        // HPD & MSENS status both high? 
         {
             // clear all interrupts
-            writeHDMIRegister(X94_INT1_ST, 0xFF);
-            writeHDMIRegister(X95_INT2_ST, 0xFF);
+			writeHDMIRegister(sdev->rmmio, X94_INT1_ST, 0xFF);
+			writeHDMIRegister(sdev->rmmio, X95_INT2_ST, 0xFF);
 
-            if (HDMI_hotplug_check())
+			if (HDMI_hotplug_check(sdev))
             {
                 return 1;
             }

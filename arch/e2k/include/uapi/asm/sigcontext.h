@@ -3,7 +3,7 @@
 
 #define MAX_TC_SIZE	10
 
-#define TIR_NUM 19
+#define TIR_NUM 19UL
 #define DAM_ENTRIES_NUM 32
 #define SBBP_ENTRIES_NUM 32
 

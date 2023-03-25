@@ -19,6 +19,7 @@
 #include <asm/signal.h>
 #include <asm/stacks.h>
 #include <asm/setup.h>
+#include <asm/kvm/guest/host_printk.h>
 
 #include "process.h"
 #include "traps.h"
@@ -299,7 +300,7 @@ void kvm_define_kernel_hw_stacks_sizes(hw_stack_t *hw_stacks)
 	kvm_set_hw_pcs_user_size(hw_stacks, KVM_GUEST_KERNEL_PCS_SIZE);
 }
 
-void kvm_clean_pc_stack_zero_frame(void *addr, bool user)
+int kvm_clean_pc_stack_zero_frame(void *addr, bool user)
 {
 	struct page *page;
 	e2k_mem_crs_t *pcs;
@@ -326,25 +327,28 @@ void kvm_clean_pc_stack_zero_frame(void *addr, bool user)
 		pcs = (e2k_mem_crs_t *)addr;
 	}
 
-	native_clean_pc_stack_zero_frame(pcs, user);
+	ret = native_clean_pc_stack_zero_frame(pcs, user);
+	if (ret)
+		return ret;
 
 	if (likely(user)) {
 		put_user_addr_to_kernel_page(page);
 	}
-	return;
+	return 0;
 
 failed:
 	if (ret == -ERESTARTSYS)
 		/* there is/are pending fatal signal(s) */
 		/* and task should be killed some later */
-		return;
+		return ret;
 
 	pr_err("%s(): failed to get kernel page of user address %px, error %d\n",
 		__func__, addr, ret);
 	send_sig(SIGKILL, current, 0);
+	return ret;
 }
 
-e2k_cute_t *kvm_get_cut_entry_pointer(int cui, struct page **page_p)
+e2k_cute_t __user *kvm_get_cut_entry_pointer(int cui, struct page **page_p)
 {
 	struct page *page;
 	unsigned long u_cute_p, k_cute_p, offset;
@@ -863,15 +867,15 @@ int kvm_switch_to_new_user(e2k_stacks_t *stacks, hw_stack_t *hw_stacks,
 	 * of the process and start new life on new process
 	 */
 	thread_info->k_usd_lo.USD_lo_base =
-		(u64)current->stack + KVM_GUEST_KERNEL_C_STACK_SIZE;
-	thread_info->k_usd_hi.USD_hi_size = KVM_GUEST_KERNEL_C_STACK_SIZE;
+		(u64)current->stack + KERNEL_C_STACK_SIZE;
+	thread_info->k_usd_hi.USD_hi_size = KERNEL_C_STACK_SIZE;
 	DebugKVMEX("set kernel local data stack to empty state: base 0x%llx "
 		"size 0x%x\n",
 		thread_info->k_usd_lo.USD_lo_base,
 		thread_info->k_usd_hi.USD_hi_size);
 
 	task_info.us_base = (u64)current->stack;
-	task_info.us_size = KVM_GUEST_KERNEL_C_STACK_SIZE;
+	task_info.us_size = KERNEL_C_STACK_SIZE;
 	DebugKVMEX("kernel local data stack from 0x%lx size 0x%lx\n",
 		task_info.us_base, task_info.us_size);
 
@@ -1314,8 +1318,9 @@ retry:
  */
 void kvm_default_idle(void)
 {
-	if (psr_and_upsr_irqs_disabled())
+	if (psr_and_upsr_irqs_disabled()) {
 		local_irq_enable();
+	}
 
 	/* clear POLLING flag because of VCPU go to sleeping, */
 	/* so cannot polling flag NEED_RESCHED and should be waked up */
@@ -1334,6 +1339,13 @@ void kvm_default_idle(void)
 	/* restore POLLING flag because of VCPU completed sleeping */
 	/* and can polling flag NEED_RESCHED to reschedule if it need */
 	set_thread_flag(TIF_POLLING_NRFLAG);
+	if (kvm_get_vcpu_state()->do_dump_stack) {
+		dump_stack();
+		kvm_get_vcpu_state()->do_dump_stack = false;
+	} else if (kvm_get_vcpu_state()->do_dump_state) {
+		coredump_in_future();
+		kvm_get_vcpu_state()->do_dump_state = false;
+	}
 
 	DebugKVMIDLE("current guest jiffies 0x%lx\n", jiffies);
 }
@@ -1385,6 +1397,9 @@ void kvm_cpu_relax(void)
 	HYPERVISOR_kvm_guest_vcpu_common_idle(GUEST_CPU_WAKE_UP_TIMEOUT,
 			true);	/* can interrupt waiting on any event */
 				/* to enable rescheduling */
+	if (kvm_get_vcpu_state()->do_dump_stack) {
+		host_dump_stack_func();
+	}
 }
 EXPORT_SYMBOL(kvm_cpu_relax);
 

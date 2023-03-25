@@ -92,7 +92,7 @@ add_bootconf()
 	fi
 cat > $BOOTCONF << EOF
 default=$OSLUP
-timeout=3
+timeout=0
 
 ########################
 

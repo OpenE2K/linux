@@ -41,9 +41,6 @@
 #define	DEBUG_DATA_BREAKPOINT_MODE	0	/* data breakpoint debugging */
 #define DebugDBP(...)	DebugPrint(DEBUG_DATA_BREAKPOINT_MODE, ##__VA_ARGS__)
 
-int refresh_processor;
-
-
 static void smp_flush_icache_range_array_ipi(void *info)
 {
 	icache_range_array_t *icache_range_arr = (icache_range_array_t *)info;
@@ -84,9 +81,7 @@ void native_smp_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 	struct mm_struct *mm = vma->vm_mm;
 	int cpu, i;
 
-	migrate_disable();
-
-	cpu = smp_processor_id();
+	cpu = get_cpu_light();
 
 	/* See comment in flush_tlb_range() */
 	for (i = 0; i < nr_cpu_ids; i++) {
@@ -107,7 +102,7 @@ void native_smp_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 	if (cpumask_any_but(mm_cpumask(mm), cpu) < nr_cpu_ids)
 		smp_call_function(smp_flush_icache_page_ipi, &icache_page, 1);
 
-	migrate_enable();
+	put_cpu();
 }
 
 static void smp_flush_icache_all_ipi(void *info)
@@ -122,14 +117,7 @@ void smp_flush_icache_all(void)
 }
 EXPORT_SYMBOL(smp_flush_icache_all);
 
-void smp_send_refresh(void)
-{
-	refresh_processor = refresh_processor | ~(0U);
-
-}
-
-
-static void stop_this_cpu_ipi(void *dummy)
+void native_stop_this_cpu_ipi(void *dummy)
 {
 	raw_all_irq_disable();
 
@@ -137,19 +125,11 @@ static void stop_this_cpu_ipi(void *dummy)
 
 	spin_begin();
 
-#ifdef CONFIG_KVM_GUEST_KERNEL
-	//TODO Why is this needed?
-	refresh_processor = refresh_processor & ~(1U << smp_processor_id());
-	for (;;) {
-		if (refresh_processor & (1U << smp_processor_id()))
-			break;
+	do {
 		spin_cpu_relax();
-	}
-	refresh_processor = refresh_processor & ~(1U << smp_processor_id());
-#else
-	while (1)
-		spin_cpu_relax();
-#endif
+	} while (true);
+
+	spin_end();
 }
 
 void smp_send_stop(void)

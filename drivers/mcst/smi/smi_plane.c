@@ -19,6 +19,8 @@
 #include <drm/drm_atomic_helper.h>
 #endif
 
+struct smi_device;
+
 extern struct smi_crtc * smi_crtc_tab[MAX_CRTC];
 extern struct drm_encoder * smi_enc_tab[MAX_ENCODER];
 extern int g_m_connector;//bit 0: DVI, bit 1: VGA, bit 2: HDMI.
@@ -88,6 +90,7 @@ static void smi_cursor_atomic_update(struct drm_plane *plane,struct drm_plane_st
 
 	//ENTER();
 	struct drm_crtc *crtc = plane->state->crtc;
+	struct smi_device *sdev = crtc->dev->dev_private;
 	struct drm_framebuffer *fb = plane->state->fb;
 	struct smi_bo *bo;
 	struct drm_gem_object *obj;
@@ -158,8 +161,10 @@ static void smi_cursor_atomic_update(struct drm_plane *plane,struct drm_plane_st
 	}
 	else
 	{
-		ddk768_enableCursor(disp_crtc, 3);
-		ddk768_setCursorPosition(disp_crtc, x<0?-x:x, y<0?-y:y, y<0?1:0,x<0?1:0);
+		ddk768_enableCursor(sdev, disp_crtc, 3);
+		ddk768_setCursorPosition(sdev, disp_crtc,
+						x < 0 ? -x : x, y < 0 ? -y : y,
+						y < 0 ? 1 : 0, x < 0 ? 1 : 0);
 	}
 
 	//LEAVE();
@@ -168,6 +173,8 @@ static void smi_cursor_atomic_update(struct drm_plane *plane,struct drm_plane_st
 void smi_cursor_atomic_disable(struct drm_plane *plane,
 			       struct drm_plane_state *old_state)
 {
+	struct drm_crtc *crtc = plane->crtc;
+	struct smi_device *sdev = crtc->dev->dev_private;
 	int ctrl_index;
 	ctrl_index = 0;
 
@@ -183,8 +190,8 @@ void smi_cursor_atomic_disable(struct drm_plane *plane,
 	}
 	else
 	{
-		ddk768_enableCursor(SMI0_CTRL, 0);
-		ddk768_enableCursor(SMI1_CTRL, 0);
+		ddk768_enableCursor(sdev, SMI0_CTRL, 0);
+		ddk768_enableCursor(sdev, SMI1_CTRL, 0);
 	}	
 
 
@@ -201,6 +208,7 @@ static int smi_plane_prepare_fb(struct drm_plane *plane, struct drm_plane_state 
 	struct drm_gem_object *obj;
 	struct smi_bo *user_bo;
 	struct drm_crtc *crtc = new_state->crtc;
+	struct smi_device *sdev = crtc->dev->dev_private;
 	int ret;
 	u64 gpu_addr;
 
@@ -259,7 +267,8 @@ static int smi_plane_prepare_fb(struct drm_plane *plane, struct drm_plane_state 
 	}
 	else
 	{
-		ddk768_initCursor(disp_crtc,(u32)gpu_addr,BPP32_BLACK,BPP32_WHITE,BPP32_BLUE);
+		ddk768_initCursor(sdev, disp_crtc, (u32)gpu_addr,
+						BPP32_BLACK, BPP32_WHITE, BPP32_BLUE);
 	}	
 
 	LEAVE(0);
@@ -274,6 +283,8 @@ static void smi_plane_cleanup_fb(struct drm_plane *plane, struct drm_plane_state
 	ENTER();
 	struct drm_gem_object *obj;
 	struct smi_bo *user_bo;
+	struct drm_crtc *crtc = plane->state->crtc;
+	struct smi_device *sdev = crtc->dev->dev_private;
 	
 	if(g_specId == SPC_SM750)
 	{
@@ -282,8 +293,8 @@ static void smi_plane_cleanup_fb(struct drm_plane *plane, struct drm_plane_state
 	}
 	else
 	{
-		ddk768_enableCursor(SMI0_CTRL, 0);
-		ddk768_enableCursor(SMI1_CTRL, 0);
+		ddk768_enableCursor(sdev, SMI0_CTRL, 0);
+		ddk768_enableCursor(sdev, SMI1_CTRL, 0);
 	}	
 
 	if (!plane->state->fb) {

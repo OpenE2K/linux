@@ -73,87 +73,55 @@ DECLARE_EARLY_PER_CPU_READ_MOSTLY(u16, x86_cpu_to_apicid);
 #endif
 
 #ifdef CONFIG_NUMA
-extern void __init numa_init(void);
-
 extern s16 __apicid_to_node[NR_CPUS];
 
-extern int __nodedata __cpu_to_node[NR_CPUS];
-#define	cpu_to_node(cpu)	__cpu_to_node[cpu]
+extern void __init numa_init(void);
+extern int early_cpu_to_node(int cpu);
+extern int is_duplicated_address(unsigned long addr);
 
-extern cpumask_t __nodedata __node_to_cpu_mask[MAX_NUMNODES];
-#define	node_to_cpu_mask(node)	__node_to_cpu_mask[node]
+static inline int is_duplicated_code(unsigned long ip)
+{
+	/* Code is not yet duplicated this early in the boot process */
+	if (system_state == SYSTEM_BOOTING)
+		return 0;
 
-#define numa_node_id()		(cpu_to_node(raw_smp_processor_id()))
+	return ip >= (unsigned long) _stext && ip < (unsigned long) _etext;
+}
 
-#define __node_to_cpumask_and(node, cpu_mask)			\
-({								\
-	cpumask_t cpumask = node_to_cpu_mask(node);		\
-	cpumask_and(&cpumask, &cpumask,	&cpu_mask);		\
-	cpumask;						\
-})
-
-#define node_to_cpumask(node)					\
-		__node_to_cpumask_and(node, *cpu_online_mask)
-#define node_to_present_cpumask(node)				\
-		__node_to_cpumask_and(node, *cpu_present_mask)
-
-#define __node_to_first_cpu(node, cpu_mask)			\
-({								\
-	cpumask_t node_cpumask;					\
-	node_cpumask = __node_to_cpumask_and(node, cpu_mask);	\
-	cpumask_first((const struct cpumask *)&node_cpumask);	\
-})
-
-#define node_to_first_cpu(node)					\
-		__node_to_first_cpu(node, *cpu_online_mask)
-#define node_to_first_present_cpu(node)				\
-		__node_to_first_cpu(node, *cpu_present_mask)
-
-#define cpumask_of_pcibus(bus)	(pcibus_to_node(bus) == NUMA_NO_NODE ?	\
+# define cpumask_of_pcibus(bus)	(pcibus_to_node(bus) == NUMA_NO_NODE ?	\
 				 cpu_online_mask :			\
 				 cpumask_of_node(pcibus_to_node(bus)))
 
 /* Mappings between node number and cpus on that node. */
-extern struct cpumask node_to_cpumask_map[MAX_NUMNODES];
+extern cpumask_var_t node_to_cpumask_map[MAX_NUMNODES];
+extern void numa_update_cpu(unsigned int cpu, bool remove);
+static inline void numa_add_cpu(unsigned int cpu)
+{
+	numa_update_cpu(cpu, false);
+}
+static inline void numa_remove_cpu(unsigned int cpu)
+{
+	numa_update_cpu(cpu, true);
+}
 
 /* Returns a pointer to the cpumask of CPUs on Node 'node'. */
 static inline const struct cpumask *cpumask_of_node(int node)
 {
-	return &node_to_cpumask_map[node];
+	return node_to_cpumask_map[node];
 }
 
-extern void setup_node_to_cpumask_map(void);
-
-extern nodemask_t __nodedata node_has_dup_kernel_map;
-extern atomic_t __nodedata node_has_dup_kernel_num;
-extern int __nodedata all_nodes_dup_kernel_nid[/*MAX_NUMNODES*/];
-
-#define	node_dup_kernel_nid(nid)	(all_nodes_dup_kernel_nid[nid])
-#define	THERE_IS_DUP_KERNEL		atomic_read(&node_has_dup_kernel_num)
-#define	DUP_KERNEL_NUM						\
-		(atomic_read(&node_has_dup_kernel_num) + 1)
-
-#define topology_physical_package_id(cpu)	cpu_to_node(cpu)
+# define topology_physical_package_id(cpu)	cpu_to_node(cpu)
 #else /* ! CONFIG_NUMA */
-
-#define numa_node_id()				0
-
 static inline void numa_init(void) { }
-
-#define	node_has_dup_kernel_map			nodemask_of_node(0)
-#define	node_has_dup_kernel_num			0
-#define	node_dup_kernel_nid(nid)		0
-#define THERE_IS_DUP_KERNEL			0
-
-#define node_to_first_cpu(node)			0
-#define node_to_first_present_cpu(node)		0
-#define node_to_present_cpumask(node)		(*cpu_present_mask)
-#define node_to_possible_cpumask(node)		cpumask_of_cpu(0)
-
-#define topology_physical_package_id(cpu)	0
+static inline void numa_add_cpu(unsigned int cpu) { }
+static inline void numa_remove_cpu(unsigned int cpu) { }
+static inline int is_duplicated_address(unsigned long addr) { return false; }
+static inline int is_duplicated_code(unsigned long ip) { return false; }
+# define topology_physical_package_id(cpu)	0
 #endif	/* CONFIG_NUMA */
 
-#define node_has_online_mem(nid) (nodes_phys_mem[nid].pfns_num != 0)
+#define for_each_node_has_dup_kernel(node) \
+		for_each_node_mm_pgdmask((node), &init_mm)
 
 #define topology_core_id(cpu)		(cpu)
 #define topology_core_cpumask(cpu)	cpumask_of_node(cpu_to_node(cpu))
@@ -164,9 +132,6 @@ static inline void arch_fix_phys_package_id(int num, u32 slot)
 {
 }
 
-static inline int is_duplicated_code(unsigned long ip)
-{
-	return ip >= (unsigned long) _stext && ip < (unsigned long) _etext;
-}
 extern const struct cpumask *cpu_coregroup_mask(int cpu);
+
 #endif /* _E2K_TOPOLOGY_H_ */

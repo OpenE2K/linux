@@ -52,10 +52,10 @@
 #define	HW_MOVE_TO_TC_IS_SUPPORTED	true
 
 /* all available page tables abstructs */
-extern const pt_struct_t __nodedata pgtable_struct_e2k_v3;
-extern const pt_struct_t __nodedata pgtable_struct_e2k_v5;
-extern const pt_struct_t __nodedata pgtable_struct_e2k_v6_pt_v6;
-extern const pt_struct_t __nodedata pgtable_struct_e2k_v6_gp;
+extern const pt_struct_t pgtable_struct_e2k_v3;
+extern const pt_struct_t pgtable_struct_e2k_v5;
+extern const pt_struct_t pgtable_struct_e2k_v6_pt_v6;
+extern const pt_struct_t pgtable_struct_e2k_v6_gp;
 
 #define	pgtable_struct_e2k_v6_pt_v3	pgtable_struct_e2k_v5
 
@@ -182,10 +182,15 @@ static inline void mmu_pt_set_host_pt_struct(struct kvm *kvm,
 	}
 }
 
+static inline const pt_struct_t *mmu_pt_get_kvm_vcpu_pt_struct(struct kvm *kvm)
+{
+	KVM_BUG_ON(kvm->arch.mmu_pt_ops.guest_pt_struct == NULL);
+	return kvm->arch.mmu_pt_ops.guest_pt_struct;
+}
+
 static inline const pt_struct_t *mmu_pt_get_vcpu_pt_struct(struct kvm_vcpu *vcpu)
 {
-	KVM_BUG_ON(vcpu->kvm->arch.mmu_pt_ops.guest_pt_struct == NULL);
-	return vcpu->kvm->arch.mmu_pt_ops.guest_pt_struct;
+	return mmu_pt_get_kvm_vcpu_pt_struct(vcpu->kvm);
 }
 
 static inline void mmu_pt_set_vcpu_pt_struct(struct kvm *kvm,
@@ -356,11 +361,12 @@ mmu_pt_sync_shadow_pt_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 }
 
 static inline int
-mmu_pt_shadow_pt_protection_fault(struct kvm_vcpu *vcpu,
-				  gpa_t addr, kvm_mmu_page_t *sp)
+mmu_pt_atomic_update_shadow_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+			gpa_t gpa, pgprotval_t old_gpte, pgprotval_t new_gpte,
+			unsigned long flags)
 {
-	return vcpu->kvm->arch.mmu_pt_ops.shadow_pt_protection_fault(vcpu,
-								addr, sp);
+	return vcpu->kvm->arch.mmu_pt_ops.atomic_update_shadow_pt(vcpu, gmm,
+					gpa, old_gpte, new_gpte, flags);
 }
 
 static inline long
@@ -541,9 +547,9 @@ mmu_pt_inject_page_fault(struct kvm_vcpu *vcpu, struct kvm_arch_exception *fault
 
 static inline void
 mmu_pt_update_spte(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
-			pgprot_t *spte, const void *pte)
+			pgprot_t *spte, pgprotval_t gpte)
 {
-	vcpu->arch.mmu.update_spte(vcpu, sp, spte, pte);
+	vcpu->arch.mmu.update_spte(vcpu, sp, spte, gpte);
 }
 
 static inline void mmu_pt_init_vcpu_pt_struct(struct kvm_vcpu *vcpu)

@@ -22,6 +22,9 @@
 
 #include "mmutrace-e2k.h"
 
+#define CREATE_TRACE_POINTS
+#include "trace-gmm.h"
+
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
 #define	DEBUG_KVM_MODE	0	/* kernel virtual machine debugging */
@@ -93,22 +96,116 @@ init_new_gmm_context(struct kvm *kvm, gmm_struct_t *gmm)
 	return 0;
 }
 
-static void destroy_gmm_u_context(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+hpa_t kvm_convert_to_init_gmm(struct kvm_vcpu *vcpu, gthread_info_t *gti)
+{
+	gmm_struct_t *cur_gmm, *init_gmm;
+	hpa_t root_hpa;
+
+	/* convert the thread to as a guest kernel thread */
+	cur_gmm = pv_vcpu_get_active_gmm(vcpu);
+	init_gmm = pv_vcpu_get_init_gmm(vcpu);
+	if (cur_gmm == init_gmm && gti == pv_vcpu_get_gti(vcpu)) {
+		/* already on init gmm */
+		KVM_WARN_ON(gti->gmm != NULL);
+	}
+	set_gti_thread_flag(gti, GTIF_KERNEL_THREAD);
+
+	root_hpa = kvm_mmu_load_the_init_gmm_root(vcpu, init_gmm);
+	pv_vcpu_set_active_gmm(vcpu, init_gmm);
+	pv_vcpu_clear_gmm(vcpu);
+
+	kvm_gmm_get(vcpu, gti, init_gmm);
+	trace_kvm_convert_to_init_gmm("convert to init gmm", vcpu, gti, cur_gmm);
+
+	return root_hpa;
+}
+
+static int destroy_all_gti_gmm_context(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
 	struct kvm *kvm = vcpu->kvm;
-	gthread_info_t *gti;
+	gthread_info_t *gti, *next_gti;
 	gpid_t *gpid;
 	struct hlist_node *next;
-	int gmm_count, i;
+	int gmm_count, cur_count, i;
+	struct kvm_vcpu *gmm_vcpu;
+	hpa_t init_root, root;
+	int r;
+	long try;
 
-	/*
-	 * root PT should be already deleted
-	 */
-	KVM_BUG_ON(VALID_PAGE(gmm->root_hpa));
-	gmm->root_gpa = E2K_INVALID_PAGE;
+	/* mark all other guest threads to switch to guest kernel gmm context */
+	gti = pv_vcpu_get_gti(vcpu);
+	gmm_count = atomic_read(&gmm->mm_count);
+	cur_count = gmm_count;
+	trace_kvm_destroy_gmm("destroy_all_gti_gmm_context()", vcpu, gti, gmm,
+				gmm_count);
+	gpid_table_lock(&kvm->arch.gpid_table);
+	for_each_guest_thread_info(gpid, i, next, &kvm->arch.gpid_table) {
+		next_gti = gpid->gthread_info;
+		if (likely(next_gti->gmm != gmm))
+			continue;
+		next_gti->gmm_in_release = true;
+		cur_count--;
+		trace_kvm_destroy_gmm("mark all gti as in release", vcpu, next_gti,
+					gmm, cur_count);
+		if (cur_count == 0)
+			break;
+	}
+	gpid_table_unlock(&kvm->arch.gpid_table);
 
-	KVM_BUG_ON(gmm == pv_vcpu_get_gmm(vcpu));
-	KVM_BUG_ON(gmm == pv_vcpu_get_active_gmm(vcpu));
+	/* switch to guest kernel init gmm on this thread */
+	root = kvm_convert_to_init_gmm(vcpu, gti);
+	init_root = kvm_mmu_get_init_gmm_root_hpa(vcpu->kvm);
+	KVM_BUG_ON(root != init_root);
+	trace_kvm_destroy_gmm("switch to init gmm", vcpu, gti, gmm,
+				atomic_read(&gmm->mm_count));
+
+	/* wait for switch of all guest threads with the gmm to init gmm */
+	try = 0;
+	do {
+
+		/* activate all vcpu(s) running guest threads with the gmm context */
+		mutex_lock(&kvm->lock);
+		kvm_for_each_vcpu(r, gmm_vcpu, kvm) {
+			if (gmm_vcpu == NULL || vcpu == gmm_vcpu)
+				continue;
+			if (pv_vcpu_get_gmm(gmm_vcpu) == gmm) {
+				kvm_vcpu_kick(gmm_vcpu);
+			}
+		}
+		mutex_unlock(&kvm->lock);
+
+		/* check all threads with the gmm switched */
+		cur_count = 0;
+		gpid_table_lock(&kvm->arch.gpid_table);
+		for_each_guest_thread_info(gpid, i, next, &kvm->arch.gpid_table) {
+			next_gti = gpid->gthread_info;
+			if (likely(next_gti->gmm != NULL && next_gti->gmm != gmm))
+				continue;
+			if (next_gti->gmm == gmm && next_gti->gmm_in_release) {
+				/* vcpu did not switch to init gmm */
+				cur_count++;
+				trace_kvm_destroy_gmm("marked gti is not converted",
+						      vcpu, next_gti, gmm,
+						      atomic_read(&gmm->mm_count));
+			} else if (next_gti->gmm == gmm) {
+				KVM_WARN_ON(true);
+				break;
+			}
+		}
+		gpid_table_unlock(&kvm->arch.gpid_table);
+		cond_resched();
+		try++;
+	} while (cur_count != 0 && try <= 5);
+	trace_kvm_destroy_gmm("switch to init gmm", vcpu, gti, gmm,
+				atomic_read(&gmm->mm_count));
+
+	return cur_count;
+}
+
+static int destroy_gmm_u_context(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+{
+	struct kvm *kvm = vcpu->kvm;
+	int gmm_count, ret = 0;
 
 	/*
 	 * GMM context is distroying, but some GTIs can have reference to it,
@@ -117,29 +214,26 @@ static void destroy_gmm_u_context(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 	gmm_count = atomic_read(&gmm->mm_count);
 	if (gmm_count > 1) {
 		/* there is(are) some gti with reference to this gmm */
-		gpid_table_lock(&kvm->arch.gpid_table);
-		for_each_guest_thread_info(gpid, i, next, &kvm->arch.gpid_table) {
-			gti = gpid->gthread_info;
-			if (likely(gti->gmm != gmm))
-				continue;
-			kvm_gmm_only_put(kvm, gti);
-			trace_kvm_gmm_put("destroy gmm context, dereference gmm "
-				"for all gti",
-				vcpu, gti, gmm);
-			gmm_count--;
-			if (gmm_count <= 1)
-				break;
-		}
-		gpid_table_unlock(&kvm->arch.gpid_table);
+		ret = destroy_all_gti_gmm_context(vcpu, gmm);
 	}
-	if (unlikely(atomic_read(&gmm->mm_count) != 1)) {
-		pr_err("%s(): gmm user's counter should be now 1, but it is %d\n",
-			__func__, atomic_read(&gmm->mm_count));
-		atomic_set(&gmm->mm_count, 1);
-		trace_kvm_gmm_put("destroy gmm context, so clear gmm counter",
-			vcpu, NULL, gmm);
+
+	release_gmm_root_pt(vcpu->kvm, gmm);
+
+	if (unlikely(ret != 0)) {
+		/* gmm is in use and cannot be release right now */
+		return ret;
 	}
-	kvm_free_gmm(vcpu->kvm, gmm);
+
+	DebugFGMM("gmm #%d after release has 0x%lx SPs, total released 0x%lx\n",
+		gmm->id, kvm_get_gmm_spt_list_size(gmm),
+		kvm_get_gmm_spt_total_released(gmm));
+
+	if (!kvm_is_empty_gmm_spt_list(gmm)) {
+		kvm_delete_gmm_sp_list(kvm, gmm);
+		KVM_WARN_ON(true);
+	}
+	kvm_free_gmm(kvm, gmm);
+	return 0;
 }
 
 /*
@@ -158,6 +252,7 @@ static inline void gmm_init(gmm_struct_t *gmm)
 	gmm->spt_list_size = 0;
 	gmm->total_released = 0;
 #endif	/* CONFIG_GUEST_MM_SPT_LIST */
+	trace_host_set_gmm_root_hpa(gmm, 0, 0, NATIVE_READ_IP_REG_VALUE());
 }
 
 static inline gmm_struct_t *do_alloc_gmm(gmmid_table_t *gmmid_table)
@@ -301,6 +396,7 @@ int kvm_guest_mm_drop(struct kvm_vcpu *vcpu, int gmmid_nr)
 	gmm_struct_t	*active_gmm = pv_vcpu_get_active_gmm(vcpu);
 	gthread_info_t	*cur_gti = pv_vcpu_get_gti(vcpu);
 	gmm_struct_t	*gmm;
+	int ret;
 
 	DebugGMM("started for host agent #%d of guest mm\n", gmmid_nr);
 	gmm = kvm_find_gmmid(&vcpu->kvm->arch.gmmid_table, gmmid_nr);
@@ -326,18 +422,12 @@ int kvm_guest_mm_drop(struct kvm_vcpu *vcpu, int gmmid_nr)
 				!pv_vcpu_is_init_gmm(vcpu, active_gmm));
 	}
 
-	release_gmm_root_pt(vcpu->kvm, gmm);
-
-	DebugFGMM("gmm #%d after release has 0x%lx SPs, total released 0x%lx\n",
-		gmm->id, kvm_get_gmm_spt_list_size(gmm),
-		kvm_get_gmm_spt_total_released(gmm));
-
-	if (!kvm_is_empty_gmm_spt_list(gmm)) {
-		kvm_delete_gmm_sp_list(vcpu->kvm, gmm);
-		KVM_WARN_ON(true);
+	ret = destroy_gmm_u_context(vcpu, gmm);
+	if (ret > 0) {
+		pr_warn("%s(): could not switch to init gmm on all threads "
+			"of gmm #%d (left %d threads)\n",
+			__func__, gmm->id, ret);
 	}
-
-	destroy_gmm_u_context(vcpu, gmm);
 
 	return 0;
 }
@@ -367,33 +457,6 @@ static void force_exit_gmm(struct kvm *kvm, gthread_info_t *gthread_info)
 	gthread_info->gmm = NULL;
 }
 
-static int kvm_deactivate_gmm(struct kvm_vcpu *vcpu,
-			gthread_info_t *gti, gmm_struct_t *gmm)
-{
-	gmm_struct_t *cur_gmm;
-	int gmmid = gmm->id;
-
-	DebugGMM("started for host gmm agent #%d users %d\n",
-		gmmid, atomic_read(&gmm->mm_count));
-	KVM_BUG_ON(gmm != gti->gmm);
-	if (unlikely(atomic_read(&gmm->mm_count) < 2)) {
-		pr_err("%s(): gmm #%d count %d but should be >= 2\n",
-			__func__, gmmid, atomic_read(&gmm->mm_count));
-	}
-
-	cur_gmm = pv_vcpu_get_gmm(vcpu);
-	if (gmm == cur_gmm) {
-		/* deactivated GMM is not more current active gmm */
-		kvm_mmu_unload_gmm_root(vcpu);
-	}
-	kvm_gmm_only_put(vcpu->kvm, gti);
-	trace_kvm_gmm_put("deactivate gmm", vcpu, gti, gmm);
-	DebugGMM("guest mm agent #%d of process agent #%d is deactivated\n",
-		gmmid, gti->gpid->nid.nr);
-
-	return 0;
-}
-
 int kvm_activate_guest_mm(struct kvm_vcpu *vcpu,
 		int active_gmmid_nr, int gmmid_nr, gpa_t u_phys_ptb)
 {
@@ -420,40 +483,7 @@ int kvm_activate_guest_mm(struct kvm_vcpu *vcpu,
 	}
 
 	old_gmm = cur_gti->gmm;
-	if (likely(active_gmmid_nr > 0)) {
-		/* old process was user guest process */
-		DebugGMM("guest old gmm is #%d\n", active_gmmid_nr);
-		if (old_gmm && old_gmm->id != active_gmmid_nr &&
-							!vcpu->arch.is_hv) {
-			pr_err("%s(): old host gmm is #%d, but guest old "
-				"gmm #%d is not the same\n",
-				__func__, old_gmm->id, active_gmmid_nr);
-		}
-		KVM_BUG_ON(old_gmm == NULL);
-	} else {
-		/* old task was guest kernel thread */
-		DebugGMM("guest old gmm is #%d (init gmm)\n", active_gmmid_nr);
-		if (old_gmm && !pv_vcpu_is_init_gmm(vcpu, old_gmm) &&
-							!vcpu->arch.is_hv) {
-			pr_err("%s(): old guest gmm is init #%d, but host old "
-				"gmm #%d is not the init too\n",
-				__func__, active_gmmid_nr, old_gmm->id);
-		}
-		KVM_BUG_ON(old_gmm != NULL);
-	}
-
-	/* deactivate old gmm of this thread */
-	if (likely(old_gmm && !pv_vcpu_is_init_gmm(vcpu, old_gmm))) {
-		int ret;
-
-		ret = kvm_deactivate_gmm(vcpu, cur_gti, old_gmm);
-		if (ret) {
-			pr_err("%s(): could not deactivate old guest mm, "
-				"error %d\n",
-				__func__, ret);
-			return ret;
-		}
-	}
+	KVM_BUG_ON(old_gmm != NULL);
 
 	kvm_gmm_get(vcpu, cur_gti, new_gmm);
 	trace_kvm_gmm_get("activate new guest mm", vcpu, cur_gti, new_gmm);
@@ -626,6 +656,21 @@ void kvm_guest_pv_mm_free(struct kvm *kvm)
 
 	/* release init gmm */
 	pv_mmu_clear_init_gmm(kvm);
+}
+
+int kvm_dump_host_and_guest_pts(struct kvm *kvm, int gmmid_nr,
+				e2k_addr_t start, e2k_addr_t end)
+{
+	gmm_struct_t	*gmm;
+
+	gmm = kvm_find_gmmid(&kvm->arch.gmmid_table, gmmid_nr);
+	if (gmm == NULL) {
+		pr_err("%s(): could not find gmm host agent GMMID #%d\n",
+			__func__, gmmid_nr);
+		return -ENODEV;
+	}
+	mmu_pt_dump_host_and_guest_pts(kvm, gmm, start, end);
+	return 0;
 }
 
 void kvm_guest_pv_mm_destroy(struct kvm *kvm)

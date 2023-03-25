@@ -35,6 +35,7 @@
 
 #include <linux/types.h>
 #include <linux/kvm_types.h>
+#include <linux/errno.h>
 
 #include <asm/e2k_api.h>
 #include <asm/cpu_regs_types.h>
@@ -380,7 +381,7 @@ HYPERVISOR_switch_to_guest_init_mm(void)
 	return light_hypercall0(KVM_HCALL_SWITCH_TO_INIT_MM);
 }
 
-union recovery_faulted_arg {
+typedef union recovery_faulted_arg {
 	struct {
 		char vr;
 		char chan;
@@ -390,7 +391,7 @@ union recovery_faulted_arg {
 		u16 tag_ext;
 	};
 	u64 entire;
-};
+} recovery_faulted_arg_t;
 static inline unsigned long
 HYPERVISOR_move_tagged_data(int word_size,
 		e2k_addr_t addr_from, e2k_addr_t addr_to)
@@ -519,7 +520,7 @@ HYPERVISOR_fast_kernel_tagged_memory_copy(void *dst, const void *src, size_t len
 }
 static inline unsigned long
 HYPERVISOR_fast_kernel_tagged_memory_set(void *addr, u64 val, u64 tag, size_t len,
-					 u64 strd_opcode)
+				  u64 strd_opcode)
 {
 	return light_hypercall5(KVM_HCALL_FAST_KERNEL_TAGGED_MEMORY_SET,
 			(unsigned long)addr, val, tag, len, strd_opcode);
@@ -699,6 +700,8 @@ HYPERVISOR_update_guest_kernel_crs(e2k_mem_crs_t *crs, e2k_mem_crs_t *prev_crs,
 						/* without flushing tlb */
 #define	KVM_HCALL_GET_SPT_TRANSLATION	137	/* get full translation of guest */
 						/* address at shadow PTs */
+#define	KVM_HCALL_DUMP_ALL_TLB		139	/* dump all TLB state */
+#define	KVM_HCALL_DUMP_HOST_AND_GUEST_PT 140	/* dump host & guest PTs */
 #define	KVM_HCALL_RECOVERY_FAULTED_TAGGED_STORE 141
 						/* recovery faulted store */
 						/* tagged value operations */
@@ -887,6 +890,7 @@ typedef struct kvm_pcs_patch_info {
 
 /* flags of operations on guest MMU */
 #define	INIT_STATE_GMMU_OPC		0x00000001UL
+#define	INIT_STATE_GMMU_TC_ONLY		0x00000002UL
 #define	SET_OS_VAB_GMMU_OPC		0x00000010UL
 #define	CREATE_NEW_GMM_GMMU_OPC		0x00000100UL
 
@@ -1149,19 +1153,12 @@ HYPERVISOR_get_all_guest_glob_regs(unsigned long *gregs[2])
 
 static inline unsigned long
 HYPERVISOR_recovery_faulted_tagged_guest_store(e2k_addr_t address, u64 wr_data,
-		u32 data_tag, u64 st_rec_opc, u64 data_ext, u32 data_ext_tag,
-		u64 opc_ext, int chan, int qp_store, int atomic_store)
+			u64 st_rec_opc, u64 data_ext, u64 opc_ext,
+			recovery_faulted_arg_t args)
 {
-	union recovery_faulted_arg arg = {
-		.chan = chan,
-		.qp = !!qp_store,
-		.atomic = !!atomic_store,
-		.tag = data_tag,
-		.tag_ext = data_ext_tag
-	};
 	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_TAGGED_GUEST_STORE,
 			address, wr_data, st_rec_opc, data_ext, opc_ext,
-			arg.entire);
+			args.entire);
 }
 static inline unsigned long
 HYPERVISOR_recovery_faulted_guest_load(e2k_addr_t address,
@@ -1206,19 +1203,12 @@ HYPERVISOR_recovery_faulted_load_to_guest_greg(e2k_addr_t address,
 
 static inline unsigned long
 HYPERVISOR_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
-		u32 data_tag, u64 st_rec_opc, u64 data_ext, u32 data_ext_tag,
-		u64 opc_ext, int chan, int qp_store, int atomic_store)
+		u64 st_rec_opc, u64 data_ext, u64 opc_ext,
+		recovery_faulted_arg_t args)
 {
-	union recovery_faulted_arg arg = {
-		.chan = chan,
-		.qp = !!qp_store,
-		.atomic = !!atomic_store,
-		.tag = data_tag,
-		.tag_ext = data_ext_tag
-	};
 	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_TAGGED_STORE,
 			address, wr_data, st_rec_opc, data_ext, opc_ext,
-			arg.entire);
+			args.entire);
 }
 static inline unsigned long
 HYPERVISOR_recovery_faulted_load(e2k_addr_t address, u64 *ld_val,
@@ -1465,13 +1455,9 @@ HYPERVISOR_notify_io(unsigned int notifier_io)
 #define	KVM_SHUTDOWN_RESTART		0x02
 #define	KVM_SHUTDOWN_PANIC		0x03
 
-extern void smp_send_refresh(void);
 static inline unsigned long
 HYPERVISOR_kvm_shutdown(void *msg, unsigned long reason)
 {
-#ifdef CONFIG_SMP
-	smp_send_refresh();
-#endif
 	return generic_hypercall2(KVM_HCALL_SHUTDOWN, (unsigned long)msg,
 					reason);
 }
@@ -1524,6 +1510,19 @@ HYPERVISOR_get_spt_translation(e2k_addr_t address,
 {
 	return generic_hypercall2(KVM_HCALL_GET_SPT_TRANSLATION, address,
 					(unsigned long)trans_info);
+}
+
+static inline unsigned long
+HYPERVISOR_dump_tlb_state(void)
+{
+	return generic_hypercall0(KVM_HCALL_DUMP_ALL_TLB);
+}
+
+static inline unsigned long
+HYPERVISOR_dump_host_and_guest_pts(int gmmid_nr, e2k_addr_t start, e2k_addr_t end)
+{
+	return generic_hypercall3(KVM_HCALL_DUMP_HOST_AND_GUEST_PT,
+				  gmmid_nr, start, end);
 }
 
 static inline unsigned long

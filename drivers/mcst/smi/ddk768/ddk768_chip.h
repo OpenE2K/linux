@@ -11,6 +11,7 @@
 *******************************************************************/
 #ifndef _DDK768_CHIP_H_
 #define _DDK768_CHIP_H_
+#include "../smi_drv.h"
 
 /* This is all the chips recognized by this library */
 typedef enum _logical_chip_type_t
@@ -37,7 +38,7 @@ initchip_param_t;
 /*
  * This function returns frame buffer memory size in Byte units.
  */
-unsigned long ddk768_getFrameBufSize(void);
+unsigned long ddk768_getFrameBufSize(struct smi_device *sdev);
 
 
 
@@ -63,7 +64,8 @@ char * ddk768_getChipTypeString(void);
  *        -1 if fail.
  *
  */
-long ddk768_initChipParamEx(initchip_param_t * pInitParam);
+long ddk768_initChipParamEx(struct smi_device *sdev,
+				initchip_param_t * pInitParam);
 
 /*
  * Initialize the chip with default parameters.
@@ -73,7 +75,7 @@ long ddk768_initChipParamEx(initchip_param_t * pInitParam);
  * Return: 0 (or NO_ERROR) if successful.
  *        -1 if fail.
  */
-long ddk768_initChip(void);
+long ddk768_initChip(struct smi_device *sdev);
 
 #define MB(x) (x<<20) /* Macro for Mega Bytes */
 

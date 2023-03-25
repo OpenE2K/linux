@@ -465,7 +465,7 @@ static int log_store(u32 caller_id, int facility, int level,
 	}
 #ifdef CONFIG_MCST
 #ifdef CONFIG_NVRAM_PANIC
-	if (smp_processor_id() == atomic_read(&panic_cpu)) {
+	if (raw_smp_processor_id() == atomic_read(&panic_cpu)) {
 		write_to_nvram_panic_area(text, text_len);
 		if (flags & LOG_NEWLINE)
 			write_to_nvram_panic_area("\n", 1);

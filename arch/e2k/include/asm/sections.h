@@ -27,17 +27,28 @@
 #define	__init_cons
 #endif	/* boot console used after init completion */
 
+/* privileged actions hypercall support */
+#define	__priv_hypercall	notrace __interrupt
+#ifdef	CONFIG_KVM_HOST_MODE
+#define	__can_be_priv_hypercall	__priv_hypercall
+#else	/* !CONFIG_KVM_HOST_MODE */
+#define	__can_be_priv_hypercall
+#endif	/* CONFIG_KVM_HOST_MODE */
+
 #ifndef __ASSEMBLY__
 extern char _start[];
 extern char __ttable_start[];
 extern char __ttable_end[];
+extern char __uaccess_start[], __uaccess_end[];
 extern char __C1_wait_trap_start[], __C1_wait_trap_end[];
 extern char __C3_wait_trap_start[], __C3_wait_trap_end[];
 extern char __init_text_begin[], __init_text_end[];
 extern char __init_data_begin[], __init_data_end[];
 extern char __node_data_start[], __node_data_end[];
+extern char __start_rodata_notes[], __end_rodata_notes[];
 extern char __common_data_begin[], __common_data_end[];
-extern char _edata_bss[];
+extern char __special_data_begin[], __special_data_end[];
+extern char _sdata_bss[], _edata_bss[];
 extern char _t_entry[], _t_entry_end[];
 extern char __entry_handlers_start[], __entry_handlers_end[];
 extern char __entry_handlers_hcalls_start[], __entry_handlers_hcalls_end[];
@@ -49,7 +60,7 @@ extern char __start_ro_after_init[], __end_ro_after_init[];
 #define __NODEDATA	.section ".node.data","aw"
 #else	/* ! CONFIG_NUMA */
 #define __nodedata	__section(data)
-#define __NODEDATA	.data
+#define __NODEDATA	.section ".data","aw"
 #endif	/* CONFIG_NUMA */
 
 #endif	/* _E2K_SECTIONS_H */

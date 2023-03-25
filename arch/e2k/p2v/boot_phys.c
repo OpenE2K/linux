@@ -66,36 +66,10 @@
 #define	DEBUG_NUMA_MODE		0	/* Boot NUMA */
 #define	DebugNUMA		if (DEBUG_NUMA_MODE) do_boot_printk
 
-/*
- * The array 'boot_mem_bitmaps[]' is a buffer for boot maps of physical memory
- * banks. The size of array is restricted by memory needed to boot tasks only.
- * This size is constant described by '#define BOOT_MAX_PHYS_MEM_SIZE'.
- * It is needed to allocate the boot bitmap array statically into the kernel
- * image. Creation of full physical memory map can be completed later,
- * when virtual memory support will be ready.
- */
-
-#ifndef	CONFIG_NUMA
-#define	boot_node_dma_low_mem_reseerved	0
-#define	boot_node_low_mem_remapped	0
-#else	/* CONFIG_NUMA */
-static boot_spinlock_t __initdata boot_node_low_mem_lock[MAX_NUMNODES] = {
-	[0 ... (MAX_NUMNODES-1)] = __BOOT_SPIN_LOCK_UNLOCKED
-};
-static int __initdata node_dma_low_mem_reseerved[MAX_NUMNODES] = { 0 };
-#define	boot_node_dma_low_mem_reseerved		\
-		boot_get_vo_value(		\
-			node_dma_low_mem_reseerved[boot_numa_node_id()])
-static int __initdata node_low_mem_remapped[MAX_NUMNODES] = { 0 };
-#define	boot_node_low_mem_remapped		\
-		boot_get_vo_value(node_low_mem_remapped[boot_numa_node_id()])
-#endif	/* ! CONFIG_NUMA */
-
 e2k_addr_t	start_of_phys_memory;	/* start address of physical memory */
 e2k_addr_t	end_of_phys_memory;	/* end address + 1 of physical memory */
 e2k_size_t	pages_of_phys_memory;	/* number of pages of physical memory */
-e2k_addr_t	kernel_image_size;	/* size of full kernel image in the */
-					/* memory ("text" + "data" + "bss") */
+
 #ifdef	CONFIG_SMP
 #ifndef	CONFIG_NUMA
 static boot_spinlock_t boot_phys_mem_lock = __BOOT_SPIN_LOCK_UNLOCKED;
@@ -116,6 +90,7 @@ static boot_spinlock_t __initdata_recv boot_phys_mem_lock[MAX_NUMNODES] = {
 #define	boot_the_node_spin_unlock(node, lock)
 #endif	/* CONFIG_SMP */
 
+__init
 void boot_expand_phys_banks_reserved_areas(void)
 {
 	boot_phys_mem_t	*all_nodes_mem = NULL;
@@ -240,7 +215,7 @@ boot_do_create_physmem_maps(boot_info_t *boot_info, bool create)
 }
 
 /* lock should be taken by caller */
-static inline void __init
+static inline void __init_recv
 boot_delete_busy_area(int node, e2k_phys_bank_t *phys_bank,
 	e2k_busy_mem_t *busy_area, short area_id, e2k_busy_mem_t *prev_area)
 {
@@ -911,9 +886,9 @@ boot_find_bank_of_addr(e2k_addr_t phys_addr, int *node_id, short *bank_index)
  * of reserved memory range is already occupied and 'ignore_busy' is not set.
  */
 
-int __init_recv boot_reserve_physmem(e2k_addr_t virt_phys_addr,
-			e2k_size_t mem_size, busy_mem_type_t mem_type,
-			unsigned short flags)
+void __init_recv boot_reserve_physmem(const char *name,
+		e2k_addr_t virt_phys_addr, e2k_size_t mem_size,
+		busy_mem_type_t mem_type, unsigned short flags)
 {
 	e2k_addr_t	phys_addr;
 	e2k_addr_t	base_addr;
@@ -927,8 +902,7 @@ int __init_recv boot_reserve_physmem(e2k_addr_t virt_phys_addr,
 	all_nodes_mem = boot_vp_to_pp((boot_phys_mem_t *)boot_phys_mem);
 	phys_addr = boot_vpa_to_pa(virt_phys_addr);
 	end_addr = phys_addr + mem_size;
-	DebugBank("boot_reserve_physmem() started: mem addr 0x%lx "
-		"size 0x%lx\n",
+	DebugBank("boot_reserve_physmem() started: mem addr 0x%lx  size 0x%lx\n",
 		phys_addr, mem_size);
 	if (mem_size == 0)
 		BOOT_BUG("Reserved memory area size %ld is empty", mem_size);
@@ -938,8 +912,8 @@ int __init_recv boot_reserve_physmem(e2k_addr_t virt_phys_addr,
 	 * considered fully reserved.
 	 */
 
-	base_addr = _PAGE_ALIGN_UP(phys_addr, PAGE_SIZE);
-	end_addr = _PAGE_ALIGN_DOWN(end_addr, PAGE_SIZE);
+	base_addr = round_down(phys_addr, PAGE_SIZE);
+	end_addr = round_up(end_addr, PAGE_SIZE);
 	pages_num = (end_addr - base_addr) >> PAGE_SHIFT;
 
 	/*
@@ -957,7 +931,7 @@ int __init_recv boot_reserve_physmem(e2k_addr_t virt_phys_addr,
 				"address 0x%lx was not found\n",
 				base_addr);
 			if (flags & BOOT_IGNORE_BANK_NOT_FOUND)
-				return 0;
+				return;
 			/* Some guest areas can be allocated by QEMU/host */
 			/* into special address space to emulate hardware */
 			if (!boot_paravirt_enabled()) {
@@ -992,11 +966,16 @@ int __init_recv boot_reserve_physmem(e2k_addr_t virt_phys_addr,
 		pages_num -= bank_pages_num;
 		base_addr += (bank_pages_num << PAGE_SHIFT);
 	}
-	return error_flag;
+
+	BOOT_BUG_ON(error_flag, "Could not reserve '%s' area: base addr 0x%lx size 0x%lx",
+			name, virt_phys_addr, mem_size);
+
+	boot_printk("The kernel '%s' segment:  base 0x%lx size 0x%lx\n",
+			name, virt_phys_addr, mem_size);
 }
 
-int __init_recv boot_delete_physmem(e2k_addr_t virt_phys_addr,
-			e2k_size_t mem_size)
+void __init_recv boot_delete_physmem(const char *name,
+		e2k_addr_t virt_phys_addr, e2k_size_t mem_size)
 {
 	unsigned short flags;
 
@@ -1013,8 +992,8 @@ int __init_recv boot_delete_physmem(e2k_addr_t virt_phys_addr,
 				BOOT_NOT_IGNORE_BUSY_BANK |
 				BOOT_IGNORE_BANK_NOT_FOUND;
 	}
-	return boot_reserve_physmem(virt_phys_addr, mem_size,
-				    hw_stripped_mem_type, flags);
+	boot_reserve_physmem(name, virt_phys_addr, mem_size,
+			hw_stripped_mem_type, flags);
 }
 
 void __init_recv boot_rereserve_bank_area(int node_id,
@@ -1108,6 +1087,7 @@ boot_param("iommu", boot_iommu_win_setup);
 static void __init
 boot_reserve_dma_low_memory(boot_info_t *boot_info)
 {
+	static __initdata BOOT_DEFINE_NODE_LOCK(low_mem_reserved_lock);
 	e2k_size_t area_size;
 	e2k_size_t min_size;
 	e2k_size_t max_size;
@@ -1127,8 +1107,7 @@ boot_reserve_dma_low_memory(boot_info_t *boot_info)
 		return;
 	}
 
-	if (BOOT_TEST_AND_SET_NODE_LOCK(boot_node_low_mem_lock,
-					boot_node_dma_low_mem_reseerved)) {
+	if (boot_node_lock(&low_mem_reserved_lock)) {
 		DebugNUMA("boot_reserve_dma_low_memory() DMA bounce buffers "
 			"was already reserved on node\n");
 		return;
@@ -1161,8 +1140,7 @@ boot_reserve_dma_low_memory(boot_info_t *boot_info)
 			area_size >> 20, (e2k_addr_t)dma_low_mem);
 	}
 
-	BOOT_NODE_UNLOCK(boot_node_low_mem_lock,
-				boot_node_dma_low_mem_reseerved);
+	boot_node_unlock(&low_mem_reserved_lock);
 }
 
 static void __init
@@ -1521,12 +1499,12 @@ boot_remap_node_low_memory(boot_info_t *boot_info, int node_id,
 static void __init
 boot_remap_low_to_high_memory(boot_info_t *boot_info)
 {
+	static __initdata BOOT_DEFINE_NODE_LOCK(low_mem_remapped_lock);
 	boot_phys_mem_t *all_nodes_mem;
 	boot_phys_mem_t *node_mem;
 	int node_id;
 
-	if (BOOT_TEST_AND_SET_NODE_LOCK(boot_node_low_mem_lock,
-					boot_node_low_mem_remapped)) {
+	if (boot_node_lock(&low_mem_remapped_lock)) {
 		DebugNUMA("boot_remap_low_to_high_memory() low memory "
 			"was already remapped on node\n");
 		return;
@@ -1539,7 +1517,7 @@ boot_remap_low_to_high_memory(boot_info_t *boot_info)
 	if (node_mem->pfns_num != 0)
 		boot_remap_node_low_memory(boot_info, node_id, node_mem);
 
-	BOOT_NODE_UNLOCK(boot_node_low_mem_lock, boot_node_low_mem_remapped);
+	boot_node_unlock(&low_mem_remapped_lock);
 }
 
 static	e2k_busy_mem_t * __init_recv
@@ -1658,21 +1636,6 @@ boot_update_kernel_image_addr(bool bsp, boot_info_t *boot_info)
 	e2k_addr_t old_addr, new_addr;
 
 	if (BOOT_IS_BSP(bsp)) {
-		/* kernel image base address */
-		old_addr = boot_kernel_phys_base;
-		new_addr = boot_get_remapped_area_addr(boot_info,
-					old_addr, kernel_image_mem_type);
-		if (new_addr != old_addr) {
-			boot_kernel_phys_base = new_addr;
-			DebugRMLT("kernel image base address was remapped from "
-				"low memory 0x%lx to high 0x%lx\n",
-				old_addr, new_addr);
-		} else {
-			DebugRMLT("kernel image base address could not remap "
-				"from low memory 0x%lx to high\n",
-				old_addr);
-		}
-
 		/* kernel image 'text' segment */
 		old_addr = boot_text_phys_base;
 		new_addr = boot_get_remapped_area_addr(boot_info,
@@ -1702,21 +1665,6 @@ boot_update_kernel_image_addr(bool bsp, boot_info_t *boot_info)
 				"from low memory 0x%lx to high\n",
 				old_addr);
 		}
-	}
-
-	/* kernel 'trap cellar' */
-	old_addr = (e2k_addr_t)boot_trap_cellar;
-	new_addr = boot_get_remapped_area_addr(boot_info,
-				old_addr, kernel_image_mem_type);
-	if (new_addr != old_addr) {
-		boot_set_MMU_TRAP_POINT(boot_trap_cellar);
-		DebugRMLT("kernel 'trap cellar' area was remapped from "
-			"low memory 0x%lx to high 0x%lx\n",
-			old_addr, new_addr);
-	} else {
-		DebugRMLT("kernel 'trap cellar' area could not remap "
-			"from low memory 0x%lx to high\n",
-			old_addr);
 	}
 }
 

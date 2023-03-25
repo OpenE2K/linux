@@ -885,8 +885,7 @@ static int PcieInit(void)
 #else /* E2K */
   // Try to setup the interrupt
   if (pci_enable_msi(gDev)) {
-    printk(KERN_ERR "bige: pci_enable_msi() failed.\n");
-//    return -1;
+    pr_debug("bige: pci_enable_msi() failed.\n");
   }
   irq = gDev->irq;
 #endif

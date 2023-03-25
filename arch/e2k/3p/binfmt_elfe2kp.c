@@ -3,6 +3,7 @@
 #include <linux/kernel.h>
 #include <linux/mman.h>
 #include <linux/file.h>
+#include <linux/fsnotify.h>
 #include <linux/personality.h>
 #include <linux/elfcore.h>
 #include <linux/security.h>
@@ -236,21 +237,23 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
         /* The base descriptor is temporarily saved to the start of the 
            memory area it describes. After it is copied to %qr0 we may
            erase it from stack. */
-	PUT_USER_AP(sp, bprm->p, args_end - bprm->p, 0L, RW_ENABLE);
+	if (PUT_USER_AP(sp, bprm->p, args_end - bprm->p, 0L, RW_ENABLE))
+		return -EFAULT;
 	sp++;
 #else
 	/* descriptor to the next four ones */
-	PUT_USER_AP(sp, sp + 1, E2k_ELF_ARG_NUM_AP * sizeof (e2k_ptr_t),
-			0L, R_ENABLE);
+	if (PUT_USER_AP(sp, sp + 1, E2k_ELF_ARG_NUM_AP * sizeof (e2k_ptr_t),
+			0L, R_ENABLE))
+		return -EFAULT;
 	sp++;
 
-	PUT_USER_AP(sp + E2k_ELF_ARGV_IND, argvb,
-		    (envpb - argvb), 0, R_ENABLE);
-	PUT_USER_AP(sp + E2k_ELF_ENVP_IND, envpb,
-		     (mddb - envpb), 0, R_ENABLE);
-	PUT_USER_AP(sp + E2k_ELF_AUX_IND, auxb,
-		     (ei_index * sizeof elf_info[0]), 0, R_ENABLE);
-	}
+	if (PUT_USER_AP(sp + E2k_ELF_ARGV_IND, argvb, (envpb - argvb), 0, R_ENABLE))
+		return -EFAULT;
+	if (PUT_USER_AP(sp + E2k_ELF_ENVP_IND, envpb, (mddb - envpb), 0, R_ENABLE))
+		return -EFAULT;
+	if (PUT_USER_AP(sp + E2k_ELF_AUX_IND, auxb,
+			(ei_index * sizeof elf_info[0]), 0, R_ENABLE))
+		return -EFAULT;
 #endif
 
         /* Save argc. */
@@ -269,10 +272,12 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 		if (!len || len > PAGE_SIZE*MAX_ARG_PAGES) {
 			return 0;
 		}
-		PUT_USER_AP(sp++, p, len, 0, RW_ENABLE);
+		if (PUT_USER_AP(sp++, p, len, 0, RW_ENABLE))
+			return -EFAULT;
 		p += len;
 	}
-	PUT_USER_AP(sp, 0, 0, 0, 0);
+	if (PUT_USER_AP(sp, 0, 0, 0, 0))
+		return -EFAULT;
 
 
 	/* Populate  envp */
@@ -284,10 +289,12 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 		if (!len || len > PAGE_SIZE*MAX_ARG_PAGES) {
 			return 0;
 		}
-		PUT_USER_AP(sp++, p, len, 0, RW_ENABLE);
+		if (PUT_USER_AP(sp++, p, len, 0, RW_ENABLE))
+			return -EFAULT;
 		p += len;
 	}
-	PUT_USER_AP(sp, 0, 0, 0, 0);
+	if (PUT_USER_AP(sp, 0, 0, 0, 0))
+		return -EFAULT;
 	current->mm->env_end = p;
 
 	/* Put the elf_info on the stack in the right place.  */
@@ -494,15 +501,18 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 		}
 		/* case PT_LOAD */
 		/* Check the correctness of segment */
-		if ( prog_p->p_align % PAGE_SIZE != 0 ) {
+		if (prog_p->p_align % PAGE_SIZE != 0) {
 			DBPL("load segment not page-aligned 0x%llx.\n",
-				 (u64)prog_p->p_align);
+					 (u64) prog_p->p_align);
 			return retval;
 		}
-		 if ((prog_p->p_vaddr - prog_p->p_offset) % prog_p->p_align ) {
-			DBPL( "load segment address/offset not properly"
-				" aligned 0x%llx : 0x%llx.\n",
-				(u64)prog_p->p_vaddr, (u64)prog_p->p_offset);
+		if (!prog_p->p_align) {
+			DBPL("load segment alignment is 0\n");
+			return retval;
+		}
+		if (!prog_p->p_align || (prog_p->p_vaddr - prog_p->p_offset) % prog_p->p_align) {
+			DBPL("load segment address/offset not properly aligned 0x%llx : 0x%llx.\n",
+					(u64) prog_p->p_vaddr, (u64) prog_p->p_offset);
 			return retval;
 		}
 		 /*
@@ -1199,13 +1209,15 @@ static int load_e2p_load_binary(struct linux_binprm * bprm)
 	set_binfmt(&elf_format);
 
 	/* load data for user */
-	create_elf_tables(bprm, &elf_ex, load_offset,
+	retval = create_elf_tables(bprm, &elf_ex, load_offset,
 			  /* Entry point should be believed to be unknown if
 			   * ld.so is started as an interpreter (or implicitly
 			   * in other words).
 			   */
 			  interpf ? 0 : start_point,
 			  interp_elfhdr_offset);
+	if (retval)
+		goto out_free_interp_file;
 	current->mm->start_stack = bprm->p;
 
 	// XXX set stack protection if current->ptrace & PT_PTRACED
@@ -1246,18 +1258,46 @@ out:
 }
 
 
-long sys_load_cu(char *name, kmdd_t *mdd)
+long sys_load_cu(const char __user *name, kmdd_t *mdd)
 {
-	int ret;
+	struct file *file;
+	struct path path;
+	int error;
 
-	struct file *file = open_exec(name);
+	error = user_path_at(AT_FDCWD, name, LOOKUP_FOLLOW, &path);
+	if (error)
+		return error;
+
+	if (!S_ISREG(path.dentry->d_inode->i_mode)) {
+		path_put(&path);
+		return -EACCES;
+	}
+
+	error = inode_permission(path.dentry->d_inode, MAY_READ);
+	if (error) {
+		path_put(&path);
+		return error;
+	}
+
+	file = dentry_open(&path, O_RDONLY, current_cred());
+	path_put(&path);
 	if (IS_ERR(file))
 		return PTR_ERR(file);
 
-	ret = e2p_load_cu_file(file, NULL, NULL, mdd, NULL, NULL);
-	allow_write_access(file);
+	error = -EACCES;
+	if (WARN_ON_ONCE(!S_ISREG(file_inode(file)->i_mode)))
+		goto exit;
+
+	error = -ENOEXEC;
+	if (file->f_op == NULL)
+		goto exit;
+
+	fsnotify_open(file);
+
+	error = e2p_load_cu_file(file, NULL, NULL, mdd, NULL, NULL);
+exit:
 	fput(file);
-	return ret;
+	return error;
 }
 
 long sys_unload_cu(unsigned long glob_base, size_t glob_size)

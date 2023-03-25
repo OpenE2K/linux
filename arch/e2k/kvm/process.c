@@ -36,6 +36,7 @@
 #include "pic.h"
 
 #include "mmutrace-e2k.h"
+#include "trace-virq.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -293,7 +294,6 @@ int clone_guest_kernel = 0;
 static gthread_info_t *alloc_guest_thread_info(struct kvm *kvm);
 static void free_guest_thread_info(struct kvm *kvm, gthread_info_t *gti);
 static void do_free_guest_thread_info(struct kvm *kvm, gthread_info_t *gti);
-static int kvm_guest_failed(struct kvm_vcpu *vcpu);
 
 #define	SET_VCPU_BREAKPOINT	false
 
@@ -480,11 +480,6 @@ void kvm_clear_host_thread_info(thread_info_t *ti)
 
 	INIT_LIST_HEAD(&ti->tasks_to_spin);
 	ti->gti_to_spin = NULL;
-
-	/* VCPU is not yet created */
-	clear_ti_thread_flag(ti, TIF_VIRTUALIZED_HOST);
-	clear_ti_thread_flag(ti, TIF_VIRTUALIZED_GUEST);
-	clear_ti_thread_flag(ti, TIF_PARAVIRT_GUEST);
 }
 
 static inline void resume_host_start_thread(struct kvm_vcpu *vcpu)
@@ -502,7 +497,6 @@ static inline void resume_host_start_thread(struct kvm_vcpu *vcpu)
 	}
 
 	/* from here the thread will be as common thread */
-	clear_thread_flag(TIF_VIRTUALIZED_HOST);
 	clear_thread_flag(TIF_MULTITHREADING);
 
 	kvm_halt_host_vcpu_thread(vcpu);
@@ -513,10 +507,6 @@ int kvm_resume_vm_thread(void)
 	if (!test_thread_flag(TIF_MULTITHREADING))
 		return 0;
 
-	if (test_thread_flag(TIF_VIRTUALIZED_HOST))
-		resume_host_start_thread(current_thread_info()->vcpu);
-	else if (test_thread_flag(TIF_VIRTUALIZED_GUEST))
-		return kvm_guest_failed(current_thread_info()->vcpu);
 	clear_thread_flag(TIF_MULTITHREADING);
 	return 0;
 }
@@ -607,6 +597,7 @@ int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu)
 		vcpu->kvm->arch.vmid.nr, vcpu->vcpu_id);
 	set_task_comm(current, name);
 	vcpu->arch.host_task = current;
+	task_thread_info(current)->is_vcpu = vcpu;
 
 	kvm_reset_vcpu_thread(vcpu);
 
@@ -814,10 +805,9 @@ free_stack_mmap:
 void vcpu_clear_signal_stack(struct kvm_vcpu *vcpu)
 {
 	kvm_host_context_t *host_ctxt;
+	thread_info_t *vcpu_ti;
 	int trap_no, syscall_no;
 	unsigned long size;
-
-	KVM_BUG_ON(current_thread_info()->vcpu != vcpu);
 
 	host_ctxt = &vcpu->arch.host_ctxt;
 
@@ -827,22 +817,37 @@ void vcpu_clear_signal_stack(struct kvm_vcpu *vcpu)
 	 */
 	trap_no = atomic_read(&host_ctxt->signal.traps_num);
 	syscall_no = atomic_read(&host_ctxt->signal.syscall_num);
-	size = current_thread_info()->signal_stack.size;
 
-	if (trap_no != 0 || syscall_no != 0 || size != 0) {
-		DebugFreeSS("VCPU #%d signal stack %d + %d frames "
-			"at %px, size 0x%lx\n",
-			vcpu->vcpu_id, trap_no, syscall_no,
-			(void *)current_thread_info()->signal_stack.base, size);
+	if (trap_no != 0 || syscall_no != 0) {
+		DebugFreeSS("VCPU #%d not empty number of trap frames %d + %d "
+			"syscall frames\n",
+			vcpu->vcpu_id, trap_no, syscall_no);
 	}
 
 	atomic_set(&host_ctxt->signal.traps_num, 0);
 	atomic_set(&host_ctxt->signal.in_work, 0);
 	atomic_set(&host_ctxt->signal.syscall_num, 0);
 	atomic_set(&host_ctxt->signal.in_syscall, 0);
-	current_thread_info()->signal_stack.base = 0;
-	current_thread_info()->signal_stack.size = 0;
-	current_thread_info()->signal_stack.used = 0;
+
+	/* zeroing VCPU host context signal stack state */
+	host_ctxt->signal.stack.base = 0;
+	host_ctxt->signal.stack.size = 0;
+	host_ctxt->signal.stack.used = 0;
+
+	if (vcpu->arch.host_task == NULL) {
+		/* host vcpu thread does not yet created */
+		return;
+	}
+	vcpu_ti = task_thread_info(vcpu->arch.host_task);
+	KVM_BUG_ON(vcpu_ti->is_vcpu != vcpu);
+	size = vcpu_ti->signal_stack.size;
+	if (size != 0) {
+		DebugFreeSS("VCPU #%d not signal stack at %px, size 0x%lx\n",
+			vcpu->vcpu_id, (void *)vcpu_ti->signal_stack.base, size);
+	}
+	vcpu_ti->signal_stack.base = 0;
+	vcpu_ti->signal_stack.size = 0;
+	vcpu_ti->signal_stack.used = 0;
 }
 
 /*
@@ -1198,7 +1203,7 @@ static int kvm_setup_guest_user_stacks(struct kvm_vcpu *vcpu,
 	gthread_info_t	*gti;
 	gmm_struct_t	*gmm;
 	char		*entry_point;
-	e2k_psr_t	psr;
+	e2k_psr_t	cur_psr, psr;
 	int		ret, cui;
 	bool		kernel;
 
@@ -1230,9 +1235,12 @@ static int kvm_setup_guest_user_stacks(struct kvm_vcpu *vcpu,
 	if (ret)
 		goto out_failed;
 
+	cur_psr = kvm_get_guest_vcpu_PSR(vcpu);
 	kvm_set_guest_vcpu_PSR(vcpu, psr);
 	kvm_set_guest_vcpu_UPSR(vcpu, E2K_USER_INITIAL_UPSR);
 	kvm_set_guest_vcpu_under_upsr(vcpu, false);
+	trace_kvm_set_guest_vcpu_PSR(vcpu, cur_psr, psr, false,
+		NATIVE_READ_IP_REG_VALUE(), NATIVE_NV_READ_CR0_HI_REG_VALUE());
 
 	DebugFRTASK("starting the new user task GPID #%d GMMID #%d\n",
 		gti->gpid->nid.nr, gmm->nid.nr);
@@ -1795,7 +1803,7 @@ int kvm_release_guest_task_struct(struct kvm_vcpu *vcpu, int gpid_nr)
 			return -EBUSY;
 		}
 
-		if (kvm_gmm_only_put(kvm, gti) == 0) {
+		if (kvm_gmm_put_and_drop(kvm, gti) == 0) {
 			DebugFRTASK("gmm GMMID #%d was released\n", gmmid_nr);
 		} else {
 			if (!kthread) {
@@ -2419,6 +2427,11 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	DebugKVMCLN("new chain registers: wbs 0x%x, ussz 0x%x\n",
 		new_crs->cr1_lo.CR1_lo_wbs * EXT_4_NR_SZ,
 		new_crs->cr1_hi.CR1_hi_ussz << 4);
+	if (__put_user(new_crs->cr0_lo.CR0_lo_half, &AW(u_regs->crs.cr0_lo)) ||
+		__put_user(new_crs->cr0_hi.CR0_hi_half, &AW(u_regs->crs.cr0_hi)) ||
+		__put_user(new_crs->cr1_lo.CR1_lo_half, &AW(u_regs->crs.cr1_lo)) ||
+		__put_user(new_crs->cr1_hi.CR1_hi_half, &AW(u_regs->crs.cr1_hi)))
+		return -EFAULT;
 
 	/* copy last guest user CRS frame to top of guest kernel stack */
 	ret = prepare_pv_vcpu_last_user_crs(vcpu, new_stacks, new_crs);
@@ -2463,7 +2476,7 @@ int kvm_clone_guest_user_stacks(struct kvm_vcpu *vcpu,
 	return gti->gpid->nid.nr;
 
 out_free_gmm:
-	kvm_gmm_only_put(kvm, gti);
+	kvm_gmm_put_and_drop(kvm, gti);
 	trace_kvm_gmm_put("clone guest user stacks failed, so release gmm",
 		vcpu, gti, gmm);
 
@@ -2537,6 +2550,9 @@ int kvm_sig_handler_return(struct kvm_vcpu *vcpu, kvm_stacks_info_t *regs_info,
 	KVM_BUG_ON(stack_regs->crs.cr1_lo.CR1_lo_pm ||
 			!stack_regs->crs.cr1_lo.CR1_lo_ie ||
 				!stack_regs->crs.cr1_lo.CR1_lo_nmie);
+
+	/* emulate restore of guest VCPU PSR state after return to user handler */
+	kvm_emulate_guest_vcpu_psr_return(vcpu, &stack_regs->crs);
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 	context = get_signal_stack();
@@ -2934,6 +2950,7 @@ int kvm_long_jump_return(struct kvm_vcpu *vcpu,
 
 failed:
 	user_exit();
+	pr_err("%s(): kill guest: some copy failed, error %d\n", __func__, ret);
 	do_exit(SIGKILL);
 	return ret;
 }
@@ -3182,27 +3199,6 @@ long kvm_guest_shutdown(struct kvm_vcpu *vcpu, void __user *msg,
 	} else {
 		/* inject intercept as hypercall return to switch to */
 		/* vcpu run thread and handle VM exit on guest shutdown */
-		kvm_inject_vcpu_exit(vcpu);
-	}
-	return 0;
-}
-
-static int kvm_guest_failed(struct kvm_vcpu *vcpu)
-{
-	DebugKVMSH("%s (%d) started on unknown failure\n",
-		current->comm, current->pid);
-
-	vcpu->arch.exit_reason = EXIT_SHUTDOWN;
-	vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
-
-	kvm_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_offline);
-
-	if (!vcpu->arch.is_hv) {
-		/* return to host VCPU to handle exit reason */
-		return RETURN_TO_HOST_APP_HCRET;
-	} else {
-		/* inject intercept as hypercall return to switch to */
-		/* vcpu run thread and handle VM exit on guest failure */
 		kvm_inject_vcpu_exit(vcpu);
 	}
 	return 0;

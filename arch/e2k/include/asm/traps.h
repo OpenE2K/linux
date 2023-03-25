@@ -102,24 +102,15 @@ static inline unsigned int user_trap_init(void)
 	return linux_osem;
 }
 
-static inline unsigned int guest_trap_init(void)
-{
-	/* Enable system calls for user's processes. */
-	unsigned int linux_osem = user_trap_init();
-
-#ifdef CONFIG_KVM_HOST_MODE
-	linux_osem |= HYPERCALLS_TRAPS_MASK;
-#endif
-
-	return linux_osem;
-}
-
 static inline unsigned int user_hcall_init(void)
 {
 	unsigned int linux_hcem = 0;
 
 	linux_hcem = 1 << LINUX_HCALL_GENERIC_TRAPNUM;
-	linux_hcem |= 1 << LINUX_HCALL_LIGHT_TRAPNUM;
+
+	/* Light hypercalls aren't used with hardware virtualization support */
+	if (!cpu_has(CPU_FEAT_ISET_V6))
+		linux_hcem |= 1 << LINUX_HCALL_LIGHT_TRAPNUM;
 
 	return linux_hcem;
 }

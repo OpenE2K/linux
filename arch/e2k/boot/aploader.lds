@@ -20,7 +20,7 @@ SECTIONS {
 	_text = .;		/* Text and read-only data */
 
 		*(EXCLUDE_FILE (arch/e2k/boot/romstartup.o arch/e2k/boot/apstartup.o) .text .gnu.linkonce.t.*)
-		*(EXCLUDE_FILE (arch/e2k/boot/romstartup.o arch/e2k/boot/piggy.o) .rodata)
+		*(EXCLUDE_FILE (arch/e2k/boot/romstartup.o arch/e2k/boot/piggy.o) .rodata .rodata.*)
 
 		. = ALIGN(4096);
 		arch/e2k/boot/piggy.o(.rodata)

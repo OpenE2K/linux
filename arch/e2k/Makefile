@@ -11,16 +11,16 @@
 
 KBUILD_DEFCONFIG ?= defconfig
 
-AS	= $(shell $(CC) -print-prog-name=as)
-OBJDUMP	= $(shell $(CC) -print-prog-name=objdump)
-LD	= $(shell $(CC) -print-prog-name=ld)
-OBJCOPY	= $(shell $(CC) -print-prog-name=objcopy)
-
 KBUILD_CFLAGS += -fkernel -gline -masm-inline $(call cc-option,-fforbid-fp) \
-		 $(call cc-option,-fmax-errors=5) $(call cc-option,-fno-loop-apb) \
-		 -fno-ident
+		 $(call cc-option,-fmax-errors=5)  $(call cc-option,-mdmodel=large) \
+		-fno-ident $(call cc-option,-finline-functions-called-once)
+ifeq ($(CONFIG_HALF_SPECULATIVE_KERNEL),y)
+KBUILD_CFLAGS += $(call cc-option,-fsemi-spec-ld)
+else
+KBUILD_CFLAGS += $(call cc-option,-fno-loop-apb)
+endif
 
-ifeq ($(PROFILE_GENERATE), 1)
+ifeq ($(PROFILE_GENERATE),y)
 KBUILD_CFLAGS += -fprofile-generate-kernel
 endif
 ifeq ($(origin PROFILE_USE), undefined)
@@ -28,14 +28,14 @@ else
 KBUILD_CFLAGS += -fprofile-use="$(PROFILE_USE)"
 endif
 
-KBUILD_CFLAGS += $(call cc-option,-finline-functions,) \
-                 $(call cc-option,-finline-functions-called-once,)
 
+ifeq ($(call cc-lcc-yn),y)
 # Some uninteresting or broken warnings can be disabled with #pragma's only
 KBUILD_CFLAGS += -Wno-array-bounds -Wno-builtin-functions-redefined \
 		 -Wno-reduced-alignment -Wno-overflow -Wno-signed-one-bit-field \
 		 -Wno-alignment-reduction-ignored \
 		 -include $(srctree)/arch/e2k/include/asm/override-lcc-warnings.h
+endif
 
 LDFLAGS_vmlinux :=
 CHECKFLAGS	+= -D__e2k__
@@ -119,7 +119,7 @@ core-y					+= arch/e2k/kernel/ \
 					   arch/e2k/fast_syscalls/
 
 core-$(CONFIG_PROTECTED_MODE)		+= arch/e2k/3p/
-
+core-$(CONFIG_SECONDARY_SPACE_SUPPORT)	+= arch/e2k/sec_space/
 drivers-$(CONFIG_PCI)			+= arch/e2k/pci/ 
 
 # suspend and hibernation support
@@ -133,7 +133,7 @@ core-y					+= arch/l/
 drivers-$(CONFIG_PCI)			+= arch/l/pci/
 
 boot :=   arch/e2k/boot
-all: e2sboot
+all: zImage
 
 MAKEBOOT = $(MAKE) -C arch/$(ARCH)/boot
 

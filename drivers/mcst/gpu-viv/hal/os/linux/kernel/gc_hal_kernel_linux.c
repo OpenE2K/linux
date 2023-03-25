@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -100,16 +100,16 @@ gckKERNEL_QueryVideoMemory(
     Interface->u.QueryVideoMemory.internalPhysName = device->internalPhysName;
 
     /* Get external memory size and physical address. */
-    Interface->u.QueryVideoMemory.externalSize = device->externalSize;
-    Interface->u.QueryVideoMemory.externalPhysName = device->externalPhysName;
+    Interface->u.QueryVideoMemory.externalSize = device->externalSize[Kernel->pdevID];
+    Interface->u.QueryVideoMemory.externalPhysName = device->externalPhysName[Kernel->pdevID];
 
     /* Get contiguous memory size and physical address. */
     Interface->u.QueryVideoMemory.contiguousSize = device->contiguousSize;
     Interface->u.QueryVideoMemory.contiguousPhysName = device->contiguousPhysName;
 
     /* Get exclusive memory size and physical address. */
-    Interface->u.QueryVideoMemory.exclusiveSize = device->exclusiveSize;
-    Interface->u.QueryVideoMemory.exclusivePhysName = device->exclusivePhysName;
+    Interface->u.QueryVideoMemory.exclusiveSize = device->exclusiveSize[Kernel->pdevID];
+    Interface->u.QueryVideoMemory.exclusivePhysName = device->exclusivePhysName[Kernel->pdevID];
 
     /* Success. */
     gcmkFOOTER_NO();
@@ -165,7 +165,7 @@ gckKERNEL_GetVideoMemoryPool(
 
     case gcvPOOL_LOCAL_EXTERNAL:
         /* External memory. */
-        videoMemory = device->externalVidMem;
+        videoMemory = device->externalVidMem[Kernel->pdevID];
         break;
 
     case gcvPOOL_SYSTEM:
@@ -175,7 +175,7 @@ gckKERNEL_GetVideoMemoryPool(
 
     case gcvPOOL_LOCAL_EXCLUSIVE:
         /* gpu exclusive memory. */
-        videoMemory = device->exclusiveVidMem;
+        videoMemory = device->exclusiveVidMem[Kernel->pdevID];
         break;
 
     case gcvPOOL_INTERNAL_SRAM:
@@ -326,8 +326,8 @@ gckKERNEL_DestroyProcessReservedUserMap(
         }
     }
 
-    physHandle = (PLINUX_MDL)device->externalPhysical;
-    bytes = device->externalSize;
+    physHandle = (PLINUX_MDL)device->externalPhysical[Kernel->pdevID];
+    bytes = device->externalSize[Kernel->pdevID];
     if (bytes)
     {
         mdl = physHandle;
@@ -465,8 +465,8 @@ gckKERNEL_MapVideoMemory(
             break;
 
         case gcvPOOL_LOCAL_EXTERNAL:
-            physHandle = (PLINUX_MDL)device->externalPhysical;
-            bytes = device->externalSize;
+            physHandle = (PLINUX_MDL)device->externalPhysical[Kernel->pdevID];
+            bytes = device->externalSize[Kernel->pdevID];
             break;
 
         case gcvPOOL_SYSTEM:
@@ -594,8 +594,8 @@ gckKERNEL_UnmapVideoMemory(
             break;
 
         case gcvPOOL_LOCAL_EXTERNAL:
-            physHandle = (PLINUX_MDL)device->externalPhysical;
-            bytes = device->externalSize;
+            physHandle = (PLINUX_MDL)device->externalPhysical[Kernel->pdevID];
+            bytes = device->externalSize[Kernel->pdevID];
             break;
 
         case gcvPOOL_SYSTEM:

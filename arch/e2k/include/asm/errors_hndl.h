@@ -19,9 +19,6 @@ extern void	init_warning(const char *fmt_v, ...) __cold;
 
 extern void	boot_bug(const char *fmt_v, ...) __noreturn __cold;
 extern void	boot_warning(const char *fmt_v, ...) __cold;
-#define BOOT_BUG_POINT(func_name) \
-	do_boot_printk("kernel boot-time BUG at %s:%d:%s\n", __FILE__, \
-	__LINE__, func_name)
 #define BOOT_BUG_ON(condition, format...) ({				\
 	int __ret_warn_on = !!(condition);				\
 	if (unlikely(__ret_warn_on)) {					\

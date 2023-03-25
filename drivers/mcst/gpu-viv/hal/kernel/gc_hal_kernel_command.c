@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -57,6 +57,116 @@
 #include "gc_hal_kernel_context.h"
 
 #define _GC_OBJ_ZONE            gcvZONE_COMMAND
+
+#if gcdDUMP_HW_SUBCOMMAND
+typedef struct _gcsRECORD_SUBCOMMAND
+{
+    gctSTRING name;
+    gctUINT type;
+    gctUINT reg;
+}
+gcsRECORD_SUBCOMMAND;
+
+static gcsRECORD_SUBCOMMAND subCommand[] =
+{
+    {"NN", 0, 0x08010428},
+    {"TP", 1, 0x0801042E},
+    {"VS", 2, 0x0801021B},
+    {"PS", 3, 0x0801040A},
+};
+
+typedef struct _gcsSubCmdNode
+{
+    gctUINT32 type;
+    gctUINT32 address;
+    gctUINT32 count;
+    struct _gcsSubCmdNode *next;
+}
+gcsSubCmdNode, *gckSubCmdNode;
+
+static gceSTATUS
+_CreateSubCmdNode(gckOS Os, gckSubCmdNode* node)
+{
+    gceSTATUS status;
+
+    gcmkONERROR(gckOS_Allocate(
+        Os,
+        gcmSIZEOF(struct _gcsSubCmdNode),
+        (gctPOINTER *)node
+        ));
+
+    return gcvSTATUS_OK;
+
+OnError:
+    return status;
+}
+
+static gceSTATUS
+_DestroySubCmdList(gckOS Os, gckSubCmdNode head)
+{
+    gceSTATUS status;
+    gckSubCmdNode next;
+    gckSubCmdNode curNode;
+    next = head->next;
+
+    while (next)
+    {
+        curNode = next;
+        next = curNode->next;
+
+        gcmkONERROR(gckOS_Free(Os, (gctPOINTER)curNode));
+    };
+
+    return gcvSTATUS_OK;
+OnError:
+    return status;
+}
+
+static gceSTATUS
+_CreateSubCmdList(
+    IN gckOS Os,
+    IN gctPOINTER Buffer,
+    IN gctSIZE_T Size,
+    IN gcsRECORD_SUBCOMMAND* SubCommand,
+    IN gctINT Count,
+    IN gckSubCmdNode ListHead
+    )
+{
+    gctINT i, j, count;
+    gctUINT32_PTR data = Buffer;
+    gctUINT32 kData;
+    gckSubCmdNode node;
+    gceSTATUS status = gcvSTATUS_OK;
+
+    count = (gctINT)(Size / 4);
+
+    for (i = 0; i < count; i += 2)
+    {
+        for (j = 0; j < Count; j++)
+        {
+            gcmkONERROR(gckOS_ReadMappedPointer(Os, data + i, &kData));
+
+            if (kData == SubCommand[j].reg)
+            {
+                _CreateSubCmdNode(Os, &node);
+
+                node->type = j;
+
+                gcmkONERROR(gckOS_ReadMappedPointer(Os, data + i + 1, &kData));
+                node->address = kData;
+
+                ListHead->count++;
+
+                node->next = ListHead->next;
+                ListHead->next = node;
+            }
+        }
+    }
+
+OnError:
+    return status;
+}
+#endif
 
 /******************************************************************************\
 ********************************* Support Code *********************************
@@ -294,7 +404,14 @@ _CheckFlushMMU(
             &flushBytes
             ));
 
-        gcmkONERROR(gckCOMMAND_Execute(Command, flushBytes));
+        if (Command->feType == gcvHW_FE_WAIT_LINK)
+        {
+            gcmkONERROR(gckCOMMAND_Execute(Command, flushBytes));
+        }
+        else
+        {
+            gcmkONERROR(gckCOMMAND_ExecuteEnd(Command, flushBytes));
+        }
 
         if ((oldValue & gcvPAGE_TABLE_DIRTY_BIT_FE)
           && (!Hardware->stallFEPrefetch)
@@ -338,7 +455,15 @@ _CheckFlushMMU(
 
         gcmkONERROR(gckWLFE_End(Hardware, pointer, address, &endBytes));
 
-        gcmkONERROR(gckCOMMAND_Execute(Command, executeBytes));
+
+        if (Command->feType == gcvHW_FE_WAIT_LINK)
+        {
+            gcmkONERROR(gckCOMMAND_Execute(Command, executeBytes));
+        }
+        else
+        {
+            gcmkONERROR(gckCOMMAND_ExecuteEnd(Command, executeBytes));
+        }
     }
 
     return gcvSTATUS_OK;
@@ -390,7 +515,14 @@ _DummyDraw(
 
         gckHARDWARE_DummyDraw(hardware, pointer, Command->queues[0].address, dummyDrawType, &dummyDrawBytes);
 
-        gcmkONERROR(gckCOMMAND_Execute(Command, dummyDrawBytes));
+        if (Command->feType == gcvHW_FE_WAIT_LINK)
+        {
+            gcmkONERROR(gckCOMMAND_Execute(Command, dummyDrawBytes));
+        }
+        else
+        {
+            gcmkONERROR(gckCOMMAND_ExecuteEnd(Command, dummyDrawBytes));
+        }
     }
 
     return gcvSTATUS_OK;
@@ -565,10 +697,11 @@ OnError:
 static gceSTATUS
 _SyncToSystemChannel(
     gckCOMMAND Command,
-    gctUINT64 SyncChannel[2]
+    gctUINT64 SyncChannel[2],
+    gctBOOL BroadcastCommit
     )
 {
-    gceSTATUS status;
+    gceSTATUS status = gcvSTATUS_OK;
     gckKERNEL kernel = Command->kernel;
     gckHARDWARE hardware = kernel->hardware;
     gctUINT8 semaId[128];
@@ -578,6 +711,7 @@ _SyncToSystemChannel(
     gctUINT8_PTR buffer;
     gctUINT32 i;
     gctUINT32 pri;
+    gctBOOL commitEntered = gcvFALSE;
 
     /* Ignore system channel. */
     SyncChannel[0] &= ~((gctUINT64)1ull);
@@ -586,6 +720,13 @@ _SyncToSystemChannel(
     if (!SyncChannel[0] && !SyncChannel[1])
     {
         return gcvSTATUS_OK;
+    }
+
+    if (BroadcastCommit)
+    {
+        /* Acquire the command queue. */
+        gcmkONERROR(gckCOMMAND_EnterCommit(Command, gcvFALSE));
+        commitEntered = gcvTRUE;
     }
 
     /* Query SendSemaphore command size. */
@@ -643,6 +784,13 @@ _SyncToSystemChannel(
 
         gcmkONERROR(gckCOMMAND_ExecuteMultiChannel(Command, 0, 0, reqBytes));
 
+        if (BroadcastCommit)
+        {
+            /* Release the command queue. */
+            gcmkONERROR(gckCOMMAND_ExitCommit(Command, gcvFALSE));
+            commitEntered = gcvFALSE;
+        }
+
         /* Now upload the pending semaphore tracking ring. */
         gcmkONERROR(_GetNextPendingPos(Command, &pos));
 
@@ -659,13 +807,18 @@ _SyncToSystemChannel(
         gcmkONERROR(gckEVENT_Submit(
             eventObj,
             gcvTRUE,
-            gcvFALSE
+            gcvFALSE,
+            BroadcastCommit
             ));
     }
 
-    return gcvSTATUS_OK;
-
 OnError:
+    if (commitEntered)
+    {
+        /* Release the command queue mutex. */
+        gcmkVERIFY_OK(gckCOMMAND_ExitCommit(Command, gcvFALSE));
+    }
+
     return status;
 }
 
@@ -682,6 +835,8 @@ _SyncFromSystemChannel(
     gctUINT32 bytes = 0;
     gctUINT8_PTR buffer;
     gctUINT32 id;
+
+    gcmkHEADER_ARG("priority=%d channelId=%d", Priority, ChannelId);
 
     if (!(Command->syncChannel[Priority ? 1 : 0] & (1ull << ChannelId)))
     {
@@ -728,10 +883,12 @@ _SyncFromSystemChannel(
     /* Clear the sync flag. */
     Command->syncChannel[Priority ? 1 : 0] &= ~(1ull << ChannelId);
 
+    gcmkFOOTER_NO();
     /* Can not track the semaphore here. */
     return gcvSTATUS_OK;
 
 OnError:
+    gcmkFOOTER();
     return status;
 }
 
@@ -759,11 +916,10 @@ _CheckFlushMcfeMMU(
     }
 
     /*
-     * We had sync'ed to system channel in every commit, see comments in Commit.
-     * It should not run into sync again here, unless there's some other place
-     * causes channels dirty. Let's check it here.
+     * This sync is earlier than in Commit, see comments in Commit.
+     * Blindly sync dirty other channels to the system channel here.
      */
-    gcmkONERROR(_SyncToSystemChannel(Command, Command->dirtyChannel));
+    gcmkONERROR(_SyncToSystemChannel(Command, Command->dirtyChannel, gcvFALSE));
 
     /* Query flush Mcfe MMU cache command bytes. */
     gcmkONERROR(gckHARDWARE_FlushMcfeMMU(Hardware, gcvNULL, &reqBytes));
@@ -842,17 +998,6 @@ _FindSemaIdFromMap(
     return -1;
 }
 
-/* Put together patch list handling variables. */
-typedef struct _gcsPATCH_LIST_VARIABLE
-{
-    /* gcvHAL_PATCH_VIDMEM_TIMESTAMP. */
-    gctUINT64 maxAsyncTimestamp;
-
-    /* gcvHAL_PATCH_MCFE_SEMAPHORE. */
-    gctBOOL semaUsed;
-}
-gcsPATCH_LIST_VARIABLE;
-
 /* Patch item handler typedef. */
 typedef gceSTATUS
 (* PATCH_ITEM_HANDLER)(
@@ -919,7 +1064,8 @@ _HandleMCFESemaphorePatch(
 
         if (gcmIS_ERROR(status))
         {
-            gcmkONERROR(_SyncToSystemChannel(Command, Command->dirtyChannel));
+            gcmkONERROR(_SyncToSystemChannel(Command, Command->dirtyChannel, gcvFALSE));
+
             gcmkONERROR(_GetNextMcfeSemaId(Command, gcvTRUE, &semaId));
         }
 
@@ -1023,6 +1169,15 @@ OnError:
     return gcvSTATUS_OK;
 }
 
+static const PATCH_ITEM_HANDLER patchHandler[] =
+{
+    gcvNULL,
+    _HandleVidmemAddressPatch,
+    _HandleMCFESemaphorePatch,
+    _HandleTimestampPatch,
+};
+PATCH_ITEM_HANDLER handler;
+
 static gceSTATUS
 _HandlePatchListSingle(
     IN gckCOMMAND Command,
@@ -1041,15 +1196,6 @@ _HandlePatchListSingle(
     gctUINT32 count = 0;
     gctUINT32 itemSize = 0;
     gctUINT32 batchCount = 0;
-
-    static const PATCH_ITEM_HANDLER patchHandler[] =
-    {
-        gcvNULL,
-        _HandleVidmemAddressPatch,
-        _HandleMCFESemaphorePatch,
-        _HandleTimestampPatch,
-    };
-    PATCH_ITEM_HANDLER handler;
 
     gcmkHEADER_ARG("Command=%p CommandBuffer=%p PatchList=%p type=%d",
                    Command, CommandBuffer, PatchList, PatchList->type);
@@ -1247,63 +1393,6 @@ OnError:
             ));
     }
 
-    gcmkFOOTER();
-    return status;
-}
-
-static gceSTATUS
-_WaitForAsyncCommandStamp(
-    IN gckCOMMAND Command,
-    IN gctUINT64 Stamp
-    )
-{
-    gctUINT32 bytes;
-    gceSTATUS status;
-    gctUINT32 fenceAddress;
-    gctUINT32 bufferSize;
-    gctPOINTER pointer;
-    gckCOMMAND asyncCommand = Command->kernel->asyncCommand;
-
-    gcmkHEADER_ARG("Stamp = 0x%llx", Stamp);
-
-    if (*(gctUINT64 *)asyncCommand->fence->logical >= Stamp)
-    {
-        /* Already satisfied, skip. */
-        gcmkFOOTER_NO();
-        return gcvSTATUS_OK;
-    }
-
-    fenceAddress = asyncCommand->fence->address;
-
-    gcmkONERROR(gckHARDWARE_WaitFence(
-        Command->kernel->hardware,
-        gcvNULL,
-        Stamp,
-        fenceAddress,
-        &bytes
-        ));
-
-    gcmkONERROR(gckCOMMAND_Reserve(
-        Command,
-        bytes,
-        &pointer,
-        &bufferSize
-        ));
-
-    gcmkONERROR(gckHARDWARE_WaitFence(
-        Command->kernel->hardware,
-        pointer,
-        Stamp,
-        fenceAddress,
-        &bytes
-        ));
-
-    gcmkONERROR(gckCOMMAND_Execute(Command, bytes));
-
-    gcmkFOOTER_NO();
-    return gcvSTATUS_OK;
-
-OnError:
     gcmkFOOTER();
     return status;
 }
@@ -1919,6 +2008,35 @@ OnError:
 }
 
 static gceSTATUS
+_StartFEWithEnd(
+    IN gckCOMMAND Command
+    )
+{
+    gceSTATUS status;
+    gcmkHEADER_ARG("Command=%p", Command);
+
+    /* Verify the arguments. */
+    gcmkVERIFY_OBJECT(Command, gcvOBJ_COMMAND);
+
+    if (Command->logical == gcvNULL)
+    {
+        /* Start at beginning of a new queue. */
+        gcmkONERROR(_NewQueue(Command, gcvTRUE));
+    }
+
+    Command->newQueue = gcvFALSE;
+
+    /* Success. */
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
+
+OnError:
+    /* Return the status. */
+    gcmkFOOTER();
+    return status;
+}
+
+static gceSTATUS
 _StartAsyncFE(
     IN gckCOMMAND Command
     )
@@ -1983,6 +2101,10 @@ gckCOMMAND_Start(
     if (Command->feType == gcvHW_FE_WAIT_LINK)
     {
         gcmkONERROR(_StartWaitLinkFE(Command));
+    }
+    else if (Command->feType == gcvHW_FE_END)
+    {
+        gcmkONERROR(_StartFEWithEnd(Command));
     }
     else if (Command->feType == gcvHW_FE_MULTI_CHANNEL)
     {
@@ -2167,6 +2289,10 @@ gckCOMMAND_Stop(
     {
         return _StopWaitLinkFE(Command);
     }
+    else if (Command->feType == gcvHW_FE_END)
+    {
+        return gcvSTATUS_OK;
+    }
     else if (Command->feType == gcvHW_FE_MULTI_CHANNEL)
     {
         return _StopMCFE(Command);
@@ -2175,6 +2301,63 @@ gckCOMMAND_Stop(
     {
         return _StopAsyncFE(Command);
     }
+}
+
+static gceSTATUS
+_WaitForAsyncCommandStamp(
+    IN gckCOMMAND Command,
+    IN gctUINT64 Stamp
+    )
+{
+    gctUINT32 bytes;
+    gceSTATUS status;
+    gctUINT32 fenceAddress;
+    gctUINT32 bufferSize;
+    gctPOINTER pointer;
+    gckCOMMAND asyncCommand = Command->kernel->asyncCommand;
+
+    gcmkHEADER_ARG("Stamp = 0x%llx", Stamp);
+
+    if (*(gctUINT64 *)asyncCommand->fence->logical >= Stamp)
+    {
+        /* Already satisfied, skip. */
+        gcmkFOOTER_NO();
+        return gcvSTATUS_OK;
+    }
+
+    fenceAddress = asyncCommand->fence->address;
+
+    gcmkONERROR(gckHARDWARE_WaitFence(
+        Command->kernel->hardware,
+        gcvNULL,
+        Stamp,
+        fenceAddress,
+        &bytes
+        ));
+
+    gcmkONERROR(gckCOMMAND_Reserve(
+        Command,
+        bytes,
+        &pointer,
+        &bufferSize
+        ));
+
+    gcmkONERROR(gckHARDWARE_WaitFence(
+        Command->kernel->hardware,
+        pointer,
+        Stamp,
+        fenceAddress,
+        &bytes
+        ));
+
+    gcmkONERROR(gckCOMMAND_Execute(Command, bytes));
+
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
+
+OnError:
+    gcmkFOOTER();
+    return status;
 }
 
 static gceSTATUS
@@ -2187,14 +2370,13 @@ _CommitWaitLinkOnce(
     IN gctBOOL Shared,
     INOUT gctBOOL *contextSwitched,
     IN gctPOINTER PreemptCommit,
-    IN gctBOOL InPreemptThread
+    IN gctBOOL InPreemptThread,
+    IN gctUINT64 MaxAsyncTimeStamp
     )
 {
     gceSTATUS status;
-    gctBOOL commitEntered = gcvFALSE;
     gctBOOL contextAcquired = gcvFALSE;
     gckHARDWARE hardware;
-    gcsPATCH_LIST_VARIABLE patchListVar = {0, 0};
 
     gcsCONTEXT_PTR contextBuffer;
     gctUINT8_PTR commandBufferLogical = gcvNULL;
@@ -2215,7 +2397,6 @@ _CommitWaitLinkOnce(
     gctUINT32 waitLinkBytes;
     gctUINT32 waitOffset;
     gctUINT32 waitSize;
-
 #if gcdCAPTURE_ONLY_MODE
     gctINT i;
 #endif
@@ -2227,7 +2408,14 @@ _CommitWaitLinkOnce(
 
 #if gcdDUMP_IN_KERNEL
     gctPOINTER contextDumpLogical = gcvNULL;
-# endif
+#if gcdDUMP_HW_SUBCOMMAND
+    gctINT checkCount = gcmCOUNTOF(subCommand);
+    gckSubCmdNode node;
+    gcsSubCmdNode subCommandList;
+    gctPOINTER entryDump;
+    gckVIDMEM_NODE nodeObject = gcvNULL;
+#endif
+#endif
     gctUINT32 exitLinkLow = 0, exitLinkHigh = 0;
     gctUINT32 entryLinkLow = 0, entryLinkHigh = 0;
     gctUINT32 commandLinkLow = 0, commandLinkHigh = 0;
@@ -2241,10 +2429,6 @@ _CommitWaitLinkOnce(
 
     gcmkASSERT(Command->feType == gcvHW_FE_WAIT_LINK);
 
-    /* Acquire the command queue. */
-    gcmkONERROR(gckCOMMAND_EnterCommit(Command, gcvFALSE));
-    commitEntered = gcvTRUE;
-
     /* Acquire the context switching mutex. */
     gcmkONERROR(gckOS_AcquireMutex(
         Command->os, Command->mutexContext, gcvINFINITE
@@ -2253,10 +2437,6 @@ _CommitWaitLinkOnce(
 
     /* Extract the gckHARDWARE and gckEVENT objects. */
     hardware = Command->kernel->hardware;
-
-
-    gcmkONERROR(
-        _HandlePatchList(Command, CommandBuffer, &patchListVar));
 
     /* Query the size of LINK command. */
     gcmkONERROR(gckWLFE_Link(
@@ -2304,11 +2484,11 @@ _CommitWaitLinkOnce(
 
     if (gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_FENCE_64BIT) &&
         Command->kernel->asyncCommand &&
-        patchListVar.maxAsyncTimestamp != 0)
+        MaxAsyncTimeStamp != 0)
     {
         gcmkONERROR(_WaitForAsyncCommandStamp(
             Command,
-            patchListVar.maxAsyncTimestamp
+            MaxAsyncTimeStamp
             ));
     }
 
@@ -2813,6 +2993,60 @@ _CommitWaitLinkOnce(
         commandBufferSize - offset
         );
 
+#if gcdDUMP_HW_SUBCOMMAND && gcdDUMP_IN_KERNEL
+    /* reset list count */
+    subCommandList.count = 0;
+    subCommandList.next = gcvNULL;
+
+    _CreateSubCmdList(Command->os, commandBufferLogical + offset, commandBufferSize - offset, subCommand, checkCount, &subCommandList);
+    node = subCommandList.next;
+
+    while (node)
+    {
+        status = gckVIDMEM_NODE_Find(Command->kernel, node->address, &nodeObject, &offset);
+
+        if (gcmIS_SUCCESS(status))
+        {
+            gcmkONERROR(gckVIDMEM_NODE_LockCPU(
+                Command->kernel,
+                nodeObject,
+                gcvFALSE,
+                gcvFALSE,
+                &entryDump
+                ));
+
+            /* Kernel address of page where stall point stay. */
+            entryDump = (gctUINT8_PTR)entryDump + offset;
+
+            gcmkVERIFY_OK(gckVIDMEM_NODE_GetSize(Command->kernel, nodeObject, &bytes));
+
+            bytes -= offset;
+
+            gcmkDUMP(Command->os, "#[%s: 0x%08X sub command]", subCommand[node->type].name, node->address);
+
+            gcmkDUMP_BUFFER(
+                Command->os,
+                gcvDUMP_BUFFER_KERNEL_COMMAND,
+                entryDump,
+                node->address,
+                bytes
+                );
+
+            gcmkVERIFY_OK(gckVIDMEM_NODE_UnlockCPU(
+                Command->kernel,
+                nodeObject,
+                0,
+                gcvFALSE,
+                gcvFALSE
+                ));
+        }
+
+        node = node->next;
+    };
+
+    _DestroySubCmdList(Command->os, &subCommandList);
+#endif
+
     /* execute user commands. */
     gcmkDUMP(
         Command->os,
@@ -2874,10 +3108,6 @@ _CommitWaitLinkOnce(
     gcmkONERROR(gckOS_ReleaseMutex(Command->os, Command->mutexContext));
     contextAcquired = gcvFALSE;
 
-    /* Release the command queue. */
-    gcmkONERROR(gckCOMMAND_ExitCommit(Command, gcvFALSE));
-    commitEntered = gcvFALSE;
-
     if (status == gcvSTATUS_INTERRUPTED)
     {
         gcmkTRACE(
@@ -2918,12 +3148,6 @@ OnError:
         gcmkVERIFY_OK(gckOS_ReleaseMutex(Command->os, Command->mutexContext));
     }
 
-    if (commitEntered)
-    {
-        /* Release the command queue mutex. */
-        gcmkVERIFY_OK(gckCOMMAND_ExitCommit(Command, gcvFALSE));
-    }
-
 #ifdef __QNXNTO__
     if (userCommandBufferLogicalMapped)
     {
@@ -2935,6 +3159,190 @@ OnError:
     }
 #endif
 
+    /* Return status. */
+    gcmkFOOTER();
+    return status;
+}
+
+static gceSTATUS
+_CommitEndOnce(
+    IN gckCOMMAND Command,
+    IN gckCONTEXT Context,
+    IN gcsHAL_COMMAND_LOCATION * CommandBuffer,
+    IN gcsSTATE_DELTA_PTR StateDelta,
+    IN gctUINT32 ProcessID,
+    IN gctBOOL Shared,
+    INOUT gctBOOL *contextSwitched
+    )
+{
+    gceSTATUS status;
+    gckHARDWARE hardware;
+    gctUINT8_PTR commandBufferLogical = gcvNULL;
+    gctUINT32 commandBufferAddress = 0;
+    gckVIDMEM_NODE commandBufferVideoMem = gcvNULL;
+    gctUINT8_PTR commandBufferTail = gcvNULL;
+    gctUINT commandBufferSize;
+    gctUINT32 offset;
+    gctUINT32 endAddress;
+    gctUINT32 endBytes;
+
+    gcmkHEADER_ARG("Command=%p CommandBuffer=%p ProcessID=%d",
+        Command, CommandBuffer, ProcessID
+        );
+
+    /* Verify the arguments. */
+    gcmkVERIFY_OBJECT(Command, gcvOBJ_COMMAND);
+
+    gcmkASSERT(Command->feType == gcvHW_FE_END);
+
+    /* Extract the gckHARDWARE and gckEVENT objects. */
+    hardware = Command->kernel->hardware;
+
+    /* Compute the command buffer entry and the size. */
+    commandBufferLogical
+        = (gctUINT8_PTR) gcmUINT64_TO_PTR(CommandBuffer->logical)
+        +                CommandBuffer->startOffset;
+
+    commandBufferAddress = CommandBuffer->address
+                         + CommandBuffer->startOffset;
+
+    commandBufferSize = CommandBuffer->size;
+
+    gcmkONERROR(_CheckFlushMMU(Command, hardware));
+
+    if (Command->dummyDraw == gcvTRUE &&
+        Context != gcvNULL)
+    {
+        Command->dummyDraw = gcvFALSE;
+        gcmkONERROR(_DummyDraw(Command));
+    }
+
+    /* Query the size of end command sequence. */
+    gcmkONERROR(gckWLFE_End(
+        hardware,
+        gcvNULL,
+        ~0U,
+        &endBytes
+        ));
+
+    /* Determine the location of the TAIL in the command buffer. */
+    commandBufferTail
+        = commandBufferLogical
+        + commandBufferSize
+        - CommandBuffer->reservedTail;
+
+    endAddress
+        = commandBufferAddress
+        + commandBufferSize
+        - CommandBuffer->reservedTail;
+
+    /* Generate command which writes out commit stamp. */
+    if (gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_FENCE_64BIT))
+    {
+        gctUINT32 bytes;
+
+        gcmkONERROR(gckHARDWARE_Fence(
+            hardware,
+            gcvENGINE_RENDER,
+            commandBufferTail,
+            Command->fence->address,
+            Command->commitStamp,
+            &bytes
+            ));
+
+        commandBufferTail += bytes;
+        endAddress += bytes;
+    }
+
+    /* Context switch required? */
+    if (Context == gcvNULL)
+    {
+        /* See if we have to switch pipes for the command buffer. */
+        if (CommandBuffer->entryPipe == (gctUINT32)(Command->pipeSelect))
+        {
+            /* Skip reserved head bytes. */
+            offset = CommandBuffer->reservedHead;
+        }
+        else
+        {
+            gctUINT32 pipeBytes = CommandBuffer->reservedHead;
+
+            /* The current hardware and the entry command buffer pipes
+            ** are different, switch to the correct pipe. */
+            gcmkONERROR(gckHARDWARE_PipeSelect(
+                Command->kernel->hardware,
+                commandBufferLogical,
+                CommandBuffer->entryPipe,
+                &pipeBytes
+                ));
+
+            /* Do not skip pipe switching sequence. */
+            offset = 0;
+
+            /* Reserved bytes in userspace must be exact for a pipeSelect. */
+            gcmkASSERT(pipeBytes == CommandBuffer->reservedHead);
+        }
+
+        Command->currContext = gcvNULL;
+    }
+
+    /* Generate an END from the end of the command buffer. */
+#if !gcdSECURITY
+    gcmkONERROR(gckWLFE_End(
+        hardware,
+        commandBufferTail,
+        endAddress,
+        &endBytes
+        ));
+#endif
+
+    gcmkONERROR(gckVIDMEM_HANDLE_Lookup(
+        Command->kernel,
+        ProcessID,
+        CommandBuffer->videoMemNode,
+        &commandBufferVideoMem
+        ));
+
+    gcmkONERROR(gckVIDMEM_NODE_CleanCache(
+        Command->kernel,
+        commandBufferVideoMem,
+        CommandBuffer->startOffset,
+        commandBufferLogical,
+        commandBufferSize
+        ));
+
+    /* Execute the command buffer. */
+    gcmkONERROR(gckWLFE_Execute(
+        hardware,
+        commandBufferAddress,
+        commandBufferSize
+        ));
+
+    gcmkDUMP(Command->os, "#[command: user]");
+    gcmkDUMP_BUFFER(
+        Command->os,
+        gcvDUMP_BUFFER_COMMAND,
+        commandBufferLogical + offset,
+        commandBufferAddress + offset,
+        commandBufferSize - offset
+        );
+
+    /* execute user commands. */
+    gcmkDUMP(
+        Command->os,
+        "@[execute 0 0 0x%08X 0x%08X]",
+        commandBufferAddress
+            + CommandBuffer->reservedHead,
+        commandBufferSize
+            - CommandBuffer->reservedHead
+            - CommandBuffer->reservedTail
+        );
+
+    /* Return status. */
+    gcmkFOOTER();
+    return gcvSTATUS_OK;
+
+OnError:
     /* Return status. */
     gcmkFOOTER();
     return status;
@@ -2957,12 +3365,8 @@ _CommitAsyncOnce(
     gctUINT32       fenceBytes;
     gctUINT32       oldValue;
     gctUINT32       flushBytes;
-    gcsPATCH_LIST_VARIABLE patchListVar = {0, 0};
 
     gcmkHEADER();
-
-    gcmkVERIFY_OK(
-        _HandlePatchList(Command, CommandBuffer, &patchListVar));
 
     gckOS_AtomicExchange(Command->os,
                          hardware->pageTableDirty[gcvENGINE_BLT],
@@ -3097,13 +3501,11 @@ _CommitMultiChannelOnce(
     )
 {
     gceSTATUS    status;
-    gctBOOL      acquired = gcvFALSE;
     gctUINT8_PTR commandBufferLogical;
     gctUINT      commandBufferSize;
     gctUINT32    commandBufferAddress;
     gckHARDWARE  hardware;
     gctUINT64    bit;
-    gcsPATCH_LIST_VARIABLE patchListVar = {0, 0};
 
     gcmkHEADER_ARG("priority=%d channelId=%d videoMemNode=%u size=0x%x patchHead=%p",
                    CommandBuffer->priority, CommandBuffer->channelId,
@@ -3113,9 +3515,6 @@ _CommitMultiChannelOnce(
     gcmkASSERT(Command->feType == gcvHW_FE_MULTI_CHANNEL);
 
     hardware = Command->kernel->hardware;
-
-    gcmkVERIFY_OK(
-        _HandlePatchList(Command, CommandBuffer, &patchListVar));
 
     /* Check flush mcfe MMU cache. */
     gcmkONERROR(_CheckFlushMcfeMMU(Command, hardware));
@@ -3159,7 +3558,6 @@ _CommitMultiChannelOnce(
     /* Large command buffer size does not make sense. */
     gcmkASSERT(commandBufferSize < 0x800000);
 
-
     if (CommandBuffer->channelId != 0)
     {
         /* Sync from the system channel. */
@@ -3171,9 +3569,6 @@ _CommitMultiChannelOnce(
     }
 
     Command->currContext = Context;
-
-    gckOS_AcquireMutex(Command->os, Command->mutexQueue, gcvINFINITE);
-    acquired = gcvTRUE;
 
 #if gcdNULL_DRIVER || gcdCAPTURE_ONLY_MODE
     /* Skip submit to hardware for NULL driver. */
@@ -3212,18 +3607,10 @@ _CommitMultiChannelOnce(
     /* This channel is dirty. */
     Command->dirtyChannel[CommandBuffer->priority ? 1 : 0] |= bit;
 
-    gckOS_ReleaseMutex(Command->os, Command->mutexQueue);
-    acquired = gcvFALSE;
-
     gcmkFOOTER_NO();
     return gcvSTATUS_OK;
 
 OnError:
-    if (acquired)
-    {
-        gckOS_ReleaseMutex(Command->os, Command->mutexQueue);
-    }
-
     gcmkFOOTER();
     return status;
 }
@@ -3259,6 +3646,8 @@ OnError:
     gcmkFOOTER();
     return status;
 }
+
+
 /*******************************************************************************
 **
 **  gckCOMMAND_Commit
@@ -3298,6 +3687,8 @@ gckCOMMAND_Commit(
     gcsHAL_COMMAND_LOCATION _cmdLoc;
     gctPOINTER userPtr = gcvNULL;
     gctBOOL needCopy = gcvFALSE;
+    gcsPATCH_LIST_VARIABLE patchListVar = {0, 0};
+    gctBOOL commitEntered = gcvFALSE;
 
     gcmkHEADER_ARG("Command=%p SubCommit=%p delta=%p context=%u pid=%u",
                    Command, SubCommit, delta, SubCommit->context, ProcessId);
@@ -3349,7 +3740,16 @@ gckCOMMAND_Commit(
             }
         }
 
+#if gcdVALID_COMMAND_BUFFER
         gcmkONERROR(_ValidCommandBuffer(Command, ProcessId, cmdLoc));
+#endif
+
+        /* Acquire the command queue. */
+        gcmkONERROR(gckCOMMAND_EnterCommit(Command, gcvFALSE));
+        commitEntered = gcvTRUE;
+
+        gcmkVERIFY_OK(
+            _HandlePatchList(Command, cmdLoc, &patchListVar));
 
         if (Command->feType == gcvHW_FE_WAIT_LINK)
         {
@@ -3362,10 +3762,24 @@ gckCOMMAND_Commit(
                                          Shared,
                                          contextSwitched,
                                          gcvNULL,
-                                         gcvFALSE);
+                                         gcvFALSE,
+                                         patchListVar.maxAsyncTimestamp);
+        }
+        else if (Command->feType == gcvHW_FE_END)
+        {
+            status = _CommitEndOnce(Command,
+                                    context,
+                                    cmdLoc,
+                                    delta,
+                                    ProcessId,
+                                    Shared,
+                                    gcvNULL);
         }
         else if (Command->feType == gcvHW_FE_MULTI_CHANNEL)
         {
+#if gcdENABLE_SW_PREEMPTION
+            gcmkDUMP(Command->os, "Priority: %d", SubCommit->priorityID);
+#endif
             status = _CommitMultiChannelOnce(Command, context, cmdLoc);
         }
         else
@@ -3379,6 +3793,10 @@ gckCOMMAND_Commit(
         {
             gcmkONERROR(status);
         }
+
+        /* Release the command queue. */
+        gcmkONERROR(gckCOMMAND_ExitCommit(Command, gcvFALSE));
+        commitEntered = gcvFALSE;
 
         /* Do not need context or delta for later commands. */
         context = gcvNULL;
@@ -3426,7 +3844,7 @@ gckCOMMAND_Commit(
          * Conclusion is that, blindly sync dirty channels is a good choice for
          * now.
          */
-        gcmkONERROR(_SyncToSystemChannel(Command, Command->dirtyChannel));
+         gcmkONERROR(_SyncToSystemChannel(Command, Command->dirtyChannel, gcvTRUE));
     }
 
     /* Output commit stamp. */
@@ -3437,6 +3855,12 @@ gckCOMMAND_Commit(
     return gcvSTATUS_OK;
 
 OnError:
+    if (commitEntered)
+    {
+        /* Release the command queue mutex. */
+        gcmkVERIFY_OK(gckCOMMAND_ExitCommit(Command, gcvFALSE));
+    }
+
     if (!needCopy && userPtr)
     {
         gckOS_UnmapUserPointer(
@@ -3489,7 +3913,7 @@ gckCOMMAND_Reserve(
     gctUINT32 requiredBytes;
     gctUINT32 requestedAligned;
 
-    gcmkHEADER_ARG("Command=%p RequestedBytes=%lu", Command, RequestedBytes);
+    gcmkHEADER_ARG("Command=%p RequestedBytes=0x%x", Command, RequestedBytes);
 
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Command, gcvOBJ_COMMAND);
@@ -3515,6 +3939,25 @@ gckCOMMAND_Reserve(
         /* Compute total number of bytes required. */
         requiredBytes += requestedAligned;
     }
+    else if (Command->feType == gcvHW_FE_END)
+    {
+        /* Compute aligned number of reuested bytes. */
+        requestedAligned = gcmALIGN(RequestedBytes, Command->alignment);
+
+        gcmkONERROR(gckWLFE_End(
+            Command->kernel->hardware,
+            gcvNULL,
+            ~0U,
+            &requiredBytes
+            ));
+
+        /* Compute total number of bytes required. */
+        requiredBytes += requestedAligned;
+    }
+    else if (Command->feType == gcvHW_FE_MULTI_CHANNEL)
+    {
+        requiredBytes = gcmALIGN(RequestedBytes, 16);
+    }
     else
     {
         requiredBytes = gcmALIGN(RequestedBytes, 8);
@@ -3524,7 +3967,7 @@ gckCOMMAND_Reserve(
     bytes = Command->pageSize - Command->offset;
 
     /* Is there enough space in the current command queue? */
-    if (bytes < requiredBytes)
+    if (bytes <= requiredBytes)
     {
         /* Create a new command queue. */
         gcmkONERROR(_NewQueue(Command, gcvFALSE));
@@ -3547,7 +3990,7 @@ gckCOMMAND_Reserve(
     *BufferSize = bytes;
 
     /* Success. */
-    gcmkFOOTER_ARG("*Buffer=0x%x *BufferSize=%lu", *Buffer, *BufferSize);
+    gcmkFOOTER_ARG("*Buffer=0x%x *BufferSize=0x%x", *Buffer, *BufferSize);
     return gcvSTATUS_OK;
 
 OnError:
@@ -3598,7 +4041,7 @@ gckCOMMAND_Execute(
     gctUINT32 execAddress;
     gctUINT32 execBytes;
 
-    gcmkHEADER_ARG("Command=%p RequestedBytes=%lu", Command, RequestedBytes);
+    gcmkHEADER_ARG("Command=%p RequestedBytes=0x%x", Command, RequestedBytes);
 
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Command, gcvOBJ_COMMAND);
@@ -3744,6 +4187,118 @@ gckCOMMAND_Execute(
 
     /* Update the command queue. */
     Command->offset  += RequestedBytes + waitLinkBytes;
+    Command->newQueue = gcvFALSE;
+
+    /* Update queue tail pointer. */
+    gcmkONERROR(gckHARDWARE_UpdateQueueTail(
+        Command->kernel->hardware, Command->logical, Command->offset
+        ));
+
+    /* Success. */
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
+
+OnError:
+    /* Return the status. */
+    gcmkFOOTER();
+    return status;
+}
+
+gceSTATUS
+gckCOMMAND_ExecuteEnd(
+    IN gckCOMMAND Command,
+    IN gctUINT32 RequestedBytes
+    )
+{
+    gceSTATUS status;
+
+    gctUINT8_PTR endLogical;
+    gctUINT32 endAddress;
+    gctUINT32 endOffset;
+    gctPOINTER execLogical;
+    gctUINT32 execAddress;
+    gctUINT32 execBytes;
+    gctUINT32 endBytes;
+
+    gcmkHEADER_ARG("Command=%p RequestedBytes=%lu", Command, RequestedBytes);
+
+    /* Verify the arguments. */
+    gcmkVERIFY_OBJECT(Command, gcvOBJ_COMMAND);
+
+    /* Compute offset for END. */
+    endOffset = Command->offset + RequestedBytes;
+
+    /* Compute the location if WAIT/LINK command sequence. */
+    endLogical  = (gctUINT8_PTR) Command->logical  + endOffset;
+    endAddress  =                Command->address  + endOffset;
+
+    gcmkONERROR(gckWLFE_End(
+        Command->kernel->hardware,
+        gcvNULL,
+        ~0U,
+        &endBytes
+        ));
+
+    /* Append END in command queue. */
+    gcmkONERROR(gckWLFE_End(
+        Command->kernel->hardware,
+        endLogical,
+        endAddress,
+        &endBytes
+        ));
+
+    /* Determine the location to jump to for the command buffer being
+    ** scheduled. */
+    if (Command->newQueue)
+    {
+        /* New command queue, jump to the beginning of it. */
+        execLogical  = Command->logical;
+        execAddress  = Command->address;
+        execBytes    = Command->offset + RequestedBytes + endBytes;
+
+        gcmkONERROR(gckVIDMEM_NODE_CleanCache(
+            Command->kernel,
+            Command->videoMem,
+            0,
+            execLogical,
+            execBytes
+            ));
+    }
+    else
+    {
+        /* Still within the preexisting command queue, jump directly to the
+           reserved area. */
+        execLogical  = (gctUINT8 *) Command->logical  + Command->offset;
+        execAddress  =              Command->address  + Command->offset;
+        execBytes    = RequestedBytes + endBytes;
+
+        gcmkONERROR(gckVIDMEM_NODE_CleanCache(
+            Command->kernel,
+            Command->videoMem,
+            Command->offset,
+            execLogical,
+            execBytes
+            ));
+    }
+
+    /* Execute the command buffer. */
+    gcmkONERROR(gckWLFE_Execute(
+        Command->kernel->hardware,
+        execAddress,
+        execBytes
+        ));
+
+    gcmkDUMP(Command->os, "#[command: kernel execute]");
+    gcmkDUMP_BUFFER(
+        Command->os,
+        gcvDUMP_BUFFER_KERNEL_COMMAND,
+        execLogical,
+        execAddress,
+        execBytes
+        );
+
+    /* Update the command queue. */
+    Command->offset  += RequestedBytes + endBytes;
     Command->newQueue = gcvFALSE;
 
     /* Update queue tail pointer. */
@@ -4013,7 +4568,7 @@ gckCOMMAND_Stall(
     gcmkONERROR(gckEVENT_Signal(eventObject, signal, gcvKERNEL_PIXEL));
 
     /* Submit the event queue. */
-    gcmkONERROR(gckEVENT_Submit(eventObject, gcvTRUE, FromPower));
+    gcmkONERROR(gckEVENT_Submit(eventObject, gcvTRUE, FromPower, gcvTRUE));
 
     gcmkDUMP(Command->os, "#[kernel.stall]");
 
@@ -4181,7 +4736,7 @@ gckCOMMAND_Attach(
     gctPOINTER pointer;
     gceSTATUS status;
 
-    if (Command->feType == gcvHW_FE_WAIT_LINK)
+    if (Command->feType == gcvHW_FE_WAIT_LINK || Command->feType == gcvHW_FE_END)
     {
         status = _AttachWaitLinkFECommand(Command,
                                         Context,
@@ -4305,7 +4860,7 @@ gckCOMMAND_Detach(
     IN gckCONTEXT Context
     )
 {
-    if (Command->feType == gcvHW_FE_WAIT_LINK)
+    if (Command->feType == gcvHW_FE_WAIT_LINK || Command->feType == gcvHW_FE_END)
     {
         return _DetachWaitLinkFECommand(Command, Context);
     }
@@ -4409,6 +4964,14 @@ gckCOMMAND_DumpExecutingBuffer(
     gctUINT32 offset;
     gctPOINTER entryDump;
     gctUINT8 processName[24] = {0};
+#if gcdDUMP_HW_SUBCOMMAND
+    gctINT checkCount = gcmCOUNTOF(subCommand);
+    gckSubCmdNode node;
+    gcsSubCmdNode subCommandList;
+    /* reset list count */
+    subCommandList.count = 0;
+    subCommandList.next = gcvNULL;
+#endif
 
     gcmkPRINT("**************************\n");
     gcmkPRINT("**** COMMAND BUF DUMP ****\n");
@@ -4417,59 +4980,62 @@ gckCOMMAND_DumpExecutingBuffer(
     gcmkPRINT("  Submitted commit stamp = %lld", Command->commitStamp - 1);
     gcmkPRINT("  Executed commit stamp  = %lld", *(gctUINT64_PTR)Command->fence->logical);
 
-    gcmkVERIFY_OK(gckOS_ReadRegisterEx(os, kernel->core, 0x664, &gpuAddress));
-    gcmkVERIFY_OK(gckOS_ReadRegisterEx(os, kernel->core, 0x664, &gpuAddress));
-
-    gcmkPRINT("DMA Address 0x%08X", gpuAddress);
-
-    /* Find GPU address in video memory list. */
-    status = gckVIDMEM_NODE_Find(kernel, gpuAddress, &nodeObject, &offset);
-
-    if (gcmIS_SUCCESS(status) && nodeObject->type == gcvVIDMEM_TYPE_COMMAND)
+    if (Command->feType != gcvHW_FE_MULTI_CHANNEL)
     {
-        gcmkONERROR(gckVIDMEM_NODE_LockCPU(
-            kernel,
-            nodeObject,
-            gcvFALSE,
-            gcvFALSE,
-            &entryDump
-            ));
+        gcmkVERIFY_OK(gckOS_ReadRegisterEx(os, kernel->core, 0x664, &gpuAddress));
+        gcmkVERIFY_OK(gckOS_ReadRegisterEx(os, kernel->core, 0x664, &gpuAddress));
 
-        gcmkVERIFY_OK(gckVIDMEM_NODE_GetSize(
-            kernel,
-            nodeObject,
-            &bytes
-            ));
+        gcmkPRINT("DMA Address 0x%08X", gpuAddress);
 
-        gcmkPRINT("Command buffer around 0x%08X:", gpuAddress);
+        /* Find GPU address in video memory list. */
+        status = gckVIDMEM_NODE_Find(kernel, gpuAddress, &nodeObject, &offset);
 
-        /* Align to 4096. */
-        offset &= 0xfffff000;
-        gpuAddress &= 0xfffff000;
+        if (gcmIS_SUCCESS(status) && nodeObject->type == gcvVIDMEM_TYPE_COMMAND)
+        {
+            gcmkONERROR(gckVIDMEM_NODE_LockCPU(
+                kernel,
+                nodeObject,
+                gcvFALSE,
+                gcvFALSE,
+                &entryDump
+                ));
 
-        /* Dump max 4096 bytes. */
-        bytes = (bytes - offset) > 4096 ? 4096 : (bytes - offset);
+            gcmkVERIFY_OK(gckVIDMEM_NODE_GetSize(
+                kernel,
+                nodeObject,
+                &bytes
+                ));
 
-        /* Kernel address of page where stall point stay. */
-        entryDump = (gctUINT8_PTR)entryDump + offset;
+            gcmkPRINT("Command buffer around 0x%08X:", gpuAddress);
 
-        _DumpBuffer(entryDump, gpuAddress, bytes);
+            /* Align to 4096. */
+            offset &= 0xfffff000;
+            gpuAddress &= 0xfffff000;
 
-        gcmkVERIFY_OK(gckVIDMEM_NODE_UnlockCPU(
-            kernel,
-            nodeObject,
-            0,
-            gcvFALSE,
-            gcvFALSE
-            ));
-    }
-    else
-    {
-        gcmkPRINT("Can not find command buffer around 0x%08X.\n", gpuAddress);
+            /* Dump max 4096 bytes. */
+            bytes = (bytes - offset) > 4096 ? 4096 : (bytes - offset);
+
+            /* Kernel address of page where stall point stay. */
+            entryDump = (gctUINT8_PTR)entryDump + offset;
+
+            _DumpBuffer(entryDump, gpuAddress, bytes);
+
+            gcmkVERIFY_OK(gckVIDMEM_NODE_UnlockCPU(
+                kernel,
+                nodeObject,
+                0,
+                gcvFALSE,
+                gcvFALSE
+                ));
+        }
+        else
+        {
+            gcmkPRINT("Can not find command buffer around 0x%08X.\n", gpuAddress);
+        }
     }
 
     /* new line. */
-    gcmkPRINT("");
+    gcmkPRINT(" ");
 
     gcmkPRINT("Kernel command buffers:");
 
@@ -4484,7 +5050,7 @@ gckCOMMAND_DumpExecutingBuffer(
     }
 
     /* new line. */
-    gcmkPRINT("");
+    gcmkPRINT(" ");
 
     if (queue->count)
     {
@@ -4533,6 +5099,9 @@ gckCOMMAND_DumpExecutingBuffer(
             /* Kernel address of page where stall point stay. */
             entryDump = (gctUINT8_PTR)entryDump + offset;
 
+#if gcdDUMP_HW_SUBCOMMAND
+            _CreateSubCmdList(kernel->os, entryDump, bytes, subCommand, checkCount, &subCommandList);
+#endif
             _DumpBuffer(entryDump, gpuAddress, bytes);
 
             gcmkVERIFY_OK(gckVIDMEM_NODE_UnlockCPU(
@@ -4549,8 +5118,59 @@ gckCOMMAND_DumpExecutingBuffer(
         }
 
         /* new line. */
-        gcmkPRINT("");
+        gcmkPRINT(" ");
     }
+
+#if gcdDUMP_HW_SUBCOMMAND
+    gcmkPRINT("Sub command:");
+    node = subCommandList.next;
+
+    while (node)
+    {
+        status = gckVIDMEM_NODE_Find(kernel, node->address, &nodeObject, &offset);
+
+        if (gcmIS_SUCCESS(status))
+        {
+            gcmkONERROR(gckVIDMEM_NODE_LockCPU(
+                kernel,
+                nodeObject,
+                gcvFALSE,
+                gcvFALSE,
+                &entryDump
+                ));
+
+            /* Kernel address of page where stall point stay. */
+            entryDump = (gctUINT8_PTR)entryDump + offset;
+
+            gcmkVERIFY_OK(gckVIDMEM_NODE_GetSize(kernel, nodeObject, &bytes));
+
+            bytes -= offset;
+
+            gcmkPRINT("%s: %08X sub command:", subCommand[node->type].name, node->address);
+
+            _DumpBuffer(entryDump, node->address, bytes);
+
+            gcmkVERIFY_OK(gckVIDMEM_NODE_UnlockCPU(
+                kernel,
+                nodeObject,
+                0,
+                gcvFALSE,
+                gcvFALSE
+                ));
+        }
+        else
+        {
+            gcmkPRINT("%08X sub command not found", node->address);
+        }
+
+        /* new line */
+        gcmkPRINT(" ");
+
+        node = node->next;
+    };
+
+    _DestroySubCmdList(kernel->os, &subCommandList);
+#endif
 
     return gcvSTATUS_OK;
 
@@ -4559,6 +5179,101 @@ OnError:
 }
 
 #if gcdENABLE_SW_PREEMPTION
+static gceSTATUS
+_PreemptHandlePatchListSingle(
+    IN gckCOMMAND Command,
+    IN gcsHAL_COMMAND_LOCATION * CommandBuffer,
+    IN gcsHAL_PATCH_LIST * PatchList,
+    OUT gcsPATCH_LIST_VARIABLE * PatchListVar
+    )
+{
+    gceSTATUS status;
+    gctUINT32 index = 0;
+    gctUINT32 count = 0;
+    gctUINT32 itemSize = 0;
+    gctUINT32 batchCount = 0;
+    gcsPATCH_ARRAY *patchArray = (gcsPATCH_ARRAY *)gcmUINT64_TO_PTR(PatchList->patchArray);
+
+    gcmkHEADER_ARG("Command=%p CommandBuffer=%p PatchList=%p type=%d",
+                   Command, CommandBuffer, PatchList, PatchList->type);
+
+    if (PatchList->type >= gcmCOUNTOF(_PatchItemSize) || PatchList->type >= gcmCOUNTOF(patchHandler) || patchArray == gcvNULL)
+    {
+        /* Exceeds buffer max size. */
+        gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+    }
+
+    itemSize = _PatchItemSize[PatchList->type];
+
+    batchCount = (gctUINT32)(sizeof(gctUINT64) * 32 / itemSize);
+
+    handler = patchHandler[PatchList->type];
+
+    while (index < PatchList->count)
+    {
+        gctUINT i;
+        gctUINT8_PTR ptr;
+
+        /* Determine batch count, don't handle too many in one batch. */
+        count = PatchList->count - index;
+
+        if (count > batchCount)
+        {
+            count = batchCount;
+        }
+
+        /* Advance to next batch. */
+        index += count;
+
+        ptr = (gctUINT8_PTR)patchArray->kArray;
+
+        for (i = 0; i < count; i++)
+        {
+            /* Call handler. */
+            gcmkONERROR(
+                handler(Command, CommandBuffer, ptr, PatchListVar));
+
+            /* Advance to next patch. */
+            ptr += itemSize;
+        }
+    }
+
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
+
+OnError:
+    gcmkFOOTER();
+    return status;
+
+}
+
+static gceSTATUS
+_PreemptHandlePatchList(
+    IN gckCOMMAND Command,
+    IN gcsHAL_COMMAND_LOCATION * CommandBuffer,
+    OUT gcsPATCH_LIST_VARIABLE * PatchListVar
+    )
+{
+    gceSTATUS status = gcvSTATUS_OK;
+    gcsHAL_PATCH_LIST *patchList;
+
+    patchList = (gcsHAL_PATCH_LIST *)gcmUINT64_TO_PTR(CommandBuffer->patchHead);
+
+    while (patchList)
+    {
+        gcmkONERROR(_PreemptHandlePatchListSingle(
+            Command,
+            CommandBuffer,
+            patchList,
+            PatchListVar));
+
+        patchList = (gcsHAL_PATCH_LIST *)gcmUINT64_TO_PTR(patchList->next);
+    }
+
+OnError:
+    return status;
+}
+
 /*******************************************************************************
 **
 **  gckCOMMAND_PreemptCommit
@@ -4588,11 +5303,23 @@ gckCOMMAND_PreemptCommit(
     gcsHAL_COMMAND_LOCATION *cmdLoc = PreemptCommit->cmdLoc;
     gckCONTEXT context = PreemptCommit->context;
     gcsSTATE_DELTA_PTR delta = PreemptCommit->delta;
+    gcsPATCH_LIST_VARIABLE patchListVar = {0, 0};
+    gctBOOL commitEntered = gcvFALSE;
 
     gcmkHEADER();
 
+    /* Acquire the command queue. */
+    gcmkONERROR(gckCOMMAND_EnterCommit(Command, gcvFALSE));
+    commitEntered = gcvTRUE;
+
     do
     {
+        gcmkVERIFY_OK(_PreemptHandlePatchList(
+            Command,
+            cmdLoc,
+            &patchListVar
+            ));
+
         if (Command->feType == gcvHW_FE_WAIT_LINK)
         {
             status = _CommitWaitLinkOnce(Command,
@@ -4603,18 +5330,24 @@ gckCOMMAND_PreemptCommit(
                                          PreemptCommit->shared,
                                          &contextSwitched,
                                          PreemptCommit,
-                                         gcvTRUE);
+                                         gcvTRUE,
+                                         0);
 
-            if (status != gcvSTATUS_INTERRUPTED)
-            {
-                gcmkONERROR(status);
-            }
+        }
+        else if (Command->feType == gcvHW_FE_MULTI_CHANNEL)
+        {
+            status = _CommitMultiChannelOnce(Command, context, cmdLoc);
         }
         else
         {
-            gcmkPRINT("Don't enable SW preemption for non-WLFE.\n");
+            gcmkPRINT("Don't enable SW preemption for aysnc FE.\n");
 
             gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
+        }
+
+        if (status != gcvSTATUS_INTERRUPTED)
+        {
+            gcmkONERROR(status);
         }
 
         context = gcvNULL;
@@ -4624,7 +5357,44 @@ gckCOMMAND_PreemptCommit(
     }
     while(cmdLoc);
 
+    /* Release the command queue. */
+    gcmkONERROR(gckCOMMAND_ExitCommit(Command, gcvFALSE));
+    commitEntered = gcvFALSE;
+
+    if (Command->feType == gcvHW_FE_MULTI_CHANNEL)
+    {
+        /*
+         * Semphore synchronization.
+         *
+         * Here we blindly sync dirty other channels to the system channel.
+         * The scenario to sync channels to the system channel:
+         * 1. Need to sync channels who sent semaphores.
+         * 2. Need to sync dirty channels when event(interrupt) is to sent.
+         * 3. Need to sync dirty channels when system channel need run something
+         *    such as flush mmu.
+         *
+         * When power management is on, blindly sync dirty channels is OK because
+         * there's always a event(intrrupt).
+         *
+         * The only condition we sync more than needed is:
+         * a. power manangement is off.
+         * b. no user event is attached when commit.
+         * c. no user event is to be submitted in next ioctl.
+         * That's a rare condition.
+         *
+         * Conclusion is that, blindly sync dirty channels is a good choice for
+         * now.
+         */
+        gcmkONERROR(_SyncToSystemChannel(Command, Command->dirtyChannel, gcvTRUE));
+    }
+
 OnError:
+    if (commitEntered)
+    {
+        /* Release the command queue mutex. */
+        gcmkVERIFY_OK(gckCOMMAND_ExitCommit(Command, gcvFALSE));
+    }
+
     /* Return the status. */
     gcmkFOOTER();
     return status;

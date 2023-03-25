@@ -229,6 +229,8 @@ static inline void kvm_setup_paging_mode(struct kvm_vcpu *vcpu)
 		}
 		set_paging_flag(vcpu);
 		return;
+	} else {
+		reset_tdp_paging(vcpu);
 	}
 	reset_paging_flag(vcpu);
 	return;
@@ -593,6 +595,36 @@ static inline bool is_cached_mmio_page_fault(struct kvm_vcpu *vcpu, u64 addr,
 	return false;
 }
 
+#define KVM_SET_USR_PFAULT(name, p, prev_usr_pfault_jmp) \
+do { \
+	(prev_usr_pfault_jmp) = (p)->thread.usr_pfault_jump; \
+	GET_LBL_ADDR(name, (p)->thread.usr_pfault_jump); \
+} while (false)
+
+#define KVM_RESTORE_USR_PFAULT(p, saved_usr_pfault_jmp) \
+({ \
+	unsigned long __pfault_result = (p)->thread.usr_pfault_jump;\
+	(p)->thread.usr_pfault_jump = (saved_usr_pfault_jmp); \
+	unlikely(!__pfault_result); \
+})
+
+#define	KVM_SET_RECOVERY_FAULTED(name, vcpu) \
+do { \
+	KVM_BUG_ON((vcpu)->arch.mmu.recovery_pfault_jump != 0); \
+	GET_LBL_ADDR(name, (vcpu)->arch.mmu.recovery_pfault_jump); \
+} while (false)
+
+#define	KVM_RESET_RECOVERY_FAULTED(vcpu) \
+do { \
+	(vcpu)->arch.mmu.recovery_pfault_jump = 0; \
+} while (false)
+
+#define	KVM_TEST_RECOVERY_FAULTED(vcpu) \
+		((vcpu)->arch.mmu.recovery_pfault_jump != 0)
+
+#define	KVM_GET_RECOVERY_JUMP_POINT(vcpu) \
+		((vcpu)->arch.mmu.recovery_pfault_jump)
+
 #ifndef	CONFIG_KVM_MMU_AUDIT
 static inline void kvm_mmu_audit(struct kvm_vcpu *vcpu, int point) { }
 static inline void mmu_audit_disable(void) { }
@@ -655,7 +687,7 @@ extern bool check_guest_spill_fill_recovery(tc_cond_t cond, e2k_addr_t address,
 extern try_pf_err_t try_atomic_pf(struct kvm_vcpu *vcpu, gfn_t gfn,
 					kvm_pfn_t *pfn, bool no_dirty_log);
 extern void mmu_pte_write_new_pte(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
-				  pgprot_t *spte, gpa_t gpa, const void *new);
+				  pgprot_t *spte, gpa_t gpa, pgprotval_t new_gpte);
 extern pgprotval_t mmu_pte_write_fetch_gpte(struct kvm_vcpu *vcpu, gpa_t *gpa,
 					    const u8 *new, int *bytes);
 extern int pte_list_add(struct kvm_vcpu *vcpu, pgprot_t *spte,
@@ -765,7 +797,6 @@ kvm_prepare_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			hpa_t root, hpa_t gp_root, gva_t vptb)
 {
 	pgprot_t *new_root;
-	int pt_index;
 
 	KVM_BUG_ON(!VALID_PAGE(root));
 	new_root = (pgprot_t *)__va(root);
@@ -792,8 +823,8 @@ kvm_prepare_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			KVM_BUG_ON(is_paging(vcpu) &&
 					pv_vcpu_is_init_gmm(vcpu,
 						pv_vcpu_get_gmm(vcpu)));
-			get_new_mmu_pid(pv_vcpu_get_gmm_context(vcpu),
-					smp_processor_id());
+			get_mmu_pid_irqs_off(pv_vcpu_get_gmm_context(vcpu),
+					MMU_PID_RELOAD_FORCED__NO_UPDATE);
 		}
 		sp->root_flags.has_host_pgds = 1;
 		sp->root_flags.nonpaging = !is_paging(vcpu);
@@ -807,9 +838,13 @@ kvm_prepare_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		spin_unlock(&vcpu->kvm->mmu_lock);
 	}
 
-	/* One PGD entry is the VPTB self-map. */
-	pt_index = kvm_vcpu_get_vmlpt_index(vcpu, gmm);
-	mmu_pt_kvm_vmlpt_kernel_spte_set(vcpu->kvm, &new_root[pt_index], new_root);
+	/* Since V6 hardware support has been simplified
+	 * and self-pointing pgd is not required anymore. */
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		/* One PGD entry is the VPTB self-map. */
+		int pt_index = kvm_vcpu_get_vmlpt_index(vcpu, gmm);
+		mmu_pt_kvm_vmlpt_kernel_spte_set(vcpu->kvm, &new_root[pt_index], new_root);
+	}
 }
 
 static inline void
@@ -818,7 +853,6 @@ mmu_pv_prepare_spt_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, hpa_t root)
 	pgprot_t *new_root;
 	kvm_mmu_page_t *sp;
 	unsigned long flags;
-	int pt_index;
 
 	KVM_BUG_ON(!VALID_PAGE(root));
 
@@ -834,16 +868,20 @@ mmu_pv_prepare_spt_u_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, hpa_t root)
 
 	/* create new host MMU context for guest user process */
 	raw_all_irq_save(flags);
-	get_new_mmu_pid(&gmm->context, smp_processor_id());
+	get_mmu_pid_irqs_off(&gmm->context, MMU_PID_RELOAD_FORCED__NO_UPDATE);
 	sp->root_flags.has_host_pgds = 1;
 	sp->host_synced = true;
 	sp->guest_kernel_synced = true;
 	raw_all_irq_restore(flags);
 	spin_unlock(&vcpu->kvm->mmu_lock);
 
-	/* One PGD entry is the VPTB self-map. */
-	pt_index = kvm_vcpu_get_vmlpt_index(vcpu, gmm);
-	mmu_pt_kvm_vmlpt_kernel_spte_set(vcpu->kvm, &new_root[pt_index], new_root);
+	/* Since V6 hardware support has been simplified
+	 * and self-pointing pgd is not required anymore. */
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		/* One PGD entry is the VPTB self-map. */
+		int pt_index = kvm_vcpu_get_vmlpt_index(vcpu, gmm);
+		mmu_pt_kvm_vmlpt_kernel_spte_set(vcpu->kvm, &new_root[pt_index], new_root);
+	}
 }
 
 static inline void
@@ -864,7 +902,6 @@ kvm_clear_shadow_root(struct kvm *kvm, struct kvm_mmu_page *sp)
 {
 	struct gmm_struct *gmm;
 	pgprot_t *root;
-	int vmlpt_index;
 
 	if (unlikely(MMU_IS_SEPARATE_PT() || kvm->arch.is_hv))
 		return;
@@ -889,9 +926,13 @@ kvm_clear_shadow_root(struct kvm *kvm, struct kvm_mmu_page *sp)
 		kvm_clear_host_kernel_root_range(kvm, root);
 	}
 
-	/* One PGD entry is the VPTB self-map. */
-	vmlpt_index = kvm_get_pv_mmu_vmlpt_index(kvm);
-	kvm_vmlpt_spte_reset(kvm, &root[vmlpt_index]);
+	/* Since V6 hardware support has been simplified
+	 * and self-pointing pgd is not required anymore. */
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		/* One PGD entry is the VPTB self-map. */
+		int vmlpt_index = kvm_get_pv_mmu_vmlpt_index(kvm);
+		kvm_vmlpt_spte_reset(kvm, &root[vmlpt_index]);
+	}
 }
 
 static inline int
@@ -950,11 +991,11 @@ static inline bool pv_vcpu_is_init_root_hpa(struct kvm_vcpu *vcpu, hpa_t root)
 	return root == init_gmm->root_hpa;
 }
 
-static inline hpa_t pv_vcpu_get_init_gk_root_hpa(struct kvm_vcpu *vcpu)
+static inline hpa_t pv_vcpu_get_init_root_hpa(struct kvm_vcpu *vcpu)
 {
 	gmm_struct_t *init_gmm = pv_vcpu_get_init_gmm(vcpu);
 
-	return init_gmm->gk_root_hpa;
+	return init_gmm->root_hpa;
 }
 
 static inline void set_vcpu_mu_events_num(struct kvm_vcpu *vcpu, int events_num)
@@ -1203,14 +1244,11 @@ extern int kvm_switch_to_tdp_paging(struct kvm_vcpu *vcpu,
 		gpa_t os_phys_ptb, gva_t os_virt_ptb, gva_t os_virt_base);
 
 static inline void
-pv_vcpu_switch_to_init_spt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+pv_vcpu_switch_to_init_spt(struct kvm_vcpu *vcpu, hpa_t root)
 {
 	gmm_struct_t *init_gmm = pv_vcpu_get_init_gmm(vcpu);
-	pgd_t *root;
 
-	KVM_BUG_ON(gmm == init_gmm);
-	root = kvm_mmu_get_gmm_root(init_gmm);
-	kvm_set_space_type_spt_u_root(vcpu, (hpa_t)__pa(root));
+	kvm_set_space_type_spt_u_root(vcpu, root);
 	if (likely(!is_sep_virt_spaces(vcpu))) {
 		kvm_set_space_type_guest_u_root(vcpu, init_gmm->u_pptb);
 	} else {
@@ -1277,12 +1315,13 @@ kvm_get_space_addr_gmm(struct kvm_vcpu *vcpu, gva_t gva)
 
 static inline void kvm_mmu_unload_gmm_root(struct kvm_vcpu *vcpu)
 {
+	gthread_info_t *gti;
 	gmm_struct_t *cur_gmm;
-	hpa_t u_root;
+	hpa_t u_root, init_root;
 
 	cur_gmm = pv_vcpu_get_gmm(vcpu);
 	if (pv_vcpu_is_init_gmm(vcpu, cur_gmm)) {
-		/* current gmm is init_gmm, cannot be unliaded */
+		/* current gmm is init_gmm, cannot be unloaded */
 		return;
 	}
 	mmu_get_spt_roots(vcpu, U_ROOT_PT_FLAG, NULL, &u_root, NULL);
@@ -1294,10 +1333,11 @@ static inline void kvm_mmu_unload_gmm_root(struct kvm_vcpu *vcpu)
 	} else {
 		kvm_mmu_unload(vcpu, U_ROOT_PT_FLAG);
 	}
-	pv_vcpu_clear_gmm(vcpu);
-	pv_vcpu_set_active_gmm(vcpu, pv_vcpu_get_init_gmm(vcpu));
-	if (likely(!pv_vcpu_is_init_root_hpa(vcpu, u_root))) {
-		pv_vcpu_switch_to_init_spt(vcpu, cur_gmm);
+	gti = pv_vcpu_get_gti(vcpu);
+	gti->gmm_in_release = true;
+	init_root = kvm_convert_to_init_gmm(vcpu, gti);
+	if (likely(u_root != init_root)) {
+		pv_vcpu_switch_to_init_spt(vcpu, init_root);
 	}
 }
 
@@ -1352,6 +1392,8 @@ extern void mmu_release_spt_nonpaging_root(struct kvm *kvm, hpa_t root_hpa);
 extern int reexecute_load_and_wait_page_fault(struct kvm_vcpu *vcpu,
 		trap_cellar_t *tcellar, gfn_t gfn, pt_regs_t *regs);
 extern void release_gmm_root_pt(struct kvm *kvm, gmm_struct_t *gmm);
+extern int kvm_dump_host_and_guest_pts(struct kvm *kvm, int gmmid_nr,
+				       e2k_addr_t start, e2k_addr_t end);
 
 static inline void mmu_flush_remote_tlbs(struct kvm_vcpu *vcpu,
 					 pgprot_t *sptep, int level)
@@ -1385,6 +1427,12 @@ static inline void
 mmu_flush_shadow_gmm_tlb(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
 	host_flush_tlb_mm(gmm);
+}
+
+static inline void mmu_pt_dump_host_and_guest_pts(struct kvm *kvm,
+			gmm_struct_t *gmm, e2k_addr_t start, e2k_addr_t end)
+{
+	kvm->arch.mmu_pt_ops.dump_host_and_guest_pts(kvm, gmm, start, end);
 }
 
 static inline gpa_t
@@ -1730,6 +1778,19 @@ kvm_move_guest_tagged_data(int word_size,
  * common case: some addresses can be from host kernel address space,
  * but point to guest structures, shadow image ...
  */
+extern __priv_hypercall long
+kvm_priv_recovery_faulted_store(e2k_addr_t address, u64 wr_data, u64 st_rec_opc,
+				u64 data_ext, u64 opc_ext, u64 args);
+extern __priv_hypercall long
+kvm_priv_recovery_faulted_load(e2k_addr_t addr, u64 *ld_val, u8 *data_tag,
+			       u64 ld_rec_opc, int chan);
+extern __priv_hypercall long
+kvm_priv_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+		e2k_addr_t addr_to_hi, u64 ld_rec_opc, u64 _args, u32 first_time);
+extern __priv_hypercall long
+kvm_priv_recovery_faulted_load_to_greg(e2k_addr_t addr, u32 greg_num_d,
+		u64 ld_rec_opc, u64 _args, u64 *saved_greg_lo, u64 *saved_greg_hi);
+
 extern long kvm_recovery_faulted_tagged_guest_store(struct kvm_vcpu *vcpu,
 		e2k_addr_t address, u64 wr_data, u64 st_rec_opc,
 		u64 data_ext, u64 opc_ext, u64 arg);

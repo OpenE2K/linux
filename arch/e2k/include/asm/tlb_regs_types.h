@@ -4,34 +4,12 @@
 #include <linux/types.h>
 #include <asm/machdep.h>
 
-
 /* now DTLB entry format is different on iset V6 vs V3-V5 */
-#if	CONFIG_CPU_ISET >= 6
-# ifdef	CONFIG_MMU_PT_V6
-#  define	MMU_IS_DTLB_V6()	true
-# else	/* ! CONFIG_MMU_PT_V6 */
-#  define	MMU_IS_DTLB_V6()	false
-# endif	/* CONFIG_MMU_PT_V6 */
-#elif	CONFIG_CPU_ISET >= 3
-#  define	MMU_IS_DTLB_V6()	false
-#elif	CONFIG_CPU_ISET == 0
-# ifdef	E2K_P2V
-#  define	MMU_IS_DTLB_V6()	\
-			(boot_machine.mmu_pt_v6)
-# else	/* ! E2K_P2V */
-#  define	MMU_IS_DTLB_V6()	\
-			(machine.mmu_pt_v6)
-# endif	/* E2K_P2V */
-#else	/* CONFIG_CPU_ISET undefined or negative */
-# warning "Undefined CPU ISET VERSION #, MMU pt_v6 mode is defined dinamicaly"
-# ifdef	E2K_P2V
-#  define	MMU_IS_DTLB_V6()	\
-			(boot_machine.mmu_pt_v6)
-# else	/* ! E2K_P2V */
-#  define	MMU_IS_DTLB_V6()	\
-			(machine.mmu_pt_v6)
-# endif	/* E2K_P2V */
-#endif	/* CONFIG_CPU_ISET 3-6 */
+#ifdef E2K_P2V
+# define MMU_IS_DTLB_V6() boot_cpu_has(CPU_FEAT_PAGE_TABLE_V6)
+#else
+# define MMU_IS_DTLB_V6() cpu_has(CPU_FEAT_PAGE_TABLE_V6)
+#endif
 
 
 /*
@@ -50,6 +28,89 @@
  */
 
 /* DTLB/ITLB registers access operations address */
+
+typedef union {
+	struct {
+		u64 type        : 3;
+		u64 setN        : 2;
+		u64             : 6;
+		u64 partN       : 1;
+		u64 lineN_small : 8;
+		u64             : 1;
+		u64 lineN_huge  : 8;
+		u64             : 35;
+	};
+	u64 word;
+} dtlb_reg_op_t;
+
+typedef union {
+	struct {
+		u64         : 8;
+		u64 va_tag  : 28;
+		u64 context : 12;
+		u64 root    : 1;
+		u64         : 1;
+		u64 g       : 1;
+		u64         : 1;
+		u64 val     : 1;
+		u64         : 11;
+	} v3;
+	struct {
+		u64          : 8;
+		u64 addr_tag : 28;
+		u64 gid      : 12;
+		u64 pid      : 12;
+		u64 g        : 1;
+		u64 root     : 1;
+		u64 virt     : 1;
+		u64 val      : 1;
+	} v6;
+	u64 word;
+} dtlb_tag_t;
+
+typedef union {
+	struct {
+		u64          : 1;
+		u64 wr       : 1;
+		u64 non_ex   : 1;
+		u64 pwt      : 1;
+		u64 pcd1     : 1;
+		u64          : 1;
+		u64 d        : 1;
+		u64          : 1;
+		u64 g        : 1;
+		u64 pcd2     : 1;
+		u64 nwa      : 1;
+		u64          : 1;
+		u64 pha      : 28;
+		u64 vva      : 1;
+		u64 pv       : 1;
+		u64 int_pr   : 1;
+		u64          : 5;
+		u64 uc       : 1;
+		u64          : 15;
+	} v3;
+	struct {
+		u64        : 1;
+		u64 wr_exc : 1;
+		u64 pv     : 1;
+		u64 vva    : 1;
+		u64 int_pr : 1;
+		u64        : 1;
+		u64 d      : 1;
+		u64        : 1;
+		u64 g      : 1;
+		u64 nwa    : 1;
+		u64        : 2;
+		u64 pha    : 36;
+		u64        : 8;
+		u64 wr_int : 1;
+		u64 mt_ma  : 3;
+		u64 mt_exc : 3;
+		u64 non_ex : 1;
+	} v6;
+	u64 word;
+} dtlb_entry_t;
 
 #ifndef	__ASSEMBLY__
 typedef	e2k_addr_t		tlb_addr_t;
@@ -111,6 +172,11 @@ typedef	tlb_addr_t		itlb_addr_t;
 		(VADDR_TO_TLB_LINE_NUM(virt_addr, large_page) << \
 					_TLB_ADDR_LINE_NUM_SHIFT2)))
 
+#define	tlb_addr_set_line_num(tlb_addr, line_num) \
+		(__tlb_addr((tlb_addr_val(tlb_addr) & \
+				~(_TLB_ADDR_LINE_NUM)) | \
+				((line_num) << _TLB_ADDR_LINE_NUM_SHIFT)))
+
 #define	tlb_addr_set_set_num(tlb_addr, set_num)	\
 		(__tlb_addr((tlb_addr_val(tlb_addr) & \
 				~_TLB_ADDR_SET_NUM) | \
@@ -121,8 +187,6 @@ typedef	tlb_addr_t		itlb_addr_t;
 
 #ifndef	__ASSEMBLY__
 typedef	e2k_addr_t		tlb_tag_t;
-typedef	tlb_tag_t		dtlb_tag_t;
-typedef	tlb_tag_t		itlb_tag_t;
 #endif	/* ! __ASSEMBLY__ */
 
 #define	tlb_tag_val(tlb_tag)		(tlb_tag)
@@ -304,11 +368,8 @@ clear_dtlb_val_flags(probe_entry_t dtlb_val, const uni_dtlb_t uni_flags)
 #define	DTLB_ENTRY_CLEAR(dtlb_val, uni_flags)	\
 		clear_dtlb_val_flags(dtlb_val, uni_flags)
 
-#define	DTLB_ENTRY_ERROR_MASK	DTLB_ENTRY_INIT(UNI_DTLB_ERROR_MASK)
 #define	DTLB_ENTRY_MISS_LEVEL_MASK	\
 				DTLB_ENTRY_INIT(UNI_DTLB_MISS_LEVEL)
-#define	DTLB_ENTRY_PROBE_SUCCESSFUL	\
-				DTLB_ENTRY_INIT(UNI_DTLB_SUCCESSFUL)
 #define	DTLB_ENTRY_RES_BITS	DTLB_ENTRY_INIT(UNI_DTLB_RES_BITS)
 #define	DTLB_ENTRY_WR		DTLB_ENTRY_INIT(UNI_PAGE_WRITE)
 #define	DTLB_ENTRY_PV		DTLB_ENTRY_INIT(UNI_PAGE_PRIV)
@@ -320,10 +381,9 @@ clear_dtlb_val_flags(probe_entry_t dtlb_val, const uni_dtlb_t uni_flags)
 #define	DTLB_ENTRY_TEST_VVA(dtlb_val)	\
 		DTLB_ENTRY_TEST(dtlb_val, UNI_PAGE_VALID)
 #define	DTLB_ENTRY_TEST_SUCCESSFUL(dtlb_val)	\
-		((MMU_IS_DTLB_V6()) ? \
-			DTLB_ENTRY_TEST(dtlb_val, UNI_DTLB_SUCCESSFUL) \
-			: \
-			!DTLB_ENTRY_TEST(dtlb_val, UNI_DTLB_SUCCESSFUL))
+		((MMU_IS_DTLB_V6()) \
+			? !!((dtlb_val) & DTLB_ENTRY_SUCCESSFUL_V6) \
+			: !((dtlb_val) & DTLB_EP_FAULT_RES_V3))
 
 static inline probe_entry_t
 mmu_phys_addr_to_dtlb_pha(e2k_addr_t phys_addr, bool mmu_pt_v6)
@@ -366,24 +426,6 @@ dtlb_pha_to_phys_addr(probe_entry_t dtlb_val)
 /* reserved bits		[57] */
 #define	RES_BITS_EP_RES		DTLB_ENTRY_RES_BITS
 
-/*
- * DTLB address probe result format
- */
-/* Physical address of successfull DTLB address probe [39: 0]/[47:0] */
-#define	PH_ADDR_AP_RES		DTLB_ENTRY_INIT(UNI_DTLB_PH_ADDR_AP_RES)
-/* AP disable result		[62] */
-#define	DISABLE_AP_RES		ILLEGAL_PAGE_EP_RES
-/* page miss			[61] */
-#define	PAGE_MISS_AP_RES	PAGE_MISS_EP_RES
-/* illegal page			[58] */
-#define	ILLEGAL_PAGE_AP_RES	ILLEGAL_PAGE_EP_RES
-
-#define	PH_ADDR_IS_PRESENT(ap_res)	(((ap_res) & ~PH_ADDR_AP_RES) == 0)
-#define	PH_ADDR_IS_MISS(ap_res)		((ap_res) & PAGE_MISS_AP_RES)
-#define	PH_ADDR_IS_VALID(ap_res)	((PH_ADDR_IS_PRESENT(ap_res) || \
-						PH_ADDR_IS_MISS(ap_res)))
-#define	PH_ADDR_IS_INVALID(ap_res)	((ap_res) & ILLEGAL_PAGE_AP_RES)
-#define	GET_PROBE_PH_ADDR(ap_res)	((ap_res) & PH_ADDR_AP_RES)\
 
 #if	!defined(CONFIG_PARAVIRT_GUEST) && !defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is native kernel without any virtualization */

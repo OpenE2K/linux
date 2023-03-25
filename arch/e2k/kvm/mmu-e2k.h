@@ -4,6 +4,7 @@
 #include <linux/kvm_host.h>
 #include <asm/mmu_types.h>
 #include <asm/pgtable_def.h>
+#include <asm/mmu_types.h>
 
 #if	_PAGE_P_V6 == _PAGE_P_V3
 # define PT_E2K_PRESENT_MASK	_PAGE_P_V6

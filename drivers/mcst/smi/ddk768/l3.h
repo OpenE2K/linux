@@ -6,9 +6,9 @@
 
 
 struct l3_pins {
-	void (*setdat)(int);
-	void (*setclk)(int);
-	void (*setmode)(int);
+	void (*setdat)(volatile unsigned char __iomem *, int);
+	void (*setclk)(volatile unsigned char __iomem *, int);
+	void (*setmode)(volatile unsigned char __iomem *, int);
 	int data_hold;
 	int data_setup;
 	int clock_high;
@@ -17,6 +17,8 @@ struct l3_pins {
 	int mode_setup;
 };
 
-int l3_write(struct l3_pins *adap, u8 addr, u8 *data, int len);
+int l3_write(volatile unsigned char __iomem *rmmio,
+			struct l3_pins *adap, u8 addr,
+			u8 *data, int len);
 
 #endif

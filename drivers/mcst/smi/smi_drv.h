@@ -181,6 +181,8 @@ struct smi_device {
 	resource_size_t			rmmio_base;
 	resource_size_t			rmmio_size;
 	void __iomem			*rmmio;
+	unsigned short 			devId;
+	u8						revId;
 
 	struct smi_mc			mc;
 	struct smi_mode_info		mode_info;

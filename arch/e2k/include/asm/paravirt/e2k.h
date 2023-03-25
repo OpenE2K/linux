@@ -14,20 +14,6 @@
 #define	boot_pv_get_machine_id()	\
 		((boot_paravirt_enabled()) ? \
 			guest_machine_id : boot_native_machine_id)
-#define	pv_set_machine_id(mach_id)					\
-({									\
-	if (paravirt_enabled())						\
-		guest_machine_id = (mach_id);				\
-	else								\
-		native_machine_id = (mach_id);				\
-})
-#define	boot_pv_set_machine_id(mach_id)					\
-({									\
-	if (boot_paravirt_enabled())					\
-		guest_machine_id = (mach_id);				\
-	else								\
-		boot_native_machine_id = (mach_id);			\
-})
 
 static inline void
 pv_set_mach_type_id(void)
@@ -40,8 +26,6 @@ pv_set_mach_type_id(void)
 
 #define	get_machine_id()		pv_get_machine_id()
 #define	boot_get_machine_id()		boot_pv_get_machine_id()
-#define	set_machine_id(mach_id)		pv_set_machine_id(mach_id)
-#define	boot_set_machine_id(mach_id)	boot_pv_set_machine_id(mach_id)
 
 static inline void set_mach_type_id(void)
 {

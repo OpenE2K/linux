@@ -88,6 +88,7 @@ long initDisplay(void);
  * while display channel are still active.
  */
 void setDisplayDPMS(
+   struct smi_device *sdev,
    disp_control_t dispControl, /* Channel 0 or Channel 1) */
    DISP_DPMS_t state, /* DPMS state */
    int lvds /* configure LVDS channel */
@@ -103,6 +104,7 @@ void setDisplayDPMS(
  * Return: 0 is OK, -1 is error.
  */
 long setDisplayFormat(
+   struct smi_device *sdev,
    disp_control_t outputInterface, /* Use the output of channel 0 or 1 */
    disp_control_t dataPath,        /* Use the data path from channel 0 or 1 */
    disp_format_t dispFormat         /* 24 bit single or 48 bit double pixel */
@@ -116,7 +118,10 @@ void setCRTPath(disp_control_t dispControl);
 /*
  * This functions uses software sequence to turn on/off the panel.
  */
-void ddk768_swPanelPowerSequence(disp_control_t dispControl, disp_state_t dispState, unsigned long vsync_delay);
+void ddk768_swPanelPowerSequence(struct smi_device *sdev,
+						disp_control_t dispControl,
+						disp_state_t dispState,
+						unsigned long vsync_delay);
 
 /*
  * This functions uses software sequence to turn on/off the digital interface.
@@ -139,7 +144,8 @@ void ddk768_setDAC(disp_state_t state);
  * Note:
  *      This function is waiting for the next vertical sync.         
  */
-void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount);
+void waitDispVerticalSync(struct smi_device *sdev,
+			disp_control_t dispControl, unsigned long vSyncCount);
 
 /*
  * Use panel vertical sync line as time delay function.
@@ -149,7 +155,8 @@ void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount);
  *
  * Input: display control (CHANNEL0_CTRL or CHANNEL1_CTRL)
  */
-void ddk768_waitVSyncLine(disp_control_t dispControl);
+void ddk768_waitVSyncLine(struct smi_device *sdev,
+						disp_control_t dispControl);
 
 /*
  * This function detects if the CRT monitor is attached.
@@ -164,6 +171,7 @@ void ddk768_waitVSyncLine(disp_control_t dispControl);
  *     -1   - Fail 
  */
 long ddk768_detectCRTMonitor(
+	struct smi_device *sdev,
     disp_control_t dispControl, 
     unsigned char redValue,
     unsigned char greenValue,
@@ -182,6 +190,7 @@ long ddk768_detectCRTMonitor(
  *      is the description of the timing and plane combination setting.
  */
 void ddk768_setDisplayEnable(
+struct smi_device *sdev,
 disp_control_t dispControl, /* Channel 0 or Channel 1) */
 disp_state_t dispState /* ON or OFF */
 );
@@ -194,6 +203,7 @@ disp_state_t dispState /* ON or OFF */
  *
  */
 long setDisplayView(
+	struct smi_device *sdev,
 	disp_control_t dispOutput, 			/* Monitor 0 or 1 */
 	disp_state_t dispState,				/* On or off */
 	disp_control_t dataPath,			/* Use the data path of channel 0 or channel 1 (optional when OFF) */
@@ -202,34 +212,37 @@ long setDisplayView(
 /*
  * Convenient function to trun on single view 
  */
-long setSingleViewOn(disp_control_t dispOutput, disp_format_t dispFormat);
+long setSingleViewOn(struct smi_device *sdev,
+		disp_control_t dispOutput, disp_format_t dispFormat);
 
 /*
  * Convenient function to trun off single view 
  */
-long setSingleViewOff(disp_control_t dispOutput, disp_format_t dispFormat);
+long setSingleViewOff(struct smi_device *sdev,
+		disp_control_t dispOutput, disp_format_t dispFormat);
 
 /*
  * Convenient function to trun on clone view 
  */
-long setCloneViewOn(disp_control_t dataPath);
+long setCloneViewOn(struct smi_device *sdev,
+				disp_control_t dataPath);
 
 /*
  * Convenient function to trun on dual view 
  */
-long setDualViewOn(void);
+long setDualViewOn(struct smi_device *sdev);
 
 /*
  * Convenient function to trun off all views
  */
-long setAllViewOff(void);
+long setAllViewOff(struct smi_device *sdev);
 
 
 /*
  * Disable double pixel clock. 
  * This is a teporary function, used to patch for the random fuzzy font problem. 
  */
-void EnableDoublePixel(disp_control_t dispControl);
-void DisableDoublePixel(disp_control_t dispControl);
+void EnableDoublePixel(struct smi_device *sdev, disp_control_t dispControl);
+void DisableDoublePixel(struct smi_device *sdev, disp_control_t dispControl);
 
 #endif /* _DISPLAY_H_ */

@@ -313,7 +313,7 @@ static inline int copy_siginfo_to_user_prot(rt_sigframe_t __user *frame,
 {
 	int ret;
 	siginfo_t __user *siginfo_ptr = &frame->info;
-	char      __user *sigval_prot_ptr;
+	void      __user *sigval_prot_ptr;
 	void __user *ptr; /* kernel pointer in the siginfo structure */
 	struct sival_ptr_list *curr_el;
 
@@ -324,7 +324,7 @@ static inline int copy_siginfo_to_user_prot(rt_sigframe_t __user *frame,
 	ptr = info->si_ptr;
 	if (!ptr) {
 		DbgSCP("Empty 'siginfo_t *info->si_ptr'\n");
-		return ret;
+		return 0;
 	}
 
 	sigval_prot_ptr = align_ptr_up((char *)(&siginfo_ptr->si_ptr),
@@ -339,6 +339,8 @@ static inline int copy_siginfo_to_user_prot(rt_sigframe_t __user *frame,
 
 	DebugHS("curr_el=0x%px\n", curr_el);
 	if (!curr_el) {
+		u64 tmp;
+
 		/*
 		 * This may be integer value in siginfo.sival_int field:
 		 * Updating field alignment for PM: simply
@@ -353,12 +355,12 @@ static inline int copy_siginfo_to_user_prot(rt_sigframe_t __user *frame,
 			  */
 			DbgSCP("Not a pointer in '(siginfo_t *)info->si_ptr': 0x%px\n",
 			       ptr);
-			DbgSCP("from=0x%px [0x%llx] --> to=0x%px [0x%llx]\n",
-				&siginfo_ptr->si_ptr, ptr, sigval_prot_ptr,
-				*(u64 __user *)sigval_prot_ptr);
+			DbgSCP("from=0x%px [0x%llx] --> to=0x%px\n",
+				&siginfo_ptr->si_ptr, ptr, sigval_prot_ptr);
 		}
-		ret = __put_priv_user((u64 __user)ptr,
-				      (u64 __user *)sigval_prot_ptr);
+		if (get_user(tmp, (u64 __user *) ptr) ||
+				put_user(tmp, (u64 __user *) sigval_prot_ptr))
+			return -EFAULT;
 	} else {
 		/*
 		 * Simply adding tags to user_ptr_lo/_hi and
@@ -367,18 +369,13 @@ static inline int copy_siginfo_to_user_prot(rt_sigframe_t __user *frame,
 		 */
 		DebugHS("curr_el: _lo=0x%llx _hi=0x%llx _tags=0x%x\n",
 			curr_el->user_ptr_lo, curr_el->user_ptr_hi,
-			curr_el->user_tags);
-		TRY_USR_PFAULT {
-			NATIVE_STORE_TAGGED_QWORD(
-				(e2k_ptr_t *)sigval_prot_ptr,
-				curr_el->user_ptr_lo, curr_el->user_ptr_hi,
-				curr_el->user_tags & 0xf,
-				curr_el->user_tags >> 4);
-		} CATCH_USR_PFAULT {
+			curr_el->user_tags & 0xff);
+		if (put_user_tagged_16(curr_el->user_ptr_lo, curr_el->user_ptr_hi,
+				curr_el->user_tags & 0xff,
+				(e2k_ptr_t __user *) sigval_prot_ptr))
 			return -EFAULT;
-		} END_USR_PFAULT
 	}
-	return ret;
+	return 0;
 }
 #else
 # define setup_prot_frame(...) do { } while (0)
@@ -401,7 +398,7 @@ static inline int setup_rt_frame(rt_sigframe_t __user *frame,
 	DebugHS("info=%px signal=%d ->thread.flags=0x%lx IS_PROTECTED=%ld\n",
 		info, current_thread_info()->ksig.sig, current->thread.flags,
 		TASK_IS_PROTECTED(current));
-
+#ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
 		e2k_ptr_t ss_sp;
 
@@ -422,7 +419,9 @@ static inline int setup_rt_frame(rt_sigframe_t __user *frame,
 					&frame->uc_prot.uc_stack.ss_flags);
 		ret = (ret) ?: __put_priv_user(current->sas_ss_size,
 					&frame->uc_prot.uc_stack.ss_size);
-	} else if (!(current->thread.flags & E2K_FLAG_32BIT)) {
+	} else
+#endif
+	if (!(current->thread.flags & E2K_FLAG_32BIT)) {
 		ret = setup_frame(&frame->uc.uc_mcontext,
 				&frame->uc.uc_extra, regs);
 		ret = (ret) ?: __copy_to_priv_user(&frame->uc.uc_sigmask,
@@ -438,18 +437,22 @@ static inline int setup_rt_frame(rt_sigframe_t __user *frame,
 					AS(regs->stacks.usd_lo).base);
 	}
 
+
 	/*
 	 * Must we set additional flags?
 	 */
 	if (!(ka->sa.sa_flags & SA_SIGINFO))
 		return ret;
 
+#ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
 		ret = (ret) ?: copy_siginfo_to_user_prot(frame, info);
 		ret = (ret) ?: __put_priv_user(0, &frame->uc_prot.uc_flags);
 		ret = (ret) ?: __put_priv_user(0, &AW(frame->uc_prot.uc_link).lo);
 		ret = (ret) ?: __put_priv_user(0, &AW(frame->uc_prot.uc_link).hi);
-	} else if (!(current->thread.flags & E2K_FLAG_32BIT)) {
+	} else
+#endif
+	if (!(current->thread.flags & E2K_FLAG_32BIT)) {
 		ret = (ret) ?: copy_siginfo_to_user(&frame->info, info);
 		ret = (ret) ?: __put_priv_user(0, &frame->uc.uc_flags);
 		ret = (ret) ?: __put_priv_user(0, &frame->uc.uc_link);
@@ -496,6 +499,7 @@ int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *ka)
 	if (!access_ok(frame, sizeof(*frame)))
 		return -EFAULT;
 
+#ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
 		e2k_ptr_t ptr;
 		stack_t stack;
@@ -523,7 +527,9 @@ int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *ka)
 		set_ptr = &frame->uc_prot.uc_sigmask;
 		cr0_hi_ptr = &frame->uc_prot.uc_mcontext.cr0_hi;
 		uc_extra_ptr = &frame->uc_prot.uc_extra;
-	} else if (!(current->thread.flags & E2K_FLAG_32BIT)) {
+	} else
+#endif
+	if (!(current->thread.flags & E2K_FLAG_32BIT)) {
 		ret = restore_altstack(&frame->uc.uc_stack);
 
 		set_ptr = &frame->uc.uc_sigmask;
@@ -1061,10 +1067,13 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 		/*
 		 * On Linux systems we pass 'struct sigcontext' in 2nd argument
 		 */
+#ifdef CONFIG_PROTECTED_MODE
 		if (TASK_IS_PROTECTED(current)) {
 			u_si = &rt_sigframe->uc_prot.uc_mcontext;
 			u_si_size = sizeof(rt_sigframe->uc_prot.uc_mcontext);
-		} else if (!(current->thread.flags & E2K_FLAG_32BIT)) {
+		} else
+#endif
+	if (!(current->thread.flags & E2K_FLAG_32BIT)) {
 			u_si = &rt_sigframe->uc.uc_mcontext;
 			u_si_size = sizeof(rt_sigframe->uc.uc_mcontext);
 		} else {
@@ -1074,11 +1083,13 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 
 		uc = NULL;
 		uc_size = 0;
+#ifdef CONFIG_PROTECTED_MODE
 	} else if (TASK_IS_PROTECTED(current)) {
 		u_si = &rt_sigframe->info;
 		u_si_size = sizeof(rt_sigframe->info);
 		uc = &rt_sigframe->uc_prot;
 		uc_size = sizeof(rt_sigframe->uc_prot);
+#endif
 	} else if (!(current->thread.flags & E2K_FLAG_32BIT)) {
 		u_si = &rt_sigframe->info;
 		u_si_size = sizeof(rt_sigframe->info);
@@ -1172,7 +1183,7 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 	return 0;
 }
 
-static int copy_sighandler_frame(struct e2k_stacks *stacks,
+static int copy_sighandler_frame(struct e2k_stacks *stacks, struct trap_pt_regs *trap,
 				 u64 *pframe, e2k_mem_crs_t *crs)
 {
 	size_t pframe_size;
@@ -1181,10 +1192,22 @@ static int copy_sighandler_frame(struct e2k_stacks *stacks,
 	e2k_mem_crs_t *k_crs;
 	int ret;
 
+	/*
+	 * Update procedure stack
+	 */
+
+	/* Make sure there is enough space in the stack before copying */
+	pframe_size = (TASK_IS_PROTECTED(current)) ? (32 * 8) : (16 * 8);
+	if (unlikely(AS(stacks->psp_hi).ind + pframe_size > AS(stacks->psp_hi).size)) {
+		AS(stacks->psp_hi).ind += pframe_size;
+		ret = handle_proc_stack_bounds(stacks, trap);
+		AS(stacks->psp_hi).ind -= pframe_size;
+		if (ret)
+			return ret;
+	}
+
 	u_pframe = (void __user *) (AS(stacks->psp_lo).base +
 				    AS(stacks->psp_hi).ind);
-	pframe_size = (TASK_IS_PROTECTED(current)) ? (32 * 8) : (16 * 8);
-
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 	ret = __copy_to_priv_user_with_tags(u_pframe, pframe, pframe_size);
 	clear_ts_flag(ts_flag);
@@ -1360,7 +1383,8 @@ int native_signal_setup(struct pt_regs *regs)
 	 * User's signal handler frame should be the last in stacks
 	 */
 	ret = prepare_sighandler_frame(&regs->stacks, pframe, &regs->crs);
-	ret = ret ?: copy_sighandler_frame(&regs->stacks, pframe, &regs->crs);
+	ret = ret ?: copy_sighandler_frame(&regs->stacks, regs->trap,
+			pframe, &regs->crs);
 	if (ret)
 		goto free_signal_stack;
 
@@ -1405,9 +1429,6 @@ void do_signal(struct pt_regs *regs)
 	E2K_SAVE_CLOCK_REG(scall_times->do_signal_start);
 	scall_times->signals_num++;
 #endif
-
-	if (TASK_IS_BINCO(current))
-		clear_delayed_signal_handling(current_thread_info());
 
 	if (get_signal(ksig)) {
 		int failed = signal_setup(regs);
@@ -2104,9 +2125,9 @@ long protected_sys_rt_sigaction(int sig,
 	if (ptr) {
 		e2k_pl_lo_t pl_lo;
 
-		act = (prot_sigaction_old_t __user *)ptr;
+		act = (prot_sigaction_old_t __user *) ptr;
 
-		if (GET_USER_VAL_TAGD(AW(pl_lo), tag, &act->sa_handler)) {
+		if (get_user_tagged_8(AW(pl_lo), tag, &act->sa_handler)) {
 			DebugSCP("Bad act->sa_handler = %px\n",
 				&act->sa_handler);
 			return -EFAULT;
@@ -2156,71 +2177,48 @@ long protected_sys_rt_sigaction(int sig,
 	return rval;
 }
 
-long protected_sys_rt_sigaction_ex(int sig,
-		const void __user *ptr, void __user *ptr2,
-		const size_t sigsetsize)
+long protected_sys_rt_sigaction_ex(int sig, const prot_sigaction_t __user *act,
+		prot_sigaction_t __user *oact, const size_t sigsetsize)
 {
 	long rval;
 	struct k_sigaction new_ka, old_ka;
-	prot_sigaction_t __user *act;
-	prot_sigaction_t __user *oact;
-	int tag_lo;
-	int tag_hi;
 
 	if (sigsetsize != sizeof(sigset_t)) {
 		DbgSCP_ALERT("SigSetSize seems extended beyond 64 bits.\n");
 		return -EINVAL;
 	}
 
-	if (ptr) {
+	if (act) {
 		e2k_pl_lo_t pl_lo;
 		e2k_pl_hi_t pl_hi;
+		int tag;
 
-		act = (prot_sigaction_t __user *)ptr;
-
-		if (GET_USER_VAL_TAGD(AW(pl_lo), tag_lo,
-				&act->sa_handler.PLLO_item)) {
-			DebugSCP("Bad act->sa_handler = %px\n",
-				 &act->sa_handler);
+		if (get_user_tagged_16(AW(pl_lo), AW(pl_hi), tag, &act->sa_handler)) {
+			DebugSCP("Bad act->sa_handler = %px\n", &act->sa_handler);
 			return -EFAULT;
 		}
-		new_ka.sa.sa_handler = (__sighandler_t)pl_lo.target;
 
-		if (!IS_CPU_ISET_V6()) {
-			if (tag_lo != E2K_PL_ETAG &&
-				new_ka.sa.sa_handler != SIG_DFL &&
-				new_ka.sa.sa_handler != SIG_IGN) {
-				DebugSCP("Wrong act->sa_handler tag 0x%x %px %px\n",
-					tag_lo, &act->sa_handler.PLLO_item,
-					new_ka.sa.sa_handler);
-				return -EINVAL;
+		new_ka.sa.sa_handler = (__sighandler_t) pl_lo.target;
+		if (new_ka.sa.sa_handler != SIG_DFL && new_ka.sa.sa_handler != SIG_IGN) {
+			if (!IS_CPU_ISET_V6()) {
+				int tag_lo = tag & 0xf;
+				if (tag_lo != E2K_PL_ETAG) {
+					DebugSCP("Wrong act->sa_handler tag 0x%x %px %px\n",
+						tag_lo, &act->sa_handler.PLLO_item,
+						new_ka.sa.sa_handler);
+					return -EINVAL;
+				}
+			} else {
+				if (tag != ETAGPLQ) {
+					DebugSCP("Bad act->sa_handler tag 0x%x\n", tag);
+					return -EINVAL;
+				}
+				if (pl_hi.PL_hi_cui == 0) {
+					DebugSCP("Zero CUI of act->sa_handler procedure label\n");
+					return -EINVAL;
+				}
+				new_ka.sa_handler_cui = pl_hi.PL_hi_cui;
 			}
-		} else if (new_ka.sa.sa_handler != SIG_DFL &&
-			   new_ka.sa.sa_handler != SIG_IGN) {
-			/* it is CPU ISET version >= V6 */
-			if (tag_lo != E2K_PLLO_ETAG) {
-				DebugSCP("Bad act->sa_handler lo tag 0x%x\n",
-					tag_lo);
-				return -EINVAL;
-			}
-			if (GET_USER_VAL_TAGD(pl_hi.PL_hi_value, tag_hi,
-					&act->sa_handler.PLHI_item)) {
-				DebugSCP("Bad act->sa_handler = %px\n",
-					&act->sa_handler.PLHI_item);
-				return -EFAULT;
-			}
-			if (tag_hi != E2K_PLHI_ETAG) {
-				DebugSCP("Bad act->sa_handler "
-					"hi tag 0x%x\n",
-					tag_hi);
-				return -EINVAL;
-			}
-			if (pl_hi.PL_hi_cui == 0) {
-				DebugSCP("Zero CUI of act->sa_handler "
-					"procedure label\n");
-				return -EINVAL;
-			}
-			new_ka.sa_handler_cui = pl_hi.PL_hi_cui;
 		}
 
 		/* Note that I intentionally ignore sa_restorer below
@@ -2232,17 +2230,14 @@ long protected_sys_rt_sigaction_ex(int sig,
 			return -EFAULT;
 	}
 
-	rval = do_sigaction(sig, (ptr) ? &new_ka : NULL,
-				(ptr2) ? &old_ka : NULL);
+	rval = do_sigaction(sig, (act) ? &new_ka : NULL, (oact) ? &old_ka : NULL);
 	DebugSCP("rval = %ld\n", rval);
 	if (rval)
 		return rval;
 
-	if (ptr2) {
-		oact = (prot_sigaction_t __user *)ptr2;
-
-		rval = PUT_USER_PL(&oact->sa_handler, (u64)old_ka.sa.sa_handler,
-							old_ka.sa_handler_cui);
+	if (oact) {
+		rval = PUT_USER_PL(&oact->sa_handler, (u64) old_ka.sa.sa_handler,
+				old_ka.sa_handler_cui);
 		rval = (rval) ?: copy_to_user(
 					&oact->sa_mask, &old_ka.sa.sa_mask,
 					sizeof(old_ka.sa.sa_mask));

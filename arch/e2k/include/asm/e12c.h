@@ -33,4 +33,5 @@ extern void e12c_setup_machine(void);
 #define E12C_L3_CACHE_SHIFT		E8C_L3_CACHE_SHIFT
 #define E12C_L3_CACHE_BYTES		E8C_L3_CACHE_BYTES
 
+#define E12C_QNR1_OFFSET		E8C2_QNR1_OFFSET
 #endif /* _ASM_E12C_H_ */

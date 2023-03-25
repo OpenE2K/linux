@@ -472,13 +472,20 @@ static inline pte_t pte_mkclean(pte_t pte)
 static inline pgprot_t pgprot_writecombine(pgprot_t prot)
 {
 	unsigned long val;
-	if (e90s_get_cpu_type() <= E90S_CPU_R2000)
+	if (e90s_get_cpu_type() < E90S_CPU_R2000P + 1) /*Bug 140644*/
 		return prot;
 	val = pgprot_val(prot);
-	val &= ~(_PAGE_CP_4U | _PAGE_CV_4U);
+	val &= ~(_PAGE_CP_4U | _PAGE_CV_4U | _PAGE_E_4U);
 	val |= _PAGE_E90S_WC_4U;
 	return __pgprot(val);
 }
+
+#ifndef pgprot_dmacoherent
+#define pgprot_dmacoherent(prot)	(prot)
+#endif
+
+#define pgprot_writethrough pgprot_writecombine
+
 #else /* CONFIG_E90S */
 static inline pte_t pte_mkdirty(pte_t pte)
 {

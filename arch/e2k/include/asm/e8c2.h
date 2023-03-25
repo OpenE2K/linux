@@ -34,4 +34,5 @@ extern void sic_error_interrupt(struct pt_regs *regs);
 #define E8C2_L3_CACHE_SHIFT		E8C_L3_CACHE_SHIFT
 #define E8C2_L3_CACHE_BYTES		E8C_L3_CACHE_BYTES
 
+#define E8C2_QNR1_OFFSET		16
 #endif /* _ASM_E8C2_H_ */

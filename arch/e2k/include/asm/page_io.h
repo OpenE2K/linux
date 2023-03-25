@@ -6,7 +6,7 @@
 #define	_E2K_PAGE_IO_H
 
 #include <linux/init.h>
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <linux/spinlock.h>
 #include <linux/swap.h>
 #include <linux/vmalloc.h>

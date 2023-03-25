@@ -4,7 +4,7 @@
 
 #include <linux/types.h>
 
-#include <asm/head.h>
+#include <asm/kvm/head.h>
 
 #define	GUEST_IO_PORTS_ADDRESS(port)	(GUEST_IO_PORTS_VIRT_BASE + (port))
 static inline void

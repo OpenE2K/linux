@@ -3,7 +3,6 @@
 #include <asm/hb_regs.h>
 #include <asm/pic.h>
 #include <asm/sic_regs.h>
-#include <asm/machdep_numa.h>
 
 #include <asm-l/hw_irq.h>
 
@@ -28,26 +27,16 @@ e1cp_setup_cpu_info(cpuinfo_e2k_t *cpu_info)
 static void __init
 e1cp_setup_arch(void)
 {
-	int nid;
-
-	for_each_node_has_dup_kernel(nid) {
-		the_node_machine(nid)->setup_cpu_info = e1cp_setup_cpu_info;
-	}
+	machine.setup_cpu_info = e1cp_setup_cpu_info;
 }
 
 void __init
 e1cp_setup_machine(void)
 {
-	int nid;
-
-	for_each_node_has_dup_kernel(nid) {
-		the_node_machine(nid)->setup_arch = e1cp_setup_arch;
-		the_node_machine(nid)->arch_reset = NULL;
-		the_node_machine(nid)->arch_halt = NULL;
-		the_node_machine(nid)->get_irq_vector = apic_get_vector;
-		the_node_machine(nid)->get_nsr_area_phys_base =
-				early_get_legacy_nbsr_base;
-		the_node_machine(nid)->setup_apic_vector_handlers =
-				e1cp_setup_apic_vector_handlers;
-	}
+	machine.setup_arch = e1cp_setup_arch;
+	machine.arch_reset = NULL;
+	machine.arch_halt = NULL;
+	machine.get_irq_vector = apic_get_vector;
+	machine.get_nsr_area_phys_base = early_get_legacy_nbsr_base;
+	machine.setup_apic_vector_handlers = e1cp_setup_apic_vector_handlers;
 }

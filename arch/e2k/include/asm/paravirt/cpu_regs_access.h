@@ -1427,6 +1427,13 @@ do { \
 	PV_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value); \
 } while (0)
 
+#define	WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
+do { \
+	PV_WRITE_OSGD_LO_REG_VALUE(OSGD_lo_value); \
+	PV_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value); \
+} while (0)
+
+
 		/*
  * Read/write low/high double-word Compilation Unit Register (CUD)
  */

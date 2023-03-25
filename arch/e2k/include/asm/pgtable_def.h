@@ -21,8 +21,11 @@
 #include <asm/page.h>
 #include <asm/pgtable-v3.h>
 #include <asm/pgtable-v6.h>
-#include <asm/p2v/boot_v2p.h>
 
+/*
+ * Set to 1 to trace user page tables updates.
+ * Set to 2 to also trace kernel page tables updates.
+ */
 #define TRACE_PT_UPDATES 0
 #if TRACE_PT_UPDATES
 # define trace_pt_update(...) \
@@ -33,6 +36,8 @@ do { \
 #else
 # define trace_pt_update(...) do { } while (0)
 #endif
+
+#define MAX_POSSIBLE_PHYSMEM_BITS CONFIG_E2K_PA_BITS
 
 #ifndef __ASSEMBLY__
 
@@ -413,6 +418,12 @@ get_pte_val_restricted_mask(void)
 #define	_PAGE_SET_PRIV(pte_val)		_PAGE_SET(pte_val, UNI_PAGE_PRIV)
 #define	_PAGE_CLEAR_PRIV(pte_val)	_PAGE_CLEAR(pte_val, UNI_PAGE_PRIV)
 
+#define	_PAGE_INIT_PROTECT		_PAGE_INIT(UNI_PAGE_PROTECT)
+#define	_PAGE_GET_PROTECT(pte_val)	_PAGE_GET(pte_val, UNI_PAGE_PROTECT)
+#define	_PAGE_TEST_PROTECT(pte_val)	_PAGE_TEST(pte_val, UNI_PAGE_PROTECT)
+#define	_PAGE_SET_PROTECT(pte_val)	_PAGE_SET(pte_val, UNI_PAGE_PROTECT)
+#define	_PAGE_CLEAR_PROTECT(pte_val)	_PAGE_CLEAR(pte_val, UNI_PAGE_PROTECT)
+
 #define	_PAGE_INIT_ACCESSED		_PAGE_INIT(UNI_PAGE_ACCESSED)
 #define	_PAGE_GET_ACCESSED(pte_val)	_PAGE_GET(pte_val, UNI_PAGE_ACCESSED)
 #define	_PAGE_TEST_ACCESSED(pte_val)	_PAGE_TEST(pte_val, UNI_PAGE_ACCESSED)
@@ -486,7 +497,17 @@ get_pte_val_restricted_mask(void)
 #define _PAGE_KERNEL		_PAGE_KERNEL_RW
 #define _PAGE_KERNEL_HUGE	_PAGE_KERNEL_HUGE_RW
 #define _PAGE_KERNEL_IMAGE	_PAGE_KERNEL_RX
-#define _PAGE_KERNEL_PT		_PAGE_KERNEL
+
+/* Do not set GLOBAL for intermediate kernel page tables. Otherwise the
+ * following is possible:
+ * 1) Kernel accesses an address from VMLPT area (0xff8*_****_****) that
+ * belongs to user space, and DTLB caches intermediate page tables with
+ * GLOBAL attribute set.
+ * 2) User accesses address that uses that cached intermediate page table,
+ * and DTLB reuses the cached entry from kernel page tables. Then user
+ * address ends up being translated through kernel page tables. */
+#define _PAGE_KERNEL_PT		_PAGE_KERNEL_RW_NOT_GLOB
+
 #define _PAGE_USER_PT		_PAGE_KERNEL_RW_NOT_GLOB
 #define _PAGE_KERNEL_PTE	_PAGE_KERNEL_PT
 #define _PAGE_KERNEL_PMD	_PAGE_KERNEL_PT
@@ -525,8 +546,6 @@ get_pte_val_restricted_mask(void)
 #define	PAGE_USER_PTE		__pgprot(_PAGE_USER_PTE)
 #define	PAGE_USER_PMD		__pgprot(_PAGE_USER_PMD)
 #define	PAGE_USER_PUD		__pgprot(_PAGE_USER_PUD)
-
-#define	PAGE_KERNEL_NOCACHE	PAGE_IO_MAP
 
 #define PAGE_USER		__pgprot(_PAGE_USER)
 #define PAGE_USER_RO_ACCESSED	__pgprot(_PAGE_USER_RO_ACCESSED)
@@ -735,6 +754,7 @@ create_protection_map(pgprot_t prot_map[16])
  */
 #define pfn_pte(pfn, pgprot)	mk_pte_phys((pfn) << PAGE_SHIFT, pgprot)
 #define pfn_pmd(pfn, pgprot)	mk_pmd_phys((pfn) << PAGE_SHIFT, pgprot)
+#define pfn_pud(pfn, pgprot)	mk_pud_phys((pfn) << PAGE_SHIFT, pgprot)
 
 /*
  * Currently all these mappings correlate to what arm64 uses
@@ -783,6 +803,11 @@ static inline pteval_t pte_only_protects(pte_t pte)
 	return pte_val(pte) & PTE_PROTECTS_MASK;
 }
 
+static inline pteval_t pmd_flags(pmd_t pmd)
+{
+	return pmd_val(pmd) & PTE_FLAGS_MASK;
+}
+
 static inline pmdval_t pmd_user_flags(pmd_t pmd)
 {
 	return pmd_val(pmd) & PMD_USER_FLAGS_MASK;
@@ -799,6 +824,7 @@ static inline pgdval_t pgd_user_flags(pgd_t pgd)
 }
 
 #define pte_pgprot(x) __pgprot(pte_flags(x))
+#define pmd_pgprot(x) __pgprot(pmd_flags(x))
 
 /*
  * Extract pfn from pte.
@@ -1061,14 +1087,16 @@ static inline int pmd_bad(pmd_t pmd)
 #define	PMD_THP_INVALIDATE_FLAGS	(UNI_PAGE_PRESENT | UNI_PAGE_PROTNONE)
 
 #define has_transparent_hugepage has_transparent_hugepage
-static inline int has_transparent_hugepage(void)                                                               
-{                                                                                      
+static inline int has_transparent_hugepage(void)
+{
 	return true;
 }
 
 #define pmd_trans_huge(pmd)		user_pmd_huge(pmd)
-#else	/* !CONFIG_TRANSPARENT_HUGEPAGE */
-#define PMD_THP_INVALIDATE_FLAGS	0UL
+#ifdef CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
+# define pud_trans_huge(pud)		user_pud_huge(pud)
+#endif
+
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
 /*
@@ -1095,6 +1123,7 @@ static inline int has_transparent_hugepage(void)
 #define pmd_mkpresent(pmd)	(__pmd(_PAGE_SET_PRESENT(pmd_val(pmd))))
 #define pmd_mk_present_valid(pmd) (__pmd(_PAGE_SET(pmd_val(pmd), \
 				   UNI_PAGE_PRESENT | UNI_PAGE_VALID)))
+#define pmd_mkvalid(pmd)	(__pmd(_PAGE_SET_VALID(pmd_val(pmd))))
 #define pmd_mknotpresent(pmd)	\
 		(__pmd(_PAGE_CLEAR(pmd_val(pmd), PMD_THP_INVALIDATE_FLAGS)))
 #define pmd_mknot_present_valid(pmd) (__pmd(_PAGE_CLEAR(pmd_val(pmd), \
@@ -1151,6 +1180,8 @@ static inline int pud_bad(pud_t pud)
 #define pud_present(pud)	_PAGE_TEST_PRESENT(pud_val(pud))
 #define pud_write(pud)		_PAGE_TEST_WRITEABLE(pud_val(pud))
 #define pud_exec(pud)		_PAGE_TEST_EXECUTEABLE(pud_val(pud))
+#define pud_dirty(pud)		_PAGE_TEST_DIRTY(pud_val(pud))
+#define pud_young(pud)		_PAGE_TEST_ACCESSED(pud_val(pud))
 #define	user_pud_huge(pud)	_PAGE_TEST_HUGE(pud_val(pud))
 #define	kernel_pud_huge(pud)		\
 		(is_huge_pud_level() && _PAGE_TEST_HUGE(pud_val(pud)))
@@ -1168,10 +1199,16 @@ static inline int pud_bad(pud_t pud)
 #define pud_mkpresent(pud)	(__pud(_PAGE_SET_PRESENT(pud_val(pud))))
 #define pud_mk_present_valid(pud) (__pud(_PAGE_SET(pud_val(pud), \
 				   UNI_PAGE_PRESENT | UNI_PAGE_VALID)))
+#define pud_mkvalid(pud)	(__pud(_PAGE_SET_VALID(pud_val(pud))))
 #define pud_mknotpresent(pud)	(__pud(_PAGE_CLEAR_PRESENT(pud_val(pud))))
 #define pud_mknot_present_valid(pud) (__pud(_PAGE_CLEAR(pud_val(pud), \
 					    UNI_PAGE_PRESENT | UNI_PAGE_VALID)))
 #define pud_mknotvalid(pud)	(__pud(_PAGE_CLEAR_VALID(pud_val(pud))))
+#define pud_mkold(pud)		(__pud(_PAGE_CLEAR_ACCESSED(pud_val(pud))))
+#define pud_mkyoung(pud)	(__pud(_PAGE_SET_ACCESSED(pud_val(pud))))
+#define pud_mkclean(pud)	(__pud(_PAGE_CLEAR_DIRTY(pud_val(pud))))
+#define pud_mkdirty(pud)	(__pud(_PAGE_SET_DIRTY(pud_val(pud))))
+#define pud_mkhuge(pud)		(__pud(_PAGE_SET_HUGE(pud_val(pud))))
 static inline pud_t pud_mk_wb(pud_t pud)
 {
 	return __pud(_PAGE_SET_MEM_TYPE(pud_val(pud), GEN_CACHE_MT));
@@ -1286,11 +1323,11 @@ static inline pte_t pte_mk_uc(pte_t pte)
 #define	pgd_index(virt_addr)		(((virt_addr) >> PGDIR_SHIFT) & \
 					(PTRS_PER_PGD - 1))
 #define pgd_offset(mm, virt_addr)	((mm)->pgd + pgd_index(virt_addr))
+#define pgd_offset_k(address)		pgd_offset(&init_mm, (address))
 #define	pgd_to_index(pgdp)		((((unsigned long)(pgdp)) /	\
 						(sizeof(pgd_t))) &	\
 							(PTRS_PER_PGD - 1))
 #define	pgd_to_page(pgdp)		((pgdp) - pgd_to_index(pgdp))
-#define	boot_pgd_index(virt_addr)	pgd_index(virt_addr)
 
 #define	VIRT_ADDR_VPTB_BASE(va)		\
 		((MMU_IS_SEPARATE_PT()) ?	\
@@ -1298,6 +1335,11 @@ static inline pte_t pte_mk_uc(pte_t pte)
 				KERNEL_VPTB_BASE_ADDR : USER_VPTB_BASE_ADDR) \
 			:	\
 			MMU_UNITED_KERNEL_VPTB)
+
+#define IS_USER_VPTB_ADDR(va) \
+	((MMU_IS_SEPARATE_PT()) ? ((va) < MMU_SEPARATE_KERNEL_VAB) \
+				: ((va) < TASK_SIZE))
+
 /*
  * The index and offset in the upper page table directory.
  */
@@ -1307,9 +1349,14 @@ static inline pte_t pte_mk_uc(pte_t pte)
 					((pmd_virt_offset(virt_addr) & \
 					PTE_MASK) >> \
 					(E2K_VA_SIZE - PGDIR_SHIFT)))
-#define	boot_pud_index(virt_addr)	pud_index(virt_addr)
-#define boot_pud_offset(pgdp, addr)	((pud_t *)boot_pgd_page(*(pgdp)) + \
-					boot_pud_index(addr))
+#define	pud_virt_offset_k(virt_addr)	(KERNEL_VPTB_BASE_ADDR | \
+					((pmd_virt_offset_k(virt_addr) & \
+					PTE_MASK) >> \
+					(E2K_VA_SIZE - PGDIR_SHIFT)))
+#define	pud_virt_offset_u(virt_addr)	(USER_VPTB_BASE_ADDR | \
+					((pmd_virt_offset_u(virt_addr) & \
+					PTE_MASK) >> \
+					(E2K_VA_SIZE - PGDIR_SHIFT)))
 
 /*
  * The index and offset in the middle page table directory
@@ -1320,9 +1367,14 @@ static inline pte_t pte_mk_uc(pte_t pte)
 					((pte_virt_offset(virt_addr) & \
 					PTE_MASK) >> \
 					(E2K_VA_SIZE - PGDIR_SHIFT)))
-#define	boot_pmd_index(virt_addr)	pmd_index(virt_addr)
-#define boot_pmd_offset(pudp, addr)	((pmd_t *)boot_pud_page(*(pudp)) + \
-					boot_pmd_index(addr))
+#define	pmd_virt_offset_k(virt_addr)	(KERNEL_VPTB_BASE_ADDR | \
+					((pte_virt_offset_k(virt_addr) & \
+					PTE_MASK) >> \
+					(E2K_VA_SIZE - PGDIR_SHIFT)))
+#define	pmd_virt_offset_u(virt_addr)	(USER_VPTB_BASE_ADDR | \
+					((pte_virt_offset_u(virt_addr) & \
+					PTE_MASK) >> \
+					(E2K_VA_SIZE - PGDIR_SHIFT)))
 
 /*
  * The index and offset in the third-level page table.
@@ -1332,10 +1384,12 @@ static inline pte_t pte_mk_uc(pte_t pte)
 #define	pte_virt_offset(virt_addr)	(VIRT_ADDR_VPTB_BASE(virt_addr) | \
 					(((virt_addr) & PTE_MASK) >> \
 					(E2K_VA_SIZE - PGDIR_SHIFT)))
-
-#define	boot_pte_index(virt_addr)	pte_index(virt_addr)
-#define boot_pte_offset(pmdp, addr)	((pte_t *)boot_pmd_page(*(pmdp)) + \
-						boot_pte_index(addr))
+#define	pte_virt_offset_k(virt_addr)	(KERNEL_VPTB_BASE_ADDR | \
+					(((virt_addr) & PTE_MASK) >> \
+					(E2K_VA_SIZE - PGDIR_SHIFT)))
+#define	pte_virt_offset_u(virt_addr)	(USER_VPTB_BASE_ADDR | \
+					(((virt_addr) & PTE_MASK) >> \
+					(E2K_VA_SIZE - PGDIR_SHIFT)))
 
 #endif	/* !(__ASSEMBLY__) */
 

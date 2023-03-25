@@ -285,8 +285,8 @@ DO_FAST_CLOCK_GETTIME(const clockid_t which_clock, struct timespec *tp)
 	}
 
 	if (likely(!ret)) {
-		tp->tv_sec = secs;
-		tp->tv_nsec = nsecs;
+		__put_user_switched_pt(secs, &tp->tv_sec);
+		__put_user_switched_pt(nsecs, &tp->tv_nsec);
 	}
 
 	return ret;
@@ -341,8 +341,8 @@ DO_FAST_GETTIMEOFDAY(struct timeval *tv)
 
 	ret = fast_get_time(secs, nsecs, false);
 	if (likely(!ret)) {
-		tv->tv_sec = secs;
-		tv->tv_usec = nsecs / 1000;
+		__put_user_switched_pt(secs, &tv->tv_sec);
+		__put_user_switched_pt(nsecs / 1000, &tv->tv_usec);
 	}
 
 	return ret;

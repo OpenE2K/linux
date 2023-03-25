@@ -1150,6 +1150,9 @@ int __must_check pci_enable_device_io(struct pci_dev *dev);
 int __must_check pci_enable_device_mem(struct pci_dev *dev);
 int __must_check pci_reenable_device(struct pci_dev *);
 int __must_check pcim_enable_device(struct pci_dev *pdev);
+#ifdef CONFIG_MCST
+int __must_check pcim_enable_device_mem(struct pci_dev *pdev);
+#endif
 void pcim_pin_device(struct pci_dev *pdev);
 
 static inline bool pci_intx_mask_supported(struct pci_dev *pdev)

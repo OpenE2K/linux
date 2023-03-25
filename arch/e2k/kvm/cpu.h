@@ -7,12 +7,16 @@
 #include <asm/kvm/switch.h>
 #include <asm/kvm/runstate.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
+#include <asm/kvm/trace_kvm.h>
 
 #include "cpu_defs.h"
 #include "intercepts.h"
 #include "process.h"
 #include "mmu_defs.h"
 #include "irq.h"
+#include "mmutrace-e2k.h"
+#include "trace-virq.h"
+#include "trace-gmm.h"
 
 #undef	DEBUG_UPDATE_HW_STACK_MODE
 #undef	DebugUHS
@@ -127,6 +131,22 @@ write_guest_CORE_MODE_reg(struct kvm_vcpu *vcpu, e2k_core_mode_t new_reg)
 	}
 }
 
+static inline unsigned int guest_trap_init(struct kvm *kvm)
+{
+	/* Enable system calls for user's processes. */
+	unsigned int linux_osem = user_trap_init();
+
+#ifdef CONFIG_KVM_HOST_MODE
+	linux_osem |= HYPERCALLS_TRAPS_MASK;
+ #ifdef	CONFIG_PRIV_HYPERCALLS
+	if (test_kvm_mode_flag(kvm, KVMF_PRIV_HCALL_ENABLE))
+		linux_osem |= PRIV_HYPERCALLS_TRAPS_MASK;
+ #endif	/* CONFIG_PRIV_HYPERCALLS */
+#endif	/* CONFIG_KVM_HOST_MODE */
+
+	return linux_osem;
+}
+
 /*
  * The function emulates change of guest PSR state on trap & system call.
  * In these cases interrupts mask are disabled into PSR
@@ -146,6 +166,8 @@ kvm_emulate_guest_vcpu_psr_trap(struct kvm_vcpu *vcpu, bool *irqs_under_upsr)
 	new_psr.PSR_reg = psr.PSR_reg & ~(PSR_IE | PSR_NMIE | PSR_SGE);
 	new_psr.PSR_reg = new_psr.PSR_reg | PSR_PM;
 	kvm_set_guest_vcpu_PSR(vcpu, new_psr);
+	trace_kvm_set_guest_vcpu_PSR(vcpu, psr, new_psr, *irqs_under_upsr,
+		NATIVE_READ_IP_REG_VALUE(), NATIVE_NV_READ_CR0_HI_REG_VALUE());
 	return psr;
 }
 
@@ -160,19 +182,28 @@ static inline void
 kvm_emulate_guest_vcpu_psr_done(struct kvm_vcpu *vcpu, e2k_psr_t source_psr,
 				bool source_under_upsr)
 {
+	e2k_psr_t psr;
+
+	psr = kvm_get_guest_vcpu_PSR(vcpu);
 	kvm_set_guest_vcpu_PSR(vcpu, source_psr);
 	kvm_set_guest_vcpu_under_upsr(vcpu, source_under_upsr);
+	trace_kvm_set_guest_vcpu_PSR(vcpu, psr, source_psr, source_under_upsr,
+		NATIVE_READ_IP_REG_VALUE(), NATIVE_NV_READ_CR0_HI_REG_VALUE());
 }
 static inline void
-kvm_emulate_guest_vcpu_psr_return(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+kvm_emulate_guest_vcpu_psr_return(struct kvm_vcpu *vcpu, e2k_mem_crs_t *crs)
 {
+	e2k_psr_t psr;
 	e2k_psr_t source_psr;
 
-	source_psr.PSR_reg = regs->crs.cr1_lo.CR1_lo_psr;
+	psr = kvm_get_guest_vcpu_PSR(vcpu);
+	source_psr.PSR_reg = crs->cr1_lo.CR1_lo_psr;
 	KVM_BUG_ON(!psr_all_irqs_enabled_flags(source_psr.PSR_reg) ||
 			all_irqs_under_upsr_flags(source_psr.PSR_reg));
 	kvm_set_guest_vcpu_PSR(vcpu, source_psr);
 	kvm_set_guest_vcpu_under_upsr(vcpu, false);
+	trace_kvm_set_guest_vcpu_PSR(vcpu, psr, source_psr, false,
+		NATIVE_READ_IP_REG_VALUE(), NATIVE_NV_READ_CR0_HI_REG_VALUE());
 }
 
 extern int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
@@ -404,11 +435,10 @@ do_emulate_pv_vcpu_intc(thread_info_t *ti, pt_regs_t *regs,
 				trap_pt_regs_t *trap)
 {
 	struct kvm_vcpu *vcpu = ti->vcpu;
+	unsigned long mmu_pid;
 
-	__guest_exit(ti, &vcpu->arch, DONT_AAU_CONTEXT_SWITCH);
-
-	/* return to hypervisor MMU context to emulate hw intercept */
-	kvm_switch_to_host_mmu_pid(vcpu, current->mm);
+	__guest_exit(ti, &vcpu->arch, DONT_AAU_CONTEXT_SWITCH |
+				      DONT_MMU_CONTEXT_SWITCH);
 
 	kvm_set_intc_emul_flag(regs);
 
@@ -418,6 +448,10 @@ do_emulate_pv_vcpu_intc(thread_info_t *ti, pt_regs_t *regs,
 	smp_wmb();	/* See the comment in kvm_vcpu_exiting_guest_mode() */
 
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
+
+	mmu_pid = current->mm->context.cpumsk[smp_processor_id()];
+	trace_kvm_switch_to_host_mmu_pid(vcpu, current->mm, mmu_pid,
+					 trap_sw_to_host);
 }
 
 static notrace __always_inline void
@@ -426,9 +460,7 @@ return_from_pv_vcpu_inject(struct kvm_vcpu *vcpu)
 	KVM_BUG_ON(!test_and_clear_ts_flag(TS_HOST_AT_VCPU_MODE));
 
 	/* return to hypervisor context */
-	__guest_exit(current_thread_info(), &vcpu->arch, 0);
-	/* return to hypervisor MMU context */
-	kvm_switch_to_host_mmu_pid(vcpu, current->mm);
+	__guest_exit(current_thread_info(), &vcpu->arch, DONT_MMU_CONTEXT_SWITCH);
 
 	vcpu->mode = OUTSIDE_GUEST_MODE;
 	smp_wmb();	/* See the comment in kvm_vcpu_exiting_guest_mode() */
@@ -451,7 +483,7 @@ host_return_to_guest_user(struct thread_info *ti, bool new_context)
 	/* handling completion by guest kernel */
 	set_ti_status_flag(ti, TS_HOST_TO_GUEST_USER);
 
-	if (likely(!new_context)) {
+	if (!new_context) {
 		/* MMU context (pid) will be the same */
 		/* and old contexts can be keeped */
 		clear_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID);
@@ -508,7 +540,7 @@ do_return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs,
 			/* return to guest user after injected trap/system call */
 			/* handling completion by guest kernel */
 			/* or exec new user */
-			host_return_to_guest_user(ti, false);
+			host_return_to_guest_user(ti, true);
 		} else if (host_return_to_injected_guest_syscall(ti, regs) ||
 				host_return_to_injected_guest_trap(ti, regs)) {
 			/* return to injected trap/system call to handle its */
@@ -519,16 +551,14 @@ do_return_from_pv_vcpu_intc(struct thread_info *ti, pt_regs_t *regs,
 			/* return to guest user after trap handling completion */
 			/* by host */
 			/* MMU context can be keeped to do not flush TLB */
-			clear_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID);
-			host_return_to_guest_user(ti, true);
+			host_return_to_guest_user(ti, false);
 		}
 	} else {
 		host_return_to_guest_kernel(ti);
 	}
 
-	/* switch host MMU to guest VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu, ti);
-
+	trace_host_get_gmm_root_hpa(pv_vcpu_get_gmm(vcpu),
+				    NATIVE_READ_IP_REG_VALUE());
 	__guest_enter(ti, &vcpu->arch, DONT_AAU_CONTEXT_SWITCH);
 
 	/* from now the host process is at paravirtualized guest (VCPU) mode */
@@ -539,15 +569,12 @@ static __always_inline void
 pv_mmu_switch_to_fast_sys_call(struct kvm_vcpu *vcpu, thread_info_t *ti)
 {
 	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
-	mmu_reg_t gk_pptb = kvm_get_space_type_spt_gk_root(vcpu);
 
 	host_return_to_guest_kernel(ti);
 	sw_ctxt->in_fast_syscall = true;
 
-	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
-		pgd_t *pgd = (pgd_t *) __va(gk_pptb);
-		copy_user_pgd_to_kernel_root_pt(pgd);
-	} else {
+	if (likely(!sw_ctxt->no_switch_pt)) {
+		mmu_reg_t gk_pptb = kvm_get_space_type_spt_gk_root(vcpu);
 		NATIVE_WRITE_MMU_U_PPTB_REG(gk_pptb);
 	}
 }
@@ -556,16 +583,13 @@ static __always_inline void
 pv_mmu_switch_from_fast_sys_call(struct kvm_vcpu *vcpu, thread_info_t *ti)
 {
 	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
-	mmu_reg_t u_pptb = kvm_get_space_type_spt_u_root(vcpu);
 
 	KVM_BUG_ON(!sw_ctxt->in_fast_syscall);
 	host_return_to_guest_user(ti, true);
 	sw_ctxt->in_fast_syscall = false;
 
-	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
-		pgd_t *pgd = (pgd_t *) __va(u_pptb);
-		copy_user_pgd_to_kernel_root_pt(pgd);
-	} else {
+	if (likely(!sw_ctxt->no_switch_pt)) {
+		mmu_reg_t u_pptb = kvm_get_space_type_spt_u_root(vcpu);
 		NATIVE_WRITE_MMU_U_PPTB_REG(u_pptb);
 	}
 }
@@ -729,7 +753,7 @@ extern unsigned long kvm_set_guest_glob_regs(struct kvm_vcpu *vcpu,
 	bool dirty_bgr, unsigned int *bgr);
 
 static inline void
-save_pv_vcpu_sys_call_stack_regs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+save_pv_vcpu_sys_call_stack_regs(struct kvm_vcpu *vcpu, const pt_regs_t *regs)
 {
 	e2k_pcsp_hi_t pcsp_hi;
 	e2k_pcshtp_t  pcshtp;
@@ -1279,11 +1303,19 @@ switch_to_host_pv_vcpu_mode(thread_info_t *ti, struct kvm_vcpu *vcpu,
 	long now_ret;
 
 	if (from_hypercall) {
+		struct mm_struct *mm;
+		unsigned long mmu_pid;
+
 		KVM_BUG_ON(!test_and_clear_ti_status_flag(ti,
 						TS_HOST_AT_VCPU_MODE));
 		__guest_exit(ti, &vcpu->arch, switch_flags);
+		/* kvm_generic_hcalls() has switch page tables already */
+		uaccess_disable();
 		/* return to hypervisor MMU context to emulate hw intercept */
-		kvm_switch_to_host_mmu_pid(vcpu, thread_info_task(ti)->mm);
+		mm = thread_info_task(ti)->mm;
+		mmu_pid = mm->context.cpumsk[smp_processor_id()];
+		trace_kvm_switch_to_host_mmu_pid(vcpu, mm, mmu_pid,
+						 to_qemu_sw_to_host);
 	} else {
 		/* switch from interception emulation mode to host vcpu mode */
 		KVM_BUG_ON(test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE));
@@ -1540,6 +1572,14 @@ static inline void kvm_check_vcpu_state_greg(void)
 		vs = HOST_GET_SAVED_VCPU_STATE_GREG(current_thread_info());
 		greg_vs = (kvm_vcpu_state_t *)vs;
 		vcpu_vs = (kvm_vcpu_state_t *)GET_GUEST_VCPU_STATE_POINTER(vcpu);
+		if (greg_vs != vcpu_vs) {
+			pr_err("%s(): vcpu state pointer on greg %px != vcpu #%d "
+				"state pointer %px\n",
+				__func__, greg_vs, vcpu->vcpu_id, vcpu_vs);
+			HOST_ONLY_COPY_TO_VCPU_STATE_GREG(
+				&current_thread_info()->k_gregs, (u64)vcpu_vs);
+			greg_vs = vcpu_vs;
+		}
 		KVM_BUG_ON(greg_vs != vcpu_vs);
 	}
 }

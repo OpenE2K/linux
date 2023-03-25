@@ -8,7 +8,6 @@
  *
  * Implementation of Elbrus I2C master.
  */
-#define DEBUG
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/delay.h>
@@ -18,6 +17,9 @@
 #include <linux/init.h>
 #include <linux/export.h>
 #include <linux/stddef.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_device.h>
 #include <linux/platform_data/i2c-l-i2c2.h>
 #include <linux/platform_device.h>
 #include <asm/io.h>
@@ -73,56 +75,55 @@ struct l_i2c2 {
 	struct i2c_adapter adap;
 	struct platform_device *pdev;
 	void __iomem *regs;
+	unsigned reg_offset;
 };
 
 # define EXTPLLI2C_RD            (0 << 31)
 # define EXTPLLI2C_WR            (1 << 31)
 
-static inline void
-st2_i2c_write(void __iomem *regs, unsigned long reg, u8 val)
+static void st2_i2c_write(struct l_i2c2 *i2c, unsigned reg, u8 val)
 {
-	writel(EXTPLLI2C_WR | (reg / 4 << 8) | val, regs);
+	unsigned v = EXTPLLI2C_WR | (reg / 4 << 8) | val;
+	writel(v, i2c->regs);
 }
 
-static inline u8 st2_i2c_read(void __iomem *regs, unsigned long reg)
+static u8 st2_i2c_read(struct l_i2c2 *i2c, unsigned reg)
 {
-	uint32_t result = 0;
-	writel(EXTPLLI2C_RD | (reg / 4 << 8), regs);
-	result = readl(regs);
-	return result;
+	unsigned v = EXTPLLI2C_RD | (reg / 4 << 8);
+	writel(v, i2c->regs);
+	v = readl(i2c->regs);
+	return v;
 }
 
-static inline void
-raw_i2c_write(void __iomem *regs, unsigned long reg, u8 val)
+static void raw_i2c_write(struct l_i2c2 *i2c, unsigned reg, u8 val)
 {
-	__raw_writel(val, regs + reg);
+	__raw_writel(val, i2c->regs + reg);
 }
 
-static inline u8 raw_i2c_read(void __iomem *regs, unsigned long reg)
+static inline u8 raw_i2c_read(struct l_i2c2 *i2c, unsigned reg)
 {
-	unsigned int result = 0;
-	result = __raw_readl(regs + reg);
-	return result;
+	unsigned r = 0;
+	r = __raw_readl(i2c->regs + reg);
+	return r;
 }
 
-static inline void
-i2c_write(struct l_i2c2 *i2c, unsigned long reg, u8 val)
+static void i2c_write(struct l_i2c2 *i2c, unsigned reg, u8 val)
 {
 	struct l_i2c2_platform_data *pdata = dev_get_platdata(&i2c->pdev->dev);
 	if (pdata->two_stage_register_access)
-		st2_i2c_write(i2c->regs, reg, val);
+		st2_i2c_write(i2c, reg, val);
 	else
-		raw_i2c_write(i2c->regs, reg, val);
+		raw_i2c_write(i2c, reg, val);
 }
 
-static inline u8 i2c_read(struct l_i2c2 *i2c, unsigned long reg)
+static u8 i2c_read(struct l_i2c2 *i2c, unsigned reg)
 {
 	struct l_i2c2_platform_data *pdata = dev_get_platdata(&i2c->pdev->dev);
 	unsigned int r = 0;
 	if (pdata->two_stage_register_access)
-		r = st2_i2c_read(i2c->regs, reg);
+		r = st2_i2c_read(i2c, reg);
 	else
-		r = raw_i2c_read(i2c->regs, reg);
+		r = raw_i2c_read(i2c, reg);
 	return r;
 }
 
@@ -310,27 +311,27 @@ static void l_i2c2_init_hw(struct l_i2c2 *i2c)
 
 static int l_i2c2_probe(struct platform_device *pdev)
 {
-	struct l_i2c2 *i2c;
 	int ret;
-	char of_path[]  = "/pmc_i2c";
+	void __iomem *regs = NULL;
+	struct device *dev = &pdev->dev;
+	struct l_i2c2_platform_data *pdata = dev_get_platdata(dev);
 	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-#if 0  /*
-	* It calls request_mem_region(), which fails if registers of two devices
-	* lay in the same physical page.
-	*/
-	void __iomem *regs = devm_ioremap_resource(&pdev->dev, res);
-#else
-	void __iomem *regs = devm_ioremap(&pdev->dev,
-					res->start, resource_size(res));
-#endif
-	struct l_i2c2_platform_data *pdata = dev_get_platdata(&pdev->dev);
 
-	if (IS_ERR(regs))
-		return PTR_ERR(regs);
-
-	i2c = devm_kzalloc(&pdev->dev, sizeof(struct l_i2c2), GFP_KERNEL);
+	struct l_i2c2 *i2c = devm_kzalloc(dev, sizeof(struct l_i2c2), GFP_KERNEL);
 	if (!i2c)
 		return -ENOMEM;
+	if (!pdata) {
+		pdata = (struct l_i2c2_platform_data *)
+				of_device_get_match_data(dev);
+		if (WARN_ON(!pdata))
+			return -ENODEV;
+		ret = platform_device_add_data(pdev, pdata, sizeof(*pdata));
+		if (WARN_ON(ret))
+			goto out;
+	}
+	regs = devm_ioremap_resource(dev, res);
+	if (IS_ERR(regs))
+		return PTR_ERR(regs);
 
 	platform_set_drvdata(pdev, i2c);
 	i2c->pdev = pdev;
@@ -341,11 +342,9 @@ static int l_i2c2_probe(struct platform_device *pdev)
 	i2c_set_adapdata(&i2c->adap, i2c);
 	snprintf(i2c->adap.name, sizeof(i2c->adap.name),
 			"Elbrus %s i2c bus", pdev->name);
-	if (strcmp("pmc-i2c", pdev->name))
-		of_path[0] = 0;
 
-	i2c->adap.dev.parent	= &pdev->dev;
-	i2c->adap.dev.of_node = of_find_node_by_path(of_path);
+	i2c->adap.dev.parent	= dev;
+	i2c->adap.dev.of_node	= dev->of_node;
 	i2c->adap.nr = pdata->bus_nr; /* Fix pmc i2c master number */
 	i2c->adap.algo = &l_i2c2_algo;
 
@@ -353,10 +352,9 @@ static int l_i2c2_probe(struct platform_device *pdev)
 
 	ret = i2c_add_numbered_adapter(&i2c->adap);
 	if (ret) {
-		dev_err(&pdev->dev, "Failed to register i2c\n");
+		dev_err(dev, "Failed to register i2c\n");
 		goto out;
 	}
-
 out:
 	return ret;
 }
@@ -396,6 +394,19 @@ static const struct dev_pm_ops l_i2c2_pm_ops = {
 };
 #endif
 
+static const struct l_i2c2_platform_data mga2x_i2c_data = {
+	.bus_nr	         = -1, /* -1 means dynamically assign bus id */
+	.base_freq_hz    = 500 * 1000 * 1000,
+	.desired_freq_hz = 100 * 1000,
+	.two_stage_register_access = true,
+};
+
+static const struct of_device_id l_i2c2_dt_ids[] = {
+	{ .compatible = "mcst,mga2x-i2c", .data = &mga2x_i2c_data},
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, l_i2c2_dt_ids);
+
 /* driver device registration */
 static const struct platform_device_id l_i2c2_driver_ids[] = {
 	{
@@ -414,6 +425,7 @@ static struct platform_driver l_i2c2_driver = {
 	.id_table	= l_i2c2_driver_ids,
 	.driver		= {
 		.name	= "l-i2c2",
+		.of_match_table = l_i2c2_dt_ids,
 #ifdef CONFIG_PM_SLEEP
 		.pm	= &l_i2c2_pm_ops,
 #endif

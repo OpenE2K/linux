@@ -23,14 +23,46 @@ extern bool debug_ustacks;
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-static inline void
-kvm_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
+static inline unsigned long
+kvm_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size,
+				bool chain_stack)
 {
-	fast_tagged_memory_copy(dst, src, size,
-			TAGGED_MEM_STORE_REC_OPC |
-			MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			TAGGED_MEM_LOAD_REC_OPC |
-			MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT, true);
+	unsigned long copied;
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+
+	if (chain_stack) {
+		NATIVE_FLUSHC;
+	} else {
+		NATIVE_FLUSHR;
+	}
+	copied = kvm_fast_tagged_memory_copy(dst, src, size, strd_opcode, ldrd_opcode, true);
+	if (likely(copied >= 0))
+		return size - copied;
+	return copied;
+}
+
+static inline unsigned long
+kvm_kernel_hw_stack_frames_copy_user(u64 *dst, const u64 *src, unsigned long size,
+					bool chain_stack)
+{
+	unsigned long copied;
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_BYPASS_L1_CACHE, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+
+	if (chain_stack) {
+		NATIVE_FLUSHC;
+	} else {
+		NATIVE_FLUSHR;
+	}
+	copied = kvm_fast_tagged_memory_copy_user(dst, src, size, NULL,
+			strd_opcode, ldrd_opcode, true);
+	if (likely(copied >= 0))
+		return size - copied;
+	return copied;
 }
 
 static __always_inline void
@@ -50,7 +82,7 @@ kvm_collapse_kernel_ps(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_si
 	size = ps_ind - spilled_size;
 	BUG_ON(!IS_ALIGNED(size, ALIGN_PSTACK_TOP_SIZE) || (s64) size < 0);
 
-	kvm_kernel_hw_stack_frames_copy(dst, src, size);
+	fast_tagged_memory_copy(dst, src, size, true);
 
 	k_psp_hi = NATIVE_NV_READ_PSP_HI_REG();
 	k_psp_hi.PSP_hi_ind = size;
@@ -83,7 +115,7 @@ kvm_collapse_kernel_pcs(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_s
 	size = pcs_ind - spilled_size;
 	BUG_ON(!IS_ALIGNED(size, ALIGN_PCSTACK_TOP_SIZE) || (s64) size < 0);
 
-	kvm_kernel_hw_stack_frames_copy(dst, src, size);
+	fast_tagged_memory_copy(dst, src, size, true);
 
 	k_pcsp_hi = NATIVE_NV_READ_PCSP_HI_REG();
 	k_pcsp_hi.PCSP_hi_ind = size;
@@ -103,10 +135,7 @@ static __always_inline int
 copy_stack_page_from_kernel(void __user *dst, void *src, e2k_size_t to_copy,
 				bool is_chain)
 {
-	int ret;
-
-	ret = HYPERVISOR_copy_hw_stacks_frames(dst, src, to_copy, is_chain);
-	return ret;
+	return kvm_kernel_hw_stack_frames_copy(dst, src, to_copy, is_chain);
 }
 
 static inline struct page *get_user_addr_to_kernel_page(unsigned long addr)
@@ -403,6 +432,7 @@ kvm_user_hw_stacks_copy(pt_regs_t *regs)
 				/* there is fatal signal to kill the process */
 				;
 			} else {
+				E2K_LMS_HALT_OK;
 				pr_err("%s(): procedure stack copying from "
 					"kernel %px to user %px, size 0x%lx "
 					"failed, error %d\n",
@@ -631,6 +661,7 @@ static __always_inline int kvm_user_hw_stacks_prepare(
 			pr_err("%s(): copying of hardware stacks failed, error %d\n",
 				__func__, ret);
 		}
+		user_exit();
 		do_exit(SIGKILL);
 	}
 	return ret;
@@ -644,12 +675,6 @@ kvm_ret_from_fork_prepare_hv_stacks(struct pt_regs *regs)
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* native guest kernel */
-
-static __always_inline void
-kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
-{
-	kvm_kernel_hw_stack_frames_copy(dst, src, size);
-}
 
 static __always_inline void
 collapse_kernel_ps(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)

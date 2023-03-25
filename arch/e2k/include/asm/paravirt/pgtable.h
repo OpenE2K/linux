@@ -161,14 +161,10 @@ set_pud_at(struct mm_struct *mm, unsigned long addr,
 	pv_set_pud_at(mm, addr, pudp, pudval);
 }
 static inline void
-validate_pud_at(struct mm_struct *mm, unsigned long addr, pud_t *pudp)
+validate_pud_at(struct mm_struct *mm, unsigned long addr, pud_t *pudp,
+		pud_t pudval)
 {
-	pv_validate_pud_at(mm, addr, pudp, __pud(_PAGE_INIT_VALID));
-}
-static inline void
-invalidate_pud_at(struct mm_struct *mm, unsigned long addr, pud_t *pudp)
-{
-	pv_validate_pud_at(mm, addr, pudp, __pud(0));
+	pv_validate_pud_at(mm, addr, pudp, pudval);
 }
 
 static inline void
@@ -181,11 +177,6 @@ static inline void
 validate_pgd_at(struct mm_struct *mm, unsigned long addr, pgd_t *pgdp)
 {
 	pv_validate_pgd_at(mm, addr, pgdp, __pgd(_PAGE_INIT_VALID));
-}
-static inline void
-invalidate_pgd_at(struct mm_struct *mm, unsigned long addr, pgd_t *pgdp)
-{
-	pv_validate_pgd_at(mm, addr, pgdp, __pgd(0));
 }
 
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,

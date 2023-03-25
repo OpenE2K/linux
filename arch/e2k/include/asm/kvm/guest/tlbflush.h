@@ -10,7 +10,7 @@
 #ifndef _E2K_KVM_GUEST_TLBFLUSH_H
 #define _E2K_KVM_GUEST_TLBFLUSH_H
 
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <asm/kvm/tlbflush.h>
 
 #ifdef CONFIG_KVM_GUEST_KERNEL
@@ -85,6 +85,15 @@ static inline void kvm_flush_pmd_tlb_range(struct mm_struct *mm,
 		native_flush_pmd_tlb_range(mm, start, end);
 	else
 		kvm_pv_flush_pmd_tlb_range(mm, start, end);
+}
+
+static inline void kvm_flush_pud_tlb_range(struct mm_struct *mm,
+		e2k_addr_t start, e2k_addr_t end)
+{
+	if (IS_HV_GM())
+		native_flush_pud_tlb_range(mm, start, end);
+	else
+		kvm_pv_flush_tlb_range(mm, start, end);
 }
 
 static inline void kvm_flush_tlb_range_and_pgtables(struct mm_struct *mm,

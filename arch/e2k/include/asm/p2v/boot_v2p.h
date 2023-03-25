@@ -92,7 +92,7 @@ is_addr_from_high_memory(e2k_addr_t addr)
  * interfaces
  */
 
-static	inline	void *
+static	inline void *
 boot_native_kernel_va_to_pa(void *virt_pnt, unsigned long kernel_base)
 {
 	unsigned long os_base;

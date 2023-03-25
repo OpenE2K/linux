@@ -119,8 +119,9 @@
 #define _PAGE_KERNEL_HUGE_V6	_PAGE_KERNEL_HUGE_RW_V6
 #define _PAGE_KERNEL_IMAGE_V6	_PAGE_KERNEL_RX_V6
 #define _PAGE_KERNEL_MODULE_V6	_PAGE_KERNEL_RWX_V6
-#define _PAGE_KERNEL_PT_V6	_PAGE_KERNEL_V6
 #define _PAGE_USER_PT_V6	_PAGE_KERNEL_RW_NOT_GLOB_V6
+/* See comment before _PAGE_KERNEL_PT */
+#define _PAGE_KERNEL_PT_V6	_PAGE_KERNEL_RW_NOT_GLOB_V6
 
 /* convert physical address to page frame number for PTE */
 #define	_PAGE_PADDR_TO_PFN_V6(phys_addr)	\

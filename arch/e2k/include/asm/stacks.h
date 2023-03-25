@@ -8,7 +8,6 @@
 #define _E2K_STACKS_H
 
 #include <linux/types.h>
-#include <asm/kvm/stacks.h>	/* virtualization support */
 
 /*
  * User's high address space is reserved for tag memory mapping.
@@ -25,7 +24,7 @@
 								/* memory */
 								/* size */
 #define	USER_TAG_MEM_BASE		\
-		(TASK_SIZE - USER_VPTB_BASE_SIZE - USER_TAG_MEM_SIZE)
+		(TASK_SIZE - USER_VPTB_BASE_SIZE - USER_TAG_MEM_SIZE - PAGE_SIZE)
 
 /*
  * User's high address below tags memory space is reserved for CUT.
@@ -74,8 +73,8 @@ typedef struct data_stack {
  * kernel function execution while trap and system calls handling
  */
 typedef struct hw_stack_area {
-	void		*base;		/* Hardware stack base pointer */
-	e2k_size_t	size;		/* Hardware stack total size */
+	void __user *base;		/* Hardware stack base pointer */
+	e2k_size_t size;		/* Hardware stack total size */
 } hw_stack_area_t;
 
 typedef struct hw_stack {
@@ -84,7 +83,7 @@ typedef struct hw_stack {
 } hw_stack_t;
 
 typedef struct old_pcs_area {
-	void	*base;			/* Hardware stack base pointer */
+	void	__user *base;		/* Hardware stack base pointer */
 	long	size;			/* Hardware stack total size */
 	struct	list_head list_entry;
 } old_pcs_area_t;
@@ -116,7 +115,7 @@ typedef struct old_pcs_area {
 
 #define USER_C_STACK_BYTE_INCR	(4 * PAGE_SIZE)
 /* Software user stack for 64-bit mode. */
-#define	USER64_STACK_TOP	USER_PC_STACKS_BASE
+#define	USER64_STACK_TOP	USER_ADDR_MAX
 /* Software user stack for 32-bit mode. */
 #define	USER32_STACK_TOP	TASK32_SIZE
 
@@ -126,28 +125,34 @@ typedef struct old_pcs_area {
  */
 #define	E2K_STK_LIM		USER64_MAIN_C_STACK_SIZE
 
+ /* Native kernel stack ((software & hardware) descriptions */
+#define NATIVE_K_DATA_GAP_SIZE		E2K_ALIGN_STACK
+#define	NATIVE_KERNEL_C_STACK_SIZE	(5 * PAGE_SIZE - NATIVE_K_DATA_GAP_SIZE)
+
 /*
- * Kernel stack ((software & hardware) descriptions
- */
-#define K_DATA_GAP_SIZE		E2K_ALIGN_STACK
-#define	KERNEL_C_STACK_SIZE	(5 * PAGE_SIZE - K_DATA_GAP_SIZE)
-
-/* Maybe implement do_softirq_own_stack() and reduce this to 7 pages
+ * Maybe implement do_softirq_own_stack() and reduce this to 7 pages
  * Having separate stack for hardware interrupts IRQ handling will allow to
- * reduce this further - prbly to ~4 pages. */
-#define	KERNEL_P_STACK_SIZE	(9 * PAGE_SIZE)
-#define NATIVE_KERNEL_P_STACK_PAGES (KERNEL_P_STACK_SIZE / PAGE_SIZE)
-
-#define	KERNEL_PC_STACK_SIZE \
+ * reduce this further - prbly to ~4 pages.
+ */
+#define	NATIVE_KERNEL_P_STACK_SIZE	(9 * PAGE_SIZE)
+#define	NATIVE_KERNEL_PC_STACK_SIZE \
 		(2 * PAGE_SIZE) /* 8 Kbytes (256 functions calls) */
-#define NATIVE_KERNEL_PC_STACK_PAGES	(KERNEL_PC_STACK_SIZE / PAGE_SIZE)
 
-#define MAX_KERNEL_P_STACK_PAGES \
-		(NATIVE_KERNEL_P_STACK_PAGES + VIRT_KERNEL_P_STACK_PAGES)
-#define MAX_KERNEL_PC_STACK_PAGES \
-		(NATIVE_KERNEL_PC_STACK_PAGES + VIRT_KERNEL_PC_STACK_PAGES)
-#define MAX_KERNEL_HW_STACK_PAGES \
-		(MAX_KERNEL_P_STACK_PAGES + MAX_KERNEL_PC_STACK_PAGES)
+#ifdef	CONFIG_KVM_GUEST_KERNEL
+/* pure guest kernel (not common host & guest paravirtualized) */
+#include <asm/kvm/guest/stacks.h>
+#elif	defined(CONFIG_PARAVIRT_GUEST)
+/* it is paravirtualized host and guest kernel */
+#include <asm/paravirt/stacks.h>
+#else	/* !CONFIG_KVM_GUEST_KERNEL && !CONFIG_PARAVIRT_GUEST */
+/* it is native kernel without virtualization support */
+/* or host kernel with virtualization support */
+#define K_DATA_GAP_SIZE		NATIVE_K_DATA_GAP_SIZE
+#define	KERNEL_C_STACK_SIZE	NATIVE_KERNEL_C_STACK_SIZE
+
+#define	KERNEL_P_STACK_SIZE	NATIVE_KERNEL_P_STACK_SIZE
+#define	KERNEL_PC_STACK_SIZE	NATIVE_KERNEL_PC_STACK_SIZE
+#endif /* CONFIG_KVM_GUEST_KERNEL */
 
 /*
  * 3 kernel stacks are allocated together and lie in memory

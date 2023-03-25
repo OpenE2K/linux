@@ -617,16 +617,6 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 
 		if (retval)
 			goto out;
-
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		if (tmp->vm_flags & VM_PAGESVALID) {
-			/* No need to flush TLB since there is
-			 * no user for the new mm yet. */
-			retval = make_all_vma_pages_valid(tmp, 0);
-			if (retval)
-				goto out;
-		}
-#endif
 	}
 	/* a new mm has just been created */
 	retval = arch_dup_mmap(oldmm, mm);
@@ -867,14 +857,6 @@ void __init fork_init(void)
 
 	set_max_threads(MAX_THREADS);
 
-#ifdef CONFIG_E2K
-	init_task.signal->rlim[RLIMIT_P_STACK_EXT].rlim_cur = PS_RLIM_CUR;
-	init_task.signal->rlim[RLIMIT_P_STACK_EXT].rlim_max =
-			USER_P_STACKS_MAX_SIZE;
-	init_task.signal->rlim[RLIMIT_PC_STACK_EXT].rlim_cur = PCS_RLIM_CUR;
-	init_task.signal->rlim[RLIMIT_PC_STACK_EXT].rlim_max =
-			USER_PC_STACKS_MAX_SIZE;
-#endif
 	init_task.signal->rlim[RLIMIT_NPROC].rlim_cur = max_threads/2;
 	init_task.signal->rlim[RLIMIT_NPROC].rlim_max = max_threads/2;
 	init_task.signal->rlim[RLIMIT_SIGPENDING] =
@@ -1658,6 +1640,10 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 
 	task_lock(current->group_leader);
 	memcpy(sig->rlim, current->signal->rlim, sizeof sig->rlim);
+#if defined(CONFIG_MCST) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	memcpy(sig->bin_comp_rlim, current->signal->bin_comp_rlim,
+	       sizeof sig->bin_comp_rlim);
+#endif
 	task_unlock(current->group_leader);
 
 	posix_cpu_timers_init_group(sig);

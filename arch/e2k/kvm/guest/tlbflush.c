@@ -98,7 +98,12 @@ static long pv_flush_tlb_range(struct mm_struct *mm, mmu_flush_tlb_op_t opc,
 		ret = -EINVAL;
 	}
 	if (unlikely(ret != 0)) {
-		trace_guest_flush_tlb_failed(mm, opc, start, end, ret);
+		if (likely(mm->gmmid_nr == -1)) {
+			/* gmm is dropping while host flush TLB */
+			ret = 0;
+		} else {
+			trace_guest_flush_tlb_failed(mm, opc, start, end, ret);
+		}
 	}
 	return ret;
 }
@@ -141,7 +146,7 @@ void kvm_pv_flush_tlb_mm(struct mm_struct *mm)
 {
 	long ret;
 
-	DebugTLB("Flush all mm address space context 0x%lx CPU #%d\n",
+	DebugTLB("Flush all mm address space context 0x%llx CPU #%d\n",
 		CTX_HARDWARE(mm->context.cpumsk[raw_smp_processor_id()]),
 		raw_smp_processor_id());
 
@@ -175,7 +180,7 @@ void kvm_pv_flush_tlb_page(struct mm_struct *mm, e2k_addr_t addr)
 {
 	long ret;
 
-	DebugTLB("Flush address 0x%lx context 0x%lx CPU #%d\n",
+	DebugTLB("Flush address 0x%lx context 0x%llx CPU #%d\n",
 		PAGE_ALIGN_UP(addr),
 		CTX_HARDWARE(mm->context.cpumsk[raw_smp_processor_id()]),
 		raw_smp_processor_id());
@@ -205,8 +210,8 @@ void kvm_pv_flush_tlb_range(struct mm_struct *const mm,
 	long ret;
 
 	KVM_BUG_ON(start > end);
-	DebugTLB("Flush address range start 0x%lx end 0x%lx context 0x%lx "
-		"CPU #%d\n", PAGE_ALIGN_UP(start), PAGE_ALIGN_DOWN(end),
+	DebugTLB("Flush address range start 0x%lx end 0x%lx context 0x%llx CPU #%d\n",
+		PAGE_ALIGN_UP(start), PAGE_ALIGN_DOWN(end),
 		CTX_HARDWARE(mm->context.cpumsk[raw_smp_processor_id()]),
 		raw_smp_processor_id());
 
@@ -279,7 +284,7 @@ void kvm_pv_flush_tlb_range_and_pgtables(struct mm_struct *mm,
 	long ret;
 
 	KVM_BUG_ON(start > end);
-	DebugTLB("Flush PTs address range start 0x%lx end 0x%lx context 0x%lx CPU #%d\n",
+	DebugTLB("Flush PTs address range start 0x%lx end 0x%lx context 0x%llx CPU #%d\n",
 		PAGE_ALIGN_UP(start), PAGE_ALIGN_DOWN(end),
 		CTX_HARDWARE(mm->context.cpumsk[raw_smp_processor_id()]),
 		raw_smp_processor_id());
@@ -315,7 +320,7 @@ void kvm_pv_flush_tlb_mm_range(struct mm_struct *mm,
 	long ret;
 
 	KVM_BUG_ON(start > end);
-	DebugTLB("Flush PTs address range start 0x%lx end 0x%lx context 0x%lx CPU #%d\n",
+	DebugTLB("Flush PTs address range start 0x%lx end 0x%lx context 0x%llx CPU #%d\n",
 		PAGE_ALIGN_UP(start), PAGE_ALIGN_DOWN(end),
 		CTX_HARDWARE(mm->context.cpumsk[raw_smp_processor_id()]),
 		raw_smp_processor_id());

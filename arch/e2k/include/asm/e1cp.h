@@ -23,4 +23,5 @@ extern void e1cp_setup_machine(void);
 
 #define E1CP_SIC_MC_COUNT		2
 
+#define E1CP_QNR1_OFFSET		E2S_QNR1_OFFSET
 #endif /* _ASM_E1CP_H_ */

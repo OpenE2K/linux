@@ -277,6 +277,7 @@ static struct pci_dev *l_dev_to_parent_pcidev(struct device *dev)
  */
 static bool l_iommu_check_device(struct device *dev)
 {
+	struct pci_dev *pdev;
 	if (!dev || !dev->dma_mask)
 		return false;
 
@@ -285,6 +286,11 @@ static bool l_iommu_check_device(struct device *dev)
 
 	if (!dev || !dev_is_pci(dev))
 		return false;
+	pdev = to_pci_dev(dev);
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+		  pdev->device == PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P) {
+		return false;
+	}
 	return true;
 }
 
@@ -442,12 +448,10 @@ static void l_quirk_enable_local_iommu(struct pci_dev *pdev)
 	l_iommu_init_hw(i, l_iommu_win_sz);
 }
 DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26, l_quirk_enable_local_iommu);
-DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P, l_quirk_enable_local_iommu);
 DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P, l_quirk_enable_local_iommu);
 DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P, l_quirk_enable_local_iommu);
 
 static const struct pci_device_id l_devices_with_iommu[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA26)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2_R2000P)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2_R2000P)},
@@ -455,14 +459,12 @@ static const struct pci_device_id l_devices_with_iommu[] = {
 };
 /* must correspond to l_devices_with_iommu[] */
 static const unsigned l_iommu_devices_iommu_offset[] = {
-	0x2000,
 	0x2800,
 	0x2c00,
 	0x2c00,
 };
 
 static const struct l_iommu_device l_iommu_devices[] = {
-	{ 0x2000, 0x2400 },
 	{ 0x2800 },
 	{ 0x2c00 },
 };
@@ -537,11 +539,13 @@ static __init int __l_iommu_init(int node, struct device *parent)
 		i = ERR_PTR(-ENOMEM);
 		goto fail;
 	}
+	l_iommu_write(i, 0, L_IOMMU_CTRL);
+	l_iommu_enable_embedded_iommus(node);
+
 	l_iommu_init_hw(i, l_iommu_win_sz);
 
 	if (!l_has_devices_with_iommu())
 		return 0;
-	l_iommu_enable_embedded_iommus(node);
 
 	for (j = 0; j < ARRAY_SIZE(l_iommu_devices); j++) {
 		i = l_iommu_init_one(node, parent, &l_iommu_devices[j]);
@@ -933,16 +937,24 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA2,
 			  l_quirk_iommu_bypass_devices);
 #endif /* CONFIG_SWIOTLB */
 
-#ifdef CONFIG_PM_SLEEP
-void l_iommu_stop_all(void)
+#define VCFG 0x40
+static void l_quirk_iommu_direct_devices(struct pci_dev *pdev)
 {
-	struct l_iommu *i;
-	if (paravirt_enabled())
-		return;
-	for_each_iommu(i)
-		l_iommu_write(i, 0, L_IOMMU_CTRL);
-}
+	/*
+	 * http://wiki.lab.sun.mcst.ru/e2kwiki/R2000p#.D0.A0.D0.B5.D0.B3.D0.B8.D1.81.D1.82.D1.80_VCFG
+	 */
+	u32 data;
 
+	pci_read_config_dword(pdev, VCFG, &data);
+	data = data & ~0x00000002;
+	pci_write_config_dword(pdev, VCFG, data);
+	/* use dma-direct interface */
+	set_dma_ops(&pdev->dev, NULL);
+}
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
+	PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P, l_quirk_iommu_direct_devices);
+
+#ifdef CONFIG_PM_SLEEP
 static int l_iommu_suspend(void)
 {
 	return 0;
@@ -955,9 +967,13 @@ static void l_iommu_resume(void)
 		l_iommu_init_hw(i, l_iommu_win_sz);
 }
 
-static void l_iommu_shutdown(void)
+void l_iommu_shutdown(void)
 {
-	l_iommu_stop_all();
+	struct l_iommu *i;
+	if (paravirt_enabled())
+		return;
+	for_each_iommu(i)
+		l_iommu_write(i, 0, L_IOMMU_CTRL);
 }
 
 static struct syscore_ops l_iommu_syscore_ops = {
@@ -972,7 +988,7 @@ static void __init l_iommu_init_pm_ops(void)
 }
 
 #else
-static inline void l_iommu_stop_all(void) {}
+void l_iommu_shutdown(void) {}
 static inline void l_iommu_init_pm_ops(void) {}
 #endif	/* CONFIG_PM_SLEEP */
 
@@ -1100,7 +1116,7 @@ static int __init l_iommu_init(void)
 		extern int swiotlb_late_init_with_default_size(size_t size);
 		swiotlb_late_init_with_default_size(L_SWIOTLB_DEFAULT_SIZE);
 		dma_ops = &l_swiotlb_dma_ops;
-		l_iommu_stop_all();
+		l_iommu_shutdown();
 		pr_info("iommu disabled\n");
 		return 0;
 	}

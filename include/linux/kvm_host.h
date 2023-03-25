@@ -1087,6 +1087,11 @@ static inline hpa_t pfn_to_hpa(kvm_pfn_t pfn)
 	return (hpa_t)pfn << PAGE_SHIFT;
 }
 
+static inline kvm_pfn_t hpa_to_pfn(hpa_t hpa)
+{
+	return (kvm_pfn_t)(hpa >> PAGE_SHIFT);
+}
+
 static inline struct page *kvm_vcpu_gpa_to_page(struct kvm_vcpu *vcpu,
 						gpa_t gpa)
 {

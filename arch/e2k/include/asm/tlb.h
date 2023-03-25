@@ -31,6 +31,12 @@ static inline void tlb_flush(struct mmu_gather *tlb)
 
 		flush_tlb_mm_range(tlb->mm, tlb->start, tlb->end,
 				   stride, levels_mask);
+
+		/* Not possible to check strictly whether there was a _huge_
+		 * pud change, but clearing puds is a rare enough event that
+		 * this flush shouldn't affect performance. */
+		if (cpu_has(CPU_HWBUG_GIGANTIC_FLUSH) && tlb->cleared_puds)
+			flush_tlb_mm_page(tlb->mm, 0ul);
 	}
 }
 

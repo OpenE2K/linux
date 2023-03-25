@@ -17,17 +17,16 @@
  */
 unsigned long
 boot_kvm_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	long ret;
 
 	if (likely(BOOT_IS_HV_GM()))
 		ret = boot_native_fast_tagged_memory_copy(dst, src, len,
-					strd_opcode, ldrd_opcode, prefetch);
+				AW(strd_opcode), AW(ldrd_opcode), prefetch);
 	else
 		ret = kvm_do_fast_tagged_memory_copy(dst, src, len,
-					strd_opcode, ldrd_opcode, prefetch);
+				strd_opcode, ldrd_opcode, prefetch);
 	if (ret) {
 		do_boot_printk("%s(): could not copy memory from %px to %px, "
 			"size 0x%lx, error %ld\n",

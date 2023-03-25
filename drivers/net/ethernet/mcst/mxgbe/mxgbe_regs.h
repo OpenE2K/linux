@@ -23,10 +23,10 @@
 
 #define MXGBE_PCI_BAR_NUMS	1	/* BAR0 - 1Mb */
 
-#define MXGBE_DEVICE_ID		0x8026
-#define MXGBE_VENDOR_ID		0x1FFF
-#define MXGBE_REVISION_ID_BOARD	0x01
-#define MXGBE_REVISION_ID_E16C	0x02
+#define MXGBE_DEVICE_ID			0x8026
+#define MXGBE_VENDOR_ID			0x1FFF
+#define MXGBE_REVISION_ID_BOARD		0x01
+#define MXGBE_REVISION_ID_E16C_R2000P	0x02
 
 
 /**
@@ -223,7 +223,7 @@
  * Descriptor:
  ******************************************************************************
  */
-
+#ifdef __e2k__
 typedef union {	/* +0x00 */
 	struct { /* Transmit + CPU */
 		uint64_t IPV6		: 1; /* [00]    */
@@ -270,6 +270,54 @@ typedef union {	/* +0x00 */
 	} __packed RD;
 	uint64_t r;
 } __packed mxgbe_ctrl_t;
+#else
+typedef union {	/* +0x00 */
+	struct { /* Transmit + CPU */
+		uint64_t FRMSIZE	:16; /* [63:48] */
+		uint64_t L4HDR		: 6; /* [47:42] */
+		uint64_t _res2_		: 1; /* [41]    */
+		uint64_t IPHDR		: 5; /* [40:36] */
+		uint64_t TCPHDR		: 4; /* [35:32] */
+		uint64_t NTCP_UDP	: 1; /* [31]    */
+		uint64_t _res1_		: 1; /* [30]    */
+		uint64_t MSS		:14; /* [29:16] */
+		uint64_t BUFSIZE	:13; /* [15:03] */
+		uint64_t L4CSUM		: 1; /* [02]    */
+		uint64_t IPCSUM		: 1; /* [01]    */
+		uint64_t IPV6		: 1; /* [00]    */
+	} __packed TC;
+	struct { /* Transmit + Device */
+		uint64_t _res2_		:32; /* [63:32] */
+		uint64_t ERRBITS	:16; /* [31:16] */
+		uint64_t BUFSIZE	:13; /* [15:03] */
+		uint64_t _res1_		: 3; /* [02:00] */
+	} __packed TD;
+	struct { /* Receive + CPU */
+		uint64_t _res2_		:48; /* [63:16] */
+		uint64_t BUFSIZE	:13; /* [15:03] */
+		uint64_t _res1_		: 3; /* [02:00] */
+	} __packed RC;
+	struct { /* Receive + Device */
+		uint64_t FRMSIZE	:16; /* [63:48] */
+		uint64_t MERGED		: 1; /* [47]    */
+		uint64_t L4CSUMOK	: 1; /* [46]    */
+		uint64_t L4CSUM		: 1; /* [45]    */
+		uint64_t NTCP_UDP	: 1; /* [44]    */
+		uint64_t IPCSUMOK	: 1; /* [43]    */
+		uint64_t SOVLAN		: 1; /* [42]    */
+		uint64_t SIVLAN		: 1; /* [41]    */
+		uint64_t DATOFFS	: 9; /* [40:32] */
+		uint64_t L4HDR		: 8; /* [31:24] */
+		uint64_t TYPE		: 3; /* [23:21] */
+		uint64_t L3HDR		: 5; /* [20:16] */
+		uint64_t BUFSIZE	:13; /* [15:03] */
+		uint64_t TOOBIG		: 1; /* [02]    */
+		uint64_t BFERR		: 1; /* [01]    */
+		uint64_t _res1_		: 1; /* [00]    */
+	} __packed RD;
+	uint64_t r;
+} __packed mxgbe_ctrl_t;
+#endif
 
 /* Transmit + CPU */
 #define TC_MSS_NOSPLIT		0
@@ -287,6 +335,7 @@ typedef union {	/* +0x00 */
 #define RD_TYPE_IPV6BIGHEAD	7
 
 
+#ifdef __e2k__
 typedef union {	/* +0x08 */
 	struct { /* Transmit + CPU */
 		uint64_t BUFPTR		:61; /* [60:00] */
@@ -310,6 +359,31 @@ typedef union {	/* +0x08 */
 	} __packed RD;
 	uint64_t r;
 } __packed mxgbe_addr_t;
+#else
+typedef union {	/* +0x08 */
+	struct { /* Transmit + CPU */
+		uint64_t OWNER		: 1; /* [63]    */
+		uint64_t SPLIT		: 2; /* [62:61] */
+		uint64_t BUFPTR		:61; /* [60:00] */
+	} __packed TC;
+	struct { /* Transmit + Device */
+		uint64_t OWNER		: 1; /* [63]    */
+		uint64_t _res1_		: 2; /* [62:61] */
+		uint64_t BUFPTR		:61; /* [60:00] */
+	} __packed TD;
+	struct { /* Receive + CPU */
+		uint64_t OWNER		: 1; /* [63]    */
+		uint64_t _res1_		: 2; /* [62:61] */
+		uint64_t BUFPTR		:61; /* [60:00] */
+	} __packed RC;
+	struct { /* Receive + Device */
+		uint64_t OWNER		: 1; /* [63]    */
+		uint64_t SPLIT		: 2; /* [62:61] */
+		uint64_t BUFPTR		:61; /* [60:00] */
+	} __packed RD;
+	uint64_t r;
+} __packed mxgbe_addr_t;
+#endif
 
 /* Transmit + CPU */
 #define TC_SPLIT_NO		0
@@ -326,6 +400,7 @@ typedef union {	/* +0x08 */
 #define RD_SPLIT_LAST		2
 
 
+#ifdef __e2k__
 typedef union {	/* +0x10 for long only */
 	struct { /* Transmit + CPU */
 		uint64_t IVLAN		:16; /* [15:00] */
@@ -348,8 +423,32 @@ typedef union {	/* +0x10 for long only */
 	} __packed RD;
 	uint64_t r;
 } __packed mxgbe_vlan_t;
+#else
+typedef union {	/* +0x10 for long only */
+	struct { /* Transmit + CPU */
+		uint64_t SOVLAN		: 1; /* [63]    */
+		uint64_t SIVLAN		: 1; /* [62]    */
+		uint64_t _res1_		:30; /* [61:32] */
+		uint64_t OVLAN		:16; /* [31:16] */
+		uint64_t IVLAN		:16; /* [15:00] */
+	} __packed TC;
+	struct { /* Transmit + Device */
+		uint64_t TICKS		:32; /* [63:32] */
+		uint64_t _res1_		:32; /* [31:00] */
+	} __packed TD;
+	struct { /* Receive + CPU */
+		uint64_t _res1_		:64; /* [63:00] */
+	} __packed RC;
+	struct { /* Receive + Device */
+		uint64_t TICKS		:32; /* [63:32] */
+		uint64_t OVLAN		:16; /* [31:16] */
+		uint64_t IVLAN		:16; /* [15:00] */
+	} __packed RD;
+	uint64_t r;
+} __packed mxgbe_vlan_t;
+#endif
 
-
+#ifdef __e2k__
 typedef union {	/* +0x18 for long only */
 	struct { /* Transmit + CPU */
 		uint64_t _res1_		:64; /* [63:00] */
@@ -369,6 +468,27 @@ typedef union {	/* +0x18 for long only */
 	} __packed RD;
 	uint64_t r;
 } __packed mxgbe_time_t;
+#else
+typedef union {	/* +0x18 for long only */
+	struct { /* Transmit + CPU */
+		uint64_t _res1_		:64; /* [63:00] */
+	} __packed TC;
+	struct { /* Transmit + Device */
+		uint64_t _res1_		: 8; /* [63:56] */
+		uint64_t TIMEBITS	: 8; /* [55:48] */
+		uint64_t SECONDS	:48; /* [47:00] */
+	} __packed TD;
+	struct { /* Receive + CPU */
+		uint64_t _res1_		:64; /* [63:00] */
+	} __packed RC;
+	struct { /* Receive + Device */
+		uint64_t _res1_		: 8; /* [63:56] */
+		uint64_t TIMEBITS	: 8; /* [55:48] */
+		uint64_t SECONDS	:48; /* [47:00] */
+	} __packed RD;
+	uint64_t r;
+} __packed mxgbe_time_t;
+#endif
 
 
 typedef struct mxgbe_descr {

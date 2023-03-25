@@ -82,7 +82,13 @@ ifneq ($(KERNELRELEASE),)
   endif # CONFIG_PERF_EVENTS
 
   ifneq ($(CONFIG_PREEMPT_RT),)
-    lttng-tracer-objs += lttng-context-migratable.o
+    ifneq ($(CONFIG_SMP),)
+      lttng-tracer-objs += lttng-context-migratable.o
+    else # CONFIG_SMP
+      ifneq ($(CONFIG_SCHED_DEBUG),)
+        lttng-tracer-objs += lttng-context-migratable.o
+      endif # CONFIG_SCHED_DEBUG
+    endif # CONFIG_SMP
     lttng-tracer-objs += lttng-context-preemptible.o
   endif # CONFIG_PREEMPT_RT
 

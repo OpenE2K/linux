@@ -20,6 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
+#include <asm/p2v/boot_v2p.h>
+
 #include <linux/console.h>
 #include <linux/delay.h>
 #include <linux/err.h>

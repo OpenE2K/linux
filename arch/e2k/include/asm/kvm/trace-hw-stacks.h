@@ -59,27 +59,22 @@ TRACE_EVENT(
 
 		trace_get_va_translation(current->mm, (e2k_addr_t)hva,
 			&__entry->hva_pgd, &__entry->hva_pud, &__entry->hva_pmd,
-			&__entry->hva_pte, &__entry->hva_pt_level);
+			&__entry->hva_pte, &__entry->hva_pt_level,
+			PT_DTLB_TRANSLATION_AUTO);
 	),
 
 	TP_printk("VCPU #%d copy %s stack kernel guest <- kernel host: dst %px "
 		"src %px size %llx\n"
-		"   kernel guest dst GVA %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"   kernel host  dst HVA %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s",
+		"  kernel guest dst GVA %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n"
+		"  kernel host  dst HVA %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n",
 		__entry->vcpu->vcpu_id,
 		(__entry->is_chain) ? "chain" : "procedure",
 		__entry->dst,
@@ -204,30 +199,26 @@ TRACE_EVENT(
 
 		trace_get_va_translation(current->mm, (e2k_addr_t)dst,
 			&__entry->dst_pgd, &__entry->dst_pud, &__entry->dst_pmd,
-			&__entry->dst_pte, &__entry->dst_pt_level);
+			&__entry->dst_pte, &__entry->dst_pt_level,
+			PT_DTLB_TRANSLATION_AUTO);
 		trace_get_va_translation(current->mm, (e2k_addr_t)src,
 			&__entry->src_pgd, &__entry->src_pud, &__entry->src_pmd,
-			&__entry->src_pte, &__entry->src_pt_level);
+			&__entry->src_pte, &__entry->src_pt_level,
+			PT_DTLB_TRANSLATION_AUTO);
 	),
 
 	TP_printk("copy area user guest <- kernel guest: dst %px "
 		"src %px size %llx\n"
-		"   kernel guest dst HVA %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"   kernel guest  dst HVA %px : pgd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pud 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pmd 0x%016lx : %s\n"
-		"        Access mode: %s%s\n"
-		"                          pte 0x%016lx : %s\n"
-		"        Access mode: %s%s",
+		"  kernel guest dst HVA %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n"
+		"  kernel guest  dst HVA %px :\n"
+		"    pgd 0x%016lx : %s%s\n"
+		"    pud 0x%016lx : %s%s\n"
+		"    pmd 0x%016lx : %s%s\n"
+		"    pte 0x%016lx : %s%s\n",
 		__entry->dst,
 		__entry->src,
 		__entry->size,

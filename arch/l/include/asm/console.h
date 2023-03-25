@@ -10,6 +10,9 @@
 #include <asm/sections.h>
 #include <asm-l/console_types.h>
 
+
+#define SERIAL_DUMP_CONSOLE_DENY	0xff
+
 #ifdef	CONFIG_SERIAL_PRINTK
 # ifdef CONFIG_SERIAL_AM85C30_CONSOLE
 extern serial_console_opts_t am85c30_serial_console;

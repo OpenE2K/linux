@@ -23,7 +23,7 @@ extern unsigned long pci_mem_start;
 
 #include <linux/types.h>
 #include <linux/slab.h>
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <linux/string.h>
 #include <asm/io.h>
 

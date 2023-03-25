@@ -8,12 +8,13 @@
 
 #include <linux/types.h>
 #include <linux/list.h>
-#include <linux/ptrace.h>
 #include <linux/kbuild.h>
+#include <linux/numa.h>
+#include <linux/ptrace.h>
+#include <linux/uaccess.h>
 #include <asm/p2v/boot_head.h>
 #include <asm/machdep.h>
 #include <asm/pv_info.h>
-#include <linux/uaccess.h>
 #ifdef	CONFIG_VIRTUALIZATION
 #include <linux/kvm_host.h>
 #endif	/* CONFIG_VIRTUALIZATION */
@@ -26,6 +27,9 @@ OFFSET(TSK_K_USD_LO, task_struct,  thread_info.k_usd_lo);
 OFFSET(TSK_K_USD_HI, task_struct, thread_info.k_usd_hi);
 OFFSET(TSK_IRQ_ENTER_CLK, task_struct, thread_info.irq_enter_clk);
 OFFSET(TSK_UPSR, task_struct, thread_info.upsr);
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+OFFSET(TSK_K_ROOT_PTB, task_struct, thread.regs.k_root_ptb);
+#endif
 
 OFFSET(TI_FLAGS, thread_info, flags);
 OFFSET(TI_STATUS, thread_info, status);
@@ -149,6 +153,8 @@ OFFSET(VCPU_ARCH_CTXT_US_CL_M3, kvm_vcpu, arch.sw_ctxt.us_cl_m3);
 #endif	/* CONFIG_VIRTUALIZATION */
 
 OFFSET(PT_TRAP, pt_regs, trap);
+OFFSET(PT_U_ROOT_PTB, pt_regs, uaccess.u_root_ptb);
+OFFSET(PT_CONT, pt_regs, uaccess.cont);
 OFFSET(PT_CTRP1, pt_regs, ctpr1);
 OFFSET(PT_CTRP2, pt_regs, ctpr2);
 OFFSET(PT_CTRP3, pt_regs, ctpr3);
@@ -219,7 +225,11 @@ DEFINE(CPU_HWBUG_INTC_CR_WRITE, CPU_HWBUG_INTC_CR_WRITE);
 DEFINE(CPU_FEAT_TRAP_V5, CPU_FEAT_TRAP_V5);
 DEFINE(CPU_FEAT_TRAP_V6, CPU_FEAT_TRAP_V6);
 DEFINE(CPU_FEAT_QPREG, CPU_FEAT_QPREG);
+DEFINE(CPU_FEAT_SEP_VIRT_SPACE, CPU_FEAT_SEP_VIRT_SPACE);
 DEFINE(USER_ADDR_MAX, USER_ADDR_MAX);
+
+DEFINE(OS_VAB_REG_ADDR, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_OS_VAB_NO));
+DEFINE(ROOT_PTB_REG_ADDR, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO));
 
 DEFINE(KERNEL_CUT_BYTE_SIZE, sizeof (kernel_CUT));
 DEFINE(TSK_TI_STACK_DELTA, offsetof(struct task_struct, stack) -

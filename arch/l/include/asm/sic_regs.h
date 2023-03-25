@@ -7,11 +7,15 @@
 #include <linux/topology.h>
 
 #include <asm/types.h>
+
+#define	E2K_SIC_ALIGN_RT_MSI	20	/* 1 Mb */
+
 #include <asm/sic_regs.h>
 
 #undef  DEBUG_ERALY_NBSR_MODE
 #undef  DebugENBSR
 #define	DEBUG_ERALY_NBSR_MODE	0	/* early NBSR access */
+
 #ifndef	CONFIG_BOOT_E2K
 #define	DebugENBSR(fmt, args...)		\
 		({ if (DEBUG_ERALY_NBSR_MODE)	\

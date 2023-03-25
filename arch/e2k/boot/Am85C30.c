@@ -61,16 +61,16 @@ static void com_outb_command(u64 port, u8 reg_num, u8 val)
 void
 serial_putc(unsigned long com_port, unsigned char c)
 {
-	while ((com_inb_command(com_port, RR0) & D2) == 0){
-	}
+	while ((com_inb_command(com_port, RR0) & D2) == 0)
+		E2K_NOP(7);
 	com_outb((com_port + 0x01), c);
 }
 
 unsigned char
 serial_getc(unsigned long com_port)
 {
-	while (((com_inb_command(com_port, RR0)) & D0) == 0){
-	}
+	while (((com_inb_command(com_port, RR0)) & D0) == 0)
+		E2K_NOP(7);
 	return com_inb(com_port + 0x01);
 }
 

@@ -11,6 +11,7 @@ extern void kvm_wait_for_cpu_booting(void);
 extern void kvm_wait_for_cpu_wake_up(void);
 extern int kvm_activate_cpu(int cpu_id);
 extern int kvm_activate_all_cpus(void);
+extern void kvm_stop_this_cpu_ipi(void *dummy);
 
 extern void kvm_csd_lock_wait(call_single_data_t *data);
 extern void kvm_csd_lock(call_single_data_t *data);
@@ -50,6 +51,11 @@ static inline int
 activate_all_cpus(void)
 {
 	return kvm_activate_all_cpus();
+}
+static inline void
+stop_this_cpu_ipi(void *dummy)
+{
+	kvm_stop_this_cpu_ipi(dummy);
 }
 
 static inline void csd_lock_wait(call_single_data_t *data)

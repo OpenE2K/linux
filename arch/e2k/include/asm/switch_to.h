@@ -53,21 +53,6 @@ do {						\
 	e2k_finish_switch(last);		\
 } while (0)
 
-#define prepare_arch_switch(next)		\
-do {						\
-	prefetch_nospec_range(&next->thread.sw_regs,	\
-			offsetof(struct sw_regs, cs_lo)); \
-        /* It works under CONFIG_MCST_RT */     \
-        SAVE_CURR_TIME_SWITCH_TO;               \
-	prepare_monitor_regs(next);		\
-} while (0)
-
-#define e2k_finish_switch(prev) \
-do { \
-	CALCULATE_TIME_SWITCH_TO; \
-	finish_monitor_regs(prev); \
-} while (0)
-
 #ifdef CONFIG_MONITORS
 #define prepare_monitor_regs(next)		\
 do {						\
@@ -86,6 +71,30 @@ do {									\
 #define prepare_monitor_regs(next)
 #define finish_monitor_regs(next)
 #endif /* CONFIG_MONITORS */
+
+#define prepare_arch_switch(next) prepare_arch_switch(next)
+static inline void prepare_arch_switch(struct task_struct *next)
+{
+	prefetchr_nospec_range(&next->thread.sw_regs, offsetof(struct sw_regs, cs_lo));
+
+	/* Protect ourselves from bad code calling schedule() or some
+	 * other blocking function from inside uaccess section. Such calls
+	 * _must_ _not_ be made because they will lead to risking getting
+	 * a page fault from a half-speculative load inside of a critical
+	 * section in kernel scheduler. This is e2k-specific limitation. */
+	WARN_ON_ONCE(!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) &&
+			READ_MMU_PID() != E2K_KERNEL_CONTEXT);
+
+	/* It works under CONFIG_MCST_RT */
+	SAVE_CURR_TIME_SWITCH_TO;
+	prepare_monitor_regs(next);
+}
+
+#define e2k_finish_switch(prev) \
+do { \
+	CALCULATE_TIME_SWITCH_TO; \
+	finish_monitor_regs(prev); \
+} while (0)
 
 #if	defined(CONFIG_PARAVIRT_GUEST)
 /* it is paravirtualized host and guest kernel */

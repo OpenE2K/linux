@@ -393,15 +393,15 @@ static inline int __is_privileged_range(struct vm_area_struct *vma,
 
 static inline int is_privileged_range(e2k_addr_t start, e2k_addr_t end)
 {
-	return start >= USER_HW_STACKS_BASE || end >= USER_HW_STACKS_BASE;
+	return start >= USER_ADDR_MAX || end >= USER_ADDR_MAX;
 }
 
 extern	int do_update_vm_area_flags(e2k_addr_t start, e2k_size_t len,
 		vm_flags_t flags_to_set, vm_flags_t flags_to_clear);
 
-static inline e2k_cute_t *native_get_cut_entry_pointer(int cui)
+static inline e2k_cute_t __user *native_get_cut_entry_pointer(int cui)
 {
-	return (e2k_cute_t *) USER_CUT_AREA_BASE + cui;
+	return (e2k_cute_t __user *) USER_CUT_AREA_BASE + cui;
 }
 
 static inline void native_put_cut_entry_pointer(struct page *page)
@@ -414,11 +414,15 @@ extern	int create_cut_entry(int tcount,
 			      unsigned long glob_base, unsigned  glob_sz);
 extern  int free_cut_entry(unsigned long glob_base, size_t glob_sz,
 				unsigned long *code_base, size_t *code_sz);
-extern	void  fill_cut_entry(e2k_cute_t *cute_p,
-		unsigned long code_base, unsigned  code_sz,
-		unsigned long glob_base, unsigned  glob_sz);
+extern void fill_kernel_cut_entry(e2k_cute_t *cute_p, bool prot,
+		unsigned long code_base, unsigned code_sz,
+		unsigned long glob_base, unsigned glob_sz);
+extern int __must_check fill_user_cut_entry(e2k_cute_t __user *cute_p, bool prot,
+		unsigned long code_base, unsigned code_sz,
+		unsigned long glob_base, unsigned glob_sz,
+		unsigned long tsd_base, unsigned tsd_sz);
 
-extern void native_clean_pc_stack_zero_frame(void *addr, bool user);
+extern int native_clean_pc_stack_zero_frame(void *addr, bool user);
 
 extern int alloc_user_hw_stacks(hw_stack_t *hw_stacks, size_t p_size, size_t pc_size);
 extern void free_user_hw_stacks(hw_stack_t *hw_stacks);
@@ -950,13 +954,12 @@ extern e2k_addr_t get_nested_kernel_IP(pt_regs_t *regs, int n);
 
 #define	ONLY_SET_GUEST_GREGS(ti)	NATIVE_ONLY_SET_GUEST_GREGS(ti)
 
-static inline void
-clean_pc_stack_zero_frame(void *addr, bool user)
+static inline int clean_pc_stack_zero_frame(void *addr, bool user)
 {
-	native_clean_pc_stack_zero_frame(addr, user);
+	return native_clean_pc_stack_zero_frame(addr, user);
 }
 
-static inline e2k_cute_t *get_cut_entry_pointer(int cui, struct page **page)
+static inline e2k_cute_t __user *get_cut_entry_pointer(int cui, struct page **page)
 {
 	return native_get_cut_entry_pointer(cui);
 }

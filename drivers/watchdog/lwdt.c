@@ -17,6 +17,7 @@
 
 #include <asm/l_timer.h>
 #include <asm/console.h>
+#include <asm/epic.h>
 
 #define DEBUG_WD		0
 #define dbgwd			if (DEBUG_WD) printk
@@ -27,6 +28,7 @@ typedef struct wd_opts {
 	int (*lwdt_start)(void);
 	int (*lwdt_stop)(void);
 	void (*lwdt_ping)(void);
+	lt_regs_eioh_t *lt_regs_eioh;
 } lwdt_opts_t;
 
 static unsigned int heartbeat = WD_SEC_DEFAULT;
@@ -178,8 +180,12 @@ static int start_i2c_watchdogs(void)
 
 	writel(0, &lt_regs->wd_prescaler);
 	writel(WD_SET_COUNTER_VAL(heartbeat), &lt_regs->wd_limit);
-	writel(WD_EVENT, &lt_regs->wd_control);
-	writel(WD_ENABLE, &lt_regs->wd_control);
+	writel(WD_EVENT, lwdt_opts->lt_regs_eioh
+			? &lwdt_opts->lt_regs_eioh->wd_control
+			: &lt_regs->wd_control);
+	writel(WD_ENABLE, lwdt_opts->lt_regs_eioh
+			? &lwdt_opts->lt_regs_eioh->wd_control
+			: &lt_regs->wd_control);
 
 	return 0;
 }
@@ -194,7 +200,9 @@ static int stop_i2c_watchdogs(void)
 		return (-ENODEV);
 	}
 
-	writel(WD_EVENT, &lt_regs->wd_control);
+	writel(WD_EVENT, lwdt_opts->lt_regs_eioh
+			? &lwdt_opts->lt_regs_eioh->wd_control
+			: &lt_regs->wd_control);
 	writel(WD_SET_COUNTER_VAL(0), &lt_regs->wd_limit);
 
 	return 0;
@@ -339,6 +347,11 @@ static int __init lwdt_init(void)
 	lwdt_opts->lwdt_start = start_i2c_watchdogs;
 	lwdt_opts->lwdt_stop = stop_i2c_watchdogs;
 	lwdt_opts->lwdt_ping = ping_i2c_watchdogs;
+	if (cpu_has_epic()) {
+		lwdt_opts->lt_regs_eioh = (lt_regs_eioh_t *)lt_regs;
+	} else {
+		lwdt_opts->lt_regs_eioh = NULL;
+	}
 	printk("set I2C-SPI watchdog timer\n");
 
 	rval = misc_register(&lwdt_miscdev);

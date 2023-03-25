@@ -130,19 +130,25 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 {
 	int err;
 	unsigned int un;
-	unsigned int cpus;
+	int node;
+	int nr_cpus;
 	int i;
 
-	cpus = num_online_cpus();
+	node = dev_to_node(&priv->pdev->dev);
+	nr_cpus = nr_cpus_node(node);
+
 	/* cleanup irq struct */
 	for (i = 0; i < priv->num_msix_entries; i++) {
 		priv->vector[i].priv = priv;
 		priv->vector[i].irq = -1;
 		priv->vector[i].bidx = -1;
 		/* setup affinity mask and node */
-		priv->vector[i].cpu = (i < priv->msix_rx_num) ?
-					(cpus - (i % cpus) - 1) :
-					(i % cpus);
+		priv->vector[i].cpu = \
+			(i < priv->num_rx_queues) ?
+			((node * nr_cpus) + nr_cpus - i - 1) :
+			(i < (priv->num_rx_queues + priv->num_tx_queues)) ?
+			(i + (node * nr_cpus) - priv->num_rx_queues) :
+			(node * nr_cpus);
 		if (priv->vector[i].cpu != -1)
 			cpumask_set_cpu(priv->vector[i].cpu,
 					&priv->vector[i].affinity_mask);
@@ -155,8 +161,9 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 	for (i = 0; i < priv->num_msix_entries; i++) {
 		if (i < priv->msix_rx_num) {
 			snprintf(priv->vector[i].name,
-				 sizeof(priv->vector[i].name),
-				 "%s-rxq%u", dev_name(&priv->ndev->dev), i);
+				 sizeof(priv->vector[i].name) - 1,
+				 "mxgbe%d:rxq%u@%s",
+				 node, i, dev_name(&priv->pdev->dev));
 			err = request_irq(priv->msix_entries[i].vector,
 					&mxgbe_rxq_irq_handler, 0
 						| IRQF_NO_THREAD
@@ -173,9 +180,10 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 					      &priv->vector[i].affinity_mask);
 		} else if (i < (priv->msix_rx_num + priv->msix_tx_num)) {
 			snprintf(priv->vector[i].name,
-				 sizeof(priv->vector[i].name),
-				 "%s-txq%u", dev_name(&priv->ndev->dev),
-				 i - priv->msix_rx_num);
+				 sizeof(priv->vector[i].name) - 1,
+				 "mxgbe%d:txq%u@%s",
+				 node, i - priv->msix_rx_num,
+				 dev_name(&priv->pdev->dev));
 			err = request_irq(priv->msix_entries[i].vector,
 					&mxgbe_txq_irq_handler, 0
 						| IRQF_NO_THREAD
@@ -192,8 +200,9 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 					      &priv->vector[i].affinity_mask);
 		} else {
 			snprintf(priv->vector[i].name,
-				 sizeof(priv->vector[i].name),
-				 "%s-mac", dev_name(&priv->ndev->dev));
+				 sizeof(priv->vector[i].name) - 1,
+				 "mxgbe%d:mac@%s",
+				 node, dev_name(&priv->pdev->dev));
 			err = request_irq(priv->msix_entries[i].vector,
 					&mxgbe_mac_irq_handler, 0
 						| IRQF_NO_THREAD

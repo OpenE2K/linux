@@ -10,6 +10,7 @@
 
 #include <linux/types.h>
 
+#include <asm/kvm/head.h>
 #include <asm/cpu_regs_access.h>
 #include <asm/page.h>
 

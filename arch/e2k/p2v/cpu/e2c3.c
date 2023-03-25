@@ -5,18 +5,9 @@ void boot_e2c3_setup_arch(void)
 {
 	boot_e2k_sic_setup_arch();
 
-	if (!boot_machine.cmdline_iset_ver)
-		boot_machine.native_iset_ver = ELBRUS_2C3_ISET;
-#ifdef	CONFIG_MMU_PT_V6
-	boot_machine.mmu_pt_v6 = true;
-#else
-	boot_machine.mmu_pt_v6 = false;
-#endif
-#ifdef CONFIG_MMU_SEP_VIRT_SPACE
-	boot_machine.mmu_separate_pt = true;
-#else
-	boot_machine.mmu_separate_pt = false;
-#endif
+	boot_machine.native_iset_ver = ELBRUS_2C3_ISET;
+	boot_machine.mmu_pt_v6 = IS_ENABLED(CONFIG_MMU_PT_V6);
+	boot_machine.mmu_separate_pt = IS_ENABLED(CONFIG_MMU_SEP_VIRT_SPACE);
 	boot_machine.L3_enable = false;	/* no cache L3 */
 	boot_machine.max_nr_node_cpus = E2C3_MAX_NR_NODE_CPUS;
 	boot_machine.nr_node_cpus = E2C3_NR_NODE_CPUS;
@@ -28,5 +19,6 @@ void boot_e2c3_setup_arch(void)
 	boot_machine.sic_mc_count = E2C3_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = 0;	/* no MC1_ECC reg */
 	boot_machine.sic_io_str1 = 0;	/* no IO_STR1 reg */
+	boot_machine.qnr1_offset = E2C3_QNR1_OFFSET;
 }
 

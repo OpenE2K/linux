@@ -340,6 +340,11 @@ extern unsigned int kobjsize(const void *objp);
 # define VM_INVEND	VM_ARCH_1	/* Invert Endianness    */
 #elif defined(CONFIG_E2K)
 # define VM_MEMTYPE_TRACKED VM_ARCH_1
+# define VM_INT_PR	VM_HIGH_ARCH_0	/* PTE.int_pr for protected mode */
+# define VM_HW_STACK_PS	VM_HIGH_ARCH_1	/* Procedure stack area */
+# define VM_HW_STACK_PCS VM_HIGH_ARCH_2	/* Chain stack area */
+# define VM_PRIVILEGED	VM_HIGH_ARCH_3	/* Pages are privileged */
+# define VM_MPDMA	VM_HIGH_ARCH_4	/* Pages are under MPDMA hardware protection */
 #elif !defined(CONFIG_MMU)
 # define VM_MAPPED_COPY	VM_ARCH_1	/* T if mapped copy of data (nommu mmap) */
 #endif

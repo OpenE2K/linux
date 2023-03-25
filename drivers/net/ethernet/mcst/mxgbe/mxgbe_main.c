@@ -13,7 +13,7 @@
 #include "mxgbe_debugfs.h"
 
 
-mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev);
+mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev, void __iomem *base);
 int mxgbe_net_register(mxgbe_priv_t *priv);
 void mxgbe_net_remove(mxgbe_priv_t *priv);
 void mxgbe_net_free(mxgbe_priv_t *priv);
@@ -30,7 +30,7 @@ u32 mxgbe_debug_mask = 0
 	/* | MXGBE_DBG_MSK_NAME */	/* FDEBUG - func call */
 	/* | MXGBE_DBG_MSK_MAC */	/* MAC */
 	/* | MXGBE_DBG_MSK_MEM */	/* Mem Alloc */
-	| MXGBE_DBG_MSK_NET		/* Network device - init */
+	/* | MXGBE_DBG_MSK_NET */	/* Network device - init */
 	/* | MXGBE_DBG_MSK_NET_TX */	/* Network device - Transmit */
 	/* | MXGBE_DBG_MSK_NET_RX */	/* Network device - Receive */
 	/* | MXGBE_DBG_MSK_NET_SKB */	/* Network device - print skb */
@@ -62,6 +62,10 @@ MODULE_PARM_DESC(led_gpio, "Enable led as gpio (default: 0)");
 int mxgbe_status = 2;
 module_param_named(status, mxgbe_status, int, 0444);
 MODULE_PARM_DESC(status, "0 - disable, 1 - enable, other - use devtree");
+
+int mxgbe_maxqueue = -1;
+module_param_named(maxqueue, mxgbe_maxqueue, int, 0444);
+MODULE_PARM_DESC(maxqueue, "Set tx/rx queue num");
 
 
 /**
@@ -109,7 +113,7 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 
 
 	/* allocate memory for priv* and ndev */
-	priv = mxgbe_net_alloc(pdev);
+	priv = mxgbe_net_alloc(pdev, bar_addr[0]);
 	if (!priv) {
 		dev_err(&pdev->dev,
 			"Cannot allocate memory for priv*, aborting\n");
@@ -133,7 +137,9 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 	msleep(20); /* millisecond sleep */
 
 	/* Reset I2C - start autoread MAC */
+#ifndef __sparc__
 	mxgbe_i2c_reset(priv);
+#endif
 
 	/* Read HW Info */
 	err = mxgbe_hw_getinfo(priv);
@@ -213,7 +219,12 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 	} else {
 		l_set_ethernet_macaddr(pdev, (char *)&priv->MAC);
 	}
-	dev_info(&pdev->dev, "MAC = %012llX\n", be64_to_cpu(priv->MAC << 16));
+	dev_info(&pdev->dev,
+#ifdef __sparc__
+		 "MAC = %012llX\n", be64_to_cpu(priv->MAC >> 16));
+#else
+		 "MAC = %012llX\n", be64_to_cpu(priv->MAC << 16));
+#endif
 
 	/* GPIO */
 	err = mxgbe_gpio_probe(priv);
@@ -319,6 +330,13 @@ void mxgbe_release_board(struct pci_dev *pdev)
  ******************************************************************************
  **/
 
+int mxgbe_device_event(struct notifier_block *unused, unsigned long event,
+		       void *ptr);
+
+static struct notifier_block mxgbe_notifier = {
+	.notifier_call = mxgbe_device_event,
+};
+
 /**
  * Driver Registration Routine
  */
@@ -333,7 +351,11 @@ static int __init mxgbe_init(void)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_DEBUG_FS
 	mxgbe_dbg_init();
+#endif /* CONFIG_DEBUG_FS */
+
+	register_netdevice_notifier(&mxgbe_notifier);
 
 	status = pci_register_driver(&mxgbe_pci_driver);
 	if (status != 0) {
@@ -346,7 +368,9 @@ static int __init mxgbe_init(void)
 	return 0;
 
 devexit:
+#ifdef CONFIG_DEBUG_FS
 	mxgbe_dbg_exit();
+#endif /* CONFIG_DEBUG_FS */
 
 	return status;
 } /* mxgbe_init */
@@ -357,9 +381,13 @@ devexit:
  */
 static void __exit mxgbe_exit(void)
 {
+	unregister_netdevice_notifier(&mxgbe_notifier);
+
 	pci_unregister_driver(&mxgbe_pci_driver);
 
+#ifdef CONFIG_DEBUG_FS
 	mxgbe_dbg_exit();
+#endif /* CONFIG_DEBUG_FS */
 
 	pr_debug(KBUILD_MODNAME ": Exit\n");
 } /* mxgbe_exit */

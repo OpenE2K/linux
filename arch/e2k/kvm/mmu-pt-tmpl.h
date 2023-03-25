@@ -28,6 +28,12 @@ mmu_set_host_pt_struct_func(struct kvm *kvm, get_pt_struct_func_t func)
 }
 
 static inline const pt_struct_t *
+mmu_get_kvm_vcpu_pt_struct(struct kvm *kvm)
+{
+	return mmu_pt_get_kvm_vcpu_pt_struct(kvm);
+}
+
+static inline const pt_struct_t *
 mmu_get_vcpu_pt_struct(struct kvm_vcpu *vcpu)
 {
 	return mmu_pt_get_vcpu_pt_struct(vcpu);
@@ -252,12 +258,10 @@ static inline pgprotval_t get_gpmd_thp_invalidate_mask(struct kvm_vcpu *vcpu)
 #ifdef	CONFIG_TRANSPARENT_HUGEPAGE
 	KVM_BUG_ON(PMD_THP_INVALIDATE_FLAGS !=
 				(UNI_PAGE_PRESENT | UNI_PAGE_PROTNONE));
+	mask |= gpt->present_mask;
+	mask |= gpt->protnone_mask;
 #endif	/* CONFIG_TRANSPARENT_HUGEPAGE */
 
-	if (PMD_THP_INVALIDATE_FLAGS & UNI_PAGE_PRESENT)
-		mask |= gpt->present_mask;
-	if (PMD_THP_INVALIDATE_FLAGS & UNI_PAGE_PROTNONE)
-		mask |= gpt->protnone_mask;
 	return mask;
 }
 
@@ -821,6 +825,11 @@ static inline pgprot_t set_spte_memory_type_mask(struct kvm_vcpu *vcpu,
 	return set_spte_val_memory_type(vcpu, spte, mem_type);
 }
 
+static inline bool is_shadow_none_pte(pgprot_t pte)
+{
+	return (pgprot_val(pte) == 0);
+}
+
 static inline bool is_shadow_present_pte(struct kvm *kvm, pgprot_t pte)
 {
 	return (pgprot_val(pte) != 0) &&
@@ -872,6 +881,11 @@ kvm_pte_pfn_to_phys_addr(pgprot_t pte, const pt_struct_t *pt)
 	return pgprot_val(pte) & kvm_get_pte_pfn_mask(pt);
 }
 static inline e2k_addr_t
+kvm_gpte_pfn_to_phys_addr(pgprotval_t pte, const pt_struct_t *pt)
+{
+	return pte & kvm_get_pte_pfn_mask(pt);
+}
+static inline e2k_addr_t
 kvm_spte_pfn_to_phys_addr(struct kvm *kvm, pgprot_t spte)
 {
 	const pt_struct_t *spt = GET_HOST_PT_STRUCT(kvm);
@@ -884,6 +898,11 @@ kvm_gpte_gfn_to_phys_addr(struct kvm_vcpu *vcpu, pgprot_t gpte)
 	const pt_struct_t *gpt = GET_VCPU_PT_STRUCT(vcpu);
 
 	return kvm_pte_pfn_to_phys_addr(gpte, gpt);
+}
+
+static inline gfn_t gpte_to_gfn(struct kvm_vcpu *vcpu, pgprotval_t gpte)
+{
+	return gpa_to_gfn(kvm_gpte_gfn_to_phys_addr(vcpu, __pgprot(gpte)));
 }
 
 static inline pgprotval_t get_spte_pfn_mask(struct kvm *kvm)
@@ -1011,9 +1030,9 @@ mmu_spte_set(struct kvm *kvm, pgprot_t *sptep, pgprot_t new_spte)
 }
 
 static inline pgprotval_t
-get_gpte_bit_mask(struct kvm_vcpu *vcpu, bool present, bool valid, bool huge)
+kvm_get_gpte_bit_mask(struct kvm *kvm, bool present, bool valid, bool huge)
 {
-	const pt_struct_t *gpt = GET_VCPU_PT_STRUCT(vcpu);
+	const pt_struct_t *gpt = GET_KVM_VCPU_PT_STRUCT(kvm);
 	pgprotval_t mask = 0;
 
 	if (present)
@@ -1023,6 +1042,27 @@ get_gpte_bit_mask(struct kvm_vcpu *vcpu, bool present, bool valid, bool huge)
 	if (huge)
 		mask |= gpt->huge_mask;
 	return mask;
+}
+
+static inline pgprotval_t kvm_get_gpte_present_mask(struct kvm *kvm)
+{
+	return kvm_get_gpte_bit_mask(kvm, true, false, false);
+}
+
+static inline pgprotval_t kvm_get_gpte_valid_mask(struct kvm *kvm)
+{
+	return kvm_get_gpte_bit_mask(kvm, false, true, false);
+}
+
+static inline pgprotval_t kvm_get_gpte_huge_mask(struct kvm *kvm)
+{
+	return kvm_get_gpte_bit_mask(kvm, false, false, true);
+}
+
+static inline pgprotval_t
+get_gpte_bit_mask(struct kvm_vcpu *vcpu, bool present, bool valid, bool huge)
+{
+	return kvm_get_gpte_bit_mask(vcpu->kvm, present, valid, huge);
 }
 
 static inline pgprotval_t get_gpte_present_mask(struct kvm_vcpu *vcpu)
@@ -1043,6 +1083,11 @@ static inline pgprotval_t get_gpte_huge_mask(struct kvm_vcpu *vcpu)
 static inline pgprotval_t get_gpte_unmapped_mask(struct kvm_vcpu *vcpu)
 {
 	return (pgprotval_t) 0;
+}
+
+static inline bool is_none_gpte(pgprotval_t pte)
+{
+	return pte == 0;
 }
 
 static inline bool is_present_gpte(pgprotval_t pte)
@@ -1075,6 +1120,26 @@ static inline bool is_huge_gpte(struct kvm_vcpu *vcpu, pgprotval_t pte)
 	return pte & get_gpte_huge_mask(vcpu);
 }
 
+static inline bool kvm_is_only_valid_gpte(struct kvm *kvm, pgprotval_t pte)
+{
+	return pte == kvm_get_gpte_valid_mask(kvm);
+}
+
+static inline bool kvm_is_valid_gpte(struct kvm *kvm, pgprotval_t pte)
+{
+	return !!(pte & kvm_get_gpte_valid_mask(kvm));
+}
+
+static inline bool kvm_is_present_or_valid_gpte(struct kvm *kvm, pgprotval_t pte)
+{
+	return is_present_gpte(pte) || kvm_is_only_valid_gpte(kvm, pte);
+}
+
+static inline bool kvm_is_huge_gpte(struct kvm *kvm, pgprotval_t pte)
+{
+	return pte & kvm_get_gpte_huge_mask(kvm);
+}
+
 static inline bool has_pt_level_huge_gpte(struct kvm_vcpu *vcpu, int level)
 {
 	const pt_struct_t *gpt = GET_VCPU_PT_STRUCT(vcpu);
@@ -1094,6 +1159,17 @@ gpte_to_gfn_level(struct kvm_vcpu *vcpu,
 	}
 
 	return gpa_to_gfn(gpa);
+}
+
+static inline pgprot_t *
+sp_gpa_to_spte(struct kvm_mmu_page *sp, gpa_t gpa)
+{
+	pgprot_t *sptep;
+	unsigned long page_offset;
+
+	page_offset = offset_in_page(gpa);
+	sptep = &sp->spt[page_offset / sizeof(*sptep)];
+	return sptep;
 }
 
 static inline gfn_t

@@ -131,34 +131,21 @@ static void __init boot_map_vram_area(vram_area_t *vram)
 	e2k_addr_t	area_phys_base;
 	e2k_size_t	area_size;
 	e2k_addr_t	area_virt_base;
-	int ret;
 
 	area_phys_base = boot_pa_to_vpa(vram->base_addr);
 	area_size = vram->pages_num << PAGE_SHIFT;
 	area_virt_base = (e2k_addr_t)__boot_va(boot_vpa_to_pa(area_phys_base));
-	ret = boot_map_phys_area(area_phys_base, area_size,
+	boot_map_phys_area("VRAM", area_phys_base, area_size,
 			area_virt_base,
 			PAGE_KERNEL, E2K_SMALL_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-	if (ret <= 0) {
-		BOOT_BUG("Could not map VRAM area: "
-			"base addr 0x%lx size 0x%lx page size 0x%x to "
-			"virtual addr 0x%lx",
-			area_phys_base, area_size, E2K_SMALL_PAGE_SIZE,
-			area_virt_base);
-	}
-	boot_printk("The VRAM area: "
-		"base addr 0x%lx size 0x%lx is mapped to 0x%x virtual "
-		"page(s) base addr 0x%lx page size 0x%x\n",
-		area_phys_base, area_size, ret, area_virt_base,
-		E2K_SMALL_PAGE_SIZE);
 }
 
 void __init boot_kvm_map_vram_memory(boot_info_t *boot_info)
 {
-	vram_area_t *vrams;
+	vram_area_t *vrams = boot_vram_areas;
 	int bank;
 
 	/*
@@ -167,29 +154,6 @@ void __init boot_kvm_map_vram_memory(boot_info_t *boot_info)
 	 * VRAM are mapped to virtual space starting from 'PAGE_OFFSET',
 	 * same as physical memory pages
 	 */
-
-	vrams = boot_vram_areas;
-
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_vram_mapped)) {
-#ifdef	CONFIG_NUMA
-		if (!boot_node_has_dup_kernel()) {
-			DebugNUMA("boot_kvm_map_vram_memory() node "
-				"has not own page table and will use "
-				"node #%d VRAM areas mapping\n",
-				boot_my_node_dup_kernel_nid);
-			goto no_mem_mapping;
-		} else {
-			DebugNUMA("boot_kvm_map_vram_memory() will map all "
-				"VRAM areas\n");
-		}
-#endif	/* CONFIG_NUMA */
-		for (bank = 0; bank < boot_vram_areas_num; bank++) {
-			boot_map_vram_area(&vrams[bank]);
-		}
-#ifdef	CONFIG_NUMA
-no_mem_mapping:
-#endif	/* CONFIG_NUMA */
-		BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_vram_mapped);
-	}
+	for (bank = 0; bank < boot_vram_areas_num; bank++)
+		boot_map_vram_area(&vrams[bank]);
 }

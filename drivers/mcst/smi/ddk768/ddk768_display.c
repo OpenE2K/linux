@@ -54,6 +54,7 @@ long initDisplay()
  * while display channel are still active.
  */
 void setDisplayDPMS(
+   struct smi_device *sdev,
    disp_control_t dispControl, /* Channel 0 or Channel 1) */
    DISP_DPMS_t state, /* DPMS state */
    int lvds /* configure LVDS channel */
@@ -67,17 +68,17 @@ void setDisplayDPMS(
 
 	/* Get the control register for channel 0 or 1. */
     ulDispCtrlAddr = (dispControl == CHANNEL0_CTRL)? DISPLAY_CTRL : (DISPLAY_CTRL+CHANNEL_OFFSET);
-    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+    ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
 
     if (lvds)
 	ulDispCtrlReg = l_ddk768_add_lvds_to_disp_ctrl_reg(ulDispCtrlReg);
     
     
     ulLvdsCtrlAddr = (dispControl == CHANNEL0_CTRL)? LVDS_CONTROL : (LVDS_CONTROL+CHANNEL_OFFSET);
-    ulLvdsCtrlReg = peekRegisterDWord(ulLvdsCtrlAddr);
+    ulLvdsCtrlReg = peekRegisterDWord(sdev->rmmio, ulLvdsCtrlAddr);
 
     /* the register exist only in channel 0 */
-    ulCurLineReg = peekRegisterDWord(CURRENT_LINE);
+    ulCurLineReg = peekRegisterDWord(sdev->rmmio, CURRENT_LINE);
 
     /* DOUBLE_PIXEL_CLOCK field is write only */
     if (FIELD_GET(ulDispCtrlReg, DISPLAY_CTRL, PIXEL_CLOCK_SELECT))
@@ -122,9 +123,9 @@ void setDisplayDPMS(
         ulLvdsCtrlReg = FIELD_SET(ulLvdsCtrlReg, LVDS_CONTROL, PDPLL1, POWER_DOWN);
         break;
     }
-    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-    pokeRegisterDWord(CURRENT_LINE, ulCurLineReg);
-    pokeRegisterDWord(ulLvdsCtrlAddr, ulLvdsCtrlReg);
+    pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
+    pokeRegisterDWord(sdev->rmmio, CURRENT_LINE, ulCurLineReg);
+    pokeRegisterDWord(sdev->rmmio, ulLvdsCtrlAddr, ulLvdsCtrlReg);
 }
 
 /* 
@@ -138,6 +139,7 @@ void setDisplayDPMS(
  * Return: 0 is OK, -1 is error.
  */
 long setDisplayFormat(
+   struct smi_device *sdev,
    disp_control_t outputInterface, /* Use the output of channel 0 or 1 */
    disp_control_t dataPath,        /* Use the data path from channel 0 or 1 */
    disp_format_t dispFormat         /* 24 bit single or 48 bit double pixel */
@@ -146,7 +148,7 @@ long setDisplayFormat(
    unsigned long ulDispCtrlAddr, ulDispCtrlReg;
 
    ulDispCtrlAddr = (outputInterface == CHANNEL0_CTRL)? DISPLAY_CTRL : (DISPLAY_CTRL+CHANNEL_OFFSET);
-   ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+   ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
 
    if (dispFormat == DOUBLE_PIXEL_48BIT)
    {
@@ -173,7 +175,7 @@ long setDisplayFormat(
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, DISABLE);
    }
 
-   pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+   pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 
    return 0;
 }
@@ -188,7 +190,8 @@ long setDisplayFormat(
  * Note:
  *      This function is waiting for the next vertical sync.         
  */
-void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount)
+void waitDispVerticalSync(struct smi_device *sdev,
+			disp_control_t dispControl, unsigned long vSyncCount)
 {
     unsigned long ulDispCtrlAddr;
     unsigned long status;
@@ -198,7 +201,8 @@ void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount)
     if (dispControl == CHANNEL0_CTRL)
     {
         // There is no Vsync when PLL is off
-        if ((FIELD_GET(peekRegisterDWord(CLOCK_ENABLE), CLOCK_ENABLE, DC0) == CLOCK_ENABLE_DC0_OFF))
+        if ((FIELD_GET(peekRegisterDWord(sdev->rmmio,
+				CLOCK_ENABLE), CLOCK_ENABLE, DC0) == CLOCK_ENABLE_DC0_OFF))
             return;
 
         ulDispCtrlAddr = DISPLAY_CTRL;
@@ -206,15 +210,17 @@ void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount)
     else
     {
         // There is no Vsync when PLL is off
-        if ((FIELD_GET(peekRegisterDWord(CLOCK_ENABLE), CLOCK_ENABLE, DC1) == CLOCK_ENABLE_DC1_OFF))
+        if ((FIELD_GET(peekRegisterDWord(sdev->rmmio,
+				CLOCK_ENABLE), CLOCK_ENABLE, DC1) == CLOCK_ENABLE_DC1_OFF))
             return;
 
         ulDispCtrlAddr = DISPLAY_CTRL+CHANNEL_OFFSET;
     }
 
     //There is no Vsync when display timing is off. 
-    if ((FIELD_GET(peekRegisterDWord(ulDispCtrlAddr), DISPLAY_CTRL, TIMING) ==
-         DISPLAY_CTRL_TIMING_DISABLE))
+    if ((FIELD_GET(peekRegisterDWord(sdev->rmmio,
+				ulDispCtrlAddr), DISPLAY_CTRL, TIMING) == 
+				DISPLAY_CTRL_TIMING_DISABLE))
     {
             return;
     }
@@ -228,9 +234,10 @@ void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount)
         ulLoopCount = 0;
         do
         {
-            status = FIELD_GET(peekRegisterDWord(ulDispCtrlAddr), DISPLAY_CTRL, VSYNC);
+            status = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+					ulDispCtrlAddr), DISPLAY_CTRL, VSYNC);
             //Insert delay to reduce number of Vsync checks
-            timerWaitTicks(3, 0xffff);
+            timerWaitTicks(sdev, 3, 0xffff);
             if(ulLoopCount++ > ulDeadLoopCount) break;
         }
         while (status == DISPLAY_CTRL_VSYNC_ACTIVE);
@@ -239,8 +246,9 @@ void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount)
         ulLoopCount = 0;
         do
         {
-            status = FIELD_GET(peekRegisterDWord(ulDispCtrlAddr), DISPLAY_CTRL, VSYNC);
-            timerWaitTicks(3, 0xffff);
+            status = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+					ulDispCtrlAddr), DISPLAY_CTRL, VSYNC);
+            timerWaitTicks(sdev, 3, 0xffff);
             if(ulLoopCount++ > ulDeadLoopCount) break;
         }
         while (status == DISPLAY_CTRL_VSYNC_INACTIVE);
@@ -255,7 +263,8 @@ void waitDispVerticalSync(disp_control_t dispControl, unsigned long vSyncCount)
  *
  * Input: display control (CHANNEL0_CTRL or CHANNEL1_CTRL)
  */
-void ddk768_waitVSyncLine(disp_control_t dispControl)
+void ddk768_waitVSyncLine(struct smi_device *sdev,
+						disp_control_t dispControl)
 {
     unsigned long ulDispCtrlAddr;
     unsigned long value;
@@ -268,7 +277,8 @@ void ddk768_waitVSyncLine(disp_control_t dispControl)
     
     do
     {
-    	value = FIELD_GET(peekRegisterDWord(ulDispCtrlAddr), CURRENT_LINE, LINE);
+    	value = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+						ulDispCtrlAddr), CURRENT_LINE, LINE);
     }
     while (value < modeParam.vertical_sync_start);
 }
@@ -276,13 +286,15 @@ void ddk768_waitVSyncLine(disp_control_t dispControl)
 /*
  * Get current display line number
  */
-unsigned long getDisplayLine(disp_control_t dispControl)
+unsigned long getDisplayLine(struct smi_device *sdev,
+							disp_control_t dispControl)
 {
     unsigned long ulRegAddr;
     unsigned long ulRegValue;
     
     ulRegAddr = (dispControl == CHANNEL0_CTRL)? CURRENT_LINE : (CURRENT_LINE+DC_OFFSET);
-    ulRegValue = FIELD_GET(peekRegisterDWord(ulRegAddr), CURRENT_LINE, LINE);
+    ulRegValue = FIELD_GET(peekRegisterDWord(sdev->rmmio, ulRegAddr),
+												CURRENT_LINE, LINE);
 
     return(ulRegValue);
 }
@@ -290,13 +302,16 @@ unsigned long getDisplayLine(disp_control_t dispControl)
 /*
  * This functions uses software sequence to turn on/off the panel of the digital interface.
  */
-void ddk768_swPanelPowerSequence(disp_control_t dispControl, disp_state_t dispState, unsigned long vSyncDelay)
+void ddk768_swPanelPowerSequence(struct smi_device *sdev,
+						disp_control_t dispControl, 
+						disp_state_t dispState, 
+						unsigned long vSyncDelay)
 {
     unsigned long ulDispCtrlAddr;
     unsigned long ulDispCtrlReg;
 
     ulDispCtrlAddr = (dispControl == CHANNEL0_CTRL)? DISPLAY_CTRL : (DISPLAY_CTRL+CHANNEL_OFFSET);
-    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+    ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
     /* DOUBLE_PIXEL_CLOCK field is write only */
     if (FIELD_GET(ulDispCtrlReg, DISPLAY_CTRL, PIXEL_CLOCK_SELECT))
 	ulDispCtrlReg |= FIELD_SET(0, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
@@ -309,22 +324,22 @@ void ddk768_swPanelPowerSequence(disp_control_t dispControl, disp_state_t dispSt
 
         /* Turn on FPVDDEN. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, FPVDDEN, HIGH);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-		waitDispVerticalSync(dispControl, vSyncDelay);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
+		waitDispVerticalSync(sdev, dispControl, vSyncDelay);
 
         /* Turn on FPDATA. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DATA, ENABLE);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-		waitDispVerticalSync(dispControl, vSyncDelay);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
+		waitDispVerticalSync(sdev, dispControl, vSyncDelay);
 
         /* Turn on FPVBIAS. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, VBIASEN, HIGH);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-		waitDispVerticalSync(dispControl, vSyncDelay);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
+		waitDispVerticalSync(sdev, dispControl, vSyncDelay);
 
         /* Turn on FPEN. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, FPEN, HIGH);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
     }
     else
     {
@@ -333,23 +348,23 @@ void ddk768_swPanelPowerSequence(disp_control_t dispControl, disp_state_t dispSt
 
         /* Turn off FPEN. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, FPEN, LOW);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-		waitDispVerticalSync(dispControl, vSyncDelay);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
+		waitDispVerticalSync(sdev, dispControl, vSyncDelay);
 
 
         /* Turn off FPVBIASEN. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, VBIASEN, LOW);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-		waitDispVerticalSync(dispControl, vSyncDelay);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
+		waitDispVerticalSync(sdev, dispControl, vSyncDelay);
 
         /* Turn off FPDATA. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DATA, DISABLE);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
-		waitDispVerticalSync(dispControl, vSyncDelay);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
+		waitDispVerticalSync(sdev, dispControl, vSyncDelay);
 
         /* Turn off FPVDDEN. */
         ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, FPVDDEN, LOW);
-        pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+        pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
     }
 
 }
@@ -393,6 +408,7 @@ void ddk768_setDAC(disp_state_t state)
  */
 //Cheok(10/18/2013): New function similar to setDisplayControl()
 void ddk768_setDisplayEnable(
+   struct smi_device *sdev,
    disp_control_t dispControl, /* Channel 0 or Channel 1) */
    disp_state_t dispState      /* ON or OFF */
 )
@@ -401,7 +417,7 @@ void ddk768_setDisplayEnable(
     unsigned long ulDispCtrlReg;
 
     ulDispCtrlAddr = (dispControl == CHANNEL0_CTRL)? DISPLAY_CTRL : (DISPLAY_CTRL+CHANNEL_OFFSET);
-    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+    ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
     /* DOUBLE_PIXEL_CLOCK field is write only */
     if (FIELD_GET(ulDispCtrlReg, DISPLAY_CTRL, PIXEL_CLOCK_SELECT))
 	ulDispCtrlReg |= FIELD_SET(0, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
@@ -416,11 +432,11 @@ void ddk768_setDisplayEnable(
           */
          ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, TIMING, ENABLE);
          ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DIRECTION, INPUT); 
-         pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+         pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 
          ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, PLANE, ENABLE)|        
                             FIELD_SET(0, DISPLAY_CTRL, DATA_PATH, EXTENDED); 
-         pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+         pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
     }
     else
     {
@@ -431,10 +447,10 @@ void ddk768_setDisplayEnable(
                   enable bit. 
           */
          ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, PLANE, DISABLE);
-         pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+         pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 
          ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, TIMING, DISABLE);
-         pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+         pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 
     }
 
@@ -448,6 +464,7 @@ void ddk768_setDisplayEnable(
  */
 
 void setDataDirection(
+   struct smi_device *sdev,
    disp_control_t dispControl, /* Channel 0 or Channel 1) */
    disp_state_t dispState      /* ON or OFF */
 )
@@ -457,11 +474,11 @@ void setDataDirection(
     if (dispState == DISP_ON)
     {
          ulDispCtrlAddr = (dispControl == CHANNEL0_CTRL)? DISPLAY_CTRL : (DISPLAY_CTRL+CHANNEL_OFFSET);
-         ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+         ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
 
          /*set data direction */ 
          ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DIRECTION, INPUT); 
-         pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+         pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 
 
      }
@@ -483,6 +500,7 @@ void setDataDirection(
  *     -1   - Fail 
  */
 long ddk768_detectCRTMonitor(
+	struct smi_device *sdev,
     disp_control_t dispControl, 
     unsigned char redValue,
     unsigned char greenValue,
@@ -517,15 +535,16 @@ long ddk768_detectCRTMonitor(
             FIELD_VALUE(0, CRT_DETECT, DATA_GREEN, green) |
             FIELD_VALUE(0, CRT_DETECT, DATA_BLUE, blue) |
             FIELD_SET(value, CRT_DETECT, ENABLE, ENABLE);
-    pokeRegisterDWord(ulMonitorDetectAddr, value);
+    pokeRegisterDWord(sdev->rmmio, ulMonitorDetectAddr, value);
     
     /* Add some delay here. Otherwise, the detection is not stable.
        SM768 has internal timer. It's better than SW countdown loop.
     */
-    timerWaitTicks(3, 0x7ffff);
+    timerWaitTicks(sdev, 3, 0x7ffff);
     
     /* Check if the monitor is detected. */
-    if (FIELD_GET(peekRegisterDWord(ulMonitorDetectAddr), CRT_DETECT, CRT) ==
+    if (FIELD_GET(peekRegisterDWord(sdev->rmmio,
+				ulMonitorDetectAddr), CRT_DETECT, CRT) ==
         CRT_DETECT_CRT_PRESENT)
     {
         result = 0;
@@ -533,9 +552,9 @@ long ddk768_detectCRTMonitor(
     
     /* Disable the Monitor Detect Enable bit. Somehow, enabling this bit will 
        cause the CRT to lose display. */
-    value = peekRegisterDWord(ulMonitorDetectAddr);
+    value = peekRegisterDWord(sdev->rmmio, ulMonitorDetectAddr);
     value = FIELD_SET(value, CRT_DETECT, ENABLE, DISABLE);
-    pokeRegisterDWord(ulMonitorDetectAddr, value);
+    pokeRegisterDWord(sdev->rmmio, ulMonitorDetectAddr, value);
 
     return result;
 }
@@ -549,15 +568,16 @@ long ddk768_detectCRTMonitor(
  *
  */
 long setDisplayView(
+	struct smi_device *sdev,	
 	disp_control_t dispOutput, 		/* Monitor 0 or 1 */
 	disp_state_t dispState,				/* On or off */
 	disp_control_t dataPath,			/* Use the data path of channel 0 or channel 1 (optional when OFF) */
 	disp_format_t dispFormat)			/* 24 or 48 bit digital interface (optional when OFF */
 {
 
-	ddk768_setDisplayEnable(dispOutput, dispState);         /* Enable or disable Channel output timing */
-	ddk768_swPanelPowerSequence(dispOutput, dispState, 4);  /* Turn on or off output power */
-	setDisplayFormat(dispOutput, dataPath, dispFormat); /* Set dataPath and output pixel format */
+	ddk768_setDisplayEnable(sdev, dispOutput, dispState);         /* Enable or disable Channel output timing */
+	ddk768_swPanelPowerSequence(sdev, dispOutput, dispState, 4);  /* Turn on or off output power */
+	setDisplayFormat(sdev, dispOutput, dataPath, dispFormat); /* Set dataPath and output pixel format */
 
 #if 0
 	if (dispState == DISP_ON)
@@ -569,9 +589,11 @@ long setDisplayView(
 /*
  * Convenient function to trun on single view 
  */
-long setSingleViewOn(disp_control_t dispOutput, disp_format_t dispFormat)
+long setSingleViewOn(struct smi_device *sdev,
+				disp_control_t dispOutput, disp_format_t dispFormat)
 {
 	setDisplayView(
+		sdev,
 		dispOutput, 			/* Output monitor */
 		DISP_ON, 				/* Turn On */
 		dispOutput,				/* Assume monitor 0 is using data path 0, and monitor 1 is using data path 1 */
@@ -583,9 +605,11 @@ long setSingleViewOn(disp_control_t dispOutput, disp_format_t dispFormat)
 /*
  * Convenient function to trun off single view 
  */
-long setSingleViewOff(disp_control_t dispOutput, disp_format_t dispFormat)
+long setSingleViewOff(struct smi_device *sdev,
+				disp_control_t dispOutput, disp_format_t dispFormat)
 {
 	setDisplayView(
+		sdev,
 		dispOutput, 	      /* Output monitor */
 		DISP_OFF, 		      /* Turn Off */
 		dispOutput,				/* Assume monitor 0 is using data path 0, and monitor 1 is using data path 1 */
@@ -597,15 +621,18 @@ long setSingleViewOff(disp_control_t dispOutput, disp_format_t dispFormat)
 /*
  * Convenient function to trun on clone view 
  */
-long setCloneViewOn(disp_control_t dataPath)
+long setCloneViewOn(struct smi_device *sdev,
+				disp_control_t dataPath)
 {
 	setDisplayView(
+		sdev,
 		CHANNEL0_CTRL,			/* For Clone view, monitor 0 has to be ON */
 		DISP_ON, 
 		dataPath,				/* Use this data path for monitor 0 */
 		SINGLE_PIXEL_24BIT);	/* Default to 24 bit single pixel, the most used case */
 
 	setDisplayView(
+		sdev,
 		CHANNEL1_CTRL,			/* For Clone view, monitor 1 has to be ON */
 		DISP_ON, 
 		dataPath,				/* Use this data path for monitor 1 */
@@ -617,10 +644,10 @@ long setCloneViewOn(disp_control_t dataPath)
 /*
  * Convenient function to trun on dual view 
  */
-long setDualViewOn()
+long setDualViewOn(struct smi_device *sdev)
 {
-	setSingleViewOn(CHANNEL0_CTRL, SINGLE_PIXEL_24BIT);
-	setSingleViewOn(CHANNEL1_CTRL, SINGLE_PIXEL_24BIT);
+	setSingleViewOn(sdev, CHANNEL0_CTRL, SINGLE_PIXEL_24BIT);
+	setSingleViewOn(sdev, CHANNEL1_CTRL, SINGLE_PIXEL_24BIT);
 
 	return 0;
 }
@@ -628,10 +655,10 @@ long setDualViewOn()
 /*
  * Convenient function to trun off all views
  */
-long setAllViewOff()
+long setAllViewOff(struct smi_device *sdev)
 {
-	setSingleViewOff(CHANNEL0_CTRL, SINGLE_PIXEL_24BIT);	/* Turn Off monitor 0 */
-	setSingleViewOff(CHANNEL1_CTRL, SINGLE_PIXEL_24BIT);	/* Turn Off monitor 1 */
+	setSingleViewOff(sdev, CHANNEL0_CTRL, SINGLE_PIXEL_24BIT);	/* Turn Off monitor 0 */
+	setSingleViewOff(sdev, CHANNEL1_CTRL, SINGLE_PIXEL_24BIT);	/* Turn Off monitor 1 */
 
 	return 0;
 }
@@ -640,38 +667,38 @@ long setAllViewOff()
  * Disable double pixel clock. 
  * This is a temporary function, used to patch for the random fuzzy font problem. 
  */
-void DisableDoublePixel(disp_control_t dispControl)
+void DisableDoublePixel(struct smi_device *sdev, disp_control_t dispControl)
 {
 	unsigned long ulDispCtrlAddr;
 	unsigned long ulDispCtrlReg;
 
 	if(dispControl == CHANNEL0_CTRL) {
 	    ulDispCtrlAddr = DISPLAY_CTRL;
-	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
 	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, DISABLE);
-	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	    pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 	}else{
 	    ulDispCtrlAddr = DISPLAY_CTRL+CHANNEL_OFFSET;
-	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
 	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, DISABLE);
-	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	    pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 	}
 }
 
-void EnableDoublePixel(disp_control_t dispControl)
+void EnableDoublePixel(struct smi_device *sdev, disp_control_t dispControl)
 {
 	unsigned long ulDispCtrlAddr;
 	unsigned long ulDispCtrlReg;
 
 	if(dispControl == CHANNEL0_CTRL) {
 	    ulDispCtrlAddr = DISPLAY_CTRL;
-	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
 	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
-	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	    pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 	}else{
 	    ulDispCtrlAddr = DISPLAY_CTRL+CHANNEL_OFFSET;
-	    ulDispCtrlReg = peekRegisterDWord(ulDispCtrlAddr);
+	    ulDispCtrlReg = peekRegisterDWord(sdev->rmmio, ulDispCtrlAddr);
 	    ulDispCtrlReg = FIELD_SET(ulDispCtrlReg, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
-	    pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
+	    pokeRegisterDWord(sdev->rmmio, ulDispCtrlAddr, ulDispCtrlReg);
 	}
 }

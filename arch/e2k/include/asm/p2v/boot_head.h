@@ -9,6 +9,7 @@
 #define	_E2K_P2V_BOOT_HEAD_H
 
 #include <linux/init.h>
+#include <linux/numa.h>
 
 #include <asm/p2v/boot_v2p.h>
 #include <asm/types.h>
@@ -17,7 +18,6 @@
 #include <asm/head.h>
 #include <asm/p2v/boot_smp.h>
 #include <asm/bootinfo.h>
-#include <asm/numnodes.h>
 
 #ifndef __ASSEMBLY__
 
@@ -62,38 +62,15 @@ extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure */
 # else
 #  define boot_native_machine_id	boot_get_vo_value(native_machine_id)
 # endif
-
-# ifdef CONFIG_NUMA
-#  define boot_the_node_machine_id(nid)	\
-		boot_the_node_get_vo_value(nid, machine_id)
-#  define boot_node_machine_id		\
-		boot_the_node_machine_id(boot_numa_node_id())
-# endif
 #endif
-
-#define	boot_machine			(boot_get_vo_value(machine))
-
-#ifdef	CONFIG_NUMA
-#define	boot_the_node_machine(nid)	\
-		((machdep_t *)boot_the_node_vp_to_pp(nid, &machine))
-#define	boot_node_machine(nid)	\
-		boot_the_node_machine(boot_numa_node_id())
-#else	/* ! CONFIG_NUMA */
-#define	boot_the_node_machine(nid)	\
-		((machdep_t *)boot_vp_to_pp(&machine))
-#define	boot_node_machine(nid)		\
-		boot_the_node_machine(0)
-#endif	/* CONFIG_NUMA */
 
 extern e2k_addr_t start_of_phys_memory;	/* start address of physical memory */
 extern e2k_addr_t end_of_phys_memory;	/* end address + 1 of physical memory */
 extern e2k_size_t pages_of_phys_memory;	/* number of pages of physical memory */
-extern e2k_addr_t kernel_image_size;	/* size of full kernel image in the */
-					/* memory ("text" + "data" + "bss") */
+
 #define	boot_start_of_phys_memory	boot_get_vo_value(start_of_phys_memory)
 #define	boot_end_of_phys_memory		boot_get_vo_value(end_of_phys_memory)
 #define	boot_pages_of_phys_memory	boot_get_vo_value(pages_of_phys_memory)
-#define	boot_kernel_image_size		boot_get_vo_value(kernel_image_size)
 
 extern int		phys_nodes_num;		/* total number of online */
 						/* nodes */
@@ -107,76 +84,44 @@ extern unsigned long	phys_mem_nodes_map;	/* map of online nodes */
 #define	boot_phys_mem_nodes_num		boot_get_vo_value(phys_mem_nodes_num)
 #define	boot_phys_mem_nodes_map		boot_get_vo_value(phys_mem_nodes_map)
 
-#ifdef	CONFIG_NUMA
-extern e2k_addr_t node_kernel_phys_base[MAX_NUMNODES];
-#define	boot_node_kernel_phys_base(node_id)				\
-		boot_get_vo_value(node_kernel_phys_base[(node_id)])
-#define	boot_kernel_phys_base						\
-		boot_node_kernel_phys_base(boot_numa_node_id())
-#define	init_node_kernel_phys_base(node_id)				\
-		(node_kernel_phys_base[(node_id)])
-#define	BOOT_EARLY_THE_NODE_HAS_DUP_KERNEL(node_id)			\
-		((unsigned long)(boot_node_kernel_phys_base(node_id)) != \
-			(unsigned long)-1)
-#define	BOOT_EARLY_NODE_HAS_DUP_KERNEL()				\
-		BOOT_EARLY_THE_NODE_HAS_DUP_KERNEL(boot_numa_node_id())
+struct node_lock_single {
+	boot_spinlock_t lock;
+	bool done;
+} ____cacheline_aligned_in_smp;
+struct node_lock {
+	struct node_lock_single nodes[MAX_NUMNODES];
+};
+#define BOOT_NODE_LOCK_INIT { \
+	.nodes[0 ... MAX_NUMNODES - 1].lock = __BOOT_SPIN_LOCK_UNLOCKED, \
+	.nodes[0 ... MAX_NUMNODES - 1].done = false \
+}
 
-#define	BOOT_TEST_AND_SET_NODE_LOCK(node_lock, node_done)		\
-({									\
-	int was_done;							\
-	boot_node_spin_lock((node_lock));				\
-	was_done = (node_done);						\
-	if ((was_done)) {						\
-		boot_node_spin_unlock((node_lock));			\
-	}								\
-	was_done;							\
-})
-#define	BOOT_NODE_UNLOCK(node_lock, node_done)				\
-({									\
-	(node_done) = 1;						\
-	boot_node_spin_unlock((node_lock));				\
-})
-#else	/* ! CONFIG_NUMA */
-extern e2k_addr_t kernel_phys_base;	/* physical address of kernel Image */
-					/* begining */
-#define BOOT_IS_BSP_ID			(boot_smp_processor_id() == 0)
-#define	boot_kernel_phys_base		boot_get_vo_value(kernel_phys_base)
-#define	BOOT_TEST_AND_SET_NODE_LOCK(node_lock, node_done) (!BOOT_IS_BSP_ID)
-#define	BOOT_NODE_UNLOCK(node_lock, node_done)
-#endif	/* CONFIG_NUMA */
+static inline bool __boot_node_lock(int node, struct node_lock *node_lock)
+{
+	struct node_lock *boot_node_lock = boot_vp_to_pp(node_lock);
+	bool done;
 
-/*
- * MMU Trap Cellar
- */
-#ifndef	CONFIG_SMP
-extern	unsigned long		kernel_trap_cellar[MMU_TRAP_CELLAR_MAX_SIZE];
+	boot_spin_lock(&boot_node_lock->nodes[node].lock);
+	done = boot_node_lock->nodes[node].done;
+	if (done)
+		boot_spin_unlock(&boot_node_lock->nodes[node].lock);
 
-#define	KERNEL_TRAP_CELLAR	kernel_trap_cellar
+	return done;
+}
 
-#define	boot_kernel_trap_cellar	boot_vp_to_pp((u64 *)kernel_trap_cellar)
-#define	boot_trap_cellar	boot_kernel_trap_cellar
-#define	BOOT_KERNEL_TRAP_CELLAR	boot_kernel_trap_cellar
-#else	/* CONFIG_SMP */
-extern	unsigned long		kernel_trap_cellar;
+static inline void __boot_node_unlock(int node, struct node_lock *node_lock)
+{
+	struct node_lock *boot_node_lock = boot_vp_to_pp(node_lock);
 
-/*
- * Don't use hard_smp_processor_id() here to avoid function call in
- * NATIVE_SAVE_TRAP_CELLAR().
- */
-#define	KERNEL_TRAP_CELLAR	\
-		((&kernel_trap_cellar) + MMU_TRAP_CELLAR_MAX_SIZE * \
-		 cpu_to_cpuid(raw_smp_processor_id()))
+	boot_node_lock->nodes[node].done = true;
+	boot_spin_unlock(&boot_node_lock->nodes[node].lock);
+}
 
-#define	boot_trap_cellar	\
-		boot_vp_to_pp((u64 *)(&kernel_trap_cellar) + \
-			MMU_TRAP_CELLAR_MAX_SIZE * boot_smp_processor_id())
-#define	boot_kernel_trap_cellar	\
-		boot_node_vp_to_pp((u64 *)(&kernel_trap_cellar) + \
-			MMU_TRAP_CELLAR_MAX_SIZE * boot_smp_processor_id())
-#define	BOOT_KERNEL_TRAP_CELLAR	\
-		((&kernel_trap_cellar) + \
-		 MMU_TRAP_CELLAR_MAX_SIZE * boot_smp_processor_id())
-#endif	/* ! CONFIG_SMP */
+#define boot_node_lock(node_lock) __boot_node_lock(boot_numa_node_id(), (node_lock))
+#define boot_node_unlock(node_lock) __boot_node_unlock(boot_numa_node_id(), (node_lock))
+
+#define BOOT_DEFINE_NODE_LOCK(name) \
+	struct node_lock name = BOOT_NODE_LOCK_INIT
 
 /*
  * Native/guest VM indicator
@@ -186,8 +131,8 @@ extern	unsigned long		kernel_trap_cellar;
 /*
  * Kernel Compilation units table
  */
-extern	e2k_cute_t		kernel_CUT[MAX_KERNEL_CODES_UNITS];
-#define	boot_kernel_CUT		boot_node_vp_to_pp((e2k_cute_t *)kernel_CUT)
+extern const e2k_cute_t		kernel_CUT[MAX_KERNEL_CODES_UNITS];
+#define boot_kernel_CUT		boot_va_to_pa((void *) kernel_CUT)
 
 /*
  * Control process of boot-time initialization.
@@ -232,88 +177,6 @@ static inline  void init_terminate_boot_init(bool bsp, int cpuid)
 	init_native_terminate_boot_init(bsp, cpuid);
 }
 #endif	/* CONFIG_PARAVIRT_GUEST */
-
-/*
- * Convert virtual address of kernel item to the consistent physical address,
- * while booting process is continued into virtual memory space.
- */
-
-#ifndef	CONFIG_NUMA
-#define	kernel_va_to_pa(virt_addr)	\
-		((e2k_addr_t)(virt_addr) - KERNEL_BASE + kernel_phys_base)
-#else	/* CONFIG_NUMA */
-#define	kernel_va_to_pa(virt_addr)	\
-		node_kernel_va_to_pa(numa_node_id(), virt_addr)
-#endif	/* ! CONFIG_NUMA */
-
-/*
- * Convert virtual address of kernel item to the consistent physical address 
- * on the given node, while booting process is continued into virtual memory 
- * space.
- */
-
-#ifndef CONFIG_NUMA
-#define node_kernel_va_to_pa(node_id, virt_addr)			\
-	((e2k_addr_t)(virt_addr) - KERNEL_BASE + kernel_phys_base)
-#else /* CONFIG_NUMA */
-#define node_kernel_va_to_pa(node_id, virt_addr)			\
-({									\
-	unsigned long virt_offset = (e2k_addr_t)(virt_addr) -		\
-							KERNEL_BASE;	\
-	unsigned long kernel_base;					\
-	if ((e2k_addr_t)(virt_addr) >= (e2k_addr_t)__node_data_end) {	\
-		kernel_base = node_kernel_phys_base[BOOT_BS_NODE_ID];	\
-	} else if (node_has_dup_kernel(node_id)) {			\
-		kernel_base = node_kernel_phys_base[node_id];		\
-	} else {							\
-		kernel_base = node_kernel_phys_base[			\
-					node_dup_kernel_nid(node_id)]; 	\
-	}								\
-	kernel_base + virt_offset;					\
-})
-#endif /* ! CONFIG_NUMA */
-
-#ifdef	CONFIG_NUMA
-/*
- * The next macroses should be used for NUMA mode to convert addresses on
- * the current node 
- */
-static	inline	void *
-boot_node_kernel_va_to_pa(int node_id, void *virt_pnt)
-{
-	unsigned long node_base;
-
-	node_base = boot_node_kernel_phys_base(node_id);
-	if (node_base == (unsigned long)-1) {
-		node_base = boot_node_kernel_phys_base(BOOT_BS_NODE_ID);
-	}
-	return boot_kernel_va_to_pa(virt_pnt, node_base);
-}
-#define	boot_the_node_vp_to_pp(node_id, virt_pnt)			\
-		boot_node_kernel_va_to_pa((node_id), (void *)(virt_pnt))
-#define	boot_the_node_get_vo_value(node_id, virt_value_name)		\
-		*(typeof ( virt_value_name)*)				\
-				boot_the_node_vp_to_pp((node_id),	\
-						&(virt_value_name))
-#define	boot_the_node_get_vo_name(node_id, virt_value_name)		\
-		*(typeof ( virt_value_name)*)				\
-				boot_the_node_vp_to_pp((node_id),	\
-						&(virt_value_name))
-#define	boot_node_vp_to_pp(virt_pnt)					\
-		boot_the_node_vp_to_pp(boot_numa_node_id(), virt_pnt)
-#define	boot_node_get_vo_value(virt_value_name)				\
-		boot_the_node_get_vo_value(boot_numa_node_id(),		\
-						virt_value_name)
-#define	boot_node_get_vo_name(virt_value_name)				\
-		boot_the_node_get_vo_name(boot_numa_node_id(),		\
-						virt_value_name)
-#else	/* ! CONFIG_NUMA */
-#define	boot_node_vp_to_pp(virt_pnt)	boot_vp_to_pp(virt_pnt)
-#define	boot_node_get_vo_value(virt_value_name)				\
-		boot_get_vo_value(virt_value_name)
-#define	boot_node_get_vo_name(virt_value_name)				\
-		boot_node_get_vo_name(virt_value_name)
-#endif	/* CONFIG_NUMA */
 
 #endif /* !(__ASSEMBLY__) */
 

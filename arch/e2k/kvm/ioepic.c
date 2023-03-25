@@ -19,6 +19,7 @@
 #include "pic.h"
 #include "irq.h"
 #include "mmu.h"
+#include "sic-nbsr.h"
 
 #if 0
 #define ioepic_debug(fmt, arg...) pr_err(fmt, ##arg)
@@ -75,24 +76,6 @@ static int ioepic_service(struct kvm_ioepic *ioepic, unsigned int idx)
 	return injected;
 }
 
-void kvm_make_scan_ioepic_request(struct kvm *kvm)
-{
-	kvm_make_all_cpus_request(kvm, KVM_REQ_SCAN_IOEPIC);
-}
-
-void kvm_vcpu_request_scan_ioepic(struct kvm *kvm)
-{
-	int i;
-
-	for (i = 0; i < kvm->arch.num_numa_nodes; i++) {
-		struct kvm_ioepic *ioepic = kvm->arch.ioepic[i];
-
-		if (!ioepic)
-			return;
-	}
-	kvm_make_scan_ioepic_request(kvm);
-}
-
 int ioepic_deliver_to_cepic(struct kvm_ioepic *ioepic, int irq)
 {
 	struct IO_EPIC_route_entry *entry = &ioepic->redirtbl[irq];
@@ -146,7 +129,6 @@ int kvm_ioepic_set_irq(struct kvm_ioepic *ioepic, int irq, int pin_status)
 	return ret;
 }
 
-/* TODO Only node 0 is supported */
 static void ioepic_notify_acked_irq(struct kvm_ioepic *ioepic, unsigned int pin)
 {
 	/*
@@ -155,7 +137,7 @@ static void ioepic_notify_acked_irq(struct kvm_ioepic *ioepic, unsigned int pin)
 	 * recursively
 	 */
 	mutex_unlock(&ioepic->lock);
-	kvm_notify_acked_irq(ioepic->kvm, KVM_IRQCHIP_IOEPIC_NODE0, pin);
+	kvm_notify_acked_irq(ioepic->kvm, KVM_IRQCHIP_IOEPIC, pin);
 	mutex_lock(&ioepic->lock);
 }
 
@@ -207,6 +189,110 @@ static inline unsigned int ioepic_read_version(void)
 	return reg.raw;
 }
 
+static int ioepic_passthrough_get_node(struct kvm_arch *kvm, unsigned int pin)
+{
+	struct ioepic_pt_pin *pt_pin;
+
+	list_for_each_entry(pt_pin, &kvm->ioepic_pt_pin, list) {
+		if (pin == pt_pin->pin)
+			return pt_pin->node;
+	}
+
+	return NUMA_NO_NODE;
+}
+
+/* Read from hardware IOEPIC, or from model (load saved guest RT_MSI address) */
+static int ioepic_passthrough_read(struct kvm *kvm, struct kvm_ioepic *ioepic, unsigned int pin,
+		unsigned int offset, void *val)
+{
+	int node = ioepic_passthrough_get_node(&kvm->arch, pin);
+	unsigned int reg_offset = offset & 0xfff;
+	unsigned int result;
+
+	if (node == NUMA_NO_NODE)
+		return -EOPNOTSUPP;
+
+	WARN_ON(kvm->arch.ioepic_direct_map);
+
+	switch (reg_offset) {
+	case IOEPIC_TABLE_INT_CTRL(0):
+	case IOEPIC_TABLE_MSG_DATA(0):
+		result = io_epic_read(node, offset);
+		break;
+	case IOEPIC_TABLE_ADDR_HIGH(0):
+		mutex_lock(&ioepic->lock);
+		result = ioepic->redirtbl[pin].addr_high;
+		mutex_unlock(&ioepic->lock);
+		break;
+	case IOEPIC_TABLE_ADDR_LOW(0):
+		mutex_lock(&ioepic->lock);
+		result = ioepic->redirtbl[pin].addr_low.raw;
+		mutex_unlock(&ioepic->lock);
+		break;
+	default:
+		result = io_epic_read(node, offset);
+		ioepic_debug("unknown ioepic reg 0x%x\n", offset);
+		break;
+	}
+
+	*(u32 *) val = result;
+	ioepic_debug("passthrough ioepic read node %d offset %x val %x\n",
+		node, offset, result);
+	return 0;
+}
+
+/* Write to hardware IOEPIC. Substitute guest RT_MSI address with host RT_MSI */
+static int ioepic_passthrough_write(struct kvm *kvm, struct kvm_ioepic *ioepic, unsigned int pin,
+		unsigned int offset, unsigned int data)
+{
+	int node = ioepic_passthrough_get_node(&kvm->arch, pin);
+	unsigned int reg_offset = offset & 0xfff;
+	bool invalid = false;
+	unsigned int g_rt_msi, rt_msi_lo, rt_msi_hi;
+
+	if (node == NUMA_NO_NODE)
+		return -EOPNOTSUPP;
+
+	WARN_ON(kvm->arch.ioepic_direct_map);
+
+	switch (reg_offset) {
+	case IOEPIC_TABLE_ADDR_HIGH(0):
+		mutex_lock(&ioepic->lock);
+		ioepic->redirtbl[pin].addr_high = data;
+		mutex_unlock(&ioepic->lock);
+
+		g_rt_msi = kvm->arch.nbsr->nodes[0].regs[offset_to_no(SIC_rt_msi_h)];
+		if (data != g_rt_msi)
+			invalid = true;
+		get_io_epic_msi(node, &rt_msi_lo, &rt_msi_hi);
+		data = rt_msi_hi;
+		break;
+	case IOEPIC_TABLE_ADDR_LOW(0):
+		mutex_lock(&ioepic->lock);
+		ioepic->redirtbl[pin].addr_low.raw = data;
+		mutex_unlock(&ioepic->lock);
+
+		g_rt_msi = kvm->arch.nbsr->nodes[0].regs[offset_to_no(SIC_rt_msi)];
+		if (data >> E2K_SIC_ALIGN_RT_MSI != g_rt_msi >> E2K_SIC_ALIGN_RT_MSI)
+			invalid = true;
+		get_io_epic_msi(node, &rt_msi_lo, &rt_msi_hi);
+		data = rt_msi_lo | (data & (E2K_SIC_SIZE_RT_MSI - 1));
+		break;
+	case IOEPIC_TABLE_INT_CTRL(0):
+	case IOEPIC_TABLE_MSG_DATA(0):
+		break;
+	default:
+		ioepic_debug("unknown passthrough ioepic reg 0x%x\n", offset);
+		break;
+	}
+
+	io_epic_write(node, offset, data);
+
+	ioepic_debug("passthrough ioepic write node %d offset %x val %x\n",
+		node, offset, data);
+	return 0;
+}
+
 static int ioepic_mmio_read(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 				gpa_t addr, int len, void *val)
 {
@@ -215,28 +301,14 @@ static int ioepic_mmio_read(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	unsigned int reg_offset = offset & 0xfff;
 	unsigned int pin = offset >> 12;
 	unsigned int result;
-	struct irq_remap_table *irt = vcpu->kvm->arch.irt;
 
 	if (!ioepic_in_range(ioepic, addr))
 		return -EOPNOTSUPP;
 
 	ASSERT(len == 4); /* 4 bytes access */
 
-	/* In case of passthrough device, read directly from real IOEPIC */
-	if (irt->enabled && pin == irt->guest_pin) {
-		unsigned int host_pin_offset = irt->host_pin << 12;
-		unsigned int node = irt->host_node;
-
-		E2K_LMS_HALT_ERROR(1);
-		pr_err("%s(): error: IOEPIC passthrough page not mapped\n",
-			__func__);
-
-		result = io_epic_read(node, host_pin_offset + reg_offset);
-		*(u32 *) val = result;
-		ioepic_debug("passthrough ioepic read offset %x val %x\n",
-			offset, result);
+	if (!ioepic_passthrough_read(vcpu->kvm, ioepic, pin, offset, val))
 		return 0;
-	}
 
 	mutex_lock(&ioepic->lock);
 	switch (reg_offset) {
@@ -330,45 +402,14 @@ static int ioepic_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	unsigned int reg_offset = offset & 0xfff;
 	unsigned int pin = offset >> 12;
 	unsigned int data = *(u32 *) val;
-	struct irq_remap_table *irt = vcpu->kvm->arch.irt;
 
 	if (!ioepic_in_range(ioepic, addr))
 		return -EOPNOTSUPP;
 
 	ASSERT(len == 4); /* 4 bytes access */
 
-	/* In case of passthrough device, write directly to real IOEPIC */
-	if (irt->enabled && pin == irt->guest_pin) {
-		unsigned int host_pin_offset = irt->host_pin << 12;
-		unsigned int node = irt->host_node;
-		struct iohub_sysdata *sd = irt->vfio_dev->bus->sysdata;
-
-		E2K_LMS_HALT_ERROR(1);
-		pr_err("%s(): error: IOEPIC passthrough page not mapped\n",
-			__func__);
-
-		switch (reg_offset) {
-		case IOEPIC_TABLE_ADDR_HIGH(0):
-			if (data != sd->pci_msi_addr_hi) {
-				pr_err("kvm_ioepic: guest's RT_MSI_HI (0x%x) does not match host's RT_MSI_HI (0x%x)\n",
-					data, sd->pci_msi_addr_hi);
-				data = sd->pci_msi_addr_hi;
-			}
-			break;
-		case IOEPIC_TABLE_ADDR_LOW(0):
-			if (data != sd->pci_msi_addr_lo) {
-				pr_err("kvm_ioepic: guest's RT_MSI_LO (0x%x) does not match host's RT_MSI_LO (0x%x)\n",
-					data, sd->pci_msi_addr_lo);
-				data = sd->pci_msi_addr_lo;
-			}
-			break;
-		}
-
-		ioepic_debug("passthrough ioepic write offset %x val %x\n",
-			offset, data);
-		io_epic_write(node, host_pin_offset + reg_offset, data);
+	if (!ioepic_passthrough_write(vcpu->kvm, ioepic, pin, offset, data))
 		return 0;
-	}
 
 	ioepic_debug("%s offset %x val %x\n", __func__, offset, data);
 
@@ -475,7 +516,6 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base, int node_id)
 {
 	struct kvm_ioepic *ioepic;
 	int ret;
-	struct irq_remap_table *irt = kvm->arch.irt;
 
 	ioepic = kvm->arch.ioepic[node_id];
 
@@ -495,6 +535,23 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base, int node_id)
 	}
 
 	mutex_lock(&kvm->slots_lock);
+	if (kvm->arch.ioepic_direct_map && is_phys_paging(kvm->vcpus[0])) {
+		struct ioepic_pt_pin *pt_pin;
+
+		/*
+		 * Mapping is done on demand (nonpaging/tdp_page_fault)
+		 * Prefetching is impossible, since we don't know, which
+		 * VCPU changed base from VM IOCTL
+		 */
+		list_for_each_entry(pt_pin, &kvm->arch.ioepic_pt_pin, list) {
+			gfn_t gfn = gpa_to_gfn(ioepic->base_address) + pt_pin->pin;
+
+			/* This will request TLB flushes */
+			mmu_pt_direct_unmap_prefixed_mmio_gfn(kvm, gfn);
+			pr_info("%s(): Unmapping IOEPIC passthrough page GFN 0x%llx\n",
+					__func__, gfn);
+		}
+	}
 	kvm_io_bus_unregister_dev(kvm, KVM_MMIO_BUS, &ioepic->dev);
 	ioepic->base_address = new_base;
 	kvm_iodevice_init(&ioepic->dev, &ioepic_mmio_ops);
@@ -511,29 +568,6 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base, int node_id)
 		return ret;
 	}
 
-	if (kvm->arch.is_hv && irt->enabled && irt->guest_node == node_id) {
-		gpa_t new_gpa = new_base + (irt->guest_pin << PAGE_SHIFT);
-
-		if (irt->gpa) {
-			/*
-			 * Not first time mapping this page, need to unmap first
-			 */
-
-			gfn_t gfn = gpa_to_gfn(irt->gpa);
-
-			/* This will request TLB flushes */
-			mmu_pt_direct_unmap_prefixed_mmio_gfn(kvm, gfn);
-			pr_info("%s(): Unmapping IOEPIC passthrough page GPA 0x%llx -> HPA 0x%llx\n",
-				__func__, irt->gpa, irt->hpa);
-		}
-
-		/*
-		 * Mapping is done on demand (nonpaging/tdp_page_fault)
-		 * Prefetching is impossible, since we don't know, which
-		 * VCPU changed base from VM IOCTL
-		 */
-		irt->gpa = new_gpa;
-	}
 
 	return 0;
 }

@@ -770,7 +770,7 @@ static int vxd_get_fw_locked(struct vxd_dev *vxd, struct mmu_ctx *stream_ctx,
 
 		vxd->fw_type = str_type;
 
-		dev_info(vxd->dev, "FW: get %s\n", drv_fw_name[str_type]);
+		dev_dbg(vxd->dev, "FW: get %s\n", drv_fw_name[str_type]);
 	}
 
 	*fw_buf_id = vxd->firmware[str_type].buf_id;
@@ -794,7 +794,7 @@ static void vxd_put_fw_locked(struct vxd_dev *vxd)
 	if (vxd->fw_refcnt > 0)
 		return;
 
-	dev_info(vxd->dev, "FW: put %s\n", drv_fw_name[vxd->fw_type]);
+	dev_dbg(vxd->dev, "FW: put %s\n", drv_fw_name[vxd->fw_type]);
 	/* Poke the monitor to finally switch off the hw, when needed */
 	vxd_monitor_locked(vxd);
 }
@@ -1462,7 +1462,7 @@ void vxd_rm_link(struct vxd_dev *vxd, struct vxd_link *link)
 		u32 bytes = vxd->stats.mem_usage_last - (MB * (1024 * 1024));
 		u32 kB = (bytes * 1000) / (1024 * 1024);
 
-		dev_err(vxd->dev,
+		dev_dbg(vxd->dev,
 			"%s: Total user memory used: %u.%u MB\n",
 			__func__, MB, kB);
 	}
@@ -1947,7 +1947,7 @@ int vxd_create_stream(struct vxd_dev *vxd, struct vxd_link *link,
 
 	list_add(&stream->list, &link->streams);
 
-	dev_info(vxd->dev, "%s: new stream id: %d, link: %p, ptd: 0x%08x\n",
+	dev_dbg(vxd->dev, "%s: new stream id: %d, link: %p, ptd: 0x%08x\n",
 		__func__, stream->id, link, stream->ptd);
 
 	*str_id = stream->id;
@@ -1983,7 +1983,7 @@ int vxd_destroy_stream(struct vxd_dev *vxd, struct vxd_link *link,
 	struct vxd_stream *stream;
 	int ret;
 
-	dev_info(vxd->dev, "%s: stream id: %d\n", __func__, str_id);
+	dev_dbg(vxd->dev, "%s: stream id: %d\n", __func__, str_id);
 
 	ret = mutex_lock_interruptible(&vxd->mutex);
 	if (ret)

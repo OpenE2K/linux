@@ -628,15 +628,26 @@ extern void * __e2k_read_kernel_return_address(int n);
 			:						\
 			__e2k_read_kernel_return_address(n); })
 
-#ifndef CONFIG_CPU_HW_CLEAR_RF
 typedef void (*clear_rf_t)(void);
+
+#ifndef CONFIG_CPU_HW_CLEAR_RF
 extern const clear_rf_t clear_rf_fn[];
 
 static __always_inline void clear_rf_kernel_except_current(u64 num_q)
 {
 	clear_rf_fn[num_q]();
 }
-#endif
+
+static __always_inline clear_rf_t get_clear_rf_fn(u64 num_q)
+{
+	return clear_rf_fn[num_q];
+}
+#else
+static __always_inline clear_rf_t get_clear_rf_fn(u64 num_q)
+{
+	return (clear_rf_t) NULL;
+}
+#endif	/* !CONFIG_CPU_HW_CLEAR_RF */
 
 #define	SWITCH_TO_KERNEL_UPSR(upsr_reg, irq_en, nmirq_dis) \
 		NATIVE_SWITCH_TO_KERNEL_UPSR(upsr_reg, irq_en, nmirq_dis)

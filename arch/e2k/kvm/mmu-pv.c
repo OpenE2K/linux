@@ -645,7 +645,7 @@ int kvm_map_host_ttable_to_shadow(struct kvm *kvm, e2k_addr_t kernel_base,
 	DebugKVM("will map trap table from 0x%lx to 0x%lx on node #%d\n",
 		start_addr, end_addr, nid);
 	down_write(&mm->mmap_sem);
-	kernel_pgd = node_pgd_offset_kernel(nid, start_addr);
+	kernel_pgd = node_pgd_offset_k(nid, start_addr);
 	shadow_pgd = pgd_offset(mm, shadow_addr);
 	vma = find_vma(mm, shadow_addr);
 	if (vma == NULL) {
@@ -811,16 +811,6 @@ e2k_addr_t kvm_print_guest_user_address_ptes(struct kvm *kvm,
 		return -EINVAL;
 	}
 	pa = do_print_guest_user_address_ptes(gmm, addr);
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-	if (!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL) {
-		pgd_t	*pgdp;
-
-		pgdp = cpu_kernel_root_pt + pgd_index(addr);
-		pr_info("host CPU #%d kernel root page table:\n",
-			smp_processor_id());
-		print_address_ptes(pgdp, addr, 0);
-	}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 	print_va_tlb(addr, 0);
 	print_va_tlb(pte_virt_offset(_PAGE_ALIGN_UP(addr, PTE_SIZE)), 0);
 	print_va_tlb(pmd_virt_offset(_PAGE_ALIGN_UP(addr, PMD_SIZE)), 0);
@@ -941,30 +931,14 @@ void kvm_arch_free_memory_region(struct kvm *kvm,
 	return;
 }
 
-/*
- * Convert VCPU process virtual address to equal host physical address (__va())
- * VCPU process addres can be:
- *	host kernel address (in hypercals, traps, interrupts)
- *	guest kernel address which is host user address
- *	guest user address
- */
-e2k_addr_t kvm_get_guest_phys_addr(struct task_struct *task,
-					e2k_addr_t virt_addr)
+UACCESS_FN_DEFINE6(recovery_faulted_tagged_store_fn,
+		e2k_addr_t, address, u64, wr_data, u64, st_rec_opc,
+		u64, data_ext, u64, opc_ext, union recovery_faulted_arg, arg)
 {
-	thread_info_t *ti = task_thread_info(task);
-
-	if (ti->vcpu == NULL) {
-		/* it is not VCPU process, so conversion as usual case */
-		return NATIVE_GET_PHYS_ADDR(task, virt_addr);
-	} else if (virt_addr >= NATIVE_TASK_SIZE) {
-		/* it is host kernel address */
-		return NATIVE_GET_PHYS_ADDR(task, virt_addr);
-	} else if (!IS_GUEST_USER_ADDRESS(virt_addr)) {
-		/* it is guest kernel address, so it is host user address */
-		return NATIVE_GET_PHYS_ADDR(task, virt_addr);
-	}
-	/* so it is guest user virtual address */
-	return kvm_guest_user_address_to_pva(task, virt_addr);
+	native_recovery_faulted_tagged_store(address, wr_data, arg.tag,
+			st_rec_opc, data_ext, arg.tag_ext, opc_ext,
+			arg.chan, arg.qp, arg.atomic);
+	return 0;
 }
 
 /*
@@ -972,6 +946,332 @@ e2k_addr_t kvm_get_guest_phys_addr(struct task_struct *task,
  * common case: some addresses can be from host kernel address space,
  * but point to guest structures, shadow image ...
  */
+
+/* privileged hypercall version of recovery faulted operations */
+
+static noinline __priv_hypercall __section(.uaccess_functions) long
+do_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
+		u64 st_rec_opc, u64 data_ext, u64 opc_ext,
+		recovery_faulted_arg_t args)
+{
+	u32 data_tag = args.tag;
+	u32 data_ext_tag = args.tag_ext;
+	int chan = args.chan;
+	int qp_store = args.qp;
+	int atomic_store = args.atomic;
+	int ret = -EAGAIN;
+
+	if (atomic_store) {
+		TRY_RECOVERY_TAGGED_STORE_ATOMIC(address, wr_data, data_tag,
+				st_rec_opc, data_ext, data_ext_tag, opc_ext, ret);
+	} else {
+		TRY_RECOVERY_TAGGED_STORE(address, wr_data, data_tag,
+				st_rec_opc, data_ext, data_ext_tag, opc_ext,
+				chan, qp_store, ret);
+	}
+	return ret;
+}
+
+__priv_hypercall long
+kvm_priv_recovery_faulted_store(e2k_addr_t address, u64 wr_data, u64 st_rec_opc,
+				u64 data_ext, u64 opc_ext, u64 _args)
+{
+	recovery_faulted_arg_t args = { entire : _args };
+	struct task_struct *p = (struct task_struct *) NATIVE_READ_CURRENT_REG_VALUE();
+	struct kvm_vcpu *vcpu = task_thread_info(p)->vcpu;
+	unsigned long to_save_usr_pfault_jump;
+	int try_no = 0;
+	long ret;
+
+	if (vcpu == NULL) {
+		/* this should not be */
+		return -ENOSYS;
+	}
+
+	KVM_SET_USR_PFAULT("$.recovery_store_failed", p, to_save_usr_pfault_jump);
+
+try_again:
+	KVM_SET_RECOVERY_FAULTED("$.recovery_store_faulted", vcpu);
+
+	ret = do_recovery_faulted_tagged_store(address, wr_data,
+			st_rec_opc, data_ext, opc_ext, args);
+	if (likely(ret == 0)) {
+		/* recovery store operation succsefully completed */
+		;
+	} else if (ret == -EAGAIN) {
+		/* page fault occured and host successfully fault handled */
+		try_no++;
+		if (likely(try_no <= 3)) {
+			/* try store recovery again */
+			goto try_again;
+		}
+		/* probably it need try page fault handle again by guest */
+	} else {
+		/* page fault occured, but host handler failed */
+		/* return fault to guest */
+		;
+	}
+
+	KVM_RESET_RECOVERY_FAULTED(vcpu);
+	KVM_RESTORE_USR_PFAULT(p, to_save_usr_pfault_jump);
+	return ret;
+}
+
+static noinline __priv_hypercall __section(.uaccess_functions) long
+do_recovery_faulted_load(e2k_addr_t addr, u64 *ld_val, u8 *data_tag,
+			 u64 ld_rec_opc, int chan)
+{
+	u64 val;
+	u32 tag;
+	long ret = -EAGAIN;
+
+	TRY_RECOVERY_TAGGED_LOAD_TO(addr, ld_rec_opc, val, tag, chan, ret);
+	*ld_val = val;
+	*data_tag = tag;
+	return ret;
+}
+
+__priv_hypercall long
+kvm_priv_recovery_faulted_load(e2k_addr_t addr, u64 *ld_val, u8 *data_tag,
+			       u64 ld_rec_opc, int chan)
+{
+	struct task_struct *p = (struct task_struct *) NATIVE_READ_CURRENT_REG_VALUE();
+	struct kvm_vcpu *vcpu = task_thread_info(p)->vcpu;
+	unsigned long to_save_usr_pfault_jump;
+	int try_no = 0;
+	long ret;
+
+	if (vcpu == NULL) {
+		/* this should not be */
+		return -ENOSYS;
+	}
+
+	KVM_SET_USR_PFAULT("$.recovery_load_failed", p, to_save_usr_pfault_jump);
+
+try_again:
+	KVM_SET_RECOVERY_FAULTED("$.recovery_load_faulted", vcpu);
+
+	ret = do_recovery_faulted_load(addr, ld_val, data_tag, ld_rec_opc, chan);
+	if (likely(ret == 0)) {
+		/* recovery load operation succsefully completed */
+		;
+	} else if (ret == -EAGAIN) {
+		/* page fault occured and host successfully fault handled */
+		try_no++;
+		if (likely(try_no <= 3)) {
+			/* try load recovery again */
+			goto try_again;
+		}
+		/* probably it need try page fault handle again by guest */
+	} else {
+		/* page fault occured, but host handler failed */
+		/* return fault to guest */
+		;
+	}
+
+	KVM_RESET_RECOVERY_FAULTED(vcpu);
+	KVM_RESTORE_USR_PFAULT(p, to_save_usr_pfault_jump);
+	return ret;
+}
+
+static __always_inline long
+try_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+		e2k_addr_t addr_to_hi, u64 ld_rec_opc,
+		recovery_faulted_arg_t args, u32 first_time)
+{
+	int chan = args.chan;
+	int qp_load = args.qp;
+	int atomic_load = args.atomic;
+	int vr = args.vr;
+	int ret = -EAGAIN;
+
+	if (atomic_load) {
+		TRY_MOVE_TAGGED_DWORD_WITH_OPC_VR_ATOMIC(addr_from, addr_to,
+				addr_to_hi, vr, ld_rec_opc, ret);
+	} else {
+		TRY_MOVE_TAGGED_DWORD_WITH_OPC_CH_VR(addr_from, addr_to,
+				addr_to_hi, vr, ld_rec_opc, chan, qp_load,
+				first_time, ret);
+	}
+	return ret;
+}
+
+static noinline __priv_hypercall __section(.uaccess_functions) long
+do_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+		e2k_addr_t addr_to_hi, u64 ld_rec_opc,
+		recovery_faulted_arg_t args, u32 first_time)
+{
+	return try_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
+					 ld_rec_opc, args, first_time);
+}
+
+__priv_hypercall long
+kvm_priv_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+		e2k_addr_t addr_to_hi, u64 ld_rec_opc, u64 _args, u32 first_time)
+{
+	recovery_faulted_arg_t args = { entire : _args };
+	struct task_struct *p = (struct task_struct *) NATIVE_READ_CURRENT_REG_VALUE();
+	struct kvm_vcpu *vcpu = task_thread_info(p)->vcpu;
+	unsigned long to_save_usr_pfault_jump;
+	int try_no = 0;
+	long ret;
+
+	if (vcpu == NULL) {
+		/* this should not be */
+		return -ENOSYS;
+	}
+
+	KVM_SET_USR_PFAULT("$.recovery_load_failed", p, to_save_usr_pfault_jump);
+
+try_again:
+	KVM_SET_RECOVERY_FAULTED("$.recovery_load_faulted", vcpu);
+
+	ret = do_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
+				       ld_rec_opc, args, first_time);
+	if (likely(ret == 0)) {
+		/* recovery move operation succsefully completed */
+		;
+	} else if (ret == -EAGAIN) {
+		/* page fault occured and host successfully fault handled */
+		try_no++;
+		if (likely(try_no <= 3)) {
+			/* try move recovery again */
+			goto try_again;
+		}
+		/* probably it need try page fault handle again by guest */
+	} else {
+		/* page fault occured, but host handler failed */
+		/* return fault to guest */
+		;
+	}
+
+	KVM_RESET_RECOVERY_FAULTED(vcpu);
+	KVM_RESTORE_USR_PFAULT(p, to_save_usr_pfault_jump);
+	return ret;
+}
+
+static __always_inline long
+recovery_faulted_load_to_cpu_greg(e2k_addr_t addr, u32 greg_num_d,
+		u64 ld_rec_opc, recovery_faulted_arg_t args)
+{
+	int chan_opc = args.chan;
+	int qp_load = args.qp;
+	int atomic_load = args.atomic;
+	int vr = args.vr;
+	int ret = -EAGAIN;
+
+	if (atomic_load) {
+		TRY_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr,
+			ld_rec_opc, greg_num_d, vr, qp_load, ret);
+	} else {
+		TRY_RECOVERY_LOAD_TO_A_GREG_CH_VR(addr,
+			ld_rec_opc, greg_num_d, chan_opc, vr, qp_load, ret);
+	}
+	return ret;
+}
+
+static noinline __priv_hypercall __section(.uaccess_functions) long
+do_recovery_faulted_load_to_greg(e2k_addr_t addr, u32 greg_num_d,
+		recovery_faulted_arg_t args, u64 ld_rec_opc,
+		u64 *saved_greg_lo, u64 *saved_greg_hi)
+{
+	long ret = -EAGAIN;
+
+	if (!saved_greg_lo) {
+		ret = recovery_faulted_load_to_cpu_greg(addr, greg_num_d,
+							ld_rec_opc, args);
+	} else {
+		ret = try_recovery_faulted_move(addr,
+			(e2k_addr_t)saved_greg_lo, (e2k_addr_t)saved_greg_hi,
+			ld_rec_opc, args, 1);
+	}
+	return ret;
+}
+
+__priv_hypercall long
+kvm_priv_recovery_faulted_load_to_greg(e2k_addr_t addr, u32 greg_num_d,
+		u64 ld_rec_opc, u64 _args, u64 *saved_greg_lo, u64 *saved_greg_hi)
+{
+	recovery_faulted_arg_t args = { .entire = _args };
+	struct task_struct *p = (struct task_struct *) NATIVE_READ_CURRENT_REG_VALUE();
+	struct kvm_vcpu *vcpu = task_thread_info(p)->vcpu;
+	unsigned long to_save_usr_pfault_jump;
+	vcpu_l_gregs_t *l_gregs;
+	u64 *addr_lo, *addr_hi;
+	int try_no = 0;
+	long ret;
+
+	if (vcpu == NULL) {
+		/* this should not be */
+		return -ENOSYS;
+	}
+
+	KVM_SET_USR_PFAULT("$.recovery_load_failed", p, to_save_usr_pfault_jump);
+
+try_again:
+	KVM_SET_RECOVERY_FAULTED("$.recovery_load_faulted", vcpu);
+
+	ret = do_recovery_faulted_load_to_greg(addr, greg_num_d, args, ld_rec_opc,
+					       saved_greg_lo, saved_greg_hi);
+	if (likely(ret == 0)) {
+		/* recovery load operation succsefully completed */
+		;
+	} else if (ret == -EAGAIN) {
+		/* page fault occured and host successfully fault handled */
+		try_no++;
+		if (likely(try_no <= 3)) {
+			/* try load recovery again */
+			goto try_again;
+		}
+		/* probably it need try page fault handle again by guest */
+	} else {
+		/* page fault occured, but host handler failed */
+		/* return fault to guest */
+		;
+	}
+
+	KVM_RESET_RECOVERY_FAULTED(vcpu);
+	KVM_RESTORE_USR_PFAULT(p, to_save_usr_pfault_jump);
+
+	if (unlikely(ret != 0))
+		return ret;
+
+	if (!(LOCAL_GREGS_USER_MASK & (1UL << greg_num_d))) {
+		/* it is not "local" global register */
+		return 0;
+	}
+
+	/* save updated registers value to recover upon return to user */
+	KVM_BUG_ON(!(LOCAL_GREGS_USER_MASK & (1UL << greg_num_d)));
+	KVM_BUG_ON((KERNEL_GREGS_MAX_MASK & (1UL << greg_num_d)) &&
+			(u64 *)saved_greg_lo == NULL);
+	KVM_BUG_ON((HOST_KERNEL_GREGS_PAIR_MASK & (1UL << greg_num_d)) &&
+			(u64 *)saved_greg_lo == NULL);
+
+	l_gregs = get_new_pv_vcpu_l_gregs(vcpu);
+	KVM_BUG_ON(l_gregs == NULL);
+
+	addr_lo = l_gregs->gregs.g[greg_num_d - LOCAL_GREGS_START].xreg;
+	if (!args.atomic)
+		addr_hi = &addr_lo[1];
+	else
+		addr_hi = &addr_lo[2];
+
+	ret = kvm_priv_recovery_faulted_move(
+			(saved_greg_lo) ? (e2k_addr_t)saved_greg_lo : addr,
+			(e2k_addr_t)addr_lo, (e2k_addr_t)addr_hi,
+			ld_rec_opc, args.entire, 1);
+	if (ret)
+		return ret;
+
+	l_gregs->updated |= (1UL << greg_num_d);
+
+	return 0;
+
+}
+
+/* generic hypercalls version of recovery faulted operations */
+
 long kvm_recovery_faulted_tagged_guest_store(struct kvm_vcpu *vcpu,
 		e2k_addr_t address, u64 wr_data, u64 st_rec_opc,
 		u64 data_ext, u64 opc_ext, u64 _arg)
@@ -985,7 +1285,7 @@ long kvm_recovery_faulted_tagged_guest_store(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, address, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): cannot translate guest address 0x%lx, "
+		DebugKVMREC("%s(): cannot translate guest address 0x%lx, "
 			"retry with page fault\n", __func__, address);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)address,
 					&exception);
@@ -993,28 +1293,35 @@ long kvm_recovery_faulted_tagged_guest_store(struct kvm_vcpu *vcpu,
 	}
 	address = hva;
 
-	TRY_USR_PFAULT {
-		native_recovery_faulted_tagged_store(address, wr_data, arg.tag,
-			st_rec_opc, data_ext, arg.tag_ext, opc_ext,
-			arg.chan, arg.qp, arg.atomic);
-	} CATCH_USR_PFAULT {
-		return -EFAULT;
-	} END_USR_PFAULT
+	return __UACCESS_FN_CALL(recovery_faulted_tagged_store_fn, address,
+				 wr_data, st_rec_opc, data_ext, opc_ext, arg);
+}
 
+
+UACCESS_FN_DEFINE5(recovery_faulted_load_fn, e2k_addr_t, address,
+		u64 *, ld_val, u8 *, data_tag, u64, ld_rec_opc, int, chan)
+{
+	native_recovery_faulted_load(address, ld_val, data_tag, ld_rec_opc, chan);
 	return 0;
 }
+
 long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu, e2k_addr_t address,
 		u64 *ld_val, u8 *data_tag, u64 ld_rec_opc, int chan)
 {
+	u64 __user *ld_val_hva;
+	u8 __user *data_tag_hva;
+	u64 ld_val_k;
+	u8 data_tag_k;
 	unsigned long hva;
 	kvm_arch_exception_t exception;
+	long ret;
 
 	DebugKVMREC("started for address 0x%lx, channel #%d\n",
 		address, chan);
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, address, false, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): cannot translate guest address 0x%lx, "
+		DebugKVMREC("%s(): cannot translate guest address 0x%lx, "
 			"retry with page fault\n", __func__, address);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)address,
 					&exception);
@@ -1024,33 +1331,53 @@ long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu, e2k_addr_t address,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)ld_val, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): cannot translate guest ld_val 0x%lx, "
+		DebugKVMREC("%s(): cannot translate guest ld_val 0x%lx, "
 			"retry with page fault\n", __func__, ld_val);
-		kvm_vcpu_inject_page_fault(vcpu, (void *)ld_val,
-					&exception);
+		kvm_vcpu_inject_page_fault(vcpu, ld_val, &exception);
 		return -EAGAIN;
 	}
-	ld_val = (u64 *)hva;
+	ld_val_hva = (u64 __user *) hva;
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)data_tag, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): cannot translate guest data_tag 0x%lx, "
+		DebugKVMREC("%s(): cannot translate guest data_tag 0x%lx, "
 			"retry with page fault\n", __func__, data_tag);
-		kvm_vcpu_inject_page_fault(vcpu, (void *)data_tag,
-					&exception);
+		kvm_vcpu_inject_page_fault(vcpu, data_tag, &exception);
 		return -EAGAIN;
 	}
-	data_tag = (u8 *)hva;
+	data_tag_hva = (u8 __user *) hva;
 
-	TRY_USR_PFAULT {
-		native_recovery_faulted_load(address, ld_val, data_tag,
-						ld_rec_opc, chan);
-	} CATCH_USR_PFAULT {
+	ret = __UACCESS_FN_CALL(recovery_faulted_load_fn, address,
+			&ld_val_k, &data_tag_k, ld_rec_opc, chan);
+	if (ret)
+		return ret;
+
+	if (put_user(ld_val_k, ld_val_hva)) {
+		pr_err("%s(): cannot translate guest ld_val 0x%lx, "
+			"retry with page fault\n", __func__, ld_val);
+		kvm_vcpu_inject_page_fault(vcpu, ld_val, &exception);
 		return -EFAULT;
-	} END_USR_PFAULT
+	}
+
+	if (put_user(data_tag_k, data_tag_hva)) {
+		pr_err("%s(): cannot translate guest data_tag 0x%lx, "
+			"retry with page fault\n", __func__, data_tag);
+		kvm_vcpu_inject_page_fault(vcpu, data_tag, &exception);
+		return -EFAULT;
+	}
 
 	DebugKVMREC("loaded data 0x%llx tag 0x%x from address 0x%lx\n",
 		*ld_val, *data_tag, address);
+	return 0;
+}
+
+UACCESS_FN_DEFINE6(recovery_faulted_move_fn,
+		e2k_addr_t, addr_from, e2k_addr_t, addr_to, e2k_addr_t, addr_to_hi,
+		union recovery_faulted_arg, arg, u64, ld_rec_opc, u32, first_time)
+{
+	native_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
+			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic,
+			first_time);
 	return 0;
 }
 
@@ -1061,13 +1388,14 @@ long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 	union recovery_faulted_arg arg = { .entire = _arg };
 	unsigned long hva;
 	kvm_arch_exception_t exception;
+	long ret;
 
 	DebugKVMREC("started from address 0x%lx to addr 0x%lx, channel #%d\n",
 		addr_from, addr_to, arg.chan);
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, addr_from, false, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): cannot translate guest addr_from 0x%lx, "
+		DebugKVMREC("%s(): cannot translate guest addr_from 0x%lx, "
 			"retry with page fault\n", __func__, addr_from);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)addr_from,
 					&exception);
@@ -1077,7 +1405,7 @@ long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, addr_to, true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): cannot translate guest addr_to 0x%lx, "
+		DebugKVMREC("%s(): cannot translate guest addr_to 0x%lx, "
 			"retry with page fault\n", __func__, addr_to);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)addr_to,
 					&exception);
@@ -1088,7 +1416,7 @@ long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 	if (addr_to_hi) {
 		hva = kvm_vcpu_gva_to_hva(vcpu, addr_to_hi, true, &exception);
 		if (kvm_is_error_hva(hva)) {
-			pr_err("%s(): cannot translate guest addr_to_hi 0x%lx, "
+			DebugKVMREC("%s(): cannot translate guest addr_to_hi 0x%lx, "
 				"retry with page fault\n",
 				__func__, addr_to_hi);
 			kvm_vcpu_inject_page_fault(vcpu, (void *)addr_to_hi,
@@ -1098,18 +1426,23 @@ long kvm_recovery_faulted_guest_move(struct kvm_vcpu *vcpu,
 		addr_to_hi = hva;
 	}
 
-	TRY_USR_PFAULT {
-		native_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
-			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic,
-			first_time);
-	} CATCH_USR_PFAULT {
-		return -EFAULT;
-	} END_USR_PFAULT
+	ret = __UACCESS_FN_CALL(recovery_faulted_move_fn, addr_from, addr_to,
+				addr_to_hi, arg, ld_rec_opc, first_time);
+	DebugKVMREC("loaded data 0x%llx from address 0x%lx, ret=%ld\n",
+		*((u64 *)addr_to), addr_from, ret);
+	return ret;
+}
 
-	DebugKVMREC("loaded data 0x%llx from address 0x%lx\n",
-		*((u64 *)addr_to), addr_from);
+UACCESS_FN_DEFINE6(recovery_faulted_load_to_greg_fn, e2k_addr_t, address,
+		u32, greg_num_d, union recovery_faulted_arg, arg,
+		u64, ld_rec_opc, u64 *, saved_greg_lo, u64 *, saved_greg_hi)
+{
+	native_recovery_faulted_load_to_greg(address, greg_num_d, arg.vr,
+			ld_rec_opc, arg.chan, arg.qp, arg.atomic,
+			(u64 *) saved_greg_lo, (u64 *) saved_greg_hi);
 	return 0;
 }
+
 long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 		e2k_addr_t address, u32 greg_num_d, u64 ld_rec_opc,
 		u64 _arg, u64 saved_greg_lo, u64 saved_greg_hi)
@@ -1119,13 +1452,14 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 	vcpu_l_gregs_t *l_gregs;
 	u64 *addr_lo, *addr_hi;
 	kvm_arch_exception_t exception;
+	long ret;
 
 	DebugKVMREC("started for address 0x%lx global reg #%d, channel #%d\n",
 		address, greg_num_d, arg.chan);
 
 	hva = kvm_vcpu_gva_to_hva(vcpu, address, false, &exception);
 	if (kvm_is_error_hva(hva)) {
-		pr_err("%s(): cannot translate guest address 0x%lx, "
+		DebugKVMREC("%s(): cannot translate guest address 0x%lx, "
 			"retry with page fault\n", __func__, address);
 		kvm_vcpu_inject_page_fault(vcpu, (void *)address, &exception);
 		return -EAGAIN;
@@ -1136,7 +1470,7 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 		hva = kvm_vcpu_gva_to_hva(vcpu, saved_greg_lo, true,
 					&exception);
 		if (kvm_is_error_hva(hva)) {
-			pr_err("%s(): cannot translate guest addr_to 0x%llx, "
+			DebugKVMREC("%s(): cannot translate guest addr_to 0x%llx, "
 				"retry with page fault\n",
 				__func__, saved_greg_lo);
 			kvm_vcpu_inject_page_fault(vcpu,
@@ -1150,7 +1484,7 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 		hva = kvm_vcpu_gva_to_hva(vcpu, saved_greg_hi, true,
 					&exception);
 		if (kvm_is_error_hva(hva)) {
-			pr_err("%s(): cannot translate guest saved_greg_hi "
+			DebugKVMREC("%s(): cannot translate guest saved_greg_hi "
 				"0x%llx, retry with page fault\n",
 				__func__, saved_greg_hi);
 			kvm_vcpu_inject_page_fault(vcpu,
@@ -1160,13 +1494,11 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 		saved_greg_hi = hva;
 	}
 
-	TRY_USR_PFAULT {
-		native_recovery_faulted_load_to_greg(address, greg_num_d, arg.vr,
-			ld_rec_opc, arg.chan, arg.qp, arg.atomic,
-			(u64 *)saved_greg_lo, (u64 *)saved_greg_hi);
-	} CATCH_USR_PFAULT {
-		return -EFAULT;
-	} END_USR_PFAULT
+	ret = __UACCESS_FN_CALL(recovery_faulted_load_to_greg_fn,
+				address, greg_num_d, arg, ld_rec_opc,
+				(u64 *) saved_greg_lo, (u64 *) saved_greg_hi);
+	if (ret)
+		return ret;
 
 	if (!(LOCAL_GREGS_USER_MASK & (1UL << greg_num_d))) {
 		/* it is not "local" global register */
@@ -1189,25 +1521,11 @@ long kvm_recovery_faulted_load_to_guest_greg(struct kvm_vcpu *vcpu,
 	else
 		addr_hi = &addr_lo[2];
 
-	if ((u64 *)saved_greg_lo != NULL) {
-		TRY_USR_PFAULT {
-			native_recovery_faulted_move(saved_greg_lo,
-				(u64)addr_lo, (u64)addr_hi,
-				arg.vr, ld_rec_opc, arg.chan, arg.qp,
-				arg.atomic, 1);
-		} CATCH_USR_PFAULT {
-			return -EFAULT;
-		} END_USR_PFAULT
-	} else {
-		TRY_USR_PFAULT {
-			native_recovery_faulted_move(address,
-				(u64)addr_lo, (u64)addr_hi,
-				arg.vr, ld_rec_opc, arg.chan, arg.qp,
-				arg.atomic, 1);
-		} CATCH_USR_PFAULT {
-			return -EFAULT;
-		} END_USR_PFAULT
-	}
+	ret = __UACCESS_FN_CALL(recovery_faulted_move_fn,
+			(saved_greg_lo) ?: address,
+			(u64) addr_lo, (u64) addr_hi, arg, ld_rec_opc, 1);
+	if (ret)
+		return ret;
 
 	l_gregs->updated |= (1UL << greg_num_d);
 
@@ -1256,6 +1574,25 @@ out_updated:
 	put_pv_vcpu_l_gregs(vcpu);
 }
 
+UACCESS_FN_DEFINE3(kvm_move_tagged_guest_data_fn, int, word_size,
+		unsigned long, hva_from, unsigned long, hva_to)
+{
+	switch (word_size) {
+	case sizeof(u32):
+		native_move_tagged_word(hva_from, hva_to);
+		break;
+	case sizeof(u64):
+		native_move_tagged_dword(hva_from, hva_to);
+		break;
+	case sizeof(u64) * 2:
+		native_move_tagged_qword(hva_from, hva_to);
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
 long kvm_move_tagged_guest_data(struct kvm_vcpu *vcpu,
 		int word_size, e2k_addr_t addr_from, e2k_addr_t addr_to)
 {
@@ -1287,25 +1624,8 @@ long kvm_move_tagged_guest_data(struct kvm_vcpu *vcpu,
 	DebugKVMREC("guest address to 0x%lx converted to hva 0x%lx\n",
 		addr_to, hva_to);
 
-	TRY_USR_PFAULT {
-		switch (word_size) {
-		case sizeof(u32):
-			native_move_tagged_word(hva_from, hva_to);
-			break;
-		case sizeof(u64):
-			native_move_tagged_dword(hva_from, hva_to);
-			break;
-		case sizeof(u64) * 2:
-			native_move_tagged_qword(hva_from, hva_to);
-			break;
-		default:
-			return -EINVAL;
-		}
-	} CATCH_USR_PFAULT {
-		return -EFAULT;
-	} END_USR_PFAULT
-
-	return 0;
+	return __UACCESS_FN_CALL(kvm_move_tagged_guest_data_fn,
+			word_size, hva_from, hva_to);
 }
 
 e2k_addr_t kvm_print_guest_kernel_ptes(e2k_addr_t address)

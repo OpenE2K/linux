@@ -20,8 +20,6 @@ extern unsigned int guest_machine_id;
 
 #define	get_machine_id()		machine_id
 #define	boot_get_machine_id()		boot_machine_id
-#define	set_machine_id(mach_id)		(machine_id = (mach_id))
-#define	boot_set_machine_id(mach_id)	(boot_machine_id = (mach_id))
 
 extern void kvm_set_mach_type_id(void);
 static inline void set_mach_type_id(void)

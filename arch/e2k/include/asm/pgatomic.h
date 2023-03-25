@@ -34,6 +34,13 @@ typedef enum pt_atomic_op {
 	ATOMIC_TEST_AND_CLEAR_RELAXED,
 } pt_atomic_op_t;
 
+#define PTE_ATOMIC_OP_NAME						\
+	{ ATOMIC_GET_AND_XCHG,		"Get and Exchange" },		\
+	{ ATOMIC_GET_AND_CLEAR,		"Get and Clear" },		\
+	{ ATOMIC_SET_WRPROTECT,		"Set Write Protect" },		\
+	{ ATOMIC_TEST_AND_CLEAR_YOUNG,	"Test and Clear Young" },	\
+	{ ATOMIC_TEST_AND_CLEAR_RELAXED, "Test and Clear Relaxed" }
+
 static inline pgprotval_t
 native_pt_set_wrprotect_atomic(pgprotval_t *pgprot)
 {

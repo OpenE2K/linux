@@ -179,8 +179,10 @@ int protected_fast_sys_gettimeofday(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 
 	}
 
 	if (tz) {
-		tz->tz_minuteswest = sys_tz.tz_minuteswest;
-		tz->tz_dsttime = sys_tz.tz_dsttime;
+		typeof(sys_tz.tz_minuteswest) minuteswest = sys_tz.tz_minuteswest;
+		typeof(sys_tz.tz_dsttime) dsttime = sys_tz.tz_dsttime;
+		__put_user_switched_pt(minuteswest, &tz->tz_minuteswest);
+		__put_user_switched_pt(dsttime, &tz->tz_dsttime);
 	}
 
 	return ret;
@@ -192,7 +194,7 @@ int protected_fast_sys_getcpu(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 arg5)
 {
 	const struct thread_info *ti = READ_CURRENT_REG();
 	int cpu = task_cpu(thread_info_task(ti));
-	int node, size;
+	int size;
 	unsigned __user *cpup;
 	unsigned __user *nodep;
 
@@ -208,13 +210,12 @@ int protected_fast_sys_getcpu(u32 tags, u64 arg2, u64 arg3, u64 arg4, u64 arg5)
 			|| (u64) nodep + sizeof(unsigned) > ti->addr_limit.seg))
 		return -EFAULT;
 
-	if (nodep)
-		node = cpu_to_node(cpu);
-
-	if (nodep)
-		*nodep = node;
+	if (nodep) {
+		int node = cpu_to_node(cpu);
+		__put_user_switched_pt(node, nodep);
+	}
 	if (cpup)
-		*cpup = cpu;
+		__put_user_switched_pt(cpu, cpup);
 
 	return 0;
 }
@@ -244,7 +245,7 @@ int protected_fast_sys_siggetmask(u32 tags, u64 arg2, u64 arg3, size_t sigsetsiz
 	if (unlikely((u64) oset + sizeof(sigset_t) > ti->addr_limit.seg))
 		return -EFAULT;
 
-	*oset = set;
+	__put_user_switched_pt(set, oset);
 
 	return 0;
 }
@@ -285,13 +286,13 @@ int protected_fast_sys_getcontext(u32 tags, u64 arg2, u64 arg3, size_t sigsetsiz
 	/* We want stack to point to user frame that called us */
 	pcsp_hi -= SZ_OF_CR;
 
-	*((u64 *) &ucp->uc_sigmask) = set;
-	ucp->uc_mcontext.sbr = key;
-	ucp->uc_mcontext.pcsp_lo = pcsp_lo;
-	ucp->uc_mcontext.pcsp_hi = pcsp_hi;
-	ucp->uc_extra.fpcr = fpcr;
-	ucp->uc_extra.fpsr = fpsr;
-	ucp->uc_extra.pfpfr = pfpfr;
+	__put_user_switched_pt(set, (u64 *) &ucp->uc_sigmask);
+	__put_user_switched_pt(key, &ucp->uc_mcontext.sbr);
+	__put_user_switched_pt(pcsp_lo, &ucp->uc_mcontext.pcsp_lo);
+	__put_user_switched_pt(pcsp_hi, &ucp->uc_mcontext.pcsp_hi);
+	__put_user_switched_pt(fpcr, &ucp->uc_extra.fpcr);
+	__put_user_switched_pt(fpsr, &ucp->uc_extra.fpsr);
+	__put_user_switched_pt(pfpfr, &ucp->uc_extra.pfpfr);
 
 	return ret;
 }

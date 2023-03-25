@@ -193,7 +193,9 @@ int radeon_dpm = -1;
 int radeon_aspm = -1;
 int radeon_runtime_pm = -1;
 int radeon_hard_reset = 0;
-int radeon_fbdev_accel = 1;
+#ifdef CONFIG_MCST
+int radeon_fbdev_accel = !IS_ENABLED(CONFIG_DEBUG_LOCK_ALLOC);
+#endif
 int radeon_vm_size = 8;
 int radeon_vm_block_size = -1;
 int radeon_deep_color = 0;
@@ -271,8 +273,10 @@ module_param_named(runpm, radeon_runtime_pm, int, 0444);
 MODULE_PARM_DESC(hard_reset, "PCI config reset (1 = force enable, 0 = disable (default))");
 module_param_named(hard_reset, radeon_hard_reset, int, 0444);
 
+#ifdef CONFIG_MCST
 MODULE_PARM_DESC(fbdev_accel, "Disable/Enable linux console framebuffer acceleration");
 module_param_named(fbdev_accel, radeon_fbdev_accel, int, 0444);
+#endif
 
 MODULE_PARM_DESC(vm_size, "VM address space size in gigabytes (default 4GB)");
 module_param_named(vm_size, radeon_vm_size, int, 0444);

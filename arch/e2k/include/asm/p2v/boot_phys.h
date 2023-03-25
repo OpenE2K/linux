@@ -9,7 +9,6 @@
 
 #include <linux/types.h>
 #include <linux/init.h>
-#include <linux/numa.h>
 
 #include <asm/types.h>
 #include <asm/e2k.h>
@@ -209,19 +208,19 @@ extern short __init boot_create_phys_bank_part(int node_id,
 
 extern bool __init_recv boot_has_node_low_memory(int node,
 						 boot_info_t *bootblock);
-extern bool __init boot_has_node_high_memory(int node, boot_info_t *bootblock);
-extern bool __init_recv boot_has_high_memory(boot_info_t *bootblock);
+extern bool __init_recv boot_has_node_high_memory(int node, boot_info_t *bootblock);
+extern bool boot_has_high_memory(boot_info_t *bootblock);
 
-extern int boot_reserve_physmem(e2k_addr_t virt_phys_addr,
-			e2k_size_t mem_size, busy_mem_type_t mem_type,
-			unsigned short flags);
-extern int boot_delete_physmem(e2k_addr_t virt_phys_addr,
-			e2k_size_t mem_size);
-extern void __init boot_rereserve_bank_area(int node_id,
+extern void __init_recv boot_reserve_physmem(const char *name,
+		e2k_addr_t virt_phys_addr, e2k_size_t mem_size,
+		busy_mem_type_t mem_type, unsigned short flags);
+extern void __init_recv boot_delete_physmem(const char *name,
+		e2k_addr_t virt_phys_addr, e2k_size_t mem_size);
+extern void __init_recv boot_rereserve_bank_area(int node_id,
 			boot_phys_mem_t *node_mem,
 			short bank, short new_bank,
 			short area, e2k_busy_mem_t *busy_area);
-extern void *boot_alloc_node_mem(int node_id, e2k_size_t mem_size,
+extern void *__init_recv boot_alloc_node_mem(int node_id, e2k_size_t mem_size,
 			e2k_size_t align, e2k_size_t page_size,
 			busy_mem_type_t mem_type, unsigned short flags);
 

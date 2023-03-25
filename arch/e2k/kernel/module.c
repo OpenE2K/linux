@@ -14,9 +14,6 @@
 #include <asm/machdep.h>
 #include <asm/pgtable.h>
 
-extern struct vm_struct *__get_vm_area(unsigned long size, unsigned long flags,
-					unsigned long start, unsigned long end);
-
 void *module_alloc(unsigned long size)
 {
 	if (PAGE_ALIGN(size) > MODULES_END - MODULES_VADDR)
@@ -34,24 +31,25 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 		       struct module *me)
 {
 	unsigned int i;
-	Elf64_Rela *rel = (void *)sechdrs[relsec].sh_addr;
-	Elf64_Sym *sym;
-	u64 *location;
-	u32 *loc32;
+	const Elf64_Rela *rel = (void *) sechdrs[relsec].sh_addr;
 
 	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
+		Elf64_Sym *sym;
 		Elf64_Addr v;
 
 		/* This is where to make the change */
-		location = (u64 *) ((u8 *)sechdrs[sechdrs[relsec].sh_info].sh_addr
+		u64 *location = (u64 *) ((u8 *)sechdrs[sechdrs[relsec].sh_info].sh_addr
 			+ rel[i].r_offset);
-		loc32 = (u32 *) location;
+		u32 *loc32 = (u32 *) location;
 
 		/* This is the symbol it is referring to.  Note that all
 		   undefined symbols have been resolved.  */
-		sym = (Elf64_Sym *)sechdrs[symindex].sh_addr
-			+ ELF64_R_SYM(rel[i].r_info);
+		sym = (Elf64_Sym *) sechdrs[symindex].sh_addr +
+				ELF64_R_SYM(rel[i].r_info);
 		v = sym->st_value + rel[i].r_addend;
+		pr_debug("--- location=0x%lx,  v=0x%llx\n"
+			 "    rel[i].r_offset = 0x%llx\n",
+			 (unsigned long) location, v, rel[i].r_offset);
 
 		switch (ELF64_R_TYPE(rel[i].r_info) & 0xff) {
 		case R_E2K_32_ABS:
@@ -68,12 +66,12 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			break;
 
 		case R_E2K_64_CALL:
-			/* As far as field r_addend holds offset within
-			 * wide command to where we change, we need to
-			 * deduct r_addend in order to obtain correct address.
-			 * Therefore we need to add r_addend to the address,
-			 * where we change to.
-			 */
+			pr_debug("    rel[i].r_addend = 0x%llx\n", rel[i].r_addend);
+			/* Since 'r_addend' field stores an offset inside of
+			 * a wide instruction we are calling into, we have to
+			 * also subtract 'r_addend' to get real offset. Then
+			 * we will add 'r_addend' to the location where we will
+			 * write the offset. */
 			v -= (Elf64_Addr) location;
 			v -= rel[i].r_addend;
 			loc32 = (Elf32_Addr *) ((char *)loc32 + rel[i].r_addend);
@@ -94,8 +92,7 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			break;
 
 		default:
-			printk(KERN_ERR "module %s: Unknown relocation: %d\n",
-			       me->name,
+			pr_err("module %s: Unknown relocation: %d\n", me->name,
 			       (int) (ELF64_R_TYPE(rel[i].r_info) & 0xff));
 			return -ENOEXEC;
 		};

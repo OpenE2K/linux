@@ -74,36 +74,6 @@ static inline int kvm_io_pic_set_base(struct kvm *kvm, u64 new_base,
 	return -ENODEV;
 }
 
-extern int kvm_setup_epic_irq_routing(struct kvm *kvm);
-extern int kvm_setup_apic_irq_routing(struct kvm *kvm);
-static inline int kvm_setup_default_irq_routing(struct kvm *kvm)
-{
-	if (kvm_is_epic(kvm))
-		return kvm_setup_epic_irq_routing(kvm);
-	else
-		return kvm_setup_apic_irq_routing(kvm);
-}
-
-extern void kvm_irq_routing_update_apic(struct kvm *kvm);
-extern void kvm_irq_routing_update_epic(struct kvm *kvm);
-static inline void kvm_irq_routing_update_pic(struct kvm *kvm)
-{
-	if (kvm_is_epic(kvm))
-		kvm_irq_routing_update_epic(kvm);
-	else
-		kvm_irq_routing_update_apic(kvm);
-}
-
-extern void kvm_post_irq_routing_update_epic(struct kvm *kvm);
-extern void kvm_post_irq_routing_update_apic(struct kvm *kvm);
-static inline void kvm_post_irq_routing_update_pic(struct kvm *kvm)
-{
-	if (kvm_is_epic(kvm))
-		kvm_post_irq_routing_update_epic(kvm);
-	else
-		kvm_post_irq_routing_update_apic(kvm);
-}
-
 static inline void kvm_pic_set_vapic_addr(struct kvm_vcpu *vcpu,
 						gpa_t vapic_addr)
 {

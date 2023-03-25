@@ -200,6 +200,8 @@ struct chip_desc {
 #if defined(CONFIG_MCST)
 static int rtc4clk_src = 0;
 #define MCP794XX_1_HZ_EN	0x40
+#define MCP794XX_REG_TRIM		0x08
+#	define MCP794XX_CRSTRIM		0x04
 #endif
 
 static const struct chip_desc chips[last_ds_type];
@@ -1904,11 +1906,26 @@ static int ds1307_probe(struct i2c_client *client,
 		rtc4clk_src = 1;
 		dev_warn(ds1307->dev, "RTC is used for clocksource. "
 			"Alarm functionality is disabled\n");
+#if defined(CONFIG_MCST)
+		if (cpu_has(CPU_HWBUG_SCLKM1_DIV)) {
+			int trim_val;
+			regmap_read(ds1307->regmap, MCP794XX_REG_TRIM,
+								&trim_val);
+			if (trim_val != 0) {
+				dev_warn(ds1307->dev, "WARNING: RTC OSCTRIM"
+					" register=%x != 0. Set it to 0\n",
+					trim_val);
+				regmap_write(ds1307->regmap,
+					MCP794XX_REG_TRIM, 0);
+			}
+		}
+
+#endif
 		clear_bit(HAS_ALARM, &ds1307->flags);
 	}
 #endif	/* CONFIG_E2K */
 #if defined(CONFIG_E90S)
-	if (e90s_get_cpu_type() == E90S_CPU_R2000 &&
+	if (e90s_get_cpu_type() >= E90S_CPU_R2000 &&
 			clk_rt_mode == CLK_RT_RTC) {
 		int	error;
 		static struct task_struct *clk_rt_registask;

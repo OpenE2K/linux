@@ -17,6 +17,7 @@
 #include "mmu.h"
 #include "gaccess.h"
 #include "pic.h"
+#include "irq.h"
 
 #if 0
 #define nbsr_debug(fmt, arg...)		pr_warn(fmt, ##arg)
@@ -145,11 +146,6 @@ static inline unsigned nbsr_addr_to_reg_offset(struct kvm_nbsr *nbsr,
 	}
 	reg_offset = addr & (nbsr->node_size - 1);
 	return reg_offset;
-}
-
-static inline unsigned int offset_to_no(unsigned int reg_offset)
-{
-	return reg_offset / 4;
 }
 
 static inline bool nbsr_bc_reg_in_range(unsigned int reg_offset)
@@ -1345,28 +1341,6 @@ static void node_nbsr_write_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 	}
 }
 
-static void kvm_write_iommu_ctrl(struct kvm_nbsr *nbsr, u32 reg_value)
-{
-	e2k_iommu_guest_write_ctrl(reg_value);
-}
-
-/* FIXME This only works with single passthrough device */
-static void kvm_write_iommu_ba_lo(struct kvm_nbsr *nbsr, u64 reg_value)
-{
-	struct irq_remap_table *irt = nbsr->kvm->arch.irt;
-
-	if (irt->vfio_dev)
-		e2k_iommu_setup_guest_2d_dte(nbsr->kvm, reg_value);
-}
-
-static void kvm_write_iommu_flush(struct kvm_nbsr *nbsr, u64 reg_value)
-{
-	struct irq_remap_table *irt = nbsr->kvm->arch.irt;
-
-	if (irt->vfio_dev)
-		e2k_iommu_flush_guest(nbsr->kvm, reg_value);
-}
-
 static int node_nbsr_write_iommu(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
@@ -1381,7 +1355,6 @@ static int node_nbsr_write_iommu(struct kvm_nbsr *nbsr, int node_id,
 	case SIC_iommu_ctrl:
 		node_nbsr->regs[offset_to_no(SIC_iommu_ctrl)] = reg_value;
 		reg_name = "iommu_ctrl";
-		kvm_write_iommu_ctrl(nbsr, reg_value);
 		ret = -EOPNOTSUPP;
 		break;
 	default:
@@ -1561,7 +1534,6 @@ static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
 		node_nbsr->regs[offset_to_no(SIC_iommu_ba_lo)] = reg_lo;
 		node_nbsr->regs[offset_to_no(SIC_iommu_ba_hi)] = reg_hi;
 		reg_name = "iommu_ba_lo";
-		kvm_write_iommu_ba_lo(nbsr, reg_value);
 		ret = -EOPNOTSUPP;
 		break;
 	case SIC_iommu_dtba_lo:
@@ -1574,7 +1546,6 @@ static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
 		node_nbsr->regs[offset_to_no(SIC_iommu_flush)] = reg_lo;
 		node_nbsr->regs[offset_to_no(SIC_iommu_flushP)] = reg_hi;
 		reg_name = "iommu_flush";
-		kvm_write_iommu_flush(nbsr, reg_value);
 		break;
 	/* SIC_iommu_err is emulated only in qemu */
 	case SIC_iommu_err:
@@ -2447,7 +2418,7 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 		 * We trust guest to never change this, and write this value
 		 * to IOEPIC/PCI_MSI
 		 */
-		if (kvm->arch.is_hv)
+		if (kvm_ioepic_unsafe_direct_map)
 			get_io_epic_msi(0, &rt_msi_lo, &rt_msi_hi);
 
 		node_nbsr = &nbsr->nodes[node];

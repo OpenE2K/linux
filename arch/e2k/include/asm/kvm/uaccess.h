@@ -220,42 +220,43 @@ host_copy_from_user_with_tags(void *to, const void __user *from,
 	return kvm_copy_from_user_with_tags(to, from, n);
 }
 
-extern int kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
+extern size_t kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
 		const void *host, void __user *guest, size_t size,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch);
-extern int kvm_vcpu_copy_host_from_guest(struct kvm_vcpu *vcpu,
+extern size_t kvm_vcpu_copy_host_from_guest(struct kvm_vcpu *vcpu,
 		void *host, const void __user *guest, size_t size,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch);
 
-static inline int
-fast_tagged_memory_copy_to_user(void __user *dst, const void *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
+		const void *src, size_t len,
+		const struct pt_regs *regs, int prefetch)
 {
 	struct kvm_vcpu *vcpu;
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
 
 	if (likely(!host_test_intc_emul_mode(regs))) {
 		return native_fast_tagged_memory_copy_to_user(dst, src,
-				len, regs,
-				strd_opcode, ldrd_opcode, prefetch);
+				len, regs, strd_opcode, ldrd_opcode, prefetch);
 	}
 
 	vcpu = native_current_thread_info()->vcpu;
 	KVM_BUG_ON(vcpu == NULL);
 	return kvm_vcpu_copy_host_to_guest(vcpu, src, dst, len,
-				strd_opcode, ldrd_opcode, prefetch);
+				AW(strd_opcode), AW(ldrd_opcode), prefetch);
 }
 
-static inline int
-fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
+		const void __user *src, size_t len,
+		const struct pt_regs *regs, int prefetch)
 {
 	struct kvm_vcpu *vcpu;
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
 
 	if (likely(!host_test_intc_emul_mode(regs))) {
 		return native_fast_tagged_memory_copy_from_user(dst, src,
@@ -266,7 +267,7 @@ fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
 	vcpu = native_current_thread_info()->vcpu;
 	KVM_BUG_ON(vcpu == NULL);
 	return kvm_vcpu_copy_host_from_guest(vcpu, dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+				AW(strd_opcode), AW(ldrd_opcode), prefetch);
 }
 #else	/* !CONFIG_KVM_HOST_MODE */
 /* it is not host kernel, it is native kernel without virtualization */
@@ -294,6 +295,32 @@ host_copy_from_user_with_tags(void *to, const void __user *from,
 {
 	return native_copy_from_user_with_tags(to, from, n);
 }
+
+#ifndef CONFIG_KVM_GUEST_KERNEL
+static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
+		const void *src, size_t len,
+		const struct pt_regs *regs, int prefetch)
+{
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+
+	return native_fast_tagged_memory_copy_to_user(dst, src, len,
+			regs, strd_opcode, ldrd_opcode, prefetch);
+}
+
+static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
+		const void __user *src, size_t len,
+		const struct pt_regs *regs, int prefetch)
+{
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+
+	return native_fast_tagged_memory_copy_from_user(dst, src, len, regs,
+			strd_opcode, ldrd_opcode, prefetch);
+}
+#endif
 #endif	/* CONFIG_KVM_HOST_MODE */
 
 static inline unsigned long

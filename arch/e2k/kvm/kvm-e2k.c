@@ -44,6 +44,7 @@
 #include <asm/kvm/cpu_hv_regs_access.h>
 #include <asm/kvm/mmu_hv_regs_types.h>
 #include <asm/kvm/runstate.h>
+#include <asm/kvm/stacks.h>
 #include <asm/kvm/page_track.h>
 #include <asm/kvm/switch.h>
 #include <asm/kvm/boot.h>
@@ -361,10 +362,10 @@ static void kvm_hardware_virt_enable(void)
 
 	/* set guest CORE_MODE register to allow of guest mode indicator */
 	/* for guest kernels, so any VM software can see guest mode */
-	CORE_MODE.CORE_MODE_reg = machine.host.read_SH_CORE_MODE();
+	CORE_MODE.CORE_MODE_reg = host_machine.read_SH_CORE_MODE();
 	CORE_MODE.CORE_MODE_gmi = 1;
 	CORE_MODE.CORE_MODE_hci = 1;
-	machine.host.write_SH_CORE_MODE(CORE_MODE.CORE_MODE_reg);
+	host_machine.write_SH_CORE_MODE(CORE_MODE.CORE_MODE_reg);
 
 	DebugKVM("KVM: CPU #%d: set guest CORE_MODE to indicate guest mode on any VMs\n",
 			raw_smp_processor_id());
@@ -467,7 +468,7 @@ static int create_vcpu_state(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 	kvm_vcpu_state_t *vcpu_state = NULL;
 	kvm_vcpu_state_t *kmap_vcpu_state = NULL;
-	e2k_cute_t *cute_p = NULL;
+	e2k_cute_t __user *cute_p = NULL;
 	user_area_t *guest_area;
 	e2k_size_t cut_size, size;
 	int npages;
@@ -538,7 +539,11 @@ static int create_vcpu_state(struct kvm_vcpu *vcpu)
 		r = -ENOMEM;
 		goto error;
 	}
-	memset(cute_p, 0, PAGE_SIZE);
+	if (clear_user(cute_p, PAGE_SIZE)) {
+		DebugKVM("could not clear VCPU guest CUT\n");
+		r = -EFAULT;
+		goto error;
+	}
 	vcpu->arch.guest_cut = cute_p;
 	if (IS_INVALID_GPA(kvm_vcpu_hva_to_gpa(vcpu, (u64)cute_p))) {
 		pr_err("%s() : could not allocate GPA of VCPU guest CUT\n",
@@ -1083,7 +1088,7 @@ static int create_vcpu_host_context(struct kvm_vcpu *vcpu)
 	host_ctxt->k_usd_hi.USD_hi_size = KERNEL_C_STACK_SIZE;
 	host_ctxt->k_sbr.SBR_reg = host_ctxt->k_usd_lo.USD_lo_base;
 
-	host_ctxt->osem = guest_trap_init();
+	host_ctxt->osem = guest_trap_init(vcpu->kvm);
 
 	host_ctxt->signal.stack.used = 0;
 	atomic_set(&host_ctxt->signal.traps_num, 0);
@@ -1285,7 +1290,7 @@ static void kvm_arch_vcpu_ctxt_init(struct kvm_vcpu *vcpu)
 	memset(&vcpu->arch.sw_ctxt, 0, sizeof(vcpu->arch.sw_ctxt));
 	memset(&vcpu->arch.hw_ctxt, 0, sizeof(vcpu->arch.hw_ctxt));
 
-	sw_ctxt->osem = guest_trap_init();
+	sw_ctxt->osem = guest_trap_init(vcpu->kvm);
 
 	if (vcpu->arch.is_hv) {
 		guest_hw_stack_t *boot_regs = &vcpu->arch.boot_stacks.regs;
@@ -1322,9 +1327,16 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, int ext)
 		DebugKVM("ioctl is KVM_CAP_IRQCHIP\n");
 		r = 1;
 		break;
+	case KVM_CAP_IOEVENTFD:
+		DebugKVM("ioctl is KVM_CAP_IOEVENTFD\n");
+		r = 1;
+		break;
 	case KVM_CAP_MP_STATE:
 		DebugKVM("ioctl is KVM_CAP_MP_STATE\n");
 		r = 1;
+		break;
+	case KVM_CAP_NR_VCPUS:
+		r = num_online_cpus();
 		break;
 	case KVM_CAP_MAX_VCPUS:
 		r = KVM_MAX_VCPUS;
@@ -1403,13 +1415,15 @@ static int handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 			vcpu->vcpu_id, vcpu->mmio_nr_fragments);
 		return -EINVAL;
 	}
+	vcpu->mmio_cur_fragment = 0;
+	vcpu->arch.mmio_offset = 0;
 	frag = &vcpu->mmio_fragments[0];
 	kvm_run->mmio.phys_addr = frag->gpa;
-	kvm_run->mmio.len = frag->len;
+	kvm_run->mmio.len = min(8u, frag->len);
 	kvm_run->mmio.is_write = vcpu->mmio_is_write;
 
 	if (vcpu->mmio_is_write)
-		memcpy(kvm_run->mmio.data, frag->data, frag->len);
+		memcpy(kvm_run->mmio.data, frag->data, min(8u, frag->len));
 	kvm_run->exit_reason = KVM_EXIT_MMIO;
 
 	DebugKVMIO("returns to host user: phys addr 0x%llx size %d to %s\n",
@@ -1718,6 +1732,9 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	if (vcpu->mmio_needed) {
 		struct kvm_mmio_fragment *frag;
 		unsigned len;
+		gpa_t frag_gpa;
+		void *frag_data;
+		unsigned frag_len;
 
 		/* Complete previous fragment */
 		if (vcpu->mmio_cur_fragment != 0) {
@@ -1726,9 +1743,35 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 				__func__,  vcpu->mmio_cur_fragment);
 		}
 		frag = &vcpu->mmio_fragments[0];
-		len = min(8u, frag->len);
+		frag_data = frag->data + vcpu->arch.mmio_offset;
+		frag_gpa = frag->gpa + vcpu->arch.mmio_offset;
+		frag_len = frag->len - vcpu->arch.mmio_offset;
+
+		len = min(8u, frag_len);
 		if (!vcpu->mmio_is_write)
-			memcpy(frag->data, kvm_run->mmio.data, len);
+			memcpy(frag_data, kvm_run->mmio.data, len);
+
+		if (frag_len > 8) {
+			/* Go forward to the next mmio piece. */
+			vcpu->arch.mmio_offset += len;
+			frag_data += len;
+			frag_gpa += len;
+			frag_len -= len;
+
+			DebugKVMIO("Reexecuting MMIO: gpa 0x%llx data 0x%llx len %d is_write %d\n",
+				frag_gpa, frag_data, frag_len, vcpu->mmio_is_write);
+
+			kvm_run->exit_reason = KVM_EXIT_MMIO;
+			kvm_run->mmio.phys_addr = frag_gpa;
+			if (vcpu->mmio_is_write)
+				memcpy(kvm_run->mmio.data, frag_data, min(8u, frag_len));
+			kvm_run->mmio.len = min(8u, frag_len);
+			kvm_run->mmio.is_write = vcpu->mmio_is_write;
+
+			goto out;
+		}
+
+		vcpu->arch.mmio_offset = 0;
 		vcpu->mmio_read_completed = 1;
 		vcpu->mmio_needed = 0;
 		r = kvm_complete_guest_mmio_request(vcpu);
@@ -1979,7 +2022,7 @@ static int kvm_alloc_epic_pages(struct kvm *kvm)
 	if (kvm->arch.is_hv) {
 		DebugKVM("started to alloc pages for EPIC\n");
 
-		kvm->arch.epic_pages = alloc_pages(GFP_KERNEL | __GFP_ZERO,
+		kvm->arch.epic_pages = alloc_pages(GFP_KERNEL | __GFP_RETRY_MAYFAIL | __GFP_ZERO,
 							MAX_EPICS_ORDER);
 
 		if (!kvm->arch.epic_pages) {
@@ -1989,8 +2032,8 @@ static int kvm_alloc_epic_pages(struct kvm *kvm)
 
 		epic_gstbase = (unsigned long)page_address(kvm->arch.epic_pages);
 
-		DebugKVM("EPIC gstbase for gstid %d is 0x%lx (PA 0x%lx)\n", kvm->arch.vmid.nr,
-			epic_gstbase, __pa(epic_gstbase));
+		DebugKVM("EPIC gstbase for gstid %d is 0x%lx (PA 0x%llx)\n",
+			kvm->arch.vmid.nr, epic_gstbase, __pa(epic_gstbase));
 	}
 
 	return 0;
@@ -2005,89 +2048,6 @@ static void kvm_free_epic_pages(struct kvm *kvm)
 
 		__free_pages(epic_pages, MAX_EPICS_ORDER);
 	}
-}
-
-/* FIXME this only works for IOEPIC #0 and VCPU #0 */
-static int kvm_setup_passthrough(struct kvm *kvm)
-{
-	struct pci_dev *pdev = NULL;
-	struct irq_remap_table *irt;
-
-	irt = kmalloc(sizeof(struct irq_remap_table),
-		GFP_KERNEL);
-	if (!irt)
-		return -ENOMEM;
-
-	kvm->arch.irt = irt;
-	irt->enabled = false;
-	irt->vfio_dev = NULL;
-
-	if (kvm->arch.is_hv) {
-		/* Setup passthrough for first device with vfio-pci driver */
-		for_each_pci_dev(pdev) {
-			if (pdev->driver && !strcmp(pdev->driver->name, "vfio-pci")) {
-				int node = dev_to_node(&pdev->dev);
-
-				irt->vfio_dev = pdev;
-				pdev->dev.archdata.kvm = kvm;
-
-				if (node == NUMA_NO_NODE)
-					node = 0;
-
-				pr_info("Found VFIO device bus %d devfn 0x%x\n",
-					pdev->bus->number, pdev->devfn);
-
-				if (!l_eioh_device(pdev)) {
-					pr_warn("kvm_ioepic: IOHub2 interrupt passthrough not supported (IOAPIC pin %d)\n",
-						pdev->irq);
-					return 0;
-				}
-
-				if (pdev->irq >= ioepic_pin_to_irq(16, pdev) &&
-						pdev->irq <= ioepic_pin_to_irq(19, pdev)) {
-					pr_info("kvm_ioepic: using PCI INTx passthrough (irq %d)\n",
-						pdev->irq);
-					return 0;
-				}
-
-				pr_info("kvm_ioepic: passing pin %d to guest\n", pdev->irq);
-
-				irt->enabled = true;
-				irt->host_pin = pdev->irq;
-				irt->guest_pin = pdev->irq;
-				irt->host_node = node;
-				irt->guest_node = 0;
-				irt->hpa = io_epic_base_node(node) + (irt->host_pin << PAGE_SHIFT);
-				/* Set in kvm_ioepic_set_base() */
-				irt->gpa = 0;
-
-				return 0;
-			}
-		}
-	}
-
-	return 0;
-}
-
-int kvm_setup_legacy_vga_passthrough(struct kvm *kvm)
-{
-	int ret;
-	struct irq_remap_table *irt = kvm->arch.irt;
-
-	if (unlikely(!irt->vfio_dev)) {
-		pr_err("%s(): error: trying to pass VGA area without passing any device\n",
-			__func__);
-		return -EPERM;
-	} else {
-		ret = vga_get_interruptible(irt->vfio_dev, VGA_RSRC_LEGACY_MEM);
-		if (ret) {
-			pr_err("%s(): failed to acquire legacy VGA area from vgaarb\n",
-				__func__);
-			return ret;
-		}
-	}
-
-	return 0;
 }
 
 static void setup_guest_features(struct kvm *kvm)
@@ -2141,15 +2101,43 @@ static int kvm_setup_guest_info(struct kvm *kvm, void __user *user_info)
 	return 0;
 }
 
-static void kvm_free_passthrough(struct kvm *kvm)
+#ifdef KVM_HAVE_LEGACY_VGA_PASSTHROUGH
+/*
+ * Find first PCI VGA device assigned to VFIO driver.
+ * This is unsafe, as it doesn't check user's permissions.
+ */
+int kvm_setup_legacy_vga_passthrough(struct kvm *kvm)
 {
-	struct irq_remap_table *irt = kvm->arch.irt;
+	struct pci_dev *pdev = NULL;
+	int ret;
 
-	if (kvm->arch.legacy_vga_passthrough)
-		vga_put(irt->vfio_dev, VGA_RSRC_LEGACY_MEM);
+	while ((pdev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, pdev)) != NULL) {
+		if (pdev->driver && !strcmp(pdev->driver->name, "vfio-pci"))
+			kvm->arch.vga_pt_dev = pdev;
+		}
+	}
 
-	kfree(irt);
+	ret = vga_get_interruptible(kvm->arch.vga_pt_dev, VGA_RSRC_LEGACY_MEM);
+	if (ret) {
+		pr_err("%s(): failed to acquire legacy VGA area from vgaarb\n",
+			__func__);
+		return ret;
+	}
+
+	return 0;
 }
+
+static void kvm_free_legacy_vga_passthrough(struct kvm *kvm)
+{
+	if (kvm->arch.legacy_vga_passthrough)
+		vga_put(kvm->arch.vga_pt_dev, VGA_RSRC_LEGACY_MEM);
+}
+#else
+static void kvm_free_legacy_vga_passthrough(struct kvm *kvm)
+{
+	/* Nothing to do */
+}
+#endif
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 {
@@ -2236,14 +2224,14 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 	kvm->arch.max_irq_no = -1;
 
 	INIT_LIST_HEAD(&kvm->arch.assigned_dev_head);
+	INIT_LIST_HEAD(&kvm->arch.ioepic_pt_pin);
+	kvm->arch.ioepic_direct_map = true;
+	if (!kvm_ioepic_unsafe_direct_map)
+		kvm->arch.ioepic_direct_map = false;
 
 	kvm_arch_init_vm_mmu(kvm);
 
 	err = kvm_alloc_epic_pages(kvm);
-	if (err)
-		goto error_gmm;
-
-	err = kvm_setup_passthrough(kvm);
 	if (err)
 		goto error_gmm;
 
@@ -2266,6 +2254,12 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 	kvm->arch.num_sclkr_run = 0;
 	kvm->arch.sh_sclkm3 = 0;
 	raw_spin_lock_init(&kvm->arch.sh_sclkr_lock);
+
+	if (!kvm->arch.is_hv && kvm->arch.is_pv && capable(CAP_SYS_ADMIN)) {
+		set_kvm_mode_flag(kvm, KVMF_PRIV_HCALL_ENABLE);
+	} else {
+		clear_kvm_mode_flag(kvm, KVMF_PRIV_HCALL_ENABLE);
+	}
 
 	return 0;
 
@@ -2427,6 +2421,7 @@ static void kvm_free_host_info(struct kvm *kvm)
 	}
 }
 
+#ifdef KVM_HAVE_GET_SET_IRQCHIP
 static int kvm_vm_ioctl_get_irqchip(struct kvm *kvm,
 					struct kvm_irqchip *chip)
 {
@@ -2467,6 +2462,7 @@ static int kvm_vm_ioctl_set_irqchip(struct kvm *kvm, struct kvm_irqchip *chip)
 	}
 	return r;
 }
+#endif
 
 int kvm_vm_ioctl_irq_line(struct kvm *kvm, struct kvm_irq_level *irq_event,
 			bool line_status)
@@ -2587,16 +2583,12 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		r = kvm_io_pic_init(kvm);
 		if (r)
 			goto out;
-		r = kvm_setup_default_irq_routing(kvm);
-		if (r) {
-			kvm_iopic_release(kvm);
-			goto out;
-		}
 		break;
 	case KVM_CREATE_SIC_NBSR:
 		DebugKVMIOCTL("ioctl is KVM_CREATE_SIC_NBSR\n");
 		r = kvm_nbsr_init(kvm);
 		break;
+#ifdef KVM_HAVE_GET_SET_IRQCHIP
 	case KVM_GET_IRQCHIP: {
 		/* 0: PIC master, 1: PIC slave, 2: IOAPIC */
 		struct kvm_irqchip chip;
@@ -2631,6 +2623,7 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		r = kvm_vm_ioctl_set_irqchip(kvm, &chip);
 		break;
 	}
+#endif
 	case KVM_SET_PCI_REGION: {
 		struct kvm_pci_region pci_region;
 
@@ -2722,6 +2715,7 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		kvm->arch.wd_prescaler_mult = arg;
 		r = 0;
 		break;
+#ifdef KVM_HAVE_LEGACY_VGA_PASSTHROUGH
 	case KVM_SET_LEGACY_VGA_PASSTHROUGH:
 		DebugKVMIOCTL("ioctl is KVM_SET_LEGACY_VGA_PASSTHROUGH to %lu\n",
 				arg);
@@ -2732,6 +2726,7 @@ long kvm_arch_vm_ioctl(struct file *filp,
 				kvm->arch.legacy_vga_passthrough = true;
 		}
 		break;
+#endif
 	case KVM_ENABLE_CAP: {
 		struct kvm_enable_cap cap;
 
@@ -3116,28 +3111,35 @@ void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu)
 	}
 }
 
-static void reset_guest_boot_cut(struct kvm_vcpu *vcpu)
+static int reset_guest_boot_cut(struct kvm_vcpu *vcpu)
 {
 	kvm_vcpu_state_t *vcpu_state = vcpu->arch.vcpu_state;
-	e2k_cute_t *cute_p = vcpu->arch.guest_cut;
+	e2k_cute_t __user *cute_p = vcpu->arch.guest_cut;
 
 	if (cute_p == NULL) {
 		KVM_BUG_ON(!vcpu->arch.is_hv);
-		return;
+		return 0;
 	} else {
 		KVM_BUG_ON(!vcpu->arch.is_pv);
 	}
 	DebugKVM("started for VCPU %d\n", vcpu->vcpu_id);
-	fill_cut_entry(cute_p, 0, 0, 0, 0);
+
+	if (fill_user_cut_entry(cute_p, false, 0, 0, 0, 0, 0, 0))
+		return -EFAULT;
 	DebugKVM("created guest CUT entry #0 zeroed at %px\n", cute_p);
+
 	cute_p += GUEST_CODES_INDEX;
-	fill_cut_entry(cute_p, 0, 0,
+	if (fill_user_cut_entry(cute_p, false, 0, 0,
 			kvm_vcpu_hva_to_gpa(vcpu, (unsigned long)vcpu_state),
-			sizeof(*vcpu_state));
+			sizeof(*vcpu_state), 0, 0))
+		return -EFAULT;
+
 	DebugKVM("created guest CUT entry #%ld from 0x%lx size 0x%lx at %px\n",
 		GUEST_CODES_INDEX,
 		(void *)kvm_vcpu_hva_to_gpa(vcpu, (unsigned long)vcpu_state),
 		sizeof(*vcpu_state), cute_p);
+
+	return 0;
 }
 
 static int kvm_setup_vcpu_thread(struct kvm_vcpu *vcpu)
@@ -3344,6 +3346,7 @@ static void init_hw_ctxt(struct kvm_vcpu *vcpu)
 	cu.VIRT_CTRL_CU_rw_sclkr = 1;
 	cu.VIRT_CTRL_CU_rw_sclkm3 = 1;
 	cu.VIRT_CTRL_CU_virt = 1;
+	cu.VIRT_CTRL_CU_hcem = 1;
 
 	hw_ctxt->virt_ctrl_cu = cu;
 	hw_ctxt->virt_ctrl_mu = vcpu->arch.mmu.virt_ctrl_mu;
@@ -3418,6 +3421,10 @@ static int kvm_start_vcpu_thread(struct kvm_vcpu *vcpu)
 	DebugKVM("started to start guest kernel on VCPU %d\n",
 		vcpu->vcpu_id);
 
+	ret = kvm_init_vcpu_thread(vcpu);
+	if (ret != 0)
+		return ret;
+
 	ret = kvm_setup_vcpu_thread(vcpu);
 	if (ret != 0)
 		return ret;
@@ -3430,6 +3437,8 @@ static int kvm_start_vcpu_thread(struct kvm_vcpu *vcpu)
 			__func__, vcpu->vcpu_id, ret);
 		return ret;
 	}
+
+	vcpu_load(vcpu);
 
 	/* create empty root PT to translate GPA -> PA while guest will */
 	/* create own PTs and then switch to them and enable virtual space */
@@ -3463,6 +3472,8 @@ static int kvm_start_vcpu_thread(struct kvm_vcpu *vcpu)
 		INIT_HOST_VCPU_STATE_GREG_COPY(current_thread_info(), vcpu);
 	}
 
+	vcpu_put(vcpu);
+
 	return 0;
 }
 
@@ -3471,8 +3482,6 @@ static int kvm_arch_ioctl_reset_vcpu(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 	int order_no;
 	int err;
-
-	vcpu_load(vcpu);
 
 	/* VCPU should first be registered */
 	order_no = atomic_inc_return(&kvm->arch.vcpus_to_reset);
@@ -3508,15 +3517,15 @@ static int kvm_arch_ioctl_reset_vcpu(struct kvm_vcpu *vcpu)
 	}
 
 	vcpu_boot_spinlock_init(vcpu);
-	reset_guest_boot_cut(vcpu);
+	err = reset_guest_boot_cut(vcpu);
+	if (err)
+		goto out_error;
 	reset_guest_vcpu_state(vcpu);
 	kvm_set_pv_vcpu_kernel_image(vcpu);
 	reset_vcpu_backup_stacks(vcpu);
 	reset_vcpu_boot_stacks(vcpu);
 	kvm_mmu_reset(vcpu);
 	reset_pic_state(vcpu);
-
-	kvm_start_vcpu_thread(vcpu);
 
 	vcpu->arch.halted = false;
 	vcpu->arch.reboot = false;
@@ -3525,12 +3534,9 @@ static int kvm_arch_ioctl_reset_vcpu(struct kvm_vcpu *vcpu)
 	if (order_no == atomic_read(&kvm->online_vcpus))
 		atomic_set(&kvm->arch.vcpus_to_reset, 0);
 
-	vcpu_put(vcpu);
-
-	return 0;
+	err = 0;
 
 out_error:
-	vcpu_put(vcpu);
 	return err;
 }
 
@@ -3657,6 +3663,7 @@ void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu)
 
 	mutex_lock(&vcpu->arch.lock);
 	current_thread_info()->vcpu = NULL;
+	current_thread_info()->is_vcpu = NULL;
 	vcpu->arch.host_task = NULL;
 	mutex_unlock(&vcpu->arch.lock);
 
@@ -3950,7 +3957,7 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	kvm_free_host_info(kvm);
 	kvm_nbsr_destroy(kvm);
 	kvm_iopic_release(kvm);
-	kvm_free_passthrough(kvm);
+	kvm_free_legacy_vga_passthrough(kvm);
 	kvm_free_epic_pages(kvm);
 	kvm_boot_spinlock_destroy(kvm);
 	kvm_guest_spinlock_destroy(kvm);
@@ -3967,7 +3974,7 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 	unsigned long flags;
 
 	DebugKVMRUN("started on VCPU %d\n", vcpu->vcpu_id);
-	trace_vcpu_put(vcpu->vcpu_id, vcpu->cpu);
+	trace_vcpu_put(vcpu->vcpu_id, vcpu->cpu, schedule);
 	trace_kvm_pid(FROM_VCPU_PUT, vcpu->kvm->arch.vmid.nr, vcpu->vcpu_id,
 		read_guest_PID_reg(vcpu));
 	set_bit(KVM_REQ_KICK, (void *) &vcpu->requests);
@@ -3996,7 +4003,14 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 	}
 	local_irq_restore(flags);
 
-	current_thread_info()->vcpu = NULL;
+	/* remember that this thread is thread of the kvm vcpu */
+	/* and only scheduled from cpu or switched to vcpu-qemu mode */
+	if (current_thread_info()->vcpu) {
+		current_thread_info()->vcpu = NULL;
+		KVM_BUG_ON(current_thread_info()->is_vcpu == NULL);
+	} else {
+		KVM_BUG_ON(current_thread_info()->is_vcpu != NULL);
+	}
 }
 
 DEFINE_PER_CPU(struct kvm_vcpu *, last_vcpu) = NULL;
@@ -4008,9 +4022,13 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu, bool schedule)
 
 	DebugKVMRUN("started on VCPU %d CPU %d\n", vcpu->vcpu_id, cpu);
 
-	current_thread_info()->vcpu = vcpu;
+	if (current_thread_info()->is_vcpu) {
+		KVM_BUG_ON(vcpu != current_thread_info()->is_vcpu);
+		current_thread_info()->vcpu = vcpu;
+	}
+
 	vcpu->cpu = cpu;
-	trace_vcpu_load(vcpu->vcpu_id, last_cpu, cpu);
+	trace_vcpu_load(vcpu->vcpu_id, last_cpu, cpu, schedule);
 	clear_bit(KVM_REQ_KICK, (void *) &vcpu->requests);
 
 	local_irq_save(flags);
@@ -4135,7 +4153,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 	switch (ioctl) {
 	case KVM_VCPU_THREAD_SETUP:
 		DebugKVM("ioctl is KVM_VCPU_THREAD_SETUP\n");
-		r = kvm_init_vcpu_thread(vcpu);
+		r = kvm_start_vcpu_thread(vcpu);
 		break;
 	case KVM_RESET_E2K_VCPU:
 		DebugKVM("ioctl is KVM_RESET_VCPU\n");
@@ -4946,13 +4964,10 @@ static bool cpu_has_kvm_support(void)
 	return kvm_vm_types_available != 0;
 }
 
-static inline bool cpu_virt_disabled(void)
-{
-	/* paravirtualization is enable at any case */
-	/* hardware virtualization prohibition will be checked while creation */
-	/* fully virtualized guest machines */
-	return false;
-}
+/* host additional fields (used only by host at arch/e2k/kvm/xxx).
+ * Cannot be put into 'machine' as it is __ro_after_init and KVM
+ * can be compiled as module. */
+host_machdep_t host_machine __ro_after_init;
 
 struct work_struct kvm_dump_stacks;	/* to schedule work to dump */
 					/* guest VCPU stacks */
@@ -4968,7 +4983,7 @@ int kvm_arch_init(void *opaque)
 	}
 
 	if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
-		kvm_host_machine_setup(&machine);
+		kvm_host_machine_setup();
 	user_area_caches_init();
 	err = kvm_vmidmap_init();
 	if (err)
@@ -5097,10 +5112,12 @@ bool kvm_vcpu_has_epic_interrupts(const struct kvm_vcpu *vcpu)
  *
  * Also this can be called from kvm_arch_dy_runnable(), in
  * which case we also check values in memory. */
+bool kvm_all_vcpus_runnable = false;
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu)
 {
 	DebugKVMRUN("started for VCPU %d\n", vcpu->vcpu_id);
-	return vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE ||
+	return kvm_all_vcpus_runnable ||
+		vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE ||
 		vcpu->arch.unhalted || kvm_vcpu_has_pic_interrupts(vcpu);
 }
 
@@ -5184,8 +5201,44 @@ static void __exit kvm_e2k_exit(void)
 bool kvm_debug = false;
 module_param_named(e2k_dbg, kvm_debug, bool, 0600);
 
+bool kvm_irq_bypass = true;
+module_param_named(e2k_irq_bypass, kvm_irq_bypass, bool, 0600);
+
+bool kvm_ioepic_unsafe_direct_map = false;
+module_param_named(e2k_ioepic_unsafe_direct_map, kvm_ioepic_unsafe_direct_map, bool, 0600);
+
 bool kvm_ftrace_dump = false;
 module_param_named(e2k_ftrace_dump, kvm_ftrace_dump, bool, 0600);
+
+unsigned int kvm_g_tmr = 0;
+module_param_named(e2k_g_tmr, kvm_g_tmr, uint, 0600);
+
+module_param_named(e2k_all_vcpus_runnable, kvm_all_vcpus_runnable, bool, 0600);
+
+static int kvm_e2k_kick_all_vcpus(const char *val, const struct kernel_param *kp)
+{
+	struct kvm *kvm;
+
+	if (mutex_is_locked(&kvm_lock)) {
+		pr_err("%s(): kvm_lock is taken\n", __func__);
+		return -EAGAIN;
+	}
+
+	mutex_lock(&kvm_lock);
+	list_for_each_entry(kvm, &vm_list, vm_list)
+		kvm_make_all_cpus_request(kvm, 0);
+	mutex_unlock(&kvm_lock);
+
+	return 0;
+}
+
+static const struct kernel_param_ops param_ops_kick_all_vcpus = {
+	.set = kvm_e2k_kick_all_vcpus,
+	.get = param_get_bool,
+};
+
+bool kvm_kick_all_vcpus = false;
+module_param_cb(e2k_kick_all_vcpus, &param_ops_kick_all_vcpus, &kvm_kick_all_vcpus, 0600);
 #endif
 
 module_init(kvm_e2k_init)

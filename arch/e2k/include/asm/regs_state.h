@@ -215,10 +215,20 @@ do {									\
 	NATIVE_DO_SAVE_MONITOR_COUNTERS(sw_regs);			\
 } while (0)
 
-static inline void native_save_user_only_regs(struct sw_regs *sw_regs)
+static inline void save_dimtp(struct sw_regs *sw_regs)
 {
+#if CONFIG_CPU_ISET >= 6
+	sw_regs->dimtp.lo = NATIVE_GET_DSREG_CLOSED(dimtp.lo);
+	sw_regs->dimtp.hi = NATIVE_GET_DSREG_CLOSED(dimtp.hi);
+#elif CONFIG_CPU_ISET == 0
 	if (machine.save_dimtp)
 		machine.save_dimtp(&sw_regs->dimtp);
+#endif
+}
+
+static inline void native_save_user_only_regs(struct sw_regs *sw_regs)
+{
+	save_dimtp(sw_regs);
 
 	/* Skip breakpoints-related fields handled by
 	 * ptrace_hbp_triggered() and arch-independent
@@ -371,25 +381,17 @@ do {									\
 		(GLOBAL_GREGS_USER_MASK | KERNEL_GREGS_MASK));		\
 } while (false)
 
-#define	RESTORE_GREGS_PAIR(gregs, nolo_save, nohi_save,			\
-					nolo_greg, nohi_greg, iset)	\
-		NATIVE_RESTORE_GREG(&(gregs)[nolo_save],		\
-					&(gregs)[nohi_save],		\
-					nolo_greg,			\
-					nohi_greg,			\
-					iset)
-#define	RESTORE_GREGS_PAIR_V3(gregs, nolo_save, nohi_save,		\
-					nolo_greg, nohi_greg)		\
-		NATIVE_RESTORE_GREG_V3(&(gregs)[nolo_save],		\
-					&(gregs)[nohi_save],		\
-					nolo_greg,			\
-					nohi_greg)
-#define	RESTORE_GREGS_PAIR_V5(gregs, nolo_save, nohi_save,		\
-					nolo_greg, nohi_greg)		\
-		NATIVE_RESTORE_GREG_V5(&(gregs)[nolo_save],		\
-					&(gregs)[nohi_save],		\
-					nolo_greg,			\
-					nohi_greg)
+#define	RESTORE_GREGS_PAIR(gregs, nolo_save, nohi_save, \
+			   nolo_greg, nohi_greg, iset) \
+	NATIVE_RESTORE_GREG((gregs), nolo_save * sizeof((gregs)[0]), \
+			    nohi_save * sizeof((gregs)[0]), \
+			    nolo_greg, nohi_greg, iset)
+#define	RESTORE_GREGS_PAIR_V3(gregs, nolo_save, nohi_save, nolo_greg, nohi_greg) \
+	NATIVE_RESTORE_GREG_V3((gregs), nolo_save * sizeof((gregs)[0]), \
+			       nohi_save * sizeof((gregs)[0]), nolo_greg, nohi_greg)
+#define	RESTORE_GREGS_PAIR_V5(gregs, nolo_save, nohi_save, nolo_greg, nohi_greg) \
+	NATIVE_RESTORE_GREG_V5((gregs), nolo_save * sizeof((gregs)[0]), \
+			       nohi_save * sizeof((gregs)[0]), nolo_greg, nohi_greg)
 
 #define DO_RESTORE_GREGS_ON_MASK(gregs, iset, PAIR_MASK_NOT_RESTORE)	\
 do {									\
@@ -675,37 +677,39 @@ do { \
  * We should save not completed filling data before starting of spilling
  * current procedure chain stack to preserve from filling data loss
  */
+DECLARE_PER_CPU(unsigned long, kernel_trap_cellar[MMU_TRAP_CELLAR_MAX_SIZE]);
+
+#ifdef	CONFIG_CLW_ENABLE
+# define CLW_ONLY(...) __VA_ARGS__
+#else
+# define CLW_ONLY(...)
+#endif
 
 #define	NATIVE_SAVE_TRAP_CELLAR(regs, trap)				\
 ({									\
-	kernel_trap_cellar_t *kernel_tcellar =				\
-		(kernel_trap_cellar_t *)KERNEL_TRAP_CELLAR;		\
-	kernel_trap_cellar_ext_t *kernel_tcellar_ext =			\
+	kernel_trap_cellar_t *__restrict kernel_tcellar =		\
+		(kernel_trap_cellar_t *) raw_cpu_ptr(kernel_trap_cellar); \
+	kernel_trap_cellar_ext_t *__restrict kernel_tcellar_ext =	\
 		(kernel_trap_cellar_ext_t *)				\
-		((void *) KERNEL_TRAP_CELLAR + TC_EXT_OFFSET);		\
+		((void *) kernel_tcellar + TC_EXT_OFFSET);		\
 	trap_cellar_t *tcellar = (trap)->tcellar;			\
 	int cnt, cs_req_num = 0, cs_a4 = 0, off, max_cnt;		\
+	CLW_ONLY(int clw_count = 0, clw_first = 0;)			\
 	u64 kstack_pf_addr = 0, stack = (u64) current->stack;		\
-	bool end_flag = false, is_qp;						\
+	bool end_flag = false, is_qp;					\
 									\
 	max_cnt = NATIVE_READ_MMU_TRAP_COUNT();				\
 	if (max_cnt < 3) {						\
 		max_cnt = 3 * HW_TC_SIZE;				\
 		end_flag = true;					\
 	}								\
-	(trap)->curr_cnt = -1;						\
-	(trap)->ignore_user_tc = 0;					\
-	(trap)->tc_called = 0;						\
-	(trap)->is_intc = false;					\
-	(trap)->from_sigreturn = 0;					\
-	CLEAR_CLW_REQUEST_COUNT(regs);					\
 	BUG_ON(max_cnt > 3 * HW_TC_SIZE);				\
+	_Pragma("loop count (2)")					\
 	for (cnt = 0; 3 * cnt < max_cnt; cnt++) {			\
 		tc_opcode_t opcode;					\
 		tc_cond_t condition;					\
 									\
-		if (end_flag)						\
-			if (AW(kernel_tcellar[cnt].condition) == -1)	\
+		if (end_flag && AW(kernel_tcellar[cnt].condition) == -1) \
 				break;					\
 									\
 		tcellar[cnt].address = kernel_tcellar[cnt].address;	\
@@ -715,12 +719,13 @@ do { \
 		is_qp = (AS(opcode).fmt == LDST_QP_FMT ||		\
 			 cpu_has(CPU_FEAT_QPREG) && AS(condition).fmtc && \
 			 AS(opcode).fmt == LDST_QWORD_FMT);		\
-		if (AS(condition).clw) {			\
-			if (GET_CLW_REQUEST_COUNT(regs) == 0) {		\
-				SET_CLW_FIRST_REQUEST(regs, cnt);	\
+		CLW_ONLY(						\
+			if (AS(condition).clw) {			\
+				if (!clw_count)				\
+					clw_first = cnt;		\
+				clw_count++;				\
 			}						\
-			INC_CLW_REQUEST_COUNT(regs);			\
-		}							\
+		)							\
 		if (is_qp)						\
 			tcellar[cnt].mask = kernel_tcellar_ext[cnt].mask; \
 		if (AS(condition).store) {				\
@@ -744,9 +749,20 @@ do { \
 		tcellar[cnt].flags = 0;					\
 	}								\
 	(trap)->tc_count = cnt * 3;					\
-	if (unlikely(GET_CLW_REQUEST_COUNT(regs) &&			\
+	CLW_ONLY(							\
+		if (unlikely(clw_count &&				\
 			cpu_has(CPU_HWBUG_CLW_STALE_L1_ENTRY)))		\
-		SET_CLW_CPU(regs, raw_smp_processor_id());		\
+			(regs)->clw_cpu = raw_smp_processor_id()	\
+	);								\
+	(trap)->curr_cnt = -1;						\
+	(trap)->ignore_user_tc = 0;					\
+	(trap)->tc_called = 0;						\
+	(trap)->is_intc = false;					\
+	(trap)->from_sigreturn = 0;					\
+	CLW_ONLY(							\
+		(regs)->clw_count = clw_count;				\
+		(regs)->clw_first = clw_first;				\
+	)								\
 	if (cs_req_num > 0) {						\
 		/* recover chain stack pointers to repeat FILL */	\
 		e2k_pcshtp_t pcshtp = NATIVE_READ_PCSHTP_REG_SVALUE();	\
@@ -853,6 +869,8 @@ do { \
 #else	/* ! CONFIG_PARAVIRT_GUEST && ! CONFIG_KVM_GUEST_KERNEL */
 /* it is native kernel without any virtualization */
 /* or native host kernel with virtualization support */
+
+static inline void kvm_trap_init(unsigned long cellar_addr) { }
 
 /* Save stack registers on kernel native/host/hypervisor mode */
 #define SAVE_STACK_REGS(regs, ti, user, trap) \
@@ -1092,7 +1110,7 @@ static inline void invalidate_MLT(void) { }
 #endif
 
 static inline void
-NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
+DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 		bool task_is_binco, bool task_traced)
 {
 	if (unlikely(task_is_binco))
@@ -1100,10 +1118,16 @@ NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 
 	invalidate_MLT();
 
-	sw_regs->cutd = NATIVE_NV_READ_CUTD_REG();
-
 	if (unlikely(task_traced))
 		native_save_user_only_regs(sw_regs);
+}
+
+static inline void
+NATIVE_DO_SAVE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
+		bool task_is_binco, bool task_traced)
+{
+	DO_SAVE_TASK_USER_REGS_TO_SWITCH(sw_regs, task_is_binco, task_traced);
+	sw_regs->cutd = NATIVE_NV_READ_CUTD_REG();
 }
 
 static inline void
@@ -1164,17 +1188,13 @@ NATIVE_SAVE_TASK_REGS_TO_SWITCH(struct task_struct *task)
  * (It moves these structures in stack memory)
  */
 static inline void
-NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
-					bool task_is_binco, bool task_traced)
+DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
+				bool task_is_binco, bool task_traced)
 {
-	e2k_cutd_t cutd = sw_regs->cutd;
-
 	if (unlikely(task_traced))
 		native_restore_user_only_regs(sw_regs);
 	else	/* Do this always when we don't test prev_task->ptrace */
 		native_clear_user_only_regs();
-
-	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
 
 	NATIVE_CLEAR_DAM;
 
@@ -1183,10 +1203,18 @@ NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 		NATIVE_RESTORE_INTEL_REGS(sw_regs);
 	}
 }
+static inline void
+NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
+					bool task_is_binco, bool task_traced)
+{
+	e2k_cutd_t cutd = sw_regs->cutd;
+
+	DO_RESTORE_TASK_USER_REGS_TO_SWITCH(sw_regs, task_is_binco, task_traced);
+	NATIVE_NV_NOIRQ_WRITE_CUTD_REG(cutd);
+}
 
 static inline void
-NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
-		struct thread_info *ti)
+NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 {
 	struct sw_regs *sw_regs = &task->thread.sw_regs;
 	u64 top = sw_regs->top;

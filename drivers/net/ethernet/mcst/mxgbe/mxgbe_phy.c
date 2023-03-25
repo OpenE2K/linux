@@ -11,6 +11,8 @@
 #include "mxgbe_phy.h"
 
 
+#define PHY_WAIT_NUM	1000
+
 /**
  * ch2.4 - MDIO (PHY)
  */
@@ -34,9 +36,15 @@
 
 /* VSC8488 - external phy on PCIe board */
 
-
+#ifndef __sparc__
+/* e2k e12g phy */
 #define PCS_DEV_ID_1G_2G5	0x7996CED0
 #define PCS_DEV_ID_1G_2G5_10G	0x7996CED1
+#else /* sparc */
+/* sparc e16g phy */
+#define PCS_DEV_ID_1G_2G5	0x7996CED2
+#define PCS_DEV_ID_1G_2G5_10G	0x7996CED3
+#endif
 
 /** Internal PCS */
 #define PMA_and_PMD_MMD	(0x1 << 18)
@@ -63,6 +71,9 @@
 
 #define VR_AN_INTR		(0x8002 | AN_MMD)
 #define SR_AN_CTRL		(0x0000 | AN_MMD)
+#define SR_AN_ADV1		(0x0010 | AN_MMD)
+#define SR_AN_ADV2		(0x0011 | AN_MMD)
+#define SR_AN_ADV3		(0x0012 | AN_MMD)
 #define SR_AN_LP_ABL1		(0x0013 | AN_MMD)
 #define SR_AN_LP_ABL2		(0x0014 | AN_MMD)
 #define SR_AN_LP_ABL3		(0x0015 | AN_MMD)
@@ -98,6 +109,15 @@
 #define VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL	(0x8091 | PMA_and_PMD_MMD)
 #define VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0	(0x8092 | PMA_and_PMD_MMD)
 #define VR_XS_PMA_Gen5_12G_VCO_CAL_REF0		(0x8096 | PMA_and_PMD_MMD)
+
+#define VR_XS_PMA_Gen5_16G_MISC_CTRL2		(0x809C | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_16G_VCO_CAL_REF0		(0x8096 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_16G_RX_EQ_CTRL0		(0x8058 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_16G_RX_CDR_CTRL1		(0x8064 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_16G_RX_MISC_CTRL0	(0x8069 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_16G_RX_GEN_CTRL4		(0x8068 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_16G_RX_IQ_CTRL0		(0x806B | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_16G_RX_EQ_CTRL5		(0x805D | PMA_and_PMD_MMD)
 
 #define SR_XS_PCS_KR_STS2	 (0x0021 | PCS_MMD)
 #define VR_XS_PCS_DIG_STS	 (0x8010 | PCS_MMD)
@@ -231,12 +251,12 @@ static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
 } /* mdio_write */
 
 /* PCS Register read/write functions */
-static u16 mxgbe_pcs_read(mxgbe_priv_t *priv, int regnum)
+u16 mxgbe_pcs_read(mxgbe_priv_t *priv, int regnum)
 {
 	return (u16)mdio_read(priv->mii_bus, priv->pcsaddr, regnum);
 }
 
-static void mxgbe_pcs_write(mxgbe_priv_t *priv, int regnum, u16 value)
+void mxgbe_pcs_write(mxgbe_priv_t *priv, int regnum, u16 value)
 {
 	mdio_write(priv->mii_bus, priv->pcsaddr, regnum, value);
 }
@@ -320,29 +340,12 @@ int mxgbe_mdio_register(mxgbe_priv_t *priv)
 
 static void mxgbe_pcs_first_init(mxgbe_priv_t *priv)
 {
-	int i;
 	u16 val;
-
-	/* PCS Reset */
-	val = mxgbe_pcs_read(priv, SR_XS_PCS_CTRL1);
-	mxgbe_pcs_write(priv, SR_XS_PCS_CTRL1, val | (1 << 15)); /* RST */
-	val = mxgbe_pcs_read(priv, SR_XS_PCS_CTRL1);
-	/* Wait RST (SR_XS_PCS_CTRL1) to 1'h0 */
-	for (i = 0; i <= 500; i++) {
-		if ((mxgbe_pcs_read(priv, SR_XS_PCS_CTRL1) & 0x8000) == 0)
-			break;
-		udelay(1);
-	}
-	if (i >= 500)
-		dev_warn(&priv->pdev->dev,
-			 "could not reset pcs at first init\n");
 
 	/* Disable Clause 73 Auto-Negotiation */
 	/* RSTRT_AN to 1'h0 / LPM to 1'h0 / AN_EN to 1'h0
 	 * EXT_NP_CTL to 1'h1 / AN_RST to 1'h0 */
-	/*
 	mxgbe_pcs_write(priv, SR_AN_CTRL, 0x2000);
-	*/
 
 	/* Disable Clause 72 Auto-Negotiation */
 	/* RS_TR to 1'h0 / TR_EN to 1'h1 */
@@ -350,23 +353,99 @@ static void mxgbe_pcs_first_init(mxgbe_priv_t *priv)
 	mxgbe_pcs_write(priv, SR_PMA_KR_PMD_CTRL, 0x0002);
 	*/
 
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77CA);
-	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_MPLLA_CTRL3, 0x0004);
+	/* Configuration Registers */
+	/* Check PCS_TYPE_SEL to 4'h0 */
+	val = mxgbe_pcs_read(priv, SR_XS_PCS_CTRL2);
+	if (val & 0xF != 0) {
+		dev_warn(&priv->pdev->dev, "wrong PCS_TYPE_SEL\n");
+		/* SET PCS_TYPE_SEL to 4'h0 */
+		mxgbe_pcs_write(priv, SR_XS_PCS_CTRL2, 0x0000);
+	} else {
+		dev_dbg(&priv->pdev->dev, "PCS_TYPE_SEL - Ok\n");
+	}
 
-#if 1
-	/* Soft Reset */
-	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
-	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL1, val | (1 << 15)); /* VR_RST */
-	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
-	i = 0;
-	while ((val & (1 << 15)) && (i < 10)) {
-		DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
-			"wait for PCSDIG reset: dev.reg 0x%02X.%04X = 0x%04X\n",
-			VR_XS_PCS_DIG_CTRL1 >> 16,
-			VR_XS_PCS_DIG_CTRL1 & 0xFFFF, val);
-		val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
-		i++;
-	};
+#ifdef __e2k__
+
+	/* 4.2. Program the register bits for 12G PHY */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL,	0x0001);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1,	0x1510);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2,	0x0300);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL,	0x000f);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,	0x0000);
+#define DEBUG_CTRLV1
+#ifdef DEBUG_CTRLV1  /* 0x1C10 / 16'h1B08 (v1/v2)     (!!!!!) */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0,	0x1C10);
+#else
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0,	0x1B08);
+#endif
+#ifdef DEBUG_CTRLV1 /* 0x0020 / 16'h002B (v1/v2)     (!!!!!) */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1,	0x0020);
+#else
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1,	0x002C);
+#endif
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2,	0x0300);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3,	0x0003);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL,	0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL,	0x0101);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL,	0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0,		0x77D0);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4,	0x0011);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL,	0x0011);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0,	0x5100);
+/* #define DEBUG_78MHZ */
+#ifdef DEBUG_78MHZ
+	dev_warn(&priv->pdev->dev, "configure PCS for 78MHz\n");
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,	0x0019);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,	0x056A);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0,		0x0015);
+#else
+	dev_warn(&priv->pdev->dev, "configure PCS for 156MHz\n");
+	/* 1 */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,	0x00f1);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,	0x0549);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0,		0x0029);
+	/* 2 */
+	/*
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,	0x001d);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,	0x056a);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0,		0x0015);
+	*/
+#endif
+
+#else /* sparc */
+
+	/* 4.2. Program the register bits for 16G PHY */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL,	0x0001);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4,	0x0011);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL,	0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL,	0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2,	0x0300);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2,	0x0300);
+#if 1 /* OK */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0,	0x1C10);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1,	0x0020);
+#else /* OK */
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0,	0x1B08);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1,	0x002C);
+#endif
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,	0x00f1);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1,	0x1510);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0,	0x5100);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_MISC_CTRL2,		0x0003);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_VCO_CAL_REF0,		0x0029);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,	0x0549);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL,	0x000f);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_RX_EQ_CTRL0,		0x5510);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3,	0x0007);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL,	0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_RX_CDR_CTRL1,		0x0111);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_RX_MISC_CTRL0,		0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_RX_GEN_CTRL4,		0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_RX_IQ_CTRL0,		0x0000);
+	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_16G_RX_EQ_CTRL5,		0x0030);
+
+#endif
+
 
 	/* SAPFIR1:
 	 * Proto: Error on PCB (Bug 115092 #8)
@@ -378,126 +457,7 @@ static void mxgbe_pcs_first_init(mxgbe_priv_t *priv)
 	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL2, val | (1 << 4)); /* TX_POL_INV_0 */
 #endif
 
-	/* INIT */
-	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
-	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL1, val | (1 << 8)); /* INIT */
-	val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
-	i = 0;
-	while ((val & (1 << 8)) && (i < 10)) {
-		DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
-			"wait for INIT done: dev.reg 0x%02X.%04X = 0x%04X\n",
-			VR_XS_PCS_DIG_CTRL1 >> 16,
-			VR_XS_PCS_DIG_CTRL1 & 0xFFFF, val);
-		val = mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1);
-		i++;
-	};
-#endif
 } /* mxgbe_pcs_first_init */
-
-/* Initiate the Vendor specific software reset */
-/* reset for both controllers are configured via func 0 */
-#if 0
-static int mxgbe_pcs_vs_reset(mxgbe_priv_t *priv)
-{
-	int i;
-
-	/* EN_VSMMD1, VR_RST */
-	mxgbe_pcs_write(priv, VR_XS_PCS_DIG_CTRL1, 0xa000);
-	for (i = 0; i < 500; i++) {
-		if ((mxgbe_pcs_read(priv, VR_XS_PCS_DIG_CTRL1) &
-			0x8000) == 0) {
-			break;
-		}
-		udelay(1);
-	}
-	if (i ==  500) {
-		dev_warn(&priv->pdev->dev, "Could not reset phy\n");
-		return 1;
-	}
-	dev_dbg(&priv->pdev->dev, "phy reset done\n");
-
-	return 0;
-} /* mxgbe_pcs_vs_reset */
-#endif
-
-/* Programming Guidelines for Clause 73 Auto-Negotiation */
-static int mxgbe_set_pcs_an_clause_73(mxgbe_priv_t *priv)
-{
-	int i;
-	int r;
-
-	if (netif_msg_hw(priv))
-		dev_info(&priv->ndev->dev, "%s\n", __func__);
-
-	for (i = 0; i < 500; i++) {
-		r = mxgbe_pcs_read(priv, VR_AN_INTR);
-		if (r & 0x7) { /* AN_INT_CMPLT | AN_INC_LINK | AN_PG_RCV */
-			break;
-		}
-	}
-	if (i == 500) {
-		dev_warn(&priv->ndev->dev,
-			 "could not set autonegotiation mode\n");
-		return 1;
-	}
-
-	if (r & 0x1) { /* AN_INT_CMPLT */
-	/* Ready */
-		return 0;
-	}
-
-	if ((r & 0x4) == 0) { /* AN_PG_RCV == 0 */
-		goto wait_an_int_cmplt;
-	}
-	r &= ~0x4; /* AN_PG_RCV = 0 */
-	mxgbe_pcs_write(priv, VR_AN_INTR, r);
-	(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
-	(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL2);
-	(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL3);
-
-	r = mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
-	if ((r & 0x800) == 0) { /* AN_LP_ADV_NP == 0 */
-		goto wait_an_int_cmplt;
-	}
-
-	for (i = 0; i < 500; i++) {
-		int j;
-		mxgbe_pcs_write(priv, SR_AN_XNP_TX3, 0);
-		mxgbe_pcs_write(priv, SR_AN_XNP_TX2, 0);
-		mxgbe_pcs_write(priv, SR_AN_XNP_TX1, 0);
-		for (j = 0; j < 500; j++) {
-			if (mxgbe_pcs_read(priv, VR_AN_INTR) & 0x4) {
-				break;
-			}
-		}
-		if (j == 500) {
-			return 1;
-		}
-		r = mxgbe_pcs_read(priv, VR_AN_INTR);
-		mxgbe_pcs_write(priv, VR_AN_INTR, r & ~0x4);/*AN_PG_RCV=0*/
-		(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
-		(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL2);
-		(void)mxgbe_pcs_read(priv, SR_AN_LP_ABL3);
-		r = mxgbe_pcs_read(priv, SR_AN_LP_ABL1);
-		if ((r & 0x800) == 0) { /* AN_LP_ADV_NP == 0 */
-			break;
-		}
-	}
-	if (i == 500) {
-		return 1;
-	}
-wait_an_int_cmplt:
-	for (i = 0; i < 500; i++) {
-		r = mxgbe_pcs_read(priv, VR_AN_INTR);
-		if (r & 0x1) { /* AN_INT_CMPLT */
-			break;
-		}
-	}
-	if (i == 500) {
-		return 1;
-	}
-	return 0;
-} /* mxgbe_set_pcs_an_clause_73 */
 
 /* init internal PCS/PMA phy */
 int mxgbe_set_pcsphy_mode(struct net_device *ndev)
@@ -510,18 +470,11 @@ int mxgbe_set_pcsphy_mode(struct net_device *ndev)
 	val |= mdio_read(priv->mii_bus, priv->pcsaddr, SR_XS_PCS_DEV_ID2);
 	priv->pcs_dev_id = val;
 	dev_info(&priv->pdev->dev,
-		 "pcs[%d] phy id: 0x%08X - %s\n",
+		 "pcs[%d] phy id: 0x%08x - %s\n",
 		 priv->pcsaddr, priv->pcs_dev_id,
 		 (priv->pcs_dev_id == PCS_DEV_ID_1G_2G5_10G) ? "10G" :
 		 (priv->pcs_dev_id == PCS_DEV_ID_1G_2G5) ? "1G/2.5G" :
 			"unknown");
-
-	/*if (mxgbe_pcs_vs_reset(priv))
-		return 1;*/
-
-	mxgbe_pcs_first_init(priv);
-
-	mxgbe_set_pcs_an_clause_73(priv);
 
 	return 0;
 } /* mxgbe_set_pcsphy_mode */

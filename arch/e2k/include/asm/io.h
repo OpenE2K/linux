@@ -11,14 +11,16 @@
 #include <asm/page.h>
 #include <asm/machdep.h>
 
+#ifndef COFNIG_KVM_GUEST_KERNEL
 #include <asm/p2v/io.h>
+#endif
 
 extern int __init native_arch_pci_init(void);
 
-#define	E2K_X86_IO_AREA_BASE	E2K_KERNEL_IO_BIOS_AREAS_BASE
+#define	E2K_X86_IO_AREA_BASE		E2K_KERNEL_IO_BIOS_AREAS_BASE
 
 /* Size of pages for the IO area */
-#define	E2K_X86_IO_PAGE_SIZE 	E2K_LARGE_PAGE_SIZE
+#define	E2K_X86_IO_PAGE_SIZE	E2K_SMALL_PAGE_SIZE
 #define X86_IO_AREA_PHYS_BASE	(machine.x86_io_area_base)
 #define X86_IO_AREA_PHYS_SIZE	(machine.x86_io_area_size)
 
@@ -88,7 +90,7 @@ static inline u8 native_readb(const volatile void __iomem *addr)
 {
 	u8 res;
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		LOAD_NV_MAS((volatile u8 __force *) addr, res,
+		IO_LOAD_NV_MAS((volatile u8 __force *) addr, res,
 				MAS_LOAD_ACQUIRE_V6(MAS_MT_0), b, "memory");
 	} else {
 		res = native_readb_relaxed(addr);
@@ -100,7 +102,7 @@ static inline u16 native_readw(const volatile void __iomem *addr)
 {
 	u16 res;
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		LOAD_NV_MAS((volatile u16 __force *) addr, res,
+		IO_LOAD_NV_MAS((volatile u16 __force *) addr, res,
 				MAS_LOAD_ACQUIRE_V6(MAS_MT_0), h, "memory");
 	} else {
 		res = native_readw_relaxed(addr);
@@ -112,7 +114,7 @@ static inline u32 native_readl(const volatile void __iomem *addr)
 {
 	u32 res;
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		LOAD_NV_MAS((volatile u32 __force *) addr, res,
+		IO_LOAD_NV_MAS((volatile u32 __force *) addr, res,
 				MAS_LOAD_ACQUIRE_V6(MAS_MT_0), w, "memory");
 	} else {
 		res = native_readl_relaxed(addr);
@@ -124,7 +126,7 @@ static inline u64 native_readq(const volatile void __iomem *addr)
 {
 	u64 res;
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		LOAD_NV_MAS((volatile u64 __force *) addr, res,
+		IO_LOAD_NV_MAS((volatile u64 __force *) addr, res,
 				MAS_LOAD_ACQUIRE_V6(MAS_MT_0), d, "memory");
 	} else {
 		res = native_readq_relaxed(addr);
@@ -135,7 +137,7 @@ static inline u64 native_readq(const volatile void __iomem *addr)
 static inline void native_writeb(u8 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		STORE_NV_MAS((volatile u8 __force *) addr, value,
+		IO_STORE_NV_MAS((volatile u8 __force *) addr, value,
 				MAS_STORE_RELEASE_V6(MAS_MT_0), b, "memory");
 		/* wmb() after MMIO writes is not required by documentation, but
 		 * this is how x86 works and how most of the drivers are tested. */
@@ -148,7 +150,7 @@ static inline void native_writeb(u8 value, volatile void __iomem *addr)
 static inline void native_writew(u16 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		STORE_NV_MAS((volatile u16 __force *) addr, value,
+		IO_STORE_NV_MAS((volatile u16 __force *) addr, value,
 				MAS_STORE_RELEASE_V6(MAS_MT_0), h, "memory");
 		wmb();
 	} else {
@@ -159,7 +161,7 @@ static inline void native_writew(u16 value, volatile void __iomem *addr)
 static inline void native_writel(u32 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		STORE_NV_MAS((volatile u32 __force *) addr, value,
+		IO_STORE_NV_MAS((volatile u32 __force *) addr, value,
 				MAS_STORE_RELEASE_V6(MAS_MT_0), w, "memory");
 		wmb();
 	} else {
@@ -170,7 +172,7 @@ static inline void native_writel(u32 value, volatile void __iomem *addr)
 static inline void native_writeq(u64 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		STORE_NV_MAS((volatile u64 __force *) addr, value,
+		IO_STORE_NV_MAS((volatile u64 __force *) addr, value,
 				MAS_STORE_RELEASE_V6(MAS_MT_0), d, "memory");
 		wmb();
 	} else {
@@ -589,6 +591,45 @@ extern void __memcpy_toio(void *dst, const void *src, size_t n);
 #define memcpy_fromio(a, b, c)	__memcpy_fromio((a), (void * __force) (b), (c))
 #define memcpy_toio(a, b, c)	__memcpy_toio((void * __force) (a), (b), (c))
 
+#define ARCH_HAS_VALID_PHYS_ADDR_RANGE
+extern int valid_phys_addr_range(phys_addr_t addr, size_t size);
+extern int valid_mmap_phys_addr_range(unsigned long pfn, size_t size);
+
+/**
+ * virt_to_phys - map virtual addresses to physical
+ * @address: address to remap
+ *
+ * The returned physical address is the physical (CPU) mapping for
+ * the memory address given. It is only valid to use this function on
+ * addresses directly mapped or allocated via kmalloc.
+ *
+ * This function does not give bus mappings for DMA transfers. In
+ * almost all conceivable cases a device driver should not be using
+ * this function.
+ */
+#define virt_to_phys virt_to_phys
+static inline phys_addr_t virt_to_phys(volatile void *address)
+{
+	return __pa(address);
+}
+
+/**
+ * phys_to_virt - map physical address to virtual
+ * @address: address to remap
+ *
+ * The returned virtual address is a current CPU mapping for
+ * the memory address given. It is only valid to use this function on
+ * addresses that have a kernel mapping.
+ *
+ * This function does not handle bus mappings for DMA transfers. In
+ * almost all conceivable cases a device driver should not be using
+ * this function.
+ */
+#define phys_to_virt phys_to_virt
+static inline void *phys_to_virt(phys_addr_t address)
+{
+	return __va(address);
+}
 
 #include <asm-generic/io.h>
 #undef PCI_IOBASE

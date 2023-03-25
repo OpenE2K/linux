@@ -31,4 +31,5 @@ extern void sic_error_interrupt(struct pt_regs *regs);
 #define E2S_SIC_MC_SIZE			0xa4
 #define E2S_SIC_MC_COUNT		3
 
+#define E2S_QNR1_OFFSET			8
 #endif /* _ASM_E2S_H_ */

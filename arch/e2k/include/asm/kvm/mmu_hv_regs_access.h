@@ -204,100 +204,100 @@ kvm_get_intc_info_mu_is_updated(struct kvm_vcpu *vcpu)
 #define	READ_SH_MMU_CR_REG_VALUE()	NATIVE_GET_MMUREG(sh_mmu_cr)
 #define	WRITE_SH_MMU_CR_REG_VALUE(val)	NATIVE_SET_MMUREG(sh_mmu_cr, (val))
 
-#ifdef CONFIG_VIRTUALIZATION
+#ifdef CONFIG_KVM
 static inline virt_ctrl_mu_t read_VIRT_CTRL_MU_reg(void)
 {
 	virt_ctrl_mu_t virt_ctrl;
 
-	virt_ctrl.VIRT_CTRL_MU_reg = machine.host.read_VIRT_CTRL_MU();
+	virt_ctrl.VIRT_CTRL_MU_reg = host_machine.read_VIRT_CTRL_MU();
 	return virt_ctrl;
 }
 static inline void write_VIRT_CTRL_MU_reg(virt_ctrl_mu_t virt_ctrl)
 {
-	machine.host.write_VIRT_CTRL_MU(virt_ctrl.VIRT_CTRL_MU_reg);
+	host_machine.write_VIRT_CTRL_MU(virt_ctrl.VIRT_CTRL_MU_reg);
 }
 
 static inline unsigned int read_GID_reg(void)
 {
-	return machine.host.read_GID();
+	return host_machine.read_GID();
 }
 static inline void write_GID_reg(unsigned int mmu_gid)
 {
-	machine.host.write_GID(MMU_GID(mmu_gid));
+	host_machine.write_GID(MMU_GID(mmu_gid));
 }
 
 static inline e2k_mmu_cr_t read_SH_MMU_CR_reg(void)
 {
-	return (e2k_mmu_cr_t) { .word = machine.host.read_SH_MMU_CR() };
+	return (e2k_mmu_cr_t) { .word = host_machine.read_SH_MMU_CR() };
 }
 static inline void write_SH_MMU_CR_reg(e2k_mmu_cr_t mmu_cr)
 {
-	machine.host.write_SH_MMU_CR(AW(mmu_cr));
+	host_machine.write_SH_MMU_CR(AW(mmu_cr));
 }
 
 static inline e2k_mmu_cr_t read_G_W_IMASK_MMU_CR_reg(void)
 {
-	return (e2k_mmu_cr_t) { .word = machine.host.read_G_W_IMASK_MMU_CR() };
+	return (e2k_mmu_cr_t) { .word = host_machine.read_G_W_IMASK_MMU_CR() };
 }
 static inline void write_G_W_IMASK_MMU_CR_reg(e2k_mmu_cr_t mmu_cr_mask)
 {
-	machine.host.write_G_W_IMASK_MMU_CR(AW(mmu_cr_mask));
+	host_machine.write_G_W_IMASK_MMU_CR(AW(mmu_cr_mask));
 }
 
 static inline unsigned int read_SH_PID_reg(void)
 {
-	return machine.host.read_SH_PID();
+	return host_machine.read_SH_PID();
 }
 static inline void write_SH_PID_reg(unsigned int mmu_pid)
 {
-	machine.host.write_SH_PID(MMU_PID(mmu_pid));
+	host_machine.write_SH_PID(MMU_PID(mmu_pid));
 }
 
 static inline e2k_addr_t read_SH_OS_PPTB_reg(void)
 {
-	return machine.host.read_SH_OS_PPTB();
+	return host_machine.read_SH_OS_PPTB();
 }
 static inline void write_SH_OS_PPTB_reg(e2k_addr_t phys_addr)
 {
-	machine.host.write_SH_OS_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
+	host_machine.write_SH_OS_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
 }
 
 static inline e2k_addr_t read_SH_OS_VPTB_reg(void)
 {
-	return machine.host.read_SH_OS_VPTB();
+	return host_machine.read_SH_OS_VPTB();
 }
 static inline void write_SH_OS_VPTB_reg(e2k_addr_t virt_addr)
 {
-	machine.host.write_SH_OS_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
+	host_machine.write_SH_OS_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
 }
 
 static inline e2k_addr_t read_GP_PPTB_reg(void)
 {
-	return machine.host.read_GP_PPTB();
+	return host_machine.read_GP_PPTB();
 }
 static inline void write_GP_PPTB_reg(e2k_addr_t phys_addr)
 {
-	machine.host.write_GP_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
+	host_machine.write_GP_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
 }
 
 static inline e2k_addr_t read_GP_VPTB_reg(void)
 {
-	return machine.host.read_GP_VPTB();
+	return host_machine.read_GP_VPTB();
 }
 static inline void write_GP_VPTB_reg(e2k_addr_t virt_addr)
 {
-	machine.host.write_GP_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
+	host_machine.write_GP_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
 }
 
 static inline e2k_addr_t read_SH_OS_VAB_reg(void)
 {
-	return machine.host.read_SH_OS_VAB();
+	return host_machine.read_SH_OS_VAB();
 }
 static inline void write_SH_OS_VAB_reg(e2k_addr_t virt_addr)
 {
-	machine.host.write_SH_OS_VAB(MMU_ADDR_TO_VAB(virt_addr));
+	host_machine.write_SH_OS_VAB(MMU_ADDR_TO_VAB(virt_addr));
 }
-#endif /* CONFIG_VIRTUALIZATION */
+#endif /* CONFIG_KVM */
 #endif /* ! __ASSEMBLY__ */
 
 #endif  /* _E2K_KVM_MMU_HV_REGS_ACCESS_H_ */

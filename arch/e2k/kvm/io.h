@@ -38,8 +38,6 @@ extern unsigned long kvm_spmc_conf_base[4];
 
 static inline kvm_pfn_t mmio_prefixed_gfn_to_pfn(struct kvm *kvm, gfn_t gfn)
 {
-	struct irq_remap_table *irt = kvm->arch.irt;
-
 	if (!(kvm_is_epic(kvm) && kvm->arch.is_hv))
 		return 0;
 
@@ -47,10 +45,17 @@ static inline kvm_pfn_t mmio_prefixed_gfn_to_pfn(struct kvm *kvm, gfn_t gfn)
 	if (gfn == gpa_to_gfn(EPIC_DEFAULT_PHYS_BASE))
 		return EPIC_DEFAULT_PHYS_BASE >> PAGE_SHIFT;
 
-	/* IOEPIC page - for passthrough device */
-	if (irt->enabled && gfn == gpa_to_gfn(irt->gpa))
-		return irt->hpa >> PAGE_SHIFT;
+	/* IOEPIC pages - for passthrough device */
+	if (kvm->arch.ioepic_direct_map) {
+		struct ioepic_pt_pin *pt_pin;
 
+		list_for_each_entry(pt_pin, &kvm->arch.ioepic_pt_pin, list) {
+			if (gfn == gpa_to_gfn(kvm->arch.ioepic[0]->base_address) + pt_pin->pin)
+				return hpa_to_pfn(io_epic_base_node(pt_pin->node)) + pt_pin->pin;
+		}
+	}
+
+#ifdef KVM_HAVE_LEGACY_VGA_PASSTHROUGH
 	/* Legacy VGA area - speed up VGA passthrough */
 	if (kvm->arch.legacy_vga_passthrough) {
 		gpa_t gpa = gfn_to_gpa(gfn);
@@ -59,6 +64,7 @@ static inline kvm_pfn_t mmio_prefixed_gfn_to_pfn(struct kvm *kvm, gfn_t gfn)
 				gpa < VGA_VRAM_PHYS_BASE + VGA_VRAM_SIZE)
 			return gfn;
 	}
+#endif
 
 	return 0;
 }

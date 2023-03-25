@@ -187,18 +187,18 @@
 #define	WRITE_SH_CORE_MODE_REG_VALUE(modes)	\
 		NATIVE_SET_SREG_CLOSED_NOEXC(sh_core_mode, modes, 5)
 
-#ifdef CONFIG_VIRTUALIZATION
+#ifdef CONFIG_KVM
 static inline e2k_core_mode_t read_SH_CORE_MODE_reg(void)
 {
 	e2k_core_mode_t core_mode;
-	core_mode.CORE_MODE_reg = machine.host.read_SH_CORE_MODE();
+	core_mode.CORE_MODE_reg = host_machine.read_SH_CORE_MODE();
 	return core_mode;
 }
 static inline void write_SH_CORE_MODE_reg(e2k_core_mode_t core_mode)
 {
-	machine.host.write_SH_CORE_MODE(core_mode.CORE_MODE_reg);
+	host_machine.write_SH_CORE_MODE(core_mode.CORE_MODE_reg);
 }
-#endif /* CONFIG_VIRTUALIZATION */
+#endif /* CONFIG_KVM */
 
 #define	READ_G_PREEMPT_TMR_REG() \
 		((g_preempt_tmr_t) NATIVE_GET_DSREG_CLOSED(g_preempt_tmr))

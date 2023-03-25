@@ -18,20 +18,13 @@
 #define	MAX_PM_SIZE	(1UL << MAX_PA_SIZE)
 
 /* E2K virtual address definitions */
-#define	MAX_VA_SIZE	59			/* Virtual address maximum */
-						/* size (bits number) */
-#define	MAX_VA_MSB	(MAX_VA_SIZE -1)	/* The maximum number of the */
-						/* most significant bit of */
-						/* virtual address */
-#define	MAX_VA_MASK	((1UL << MAX_VA_SIZE) - 1)
-
 #define	E2K_VA_SIZE	48			/* E2K Virtual address size */
 						/* (bits number) */
 #define	E2K_VA_MSB	(E2K_VA_SIZE - 1)	/* The number of the most */
 						/* significant bit of E2K */
 						/* virtual address */
 #define	E2K_VA_MASK	((1UL << E2K_VA_SIZE) - 1)
-
+#define E2K_VA_END	(1UL << E2K_VA_SIZE)
 #define	E2K_VA_PAGE_MASK	(E2K_VA_MASK & PAGE_MASK)
 
 
@@ -1028,7 +1021,7 @@ typedef	union instr_hs {
 
 #define E2K_INSTR_HS_LNG_MASK	0x70
 
-#define	E2K_GET_INSTR_SIZE(hs)	((hs.lng + 1) * sizeof(instr_item_t))
+#define	E2K_GET_INSTR_SIZE(hs)	(((hs).lng + 1) * sizeof(instr_item_t))
 
 /*
  * Stubs sullable structure
@@ -1266,6 +1259,13 @@ typedef	union e2k_wd {
 #define	WD_fx			fx
 #define	WD_reg			word
 
+/* Function parameters area size by C calling convention in quadro registers
+ * (different for 128-bit mode to accomodate more descriptors) */
+#define C_ABI_PSIZE_UNPROT 4
+#define C_ABI_PSIZE_PROT 8
+#define C_ABI_PSIZE(protected) \
+		((protected) ? C_ABI_PSIZE_PROT : C_ABI_PSIZE_UNPROT)
+
 /* Structure of dword register PSHTP */
 typedef	struct e2k_pshtp_fields {		/* PSHTP fields */
 	u64	ind	: E2K_WD_SIZE + 1;	/* [WD_MSB + 1 : 0] */
@@ -1502,6 +1502,9 @@ typedef	struct {	/* Structure of cr0_lo chain reg */
 	u64	pf	: 64;		/* [63: 0]	*/
 } e2k_cr0_lo_fields_t;
 typedef	union {
+	struct {
+		u64 pf	: 64;		/* [63: 0]	*/
+	};
 	e2k_cr0_lo_fields_t	fields;	/* as fields		*/
 	u64			word;	/* as entire register	*/
 } e2k_cr0_lo_t;
@@ -1794,73 +1797,80 @@ typedef	union {
 
 /* CUT entry */
 
-typedef	struct e2k_cute_dw0_fields {	/* Structure of the first d-word */
-					/* of CUT entry */
-	u64	cud_base	: E2K_VA_SIZE;		/* [47: 0]	*/
-	u64	unused1		: 57 - E2K_VA_MSB;	/* [57:48]	*/
-	u64	cud_c		: 1;			/* [58:58]	*/
-	u64	unused2		: 5;			/* [63:59]	*/
-} e2k_cute_dw0_fields_t;
-
-typedef	union e2k_cute_dw0 {
-	e2k_cute_dw0_fields_t	fields;	/* as fields		*/
-	u64			word;	/* as entire register	*/
+typedef	union {
+	struct {
+		u64 cud_base	: E2K_VA_SIZE;		/* [47: 0] */
+		u64		: 57 - E2K_VA_MSB;	/* [57:48] */
+		u64 cud_c	: 1;			/* [58:58] */
+		u64		: 5;			/* [63:59] */
+	};
+	u64 word;	/* as entire register	*/
 } e2k_cute_dw0_t;
 
-
-typedef	struct e2k_cute_dw1_fields {	/* Structure of the second d-word */
-					/* of CUT entry			*/
-	u64	unused1		: 32;			/* [31: 0]	*/
-	u64	cud_size	: 32;			/* [63:32]	*/
-} e2k_cute_dw1_fields_t;
-
-typedef	union e2k_cute_dw1 {
-	e2k_cute_dw1_fields_t	fields;	/* as fields		*/
-	u64			word;	/* as entire register	*/
+typedef	union {
+	struct {
+		u64		: 32;			/* [31: 0] */
+		u64 cud_size	: 32;			/* [63:32] */
+	};
+	u64 word;	/* as entire register	*/
 } e2k_cute_dw1_t;
 
-typedef	struct e2k_cute_dw2_fields {	/* Structure of the third d-word */
-					/* of CUT entry			*/
-	u64	gd_base		: E2K_VA_SIZE;		/* [47: 0]	*/
-	u64	unused1		: 63 - E2K_VA_MSB;	/* [63:48]	*/
-} e2k_cute_dw2_fields_t;
-
-typedef	union e2k_cute_dw2 {
-	e2k_cute_dw2_fields_t	fields;	/* as fields		*/
-	u64			word;	/* as entire register	*/
+typedef	union {
+	struct {
+		u64 gd_base	: E2K_VA_SIZE;		/* [47: 0] */
+		u64		: 63 - E2K_VA_MSB;	/* [63:48] */
+	};
+	u64 word;	/* as entire register	*/
 } e2k_cute_dw2_t;
 
-typedef	struct e2k_cute_dw3_fields {	/* Structure of the fourth d-word */
-					/* of CUT entry			*/
-	u64	tsd_base	: 15;			/* [14: 0]	*/
-	u64	unused1		: 1;			/* [15:15]	*/
-	u64	tsd_size	: 15;			/* [30:16]	*/
-	u64	unused2		: 1;			/* [31:31]	*/
-	u64	gd_size		: 32;			/* [63:32]	*/
-} e2k_cute_dw3_fields_t;
-
-typedef	union e2k_cute_dw3 {
-	e2k_cute_dw3_fields_t	fields;	/* as fields		*/
-	u64			word;	/* as entire register	*/
+typedef	union {
+	struct {
+		u64 tsd_base	: 15;			/* [14: 0] */
+		u64		: 1;			/* [15:15] */
+		u64 tsd_size	: 15;			/* [30:16] */
+		u64		: 1;			/* [31:31] */
+		u64 gd_size	: 32;			/* [63:32] */
+	};
+	u64 word;	/* as entire register	*/
 } e2k_cute_dw3_t;
 
 /* Structure of entire CUT entry */
 typedef	struct e2k_cute {
-	e2k_cute_dw0_t	dw0;
-	e2k_cute_dw1_t	dw1;
-	e2k_cute_dw2_t	dw2;
-	e2k_cute_dw3_t	dw3;
+	union {
+		struct {
+			u64 cud_base	: E2K_VA_SIZE;		/* [47: 0] */
+			u64		: 56 - E2K_VA_MSB;	/* [56:48] */
+			u64 cud_prot	: 1;			/* [57] */
+			u64 cud_c	: 1;			/* [58] */
+			u64		: 5;			/* [63:59] */
+		};
+		e2k_cute_dw0_t dw0;
+	};
+	union {
+		struct {
+			u64		: 32;			/* [31: 0] */
+			u64 cud_size	: 32;			/* [63:32] */
+		};
+		e2k_cute_dw1_t dw1;
+	};
+	union {
+		struct {
+			u64 gd_base	: E2K_VA_SIZE;		/* [47: 0] */
+			u64		: 63 - E2K_VA_MSB;	/* [63:48] */
+		};
+		e2k_cute_dw2_t dw2;
+	};
+	union {
+		struct {
+			u64 tsd_base	: 15;			/* [14: 0] */
+			u64		: 1;			/* [15:15] */
+			u64 tsd_size	: 15;			/* [30:16] */
+			u64		: 1;			/* [31:31] */
+			u64 gd_size	: 32;			/* [63:32] */
+		};
+		e2k_cute_dw3_t dw3;
+	};
 } e2k_cute_t;
-
-#define	CUTE_CUD_BASE(p)	AS_STRUCT(p->dw0).cud_base
-#define	CUTE_CUD_SIZE(p)	AS_STRUCT(p->dw1).cud_size
-#define	CUTE_CUD_C(p)		AS_STRUCT(p->dw0).cud_c
-
-#define	CUTE_GD_BASE(p)		AS_STRUCT(p->dw2).gd_base
-#define	CUTE_GD_SIZE(p)		AS_STRUCT(p->dw3).gd_size
-
-#define	CUTE_TSD_BASE(p)	AS_STRUCT(p->dw3).tsd_base
-#define	CUTE_TSD_SIZE(p)	AS_STRUCT(p->dw3).tsd_size
 
 #endif /* !(__ASSEMBLY__) */
 

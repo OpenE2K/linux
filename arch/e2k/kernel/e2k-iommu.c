@@ -22,18 +22,9 @@
 #include <asm/e2k_debug.h>
 
 #include <asm-l/swiotlb.h>
-#include <asm-l/epic.h>
+#include <asm-l/pic.h>
 
 #include <trace/events/iommu.h>
-
-#undef	DEBUG_PASSTHROUGH_MODE
-#undef	DebugPT
-#define	DEBUG_PASSTHROUGH_MODE	0	/* IOMMU Passthrough debugging */
-#define	DebugPT(fmt, args...)					\
-({								\
-	if (DEBUG_PASSTHROUGH_MODE || kvm_debug)		\
-		pr_info("%s(): " fmt, __func__, ##args);	\
-})
 
 #define E2K_DTE_MAX_BUS_NR	(1 << 8)
 #define E2K_DTE_ENTRIES_NR	(E2K_DTE_MAX_BUS_NR * 256)
@@ -419,18 +410,19 @@ static void __e2k_iommu_free_pgtable(struct e2k_iommu_domain *d,
 static void e2k_iommu_init_hw(struct e2k_iommu *i)
 {
 	int node = i->node;
-	u64 d = __pa(i->dtable) | IOMMU_DTBAR_PRESENT |
-			IOMMU_DTBAR_CASHABLE_DTE | IOMMU_DTBAR_DFLT_SZ;
-	u64 p = __pa(i->default_pgtable) | IOMMU_PTBAR_PRESENT |
-			IOMMU_PTBAR_CASHABLE_TTE | IOMMU_PTBAR_DFLT_SZ;
+	u64 d, p;
 	u32 c = IOMMU_CTRL_NEW_VERS | IOMMU_CTRL_PREFETCH_EN |
 			 IOMMU_CTRL_CASHABLE_TTE | IOMMU_CTRL_ENAB;
 
 	if (i->dtable) {
+		d = __pa(i->dtable) | IOMMU_DTBAR_PRESENT |
+				IOMMU_DTBAR_CASHABLE_DTE | IOMMU_DTBAR_DFLT_SZ;
 		p = 0;
 		c |= IOMMU_CTRL_DEV_TABLE_EN;
 	} else {
 		d = 0;
+		p = __pa(i->default_pgtable) | IOMMU_PTBAR_PRESENT |
+				IOMMU_PTBAR_CASHABLE_TTE | IOMMU_PTBAR_DFLT_SZ;
 	}
 	e2k_iommu_write(node, 0, E2K_IOMMU_CTRL);
 	/* clear errors & unmask interrupts */
@@ -623,7 +615,7 @@ static void __e2k_iommu_free_pgtable(struct e2k_iommu_domain *d,
 	while (ptep != end) {
 		io_pte pte = *ptep++;
 
-		if (!pte || WARN_ON(iopte_leaf(pte)))
+		if (!pte || iopte_leaf(pte))
 			continue;
 
 		__e2k_iommu_free_pgtable(d, iova, lvl + 1, iopte_deref(pte));
@@ -751,7 +743,7 @@ static void __e2k_iommu_error_interrupt(char *str, int len, int iommu,
 	}
 }
 
-void e2k_iommu_error_interrupt(void)
+void e2k_iommu_error_interrupt(struct pt_regs *regs)
 {
 	int node = numa_node_id(), i;
 	char str[1024];
@@ -780,8 +772,8 @@ void e2k_iommu_error_interrupt(void)
 
 	debug_dma_dump_mappings(NULL);
 
-	ack_epic_irq();
-	irq_exit();
+	ack_pic_irq();
+	l_irq_exit();
 
 	if (iommu_panic_off)
 		pr_emerg("%s", str);
@@ -903,125 +895,6 @@ static char *e2k_iommu_cfg_for_device(char *str, bool disable)
 	return str;
 }
 
-#ifdef CONFIG_KVM_HOST_MODE
-/* Handle intercepted guest writes and reads */
-void e2k_iommu_guest_write_ctrl(u32 reg_value)
-{
-	if (reg_value & IOMMU_CTRL_ENAB)
-		DebugPT("e2k-iommu: guest enabled IOMMU support %s\n",
-			reg_value & IOMMU_CTRL_DEV_TABLE_EN ?
-			"with device table enabled: passthrough not supported" :
-			"with device table disabled: passthrough supported");
-}
-
-void e2k_iommu_flush_guest(struct kvm *kvm, u64 command)
-{
-	struct irq_remap_table *irt = kvm->arch.irt;
-	u32 edid = (u32) kvm->arch.vmid.nr | E2K_IOMMU_EDID_GUEST_MASK;
-	struct device *dev;
-	struct e2k_iommu *iommu;
-	union iommu_cmd_c reg;
-
-	dev = &irt->vfio_dev->dev;
-	iommu = dev_to_iommu(dev);
-
-	reg.raw = command;
-
-	if (!reg.bits.rs) {
-		pr_err("e2k-iommu: ignore guests's command without cmd_c.rs\n");
-		return;
-	}
-
-	switch (reg.bits.code) {
-	case FL_PTE:
-		e2k_iommu_flush(iommu, reg.bits.addr << IO_PAGE_SHIFT, edid,
-			FL_PTE);
-		break;
-	case FL_ALL:
-		e2k_iommu_flush(iommu, 0, edid, FL_ID);
-		break;
-	default:
-		pr_err("e2k-iommu: ignore unsupported guest's command %d\n",
-			reg.bits.code);
-		break;
-	}
-}
-
-void e2k_iommu_virt_enable(int node)
-{
-	unsigned int val;
-
-	DebugPT("e2k-iommu: enabling virtualization support (node %d)\n", node);
-
-	val = e2k_iommu_read(node, 0, E2K_IOMMU_CTRL);
-	if (!(val & IOMMU_CTRL_GT_EN)) {
-		val |= IOMMU_CTRL_GT_EN;
-		e2k_iommu_write(node, val, E2K_IOMMU_CTRL);
-	}
-
-}
-
-/* Enable second level of guest DMA translation */
-void e2k_iommu_setup_guest_2d_dte(struct kvm *kvm, u64 g_page_table)
-{
-	struct irq_remap_table *irt = kvm->arch.irt;
-	struct device *dev;
-	struct e2k_iommu *iommu;
-	struct e2k_iommu_domain *domain;
-	struct dte *dte_old, dte_new;
-	unsigned long flags;
-
-	dev = &irt->vfio_dev->dev;
-	iommu = dev_to_iommu(dev);
-	domain = to_e2k_domain(iommu_get_domain_for_dev(dev));
-	dte_old = dev_to_dte(iommu, dev);
-
-	memcpy(&dte_new, dte_old, sizeof(struct dte));
-
-	dte_new.g_enable = 1;
-	dte_new.g_cached = 1;
-	dte_new.g_addr_width = E2K_DTE_HVAW_48_BITS;
-	dte_new.g_page_table = g_page_table >> IO_PAGE_SHIFT;
-
-	spin_lock_irqsave(&iommu->lock, flags);
-
-	memcpy(dte_old, &dte_new, sizeof(struct dte));
-
-	spin_unlock_irqrestore(&iommu->lock, flags);
-
-	e2k_iommu_flush_domain(domain);
-}
-
-/* Enable first level of guest DMA translation and interrupt translation */
-static int e2k_iommu_setup_guest_dte(struct device *dev, int node,
-		struct e2k_iommu_domain *domain, struct dte *dteval)
-{
-	struct kvm *kvm = dev->archdata.kvm;
-	unsigned long int_table;
-
-	/* Should be initialized in kvm_setup_passthrough() */
-	if (!kvm)
-		return -EINVAL;
-
-	e2k_iommu_virt_enable(node);
-
-	domain->id = (unsigned int) kvm->arch.vmid.nr | E2K_IOMMU_EDID_GUEST_MASK;
-
-	int_table = __pa(page_address(kvm->arch.epic_pages));
-	dteval->int_table = int_table >> IO_PAGE_SHIFT;
-	dteval->id = kvm->arch.vmid.nr;
-	dteval->guest = 1;
-
-	return 0;
-}
-#else
-static int e2k_iommu_setup_guest_dte(struct device *dev, int node,
-		struct e2k_iommu_domain *domain, struct dte *dteval)
-{
-	return -EINVAL;
-}
-#endif
-
 #ifdef CONFIG_PM
 static int e2k_iommu_suspend(void)
 {
@@ -1052,6 +925,11 @@ static void e2k_iommu_resume(void)
 	}
 }
 
+void e2k_iommu_shutdown(void)
+{
+	e2k_iommu_suspend();
+}
+
 static struct syscore_ops e2k_iommu_syscore_ops = {
 	.resume		= e2k_iommu_resume,
 	.suspend	= e2k_iommu_suspend,
@@ -1063,6 +941,7 @@ static void __init e2k_iommu_init_pm_ops(void)
 }
 
 #else
+void e2k_iommu_shutdown(void) {}
 static void e2k_iommu_init_pm_ops(void) {}
 #endif	/* CONFIG_PM */
 #if defined CONFIG_IOMMU_DEBUGFS
@@ -1204,7 +1083,6 @@ static void e2k_iommu_detach_device(struct iommu_domain *iommu_domain,
 
 	if (!dev_is_pci(dev))
 		goto out;
-	dev->archdata.domain = NULL;
 	dte = dev_to_dte(i, dev);
 	if (dte) {
 		spin_lock_irqsave(&i->lock, flags);
@@ -1214,6 +1092,56 @@ static void e2k_iommu_detach_device(struct iommu_domain *iommu_domain,
 out:
 	e2k_iommu_flush_dev(i, dev);
 }
+
+void e2k_iommu_virt_enable(int node)
+{
+	unsigned int val;
+
+	pr_info("%s(): node %d\n", __func__, node);
+
+	val = e2k_iommu_read(node, 0, E2K_IOMMU_CTRL);
+	if (!(val & IOMMU_CTRL_GT_EN)) {
+		val |= IOMMU_CTRL_GT_EN;
+		e2k_iommu_write(node, val, E2K_IOMMU_CTRL);
+	}
+
+}
+
+int __e2k_iommu_set_kvm_device(struct device *dev, struct kvm *kvm)
+{
+	unsigned long int_table = __pa(page_address(kvm->arch.epic_pages));
+	unsigned int vmid = kvm->arch.vmid.nr;
+	struct e2k_iommu *i;
+	unsigned long flags;
+	struct dte *dte;
+
+	if (!e2k_iommu_check_device(dev))
+		return -EINVAL;
+	i = dev_to_iommu(dev);
+	dte = dev_to_dte(i, dev);
+	if (!dte)
+		return -EINVAL;
+
+	e2k_iommu_virt_enable(i->node);
+
+	spin_lock_irqsave(&i->lock, flags);
+	dte->int_table = int_table >> IO_PAGE_SHIFT;
+	dte->id = vmid;
+	dte->guest = 1;
+	spin_unlock_irqrestore(&i->lock, flags);
+
+	e2k_iommu_flush_dev(i, dev);
+
+	return 0;
+}
+
+void e2k_iommu_set_kvm_device(struct device *dev, struct kvm *kvm)
+{
+	if (kvm)
+		WARN_ON(__e2k_iommu_set_kvm_device(dev, kvm));
+	pr_info("%s(): finished\n", __func__);
+}
+EXPORT_SYMBOL(e2k_iommu_set_kvm_device);
 
 static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 				   struct device *dev)
@@ -1228,7 +1156,7 @@ static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 		.h_cached = 1,
 		.h_prefetch = 1,
 		.h_addr_width = E2K_DTE_HVAW_48_BITS,
-		.h_page_table = __pa(d->pgtable) >> IO_PAGE_SHIFT,
+		.h_page_table = (d->pgtable) ? (__pa(d->pgtable) >> IO_PAGE_SHIFT) : 0,
 		.int_enable = 1,
 		.id = iommu_group_id(dev->iommu_group),
 	};
@@ -1236,12 +1164,6 @@ static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 	if (!e2k_iommu_check_device(dev))
 		return -EINVAL;
 	i = dev_to_iommu(dev);
-
-	if (dev->archdata.domain)
-		e2k_iommu_detach_device(&dev->archdata.domain->domain,
-			dev);
-
-	dev->archdata.domain = d;
 
 	if (!dev_is_pci(dev))
 		goto out;
@@ -1252,15 +1174,7 @@ static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 	if (!d->e2k_iommu) {
 		d->e2k_iommu = i;
 		d->pgtable = i->default_pgtable;
-
-		if (iommu_domain->type == IOMMU_DOMAIN_UNMANAGED) {
-			if (e2k_iommu_setup_guest_dte(dev, i->node, d, &dteval)) {
-				mutex_unlock(&d->mutex);
-				return -EINVAL;
-			}
-		} else {
-			d->id = iommu_group_id(dev->iommu_group);
-		}
+		d->id = iommu_group_id(dev->iommu_group);
 	} else if (WARN_ON(d->e2k_iommu != i)) {
 		mutex_unlock(&d->mutex);
 		return -EINVAL;
@@ -1282,6 +1196,8 @@ static int e2k_iommu_attach_device(struct iommu_domain *iommu_domain,
 		memcpy(dte, &dteval, sizeof(struct dte));
 		spin_unlock_irqrestore(&i->lock, flags);
 	}
+
+	e2k_iommu_flush_dev(i, dev);
 out:
 	return 0;
 }
@@ -1318,13 +1234,10 @@ static struct iommu_domain *e2k_iommu_domain_alloc(unsigned type)
 static void e2k_iommu_domain_free(struct iommu_domain *iommu_domain)
 {
 	struct e2k_iommu_domain *d = to_e2k_domain(iommu_domain);
-	io_pte *ptep = d->pgtable;
 
 	iommu_put_dma_cookie(iommu_domain);
-	__e2k_iommu_free_pgtable(d, 0, E2K_IOMMU_START_LVL(), ptep);
-
-	if (!d->e2k_iommu || (d->e2k_iommu->default_pgtable != ptep))
-		__e2k_iommu_free_pages(ptep, E2K_IOMMU_GRANULE());
+	if (d->pgtable)
+		__e2k_iommu_free_pgtable(d, 0, E2K_IOMMU_START_LVL(), d->pgtable);
 
 	if (d->e2k_iommu)
 		e2k_iommu_flush_domain(d);
@@ -1413,7 +1326,7 @@ static bool e2k_iommu_capable(enum iommu_cap cap)
 	case IOMMU_CAP_CACHE_COHERENCY:
 		return true;
 	case IOMMU_CAP_INTR_REMAP:
-		return true; /* MSIs are just memory writes */
+		return true; /* Remapping isn't supported, but posting is */
 	case IOMMU_CAP_NOEXEC:
 		return true;
 	default:

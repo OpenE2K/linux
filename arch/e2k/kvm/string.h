@@ -9,55 +9,62 @@
 #include "mmu.h"
 #include "gaccess.h"
 
-static inline long
-kvm_fast_guest_kernel_tagged_memory_copy(struct kvm_vcpu *vcpu,
-		void *dst, const void *src, size_t len, size_t *copied,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static __priv_hypercall inline unsigned long
+kvm_priv_tagged_memory_copy(void *dst, const void *src, size_t len,
+			    unsigned long strd_opcode, unsigned long ldrd_opcode,
+			    bool prefetch)
 {
-	long ret;
-
-	if (unlikely(!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)dst) ||
-			!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)src))) {
-		/* only guest kernel memory areas can be copied */
-		ret = -EINVAL;
-		goto failed;
-	}
-
-	kvm_vcpu_set_dont_inject(vcpu);
-	ret = copy_aligned_user_tagged_memory(dst, src, len, copied,
-				strd_opcode, ldrd_opcode, prefetch);
-	kvm_vcpu_reset_dont_inject(vcpu);
-	if (likely(ret == 0))
-		return ret;
-
-failed:
-	return ret;
+	return native_fast_tagged_memory_copy(dst, src, len,
+			(ldst_rec_op_t) { .word = strd_opcode },
+			(ldst_rec_op_t) { .word = ldrd_opcode }, prefetch);
 }
 
-static inline long
-kvm_fast_guest_kernel_tagged_memory_set(struct kvm_vcpu *vcpu,
-		void *addr, u64 val, u64 tag, size_t len, size_t *cleared,
-		u64 strd_opcode)
+static __priv_hypercall inline unsigned long
+kvm_priv_tagged_memory_set(void *addr, u64 val, u64 tag, size_t len,
+			   u64 strd_opcode)
 {
-	long ret;
-
-	if (unlikely(!IS_GUEST_KERNEL_ADDRESS((e2k_addr_t)addr))) {
-		/* only guest kernel memory areas can be set */
-		ret = -EINVAL;
-		goto failed;
-	}
-
-	kvm_vcpu_set_dont_inject(vcpu);
-	ret = set_aligned_user_tagged_memory(addr, val, tag, len,
-					     cleared, strd_opcode);
-	kvm_vcpu_reset_dont_inject(vcpu);
-	if (likely(ret == 0))
-		return ret;
-
-failed:
-	return ret;
+	return native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
 }
+
+static __priv_hypercall inline unsigned long
+kvm_priv_tagged_memory_copy_user(void *dst, const void *src, size_t len,
+			unsigned long strd_opcode, unsigned long ldrd_opcode,
+			bool prefetch)
+{
+	struct task_struct *p = (struct task_struct *) NATIVE_READ_CURRENT_REG_VALUE();
+	unsigned long to_save_usr_pfault_jump;
+	unsigned long copied;
+
+	KVM_SET_USR_PFAULT("$.recovery_memcpy_fault", p, to_save_usr_pfault_jump);
+	copied = native_fast_tagged_memory_copy(dst, src, len,
+			(ldst_rec_op_t) { .word = strd_opcode },
+			(ldst_rec_op_t) { .word = ldrd_opcode }, prefetch);
+	KVM_RESTORE_USR_PFAULT(p, to_save_usr_pfault_jump);
+
+	return copied;
+}
+
+static __priv_hypercall inline unsigned long
+kvm_priv_tagged_memory_set_user(void *addr, u64 val, u64 tag, size_t len,
+				u64 strd_opcode)
+{
+	struct task_struct *p = (struct task_struct *) NATIVE_READ_CURRENT_REG_VALUE();
+	unsigned long to_save_usr_pfault_jump;
+	unsigned long cleared;
+
+	KVM_SET_USR_PFAULT("$.recovery_memset_fault", p, to_save_usr_pfault_jump);
+	cleared = native_fast_tagged_memory_set(addr, val, tag, len, strd_opcode);
+	KVM_RESTORE_USR_PFAULT(p, to_save_usr_pfault_jump);
+
+	return cleared;
+}
+
+extern long kvm_fast_guest_kernel_tagged_memory_copy_light_hcall(
+		struct kvm_vcpu *vcpu, void *dst, const void *src, size_t len,
+		unsigned long strd_opcode, unsigned long ldrd_opcode, int prefetch);
+extern long kvm_fast_guest_kernel_tagged_memory_set_light_hcall(
+		struct kvm_vcpu *vcpu, void *addr, u64 val, u64 tag, size_t len,
+		u64 strd_opcode);
 
 /*
  * optimized copy memory along with tags

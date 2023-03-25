@@ -47,9 +47,7 @@ extern void boot_native_write_MMU_OS_VAB_reg_value(unsigned long value);
 		NATIVE_READ_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_PID_NO))
 #define	NATIVE_WRITE_MMU_PID_REG(reg_val)				\
-		NATIVE_WRITE_MMU_REG( \
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_PID_NO),	\
-			mmu_reg_val(reg_val))
+		NATIVE_SET_MMUREG(cont,	mmu_reg_val(reg_val))
 #define	NATIVE_READ_MMU_U_PPTB_REG()					\
 		NATIVE_READ_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO))

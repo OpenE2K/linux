@@ -7,10 +7,12 @@
  *
  * Copyright 2001 Salavat S. Guiliazov (atic@mcst.ru)
  */
- 
+
+#include <linux/debugfs.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/mm.h>
+#include <linux/ratelimit.h>
 #include <linux/sizes.h>
 
 #include <asm/types.h>
@@ -22,6 +24,7 @@
 #include <asm/secondary_space.h>
 #include <asm/sic_regs.h>
 #include <asm/p2v/boot_map.h>
+#include <asm/secondary_space.h>
 
 #define CREATE_TRACE_POINTS
 #include "trace-tlb-flush.h"
@@ -37,9 +40,8 @@
 #define	DEBUG_PT_MODE		0	/* Data Caches */
 #define DebugPT(...)		DebugPrint(DEBUG_PT_MODE ,##__VA_ARGS__)
 
-#ifndef CONFIG_SMP
-unsigned long	mmu_last_context = CTX_FIRST_VERSION;
-#endif /* !CONFIG_SMP */
+u64 kernel_voffset __ro_after_init;
+EXPORT_SYMBOL(kernel_voffset);
 
 /*
  * Hardware MMUs page tables have some differences from one ISET to other
@@ -51,7 +53,7 @@ unsigned long	mmu_last_context = CTX_FIRST_VERSION;
  * Warning .boot_*() entries should be updated dinamicaly to point to
  * physical addresses of functions for arch/e2k/p2v/
  */
-pt_struct_t __nodedata pgtable_struct = {
+pt_struct_t __ro_after_init pgtable_struct = {
 	.type		= E2K_PT_TYPE,
 	.pt_v6		= false,	/* as default for compatibility */
 	.pfn_mask	= _PAGE_PFN_V3,
@@ -157,39 +159,6 @@ pt_struct_t __nodedata pgtable_struct = {
 };
 EXPORT_SYMBOL(pgtable_struct);
 
-
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-/*
- * Update all user PGD entries of current active mm.
- * PGDs are updated into CPU root page table from main user PGD table
- */
-void
-__flush_cpu_root_pt_mm(struct mm_struct *mm)
-{
-	if (MMU_IS_SEPARATE_PT())
-		return;
-	if (!THERE_IS_DUP_KERNEL)
-		return;
-	if (current->active_mm != mm)
-		return;
-	copy_user_pgd_to_kernel_root_pt(mm->pgd);
-}
-/*
- * Update all user PGD entries of current active mm.
- * PGDs are updated into CPU root page table from main user PGD table
- */
-void
-__flush_cpu_root_pt(void)
-{
-	if (MMU_IS_SEPARATE_PT())
-		return;
-	if (!THERE_IS_DUP_KERNEL)
-		return;
-	if (current->active_mm == &init_mm || !current->active_mm)
-		return;
-	copy_user_pgd_to_kernel_root_pt(current->active_mm->pgd);
-}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 
 /*
  * CACHES flushing:
@@ -373,9 +342,7 @@ void native_flush_icache_range_array(icache_range_array_t *icache_range_arr)
 
 	context = icache_range_arr->mm->context.cpumsk[cpu];
 
-	DebugIC("started: icache_range_arr "
-		"0x%lx\n",
-		icache_range_arr);
+	DebugIC("started: icache_range_arr 0x%lx\n", icache_range_arr);
 	if (context) {
 		for (i = 0; i < icache_range_arr->count; i++) {
 			icache_range_t icache_range =
@@ -386,16 +353,9 @@ void native_flush_icache_range_array(icache_range_array_t *icache_range_arr)
 					context);
 		}
 	} else if (icache_range_arr->mm == current->active_mm) {
-		unsigned long ctx, flags;
-
-		raw_all_irq_save(flags);
-		ctx = get_new_mmu_context(icache_range_arr->mm, cpu);
-		reload_context_mask(ctx);
-		raw_all_irq_restore(flags);
+		flush_mmu_pid(&icache_range_arr->mm->context);
 	}
-	DebugIC("finished: icache_range_arr "
-		"0x%lx\n",
-		icache_range_arr);
+	DebugIC("finished: icache_range_arr 0x%lx\n", icache_range_arr);
 }
 
 /*
@@ -430,16 +390,28 @@ void native_flush_icache_page(struct vm_area_struct *vma, struct page *page)
 int arch_dup_mmap(struct mm_struct *oldmm, struct mm_struct *mm)
 {
 	mm_context_t *mmu, *oldmmu;
+#ifdef CONFIG_PROTECTED_MODE
 	struct sival_ptr_list *oldlink;
+#endif
+#ifdef CONFIG_MAKE_ALL_PAGES_VALID
+	struct vm_area_struct *vma;
 
-	if (!oldmm)
-		return 0;
-	if (!mm)
-		return -EINVAL;
+	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+		if (!(vma->vm_flags & VM_PAGESVALID))
+			continue;
+
+		/* No need to flush TLB since there is
+		 * no user for the new mm yet. */
+		int ret = make_all_vma_pages_valid(vma, 0);
+		if (ret)
+			return ret;
+	}
+#endif
 
 	oldmmu = &oldmm->context;
 	mmu = &mm->context;
 
+#ifdef CONFIG_PROTECTED_MODE
 	init_rwsem(&mmu->sival_ptr_list_sem);
 	INIT_LIST_HEAD(&mmu->sival_ptr_list_head);
 
@@ -461,17 +433,21 @@ int arch_dup_mmap(struct mm_struct *oldmm, struct mm_struct *mm)
 		oldmm, mm);
 
 	mmu->pm_sc_debug_mode = oldmmu->pm_sc_debug_mode;
+#endif
 
 	return 0;
 }
 
 void arch_exit_mmap(struct mm_struct *mm)
 {
+#ifdef CONFIG_PROTECTED_MODE
 	struct sival_ptr_list *sival_ptr, *tmp;
+#endif
 
 	if (mm == NULL)
 		return;
 
+#ifdef CONFIG_PROTECTED_MODE
 	/* Release mmu->sival_ptr_list */
 	list_for_each_entry_safe(sival_ptr, tmp,
 			&mm->context.sival_ptr_list_head, link) {
@@ -479,10 +455,86 @@ void arch_exit_mmap(struct mm_struct *mm)
 		list_del(&sival_ptr->link);
 		kfree(sival_ptr);
 	}
+#endif
 
 	/* Release hw_contexts */
 	hw_contexts_destroy(&mm->context);
+
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+	if (mm->context.bincomp_info.info)
+		free_bin_comp_info(&mm->context.bincomp_info);
+	if (mm->context.bincomp_fdt)
+		free_bin_comp_fdt(mm->context.bincomp_fdt);
+#endif
 }
+
+#ifdef CONFIG_NUMA
+static void free_node_pgds(struct mm_struct *mm)
+{
+	mm_context_t *context = &mm->context;
+	int node;
+
+	if (MMU_IS_SEPARATE_PT())
+		return;
+
+	for_each_node_mask(node, context->pgds_nodemask) {
+		if (node == context->mm_pgd_node)
+			continue;
+
+		pgd_free(mm, context->node_pgds[node]);
+		context->node_pgds[node] = NULL;
+	}
+	nodes_clear(context->pgds_nodemask);
+}
+
+static int alloc_node_pgds(struct mm_struct *mm)
+{
+	mm_context_t *context = &mm->context;
+	int node;
+
+	memset(context->node_pgds, 0, sizeof(context->node_pgds));
+	nodes_clear(context->pgds_nodemask);
+	context->mm_pgd_node = NUMA_NO_NODE;
+
+	if (MMU_IS_SEPARATE_PT())
+		return 0;
+
+	/* Reuse already allocated mm->pgd on corresponding node */
+	BUG_ON(!mm->pgd);
+	node = page_to_nid(virt_to_page(mm->pgd));
+
+	context->node_pgds[node] = mm->pgd;
+	context->mm_pgd_node = node;
+	node_set(node, context->pgds_nodemask);
+
+	/* On nodes with memory allocate a new pgd,
+	 * nodes w/o memory will reuse mm->pgd. */
+	for_each_node(node) {
+		if (node == context->mm_pgd_node)
+			continue;
+
+		if (node_state(node, N_MEMORY)) {
+			context->node_pgds[node] = pgd_alloc_node(mm,
+								  node);
+			if (!context->node_pgds[node]) {
+				free_node_pgds(mm);
+				return -ENOMEM;
+			}
+			node_set(node, context->pgds_nodemask);
+		} else {
+			context->node_pgds[node] = mm->pgd;
+		}
+	}
+
+	return 0;
+}
+#else
+static void free_node_pgds(struct mm_struct *mm) { }
+static int alloc_node_pgds(struct mm_struct *mm)
+{
+	return 0;
+}
+#endif
 
 /*
  * Initialize a new mmu context.  This is invoked when a new
@@ -493,18 +545,18 @@ int __init_new_context(struct task_struct *p, struct mm_struct *mm,
 		mm_context_t *context)
 {
 	bool is_fork = p && (p != current);
+	mm_context_t *curr_context = &current->mm->context;
 	int ret;
 
 	memset(&context->cpumsk, 0, nr_cpu_ids * sizeof(context->cpumsk[0]));
 
+	mutex_init(&context->cut_mask_lock);
+
 	if (is_fork) {
 		/*
-		 * Copy data on user fork
-		 */
-		mm_context_t *curr_context = &current->mm->context;
-
-		/*
-		 * Copy cut mask from the context of parent process
+		 * Copy data on user fork:
+		 *
+		 * copy cut mask from the context of parent process
 		 * to the context of new process
 		 */
 		mutex_lock(&curr_context->cut_mask_lock);
@@ -516,15 +568,16 @@ int __init_new_context(struct task_struct *p, struct mm_struct *mm,
 		/*
 		 * Initialize by zero cut_mask of new process
 		 */
-		mutex_init(&context->cut_mask_lock);
 		bitmap_zero((unsigned long *) &context->cut_mask,
 				USER_CUT_AREA_SIZE/sizeof(e2k_cute_t));
 	}
 
 	atomic_set(&context->tstart, 1);
 
+#ifdef CONFIG_PROTECTED_MODE
 	init_rwsem(&context->sival_ptr_list_sem);
 	INIT_LIST_HEAD(&context->sival_ptr_list_head);
+#endif
 
 	INIT_LIST_HEAD(&context->delay_free_stacks);
 	init_rwsem(&context->core_lock);
@@ -533,9 +586,398 @@ int __init_new_context(struct task_struct *p, struct mm_struct *mm,
 	spin_lock_init(&context->cached_stacks_lock);
 	context->cached_stacks_size = 0;
 
-	if (mm == NULL)
+	if (!mm)
 		return 0;
 
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+	rwlock_init(&context->bincomp_info.lock);
+	rwlock_init(&context->bincomp_fdt_lock);
+
+	if (current->mm) {
+		bin_comp_info_t *oldbi = &curr_context->bincomp_info;
+
+		read_lock(&oldbi->lock);
+		if (oldbi->info)
+			ret = copy_bin_comp_info(oldbi, mm);
+		read_unlock(&oldbi->lock);
+		if (ret)
+			return ret;
+
+		read_lock(&curr_context->bincomp_fdt_lock);
+		context->bincomp_fdt = curr_context->bincomp_fdt;
+		if (context->bincomp_fdt)
+			atomic_inc(&context->bincomp_fdt->usage);
+		read_unlock(&curr_context->bincomp_fdt_lock);
+	}
+#endif
+
+	ret = alloc_node_pgds(mm);
+	if (ret)
+		return ret;
+
 	ret = hw_contexts_init(p, context, is_fork);
+	if (ret)
+		goto fail_free_pgds;
+
+	return 0;
+
+fail_free_pgds:
+	free_node_pgds(mm);
+
 	return ret;
 }
+
+/*
+ * Destroy a dead context.  This occurs when mmput drops the
+ * mm_users count to zero, the mmaps have been released, and
+ * all the page tables have been flushed.  The function job
+ * is to destroy any remaining processor-specific state.
+ */
+void destroy_context(struct mm_struct *mm)
+{
+	free_node_pgds(mm);
+
+	destroy_cached_stacks(&mm->context);
+}
+
+#ifdef CONFIG_HALF_SPEC_LOADS_INJECTION
+#include <asm/trace-defs.h>
+#include <linux/moduleparam.h>
+static unsigned long hs_inject_address, hs_inject_size,
+		     hs_inject_step = 0x1000;
+static bool hs_inject_default = true;
+core_param(hs_inject_address, hs_inject_address, ulong, 0644);
+core_param(hs_inject_size, hs_inject_size, ulong, 0644);
+core_param(hs_inject_step, hs_inject_step, ulong, 0644);
+core_param(hs_inject_default, hs_inject_default, bool, 0644);
+
+static bool differs_pt_dtlb(u64 pte, u64 dtlb)
+{
+	bool pt_successfull = (_PAGE_TEST_PRESENT(pte) && _PAGE_TEST_VALID(pte));
+	bool dtlb_successfull = (cpu_has(CPU_FEAT_ISET_V6))
+			? !!(dtlb & DTLB_ENTRY_SUCCESSFUL_V6)
+			: !(dtlb & DTLB_ENTRY_ERROR_MASK_V3);
+
+	if (pt_successfull != dtlb_successfull)
+		return true;
+
+	if (!dtlb_successfull)
+		return false;
+
+	if (cpu_has(CPU_FEAT_ISET_V6)) {
+		return _PAGE_TEST_WRITEABLE(pte) != !!(dtlb & DTLB_ENTRY_W_V6) ||
+			_PAGE_TEST_PRIV(pte) != !!(dtlb & DTLB_ENTRY_PV_or_U_S_V6) ||
+			_PAGE_TEST_VALID(pte) != !!(dtlb & DTLB_ENTRY_VVA_V6) ||
+			_PAGE_TEST(pte, UNI_PAGE_PROTECT) != !!(dtlb & DTLB_ENTRY_INT_PR_V6) ||
+			_PAGE_TEST(pte, UNI_PAGE_GLOBAL) != !!(dtlb & DTLB_ENTRY_G_V6) ||
+			_PAGE_TEST_NOT_EXEC(pte) != !!(dtlb & DTLB_ENTRY_NON_EX_V6) ||
+			_PAGE_MT_GET_VAL(pte) != DTLB_ENTRY_MT_GET_VAL(dtlb & DTLB_ENTRY_MT_V6) ||
+			_PAGE_PFN_TO_PADDR(pte) != DTLB_ENTRY_PHA_TO_PA_V6(dtlb);
+	} else {
+		return _PAGE_TEST_WRITEABLE(pte) != !!(dtlb & DTLB_ENTRY_WR_V3) ||
+			_PAGE_TEST_PRIV(pte) != !!(dtlb & DTLB_ENTRY_PV_V3) ||
+			_PAGE_TEST_VALID(pte) != !!(dtlb & DTLB_ENTRY_VVA_V3) ||
+			_PAGE_TEST(pte, UNI_PAGE_PROTECT) != !!(dtlb & DTLB_ENTRY_INT_PR_NON_EX_V3) ||
+			_PAGE_TEST(pte, UNI_PAGE_GLOBAL) != !!(dtlb & DTLB_ENTRY_G_V3) ||
+			_PAGE_TEST_NOT_EXEC(pte) != !!(dtlb & DTLB_ENTRY_NON_EX_U_S_V3) ||
+			_PAGE_PFN_TO_PADDR(pte) != DTLB_ENTRY_PHA_TO_PA_V3(dtlb);
+	}
+}
+
+static void check_single_addr(unsigned long address)
+{
+	u64 dtlb_entry, dtlb_pud, dtlb_pmd, dtlb_pte;
+	pgdval_t pgd;
+	pudval_t pud;
+	pmdval_t pmd;
+	pteval_t pte;
+	int pt_level;
+
+	if (!current->mm)
+		return;
+
+	trace_get_va_translation(current->mm, address, &pgd, &pud, &pmd, &pte,
+			&pt_level, PT_DTLB_TRANSLATION_AUTO);
+	trace_get_dtlb_translation(current->mm, address, &dtlb_entry, &dtlb_pud,
+			&dtlb_pmd, &dtlb_pte, pt_level, PT_DTLB_TRANSLATION_AUTO);
+
+	if (!differs_pt_dtlb(pgd, dtlb_pud) &&
+	    !(pt_level <= E2K_PUD_LEVEL_NUM && differs_pt_dtlb(pud, dtlb_pmd)) &&
+	    !(pt_level <= E2K_PMD_LEVEL_NUM && differs_pt_dtlb(pmd, dtlb_pte)) &&
+	    !(pt_level <= E2K_PTE_LEVEL_NUM && differs_pt_dtlb(pte, dtlb_entry)))
+		return;
+
+	trace_printk("DTLB contents for address 0x%lx do not match page table\n"
+		"Page table (all f's if entry hasn't been read)\n"
+		"  pgd 0x%lx\n"
+		"  pud 0x%lx\n"
+		"  pmd 0x%lx\n"
+		"  pte 0x%lx\n"
+		"Probed DTLB entries:\n"
+		"  pud 0x%llx\n"
+		"  pmd 0x%llx\n"
+		"  pte 0x%llx\n"
+		" addr 0x%llx\n",
+		address,
+		(pt_level <= E2K_PGD_LEVEL_NUM) ? pgd : -1UL,
+		(pt_level <= E2K_PUD_LEVEL_NUM) ? pud : -1UL,
+		(pt_level <= E2K_PMD_LEVEL_NUM) ? pmd : -1UL,
+		(pt_level <= E2K_PTE_LEVEL_NUM) ? pte : -1UL,
+		(pt_level <= E2K_PUD_LEVEL_NUM) ? dtlb_pud : -1ULL,
+		(pt_level <= E2K_PMD_LEVEL_NUM) ? dtlb_pmd : -1ULL,
+		(pt_level <= E2K_PTE_LEVEL_NUM) ? dtlb_pte : -1ULL,
+		dtlb_entry);
+	tracing_off();
+}
+
+void debug_inject_half_spec_loads(bool check)
+{
+	unsigned long addr;
+
+	static DEFINE_RATELIMIT_STATE(hs_loads_rs, 2 * HZ, 500);
+	hs_loads_rs.flags |= RATELIMIT_MSG_ON_RELEASE;
+
+	if (!__ratelimit(&hs_loads_rs))
+		return;
+
+	if (hs_inject_size) {
+		for (addr = hs_inject_address;
+				addr < hs_inject_address + hs_inject_size;
+				addr += hs_inject_step) {
+			E2K_HALF_SPEC_LOAD(addr);
+		}
+
+		if (check) {
+			for (addr = hs_inject_address;
+					addr < hs_inject_address + hs_inject_size;
+					addr += hs_inject_step) {
+				check_single_addr(addr);
+			}
+		}
+	}
+
+	if (hs_inject_default) {
+		for (addr = 0; addr < ULL(0x80000); addr += 4 * PAGE_SIZE) {
+			E2K_HALF_SPEC_LOAD(addr);
+			if (check)
+				check_single_addr(addr);
+		}
+
+		for (addr = KERNEL_VPTB_BASE_ADDR; addr < ULL(0x1000000000000);
+				addr += 1UL << 36) {
+			E2K_HALF_SPEC_LOAD(addr);
+			if (check)
+				check_single_addr(addr);
+		}
+
+		E2K_HALF_SPEC_LOAD(0xffffc0000000UL);
+		if (check)
+			check_single_addr(0xffffc0000000UL);
+		E2K_HALF_SPEC_LOAD(0xffffffe00000UL);
+		if (check)
+			check_single_addr(0xffffffe00000UL);
+		E2K_HALF_SPEC_LOAD(0xfffffffff000UL);
+		if (check)
+			check_single_addr(0xfffffffff000UL);
+	}
+}
+
+static int test_half_spec_mode(void)
+{
+	debug_inject_half_spec_loads(false);
+	return 0;
+}
+late_initcall(test_half_spec_mode);
+#endif /* CONFIG_HALF_SPEC_LOADS_INJECTION */
+
+
+/* Since CTX_FIRST_VERSION > 0 and after that last_mmu_context
+ * only increases, we know that this variable is never 0.  And
+ * if some TLB flush sets mm->context.cpumsk to 0, then version
+ * check will automatically fail (in other words, we can just
+ * compare contexts versions without comparing the context with 0
+ * in get_mmu_pid_irqs_off()). */
+DEFINE_PER_CPU(u64, last_mmu_context) = CTX_FIRST_VERSION;
+/* This is the current context value - i.e. the value that
+ * should go into %pid before trying to access userspace. */
+DEFINE_PER_CPU(u64, current_mmu_context) = E2K_KERNEL_CONTEXT;
+EXPORT_PER_CPU_SYMBOL(current_mmu_context);
+/* User PT base cached for fast retrieval in uaccess_enable() */
+DEFINE_PER_CPU(u64, u_root_ptb) = ULL(-1);
+EXPORT_PER_CPU_SYMBOL(u_root_ptb);
+
+/*
+ * Get process new MMU context. This is needed when the page table
+ * pointer is changed or when the CONTEXT of the current process is updated
+ * This function is called under closed interrupts (including NMIs).
+ */
+u64 get_new_mmu_pid_irqs_off(mm_context_t *context, int cpu)
+{
+	u64 ctx, next;
+
+	debug_inject_half_spec_loads(false);
+
+	/* Otherwise there is a possibility that a half.-speculative load
+	 * between flush_TLB_all() and later set_MMU_CONT() will create
+	 * an invalid DTLB entry for current context. */
+	VM_BUG_ON(READ_MMU_PID() != E2K_KERNEL_CONTEXT);
+
+	ctx = raw_cpu_read(last_mmu_context);
+	next = ctx + 1;
+
+	if (unlikely(CTX_HARDWARE(next) == E2K_KERNEL_CONTEXT)) {
+		++next;
+		flush_TLB_all();
+		flush_ICACHE_all();
+		if (unlikely(CTX_VERSION(next) < CTX_FIRST_VERSION)) {
+			next = CTX_FIRST_VERSION;
+			if (CTX_HARDWARE(next) == E2K_KERNEL_CONTEXT)
+				++next;
+		}
+	}
+
+	/* Another CPU might have written 0 to our cpu's mm context
+	 * while we were getting the next context. But it is OK since
+	 * we are changing the context anyway, and if this happens we
+	 * will just rewrite that 0 with the new context. */
+	context->cpumsk[cpu] = next;
+	raw_cpu_write(last_mmu_context, next);
+
+	return next;
+}
+
+
+#ifdef CONFIG_DEBUG_FS
+static void tlb_contents_show_entry(struct seq_file *seq, u64 line, u64 set)
+{
+	u64 vfn;
+	dtlb_tag_t tag;
+	dtlb_entry_t entry;
+	dtlb_reg_op_t dtlb_reg_op = {
+		.type = tlb_addr_tag_access,
+		.setN = set,
+		.lineN_small = line,
+		.lineN_huge = line,
+	};
+	bool huge = (set == 1 && MMU_CR_KERNEL.set1 ||
+		     set == 2 && MMU_CR_KERNEL.set2 ||
+		     set == 3 && MMU_CR_KERNEL.set3);
+
+	tag.word = READ_DTLB_REG(dtlb_reg_op.word);
+
+	/* Do not print inactive entries */
+	if (!cpu_has(CPU_FEAT_ISET_V6) && !tag.v3.val ||
+	    cpu_has(CPU_FEAT_ISET_V6) && !tag.v6.val) {
+		seq_printf(seq, "Line %3lld set %lld: empty\n\n\n", line, set);
+		return;
+	}
+
+	dtlb_reg_op.type = tlb_addr_entry_access;
+	entry.word = READ_DTLB_REG(dtlb_reg_op.word);
+
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		vfn = ((u64) tag.v3.va_tag << 8);
+		if (!huge)
+			vfn |= line;
+
+		seq_printf(seq, "Line %3lld set %lld:\n"
+			"  tag:   %016llx%s%s|context %x|va_tag %x|vfn %llx\n"
+			"  entry: %016llx%s%s%s%s%s%s%s%s%s%s%s%s|pha %x\n",
+			line, set,
+			tag.word,
+			(tag.v3.g) ? "|global" : "",
+			(tag.v3.root) ? "|root" : "",
+			tag.v3.context,
+			tag.v3.va_tag,
+			vfn,
+			entry.word,
+			(entry.v3.wr) ? "|writable" : "",
+			(entry.v3.non_ex) ? "|non_ex" : "",
+			(entry.v3.pwt) ? "|PWT" : "",
+			(entry.v3.pcd1) ? "|CD1" : "",
+			(entry.v3.pcd2) ? "|CD2" : "",
+			(entry.v3.d) ? "|dirty" : "",
+			(entry.v3.g) ? "|global" : "",
+			(entry.v3.nwa) ? "|NWA" : "",
+			(entry.v3.vva) ? "|valid" : "",
+			(entry.v3.pv) ? "|priv" : "",
+			(entry.v3.int_pr) ? "|int_pr" : "",
+			(entry.v3.uc) ? "|UC" : "",
+			entry.v3.pha);
+	} else { /* iset v6 */
+		vfn = ((u64) tag.v6.addr_tag << 8);
+		if (!huge)
+			vfn |= line;
+
+		seq_printf(seq, "Line %3lld set %lld:\n"
+			"  tag:   %016llx%s%s%s|pid %x|gid %x|addr_tag %x|vfn %llx\n"
+			"  entry: %016llx%s%s%s%s%s%s%s%s%s|mt_ma %x|mt_exc %x|pha %llx\n",
+			line, set,
+			tag.word,
+			(tag.v6.g) ? "|global" : "",
+			(tag.v6.root) ? "|root" : "",
+			(tag.v6.virt) ? "|virt" : "",
+			tag.v6.pid,
+			tag.v6.gid,
+			tag.v6.addr_tag,
+			vfn,
+			entry.word,
+			(entry.v6.wr_exc) ? "|wr_exc" : "",
+			(entry.v6.wr_int) ? "|wr_int" : "",
+			(entry.v6.pv) ? "|priv" : "",
+			(entry.v6.vva) ? "|valid" : "",
+			(entry.v6.int_pr) ? "|int_pr" : "",
+			(entry.v6.d) ? "|dirty" : "",
+			(entry.v6.g) ? "|global" : "",
+			(entry.v6.nwa) ? "|NWA" : "",
+			(entry.v6.non_ex) ? "|non_ex" : "",
+			entry.v6.mt_ma,
+			entry.v6.mt_exc,
+			entry.v6.pha);
+	}
+}
+
+static void tlb_contents_show_ipi(void *arg)
+{
+	struct seq_file *seq = arg;
+	u64 line, set;
+
+	for (line = 0; line < NATIVE_TLB_LINES_NUM; line++) {
+		for (set = 0; set < NATIVE_TLB_SETS_NUM; set++) {
+			tlb_contents_show_entry(seq, line, set);
+		}
+	}
+}
+
+static int tlb_contents_show(struct seq_file *seq, void *unused)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		seq_printf(seq, "CPU%d:\n", cpu);
+		smp_call_function_single(cpu, tlb_contents_show_ipi, seq, true);
+	}
+
+	return 0;
+}
+
+static int tlb_contents_seq_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, tlb_contents_show, NULL);
+}
+
+static const struct file_operations tlb_contents_fops = {
+	.open    = tlb_contents_seq_open,
+	.read	 = seq_read,
+	.llseek	 = seq_lseek,
+	.release = single_release,
+};
+
+static int __init tlb_contents_create(void)
+{
+	debugfs_create_file("tlb_contents", S_IRUSR,
+			    arch_debugfs_dir, NULL, &tlb_contents_fops);
+	return 0;
+}
+late_initcall(tlb_contents_create);
+#endif /* CONFIG_DEBUG_FS */

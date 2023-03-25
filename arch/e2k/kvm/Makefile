@@ -18,15 +18,17 @@ kvm-$(CONFIG_KVM_HOST_MODE)	+= pt-structs.o switch.o \
 				   lapic.o ioapic.o cepic.o ioepic.o \
 				   irq_comm.o timer.o virq.o io.o \
 				   user_area.o nid.o vmid.o gpid.o \
-				   hypercalls.o process.o ttable.o \
+				   hypercalls.o process.o ttable.o priv-hypercalls.o \
 				   trap_table.o cpu.o mm.o mmu-flush.o \
 				   boot_spinlock.o spinlock.o \
-				   runstate.o complete.o \
+				   complete.o string.o  recovery-ldst.o \
 				   sic-nbsr.o lt.o spmc.o gaccess.o debug.o \
 				   proc_context_stacks.o ctx_signal_stacks.o
 kvm-$(CONFIG_KVM_GVA_CACHE)	+= gva_cache.o
 kvm-$(CONFIG_KVM_GVA_CACHE_STAT) += gva_cache_stat.o
 kvm-y				+= kvm-e2k.o
+kvm-$(CONFIG_DEBUG_VCPU_RUNSTATE) += runstate.o
+
 obj-y				+= cpu/
 
 kvm-$(CONFIG_KVM_MMIO)         += $(KVM)/coalesced_mmio.o
@@ -43,14 +45,28 @@ AFLAGS_trap_table.o += -march=elbrus-v6
 # We should no instrument these files
 CFLAGS_REMOVE_ttable.o := -fprofile-generate-kernel
 
-# -fexclude-ctpr2: make sure that AAU is not zeroed before we get to it
-# -fno-dam - hardware bug 124206 workaround
 CFLAGS_REMOVE_hv_cpu.o = $(CFLAGS_ALL_CPUS)
-CFLAGS_hv_cpu.o := -march=elbrus-v6 -fexclude-ctpr2 -fno-dam
+CFLAGS_hv_cpu.o := -march=elbrus-v6
 CFLAGS_REMOVE_hv_intercepts.o = $(CFLAGS_ALL_CPUS)
 CFLAGS_hv_intercepts.o := -march=elbrus-v6
+CFLAGS_REMOVE_hv_glaunch.o = $(CFLAGS_ALL_CPUS)
+CFLAGS_hv_glaunch.o := -march=elbrus-v6
 
-kvm-$(CONFIG_KVM_HW_VIRTUALIZATION) += hv_cpu.o hv_mmu.o hv_intercepts.o
+# "-fexclude-ctpr2" - make sure that AAU is not zeroed before we get to it
+# "-fno-dam" - hardware bug 124206 workaround (CPU_HWBUG_L1I_STOPS_WORKING)
+CFLAGS_hv_glaunch.o += -fexclude-ctpr2
+ifeq ($(CONFIG_MIGHT_HAVE_CPU_HWBUG_L1I_STOPS_WORKING),y)
+CFLAGS_hv_glaunch.o += $(call cc-option,-fno-dam)
+endif
+
+# Avoid half-speculative loads (both normal and from AAU)
+# in kvm_light_hcalls() because it is executed with guest's
+# page tables and the can be no unexpected page faults.
+# TODO bug 140465 - set attribute((optimize)) on kvm_light_hcalls instead
+CFLAGS_hypercalls.o += $(call cc-option,-fno-semi-spec-ld) \
+		    $(call cc-option,-fno-loop-apb)
+
+kvm-$(CONFIG_KVM_HW_VIRTUALIZATION) += hv_cpu.o hv_mmu.o hv_intercepts.o hv_glaunch.o
 
 kvm-y += intercepts.o
 ifeq ($(CONFIG_KVM_PARAVIRTUALIZATION),y)

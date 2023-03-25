@@ -10,6 +10,7 @@
 #include <asm/debug_print.h>
 #include <asm/mmu_regs.h>
 #include <asm/machdep.h>
+#include <asm/tlbflush.h> /* flush_tlb_kernel_range() */
 
 #include <uapi/asm/e2k_syswork.h>
 #include <asm/mmu_regs_access.h>
@@ -25,7 +26,7 @@
  */
 
 /*
- * Caches aren't brain-dead on the E2K
+ * Caches are clever on the E2K...
  */
 #define flush_cache_all()			do { } while (0)
 #define flush_cache_mm(mm)			do { } while (0)
@@ -37,7 +38,28 @@
 #define flush_dcache_page(page)			do { } while (0)
 #define flush_dcache_mmap_lock(mapping)		do { } while (0)
 #define flush_dcache_mmap_unlock(mapping)	do { } while (0)
-#define flush_cache_vmap(start, end)		do { } while (0)
+/*
+ * ...sometimes too clever for their own good
+ *
+ * Half-speculative loads can write empty PTE value to DTLB if they
+ * accidentally hit into unmapped area. After mapping that area
+ * consecutive h.-s. loads would return a diagnostic value causing
+ * kernel to crash. So we flush those empty PTEs from DTLB here.
+ *
+ * For guest kernels without hardware virualization support we have
+ * a similar situation.  Even if such kernel is built without
+ * CONFIG_HALF_SPECULATIVE_KERNEL, modern lcc versions will still
+ * use half-speculative loads (although rather carefully, just for
+ * addresses that are known to be good).  So there might be a h.-s.
+ * load from VMALLOC area, and we need to have shadow page tables
+ * updated with valid bit to avoid putting empty PTEs into DTLB.
+ */
+#define flush_cache_vmap(start, end) \
+do { \
+	if (IS_ENABLED(CONFIG_HALF_SPECULATIVE_KERNEL) || \
+			IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) \
+		flush_tlb_kernel_range(start, end); \
+} while (0)
 #define flush_cache_vunmap(start, end)		do { } while (0)
 
 /*

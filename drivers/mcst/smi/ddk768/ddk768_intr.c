@@ -20,6 +20,7 @@
  * Change interrupt mask 
  */
 void setIntMask(
+	struct smi_device *sdev,
     unsigned long mask_on, 
     unsigned long mask_off
 )
@@ -27,35 +28,35 @@ void setIntMask(
     unsigned long mask;
 
     /* Get current interrupt mask */
-    mask = peekRegisterDWord(INT_MASK);
+	mask = peekRegisterDWord(sdev->rmmio, INT_MASK);
 
     /* Enable new masks and disable old masks */
     mask = mask | mask_on;
     mask = mask & ~mask_off;
 
     /* Program new interrupt mask */
-    pokeRegisterDWord(INT_MASK, mask);
+	pokeRegisterDWord(sdev->rmmio, INT_MASK, mask);
 }
 
 
-void sb_IRQMask(int irq_num)
+void sb_IRQMask(struct smi_device *sdev, int irq_num)
 {
 		unsigned int mask;
-        mask = peekRegisterDWord(INT_MASK);
+		mask = peekRegisterDWord(sdev->rmmio, INT_MASK);
         mask &= ~(0x1<<irq_num);
-        pokeRegisterDWord(INT_MASK,mask);  
+		pokeRegisterDWord(sdev->rmmio, INT_MASK, mask);
   
 }
 
 
 
 
-void sb_IRQUnmask(int irq_num)
+void sb_IRQUnmask(struct smi_device *sdev, int irq_num)
 {
 		unsigned int mask;
-        mask = peekRegisterDWord(INT_MASK);
+		mask = peekRegisterDWord(sdev->rmmio, INT_MASK);
         mask = mask | 0x1<<irq_num;
-        pokeRegisterDWord(INT_MASK,mask);  
+		pokeRegisterDWord(sdev->rmmio, INT_MASK, mask);
   
 }
 

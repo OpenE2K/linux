@@ -960,11 +960,11 @@ pvr_buffer_sync_wait_handle_get(struct pvr_buffer_sync_context *ctx,
 		goto exit;
 
 retry:
-	seq = read_seqcount_begin(&resv->seq);
+	seq = read_seqbegin(&resv->seq);
 	rcu_read_lock();
 	resv_list = rcu_dereference(resv->fence);
 
-	if (read_seqcount_retry(&resv->seq, seq))
+	if (read_seqretry(&resv->seq, seq))
 		goto unlock_retry;
 
 	if (resv_list) {
@@ -984,7 +984,7 @@ retry:
 	if (!wait_fence) {
 		fence = rcu_dereference(resv->fence_excl);
 
-		if (read_seqcount_retry(&resv->seq, seq))
+		if (read_seqretry(&resv->seq, seq))
 			goto unlock_retry;
 
 		if (fence &&

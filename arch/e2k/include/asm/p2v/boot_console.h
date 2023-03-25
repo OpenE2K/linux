@@ -33,7 +33,7 @@
 		boot_opts_func_entry(boot_serial_boot_console_opts, func)
 
 extern unsigned char serial_dump_console_num;
-#define boot_serial_boot_console_num  boot_get_vo_value(serial_dump_console_num)
+#define boot_serial_dump_console_num  boot_get_vo_value(serial_dump_console_num)
 
 extern void __init_recv boot_setup_serial_console(bool bsp, boot_info_t *);
 #endif /* CONFIG_SERIAL_BOOT_PRINTK */

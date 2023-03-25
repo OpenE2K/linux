@@ -16,6 +16,7 @@
 #include <linux/of_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
+#include <linux/regmap.h>
 
 #include <video/mipi_display.h>
 
@@ -247,6 +248,9 @@ struct dw_mipi_dsi {
 	struct dw_mipi_dsi *slave; /* dual-dsi slave ptr */
 
 	const struct dw_mipi_dsi_plat_data *plat_data;
+#ifdef CONFIG_MCST
+	struct regmap *regm;
+#endif
 };
 
 /*
@@ -280,14 +284,30 @@ static inline struct dw_mipi_dsi *bridge_to_dsi(struct drm_bridge *bridge)
 	return container_of(bridge, struct dw_mipi_dsi, bridge);
 }
 
-static inline void dsi_write(struct dw_mipi_dsi *dsi, u32 reg, u32 val)
+static inline void __dsi_write(struct dw_mipi_dsi *dsi, u32 reg, u32 val)
 {
+#ifdef CONFIG_MCST
+	regmap_write(dsi->regm, reg, val);
+#else
 	writel(val, dsi->base + reg);
+#endif
 }
+
+#define dsi_write(__dsi, __offset, __val) do {				\
+	unsigned __val2 = __val;				\
+	DRM_DEV_DEBUG_KMS(__dsi->dev, "W: %x: %s\n", __val2, # __offset);	\
+	__dsi_write(__dsi, __offset, __val2);				\
+} while (0)
 
 static inline u32 dsi_read(struct dw_mipi_dsi *dsi, u32 reg)
 {
+#ifdef CONFIG_MCST
+	unsigned int val = 0;
+	regmap_read(dsi->regm, reg, &val);
+	return val;
+#else
 	return readl(dsi->base + reg);
+#endif
 }
 
 static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
@@ -295,8 +315,10 @@ static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
 {
 	struct dw_mipi_dsi *dsi = host_to_dsi(host);
 	const struct dw_mipi_dsi_plat_data *pdata = dsi->plat_data;
+#ifndef CONFIG_MCST
 	struct drm_bridge *bridge;
 	struct drm_panel *panel;
+#endif
 	int ret;
 
 	if (device->lanes > dsi->plat_data->max_data_lanes) {
@@ -309,7 +331,7 @@ static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
 	dsi->channel = device->channel;
 	dsi->format = device->format;
 	dsi->mode_flags = device->mode_flags;
-
+#ifndef CONFIG_MCST
 	ret = drm_of_find_panel_or_bridge(host->dev->of_node, 1, 0,
 					  &panel, &bridge);
 	if (ret)
@@ -320,8 +342,8 @@ static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
 		if (IS_ERR(bridge))
 			return PTR_ERR(bridge);
 	}
-
 	dsi->panel_bridge = bridge;
+#endif
 
 	drm_bridge_add(&dsi->bridge);
 
@@ -373,9 +395,15 @@ static int dw_mipi_dsi_gen_pkt_hdr_write(struct dw_mipi_dsi *dsi, u32 hdr_val)
 	int ret;
 	u32 val, mask;
 
+#ifdef CONFIG_MCST
+	ret = regmap_read_poll_timeout(dsi->regm, DSI_CMD_PKT_STATUS,
+				 val, !(val & GEN_CMD_FULL), 1000,
+				 CMD_PKT_STATUS_TIMEOUT_US);
+#else
 	ret = readl_poll_timeout(dsi->base + DSI_CMD_PKT_STATUS,
 				 val, !(val & GEN_CMD_FULL), 1000,
 				 CMD_PKT_STATUS_TIMEOUT_US);
+#endif	/*CONFIG_MCST*/
 	if (ret) {
 		dev_err(dsi->dev, "failed to get available command FIFO\n");
 		return ret;
@@ -384,9 +412,15 @@ static int dw_mipi_dsi_gen_pkt_hdr_write(struct dw_mipi_dsi *dsi, u32 hdr_val)
 	dsi_write(dsi, DSI_GEN_HDR, hdr_val);
 
 	mask = GEN_CMD_EMPTY | GEN_PLD_W_EMPTY;
+#ifdef CONFIG_MCST
+	ret = regmap_read_poll_timeout(dsi->regm, DSI_CMD_PKT_STATUS,
+				 val, (val & mask) == mask,
+				 1000, CMD_PKT_STATUS_TIMEOUT_US);
+#else
 	ret = readl_poll_timeout(dsi->base + DSI_CMD_PKT_STATUS,
 				 val, (val & mask) == mask,
 				 1000, CMD_PKT_STATUS_TIMEOUT_US);
+#endif
 	if (ret) {
 		dev_err(dsi->dev, "failed to write command FIFO\n");
 		return ret;
@@ -416,9 +450,15 @@ static int dw_mipi_dsi_write(struct dw_mipi_dsi *dsi,
 			len -= pld_data_bytes;
 		}
 
+#ifdef CONFIG_MCST
+		ret = regmap_read_poll_timeout(dsi->regm, DSI_CMD_PKT_STATUS,
+					 val, !(val & GEN_PLD_W_FULL), 1000,
+					 CMD_PKT_STATUS_TIMEOUT_US);
+#else
 		ret = readl_poll_timeout(dsi->base + DSI_CMD_PKT_STATUS,
 					 val, !(val & GEN_PLD_W_FULL), 1000,
 					 CMD_PKT_STATUS_TIMEOUT_US);
+#endif
 		if (ret) {
 			dev_err(dsi->dev,
 				"failed to get available write payload FIFO\n");
@@ -439,9 +479,15 @@ static int dw_mipi_dsi_read(struct dw_mipi_dsi *dsi,
 	u32 val;
 
 	/* Wait end of the read operation */
+#ifdef CONFIG_MCST
+	ret = regmap_read_poll_timeout(dsi->regm, DSI_CMD_PKT_STATUS,
+				 val, !(val & GEN_RD_CMD_BUSY),
+				 1000, CMD_PKT_STATUS_TIMEOUT_US);
+#else
 	ret = readl_poll_timeout(dsi->base + DSI_CMD_PKT_STATUS,
 				 val, !(val & GEN_RD_CMD_BUSY),
 				 1000, CMD_PKT_STATUS_TIMEOUT_US);
+#endif
 	if (ret) {
 		dev_err(dsi->dev, "Timeout during read operation\n");
 		return ret;
@@ -449,9 +495,15 @@ static int dw_mipi_dsi_read(struct dw_mipi_dsi *dsi,
 
 	for (i = 0; i < len; i += 4) {
 		/* Read fifo must not be empty before all bytes are read */
+#ifdef CONFIG_MCST
+		ret = regmap_read_poll_timeout(dsi->regm, DSI_CMD_PKT_STATUS,
+					 val, !(val & GEN_PLD_R_EMPTY),
+					 1000, CMD_PKT_STATUS_TIMEOUT_US);
+#else
 		ret = readl_poll_timeout(dsi->base + DSI_CMD_PKT_STATUS,
 					 val, !(val & GEN_PLD_R_EMPTY),
 					 1000, CMD_PKT_STATUS_TIMEOUT_US);
+#endif
 		if (ret) {
 			dev_err(dsi->dev, "Read payload FIFO is empty\n");
 			return ret;
@@ -764,8 +816,10 @@ static void dw_mipi_dsi_dphy_init(struct dw_mipi_dsi *dsi)
 	/* Clear PHY state */
 	dsi_write(dsi, DSI_PHY_RSTZ, PHY_DISFORCEPLL | PHY_DISABLECLK
 		  | PHY_RSTZ | PHY_SHUTDOWNZ);
+#ifdef CONFIG_MCST
 	dsi_write(dsi, DSI_PHY_TST_CTRL0, PHY_UNTESTCLR);
 	dsi_write(dsi, DSI_PHY_TST_CTRL0, PHY_TESTCLR);
+#endif
 	dsi_write(dsi, DSI_PHY_TST_CTRL0, PHY_UNTESTCLR);
 }
 
@@ -777,14 +831,25 @@ static void dw_mipi_dsi_dphy_enable(struct dw_mipi_dsi *dsi)
 	dsi_write(dsi, DSI_PHY_RSTZ, PHY_ENFORCEPLL | PHY_ENABLECLK |
 		  PHY_UNRSTZ | PHY_UNSHUTDOWNZ);
 
+#ifdef CONFIG_MCST
+	ret = regmap_read_poll_timeout(dsi->regm, DSI_PHY_STATUS, val,
+				 val & PHY_LOCK, 1000, PHY_STATUS_TIMEOUT_US);
+#else
 	ret = readl_poll_timeout(dsi->base + DSI_PHY_STATUS, val,
 				 val & PHY_LOCK, 1000, PHY_STATUS_TIMEOUT_US);
+#endif
 	if (ret)
 		DRM_DEBUG_DRIVER("failed to wait phy lock state\n");
 
+#ifdef CONFIG_MCST
+	ret = regmap_read_poll_timeout(dsi->regm, DSI_PHY_STATUS,
+				 val, val & PHY_STOP_STATE_CLK_LANE, 1000,
+				 PHY_STATUS_TIMEOUT_US);
+#else
 	ret = readl_poll_timeout(dsi->base + DSI_PHY_STATUS,
 				 val, val & PHY_STOP_STATE_CLK_LANE, 1000,
 				 PHY_STATUS_TIMEOUT_US);
+#endif
 	if (ret)
 		DRM_DEBUG_DRIVER("failed to wait phy clk lane stop state\n");
 }
@@ -931,6 +996,22 @@ dw_mipi_dsi_bridge_mode_valid(struct drm_bridge *bridge,
 static int dw_mipi_dsi_bridge_attach(struct drm_bridge *bridge)
 {
 	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+#ifdef CONFIG_MCST
+	struct mipi_dsi_host *host = &dsi->dsi_host;
+	struct drm_bridge *b;
+	struct drm_panel *p;
+	int ret = drm_of_find_panel_or_bridge(host->dev->of_node, 1, 0,
+					  &p, &b);
+	if (ret)
+		return ret;
+
+	if (p) {
+		b = drm_panel_bridge_add(p, DRM_MODE_CONNECTOR_DSI);
+		if (IS_ERR(b))
+			return PTR_ERR(b);
+	}
+	dsi->panel_bridge = b;
+#endif
 
 	if (!bridge->encoder) {
 		DRM_ERROR("Parent encoder object not found\n");
@@ -979,6 +1060,15 @@ static void dw_mipi_dsi_debugfs_remove(struct dw_mipi_dsi *dsi) { }
 
 #endif /* CONFIG_DEBUG_FS */
 
+#ifdef CONFIG_MCST
+static const struct regmap_config dw_mipi_dsi_regmap_config = {
+	.reg_bits	= 32,
+	.val_bits	= 32,
+	.reg_stride	= 4,
+	.max_register	= 0x2b4,
+};
+#endif
+
 static struct dw_mipi_dsi *
 __dw_mipi_dsi_probe(struct platform_device *pdev,
 		    const struct dw_mipi_dsi_plat_data *plat_data)
@@ -1000,27 +1090,41 @@ __dw_mipi_dsi_probe(struct platform_device *pdev,
 		DRM_ERROR("Phy not properly configured\n");
 		return ERR_PTR(-ENODEV);
 	}
+#ifdef CONFIG_MCST
+	if (!plat_data->regm) {
+#endif
+		if (!plat_data->base) {
+			res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+			if (!res)
+				return ERR_PTR(-ENODEV);
 
-	if (!plat_data->base) {
-		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-		if (!res)
-			return ERR_PTR(-ENODEV);
+			dsi->base = devm_ioremap_resource(dev, res);
+			if (IS_ERR(dsi->base))
+				return ERR_PTR(-ENODEV);
 
-		dsi->base = devm_ioremap_resource(dev, res);
-		if (IS_ERR(dsi->base))
-			return ERR_PTR(-ENODEV);
-
+		} else {
+			dsi->base = plat_data->base;
+		}
+#ifdef CONFIG_MCST
+		dsi->regm = devm_regmap_init_mmio(dev,
+					dsi->base, &dw_mipi_dsi_regmap_config);
+		if (IS_ERR(dsi->regm)) {
+			dev_err(dev, "Failed to configure regmap\n");
+			return (void *)dsi->regm;
+		}
+#endif
 	} else {
-		dsi->base = plat_data->base;
+		dsi->regm = plat_data->regm;
 	}
 
+#ifndef CONFIG_MCST
 	dsi->pclk = devm_clk_get(dev, "pclk");
 	if (IS_ERR(dsi->pclk)) {
 		ret = PTR_ERR(dsi->pclk);
 		dev_err(dev, "Unable to get pclk: %d\n", ret);
 		return ERR_PTR(ret);
 	}
-
+#endif
 	/*
 	 * Note that the reset was not defined in the initial device tree, so
 	 * we have to be prepared for it not being found.

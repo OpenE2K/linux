@@ -39,22 +39,22 @@
  * This function must be called before other 2D functions.
  * Assumption: A specific video mode has been properly set up.
  */
-void ddk768_deInit()
+void ddk768_deInit(struct smi_device *sdev)
 {
-    ddk768_enable2DEngine(1);
+    ddk768_enable2DEngine(sdev, 1);
 
     ddk768_deReset(); /* Just be sure no left-over operations from other applications */
 
     /* Set up 2D registers that won't change for a specific mode. */
 
     /* Drawing engine bus and pixel mask, always want to enable. */
-    POKE_32(DE_MASKS, 0xFFFFFFFF);
+    POKE_32(sdev->rmmio, DE_MASKS, 0xFFFFFFFF);
 
     /* Pixel format, which can be 8, 16 or 32.
        Assuming setmode is call before 2D init, then pixel format
        is available in reg 0x80000 (Panel Display Control)
     */
-    POKE_32(DE_STRETCH_FORMAT,
+    POKE_32(sdev->rmmio, DE_STRETCH_FORMAT,
         FIELD_SET  (0, DE_STRETCH_FORMAT, PATTERN_XY,   NORMAL)  |
         FIELD_VALUE(0, DE_STRETCH_FORMAT, PATTERN_Y,    0)       |
         FIELD_VALUE(0, DE_STRETCH_FORMAT, PATTERN_X,    0)       |
@@ -62,8 +62,8 @@ void ddk768_deInit()
         FIELD_VALUE(0, DE_STRETCH_FORMAT, SOURCE_HEIGHT,3));
 
     /* Clipping and transparent are disable after INIT */
-    ddk768_deSetClipping(0, 0, 0, 0, 0);
-    ddk768_deSetTransparency(0, 0, 0, 0);
+    ddk768_deSetClipping(sdev, 0, 0, 0, 0, 0);
+    ddk768_deSetTransparency(sdev, 0, 0, 0, 0);
 }
 
 /*
@@ -111,14 +111,14 @@ void ddk768_deReset()
  * Return: 0 = return because engine is idle and normal.
  *        -1 = return because time out (2D engine may have problem).
  */
-long ddk768_deWaitForNotBusy(void)
+long ddk768_deWaitForNotBusy(struct smi_device *sdev)
 {
 	unsigned long dwVal;
     unsigned long i = 0x100000;
 
     while (i--)
     {
-        dwVal = PEEK_32(DE_STATE2);
+        dwVal = PEEK_32(sdev->rmmio, DE_STATE2);
         if ((FIELD_GET(dwVal, DE_STATE2, DE_STATUS)      == DE_STATE2_DE_STATUS_IDLE) &&
             (FIELD_GET(dwVal, DE_STATE2, DE_FIFO)        == DE_STATE2_DE_FIFO_EMPTY) &&
             (FIELD_GET(dwVal, DE_STATE2, DE_MEM_FIFO)    == DE_STATE2_DE_MEM_FIFO_EMPTY))
@@ -135,13 +135,14 @@ long ddk768_deWaitForNotBusy(void)
  * 
  */
 long ddk768_deSetClipping(
+struct smi_device *sdev,
 unsigned long enable, /* 0 = disable clipping, 1 = enable clipping */
 unsigned long x1,     /* x1, y1 is the upper left corner of the clipping area */
 unsigned long y1,     /* Note that the region includes x1 and y1 */
 unsigned long x2,     /* x2, y2 is the lower right corner of the clippiing area */
 unsigned long y2)     /* Note that the region will not include x2 and y2 */
 {
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -158,7 +159,7 @@ unsigned long y2)     /* Note that the region will not include x2 and y2 */
        Note: This module defautls to clip outside region.
        "Clip inside" is not a useful feature since nothing gets drawn.
      */
-    POKE_32(DE_CLIP_TL,
+    POKE_32(sdev->rmmio, DE_CLIP_TL,
         FIELD_VALUE(0, DE_CLIP_TL, TOP, y1) |
         ((enable)?
           FIELD_SET(0, DE_CLIP_TL, STATUS, ENABLE)
@@ -167,7 +168,7 @@ unsigned long y2)     /* Note that the region will not include x2 and y2 */
         FIELD_VALUE(0, DE_CLIP_TL, LEFT, x1));
 
     /* Lower right corner */
-    POKE_32(DE_CLIP_BR,
+    POKE_32(sdev->rmmio, DE_CLIP_BR,
         FIELD_VALUE(0, DE_CLIP_BR, BOTTOM,y2) |
         FIELD_VALUE(0, DE_CLIP_BR, RIGHT, x2));
 
@@ -182,6 +183,7 @@ unsigned long y2)     /* Note that the region will not include x2 and y2 */
  * If not match, the destination pixel will be updated.
  */
 long ddk768_deSetTransparency(
+struct smi_device *sdev,
 unsigned long enable,     /* 0 = disable, 1 = enable transparency feature */
 unsigned long tSelect,    /* 0 = compare source, 1 = compare destination */
 unsigned long tMatch,     /* 0 = Opaque mode, 1 = transparent mode */
@@ -189,7 +191,7 @@ unsigned long ulColor)    /* Color to compare. */
 {
     unsigned long de_ctrl;
 
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -205,22 +207,22 @@ unsigned long ulColor)    /* Color to compare. */
     /* Set mask */
     if (enable)
     {
-        POKE_32(DE_COLOR_COMPARE_MASK, 0x00ffffff);
+        POKE_32(sdev->rmmio, DE_COLOR_COMPARE_MASK, 0x00ffffff);
 
         /* Set compare color */
-        POKE_32(DE_COLOR_COMPARE, ulColor);
+        POKE_32(sdev->rmmio, DE_COLOR_COMPARE, ulColor);
     }
     else
     {
-        POKE_32(DE_COLOR_COMPARE_MASK, 0x0);
-        POKE_32(DE_COLOR_COMPARE, 0x0);
+        POKE_32(sdev->rmmio, DE_COLOR_COMPARE_MASK, 0x0);
+        POKE_32(sdev->rmmio, DE_COLOR_COMPARE, 0x0);
     }
 
     /* Set up transparency control, without affecting other bits
        Note: There are two operatiing modes: Transparent and Opague.
        We only use transparent mode because Opaque mode may have bug.
     */
-    de_ctrl = PEEK_32(DE_CONTROL)
+    de_ctrl = PEEK_32(sdev->rmmio, DE_CONTROL)
               & FIELD_CLEAR(DE_CONTROL, TRANSPARENCY)
               & FIELD_CLEAR(DE_CONTROL, TRANSPARENCY_MATCH)
               & FIELD_CLEAR(DE_CONTROL, TRANSPARENCY_SELECT);
@@ -239,7 +241,7 @@ unsigned long ulColor)    /* Color to compare. */
       FIELD_SET(0, DE_CONTROL, TRANSPARENCY_SELECT, DESTINATION)
     : FIELD_SET(0, DE_CONTROL, TRANSPARENCY_SELECT, SOURCE));
 
-    POKE_32(DE_CONTROL, de_ctrl);
+    POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl);
 
     return 0;
 }
@@ -249,11 +251,11 @@ unsigned long ulColor)    /* Color to compare. */
  * It returns a double word with the transparent fields properly set,
  * while other fields are 0.
  */
-unsigned long ddk768_deGetTransparency(void)
+unsigned long ddk768_deGetTransparency(struct smi_device *sdev)
 {
     unsigned long de_ctrl;
 
-    de_ctrl = PEEK_32(DE_CONTROL);
+    de_ctrl = PEEK_32(sdev->rmmio, DE_CONTROL);
 
     de_ctrl &= 
         FIELD_MASK(DE_CONTROL_TRANSPARENCY_MATCH) | 
@@ -267,12 +269,13 @@ unsigned long ddk768_deGetTransparency(void)
  * This function sets the pixel format that will apply to the 2D Engine.
  */
 void ddk768_deSetPixelFormat(
+	struct smi_device *sdev,
     unsigned long bpp
 )
 {
     unsigned long de_format;
     
-    de_format = PEEK_32(DE_STRETCH_FORMAT);
+    de_format = PEEK_32(sdev->rmmio, DE_STRETCH_FORMAT);
     
     switch (bpp)
     {
@@ -288,7 +291,7 @@ void ddk768_deSetPixelFormat(
             break;
     }
     
-    POKE_32(DE_STRETCH_FORMAT, de_format);
+    POKE_32(sdev->rmmio, DE_STRETCH_FORMAT, de_format);
 }
 
 /*
@@ -296,6 +299,7 @@ void ddk768_deSetPixelFormat(
  * The filled area includes the starting points.
  */
 long ddk768_deRectFill( /*resolution_t resolution, point_t p0, point_t p1, unsigned long color, unsigned long rop2)*/
+struct smi_device *sdev,
 unsigned long dBase,  /* Base address of destination surface counted from beginning of video frame buffer */
 unsigned long dPitch, /* Pitch value of destination surface in BYTES */
 unsigned long bpp,    /* Color depth of destination surface: 8, 16 or 32 */
@@ -310,7 +314,7 @@ unsigned long rop2)   /* ROP value */
 
     bytePerPixel = bpp/8;
     
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -326,27 +330,27 @@ unsigned long rop2)   /* ROP value */
     /* 2D Destination Base.
        It is an address offset (128 bit aligned) from the beginning of frame buffer.
     */
-    POKE_32(DE_WINDOW_DESTINATION_BASE, dBase);
+    POKE_32(sdev->rmmio, DE_WINDOW_DESTINATION_BASE, dBase);
 
     /* Program pitch (distance between the 1st points of two adjacent lines).
        Note that input pitch is BYTE value, but the 2D Pitch register uses
        pixel values. Need Byte to pixel convertion.
     */
-    POKE_32(DE_PITCH,
+    POKE_32(sdev->rmmio, DE_PITCH,
         FIELD_VALUE(0, DE_PITCH, DESTINATION, (dPitch/bytePerPixel)) |
         FIELD_VALUE(0, DE_PITCH, SOURCE,      (dPitch/bytePerPixel)));
 
     /* Screen Window width in Pixels.
        2D engine uses this value to calculate the linear address in frame buffer for a given point.
     */
-    POKE_32(DE_WINDOW_WIDTH,
+    POKE_32(sdev->rmmio, DE_WINDOW_WIDTH,
         FIELD_VALUE(0, DE_WINDOW_WIDTH, DESTINATION, (dPitch/bytePerPixel)) |
         FIELD_VALUE(0, DE_WINDOW_WIDTH, SOURCE,      (dPitch/bytePerPixel)));
 
-    POKE_32(DE_FOREGROUND, color);
+    POKE_32(sdev->rmmio, DE_FOREGROUND, color);
 
     /* Set the pixel format of the destination */
-    ddk768_deSetPixelFormat(bpp);
+    ddk768_deSetPixelFormat(sdev, bpp);
 
 #ifdef ENABLE_192_BYTES_PATCH
     /* Workaround for 192 byte requirement when ROP is not COPY */
@@ -361,14 +365,14 @@ unsigned long rop2)   /* ROP value */
 
         while (1)
         {
-            ddk768_deWaitForNotBusy();
+            ddk768_deWaitForNotBusy(sdev);
             
-            POKE_32(DE_DESTINATION,
+            POKE_32(sdev->rmmio, DE_DESTINATION,
                 FIELD_SET  (0, DE_DESTINATION, WRAP, DISABLE) |
                 FIELD_VALUE(0, DE_DESTINATION, X,    x)  |
                 FIELD_VALUE(0, DE_DESTINATION, Y,    y));
                 
-            POKE_32(DE_DIMENSION,
+            POKE_32(sdev->rmmio, DE_DIMENSION,
                 FIELD_VALUE(0, DE_DIMENSION, X,    xChunk) |
                 FIELD_VALUE(0, DE_DIMENSION, Y_ET, height));
 
@@ -380,7 +384,7 @@ unsigned long rop2)   /* ROP value */
                 FIELD_SET  (0, DE_CONTROL,  ROP_SELECT, ROP2)           |
                 FIELD_VALUE(0, DE_CONTROL,  ROP,        rop2);
 
-            POKE_32(DE_CONTROL, de_ctrl | ddk768_deGetTransparency());
+            POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl | ddk768_deGetTransparency(sdev));
 
             if (xChunk == width) break;
 
@@ -397,12 +401,12 @@ unsigned long rop2)   /* ROP value */
     else
 #endif
     {
-        POKE_32(DE_DESTINATION,
+        POKE_32(sdev->rmmio, DE_DESTINATION,
             FIELD_SET  (0, DE_DESTINATION, WRAP, DISABLE) |
             FIELD_VALUE(0, DE_DESTINATION, X,    x)       |
             FIELD_VALUE(0, DE_DESTINATION, Y,    y));
 
-        POKE_32(DE_DIMENSION,
+        POKE_32(sdev->rmmio, DE_DIMENSION,
             FIELD_VALUE(0, DE_DIMENSION, X,    width) |
             FIELD_VALUE(0, DE_DIMENSION, Y_ET, height));
 
@@ -414,7 +418,7 @@ unsigned long rop2)   /* ROP value */
             FIELD_SET  (0, DE_CONTROL,  ROP_SELECT, ROP2)           |
             FIELD_VALUE(0, DE_CONTROL,  ROP,        rop2);
 
-        POKE_32(DE_CONTROL, de_ctrl | ddk768_deGetTransparency());
+        POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl | ddk768_deGetTransparency(sdev));
     }
     
     return 0;
@@ -425,6 +429,7 @@ unsigned long rop2)   /* ROP value */
  * The filled area includes the starting points.
  */
 long ddk768_deStartTrapezoidFill(
+	struct smi_device *sdev,
     unsigned long dBase,  /* Base address of destination surface counted from beginning of video frame buffer */
     unsigned long dPitch, /* Pitch value of destination surface in BYTES */
     unsigned long bpp,    /* Color depth of destination surface: 8, 16 or 32 */
@@ -444,7 +449,7 @@ long ddk768_deStartTrapezoidFill(
         FIELD_SET  (0, DE_CONTROL, ROP_SELECT,  ROP2)            |
         FIELD_VALUE(0, DE_CONTROL, ROP,         rop2);
 
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -460,42 +465,43 @@ long ddk768_deStartTrapezoidFill(
     /* 2D Destination Base.
        It is an address offset (128 bit aligned) from the beginning of frame buffer.
     */
-    POKE_32(DE_WINDOW_DESTINATION_BASE, dBase);
+    POKE_32(sdev->rmmio, DE_WINDOW_DESTINATION_BASE, dBase);
 
     /* Program pitch (distance between the 1st points of two adjacent lines).
        Note that input pitch is BYTE value, but the 2D Pitch register uses
        pixel values. Need Byte to pixel convertion.
     */
-    POKE_32(DE_PITCH,
+    POKE_32(sdev->rmmio, DE_PITCH,
         FIELD_VALUE(0, DE_PITCH, DESTINATION, dPitch / BYTE_PER_PIXEL(bpp)) |
         FIELD_VALUE(0, DE_PITCH, SOURCE, dPitch / BYTE_PER_PIXEL(bpp)));
 
     /* Screen Window width in Pixels.
        2D engine uses this value to calculate the linear address in frame buffer for a given point.
     */
-    POKE_32(DE_WINDOW_WIDTH,
+    POKE_32(sdev->rmmio, DE_WINDOW_WIDTH,
         FIELD_VALUE(0, DE_WINDOW_WIDTH, DESTINATION, dPitch / BYTE_PER_PIXEL(bpp)) |
         FIELD_VALUE(0, DE_WINDOW_WIDTH, SOURCE,      dPitch / BYTE_PER_PIXEL(bpp)));
 
     /* Set the Line Color */
-    POKE_32(DE_FOREGROUND, color);
+    POKE_32(sdev->rmmio, DE_FOREGROUND, color);
     
     /* Set the destination coordinate */
-    POKE_32(DE_DESTINATION,
+    POKE_32(sdev->rmmio, DE_DESTINATION,
         FIELD_SET  (0, DE_DESTINATION, WRAP, DISABLE) |
         FIELD_VALUE(0, DE_DESTINATION, X,    x)       |
         FIELD_VALUE(0, DE_DESTINATION, Y,    y));
     
     /* Set the pixel format of the destination */
-    ddk768_deSetPixelFormat(bpp);
+    ddk768_deSetPixelFormat(sdev, bpp);
     
     /* Set the line length and width */
-    POKE_32(DE_DIMENSION,
+    POKE_32(sdev->rmmio, DE_DIMENSION,
         FIELD_VALUE(0, DE_DIMENSION, X,    length) |
         FIELD_VALUE(0, DE_DIMENSION, Y_ET, 0));
 
     /* Enable the 2D Engine. */
-    POKE_32(DE_CONTROL, de_ctrl | ddk768_deGetTransparency());
+    POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl |
+						ddk768_deGetTransparency(sdev));
     
     return 0;
 }
@@ -504,11 +510,12 @@ long ddk768_deStartTrapezoidFill(
  * Function to continue drawing a line using Trapezoid Fill method.
  */
 long ddk768_deNextTrapezoidFill(
+	struct smi_device *sdev,
     unsigned long x,            /* Starting X location. */
     unsigned long length        /* Line length */
 )
 {
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -522,12 +529,14 @@ long ddk768_deNextTrapezoidFill(
     }
     
     /* Set the X destination coordinate */
-    POKE_32(DE_DESTINATION,
-        FIELD_VALUE(PEEK_32(DE_DESTINATION), DE_DESTINATION, X,    x));
+    POKE_32(sdev->rmmio, DE_DESTINATION,
+        FIELD_VALUE(PEEK_32(sdev->rmmio,
+				DE_DESTINATION), DE_DESTINATION, X,    x));
         
     /* Set the line length */
-    POKE_32(DE_DIMENSION,
-        FIELD_VALUE(PEEK_32(DE_DIMENSION), DE_DIMENSION, X,    length));
+    POKE_32(sdev->rmmio, DE_DIMENSION,
+        FIELD_VALUE(PEEK_32(sdev->rmmio,
+				DE_DIMENSION), DE_DIMENSION, X,    length));
         
     return 0;
 }
@@ -537,9 +546,9 @@ long ddk768_deNextTrapezoidFill(
  * This function has to be called to end the Trapezoid Fill drawing.
  * Otherwise, the next 2D function might still use this function.
  */
-long ddk768_deStopTrapezoidFill()
+long ddk768_deStopTrapezoidFill(struct smi_device *sdev)
 {
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -552,7 +561,8 @@ long ddk768_deStopTrapezoidFill()
         /* ddk768_deReset(); */
     }
     
-    POKE_32(DE_CONTROL, FIELD_SET(PEEK_32(DE_CONTROL), DE_CONTROL, QUICK_START, DISABLE));
+    POKE_32(sdev->rmmio, DE_CONTROL, FIELD_SET(PEEK_32(sdev->rmmio,
+					DE_CONTROL), DE_CONTROL, QUICK_START, DISABLE));
     
     return 0;
 }
@@ -565,6 +575,7 @@ long ddk768_deStopTrapezoidFill()
  *        mono expansion.
  */
 long ddk768_deVideoMem2VideoMemBlt(
+struct smi_device *sdev,
 unsigned long sBase,  /* Address of source: offset in frame buffer */
 unsigned long sPitch, /* Pitch value of source surface in BYTE */
 unsigned long sx,
@@ -581,7 +592,7 @@ unsigned long rop2)   /* ROP value */
     unsigned long nDirection, de_ctrl, bytePerPixel;
     long opSign;
 
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -677,30 +688,30 @@ unsigned long rop2)   /* ROP value */
     /* 2D Source Base.
        It is an address offset (128 bit aligned) from the beginning of frame buffer.
     */
-    POKE_32(DE_WINDOW_SOURCE_BASE, sBase);
+    POKE_32(sdev->rmmio, DE_WINDOW_SOURCE_BASE, sBase);
 
     /* 2D Destination Base.
        It is an address offset (128 bit aligned) from the beginning of frame buffer.
     */
-    POKE_32(DE_WINDOW_DESTINATION_BASE, dBase);
+    POKE_32(sdev->rmmio, DE_WINDOW_DESTINATION_BASE, dBase);
 
     /* Program pitch (distance between the 1st points of two adjacent lines).
        Note that input pitch is BYTE value, but the 2D Pitch register uses
        pixel values. Need Byte to pixel convertion.
     */
-    POKE_32(DE_PITCH,
+    POKE_32(sdev->rmmio, DE_PITCH,
         FIELD_VALUE(0, DE_PITCH, DESTINATION, (dPitch/bytePerPixel)) |
         FIELD_VALUE(0, DE_PITCH, SOURCE,      (sPitch/bytePerPixel)));
 
     /* Screen Window width in Pixels.
        2D engine uses this value to calculate the linear address in frame buffer for a given point.
     */
-    POKE_32(DE_WINDOW_WIDTH,
+    POKE_32(sdev->rmmio, DE_WINDOW_WIDTH,
         FIELD_VALUE(0, DE_WINDOW_WIDTH, DESTINATION, (dPitch/bytePerPixel)) |
         FIELD_VALUE(0, DE_WINDOW_WIDTH, SOURCE,      (sPitch/bytePerPixel)));
 
     /* Set the pixel format of the destination */
-    ddk768_deSetPixelFormat(bpp);
+    ddk768_deSetPixelFormat(sdev, bpp);
     
 #ifdef ENABLE_192_BYTES_PATCH
     /* This bug is fixed in SM718 for 16 and 32 bpp. However, in 8-bpp, the problem still exists. 
@@ -722,16 +733,16 @@ unsigned long rop2)   /* ROP value */
 
         while (1)
         {
-            ddk768_deWaitForNotBusy();
-            POKE_32(DE_SOURCE,
+            ddk768_deWaitForNotBusy(sdev);
+            POKE_32(sdev->rmmio, DE_SOURCE,
                 FIELD_SET  (0, DE_SOURCE, WRAP, DISABLE) |
                 FIELD_VALUE(0, DE_SOURCE, X_K1, sx)   |
                 FIELD_VALUE(0, DE_SOURCE, Y_K2, sy));
-            POKE_32(DE_DESTINATION,
+            POKE_32(sdev->rmmio, DE_DESTINATION,
                 FIELD_SET  (0, DE_DESTINATION, WRAP, DISABLE) |
                 FIELD_VALUE(0, DE_DESTINATION, X,    dx)  |
                 FIELD_VALUE(0, DE_DESTINATION, Y,    dy));
-            POKE_32(DE_DIMENSION,
+            POKE_32(sdev->rmmio, DE_DIMENSION,
                 FIELD_VALUE(0, DE_DIMENSION, X,    xChunk) |
                 FIELD_VALUE(0, DE_DIMENSION, Y_ET, height));
 
@@ -744,7 +755,8 @@ unsigned long rop2)   /* ROP value */
                 : FIELD_SET(0, DE_CONTROL, DIRECTION, LEFT_TO_RIGHT)) |
                 FIELD_SET(0, DE_CONTROL, STATUS, START);
 
-            POKE_32(DE_CONTROL, de_ctrl | ddk768_deGetTransparency());
+            POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl |
+							ddk768_deGetTransparency(sdev));
 
             if (xChunk == width) break;
 
@@ -762,17 +774,17 @@ unsigned long rop2)   /* ROP value */
     else
 #endif
     {
-        ddk768_deWaitForNotBusy();
+        ddk768_deWaitForNotBusy(sdev);
 
-        POKE_32(DE_SOURCE,
+        POKE_32(sdev->rmmio, DE_SOURCE,
             FIELD_SET  (0, DE_SOURCE, WRAP, DISABLE) |
             FIELD_VALUE(0, DE_SOURCE, X_K1, sx)   |
             FIELD_VALUE(0, DE_SOURCE, Y_K2, sy));
-        POKE_32(DE_DESTINATION,
+        POKE_32(sdev->rmmio, DE_DESTINATION,
             FIELD_SET  (0, DE_DESTINATION, WRAP, DISABLE) |
             FIELD_VALUE(0, DE_DESTINATION, X,    dx)  |
             FIELD_VALUE(0, DE_DESTINATION, Y,    dy));
-        POKE_32(DE_DIMENSION,
+        POKE_32(sdev->rmmio, DE_DIMENSION,
             FIELD_VALUE(0, DE_DIMENSION, X,    width) |
             FIELD_VALUE(0, DE_DIMENSION, Y_ET, height));
 
@@ -785,7 +797,8 @@ unsigned long rop2)   /* ROP value */
             : FIELD_SET(0, DE_CONTROL, DIRECTION, LEFT_TO_RIGHT)) |
             FIELD_SET(0, DE_CONTROL, STATUS, START);
 
-        POKE_32(DE_CONTROL, de_ctrl | ddk768_deGetTransparency());
+        POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl |
+						ddk768_deGetTransparency(sdev));
     }
 
     return 0;
@@ -964,6 +977,7 @@ long ddk768_deSystemMem2VideoMemBusMasterBlt(
  *        mono expansion.
  */
 long ddk768_deSystemMem2VideoMemBlt(
+	struct smi_device *sdev,
     unsigned char *pSrcbuf, /* pointer to source data in system memory */
     long srcDelta,          /* width (in Bytes) of the source data, +ive means top down and -ive mean button up */
     unsigned long dBase,    /* Address of destination: offset in frame buffer */
@@ -999,7 +1013,7 @@ long ddk768_deSystemMem2VideoMemBlt(
     ulBytesRemain = ulBytesPerScan & 7;
 
     /* Program 2D Drawing Engine */
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -1015,46 +1029,46 @@ long ddk768_deSystemMem2VideoMemBlt(
     /* 2D Source Base.
        Use 0 for HOST Blt.
     */
-    POKE_32(DE_WINDOW_SOURCE_BASE, 0);
+    POKE_32(sdev->rmmio, DE_WINDOW_SOURCE_BASE, 0);
 
     /* 2D Destination Base.
        It is an address offset (128 bit aligned) from the beginning of frame buffer.
     */
-    POKE_32(DE_WINDOW_DESTINATION_BASE, dBase);
+    POKE_32(sdev->rmmio, DE_WINDOW_DESTINATION_BASE, dBase);
 
     /* Program pitch (distance between the 1st points of two adjacent lines).
        Note that input pitch is BYTE value, but the 2D Pitch register uses
        pixel values. Need Byte to pixel convertion.
     */
-    POKE_32(DE_PITCH,
+    POKE_32(sdev->rmmio, DE_PITCH,
         FIELD_VALUE(0, DE_PITCH, DESTINATION, dPitch/bytePerPixel) |
         FIELD_VALUE(0, DE_PITCH, SOURCE,      dPitch/bytePerPixel));
 
     /* Screen Window width in Pixels.
        2D engine uses this value to calculate the linear address in frame buffer for a given point.
     */
-    POKE_32(DE_WINDOW_WIDTH,
+    POKE_32(sdev->rmmio, DE_WINDOW_WIDTH,
         FIELD_VALUE(0, DE_WINDOW_WIDTH, DESTINATION, (dPitch/bytePerPixel)) |
         FIELD_VALUE(0, DE_WINDOW_WIDTH, SOURCE,      (dPitch/bytePerPixel)));
 
     /* Note: For 2D Source in Host Write, only X_K1 field is needed, and Y_K2 field is not used.
              For 1 to 1 bitmap transfer, use 0 for X_K1 means source alignment from byte 0. */
-    POKE_32(DE_SOURCE,
+    POKE_32(sdev->rmmio, DE_SOURCE,
         FIELD_SET  (0, DE_SOURCE, WRAP, DISABLE) |
         FIELD_VALUE(0, DE_SOURCE, X_K1, 0)       |
         FIELD_VALUE(0, DE_SOURCE, Y_K2, 0));
 
-    POKE_32(DE_DESTINATION,
+    POKE_32(sdev->rmmio, DE_DESTINATION,
         FIELD_SET  (0, DE_DESTINATION, WRAP, DISABLE) |
         FIELD_VALUE(0, DE_DESTINATION, X,    dx)    |
         FIELD_VALUE(0, DE_DESTINATION, Y,    dy));
 
-    POKE_32(DE_DIMENSION,
+    POKE_32(sdev->rmmio, DE_DIMENSION,
         FIELD_VALUE(0, DE_DIMENSION, X,    width) |
         FIELD_VALUE(0, DE_DIMENSION, Y_ET, height));
         
     /* Set the pixel format of the destination */
-    ddk768_deSetPixelFormat(bpp);
+    ddk768_deSetPixelFormat(sdev, bpp);
 
     de_ctrl = 
         FIELD_VALUE(0, DE_CONTROL, ROP, rop2)         |
@@ -1063,20 +1077,21 @@ long ddk768_deSystemMem2VideoMemBlt(
         FIELD_SET(0, DE_CONTROL, HOST, COLOR)         |
         FIELD_SET(0, DE_CONTROL, STATUS, START);
 
-    POKE_32(DE_CONTROL, de_ctrl | ddk768_deGetTransparency());
+    POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl | ddk768_deGetTransparency(sdev));
 
     /* Write bitmap/image data (line by line) to 2D Engine data port */
     for (i = 0; i < height; i++)
     {
         /* For each line, send the data in chunks of 4 bytes. */
         for (j=0; j < (ul8BytesPerScan/4);  j++)
-            POKE_32(DE_DATA_PORT, *(unsigned long *)(pSrcbuf + (j * 4)));
+            POKE_32(sdev->rmmio, DE_DATA_PORT,
+							*(unsigned long *)(pSrcbuf + (j * 4)));
 
         if (ulBytesRemain)
         {
             memcpy(ajRemain, pSrcbuf+ul8BytesPerScan, ulBytesRemain);
-            POKE_32(DE_DATA_PORT, *(unsigned long *)ajRemain);
-            POKE_32(DE_DATA_PORT, *(unsigned long *)(ajRemain+4));
+            POKE_32(sdev->rmmio, DE_DATA_PORT, *(unsigned long *)ajRemain);
+            POKE_32(sdev->rmmio, DE_DATA_PORT, *(unsigned long *)(ajRemain+4));
         }
 
         pSrcbuf += srcDelta;
@@ -1091,6 +1106,7 @@ long ddk768_deSystemMem2VideoMemBlt(
  * This function expands the monochrome data to color image in video memory.
  */
 long ddk768_deSystemMem2VideoMemMonoBlt(
+struct smi_device *sdev,
 unsigned char *pSrcbuf, /* pointer to start of source buffer in system memory */
 long srcDelta,          /* Pitch value (in bytes) of the source buffer, +ive means top down and -ive mean button up */
 unsigned long startBit, /* Mono data can start at any bit in a byte, this value should be 0 to 7 */
@@ -1120,7 +1136,7 @@ unsigned long rop2)     /* ROP value */
     ul4BytesPerScan = ulBytesPerScan & ~3;
     ulBytesRemain = ulBytesPerScan & 3;
 
-    if (ddk768_deWaitForNotBusy() != 0)
+    if (ddk768_deWaitForNotBusy(sdev) != 0)
     {
         /* The 2D engine is always busy for some unknown reason.
            Application can choose to return ERROR, or reset it and
@@ -1136,48 +1152,48 @@ unsigned long rop2)     /* ROP value */
     /* 2D Source Base.
        Use 0 for HOST Blt.
     */
-    POKE_32(DE_WINDOW_SOURCE_BASE, 0);
+    POKE_32(sdev->rmmio, DE_WINDOW_SOURCE_BASE, 0);
 
     /* 2D Destination Base.
        It is an address offset (128 bit aligned) from the beginning of frame buffer.
     */
-    POKE_32(DE_WINDOW_DESTINATION_BASE, dBase);
+    POKE_32(sdev->rmmio, DE_WINDOW_DESTINATION_BASE, dBase);
 
     /* Program pitch (distance between the 1st points of two adjacent lines).
        Note that input pitch is BYTE value, but the 2D Pitch register uses
        pixel values. Need Byte to pixel convertion.
     */
-    POKE_32(DE_PITCH,
+    POKE_32(sdev->rmmio, DE_PITCH,
         FIELD_VALUE(0, DE_PITCH, DESTINATION, dPitch/bytePerPixel) |
         FIELD_VALUE(0, DE_PITCH, SOURCE,      dPitch/bytePerPixel));
 
     /* Screen Window width in Pixels.
        2D engine uses this value to calculate the linear address in frame buffer for a given point.
     */
-    POKE_32(DE_WINDOW_WIDTH,
+    POKE_32(sdev->rmmio, DE_WINDOW_WIDTH,
         FIELD_VALUE(0, DE_WINDOW_WIDTH, DESTINATION, (dPitch/bytePerPixel)) |
         FIELD_VALUE(0, DE_WINDOW_WIDTH, SOURCE,      (dPitch/bytePerPixel)));
 
     /* Note: For 2D Source in Host Write, only X_K1_MONO field is needed, and Y_K2 field is not used.
              For mono bitmap, use startBit for X_K1. */
-    POKE_32(DE_SOURCE,
+    POKE_32(sdev->rmmio, DE_SOURCE,
         FIELD_SET  (0, DE_SOURCE, WRAP, DISABLE)       |
         FIELD_VALUE(0, DE_SOURCE, X_K1_MONO, startBit));
 
-    POKE_32(DE_DESTINATION,
+    POKE_32(sdev->rmmio, DE_DESTINATION,
         FIELD_SET  (0, DE_DESTINATION, WRAP, DISABLE) |
         FIELD_VALUE(0, DE_DESTINATION, X,    dx)    |
         FIELD_VALUE(0, DE_DESTINATION, Y,    dy));
 
-    POKE_32(DE_DIMENSION,
+    POKE_32(sdev->rmmio, DE_DIMENSION,
         FIELD_VALUE(0, DE_DIMENSION, X,    width) |
         FIELD_VALUE(0, DE_DIMENSION, Y_ET, height));
 
-    POKE_32(DE_FOREGROUND, fColor);
-    POKE_32(DE_BACKGROUND, bColor);
+    POKE_32(sdev->rmmio, DE_FOREGROUND, fColor);
+    POKE_32(sdev->rmmio, DE_BACKGROUND, bColor);
     
     /* Set the pixel format of the destination */
-    ddk768_deSetPixelFormat(bpp);
+    ddk768_deSetPixelFormat(sdev, bpp);
 
     de_ctrl = FIELD_VALUE(0, DE_CONTROL, ROP, rop2)         |
               FIELD_SET(0, DE_CONTROL, ROP_SELECT, ROP2)    |
@@ -1185,7 +1201,8 @@ unsigned long rop2)     /* ROP value */
               FIELD_SET(0, DE_CONTROL, HOST, MONO)          |
               FIELD_SET(0, DE_CONTROL, STATUS, START);
 
-    POKE_32(DE_CONTROL, de_ctrl | ddk768_deGetTransparency());
+    POKE_32(sdev->rmmio, DE_CONTROL, de_ctrl |
+					ddk768_deGetTransparency(sdev));
 
     /* Write MONO data (line by line) to 2D Engine data port */
     for (i=0; i<height; i++)
@@ -1193,13 +1210,14 @@ unsigned long rop2)     /* ROP value */
         /* For each line, send the data in chunks of 4 bytes */
         for (j=0; j<(ul4BytesPerScan/4); j++)
         {
-            POKE_32(DE_DATA_PORT, *(unsigned long *)(pSrcbuf + (j * 4)));
+            POKE_32(sdev->rmmio, DE_DATA_PORT,
+							*(unsigned long *)(pSrcbuf + (j * 4)));
         }
 
         if (ulBytesRemain)
         {
             memcpy(ajRemain, pSrcbuf+ul4BytesPerScan, ulBytesRemain);
-            POKE_32(DE_DATA_PORT, *(unsigned long *)ajRemain);
+            POKE_32(sdev->rmmio, DE_DATA_PORT, *(unsigned long *)ajRemain);
         }
 
         pSrcbuf += srcDelta;

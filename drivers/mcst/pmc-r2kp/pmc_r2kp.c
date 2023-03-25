@@ -27,7 +27,8 @@
 
 #undef DebugPMC
 #undef PMC_DEBUG
-#ifdef PMC_DEBUG
+#define PMC_DEBUG 0
+#if PMC_DEBUG
 #define DebugPMC(x, ...) do {					\
 	pr_err("PMC-R2KP DEBUG: %s: %d: " x,			\
 			__func__, __LINE__, ##__VA_ARGS__);	\
@@ -48,8 +49,11 @@
 #define PMC_R2KP_REG_DOORBELL_REQ_DONE		(0x1 << 18)
 
 /* List of R2000+ PMC services */
+#define PMC_R2KP_SRV_VERSION		0x0
 #define PMC_R2KP_SRV_GET_FREQ		0x07
 #define PMC_R2KP_SRV_GET_DEV_ATTR	0x0A
+#define PMC_R2KP_SRV_SET_PERF		0x14
+#define PMC_R2KP_SRV_GET_PERF		0x16
 
 /* HW errors: from -1 to -6 */
 #define PMC_R2KP_STATUS_BUSY		(-7)
@@ -58,6 +62,10 @@
 #define PMC_R2KP_REG_PARAM_NUMBER	4
 #define PMC_R2KP_REG_TEMP			0x0C
 #define PMC_R2KP_REG_TEMP_MAX		0x08
+
+#define PMC_R2KP_MIN_PERF			1 /* min perf stage */
+#define PMC_R2KP_MAX_PERF			3 /* max perf stage */
+#define PMC_R2KP_DEV_NUM			8 /* number of devices */
 
 /*
  *  0 = the first access to pmc service
@@ -118,7 +126,7 @@ static int r2kp_get_service(int node, unsigned int serv, uint32_t *param)
 	int i, rc;
 	void __iomem *regs = __pmc_regs(node);
 
-	DebugPMC("in params: %d %d %d %d\n",
+	DebugPMC("in params: (0x%X) %d %d %d %d\n", serv,
 			*param, *(param+1), *(param+2), *(param+3));
 	for (i = 0; i < PMC_R2KP_REG_PARAM_NUMBER; i++)
 		__raw_writel(*(param + i), regs + PMC_R2KP_REG_PARAM(i));
@@ -151,14 +159,59 @@ uint32_t r2kp_get_freq_mult(int cpu)
 /*
  * Must be called with r2kp_pmc_service_lock held.
  */
+static uint32_t r2kp_get_dev_freq(int dev)
+{
+	uint32_t param[PMC_R2KP_REG_PARAM_NUMBER] = {dev, 0, 0, 0};
+	int rc;
+
+	rc = r2kp_get_service(0,
+			PMC_R2KP_SRV_GET_FREQ, &param[0]);
+	if (rc < 0)
+		return 0;
+	return param[0];
+}
+
+/*
+ * Must be called with r2kp_pmc_service_lock held.
+ */
+static uint32_t r2kp_get_pmc_version(void)
+{
+	uint32_t param[PMC_R2KP_REG_PARAM_NUMBER] = {};
+	int rc;
+
+	rc = r2kp_get_service(0,
+			PMC_R2KP_SRV_VERSION, &param[0]);
+	if (rc < 0)
+		return 0;
+	return param[0];
+}
+
+/*
+ * Must be called with r2kp_pmc_service_lock held.
+ */
 static int r2kp_get_dev_attr(int node, int index, uint32_t *param)
 {
 	*param = index;
 	return r2kp_get_service(node, PMC_R2KP_SRV_GET_DEV_ATTR, param);
 }
 
+/*
+ * Must be called with r2kp_pmc_service_lock held.
+ */
+static uint32_t r2kp_get_perf(void)
+{
+	uint32_t param[PMC_R2KP_REG_PARAM_NUMBER] = {};
+	int rc;
+
+	rc = r2kp_get_service(0,
+			PMC_R2KP_SRV_GET_PERF, &param[0]);
+	if (rc < 0)
+		return 0;
+	return param[0];
+}
+
 struct pmcmon_data {
-	const struct attribute_group *groups[3];	/* 2 groups + NULL */
+	const struct attribute_group *groups[5];	/* 4 groups + NULL */
 	unsigned long last_updated;	/* In jiffies */
 	char valid;			/* 1 if fields below are valid */
 	u8 has_sensor;		/* Bitfield, up to 6 sensors can be available */
@@ -168,6 +221,9 @@ struct pmcmon_data {
 	u8 temp_max;		/* Register value, degrees */
 	u8 temp_hyst;		/* Register value, degrees */
 	u8 temp_crit;		/* Register value, degrees */
+	u8 perf_stage;
+	u16 freq[PMC_R2KP_DEV_NUM];		/* In MHz */
+	u32 pmc_version;
 };
 
 /* How often we reread registers/sensors values (In jiffies) */
@@ -211,6 +267,20 @@ static struct pmcmon_data *r2kp_update_device(struct device *dev)
 				}
 			}
 		}
+
+		data->perf_stage = (u8)r2kp_get_perf();
+		if (data->perf_stage > PMC_R2KP_MAX_PERF)
+			data->perf_stage = 0;
+		/*
+		 * data->perf_stage == 0 => a targeted perf control.
+		 * In this stage the freqs can vary by PMC widely.
+		 * There's no point to show them in this case.
+		 */
+		if (data->perf_stage) {
+			for (i = 0; i < PMC_R2KP_DEV_NUM; i++)
+				data->freq[i] = r2kp_get_dev_freq(i);
+		}
+
 		data->last_updated = jiffies;
 		data->valid = 1;
 	}
@@ -278,6 +348,72 @@ static ssize_t r2kp_show_temp_crit(struct device *dev,
 	struct pmcmon_data *data = r2kp_update_device(dev);
 
 	return sprintf(buf, "%ld\n", temp_from_reg(data->temp_crit));
+}
+
+static ssize_t r2kp_show_perf_stage(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct pmcmon_data *data = r2kp_update_device(dev);
+
+	return sprintf(buf, "%d\n", data->perf_stage);
+}
+
+static const char * const r2kp_freq_dev[PMC_R2KP_DEV_NUM] = {
+	[0] = "FREQ_CL",
+	[1] = "FREQ_NB",
+	[2] = "FREQ_CODEC",
+	[3] = "FREQ_MGA",
+	[4] = "FREQ_3D_CORE",
+	[5] = "FREQ_3D_SHADER",
+	[6] = "FREQ_SB_FAST",
+	[7] = "FREQ_SB_SLOW",
+};
+
+static ssize_t r2kp_show_long_perf_stage(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct pmcmon_data *data = r2kp_update_device(dev);
+	int i = data->perf_stage;
+	int len = 0;
+
+	if (i < PMC_R2KP_MIN_PERF || i > PMC_R2KP_MAX_PERF)
+		return sprintf(buf, "Targeted performance control.\n");
+
+	for (i = 0; i < PMC_R2KP_DEV_NUM; i++) {
+		len += sprintf(buf + len, "%-15s = %4d MHz\n",
+					r2kp_freq_dev[i], data->freq[i]);
+	}
+	return len;
+}
+
+static ssize_t r2kp_show_ver(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct pmcmon_data *data = r2kp_update_device(dev);
+	u32 x = data->pmc_version;
+	u8 patch = (u8)(x & 0xFF);
+	u8 minor = (u8)(x >> 8 & 0xFF);
+	u8 major = (u8)(x >> 16 & 0xFF);
+
+	return sprintf(buf, "%d.%d.%d\n", major, minor, patch);
+}
+
+static ssize_t r2kp_show_ver_label(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "pmc_version\n");
+}
+
+static umode_t r2kp_ver_is_visible(struct kobject *kobj,
+			struct attribute *attr, int index)
+{
+	struct device *dev = container_of(kobj, struct device, kobj);
+	struct pmcmon_data *data = r2kp_update_device(dev);
+
+	if (data->pmc_version)
+		return attr->mode;
+
+	return 0;
 }
 
 #define R2KP_MIN_TEMP (20)
@@ -355,6 +491,34 @@ static ssize_t r2kp_set_temp_hyst(struct device *dev, struct device_attribute
 	data->temp_hyst = temp_to_reg(val);
 	__raw_writel(get_temp_to_reg(data), regs + PMC_R2KP_REG_TEMP_MAX);
 	mutex_unlock(&r2kp_pmc_service_lock);
+
+	return count;
+}
+
+static ssize_t r2kp_set_perf_stage(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct pmcmon_data *data = dev_get_drvdata(dev);
+	long val;
+	int err;
+	uint32_t param[PMC_R2KP_REG_PARAM_NUMBER] = {};
+
+	err = kstrtol(buf, 10, &val);
+	if (err)
+		return err;
+
+	if (val < PMC_R2KP_MIN_PERF || val > PMC_R2KP_MAX_PERF)
+		return -ERANGE;
+
+	param[0] = (uint32_t)val;
+	mutex_lock(&r2kp_pmc_service_lock);
+	err = r2kp_get_service(0, PMC_R2KP_SRV_SET_PERF, &param[0]);
+	mutex_unlock(&r2kp_pmc_service_lock);
+
+	if (err < 0 || param[0] > PMC_R2KP_MAX_PERF)
+		return -EINVAL;
+
+	data->perf_stage = (u8)param[0];
 
 	return count;
 }
@@ -519,6 +683,35 @@ static const struct attribute_group r2kp_group_temp = {
 	.attrs = r2kp_attrs_temp,
 };
 
+static SENSOR_DEVICE_ATTR(ver_input, S_IRUGO, r2kp_show_ver, NULL, 0);
+static SENSOR_DEVICE_ATTR(ver_label, S_IRUGO, r2kp_show_ver_label, NULL, 0);
+
+static struct attribute *r2kp_attrs_ver[] = {
+	&sensor_dev_attr_ver_input.dev_attr.attr,
+	&sensor_dev_attr_ver_label.dev_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group r2kp_group_ver = {
+	.attrs = r2kp_attrs_ver,
+	.is_visible = r2kp_ver_is_visible,
+};
+
+static SENSOR_DEVICE_ATTR(performance_level, 0644,
+				r2kp_show_perf_stage, r2kp_set_perf_stage, 0);
+static SENSOR_DEVICE_ATTR(performance_level_description, 0444,
+				r2kp_show_long_perf_stage, NULL, 1);
+
+static struct attribute *r2kp_attrs_perf[] = {
+	&sensor_dev_attr_performance_level.dev_attr.attr,
+	&sensor_dev_attr_performance_level_description.dev_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group r2kp_group_perf = {
+	.attrs = r2kp_attrs_perf,
+};
+
 static int pmc_r2kp_hwmon_init(struct platform_device *pdev)
 {
 	struct pmcmon_data *data;
@@ -548,8 +741,14 @@ static int pmc_r2kp_hwmon_init(struct platform_device *pdev)
 			continue;
 		data->has_sensor |= BIT(i);
 	}
+	mutex_lock(&r2kp_pmc_service_lock);
+	data->pmc_version = r2kp_get_pmc_version();
+	mutex_unlock(&r2kp_pmc_service_lock);
+
 	data->groups[0] = &r2kp_group;
 	data->groups[1] = &r2kp_group_temp;
+	data->groups[2] = &r2kp_group_ver;
+	data->groups[3] = &r2kp_group_perf;
 
 	hdev = devm_hwmon_device_register_with_groups(
 				&pdev->dev,

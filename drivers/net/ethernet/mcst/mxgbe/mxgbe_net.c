@@ -223,7 +223,9 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	/* unsigned long flags; */ /* spin_lock */
 	unsigned timestart;
 	mxgbe_addr_t descr_addr;
+	mxgbe_ctrl_t descr_ctrl;
 	s64 t1, t2;
+	void __iomem *base = priv->bar0_base;
 
 
 	FDEBUG;
@@ -240,7 +242,7 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	tail_cur = priv->rxq[qn].tail; /* new rx descr */
 
 	/* Get HW TAIL */
-	tail_hw = (u16)le32_to_cpu(*(u32 *)(priv->rxq[qn].tail_addr));
+	tail_hw = Q_TAIL_GET_PTR(mxgbe_rreg32(base, RXQ_REG_ADDR(qn, Q_TAIL)));
 	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
 		"net_hw_rx(qn=%d): tail_ram=%d\n",
 		qn, tail_hw);
@@ -273,14 +275,14 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	/* Wait for OWNER */
 	t1 = ktime_to_ns(ktime_get());
 
-	descr_addr.r = READ_ONCE(descr->addr.r);
+	descr_addr.r = le64_to_cpu(READ_ONCE(descr->addr.r));
 	if (!descr_addr.RD.OWNER) {
 #ifdef DEBUG
 		dev_err(&ndev->dev, "RX ERROR: old OWNER\n");
 #endif /* DEBUG */
 		timestart = 0;
 		do {
-			descr_addr.r = READ_ONCE(descr->addr.r);
+			descr_addr.r = le64_to_cpu(READ_ONCE(descr->addr.r));
 			if (timestart >= 0xFFFF) {
 				/* realloc this */
 				pci_unmap_single(priv->pdev,
@@ -314,14 +316,14 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 			timestart, t2 - t1);
 	}
 
+	descr_ctrl.r = le64_to_cpu(READ_ONCE(descr->ctrl.r));
 
 	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
 		"net_hw_rx(qn=%d): descr=%p, rxq_buff=%p\n",
 		qn, descr, rxq_buff);
 	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
 		"net_hw_rx(qn=%d): descr: %016llX %016llX\n",
-		qn, descr->ctrl.r, descr->addr.r);
-
+		qn, descr_ctrl.r, descr_addr.r);
 
 	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
 		"net_hw_rx(qn=%d): dma=%llX, size=%u, skb=%p\n",
@@ -339,7 +341,7 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	pci_unmap_single(priv->pdev, rxq_buff->dma, rxq_buff->size,
 			 PCI_DMA_FROMDEVICE);
 	skb = rxq_buff->skb;
-	skb_put(skb, descr->ctrl.RD.FRMSIZE + 1);
+	skb_put(skb, descr_ctrl.RD.FRMSIZE + 1);
 	rxq_buff->dma = 0;
 	/* -= process descr =- */
 
@@ -373,8 +375,8 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 
 #ifdef USE_HW_CSUM
 	/* IPv4 CS */
-	if (((descr->ctrl.RD.TYPE == 4) || (descr->ctrl.RD.TYPE == 5)) &&
-	    (descr->ctrl.RD.IPCSUMOK = 0)) {
+	if (((descr_ctrl.RD.TYPE == 4) || (descr_ctrl.RD.TYPE == 5)) &&
+	    (descr_ctrl.RD.IPCSUMOK == 0)) {
 		dev_err(&ndev->dev,
 			"ERROR: Wrong IPv4 CSUM\n");
 		dev_kfree_skb_any(skb);
@@ -439,25 +441,24 @@ static int mxgbe_poll_rx(struct napi_struct *napi, int budget)
 	/* Rx */
 	while (mxgbe_net_hw_rx(priv, qn)) {
 		work_done++;
-		if (work_done == budget) {
+		if (work_done >= budget) {
 			DEV_DBG(MXGBE_DBG_MSK_NET_RX,
 				&priv->ndev->dev,
 				"*** mxgbe_poll_rx: rx budget %d overloaded\n",
 				budget);
-			break;
+			return work_done;
 		}
 	}
 
-	if (work_done < budget) {
-		napi_complete(&(vector->napi));
-		/* NAPI: Enable Q_IRQ_EN_WRBACK */
-		mxgbe_wreg32(base, RXQ_REG_ADDR(qn, Q_IRQ),
-			Q_IRQ_EN_WRBACK | Q_IRQ_ENSETBITS);
-		DEV_DBG(MXGBE_DBG_MSK_NET_RX,
-			&priv->ndev->dev,
-			"*** mxgbe_poll_rx: napi_complete %d (budget %d)\n",
-			work_done, budget);
-	}
+	napi_complete(&(vector->napi));
+	/* NAPI: Enable IRQ */
+	mxgbe_wreg32(base, RXQ_REG_ADDR(qn, Q_IRQ),
+		     Q_IRQ_EN_ALL | Q_IRQ_ENSETBITS);
+
+	DEV_DBG(MXGBE_DBG_MSK_NET_RX,
+		&priv->ndev->dev,
+		"*** mxgbe_poll_rx: napi_complete %d (budget %d)\n",
+		work_done, budget);
 
 	return work_done;
 } /* mxgbe_poll_rx */
@@ -572,27 +573,24 @@ static int mxgbe_poll_tx(struct napi_struct *napi, int budget)
 	/* Tx */
 	while (mxgbe_txq_confirm(priv, qn)) {
 		work_done++;
-		if (work_done == budget) {
+		if (work_done >= budget) {
 			DEV_DBG(MXGBE_DBG_MSK_NET_TX,
 				&priv->ndev->dev,
 				"*** mxgbe_poll_tx: tx budget %d overloaded\n",
 				budget);
-			break;
+			return work_done;
 		}
 	}
 
-	if (work_done < budget) {
-		napi_complete(&(vector->napi));
-		/* NAPI: Enable IRQ: WRBACK and | EMPTY */
-		mxgbe_wreg32(base, TXQ_REG_ADDR(qn, Q_IRQ), 0
-			     | Q_IRQ_EN_WRBACK
-			     | Q_IRQ_EN_EMPTY
-				| Q_IRQ_ENSETBITS);
-		DEV_DBG(MXGBE_DBG_MSK_NET_TX,
-			&priv->ndev->dev,
-			"*** mxgbe_poll_tx: napi_complete %d (budget %d)\n",
-			work_done, budget);
-	}
+	napi_complete(&(vector->napi));
+	/* NAPI: Enable IRQ */
+	mxgbe_wreg32(base, TXQ_REG_ADDR(qn, Q_IRQ),
+		     Q_IRQ_EN_ALL | Q_IRQ_ENSETBITS);
+
+	DEV_DBG(MXGBE_DBG_MSK_NET_TX,
+		&priv->ndev->dev,
+		"*** mxgbe_poll_tx: napi_complete %d (budget %d)\n",
+		work_done, budget);
 
 	return work_done;
 } /* mxgbe_poll_tx */
@@ -641,6 +639,16 @@ void mxgbe_net_mac_irq_handler(mxgbe_priv_t *priv, u32 state)
  ******************************************************************************
  **/
 
+static inline int mxgbe_tx_q_mapping(mxgbe_priv_t *priv, struct sk_buff *skb)
+{
+	unsigned int r_idx = skb->queue_mapping;
+
+	if (r_idx >= priv->num_tx_queues)
+		r_idx = r_idx % priv->num_tx_queues;
+
+	return r_idx;
+} /* mxgbe_tx_q_mapping */
+
 /**
  * The network interface transmission function
  * @skb: socket buffer for tx
@@ -657,15 +665,9 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 	dma_addr_t dmaaddr;
 	mxgbe_tx_buff_t tx_buff;
 	ssize_t size;
+	int nq;
 
 	FDEBUG;
-
-	assert(skb);
-	if (!skb)
-		return -1;
-	assert(ndev);
-	if (!ndev)
-		return -1;
 
 	priv = netdev_priv(ndev);
 	assert(priv);
@@ -674,6 +676,8 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 
 	if (netif_queue_stopped(ndev))
 		return 1;
+
+	nq = mxgbe_tx_q_mapping(priv, skb);
 
 	/* Check packet's size */
 #if 0
@@ -691,6 +695,24 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 			"ERROR: Very large Tx packet's size\n");
 		goto tx_free_skb;
 	}
+
+	if (skb_put_padto(skb, ETH_ZLEN)) {
+		/*if (netif_msg_tx_queued(ep))*/
+			dev_err(&ndev->dev,
+				 "%s: Could not skb_put_padto\n", __func__);
+
+		return NETDEV_TX_OK;
+	}
+	if (__netif_subqueue_stopped(ndev, nq)) {
+		/*if (netif_msg_tx_queued(ep))*/
+			dev_info(&ndev->dev,
+				 "%s: xmit to queue %d stopped\n",
+				 __func__, nq);
+
+		return NETDEV_TX_BUSY;
+	}
+
+	/* start_xmit_to_q */
 
 	size = skb->len;
 
@@ -732,7 +754,7 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 	}
 #endif /* DEBUG */
 
-	ret = mxgbe_txq_send(priv, 0/*qn*/, &descr, &tx_buff);
+	ret = mxgbe_txq_send(priv, nq, &descr, &tx_buff);
 	if (ret < 0)
 		goto tx_free_skb;
 
@@ -760,9 +782,9 @@ tx_free_skb:
  */
 static int mxgbe_open(struct net_device *ndev)
 {
-	int err = 0, queues;
 	mxgbe_priv_t *priv;
 	int qn;
+	int node;
 
 	FDEBUG;
 
@@ -779,16 +801,6 @@ static int mxgbe_open(struct net_device *ndev)
 	netif_carrier_off(ndev);
 
 	/* Enable interrupt */
-
-	queues = priv->num_tx_queues;
-	/*err = netif_set_real_num_tx_queues(ndev, queues);*/
-	if (err)
-		goto err_set_queues;
-
-	queues = priv->num_rx_queues;
-	/*err = netif_set_real_num_rx_queues(ndev, queues);*/
-	if (err)
-		goto err_set_queues;
 
 	/* Start all RX Queue */
 	for (qn = 0; qn < priv->num_rx_queues; qn++) {
@@ -810,14 +822,10 @@ static int mxgbe_open(struct net_device *ndev)
 	if (!priv->carrier)
 		netif_carrier_on(ndev);
 
-	dev_info(&ndev->dev, KBUILD_MODNAME " interface OPEN\n");
+	node = dev_to_node(&priv->pdev->dev);
+	dev_info(&ndev->dev, KBUILD_MODNAME " node%d interface OPEN\n", node);
 
 	return 0;
-
-err_set_queues:
-	/* mxgbe_free_irq(priv); */
-
-	return err;
 } /* mxgbe_open */
 
 
@@ -831,6 +839,7 @@ static int mxgbe_stop(struct net_device *ndev)
 {
 	mxgbe_priv_t *priv;
 	int qn;
+	int node;
 
 	FDEBUG;
 
@@ -844,7 +853,8 @@ static int mxgbe_stop(struct net_device *ndev)
 		return -1;
 
 	/*if (netif_msg_ifup(priv))*/
-	dev_info(&ndev->dev, KBUILD_MODNAME " interface STOP\n");
+	node = dev_to_node(&priv->pdev->dev);
+	dev_info(&ndev->dev, KBUILD_MODNAME " node%d interface STOP\n", node);
 
 	/* Disable interrupt */
 
@@ -914,14 +924,17 @@ static int mxgbe_change_mtu(struct net_device *ndev, int new_mtu)
 		return 0;
 	}
 	if (new_mtu > MXGBE_MTU) {
+		dev_warn(&ndev->dev,
+			 "current MTU %u, requested %d (valid: %d..%d)\n",
+			 old_mtu, new_mtu, ndev->min_mtu, ndev->max_mtu);
 		return -EINVAL;
 	}
 
 	ndev->mtu = new_mtu;
 	netdev_update_features(ndev);
 
-	dev_info(&ndev->dev, "change MTU: old=%u, new=%d\n",
-		 old_mtu, new_mtu);
+	dev_info(&ndev->dev, "change MTU: old=%u, new=%d (valid: %d..%d)\n",
+		 old_mtu, new_mtu, ndev->min_mtu, ndev->max_mtu);
 
 	return 0;
 } /* mxgbe_change_mtu */
@@ -966,7 +979,7 @@ static void mxgbe_tx_timeout(struct net_device *ndev)
 /**
  * net_device_ops
  */
-static const struct net_device_ops mxgbe_netdev_ops = {
+const struct net_device_ops mxgbe_netdev_ops = {
 	.ndo_open		= mxgbe_open,
 	.ndo_stop		= mxgbe_stop,
 	.ndo_start_xmit		= mxgbe_start_xmit,
@@ -988,13 +1001,42 @@ static const struct net_device_ops mxgbe_netdev_ops = {
  ******************************************************************************
  **/
 
-mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev)
+mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev, void __iomem *base)
 {
 	mxgbe_priv_t *priv;
 	struct net_device *ndev;
-	unsigned int max_q = TXQ_MAXNUM;
+	unsigned int txqs;
+	unsigned int rxqs;
+	int cpus;
 
-	ndev = alloc_etherdev_mq(sizeof(struct mxgbe_priv), max_q);
+
+	txqs = mxgbe_rreg32(base, TX_QNUM);
+	rxqs = mxgbe_rreg32(base, RX_QNUM);
+	cpus = num_online_cpus();
+
+	/* chk Tx */
+	if ((txqs < TXQ_MINNUM) || (txqs > TXQ_MAXNUM)) {
+		dev_err(&pdev->dev, "wrong txq numbers\n");
+		return NULL;
+	}
+	txqs = min_t(int, txqs, cpus);
+	txqs = min_t(int, txqs, TXQ_MAXNUM);
+	if ((mxgbe_maxqueue >= TXQ_MINNUM) && (mxgbe_maxqueue <= TXQ_MAXNUM)) {
+		txqs = min_t(int, txqs, mxgbe_maxqueue);
+	}
+
+	/* chk Rx */
+	if ((rxqs < RXQ_MINNUM) || (rxqs > RXQ_MAXNUM)) {
+		dev_err(&pdev->dev, "wrong rxq numbers\n");
+		return NULL;
+	}
+	rxqs = min_t(int, rxqs, cpus);
+	rxqs = min_t(int, rxqs, RXQ_MAXNUM);
+	if ((mxgbe_maxqueue >= RXQ_MINNUM) && (mxgbe_maxqueue <= RXQ_MAXNUM)) {
+		rxqs = min_t(int, rxqs, mxgbe_maxqueue);
+	}
+
+	ndev = alloc_etherdev_mqs(sizeof(struct mxgbe_priv), txqs, rxqs);
 	if (!ndev) {
 		dev_err(&pdev->dev,
 			"ERROR: Cannot allocate memory" \
@@ -1005,6 +1047,11 @@ mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev)
 	priv = netdev_priv(ndev);
 	priv->ndev = ndev;
 	priv->pdev = pdev;
+	priv->num_tx_queues = txqs;
+	priv->num_rx_queues = rxqs;
+
+	dev_info(&pdev->dev,
+		 "cpus:%d, tx_queues:%d, rx_queues:%d\n", cpus, txqs, rxqs);
 
 	return priv;
 }
@@ -1031,9 +1078,12 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 		/* | NETIF_F_IPV6_CSUM */	/* IPV6 XS */
 		;
 #else
-	/* ndev->features |= NETIF_F_IP_CSUM; */
-	/* ndev->features |= NETIF_F_HW_CSUM; */
+	ndev->hw_features = 0;
 #endif /* USE_HW_CSUM */
+
+	/* MTU range: 68 - 16366 */
+	ndev->min_mtu = ETH_MIN_MTU;
+	ndev->max_mtu = MXGBE_MAXFRAMESIZE - (ETH_HLEN + ETH_FCS_LEN);
 
 	/* create napi for all queue */
 	for (qn = 0; qn < priv->num_rx_queues; qn++) {
@@ -1066,6 +1116,17 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 		dev_err(&priv->pdev->dev,
 			"Cannot register net device, aborting\n");
 		goto err_out_mdiobus;
+	}
+
+	if (priv->num_tx_queues != priv->ndev->num_tx_queues) {
+		dev_warn(&ndev->dev,
+			 "num_tx_queues wrong: %d != %d\n",
+			 priv->num_tx_queues, priv->ndev->num_tx_queues);
+	}
+	if (priv->num_rx_queues != priv->ndev->num_rx_queues) {
+		dev_warn(&ndev->dev,
+			 "num_rx_queues wrong: %d != %d\n",
+			 priv->num_rx_queues, priv->ndev->num_rx_queues);
 	}
 
 	for (qn = 0; qn < priv->num_rx_queues; qn++) {
@@ -1166,6 +1227,51 @@ void mxgbe_net_free(mxgbe_priv_t *priv)
 {
 	free_netdev(priv->ndev);
 } /* mxgbe_net_free */
+
+
+/**
+ ******************************************************************************
+ * Event Part
+ ******************************************************************************
+ **/
+
+#ifdef CONFIG_DEBUG_FS
+void mxgbe_dbg_rename(mxgbe_priv_t *priv, const char *name);
+#endif /* CONFIG_DEBUG_FS */
+
+/* Use network device events to rename some file entries. */
+int mxgbe_device_event(struct notifier_block *unused, unsigned long event,
+		       void *ptr)
+{
+	struct net_device *ndev = netdev_notifier_info_to_dev(ptr);
+	mxgbe_priv_t *priv;
+
+	if (!ndev)
+		goto done;
+
+	priv = netdev_priv(ndev);
+	if (!priv)
+		goto done;
+
+	if (ndev->netdev_ops != &mxgbe_netdev_ops)
+		goto done;
+
+	switch (event) {
+	case NETDEV_CHANGENAME:
+		dev_info(&priv->pdev->dev,
+			": node%d 10G network interface name - %s\n",
+			dev_to_node(&priv->pdev->dev), ndev->name);
+
+#ifdef CONFIG_DEBUG_FS
+		snprintf(priv->dbg_name, sizeof(priv->dbg_name) - 1,
+			 "%s@%s", ndev->name, dev_name(&priv->pdev->dev));
+		mxgbe_dbg_rename(priv, priv->dbg_name);
+#endif /* CONFIG_DEBUG_FS */
+		break;
+	}
+done:
+	return NOTIFY_DONE;
+} /* mxgbe_device_event */
 
 
 /**

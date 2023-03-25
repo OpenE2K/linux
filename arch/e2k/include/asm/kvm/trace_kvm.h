@@ -3,6 +3,7 @@
 
 #include <linux/tracepoint.h>
 #include <asm/kvm_host.h>
+#include <asm/kvm/mmu.h>
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM kvm
@@ -215,24 +216,6 @@ TRACE_EVENT(kvm_exit,
 );
 
 /*
- * Tracepoint for kvm interrupt injection:
- */
-TRACE_EVENT(kvm_inj_virq,
-	TP_PROTO(unsigned int irq),
-	TP_ARGS(irq),
-
-	TP_STRUCT__entry(
-		__field(	unsigned int,	irq		)
-	),
-
-	TP_fast_assign(
-		__entry->irq		= irq;
-	),
-
-	TP_printk("irq %u", __entry->irq)
-);
-
-/*
  * Tracepoint for page fault.
  */
 TRACE_EVENT(kvm_page_fault,
@@ -400,6 +383,28 @@ TRACE_EVENT(kvm_apic_accept_irq,
 		  __print_symbolic((__entry->dm >> 8 & 0x7), kvm_deliver_mode),
 		  __entry->tm ? "level" : "edge",
 		  __entry->coalesced ? " (coalesced)" : "")
+);
+
+TRACE_EVENT(kvm_apic_irq_vector,
+	    TP_PROTO(__u32 apicid, __u8 vec, int virqs_num),
+	    TP_ARGS(apicid, vec, virqs_num),
+
+	TP_STRUCT__entry(
+		__field(	__u32,		apicid		)
+		__field(	__u8,		vec		)
+		__field(	int,		virqs_num	)
+	),
+
+	TP_fast_assign(
+		__entry->apicid		= apicid;
+		__entry->vec		= vec;
+		__entry->virqs_num	= virqs_num;
+	),
+
+	TP_printk("apicid #%x vector %u %s %d irq(s)",
+		  __entry->apicid, __entry->vec,
+		  (__entry->virqs_num >= 0) ? "there is still" : "there were no",
+		  (__entry->virqs_num >= 0) ? __entry->virqs_num : 0)
 );
 
 TRACE_EVENT(kvm_epic_ipi,
@@ -1191,44 +1196,51 @@ TRACE_EVENT(
 TRACE_EVENT(
 	vcpu_put,
 
-	TP_PROTO(int vcpu, int cpu),
+	TP_PROTO(int vcpu, int cpu, bool schedule),
 
-	TP_ARGS(vcpu, cpu),
+	TP_ARGS(vcpu, cpu, schedule),
 
 	TP_STRUCT__entry(
 		__field(	int,	vcpu	)
 		__field(	int,	cpu	)
+		__field(	bool,	schedule)
 	),
 
 	TP_fast_assign(
 		__entry->vcpu = vcpu;
 		__entry->cpu = cpu;
+		__entry->schedule = schedule;
 	),
 
-	TP_printk("vcpu %d, cpu %d", __entry->vcpu, __entry->cpu)
+	TP_printk("vcpu %d, cpu %d, from %s",
+		__entry->vcpu, __entry->cpu,
+		(__entry->schedule) ? "schedule()" : "vcpu_put()")
 );
 
 TRACE_EVENT(
 	vcpu_load,
 
-	TP_PROTO(int vcpu, int last_cpu, int cpu),
+	TP_PROTO(int vcpu, int last_cpu, int cpu, bool schedule),
 
-	TP_ARGS(vcpu, last_cpu, cpu),
+	TP_ARGS(vcpu, last_cpu, cpu, schedule),
 
 	TP_STRUCT__entry(
 		__field(	int,	vcpu	)
-		__field(	int,	last_cpu	)
+		__field(	int,	last_cpu)
 		__field(	int,	cpu	)
+		__field(	bool,	schedule)
 	),
 
 	TP_fast_assign(
 		__entry->vcpu = vcpu;
 		__entry->last_cpu = last_cpu;
 		__entry->cpu = cpu;
+		__entry->schedule = schedule;
 	),
 
-	TP_printk("vcpu %d, cpu %d, last_cpu %d", __entry->vcpu, __entry->cpu,
-		__entry->last_cpu)
+	TP_printk("vcpu %d, cpu %d, last_cpu %d, from %s",
+		__entry->vcpu, __entry->cpu, __entry->last_cpu,
+		(__entry->schedule) ? "schedule()" : "vcpu_load()")
 );
 
 TRACE_EVENT(
@@ -1255,10 +1267,87 @@ TRACE_EVENT(
 		__entry->handler = handler;
 	),
 
-	TP_printk("HVA 0x%llx - 0x%llx; GPA 0x%llx - 0x%llx; handler 0x%px",
+	TP_printk("HVA 0x%llx - 0x%llx; GPA 0x%llx - 0x%llx; handler %pfx",
 		__entry->hva_start, __entry->hva_end,
 		__entry->gpa_start, __entry->gpa_end,
 		__entry->handler)
+);
+
+TRACE_EVENT(
+	kvm_unmap_rmap,
+
+	TP_PROTO(struct kvm_mmu_page *sp, pgprot_t *sptep, pgprot_t old_spte,
+		 gmm_struct_t *gmm, bool removed),
+
+	TP_ARGS(sp, sptep, old_spte, gmm, removed),
+
+	TP_STRUCT__entry(
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		old_spte	)
+		__field(pgprotval_t,		spte		)
+		__field(int,			gmm_id		)
+		__field(gva_t,			gva		)
+		__field(gfn_t,			gfn		)
+		__field(int,			level		)
+		__field(bool,			removed		)
+	),
+
+	TP_fast_assign(
+		__entry->sptep = sptep;
+		__entry->old_spte = pgprot_val(old_spte);
+		__entry->spte = pgprot_val(*sptep);
+		__entry->gmm_id = (gmm) ? gmm->id : -1;
+		__entry->gva = sp->gva;
+		__entry->gfn = sp->gfn;
+		__entry->level = sp->role.level;
+		__entry->removed = removed;
+	),
+
+	TP_printk("gmm #%d gva 0x%lx gfn 0x%llx level #%d\n"
+		"     spte at %px : old %016lx new %016lx, rmap %s",
+		__entry->gmm_id, __entry->gva, __entry->gfn, __entry->level,
+		__entry->sptep, __entry->old_spte, __entry->spte,
+		(__entry->removed) ? "is removed" : "none or already removed")
+);
+
+TRACE_EVENT(
+	kvm_set_pte_rmapp,
+
+	TP_PROTO(pte_t *ptep, struct kvm_mmu_page *sp,
+		 pgprot_t *sptep, pgprot_t old_spte,
+		 gmm_struct_t *gmm, bool dropped),
+
+	TP_ARGS(ptep, sp, sptep, old_spte, gmm, dropped),
+
+	TP_STRUCT__entry(
+		__field(pteval_t,		pte		)
+		__field(pgprot_t *,		sptep		)
+		__field(pgprotval_t,		old_spte	)
+		__field(pgprotval_t,		spte		)
+		__field(int,			gmm_id		)
+		__field(gva_t,			gva		)
+		__field(gfn_t,			gfn		)
+		__field(int,			level		)
+		__field(bool,			dropped		)
+	),
+
+	TP_fast_assign(
+		__entry->pte = pte_val(*ptep);
+		__entry->sptep = sptep;
+		__entry->old_spte = pgprot_val(old_spte);
+		__entry->spte = pgprot_val(*sptep);
+		__entry->gmm_id = (gmm) ? gmm->id : -1;
+		__entry->gva = sp->gva;
+		__entry->gfn = sp->gfn;
+		__entry->level = sp->role.level;
+		__entry->dropped = dropped;
+	),
+
+	TP_printk("gmm #%d gva 0x%lx gfn 0x%llx level #%d\n"
+		"     new pte %016lx spte at %px : old %016lx new %016lx, %s",
+		__entry->gmm_id, __entry->gva, __entry->gfn, __entry->level,
+		__entry->pte, __entry->sptep, __entry->old_spte, __entry->spte,
+		(__entry->dropped) ? "is dropped" : "is updated to new pfn")
 );
 
 TRACE_EVENT(
@@ -1733,6 +1822,62 @@ TRACE_EVENT(
 	TP_printk("rmap head %px : remove many->bad not found spte %px : 0x%lx "
 		"head val 0x%lx\n",
 		__entry->rmap_head, __entry->sptep, __entry->spte, __entry->val)
+);
+
+#define kvm_switch_to_host_type						\
+	{ undefined_sw_to_host, "Undefined" },				\
+	{ syscall_sw_to_host, "Syscall from guest" },			\
+	{ hypercall_sw_to_host, "Hypercall from guest" },		\
+	{ to_qemu_sw_to_host, "Return to qemu" },			\
+	{ trap_sw_to_host, "Trap on guest" },				\
+	{ trampoline_sw_to_host, "Injection completion" }
+
+TRACE_EVENT(
+	kvm_switch_to_host_mmu_pid,
+	TP_PROTO(struct kvm_vcpu *vcpu, void *mm, unsigned long mmu_pid,
+		 sw_to_host_type_t switch_type),
+	TP_ARGS(vcpu, mm, mmu_pid, switch_type),
+
+	TP_STRUCT__entry(
+		__field(int, vcpu_id)
+		__field(int, cpu_id)
+		__field(void *, mm)
+		__field(unsigned long, mmu_pid)
+		__field(sw_to_host_type_t, type)
+	),
+
+	TP_fast_assign(
+		__entry->vcpu_id = (vcpu) ? vcpu->vcpu_id : -1;
+		__entry->cpu_id = smp_processor_id();
+		__entry->mm = mm;
+		__entry->mmu_pid = mmu_pid;
+		__entry->type = switch_type;
+	),
+
+	TP_printk("vcpu #%d/cpu #%d switch type: %s\n"
+		"     mm %px set mmu pid to 0x%lx",
+		  __entry->vcpu_id, __entry->cpu_id,
+		  __print_symbolic(__entry->type, kvm_switch_to_host_type),
+		  __entry->mm, __entry->mmu_pid
+	)
+);
+
+TRACE_EVENT(kvm_e2k_msi,
+	    TP_PROTO(__u64 address, __u64 data),
+	    TP_ARGS(address, data),
+
+	TP_STRUCT__entry(
+		__field(	__u64,		address		)
+		__field(	__u64,		data		)
+	),
+
+	TP_fast_assign(
+		__entry->address	= address;
+		__entry->data		= data;
+	),
+
+	TP_printk("addr 0x%llx data 0x%llx",
+		__entry->address, __entry->data)
 );
 
 #endif /* _TRACE_KVM_H */

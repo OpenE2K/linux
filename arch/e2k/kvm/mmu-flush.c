@@ -117,40 +117,6 @@ void host_local_flush_tlb_range(mm_context_t *context,
 				trace_enabled);
 }
 
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-/*
- * Update all user PGD entries of the gmm.
- * PGDs are updated into CPU root page table from main user PGD table
- */
-void host_flush_cpu_root_pt_mm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
-{
-	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
-		pgd_t *gmm_pgd = kvm_mmu_get_gmm_root(gmm);
-
-		KVM_BUG_ON(gmm_pgd == NULL);
-		copy_guest_user_pgd_to_kernel_root_pt(gmm_pgd);
-		trace_host_flush_cpu_root_pt(vcpu, gmm, gmm_pgd);
-	}
-}
-/*
- * Update all user PGD entries of current active mm.
- * PGDs are updated into CPU root page table from main user PGD table
- */
-void host_flush_cpu_root_pt(struct kvm_vcpu *vcpu)
-{
-	gmm_struct_t *gmm = pv_vcpu_get_gmm(vcpu);
-
-	host_flush_cpu_root_pt_mm(vcpu, gmm);
-}
-#else	/* !CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-void host_flush_cpu_root_pt_mm(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
-{
-}
-void host_flush_cpu_root_pt(struct kvm_vcpu *vcpu)
-{
-}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-
 #ifdef	CONFIG_SMP
 
 static void host_flush_init_gmm_tlb_range(struct kvm *kvm, gmm_struct_t *cur_gmm,
@@ -195,37 +161,38 @@ static void host_flush_init_gmm_tlb_range(struct kvm *kvm, gmm_struct_t *cur_gmm
 	put_cpu();
 }
 
-void host_flush_shadow_pt_tlb_range(struct kvm_vcpu *vcpu,
-		gva_t start, gva_t end, pgprot_t spte, int level)
+void host_flush_shadow_pt_tlb_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+			gva_t start, gva_t end, pgprot_t spte, int level)
 {
 	bool trace_enabled = trace_host_flush_tlb_enabled();
-	gmm_struct_t *cur_gmm = pv_vcpu_get_gmm(vcpu);
 
 	KVM_BUG_ON(start >= NATIVE_TASK_SIZE);
 
 	if (unlikely(start < GUEST_TASK_SIZE)) {
 		DebugFLSPT("cpu #%d vcpu #%d gmm id #%d : range from 0x%lx "
 			"to 0x%lx, level #%d spte 0x%lx\n",
-			raw_smp_processor_id(), vcpu->vcpu_id, cur_gmm->nid.nr,
+			raw_smp_processor_id(), vcpu->vcpu_id, gmm->id,
 			start, end, level, pgprot_val(spte));
 
 		KVM_BUG_ON(is_paging(vcpu) &&
-				pv_mmu_is_init_gmm(vcpu->kvm, cur_gmm));
+				pv_mmu_is_init_gmm(vcpu->kvm, gmm));
 
 		if (level == E2K_PTE_LEVEL_NUM) {
-			host_flush_tlb_page(cur_gmm, start);
+			host_flush_tlb_page(gmm, start);
 		} else if (level == E2K_PMD_LEVEL_NUM) {
-			host_flush_pmd_tlb_range(cur_gmm, start, end);
+			host_flush_pmd_tlb_range(gmm, start, end);
 		} else if (level == E2K_PUD_LEVEL_NUM ||
 					level == E2K_PGD_LEVEL_NUM) {
-			host_flush_tlb_range(cur_gmm, start, end);
+			host_flush_tlb_range(gmm, start, end);
 		} else {
 			KVM_BUG_ON(true);
 		}
 		return;
 	}
 
-	host_flush_init_gmm_tlb_range(vcpu->kvm, cur_gmm, start, end, level,
+	KVM_BUG_ON(!pv_mmu_is_init_gmm(vcpu->kvm, gmm));
+
+	host_flush_init_gmm_tlb_range(vcpu->kvm, gmm, start, end, level,
 				      trace_enabled);
 }
 
@@ -233,6 +200,8 @@ void host_flush_shadow_pt_level_tlb(struct kvm *kvm, gmm_struct_t *gmm, gva_t gv
 			int level, pgprot_t new_spte, pgprot_t old_spte)
 {
 	bool trace_enabled = trace_host_flush_tlb_enabled();
+	const pt_struct_t *spt = mmu_pt_get_host_pt_struct(kvm);
+	unsigned long page_size = get_pt_struct_level_page_size(spt, level);
 
 	KVM_BUG_ON(gva >= NATIVE_TASK_SIZE);
 
@@ -242,18 +211,28 @@ void host_flush_shadow_pt_level_tlb(struct kvm *kvm, gmm_struct_t *gmm, gva_t gv
 			raw_smp_processor_id(), gmm->nid.nr,
 			level, gva, pgprot_val(old_spte), pgprot_val(new_spte));
 
-		host_flush_tlb_page(gmm, gva);
+		if (level == E2K_PTE_LEVEL_NUM) {
+			host_flush_tlb_page(gmm, gva);
+		} else if (level == E2K_PMD_LEVEL_NUM) {
+			host_flush_pmd_tlb_range(gmm, gva, gva + page_size);
+		} else if (level == E2K_PUD_LEVEL_NUM ||
+					level == E2K_PGD_LEVEL_NUM) {
+			host_flush_tlb_range(gmm, gva, gva + page_size);
+		} else {
+			KVM_BUG_ON(true);
+		}
 		return;
 	}
 
 	KVM_BUG_ON(!pv_mmu_is_init_gmm(kvm, gmm));
 
-	host_flush_init_gmm_tlb_range(kvm, gmm, gva, gva, level, trace_enabled);
+	host_flush_init_gmm_tlb_range(kvm, gmm, gva, gva + page_size, level,
+					trace_enabled);
 }
 
 #else	/* !CONFIG_SMP */
-void host_flush_shadow_pt_tlb_range(struct kvm_vcpu *vcpu,
-		gva_t start, gva_t end, pgprot_t spte, int level)
+void host_flush_shadow_pt_tlb_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+			gva_t start, gva_t end, pgprot_t spte, int level)
 {
 }
 

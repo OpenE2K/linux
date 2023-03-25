@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -611,6 +611,11 @@ gckKERNEL_CreateProcessDB(
                 gcmkONERROR(gcvSTATUS_INVALID_REQUEST);
             }
 
+            if (database->refs == gcvNULL)
+            {
+                gcmkONERROR(gcvSTATUS_INVALID_ADDRESS);
+            }
+
             gcmkVERIFY_OK(gckOS_AtomIncrement(Kernel->os, database->refs, &oldVal));
             goto OnExit;
         }
@@ -1178,6 +1183,12 @@ gckKERNEL_DestroyProcessDB(
     if (database)
     {
         gctINT32 oldVal = 0;
+
+        if (database->refs == gcvNULL)
+        {
+            gcmkONERROR(gcvSTATUS_INVALID_ADDRESS);
+        }
+
         gcmkONERROR(gckOS_AtomDecrement(Kernel->os, database->refs, &oldVal));
         if (oldVal != 1)
         {
@@ -1377,7 +1388,7 @@ gckKERNEL_DestroyProcessDB(
                 {
                     gctUINT32 priorityID = gcmPTR2INT32(record->data);
                     gceHARDWARE_TYPE type = Kernel->hardware->type;
-                    gctUINT32 id = 0;
+                    gctINT32 id = 0;
 
                     if (priorityID >= gcdMAX_PRIORITY_QUEUE_NUM)
                     {
@@ -1389,7 +1400,7 @@ gckKERNEL_DestroyProcessDB(
 
                     gcmkVERIFY_OK(gckOS_AtomGet(Kernel->os, Kernel->device->atomPriorityID, &id));
 
-                    if (id > 0 && priorityID == id)
+                    if (id > 0 && priorityID == (gctUINT32)id)
                     {
                         gcmkVERIFY_OK(gckOS_AtomDecrement(Kernel->os, Kernel->device->atomPriorityID, &id));
                         while (--id)
@@ -1407,7 +1418,7 @@ gckKERNEL_DestroyProcessDB(
                     if (type == gcvHARDWARE_3D || type == gcvHARDWARE_3D2D || type == gcvHARDWARE_VIP)
                     {
                         gckKERNEL kernel = gcvNULL;
-                        gctINT i;
+                        gctUINT i;
 
                         for (i = 0; i < Kernel->device->coreNum; i++)
                         {

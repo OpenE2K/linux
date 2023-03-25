@@ -57,7 +57,6 @@ void kvm_ioepic_destroy(struct kvm *kvm);
 int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base, int node_id);
 int kvm_ioepic_set_irq(struct kvm_ioepic *ioepic, int irq, int level);
 void kvm_ioepic_reset(struct kvm_ioepic *ioepic);
-void kvm_make_scan_ioepic_request(struct kvm *kvm);
 #if 0
 int kvm_get_ioepic(struct kvm *kvm, struct kvm_ioepic_state *state);
 int kvm_set_ioepic(struct kvm *kvm, struct kvm_ioepic_state *state);

@@ -76,8 +76,6 @@ long	kernel_symtab_size;
 void	*kernel_strtab;
 long	kernel_strtab_size;
 
-e2k_addr_t print_kernel_address_ptes(e2k_addr_t address);
-
 int debug_userstack = 0;
 static int __init userstack_setup(char *str)
 {
@@ -275,14 +273,12 @@ void setup_stack_print()
 
 static int careful_tagged_copy(void *dst, void *src, unsigned long sz)
 {
-	SET_USR_PFAULT("$.recovery_memcpy_fault");
-	fast_tagged_memory_copy_user(dst, src, sz, NULL,
-			TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			0);	/* prefetch */
-	if (RESTORE_USR_PFAULT)
+	size_t copied;
+
+	SET_USR_PFAULT("$.recovery_memcpy_fault", false);
+	copied = fast_tagged_memory_copy_in_user((void __force __user *) dst,
+				     (void __force __user *) src, sz, NULL, 0);
+	if (RESTORE_USR_PFAULT(false) || copied != sz)
 		return -EFAULT;
 
 	return 0;
@@ -350,6 +346,33 @@ static void copy_k_data_stack_regs(const struct pt_regs *limit_regs,
 }
 #endif
 
+void fill_trap_stack_regs(const pt_regs_t *trap_pt_regs,
+			  printed_trap_regs_t *regs_trap)
+{
+	regs_trap->frame = AS(trap_pt_regs->stacks.pcsp_lo).base +
+			      AS(trap_pt_regs->stacks.pcsp_hi).ind;
+	regs_trap->ctpr1 = trap_pt_regs->ctpr1;
+	regs_trap->ctpr1_hi = trap_pt_regs->ctpr1_hi;
+	regs_trap->ctpr2 = trap_pt_regs->ctpr2;
+	regs_trap->ctpr2_hi = trap_pt_regs->ctpr2_hi;
+	regs_trap->ctpr3 = trap_pt_regs->ctpr3;
+	regs_trap->ctpr3_hi = trap_pt_regs->ctpr3_hi;
+	regs_trap->lsr = trap_pt_regs->lsr;
+	regs_trap->ilcr = trap_pt_regs->ilcr;
+	if (machine.native_iset_ver >= E2K_ISET_V5) {
+		regs_trap->lsr1 = trap_pt_regs->lsr1;
+		regs_trap->ilcr1 = trap_pt_regs->ilcr1;
+	}
+	if (trap_pt_regs->trap && trap_pt_regs->trap->sbbp) {
+		memcpy(regs_trap->sbbp, trap_pt_regs->trap->sbbp,
+				sizeof(regs_trap->sbbp));
+	} else {
+		memset(regs_trap->sbbp, 0,
+				sizeof(regs_trap->sbbp));
+	}
+	regs_trap->valid = 1;
+}
+
 static void copy_trap_stack_regs(const struct pt_regs *limit_regs,
 		struct stack_regs *regs)
 {
@@ -372,34 +395,13 @@ static void copy_trap_stack_regs(const struct pt_regs *limit_regs,
 		if (!trap_pt_regs)
 			break;
 
-		regs->trap[i].frame = AS(trap_pt_regs->stacks.pcsp_lo).base +
-				      AS(trap_pt_regs->stacks.pcsp_hi).ind;
-		regs->trap[i].ctpr1 = trap_pt_regs->ctpr1;
-		regs->trap[i].ctpr1_hi = trap_pt_regs->ctpr1_hi;
-		regs->trap[i].ctpr2 = trap_pt_regs->ctpr2;
-		regs->trap[i].ctpr2_hi = trap_pt_regs->ctpr2_hi;
-		regs->trap[i].ctpr3 = trap_pt_regs->ctpr3;
-		regs->trap[i].ctpr3_hi = trap_pt_regs->ctpr3_hi;
-		regs->trap[i].lsr = trap_pt_regs->lsr;
-		regs->trap[i].ilcr = trap_pt_regs->ilcr;
-		if (machine.native_iset_ver >= E2K_ISET_V5) {
-			regs->trap[i].lsr1 = trap_pt_regs->lsr1;
-			regs->trap[i].ilcr1 = trap_pt_regs->ilcr1;
-		}
-		if (trap_pt_regs->trap && trap_pt_regs->trap->sbbp) {
-			memcpy(regs->trap[i].sbbp, trap_pt_regs->trap->sbbp,
-					sizeof(regs->trap[i].sbbp));
-		} else {
-			memset(regs->trap[i].sbbp, 0,
-					sizeof(regs->trap[i].sbbp));
-		}
-		regs->trap[i].valid = 1;
+		fill_trap_stack_regs(trap_pt_regs, &regs->trap[i]);
 
 		trap_pt_regs = find_trap_host_regs(trap_pt_regs->next);
 	}
 }
 
-static unsigned long copy_user_hardware_stack(void *dst, void *src, u64 sz)
+static unsigned long copy_user_hardware_stack(void *dst, void __user *src, u64 sz)
 {
 	unsigned long n;
 	int ret;
@@ -407,10 +409,10 @@ static unsigned long copy_user_hardware_stack(void *dst, void *src, u64 sz)
 	/* We are currently on reserve stacks which means
 	 * that this function is trying to access kernel's stacks */
 	if (on_reserve_stacks())
-		if (careful_tagged_copy(dst, src, sz))
+		if (careful_tagged_copy(dst, (void __force *) src, sz))
 			return sz;
 
-	n = (u64)src + sz - PAGE_ALIGN_UP((u64)src + sz);
+	n = (unsigned long) src + sz - PAGE_ALIGN_UP((unsigned long) src + sz);
 	if (n == 0)
 		n = PAGE_SIZE;
 	n = min(n, sz);
@@ -504,25 +506,24 @@ static void copy_proc_stack_regs(const struct pt_regs *limit_regs,
 	}
 	if (pt_regs) {
 		unsigned long copied;
-
-		src = (void *) AS(pt_regs->stacks.psp_lo).base;
+		void __user *u_src = (void __user *) AS(pt_regs->stacks.psp_lo).base;
 		sz = AS(pt_regs->stacks.psp_hi).ind -
 				GET_PSHTP_MEM_INDEX(pt_regs->stacks.pshtp);
 		if (sz > regs->base_psp_stack - regs->psp_stack_cache) {
 			s64 delta = sz - (u64) (regs->base_psp_stack -
 						regs->psp_stack_cache);
 			sz -= delta;
-			src += delta;
+			u_src += delta;
 		}
 		dst = regs->base_psp_stack - sz;
 
-		copied = sz - copy_user_hardware_stack(dst, src, sz);
+		copied = sz - copy_user_hardware_stack(dst, u_src, sz);
 
 		if (copied) {
 			regs->base_psp_stack -= copied;
 			regs->size_psp_stack += copied;
 			regs->orig_base_psp_stack_k -= copied;
-			regs->orig_base_psp_stack_u = (u64) src + sz - copied;
+			regs->orig_base_psp_stack_u = (unsigned long) u_src + sz - copied;
 			regs->user_size_psp_stack += (on_reserve_stacks()) ? 0 : copied;
 		} else {
 			regs->orig_base_psp_stack_u = 0;
@@ -600,22 +601,22 @@ static int copy_chain_stack_regs(const struct pt_regs *limit_regs,
 	}
 
 	if (pt_regs) {
-		src = (void *) AS(pt_regs->stacks.pcsp_lo).base;
+		void __user *u_src = (void __user *) AS(pt_regs->stacks.pcsp_lo).base;
 		sz = AS(pt_regs->stacks.pcsp_hi).ind -
 				PCSHTP_SIGN_EXTEND(pt_regs->stacks.pcshtp);
 		if (sz > regs->base_chain_stack - regs->chain_stack_cache) {
 			s64 delta = sz - (u64) (regs->base_chain_stack -
 						regs->chain_stack_cache);
 			sz -= delta;
-			src += delta;
+			u_src += delta;
 		}
 		dst = regs->base_chain_stack - sz;
 
-		if (!copy_user_hardware_stack(dst, src, sz)) {
+		if (!copy_user_hardware_stack(dst, u_src, sz)) {
 			regs->base_chain_stack -= sz;
 			regs->size_chain_stack += sz;
 			regs->orig_base_chain_stack_k -= sz;
-			regs->orig_base_chain_stack_u = (u64) src;
+			regs->orig_base_chain_stack_u = (unsigned long) u_src;
 			regs->user_size_chain_stack += (on_reserve_stacks()) ? 0 : sz;
 		} else {
 			regs->orig_base_chain_stack_u = 0;
@@ -952,7 +953,7 @@ void print_mmap(struct task_struct *task)
 	pr_alert("============ MMAP AREAS for pid %d =============\n", task->pid);
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		vm_file = vma->vm_file;
-		pr_cont("ADDR 0x%-10lx END 0x%-10lx ",
+		pr_alert("ADDR 0x%-10lx END 0x%-10lx ",
 			vma->vm_start, vma->vm_end);
 		all_sz += vma->vm_end - vma->vm_start;
 		if (vma->vm_flags & VM_WRITE)
@@ -1151,10 +1152,10 @@ void print_tc_record(const trap_cellar_t *tcellar, int num)
 	       "                 opcode 0x%03x: fmt 0x%02x, npsp 0x%x\n"
 	       "                 store 0x%x, s_f  0x%x, mas 0x%x\n"
 	       "                 root  0x%x, scal 0x%x, sru 0x%x\n"
-	       "                 chan  0x%x, se   0x%x, pm  0x%x\n" 
+	       "                 chan  0x%x, spec 0x%x, pm  0x%x\n"
 	       "                 fault_type 0x%x:\n"
 	       "                    intl_res_bits = %d MLT_trap     = %d\n"
-	       "                    ph_pr_page	  = %d global_sp    = %d\n"
+	       "                    ph_pr_page    = %d global_sp    = %d\n"
 	       "                    io_page       = %d isys_page    = %d\n"
 	       "                    prot_page     = %d priv_page    = %d\n"
 	       "                    illegal_page  = %d nwrite_page  = %d\n"
@@ -1418,12 +1419,49 @@ print_all_mmap(void)
 	read_unlock(&tasklist_lock);
 }
 
+UACCESS_FN_DEFINE2(copy_crs_fn, e2k_mem_crs_t *, dst, const e2k_mem_crs_t *, src)
+{
+	e2k_cr0_lo_t cr0_lo;
+	e2k_cr0_hi_t cr0_hi;
+	e2k_cr1_lo_t cr1_lo;
+	e2k_cr1_hi_t cr1_hi;
+
+	if ((unsigned long) src < TASK_SIZE) {
+		const e2k_mem_crs_t *u_src = (const e2k_mem_crs_t __user __force *) src;
+		USER_LD(AW(cr0_lo), &AW(u_src->cr0_lo));
+		USER_LD(AW(cr0_hi), &AW(u_src->cr0_hi));
+		USER_LD(AW(cr1_lo), &AW(u_src->cr1_lo));
+		USER_LD(AW(cr1_hi), &AW(u_src->cr1_hi));
+	} else {
+		cr0_lo = src->cr0_lo;
+		cr0_hi = src->cr0_hi;
+		cr1_lo = src->cr1_lo;
+		cr1_hi = src->cr1_hi;
+	}
+
+	if ((unsigned long) dst < TASK_SIZE) {
+		e2k_mem_crs_t *u_dst = (e2k_mem_crs_t __user __force *) dst;
+		USER_ST(AW(cr0_lo), &AW(u_dst->cr0_lo));
+		USER_ST(AW(cr0_hi), &AW(u_dst->cr0_hi));
+		USER_ST(AW(cr1_lo), &AW(u_dst->cr1_lo));
+		USER_ST(AW(cr1_hi), &AW(u_dst->cr1_hi));
+	} else {
+		dst->cr0_lo = cr0_lo;
+		dst->cr0_hi = cr0_hi;
+		dst->cr1_lo = cr1_lo;
+		dst->cr1_hi = cr1_hi;
+	}
+
+	return 0;
+}
+
 notrace
-static int get_chain_frame(e2k_mem_crs_t *dst, e2k_mem_crs_t *src,
+static int get_chain_frame(e2k_mem_crs_t *dst, const e2k_mem_crs_t *src,
 			   int flags, struct task_struct *p)
 {
 	if (p != current || (flags & PCS_USER)) {
 		unsigned long ts_flag;
+		int ret;
 
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 		/*
@@ -1431,15 +1469,10 @@ static int get_chain_frame(e2k_mem_crs_t *dst, e2k_mem_crs_t *src,
 		 * happens we just bail out, otherwise we would have
 		 * to SPILL chain stack again.
 		 */
-		__TRY_USR_PFAULT {
-			*dst = *src;
-		} CATCH_USR_PFAULT {
-			clear_ts_flag(ts_flag);
-			return -EFAULT;
-		} END_USR_PFAULT
+		ret = ____UACCESS_FN_CALL(copy_crs_fn, dst, src);
 		clear_ts_flag(ts_flag);
 
-		return 0;
+		return ret;
 	}
 
 	if (WARN_ON_ONCE(!(flags & PCS_USER) && (unsigned long) src < TASK_SIZE))
@@ -1460,7 +1493,7 @@ int ____parse_chain_stack(int flags, struct task_struct *p,
 	e2k_mem_crs_t *frame;
 	unsigned long chain_stack_bytes_fixed = 0;
 
-	if (flags & PCS_OPEN_IRQS)
+	if ((flags & PCS_OPEN_IRQS) && p == current)
 		func_flags |= PCF_IRQS_CLOSE_NEEDED;
 	if (*interrupts_enabled == false) {
 		func_flags |= PCF_FLUSH_NEEDED;
@@ -1625,10 +1658,14 @@ static int __parse_chain_stack(int flags, struct task_struct *p,
  * @func: function to call
  * @arg: function argument
  *
+ * Will stop parsing when either condition is met:
+ *  - bottom of chain stack is reached;
+ *  - @func returned non-zero value.
+ *
  * See comment before parse_chain_fn_t for other arguments explanation.
  *
  * IMPORTANT: if @func wants to modify frame contents it must flush
- * chain stack if "flush_needed" is set.
+ * chain stack if PCF_FLUSH_NEEDED is set.
  */
 notrace noinline long parse_chain_stack(int flags, struct task_struct *p,
 					parse_chain_fn_t func, void *arg)
@@ -2060,18 +2097,8 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 	debug_userstack |= (print_window_regs && debug_guest_regs(task));
 
 	if (!regs->ignore_banner) {
-		if (IS_KERNEL_THREAD(task, task->mm)) {
-			pr_info("Task %s (%d) is Kernel Thread\n",
-				task->comm, task->pid);
-		} else {
-			pr_info("Task %s (%d) is User Thread\n",
-				task->comm, task->pid);
-		}
-
-		pr_alert("PROCESS: %s, PID: %d, %s: %d, state: %c %s "
-			"(0x%lx), flags: 0x%x\n",
-			task->comm == NULL ? "NULL" : task->comm,
-			task->pid,
+		pr_alert("PROCESS: %s, PID: %d, %s: %d, state: %c %s (0x%lx), flags: 0x%x (%s)\n",
+			task->comm, task->pid,
 			get_cpu_type_name(),
 			task_cpu(task), task_state_to_char(task),
 #ifdef CONFIG_SMP
@@ -2079,7 +2106,8 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 #else
 			"",
 #endif
-			task->state, task->flags);
+			task->state, task->flags,
+			(task->flags & PF_KTHREAD) ? "Kernel" : "User");
 	}
 
 	if (!regs->base_psp_stack) {
@@ -2103,9 +2131,9 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 				AS_STRUCT(regs->pcsp_lo).base,
 				AS_STRUCT(regs->pcsp_hi).ind,
 				AS_STRUCT(regs->pcsp_hi).size);
-		pr_alert("  ---------------------------------------------------------------------\n"
-			 "      IP (hex)     PROCEDURE/FILE(@ Library load address)\n"
-			 "  ---------------------------------------------------------------------\n");
+		pr_alert("  ---------------------------------------------------------------------\n");
+		pr_alert("      IP (hex)     PROCEDURE/FILE(@ Library load address)\n");
+		pr_alert("  ---------------------------------------------------------------------\n");
 	}
 
 	for (;;) {
@@ -2126,34 +2154,34 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 			    regs->trap[trap_num].frame ==
 					orig_chain_base + cr_ind) {
 				if (machine.native_iset_ver >= E2K_ISET_V6) {
-					pr_alert("      ctpr1 %llx:%llx ctpr2 %llx:%llx ctpr3 %llx:%llx\n"
-						 "      lsr %llx ilcr %llx lsr1 %llx ilcr1 %llx\n",
+					pr_alert("      ctpr1 %llx:%llx ctpr2 %llx:%llx ctpr3 %llx:%llx\n",
 						AW(regs->trap[trap_num].ctpr1_hi),
 						AW(regs->trap[trap_num].ctpr1),
 						AW(regs->trap[trap_num].ctpr2_hi),
 						AW(regs->trap[trap_num].ctpr2),
 						AW(regs->trap[trap_num].ctpr3_hi),
-						AW(regs->trap[trap_num].ctpr3),
+						AW(regs->trap[trap_num].ctpr3));
+					pr_alert("      lsr %llx ilcr %llx lsr1 %llx ilcr1 %llx\n",
 						regs->trap[trap_num].lsr,
 						regs->trap[trap_num].ilcr,
 						regs->trap[trap_num].lsr1,
 						regs->trap[trap_num].ilcr1);
 				} else if (machine.native_iset_ver == E2K_ISET_V5) {
-					pr_alert("      ctpr1 %llx ctpr2 %llx ctpr3 %llx\n"
-						 "      lsr %llx ilcr %llx lsr1 %llx ilcr1 %llx\n",
+					pr_alert("      ctpr1 %llx ctpr2 %llx ctpr3 %llx\n",
 						AW(regs->trap[trap_num].ctpr1),
 						AW(regs->trap[trap_num].ctpr2),
-						AW(regs->trap[trap_num].ctpr3),
+						AW(regs->trap[trap_num].ctpr3));
+					pr_alert("      lsr %llx ilcr %llx lsr1 %llx ilcr1 %llx\n",
 						regs->trap[trap_num].lsr,
 						regs->trap[trap_num].ilcr,
 						regs->trap[trap_num].lsr1,
 						regs->trap[trap_num].ilcr1);
 				} else {
-					pr_alert("      ctpr1 %llx ctpr2 %llx ctpr3 %llx\n"
-						 "      lsr %llx ilcr %llx\n",
+					pr_alert("      ctpr1 %llx ctpr2 %llx ctpr3 %llx\n",
 						AW(regs->trap[trap_num].ctpr1),
 						AW(regs->trap[trap_num].ctpr2),
-						AW(regs->trap[trap_num].ctpr3),
+						AW(regs->trap[trap_num].ctpr3));
+					pr_alert("      lsr %llx ilcr %llx\n",
 						regs->trap[trap_num].lsr,
 						regs->trap[trap_num].ilcr);
 				}
@@ -2190,13 +2218,16 @@ void print_chain_stack(struct stack_regs *regs, int show_reg_window)
 
 				print_predicates(crs.cr0_lo, crs.cr1_hi);
 
-				if (psp_ind < 0 && cr_ind > 0) {
-					pr_alert("! Invalid Register Window index (psp.ind) 0x%llx",
-							psp_ind);
-				} else if (psp_ind >= 0) {
+				if (likely(psp_ind >= 0)) {
 					print_reg_window(new_psp_base + psp_ind,
 						AS(crs.cr1_lo).wbs,
 						AS(crs.cr1_lo).wfx, crs.cr1_hi);
+				} else if (psp_ind < 0 && cr_ind > 0 &&
+					   /* Avoid false warnings for deep recursion */
+					   regs->size_psp_stack <=
+						ARRAY_SIZE(psp_stack_cache) - 2 * MAX_SRF_SIZE) {
+					pr_alert("! Invalid Register Window index (psp.ind) 0x%llx\n",
+							psp_ind);
 				}
 			}
 		}
@@ -2364,75 +2395,6 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 {
 	print_stack_frames(task, NULL, 1);
 }
-
-void
-set_tags(__e2k_u64_t* addr, long params) {
-	long size,i;
-	register __e2k_u64_t dword;
-	register __e2k_u32_t tag;
-
-	size = params >> 12; // page size
-	if ((size < 0) || ((size % sizeof(__e2k_u64_t)) != 0)) {
-		printk("set_tags() Wrong parameter size in 'set_tags' - 0x%lx\n",size);
-		return;
-	}
-	dword = ((params & (0xff0)) >> 4) | ((params & 0xff0) << 4);
-	dword = dword | (dword << 16);
-	dword = dword | (dword << 32);
-	tag = (params & 0xf);
-
-	/* After E2K_PUTTAGD must STRONGLY follow STORE_TAG asm
-	 * to avoid compiler's problems */
-	for(i = 0; i < size/sizeof(__e2k_u64_t); i++) {
-		NATIVE_STORE_VALUE_WITH_TAG(addr, dword, tag);
-		addr++;
-	}
-}
-                                              
-static long
-check_tags(__e2k_u64_t* addr, long params) {
-	long size,i;
-	long res = 0;
-	u64 dword, dval;
-	u8 tag, tval;
-
-	size = params >> 12;
-	if ((size < 0) || ((size % sizeof(__e2k_u64_t)) != 0)) {
-		printk("check_tags() Wrong parameter size in 'set_tags' - 0x%lx\n",
-				size);
-		return -1;
-	}
-
-	dword = ((params & (0xff0)) >> 4) | ((params & 0xff0) << 4);
-	dword = dword | (dword << 16);
-	dword = dword | (dword << 32);
-	tag = (params & 0xf);
-
-	for(i = 0; i < size/sizeof(__e2k_u64_t); i++) {
-		TRY_USR_PFAULT {
-			load_value_and_tagd(addr, &dval, &tval);
-		} CATCH_USR_PFAULT {
-			return -EFAULT;
-		} END_USR_PFAULT
-
-		if (dword != dval) {
-			printk("check_tags() DWORD 0x%llx differs from expected value 0x%llx, address 0x%px\n", dval, dword, addr);
-			return -1;
-			res = -1;
-		}
-		if (tag != tval) {
-			printk("check_tags() TAG 0x%d differs from expected value 0x%d, address 0x%px\n", tval, tag, addr);
-			return -1;
-			res = -1;
-		}
-		addr++;
-	}
-
-	return res;
-}
-
-extern e2k_addr_t print_kernel_address_ptes(e2k_addr_t address);
-extern void print_vma_and_ptes(struct vm_area_struct *vma, e2k_addr_t address);
 
 long
 get_addr_prot(long addr)
@@ -3178,7 +3140,7 @@ static long read_current_chain_stack(void __user *buf,
 	args.start = src;
 	args.end = src + size;
 
-	ret = parse_chain_stack(PCS_USER, NULL, __read_current_chain_stack, &args);
+	ret = parse_chain_stack(PCS_USER | PCS_OPEN_IRQS, NULL, __read_current_chain_stack, &args);
 	if (IS_ERR_VALUE(ret))
 		return ret;
 
@@ -3639,16 +3601,6 @@ sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
 	case PRINT_REGS:
 		DbgESW("PRINT_PT_REGS\n");
 		print_cpu_regs((char *) arg2);
-		break;	
-	case SET_TAGS:
-                DbgESW("setting tags: address 0x%lx params 0x%lx\n", 
-                		arg2, arg3);
-		set_tags((__e2k_u64_t*)arg2, arg3);
-		break;
-	case CHECK_TAGS:
-		DbgESW("checking tags: address 0x%lx params 0x%lx\n", 
-			arg2, arg3);
-		rval = check_tags((__e2k_u64_t*)arg2, arg3);
 		break;	
 	case IDE_INFO:
 		rval = ide_info(arg2);

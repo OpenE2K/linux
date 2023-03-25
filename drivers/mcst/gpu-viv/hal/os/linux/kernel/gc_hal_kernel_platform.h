@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -61,6 +61,10 @@
 #include <linux/pci.h>
 #endif
 
+#if USE_LINUX_PCIE
+#define gcdMAX_PCIE_BAR    6
+#endif
+
 typedef struct _gcsMODULE_PARAMETERS
 {
     gctINT                  irqs[gcvCORE_COUNT];
@@ -78,12 +82,12 @@ typedef struct _gcsMODULE_PARAMETERS
     gctBOOL                 contiguousRequested;
 
     /* External memory pool. */
-    gctPHYS_ADDR_T          externalBase;
-    gctSIZE_T               externalSize;
+    gctPHYS_ADDR_T          externalBase[gcdPLATFORM_DEVICE_COUNT];
+    gctSIZE_T               externalSize[gcdPLATFORM_DEVICE_COUNT];
 
     /* External memory pool. */
-    gctPHYS_ADDR_T          exclusiveBase;
-    gctSIZE_T               exclusiveSize;
+    gctPHYS_ADDR_T          exclusiveBase[gcdPLATFORM_DEVICE_COUNT];
+    gctSIZE_T               exclusiveSize[gcdPLATFORM_DEVICE_COUNT];
 
     /* Per-core SRAM. */
     gctPHYS_ADDR_T          sRAMBases[gcvCORE_COUNT][gcvSRAM_INTER_COUNT];
@@ -98,6 +102,8 @@ typedef struct _gcsMODULE_PARAMETERS
     gctINT32                sRAMOffsets[gcvSRAM_EXT_COUNT];
 #endif
 
+    gctUINT                 pdevCoreCount[gcdPLATFORM_DEVICE_COUNT];
+
     gctBOOL                 sRAMRequested;
     gctUINT32               sRAMLoopMode;
 
@@ -107,18 +113,20 @@ typedef struct _gcsMODULE_PARAMETERS
 
     gctUINT                 recovery;
     gctINT                  powerManagement;
+#if defined (CONFIG_E90S)
+    gctINT                  pmcPowerManagement;
+#endif
 
     gctINT                  enableMmu;
     gctINT                  fastClear;
     gceCOMPRESSION_OPTION   compression;
     gctUINT                 gpu3DMinClock;
-    gctUINT                 userClusterMask;
+    gctUINT                 userClusterMasks[gcdMAX_MAJOR_CORE_COUNT];
     gctUINT                 smallBatch;
 
     /* Debug or other information. */
     gctUINT                 stuckDump;
-    gctINT                  gpuProfiler;
-
+    gctUINT                 softReset;
     /* device type, 0 for char device, 1 for misc device. */
     gctUINT                 deviceType;
     gctUINT                 showArgs;
@@ -130,6 +138,12 @@ typedef struct _gcsMODULE_PARAMETERS
     gctUINT                 allMapInOne;
 
     gctUINT                 isrPoll;
+
+    /* APB register offset to the register base address. */
+    gctUINT64               registerAPB;
+
+    /* Enabled NN clusters number */
+    gctUINT                 enableNN;
 }
 gcsMODULE_PARAMETERS;
 
@@ -300,7 +314,6 @@ typedef struct _gcsPLATFORM_OPERATIONS
     **
     ** syncMemory
     **
-    ** sync invisible memory by dma if support.
     */
     gceSTATUS
     (*syncMemory)(
@@ -309,32 +322,43 @@ typedef struct _gcsPLATFORM_OPERATIONS
         IN gctUINT32 Reason
     );
 
-/*******************************************************************************
-**
-**  _ExternalCacheOperation
-**
-**  External device cache operation, if support. If the core has any additional caches
-**  they must be invalidated after this function returns. If the core does not
-**  have any addional caches the externalCacheOperation in the platform->ops should
-**  remain NULL.
-**
-**  INPUT:
-**
-**      gckOS Os
-**          Pointer to an gckOS object.
-**
-**      gceCACHEOPERATION Operation
-**          Cache Operation: gcvCACHE_FLUSH, gcvCACHE_CLEAN or gcvCACHE_INVALIDATE.
-**
-**  OUTPUT:
-**
-**      Nothing.
-*/
+    /*******************************************************************************
+    **
+    **  _ExternalCacheOperation
+    **
+    **  External device cache operation, if support. If the core has any additional caches
+    **  they must be invalidated after this function returns. If the core does not
+    **  have any addional caches the externalCacheOperation in the platform->ops should
+    **  remain NULL. The function may be called by multiple thread, so need to add mutex
+    **  in the callback when there is shared resource.
+    **
+    **  INPUT:
+    **      gceCACHEOPERATION Operation
+    **          Cache Operation: gcvCACHE_FLUSH, gcvCACHE_CLEAN or gcvCACHE_INVALIDATE.
+    **
+    **  OUTPUT:
+    **
+    **      Nothing.
+    */
     void
     (*externalCacheOperation)(
         IN gcsPLATFORM *Platform,
         IN gceCACHEOPERATION Operation
     );
+
+#if gcdENABLE_MP_SWITCH
+    /*******************************************************************************
+    ** switchCoreCount
+    **
+    ** Switch the core count according to specific conditions.
+    **
+    */
+    gceSTATUS
+    (*switchCoreCount)(
+        IN gcsPLATFORM *Platform,
+        OUT gctUINT32 *Count
+    );
+#endif
 }
 gcsPLATFORM_OPERATIONS;
 
@@ -346,16 +370,23 @@ struct _gcsPLATFORM
     const char *name;
     gcsPLATFORM_OPERATIONS* ops;
 
-    /* TODO: Remove AXI-SRAM size from feature database. */
     gckDEVICE dev;
 
     /* PLATFORM specific flags */
     gctUINT32  flagBits;
 
+    /* Real-time core count. */
+    gctUINT32  coreCount;
+
     void*                   priv;
+    /* Module special parameters */
+    gcsMODULE_PARAMETERS params;
 };
 
 int gckPLATFORM_Init(struct platform_driver *pdrv, gcsPLATFORM **platform);
 int gckPLATFORM_Terminate(gcsPLATFORM *platform);
 
+#if defined(CONFIG_E90S)
+extern gcsPLATFORM *platform;
+#endif
 #endif

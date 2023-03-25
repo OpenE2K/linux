@@ -310,14 +310,18 @@ static void __init set_cpu_and_fpu(int psr_impl, int psr_vers, int fpu_vers)
 	}
 	if (sparc_cpu_type == NULL)
 	{
+#ifndef CONFIG_E90S
 		printk(KERN_ERR "CPU: Unknown chip, impl[0x%x] vers[0x%x]\n",
 		       psr_impl, psr_vers);
+#endif
 		sparc_cpu_type = "Unknown CPU";
 	}
 	if (sparc_fpu_type == NULL)
 	{
+#ifndef CONFIG_E90S
 		printk(KERN_ERR "FPU: Unknown chip, impl[0x%x] vers[0x%x]\n",
 		       psr_impl, fpu_vers);
+#endif
 		sparc_fpu_type = "Unknown FPU";
 	}
 	if (sparc_pmu_type == NULL)

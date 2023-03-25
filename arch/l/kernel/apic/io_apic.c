@@ -2405,7 +2405,7 @@ void native_disable_io_apic(void)
 	}
 #endif
 
-	if (cpu_has_apic || apic_from_smp_config())
+	if (!cpu_has_epic() && (cpu_has_apic || apic_from_smp_config()))
 #ifdef CONFIG_PIC
 		disconnect_bsp_APIC(ioapic_i8259.pin != -1);
 #else

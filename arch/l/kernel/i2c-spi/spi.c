@@ -69,10 +69,15 @@
 #define		L_SPI_FREQ_CHANGED_SHIFT	1
 #define		L_SPI_FREQ_CHANGED		(1 << L_SPI_FREQ_CHANGED_SHIFT)
 #define		L_SPI_DIVIDER_SHIFT		2
+#define		L_SPI_DIVIDER_SHIFT_EXT	5
 #define		L_SPI_DIVIDER_2			(0 << L_SPI_DIVIDER_SHIFT)
 #define		L_SPI_DIVIDER_4			(1 << L_SPI_DIVIDER_SHIFT)
 #define		L_SPI_DIVIDER_8			(2 << L_SPI_DIVIDER_SHIFT)
 #define		L_SPI_DIVIDER_16		(3 << L_SPI_DIVIDER_SHIFT)
+#define		L_SPI_DIVIDER_20		((1 << L_SPI_DIVIDER_SHIFT_EXT) | L_SPI_DIVIDER_2)
+#define		L_SPI_DIVIDER_34		((1 << L_SPI_DIVIDER_SHIFT_EXT) | L_SPI_DIVIDER_4)
+#define		L_SPI_DIVIDER_50		((1 << L_SPI_DIVIDER_SHIFT_EXT) | L_SPI_DIVIDER_8)
+#define		L_SPI_DIVIDER_100		((1 << L_SPI_DIVIDER_SHIFT_EXT) | L_SPI_DIVIDER_16)
 #define		L_SPI_DIVIDER_MASK		0xc
 #define		L_SPI_MODE_INTR_SHIFT		4
 #define		L_SPI_MODE_INTR			(1 << L_SPI_MODE_INTR_SHIFT)
@@ -189,6 +194,10 @@ static u32 l_spi_wait_completion(struct l_spi *l_spi)
 	return status;
 }
 
+static bool l_ext_freq_supported(void)
+{
+	return cpu_has_epic();
+}
 
 /* Change bus speed or mode as requested. */
 static int l_spi_set_mode_and_freq(struct spi_device *spi,
@@ -226,8 +235,24 @@ static int l_spi_set_mode_and_freq(struct spi_device *spi,
 			l_spi->speed_hz_max = l_spi->baseclk / 4;
 		} else if (n <= 16) {
 			n = L_SPI_DIVIDER_16;
-			l_spi->speed_hz_min = 0;
+			l_spi->speed_hz_min = l_spi->baseclk / 16;
 			l_spi->speed_hz_max = l_spi->baseclk / 8;
+		} else if (l_ext_freq_supported() && n <= 20) {
+			n = L_SPI_DIVIDER_20;
+			l_spi->speed_hz_min = l_spi->baseclk / 20;
+			l_spi->speed_hz_max = l_spi->baseclk / 16;
+		} else if (l_ext_freq_supported() && n <= 34) {
+			n = L_SPI_DIVIDER_34;
+			l_spi->speed_hz_min = l_spi->baseclk / 34;
+			l_spi->speed_hz_max = l_spi->baseclk / 20;
+		} else if (l_ext_freq_supported() && n <= 50) {
+			n = L_SPI_DIVIDER_50;
+			l_spi->speed_hz_min = l_spi->baseclk / 50;
+			l_spi->speed_hz_max = l_spi->baseclk / 34;
+		} else if (l_ext_freq_supported() && n <= 100) {
+			n = L_SPI_DIVIDER_100;
+			l_spi->speed_hz_min = l_spi->baseclk / 100;
+			l_spi->speed_hz_max = l_spi->baseclk / 50;
 		} else {
 			dev_dbg(dev, "requested speed %d is not supported\n",
 					spi_freq);
@@ -260,7 +285,11 @@ static int l_spi_set_mode_and_freq(struct spi_device *spi,
 				(n == L_SPI_DIVIDER_2) ? 2 :
 				(n == L_SPI_DIVIDER_4) ? 4 :
 				(n == L_SPI_DIVIDER_8) ? 8 :
-				(n == L_SPI_DIVIDER_16) ? 16 : 0,
+				(n == L_SPI_DIVIDER_16) ? 16 :
+				(n == L_SPI_DIVIDER_20) ? 20 :
+				(n == L_SPI_DIVIDER_34) ? 34 :
+				(n == L_SPI_DIVIDER_50) ? 50 :
+				(n == L_SPI_DIVIDER_100) ? 100 : 0,
 				(spi_mode == SPI_MODE_0) ? 0 : 3);
 
 		l_spi_write(l_spi, mode, L_SPI_MODE);
@@ -309,10 +338,19 @@ static int l_spi_transfer(struct spi_device *spi, struct spi_message *m)
 			return -EINVAL;
 		}
 
-		if (unlikely(speed_hz < l_spi->baseclk / 16)) {
+		if (unlikely(!l_ext_freq_supported() &&
+					(speed_hz < l_spi->baseclk / 16))) {
 			dev_err(dev, "spi transfer: requested speed %d "
 					"is lower than %d\n", speed_hz,
 					l_spi->baseclk / 16);
+			return -EINVAL;
+		}
+
+		if (unlikely(l_ext_freq_supported() &&
+					(speed_hz < l_spi->baseclk / 100))) {
+			dev_err(dev, "spi transfer: requested speed %d "
+					"is lower than %d\n", speed_hz,
+					l_spi->baseclk / 100);
 			return -EINVAL;
 		}
 
@@ -630,7 +668,10 @@ static int l_spi_setup(struct spi_device *spi)
 		return -EINVAL;
 	}
 
-	if (spi->max_speed_hz < l_spi->baseclk / 16) {
+	if ((!l_ext_freq_supported() &&
+				(spi->max_speed_hz < l_spi->baseclk / 16)) ||
+				(l_ext_freq_supported() &&
+				(spi->max_speed_hz < l_spi->baseclk / 100))) {
 		dev_err(dev, "requested bus speed %d is not supported\n",
 				spi->max_speed_hz);
 		return -EINVAL;

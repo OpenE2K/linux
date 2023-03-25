@@ -298,14 +298,7 @@ unsigned long long kvm_sched_clock(void)
 	 */
 	preempt_disable();
 
-	if (current == NULL || test_thread_flag(TIF_PSEUDOTHREAD)) {
-		/* sched_clock() started on VIRQ VCPU, so only host */
-		/* can get main VCPU running time */
-		running = HYPERVISOR_get_guest_running_time();
-	} else {
-		running = get_running_time(false);
-	}
-
+	running = get_running_time(false);
 	ns = cycles_2nsec(running);
 
 	preempt_enable();

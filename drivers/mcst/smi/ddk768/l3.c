@@ -5,17 +5,18 @@
  * Send one byte of data to the chip.  Data is latched into the chip on
  * the rising edge of the clock.
  */
-static void sendbyte(struct l3_pins *adap, unsigned int byte)
+static void sendbyte(volatile unsigned char __iomem *rmmio,
+				struct l3_pins *adap, unsigned int byte)
 {
 	int i;
 
 	for (i = 0; i < 8; i++) {
-		adap->setclk(0);
-		sb_OS_WAIT_USEC_POLL(adap->data_hold);
-		adap->setdat(byte & 1);
-		sb_OS_WAIT_USEC_POLL(adap->data_setup);
-		adap->setclk(1);
-		sb_OS_WAIT_USEC_POLL(adap->clock_high);
+		adap->setclk(rmmio, 0);
+		sb_OS_WAIT_USEC_POLL(rmmio, adap->data_hold);
+		adap->setdat(rmmio, byte & 1);
+		sb_OS_WAIT_USEC_POLL(rmmio, adap->data_setup);
+		adap->setclk(rmmio, 1);
+		sb_OS_WAIT_USEC_POLL(rmmio, adap->clock_high);
 		byte >>= 1;
 	}
 }
@@ -25,40 +26,43 @@ static void sendbyte(struct l3_pins *adap, unsigned int byte)
  * between each byte, but never at the start nor at the end of the
  * transfer.
  */
-static void sendbytes(struct l3_pins *adap, const u8 *buf,
-		      int len)
+static void sendbytes(volatile unsigned char __iomem *rmmio,
+				struct l3_pins *adap, const u8 *buf,
+				int len)
 {
 	int i;
 
 	for (i = 0; i < len; i++) {
 		if (i) {
-			sb_OS_WAIT_USEC_POLL(adap->mode_hold);
-			adap->setmode(0);
-			sb_OS_WAIT_USEC_POLL(adap->mode);
+			sb_OS_WAIT_USEC_POLL(rmmio, adap->mode_hold);
+			adap->setmode(rmmio, 0);
+			sb_OS_WAIT_USEC_POLL(rmmio, adap->mode);
 		}
-		adap->setmode(1);
-		sb_OS_WAIT_USEC_POLL(adap->mode_setup);
-		sendbyte(adap, buf[i]);
+		adap->setmode(rmmio, 1);
+		sb_OS_WAIT_USEC_POLL(rmmio, adap->mode_setup);
+		sendbyte(rmmio, adap, buf[i]);
 	}
 }
 
-int l3_write(struct l3_pins *adap, u8 addr, u8 *data, int len)
+int l3_write(volatile unsigned char __iomem *rmmio,
+				struct l3_pins *adap,
+				u8 addr, u8 *data, int len)
 {
-	adap->setclk(1);
-	adap->setdat(1);
-	adap->setmode(1);
-	sb_OS_WAIT_USEC_POLL(adap->mode);
+	adap->setclk(rmmio, 1);
+	adap->setdat(rmmio, 1);
+	adap->setmode(rmmio, 1);
+	sb_OS_WAIT_USEC_POLL(rmmio, adap->mode);
 
-	adap->setmode(0);
-	sb_OS_WAIT_USEC_POLL(adap->mode_setup);
-	sendbyte(adap, addr);
-	sb_OS_WAIT_USEC_POLL(adap->mode_hold);
+	adap->setmode(rmmio, 0);
+	sb_OS_WAIT_USEC_POLL(rmmio, adap->mode_setup);
+	sendbyte(rmmio, adap, addr);
+	sb_OS_WAIT_USEC_POLL(rmmio, adap->mode_hold);
 
-	sendbytes(adap, data, len);
+	sendbytes(rmmio, adap, data, len);
 
-	adap->setclk(1);
-	adap->setdat(1);
-	adap->setmode(0);
+	adap->setclk(rmmio, 1);
+	adap->setdat(rmmio, 1);
+	adap->setmode(rmmio, 0);
 
 	return len;
 }

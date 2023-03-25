@@ -1,4 +1,5 @@
 #include <linux/init.h>
+#include <linux/sched.h>
 
 #include <stdarg.h>
 
@@ -8,6 +9,7 @@
 #include <asm/io.h>
 #include <asm/simul.h>
 #include <asm/p2v/boot_console.h>
+#include <asm/p2v/boot_irqflags.h>
 #include <asm/p2v/boot_param.h>
 
 #include "../boot_string.h"
@@ -29,7 +31,13 @@
 
 static int __init boot_dump_console_set(char *cmd)
 {
-	boot_serial_boot_console_num = boot_simple_strtoul(cmd, &cmd, 0);
+	if (boot_strlen(cmd) == 2 && !boot_strcmp(cmd, "no")) {
+		boot_serial_dump_console_num = SERIAL_DUMP_CONSOLE_DENY;
+	} else {
+		boot_serial_dump_console_num = boot_simple_strtoul(cmd, &cmd, 0);
+		if (boot_serial_dump_console_num > 1)
+			boot_serial_dump_console_num = 0;
+	}
 	return 0;
 }
 boot_param("dump_console", boot_dump_console_set);
@@ -68,7 +76,7 @@ boot_setup_serial_console(bool bsp, boot_info_t *boot_info)
 		DebugSC("boot_setup_serial_console() CPU is not BSP "
 			"waiting for init completion\n");
 		while(!boot_serial_boot_console_inited)
-			;
+			boot_cpu_relax();
 		DebugSC("boot_setup_serial_console() waiting for init "
 			"completed\n");
 		return;

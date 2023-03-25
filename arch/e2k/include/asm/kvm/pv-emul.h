@@ -55,6 +55,26 @@ host_test_intc_emul_mode(const struct pt_regs *regs)
 	return true;
 }
 
+static inline bool test_ti_is_vcpu_thread(struct thread_info *ti)
+{
+	return ti && ti->is_vcpu;
+}
+
+static inline bool is_task_at_vcpu_guest_mode(struct task_struct *task)
+{
+	struct thread_info *ti = task_thread_info(task);
+
+	return test_ti_status_flag(ti, TS_HOST_AT_VCPU_MODE);
+}
+
+static inline bool is_task_at_vcpu_intc_emul_mode(struct task_struct *task)
+{
+	struct thread_info *ti = task_thread_info(task);
+	struct pt_regs *regs = ti->pt_regs;
+
+	return test_ti_is_vcpu_thread(ti) && regs && kvm_test_intc_emul_flag(regs);
+}
+
 extern void pv_vcpu_switch_to_host_from_intc(thread_info_t *ti);
 extern void pv_vcpu_return_to_intc_mode(thread_info_t *ti, struct kvm_vcpu *vcpu);
 
@@ -67,6 +87,21 @@ static inline void return_to_pv_vcpu_intc(struct kvm_vcpu *vcpu)
 /* it is not host kernel */
 static inline bool
 host_test_intc_emul_mode(const pt_regs_t *regs)
+{
+	return false;
+}
+
+static inline bool test_ti_is_vcpu_thread(struct thread_info *ti)
+{
+	return false;
+}
+
+static inline bool is_task_at_vcpu_guest_mode(struct task_struct *task)
+{
+	return false;
+}
+
+static inline bool is_task_at_vcpu_intc_emul_mode(struct task_struct *task)
 {
 	return false;
 }

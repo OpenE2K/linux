@@ -22,41 +22,14 @@
 #include <asm/pgalloc.h>
 #include <asm/process.h>
 #include <asm/pci.h>
+#include <asm/epic.h>
 
 #undef	DEBUG_INIT_MODE
 #undef	DebugB
 #define	DEBUG_INIT_MODE		0	/* Boot paging init */
 #define DebugB(...)		DebugPrint(DEBUG_INIT_MODE ,##__VA_ARGS__)
 
-#undef	DEBUG_MEMMAP_INIT_MODE
-#undef	DebugMI
-#define	DEBUG_MEMMAP_INIT_MODE	0	/* memory mapping init */
-#define DebugMI(...)		DebugPrint(DEBUG_MEMMAP_INIT_MODE ,##__VA_ARGS__)
-
-#undef	DEBUG_ZONE_SIZE_MODE
-#undef	DebugZS
-#define	DEBUG_ZONE_SIZE_MODE	0	/* zone size calculation */
-#define DebugZS(...)		DebugPrint(DEBUG_ZONE_SIZE_MODE ,##__VA_ARGS__)
-
-#undef  DEBUG_DISCONTIG_MODE
-#undef  DebugDM
-#define DEBUG_DISCONTIG_MODE	0	/* discontig. memory */
-#define DebugDM(...)		DebugPrint(DEBUG_DISCONTIG_MODE ,##__VA_ARGS__)
-
-#undef	DEBUG_PAGE_VALID_MODE
-#undef	DebugPV
-#define	DEBUG_PAGE_VALID_MODE	0	/* checking: is page valid */
-#define DebugPV(...)		DebugPrint(DEBUG_PAGE_VALID_MODE ,##__VA_ARGS__)
-
-#undef	DEBUG_PAGE_VALID_ERR_MODE
-#undef	DebugPVE
-#define	DEBUG_PAGE_VALID_ERR_MODE	0	/* checking: is page valid */
-#define DebugPVE(...)			DebugPrint(DEBUG_PAGE_VALID_ERR_MODE ,##__VA_ARGS__)
-
-#undef  DEBUG_NUMA_MODE
-#undef  DebugNUMA
-#define DEBUG_NUMA_MODE		0	/* NUMA supporting */
-#define DebugNUMA(...)		DebugPrint(DEBUG_NUMA_MODE ,##__VA_ARGS__)
+pgd_t swapper_pg_dir[PTRS_PER_PGD] __page_aligned_bss;
 
 #ifdef CONFIG_NEED_MULTIPLE_NODES
 pg_data_t	*node_data[MAX_NUMNODES];
@@ -69,36 +42,12 @@ struct page __read_mostly	*zeroed_page = NULL;
 EXPORT_SYMBOL(zeroed_page);
 
 u64 __read_mostly zero_page_nid_to_pfn[MAX_NUMNODES] = {
-	[0 ... MAX_NUMNODES-1] = 0
+	[0 ... MAX_NUMNODES-1] = 0xdead1212dead1212
 };
 struct page __read_mostly *zero_page_nid_to_page[MAX_NUMNODES] = {
 	[0 ... MAX_NUMNODES-1] = 0
 };
 
-int mem_init_done = 0;
-static int init_bootmem_done = 0;
-
-/* This is only called until mem_init is done. */
-static void __init *node_early_get_page(int node)
-{
-	void *p;
-
-	if (init_bootmem_done) {
-		p = memblock_alloc_node(PAGE_SIZE, PAGE_SIZE, node);
-	} else {
-		BOOT_BUG("is not implemented for boot-time mode");
-	}
-	return p;
-}
-void __init *node_early_get_zeroed_page(int nid)
-{
-	void *p = node_early_get_page(nid);
-
-	if (p == NULL)
-		return p;
-	clear_page(p);
-	return p;
-}
 
 static void __init nodes_up(void)
 {
@@ -413,7 +362,6 @@ setup_memory(void)
 	allocate_node_datas();
 #endif
 
-	init_bootmem_done = 1;
 	last_valid_pfn = end_of_phys_memory >> PAGE_SHIFT;
 }
 
@@ -498,18 +446,12 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 
 	ret = vmemmap_populate_basepages(start, end, node);
 	if (ret) {
-		pr_err("%s(): could not populate sparse memory VMEMMAP "
-			"from 0x%lx to 0x%lx, error %d\n",
-			__func__, start, end, ret);
+		pr_err("%s(): could not populate sparse memory VMEMMAP from 0x%lx to 0x%lx, error %d\n",
+				__func__, start, end, ret);
 		return ret;
 	}
-	ret = all_other_nodes_map_vm_area(numa_node_id(), start, end - start);
-	if (ret) {
-		pr_err("%s(): node #%d could not populate on other nodes "
-			"sparse memory VMEMMAP from 0x%lx to 0x%lx, error %d\n",
-			__func__, numa_node_id(), start, end, ret);
-	}
-	return ret;
+
+	return 0;
 }
 #endif	/* CONFIG_SPARSEMEM_VMEMMAP */
 
@@ -545,7 +487,24 @@ static int __init mark_nonram_nosave(void)
  */
 void __init notrace paging_init(void)
 {
-	int	node;
+#ifdef CONFIG_NUMA
+	int node;
+
+	/* Chicken and egg problem:
+	 *   sparse_init() -> pgd_populate() -> pgds_nodemask
+	 *     AND
+	 *   pgds_nodemask -> page_nid() -> zone_sizes_init() -> sparse_init()
+	 *
+	 * To solve it we first set pgds_nodemask for 0 node so pgd_populate()
+	 * works. Then we use page_to_nid() to find out which node does
+	 * swapper_pg_dir actually belong to. */
+	node_set(0, init_mm.context.pgds_nodemask);
+	init_mm.context.mm_pgd_node = 0;
+#endif
+
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+	init_task.thread.regs.k_root_ptb = __pa(swapper_pg_dir);
+#endif
 
 	/*
 	 * Setup the boot-time allocator.
@@ -562,89 +521,67 @@ void __init notrace paging_init(void)
 
 	mark_nonram_nosave();
 
-	for_each_node_has_dup_kernel(node) {
-		unsigned long addr = (unsigned long) empty_zero_page;
-		pgd_t *pgd = node_pgd_offset_kernel(node, addr);
-		pud_t *pud;
-		pmd_t *pmd;
-		pte_t *pte;
-
-		pr_info("node%d kernel phys base: 0x%lx\n",
-			node,
-#ifdef	CONFIG_NUMA
-			node_kernel_phys_base[node]);
-#else
-			kernel_phys_base);
+#ifdef CONFIG_NUMA
+	/* page_to_nid() works because zone_sizes_init() has finished */
+	node = page_to_nid(phys_to_page(__pa(swapper_pg_dir)));
+	node_clear(0, init_mm.context.pgds_nodemask);
+	node_set(node, init_mm.context.pgds_nodemask);
+	init_mm.context.mm_pgd_node = node;
 #endif
+}
 
-		/*
-		 * Protect the zero page from writing
-		 */
-		if (WARN_ON(pgd_none_or_clear_bad(pgd))) {
-			pr_warning("zero_page: pgd_none returned 1\n");
-			continue;
-		}
-		if (kernel_pgd_huge(*pgd)) {
-			/* We cannot protect ZERO_PAGE from writing
-			 * if it is mapped as part of a huge page. */
-			pr_warning("WARNING zero_page is mapped with huge page "
-				"on node %d\n",
-				node);
-			continue;
-		}
-		pud = pud_offset(pgd, addr);
-		if (WARN_ON(pud_none_or_clear_bad(pud))) {
-			pr_warning("zero_page: pud_none returned 1\n");
-			continue;
-		}
-		if (kernel_pud_huge(*pud)) {
-			/* We cannot protect ZERO_PAGE from writing
-			 * if it is mapped as part of a huge page. */
-			pr_warning("WARNING zero_page is mapped with huge page "
-				"on node %d\n",
-				node);
-			continue;
-		}
-		pmd = pmd_offset(pud, addr);
-		if (WARN_ON(pmd_none_or_clear_bad(pmd))) {
-			pr_warning("zero_page: pmd_none returned 1\n");
-			continue;
-		}
-		if (WARN_ON(kernel_pmd_huge(*pmd))) {
-			/* We cannot protect ZERO_PAGE from writing
-			 * if it is mapped as part of a huge page. */
-			pr_warning("WARNING zero_page is mapped with huge page "
-				"on node %d\n",
-				node);
-			continue;
-		}
-		pte = pte_offset_kernel(pmd, addr);
+static void setup_zero_pages(void)
+{
+	int node;
 
-		if (WARN_ON(pte_none(*pte) || !pte_present(*pte))) {
-			pr_warning("zero_page: pte_none returned 1\n");
-			continue;
-		}
+	/* Clear the zero-page */
+	fast_tagged_memory_set(empty_zero_page,
+			0, CLEAR_MEMORY_TAG, sizeof(empty_zero_page),
+			LDST_DWORD_FMT << LDST_REC_OPC_FMT_SHIFT);
 
-		native_set_pte(pte, pte_wrprotect(*pte), false);
-
-		/*
-		 * Initialize the list of zero pages
-		 */
-		zero_page_nid_to_pfn[node] = pte_pfn(*pte);
-		zero_page_nid_to_page[node] = pte_page(*pte);
-
-		/*
-		 * zeroing the zero-page
-		 */
-		fast_tagged_memory_set(
-			(void *) __va(_PAGE_PFN_TO_PADDR(pte_val(*pte))),
-				0, CLEAR_MEMORY_TAG, sizeof(empty_zero_page),
-				LDST_DWORD_FMT << LDST_REC_OPC_FMT_SHIFT);
+	/* It will be duplicated later when memory subsystem is initialized */
+	for_each_node(node) {
+		phys_addr_t pa = __pa_symbol(empty_zero_page);
+		zero_page_nid_to_pfn[node] = PHYS_PFN(pa);
+		zero_page_nid_to_page[node] = phys_to_page(pa);
 	}
 
-	flush_TLB_page((unsigned long) empty_zero_page, E2K_KERNEL_CONTEXT);
+	zeroed_page = zero_page_nid_to_page[numa_node_id()];
+}
 
-	zeroed_page = phys_to_page(vpa_to_pa(kernel_va_to_pa(empty_zero_page)));
+static void __init preallocate_dynamic_pgds_range(
+		unsigned long start, unsigned long end)
+{
+	unsigned long addr;
+
+	for (addr = start; addr < end; addr += PGDIR_SIZE) {
+		pgd_t *pgd = pgd_offset_k(addr);
+
+		if (pgd_none(*pgd)) {
+			pud_t *pud = pud_alloc(&init_mm, pgd, addr);
+			WARN_ON(!pud);
+		}
+	}
+}
+
+static void __init preallocate_dynamic_pgds(void)
+{
+	BUG_ON(E2K_MODULES_END <= E2K_MODULES_START);
+
+	/* User threads in !SEPARATE case use each their own pgd page
+	 * with both user and kernel pgds, so we preallocate all pgds
+	 * before any user threads are created. This way there wil be
+	 * no page faults on vmalloc or module areas.
+	 *
+	 * In SEPARATE case user threads do not have kernel pgd in their
+	 * page tables, hardware always uses the same pgd from init_mm
+	 * and there will be no page faults on vmalloc/module areas even
+	 * without preallocation. */
+	if (MMU_IS_SEPARATE_PT())
+		return;
+
+	preallocate_dynamic_pgds_range(MODULES_VADDR, MODULES_END);
+	preallocate_dynamic_pgds_range(VMALLOC_START, VMALLOC_END);
 }
 
 void __init notrace mem_init(void)
@@ -655,9 +592,15 @@ void __init notrace mem_init(void)
 
 	high_memory = __va(last_valid_pfn << PAGE_SHIFT);
 
+	this_cpu_write(u_root_ptb, __pa(mm_node_pgd(&init_mm, numa_node_id())));
+
 	memblock_free_all();
 
 	set_secondary_space_MMU_state();
+
+	setup_zero_pages();
+
+	preallocate_dynamic_pgds();
 
 	if (IS_CPU_ISET_V6()) {
 		if (MMU_IS_PT_V6()) {
@@ -683,7 +626,7 @@ void __init notrace mem_init(void)
 	}
 	pr_info("kernel virt base: 0x%lx, kernel virt end: 0x%lx\n",
 		KERNEL_BASE, KERNEL_END);
-	pr_info("Kernel virt base: %016lx, last valid phaddr: %016lx\n",
+	pr_info("linear mapping virt base: %016lx, last valid phaddr: %016lx\n",
 		PAGE_OFFSET, (last_valid_pfn << PAGE_SHIFT));
 
 	total_pages_num = (end_of_phys_memory >> PAGE_SHIFT) -
@@ -694,7 +637,6 @@ void __init notrace mem_init(void)
 	pr_info("Memory total mapped pages number 0x%lx : valid 0x%lx, invalid 0x%lx\n",
 		total_pages_num, valid_pages_num, invalid_pages_num);
 
-	mem_init_done = 1;
 	mem_init_print_info(NULL);
 }
 
@@ -702,11 +644,16 @@ void mark_rodata_ro(void)
 {
 	unsigned long size = __end_ro_after_init - __start_ro_after_init;
 
+	if (!size)
+		return;
+
 	set_memory_ro((unsigned long)__start_ro_after_init,
 				size >> PAGE_SHIFT);
+	kernel_image_duplicate_page_range(__start_ro_after_init, size, false);
 
-	pr_info("Write protected read-only-after-init data: %luk\n",
-		size >> 10);
+	pr_info("Write protected %sread-only-after-init data: %luk\n",
+			(IS_ENABLED(CONFIG_NUMA)) ? "and NUMA duplicated " : "",
+			size >> 10);
 }
 
 /* The call to BOOT_TRACEPOINT and get_lt_timer is valid since it is done
@@ -729,12 +676,20 @@ void free_initmem(void)
 
 	if (cpu_has(CPU_HWBUG_E8C_WATCHDOG)) {
 		get_lt_timer();
-		writel(WD_EVENT, &lt_regs->wd_control);
+		lt_regs_eioh_t *lt_regs_eioh = NULL;
+		if (cpu_has_epic()) {
+			lt_regs_eioh = (lt_regs_eioh_t *)lt_regs;
+		}
+		writel(WD_EVENT, lt_regs_eioh
+				? &lt_regs_eioh->wd_control
+				: &lt_regs->wd_control);
 		writel(WD_SET_COUNTER_VAL(0), &lt_regs->wd_limit);
 	}
 
-	free_reserved_area(__init_text_begin, __init_text_end, -1, "init text");
-	free_reserved_area(__init_data_begin, __init_data_end, -1, "init data");
+	WARN_ON(set_memory_np((unsigned long) &__init_begin,
+			      ((unsigned long) &__init_end -
+			       (unsigned long) &__init_begin) / PAGE_SIZE));
+	free_initmem_default(POISON_FREE_INITMEM);
 
 #if !defined(CONFIG_RECOVERY) && !defined(CONFIG_E2K_KEXEC)
 	/*
@@ -900,3 +855,54 @@ static int __init add_system_ram_resources(void)
 	return 0;
 }
 subsys_initcall(add_system_ram_resources);
+
+int kern_addr_valid(unsigned long addr)
+{
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	if (addr >= E2K_VA_END || addr < PAGE_OFFSET)
+		return 0;
+
+	pgd = pgd_offset_k(addr);
+	if (pgd_none(*pgd))
+		return 0;
+
+	p4d = p4d_offset(pgd, addr);
+	if (p4d_none(*p4d))
+		return 0;
+
+	pud = pud_offset(p4d, addr);
+	if (pud_none(*pud))
+		return 0;
+
+	if (kernel_pud_huge(*pud))
+		return pfn_valid(pud_pfn(*pud));
+
+	pmd = pmd_offset(pud, addr);
+	if (pmd_none(*pmd))
+		return 0;
+
+	if (kernel_pmd_huge(*pmd))
+		return pfn_valid(pmd_pfn(*pmd));
+
+	pte = pte_offset_kernel(pmd, addr);
+	if (pte_none(*pte))
+		return 0;
+
+	return pfn_valid(pte_pfn(*pte));
+}
+
+__pure
+bool __virt_addr_valid(unsigned long kaddr)
+{
+	if (likely(kaddr >= PAGE_OFFSET && kaddr < PAGE_OFFSET + MAX_PM_SIZE ||
+		   kaddr >= KERNEL_BASE && kaddr < KERNEL_END))
+		return pfn_valid(__pa(kaddr) >> PAGE_SHIFT);
+
+	return false;
+}
+EXPORT_SYMBOL(__virt_addr_valid);

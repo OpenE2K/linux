@@ -1671,7 +1671,7 @@ void setup_local_APIC(void)
 #endif
 
 #ifdef CONFIG_E2K
-	if (l_iommu_supported()) {
+	if (l_iommu_supported() || HAS_MACHINE_E2K_IOMMU) {
 		unsigned int value;
 		unsigned int apic_id;
 

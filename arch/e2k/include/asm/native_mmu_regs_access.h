@@ -31,29 +31,19 @@
 /*
  * Write/read MMU register
  */
-#define	NATIVE_WRITE_MMU_REG(addr_val, reg_val)				\
-		NATIVE_WRITE_MAS_D((addr_val), (reg_val), MAS_MMU_REG)
+#define	NATIVE_WRITE_MMU_REG(addr_val, reg_val) \
+do { \
+	asm volatile (MMURW_WAIT_ASYNC_TLB ::: "memory"); \
+	NATIVE_WRITE_MAS_D((addr_val), (reg_val), MAS_MMU_REG); \
+} while (0)
 
 #define	NATIVE_READ_MMU_REG(addr_val)					\
 		NATIVE_READ_MAS_D((addr_val), MAS_MMU_REG)
-#define	NATIVE_WRITE_MMU_CR(mmu_cr)					\
-		NATIVE_WRITE_MMU_REG(					\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_CR_NO),	\
-			AW(mmu_cr))
-#define	NATIVE_WRITE_MMU_TRAP_POINT(mmu_tc)				\
-		NATIVE_WRITE_MMU_REG(					\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_TRAP_POINT_NO), \
-			mmu_reg_val(mmu_tc))
-#define	NATIVE_READ_MMU_TRAP_POINT()	\
-		NATIVE_READ_MMU_REG(	\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_TRAP_POINT_NO))
-#define	NATIVE_WRITE_MMU_US_CL_D(us_cl_d)				\
-		NATIVE_WRITE_MMU_REG(					\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO), \
-			mmu_reg_val(us_cl_d))
-#define	NATIVE_READ_MMU_US_CL_D()	\
-		NATIVE_READ_MMU_REG(	\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO))
+#define	NATIVE_WRITE_MMU_CR(x)		NATIVE_SET_MMUREG(mmu_cr, AW(x))
+#define	NATIVE_WRITE_MMU_TRAP_POINT(x)	NATIVE_SET_MMUREG(trap_point, (x))
+#define	NATIVE_READ_MMU_TRAP_POINT()	NATIVE_GET_MMUREG(trap_point)
+#define	NATIVE_WRITE_MMU_US_CL_D(x)	NATIVE_SET_MMUREG(us_cl_d, (x))
+#define	NATIVE_READ_MMU_US_CL_D()	NATIVE_GET_MMUREG(us_cl_d)
 #define	NATIVE_WRITE_MMU_OS_PPTB_REG_VALUE(mmu_phys_ptb)	\
 		NATIVE_WRITE_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_OS_PPTB_NO), \
@@ -81,17 +71,9 @@
 #define	BOOT_NATIVE_READ_MMU_REG(addr_val)				\
 		NATIVE_READ_MMU_REG(addr_val)
 
-#define	BOOT_NATIVE_WRITE_MMU_CR(mmu_cr)				\
-		BOOT_NATIVE_WRITE_MMU_REG(				\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_CR_NO),	\
-			mmu_reg_val(mmu_cr))
-#define	BOOT_NATIVE_WRITE_MMU_TRAP_POINT(mmu_tc)			\
-		BOOT_NATIVE_WRITE_MMU_REG(				\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_TRAP_POINT_NO), \
-			mmu_reg_val(mmu_tc))
-#define	BOOT_NATIVE_READ_MMU_TRAP_POINT()	\
-		BOOT_NATIVE_READ_MMU_REG(	\
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_TRAP_POINT_NO))
+#define	BOOT_NATIVE_WRITE_MMU_CR(x)		NATIVE_SET_MMUREG(mmu_cr, (x))
+#define	BOOT_NATIVE_WRITE_MMU_TRAP_POINT(x)	NATIVE_SET_MMUREG(trap_point, (x))
+#define	BOOT_NATIVE_READ_MMU_TRAP_POINT()	NATIVE_GET_MMUREG(trap_point)
 #define	BOOT_NATIVE_WRITE_MMU_OS_PPTB_REG_VALUE(mmu_phys_ptb)	\
 		BOOT_NATIVE_WRITE_MMU_REG(	\
 			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_OS_PPTB_NO), \

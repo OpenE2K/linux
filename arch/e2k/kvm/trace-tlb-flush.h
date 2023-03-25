@@ -113,36 +113,6 @@ TRACE_EVENT(
 );
 
 TRACE_EVENT(
-	host_flush_cpu_root_pt,
-
-	TP_PROTO(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, pgd_t *gmm_pgd),
-
-	TP_ARGS(vcpu, gmm, gmm_pgd),
-
-	TP_STRUCT__entry(
-		__field(int, cpu_id)
-		__field(int, vcpu_id)
-		__field(int, gmm_id)
-		__field(pgd_t *, gmm_pgd)
-		__field(pgd_t *, cpu_pgd)
-	),
-
-	TP_fast_assign(
-		__entry->cpu_id = smp_processor_id();
-		__entry->vcpu_id = vcpu->vcpu_id;
-		__entry->gmm_id = (gmm != NULL) ? gmm->nid.nr : -2;
-		__entry->gmm_pgd = gmm_pgd;
-		__entry->cpu_pgd = cpu_kernel_root_pt;
-	),
-
-	TP_printk("cpu #%d vcpu #%d copy user 0x%lx pgds from gmm #%d at %px "
-		"to cpu root at %px",
-		__entry->cpu_id, __entry->vcpu_id, GUEST_USER_PTRS_PER_PGD,
-		__entry->gmm_id, __entry->gmm_pgd, __entry->cpu_pgd
-	)
-);
-
-TRACE_EVENT(
 	gva_tlb_state,
 
 	TP_PROTO(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, e2k_addr_t address),

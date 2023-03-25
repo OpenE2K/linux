@@ -115,20 +115,6 @@ typedef u32		compat_old_sigset_t;
 
 typedef u32		compat_sigset_word;
 
-typedef struct sigevent32 {
-	sigval_t sigev_value;
-	int sigev_signo;
-	int sigev_notify;
-	union {
-		int _pad[SIGEV_PAD_SIZE32];
-
-		struct {
-			u32 _function;
-			u32 _attribute;	/* really pthread_attr_t */
-		} _sigev_thread;
-	} _sigev_un;
-} sigevent_t32;
-
 #define COMPAT_OFF_T_MAX	0x7fffffff
 
 /*

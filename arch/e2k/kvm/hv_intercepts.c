@@ -1615,6 +1615,19 @@ static int write_reg_intc_cu(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
+static unsigned long long do_hcem_intc(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
+{
+	intc_info_cu_entry_t *entry;
+
+	entry = find_cu_info_entry(vcpu, cu, ICE_MASKED_HCALL, -1);
+	if (entry == NULL) {
+		pr_err("%s(): could not find INTC_INFO_CU event ICE_MASKED_HCALL\n", __func__);
+		return 0;
+	}
+
+	return entry->hi;
+}
+
 static int handle_cu_cond_events(struct kvm_vcpu *vcpu,
 			intc_info_cu_t *cu, pt_regs_t *regs)
 {
@@ -1653,6 +1666,12 @@ static int handle_cu_cond_events(struct kvm_vcpu *vcpu,
 			__func__);
 		print_intc_ctxt(vcpu);
 		cond_events &= ~intc_cu_evn_c_virt_mask;
+	}
+	if (cond_events & intc_cu_evn_c_hcem_mask) {
+		pr_err("%s(): unexpected hypercall type %llx\n", __func__, do_hcem_intc(vcpu, cu));
+		print_intc_ctxt(vcpu);
+		KVM_BUG_ON(true);
+		cond_events &= ~intc_cu_evn_c_hcem_mask;
 	}
 	if (cond_events == 0)
 		return ret;
@@ -1704,6 +1723,10 @@ static int handle_cu_uncond_events(struct kvm_vcpu *vcpu,
 	if (uncond_evn & intc_cu_evn_u_exc_mem_error_mask) {
 		uncond_evn &= ~intc_cu_evn_u_exc_mem_error_mask;
 		do_mem_error(regs);
+	}
+	if (uncond_evn & intc_cu_evn_u_g_tmr_mask) {
+		/* Ignore G_PREEMPT_TMR */
+		uncond_evn &= ~intc_cu_evn_u_g_tmr_mask;
 	}
 	if (uncond_evn != 0) {
 		pr_err("%s(): is not yet implemented, events: 0x%llx\n",

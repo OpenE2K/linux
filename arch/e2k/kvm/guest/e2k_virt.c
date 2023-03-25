@@ -17,7 +17,6 @@
 #include <asm/io.h>
 #include <asm/iolinkmask.h>
 #include <asm/machdep.h>
-#include <asm/machdep_numa.h>
 #include <asm/smp.h>
 #include <asm/ptrace.h>
 #include <asm/console.h>
@@ -128,7 +127,8 @@ void e2k_virt_shutdown(void)
  */
 void e2k_virt_power_off(void)
 {
-	DebugKVMSH("started on %s (%d)\n", current->comm, current->pid);
+	DebugKVMSH("started on %s (%d), cpu %d\n",
+		current->comm, current->pid, smp_processor_id());
 	e2k_virt_shutdown();
 	HYPERVISOR_kvm_shutdown("KVM Power down", KVM_SHUTDOWN_POWEROFF);
 }
@@ -141,8 +141,8 @@ static void e2k_virt_restart_machine(char *reason)
 {
 	if (reason == NULL)
 		reason = "Restarting system...";
-	DebugKVMSH("started to %s on %s (%d)\n",
-		reason, current->comm, current->pid);
+	DebugKVMSH("started to %s on %s (%d) cpu %d\n",
+		reason, current->comm, current->pid, smp_processor_id());
 	HYPERVISOR_kvm_shutdown(reason, KVM_SHUTDOWN_RESTART);
 }
 static void e2k_virt_reset_machine(char *reason)
@@ -227,8 +227,14 @@ e2k_virt_setup_arch(void)
 	kvm_sort_main_extable();
 
 	/* call only to set IP to goto in case of page fault on user address */
-	kvm_fast_tagged_memory_copy_user(NULL, NULL, 0, NULL, 0, 0, 0);
+	kvm_fast_tagged_memory_copy_user(NULL, NULL, 0, NULL,
+			(ldst_rec_op_t) { .word = 0 }, (ldst_rec_op_t) { .word = 0 }, 0);
 	kvm_fast_tagged_memory_set_user(NULL, 0, 0, 0, NULL, 0);
+	kvm_recovery_faulted_tagged_store(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+	kvm_recovery_faulted_load(0, NULL, NULL, 0, 0, (tc_cond_t) { .word = 0 });
+	kvm_recovery_faulted_move(0, 0, 0, 0, 0, 0, 0, 0, 0, (tc_cond_t) { .word = 0 });
+	kvm_recovery_faulted_load_to_greg(0, 0, 0, 0, 0, 0, 0, NULL, NULL,
+					  (tc_cond_t) { .word = 0 });
 }
 
 int e2k_virt_get_vector_apic(void)
@@ -295,42 +301,33 @@ e2k_virt_create_io_config(void)
 }
 #endif /* CONFIG_IOHUB_DOMAINS */
 
+__init
 void setup_guest_interface(void)
 {
-	machdep_t *node_mach;
-	int nid;
+	if (machine.native_iset_ver >= E2K_ISET_V5) {
+		machine.save_gregs = save_glob_regs_v5;
+		machine.save_gregs_dirty_bgr = save_glob_regs_dirty_bgr_v5;
+		machine.save_local_gregs = save_local_glob_regs_v5;
+		machine.restore_gregs = restore_glob_regs_v5;
+		machine.restore_local_gregs = restore_local_glob_regs_v5;
+	} else if (machine.native_iset_ver >= E2K_ISET_V3) {
+		machine.save_gregs = save_glob_regs_v3;
+		machine.save_gregs_dirty_bgr = save_glob_regs_dirty_bgr_v3;
+		machine.save_local_gregs = save_local_glob_regs_v3;
+		machine.restore_gregs = restore_glob_regs_v3;
+		machine.restore_local_gregs = restore_local_glob_regs_v3;
+	} else {
+		BUG_ON(true);
+	}
 
-	for_each_node_has_dup_kernel(nid) {
-		node_mach = the_node_machine(nid);
-		if (node_mach->native_iset_ver >= E2K_ISET_V5) {
-			node_mach->save_gregs = save_glob_regs_v5;
-			node_mach->save_gregs_dirty_bgr =
-				save_glob_regs_dirty_bgr_v5;
-			node_mach->save_local_gregs = save_local_glob_regs_v5;
-			node_mach->restore_gregs = restore_glob_regs_v5;
-			node_mach->restore_local_gregs =
-				restore_local_glob_regs_v5;
-		} else if (node_mach->native_iset_ver >= E2K_ISET_V3) {
-			node_mach->save_gregs = save_glob_regs_v3;
-			node_mach->save_gregs_dirty_bgr =
-				save_glob_regs_dirty_bgr_v3;
-			node_mach->save_local_gregs = save_local_glob_regs_v3;
-			node_mach->restore_gregs = restore_glob_regs_v3;
-			node_mach->restore_local_gregs =
-				restore_local_glob_regs_v3;
-		} else {
-			BUG_ON(true);
+	if (IS_HV_GM()) {
+		if (machine.native_iset_ver < E2K_ISET_V6) {
+			panic("%s(): native host ISET version #%d is "
+				"too old to support hardware "
+				"virtualization\n",
+				__func__, machine.native_iset_ver);
 		}
-
-		if (IS_HV_GM()) {
-			if (node_mach->native_iset_ver < E2K_ISET_V6) {
-				panic("%s(): native host ISET version #%d is "
-					"too old to support hardware "
-					"virtualization\n",
-					__func__, node_mach->native_iset_ver);
-			}
-		} else {
-		}
+	} else {
 	}
 }
 

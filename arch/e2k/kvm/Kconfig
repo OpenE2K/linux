@@ -15,6 +15,8 @@ menuconfig KVM
 	select HAVE_KVM_EVENTFD
 	select HAVE_KVM_IRQ_ROUTING
 	select HAVE_KVM_MSI
+	select IRQ_BYPASS_MANAGER
+	select HAVE_KVM_IRQ_BYPASS
 	select KVM_APIC_ARCHITECTURE
 	select SRCU
 	select MMU_NOTIFIER
@@ -238,6 +240,18 @@ config KVM_GUEST_HW_HCALL
 	  In other cases guest can use special system calls instead of HCALLs
 	  as at paravirtualization mode.
 
+config PRIV_HYPERCALLS
+	bool "Privileged actions software hypercalls is enable"
+	depends on (KVM_HOST_MODE || KVM_GUEST_MODE) && KVM_PARAVIRTUALIZATION
+	default y
+	help
+	  Say Y here to enable software hypercalls to make some privileged
+	  actions by host? but in the guest cpu/mmy context. This hypercall
+	  allows to significantly optimize some guest functions.
+	  All possible privileged actions are granted and performed
+	  only by host.
+	  This hypercalls can be called only from system admin mode
+
 config KVM_SHADOW_PT
 	bool "Guest kernel PTs based on host Shadow Page Tables support"
 	depends on KVM_GUEST_MODE
@@ -345,6 +359,7 @@ config QUEUED_LOCK_STAT
 config PARAVIRT_DEBUG
 	bool "paravirt-ops debugging"
 	depends on PARAVIRT && DEBUG_KERNEL
+	select DEBUG_VCPU_RUNSTATE
 	help
 	  Enable to debug paravirt_ops internals.  Specifically, BUG if
 	  a paravirt_op is missing when it is called.

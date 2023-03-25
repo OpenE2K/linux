@@ -32,6 +32,7 @@
  *       0   - Success
  */
 long ddk768_swI2CInit(
+	struct smi_device *sdev,
     unsigned char i2cClkGPIO, 
     unsigned char i2cDataGPIO
 );
@@ -48,6 +49,7 @@ long ddk768_swI2CInit(
  *      Register value
  */
 unsigned char ddk768_swI2CReadReg(
+	struct smi_device *sdev,
     unsigned char deviceAddress, 
     unsigned char registerIndex
 );
@@ -66,6 +68,7 @@ unsigned char ddk768_swI2CReadReg(
  *         -1   - Fail
  */
 long ddk768_swI2CWriteReg(
+	struct smi_device *sdev,
     unsigned char deviceAddress, 
     unsigned char registerIndex, 
     unsigned char data
@@ -82,7 +85,7 @@ long ddk768_swI2CWriteReg(
  *  Parameters:
  *      value	- Bit value to set to the SCL or SDA (0 = low, 1 = high)
  */ 
-void ddk768_swI2CSCL(unsigned char value);
+void ddk768_swI2CSCL(struct smi_device *sdev, unsigned char value);
 
 /*
  *  This function set/reset the SDA GPIO pin
@@ -90,6 +93,6 @@ void ddk768_swI2CSCL(unsigned char value);
  *  Parameters:
  *      value	- Bit value to set to the SCL or SDA (0 = low, 1 = high)
  */
-void ddk768_swI2CSDA(unsigned char value);
+void ddk768_swI2CSDA(struct smi_device *sdev, unsigned char value);
 
 #endif  /* _SWI2C_H_ */

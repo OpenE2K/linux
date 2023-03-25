@@ -272,13 +272,11 @@ static inline int apic_find_highest_irr(struct kvm_lapic *apic)
 {
 	int result;
 
+	result = apic_search_irr(apic);
 	if (!apic->irr_pending) {
-		result = apic_search_irr(apic);
 		if (result == -1)
 			return -1;
 		apic->irr_pending = true;
-	} else {
-		result = apic_search_irr(apic);
 	}
 	ASSERT(result == -1 || result >= 16);
 
@@ -1655,8 +1653,10 @@ int kvm_get_sw_apic_interrupt(struct kvm_vcpu *vcpu)
 	apic_debug("kvm_get_apic_interrupt() vector is 0x%x\n", vector);
 
 	if (kvm_test_pending_virqs(vcpu)) {
+		int virqs_num;
+
 		raw_spin_lock_irqsave(&vcpu->kvm->arch.virq_lock, flags);
-		kvm_dec_vcpu_pending_virq(vcpu, apic->virq_no);
+		virqs_num = kvm_dec_vcpu_pending_virq(vcpu, apic->virq_no);
 		if (!apic->irr_pending) {
 			/* nothing more pending VIRQs, clear flag */
 			kvm_clear_pending_virqs(vcpu);
@@ -1666,7 +1666,10 @@ int kvm_get_sw_apic_interrupt(struct kvm_vcpu *vcpu)
 		/* clear flag to enable new injections to handle */
 		/* remaining here pending VIRQs on IRR or new one */
 		kvm_clear_virqs_injected(vcpu);
+		trace_kvm_apic_irq_vector(vcpu->vcpu_id, vector, virqs_num);
 		raw_spin_unlock_irqrestore(&vcpu->kvm->arch.virq_lock, flags);
+	} else {
+		trace_kvm_apic_irq_vector(vcpu->vcpu_id, vector, -1);
 	}
 
 	DebugVIRQs("LAPIC #%d VIRQ vector is %x\n",

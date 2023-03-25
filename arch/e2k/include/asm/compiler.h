@@ -46,13 +46,17 @@ do { \
 	__asm__ NOT_VOLATILE("{nop}" : "=r" (unused) : : "memory", PREEMPTION_CLOBBERS);\
 } while (0)
 
+#ifdef CONFIG_PREEMPT_NONE
+# define barrier_preemption()
+#else
 /* See comment before PREEMPTION_CLOBBERS */
-#define barrier_preemption() \
+# define barrier_preemption() \
 do { \
 	int unused; \
 	/* TODO bug 126238 - insert additional NOP until fixed */ \
-	__asm__ NOT_VOLATILE("{nop}" : "=r" (unused) : : PREEMPTION_CLOBBERS);\
+	__asm__ NOT_VOLATILE("{nop}" : "=r" (unused) : : PREEMPTION_CLOBBERS); \
 } while (0)
+#endif
 
 #define barrier_data(ptr) \
 do { \

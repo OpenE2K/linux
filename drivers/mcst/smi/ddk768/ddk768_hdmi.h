@@ -224,7 +224,8 @@ long unhookHDMIInterrupt(
  *      None
  *
  */
-void writeHDMIRegister(unsigned char addr, unsigned char value);
+void writeHDMIRegister(volatile unsigned char __iomem *rmmio,
+				unsigned char addr, unsigned char value);
 
 /*
  *  Function: 
@@ -237,7 +238,8 @@ void writeHDMIRegister(unsigned char addr, unsigned char value);
  *      register value
  *
  */
-unsigned char readHDMIRegister(unsigned char addr);
+unsigned char readHDMIRegister(
+		volatile unsigned char __iomem *rmmio, unsigned char addr);
 
 /*
  *  Function: 
@@ -251,7 +253,7 @@ unsigned char readHDMIRegister(unsigned char addr);
  *      None
  *  
  */
-void writeHDMIControlRegister(unsigned char value);
+void writeHDMIControlRegister(struct smi_device *sdev, unsigned char value);
 
 /*
  *  Function: 
@@ -265,7 +267,7 @@ void writeHDMIControlRegister(unsigned char value);
  *      register value
  *
  */
-unsigned char readHDMIControlRegister(void);
+unsigned char readHDMIControlRegister(struct smi_device *sdev);
 
 /*
  *  Function: 
@@ -279,7 +281,8 @@ unsigned char readHDMIControlRegister(void);
  *      None
  *
  */
-void writeHdmiPHYRegister(unsigned char addr, unsigned char value);
+void writeHdmiPHYRegister(struct smi_device *sdev,
+						unsigned char addr, unsigned char value);
 
 /*
  *  Function:
@@ -293,7 +296,7 @@ void writeHdmiPHYRegister(unsigned char addr, unsigned char value);
  *      None
  *
  */
-void setHDMIChannel(unsigned char Channel);
+void setHDMIChannel(struct smi_device *sdev, unsigned char Channel);
 
 /*
  *  Function:
@@ -307,7 +310,7 @@ void setHDMIChannel(unsigned char Channel);
  *      None
  *
  */
-void enableHdmI2C(unsigned long enable);
+void enableHdmI2C(struct smi_device *sdev, unsigned long enable);
 
 /*
  *  Function:
@@ -320,13 +323,13 @@ void enableHdmI2C(unsigned long enable);
  *      None
  *
  */
-void HDMI_Dump_Registers (void);
+void HDMI_Dump_Registers(struct smi_device *sdev);
 
 //
 // Parameters   : unsigned char mode. 4 modes available.
 //                  MODE_A (sleep), MODE_B (register access), MODE_D (clock), MODE_E (active).
 //
-void HDMI_System_PD (unsigned char mode);
+void HDMI_System_PD(struct smi_device *sdev, unsigned char mode);
 
 /*
  *  Function:
@@ -339,7 +342,7 @@ void HDMI_System_PD (unsigned char mode);
  *      None
  *
  */
-void HDMI_Init (void);
+void HDMI_Init(struct smi_device *sdev);
 
 /*
  *  Function:
@@ -356,9 +359,10 @@ void HDMI_Init (void);
  *      -1 - Error 
  *
  */
-long HDMI_Set_Mode (logicalMode_t *pLogicalMode, bool isHDMI);
+long HDMI_Set_Mode(struct smi_device *sdev,
+		logicalMode_t *pLogicalMode, bool isHDMI);
 
-void HDMI_Enable_Output(void);
+void HDMI_Enable_Output(struct smi_device *sdev);
 
 /*
  *  Function:
@@ -374,7 +378,7 @@ void HDMI_Enable_Output(void);
  *      None
  *
  */
-void HDMI_Disable_Output (void);
+void HDMI_Disable_Output(struct smi_device *sdev);
 
 /*
  *  Function:
@@ -387,7 +391,7 @@ void HDMI_Disable_Output (void);
  *      None
  *
  */
-void HDMI_Unplugged (void);
+void HDMI_Unplugged(struct smi_device *sdev);
 
 /*
  *  Function:
@@ -403,7 +407,7 @@ void HDMI_Unplugged (void);
  *      None
  *
  */
-void HDMI_Audio_Mute (void);
+void HDMI_Audio_Mute(volatile unsigned char __iomem *rmmio);
 
 /*
  *  Function:
@@ -419,7 +423,7 @@ void HDMI_Audio_Mute (void);
  *      None
  *
  */
-void HDMI_Audio_Unmute (void);
+void HDMI_Audio_Unmute(volatile unsigned char __iomem *rmmio);
 
 /*
  *  Function:
@@ -433,7 +437,8 @@ void HDMI_Audio_Unmute (void);
  *      0 - exist block0 EDID (128 Bytes)
  *      1 - exist block0 & block1 EDID (256 Bytes)
  */
-long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize);
+long HDMI_Read_Edid(struct smi_device *sdev,
+				BYTE *pEDIDBuffer, unsigned long bufferSize);
 
 /*
  *  Function:
@@ -447,9 +452,9 @@ long HDMI_Read_Edid(BYTE *pEDIDBuffer, unsigned long bufferSize);
  *      1 - plugged
  * 
  */
-BYTE HDMI_hotplug_check (void);
+BYTE HDMI_hotplug_check(struct smi_device *sdev);
 
-int hdmi_detect(void);
+int hdmi_detect(struct smi_device *sdev);
 
 
 void hdmiHandler(void);

@@ -17,6 +17,7 @@
 #include <asm/mmu_context.h>
 #include <asm/sic_regs_access.h>
 #include <asm/smp-boot.h>
+#include <asm/qspinlock.h>
 #include <asm/regs_state.h>
 #include <asm-l/hw_irq.h>
 
@@ -54,30 +55,6 @@
 static int bsp_cpu;
 cpumask_t callin_go;
 
-/*
- * __nodedata variables should lay in single cache line. In other case access
- * to neighboring variables could lead to hardware hang. It can be in case of
- * lowmem access to neighboring variables and the following highmem access to
- * __nodedata variables or vice versa.
- */
-
-#ifdef	CONFIG_NUMA
-nodemask_t ____cacheline_aligned_in_smp __nodedata node_has_dup_kernel_map;
-
-atomic_t ____cacheline_aligned_in_smp __nodedata
-node_has_dup_kernel_num = ATOMIC_INIT(0);
-
-int ____cacheline_aligned_in_smp __nodedata
-all_nodes_dup_kernel_nid[MAX_NUMNODES];
-
-#ifndef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-pgd_t ____cacheline_aligned_in_smp __nodedata *all_nodes_pg_dir[MAX_NUMNODES];
-#else	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-pg_dir_t ____cacheline_aligned_in_smp __nodedata
-*all_nodes_pg_dir[MAX_NUMNODES];
-#endif	/* ! ONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-#endif	/* CONFIG_NUMA */
-
 static int old_num_online_cpus;
 
 
@@ -100,29 +77,6 @@ int native_activate_all_cpus(void)
 	return 0;
 }
 
-#ifdef	CONFIG_NUMA
-/*
- * Which logical CPUs are on which nodes
- */
-cpumask_t node_to_cpumask_map[MAX_NUMNODES];
-EXPORT_SYMBOL(node_to_cpumask_map);
-
-/*
- * Allocate node_to_cpumask_map based on node_online_map
- * Requires cpu_online_mask to be valid.
- */
-void __init_recv setup_node_to_cpumask_map(void)
-{
-	int node;
-
-	for (node = 0; node < MAX_NUMNODES; node ++) {
-		cpumask_clear(&node_to_cpumask_map[node]);
-	}
-	for_each_online_node(node) {
-		node_to_cpumask_map[node] = node_to_cpumask(node);
-	}
-}
-#endif	/* CONFIG_NUMA */
 
 /* Used solely to pass pointer from cpu_up() running on BSP
  * to e2k_start_secondary() running on AP */
@@ -194,6 +148,14 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 	/* By now percpu areas should have been initialized by BSP */
 	set_my_cpu_offset(__per_cpu_offset[cpu]);
 
+	/* cpumask_of_node() and cpu_to_node() initialization */
+	set_numa_node(early_cpu_to_node(cpu));
+	numa_add_cpu(cpu);
+
+	trap_init();
+
+	this_cpu_write(u_root_ptb, __pa(mm_node_pgd(&init_mm, numa_node_id())));
+
 	/*
 	 * The BSP has finished the init stage and is spinning on
 	 * cpu_online_mask until we finish. We are free to set up this
@@ -241,6 +203,7 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 
 	__setup_vector_irq(cpu);
 
+	smp_wmb();
 	notify_cpu_starting(cpu);
 
 	/* Allow BSP to continue */
@@ -273,7 +236,7 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 /*
  * Activate a secondary processor.
  */
-void __init e2k_start_secondary(int cpuid)
+void e2k_start_secondary(int cpuid)
 {
 	struct task_struct *idle;
 	unsigned long stack_base;
@@ -301,6 +264,10 @@ void __init e2k_start_secondary(int cpuid)
 void start_secondary_resume(int cpuid, int cpu)
 {
 	unsigned long stack_base = (unsigned long) idle_tasks[cpu]->stack;
+
+	/* Drop any mappings that could have been invalidated
+	 * while this CPU was offline */
+	local_flush_tlb_all();
 
 	BUG_ON(!stack_base);
 	NATIVE_SWITCH_TO_KERNEL_STACK(
@@ -486,10 +453,6 @@ e2k_smp_cpus_done(unsigned int max_cpus, int recovery)
 
 	pr_info("Total of %d processors activated\n", num_online_cpus());
 
-#ifdef	CONFIG_NUMA
-	setup_node_to_cpumask_map();
-#endif	/* CONFIG_NUMA */
-
 	setup_ioapic_dest();
 
 	setup_processor_pic();
@@ -500,12 +463,17 @@ e2k_smp_cpus_done(unsigned int max_cpus, int recovery)
 	DebugSMPB("finished\n");
 }
 
-#ifdef CONFIG_PARAVIRT_SPINLOCKS
-#include <asm/qspinlock.h>
-#endif /* CONFIG_PARAVIRT_SPINLOCKS */
-
 void __init smp_prepare_boot_cpu(void)
 {
+	int cpu = smp_processor_id();
+
+	/* Set per_cpu area pointer */
+	set_my_cpu_offset(__per_cpu_offset[smp_processor_id()]);
+
+	/* cpumask_of_node() and cpu_to_node() initialization */
+	set_numa_node(early_cpu_to_node(cpu));
+	numa_add_cpu(cpu);
+
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
 	/*
 	 * Allocate "PV qspinlock" global hash table used by paravirt spinlocks

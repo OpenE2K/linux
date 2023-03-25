@@ -2165,12 +2165,7 @@ int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 	if (WARN_ON(addr >= end))
 		return -EINVAL;
 
-#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
-	BUG_ON(mm != &init_mm);
-	pgd = node_pgd_offset_kernel(numa_node_id(), addr);
-#else
 	pgd = pgd_offset(mm, addr);
-#endif
 	do {
 		next = pgd_addr_end(addr, end);
 		err = apply_to_p4d_range(mm, pgd, addr, next, fn, data);

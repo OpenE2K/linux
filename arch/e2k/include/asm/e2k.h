@@ -122,7 +122,7 @@
 #elif	defined(CONFIG_E2C3)	/* can be defined only for tiny boot on lms */
  #define	native_machine_id	MACHINE_ID_E2C3_LMS
 #else	/* ! CONFIG_E2K_MACHINE && ! our boot on lms */
-extern unsigned int __nodedata native_machine_id;
+extern unsigned int native_machine_id;
 #endif /* CONFIG_E2K_MACHINE */
 
 extern const char *e2k_get_cpu_type_name(int mach_type_id);
@@ -235,8 +235,6 @@ extern void e2k_init_IRQ(void);
 
 #define	get_machine_id()		machine_id
 #define	boot_get_machine_id()		boot_machine_id
-#define	set_machine_id(mach_id)		(machine_id = (mach_id))
-#define	boot_set_machine_id(mach_id)	(boot_machine_id = (mach_id))
 
 static inline void set_mach_type_id(void)
 {

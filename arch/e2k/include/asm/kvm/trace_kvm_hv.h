@@ -436,41 +436,47 @@ TRACE_EVENT(
 TRACE_EVENT(
 	complete_intc_info_io_read,
 
-	TP_PROTO(unsigned long gpa, unsigned long data),
+	TP_PROTO(unsigned long gpa, unsigned long data, unsigned long data_ext),
 
-	TP_ARGS(gpa, data),
+	TP_ARGS(gpa, data, data_ext),
 
 	TP_STRUCT__entry(
 		__field(	unsigned long,	gpa	)
 		__field(	unsigned long,	data	)
+		__field(	unsigned long,	data_ext	)
 	),
 
 	TP_fast_assign(
 		__entry->gpa = gpa;
 		__entry->data = data;
+		__entry->data_ext = data_ext;
 	),
 
-	TP_printk("gpa 0x%lx, data 0x%lx", __entry->gpa, __entry->data)
+	TP_printk("gpa 0x%lx, data 0x%lx, data_ext 0x%lx", __entry->gpa,
+		__entry->data, __entry->data_ext)
 );
 
 TRACE_EVENT(
 	complete_intc_info_io_write,
 
-	TP_PROTO(unsigned long gpa, unsigned long data),
+	TP_PROTO(unsigned long gpa, unsigned long data, unsigned long data_ext),
 
-	TP_ARGS(gpa, data),
+	TP_ARGS(gpa, data, data_ext),
 
 	TP_STRUCT__entry(
 		__field(	unsigned long,	gpa	)
 		__field(	unsigned long,	data	)
+		__field(	unsigned long,	data_ext	)
 	),
 
 	TP_fast_assign(
 		__entry->gpa = gpa;
 		__entry->data = data;
+		__entry->data_ext = data_ext;
 	),
 
-	TP_printk("gpa 0x%lx, data 0x%lx", __entry->gpa, __entry->data)
+	TP_printk("gpa 0x%lx, data 0x%lx, data_ext 0x%lx", __entry->gpa,
+		__entry->data, __entry->data_ext)
 );
 
 TRACE_EVENT(

@@ -190,10 +190,10 @@ void pv_apf_wake(void)
 /*
  * Translate gva to gpa
  */
-static unsigned long gva_to_gpa(void *gva)
+static phys_addr_t gva_to_gpa(void *gva)
 {
-	unsigned long gfn = page_to_pfn(virt_to_page(gva));
-	return PFN_PHYS(gfn) + ((unsigned long)gva & ~PAGE_MASK);
+	return node_kernel_address_to_phys(numa_node_id(),
+			(unsigned long) gva);
 }
 
 /*
@@ -202,8 +202,8 @@ static unsigned long gva_to_gpa(void *gva)
 static void pv_apf_enable_curr_cpu(void *info)
 {
 	struct pv_apf_event *event = this_cpu_ptr(&pv_apf_event);
-	unsigned long apf_reason_gpa = gva_to_gpa(&event->apf_reason);
-	unsigned long apf_id_gpa = gva_to_gpa(&event->apf_id);
+	phys_addr_t apf_reason_gpa = gva_to_gpa(&event->apf_reason);
+	phys_addr_t apf_id_gpa = gva_to_gpa(&event->apf_id);
 
 	this_cpu_write(pv_apf_event.apf_reason, KVM_APF_NO);
 	this_cpu_write(pv_apf_event.apf_id, 0);

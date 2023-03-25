@@ -6,7 +6,7 @@
 #ifndef _E2K_PARAVIRT_TLBFLUSH_H
 #define _E2K_PARAVIRT_TLBFLUSH_H
 
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <asm/paravirt/pv_ops.h>
 
 static inline void pv_flush_tlb_all(void)

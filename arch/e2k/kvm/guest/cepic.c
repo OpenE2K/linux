@@ -156,7 +156,7 @@ static int kvm_do_setup_cepic_virq(bool bsp, int cpu)
 		ret = kvm_request_virq(KVM_VIRQ_CEPIC,
 				&kvm_cepic_interrupt, cpu,
 				BY_DIRECT_INJ_VIRQ_FLAG,
-				name, (void *)cpu);
+				name, (void *) (long) cpu);
 		if (ret == 0) {
 			if (bsp)
 				bsp_direct_virq_cepic = true;

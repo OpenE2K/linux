@@ -14,6 +14,14 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 		     phys_addr_t bar_addr_bus[]);
 void mxgbe_release_board(struct pci_dev *pdev);
 
+/* eldwcxpcs.ko */
+int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);
+/* PCS MPLL MODE */
+#define MPLL_MODE_10G		0
+#define MPLL_MODE_1G		1
+#define MPLL_MODE_2G5		2
+#define MPLL_MODE_1G_BIF	3
+
 
 /**
  * Device Initialization Routine
@@ -36,10 +44,9 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 	phys_addr_t bar_addr_bus[MXGBE_PCI_BAR_NUMS] = {0};
 	struct device_node *np = dev_of_node(&pdev->dev);
 	const char *of_status_prop = NULL;
-
-	assert(pdev);
-	if (!pdev)
-		return -ENODEV;
+	int mpllm;
+	u32 val;
+	unsigned long timestart;
 
 	/* check cmdline param */
 	if (mxgbe_status == 0) {
@@ -58,6 +65,22 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 			dev_warn(&pdev->dev,
 				 "devicetree for node not found!\n");
 		}
+	}
+
+	/* PCS MPLL mode: 0-10G, 1-1G, 2-2.5G, 3-bifurcation */
+	mpllm = eldwcxpcs_get_mpll_mode(pdev);
+	if (mpllm < 0) {
+		dev_err(&pdev->dev,
+			 "wrong PCS MPLL mode (%d)\n", mpllm);
+		return -ENODEV;
+	} else {
+		dev_dbg(&pdev->dev,
+			 "PCS MPLL mode (%d)\n", mpllm);
+	}
+	if (mpllm != MPLL_MODE_10G) {
+		dev_warn(&pdev->dev,
+			 "10G device disabled, use 1G device\n");
+		return -ENODEV;
 	}
 
 	dev_info(&pdev->dev, "initializing PCI device %04x:%04x\n",
@@ -91,6 +114,25 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 	/*
 	pci_enable_pcie_error_reporting(pdev);
 	*/
+
+	/* RESET */
+#define CFGSPACE_RST_REG 0x40 /* +40h */
+#define CFGSPACE_RST 0x40 /* bit 6 */
+	pci_write_config_dword(pdev, CFGSPACE_RST_REG, CFGSPACE_RST);
+	timestart = jiffies;
+	do {
+		err = pci_read_config_dword(pdev, CFGSPACE_RST_REG, &val);
+		if (err) {
+			dev_warn(&pdev->dev,
+				"HW Reset (CFGSPACE_RST) not done\n");
+			break;
+		}
+		if (time_after(jiffies, timestart + HZ)) {
+			dev_warn(&pdev->dev,
+				"HW Reset (CFGSPACE_RST) not done - timeout\n");
+			break;
+		}
+	} while (val & CFGSPACE_RST);
 
 	if (pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
 		dev_warn(&pdev->dev,

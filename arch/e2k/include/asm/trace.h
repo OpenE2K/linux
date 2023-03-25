@@ -127,15 +127,13 @@ TRACE_EVENT(
 			))
 );
 
-TRACE_EVENT(
-	unhandled_page_fault,
-
-	TP_PROTO(unsigned long address),
-
-	TP_ARGS(address),
+DECLARE_EVENT_CLASS(address_pt_dtlb,
+	TP_PROTO(unsigned long address, enum pt_dtlb_translation_mode mode),
+	TP_ARGS(address, mode),
 
 	TP_STRUCT__entry(
 		__field(	unsigned long,	address		)
+		__field(	enum pt_dtlb_translation_mode, mode )
 		__field(	u64,		dtlb_entry	)
 		__field(	u64,		dtlb_pud	)
 		__field(	u64,		dtlb_pmd	)
@@ -149,10 +147,11 @@ TRACE_EVENT(
 
 	TP_fast_assign(
 		__entry->address = address;
+		__entry->mode = mode;
 
 		trace_get_va_translation(current->mm, address,
 			&__entry->pgd, &__entry->pud, &__entry->pmd,
-			&__entry->pte, &__entry->pt_level);
+			&__entry->pte, &__entry->pt_level, mode);
 
 		/*
 		 * Save DTLB entries.
@@ -163,25 +162,24 @@ TRACE_EVENT(
 		trace_get_dtlb_translation(current->mm, address,
 			&__entry->dtlb_entry, &__entry->dtlb_pud,
 			&__entry->dtlb_pmd, &__entry->dtlb_pte,
-			__entry->pt_level);
+			__entry->pt_level, mode);
 	),
 
-	TP_printk("\n"
-		"Page table for address 0x%lx (all f's are returned if the entry has not been read)\n"
-		"  pgd 0x%lx: %s\n"
-		"    Access mode: %s%s\n"
-		"  pud 0x%lx: %s\n"
-		"    Access mode: %s%s\n"
-		"  pmd 0x%lx: %s\n"
-		"    Access mode: %s%s\n"
-		"  pte 0x%lx: %s\n"
-		"    Access mode: %s%s\n"
+	TP_printk("\n%s"
+		"Page table for 0x%lx (all f's if entry hasn't been read)\n"
+		"  pgd 0x%lx: %s%s\n"
+		"  pud 0x%lx: %s%s\n"
+		"  pmd 0x%lx: %s%s\n"
+		"  pte 0x%lx: %s%s\n"
 		"Probed DTLB entries:\n"
-		"  pud address entry 0x%llx: %s\n"
-		"  pmd address entry 0x%llx: %s\n"
-		"  pte address entry 0x%llx: %s\n"
-		"      address entry 0x%llx: %s"
-		,
+		"  pud 0x%llx: %s%s\n"
+		"  pmd 0x%llx: %s%s\n"
+		"  pte 0x%llx: %s%s\n"
+		" addr 0x%llx: %s%s",
+		(__entry->mode == PT_DTLB_TRANSLATION_AUTO) ? ""
+			: (__entry->mode == PT_DTLB_TRANSLATION_USER)
+					? "Forced print of user page tables and TLB\n"
+			: "Forced print of kernel page tables and TLB\n",
 		__entry->address,
 		(__entry->pt_level <= E2K_PGD_LEVEL_NUM) ? __entry->pgd : -1UL,
 		E2K_TRACE_PRINT_PT_FLAGS(__entry->pgd,
@@ -195,18 +193,33 @@ TRACE_EVENT(
 		(__entry->pt_level <= E2K_PTE_LEVEL_NUM) ? __entry->pte : -1UL,
 		E2K_TRACE_PRINT_PT_FLAGS(__entry->pte,
 				__entry->pt_level <= E2K_PTE_LEVEL_NUM),
-		(__entry->pt_level <= E2K_PUD_LEVEL_NUM) ? __entry->dtlb_pud : -1ULL,
-		(__entry->pt_level <= E2K_PUD_LEVEL_NUM) ?
-			E2K_TRACE_PRINT_DTLB(__entry->dtlb_pud) : "(not read)",
-		(__entry->pt_level <= E2K_PMD_LEVEL_NUM) ? __entry->dtlb_pmd : -1ULL,
-		(__entry->pt_level <= E2K_PMD_LEVEL_NUM) ?
-			E2K_TRACE_PRINT_DTLB(__entry->dtlb_pmd) : "(not read)",
-		(__entry->pt_level <= E2K_PTE_LEVEL_NUM) ? __entry->dtlb_pte : -1ULL,
-		(__entry->pt_level <= E2K_PTE_LEVEL_NUM) ?
-			E2K_TRACE_PRINT_DTLB(__entry->dtlb_pte) : "(not read)",
+		(__entry->pt_level <= E2K_PUD_LEVEL_NUM || cpu_has(CPU_FEAT_SEPARATE_TLU_CACHE))
+				? __entry->dtlb_pud : -1UL,
+		E2K_TRACE_PRINT_DTLB(__entry->dtlb_pud,
+				(__entry->pt_level <= E2K_PUD_LEVEL_NUM ||
+				 cpu_has(CPU_FEAT_SEPARATE_TLU_CACHE))),
+		(__entry->pt_level <= E2K_PMD_LEVEL_NUM || cpu_has(CPU_FEAT_SEPARATE_TLU_CACHE))
+				? __entry->dtlb_pmd : -1UL,
+		E2K_TRACE_PRINT_DTLB(__entry->dtlb_pmd,
+				(__entry->pt_level <= E2K_PMD_LEVEL_NUM ||
+				 cpu_has(CPU_FEAT_SEPARATE_TLU_CACHE))),
+		(__entry->pt_level <= E2K_PTE_LEVEL_NUM || cpu_has(CPU_FEAT_SEPARATE_TLU_CACHE))
+				? __entry->dtlb_pte : -1UL,
+		E2K_TRACE_PRINT_DTLB(__entry->dtlb_pte,
+				(__entry->pt_level <= E2K_PTE_LEVEL_NUM ||
+				 cpu_has(CPU_FEAT_SEPARATE_TLU_CACHE))),
 		__entry->dtlb_entry,
-		E2K_TRACE_PRINT_DTLB(__entry->dtlb_entry))
+		E2K_TRACE_PRINT_DTLB(__entry->dtlb_entry, true))
 );
+
+DEFINE_EVENT(address_pt_dtlb, unhandled_page_fault,
+		TP_PROTO(unsigned long address, enum pt_dtlb_translation_mode mode),
+		TP_ARGS(address, mode));
+
+DEFINE_EVENT(address_pt_dtlb, trap_cellar_pt_dtlb,
+		TP_PROTO(unsigned long address, enum pt_dtlb_translation_mode mode),
+		TP_ARGS(address, mode));
+
 
 #define TIRHI_EXC_MASK		0x00000fffffffffffULL
 #define TIRHI_ALS_MASK		0x0003f00000000000ULL
@@ -353,7 +366,6 @@ TRACE_EVENT(
 		__entry->ip[12], __entry->ip[13], __entry->ip[14], __entry->ip[15]
 		)
 );
-
 
 #endif /* _TRACE_E2K_H */
 

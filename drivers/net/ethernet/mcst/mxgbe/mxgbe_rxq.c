@@ -115,18 +115,18 @@ int mxgbe_rxq_alloc_all(mxgbe_priv_t *priv)
 			priv->rxq[qn].que_size / sizeof(mxgbe_descr_t);
 		priv->rxq[qn].tail = 0;
 
-		DEV_DBG(MXGBE_DBG_MSK_RX, &priv->pdev->dev,
-			"rxq_alloc_all: RX Tail: addr=%p handle=%llX\n",
+		DEV_DBG(MXGBE_DBG_MSK_MEM, &priv->pdev->dev,
+			"rxq_alloc_all: RX Tail: addr=%p handle=%016llX\n",
 			priv->rxq[qn].tail_addr,
 			(unsigned long long)priv->rxq[qn].tail_handle);
 
-		DEV_DBG(MXGBE_DBG_MSK_RX, &priv->pdev->dev,
+		DEV_DBG(MXGBE_DBG_MSK_MEM, &priv->pdev->dev,
 			"rxq_alloc_all: HW Queue: rxq[%d].descr_cnt=%d  " \
 			"que_size=%u\n",
 			qn, priv->rxq[qn].descr_cnt,
 			(unsigned int)priv->rxq[qn].que_size);
-		DEV_DBG(MXGBE_DBG_MSK_RX, &priv->pdev->dev,
-			"rxq_alloc_all: que_addr=%p que_handle=%llX\n",
+		DEV_DBG(MXGBE_DBG_MSK_MEM, &priv->pdev->dev,
+			"rxq_alloc_all: que_addr=%p que_handle=%016llX\n",
 			priv->rxq[qn].que_addr,
 			(unsigned long long)priv->rxq[qn].que_handle);
 
@@ -265,8 +265,8 @@ void mxgbe_rx_init(mxgbe_priv_t *priv)
 		/*| RX_HASH_ENETHT*/
 		/*| RX_HASH_ENSMAC*/
 		/*| RX_HASH_ENDMAC*/
-		| RX_HASH_ADD(1)	/* == 0..255 */
-		| RX_HASH_DIV(1)	/* == 1..256 */
+		| RX_HASH_ADD(0)	/* == 0..255 */
+		| RX_HASH_DIV(priv->num_rx_queues)	/* == 1..256 */
 		;
 	mxgbe_wreg32(base, RX_IP, val);  /* IP */
 
@@ -282,7 +282,7 @@ void mxgbe_rx_init(mxgbe_priv_t *priv)
 		/*| RX_HASH_ENSMAC*/
 		/*| RX_HASH_ENDMAC*/
 		| RX_HASH_ADD(0)	/* == 0..255 */
-		| RX_HASH_DIV(1)	/* == 1..256 */
+		| RX_HASH_DIV(priv->num_rx_queues)	/* == 1..256 */
 		;
 	mxgbe_wreg32(base, RX_TCP, val); /* TCP */
 
@@ -297,8 +297,8 @@ void mxgbe_rx_init(mxgbe_priv_t *priv)
 		/*| RX_HASH_ENETHT*/
 		/*| RX_HASH_ENSMAC*/
 		/*| RX_HASH_ENDMAC*/
-		| RX_HASH_ADD(2)	/* == 0..255 */
-		| RX_HASH_DIV(1)	/* == 1..256 */
+		| RX_HASH_ADD(0)	/* == 0..255 */
+		| RX_HASH_DIV(priv->num_rx_queues)	/* == 1..256 */
 		;
 	mxgbe_wreg32(base, RX_UDP, val); /* UDP */
 } /* mxgbe_rx_init */
@@ -368,8 +368,8 @@ int mxgbe_rxq_init_all(mxgbe_priv_t *priv)
 		mxgbe_wreg32(base, RXQ_REG_ADDR(qn, Q_RDYTHR), 0);
 		mxgbe_wreg64(base, RXQ_REG_ADDR(qn, Q_ADDR),
 			     priv->rxq[qn].que_handle);
-		mxgbe_wreg64(base, RXQ_REG_ADDR(qn, Q_TAILADDR),
-			     priv->rxq[qn].tail_handle);
+		mxgbe_wreg64(base, RXQ_REG_ADDR(qn, Q_TAILADDR), 0);
+			     /*priv->rxq[qn].tail_handle);*/
 		mxgbe_wreg32(base, RXQ_REG_ADDR(qn, Q_SIZE),
 			     priv->rxq[qn].descr_cnt);
 
@@ -402,7 +402,7 @@ void mxgbe_rxq_start(mxgbe_priv_t *priv, int qn)
 #endif /* USE_LONG_DESCR */
 		     Q_CTRL_SET_AUTOWRB | /* autoclean !!! */
 		     /* Q_CTRL_SET_WRDONEMEM | */ /* set in Reset state */
-		     Q_CTRL_SET_WRTAILMEM |
+		     /* Q_CTRL_SET_WRTAILMEM | */
 		     Q_CTRL_SET_START);
 
 } /* mxgbe_rxq_start */
@@ -440,7 +440,16 @@ int mxgbe_rxq_request(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 	nFDEBUG; /* too big: priv->rxq[qn].descr_cnt !!! */
 
 	q_descr = ((mxgbe_descr_t *)(priv->rxq[qn].que_addr)) + head;
-	*q_descr = *descr; /* copy */
+#ifdef USE_LONG_DESCR
+	q_descr->vlan.r = cpu_to_le64(descr->vlan.r);
+	q_descr->time.r = cpu_to_le64(descr->time.r);
+#endif /* USE_LONG_DESCR */
+	q_descr->addr.r = cpu_to_le64(descr->addr.r);
+	q_descr->ctrl.r = cpu_to_le64(descr->ctrl.r);
+
+	/* Force memory writes to complete before letting h/w
+	 * know there are new descriptors to fetch. */
+	wmb();
 
 	INC_RXQ_INDEX(new_head, head, qn);
 
@@ -453,6 +462,7 @@ int mxgbe_rxq_request(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 		descr->ctrl.r, descr->addr.r);
 
 	/* start Rx */
+	priv->rxq[qn].head = new_head;
 	mxgbe_wreg32(base, RXQ_REG_ADDR(qn, Q_HEAD), Q_HEAD_SET_PTR(new_head));
 
 	return 0;

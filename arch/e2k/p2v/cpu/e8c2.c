@@ -6,8 +6,7 @@ void boot_e8c2_setup_arch(void)
 {
 	boot_e2k_sic_setup_arch();
 
-	if (!boot_machine.cmdline_iset_ver)
-		boot_machine.native_iset_ver = ELBRUS_8C2_ISET;
+	boot_machine.native_iset_ver = ELBRUS_8C2_ISET;
 	boot_machine.mmu_pt_v6 = false;
 	boot_machine.mmu_separate_pt = false;
 	boot_machine.L3_enable = true;
@@ -21,5 +20,6 @@ void boot_e8c2_setup_arch(void)
 	boot_machine.sic_mc_count = E8C2_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = SIC_mc1_ecc;
 	boot_machine.sic_io_str1 = 0;
+	boot_machine.qnr1_offset = E8C2_QNR1_OFFSET;
 }
 

@@ -146,8 +146,8 @@
     },
     {
         "EventCode": "0x111",
-        "EventName": "DTLB_DEC_STALL",
-        "BriefDescription": "1:11 количество тактов блокировки дешифрации от устройства DTLB",
+        "EventName": "STALL_DTLB",
+        "BriefDescription": "1:11 количество тактов блокировки исполнения от устройства DTLB (суммарно). Асинхронные запросы от AAU не учитываются.",
     },
     {
         "EventCode": "0x112",
@@ -156,18 +156,18 @@
     },
     {
         "EventCode": "0x113",
-        "EventName": "DTLB_DEC_STALL_AAU",
-        "BriefDescription": "1:13 количество тактов блокировки дешифрации от устройства AAU",
+        "EventName": "STALL_AAU",
+        "BriefDescription": "1:13 количество тактов блокировки исполнения от устройства AAU",
     },
     {
         "EventCode": "0x114",
-        "EventName": "DTLB_DEC_STALL_CLW",
-        "BriefDescription": "1:14 количество тактов блокировки дешифрации от устройства CLW",
+        "EventName": "STALL_DTLB_CLW",
+        "BriefDescription": "1:14 количество тактов блокировки исполнения от устройства CLW",
     },
     {
         "EventCode": "0x115",
-        "EventName": "DTLB_DEC_STALL_MLT",
-        "BriefDescription": "1:15 количество тактов блокировки дешифрации от устройства MLT",
+        "EventName": "STALL_DTLB_MLT",
+        "BriefDescription": "1:15 количество тактов блокировки исполнения от устройства MLT",
     },
     {
         "EventCode": "0x120",

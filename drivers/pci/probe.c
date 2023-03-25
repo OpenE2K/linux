@@ -2278,6 +2278,29 @@ bool pci_bus_generic_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
 	return true;
 }
 
+#ifdef CONFIG_E90S
+static bool l_do_not_touch_device(struct pci_bus *bus, int devfn)
+{
+	struct device_node *np;
+	int b = bus->number;
+	int s = PCI_SLOT(devfn);
+	int f = PCI_FUNC(devfn);
+	if (!bus->dev.of_node)
+		return false;
+	if (e90s_get_cpu_type() != E90S_CPU_R2000P)
+		return false;
+	np = of_pci_find_child_device(bus->dev.of_node, devfn);
+	if (np == NULL)
+		return false;
+	/* Bug 138320 */
+	if (b != 1 || f != 0)
+		return false;
+	if (s == 5 || s == 6 || s == 7 || s == 8) /* PCIe bridges */
+		return !of_device_is_available(np);
+
+	return false;
+}
+#endif
 bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
 				int timeout)
 {
@@ -2293,6 +2316,10 @@ bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
 		return pci_idt_bus_quirk(bus, devfn, l, timeout);
 #endif
 
+#ifdef CONFIG_E90S
+	if (l_do_not_touch_device(bus, devfn))
+		return false;
+#endif
 	return pci_bus_generic_read_dev_vendor_id(bus, devfn, l, timeout);
 }
 EXPORT_SYMBOL(pci_bus_read_dev_vendor_id);

@@ -12,12 +12,12 @@
 #ifndef _DDK768_2D_H_
 #define _DDK768_2D_H_
 
-#define POKE_8(address, value)          pokeRegisterByte(address, value)
-#define POKE_16(address, value)         pokeRegisterWord(address, value)
-#define POKE_32(address, value)         pokeRegisterDWord(address, value)
-#define PEEK_8(address)                 peekRegisterByte(address)
-#define PEEK_16(address)                peekRegisterWord(address)
-#define PEEK_32(address)                peekRegisterDWord(address)
+#define POKE_8(mmio, address, value)    pokeRegisterByte(mmio, address, value)
+#define POKE_16(mmio, address, value)   pokeRegisterWord(mmio, address, value)
+#define POKE_32(mmio, address, value)   pokeRegisterDWord(mmio, address, value)
+#define PEEK_8(mmio, address)           peekRegisterByte(mmio, address)
+#define PEEK_16(mmio, address)          peekRegisterWord(mmio, address)
+#define PEEK_32(mmio, address)          peekRegisterDWord(mmio, address)
 
 /* Rotation Direction */
 typedef enum _rotate_dir_t
@@ -34,7 +34,7 @@ rotate_dir_t;
  * This function must be called before other 2D functions.
  * Assumption: A specific vidoe mode has been properly set up.
  */
-void ddk768_deInit(void);
+void ddk768_deInit(struct smi_device *sdev);
 
 /*
  * Reset 2D engine by 
@@ -50,7 +50,7 @@ void ddk768_deReset(void);
  * Return: 0 = return because engine is idle and normal.
  *        -1 = return because time out (2D engine may have problem).
  */
-long ddk768_deWaitForNotBusy(void);
+long ddk768_deWaitForNotBusy(struct smi_device *sdev);
 
 /* deWaitIdle() function.
  *
@@ -74,6 +74,7 @@ long deWaitIdle(unsigned long i);
  * 
  */
 long ddk768_deSetClipping(
+struct smi_device *sdev,
 unsigned long enable, /* 0 = disable clipping, 1 = enable clipping */
 unsigned long x1,     /* x1, y1 is the upper left corner of the clipping area */
 unsigned long y1,     /* Note that the region includes x1 and y1 */
@@ -88,6 +89,7 @@ unsigned long y2);    /* Note that the region will not include x2 and y2 */
  * If not match, the destination pixel will be updated.
  */
 long ddk768_deSetTransparency(
+struct smi_device *sdev,
 unsigned long enable,     /* 0 = disable, 1 = enable transparency feature */
 unsigned long tSelect,    /* 0 = compare source, 1 = compare destination */
 unsigned long tMatch,     /* 0 = Opaque mode, 1 = transparent mode */
@@ -98,6 +100,7 @@ unsigned long ulColor);   /* Color to compare. */
  * The filled area includes the starting points.
  */
 long ddk768_deRectFill( /*resolution_t resolution, point_t p0, point_t p1, unsigned long color, unsigned long rop2)*/
+struct smi_device *sdev,
 unsigned long dBase,  /* Base address of destination surface counted from beginning of video frame buffer */
 unsigned long dPitch, /* Pitch value of destination surface in BYTES */
 unsigned long bpp,    /* Color depth of destination surface: 8, 16 or 32 */
@@ -116,6 +119,7 @@ unsigned long rop2);  /* ROP value */
  *        mono expansion.
  */
 long ddk768_deVideoMem2VideoMemBlt(
+struct smi_device *sdev,
 unsigned long sBase,  /* Address of source: offset in frame buffer */
 unsigned long sPitch, /* Pitch value of source surface in BYTE */
 unsigned long sx,
@@ -159,6 +163,7 @@ long ddk768_deSystemMem2VideoMemBusMasterBlt(
  *        mono expansion.
  */
 long ddk768_deSystemMem2VideoMemBlt(
+struct smi_device *sdev,
 unsigned char *pSrcbuf, /* pointer to source data in system memory */
 long srcDelta,          /* width (in Bytes) of the source data, +ive means top down and -ive mean button up */
 unsigned long dBase,    /* Address of destination: offset in frame buffer */
@@ -176,6 +181,7 @@ unsigned long rop2);    /* ROP value */
  * This function expands the monochrome data to color image in video memory.
  */
 long ddk768_deSystemMem2VideoMemMonoBlt(
+struct smi_device *sdev,
 unsigned char *pSrcbuf, /* pointer to start of source buffer in system memory */
 long srcDelta,          /* Pitch value (in bytes) of the source buffer, +ive means top down and -ive mean button up */
 unsigned long startBit, /* Mono data can start at any bit in a byte, this value should be 0 to 7 */
@@ -451,6 +457,7 @@ long deStopLineStrip();
  * The filled area includes the starting points.
  */
 long ddk768_deStartTrapezoidFill(
+	struct smi_device *sdev,
     unsigned long dBase,  /* Base address of destination surface counted from beginning of video frame buffer */
     unsigned long dPitch, /* Pitch value of destination surface in BYTES */
     unsigned long bpp,    /* Color depth of destination surface: 8, 16 or 32 */
@@ -464,6 +471,7 @@ long ddk768_deStartTrapezoidFill(
  * Function to continue drawing a line using Trapezoid Fill method.
  */
 long ddk768_deNextTrapezoidFill(
+	struct smi_device *sdev,
     unsigned long x,            /* Starting X location. */
     unsigned long length        /* Line length */
 );
@@ -473,7 +481,7 @@ long ddk768_deNextTrapezoidFill(
  * This function has to be called to end the Trapezoid Fill drawing.
  * Otherwise, the next 2D function might still use this function.
  */
-long ddk768_deStopTrapezoidFill(void);
+long ddk768_deStopTrapezoidFill(struct smi_device *sdev);
 
 /*
  * This function clears the RAW interrupt status of DE.

@@ -9,14 +9,13 @@
 #define	pv_ttable_entry3	(pv_cpu_ops.trap_table_entry3)
 #define	pv_ttable_entry4	(pv_cpu_ops.trap_table_entry4)
 
-static inline void
-pv_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
-			e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
+static inline void pv_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
+		e2k_usd_lo_t usd_lo, e2k_upsr_t upsr, e2k_mem_crs_t crs)
 {
 	if (!paravirt_enabled())
-		native_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr);
+		native_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr, crs);
 	else
-		kvm_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr);
+		kvm_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr, crs);
 }
 
 static inline void pv_stack_bounds_trap_enable(void)
@@ -64,11 +63,10 @@ pv_correct_trap_return_ip(struct pt_regs *regs, unsigned long return_ip)
 #define	ttable_entry3		pv_ttable_entry3
 #define	ttable_entry4		pv_ttable_entry4
 
-static inline void
-exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
-			e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
+static inline void exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
+		e2k_usd_lo_t usd_lo, e2k_upsr_t upsr, e2k_mem_crs_t crs)
 {
-	pv_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr);
+	pv_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr, crs);
 }
 
 static inline bool

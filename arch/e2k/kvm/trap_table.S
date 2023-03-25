@@ -16,6 +16,7 @@
 
 .global kvm_light_hcalls;
 .global	kvm_generic_hcalls;
+.global kvm_priv_hcalls;
 .global dump_stack;
 .global trap_handler_trampoline_continue;
 .global syscall_handler_trampoline_continue;
@@ -27,7 +28,7 @@
 # define CLW_ONLY(...)
 #endif
 
-#define HCALL_WSZ 11
+#define HCALL_WSZ 13
 
 /* ttable_entry16/17 - wrappers for software paravirtualiation mode.
  * Hypervisor must use hret when entered from hcall, so we remember
@@ -41,15 +42,29 @@ ttable_entry16:
 	/* Disable load/store generations */
 	crp
 	}
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_FEAT_SEP_VIRT_SPACE version - save %os_vab */
+		{
+			setwd	wsz = HCALL_WSZ, nfx = 0
+			addd 0, 0, %dr22
+			addd 0, OS_VAB_REG_ADDR, %dr24
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Original instruction - save %root_ptb */
+		{
+			setwd	wsz = HCALL_WSZ, nfx = 0
+			NOT_SEP_VIRT_SPACE_ONLY(ldgdd 0, TSK_K_ROOT_PTB, %dr22)
+			addd 0, ROOT_PTB_REG_ADDR, %dr24
+		}
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_SEP_VIRT_SPACE)
+	//TODO must save and disable CLW here before switching stacks for security reasons...
 	{
-	setwd	wsz = HCALL_WSZ, nfx = 0
 	rrd	%osr0, %dr17			// %dr17: current_thread_info
-	shld 1, 63, %dr18
-	}
-	{
 	/* Important: the first memory access in kernel is store.
 	 * This is needed to flush SLT before trying to load anything. */
 	stw,sm %r0, [slt_disable + 0]
+	addd 0, E2K_KERNEL_CONTEXT, %dr23
+	shld 1, 63, %dr18
 	}
 
 	// if (READ_SBR_REG() < NATIVE_TASK_SIZE) {
@@ -71,6 +86,10 @@ ttable_entry16:
 
 	/* flush hardware stacks to cause the possible page fault on guest */
 	{
+	nop 2
+	}
+	{
+	nop 3
 	flushc
 	}
 	{
@@ -142,12 +161,19 @@ ttable_entry16:
 	andns	%dr13, PSR_SGE_AS, %dr13	// psr &= ~PSR_SGE;
 	}
 	{
-	nop 4 /* usd->getsp */
+	/* nop 0 (rwd usd->getsp) */
 	rwd	%dr8, %usd.hi
 	ord %dr0, %dr18, %dr0
 	std	%dr7, [ %dr19 + VCPU_ARCH_CTXT_SBR ]
 	}
-
+	{
+	/* MMU registers can be written only after disabling CLW/AAU */
+	mmurw %dr23, %cont
+	}
+	{
+	nop 2 /* mmurw -> memory access */
+	std,2 %dr22, [ %dr24 + 0 ], mas=MAS_MMU_REG
+	}
 	/*
 	 * Do not increment hardware stacks sizes on kernel resident part
 	 * it should be done by appropriate trap handlers,
@@ -272,6 +298,45 @@ ttable_entry17:
 	ct %ctpr1
 	}
 	.size ttable_entry17, . -$ttable_entry17
+
+.global ttable_entry18
+.section .ttable_entry18, "ax",@progbits
+.align	8
+.type	ttable_entry18,@function	/* privileged actions hypercall */
+ttable_entry18:
+#ifdef	CONFIG_PRIV_HYPERCALLS
+{
+	/* Disable load/store generations */
+	crp
+}
+{
+	/* Important: the first memory access in kernel is store.
+	 * This is needed to flush SLT before trying to load anything. */
+	stw,sm	%r0, [slt_disable + 0]
+}
+
+{
+	puttagd	%dr0, 0, %dr0
+	puttagd	%dr1, 0, %dr1
+	disp	%ctpr1, kvm_priv_hcalls
+}
+{
+	puttagd	%dr2, 0, %dr2
+	puttagd	%dr3, 0, %dr3
+}
+{
+	puttagd	%dr4, 0, %dr4
+	puttagd	%dr5, 0, %dr5
+}
+{
+	puttagd	%dr6, 0, %dr6
+	puttagd	%dr7, 0, %dr7
+	ct	%ctpr1
+}
+#else	/* !CONFIG_PRIV_HYPERCALLS */
+#endif	/* CONFIG_PRIV_HYPERCALLS */
+
+.size ttable_entry18, . -$ttable_entry18
 
 .global slt_disable;
 
@@ -419,7 +484,7 @@ hcall_entry1:
 .section ".irqentry.text", "ax"
 .type trap_handler_trampoline,@function
 trap_handler_trampoline:
-	HANDLER_TRAMPOLINE %ctpr2, 11, trap_handler_trampoline_continue, 0
+	HANDLER_TRAMPOLINE(%ctpr2, 11, trap_handler_trampoline_continue, 0)
 trap_handler_switched_stacks:
 {
 	setsft;
@@ -430,7 +495,7 @@ trap_handler_switched_stacks:
 .section ".entry.text", "ax"
 .type syscall_handler_trampoline,@function
 syscall_handler_trampoline:
-	HANDLER_TRAMPOLINE %ctpr2, 11, syscall_handler_trampoline_continue, 1
+	HANDLER_TRAMPOLINE(%ctpr2, 11, syscall_handler_trampoline_continue, 1)
 syscall_handler_switched_stacks:
 {
 	setsft;
@@ -441,7 +506,7 @@ syscall_handler_switched_stacks:
 .section ".entry.text", "ax"
 .type host_mkctxt_trampoline,@function
 host_mkctxt_trampoline:
-	HANDLER_TRAMPOLINE %ctpr2, 11, host_mkctxt_trampoline_continue, 4
+	HANDLER_TRAMPOLINE(%ctpr2, 11, host_mkctxt_trampoline_continue, 4)
 host_mkctxt_switched_stacks:
 {
 	setsft;
@@ -452,7 +517,7 @@ host_mkctxt_switched_stacks:
 .section ".entry.text", "ax"
 .type return_pv_vcpu_from_mkctxt,@function
 return_pv_vcpu_from_mkctxt:
-	HANDLER_TRAMPOLINE %ctpr2, 11, return_pv_vcpu_from_mkctxt_continue, 4
+	HANDLER_TRAMPOLINE(%ctpr2, 11, return_pv_vcpu_from_mkctxt_continue, 4)
 return_pv_vcpu_from_mkctxt_switched_stacks:
 {
 	setsft;
@@ -463,7 +528,7 @@ return_pv_vcpu_from_mkctxt_switched_stacks:
 .section ".entry.text", "ax"
 .type syscall_fork_trampoline,@function
 syscall_fork_trampoline:
-	HANDLER_TRAMPOLINE %ctpr2, 11, syscall_fork_trampoline_continue, 1
+	HANDLER_TRAMPOLINE(%ctpr2, 11, syscall_fork_trampoline_continue, 1)
 syscall_fork_switched_stacks:
 {
 	setsft;

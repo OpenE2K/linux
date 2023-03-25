@@ -39,18 +39,19 @@ static unsigned long gSrcVideoHeight = 0;
  *      heightAdjustment    - Height adjustment in line        
  */
 void videoSetWindowAdjustment(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     short widthAdjustment,
     short heightAdjustment
 )
 {
     unsigned long width, height;
-    videoGetWindowSize(dispCtrl, &width, &height);
+	videoGetWindowSize(sdev, dispCtrl, &width, &height);
     
     gWidthAdjustment = widthAdjustment;
     gHeightAdjustment = heightAdjustment;
     
-    videoSetWindowSize(dispCtrl, width, height);
+	videoSetWindowSize(sdev, dispCtrl, width, height);
 }
 
 /*
@@ -86,10 +87,12 @@ void videoGetWindowAdjustment(
  *      1 - Flip pending
  */
 unsigned long videoGetBufferStatus(
+	struct smi_device *sdev,
     unsigned long bufferIndex
 )
 {
-        return (FIELD_GET(peekRegisterDWord(VIDEO_FB_ADDRESS), VIDEO_FB_ADDRESS, STATUS));
+	return FIELD_GET(peekRegisterDWord(
+					sdev->rmmio, VIDEO_FB_ADDRESS),	VIDEO_FB_ADDRESS, STATUS);
 }
 
 /*
@@ -100,9 +103,10 @@ unsigned long videoGetBufferStatus(
  *      pitch   - Number of bytes per line of the video plane 
  *                specified in 128-bit aligned bytes.
  */
-unsigned short videoGetPitch()
+unsigned short videoGetPitch(struct smi_device *sdev)
 {
-    return (FIELD_GET(peekRegisterDWord(VIDEO_FB_WIDTH), VIDEO_FB_WIDTH, WIDTH));
+	return FIELD_GET(peekRegisterDWord(
+					sdev->rmmio, VIDEO_FB_WIDTH), VIDEO_FB_WIDTH, WIDTH);
 }
 
 /*
@@ -113,9 +117,10 @@ unsigned short videoGetPitch()
  *      lineOffset  - Number of 128-bit aligned bytes per line 
  *                    of the video plane.
  */
-unsigned short videoGetLineOffset()
+unsigned short videoGetLineOffset(struct smi_device *sdev)
 {
-    return (FIELD_GET(peekRegisterDWord(VIDEO_FB_WIDTH), VIDEO_FB_WIDTH, OFFSET));
+	return FIELD_GET(peekRegisterDWord(
+				sdev->rmmio, VIDEO_FB_WIDTH), VIDEO_FB_WIDTH, OFFSET);
 }
 
 /*
@@ -126,6 +131,7 @@ unsigned short videoGetLineOffset()
  *      bufferIndex - The index of the buffer which size to be retrieved
  */
 unsigned long videoGetBufferSize(
+	struct smi_device *sdev,
     unsigned long bufferIndex
 )
 {
@@ -134,7 +140,8 @@ unsigned long videoGetBufferSize(
     if (bufferIndex == 0)
     {
         value = (unsigned long)
-            FIELD_GET(peekRegisterDWord(VIDEO_FB_ADDRESS), VIDEO_FB_ADDRESS, ADDRESS);
+			FIELD_GET(peekRegisterDWord(
+				sdev->rmmio, VIDEO_FB_ADDRESS),	VIDEO_FB_ADDRESS, ADDRESS);
     }
     
     return value;
@@ -152,10 +159,12 @@ unsigned long videoGetBufferSize(
  *      The video buffer of the requested index.
  */
 unsigned long videoGetBuffer(
+	struct smi_device *sdev,
     unsigned char bufferIndex
 )
 {
-        return (FIELD_GET(peekRegisterDWord(VIDEO_FB_ADDRESS), VIDEO_FB_ADDRESS, ADDRESS));
+	return FIELD_GET(peekRegisterDWord(
+			sdev->rmmio, VIDEO_FB_ADDRESS),	VIDEO_FB_ADDRESS, ADDRESS);
 }
 
 /*
@@ -236,6 +245,7 @@ unsigned long videoGetBufferLastAddress(
  *      bufferStartAddress  - The starting address of the buffer
  */
 void videoSetBuffer(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned char bufferIndex,          /* The index of the buffer to be set. */
     unsigned long bufferStartAddress    /* Video buffer with 128-bit alignment */
@@ -245,7 +255,7 @@ void videoSetBuffer(
 	unsigned long regFB;
 
     /* Get the buffer size first */
-    bufferSize = videoGetBufferSize(bufferIndex);
+	bufferSize = videoGetBufferSize(sdev, bufferIndex);
     
     lastAddress = videoGetBufferLastAddress(bufferIndex);
 #if 0    
@@ -264,7 +274,7 @@ void videoSetBuffer(
     if (bufferIndex == 0)
     {
 		regFB = (dispCtrl == CHANNEL0_CTRL)? VIDEO_FB_ADDRESS : (VIDEO_FB_ADDRESS+CHANNEL_OFFSET);
-	    pokeRegisterDWord(regFB,
+	    pokeRegisterDWord(sdev->rmmio, regFB,
 	            FIELD_SET(0, VIDEO_FB_ADDRESS, STATUS, PENDING) |
 	            FIELD_VALUE(0, VIDEO_FB_ADDRESS, ADDRESS, bufferStartAddress));
     }
@@ -278,6 +288,7 @@ void videoSetBuffer(
  *      bufferStartAddress  - The starting address of the buffer
  */
 void videoSetUVBuffer(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long bufferStartUAddress,    /* Video buffer with 128-bit alignment */
     unsigned long bufferStartVAddress    /* Video buffer with 128-bit alignment */
@@ -287,9 +298,9 @@ void videoSetUVBuffer(
 
 	regU = (dispCtrl == CHANNEL0_CTRL)? VIDEO_FB_ADDRESS_U : (VIDEO_FB_ADDRESS_U+CHANNEL_OFFSET);
 	regV = (dispCtrl == CHANNEL0_CTRL)? VIDEO_FB_ADDRESS_V : (VIDEO_FB_ADDRESS_V+CHANNEL_OFFSET);
-    pokeRegisterDWord(regU,
+	pokeRegisterDWord(sdev->rmmio, regU,
         FIELD_VALUE(0, VIDEO_FB_ADDRESS_U, ADDRESS, bufferStartUAddress));
-    pokeRegisterDWord(regV,
+	pokeRegisterDWord(sdev->rmmio, regV,
         FIELD_VALUE(0, VIDEO_FB_ADDRESS_V, ADDRESS, bufferStartVAddress));
 }
 
@@ -304,6 +315,7 @@ void videoSetUVBuffer(
  *                        of the video plane.
  */
 void videoSetPitchOffset(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned short pitch,
     unsigned short lineOffset
@@ -313,7 +325,7 @@ void videoSetPitchOffset(
 
     /* Set Video Buffer Offset (pitch) */
 	regWidth = (dispCtrl == CHANNEL0_CTRL)? VIDEO_FB_WIDTH : (VIDEO_FB_WIDTH+CHANNEL_OFFSET);
-	pokeRegisterDWord(regWidth,
+	pokeRegisterDWord(sdev->rmmio, regWidth,
 	    FIELD_VALUE(0, VIDEO_FB_WIDTH, WIDTH, pitch) |
 	    FIELD_VALUE(0, VIDEO_FB_WIDTH, OFFSET, lineOffset));
 }
@@ -328,6 +340,7 @@ void videoSetPitchOffset(
  *                        of the video plane.
  */
 void videoSetUVPitchOffset(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned short pitch,
     unsigned short lineOffset
@@ -336,10 +349,10 @@ void videoSetUVPitchOffset(
 	unsigned long regWidthU, regWidthV;
 	regWidthU = (dispCtrl == CHANNEL0_CTRL)? VIDEO_FB_WIDTH_U : (VIDEO_FB_WIDTH_U+CHANNEL_OFFSET);
 	regWidthV =	(dispCtrl == CHANNEL0_CTRL)? VIDEO_FB_WIDTH_V : (VIDEO_FB_WIDTH_V+CHANNEL_OFFSET);
-	pokeRegisterDWord(regWidthU,
+	pokeRegisterDWord(sdev->rmmio, regWidthU,
 	    FIELD_VALUE(0, VIDEO_FB_WIDTH_U, WIDTH, pitch) |
 	    FIELD_VALUE(0, VIDEO_FB_WIDTH_U, OFFSET, lineOffset));
-	pokeRegisterDWord(regWidthV,
+	pokeRegisterDWord(sdev->rmmio, regWidthV,
 	    FIELD_VALUE(0, VIDEO_FB_WIDTH_V, WIDTH, pitch) |
 	    FIELD_VALUE(0, VIDEO_FB_WIDTH_V, OFFSET, lineOffset));
 }
@@ -382,6 +395,7 @@ void videoSetLast(
  *      height      - Video Window height
  */
 void videoSetWindowSize(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long width,
     unsigned long height
@@ -392,12 +406,12 @@ void videoSetWindowSize(
 	regTL = (dispCtrl == CHANNEL0_CTRL)? VIDEO_PLANE_TL : (VIDEO_PLANE_TL+CHANNEL_OFFSET);
 	regBR = (dispCtrl == CHANNEL0_CTRL)? VIDEO_PLANE_BR : (VIDEO_PLANE_BR+CHANNEL_OFFSET);
 
-	value = peekRegisterDWord(regTL);
+	value = peekRegisterDWord(sdev->rmmio, regTL);
 	startX = FIELD_GET(value, VIDEO_PLANE_TL, LEFT);
 	startY = FIELD_GET(value, VIDEO_PLANE_TL, TOP);
 
 	/* Set bottom and right position */
-	pokeRegisterDWord(regBR,
+	pokeRegisterDWord(sdev->rmmio, regBR,
 	    FIELD_VALUE(0, VIDEO_PLANE_BR, BOTTOM, startY + height - 1 - gHeightAdjustment) |
 	    FIELD_VALUE(0, VIDEO_PLANE_BR, RIGHT, startX + width - 1 - gWidthAdjustment)); 
 }
@@ -411,6 +425,7 @@ void videoSetWindowSize(
  *      height      - Video Window height
  */
 void videoGetWindowSize(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long *pVideoWidth,
     unsigned long *pVideoHeight
@@ -422,8 +437,8 @@ void videoGetWindowSize(
 	regTL = (dispCtrl == CHANNEL0_CTRL)? VIDEO_PLANE_TL : (VIDEO_PLANE_TL+CHANNEL_OFFSET);
 	regBR = (dispCtrl == CHANNEL0_CTRL)? VIDEO_PLANE_BR : (VIDEO_PLANE_BR+CHANNEL_OFFSET);
 
-	positionTopLeft = peekRegisterDWord(regTL);
-	positionRightBottom = peekRegisterDWord(regBR);
+	positionTopLeft = peekRegisterDWord(sdev->rmmio, regTL);
+	positionRightBottom = peekRegisterDWord(sdev->rmmio, regBR);
 	videoWidth  = FIELD_GET(positionRightBottom, VIDEO_PLANE_BR, RIGHT) - 
 	              FIELD_GET(positionTopLeft, VIDEO_PLANE_TL, LEFT) + 1 +
 	              gWidthAdjustment;
@@ -447,6 +462,7 @@ void videoGetWindowSize(
  *      startY      - Y Coordinate of the video window starting position
  */
 void videoSetPosition(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long startX,
     unsigned long startY
@@ -458,14 +474,14 @@ void videoSetPosition(
 	regTL = (dispCtrl == CHANNEL0_CTRL)? VIDEO_PLANE_TL : (VIDEO_PLANE_TL+CHANNEL_OFFSET);
 
 	/* Get the video window width and height */
-    videoGetWindowSize(dispCtrl, &videoWidth, &videoHeight);
+	videoGetWindowSize(sdev, dispCtrl, &videoWidth, &videoHeight);
 
-	pokeRegisterDWord(regTL,
+	pokeRegisterDWord(sdev->rmmio, regTL,
 	    FIELD_VALUE(0, VIDEO_PLANE_TL, TOP, startY) |
 	    FIELD_VALUE(0, VIDEO_PLANE_TL, LEFT, startX));
 
     /* Set bottom and right position */    
-    videoSetWindowSize(dispCtrl, videoWidth, videoHeight);
+	videoSetWindowSize(sdev, dispCtrl, videoWidth, videoHeight);
 
 }
 
@@ -481,6 +497,7 @@ void videoSetPosition(
  *      blueConstant    - Blue Constant Value
  */
 void videoSetConstants(
+	struct smi_device *sdev,
     unsigned dispCtrl,
     unsigned char  yConstant,               /* Y Adjustment */
     unsigned char  redConstant,             /* Red Conversion constant */
@@ -491,7 +508,7 @@ void videoSetConstants(
 	unsigned long regYUV;
 
 	regYUV = (dispCtrl == CHANNEL0_CTRL)? VIDEO_YUV_CONSTANTS : (VIDEO_YUV_CONSTANTS+CHANNEL_OFFSET);
-	pokeRegisterDWord(regYUV,
+	pokeRegisterDWord(sdev->rmmio, regYUV,
 	    FIELD_VALUE(0, VIDEO_YUV_CONSTANTS, Y, yConstant) |
 	    FIELD_VALUE(0, VIDEO_YUV_CONSTANTS, R, redConstant) |
 	    FIELD_VALUE(0, VIDEO_YUV_CONSTANTS, G, greenConstant) |
@@ -508,6 +525,7 @@ void videoSetConstants(
  *      bufferInitScale     - Buffer Initial vertical scale value
  */
 void videoSetInitialScale(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned short InitScaleHorizontal,
     unsigned short InitScaleVertical
@@ -518,10 +536,10 @@ void videoSetInitialScale(
 
 	regScale = (dispCtrl == CHANNEL0_CTRL)? VIDEO_INITIAL_SCALE : (VIDEO_INITIAL_SCALE+CHANNEL_OFFSET);
 
-    value = peekRegisterDWord(regScale);
+	value = peekRegisterDWord(sdev->rmmio, regScale);
     value = FIELD_VALUE(value, VIDEO_INITIAL_SCALE, VERTICAL, InitScaleVertical);
     value = FIELD_VALUE(value, VIDEO_INITIAL_SCALE, HORIZONTAL, InitScaleHorizontal);
-    pokeRegisterDWord(regScale, value);
+	pokeRegisterDWord(sdev->rmmio, regScale, value);
 }
 
 /*
@@ -533,6 +551,7 @@ void videoSetInitialScale(
  *      pbuffer1InitScale   - Pointer to variable to store buffer 1 initial vertical scale
  */
 void videoGetInitialScale(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned short *pBufferVInitScale,
     unsigned short *pBufferHInitScale
@@ -543,9 +562,11 @@ void videoGetInitialScale(
 	regScale = (dispCtrl == CHANNEL0_CTRL)? VIDEO_INITIAL_SCALE : (VIDEO_INITIAL_SCALE+CHANNEL_OFFSET);
 
     *pBufferHInitScale = (unsigned short)
-        FIELD_GET(peekRegisterDWord(regScale), VIDEO_INITIAL_SCALE, HORIZONTAL);
+		FIELD_GET(peekRegisterDWord(sdev->rmmio, regScale),
+						VIDEO_INITIAL_SCALE, HORIZONTAL);
     *pBufferVInitScale = (unsigned short)
-        FIELD_GET(peekRegisterDWord(regScale), VIDEO_INITIAL_SCALE, VERTICAL);
+		FIELD_GET(peekRegisterDWord(sdev->rmmio, regScale),
+						VIDEO_INITIAL_SCALE, VERTICAL);
 }
 
 /*
@@ -559,6 +580,7 @@ void videoGetInitialScale(
  *      dstHeight    - The destination video height
  */
 void videoScale(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long srcWidth,
     unsigned long srcHeight,
@@ -587,7 +609,7 @@ void videoScale(
 	    value = FIELD_VALUE(value, VIDEO_SCALE, HORIZONTAL_SCALE, scaleFactor);
 	}
 	
-	pokeRegisterDWord(regScale, value);
+	pokeRegisterDWord(sdev->rmmio, regScale, value);
 }
 
 
@@ -599,6 +621,7 @@ void videoScale(
  *      byteSwap    - Flag to enable/disable YUV data byte swap.
  */
 void videoSwapYUVByte(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
    	video_byteswap_t byteSwap  
 )
@@ -608,13 +631,13 @@ void videoSwapYUVByte(
 
 	regCtrl = (dispCtrl == CHANNEL0_CTRL)? VIDEO_DISPLAY_CTRL : (VIDEO_DISPLAY_CTRL+CHANNEL_OFFSET);
 
-	value = peekRegisterDWord(regCtrl);
+	value = peekRegisterDWord(sdev->rmmio, regCtrl);
 	if (byteSwap == SWAP_BYTE)
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, BYTE_SWAP, ENABLE);
 	else
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, BYTE_SWAP, DISABLE);
 	
-	pokeRegisterDWord(regCtrl, value);
+	pokeRegisterDWord(sdev->rmmio, regCtrl, value);
 }
 
 /*
@@ -626,6 +649,7 @@ void videoSwapYUVByte(
  *      enableVertInterpolation   - Flag to enable/disable Vertical interpolation
  */
 void videoSetInterpolation(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long enableHorzInterpolation,
     unsigned long enableVertInterpolation
@@ -636,7 +660,7 @@ void videoSetInterpolation(
 
 	regCtrl = (dispCtrl == CHANNEL0_CTRL)? VIDEO_DISPLAY_CTRL : (VIDEO_DISPLAY_CTRL+CHANNEL_OFFSET);
 
-	value = peekRegisterDWord(regCtrl);
+	value = peekRegisterDWord(sdev->rmmio, regCtrl);
 	
 	if (enableHorzInterpolation)
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, HORIZONTAL_MODE, INTERPOLATE);
@@ -648,7 +672,7 @@ void videoSetInterpolation(
 	else
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, VERTICAL_MODE, REPLICATE);
 	    
-	pokeRegisterDWord(regCtrl, value);
+	pokeRegisterDWord(sdev->rmmio, regCtrl, value);
 }
 
 /*
@@ -660,13 +684,14 @@ void videoSetInterpolation(
  *      pVertInterpolationStatus	- Pointer to store the vertical interpolation status
  */
 void videoGetInterpolation(
+	struct smi_device *sdev,
     unsigned long *pHorzInterpolationStatus,
     unsigned long *pVertInterpolationStatus
 )
 {
     unsigned long value;
     
-    value = peekRegisterDWord(VIDEO_DISPLAY_CTRL);
+	value = peekRegisterDWord(sdev->rmmio, VIDEO_DISPLAY_CTRL);
     if (pHorzInterpolationStatus != (unsigned long *)0)
 	{
 		if (FIELD_GET(value, VIDEO_DISPLAY_CTRL, HORIZONTAL_MODE) == VIDEO_DISPLAY_CTRL_HORIZONTAL_MODE_INTERPOLATE)
@@ -692,11 +717,12 @@ void videoGetInterpolation(
  *      startPixel  - Starting pixel number for smooth pixel panning
  */
 void videoSetStartPanningPixel(
+	struct smi_device *sdev,
     unsigned char startPixel
 )
 {
-    pokeRegisterDWord(VIDEO_DISPLAY_CTRL, 
-                      peekRegisterDWord(VIDEO_DISPLAY_CTRL) | 
+	pokeRegisterDWord(sdev->rmmio, VIDEO_DISPLAY_CTRL,
+					peekRegisterDWord(sdev->rmmio, VIDEO_DISPLAY_CTRL) |
                       FIELD_VALUE(0, VIDEO_DISPLAY_CTRL, PIXEL, startPixel));    
 }
 
@@ -712,6 +738,7 @@ void videoSetStartPanningPixel(
  *      without proper format will have no effect.
  */
 void videoSetGammaCtrl(
+	struct smi_device *sdev,
     unsigned dispCtrl,
     unsigned long enableGammaCtrl
 )
@@ -721,14 +748,14 @@ void videoSetGammaCtrl(
 
 	regCtrl = (dispCtrl == CHANNEL0_CTRL)? VIDEO_DISPLAY_CTRL : (VIDEO_DISPLAY_CTRL+CHANNEL_OFFSET);
 
-	value = peekRegisterDWord(regCtrl);
+	value = peekRegisterDWord(sdev->rmmio, regCtrl);
 	
 	if (enableGammaCtrl)
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, GAMMA, ENABLE);
 	else
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, GAMMA, DISABLE);
 	    
-	pokeRegisterDWord(regCtrl, value);    
+	pokeRegisterDWord(sdev->rmmio, regCtrl, value);
 }
 
 /*
@@ -739,11 +766,11 @@ void videoSetGammaCtrl(
  *      0   - Disable
  *      1   - Enable
  */
-unsigned char isVideoEnable()
+unsigned char isVideoEnable(struct smi_device *sdev)
 {
     unsigned long value;
     
-    value = peekRegisterDWord(VIDEO_DISPLAY_CTRL);
+	value = peekRegisterDWord(sdev->rmmio, VIDEO_DISPLAY_CTRL);
     
     return ((FIELD_GET(value, VIDEO_DISPLAY_CTRL, PLANE) == VIDEO_DISPLAY_CTRL_PLANE_ENABLE) ? 1 : 0);
 }
@@ -756,6 +783,7 @@ unsigned char isVideoEnable()
  *      videoCtrl   - Enable/Disable video
  */
 static void videoSetCtrl(
+	struct smi_device *sdev,
     disp_control_t dispCtrl,
     video_ctrl_t videoCtrl
 )
@@ -765,14 +793,14 @@ static void videoSetCtrl(
 
 	regCtrl = (dispCtrl == CHANNEL0_CTRL)? VIDEO_DISPLAY_CTRL : (VIDEO_DISPLAY_CTRL+CHANNEL_OFFSET);
 
-	value = peekRegisterDWord(regCtrl);
+	value = peekRegisterDWord(sdev->rmmio, regCtrl);
 	
 	if (videoCtrl == VIDEO_ON)
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, PLANE, ENABLE);
 	else
 	    value = FIELD_SET(value, VIDEO_DISPLAY_CTRL, PLANE, DISABLE);
 	            
-	pokeRegisterDWord(regCtrl, value); 
+	pokeRegisterDWord(sdev->rmmio, regCtrl, value);
 }
 
 /*
@@ -785,6 +813,7 @@ static void videoSetCtrl(
  *                    * FORMAT_YUYV - 16-bit YUYV mode
  */
 static void videoSetFormat(
+	struct smi_device *sdev,
     unsigned dispCtrl,
     video_format_t  videoFormat
 )
@@ -794,7 +823,7 @@ static void videoSetFormat(
 
 	regCtrl = (dispCtrl == CHANNEL0_CTRL)? VIDEO_DISPLAY_CTRL : (VIDEO_DISPLAY_CTRL+CHANNEL_OFFSET);
 
-	value = peekRegisterDWord(regCtrl);
+	value = peekRegisterDWord(sdev->rmmio, regCtrl);
 	switch (videoFormat)
 	{
 	    default:
@@ -812,7 +841,7 @@ static void videoSetFormat(
 	        break;
 	}
 	
-	pokeRegisterDWord(regCtrl, value);
+	pokeRegisterDWord(sdev->rmmio, regCtrl, value);
 }
 
 /*
@@ -922,6 +951,7 @@ unsigned long videoGetEdgeDetection(
  *     -1  - Fail
  */
 unsigned char videoSetupEx(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long x,                /* X Coordinate of the video window */
     unsigned long y,                /* Y Coordinate of the video window */
@@ -948,34 +978,34 @@ unsigned char videoSetupEx(
     gSrcVideoWidth = srcWidth;
     gSrcVideoHeight = srcHeight;
     /* Disable the video plane first */
-    videoSetCtrl(dispCtrl, VIDEO_OFF);
+	videoSetCtrl(sdev, dispCtrl, VIDEO_OFF);
     
     /* Set the video position */
-    videoSetPosition(dispCtrl, x, y);
+	videoSetPosition(sdev, dispCtrl, x, y);
     
     /* Set the scale factor */
-    videoScale(dispCtrl, srcWidth, srcHeight, dstWidth, dstHeight);
+	videoScale(sdev, dispCtrl, srcWidth, srcHeight, dstWidth, dstHeight);
     
     /* Set the video format */
-    videoSetFormat(dispCtrl, videoFormat);
+	videoSetFormat(sdev, dispCtrl, videoFormat);
     
     /* Set the buffer pitch */
-    videoSetPitchOffset(dispCtrl, srcPitch, srcLineOffset);
+	videoSetPitchOffset(sdev, dispCtrl, srcPitch, srcLineOffset);
     /* Set the UV buffer pitch */
-    videoSetUVPitchOffset(dispCtrl, sUVPitch, sUVPitch);
+	videoSetUVPitchOffset(sdev, dispCtrl, sUVPitch, sUVPitch);
     
     /* Enable double buffer */
 //    videoEnableDoubleBuffer(doubleBuffer);
     
     /* Set the video buffer 0 and 1 */
-    videoSetBuffer(dispCtrl, 0, srcAddress0);
+	videoSetBuffer(sdev, dispCtrl, 0, srcAddress0);
 //    videoSetBuffer(dispCtrl, 1, srcAddress1);
    
     /* Set the video buffer U and V */
-    videoSetUVBuffer(dispCtrl, sUAddress, sVAddress);
+	videoSetUVBuffer(sdev, dispCtrl, sUAddress, sVAddress);
         
     /* Set the destination video window */
-    videoSetWindowSize(dispCtrl, dstWidth, dstHeight);
+	videoSetWindowSize(sdev, dispCtrl, dstWidth, dstHeight);
 
     /* Set the last line */
     videoSetLast(dispCtrl, srcWidth, srcHeight);
@@ -1024,6 +1054,7 @@ unsigned char videoSetupEx(
  *     -1  - Fail
  */
 unsigned char videoSetup(
+	struct smi_device *sdev,
     disp_control_t dispCtrl,
     unsigned long x,                /* X Coordinate of the video window */
     unsigned long y,                /* Y Coordinate of the video window */
@@ -1043,8 +1074,9 @@ unsigned char videoSetup(
     video_format_t videoFormat      /* Source video format */
 )
 {
-    return videoSetupEx(dispCtrl, x, y, srcWidth, srcHeight, dstWidth, dstHeight, doubleBuffer, 
-                        srcAddress0, 0, 0, 0,srcPitch, srcLineOffset, videoFormat,
+	return videoSetupEx(sdev, dispCtrl, x, y, srcWidth, srcHeight,
+						dstWidth, dstHeight, doubleBuffer, srcAddress0,
+						0, 0, 0, srcPitch, srcLineOffset, videoFormat,
                         0, 0);
     
 }
@@ -1053,22 +1085,23 @@ unsigned char videoSetup(
  *  startVideo
  *      This function starts the video.
  */
-void startVideo( 
+void startVideo(
+struct smi_device *sdev,
 unsigned dispCtrl
 )
 {
     /* Enable the video plane */
-    videoSetCtrl(dispCtrl, VIDEO_ON);
+	videoSetCtrl(sdev, dispCtrl, VIDEO_ON);
 }
 
 /*
  *  stopVideo
  *      This function stops the video.
  */
-void stopVideo(unsigned dispCtrl)
+void stopVideo(struct smi_device *sdev, unsigned dispCtrl)
 {
     /* Just disable the video plane */
-    videoSetCtrl(dispCtrl, VIDEO_OFF);
+	videoSetCtrl(sdev, dispCtrl, VIDEO_OFF);
 }
 
 

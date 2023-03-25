@@ -2,7 +2,6 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/init.h>
-#include <linux/syscalls.h>
 #include <linux/tty.h>
 #include <linux/kvm_host.h>
 #include <kvm/iodev.h>
@@ -63,7 +62,7 @@
 #define	DIRECT_IO_PORT_ACCESS	0	/* do direct access to IO port from */
 					/* here */
 
-static void copy_io_intc_info_data(void *mmio_data, void *intc_data,
+static void copy_io_intc_info_data(void *mmio_data, void *intc_data, void *intc_data_ext,
 					gpa_t gpa, int size, bool to_intc)
 {
 	switch (size) {
@@ -112,6 +111,22 @@ static void copy_io_intc_info_data(void *mmio_data, void *intc_data,
 		} else {
 			int u64_no = (gpa & (sizeof(u64) - 1)) >> 3;
 			*mmio = intc[u64_no];
+		}
+		return;
+	}
+	case 16: {
+		u64 *mmio = (u64 *)mmio_data;
+		u64 *intc = (u64 *)intc_data;
+		u64 *intc_ext = (u64 *)intc_data_ext;
+
+		KVM_BUG_ON(!intc_ext);
+
+		if (to_intc) {
+			*intc = mmio[0];
+			*intc_ext = mmio[1];
+		} else {
+			mmio[0] = *intc;
+			mmio[1] = *intc_ext;
 		}
 		return;
 	}
@@ -208,7 +223,7 @@ static void complete_intc_info_io_write(struct kvm_vcpu *vcpu,
 	/* For stores - delete this entry from INTC_INFO_MU */
 	kvm_delete_intc_info_mu(vcpu, intc_info_mu);
 	trace_complete_intc_info_io_write(intc_info_mu->gpa,
-		intc_info_mu->data);
+		intc_info_mu->data, intc_info_mu->data_ext);
 }
 
 static void complete_intc_info_io_read(struct kvm_vcpu *vcpu,
@@ -218,7 +233,8 @@ static void complete_intc_info_io_read(struct kvm_vcpu *vcpu,
 	/* Data will be read from the INTC_INFO_MU */
 	intc_info_mu->hdr.event_code = IME_READ_MU;
 	kvm_set_intc_info_mu_is_updated(vcpu);
-	trace_complete_intc_info_io_read(intc_info_mu->gpa, intc_info_mu->data);
+	trace_complete_intc_info_io_read(intc_info_mu->gpa,
+		intc_info_mu->data, intc_info_mu->data_ext);
 }
 
 static int vcpu_mmio_local_write(struct kvm_vcpu *vcpu, gpa_t gpa,
@@ -227,7 +243,8 @@ static int vcpu_mmio_local_write(struct kvm_vcpu *vcpu, gpa_t gpa,
 	unsigned long data;
 	int ret;
 
-	copy_io_intc_info_data(&data, &intc_info_mu->data, gpa, size, false);
+	copy_io_intc_info_data(&data, &intc_info_mu->data, &intc_info_mu->data_ext,
+		gpa, size, false);
 
 	ret = vcpu_mmio_write(vcpu, gpa, size, &data);
 	if (ret != 0) {
@@ -242,7 +259,7 @@ static int vcpu_mmio_local_write(struct kvm_vcpu *vcpu, gpa_t gpa,
 static int vcpu_mmio_local_read(struct kvm_vcpu *vcpu, gpa_t gpa,
 				int size, intc_info_mu_t *intc_info_mu)
 {
-	unsigned long data;
+	unsigned long data[2];
 	int ret;
 
 	ret = vcpu_mmio_read(vcpu, gpa, size, &data);
@@ -251,7 +268,8 @@ static int vcpu_mmio_local_read(struct kvm_vcpu *vcpu, gpa_t gpa,
 		return ret;
 	}
 
-	copy_io_intc_info_data(&data, &intc_info_mu->data, gpa, size, true);
+	copy_io_intc_info_data(&data, &intc_info_mu->data, &intc_info_mu->data_ext,
+		gpa, size, true);
 	complete_intc_info_io_read(vcpu, intc_info_mu);
 	return 0;
 }
@@ -299,9 +317,9 @@ static int kvm_hv_mmio_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	/* MMIO request should be passed to user space emulation */
 	if (is_write) {
 		copy_io_intc_info_data(vcpu->arch.mmio_data,
-				&intc_info_mu->data, gpa, size, false);
-		DebugMMIOPF("write data 0x%llx to 0x%llx size %d byte(s)\n",
-			*vcpu->arch.mmio_data, gpa, size);
+				&intc_info_mu->data, &intc_info_mu->data_ext, gpa, size, false);
+		DebugMMIOPF("write data 0x%llx data_ext 0x%llx to 0x%llx size %d byte(s)\n",
+			vcpu->arch.mmio_data[0], vcpu->arch.mmio_data[1], gpa, size);
 	}
 	vcpu_mmio_prepare_request(vcpu, gpa, vcpu->arch.mmio_data, size,
 					is_write);
@@ -339,7 +357,7 @@ static int kvm_hv_io_port_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	/* IO port request should be passed to user space emulation */
 	if (is_write) {
 		copy_io_intc_info_data(&vcpu->arch.ioport.data,
-				&intc_info_mu->data, gpa, size, false);
+				&intc_info_mu->data, NULL, gpa, size, false);
 		DebugIOPF("write data 0x%llx to port 0x%x size %d byte(s)\n",
 			vcpu->arch.ioport.data, port, size);
 	}
@@ -384,8 +402,6 @@ int kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	AW(opcode) = AS(cond).opcode;
 	KVM_BUG_ON(AS(opcode).fmt == 0);
 	size = 1 << (AS(opcode).fmt - 1);
-	if (size > sizeof(unsigned long))
-		size = sizeof(unsigned long);
 
 	if (gpa >= X86_IO_AREA_PHYS_BASE &&
 			gpa < X86_IO_AREA_PHYS_BASE + X86_IO_AREA_PHYS_SIZE) {
@@ -407,9 +423,9 @@ static int kvm_complete_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 
 	if (!is_write) {
 		copy_io_intc_info_data(io_data,
-				&intc_info_mu->data, gpa, size, true);
-		DebugIOPF("read data 0x%lx from 0x%llx size %d byte(s)\n",
-			intc_info_mu->data, gpa, size);
+				&intc_info_mu->data, &intc_info_mu->data_ext, gpa, size, true);
+		DebugIOPF("read data 0x%lx data_ext 0x%lx from 0x%llx size %d byte(s)\n",
+			intc_info_mu->data, intc_info_mu->data_ext, gpa, size);
 		complete_intc_info_io_read(vcpu, intc_info_mu);
 	} else {
 		complete_intc_info_io_write(vcpu, intc_info_mu);
@@ -790,6 +806,7 @@ long kvm_guest_console_io(struct kvm_vcpu *vcpu,
 		int io_cmd, int count, char __user *str)
 {
 	char buffer[512];
+	struct tty_struct *tty;
 	long ret;
 
 	DebugKVMIO("%s console: count 0x%x, string %px\n",
@@ -803,8 +820,6 @@ long kvm_guest_console_io(struct kvm_vcpu *vcpu,
 		count = sizeof(buffer) - 1;
 	}
 	if (io_cmd == CONSOLEIO_write) {
-		struct file *fstdout;
-
 		ret = kvm_vcpu_copy_from_guest(vcpu, buffer, str, count);
 		if (ret) {
 			DebugKVMIO("could not copy string from user, err %ld\n",
@@ -812,14 +827,15 @@ long kvm_guest_console_io(struct kvm_vcpu *vcpu,
 			count = ret;
 			goto out;
 		}
-
-		fstdout = fget(1);
-		if (!fstdout) {
-			pr_err_ratelimited("Error in KVM_HCALL_CONSOLE_IO: stdout is not available\n");
-		} else {
-			kernel_write(fstdout, buffer, count, 0);
-			fput(fstdout);
+		buffer[count] = '\0';
+		tty = get_current_tty();
+		if (!tty) {
+			DebugKVMIO("could not get current tty of guest\n");
+			pr_err("%s", buffer);
+			goto out;
 		}
+		tty_write_message(tty, buffer);
+		tty_kref_put(tty);
 	} else {
 		/* read from console */
 		DebugKVMIO("read string from console is not supported\n");
@@ -872,7 +888,6 @@ int kvm_prefetch_mmio_areas(struct kvm_vcpu *vcpu)
 {
 #if 0
 	struct kvm *kvm = vcpu->kvm;
-	struct irq_remap_table *irt = kvm->arch.irt;
 	int ret;
 
 	if (!kvm_is_epic(kvm) || !kvm->arch.is_hv)
@@ -890,18 +905,6 @@ int kvm_prefetch_mmio_areas(struct kvm_vcpu *vcpu)
 		__func__, EPIC_DEFAULT_PHYS_BASE, EPIC_DEFAULT_PHYS_BASE);
 
 	/* Populate the passthrough IOEPIC page */
-	if (irt->enabled) {
-		ret = kvm_prefetch_mmu_area(vcpu, irt->gpa,
-			irt->gpa + PAGE_SIZE,
-			PFERR_NOT_PRESENT_MASK | PFERR_WRITE_MASK);
-		if (ret != 0) {
-			pr_err("%s(): Failed to map IOEPIC passthrough page GPA 0x%llx -> HPA 0x%llx\n",
-				__func__, irt->gpa, irt->hpa);
-			return ret;
-		}
-		pr_info("%s(): Mapping IOEPIC passthrough page GPA 0x%llx -> HPA 0x%llx\n",
-			__func__, irt->gpa, irt->hpa);
-	}
 #endif
 	return 0;
 }

@@ -731,8 +731,6 @@ typedef	union e2k_rt_ioapic_struct {		/* Structure of lower word */
 /*
  *   Read/Write RT_MSI Regs
  */
-#define	E2K_SIC_ALIGN_RT_MSI	20		/* 1 Mb */
-
 typedef	unsigned int	e2k_rt_msi_t;	/* Read/write pointer (low 32 bits) */
 typedef	unsigned int	e2k_rt_msi_h_t;	/* Read/write pointer (high 32 bits) */
 typedef	struct e2k_rt_msi_fields {
@@ -758,7 +756,8 @@ typedef	union e2k_rt_msi_h_struct {		/* Structure of higher word */
 #define	E2K_RT_MSI_H_bgn	fields.bgn
 #define	E2K_RT_MSI_H_end	E2K_RT_MSI_H_bgn
 #define	E2K_RT_MSI_H_reg	word
-#define	E2K_RT_MSI_DEFAULT_BASE	0x120000000UL
+#define	E2K_RT_MSI_ISA_BASE	0x120000000UL	/* Default RT_MSI, as defined by v6 ISA */
+#define	E2K_RT_MSI_DEFAULT_BASE	0xf8000000UL	/* Some devices don't support 64-bit MSI addr */
 
 /*
  *   Read/Write ST_P Regs

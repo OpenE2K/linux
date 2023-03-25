@@ -41,8 +41,11 @@ static void fixup_irqs(void)
  */
 int __cpu_disable(void)
 {
+	unsigned int cpu = smp_processor_id();
+
 	lock_vector_lock();
-	set_cpu_online(raw_smp_processor_id(), false);
+	set_cpu_online(cpu, false);
+	numa_remove_cpu(cpu);
 	unlock_vector_lock();
 
 	fixup_irqs();

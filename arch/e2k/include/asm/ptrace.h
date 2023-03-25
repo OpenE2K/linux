@@ -160,6 +160,12 @@ typedef	struct pt_regs {
 	u64		ilcr;		/* initial loop value */
 	u64		lsr1;
 	u64		ilcr1;
+	/* %root_ptb/%cont should be saved in case an interrupt happens
+	 * in get_user(); so they are needed only for !user_mode traps. */
+	struct {
+		u64 u_root_ptb;
+		u64 cont;
+	} uaccess;
 	int		interrupt_vector;
 #ifdef	CONFIG_EPIC
 	unsigned int	epic_core_priority;

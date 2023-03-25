@@ -5,10 +5,9 @@
 EXTRA_CFLAGS += -Werror -D_MCU_
 ccflags-y := -I$(srctree)/drivers/mcst/mga2/it6613
 
-mga2-y := mga2_drv.o mga2_main.o mga2_mode.o mga2_fb.o mga2_irq.o \
-		 mga2_i2c.o mga2_pll.o mga2_dvi.o mga2_lvds.o		\
-		mga2_layer.o mga2_hdmi_it6613.o \
-		it6613/HDMI_TX/HDMI_TX.o  it6613/HDMI_TX/it6613_drv.o \
-		it6613/HDMI_TX/it6613_sys.o it6613/HDMI_TX/EDID.o
+mga2-y := drv.o main.o crtc.o fb.o irq.o \
+		hdmi.o lvds.o rgb.o dsi.o \
+		clk.o clk-div.o  clk-tsmc.o clk-cy22394.o \
+		gpio.o pwm.o gpio-pwm.o
 
-obj-$(CONFIG_DRM_MGA2) := mga2.o
+obj-$(CONFIG_DRM_MGA2)  += mga2.o

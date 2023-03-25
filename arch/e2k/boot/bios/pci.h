@@ -368,7 +368,7 @@ static inline int bios_pci_domain_nr(struct bios_pci_bus *bus)
 }
 static inline void bios_set_pci_domain_nr(struct bios_pci_bus *bus, int domain)
 {
-	bus->sysdata = (void *)domain;
+	bus->sysdata = (void *)(long)domain;
 }
 #endif /* CONFIG_E2K_SIC */
 

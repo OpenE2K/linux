@@ -19,8 +19,6 @@
 #define	SET_AA_TIRS(tir_hi, aa_field)	((tir_hi) | (((aa_field) & 0x0f) << 52))
 /* get IP field of tir_lo register */
 #define GET_IP_TIRS(tir_lo)		((tir_lo) & E2K_VA_MASK)
-/* get IP field of cr0_hi register */
-#define GET_IP_CR0_HI(cr0_hi)		((cr0_hi).CR0_hi_ip << E2K_ALIGN_INS)
 
 /*
  * Trap Info Register: the numbers of exceptions
@@ -263,9 +261,12 @@ enum pf_ret {
 
 #define GENERIC_HYPERCALL_TRAPNUM	16 /* guest software hypercalls */
 #define LIGHT_HYPERCALL_TRAPNUM		17 /* guest light software hypercalls */
+#define PRIV_HYPERCALL_TRAPNUM		18 /* privileged actions hypercalls */
 
+#define	PRIV_HYPERCALLS_TRAPS_MASK	(1U << PRIV_HYPERCALL_TRAPNUM)
 #define	HYPERCALLS_TRAPS_MASK		((1U << GENERIC_HYPERCALL_TRAPNUM) | \
-					(1U << LIGHT_HYPERCALL_TRAPNUM))
+					(1U << LIGHT_HYPERCALL_TRAPNUM) | \
+					PRIV_HYPERCALLS_TRAPS_MASK)
 
 /*
  * One trap table entry byte size

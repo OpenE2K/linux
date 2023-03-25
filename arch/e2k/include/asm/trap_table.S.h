@@ -10,9 +10,7 @@
 
 #ifdef	__ASSEMBLY__
 
-#include <asm/thread_info.h>
-#include <asm/e2k_api.h>
-#include <asm/cpu_regs_types.h>
+#include <asm/alternative-asm.h>
 #include <asm/glob_regs.h>
 #include <asm/mmu_types.h>
 
@@ -22,6 +20,12 @@
 # define SMP_ONLY(...) __VA_ARGS__
 #else
 # define SMP_ONLY(...)
+#endif
+
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+# define NOT_SEP_VIRT_SPACE_ONLY(...) __VA_ARGS__
+#else
+# define NOT_SEP_VIRT_SPACE_ONLY(...)
 #endif
 
 /*
@@ -146,22 +150,48 @@
 		strd,5 GCPUID_PREEMPT, GVCPUSTATE, TAGGED_MEM_STORE_REC_OPC | PREFIX##G_VCPU_STATE_EXT; \
 	}
 
-.macro	HANDLER_TRAMPOLINE ctprN, scallN, fn, wbsL
-/* Force load OSGD->GD. Alternative is to use non-0 CUI for kernel */
-{
-	sdisp	\ctprN, \scallN
-}
-	/* CPU_HWBUG_VIRT_PSIZE_INTERCEPTION */
-	{ nop } { nop } { nop } { nop }
-	call	\ctprN, wbs=\wbsL
-	disp	\ctprN, \fn
-	SWITCH_HW_STACKS_FROM_USER()
-	SMP_ONLY(shld,1	GCPUID_PREEMPT, 3, GCPUOFFSET)
-{
-	SMP_ONLY(ldd,2	[ __per_cpu_offset + GCPUOFFSET ], GCPUOFFSET)
-	ct	\ctprN
-}
-.endm	/* HANDLER_TRAMPOLINE */
+#define HANDLER_TRAMPOLINE(ctprN, scallN, fn, wbsL) \
+	/* Force load OSGD->GD. Alternative is to use non-0 CUI for kernel */ \
+	{ \
+		sdisp ctprN, scallN; \
+	} \
+	/* CPU_HWBUG_VIRT_PSIZE_INTERCEPTION */ \
+	{ nop } { nop } { nop } { nop } \
+	call ctprN, wbs=wbsL; \
+	SWITCH_HW_STACKS_FROM_USER( \
+		disp ctprN, fn; \
+	); \
+	ALTERNATIVE_1_ALTINSTR \
+		/* CPU_FEAT_SEP_VIRT_SPACE version - get kernel PT root from %os_pptb */ \
+		{ \
+			addd 0, 0, GVCPUSTATE; \
+			mmurr %os_pptb, GVCPUSTATE; \
+		} \
+		{ \
+			addd 0, E2K_KERNEL_CONTEXT, GVCPUSTATE; \
+			mmurw GVCPUSTATE, %u_pptb; \
+		} \
+	ALTERNATIVE_2_OLDINSTR \
+		/* Original instruction - get kernel PT root from memory */ \
+		{ \
+			NOT_SEP_VIRT_SPACE_ONLY(ldgdd 0, TSK_K_ROOT_PTB, GVCPUSTATE;) \
+		} \
+		{ \
+			addd 0, E2K_KERNEL_CONTEXT, GVCPUSTATE; \
+			mmurw GVCPUSTATE, %root_ptb; \
+		} \
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_SEP_VIRT_SPACE) \
+	{ \
+		nop 1; \
+		mmurw GVCPUSTATE, %cont; \
+	} \
+	{ \
+		SMP_ONLY(shld,1	GCPUID_PREEMPT, 3, GCPUOFFSET); \
+	} \
+	{ \
+		SMP_ONLY(ldd,2	[ __per_cpu_offset + GCPUOFFSET ], GCPUOFFSET); \
+		ct ctprN; \
+	}
 
 #endif	/* __ASSEMBLY__ */
 

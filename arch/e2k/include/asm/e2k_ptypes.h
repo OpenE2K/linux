@@ -164,11 +164,40 @@ typedef union {	/* Common array pointer */
 				u64 size   : 32;		/* [63:32] */
 			};
 		};
+	};
+	union {
+		e2k_ap_t ap;
+		e2k_sap_t sap;
+		struct {
+			/* Low word common fields */
+			union {
+				struct {
+					u64 unused1 : 59;	/* [58:0] */
+					u64 rw      : 2;	/* [60:59] */
+					u64 itag    : 3;	/* [63:61] */
+				};
+				struct {
+					u64 unused2 : 59;	/* [58: 0] */
+					u64 r       : 1;	/* [59:59] */
+					u64 w       : 1;	/* [60:60] */
+					u64 unused3 : 3;	/* [63:61] */
+				};
+			};
+			/* High word common fields */
+			struct {
+				u64 curptr : 32;		/* [31: 0] */
+				u64 size   : 32;		/* [63:32] */
+			};
+		};
 	} fields;
 	struct {
-		long	lo;
-		long	hi;
+		u64	lo;
+		u64	hi;
 	} word;
+	struct {
+		u64	lo;
+		u64	hi;
+	};
 } __aligned(16) e2k_ptr_t;
 
 #define	R_ENABLE	0x1
@@ -308,7 +337,7 @@ typedef	union e2k_pl_hi {
 typedef struct e2k_pl {
 	e2k_pl_lo_t	lo;
 	e2k_pl_hi_t	hi;
-} e2k_pl_t;
+} __aligned(16) e2k_pl_t;
 
 #define	PL_target		lo.PL_lo_target
 #define	PL_itag			lo.PL_lo_itag

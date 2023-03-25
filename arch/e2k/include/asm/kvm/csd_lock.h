@@ -18,10 +18,20 @@
 #include <asm/kvm/threads.h>
 #include <asm/kvm/hypercall.h>
 
+typedef enum unlocked_type {
+	undefined_unlocked_type,	/* there is no unlocking */
+	woken_unlocked_type,		/* waiting task has been woken up */
+	is_running_unlocked_type,	/* task was already running */
+	queued_as_unlocked_type,	/* queued to waiting list as */
+					/* unlocked entry */
+} unlocked_type_t;
+
 typedef struct csd_lock_waiter {
 	struct list_head	wait_list;
 	struct kvm_vcpu		*vcpu;
 	struct task_struct	*task;
+	struct kvm_vcpu		*by_vcpu;
+	unlocked_type_t		state;
 	void			*lock;
 } csd_lock_waiter_t;
 
@@ -41,3 +51,4 @@ extern void kvm_guest_csd_lock_destroy(struct kvm *kvm);
 #define	kvm_guest_csd_lock_destroy(kvm)
 #endif	/* CONFIG_SMP */
 #endif	/* _ASM_E2K_KVM_CSD_LOCK_H */
+

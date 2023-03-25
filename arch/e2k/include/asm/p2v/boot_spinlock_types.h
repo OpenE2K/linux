@@ -4,6 +4,7 @@
 
 #define BOOT_SPINLOCK_HEAD_SHIFT 0
 #define BOOT_SPINLOCK_TAIL_SHIFT 16
+
 typedef union {
 	u32 lock;
 	struct {
@@ -11,5 +12,6 @@ typedef union {
 		u16 tail;
 	};
 } boot_spinlock_t;
-
 #define __BOOT_SPIN_LOCK_UNLOCKED (boot_spinlock_t) { .lock = 0 }
+
+#define DEFINE_BOOT_SPINLOCK(x) boot_spinlock_t x = __BOOT_SPIN_LOCK_UNLOCKED

@@ -38,15 +38,13 @@
 
 inline u32 mxgbe_rreg32(void __iomem *base, u32 port)
 {
-	return ioread32(base + port);
+	return readl(base + port);
 }
-
 
 inline void mxgbe_wreg32(void __iomem *base, u32 port, u32 val)
 {
-	iowrite32(val, base + port);
+	writel(val, base + port);
 }
-
 
 /* Read counter register */
 u64 mxgbe_rreg64c(void __iomem *base, u32 port)
@@ -54,14 +52,22 @@ u64 mxgbe_rreg64c(void __iomem *base, u32 port)
 	u32 h1, l2, h3;
 
 	do {
-		h1 = ioread32(base + port + 4);
-		l2 = ioread32(base + port);
-		h3 = ioread32(base + port + 4);
+		h1 = readl(base + port + 4);
+		l2 = readl(base + port);
+		h3 = readl(base + port + 4);
 	} while (h1 != h3);
 
 	return ((u64)h3 << 32) | l2;
 } /* mxgbe_rreg64c */
 
+#ifndef writeq
+#define writeq writeq
+static inline void writeq(u64 val, void __iomem *addr)
+{
+	writel((u32)val, addr);
+	writel((u32)(val >> 32), addr + 4);
+}
+#endif
 
 inline void mxgbe_wreg64(void __iomem *base, u32 port, u64 val)
 {
@@ -127,6 +133,7 @@ int mxgbe_hw_reset(mxgbe_priv_t *priv)
 	/* R2000+ proto */
 	mxgbe_wreg32(base, PRST_CST, PRST_DIS_STB_CLK);
 
+	val = mxgbe_rreg32(base, PRST_CST);
 	dev_info(&priv->pdev->dev,
 		 "HW Reset done, PRST_CST=0x%08X\n", val);
 
@@ -146,7 +153,6 @@ int mxgbe_hw_getinfo(mxgbe_priv_t *priv)
 {
 	u32 val;
 	u8 byte;
-	int cpus;
 	void __iomem *base = priv->bar0_base;
 	struct pci_dev *pdev = priv->pdev;
 
@@ -160,46 +166,25 @@ int mxgbe_hw_getinfo(mxgbe_priv_t *priv)
 		priv->pcsaddr = 0;
 		dev_info(&priv->pdev->dev,
 			 "revision id = %d: PCIe board\n", byte);
-	} else if (MXGBE_REVISION_ID_E16C == byte) {
-		priv->revision = MXGBE_REVISION_ID_E16C;
+	} else if (MXGBE_REVISION_ID_E16C_R2000P == byte) {
+		priv->revision = MXGBE_REVISION_ID_E16C_R2000P;
 		priv->pcsaddr = 1;
 		dev_info(&priv->pdev->dev,
+#ifdef __e2k__
 			 "revision id = %d: E16C\n", byte);
+#else /* sparc */
+			 "revision id = %d: R2000+\n", byte);
+#endif
 	} else {
 		dev_info(&priv->pdev->dev,
 			 "revision id = %d: unknown\n", byte);
 		return -ENODEV;
 	}
 
-	/* read Tx */
-	val = mxgbe_rreg32(base, TX_QNUM);
-	priv->num_tx_queues = (unsigned int)val;
 	val = mxgbe_rreg32(base, TX_BUFSIZE);
 	priv->hw_tx_bufsize = (unsigned int)val;
-
-	/* read Rx */
-	val = mxgbe_rreg32(base, RX_QNUM);
-	priv->num_rx_queues = (unsigned int)val;
 	val = mxgbe_rreg32(base, RX_BUFSIZE);
 	priv->hw_rx_bufsize = (unsigned int)val;
-
-	cpus = num_online_cpus();
-
-	/* chk Tx */
-	if ((priv->num_tx_queues < TXQ_MINNUM) ||
-	    (priv->num_tx_queues > TXQ_MAXNUM))
-		return -ENODEV;
-
-	priv->num_tx_queues = min_t(int, priv->num_tx_queues, cpus);
-	priv->num_tx_queues = min_t(int, priv->num_tx_queues, TX_QNUM_MAX_USE);
-
-	/* chk Rx */
-	if ((priv->num_rx_queues < RXQ_MINNUM) ||
-	    (priv->num_rx_queues > RXQ_MAXNUM))
-		return -ENODEV;
-
-	priv->num_rx_queues = min_t(int, priv->num_rx_queues, cpus);
-	priv->num_rx_queues = min_t(int, priv->num_rx_queues, RX_QNUM_MAX_USE);
 
 	return 0;
 } /* mxgbe_hw_getinfo */

@@ -75,6 +75,8 @@ typedef struct host_machdep {
 	void (*write_SH_MMU_CR)(u64);
 } host_machdep_t;
 
+extern host_machdep_t host_machine;
+
 #if	!defined(CONFIG_PARAVIRT_GUEST) && !defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is native host kernel with virtualization support */
 typedef struct guest_machdep {

@@ -2,7 +2,7 @@
 #include <linux/init.h>
 #include <asm/machdep.h>
 
-__nodedata machdep_t machine = { 0 };
+machdep_t machine = { 0 };
 
 int cpu_to_iset(int cpu)
 {

@@ -8,7 +8,6 @@
 #include <linux/pnp.h>
 
 #include <asm/p2v/boot_head.h>
-#include <asm/machdep_numa.h>
 #include <asm/time.h>
 #if defined(CONFIG_SCLKR_CLOCKSOURCE)
 #include <linux/clocksource.h>
@@ -71,12 +70,6 @@ static unsigned long iohub_rtc_get_time(void)
 
 void __init native_clock_init(void)
 {
-	int nid;
-
-	for_each_node_has_dup_kernel(nid) {
-		the_node_machine(nid)->set_wallclock =
-			&iohub_rtc_set_mmss;
-		the_node_machine(nid)->get_wallclock =
-			&iohub_rtc_get_time;
-	}
+	machine.set_wallclock = &iohub_rtc_set_mmss;
+	machine.get_wallclock = &iohub_rtc_get_time;
 }

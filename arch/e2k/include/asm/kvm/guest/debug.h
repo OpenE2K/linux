@@ -8,36 +8,33 @@
 
 #include <linux/types.h>
 
-/* Read instruction word (two syllables) from IP address */
-static inline unsigned long
-kvm_read_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip)
-{
-	/* guest image should be read on virtual physical IP */
-	return *((u64 *)pa_to_vpa(phys_ip));
-}
-/* Write modified instruction word at IP address */
-static inline void
-kvm_modify_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip,
-				unsigned long instr_word)
-{
-	/* guest image should be writed on virtual physical IP */
-	*((u64 *)pa_to_vpa(phys_ip)) = instr_word;
-}
-
 extern int kvm_do_parse_chain_stack(int flags, struct task_struct *p,
 		parse_chain_fn_t func, void *arg, unsigned long delta_user,
 		unsigned long top, unsigned long bottom,
 		bool *interrupts_enabled, unsigned long *irq_flags);
+
+static inline void kvm_print_all_tlb(void)
+{
+	HYPERVISOR_dump_tlb_state();
+}
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */
 
 #include <asm/kvm/vcpu-regs-debug-inline.h>
 
-#define	GET_PHYS_ADDR(task, addr)	GUEST_GET_PHYS_ADDR(task, addr)
-
 #define	debug_guest_regs(task)	false	/* none any guests */
 #define	get_cpu_type_name()	"VCPU"	/* virtual CPU */
+
+static inline void print_all_tlb(void)
+{
+	kvm_print_all_tlb();
+}
+
+static inline void print_address_tlb(unsigned long address)
+{
+	pr_err("%s(): is not yet implemented for guest kernel\n", __func__);
+}
 
 static inline void print_all_guest_stacks(void)
 {
@@ -73,20 +70,6 @@ static inline void
 host_tracing_start(void)
 {
 	HYPERVISOR_tracing_start();
-}
-
-/* Read instruction word (two syllables) from IP address */
-static inline unsigned long
-read_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip)
-{
-	return kvm_read_instr_on_IP(ip, phys_ip);
-}
-/* Write modified instruction word at IP address */
-static inline void
-modify_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip,
-				unsigned long instr_word)
-{
-	kvm_modify_instr_on_IP(ip, phys_ip, instr_word);
 }
 
 static inline int

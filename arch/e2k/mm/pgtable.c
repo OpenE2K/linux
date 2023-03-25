@@ -458,7 +458,13 @@ void untrack_pfn(struct vm_area_struct *vma, unsigned long pfn, unsigned long si
 	if (!region_is_ram_only(paddr, paddr + PAGE_SIZE))
 		return;
 
-	WARN_ON_ONCE(!pfn && !size && follow_phys(vma, vma->vm_start, 0, &prot, &paddr));
+	/*
+	 * Some drivers (like VFIO) may delay mapping after setting VM_PFNMAP.
+	 * It should be safe to ignore this warning.
+	 */
+	if (!pfn && !size && follow_phys(vma, vma->vm_start, 0, &prot, &paddr))
+		pr_warn_once("%s(): PID %d: failed to find mapping for address 0x%lx\n",
+			__func__, current->pid, vma->vm_start);
 
 	if (vma)
 		vma->vm_flags &= ~VM_MEMTYPE_TRACKED;
@@ -483,6 +489,37 @@ int io_remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 	return remap_pfn_range(vma, addr, pfn, size, pgprot_decrypted(prot));
 }
 EXPORT_SYMBOL(io_remap_pfn_range);
+
+
+/*
+ * /dev/mem mapping:
+ *  if opened with O_SYNC, then use WC for RAM and UC for device memory;
+ *  otherwise use WB.
+ */
+pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+		unsigned long size, pgprot_t vma_prot)
+{
+	int is_ram = region_intersects(PFN_PHYS(pfn), size,
+			IORESOURCE_SYSTEM_RAM, IORES_DESC_NONE);
+
+	switch (is_ram) {
+	case REGION_INTERSECTS:
+		if (file->f_flags & O_DSYNC)
+			return pgprot_writecombine(vma_prot);
+		break;
+	case REGION_MIXED:
+		WARN_ONCE(true, "[mem 0x%llx-0x%llx] is both RAM and device memory\n",
+				PFN_PHYS(pfn), PFN_PHYS(pfn) + size - 1);
+		fallthrough;
+	case REGION_DISJOINT:
+		if (file->f_flags & O_DSYNC)
+			return pgprot_noncached(vma_prot);
+		break;
+	}
+
+	return vma_prot;
+}
+EXPORT_SYMBOL(phys_mem_access_prot);
 
 
 /*
@@ -529,6 +566,25 @@ int pmdp_set_access_flags(struct vm_area_struct *vma,
 
 	return changed;
 }
+
+/*
+ * Same as ptep_set_access_flags() but for PUD
+ */
+int pudp_set_access_flags(struct vm_area_struct *vma,
+			  unsigned long address, pud_t *pudp,
+			  pud_t entry, int dirty)
+{
+	int changed = !pud_same(*pudp, entry);
+
+	VM_BUG_ON(address & ~HPAGE_PUD_MASK);
+
+	if (changed && dirty) {
+		set_pud_at(vma->vm_mm, address, pudp, entry);
+		flush_pud_tlb_range(vma, address, address + HPAGE_PUD_SIZE);
+	}
+
+	return changed;
+}
 #endif
 
 #ifdef CONFIG_HAVE_ARCH_HUGE_VMAP
@@ -552,13 +608,7 @@ int pmd_clear_huge(pmd_t *pmd)
 
 int pmd_free_pte_page(pmd_t *pmd, unsigned long addr)
 {
-	pte_t *pte;
-
-	//TODO remove this after upgrading - check is moved to arch-indep. code
-	if (!pmd_present(*pmd))
-		return 1;
-
-	pte = (pte_t *) pmd_page_vaddr(*pmd);
+	pte_t *pte = (pte_t *) pmd_page_vaddr(*pmd);
 	pmd_clear(pmd);
 
 	flush_tlb_kernel_range(addr, addr + PMD_SIZE);

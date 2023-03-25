@@ -88,9 +88,9 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	/*
 	 * Don't allow anybody to remap normal RAM that we're using..
 	 */
-	if (phys_addr_valid(phys_addr)) {
-		for (page = virt_to_page(__va(phys_addr));
-				page <= virt_to_page(__va(last_addr)); page++) {
+	if (pfn_valid(__phys_to_pfn(phys_addr))) {
+		for (page = pfn_to_page(__phys_to_pfn(phys_addr));
+				page <= pfn_to_page(__phys_to_pfn(last_addr)); page++) {
 			if (!PageReserved(page)) {
 				WARN_ONCE(1, "phys. area at %pa - %pa is not reserved and can not be remapped\n",
 						&phys_addr, &last_addr);
@@ -102,7 +102,7 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	/*
 	 * Why would we need ioremap() that early in the boot process?
 	 */
-	BUG_ON(!mem_init_done);
+	BUG_ON(!slab_is_available());
 
 	/*
 	 * Mappings have to be page-aligned

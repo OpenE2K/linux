@@ -10,12 +10,25 @@
 
 #ifndef __ASSEMBLY__
 
-#define REPLACE_USR_PFAULT(to_pfault_IP) \
-		(current_thread_info()->usr_pfault_jump = to_pfault_IP)
+#define SAVE_REPLACE_USR_PFAULT(new_pfault_IP, to_save_prev_IP) \
+({ \
+	(to_save_prev_IP) = current->thread.usr_pfault_jump; \
+	current->thread.usr_pfault_jump = (new_pfault_IP); \
+})
+
+#define REPLACE_USR_PFAULT(new_pfault_IP) \
+({ \
+	current->thread.usr_pfault_jump = (new_pfault_IP); \
+})
+
+#define RESTORE_REPLACED_USR_PFAULT(saved_prev_IP) \
+({ \
+	current->thread.usr_pfault_jump = (saved_prev_IP); \
+})
 
 extern unsigned long kvm_fast_kernel_tagged_memory_copy(void *dst, const void *src,
-				size_t len, unsigned long strd_opcode,
-				unsigned long ldrd_opcode, int prefetch);
+				size_t len, ldst_rec_op_t strd_opcode,
+				ldst_rec_op_t ldrd_opcode, int prefetch);
 extern unsigned long kvm_fast_kernel_tagged_memory_set(void *addr, u64 val, u64 tag,
 				size_t len, u64 strd_opcode);
 
@@ -25,14 +38,13 @@ extern unsigned long kvm_fast_kernel_tagged_memory_set(void *addr, u64 val, u64 
  */
 static inline unsigned long
 kvm_do_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	long ret;
 
 	do {
 		ret = HYPERVISOR_fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+				AW(strd_opcode), AW(ldrd_opcode), prefetch);
 	} while (ret == -EAGAIN);
 
 	return ret;
@@ -66,7 +78,7 @@ kvm_do_extract_tags_32(u16 *dst, const void *src)
 #ifndef	DEBUG_GUEST_STRINGS
 static inline unsigned long
 kvm_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
 		int prefetch)
 {
 	if (likely(IS_HV_GM()))
@@ -98,47 +110,39 @@ kvm_extract_tags_32(u16 *dst, const void *src)
 }
 #else	/* DEBUG_GUEST_STRINGS */
 extern unsigned long kvm_fast_tagged_memory_copy(void *dst, const void *src,
-				size_t len,
-				unsigned long strd_opcode,
-				unsigned long ldrd_opcode,
-				int prefetch);
+		size_t len, ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
+		int prefetch);
 extern unsigned long kvm_fast_tagged_memory_set(void *addr, u64 val, u64 tag,
-				size_t len, u64 strd_opcode);
+		size_t len, u64 strd_opcode);
 extern unsigned long boot_kvm_fast_tagged_memory_copy(void *dst,
-				const void *src, size_t len,
-				unsigned long strd_opcode,
-				unsigned long ldrd_opcode,
-				int prefetch);
+		const void *src, size_t len, ldst_rec_op_t strd_opcode,
+		ldst_rec_op_t ldrd_opcode, int prefetch);
 extern unsigned long boot_kvm_fast_tagged_memory_set(void *addr, u64 val,
-				u64 tag, size_t len, u64 strd_opcode);
+		u64 tag, size_t len, u64 strd_opcode);
 
 extern unsigned long kvm_extract_tags_32(u16 *dst, const void *src);
 #endif	/* ! DEBUG_GUEST_STRINGS */
 
 extern unsigned long kvm_fast_tagged_memory_copy_user(void *dst, const void *src,
-				size_t len, size_t *copied,
-				unsigned long strd_opcode,
-				unsigned long ldrd_opcode,
-				int prefetch);
+		size_t len, size_t *copied, ldst_rec_op_t strd_opcode,
+		ldst_rec_op_t ldrd_opcode, int prefetch);
 extern unsigned long kvm_fast_tagged_memory_set_user(void *addr, u64 val, u64 tag,
-				size_t len, size_t *cleared, u64 strd_opcode);
+		size_t len, size_t *cleared, u64 strd_opcode);
 
-static inline int
-kvm_fast_tagged_memory_copy_to_user(void __user *dst, const void *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline size_t kvm_fast_tagged_memory_copy_to_user(void __user *dst,
+		const void *src, size_t len, size_t *copied,
+		const struct pt_regs *regs, ldst_rec_op_t strd_opcode,
+		ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	/* guest kernel does not support any nested guests */
 	return kvm_fast_tagged_memory_copy_user(dst, src, len, copied,
 				strd_opcode, ldrd_opcode, prefetch);
 }
 
-static inline int
-kvm_fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline size_t kvm_fast_tagged_memory_copy_from_user(void *dst,
+		const void __user *src, size_t len, size_t *copied,
+		const struct pt_regs *regs, ldst_rec_op_t strd_opcode,
+		ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	/* guest kernel does not support any nested guests */
 	return kvm_fast_tagged_memory_copy_user(dst, src, len, copied,
@@ -168,27 +172,52 @@ static inline void kvm_tagged_memcpy_8(void *dst, const void *src, size_t n)
 		kvm_tagged_memcpy_8(dst, src, n);			\
 })
 
-static inline unsigned long
-fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline void fast_tagged_memory_copy(void *dst, const void *src,
+		size_t len, int prefetch)
 {
-	return kvm_fast_kernel_tagged_memory_copy(dst, src, len, strd_opcode,
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t)
+		{ .fmt = LDST_QWORD_FMT, .mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+	kvm_fast_kernel_tagged_memory_copy(dst, src, len, strd_opcode,
 						  ldrd_opcode, prefetch);
 }
-static inline unsigned long
-fast_tagged_memory_copy_user(void *dst, const void *src, size_t len, size_t *copied,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+
+static __always_inline unsigned long
+fast_tagged_memory_copy_to_user(void __user *dst, const void *src, size_t len,
+		size_t *copied, int prefetch)
 {
-	return kvm_fast_tagged_memory_copy_user(dst, src, len, copied, strd_opcode,
-						ldrd_opcode, prefetch);
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+	return kvm_fast_tagged_memory_copy_user((void __force *) dst, src, len,
+			copied, strd_opcode, ldrd_opcode, prefetch);
+}
+static __always_inline unsigned long
+fast_tagged_memory_copy_from_user(void *dst, const void __user *src, size_t len,
+		size_t *copied, int prefetch)
+{
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+	return kvm_fast_tagged_memory_copy_user(dst, (void __force *) src, len,
+			copied, strd_opcode, ldrd_opcode, prefetch);
+}
+static __always_inline unsigned long
+fast_tagged_memory_copy_in_user(void __user *dst, const void __user *src, size_t len,
+		size_t *copied, int prefetch)
+{
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+	return kvm_fast_tagged_memory_copy_user((void __force *)  dst, (void __force *) src,
+			len, copied, strd_opcode, ldrd_opcode, prefetch);
 }
 static inline unsigned long
-boot_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+boot_fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t)
+		{ .fmt = LDST_QWORD_FMT, .mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
 	return boot_kvm_fast_tagged_memory_copy(dst, src, len, strd_opcode,
 						ldrd_opcode, prefetch);
 }
@@ -218,23 +247,27 @@ extract_tags_32(u16 *dst, const void *src)
 	return kvm_extract_tags_32(dst, src);
 }
 
-static inline int
-fast_tagged_memory_copy_to_user(void __user *dst, const void *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
+		const void *src, size_t len,
+		const struct pt_regs *regs, int prefetch)
 {
-	return kvm_fast_tagged_memory_copy_to_user(dst, src, len, copied, regs,
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+
+	return kvm_fast_tagged_memory_copy_to_user(dst, src, len, NULL, regs,
 				strd_opcode, ldrd_opcode, prefetch);
 }
 
-static inline int
-fast_tagged_memory_copy_from_user(void *dst, const void __user *src,
-		size_t len, size_t *copied, const struct pt_regs *regs,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+static inline size_t
+fast_tagged_memory_copy_from_user_gva(void *dst, const void __user *src,
+		size_t len, const struct pt_regs *regs, int prefetch)
 {
-	return kvm_fast_tagged_memory_copy_from_user(dst, src, len, copied, regs,
+	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
+			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+
+	return kvm_fast_tagged_memory_copy_from_user(dst, src, len, NULL, regs,
 				strd_opcode, ldrd_opcode, prefetch);
 }
 

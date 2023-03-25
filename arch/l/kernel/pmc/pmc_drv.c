@@ -673,6 +673,15 @@ static void __exit pmc_exit(void)
 	regulator_put(vout_regulator);
 #endif
 #endif
+#ifndef CONFIG_E90S /* E2K */
+	if (l_pmc[0].i2c_chan) {
+		platform_device_unregister(l_pmc[0].i2c_chan);
+		l_pmc[0].i2c_chan = NULL;
+	}
+
+	pci_dev_put(l_pmc[0].pdev);
+	l_pmc[0].pdev = NULL;
+#endif
 }
 
 module_init(pmc_init);

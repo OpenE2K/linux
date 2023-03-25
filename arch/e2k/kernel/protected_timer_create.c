@@ -16,6 +16,7 @@
 #include <linux/compat.h>
 #include <asm/e2k_debug.h>
 
+#include <asm/signal.h>
 #include <asm/syscalls.h>
 #include <asm/convert_array.h>
 #include <asm/protected_syscalls.h>
@@ -68,9 +69,6 @@ do { \
 
 #define get_user_space(x)	arch_compat_alloc_user_space(x)
 
-#define USER_PTR_OFFSET_LO 0
-#define USER_PTR_OFFSET_HI 8
-
 static inline
 unsigned long e2k_descriptor_size(long user_ptr_hi, unsigned int min_size)
 {
@@ -95,13 +93,9 @@ unsigned long e2k_descriptor_size(long user_ptr_hi, unsigned int min_size)
  * placed in *timerid.  On failure, -1 is returned, and errno is set to
  *                                                   indicate the error.
  */
-long protected_sys_timer_create(const long arg1 /*clockid*/,
-			const unsigned long __user arg2 /*sevp*/,
-			const unsigned long __user arg3 /*timerid*/,
-			const unsigned long	unused4,
-			const unsigned long	unused5,
-			const unsigned long	unused6,
-			const struct pt_regs *regs)
+long protected_sys_timer_create(clockid_t which_clock,
+		prot_sigevent_t __user *user_sev, timer_t __user *timerid,
+		u64 unused4, u64 unused5, u64 unused6, const struct pt_regs *regs)
 {
 #define MASK_SIGEVENT_TYPE_I   0x0
 #define MASK_SIGEVENT_TYPE_P   0x3
@@ -113,37 +107,23 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 #define MASK_SIGEVENT_RW_SIGNAL		0x280
 #define MASK_SIGEVENT_RW_THREAD		0x000
 #define MASK_SIGEVENT_RW_THREAD_ID	0x800
-#define SIZE_SIGEVENT           64
-#define PROT_OFFSET_SIGEV_NOTIFY 16 /* NB> 16 is correct number to download
-				     * the field with NATIVE_LOAD_VAL_AND_TAGD.
-				     */
-	unsigned long user_sev = (unsigned long)arg2;
-	timer_t *timerid  = (timer_t *)arg3;
-	sigevent_t *kernel_sev = NULL;
+	sigevent_t __user *kernel_sev = NULL;
 	unsigned long size;
 	long mask_sigevent_type, mask_align, mask_rw_type;
-	int field_num;
-	unsigned char sival_ptr_tags, tag, tag3;
-	long user_ptr_lo, user_ptr_hi, user_notify;
-	int rval;
+	int field_num, user_notify, rval;
+	u32 sival_ptr_tags;
+	u64 user_ptr_lo, user_ptr_hi;
 
-	DbgSCP("clockid=%ld, sevp=0x%lx, timerid=0x%lx\n", arg1, arg2, arg3);
+	DbgSCP("which_clock=%d, sevp=0x%px, timerid=0x%px\n",
+			which_clock, user_sev, timerid);
 	if (!user_sev)
 		goto run_syscall;
 
 	/* Detecting the type of the first field of the sigevent structure: */
-	TRY_USR_PFAULT {
-		NATIVE_LOAD_VAL_AND_TAGD(user_sev + USER_PTR_OFFSET_LO,
-				user_ptr_lo, sival_ptr_tags);
-		NATIVE_LOAD_VAL_AND_TAGD(user_sev + USER_PTR_OFFSET_HI,
-				user_ptr_hi, tag);
-		NATIVE_LOAD_VAL_AND_TAGD(user_sev + PROT_OFFSET_SIGEV_NOTIFY,
-				user_notify, tag3);
-	} CATCH_USR_PFAULT {
+	if (get_user_tagged_16(user_ptr_lo, user_ptr_hi,
+				sival_ptr_tags, user_sev) ||
+			get_user(user_notify, &user_sev->sigev_notify))
 		return -EFAULT;
-	} END_USR_PFAULT
-	sival_ptr_tags |= tag << 4;
-	user_notify >>= 32; /* NB> the value stored in the upper half of long */
 
 	/*
 	 * Acqiure type mask in accordance with the data type
@@ -161,8 +141,7 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 		break;
 	case ETAGPLQ: /* this is for future Elbrus arch V6 */
 		DbgSCP_ERR("unsupported tag ETAGPLQ (0x%x)\n", sival_ptr_tags);
-		DbgSCP("\tptr_lo=0x%lx ptr_hi=0x%lx\n",
-		       user_ptr_lo, user_ptr_hi);
+		DbgSCP("\tptr_lo=0x%llx ptr_hi=0x%llx\n", user_ptr_lo, user_ptr_hi);
 		return -EINVAL;
 	default:
 		mask_sigevent_type = MASK_SIGEVENT_TYPE_I;
@@ -192,18 +171,17 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 		field_num = 5; /* +1 extra field to have 8-order struct size */
 		break;
 	default:
-		DbgSCP_ERR("unsupported sigev_notify value (0x%lx)\n",
-							user_notify);
+		DbgSCP_ERR("unsupported sigev_notify value %d\n", user_notify);
 		return -EINVAL;
 	}
 
 	/* Converting structure sigevent sev: */
 	kernel_sev = get_user_space(sizeof(*kernel_sev));
-	size = e2k_descriptor_size(regs->args[4], SIZE_SIGEVENT /*min_size*/);
+	size = e2k_descriptor_size(regs->args[4], sizeof(*user_sev));
 	if (!size)
 		return -EINVAL;
-	rval = convert_array_3((long *) user_sev, (long *)kernel_sev, size,
-			field_num, 1,
+	rval = convert_array_3((long __user *) user_sev, (long __user *) kernel_sev,
+			size, field_num, 1,
 			mask_sigevent_type, mask_align, mask_rw_type, 0);
 
 	if (rval != 0) {
@@ -211,19 +189,22 @@ long protected_sys_timer_create(const long arg1 /*clockid*/,
 		return -EINVAL;
 	}
 run_syscall:
-	rval = sys_timer_create((clockid_t)arg1, kernel_sev, timerid);
+	rval = sys_timer_create(which_clock, kernel_sev, timerid);
 	if (rval)
 		return rval;
 
 	/* Save it in sival_ptr_list: */
 	if (kernel_sev) {
-		store_descriptor_attrs(kernel_sev->sigev_value.sival_ptr,
-			user_ptr_lo, user_ptr_hi, sival_ptr_tags, 0 /*signum*/);
+		void __user *sival_ptr;
+		if (get_user(sival_ptr, &kernel_sev->sigev_value.sival_ptr))
+			return -EFAULT;
 
-		DbgSCP("\tkernel_ptr = 0x%lx\n",
-		       (long)kernel_sev->sigev_value.sival_ptr);
-		DbgSCP("\tuser_ptr_lo = 0x%lx\n", user_ptr_lo);
-		DbgSCP("\tuser_ptr_hi = 0x%lx\n", user_ptr_hi);
+		store_descriptor_attrs(sival_ptr, user_ptr_lo, user_ptr_hi,
+				       sival_ptr_tags, 0 /*signum*/);
+
+		DbgSCP("\tkernel_ptr = %px\n", kernel_sev->sigev_value.sival_ptr);
+		DbgSCP("\tuser_ptr_lo = 0x%llx\n", user_ptr_lo);
+		DbgSCP("\tuser_ptr_hi = 0x%llx\n", user_ptr_hi);
 		DbgSCP("\tuser_tags = 0x%x\n", sival_ptr_tags);
 	}
 	return 0;
@@ -233,35 +214,35 @@ run_syscall:
  * On success, rt_sigtimedwait() returns a signal number (positive value).
  * On failure it returns -1, with errno set to indicate the error.
  */
-long protected_sys_rt_sigtimedwait(const unsigned long __user arg1 /*set*/,
-				   const unsigned long __user arg2 /*info*/,
-				   const unsigned long __user arg3 /*timeout*/,
-				   const unsigned long arg4 /*sigsetsize*/)
+long protected_sys_rt_sigtimedwait(const sigset_t __user *set,
+				   siginfo_t __user *info,
+				   const struct __kernel_timespec __user *timeout,
+				   size_t sigsetsize)
 {
 	struct sival_ptr_list *curr_el = NULL;
 	void  __user *dscr_ptr;
-	siginfo_t __user *info;
-	int rval;
+	int rval, si_code, si_signo;
 
 	DbgSCP("set= 0x%lx, info=0x%lx, timeout=0x%lx, sigsetsize=%ld\n",
-			arg1, arg2, arg3, arg4);
+			set, info, timeout, sigsetsize);
 
-	rval = sys_rt_sigtimedwait((sigset_t *) arg1, (siginfo_t *) arg2,
-			(struct __kernel_timespec *) arg3, (size_t)arg4);
+	rval = sys_rt_sigtimedwait(set, info, timeout, sigsetsize);
 	if (rval <= 0) {
 		DbgSCP("rt_sigtimedwait failed. rval = %d\n", rval);
 		return rval;
 	}
-	if (!arg2)
+	if (!info)
 		return rval;
-	info = (siginfo_t *)arg2;
 
-	DbgSCP("si_code = 0x%x\n", info->si_code);
-	if ((info->si_code > 0) &&
-	    siginfo_layout(info->si_signo, info->si_code) != SIL_RT) {
+	if (get_user(si_code, &info->si_code) ||
+			get_user(si_signo, &info->si_signo) ||
+			get_user(dscr_ptr, &info->si_ptr))
+		return -EFAULT;
+
+	DbgSCP("si_code = 0x%x\n", si_code);
+	if (si_code > 0 && siginfo_layout(si_signo, si_code) != SIL_RT) {
 		return rval;
 	}
-	dscr_ptr = info->si_ptr;
 	if (dscr_ptr == NULL) {
 		/*
 		 * The 'si_ptr pointer' in the 'siginfo' structure
@@ -289,12 +270,11 @@ long protected_sys_rt_sigtimedwait(const unsigned long __user arg1 /*set*/,
 	DbgSCP("user_ptr_lo = 0x%llx\n", curr_el->user_ptr_lo);
 	DbgSCP("user_ptr_hi = 0x%llx\n", curr_el->user_ptr_hi);
 	DbgSCP("user_tags = 0x%x\n", curr_el->user_tags);
-	NATIVE_STORE_TAGGED_QWORD(
-		(e2k_ptr_t *) (&(((siginfo_t *)arg2)->si_ptr)+0x1),
-		curr_el->user_ptr_lo, curr_el->user_ptr_hi,
-		curr_el->user_tags & 0xf, curr_el->user_tags >> 4);
+	if (put_user_tagged_16(curr_el->user_ptr_lo, curr_el->user_ptr_hi,
+			curr_el->user_tags, &info->si_ptr + 1))
+		return -EFAULT;
 
-	DbgSCP("info->si_code = 0x%x\n", info->si_code);
+	DbgSCP("info->si_code = 0x%x\n", si_code);
 	return rval;
 }
 

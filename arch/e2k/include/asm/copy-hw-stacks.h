@@ -116,48 +116,6 @@ static inline void trace_host_hva_area(u64 *hva_base, u64 hva_size)
 }
 
 static __always_inline void
-native_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
-{
-	void *dst_tail;
-	const void *src_tail;
-	u64 copied;
-	int i;
-
-	/*
-	 * Kernel does not use FP registers so do not copy them.
-	 * This only applies to CPUs before V5 instruction set
-	 * (since V5 FP registers become general-purpose QP registers).
-	 */
-	if (cpu_has(CPU_FEAT_QPREG)) {
-#pragma loop count (10)
-		for (i = 0; i < size / 64; i++)
-			E2K_TAGGED_MEMMOVE_64(&dst[8 * i], &src[8 * i]);
-
-		copied = round_down(size, 64);
-		dst_tail = (void *) dst + copied;
-		src_tail = (void *) src + copied;
-	} else {
-#pragma loop count (5)
-		for (i = 0; i < size / 128; i++)
-			E2K_TAGGED_MEMMOVE_128_RF_V3(&dst[16 * i],
-					&src[16 * i]);
-
-		copied = round_down(size, 128);
-		dst_tail = (void *) dst + copied;
-		src_tail = (void *) src + copied;
-
-		if (size & 64) {
-			E2K_TAGGED_MEMMOVE_64(dst_tail, src_tail);
-			dst_tail += 64;
-			src_tail += 64;
-		}
-	}
-
-	if (size & 32)
-		E2K_TAGGED_MEMMOVE_32(dst_tail, src_tail);
-}
-
-static __always_inline void
 native_collapse_kernel_pcs(u64 *dst, const u64 *src, u64 spilled_size)
 {
 	e2k_pcsp_hi_t k_pcsp_hi;
@@ -214,8 +172,7 @@ native_collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
 	size = k_psp_hi.PSP_hi_ind - spilled_size;
 	BUG_ON(!IS_ALIGNED(size, ALIGN_PSTACK_TOP_SIZE) || (s64) size < 0);
 
-	prefetch_nospec_range(src, size);
-	native_kernel_hw_stack_frames_copy(dst, src, size);
+	fast_tagged_memory_copy(dst, src, size, true);
 
 	k_psp_hi.PSP_hi_ind -= spilled_size;
 	NATIVE_NV_NOIRQ_WRITE_PSP_HI_REG(k_psp_hi);
@@ -238,11 +195,6 @@ native_collapse_kernel_ps(u64 *dst, const u64 *src, u64 spilled_size)
 /* native kernel with virtualization support */
 /* native kernel without virtualization support */
 
-static __always_inline void
-kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size)
-{
-	native_kernel_hw_stack_frames_copy(dst, src, size);
-}
 static __always_inline void
 collapse_kernel_pcs(pt_regs_t *regs, u64 *dst, const u64 *src, u64 spilled_size)
 {
@@ -314,24 +266,20 @@ static inline int copy_user_to_current_hw_stack(void *dst, void __user *src,
 	 */
 	do {
 		unsigned long ts_flag;
+		size_t copied;
 
 		counter = READ_ONCE(current->thread.traps_count);
 
 		if (chain)
-			E2K_FLUSHC;
+			NATIVE_FLUSHC;
 		else
-			E2K_FLUSHR;
+			NATIVE_FLUSHR;
 
-		SET_USR_PFAULT("$.recovery_memcpy_fault");
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-		fast_tagged_memory_copy_from_user(dst, src, size, NULL, regs,
-				TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				true);
+		copied = fast_tagged_memory_copy_from_user_gva(dst, src, size,
+				regs, true);
 		clear_ts_flag(ts_flag);
-		if (RESTORE_USR_PFAULT)
+		if (unlikely(copied != size))
 			return -EFAULT;
 	} while (unlikely(counter != READ_ONCE(current->thread.traps_count)));
 
@@ -379,30 +327,24 @@ static __always_inline int
 user_hw_stack_frames_copy(void __user *dst, void *src, long copy_size,
 		const pt_regs_t *regs, long hw_stack_ind, bool is_pcsp)
 {
-	unsigned long ts_flag;
+	unsigned long ts_flag, copied;
 
 	if (unlikely(hw_stack_ind < copy_size)) {
 		unsigned long flags;
 		raw_all_irq_save(flags);
 		if (is_pcsp) {
-			E2K_FLUSHC;
+			NATIVE_FLUSHC;
 		} else {
-			E2K_FLUSHR;
+			NATIVE_FLUSHR;
 		}
 		raw_all_irq_restore(flags);
 	}
 
-	SET_USR_PFAULT("$.recovery_memcpy_fault");
-
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	fast_tagged_memory_copy_to_user(dst, src, copy_size, NULL, regs,
-			TAGGED_MEM_STORE_REC_OPC |
-			MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			TAGGED_MEM_LOAD_REC_OPC |
-			MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT, true);
+	copied = fast_tagged_memory_copy_to_user_gva(dst, src, copy_size, regs, true);
 	clear_ts_flag(ts_flag);
 
-	if (RESTORE_USR_PFAULT) {
+	if (unlikely(copied != copy_size)) {
 		pr_err("process %s (%d) %s stack could not be copied "
 			"from %px to %px size 0x%lx (out of memory?)\n",
 			current->comm, current->pid,
@@ -533,10 +475,13 @@ native_user_hw_stacks_copy(struct e2k_stacks *stacks,
 		BUG_ON((E2K_MAXCR_q - 4) * 16 < E2K_CF_MAX_FILL);
 	}
 
-	if (likely(pcs_copy_size <= 0 && ps_copy_size <= 0))
+	if (!copy_full) {
+		/* Fast path when there is nothing to copy */
+		if (likely(pcs_copy_size <= 0 && ps_copy_size <= 0))
 			return 0;
+	}
 
-	if (unlikely(pcs_copy_size > 0)) {
+	if (pcs_copy_size > 0) {
 		e2k_pcsp_hi_t k_pcsp_hi = NATIVE_NV_READ_PCSP_HI_REG();
 
 		/* Since not all user data has been SPILL'ed it is possible
@@ -559,7 +504,7 @@ native_user_hw_stacks_copy(struct e2k_stacks *stacks,
 			return ret;
 	}
 
-	if (unlikely(ps_copy_size > 0)) {
+	if (ps_copy_size > 0) {
 		e2k_psp_hi_t k_psp_hi = NATIVE_NV_READ_PSP_HI_REG();
 
 		/* Since not all user data has been SPILL'ed it is possible
@@ -692,7 +637,7 @@ static __always_inline void native_user_hw_stacks_prepare(
 		int ret = -EINVAL;
 
 		raw_all_irq_save(flags);
-		E2K_FLUSHC;
+		NATIVE_FLUSHC;
 		k_pcsp_hi = READ_PCSP_HI_REG();
 		BUG_ON(AS(k_pcsp_hi).ind);
 		AS(k_pcsp_hi).ind += SZ_OF_CR;
@@ -819,6 +764,19 @@ static inline int do_user_hw_stacks_copy_full(struct e2k_stacks *stacks,
 	if (crs) {
 		e2k_mem_crs_t __user *u_frame;
 		int ret;
+
+		/*
+		 * Make sure there is enough space in user chain stack
+		 * before copying
+		 */
+		if (unlikely(AS(stacks->pcsp_hi).ind + sizeof(regs->crs) >
+				AS(stacks->pcsp_hi).size)) {
+			AS(stacks->pcsp_hi).ind += sizeof(regs->crs);
+			ret = handle_chain_stack_bounds(stacks, regs->trap);
+			AS(stacks->pcsp_hi).ind -= sizeof(regs->crs);
+			if (ret)
+				return ret;
+		}
 
 		u_frame = (void __user *) (AS(stacks->pcsp_lo).base +
 					   AS(stacks->pcsp_hi).ind);

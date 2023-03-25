@@ -168,7 +168,7 @@ do {							\
  * Returns: 0 - if converted OK;
  *     error number - otherwise.
  */
-
+#define ERR_FATAL "FATAL ERROR: failed to read from 0x%lx (field %d) !!!\n"
 extern int get_pm_struct(long __user *prot_array,
 			 long		*new_array,
 			 const int max_prot_array_size, const int fields,
@@ -198,7 +198,8 @@ extern int get_pm_struct(long __user *prot_array,
 
 	int struct_len, prot_len;
 	int elem_type, alignment;
-	long pat_type, pat_align, pat_rw, val_long;
+	long pat_type, pat_align, pat_rw;
+	u64 val_long;
 	int __user *ptr_from;
 	int __user *ptr_to;
 	int user_mode = 0;
@@ -321,8 +322,6 @@ extern int get_pm_struct(long __user *prot_array,
 		user_mode = 1;
 	}
 
-TRY_USR_PFAULT {
-
 	/* Detailed analysis of data encoded in the input structure(s): */
 	for (i = 0; i < items; i++) {
 		ptr_from = (int *)((uintptr_t) prot_array + struct_len * i);
@@ -344,38 +343,39 @@ load_current_element:
 			switch (elem_type) {
 			case _INT_FIELD:
 				/* Load word (4 bytes) with tags */
-				NATIVE_LOAD_VAL_AND_TAGW((int *) ptr_from,
-							val_int, tag);
+				if (get_user_tagged_4(val_int, tag, ptr_from)) {
+					DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+					return -EFAULT;
+				}
 
-				if ((tag == ETAGEWS) && may_be_uninitialized)
+				if ((tag == ETAGEWS) && may_be_uninitialized) {
 					val_int = 0; /* we don't copy trash */
-				/* Check for valid 'int' field */
-				else if (likely((pat_rw & 0xf) != _WRITEABLE)
-					&& (tag != ETAGNUM)
-					&& !(rval_mode
-					     & CONV_ARR_IGNORE_INT_FLD_ERR)) {
+				} else if (likely((pat_rw & 0xf) != _WRITEABLE) &&
+						tag != ETAGNUM &&
+						!(rval_mode & CONV_ARR_IGNORE_INT_FLD_ERR)) {
+					/* Check for valid 'int' field failed */
 #define ERROR_UNINIT_FLDI \
 	"uninitialized value (tag=0x%x) at struct128[%d]: 0x%x\n"
 #define ERROR_UNEXPECTED_VALI \
 	"unexpected value (tag=0x%x) at struct128[%d]: 0x%x\n"
-					if (tag == ETAGEWS)
+					if (tag == ETAGEWS) {
 						DbgSCP_ALERT(ERROR_UNINIT_FLDI,
-						   tag, j, val_int);
-					else
+							     tag, j, val_int);
+					} else {
 						DbgSCP_ALERT(ERROR_UNEXPECTED_VALI,
-						   tag, j, val_int);
+							     tag, j, val_int);
+					}
 #define IGNORING_ARR_ELEM \
 	"ignoring struct128[%d]; replaced with zero\n"
 					/* Don't copy field of another type */
-					if (val_int && (!CONVERT_WARN_ONLY)) {
-						DbgSCP_ALERT(IGNORING_ARR_ELEM,
-							     i);
+					if (val_int && !CONVERT_WARN_ONLY) {
+						DbgSCP_ALERT(IGNORING_ARR_ELEM, i);
 						val_int = 0;
 					}
 					if (rval_mode & CONV_ARR_WRONG_INT_FLD)
 						rval = -EFAULT;
 				}
-				if ((long)ptr_to & 1) { /* write at higher word */
+				if ((long) ptr_to & 1) { /* write at higher word */
 					PUT_USER_OR_KERNEL(user_mode,
 						(int *) ptr_to, val_int);
 				} else { /* write at lower word */
@@ -394,30 +394,31 @@ load_current_element:
 				break;
 			case _LONG_FIELD:
 				/* Load dword (8 bytes) with tags */
-				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
-							val_long, tag);
+				if (get_user_tagged_8(val_long, tag, (u64 __user *) ptr_from)) {
+					DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+					return -EFAULT;
+				}
 
-				if ((tag == ETAGEWD) && may_be_uninitialized)
+				if ((tag == ETAGEWD) && may_be_uninitialized) {
 					val_long = 0; /* we don't copy trash */
-				/* Check for valid 'long' field */
-				else if (likely((pat_rw & 0xf) != _WRITEABLE)
-					&& (tag != ETAGNUM)
-					&& !(rval_mode
-					     & CONV_ARR_IGNORE_LONG_FLD_ERR)) {
+				} else if (likely((pat_rw & 0xf) != _WRITEABLE) &&
+						tag != ETAGNUM &&
+						!(rval_mode & CONV_ARR_IGNORE_LONG_FLD_ERR)) {
+					/* Check for valid 'long' field failed */
 #define ERROR_UNINIT_FLDL \
-	"uninitialized value (tag=0x%x) at struct128[%d]: 0x%lx\n"
+	"uninitialized value (tag=0x%x) at struct128[%d]: 0x%llx\n"
 #define ERROR_UNEXPECTED_VALL \
-	"unexpected value (tag=0x%x) at struct128[%d]: 0x%lx\n"
-					if (tag == ETAGEWD)
+	"unexpected value (tag=0x%x) at struct128[%d]: 0x%llx\n"
+					if (tag == ETAGEWD) {
 						DbgSCP_ALERT(ERROR_UNINIT_FLDL,
 							     tag, j, val_long);
-					else
+					} else {
 						DbgSCP_ALERT(ERROR_UNEXPECTED_VALL,
 							     tag, j, val_long);
+					}
 					/* Don't copy field of another type */
 					if (val_long && (!CONVERT_WARN_ONLY)) {
-						DbgSCP_ALERT(IGNORING_ARR_ELEM,
-							     i);
+						DbgSCP_ALERT(IGNORING_ARR_ELEM, i);
 						val_long = 0;
 					}
 					if (rval_mode & CONV_ARR_WRONG_LONG_FLD)
@@ -433,19 +434,19 @@ load_current_element:
 				break;
 			case _FUNC_FIELD:
 				/* Load dword (8 bytes) with tags */
-				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
-							val_long, tag);
+				if (get_user_tagged_8(val_long, tag, (long *) ptr_from)) {
+					DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+					return -EFAULT;
+				}
 
-				if ((tag == ETAGEWD) && may_be_uninitialized)
+				if ((tag == ETAGEWD) && may_be_uninitialized) {
 					val_long = 0; /* we don't copy trash */
-				/* Check for valid func field */
-				else if (likely((pat_rw & 0xf) != _WRITEABLE)
-					&& (tag != ETAGPLD) && val_long
-					&& (!(rval_mode
-					      & CONV_ARR_IGNORE_FUNC_FLD_ERR))
-						|| tag) {
+				} else if (tag || likely((pat_rw & 0xf) != _WRITEABLE) &&
+						tag != ETAGPLD && val_long &&
+						!(rval_mode & CONV_ARR_IGNORE_FUNC_FLD_ERR)) {
+					/* Check for valid func field failed */
 #define ERROR_UNEXPECTED_ELEMENTF \
-	"not function pointer (tag=0x%x) at struct128[%d]: 0x%lx\n"
+	"not function pointer (tag=0x%x) at struct128[%d]: 0x%llx\n"
 					DbgSCP_ALERT(ERROR_UNEXPECTED_ELEMENTF,
 						   tag, j, val_long);
 					if (rval_mode & CONV_ARR_WRONG_FUNC_FLD)
@@ -466,21 +467,15 @@ load_current_element:
 				 * Load dword (8 bytes) with tags
 				 * (the first half of descriptor)
 				 */
-				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
-							val_long, tag);
-
-				long next_val_long;
+				u64 next_val_long;
 				int dtag;
 				e2k_ptr_t __ptr__;
 
-				/*
-				 * The next dword (8 bytes) is
-				 * the second half of descriptor
-				 */
-				ptr_from += 2;
-				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
-							next_val_long, dtag);
-				dtag = tag | (dtag << 4);
+				if (get_user_tagged_16(val_long, next_val_long, dtag, ptr_from)) {
+					DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+					return -EFAULT;
+				}
+				tag = dtag & 0xf;
 
 				/* Copy valid pointer field */
 				if ((dtag == ETAGAPQ) ||
@@ -501,7 +496,7 @@ load_current_element:
 					      & CONV_ARR_IGNORE_DSCR_FLD_ERR))
 						|| tag) {
 #define ERR_NOT_DSCR \
-	"not descriptor (tag=0x%x) at struct128[%d]: 0x%lx : 0x%lx\n"
+	"not descriptor (tag=0x%x) at struct128[%d]: 0x%llx : 0x%llx\n"
 					DbgSCP_ALERT(ERR_NOT_DSCR, dtag, j,
 						val_long, next_val_long);
 					if (rval_mode & CONV_ARR_WRONG_DSCR_FLD)
@@ -513,7 +508,7 @@ load_current_element:
 						(long *) ptr_to, val_long);
 eo_ptr_field:
 				/* Move on ptr_from and ptr_to: */
-				ptr_from += 2;
+				ptr_from += 4;
 				ptr_to += 2;
 
 				break;
@@ -521,29 +516,43 @@ eo_ptr_field:
 			case _INT_PTR_FIELD:
 			case _LONG_PTR_FIELD: {
 				/* Check for descriptor tag in the field: */
-				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
-							val_long, tag);
-				if (tag == E2K_AP_LO_ETAG)
+				if (get_user_tagged_8(val_long, tag, (long *) ptr_from)) {
+					DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+					return -EFAULT;
+				}
+				if (tag == E2K_AP_LO_ETAG) {
 					/* This must be descriptor: */
 					elem_type = _PTR_FIELD;
-				else /* This is 'int' or 'long' */
+				} else {/* This is 'int' or 'long' */
 					elem_type &= 0x3;
 					/* _INT_PTR_FIELD -> _INT_FIELD */
 					/* _LONG_PTR_FIELD -> _LONG_FIELD */
+				}
 				goto load_current_element;
 			}
 			case _PTR__FUNC_FIELD: {
 				/* Check for descriptor tag in the field: */
-				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
-							val_long, tag);
-				elem_type = (tag == E2K_AP_LO_ETAG) ? _PTR_FIELD
-								: _FUNC_FIELD;
+				u64 next_val_long;
+				if (get_user_tagged_16(val_long, next_val_long,
+						tag, (long *) ptr_from)) {
+					DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+					return -EFAULT;
+				}
+				elem_type = (tag == ETAGAPQ) ? _PTR_FIELD : _FUNC_FIELD;
 				goto load_current_element;
 			}
 			case _TAG_DEFINED_FIELD: {
 				/* Check for tag in the field: */
-				NATIVE_LOAD_VAL_AND_TAGD((long *) ptr_from,
-							val_long, tag);
+				u64 next_val_long;
+				if (!IS_ALIGNED((unsigned long) ptr_from, 16) &&
+				    get_user_tagged_8(val_long, tag, (long *) ptr_from) ||
+				    IS_ALIGNED((unsigned long) ptr_from, 16) &&
+				    get_user_tagged_16(val_long, next_val_long,
+						tag, (long *) ptr_from)) {
+					DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
+					return -EFAULT;
+				}
+				tag &= 0xf;
 				if (tag == E2K_AP_LO_ETAG)
 					elem_type = _PTR_FIELD;
 				else if (tag == E2K_PL_ETAG)
@@ -573,12 +582,6 @@ eo_ptr_field:
 			pat_rw >>= 4;
 		}
 	}
-
-} CATCH_USR_PFAULT {
-#define ERR_FATAL "FATAL ERROR: failed to read from 0x%lx (field %d) !!!\n"
-			DbgSCP_ALERT(ERR_FATAL, (long) ptr_from, j);
-			return -EFAULT;
-} END_USR_PFAULT
 
 	DbgSCP("The array was converted successfully\n");
 

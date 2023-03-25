@@ -59,6 +59,12 @@ localversion()
 	|| exit 1
 }
 ###############################################################################
+conf_rt()
+{
+	$conf_script $OPTFILE \
+	-u CONFIG_HZ_100 -e CONFIG_HZ_1000 \
+	|| exit 1
+}
 conf_nn()
 {
 	$conf_script $OPTFILE \
@@ -66,9 +72,9 @@ conf_nn()
 	|| exit 1
 }
 e90s_nort()  { :; }
-e90s_rt()    { :; }
+e90s_rt()    { conf_rt; }
 e90s_nn()    { conf_nn; }
-e90s_nnrt()  { conf_nn; }
+e90s_nnrt()  { conf_nn; conf_rt; }
 ###############################################################################
 trap "cleanup" 1 2 3 6 15 EXIT
 OUTPUT_DIR=.

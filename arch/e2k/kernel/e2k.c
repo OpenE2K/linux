@@ -22,7 +22,6 @@
 #include <asm/e2c3.h>
 #include <asm/hw_irq.h>
 #include <asm/byteorder.h>
-#include <asm/machdep_numa.h>
 #include <asm/traps.h>
 #include <asm/smp.h>
 #include <asm/io.h>
@@ -219,7 +218,10 @@ void __init e2k_init_IRQ_apic(void)
 	 */
 	l_init_system_handlers_table();
 
-	if (l_iommu_supported())
+	if (HAS_MACHINE_E2K_IOMMU)
+		setup_PIC_vector_handler(LVT3_INTERRUPT_VECTOR,
+			e2k_iommu_error_interrupt, 1, "iommu_interrupt");
+	else if (l_iommu_supported())
 		setup_PIC_vector_handler(LVT3_INTERRUPT_VECTOR,
 			iommu_interrupt, 1, "iommu_interrupt");
 
@@ -324,15 +326,11 @@ EXPORT_SYMBOL(pm_power_off);
 static void __init
 native_e2k_setup_machine(void)
 {
-	int nid;
-
-	for_each_node_has_dup_kernel(nid) {
-		the_node_machine(nid)->show_cpuinfo	= native_show_cpuinfo;
-		the_node_machine(nid)->init_IRQ		= e2k_init_IRQ;
-		the_node_machine(nid)->restart		= e2k_restart;
-		the_node_machine(nid)->power_off	= e2k_power_off;
-		the_node_machine(nid)->halt		= e2k_halt;
-	}
+	machine.show_cpuinfo = native_show_cpuinfo;
+	machine.init_IRQ = e2k_init_IRQ;
+	machine.restart = e2k_restart;
+	machine.power_off = e2k_power_off;
+	machine.halt = e2k_halt;
 }
 
 void __init

@@ -40,6 +40,7 @@
 #include <asm/pic.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
+#include <asm/set_memory.h>
 #include <asm/head.h>
 #include <asm/p2v/boot_head.h>
 #include <asm/p2v/boot_init.h>
@@ -229,13 +230,13 @@ void native_print_machine_type_info(void)
 
 #define STANDARD_IO_RESOURCES (sizeof(standard_io_resources)/sizeof(struct resource))
 
-machdep_t __nodedata	machine = { 0 };
+machdep_t machine __ro_after_init = { 0 };
 EXPORT_SYMBOL(machine);
 
 #ifdef	CONFIG_E2K_MACHINE
-/*	native_machine_id;	is define in asm/e2k.h */
+/* 'native_machine_id' is defined in asm/e2k.h */
 #else	/* ! CONFIG_E2K_MACHINE */
-__nodedata unsigned int native_machine_id = -1;
+unsigned int native_machine_id __ro_after_init = -1;
 EXPORT_SYMBOL(native_machine_id);
 #endif	/* ! CONFIG_E2K_MACHINE */
 
@@ -284,17 +285,14 @@ max_node_iolinks_num_setup(char *str)
 __setup("nodeiolinks=", max_node_iolinks_num_setup);
 
 #if defined (CONFIG_SMP) && defined (CONFIG_HAVE_SETUP_PER_CPU_AREA)
-unsigned long __nodedata __per_cpu_offset[NR_CPUS];
+unsigned long __per_cpu_offset[NR_CPUS] __ro_after_init;
 EXPORT_SYMBOL(__per_cpu_offset);
 
 # ifdef CONFIG_NEED_PER_CPU_EMBED_FIRST_CHUNK
 #  ifdef CONFIG_NUMA
 static int __init pcpu_cpu_distance(unsigned int from, unsigned int to)
 {
-	int distance = REMOTE_DISTANCE;
-	if (cpu_to_node(from) == cpu_to_node(to))
-		distance = LOCAL_DISTANCE;
-	return distance;
+	return node_distance(early_cpu_to_node(from), early_cpu_to_node(to));
 }
 #  endif /* CONFIG_NUMA */
 
@@ -303,20 +301,20 @@ static void * __init pcpu_alloc_memblock(unsigned int cpu, unsigned long size,
 {
 	const unsigned long goal = __pa(MAX_DMA_ADDRESS);
 #  ifdef CONFIG_NUMA
-	int node = cpu_to_node(cpu);
+	int node = early_cpu_to_node(cpu);
 	void *ptr;
 
 	if (!node_online(node) || !NODE_DATA(node)) {
 		ptr = memblock_alloc_from(size, align, goal);
 		DebugPC("cpu %d has no node %d or node-local memory\n",
 			cpu, node);
-		DebugPC("per cpu data for cpu%d %lu bytes at %016lx\n",
+		DebugPC("per cpu data for cpu%d %lu bytes at 0x%llx\n",
 			cpu, size, __pa(ptr));
 	} else {
 		ptr = memblock_alloc_try_nid(size, align, goal,
 					     MEMBLOCK_ALLOC_ACCESSIBLE,
 					     node);
-		DebugPC("per cpu data for cpu%d %lu bytes on node%d at %016lx\n",
+		DebugPC("per cpu data for cpu%d %lu bytes on node%d at 0x%llx\n",
 			 cpu, size, node, __pa(ptr));
 	}
 	return ptr;
@@ -345,17 +343,15 @@ static void __init pcpu_populate_pte(unsigned long addr)
 
 	pud = pud_offset(pgd, addr);
 	if (pud_none(*pud)) {
-		pmd_t *new;
-
-		new = memblock_alloc_from(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
+		pmd_t *new = memblock_alloc_from(PAGE_SIZE,
+				PAGE_SIZE, PAGE_SIZE);
 		pud_populate(&init_mm, pud, new);
 	}
 
 	pmd = pmd_offset(pud, addr);
 	if (!pmd_present(*pmd)) {
-		pte_t *new;
-
-		new = memblock_alloc_from(PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
+		pte_t *new = memblock_alloc_from(PAGE_SIZE,
+				PAGE_SIZE, PAGE_SIZE);
 		pmd_populate_kernel(&init_mm, pmd, new);
 	}
 }
@@ -365,9 +361,6 @@ void __init setup_per_cpu_areas(void)
 {
 	e2k_addr_t delta;
 	unsigned int cpu;
-# ifdef CONFIG_NUMA
-	int node;
-# endif /* CONFIG_NUMA */
 	int rc = -EINVAL;
 
 # ifdef CONFIG_NEED_PER_CPU_EMBED_FIRST_CHUNK
@@ -402,16 +395,6 @@ void __init setup_per_cpu_areas(void)
 	for_each_possible_cpu(cpu)
 		__per_cpu_offset[cpu] = delta + pcpu_unit_offsets[cpu];
 
-# ifdef CONFIG_NUMA
-	for_each_node_has_dup_kernel(node) {
-		void *per_cpu_offset = __va(vpa_to_pa(
-						node_kernel_va_to_pa(node,
-							__per_cpu_offset)));
-		memcpy(per_cpu_offset, __per_cpu_offset, 
-			sizeof(__per_cpu_offset));
-	}
-# endif /* CONFIG_NUMA */
-
 	/* alrighty, percpu areas up and running */
 	for_each_possible_cpu(cpu) {
 # ifdef CONFIG_L_LOCAL_APIC
@@ -421,9 +404,6 @@ void __init setup_per_cpu_areas(void)
 			early_per_cpu_map(x86_bios_cpu_apicid, cpu);
 # endif
 	}
-
-	/* Set per_cpu area pointer */
-	set_my_cpu_offset(__per_cpu_offset[smp_processor_id()]);
 
 	/* indicate the early static arrays will soon be gone */
 # ifdef CONFIG_L_LOCAL_APIC
@@ -610,11 +590,81 @@ void __init e2k_start_kernel()
 	E2K_JUMP(e2k_start_kernel_switched_stacks);
 }
 
-void __init setup_arch(char **cmdline_p)
+/* Protect kernel from writing by virtual address at PAGE_OFFSET alias.
+ * This could be called as early as setup_arch() if not for ftrace
+ * initialization which accesses these areas. */
+static __init int mark_linear_kernel_alias_ro(void)
 {
-	extern int panic_timeout;
+	set_memory_ro((unsigned long) lm_alias(_stext),
+		      (unsigned long) (_etext - _stext) >> PAGE_SHIFT);
+	set_memory_ro((unsigned long) lm_alias(__start_rodata_notes),
+		      (unsigned long) (__end_rodata_notes -
+				       __start_rodata_notes) >> PAGE_SHIFT);
+	set_memory_ro((unsigned long) lm_alias(__special_data_begin),
+		      (unsigned long) (__special_data_end -
+				       __special_data_begin) >> PAGE_SHIFT);
+	set_memory_ro((unsigned long) lm_alias(__node_data_start),
+		      (unsigned long) (__node_data_end -
+				       __node_data_start) >> PAGE_SHIFT);
+	set_memory_ro((unsigned long) lm_alias(__common_data_begin),
+		      (unsigned long) (__common_data_end -
+				       __common_data_begin) >> PAGE_SHIFT);
+	return 0;
+}
+arch_initcall(mark_linear_kernel_alias_ro);
+
+static void __init parse_cmd_line(char **cmdline_p)
+{
 	char c = ' ', *to = command_line, *from = boot_command_line;
 	int len = 0;
+
+	for (;;) {
+		if (c != ' ')
+			goto next_char;
+		if (!memcmp(from, "iolinks=", 8)) {
+			from += 8;
+			max_iolinks = simple_strtol(from, &from, 0);
+		}
+		if (!memcmp(from, "nodeiolinks=", 12)) {
+			from += 12;
+			max_node_iolinks = simple_strtol(from, &from, 0);
+		}
+next_char:
+		c = *(from++);
+		if (!c)
+			break;
+		if (COMMAND_LINE_SIZE <= ++len)
+			break;
+		*(to++) = c;
+	}
+	*to = '\0';
+	*cmdline_p = command_line;
+	strlcpy(boot_command_line, command_line, COMMAND_LINE_SIZE);
+	pr_notice("Full kernel command line: %s\n", saved_boot_cmdline);
+}
+
+static void __init rlim_init(void)
+{
+	init_task.signal->rlim[RLIMIT_P_STACK_EXT].rlim_cur = PS_RLIM_CUR;
+	init_task.signal->rlim[RLIMIT_P_STACK_EXT].rlim_max =
+			USER_P_STACKS_MAX_SIZE;
+	init_task.signal->rlim[RLIMIT_PC_STACK_EXT].rlim_cur = PCS_RLIM_CUR;
+	init_task.signal->rlim[RLIMIT_PC_STACK_EXT].rlim_max =
+			USER_PC_STACKS_MAX_SIZE;
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_DATA].rlim_cur = RLIM_INFINITY;
+	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_DATA].rlim_max = RLIM_INFINITY;
+	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_STACK].rlim_cur = _STK_LIM;
+	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_STACK].rlim_max = RLIM_INFINITY;
+	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_AS].rlim_cur = RLIM_INFINITY;
+	init_task.signal->bin_comp_rlim[BC_RLIMIT_X86_AS].rlim_max = RLIM_INFINITY;
+#endif
+}
+
+void __init setup_arch(char **cmdline_p)
+{
+	phys_addr_t kernel_phys_base;
+	extern int panic_timeout;
 	int cpu;
 
 	DebugSPRs("setup_arch()");
@@ -639,11 +689,9 @@ void __init setup_arch(char **cmdline_p)
 	get_smp_config();
 #endif
 
-	pr_notice("cpu to cpuid map: ");
-	for_each_possible_cpu(cpu)
-		pr_cont("%d->%d ", cpu, cpu_to_cpuid(cpu));
-	pr_cont("\n");
-
+	kernel_phys_base = pgd_kernel_address_to_phys(
+			&swapper_pg_dir[pgd_index(KERNEL_BASE)], KERNEL_BASE);
+	kernel_voffset = KERNEL_BASE - kernel_phys_base;
 	numa_init();
 
 #ifdef CONFIG_SMP
@@ -651,38 +699,14 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	parse_bootinfo();
+	parse_cmd_line(cmdline_p);
 
-	for (;;) {
-		if (c != ' ')
-			goto next_char;
-		if (!memcmp(from, "iolinks=", 8)) {
-			from += 8;
-			max_iolinks = simple_strtol(from, &from, 0);
-		}
-		if (!memcmp(from, "nodeiolinks=", 12)) {
-			from += 12;
-			max_node_iolinks = simple_strtol(from, &from, 0);
-		}
-	next_char:
-		c = *(from++);
-		if (!c)
-			break;
-		if (COMMAND_LINE_SIZE <= ++len)
-			break;
-		*(to++) = c;
-	}
-	*to = '\0';
-	*cmdline_p = command_line;
-	strlcpy(boot_command_line, command_line, COMMAND_LINE_SIZE);
-	pr_notice("Full kernel command line: %s\n", saved_boot_cmdline);
 
 	/* reboot on panic */
 	panic_timeout = 30;	/* 30 seconds of black screen of death */
 
 	parse_early_param();
-
 	l_setup_arch();
-
 	set_mach_type_id();
 
 	pr_notice("ARCH: E2K ");
@@ -698,26 +722,30 @@ void __init setup_arch(char **cmdline_p)
 	/* See comment above */
 	/* up_write(&uts_sem); */
 	
-	if (machine_serial_num == -1UL || machine_serial_num == 0) {
+	if (machine_serial_num == -1UL || machine_serial_num == 0)
 		pr_cont(" SERIAL # UNKNOWN\n");
-	} else {
+	else
 		pr_cont(" SERIAL # 0x%016lx\n", machine_serial_num);
-	}
 
 	printk("Kernel image check sum: %u\n",
 		bootblock_virt->info.kernel_csum);
 
-	apply_alternative_instructions();
+	pr_notice("cpu to cpuid map: ");
+	for_each_possible_cpu(cpu)
+		pr_cont("%d->%d ", cpu, cpu_to_cpuid(cpu));
+	pr_cont("\n");
+	pr_info("Kernel loaded at phys. address 0x%llx\n", kernel_phys_base);
 
-	if (machine.setup_arch != NULL) {
+	if (machine.setup_arch)
 		machine.setup_arch();
-	}
 
 	paravirt_banner();
 
 	BOOT_TRACEPOINT("Calling paging_init()");
 	paging_init();
 	BOOT_TRACEPOINT("paging_init() finished");
+
+	apply_alternative_instructions();
 
 #ifdef CONFIG_OF
 	device_tree_init();
@@ -781,6 +809,8 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	late_time_init = e2k_late_time_init;
+
+	rlim_init();
 }
 
 void __init init_IRQ(void)
@@ -807,10 +837,6 @@ void store_cpu_info(int cpu)
 
 #ifdef CONFIG_SMP
 	c->cpu = cpu;
-
-	c->mmu_last_context = CTX_FIRST_VERSION;
-	/* Flush TLB when reusing context after hotplug */
-	local_flush_tlb_all();
 #endif
 }
 

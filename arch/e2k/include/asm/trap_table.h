@@ -34,11 +34,15 @@ typedef long (*ttable_entry_args_t)(int sys_num, ...);
 static inline bool
 is_gdb_breakpoint_trap(struct pt_regs *regs)
 {
-	u64 *instr = (u64 *) GET_IP_CR0_HI(regs->crs.cr0_hi);
+	u64 __user *instr = (u64 __user *) instruction_pointer(regs);
 	u64 val;
+
+	if (!user_mode(regs))
+		return false;
 
 	if (host_get_user(val, instr, regs))
 		return false;
+
 	return (val & GDB_BREAKPOINT_STUB_MASK) == GDB_BREAKPOINT_STUB;
 }
 
@@ -80,7 +84,7 @@ native_correct_trap_return_ip(struct pt_regs *regs, unsigned long return_ip)
 		regs = current_thread_info()->pt_regs;
 		BUG_ON(regs == NULL);
 	}
-	regs->crs.cr0_hi.CR0_hi_IP = return_ip;
+	regs->crs.cr0_hi.ip = return_ip >> 3;
 }
 
 static inline int
@@ -146,12 +150,15 @@ typedef unsigned long (*protected_system_call_func)(unsigned long arg1,
 						unsigned long arg5,
 						unsigned long arg6,
 						struct pt_regs *regs);
-static inline void
-native_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
-				e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
+static inline void native_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
+		e2k_usd_lo_t usd_lo, e2k_upsr_t upsr, e2k_mem_crs_t crs)
 {
 	NATIVE_EXIT_HANDLE_SYSCALL(sbr, usd_hi.USD_hi_half, usd_lo.USD_lo_half,
-					upsr.UPSR_reg);
+				   upsr.UPSR_reg);
+	WRITE_CR0_HI_REG(crs.cr0_hi);
+	WRITE_CR0_LO_REG(crs.cr0_lo);
+	WRITE_CR1_HI_REG(crs.cr1_hi);
+	WRITE_CR1_LO_REG(crs.cr1_lo);
 }
 
 extern SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
@@ -201,11 +208,10 @@ stack_bounds_trap_enable(void)
 #define	get_ttable_entry3	((ttable_entry_args_t)native_ttable_entry3)
 #define	get_ttable_entry4	((ttable_entry_args_t)native_ttable_entry4)
 
-static inline void
-exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
-			e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
+static inline void exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
+		e2k_usd_lo_t usd_lo, e2k_upsr_t upsr, e2k_mem_crs_t crs)
 {
-	native_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr);
+	native_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr, crs);
 }
 
 static inline unsigned long

@@ -34,7 +34,7 @@ static int __init clk_rt_setup(char *s)
 	static struct task_struct *reg_task;
 	if (!s || (strcmp(s, "no") && strcmp(s, "rtc") &&
 			strcmp(s, "ext") && strcmp(s, "int"))) {
-		pr_err(KERN_ERR "Possible sclkr cmdline modes are:\n"
+		pr_err(KERN_ERR "Possible clk_rt cmdline modes are:\n"
 			"no, ext, rtc, int\n");
 		return -EINVAL;
 	}
@@ -255,9 +255,8 @@ noinline int clk_rt_register(void *new_clk_rt_src_arg)
 	safe_lo = (freq >> 2) + (freq >> 3);
 	safe_lo2 = freq - (freq >> 2);
 	while (clk_rt_lo < safe_lo || clk_rt_lo > safe_lo2) {
-		cpu_relax();
 		clk_rt_lo = read_rt_tick() & MASK_32;
-		/* ? schedule_timeout_interruptible(HZ / 2); */
+		schedule_timeout_interruptible((HZ >> 2) + (HZ >> 8));
 	}
 	raw_local_irq_restore(flags);
 	migrate_enable();

@@ -47,10 +47,12 @@ struct radeon_fbdev {
 	struct drm_framebuffer fb;
 	struct radeon_device *rdev;
 
+#ifdef CONFIG_MCST
 	struct radeon_bo *rbosys;
 	struct drm_clip_rect dirty_clip;
 	spinlock_t dirty_lock;
 	struct work_struct dirty_work;
+#endif
 };
 
 static int
@@ -72,14 +74,17 @@ radeonfb_release(struct fb_info *info, int user)
 {
 	struct radeon_fbdev *rfbdev = info->par;
 	struct radeon_device *rdev = rfbdev->rdev;
+#ifdef CONFIG_MCST
 	if (radeon_fbdev_accel)
 		cancel_work_sync(&rfbdev->dirty_work);
+#endif
 
 	pm_runtime_mark_last_busy(rdev->ddev->dev);
 	pm_runtime_put_autosuspend(rdev->ddev->dev);
 	return 0;
 }
 
+#ifdef CONFIG_MCST
 static void __radeon_dirty(struct radeon_fbdev *rfbdev,
 			  struct drm_clip_rect *c)
 {
@@ -197,17 +202,24 @@ static ssize_t radeon_fbwrite(struct fb_info *info, const char __user *buf,
 				    info->var.yres);
 	return ret;
 }
+#endif /* CONFIG_MCST */
 
 static struct fb_ops radeonfb_ops = {
 	.owner = THIS_MODULE,
 	DRM_FB_HELPER_DEFAULT_OPS,
 	.fb_open = radeonfb_open,
 	.fb_release = radeonfb_release,
+#ifdef CONFIG_MCST
 	.fb_fillrect = radeon_fillrect,
 	.fb_copyarea = radeon_copyarea,
 	.fb_imageblit = radeon_imageblit,
 	.fb_read	= fb_sys_read,
 	.fb_write	= radeon_fbwrite,
+#else
+	.fb_fillrect = drm_fb_helper_cfb_fillrect,
+	.fb_copyarea = drm_fb_helper_cfb_copyarea,
+	.fb_imageblit = drm_fb_helper_cfb_imageblit,
+#endif
 };
 
 
@@ -335,7 +347,7 @@ out_unref:
 	return ret;
 }
 
-
+#ifdef CONFIG_MCST
 static struct radeon_bo *radeon_mk_obj(struct radeon_device *rdev,
 				unsigned size, int domain,
 				uint64_t *gpu_addr, void **addr)
@@ -384,6 +396,7 @@ static void radeon_rm_obj(struct radeon_bo *obj)
 	radeon_bo_unreserve(obj);
 	radeon_bo_unref(&obj);
 }
+#endif /* CONFIG_MCST */
 
 static int radeonfb_create(struct drm_fb_helper *helper,
 			   struct drm_fb_helper_surface_size *sizes)
@@ -417,6 +430,7 @@ static int radeonfb_create(struct drm_fb_helper *helper,
 
 	rbo = gem_to_radeon_bo(gobj);
 
+#ifdef CONFIG_MCST
 	if (!rdev->accel_working)
 		radeon_fbdev_accel = 0;
 	if (radeon_fbdev_accel) {
@@ -436,6 +450,7 @@ static int radeonfb_create(struct drm_fb_helper *helper,
 		radeonfb_ops.fb_read	  = NULL;
 		radeonfb_ops.fb_write	  = NULL;
 	}
+#endif /* CONFIG_MCST */
 
 	/* okay we have an object now allocate the framebuffer */
 	info = drm_fb_helper_alloc_fbi(helper);
@@ -460,16 +475,20 @@ static int radeonfb_create(struct drm_fb_helper *helper,
 
 	memset_io(rbo->kptr, 0x0, radeon_bo_size(rbo));
 
+#ifdef CONFIG_MCST
 	if (radeon_fbdev_accel)
 		info->flags |= FBINFO_READS_FAST;
+#endif
 	info->fbops = &radeonfb_ops;
 
 	tmp = radeon_bo_gpu_offset(rbo) - rdev->mc.vram_start;
 	info->fix.smem_start = rdev->mc.aper_base + tmp;
 	info->fix.smem_len = radeon_bo_size(rbo);
 	info->screen_base = rbo->kptr;
+#ifdef CONFIG_MCST
 	if (radeon_fbdev_accel)
 		info->screen_base = rfbdev->rbosys->kptr;
+#endif
 	info->screen_size = radeon_bo_size(rbo);
 
 	drm_fb_helper_fill_info(info, &rfbdev->helper, sizes);
@@ -495,8 +514,10 @@ static int radeonfb_create(struct drm_fb_helper *helper,
 	return 0;
 
 out:
+#ifdef CONFIG_MCST
 	if (rfbdev->rbosys)
 		radeon_rm_obj(rfbdev->rbosys);
+#endif
 	if (rbo) {
 
 	}
@@ -515,11 +536,13 @@ static int radeon_fbdev_destroy(struct drm_device *dev, struct radeon_fbdev *rfb
 
 	drm_fb_helper_unregister_fbi(&rfbdev->helper);
 
+#ifdef CONFIG_MCST
 	if (rfbdev->rbosys) {
 		cancel_work_sync(&rfbdev->dirty_work);
 		radeon_rm_obj(rfbdev->rbosys);
 		rfbdev->rbosys = NULL;
 	}
+#endif
 
 	if (fb->obj[0]) {
 		radeonfb_destroy_pinned_object(fb->obj[0]);

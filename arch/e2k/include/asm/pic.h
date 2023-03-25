@@ -65,6 +65,15 @@ static inline unsigned int boot_early_pic_read_id(void)
 	else
 		return boot_apic_read_id();
 }
+
+extern void disable_local_APIC(void);
+static inline void pic_disable(void)
+{
+	if (cpu_has_epic())
+		cepic_disable();
+	else
+		disable_local_APIC();
+}
 #else
 static inline bool boot_early_pic_is_bsp(void)
 {
@@ -74,6 +83,12 @@ static inline bool boot_early_pic_is_bsp(void)
 static inline unsigned int boot_early_pic_read_id(void)
 {
 	return boot_apic_read_id();
+}
+
+extern void disable_local_APIC(void);
+static inline void pic_disable(void)
+{
+	disable_local_APIC();
 }
 #endif
 

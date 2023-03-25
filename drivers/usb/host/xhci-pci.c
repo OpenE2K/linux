@@ -599,6 +599,12 @@ static void xhci_pci_shutdown(struct usb_hcd *hcd)
 
 	xhci_shutdown(hcd);
 
+#ifdef CONFIG_MCST /* dma-fault at kexec: bug 142970 */
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+	    pdev->device == PCI_DEVICE_ID_MCST_USB_3_0)
+		pci_reset_function_locked(pdev);
+#endif
+
 	/* Yet another workaround for spurious wakeups at shutdown with HSW */
 	if (xhci->quirks & XHCI_SPURIOUS_WAKEUP)
 		pci_set_power_state(pdev, PCI_D3hot);

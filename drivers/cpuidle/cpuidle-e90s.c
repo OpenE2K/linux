@@ -29,6 +29,18 @@
 
 static struct platform_device *e90s_idle_pdev;
 
+static inline void e90s_flush_icache(void)
+{
+	__asm__ __volatile__("stxa	%%g0, [%%g0] %0"
+			     : /* No outputs */
+			     : "i" (ASI_IC_TAG));
+}
+
+static inline bool e90s_cstate_bug(void) /*Bug 139677*/
+{
+	return get_cpu_revision() == 0x20;
+}
+
 static void e90s_enter_c6(void)
 {
 	struct mm_struct *mm;
@@ -38,7 +50,6 @@ static void e90s_enter_c6(void)
 	tsb_context_switch_ctx(mm, CTX_HWBITS(mm->context));
 	local_irq_enable();
 }
-
 static int e90s_enter_idle(struct cpuidle_device *dev,
 				struct cpuidle_driver *drv, int index)
 {
@@ -51,6 +62,18 @@ static int e90s_enter_idle(struct cpuidle_device *dev,
 		break;
 	case 2:
 		state = 3;
+		if (e90s_cstate_bug()) {
+			local_irq_enable();
+			e90s_flush_icache();
+			writeq_asi(state, E90S_R2000_PWRCTRL_REG_ADDR,
+						ASI_DCU_CONTROL_REG);
+			__asm__ __volatile__(
+			"nop; nop; nop; nop; nop; nop; nop; nop;"
+			"nop; nop; nop; nop; nop; nop; nop; nop;"
+			"nop; nop; nop; nop;"
+			     : : );
+			return index;
+		}
 		break;
 	case 3:
 		state = 6;	/* Note: for R2000 index < 3 */
@@ -61,6 +84,7 @@ static int e90s_enter_idle(struct cpuidle_device *dev,
 	}
 	local_irq_enable();
 	writeq_asi(state, E90S_R2000_PWRCTRL_REG_ADDR, ASI_DCU_CONTROL_REG);
+
 	return index;
 }
 

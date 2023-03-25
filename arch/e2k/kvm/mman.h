@@ -79,37 +79,6 @@ static inline void kvm_free_gmm(struct kvm *kvm, gmm_struct_t *gmm)
 	do_free_gmm(kvm, gmm, gmmid_table);
 }
 
-static inline void do_gmm_get(gmm_struct_t *gmm)
-{
-	atomic_inc(&gmm->mm_count);
-}
-
-static inline void kvm_gmm_get(struct kvm_vcpu *vcpu, gthread_info_t *gti,
-				gmm_struct_t *gmm)
-{
-	do_gmm_get(gmm);
-	if (likely(!pv_vcpu_is_init_gmm(vcpu, gmm))) {
-		gti->gmm = gmm;
-		gti->gmm_in_release = false;
-	}
-	DebugGMM("GPID #%d guest mm #%d at %px has now %d users\n",
-		gti->gpid->nid.nr, gmm->id, gmm,
-		atomic_read(&gmm->mm_count));
-}
-static inline int do_gmm_put(struct kvm *kvm, gmm_struct_t *gmm)
-{
-	int count;
-
-	count = atomic_read(&gmm->mm_count);
-	if (unlikely(count <= 0)) {
-		pr_err("%s(): gmm #%d user's counter %d is already empty\n",
-			__func__, gmm->id, count);
-		return 0;
-	}
-	count = atomic_dec_return(&gmm->mm_count);
-	KVM_BUG_ON(count < 0);
-	return count;
-}
 static inline int kvm_do_gmm_put(struct kvm *kvm, gthread_info_t *gti,
 				 bool only_put, bool drop_and_free)
 {

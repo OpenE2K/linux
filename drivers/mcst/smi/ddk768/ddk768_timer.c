@@ -42,6 +42,7 @@ unsigned long calcTimerCounter(
  *
  */
 void timerStart(
+	volatile unsigned char __iomem *rmmio,
     timer_number_t timer,         /* which timer: 0 to 3 */
     unsigned long timerCounter,   /* Timer counter */
     unsigned long div16Enable     /* Enable the 16 divisor, time out will be increased by 16 */
@@ -63,7 +64,7 @@ void timerStart(
         | FIELD_VALUE(0, TIMER_CONTROL, DIV16, div16Enable)
         | FIELD_SET(0, TIMER_CONTROL, ENABLE, ENABLE);           /* Start the timer */
 
-    __pokeRegisterDWord(ulTimerAddr, ulTimerValue);
+	__pokeRegisterDWord(rmmio, ulTimerAddr, ulTimerValue);
 
     gTimerCounter[timer] = timerCounter;
 }
@@ -78,6 +79,7 @@ void timerStart(
  *        0 = Raw int is NOT pending.
  */
 unsigned long timerRawIntPending(
+	volatile unsigned char __iomem *rmmio,
     timer_number_t timer         /* which timer: 0 to 3 */
 )
 {  
@@ -87,7 +89,8 @@ unsigned long timerRawIntPending(
        Timer 0 address + ( timer number x 4 )
     */
     ulTimerAddr = TIMER_CONTROL + (timer << 2);
-    rawIntStatus = FIELD_GET(peekRegisterDWord(ulTimerAddr), TIMER_CONTROL, RAWINT_STATUS);
+	rawIntStatus = FIELD_GET(peekRegisterDWord(rmmio,
+							ulTimerAddr), TIMER_CONTROL, RAWINT_STATUS);
 
     return(rawIntStatus);
 }
@@ -100,6 +103,7 @@ unsigned long timerRawIntPending(
  * 
  */
 void timerClearRawInt(
+	struct smi_device *sdev,
     timer_number_t timer         /* which timer: 0 to 3 */
 )
 {  
@@ -109,10 +113,10 @@ void timerClearRawInt(
        Timer 0 address + ( timer number x 4 )
     */
     ulTimerAddr = TIMER_CONTROL + (timer << 2);
-    ulTimerValue = peekRegisterDWord(ulTimerAddr)
+	ulTimerValue = peekRegisterDWord(sdev->rmmio, ulTimerAddr)
                  & FIELD_CLEAR(TIMER_CONTROL, COUNTER); /* We don't want the current counter value */
 
-    pokeRegisterDWord(ulTimerAddr,
+	pokeRegisterDWord(sdev->rmmio, ulTimerAddr,
             ulTimerValue
           | FIELD_VALUE(0, TIMER_CONTROL, COUNTER, gTimerCounter[timer]) /* When clearing raw int, we don't want to erase the original counter value */
           | FIELD_SET(0, TIMER_CONTROL, RAWINT_STATUS, RESET));    /* Reset the raw interrupt */
@@ -123,6 +127,7 @@ void timerClearRawInt(
  *
  */
 void timerStop(
+	volatile unsigned char __iomem *rmmio,
     timer_number_t timer         /* which timer: 0 to 3 */
 )
 {  
@@ -137,7 +142,7 @@ void timerStop(
           FIELD_SET(0, TIMER_CONTROL, RAWINT_STATUS, RESET)    /* Reset the raw interrupt */
         | FIELD_SET(0, TIMER_CONTROL, ENABLE, DISABLE);        /* Stop the timer */
 
-    __pokeRegisterDWord(ulTimerAddr, ulTimerValue);
+	__pokeRegisterDWord(rmmio, ulTimerAddr, ulTimerValue);
 
     gTimerCounter[timer] = 0;
 }
@@ -148,6 +153,7 @@ void timerStop(
  * Note: When timer is disable, always read back 0.
  */
 unsigned long timerGetCounter(
+	struct smi_device *sdev,
     timer_number_t timer         /* which timer: 0 to 3 */
 )
 {  
@@ -157,7 +163,8 @@ unsigned long timerGetCounter(
        Timer 0 address + ( timer number x 4 )
     */
     ulTimerAddr = TIMER_CONTROL + (timer << 2);
-    ulCounter = FIELD_GET(peekRegisterDWord(ulTimerAddr), TIMER_CONTROL, COUNTER);
+	ulCounter = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+							ulTimerAddr), TIMER_CONTROL, COUNTER);
 
     return(ulCounter);
 }
@@ -184,6 +191,7 @@ unsigned long timerGetCounterSetting(
  * in micro-second.
  */
 void timerWait(
+	struct smi_device *sdev,
     timer_number_t timer,
     unsigned long microSeconds
 )
@@ -198,11 +206,11 @@ void timerWait(
 
     //Tick count is based on enabling DIV 16.
     //Third parameter to timerStart is 1.
-    timerStart(timer, ticks, 1);
+	timerStart(sdev->rmmio, timer, ticks, 1);
 
-    while (!timerRawIntPending(timer));
+	while (!timerRawIntPending(sdev->rmmio, timer));
 
-    timerStop(timer);
+	timerStop(sdev->rmmio, timer);
 }
 
 /* 
@@ -210,6 +218,7 @@ void timerWait(
  *
  */
 void timerWaitTicks(
+	struct smi_device *sdev,
     timer_number_t timer, /* Use timer 0, 1, 2 or 3 */
     unsigned long ticks
 )
@@ -217,11 +226,11 @@ void timerWaitTicks(
     //Counter is 28 bits only.
     ticks &= 0xFFFFFFF;
 
-    timerStart(timer, ticks, 0);
+	timerStart(sdev->rmmio, timer, ticks, 0);
 
-    while (!timerRawIntPending(timer));
+	while (!timerRawIntPending(sdev->rmmio, timer));
 
-    timerStop(timer);
+	timerStop(sdev->rmmio, timer);
 }
 
 /* 
@@ -264,14 +273,14 @@ unsigned long timerIntMask(
  * interrupt under WATCOM DOS extender.
  * 
  */
-void timerIsrTemplate(unsigned long status)
+void timerIsrTemplate(struct smi_device *sdev, unsigned long status)
 {
     if (FIELD_GET(status, INT_STATUS, TIMER0) == INT_STATUS_TIMER0_ACTIVE)
     {
         /* Perform ISR action for timer 0 here */
         incTestCounter();
 
-        timerClearRawInt(0);
+		timerClearRawInt(sdev, 0);
     }            
 
     if (FIELD_GET(status, INT_STATUS, TIMER1) == INT_STATUS_TIMER1_ACTIVE)
@@ -279,7 +288,7 @@ void timerIsrTemplate(unsigned long status)
         /* Perform ISR action for timer 1 here */
         incTestCounter();
 
-        timerClearRawInt(1);
+		timerClearRawInt(sdev, 1);
     }            
 
     if (FIELD_GET(status, INT_STATUS, TIMER2) == INT_STATUS_TIMER2_ACTIVE)
@@ -287,7 +296,7 @@ void timerIsrTemplate(unsigned long status)
         /* Perform ISR action for timer 2 here */
         incTestCounter();
 
-        timerClearRawInt(2);
+		timerClearRawInt(sdev, 2);
     }            
 
     if (FIELD_GET(status, INT_STATUS, TIMER3) == INT_STATUS_TIMER3_ACTIVE)
@@ -295,12 +304,13 @@ void timerIsrTemplate(unsigned long status)
         /* Perform ISR action for timer 3 here */
         incTestCounter();
 
-        timerClearRawInt(3);
+		timerClearRawInt(sdev, 3);
     }            
 }
 
 
 void timerWaitMsec(
+	struct smi_device *sdev,
     unsigned long milliSeconds
 )
 {
@@ -310,14 +320,15 @@ void timerWaitMsec(
     /* Calculate how many ticks are needed for the amount of time.   */
     ticks = 168000 * milliSeconds;
 
-    timerStart(timer, ticks, 0);
+	timerStart(sdev->rmmio, timer, ticks, 0);
 
-    while (!timerRawIntPending(timer));
+	while (!timerRawIntPending(sdev->rmmio, timer));
 
-    timerStop(timer);
+	timerStop(sdev->rmmio, timer);
 }
 
 void timerWaitUsec(
+	volatile unsigned char __iomem *rmmio,
     unsigned long USeconds
 )
 {
@@ -327,11 +338,11 @@ void timerWaitUsec(
     /* Calculate how many ticks are needed for the amount of time.   */
     ticks = 168 * USeconds;
 
-    timerStart(timer, ticks, 0);
+	timerStart(rmmio, timer, ticks, 0);
 
-    while (!timerRawIntPending(timer));
+	while (!timerRawIntPending(rmmio, timer));
 
-    timerStop(timer);
+	timerStop(rmmio, timer);
 }
 
 

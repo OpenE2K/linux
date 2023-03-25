@@ -13,6 +13,7 @@
 #include <asm/kvm/cpu_hv_regs_access.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
 #include <asm/pgd.h>
+#include <asm/regs_state.h>
 
 #define	DEBUG_UPSR_FP_DISABLE
 
@@ -224,6 +225,8 @@ static inline void kvm_switch_hv_mmu_pt_regs(struct kvm_sw_cpu_context *sw_ctxt)
 	mmu_reg_t u_pptb;
 	mmu_reg_t u_vptb;
 
+	KVM_BUG_ON(!MMU_IS_SEPARATE_PT());
+
 	u_pptb = NATIVE_READ_MMU_U_PPTB_REG();
 	u_vptb = NATIVE_READ_MMU_U_VPTB_REG();
 
@@ -234,30 +237,81 @@ static inline void kvm_switch_hv_mmu_pt_regs(struct kvm_sw_cpu_context *sw_ctxt)
 	sw_ctxt->sh_u_vptb = u_vptb;
 }
 
+static inline unsigned long
+kvm_switch_to_guest_mmu_pid(struct kvm_vcpu *vcpu, thread_info_t *ti)
+{
+	mm_context_t *gmm_context;
+	enum reload_pid_mode mode;
+	unsigned long flags;
+	u64 context;
+
+	debug_inject_half_spec_loads(false);
+
+	raw_all_irq_save(flags);
+	gmm_context = pv_vcpu_get_gmm_context(vcpu);
+#ifdef	CONFIG_SMP
+	/* Start flush ipis for the guest mm */
+	cpumask_set_cpu(smp_processor_id(), pv_vcpu_get_gmm_cpumask(vcpu));
+	/* See comment in switch_mm() */
+	smp_mb__after_atomic();
+#endif	/* CONFIG_SMP */
+	if (unlikely(test_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID))) {
+		/* get new MMU context to exclude access to guest kernel */
+		/* virtual space from guest user */
+		mode = MMU_PID_RELOAD_FORCED__NO_UPDATE;
+	} else {
+		mode = MMU_PID_RELOAD_CHECK__NO_UPDATE;
+	}
+	context = get_mmu_pid_irqs_off(gmm_context, mode);
+	set_MMU_CONT(CTX_HARDWARE(context));
+	raw_all_irq_restore(flags);
+	return context;
+}
+
 static inline void
 kvm_switch_pv_mmu_pt_regs_to_guest(struct kvm_sw_cpu_context *sw_ctxt,
 				   struct thread_info *ti)
 {
 	struct kvm_vcpu *vcpu = ti->vcpu;
-	mmu_reg_t u_pptb, u_vptb, root;
+	mmu_reg_t root;
 
-	u_pptb = NATIVE_READ_MMU_U_PPTB_REG();
-	u_vptb = NATIVE_READ_MMU_U_VPTB_REG();
+	/* No need to save host registers in 'sw_regs' - we already know
+	 * that host in PV case executes with %pid=0 and kernel %pptb */
 
 	if (likely(test_ti_status_flag(ti, TS_HOST_TO_GUEST_USER))) {
 		root = kvm_get_space_type_spt_u_root(vcpu);
-		KVM_BUG_ON(is_paging(vcpu) &&
-			   root != pv_vcpu_get_gmm(ti->vcpu)->root_hpa);
+		KVM_BUG_ON(root != pv_vcpu_get_gmm(vcpu)->root_hpa);
 	} else {
-		root = kvm_get_space_type_spt_gk_root(vcpu);
-		KVM_BUG_ON(is_paging(vcpu) &&
-			   root != pv_vcpu_get_gmm(vcpu)->gk_root_hpa);
+		gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+		gmm_struct_t *gmm;
+
+		if (unlikely(gti->gmm_in_release)) {
+			root = kvm_convert_to_init_gmm(vcpu, gti);
+		} else {
+			root = kvm_get_space_type_spt_gk_root(vcpu);
+		}
+		gmm = pv_vcpu_get_gmm(vcpu);
+		if (unlikely(!is_paging(vcpu))) {
+			KVM_BUG_ON(root != vcpu->kvm->arch.nonp_root_hpa);
+		} else if (pv_vcpu_is_init_gmm(vcpu, gmm)) {
+			KVM_BUG_ON(root != gmm->root_hpa);
+		} else {
+			KVM_BUG_ON(root != gmm->gk_root_hpa);
+		}
 	}
 	NATIVE_WRITE_MMU_U_PPTB_REG(root);
 	NATIVE_WRITE_MMU_U_VPTB_REG(sw_ctxt->sh_u_vptb);
 
-	sw_ctxt->sh_u_pptb = u_pptb;
-	sw_ctxt->sh_u_vptb = u_vptb;
+	kvm_switch_to_guest_mmu_pid(vcpu, ti);
+}
+
+static inline void kvm_switch_to_host_mmu_pid(struct kvm_vcpu *vcpu,
+						struct mm_struct *mm)
+{
+#ifdef	CONFIG_SMP
+	/* Stop receiving flush ipis for the guest mm */
+	cpumask_clear_cpu(smp_processor_id(), pv_vcpu_get_gmm_cpumask(vcpu));
+#endif	/* CONFIG_SMP */
 }
 
 static inline void
@@ -267,19 +321,35 @@ kvm_switch_pv_mmu_pt_regs_to_host(struct kvm_sw_cpu_context *sw_ctxt,
 	struct kvm_vcpu *vcpu = ti->vcpu;
 	mmu_reg_t u_pptb, u_vptb;
 
+	/* We have switched registers already to host values when entering,
+	 * so there is no need to update registers here - instead just
+	 * update the values in 'sw_ctxt' */
 	u_vptb = NATIVE_READ_MMU_U_VPTB_REG();
 	if (likely(test_ti_status_flag(ti, TS_HOST_TO_GUEST_USER))) {
 		u_pptb = kvm_get_space_type_spt_u_root(vcpu);
-		KVM_BUG_ON(is_paging(vcpu) &&
-			   u_pptb != pv_vcpu_get_gmm(ti->vcpu)->root_hpa);
+		KVM_BUG_ON(u_pptb != pv_vcpu_get_gmm(ti->vcpu)->root_hpa);
 	} else {
-		u_pptb = kvm_get_space_type_spt_gk_root(vcpu);
-		KVM_BUG_ON(is_paging(vcpu) &&
-			   u_pptb != pv_vcpu_get_gmm(vcpu)->gk_root_hpa);
+		gthread_info_t *gti = pv_vcpu_get_gti(vcpu);
+		gmm_struct_t *gmm;
+
+		if (unlikely(gti->gmm_in_release)) {
+			u_pptb = kvm_convert_to_init_gmm(vcpu, gti);
+		} else {
+			u_pptb = kvm_get_space_type_spt_gk_root(vcpu);
+		}
+		gmm = pv_vcpu_get_gmm(vcpu);
+
+		if (unlikely(!is_paging(vcpu))) {
+			KVM_BUG_ON(u_pptb != vcpu->kvm->arch.nonp_root_hpa);
+		} else if (pv_vcpu_is_init_gmm(vcpu, gmm)) {
+			KVM_BUG_ON(u_pptb != gmm->root_hpa);
+		} else {
+			KVM_BUG_ON(u_pptb != gmm->gk_root_hpa);
+		}
 	}
 
-	NATIVE_WRITE_MMU_U_PPTB_REG(sw_ctxt->sh_u_pptb);
-	NATIVE_WRITE_MMU_U_VPTB_REG(sw_ctxt->sh_u_vptb);
+	/* return to hypervisor MMU roots & context to emulate hw intercept */
+	kvm_switch_to_host_mmu_pid(vcpu, thread_info_task(ti)->mm);
 
 	sw_ctxt->sh_u_pptb = u_pptb;
 	sw_ctxt->sh_u_vptb = u_vptb;
@@ -317,6 +387,10 @@ kvm_switch_pv_mmu_regs_to_guest(struct kvm_sw_cpu_context *sw_ctxt,
 {
 	if (likely(!sw_ctxt->no_switch_pt)) {
 		kvm_switch_pv_mmu_pt_regs_to_guest(sw_ctxt, ti);
+	} else {
+		struct kvm_vcpu *vcpu = ti->vcpu;
+
+		kvm_switch_to_guest_mmu_pid(vcpu, ti);
 	}
 	if (switch_tc) {
 		kvm_switch_mmu_tc_regs(sw_ctxt);
@@ -329,49 +403,14 @@ kvm_switch_pv_mmu_regs_to_host(struct kvm_sw_cpu_context *sw_ctxt,
 {
 	if (likely(!sw_ctxt->no_switch_pt)) {
 		kvm_switch_pv_mmu_pt_regs_to_host(sw_ctxt, ti);
+	} else {
+		struct kvm_vcpu *vcpu = ti->vcpu;
+
+		kvm_switch_to_host_mmu_pid(vcpu, thread_info_task(ti)->mm);
 	}
 	if (switch_tc) {
 		kvm_switch_mmu_tc_regs(sw_ctxt);
 	}
-}
-
-static inline void kvm_switch_to_guest_mmu_pid(struct kvm_vcpu *vcpu,
-					       struct thread_info *ti)
-{
-	mm_context_t *gmm_context;
-	unsigned long mask, flags;
-	int cpu = raw_smp_processor_id();
-
-	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
-		pgd_t *pgd;
-
-		if (test_ti_status_flag(ti, TS_HOST_TO_GUEST_USER)) {
-			/* switch to guest user, guest kernel pgds should */
-			/* be zeroed at user root */
-			pgd = (pgd_t *)__va(kvm_get_space_type_spt_u_root(vcpu));
-		} else {
-			pgd = (pgd_t *)__va(kvm_get_space_type_spt_gk_root(vcpu));
-		}
-		copy_user_pgd_to_kernel_root_pt(pgd);
-	}
-	raw_all_irq_save(flags);
-	gmm_context = pv_vcpu_get_gmm_context(vcpu);
-#ifdef	CONFIG_SMP
-	/* Stop flush ipis for the guest mm */
-	cpumask_set_cpu(cpu, pv_vcpu_get_gmm_cpumask(vcpu));
-	/* This barrier could be smp_mb__after_atomic() ..., */
-	/* see arch/e2k/iclude/asm/mmu_context.h */
-	smp_mb();
-#endif	/* CONFIG_SMP */
-	if (unlikely(test_ti_status_flag(ti, TS_HOST_SWITCH_MMU_PID))) {
-		/* get new MMU context to exclude access to guest kernel */
-		/* virtual space from guest user */
-		mask = get_new_mmu_pid(gmm_context, cpu);
-	} else {
-		mask = get_mmu_pid(gmm_context, cpu);
-	}
-	reload_context_mask(mask);
-	raw_all_irq_restore(flags);
 }
 
 static inline unsigned long kvm_get_guest_mmu_pid(struct kvm_vcpu *vcpu)
@@ -380,28 +419,6 @@ static inline unsigned long kvm_get_guest_mmu_pid(struct kvm_vcpu *vcpu)
 
 	gmm_context = pv_vcpu_get_gmm_context(vcpu);
 	return gmm_context->cpumsk[smp_processor_id()];
-}
-
-static inline void kvm_switch_to_host_mmu_pid(struct kvm_vcpu *vcpu,
-							struct mm_struct *mm)
-{
-	unsigned long mask, flags;
-	int cpu = raw_smp_processor_id();
-
-	if (unlikely(vcpu->arch.sw_ctxt.no_switch_pt)) {
-		copy_user_pgd_to_kernel_root_pt(mm->pgd);
-	}
-	raw_all_irq_save(flags);
-#ifdef	CONFIG_SMP
-	/* Start receiving flush ipis for the guest mm */
-	cpumask_clear_cpu(cpu, pv_vcpu_get_gmm_cpumask(vcpu));
-	/* This barrier could be smp_mb__after_atomic() ..., */
-	/* see arch/e2k/iclude/asm/mmu_context.h */
-	smp_mb();
-#endif	/* CONFIG_SMP */
-	mask = get_mmu_context(mm, cpu);
-	reload_context_mask(mask);
-	raw_all_irq_restore(flags);
 }
 
 #ifdef	CONFIG_CLW_ENABLE
@@ -485,9 +502,6 @@ static inline void host_guest_enter(struct thread_info *ti,
 
 		E2K_FLUSHTS;
 
-		/* For hypercalls skip the extended part. */
-		HOST_RESTORE_HOST_GREGS(ti);
-
 		NATIVE_RESTORE_INTEL_REGS(sw_ctxt);
 
 		/* compilation units context */
@@ -504,6 +518,9 @@ static inline void host_guest_enter(struct thread_info *ti,
 				kvm_switch_hv_mmu_regs(sw_ctxt, vcpu->is_hv);
 			}
 		}
+
+		/* For hypercalls skip the extended part. */
+		HOST_RESTORE_HOST_GREGS(ti);
 	} else if (flags & FULL_CONTEXT_SWITCH) {
 
 		/*
@@ -516,11 +533,6 @@ static inline void host_guest_enter(struct thread_info *ti,
 #endif
 
 		E2K_FLUSHTS;
-
-		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
-			/* For interceptions restore extended part */
-			NATIVE_RESTORE_KERNEL_GREGS(&ti->k_gregs);
-		}
 
 		NATIVE_RESTORE_INTEL_REGS(sw_ctxt);
 
@@ -555,6 +567,11 @@ static inline void host_guest_enter(struct thread_info *ti,
 			NATIVE_RESTORE_AADS(&sw_ctxt->aau_context);
 		}
 #endif
+
+		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
+			/* For interceptions restore extended part */
+			NATIVE_RESTORE_KERNEL_GREGS(&ti->k_gregs);
+		}
 	} else {
 		/*
 		 * Return from emulation of interseption to paravirtualized
@@ -664,7 +681,6 @@ static inline void host_guest_exit(struct thread_info *ti,
 			}
 		}
 	} else if (flags & FULL_CONTEXT_SWITCH) {
-
 		/*
 		 * Interceptions - hardware support is enabled
 		 */
@@ -814,6 +830,8 @@ pv_vcpu_save_host_context(struct kvm_vcpu *vcpu, gthread_info_t *cur_gti)
 	cur_gti->signal.in_work = vcpu->arch.host_ctxt.signal.in_work;
 	cur_gti->signal.syscall_num = vcpu->arch.host_ctxt.signal.syscall_num;
 	cur_gti->signal.in_syscall = vcpu->arch.host_ctxt.signal.in_syscall;
+	cur_gti->usr_pfault_jump = current->thread.usr_pfault_jump;
+	cur_gti->recovery_pfault_jump = vcpu->arch.mmu.recovery_pfault_jump;
 }
 
 static inline void
@@ -826,6 +844,8 @@ pv_vcpu_restore_host_context(struct kvm_vcpu *vcpu, gthread_info_t *next_gti)
 	vcpu->arch.host_ctxt.signal.in_work = next_gti->signal.in_work;
 	vcpu->arch.host_ctxt.signal.syscall_num = next_gti->signal.syscall_num;
 	vcpu->arch.host_ctxt.signal.in_syscall = next_gti->signal.in_syscall;
+	current->thread.usr_pfault_jump = next_gti->usr_pfault_jump;
+	vcpu->arch.mmu.recovery_pfault_jump = next_gti->recovery_pfault_jump;
 }
 
 static inline void
@@ -1102,11 +1122,15 @@ host_return_to_injected_guest_trap(struct thread_info *ti, pt_regs_t *regs)
 	}
 
 	/* it need return to start handling of new injected trap */
-	if (test_gti_thread_flag(gti, GTIF_KERNEL_THREAD) ||
-			pv_vcpu_trap_on_guest_kernel(regs)) {
+	if (pv_vcpu_trap_on_guest_kernel(regs)) {
 		/* return to recursive injected trap at guest kernel mode */
 		/* so all guest stacks were already switched to */
 		return false;
+	}
+	if (test_gti_thread_flag(gti, GTIF_KERNEL_THREAD)) {
+		/* the guest user thread can be in the completion stage */
+		/* and switched to kernel init mm as kernel thread */
+		return !pv_vcpu_trap_on_guest_kernel(regs);
 	}
 
 	/* return from host trap to injected trap at user mode */
@@ -1181,8 +1205,6 @@ host_trap_guest_exit_trap(struct thread_info *ti, struct pt_regs *regs)
 		host_trap_pv_vcpu_exit_trap(ti, regs);
 	}
 
-	host_switch_trap_enable_mask(ti, regs, true);
-
 	/* restore global regs of native kernel */
 	native_trap_guest_enter(ti, regs, EXIT_FROM_TRAP_SWITCH);
 }
@@ -1238,9 +1260,6 @@ host_trap_guest_exit(struct thread_info *ti, struct pt_regs *regs,
 	 * Trap on paravirtualized guest VCPU is interpreted as intercept
 	 */
 	kvm_emulate_pv_vcpu_intc(ti, regs, trap);
-
-	/* only after switch to host MMU context at previous function */
-	host_switch_trap_enable_mask(ti, regs, false);
 }
 
 static inline void __guest_exit(struct thread_info *ti,
@@ -1259,9 +1278,7 @@ static inline bool host_guest_syscall_enter(struct pt_regs *regs,
 	clear_ts_flag(TS_HOST_AT_VCPU_MODE);
 
 	vcpu = current_thread_info()->vcpu;
-	__guest_exit(current_thread_info(), &vcpu->arch, 0);
-	/* return to hypervisor MMU context to emulate intercept */
-	kvm_switch_to_host_mmu_pid(vcpu, current->mm);
+	__guest_exit(current_thread_info(), &vcpu->arch, DONT_MMU_CONTEXT_SWITCH);
 	kvm_set_intc_emul_flag(regs);
 
 	vcpu->mode = OUTSIDE_GUEST_MODE;

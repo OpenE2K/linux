@@ -2844,32 +2844,21 @@ write_ILCR_reg(e2k_ilcr_t ILCR)
 #define	NATIVE_READ_CURRENT_REG() \
 ({ \
 	struct thread_info *TI; \
-	TI = (struct thread_info *)NATIVE_READ_CURRENT_REG_VALUE(); \
+	TI = task_thread_info((struct task_struct *)NATIVE_READ_CURRENT_REG_VALUE()); \
 	TI; \
 })
 #define	READ_CURRENT_REG() \
 ({ \
 	struct thread_info *TI; \
-	TI = (struct thread_info *)READ_CURRENT_REG_VALUE(); \
+	TI = task_thread_info((struct task_struct *)READ_CURRENT_REG_VALUE()); \
 	TI; \
 })
 #define	BOOT_READ_CURRENT_REG() \
 ({ \
 	struct thread_info *TI; \
-	TI = (struct thread_info *)BOOT_READ_CURRENT_REG_VALUE(); \
+	TI = task_thread_info((struct task_struct *)BOOT_READ_CURRENT_REG_VALUE()); \
 	TI; \
 })
-
-static	inline	struct thread_info *
-read_current_reg(void)
-{
-	return READ_CURRENT_REG();
-}
-static	inline	struct thread_info *
-boot_read_current_reg(void)
-{
-	return BOOT_READ_CURRENT_REG();
-}
 
 #define	NATIVE_SET_OSR0_REG_VALUE(TI)	\
 		NATIVE_NV_WRITE_OSR0_REG_VALUE(TI)

@@ -326,7 +326,7 @@ static __interrupt notrace void dump_u32_no_stack(u32 num)
 }
 
 static arch_spinlock_t dump_lock = __ARCH_SPIN_LOCK_UNLOCKED;
-static __interrupt notrace void dump_debug_info_no_stack(void)
+static __always_inline __interrupt notrace void dump_debug_info_no_stack(void)
 {
 	u64 usd_lo_base;
 	e2k_cr0_hi_t cr0_hi;
@@ -458,6 +458,7 @@ static void kernel_hw_stack_fatal_error(struct pt_regs *regs,
 	NATIVE_WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_ENABLED));
 	raw_local_irq_enable();
 
+	/* Enable emergency console and avoid stack print from panic() */
 	bust_spinlocks(1);
 
 	if (kstack_pf_addr) {
@@ -608,8 +609,12 @@ void do_notify_resume(struct pt_regs *regs)
  * So, it needs to switch to kernel stacks
  */
 void notrace __irq_entry
-user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
+user_trap_handler(struct pt_regs *regs)
 {
+#if defined(CONFIG_VIRTUALIZATION) && !defined(CONFIG_PARAVIRT_GUEST) && \
+    !defined(CONFIG_KVM_GUEST_KERNEL)
+	struct thread_info *thread_info = current_thread_info();
+#endif
 	struct trap_pt_regs	*trap;
 #if defined(CONFIG_KERNEL_TIMES_ACCOUNT) || defined(CONFIG_E2K_PROFILING)
 	register e2k_clock_t	clock = NATIVE_READ_CLKR_REG_VALUE();
@@ -810,9 +815,6 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	}
 #endif
 
-	/* Update run state info, if trap occured on guest kernel */
-	SET_RUNSTATE_IN_USER_TRAP();
-
 	BUILD_BUG_ON(sizeof(enum ctx_state) != sizeof(trap->prev_state));
 	trap->prev_state = exception_enter();
 
@@ -838,6 +840,9 @@ user_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		NATIVE_WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_ENABLED));
 		do_exit(SIGKILL);
 	}
+
+	/* Update run state info, if trap occured on guest kernel */
+	SET_RUNSTATE_IN_USER_TRAP();
 
 	/*
 	 * This will enable interrupts
@@ -898,6 +903,8 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	register e2k_clock_t	clock = NATIVE_READ_CLKR_REG_VALUE();
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 	e2k_cr0_hi_t cr0_hi;
+	e2k_cr1_lo_t cr1_lo;
+	e2k_cr1_hi_t cr1_hi;
 #ifdef CONFIG_USE_AAU
 	e2k_aalda_t *aaldas;
 	e2k_aau_t *aau_regs;
@@ -1007,7 +1014,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * current pt_regs structure
 	 */
         read_ticks(clock);
-	exceptions = SAVE_TIRS(trap->TIRs, trap->nr_TIRs, false);
+        exceptions = SAVE_TIRS(trap->TIRs, trap->nr_TIRs, false);
 	nmi = exceptions & non_maskable_exc_mask;
 	hw_overflow = unlikely(exceptions & (exc_chain_stack_bounds_mask |
 					     exc_proc_stack_bounds_mask));
@@ -1032,8 +1039,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 			trace_tir_ip_trace(i);
 	}
 	UNFREEZE_TIRs();
-
-	cr0_hi = regs->crs.cr0_hi;
 
 #ifdef CONFIG_USE_AAU
 	/* It's important to save AAD before all call operations. */
@@ -1063,9 +1068,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * Note that we cannot do this before saving AAU. */
 	if (cpu_has(CPU_HWBUG_L1I_STOPS_WORKING))
 		E2K_DISP_CTPRS();
-
-	/* Update run state info, if trap occured on guest kernel */
-	SET_RUNSTATE_IN_KERNEL_TRAP(to_save_runstate);
 
 	psp_hi = regs->stacks.psp_hi;
 	pcsp_hi = regs->stacks.pcsp_hi;
@@ -1102,6 +1104,9 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #ifdef CONFIG_CLI_CHECK_TIME
 	tt0_prolog_ticks(E2K_GET_DSREG(clkr) - start_tick);
 #endif
+
+	/* Update run state info, if trap occured on guest kernel */
+	SET_RUNSTATE_IN_KERNEL_TRAP(to_save_runstate);
 
 	/*
 	 * This will enable non-maskable interrupts if (!nmi)
@@ -1165,6 +1170,24 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	}
 	RETURN_TO_KERNEL_UPSR(upsr);
 
+#ifdef CONFIG_USE_AAU
+	native_clear_apb();
+#endif
+
+	cr0_hi = regs->crs.cr0_hi;
+	cr1_lo = regs->crs.cr1_lo;
+	cr1_hi = regs->crs.cr1_hi;
+
+	/*
+	 * Hardware can lose singlestep flag on interrupt if it
+	 * arrives earlier, so we must always manually reset it.
+	 */
+	if (cpu_has(CPU_HWBUG_SS) && test_ts_flag(TS_SINGLESTEP_KERNEL))
+		AS(cr1_lo).ss = 1;
+
+	/* Update run state info, if trap occured on guest kernel */
+	SET_RUNSTATE_OUT_KERNEL_TRAP(to_save_runstate);
+
 	/*
 	 * Dequeue current pt_regs structure and previous
 	 * regs will be now actuale
@@ -1187,24 +1210,14 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	E2K_SAVE_CLOCK_REG(trap_times->end);
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 
-	/* Update run state info, if trap occured on guest kernel */
-	SET_RUNSTATE_OUT_KERNEL_TRAP(to_save_runstate);
+	/* MMU registers must be written with not active CLW/AAU */
+	uaccess_enable_in_kernel_trap(regs);
 
-	if (unlikely(AW(cr0_hi) != AW(regs->crs.cr0_hi)))
-		NATIVE_NV_NOIRQ_WRITE_CR0_HI_REG(regs->crs.cr0_hi);
-	if (unlikely(cpu_has(CPU_HWBUG_SS) &&
-		     test_ts_flag(TS_SINGLESTEP_KERNEL))) {
-		/*
-		 * Hardware can lose singlestep flag on interrupt if it
-		 * arrives earlier, so we must always manually reset it.
-		 */
-		e2k_cr1_lo_t cr1_lo = READ_CR1_LO_REG();
-		AS(cr1_lo).ss = 1;
-		WRITE_CR1_LO_REG(cr1_lo);
-	}
+	WRITE_CR0_HI_REG(cr0_hi);
+	WRITE_CR1_LO_REG(cr1_lo);
+	WRITE_CR1_HI_REG(cr1_hi);
 
 #ifdef CONFIG_USE_AAU
-	native_clear_apb();
 	if (cpu_has(CPU_HWBUG_AAU_AALDV))
 		__E2K_WAIT(_ma_c);
 	if (aau_working(aasr)) {
@@ -1389,31 +1402,43 @@ static inline void get_futex_mask(long call, long *mask_type, long *mask_align,
 static inline int
 fetch_pm_robust_entry(long __user **entry, long __user *head, unsigned int *pi)
 {
+	e2k_ptr_t descr, khdtop;
 	long addr;
-	if (convert_array(head, &addr, 16, 1, 1, 0x3, 0x3)) {
-		long tmp[2];
-		if (copy_from_user_with_tags(tmp, head, 16) == 0) {
-			long lo, hi;
-			int ltag, htag;
-			NATIVE_LOAD_VAL_AND_TAGD(tmp, lo, ltag);
-			NATIVE_LOAD_VAL_AND_TAGD(&tmp[1], hi, htag);
+	int ltag, htag = 0;
 
-			printk(KERN_DEBUG "Fetch pm_robust_entry failed with AP == <%x> 0x%lx : <%x> 0x%lx\n",
-				ltag, tmp[0], htag, tmp[1]);
-		}
-
+	if (copy_from_user_with_tags(&khdtop, head, 16) != 0) {
+		pr_debug("%s failed with head == 0x%lx\n", __func__, head);
 		return -EFAULT;
 	}
 
-	*entry = (long __user *) (addr & ~1);
+	NATIVE_LOAD_VAL_AND_TAGD(&khdtop.word.lo, descr.word.lo, ltag);
+	NATIVE_LOAD_VAL_AND_TAGD(&khdtop.word.hi, descr.word.hi, htag);
+
+	if ((descr.word.lo == 0) && (descr.word.hi == 0)) {
+		/* ignoring empty descriptor: */
+		addr = 0;
+	} else if ((ltag != E2K_AP_LO_ETAG) || (htag != E2K_AP_HI_ETAG)) {
+		goto err_out;
+	} else {
+		/* replacing descriptor with 64-bit pointer: */
+		addr = E2K_PTR_PTR(descr, GET_SBR_HI());
+	}
+
 	*pi = (unsigned int) addr & 1;
+	if (put_user((addr & ~1), (long __user *) entry))
+		goto err_out;
 
 	return 0;
+
+err_out:
+	pr_debug("%s() failed with AP == <%x> 0x%llx : <%x> 0x%llx (head == 0x%lx)\n",
+	       __func__, ltag, descr.word.lo, htag, descr.word.hi, head);
+	return -EFAULT;
 }
 
 static void __user *pm_futex_uaddr(long __user *entry, long futex_offset)
 {
-	compat_uptr_t base = (long) entry;
+	compat_uptr_t __user base = (long __user) entry;
 	void __user *uaddr = (void __user *) (base + futex_offset);
 
 	return uaddr;
@@ -1453,7 +1478,7 @@ void pm_exit_robust_list(struct task_struct *curr)
 	 * rid of this limiation when (sub)structures containing no APs are
 	 * converted.
 	 */
-	if (get_user(futex_offset, (long *) &head[2])) {
+	if (get_user(futex_offset, (long __user *) &head[2])) {
 		DbgSCP_ALERT("failed to read from 0x%lx !!!\n",
 			     (uintptr_t) &head[2]);
 		return;
@@ -1620,6 +1645,8 @@ do { \
 	read_ticks(clock1);
 	info_save_stack_reg(clock1);
 #endif
+	/* Must be done before opening interrupts: we want kernel to
+	 * always have proper pt_regs, even in kernel trap handler. */
 	current_thread_info()->pt_regs = regs;
 	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_ENABLED));
 
@@ -2080,28 +2107,22 @@ nr_mmap_out:
 			 * the second one is child_tidptr. The third
 			 * argument (tls) requires special handling. */
 			if (arg1 & CLONE_SETTLS) {
-				int tls_lo_tag, tls_hi_tag;
+				u32 tls_tag;
 				u64 tls_lo, tls_hi;
 
 				/* Copy TLS argument with tags. */
-				TRY_USR_PFAULT {
-					NATIVE_LOAD_TAGGED_QWORD_AND_TAGS(
-						((u64 *) args_ptr) + 4,
-						tls_lo, tls_hi,
-						tls_lo_tag, tls_hi_tag);
-				} CATCH_USR_PFAULT {
+				if (get_user_tagged_16(tls_lo, tls_hi, tls_tag,
+						((u64 *) args_ptr) + 4)) {
 					rval = -EFAULT;
 					break;
-				} END_USR_PFAULT
+				}
 
 				/* Check that the pointer is good. */
 				tls = e2k_ptr_ptr(tls_lo, tls_hi, 4);
 				tls_size = e2k_ptr_size(tls_lo, tls_hi, 4);
-				if (((tls_hi_tag << 4) | tls_lo_tag) != ETAGAPQ
-						|| tls_size < sizeof(int)) {
+				if (tls_tag != ETAGAPQ || tls_size < sizeof(int)) {
 					DbgSCP(" Bad TLS pointer: size=%d, tag=%d\n",
-						tls_size,
-						(tls_hi_tag << 4) | tls_lo_tag);
+						tls_size, tls_tag);
 					break;
 				}
 			}
@@ -2366,7 +2387,8 @@ nr_mmap_out:
 			break;
 
 		rval = protected_sys_rt_sigaction_ex((int)arg1,
-				(const void *)ptr, (void *)ptr2, (size_t) arg6);
+				(const void __user *)ptr,
+				(void __user *)ptr2, (size_t) arg6);
 		DbgSCP("protected_sys_rt_sigaction() rval = %ld\n", rval);
 		break;
 	}
@@ -3269,8 +3291,7 @@ static inline int null_prot_ptr(u32 tag, u64 arg)
  * fatal    - signal to let caller know that this argument is wrong, and
  *                    it would be unsafe to proceed with the system call.
  */
-static inline
-unsigned long get_protected_ARG(u16 sys_num, u64 tag, u32 mask, u8 a_num,
+static unsigned long get_protected_ARG(u16 sys_num, u64 tag, u32 mask, u8 a_num,
 			     unsigned long descr_lo, unsigned long descr_hi,
 			     long min_size, u64 sbr_hi, u8 *fatal)
 {
@@ -3422,12 +3443,12 @@ int check_arg_descr_size(int sys_num, int arg_num, int neg_size,
 	if (!PM_SYSCALL_WARN_ONLY) {
 		e2k_ptr_lo_t descr_lo;
 		e2k_ptr_hi_t descr_hi;
-		void *addr;
+		void __user *addr;
 
 		descr_lo.word = regs->args[arg_num * 2 - 1];
 		descr_hi.word = regs->args[arg_num * 2];
-		addr = (void *)(descr_lo.fields.ap.base + descr_hi.fields.size);
-		force_sig_bnderr(addr, (void *)descr_lo.fields.ap.base, addr);
+		addr = (void __user *)(descr_lo.fields.ap.base + descr_hi.fields.size);
+		force_sig_bnderr(addr, (void __user *)descr_lo.fields.ap.base, addr);
 	}
 
 	if (adjust_bufsize)
@@ -3519,6 +3540,8 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 		size2 = sys_protcall_args[sys_num].size2;
 	}
 
+	/* Must be done before opening interrupts: we want kernel to
+	 * always have proper pt_regs, even in kernel trap handler. */
 	current_thread_info()->pt_regs = regs;
 	WRITE_PSR_IRQ_BARRIER(AW(E2K_KERNEL_PSR_ENABLED));
 
@@ -3770,41 +3793,33 @@ static void get_socketcall_mask(long call, long *mask_type, long *mask_align,
 }
 
 notrace __section(".entry.text")
-static long check_select_fs(e2k_ptr_t *fds_p, fd_set *fds[3])
+static long check_select_fs(e2k_ptr_t __user *fds_p, fd_set *fds[3])
 {
-	volatile int res = 0;
+	e2k_ptr_t val;
+	u32 tag;
 	int i;
 
-	/* Now we'll touch user addresses. Let's do it carefuly */
-	TRY_USR_PFAULT {
-		for (i = 0; i < 3; i++, fds_p++) {
-			if (AWP(fds_p).lo == 0
-			    && AWP(fds_p).hi == 0
-			    && (NATIVE_LOAD_TAGD(&AWP(fds_p).hi) == 0)
-			    && (NATIVE_LOAD_TAGD(&AWP(fds_p).lo) == 0)) {
-				fds[i] = (fd_set *) 0;
-				continue;
-			}
+	for (i = 0; i < 3; i++) {
+		if (get_user_tagged_16(val.lo, val.hi, tag, &fds_p[i]))
+			return -EFAULT;
 
-			if ((NATIVE_LOAD_TAGD(&AWP(fds_p).hi) != E2K_AP_HI_ETAG) ||
-			    (NATIVE_LOAD_TAGD(&AWP(fds_p).lo) != E2K_AP_LO_ETAG)) {
-				DbgSCP(" No desk fds[%d]; EINVAL\n", i);
-				res = -EINVAL;
-				break;
-			}
-			if (ASP(fds_p).size - ASP(fds_p).curptr <
-					sizeof (fd_set)) {
-				DbgSCP("  Too small fds[%d];\n", i);
-				res = -EINVAL;
-				break;
-			}
-			fds[i] = (fd_set *)E2K_PTR_PTR(fds_p[i], GET_SBR_HI());
+		if (!val.lo && !val.hi && tag == ETAGNPQ) {
+			fds[i] = NULL;
+			continue;
 		}
-	} CATCH_USR_PFAULT {
-		res = -EINVAL;
-	} END_USR_PFAULT
+		if (tag != ETAGAPQ) {
+			DbgSCP(" No desk fds[%d]; EINVAL\n", i);
+			return -EINVAL;
+		}
+		if (val.size - val.curptr < sizeof(fd_set)) {
+			DbgSCP("  Too small fds[%d];\n", i);
+			return -EINVAL;
+		}
 
-	return res;
+		fds[i] = (fd_set *) E2K_PTR_PTR(val, GET_SBR_HI());
+	}
+
+	return 0;
 }
 
 #define get_user_space(x)	arch_compat_alloc_user_space(x)
@@ -4294,7 +4309,7 @@ static long do_protected_syscall(unsigned long sys_num, const long arg1,
 		if (!size)
 			return -EINVAL;
 
-		rval = check_select_fs((e2k_ptr_t *) ptr, fds);
+		rval = check_select_fs((e2k_ptr_t __user *) ptr, fds);
 		if (rval)
 			return -EINVAL;
 
@@ -4329,7 +4344,7 @@ static long do_protected_syscall(unsigned long sys_num, const long arg1,
 			return rval;
 		}
 
-		rval = check_select_fs((e2k_ptr_t *) ptr, fds);
+		rval = check_select_fs((e2k_ptr_t __user *) ptr, fds);
 		if (rval)
 			return -EINVAL;
 
@@ -4538,6 +4553,11 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 	if (unlikely(guest_enter)) {
 		/* the system call is from guest and syscall is injecting */
 		pv_vcpu_syscall_intc(current_thread_info(), regs);
+
+		/* Disable interrupts:
+		 *  - pt_regs must be not NULL while interrupts are enabled;
+		 *  - switch to guest page tables under closed interrupts. */
+		raw_all_irq_disable();
 		current_thread_info()->pt_regs = NULL;
 		guest_syscall_inject(current_thread_info(), regs);
 		unreachable();
@@ -4595,24 +4615,18 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 void notrace __noreturn
 finish_syscall_sw_fill(void)
 {
-	struct pt_regs *regs;
-	restore_caller_t from;
-	bool return_to_user;
-	bool ts_host_at_vcpu_mode;
+	struct pt_regs *regs = current_thread_info()->pt_regs;
+	restore_caller_t from = current->thread.fill.from;
+	bool return_to_user = current->thread.fill.return_to_user;
+	bool ts_host_at_vcpu_mode = current->thread.fill.ts_host_at_vcpu_mode;
 
 	user_hw_stacks_restore__sw_sequel();
-
-	regs = current_thread_info()->pt_regs;
-	from = current->thread.fill.from;
-	return_to_user = current->thread.fill.return_to_user;
-	ts_host_at_vcpu_mode = current->thread.fill.ts_host_at_vcpu_mode;
 
 	finish_syscall_switched_stacks(regs, from, return_to_user, ts_host_at_vcpu_mode);
 
 	unreachable();
 }
 
-__section(".entry.text")
 int copy_context_from_signal_stack(struct local_gregs *l_gregs,
 		struct pt_regs *regs, struct trap_pt_regs *trap, u64 *sbbp,
 		e2k_aau_t *aau_context, struct k_sigaction *ka)
@@ -4752,25 +4766,18 @@ notrace void makecontext_trampoline_switched(void)
 			goto exit;
 		}
 		uc_link = (struct ucontext *) ucontext_64;
-	} else {
+	}
+#ifdef CONFIG_PROTECTED_MODE
+	else {
 		/* CTX_128_BIT */
 		e2k_ptr_t ptr;
-		u64 lo_val, hi_val;
-		u8 lo_tag, hi_tag;
-		u8 tag;
-		u32 size;
+		u32 size, tag;
 
-		TRY_USR_PFAULT {
-			NATIVE_LOAD_TAGGED_QWORD_AND_TAGS(ctx->p_uc_link,
-					lo_val, hi_val, lo_tag, hi_tag);
-		} CATCH_USR_PFAULT {
+		if (get_user_tagged_16(ptr.lo, ptr.hi, tag, ctx->p_uc_link)) {
 			ret = -EFAULT;
 			goto exit;
-		} END_USR_PFAULT
-		AW(ptr).lo = lo_val;
-		AW(ptr).hi = hi_val;
+		}
 		size = AS(ptr).size - AS(ptr).curptr;
-		tag = (hi_tag << 4) | lo_tag;
 
 		/*
 		 * Check that the pointer is good.
@@ -4779,15 +4786,15 @@ notrace void makecontext_trampoline_switched(void)
 		if (!size)
 			/* NULL pointer, just return */
 			goto exit;
-		if (tag != ETAGAPQ || size <
-				offsetof(struct ucontext_prot,
-						uc_mcontext.usd_lo)) {
+		if (tag != ETAGAPQ || size < offsetof(struct ucontext_prot,
+							uc_mcontext.usd_lo)) {
 			ret = -EFAULT;
 			goto exit;
 		}
 
 		uc_link = (struct ucontext_prot *) E2K_PTR_PTR(ptr, GET_SBR_HI());
 	}
+#endif
 
 	DebugCTX("ctx %lx, uc_link=%lx\n", ctx, uc_link);
 
@@ -4922,8 +4929,8 @@ notrace long do_sigreturn(void)
 	if (!TASK_IS_BINCO(current))
 		restore_local_glob_regs(&l_gregs, true);
 
-	if (!from_syscall(&regs)) {
-		BUG_ON(!regs.trap || regs.kernel_entry);
+	if (from_trap(&regs)) {
+		BUG_ON(regs.kernel_entry);
 
 		finish_user_trap_handler(&regs, FROM_USER_TRAP | FROM_SIGRETURN);
 	} else {

@@ -8,9 +8,7 @@
 
 #define MV_FLUSH	0x00000001
 
-struct vm_area_struct;
 struct file;
-struct mm_struct;
 
 int make_all_vma_pages_valid(struct vm_area_struct *vma, int flags);
 int make_vma_pages_valid(struct vm_area_struct *vma,
@@ -45,17 +43,19 @@ int e2k_set_vmm_cui(struct mm_struct *mm, int cui,
 static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
 						   unsigned long pkey)
 {
-	unsigned long vm_flags;
+	unsigned long vm_flags = 0;
 	unsigned long cui;
 
-	/* Order of checks is important since
-	 * 32BIT flag is set in protected mode */
-	if (TASK_IS_PROTECTED(current))
+	if (TASK_IS_PROTECTED(current)) {
 		cui = GET_CUI_FROM_INT_PROT(prot);
-	else
+		/* See comment before USER_LD() */
+		if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
+			vm_flags |= VM_INT_PR;
+	} else {
 		cui = USER_CODES_UNPROT_INDEX(current);
+	}
 
-	vm_flags = cui << VM_CUI_SHIFT;
+	vm_flags |= cui << VM_CUI_SHIFT;
 
 	if (current_thread_info()->status & TS_MMAP_PRIVILEGED)
 		vm_flags |= VM_PRIVILEGED;
@@ -75,12 +75,13 @@ static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
 
 static inline pgprot_t arch_vm_get_page_prot(unsigned long vm_flags)
 {
-	unsigned long page_prot;
-
-	page_prot = vm_flags & VM_CUI;
+	unsigned long page_prot = cpu_has(CPU_FEAT_ISET_V6) ? 0 : (vm_flags & VM_CUI);
 
 	if (vm_flags & VM_PRIVILEGED)
 		page_prot = _PAGE_SET_PRIV(page_prot);
+
+	if (vm_flags & VM_INT_PR)
+		page_prot = _PAGE_SET_PROTECT(page_prot);
 
 	return __pgprot(page_prot);
 }

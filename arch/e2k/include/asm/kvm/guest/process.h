@@ -75,10 +75,7 @@ while (false)
 
 static inline void KVM_COPY_STACKS_TO_MEMORY(void)
 {
-	if (IS_HV_GM())
-		NATIVE_COPY_STACKS_TO_MEMORY();
-	else
-		HYPERVISOR_copy_stacks_to_memory();
+	NATIVE_COPY_STACKS_TO_MEMORY();
 }
 
 /* own VCPU state: directly accessible through global registers */
@@ -90,7 +87,7 @@ static inline kvm_vcpu_state_t *kvm_get_vcpu_state(void)
 	return (kvm_vcpu_state_t *)(vcpu_base);
 }
 
-extern void kvm_clean_pc_stack_zero_frame(void *addr, bool user);
+extern int kvm_clean_pc_stack_zero_frame(void *addr, bool user);
 extern e2k_cute_t *kvm_get_cut_entry_pointer(int cui, struct page **page);
 extern void kvm_put_cut_entry_pointer(struct page *page);
 
@@ -132,12 +129,14 @@ kvm_jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 		default:
 			BUG();
 		}
+#ifdef CONFIG_PROTECTED_MODE
 	} else if (from & FROM_SYSCALL_PROT_8) {
 		/* the syscall restart is not yet implemented */
 		BUG();
 	} else if (from & FROM_SYSCALL_PROT_10) {
 		/* the syscall restart is not yet implemented */
 		BUG();
+#endif
 	} else {
 		BUG();
 	}
@@ -326,13 +325,13 @@ static inline void COPY_STACKS_TO_MEMORY(void)
 	KVM_COPY_STACKS_TO_MEMORY();
 }
 
-static inline void
+static inline int
 clean_pc_stack_zero_frame(void *addr, bool user)
 {
-	kvm_clean_pc_stack_zero_frame(addr, user);
+	return kvm_clean_pc_stack_zero_frame(addr, user);
 }
 
-static inline e2k_cute_t *get_cut_entry_pointer(int cui, struct page **page)
+static inline e2k_cute_t __user *get_cut_entry_pointer(int cui, struct page **page)
 {
 	return kvm_get_cut_entry_pointer(cui, page);
 }

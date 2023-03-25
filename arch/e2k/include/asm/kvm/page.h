@@ -52,7 +52,7 @@
 /* it is paravirtualized host and guest kernel */
 #include <asm/paravirt/pv_info.h>
 #else
- #error	"Unknown virtualization type */
+ #error	"Unknown virtualization type "
 #endif	/* ! CONFIG_VIRTUALIZATION */
 
 #endif /* !(__KERNEL__) */

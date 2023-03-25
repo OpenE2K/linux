@@ -5,8 +5,8 @@
  * Copyright 2001-2003 Salavat S. Guiliazov (atic@mcst.ru)
  */
 
-#include <asm/p2v/boot_cacheflush.h>
 #include <asm/p2v/boot_v2p.h>
+#include <asm/p2v/boot_cacheflush.h>
 #include <asm/p2v/boot_init.h>
 #include <asm/p2v/boot_phys.h>
 #include <asm/boot_profiling.h>
@@ -16,6 +16,8 @@
 #include <asm/mmu_context.h>
 #include <asm/regs_state.h>
 #include <asm/pic.h>
+
+#include <linux/cpu.h>
 
 #undef	boot_printk
 #undef	DebugR
@@ -28,20 +30,6 @@
 static	atomic_t boot_info_recovery_finished = ATOMIC_INIT(0);
 #endif	/* CONFIG_SMP */
 
-
-static void
-init_recovery_mem_term(int cpuid)
-{
-	/*
-	 * Flush the temporarly mapped areas to virtual space.
-	 */
-
-	DebugR("init_recovery_mem_term() will start init_clear_temporary_ptes() on CPU %d\n",
-		cpuid);
-	init_clear_temporary_ptes(ALL_TLB_ACCESS_MASK, cpuid);
-
-	set_secondary_space_MMU_state();
-}
 
 static noinline void
 init_switch_to_interrupted_process(void)
@@ -63,7 +51,7 @@ init_switch_to_interrupted_process(void)
 	 */
 
 	NATIVE_FLUSHCPU;
-	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task, task_thread_info(task));
+	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task);
 
 	/*
 	 * Return to interrupted point
@@ -121,6 +109,8 @@ boot_recovery_sequel(bool bsp, int cpuid, int cpus_to_sync)
 {
 	int cpu;
 
+	init_unmap_virt_to_equal_phys(bsp, cpus_to_sync);
+
 	va_support_on = 1;
 
 	/*
@@ -142,7 +132,7 @@ boot_recovery_sequel(bool bsp, int cpuid, int cpus_to_sync)
 
 	/* __my_cpu_offset is now stored in g18, so we should to restore it */
 	set_my_cpu_offset(__per_cpu_offset[cpu]);
-
+	trap_init();
 
 	/*
 	 * Set pointer of current task structure to kernel restart task for
@@ -170,9 +160,7 @@ boot_recovery_sequel(bool bsp, int cpuid, int cpus_to_sync)
 	/*
 	 * Terminate boot-time recovery of virtual memory support
 	 */
-	DebugR("boot_recovery_sequel() will start init_recovery_mem_term() on CPU %d\n",
-		cpuid);
-	init_recovery_mem_term(cpuid);
+	set_secondary_space_MMU_state();
 
 	/*
 	 * Start kernel recovery process
@@ -269,11 +257,7 @@ boot_recovery_setup(bootblock_struct_t *bootblock)
 	 * to kernel image unit into the physical space
 	 */
 
-#ifndef CONFIG_NUMA
 	reg_lo.CUD_lo_base = boot_text_phys_base;
-#else	/* CONFIG_NUMA */
-	reg_lo.CUD_lo_base = boot_node_text_phys_base(BOOT_BS_NODE_ID);
-#endif	/* !CONFIG_NUMA */
 	reg_lo.CUD_lo_c = E2K_CUD_CHECKED_FLAG;
 	reg_lo._CUD_lo_rw = E2K_CUD_RW_PROTECTIONS;
 
@@ -310,19 +294,6 @@ boot_recovery_setup(bootblock_struct_t *bootblock)
 	boot_printk("Kernel boot-time initialization in progress on CPU %d\n",
 		boot_smp_processor_id());
 #endif	/* CONFIG_SMP */
-
-	/*
-	 * Set Trap Cellar pointer and MMU register to kernel image area
-	 * and reset Trap Counter register
-	 */
-
-	boot_set_MMU_TRAP_POINT(boot_kernel_trap_cellar);
-	boot_reset_MMU_TRAP_COUNT();
-
-	boot_printk("Kernel trap cellar set to physical address 0x%lx "
-		"MMU_TRAP_CELLAR_MAX_SIZE 0x%x kernel_trap_cellar 0x%lx\n",
-		boot_kernel_trap_cellar, MMU_TRAP_CELLAR_MAX_SIZE,
-		BOOT_KERNEL_TRAP_CELLAR);
 
 	/*
 	 * Recover phys. address of boot information block in

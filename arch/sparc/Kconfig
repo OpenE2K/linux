@@ -13,6 +13,8 @@ config 64BIT
 config SPARC
 	bool
 	default y
+	select COMMON_CLK if E90S
+	select EDAC_SUPPORT if E90S
 	select ARCH_MIGHT_HAVE_PC_PARPORT if SPARC64 && PCI
 	select ARCH_MIGHT_HAVE_PC_SERIO   if !E90S
 	select ARCH_SUPPORTS_NUMA_BALANCING if E90S
@@ -163,6 +165,10 @@ config HIGHMEM
 config ZONE_DMA
 	bool
 	default y if SPARC32
+
+config ZONE_DMA32
+	bool
+	default y if E90S
 
 config GENERIC_ISA_DMA
 	bool

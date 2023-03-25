@@ -33,7 +33,6 @@ typedef struct cpuinfo_e2k {
 	__u64 proc_freq;	/* frequency of processor */
 #ifdef CONFIG_SMP
 	int cpu;
-	__u64 mmu_last_context;
 	__u64 ipi_count;
 #endif
 } cpuinfo_e2k_t;
@@ -83,6 +82,17 @@ typedef struct thread_struct {
 		bool ts_host_at_vcpu_mode;
 	} fill;
 
+	struct {
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+		/* Kernel PT base cached for fast retrieval upon kernel entry.
+		 * Used in !MMU_SEP_VIRT_SPACE() case only. */
+		u64 k_root_ptb;
+#endif
+		u64 u_root_ptb;
+	} regs;
+
+	unsigned long usr_pfault_jump;
+
 	u32		context;	/* context of running process	     */
 	/* Total number of all interrupts and exceptions since kernel boot */
 	u64 traps_count;
@@ -116,6 +126,18 @@ typedef struct thread_struct {
 
 	unsigned long	flags;		/* various flags (e.g. for mmap)     */
 } thread_t;
+
+# ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+#  define INIT_THREAD_REGS \
+	.regs.k_root_ptb = ULL(-1),
+# else
+#  define INIT_THREAD_REGS
+# endif
+
+# define INIT_THREAD { \
+	INIT_THREAD_REGS \
+}
+
 #endif /* !__ASSEMBLY__ */
 
 /*
@@ -180,9 +202,6 @@ typedef struct thread_struct {
 
 #define K_STK_BASE(thr)		((thr)->k_stk_base)
 #define K_STK_TOP(thr)		((thr)->k_stk_base + KERNEL_C_STACK_SIZE)
-
-
-#define INIT_THREAD { 0 }
 
 extern void start_thread(struct pt_regs *regs,
 			unsigned long entry, unsigned long sp);
@@ -298,10 +317,12 @@ do { \
 /*  Use L2 cache line size since we are prefetching to L2 */
 #define PREFETCH_STRIDE 64
 
-static __always_inline void prefetch_nospec_range(const void *addr, size_t len)
+static __always_inline void __prefetch_nospec_range(const void *addr,
+		size_t len, int mas)
 {
-	s64 i, rem, prefetched;
-
+#ifndef CONFIG_HALF_SPECULATIVE_KERNEL
+	s64 rem, prefetched;
+#endif
 	if (__builtin_constant_p(len) && len < 24 * PREFETCH_STRIDE) {
 		if (len > 0)
 			prefetch_nospec(addr);
@@ -351,15 +372,20 @@ static __always_inline void prefetch_nospec_range(const void *addr, size_t len)
 			prefetch_nospec_offset(addr, 22 * PREFETCH_STRIDE);
 		if (len > 23 * PREFETCH_STRIDE)
 			prefetch_nospec_offset(addr, 23 * PREFETCH_STRIDE);
+		if (len > 1)
+			prefetch_nospec_offset(addr, len - 1);
 
 		return;
 	}
 
+#ifdef CONFIG_HALF_SPECULATIVE_KERNEL
+	E2K_PREFETCH_256_LOOP(addr, (len + 255) / 256, mas);
+#else
 	rem = len % (4 * PREFETCH_STRIDE);
-	prefetched = len / (4 * PREFETCH_STRIDE);
+	prefetched = len - rem;
 
-	for (i = 0; i <= (s64) len - 256; i += 256)
-		E2K_PREFETCH_L2_NOSPEC_256(addr + i);
+	if (len >= 256)
+		E2K_PREFETCH_256_LOOP(addr, len / 256, mas);
 
 	if (rem > 0)
 		prefetch_nospec(addr + prefetched);
@@ -369,6 +395,15 @@ static __always_inline void prefetch_nospec_range(const void *addr, size_t len)
 		prefetch_nospec_offset(addr + prefetched, 2 * PREFETCH_STRIDE);
 	if (rem > 3 * PREFETCH_STRIDE)
 		prefetch_nospec_offset(addr + prefetched, 3 * PREFETCH_STRIDE);
+#endif
+}
+static __always_inline void prefetchw_nospec_range(const void *addr, size_t len)
+{
+	__prefetch_nospec_range(addr, len, MAS_BYPASS_L1_CACHE);
+}
+static __always_inline void prefetchr_nospec_range(const void *addr, size_t len)
+{
+	__prefetch_nospec_range(addr, len, 0);
 }
 
 extern u64 cacheinfo_get_l1d_line_size(void);

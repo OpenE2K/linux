@@ -8,7 +8,9 @@
 #include <linux/bitmap.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
+#include <linux/topology.h>
 
+#include <asm/alternative.h>
 #include <asm/mmu_regs.h>
 #include <asm/page.h>
 #include <asm/tlbflush.h>
@@ -16,6 +18,7 @@
 #include <asm/secondary_space.h>
 #include <asm/mmu_regs_access.h>
 #include <asm/mm_hooks.h>
+#include <asm/pgtable_types.h>
 
 /*
  * The high bits of the "context_cache" (and the "mm->context") are the
@@ -27,139 +30,158 @@
  * That will automatically force a new CONTEXT for any other processes
  * the next time they want to run.
  *
- * cpu_last_context(cpuid):
+ * last_mmu_context(cpuid):
  * 63                                                 0
  * +-------------------------------+------------------+
- * | asn version of this processor | hardware CONTEXT |
+ * | ctx version of this processor | hardware CONTEXT |
  * +-------------------------------+------------------+
  */
 
 #define	CTX_HARDWARE_BITS	12
-#define	CTX_HARDWARE_MASK	((1UL << CTX_HARDWARE_BITS) - 1)
+#define	CTX_HARDWARE_MASK	((1ULL << CTX_HARDWARE_BITS) - 1)
 #define	CTX_HARDWARE_MAX	CTX_HARDWARE_MASK
 #define CTX_VERSION_SHIFT	CTX_HARDWARE_BITS
-#define CTX_VERSION_SIZE	(1UL << CTX_VERSION_SHIFT)
+#define CTX_VERSION_SIZE	(1ULL << CTX_VERSION_SHIFT)
 #define CTX_VERSION_MASK	(~(CTX_VERSION_SIZE - 1))
-#define	CTX_FIRST_VERSION_NUM	1UL
+#define	CTX_FIRST_VERSION_NUM	1ULL
 #define	CTX_FIRST_VERSION	(CTX_FIRST_VERSION_NUM << CTX_VERSION_SHIFT)
 
 #define	CTX_HARDWARE(ctx)	((ctx) & CTX_HARDWARE_MASK)
 #define	CTX_VERSION(ctx)	((ctx) & CTX_VERSION_MASK)
+#define	CTX_VERSION_NO(ctx)	(CTX_VERSION(ctx) >> CTX_VERSION_SHIFT)
 
-#ifdef CONFIG_SMP
-#include <asm/smp.h>
-//spin_lock is needed: #define cpu_last_context(cpuid)	(cpu_data[cpuid].mmu_last_context)
-#define my_cpu_last_context()	(my_cpu_data.mmu_last_context)
-#define my_cpu_last_context1(num_cpu)	(my_cpu_data1(num_cpu).mmu_last_context)
-#else
-extern unsigned long		mmu_last_context;
-//#define cpu_last_context(cpuid)	mmu_last_context
-#define my_cpu_last_context()	mmu_last_context
-#define my_cpu_last_context1(num_cpu)	mmu_last_context
-#endif /* CONFIG_SMP */
+DECLARE_PER_CPU(u64, last_mmu_context);
+DECLARE_PER_CPU(u64, current_mmu_context);
+DECLARE_PER_CPU(u64, u_root_ptb);
 
-static inline void
-reload_context_mask(unsigned long mask)
-{
-	set_MMU_CONT(CTX_HARDWARE(mask));
-}
+extern u64 get_new_mmu_pid_irqs_off(mm_context_t *context, int cpu);
 
 /*
- * Get process new MMU context. This is needed when the page table
- * pointer is changed or when the CONTEXT of the current process is updated
- * This proc is called under closed interrupts or preempt_disable()
+ * Force a context reload. This is needed when context is changed
  */
+enum reload_pid_mode {
+	/* Force calculation of a new %pid value */
+	MMU_PID_RELOAD_FORCED,
+	/* Get a new %pid on flush (i.e. ctx == 0) or version mismatch
+	 * (can happen if the task hasn't been executing for some time
+	 * and other tasks exhausted all 10 bits of %pid register). */
+	MMU_PID_RELOAD_CHECK,
+	/* *__NO_UPDATE versions do _not_ update the cached value in
+	 * current_mmu_context.  This is useful when we want to switch
+	 * to guest's %pid value but keep the qemu's cached pid value
+	 * intact in 'per_cpu(last_mmu_context)' (i.e. always when we
+	 * work with gmm_context and are not inside light hypercall). */
+	MMU_PID_RELOAD_FORCED__NO_UPDATE,
+	MMU_PID_RELOAD_CHECK__NO_UPDATE,
+};
 
-static inline unsigned long
-get_new_mmu_pid(mm_context_t *context, int num_cpu)
+/**
+ * get_mmu_pid_irqs_off - update %pid register value in @context structure
+ * @context: mm_context_t that holds current PID/CONT
+ * @mode: whether to force allocation of a new pid, or try to
+ *	  use the previous one
+ */
+static __always_inline u64 get_mmu_pid_irqs_off(mm_context_t *context,
+		enum reload_pid_mode mode)
 {
-	unsigned long ctx;
-	unsigned long next;
+	int cpu = smp_processor_id();
+	u64 ctx = context->cpumsk[cpu];
+	bool get_new_context;
+
+	BUILD_BUG_ON(mode != MMU_PID_RELOAD_FORCED &&
+		     mode != MMU_PID_RELOAD_FORCED__NO_UPDATE &&
+		     mode != MMU_PID_RELOAD_CHECK &&
+		     mode != MMU_PID_RELOAD_CHECK__NO_UPDATE);
 
 	/* Interrupts should be disabled to not bother about
 	 * async-safety (calls to this function from the same
 	 * CPU after it was interrupted). */
+	VM_BUG_ON(!psr_and_upsr_all_irqs_disabled());
 
-	WARN_ON_ONCE(!__raw_all_irqs_disabled());
-
-        ctx = my_cpu_last_context1(num_cpu);
-	next = ctx + 1;
-	if (CTX_HARDWARE(next) == E2K_KERNEL_CONTEXT)
-		next ++;
-	if (CTX_VERSION(ctx) != CTX_VERSION(next)) {
-		flush_TLB_all();
-		flush_ICACHE_all();
-		if (CTX_VERSION(next) < CTX_FIRST_VERSION) {
-			next = CTX_FIRST_VERSION;
-			if (CTX_HARDWARE(next) == E2K_KERNEL_CONTEXT)
-				next ++;
-		}
+	if (mode == MMU_PID_RELOAD_FORCED ||
+			mode == MMU_PID_RELOAD_FORCED__NO_UPDATE) {
+		get_new_context = true;
+	} else if (mode == MMU_PID_RELOAD_CHECK ||
+			mode == MMU_PID_RELOAD_CHECK__NO_UPDATE) {
+		get_new_context = (CTX_VERSION(ctx) !=
+				   CTX_VERSION(raw_cpu_read(last_mmu_context)));
 	}
 
-	/* Another CPU might have written 0 to our cpu's mm context
-	 * while we were getting the next context. But it is OK since
-	 * we are changing the context anyway, and if this happens we
-	 * will just rewrite that 0 with the new context. */
-	context->cpumsk[num_cpu] = next;
-	my_cpu_last_context1(num_cpu) = next;
+	if (unlikely(get_new_context))
+		ctx = get_new_mmu_pid_irqs_off(context, cpu);
 
-        return next;
+	if (mode != MMU_PID_RELOAD_CHECK__NO_UPDATE &&
+			mode != MMU_PID_RELOAD_FORCED__NO_UPDATE)
+		raw_cpu_write(current_mmu_context, ctx);
+
+	return ctx;
 }
 
-static inline unsigned long
-get_new_mmu_context(struct mm_struct *mm, int num_cpu)
-{
-	return get_new_mmu_pid(&mm->context, num_cpu);
-}
-
-/*
- * Get the process current MMU context.
+/**
+ * flush_mmu_pid - drop current %pid register value for @context
+ * @context: mm_context_t that holds current PID/CONT
+ *
+ * This function drops currently used %pid value which is useful
+ * for doing a full TLB flush of the passed context.  The next
+ * %pid value to use will be allocated when we actually switch
+ * to user's VM space - i.e. in get_user/etc or when returning
+ * from kernel to user.
  */
-static inline unsigned long
-get_mmu_pid(mm_context_t *context, int cpu)
+static inline void flush_mmu_pid(mm_context_t *context)
 {
-	unsigned long next;
-
-	/* check if our CPU MASK is of an older generation and thus invalid: */
-	next = context->cpumsk[cpu];
-	if (unlikely(next == 0 || CTX_VERSION(my_cpu_last_context1(cpu))
-			!= CTX_VERSION(next)))
-		next = get_new_mmu_pid(context, cpu);
-
-        return next;
-}
-
-static inline unsigned long
-get_mmu_context(struct mm_struct *mm, int cpu)
-{
-	return get_mmu_pid(&mm->context, cpu);
-}
-
-/*
- * Get the process current MMU context.
- */
-static inline void
-copy_mmu_pid(mm_context_t *pid_to, mm_context_t *pid_from)
-{
-	*pid_to = *pid_from;
-}
-
-static inline void
-reload_mmu_context(struct mm_struct *mm)
-{
-	unsigned long ctx, flags;
-	int cpu;
+	unsigned long flags;
+	struct mm_struct *mm = current->mm;
 
 	raw_all_irq_save(flags);
-	cpu = smp_processor_id();
-	ctx = get_new_mmu_context(mm, cpu);
-	reload_context_mask(ctx);
+	get_mmu_pid_irqs_off(context, MMU_PID_RELOAD_FORCED);
+	/* If 'context' is from current->active_mm and not from
+	 * current->mm then we make sure that uaccess_enable()
+	 * will not give access to lazy user context. */
+	if (!mm || context != &mm->context)
+		raw_cpu_write(current_mmu_context, E2K_KERNEL_CONTEXT);
 	raw_all_irq_restore(flags);
+
+	/* We are currently executing with E2K_KERNEL_CONTEXT and the
+	 * new %pid value will be written only when actually needed. */
+	VM_BUG_ON(READ_MMU_PID() != E2K_KERNEL_CONTEXT);
 }
 
-static inline void
-enter_lazy_tlb (struct mm_struct *mm, struct task_struct *tsk)
+/**
+ * reload_root_pgd - change the active pgd for current guest's task.
+ * @pgd: page table root to switch to
+ *
+ * IMPORTANT: for usage in light hypercalls only as this switches %u_root_ptb
+ */
+static inline void reload_root_pgd(const pgd_t *pgd)
 {
+	/* Kernel executes with user pgd loaded to register but
+	 * disabled through OS_VAB, so we can just update the register. */
+	set_MMU_U_PPTB(__pa(pgd));
+}
+
+/*
+ * Please ignore the name of this function.  It should be called
+ * switch_to_kernel_thread().
+ *
+ * enter_lazy_tlb() is a hint from the scheduler that we are entering a
+ * kernel thread or other context without an mm.  Acceptable implementations
+ * include doing nothing whatsoever, switching to init_mm, or various clever
+ * lazy tricks to try to minimize TLB flushes.
+ *
+ * The scheduler reserves the right to call enter_lazy_tlb() several times
+ * in a row.  It will notify us that we're going back to a real mm by
+ * calling switch_mm_irqs_off().
+ */
+static inline void enter_lazy_tlb(struct mm_struct *prev_mm,
+		struct task_struct *tsk)
+{
+	pgd_t *os_page_table = mm_node_pgd(&init_mm, numa_node_id());
+
+	VM_BUG_ON(!oops_in_progress && READ_MMU_PID() != E2K_KERNEL_CONTEXT);
+
+	/* Make sure that kernel threads execute with kernel page tables */
+	raw_cpu_write(u_root_ptb, __pa(os_page_table));
+	raw_cpu_write(current_mmu_context, E2K_KERNEL_CONTEXT);
 }
 
 extern int __init_new_context(struct task_struct *p, struct mm_struct *mm,
@@ -168,77 +190,92 @@ static inline int init_new_context(struct task_struct *p, struct mm_struct *mm)
 {
 	return __init_new_context(p, mm, &mm->context);
 }
-
-static inline int
-init_new_mmu_pid(mm_context_t *context)
-{
-	return __init_new_context(NULL, NULL, context);
-}
-
 extern void destroy_cached_stacks(mm_context_t *context);
+extern void destroy_context(struct mm_struct *mm);
+
+struct uaccess_regs {
+	u64 u_root_ptb;
+	u64 ctx;
+};
 
 /*
- * Destroy a dead context.  This occurs when mmput drops the
- * mm_users count to zero, the mmaps have been released, and
- * all the page tables have been flushed.  The function job
- * is to destroy any remaining processor-specific state.
+ * For specific use case in light hypercalls: if we are executing with
+ * guest user's values for uac_regs and do not want to correupt them,
+ * instead of uaccess_enable() + uaccess_disable() pair one should use:
+ *
+ *   struct uaccess_regs regs;
+ *   native_uaccess_save(&regs);
+ *   < ... >
+ *   native_uaccess_restore(&regs);
  */
-static inline void destroy_context(struct mm_struct *mm)
+static inline void native_uaccess_save(struct uaccess_regs *ua_regs)
 {
-	destroy_cached_stacks(&mm->context);
+	ua_regs->u_root_ptb = NATIVE_READ_MMU_U_PPTB_REG();
+	ua_regs->ctx = READ_MMU_PID();
 }
 
-
-/*
- * Force a context reload. This is needed when context is changed
- */
-static inline void
-reload_mmu_pid(mm_context_t *context, int num_cpu)
+static inline void native_uaccess_restore(const struct uaccess_regs *ua_regs)
 {
-	unsigned long ctx = context->cpumsk[num_cpu];
-
-	if (!ctx)
-		ctx = get_new_mmu_pid(context, num_cpu);
-	set_MMU_CONT(CTX_HARDWARE(ctx));
-}
-static inline void
-reload_context(struct mm_struct *mm, int num_cpu)
-{
-	reload_mmu_pid(&mm->context, num_cpu);
+	WRITE_UACCESS_REGS(ua_regs->ctx, ua_regs->u_root_ptb);
 }
 
 /*
- * Force a root page table pointer reload.
+ * Enable user page tables when returning to user space
  */
-static inline void
-reload_root_pgd(pgd_t *pgd)
+static inline void native_uaccess_enable_irqs_off(void)
 {
-	if (MMU_IS_SEPARATE_PT()) {
-		set_MMU_U_PPTB(__pa(pgd));
-	} else {
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-		if (!THERE_IS_DUP_KERNEL) {
-			set_MMU_U_PPTB(__pa(pgd));
-		}
-#else	/* ! CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-		set_MMU_U_PPTB(__pa(pgd));
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
+	u64 ctx = raw_cpu_read(current_mmu_context);
+	u64 root_ptb = raw_cpu_read(u_root_ptb);
+
+	VM_BUG_ON(!oops_in_progress &&
+		  (READ_MMU_PID() != E2K_KERNEL_CONTEXT ||
+		   root_ptb == ULL(-1) ||
+		   current->mm && CTX_HARDWARE(ctx) == E2K_KERNEL_CONTEXT));
+
+	WRITE_UACCESS_REGS(ctx, root_ptb);
+}
+
+/*
+ * uaccess_enable()/uaccess_disable() are for use
+ * in get_user()/put_user()/etc
+ */
+static inline void native_uaccess_enable(void)
+{
+	unsigned long flags;
+
+	raw_all_irq_save(flags);
+	native_uaccess_enable_irqs_off();
+	raw_all_irq_restore(flags);
+}
+
+static inline void native_uaccess_disable(void)
+{
+	VM_BUG_ON(current->mm && READ_MMU_PID() == E2K_KERNEL_CONTEXT);
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+	u64 k_root_ptb = MMU_IS_SEPARATE_PT() ? NATIVE_READ_MMU_OS_PPTB_REG_VALUE()
+					      : current->thread.regs.k_root_ptb;
+#else
+	u64 k_root_ptb = NATIVE_READ_MMU_OS_PPTB_REG_VALUE();
+#endif
+	VM_BUG_ON(k_root_ptb == ULL(-1));
+	WRITE_UACCESS_REGS(E2K_KERNEL_CONTEXT, k_root_ptb);
+}
+
+/*
+ * Kernel trap handler could have been entered from inside of get/put_user(),
+ * in which case we must enable user page tables before exiting handler.
+ */
+static inline void uaccess_enable_in_kernel_trap(const struct pt_regs *regs)
+{
+	u64 ctx = regs->uaccess.cont;
+	u64 root_ptb = regs->uaccess.u_root_ptb;
+
+	if (unlikely(ctx != E2K_KERNEL_CONTEXT)) {
+		/* User context could have changed while we were
+		 * executing with kernel context, update it. */
+		ctx = raw_cpu_read(current_mmu_context);
 	}
-}
-
-static inline void
-reload_root_pt(struct mm_struct *mm)
-{
-	pgd_t *pgd;
-
-	if (mm == &init_mm) {
-		pgd = cpu_kernel_root_pt;
-		if ((unsigned long) pgd >= KERNEL_BASE)
-			pgd = __va(kernel_va_to_pa(pgd));
-	} else {
-		pgd = mm->pgd;
-	}
-	reload_root_pgd(pgd);
+	WRITE_UACCESS_REGS(ctx, root_ptb);
 }
 
 /*
@@ -255,49 +292,19 @@ set_root_pt(pgd_t *root_pt)
 /*
  * Switch a root page table pointer and context.
  */
-static inline void
-reload_thread(struct mm_struct *mm)
+static inline void reload_thread(struct mm_struct *mm)
 {
 	unsigned long flags;
-	int num_cpu;
 
-	preempt_disable();
-	num_cpu = raw_smp_processor_id();
-	if (!MMU_IS_SEPARATE_PT()) {
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-		if (THERE_IS_DUP_KERNEL) {
-			spin_lock(&mm->page_table_lock);
-			copy_user_pgd_to_kernel_root_pt(mm->pgd);
-			spin_unlock(&mm->page_table_lock);
-		}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-	}
 	raw_all_irq_save(flags);
-	reload_root_pt(mm);
-	reload_context(mm, num_cpu);
+
+	/* %root_ptb/%cont are switched on kernel entry
+	 * and exit, so there is nothing to do here. */
+	(void) get_mmu_pid_irqs_off(&mm->context, MMU_PID_RELOAD_FORCED);
+
+	local_flush_tlb_all();
+
 	raw_all_irq_restore(flags);
-	preempt_enable();
-}
-
-static inline void
-do_switch_mm(struct mm_struct *prev_mm, struct mm_struct *next_mm,
-		struct task_struct *next, int switch_pgd);
-
-/*
- * Activate a new MM instance for the current task.
- */
-static inline void
-native_activate_mm(struct mm_struct *active_mm, struct mm_struct *mm)
-{
-	do_switch_mm(active_mm, mm, NULL, false);
-}
-
-static inline void call_switch_mm(struct mm_struct *prev_mm,
-		struct mm_struct *next_mm, struct task_struct *next,
-		int switch_pgd, int switch_mm)
-{
-	if (switch_mm || switch_pgd)
-		do_switch_mm(prev_mm, next_mm, next, switch_pgd);
 }
 
 /* Virtualization support */
@@ -311,114 +318,97 @@ extern void native_deactivate_mm(struct task_struct *dead_task,
  * Switch from address space PREV to address space NEXT.
  * interrupt was disabled by caller
  */
-static inline void
-do_switch_mm(struct mm_struct *prev_mm, struct mm_struct *next_mm,
-		struct task_struct *next, int switch_pgd)
+static inline void switch_mm(struct mm_struct *prev_mm,
+		struct mm_struct *next_mm, struct task_struct *next)
 {
-	int cpu = raw_smp_processor_id();
-	unsigned long flags, mask;
+	unsigned long flags;
+	int cpu, node;
+	pgd_t *pgd;
 
-	if (likely(prev_mm != next_mm)) {
-		raw_all_irq_save(flags);
+	raw_all_irq_save(flags);
+	node = numa_node_id();
+	cpu = raw_smp_processor_id();
+	pgd = mm_node_pgd(next_mm, node);
 
-		if (likely(next_mm)) {
-#ifdef CONFIG_SMP
-			/* Start receiving flush ipis for the next mm */
-			cpumask_set_cpu(cpu, mm_cpumask(next_mm));
-
-			/* Without a memory barrier, a following race can happen
-			 * (CPU0 executes switch_mm, CPU1 executes flush_tlb):
-			 *
-			 * -----------------------------+-----------------------
-			 * 		CPU0		|	CPU1
-			 * -----------------------------+-----------------------
-			 * read next_mm->context	|
-			 * for CPU0			|
-			 *				| set next_mm->context
-			 *				| for CPU0 to 0
-			 * the loaded value has older	|
-			 * context version -> update it	|
-			 * with get_new_mmu_context()	|
-			 * -> 0 in next_mm->context	| execute memory barrier
-			 * is rewritten			|
-			 *				| CPU0 is not set in
-			 *				| mm_cpumask(next_mm),
-			 *				| so ipi's not send
-			 * set CPU0 bit in		|
-			 * mm_cpumask(next_mm)		|
-			 * -----------------------------+-----------------------
-			 *
-			 * To avoid the races both CPU1 and CPU0 execute memory
-			 * barriers:
-			 * -----------------------------+-----------------------
-			 * 		CPU0		|	CPU1
-			 * -----------------------------+-----------------------
-			 * set CPU0 bit in		| set next_mm->context
-			 * mm_cpumask(next_mm)		| for CPU0 to 0
-			 *				|
-			 * execute memory barrier	| execute memory barrier
-			 *				|
-			 * read next_mm->context	| CPU0 is not set in
-			 * for CPU0			| mm_cpumask(next_mm),
-			 *				| so ipi's not send
-			 * -----------------------------+-----------------------
-			 * This way either CPU0 will see 0 in next_mm or
-			 * CPU1 will send the flush ipi to CPU0, or both.
-			 *
-			 * This barrier could be smp_mb__after_atomic(), but
-			 * the membarrier syscall requires a full memory
-			 * barrier after storing to rq->curr, before going
-			 * back to user-space.
-			 */
-			smp_mb();
-#endif
-
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-			/* Load user page table */
-			if (!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL) {
-				copy_user_pgd_to_kernel_root_pt(next_mm->pgd);
-			}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-
-			/* Switch context */
-			reload_root_pt(next_mm);
-			mask = get_mmu_context(next_mm, cpu);
-			reload_context_mask(mask);
-		}
-
-#ifdef CONFIG_SMP
-		/* Stop flush ipis for the previous mm */
-		if (likely(prev_mm))
-			cpumask_clear_cpu(cpu, mm_cpumask(prev_mm));
-#endif
-		raw_all_irq_restore(flags);
-	} else {
-		/* Switching between threads, nothing to do here */
+	if (prev_mm == next_mm) {
+		/* Switching between threads.
+		 * We can get here after several enter_lazy_tlb() calls,
+		 * so just reload values that are cleared there:
+		 *  - get_mmu_pid_irqs_off() reloads current_mmu_context;
+		 *  - u_root_ptb can be loaded from mm. */
+		goto skip_mm_cpumask;
 	}
-}
 
-static inline void need_switch_mm(struct task_struct *prev,
-		struct task_struct *next, struct mm_struct *oldmm,
-		struct mm_struct *mm, int *switch_pgd, int *switch_mm)
-{
-	*switch_pgd = false;
-	*switch_mm = mm != NULL;
+#ifdef CONFIG_SMP
+	/* Start receiving flush ipis for the next mm */
+	cpumask_set_cpu(cpu, mm_cpumask(next_mm));
+
+	/* Without a memory barrier, a following race can happen
+	 * (CPU0 executes switch_mm, CPU1 executes flush_tlb):
+	 *
+	 * -----------------------------+-----------------------
+	 * 		CPU0		|	CPU1
+	 * -----------------------------+-----------------------
+	 * read next_mm->context	|
+	 * for CPU0			|
+	 *				| set next_mm->context
+	 *				| for CPU0 to 0
+	 * the loaded value has older	|
+	 * context version -> update it	|
+	 * with get_new_mmu_pid()	|
+	 * -> 0 in next_mm->context	| execute memory barrier
+	 * is rewritten			|
+	 *				| CPU0 is not set in
+	 *				| mm_cpumask(next_mm),
+	 *				| so ipi's not send
+	 * set CPU0 bit in		|
+	 * mm_cpumask(next_mm)		|
+	 * -----------------------------+-----------------------
+	 *
+	 * To avoid the races both CPU1 and CPU0 execute memory
+	 * barriers:
+	 * -----------------------------+-----------------------
+	 * 		CPU0		|	CPU1
+	 * -----------------------------+-----------------------
+	 * set CPU0 bit in		| set next_mm->context
+	 * mm_cpumask(next_mm)		| for CPU0 to 0
+	 *				|
+	 * execute memory barrier	| execute memory barrier
+	 *				|
+	 * read next_mm->context	| CPU0 is not set in
+	 * for CPU0			| mm_cpumask(next_mm),
+	 *				| so ipi's not send
+	 * -----------------------------+-----------------------
+	 * This way either CPU0 will see 0 in next_mm or
+	 * CPU1 will send the flush ipi to CPU0, or both.
+	 *
+	 * This barrier could be smp_mb__after_atomic(), but
+	 * the membarrier syscall requires a full memory
+	 * barrier after storing to rq->curr, before going
+	 * back to user-space.
+	 */
+	smp_mb();
+
+	/* Stop flush ipis for the previous mm */
+	if (prev_mm)
+		cpumask_clear_cpu(cpu, mm_cpumask(prev_mm));
+#endif
+
+skip_mm_cpumask:
+	/* Switch context */
+	get_mmu_pid_irqs_off(&next_mm->context, MMU_PID_RELOAD_CHECK);
+	raw_cpu_write(u_root_ptb, __pa(pgd));
+
+	raw_all_irq_restore(flags);
 }
 
 /*
- * Switch from address space PREV to address space NEXT.
+ * Activate a new MM instance for the current task.
  */
 static inline void
-switch_mm(struct mm_struct *prev_mm, struct mm_struct *next_mm,
-	      struct task_struct *next)
+native_activate_mm(struct mm_struct *active_mm, struct mm_struct *mm)
 {
-	int switch_pgd, switch_mm;
-
-	need_switch_mm(current, next, prev_mm, next_mm,
-			&switch_pgd, &switch_mm);
-	BUG_ON(switch_mm && switch_pgd);
-
-	call_switch_mm(prev_mm, next_mm, next, switch_pgd, switch_mm);
+	switch_mm(active_mm, mm, current);
 }
 
 /*
@@ -427,7 +417,7 @@ switch_mm(struct mm_struct *prev_mm, struct mm_struct *next_mm,
 static inline void
 set_kernel_MMU_state(void)
 {
-	e2k_addr_t root_base = kernel_va_to_pa(cpu_kernel_root_pt);
+	e2k_addr_t root_base = __pa_symbol(swapper_pg_dir);
 
 	E2K_WAIT_ALL;
 	if (MMU_IS_SEPARATE_PT()) {

@@ -300,13 +300,13 @@ static void pci_freedev(SYSDEVU_sInfo *dev)
 static void handle_suspend(SYSDEVU_sInfo *dev, IMG_BOOL forAPM)
 {
 	/* customer specific code for handling device suspend ( disabling clocks ) */
-	printk("PCI platform handle_suspend %s APM\n", forAPM ? "for" : "not for");
+	pr_debug("PCI platform handle_suspend %s APM\n", forAPM ? "for" : "not for");
 }
 
 static void handle_resume(SYSDEVU_sInfo *dev, IMG_BOOL forAPM)
 {
 	/* customer specific code for handling device resume ( enabling clocks ) */
-	printk("PCI platform handle_resume %s APM\n", forAPM ? "for" : "not for");
+	pr_debug("PCI platform handle_resume %s APM\n", forAPM ? "for" : "not for");
 }
 
 

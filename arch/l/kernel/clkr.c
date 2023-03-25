@@ -248,7 +248,8 @@ static int __init clkr_init(void)
 			"ARCH_USES_GETTIMEOFFSET was enabled in "
 			"kernel configuration.\n");
 #else
-	clocksource_register_hz(&clocksource_clkr, cpu_freq_hz);
+	if (e90s_get_cpu_type() < E90S_CPU_R2000)
+		clocksource_register_hz(&clocksource_clkr, cpu_freq_hz);
 #endif
 
 	return 0;

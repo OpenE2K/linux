@@ -91,6 +91,7 @@ static int smi_crtc_do_set_base(struct drm_crtc *crtc,
 	struct smi_bo *bo;
 	struct smi_framebuffer *smi_fb;
 	struct smi_crtc *smi_crtc = to_smi_crtc(crtc);
+	struct smi_device *sdev = crtc->dev->dev_private;
 
 	ENTER();
 	if (old_fb) {
@@ -154,7 +155,7 @@ static int smi_crtc_do_set_base(struct drm_crtc *crtc,
 	}
 	else
 	{
-		hw768_set_base(dst_ctrl,pitch,base_addr);
+		hw768_set_base(sdev, dst_ctrl, pitch, base_addr);
 	}
 
 	smi_crtc->CursorOffset = align_offset/(smi_bpp/8);
@@ -337,21 +338,21 @@ static int smi_crtc_mode_set(struct drm_crtc *crtc,
 		logicalMode.hz = refresh_rate;
 		logicalMode.pitch = 0;
 		logicalMode.dispCtrl = dst_ctrl;
-		ddk768_setMode(&logicalMode);
+		ddk768_setMode(sdev, &logicalMode);
 
 		if (smi_crtc_connector_lvds(crtc)) {
 			dispFormat = DOUBLE_PIXEL_48BIT;
 		} else {
-			DisableDoublePixel(0);
-			DisableDoublePixel(1);
+			DisableDoublePixel(sdev, 0);
+			DisableDoublePixel(sdev, 1);
 		}
 		smi_crtc_do_set_base(crtc, old_fb, x, y, 0, dst_ctrl);
-		setSingleViewOn(dst_ctrl, dispFormat);
+		setSingleViewOn(sdev, dst_ctrl, dispFormat);
 
 		if((g_m_connector & USE_HDMI)&&(ctrl_index > SMI1_CTRL))
 		{
 			printk("starting init HDMI!dst=[%d]\n", dst_ctrl);
-			int ret=hw768_set_hdmi_mode(&logicalMode, sdev->is_hdmi);
+			int ret = hw768_set_hdmi_mode(sdev, &logicalMode, sdev->is_hdmi);
 			if (ret != 0)
 			{
 				printk("HDMI Mode not supported!\n");
@@ -369,7 +370,7 @@ static int smi_crtc_mode_set(struct drm_crtc *crtc,
 		{
 			logicalMode.dispCtrl = 0;
 			printk("starting init HDMI!dst=[%d]\n", dst_ctrl);
-			int ret=hw768_set_hdmi_mode(&logicalMode, true);
+			int ret = hw768_set_hdmi_mode(sdev, &logicalMode, true);
 			if (ret != 0)
 			{
 				printk("HDMI Mode not supported!\n");
@@ -557,6 +558,7 @@ static void smi_encoder_mode_set(struct drm_encoder *encoder,
 
 static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 {
+	struct smi_device *sdev = encoder->dev->dev_private;
 	int index =0;
 
 	ENTER();
@@ -607,9 +609,9 @@ static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 			if(force_connect)
 				LEAVE();
 			if (mode == DRM_MODE_DPMS_OFF)	
-				hw768_HDMI_Disable_Output();
+				hw768_HDMI_Disable_Output(sdev);
 			else
-				hw768_HDMI_Enable_Output();
+				hw768_HDMI_Enable_Output(sdev);
 			if(g_m_connector == USE_DVI_HDMI){
 				index = SMI1_CTRL;
 			 	dbg_msg("HDMI connector: index=%d\n",index);
@@ -624,15 +626,15 @@ static void smi_encoder_dpms(struct drm_encoder *encoder, int mode)
 		}
 		
 		if (mode == DRM_MODE_DPMS_OFF){
-			setDisplayDPMS(index, DISP_DPMS_OFF, lvds);
-			ddk768_swPanelPowerSequence(index, 0, 4);
+			setDisplayDPMS(sdev, index, DISP_DPMS_OFF, lvds);
+			ddk768_swPanelPowerSequence(sdev, index, 0, 4);
 		}else{
-			setDisplayDPMS(index, DISP_DPMS_ON, lvds);
-			ddk768_swPanelPowerSequence(index, 1, 4);
+			setDisplayDPMS(sdev, index, DISP_DPMS_ON, lvds);
+			ddk768_swPanelPowerSequence(sdev, index, 1, 4);
 		}
 
 		if(lvds_channel == 2)
-			EnableDoublePixel(0);
+			EnableDoublePixel(sdev, 0);
 	}
 	
 	LEAVE();
@@ -847,10 +849,11 @@ int smi_connector_get_modes(struct drm_connector *connector)
 			} else {
 				edid_buf = sdev->dvi_edid;
 #ifdef HW_I2C
-				ret = ddk768_edidReadMonitorExHwI2C(edid_buf, 256, 0, 0);
+				ret = ddk768_edidReadMonitorExHwI2C(sdev, edid_buf, 256, 0, 0);
 				dbg_msg("DVI edid size= %d\n",ret);
 #else
-				ddk768_edidReadMonitorEx(edid_buf, 256, 0, 30, 31); // GPIO 30,31 for DVI, HW I2C0
+				/* GPIO 30,31 for DVI, HW I2C0 */
+				ddk768_edidReadMonitorEx(sdev, edid_buf, 256, 0, 30, 31);
 #endif
 				if (ret) {
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4,18,0)
@@ -875,10 +878,11 @@ int smi_connector_get_modes(struct drm_connector *connector)
 		{
 			edid_buf = sdev->vga_edid;
 #ifdef HW_I2C		
-			ret = ddk768_edidReadMonitorExHwI2C(edid_buf, 256, 0, 1);
+			ret = ddk768_edidReadMonitorExHwI2C(sdev, edid_buf, 256, 0, 1);
 			dbg_msg("VGA edid size= %d\n",ret);
 #else
-			ddk768_edidReadMonitorEx(edid_buf, 256, 0, 6, 7);//GPIO 6,7 for VGA, HW I2C1
+			/* GPIO 6,7 for VGA, HW I2C1 */
+			ddk768_edidReadMonitorEx(sdev, edid_buf, 256, 0, 6, 7);
 #endif			
 		       
 			if (ret) {
@@ -903,7 +907,8 @@ int smi_connector_get_modes(struct drm_connector *connector)
 		if(connector->connector_type == DRM_MODE_CONNECTOR_HDMIA)
 		{
 			edid_buf = sdev->hdmi_edid;
-			ret = ddk768_edidReadMonitorEx(edid_buf, 256, 0, 8, 9); //use GPIO8/9 for HDMI
+			/* use GPIO8/9 for HDMI */
+			ret = ddk768_edidReadMonitorEx(sdev, edid_buf, 256, 0, 8, 9);
 			dbg_msg("HDMI edid size= %d\n",ret);
 
 			if (ret) {
@@ -997,9 +1002,10 @@ struct drm_encoder *smi_connector_best_encoder(struct drm_connector
 }
 
 
-static enum drm_connector_status smi_connector_detect(struct drm_connector
-						   *connector, bool force)
+static enum drm_connector_status smi_connector_detect(
+			struct drm_connector *connector, bool force)
 {
+	struct smi_device *sdev = connector->dev->dev_private;
 	if(force_connect){
 		if(connector->connector_type == DRM_MODE_CONNECTOR_HDMIA){
 			g_m_connector = g_m_connector&(~USE_HDMI);
@@ -1054,12 +1060,12 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 				return connector_status_connected;
 			}
 #ifdef HW_I2C	
-			if(ddk768_edidHeaderReadMonitorExHwI2C(0)<0)						
+			if (ddk768_edidHeaderReadMonitorExHwI2C(sdev, 0) < 0)
 #else
-			if(ddk768_edidHeaderReadMonitorEx(30,31)<0)	
+			if (ddk768_edidHeaderReadMonitorEx(sdev, 30, 31) < 0)
 #endif
 			{				
-				dbg_msg("detect DVI DO NOT connected. \n");
+				dbg_msg("detect DVI DO NOT connected.\n");
 				g_m_connector = g_m_connector & (~USE_DVI);
 				return connector_status_disconnected; 
 			}
@@ -1074,12 +1080,12 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 		if(connector->connector_type == DRM_MODE_CONNECTOR_VGA)
 		{
 #ifdef HW_I2C	
-			if(ddk768_edidHeaderReadMonitorExHwI2C(1)<0)						
+			if (ddk768_edidHeaderReadMonitorExHwI2C(sdev, 1) < 0)
 #else
-			if(ddk768_edidHeaderReadMonitorEx(6,7)<0) 
+			if (ddk768_edidHeaderReadMonitorEx(sdev, 6, 7) < 0)
 #endif
 			{				
-				dbg_msg("detect CRT DO NOT connected. \n");
+				dbg_msg("detect CRT DO NOT connected.\n");
 				g_m_connector =g_m_connector&(~USE_VGA);
 				return connector_status_disconnected;
 			}
@@ -1095,7 +1101,7 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 		{
 
 			if (g_m_connector == USE_DVI_VGA || g_m_connector == USE_ALL){
-				hw768_HDMI_Disable_Output();
+				hw768_HDMI_Disable_Output(sdev);
 				dbg_msg("set HDMI connector_status_disconnected because of VGA+DVI\n");
 				g_m_connector = g_m_connector&(~USE_HDMI);
 				return connector_status_disconnected;  //If VGA and DVI are both connected, disable HDMI
@@ -1103,9 +1109,9 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 #if 0//ndef AUDIO_EN
 			if (hdmi_hotplug_detect()){
 #else
-			if(ddk768_edidHeaderReadMonitorEx(8,9)==0){ 
+			if (ddk768_edidHeaderReadMonitorEx(sdev, 8, 9) == 0) {
 #endif
-				dbg_msg("detect HDMI connected(GPIO 6,7) \n");
+				dbg_msg("detect HDMI connected(GPIO 6,7)\n");
 				g_m_connector = g_m_connector|USE_HDMI;
 				return connector_status_connected; 
 			}
@@ -1116,12 +1122,9 @@ static enum drm_connector_status smi_connector_detect(struct drm_connector
 			}
 		
 		}
-		if(connector->connector_type == DRM_MODE_CONNECTOR_LVDS)
-		{	/*FIXME:hdmi connected*/
-			if(ddk768_edidHeaderReadMonitorEx(8,9)==0)
-				return connector_status_disconnected;
-			return connector_status_connected; 
-		}
+	}
+	if (connector->connector_type == DRM_MODE_CONNECTOR_LVDS) {
+		return connector_status_disconnected;
 	}
 	return connector_status_disconnected;
 }
@@ -1192,7 +1195,7 @@ static struct drm_connector *smi_connector_init(struct drm_device *dev, int inde
 			printk("error index of Connector\n");
 	}
 	drm_connector_helper_add(connector, &smi_vga_connector_helper_funcs);
-	if (0 ) {/* (index == 3) { lvds */
+	if (index == 3) { /* lvds */
 		 /*FIXME:hdmi connected*/
 		if (panel)
 			connector->force = DRM_FORCE_ON;

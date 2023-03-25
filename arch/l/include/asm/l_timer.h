@@ -44,6 +44,21 @@ typedef	struct lt_regs {
 	u32	reset_counter_hi;	/* reset counter low bits */
 } lt_regs_t;
 
+typedef	struct lt_regs_eioh {
+	u32	counter_limit;	/* timer counter limit value */
+	u32	counter_start;	/* start value of counter */
+	u32	counter;	/* timer counter */
+	u32	counter_cntr;	/* timer control register */
+	u32	wd_counter;		/* watchdog counter */
+	u32	wd_prescaler;		/* watchdog prescaler */
+	u32	wd_limit;		/* watchdog limit */
+	u32	wd_control;		/* watchdog control register */
+	u32	reset_counter_lo;	/* reset counter low bits */
+	u32	reset_counter_hi;	/* reset counter low bits */
+	u32	power_counter_lo;	/* power counter low bits */
+	u32	power_counter_hi;	/* power counter high bits */
+} lt_regs_eioh_t;
+
 extern unsigned long long	lt_phys_base;
 extern lt_regs_t		*lt_regs;
 extern long lt_clock_rate;

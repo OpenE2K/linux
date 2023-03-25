@@ -91,6 +91,8 @@ struct pcs_handle {
 extern void register_pcs_handle(const struct pcs_handle *handle);
 extern void unregister_pcs_handle(void);
 
+extern void cepic_disable(void);
+
 extern __visible void epic_smp_timer_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_spurious_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_error_interrupt(struct pt_regs *regs);
@@ -98,7 +100,6 @@ extern __visible void prepic_smp_error_interrupt(struct pt_regs *regs);
 extern __visible void epic_smp_irq_work_interrupt(struct pt_regs *regs);
 extern __visible void cepic_epic_interrupt(struct pt_regs *regs);
 extern __visible void epic_hc_emerg_interrupt(struct pt_regs *regs);
-extern __visible void epic_iommu_interrupt(struct pt_regs *regs);
 extern __visible void epic_uncore_interrupt(struct pt_regs *regs);
 extern __visible void epic_ipcc_interrupt(struct pt_regs *regs);
 extern __visible void epic_hc_interrupt(struct pt_regs *regs);

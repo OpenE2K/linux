@@ -14,6 +14,9 @@ register unsigned long __my_cpu_offset DO_ASM_GET_GREG_MEMONIC(
 
 # define set_my_cpu_offset(off) do {__my_cpu_offset = (off); } while (0)
 
+/* this_cpu_* operations must be atomic with regard to interrupts
+ * and preemption, but must not be atomic with regard to other
+ * CPUs accessing the same variable. */
 # define this_cpu_read_1(pcp) __arch_this_cpu_read((pcp), "b")
 # define this_cpu_read_2(pcp) __arch_this_cpu_read((pcp), "h")
 # define this_cpu_read_4(pcp) __arch_this_cpu_read((pcp), "w")

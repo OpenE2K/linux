@@ -105,7 +105,9 @@ extern int radeon_dpm;
 extern int radeon_aspm;
 extern int radeon_runtime_pm;
 extern int radeon_hard_reset;
+#ifdef CONFIG_MCST
 extern int radeon_fbdev_accel;
+#endif
 extern int radeon_vm_size;
 extern int radeon_vm_block_size;
 extern int radeon_deep_color;

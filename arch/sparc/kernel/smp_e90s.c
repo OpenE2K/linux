@@ -18,6 +18,7 @@
 #include <asm/e90s.h>
 #include <asm/mpspec.h>
 #include <asm/epic.h>
+#include <asm/setup.h>
 #include <asm/l_pmc.h>
 #include <asm-l/pic.h>
 
@@ -39,7 +40,10 @@ long long do_sync_cpu_clocks = 1; /* 0 - watch only; 1 - do_sync(modify); */
 
 static void smp_store_cpu_info(int cpu)
 {
-	cpu_data(cpu).clock_tick = loops_per_jiffy * HZ;
+	if (cpu == 0) /*time is not ready yet */
+		cpu_data(cpu).clock_tick = loops_per_jiffy * HZ;
+	else
+		cpu_data(cpu).clock_tick =  measure_cpu_freq(cpu);
 	cpu_data(cpu).dcache_size = E90S_DCACHE_SIZE;
 	cpu_data(cpu).dcache_line_size = E90S_DCACHE_LINE_SIZE;
 	cpu_data(cpu).icache_size = E90S_ICACHE_SIZE;
@@ -371,12 +375,15 @@ void smp_synchronize_tick_client(void)
 	long i, delta, adj, adjust_latency = 0, done = 0;
 	unsigned long flags, rt, master_time_stamp;
 	int	do_sync = do_sync_cpu_clocks;
+	int	round;
+	int	cpu = smp_processor_id();
 #if DEBUG_TICK_SYNC
 	struct {
 		long rt;	/* roundtrip time */
 		long master;	/* master's timestamp */
 		long diff;	/* difference between midpoint and master's timestamp */
 		long lat;	/* estimate of itc adjustment latency */
+		long cyc;	/* current cycle */
 	} t[NUM_ROUNDS];
 #endif
 
@@ -392,6 +399,8 @@ void smp_synchronize_tick_client(void)
 			delta = get_delta(&rt, &master_time_stamp);
 			if (delta == 0) {
 				done = 1;	/* let's lock on to this... */
+			} else {
+				round = i;
 			}
 
 			if (!done) {
@@ -408,6 +417,7 @@ void smp_synchronize_tick_client(void)
 			t[i].master = master_time_stamp;
 			t[i].diff = delta;
 			t[i].lat = adjust_latency / 4;
+			t[i].cyc = get_cycles();
 #endif
 		}
 		if (do_sync) {
@@ -427,17 +437,17 @@ void smp_synchronize_tick_client(void)
 
 #if DEBUG_TICK_SYNC
 	for (i = 0; i < NUM_ROUNDS; i++)
-		printk("rt=%5ld master=%5ld diff=%5ld adjlat=%5ld\n",
-			   t[i].rt, t[i].master, t[i].diff, t[i].lat);
+		pr_err("cpu%d rt=%5ld mast=%5ld dff=%5ld lat=%5ld at %ld cyc\n",
+		    cpu, t[i].rt, t[i].master, t[i].diff, t[i].lat, t[i].cyc);
 #endif
 
 	if (!do_sync) {
 		delta_ticks[smp_processor_id()] = delta;
 		return;
 	}
-	printk(KERN_INFO "CPU %d: synchronized TICK with master CPU "
+	printk(KERN_INFO "CPU %d: synchronized STICK with master CPU at %d/%d round "
 		   "(last diff %ld cycles, maxerr %lu cycles)\n",
-		   smp_processor_id(), delta, rt);
+		   cpu, round, NUM_ROUNDS, delta, rt);
 }
 
 void smp_synchronize_one_tick(int cpu)
@@ -489,7 +499,7 @@ void smp_synchronize_one_tick(int cpu)
 			rmb();	/* */
 		if ((go_cycl_sync[MASTER] & ~(CYCL_SYNC_GAP - 1)) !=
 				(get_cycles() & ~(CYCL_SYNC_GAP - 1))) {
-			pr_err("CYCLES_SYNC ERR cpu%d: slv=0x%lx mst=0x%lx\n",
+			pr_err("CYCLES_SYNC ERR cpu%d: slv=%ld mst(cur)=%ld\n",
 				cpu, go_cycl_sync[MASTER],
 				get_cycles());
 		}

@@ -914,3 +914,8 @@ void host_dump_stack(void)
 {
 	host_print_stack_frames(current, NULL, 1);
 }
+
+void host_dump_stack_func(void)
+{
+	host_print_stack_frames(current, NULL, 0);
+}

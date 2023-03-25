@@ -10,6 +10,8 @@
 *******************************************************************/
 #ifndef _IIS_H_
 #define _IIS_H_
+#include "../smi_drv.h"
+#include "../smi_snd.h"
 
 
 #define IIS_REF_CLOCK 48000000
@@ -19,6 +21,7 @@
  * Set up I2S and GPIO registers to transmit/receive data.
  */
 void iisOpen(
+	struct smi_device *sdev,
    unsigned long wordLength, //Number of bits in IIS data: 16 bit, 24 bit, 32 bit
    unsigned long sampleRate  //Sampling rate.
 );
@@ -26,7 +29,7 @@ void iisOpen(
 /*
  *    Turn off I2S and close GPIO 
  */
-void iisClose(void);
+void iisClose(struct smi_device *sdev);
 
 /*
  *  This function set up I2S to DMA data from SRAM.
@@ -39,6 +42,7 @@ void iisClose(void);
  *        Number of bytes to DMA (DWord aligned)
  */
 void iisTxDmaSetup(
+	struct smi_device *sdev,
     unsigned long offset, /* Offset from start of SRAM area */
     unsigned long len     /* Number of bytes to DMA */
     );
@@ -46,14 +50,14 @@ void iisTxDmaSetup(
 /*
  * Return current IIS DMA position.
  */
-unsigned long iisDmaPointer(void);
+unsigned long iisDmaPointer(struct smi_device *sdev);
 
 /*
  * This function start IIS without enabling Tx line.
  * It can be used to flush left over SRAM data without
  * sending them to Codec.
  */
-void iisStartNoTx(void);
+void iisStartNoTx(struct smi_device *sdev);
 
 /*
  * This function is needed only when I2S is intended to operate in master mode.
@@ -62,7 +66,7 @@ void iisStartNoTx(void);
  * functioning as soon as an external clock is detected after iisOpen().
  *
  */
-void iisStart(void);
+void iisStart(struct sm768chip *chip);
 
 /*
  * This function is useful only when I2S is operating in master mode.
@@ -71,12 +75,13 @@ void iisStart(void);
  * control register.
  *
  */
-void iisStop(void);
+void iisStop(volatile unsigned char __iomem *rmmio);
 
 /*
  * Set values for left Tx and right Tx register.
  */
 void iisSetTx(
+	volatile unsigned char __iomem *rmmio,
     unsigned long left, //Data for left channel Tx
     unsigned long right //Data for right channel Tx
     );
@@ -88,7 +93,7 @@ void iisSetTx(
  * It has to be cleared, in order to distinguish between different sessions of countdown.
  * 
  */
-void iisClearRawInt(void);
+void iisClearRawInt(struct sm768chip *chip);
 
 /* 
  * This function returns the INT mask for IIS.

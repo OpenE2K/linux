@@ -112,6 +112,9 @@ extern bool debug_VIRQs;
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#define CREATE_TRACE_POINTS
+#include "trace-virq.h"
+
 static void kvm_register_vcpu_interrupt(struct kvm_vcpu *vcpu,
 		int irq, int virq_id);
 static int kvm_wake_up_virq(kvm_guest_virq_t *guest_virq,
@@ -415,6 +418,8 @@ int kvm_vcpu_interrupt(struct kvm_vcpu *vcpu, int irq)
 		WARN_ON(true);
 		do_wake_up = true;
 	}
+	trace_kvm_vcpu_interrupt(vcpu, virq_id, has_pending_virqs, virqs_num,
+				 do_wake_up);
 	kvm_wake_up_virq(guest_virq, true, /* inject */ do_wake_up);
 	raw_spin_unlock_irqrestore(&kvm->arch.virq_lock, flags);
 	return 0;
@@ -431,8 +436,12 @@ kvm_wake_up_direct_virq(kvm_guest_virq_t *guest_virq,
 
 	if (!(guest_virq->flags & DIRECT_INJ_VIRQ_FLAG))
 		KVM_BUG_ON(true);
-	if (!inject || !do_wake_up)
+	virqs_num = atomic_read(guest_virq->count);
+	if (!(inject || do_wake_up)) {
+		trace_kvm_virq_wake_up(guest_virq->vcpu, virq_id,
+			need_not_virq_wake_up, virqs_num, inject, do_wake_up);
 		return 0;
+	}
 	task = guest_virq->host_task;
 	if (unlikely(task == NULL))
 		return -EINVAL;
@@ -442,6 +451,8 @@ kvm_wake_up_direct_virq(kvm_guest_virq_t *guest_virq,
 		kvm_get_virq_name(virq_id), virqs_num);
 	if (virqs_num <= 0) {
 		/* none pending VIRQs */
+		trace_kvm_virq_wake_up(guest_virq->vcpu, virq_id,
+			no_pending_virq_wake_up, virqs_num, inject, do_wake_up);
 		return 0;
 	}
 	kvm_set_pending_virqs(guest_virq->vcpu);
@@ -452,14 +463,19 @@ kvm_wake_up_direct_virq(kvm_guest_virq_t *guest_virq,
 		DebugVIRQs("current %s (%d) is VCPU thread to inject "
 			"VIRQ %s\n",
 			task->comm, task->pid, kvm_get_virq_name(virq_id));
+		trace_kvm_virq_wake_up(guest_virq->vcpu, virq_id,
+			current_vcpu_virq_wake_up, virqs_num, inject, do_wake_up);
 		return virqs_num;
 	}
 
 	/* received some VIRQs, so activate VCPU thread if it is on idle */
 	if (!(guest_virq->vcpu->arch.on_idle ||
 			guest_virq->vcpu->arch.on_spinlock ||
-			guest_virq->vcpu->arch.on_csd_lock))
+			guest_virq->vcpu->arch.on_csd_lock)) {
+		trace_kvm_virq_wake_up(guest_virq->vcpu, virq_id,
+			active_vcpu_virq_wake_up, virqs_num, inject, do_wake_up);
 		return virqs_num;
+	}
 	ret = wake_up_process(task);
 	if (ret) {
 		DebugDVIRQ("wakeed up guest VIRQ %s VCPU thread %s (%d)\n",
@@ -476,6 +492,8 @@ kvm_wake_up_direct_virq(kvm_guest_virq_t *guest_virq,
 			virqs_num);
 	}
 	kvm_vcpu_kick(guest_virq->vcpu);
+	trace_kvm_virq_wake_up(guest_virq->vcpu, virq_id,
+			vcpu_virq_waked_up, virqs_num, inject, do_wake_up);
 	return virqs_num;
 }
 
@@ -490,6 +508,8 @@ static int kvm_wake_up_virq(kvm_guest_virq_t *guest_virq,
 		kvm_get_virq_name(virq_id), virqs_num);
 	if (virqs_num <= 0) {
 		/* none pending VIRQs */
+		trace_kvm_virq_wake_up(guest_virq->vcpu, virq_id,
+			no_pending_virq_wake_up, virqs_num, do_inject, do_wake_up);
 		return 0;
 	}
 	if (guest_virq->flags & DIRECT_INJ_VIRQ_FLAG) {

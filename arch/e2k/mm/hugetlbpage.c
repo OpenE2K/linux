@@ -4,102 +4,61 @@
 
 #include <linux/init.h>
 #include <linux/fs.h>
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <linux/hugetlb.h>
 #include <linux/pagemap.h>
 #include <linux/sysctl.h>
-#include <linux/slab.h>
 
 #include <asm/mman.h>
 #include <asm/pgalloc.h>
-#include <asm/tlb.h>
-#include <asm/tlbflush.h>
-#include <asm/cacheflush.h>
 
-#undef	DEBUG_HUGETLB_MODE
-#undef	DebugHP
-#define	DEBUG_HUGETLB_MODE	0	/* Huge pages */
-#define DebugHP(...)		DebugPrint(DEBUG_HUGETLB_MODE ,##__VA_ARGS__)
-
-pte_t *
-huge_pte_alloc(struct mm_struct *mm, unsigned long addr, unsigned long sz)
-{
-	pgd_t *pgd;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
-
-	pgd = pgd_offset(mm, addr);
-	pud = pud_alloc(mm, pgd, addr);
-	if (pud == NULL) {
-		return NULL;
-	}
-	pmd = pmd_alloc(mm, pud, addr);
-	if (pmd == NULL) {
-		return NULL;
-	}
-	pte = (pte_t *)pmd;
- 
-	BUG_ON(pte && pte_present(*pte) && !pte_huge(*pte));
-
-	return pte;
-}
-
-pte_t *
-huge_pte_offset(struct mm_struct *mm, unsigned long addr, unsigned long sz)
-{
-	pgd_t *pgd;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
-
-	pgd = pgd_offset(mm, addr);
-	if (pgd_none(*pgd))
-		return NULL;
-	pud = pud_offset(pgd, addr);
-	if (pud_none(*pud))
-		return NULL;
-	pmd = pmd_offset(pud, addr);
-	pte = (pte_t *)pmd;
-
-	return pte;
-}
-
-void
-set_huge_pte_at(struct mm_struct *mm, unsigned long address,
-		pte_t *ptep, pte_t entry)
-{
-	/*
-	 * In this case virtual page occupied two sequential entries in
-	 * page table on 2-th level (PMD).
-	 * All two pte's (pmd's) should be set to identical entries.
-	 */
-	DebugHP("will set pte 0x%px = 0x%lx\n",
-		ptep, pte_val(entry));
-	set_pte_at(mm, address, ptep, entry);
-}
-
-pte_t
-huge_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
-		pte_t *ptep)
-{
-	pte_t entry = *ptep;
-	huge_pte_clear(mm, addr, ptep,
-		       0 /* unused now */);
-	return entry;
-}
-
-/* Update this if adding upport for ARCH_ENABLE_HUGEPAGE_MIGRATION (see x86) */
+/*
+ * pmd_huge() returns 1 if @pmd is hugetlb related entry, that is normal
+ * hugetlb entry or non-present (migration or hwpoisoned) hugetlb entry.
+ * Otherwise, returns 0.
+ *
+ * Do NOT use this for anything but checking for _possible_ _HugeTLB_ entry.
+ */
 int pmd_huge(pmd_t pmd)
 {
-	return user_pmd_huge(pmd);
+	return !pmd_none(pmd) && _PAGE_GET(pmd_val(pmd),
+					   UNI_PAGE_PRESENT | UNI_PAGE_HUGE) !=
+						_PAGE_INIT_PRESENT;
 }
 
 int pud_huge(pud_t pud)
 {
-	BUG_ON(user_pud_huge(pud));	/* not implemented for user */
+	return user_pud_huge(pud);
+}
+
+static __init int setup_hugepagesz(char *opt)
+{
+	unsigned long sz = memparse(opt, &opt);
+	if (sz == PMD_SIZE) {
+		hugetlb_add_hstate(PMD_SHIFT - PAGE_SHIFT);
+	} else if (sz == PUD_SIZE && cpu_has(CPU_FEAT_ISET_V5)) {
+		hugetlb_add_hstate(PUD_SHIFT - PAGE_SHIFT);
+	} else {
+		hugetlb_bad_size();
+		pr_err("hugepagesz: Unsupported page size %lu M\n", sz >> 20);
+		return 0;
+	}
+	return 1;
+}
+__setup("hugepagesz=", setup_hugepagesz);
+
+#ifdef CONFIG_CONTIG_ALLOC
+__init
+static int gigantic_pages_init(void)
+{
+	/* With compaction or CMA we can allocate gigantic pages at runtime */
+	if (cpu_has(CPU_FEAT_ISET_V5) && !size_to_hstate(1UL << PUD_SHIFT))
+		hugetlb_add_hstate(PUD_SHIFT - PAGE_SHIFT);
+
 	return 0;
 }
+arch_initcall(gigantic_pages_init);
+#endif
 
 #ifdef HAVE_ARCH_HUGETLB_UNMAPPED_AREA
 unsigned long
@@ -122,8 +81,8 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 
 	if (flags & MAP_FIXED) {
 		if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
-				(addr >= USER_HW_STACKS_BASE ||
-				 addr + len >= USER_HW_STACKS_BASE))
+				(addr >= USER_ADDR_MAX ||
+				 addr + len >= USER_ADDR_MAX))
 			return -ENOMEM;
 		if (prepare_hugepage_range(file, addr, len))
 			return -EINVAL;
@@ -136,7 +95,7 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 			end = TASK32_SIZE;
 		else
 			end = TASK_SIZE;
-		end = min(end, USER_HW_STACKS_BASE);
+		end = min(end, USER_ADDR_MAX);
 	} else {
 		end = TASK_SIZE;
 	}

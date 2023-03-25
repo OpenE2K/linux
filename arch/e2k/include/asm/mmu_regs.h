@@ -194,12 +194,8 @@ boot_set_MMU_OS_VPTB(unsigned long mmu_virt_ptb)
 /*
  * Write/read MMU root page table physical base register
  */
-#define	WRITE_MMU_U_PPTB(mmu_phys_ptb)	\
-		WRITE_MMU_REG( \
-			_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO), \
-			mmu_reg_val(mmu_phys_ptb))
-#define	READ_MMU_U_PPTB()	\
-		READ_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_U_PPTB_NO))
+#define	WRITE_MMU_U_PPTB(mmu_phys_ptb)	NATIVE_SET_MMUREG(root_ptb, mmu_phys_ptb)
+#define	READ_MMU_U_PPTB()		NATIVE_GET_MMUREG(root_ptb)
 static inline	void
 set_MMU_U_PPTB(unsigned long mmu_phys_ptb)
 {
@@ -253,10 +249,9 @@ boot_set_MMU_OS_PPTB(unsigned long mmu_phys_ptb)
 		WRITE_MMU_REG(_MMU_REG_NO_TO_MMU_ADDR_VAL( \
 						_MMU_TRAP_POINT_NO), \
 			_MMU_TRAP_POINT((e2k_addr_t)trap_cellar))
-static inline	void
-set_MMU_TRAP_POINT(void *trap_cellar)
+static inline void set_MMU_TRAP_POINT(unsigned long trap_cellar)
 {
-	DebugMR("Set MMU Trap Point register to %px\n", trap_cellar);
+	DebugMR("Set MMU Trap Point register to %lx\n", trap_cellar);
 	WRITE_MMU_TRAP_POINT(trap_cellar);
 }
 #define	BOOT_WRITE_MMU_TRAP_POINT(trap_cellar)	\
@@ -669,23 +664,6 @@ static	inline	void
 flush_ICACHE_kernel_line(e2k_addr_t virt_addr)
 {
 	flush_ICACHE_line_sys(virt_addr, E2K_KERNEL_CONTEXT);
-}
-
-/*
- * Flush and invalidate CACHE(s) (invalidate all caches of the processor)
- * WARNING: operation was deleted from instruction set begining V3-iset
- */
-
-static inline void
-boot_native_invalidate_CACHE_L12(void)
-{
-	unsigned long flags;
-
-	raw_all_irq_save(flags);
-	E2K_WAIT_MA;
-	NATIVE_FLUSH_CACHE_L12(flush_op_write_back_cache_L12);
-	E2K_WAIT_FLUSH;
-	raw_all_irq_restore(flags);
 }
 
 /*

@@ -1044,13 +1044,15 @@ static int do_get_prio_protect(void);
 #endif /* CONFIG_HAVE_EL_POSIX_SYSCALL */
 
 static DEFINE_RAW_SPINLOCK(atomic_add_lock);
-
+/*#define EL_TIMERFD_USING */
 #ifdef CONFIG_MCST_RT
+#ifdef EL_TIMERFD_USING
 static int el_open_timerfd(void);
 static int el_timerfd_settime(int ufd, struct itimerspec __user *tmr);
 #ifdef CONFIG_COMPAT
 static int compat_el_timerfd_settime(int ufd, struct compat_itimerspec __user *tmr);
 #endif
+#endif /*EL_TIMERFD_USING */
 #endif
 
 /*#define SHOW_WOKEN_TIME*/
@@ -1109,7 +1111,9 @@ int  cpus_intcount[NR_CPUS];
 
 #include <linux/cpuset.h>
 
+#ifdef SHOW_WOKEN_TIME
 static int pr_err_done = 0;
+#endif
 
 long do_el_posix(int req, void __user *a1, void __user *a2,
 		 void __user *a3, int a4)
@@ -1571,12 +1575,14 @@ long do_el_posix(int req, void __user *a1, void __user *a2,
 			break;
 		}
 #ifdef CONFIG_MCST_RT
+#ifdef EL_TIMERFD_USING
 	case EL_OPEN_TIMERFD :
 		rval = el_open_timerfd();
 		break;
 	case EL_TIMERFD_SETTIME :
 		rval = el_timerfd_settime((int) (unsigned long) a1, a2);
 		break;
+#endif /*EL_TIMERFD_USING */
 #endif
 #ifdef CONFIG_E90S
 	case EL_SYNC_CYCLS: {
@@ -1796,9 +1802,11 @@ asmlinkage long compat_sys_el_posix(int req, void __user *a1, void __user *a2,
 
 	switch (req) {
 #ifdef CONFIG_MCST_RT
+#ifdef EL_TIMERFD_USING
 		case EL_TIMERFD_SETTIME:
 			rval = compat_el_timerfd_settime((int) (unsigned long) a1, a2);
 			break;
+#endif /*EL_TIMERFD_USING */
 #endif
 		/* TODO: all el_posix users must use this interface */
 		default:
@@ -9175,6 +9183,7 @@ out_put_task:
 #endif /* CONFIG_HAVE_EL_POSIX_SYSCALL */
 
 #ifdef CONFIG_MCST_RT
+#ifdef EL_TIMERFD_USING
 
 static inline int el_ctx_lock_irq(struct el_timerfd_ctx *ctx)
 {
@@ -9361,7 +9370,7 @@ static int el_open_timerfd(void)
 	ctx->ticks  = 0;
 	ctx->handled_ticks = 0;
 
-	ufd = anon_inode_getfd("[el_timerfd]", &el_timerfd_fops, ctx, O_RDWR);
+	ufd = anon_inode_getfd("[el_timerfd]", &el_timerfd_fops, ctx, 0);
 	if (ufd < 0)
 		kfree(ctx);
 	
@@ -9517,4 +9526,5 @@ static int compat_el_timerfd_settime(int ufd, struct compat_itimerspec __user *t
 }
 #endif /* CONFIG_COMPAT */
 
+#endif /*EL_TIMERFD_USING */
 #endif

@@ -3,7 +3,6 @@
 #define	_E2K_HEAD_H
 
 #include <asm/types.h>
-#include <asm/p2v/boot_v2p.h>
 #include <asm/page.h>
 #include <asm/e2k_api.h>
 #ifndef __ASSEMBLY__
@@ -157,12 +156,8 @@
  * 0x0000 ffff ffff ffff - root-fourth-level itself PGD
  */
 
-#define	KERNEL_VPTB_BASE_ADDR		0x0000ff8000000000UL
-#ifndef __ASSEMBLY__
-#define	KERNEL_PPTB_BASE_ADDR		((e2k_addr_t)boot_root_pt)
-#else
-#define	KERNEL_PPTB_BASE_ADDR		(boot_root_pt)
-#endif /* !(__ASSEMBLY__) */
+#define	KERNEL_VPTB_BASE_ADDR	0x0000ff8000000000UL
+#define	KERNEL_PPTB_BASE_ADDR	((unsigned long) boot_va_to_pa(swapper_pg_dir))
 
 /*
  * Area dedicated for I/O ports and BIOS physical memory
@@ -206,23 +201,25 @@
 /*
  * Area dedicated for kernel resident image virtual space and virtual space
  * to allocate and load kernel modules.
+ *
  * Both this areas should be within 2 ** 30 bits of virtual adresses to provide
  * call of extern functions based on literal displacement DISP
- * 0x0000 e200 0000 0000 - 0x0000 e200 3fff ffff kernel image area with modules
- * 0x0000 e200 0000 0000 - 0x0000 e200 0xxx x000 kernel image area
- *					xxx x	 defined by kernel_image_size
- * 0x0000 e200 0xxx x000 - 0x0000 e200 3fff ffff area to load modules
+ *
+ * Modules and kernel are put into different PGDs because kernel image is
+ * duplicated across NUMA nodes and modules are not.
+ *
+ * 0xe1ff c000 0000 - 0xe200 0000 0000 area to load modules
+ * 0xe200 0000 0000 - 0xe200 3fff ffff kernel image area with modules
+ * 0xe200 0000 0000 - 0xe200 0xxx x000 kernel image area
+ *			      xxx x    defined by E2K_KERNEL_IMAGE_AREA_SIZE
  */
 #define	NATIVE_KERNEL_IMAGE_AREA_BASE	0x0000e20000000000
 
 #define	KERNEL_IMAGE_PGD_INDEX		pgd_index(E2K_KERNEL_IMAGE_AREA_BASE)
 
-#define	E2K_KERNEL_IMAGE_AREA_SIZE	kernel_image_size
-#define	E2K_MODULES_START		_PAGE_ALIGN_DOWN( \
-						(E2K_KERNEL_IMAGE_AREA_BASE + \
-						E2K_KERNEL_IMAGE_AREA_SIZE), \
-						E2K_KERNEL_PAGE_SIZE)
-#define	E2K_MODULES_END			(E2K_KERNEL_IMAGE_AREA_BASE + (1 << 30))
+#define	E2K_KERNEL_IMAGE_AREA_SIZE	(KERNEL_END - KERNEL_BASE)
+#define	E2K_MODULES_END	  round_down(E2K_KERNEL_IMAGE_AREA_BASE, PGDIR_SIZE)
+#define E2K_MODULES_START round_up(KERNEL_END - (1UL << 30), E2K_LARGE_PAGE_SIZE)
 #define	E2K_KERNEL_AREAS_SIZE		0x0000000040000000UL	/* 2 ** 30 */
 
 #define	KERNEL_CODES_INDEX		0UL	/* kernel CUI */
@@ -257,10 +254,5 @@
 
 /* virtualization support */
 #include <asm/kvm/head.h>
-
-/*
- * Kernel virtual memory context
- */
-#define	E2K_KERNEL_CONTEXT		0x000
 
 #endif /* !(_E2K_HEAD_H) */

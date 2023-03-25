@@ -21,6 +21,9 @@
 #include <linux/regmap.h>
 #include <linux/dma-mapping.h>
 #include <linux/spinlock.h>
+#ifdef CONFIG_MCST
+#include <linux/of_address.h>
+#endif
 
 #include <media/cec-notifier.h>
 
@@ -1832,7 +1835,7 @@ err:
 	return -EINVAL;
 }
 #endif	/*CONFIG_MCST*/
- 
+
 static int hdmi_phy_configure(struct dw_hdmi *hdmi)
 {
 	const struct dw_hdmi_phy_data *phy = hdmi->phy.data;
@@ -3045,29 +3048,6 @@ static void dw_hdmi_init_hw(struct dw_hdmi *hdmi)
 		hdmi->phy.ops->setup_hpd(hdmi, hdmi->phy.data);
 }
 
-#ifdef CONFIG_MCST
-static int dev_is_type(struct device *dev, void *data)
-{
-	struct device **d = data;
-	if (dev->type == &i2c_adapter_type) {
-		get_device(dev);
-		*d = dev;
-		return 1;
-	}
-	return device_for_each_child(dev, d, dev_is_type);
-}
-
-static struct device *dev_find_type(struct device *parent)
-{
-	struct device *d = NULL;
-	if (dev_is_type(parent, &d)) {
-		return d;
-	}
-	device_for_each_child(parent, &d, dev_is_type);
-	return d;
-}
-#endif	/*CONFIG_MCST*/
-
 static struct dw_hdmi *
 __dw_hdmi_probe(struct platform_device *pdev,
 		const struct dw_hdmi_plat_data *plat_data)
@@ -3079,9 +3059,6 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	struct dw_hdmi_cec_data cec;
 	struct dw_hdmi *hdmi;
 	struct resource *iores = NULL;
-#ifdef CONFIG_MCST
-	struct device *ddc_dev;
-#endif	/*CONFIG_MCST*/
 	int irq;
 	int ret;
 	u32 val = 1;
@@ -3116,10 +3093,6 @@ __dw_hdmi_probe(struct platform_device *pdev,
 			return ERR_PTR(-EPROBE_DEFER);
 		}
 
-#ifdef CONFIG_MCST
-	} else if ((ddc_dev = dev_find_type(hdmi->dev))) {
-		hdmi->ddc = to_i2c_adapter(ddc_dev);
-#endif	/*CONFIG_MCST*/
 	} else {
 		dev_dbg(hdmi->dev, "no ddc property found\n");
 	}
@@ -3128,10 +3101,7 @@ __dw_hdmi_probe(struct platform_device *pdev,
 		const struct regmap_config *reg_config;
 
 		of_property_read_u32(np, "reg-io-width", &val);
-#ifdef CONFIG_MCST
-	hdmi->audio_enable = true;
-	val = 4;
-#endif	/*CONFIG_MCST*/
+
 		switch (val) {
 		case 4:
 			reg_config = &hdmi_regmap_32bit_config;
@@ -3345,12 +3315,12 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	return hdmi;
 
 err_iahb:
-#ifndef CONFIG_MCST
 	if (hdmi->i2c) {
 		i2c_del_adapter(&hdmi->i2c->adap);
 		hdmi->ddc = NULL;
 	}
 
+#ifndef CONFIG_MCST
 	clk_disable_unprepare(hdmi->iahb_clk);
 	if (hdmi->cec_clk)
 		clk_disable_unprepare(hdmi->cec_clk);
@@ -3373,19 +3343,17 @@ static void __dw_hdmi_remove(struct dw_hdmi *hdmi)
 	/* Disable all interrupts */
 	hdmi_writeb(hdmi, ~0, HDMI_IH_MUTE_PHY_STAT0);
 
-#ifdef CONFIG_MCST
-	put_device(&hdmi->ddc->dev);
-#else
+#ifndef CONFIG_MCST
 	clk_disable_unprepare(hdmi->iahb_clk);
 	clk_disable_unprepare(hdmi->isfr_clk);
 	if (hdmi->cec_clk)
 		clk_disable_unprepare(hdmi->cec_clk);
+#endif	/*CONFIG_MCST*/
 
 	if (hdmi->i2c)
 		i2c_del_adapter(&hdmi->i2c->adap);
 	else
 		i2c_put_adapter(hdmi->ddc);
-#endif	/*CONFIG_MCST*/
 }
 
 /* -----------------------------------------------------------------------------

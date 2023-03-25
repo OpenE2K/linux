@@ -1,4 +1,5 @@
 #include <linux/kernel.h>
+#include <asm/cpu_regs.h>
 #include <asm/e2k.h>
 #include <asm/p2v/boot_head.h>
 #include <asm/p2v/boot_console.h>

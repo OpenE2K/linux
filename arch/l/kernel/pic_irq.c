@@ -292,7 +292,9 @@ void arch_send_call_function_single_ipi(int cpu)
 
 void smp_send_reschedule(int cpu)
 {
-	pic_send_reschedule(cpu);
+	if (likely(!cpu_is_offline(cpu))) {
+		pic_send_reschedule(cpu);
+	}
 }
 
 void irq_force_complete_move(struct irq_desc *desc)

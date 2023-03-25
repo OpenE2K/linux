@@ -75,7 +75,7 @@ CFLAGS_REMOVE_boot-pv-hpt.o = $(BOOT_CFLAGS_REMOVE)
 CFLAGS_boot-pv-hpt.o = $(BOOT_CFLAGS_ADD)
 
 obj-$(CONFIG_KVM_GUEST_MODE) +=	ttable.o traps.o fast_syscalls.o \
-				process.o signal.o mmu.o \
+				process.o signal.o mmu.o uaccess.o \
 				e2k_virt.o time.o io.o string.o \
 				spinlock.o irq.o lapic.o \
 				host_printk.o host_dump_stack.o \

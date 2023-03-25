@@ -1285,7 +1285,11 @@ __e90s_enter_c6:
 
 	set	6, %g1 /* C6 */
 	set	E90S_R2000_PWRCTRL_REG_ADDR, %g2
+	stxa	%g0, [%g0] ASI_IC_TAG /* flush icache: bug 139677 */
 	stxa	%g1, [%g2] ASI_DCU_CONTROL_REG
+	nop; nop; nop; nop; nop; nop; nop; nop; /* 20 nops: bug 139677 */
+	nop; nop; nop; nop; nop; nop; nop; nop;
+	nop; nop; nop; nop;
 	ret
 	 restore
 	.size		__e90s_enter_c6,.-__e90s_enter_c6

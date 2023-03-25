@@ -178,9 +178,10 @@ static void elcan_irq_control(struct elcan_priv *priv, bool enable)
 		priv->write_reg(priv, ELCAN_TX_IRQ_REG, TX_IRQ_EN_MASK);
 		priv->write_reg(priv, ELCAN_RX_ENA_IRQ_REG, RX_ENA_MASK);
 	} else {
-		priv->write_reg(priv, ELCAN_CTLSTA_REG, ctrl);
+		priv->write_reg(priv, ELCAN_RX_ENA_IRQ_REG,
+				RX_ENA_MASK | RX_RX_IRQ_TH_MASK);
 		priv->write_reg(priv, ELCAN_TX_IRQ_REG, 0);
-		priv->write_reg(priv, ELCAN_RX_ENA_IRQ_REG, 0);
+		priv->write_reg(priv, ELCAN_CTLSTA_REG, ctrl | LEC_MASK);
 	}
 }
 
@@ -829,7 +830,8 @@ static void elcan_stop(struct net_device *dev)
 	struct elcan_priv *priv = netdev_priv(dev);
 
 	elcan_irq_control(priv, false);
-	priv->write_reg(priv, ELCAN_CTLSTA_REG, 0);
+	priv->write_reg(priv, ELCAN_RX_ENA_IRQ_REG, 0);
+	priv->write_reg(priv, ELCAN_CTLSTA_REG, LEC_MASK);
 	priv->can.state = CAN_STATE_STOPPED;
 } /* elcan_stop */
 

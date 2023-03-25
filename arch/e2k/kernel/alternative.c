@@ -119,6 +119,8 @@ static int copy_instr(void *dst, int dst_node, void *src,
 
 		size_t copy_size = min(len, tail_bytes(dst_va));
 		memcpy(dst_va, src, copy_size);
+		flush_icache_range((unsigned long) dst_va,
+				   (unsigned long) dst_va + copy_size);
 
 		len -= copy_size;
 		src += copy_size;

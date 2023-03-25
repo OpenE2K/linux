@@ -72,7 +72,7 @@ mmu_set_pte_val_memory_type_rule_gp(pgprot_t pte, unsigned int mtcr)
  * Warning .boot_*() entries should be updated dinamicaly to point to
  * physical addresses of functions for arch/e2k/p2v/
  */
-const pt_struct_t __nodedata pgtable_struct_e2k_v3 = {
+const pt_struct_t pgtable_struct_e2k_v3 = {
 	.type		= E2K_PT_TYPE,
 	.name		= "primary e2k v3",
 	.pt_v6		= false,
@@ -167,7 +167,7 @@ const pt_struct_t __nodedata pgtable_struct_e2k_v3 = {
 		},
 	},
 };
-const pt_struct_t __nodedata pgtable_struct_e2k_v5 = {
+const pt_struct_t pgtable_struct_e2k_v5 = {
 	.type		= E2K_PT_TYPE,
 	.name		= "primary e2k v5",
 	.pt_v6		= false,
@@ -263,7 +263,7 @@ const pt_struct_t __nodedata pgtable_struct_e2k_v5 = {
 	},
 };
 
-const pt_struct_t __nodedata pgtable_struct_e2k_v6_pt_v6 = {
+const pt_struct_t pgtable_struct_e2k_v6_pt_v6 = {
 	.type		= E2K_PT_TYPE,
 	.name		= "primary e2k v6",
 	.pt_v6		= true,
@@ -359,7 +359,7 @@ const pt_struct_t __nodedata pgtable_struct_e2k_v6_pt_v6 = {
 	},
 };
 
-const pt_struct_t __nodedata pgtable_struct_e2k_v6_gp = {
+const pt_struct_t pgtable_struct_e2k_v6_gp = {
 	.type		= E2K_PT_TYPE,
 	.name		= "guest physical e2k v6",
 	.pt_v6		= true,

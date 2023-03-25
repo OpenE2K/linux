@@ -11,7 +11,11 @@ struct vm_area_struct;
 struct pt_regs;
 struct file;
 extern int do_global_sp(struct pt_regs *regs, trap_cellar_t *tcellar);
+#ifdef CONFIG_PROTECTED_MODE
 extern int lw_global_sp(struct pt_regs *regs);
+#else
+static inline int lw_global_sp(struct pt_regs *regs) { return 0; }
+#endif
 extern void free_global_sp(void);
 extern int delete_records(unsigned int psl_from);
 extern void mark_all_global_sp(struct pt_regs *regs, pid_t pid);

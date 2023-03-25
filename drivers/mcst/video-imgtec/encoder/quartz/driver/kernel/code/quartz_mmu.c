@@ -639,7 +639,7 @@ IMG_BOOL Quartz_Core_MMU_HWSetup(IMG_HANDLE pvDevContext)
 #endif
 #endif /*SYSBRG_NO_BRIDGING*/
 
-	PRINT("Page table directory at physical address 0x%08x\n", ui32Cmd);
+	DEBUG_PRINT("Page table directory at physical address 0x%08x\n", ui32Cmd);
 
 	// Now enable MMU access for all requesters
 	// Enable requestors (listed in TRM)

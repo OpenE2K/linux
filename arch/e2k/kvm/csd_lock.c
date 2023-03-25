@@ -15,6 +15,7 @@
 #include <asm/kvm/csd_lock.h>
 
 #include "process.h"
+#include "cpu.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -63,10 +64,13 @@
 
 #ifdef	CONFIG_SMP
 
+#define CREATE_TRACE_POINTS
+#include "trace-csd-lock.h"
+
 static inline csd_lock_waiter_t *
 find_lock_in_csd_list(struct kvm *kvm, void *lock)
 {
-	csd_lock_waiter_t *w;
+	csd_lock_waiter_t *w, *lock_w = NULL;
 
 	list_for_each_entry(w, &kvm->arch.csd_lock_wait_head, wait_list) {
 		DebugKVM("next csd lock waiter list entry lock %px\n",
@@ -82,10 +86,15 @@ find_lock_in_csd_list(struct kvm *kvm, void *lock)
 					"VCPU #%d\n",
 					lock, w->vcpu->vcpu_id);
 			}
-			return w;
+			if (unlikely(lock_w != NULL)) {
+				pr_err("%s(): one more entry of lock %px in the "
+					"list of current active waiters\n",
+					__func__, lock);
+			}
+			lock_w = w;
 		}
 	}
-	return NULL;
+	return lock_w;
 }
 
 static void dump_waiter_list(struct kvm *kvm)
@@ -93,15 +102,26 @@ static void dump_waiter_list(struct kvm *kvm)
 	csd_lock_waiter_t *w;
 
 	list_for_each_entry(w, &kvm->arch.csd_lock_wait_head, wait_list) {
-		pr_alert("next csd lock waiter list entry %px: lock %px ",
+		pr_alert("csd lock waiter list entry %px: lock %px ",
 			w, w->lock);
 		if (w->task) {
-			pr_cont("is waiting by task %s (%d) VCPU #%d\n",
-				w->task->comm, w->task->pid,
+			pr_cont("is waiting on vcpu #%d",
 				w->vcpu->vcpu_id);
+			if (w->by_vcpu) {
+				pr_cont(" for wake up by vcpu #%d state: %d\n",
+					w->by_vcpu->vcpu_id, w->state);
+			} else {
+				pr_cont("\n");
+			}
 		} else {
-			pr_cont("is already unlocked by by VCPU #%d\n",
-				w->vcpu->vcpu_id);
+			if (w->by_vcpu) {
+				pr_cont("is already unlocked by VCPU #%d "
+					"state %d\n",
+					w->by_vcpu->vcpu_id, w->state);
+			} else {
+				pr_cont("is a hang waiter entry, state %d\n",
+					w->state);
+			}
 		}
 		pr_cont("\n");
 	}
@@ -110,15 +130,32 @@ static void dump_waiter_list(struct kvm *kvm)
 /* Insert lock to waiting list as waiter entry */
 /* spinlock should be taken */
 static inline void queue_waiter_to_list(struct kvm_vcpu *vcpu, void *lock,
+				csd_lock_waiter_t *w,  struct task_struct *task)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	trace_kvm_queue_waiter_to_lock_wait_list(vcpu, w);
+	list_move_tail(&w->wait_list, &kvm->arch.csd_lock_wait_head);
+	KVM_BUG_ON(task && vcpu->arch.host_task != task);
+	w->task = task;
+	w->lock = lock;
+	w->vcpu = vcpu;
+	w->by_vcpu = NULL;
+	w->state = undefined_unlocked_type;
+}
+
+static inline void queue_waiter_to_free_list(struct kvm_vcpu *vcpu,
 						csd_lock_waiter_t *w)
 {
 	struct kvm *kvm = vcpu->kvm;
 
-	list_move_tail(&w->wait_list, &kvm->arch.csd_lock_wait_head);
-	KVM_BUG_ON(vcpu->arch.host_task != current);
-	w->task = current;
-	w->lock = lock;
-	w->vcpu = vcpu;
+	trace_kvm_queue_waiter_to_free_list(vcpu, w);
+	list_move_tail(&w->wait_list, &kvm->arch.csd_lock_free_head);
+	w->task = NULL;
+	w->vcpu = NULL;
+	w->lock = NULL;
+	w->by_vcpu = NULL;
+	w->state = undefined_unlocked_type;
 }
 
 static inline csd_lock_waiter_t *
@@ -130,7 +167,7 @@ queue_lock_to_waiter_list(struct kvm_vcpu *vcpu, void *lock)
 	if (likely(!list_empty(&kvm->arch.csd_lock_free_head))) {
 		w = list_first_entry(&kvm->arch.csd_lock_free_head,
 					csd_lock_waiter_t, wait_list);
-		queue_waiter_to_list(vcpu, lock, w);
+		queue_waiter_to_list(vcpu, lock, w, current);
 	} else {
 		pr_err("%s(): empty list of free csd lock waiter "
 			"structures\n", __func__);
@@ -141,6 +178,35 @@ queue_lock_to_waiter_list(struct kvm_vcpu *vcpu, void *lock)
 	DebugKVM("add csd lock %px to waiter list %px as waiter entry "
 		"on VCPU #%d\n",
 		w->lock, w, vcpu->vcpu_id);
+	return w;
+}
+
+/* Insert lock to waiting list as unlocked entry */
+static inline csd_lock_waiter_t *
+queue_as_unlocked_to_waiter_list(struct kvm_vcpu *vcpu, void *lock)
+{
+	struct kvm *kvm = vcpu->kvm;
+	csd_lock_waiter_t *w;
+
+	if (likely(!list_empty(&kvm->arch.csd_lock_free_head))) {
+		w = list_first_entry(&kvm->arch.csd_lock_free_head,
+					csd_lock_waiter_t, wait_list);
+		list_move_tail(&w->wait_list, &kvm->arch.csd_lock_wait_head);
+		w->task = NULL;
+		w->lock = lock;
+		w->vcpu = NULL;
+		w->by_vcpu = vcpu;
+		w->state = queued_as_unlocked_type;
+		trace_kvm_queue_unlocked_waiter(vcpu, lock, w);
+		DebugKVMUL("guest csd lock %px on VCPU #%d could not find "
+			"at waiters for unlocking list, queue %px as unlocked\n",
+			lock, vcpu->vcpu_id, w);
+	} else {
+		pr_err("%s(): empty list of free csd lock waiter structures\n",
+			__func__);
+		dump_waiter_list(kvm);
+		BUG_ON(true);
+	}
 	return w;
 }
 
@@ -168,13 +234,14 @@ guest_csd_lock(struct kvm_vcpu *vcpu, void *lock)
 			lock, vcpu->vcpu_id);
 		/* Insert lock to waiting list as waiter entry */
 		w = queue_lock_to_waiter_list(vcpu, lock);
-		raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
 		if (w == NULL)
 			goto failed;
+		trace_kvm_queue_lock_to_waiter_list(vcpu, lock, w);
+		raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
 		return 0;
 	}
 	if (likely(w->task == NULL)) {
-		struct kvm_vcpu *w_vcpu = w->vcpu;
+		struct kvm_vcpu *by_vcpu = w->by_vcpu;
 
 		/*
 		 * Lock has been queued as unlocked by other VCPU after
@@ -182,12 +249,14 @@ guest_csd_lock(struct kvm_vcpu *vcpu, void *lock)
 		 * by this VCPU.
 		 * Move the lock from list as unlocked to list as waiter
 		 */
-		BUG_ON(vcpu == w_vcpu);
-		queue_waiter_to_list(vcpu, lock, w);
+		KVM_BUG_ON(by_vcpu == NULL);
+		KVM_BUG_ON(vcpu == by_vcpu);
+		trace_kvm_queue_waiter_to_list(vcpu, lock, w);
+		queue_waiter_to_list(vcpu, lock, w, current);
 		raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
 		DebugWAIT("csd lock %px on VCPU #%d, other VCPU #%d had time "
 			"to queue to waiter list as unlocked\n",
-			lock, vcpu->vcpu_id, w_vcpu->vcpu_id);
+			lock, vcpu->vcpu_id, by_vcpu->vcpu_id);
 		return 0;
 	}
 
@@ -198,6 +267,8 @@ guest_csd_lock(struct kvm_vcpu *vcpu, void *lock)
 		w->task->pid, w->vcpu->vcpu_id);
 	KVM_BUG_ON(true);
 failed:
+	trace_kvm_csd_lock_ctl_failed(vcpu, lock, CSD_LOCK_CTL, -EBUSY);
+	raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
 	return -EBUSY;
 }
 
@@ -222,13 +293,23 @@ guest_csd_unlock(struct kvm_vcpu *vcpu, void *lock)
 	raw_spin_lock_irqsave(&kvm->arch.csd_spinlock, flags);
 	w = find_lock_in_csd_list(vcpu->kvm, lock);
 	if (likely(w != NULL)) {
+		struct task_struct *w_task;
+		struct kvm_vcpu *w_vcpu;
+		bool woken;
+
 		/* there is waiter for lock unlocking */
-		if (unlikely(w->task)) {
+		w_task = w->task;
+		w_vcpu = w->vcpu;
+		w->by_vcpu = vcpu;
+		if (unlikely(w_task)) {
 			DebugKVM("guest csd lock %px on VCPU #%d is queued "
 				"as waiter task %s (%d) on VCPU #%d\n",
 				lock, vcpu->vcpu_id,
-				w->task->comm, w->task->pid, w->vcpu->vcpu_id);
-			wake_up_process(w->task);
+				w_task->comm, w_task->pid, w->vcpu->vcpu_id);
+			woken = wake_up_process(w_task);
+			w->state = (woken) ? woken_unlocked_type :
+						is_running_unlocked_type;
+			trace_kvm_wake_up_waiter(vcpu, lock, w);
 		} else {
 			/*
 			* Lock has been queued as unlocked by other VCPU after
@@ -239,33 +320,21 @@ guest_csd_unlock(struct kvm_vcpu *vcpu, void *lock)
 			DebugWAIT("free csd lock %px on VCPU #%d, other VCPU #%d "
 				"had time to queue to waiter list as unlocked\n",
 				lock, vcpu->vcpu_id, w->vcpu->vcpu_id);
+			if (likely(w->by_vcpu != NULL)) {
+				KVM_WARN_ON(w->by_vcpu == vcpu);
+				trace_kvm_free_unlocked_waiter(vcpu, lock, w);
+				queue_waiter_to_free_list(vcpu, w);
+			} else {
+				KVM_BUG_ON(true);
+			}
 		}
-		w->task = NULL;
-		w->vcpu = NULL;
-		w->lock = NULL;
-		list_move_tail(&w->wait_list, &kvm->arch.csd_lock_free_head);
 		raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
 		return 0;
 	}
 	/* csd lock is not found at waiters list, so unlock is comming */
 	/* earlier then lock waiting. Insert lock to waiting list as */
 	/* unlocked entry */
-	if (likely(!list_empty(&kvm->arch.csd_lock_free_head))) {
-		w = list_first_entry(&kvm->arch.csd_lock_free_head,
-					csd_lock_waiter_t, wait_list);
-		list_move_tail(&w->wait_list, &kvm->arch.csd_lock_wait_head);
-		w->task = NULL;
-		w->lock = lock;
-		w->vcpu = vcpu;
-		DebugKVMUL("guest csd lock %px on VCPU #%d could not find "
-			"at waiters for unlocking list, queue %px as unlocked\n",
-			lock, vcpu->vcpu_id, w);
-	} else {
-		pr_err("%s(): empty list of free csd lock waiter structures\n",
-			__func__);
-		dump_waiter_list(kvm);
-		BUG_ON(true);
-	}
+	w = queue_as_unlocked_to_waiter_list(vcpu, lock);
 	raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
 	return 0;
 }
@@ -283,17 +352,21 @@ guest_csd_lock_wait(struct kvm_vcpu *vcpu, void *lock, bool try)
 {
 	struct kvm *kvm = vcpu->kvm;
 	csd_lock_waiter_t *w;
-	struct task_struct *guest_task;
+	struct task_struct *host_task;
 	unsigned long flags;
 	bool do_wait = false;
+	bool queued = false;
+	int try_num;
 
 	DebugKVM("%s (%d) started for guest csd lock %px on VCPU #%d\n",
 		current->comm, current->pid, lock, vcpu->vcpu_id);
 
 	KVM_BUG_ON(vcpu->arch.host_task != current);
-	guest_task = current;
-	GTI_BUG_ON(guest_task == NULL);
+	host_task = current;
 
+	try_num = 0;
+
+again:
 	raw_spin_lock_irqsave(&kvm->arch.csd_spinlock, flags);
 	w = find_lock_in_csd_list(vcpu->kvm, lock);
 	if (likely(w == NULL)) {
@@ -304,6 +377,7 @@ guest_csd_lock_wait(struct kvm_vcpu *vcpu, void *lock, bool try)
 		/* unlocked. */
 		if (try) {
 			/* waiting does not need, nothing to do */
+			trace_kvm_already_unlocked(vcpu, lock);
 			raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock,
 							flags);
 			DebugKVM("none waiters and it is well case\n");
@@ -315,10 +389,11 @@ guest_csd_lock_wait(struct kvm_vcpu *vcpu, void *lock, bool try)
 		if (kvm_test_pending_virqs(vcpu)) {
 			/* there are VIRQs to handle, goto to try handle */
 			vcpu->arch.on_csd_lock = false;
+			trace_kvm_break_lock_waiting(vcpu, lock);
 			raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock,
 							flags);
 			DebugKVM("there are pending VIRQs, try handle\n");
-			return 0;
+			return -EAGAIN;
 		}
 		kvm_for_each_vcpu(r, other_vcpu, kvm) {
 			if (other_vcpu == vcpu)
@@ -329,39 +404,103 @@ guest_csd_lock_wait(struct kvm_vcpu *vcpu, void *lock, bool try)
 		w = queue_lock_to_waiter_list(vcpu, lock);
 		if (w == NULL)
 			goto failed;
+		queued = true;
 		do_wait = true;
+		trace_kvm_queue_lock_to_waiter_list(vcpu, lock, w);
 	} else if (likely(w->task == NULL)) {
-		/* there is csd lock already unlocked entry */
+		/* there is already csd lock unlocked entry */
 		DebugKVM("guest csd lock %px on VCPU #%d is queued "
 			"as unlocked by VCPU #%d\n",
-			lock, vcpu->vcpu_id, w->vcpu->vcpu_id);
-		BUG_ON(try && vcpu == w->vcpu);
+			lock, vcpu->vcpu_id, w->by_vcpu->vcpu_id);
+		KVM_BUG_ON(w->by_vcpu == NULL);
+		KVM_BUG_ON(w->state != queued_as_unlocked_type);
+		if (vcpu == w->by_vcpu) {
+			pr_err_once("%s(): csd lock was queued as unlocked on "
+				"vcpu #%d by itself, why???\n",
+				__func__, vcpu->vcpu_id);
+		}
 		DebugKVM("guest csd lock %px was queued by VCPU #%d as unlocked "
 			"and is waiting for release by VCPU #%d itself\n",
-			lock, w->vcpu->vcpu_id, vcpu->vcpu_id);
+			lock, w->by_vcpu->vcpu_id, vcpu->vcpu_id);
 		do_wait = false;
+		trace_kvm_free_unlocked_waiter(vcpu, lock, w);
 		goto unlocked;
-	} else if (w->task == guest_task) {
+	} else if (w->task == host_task) {
 		/* there is csd lock already waiter entry */
 		DebugKVM("guest csd lock %px on VCPU #%d is queued "
 			"as waiter by VCPU #%d\n",
 			lock, vcpu->vcpu_id, w->vcpu->vcpu_id);
 		KVM_BUG_ON(!try && vcpu != w->vcpu);
-		vcpu->arch.on_csd_lock = true;
-		do_wait = true;
+		if (w->by_vcpu == NULL) {
+			/* waiting for unlock is comming earlier then unlocking */
+			vcpu->arch.on_csd_lock = true;
+			do_wait = true;
+		} else {
+			/* lock has been already unlocked and waiting task was */
+			/* woken up, so free waiter */
+			do_wait = false;
+			trace_kvm_free_woken_waiter(vcpu, lock, w);
+			goto unlocked;
+		}
 	} else {
 		pr_err("%s(): guest csd lock %px on VCPU #%d is queued "
-			"as waiter task %s (%d) by other VCPU #%d\n",
+			"as waiter task %s (%d) by other VCPU #%d "
+			"by_vcpu #%d, state: %d\n",
 			__func__, lock, vcpu->vcpu_id,
-			w->task->comm, w->task->pid, w->vcpu->vcpu_id);
-		BUG_ON(true);
+			w->task->comm, w->task->pid, w->vcpu->vcpu_id,
+			(w->by_vcpu) ? w->by_vcpu->vcpu_id : -1, w->state);
+		KVM_WARN_ON(true);
 	}
 	if (do_wait) {
+		trace_kvm_wait_for_wake_up(vcpu, lock, w);
 		set_current_state(TASK_INTERRUPTIBLE);
 		raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
+		if (kvm_test_pending_virqs(vcpu)) {
+			/* there are VIRQs to handle, goto to try handle */
+			/* and to enable ipi interrupts towards each other */
+			vcpu->arch.on_csd_lock = false;
+			trace_kvm_break_lock_waiting(vcpu, lock);
+			DebugKVM("there are pending VIRQs, try handle\n");
+			return -EAGAIN;
+		}
 		DebugKVM("go to schedule and wait for waking up\n");
-		schedule();
-		__set_current_state(TASK_RUNNING);
+		do {
+			long out;
+
+			out = schedule_timeout(3);
+			__set_current_state(TASK_RUNNING);
+			if (out > 0) {
+				/* VCPU waked up on some event */
+				break;
+			} else {
+				/* VCPU waked up on timeout */
+				vcpu->arch.on_csd_lock = false;
+				try_num++;
+				if (((try_num) & 0xf) == 0) {
+					pr_err("%s(): vcpu #%d waiting is timed "
+						"out, try #%d, try again\n",
+						__func__, vcpu->vcpu_id, try_num);
+				}
+				if (unlikely(try_num > 100)) {
+					pr_err("%s(): kill user: guest csd lock %px "
+						"on VCPU #%d %s queued as waiter "
+						"by VCPU #%d\n",
+						__func__, lock, vcpu->vcpu_id,
+						(queued) ? "is" : "has been",
+						(w->vcpu) ? w->vcpu->vcpu_id : -1);
+					do_exit(SIGKILL);
+				} else {
+					/*
+					 * Try wait again, probably after unlocking
+					 * spinlock and before call scheduler other
+					 * vcpu was waked up this waiter and its
+					 * is lost here
+					 */
+					do_wait = false;
+					goto again;
+				}
+			}
+		} while (true);
 		DebugKVM("guest csd lock %px on VCPU #%d is waked up\n",
 			lock, vcpu->vcpu_id);
 		if (fatal_signal_pending(current)) {
@@ -370,20 +509,19 @@ guest_csd_lock_wait(struct kvm_vcpu *vcpu, void *lock, bool try)
 				"VCPU thread\n",
 				current->comm, current->pid);
 			kvm_spare_host_vcpu_release(vcpu);
+			trace_kvm_csd_lock_ctl_failed(vcpu, lock,
+					CSD_LOCK_WAIT_CTL, -ERESTARTSYS);
 			return -ERESTARTSYS;
 		}
-		raw_spin_lock_irqsave(&kvm->arch.csd_spinlock, flags);
 		vcpu->arch.on_csd_lock = false;
-		goto unlocked;
+		trace_kvm_wait_lock_again(vcpu, lock, w);
+		goto again;
 	}
 
 unlocked:
 	/* lock already unlocked, dequeue and free lock structure */
 	/* and return to guest */
-	w->task = NULL;
-	w->vcpu = NULL;
-	w->lock = NULL;
-	list_move_tail(&w->wait_list, &kvm->arch.csd_lock_free_head);
+	queue_waiter_to_free_list(vcpu, w);
 	raw_spin_unlock_irqrestore(&kvm->arch.csd_spinlock, flags);
 	return 0;
 
@@ -399,6 +537,7 @@ failed:
 int kvm_guest_csd_lock_ctl(struct kvm_vcpu *vcpu,
 				csd_ctl_t csd_ctl_no, void *lock)
 {
+	trace_kvm_csd_lock_ctl(vcpu, lock, csd_ctl_no);
 	switch (csd_ctl_no) {
 	case CSD_LOCK_CTL:
 		return guest_csd_lock(vcpu, lock);
@@ -430,6 +569,8 @@ int kvm_guest_csd_lock_init(struct kvm *kvm)
 		w->task = NULL;
 		w->vcpu = NULL;
 		w->lock = NULL;
+		w->by_vcpu = NULL;
+		w->state = undefined_unlocked_type;
 		list_add_tail(&w->wait_list, &kvm->arch.csd_lock_free_head);
 	}
 	return 0;
@@ -446,6 +587,8 @@ static inline void destroy_csd_lock_waiter(csd_lock_waiter_t *w)
 		w->task = NULL;
 		w->lock = NULL;
 		w->vcpu = NULL;
+		w->by_vcpu = NULL;
+		w->state = undefined_unlocked_type;
 	} else {
 		DebugKVM("current csd lock waiter list entry unlocked "
 			"by VCPU #%d lock %px\n",

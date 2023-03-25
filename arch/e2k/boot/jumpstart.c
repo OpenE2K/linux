@@ -1069,10 +1069,9 @@ void set_memory_filters(boot_info_t *boot_info)
 	u64 size_lo = size_real;
 	u64 memory_start = 0;	/* memory starts from 0 and can be on BSP */
 	e2k_rt_mlo_struct_t	rt_mlo;
-	u64 hole_size_lo;
+	u64 hole_size_lo, lo_memory_start;
 #ifdef	CONFIG_SMP
 	u64 size_to_probe;
-	u64 lo_memory_start;
 #endif	/* CONFIG_SMP */
 #ifdef	CONFIG_ENABLE_EXTMEM
 	u64 size_hi = 0;

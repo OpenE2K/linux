@@ -6,7 +6,9 @@
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
+#include <asm/set_memory.h>
 #include <asm/tlbflush.h>
+#include <asm/topology.h>
 
 static void modify_pte_page(pte_t *ptep, enum sma_mode mode)
 {
@@ -95,31 +97,71 @@ static int walk_pte_level(pmd_t *pmd, unsigned long addr, unsigned long end,
 	return 0;
 }
 
-static __ref void *sma_alloc_page(int node)
+static __ref void *sma_alloc_page(int node, enum e2k_pt_levels level)
 {
 	void *addr = NULL;
 
 	if (slab_is_available()) {
-		struct page *page = alloc_pages_node(node,
-				GFP_KERNEL|__GFP_NOWARN, 0);
-		if (page)
-			addr = page_address(page);
+		switch (level) {
+		case PT_LEVEL_PGD:
+			addr = pgd_alloc_node(&init_mm, node);
+			break;
+		case PT_LEVEL_PUD:
+			addr = pud_alloc_one_node(&init_mm, node);
+			break;
+		case PT_LEVEL_PMD:
+			addr = pmd_alloc_one_node(&init_mm, node);
+			break;
+		case PT_LEVEL_PTE:
+			addr = pte_alloc_one_kernel_node(&init_mm, node);
+			break;
+		case PT_LEVEL_PAGES: {
+			struct page *page;
+			gfp_t gfp = GFP_KERNEL|__GFP_NOWARN;
+
+			if (node != NUMA_NO_NODE)
+				gfp |= __GFP_THISNODE;
+			page = alloc_pages_node(node, gfp, 0);
+			if (page)
+				addr = page_address(page);
+			break;
+		}
+		}
 	} else {
 		addr = memblock_alloc_node(PAGE_SIZE, PAGE_SIZE, node);
+		if (addr && level == PT_LEVEL_PGD)
+			pgd_ctor(&init_mm, node, (pgd_t *) addr);
 	}
 
 	return addr;
 }
 
-static __ref void sma_free_page(int node, void *addr)
+static __ref void sma_free_page(enum e2k_pt_levels level, void *addr)
 {
-	if (slab_is_available())
-		free_page((unsigned long) addr);
-	else
+	if (slab_is_available()) {
+		switch (level) {
+		case PT_LEVEL_PGD:
+			pgd_free(&init_mm, addr);
+			break;
+		case PT_LEVEL_PUD:
+			pud_free(&init_mm, addr);
+			break;
+		case PT_LEVEL_PMD:
+			pmd_free(&init_mm, addr);
+			break;
+		case PT_LEVEL_PTE:
+			pte_free_kernel(&init_mm, addr);
+			break;
+		case PT_LEVEL_PAGES:
+			free_page((unsigned long) addr);
+			break;
+		}
+	} else {
 		memblock_free(__pa(addr), PAGE_SIZE);
+	}
 }
 
-DEFINE_RAW_SPINLOCK(sma_lock);
+static DEFINE_RAW_SPINLOCK(sma_lock);
 
 static void
 map_pmd_huge_page_to_ptes(pte_t *pte_page, e2k_addr_t phys_page,
@@ -149,7 +191,7 @@ split_one_pmd_page(pmd_t *pmdp, e2k_addr_t phys_page, pte_t *pte_page)
 }
 void split_simple_pmd_page(pgprot_t *ptp, pte_t *ptes)
 {
-	const pt_level_t *pmd_level = get_pt_level_on_id(E2K_PMD_LEVEL_NUM);
+	const pt_level_t *pmd_level = get_pt_level_on_id(PT_LEVEL_PMD);
 	pte_t *ptep;
 	e2k_addr_t phys_page;
 
@@ -165,13 +207,13 @@ void split_simple_pmd_page(pgprot_t *ptp, pte_t *ptes)
 static inline void
 free_pmd_huge_ptes_pages(int node, pte_t *ptes)
 {
-	sma_free_page(node, ptes);
+	sma_free_page(PT_LEVEL_PTE, ptes);
 	ptes = NULL;
 }
 static inline pte_t *
 alloc_pmd_huge_ptes_pages(int node)
 {
-	return sma_alloc_page(node);
+	return sma_alloc_page(node, PT_LEVEL_PTE);
 }
 
 /* FIXME; split is not fully implemented for guest kernel */
@@ -179,20 +221,20 @@ alloc_pmd_huge_ptes_pages(int node)
 static int split_pmd_page(int node, pmd_t *pmdp)
 {
 	pte_t *ptes;
-	const pt_level_t *pmd_level = get_pt_level_on_id(E2K_PMD_LEVEL_NUM);
 	bool was_updated = false;
+	unsigned long flags;
 
 	ptes = alloc_pmd_huge_ptes_pages(node);
 	if (unlikely(!ptes))
 		return -ENOMEM;
 
 	/* Re-read `*pmdp' again under spinlock */
-	raw_spin_lock(&sma_lock);
+	raw_spin_lock_irqsave(&sma_lock, flags);
 	if (!kernel_pmd_huge(*pmdp))
 		was_updated = true;
 	else
 		split_simple_pmd_page((pgprot_t *)pmdp, ptes);
-	raw_spin_unlock(&sma_lock);
+	raw_spin_unlock_irqrestore(&sma_lock, flags);
 
 	if (was_updated)
 		free_pmd_huge_ptes_pages(node, ptes);
@@ -277,21 +319,41 @@ static int walk_pmd_level(int node, pud_t *pud, unsigned long addr,
 
 	pmdp = pmd_offset(pud, addr);
 	do {
-		if (pmd_none(*pmdp))
+		pmd_t pmdval = pmd_read_atomic(pmdp);
+		barrier();
+		if (pmd_none(pmdval))
 			return -EINVAL;
 		next = pmd_addr_end(addr, end);
-		if (!kernel_pmd_huge(*pmdp)) {
+		if (!kernel_pmd_huge(pmdval)) {
 			ret = walk_pte_level(pmdp, addr, next, mode,
 					     need_flush);
-		} else if (!pmd_modified(*pmdp, mode)) {
-			page_size = get_pmd_level_page_size();
-			if (addr & (page_size - 1) ||
-					addr + page_size > next) {
-				ret = split_pmd_page(node, pmdp);
+		} else if (!pmd_modified(pmdval, mode)) {
+			unsigned long flags;
+
+			/* Protect against concurrent split */
+			raw_spin_lock_irqsave(&sma_lock, flags);
+
+			/* Check again under spinlock */
+			if (!kernel_pmd_huge(*pmdp)) {
+				raw_spin_unlock_irqrestore(&sma_lock, flags);
 				continue;
 			}
-			*need_flush = 1;
-			modify_pmd_page(pmdp, mode);
+
+			if (!pmd_modified(*pmdp, mode)) {
+				page_size = get_pmd_level_page_size();
+				if (addr & (page_size - 1) || addr + page_size > next) {
+					/* Have to unlock spinlock before
+					 * allocating memory */
+					raw_spin_unlock_irqrestore(&sma_lock, flags);
+					if ((ret = split_pmd_page(node, pmdp)))
+						return ret;
+					continue;
+				}
+				*need_flush = 1;
+				modify_pmd_page(pmdp, mode);
+			}
+
+			raw_spin_unlock_irqrestore(&sma_lock, flags);
 		}
 		++pmdp;
 		addr = next;
@@ -314,7 +376,6 @@ void map_pud_huge_page_to_simple_pmds(pgprot_t *pmd_page, e2k_addr_t phys_page,
 static void
 split_one_pud_page(pud_t *pudp, pmd_t *pmd_page)
 {
-	const pt_level_t *pud_level = get_pt_level_on_id(E2K_PUD_LEVEL_NUM);
 	e2k_addr_t phys_page;
 	pgprot_t pgprot;
 	pud_t new;
@@ -334,22 +395,23 @@ static int split_pud_page(int node, pud_t *pudp)
 {
 	pmd_t *pmdp;
 	bool was_updated = false;
+	unsigned long flags;
 
-	pmdp = sma_alloc_page(node);
+	pmdp = sma_alloc_page(node, PT_LEVEL_PMD);
 	if (!pmdp)
 		return -ENOMEM;
 
 	/* Re-read `*pudp' again under spinlock */
-	raw_spin_lock(&sma_lock);
+	raw_spin_lock_irqsave(&sma_lock, flags);
 	if (!kernel_pud_huge(*pudp)) {
 		was_updated = true;
 	} else {
 		split_one_pud_page(pudp, pmdp);
 	}
-	raw_spin_unlock(&sma_lock);
+	raw_spin_unlock_irqrestore(&sma_lock, flags);
 
 	if (was_updated)
-		sma_free_page(node, pmdp);
+		sma_free_page(PT_LEVEL_PMD, pmdp);
 
 	return 0;
 }
@@ -430,20 +492,41 @@ static int walk_pud_level(int node, pgd_t *pgd, unsigned long addr,
 
 	pudp = pud_offset(pgd, addr);
 	do {
-		if (pud_none(*pudp))
+		pud_t pudval = *pudp;
+		barrier();
+		if (pud_none(pudval))
 			return -EINVAL;
 		next = pud_addr_end(addr, end);
-		if (!kernel_pud_huge(*pudp)) {
+		if (!kernel_pud_huge(pudval)) {
 			ret = walk_pmd_level(node, pudp, addr, next, mode,
 					     need_flush);
-		} else if (!pud_modified(*pudp, mode)) {
-			page_size = get_pud_level_page_size();
-			if (addr & (page_size - 1) || addr + page_size > next) {
-				ret = split_pud_page(node, pudp);
+		} else if (!pud_modified(pudval, mode)) {
+			unsigned long flags;
+
+			/* Protect against concurrent split */
+			raw_spin_lock_irqsave(&sma_lock, flags);
+
+			/* Check again under spinlock */
+			if (!kernel_pud_huge(*pudp)) {
+				raw_spin_unlock_irqrestore(&sma_lock, flags);
 				continue;
 			}
-			*need_flush = 1;
-			modify_pud_page(pudp, mode);
+
+			if (!pud_modified(*pudp, mode)) {
+				page_size = get_pud_level_page_size();
+				if (addr & (page_size - 1) || addr + page_size > next) {
+					/* Have to unlock spinlock before
+					 * allocating memory */
+					raw_spin_unlock_irqrestore(&sma_lock, flags);
+					if ((ret = split_pud_page(node, pudp)))
+						return ret;
+					continue;
+				}
+				*need_flush = 1;
+				modify_pud_page(pudp, mode);
+			}
+
+			raw_spin_unlock_irqrestore(&sma_lock, flags);
 		}
 		++pudp;
 		addr = next;
@@ -459,8 +542,8 @@ static int set_memory_attr(unsigned long start, unsigned long end,
 	int node, ret, need_flush = 0;
 	pgd_t *pgdp;
 
-	if (end > E2K_MODULES_END && (start < VMALLOC_START ||
-				     end > VMALLOC_END))
+	if (WARN_ON_ONCE(end > KERNEL_END &&
+			 (start < VMALLOC_START || end > VMALLOC_END)))
 		return -EINVAL;
 
 	if (start >= end)
@@ -478,11 +561,11 @@ static int set_memory_attr(unsigned long start, unsigned long end,
 	if (mode == SMA_WB_MT || mode == SMA_WC_MT || mode == SMA_UC_MT)
 		vm_unmap_aliases();
 
-	for_each_node_has_dup_kernel(node) {
+	for_each_node_state(node, N_MEMORY) {
 		addr = start;
-		pgdp = node_pgd_offset_kernel(node, addr);
+		pgdp = node_pgd_offset_k(node, addr);
 		do {
-			if (pgd_none(*pgdp))
+			if (WARN_ON_ONCE(pgd_none(*pgdp)))
 				return -EINVAL;
 			/* FIXME: should be implemented, */
 			/* if pgd level can have PTEs */
@@ -490,7 +573,7 @@ static int set_memory_attr(unsigned long start, unsigned long end,
 			next = pgd_addr_end(addr, end);
 			ret = walk_pud_level(node, pgdp, addr, next, mode,
 					     &need_flush);
-			if (ret)
+			if (WARN_ON_ONCE(ret))
 				return ret;
 		} while (pgdp++, addr = next, addr < end);
 	}
@@ -529,6 +612,12 @@ int set_memory_x(unsigned long addr, int numpages)
 	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_X);
 }
 
+int set_memory_np(unsigned long addr, int numpages)
+{
+	addr &= PAGE_MASK;
+	return set_memory_attr(addr, addr + numpages * PAGE_SIZE, SMA_NP);
+}
+
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 void __kernel_map_pages(struct page *page, int numpages, int enable)
@@ -547,17 +636,9 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
  */
 bool kernel_page_present(struct page *page)
 {
-	unsigned long addr, entry_val;
-	probe_entry_t entry;
-
-	addr = (unsigned long) page_address(page);
-	entry = get_MMU_DTLB_ENTRY(addr);
-	entry_val = probe_entry_val(entry);
-
-	if ((entry_val & ~DTLB_EP_RES) || !(entry_val & DTLB_ENTRY_VVA))
-		return false;
-
-	return true;
+	unsigned long addr = (unsigned long) page_address(page);
+	probe_entry_t entry = get_MMU_DTLB_ENTRY(addr);
+	return DTLB_ENTRY_TEST_SUCCESSFUL(entry) && DTLB_ENTRY_TEST_VVA(entry);
 }
 # endif
 #endif
@@ -781,5 +862,420 @@ void arch_free_page(struct page *page, int order)
 check_mt:
 	WARN_ONCE(mt != GEN_CACHE_MT, "The freed page is mapped with %d memory type instead of writeback. Did you forget to call set_memory_wb()/set_pages_array_wb() before freeing it?\n",
 			mt);
+}
+#endif
+
+
+#ifdef CONFIG_NUMA
+/* Protect simultaneous access to the last level (PT_LEVEL_PAGES) */
+static DEFINE_SPINLOCK(duplication_lock);
+
+static int kernel_duplicate_pte_page(int node, const pte_t *pte, pmd_t *pmd)
+{
+	int pte_node;
+
+	BUG_ON((unsigned long) pte & (PTE_TABLE_SIZE - 1));
+
+	pte_node = page_to_nid(phys_to_page(__pa(pte)));
+	if (pte_node != node) {
+		/* This pte has not been duplicated yet */
+		pmd_t *dup_pte = sma_alloc_page(node, PT_LEVEL_PTE);
+		if (!dup_pte) {
+			pr_info("Could not allocate pud from node %d\n", node);
+			return -ENOMEM;
+		}
+		memcpy(dup_pte, pte, PTE_TABLE_SIZE);
+		smp_wmb(); /* See comment in __pte_alloc */
+
+		spin_lock(&init_mm.page_table_lock);
+		if (pte == (pte_t *) pmd_page_vaddr(*pmd)) {
+			pmd_set_k(pmd, dup_pte);
+		} else {
+			/* Someone has just duplicated it */
+			sma_free_page(PT_LEVEL_PTE, dup_pte);
+		}
+		spin_unlock(&init_mm.page_table_lock);
+	}
+
+	return 0;
+}
+
+static int kernel_duplicate_one_page(int node, pte_t *ptep)
+{
+	int page_node = page_to_nid(pte_page(*ptep));
+
+	if (page_node != node) {
+		void *dup_addr = sma_alloc_page(node, PT_LEVEL_PAGES);
+		if (!dup_addr)
+			return -ENOMEM;
+
+		tagged_memcpy_8(dup_addr, (void *) pte_page_vaddr(*ptep),
+				PTE_SIZE);
+
+		spin_lock(&duplication_lock);
+		if (node != page_to_nid(pte_page(*ptep))) {
+			set_pte(ptep, mk_pte_phys(__pa(dup_addr),
+						  pte_pgprot(*ptep)));
+		} else {
+			/* Someone has just duplicated it */
+			free_page((unsigned long) dup_addr);
+		}
+		spin_unlock(&duplication_lock);
+	}
+
+	return 0;
+}
+
+static int kernel_duplicate_pte_range(int node, enum e2k_pt_levels level,
+		pmd_t *pmd, unsigned long addr, unsigned long end)
+{
+	pte_t *ptep, *base_pte;
+	int ret = 0;
+
+	base_pte = (pte_t *) pmd_page_vaddr(*pmd);
+	ret = kernel_duplicate_pte_page(node, base_pte, pmd);
+	if (ret)
+		return ret;
+
+	if (level == PT_LEVEL_PTE)
+		return 0;
+
+	ptep = base_pte + pte_index(addr);
+	do {
+		if (pte_none(*ptep))
+			return -EINVAL;
+
+		ret = kernel_duplicate_one_page(node, ptep);
+		if (ret)
+			return ret;
+	} while (ptep++, addr += PAGE_SIZE, addr < end);
+
+	return 0;
+}
+
+static int kernel_duplicate_huge_pmd(int node, pmd_t *pmd,
+		unsigned long addr, unsigned long end)
+{
+	int hpage_node;
+
+	BUG_ON((end - addr) != PMD_SIZE || !IS_ALIGNED(addr, PMD_SIZE));
+
+	hpage_node = page_to_nid(pmd_page(*pmd));
+
+	if (hpage_node != node) {
+		phys_addr_t dup_phys;
+		struct page *dup_hpage = alloc_pages_node(node, GFP_KERNEL |
+				__GFP_RETRY_MAYFAIL | __GFP_THISNODE,
+				get_order(PMD_SIZE));
+		if (!dup_hpage)
+			return -ENOMEM;
+
+		dup_phys = page_to_phys(dup_hpage);
+		tagged_memcpy_8(__va(dup_phys), (void *) pmd_page_vaddr(*pmd),
+				PMD_SIZE);
+
+		spin_lock(&duplication_lock);
+		if (node != page_to_nid(pmd_page(*pmd))) {
+			BUG_ON(!IS_ALIGNED(dup_phys, PMD_SIZE));
+			set_pmd(pmd, pmd_mkhuge(mk_pmd_phys(dup_phys,
+							    pmd_pgprot(*pmd))));
+		} else {
+			/* Someone has just duplicated it */
+			__free_pages(dup_hpage, get_order(PMD_SIZE));
+		}
+		spin_unlock(&duplication_lock);
+	}
+
+	return 0;
+}
+
+static int kernel_duplicate_pmd_page(int node, const pmd_t *pmd, pud_t *pud)
+{
+	int pmd_node;
+
+	BUG_ON((unsigned long) pmd & (PMD_TABLE_SIZE - 1));
+
+	pmd_node = page_to_nid(phys_to_page(__pa(pmd)));
+	if (pmd_node != node) {
+		/* This pmd has not been duplicated yet */
+		pmd_t *dup_pmd = sma_alloc_page(node, PT_LEVEL_PMD);
+		if (!dup_pmd) {
+			pr_info("Could not allocate pud from node %d\n", node);
+			return -ENOMEM;
+		}
+		memcpy(dup_pmd, pmd, PMD_TABLE_SIZE);
+		smp_wmb(); /* See comment in __pte_alloc */
+
+		spin_lock(&init_mm.page_table_lock);
+		if (pmd == (pmd_t *) pud_page_vaddr(*pud)) {
+			pud_set_k(pud, dup_pmd);
+		} else {
+			/* Someone has just duplicated it */
+			sma_free_page(PT_LEVEL_PMD, dup_pmd);
+		}
+		spin_unlock(&init_mm.page_table_lock);
+	}
+
+	return 0;
+}
+
+static int kernel_duplicate_pmd_range(int node, enum e2k_pt_levels level, pud_t *pud,
+		unsigned long addr, unsigned long end)
+{
+	pmd_t *pmdp, *base_pmd;
+	unsigned long next;
+	e2k_size_t page_size;
+	int ret = 0;
+
+	base_pmd = (pmd_t *) pud_page_vaddr(*pud);
+	ret = kernel_duplicate_pmd_page(node, base_pmd, pud);
+	if (ret)
+		return ret;
+
+	if (level == PT_LEVEL_PMD)
+		return 0;
+
+	pmdp = base_pmd + pmd_index(addr);
+	do {
+		if (pmd_none(*pmdp))
+			return -EINVAL;
+
+		next = pmd_addr_end(addr, end);
+
+		if (!kernel_pmd_huge(*pmdp)) {
+			ret = kernel_duplicate_pte_range(node, level, pmdp,
+					addr, next);
+		} else {
+			page_size = get_pmd_level_page_size();
+			if (addr & (page_size - 1) || addr + page_size > next) {
+				ret = split_pmd_page(node, pmdp);
+				continue;
+			}
+			if (level == PT_LEVEL_PAGES) {
+				ret = kernel_duplicate_huge_pmd(node, pmdp,
+						addr, next);
+			}
+		}
+		++pmdp;
+		addr = next;
+	} while (addr < end && !ret);
+
+	return ret;
+}
+
+static int kernel_duplicate_pud_page(int node, const pud_t *pud, pgd_t *pgd)
+{
+	int pud_node;
+
+	BUG_ON((unsigned long) pud & (PUD_TABLE_SIZE - 1));
+
+	pud_node = page_to_nid(phys_to_page(__pa(pud)));
+	if (pud_node != node) {
+		/* This pud has not been duplicated yet */
+		pud_t *dup_pud = sma_alloc_page(node, PT_LEVEL_PUD);
+		if (!dup_pud) {
+			pr_info("Could not allocate pud from node %d\n", node);
+			return -ENOMEM;
+		}
+		memcpy(dup_pud, pud, PUD_TABLE_SIZE);
+		smp_wmb(); /* See comment in __pte_alloc */
+
+		spin_lock(&init_mm.page_table_lock);
+		if (pud == (pud_t *) pgd_page_vaddr(*pgd)) {
+			pgd_set_k(pgd, dup_pud);
+		} else {
+			/* Someone has just duplicated it */
+			sma_free_page(PT_LEVEL_PUD, dup_pud);
+		}
+		spin_unlock(&init_mm.page_table_lock);
+	}
+
+	return 0;
+}
+
+static int kernel_duplicate_pud_range(int node, enum e2k_pt_levels level,
+		pgd_t *pgd, unsigned long addr, unsigned long end)
+{
+	unsigned long next;
+	pud_t *pudp, *base_pud;
+	e2k_size_t page_size;
+	int ret = 0;
+
+	base_pud = (pud_t *) pgd_page_vaddr(*pgd);
+	ret = kernel_duplicate_pud_page(node, base_pud, pgd);
+	if (ret)
+		return ret;
+
+	if (level == PT_LEVEL_PUD)
+		return 0;
+
+	pudp = base_pud + pud_index(addr);
+	do {
+		if (pud_none(*pudp))
+			return -EINVAL;
+
+		next = pud_addr_end(addr, end);
+
+		if (!kernel_pud_huge(*pudp)) {
+			ret = kernel_duplicate_pmd_range(node, level, pudp,
+					addr, next);
+		} else {
+			page_size = get_pud_level_page_size();
+			if (addr & (page_size - 1) || addr + page_size > next) {
+				ret = split_pud_page(node, pudp);
+				continue;
+			}
+			if (level == PT_LEVEL_PAGES) {
+				/* No way we can allocate 1GB of contiguous
+				 * memory, so warn user. */
+				WARN_ON_ONCE(1);
+				ret = -EINVAL;
+			}
+		}
+		++pudp;
+		addr = next;
+	} while (addr < end && !ret);
+
+	return ret;
+}
+
+static int kernel_duplicate_pgd_page(int node, const pgd_t *pgd)
+{
+	int pgd_node;
+
+	BUG_ON((unsigned long) pgd & (PGD_TABLE_SIZE - 1));
+
+	/* We use virt_to_page() because it can work with addresses
+	 * from linear mapping as well with &swapper_pg_dir. */
+	pgd_node = page_to_nid(virt_to_page(pgd));
+	if (pgd_node != node) {
+		/* This pgd has not been duplicated yet */
+		pgd_t *dup_pgd = sma_alloc_page(node, PT_LEVEL_PGD);
+		if (!dup_pgd) {
+			pr_info("Could not allocate pud from node %d\n", node);
+			return -ENOMEM;
+		}
+		memcpy(dup_pgd, pgd, PGD_TABLE_SIZE);
+		smp_wmb(); /* See comment in __pte_alloc */
+
+		spin_lock(&init_mm.page_table_lock);
+		if (init_mm.context.node_pgds[node] == pgd) {
+			init_mm.context.node_pgds[node] = dup_pgd;
+			node_set(node, init_mm.context.pgds_nodemask);
+		} else {
+			/* Someone has just duplicated it */
+			sma_free_page(PT_LEVEL_PGD, dup_pgd);
+		}
+		spin_unlock(&init_mm.page_table_lock);
+	}
+
+	return 0;
+}
+
+static int kernel_duplicate_pgd_range(int node, enum e2k_pt_levels level,
+		unsigned long addr, unsigned long end)
+{
+	pgd_t *pgd, *base_pgd;
+	unsigned long next;
+	int ret = 0;
+
+	base_pgd = init_mm.context.node_pgds[node];
+	ret = kernel_duplicate_pgd_page(node, base_pgd);
+	if (ret)
+		return ret;
+
+	if (level == PT_LEVEL_PGD)
+		return 0;
+
+	pgd = base_pgd + pgd_index(addr);
+	BUG_ON(pgd_none(*pgd));
+	do {
+		if (unlikely(pgd_none(*pgd) || kernel_pgd_huge(*pgd)))
+			return -EINVAL;
+
+		next = pgd_addr_end(addr, end);
+
+		ret = kernel_duplicate_pud_range(node, level, pgd, addr, next);
+		if (ret)
+			break;
+	} while (pgd++, addr = next, addr != end);
+
+	return ret;
+}
+
+static int call_duplication_for_each_memory_node(enum e2k_pt_levels level,
+		unsigned long addr, unsigned long end)
+{
+	int ret, node;
+
+	for_each_node_state(node, N_MEMORY) {
+		ret = kernel_duplicate_pgd_range(node, level, addr, end);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+
+static void reload_pgd_and_flush(void *unused)
+{
+	/* Update root PT to point to the duplicated image */
+	set_root_pt(mm_node_pgd(&init_mm, numa_node_id()));
+	local_flush_tlb_all();
+}
+
+/**
+ * kernel_image_duplicate_page_range - duplicate memory across NUMA nodes
+ * @_addr - start address
+ * @_end - end address
+ * @page_tables_only - duplicate page tables but keep only one copy of data
+ *
+ * Will also update init_mm.context.node_pgds and pgds_nodemask as necessary.
+ */
+int kernel_image_duplicate_page_range(void *_addr, size_t size,
+		bool page_tables_only)
+{
+	unsigned long addr = (unsigned long) _addr;
+	unsigned long end = addr + size;
+	int ret;
+
+	/* It seems that duplication does not make sense
+	 * on guest where memory nodes are virtual */
+	if (IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) || size == 0)
+		return 0;
+
+	might_sleep();
+	BUG_ON(addr > end || !PAGE_ALIGNED(addr) || !PAGE_ALIGNED(size));
+
+	BUILD_BUG_ON(E2K_PT_LEVELS_NUM != 4);
+
+	/* page_to_nid() for memblock allocated pages will not work for
+	 * deferred pages (see CONFIG_DEFERRED_STRUCT_PAGE_INIT), so
+	 * avoid calling this function too early in the boot process. */
+	BUG_ON(!slab_is_available());
+
+	/* There can be complex cases, e.g. pgd was already allocated
+	 * on node 1, pud was allocatead on node 0 and pmd on node 2.
+	 * To handle these we do the duplication one step at a time:
+	 * 1) Duplicate all PGDs in range.
+	 * 2) Duplicate all PUDs in range.
+	 * 3) Duplicate all PMDs in range.
+	 * 4) Duplicate all PTEs in range.
+	 * 5) Duplicate actual data. */
+	ret = call_duplication_for_each_memory_node(PT_LEVEL_PGD, addr, end);
+	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PUD, addr, end);
+	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PMD, addr, end);
+	ret = ret ?: call_duplication_for_each_memory_node(PT_LEVEL_PTE, addr, end);
+	if (!ret && !page_tables_only)
+		ret = call_duplication_for_each_memory_node(PT_LEVEL_PAGES, addr, end);
+
+	if (!ret)
+		on_each_cpu(&reload_pgd_and_flush, NULL, 1);
+
+	WARN(ret, "Failed to duplicate 0x%lx - 0x%lx with error %d\n",
+			addr, end, ret);
+
+	return ret;
 }
 #endif

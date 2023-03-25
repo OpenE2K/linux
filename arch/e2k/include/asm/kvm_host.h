@@ -416,8 +416,10 @@ typedef enum pf_res {
 				/* be retried on guest or should be handled */
 				/* from begining by hypervisor */
 	PFRES_RETRY_MEM,	/* not enough memory to handle */
-	PFRES_DONT_INJECT,	/* page ault should be injected to the guest */
+	PFRES_DONT_INJECT,	/* page fault should be injected to the guest */
 				/* but injection is prohibited */
+	PFRES_ENOSPC,		/* mmu pages limit exceeded to allocate new */
+				/* shadow page tables */
 } pf_res_t;
 
 struct kvm_arch_exception;
@@ -509,6 +511,9 @@ typedef struct kvm_mmu {
 					/* guest mm agent on host (same as */
 					/* active_mm at native mode) */
 
+	/* jump point, if recovery operation failed */
+	unsigned long	recovery_pfault_jump;
+
 	/* MMU interceptions control registers state */
 	virt_ctrl_mu_t	virt_ctrl_mu;
 	e2k_mmu_cr_t	g_w_imask_mmu_cr;
@@ -564,7 +569,7 @@ typedef struct kvm_mmu {
 			    struct kvm_arch_exception *exception,
 			    gw_attr_t *gw_res);
 	void (*update_spte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
-			   pgprot_t *spte, const void *pte);
+			   pgprot_t *spte, pgprotval_t gpte);
 	int (*sync_gva)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, gva_t gva);
 	long (*sync_gva_range)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 				gva_t gva_start, gva_t gva_end);
@@ -624,8 +629,9 @@ typedef struct kvm_mmu_pt_ops {
 	int (*sync_shadow_pt_range)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			hpa_t spt_root, gva_t start, gva_t end,
 			gpa_t guest_root, gva_t vptb);
-	int (*shadow_pt_protection_fault)(struct kvm_vcpu *vcpu,
-					  gpa_t addr, kvm_mmu_page_t *sp);
+	int (*atomic_update_shadow_pt)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
+			gpa_t gpa, pgprotval_t old_gpte, pgprotval_t new_gpte,
+			unsigned long flags);
 	void (*direct_unmap_prefixed_mmio_gfn)(struct kvm *kvm, gfn_t gfn);
 	void (*kvm_mmu_free_page)(struct kvm *kvm, struct kvm_mmu_page *sp);
 	void (*copy_guest_shadow_root_range)(struct kvm_vcpu *vcpu,
@@ -672,6 +678,9 @@ typedef struct kvm_mmu_pt_ops {
 					pgprot_t *sptep);
 	void (*mmu_flush_shadow_pt_level_tlb)(struct kvm *kvm,
 					pgprot_t *sptep, pgprot_t old_spte);
+
+	void (*dump_host_and_guest_pts)(struct kvm *kvm, gmm_struct_t *gmm,
+					    e2k_addr_t start, e2k_addr_t end);
 
 	/* MMU interafce init functions */
 	void (*mmu_init_vcpu_pt_struct)(struct kvm_vcpu *vcpu);
@@ -1088,7 +1097,7 @@ struct kvm_vcpu_arch {
 	gva_t		guest_vcpu_state;	/* alias of VCPU state */
 						/* mapped into guest kernel VM */
 						/* to access from guest */
-	e2k_cute_t *guest_cut;
+	e2k_cute_t __user *guest_cut;
 	e2k_addr_t guest_phys_base;	/* guest image (kernel) physical base */
 	char *guest_base;		/* guest image (kernel) virtual base */
 	e2k_size_t guest_size;		/* guest image (kernel) size */
@@ -1126,7 +1135,8 @@ struct kvm_vcpu_arch {
 	unsigned access;
 	gfn_t mmio_gfn;
 	u64 mmio_gen;
-	u64 mmio_data[1];
+	u64 mmio_data[2];
+	u64 mmio_offset;
 	u64 __user *mmio_user_data;
 	intc_info_mu_t *io_intc_info;
 
@@ -1262,8 +1272,6 @@ typedef struct kvm_arch_memory_slot {
 #define	KVM_REQ_SYNC_GMM_SPT_ROOT	21	/* it need sync guest user */
 						/* copies of root PT */
 #define KVM_REQ_VIRQS_INJECTED		22	/* pending VIRQs injected */
-#define KVM_REQ_SCAN_IOAPIC		23	/* scan IO-APIC */
-#define KVM_REQ_SCAN_IOEPIC		24	/* scan IO-EPIC */
 #define	KVM_REQ_TO_COREDUMP		25	/* pending coredump request */
 
 #define kvm_set_pending_virqs(vcpu)	\
@@ -1306,19 +1314,14 @@ struct kvm_irq_mask_notifier {
 	struct hlist_node link;
 };
 
-struct irq_remap_table {
-	bool enabled;
-	unsigned int host_pin;
-	unsigned int guest_pin;
-	int host_node;
-	int guest_node;
-	/* IOEPIC passthrough page start */
-	hpa_t hpa;
-	gpa_t gpa;
-	struct pci_dev *vfio_dev;
+struct ioepic_pt_pin {
+	unsigned int pin; /* Guest pin == host pin relative to current IOEPIC */
+	unsigned int node; /* Host node (guest node is always 0) */
+	struct list_head list;
 };
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
+#define __KVM_HAVE_ARCH_ASSIGNED_DEVICE
 
 struct kvm_arch {
 	unsigned long vm_type;	/* virtual machine type */
@@ -1348,10 +1351,10 @@ struct kvm_arch {
 	struct hlist_head gmmid_hash[GMMID_HASH_SIZE];
 	gmmid_table_t gmmid_table;
 	gmm_struct_t *init_gmm;		/* host agent of guest kernel mm */
-
-#ifdef	CONFIG_KVM_HV_MMU
 	/* MMU nonpaging mode */
 	hpa_t nonp_root_hpa;		/* physical base of nonpaging root PT */
+
+#ifdef	CONFIG_KVM_HV_MMU
 	/* MMU pages statistic */
 	unsigned int n_used_mmu_pages;
 	unsigned int n_requested_mmu_pages;
@@ -1382,7 +1385,8 @@ struct kvm_arch {
 	struct page *epic_pages; /* HW CEPIC support */
 	struct list_head assigned_dev_head;
 	struct iommu_domain *iommu_domain;
-	struct irq_remap_table *irt;
+	bool ioepic_direct_map;
+	struct list_head ioepic_pt_pin;
 	unsigned long irq_sources_bitmap;
 	struct kvm_nbsr *nbsr;
 	struct kvm_lt *lt[KVM_MAX_EIOHUB_NUM];
@@ -1449,16 +1453,15 @@ struct kvm_arch {
 	 * its frequency) */
 	unsigned long wd_prescaler_mult;
 
+#ifdef KVM_HAVE_LEGACY_VGA_PASSTHROUGH
 	/* Directly map legacy VGA area (0xa0000-0xbffff) to guest */
 	bool legacy_vga_passthrough;
-};
+	struct pci_dev *vga_pt_dev;
+#endif
 
-static inline bool kvm_has_passthrough_device(const struct kvm_arch *kvm)
-{
-	if (!kvm->irt)
-		return false;
-	return kvm->irt->vfio_dev != NULL;
-}
+#define __KVM_HAVE_ARCH_ASSIGNED_DEVICE
+	atomic_t assigned_device_count;
+};
 
 #ifdef CONFIG_KVM_ASYNC_PF
 
@@ -1478,6 +1481,8 @@ struct kvm_arch_async_pf {
 					/* and has shadow image address */
 #define	KVMF_VCPU_STARTED	1	/* VCPUs (one or more) is started */
 					/* VM real active */
+#define	KVMF_PRIV_HCALL_ENABLE	2	/* privileged actions software */
+					/* hypercalls is enabled */
 #define	KVMF_ARCH_API_TAKEN	4	/* ioctl() to get KVM arch api version */
 					/* was received (to break old versions) */
 #define	KVMF_IN_SHOW_STATE	8	/* show state of KVM (print all */
@@ -1489,6 +1494,7 @@ struct kvm_arch_async_pf {
 #define	KVMF_LINTEL		40	/* guest is running LIntel */
 #define	KVMF_PARAVIRT_GUEST_MASK	(1UL << KVMF_PARAVIRT_GUEST)
 #define	KVMF_VCPU_STARTED_MASK		(1UL << KVMF_VCPU_STARTED)
+#define	KVMF_PRIV_HCALL_ENABLE_MASK	(1UL << KVMF_PRIV_HCALL_ENABLE)
 #define	KVMF_ARCH_API_TAKEN_MASK	(1UL << KVMF_ARCH_API_TAKEN)
 #define	KVMF_IN_SHOW_STATE_MASK		(1UL << KVMF_IN_SHOW_STATE)
 #define	KVMF_NATIVE_KERNEL_MASK		(1UL << KVMF_NATIVE_KERNEL)
@@ -1598,8 +1604,6 @@ extern struct kvm_vcpu *kvm_get_vcpu_on_hard_cpu_id(struct kvm *kvm,
 							int hard_cpu_id);
 extern bool kvm_vcpu_is_bsp(struct kvm_vcpu *vcpu);
 
-extern void kvm_make_scan_ioapic_request(struct kvm *kvm);
-
 #ifdef CONFIG_KVM_ASYNC_PF
 extern void kvm_arch_async_page_not_present(struct kvm_vcpu *vcpu,
 		struct kvm_async_pf *work);
@@ -1623,7 +1627,7 @@ extern void kvm_init_cepic_idle_timer(struct kvm_vcpu *vcpu);
 #define	VCPU_IDLE_TIMEOUT	1
 extern void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu);
 extern void kvm_epic_stop_idle_timer(struct kvm_vcpu *vcpu);
-
+extern noinline void launch_hv_vcpu(struct kvm_vcpu_arch *vcpu);
 #else	/* ! CONFIG_KVM_HW_VIRTUALIZATION || CONFIG_KVM_GUEST_KERNEL */
 /* it is host without virtualization support */
 /* or native paravirtualized guest */

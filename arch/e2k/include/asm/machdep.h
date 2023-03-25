@@ -34,11 +34,10 @@ typedef struct machdep {
 	int		native_rev;		/* cpu revision */
 	e2k_iset_ver_t	native_iset_ver;	/* Instruction set version */
 	bool		cmdline_iset_ver;	/* iset specified in cmdline */
-	bool		mmu_pt_v6;		/* MMU is setting up to use */
-						/* new page table structures */
-	bool		mmu_separate_pt;	/* MMU was set to use */
-						/* separate PTs for kernel */
-						/* and users */
+	/* MMU is set to use new page table structures */
+	bool		mmu_pt_v6;
+	/* MMU is set to use separate PTs for kernel and users */
+	bool		mmu_separate_pt;
 	bool		L3_enable;		/* cache L3 is enable */
 	bool		gmi;			/* is hardware virtualized */
 						/* guest VM */
@@ -59,6 +58,7 @@ typedef struct machdep {
 	u8		sic_mc_count;
 	u32		sic_mc1_ecc;
 	u32		sic_io_str1;
+	u8		qnr1_offset;
 
 	unsigned long cpu_features[(NR_CPU_FEATURES + 63) / 64];
 
@@ -127,8 +127,6 @@ typedef struct machdep {
 	int		(*get_irq_vector)(void);
 
 	/* virtualization support: guest kernel and host/hypervisor */
-	host_machdep_t	host;	/* host additional fields (used only by */
-				/* host at arch/e2k/kvm/xxx) */
 	guest_machdep_t	guest;	/* guest additional fields (used only by */
 				/* guest at arch/e2k/kvm/guest/xxx) */
 } machdep_t;
@@ -388,6 +386,13 @@ CPUHAS(CPU_HWBUG_USD_ALIGNMENT,
 			cpu == IDR_E1CP_MDL || cpu == IDR_E8C2_MDL ||
 			cpu == IDR_E16C_MDL || cpu == IDR_E2C3_MDL ||
 			cpu == IDR_E12C_MDL);
+/* #129870 (#131465) - prefetches into %empty register do not work.
+ * Workaround - add "L1 cache disable" MAS to prefetch into L2 instead. */
+CPUHAS(CPU_HWBUG_PREFETCH_EMPTY,
+		!IS_ENABLED(CONFIG_CPU_E16C) && !IS_ENABLED(CONFIG_CPU_E2C3),
+		false,
+		cpu == IDR_E16C_MDL && revision == 0 ||
+		cpu == IDR_E2C3_MDL && revision == 0);
 /* #130039 - intercepting some specific sequences of call/return/setwd
  * (that change WD.psize in a specific way) does not work.
  * Workaround - avoid those sequences. */
@@ -455,9 +460,52 @@ CPUHAS(CPU_HWBUG_INTC_CR_WRITE,
 			!IS_ENABLED(CONFIG_CPU_E2C3),
 		false,
 		(cpu == IDR_E16C_MDL && revision == 0 ||
-		cpu == IDR_E2C3_MDL && revision == 0) &&
+		 cpu == IDR_E2C3_MDL && revision == 0) &&
 			is_hardware_guest);
-
+/* #142262 - tagged 'ldw' instruction does not work
+ * Workaround - insert 4 bubbles between tagged 'ldw' and potentially
+ * aliasing previous 'stw'. */
+CPUHAS(CPU_HWBUG_TAGGED_LDW,
+		!IS_ENABLED(CONFIG_CPU_E16C) && !IS_ENABLED(CONFIG_CPU_E12C) &&
+			!IS_ENABLED(CONFIG_CPU_E2C3),
+		false,
+		cpu == IDR_E16C_MDL && revision <= 1 ||
+			cpu == IDR_E2C3_MDL && revision <= 1 ||
+			cpu == IDR_E12C_MDL && revision == 0);
+/* e8c2 implementation of flush_tlb_page does not wait for the finish
+ * of L1D flushing when flushing 1GB page.
+ * Workaround - add another "flush_tlb_page + wait fl_c" pair on any
+ * address, or use "flush_tlb_all". */
+CPUHAS(CPU_HWBUG_GIGANTIC_FLUSH,
+		IS_ENABLED(CONFIG_E2K_MACHINE),
+		IS_ENABLED(CONFIG_CPU_E8C2),
+		cpu == IDR_E8C2_MDL);
+/* #124144 (#142159) - TLU search for IB may return incorrect address,
+ * if it runs concurrently with glaunch/hret.
+ * Workaround - full tlb/ib flush before each glaunch/hret */
+CPUHAS(CPU_HWBUG_VIRT_TLU_IB,
+		!IS_ENABLED(CONFIG_CPU_E16C),
+		false,
+		cpu == IDR_E16C_MDL && revision == 0);
+/* #143157, #141618 - user exc_instr_debug and exc_data_debug could occure in kernel */
+CPUHAS(CPU_HWBUG_EXC_DEBUG,
+		CONFIG_CPU_ISET != 0,
+		CONFIG_CPU_ISET <= 6,
+		iset_ver <= E2K_ISET_V6);
+/* #142494 - sclkm1.div is 1 MHz less sametimes
+ * Workaround - use previous correct frequency */
+CPUHAS(CPU_HWBUG_SCLKM1_DIV,
+		IS_ENABLED(CONFIG_E2K_MACHINE) && IS_ENABLED(CONFIG_CPU_E8C2),
+		IS_ENABLED(CONFIG_CPU_E8C2),
+		cpu == IDR_E8C2_MDL);
+/* #143614 - Secondary bus reset is broken on some PCIe bridges
+ * Workaround - do not use it */
+CPUHAS(CPU_HWBUG_SECONDARY_BUS_RESET,
+		!IS_ENABLED(CONFIG_CPU_E16C) &&
+			!IS_ENABLED(CONFIG_CPU_E2C3),
+		false,
+		cpu == IDR_E16C_MDL && revision == 0 ||
+		cpu == IDR_E2C3_MDL && revision == 0);
 /*
  * Not bugs but features go here
  */
@@ -465,8 +513,8 @@ CPUHAS(CPU_HWBUG_INTC_CR_WRITE,
 /* Support for WC mapping of legacy VGA area at 0xa0000 phys. address. */
 CPUHAS(CPU_FEAT_WC_LEGACY_VGA,
 		IS_ENABLED(CONFIG_E2K_MACHINE),
-		!IS_ENABLED(CONFIG_CPU_E1CP),
-		cpu != IDR_E1CP_MDL);
+		false /* bug 141028 !IS_ENABLED(CONFIG_CPU_E1CP) */,
+		false /* bug 141028 cpu != IDR_E1CP_MDL */);
 /* Rely on IDR instead of iset version to choose between APIC and EPIC.
  * For guest we use it's own fake IDR so that we choose between APIC and
  * EPIC based on what hardware guest *thinks* it's being executed on. */
@@ -539,6 +587,16 @@ CPUHAS(CPU_FEAT_FILLC,
 		CONFIG_CPU_ISET != 0,
 		CONFIG_CPU_ISET >= 6,
 		iset_ver >= E2K_ISET_V6);
+/* Separate user and kernel virtual spaces: only since iset V6 */
+CPUHAS(CPU_FEAT_SEP_VIRT_SPACE,
+		IS_ENABLED(CONFIG_E2K_MACHINE),
+		IS_ENABLED(CONFIG_MMU_SEP_VIRT_SPACE),
+		machine->mmu_separate_pt);
+/* Page table format from iset v6 */
+CPUHAS(CPU_FEAT_PAGE_TABLE_V6,
+		IS_ENABLED(CONFIG_E2K_MACHINE),
+		CONFIG_CPU_ISET >= 6 && IS_ENABLED(CONFIG_MMU_PT_V6),
+		machine->mmu_pt_v6);
 /* Optimized version of machine.iset check */
 CPUHAS(CPU_FEAT_ISET_V5,
 		CONFIG_CPU_ISET != 0,
@@ -582,35 +640,19 @@ extern void cpu_set_feature(struct machdep *machine, int feature);
 extern void cpu_clear_feature(struct machdep *machine, int feature);
 
 
-extern __nodedata machdep_t	machine;
-extern __nodedata pt_struct_t	pgtable_struct;
+extern machdep_t	machine;
+extern pt_struct_t	pgtable_struct;
 
-#define	boot_machine		(boot_get_vo_value(machine))
-#define	boot_pgtable_struct	((pt_struct_t)boot_get_vo_value(pgtable_struct))
-#define	boot_pgtable_struct_p	boot_vp_to_pp(&pgtable_struct)
-
-#if	CONFIG_CPU_ISET >= 6
-#  define	IS_CPU_ISET_V6()	true
-#elif	CONFIG_CPU_ISET >= 1
-#  define	IS_CPU_ISET_V6()	false
-#elif	CONFIG_CPU_ISET == 0
-# ifdef	E2K_P2V
-#  define	IS_CPU_ISET_V6()	\
-			(boot_machine.native_iset_ver >= E2K_ISET_V6)
-# else	/* ! E2K_P2V */
-#  define	IS_CPU_ISET_V6()	\
-			(machine.native_iset_ver >= E2K_ISET_V6)
-# endif	/* E2K_P2V */
-#else	/* CONFIG_CPU_ISET undefined or negative */
-# warning "Undefined CPU ISET VERSION #, IS_CPU_ISET_V6 is defined dinamicaly"
-# ifdef	E2K_P2V
-#  define	IS_CPU_ISET_V6()	\
-			(boot_machine.native_iset_ver >= E2K_ISET_V6)
-# else	/* ! E2K_P2V */
-#  define	IS_CPU_ISET_V6()	\
-			(machine.native_iset_ver >= E2K_ISET_V6)
-# endif	/* E2K_P2V */
-#endif	/* CONFIG_CPU_ISET 0-6 */
+#if defined E2K_P2V && !defined CONFIG_BOOT_E2K
+# define boot_machine		(boot_get_vo_value(machine))
+# define boot_pgtable_struct	((pt_struct_t)boot_get_vo_value(pgtable_struct))
+# define boot_pgtable_struct_p	boot_vp_to_pp(&pgtable_struct)
+#else
+# define boot_machine		machine
+# define boot_pgtable_struct	pgtable_struct
+# define boot_pgtable_struct_p	(&pgtable_struct)
+#endif
+#define IS_CPU_ISET_V6()	cpu_has(CPU_FEAT_ISET_V6)
 
 /* Returns true in guest running with hardware virtualization support */
 #if CONFIG_CPU_ISET >= 3 && !defined E2K_P2V

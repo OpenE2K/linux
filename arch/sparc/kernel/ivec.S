@@ -100,7 +100,7 @@ do_ivec_xcall_e90s:
 #endif /*CONFIG_SMP*/
 
 do_ivec_cycl_sync_e90s:
-	rd	%tick, %g2
+	rd	%stick, %g2
 	add	%g2, CYCL_SYNC_GAP>>1, %g2	/* to round up */
 	and	%g2, ~(CYCL_SYNC_GAP - 1), %g2
 	/* add	%g2, for more precicsion we could add interrupt time cycles */

@@ -1020,6 +1020,10 @@ static int adaptive_wait(struct rt_mutex *lock,
 		 * checking the above to be valid.
 		 */
 		barrier();
+#ifdef CONFIG_MCST
+		if (owner == NULL)	/* bug 141258 */
+			break;
+#endif
 		if (!owner->on_cpu) {
 			res = 1;
 			break;

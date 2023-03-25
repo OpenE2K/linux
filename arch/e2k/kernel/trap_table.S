@@ -2,13 +2,10 @@
  * Trap table entries implemented on assembler
  */
 
-#include <asm/alternative-asm.h>
 #include <asm/unistd.h>
-#include <asm/mmu_regs_types.h>
 #include <generated/asm-offsets.h>
 #include <asm/pv_info.h>
 #include <asm/mmu_types.h>
-#include <asm/e2k_api.h>
 #include <asm/trap_table.h>
 #include <asm/trap_table.S.h>
 #include <asm/thread_info.h>
@@ -36,6 +33,12 @@
 # define PV_VCPU(...) __VA_ARGS__
 #else
 # define PV_VCPU(...)
+#endif
+
+#ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
+# define NOT_SEP_VIRT_SPACE_ONLY(...) __VA_ARGS__
+#else
+# define NOT_SEP_VIRT_SPACE_ONLY(...)
 #endif
 
 .section .ttable_entry0, "ax",@progbits
@@ -95,16 +98,12 @@ ttable_entry0:
 	SWITCH_HW_STACKS(TSK_TI_TMP_)
 trap_handler_switched_stacks:
 	{
-	setwd	wsz = 18, nfx = 1;
+	setwd	wsz = 20, nfx = 1;
 	rrd	%ctpr1, %dr6;
-	ldd	GCURTASK, TSK_STACK, %dr1 ? %pred0; // %dr1: stack
-	ldd	GCURTASK, TSK_K_USD_LO, %dr23 ? %pred0;	// %dr23: usd_lo
-	ldd	GCURTASK, TSK_K_USD_HI, %dr22 ? %pred0;	// %dr22: usd_hi
+	ldgdd	0, TSK_STACK, %dr1 ? %pred0; // %dr1: stack
+	ldgdd	0, TSK_K_USD_LO, %dr23 ? %pred0;	// %dr23: usd_lo
+	ldgdd	0, TSK_K_USD_HI, %dr22 ? %pred0;	// %dr22: usd_hi
 	}
-
-	// trap can occur on guest kernel
-	// %pred20, %dr15, %dr16, %dr17: temporary predicate and registers
-	SWITCH_TO_KERNEL_IMAGE_PGD GCURTASK, %pred20, %dr15, %dr16, %dr17
 
 	ALTERNATIVE_1_ALTINSTR
 		/* CPU_FEAT_TRAP_V5 version - save %lsr1, %ilcr1 */
@@ -146,18 +145,36 @@ trap_handler_switched_stacks:
 	ALTERNATIVE_4_FEATURE2(CPU_FEAT_TRAP_V5, CPU_FEAT_TRAP_V6)
 
 	{
-	rrd %clkr, %dr0
 	ipd 1
-	disp	%ctpr1, 2f
-	/* Read CLW unit registers state for protected mode */
-	CLW_ONLY(mmurr,5 %us_cl_m0, %dr8 ? %pred0)
-	}
-	{
-	rrd %sbr, %dr26
+	disp %ctpr1, 2f
+	rrd %clkr, %dr0
+	mmurr %cont, %dr9 ? ~ %pred0
 	CLW_ONLY(mmurr,5 %us_cl_m1, %dr9 ? %pred0)
 	}
+
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_FEAT_SEP_VIRT_SPACE version - get kernel PT root from %os_pptb */
+		{
+			rrd %sbr, %dr26
+			mmurr,2 %os_pptb, %dr36
+			addd 0, E2K_KERNEL_CONTEXT, %dr37
+			/* Read CLW unit registers state for protected mode */
+			CLW_ONLY(mmurr,5 %us_cl_m0, %dr8 ? %pred0)
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Original instruction - get kernel PT root from memory */
+		{
+			rrd %sbr, %dr26
+			NOT_SEP_VIRT_SPACE_ONLY(ldgdd 0, TSK_K_ROOT_PTB, %dr36)
+			addd 0, E2K_KERNEL_CONTEXT, %dr37
+			/* Read CLW unit registers state for protected mode */
+			CLW_ONLY(mmurr,5 %us_cl_m0, %dr8 ? %pred0)
+		}
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_SEP_VIRT_SPACE)
+
 	{
-	rrd	%usd.hi, %dr7;
+	rrd %usd.hi, %dr7;
+	mmurr,2 %root_ptb, %dr10 ? ~ %pred0
 	CLW_ONLY(mmurr,5 %us_cl_m2, %dr10 ? %pred0)
 	}
 	{
@@ -262,14 +279,17 @@ trap_handler_switched_stacks:
 	strd,5 %dr35, GCURTASK, TAGGED_MEM_STORE_REC_OPC | TSK_TI_G_CPU_ID_PREEMPT_EXT
 	}
 	{
-	nop 1; /* getsp -> use */
 	getsp   -(PTRACE_SZOF + TRAP_PTREGS_SZOF), %dr0
+	/* MMU registers can be written only after disabling CLW/AAU */
+	mmurw %dr37, %cont
+	}
+	{
+	nop 2 /* mmurw -> memory access */
+	mmurw,2 %dr36, %root_ptb
 	}
 #ifdef CONFIG_CLW_ENABLE
 	{
 	std	%dr10, [%dr0 + PT_US_CL_M2]
-	}
-	{
 	std	%dr11, [%dr0 + PT_US_CL_M3]
 	}
 	{
@@ -324,17 +344,19 @@ trap_handler_switched_stacks:
 	ipd 2
 	disp	%ctpr1, kernel_trap_handler;
 	getsp   -(PTRACE_SZOF + TRAP_PTREGS_SZOF + 2 * 7), %dr0 ? ~ %pred1
+	/* MMU registers can be written only after disabling CLW/AAU */
+	mmurw %dr37, %cont
 	}
 	{
+	nop 2 /* mmurw -> memory access */
 	rrd	%lsr, %dr16
-	ibranch kernel_data_stack_overflow ? %pred1
+	mmurw,2 %dr36, %root_ptb
 	}
 	{
 	rrd	%ilcr, %dr4;
-	std,2	%dr6, [%dr0 + PT_CTRP1] ;	// regs->ctpr1 = ctpr1
-	}
-	{
-	std,2	%dr5, [%dr0 + PT_CTRP2] ;	// regs->ctpr2 = ctpr2
+	std	%dr6, [%dr0 + PT_CTRP1] ? ~ %pred1
+	std	%dr5, [%dr0 + PT_CTRP2] ? ~ %pred1
+	ibranch kernel_data_stack_overflow ? %pred1
 	}
 	{
  	std	%dr3, [%dr0 + PT_CTRP3] ;	// regs->ctpr3 = ctpr3
@@ -355,6 +377,10 @@ trap_handler_switched_stacks:
 	}
 	{
 	std %dr19, [%dr0 + PT_CTPR3_HI]
+	}
+	{
+	std %dr9, [%dr0 + PT_CONT]
+	std %dr10, [%dr0 + PT_U_ROOT_PTB]
 	}
 	{
 	std %dr4, [%dr0 + PT_ILCR]
@@ -381,12 +407,28 @@ trap_handler_switched_stacks:
 #define SYS_CALL(sys_call_table, FORMAT_32, KERNEL_ENTRY)		\
 	{								\
 		setwd	wsz = WSZ, nfx = 1;				\
-		nop 2;							\
 		rrd	%osr0, %dr7;					\
-		ldd,2	GCURTASK, TSK_STACK, %dr10;			\
-		ldd,3	GCURTASK, TSK_K_USD_HI, %dr8; 			\
+		ldgdd,2	0, TSK_STACK, %dr10;				\
+		ldgdd,3	0, TSK_K_USD_HI, %dr8; 				\
 		puttags,5 %r0, 0, %r0;					\
 	}								\
+	ALTERNATIVE_1_ALTINSTR \
+		/* CPU_FEAT_SEP_VIRT_SPACE version - get kernel PT root from %os_pptb */ \
+		{ \
+			nop 1; \
+			ldgdd 0, TSK_K_USD_LO, %dr9; \
+			mmurr %os_pptb, %dr12; \
+			addd 0, E2K_KERNEL_CONTEXT, %dr13; \
+		} \
+	ALTERNATIVE_2_OLDINSTR \
+		/* Original instruction - get kernel PT root from memory */ \
+		{ \
+			nop 1; \
+			ldgdd 0, TSK_K_USD_LO, %dr9; \
+			NOT_SEP_VIRT_SPACE_ONLY(ldgdd 0, TSK_K_ROOT_PTB, %dr12;) \
+			addd 0, E2K_KERNEL_CONTEXT, %dr13; \
+		} \
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_SEP_VIRT_SPACE) \
 									\
 	/* goto guest kernel system call table entry, */		\
 	/* if system call is from guest user */				\
@@ -401,7 +443,6 @@ trap_handler_switched_stacks:
 		PV_VCPU(rrd	%sbr, %dr21);				\
 		cmpbsb,3 %r0, NR_syscalls,%pred3; /* sys_num < NR_syscalls */ \
 		sxt,4	6, %r0, %dr0;					\
-		ldd,5	GCURTASK, TSK_K_USD_LO, %dr9;			\
 	}								\
 	{								\
 		rrd	%usd.lo, %dr19;					\
@@ -440,10 +481,22 @@ trap_handler_switched_stacks:
 		puttagd,5 %dr4, 0, %dr4;				\
 	}								\
 	{								\
-		nop 3; /* rwd %usd -> getsp */				\
+		nop 1; /* rwd %usd -> getsp */				\
 		rwd	%dr8, %usd.hi;					\
 		PREPARE_CLW_ADDR(%dr17);				\
 		puttagd,5 %dr5, 0, %dr5;				\
+	}								\
+	{								\
+		rrs	%upsr, %r15;					\
+		STORE_CLW_VAL(%dr18, %dr17);				\
+	}								\
+	{								\
+		sxt,4	6, %r1, %dr1 ? %pred2;				\
+		sxt,1	6, %r2, %dr2 ? %pred2;				\
+		sxt,0	6, %r3, %dr3 ? %pred2;				\
+		sxt,3	6, %r4, %dr4 ? %pred2;				\
+		stw,2	%r15, GCURTASK, TSK_UPSR;			\
+		puttagd,5 %dr6, 0, %dr6;				\
 	}								\
 	/*								\
 	 * Guest under hardware virtualization support - IS_HV_GM()	\
@@ -455,43 +508,39 @@ trap_handler_switched_stacks:
 	 */								\
 	SAVE_HOST_GREGS_TO_VIRT_UNEXT %dr7, %dr10			\
 	{								\
-		rrs	%upsr, %r15;					\
-		STORE_CLW_VAL(%dr18, %dr17);				\
+		/* MMU registers can be written only after disabling	\
+		 * CLW/AAU (so at any point for a 32/64 bit syscall). */ \
+		mmurw %dr13, %cont;					\
 	}								\
 	{								\
 		rws	E2K_KERNEL_UPSR_ENABLED,  %upsr;		\
-		stw	%r15, GCURTASK, TSK_UPSR;			\
-		puttagd,5 %dr6, 0, %dr6;				\
-	}								\
-	{								\
-		nop 1; /* getsp -> usage */				\
-		getsp	-(PTRACE_SZOF + 64), %dr7;			\
 		adds,1	0, KERNEL_ENTRY, %r8;				\
-		sxt,3	6, %r1, %dr1 ? %pred2;				\
-		sxt,4	6, %r2, %dr2 ? %pred2;				\
+		mmurw %dr12, %root_ptb;					\
 	}								\
 	{								\
-		addd,1	%dr7, 64, %dr7;					\
-		stw,2	%r0, [ %dr7 + (PT_SYS_NUM + 64) ];		\
-		sxt,3	6, %r3, %dr3 ? %pred2;				\
-		sxt,4	6, %r4, %dr4 ? %pred2;				\
+		nop 1; /* mmurw -> memory access, getsp -> usage */ \
+		getsp	-(PTRACE_SZOF + 64), %dr7;			\
 	}								\
-	{								\
-		stw,2	%r8, [ %dr7 + PT_KERNEL_ENTRY ];		\
+	{ \
+		stw,2	%r0, [ (%dr7 + 64) + PT_SYS_NUM ];		\
 		SMP_ONLY(shld,4 GCPUID_PREEMPT, 3, GCPUOFFSET);		\
-		/* regs->g_stacks.sbr/top = %sbr */			\
-		PV_VCPU(std	%dr21, [%dr7 + PT_G_STACK+G_ST_SBR]);	\
-	}								\
+	} \
 	{								\
-		std,2	%dr19, [%dr7 + PT_STACK+ST_USD_LO];		\
-		std,5	%dr20, [%dr7 + PT_STACK+ST_USD_HI];		\
+		stw,2	%r8, [ (%dr7 + 64) + PT_KERNEL_ENTRY ];		\
+		SMP_ONLY(ldd,5 GCPUOFFSET, __per_cpu_offset, GCPUOFFSET); \
+	} \
+	{								\
+		std,2	%dr19, [(%dr7 + 64) + PT_STACK+ST_USD_LO];	\
+		std,5	%dr20, [(%dr7 + 64) + PT_STACK+ST_USD_HI];	\
 		sxt,3	6, %r5, %dr5 ? %pred2;				\
 		sxt,4	6, %r6, %dr6 ? %pred2;				\
 	}								\
 	{								\
-		std,2	%dr11, [%dr7 + PT_STACK+ST_TOP];		\
-		SMP_ONLY(ldd,5 GCPUOFFSET, __per_cpu_offset, GCPUOFFSET); \
+		addd,1	%dr7, 64, %dr7;					\
+		std,2	%dr11, [(%dr7 + 64) + PT_STACK+ST_TOP];		\
 		addd,4	%dr14, 0, %dr0;					\
+		/* regs->g_stacks.sbr/top = %sbr */			\
+		PV_VCPU(std	%dr21, [(%dr7 + 64) + PT_G_STACK+G_ST_SBR]); \
 		ct %ctpr1;						\
 	}
 
@@ -759,6 +808,7 @@ $ret_from_fast_sys_call:
 .size $ret_from_fast_sys_call, . - $ret_from_fast_sys_call
 #endif /* CONFIG_KVM_HOST_MODE */
 
+#ifdef CONFIG_PROTECTED_MODE
 .global fast_sys_calls_table_128;
 .global ttable_entry7;
 
@@ -833,8 +883,6 @@ ttable_entry7:
 }
 .size	 $ttable_entry7, . -$ttable_entry7
 
-
-#ifdef CONFIG_PROTECTED_MODE
 .global	ttable_entry8_C;
 .global	ttable_entry8
 
@@ -848,7 +896,7 @@ ttable_entry8:
 		disp %ctpr1, ttable_entry8_C;
 	)
 	{
-		setwd	wsz = 16, nfx = 1
+		setwd	wsz = 18, nfx = 1
 		ldgdd,3 TSK_K_USD_HI, %dr25
 		addd,0	0, 1, %dr28
 		addd,1	0, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO), %dr26
@@ -860,7 +908,7 @@ ttable_entry8:
 	}
 	{
 		rrd %usd.lo, %dr29
-		ldd,3 GCURTASK, TSK_K_USD_LO, %dr27
+		ldgdd,3 0, TSK_K_USD_LO, %dr27
 		gettagd,2 %dr4, %r19
 		gettagd,5 %dr5, %r20
 		shls,1 %r17, 8, %r17
@@ -881,12 +929,13 @@ ttable_entry8:
 		shls,4 %r20, 20, %r20
 		gettagd,2 %dr6, %r21
 		gettagd,5 %dr7, %r22
-		ldd,3 GCURTASK, TSK_U_STACK_TOP, %dr15
 	}
 	{
 		rrs	%upsr, %r31
 
-		puttags,5 %r0, 0, %r0
+		ldgdd,5 0, TSK_U_STACK_TOP, %dr15
+		addd,4	0, E2K_KERNEL_CONTEXT, %dr33
+
 		addd,1	%dr1, KERNEL_C_STACK_SIZE + KERNEL_C_STACK_OFFSET, %dr1
 		/* Disable CLW unit for nonprotected mode */
 		std,2	%dr28, 0, [%dr26] MAS_MMU_REG
@@ -919,21 +968,32 @@ ttable_entry8:
 		sxt,1 6, %r21, %dr21
 		sxt,4 6, %r22, %dr22
 	}
-	{
-		rwd	%dr25, %usd.hi
-		sxt,3 6, %r0, %dr0
-		puttagd,2 %dr2, 0, %dr2
-		puttagd,5 %dr3, 0, %dr3
-		sxt,1 6, %r23, %dr23
-		sxt,4 6, %r24, %dr24
-	}
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_FEAT_SEP_VIRT_SPACE version - get kernel PT root from %os_pptb */
+		{
+			rwd     %dr25, %usd.hi
+			puttagd,5 %dr2, 0, %dr2
+			sxt,1 6, %r23, %dr23
+			sxt,4 6, %r24, %dr24
+			mmurr,2 %os_pptb, %dr32
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Original instruction - get kernel PT root from memory */
+		{
+			rwd     %dr25, %usd.hi
+			puttagd,5 %dr2, 0, %dr2
+			sxt,1 6, %r23, %dr23
+			sxt,4 6, %r24, %dr24
+			NOT_SEP_VIRT_SPACE_ONLY(ldgdd,2 0, TSK_K_ROOT_PTB, %dr32)
+		}
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_SEP_VIRT_SPACE)
 	{
 		shld,0 %dr21, 24, %dr21
 		shld,3 %dr22, 28, %dr22
 		shld,1 %dr23, 32, %dr23
 		shld,4 %dr24, 36, %dr24
-		puttagd,2 %dr4, 0, %dr4
-		puttagd,5 %dr5, 0, %dr5
+		puttagd,2 %dr3, 0, %dr3
+		puttagd,5 %dr4, 0, %dr4
 	}
 	{
 		rws	E2K_KERNEL_UPSR_ENABLED, %upsr
@@ -943,25 +1003,33 @@ ttable_entry8:
 		ord,4 %dr22, %dr24, %dr24
 	}
 	{
+		puttagd,2 %dr5, 0, %dr5
 		ors,3 %r19, %r20, %r1
 		sxt,1 6, %r17, %dr17
 		sxt,4 6, %r18, %dr18
-		sxt,2 6, %r21, %dr21
+		sxt,0 6, %r21, %dr21
 		sxt,5 6, %r22, %dr22
 	}
 	{
-		puttagd,2 %dr6, 0, %dr6
-		puttagd,5 %dr7, 0, %dr7
+		/* MMU registers can be written only after disabling CLW/AAU */
+		mmurw %dr33, %cont
+		puttagd,5 %dr6, 0, %dr6
 		shld,1 %dr17, 40, %dr17
 		shld,4 %dr18, 44, %dr18
 		shld,0 %dr21, 48, %dr21
 		shld,3 %dr22, 52, %dr22
 	}
 	{
+		/* mmurw -> memory access delay is 2 cycles */
+		mmurw,2 %dr32, %root_ptb
 		ord,1 %dr17, %dr21, %dr21
 		ord,4 %dr18, %dr22, %dr22
-		stw,2 %r31, GCURTASK, TSK_UPSR
+		stw,5 %r31, GCURTASK, TSK_UPSR
 		sxt,3 6, %r1, %dr1
+	}
+	{
+		puttagd,2 %dr7, 0, %dr7
+		puttags,5 %r0, 0, %r0
 	}
 
 	/* Reserve memory for 'struct pt_regs' and parameters and put in
@@ -977,6 +1045,7 @@ ttable_entry8:
 	{
 		/* %dr20: current_thread_info */
 		rrd	%osr0, %dr20
+		sxt,4 6, %r0, %dr0
 
 		SMP_ONLY(ldd,3 GCPUOFFSET, __per_cpu_offset, GCPUOFFSET)
 
@@ -1043,11 +1112,25 @@ ttable_entry8:
 	.type	 ttable_entry10,@function
 ttable_entry10:
 	SWITCH_HW_STACKS_FROM_USER()
+
 	{
-		setwd	wsz = 11, nfx = 1
-		addd	0, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO), %dr16
-		addd	0, 1, %dr17
+		setwd   wsz = 13, nfx = 1
+		addd    0, _MMU_REG_NO_TO_MMU_ADDR_VAL(_MMU_US_CL_D_NO), %dr16
+		addd    0, 1, %dr17
 	}
+	ALTERNATIVE_1_ALTINSTR
+		/* CPU_FEAT_SEP_VIRT_SPACE version - get kernel PT root from %os_pptb */
+		{
+			mmurr %os_pptb, %dr22
+			addd,4	0, E2K_KERNEL_CONTEXT, %dr23
+		}
+	ALTERNATIVE_2_OLDINSTR
+		/* Original instruction - get kernel PT root from memory */
+		{
+			NOT_SEP_VIRT_SPACE_ONLY(ldgdd,3 0, TSK_K_ROOT_PTB, %dr22)
+			addd,4	0, E2K_KERNEL_CONTEXT, %dr23
+		}
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_SEP_VIRT_SPACE)
 
 	/* goto guest kernel system call table entry, */
 	/* if system call is from guest user */
@@ -1162,8 +1245,12 @@ ttable_entry10:
 		rrs	%upsr, %r20
 	}
 	{
-		nop 3
-		rws	E2K_KERNEL_UPSR_ENABLED, %upsr
+		/* MMU registers can be written only after disabling CLW/AAU */
+		mmurw %dr23, %cont
+	}
+	{
+		nop 1 /* mmurw -> memory access */
+		mmurw,2 %dr22, %root_ptb
 	}
 
 	/* Reserve memory for 'struct pt_regs' and parameters and put in
@@ -1201,7 +1288,11 @@ ttable_entry10:
 		std %dr19, [%dr7 + PT_STACK+ST_USD_HI + 64]
 	}
 	{
+		nop 3
+		rws	E2K_KERNEL_UPSR_ENABLED, %upsr
 		std %dr16, [%dr7 + PT_STACK+ST_TOP]
+	}
+	{
 		/* Go to main protected system call handler */
 		ct	%ctpr1
 	}
@@ -1224,7 +1315,7 @@ osgd_to_gd:
 .section ".entry.text", "ax"
 .type sighandler_trampoline,@function
 sighandler_trampoline:
-	HANDLER_TRAMPOLINE	%ctpr2, 11, sighandler_trampoline_continue, 0
+	HANDLER_TRAMPOLINE(%ctpr2, 11, sighandler_trampoline_continue, 0)
 .size $sighandler_trampoline, . - $sighandler_trampoline
 
 .global makecontext_trampoline
@@ -1232,7 +1323,7 @@ sighandler_trampoline:
 .section ".entry.text", "ax"
 .type makecontext_trampoline,@function
 makecontext_trampoline:
-	HANDLER_TRAMPOLINE	%ctpr2, 11, makecontext_trampoline_continue, 4
+	HANDLER_TRAMPOLINE(%ctpr2, 11, makecontext_trampoline_continue, 4)
 .size $makecontext_trampoline, . - $makecontext_trampoline
 
 .global makecontext_trampoline_protected
@@ -1240,5 +1331,5 @@ makecontext_trampoline:
 .section ".entry.text", "ax"
 .type makecontext_trampoline_protected,@function
 makecontext_trampoline_protected:
-    HANDLER_TRAMPOLINE    %ctpr2, 11, makecontext_trampoline_continue, 8
+	HANDLER_TRAMPOLINE(%ctpr2, 11, makecontext_trampoline_continue, 8)
 .size $makecontext_trampoline_protected, . - $makecontext_trampoline_protected

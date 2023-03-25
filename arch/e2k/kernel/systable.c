@@ -10,7 +10,12 @@
 #include <asm/trap_table.h>
 
 #define	SYSTEM_CALL_TBL_ENTRY(sysname)	(system_call_func) sysname
+
+#ifdef CONFIG_PROTECTED_MODE
 #define	PROT_SYSCALL_TBL_ENTRY(sysname)	((protected_system_call_func) sysname)
+#else
+#define	PROT_SYSCALL_TBL_ENTRY(sysname)	((protected_system_call_func) sys_ni_syscall)
+#endif
 
 #ifdef CONFIG_COMPAT
 # define COMPAT_SYSTEM_CALL_TBL_ENTRY(sysname) \

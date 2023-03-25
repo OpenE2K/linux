@@ -18,6 +18,16 @@
 #include <asm/kvm/gregs.h>
 #endif /* __ASSEMBLY__ */
 
+static inline void kvm_trap_init(unsigned long cellar_addr)
+{
+	vcpu_gmmu_info_t gmmu_info;
+
+	gmmu_info.opcode = INIT_STATE_GMMU_TC_ONLY;
+	gmmu_info.trap_cellar = cellar_addr;
+
+	BUG_ON(HYPERVISOR_vcpu_guest_mmu_state(&gmmu_info));
+}
+
 extern void kvm_save_glob_regs(global_regs_t *gregs);
 extern void kvm_save_glob_regs_dirty_bgr(global_regs_t *gregs);
 extern void kvm_save_local_glob_regs(local_gregs_t *l_gregs, bool is_signal);
@@ -232,10 +242,6 @@ do { \
 									\
 	KVM_DO_RESTORE_USER_STACK_REGS(regs, in_syscall, updated);	\
 })
-#define KVM_RESTORE_USER_TRAP_STACK_REGS(regs)				\
-		KVM_RESTORE_USER_STACK_REGS(regs, false)
-#define KVM_RESTORE_USER_SYSCALL_STACK_REGS(regs)			\
-		KVM_RESTORE_USER_STACK_REGS(regs, true)
 #define	KVM_RESTORE_USER_CUT_REGS(ti, regs)	/* CUTD is set by host */
 
 #define KVM_RESTORE_COMMON_REGS(regs)	/* should be restored by host */
@@ -243,10 +249,10 @@ do { \
 #define	KVM_SAVE_TRAP_CELLAR(regs, trap)				\
 ({									\
 	kernel_trap_cellar_t *kernel_tcellar =				\
-		(kernel_trap_cellar_t *)KERNEL_TRAP_CELLAR;		\
+		(kernel_trap_cellar_t *) raw_cpu_ptr(kernel_trap_cellar); \
 	kernel_trap_cellar_ext_t *kernel_tcellar_ext =			\
 		(kernel_trap_cellar_ext_t *)				\
-		((void *) KERNEL_TRAP_CELLAR + TC_EXT_OFFSET);		\
+		((void *) kernel_tcellar + TC_EXT_OFFSET);		\
 	trap_cellar_t *tcellar = (trap)->tcellar;			\
 	int cnt, cs_req_num = 0, cs_a4 = 0, max_cnt;			\
 	u64 kstack_pf_addr = 0;						\

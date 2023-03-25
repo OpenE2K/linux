@@ -21,17 +21,17 @@ kvm_ftype_test_sw_fault(tc_fault_type_t ftype)
 	return ftype_test_is_kvm_fault_injected(ftype);
 }
 
-extern void kvm_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
+extern long kvm_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
 		u32 data_tag, u64 st_rec_opc, u64 data_ext, u32 data_ext_tag,
 		u64 opc_ext, int chan, int qp_store, int atomic_store);
-extern void kvm_recovery_faulted_load(e2k_addr_t address, u64 *ld_val,
+extern long kvm_recovery_faulted_load(e2k_addr_t address, u64 *ld_val,
 				u8 *data_tag, u64 ld_rec_opc, int chan,
 				tc_cond_t cond);
-extern void kvm_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+extern long kvm_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
 		int qp_load, int atomic_load, u32 first_time,
 		tc_cond_t cond);
-extern void kvm_recovery_faulted_load_to_greg(e2k_addr_t address,
+extern long kvm_recovery_faulted_load_to_greg(e2k_addr_t address,
 		u32 greg_num_d, int vr, u64 ld_rec_opc, int chan,
 		int qp_load, int atomic_load,
 		void *saved_greg_lo, void *saved_greg_hi,

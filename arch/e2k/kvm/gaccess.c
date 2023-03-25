@@ -339,10 +339,10 @@ static long kvm_vcpu_do_set_guest_virt_system(struct kvm_vcpu *vcpu,
 			ret = -EFAULT;
 			goto return_fault;
 		}
-		SET_USR_PFAULT("$.recovery_memset_fault");
+		SET_USR_PFAULT("$.recovery_memset_fault", false);
 		memset_ret = recovery_memset_8(haddr, val, tag,
 						towrite, strd_opcode);
-		if (RESTORE_USR_PFAULT) {
+		if (RESTORE_USR_PFAULT(false)) {
 			ret = -EFAULT;
 			goto return_fault;
 		}
@@ -577,11 +577,11 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 				trace_host_copy_hva_area(haddr_dst, haddr_src,
 							 towrite);
 
-			SET_USR_PFAULT("$.recovery_memcpy_fault");
+			SET_USR_PFAULT("$.recovery_memcpy_fault", false);
 			memcpy_ret = recovery_memcpy_8(haddr_dst, haddr_src,
 					towrite, strd_opcode, ldrd_opcode,
 					prefetch);
-			if (RESTORE_USR_PFAULT) {
+			if (RESTORE_USR_PFAULT(false)) {
 				ret = -EFAULT;
 				goto return_fault;
 			}
@@ -683,16 +683,15 @@ long kvm_vcpu_copy_guest_user_virt_system_16(struct kvm_vcpu *vcpu,
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_user_virt_system_16);
 
-static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
+static size_t kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 		void *host, void __user *guest, size_t size, bool to_host,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
 {
-	size_t len = size, quad;
+	size_t len = size, quad, head, head_len, tail, ret;
 	unsigned long hva;
 	void *dst_addr = NULL, *src_addr = NULL, *guest_addr = NULL;
 	unsigned guest_off, hva_len = 0;
-	int head, head_len, tail, tail_len, ret;
 	kvm_arch_exception_t exception;
 
 	if (to_host) {
@@ -731,7 +730,7 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 		hva_len = (unsigned)PAGE_SIZE - guest_off;
 		head_len = min(head, hva_len);
 
-		DebugHGCOPY("copy head from %px to %px, size 0x%x\n",
+		DebugHGCOPY("copy head from %px to %px, size 0x%lx\n",
 				src_addr, dst_addr, head_len);
 		if (to_host) {
 			ret = copy_from_user(dst_addr, src_addr, head_len);
@@ -739,7 +738,7 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 			ret = copy_to_user(dst_addr, src_addr, head_len);
 		}
 		if (ret) {
-			pr_err("%s(): could not copy 0x%x bytes from %px to %px, not copied 0x%x bytes\n",
+			pr_err("%s(): could not copy 0x%lx bytes from %px to %px, not copied 0x%lx bytes\n",
 				__func__, head_len, src_addr, dst_addr, ret);
 			return -EFAULT;
 		}
@@ -766,8 +765,7 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 		goto tail_copy;
 
 	while (quad) {
-		size_t quad_len;
-		int quad_tail, tail_len;
+		size_t quad_len, quad_tail;
 
 		if (hva_len == 0) {
 			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
@@ -804,13 +802,13 @@ static int kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 			return -EFAULT;
 		}
 		/* fast copy quad aligned and within one page of guest */
-		SET_USR_PFAULT("$.recovery_memcpy_fault");
+		SET_USR_PFAULT("$.recovery_memcpy_fault", false);
 		ret = recovery_memcpy_8(dst_addr, src_addr, quad_len,
 				strd_opcode, ldrd_opcode, prefetch);
-		if (RESTORE_USR_PFAULT)
+		if (RESTORE_USR_PFAULT(false))
 			return -EFAULT;
 		if (ret < quad_len) {
-			pr_err("%s(): could not copy 0x%lx bytes from %px to %px, not copied 0x%x bytes\n",
+			pr_err("%s(): could not copy 0x%lx bytes from %px to %px, not copied 0x%lx bytes\n",
 				__func__, quad_len, src_addr, dst_addr, ret);
 			return -EFAULT;
 		}
@@ -829,6 +827,8 @@ quad_tail_copy:
 			continue;
 
 		do {
+			size_t tail_len;
+
 			if (hva_len == 0) {
 				hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
 							!to_host, &exception);
@@ -851,7 +851,7 @@ quad_tail_copy:
 				hva_len = (unsigned)PAGE_SIZE - guest_off;
 			}
 			tail_len = min(quad_tail, hva_len);
-			DebugHGCOPY("copy quad tail from %px to %px, size 0x%x\n",
+			DebugHGCOPY("copy quad tail from %px to %px, size 0x%lx\n",
 				src_addr, dst_addr, tail_len);
 			if (to_host) {
 				ret = copy_from_user(dst_addr, src_addr, tail_len);
@@ -859,7 +859,7 @@ quad_tail_copy:
 				ret = copy_to_user(dst_addr, src_addr, tail_len);
 			}
 			if (ret) {
-				pr_err("%s(): could not copy 0x%x bytes from %px to %px, not copied 0x%x bytes\n",
+				pr_err("%s(): could not copy 0x%lx bytes from %px to %px, not copied 0x%lx bytes\n",
 					__func__, tail_len, src_addr, dst_addr, ret);
 				return -EFAULT;
 			}
@@ -883,6 +883,8 @@ tail_copy:
 
 	/* copy not quad aligned tail of transfered data */
 	do {
+		size_t tail_len;
+
 		if (hva_len == 0) {
 			hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)guest,
 						!to_host, &exception);
@@ -904,7 +906,7 @@ tail_copy:
 			hva_len = (unsigned)PAGE_SIZE - guest_off;
 		}
 		tail_len = min(tail, hva_len);
-		DebugHGCOPY("copy tail from %px to %px, size 0x%x\n",
+		DebugHGCOPY("copy tail from %px to %px, size 0x%lx\n",
 			src_addr, dst_addr, tail_len);
 		if (to_host) {
 			ret = copy_from_user(dst_addr, src_addr, tail_len);
@@ -912,7 +914,7 @@ tail_copy:
 			ret = copy_to_user(dst_addr, src_addr, tail_len);
 		}
 		if (ret) {
-			pr_err("%s(): could not copy 0x%x bytes from %px to %px, not copied 0x%x bytes\n",
+			pr_err("%s(): could not copy 0x%lx bytes from %px to %px, not copied 0x%lx bytes\n",
 				__func__, tail_len, src_addr, dst_addr, ret);
 			return -EFAULT;
 		}
@@ -931,7 +933,7 @@ out:
 	return size;
 }
 
-int kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
+size_t kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
 		const void *host, void __user *guest, size_t size,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
@@ -940,7 +942,7 @@ int kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
 				false, strd_opcode, ldrd_opcode, prefetch);
 }
 
-int kvm_vcpu_copy_host_from_guest(struct kvm_vcpu *vcpu,
+size_t kvm_vcpu_copy_host_from_guest(struct kvm_vcpu *vcpu,
 		void *host, const void __user *guest, size_t size,
 		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)

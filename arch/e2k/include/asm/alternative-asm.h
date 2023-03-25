@@ -39,8 +39,7 @@
  */
 .macro alt_pad bytes
 	.if ( \bytes >= 576 )
-		ibranch . + \bytes
-		alt_pad_fill \bytes - 16
+		.error Expand with NOPs manually; use of ibranch here is not recommended (see bug 142105)
 	.else
 		alt_pad_64bytes \bytes, 512
 		alt_pad_64bytes \bytes, 448
@@ -80,6 +79,13 @@
 	.endif
 .endm
 
+/* Mark labels that are not targets of a call or jump */
+#if defined(__LCC__) && __LCC__ >= 127
+# define NONTARGET_LABEL(num) .non_target_label num;
+#else
+# define NONTARGET_LABEL(num) num:
+#endif
+
 /*
  * Define an alternative between two instructions. If @feature is
  * present, early code in apply_alternatives() replaces @oldinstr with
@@ -87,15 +93,15 @@
  */
 .macro ALTERNATIVE oldinstr, newinstr, feature
 	.pushsection .altinstr_replacement,"ax"
-770:	\newinstr
-771:	.popsection
-772:	\oldinstr
-773:	alt_len_check 770b, 771b
-	alt_len_check 772b, 773b
-	alt_pad ( ( 771b - 770b ) - ( 773b - 772b ) )
-774:	.pushsection .altinstructions,"a"
-	alt_entry 772b, 774b, 770b, 771b, \feature
-	.popsection
+NONTARGET_LABEL(770)	\newinstr
+NONTARGET_LABEL(771)	.popsection
+NONTARGET_LABEL(772)	\oldinstr
+NONTARGET_LABEL(773)	alt_len_check 770b, 771b
+			alt_len_check 772b, 773b
+			alt_pad ( ( 771b - 770b ) - ( 773b - 772b ) )
+NONTARGET_LABEL(774)	.pushsection .altinstructions,"a"
+			alt_entry 772b, 774b, 770b, 771b, \feature
+			.popsection
 .endm
 
 /*
@@ -103,22 +109,22 @@
  */
 .macro ALTERNATIVE_2 oldinstr, newinstr1, feature1, newinstr2, feature2
 	.pushsection .altinstr_replacement,"ax"
-770:	\newinstr1
-771:	\newinstr2
-772:	.popsection
-773:	\oldinstr
-774:	alt_len_check 770b, 771b
-	alt_len_check 771b, 772b
-	alt_len_check 773b, 774b
-	.if ( 771b - 770b > 772b - 771b )
-	alt_pad ( ( 771b - 770b ) - ( 774b - 773b ) )
-	.else
-	alt_pad ( ( 772b - 771b ) - ( 774b - 773b ) )
-	.endif
-775:	.pushsection .altinstructions,"a"
-	alt_entry 773b, 775b, 770b, 771b,\feature1
-	alt_entry 773b, 775b, 771b, 772b,\feature2
-	.popsection
+NONTARGET_LABEL(770)	\newinstr1
+NONTARGET_LABEL(771)	\newinstr2
+NONTARGET_LABEL(772)	.popsection
+NONTARGET_LABEL(773)	\oldinstr
+NONTARGET_LABEL(774)	alt_len_check 770b, 771b
+			alt_len_check 771b, 772b
+			alt_len_check 773b, 774b
+			.if ( 771b - 770b > 772b - 771b )
+			alt_pad ( ( 771b - 770b ) - ( 774b - 773b ) )
+			.else
+			alt_pad ( ( 772b - 771b ) - ( 774b - 773b ) )
+			.endif
+NONTARGET_LABEL(775)	.pushsection .altinstructions,"a"
+			alt_entry 773b, 775b, 770b, 771b,\feature1
+			alt_entry 773b, 775b, 771b, 772b,\feature2
+			.popsection
 .endm
 
 
@@ -147,33 +153,33 @@
  */
 #define ALTERNATIVE_1_ALTINSTR \
 	.pushsection .altinstr_replacement,"ax" ; \
-	770:
+	NONTARGET_LABEL(770)
 
 #define ALTERNATIVE_2_OLDINSTR \
-	771: ; \
+	NONTARGET_LABEL(771) ; \
 	.popsection ; \
-	772:
+	NONTARGET_LABEL(772)
 
 #define ALTERNATIVE_3_FEATURE(feature) \
-	773: ; \
+	NONTARGET_LABEL(773) ; \
 	alt_len_check 770b, 771b ; \
 	alt_len_check 772b, 773b ; \
 	alt_pad ( ( 771b - 770b ) - ( 773b - 772b ) ) ; \
-	774: ; \
+	NONTARGET_LABEL(774) ; \
 	.pushsection .altinstructions,"a" ; \
 	alt_entry 772b, 774b, 770b, 771b, feature ; \
 	.popsection
 
 #define ALTERNATIVE_2_ALTINSTR2 \
-	771:
+	NONTARGET_LABEL(771)
 
 #define ALTERNATIVE_3_OLDINSTR2 \
-	772: ; \
+	NONTARGET_LABEL(772) ; \
 	.popsection ; \
-	773:
+	NONTARGET_LABEL(773)
 
 #define ALTERNATIVE_4_FEATURE2(feature1, feature2) \
-	774: ; \
+	NONTARGET_LABEL(774) ; \
 	alt_len_check 770b, 771b ; \
 	alt_len_check 771b, 772b ; \
 	alt_len_check 773b, 774b ; \
@@ -182,7 +188,7 @@
 	.else ; \
 		alt_pad ( ( 772b - 771b ) - ( 774b - 773b ) ) ; \
 	.endif ; \
-	775: ; \
+	NONTARGET_LABEL(775) ; \
 	.pushsection .altinstructions,"a" ; \
 	alt_entry 773b, 775b, 770b, 771b, feature1 ; \
 	alt_entry 773b, 775b, 771b, 772b, feature2 ; \

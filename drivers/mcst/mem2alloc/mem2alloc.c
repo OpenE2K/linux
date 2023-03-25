@@ -8,6 +8,10 @@
 #include <linux/pci.h>
 #include <linux/swiotlb.h>
 
+#ifdef CONFIG_E2K
+# include <asm/set_memory.h>
+#endif
+
 #include "mem2alloc.h"
 
 static int mem2alloc_major = 0;	/* dynamic */
@@ -21,7 +25,7 @@ struct ma_chunk {
 
 static int AllocMemory(MemallocParams *p, struct file *filp);
 static int FreeMemory(u64 busaddr, struct file *filp);
-static int mem2alloc_mmap(struct file *filp, struct vm_area_struct *vma);
+static int mem2alloc_mmap(struct file *file, struct vm_area_struct *vma);
 
 static long mem2alloc_ioctl(struct file *filp, unsigned int cmd,
 			   unsigned long _arg)
@@ -46,8 +50,10 @@ static long mem2alloc_ioctl(struct file *filp, unsigned int cmd,
 			break;
 
 		ret = AllocMemory(&memparams, filp);
+		if (ret)
+			break;
 
-		ret |= copy_to_user((MemallocParams *) arg, &memparams,
+		ret = copy_to_user((MemallocParams *) arg, &memparams,
 				    sizeof(MemallocParams));
 		break;
 	case MEMALLOC_IOCSFREEBUFFER:
@@ -79,6 +85,9 @@ static int mem2alloc_release(struct inode *inode, struct file *filp)
 			dev = &pdev->dev;
 		dma_unmap_page(dev, p->dma_address, p->size,
 			       DMA_BIDIRECTIONAL);
+#ifdef CONFIG_E2K
+		set_memory_wb((unsigned long) __va(p->phys_address), (p->size >> PAGE_SHIFT));
+#endif
 		__free_pages(c->page, get_order(p->size));
 		c = c->next;
 		kfree(c2);
@@ -99,7 +108,6 @@ static struct file_operations mem2alloc_fops = {
 	.compat_ioctl = mem2alloc_ioctl,
 	.unlocked_ioctl = mem2alloc_ioctl,
 	.mmap = mem2alloc_mmap
-
 };
 
 int __init mem2alloc_init(void)
@@ -122,7 +130,7 @@ static int AllocMemory(MemallocParams *p, struct file *filp)
 	struct pci_dev *pdev;
 	struct device *dev = NULL;
 	struct ma_chunk *n, *c = kzalloc(sizeof(*c), GFP_KERNEL);
-	gfp_t gfp_mask = __GFP_ZERO | GFP_KERNEL;
+	gfp_t gfp_mask = __GFP_ZERO | GFP_USER;
 	pdev = pci_get_domain_bus_and_slot(p->pci_domain, p->bus,
 			PCI_DEVFN(p->slot, p->function));
 	if (!c)
@@ -155,13 +163,18 @@ static int AllocMemory(MemallocParams *p, struct file *filp)
 		ret = -EFAULT;
 		goto err;
 	}
+
+	p->phys_address = page_to_phys(c->page);
+#ifdef CONFIG_E2K
+	set_memory_wc((unsigned long) __va(p->phys_address), (p->size >> PAGE_SHIFT));
+#endif
+
 	spin_lock(&mem_lock);
 	n = filp->private_data;
 	c->next = n;
 	filp->private_data = c;
 	spin_unlock(&mem_lock);
 
-	p->phys_address = page_to_phys(c->page);
 	memcpy(&c->params, p, sizeof(*p));
 	return 0;
       err:
@@ -202,6 +215,9 @@ static int FreeMemory(u64 busaddr, struct file *filp)
 		dev = &pdev->dev;
 	dma_unmap_page(dev, p->dma_address, p->size,
 			DMA_BIDIRECTIONAL);
+#ifdef CONFIG_E2K
+	set_memory_wb((unsigned long) __va(p->phys_address), (p->size >> PAGE_SHIFT));
+#endif
 	__free_pages(c->page, get_order(p->size));
 	kfree(c);
 	r = 0;
@@ -209,25 +225,33 @@ static int FreeMemory(u64 busaddr, struct file *filp)
 	return r;
 }
 
-static int mem2alloc_mmap(struct file *filp, struct vm_area_struct *vma)
+static int mem2alloc_mmap(struct file *file, struct vm_area_struct *vma)
 {
-    struct ma_chunk *entry = filp->private_data;
+	size_t size = vma->vm_end - vma->vm_start;
+	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
+	struct ma_chunk *c;
+	int ret;
 
-    if (entry == NULL)
-    {
-        return -EINVAL;
-    }
+	/* Check that this is indeed a chunk that was allocated with mem2alloc */
+	spin_lock(&mem_lock);
+	for (c = file->private_data; c != NULL; c = c->next) {
+		if (c->params.phys_address == offset)
+			break;
+	}
+	ret = (!c || WARN_ON_ONCE(c->params.size != size)) ? -EINVAL : 0;
+	spin_unlock(&mem_lock);
+	if (ret)
+		return ret;
 
-    vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 
-    if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, vma->vm_end - vma->vm_start,
-                        vma->vm_page_prot))
-    {
-       return -EAGAIN;
-    }
+	/* Remap-pfn-range will mark the range VM_IO */
+	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+			    size, vma->vm_page_prot)) {
+		return -EAGAIN;
+	}
 	return 0;
 }
-
 
 module_init(mem2alloc_init);
 module_exit(mem2alloc_cleanup);

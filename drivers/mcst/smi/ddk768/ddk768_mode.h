@@ -12,6 +12,7 @@
 #ifndef _DDK768_MODE_H_
 #define _DDK768_MODE_H_
 
+struct smi_device;
 /* Maximum parameters those can be saved in the mode table. */
 #define MAX_MODE_TABLE_ENTRIES              60
 #define PITCH(width, bpp)               (((width) * (bpp) / 8 + 15) & ~15)
@@ -314,6 +315,7 @@ long addTiming(
  *        ulBaseAddress    - Base Address value to be set.
  */
 void ddk768_setDisplayBaseAddress(
+	struct smi_device *sdev,
     disp_control_t dispControl,
     unsigned long ulBaseAddress
 );
@@ -331,6 +333,7 @@ void ddk768_setDisplayBaseAddress(
  *      0   - Display is not pending
  */
 long isDisplayBasePending(
+	struct smi_device *sdev,
     disp_control_t dispControl
 );
 
@@ -349,6 +352,7 @@ long isDisplayBasePending(
  *         -1 if any set mode error.
  */
 long ddk768_setCustomMode(
+	struct smi_device *sdev,
     logicalMode_t *pLogicalMode, 
     mode_parameter_t *pUserModeParam
 );
@@ -361,6 +365,7 @@ long ddk768_setCustomMode(
  *         -1 if any set mode error.
  */
 long ddk768_setModeEx(
+	struct smi_device *sdev,
     logicalMode_t *pLogicalMode
 );
 
@@ -373,6 +378,7 @@ long ddk768_setModeEx(
  *         -1 if any set mode error.
  */
 long ddk768_setMode(
+	struct smi_device *sdev,
     logicalMode_t *pLogicalMode
 );
 

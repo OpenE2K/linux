@@ -30,4 +30,5 @@ extern void e2c3_setup_machine(void);
 #define E2C3_SIC_MC_SIZE		E16C_SIC_MC_SIZE
 #define E2C3_SIC_MC_COUNT		E12C_SIC_MC_COUNT
 
+#define E2C3_QNR1_OFFSET		E8C2_QNR1_OFFSET
 #endif /* _ASM_E2C3_H_ */

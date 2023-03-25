@@ -105,7 +105,7 @@
 }
 {
 	cmpandedb \rtmp1, CR1_LO_PSR_PM_MASK, \ptmp1;
-	cmpandedb \rtmp0, _TIF_VIRTUALIZED_GUEST, \ptmp0;
+/*	cmpandedb \rtmp0, _TIF_VIRTUALIZED_GUEST, \ptmp0; */
 	cmpandedb \rtmp0, _TIF_PARAVIRT_GUEST, \ptmp2;
 }
 {

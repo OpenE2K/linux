@@ -23,6 +23,7 @@
 #define	PCI_SOFT_RESET_DURATION		0x68
 #define	L_IOHUB_SOFT_RESET_DURATION	0x0000ffff
 #define	L_IOHUB2_SOFT_RESET_DURATION	0x00ffffff
+#define	L_EIOHUB_SOFT_RESET_DURATION	(250e+6 * 20e-3) /* 20ms at 250 MHz */
 
 /* Common SPI & I2C definitions */
 

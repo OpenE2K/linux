@@ -7,7 +7,7 @@
 #ifndef _E2K_TLBFLUSH_H
 #define _E2K_TLBFLUSH_H
 
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 
 
 /*
@@ -69,6 +69,10 @@ extern void native_flush_tlb_kernel_range_nmi(unsigned long start, unsigned long
 #define native_flush_pmd_tlb_range(mm, start, end) \
 	native_flush_tlb_mm_range((mm), (start), (end), \
 				  PMD_SIZE, FLUSH_TLB_LEVELS_LAST)
+
+#define native_flush_pud_tlb_range(mm, start, end) \
+	native_flush_tlb_mm_range((mm), (start), (end), \
+				  PUD_SIZE, FLUSH_TLB_LEVELS_LAST)
 
 /*
  * Signal to all users of this mm that it has been flushed.
@@ -134,14 +138,6 @@ static inline void native_local_flush_tlb_page_and_pgtables(
 			PAGE_SIZE, FLUSH_TLB_LEVELS_ALL);
 }
 
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-extern void __flush_cpu_root_pt_mm(struct mm_struct *mm);
-extern void __flush_cpu_root_pt(void);
-#else	/* ! CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-#define	__flush_cpu_root_pt_mm(mm)
-#define	__flush_cpu_root_pt()
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-
 
 #if	defined(CONFIG_PARAVIRT_GUEST)
 /* it is paravirtualized host and guest kernel */
@@ -153,6 +149,7 @@ extern void __flush_cpu_root_pt(void);
 # define flush_tlb_kernel_range		kvm_flush_tlb_kernel_range
 # define flush_tlb_kernel_range_nmi	kvm_flush_tlb_kernel_range
 # define flush_tlb_mm			kvm_flush_tlb_mm
+# define flush_tlb_mm_page		kvm_flush_tlb_page
 # define flush_tlb_page(vma, addr)	kvm_flush_tlb_page((vma)->vm_mm, (addr))
 # define flush_tlb_mm_range		kvm_flush_tlb_mm_range
 # define flush_tlb_range_and_pgtables	kvm_flush_tlb_range_and_pgtables
@@ -160,6 +157,8 @@ extern void __flush_cpu_root_pt(void);
 		kvm_flush_tlb_range((vma)->vm_mm, (start), (end))
 # define flush_pmd_tlb_range(vma, start, end) \
 		kvm_flush_pmd_tlb_range((vma)->vm_mm, (start), (end))
+# define flush_pud_tlb_range(vma, start, end) \
+		kvm_flush_pud_tlb_range((vma)->vm_mm, (start), (end))
 /* local_*() versions are for flushing current CPU only.
  * A bit of an overkill: flushing whole mm instead of just current CPU... */
 # define local_flush_tlb_mm_range	kvm_flush_tlb_mm_range
@@ -176,6 +175,7 @@ extern void __flush_cpu_root_pt(void);
 # define flush_tlb_kernel_range		native_flush_tlb_kernel_range
 # define flush_tlb_kernel_range_nmi	native_flush_tlb_kernel_range_nmi
 # define flush_tlb_mm			native_flush_tlb_mm
+# define flush_tlb_mm_page		native_flush_tlb_page
 # define flush_tlb_page(vma, addr)	native_flush_tlb_page((vma)->vm_mm, (addr))
 # define flush_tlb_mm_range		native_flush_tlb_mm_range
 # define flush_tlb_range_and_pgtables	native_flush_tlb_range_and_pgtables
@@ -183,6 +183,8 @@ extern void __flush_cpu_root_pt(void);
 		native_flush_tlb_range((vma)->vm_mm, (start), (end))
 # define flush_pmd_tlb_range(vma, start, end) \
 		native_flush_pmd_tlb_range((vma)->vm_mm, (start), (end))
+# define flush_pud_tlb_range(vma, start, end) \
+		native_flush_pud_tlb_range((vma)->vm_mm, (start), (end))
 /* local_*() versions are for flushing current CPU only */
 # define local_flush_tlb_mm_range	native_local_flush_tlb_mm_range
 # define local_flush_tlb_page		native_local_flush_tlb_page
@@ -191,16 +193,6 @@ extern void __flush_cpu_root_pt(void);
 # define local_flush_tlb_page_and_pgtables \
 		native_local_flush_tlb_page_and_pgtables
 #endif	/* ! CONFIG_PARAVIRT_GUEST && ! CONFIG_KVM_GUEST_KERNEL */
-
-static inline void update_mmu_cache(struct vm_area_struct *vma,
-		unsigned long address, pte_t *pte)
-{
-}
-
-static inline void update_mmu_cache_pmd(struct vm_area_struct *vma,
-		unsigned long address, pmd_t *pmd)
-{
-}
 
 #ifdef	CONFIG_KVM_HOST_MODE
 #include <asm/kvm/tlbflush.h>

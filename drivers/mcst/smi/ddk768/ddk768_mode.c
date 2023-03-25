@@ -579,6 +579,7 @@ long addTiming(
  *		ulBaseAddress	- Base Address value to be set.
  */
 void ddk768_setDisplayBaseAddress(
+	struct smi_device *sdev,
 	disp_control_t dispControl,
 	unsigned long ulBaseAddress
 )
@@ -588,7 +589,7 @@ void ddk768_setDisplayBaseAddress(
     regFB = (dispControl == CHANNEL0_CTRL) ? FB_ADDRESS : (FB_ADDRESS+CHANNEL_OFFSET);
 
 		/* Frame buffer base for this mode */
-	pokeRegisterDWord(regFB,
+	pokeRegisterDWord(sdev->rmmio, regFB,
           FIELD_SET(0, FB_ADDRESS, STATUS, PENDING)
         | FIELD_VALUE(0, FB_ADDRESS, ADDRESS, ulBaseAddress));
 }
@@ -606,6 +607,7 @@ void ddk768_setDisplayBaseAddress(
  *      0   - Display is not pending
  */
 long isDisplayBasePending(
+	struct smi_device *sdev,
     disp_control_t dispControl
 )
 {
@@ -613,7 +615,8 @@ long isDisplayBasePending(
 
     regFB = (dispControl == CHANNEL0_CTRL) ? FB_ADDRESS : (FB_ADDRESS+CHANNEL_OFFSET);
 
-    if (FIELD_GET(peekRegisterDWord(regFB), FB_ADDRESS, STATUS) == FB_ADDRESS_STATUS_PENDING)
+	if (FIELD_GET(peekRegisterDWord(sdev->rmmio, regFB),
+			FB_ADDRESS, STATUS) == FB_ADDRESS_STATUS_PENDING)
         return 1;
 
     return (0);
@@ -628,6 +631,7 @@ long isDisplayBasePending(
  *        -1 = fail.
  */
 long ddk768_programModeRegisters(
+struct smi_device *sdev,
 logicalMode_t *pLogicalMode, 
 mode_parameter_t *pModeParam,   /* mode information about pixel clock, horizontal total, etc. */
 pll_value_t *pPLL               /* Pre-calculated values for the PLL */
@@ -643,7 +647,7 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
 #endif
 
     /*  Make sure normal display channel is used, not VGA channel */
-    pokeRegisterDWord(VGA_CONFIGURATION,
+	pokeRegisterDWord(sdev->rmmio, VGA_CONFIGURATION,
           FIELD_SET(0, VGA_CONFIGURATION, PLL, PANEL)
         | FIELD_SET(0, VGA_CONFIGURATION, MODE, GRAPHIC));
 
@@ -651,7 +655,7 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
 	pllReg = (pLogicalMode->dispCtrl==CHANNEL0_CTRL)? VCLK0_PLL : VCLK1_PLL;
 
     /* Program PLL */
-    pokeRegisterDWord(pllReg, ddk768_formatPllReg(pPLL));
+	pokeRegisterDWord(sdev->rmmio, pllReg, ddk768_formatPllReg(pPLL));
     
 #if 0
     /* Frame buffer base */
@@ -663,28 +667,29 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
 
 
     /* Pitch value (Hardware people calls it Offset) */
-    pokeRegisterDWord((FB_WIDTH+offset),
+	pokeRegisterDWord(sdev->rmmio, (FB_WIDTH+offset),
           FIELD_VALUE(0, FB_WIDTH, WIDTH, pLogicalMode->pitch));
 
-    pokeRegisterDWord((HORIZONTAL_TOTAL+offset),
+	pokeRegisterDWord(sdev->rmmio, (HORIZONTAL_TOTAL+offset),
           FIELD_VALUE(0, HORIZONTAL_TOTAL, TOTAL, pModeParam->horizontal_total - 1)
         | FIELD_VALUE(0, HORIZONTAL_TOTAL, DISPLAY_END, pModeParam->horizontal_display_end - 1));
 
-    pokeRegisterDWord((HORIZONTAL_SYNC+offset),
+	pokeRegisterDWord(sdev->rmmio, (HORIZONTAL_SYNC+offset),
           FIELD_VALUE(0, HORIZONTAL_SYNC, WIDTH, pModeParam->horizontal_sync_width)
         | FIELD_VALUE(0, HORIZONTAL_SYNC, START, pModeParam->horizontal_sync_start - 1));
 
-    pokeRegisterDWord((VERTICAL_TOTAL+offset),
+	pokeRegisterDWord(sdev->rmmio, (VERTICAL_TOTAL+offset),
           FIELD_VALUE(0, VERTICAL_TOTAL, TOTAL, pModeParam->vertical_total - 1)
         | FIELD_VALUE(0, VERTICAL_TOTAL, DISPLAY_END, pModeParam->vertical_display_end - 1));
 
-    pokeRegisterDWord((VERTICAL_SYNC+offset),
+	pokeRegisterDWord(sdev->rmmio, (VERTICAL_SYNC+offset),
           FIELD_VALUE(0, VERTICAL_SYNC, HEIGHT, pModeParam->vertical_sync_height)
         | FIELD_VALUE(0, VERTICAL_SYNC, START, pModeParam->vertical_sync_start - 1));
 
 
     
-    unsigned long hdmi_channel = FIELD_GET(peekRegisterDWord(DISPLAY_CTRL+offset),
+	unsigned long hdmi_channel = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+									DISPLAY_CTRL+offset),
                                    DISPLAY_CTRL,
                                    HDMI_SELECT);    
 
@@ -722,7 +727,7 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
 		 ulTmpValue= FIELD_SET(ulTmpValue,DISPLAY_CTRL, HDMI_SELECT, CHANNEL1);
 
 
-    pokeRegisterDWord((DISPLAY_CTRL+offset), ulTmpValue);
+	pokeRegisterDWord(sdev->rmmio, (DISPLAY_CTRL+offset), ulTmpValue);
 
     /* Palette RAM. */
     paletteRam = PALETTE_RAM + offset;
@@ -742,7 +747,7 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
         for (offset = 0; offset < 256 * 4; offset += 4)
         {
             /* Store current RGB value. */
-            __pokeRegisterDWord(paletteRam + offset, gray
+			__pokeRegisterDWord(sdev->rmmio, paletteRam + offset, gray
                                 ? RGB((gray + 50) / 100,
                                       (gray + 50) / 100,
                                       (gray + 50) / 100)
@@ -785,7 +790,7 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
         ulTmpValue = 0x000000;
         for (offset = 0; offset < 256 * 4; offset += 4)
         {
-            __pokeRegisterDWord(paletteRam + offset, ulTmpValue);
+			__pokeRegisterDWord(sdev->rmmio, paletteRam + offset, ulTmpValue);
 
             /* Advance RGB by 1,1,1. */
             ulTmpValue += 0x010101;
@@ -810,6 +815,7 @@ pll_value_t *pPLL               /* Pre-calculated values for the PLL */
  *         -1 if any set mode error.
  */
 long ddk768_setCustomMode(
+	struct smi_device *sdev,
     logicalMode_t *pLogicalMode, 
     mode_parameter_t *pUserModeParam
 )
@@ -821,7 +827,7 @@ long ddk768_setCustomMode(
      * Minimum check on mode base address.
      * At least it shouldn't be bigger than the size of frame buffer.
      */
-    if (ddk768_getFrameBufSize() <= pLogicalMode->baseAddress)
+	if (ddk768_getFrameBufSize(sdev) <= pLogicalMode->baseAddress)
         return -1;
 
     /*
@@ -860,7 +866,8 @@ long ddk768_setCustomMode(
     }
 
     /* Program the hardware to set up the mode. */
-    return( ddk768_programModeRegisters( 
+	return( ddk768_programModeRegisters(
+			sdev,
             pLogicalMode, 
             pUserModeParam,
             &pll));
@@ -874,6 +881,7 @@ long ddk768_setCustomMode(
  *         -1 if any set mode error.
  */
 long ddk768_setModeEx(
+	struct smi_device *sdev,
     logicalMode_t *pLogicalMode
 )
 {
@@ -904,7 +912,7 @@ long ddk768_setModeEx(
     if (pModeParam == (mode_parameter_t *)0)
         return -1;
 
-    return(ddk768_setCustomMode(pLogicalMode, pModeParam));
+	return ddk768_setCustomMode(sdev, pLogicalMode, pModeParam);
 }
 
 /*
@@ -916,12 +924,13 @@ long ddk768_setModeEx(
  *         -1 if any set mode error.
  */
 long ddk768_setMode(
+	struct smi_device *sdev,
     logicalMode_t *pLogicalMode
 )
 {
     pLogicalMode->userData = (void *)0;
 
     /* Call the setModeEx to set the mode. */
-    return ddk768_setModeEx(pLogicalMode);
+	return ddk768_setModeEx(sdev, pLogicalMode);
 }
 

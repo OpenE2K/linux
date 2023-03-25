@@ -1,58 +1,54 @@
-/*
- *	Access to VGA videoram
- *
- *	(c) 1998 Martin Mares <mj@ucw.cz>
- */
-
 #ifndef _LINUX_ASM_VGA_H_
 #define _LINUX_ASM_VGA_H_
 
 #include <asm/e2k_api.h>
+#include <asm/io.h>
 #include <asm/mas.h>
 
-/*
- *	On the PC, we can just recalculate addresses and then
- *	access the videoram directly without any black magic.
- */
-
-#define	E2K_VGA_DIRECT_IOMEM
+#define VT_BUF_HAVE_RW
 
 #define VGA_MAP_MEM(x, s) (unsigned long)phys_to_virt(x)
 
 #define	VGA_VRAM_PHYS_BASE	0x00000a0000UL	/* VGA video RAM low memory */
 #define	VGA_VRAM_SIZE		0x0000020000UL	/* a0000 - c0000 */
 
-#ifdef E2K_VGA_DIRECT_IOMEM
+#define native_scr_writew(val, addr) \
+do { \
+	if (cpu_has(CPU_FEAT_WC_LEGACY_VGA)) { \
+		*(addr) = (val); \
+	} else { \
+		native_writew_relaxed(val, (volatile u16 *) addr); \
+	} \
+} while (0)
 
-#define native_scr_writew(val, addr)	(*(addr) = (val))
-#define native_scr_readw(addr)		(*(addr))
+#define native_scr_readw(addr) \
+({ \
+	u16 __scr_val; \
+	if (cpu_has(CPU_FEAT_WC_LEGACY_VGA)) { \
+		__scr_val = *(addr); \
+	} else { \
+		__scr_val = native_readw_relaxed((volatile u16 *) addr); \
+	} \
+	__scr_val; \
+})
 
-#define native_vga_readb(addr)		(*(addr))
-#define native_vga_writeb(val, addr)	(*(addr) = (val))
-
-#else
-
-#define VT_BUF_HAVE_RW
-
-static inline void native_scr_writew(u16 val, volatile u16 *addr)
+static inline void native_vga_writeb(u8 val, u8 *addr)
 {
-	native_writew_relaxed(val, addr);
-}
-static inline u16 native_scr_readw(volatile const u16 *addr)
-{
-	return native_readw_relaxed(addr);
-}
-static inline void native_vga_writeb(u8 val, volatile u8 *addr)
-{
-	native_writeb_relaxed(val, addr);
+	if (cpu_has(CPU_FEAT_WC_LEGACY_VGA)) {
+		*addr = val;
+	} else {
+		native_writeb_relaxed(val, (volatile u8 *) addr);
+	}
 }
 
-static inline u8 native_vga_readb(volatile const u8 *addr)
+static inline u8 native_vga_readb(const u8 *addr)
 {
-	return native_readb_relaxed(addr);
+	if (cpu_has(CPU_FEAT_WC_LEGACY_VGA)) {
+		return *addr;
+	} else {
+		return native_readb_relaxed((volatile u8 *) addr);
+	}
 }
-
-#endif	/* E2K_VGA_DIRECT_IOMEM */
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* native guest kernel */
@@ -62,25 +58,10 @@ static inline u8 native_vga_readb(volatile const u8 *addr)
 #include <asm/paravirt/vga.h>
 #else	/* ! CONFIG_KVM_GUEST_KERNEL && ! CONFIG_PARAVIRT_GUEST */
 /* native host kernel with or whithout visrtualizaton */
-
-static inline void scr_writew(u16 val, volatile u16 *addr)
-{
-	native_scr_writew(val, addr);
-}
-
-static inline u16 scr_readw(volatile const u16 *addr)
-{
-	return native_scr_readw(addr);
-}
-static inline void vga_writeb(u8 val, volatile u8 *addr)
-{
-	native_vga_writeb(val, addr);
-}
-
-static inline u8 vga_readb(volatile const u8 *addr)
-{
-	return native_vga_readb(addr);
-}
+# define scr_writew	native_scr_writew
+# define scr_readw	native_scr_readw
+# define vga_writeb	native_vga_writeb
+# define vga_readb	native_vga_readb
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
 /*

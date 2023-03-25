@@ -1011,6 +1011,7 @@ unsigned char ddk768_edidGetExtension(
  *      edidSize   - Success and return the edid's size
  */
 long ddk768_edidReadMonitorEx(
+	struct smi_device *sdev,
     unsigned char *pEDIDBuffer,
     unsigned long bufferSize,
     unsigned char edidExtNo,
@@ -1024,7 +1025,7 @@ long ddk768_edidReadMonitorEx(
     long edidSize = TOTAL_EDID_REGISTERS_128;
 
     /* Initialize the i2c bus */
-    ddk768_swI2CInit(sclGpio, sdaGpio);
+    ddk768_swI2CInit(sdev, sclGpio, sdaGpio);
 
     for (retry = 0; retry < EDID_TOTAL_RETRY_COUNTER; retry++)
     {
@@ -1032,11 +1033,13 @@ long ddk768_edidReadMonitorEx(
             
         /* Read the EDID from the monitor. */
         for (offset = 0; offset < TOTAL_EDID_REGISTERS_128; offset++)
-            edidBuffer[offset] = ddk768_swI2CReadReg(EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
+            edidBuffer[offset] = ddk768_swI2CReadReg(sdev,
+					EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
          	if(edidBuffer[EDID_EXTEND_BLOCK])
        	 	{
             	for (offset = TOTAL_EDID_REGISTERS_128; offset < TOTAL_EDID_REGISTERS_256; offset++)
-                edidBuffer[offset] = ddk768_swI2CReadReg(EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
+                edidBuffer[offset] = ddk768_swI2CReadReg(sdev,
+					EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
             	edidSize = TOTAL_EDID_REGISTERS_256;
          	}	
 
@@ -1085,6 +1088,7 @@ long ddk768_edidReadMonitorEx(
  *     edidSize   - Success and return the edid's size.
  */
 long ddk768_edidReadMonitorExHwI2C(
+	struct smi_device *sdev,
     unsigned char *pEDIDBuffer,
     unsigned long bufferSize,
     unsigned char edidExtNo,
@@ -1098,7 +1102,7 @@ long ddk768_edidReadMonitorExHwI2C(
     long edidSize = 0;
     
     /* Initialize the i2c bus */
-    ddk768_hwI2CInit(i2cNumber);
+    ddk768_hwI2CInit(sdev, i2cNumber);
 #if 0
     for (retry = 0; retry < EDID_TOTAL_RETRY_COUNTER; retry++)
     {
@@ -1123,7 +1127,8 @@ long ddk768_edidReadMonitorExHwI2C(
         /* Read the EDID from the monitor. */
         for (offset = 0; offset < TOTAL_EDID_REGISTERS_128; offset++)
         {
-            value = ddk768_hwI2CReadReg(i2cNumber,EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
+            value = ddk768_hwI2CReadReg(sdev, i2cNumber,
+							EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
             if(0xFFFFFFFF == value)
                 break;
             edidBuffer[offset] = (0xFF & value);
@@ -1135,7 +1140,9 @@ long ddk768_edidReadMonitorExHwI2C(
             {
                 for (offset = TOTAL_EDID_REGISTERS_128; offset < TOTAL_EDID_REGISTERS_256; offset++)
                 {
-                    value = ddk768_hwI2CReadReg(i2cNumber,EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
+                    value = ddk768_hwI2CReadReg(sdev, i2cNumber,
+									EDID_DEVICE_I2C_ADDRESS,
+									(unsigned char)offset);
 
                     if(0xFFFFFFFF == value)
                         break;
@@ -1158,7 +1165,7 @@ long ddk768_edidReadMonitorExHwI2C(
 #endif
 
     /* Finish using HW I2C, we can close the device. */
-    ddk768_hwI2CClose(i2cNumber);
+    ddk768_hwI2CClose(sdev, i2cNumber);
     
      /*
      *  The monitor might not be DDC2B compliance. Therefore, need to use DDC1 protocol,
@@ -1201,6 +1208,7 @@ long ddk768_edidReadMonitorExHwI2C(
  *     -1   - Fail
  */
 long ddk768_edidReadMonitor(
+	struct smi_device *sdev,
     unsigned char *pEDIDBuffer,
     unsigned long bufferSize,
     unsigned char edidExtNo,
@@ -1221,7 +1229,8 @@ long ddk768_edidReadMonitor(
         i2cSDA = DEFAULT_I2C1_SDA;
     }
 
-    return ddk768_edidReadMonitorEx(pEDIDBuffer, bufferSize, edidExtNo, i2cSCL, i2cSDA);
+    return ddk768_edidReadMonitorEx(sdev, pEDIDBuffer,
+					bufferSize, edidExtNo, i2cSCL, i2cSDA);
 }
 
 
@@ -1238,6 +1247,7 @@ long ddk768_edidReadMonitor(
  *     -1   - Fail
  */
 long ddk768_edidHeaderReadMonitorEx(
+	struct smi_device *sdev,
     unsigned char sclGpio,
     unsigned char sdaGpio
 )
@@ -1247,7 +1257,7 @@ long ddk768_edidHeaderReadMonitorEx(
     unsigned long offset;
 
     /* Initialize the i2c bus */
-    ddk768_swI2CInit(sclGpio, sdaGpio);
+    ddk768_swI2CInit(sdev, sclGpio, sdaGpio);
 
     for (retry = 0; retry < EDID_TOTAL_RETRY_COUNTER; retry++)
     {
@@ -1255,7 +1265,8 @@ long ddk768_edidHeaderReadMonitorEx(
 
         /* Read the EDID from the monitor. */
         for (offset = 0; offset < HEADER_EDID_REGISTERS; offset++)
-            edidBuffer[offset] = ddk768_swI2CReadReg(EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
+            edidBuffer[offset] = ddk768_swI2CReadReg(sdev,
+					EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
 
         /* Check if the EDID header is valid. */
         if (!edidGetHeader((unsigned char *)&edidBuffer))
@@ -1280,6 +1291,7 @@ long ddk768_edidHeaderReadMonitorEx(
 }
 
 long ddk768_edidHeaderReadMonitorExHwI2C(
+	struct smi_device *sdev,
     unsigned char i2cNumber
 )
 {
@@ -1288,7 +1300,7 @@ long ddk768_edidHeaderReadMonitorExHwI2C(
     unsigned long offset;
 
     /* Initialize the i2c bus */
-    ddk768_hwI2CInit(i2cNumber);
+    ddk768_hwI2CInit(sdev, i2cNumber);
 
     for (retry = 0; retry < EDID_TOTAL_RETRY_COUNTER; retry++)
     {
@@ -1296,7 +1308,9 @@ long ddk768_edidHeaderReadMonitorExHwI2C(
 
         /* Read the EDID from the monitor. */
         for (offset = 0; offset < HEADER_EDID_REGISTERS; offset++)
-            edidBuffer[offset] = ddk768_hwI2CReadReg(i2cNumber,EDID_DEVICE_I2C_ADDRESS, (unsigned char)offset);
+            edidBuffer[offset] = ddk768_hwI2CReadReg(sdev, i2cNumber,
+							EDID_DEVICE_I2C_ADDRESS,
+							(unsigned char)offset);
 
         /* Check if the EDID header is valid. */
         if (!edidGetHeader((unsigned char *)&edidBuffer))
@@ -1304,7 +1318,7 @@ long ddk768_edidHeaderReadMonitorExHwI2C(
     }
 
 	/* Finish using HW I2C, we can close the device. */
-    ddk768_hwI2CClose(i2cNumber);
+    ddk768_hwI2CClose(sdev, i2cNumber);
 
     /*
      *  The monitor might not be DDC2B compliance. Therefore, need to use DDC1 protocol,

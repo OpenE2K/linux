@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -456,6 +456,10 @@ typedef struct _gcsALLOCATOR
     void                      (*destructor)(struct _gcsALLOCATOR *);
 
     struct list_head          link;
+#if gcdANON_FILE_FOR_ALLOCATOR
+    /*Anonymous file for map to user. */
+    struct file *             anon_file;
+#endif
 }
 gcsALLOCATOR;
 
@@ -486,13 +490,6 @@ typedef union _gcsATTACH_DESC
         gctSIZE_T               size;
     }
     userMem;
-
-    /* gcvALLOC_FLAG_EXTERNAL_MEMORY */
-    struct
-    {
-        gcsEXTERNAL_MEMORY_INFO info;
-    }
-    externalMem;
 
     /* Reserved memory. */
     struct
@@ -562,13 +559,7 @@ OnError:
     return status;
 }
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION (3,6,0)) || \
-        (LINUX_VERSION_CODE < KERNEL_VERSION (5,4,0) && \
-                !defined (ARCH_HAS_SG_CHAIN) && \
-                !defined (CONFIG_ARCH_HAS_SG_CHAIN)) || \
-        (LINUX_VERSION_CODE >= KERNEL_VERSION (5,4,0) && \
-                defined (CONFIG_ARCH_NO_SG_CHAIN))
-
+#if !gcdUSE_Linux_SG_TABLE_API
 int
 alloc_sg_list_from_pages(
     struct scatterlist **sgl,

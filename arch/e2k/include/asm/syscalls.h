@@ -74,21 +74,15 @@ extern long protected_sys_clean_descriptors(void __user *addr,
 extern long protected_sys_rt_sigaction(int sig,
 			const void __user *ptr, void __user *ptr2,
 			const size_t sigsetsize);
-extern long protected_sys_rt_sigaction_ex(int sig,
-			const void __user *ptr, void __user *ptr2,
-			const size_t sigsetsize);
-extern long protected_sys_mq_notify(const long a1,
-					const unsigned long __user a2);
-extern long protected_sys_timer_create(const long	a1, /* clockid */
-				const unsigned long __user a2, /* sevp */
-				const unsigned long __user a3, /* timerid */
-				const unsigned long	unused4,
-				const unsigned long	unused5,
-				const unsigned long	unused6,
-				const struct pt_regs	*regs);
-extern long protected_sys_rt_sigtimedwait(const unsigned long __user a1,
-		const unsigned long __user a2, const unsigned long __user a3,
-		const unsigned long a4);
+extern long protected_sys_rt_sigaction_ex(int sig, const prot_sigaction_t __user *act,
+		prot_sigaction_t __user *oact, const size_t sigsetsize);
+extern long protected_sys_mq_notify(const long a1, const void __user *a2);
+extern long protected_sys_timer_create(clockid_t which_clock,
+		prot_sigevent_t __user *user_sev, timer_t *timerid,
+		u64 unused4, u64 unused5, u64 unused6, const struct pt_regs *regs);
+extern long protected_sys_rt_sigtimedwait(const sigset_t __user *set,
+		siginfo_t __user *info, const struct __kernel_timespec __user *timeout,
+		size_t sigsetsize);
 extern long protected_sys_sysctl(const unsigned long __user a1);
 extern long protected_sys_clone(const unsigned long	a1,	/* flags */
 			 const unsigned long	a2,	/* new_stackptr */
@@ -98,8 +92,8 @@ extern long protected_sys_clone(const unsigned long	a1,	/* flags */
 			 const unsigned long	unused6,
 			 struct pt_regs	*regs);
 extern long protected_sys_execve(const unsigned long __user a1,/* filename*/
-			  const unsigned long __user a2,/* argv[] */
-			  const unsigned long __user a3,/* envp[] */
+			  unsigned long __user *u_argv,/* argv[] */
+			  unsigned long __user *u_envp,/* envp[] */
 			  const unsigned long	unused4,
 			  const unsigned long	unused5,
 			  const unsigned long	unused6,
@@ -136,7 +130,7 @@ extern long protected_sys_ipc(const unsigned long	call,	/* a1 */
 			      const long		first,	/* a2 */
 			      const unsigned long	second,	/* a3 */
 			      const unsigned long	third,	/* a4 */
-			      const unsigned long __user ptr,	/* a5 */
+			      void __user *const ptr,	/* a5 */
 			      const long		fifth,	/* a6 */
 			      const struct pt_regs	*regs);
 extern long protected_sys_mmap(const unsigned long a1, /* start */
@@ -258,11 +252,21 @@ extern long protected_sys_recvmmsg(const unsigned long	socket,
 			      const unsigned long __user timeout,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
-extern long protected_sys_olduselib(const unsigned long __user a1, /* library */
-				    const unsigned long __user a2); /* umdd */
+extern long protected_sys_olduselib(const char __user *library,
+				    const unsigned long __user a2, /* umdd */
+				const unsigned long	unused3,
+				const unsigned long	unused4,
+				const unsigned long	unused5,
+				const unsigned long	unused6,
+				const struct pt_regs	*regs);
 	/* NB> 'olduselib' is obsolete syscall; unsupported in CPU ISET V6 */
-extern long protected_sys_uselib(const unsigned long __user a1, /* library */
-				 const unsigned long __user a2); /* umdd */
+extern long protected_sys_uselib(const char __user *library,
+				 const unsigned long __user a2, /* umdd */
+				const unsigned long	unused3,
+				const unsigned long	unused4,
+				const unsigned long	unused5,
+				const unsigned long	unused6,
+				const struct pt_regs	*regs);
 extern long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
 					stack_prot_t __user *old_ss_128,
 				      const unsigned long	unused3,
@@ -298,8 +302,7 @@ extern long protected_sys_set_robust_list(
 				 const unsigned long unused6,
 				 const struct pt_regs	*regs);
 extern long protected_sys_get_robust_list(const unsigned long pid,
-				 unsigned long __user head_ptr,
-				 unsigned long __user len_ptr);
+		e2k_ptr_t __user *head_ptr, size_t __user *len_ptr);
 extern long protected_sys_process_vm_readv(const unsigned long pid, /*a1*/
 				 const struct iovec __user *lvec, /* a2 */
 				 unsigned long liovcnt,           /* a3 */
@@ -427,7 +430,7 @@ extern int arch_init_pm_sc_debug_mode(const int debug_mask);
  * The descriptor may be restored with the function that follows.
  */
 static inline
-void store_descriptor_attrs(void *kernel_ptr,
+void store_descriptor_attrs(void __user *kernel_ptr,
 			    const long user_ptr_lo, const long user_ptr_hi,
 			    const int ptr_tags, const int signum)
 {

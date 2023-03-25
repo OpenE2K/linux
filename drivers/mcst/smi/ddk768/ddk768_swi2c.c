@@ -84,10 +84,10 @@ static unsigned long g_i2cDataGPIODataDirReg = GPIO_DATA_DIRECTION;
 /*
  *  This function puts a delay between command
  */        
-static void swI2CWait(void)
+static void swI2CWait(struct smi_device *sdev)
 {
     //SM768 has build-in timer. Use it instead of SW loop.
-    timerWaitTicks(3, 0x3ff);
+	timerWaitTicks(sdev, 3, 0x3ff);
 }
 
 /*
@@ -102,28 +102,32 @@ static void swI2CWait(void)
  *      signal because the i2c will fail when other device try to drive the
  *      signal due to SM50x will drive the signal to always high.
  */ 
-void ddk768_swI2CSCL(unsigned char value)
+void ddk768_swI2CSCL(struct smi_device *sdev, unsigned char value)
 {
     unsigned long ulGPIOData;
     unsigned long ulGPIODirection;
 
-    ulGPIODirection = __peekRegisterDWord(g_i2cClkGPIODataDirReg);
+	ulGPIODirection = __peekRegisterDWord(sdev->rmmio,
+								g_i2cClkGPIODataDirReg);
     if (value)      /* High */
     {
         /* Set direction as input. This will automatically pull the signal up. */
         ulGPIODirection &= ~(1 << g_i2cClockGPIO);    
-        __pokeRegisterDWord(g_i2cClkGPIODataDirReg, ulGPIODirection);
+		__pokeRegisterDWord(sdev->rmmio,
+						g_i2cClkGPIODataDirReg, ulGPIODirection);
     }
     else            /* Low */
     {
         /* Set the signal down */
-        ulGPIOData = peekRegisterDWord(g_i2cClkGPIODataReg);
+		ulGPIOData = peekRegisterDWord(sdev->rmmio, g_i2cClkGPIODataReg);
         ulGPIOData &= ~(1 << g_i2cClockGPIO);
-        __pokeRegisterDWord(g_i2cClkGPIODataReg, ulGPIOData);
+		__pokeRegisterDWord(sdev->rmmio,
+						g_i2cClkGPIODataReg, ulGPIOData);
 
         /* Set direction as output */
         ulGPIODirection |= (1 << g_i2cClockGPIO);        
-        __pokeRegisterDWord(g_i2cClkGPIODataDirReg, ulGPIODirection);
+		__pokeRegisterDWord(sdev->rmmio,
+						g_i2cClkGPIODataDirReg, ulGPIODirection);
     }
 }
 
@@ -139,28 +143,32 @@ void ddk768_swI2CSCL(unsigned char value)
  *      signal because the i2c will fail when other device try to drive the
  *      signal due to SM50x will drive the signal to always high.
  */
-void ddk768_swI2CSDA(unsigned char value)
+void ddk768_swI2CSDA(struct smi_device *sdev, unsigned char value)
 {
     unsigned long ulGPIOData;
     unsigned long ulGPIODirection;
 
-    ulGPIODirection = __peekRegisterDWord(g_i2cDataGPIODataDirReg);
+	ulGPIODirection = __peekRegisterDWord(sdev->rmmio,
+								g_i2cDataGPIODataDirReg);
     if (value)      /* High */
     {
         /* Set direction as input. This will automatically pull the signal up. */
         ulGPIODirection &= ~(1 << g_i2cDataGPIO);    
-        __pokeRegisterDWord(g_i2cDataGPIODataDirReg, ulGPIODirection);
+		__pokeRegisterDWord(sdev->rmmio,
+						g_i2cDataGPIODataDirReg, ulGPIODirection);
     }
     else            /* Low */
     {
         /* Set the signal down */
-        ulGPIOData = peekRegisterDWord(g_i2cDataGPIODataReg);
+		ulGPIOData = peekRegisterDWord(sdev->rmmio, g_i2cDataGPIODataReg);
         ulGPIOData &= ~(1 << g_i2cDataGPIO);
-        __pokeRegisterDWord(g_i2cDataGPIODataReg, ulGPIOData);
+		__pokeRegisterDWord(sdev->rmmio,
+						g_i2cDataGPIODataReg, ulGPIOData);
 
         /* Set direction as output */
         ulGPIODirection |= (1 << g_i2cDataGPIO);        
-        __pokeRegisterDWord(g_i2cDataGPIODataDirReg, ulGPIODirection);
+		__pokeRegisterDWord(sdev->rmmio,
+						g_i2cDataGPIODataDirReg, ulGPIODirection);
     }
 }
 
@@ -170,21 +178,24 @@ void ddk768_swI2CSDA(unsigned char value)
  *  Return Value:
  *      The SDA data bit sent by the Slave
  */
-static unsigned char swI2CReadSDA(void)
+static unsigned char swI2CReadSDA(struct smi_device *sdev)
 {
     unsigned long ulGPIODirection;
     unsigned long ulGPIOData;
 
     /* Make sure that the direction is input (High) */
-    ulGPIODirection = __peekRegisterDWord(g_i2cDataGPIODataDirReg);
+	ulGPIODirection = __peekRegisterDWord(sdev->rmmio,
+								g_i2cDataGPIODataDirReg);
     if ((ulGPIODirection & (1 << g_i2cDataGPIO)) != (~(1 << g_i2cDataGPIO)))
     {
         ulGPIODirection &= ~(1 << g_i2cDataGPIO);
-        __pokeRegisterDWord(g_i2cDataGPIODataDirReg, ulGPIODirection);
+		__pokeRegisterDWord(sdev->rmmio,
+						g_i2cDataGPIODataDirReg, ulGPIODirection);
     }
 
     /* Now read the SDA line */
-    ulGPIOData = __peekRegisterDWord(g_i2cDataGPIODataReg);
+	ulGPIOData = __peekRegisterDWord(sdev->rmmio,
+							g_i2cDataGPIODataReg);
     if (ulGPIOData & (1 << g_i2cDataGPIO)) 
         return 1;
     else 
@@ -203,23 +214,23 @@ static void swI2CAck(void)
 /*
  *  This function sends the start command to the slave device
  */
-void ddk768_swI2CStart(void)
+void ddk768_swI2CStart(struct smi_device *sdev)
 {
     /* Start I2C */
-    ddk768_swI2CSDA(1);
-    ddk768_swI2CSCL(1);
-    ddk768_swI2CSDA(0);
+	ddk768_swI2CSDA(sdev, 1);
+	ddk768_swI2CSCL(sdev, 1);
+	ddk768_swI2CSDA(sdev, 0);
 }
 
 /*
  *  This function sends the stop command to the slave device
  */
-void ddk768_swI2CStop(void)
+void ddk768_swI2CStop(struct smi_device *sdev)
 {
     /* Stop the I2C */
-    ddk768_swI2CSCL(1);
-    ddk768_swI2CSDA(0);
-    ddk768_swI2CSDA(1);
+	ddk768_swI2CSCL(sdev, 1);
+	ddk768_swI2CSDA(sdev, 0);
+	ddk768_swI2CSDA(sdev, 1);
 }
 
 /*
@@ -232,7 +243,7 @@ void ddk768_swI2CStop(void)
  *       0   - Success
  *      -1   - Fail to write byte
  */
-long ddk768_swI2CWriteByte(unsigned char data) 
+long ddk768_swI2CWriteByte(struct smi_device *sdev, unsigned char data)
 {
     unsigned char value = data;
     int i;
@@ -241,48 +252,48 @@ long ddk768_swI2CWriteByte(unsigned char data)
     for (i=0; i<8; i++)
     {
         /* Set SCL to low */
-        ddk768_swI2CSCL(0);
+		ddk768_swI2CSCL(sdev, 0);
 
         /* Send data bit */
-        if ((value & 0x80) != 0)
-            ddk768_swI2CSDA(1);
+		if ((value & 0x80) != 0)
+			ddk768_swI2CSDA(sdev, 1);
         else
-            ddk768_swI2CSDA(0);
+			ddk768_swI2CSDA(sdev, 0);
 
-        swI2CWait();
+		swI2CWait(sdev);
 
         /* Toggle clk line to one */
-        ddk768_swI2CSCL(1);
-        swI2CWait();
+		ddk768_swI2CSCL(sdev, 1);
+		swI2CWait(sdev);
 
         /* Shift byte to be sent */
         value = value << 1;
     }
 
     /* Set the SCL Low and SDA High (prepare to get input) */
-    ddk768_swI2CSCL(0);
-    ddk768_swI2CSDA(1);
+	ddk768_swI2CSCL(sdev, 0);
+	ddk768_swI2CSDA(sdev, 1);
 
     /* Set the SCL High for ack */
-    swI2CWait();
-    ddk768_swI2CSCL(1);
-    swI2CWait();
+	swI2CWait(sdev);
+	ddk768_swI2CSCL(sdev, 1);
+	swI2CWait(sdev);
 
     /* Read SDA, until SDA==0 */
     for(i=0; i<0xff; i++) 
     {
-        if (!swI2CReadSDA())
+		if (!swI2CReadSDA(sdev))
             break;
 
-        ddk768_swI2CSCL(0);
-        swI2CWait();
-        ddk768_swI2CSCL(1);
-        swI2CWait();
+		ddk768_swI2CSCL(sdev, 0);
+		swI2CWait(sdev);
+		ddk768_swI2CSCL(sdev, 1);
+		swI2CWait(sdev);
     }
 
     /* Set the SCL Low and SDA High */
-    ddk768_swI2CSCL(0);
-    ddk768_swI2CSDA(1);
+	ddk768_swI2CSCL(sdev, 0);
+	ddk768_swI2CSDA(sdev, 1);
 
     if (i<0xff)
         return 0;
@@ -300,7 +311,8 @@ long ddk768_swI2CWriteByte(unsigned char data)
  *  Return Value:
  *      One byte data read from the Slave device
  */
-unsigned char ddk768_swI2CReadByte(unsigned char ack)
+unsigned char ddk768_swI2CReadByte(struct smi_device *sdev,
+									unsigned char ack)
 {
     int i;
     unsigned char data = 0;
@@ -308,24 +320,24 @@ unsigned char ddk768_swI2CReadByte(unsigned char ack)
     for(i=7; i>=0; i--)
     {
         /* Set the SCL to Low and SDA to High (Input) */
-        ddk768_swI2CSCL(0);
-        ddk768_swI2CSDA(1);
-        swI2CWait();
+		ddk768_swI2CSCL(sdev, 0);
+		ddk768_swI2CSDA(sdev, 1);
+		swI2CWait(sdev);
 
         /* Set the SCL High */
-        ddk768_swI2CSCL(1);
-        swI2CWait();
+		ddk768_swI2CSCL(sdev, 1);
+		swI2CWait(sdev);
 
         /* Read data bits from SDA */
-        data |= (swI2CReadSDA() << i);
+		data |= (swI2CReadSDA(sdev) << i);
     }
 
     if (ack)
         swI2CAck();
 
     /* Set the SCL Low and SDA High */
-    ddk768_swI2CSCL(0);
-    ddk768_swI2CSDA(1);
+	ddk768_swI2CSCL(sdev, 0);
+	ddk768_swI2CSDA(sdev, 1);
 
     return data;
 }
@@ -343,6 +355,7 @@ unsigned char ddk768_swI2CReadByte(unsigned char ack)
  *       0   - Success
  */
 long ddk768_swI2CInit(
+	struct smi_device *sdev,
     unsigned char i2cClkGPIO, 
     unsigned char i2cDataGPIO
 )
@@ -371,15 +384,17 @@ long ddk768_swI2CInit(
     g_i2cDataGPIO = i2cDataGPIO;
 
     /* Enable the GPIO pins for the i2c Clock and Data (GPIO MUX) */
-    __pokeRegisterDWord(g_i2cClkGPIOMuxReg, 
-                      __peekRegisterDWord(g_i2cClkGPIOMuxReg) & ~(1 << g_i2cClockGPIO));
-    __pokeRegisterDWord(g_i2cDataGPIOMuxReg, 
-                      __peekRegisterDWord(g_i2cDataGPIOMuxReg) & ~(1 << g_i2cDataGPIO));
+	__pokeRegisterDWord(sdev->rmmio, g_i2cClkGPIOMuxReg,
+						__peekRegisterDWord(sdev->rmmio,
+						g_i2cClkGPIOMuxReg) & ~(1 << g_i2cClockGPIO));
+	__pokeRegisterDWord(sdev->rmmio, g_i2cDataGPIOMuxReg,
+						__peekRegisterDWord(sdev->rmmio,
+						g_i2cDataGPIOMuxReg) & ~(1 << g_i2cDataGPIO));
 
 
     /* Clear the i2c lines. */
     for(i=0; i<9; i++) 
-        ddk768_swI2CStop();
+		ddk768_swI2CStop(sdev);
 
     return 0;
 }
@@ -396,6 +411,7 @@ long ddk768_swI2CInit(
  *      Register value
  */
 unsigned char ddk768_swI2CReadReg(
+	struct smi_device *sdev,
     unsigned char deviceAddress, 
     unsigned char registerIndex
 )
@@ -403,21 +419,21 @@ unsigned char ddk768_swI2CReadReg(
     unsigned char data;
 
     /* Send the Start signal */
-    ddk768_swI2CStart();
+	ddk768_swI2CStart(sdev);
 
     /* Send the device address */
-    ddk768_swI2CWriteByte(deviceAddress);                                                  
+	ddk768_swI2CWriteByte(sdev, deviceAddress);
 
     /* Send the register index */
-    ddk768_swI2CWriteByte(registerIndex);               
+	ddk768_swI2CWriteByte(sdev, registerIndex);
 
     /* Get the bus again and get the data from the device read address */
-    ddk768_swI2CStart();
-    ddk768_swI2CWriteByte(deviceAddress + 1);
-    data = ddk768_swI2CReadByte(1);
+	ddk768_swI2CStart(sdev);
+	ddk768_swI2CWriteByte(sdev, deviceAddress + 1);
+	data = ddk768_swI2CReadByte(sdev, 1);
 
     /* Stop swI2C and release the bus */
-    ddk768_swI2CStop();
+	ddk768_swI2CStop(sdev);
 
     return data;
 }
@@ -436,6 +452,7 @@ unsigned char ddk768_swI2CReadReg(
  *         -1   - Fail
  */
 long ddk768_swI2CWriteReg(
+	struct smi_device *sdev,
     unsigned char deviceAddress, 
     unsigned char registerIndex, 
     unsigned char data
@@ -444,20 +461,20 @@ long ddk768_swI2CWriteReg(
     long returnValue = 0;
     
     /* Send the Start signal */
-    ddk768_swI2CStart();
+	ddk768_swI2CStart(sdev);
 
     /* Send the device address and read the data. All should return success
        in order for the writing processed to be successful
      */
-    if ((ddk768_swI2CWriteByte(deviceAddress) != 0) ||
-        (ddk768_swI2CWriteByte(registerIndex) != 0) ||
-        (ddk768_swI2CWriteByte(data) != 0))
+	if ((ddk768_swI2CWriteByte(sdev, deviceAddress) != 0) ||
+		(ddk768_swI2CWriteByte(sdev, registerIndex) != 0) ||
+		(ddk768_swI2CWriteByte(sdev, data) != 0))
     {
         returnValue = -1;
     }
     
     /* Stop i2c and release the bus */
-    ddk768_swI2CStop();
+	ddk768_swI2CStop(sdev);
 
     return returnValue;
 }

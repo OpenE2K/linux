@@ -18,6 +18,7 @@
 #include <asm/copy-hw-stacks.h>
 
 #include <asm/kvm/hypercall.h>
+#include <asm/kvm/priv-hypercall.h>
 
 #undef	DEBUG_KVM_PTE_MODE
 #undef	DebugKVMPTE
@@ -302,7 +303,7 @@ check_native_mmu_probe(e2k_addr_t virt_addr, unsigned long probe_val)
 {
 	if (!DTLB_ENTRY_TEST_SUCCESSFUL(probe_val)) {
 		DebugMMUOP("virt addr 0x%lx, MMU probe returned 0x%lx : "
-			"probe disabled\n",
+			"exception\n",
 			virt_addr, probe_val);
 	} else if (DTLB_ENTRY_TEST_VVA(probe_val)) {
 		DebugMMUOP("virt addr 0x%lx, MMU probe returned 0x%lx : "
@@ -601,34 +602,138 @@ void kvm_activate_mm(struct mm_struct *active_mm, struct mm_struct *mm)
 /*
  * Recovery faulted store operations
  */
-void kvm_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
+
+#ifdef	CONFIG_PRIV_HYPERCALLS
+static long kvm_priv_recovery_faulted_tagged_store(e2k_addr_t addr, u64 wr_data,
+			u64 st_rec_opc, u64 data_ext, u64 opc_ext,
+			recovery_faulted_arg_t args)
+{
+	int ret;
+
+	ret = HYPERVISOR_priv_recovery_faulted_store(addr, wr_data,
+					st_rec_opc, data_ext, opc_ext, args);
+	return ret;
+}
+
+static long kvm_priv_recovery_faulted_load(e2k_addr_t addr,
+			u64 *ld_val, u8 *data_tag, u64 ld_rec_opc, int chan)
+{
+	int ret;
+
+	ret = HYPERVISOR_priv_recovery_faulted_load(addr, ld_val, data_tag,
+						    ld_rec_opc, chan);
+	return ret;
+}
+static long kvm_priv_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+			e2k_addr_t addr_to_hi, u64 ld_rec_opc,
+			recovery_faulted_arg_t args, u32 first_time)
+{
+	int ret;
+
+	ret = HYPERVISOR_priv_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
+					ld_rec_opc, args, first_time);
+	return ret;
+}
+static long kvm_priv_recovery_faulted_load_to_greg(e2k_addr_t address,
+			u32 greg_num_d, u64 ld_rec_opc, recovery_faulted_arg_t args,
+			void *saved_greg_lo, void *saved_greg_hi)
+{
+	int ret;
+
+	ret = HYPERVISOR_priv_recovery_faulted_load_to_greg(address, greg_num_d,
+			ld_rec_opc, args, saved_greg_lo, saved_greg_hi);
+	return ret;
+}
+
+#else	/* !CONFIG_PRIV_HYPERCALLS */
+static long kvm_priv_recovery_faulted_tagged_store(e2k_addr_t addr, u64 wr_data,
+			u64 st_rec_opc, u64 data_ext, u64 opc_ext,
+			recovery_faulted_arg_t args)
+{
+	return -ENOSYS;
+}
+
+static long kvm_priv_recovery_faulted_load(e2k_addr_t addr,
+			u64 *ld_val, u8 *data_tag, u64 ld_rec_opc, int chan)
+{
+	return -ENOSYS;
+}
+static long kvm_priv_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+			e2k_addr_t addr_to_hi, u64 ld_rec_opc,
+			recovery_faulted_arg_t args, u32 first_time)
+{
+	return -ENOSYS;
+}
+static long kvm_priv_recovery_faulted_load_to_greg(e2k_addr_t address,
+			u32 greg_num_d, u64 ld_rec_opc, recovery_faulted_arg_t args,
+			void *saved_greg_lo, void *saved_greg_hi)
+{
+	return -ENOSYS;
+}
+#endif	/* CONFIG_PRIV_HYPERCALLS */
+
+long kvm_recovery_faulted_tagged_store(e2k_addr_t address, u64 wr_data,
 		u32 data_tag, u64 st_rec_opc, u64 data_ext, u32 data_ext_tag,
 		u64 opc_ext, int chan, int qp_store, int atomic_store)
 {
+	static unsigned long faulted_store_IP = 0UL;
+	unsigned long to_save_replaced_IP;
+	recovery_faulted_arg_t args = {
+		.chan = chan,
+		.qp = !!qp_store,
+		.atomic = !!atomic_store,
+		.tag = data_tag,
+		.tag_ext = data_ext_tag
+	};
 	long hret;
 
 	DebugKVMREC("started for address 0x%lx data 0x%llx tag 0x%x, "
 		"channel #%d\n", address, wr_data, data_tag, chan);
+	if (unlikely(faulted_store_IP == 0)) {
+		hret = 0;
+		goto out;
+	}
+
+	/* return IP is inverted to tell the host that the return */
+	/* should be on the host privileged action handler */
+	SAVE_REPLACE_USR_PFAULT(0 - faulted_store_IP, to_save_replaced_IP);
+
+	hret = kvm_priv_recovery_faulted_tagged_store(address, wr_data,
+			st_rec_opc, data_ext, opc_ext, args);
+	if (likely(hret == 0)) {
+		goto restore_out;
+	}
+
+	/* restore not inverted IP */
+	REPLACE_USR_PFAULT(faulted_store_IP);
+
+	if (hret == -ENOSYS) {
+		/* recovery as privileged action is disable */
+		;
+	} else {
+		/* recovery failed */
+		goto failed;
+	}
 
 again:
 	if (likely(is_simple_ldst_op(st_rec_opc, (tc_cond_t) {.word = 0})) &&
 			!data_tag) {
 		simple_recovery_faulted_store(address, wr_data, st_rec_opc);
+		hret = 0;
+		goto restore_out;
 	} else if (IS_HOST_KERNEL_ADDRESS(address)) {
 		hret = HYPERVISOR_recovery_faulted_tagged_guest_store(address,
-				wr_data, data_tag, st_rec_opc, data_ext,
-				data_ext_tag, opc_ext, chan, qp_store,
-				atomic_store);
+				wr_data, st_rec_opc, data_ext, opc_ext, args);
 	} else {
 		hret = HYPERVISOR_recovery_faulted_tagged_store(address,
-				wr_data, data_tag, st_rec_opc, data_ext,
-				data_ext_tag, opc_ext, chan, qp_store,
-				atomic_store);
+				wr_data, st_rec_opc, data_ext, opc_ext, args);
 	}
 
+failed:
 	if (hret == -EAGAIN) {
-		DebugKVMREC("retry store to address 0x%lx data 0x%llx tag 0x%x, "
-			"channel #%d\n", address, wr_data, data_tag, chan);
+		DebugKVMREC("%s(): retry store to address 0x%lx data 0x%llx tag 0x%x, "
+			"channel #%d\n",
+			__func__, address, wr_data, data_tag, chan);
 		goto again;
 	}
 
@@ -636,17 +741,53 @@ again:
 		DebugKVMREC("started for address 0x%lx data 0x%llx tag 0x%x, "
 			"channel #%d\n", address, wr_data, data_tag, chan);
 	} else {
-		DebugKVMREC("started for address 0x%lx data 0x%llx tag 0x%x, "
-			"channel #%d will be retried\n", address, wr_data,
-			data_tag, chan);
+		pr_err("%s(): failed for address 0x%lx data 0x%llx tag 0x%x, "
+			"channel #%d, error %ld\n",
+			__func__, address, wr_data, data_tag, chan, hret);
 	}
+
+restore_out:
+	RESTORE_REPLACED_USR_PFAULT(to_save_replaced_IP);
+
+out:
+	E2K_CMD_SEPARATOR;
+	faulted_store_IP = NATIVE_READ_IP_REG_VALUE();
+	return hret;
 }
-void kvm_recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
+
+long kvm_recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
 				u64 ld_rec_opc, int chan, tc_cond_t cond)
 {
+	static unsigned long faulted_load_IP = 0UL;
+	unsigned long to_save_replaced_IP;
 	long hret;
 
 	DebugKVMREC("started for address 0x%lx, channel #%d\n", address, chan);
+	if (unlikely(faulted_load_IP == 0)) {
+		hret = 0;
+		goto out;
+	}
+
+	/* return IP is inverted to tell the host that the return */
+	/* should be on the host privileged action handler */
+	SAVE_REPLACE_USR_PFAULT(0 - faulted_load_IP, to_save_replaced_IP);
+
+	hret = kvm_priv_recovery_faulted_load(address, ld_val, data_tag,
+					      ld_rec_opc, chan);
+	if (likely(hret == 0)) {
+		goto restore_out;
+	}
+
+	/* restore not inverted IP */
+	REPLACE_USR_PFAULT(faulted_load_IP);
+
+	if (hret == -ENOSYS) {
+		/* recovery as privileged action is disable */
+		;
+	} else {
+		/* recovery failed */
+		goto failed;
+	}
 
 again:
 	if (likely(is_simple_ldst_op(ld_rec_opc, cond))) {
@@ -654,6 +795,8 @@ again:
 						ld_rec_opc, 1, cond);
 		if (data_tag)
 			*data_tag = 0;
+		hret = 0;
+		goto restore_out;
 	} else if (unlikely(IS_HOST_KERNEL_ADDRESS(address) ||
 			IS_HOST_KERNEL_ADDRESS((e2k_addr_t)ld_val) ||
 			IS_HOST_KERNEL_ADDRESS((e2k_addr_t)data_tag))) {
@@ -664,9 +807,10 @@ again:
 					data_tag, ld_rec_opc, chan);
 	}
 
+failed:
 	if (hret == -EAGAIN) {
-		DebugKVMREC("retry ld from address 0x%lx, channel #%d\n",
-				address, chan);
+		DebugKVMREC("%s(): retry ld from address 0x%lx, channel #%d\n",
+			__func__, address, chan);
 		goto again;
 	}
 
@@ -674,27 +818,70 @@ again:
 		DebugKVMREC("loaded data 0x%llx tag 0x%x from address 0x%lx\n",
 				*ld_val, *data_tag, address);
 	} else {
-		DebugKVMREC("loading data 0x%llx tag 0x%x from address 0x%lx "
-			"should be retried\n", *ld_val, *data_tag, address);
+		pr_err("%s(): failed loading data 0x%llx tag 0x%x "
+			"from address 0x%lx, error %ld\n",
+			__func__, *ld_val, *data_tag, address, hret);
 	}
+
+restore_out:
+	RESTORE_REPLACED_USR_PFAULT(to_save_replaced_IP);
+
+out:
+	E2K_CMD_SEPARATOR;
+	faulted_load_IP = NATIVE_READ_IP_REG_VALUE();
+	return hret;
 }
-void kvm_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
+
+long kvm_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc,
 		int chan, int qp_load, int atomic_load, u32 first_time,
 		tc_cond_t cond)
 {
+	static unsigned long faulted_move_IP = 0UL;
+	unsigned long to_save_replaced_IP;
+	recovery_faulted_arg_t args = {
+		.chan = chan,
+		.qp = !!qp_load,
+		.atomic = !!atomic_load,
+		.vr = vr,
+	};
 	long hret;
-	u64 val;
-	u8 tag;
 
 	DebugKVMREC("started for address from 0x%lx to addr 0x%lx, "
 		"channel #%d\n",
 		addr_from, addr_to, chan);
+	if (unlikely(faulted_move_IP == 0)) {
+		hret = 0;
+		goto out;
+	}
+
+	/* return IP is inverted to tell the host that the return */
+	/* should be on the host privileged action handler */
+	SAVE_REPLACE_USR_PFAULT(0 - faulted_move_IP, to_save_replaced_IP);
+
+	hret = kvm_priv_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
+			ld_rec_opc, args, first_time);
+	if (likely(hret == 0)) {
+		goto restore_out;
+	}
+
+	/* restore not inverted IP */
+	REPLACE_USR_PFAULT(faulted_move_IP);
+
+	if (hret == -ENOSYS) {
+		/* recovery as privileged action is disable */
+		;
+	} else {
+		/* recovery failed */
+		goto failed;
+	}
 
 again:
 	if (likely(is_simple_ldst_op(ld_rec_opc, cond)) && vr) {
 		simple_recovery_faulted_move(addr_from, addr_to, ld_rec_opc,
 						first_time, cond);
+		hret = 0;
+		goto restore_out;
 	} else if (unlikely(IS_HOST_KERNEL_ADDRESS(addr_from) ||
 			IS_HOST_KERNEL_ADDRESS(addr_to))) {
 		hret = HYPERVISOR_recovery_faulted_guest_move(addr_from,
@@ -706,34 +893,83 @@ again:
 				qp_load, atomic_load, first_time);
 	}
 
+failed:
 	if (hret == -EAGAIN) {
-		DebugKVMREC("retry move from addr 0x%lx to addr 0x%lx, "
-			"channel #%d\n", addr_from, addr_to, chan);
+		DebugKVMREC("%s(): retry move from addr 0x%lx to addr 0x%lx, "
+			"channel #%d\n",
+			__func__, addr_from, addr_to, chan);
 		goto again;
 	}
 
-	if (DEBUG_KVM_RECOVERY_MODE)
-		load_value_and_tagd((void *) addr_to, &val, &tag);
+	if (!hret) {
+		u64 val;
+		u8 tag;
 
-	DebugKVMREC("moved data 0x%llx tag 0x%x from address 0x%lx %s\n",
-		val, tag, addr_from, !hret ? "completed" : "will be retried");
+		if (DEBUG_KVM_RECOVERY_MODE)
+			load_value_and_tagd((void *) addr_to, &val, &tag);
+		DebugKVMREC("moved data 0x%llx tag 0x%x from address 0x%lx\n",
+			val, tag, addr_from);
+	} else {
+		pr_err("%s(): failed moving from addr 0x%lx to addr 0x%lx, "
+			"channel #%d, error %ld\n",
+			__func__, addr_from, addr_to, chan, hret);
+	}
+
+restore_out:
+	RESTORE_REPLACED_USR_PFAULT(to_save_replaced_IP);
+
+out:
+	E2K_CMD_SEPARATOR;
+	faulted_move_IP = NATIVE_READ_IP_REG_VALUE();
+	return hret;
 }
-void kvm_recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
+
+long kvm_recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
 		int vr, u64 ld_rec_opc, int chan, int qp_load, int atomic_load,
 		void *saved_greg_lo, void *saved_greg_hi, tc_cond_t cond)
 {
+	static unsigned long faulted_greg_IP = 0UL;
+	unsigned long to_save_replaced_IP;
+	recovery_faulted_arg_t args = {
+		.chan = chan,
+		.qp = !!qp_load,
+		.atomic = !!atomic_load,
+		.vr = vr,
+	};
 	long hret;
-	u64 val;
-	u8 tag;
 
 	DebugKVMREC("started for address 0x%lx global reg #%d, channel #%d\n",
 		address, greg_num_d, chan);
+	if (unlikely(faulted_greg_IP == 0)) {
+		hret = 0;
+		goto out;
+	}
+
+	/* return IP is inverted to tell the host that the return */
+	/* should be on the host privileged action handler */
+	SAVE_REPLACE_USR_PFAULT(0 - faulted_greg_IP, to_save_replaced_IP);
+
+	hret = kvm_priv_recovery_faulted_load_to_greg(address, greg_num_d,
+			ld_rec_opc, args, saved_greg_lo, saved_greg_hi);
+	if (likely(hret == 0)) {
+		goto restore_out;
+	}
+
+	if (hret == -ENOSYS) {
+		/* recovery as privileged action is disable */
+		;
+	} else {
+		/* recovery failed */
+		goto failed;
+	}
 
 again:
 	if (likely(is_simple_ldst_op(ld_rec_opc, cond))
 					&& !saved_greg_lo && vr) {
 		simple_recovery_faulted_load_to_greg(address, greg_num_d,
 						ld_rec_opc, cond);
+		hret = 0;
+		goto restore_out;
 	} else if (unlikely(IS_HOST_KERNEL_ADDRESS(address) ||
 			IS_HOST_KERNEL_ADDRESS((e2k_addr_t)saved_greg_lo))) {
 		hret = HYPERVISOR_recovery_faulted_load_to_guest_greg(address,
@@ -745,18 +981,38 @@ again:
 			qp_load, atomic_load, saved_greg_lo, saved_greg_hi);
 	}
 
+failed:
 	if (hret == -EAGAIN) {
-		DebugKVMREC("retry load from addr 0x%lx to global reg #%d, "
-			"channel #%d\n", address, greg_num_d, chan);
+		DebugKVMREC("%s(): retry load from addr 0x%lx to global reg #%d, "
+			"channel #%d\n",
+			__func__, address, greg_num_d, chan);
 		goto again;
 	}
 
-	if (DEBUG_KVM_RECOVERY_MODE)
-		E2K_GET_DGREG_VAL_AND_TAG(greg_num_d, val, tag);
+	if (!hret) {
+		u64 val;
+		u8 tag;
 
-	DebugKVMREC("loaded data 0x%llx tag 0x%x from address 0x%lx %s\n",
-		val, tag, address, !hret ? "completed" : "will be retried");
+		if (DEBUG_KVM_RECOVERY_MODE)
+			E2K_GET_DGREG_VAL_AND_TAG(greg_num_d, val, tag);
+
+		DebugKVMREC("loaded data 0x%llx tag 0x%x from address 0x%lx\n",
+			val, tag, address);
+	} else {
+		pr_err("%s(): loaded data from address 0x%lx to global reg #%d, "
+			"channel #%d, error %ld\n",
+			__func__, address, greg_num_d, chan, hret);
+	}
+
+restore_out:
+	RESTORE_REPLACED_USR_PFAULT(to_save_replaced_IP);
+
+out:
+	E2K_CMD_SEPARATOR;
+	faulted_greg_IP = NATIVE_READ_IP_REG_VALUE();
+	return hret;
 }
+
 static inline void kvm_do_move_tagged_data(int word_size, e2k_addr_t addr_from,
 				e2k_addr_t addr_to)
 {
@@ -783,8 +1039,9 @@ again:
 	}
 
 	if (hret == -EAGAIN) {
-		DebugKVMREC("retry tagged move from 0x%lx to 0x%lx, "
-			"word size : %d\n", addr_from, addr_to, word_size);
+		pr_warn("%s(): retry tagged move from 0x%lx to 0x%lx, "
+			"word size : %d\n",
+			__func__, addr_from, addr_to, word_size);
 		goto again;
 	}
 

@@ -61,9 +61,6 @@ void __init_recv setup_serial_dump_console(boot_info_t *boot_info)
 	serial_console_opts_t *console;
 	int i;
 
-	if (serial_dump_console_num)
-		return;
-
 	DebugSC("setup_serial_dump_console() started for consoles "
 		"list 0x%lx\n", consoles);
 
@@ -75,7 +72,7 @@ void __init_recv setup_serial_dump_console(boot_info_t *boot_info)
 		DebugSC("setup_serial_dump_console() CPU is not BSP "
 			"waiting for init completion\n");
 		while (!serial_console_inited)
-			;
+			cpu_relax();
 		DebugSC("setup_serial_dump_console() waiting for init "
 			"completed\n");
 		return;

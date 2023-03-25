@@ -52,7 +52,10 @@ extern int __kprobes kprobe_exceptions_notify(struct notifier_block *self,
 
 static inline int is_kprobe_break1_trap(struct pt_regs *regs)
 {
-	u64 *instr = (u64 *)GET_IP_CR0_HI(regs->crs.cr0_hi);
+	u64 *instr = (u64 *) instruction_pointer(regs);
+
+	if (user_mode(regs))
+		return false;
 
 	if (cpu_has(CPU_HWBUG_BREAKPOINT_INSTR))
 		return (*instr & ~E2K_INSTR_HS_LNG_MASK) ==

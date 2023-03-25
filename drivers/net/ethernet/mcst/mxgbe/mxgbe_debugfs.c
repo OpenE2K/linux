@@ -502,6 +502,7 @@ const char *mxgbe_dbg_reg_name_misc[25] = {
 #define VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL	(0x8091 | PMA_and_PMD_MMD)
 #define VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0	(0x8092 | PMA_and_PMD_MMD)
 #define VR_XS_PMA_Gen5_12G_VCO_CAL_REF0		(0x8096 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MISC_STS		(0x8098 | PMA_and_PMD_MMD)
 #define SR_XS_PCS_KR_STS2	 (0x0021 | PCS_MMD)
 #define VR_XS_PCS_DIG_STS	 (0x8010 | PCS_MMD)
 
@@ -525,7 +526,7 @@ const u_int32_t mxgbe_dbg_reg_id_phy[12] = {
 	0x010008,
 	0x01000A,
 #else
-const u_int32_t mxgbe_dbg_reg_id_phy[50] = {
+const u_int32_t mxgbe_dbg_reg_id_phy[51] = {
 	SR_XS_PCS_CTRL1,
 	SR_XS_PCS_DEV_ID1,
 	SR_XS_PCS_DEV_ID2,
@@ -574,6 +575,7 @@ const u_int32_t mxgbe_dbg_reg_id_phy[50] = {
 	VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
 	VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,
 	VR_XS_PMA_Gen5_12G_VCO_CAL_REF0,
+	VR_XS_PMA_Gen5_12G_16G_MISC_STS,
 	SR_XS_PCS_KR_STS2,
 	VR_XS_PCS_DIG_STS,
 #endif
@@ -597,7 +599,7 @@ const char *mxgbe_dbg_reg_name_phy[12] = {
 	"PMA/PMD Status 2 (def: 0xB1EF)",
 	"PMA/PMD Receive SigDet (def: 0x0000)",
 #else
-const char *mxgbe_dbg_reg_name_phy[50] = {
+const char *mxgbe_dbg_reg_name_phy[51] = {
 	"SR_XS_PCS_CTRL1",
 	"SR_XS_PCS_DEV_ID1",
 	"SR_XS_PCS_DEV_ID2",
@@ -646,6 +648,7 @@ const char *mxgbe_dbg_reg_name_phy[50] = {
 	"VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL",
 	"VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0",
 	"VR_XS_PMA_Gen5_12G_VCO_CAL_REF0",
+	"VR_XS_PMA_Gen5_12G_16G_MISC_STS",
 	"SR_XS_PCS_KR_STS2",
 	"VR_XS_PCS_DIG_STS",
 #endif
@@ -846,7 +849,7 @@ static ssize_t mxgbe_dbg_reg_txq_read(struct file *filp, char __user *buffer,
 				  "TXQ%d:\n", q);
 		for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_q); i++) {
 			DPREG_32(TXQ_REG_ADDR(q, mxgbe_dbg_reg_id_q[i]),
-				 mxgbe_dbg_reg_name_q[i]);
+				 (q == 0) ? mxgbe_dbg_reg_name_q[i] : "");
 		}
 	}
 
@@ -941,7 +944,7 @@ static ssize_t mxgbe_dbg_reg_rxq_read(struct file *filp, char __user *buffer,
 				  "RXQ%d:\n", q);
 		for (i = 0; i < ARRAY_SIZE(mxgbe_dbg_reg_id_q); i++) {
 			DPREG_32(RXQ_REG_ADDR(q, mxgbe_dbg_reg_id_q[i]),
-				 mxgbe_dbg_reg_name_q[i]);
+				 (q == 0) ? mxgbe_dbg_reg_name_q[i] : "");
 		}
 	}
 
@@ -1259,59 +1262,6 @@ static const struct file_operations mxgbe_dbg_reg_cnt_fops = {
 	.read = mxgbe_dbg_reg_cnt_read,
 };
 
-#if 0
-/**
- ******************************************************************************
- * /sys/kernel/debug/mxgbe/<pcidev>/rxq0_descr
- ******************************************************************************
- **/
-
-static char mxgbe_dbg_rxq0_descr_buf[PAGE_SIZE] = "";
-
-static ssize_t mxgbe_dbg_rxq0_descr_read(struct file *filp,
-					 char __user *buffer,
-					 size_t count, loff_t *ppos)
-{
-	int i;
-	int len;
-	int offs = 0;
-	mxgbe_descr_t *descr;
-	mxgbe_priv_t *priv = filp->private_data;
-	char *buf = mxgbe_dbg_rxq0_descr_buf;
-
-	/* don't allow partial reads */
-	if (*ppos != 0)
-		return 0;
-
-	/* RXQ0_DESCR_DUMP */
-	/*
-	offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-			  "= %s | %s - RXQ0_DESCR DUMP (hex) =\n",
-			  priv->ndev->name, pci_name(priv->pdev));
-	*/
-	for (i = 0; i < 256; i++) {
-		descr = ((mxgbe_descr_t *)(priv->rxq[0].que_addr)) + i;
-		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
-				  "%02X: %016llX\n",
-				  i, /*descr->ctrl.r,*/ descr->addr.r);
-	}
-
-	if (count < strlen(buf)) {
-		return -ENOSPC;
-	}
-
-	len = simple_read_from_buffer(buffer, count, ppos, buf, strlen(buf));
-
-	return len;
-} /* mxgbe_dbg_rxq0_descr_read */
-
-static const struct file_operations mxgbe_dbg_rxq0_descr_fops = {
-	.owner = THIS_MODULE,
-	.open = simple_open,
-	.read = mxgbe_dbg_rxq0_descr_read,
-};
-#endif /* 0 */
-
 
 /**
  ******************************************************************************
@@ -1354,6 +1304,9 @@ static ssize_t mxgbe_dbg_reg_ops_read(struct file *filp, char __user *buffer,
 	return len;
 } /* mxgbe_dbg_reg_ops_read */
 
+u16 mxgbe_pcs_read(mxgbe_priv_t *priv, int regnum);
+void mxgbe_pcs_write(mxgbe_priv_t *priv, int regnum, u16 value);
+
 /**
  * mxgbe_dbg_reg_ops_write - write into reg_ops datum
  * @filp: the opened file
@@ -1385,7 +1338,34 @@ static ssize_t mxgbe_dbg_reg_ops_write(struct file *filp,
 	mxgbe_dbg_reg_ops_buf[len] = '\0';
 
 	/* parse cmd >>> */
-	if (strncmp(mxgbe_dbg_reg_ops_buf, "write", 5) == 0) {
+	if (strncmp(mxgbe_dbg_reg_ops_buf, "writepcs ", 9) == 0) {
+		u32 reg, value;
+		int cnt;
+
+		cnt = sscanf(&mxgbe_dbg_reg_ops_buf[8], "%x %x", &reg, &value);
+		if (cnt == 2) {
+			priv->reg_last_value = value;
+			mxgbe_pcs_write(priv, reg, value);
+		} else {
+			priv->reg_last_value = 0xFFFFFFFF;
+			pr_err(KBUILD_MODNAME
+				 ": debugfs reg_ops usage:"
+				 " writepcs <reg> <val>\n");
+		}
+	} else if (strncmp(mxgbe_dbg_reg_ops_buf, "readpcs ", 8) == 0) {
+		u32 reg, value;
+		int cnt;
+
+		cnt = sscanf(&mxgbe_dbg_reg_ops_buf[7], "%x", &reg);
+		if (cnt == 1) {
+			value = (u32)mxgbe_pcs_read(priv, reg);
+			priv->reg_last_value = value;
+		} else {
+			priv->reg_last_value = 0xFFFFFFFF;
+			pr_err(KBUILD_MODNAME
+				 ": debugfs reg_ops usage: readpcs <reg>\n");
+		}
+	} else if (strncmp(mxgbe_dbg_reg_ops_buf, "write", 5) == 0) {
 		u32 reg, value;
 		int cnt;
 		cnt = sscanf(&mxgbe_dbg_reg_ops_buf[5], "%x %x", &reg, &value);
@@ -1420,6 +1400,10 @@ static ssize_t mxgbe_dbg_reg_ops_write(struct file *filp,
 		       ": debugfs reg_ops:   read <reg>\n");
 		pr_err(KBUILD_MODNAME
 		       ": debugfs reg_ops:   write <reg> <val>\n");
+		pr_err(KBUILD_MODNAME
+		       ": debugfs reg_ops:   readpcs <reg>\n");
+		pr_err(KBUILD_MODNAME
+		       ": debugfs reg_ops:   writepcs <reg> <val>\n");
 	}
 	/* parse cmd <<< */
 
@@ -1440,6 +1424,15 @@ static const struct file_operations mxgbe_dbg_reg_ops_fops = {
  * Board Init Part
  ******************************************************************************
  **/
+
+void mxgbe_dbg_rename(mxgbe_priv_t *priv, const char *name)
+{
+	if (priv->mxgbe_dbg_board)
+		priv->mxgbe_dbg_board = debugfs_rename(mxgbe_dbg_root,
+						priv->mxgbe_dbg_board,
+						mxgbe_dbg_root,
+						name);
+} /* mxgbe_dbg_rename */
 
 /**
  * mxgbe_dbg_board_init - setup the debugfs directory

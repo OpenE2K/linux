@@ -171,6 +171,28 @@ kvm_get_guest_thread_info(struct kvm *kvm, int gpid_nr)
 #define	CHECK_GUEST_KERNEL_DATA_STACK(ti, g_sbr, g_usd_size)
 #endif	/* CONFIG_KVM_GUEST_HW_HCALL */
 
+static inline void
+HOST_SAVE_TASK_USER_REGS_TO_SWITCH(struct kvm_vcpu *vcpu, struct sw_regs *sw_regs,
+				   bool task_is_binco, bool task_traced)
+{
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
+
+	DO_SAVE_TASK_USER_REGS_TO_SWITCH(sw_regs, task_is_binco, task_traced);
+	/* the hardware register was saved by hypercall in vcpu sw context */
+	sw_regs->cutd = sw_ctxt->cutd;
+}
+static inline void
+HOST_RESTORE_TASK_USER_REGS_TO_SWITCH(struct kvm_vcpu *vcpu, struct sw_regs *sw_regs,
+					bool task_is_binco, bool task_traced)
+{
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
+
+	DO_RESTORE_TASK_USER_REGS_TO_SWITCH(sw_regs, task_is_binco, task_traced);
+	/* the hardware register will be restored by hypercall */
+	/* from vcpu software context */
+	sw_ctxt->cutd = sw_regs->cutd;
+}
+
 #define	SAVE_KVM_HOST_KERNEL_STACKS_STATE(__ti, __gti, __gregs)		\
 ({									\
 	(__gregs)->k_usd_size = (__ti)->k_usd_hi.USD_hi_size;		\

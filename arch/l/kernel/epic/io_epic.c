@@ -158,27 +158,21 @@ unsigned int io_epic_read(unsigned int epic, unsigned int reg)
 	return boot_readl((void __iomem *) (io_epic_base(epic) + reg));
 }
 
-static inline void set_io_epic_irq_attr(struct io_epic_irq_attr *irq_attr,
-					int ioepic, int ioepic_pin,
-					int trigger, int rid)
-{
-	irq_attr->ioepic	= ioepic;
-	irq_attr->ioepic_pin	= ioepic_pin;
-	irq_attr->trigger	= trigger;
-	irq_attr->rid		= rid;
-}
-
 union io_epic_entry_union {
 	struct { u32 w1, w2, w3, w4, w5; };
 	struct IO_EPIC_route_entry entry;
 };
 
-/* Write interrupt control word last, as it contains the mask bit */
+/* Mask the pin before overwriting the entry */
 static void __ioepic_write_entry(int epic, int pin,
 					struct IO_EPIC_route_entry e)
 {
 	union io_epic_entry_union eu;
 	union IO_EPIC_INT_CTRL reg;
+
+	reg.raw = 0;
+	reg.bits.mask = 1;
+	io_epic_write(epic, IOEPIC_TABLE_INT_CTRL(pin), reg.raw);
 
 	eu.entry = e;
 	io_epic_write(epic, IOEPIC_TABLE_MSG_DATA(pin), eu.w2);
@@ -228,41 +222,34 @@ struct IO_EPIC_route_entry ioepic_read_entry(int epic, int pin)
 	return e;
 }
 
-int native_setup_ioepic_entry(int ioepic_idx, int irq,
-				struct IO_EPIC_route_entry *entry,
-				unsigned int destination, int vector,
-				struct io_epic_irq_attr *attr)
+void ioepic_initialize_pin(struct epic_irq_cfg *cfg)
 {
+	struct IO_EPIC_route_entry entry;
 	u32 lo, hi;
-	if (ioepics[ioepic_idx].ioepic) {
+
+	if (ioepics[cfg->epic].ioepic) {
 		struct iohub_sysdata *sd =
-			ioepics[ioepic_idx].ioepic->bus->sysdata;
+			ioepics[cfg->epic].ioepic->bus->sysdata;
 		lo = sd->pci_msi_addr_lo;
 		hi = sd->pci_msi_addr_hi;
 	} else {
-		get_io_epic_msi(ioepics[ioepic_idx].mp_config.nodeid,
+		get_io_epic_msi(ioepics[cfg->epic].mp_config.nodeid,
 				&lo, &hi);
 	}
-	memset(entry, 0, sizeof(*entry));
+	memset(&entry, 0, sizeof(entry));
 
-	entry->msg_data.bits.vector = vector;
-	/*
-	 * Area defined by RT_MSI is aligned to 1 Mb, so lower 20 bits are
-	 * reused to encode destination core ID
-	 */
-	entry->addr_high = hi;
-	entry->addr_low.bits.MSI = lo >> 20;
-	entry->addr_low.bits.dst = cepic_id_short_to_full(destination);
+	entry.msg_data.bits.vector = cfg->vector;
+	entry.addr_high = hi;
+	entry.addr_low.bits.MSI = lo >> E2K_SIC_ALIGN_RT_MSI;
+	entry.addr_low.bits.dst = cepic_id_short_to_full(cfg->dest);
 
-	/* req_id is currently not used */
+	entry.int_ctrl.bits.trigger = cfg->trigger;
+	if (cfg->trigger)
+		entry.int_ctrl.bits.mask = 1;
 
-	entry->int_ctrl.bits.trigger = attr->trigger;
-	if (attr->trigger)
-		entry->int_ctrl.bits.mask = 1;
+	entry.rid.raw = cfg->rid;
 
-	entry->rid.raw = attr->rid;
-
-	return 0;
+	ioepic_write_entry(cfg->epic, cfg->pin, entry);
 }
 
 /* Return 0, if the pin was not already masked, and 1, if it was */
@@ -761,6 +748,9 @@ int __ioepic_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	if (!cpumask_intersects(mask, cpu_online_mask))
 		return -EINVAL;
 
+	if (cfg->passthrough)
+		return -EPERM;
+
 	err = epic_assign_irq_vector(irq, cfg, mask);
 	if (err)
 		return err;
@@ -822,6 +812,98 @@ static unsigned int startup_ioepic_irq(struct irq_data *data)
 	return 0;
 }
 
+#ifdef CONFIG_E2K
+#include <asm/e2k-iommu.h>
+
+static void io_epic_reset_pin(unsigned int epic, unsigned int pin);
+static void ioepic_setup_pin_passthrough(struct ioepic_vcpu_info *info, struct epic_irq_cfg *cfg)
+{
+	struct ioepic_pt_pin *pt_pin, *tmp;
+
+	if (info->valid) {
+		/*
+		 * Host and guest pin numbers always match.
+		 * Passthrough of the same pin from several host IOEPICs to one VM isn't supported
+		 */
+		list_for_each_entry_safe(pt_pin, tmp, info->ioepic_pt_pin, list) {
+			if (pt_pin->pin == cfg->pin) {
+				WARN(true, "failed to pass ioepic node %d pin %d (already passing ioepic node %d pin %d\n)",
+					cfg->node, cfg->pin, pt_pin->node, pt_pin->pin);
+				return;
+			}
+		}
+
+		pt_pin = kmalloc(sizeof(struct ioepic_pt_pin), GFP_KERNEL);
+		pt_pin->node = cfg->node;
+		pt_pin->pin = cfg->pin;
+		INIT_LIST_HEAD(&pt_pin->list);
+		list_add_tail(&pt_pin->list, info->ioepic_pt_pin);
+
+		io_epic_reset_pin(cfg->epic, cfg->pin);
+	} else {
+		list_for_each_entry_safe(pt_pin, tmp, info->ioepic_pt_pin, list) {
+			if (pt_pin->pin == cfg->pin && pt_pin->node == cfg->node) {
+				list_del(&pt_pin->list);
+				kfree(pt_pin);
+				break;
+			}
+		}
+
+		ioepic_initialize_pin(cfg);
+	}
+
+	cfg->passthrough = info->valid;
+
+	pr_info("%s(): %s IOEPIC passthrough (node %d pin %d)\n", __func__,
+		info->valid ? "set" : "reset", cfg->node, cfg->pin);
+}
+
+int ioepic_node_pin_to_irq(unsigned int pin, unsigned int node);
+bool ioepic_try_setup_pin_range_passthrough(struct ioepic_vcpu_info *info,
+		struct epic_irq_cfg *irq_cfg, int min, int max)
+{
+	int irq, pin;
+	struct epic_irq_cfg *cfg;
+
+	if (min <= irq_cfg->pin && irq_cfg->pin <= max) {
+		for (pin = min; pin <= max; pin++) {
+			irq = ioepic_node_pin_to_irq(pin, irq_cfg->node);
+			cfg = irq_get_chip_data(irq);
+			ioepic_setup_pin_passthrough(info, cfg);
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+static int ioepic_set_vcpu_affinity(struct irq_data *data, void *vcpu_info)
+{
+	struct ioepic_vcpu_info *info = vcpu_info;
+	struct epic_irq_cfg *cfg = irq_data_get_irq_chip_data(data);
+
+	if (cfg->pin > ioepics[cfg->epic].nr_registers) {
+		WARN(true, "error setting ioepic passthrough for pin %d", cfg->pin);
+		return -EINVAL;
+	}
+
+	if (16 <= cfg->pin && cfg->pin <= 19) {
+		pr_info("%s(): do not pass ioepic intx (node %d pin %d)\n", __func__,
+			cfg->node, cfg->pin);
+		return -EACCES;
+	}
+
+	/* Ethernet 1G and GPIO/MPV require multiple IOEPIC interrupts */
+	if (!ioepic_try_setup_pin_range_passthrough(info, cfg, 3, 7) &&
+			!ioepic_try_setup_pin_range_passthrough(info, cfg, 9, 13) &&
+			!ioepic_try_setup_pin_range_passthrough(info, cfg, 23, 27))
+		ioepic_setup_pin_passthrough(info, cfg);
+
+	return 0;
+}
+#endif
+
 struct irq_chip ioepic_chip __read_mostly = {
 	.name			= "IO-EPIC",
 	.irq_startup		= startup_ioepic_irq,
@@ -830,7 +912,10 @@ struct irq_chip ioepic_chip __read_mostly = {
 	.irq_ack		= ack_epic_edge,
 	.irq_eoi		= ack_epic_level,
 	.irq_set_affinity	= native_ioepic_set_affinity,
-	.irq_retrigger		= ioepic_retrigger_irq
+	.irq_retrigger		= ioepic_retrigger_irq,
+#ifdef CONFIG_E2K
+	.irq_set_vcpu_affinity	= ioepic_set_vcpu_affinity,
+#endif
 };
 
 void __epic_setup_vector_irq(int cpu)
@@ -972,14 +1057,11 @@ static void __epic_clear_irq_vector(int irq, struct epic_irq_cfg *cfg)
 	cfg->move_in_progress = 0;
 }
 
-static void ioepic_register_intr(unsigned int irq, struct epic_irq_cfg *cfg,
-				 unsigned long trigger)
+static void ioepic_register_intr(unsigned int irq, struct epic_irq_cfg *cfg)
 {
-	struct irq_chip *chip = &ioepic_chip;
-	irq_flow_handler_t hdl;
 	bool fasteoi;
 
-	if (trigger == IOEPIC_AUTO || trigger == IOEPIC_LEVEL) {
+	if (cfg->trigger == IOEPIC_AUTO || cfg->trigger == IOEPIC_LEVEL) {
 		irq_set_status_flags(irq, IRQ_LEVEL);
 		fasteoi = true;
 	} else {
@@ -987,57 +1069,29 @@ static void ioepic_register_intr(unsigned int irq, struct epic_irq_cfg *cfg,
 		fasteoi = false;
 	}
 
-	hdl = fasteoi ? handle_fasteoi_irq : handle_edge_irq;
-	irq_set_chip_and_handler_name(irq, chip, hdl,
-				      fasteoi ? "fasteoi" : "edge");
+	irq_set_chip_and_handler_name(irq, &ioepic_chip,
+					fasteoi ? handle_fasteoi_irq : handle_edge_irq,
+					fasteoi ? "fasteoi" : "edge");
 }
 
-static void setup_ioepic_irq(unsigned int irq, struct epic_irq_cfg *cfg,
-				struct io_epic_irq_attr *attr)
+static void setup_ioepic_irq(unsigned int irq, struct epic_irq_cfg *cfg)
 {
-	struct IO_EPIC_route_entry entry;
-
 	if (epic_assign_irq_vector(irq, cfg, cpu_online_mask))
 		return;
 	if (cfg->dest == BAD_EPICID) {
 		pr_warn("Failed to obtain dest epicid for ioepic %d, pin %d\n",
-			mpc_ioepic_id(attr->ioepic), attr->ioepic_pin);
+			mpc_ioepic_id(cfg->epic), cfg->pin);
 		__epic_clear_irq_vector(irq, cfg);
 		return;
 	}
 
 	epic_printk("IOEPIC[%d]: Set routing entry (%d-%d -> 0x%x -> IRQ %d Mode:%i Dest:%d SID:0x%x)\n",
-		    attr->ioepic, mpc_ioepic_id(attr->ioepic), attr->ioepic_pin,
-		    cfg->vector, irq, attr->trigger, cfg->dest, attr->rid);
+		    cfg->epic, mpc_ioepic_id(cfg->epic), cfg->pin,
+		    cfg->vector, irq, cfg->trigger, cfg->dest, cfg->rid);
 
-	if (native_setup_ioepic_entry(attr->ioepic, irq, &entry, cfg->dest,
-						cfg->vector, attr)) {
-		pr_warn("Failed to setup ioepic entry for ioepic  %d, pin %d\n",
-			mpc_ioepic_id(attr->ioepic), attr->ioepic_pin);
-		__epic_clear_irq_vector(irq, cfg);
+	ioepic_register_intr(irq, cfg);
 
-		return;
-	}
-
-	ioepic_register_intr(irq, cfg, attr->trigger);
-
-	ioepic_write_entry(attr->ioepic, attr->ioepic_pin, entry);
-}
-
-static int
-io_epic_setup_irq_pin(unsigned int irq, int node, struct io_epic_irq_attr *attr)
-{
-	struct epic_irq_cfg *cfg = alloc_irq_and_cfg_at(irq, node);
-
-	if (!cfg)
-		return -EINVAL;
-
-	cfg->epic = attr->ioepic;
-	cfg->pin = attr->ioepic_pin;
-
-	setup_ioepic_irq(irq, cfg, attr);
-
-	return 0;
+	ioepic_initialize_pin(cfg);
 }
 
 /*
@@ -1121,20 +1175,43 @@ static unsigned int irq_requester_id(int idx, int epic)
 	return rid.raw;
 }
 
-static void __init io_epic_reset_pin(unsigned int epic, unsigned int pin)
+/* Support both IOEPIC v1 and v2 by writing INT_CTRL twice (for RW and RW1C bits) */
+static void io_epic_reset_pin(unsigned int epic, unsigned int pin)
 {
-	/* These registers are not reset by hardware */
+	union IO_EPIC_INT_CTRL reg;
+
+	reg.raw = 0;
+	reg.bits.mask = 1;
+	io_epic_write(epic, IOEPIC_TABLE_INT_CTRL(pin), reg.raw);
+
+	reg.bits.delivery_status = 1;
+	reg.bits.software_int = 1;
+	io_epic_write(epic, IOEPIC_TABLE_INT_CTRL(pin), reg.raw);
+
 	io_epic_write(epic, IOEPIC_INT_RID(pin), 0);
 	io_epic_write(epic, IOEPIC_TABLE_MSG_DATA(pin), 0);
 	io_epic_write(epic, IOEPIC_TABLE_ADDR_HIGH(pin), 0);
 	io_epic_write(epic, IOEPIC_TABLE_ADDR_LOW(pin), 0);
 }
 
+void __init ioepic_check_trigger(struct epic_irq_cfg *cfg)
+{
+	if (cfg->pin < IO_EPIC_NR_REGS && cfg->trigger != pin_to_trigger[cfg->pin])
+		epic_printk("IOEPIC%d, pin %d: trigger type mismatch\n",
+			cfg->epic, cfg->pin);
+}
+
+/*
+ * Main reason to read mptable is to get RID for each IRQ. It also helps to:
+ * - Get IOEPIC node
+ * - Double-check trigger value
+ */
 static void __init __setup_io_epic_irqs(unsigned int ioepic_idx)
 {
 	int idx;
-	struct io_epic_irq_attr attr;
-	unsigned int pin, irq, trigger, req_id;
+	struct epic_irq_cfg *cfg;
+	unsigned int pin, irq;
+	unsigned int node = mpc_ioepic_nodeid(ioepic_idx);
 
 	for (pin = 0; pin < ioepics[ioepic_idx].nr_registers; pin++) {
 		idx = find_irq_entry(ioepic_idx, pin, mp_INT);
@@ -1142,22 +1219,28 @@ static void __init __setup_io_epic_irqs(unsigned int ioepic_idx)
 			idx = find_irq_entry(ioepic_idx, pin, mp_FixINT);
 
 		if (idx == -1) {
+			/* Some of the registers aren't reset by hardware */
 			io_epic_reset_pin(ioepic_idx, pin);
 			continue;
 		}
 
 		irq = pin_2_irq(idx, ioepic_idx, pin);
-		trigger = irq_trigger(idx);
-		req_id = irq_requester_id(idx, ioepic_idx);
 
-		if (pin < IO_EPIC_NR_REGS && trigger != pin_to_trigger[pin])
-			epic_printk("IOEPIC%d, pin %d: trigger type mismatch\n",
-				ioepic_idx, pin);
+		cfg = alloc_irq_and_cfg_at(irq, node);
+		if (!cfg) {
+			WARN(true, "Failed to allocate IOEPIC IRQ descriptor\n");
+			continue;
+		}
 
-		set_io_epic_irq_attr(&attr, ioepic_idx, pin, trigger, req_id);
+		cfg->epic = ioepic_idx;
+		cfg->pin = pin;
+		cfg->trigger = irq_trigger(idx);
+		cfg->node = node;
+		cfg->rid = irq_requester_id(idx, ioepic_idx);
 
-		io_epic_setup_irq_pin(irq, mpc_ioepic_nodeid(ioepic_idx),
-			&attr);
+		ioepic_check_trigger(cfg);
+
+		setup_ioepic_irq(irq, cfg);
 	}
 }
 
@@ -1198,9 +1281,6 @@ void __init setup_io_epic(void)
 	setup_ioepic_ids_from_mpc_nocheck();
 	setup_io_epic_irqs();
 	alloc_ioepic_saved_registers();
-	/* FIXME skipping pcibios_irq_init() on guest (for passthrough) */
-	if (paravirt_enabled())
-		pcibios_enable_irq = pirq_enable_irq;
 }
 
 void __init mp_register_ioepic(int ver, int id, int node, unsigned long address,
@@ -1638,16 +1718,20 @@ int ioepic_pin_to_irq_num(unsigned int pin, struct pci_dev *dev)
 		PCI_SLOT(dev->devfn), pin);
 }
 #else
-int ioepic_pin_to_irq_num(unsigned int pin, struct pci_dev *dev)
+int ioepic_node_pin_to_irq(unsigned int pin, unsigned int node)
 {
-	unsigned int dev_node = dev_to_node(&dev->dev);
 	unsigned int ioepic_idx;
 
 	for (ioepic_idx = 0; ioepic_idx < nr_ioepics; ioepic_idx++)
-		if (dev_node == mpc_ioepic_nodeid(ioepic_idx))
+		if (node == mpc_ioepic_nodeid(ioepic_idx))
 			return mp_ioepic_gsi_base(ioepic_idx) + pin;
 
 	return -1;
+}
+
+int ioepic_pin_to_irq_num(unsigned int pin, struct pci_dev *dev)
+{
+	return ioepic_node_pin_to_irq(pin, dev_to_node(&dev->dev));
 }
 #endif
 
@@ -2113,7 +2197,7 @@ subsys_initcall_sync(setup_epic_ioapic);
 /*
  * Dynamic irq allocate and deallocation
  */
-unsigned int __epic_create_irqs(unsigned int from, unsigned int count, int node)
+unsigned int __epic_create_irqs(unsigned int from, unsigned int count, int node, unsigned int rid)
 {
 	struct epic_irq_cfg **cfg;
 	unsigned long flags;
@@ -2135,6 +2219,8 @@ unsigned int __epic_create_irqs(unsigned int from, unsigned int count, int node)
 		cfg[i] = alloc_irq_cfg(node);
 		if (!cfg[i])
 			goto out_irqs;
+		cfg[i]->rid = rid;
+		cfg[i]->node = node;
 	}
 
 	raw_spin_lock_irqsave(&vector_lock, flags);
@@ -2168,9 +2254,9 @@ out_cfgs:
 	return 0;
 }
 
-unsigned int epic_create_irq_nr(unsigned int from, int node)
+unsigned int epic_create_irq_nr(unsigned int from, int node, unsigned int rid)
 {
-	return __epic_create_irqs(from, 1, node);
+	return __epic_create_irqs(from, 1, node, rid);
 }
 
 void epic_destroy_irq(unsigned int irq)
@@ -2202,28 +2288,28 @@ void epic_destroy_irqs(unsigned int irq, unsigned int count)
 /*
  * MSI message composition
  */
-void native_epic_compose_msi_msg(struct pci_dev *pdev,
-			    unsigned int irq,
-			    struct msi_msg *msg)
+void native_epic_compose_msi_msg(unsigned int msi_addr_lo,
+				unsigned int msi_addr_hi,
+				unsigned int irq,
+				struct msi_msg *msg)
 {
-	struct iohub_sysdata *sd = pdev->bus->sysdata;
 	struct epic_irq_cfg *cfg = irq_get_chip_data(irq);
 	union IO_EPIC_MSG_ADDR_LOW addr_low;
 	union IO_EPIC_MSG_DATA data;
 
 	addr_low.raw = 0;
-	addr_low.bits.MSI = sd->pci_msi_addr_lo >> 20;
+	addr_low.bits.MSI = msi_addr_lo >> 20;
 	addr_low.bits.dst = cepic_id_short_to_full(cfg->dest);
 
 	data.raw = 0;
 	data.bits.vector = cfg->vector;
 
-	msg->address_hi = sd->pci_msi_addr_hi;
+	msg->address_hi = msi_addr_hi;
 	msg->address_lo = addr_low.raw;
 	msg->data = data.raw;
 
-	epic_printk("MSI for %s: irq %d : addr_lo = 0x%08x, data = 0x%08x\n",
-		pdev->bus->name, irq, msg->address_lo, msg->data);
+	epic_printk("MSI irq %d : addr_hi = 0x%08x, addr_lo = 0x%08x, data = 0x%08x\n",
+		irq, msg->address_hi, msg->address_lo, msg->data);
 }
 
 int epic_msi_compose_msg(struct pci_dev *pdev, unsigned int irq,
@@ -2231,6 +2317,7 @@ int epic_msi_compose_msg(struct pci_dev *pdev, unsigned int irq,
 {
 	struct epic_irq_cfg *cfg;
 	int err;
+	struct iohub_sysdata *sd = pdev->bus->sysdata;
 
 #ifdef CONFIG_E2K
 	if (e2k_msi_disabled)
@@ -2241,7 +2328,7 @@ int epic_msi_compose_msg(struct pci_dev *pdev, unsigned int irq,
 	if (err)
 		return err;
 
-	native_epic_compose_msi_msg(pdev, irq, msg);
+	native_epic_compose_msi_msg(sd->pci_msi_addr_lo, sd->pci_msi_addr_hi, irq, msg);
 
 	return 0;
 }
@@ -2253,12 +2340,14 @@ epic_msi_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	struct epic_irq_cfg *cfg = irq_data_get_irq_chip_data(data);
 	struct msi_msg msg;
 	unsigned int dest;
+	int ret;
 
 	union IO_EPIC_MSG_ADDR_LOW addr_low;
 	union IO_EPIC_MSG_DATA msg_data;
 
-	if (__ioepic_set_affinity(data, mask, &dest))
-		return -1;
+	ret = __ioepic_set_affinity(data, mask, &dest);
+	if (ret)
+		return ret;
 
 	__get_cached_msi_msg(data->common->msi_desc, &msg);
 
@@ -2276,6 +2365,42 @@ epic_msi_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	return IRQ_SET_MASK_OK_NOCOPY;
 }
 
+#ifdef CONFIG_E2K
+static int epic_msi_set_vcpu_affinity(struct irq_data *data, void *vcpu_info)
+{
+	struct ioepic_vcpu_info *info = vcpu_info;
+	struct epic_irq_cfg *cfg = irq_data_get_irq_chip_data(data);
+
+	pci_msi_mask_irq(data);
+
+	/* Restore host MSI configuration, when shutting down irq bypass */
+	if (!info->valid) {
+		unsigned int msi_addr_lo;
+		unsigned int msi_addr_hi;
+
+		get_io_epic_msi(cfg->node, &msi_addr_lo, &msi_addr_hi);
+		native_epic_compose_msi_msg(msi_addr_lo, msi_addr_hi, data->irq, &info->msi);
+		info->msi_valid = true;
+	}
+
+	if (!info->msi_valid)
+		return -EINVAL;
+
+	/*
+	 * e2k does not support interrupt remapping: write guest vector and dest_id to device
+	 * This might cause problems with VFIO (which assumes interrupt remapping)
+	 */
+	pci_write_msi_msg(data->irq, &info->msi);
+
+	cfg->passthrough = info->valid;
+
+	pci_msi_unmask_irq(data);
+
+	return 0;
+}
+
+#endif
+
 /*
  * IRQ Chip for MSI PCI/PCI-X/PCI-Express Devices,
  * which implement the MSI or MSI-X Capability Structure.
@@ -2287,6 +2412,9 @@ static struct irq_chip msi_chip = {
 	.irq_ack		= ack_epic_edge,
 	.irq_set_affinity	= epic_msi_set_affinity,
 	.irq_retrigger		= ioepic_retrigger_irq,
+#ifdef CONFIG_E2K
+	.irq_set_vcpu_affinity	= epic_msi_set_vcpu_affinity
+#endif
 };
 
 int epic_setup_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc,
@@ -2330,7 +2458,7 @@ int native_setup_msi_irqs_epic(struct pci_dev *dev, int nvec, int type)
 	node = dev_to_node(&dev->dev);
 	irq_want = get_nr_irqs_gsi();
 	list_for_each_entry(msidesc, dev_to_msi_list(&dev->dev), list) {
-		irq = epic_create_irq_nr(irq_want, node);
+		irq = epic_create_irq_nr(irq_want, node, dev->bus->number << 8 | dev->devfn);
 		if (irq == 0)
 			return -ENOSPC;
 
@@ -2391,4 +2519,14 @@ void fixup_irqs_epic(void)
 		}
 		__this_cpu_write(vector_irq[vector], -1);
 	}
+}
+
+/* Reset IOEPIC registers (for kexec) */
+void reset_io_epic(void)
+{
+	unsigned int epic, pin;
+
+	for (epic = 0; epic < nr_ioepics; epic++)
+		for (pin = 0; pin < ioepics[epic].nr_registers; pin++)
+			io_epic_reset_pin(epic, pin);
 }

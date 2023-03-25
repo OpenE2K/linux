@@ -44,6 +44,9 @@ static inline unsigned long get_dcr(void)
                 case E90S_CPU_R2000:                    \
                         name = "R2000";                 \
                         break;                          \
+		case E90S_CPU_R2000P:                   \
+			name = "R2000+";                \
+			break;                          \
                 default:                                \
                         name = "unknown";               \
         }                                               \

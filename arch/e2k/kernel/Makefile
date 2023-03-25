@@ -62,33 +62,34 @@ else
 $(obj)/ttable.o: $(obj)/ttable_wbs.h
 endif
 
-# -fexclude-ctpr2 - to make sure that AAU is not zeroed before we get to it
-# -fno-dam - hardware bug 124206 workaround (CPU_HWBUG_L1I_STOPS_WORKING)
-CFLAGS_ttable.o := -fno-dam -fexclude-ctpr2
-CFLAGS_ttable_tmp.o := -fno-dam -fexclude-ctpr2 -DGENERATING_HEADER
+# "-fexclude-ctpr2" - to make sure that AAU is not zeroed before we get to it.
+# "-fno-dam" - hardware bug 124206 workaround (CPU_HWBUG_L1I_STOPS_WORKING)
+# "-fno-semi-spec-ld" - to make sure nothing bad happens between restoring %cont
+# and %root_ptb registers and DONE instruction.
+CFLAGS_ttable.o     := -fexclude-ctpr2 $(call cc-option,-fno-semi-spec-ld)
+CFLAGS_ttable_tmp.o := -fexclude-ctpr2 $(call cc-option,-fno-semi-spec-ld) -DGENERATING_HEADER
+ifeq ($(CONFIG_MIGHT_HAVE_CPU_HWBUG_L1I_STOPS_WORKING),y)
+CFLAGS_ttable.o     += $(call cc-option,-fno-dam)
+CFLAGS_ttable_tmp.o += $(call cc-option,-fno-dam)
+endif
 
 # To compile gregs and ctpr saving for iset v6
 AFLAGS_REMOVE_trap_table.o = $(CFLAGS_ALL_CPUS)
 AFLAGS_trap_table.o += -march=elbrus-v6
 
-# We should no instrument these files
-CFLAGS_REMOVE_ttable.o := -fprofile-generate-kernel
-CFLAGS_REMOVE_ttable_tmp.o := -fprofile-generate-kernel
+# We should not instrument these files
+CFLAGS_REMOVE_ttable.o     := -fprofile-generate-kernel $(call cc-option,-fsemi-spec-ld)
+CFLAGS_REMOVE_ttable_tmp.o := -fprofile-generate-kernel $(call cc-option,-fsemi-spec-ld)
 
-CFLAGS_ptrace.o += -Wframe-larger-than=12288
-
-obj-y	+=	trap_table.o ttable.o page_tables.o process.o copy-hw-stacks.o \
-		entry_user.o signal.o io.o setup.o time.o sys_e2k.o traps.o \
+obj-y	+=	trap_table.o ttable.o process.o copy-hw-stacks.o entry_user.o \
+		signal.o io.o setup.o time.o sys_e2k.o traps.o \
 		systable.o ptrace.o e2k_syswork.o sys_32.o $(GDBSTART) \
 		proc_context.o backtrace.o trace_clock.o topology.o \
 		rtc.o e2k.o trace.o nmi.o getsp.o alternative.o convert_array.o \
 		protected_mq_notify.o protected_timer_create.o protected_syscalls.o \
-		fill_handler_entry.o proc_context_stacks.o
+		fill_handler_entry.o proc_context_stacks.o e2k-iommu.o kdebugfs.o
 
-obj-$(CONFIG_EPIC) += e2k-iommu.o
 obj-$(CONFIG_HAVE_HW_BREAKPOINT) += hw_breakpoint.o
-
-CFLAGS_process.o += -fno-tail-calls
 
 obj-y				+= cpu/
 obj-y				+= e2k_sic.o
@@ -117,7 +118,6 @@ obj-$(CONFIG_IOCTL_ELF32)	+= ioctl32.o
 obj-$(CONFIG_RECOVERY)		+= recovery.o
 obj-$(CONFIG_MODULES)		+= module.o ksyms.o
 obj-$(CONFIG_KPROBES)		+= kprobes.o
-obj-$(CONFIG_SECONDARY_SPACE_SUPPORT)	+= sec_space.o
 obj-$(CONFIG_PRECISE_TIME)	+= precise_time.o
 obj-$(CONFIG_FUNCTION_TRACER)	+= ftrace.o
 obj-$(CONFIG_FTRACE_SYSCALLS)   += ftrace.o

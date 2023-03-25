@@ -362,8 +362,8 @@ static s32 __l_smbus_xfer(struct i2c_adapter *adap, u16 addr,
 			value |= I2C_DATA_PHASE_PRESENT;
 			w_i2c(value, SMBCONTROL);
 			writeb(command, daddr);
-			writeb((u8)data->word, (daddr + 1));
-			writeb((u8)(data->word >> 8), (daddr + 2));
+			/* save endiannes */
+			memcpy_toio((daddr + 1), data, 2);
 
 		} else {
 			/* Read */
@@ -468,7 +468,8 @@ static s32 __l_smbus_xfer(struct i2c_adapter *adap, u16 addr,
 		data->byte = readb(daddr);
 		break;
 	case IOHUB_WORD_DATA:
-		data->word = readw(daddr);
+		/* save endianess, do not use readw() */
+		memcpy_fromio(data, daddr, 2);
 		break;
 	case IOHUB_BLOCK_DATA:
 		len = readb(daddr);
@@ -646,6 +647,69 @@ static void l_i2c_init_hw(struct l_i2c *l_i2c)
 	w_i2c(mode, SMBMODE);
 }
 
+/* Max. transaction takes:
+ * (I2C_MAX_TRANS_BYTES + 2) * 10 bit / 100kHz = 6600 us.
+ * Let 8 msec is hw timeout.
+ */
+#define TICKS_100MHZ (0x000C3500)
+#define TICKS_250MHZ (0x001E8480)
+#define TICKS_500MHZ (0x003D0900)
+#define TICKS_1GHZ   (0x007A1200)
+
+static void set_hw_timeout(struct l_i2c *l_i2c)
+{
+	u32 ticks = 0; /* 0 - use default hw timeout */
+
+	switch (to_pci_dev(l_i2c->pdev->dev.parent)->device) {
+	case PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI:
+		{
+			u32 pdata;
+
+			pci_read_config_dword(to_pci_dev(l_i2c->pdev->dev.parent), 0x40, &pdata);
+			/* I2C, IPMB, SPI_CS Port Control(offset 40h) 24:23 bits:
+			 * 00 – 100 MHz
+			 * 01 – 250 MHz
+			 * 10 – 500 MHz
+			 * 11 – 1 GHz
+			 */
+			switch ((pdata >> 23) & 0x03) {
+			/* We set the number of ticks (=8ms) according to the received bits.
+			 * But the frequencies can be in the ranges of 1GHz-500MHz,
+			 * 500-250MHz, 250-100MHz.
+			 * Thus, in reality, hw timeout can be up to 16-20 mc.
+			 * So, 20 mc is a reasonable value for i2c->timeout.
+			 */
+			case 3:
+				ticks = TICKS_1GHZ;
+				break;
+			case 2:
+				ticks = TICKS_500MHZ;
+				break;
+			case 1:
+				ticks = TICKS_250MHZ;
+				break;
+			case 0:
+				ticks = TICKS_100MHZ;
+			}
+		}
+		break;
+	case PCI_DEVICE_ID_MCST_I2CSPI:
+	case PCI_DEVICE_ID_MCST_I2C_SPI:
+		if (iohub_revision(to_pci_dev(l_i2c->pdev->dev.parent)) & 0x01) {
+			/* 250MHz - ASIC */
+			ticks = TICKS_250MHZ;
+		} else {
+			/* 100MHz - ALTERA */
+			ticks = TICKS_100MHZ;
+		}
+	}
+
+	if (ticks)
+		w_i2c(ticks, SMBTIMEOUT);
+
+	dev_info(&l_i2c->pdev->dev, "I2C HW timeout: 0x%X\n", r_i2c(SMBTIMEOUT));
+}
+
 static int l_i2c_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -682,24 +746,29 @@ static int l_i2c_probe(struct platform_device *pdev)
 	for (i = 0; i < i2c_adapters_per_controller; i++) {
 		char s[64];
 		struct i2c_adapter *i2c = &l_i2c->adapter[i];
+
+		sprintf(s, "/l_i2c@%d/i2c@%d", pdev->id, i);
+		i2c->dev.of_node = of_find_node_by_path(s);
+		/* check if a device is available for use in devtree */
+		if (i2c->dev.of_node &&
+			!of_device_is_available(i2c->dev.of_node))
+			continue;
+
 		id = pdev->id * i2c_adapters_per_controller + i;
 		/* set up the sysfs linkage to our parent device */
 		i2c->dev.parent = &pdev->dev;
-		sprintf(s, "/l_i2c@%d/i2c@%d", pdev->id, i);
-		i2c->dev.of_node = of_find_node_by_path(s);
 		/* init adapter himself */
 		i2c->owner = THIS_MODULE;
 		i2c->class = (I2C_CLASS_HWMON | I2C_CLASS_SPD);
 		i2c->algo = &l_i2c_algorithm;
 		i2c->quirks = &l_i2c_quirks;
 		i2c->nr = id;
-		/* Max. transaction should take:
-		 * (I2C_MAX_TRANS_BYTES + 2) * 10 bit / 100kHz = 6600 us.
-		 * Round it up to 10 ms. */
-		i2c->timeout = msecs_to_jiffies(10);
+		/* See details in set_hw_timeout() */
+		i2c->timeout = msecs_to_jiffies(20);
 		of_property_read_u32(i2c->dev.of_node,
 				"clock-frequency", &l_i2c->bus_speed[i]);
-		strlcpy(i2c->name, "l_i2c", sizeof(i2c->name));
+		sprintf(s, "i2c l_i2c (ioh %d chan %d)", pdev->id, i);
+		strlcpy(i2c->name, s, sizeof(i2c->name));
 
 		if ((ret = i2c_add_numbered_adapter(i2c))) {
 			dev_err(&pdev->dev, "failed to register "
@@ -714,6 +783,7 @@ static int l_i2c_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, l_i2c);
 	l_i2c_init_hw(l_i2c);
+	set_hw_timeout(l_i2c);
 
 	return ret;
 

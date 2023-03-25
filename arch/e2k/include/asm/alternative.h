@@ -5,6 +5,8 @@
 
 #include <linux/types.h>
 
+#include <asm/e2k_api.h>
+
 struct alt_instr {
 	s32 instr_offset;	/* original instruction */
 	s32 repl_offset;	/* offset to replacement instruction */
@@ -28,7 +30,6 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
  * +-----------+---------+-----------------+
  * | oldinstr  |  oldinstr_padding         |
  * |           +---------+-----------------+
- * |           | ibranch if length >= 576  |
  * |           | 64-bytes NOPs otherwise   |
  * +-----------+---------+-----------------+
  *		^^^^^^ static padding ^^^^^
@@ -78,9 +79,7 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
 
 #define OLDINSTR_PADDING(oldinstr, num)					\
 	".if " oldinstr_pad_len(num) " >= 576\n"			\
-		"\tibranch " e_oldinstr_pad_end "f\n"			\
-		"6620:\n"						\
-		"\t.fill (" oldinstr_pad_len(num) " - (6620b-662b)) / 8, 8, 0\n" \
+		"\t.error Expand with NOPs manually; use of ibranch here is not recommended (see bug 142105)\n" \
 	".else\n"							\
 		OLDINSTR_PAD_64_BYTES(num, 512)				\
 		OLDINSTR_PAD_64_BYTES(num, 448)				\
@@ -120,19 +119,19 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
 	".endif\n"
 
 #define OLDINSTR(oldinstr, num)						\
-	"661:\n\t" oldinstr "\n662:\n"					\
+	NONTARGET_LABEL("661") "\n\t" oldinstr "\n" NONTARGET_LABEL("662") "\n" \
 	OLDINSTR_PADDING(oldinstr, num)					\
-	e_oldinstr_pad_end ":\n"					\
+	NONTARGET_LABEL(e_oldinstr_pad_end) "\n"			\
 	INSTR_LEN_SANITY_CHECK(oldinstr_len)
 
 #define OLDINSTR_2(oldinstr, num1, num2)				\
-	"661:\n\t" oldinstr "\n662:\n"					\
+	NONTARGET_LABEL("661") "\n\t" oldinstr "\n" NONTARGET_LABEL("662") "\n" \
 	".if " altinstr_len(num1) " < " altinstr_len(num2) "\n"		\
 	OLDINSTR_PADDING(oldinstr, num2)				\
 	".else\n"							\
 	OLDINSTR_PADDING(oldinstr, num1)				\
 	".endif\n"							\
-	e_oldinstr_pad_end ":\n"					\
+	NONTARGET_LABEL(e_oldinstr_pad_end) "\n"			\
 	INSTR_LEN_SANITY_CHECK(oldinstr_len)
 
 #define ALTINSTR_ENTRY(facility, num)					\
@@ -144,7 +143,9 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
 	"\t.short " __stringify(facility) "\n"	/* facility bit    */
 
 #define ALTINSTR_REPLACEMENT(altinstr, num)	/* replacement */	\
-	b_altinstr(num)":\n\t" altinstr "\n" e_altinstr(num) ":\n"	\
+	NONTARGET_LABEL(b_altinstr(num)) "\n" \
+	altinstr "\n" \
+	NONTARGET_LABEL(e_altinstr(num)) "\n"	\
 	INSTR_LEN_SANITY_CHECK(altinstr_len(num))
 
 /* alternative assembly primitive: */
@@ -215,45 +216,50 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
  *		"< initial instruction >"
  *		ALTERNATIVE_4_FEATURE2(feature1, feature2)
  *		)
+ *
+ * IMPORTANT: the instructions themselves are copied as-is without
+ * patching. This means that instructions with offsets relative to
+ * IP (i.e. disp, sdisp, puttsd, ibranch, pref) must not be used in
+ * alternative branch.
  */
 #define ALTERNATIVE_1_ALTINSTR \
 	".pushsection .altinstr_replacement, \"ax\"\n" \
-	b_altinstr(1)":\n"
+	NONTARGET_LABEL(b_altinstr(1))"\n"
 
 #define ALTERNATIVE_2_OLDINSTR \
-	"\n" e_altinstr(1) ":\n" \
+	"\n" NONTARGET_LABEL(e_altinstr(1)) "\n" \
 	INSTR_LEN_SANITY_CHECK(altinstr_len(1)) \
 	".popsection\n" \
-	"661:\n"
+	NONTARGET_LABEL("661") "\n"
 
 #define ALTERNATIVE_3_FEATURE(facility) \
-	"\n662:\n" \
+	"\n" NONTARGET_LABEL("662") "\n" \
 	OLDINSTR_PADDING(oldinstr, 1) \
-	e_oldinstr_pad_end ":\n" \
+	NONTARGET_LABEL(e_oldinstr_pad_end) "\n" \
 	INSTR_LEN_SANITY_CHECK(oldinstr_len) \
 	".pushsection .altinstructions,\"a\"\n" \
 	ALTINSTR_ENTRY(facility, 1) \
 	".popsection\n"
 
 #define ALTERNATIVE_2_ALTINSTR2 \
-	"\n" e_altinstr(1) ":\n" \
+	"\n" NONTARGET_LABEL(e_altinstr(1)) "\n" \
 	INSTR_LEN_SANITY_CHECK(altinstr_len(1)) \
-	b_altinstr(2)":\n"
+	NONTARGET_LABEL(b_altinstr(2))"\n"
 
 #define ALTERNATIVE_3_OLDINSTR2 \
-	"\n" e_altinstr(2) ":\n" \
+	"\n" NONTARGET_LABEL(e_altinstr(2)) "\n" \
 	INSTR_LEN_SANITY_CHECK(altinstr_len(2)) \
 	".popsection\n" \
-	"661:\n"
+	NONTARGET_LABEL("661") "\n"
 
 #define ALTERNATIVE_4_FEATURE2(facility1, facility2) \
-	"\n662:\n" \
+	"\n" NONTARGET_LABEL("662") "\n" \
 	".if " altinstr_len(1) " < " altinstr_len(2) "\n" \
 	OLDINSTR_PADDING(oldinstr, 2) \
 	".else\n" \
 	OLDINSTR_PADDING(oldinstr, 1) \
 	".endif\n" \
-	e_oldinstr_pad_end ":\n" \
+	NONTARGET_LABEL(e_oldinstr_pad_end) "\n" \
 	INSTR_LEN_SANITY_CHECK(oldinstr_len) \
 	".pushsection .altinstructions,\"a\"\n" \
 	ALTINSTR_ENTRY(facility1, 1) \

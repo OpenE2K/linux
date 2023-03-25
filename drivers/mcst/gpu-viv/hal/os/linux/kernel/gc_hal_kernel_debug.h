@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -112,6 +112,7 @@ typedef va_list gctARGUMENTS;
 #define gcmkOUTPUT_STRING(String) \
     printk("%s", String); \
 
+#if gcdDUMP_IN_KERNEL
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
 #define gcmkDUMP_STRING(Os, String) \
     do \
@@ -148,6 +149,7 @@ typedef va_list gctARGUMENTS;
         mutex_unlock(&Os->dumpFilpMutex); \
     } \
     while (0)
+#endif
 #endif
 
 #define gcmkSPRINTF(Destination, Size, ...) \

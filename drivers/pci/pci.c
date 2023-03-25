@@ -1827,6 +1827,27 @@ int pcim_enable_device(struct pci_dev *pdev)
 }
 EXPORT_SYMBOL(pcim_enable_device);
 
+#ifdef CONFIG_MCST
+int pcim_enable_device_mem(struct pci_dev *pdev)
+{
+	struct pci_devres *dr;
+	int rc;
+
+	dr = get_pci_dr(pdev);
+	if (unlikely(!dr))
+		return -ENOMEM;
+	if (dr->enabled)
+		return 0;
+
+	rc = pci_enable_device_mem(pdev);
+	if (!rc) {
+		pdev->is_managed = 1;
+		dr->enabled = 1;
+	}
+	return rc;
+}
+EXPORT_SYMBOL(pcim_enable_device_mem);
+#endif
 /**
  * pcim_pin_device - Pin managed PCI device
  * @pdev: PCI device to pin

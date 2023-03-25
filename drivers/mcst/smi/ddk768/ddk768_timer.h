@@ -10,6 +10,7 @@
 *******************************************************************/
 #ifndef _TIMER_H_
 #define _TIMER_H_
+#include "../smi_drv.h"
 
 
 
@@ -40,6 +41,7 @@ unsigned long calcTimerCounter(
  *
  */
 void timerStart(
+	volatile unsigned char __iomem *rmmio,
     timer_number_t timer,         /* which timer: 0 to 3 */
     unsigned long timerCounter,      /* Timer counter: use calcTimerCounter() to work out a counter for a specific period. */
     unsigned long div16Enable     /* Enable the 16 divisor, time out will be increased by 16 */
@@ -55,6 +57,7 @@ void timerStart(
  *        0 = Raw int is NOT pending.
  */
 unsigned long timerRawIntPending(
+	volatile unsigned char __iomem *rmmio,
     timer_number_t timer         /* which timer: 0 to 3 */
 );
 
@@ -66,6 +69,7 @@ unsigned long timerRawIntPending(
  *
  */
 void timerClearRawInt(
+	struct smi_device *sdev,
     timer_number_t timer         /* which timer: 0 to 3 */
 );
 
@@ -74,6 +78,7 @@ void timerClearRawInt(
  *
  */
 void timerStop(
+	volatile unsigned char __iomem *rmmio,
     timer_number_t timer         /* which timer: 0 to 3 */
 );
 
@@ -83,6 +88,7 @@ void timerStop(
  * Note: When timer is disable, always read back 0.
  */
 unsigned long timerGetCounter(
+	struct smi_device *sdev,
     timer_number_t timer         /* which timer: 0 to 3 */
 );
 
@@ -102,6 +108,7 @@ unsigned long timerGetCounterSetting(
  * in micro-second.
  */
 void timerWait(
+	struct smi_device *sdev,
     timer_number_t timer,
     unsigned long microSeconds
 );
@@ -111,6 +118,7 @@ void timerWait(
  *
  */
 void timerWaitTicks(
+	struct smi_device *sdev,
     timer_number_t timer, /* Use timer 0, 1, 2 or 3 */
     unsigned long ticks
 );
@@ -135,16 +143,18 @@ void setTestCounter(unsigned long value);
  * interrupt under WATCOM DOS extender.
  * 
  */
-void timerIsrTemplate(unsigned long status);
+void timerIsrTemplate(struct smi_device *sdev, unsigned long status);
 
 void timerWaitMsec(
+	struct smi_device *sdev,
     unsigned long milliSeconds
 );
 
 void timerWaitUsec(
+	volatile unsigned char __iomem *rmmio,
     unsigned long USeconds
 );
-#define sb_OS_WAIT_MSEC_POLL(ms) timerWaitMsec(ms)
-#define sb_OS_WAIT_USEC_POLL(us) timerWaitUsec(us)
+#define sb_OS_WAIT_MSEC_POLL(sdev, ms) timerWaitMsec(sdev, ms)
+#define sb_OS_WAIT_USEC_POLL(rmmio, us) timerWaitUsec(rmmio, us)
 #endif /* _TIMER_H_ */
 

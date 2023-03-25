@@ -177,6 +177,9 @@ static int vfio_intx_set_signal(struct vfio_pci_device *vdev, int fd)
 	int ret;
 
 	if (vdev->ctx[0].trigger) {
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+		irq_bypass_unregister_producer(&vdev->ctx[0].producer);
+#endif
 		free_irq(pdev->irq, vdev);
 		kfree(vdev->ctx[0].name);
 		eventfd_ctx_put(vdev->ctx[0].trigger);
@@ -210,6 +213,14 @@ static int vfio_intx_set_signal(struct vfio_pci_device *vdev, int fd)
 		eventfd_ctx_put(trigger);
 		return ret;
 	}
+
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+	vdev->ctx[0].producer.token = trigger;
+	vdev->ctx[0].producer.irq = pdev->irq;
+	ret = irq_bypass_register_producer(&vdev->ctx[0].producer);
+	if (ret)
+		vdev->ctx[0].producer.token = NULL;
+#endif
 
 	/*
 	 * INTx disable will stick across the new irq setup,

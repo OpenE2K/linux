@@ -411,8 +411,11 @@ pv_vcpu_user_hw_stacks_prepare(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 	 */
 	ret = pv_vcpu_user_hw_stacks_copy(regs, stacks, cur_window_q,
 					  guest_user);
-	if (unlikely(ret))
+	if (unlikely(ret)) {
+		pr_err("%s(): kill guest: user hw stacks copy failed, error %d\n",
+			__func__, ret);
 		do_exit(SIGKILL);
+	}
 }
 
 /* Same as for native kernel without virtualization support */

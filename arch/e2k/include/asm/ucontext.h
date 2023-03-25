@@ -40,7 +40,9 @@ typedef struct rt_sigframe {
 	union {
 		struct ucontext		uc;
 		struct ucontext_32	uc_32;
+#ifdef CONFIG_PROTECTED_MODE
 		struct ucontext_prot	uc_prot;
+#endif
 	};
 } rt_sigframe_t;
 

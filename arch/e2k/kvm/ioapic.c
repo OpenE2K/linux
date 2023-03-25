@@ -100,31 +100,6 @@ static int ioapic_service(struct kvm_ioapic *ioapic, unsigned int idx)
 	return injected;
 }
 
-void kvm_make_scan_ioapic_request(struct kvm *kvm)
-{
-	kvm_make_all_cpus_request(kvm, KVM_REQ_SCAN_IOAPIC);
-}
-
-void kvm_vcpu_request_scan_ioapic(struct kvm *kvm)
-{
-	int i;
-
-	for (i = 0; i < kvm->arch.num_numa_nodes; i++) {
-		struct kvm_ioapic *ioapic = kvm->arch.vioapic[i];
-
-		if (!ioapic)
-			return;
-	}
-	kvm_make_scan_ioapic_request(kvm);
-}
-
-void kvm_arch_post_irq_ack_notifier_list_update(struct kvm *kvm)
-{
-	if (!ioapic_in_kernel(kvm))
-		return;
-	kvm_make_scan_ioapic_request(kvm);
-}
-
 static void ioapic_write_indirect(struct kvm_ioapic *ioapic, u32 val)
 {
 	unsigned index;
@@ -223,7 +198,9 @@ int kvm_ioapic_set_irq(struct kvm_ioapic *ioapic, int irq, int level)
 			else
 				ret = 0; /* report coalesced interrupt */
 		}
+#ifdef __KVM_HAVE_IOAPIC
 		trace_kvm_ioapic_set_irq(entry.bits, irq, ret == 0);
+#endif
 	}
 	mutex_unlock(&ioapic->lock);
 

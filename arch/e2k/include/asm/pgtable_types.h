@@ -6,47 +6,8 @@
 #include <linux/types.h>
 #include <asm/mmu_types.h>
 
-#if	CONFIG_CPU_ISET >= 6
-# ifdef	CONFIG_MMU_PT_V6
-#  define	MMU_IS_PT_V6()		true
-# else	/* ! CONFIG_MMU_PT_V6 */
-#  define	MMU_IS_PT_V6()		false
-# endif	/* CONFIG_MMU_PT_V6 */
-# ifdef	CONFIG_MMU_SEP_VIRT_SPACE
-#  ifndef CONFIG_DYNAMIC_SEP_VIRT_SPACE
-#   define	MMU_IS_SEPARATE_PT()	true
-#  else	/* CONFIG_DYNAMIC_SEP_VIRT_SPACE */
-#   ifdef E2K_P2V
-#    define	MMU_IS_SEPARATE_PT()	(boot_machine.mmu_separate_pt)
-#   else /* ! E2K_P2V */
-#    define	MMU_IS_SEPARATE_PT()	(machine.mmu_separate_pt)
-#   endif /* E2K_P2V */
-#  endif /* ! CONFIG_DYNAMIC_SEP_VIRT_SPACE */
-# else	/* ! MMU_SEP_VIRT_SPACE */
-#  define	MMU_IS_SEPARATE_PT()	false
-# endif	/* MMU_SEP_VIRT_SPACE */
-#elif	CONFIG_CPU_ISET >= 2
-#  define	MMU_IS_PT_V6()		false
-#  define	MMU_IS_SEPARATE_PT()	false
-#elif	CONFIG_CPU_ISET == 0
-# ifdef	E2K_P2V
-#  define	MMU_IS_PT_V6()		(boot_machine.mmu_pt_v6)
-#  define	MMU_IS_SEPARATE_PT()	(boot_machine.mmu_separate_pt)
-# else	/* ! E2K_P2V */
-#  define	MMU_IS_PT_V6()		(machine.mmu_pt_v6)
-#  define	MMU_IS_SEPARATE_PT()	(machine.mmu_separate_pt)
-# endif	/* E2K_P2V */
-#else	/* CONFIG_CPU_ISET undefined or negative */
-# warning "Undefined CPU ISET VERSION #, MMU pt_v6 mode is defined dinamicaly"
-# warning "Undefined CPU ISET VERSION #, MMU sep_pt mode is defined dinamicaly"
-# ifdef	E2K_P2V
-#  define	MMU_IS_PT_V6()		(boot_machine.mmu_pt_v6)
-#  define	MMU_IS_SEPARATE_PT()	(boot_machine.mmu_separate_pt)
-# else	/* ! E2K_P2V */
-#  define	MMU_IS_PT_V6()		(machine.mmu_pt_v6)
-#  define	MMU_IS_SEPARATE_PT()	(machine.mmu_separate_pt)
-# endif	/* E2K_P2V */
-#endif	/* CONFIG_CPU_ISET 0-6 */
+#define MMU_IS_SEPARATE_PT()	cpu_has(CPU_FEAT_SEP_VIRT_SPACE)
+#define MMU_IS_PT_V6()		cpu_has(CPU_FEAT_PAGE_TABLE_V6)
 
 /* max. number of physical address bits (architected) */
 #define E2K_MAX_PHYS_BITS_V3	40	/* on V1-V5 */
@@ -145,23 +106,11 @@ typedef enum uni_page_bits {
 	UNI_PAGE_PFN_BIT,		/* Physical Page Number field */
 	UNI_PAGE_MEM_TYPE_BIT,		/* Memory Type field */
 	UNI_PAGE_MEM_TYPE_RULE_BIT,	/* Memory Type Combination Rule field */
-	UNI_PAGE_MEM_TYPE_MA_BIT,	/* Memory Type to memory access */
-					/* DTLB field */
-	UNI_PAGE_WRITE_INT_BIT,		/* Write protected physical address */
-					/* DTLB field */
 	UNI_PAGE_INTL_RD_BIT,		/* Intel Read protection */
 					/* DTLB field */
 	UNI_PAGE_INTL_WR_BIT,		/* Intel Write protection */
 					/* DTLB field */
-	UNI_DTLB_EP_RES_BIT,		/* DTLB entry probe result field */
-					/* for successful probe completion */
-	UNI_DTLB_PH_ADDR_AP_RES_BIT,	/* physical address for successful */
-					/* DTLB address probe result */
-	UNI_DTLB_ERROR_MASK_BIT,	/* DTLB entry probe faults mask */
-					/* for unsuccessful probe completion */
 	UNI_DTLB_MISS_LEVEL_BIT,	/* miss level DTLB field */
-	UNI_DTLB_SUCCESSFUL_BIT,	/* seccessful translation flag */
-					/* for DTLB probe operation */
 	UNI_DTLB_RES_BITS_BIT,		/* reserved bits of DTLB probe */
 					/* result */
 } uni_page_bits_t;
@@ -188,16 +137,9 @@ typedef const unsigned long	uni_dtlb_t;
 #define	UNI_PAGE_MEM_TYPE	(uni_pteval_t)(1ULL << UNI_PAGE_MEM_TYPE_BIT)
 #define	UNI_PAGE_MEM_TYPE_RULE	\
 		(uni_pteval_t)(1ULL << UNI_PAGE_MEM_TYPE_RULE_BIT)
-#define	UNI_PAGE_MEM_TYPE_MA	(uni_dtlb_t)(1ULL << UNI_PAGE_MEM_TYPE_MA_BIT)
-#define	UNI_PAGE_WRITE_INT	(uni_dtlb_t)(1ULL << UNI_PAGE_WRITE_INT_BIT)
 #define	UNI_PAGE_INTL_RD	(uni_dtlb_t)(1ULL << UNI_PAGE_INTL_RD_BIT)
 #define	UNI_PAGE_INTL_WR	(uni_dtlb_t)(1ULL << UNI_PAGE_INTL_WR_BIT)
-#define	UNI_DTLB_EP_RES		(uni_dtlb_t)(1ULL << UNI_DTLB_EP_RES_BIT)
-#define	UNI_DTLB_PH_ADDR_AP_RES	\
-		(uni_dtlb_t)(1ULL << UNI_DTLB_PH_ADDR_AP_RES_BIT)
-#define	UNI_DTLB_ERROR_MASK	(uni_dtlb_t)(1ULL << UNI_DTLB_ERROR_MASK_BIT)
 #define	UNI_DTLB_MISS_LEVEL	(uni_dtlb_t)(1ULL << UNI_DTLB_MISS_LEVEL_BIT)
-#define	UNI_DTLB_SUCCESSFUL	(uni_dtlb_t)(1ULL << UNI_DTLB_SUCCESSFUL_BIT)
 #define	UNI_DTLB_RES_BITS	(uni_dtlb_t)(1ULL << UNI_DTLB_RES_BITS_BIT)
 
 /*

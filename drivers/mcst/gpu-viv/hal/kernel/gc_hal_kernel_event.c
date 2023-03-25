@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -177,7 +177,7 @@ gckEVENT_IsEmpty(
     )
 {
     gceSTATUS status;
-    gctSIZE_T i;
+    gctINT i;
 
     gcmkHEADER_ARG("Event=0x%x", Event);
 
@@ -189,7 +189,7 @@ gckEVENT_IsEmpty(
     *IsEmpty = gcvTRUE;
 
     /* Walk the event queue. */
-    for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+    for (i = 0; i < Event->totalQueueCount; ++i)
     {
         /* Check whether this event is in use. */
         if (Event->queues[i].head != gcvNULL)
@@ -234,15 +234,17 @@ _TryToIdleGPU(
     gceSTATUS status;
     gctBOOL empty = gcvFALSE, idle = gcvFALSE;
     gctBOOL powerLocked = gcvFALSE;
-    gckHARDWARE hardware;
+    gckHARDWARE hardware = Event->kernel->hardware;
+#if gcdENABLE_PER_DEVICE_PM
+    gctBOOL devicePowerLocked = gcvFALSE;
+    gckDEVICE device = Event->kernel->device;
+#endif
 
     gcmkHEADER_ARG("Event=0x%x", Event);
 
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Event, gcvOBJ_EVENT);
 
-    /* Grab gckHARDWARE object. */
-    hardware = Event->kernel->hardware;
     gcmkVERIFY_OBJECT(hardware, gcvOBJ_HARDWARE);
 
     /* Check whether the event queue is empty. */
@@ -250,27 +252,141 @@ _TryToIdleGPU(
 
     if (empty)
     {
-        status = gckOS_AcquireMutex(hardware->os, hardware->powerMutex, 0);
-        if (status == gcvSTATUS_TIMEOUT)
+#if gcdENABLE_PER_DEVICE_PM
+        if (hardware->type == gcvHARDWARE_3D ||
+            hardware->type == gcvHARDWARE_3D2D ||
+            hardware->type == gcvHARDWARE_VIP)
         {
-            gcmkFOOTER_NO();
-            return gcvSTATUS_OK;
+            status = gckOS_AcquireMutex(device->os, device->powerMutex, 0);
+            if (status == gcvSTATUS_TIMEOUT)
+            {
+                gcmkFOOTER();
+                return gcvSTATUS_OK;
+            }
+
+            devicePowerLocked = gcvTRUE;
+
+            status = gckOS_AcquireMutex(hardware->os, hardware->powerMutex, 0);
+            if (status == gcvSTATUS_TIMEOUT)
+            {
+                gcmkVERIFY_OK(gckOS_ReleaseMutex(device->os, device->powerMutex));
+                gcmkFOOTER();
+                return gcvSTATUS_OK;
+            }
+
+            powerLocked = gcvTRUE;
+
+            /* Query whether the hardware is idle. */
+            gcmkONERROR(gckHARDWARE_QueryIdle(hardware, &idle));
+
+            gcmkONERROR(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
+
+            powerLocked = gcvFALSE;
+
+            if (idle)
+            {
+                gctUINT32 broCoreMask;
+                gckKERNEL kernel;
+                gctUINT i;
+
+                gcmkVERIFY_OK(gckOS_AtomGet(hardware->os, Event->kernel->atomBroCoreMask, (gctINT32_PTR)&broCoreMask));
+
+                /* I am along. */
+                if ((gceCORE)broCoreMask == hardware->core)
+                {
+                    /* Inform the system of idle GPU. */
+                    gcmkONERROR(gckOS_Broadcast(hardware->os,
+                                                hardware,
+                                                gcvBROADCAST_GPU_IDLE));
+
+                    gcmkVERIFY_OK(gckOS_ReleaseMutex(device->os, device->powerMutex));
+                    gcmkFOOTER();
+                    return gcvSTATUS_OK;
+                }
+
+                /* Check all the brother cores. */
+                for (i = 0; i < device->coreNum; i++)
+                {
+                    kernel = device->coreInfoArray[i].kernel;
+                    hardware = kernel->hardware;
+
+                    if (!hardware || ((gceCORE)i == hardware->core))
+                    {
+                        continue;
+                    }
+
+                    if ((1 << i) & broCoreMask)
+                    {
+                        status = gckOS_AcquireMutex(hardware->os, hardware->powerMutex, 0);
+                        if (status == gcvSTATUS_TIMEOUT)
+                        {
+                            gcmkVERIFY_OK(gckOS_ReleaseMutex(device->os, device->powerMutex));
+                            gcmkFOOTER();
+                            return gcvSTATUS_OK;
+                        }
+
+                        powerLocked = gcvTRUE;
+
+                        /* Query whether the hardware is idle. */
+                        gcmkONERROR(gckHARDWARE_QueryIdle(hardware, &idle));
+
+                        gcmkONERROR(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
+                        powerLocked = gcvFALSE;
+
+                        if (!idle)
+                        {
+                            /* A brother is not idle, quit. */
+                            gcmkVERIFY_OK(gckOS_ReleaseMutex(device->os, device->powerMutex));
+                            gcmkFOOTER();
+                            return gcvSTATUS_OK;
+                        }
+                    }
+                }
+
+                /* All the brothers are idle. */
+                for (i = 0; i < device->coreNum; i++)
+                {
+                    if ((1 << i) & broCoreMask)
+                    {
+                        kernel = device->coreInfoArray[i].kernel;
+                        hardware = kernel->hardware;
+
+                        /* Inform the system of idle GPU. */
+                        gcmkONERROR(gckOS_Broadcast(hardware->os,
+                                                    hardware,
+                                                    gcvBROADCAST_GPU_IDLE));
+                    }
+                }
+            }
+
+            gcmkONERROR(gckOS_ReleaseMutex(device->os, device->powerMutex));
         }
-
-        powerLocked = gcvTRUE;
-
-        /* Query whether the hardware is idle. */
-        gcmkONERROR(gckHARDWARE_QueryIdle(Event->kernel->hardware, &idle));
-
-        gcmkONERROR(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
-        powerLocked = gcvFALSE;
-
-        if (idle)
+        else
+#endif
         {
-            /* Inform the system of idle GPU. */
-            gcmkONERROR(gckOS_Broadcast(Event->os,
-                                        Event->kernel->hardware,
-                                        gcvBROADCAST_GPU_IDLE));
+            status = gckOS_AcquireMutex(hardware->os, hardware->powerMutex, 0);
+            if (status == gcvSTATUS_TIMEOUT)
+            {
+                gcmkFOOTER();
+                return gcvSTATUS_OK;
+            }
+
+            powerLocked = gcvTRUE;
+
+            /* Query whether the hardware is idle. */
+            gcmkONERROR(gckHARDWARE_QueryIdle(Event->kernel->hardware, &idle));
+
+            gcmkONERROR(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
+
+            powerLocked = gcvFALSE;
+
+            if (idle)
+            {
+                /* Inform the system of idle GPU. */
+                gcmkONERROR(gckOS_Broadcast(Event->os,
+                                            Event->kernel->hardware,
+                                            gcvBROADCAST_GPU_IDLE));
+            }
         }
     }
 
@@ -278,9 +394,16 @@ _TryToIdleGPU(
     return gcvSTATUS_OK;
 
 OnError:
+#if gcdENABLE_PER_DEVICE_PM
+    if (devicePowerLocked)
+    {
+        gcmkVERIFY_OK(gckOS_ReleaseMutex(device->os, device->powerMutex));
+    }
+#endif
+
     if (powerLocked)
     {
-        gcmkONERROR(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
+        gcmkVERIFY_OK(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
     }
 
     gcmkFOOTER();
@@ -431,7 +554,7 @@ _SubmitTimerFunction(
     )
 {
     gckEVENT event = (gckEVENT)Data;
-    gcmkVERIFY_OK(gckEVENT_Submit(event, gcvTRUE, gcvFALSE));
+    gcmkVERIFY_OK(gckEVENT_Submit(event, gcvTRUE, gcvFALSE, gcvTRUE));
 }
 
 /******************************************************************************\
@@ -518,7 +641,11 @@ gckEVENT_Construct(
         eventObj->freeList = &eventObj->repoList[i];
     }
 
-    eventObj->freeQueueCount = gcmCOUNTOF(eventObj->queues);
+    eventObj->totalQueueCount = (Command->feType == gcvHW_FE_END) ?
+                                gcdEVENT_QUEUE_COUNT - 1 :
+                                gcdEVENT_QUEUE_COUNT;
+
+    eventObj->freeQueueCount  = eventObj->totalQueueCount;
 
     gcmkONERROR(gckOS_AtomConstruct(os, &eventObj->pending));
 
@@ -742,11 +869,11 @@ gckEVENT_GetEvent(
 
         /* Walk through all events. */
         id = Event->lastID;
-        for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+        for (i = 0; i < Event->totalQueueCount; ++i)
         {
             gctINT nextID = id + 1;
 
-            if (nextID == gcmCOUNTOF(Event->queues))
+            if (nextID == Event->totalQueueCount)
             {
                 nextID = 0;
             }
@@ -1207,8 +1334,8 @@ gckEVENT_Signal(
     iface.u.Signal.process   = 0;
 
 #ifdef __QNXNTO__
-    iface.u.Signal.coid      = 0;
     iface.u.Signal.rcvid     = 0;
+    SIGEV_NONE_INIT(&iface.u.Signal.event);
 
     gcmkONERROR(gckOS_SignalPending(Event->os, Signal));
 #endif
@@ -1247,6 +1374,9 @@ OnError:
 **          Determines whether the call originates from inside the power
 **          management or not.
 **
+**      gctBOOL BroadcastCommit
+**          Determines whether broadcast the new commit arrives or not.
+**
 **  OUTPUT:
 **
 **      Nothing.
@@ -1255,7 +1385,8 @@ gceSTATUS
 gckEVENT_Submit(
     IN gckEVENT Event,
     IN gctBOOL Wait,
-    IN gctBOOL FromPower
+    IN gctBOOL FromPower,
+    IN gctBOOL BroadcastCommit
     )
 {
     gceSTATUS status;
@@ -1295,9 +1426,12 @@ gckEVENT_Submit(
     /* Are there event queues? */
     if (Event->queueHead != gcvNULL)
     {
-        /* Acquire the command queue. */
-        gcmkONERROR(gckCOMMAND_EnterCommit(command, FromPower));
-        commitEntered = gcvTRUE;
+        if (BroadcastCommit)
+        {
+            /* Acquire the command queue. */
+            gcmkONERROR(gckCOMMAND_EnterCommit(command, FromPower));
+            commitEntered = gcvTRUE;
+        }
 
         /* Get current commit stamp. */
         commitStamp = command->commitStamp;
@@ -1346,8 +1480,7 @@ gckEVENT_Submit(
             gcmkONERROR(gckOS_ReleaseMutex(Event->os, Event->eventListMutex));
             acquired = gcvFALSE;
 
-
-            if (command->feType == gcvHW_FE_WAIT_LINK)
+            if (command->feType == gcvHW_FE_WAIT_LINK || command->feType == gcvHW_FE_END)
             {
                 /* Determine cache needed to flush. */
                 gcmkVERIFY_OK(_QueryFlush(Event, Event->queues[id].head, &flush));
@@ -1411,7 +1544,7 @@ gckEVENT_Submit(
                 ));
 #endif
 
-            if (command->feType == gcvHW_FE_WAIT_LINK)
+            if (command->feType == gcvHW_FE_WAIT_LINK || command->feType == gcvHW_FE_END)
             {
                 /* Set the flush in the command queue. */
                 gcmkONERROR(gckHARDWARE_Flush(
@@ -1441,7 +1574,14 @@ gckEVENT_Submit(
                     );
 #else
                 /* Execute the hardware event. */
-                gcmkONERROR(gckCOMMAND_Execute(command, executeBytes));
+                if (command->feType == gcvHW_FE_WAIT_LINK)
+                {
+                    gcmkONERROR(gckCOMMAND_Execute(command, executeBytes));
+                }
+                else
+                {
+                    gcmkONERROR(gckCOMMAND_ExecuteEnd(command, executeBytes));
+                }
 #endif
             }
             else if (command->feType == gcvHW_FE_ASYNC)
@@ -1477,12 +1617,15 @@ gckEVENT_Submit(
             /* Notify immediately on infinite hardware. */
             gcmkONERROR(gckEVENT_Interrupt(Event, 1 << id));
 
-            gcmkONERROR(gckEVENT_Notify(Event, 0));
+            gcmkONERROR(gckEVENT_Notify(Event, 0, gcvNULL));
 #endif
         }
 
-        /* Release the command queue. */
-        gcmkONERROR(gckCOMMAND_ExitCommit(command, FromPower));
+        if (BroadcastCommit)
+        {
+            /* Release the command queue. */
+            gcmkONERROR(gckCOMMAND_ExitCommit(command, FromPower));
+        }
 
 #if !gcdNULL_DRIVER
         if (!FromPower)
@@ -1588,7 +1731,7 @@ gckEVENT_PreemptCommit(
 
 
     /* Submit the event list. */
-    gcmkONERROR(gckEVENT_Submit(Event, gcvTRUE, gcvFALSE));
+    gcmkONERROR(gckEVENT_Submit(Event, gcvTRUE, gcvFALSE, gcvTRUE));
 
     /* Success */
     gcmkFOOTER_NO();
@@ -1618,6 +1761,8 @@ OnError:
 **      gctBOOL Forced
 **          Force fire a event. There won't be interrupt if there's no events
             queued. Force a event by append a dummy one if this parameter is on.
+**      gctBOOL Submit
+**          Submit event or not.
 **
 **  OUTPUT:
 **
@@ -1627,7 +1772,8 @@ gceSTATUS
 gckEVENT_Commit(
     IN gckEVENT Event,
     IN gcsQUEUE_PTR Queue,
-    IN gctBOOL Forced
+    IN gctBOOL Forced,
+    IN gctBOOL Submit
     )
 {
     gceSTATUS status;
@@ -1704,8 +1850,11 @@ gckEVENT_Commit(
         gcmkONERROR(gckEVENT_AddList(Event, &iface, gcvKERNEL_PIXEL, gcvFALSE, gcvTRUE));
     }
 
-    /* Submit the event list. */
-    gcmkONERROR(gckEVENT_Submit(Event, gcvTRUE, gcvFALSE));
+    if (Submit)
+    {
+        /* Submit the event list. */
+        gcmkONERROR(gckEVENT_Submit(Event, gcvTRUE, gcvFALSE, gcvTRUE));
+    }
 
     /* Success */
     gcmkFOOTER_NO();
@@ -1758,7 +1907,7 @@ gckEVENT_Interrupt(
         gctINT j = 0;
         gctINT32 oldValue;
 
-        for (j = 0; j < gcmCOUNTOF(Event->queues); j++)
+        for (j = 0; j < Event->totalQueueCount; j++)
         {
             if ((Data & (1 << j)))
             {
@@ -1792,7 +1941,8 @@ gckEVENT_Interrupt(
 gceSTATUS
 gckEVENT_Notify(
     IN gckEVENT Event,
-    IN gctUINT32 IDs
+    IN gctUINT32 IDs,
+    OUT gceEVENT_FAULT *Fault
     )
 {
     gceSTATUS status = gcvSTATUS_OK;
@@ -1802,6 +1952,7 @@ gckEVENT_Notify(
     gctBOOL acquired = gcvFALSE;
     gctSIGNAL signal;
     gctUINT pending = 0;
+    gceEVENT_FAULT fault = gcvEVENT_NO_FAULT;
 
 #if gcmIS_DEBUG(gcdDEBUG_TRACE)
     gctINT eventNumber = 0;
@@ -1816,7 +1967,7 @@ gckEVENT_Notify(
     gcmDEBUG_ONLY(
         if (IDs != 0)
         {
-            for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+            for (i = 0; i < Event->totalQueueCount; ++i)
             {
                 if (Event->queues[i].head != gcvNULL)
                 {
@@ -1858,13 +2009,19 @@ gckEVENT_Notify(
         if (pending & 0x80000000)
         {
             gcmkPRINT("AXI BUS ERROR");
-            gckHARDWARE_DumpGPUState(Event->kernel->hardware);
             pending &= 0x7FFFFFFF;
+
+            fault |= gcvEVENT_BUS_ERROR_FAULT;
         }
 
         if ((pending & 0x40000000) && Event->kernel->hardware->mmuVersion)
         {
 #if gcdUSE_MMU_EXCEPTION
+
+#if defined(EMULATOR) || defined(LINUXEMULATOR)
+            gcmkPRINT("MMU exception is detected.\n");
+#endif
+
 #if gcdALLOC_ON_FAULT
             status = gckHARDWARE_HandleFault(Event->kernel->hardware);
 #endif
@@ -1892,7 +2049,7 @@ gckEVENT_Notify(
         gcmDEBUG_ONLY(
             if (IDs == 0)
             {
-                for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+                for (i = 0; i < Event->totalQueueCount; ++i)
                 {
                     if (Event->queues[i].head != gcvNULL)
                     {
@@ -1907,7 +2064,7 @@ gckEVENT_Notify(
         );
 
         /* Find the oldest pending interrupt. */
-        for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+        for (i = 0; i < Event->totalQueueCount; ++i)
         {
             if ((Event->queues[i].head != gcvNULL)
             &&  (pending & (1 << i))
@@ -1935,6 +2092,12 @@ gckEVENT_Notify(
                 pending
                 );
 
+            /* Clear the BUS ERROR event. */
+            if (fault & gcvEVENT_BUS_ERROR_FAULT)
+            {
+                pending |= (1 << 31);
+            }
+
             gckOS_AtomClearMask(Event->pending, pending);
 
             /* Release the mutex queue. */
@@ -1944,7 +2107,7 @@ gckEVENT_Notify(
         }
 
         /* Check whether there is a missed interrupt. */
-        for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+        for (i = 0; i < Event->totalQueueCount; ++i)
         {
             if ((Event->queues[i].head != gcvNULL)
             &&  (Event->queues[i].stamp < queue->stamp)
@@ -2084,7 +2247,7 @@ gckEVENT_Notify(
                                signal);
 
 #ifdef __QNXNTO__
-                if ((record->info.u.Signal.coid == 0)
+                if ((record->info.u.Signal.event.sigev_notify == SIGEV_NONE)
                 &&  (record->info.u.Signal.rcvid == 0)
                 )
                 {
@@ -2100,7 +2263,7 @@ gckEVENT_Notify(
                         gckOS_UserSignal(Event->os,
                                          signal,
                                          record->info.u.Signal.rcvid,
-                                         record->info.u.Signal.coid));
+                                         &record->info.u.Signal.event));
                 }
 #else
                 /* Set signal. */
@@ -2204,6 +2367,11 @@ gckEVENT_Notify(
     /* End of event handling. */
     Event->notifyState = -1;
 
+    if (Fault != gcvNULL)
+    {
+        *Fault = fault;
+    }
+
     /* Success. */
     gcmkFOOTER_NO();
     return gcvSTATUS_OK;
@@ -2246,7 +2414,7 @@ gckEVENT_FreeProcess(
     IN gctUINT32 ProcessID
     )
 {
-    gctSIZE_T i;
+    gctINT i;
     gctBOOL acquired = gcvFALSE;
     gcsEVENT_PTR record, next;
     gceSTATUS status;
@@ -2258,7 +2426,7 @@ gckEVENT_FreeProcess(
     gcmkVERIFY_OBJECT(Event, gcvOBJ_EVENT);
 
     /* Walk through all queues. */
-    for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+    for (i = 0; i < Event->totalQueueCount; ++i)
     {
         if (Event->queues[i].head != gcvNULL)
         {
@@ -2434,7 +2602,7 @@ gckEVENT_Dump(
     }
 
     gcmkPRINT("  Untriggered Event:");
-    for (i = 0; i < gcmCOUNTOF(Event->queues); i++)
+    for (i = 0; i < Event->totalQueueCount; i++)
     {
         queue = &Event->queues[i];
         record = queue->head;

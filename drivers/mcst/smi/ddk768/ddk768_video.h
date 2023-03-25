@@ -21,6 +21,8 @@
   
    Note: The 8-bit index and RGB 8:8:8 formats are not supported
  */
+#include "../smi_drv.h"
+
 typedef enum _video_format_t
 {
     FORMAT_RGB565 = 0,
@@ -80,6 +82,7 @@ video_ctrl_t;
  *      heightAdjustment    - Height adjustment in line        
  */
 void videoSetWindowAdjustment(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     short widthAdjustment,
     short heightAdjustment
@@ -134,6 +137,7 @@ void videoEnableDoubleBuffer(
  *      1 - Flip pending
  */
 unsigned long videoGetBufferStatus(
+	struct smi_device *sdev,
     unsigned long bufferIndex
 );
 
@@ -148,6 +152,7 @@ unsigned long videoGetBufferStatus(
  *      The video buffer of the requested index.
  */
 unsigned long videoGetBuffer(
+	struct smi_device *sdev,
     unsigned char bufferIndex
 );
 
@@ -160,6 +165,7 @@ unsigned long videoGetBuffer(
  *      bufferStartAddress  - The starting address of the buffer
  */
 void videoSetBuffer(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned char bufferIndex,          /* The index of the buffer to be set. */
     unsigned long bufferStartAddress    /* Video buffer with 128-bit alignment */
@@ -173,6 +179,7 @@ void videoSetBuffer(
  *      bufferStartAddress  - The starting address of the buffer
  */
 void videoSetUVBuffer(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long bufferStartUAddress,    /* Video buffer with 128-bit alignment */
     unsigned long bufferStartVAddress    /* Video buffer with 128-bit alignment */
@@ -189,6 +196,7 @@ void videoSetUVBuffer(
  *                        of the video plane.
  */
 void videoSetPitchOffset(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned short pitch,
     unsigned short lineOffset
@@ -205,6 +213,7 @@ void videoSetPitchOffset(
  *                        of the video plane.
  */
 void videoSetUVPitchOffset(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned short pitch,
     unsigned short lineOffset
@@ -218,7 +227,7 @@ void videoSetUVPitchOffset(
  *      pitch   - Number of bytes per line of the video plane 
  *                specified in 128-bit aligned bytes.
  */
-unsigned short videoGetPitch(void);
+unsigned short videoGetPitch(struct smi_device *sdev);
 
 /*
  * videoGetLineOffset
@@ -228,7 +237,7 @@ unsigned short videoGetPitch(void);
  *      lineOffset  - Number of 128-bit aligned bytes per line 
  *                    of the video plane.
  */
-unsigned short videoGetLineOffset(void);
+unsigned short videoGetLineOffset(struct smi_device *sdev);
 /*
  *  videoSetLast 
  *      This function sets the video source last lines and width.
@@ -253,6 +262,7 @@ void videoSetLast(
  *      height      - Video Window height
  */
 void videoSetWindowSize(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long width,
     unsigned long height
@@ -267,6 +277,7 @@ void videoSetWindowSize(
  *      height      - Video Window height
  */
 void videoGetWindowSize(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long *pWidth,
     unsigned long *pHeight
@@ -281,6 +292,7 @@ void videoGetWindowSize(
  *      startY      - Y Coordinate of the video window starting position
  */
 void videoSetPosition(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long startX,
     unsigned long startY
@@ -298,6 +310,7 @@ void videoSetPosition(
  *      blueConstant    - Blue Constant Value
  */
 void videoSetConstants(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned char  yConstant,               /* Y Adjustment */
     unsigned char  redConstant,             /* Red Conversion constant */
@@ -315,6 +328,7 @@ void videoSetConstants(
  *      bufferInitScale     - Buffer Initial vertical scale value
  */
 void videoSetInitialScale(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned short InitScaleHorizontal,
     unsigned short InitScaleVertical
@@ -353,8 +367,9 @@ void videoSetSourceBuffer(
  *      byteSwap    - Flag to enable/disable YUV data byte swap.
  */
 void videoSwapYUVByte(
+	struct smi_device *sdev,
    unsigned dispCtrl,
-   video_byteswap_t byteSwap  
+	video_byteswap_t byteSwap
 );
 
 /*
@@ -366,6 +381,7 @@ void videoSwapYUVByte(
  *      enableVertInterpolation   - Flag to enable/disable Vertical interpolation
  */
 void videoSetInterpolation(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long enableHorzInterpolation,
     unsigned long enableVertInterpolation
@@ -380,6 +396,7 @@ void videoSetInterpolation(
  *      pVertInterpolationStatus	- Pointer to store the vertical interpolation status
  */
 void videoGetInterpolation(
+	struct smi_device *sdev,
     unsigned long *pHorzInterpolationStatus,
     unsigned long *pVertInterpolationStatus
 );
@@ -392,6 +409,7 @@ void videoGetInterpolation(
  *      startPixel  - Starting pixel number for smooth pixel panning
  */
 void videoSetStartPanningPixel(
+	struct smi_device *sdev,
     unsigned char startPixel
 );
 
@@ -407,6 +425,7 @@ void videoSetStartPanningPixel(
  *      without proper format will have no effect.
  */
 void videoSetGammaCtrl(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long enableGammaCtrl
 );
@@ -419,7 +438,7 @@ void videoSetGammaCtrl(
  *      0   - Disable
  *      1   - Enable
  */
-unsigned char isVideoEnable(void);
+unsigned char isVideoEnable(struct smi_device *sdev);
 
 /*
  *  videoSetEdgeDetection
@@ -484,6 +503,7 @@ unsigned long videoGetEdgeDetection(
  *     -1  - Fail
  */
 unsigned char videoSetupEx(
+	struct smi_device *sdev,
 	unsigned dispCtrl,
     unsigned long x,                /* X Coordinate of the video window */
     unsigned long y,                /* Y Coordinate of the video window */
@@ -530,6 +550,7 @@ unsigned char videoSetupEx(
  *     -1  - Fail
  */
 unsigned char videoSetup(
+	struct smi_device *sdev,
     disp_control_t dispCtrl,
     unsigned long x,                /* X Coordinate of the video window */
     unsigned long y,                /* Y Coordinate of the video window */
@@ -553,12 +574,12 @@ unsigned char videoSetup(
  *  startVideo
  *      This function starts the video.
  */
-void startVideo(unsigned dispCtrl);
+void startVideo(struct smi_device *sdev, unsigned dispCtrl);
 
 /*
  *  stopVideo
  *      This function stops the video.
  */
-void stopVideo(unsigned dispCtrl);
+void stopVideo(struct smi_device *sdev, unsigned dispCtrl);
 
 

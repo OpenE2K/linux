@@ -10,12 +10,14 @@
 #include <linux/sched/debug.h>
 #include <linux/sched/task.h>
 #include <linux/err.h>
+#include <linux/processor.h>
 
 #include <asm/pic.h>
 #include <asm/cpu.h>
 #include <asm/smp-boot.h>
 #include <asm/kvm/hypercall.h>
 #include <asm/kvm/guest/irq.h>
+#include <asm/kvm/guest/host_printk.h>
 
 #include "cpu.h"
 #include "pic.h"
@@ -37,6 +39,9 @@
 	if (DEBUG_SWITCH_KERNEL_STACKS_MODE)				\
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
+
+#define CREATE_TRACE_POINTS
+#include "trace-csd-lock.h"
 
 void kvm_ap_switch_to_init_stack(e2k_addr_t stack_base, int cpuid, int cpu)
 {
@@ -105,6 +110,24 @@ void kvm_setup_secondary_task(int cpu)
 	ti_idle->gmmid_nr = 0;	/* init mm should have GMMID == 0 */
 }
 
+void kvm_stop_this_cpu_ipi(void *dummy)
+{
+	raw_all_irq_disable();
+
+	set_cpu_online(smp_processor_id(), false);
+
+	spin_begin();
+
+	/* IRQs should be enabled to handle pending VIRQs */
+	raw_all_irq_enable();
+
+	do {
+		spin_cpu_relax();
+	} while (true);
+
+	spin_end();
+}
+
 /*
  * The function implements asynchronous wait for csd lock unlocking.
  * In this case csd_lock_wait() has not explicit call and waiting will be
@@ -116,9 +139,12 @@ static inline void kvm_csd_lock_try_wait(call_single_data_t *data)
 {
 	int ret;
 
+	trace_kvm_csd_lock_try_wait(data, CSD_LOCK_TRY_WAIT_CTL,
+				NATIVE_NV_READ_CR0_HI_REG().CR0_hi_IP);
 	ret = HYPERVISOR_guest_csd_lock_try_wait(data);
 	if (ret == -EBUSY) {
 		/* other VCPUs cannot handle IPI, try show all stacks */
+		trace_kvm_csd_ctl_failed(data, CSD_LOCK_TRY_WAIT_CTL, ret);
 		if (kvm_get_vcpu_state()->do_dump_state) {
 			kvm_get_vcpu_state()->do_dump_state = false;
 			show_state();
@@ -140,17 +166,31 @@ void kvm_csd_lock_wait(call_single_data_t *data)
 	int ret;
 
 	do {
+		trace_kvm_csd_lock_wait(data, CSD_LOCK_WAIT_CTL,
+				NATIVE_NV_READ_CR0_HI_REG().CR0_hi_IP);
 		ret = HYPERVISOR_guest_csd_lock_wait(data);
-		if (ret == -EBUSY) {
-			/* other VCPUs cannot handle IPI, try show all stacks */
-			show_state();
-			panic("could not handle IPI by all VCPUs\n");
+		if (likely(ret == 0)) {
+			break;
+		} else if (ret == -EAGAIN) {
+			/* lock was interrupted to handle pending virqs */
+			/* and support interprocessors IPI towards each other */
+			trace_kvm_csd_ctl_failed(data, CSD_LOCK_WAIT_CTL, ret);
+			continue;
+		} else if (ret == -EBUSY) {
+			/* other VCPUs cannot handle IPI */
+			trace_kvm_csd_ctl_failed(data, CSD_LOCK_WAIT_CTL, ret);
+			panic("%s(): could not handle IPI by all VCPUs\n",
+				__func__);
+			break;
 		}
-	} while (smp_load_acquire(&data->flags) & CSD_FLAG_LOCK);
+	} while (true);
+	smp_cond_load_acquire(&data->flags, !(VAL & CSD_FLAG_LOCK));
 }
 
 void kvm_csd_lock(call_single_data_t *data)
 {
+	int ret;
+
 	if (likely(!(smp_load_acquire(&data->flags) & CSD_FLAG_LOCK))) {
 		/* lock should be already released and in the host queue */
 		/* and need be unqueued or lock is free */
@@ -169,7 +209,17 @@ void kvm_csd_lock(call_single_data_t *data)
 	data->flags |= CSD_FLAG_LOCK;
 
 	/* register lock wait guest on host */
-	HYPERVISOR_guest_csd_lock(data);
+	trace_kvm_csd_lock(data, CSD_LOCK_CTL,
+		NATIVE_NV_READ_CR0_HI_REG().CR0_hi_IP);
+
+	ret = HYPERVISOR_guest_csd_lock(data);
+	if (ret != 0) {
+		/* other VCPUs cannot handle IPI */
+		trace_kvm_csd_ctl_failed(data, CSD_LOCK_CTL, ret);
+		panic("%s(): could not handle IPI by all VCPUs\n",
+			__func__);
+	}
+	trace_kvm_csd_ctl_succeeded(data, CSD_LOCK_CTL);
 }
 
 void kvm_arch_csd_lock_async(call_single_data_t *data)
@@ -185,6 +235,8 @@ void kvm_arch_csd_lock_async(call_single_data_t *data)
 
 	/* asynchronous lock need not register on host */
 	/* HYPERVISOR_guest_csd_lock(data); */
+	trace_kvm_csd_lock(data, CSD_LOCK_CTL,
+			NATIVE_NV_READ_CR0_HI_REG().CR0_hi_IP);
 }
 
 void kvm_csd_unlock(call_single_data_t *data)
@@ -194,13 +246,25 @@ void kvm_csd_unlock(call_single_data_t *data)
 	WARN_ON(!(flags & CSD_FLAG_LOCK));
 
 	/* wake up sychronous lock waiting guest on host */
-	if (!(flags & CSD_FLAG_LOCK_ASYNC))
-		HYPERVISOR_guest_csd_unlock(data);
+	if (!(flags & CSD_FLAG_LOCK_ASYNC)) {
+		int ret;
+
+		trace_kvm_csd_unlock(data, CSD_UNLOCK_CTL,
+				NATIVE_NV_READ_CR0_HI_REG().CR0_hi_IP);
+		ret = HYPERVISOR_guest_csd_unlock(data);
+		if (ret != 0) {
+			/* other VCPUs cannot handle IPI */
+			trace_kvm_csd_ctl_failed(data, CSD_UNLOCK_CTL, ret);
+			panic("%s(): could not handle IPI by all VCPUs\n",
+				__func__);
+		}
+	}
 
 	/* ensure we're all done before releasing data */
 	smp_mb();
 
 	data->flags &= ~(CSD_FLAG_LOCK | CSD_FLAG_LOCK_ASYNC);
+	trace_kvm_csd_ctl_succeeded(data, CSD_UNLOCK_CTL);
 }
 
 void kvm_setup_pic_virq(unsigned int cpuid)

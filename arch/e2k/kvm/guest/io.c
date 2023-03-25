@@ -540,23 +540,23 @@ void kvm_scr_writew(u16 w, volatile u16 *addr)
 {
 	DebugKVMIO("started to write halfword 0x%04x to VGA VRAM addr %px\n",
 		w, addr);
-	kvm_vga_vram_access((void *)addr, w, 2, true);
+	kvm_vga_vram_access((void *) addr, w, 2, true);
 }
 u16 kvm_scr_readw(volatile const u16 *addr)
 {
 	DebugKVMIO("started to read halfword from VGA VRAM addr %px\n", addr);
-	return kvm_vga_vram_access((void *)addr, 0, 2, false);
+	return kvm_vga_vram_access((void *) addr, 0, 2, false);
 }
-void kvm_vga_writeb(u8 b, volatile u8 *addr)
+void kvm_vga_writeb(u8 b, u8 *addr)
 {
 	DebugKVMIO("started to write byte 0x%02x to VGA VRAM addr %px\n",
 		b, addr);
-	kvm_vga_vram_access((void *)addr, b, 1, true);
+	kvm_vga_vram_access(addr, b, 1, true);
 }
-u8 kvm_vga_readb(volatile const u8 *addr)
+u8 kvm_vga_readb(const u8 *addr)
 {
 	DebugKVMIO("started to read byte from VGA VRAM addr %px\n", addr);
-	return kvm_vga_vram_access((void *)addr, 0, 1, false);
+	return kvm_vga_vram_access((void *) addr, 0, 1, false);
 }
 
 unsigned long kvm_notify_io(unsigned int notifier_io)

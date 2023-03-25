@@ -197,6 +197,12 @@ typedef struct gthread_info {
 	kvm_signal_context_t signal;	/* the host kernel's signal/trap */
 					/* stack of contexts */
 
+	/* to save/restore jump point, if recovery operation failed */
+	unsigned long recovery_pfault_jump;
+
+	/* to save/restore page fault jump point, if access to user failed */
+	unsigned long usr_pfault_jump;
+
 	/* follow pointer should be updated by each recursive traps, */
 	/* system calls, signal handler running */
 	gpt_regs_t	*gpt_regs;	/* pointer to current state of */

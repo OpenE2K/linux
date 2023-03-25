@@ -4,8 +4,6 @@
  * Network part - ethtool support
  */
 
-#include <asm/uaccess.h>
-
 #include "mxgbe.h"
 #include "mxgbe_mac.h"
 #include "mxgbe_hw.h"

@@ -270,7 +270,7 @@ static int smi_vram_init(struct smi_device *cdev)
 	if(g_specId == SPC_SM750)
 		cdev->mc.vram_size = ddk750_getFrameBufSize();
 	else
-		cdev->mc.vram_size = ddk768_getFrameBufSize();
+		cdev->mc.vram_size = ddk768_getFrameBufSize(cdev);
 
 	if (!request_mem_region(cdev->mc.vram_base, cdev->mc.vram_size,
 				"smidrmfb_vram")) {
@@ -334,8 +334,12 @@ int smi_device_init(struct smi_device *cdev,
 
 	if(g_specId == SPC_SM750)
 		ddk750_set_mmio(cdev->rmmio,pdev->device,pdev->revision);
-	else
-		ddk768_set_mmio(cdev->rmmio,pdev->device,pdev->revision);
+	else {
+	/*	ddk768_set_mmio(cdev->rmmio,pdev->device,pdev->revision); */
+		cdev->devId = pdev->device;
+		cdev->revId = pdev->revision;
+		printk(KERN_INFO "Found SM768 SOC Chip\n");
+	}
 
 	ddev->dev->of_node =
 		of_find_compatible_node(NULL, NULL, "smi,smi");
@@ -362,13 +366,13 @@ void smi_device_fini(struct smi_device *cdev)
 void drm_kms_helper_poll_init(struct drm_device *dev);
 int smi_driver_load(struct drm_device *dev, unsigned long flags)
 {
-	struct smi_device *cdev;
+	struct smi_device *sdev;
 	int r;
 
-	cdev = kzalloc(sizeof(struct smi_device), GFP_KERNEL);
-	if (cdev == NULL)
+	sdev = kzalloc(sizeof(struct smi_device), GFP_KERNEL);
+	if (sdev == NULL)
 		return -ENOMEM;
-	dev->dev_private = (void *)cdev;
+	dev->dev_private = (void *)sdev;
 
 	r = pci_enable_device(dev->pdev);
 	if (r) {
@@ -376,7 +380,7 @@ int smi_driver_load(struct drm_device *dev, unsigned long flags)
 		goto out;
 	}
 
-	r = smi_device_init(cdev, dev, dev->pdev, flags);
+	r = smi_device_init(sdev, dev, dev->pdev, flags);
 	if (r) {
 		dev_err(&dev->pdev->dev, "Fatal error during GPU init: %d\n", r);
 		goto out;
@@ -398,15 +402,15 @@ int smi_driver_load(struct drm_device *dev, unsigned long flags)
 	}
 	else
 	{
-		ddk768_initChip();
-		ddk768_deInit();
-		hw768_init_hdmi();
+		ddk768_initChip(sdev);
+		ddk768_deInit(sdev);
+		hw768_init_hdmi(sdev);
 #ifdef AUDIO_EN
 		smi_audio_init(dev);
 #endif
 	}
 	
-	r = smi_mm_init(cdev);
+	r = smi_mm_init(sdev);
 	if (r){
 		dev_err(&dev->pdev->dev, "fatal err on mm init\n");
 		goto out;
@@ -425,14 +429,14 @@ int smi_driver_load(struct drm_device *dev, unsigned long flags)
 			DRM_ERROR("install irq failed , ret = %d\n", ret);
 	
 	dev->mode_config.funcs = (void *)&smi_mode_funcs;
-	r = smi_modeset_init(cdev);
+	r = smi_modeset_init(sdev);
 	if (r){
 		dev_err(&dev->pdev->dev, "Fatal error during modeset init: %d\n", r);
 		goto out;
 	}
 
-	cdev->regsave = vmalloc(1024);
-	if(!cdev->regsave)
+	sdev->regsave = vmalloc(1024);
+	if (!sdev->regsave)
 	{
 		printk("cannot allocate regsave\n");
 		//return -ENOMEM;

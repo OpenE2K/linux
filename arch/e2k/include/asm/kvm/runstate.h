@@ -8,6 +8,8 @@
 #include <linux/kvm_host.h>
 #include <linux/irqflags.h>
 
+#include <asm/kvm/switch.h>
+
 /*
  * VCPU state structure contains virtual CPU running state info.
  * The structure is common for host and guest and can (and should)
@@ -339,7 +341,6 @@ kvm_get_guest_running_time(struct kvm_vcpu *vcpu)
 	return running;
 }
 
-#define	CONFIG_DEBUG_VCPU_RUNSTATE
 #ifndef	CONFIG_DEBUG_VCPU_RUNSTATE
 /* guest VCPU run state should be updated in traps and interrupts */
 static inline void
@@ -347,13 +348,16 @@ kvm_set_guest_runstate_in_user_trap(void)
 {
 	thread_info_t *ti = current_thread_info();
 	struct kvm_vcpu *vcpu;
+	struct pt_regs *regs = ti->pt_regs;
 
-	if (!test_ti_thread_flag(ti, TIF_VIRTUALIZED_GUEST))
+	if (likely(!test_ti_is_vcpu_thread(ti)))
 		return;
-	vcpu = ti->vcpu;
+	if (!regs || !kvm_test_intc_emul_flag(regs))
+		return;
+	vcpu = ti->is_vcpu;
 	BUG_ON(vcpu == NULL);
-	BUG_ON(!irqs_disabled());
-	BUG_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_running);
+	BUG_ON(!psr_and_upsr_irqs_disabled());
+	WARN_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_in_intercept);
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_trap);
 }
 static inline void
@@ -361,30 +365,41 @@ kvm_set_guest_runstate_out_user_trap(void)
 {
 	thread_info_t *ti = current_thread_info();
 	struct kvm_vcpu *vcpu;
+	struct pt_regs *regs = ti->pt_regs;
 
-	if (!test_ti_thread_flag(ti, TIF_VIRTUALIZED_GUEST))
+	if (likely(!test_ti_is_vcpu_thread(ti)))
 		return;
-	vcpu = ti->vcpu;
-	BUG_ON(vcpu == NULL);
-	BUG_ON(!irqs_disabled());
-	BUG_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_in_trap);
-	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
+	if (!regs || !kvm_test_intc_emul_flag(regs))
+		return;
+	vcpu = ti->is_vcpu;
+	if (vcpu == NULL)
+		return;
+	BUG_ON(!psr_and_upsr_irqs_disabled());
+	WARN_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_in_trap);
+	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
 }
 static inline int
 kvm_set_guest_runstate_in_kernel_trap(void)
 {
 	thread_info_t *ti = current_thread_info();
 	struct kvm_vcpu *vcpu;
+	struct pt_regs *regs = ti->pt_regs;
 	int cur_runstate;
 
-	if (!test_ti_thread_flag(ti, TIF_VIRTUALIZED_GUEST))
+	if (likely(!test_ti_is_vcpu_thread(ti)))
 		return -1;
-	vcpu = ti->vcpu;
+	if (!regs || !kvm_test_intc_emul_flag(regs))
+		return -1;
+	vcpu = ti->is_vcpu;
 	if (vcpu == NULL)
-		return -1;	/* It is VIRQ VCPU: run state is unused */
-	BUG_ON(!irqs_disabled());
+		return -1;
+	BUG_ON(!psr_and_upsr_irqs_disabled());
 	cur_runstate = kvm_get_guest_vcpu_runstate(vcpu);
-	BUG_ON(cur_runstate != RUNSTATE_running);
+	if (cur_runstate == RUNSTATE_offline)
+		/* VCPU is not yet started */
+		return -1;
+	WARN_ON(cur_runstate == RUNSTATE_running &&
+		!test_ti_thread_flag(ti, TIF_GENERIC_HYPERCALL));
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_trap);
 	return cur_runstate;
 }
@@ -393,14 +408,22 @@ kvm_set_guest_runstate_out_kernel_trap(int saved_runstate)
 {
 	thread_info_t *ti = current_thread_info();
 	struct kvm_vcpu *vcpu;
+	struct pt_regs *regs = ti->pt_regs;
+	int cur_runstate;
 
-	if (!test_ti_thread_flag(ti, TIF_VIRTUALIZED_GUEST))
+	if (likely(!test_ti_is_vcpu_thread(ti)))
 		return;
-	vcpu = ti->vcpu;
+	if (!regs || !kvm_test_intc_emul_flag(regs))
+		return;
+	vcpu = ti->is_vcpu;
 	if (vcpu == NULL)
-		return;	/* It is VIRQ VCPU: run state is unused */
-	BUG_ON(!irqs_disabled());
-	BUG_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_in_trap);
+		return;
+	BUG_ON(!psr_and_upsr_irqs_disabled());
+	cur_runstate = kvm_get_guest_vcpu_runstate(vcpu);
+	if (cur_runstate == RUNSTATE_offline)
+		/* VCPU is not yet started */
+		return;
+	WARN_ON(cur_runstate != RUNSTATE_in_trap);
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, saved_runstate);
 }
 #else	/* CONFIG_DEBUG_VCPU_RUNSTATE */

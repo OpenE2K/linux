@@ -116,8 +116,9 @@ void kvm_correct_trap_return_ip(struct pt_regs *regs, unsigned long return_ip)
 	native_correct_trap_return_ip(regs, return_ip);
 	ret = HYPERVISOR_correct_trap_return_ip(return_ip);
 	if (ret) {
-		pr_err("%s(): hypervisor could not coorect IP to return, "
-			"error %d\n",
+		user_exit();
+		pr_err("%s(): kill user: hypervisor could not coorect IP "
+			"to return, error %d\n",
 			__func__, ret);
 		do_exit(SIGKILL);
 	}
@@ -1025,25 +1026,21 @@ void kvm_guest_mkctxt_trampoline(void)
 			goto exit_;
 		}
 		uc_link = (struct ucontext *) ucontext_64;
-	} else {
+	}
+#ifdef CONFIG_PROTECTED_MODE
+	else {
 		/* CTX_128_BIT */
 		e2k_ptr_t ptr;
 		u64 lo_val, hi_val;
-		u8 lo_tag, hi_tag;
-		u8 tag;
-		u32 size;
+		u32 size, tag;
 
-		TRY_USR_PFAULT {
-			load_qvalue_and_tagq((e2k_addr_t)ctx->p_uc_link,
-					&lo_val, &hi_val, &lo_tag, &hi_tag);
-		} CATCH_USR_PFAULT {
+		if (get_user_tagged_16(lo_val, hi_val, tag, (u64 *) ctx->p_uc_link)) {
 			ret = -EFAULT;
 			goto exit_;
-		} END_USR_PFAULT
+		}
 		AW(ptr).lo = lo_val;
 		AW(ptr).hi = hi_val;
 		size = AS(ptr).size - AS(ptr).curptr;
-		tag = (hi_tag << 4) | lo_tag;
 
 		/*
 		 * Check that the pointer is good.
@@ -1053,8 +1050,7 @@ void kvm_guest_mkctxt_trampoline(void)
 			/* NULL pointer, just return */
 			goto exit_;
 		if (tag != ETAGAPQ || size <
-				offsetof(struct ucontext_prot,
-					uc_mcontext.usd_lo)) {
+				offsetof(struct ucontext_prot, uc_mcontext.usd_lo)) {
 			ret = -EFAULT;
 			goto exit_;
 		}
@@ -1062,6 +1058,7 @@ void kvm_guest_mkctxt_trampoline(void)
 		uc_link = (struct ucontext_prot *)
 				E2K_PTR_PTR(ptr, GET_SBR_HI());
 	}
+#endif
 
 	if (uc_link) {
 		/*

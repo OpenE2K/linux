@@ -198,21 +198,10 @@ typedef union pf_mode {
 	u32 word;
 } pf_mode_t;
 
-static int pf_force_sig_info(int si_signo, int si_code, unsigned long address,
-			     struct pt_regs *regs);
+static int pf_force_sig_info(const char *reason, int si_signo, int si_code,
+			     unsigned long address, struct pt_regs *regs);
 
 int show_unhandled_signals = 0;
-
-#undef  GET_IP
-#define GET_IP  GET_IP_CR0_HI((regs)->crs.cr0_hi)
-#define PFDBGPRINT(fmt, ...) \
-do { \
-	if (debug_pagefault || DEBUG_PF_MODE) { \
-		pr_notice("PAGE FAULT. " fmt ": IP=%px %s(pid=%d)\n" \
-				,##__VA_ARGS__, (void *) GET_IP, \
-				current->comm, current->pid); \
-	} \
-} while (0)
 
 /********************* END of PAGE FAULT DEBUG for users *****************/
 
@@ -346,6 +335,10 @@ user_address_to_pva(struct task_struct *tsk, e2k_addr_t address)
         }
 
 	pud = pud_offset(pgd, address);
+	if (user_pud_huge(*pud)) {
+		return (unsigned long) __va((pud_pfn(*pud) << PAGE_SHIFT) |
+					    (address & ~PUD_MASK));
+	}
 	if (pud_none(*pud) || pud_bad(*pud)) {
 		pr_err("PUD  0x%px = 0x%lx none or bad for address 0x%lx\n",
 			pud, pud_val(*pud), address);
@@ -353,7 +346,7 @@ user_address_to_pva(struct task_struct *tsk, e2k_addr_t address)
 	}
 
 	pmd = pmd_offset(pud, address);
-	if (pmd_huge(*pmd)) {
+	if (user_pmd_huge(*pmd)) {
 		pte = (pte_t *) pmd;
 		offset = address & (get_pmd_level_page_size() - 1);
 	} else {
@@ -407,7 +400,7 @@ pte_t *get_user_address_pte(struct vm_area_struct *vma, e2k_addr_t address)
 		return NULL;
 	}
 	pud = pud_offset(pgd, address);
-	if (pud_huge(*pud))
+	if (user_pud_huge(*pud))
 		return (pte_t *) pud;
 	if (pud_none(*pud) && pud_valid(*pud)) {
 		DebugUPTE("PUD  0x%px = 0x%lx only valid for address 0x%lx\n",
@@ -420,7 +413,7 @@ pte_t *get_user_address_pte(struct vm_area_struct *vma, e2k_addr_t address)
 		return NULL;
 	}
 	pmd = pmd_offset(pud, address);
-	if (pmd_huge(*pmd))
+	if (user_pmd_huge(*pmd))
 		return (pte_t *) pmd;
 	if (pmd_none(*pmd) && pmd_valid(*pmd)) {
 		DebugUPTE("PMD 0x%px = 0x%016lx only valid for address "
@@ -464,7 +457,7 @@ kernel_address_to_pva(e2k_addr_t address)
 	}
 	if (unlikely(IS_GUEST_ADDRESS_TO_HOST(address))) {
 		if (address >= KERNEL_BASE && address <= KERNEL_END) {
-			return kernel_va_to_pa(address);
+			return __pa_symbol(address);
 		} else {
 			pr_alert("Address 0x%016lx is host kernel address\n",
 				address);
@@ -529,11 +522,10 @@ huge_pte:
 					(address & (page_size - 1)));
 }
 
-unsigned long node_kernel_address_to_phys(int node, e2k_addr_t addr)
+phys_addr_t pgd_kernel_address_to_phys(pgd_t *pgd, e2k_addr_t addr)
 {
-	e2k_addr_t phys_addr;
+	phys_addr_t phys_addr;
 	e2k_size_t page_size;
-	pgd_t *pgd = node_pgd_offset_kernel(node, addr);
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
@@ -583,6 +575,13 @@ huge_pte:
 	return phys_addr;
 }
 
+phys_addr_t node_kernel_address_to_phys(int node, e2k_addr_t addr)
+{
+	pgd_t *pgd = node_pgd_offset_k(node, addr);
+
+	return pgd_kernel_address_to_phys(pgd, addr);
+}
+
 static const char *get_memory_type_string(pte_t pte)
 {
 	char *memory_types_v6[8] = { "General Cacheable",
@@ -593,7 +592,7 @@ static const char *get_memory_type_string(pte_t pte)
 	if (MMU_IS_PT_V6())
 		return memory_types_v6[_PAGE_MT_GET_VAL(pte_val(pte))];
 
-	if (!(pte_val(pte) & ~_PAGE_VALID_V3))
+	if (!pte_present(pte))
 		return "";
 
 	if ((pte_val(pte) & _PAGE_CD_MASK_V3) != _PAGE_CD_MASK_V3)
@@ -605,20 +604,19 @@ static const char *get_memory_type_string(pte_t pte)
 		return "write_combine";
 }
 
-e2k_addr_t print_address_ptes(pgd_t *pgdp, e2k_addr_t address, int kernel)
+void print_address_ptes(pgd_t *pgdp, e2k_addr_t address, int kernel)
 {
 	pgd_t		pgd = *pgdp;
 	pud_t		*pud;
 	pmd_t		*pmd;
 	pte_t		*pte;
-	e2k_addr_t	pa = 0;
 	e2k_size_t	page_size;
+	const char *level_name = "PTE";
 
 	if (kernel && kernel_pgd_huge(pgd)) {
 		pte = (pte_t *)pgdp;
 		page_size = get_pgd_level_page_size();
-		pr_alert("%s PGD 0x%px = 0x%016lx is PTE of huge page\n",
-			(kernel) ? "kernel" : "user", pgdp, pgd_val(pgd));
+		level_name = "HUGE PGD";
 		goto huge_pte;
 	}
 	if (pgd_none(pgd) && (kernel || !pgd_valid(pgd)) || pgd_bad(pgd)) {
@@ -626,53 +624,51 @@ e2k_addr_t print_address_ptes(pgd_t *pgdp, e2k_addr_t address, int kernel)
 			"for address 0x%016lx\n",
 			(kernel) ? "kernel" : "user", pgdp, pgd_val(pgd),
 			address);
-		return pa;
+		return;
 	}
 	pr_alert("%s PGD 0x%px = 0x%016lx valid for address 0x%016lx\n",
 			(kernel) ? "kernel" : "user", pgdp, pgd_val(pgd),
 			address);
 	if (pgd_none(pgd))
-		return pa;
+		return;
 
 	/* pud */
 	pud = pud_offset(pgdp, address);
 	if (kernel && kernel_pud_huge(*pud)) {
 		pte = (pte_t *)pud;
 		page_size = get_pud_level_page_size();
-		pr_alert("PUD 0x%px = 0x%016lx is PTE of huge page\n",
-			pud, pud_val(*pud));
+		level_name = "HUGE PUD";
 		goto huge_pte;
 	}
 	if (pud_none(*pud) && (kernel || !pud_valid(*pud)) || pud_bad(*pud)) {
 		pr_alert("PUD 0x%px = 0x%016lx none or bad "
 			"for address 0x%016lx\n",
 			pud, pud_val(*pud), address);
-		return pa;
+		return;
 	}
 	pr_alert("PUD 0x%px = 0x%016lx valid for address 0x%016lx\n",
 			pud, pud_val(*pud), address);
 	if (pud_none(*pud))
-		return pa;
+		return;
 
 	/* pmd */
 	pmd = pmd_offset(pud, address);
-	if (kernel && kernel_pmd_huge(*pmd) || !kernel && pmd_huge(*pmd)) {
+	if (kernel && kernel_pmd_huge(*pmd) || !kernel && user_pmd_huge(*pmd)) {
 		pte = (pte_t *)pmd;
 		page_size = get_pmd_level_page_size();
-		pr_alert("PMD 0x%px = 0x%016lx is PTE of huge page\n",
-			pmd, pmd_val(*pmd));
+		level_name = "HUGE PMD";
 		goto huge_pte;
 	}
 	if (pmd_none(*pmd) && (kernel || !pmd_valid(*pmd)) || pmd_bad(*pmd)) {
 		pr_alert("PMD 0x%px = 0x%016lx none or bad for "
 			"address 0x%016lx\n",
 			pmd, pmd_val(*pmd), address);
-		return pa;
+		return;
 	}
 	pr_alert("PMD 0x%px = 0x%016lx valid for address 0x%016lx\n",
 			pmd, pmd_val(*pmd), address);
 	if (pmd_none(*pmd))
-		return pa;
+		return;
 
 	/* pte */
 	pte = (kernel) ?
@@ -680,28 +676,14 @@ e2k_addr_t print_address_ptes(pgd_t *pgdp, e2k_addr_t address, int kernel)
 	page_size = get_pte_level_page_size();
 
 huge_pte:
-	if (pte_none(*pte)) {
-		pr_alert("PTE  0x%px = 0x%016lx none for address 0x%016lx\n",
-				pte, pte_val(*pte), address);
-	} else if (!pte_present(*pte)) {
-		pr_alert("PTE  0x%px = 0x%016lx is pte of not present page for address 0x%016lx\n",
-				pte, pte_val(*pte), address);
-	} else if (pte_protnone(*pte)) {
-		pr_alert("PTE  0x%px = 0x%016lx valid & not present (migrate) page for address 0x%016lx\n",
-				pte, pte_val(*pte), address);
-	} else {
-		pr_alert("PTE  0x%px = 0x%016lx %s & present for address 0x%016lx %s\n",
-				pte, pte_val(*pte),
-				pte_valid(*pte) ? "valid" : "not valid",
-				address, get_memory_type_string(*pte));
-
-		pa = _PAGE_PFN_TO_PADDR(pte_val(*pte)) +
-						(address & (page_size - 1));
-	}
-
-	return pa;
+	pr_alert("%s 0x%px = 0x%016lx %s for address 0x%lx %s\n", level_name,
+		pte, pte_val(*pte),
+		(pte_none(*pte)) ? "none" :
+			(!pte_present(*pte)) ? "not present" :
+			(pte_protnone(*pte)) ? "valid & not present (migrate)" :
+			(pte_valid(*pte)) ? "valid" : "not valid",
+		address, get_memory_type_string(*pte));
 }
-
 
 void print_vma_and_ptes(struct vm_area_struct *vma, e2k_addr_t address)
 {
@@ -737,26 +719,35 @@ __print_user_address_ptes(struct mm_struct *mm, e2k_addr_t address)
 e2k_addr_t print_user_address_ptes(struct mm_struct *mm, e2k_addr_t address)
 {
 	if (address >= TASK_SIZE) {
-		pr_info("Address 0x%016lx is not user address to print PTE's\n",
+		pr_alert("Address 0x%016lx is not user address to print PTE's\n",
 			address);
 		return 0;
 	}
 	return __print_user_address_ptes(mm, address);
 }
 
-e2k_addr_t print_kernel_address_ptes(e2k_addr_t address)
+void print_kernel_address_ptes(e2k_addr_t address)
 {
-	pgd_t		*pgdp;
-	e2k_addr_t	pa = 0;
+	int node, index = pgd_index(address);
+	bool is_duplicated = is_duplicated_address(address);
 
 	if (address < TASK_SIZE) {
 		printk("Address 0x%016lx is not kernel address to print PTE's\n",
 			address);
-		return pa;
+		return;
 	}
-	pgdp = pgd_offset_k(address);
-	pa = print_address_ptes(pgdp, address, 1);
-	return pa;
+
+	for_each_node_mm_pgdmask(node, &init_mm) {
+		pgd_t *node_pgd = mm_node_pgd(&init_mm, node) + index;
+
+		if (is_duplicated && num_node_state(N_MEMORY) > 1)
+			pr_info("NODE #%d kernel page table:\n", node);
+
+		print_address_ptes(node_pgd, address, 1);
+
+		if (!is_duplicated)
+			break;
+	}
 }
 
 void print_address_page_tables(unsigned long address, int last_level_only)
@@ -862,52 +853,6 @@ huge_pte:
 	return 1;
 }
 
-#if 0
-void print_vma_node_ptes(struct vm_area_struct *vma, e2k_addr_t address)
-{
-	print_vma_and_ptes(vma, address);
-
-	if (MMU_IS_SEPARATE_PT())
-		return;
-
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-	if (THERE_IS_DUP_KERNEL) {
-		pgd_t	*pgdp;
-
-		pgdp = cpu_kernel_root_pt + pgd_index(address);
-		pr_info("CPU #%d kernel root page table:\n",
-			smp_processor_id());
-		print_address_ptes(pgdp, address, 0);
-	}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-}
-#endif
-
-#ifdef CONFIG_NUMA
-static void
-print_kernel_address_all_nodes_ptes(e2k_addr_t address)
-{
-	pgd_t	*pgdp;
-	int	cpu;
-	int	nid = numa_node_id();
-
-	pgdp = node_pgd_offset_kernel(nid, address);
-	pr_info("NODE #%d kernel root page table:\n", nid);
-	print_address_ptes(pgdp, address, 1);
-
-	for_each_online_cpu(cpu) {
-		pgdp = the_cpu_pg_dir(cpu) + pgd_index(address);
-		pr_info("CPU #%d kernel root page table:\n", cpu);
-		print_address_ptes(pgdp, address, 1);
-	}
-}
-#else /* !CONFIG_NUMA */
-static void
-print_kernel_address_all_nodes_ptes(e2k_addr_t address)
-{
-}
-#endif /* CONFIG_NUMA */
-
 struct page *e2k_virt_to_page(const void *kaddrp)
 {
 	e2k_addr_t kaddr = (e2k_addr_t)kaddrp;
@@ -916,7 +861,7 @@ struct page *e2k_virt_to_page(const void *kaddrp)
 		return phys_to_page(__pa(kaddrp));
 	}
 	if (kaddr >= KERNEL_BASE && kaddr <= KERNEL_END) {
-		return phys_to_page(vpa_to_pa(kernel_va_to_pa(kaddrp)));
+		return phys_to_page(__pa_symbol(kaddrp));
 	}
 	if (is_vmalloc_addr(kaddrp)) {
 		return vmalloc_to_page(kaddrp);
@@ -1242,15 +1187,13 @@ static int update_chain_stack_ussz(e2k_mem_crs_t *frame,
 					"trying to apply stack correction to the last frame\n"))
 				return -ESRCH;
 
-			if (flags & PCF_FLUSH_NEEDED)
-				NATIVE_FLUSHC;
+			NATIVE_FLUSHC;
 			ret = get_cr1_lo(&prev_cr1_lo,
 					 params->prev_frame_addr, 0);
 			if (ret)
 				return ret;
-			AS(prev_cr1_lo).lw = 1;
-			if (flags & PCF_FLUSH_NEEDED)
-				NATIVE_FLUSHC;
+			prev_cr1_lo.lw = 1;
+			NATIVE_FLUSHC;
 			ret = put_cr1_lo(prev_cr1_lo,
 					 params->prev_frame_addr, 0);
 			if (ret)
@@ -1999,25 +1942,26 @@ int handle_chain_stack_bounds(struct e2k_stacks *stacks,
 	return 0;
 }
 
-static void print_pagefault_info(struct trap_pt_regs *trap, e2k_addr_t address,
-				 bool debug_mode, bool stack)
+__cold
+static void print_pagefault_info(const char *reason, struct pt_regs *regs,
+		e2k_addr_t address, bool stack)
 {
-	struct mm_struct *mm = current->mm;
-
-	if (mm == NULL)
-		mm = &init_mm;
+	struct trap_pt_regs *trap = regs->trap;
 
 	/* if this is guest, stop tracing in host to avoid buffer overwrite */
 	host_ftrace_stop();
 
+	pr_alert("%s (%d): PAGE FAULT at address 0x%lx: %s, IP=%lx\n",
+			current->comm, current->pid, address, reason,
+			instruction_pointer(regs));
+
+	/* Print TLB first */
+	print_address_tlb(address);
+	print_address_page_tables(address, true);
 	print_all_TIRs(trap->TIRs, trap->nr_TIRs);
 	print_all_TC(trap->tcellar, trap->tc_count);
 	print_mmap(current);
 	DebugPF("MMU_ADDR_CONT = 0x%llx\n", read_MMU_reg(MMU_ADDR_CONT));
-
-	if (debug_mode)
-		print_address_tlb(address);
-	print_address_page_tables(address, !debug_mode);
 
 	if (trap->nr_page_fault_exc == exc_instr_page_miss_num ||
 	    trap->nr_page_fault_exc == exc_instr_page_prot_num) {
@@ -2025,15 +1969,13 @@ static void print_pagefault_info(struct trap_pt_regs *trap, e2k_addr_t address,
 			round_down(address + E2K_INSTR_MAX_SIZE - 1, PAGE_SIZE);
 
 		if (instruction_end_page != round_down(address, PAGE_SIZE)) {
-			if (debug_mode)
-				print_address_tlb(instruction_end_page);
-			print_address_page_tables(instruction_end_page,
-						  !debug_mode);
+			print_address_tlb(instruction_end_page);
+			print_address_page_tables(instruction_end_page, true);
 		}
 	}
 
 	if (stack)
-		dump_stack();
+		print_stack_frames(current, regs, 1);
 }
 
 static inline void debug_print_trap_cellar(const trap_cellar_t *tcellar,
@@ -2055,14 +1997,6 @@ static inline void debug_print_trap_cellar(const trap_cellar_t *tcellar,
 			cnt, tcellar[cnt].address, AW(ftype), chan);
 		PrintTC(&tcellar[cnt], cnt);
 	}
-}
-
-static inline unsigned long get_fault_ip(struct pt_regs *regs)
-{
-	e2k_tir_lo_t tir_lo;
-
-	tir_lo.TIR_lo_reg = regs->trap->TIR_lo;
-	return tir_lo.TIR_lo_ip;
 }
 
 static inline bool
@@ -2087,9 +2021,7 @@ is_injected_to_reexecute(struct pt_regs *regs)
 	if (unlikely(!ptrap))
 		panic("do_trap_cellar() previous pt_regs are not from trap\n");
 
-	if (unlikely(!user_mode(pregs) &&
-			!current_thread_info()->usr_pfault_jump &&
-			!search_exception_tables(get_fault_ip(pregs))))
+	if (unlikely(!user_mode(pregs) && !from_uaccess_allowed_code(pregs)))
 		panic("do_trap_cellar() previous pt_regs are not user's\n");
 
 	return true;
@@ -2109,9 +2041,7 @@ copy_nested_tc_records(struct pt_regs *regs,
 	if (unlikely(!ptrap))
 		panic("do_trap_cellar() previous pt_regs are not from trap\n");
 
-	if (unlikely(!user_mode(pregs) &&
-			!current_thread_info()->usr_pfault_jump &&
-			!search_exception_tables(get_fault_ip(pregs))))
+	if (unlikely(!from_uaccess_allowed_code(pregs)))
 		panic("do_trap_cellar() previous pt_regs are not user's\n");
 
 	/*
@@ -2424,6 +2354,30 @@ fail_sigsegv:
 	return PFR_SIGPENDING;
 }
 
+static void debug_trace_trap_cellar(const trap_cellar_t *tcellar,
+		unsigned int tc_count, const struct pt_regs *regs)
+{
+	unsigned long address;
+	int cnt;
+
+	for (cnt = 0; (3 * cnt) < tc_count; cnt++)
+		trace_trap_cellar(&tcellar[cnt], cnt);
+
+	address = -1ul;
+	for (cnt = 0; (3 * cnt) < tc_count; cnt++) {
+		if (PFN_DOWN(address) == PFN_DOWN(tcellar[cnt].address))
+			continue;
+
+		address = tcellar[cnt].address;
+		if (user_mode(regs)) {
+			trace_trap_cellar_pt_dtlb(address, PT_DTLB_TRANSLATION_AUTO);
+		} else {
+			trace_trap_cellar_pt_dtlb(address, PT_DTLB_TRANSLATION_KERNEL);
+			trace_trap_cellar_pt_dtlb(address, PT_DTLB_TRANSLATION_USER);
+		}
+	}
+}
+
 void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 {
 	struct trap_pt_regs	*trap = regs->trap;
@@ -2470,12 +2424,8 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 		e2k_tir_lo_t	tir_lo;
 		struct pt_regs	*prev_regs = regs->next;
 
-		if (trace_trap_cellar_enabled()) {
-			int cnt;
-
-			for (cnt = 0; (3 * cnt) < tc_count; cnt++)
-				trace_trap_cellar(&tcellar[cnt], cnt);
-		}
+		if (trace_trap_cellar_enabled() || trace_trap_cellar_pt_dtlb_enabled())
+			debug_trace_trap_cellar(tcellar, tc_count, regs);
 
 		debug_print_trap_cellar(tcellar, tc_count);
 
@@ -2610,7 +2560,12 @@ void do_trap_cellar(struct pt_regs *regs, int only_system_tc)
 retry_guest_kernel:
 		pass_result = pass_page_fault_to_guest(regs, &tcellar[cnt]);
 		to_complete |= KVM_GET_NEED_COMPLETE_PF(pass_result);
-		if (likely(KVM_IS_NOT_GUEST_TRAP(pass_result))) {
+		if (unlikely(KVM_IS_ERROR_RESULT_PF(pass_result))) {
+			pr_err("%s(): kill the guest, fault handling was failed, "
+				"error %ld\n",
+				__func__, (long)pass_result);
+			goto out_to_kill;
+		} else if (likely(KVM_IS_NOT_GUEST_TRAP(pass_result))) {
 			/* trap is not due to guest and should be handled */
 			/* in the regular mode */
 			;
@@ -2631,17 +2586,6 @@ retry_guest_kernel:
 				"shadow PT: address 0x%lx\n",
 				cnt, tcellar[cnt].address);
 			goto continue_passed;
-		} else if (KVM_IS_ERROR_RESULT_PF(pass_result)) {
-			union pf_mode mode;
-
-			DebugKVMPF("request #%d failed: address 0x%lx "
-				"error %ld\n",
-				cnt, tcellar[cnt].address,
-				(long)pass_result);
-			mode.word = 0;
-			rval = pf_force_sig_info(SIGBUS, BUS_ADRERR,
-					tcellar[cnt].address, regs);
-			goto handled;
 		} else {
 			BUG_ON(true);
 		}
@@ -2929,6 +2873,10 @@ out:
 		trap->curr_cnt = skip;
 	if (to_complete != 0)
 		complete_page_fault_to_guest(to_complete);
+	return;
+
+out_to_kill:
+	do_group_exit(SIGKILL);
 }
 
 static inline int is_spec_load_fault(union pf_mode mode)
@@ -2951,7 +2899,7 @@ static inline union pf_mode set_kvm_fault_passed(tc_cond_t condition,
 }
 
 static inline union pf_mode set_kvm_copy_user(tc_cond_t condition,
-						   pf_mode_t mode)
+						pf_mode_t mode)
 {
 	mode.as_kvm_copy_user = tc_test_is_as_kvm_copy_user(condition);
 	return mode;
@@ -3039,88 +2987,153 @@ static int handle_spec_load_fault(unsigned long address, struct pt_regs *regs,
 #endif
 
 	if (debug_semi_spec)
-		pr_notice("PAGE FAULT. ignore invalid LOAD address 0x%lx in speculative mode: IP=%px %s(pid=%d)\n",
-			address, (void *) GET_IP, current->comm, current->pid);
+		pr_notice("PAGE FAULT. ignore invalid LOAD address 0x%lx in speculative mode: IP=%lx %s(pid=%d)\n",
+				address, instruction_pointer(regs),
+				current->comm, current->pid);
 
 	return 1;
 }
 
-/*
- * Are we prepared to handle this kernel fault?
- */
-static int fixup_exception(struct pt_regs *regs)
+static notrace long return_efault(void)
 {
-	const struct exception_table_entry *fixup;
-	unsigned long ip, new_ip;
-
-	ip = get_fault_ip(regs);
-
-	/* get_user/put_user case: */
-	fixup = search_exception_tables(ip);
-	if (fixup) {
-		new_ip = fixup->fixup;
-
-		correct_trap_return_ip(regs, new_ip);
-		return PFR_CONTROLLED_ACCESS;
-	}
-
-	/* All user accesses besides get_user/put_user and wtrap: */
-	if (current_thread_info()->usr_pfault_jump) {
-		new_ip = current_thread_info()->usr_pfault_jump;
-		correct_trap_return_ip(regs, new_ip);
-
-		/* Controlled access from kernel to user space,
-		 * just invalidate diagnostic tag in reg if load. */
-		current_thread_info()->usr_pfault_jump = 0;
-
-		return PFR_CONTROLLED_ACCESS;
-	}
-
-	return 0;
+	return -EFAULT;
 }
 
-static int no_context(unsigned long address, struct pt_regs *regs,
-		      union pf_mode mode)
+static notrace void double_return_efault(void)
 {
-	if (fixup_exception(regs))
-		return PFR_CONTROLLED_ACCESS;
+	e2k_cr0_hi_t cr0_hi = READ_CR0_HI_REG();
+	cr0_hi.ip = (unsigned long) return_efault >> 3;
+	WRITE_CR0_HI_REG(cr0_hi);
+}
+
+/**
+ * handle_uaccess_trap - handle trap caused by accessing a user address
+ *		legitimately (i.e. its an intended access of user memory)
+ * @regs - pt_regs for this trap
+ * @exc_diag - whether this a real exc_data_page exception or exc_diag_*.
+ *             On e2k when half-spec. loads are used by compiler in its
+ *             optimizations, it's possible that exc_diag_* will be generated
+ *             instead of exc_data_page (because the load that should have
+ *             generated page fault has been put into half-spec. mode).
+ */
+bool handle_uaccess_trap(struct pt_regs *regs, bool exc_diag)
+{
+	unsigned long trap_ip = get_trap_ip(regs);
 
 	/*
-	 * Kernel should not use semi-speculative mode
-	 * so we check only user accesses.
+	 * Compiler won't use half-spec. mode for get_user()/put_user()
+	 * so do not check for get_user()/put_user() from exc_diag_*.
+	 */
+	if (!exc_diag) {
+		/* get_user/put_user case: */
+		const struct exception_table_entry *fixup;
+
+		fixup = search_exception_tables(trap_ip);
+		if (fixup) {
+			correct_trap_return_ip(regs, fixup->fixup);
+			return true;
+		}
+	}
+
+	/* UACCESS_FN_CALL case. This should be checked before
+	 * SET_USR_PFAULT case because we can call SET_USR_PFAULT()
+	 * from UACCESS_FN_DEFINE function. */
+	if (trap_ip >= (unsigned long) __uaccess_start &&
+	    trap_ip < (unsigned long) __uaccess_end) {
+		unsigned long flags, return_ip = get_return_ip(regs);
+
+		if (return_ip >= (unsigned long) __uaccess_start &&
+		    return_ip < (unsigned long) __uaccess_end) {
+			correct_trap_return_ip(regs, (unsigned long) return_efault);
+			return true;
+		}
+
+		/* Special case: the same wide instruction that had the
+		 * faulting user access also had return or call instruction. */
+		e2k_mem_crs_t *frame = (e2k_mem_crs_t *)
+				(regs->stacks.pcsp_lo.base + regs->stacks.pcsp_hi.ind) - 1;
+		raw_all_irq_save(flags);
+		COPY_STACKS_TO_MEMORY();
+		if (trap_ip + E2K_GET_INSTR_SIZE(*(instr_hs_t *) trap_ip) ==
+				(frame->cr0_hi.ip << 3)) {
+			/* It was a call instruction, so we need to skip
+			 * two functions in stack */
+			correct_trap_return_ip(regs, (unsigned long) double_return_efault);
+		} else {
+			/* It was a return instruction, so we need
+			 * to write -EFAULT directly to caller's
+			 * %dr0 instead of changing return IP. */
+			unsigned long dr0_addr = AS(regs->stacks.psp_lo).base +
+					AS(regs->stacks.psp_hi).ind -
+					C_ABI_PSIZE_UNPROT * EXT_4_NR_SZ;
+			u64 efault = -EFAULT;
+			tc_cond_t cond = (tc_cond_t) { .word = 0 };
+
+			AS(cond).store = 1;
+			AS(cond).chan = 1;
+			recovery_faulted_move((unsigned long) &efault, dr0_addr,
+					0ul /* reg_hi */, 1 /* vr */,
+					LDST_DWORD_FMT << LDST_REC_OPC_FMT_SHIFT,
+					0, false /* qp_load */, false /* atomic_load */,
+					true /* first_time */, cond);
+		}
+		raw_all_irq_restore(flags);
+
+		return true;
+	}
+
+	/* SET_USR_PFAULT case: */
+	if (current->thread.usr_pfault_jump) {
+		correct_trap_return_ip(regs, current->thread.usr_pfault_jump);
+		current->thread.usr_pfault_jump = 0;
+		return true;
+	}
+
+	return false;
+}
+
+__cold
+static int no_context(const char *reason, unsigned long address,
+		      struct pt_regs *regs, union pf_mode mode)
+{
+	/*
+	 * Are we prepared to handle this kernel fault?
+	 */
+	if (handle_uaccess_trap(regs, false)) {
+		/* Controlled access from kernel to user space,
+		 * just invalidate diagnostic tag in reg if load. */
+		return PFR_CONTROLLED_ACCESS;
+	}
+
+	/*
+	 * Kernel's semi-speculative mode loads are checked above,
+	 * so we check only user accesses here.
 	 */
 	if (mode.user && handle_spec_load_fault(address, regs, mode))
 		return PFR_IGNORE;
 
-	print_pagefault_info(regs->trap, address, DEBUG_PF_MODE, false);
+	/* Enable emergency console before printing */
+	bust_spinlocks(1);
+	print_pagefault_info(reason, regs, address, false);
+	bust_spinlocks(0);
 
 	/*
 	 *  Oops. The kernel tried to access some bad page.
 	 */
 	if (current->pid <= 1)
-		panic("do_page_fault: no_context on pid %d so will be recursive traps. IP = 0x%lx\n",
-				current->pid, get_fault_ip(regs));
+		panic("do_page_fault: no_context on pid %d. IP 0x%lx\n",
+				current->pid, get_trap_ip(regs));
 
 	panic("do_page_fault: no_context for address %lx from IP = %lx\n",
-			address, get_fault_ip(regs));
-}
-
-static int vmalloc_fault(unsigned long address, struct pt_regs *regs,
-			 tc_fault_type_t ftype, union pf_mode mode)
-{
-	pr_alert("Unexpected fault for kernel address 0x%lx from VMALLOC area ( >= 0x%lx < 0x%lx)\n",
-			address, VMALLOC_START, VMALLOC_END);
-	print_address_ptes(pgd_offset_k(address), address, 1);
-	print_kernel_address_all_nodes_ptes(address);
-	BUG();
+			address, get_trap_ip(regs));
 }
 
 /*
  * Print out info about fatal segfaults, if the show_unhandled_signals
  * sysctl is set:
  */
-static inline void
-show_signal_msg(struct pt_regs *regs, unsigned long address,
+__cold
+static void show_signal_msg(struct pt_regs *regs, unsigned long address,
 		struct task_struct *tsk)
 {
 	void		*cr_ip, *tir_ip;
@@ -3131,8 +3144,8 @@ show_signal_msg(struct pt_regs *regs, unsigned long address,
 	if (!printk_ratelimit())
 		return;
 
-	tir_ip = (void *)get_fault_ip(regs);
-	cr_ip = (void *)GET_IP_CR0_HI(regs->crs.cr0_hi);
+	tir_ip = (void *) get_trap_ip(regs);
+	cr_ip = (void *) instruction_pointer(regs);
 
 	if (tir_ip == cr_ip)
 		printk("%s%s[%d]: segfault at %lx ip %px",
@@ -3148,10 +3161,14 @@ show_signal_msg(struct pt_regs *regs, unsigned long address,
 	printk(KERN_CONT "\n");
 }
 
-static int pf_force_sig_info(int si_signo, int si_code, unsigned long address,
-			     struct pt_regs *regs)
+static int pf_force_sig_info(const char *reason, int si_signo, int si_code,
+			     unsigned long address, struct pt_regs *regs)
 {
-	struct trap_pt_regs *trap = regs->trap;
+	if (address < TASK_SIZE)
+		trace_unhandled_page_fault(address, PT_DTLB_TRANSLATION_AUTO);
+
+	if (debug_pagefault || DEBUG_PF_MODE)
+		print_pagefault_info(reason, regs, address, true);
 
 	if (si_signo == SIGBUS) {
 		debug_signal_print("SIGBUS. Page fault", regs, false);
@@ -3159,13 +3176,11 @@ static int pf_force_sig_info(int si_signo, int si_code, unsigned long address,
 		debug_signal_print("SIGSEGV. Page fault", regs, false);
 	}
 
-	PFDBGPRINT("Signal %d for address 0x%lx", si_signo, address);
-
-	if (debug_pagefault)
-		print_pagefault_info(trap, address, DEBUG_PF_MODE, true);
+	if (address < TASK_SIZE && show_unhandled_signals)
+		show_signal_msg(regs, address, current);
 
 	force_sig_fault(si_signo, si_code, (void __user *)address,
-			trap->nr_page_fault_exc);
+			regs->trap->nr_page_fault_exc);
 
 	return PFR_SIGPENDING;
 }
@@ -3312,8 +3327,8 @@ static int clear_valid_on_spec_load_one(struct vm_area_struct *vma,
 
 out_success:
 	if (debug_semi_spec)
-		pr_notice("PAGE FAULT. unmap invalid SPEC LD address 0x%lx: IP=%px %s(pid=%d)\n",
-			addr, (void *) GET_IP, current->comm, current->pid);
+		pr_notice("PAGE FAULT. unmap invalid SPEC LD address 0x%lx: IP=%lx %s(pid=%d)\n",
+			addr, instruction_pointer(regs), current->comm, current->pid);
 
 	return PFR_IGNORE;
 
@@ -3352,14 +3367,6 @@ static int clear_valid_on_spec_load(unsigned long address,
 	if (!is_spec_load_fault(mode))
 		return 0;
 
-	/* Area for page tables in virtual memory is special and
-	 * it never maps actual user memory and still we can get
-	 * page fault on it (because it's self-mapping), so skip. */
-	if (MMU_IS_SEPARATE_PT() &&
-	    address >= MMU_SEPARATE_USER_VPTB &&
-	    address < MMU_SEPARATE_USER_VPTB + PGDIR_SIZE)
-		return 0;
-
 	ret = clear_valid_on_spec_load_one(vma, address, regs, unlocked);
 	if (ret || *unlocked)
 		return ret;
@@ -3377,8 +3384,9 @@ static int clear_valid_on_spec_load(unsigned long address,
 }
 
 __cold
-static int bad_area(unsigned long address, struct pt_regs *regs, union pf_mode mode,
-			int addr_num, int si_code)
+static int bad_area(const char *reason, unsigned long address,
+		    struct pt_regs *regs, union pf_mode mode,
+		    int addr_num, int si_code)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
@@ -3403,67 +3411,46 @@ static int bad_area(unsigned long address, struct pt_regs *regs, union pf_mode m
 	if (ret)
 		return ret;
 
+	if (!mode.user)
+		return no_context(reason, address, regs, mode);
+
 	if (unlikely(is_kvm_fault_injected(mode))) {
 		if (is_injected_to_reexecute(regs) || !is_kvm_copy_user(mode))
-			goto force_sig;
+			return pf_force_sig_info(reason, SIGSEGV, si_code, address, regs);
 	}
-
-	if (!mode.user && address >= TASK_SIZE)
-		return no_context(address, regs, mode);
 
 	if (handle_spec_load_fault(address, regs, mode))
 		return PFR_IGNORE;
 
-	if (!mode.user)
-		return no_context(address, regs, mode);
-
-	trace_unhandled_page_fault(address);
-
-	if (likely(show_unhandled_signals))
-		show_signal_msg(regs, address, current);
-
-force_sig:
-	return pf_force_sig_info(SIGSEGV, si_code, address, regs);
+	return pf_force_sig_info(reason, SIGSEGV, si_code, address, regs);
 }
 
-
-static int access_error(struct vm_area_struct *vma, unsigned long address,
-			struct pt_regs *regs, union pf_mode mode,
-			int instr_page)
+static const char *access_error(struct vm_area_struct *vma,
+		unsigned long address, struct pt_regs *regs, union pf_mode mode,
+		int instr_page)
 {
 	if (mode.write) {
 		/* Check write permissions */
-		if (unlikely(!(vma->vm_flags & (VM_WRITE | VM_MPDMA)))) {
-			if (!is_spec_load_fault(mode))
-				PFDBGPRINT("Page is not writable");
-			return 1;
-		}
-	} else if (unlikely(!(vma->vm_flags &
-			(VM_READ | VM_EXEC | VM_WRITE)))) {
+		if (unlikely(!(vma->vm_flags & (VM_WRITE | VM_MPDMA))))
+			return "page is not writable";
+	} else  {
 		/* Check read permissions */
-		if (!is_spec_load_fault(mode))
-			PFDBGPRINT("Page is PROT_NONE");
-		return 1;
+		if (unlikely(!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))))
+			return "page is PROT_NONE";
 	}
 
 	/* Check exec permissions */
-	if (instr_page && unlikely(!(vma->vm_flags & VM_EXEC))) {
-		PFDBGPRINT("Page is not executable");
-		return 1;
-	}
+	if (instr_page && unlikely(!(vma->vm_flags & VM_EXEC)))
+		return "page is not executable";
 
 	/* Check privilege level */
 	if (unlikely((vma->vm_flags & VM_PRIVILEGED) &&
 		     (!test_ts_flag(TS_KERNEL_SYSCALL) ||
-				!kernel_is_privileged()) &&
-					!is_kvm_fault_mode(mode))) {
-		if (!is_spec_load_fault(mode)) {
-			PFDBGPRINT("Page is privileged");
-		}
-		return 1;
+		      !kernel_is_privileged()) && !is_kvm_fault_mode(mode))) {
+		return "page is privileged";
 	}
 
-	return 0;
+	return NULL;
 }
 
 /*
@@ -3560,8 +3547,9 @@ static int handle_forbidden_aau_load(struct vm_area_struct *vma,
 	pte_unmap_unlock(pte, ptl);
 
 	if (debug_semi_spec)
-		pr_notice("PAGE FAULT. unmap invalid MOVA address 0x%lx: IP=%px %s(pid=%d)\n",
-			address, (void *) GET_IP, current->comm, current->pid);
+		pr_notice("PAGE FAULT. unmap invalid MOVA address 0x%lx: IP=%lx %s(pid=%d)\n",
+				address, instruction_pointer(regs),
+				current->comm, current->pid);
 
 ignore:
 	up_read(&current->mm->mmap_sem);
@@ -3592,7 +3580,8 @@ static int mm_fault_error(struct vm_area_struct *vma, unsigned long address,
 		up_read(&current->mm->mmap_sem);
 
 		if (!mode.user)
-			return no_context(address, regs, mode);
+			return no_context("fatal signal pending",
+					address, regs, mode);
 
 		return PFR_SIGPENDING;
 	}
@@ -3601,7 +3590,7 @@ static int mm_fault_error(struct vm_area_struct *vma, unsigned long address,
 		up_read(&current->mm->mmap_sem);
 
 		if (!mode.user)
-			return no_context(address, regs, mode);
+			return no_context("Out-of-Memory", address, regs, mode);
 
 		pagefault_out_of_memory();
 
@@ -3622,7 +3611,8 @@ static int mm_fault_error(struct vm_area_struct *vma, unsigned long address,
 		int signal, si_code;
 
 		if (!mode.user)
-			return no_context(address, regs, mode);
+			return no_context("handle_mm_fault failed",
+					address, regs, mode);
 
 		/* We cannot guarantee that another thread did not
 		 * truncate the file we were reading from, thus we
@@ -3639,7 +3629,8 @@ static int mm_fault_error(struct vm_area_struct *vma, unsigned long address,
 			si_code = SEGV_MAPERR;
 		}
 
-		return pf_force_sig_info(signal, si_code, address, regs);
+		return pf_force_sig_info("handle_mm_fault failed",
+				signal, si_code, address, regs);
 	}
 
 	BUG();
@@ -3670,12 +3661,12 @@ static int handle_kernel_address(unsigned long address, struct pt_regs *regs,
 		if (handle_spec_load_fault(address, regs, mode))
 			return PFR_IGNORE;
 
-		PFDBGPRINT("On kernel address 0x%lx in user mode", address);
-		return pf_force_sig_info(SIGBUS, BUS_ADRERR, address, regs);
+		return pf_force_sig_info("access from user to kernel", SIGBUS,
+				BUS_ADRERR, address, regs);
 	}
 
 	if (address >= VMALLOC_START && address < VMALLOC_END)
-		return vmalloc_fault(address, regs, ftype, mode);
+		return no_context("vmalloc fault", address, regs, mode);
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 	if (unlikely(address >= GUEST_VMEMMAP_START && address < GUEST_VMEMMAP_END))
@@ -3686,7 +3677,8 @@ static int handle_kernel_address(unsigned long address, struct pt_regs *regs,
 	 * Check that it was the kernel address that caused the page fault
 	 */
 	if (regs->trap->tc_count <= 3 || AW(ftype))
-		return no_context(address, regs, mode);
+		return no_context("page fault at kernel address",
+				address, regs, mode);
 
 	DebugPF("kernel address 0x%lx due to user address page fault\n",
 			address);
@@ -3802,7 +3794,7 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	union pf_mode mode;
 	const int fmt = TC_COND_FMT_FULL(condition);
 	const bool qp = (fmt == LDST_QP_FMT || fmt == TC_FMT_QPWORD_Q);
-	int ret, addr_num;
+	int addr_num;
 	int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	vm_fault_t major = 0;
 
@@ -3867,6 +3859,9 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		flags |= FAULT_FLAG_WRITE;
 	if (mode.user)
 		flags |= FAULT_FLAG_USER;
+	if (regs->trap->nr_page_fault_exc == exc_instr_page_miss_num ||
+	    regs->trap->nr_page_fault_exc == exc_instr_page_prot_num)
+		flags |= FAULT_FLAG_INSTRUCTION;
 
 #ifdef CONFIG_MCST_RT
 	if ((rts_act_mask & RTS_PGFLT_RTWRN && rt_task(current)) ||
@@ -3879,7 +3874,10 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		return handle_kernel_address(address, regs, mode, ftype);
 
 	if (unlikely(!mm || faulthandler_disabled() || mode.host_dont_inject))
-		return no_context(address, regs, mode);
+		return no_context((!mm) ? "page fault in kernel" :
+				  faulthandler_disabled() ? "PF handler disabled" :
+				  "host_dont_inject is set",
+				address, regs, mode);
 
 	if (pf_on_page_boundary(address, condition) &&
 			!unlikely(tc_test_is_as_kvm_injected(condition))) {
@@ -3911,12 +3909,11 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	 * 2. The access did not originate in userspace.
 	 */
 	if (unlikely(!down_read_trylock(&mm->mmap_sem))) {
-		if (!user_mode(regs) &&
-				!is_kvm_fault_injected(mode) &&
-				!current_thread_info()->usr_pfault_jump &&
-				!search_exception_tables(get_fault_ip(regs))) {
+		if (!from_uaccess_allowed_code(regs) &&
+				!is_kvm_fault_injected(mode)) {
 			/* It is kernel code where we do not expect faults */
-			return no_context(address, regs, mode);
+			return no_context("page fault in kernel",
+					address, regs, mode);
 		}
 retry:
 		down_read(&mm->mmap_sem);
@@ -3932,7 +3929,7 @@ retry:
 
 	DebugPF("find_vma() returned 0x%px\n", vma);
 
-	if (!vma) {
+	if (!vma || address < vma->vm_start) {
 #ifdef CONFIG_SOFTWARE_SWAP_TAGS
 		if (is_tags_area_addr(address)) {
 			DebugPF("fault address 0x%lx is from "
@@ -3943,51 +3940,9 @@ retry:
 		} else 
 #endif
 		{
-			if (!mode.spec)
-				PFDBGPRINT("PAGE FAULT. Trap with not "
-					"speculative load and invalid address");
-			return bad_area(address, regs, mode, addr_num, SEGV_MAPERR);
+			return bad_area("vma not found", address, regs,
+					mode, addr_num, SEGV_MAPERR);
 		}
-	}
-
-	if (address < vma->vm_start) {
-#ifdef CONFIG_SOFTWARE_SWAP_TAGS
-		if (is_tags_area_addr(address)) {
-			DebugPF("fault address 0x%lx is from tags virtual "
-				"space\n",
-				address);
-			vma = create_tags_vma(mm, tag_to_virt(address));
-			if (vma == NULL)
-				return pf_out_of_memory(address, regs, mode);
-			goto good_area;
-		}
-#endif
-
-		return bad_area(address, regs, mode, addr_num, SEGV_MAPERR);
-	}
-
-	/*
-	 * pgd now should be populated while fault handling.
-	 *
-	 * This can happen on NUMA when user PGD entries are copied
-	 * to per-cpu PGD table. So PGD user entries are updated
-	 * only in process's 'mm' and on the CPU on which the
-	 * thread which is manipulating page tables executes.
-	 *
-	 * But if there is another thread active when page table is
-	 * updated then it still uses the old copy of PGD. So we have
-	 * to update PGD and proceed with the normal handling (in the
-	 * case not only PGD is missing but the page in RAM too).
-	 */
-	if (pgd_populate_cpu_root_pt(mm, pgd_offset(mm, address))) {
-		/*
-		 * PGD only is populated at CPU root page table
-		 * from main user page table mm->pgd
-		 */
-		DebugPGD("pgd 0x%px = 0x%lx populated on CPU #%d\n",
-				pgd_offset(mm, address),
-				pgd_val(*pgd_offset(mm, address)),
-				smp_processor_id());
 	}
 
 #ifdef CONFIG_MAKE_ALL_PAGES_VALID
@@ -4000,9 +3955,9 @@ retry:
 				 (VM_READ | VM_WRITE | VM_EXEC)) == 0;
 
 		if (instr_page && AS(ftype).illegal_page) {
-			print_va_tlb(address, 0);
-			PFDBGPRINT("Instruction page protection for valid address");
-			return bad_area(address, regs, mode, addr_num, SEGV_MAPERR);
+			tracing_off();
+			return bad_area("instruction page protection for valid address",
+					address, regs, mode, addr_num, SEGV_MAPERR);
 		}
 
 		/* bug #102076: now this situation is possible */
@@ -4014,13 +3969,8 @@ retry:
 				AS(ftype).global_sp || AS(ftype).nwrite_page ||
 				AS(ftype).illegal_page ||
 				ftype_test_sw_fault(ftype))) {
-			PFDBGPRINT("trap with bad fault type for valid address ft:0x%x, wr:%d",
-					AW(ftype), AS(ftype).nwrite_page);
-			if (debug_pagefault) {
-				print_pagefault_info(regs->trap, address,
-					DEBUG_PF_MODE, true);
-			}
-			return bad_area(address, regs, mode, addr_num, SEGV_ACCERR);
+			return bad_area("trap with bad fault type for valid address",
+					address, regs, mode, addr_num, SEGV_ACCERR);
 		}
 	}
 #endif	/* CONFIG_MAKE_ALL_PAGES_VALID */
@@ -4029,18 +3979,17 @@ retry:
 	 * Ok, we have a good vm_area for this memory access, so
 	 * we can handle it..
 	 */
-#ifdef CONFIG_SOFTWARE_SWAP_TAGS
-good_area:
-#endif
 	DebugPF("have good vm_area\n");
 
 	/* We use bitwise OR for performance */
 	if (unlikely((AS(ftype).exc_mem_lock | AS(ftype).ph_pr_page |
-		     AS(ftype).io_page | AS(ftype).prot_page |
-		     AS(ftype).isys_page | AS(ftype).ph_bound) ||
+		      AS(ftype).io_page | AS(ftype).prot_page |
+		      AS(ftype).isys_page | AS(ftype).ph_bound) ||
 		     !ftype_has_sw_fault(ftype))) {
-		PFDBGPRINT("Bad fault type 0x%x", AW(ftype));
-		goto force_sigbus;
+		up_read(&mm->mmap_sem);
+
+		return pf_force_sig_info("bad ftype", SIGBUS, BUS_ADRERR,
+				address, regs);
 	}
 
 	if (unlikely((vma->vm_flags & VM_PRIVILEGED))) {
@@ -4072,12 +4021,17 @@ good_area:
 	if ((flags & FAULT_FLAG_ALLOW_RETRY) /* call just once */ &&
 			(current->thread.flags & E2K_FLAG_PROTECTED_MODE) &&
 			instr_page == 0 && WAS_MULTITHREADING) {
-		DebugPF("WAS_MULTITHREADING=%d address=%lx ip=%llx\n",
-				WAS_MULTITHREADING, address, GET_IP);
+		int ret;
+
+		DebugPF("WAS_MULTITHREADING=%d address=%lx ip=%lx\n",
+				WAS_MULTITHREADING, address,
+				instruction_pointer(regs));
 
 		ret = interpreted_ap_code(regs, &vma, &address);
-		if (!ret)
-			return bad_area(address, regs, mode, addr_num, SEGV_ACCERR);
+		if (!ret) {
+			return bad_area("could not interpret AP replacement",
+					address, regs, mode, addr_num, SEGV_ACCERR);
+		}
 
 		if (ret == 1 || ret == 2) {
 	                up_read(&mm->mmap_sem);
@@ -4089,9 +4043,10 @@ good_area:
 
 	do {
 		int fault;
+		const char *str;
 
-		if (access_error(vma, address, regs, mode, instr_page))
-			return bad_area(address, regs, mode, addr_num, SEGV_ACCERR);
+		if ((str = access_error(vma, address, regs, mode, instr_page)))
+			return bad_area(str, address, regs, mode, addr_num, SEGV_ACCERR);
 
 		fault = handle_mm_fault(vma, address, flags);
 		major |= fault & VM_FAULT_MAJOR;
@@ -4106,7 +4061,8 @@ good_area:
 				goto retry;
 
 			if (!mode.user)
-				return no_context(address, regs, mode);
+				return no_context("fatal signal pending",
+						address, regs, mode);
 
 			return PFR_SIGPENDING;
 		}
@@ -4140,8 +4096,8 @@ good_area:
 				vma = vma->vm_next;
 				if (!vma || vma->vm_start > address) {
 					DebugNAO("end address is not valid (has not VMA)\n");
-					PFDBGPRINT("End address is not valid (has not VMA)");
-					return bad_area(address, regs, mode,
+					return bad_area("vma not found for second page of unaligned access",
+							address, regs, mode,
 							addr_num, SEGV_MAPERR);
 				}
 			}
@@ -4162,11 +4118,6 @@ good_area:
 	DebugPF("handle_mm_fault() finished\n");
 
 	return PFR_SUCCESS;
-
-force_sigbus:
-	up_read(&mm->mmap_sem);
-
-	return pf_force_sig_info(SIGBUS, BUS_ADRERR, address, regs);
 }
 
 /**
@@ -4404,8 +4355,6 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 		return EXEC_MMU_SUCCESS;
 	}
 
-	ACCESS_CONTROL_DISABLE_AND_SAVE(upsr_to_save);
-
 	/*
 	 * Load data to store from trap cellar
 	 */
@@ -4477,6 +4426,10 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 		swap(st_rec_opc, st_opc_ext);
 	}
 
+	ACCESS_CONTROL_DISABLE_AND_SAVE(upsr_to_save);
+
+	uaccess_enable();
+
 	if (unlikely(hva_page_offset)) {
 		recovery_store_with_bytes(address, address_hi_hva, hva_page_offset,
 			data, data_ext, st_rec_opc, chan,
@@ -4495,6 +4448,8 @@ static enum exec_mmu_ret do_recovery_store(struct pt_regs *regs,
 				AW(st_rec_opc), data_ext, data_ext_tag,
 				AW(st_opc_ext), chan, qp_store, atomic_store);
 	}
+
+	uaccess_disable();
 
 	ACCESS_CONTROL_RESTORE(upsr_to_save);
 
@@ -4887,8 +4842,9 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 		if (greg_recovery) {
 			E2K_GET_DGREG_VAL_AND_TAG(greg_num_d, val, tag);
 		} else {
-			load_value_and_tagd((void *) radr,
-					&val, &tag);
+			uaccess_enable();
+			load_value_and_tagd((void *) radr, &val, &tag);
+			uaccess_disable();
 		}
 
 		DbgEXMMU("load from register file background register value 0x%llx tag 0x%x\n",
@@ -4906,8 +4862,11 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 #endif
 
 	if (zeroing) {
-		if (!greg_recovery && radr)
+		if (!greg_recovery && radr) {
+			uaccess_enable();
 			store_tagged_dword((void *) radr, 0ULL, 0);
+			uaccess_disable();
+		}
 
 		return EXEC_MMU_SUCCESS;
 	}
@@ -4971,6 +4930,7 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 		else
 			reg_address_hi = reg_address + 16;
 
+		uaccess_enable();
 		if (likely(!hva_page_offset)) {
 			recovery_faulted_move(address, reg_address,
 					reg_address_hi, vr, AW(ld_rec_opc),
@@ -4983,6 +4943,7 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 					tc_cond_to_size(tcellar->condition),
 					tcellar->condition);
 		}
+		uaccess_disable();
 	} else {
 		/* Load to %g register */
 		u64 *saved_greg_lo = NULL, *saved_greg_hi = NULL;
@@ -5003,6 +4964,7 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 			else
 				saved_greg_hi = &saved_greg_lo[2];
 		}
+		uaccess_enable();
 		if (likely(!hva_page_offset)) {
 			recovery_faulted_load_to_greg(address, greg_num_d, vr,
 					AW(ld_rec_opc), chan, qp_load,
@@ -5025,6 +4987,7 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 						tcellar->condition);
 			}
 		}
+		uaccess_disable();
 	}
 
 	ACCESS_CONTROL_RESTORE(upsr_to_save);
@@ -5137,6 +5100,17 @@ enum exec_mmu_ret execute_mmu_operations(trap_cellar_t *tcellar,
 	if (unlikely(tc_test_is_as_kvm_injected(cond))) {
 		/* fault is injected by KVM for guest only to eliminate */
 		/* a page fault reason and load/store is fake operation */
+		return EXEC_MMU_SUCCESS;
+	}
+
+	if (unlikely(tc_test_is_as_kvm_recovery_user(cond))) {
+		/* fault is injected by KVM for guest load/store recover */
+		/* operation (privileged hypercall) and guest should */
+		/* reexecute this operation itself */
+
+		/* reset condition flag to signal successful fault completion */
+		cond = tc_reset_kvm_recovery_user(cond);
+		tcellar->condition = cond;
 		return EXEC_MMU_SUCCESS;
 	}
 

@@ -726,7 +726,7 @@ int lttng_add_preemptible_to_ctx(struct lttng_ctx **ctx)
 	return -ENOSYS;
 }
 #endif
-#ifdef CONFIG_PREEMPT_RT
+#if defined(CONFIG_PREEMPT_RT) && (defined(CONFIG_SMP) || defined(CONFIG_SCHED_DEBUG))
 int lttng_add_migratable_to_ctx(struct lttng_ctx **ctx);
 #else
 static inline

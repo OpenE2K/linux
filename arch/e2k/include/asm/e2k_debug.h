@@ -34,22 +34,23 @@
 extern void print_stack_frames(struct task_struct *task,
 		const struct pt_regs *pt_regs, int show_reg_window) __cold;
 extern void print_mmap(struct task_struct *task) __cold;
-extern void print_va_tlb(e2k_addr_t addr, int large_page) __cold;
+extern void native_print_all_tlb(void);
+extern void print_va_tlb(e2k_addr_t addr, bool huge_page) __cold;
+extern void print_va_all_tlb_levels(e2k_addr_t addr, bool huge_page) __cold;
 extern void print_all_TC(const trap_cellar_t *TC, int TC_count) __cold;
 extern void print_tc_record(const trap_cellar_t *tcellar, int num) __cold;
 extern u64 print_all_TIRs(const e2k_tir_t *TIRs, u64 nr_TIRs) __cold;
 extern void print_address_page_tables(unsigned long address,
 		int last_level_only) __cold;
 extern void print_pt_regs(const pt_regs_t *regs) __cold;
+extern void print_kernel_address_ptes(e2k_addr_t address) __cold;
+extern void print_vma_and_ptes(struct vm_area_struct *, e2k_addr_t) __cold;
 
 __init extern void setup_stack_print(void);
 
-static inline void print_address_tlb(unsigned long address)
+static inline void native_print_address_tlb(unsigned long address)
 {
-	print_va_tlb(address, 0);
-	print_va_tlb(pte_virt_offset(round_down(address, PTE_SIZE)), 0);
-	print_va_tlb(pmd_virt_offset(round_down(address, PMD_SIZE)), 0);
-	print_va_tlb(pud_virt_offset(round_down(address, PUD_SIZE)), 0);
+	print_va_all_tlb_levels(address, 0);
 }
 
 /**
@@ -72,7 +73,7 @@ static inline void print_address_tlb(unsigned long address)
  * @real_frame_addr is used for modifying stack in memory.
  *
  * IMPORTANT: if function wants to modify frame contents it must flush
- * chain stack if @flush_needed is set.
+ * chain stack if PCF_FLUSH_NEEDED is set.
  */
 #define PCF_FLUSH_NEEDED 0x1
 #define PCF_IRQS_CLOSE_NEEDED 0x2
@@ -112,35 +113,13 @@ extern	long	kernel_strtab_size;
 
 #define NATIVE_IS_USER_ADDR(task, addr)		\
 		(((e2k_addr_t)(addr)) < NATIVE_TASK_SIZE)
-#define NATIVE_GET_PHYS_ADDR(task, addr)	\
-({									\
-	e2k_addr_t phys;						\
-	if (NATIVE_IS_USER_ADDR(task, addr))				\
-		phys = (unsigned long)user_address_to_pva(task, addr);	\
-	else								\
-		phys = (unsigned long)kernel_address_to_pva(addr);	\
-	phys;								\
-})
-
-/* Read instruction word (two syllables) from IP address */
-static inline unsigned long
-native_read_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip)
-{
-	return NATIVE_READ_MAS_D(phys_ip, MAS_LOAD_PA);
-}
-/* Write modified instruction word at IP address */
-static inline void
-native_modify_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip,
-				unsigned long instr_word)
-{
-	NATIVE_WRITE_MAS_D(phys_ip, instr_word, MAS_STORE_PA);
-}
 
 #define SIZE_PSP_STACK (16 * 4096)
 #define DATA_STACK_PAGES 16
 #define SIZE_DATA_STACK (DATA_STACK_PAGES * PAGE_SIZE)
 
-#define SIZE_CHAIN_STACK KERNEL_PC_STACK_SIZE
+#define SIZE_CHAIN_STACK	KERNEL_PC_STACK_SIZE
+#define	VIRT_SIZE_CHAIN_STACK	VIRT_KERNEL_PCS_SIZE
 
 /* Maximum number of user windows where a trap occured
  * for which additional registers will be printed (ctpr's, lsr and ilcr). */
@@ -212,6 +191,8 @@ extern void print_chain_stack(struct stack_regs *regs,
 				int show_reg_window);
 extern void copy_stack_regs(struct task_struct *task,
 		const struct pt_regs *limit_regs, struct stack_regs *regs);
+extern void fill_trap_stack_regs(const pt_regs_t *trap_pt_regs,
+				 printed_trap_regs_t *regs_trap);
 
 extern struct stack_regs stack_regs_cache[NR_CPUS];
 extern int debug_userstack;
@@ -225,6 +206,11 @@ extern int debug_datastack;
 /* it is native kernel without any virtualization */
 /* or it is native host kernel with virtualization support */
 /* or it is paravirtualized host and guest kernel */
+
+static inline void print_address_tlb(unsigned long address)
+{
+	native_print_address_tlb(address);
+}
 
 static inline int
 do_parse_chain_stack(int flags, struct task_struct *p,
@@ -240,30 +226,20 @@ do_parse_chain_stack(int flags, struct task_struct *p,
 
 #ifndef	CONFIG_VIRTUALIZATION
 /* it is native kernel without any virtualization */
-#define GET_PHYS_ADDR(task, addr)	NATIVE_GET_PHYS_ADDR(task, addr)
 #define	print_all_guest_stacks()	/* nothing to do */
 #define	print_guest_vcpu_stack(vcpu)	/* nothing to do */
 #define	debug_guest_regs(task)		false	/* none any guests */
 #define	get_cpu_type_name()		"CPU"	/* real CPU */
 
-/* Read instruction word (two syllables) from IP address */
-static inline unsigned long
-read_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip)
-{
-	return native_read_instr_on_IP(ip, phys_ip);
-}
-/* Write modified instruction word at IP address */
-static inline void
-modify_instr_on_IP(e2k_addr_t ip, e2k_addr_t phys_ip,
-				unsigned long instr_word)
-{
-	native_modify_instr_on_IP(ip, phys_ip, instr_word);
-}
 static inline void
 print_guest_stack(struct task_struct *task,
 		stack_regs_t *const regs, bool show_reg_window)
 {
 	return;
+}
+static inline void print_all_tlb(void)
+{
+	native_print_all_tlb();
 }
 static inline void
 host_ftrace_stop(void)
@@ -341,8 +317,7 @@ print_chain_stack_regs(char *point)
 
 #define	DebugCpuR(str)	if (DEBUG_CpuR_MODE) print_cpu_regs(str)
 #define	DebugSPRs(POS)	if (DEBUG_SPRs_MODE) print_stack_pointers_reg(POS)
-static inline void
-print_cpu_regs(char *str)
+static inline void print_cpu_regs(char *str)
 {
 	pr_info("%s\n	%s", str, "CPU REGS value:\n");
 	pr_info("usbr	 %llx\n", READ_SBR_REG_VALUE());
@@ -544,8 +519,10 @@ static inline int set_hardware_instr_breakpoint(u64 addr,
 	case 2: WRITE_DIBAR2_REG_VALUE(dibar); break;
 	case 3: WRITE_DIBAR3_REG_VALUE(dibar); break;
 	default:
-		if (__builtin_constant_p((cp_num)))
+#ifdef __LCC__
+		if (__builtin_constant_p(cp_num))
 			BUILD_BUG();
+#endif
 		return -EINVAL;
 	}
 
@@ -596,7 +573,7 @@ static inline int set_hardware_data_breakpoint(u64 addr, u64 size,
 		size = 5;
 		break;
 	default:
-		if (__builtin_constant_p((size)))
+		if (__builtin_constant_p(size))
 			BUILD_BUG();
 		return -EINVAL;
 	}
@@ -615,8 +592,10 @@ static inline int set_hardware_data_breakpoint(u64 addr, u64 size,
 		WRITE_DDBAR3_REG_VALUE(ddbar);
 		break;
 	default:
-		if (__builtin_constant_p((cp_num)))
+#ifdef __LCC__
+		if (__builtin_constant_p(cp_num))
 			BUILD_BUG();
+#endif
 		return -EINVAL;
 	}
 
@@ -674,7 +653,7 @@ static inline int reset_hardware_data_breakpoint(void *addr)
 			ddbar = READ_DDBAR3_REG_VALUE();
 			break;
 		default:
-			if (__builtin_constant_p((cp_num)))
+			if (__builtin_constant_p(cp_num))
 				BUILD_BUG();
 			return -EINVAL;
 		}
@@ -705,7 +684,7 @@ static inline int reset_hardware_data_breakpoint(void *addr)
 		WRITE_DDBAR3_REG_VALUE(0);
 		break;
 	default:
-		if (__builtin_constant_p((cp_num)))
+		if (__builtin_constant_p(cp_num))
 			BUILD_BUG();
 		return -EINVAL;
 	}

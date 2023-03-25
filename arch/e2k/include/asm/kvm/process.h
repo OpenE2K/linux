@@ -9,6 +9,7 @@
 #include <linux/kvm_host.h>
 
 #include <asm/cpu_regs.h>
+#include <asm/pv_info.h>
 #include <asm/regs_state.h>
 #include <asm/kvm/thread_info.h>
 #include <asm/kvm/mmu.h>
@@ -100,8 +101,7 @@ do { \
 ({									\
 	bool is;							\
 									\
-	if (!test_thread_flag(TIF_VIRTUALIZED_GUEST) ||			\
-						paravirt_enabled())	\
+	if (!ts_host_at_vcpu_mode() || paravirt_enabled())		\
 		/* Stack is not guest data stack */			\
 		/* or it is guest and it cannot run own guest */	\
 		is = false;						\
@@ -398,31 +398,18 @@ static __always_inline __interrupt void
 kvm_complete_switch_to_user_func(void)
 {
 	thread_info_t	*ti;
-	gthread_info_t	*gti;
-	bool		from_virt_guest;
 	bool		from_pv_guest;
 
 	/* current thread info/task pointer global registers were cleared */
 	/* while all global registers were set to emty state */
 	ti = NATIVE_READ_CURRENT_REG();
-	gti = ti->gthread_info;
-	from_virt_guest = test_ti_thread_flag(ti, TIF_VIRTUALIZED_GUEST);
 	from_pv_guest = test_ti_thread_flag(ti, TIF_PARAVIRT_GUEST);
 
 	/* the function should switch interrupt control from UPSR to */
 	/* PSR and set initial state of user UPSR */
-	if (!from_virt_guest) {
-		NATIVE_SET_USER_INITIAL_UPSR(E2K_USER_INITIAL_UPSR);
-	} else {
-		KVM_SET_GUEST_USER_INITIAL_UPSR(ti);
-	}
+	NATIVE_SET_USER_INITIAL_UPSR(E2K_USER_INITIAL_UPSR);
 
-	if (unlikely(from_virt_guest)) {
-		/* structure gregs into guest thread info structure will */
-		/* contain user global registers from now */
-		gti->gregs_active = 1;
-		gti->gregs_valid = 0;
-		gti->gregs_for_currents_valid = 0;
+	if (unlikely(from_pv_guest)) {
 		KVM_COND_GOTO_RETURN_TO_PARAVIRT_GUEST(from_pv_guest, 0);
 	}
 }
@@ -436,31 +423,14 @@ kvm_complete_go2user(thread_info_t *ti, long fn)
 	bool is_pv_guest;	/* entry point fn is paravirtualized guest */
 				/* kernel function */
 
-	if (!test_ti_thread_flag(ti, TIF_VIRTUALIZED_GUEST)) {
-		/* it is not guest process return to */
-		/* but the function should restore user UPSR state */
-		NATIVE_WRITE_UPSR_REG(ti->upsr);
-		return;
-	}
-	if ((e2k_addr_t)fn < GUEST_TASK_SIZE &&
-			(ti->vcpu == NULL || is_paging(ti->vcpu))) {
-		/* it is guest user process return to */
-		/* clear host global registers used for virtualization
-		CLEAR_HOST_GREGS();
-		 */
-		/* the function should restore guest user UPSR state */
-		KVM_RESTORE_GUEST_USER_UPSR(ti);
-	} else {
-		/* it is guest kernel process return to
-		ONLY_SET_HOST_GREGS(ti->vcpu, ti->vcpu->arch.vcpu_state);
-		 */
-		/* the function should restore guest kernel UPSR state */
-		KVM_RESTORE_GUEST_KERNEL_UPSR(ti);
-	}
+	/* the function should restore user UPSR state */
+	NATIVE_WRITE_UPSR_REG(ti->upsr);
 
 	is_pv_guest = ((e2k_addr_t)fn >= HOST_TASK_SIZE);
 
-	KVM_COND_GOTO_RETURN_TO_PARAVIRT_GUEST(is_pv_guest, 0);
+	if (unlikely(is_pv_guest)) {
+		KVM_COND_GOTO_RETURN_TO_PARAVIRT_GUEST(is_pv_guest, 0);
+	}
 }
 
 #undef	printk

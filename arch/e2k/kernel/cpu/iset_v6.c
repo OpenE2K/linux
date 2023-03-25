@@ -683,10 +683,9 @@ die:
  * wakeups as only whole cache lines can be watched. */
 static void __cpuidle mem_wait_idle(void)
 {
-	NATIVE_READ_MAS_D_CH(&current_thread_info()->flags,
-			MAS_WATCH_FOR_MODIFICATION_V6, 0);
-	if (!need_resched())
-		E2K_WAIT(_mem_mod | _int);
+	unsigned long need_resched_mask = (1ul << TIF_NEED_RESCHED) |
+			(IS_ENABLED(CONFIG_PREEMPT_LAZY) ? (1ul << TIF_NEED_RESCHED_LAZY) : 0);
+	E2K_WATCH_FOR_MODIFICATION_64(&current_thread_info()->flags, need_resched_mask);
 }
 
 void __cpuidle C1_enter_v6(void)

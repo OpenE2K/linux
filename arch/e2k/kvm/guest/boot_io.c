@@ -1,3 +1,4 @@
+#include <asm/p2v/boot_v2p.h>
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -8,6 +9,7 @@
 
 #include <asm/mman.h>
 #include <asm/io.h>
+#include <asm/p2v/io.h>
 #include <asm/vga.h>
 #include <asm/kvm/guest/io.h>
 #include <asm/kvm/hypercall.h>

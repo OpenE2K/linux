@@ -15,20 +15,13 @@
 void mmu_pid_flush_tlb_mm(mm_context_t *context, bool is_active,
 		cpumask_t *mm_cpumask, int cpu, bool trace_enabled)
 {
-	unsigned long pid, old_pid = context->cpumsk[cpu];
+	unsigned long old_pid = context->cpumsk[cpu];
 
 	if (is_active) {
-		unsigned long flags;
-
 		/* Should update right now */
-		DebugPT("mm context will be reloaded\n");
-		raw_all_irq_save(flags);
-		pid = get_new_mmu_pid(context, cpu);
-		reload_context_mask(pid);
-		raw_all_irq_restore(flags);
-
-		DebugPT("CPU #%d new mm context is 0x%lx\n",
-				cpu, context->cpumsk[cpu]);
+		flush_mmu_pid(context);
+		DebugPT("CPU #%d new mm context is 0x%llx\n", raw_smp_processor_id(),
+				context->cpumsk[raw_smp_processor_id()]);
 	} else {
 #ifdef CONFIG_SMP
 		/* Remove this cpu from mm_cpumask. This might be
@@ -42,11 +35,11 @@ void mmu_pid_flush_tlb_mm(mm_context_t *context, bool is_active,
 		}
 #endif
 		context->cpumsk[cpu] = 0;
-		pid = 0;
 	}
 
 	if (unlikely(trace_enabled))
-		trace_mmu_pid_flush_tlb_mm(cpu, context, is_active, old_pid, pid);
+		trace_mmu_pid_flush_tlb_mm(cpu, context, is_active, old_pid,
+				context->cpumsk[cpu]);
 }
 
 struct mm_args {
@@ -70,12 +63,6 @@ static void flush_tlb_mm_ipi(void *info)
 #ifdef CONFIG_SMP
 	inc_irq_stat(irq_tlb_count);
 #endif
-
-	/* For PV guest real copying should be when returning
-	 * to the guest mode & context */
-	if (mm)
-		__flush_cpu_root_pt_mm(mm);
-
 	mmu_pid_flush_tlb_mm(args->context, mm ? (mm == current->active_mm) : false,
 			args->mm_cpumask, smp_processor_id(), args->trace_enabled);
 }
@@ -205,7 +192,6 @@ EXPORT_SYMBOL(native_flush_tlb_page);
 static void mmu_pid_flush_tlb_all(void)
 {
 	flush_TLB_all();
-	__flush_cpu_root_pt();
 	if (trace_native_flush_tlb_enabled())
 		trace_mmu_pid_flush_tlb_all(smp_processor_id());
 }
@@ -216,7 +202,6 @@ static void flush_tlb_all_ipi(void *info)
 	inc_irq_stat(irq_tlb_count);
 #endif
 	mmu_pid_flush_tlb_all();
-	__flush_cpu_root_pt();
 }
 
 

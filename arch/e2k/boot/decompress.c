@@ -78,10 +78,12 @@ static int got_updating_in_progress = 1;
 static int unpacking_in_progress = 1;
 
 static boot_info_t *boot_info;
-
 static unsigned long kernel_address;
-
 static unsigned long io_area_phys_base;
+static atomic_t dec_cpus_arrived;
+
+#define CONSOLE_CHANNEL_DENY	0xff
+static char console_channel;
 
 #ifdef CONFIG_KVM_GUEST_KERNEL
 #define	STARTUP_TTABLE_ENTRY_OFFSET	0x10000
@@ -138,6 +140,12 @@ static inline u8 am85c30_com_inb_command(u64 iomem_addr, u8 reg_num)
 	return dec_readb((void __iomem *) iomem_addr);
 }
 
+static inline void am85c30_com_outb_command(u64 iomem_addr, u8 reg_num, u8 val)
+{
+	dec_writeb(reg_num, (void __iomem *) iomem_addr);
+	dec_writeb(val, (void __iomem *) iomem_addr);
+}
+
 static inline void am85c30_com_outb(u64 iomem_addr, u8 byte)
 {
 	dec_writeb(byte, (void __iomem *) iomem_addr);
@@ -156,41 +164,49 @@ static inline unsigned int dec_apic_is_bsp(void)
 	return BootStrap(dec_readl((void __iomem *)(APIC_DEFAULT_PHYS_BASE + APIC_BSP)));
 }
 
-#define AM85C30_RR0	0x00
-#define AM85C30_D2	(0x01 << 2)
+#define AM85C30_RR0		0x00
+#define AM85C30_RR1		0x01
+#define	AM85C30_WR0		0x00
+#define AM85C30_WR1		0x01
+#define AM85C30_D2		(0x01 << 2)
+#define	AM85C30_RES_Tx_P	0x28
+#define AM85C30_EXT_INT_ENAB	0x01
+#define AM85C30_TxINT_ENAB	0x02
+#define AM85C30_RxINT_MASK	0x18
+
 static void am85c30_putc(unsigned long port, char c)
 {
-	/*
-	 * Output to ttyS0
-	 */
+	u8 cmd_saved = am85c30_com_inb_command(port, AM85C30_RR1);
+
+	am85c30_com_outb_command(port, AM85C30_WR1,
+		cmd_saved & ~(AM85C30_EXT_INT_ENAB | AM85C30_TxINT_ENAB |
+							AM85C30_RxINT_MASK));
+
 	while ((am85c30_com_inb_command(port, AM85C30_RR0) & AM85C30_D2) == 0)
 		E2K_NOP(7);
 	am85c30_com_outb(port + 0x01, c);
 
-	/*
-	 * Output to ttyS1
-	 */
-	port += 2;
 	while ((am85c30_com_inb_command(port, AM85C30_RR0) & AM85C30_D2) == 0)
 		E2K_NOP(7);
-	am85c30_com_outb(port + 0x01, c);
+	am85c30_com_outb_command(port, AM85C30_WR0, AM85C30_RES_Tx_P);
+	am85c30_com_outb_command(port, AM85C30_WR1, cmd_saved);
 }
 
-static void __putc(unsigned long port, char c)
+static void __putc(unsigned long port, char channel, char c)
 {
-	am85c30_putc(port, c);
+	am85c30_putc(port + 2 * channel, c);
 }
 
 static void putc(char c)
 {
 	unsigned long port = boot_info->serial_base;
 
-	if (!port)
+	if (!port || console_channel == CONSOLE_CHANNEL_DENY)
 		return;
 
-	__putc(port, c);
+	__putc(port, console_channel, c);
 	if (c == '\n')
-		__putc(port, '\r');
+		__putc(port, console_channel, '\r');
 }
 
 static void puts(char *s)
@@ -560,6 +576,24 @@ static __always_inline void jump_to_image(unsigned long kernel_address,
 					   n, bootblock);
 }
 
+static void parse_console_params(boot_info_t *info)
+{
+	char *cmdline;
+
+	if (!strncmp(info->kernel_args_string, KERNEL_ARGS_STRING_EX_SIGNATURE,
+			KERNEL_ARGS_STRING_EX_SIGN_SIZE))
+		/* Extended command line (512 bytes) */
+		cmdline = info->bios.kernel_args_string_ex;
+	else
+		/* Standart command line (128 bytes) */
+		cmdline = info->kernel_args_string;
+
+	if (strstr(cmdline, "dump_console=1"))
+		console_channel = 1;
+	else if (strstr(cmdline, "dump_console=no"))
+		console_channel = CONSOLE_CHANNEL_DENY;
+}
+
 static struct board_mem memory;
 extern int machdep_setup_features(int cpu, int revision);
 
@@ -600,6 +634,8 @@ noinline void decompress_kernel_updated_got(int n, bootblock_struct_t *bootblock
 		io_area_phys_base = E2K_LEGACY_SIC_IO_AREA_PHYS_BASE;
 	else
 		io_area_phys_base = E2K_FULL_SIC_IO_AREA_PHYS_BASE;
+
+	parse_console_params(boot_info);
 
 	puts("\nDecompressor started\n");
 
@@ -684,6 +720,8 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 	e2k_idr_t idr;
 	int bsp;
 
+	atomic_inc(&dec_cpus_arrived);
+
 	/*
 	 * Only bootstrap processor proceeds to unpacking
 	 */
@@ -695,12 +733,19 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 		bsp = dec_apic_is_bsp();
 
 	if (!bsp) {
-		while (got_updating_in_progress)
+		while (READ_ONCE(got_updating_in_progress))
 			E2K_NOP(7);
 		/* Barrier between reading `got_updating_in_progress'
 		 * and reading GOT */
 		smp_rmb();
 	} else {
+		/*
+		 * We should be sure, that all cpus are here after kexec and
+		 * before the first memory allocation in decompressor
+		 */
+		while (atomic_read(&dec_cpus_arrived) < bootblock->info.num_of_cpus)
+			E2K_NOP(7);
+
 		load_offset = AS(READ_OSCUD_LO_REG()).base - 0x10000;
 		got = (unsigned long)_got + load_offset;
 		egot = (unsigned long)_egot + load_offset;
@@ -713,7 +758,7 @@ void decompress_kernel(int n, bootblock_struct_t *bootblock)
 			*((unsigned long *)addr) += load_offset;
 
 		smp_wmb(); /* Wait for GOT changes */
-		got_updating_in_progress = 0;
+		WRITE_ONCE(got_updating_in_progress, 0);
 	}
 
 	decompress_kernel_updated_got(n, bootblock, bsp, idr, orig_kernel_size);

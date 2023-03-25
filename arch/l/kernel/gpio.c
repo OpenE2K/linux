@@ -357,11 +357,15 @@ static int l_gpio_irq_set_affinity(struct irq_data *irq_data,
 	int ret = 0, i;
 	unsigned int irq = irq_data->irq;
 	struct l_gpio *chip = irq_get_chip_data(irq);
+	struct irq_data *iopic_data;
+	struct irq_chip *iopic_chip;
+
 	for (i = 0; chip->data.irq[i].nr && ret == 0; i++) {
-		struct irq_data *idata =
-				irq_get_irq_data(chip->data.irq[i].nr);
-		if (idata)
-			ret = native_ioapic_set_affinity(idata, mask, force);
+		iopic_data = irq_get_irq_data(chip->data.irq[i].nr);
+		iopic_chip = irq_get_chip(chip->data.irq[i].nr);
+
+		if (iopic_chip)
+			ret = iopic_chip->irq_set_affinity(iopic_data, mask, force);
 	else
 		pr_alert("Error: gpio: could not set IRQ#%d affinity. Did not boot pass info about it?\n",
 			chip->data.irq[i].nr);
@@ -446,8 +450,7 @@ static int __init l_gpio_probe(struct pci_dev *pdev,
 
 	dev_info(&pdev->dev, "allocated PCI BAR #%d: base 0x%llx\n", bar,
 		 (unsigned long long)c->base);
-
-	/* Default settings: */
+#if 0 /* do not touch boot settings */
 	/* Default Input/Output mode for all pins: */
 	writel(L_GPIO_CNTRL_DEF, c->base_ioaddr + L_GPIO_CNTRL);
 	/* Default interrupt enable/disable for all pins: */
@@ -456,7 +459,7 @@ static int __init l_gpio_probe(struct pci_dev *pdev,
 	writel(L_GPIO_INT_CLS_DEF, c->base_ioaddr + L_GPIO_INT_CLS);
 	/* Default rising/falling edge detection for all pins (if edge): */
 	writel(L_GPIO_INT_LVL_DEF, c->base_ioaddr + L_GPIO_INT_LVL);
-
+#endif
 	/* finally, register with the generic GPIO API */
 	err = gpiochip_add(&(c->chip));
 	if (err)
@@ -534,6 +537,9 @@ static struct l_gpio_data l_iohub2_private_data = {
 static struct l_gpio_data l_iohub3_private_data = {
 	.bar = 0,
 	.lines = 16,
+	.irq = {
+		{ .nr = 12 }
+	},
 };
 
 static struct pci_device_id __initdata l_gpio_pci_tbl[] = {
@@ -557,9 +563,14 @@ static struct device_node *l_gpio_get_of_node(struct pci_dev *pdev,
 {
 	int node = dev_to_node(&pdev->dev);
 	char path[32];
+	if (pdev->dev.of_node)
+		return pdev->dev.of_node;
 
-	if (data != &l_iohub_private_data && data != &l_iohub2_private_data)
+	if (data != &l_iohub_private_data &&
+		    data != &l_iohub2_private_data &&
+		    data != &l_iohub3_private_data) {
 		return NULL;
+	}
 
 	if (node < 0)
 		node = 0;
@@ -618,6 +629,13 @@ static int __init l_gpio_init(void)
 			 */
 			if (cpu_has_epic() && d == &l_iohub2_private_data)
 				d->irq[0].nr = pdev->irq + 1;
+
+			/* FIXME: We need universal function to choose between
+			 * native_ioapic_set_affinity and native_ioepic_set_affinity
+			 * in l_gpio_irq_set_affinity */
+			if (cpu_has_epic() && d == &l_iohub3_private_data) {
+				l_gpio_irqchip.irq_set_affinity = NULL;
+			}
 
 			memcpy(&next->data, d, sizeof(*d));
 			err = l_gpio_probe(pdev, &l_gpio_pci_tbl[i], next);

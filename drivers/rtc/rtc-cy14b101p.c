@@ -804,7 +804,7 @@ static int cy14b101p_probe(struct spi_device *spi)
 	}
 #endif	/* CONFIG_E2K */
 #if defined(CONFIG_E90S)
-	if (e90s_get_cpu_type() == E90S_CPU_R2000 &&
+	if (e90s_get_cpu_type() >= E90S_CPU_R2000 &&
 			clk_rt_mode == CLK_RT_RTC) {
 		int	error;
 		static struct task_struct *clk_rt_registask;

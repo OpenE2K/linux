@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -57,6 +57,10 @@
 #define __gc_hal_driver_vg_shared_h_
 
 #include "gc_hal_types.h"
+
+#if defined(__QNXNTO__)
+#include <sys/siginfo.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -190,7 +194,7 @@ typedef struct _gcsTASK_SIGNAL
     IN gctSIGNAL                signal;
 
 #if defined(__QNXNTO__)
-    IN gctINT32                 coid;
+    IN struct sigevent          event;
     IN gctINT32                 rcvid;
 #endif
 }
@@ -234,7 +238,7 @@ typedef struct _gcsTASK_FREE_VIDEO_MEMORY
     IN gceTASK                  id;
 
     /* Allocated video memory. */
-    IN gctUINT32                node;
+    IN gctUINT64                node;
 }
 gcsTASK_FREE_VIDEO_MEMORY;
 

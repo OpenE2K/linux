@@ -16,6 +16,26 @@
 #define DebugMMP(...)		DebugPrint(DEBUG_MMP_MODE ,##__VA_ARGS__)
 
 
+/*
+ * You really shouldn't be using read() or write() on /dev/mem.
+ * This might go away in the future.
+ *
+ * Can we access it for direct reading/writing? Must be RAM:
+ */
+int valid_phys_addr_range(phys_addr_t addr, size_t count)
+{
+	return addr + count - 1 <= __pa(high_memory - 1);
+}
+
+/* Can we access it through mmap? Must be a valid physical address: */
+int valid_mmap_phys_addr_range(unsigned long pfn, size_t count)
+{
+	phys_addr_t addr = (phys_addr_t) pfn << PAGE_SHIFT;
+
+	return !((addr + count - 1) >> MAX_POSSIBLE_PHYSMEM_BITS);
+}
+
+
 /* Get an address range which is currently unmapped.
  * For mmap() without MAP_FIXED and shmat() with addr=0.
  *
@@ -41,8 +61,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 
 	if (flags & MAP_FIXED) {
 		if (!test_ts_flag(TS_KERNEL_SYSCALL)) {
-			if (addr >= USER_HW_STACKS_BASE ||
-			    addr + len >= USER_HW_STACKS_BASE)
+			if (addr >= USER_ADDR_MAX || addr + len >= USER_ADDR_MAX)
 				return -ENOMEM;
 
 			if (!TASK_IS_BINCO(current) && is_32bit &&
@@ -60,7 +79,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 			end = TASK32_SIZE;
 		else
 			end = TASK_SIZE;
-		end = min(end, USER_HW_STACKS_BASE);
+		end = min(end, USER_ADDR_MAX);
 	} else {
 		end = TASK_SIZE;
 	}

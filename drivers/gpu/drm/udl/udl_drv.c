@@ -4,6 +4,9 @@
  */
 
 #include <linux/module.h>
+#ifdef CONFIG_MCST
+#include <linux/dma-mapping.h>
+#endif
 
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_drv.h>
@@ -52,6 +55,10 @@ static const struct file_operations udl_driver_fops = {
 
 static void udl_driver_release(struct drm_device *dev)
 {
+#ifdef CONFIG_MCST /* Bug 141042 */
+	struct udl_device *udl = to_udl(dev);
+	udl->drm.dev->dma_parms = NULL;
+#endif
 	udl_fini(dev);
 	udl_modeset_cleanup(dev);
 	drm_dev_fini(dev);
@@ -101,7 +108,11 @@ static struct udl_device *udl_driver_create(struct usb_interface *interface)
 
 	udl->udev = udev;
 	udl->drm.dev_private = udl;
-
+#ifdef CONFIG_MCST /* Bug 141042 */
+	WARN_ON(dma_set_mask(udl->drm.dev, DMA_BIT_MASK(64)));
+	udl->drm.dev->dma_parms = &udl->dma_parms;
+	WARN_ON(dma_set_max_seg_size(udl->drm.dev, DMA_BIT_MASK(32)));
+#endif
 	r = udl_init(udl);
 	if (r) {
 		drm_dev_fini(&udl->drm);

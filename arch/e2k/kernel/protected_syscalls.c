@@ -366,8 +366,9 @@ static struct user_msghdr __user *convert_msghdr(
  * 'user_buff' - buffer for converted structure in user space.
  */
 {
-	long __user *args = (long *) user_buff;
+	long __user *args = (long __user *) user_buff;
 	struct user_msghdr __user *converted_msghdr = NULL;
+	struct iovec	__user *msg_iov;
 	struct iovec __user *converted_iovec;
 	int err_mh, err_iov;
 
@@ -390,7 +391,7 @@ static struct user_msghdr __user *convert_msghdr(
 					sizeof(struct iovec));
 
 	/* Convert struct msghdr: */
-	converted_msghdr = (struct user_msghdr *) args;
+	converted_msghdr = (struct user_msghdr __user *) args;
 	err_mh = convert_array_3((long *)prot_msghdr, (long *) converted_msghdr,
 				SIZE_MSGHDR, 7, 1, MASK_MSGHDR_TYPE,
 				MASK_MSGHDR_ALIGN, MASK_MSGHDR_RW,
@@ -399,11 +400,13 @@ static struct user_msghdr __user *convert_msghdr(
 		DbgSCP_ALERT("Bad user_msghdr in syscall \'%s\'\n",
 			     syscall_name);
 
-	if (converted_msghdr->msg_iov) {
+	if (get_user(msg_iov, &converted_msghdr->msg_iov))
+		return ERR_PTR(-EFAULT);
+	if (msg_iov) {
 		/* Convert struct iovec from msghdr->msg_iov */
 		converted_iovec = (struct iovec *)
 			((char *)converted_msghdr + sizeof(struct user_msghdr));
-		err_iov = convert_array_3((long *) converted_msghdr->msg_iov,
+		err_iov = convert_array_3((long *) msg_iov,
 					  (long *) converted_iovec,
 					  SIZE_IOVEC, 2, 1, MASK_IOVEC_TYPE,
 					  MASK_IOVEC_ALIGN, 0,
@@ -419,7 +422,8 @@ static struct user_msghdr __user *convert_msghdr(
 	}
 
 	/* Assign converted iovec pointer to converted msghdr structure: */
-	converted_msghdr->msg_iov = converted_iovec;
+	if (put_user(converted_iovec, &converted_msghdr->msg_iov))
+		return ERR_PTR(-EFAULT);
 
 	return (struct user_msghdr *) args;
 }
@@ -440,9 +444,9 @@ long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
 #define SIGALTST_ERR2 "Bad 'ss' descriptor for sigaltstack()\n"
 #define SIGALTST_ERRSIZE "Size of 'ss' arg (%d) is less than required by 'ss_size' field (%zd)\n"
 #define SIGALTST_ERRWRITE "Failed to update 'old_ss' descriptor; error code = %d\n"
-	stack_t *ss = NULL;
-	stack_t *old_ss = NULL;
-	unsigned long lo, hi;
+	stack_t *__user ss = NULL;
+	stack_t *__user old_ss = NULL;
+	u64 lo, hi;
 	unsigned int size = 0, size1 = 0, size2 = 0;
 	long rval = -EINVAL; /* syscall return value */
 
@@ -465,9 +469,7 @@ long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
 		size += sizeof(stack_t);
 	}
 	if (size) {
-		void *buf;
-
-		buf = get_user_space(size);
+		void *__user buf = get_user_space(size);
 		if (ss_128)
 			ss = buf;
 		if (old_ss_128)
@@ -475,6 +477,8 @@ long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
 	}
 
 	if (ss_128) {
+		size_t ss_size;
+
 		/* Struct 'ss_128' contains pointer in the first field */
 		rval = get_pm_struct_simple((long *) ss_128, (long *) ss, size1,
 				3, 1, SIGALTST_MASK_TYPE, SIGALTST_MASK_ALIGN);
@@ -483,15 +487,14 @@ long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
 			return rval;
 		}
 		/* Checking stack size for correctness: */
-		rval = get_user(hi, &ss_128->ss_sp.word.hi);
-		if (rval) {
-			DbgSCP_ALERT(FATAL_ERR_READ,
-				     (long) &ss_128->ss_sp.word.hi);
-			return rval;
+		if (get_user(hi, &ss_128->ss_sp.hi) ||
+				get_user(ss_size, &ss->ss_size)) {
+			DbgSCP_ALERT(FATAL_ERR_READ, (long) &ss_128->ss_sp.hi);
+			return -EFAULT;
 		}
 		size2 = e2k_ptr_size(0L /*lo*/, hi, 0);
-		if (size2 < ss->ss_size) {
-			DbgSCP_ALERT(SIGALTST_ERRSIZE, size2, ss->ss_size);
+		if (size2 < ss_size) {
+			DbgSCP_ALERT(SIGALTST_ERRSIZE, size2, ss_size);
 			return -EINVAL;
 		}
 	}
@@ -500,32 +503,31 @@ long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
 
 	if (old_ss_128) {
 		/* Updating 'old_ss_128': */
-		e2k_ptr_t dscr;
+		stack_t k_old_ss;
 		int ret;
 
-		if (old_ss->ss_sp) {
-			/* Constructing descriptor for protected 'ss_sp': */
-			lo = make_ap_lo((e2k_addr_t) old_ss->ss_sp,
-					old_ss->ss_size, 0, RW_ENABLE);
-			hi = make_ap_hi((e2k_addr_t) old_ss->ss_sp,
-					old_ss->ss_size, 0, RW_ENABLE);
-			NATIVE_STORE_VALUE_WITH_TAG(&AWP(&dscr).hi, hi,
-						    E2K_AP_HI_ETAG);
-			NATIVE_STORE_VALUE_WITH_TAG(&AWP(&dscr).lo, lo,
-						    E2K_AP_LO_ETAG);
-
-			ret = copy_to_user_with_tags(&old_ss_128->ss_sp, &dscr,
-						     sizeof(dscr));
-			if (ret)
-				ret = -EFAULT;
-		} else {
-			/* Zeroing protected 'ss_sp' field: */
-			ret = put_user(0L, &old_ss_128->ss_sp.word.lo);
-			ret |= put_user(0L, &old_ss_128->ss_sp.word.hi);
+		if (copy_from_user(&k_old_ss, old_ss, sizeof(k_old_ss))) {
+			DbgSCP_ALERT(FATAL_ERR_READ, (long) &old_ss);
+			return -EFAULT;
 		}
 
-		ret |= put_user(old_ss->ss_flags, &old_ss_128->ss_flags);
-		ret |= put_user(old_ss->ss_size, &old_ss_128->ss_size);
+		if (k_old_ss.ss_sp) {
+			/* Constructing descriptor for protected 'ss_sp': */
+			lo = make_ap_lo((e2k_addr_t) k_old_ss.ss_sp,
+					old_ss->ss_size, 0, RW_ENABLE);
+			hi = make_ap_hi((e2k_addr_t) k_old_ss.ss_sp,
+					old_ss->ss_size, 0, RW_ENABLE);
+			ret = put_user_tagged_16(lo, hi, ETAGAPQ, &old_ss_128->ss_sp);
+		} else {
+			/* Zeroing protected 'ss_sp' field: */
+			lo = 0;
+			hi = 0;
+			ret = put_user(0L, &old_ss_128->ss_sp.lo);
+			ret |= put_user(0L, &old_ss_128->ss_sp.hi);
+		}
+
+		ret |= put_user(k_old_ss.ss_flags, &old_ss_128->ss_flags);
+		ret |= put_user(k_old_ss.ss_size, &old_ss_128->ss_size);
 
 		if (!rval)
 			rval = ret;
@@ -533,10 +535,8 @@ long protected_sys_sigaltstack(const stack_prot_t __user *ss_128,
 		if (ret) {
 			DbgSCP_ALERT(SIGALTST_ERRWRITE, ret);
 		} else {
-			DbgSCP("old_ss_128: sp=0x%lx:0x%lx flags=0x%x size=0x%zx\n",
-				old_ss_128->ss_sp.word.lo,
-				old_ss_128->ss_sp.word.hi,
-				old_ss_128->ss_flags, old_ss_128->ss_size);
+			DbgSCP("old_ss_128: sp=0x%llx:0x%llx flags=0x%x size=0x%zx\n",
+				lo, hi, k_old_ss.ss_flags, k_old_ss.ss_size);
 		}
 	}
 
@@ -650,8 +650,8 @@ long protected_sys_clone(const unsigned long	a1,	/* flags */
 
 notrace __section(".entry.text")
 long protected_sys_execve(const unsigned long __user a1,/* filename*/
-			  const unsigned long __user a2,/* argv[] */
-			  const unsigned long __user a3,/* envp[] */
+			  unsigned long __user *u_argv,	/* argv[] */
+			  unsigned long __user *u_envp,	/* envp[] */
 			  const unsigned long	a4,	/* not used */
 			  const unsigned long	a5,	/* not used */
 			  const unsigned long	a6,	/* not used*/
@@ -660,8 +660,6 @@ long protected_sys_execve(const unsigned long __user a1,/* filename*/
 	char __user *filename = (char *) a1;
 	unsigned long *buf;
 	unsigned long *argv, *envp;
-	unsigned long __user *u_argv = (unsigned long *) a2;
-	unsigned long __user *u_envp = (unsigned long *) a3;
 	unsigned int size = 0, size2 = 0;
 	int argc = 0, envc = 0;
 	long rval; /* syscall return value */
@@ -692,13 +690,13 @@ long protected_sys_execve(const unsigned long __user a1,/* filename*/
 	 */
 
 	/* Count real number of entries in argv */
-	argc = count_descriptors((long *) u_argv, size);
+	argc = count_descriptors((long __user *) u_argv, size);
 	if (argc < 0)
 		return -EINVAL;
 
 	/* Count real number of entries in envc */
 	if (size2) {
-		envc = count_descriptors((long *) u_envp, size2);
+		envc = count_descriptors((long __user *) u_envp, size2);
 		if (envc < 0)
 			return -EINVAL;
 	}
@@ -728,7 +726,8 @@ long protected_sys_execve(const unsigned long __user a1,/* filename*/
 		}
 	}
 	/* The array argv must be terminated by zero */
-	argv[argc] = 0;
+	if (put_user(0, &argv[argc]))
+		return -EFAULT;
 
 	/*
 	 * Convert descriptors in envp to ints
@@ -743,7 +742,8 @@ long protected_sys_execve(const unsigned long __user a1,/* filename*/
 		}
 	}
 	/* The array envp must be terminated by zero */
-	envp[envc] = 0;
+	if (put_user(0, &envp[envc]))
+		return -EFAULT;
 
 	rval = e2k_sys_execve(filename, (char **) argv,
 			      (char **) envp);
@@ -1222,10 +1222,14 @@ long protected_sys_sysctl(const unsigned long __user arg1)
 
 
 notrace __section(".entry.text")
-long protected_sys_olduselib(const unsigned long __user a1, /* library */
-			const unsigned long __user a2) /* umdd */
+long protected_sys_olduselib(const char __user *library,
+			     const unsigned long __user a2, /* umdd */
+			const unsigned long unused3,
+			const unsigned long unused4,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs	*regs)
 {
-	char *str = (char *)a1;
 	umdd_old_t *umdd = (umdd_old_t *) a2;
 	kmdd_t kmdd;
 	int rval; /* syscall return value */
@@ -1233,82 +1237,80 @@ long protected_sys_olduselib(const unsigned long __user a1, /* library */
 	if (IS_CPU_ISET_V6())
 		return -ENOSYS;
 
-	if (!a1 || !a2)
+	if (!library || !a2 || !e2k_ptr_str(regs->args[1], regs->args[2], GET_SBR_HI()))
 		return -EINVAL;
 
 	if (current->thread.flags & E2K_FLAG_3P_ELF32)
-		rval = sys_load_cu_elf32_3P(str, &kmdd);
+		rval = sys_load_cu_elf32_3P(library, &kmdd);
 	else
-		rval = sys_load_cu_elf64_3P(str, &kmdd);
+		rval = sys_load_cu_elf64_3P(library, &kmdd);
 
 	if (rval) {
-		DbgSCP_ERR("failed, could not load\n");
+		DbgSCP("could not load library err #%d\n", rval);
 		return rval;
 	}
 
-	rval |= PUT_USER_AP(&umdd->mdd_got, kmdd.got_addr,
-			    kmdd.got_len, 0, RW_ENABLE);
+	rval = PUT_USER_AP(&umdd->mdd_got, kmdd.got_addr, kmdd.got_len, 0, RW_ENABLE);
 	if (kmdd.init_got_point)
-		rval |= PUT_USER_PL_V3(&umdd->mdd_init_got,
-					kmdd.init_got_point);
+		rval = rval ?: PUT_USER_PL_V3(&umdd->mdd_init_got, kmdd.init_got_point);
 	else
-		rval |= put_user(0L, &umdd->mdd_init_got.word);
+		rval = rval ?: put_user(0L, &umdd->mdd_init_got.word);
 
 	if (kmdd.entry_point)
-		rval |= PUT_USER_PL_V3(&umdd->mdd_start,
-					kmdd.entry_point);
+		rval = rval ?: PUT_USER_PL_V3(&umdd->mdd_start, kmdd.entry_point);
 	else
-		rval |= put_user(0L, &umdd->mdd_start.word);
+		rval = rval ?: put_user(0L, &umdd->mdd_start.word);
 
 	if (kmdd.init_point)
-		rval |= PUT_USER_PL_V3(&umdd->mdd_init,
-					kmdd.init_point);
+		rval = rval ?: PUT_USER_PL_V3(&umdd->mdd_init, kmdd.init_point);
 	else
-		rval |= put_user(0L, &umdd->mdd_init.word);
+		rval = rval ?: put_user(0L, &umdd->mdd_init.word);
 
 	if (kmdd.fini_point)
-		rval |= PUT_USER_PL_V3(&umdd->mdd_fini,
-					kmdd.fini_point);
+		rval = rval ?: PUT_USER_PL_V3(&umdd->mdd_fini, kmdd.fini_point);
 	else
-		rval |= put_user(0L, &umdd->mdd_fini.word);
+		rval = rval ?: put_user(0L, &umdd->mdd_fini.word);
 
 	return rval;
 }
 
 
 notrace __section(".entry.text")
-long protected_sys_uselib(const unsigned long __user a1, /* library */
-			const unsigned long __user a2) /* umdd */
+long protected_sys_uselib(const char __user *library,
+			  const unsigned long __user a2, /* umdd */
+			const unsigned long unused3,
+			const unsigned long unused4,
+			const unsigned long unused5,
+			const unsigned long unused6,
+			const struct pt_regs	*regs)
 {
-	char *str = (char *)a1;
 	umdd_t *umdd = (umdd_t *) a2;
 	kmdd_t kmdd;
 	int rval; /* syscall return value */
 
-	if (!a1 || !a2)
+	if (!library || !a2 || !e2k_ptr_str(regs->args[1], regs->args[2], GET_SBR_HI()))
 		return -EINVAL;
 
 	if (current->thread.flags & E2K_FLAG_3P_ELF32)
-		rval = sys_load_cu_elf32_3P(str, &kmdd);
+		rval = sys_load_cu_elf32_3P(library, &kmdd);
 	else
-		rval = sys_load_cu_elf64_3P(str, &kmdd);
+		rval = sys_load_cu_elf64_3P(library, &kmdd);
 
 	if (rval) {
-		DbgSCP("could not load '%s' err #%d\n", str, rval);
+		DbgSCP("could not load library err #%d\n", rval);
 		return rval;
 	}
 	BUG_ON(kmdd.cui == 0);
 
-	rval |= PUT_USER_AP(&umdd->mdd_got, kmdd.got_addr,
-			    kmdd.got_len, 0, RW_ENABLE);
+	rval = PUT_USER_AP(&umdd->mdd_got, kmdd.got_addr, kmdd.got_len, 0, RW_ENABLE);
 
 	if (kmdd.init_got_point) {
-		rval |= PUT_USER_PL(&umdd->mdd_init_got,
+		rval = rval ?: PUT_USER_PL(&umdd->mdd_init_got,
 					kmdd.init_got_point,
 					kmdd.cui);
 	} else {
-		rval |= put_user(0L, &umdd->mdd_init_got.PLLO_value);
-		rval |= put_user(0L, &umdd->mdd_init_got.PLHI_value);
+		rval = rval ?: put_user(0L, &umdd->mdd_init_got.PLLO_value);
+		rval = rval ?: put_user(0L, &umdd->mdd_init_got.PLHI_value);
 	}
 
 	return rval;
@@ -1341,21 +1343,11 @@ long protected_sys_mremap(const unsigned long	__user old_address,
 		rval = -EFAULT;
 		goto nr_mremap_err;
 	}
-	if (flags & MREMAP_FIXED) {
-		DbgSCP_ALERT("MREMAP_FIXED flag is not supported in PM\n");
-		goto nr_mremap_err;
-	}
 	if (e2k_ptr_itag(regs->args[1]) != AP_ITAG) {
 		DbgSCP_ALERT("mremap cannot remap descriptor in stack\n");
 		goto nr_mremap_err;
 	}
-	base = sys_mremap(old_address, old_size, new_size, flags,
-				/*
-				 * MREMAP_FIXED is not supported in PM,
-				 * therefore pass an invalid value for
-				 * new_address.
-				 */
-				0);
+	base = sys_mremap(old_address, old_size, new_size, flags, new_address);
 	if (base & ~PAGE_MASK) { /* this is error code */
 		rval = base;
 		goto nr_mremap_err;
@@ -1573,6 +1565,8 @@ long protected_sys_socketcall(const unsigned long        a1, /* call */
 		if (prot_msghdr) {
 			converted_msghdr = convert_msghdr(prot_msghdr,
 				SIZE_MSGHDR, "socketcall", converted_msghdr);
+			if (IS_ERR(converted_msghdr))
+				return PTR_ERR(converted_msghdr);
 			/* Set args[1] to pointer to converted structure */
 			args[1] = (long) converted_msghdr;
 		} else {
@@ -1645,6 +1639,8 @@ long protected_sys_sendmsg(const unsigned long		sockfd,
 	size = e2k_ptr_size(regs->args[3], regs->args[4], 1 /*min_size*/);
 	converted_msghdr = convert_msghdr((struct protected_user_msghdr *) msg,
 					  size, "sendmsg", NULL);
+	if (IS_ERR(converted_msghdr))
+		return PTR_ERR(converted_msghdr);
 
 	 /* Call socketcall handler function: */
 	rval = sys_sendmsg(sockfd, converted_msghdr, flags);
@@ -1670,6 +1666,8 @@ long protected_sys_recvmsg(const unsigned long		socket,
 
 	size = e2k_ptr_size(regs->args[3], regs->args[4], 1 /*min_size*/);
 	converted_msghdr = convert_msghdr(prot_msghdr, size, "recvmsg", NULL);
+	if (IS_ERR(converted_msghdr))
+		return PTR_ERR(converted_msghdr);
 
 	 /* Call socketcall handler function: */
 	rval = sys_recvmsg(socket, converted_msghdr, flags);
@@ -1754,12 +1752,16 @@ static long convert_mmsghdr(long __user *prot_mmsghdr,
 	 */
 	converted_iovec = args + MMSGHDR_VECT_SIZE_LONGS(vlen);
 	for (i = 0, v_mmsrhdr = args; i < vlen; i++) {
-		converted_mmsghdr = (struct mmsghdr *) v_mmsrhdr;
+		struct iovec __user *msg_iov;
+
+		converted_mmsghdr = (struct mmsghdr __user *) v_mmsrhdr;
 		converted_msghdr = &converted_mmsghdr->msg_hdr;
-		iov_len = converted_msghdr->msg_iovlen;
-		if (converted_msghdr->msg_iov) {
+		if (get_user(iov_len, &converted_msghdr->msg_iovlen) ||
+				get_user(msg_iov, &converted_msghdr->msg_iov))
+			return -EFAULT;
+		if (msg_iov) {
 			err = convert_array_3(
-				(long *) converted_msghdr->msg_iov,
+				(long *) msg_iov,
 				(long *) converted_iovec,
 				SIZE_IOVEC * iov_len, 2, iov_len,
 				MASK_IOVEC_TYPE, MASK_IOVEC_ALIGN, 0,
@@ -1775,11 +1777,12 @@ static long convert_mmsghdr(long __user *prot_mmsghdr,
 		}
 
 		/* Replacing iovec pointer in converted msghdr structure: */
-		converted_msghdr->msg_iov = (struct iovec *) converted_iovec;
+		if (put_user((struct iovec *) converted_iovec,
+				&converted_msghdr->msg_iov))
+			return -EFAULT;
 
 		v_mmsrhdr += MMSGHDR_STRUCT_SIZE_LONGS;
-		converted_iovec +=
-				iov_len * sizeof(struct iovec) / sizeof(long);
+		converted_iovec += iov_len * sizeof(struct iovec) / sizeof(long);
 	}
 
 	return 0;
@@ -2062,7 +2065,8 @@ static long process_shmat_syscall_result(const int shmid, const int shmflg,
 
 	access = (shmflg & SHM_RDONLY) ? R_ENABLE : RW_ENABLE;
 
-	base = *raddr;
+	if (get_user(base, raddr))
+		return -EFAULT;
 
 	lo = make_ap_lo(base, segm_size, 0, access);
 	hi = make_ap_hi(base, segm_size, 0, access);
@@ -2079,14 +2083,12 @@ static long process_shmat_syscall_result(const int shmid, const int shmflg,
 	return rval;
 }
 
-static int semctl_ptr128_to_64(unsigned long __user semun_ptr128,
-			       unsigned long __user semun_ptr64)
+static int semctl_ptr128_to_64(void __user *semun_ptr128, u64 __user *semun_ptr64)
 /* Union semun may contain descriptor; if so replacing it with 64-bit pointer. */
 {
 	e2k_ptr_t descr;
 	unsigned long ptr64;
-	int tag, tag_hi;
-	int rval = 0; /* syscall return value */
+	int tag, rval = 0; /* syscall return value */
 
 	if (!semun_ptr128 || !semun_ptr64) {
 		DbgSCP("Empty semun pointer\n");
@@ -2094,19 +2096,13 @@ static int semctl_ptr128_to_64(unsigned long __user semun_ptr128,
 	}
 
 	/* Check for descriptor in semun_ptr128: */
-TRY_USR_PFAULT {
+	if (get_user_tagged_16(descr.word.lo, descr.word.hi, tag, semun_ptr128)) {
+		DbgSCP_ALERT(FATAL_ERR_READ, semun_ptr128);
+		rval = -EFAULT;
+		goto out;
+	}
 
-	NATIVE_LOAD_VAL_AND_TAGD(semun_ptr128, descr.word.lo, tag);
-	if (tag) /* not 'int' */
-		NATIVE_LOAD_VAL_AND_TAGD(semun_ptr128 + 8, descr.word.hi, tag_hi);
-
-} CATCH_USR_PFAULT {
-	DbgSCP_ALERT(FATAL_ERR_READ, semun_ptr128);
-	rval = -EFAULT;
-	goto out;
-} END_USR_PFAULT
-
-	if ((tag != E2K_AP_LO_ETAG) || (tag_hi != E2K_AP_HI_ETAG)) {
+	if (tag != ETAGAPQ) {
 		DbgSCP_WARN("Semun ptr 0x%lx doesn't contain descriptor\n",
 		       semun_ptr128);
 		rval = -EFAULT;
@@ -2115,7 +2111,7 @@ TRY_USR_PFAULT {
 
 	/* replacing descriptor with 64-bit pointer: */
 	ptr64 = ptr128_to_64(descr);
-	if (put_user(ptr64, (long *) semun_ptr64)) {
+	if (put_user(ptr64, semun_ptr64)) {
 		DbgSCP_ALERT(FATAL_ERR_WRITE, semun_ptr64);
 		rval = -EFAULT;
 	}
@@ -2129,12 +2125,12 @@ notrace __section(".entry.text")
 long protected_sys_semctl(const long	semid,	/* a1 */
 			  const long	semnum,	/* a2 */
 			  const long	cmd,	/* a3 */
-			  const unsigned long __user ptr, /* a4 */
+			  const unsigned long ptr, /* a4 */
 			  const unsigned long unused5,
 			  const unsigned long unused6,
 			  const struct pt_regs	*regs)
 {
-	union semun *converted_semun;
+	union semun __user *converted_semun;
 	unsigned long __user fourth = 0; /* fourth arg to 'semctl' syscall */
 	long rval; /* syscall return value */
 
@@ -2155,7 +2151,8 @@ long protected_sys_semctl(const long	semid,	/* a1 */
 		}
 		/* Union semun (4-th arg) contains pointer */
 		converted_semun = get_user_space(sizeof(union semun));
-		rval = semctl_ptr128_to_64(ptr, (unsigned long) converted_semun);
+		rval = semctl_ptr128_to_64((void __user *) ptr,
+				(u64 __user *) converted_semun);
 		if (rval)
 			goto out;
 		fourth = (unsigned long) converted_semun;
@@ -2239,13 +2236,13 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 		       const long		first,	/* a2 */
 		       const unsigned long	second,	/* a3 */
 		       const unsigned long	third,	/* a4 */
-		       const unsigned long __user ptr,	/* a5 */
+		       void __user *const ptr,	/* a5 */
 		       const long		fifth,	/* a6 */
 		       const struct pt_regs	*regs)
 {
 	long mask_type, mask_align;
 	int fields;
-	void *fourth = (void *) ptr; /* fourth arg to 'ipc' syscall */
+	void __user *fourth = ptr; /* fourth arg to 'ipc' syscall */
 	long rval; /* syscall return value */
 
 	get_ipc_mask(call, &mask_type, &mask_align, &fields);
@@ -2284,19 +2281,19 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 			if (!ptr)
 				return -EINVAL;
 			converted_semun = get_user_space(sizeof(union semun));
-			rval = semctl_ptr128_to_64(ptr, (unsigned long) converted_semun);
+			rval = semctl_ptr128_to_64(ptr, (u64 __user *) converted_semun);
 			if (rval)
 				goto out;
 			/*
 			 * Assign args[3] to pointer to
 			 * converted union
 			 */
-			fourth = (void *) converted_semun;
+			fourth = converted_semun;
 			break;
 		/* Int value in union semun required */
 		case SETVAL:
 			/* Int value for SETVAL */
-			fourth = (void *) ptr;
+			fourth = ptr;
 			break;
 		/* No union semun as argument */
 		default:
@@ -2315,7 +2312,7 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 		 * inside, therefore it needs to be additionally
 		 * converted with saving results in these struct
 		 */
-		struct ipc_kludge *converted_new_msg_buf;
+		struct ipc_kludge __user *converted_new_msg_buf;
 
 		converted_new_msg_buf =
 				get_user_space(sizeof(struct ipc_kludge));
@@ -2332,7 +2329,7 @@ long protected_sys_ipc(const unsigned long	call,	/* a1 */
 		/*
 		 * Assign args[3] to pointer to converted new_msg_buf
 		 */
-		fourth = (void *) converted_new_msg_buf;
+		fourth = converted_new_msg_buf;
 		break;
 	}
 	default: /* other options don't require extra arg processing */
@@ -2405,7 +2402,6 @@ static long prot_sys_mmap(const unsigned long start,
 		rval = base;
 		goto nr_mmap_out;
 	}
-	base += (unsigned long) offset & PAGE_MASK;
 
 	if (!prot) {
 		DbgSCP_WARN("delivered descriptor without access rights:\n");
@@ -2607,8 +2603,7 @@ long protected_sys_set_robust_list(const unsigned long __user listhead, /* a1 */
 
 notrace __section(".entry.text")
 long protected_sys_get_robust_list(const unsigned long pid,
-				 unsigned long __user head_ptr,
-				 unsigned long __user len_ptr)
+		e2k_ptr_t __user *head_ptr, size_t __user *len_ptr)
 {
 	/* In glibc side `sizeof (struct robust_list_head) == 0x30'.  */
 #define SIZEOF_PROT_HEAD_STRUCT 0x30
@@ -2656,7 +2651,7 @@ long protected_sys_get_robust_list(const unsigned long pid,
 	/* We need to return the original descriptor;
 	 * restoring it from the pointer saved in task_struct:
 	 */
-	dscr_attrs = get_descriptor_attrs((void *)head, 0 /* signum */);
+	dscr_attrs = get_descriptor_attrs(head, 0 /* signum */);
 	if (!dscr_attrs) {
 		DbgSCP_ALERT("Failed to restore descriptor attributes "
 						"on pointer 0x%lx\n", head);
@@ -2674,28 +2669,21 @@ long protected_sys_get_robust_list(const unsigned long pid,
 		return -EFAULT;
 	}
 
-	TRY_USR_PFAULT {
-		NATIVE_STORE_VALUE_WITH_TAG(&AWP(&dscr).hi,
-					    dscr_attrs->user_ptr_hi,
-					    dscr_attrs->user_tags >> 4);
-		NATIVE_STORE_VALUE_WITH_TAG(&AWP(&dscr).lo,
-					    dscr_attrs->user_ptr_lo,
-					    dscr_attrs->user_tags & 0xF);
-	} CATCH_USR_PFAULT {
-		return -EFAULT;
-	} END_USR_PFAULT
+	NATIVE_STORE_VALUE_WITH_TAG(&AW(dscr).hi, dscr_attrs->user_ptr_hi,
+				dscr_attrs->user_tags >> 4);
+	NATIVE_STORE_VALUE_WITH_TAG(&AW(dscr).lo, dscr_attrs->user_ptr_lo,
+				dscr_attrs->user_tags & 0xF);
 
-	DbgSCP("robust_list head: lo=0x%lx  hi=0x%lx  tags=0x%x  len=%zd\n",
-		AWP(&dscr).lo, AWP(&dscr).hi, dscr_attrs->user_tags, len);
-	ret = 0;
+	DbgSCP("robust_list head: lo=0x%llx  hi=0x%llx  tags=0x%x  len=%zd\n",
+		dscr.lo, dscr.hi, dscr_attrs->user_tags, len);
 
 	len = SIZEOF_PROT_HEAD_STRUCT;
 empty_list_out:
-	if (copy_to_user((void *)len_ptr, &len, sizeof(len)))
+	if (copy_to_user_with_tags(head_ptr, &dscr, sizeof(dscr)) ||
+			put_user(len, len_ptr))
 		return -EFAULT;
-	if (copy_to_user_with_tags((void *)head_ptr, &dscr, sizeof(dscr)))
-		return -EFAULT;
-	return ret;
+
+	return 0;
 
 err_unlock:
 	rcu_read_unlock();
@@ -3018,12 +3006,10 @@ long protected_sys_ioctl(const int fd,				/* a1 */
 		}
 
 		/* Reading value of the 'ifc_len' field: */
-TRY_USR_PFAULT {
-		NATIVE_LOAD_VAL_AND_TAGW((int *) ifc128, ifc_len128, tag);
-} CATCH_USR_PFAULT {
-		DbgSCP_ALERT(FATAL_ERR_READ, (long) argp);
-		return -EINVAL;
-} END_USR_PFAULT
+		if (get_user_tagged_4(ifc_len128, tag, (int __user *) ifc128)) {
+			DbgSCP_ALERT(FATAL_ERR_READ, (long) argp);
+			return -EINVAL;
+		}
 
 		if (tag != ETAGNVS) {
 #define ERR_FATAL_IFCLEN "unexpected value in field 'ifc_len' (tag 0x%x)\n"
@@ -3383,7 +3369,7 @@ struct epoll_event *convert_epoll_event(void __user *event, int count,
 /* Updating user (protected) event structure on modified kernel structure: */
 static int update_epoll_event(void __user *event, void *kevent, int count)
 {
-	long lval;
+	u64 lval;
 	int tag;
 	int j, ret;
 	long *klarr;
@@ -3412,11 +3398,11 @@ static int update_epoll_event(void __user *event, void *kevent, int count)
 		ret++;
 
 		/* Checking if struct field 'data' is descriptor: */
-		NATIVE_LOAD_VAL_AND_TAGD((long)ularr +
-				EPOLL_EVENT_PROT_DATA_OFFSET, lval, tag);
+		if (get_user_tagged_8(lval, tag, (long __user *)
+				((long) ularr + EPOLL_EVENT_PROT_DATA_OFFSET)))
+			return -EFAULT;
 		if (tag != ETAGNVD) { /* this must be descriptor */
-			DbgSCP("lval=0x%lx  tag=0x%x  update skipped\n",
-			       lval, tag);
+			DbgSCP("lval=0x%llx  tag=0x%x  update skipped\n", lval, tag);
 			continue; /* skipping it for now */
 		}
 
@@ -3593,7 +3579,7 @@ long protected_sys_pselect6(const long		nfds,		/* a1 */
  */
 static
 int convert_protected_siginfo_t(const unsigned long __user prot_siginfo,
-						void __user **siginfo_64,
+						void * __user *siginfo_64,
 				const unsigned long mask_type)
 {
 /* Structure siginfo_t contains 9 fields:
@@ -3607,8 +3593,9 @@ int convert_protected_siginfo_t(const unsigned long __user prot_siginfo,
 #define SIGVAL_OFFSET_HI	40     /* ditto */
 #define SIGVAL_OFFSET		24     /* ditto in the 64-bit structure */
 	void __user *converted_siginfo;
-	long descr_lo, descr_hi, ptr;
-	int rval, tag, tag_hi;
+	u64 descr_lo, descr_hi;
+	unsigned long ptr;
+	int rval, tag;
 
 	DbgSCP(" siginfo=0x%lx\n", prot_siginfo);
 
@@ -3628,37 +3615,34 @@ int convert_protected_siginfo_t(const unsigned long __user prot_siginfo,
 	}
 
 	/* Check for descriptor in the '_sigval' field: */
-TRY_USR_PFAULT {
-	NATIVE_LOAD_VAL_AND_TAGD((prot_siginfo + SIGVAL_OFFSET_LO),
-				 descr_lo, tag);
-	if (!tag) /* 'int' in the union */
-		goto out;
-	NATIVE_LOAD_VAL_AND_TAGD((prot_siginfo + SIGVAL_OFFSET_HI),
-				 descr_hi, tag_hi);
-} CATCH_USR_PFAULT {
+	if ((rval = get_user_tagged_16(descr_lo, descr_hi, tag,
+			(void __user *) prot_siginfo + SIGVAL_OFFSET_LO))) {
 		DbgSCP_ALERT(FATAL_ERR_READ, (long) (prot_siginfo + 4));
 		converted_siginfo = NULL;
-		rval = -EFAULT;
 		goto out;
-} END_USR_PFAULT
-
-	tag |= (tag_hi << 4);
+	}
 	if (tag != ETAGAPQ) {
-		DbgSCP_ALERT("Bad struct '_sigval' in siginfo_t: tag = 0x%x\n",
-			     tag);
+		if (tag & 0xf) {
+			/* Not an 'int' in the union */
+			DbgSCP_ALERT("Bad struct '_sigval' in siginfo_t: tag = 0x%x\n",
+				     tag);
+		}
 		goto out;
 	}
 	/* Storing descriptor attributes in 'sival_ptr_list' for
 	 * kernel to update 'usiginfo' in copy_siginfo_to_user_prot():
 	 */
-	ptr = *(long *)(converted_siginfo + SIGVAL_OFFSET);
+	if (get_user(ptr, (long __user *) (converted_siginfo + SIGVAL_OFFSET)))
+		return -EFAULT;
+
 	store_descriptor_attrs((void *)ptr,
 			       descr_lo, descr_hi, tag, 0 /*sig#*/);
-	DbgSCP("stored sigval attrs: [0x%lx] ==> 0x%lx 0x%lx\n", ptr,
+	DbgSCP("stored sigval attrs: [0x%lx] ==> 0x%llx 0x%llx\n", ptr,
 	       descr_lo, descr_hi);
 
 out:
-	*siginfo_64 = converted_siginfo;
+	if (put_user(converted_siginfo, siginfo_64))
+		return -EFAULT;
 
 	return rval;
 }
@@ -3711,36 +3695,29 @@ int update_protected_siginfo_t(unsigned long __user siginfo64,
 	}
 
 	if (infop64 != infop128) { /* these are different descriptors */
-		lval = *infop64;
-		rval = put_user(lval, infop128);
-
-		lval = *(infop64 + 1);
-		rval = (rval) ?:  put_user(lval, infop128 + 1);
-
-		lval = *(infop64 + 2);
-		rval = (rval) ?:  put_user(lval, infop128 + 2);
-
-		if (rval)
+		if (copy_in_user(infop128, infop64, 24)) {
+			rval = -EFAULT;
 			goto out;
+		}
 	}
 	/* NB> We cannot use direct order below as it wouldn't work
 	 *     in the case when siginfo64 and siginfo128 are the same pointer.
 	 */
-	lval = *(infop64 + 5);
+	rval = get_user(lval, infop64 + 5);
 	rval = (rval) ?:  put_user(lval, infop128 + 7);
 
-	lval = *(infop64 + 4);
+	rval = (rval) ?:  get_user(lval, infop64 + 4);
 	rval = (rval) ?:  put_user(lval, infop128 + 6);
 
-	lval = *(infop64 + 3);
+	rval = (rval) ?:  get_user(lval, infop64 + 3);
 	rval = (rval) ?:  put_user(lval, infop128 + 4);
 
 	rval = (rval) ?:  put_user(0L, infop128 + 5); /* to avoid ETAG */
 
 out:
 	if (rval)
-		DbgSCP_ALERT("FATAL ERROR: failed to write at 0x%lx !!!\n",
-			     (long) infop128);
+		DbgSCP_ALERT("FATAL ERROR: failed to write at 0x%px !!!\n",
+			     infop128);
 	return rval;
 }
 

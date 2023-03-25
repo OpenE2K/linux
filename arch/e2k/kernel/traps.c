@@ -12,6 +12,8 @@
 #include <linux/ring_buffer.h>
 #include <linux/irq.h>
 #include <linux/extable.h>
+#include <linux/percpu.h>
+#include <linux/uaccess.h>
 #include <linux/unistd.h>
 #include <linux/vmalloc.h>
 #include <linux/console.h>
@@ -30,7 +32,6 @@
 #include <asm/trap_table.h>
 #include <asm/delay.h>
 #include <asm/sections.h>
-#include <linux/uaccess.h>
 #include <asm/smp.h>
 #include <asm/console.h>
 #include <asm/perf_event.h>
@@ -257,8 +258,27 @@ static int __init sig_on_mem_err_setup(char *str)
 }
 __setup("sig_on_mem_err", sig_on_mem_err_setup);
 
-void __init trap_init(void)
+/* Use 'const' since this really should not be modified. */
+const e2k_cute_t kernel_CUT[MAX_KERNEL_CODES_UNITS]
+		__aligned(1 << E2K_ALIGN_CUT);
+
+DEFINE_PER_CPU(unsigned long, kernel_trap_cellar[MMU_TRAP_CELLAR_MAX_SIZE])
+		__aligned(1 << MMU_ALIGN_TRAP_POINT_BASE);
+void trap_init(void)
 {
+	unsigned long cellar_addr;
+
+	/*
+	 * Set Trap Cellar pointer and reset Trap Counter register
+	 */
+	cellar_addr = node_kernel_address_to_phys(numa_node_id(),
+			(unsigned long) raw_cpu_ptr(kernel_trap_cellar));
+	BUG_ON(!IS_ALIGNED(cellar_addr, 1 << MMU_ALIGN_TRAP_POINT_BASE));
+
+	set_MMU_TRAP_POINT(cellar_addr);
+	reset_MMU_TRAP_COUNT();
+
+	kvm_trap_init(cellar_addr);
 }
 
 void  start_dump_print(void)
@@ -526,8 +546,6 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 	 * interrupts control is used and all following trap handling
 	 * will be executed under UPSR control.
 	 *
-	 * SGE was already disabled by hardware on trap enter.
-	 *
 	 * We disable NMI in UPSR here again in case a local_irq_save()
 	 * called from an NMI handler enabled it.
 	 */
@@ -792,9 +810,11 @@ static void do_illegal_opcode(struct pt_regs *regs)
 		}
 
 		ip = (u32 *) AS(regs->trap->TIRs[0].TIR_lo).base;
+		bust_spinlocks(1);
 		pr_alert("*0x%llx = 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",
 				(u64) ip, ip[0], ip[1], ip[2], ip[3],
 				ip[4], ip[5], ip[6], ip[7]);
+		bust_spinlocks(0);
 		die("illegal_opcode trap in kernel mode", regs, 0);
 	} else {
 		die_if_init("illegal_opcode trap in init process", regs, SIGILL);
@@ -833,37 +853,18 @@ static void do_fp_stack_u(struct pt_regs *regs)
 	debug_signal_print("SIGFPE. fp_stack_u", regs, false);
 }
 
-static void *syscall_entry_begin = _t_entry + 0x800;
-static void *syscall_entry_end = _t_entry_end;
 static void do_d_interrupt(struct pt_regs *regs)
 {
 	die_if_kernel("d_interrupt trap in kernel mode", regs, 0);
-
 	S_SIG(regs, SIGBUS, exc_d_interrupt_num, BUS_OBJERR);
 	debug_signal_print("SIGBUS. d_interrupt", regs, false);
-
-	if (TASK_IS_BINCO(current)) {
-		/*
-		 * UPSR.di == 1, VFDI called, and what must we do here?
-		 *
-		 * There are two cases:
-		 * 1) if VFDI's long instructions does not have a system call
-		 * then we just send a SIGSEGV.
-		 * 2) if VFDI's long instructions contains a system call then
-		 * we will set a special flag forbidding signal handling in
-		 * interrupts so that it will be handled only after that
-		 * system call.
-		 *
-		 * For details refer to bug #56664.
-		 */
-		void *ip = (void *) (AS(regs->crs.cr0_hi).ip << 3);
-		if (ip >= syscall_entry_begin && ip < syscall_entry_end)
-			set_delayed_signal_handling(current_thread_info());
-	}
 }
 
 static void do_diag_ct_cond(struct pt_regs *regs)
 {
+	if (handle_uaccess_trap(regs, true))
+		return;
+
 	die_if_kernel("diag_ct_cond trap in kernel mode", regs, 0);
 
 	S_SIG(regs, SIGILL, exc_diag_ct_cond_num, ILL_ILLOPN);
@@ -872,6 +873,9 @@ static void do_diag_ct_cond(struct pt_regs *regs)
 
 static void do_diag_instr_addr(struct pt_regs *regs)
 {
+	if (handle_uaccess_trap(regs, true))
+		return;
+
 	die_if_kernel("diag_instr_addr trap in kernel mode", regs, 0);
 
 	S_SIG(regs, SIGILL, exc_diag_instr_addr_num, ILL_ILLADR);
@@ -913,10 +917,17 @@ static notrace void do_instr_debug(struct pt_regs *regs)
 	dibsr = READ_DIBSR_REG();
 	if (dibsr.m0 || dibsr.m1 || dibsr.ss || dibsr.b0 ||
 			dibsr.b1 || dibsr.b2 || dibsr.b3) {
+		bool hwbug = cpu_has(CPU_HWBUG_EXC_DEBUG);
+		struct pt_regs *user_regs;
+
 		/* ptrace works in user space only */
-		if ((current->flags & PF_KTHREAD) || !user_mode(regs))
+		if ((current->flags & PF_KTHREAD) || !hwbug && !user_mode(regs))
 			die("instr_debug trap in kernel mode", regs, 0);
-		S_SIG(regs, SIGTRAP, exc_instr_debug_num, TRAP_HWBKPT);
+
+		user_regs = (hwbug) ? find_user_regs(regs) : regs;
+		BUG_ON(!user_regs);
+		S_SIG(user_regs, SIGTRAP, exc_instr_debug_num, TRAP_HWBKPT);
+
 		/* #24785 Customer asks us to avoid this annoying message
 		SDBGPRINT("SIGTRAP. Stop on breakpoint"); */
 
@@ -980,6 +991,9 @@ static void do_fp_stack_o(struct pt_regs *regs)
 
 static void do_diag_cond(struct pt_regs *regs)
 {
+	if (handle_uaccess_trap(regs, true))
+		return;
+
 	die_if_kernel("diag_cond trap in kernel mode", regs, 0);
 
 	S_SIG(regs, SIGILL, exc_diag_cond_num, ILL_ILLOPN);
@@ -988,18 +1002,15 @@ static void do_diag_cond(struct pt_regs *regs)
 
 static void do_diag_operand(struct pt_regs *regs)
 {
-	/* Some history... */
-	regs->trap->TIR_lo &= 0x0000ffffffffffff;
+	if (handle_uaccess_trap(regs, true))
+		return;
 
-	DbgTC("start\n");
-	DbgTC("regs->cr0: IP 0x%llx\n", GET_IP_CR0_HI(regs->crs.cr0_hi));
+	DbgTC("regs->cr0: IP 0x%lx\n", instruction_pointer(regs));
 	die_if_kernel("diag_operand trap in kernel mode", regs, 0);
 	die_if_init("diag_operand trap in init process", regs, 0);
 
 	S_SIG(regs, SIGILL, exc_diag_operand_num, ILL_ILLOPN);
 	debug_signal_print("SIGILL. diag_operand", regs, true);
-
-	DbgTC("finish");
 }
 
 static void do_illegal_operand(struct pt_regs *regs)
@@ -1271,10 +1282,16 @@ static void do_ainstr_page_prot(struct pt_regs *regs)
 
 static void do_last_wish(struct pt_regs *regs)
 {
-	struct thread_info *ti = current_thread_info();
-
 	if (user_mode(regs)) {
 		getsp_adj_apply(regs);
+
+		/*
+		 * "Last wish" exception can be induced either by debugger or
+		 * "SP -> global" handling mechanism.
+		 * I will leave some space here for alternative code then execute
+		 * the processor of the "global_sp" list.
+		 */
+		lw_global_sp(regs);
 	} else if (handle_guest_last_wish(regs)) {
 		/* it is wish of host to support guest and it handled */
 		return;
@@ -1283,20 +1300,6 @@ static void do_last_wish(struct pt_regs *regs)
 			die("last_wish in kernel mode", regs, 0);
 	}
 
-	if (ti->last_wish && user_mode(regs)) {
-		ti->last_wish = false;
-		return;
-	}
-
-#ifdef CONFIG_PROTECTED_MODE
-	/*
-	 * "Last wish" exception can be induced either by debugger or 
-	 * "SP -> global" handling mechanism.
-	 * I will leave some space here for alternative code then execute
-	 * the processor of the "global_sp" list.
-	 */
-	lw_global_sp(regs);
-#endif /* CONFIG_PROTECTED_MODE */
 }
 
 static void do_base_not_aligned(struct pt_regs *regs)
@@ -1321,7 +1324,9 @@ static void do_software_trap(struct pt_regs *regs)
 		struct trap_pt_regs *trap = regs->trap;
 		enum bug_trap_type btt;
 
+		bust_spinlocks(1);
 		btt = report_bug(trap->TIRs[0].TIR_lo.TIR_lo_ip, regs);
+		bust_spinlocks(0);
 		if (btt == BUG_TRAP_TYPE_WARN) {
 			unsigned long ip = regs->crs.cr0_hi.CR0_hi_IP;
 			unsigned long new_ip;
@@ -1361,6 +1366,9 @@ static notrace void do_data_debug(struct pt_regs *regs)
 
 	ddbsr = READ_DDBSR_REG();
 	if (ddbsr.m0 || ddbsr.m1 || ddbsr.b0 || ddbsr.b1 || ddbsr.b2 || ddbsr.b3) {
+		bool hwbug = cpu_has(CPU_HWBUG_EXC_DEBUG);
+		struct pt_regs *user_regs;
+
 		if (DATA_BREAKPOINT_ON) {
 			/* data breakpoint occured */
 			dump_stack();
@@ -1368,21 +1376,20 @@ static notrace void do_data_debug(struct pt_regs *regs)
 		}
 
 		/* ptrace works in user space only */
-		if ((current->flags & PF_KTHREAD) || !user_mode(regs)) {
+		if ((current->flags & PF_KTHREAD) || !hwbug && !user_mode(regs)) {
 			struct pt_regs *pregs = regs->next;
-			const struct exception_table_entry *fixup;
 			bool from_execute_mmu_op;
 
-			/* get_user/put_user case: */
-			fixup = search_exception_tables(
-					regs->trap->TIRs[1].TIR_lo.TIR_lo_ip);
 			from_execute_mmu_op = (pregs && pregs->flags.exec_mmu_op);
 
-			if (!current_thread_info()->usr_pfault_jump &&
-					!fixup && !from_execute_mmu_op)
+			if (!from_uaccess_allowed_code(regs) && !from_execute_mmu_op)
 				die("data_debug trap in kernel mode", regs, 0);
 		}
-		S_SIG(regs, SIGTRAP, exc_data_debug_num, TRAP_HWBKPT);
+
+		user_regs = (hwbug) ? find_user_regs(regs) : regs;
+		BUG_ON(!user_regs);
+		S_SIG(user_regs, SIGTRAP, exc_data_debug_num, TRAP_HWBKPT);
+
 		/* #24785 Customer asks us to avoid this annoying message
 		debug_signal_print("SIGTRAP. Stop on watchpoint", regs, false); */
 

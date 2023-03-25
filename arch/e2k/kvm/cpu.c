@@ -560,10 +560,6 @@ startup_pv_vcpu(struct kvm_vcpu *vcpu, guest_hw_stack_t *stack_regs,
 	/* now it is to kernel */
 	host_return_to_guest_kernel(current_thread_info());
 
-	/* switch host MMU to VCPU MMU context: */
-	/* it is to kernel for now */
-	kvm_switch_to_guest_mmu_pid(vcpu, current_thread_info());
-
 	__guest_enter(current_thread_info(), &vcpu->arch, flags);
 
 	if (flags & FROM_HYPERCALL_SWITCH) {
@@ -675,9 +671,6 @@ launch_pv_vcpu(struct kvm_vcpu *vcpu, unsigned switch_flags)
 	/* set flags of return type to guest kernel or guest user: */
 	/* now it is to kernel */
 	host_return_to_guest_kernel(ti);
-
-	/* switch host MMU to VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu, ti);
 
 	__guest_enter(ti, &vcpu->arch, switch_flags);
 
@@ -1143,7 +1136,7 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	struct signal_stack_context __user *context;
 	pv_vcpu_ctxt_t __user *vcpu_ctxt;
 	kvm_host_context_t *host_ctxt;
-	int trap_no = 0;
+	int trap_no = 0, scall_no = 0;
 	e2k_psr_t guest_psr;
 	bool irq_under_upsr;
 	unsigned long ts_flag;
@@ -1152,12 +1145,10 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	host_ctxt = &vcpu->arch.host_ctxt;
 	if (from == FROM_PV_VCPU_TRAP_INJECT) {
 		trap_no = atomic_inc_return(&host_ctxt->signal.traps_num);
-		KVM_BUG_ON(atomic_read(&host_ctxt->signal.traps_num) <=
-				atomic_read(&host_ctxt->signal.in_work));
+		KVM_BUG_ON(trap_no <= atomic_read(&host_ctxt->signal.in_work));
 	} else if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
-		atomic_inc(&host_ctxt->signal.syscall_num);
-		KVM_BUG_ON(atomic_read(&host_ctxt->signal.syscall_num) <=
-				atomic_read(&host_ctxt->signal.in_syscall));
+		scall_no = atomic_inc_return(&host_ctxt->signal.syscall_num);
+		KVM_BUG_ON(scall_no <= atomic_read(&host_ctxt->signal.in_syscall));
 	} else {
 		KVM_BUG_ON(true);
 	}
@@ -1174,6 +1165,13 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		return ret;
 	}
 	gti = pv_vcpu_get_gti(vcpu);
+	if (from == FROM_PV_VCPU_TRAP_INJECT) {
+		atomic_set(&gti->signal.traps_num, trap_no);
+	} else if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
+		atomic_set(&gti->signal.syscall_num, scall_no);
+	} else {
+		KVM_BUG_ON(true);
+	}
 	gti->signal.stack.base = current_thread_info()->signal_stack.base;
 	gti->signal.stack.size = current_thread_info()->signal_stack.size;
 	gti->signal.stack.used = current_thread_info()->signal_stack.used;
@@ -1204,6 +1202,13 @@ static int setup_pv_vcpu_trap_stack(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	ret |= __put_user(irq_under_upsr, &(vcpu_ctxt->irq_under_upsr));
 
 	clear_ts_flag(ts_flag);
+
+	if (unlikely(from == FROM_PV_VCPU_SYSCALL_INJECT && guest_psr.PSR_pm)) {
+		pr_err("%s(): privileged PSR 0x%x at syscall #%d\n",
+			__func__, guest_psr.PSR_reg, scall_no);
+		KVM_WARN_ON(true);
+		ret = -EINVAL;
+	}
 
 	return ret;
 }
@@ -1380,6 +1385,8 @@ void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 					__func__, TIRs_num);
 				print_injected_TIRs(vcpu);
 			}
+			pr_err("%s(): kill guest: too many recursive guest "
+				"traps injection\n", __func__);
 			goto out_to_kill;
 		}
 	} else if (TIRs_num >= 0) {
@@ -1402,7 +1409,16 @@ void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 				print_injected_TIRs(vcpu);
 			}
 		}
-		goto out_to_kill;
+		if (unlikely(!is_fake)) {
+			pr_err("%s(): kill guest: new not fake trap, previous TIRs "
+				"not yet read\n", __func__);
+			goto out_to_kill;
+		} else {
+			/*
+			 * Ignore new trap and retry continue previous trap handler
+			 */
+			return;
+		}
 	}
 
 	kvm_clear_vcpu_guest_stacks_pending(vcpu, regs);
@@ -1414,8 +1430,11 @@ void insert_pv_vcpu_traps(thread_info_t *ti, pt_regs_t *regs)
 	kvm_clear_guest_traps_wish(vcpu);
 
 	failed = setup_pv_vcpu_trap(vcpu, regs);
-	if (failed)
+	if (failed) {
+		pr_err("%s(): setup vcpu trap failed, error %d\n",
+			__func__, failed);
 		goto out_to_kill;
+	}
 
 	return;
 
@@ -1512,6 +1531,8 @@ static void insert_pv_vcpu_syscall(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 		}
 #endif /* CONFIG_SECONDARY_SPACE_SUPPORT */
 	} else {
+		pr_err("%s(): kill guest: setup syscall failed, error %d\n",
+			__func__, failed);
 		do_exit(SIGKILL);
 	}
 
@@ -1661,9 +1682,6 @@ switch_to_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, e2k_stacks_t *g_stacks,
 	/* it is to kernel for now */
 	host_return_to_guest_kernel(current_thread_info());
 
-	/* switch host MMU to VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu, current_thread_info());
-
 	__guest_enter(current_thread_info(), &vcpu->arch, 0);
 
 	/* from now the host process is at paravirtualized guest (VCPU) mode */
@@ -1738,12 +1756,14 @@ void insert_pv_vcpu_sigreturn(struct kvm_vcpu *vcpu, pv_vcpu_ctxt_t *vcpu_ctxt,
 
 fault:
 	user_exit();
+	pr_err("%s(): kill user: something failed, error %d\n", __func__, failed);
 	do_exit(SIGKILL);
 }
 
 void host_pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs)
 {
 	struct kvm_vcpu *vcpu = ti->vcpu;
+	unsigned long mmu_pid;
 
 	/* replace stacks->top value with real register SBR state */
 	regs->stacks.top = regs->g_stacks.top;
@@ -1751,6 +1771,10 @@ void host_pv_vcpu_syscall_intc(thread_info_t *ti, pt_regs_t *regs)
 	pv_vcpu_check_trap_in_fast_syscall(vcpu, regs);
 
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_intercept);
+
+	mmu_pid = current->mm->context.cpumsk[smp_processor_id()];
+	trace_kvm_switch_to_host_mmu_pid(vcpu, current->mm, mmu_pid,
+					 syscall_sw_to_host);
 
 	insert_pv_vcpu_syscall(vcpu, regs);
 }
@@ -2196,6 +2220,10 @@ return_to_paravirt_guest(unsigned long ret_value)
 {
 	thread_info_t *ti = NATIVE_READ_CURRENT_REG();
 
+	/* Set global registers to empty state to prevent other user */
+	/* or kernel current pointers access */
+	INIT_G_REGS();
+
 	/* switch to guest shadow kernel image */
 	if (ti->flags & _TIF_PARAVIRT_GUEST) {
 		*ti->kernel_image_pgd_p = ti->shadow_image_pgd;
@@ -2400,8 +2428,10 @@ int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
 {
 	kernel_mem_ps_t ps_frame[KVM_MAX_PS_FRAME_NUM_TO_UPDATE];
 	e2k_mem_crs_t pcs_frame;
-	e2k_mem_crs_t *pcs;
-	e2k_mem_ps_t *ps;
+	e2k_mem_crs_t __user *u_pcs;
+	e2k_cr0_hi_t cr0_hi;
+	e2k_cr1_lo_t cr1_lo;
+	e2k_mem_ps_t __user *u_ps;
 	unsigned long flags;
 	bool priv_guest;
 	e2k_stacks_t *guest_stacks;
@@ -2464,43 +2494,50 @@ int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
 	raw_all_irq_save(flags);
 
 	/* hypercalls are running on own hardware stacks */
-	ps = (e2k_mem_ps_t *)guest_stacks->psp_lo.PSP_lo_base;
-	pcs = (e2k_mem_crs_t *)guest_stacks->pcsp_lo.PCSP_lo_base;
 
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)ps, true, &exception);
+	hva = kvm_vcpu_gva_to_hva(vcpu, guest_stacks->psp_lo.PSP_lo_base,
+				  true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
-			"fault to guest\n", ps);
-		kvm_vcpu_inject_page_fault(vcpu, (void *)ps, &exception);
+		DebugKVM("failed to find GPA for dst %llx GVA, inject page fault to guest\n",
+				guest_stacks->psp_lo.PSP_lo_base);
+		kvm_vcpu_inject_page_fault(vcpu,
+				(void *) guest_stacks->psp_lo.PSP_lo_base, &exception);
 		ret = -EAGAIN;
 		goto out_error;
 	}
+	u_ps = (e2k_mem_ps_t __user *) hva;
 
-	ps = (e2k_mem_ps_t *)hva;
-
-	hva = kvm_vcpu_gva_to_hva(vcpu, (gva_t)pcs, true, &exception);
+	hva = kvm_vcpu_gva_to_hva(vcpu, guest_stacks->pcsp_lo.PCSP_lo_base,
+				  true, &exception);
 	if (kvm_is_error_hva(hva)) {
-		DebugKVM("failed to find GPA for dst %lx GVA, inject page "
-			"fault to guest\n", pcs);
-		kvm_vcpu_inject_page_fault(vcpu, (void *)pcs, &exception);
+		DebugKVM("failed to find GPA for dst %llx GVA, inject page fault to guest\n",
+				guest_stacks->pcsp_lo.PCSP_lo_base);
+		kvm_vcpu_inject_page_fault(vcpu,
+				(void *) guest_stacks->pcsp_lo.PCSP_lo_base, &exception);
 		ret = -EAGAIN;
 		goto out_error;
 	}
+	u_pcs = (e2k_mem_crs_t __user *) hva;
 
-	pcs = (e2k_mem_crs_t *)hva;
-	ps = &ps[ps_frame_ind / sizeof(*ps)];
-	DebugKVMHSU("procedure stack frame to update: index 0x%x base %px\n",
-		ps_frame_ind, ps);
-	pcs = &pcs[pcs_frame_ind / sizeof(*pcs)];
-	DebugKVMHSU("chain stack frame to update: index 0x%x base %px\n",
-		pcs_frame_ind, pcs);
+	u_ps = &u_ps[ps_frame_ind / sizeof(*u_ps)];
+	u_pcs = &u_pcs[pcs_frame_ind / sizeof(*u_pcs)];
+	DebugKVMHSU("procedure stack frame to update: index 0x%x base %px\n"
+		    "chain stack frame to update: index 0x%x base %px\n",
+		    ps_frame_ind, u_ps, pcs_frame_ind, u_pcs);
 
-	if (pcs->cr1_lo.CR1_lo_pm && !priv_guest) {
+	if (get_user(AW(cr1_lo), &AW(u_pcs->cr1_lo)) ||
+			get_user(AW(cr0_hi), &AW(u_pcs->cr0_hi))) {
+		DebugKVM("failed to read PCS frame at HVA %px\n", u_pcs);
+		ret = -EFAULT;
+		goto out_error;
+	}
+
+	if (cr1_lo.pm && !priv_guest) {
 		DebugKVM("try to update host kernel frame\n");
 		ret = -EINVAL;
 		goto out_error;
 	}
-	if (ps_frame_size > pcs->cr1_lo.CR1_lo_wbs * EXT_4_NR_SZ) {
+	if (ps_frame_size > cr1_lo.wbs * EXT_4_NR_SZ) {
 		DebugKVM("try to update too big procedure frame\n");
 		ret = -EINVAL;
 		goto out_error;
@@ -2511,22 +2548,35 @@ int kvm_update_hw_stacks_frames(struct kvm_vcpu *vcpu,
 
 	/* now can update only IP field of chain stack registers */
 	DebugKVMHSU("will update only CR0_hi IP from %pF to %pF\n",
-		(void *)(pcs->cr0_hi.CR0_hi_IP),
-		(void *)(pcs_frame.cr0_hi.CR0_hi_IP));
-	pcs->cr0_hi = pcs_frame.cr0_hi;
+			(void *) (cr0_hi.ip << 3),
+			(void *) (pcs_frame.cr0_hi.ip << 3));
+	if (put_user(AW(pcs_frame.cr0_hi), &AW(u_pcs->cr0_hi))) {
+		DebugKVM("failed to write PCS frame at HVA %px\n", u_pcs);
+		ret = -EFAULT;
+		goto out_error;
+	}
 
 	/* FIXME: tags are not copied */
 	for (frame = 0; frame < ps_frame_size / EXT_4_NR_SZ; frame++) {
 		if (machine.native_iset_ver < E2K_ISET_V5) {
-			ps[frame].v3.word_lo = ps_frame[frame].word_lo;
-			ps[frame].v3.word_hi = ps_frame[frame].word_hi;
+			ret = put_user(ps_frame[frame].word_lo,
+					&u_ps[frame].v3.word_lo);
+			ret = ret ?: put_user(ps_frame[frame].word_hi,
+					&u_ps[frame].v3.word_hi);
 			/* Skip frame[2] and frame[3] - they hold */
 			/* extended data not used by kernel */
 		} else {
-			ps[frame].v5.word_lo = ps_frame[frame].word_lo;
-			ps[frame].v5.word_hi = ps_frame[frame].word_hi;
+			ret = put_user(ps_frame[frame].word_lo,
+					&u_ps[frame].v5.word_lo);
+			ret = ret ?: put_user(ps_frame[frame].word_hi,
+					&u_ps[frame].v5.word_hi);
 			/* Skip frame[1] and frame[3] - they hold */
 			/* extended data not used by kernel */
+		}
+		if (ret) {
+			DebugKVM("failed to write PS frame at HVA %px\n",
+					&u_ps[frame]);
+			goto out_error;
 		}
 	}
 

@@ -1102,7 +1102,7 @@ out:
 	return ret;
 }
 
-void *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
+void __user *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 				e2k_addr_t size, e2k_addr_t align,
 				unsigned long flags)
 {
@@ -1359,7 +1359,7 @@ user_area_free_queued_chunks(user_area_t *user_area)
 		"chunks num %d\n", total);
 }
 
-void user_area_free_chunk(user_area_t *user_area, void *chunk)
+void user_area_free_chunk(user_area_t *user_area, void __user *chunk)
 {
 	user_area_free_queued_chunks(user_area);
 	user_area_do_free_chunk(user_area, chunk, USER_AREA_FREE);

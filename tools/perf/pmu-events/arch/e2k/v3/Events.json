@@ -46,8 +46,8 @@
     },
     {
         "EventCode": "0x015",
-        "EventName": "MAU_DEC_STALL",
-        "BriefDescription": "0:15 количество оборотов вертушки при блокировке дешифрации от устройства MAU",
+        "EventName": "STALL_DTLB_MAU",
+        "BriefDescription": "0:15 количество оборотов вертушки при блокировке исполнения от устройства MAU",
     },
     {
         "EventCode": "0x016",
@@ -56,13 +56,13 @@
     },
     {
         "EventCode": "0x017",
-        "EventName": "TLB_MISS_STALL",
-        "BriefDescription": "0:17 количество оборотов вертушки при блокировке дешифрации от промаха в TLB",
+        "EventName": "STALL_DTLB_MISS",
+        "BriefDescription": "0:17 количество оборотов вертушки при блокировке исполнения от промаха в TLB",
     },
     {
         "EventCode": "0x018",
-        "EventName": "L1_STALL",
-        "BriefDescription": "0:18 количество оборотов вертушки при блокировке дешифрации от L1 CACHE",
+        "EventName": "STALL_DTLB_L1",
+        "BriefDescription": "0:18 количество оборотов вертушки при блокировке исполнения от L1 CACHE",
     },
     {
         "EventCode": "0x019",
@@ -221,8 +221,8 @@
     },
     {
         "EventCode": "0x111",
-        "EventName": "DTLB_DEC_STALL",
-        "BriefDescription": "1:11 количество оборотов вертушки при блокировке дешифрации от устройства DTLB",
+        "EventName": "STALL_DTLB",
+        "BriefDescription": "1:11 количество оборотов вертушки при блокировке исполнения от устройства DTLB (суммарно). Асинхронные запросы от AAU не учитываются.",
     },
     {
         "EventCode": "0x112",
@@ -231,18 +231,18 @@
     },
     {
         "EventCode": "0x113",
-        "EventName": "DTLB_DEC_STALL_AAU",
-        "BriefDescription": "1:13 количество оборотов вертушки при блокировке дешифрации от устройства AAU",
+        "EventName": "STALL_AAU",
+        "BriefDescription": "1:13 количество оборотов вертушки при блокировке исполнения от устройства AAU",
     },
     {
         "EventCode": "0x114",
-        "EventName": "DTLB_DEC_STALL_CLW",
-        "BriefDescription": "1:14 количество оборотов вертушки при блокировке дешифрации от устройства CLW",
+        "EventName": "STALL_DTLB_CLW",
+        "BriefDescription": "1:14 количество оборотов вертушки при блокировке исполнения от устройства CLW",
     },
     {
         "EventCode": "0x115",
-        "EventName": "DTLB_DEC_STALL_MLT",
-        "BriefDescription": "1:15 количество оборотов вертушки при блокировке дешифрации от устройства MLT",
+        "EventName": "STALL_DTLB_MLT",
+        "BriefDescription": "1:15 количество оборотов вертушки при блокировке исполнения от устройства MLT",
     },
     {
         "EventCode": "0x116",
@@ -256,13 +256,13 @@
     },
     {
         "EventCode": "0x118",
-        "EventName": "DTLB_STALL_UNALIGN",
-        "BriefDescription": "1:18 количество оборотов вертушки при блокировке дешифрации от невыровненности (счит - до l1 line,запись - до dw)",
+        "EventName": "STALL_DTLB_UNALIGN",
+        "BriefDescription": "1:18 количество оборотов вертушки при блокировке исполнения от невыровненности (счит - до l1 line,запись - до dw)",
     },
     {
         "EventCode": "0x119",
-        "EventName": "DTLB_STALL_SEMLOCK",
-        "BriefDescription": "1:19 количество оборотов вертушки при блокировке дешифрации семафорных операций",
+        "EventName": "STALL_DTLB_SEMLOCK",
+        "BriefDescription": "1:19 количество оборотов вертушки при блокировке исполнения семафорных операций",
     },
     {
         "EventCode": "0x120",

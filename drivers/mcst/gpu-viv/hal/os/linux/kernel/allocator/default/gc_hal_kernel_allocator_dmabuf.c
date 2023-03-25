@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -223,7 +223,7 @@ _DmabufAttach(
     }
 
     get_dma_buf(dmabuf);
-    attachment = dma_buf_attach(dmabuf, &os->device->platform->device->dev);
+    attachment = dma_buf_attach(dmabuf, os->device->platform->device->dev.parent);
 
     if (!attachment)
     {
@@ -233,6 +233,13 @@ _DmabufAttach(
     sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
 
     if (!sgt)
+    {
+        gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
+    }
+
+    if (os->device->args.enableMmu == 0 &&
+        os->iommu == gcvNULL &&
+        sgt->nents != 1)
     {
         gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
     }
@@ -373,19 +380,6 @@ _DmabufMapUser(
         gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
     }
     userLogical += buf_desc->sgt->sgl->offset;
-
-    /* To make sure the mapping is created. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
-    if (access_ok(userLogical, 4))
-#else
-    if (access_ok(VERIFY_READ, userLogical, 4))
-#endif
-    {
-        uint32_t mem;
-        get_user(mem, (uint32_t *)userLogical);
-
-        (void)mem;
-    }
 
     MdlMap->vmaAddr = (gctPOINTER)userLogical;
     MdlMap->cacheable = Cacheable;

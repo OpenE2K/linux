@@ -50,10 +50,10 @@ config ETH1000
 
 config MXGBE
 	tristate "Elbrus 10-Gigabit Ethernet support"
-	depends on PCI && EPIC
-	default m
+	depends on PCI && EPIC && ELDWCXPCS
+	default n
 
 config MGB
 	tristate "Elbrus 1/2.5 Gigabit Ethernet card (KPI3)"
-	depends on PCI && EPIC
-	default y
+	depends on PCI && EPIC && ELDWCXPCS
+	default n

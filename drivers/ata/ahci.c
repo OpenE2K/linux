@@ -1719,10 +1719,15 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	/* acquire resources */
+#ifdef CONFIG_MCST
+	 /* Bug 143381: boot does not assign io-bars,
+	    so enable only required mem-bar */
+	rc = pcim_enable_device_mem(pdev);
+#else
 	rc = pcim_enable_device(pdev);
+#endif
 	if (rc)
 		return rc;
-
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL &&
 	    (pdev->device == 0x2652 || pdev->device == 0x2653)) {
 		u8 map;
@@ -1739,10 +1744,15 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		}
 	}
 
+#ifdef CONFIG_MCST
+	 /* Bug 143381: boot does not assign io-bars */
+	rc = pcim_iomap_regions(pdev, 1 << ahci_pci_bar, DRV_NAME);
+#else
 	/* AHCI controllers often implement SFF compatible interface.
 	 * Grab all PCI BARs just in case.
 	 */
 	rc = pcim_iomap_regions_request_all(pdev, 1 << ahci_pci_bar, DRV_NAME);
+#endif
 	if (rc == -EBUSY)
 		pcim_pin_device(pdev);
 	if (rc)
@@ -1824,7 +1834,8 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		if (iohub_generation(pdev) == 1 &&
 				iohub_revision(pdev) < 3) {
 			pi.flags |= ATA_FLAG_IOHUB2_REV2;
-		} else if (iohub_generation(pdev) == 2 &&
+		} else if (IS_ENABLED(CONFIG_E2K) &&
+				iohub_generation(pdev) == 2 &&
 				pdev->revision == 2) {
 			pi.flags |= ATA_FLAG_E2C3_REV0;
 		}

@@ -2,6 +2,7 @@
 #define	_ASM_L_IO_EPIC_H
 
 #include <linux/types.h>
+#include <linux/msi.h>
 #include <asm/mpspec.h>
 #include <asm/epicdef.h>
 #include <asm/irq_vectors.h>
@@ -38,6 +39,9 @@ struct mp_ioepic_gsi {
  * cpumask fields 'domain' and 'old_domain' from APIC irq_cfg are replaced with
  * int dest here. Similar to APIC in physical addressing mode, there is
  * no need for a cpumask, if only one CPU bit is set in it at all times
+ *
+ * field irq_2_iommu is replaced by node & rid (PCI domain:bus:dev:fn)
+ * field passthrough protects VM irq configuration from host changes (affinity)
  */
 struct epic_irq_cfg {
 	unsigned short pin;
@@ -46,9 +50,10 @@ struct epic_irq_cfg {
 	unsigned short dest;
 	unsigned short vector;
 	unsigned char move_in_progress : 1;
-#ifdef CONFIG_INTR_REMAP
-	struct irq_2_iommu	irq_2_iommu;
-#endif
+	unsigned char passthrough : 1;
+	int trigger;
+	unsigned int node;
+	unsigned int rid;
 };
 
 #define IO_EPIC_VECTOR(irq) ({ \
@@ -56,22 +61,24 @@ struct epic_irq_cfg {
 	(__cfg) ? __cfg->vector : 0; \
 })
 
-struct io_epic_irq_attr {
-	int ioepic;
-	int ioepic_pin;
-	int trigger;
-	int rid;
-};
-
 struct irq_chip;
 extern struct irq_chip ioepic_chip;
 extern unsigned long used_vectors[];
 
 extern unsigned long io_epic_base_node(int node);
-/* FIXME should be removed after proper passthrough implementation */
 extern unsigned int io_epic_read(unsigned int epic, unsigned int reg);
 extern void io_epic_write(unsigned int epic, unsigned int reg,
 				unsigned int value);
 extern int pirq_enable_irq(struct pci_dev *dev);
+
+struct ioepic_vcpu_info {
+	bool valid;
+	bool msi_valid;
+
+	struct list_head *ioepic_pt_pin;
+	unsigned int vmid;
+	phys_addr_t int_table;
+	struct msi_msg msi;
+};
 
 #endif	/* _ASM_L_IO_EPIC_H */

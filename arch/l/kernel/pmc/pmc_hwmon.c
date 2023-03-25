@@ -391,6 +391,7 @@ ATTRIBUTE_GROUPS(pmcmon);
 	__raw_writel(__val2, l_pmc->cntrl_base + __offset);	\
 } while (0)
 
+#ifndef CONFIG_E90S
 static int pmc_l_raw_to_millicelsius(unsigned v)
 {
 	v &= PMC_MOORTEC_TEMP_VALUE_MASK;
@@ -674,6 +675,11 @@ static int pmc_l_thermal_probe(struct l_pmc *l_pmc)
 	int ret = 0;
 	struct pci_dev *pdev = l_pmc->pdev;
 
+	ret = sysfs_create_group(&(l_pmc[0].pdev)->dev.kobj,
+				&pmc_tmoortec_attr_group);
+	if (ret)
+		return ret;
+
 	raw_spin_lock_init(&l_pmc->thermal_lock);
 
 	l_pmc->trip_temp[LPMC_TRIP_PASSIVE] = LPMC_TEMP_PASSIVE;
@@ -686,7 +692,8 @@ static int pmc_l_thermal_probe(struct l_pmc *l_pmc)
 	l_pmc->policy = cpufreq_cpu_get(cpumask_first(cpu_online_mask));
 	if (!l_pmc->policy) {
 		dev_err(&pdev->dev, "CPUFreq policy not found\n");
-		return -EPROBE_DEFER;
+		ret = -EPROBE_DEFER;
+		goto out_group;
 	}
 
 	l_pmc->cdev = cpufreq_cooling_register(l_pmc->policy);
@@ -731,27 +738,23 @@ out_cooling:
 	cpufreq_cooling_unregister(l_pmc->cdev);
 out_policy:
 	cpufreq_cpu_put(l_pmc->policy);
+out_group:
+	sysfs_remove_group(&(l_pmc[0].pdev)->dev.kobj, &pmc_tmoortec_attr_group);
 	return ret;
 }
 
 static void pmc_l_thermal_remove(struct l_pmc *l_pmc)
 {
-	cpufreq_cooling_unregister(l_pmc->cdev);
 	thermal_zone_device_unregister(l_pmc->thermal);
+	cpufreq_cooling_unregister(l_pmc->cdev);
+	cpufreq_cpu_put(l_pmc->policy);
+	sysfs_remove_group(&(l_pmc[0].pdev)->dev.kobj, &pmc_tmoortec_attr_group);
 }
 
 static int pmc_l_probe(struct pci_dev *dev,
 				  const struct pci_device_id *ent)
 {
-	int ret;
-
-	ret = sysfs_create_group(&(l_pmc[0].pdev)->dev.kobj,
-				&pmc_tmoortec_attr_group);
-	if (ret) {
-		return ret;
-	}
-	ret = pmc_l_thermal_probe(&l_pmc[0]);
-	return ret;
+	return pmc_l_thermal_probe(&l_pmc[0]);
 }
 
 static void pmc_l_remove(struct pci_dev *dev)
@@ -771,9 +774,11 @@ static struct pci_driver pmc_l_driver = {
 	.probe		= pmc_l_probe,
 	.remove         = pmc_l_remove,
 };
-
+#endif
 
 #ifdef PMC_HWMON
+static struct platform_device *pmc_hwmon_pdev[MAX_NUMNODES];
+
 int pmc_hwmon_init(void)
 {
 	int node;
@@ -829,15 +834,23 @@ int pmc_hwmon_init(void)
 		dev_info(hwmon_dev, "node %d hwmon device enabled - %s",
 				pmcmon_dev->node, dev_name(pmcmon_dev->hdev));
 
+		pmc_hwmon_pdev[node] = vdev;
 	}
 	return 0;
 }
 
 void pmc_hwmon_exit(void)
 {
-	return;
+	int node;
+
+	for_each_online_node(node)
+		platform_device_unregister(pmc_hwmon_pdev[node]);
 }
 #endif /* PMC_HWMON */
+
+#ifdef CONFIG_E90S
+static struct platform_device *pmc_temp_pdev[MAX_NUMNODES];
+#endif
 
 int pmc_temp_sensors_init(void)
 {
@@ -883,6 +896,7 @@ int pmc_temp_sensors_init(void)
 			platform_device_unregister(a);
 			return err;
 		}
+		pmc_temp_pdev[node] = a;
 	}
 	return 0;
 #else /* E1C+ */
@@ -892,14 +906,24 @@ int pmc_temp_sensors_init(void)
 
 void pmc_temp_sensors_exit(void)
 {
-	if (l_pmc[0].i2c_chan) {
-		platform_device_unregister(l_pmc[0].i2c_chan);
-		l_pmc[0].i2c_chan = NULL;
+#ifdef CONFIG_E90S
+	int node;
+
+	for_each_online_node(node) {
+#ifdef CONFIG_NUMA
+		struct device *d = &node_devices[node]->dev;
+#else
+		struct device *d = cpu_subsys.dev_root;
+#endif /* CONFIG_NUMA */
+		if (!pmc_temp_pdev[node])
+			continue;
+		sysfs_remove_group(&d->kobj,
+				&pmc_tmoortec_attr_group);
+		platform_device_unregister(pmc_temp_pdev[node]);
 	}
+#else /* E1C+ */
 	sysfs_remove_group(&(l_pmc[0].pdev)->dev.kobj,
 				&pmc_tmoortec_attr_group);
-	pci_dev_put(l_pmc[0].pdev);
-	l_pmc[0].pdev = NULL;
-
 	pci_unregister_driver(&pmc_l_driver);
+#endif /* CONFIG_E90S */
 }

@@ -106,7 +106,7 @@ int pvr_drm_load(struct drm_device *ddev, unsigned long flags)
 	 * drm_get_pci_dev()
 	 */
 	if (ddev->dev)
-		platform_set_drvdata(ddev->dev, ddev);
+		platform_set_drvdata(to_platform_device(ddev->dev), ddev);
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 12, 0))
 	/* older kernels do not have render drm_minor member in drm_device,

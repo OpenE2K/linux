@@ -41,23 +41,23 @@ struct smi_768_register{
 	uint32_t secondary_hwc_color_12, secondary_hwc_color_3;
 };
 
-void hw768_enable_lvds(int channels)
+void hw768_enable_lvds(struct smi_device *sdev, int channels)
 {
 	if(channels == 1){
-		pokeRegisterDWord(0x80020,0x31E30000);
-		pokeRegisterDWord(0x8002C,0x74001200);
+		pokeRegisterDWord(sdev->rmmio, 0x80020, 0x31E30000);
+		pokeRegisterDWord(sdev->rmmio, 0x8002C, 0x74001200);
 	}else{
-		pokeRegisterDWord(0x80020,0x31E3F71D);
-		pokeRegisterDWord(0x8002C,0x750FED02);
-		unsigned long value = peekRegisterDWord(DISPLAY_CTRL);
+		pokeRegisterDWord(sdev->rmmio, 0x80020, 0x31E3F71D);
+		pokeRegisterDWord(sdev->rmmio, 0x8002C, 0x750FED02);
+		unsigned long value = peekRegisterDWord(sdev->rmmio, DISPLAY_CTRL);
 		value = FIELD_SET(value, DISPLAY_CTRL, LVDS_OUTPUT_FORMAT, CHANNEL0_48BIT);
 		value = FIELD_SET(value, DISPLAY_CTRL, PIXEL_CLOCK_SELECT, HALF);
 		value = FIELD_SET(value, DISPLAY_CTRL, DOUBLE_PIXEL_CLOCK, ENABLE);
-		pokeRegisterDWord(DISPLAY_CTRL,value);
+		pokeRegisterDWord(sdev->rmmio, DISPLAY_CTRL, value);
 
-		value = peekRegisterDWord(DISPLAY_CTRL + CHANNEL_OFFSET);
+		value = peekRegisterDWord(sdev->rmmio, DISPLAY_CTRL + CHANNEL_OFFSET);
 		value = FIELD_SET(value, DISPLAY_CTRL, LVDS_OUTPUT_FORMAT, CHANNEL0_48BIT);
-		pokeRegisterDWord(DISPLAY_CTRL + CHANNEL_OFFSET,value);
+		pokeRegisterDWord(sdev->rmmio, DISPLAY_CTRL + CHANNEL_OFFSET, value);
 	}
 }
 
@@ -70,40 +70,48 @@ void hw768_resume(struct smi_768_register * pSave)
 {
 	printk("sm768 resume\n");
 }
-void hw768_set_base(int display,int pitch,int base_addr)
+void hw768_set_base(struct smi_device *sdev,
+				int display, int pitch, int base_addr)
 {	
 
 	if(display == 0)
 	{
 		/* Frame buffer base */
-	    pokeRegisterDWord((FB_ADDRESS),
+	    pokeRegisterDWord(sdev->rmmio, (FB_ADDRESS),
 	          FIELD_SET(0, FB_ADDRESS, STATUS, PENDING)
 	        | FIELD_VALUE(0, FB_ADDRESS, ADDRESS, base_addr));
 
 	    /* Pitch value (Hardware people calls it Offset) */
-    	pokeRegisterDWord((FB_WIDTH), FIELD_VALUE(peekRegisterDWord(FB_WIDTH), FB_WIDTH, OFFSET, pitch));
+		pokeRegisterDWord(sdev->rmmio, (FB_WIDTH),
+						FIELD_VALUE(peekRegisterDWord(
+									sdev->rmmio, FB_WIDTH),
+									FB_WIDTH, OFFSET, pitch));
 	}
 	else
 	{
 		/* Frame buffer base */
-	    pokeRegisterDWord((FB_ADDRESS+CHANNEL_OFFSET),
+	    pokeRegisterDWord(sdev->rmmio, (FB_ADDRESS+CHANNEL_OFFSET),
 	          FIELD_SET(0, FB_ADDRESS, STATUS, PENDING)
 	        | FIELD_VALUE(0, FB_ADDRESS, ADDRESS, base_addr));
 
 		
 	    /* Pitch value (Hardware people calls it Offset) */	
-	    pokeRegisterDWord((FB_WIDTH+CHANNEL_OFFSET),FIELD_VALUE(peekRegisterDWord(FB_WIDTH+CHANNEL_OFFSET), FB_WIDTH, OFFSET, pitch));
+	    pokeRegisterDWord(sdev->rmmio,
+			(FB_WIDTH+CHANNEL_OFFSET),
+			FIELD_VALUE(peekRegisterDWord(sdev->rmmio,
+			FB_WIDTH+CHANNEL_OFFSET), FB_WIDTH, OFFSET, pitch));
 
 	}
 }
 
 
-void hw768_init_hdmi(void)
+void hw768_init_hdmi(struct smi_device *sdev)
 {
-	HDMI_Init();
+	HDMI_Init(sdev);
 }
 
-int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode, bool isHDMI)
+int hw768_set_hdmi_mode(struct smi_device *sdev,
+			logicalMode_t *pLogicalMode, bool isHDMI)
 {
 	int ret = 1;
 	if(pLogicalMode->x == 3840)
@@ -114,54 +122,55 @@ int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode, bool isHDMI)
 	else
 		pLogicalMode->hz = 60;
 	// set HDMI parameters
-	HDMI_Disable_Output();
-	ret = HDMI_Set_Mode(pLogicalMode, isHDMI);
+	HDMI_Disable_Output(sdev);
+	ret = HDMI_Set_Mode(sdev, pLogicalMode, isHDMI);
 	return ret;
 }
 
-int hw768_en_dis_interrupt(int status, int pipe)
+int hw768_en_dis_interrupt(struct smi_device *sdev,
+								int status, int pipe)
 {
 	if(status == 0)
 	{
-		pokeRegisterDWord(INT_MASK, 	(pipe == CHANNEL0_CTRL) ? 
+		pokeRegisterDWord(sdev->rmmio, INT_MASK, (pipe == CHANNEL0_CTRL) ?
 		FIELD_SET(0, INT_MASK, CHANNEL1_VSYNC, DISABLE):
 		FIELD_SET(0, INT_MASK, CHANNEL0_VSYNC, DISABLE));
 	}
 	else
 	{
-		pokeRegisterDWord(INT_MASK, 	(pipe == CHANNEL1_CTRL) ? 
+		pokeRegisterDWord(sdev->rmmio, INT_MASK, (pipe == CHANNEL1_CTRL) ?
 		FIELD_SET(0, INT_MASK, CHANNEL1_VSYNC, ENABLE):
 		FIELD_SET(0, INT_MASK, CHANNEL0_VSYNC, ENABLE));
 	}
 	return 0;
 }
-void hw768_HDMI_Enable_Output(void)
+void hw768_HDMI_Enable_Output(struct smi_device *sdev)
 {
-	HDMI_Enable_Output();
+	HDMI_Enable_Output(sdev);
 }
 
-void hw768_HDMI_Disable_Output(void)
+void hw768_HDMI_Disable_Output(struct smi_device *sdev)
 {
-	HDMI_Disable_Output();
+	HDMI_Disable_Output(sdev);
 }
 
 
-int hw768_get_hdmi_edid(unsigned char *pEDIDBuffer)
+int hw768_get_hdmi_edid(struct smi_device *sdev, unsigned char *pEDIDBuffer)
 {
     int ret;
-    enableHdmI2C(1);
-    ret = HDMI_Read_Edid(pEDIDBuffer, 128);
-    enableHdmI2C(0);
+	enableHdmI2C(sdev, 1);
+	ret = HDMI_Read_Edid(sdev, pEDIDBuffer, 128);
+	enableHdmI2C(sdev, 0);
 
     return ret;
 }
 
-int hw768_check_iis_interrupt(void)
+int hw768_check_iis_interrupt(volatile unsigned char __iomem *rmmio)
 {
 
 	unsigned long value;
 		
-	value = peekRegisterDWord(INT_STATUS);
+	value = peekRegisterDWord(rmmio, INT_STATUS);
 
 	
     if (FIELD_GET(value, INT_STATUS, I2S) == INT_STATUS_I2S_ACTIVE)
@@ -171,13 +180,13 @@ int hw768_check_iis_interrupt(void)
 }
 
 
-int hw768_check_vsync_interrupt(int path)
+int hw768_check_vsync_interrupt(struct smi_device *sdev, int path)
 {
 
 	unsigned long value1,value2;
 		
-	value1 = peekRegisterDWord(RAW_INT);
-	value2 = peekRegisterDWord(INT_MASK);
+	value1 = peekRegisterDWord(sdev->rmmio, RAW_INT);
+	value2 = peekRegisterDWord(sdev->rmmio, INT_MASK);
 
 	if(path == CHANNEL0_CTRL)
 	{
@@ -198,19 +207,21 @@ int hw768_check_vsync_interrupt(int path)
 }
 
 
-void hw768_clear_vsync_interrupt(int path)
+void hw768_clear_vsync_interrupt(struct smi_device *sdev, int path)
 {
 	
 	unsigned long value;
 	
-	value = peekRegisterDWord(RAW_INT);
+	value = peekRegisterDWord(sdev->rmmio, RAW_INT);
 
 	if(path == CHANNEL0_CTRL)
 	{   
-		pokeRegisterDWord(RAW_INT, FIELD_SET(value, RAW_INT, CHANNEL0_VSYNC, CLEAR));
+		pokeRegisterDWord(sdev->rmmio, RAW_INT,
+						FIELD_SET(value, RAW_INT, CHANNEL0_VSYNC, CLEAR));
 			
 	}else{	
-		pokeRegisterDWord(RAW_INT, FIELD_SET(value, RAW_INT, CHANNEL1_VSYNC, CLEAR));	
+		pokeRegisterDWord(sdev->rmmio, RAW_INT,
+			FIELD_SET(value, RAW_INT, CHANNEL1_VSYNC, CLEAR));
 	}
 	
 }
@@ -219,14 +230,14 @@ void hw768_clear_vsync_interrupt(int path)
 
 int hdmi_int_status = 0;
 
-inline int hdmi_hotplug_detect(void)
+inline int hdmi_hotplug_detect(struct smi_device *sdev)
 {
-		unsigned int intMask = peekRegisterDWord(INT_MASK);
+		unsigned int intMask = peekRegisterDWord(sdev->rmmio, INT_MASK);
     	intMask = FIELD_SET(intMask, INT_MASK, HDMI, ENABLE);
-    	pokeRegisterDWord(INT_MASK, intMask);
+		pokeRegisterDWord(sdev->rmmio, INT_MASK, intMask);
 
 
-		int ret = hdmi_detect();
+		int ret = hdmi_detect(sdev);
 
 		if (ret == 1) {
 			hdmi_int_status = 1;
@@ -238,18 +249,17 @@ inline int hdmi_hotplug_detect(void)
 			hdmi_int_status = hdmi_int_status & ret;		
 		}	
 
-		intMask = peekRegisterDWord(INT_MASK);
+		intMask = peekRegisterDWord(sdev->rmmio, INT_MASK);
     	intMask = FIELD_SET(intMask, INT_MASK, HDMI, DISABLE);
-    	pokeRegisterDWord(INT_MASK, intMask);
+		pokeRegisterDWord(sdev->rmmio, INT_MASK, intMask);
 
 		return hdmi_int_status;
 
 }
 
-void ddk768_disable_IntMask(void)
+void ddk768_disable_IntMask(struct smi_device *sdev)
 {
-	
-    pokeRegisterDWord(INT_MASK, 0);
+	pokeRegisterDWord(sdev->rmmio, INT_MASK, 0);
 }
 
 

@@ -501,6 +501,12 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 			call_single_data_t *csd;
 
 			csd = per_cpu_ptr(cfd->csd, cpu);
+
+#if	defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+			if (cond_func && !cond_func(cpu, info))
+				continue;
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
+
 			csd_lock_wait(csd);
 		}
 	}

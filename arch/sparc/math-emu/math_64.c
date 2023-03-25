@@ -200,11 +200,9 @@ typedef union {
 
 #define get_s_fpreg(a, r) get_fpreg(a, r, s)
 #define get_d_fpreg(a, r) get_fpreg(a, r, d)
-#define get_q_fpreg(a, r) get_fpreg(a, r, q)
 
 #define set_s_fpreg(a, r) set_fpreg(a, r, s)
 #define set_d_fpreg(a, r) set_fpreg(a, r, d)
-#define set_q_fpreg(a, r) set_fpreg(a, r, q)
 
 static unsigned long fpreg_add_s(argp rs1, argp rs2, argp rd,
 					 int s1, int s2)
@@ -707,7 +705,7 @@ int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap)
 			break;
 		}
 		switch (type & 0x7) {
-		case 7: get_q_fpreg(rs1, freg);
+		case 7: save_and_clear_fpu(); /* e90s don't support qp float */
 			FP_UNPACK_QP (QA, rs1); break;
 		case 6: get_d_fpreg(rs1, freg);
 			FP_UNPACK_DP (DA, rs1); break;
@@ -725,7 +723,8 @@ int do_mathemu(struct pt_regs *regs, struct fpustate *f, bool illegal_insn_trap)
 			break;
 		}
 		switch ((type >> 3) & 0x7) {
-		case 7: get_q_fpreg(rs2, freg); FP_UNPACK_QP (QB, rs2); break;
+		case 7: save_and_clear_fpu(); /* e90s don't support qp float */;
+			FP_UNPACK_QP (QB, rs2); break;
 		case 6: get_d_fpreg(rs2, freg); FP_UNPACK_DP (DB, rs2); break;
 		case 5: get_s_fpreg(rs2, freg); FP_UNPACK_SP (SB, rs2); break;
 		}

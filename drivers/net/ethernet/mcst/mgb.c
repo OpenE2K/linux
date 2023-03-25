@@ -46,21 +46,18 @@
 #include <asm/irqflags.h>
 #include <asm/irq.h>
 #include <asm/setup.h>
-#include <asm/io_epic.h>
 #include <asm/pci.h>
 
 /* only for printk */
 #include <linux/marvell_phy.h>
 
-
-#define DRV_VERSION	"2.00"
-#define DRV_RELDATE	"20.02.2020"
-static const char *version = "mgb.c: v" DRV_VERSION " " DRV_RELDATE
-			     " rev@mcst.ru, kalita_a@mcst.ru\n";
-
+#define DRV_VERSION	"2.11"
 
 /* TI DP83867 phy identifier values (not in .h) */
 #define DP83867_PHY_ID		0x2000a231
+
+/* Realtek RTL8211F phy identifier values (not in .h) */
+#define RTL8211F_PHY_ID		0x001CC916
 
 
 static int assigned_speed = SPEED_1000;
@@ -87,10 +84,6 @@ MODULE_PARM_DESC(hd, "work in half duplex mode");
 static int an_clause_73 = 0;
 module_param(an_clause_73, int, 0444);
 MODULE_PARM_DESC(an_clause_73, "use clause 73 autunegotiation");
-
-static int mpll_mode = -1;
-module_param_named(mpllmode, mpll_mode, int, 0444);
-MODULE_PARM_DESC(mpllmode, "PCS MPLL mode: 0-normal, 1-bifurcation, 2-2.5G");
 
 static int mgb_status = 2;
 module_param_named(status, mgb_status, int, 0444);
@@ -274,10 +267,14 @@ static DEFINE_MUTEX(mgb_mutex);
 #define SH_R_LADDRF0		(1 << 1)  /* RW1  */
 #define SH_R_MODE_PADDR0	(1 << 0)  /* RW1  */
 
+/* eldwcxpcs.ko */
+int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);
 /* PCS MPLL MODE */
-#define PCS_NORMAL_MODE		0
-#define PCS_BIFURCATION_MODE	1
-#define PCS_2G5_MODE		2
+#define MPLL_MODE_10G		0
+#define MPLL_MODE_1G		1
+#define MPLL_MODE_2G5		2
+#define MPLL_MODE_1G_BIF	3
+
 
 static const char mgb_gstrings_test[][ETH_GSTRING_LEN] = {
 	"Loopback test  (offline)"
@@ -477,8 +474,7 @@ struct mgb_private {
 	int			pcsaddr;	/* Address of Internal PHY */
 	u32			pcs_dev_id;
 	struct device_node	*phy_node;	/* Connection to External PHY */
-	int			mpll_mode;      /* Normal=0,
-						 * Bifurcation=1, 2G5=2 */
+	int			mpll_mode;      /* Normal=1, 2G5=2, Bif=3 */
 #if 0
 	struct phy_device	*pcsdev;
 #endif
@@ -553,8 +549,7 @@ static int mgb_debug = 0;
 #ifdef MODULE
 static inline bool mgb_is_eiohub_proto(void)
 {
-	return true;
-	/*return false;*/
+	return false;
 }
 #else /* !MODULE */
 #define mgb_is_eiohub_proto is_prototype
@@ -993,17 +988,11 @@ static void mgb_phylink_handler(struct net_device *dev)
 		phy_print_status(dev->phydev);
 }
 
-static int mgb_pcs_vs_reset(struct mgb_private *ep);
-
 /* called at begin of open() */
 static int mgb_extphy_connect(struct mgb_private *ep)
 {
 	struct phy_device *phydev;
 	int ret;
-
-	if (mgb_pcs_vs_reset(ep)) {
-		return 1;
-	}
 
 	if (ep->extphyaddr == -1)
 		return 0;
@@ -1153,8 +1142,15 @@ static void mgb_pcs_write(struct mgb_private *ep, int regnum, u16 value)
 	mgio_write_clause_45(ep, ep->pcsaddr, regnum, value);
 }
 
+#ifndef __sparc__
+/* e2k e12g phy */
 #define PCS_DEV_ID_1G_2G5	0x7996CED0
 #define PCS_DEV_ID_1G_2G5_10G	0x7996CED1
+#else /* sparc */
+/* sparc e16g phy */
+#define PCS_DEV_ID_1G_2G5	0x7996CED2
+#define PCS_DEV_ID_1G_2G5_10G	0x7996CED3
+#endif
 
 #define PMA_and_PMD_MMD	(0x1 << 18)
 #define PCS_MMD		(0x3 << 18)
@@ -1213,203 +1209,8 @@ static void mgb_pcs_write(struct mgb_private *ep, int regnum, u16 value)
 #define VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL	(0x8091 | PMA_and_PMD_MMD)
 #define VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0	(0x8092 | PMA_and_PMD_MMD)
 #define VR_XS_PMA_Gen5_12G_VCO_CAL_REF0		(0x8096 | PMA_and_PMD_MMD)
+#define VR_XS_PMA_Gen5_12G_16G_MISC_STS		(0x8098 | PMA_and_PMD_MMD)
 
-/* Initiate the Vendor specific software reset */
-/* reset for both controllers are configured via func 0 */
-static int mgb_pcs_vs_reset(struct mgb_private *ep)
-{
-	/**if (ep->pcs_dev_id != PCS_DEV_ID_1G_2G5_10G)
-		return 0;*/
-
-	if (PCI_FUNC(ep->pci_dev->devfn) == 0) {
-		int i;
-
-		if (ep->mpll_mode == PCS_2G5_MODE)
-			mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1, 0xa004);
-		else
-			mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1, 0xa000);
-
-		for (i = 0; i < MGB_PHY_WAIT_NUM; i++) {
-			if ((mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) &
-				0x8000) == 0) {
-				break;
-			}
-			udelay(1);
-		}
-		if (i == MGB_PHY_WAIT_NUM) {
-			dev_warn(&ep->pci_dev->dev, "could not reset PCS\n");
-			return 1;
-		}
-	}
-	return 0;
-}
-
-static void mgb_pcs_first_init(struct mgb_private *ep)
-{
-	int i;
-
-	/** eth1g_double_pcs_regs_config.txt */
-	/** eth1g_bifurcation_double_pcs_regs_config.txt */
-	/** eth2_5G_bifurcation_double_pcs_regs_config.txt */
-	/* 1./2. Wait RST to 1'h0 */
-	for (i = 0; i <= MGB_PHY_WAIT_NUM; i++) {
-		if ((mgb_pcs_read(ep, SR_XS_PCS_CTRL1) & 0x8000) == 0)
-			break;
-		udelay(1);
-	}
-	if (i >= MGB_PHY_WAIT_NUM)
-		dev_warn(&ep->pci_dev->dev,
-			 "could not reset PCS at first init\n");
-
-	/*if (ep->pcs_dev_id != PCS_DEV_ID_1G_2G5_10G)
-		goto skip_funk0_init;*/
-
-	/* 3. Configuration MPLL Registers */
-	/* NOT: mpll registers for both controllers are configured via geth_1 */
-	if (ep->mpll_mode == PCS_2G5_MODE) {
-		/** eth2_5G_bifurcation_double_pcs_regs_config.txt */
-		dev_info(&ep->pci_dev->dev,
-			"configure PCS MPLL: 2.5G MODE\n");
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2, 0x0200);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0, 0x0028);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL1, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2, 0x0299);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL3, 0x0007);
-	} else if (ep->mpll_mode == PCS_BIFURCATION_MODE) {
-		/** eth1g_bifurcation_double_pcs_regs_config.txt */
-		dev_info(&ep->pci_dev->dev,
-			"configure PCS MPLL: BIFURCATION MODE\n");
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2, 0x0200);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0, 0x0028);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL1, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL2, 0x0299);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLB_CTRL3, 0x0007);
-	} else { /* PCS_NORMAL_MODE */
-		/** eth1g_double_pcs_regs_config.txt */
-		dev_info(&ep->pci_dev->dev,
-			 "configure PCS MPLL: NORMAL MODE\n");
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL, 0x0001);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL0, 0x0020);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLA_CTRL1, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLA_CTRL2, 0x0200);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLLB_CTRL0, 0x8000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_MPLLA_CTRL3, 0x003A);
-	}
-
-	/*skip_funk0_init:*/
-
-	/* 4. Configuration Registers */
-	if (ep->mpll_mode == PCS_2G5_MODE) {
-		/** eth2_5G_bifurcation_double_pcs_regs_config.txt */
-		/* 4.2. Check PCS_TYPE_SEL (SR_XS_PCS_CTRL2) to 4'h1 */
-		mgb_pcs_write(ep, SR_XS_PCS_CTRL2, 0x0001);
-		/* 4.3. Enable 2.5G GMII Mode */
-		mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1,
-			      mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) | 0x2004);
-		/* 4.4. Check SS13 (SR_PMA_CTRL1(only for Backplane Ethernet)
-		 * or SR_XS_PCS_CTRL1) to 1'h0 */
-		/* TODO: ... */
-		/* 4.5. Program the register bits for 12G PHY */
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL, 0x0011);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1510);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL, 0x000F);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL, 0x0002);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0, 0x2000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1, 0x0020);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0002);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0002);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL, 0x0101);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77A6);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0010);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL, 0x00F1);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0550);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x0022);
-	} else if (ep->mpll_mode == PCS_BIFURCATION_MODE) {
-		mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1,
-			      mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) & ~0x0004);
-		/** eth1g_bifurcation_double_pcs_regs_config.txt */
-		/* 4.2. Check PCS_TYPE_SEL (SR_XS_PCS_CTRL2) to 4'h1 */
-		mgb_pcs_write(ep, SR_XS_PCS_CTRL2, 0x0001);
-		/* 4.3. Check SS13 (SR_PMA_CTRL1(only for Backplane Ethernet)
-		 * or SR_XS_PCS_CTRL1) to 1'h0 */
-		/* TODO: ... */
-		/* 4.4. Program the register bits for 12G PHY */
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL, 0x0011);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1500);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL, 0x000F);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL, 0x0007);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0, 0x2800);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0003);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0003);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL, 0x0101);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77A6);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0010);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL, 0x00F1);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0540);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x002A);
-	} else { /* PCS_NORMAL_MODE */
-		mgb_pcs_write(ep, VR_XS_PCS_DIG_CTRL1,
-			      mgb_pcs_read(ep, VR_XS_PCS_DIG_CTRL1) & ~0x0004);
-		/** eth1g_double_pcs_regs_config.txt */
-		/* 4.2. Check PCS_TYPE_SEL (SR_XS_PCS_CTRL2) to 4'h1 */
-		mgb_pcs_write(ep, SR_XS_PCS_CTRL2, 0x0001);
-		/* 4.3. Check SS13 (SR_PMA_CTRL1) to 1'h0 */
-		/* TODO: ... */
-		/* 4.4. Program the register bits for 12G PHY */
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL1, 0x1500);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_GENCTRL2, 0x0100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_BOOST_CTRL, 0x000F);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_RATE_CTRL, 0x0003);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL0, 0x2800);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_TX_EQ_CTRL1, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL2, 0x0100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_GENCTRL3, 0x0003);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_RATE_CTRL, 0x0003);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_CDR_CTRL, 0x0101);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_ATTN_CTRL, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_RX_EQ_CTRL0, 0x77A6);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_RX_EQ_CTRL4, 0x0010);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_AFE_DFE_EN_CTRL, 0x0000);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_MISC_CTRL0, 0x5100);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL, 0x0071);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0, 0x0540);
-		mgb_pcs_write(ep, VR_XS_PMA_Gen5_12G_VCO_CAL_REF0, 0x002A);
-	}
-}
-
-static void mgb_sw_reset_mgio(struct mgb_private *ep)
-{
-	int r;
-	unsigned long flags;
-
-	/**if (ep->pcs_dev_id != PCS_DEV_ID_1G_2G5_10G)
-		return;*/
-
-	/* do for func0 only! */
-	if (PCI_FUNC(ep->pci_dev->devfn) == 0) {
-		raw_spin_lock_irqsave(&ep->mgio_lock, flags);
-		r = mgb_read_mgio_csr(ep);
-		r &= ~MG_W1C_MASK;
-		r |= MG_SRST; /* RST */
-		/*r |= MG_OUTS;*/ /* TX_DISABLE */
-		mgb_write_mgio_csr(ep, r); /* software reset */
-		r &= ~MG_SRST; /* ~RST */
-		usleep_range(10, 20); /* reset delay */
-		mgb_write_mgio_csr(ep, r); /* wait for reset */
-		raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
-	}
-}
 
 /* Programming Guidelines for Clause 37 Auto-Negotiation */
 static int mgb_set_pcs_an_clause_37(struct mgb_private *ep, int sgmii)
@@ -1559,18 +1360,6 @@ static int mgb_set_pcsphy_mode(struct net_device *dev)
 		 (ep->pcs_dev_id == PCS_DEV_ID_1G_2G5_10G) ? "1G/2.5G/10G" :
 		 (ep->pcs_dev_id == PCS_DEV_ID_1G_2G5) ? "1G/2.5G" : "unknown");
 
-	/* Switch DWC_xpcs to 1G speed mode XXX */
-
-	mgb_sw_reset_mgio(ep);
-
-	mgb_pcs_first_init(ep);
-
-	/*
-	if (mgb_pcs_vs_reset(ep)) {
-		return 1;
-	}
-	*/
-
 	if (ep->extphyaddr != -1) {
 		/* External PHY present */
 		r = mgb_set_pcs_an_clause_37(ep, 1); /* SGMII */
@@ -1608,6 +1397,10 @@ static void mgb_print_extphy(struct mgb_private *ep, u32 id)
 	} else if (id == DP83867_PHY_ID) {
 		dev_info(&pdev->dev,
 			 "found external phy id 0x%08X - TI DP83867\n", id);
+	} else if (id == RTL8211F_PHY_ID) {
+		dev_info(&pdev->dev,
+			 "found external phy id 0x%08X - Realtek RTL8211F\n",
+			 id);
 	} else {
 		dev_info(&pdev->dev,
 			 "found external phy id 0x%08X - unknown phy\n", id);
@@ -4505,7 +4298,7 @@ do { \
 
 static char mgb_dbg_reg_phy_buf[PAGE_SIZE] = "";
 
-const u_int32_t mgb_dbg_reg_id_phy[23] = {
+const u_int32_t mgb_dbg_reg_id_phy[24] = {
 	MII_BMCR,
 	MII_BMSR,
 	MII_PHYSID1,
@@ -4518,6 +4311,7 @@ const u_int32_t mgb_dbg_reg_id_phy[23] = {
 	MII_MMD_CTRL,
 	MII_MMD_DATA,
 	MII_ESTATUS,
+	0x0010,
 	MII_DCOUNTER,
 	MII_FCSCOUNTER,
 	MII_NWAYTEST,
@@ -4530,7 +4324,7 @@ const u_int32_t mgb_dbg_reg_id_phy[23] = {
 	MII_TPISTATUS,
 	MII_NCONFIG,
 };
-const char *mgb_dbg_reg_name_phy[23] = {
+const char *mgb_dbg_reg_name_phy[24] = {
 	"MII_BMCR: Basic mode control register",
 	"MII_BMSR: Basic mode status register",
 	"MII_PHYSID1: PHYS ID 1",
@@ -4543,6 +4337,7 @@ const char *mgb_dbg_reg_name_phy[23] = {
 	"MII_MMD_CTRL: MMD Access Control Register",
 	"MII_MMD_DATA: MMD Access Data Register",
 	"MII_ESTATUS: Extended Status",
+	"TI_PHYCR: SGMII Enable (bit 11)",
 	"MII_DCOUNTER: Disconnect counter",
 	"MII_FCSCOUNTER: False carrier counter",
 	"MII_NWAYTEST: N-way auto-neg test reg",
@@ -4605,7 +4400,7 @@ do { \
 
 static char mgb_dbg_reg_pcs_buf[PAGE_SIZE] = "";
 
-const u_int32_t mgb_dbg_reg_id_pcs[47] = {
+const u_int32_t mgb_dbg_reg_id_pcs[48] = {
 	SR_XS_PCS_CTRL1,
 	SR_XS_PCS_DEV_ID1,
 	SR_XS_PCS_DEV_ID2,
@@ -4653,8 +4448,9 @@ const u_int32_t mgb_dbg_reg_id_pcs[47] = {
 	VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL,
 	VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0,
 	VR_XS_PMA_Gen5_12G_VCO_CAL_REF0,
+	VR_XS_PMA_Gen5_12G_16G_MISC_STS,
 };
-const char *mgb_dbg_reg_name_pcs[47] = {
+const char *mgb_dbg_reg_name_pcs[48] = {
 	"SR_XS_PCS_CTRL1",
 	"SR_XS_PCS_DEV_ID1",
 	"SR_XS_PCS_DEV_ID2",
@@ -4702,6 +4498,7 @@ const char *mgb_dbg_reg_name_pcs[47] = {
 	"VR_XS_PMA_Gen5_12G_16G_REF_CLK_CTRL",
 	"VR_XS_PMA_Gen5_12G_16G_VCO_CAL_LD0",
 	"VR_XS_PMA_Gen5_12G_VCO_CAL_REF0",
+	"VR_XS_PMA_Gen5_12G_16G_MISC_STS",
 };
 
 static ssize_t mgb_dbg_reg_pcs_read(struct file *filp, char __user *buffer,
@@ -4793,36 +4590,7 @@ static ssize_t mgb_dbg_reg_ops_write(struct file *filp,
 
 	mgb_dbg_reg_ops_buf[len] = '\0';
 
-	if (strncmp(mgb_dbg_reg_ops_buf, "write", 5) == 0) {
-		u32 reg, value;
-		int cnt;
-
-		cnt = sscanf(&mgb_dbg_reg_ops_buf[5], "%x %x", &reg, &value);
-		if (cnt == 2) {
-			ep->reg_last_value = value;
-			if (ep->base_ioaddr)
-				writel(value, ep->base_ioaddr + (reg << 2));
-		} else {
-			ep->reg_last_value = 0xFFFFFFFF;
-			dev_warn(&ep->pci_dev->dev,
-				 "debugfs reg_ops usage: write <reg> <val>\n");
-		}
-	} else if (strncmp(mgb_dbg_reg_ops_buf, "read", 4) == 0) {
-		u32 reg, value;
-		int cnt;
-
-		cnt = sscanf(&mgb_dbg_reg_ops_buf[4], "%x", &reg);
-		if (cnt == 1) {
-			value = (u32)-1;
-			if (ep->base_ioaddr)
-				value = readl(ep->base_ioaddr + (reg << 2));
-			ep->reg_last_value = value;
-		} else {
-			ep->reg_last_value = 0xFFFFFFFF;
-			dev_warn(&ep->pci_dev->dev,
-				 "debugfs reg_ops usage: read <reg>\n");
-		}
-	} else if (strncmp(mgb_dbg_reg_ops_buf, "writephy ", 9) == 0) {
+	if (strncmp(mgb_dbg_reg_ops_buf, "writephy ", 9) == 0) {
 		u32 reg, value;
 		int cnt;
 
@@ -4884,6 +4652,35 @@ static ssize_t mgb_dbg_reg_ops_write(struct file *filp,
 			ep->reg_last_value = 0xFFFFFFFF;
 			dev_warn(&ep->pci_dev->dev,
 				 "debugfs reg_ops usage: readpcs <reg>\n");
+		}
+	} else if (strncmp(mgb_dbg_reg_ops_buf, "write", 5) == 0) {
+		u32 reg, value;
+		int cnt;
+
+		cnt = sscanf(&mgb_dbg_reg_ops_buf[5], "%x %x", &reg, &value);
+		if (cnt == 2) {
+			ep->reg_last_value = value;
+			if (ep->base_ioaddr)
+				writel(value, ep->base_ioaddr + (reg << 2));
+		} else {
+			ep->reg_last_value = 0xFFFFFFFF;
+			dev_warn(&ep->pci_dev->dev,
+				 "debugfs reg_ops usage: write <reg> <val>\n");
+		}
+	} else if (strncmp(mgb_dbg_reg_ops_buf, "read", 4) == 0) {
+		u32 reg, value;
+		int cnt;
+
+		cnt = sscanf(&mgb_dbg_reg_ops_buf[4], "%x", &reg);
+		if (cnt == 1) {
+			value = (u32)-1;
+			if (ep->base_ioaddr)
+				value = readl(ep->base_ioaddr + (reg << 2));
+			ep->reg_last_value = value;
+		} else {
+			ep->reg_last_value = 0xFFFFFFFF;
+			dev_warn(&ep->pci_dev->dev,
+				 "debugfs reg_ops usage: read <reg>\n");
 		}
 	} else {
 		ep->reg_last_value = 0xFFFFFFFF;
@@ -4980,6 +4777,7 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct device_node *np = dev_of_node(&pdev->dev);
 	const char *of_status_prop = NULL;
 	const char *of_phymode_prop = NULL;
+	int mpllm;
 
 	/* check cmdline param */
 	if (mgb_status == 0) {
@@ -4997,6 +4795,24 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		} else {
 			dev_warn(&pdev->dev,
 				 "devicetree for node not found!\n");
+		}
+	}
+
+	/* PCS MPLL mode: 0-10G, 1-1G, 2-2.5G, 3-bifurcation */
+	mpllm = eldwcxpcs_get_mpll_mode(pdev);
+	if (mpllm < 0) {
+		dev_err(&pdev->dev,
+			 "wrong PCS MPLL mode (%d)\n", mpllm);
+		return -ENODEV;
+	} else {
+		dev_dbg(&pdev->dev,
+			 "PCS MPLL mode (%d)\n", mpllm);
+	}
+	if (mpllm == MPLL_MODE_10G) {
+		if (PCI_FUNC(pdev->devfn) == 0) {
+			dev_warn(&pdev->dev,
+				 "1G device disabled, use 10G device\n");
+			return -ENODEV;
 		}
 	}
 
@@ -5074,8 +4890,7 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	ep->flags = 0;
 	ep->msg_enable = mgb_debug;
 
-	if (mpll_mode != -1)
-		ep->mpll_mode = mpll_mode;
+	ep->mpll_mode = mpllm;
 
 	ep->mgb_ticks_per_usec = mgb_is_eiohub_proto() ? 125 : 480;
 
@@ -5083,8 +4898,12 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	mutex_init(&ep->mx);
 
 	l_set_ethernet_macaddr(pdev, dev->dev_addr);
-	dev_info(&pdev->dev, "MAC = %012llX\n",
-		 be64_to_cpu(*(u64 *)(dev->dev_addr) << 16));
+	dev_info(&pdev->dev,
+#ifdef __sparc__
+		 "MAC = %012llX\n", be64_to_cpu(*(u64 *)(dev->dev_addr) >> 16));
+#else
+		 "MAC = %012llX\n", be64_to_cpu(*(u64 *)(dev->dev_addr) << 16));
+#endif
 
 	mgb_write_e_csr(ep, STOP); /* Stop card */
 	/* Check for a valid station address */
@@ -5103,7 +4922,7 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 					&(pdev->dev));
 	ep->ptp_clock_info.max_adj = 1000000000;
 #else
-	pr_err("failed to register MPV pps source\n");
+	pr_err("There is no external (GLONASS or other) pps for MPV & MGB\n");
 	ep->ptp_clock = ERR_PTR(-EINVAL);
 #endif
 	if (IS_ERR(ep->ptp_clock)) {
@@ -5361,8 +5180,6 @@ static int __init mgb_init_module(void)
 {
 	int status;
 
-	pr_info(KBUILD_MODNAME ": %s", version);
-
 	mgb_debug = netif_msg_init(debug,
 		NETIF_MSG_DRV |			/* netif_msg_drv */
 		NETIF_MSG_PROBE |		/* netif_msg_probe */
@@ -5403,7 +5220,7 @@ module_init(mgb_init_module);
 module_exit(mgb_cleanup_module);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Vadim A. Revyakin");
+MODULE_AUTHOR("Vadim A. Revyakin, Andrey V. Kalita");
 MODULE_DESCRIPTION("mgb ethernet card of e2k family CPUs driver");
 MODULE_SUPPORTED_DEVICE("MGB, DeviceID:" PCI_DEVICE_ID_MCST_MGB
 			", VendorID:" PCI_VENDOR_ID_MCST_TMP);

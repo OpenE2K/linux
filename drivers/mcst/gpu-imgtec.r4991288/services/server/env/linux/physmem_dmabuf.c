@@ -81,7 +81,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * and using our dmabuf.
  */
 
-static int PVRDmaBufOpsAttach(struct dma_buf *psDmaBuf, struct device *psDev,
+static int PVRDmaBufOpsAttach(struct dma_buf *psDmaBuf,
                            struct dma_buf_attachment *psAttachment)
 {
 	return -ENOSYS;

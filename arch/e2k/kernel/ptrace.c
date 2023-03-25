@@ -379,10 +379,10 @@ static void execute_user_gd_cud_regs(struct task_struct *child,
 			__func__, pnt_cut_entry, sizeof(e2k_cute_t));
 		return;
 	}
-	user_regs->gd_lo = CUTE_GD_BASE(p_cute);
-	user_regs->gd_hi = CUTE_GD_SIZE(p_cute);
-	user_regs->cud_lo = CUTE_CUD_BASE(p_cute);
-	user_regs->cud_hi = CUTE_CUD_SIZE(p_cute);
+	user_regs->gd_lo = p_cute->gd_base;
+	user_regs->gd_hi = p_cute->gd_size;
+	user_regs->cud_lo = p_cute->cud_base;
+	user_regs->cud_hi = p_cute->cud_size;
 }
 
 void core_pt_regs_to_user_regs (struct pt_regs *pt_regs,
@@ -1297,23 +1297,6 @@ void ptrace_disable(struct task_struct *child)
 	user_disable_single_step(child);
 }
 
-
-static bool is_hw_stack_from_task(struct task_struct *child,
-		unsigned long addr, size_t size)
-{
-	struct thread_info *ti = task_thread_info(child);
-
-	if (range_includes((u64) GET_PCS_BASE(&ti->u_hw_stack),
-			    get_hw_pcs_user_size(&ti->u_hw_stack),
-			    addr, size) ||
-	    range_includes((u64) GET_PS_BASE(&ti->u_hw_stack),
-			    get_hw_ps_user_size(&ti->u_hw_stack),
-			    addr, size))
-		return true;
-
-	return false;
-}
-
 static int arch_ptrace_peek(struct task_struct *child,
 		 unsigned long addr, unsigned long data, bool tag, bool user)
 {
@@ -1322,7 +1305,7 @@ static int arch_ptrace_peek(struct task_struct *child,
 	unsigned long value;
 	int copied;
 	bool privileged_access = range_intersects(addr, sizeof(tmp),
-		USER_HW_STACKS_BASE, PAGE_OFFSET - USER_HW_STACKS_BASE);
+			USER_ADDR_MAX, PAGE_OFFSET - USER_ADDR_MAX);
 	bool tag_unaligned = false;
 
 	if (!user && data < PAGE_OFFSET)
@@ -1339,9 +1322,9 @@ static int arch_ptrace_peek(struct task_struct *child,
 	if (privileged_access) {
 		unsigned long ts_flag;
 
-		/* Only allow access to CUT and
-		 * this particular thread's stacks */
-		if (!is_hw_stack_from_task(child, addr, sizeof(tmp)) &&
+		/* Only allow access to CUT and hw stacks */
+		if (!range_includes(USER_HW_STACKS_BASE, E2K_ALL_STACKS_MAX_SIZE,
+				addr, sizeof(tmp)) &&
 		    !range_includes(USER_CUT_AREA_BASE, USER_CUT_AREA_SIZE,
 				    addr, sizeof(tmp)))
 			return -EPERM;
@@ -1469,13 +1452,15 @@ static int arch_ptrace_poke(struct task_struct *child,
 {
 	struct thread_info *ti = task_thread_info(child);
 	bool privileged_access = range_intersects(addr, sizeof(data),
-		USER_HW_STACKS_BASE, PAGE_OFFSET - USER_HW_STACKS_BASE);
+			USER_ADDR_MAX, PAGE_OFFSET - USER_ADDR_MAX);
+	volatile unsigned long value;	/* volatile because it contains tag */
 
-	/* Only allow access to this child's stacks */
+	/* Only allow access to hw stacks */
 	if (privileged_access) {
 		struct poke_work_args *poke_work;
 
-		if (!is_hw_stack_from_task(child, addr, sizeof(data)))
+		if (!range_includes(USER_HW_STACKS_BASE, E2K_ALL_STACKS_MAX_SIZE,
+				addr, sizeof(value)))
 			return -EPERM;
 
 		/* Chain stack access works only with aligned dwords */
@@ -1492,8 +1477,6 @@ static int arch_ptrace_poke(struct task_struct *child,
 		init_task_work(&poke_work->callback, poke_work_fn);
 		return task_work_add(child, &poke_work->callback, true);
 	} else {
-		/* volatile because it contains tag */
-		volatile unsigned long value;
 		int copied;
 
 		store_tagged_dword((u64 *) &value, data, tag);
@@ -1508,9 +1491,9 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 		   unsigned long data, bool compat)
 {
 	struct user_regs_struct local_user_regs;
-	u8 tag;
 	long ret;
 #ifdef CONFIG_PROTECTED_MODE
+	u8 tag;
 	long resdata = -1L;
 	int itag;
 #endif /* CONFIG_PROTECTED_MODE */
@@ -1658,7 +1641,7 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 		e2k_cutd_t cutd = sw_regs->cutd;
 		e2k_pusd_lo_t pusd_lo;
 		e2k_pusd_hi_t pusd_hi;
-		e2k_cute_t cute, *cute_p = &cute;
+		e2k_cute_t cute;
 		int cui = USER_CODES_PROT_INDEX; /* FIXME In a kernel it
 							* isn't realized yet */
 		long cute_entry_addr, stack_bottom;
@@ -1708,10 +1691,10 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 		if (copied != sizeof(cute))
 			break;
 
-		gd_base = CUTE_GD_BASE(cute_p);
-		gd_size = CUTE_GD_SIZE(cute_p);
-		cud_base = CUTE_CUD_BASE(cute_p);
-		cud_size = CUTE_CUD_SIZE(cute_p);
+		gd_base = cute.gd_base;
+		gd_size = cute.gd_size;
+		cud_base = cute.cud_base;
+		cud_size = cute.cud_size;
 
 #ifdef DEBUG_PTRACE
 		pr_info("do_ptrace: gd.base = 0x%lx, gd.size = 0x%lx\n"

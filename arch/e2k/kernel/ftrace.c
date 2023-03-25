@@ -28,6 +28,7 @@
 #include <asm/process.h>
 #include <asm/ftrace.h>
 #include <asm/e2k_debug.h> 
+#include <asm/set_memory.h>
 
 #include <asm-generic/kprobes.h>
 
@@ -282,6 +283,20 @@ void arch_ftrace_update_code(int command)
 	ftrace_modify_all_code(command);
 }
 
+int ftrace_arch_code_modify_prepare(void)
+{
+	set_memory_rw((unsigned long) lm_alias(_stext),
+		      (unsigned long) (_etext - _stext) >> PAGE_SHIFT);
+	return 0;
+}
+
+int ftrace_arch_code_modify_post_process(void)
+{
+	set_memory_ro((unsigned long) lm_alias(_stext),
+		      (unsigned long) (_etext - _stext) >> PAGE_SHIFT);
+	return 0;
+}
+
 # define SS_CT_SHIFT 5
 # define SS_CT_MASK (0xf << SS_CT_SHIFT)
 
@@ -305,10 +320,44 @@ static struct stack_trace saved_trace_disabled = {
 };
 #endif /* CONFIG_STACKTRACE */
 
-static inline int e2k_modify_call(const unsigned long addr,
-		const unsigned long ip,
-		const unsigned long phys_ip,
-		const int enable)
+/* Read instruction word (two syllables) from IP address */
+static inline unsigned long read_instruction(unsigned long ip, phys_addr_t phys_ip)
+{
+	return *((u64 *) __va(phys_ip));
+}
+
+/* Write modified instruction word at IP address */
+static int modify_instruction(unsigned long ip, phys_addr_t phys_ip,
+				u64 instr_word)
+{
+	unsigned long flush_addr = (unsigned long) __va(phys_ip);
+
+	/* For kernel text pages were updated with write
+	 * access in ftrace_arch_code_modify_prepare() */
+	if (is_kernel_text(ip)) {
+		*((u64 *) __va(phys_ip)) = instr_word;
+		flush_icache_range(flush_addr, flush_addr + 8);
+		return 0;
+	}
+
+	/* For modules we temporarily map the page with instruction */
+	struct page *page = phys_to_page(phys_ip);
+	void *mapped_page = vmap(&page, 1, VM_MAP, PAGE_KERNEL);
+	if (!mapped_page) {
+		pr_info("Failed to map module code page from 0x%lx (phys. 0x%llx)\n",
+				ip, phys_ip);
+		return -EINVAL;
+	}
+
+	*(u64 *) (mapped_page + (phys_ip & ~PAGE_MASK)) = instr_word;
+	flush_icache_range(flush_addr, flush_addr + 8);
+
+	vunmap(mapped_page);
+	return 0;
+}
+
+static int e2k_modify_call(unsigned long addr, unsigned long ip,
+		unsigned long phys_ip, int enable)
 {
 	union {
 		struct {
@@ -318,25 +367,16 @@ static inline int e2k_modify_call(const unsigned long addr,
 		unsigned long instr_word;
 	} instruction;
 
-	unsigned long flush_addr = (unsigned long) __va(phys_ip);
-
-# if DEBUG_FTRACE_MODE
-	if (enable)
-		DebugFTRACE("Enabling _mcount at %lx (phys %lx)\n",
-				ip, phys_ip);
-	else
-		DebugFTRACE("Disabling _mcount at %lx (phys %lx)\n",
-				ip, phys_ip);
-# endif
+	DebugFTRACE("%s _mcount at %lx (phys %lx)\n",
+			(enable) ? "Enabling" : "Disabling", ip, phys_ip);
 
 	if (addr != FTRACE_ADDR) {
-		pr_info("Passed addr is %lx instead of %lx\n",
-				addr, FTRACE_ADDR);
+		pr_info("Passed addr is %lx instead of %lx\n", addr, FTRACE_ADDR);
 		return -EINVAL;
 	}
 
 	/* Read the header and stubs syllables. */
-	instruction.instr_word = read_instr_on_IP(ip, phys_ip);
+	instruction.instr_word = read_instruction(ip, phys_ip);
 
 	/* Check that the stubs syllable is present. */
 	if (!instruction.HS.s) {
@@ -397,11 +437,7 @@ static inline int e2k_modify_call(const unsigned long addr,
 	}
 
 	/* Write the modified syllable. */
-	modify_instr_on_IP(ip, phys_ip, instruction.instr_word);
-
-	flush_icache_range(flush_addr, flush_addr + 8);
-
-	return 0;
+	return modify_instruction(ip, phys_ip, instruction.instr_word);
 }
 
 int ftrace_make_nop(struct module *mod,
@@ -421,9 +457,6 @@ int ftrace_make_nop(struct module *mod,
 		ret = e2k_modify_call(addr, ip, phys_ip, 0);
 		if (ret)
 			return ret;
-
-		if (!THERE_IS_DUP_KERNEL)
-			break;
 
 		/* Modules are not duplicated */
 		if (!is_duplicated_code(ip))
@@ -449,9 +482,6 @@ int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 		ret = e2k_modify_call(addr, ip, phys_ip, 1);
 		if (ret)
 			return ret;
-
-		if (!THERE_IS_DUP_KERNEL)
-			break;
 
 		/* Modules are not duplicated */
 		if (!is_duplicated_code(ip))
@@ -524,7 +554,7 @@ void _mcount(const e2k_cr0_hi_t frompc)
 
 		wbs = frame->cr1_lo.fields.wbs;
 
-		if (unlikely(frame->cr1_lo.fields.wpsz > 4 ||
+		if (unlikely(frame->cr1_lo.fields.wpsz > C_ABI_PSIZE_UNPROT ||
 				wbs >= E2K_MAXSR)) {
 			static int once = 1;
 			/* return_to_hook() currently assumes that the
@@ -532,8 +562,8 @@ void _mcount(const e2k_cr0_hi_t frompc)
 			 * in accordance with existing conventions. */
 			if (once) {
 				once = 0;
-				pr_err("Bug in ftrace - psize(%d) is not 4 or wbs(%lld) is too big!\n",
-						frame->cr1_lo.fields.wpsz, wbs);
+				pr_err("Bug in ftrace - psize(%d) is not %d or wbs(%lld) is too big!\n",
+					frame->cr1_lo.fields.wpsz, C_ABI_PSIZE_UNPROT, wbs);
 				WARN_ON(1);
 				goto out;
 			}

@@ -1,6 +1,7 @@
 #ifndef _UDA1345_CODEC_H
 #define _UDA1345_CODEC_H
 #include "l3.h"
+#include "../smi_drv.h"
 
 
 #define UDA1345_L3ADDR	5
@@ -118,14 +119,20 @@ struct uda1345_data
 
 
 
-int uda1345_setsysclkfs(enum uda1345_sysclkf sysclk);
-int uda1345_setformat(enum uda1345_input_format informat);
-int uda1345_setdcfilter(enum uda1345_dc_filter onoff);
-int uda1345_setvolume(u8 dB);
-int uda1345_setdemphasis(enum uda1345_de_emphasis emphasis);
-int uda1345_setmute(enum uda1345_mute onoff);
-int uda1345_setpower(enum uda1345_power onoff);
-int uda1345_init(void);
-int uda1345_deinit(void);
+int uda1345_setsysclkfs(struct smi_device *sdev,
+						enum uda1345_sysclkf sysclk);
+int uda1345_setformat(struct smi_device *sdev,
+						enum uda1345_input_format informat);
+int uda1345_setdcfilter(struct smi_device *sdev,
+						enum uda1345_dc_filter onoff);
+int uda1345_setvolume(volatile unsigned char __iomem *rmmio, u8 dB);
+int uda1345_setdemphasis(struct smi_device *sdev,
+						enum uda1345_de_emphasis emphasis);
+int uda1345_setmute(volatile unsigned char __iomem *rmmio,
+						enum uda1345_mute onoff);
+int uda1345_setpower(volatile unsigned char __iomem *rmmio,
+						enum uda1345_power onoff);
+int uda1345_init(struct smi_device *sdev);
+int uda1345_deinit(struct smi_device *sdev);
 #endif
 

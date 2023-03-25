@@ -189,7 +189,7 @@ static int parse_getsp_reg_operand(instr_src_t src2, const struct pt_regs *regs,
 	offset_d = 2 * AS(regs->crs.cr1_lo).wbs - ind_d;
 	raddr = ps_top - ((offset_d + 1) / 2) * 32;
 	if (offset_d % 2)
-		raddr += ((machine.native_iset_ver < E2K_ISET_V5) ? 8 : 16);
+		raddr += machine.qnr1_offset;
 	if (raddr < PAGE_OFFSET && raddr >= u_ps_top)
 		raddr += AS(current_thread_info()->k_psp_lo).base - u_ps_top;
 

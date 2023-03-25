@@ -19,7 +19,6 @@
 #  define arch_boot_spin_locked_slow(lock)	do { } while (0)
 # endif	/* CONFIG_PARAVIRT_GUEST || CONFIG_KVM_GUEST_KERNEL */
 
-
 static inline void boot_native_spin_unlock_wait(boot_spinlock_t *lock)
 {
 	boot_spinlock_t val;
@@ -44,11 +43,6 @@ static inline int boot_native_spin_is_locked(boot_spinlock_t *lock)
 	val.lock = READ_ONCE(lock->lock);
 
 	return val.head != val.tail;
-}
-
-static __always_inline int boot_native_spin_value_unlocked(boot_spinlock_t lock)
-{
-	return lock.head == lock.tail;
 }
 
 static inline int boot_native_spin_is_contended(boot_spinlock_t *lock)

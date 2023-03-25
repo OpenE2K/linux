@@ -20,6 +20,8 @@
 /* it is native kernel with virtualization support (hypervisor) */
 
 #include "cpu.h"
+#include "mmutrace-e2k.h"
+#include "trace-gmm.h"
 
 #undef	DEBUG_PV_FORK_MODE
 #undef	DebugFORK
@@ -502,6 +504,7 @@ void return_to_injected_syscall(thread_info_t *ti, pt_regs_t *regs)
 {
 	e2k_pshtp_t pshtp;
 	u64 wsz, num_q;
+	clear_rf_t clear_fn;
 
 	/*
 	 * This can page fault so call with open interrupts
@@ -522,6 +525,8 @@ void return_to_injected_syscall(thread_info_t *ti, pt_regs_t *regs)
 
 	RESTORE_USER_SYSCALL_STACK_REGS(regs);
 
+	clear_fn = get_clear_rf_fn(num_q);
+
 	/* it is guest kernel process return to */
 	host_syscall_pv_vcpu_exit_trap(ti, regs);
 
@@ -529,8 +534,9 @@ void return_to_injected_syscall(thread_info_t *ti, pt_regs_t *regs)
 	 * If either FILLC or FILLR isn't supported, jump to return_to_injected_syscall_sw_fill.
 	 * Otherwise, fall through and call return_to_injected_syscall_switched_stacks directly.
 	 */
-	user_hw_stacks_restore(regs, &regs->g_stacks, wsz, num_q,
-		&return_to_injected_syscall_sw_fill, return_to_injected_syscall_sw_fill_wsz);
+	user_hw_stacks_restore(&regs->g_stacks, wsz, clear_fn,
+			&return_to_injected_syscall_sw_fill,
+			return_to_injected_syscall_sw_fill_wsz);
 
 	return_to_injected_syscall_switched_stacks();
 
@@ -552,7 +558,8 @@ static __always_inline void
 pv_vcpu_swicth_to_guest_mmu_ctxt(thread_info_t *ti, struct kvm_vcpu *vcpu)
 {
 	/* switch host MMU to guest VCPU MMU context */
-	kvm_switch_to_guest_mmu_pid(vcpu, ti);
+	trace_host_get_gmm_root_hpa(pv_vcpu_get_gmm(vcpu),
+				    NATIVE_READ_IP_REG_VALUE());
 	__guest_enter(ti, &vcpu->arch, DONT_AAU_CONTEXT_SWITCH);
 
 	/* from now the host process is at paravirtualized guest(VCPU) mode */
@@ -614,10 +621,15 @@ static __always_inline void guest_mkctxt_complete(void)
 	u64 sbbp[SBBP_ENTRIES_NUM], wsz;
 	struct trap_pt_regs saved_trap;
 	unsigned long ts_flag;
+	unsigned long mmu_pid;
 	int ret;
 	bool return_to_user;
 
 	raw_all_irq_enable();
+
+	mmu_pid = current->mm->context.cpumsk[smp_processor_id()];
+	trace_kvm_switch_to_host_mmu_pid(vcpu, current->mm, mmu_pid,
+					 trampoline_sw_to_host);
 
 	/*
 	 * Copy guest's user context from signal host stack.
@@ -632,14 +644,22 @@ static __always_inline void guest_mkctxt_complete(void)
 	clear_ts_flag(ts_flag);
 	if (ret) {
 		user_exit();
+		pr_err("%s(): kill guest: copy from user failed, error %d\n",
+			__func__, ret);
 		do_exit(SIGKILL);
 	}
 
 	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
 				sbbp, &aau_context, NULL)) {
 		user_exit();
+		pr_err("%s(): kill guest: copy context from signal stack failed\n",
+			__func__);
 		do_exit(SIGKILL);
 	}
+	atomic_dec(&gti->signal.syscall_num);
+	gti->signal.stack.base = current_thread_info()->signal_stack.base;
+	gti->signal.stack.size = current_thread_info()->signal_stack.size;
+	gti->signal.stack.used = current_thread_info()->signal_stack.used;
 
 	/* Switch guest's interrupts into user mode */
 	kvm_emulate_guest_vcpu_psr_done(vcpu, vcpu_ctxt.guest_psr,
@@ -785,8 +805,11 @@ setup_pv_vcpu_mkctxt_trampoline(struct pt_regs *regs,
 	 * mode.
 	 */
 	ret = reserve_signal_stack();
-	if (unlikely(ret))
+	if (unlikely(ret)) {
+		pr_err("%s(): kill guest: reserve signal stack failed, error %d\n",
+			__func__, ret);
 		do_exit(SIGKILL);
+	}
 	gti = pv_vcpu_get_gti(vcpu);
 	gti->signal.stack.base = current_thread_info()->signal_stack.base;
 	gti->signal.stack.size = current_thread_info()->signal_stack.size;
@@ -800,6 +823,8 @@ setup_pv_vcpu_mkctxt_trampoline(struct pt_regs *regs,
 	ret |= __put_user(false, &vcpu_ctxt->in_sig_handler);
 	if (unlikely(ret)) {
 		pop_signal_stack();
+		pr_err("%s(): kill guest: put user failed, error %d\n",
+			__func__, ret);
 		do_exit(SIGKILL);
 	}
 
@@ -811,6 +836,9 @@ setup_pv_vcpu_mkctxt_trampoline(struct pt_regs *regs,
 	ret = pv_vcpu_prepare_syscall_trampoline_frame(regs, vcpu);
 	if (ret) {
 		pop_signal_stack();
+		pr_err("%s(): kill guest: prepare syscall trampoline "
+			"failed, error %d\n",
+			__func__, ret);
 		do_exit(SIGKILL);
 	}
 
@@ -821,6 +849,9 @@ setup_pv_vcpu_mkctxt_trampoline(struct pt_regs *regs,
 	ret = pv_vcpu_prepare_gst_mkctxt_trampoline_frame(regs, vcpu);
 	if (ret) {
 		pop_signal_stack();
+		pr_err("%s(): kill guest: prepare coroutine trampoline "
+			"failed, error %d\n",
+			__func__, ret);
 		do_exit(SIGKILL);
 	}
 }
@@ -833,6 +864,7 @@ guest_mkctxt_trampoline_inject(void)
 	struct kvm_vcpu *vcpu = ti->vcpu;
 	u64 wsz;
 	bool return_to_user;
+	unsigned long mmu_pid;
 
 	raw_all_irq_enable();
 
@@ -843,6 +875,10 @@ guest_mkctxt_trampoline_inject(void)
 	/* Save guest's stack regs state in pt_regs and emulated vcpu regs */
 	SAVE_STACK_REGS(&regs, ti, true, false);
 	save_pv_vcpu_sys_call_stack_regs(vcpu, &regs);
+
+	mmu_pid = current->mm->context.cpumsk[smp_processor_id()];
+	trace_kvm_switch_to_host_mmu_pid(vcpu, current->mm, mmu_pid,
+					 trampoline_sw_to_host);
 
 	/* Prepare all context on guest user stacks */
 	setup_pv_vcpu_mkctxt_trampoline(&regs, vcpu);
@@ -891,6 +927,7 @@ return_pv_vcpu_inject(inject_caller_t from)
 	gthread_info_t *gti;
 	bool guest_user, user_stacks;
 	u64 sbbp[SBBP_ENTRIES_NUM];
+	struct k_sigaction ka;
 	e2k_aau_t aau_context;
 	struct local_gregs l_gregs;
 	e2k_stacks_t cur_g_stacks;
@@ -898,6 +935,7 @@ return_pv_vcpu_inject(inject_caller_t from)
 	e2k_pcshtp_t u_pcshtp;
 	e2k_wd_t wd;
 	unsigned long ts_flag;
+	unsigned long mmu_pid;
 	int ret;
 
 	gti = pv_vcpu_get_gti(vcpu);
@@ -917,6 +955,10 @@ return_pv_vcpu_inject(inject_caller_t from)
 
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_in_trap);
 
+	mmu_pid = current->mm->context.cpumsk[smp_processor_id()];
+	trace_kvm_switch_to_host_mmu_pid(vcpu, current->mm, mmu_pid,
+					 trampoline_sw_to_host);
+
 	context = get_signal_stack();
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
@@ -925,6 +967,8 @@ return_pv_vcpu_inject(inject_caller_t from)
 	clear_ts_flag(ts_flag);
 	if (ret) {
 		user_exit();
+		pr_err("%s(): kill guest: copy from user failed, error %d\n",
+			__func__, ret);
 		do_exit(SIGKILL);
 	}
 
@@ -935,10 +979,15 @@ return_pv_vcpu_inject(inject_caller_t from)
 		/* so the guest global registers contain user values and */
 		/* migration checker can not be running here */
 
+		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 		ret = __copy_from_user_with_tags(&regs, &context->regs,
 						 sizeof(regs));
+		clear_ts_flag(ts_flag);
 		if (ret) {
 			user_exit();
+			pr_err("%s(): kill guest: copy from user with tags "
+				"failed, error %d\n",
+				__func__, ret);
 			do_exit(SIGKILL);
 		}
 		insert_pv_vcpu_sigreturn(vcpu, &vcpu_ctxt, &regs);
@@ -947,10 +996,22 @@ return_pv_vcpu_inject(inject_caller_t from)
 	}
 
 	if (copy_context_from_signal_stack(&l_gregs, &regs, &saved_trap,
-					   sbbp, &aau_context, NULL)) {
+					   sbbp, &aau_context, &ka)) {
 		user_exit();
+		pr_err("%s(): kill guest: copy context from signal stack failed\n",
+			__func__);
 		do_exit(SIGKILL);
 	}
+	if (from == FROM_PV_VCPU_TRAP_INJECT) {
+		atomic_dec(&gti->signal.traps_num);
+	} else if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
+		atomic_dec(&gti->signal.syscall_num);
+	} else {
+		KVM_BUG_ON(true);
+	}
+	gti->signal.stack.base = current_thread_info()->signal_stack.base;
+	gti->signal.stack.size = current_thread_info()->signal_stack.size;
+	gti->signal.stack.used = current_thread_info()->signal_stack.used;
 
 	KVM_BUG_ON(vcpu_ctxt.inject_from != from);
 	if (from == FROM_PV_VCPU_SYSCALL_INJECT) {
@@ -1117,7 +1178,7 @@ return_pv_vcpu_inject(inject_caller_t from)
 				regs.sys_rval = -EINTR;
 				break;
 			case -ERESTARTSYS:
-				if (!(context->sigact.sa.sa_flags & SA_RESTART)) {
+				if (!(ka.sa.sa_flags & SA_RESTART)) {
 					regs.sys_rval = -EINTR;
 					break;
 				}
@@ -1147,17 +1208,28 @@ static __always_inline notrace void pv_vcpu_return_from_fork(u64 sys_rval)
 	e2k_pshtp_t u_pshtp;
 	e2k_pcshtp_t u_pcshtp;
 	e2k_wd_t wd;
+	unsigned long mmu_pid;
 
 	gti = pv_vcpu_get_gti(vcpu);
 	COPY_U_HW_STACKS_FROM_TI(&cur_g_stacks, ti);
 	raw_all_irq_enable();
 
+	mmu_pid = current->mm->context.cpumsk[smp_processor_id()];
+	trace_kvm_switch_to_host_mmu_pid(vcpu, current->mm, mmu_pid,
+					 trampoline_sw_to_host);
+
 	KVM_BUG_ON(kvm_is_guest_migrated_to_other_vcpu(ti, vcpu));
 
 	if (unlikely(copy_pt_regs_from_signal_stack(&regs))) {
 		user_exit();
+		pr_err("%s(): kill guest: copy regs from signal stack failed\n",
+			__func__);
 		do_exit(SIGKILL);
 	}
+	atomic_dec(&gti->signal.syscall_num);
+	gti->signal.stack.base = current_thread_info()->signal_stack.base;
+	gti->signal.stack.size = current_thread_info()->signal_stack.size;
+	gti->signal.stack.used = current_thread_info()->signal_stack.used;
 
 	/*
 	 * Always make any pending restarted system call return -EINTR.
@@ -1197,7 +1269,7 @@ static __always_inline notrace void pv_vcpu_return_from_fork(u64 sys_rval)
 	COPY_U_HW_STACKS_TO_STACKS(&regs.g_stacks, &cur_g_stacks);
 
 	/* emulate restore of guest VCPU PSR state after return from syscall */
-	kvm_emulate_guest_vcpu_psr_return(vcpu, &regs);
+	kvm_emulate_guest_vcpu_psr_return(vcpu, &regs.crs);
 
 	finish_syscall(&regs, FROM_PV_VCPU_SYSFORK, true);
 }

@@ -1,9 +1,7 @@
 #ifndef __E2K_KVM_HOST_MM_H
 #define __E2K_KVM_HOST_MM_H
 
-#include <linux/types.h>
-#include <linux/list.h>
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <linux/kvm.h>
 
 #include <asm/kvm/nid.h>

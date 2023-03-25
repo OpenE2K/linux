@@ -9,16 +9,17 @@
 
 #include <asm/p2v/boot_v2p.h>
 
+#include <asm/p2v/io.h>
 #include <asm/p2v/boot_init.h>
 #include <asm/p2v/boot_phys.h>
 #include <asm/p2v/boot_map.h>
 #include <asm/p2v/boot_cacheflush.h>
 #include <asm/p2v/boot_console.h>
-#include <asm/mmu_context.h>
 #include <asm/p2v/boot_param.h>
 #include <asm/p2v/boot_mmu_context.h>
 #include <asm/errors_hndl.h>
 #include <asm/e2k_debug.h>
+#include <asm/mmu_context.h>
 #include <asm/process.h>
 #include <asm/regs_state.h>
 #include <asm/sic_regs_access.h>
@@ -40,11 +41,6 @@
 #undef	DebugBank
 #define	DEBUG_PHYS_BANK_MODE	0	/* Physical memory bank management */
 #define	DebugBank		if (DEBUG_PHYS_BANK_MODE) do_boot_printk
-
-#undef	DEBUG_NUMA_MODE
-#undef	DebugNUMA
-#define	DEBUG_NUMA_MODE		0	/* Boot NUMA */
-#define	DebugNUMA		if (DEBUG_NUMA_MODE) do_boot_printk
 
 /*
  * Array of 'BOOT_MAX_MEM_NUMNODES' of 'BOOT_MAX_MEM_NUMNODES' structures
@@ -74,13 +70,10 @@ bool pa_to_high_disabled = false;	/* default is enabled */
 bootmem_areas_t	kernel_bootmem;
 long		phys_memory_mgb_size;
 
-#ifdef	CONFIG_SMP
-static	atomic_t boot_physmem_maps_ready = ATOMIC_INIT(0);
-static	atomic_t __initdata_recv boot_pv_ops_switched = ATOMIC_INIT(0);
-#ifndef	CONFIG_NUMA
-static	atomic_t boot_mapping_ready = ATOMIC_INIT(0);
-#endif	/* ! CONFIG_NUMA */
-#endif	/* CONFIG_SMP */
+static atomic_t boot_physmem_maps_ready = ATOMIC_INIT(0);
+#ifdef CONFIG_SMP
+static atomic_t __initdata_recv boot_pv_ops_switched = ATOMIC_INIT(0);
+#endif
 
 /*
  * FIXME: Nodes number is limited by bits in unsigned long size - 64
@@ -89,68 +82,6 @@ int			phys_nodes_num;
 unsigned long		phys_nodes_map;
 int			phys_mem_nodes_num;
 unsigned long		phys_mem_nodes_map;
-
-#ifdef	CONFIG_NUMA
-e2k_addr_t node_kernel_phys_base[MAX_NUMNODES] = {
-				[0 ... (MAX_NUMNODES-1)] = -1
-			};
-static boot_spinlock_t __initdata boot_node_kernel_dup_lock[MAX_NUMNODES] = {
-	[0 ... (MAX_NUMNODES-1)] = __BOOT_SPIN_LOCK_UNLOCKED
-};
-atomic_t early_node_has_dup_kernel_num = ATOMIC_INIT(0);
-static int __initdata node_kernel_duplicated[MAX_NUMNODES] = { 0 };
-static int __initdata node_set_kernel_duplicated[MAX_NUMNODES] = { 0 };
-static int __initdata node_kernel_base_is_set[MAX_NUMNODES] = { 0 };
-#define	boot_node_kernel_duplicated					\
-		boot_get_vo_value(node_kernel_duplicated[boot_numa_node_id()])
-#define	boot_node_set_kernel_duplicated					\
-		boot_get_vo_value(node_set_kernel_duplicated[		\
-						boot_numa_node_id()])
-#define	boot_node_kernel_base_is_set					\
-		boot_get_vo_value(node_kernel_base_is_set[		\
-						boot_numa_node_id()])
-boot_spinlock_t __initdata boot_node_map_lock[MAX_NUMNODES] = {
-	[0 ... (MAX_NUMNODES-1)] = __BOOT_SPIN_LOCK_UNLOCKED
-};
-boot_spinlock_t __initdata_recv boot_node_flush_lock[MAX_NUMNODES] = {
-	[0 ... (MAX_NUMNODES-1)] = __BOOT_SPIN_LOCK_UNLOCKED
-};
-int __initdata node_mem_mapped[MAX_NUMNODES] = { 0 };
-static int __initdata node_image_mapped[MAX_NUMNODES] = { 0 };
-static int __initdata node_io_mapped[MAX_NUMNODES] = { 0 };
-static int __initdata node_info_mapped[MAX_NUMNODES] = { 0 };
-static int __initdata node_ports_mapped[MAX_NUMNODES] = { 0 };
-static int __initdata node_hwbug_mapped[MAX_NUMNODES] = { 0 };
-#ifdef CONFIG_ONLY_HIGH_PHYS_MEM
-static int __initdata_recv node_flushed[MAX_NUMNODES] = { 0 };
-# define boot_node_flushed					\
-		boot_get_vo_value(node_flushed[boot_numa_node_id()])
-#endif
-#define	boot_node_image_mapped					\
-		boot_get_vo_value(node_image_mapped[boot_numa_node_id()])
-#define	boot_node_mem_mapped					\
-		boot_get_vo_value(node_mem_mapped[boot_numa_node_id()])
-#define	boot_node_io_mapped					\
-		boot_get_vo_value(node_io_mapped[boot_numa_node_id()])
-#define	boot_node_info_mapped					\
-		boot_get_vo_value(node_info_mapped[boot_numa_node_id()])
-#define	boot_node_ports_mapped					\
-		boot_get_vo_value(node_ports_mapped[boot_numa_node_id()])
-#define	boot_node_hwbug_mapped					\
-		boot_get_vo_value(node_hwbug_mapped[boot_numa_node_id()])
-#else	/* ! CONFIG_NUMA */
-e2k_addr_t kernel_phys_base;
-#define	boot_node_image_mapped	0
-#define	boot_node_mem_mapped	0
-#define	boot_node_io_mapped	0
-#define	boot_node_info_mapped	0
-#define	boot_node_ports_mapped	0
-#define	boot_node_hwbug_mapped	0
-#define	boot_node_flushed	0
-#endif	/* CONFIG_NUMA */
-
-static bool mmu_pt_v6 = false;
-#define	boot_mmu_pt_v6	boot_get_vo_value(mmu_pt_v6)
 
 static __init void boot_reserve_bootinfo_areas(boot_info_t *boot_info);
 
@@ -202,88 +133,54 @@ boot_param("nodemem", boot_node_mem_set);
 
 static int __init boot_set_mmu_pt_v6(char *cmd)
 {
-	machdep_t *mach = &boot_machine;
+#ifdef CONFIG_E2K_MACHINE
+	do_boot_printk("set_pt_v6 is supported only on !CONFIG_E2K_MACHINE kernels\n");
+#else
+	if (!IS_ENABLED(CONFIG_MMU_PT_V6))
+		do_boot_printk("CONFIG_MMU_PT_V6 is disabled, so MMU PT_V6 cannot be set\n");
+	else
+		boot_machine.mmu_pt_v6 = true;
+#endif
 
-#ifndef	CONFIG_MMU_PT_V6
-	do_boot_printk("CONFIG_MMU_PT_V6 is disabled, so MMU PT_V6 cannot be "
-		"set\n");
-	boot_mmu_pt_v6 = false;
-#else	/* CONFIG_MMU_PT_V6 */
-	if (!mach->mmu_pt_v6) {
-		/* new format is not supported */
-		do_boot_printk("MMU doesn't support new format of page table, "
-			"so MMU PT_V6 cannot be set\n");
-		boot_mmu_pt_v6 = false;
-	} else {
-		boot_mmu_pt_v6 = true;
-	}
-#endif	/* ! CONFIG_MMU_PT_V6 */
-	mach->mmu_pt_v6 = boot_mmu_pt_v6;
 	return 0;
 }
 boot_param("set_pt_v6", boot_set_mmu_pt_v6);
 
 static int __init boot_reset_mmu_pt_v6(char *cmd)
 {
-	machdep_t *mach = &boot_machine;
+#ifdef CONFIG_E2K_MACHINE
+	do_boot_printk("reset_pt_v6 is supported only on !CONFIG_E2K_MACHINE kernels\n");
+#else
+	if (!IS_ENABLED(CONFIG_MMU_PT_V6))
+		do_boot_printk("CONFIG_MMU_PT_V6 is disabled, so MMU PT_V6 cannot be reset\n");
+	else
+		boot_machine.mmu_pt_v6 = false;
+#endif
 
-#ifndef	CONFIG_MMU_PT_V6
-	do_boot_printk("CONFIG_MMU_PT_V6 is disabled, so MMU PT_V6 always is "
-		"OFF\n");
-	boot_mmu_pt_v6 = false;
-#else	/* CONFIG_MMU_PT_V6 */
-	if (!mach->mmu_pt_v6) {
-		/* new format is not supported */
-		boot_mmu_pt_v6 = false;
-	} else {
-		do_boot_printk("CONFIG_MMU_PT_V6 is enabled staticaly, "
-			"so MMU PT_V6 cannot be reset\n");
-		boot_mmu_pt_v6 = true;
-	}
-#endif	/* ! CONFIG_MMU_PT_V6 */
-	mach->mmu_pt_v6 = boot_mmu_pt_v6;
 	return 0;
 }
 boot_param("reset_pt_v6", boot_reset_mmu_pt_v6);
 
 static int __init boot_set_mmu_separate_pt(char *cmd)
 {
-	machdep_t *mach = &boot_machine;
+#ifdef CONFIG_E2K_MACHINE
+	do_boot_printk("CONFIG_E2K_MACHINE is enabled so MMU SEPARATE_PT cannot be set\n");
+#else
+	boot_machine.mmu_separate_pt = true;
+#endif
 
-#ifndef	CONFIG_MMU_SEP_VIRT_SPACE
-	do_boot_printk("CONFIG_MMU_SEP_VIRT_SPACE is disabled, "
-		"so MMU SEPARATE_PT cannot be set\n");
-	mach->mmu_separate_pt = false;
-#else	/* CONFIG_MMU_SEP_VIRT_SPACE */
-	if (!mach->mmu_separate_pt) {
-		do_boot_printk("MMU doesn't support separate page tables mode, "
-			"so MMU SEPARATE_PT cannot be set\n");
-	}
-#endif	/* ! CONFIG_MMU_SEP_VIRT_SPACE */
 	return 0;
 }
 boot_param("set_sep_pt", boot_set_mmu_separate_pt);
 
 static int __init boot_reset_mmu_separate_pt(char *cmd)
 {
-	machdep_t *mach = &boot_machine;
+#ifdef CONFIG_E2K_MACHINE
+	do_boot_printk("CONFIG_E2K_MACHINE is enabled so MMU SEPARATE_PT cannot be reset\n");
+#else
+	boot_machine.mmu_separate_pt = false;
+#endif
 
-#ifndef	CONFIG_MMU_SEP_VIRT_SPACE
-	do_boot_printk("CONFIG_MMU_SEP_VIRT_SPACE is disabled, "
-		"so MMU SEPARATE_PT always is OFF\n");
-	mach->mmu_separate_pt = false;
-#else	/* CONFIG_MMU_SEP_VIRT_SPACE */
-# ifdef CONFIG_DYNAMIC_SEP_VIRT_SPACE
-	mach->mmu_separate_pt = false;
-# else /* ! CONFIG_DYNAMIC_SEP_VIRT_SPACE */
-	if (!mach->mmu_separate_pt) {
-		/* MMU does not support this mode */
-	} else {
-		do_boot_printk("CONFIG_MMU_SEP_VIRT_SPACE is enabled "
-			"staticaly, so MMU SEPARATE_PT cannot be reset\n");
-	}
-# endif	/* CONFIG_DYNAMIC_SEP_VIRT_SPACE */
-#endif	/* ! CONFIG_MMU_SEP_VIRT_SPACE */
 	return 0;
 }
 boot_param("reset_sep_pt", boot_reset_mmu_separate_pt);
@@ -501,7 +398,7 @@ bool __init boot_has_node_low_memory(int node, boot_info_t *bootblock)
 	return false;
 }
 
-bool __init boot_has_node_high_memory(int node, boot_info_t *bootblock)
+bool __init_recv boot_has_node_high_memory(int node, boot_info_t *bootblock)
 {
 	bank_info_t *bank_info;
 	int banks_ind = 0;
@@ -537,7 +434,7 @@ bool __init_recv boot_has_high_memory(boot_info_t *bootblock)
 	return false;
 }
 
-static inline short __init
+static short __init_recv
 boot_get_free_phys_bank(int node, node_phys_mem_t *node_mem)
 {
 	e2k_phys_bank_t	*phys_banks;
@@ -563,7 +460,7 @@ boot_get_free_phys_bank(int node, node_phys_mem_t *node_mem)
 	return -1;
 }
 
-static inline short __init
+static short __init_recv
 boot_find_node_phys_bank(int node, node_phys_mem_t *node_mem, short bank)
 {
 	e2k_phys_bank_t *cur_phys_bank;
@@ -823,7 +720,7 @@ short __init boot_create_new_phys_bank(int node, node_phys_mem_t *node_mem,
 /* should return source bank index in the list of node banks */
 /* after deleting the bank from list its index should be -1 */
 /* as flag of free entry */
-static inline short __init
+static inline short __init_recv
 boot_delete_phys_bank(int node_id, node_phys_mem_t *node_mem,
 			short bank, e2k_phys_bank_t *phys_bank)
 {
@@ -1491,7 +1388,6 @@ boot_native_loader_probe_memory(node_phys_mem_t *nodes_phys_mem,
 	} else if (bootblock->signature == X86BOOT_SIGNATURE) {
 		bank_num = boot_biosx86_probe_memory(nodes_phys_mem, bootblock);
 	} else {
-		BOOT_BUG_POINT("boot_native_loader_probe_memory");
 		BOOT_BUG("Unknown type of Boot information structure");
 	}
 	return bank_num;
@@ -1768,7 +1664,6 @@ boot_native_get_bootblock_size(boot_info_t *bblock)
 	} else if (bblock->signature == X86BOOT_SIGNATURE) {
 		area_size = sizeof(bootblock_struct_t);
 	} else {
-		BOOT_BUG_POINT("boot_native_get_bootblock_size");
 		BOOT_BUG("Unknown type of Boot information structure");
 	}
 	return area_size;
@@ -1779,20 +1674,13 @@ boot_reserve_0_phys_page(bool bsp, boot_info_t *boot_info)
 {
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	int		ret;
 
 	if (BOOT_IS_BSP(bsp)) {
 		area_base = 0;
 		area_size = PAGE_SIZE;
-		ret = boot_reserve_physmem(area_base, area_size,
-				hw_reserved_mem_type,
-				BOOT_NOT_IGNORE_BUSY_BANK |
-				BOOT_IGNORE_BANK_NOT_FOUND);
-		if (ret != 0) {
-			BOOT_BUG("Could not reserve 0-page area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size, PAGE_SIZE);
-		}
+		boot_reserve_physmem("0-page", area_base, area_size,
+			hw_reserved_mem_type,
+			BOOT_NOT_IGNORE_BUSY_BANK | BOOT_IGNORE_BANK_NOT_FOUND);
 		boot_fast_memset((void *)0, 0x00, PAGE_SIZE);
 		boot_printk("The 0-page reserved area: "
 			"base addr 0x%lx size 0x%lx page size 0x%x\n",
@@ -1800,306 +1688,165 @@ boot_reserve_0_phys_page(bool bsp, boot_info_t *boot_info)
 	}
 }
 
+/*
+ * Reserve kernel image 'text/data/bss' segments.
+ */
 void __init
 boot_reserve_kernel_image(bool bsp, boot_info_t *boot_info)
 {
-	e2k_addr_t	area_base;
-	e2k_size_t	area_size;
-	oscud_struct_t	OSCUD = { { {0} }, { {0} } };
-	osgd_struct_t	OSGD  = { { {0} }, { {0} } };
-	int		ret;
+	e2k_addr_t base;
+	e2k_size_t size, delta;
 
-	/*
-	 * Reserve kernel image 'text/data/bss' segments.
-	 * 'OSCUD' & 'OSGD' register-pointers describe these areas.
-	 * 'text' and 'data/bss' segments can intersect or one can include
-	 * other.
-	 */
+	if (!BOOT_IS_BSP(bsp))
+		return;
 
-	if (BOOT_IS_BSP(bsp)) {
-		boot_read_OSCUD_reg(&OSCUD);
-		area_base = OSCUD.OSCUD_base;
-		area_size = OSCUD.OSCUD_size;
-		ret = boot_reserve_physmem(area_base, area_size,
-				kernel_image_mem_type,
-				BOOT_NOT_IGNORE_BUSY_BANK |
-					BOOT_CAN_BE_INTERSECTIONS);
-		if (ret != 0) {
-			BOOT_BUG("Could not reserve kernel 'text' segment: "
-				"base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size,
-				BOOT_E2K_KERNEL_PAGE_SIZE);
-		}
-		boot_text_phys_base = area_base;
-		boot_text_size = area_size;
-		boot_printk("The kernel 'text' segment: base 0x%lx "
-			"size 0x%lx page size 0x%x\n",
-			boot_text_phys_base, boot_text_size,
-			BOOT_E2K_KERNEL_PAGE_SIZE);
+	delta = (unsigned long) boot_va_to_pa(_start) - (unsigned long) _start;
 
-		area_base = (e2k_addr_t)boot_vp_to_pp(
-						&__start_ro_after_init);
-		area_size = (e2k_addr_t)__end_ro_after_init -
-			    (e2k_addr_t)__start_ro_after_init;
-		area_size = _PAGE_ALIGN_DOWN(area_size, PAGE_SIZE);
-		if (area_size != 0) {
-			ret = boot_reserve_physmem(area_base, area_size,
-					kernel_image_mem_type,
-					BOOT_IGNORE_BUSY_BANK |
-						BOOT_CAN_BE_INTERSECTIONS);
-			if (ret) {
-				BOOT_BUG("Could not reserve kernel "
-					"'.data.ro_after_init' segment: "
-					"base addr 0x%lx size 0x%lx "
-					"page size 0x%x",
-					area_base, area_size, PAGE_SIZE);
-			}
-			boot_printk("The kernel '.data.ro_after_init' segment: "
-				"base 0x%lx size 0x%lx page size 0x%x\n",
-				area_base, area_size, PAGE_SIZE);
-		} else {
-			boot_printk("The kernel '.data.ro_after_init' segment "
-				"is empty\n");
-		}
+	base = (unsigned long) _stext + delta;
+	size = (unsigned long) (_etext - _stext);
+	boot_reserve_physmem(".text", base, size, kernel_image_mem_type,
+			BOOT_NOT_IGNORE_BUSY_BANK);
+	boot_text_phys_base = base;
+	boot_text_size = size;
 
-#ifndef CONFIG_NUMA
-		area_base = (u64) boot_vp_to_pp((void *) empty_zero_page);
-		area_size = PAGE_SIZE;
-		ret = boot_reserve_physmem(area_base, area_size,
-			      kernel_image_mem_type, BOOT_NOT_IGNORE_BUSY_BANK);
-		if (ret) {
-			BOOT_BUG("Could not reserve kernel 'zero_page' segment: base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size, PAGE_SIZE);
-		}
-#endif
+	base = (unsigned long) __start_rodata_notes + delta;
+	size = (unsigned long) (__end_rodata_notes - __start_rodata_notes);
+	boot_reserve_physmem(".rodata/.notes", base, size,
+			kernel_image_mem_type, BOOT_NOT_IGNORE_BUSY_BANK);
 
-		boot_read_OSGD_reg(&OSGD);
-		area_base = OSGD.OSGD_base;
-		area_size = OSGD.OSGD_size;
-		ret = boot_reserve_physmem(area_base, area_size,
-				kernel_image_mem_type,
-				BOOT_IGNORE_BUSY_BANK |
-					BOOT_CAN_BE_INTERSECTIONS);
-		if (ret != 0) {
-			BOOT_BUG("Could not reserve kernel 'data/bss' "
-				"segments: base addr 0x%lx size 0x%lx "
-				"page size 0x%x",
-				area_base, area_size,
-				BOOT_E2K_KERNEL_PAGE_SIZE);
-		}
-		boot_data_phys_base = area_base;
-		boot_data_size = area_size;
-		boot_printk("The kernel 'data/bss' segment: "
-			"base addr 0x%lx size 0x%lx page size 0x%x\n",
-			area_base, area_size, BOOT_E2K_KERNEL_PAGE_SIZE);
+	base = (unsigned long) __special_data_begin + delta;
+	size = (unsigned long) (__special_data_end - __special_data_begin);
+	boot_reserve_physmem(".nodedata/.ro_after_init", base, size,
+			kernel_image_mem_type, BOOT_NOT_IGNORE_BUSY_BANK);
 
-		area_base = (e2k_addr_t)boot_vp_to_pp(&__init_begin);
-		area_size = (e2k_addr_t) (__init_end - __init_begin);
-		ret = boot_reserve_physmem(area_base, area_size,
-				kernel_image_mem_type,
-				BOOT_IGNORE_BUSY_BANK |
-					BOOT_CAN_BE_INTERSECTIONS);
-		if (ret) {
-			BOOT_BUG("Could not reserve kernel 'init' segment: "
-				"base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size, PAGE_SIZE);
-		}
-		boot_printk("The kernel 'init' segment: base 0x%lx "
-			"size 0x%lx page size 0x%x\n",
-			area_base, area_size, PAGE_SIZE);
-	}
+	base = (unsigned long) __common_data_begin + delta;
+	size = (unsigned long) (__common_data_end - __common_data_begin);
+	boot_reserve_physmem(".data/.bss", base, size, kernel_image_mem_type,
+			BOOT_NOT_IGNORE_BUSY_BANK);
+	boot_data_phys_base = base;
+	boot_data_size = size;
+
+	base = (unsigned long) __init_begin + delta;
+	size = (unsigned long) (__init_end - __init_begin);
+	boot_reserve_physmem(".init", base, size, kernel_image_mem_type,
+			BOOT_NOT_IGNORE_BUSY_BANK);
 }
  
 void __init boot_reserve_stacks(boot_info_t *boot_info)
 {
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	e2k_addr_t	area_offset;
-	psp_struct_t	PSP = { { {0} }, { {0} } };
-	pcsp_struct_t	PCSP  = { { {0} }, { {0} } };
-	e2k_usbr_t	USBR = { {0} };
-	usd_struct_t	USD  = { { {0} }, { {0} } };
-	int		ret;
+	psp_struct_t	PSP;
+	pcsp_struct_t	PCSP;
+	e2k_usbr_t	USBR;
+	usd_struct_t	USD;
 
 	/*
 	 * Reserve memory of boot-time hardware procedures stack (PS).
 	 * 'PSP' register-pointer describes this area.
 	 */
-
 	boot_read_PSP_reg(&PSP);
 	area_base = PSP.PSP_base;
 	area_size = PSP.PSP_size;
-	ret = boot_reserve_physmem(area_base, area_size, boot_loader_mem_type,
-			BOOT_CAN_BE_INTERSECTIONS);
-	if (ret != 0) {
-		BOOT_BUG("Could not reserve kernel boot-time procedure stack: "
-			"base addr 0x%lx size 0x%lx page size 0x%x",
-			area_base, area_size + E2K_KERNEL_PS_PAGE_SIZE,
-			E2K_KERNEL_PS_PAGE_SIZE);
-	}
+	boot_reserve_physmem("procedure stack", area_base, area_size,
+			boot_loader_mem_type, BOOT_CAN_BE_INTERSECTIONS);
 	boot_boot_ps_phys_base = area_base;
 	boot_boot_ps_size = area_size;
-	boot_printk("The kernel boot-time procedures stack: "
-		"base addr 0x%lx size 0x%lx page size 0x%x\n",
-		area_base, area_size + E2K_KERNEL_PS_PAGE_SIZE,
-		E2K_KERNEL_PS_PAGE_SIZE);
 
 	/*
 	 * Reserve memory of boot-time hardware procedure chain stack (PCS).
 	 * 'PCSP' register-pointer describes this area.
 	 */
-
 	boot_read_PCSP_reg(&PCSP);
 	area_base = PCSP.PCSP_base;
 	area_size = PCSP.PCSP_size;
-	ret = boot_reserve_physmem(area_base, area_size, boot_loader_mem_type,
-			BOOT_CAN_BE_INTERSECTIONS);
-	if (ret != 0) {
-		BOOT_BUG("Could not reserve kernel boot-time procedure chain "
-			"stack: base addr 0x%lx size 0x%lx page size 0x%x",
-			area_base, area_size + E2K_KERNEL_PCS_PAGE_SIZE,
-			E2K_KERNEL_PCS_PAGE_SIZE);
-	}
+	boot_reserve_physmem("chain stack", area_base, area_size,
+			boot_loader_mem_type, BOOT_CAN_BE_INTERSECTIONS);
 	boot_boot_pcs_phys_base = area_base;
 	boot_boot_pcs_size = area_size;
-	boot_printk("The kernel boot-time procedure chain stack: "
-		"base addr 0x%lx size 0x%lx page size 0x%x\n",
-		area_base, area_size + E2K_KERNEL_PCS_PAGE_SIZE,
-		E2K_KERNEL_PCS_PAGE_SIZE);
 
 	/*
 	 * Reserve memory of boot-time kernel stack (user stack) (US).
 	 * 'SBR + USD' registers describe this area.
 	 */
-
 	USBR = boot_read_USBR_reg();
-	area_base = USBR.USBR_base;
 	boot_read_USD_reg(&USD);
-	boot_printk("The kernel boot-time data stack: "
-		"USBR_base 0x%lx USD_base 0x%lx USD_size 0x%lx\n",
-		USBR.USBR_base, USD.USD_base, USD.USD_size);
-	area_size = area_base - USD.USD_base;
-	area_offset = USD.USD_size;
-	area_size += area_offset;
-	area_base -= area_size;
-	ret = boot_reserve_physmem(area_base, area_size,
-			boot_loader_mem_type,
-			BOOT_CAN_BE_INTERSECTIONS);
-	if (ret != 0) {
-		BOOT_BUG("Could not reserve kernel boot-time data stack: "
-			"base addr 0x%lx size 0x%lx USD offset 0x%lx page "
-			"size 0x%x",
-			area_base, area_size, area_offset,
-			E2K_KERNEL_US_PAGE_SIZE);
-	}
+	boot_printk("The kernel boot-time data stack: USBR_base 0x%lx USD_base 0x%lx USD_size 0x%lx\n",
+			USBR.USBR_base, USD.USD_base, USD.USD_size);
+	area_base = USD.USD_base - USD.USD_size;
+	area_size = USBR.USBR_base - area_base;
+	boot_reserve_physmem("data stack", area_base, area_size,
+			boot_loader_mem_type, BOOT_CAN_BE_INTERSECTIONS);
 	boot_boot_stack_phys_base = area_base;
-	boot_boot_stack_phys_offset = area_offset;
+	boot_boot_stack_phys_offset = USD.USD_size;
 	boot_boot_stack_size = area_size;
-	boot_printk("The kernel boot-time data stack: "
-		"base addr 0x%lx size 0x%lx USD offset 0x%lx page size 0x%x\n",
-		area_base, area_size, area_offset, E2K_KERNEL_US_PAGE_SIZE);
 }
 
 static	void __init
 boot_reserve_low_io_mem(bool bsp)
 {
-	e2k_addr_t	area_base;
-	e2k_size_t	area_size;
-	int		ret;
-
 	/*
 	 * Reserve memory of low VGAMEM area.
 	 */
-
 	if (BOOT_IS_BSP(bsp)) {
-		area_base = VGA_VRAM_PHYS_BASE;		/* VGA ... */
-		area_size = VGA_VRAM_SIZE;
-		ret = boot_delete_physmem(area_base, area_size);
-		if (ret != 0) {
-			BOOT_BUG("Could not delete low VGAMEM area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size, E2K_X86_HW_PAGE_SIZE);
-		}
+		e2k_addr_t area_base = VGA_VRAM_PHYS_BASE;	/* VGA ... */
+		e2k_size_t area_size = VGA_VRAM_SIZE;
+		boot_delete_physmem("Deleted low VGAMEM", area_base, area_size);
 		boot_x86_hw_phys_base = area_base;
 		boot_x86_hw_size      = area_size;
-		boot_printk("The low VGAMEM deleted area: "
-			"base addr 0x%lx size 0x%lx page size 0x%x\n",
-			area_base, area_size, E2K_X86_HW_PAGE_SIZE);
 	}
 }
 
+/*
+ * Reserve boot information records.
+ */
 void __init boot_reserve_bootblock(bool bsp, boot_info_t *boot_info)
 {
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	int		ret;
+
+	if (!BOOT_IS_BSP(bsp))
+		return;
+
+	area_base = boot_bootinfo_phys_base;	/* cmdline ... */
+	area_size = 0;
+	area_size = boot_get_bootblock_size(boot_info);
+	boot_reserve_physmem("bootblock", area_base, area_size,
+			boot_loader_mem_type, BOOT_CAN_BE_INTERSECTIONS);
+
+	boot_bootinfo_phys_base = area_base;
+	boot_bootinfo_size      = area_size;
+
+	boot_printk("The BOOTINFO reserved area: base addr 0x%lx size 0x%lx page size 0x%x\n",
+		area_base, area_size, E2K_BOOTINFO_PAGE_SIZE);
 
 	/*
-	 * Reserve boot information records.
+	 * Reserve the needed areas from boot information records.
 	 */
-
-	if (BOOT_IS_BSP(bsp)) {
-		area_base = boot_bootinfo_phys_base;	/* cmdline ... */
-		area_size = 0;
-		area_size = boot_get_bootblock_size(boot_info);
-		ret = boot_reserve_physmem(area_base, area_size,
-			boot_loader_mem_type,
-			BOOT_CAN_BE_INTERSECTIONS);
-		if (ret != 0) {
-			BOOT_BUG("Could not reserve BOOTINFO area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size, E2K_BOOTINFO_PAGE_SIZE);
-		}
-
-		boot_bootinfo_phys_base = area_base;
-		boot_bootinfo_size      = area_size;
-
-		boot_printk("The BOOTINFO reserved area: "
-			"base addr 0x%lx size 0x%lx page size 0x%x\n",
-			area_base, area_size, E2K_BOOTINFO_PAGE_SIZE);
-
-		/*
-		 * Reserve the needed areas from boot information records.
-		 */
-
-		boot_reserve_bootinfo_areas(boot_info);
-	}
+	boot_reserve_bootinfo_areas(boot_info);
 }
 
+/*
+ * Reserve memory used by BOOT (e2k boot-loader)
+ */
 static	void __init
 boot_reserve_boot_memory(bool bsp, boot_info_t *boot_info)
 {
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
 	int		bank;
-	int		ret;
 
-	/*
-	 * Reserve memory used by BOOT (e2k boot-loader)
-	 */
+	if (!BOOT_IS_BSP(bsp))
+		return;
 
-	if (BOOT_IS_BSP(bsp)) {
-		for (bank = 0; bank < boot_info->num_of_busy; bank++) {
-			bank_info_t *busy_area;
-			busy_area = &boot_info->busy[bank];
-			area_base = busy_area->address;
-			area_size = busy_area->size;
-			ret = boot_reserve_physmem(area_base,
-				area_size,
-				boot_loader_mem_type,
-				BOOT_IGNORE_BUSY_BANK |
-					BOOT_CAN_BE_INTERSECTIONS);
-			if (ret != 0)
-				BOOT_BUG("Could not reserve BIOS data "
-					"area #%d : base addr 0x%lx size 0x%lx "
-					"page size 0x%x",
-					bank, area_base, area_size,
-					PAGE_SIZE);
-			boot_printk("The BIOS data reserved area #%d : "
-				"base addr 0x%lx size 0x%lx page size "
-				"0x%x\n",
-				bank, area_base, area_size, PAGE_SIZE);
-		}
+	for (bank = 0; bank < boot_info->num_of_busy; bank++) {
+		bank_info_t *busy_area;
+		busy_area = &boot_info->busy[bank];
+		area_base = busy_area->address;
+		area_size = busy_area->size;
+		boot_reserve_physmem("BIOS data", area_base, area_size,
+			     boot_loader_mem_type,
+			     BOOT_IGNORE_BUSY_BANK | BOOT_CAN_BE_INTERSECTIONS);
 	}
 }
 
@@ -2139,10 +1886,10 @@ boot_native_reserve_all_bootmem(bool bsp, boot_info_t *boot_info)
 	/*
 	 * SYNCHRONIZATION POINT #0.1
 	 * At this point all processors should complete reservation of
-	 * themself used memory.
+	 * memory used by themselves.
 	 * Now boot loader busy area can be reserved, but only after
-	 * this synchronization, because of this area can include all
-	 * other before reserved areas (bug 101002)
+	 * this synchronization, because this area might include all
+	 * other already reserved areas (bug 101002)
 	 */
 	boot_sync_all_processors();
 
@@ -2167,7 +1914,6 @@ boot_reserve_mp_table(boot_info_t *bblock)
 {
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	int		ret;
 	struct intel_mp_floating *mpf;
 
 	if (bblock->mp_table_base == (e2k_addr_t)0UL)
@@ -2176,23 +1922,13 @@ boot_reserve_mp_table(boot_info_t *bblock)
 	/*
 	 * MP floating specification table
 	 */
-
 	area_base = bblock->mp_table_base;
 	area_size = E2K_MPT_PAGE_SIZE;
-	ret = boot_reserve_physmem(area_base, area_size,
+	boot_reserve_physmem("MP floating table", area_base, area_size,
 			boot_loader_mem_type,
-			BOOT_IGNORE_BUSY_BANK |
-				BOOT_CAN_BE_INTERSECTIONS);
-	if (ret != 0) {
-		BOOT_BUG("Could not reserve MP floating table area: "
-			"base addr 0x%lx size 0x%lx page size 0x%x",
-			area_base, area_size, E2K_MPT_PAGE_SIZE);
-	}
+			BOOT_IGNORE_BUSY_BANK | BOOT_CAN_BE_INTERSECTIONS);
 	boot_mpf_phys_base = area_base;
 	boot_mpf_size = area_size;
-	boot_printk("The MP floating table: "
-		"base addr 0x%lx size 0x%lx page size 0x%x\n",
-		area_base, area_size, E2K_MPT_PAGE_SIZE);
 
 	mpf = (struct intel_mp_floating *)bblock->mp_table_base;
 	if (DEBUG_BOOT_MODE) {
@@ -2205,25 +1941,14 @@ boot_reserve_mp_table(boot_info_t *bblock)
 	/*
 	 * MP configuration table
 	 */
-
 	if (mpf->mpf_physptr != (e2k_addr_t)0UL) {
 		area_base = mpf->mpf_physptr;
 		area_size = E2K_MPT_PAGE_SIZE;
-		ret = boot_reserve_physmem(area_base, area_size,
-				boot_loader_mem_type,
-				BOOT_IGNORE_BUSY_BANK |
-					BOOT_CAN_BE_INTERSECTIONS);
-		if (ret != 0) {
-			BOOT_BUG("Could not reserve MP configuration table "
-				"area: base addr 0x%lx size 0x%lx "
-				"page size 0x%x",
-				area_base, area_size, E2K_MPT_PAGE_SIZE);
-		}
+		boot_reserve_physmem("MP configuration table", area_base,
+			area_size, boot_loader_mem_type,
+			BOOT_IGNORE_BUSY_BANK | BOOT_CAN_BE_INTERSECTIONS);
 		boot_mpc_phys_base = area_base;
 		boot_mpc_size = area_size;
-		boot_printk("The MP configuration table: "
-			"base addr 0x%lx size 0x%lx page size 0x%x\n",
-			area_base, area_size, E2K_MPT_PAGE_SIZE);
 	} else {
 		boot_mpc_size = 0;
 		boot_printk("The MP configuration table: is absent\n");
@@ -2244,27 +1969,17 @@ boot_reserve_bootinfo_areas(boot_info_t *boot_info)
 #ifdef CONFIG_BLK_DEV_INITRD
 	e2k_addr_t	area_base;
 	e2k_size_t	area_size;
-	int		ret;
 #endif	/* CONFIG_BLK_DEV_INITRD */
 
 #ifdef CONFIG_BLK_DEV_INITRD
-
 	/*
 	 * Reserve memory of initial ramdisk (initrd).
 	 */
-
-	area_base = boot_info->ramdisk_base;	/* INITRD_BASE and */
-	area_size = boot_info->ramdisk_size;	/* INITRD_SIZE */
-						/* comes from Loader */
+	area_base = boot_info->ramdisk_base; /* INITRD_BASE and INITRD_SIZE */
+	area_size = boot_info->ramdisk_size; /* come from Loader */
 	if (area_size) {
-		ret = boot_reserve_physmem(area_base, area_size,
-				boot_loader_mem_type,
-				BOOT_CAN_BE_INTERSECTIONS);
-		if (ret != 0) {
-			BOOT_BUG("Could not reserve initial ramdisk area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x",
-				area_base, area_size, E2K_INITRD_PAGE_SIZE);
-		}
+		boot_reserve_physmem("initrd", area_base, area_size,
+			boot_loader_mem_type, BOOT_CAN_BE_INTERSECTIONS);
 		boot_initrd_phys_base = area_base;
 		boot_initrd_size = area_size;
 		boot_printk("The initial ramdisk area: "
@@ -2276,184 +1991,13 @@ boot_reserve_bootinfo_areas(boot_info_t *boot_info)
 #endif	/* CONFIG_BLK_DEV_INITRD */
 
 	/*
-	 * Reserv MP configuration table
+	 * Reserve MP configuration table
 	 */
-
 #ifdef	CONFIG_L_IO_APIC
 	if (boot_info->mp_table_base != (e2k_addr_t)0UL)
 		boot_reserve_mp_table(boot_info);
 #endif	/* CONFIG_L_IO_APIC */
 }
-
-#ifdef	CONFIG_NUMA
-static void __init
-boot_node_set_dup_kernel(void *dup_start)
-{
-	e2k_addr_t data_offset;
-
-	if (dup_start == (void *)-1)
-		BOOT_BUG("Invalid or was not allocated duplicated "
-			"kernel base\n");
-	boot_kernel_phys_base = (e2k_addr_t)dup_start;
-	DebugNUMA("boot_node_set_dup_kernel() set kernel base to 0x%lx\n",
-		(e2k_addr_t)dup_start);
-
-	boot_text_phys_base = (e2k_addr_t)dup_start;
-	boot_data_phys_base = boot_node_data_phys_base(BOOT_BS_NODE_ID);
-	boot_data_size = boot_node_data_size(BOOT_BS_NODE_ID);
-	data_offset = (e2k_addr_t)__node_data_start - KERNEL_BASE;
-	boot_dup_data_phys_base = (e2k_addr_t)dup_start + data_offset;
-}
-
-static void __init
-boot_node_duplicate_kernel(boot_info_t *bootblock)
-{
-	e2k_addr_t	area_base;
-	e2k_addr_t	area_end;
-	e2k_size_t	area_size;
-	e2k_size_t	data_offset;
-	void		*dup_start;
-	int		node_id = boot_numa_node_id();
-
-	if (BOOT_TEST_AND_SET_NODE_LOCK(boot_node_kernel_dup_lock,
-					boot_node_kernel_duplicated)) {
-		DebugNUMA("boot_node_duplicate_kernel() kernel was "
-			"duplicated already on node\n");
-		return;
-	}
-	area_base = boot_read_OSCUD_lo_reg().OSCUD_lo_base;
-	area_end = (e2k_addr_t)boot_vp_to_pp(&__node_data_end);
-	area_end = _PAGE_ALIGN_DOWN(area_end, PAGE_SIZE);
-	if (area_end <= area_base)
-		BOOT_BUG("Kernel node duplicate area end 0x%lx <= start 0x%lx",
-				area_end, area_base);
-	area_size = area_end - area_base;
-	data_offset = (e2k_addr_t)boot_vp_to_pp(&__node_data_start) -
-			area_base;
-	if (data_offset > area_size)
-		BOOT_BUG("Kernel node duplicate data offset 0x%lx > all area size 0x%lx",
-				data_offset, area_size);
-	boot_dup_data_size = area_size - data_offset;
-	if (!BOOT_IS_BS_NODE) {
-		dup_start = boot_the_node_try_alloc_pages(node_id,
-					area_size, BOOT_E2K_KERNEL_PAGE_SIZE,
-					kernel_image_mem_type);
-		boot_kernel_phys_base = (e2k_addr_t)dup_start;
-		boot_text_size = boot_node_text_size(BOOT_BS_NODE_ID);
-		if (dup_start == (void *)-1) {
-			BOOT_WARNING("Could not allocate memory on the node #%d to duplicate kernel text, size 0x%lx",
-				node_id, area_size);
-		} else {
-			boot_fast_memcpy(dup_start, (char *)area_base,
-						area_size);
-			boot_atomic_inc(&boot_early_node_has_dup_kernel_num);
-			DebugNUMA("boot_node_duplicate_kernel() allocated "
-				"area and duplicate to 0x%lx, size 0x%lx\n",
-				(e2k_addr_t)dup_start, area_size);
-			boot_node_set_dup_kernel(dup_start);
-		}
-	} else {
-		dup_start = (void *)boot_kernel_phys_base;
-		DebugNUMA("boot_node_duplicate_kernel() node "
-			"is BS NODE area 0x%lx, size 0x%lx\n",
-			(e2k_addr_t)dup_start, area_size);
-		boot_dup_data_phys_base = (e2k_addr_t)dup_start + data_offset;
-	}
-	BOOT_NODE_UNLOCK(boot_node_kernel_dup_lock,
-				boot_node_kernel_duplicated);
-}
-
-static void __init
-boot_node_set_duplicated_mode(void)
-{
-	int	has_not_dup = 0;
-	int	node_id = boot_numa_node_id();
-	int	dup_nid;
-	int	nid;
-	int	dup_nodes_num = 0;
-
-	if (BOOT_TEST_AND_SET_NODE_LOCK(boot_node_kernel_dup_lock,
-					boot_node_set_kernel_duplicated)) {
-		DebugNUMA("boot_node_set_duplicated_mode() kernel was "
-			"set duplicated mode already on node\n");
-		return;
-	}
-	if (!BOOT_EARLY_THE_NODE_HAS_DUP_KERNEL(node_id)) {
-		has_not_dup = 1;
-		dup_nid = boot_early_get_next_node_has_dup_kernel(node_id);
-		if (dup_nid >= MAX_NUMNODES || dup_nid < 0)
-			BOOT_BUG("Could not find node with duplicated kernel to share it\n");
-		DebugNUMA("boot_node_set_duplicated_mode() node has not "
-			"own copy of kernel image and will use NODE #%d "
-			"image and page table\n",
-			dup_nid);
-	} else {
-		dup_nid = node_id;
-		DebugNUMA("boot_node_set_duplicated_mode() node has own "
-			"copy of kernel image from 0x%lx\n",
-			boot_kernel_phys_base);
-	}
-	if (BOOT_IS_BS_NODE) {
-		dup_nodes_num = boot_atomic_read(
-					&boot_early_node_has_dup_kernel_num);
-	}
-	
-	boot_for_each_node_has_online_mem(nid) {
-		if (!BOOT_EARLY_THE_NODE_HAS_DUP_KERNEL(nid))
-			continue;
-		boot_the_node_dup_kernel_nid(nid)[node_id] = dup_nid;
-		DebugNUMA("boot_node_set_duplicated_mode() set "
-			"duplicated node id 0x%px to #%d on node #%d\n",
-			&(boot_the_node_dup_kernel_nid(nid)[node_id]),
-			boot_the_node_dup_kernel_nid(nid)[node_id], nid);
-		if (!has_not_dup) {
-			boot_the_node_set_has_dup_kernel(nid, node_id);
-		}
-		if (BOOT_IS_BS_NODE) {
-			boot_atomic_set(&boot_the_node_has_dup_kernel_num(nid),
-							dup_nodes_num);
-			DebugNUMA("boot_node_set_duplicated_mode() set "
-				"duplicated nodes number 0x%px to %d on "
-				"node #%d\n",
-				&(boot_the_node_has_dup_kernel_num(nid)),
-				boot_the_node_has_dup_kernel_num(nid), nid);
-		}
-		boot_the_node_pg_dir(nid)[node_id] =
-			__boot_va(boot_vpa_to_pa(
-				(e2k_addr_t)boot_the_node_root_pt(dup_nid)));
-		DebugNUMA("boot_node_set_duplicated_mode() set "
-			"pg_dir pointer 0x%px to 0x%lx on node #%d\n",
-			&(boot_the_node_pg_dir(nid)[node_id]),
-			boot_the_node_pg_dir(nid)[node_id], nid);
-	}
-	BOOT_NODE_UNLOCK(boot_node_kernel_dup_lock,
-				boot_node_set_kernel_duplicated);
-}
-
-static void __init
-boot_node_set_kernel_base(void)
-{
-	int dup_nid;
-
-	if (BOOT_EARLY_NODE_HAS_DUP_KERNEL()) {
-		DebugNUMA("boot_node_set_kernel_base() node has own copy and "
-			"set already kernel base of copy\n");
-		return;
-	}
-	if (BOOT_TEST_AND_SET_NODE_LOCK(boot_node_kernel_dup_lock,
-					boot_node_kernel_base_is_set)) {
-		DebugNUMA("boot_node_set_kernel_base() kernel base was "
-			"set already on node\n");
-		return;
-	}
-	dup_nid = boot_my_node_dup_kernel_nid;
-	if (dup_nid >= MAX_NUMNODES || dup_nid < 0)
-		BOOT_BUG("Invalid duplicated kernel node id %d\n", dup_nid);
-	boot_node_set_dup_kernel((void *)boot_node_kernel_phys_base(dup_nid));
-	BOOT_NODE_UNLOCK(boot_node_kernel_dup_lock,
-				boot_node_kernel_base_is_set);
-}
-#endif	/* CONFIG_NUMA */
 
 static int __init
 boot_is_pfn_valid(e2k_size_t pfn)
@@ -2506,467 +2050,58 @@ boot_is_pfn_valid(e2k_size_t pfn)
  * then it should be added to the list of already known ones.
  */
 
+/*
+ * Map the kernel image 'text/data/bss' segments.
+ * 'text' and 'data/bss' segments can intersect or one can include
+ * other.
+ */
 void __init boot_map_kernel_image(bool populate_on_host)
 {
-	e2k_addr_t	kernel_base;
-	e2k_addr_t	bs_text_phys_base;
-	e2k_addr_t	text_phys_base;
-	e2k_addr_t	text_virt_base;
-	e2k_size_t	text_size;
-	e2k_addr_t	init_base;
-	e2k_size_t	init_size;
-#ifdef	CONFIG_NUMA
-	e2k_addr_t	dup_data_phys_base;
-	e2k_addr_t	dup_data_virt_base;
-	e2k_size_t	dup_data_size;
-	e2k_addr_t	rem_text_phys_base = 0;
-	e2k_addr_t	rem_text_virt_base = 0;
-	e2k_size_t	rem_text_size;
-	e2k_addr_t	rem_text_end;
-	pgprot_t	rem_text_prot;
-#endif	/* CONFIG_NUMA */
-#if defined(CONFIG_NUMA)
-	e2k_size_t	map_size;
-#endif	/* CONFIG_NUMA */
-	e2k_addr_t	data_phys_base;
-	e2k_addr_t	data_virt_base;
-	e2k_size_t	data_size;
-	e2k_addr_t	area_base;
-	e2k_addr_t	area_offset;
-	e2k_size_t	area_size;
-	e2k_addr_t	area_virt_base;
-	int		is_bs_node = BOOT_IS_BS_NODE;
-	int		ret;
+	e2k_addr_t virt_base;
+	e2k_size_t size, delta;
 
-	/*
-	 * Map the kernel image 'text/data/bss' segments.
-	 * 'text' and 'data/bss' segments can intersect or one can include
-	 * other.
-	 */
+	/* Kernel image duplication on NUMA is done later
+	 * (see duplicate_kernel_image()) */
 
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_image_mapped)) {
-#ifdef CONFIG_NUMA
-		if (!BOOT_EARLY_THERE_IS_DUP_KERNEL && !is_bs_node) {
-			DebugNUMA("boot_map_kernel_image() node "
-				"has not own page table and will use "
-				"BS image mapping\n");
-			goto no_mapping;
-		} else {
-			DebugNUMA("boot_map_kernel_image() will map kernel "
-				"image\n");
-		}
-#endif /* CONFIG_NUMA */
-		kernel_base = boot_kernel_phys_base;
-		text_phys_base = boot_text_phys_base;
-		text_size = boot_text_size;
-		bs_text_phys_base = text_phys_base;
-		DebugNUMA("boot_map_kernel_image() text phys base 0x%lx, size "
-			"0x%lx\n",
-			text_phys_base, text_size);
+	delta = (unsigned long) boot_va_to_pa(_start) - (unsigned long) _start;
 
-		data_phys_base = boot_data_phys_base;
-		data_size = boot_data_size;
-		DebugNUMA("boot_map_kernel_image() data phys base 0x%lx, size "
-			"0x%lx\n",
-			data_phys_base, data_size);
-
-#ifdef	CONFIG_NUMA
-		dup_data_phys_base = boot_dup_data_phys_base;
-		dup_data_size = boot_dup_data_size;
-		if (is_bs_node) {
-			DebugNUMA("boot_map_kernel_image() node "
-				"is BS node, so does not duplicate kernel, "
-				"BS image from 0x%lx\n",
-				text_phys_base);
-		} else if (!boot_node_has_dup_kernel()) {
-			DebugNUMA("boot_map_kernel_image() node "
-				"has not duplicated kernel image and will use "
-				"image of node #%d from 0x%lx\n",
-				text_phys_base, boot_my_node_dup_kernel_nid);
-			goto no_mapping;
-		} else {
-			bs_text_phys_base =
-				boot_node_text_phys_base(BOOT_BS_NODE_ID);
-			DebugNUMA("boot_map_kernel_image() node "
-				"has duplicated kernel image from 0x%lx\n",
-				text_phys_base);
-		}
-		DebugNUMA("boot_map_kernel_image() dup data phys base 0x%lx, "
-			"size 0x%lx\n",
-			dup_data_phys_base, dup_data_size);
-#else
-		bs_text_phys_base = text_phys_base;
-#endif	/* CONFIG_NUMA */
-
-		area_virt_base = KERNEL_BASE;
-
-		if (is_bs_node && text_phys_base > data_phys_base) {
-			BOOT_BUG("The kernel 'text' segment base addr "
-				"0x%lx > 0x%lx 'data' segment base",
-				text_phys_base, data_phys_base);
-		}
-
-		text_virt_base = area_virt_base;
-#if defined(CONFIG_NUMA)
-		data_virt_base = _PAGE_ALIGN_UP(text_virt_base +
-				 	(data_phys_base - bs_text_phys_base),
-					E2K_SMALL_PAGE_SIZE);
-		data_phys_base = _PAGE_ALIGN_UP(data_phys_base,
-						E2K_SMALL_PAGE_SIZE);
-		DebugNUMA("boot_map_kernel_image() UP data phys base 0x%lx, "
-			"size 0x%lx\n",
-			data_phys_base, data_size);
-		dup_data_phys_base = _PAGE_ALIGN_UP(dup_data_phys_base,
-						E2K_SMALL_PAGE_SIZE);
-		DebugNUMA("boot_map_kernel_image() UP dup data phys base "
-			"0x%lx, size 0x%lx\n",
-			dup_data_phys_base, dup_data_size);
-#else	/* ! CONFIG_NUMA */
-		data_virt_base = _PAGE_ALIGN_UP(text_virt_base +
-				 	(data_phys_base - bs_text_phys_base),
-					BOOT_E2K_KERNEL_PAGE_SIZE);
-		data_phys_base = _PAGE_ALIGN_UP(data_phys_base,
-						BOOT_E2K_KERNEL_PAGE_SIZE);
-#endif	/* CONFIG_NUMA */
-		data_size += (boot_data_phys_base - data_phys_base);
-		DebugNUMA("boot_map_kernel_image() updated data size: phys "
-			"base 0x%lx, size 0x%lx\n",
-			data_phys_base, data_size);
-#ifdef	CONFIG_NUMA
-		if (is_bs_node && dup_data_phys_base != data_phys_base) {
-			BOOT_BUG("The kernel 'data' segment base "
-				"addr 0x%lx is not the same as node "
-				"duplicated data base 0x%lx",
-				data_phys_base, dup_data_phys_base);
-		}
-#endif	/* CONFIG_NUMA */
-#ifdef	CONFIG_NUMA
-		dup_data_size = _PAGE_ALIGN_DOWN(dup_data_size,
-						E2K_SMALL_PAGE_SIZE);
-		dup_data_size += (boot_dup_data_phys_base - dup_data_phys_base);
-		dup_data_virt_base = data_virt_base;
-		DebugNUMA("boot_map_kernel_image() down dup data size: phys "
-			"base 0x%lx, size 0x%lx\n",
-			dup_data_phys_base, dup_data_size);
-		data_phys_base += dup_data_size;
-		data_virt_base += dup_data_size;
-		data_size -= dup_data_size;
-		DebugNUMA("boot_map_kernel_image() update data phys "
-			"base 0x%lx, size 0x%lx\n",
-			data_phys_base, data_size);
-		rem_text_end = text_phys_base + text_size;
-		rem_text_end = _PAGE_ALIGN_DOWN(rem_text_end,
-						BOOT_E2K_KERNEL_PAGE_SIZE);
-		rem_text_phys_base = _PAGE_ALIGN_UP(text_phys_base + text_size,
-						BOOT_E2K_KERNEL_PAGE_SIZE);
-		DebugNUMA("boot_map_kernel_image() rem text phys "
-			"base 0x%lx, end 0x%lx\n",
-			rem_text_phys_base, rem_text_end);
-		if (rem_text_end > dup_data_phys_base) {
-			/*
-			 * Intersection of kernel text last page and
-			 * duplicated data
-			 */
-			rem_text_size = dup_data_phys_base - rem_text_phys_base;
-			DebugNUMA("boot_map_kernel_image() rem text size "
-				"0x%lx\n",
-				rem_text_size);
-			text_size -= rem_text_size;
-			rem_text_virt_base = text_virt_base +
-				rem_text_phys_base - text_phys_base;
-			rem_text_prot = PAGE_KERNEL_TEXT;
-			DebugNUMA("boot_map_kernel_image() update text size: "
-				"phys base 0x%lx, size 0x%lx\n",
-				text_phys_base, text_size);
-		} else {
-			rem_text_size = 0;
-			DebugNUMA("boot_map_kernel_image() empty rem text size "
-				"0x%lx\n",
-				rem_text_size);
-		}
-#endif	/* CONFIG_NUMA */
-
-		ret = boot_map_phys_area(text_phys_base, text_size,
-			text_virt_base,
+	virt_base = (unsigned long) _stext;
+	size = (unsigned long) (_etext - _stext);
+	boot_map_phys_area(".text", virt_base + delta, size, virt_base,
 			PAGE_KERNEL_TEXT, BOOT_E2K_KERNEL_PAGE_SIZE,
-			false,	/* do not ignore if text mapping virtual */
-				/* area is busy */
+			false, populate_on_host);
+	boot_text_virt_base = virt_base;
+
+	virt_base = (unsigned long) __start_rodata_notes;
+	size = (unsigned long) (__end_rodata_notes - __start_rodata_notes);
+	boot_map_phys_area(".rodata/.notes", virt_base + delta, size, virt_base,
+			PAGE_KERNEL_RO, BOOT_E2K_KERNEL_PAGE_SIZE,
+			false, populate_on_host);
+
+	virt_base = (unsigned long) __special_data_begin;
+	size = (unsigned long) (__special_data_end - __special_data_begin);
+	boot_map_phys_area(".nodedata/.ro_after_init", virt_base + delta, size,
+			virt_base, PAGE_KERNEL_DATA, PAGE_SIZE, false,
 			populate_on_host);
-		if (ret <= 0) {
-			BOOT_BUG("Could not map kernel 'text' segment: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				text_phys_base, text_size,
-				BOOT_E2K_KERNEL_PAGE_SIZE,
-				text_virt_base);
-		}
-		boot_text_virt_base = text_virt_base;
-		boot_printk("The kernel 'text' segment: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			text_phys_base, text_size, ret, text_virt_base,
-			BOOT_E2K_KERNEL_PAGE_SIZE);
 
-#ifdef	CONFIG_NUMA
-		if (rem_text_size != 0) {
-			ret = boot_map_phys_area(rem_text_phys_base,
-				rem_text_size,
-				rem_text_virt_base,
-				rem_text_prot, E2K_SMALL_PAGE_SIZE,
-				false,	/* do not ignore if data mapping */
-					/* virtual area is busy */
-				populate_on_host);
+	virt_base = (unsigned long) __common_data_begin;
+	size = (unsigned long) (__common_data_end - __common_data_begin);
+	boot_map_phys_area(".data/.bss", virt_base + delta, size, virt_base,
+			PAGE_KERNEL_DATA, BOOT_E2K_KERNEL_PAGE_SIZE,
+			false, populate_on_host);
 
-			if (ret <= 0) {
-				BOOT_BUG("Could not map kernel ending of "
-					"'text' segment: base addr 0x%lx size "
-					"0x%lx page size 0x%x to virtual addr "
-					"0x%lx",
-					rem_text_phys_base, rem_text_size,
-					E2K_SMALL_PAGE_SIZE,
-					rem_text_virt_base);
-			}
-			boot_printk("The kernel ending of 'text' segment: "
-				"base addr 0x%lx size 0x%lx is mapped to %d "
-				"virtual page(s) base addr 0x%lx page size "
-				"0x%x\n",
-				rem_text_phys_base, rem_text_size, ret,
-				rem_text_virt_base, E2K_SMALL_PAGE_SIZE);
-		}
-		if (dup_data_size != 0) {
-			ret = boot_map_phys_area(dup_data_phys_base,
-				dup_data_size,
-				dup_data_virt_base,
-				PAGE_KERNEL_DATA, E2K_SMALL_PAGE_SIZE,
-				false,	/* do not ignore if data mapping */
-					/* virtual area is busy */
-				populate_on_host);
+	virt_base = (unsigned long)__init_text_begin;
+	size = (unsigned long) (__init_text_end - __init_text_begin);
+	boot_map_phys_area(".init.text", virt_base + delta, size, virt_base,
+			PAGE_KERNEL_TEXT, PAGE_SIZE, false, populate_on_host);
 
-			if (ret <= 0) {
-				BOOT_BUG("Could not map kernel ' duplicated "
-					"data/bss' area: base addr 0x%lx size "
-					"0x%lx page size 0x%x to virtual addr "
-					"0x%lx",
-					dup_data_phys_base, dup_data_size,
-					E2K_SMALL_PAGE_SIZE,
-					dup_data_virt_base);
-			}
-			boot_dup_data_virt_base = dup_data_virt_base +
-				(boot_dup_data_phys_base - dup_data_phys_base);
-			boot_printk("The kernel 'duplicated data/bss' area: "
-				"base addr 0x%lx size 0x%lx is mapped to %d "
-				"virtual page(s) base addr 0x%lx page size "
-				"0x%x\n",
-				dup_data_phys_base, dup_data_size, ret,
-				dup_data_virt_base,
-				E2K_SMALL_PAGE_SIZE);
-		}
-#endif	/* CONFIG_NUMA */
+	virt_base = (unsigned long)__init_data_begin;
+	size = (unsigned long) (__init_data_end - __init_data_begin);
+	boot_map_phys_area(".init.data", virt_base + delta, size, virt_base,
+			PAGE_KERNEL_DATA, PAGE_SIZE, false, populate_on_host);
 
-		area_virt_base = (e2k_addr_t)__start_ro_after_init;
-		if (area_virt_base < (e2k_addr_t)data_virt_base) {
-			BOOT_BUG("Kernel image segment '.data.ro_after_init' "
-				"start addr 0x%lx is out of common "
-				"data base 0x%lx\n",
-				area_virt_base, data_virt_base);
-		}
-		area_offset = area_virt_base - data_virt_base;
-		area_base = data_phys_base + area_offset;
-		area_size = __end_ro_after_init -
-					__start_ro_after_init;
-		if (area_size != 0) {
-			ret = boot_map_phys_area(area_base, area_size,
-				area_virt_base,
-				PAGE_KERNEL_DATA, PAGE_SIZE,
-				false,	/* do not ignore if data mapping */
-					/* virtual area is busy */
-				populate_on_host);
-			if (ret <= 0) {
-				BOOT_BUG("Could not map kernel "
-					"'.data.ro_after_init' "
-					"segment: base addr 0x%lx size 0x%lx "
-					"page size 0x%x to virtual "
-					"addr 0x%lx\n",
-					area_base, area_size, PAGE_SIZE,
-					area_virt_base);
-			}
-			boot_printk("The kernel '.data.ro_after_init' segment: "
-				"base addr 0x%lx size 0x%lx is mapped "
-				"to %d virtual page(s) base addr 0x%lx "
-				"page size 0x%x\n",
-				area_base, area_size, ret,
-				area_virt_base, PAGE_SIZE);
-		}
-		data_phys_base += area_size;
-		data_virt_base += area_size;
-		data_size -= area_size;
-		DebugNUMA("boot_map_kernel_image() update data phys "
-			"base 0x%lx, virt base 0x%lx, size 0x%lx\n",
-			data_phys_base, data_virt_base, data_size);
-
-		area_virt_base = (e2k_addr_t)__init_text_begin;
-		if (area_virt_base < (e2k_addr_t)data_virt_base) {
-			BOOT_BUG("Kernel image segment '.init.text' "
-				"start addr 0x%lx is out of common "
-				"data base 0x%lx\n",
-				area_virt_base, data_virt_base);
-		}
-		area_offset = area_virt_base - data_virt_base;
-		init_base = data_phys_base + area_offset;
-		init_size = __init_text_end - __init_text_begin;
-		ret = boot_map_phys_area(init_base, init_size,
-				area_virt_base,
-				PAGE_KERNEL_TEXT, PAGE_SIZE,
-				false,	/* do not ignore if data mapping */
-					/* virtual area is busy */
-				populate_on_host);
-		if (ret <= 0) {
-			BOOT_BUG("Could not map kernel '.init.text' segment: "
-				"base addr 0x%lx size 0x%lx page size 0x%x "
-				"to virtual addr 0x%lx\n",
-				init_base, init_size, PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The kernel '.init.text' segment: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			init_base, init_size, ret,
-			area_virt_base, PAGE_SIZE);
-
-		area_virt_base = (e2k_addr_t)__init_data_begin;
-		if (area_virt_base < (e2k_addr_t)data_virt_base) {
-			BOOT_BUG("Kernel image segment '.init.data' "
-				"start addr 0x%lx is out of common "
-				"data base 0x%lx\n",
-				area_virt_base, data_virt_base);
-		}
-		area_offset = area_virt_base - data_virt_base;
-		init_base = data_phys_base + area_offset;
-		init_size = __init_data_end - __init_data_begin;
-		ret = boot_map_phys_area(init_base, init_size,
-				area_virt_base,
-				PAGE_KERNEL_DATA, PAGE_SIZE,
-				false,	/* do not ignore if data mapping */
-					/* virtual area is busy */
-				populate_on_host);
-		if (ret <= 0) {
-			BOOT_BUG("Could not map kernel '.init.data' segment: "
-				"base addr 0x%lx size 0x%lx page size 0x%x "
-				"to virtual addr 0x%lx",
-				init_base, init_size, PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The kernel '.init.data' segment: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			init_base, init_size, ret,
-			area_virt_base, PAGE_SIZE);
-
-		area_virt_base = (e2k_addr_t)__common_data_begin;
-		area_offset = area_virt_base - data_virt_base;
-		if (area_offset < 0) {
-			BOOT_BUG("The kernel 'common not duplicated data' "
-				"start addr 0x%lx is lower of data segment "
-				"virtual addr 0x%lx",
-				area_virt_base, data_virt_base);
-		}
-		data_size -= area_offset;
-		data_virt_base += area_offset;
-		data_phys_base += area_offset;
-
-#if defined(CONFIG_NUMA)
-		map_size = data_phys_base & (BOOT_E2K_KERNEL_PAGE_SIZE - 1);
-		if (map_size != 0) {
-			map_size = _PAGE_ALIGN_DOWN(map_size,
-						BOOT_E2K_KERNEL_PAGE_SIZE) -
-							map_size;
-			if (map_size > data_size)
-				map_size = data_size;
-			ret = boot_map_phys_area(data_phys_base, map_size,
-				data_virt_base,
-				PAGE_KERNEL_DATA, E2K_SMALL_PAGE_SIZE,
-				false,	/* do not ignore if data mapping */
-					/* virtual area is busy */
-				populate_on_host);
-
-			if (ret <= 0) {
-				BOOT_BUG("Could not map kernel 'data/bss' "
-					"segment: base addr 0x%lx size 0x%lx "
-					"page size 0x%x to virtual addr 0x%lx",
-					data_phys_base, map_size,
-					E2K_SMALL_PAGE_SIZE,
-					data_virt_base);
-			}
-			boot_printk("The kernel 'data/bss' segment: "
-				"base addr 0x%lx size 0x%lx is mapped to %d "
-				"virtual small page(s) base addr 0x%lx page "
-				"size 0x%x\n",
-				data_phys_base, map_size, ret, data_virt_base,
-				E2K_SMALL_PAGE_SIZE);
-			data_size -= map_size;
-			data_phys_base += map_size;
-			data_virt_base += map_size;
-		}
-#endif	/* CONFIG_NUMA */
-		boot_data_virt_base = data_virt_base +
-			(boot_data_phys_base - data_phys_base);
-		if (data_size != 0) {
-			ret = boot_map_phys_area(data_phys_base, data_size,
-				data_virt_base,
-				PAGE_KERNEL_DATA, BOOT_E2K_KERNEL_PAGE_SIZE,
-#if !defined(CONFIG_NUMA)
-				true,	/* ignore if data mapping virtual */
-					/* area is busy */
-#else	/* CONFIG_NUMA */
-				false,	/* do not ignore if data mapping */
-					/* virtual area is busy */
-#endif	/* ! CONFIG_NUMA */
-				populate_on_host);
-			if (ret <= 0) {
-				BOOT_BUG("Could not map kernel 'data/bss' "
-					"segment: base addr 0x%lx size 0x%lx "
-					"page size 0x%x to virtual addr 0x%lx",
-					data_phys_base, data_size,
-					BOOT_E2K_KERNEL_PAGE_SIZE,
-					data_virt_base);
-			}
-			boot_printk("The kernel 'data/bss' segment: "
-				"base addr 0x%lx size 0x%lx is mapped to %d "
-				"virtual page(s) base addr 0x%lx page size "
-				"0x%x\n",
-				data_phys_base, data_size, ret, data_virt_base,
-				BOOT_E2K_KERNEL_PAGE_SIZE);
-		}
-
-#ifndef CONFIG_NUMA
-		area_base = (u64) boot_vp_to_pp((void *) empty_zero_page);
-		area_virt_base = (unsigned long) empty_zero_page;
-		ret = boot_map_phys_area(area_base, PAGE_SIZE, area_virt_base,
-				PAGE_KERNEL_DATA, PAGE_SIZE, false,
-				populate_on_host);
-		if (ret <= 0) {
-			BOOT_BUG("Could not map kernel 'zero_page' segment: base addr 0x%lx size 0x%lx page size 0x%x to virtual addr 0x%lx",
-				area_base, PAGE_SIZE, PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The kernel 'zero_page' segment: base addr 0x%lx size 0x%lx is mapped to %d virtual page(s) base addr 0x%lx page size 0x%x\n",
-			area_base, area_size, ret, area_virt_base, PAGE_SIZE);
-#endif
-
-		if (is_bs_node) {
-			area_virt_base = KERNEL_BASE;
-			area_size = KERNEL_END - KERNEL_BASE;
-			boot_kernel_image_size = area_size;
-			boot_printk("The kernel full image: "
-				"is mapped from base addr 0x%lx size 0x%lx\n",
-				area_virt_base, area_size);
-		}
-#ifdef	CONFIG_NUMA
-no_mapping:
-#endif	/* CONFIG_NUMA */
-		BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_image_mapped);
-	}
+	boot_printk("The kernel full image: is mapped from base addr 0x%lx size 0x%lx\n",
+			KERNEL_BASE, KERNEL_END - KERNEL_BASE);
 }
 
 void __init boot_map_kernel_boot_stacks(void)
@@ -3023,148 +2158,67 @@ void __init boot_map_all_phys_memory(void)
 	 * All physical memory pages are mapped to virtual space starting
 	 * from 'PAGE_OFFSET'
 	 */
-
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_mem_mapped)) {
-#ifdef	CONFIG_NUMA
-		if (!boot_node_has_dup_kernel()) {
-			DebugNUMA("boot_map_all_phys_memory() node "
-				"has not own page table and will use "
-				"node #%d physical memory mapping\n",
-				boot_my_node_dup_kernel_nid);
-			goto no_mem_mapping;
-		} else {
-			DebugNUMA("boot_map_all_phys_memory() will map all "
-				"physical memory\n");
-		}
-#endif	/* CONFIG_NUMA */
-		boot_printk("The physical memory start address 0x%lx, "
-			"end 0x%lx\n",
-			boot_start_of_phys_memory,
-			boot_end_of_phys_memory);
-		ret = boot_map_physmem(PAGE_MAPPED_PHYS_MEM,
-				IS_ENABLED(CONFIG_DEBUG_PAGEALLOC) ? PAGE_SIZE :
+	boot_printk("The physical memory start address 0x%lx, end 0x%lx\n",
+			boot_start_of_phys_memory, boot_end_of_phys_memory);
+	ret = boot_map_physmem(PAGE_MAPPED_PHYS_MEM,
+			IS_ENABLED(CONFIG_DEBUG_PAGEALLOC) ? PAGE_SIZE :
 					   0 /* any max possible page size */);
-		if (ret <= 0) {
-			BOOT_BUG("Could not map all physical memory: error %ld",
-				ret);
-		}
-		boot_printk("All physical memory is mapped to %d virtual "
-			"pages from base offset 0x%lx\n",
+	BOOT_BUG_ON(ret <= 0, "Mapping all phys. memory failed with %ld", ret);
+	boot_printk("All physical memory is mapped to %d virtual pages from base offset 0x%lx\n",
 			ret, (e2k_addr_t)__boot_va(boot_start_of_phys_memory));
-#ifdef	CONFIG_NUMA
-no_mem_mapping:
-#endif	/* CONFIG_NUMA */
-		BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_mem_mapped);
-	}
 }
 
-static	void __init
+static void __init
 boot_map_low_io_memory(void)
 {
-	e2k_addr_t	area_phys_base;
-	e2k_size_t	area_size;
-	e2k_addr_t	area_virt_base;
-	int		ret;
+	e2k_addr_t	area_phys_base, area_virt_base;
 
 	/*
 	 * Map the low VGAMEM.
 	 */
-
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_io_mapped)) {
-#ifdef	CONFIG_NUMA
-		if (!boot_node_has_dup_kernel()) {
-			goto no_io_mapping;
-		}
-#endif	/* CONFIG_NUMA */
-		area_phys_base = VGA_VRAM_PHYS_BASE;
-		area_size = VGA_VRAM_SIZE;
-		area_virt_base =
-			(e2k_addr_t)__boot_va(area_phys_base);
-		ret = boot_map_phys_area(area_phys_base, area_size, area_virt_base,
+	area_phys_base = VGA_VRAM_PHYS_BASE;
+	area_virt_base = (e2k_addr_t)__boot_va(area_phys_base);
+	boot_map_phys_area("low VGAMEM", area_phys_base, VGA_VRAM_SIZE, area_virt_base,
 			boot_cpu_has(CPU_FEAT_WC_LEGACY_VGA) ? PAGE_IO_MAP_WC
 							     : PAGE_IO_MAP,
 			E2K_SMALL_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-		if (ret <= 0) {
-			BOOT_BUG("Could not map low VGAMEM area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				area_phys_base, area_size, E2K_SMALL_PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The low VGAMEM area: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			area_phys_base, area_size, ret, area_virt_base,
-			E2K_SMALL_PAGE_SIZE);
-#ifdef	CONFIG_NUMA
-no_io_mapping:
-#endif	/* CONFIG_NUMA */
-		BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_io_mapped);
-	}
 }
 
-static	void __init
-boot_map_high_io_memory(bool bsp)
+static void __init
+boot_map_high_io_memory(void)
 {
+	static __initdata BOOT_DEFINE_NODE_LOCK(hwbug_lock);
 	unsigned long	first_base;
 	e2k_addr_t	area_phys_base;
 	e2k_size_t	area_size;
 	e2k_addr_t	area_virt_base;
-	int		ret, node;
+	int		node;
 
 	/*
 	 * Map the PCI/IO ports area to allow IO operations on system console.
 	 */
-
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_ports_mapped)) {
-#ifdef	CONFIG_NUMA
-		if (!boot_node_has_dup_kernel())
-			goto no_ports_mapping;
-#endif	/* CONFIG_NUMA */
-		area_phys_base = boot_machine.x86_io_area_base;
-		if (BOOT_HAS_MACHINE_E2K_FULL_SIC)
-			area_size = E2K_FULL_SIC_IO_AREA_SIZE;
-		else if (BOOT_HAS_MACHINE_E2K_LEGACY_SIC)
-			area_size = E2K_LEGACY_SIC_IO_AREA_SIZE;
-		else
-			BOOT_BUG("Unknown x86 I/O ports area size");
-		area_virt_base = E2K_X86_IO_AREA_BASE;
-		ret = boot_map_phys_area(area_phys_base, area_size,
+	area_phys_base = boot_machine.x86_io_area_base;
+	if (BOOT_HAS_MACHINE_E2K_FULL_SIC)
+		area_size = E2K_FULL_SIC_IO_AREA_SIZE;
+	else if (BOOT_HAS_MACHINE_E2K_LEGACY_SIC)
+		area_size = E2K_LEGACY_SIC_IO_AREA_SIZE;
+	else
+		BOOT_BUG("Unknown x86 I/O ports area size");
+	area_virt_base = E2K_X86_IO_AREA_BASE;
+	boot_map_phys_area("PCI I/O ports", area_phys_base, area_size,
 			area_virt_base,
 			PAGE_IO_MAP, BOOT_E2K_X86_IO_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-		if (ret <= 0) {
-			BOOT_BUG("Could not map PCI/IO ports area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				area_phys_base, area_size,
-				BOOT_E2K_X86_IO_PAGE_SIZE, area_virt_base);
-		}
-		boot_printk("The PCI/IO ports area: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			area_phys_base, area_size, ret, area_virt_base,
-			BOOT_E2K_X86_IO_PAGE_SIZE);
-#ifdef	CONFIG_NUMA
-no_ports_mapping:
-#endif	/* CONFIG_NUMA */
-		BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_ports_mapped);
-	}
 
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_hwbug_mapped)) {
-#ifdef	CONFIG_NUMA
-		if (!boot_node_has_dup_kernel())
+	if (!boot_node_lock(&hwbug_lock)) {
+		if (!boot_node_has_online_mem(boot_numa_node_id()))
 			goto no_hwbug_mapping;
-#endif	/* CONFIG_NUMA */
+
 		/*
 		 * Only 4 nodes on e8c with the problem
 		 * Allocate and map 8 * 4 = 32 pages on every node.
@@ -3193,54 +2247,51 @@ no_ports_mapping:
 			area_virt_base = node * 8 * PAGE_SIZE +
 				NATIVE_HWBUG_WRITE_MEMORY_BARRIER_ADDRESS;
 
-			ret = boot_map_phys_area(area_phys_base, 8 * PAGE_SIZE,
-					area_virt_base,	PAGE_USER_RO_ACCESSED,
-					PAGE_SIZE,
+			boot_map_phys_area("hwbug workaround", area_phys_base,
+					8 * PAGE_SIZE, area_virt_base,
+					PAGE_USER_RO_ACCESSED, PAGE_SIZE,
 					true,	/* ignory busy mapping ? */
 					false);	/* populate map on host ? */
-			if (ret <= 0)
-				BOOT_BUG("Could not map hwbug workaround area: pa 0x%lx to va 0x%lx",
-					area_phys_base, area_virt_base);
 		}
-#ifdef	CONFIG_NUMA
+
 no_hwbug_mapping:
-#endif	/* CONFIG_NUMA */
-		BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_hwbug_mapped);
+		boot_node_unlock(&hwbug_lock);
 	}
 }
 
 void __init boot_native_map_all_bootmem(bool bsp, boot_info_t *boot_info)
 {
+	if (BOOT_IS_BSP(bsp)) {
+		/*
+		 * Map the kernel image 'text/data/bss' segments.
+		 */
+		boot_map_kernel_image(false);
 
-	/*
-	 * Map the kernel image 'text/data/bss' segments.
-	 */
-	boot_map_kernel_image(false);
+		/*
+		 * Map all available physical memory
+		 */
+		boot_map_all_phys_memory();
+
+		/*
+		 * Map the low VGAMEM.
+		 */
+		boot_map_low_io_memory();
+
+		/*
+		 * Map all needed physical areas from boot-info.
+		 */
+		boot_map_all_bootinfo_areas(boot_info);
+
+		/*
+		 * Map the PCI/IO ports area to allow IO operations on system console.
+		 */
+		boot_map_high_io_memory();
+	}
 
 	/*
 	 * Map the kernel stacks
 	 */
 	boot_map_kernel_boot_stacks();
-
-	/*
-	 * Map all available physical memory
-	 */
-	boot_map_all_phys_memory();
-
-	/*
-	 * Map the low VGAMEM.
-	 */
-	boot_map_low_io_memory();
-
-	/*
-	 * Map all needed physical areas from boot-info.
-	 */
-	boot_map_all_bootinfo_areas(boot_info);
-
-	/*
-	 * Map the PCI/IO ports area to allow IO operations on system console.
-	 */
-	boot_map_high_io_memory(bsp);
 }
 
 #ifdef	CONFIG_L_IO_APIC
@@ -3256,7 +2307,6 @@ boot_map_mp_table(boot_info_t *boot_info)
 	e2k_size_t	area_size;
 	e2k_size_t	area_offset;
 	e2k_addr_t	area_pfn;
-	int		ret;
 
 	if (boot_info->mp_table_base == (e2k_addr_t)0UL)
 		return;
@@ -3271,25 +2321,11 @@ boot_map_mp_table(boot_info_t *boot_info)
 	area_size = boot_mpf_size + area_offset;
 	area_virt_base = (e2k_addr_t)__boot_va(boot_vpa_to_pa(area_phys_base));
 	if (!boot_is_pfn_valid(area_pfn)) {
-		ret = boot_map_phys_area(area_phys_base, area_size,
-			area_virt_base,
-			PAGE_MPT, E2K_MPT_PAGE_SIZE,
+		boot_map_phys_area("MP floating table", area_phys_base,
+			area_size, area_virt_base, PAGE_MPT, E2K_MPT_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-		if (ret <= 0) {
-			BOOT_BUG("Could not map MP floating table page(s): "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				area_phys_base, area_size,
-				E2K_MPT_PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The MP floating table page(s): "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			area_phys_base, area_size, ret, area_virt_base,
-			E2K_MPT_PAGE_SIZE);
 	}
 	boot_printk("The MP floating table: base addr 0x%lx size 0x%lx "
 		"is mapped to virtual base addr 0x%lx\n",
@@ -3308,25 +2344,11 @@ boot_map_mp_table(boot_info_t *boot_info)
 	area_size = boot_mpc_size + area_offset;
 	area_virt_base = (e2k_addr_t)__boot_va(boot_vpa_to_pa(area_phys_base));
 	if (!boot_is_pfn_valid(area_pfn)) {
-		ret = boot_map_phys_area(area_phys_base, area_size,
-			area_virt_base,
-			PAGE_MPT, E2K_MPT_PAGE_SIZE,
+		boot_map_phys_area("MP configuration table", area_phys_base,
+			area_size, area_virt_base, PAGE_MPT, E2K_MPT_PAGE_SIZE,
 			true,	/* ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-		if (ret <= 0) {
-			BOOT_BUG("Could not map MP configuration table "
-				"page(s): base addr 0x%lx size 0x%lx page "
-				"size 0x%x to virtual addr 0x%lx",
-				area_phys_base, area_size,
-				E2K_MPT_PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The MP configuration table page(s): "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			area_phys_base, area_size, ret, area_virt_base,
-			E2K_MPT_PAGE_SIZE);
 	}
 	boot_printk("The MP configuration table : base addr 0x%lx size 0x%lx "
 		"is mapped to virtual base addr 0x%lx\n",
@@ -3339,7 +2361,6 @@ boot_map_mp_table(boot_info_t *boot_info)
  * All the mapped areas enumerate below. If a some new area will be used,
  * then it should be added to the list of already known ones.
  */
-
 void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 {
 	e2k_addr_t	area_phys_base;
@@ -3353,21 +2374,6 @@ void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 	e2k_addr_t	strtab_phys_base;
 	e2k_addr_t	strtab_virt_base;
 	e2k_size_t	strtab_size;
-	int		ret = 0;
-
-
-	if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_map_lock,
-						boot_node_info_mapped)) {
-#ifdef	CONFIG_NUMA
-		if (!boot_node_has_dup_kernel()) {
-			BOOT_NODE_UNLOCK(boot_node_map_lock,
-						boot_node_info_mapped);
-			return;
-		}
-#endif	/* CONFIG_NUMA */
-	} else {
-		return;
-	}
 
 	/*
 	 * Map the bootinfo structure.
@@ -3381,25 +2387,12 @@ void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 							area_phys_base));
 
 	if (!boot_is_pfn_valid(area_pfn)) {
-		ret = boot_map_phys_area(area_phys_base, area_size,
+		boot_map_phys_area("bootinfo", area_phys_base, area_size,
 			area_virt_base,
 			PAGE_BOOTINFO, E2K_BOOTINFO_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-		if (ret <= 0) {
-			BOOT_BUG("Could not map BOOTINFO structue: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				area_phys_base, area_size,
-				E2K_BOOTINFO_PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The BOOTINFO structure pages: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			area_phys_base, area_size, ret, area_virt_base,
-			E2K_BOOTINFO_PAGE_SIZE);
 	}
 	boot_bootblock_virt =
 		(bootblock_struct_t *)__boot_va(boot_vpa_to_pa(
@@ -3420,25 +2413,12 @@ void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 	if (area_size && !boot_is_pfn_valid(area_pfn)) {
 		area_virt_base = (e2k_addr_t)__boot_va(boot_vpa_to_pa(
 							area_phys_base));
-		ret = boot_map_phys_area(area_phys_base, area_size,
+		boot_map_phys_area("initrd", area_phys_base, area_size,
 			area_virt_base,
 			PAGE_INITRD, E2K_INITRD_PAGE_SIZE,
 			false,	/* do not ignore if data mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-		if (ret <= 0) {
-			BOOT_BUG("Could not map initial ramdisk area: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				area_phys_base, area_size,
-				E2K_INITRD_PAGE_SIZE,
-				area_virt_base);
-		}
-		boot_printk("The initial ramdisk area: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			area_phys_base, area_size, ret, area_virt_base,
-			E2K_INITRD_PAGE_SIZE);
 	}
 #endif	/* CONFIG_BLK_DEV_INITRD */
 
@@ -3447,7 +2427,6 @@ void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 	/*
 	 * Map the kernel SYMTAB (symbols table).
 	 */
-
 	symtab_phys_base = boot_symtab_phys_base;
 	symtab_size = boot_symtab_size;
 
@@ -3490,60 +2469,29 @@ void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 		symtab_virt_base = area_virt_base;
 	}
 
-	if (symtab_size != 0) {
-		ret = boot_map_phys_area(symtab_phys_base, symtab_size,
+	if (symtab_size) {
+		boot_map_phys_area("symtab", symtab_phys_base, symtab_size,
 			symtab_virt_base, PAGE_KERNEL_NAMETAB,
 			E2K_NAMETAB_PAGE_SIZE,
 			false,	/* do not ignore if symbols table mapping */
 				/* virtual area is busy */
 			false);	/* populate map on host? */
-		if (ret <= 0) {
-			BOOT_BUG("Could not map kernel symbols table: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				symtab_phys_base, symtab_size,
-				E2K_NAMETAB_PAGE_SIZE,
-				symtab_virt_base);
-		}
-	}
-	boot_symtab_virt_base = symtab_virt_base;
-	if (symtab_size != 0) {
-		boot_printk("The kernel symbols table: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			symtab_phys_base, symtab_size, ret, symtab_virt_base,
-			E2K_NAMETAB_PAGE_SIZE);
 	} else {
 		boot_printk("The kernel symbols table is empty\n");
 	}
+	boot_symtab_virt_base = symtab_virt_base;
 
-	if (strtab_size != 0) {
-		ret = boot_map_phys_area(strtab_phys_base, strtab_size,
+	if (strtab_size) {
+		boot_map_phys_area("strtab", strtab_phys_base, strtab_size,
 			strtab_virt_base, PAGE_KERNEL_NAMETAB,
 			E2K_NAMETAB_PAGE_SIZE,
 			true,	/* ignore if strings table mapping virtual */
 				/* area is busy */
 			false);	/* populate map on host? */
-
-		if (ret <= 0) {
-			BOOT_BUG("Could not map kernel strings table: "
-				"base addr 0x%lx size 0x%lx page size 0x%x to "
-				"virtual addr 0x%lx",
-				strtab_phys_base, strtab_size,
-				E2K_NAMETAB_PAGE_SIZE,
-				strtab_virt_base);
-		}
-	}
-	boot_strtab_virt_base = strtab_virt_base;
-	if (strtab_size != 0) {
-		boot_printk("The kernel strings table: "
-			"base addr 0x%lx size 0x%lx is mapped to %d virtual "
-			"page(s) base addr 0x%lx page size 0x%x\n",
-			strtab_phys_base, strtab_size, ret, strtab_virt_base,
-			E2K_NAMETAB_PAGE_SIZE);
 	} else {
 		boot_printk("The kernel strings table is empty\n");
 	}
+	boot_strtab_virt_base = strtab_virt_base;
 
 	boot_kernel_symtab = (void *)(symtab_virt_base +
 		(boot_symtab_phys_base & (E2K_NAMETAB_PAGE_SIZE - 1)));
@@ -3555,8 +2503,6 @@ void __init boot_map_all_bootinfo_areas(boot_info_t *boot_info)
 	boot_kernel_strtab_size = boot_strtab_size;
 	boot_printk("The kernel strings table: addr 0x%lx size 0x%lx\n",
 		boot_kernel_strtab, boot_kernel_strtab_size);
-
-	BOOT_NODE_UNLOCK(boot_node_map_lock, boot_node_info_mapped);
 }
 
 /* 
@@ -3678,16 +2624,16 @@ boot_native_kernel_switch_to_virt(bool bsp, int cpuid,
 	/* so need flush all caches from low physical addresses */
 	flush_caches = !BOOT_LOW_MEMORY_ENABLED();
 	if (flush_caches) {
+		static __initdata_recv BOOT_DEFINE_NODE_LOCK(flush_lock);
+
 		iset_ver = boot_machine.native_iset_ver;
 		if (iset_ver >= E2K_ISET_V4 && boot_machine.L3_enable)
 			l3_enable = true;
-		if (!BOOT_TEST_AND_SET_NODE_LOCK(boot_node_flush_lock,
-							boot_node_flushed)) {
+		if (!boot_node_lock(&flush_lock)) {
 			do_i_flush = true;
 			if (l3_enable)
 				node_nbsr = BOOT_THE_NODE_NBSR_PHYS_BASE(0);
-			BOOT_NODE_UNLOCK(boot_node_flush_lock,
-						boot_node_flushed);
+			boot_node_unlock(&flush_lock);
 		}
 	}
 #endif	/* CONFIG_ONLY_HIGH_PHYS_MEM */
@@ -3698,20 +2644,12 @@ boot_native_kernel_switch_to_virt(bool bsp, int cpuid,
 	 */
 
 	cud_lo.CUD_lo_half = 0;
-#ifndef	CONFIG_NUMA
 	cud_lo.CUD_lo_base = bootmem->text.virt;
-#else	/* CONFIG_NUMA */
-	cud_lo.CUD_lo_base = bootmem->text.nodes[BOOT_BS_NODE_ID].virt;
-#endif	/* ! CONFIG_NUMA */
 	cud_lo._CUD_lo_rw = E2K_CUD_RW_PROTECTIONS;
 	cud_lo.CUD_lo_c = CUD_CFLAG_SET;
 
 	gd_lo.GD_lo_half = 0;
-#ifndef	CONFIG_NUMA
 	gd_lo.GD_lo_base = bootmem->data.virt;
-#else	/* CONFIG_NUMA */
-	gd_lo.GD_lo_base = bootmem->data.nodes[BOOT_BS_NODE_ID].virt;
-#endif	/* ! CONFIG_NUMA */
 	gd_lo._GD_lo_rw = E2K_GD_RW_PROTECTIONS;
 
 	/*
@@ -3927,21 +2865,15 @@ boot_native_map_needful_to_equal_virt_area(e2k_addr_t stack_top_addr)
 
 static void boot_init_mmu_support(void)
 {
-	machdep_t *mach = &boot_machine;
 	e2k_core_mode_t core_mode;
 
-	boot_mmu_pt_v6 = mach->mmu_pt_v6;
-
-	if (mach->native_iset_ver < E2K_ISET_V6) {
+	if (!boot_cpu_has(CPU_FEAT_ISET_V6)) {
 		boot_printk("MMU: old legacy Page Table entries format\n");
 		return;
 	}
 	core_mode.CORE_MODE_reg = BOOT_READ_CORE_MODE_REG_VALUE();
 	core_mode.CORE_MODE_sep_virt_space = 0;
-	if (mach->mmu_pt_v6)
-		core_mode.CORE_MODE_pt_v6 = 1;
-	else
-		core_mode.CORE_MODE_pt_v6 = 0;
+	core_mode.CORE_MODE_pt_v6 = !!cpu_has(CPU_FEAT_PAGE_TABLE_V6);
 	BOOT_WRITE_CORE_MODE_REG_VALUE(core_mode.CORE_MODE_reg);
 
 	core_mode.CORE_MODE_reg = BOOT_READ_CORE_MODE_REG_VALUE();
@@ -3960,7 +2892,7 @@ static void boot_init_mmu_support(void)
 	boot_printk("CORE_MODE is set to: 0x%x\n", core_mode.CORE_MODE_reg);
 
 	/* set flag of PT version at abstruct page table structure */
-	boot_pgtable_struct_p->pt_v6 = mach->mmu_pt_v6;
+	boot_pgtable_struct_p->pt_v6 = !!cpu_has(CPU_FEAT_PAGE_TABLE_V6);
 }
 
 /*
@@ -3976,15 +2908,13 @@ boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info,
 	e2k_size_t pages_num;
 
 	if (BOOT_IS_BSP(bsp)) {
+		int nid = numa_node_id();
 
 		/*
 		 * Probe the system memory and fill the structures
 		 * 'nodes_phys_mem' of physical memory configuration.
 		 */
 		boot_probe_memory(boot_info);
-		boot_kernel_phys_base = (e2k_addr_t)boot_vp_to_pp(KERNEL_BASE);
-		boot_printk("The kernel image physical address is 0x%lx\n",
-			boot_kernel_phys_base);
 
 		/*
 		 * Create the physical memory pages maps to support
@@ -3994,7 +2924,7 @@ boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info,
 		boot_printk("The physical memory size is 0x%lx "
 			"pages * 0x%x = 0x%lx bytes\n",
 			pages_num, PAGE_SIZE, pages_num * PAGE_SIZE);
-#ifdef	CONFIG_SMP
+
 		/*
 		 * Bootstrap processor completed creation of simple
 		 * boot-time memory allocator and all CPUs can start
@@ -4002,13 +2932,11 @@ boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info,
 		 */
 		boot_set_event(&boot_physmem_maps_ready);
 	} else {
-
 		/*
 		 * Other processors are waiting for completion of creation
 		 * to start reservation of used memory by each CPU
 		 */
 		boot_wait_for_event(&boot_physmem_maps_ready);
-#endif	/* CONFIG_SMP */
 	}
 
 	/*
@@ -4060,92 +2988,16 @@ boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info,
 	 */
 	boot_sync_all_processors();
 
-#ifdef	CONFIG_NUMA
-	boot_node_duplicate_kernel(boot_info);
+	/*
+	 * Init the boot-time support of physical areas mapping to virtual space
+	 */
+	boot_init_mapping(bsp);
 
 	/*
-	 * SYNCHRONIZATION POINT for NUMA #0.5
-	 * At this point all nodes should complete creation of
-	 * own copy of kernel image and page tables
+	 * SYNCHRONIZATION POINT #0.5
+	 * Waiting for all CPUs init mapping
 	 */
 	boot_sync_all_processors();
-
-	/*
-	 * After synchronization all nodes should switch to duplicated
-	 * kernel mode and can use own copy of kernel image and page tables
-	 */
-	boot_node_set_duplicated_mode();
-
-	/*
-	 * SYNCHRONIZATION POINT for NUMA #0.6
-	 * At this point all nodes should complete switch to duplicated
-	 * kernel image and page tables
-	 */
-	boot_sync_all_processors();
-
-	/*
-	 * After synchronization all nodes run on duplicated image
-	 * but if node has not own copy and use some other node copy then
-	 * it need change kernel image base from -1 to base address of used
-	 * node's image. Base address -1 was used to early detection nodes
-	 * without duplicated image
-	 */
-	boot_node_set_kernel_base();
-
-	/*
-	 * Now for NUMA mode we can set Trap Cellar pointer and MMU
-	 * register to own copy of kernel image area on each node
-	 * and reset Trap Counter register
-	 */
-	boot_set_MMU_TRAP_POINT(boot_kernel_trap_cellar);
-
-	boot_printk("Kernel trap cellar set to physical "
-		"address 0x%lx MMU_TRAP_CELLAR_MAX_SIZE 0x%x "
-		"kernel_trap_cellar 0x%lx\n",
-		boot_kernel_trap_cellar, MMU_TRAP_CELLAR_MAX_SIZE,
-		BOOT_KERNEL_TRAP_CELLAR);
-#endif	/* CONFIG_NUMA */
-
-#ifndef	CONFIG_NUMA
-	if (BOOT_IS_BSP(bsp)) {
-
-		/*
-		 * Init the boot-time support of physical areas mapping
-		 * to virtual space
-		 */
-
-		boot_init_mapping();
-
-#ifdef	CONFIG_SMP
-		/*
-		 * Bootstrap processor completed initialization of support
-		 * of physical areas mapping to virtual space
-		 */
-		boot_set_event(&boot_mapping_ready);
-	} else {
-
-		/*
-		 * Other processors are waiting for completion of
-		 * initialization to start mapping
-		 */
-		boot_wait_for_event(&boot_mapping_ready);
-#endif	/* CONFIG_SMP */
-	}
-#else	/* CONFIG_NUMA */
-	/*
-	 * Init the boot-time support of physical areas mapping
-	 * to virtual space on each node.
-	 * A node has own page table and own mapping of some kernel objects
-	 */
-	boot_node_init_mapping();
-
-	/*
-	 * SYNCHRONIZATION POINT #0.7
-	 * Waiting for all nodes init mapping before pgd sets on
-	 * cpus of same node
-	 */
-	boot_sync_all_processors();
-#endif	/* ! CONFIG_NUMA */
 
 	/*
 	 * Map the kernel memory areas used at boot-time
@@ -4186,21 +3038,4 @@ boot_mem_init(bool bsp, int cpuid, boot_info_t *boot_info,
 	 * Should not be return here from this function.
 	 */
 	boot_kernel_switch_to_virt(bsp, cpuid, boot_init_sequel_func);
-}
-
-/*
- * Control process of termination of boot-time initialization of Virtual memory
- * support. The function terminates this process and is executed on virtual
- * memory.
- */
-
-void __init
-init_mem_term(int cpuid)
-{
-
-	/*
-	 * Flush the temporarly mapped areas to virtual space.
-	 */
-
-	init_clear_temporary_ptes(ALL_TLB_ACCESS_MASK, cpuid);
 }

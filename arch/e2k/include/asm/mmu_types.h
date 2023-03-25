@@ -59,6 +59,7 @@ typedef struct { pgprotval_t pgprot; } pgprot_t;
 #define PTRS_PER_PGD	(1UL << PT_ENTRIES_BITS)
 #define	PGD_TABLE_SIZE	(PTRS_PER_PGD * sizeof(pgd_t))
 #define USER_PTRS_PER_PGD (TASK_SIZE / PGDIR_SIZE)
+#define KERNEL_PTRS_PER_PGD (PTRS_PER_PGD - USER_PTRS_PER_PGD)
 #define FIRST_USER_ADDRESS 0
 
 /*
@@ -122,16 +123,24 @@ typedef struct { pgprotval_t pgprot; } pgprot_t;
 
 /* max possible number of page table levels for all ISETs, types, modes */
 /* to can describe any supported by MMUs type of page tables */
-#define	ARCH_MAX_PT_LEVELS	4	/* for 48 bits virtual address */
+#define ARCH_MAX_PT_LEVELS	4	/* for 48 bits virtual address */
 					/* and 48 bits physical address */
 
-#define	E2K_PT_LEVELS_NUM	4	/* native mode page tables have */
+#define E2K_PT_LEVELS_NUM	4	/* native mode page tables have */
 					/* equal number of levels up to now */
-#define	E2K_PAGES_LEVEL_NUM	0	/* level number of physical pages */
-#define	E2K_PTE_LEVEL_NUM	1	/* level number of native pte */
-#define	E2K_PMD_LEVEL_NUM	2	/* level number of native pmd */
-#define	E2K_PUD_LEVEL_NUM	3	/* level number of native pud */
-#define	E2K_PGD_LEVEL_NUM	4	/* level number of native pgd */
+#define E2K_PAGES_LEVEL_NUM	0	/* level number of physical pages */
+#define E2K_PTE_LEVEL_NUM	1	/* level number of native pte */
+#define E2K_PMD_LEVEL_NUM	2	/* level number of native pmd */
+#define E2K_PUD_LEVEL_NUM	3	/* level number of native pud */
+#define E2K_PGD_LEVEL_NUM	4	/* level number of native pgd */
+
+enum e2k_pt_levels {
+	PT_LEVEL_PAGES = 0,	/* level number of physical pages */
+	PT_LEVEL_PTE,		/* level number of native pte */
+	PT_LEVEL_PMD,		/* level number of native pmd */
+	PT_LEVEL_PUD,		/* level number of native pud */
+	PT_LEVEL_PGD,		/* level number of native pgd */
+};
 
 #define	E2K_PAGES_LEVEL_MASK	(1 << E2K_PAGES_LEVEL_NUM)
 #define E2K_PTE_LEVEL_MASK	(1 << E2K_PTE_LEVEL_NUM)
@@ -541,6 +550,7 @@ typedef union {
 #define	kvm_injected		intl_res_bits
 #define	LDST_KVM_FAKE_FMT	LDST_INVALID_FMT
 #define	kvm_copy_user		empt
+#define	kvm_recovery_user	root
 
 static inline tc_cond_t tc_set_kvm_fault_injected(tc_cond_t cond)
 {
@@ -557,6 +567,18 @@ static inline tc_cond_t tc_set_kvm_fake_format(tc_cond_t cond)
 static inline tc_cond_t tc_set_kvm_copy_user(tc_cond_t cond)
 {
 	cond.kvm_copy_user = 1;
+	return cond;
+}
+
+static inline tc_cond_t tc_set_kvm_recovery_user(tc_cond_t cond)
+{
+	cond.kvm_recovery_user = 1;
+	return cond;
+}
+
+static inline tc_cond_t tc_reset_kvm_recovery_user(tc_cond_t cond)
+{
+	cond.kvm_recovery_user = 0;
 	return cond;
 }
 
@@ -597,6 +619,11 @@ static inline bool tc_test_is_kvm_copy_user(tc_cond_t cond)
 	return cond.kvm_copy_user;
 }
 
+static inline bool tc_test_is_kvm_recovery_user(tc_cond_t cond)
+{
+	return cond.kvm_recovery_user;
+}
+
 static inline bool tc_test_is_as_kvm_injected(tc_cond_t cond)
 {
 	bool injected;
@@ -621,6 +648,14 @@ static inline bool tc_test_is_as_kvm_copy_user(tc_cond_t cond)
 	return (injected) ? ((tc_test_is_kvm_fake_format(cond)) ?
 				tc_test_is_kvm_copy_user(cond) : false)
 			  : false;
+}
+
+static inline bool tc_test_is_as_kvm_recovery_user(tc_cond_t cond)
+{
+	bool injected;
+
+	injected = tc_test_is_kvm_fault_injected(cond);
+	return (injected) ? tc_test_is_kvm_recovery_user(cond) : false;
 }
 
 static inline bool tc_cond_is_special_mmu_aau(tc_cond_t cond)

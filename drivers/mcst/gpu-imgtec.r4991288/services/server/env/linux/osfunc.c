@@ -1220,11 +1220,11 @@ static void OSTimerCallbackBody(TIMER_CALLBACK_DATA *psTimerCBData)
 /*************************************************************************/ /*!
 @Function       OSTimerCallbackWrapper
 @Description    OS specific timer callback wrapper function
-@Input          uData    Timer callback data
+@Input          psTimer    Timer list structure
 */ /**************************************************************************/
-static void OSTimerCallbackWrapper(uintptr_t uData)
+static void OSTimerCallbackWrapper(struct timer_list *psTimer)
 {
-	TIMER_CALLBACK_DATA	*psTimerCBData = (TIMER_CALLBACK_DATA*)uData;
+	TIMER_CALLBACK_DATA *psTimerCBData = from_timer(psTimerCBData, psTimer, sTimer);
 
 #if defined(PVR_LINUX_TIMERS_USING_WORKQUEUES) || defined(PVR_LINUX_TIMERS_USING_SHARED_WORKQUEUE)
 	int res;

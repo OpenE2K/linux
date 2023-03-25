@@ -20,10 +20,14 @@
  */
 
 #include <linux/kvm_host.h>
+#include <linux/kvm_irqfd.h>
+#include <linux/irq.h>
 #include <trace/events/kvm.h>
+#include <asm/kvm/trace_kvm.h>
 #include <asm/kvm/trace_kvm_hv.h>
 
 #include <asm/epic.h>
+#include <asm/io_epic.h>
 #include <asm/msidef.h>
 #ifdef CONFIG_IA64
 #include <asm/iosapic.h>
@@ -33,6 +37,7 @@
 #include "pic.h"
 #include "ioapic.h"
 #include "ioepic.h"
+#include "sic-nbsr.h"
 
 #undef	DEBUG_IRQ_DELIVER_MODE
 #undef	DebugIRQ
@@ -53,20 +58,6 @@ static inline int kvm_irq_line_state(unsigned long *irq_state,
 		clear_bit(irq_source_id, irq_state);
 
 	return !!(*irq_state);
-}
-
-static int kvm_set_pic_irq(struct kvm_kernel_irq_routing_entry *e,
-				struct kvm *kvm, int irq_source_id, int level,
-				bool line_status)
-{
-#ifdef CONFIG_X86
-	struct kvm_pic *pic = pic_irqchip(kvm);
-	level = kvm_irq_line_state(&pic->irq_states[e->irqchip.pin],
-				   irq_source_id, level);
-	return kvm_pic_set_irq(pic, e->irqchip.pin, level);
-#else
-	return -1;
-#endif
 }
 
 static int kvm_set_ioapic_irq(struct kvm_kernel_irq_routing_entry *e,
@@ -694,63 +685,11 @@ int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
 	if (!level)
 		return -1;
 
-	trace_kvm_msi_set_irq(address, e->msi.data);
+	trace_kvm_e2k_msi(address, e->msi.data);
 
 	return kvm_set_pic_msi(e, kvm, irq_source_id, level, line_status);
 }
 EXPORT_SYMBOL(kvm_set_msi);
-
-int kvm_request_irq_source_id(struct kvm *kvm)
-{
-	unsigned long *bitmap = &kvm->arch.irq_sources_bitmap;
-	int irq_source_id;
-
-	mutex_lock(&kvm->irq_lock);
-	irq_source_id = find_first_zero_bit(bitmap, BITS_PER_LONG);
-
-	if (irq_source_id >= BITS_PER_LONG) {
-		printk(KERN_WARNING "kvm: exhaust allocatable IRQ sources!\n");
-		irq_source_id = -EFAULT;
-		goto unlock;
-	}
-
-	ASSERT(irq_source_id != KVM_USERSPACE_IRQ_SOURCE_ID);
-	set_bit(irq_source_id, bitmap);
-unlock:
-	mutex_unlock(&kvm->irq_lock);
-
-	return irq_source_id;
-}
-
-#if 0
-void kvm_free_irq_source_id(struct kvm *kvm, int irq_source_id)
-{
-	int i;
-
-	ASSERT(irq_source_id != KVM_USERSPACE_IRQ_SOURCE_ID);
-
-	mutex_lock(&kvm->irq_lock);
-	if (irq_source_id < 0 ||
-	    irq_source_id >= BITS_PER_LONG) {
-		printk(KERN_ERR "kvm: IRQ source ID out of range!\n");
-		goto unlock;
-	}
-	clear_bit(irq_source_id, &kvm->arch.irq_sources_bitmap);
-	if (!irqchip_in_kernel(kvm))
-		goto unlock;
-
-	for (i = 0; i < KVM_IOAPIC_NUM_PINS; i++) {
-		clear_bit(irq_source_id, &kvm->arch.vioapic->irq_states[i]);
-		if (i >= 16)
-			continue;
-#ifdef CONFIG_X86
-		clear_bit(irq_source_id, &pic_irqchip(kvm)->irq_states[i]);
-#endif
-	}
-unlock:
-	mutex_unlock(&kvm->irq_lock);
-}
-#endif
 
 void kvm_register_irq_mask_notifier(struct kvm *kvm, int irq,
 				    struct kvm_irq_mask_notifier *kimn)
@@ -795,45 +734,16 @@ int kvm_set_routing_entry(struct kvm *kvm,
 		DebugIRQ("routing IRQCHIP\n");
 		delta = 0;
 		switch (ue->u.irqchip.irqchip) {
-		case KVM_IRQCHIP_PIC_MASTER:
-			e->set = kvm_set_pic_irq;
-			max_pin = 16;
-			DebugIRQ("IRQCHIP is PIC master\n");
-			break;
-		case KVM_IRQCHIP_PIC_SLAVE:
-			e->set = kvm_set_pic_irq;
-			max_pin = 16;
-			delta = 8;
-			DebugIRQ("IRQCHIP is PIC slave\n");
-			break;
 		case KVM_IRQCHIP_IOAPIC:
 			max_pin = KVM_IOAPIC_NUM_PINS;
 			e->set = kvm_set_ioapic_irq;
 			DebugIRQ("IRQCHIP is IOAPIC pin #%d\n",
 				ue->u.irqchip.pin);
 			break;
-		case KVM_IRQCHIP_IOEPIC_NODE0:
+		case KVM_IRQCHIP_IOEPIC:
 			max_pin = KVM_IOEPIC_NUM_PINS;
 			e->set = kvm_set_ioepic_irq;
-			DebugIRQ("IRQCHIP is IOEPIC_NODE0 pin #%d\n",
-				ue->u.irqchip.pin);
-			break;
-		case KVM_IRQCHIP_IOEPIC_NODE1:
-			max_pin = KVM_IOEPIC_NUM_PINS;
-			e->set = kvm_set_ioepic_irq;
-			DebugIRQ("IRQCHIP is IOEPIC_NODE1 pin #%d\n",
-				ue->u.irqchip.pin);
-			break;
-		case KVM_IRQCHIP_IOEPIC_NODE2:
-			max_pin = KVM_IOEPIC_NUM_PINS;
-			e->set = kvm_set_ioepic_irq;
-			DebugIRQ("IRQCHIP is IOEPIC_NODE2 pin #%d\n",
-				ue->u.irqchip.pin);
-			break;
-		case KVM_IRQCHIP_IOEPIC_NODE3:
-			max_pin = KVM_IOEPIC_NUM_PINS;
-			e->set = kvm_set_ioepic_irq;
-			DebugIRQ("IRQCHIP is IOEPIC_NODE3 pin #%d\n",
+			DebugIRQ("IRQCHIP is IOEPIC pin #%d\n",
 				ue->u.irqchip.pin);
 			break;
 		default:
@@ -862,169 +772,207 @@ out:
 	return r;
 }
 
-#define IOAPIC_ROUTING_ENTRY(irq) \
-	{ .gsi = irq, .type = KVM_IRQ_ROUTING_IRQCHIP,	\
-	  .u.irqchip.irqchip = KVM_IRQCHIP_IOAPIC, .u.irqchip.pin = (irq) }
-#define ROUTING_ENTRY1(irq) IOAPIC_ROUTING_ENTRY(irq)
-
-#ifdef CONFIG_X86
-#  define PIC_ROUTING_ENTRY(irq) \
-	{ .gsi = irq, .type = KVM_IRQ_ROUTING_IRQCHIP,	\
-	  .u.irqchip.irqchip = SELECT_PIC(irq), .u.irqchip.pin = (irq) % 8 }
-#  define ROUTING_ENTRY2(irq) \
-	IOAPIC_ROUTING_ENTRY(irq), PIC_ROUTING_ENTRY(irq)
-#else
-#  define ROUTING_ENTRY2(irq) \
-	IOAPIC_ROUTING_ENTRY(irq)
-#endif
-
-#define IOAPIC_ROUTING_ENTRY_NODE_1(irq) \
-	{ .gsi = irq + 64, .type = KVM_IRQ_ROUTING_IRQCHIP,	\
-	  .u.irqchip.irqchip = KVM_IRQCHIP_IOAPIC, .u.irqchip.pin = (irq) }
-
-#define IOAPIC_ROUTING_ENTRY_NODE_2(irq) \
-	{ .gsi = irq + 128, .type = KVM_IRQ_ROUTING_IRQCHIP,	\
-	  .u.irqchip.irqchip = KVM_IRQCHIP_IOAPIC, .u.irqchip.pin = (irq) }
-
-#define IOAPIC_ROUTING_ENTRY_NODE_3(irq) \
-	{ .gsi = irq + 192, .type = KVM_IRQ_ROUTING_IRQCHIP,	\
-	  .u.irqchip.irqchip = KVM_IRQCHIP_IOAPIC, .u.irqchip.pin = (irq) }
-
-static const struct kvm_irq_routing_entry default_routing[] = {
-	ROUTING_ENTRY2(0), ROUTING_ENTRY2(1),
-	ROUTING_ENTRY2(2), ROUTING_ENTRY2(3),
-	ROUTING_ENTRY2(4), ROUTING_ENTRY2(5),
-	ROUTING_ENTRY2(6), ROUTING_ENTRY2(7),
-	ROUTING_ENTRY2(8), ROUTING_ENTRY2(9),
-	ROUTING_ENTRY2(10), ROUTING_ENTRY2(11),
-	ROUTING_ENTRY2(12), ROUTING_ENTRY2(13),
-	ROUTING_ENTRY2(14), ROUTING_ENTRY2(15),
-	ROUTING_ENTRY1(16), ROUTING_ENTRY1(17),
-	ROUTING_ENTRY1(18), ROUTING_ENTRY1(19),
-	ROUTING_ENTRY1(20), ROUTING_ENTRY1(21),
-	ROUTING_ENTRY1(22), ROUTING_ENTRY1(23),
-#ifdef CONFIG_IA64
-	ROUTING_ENTRY1(24), ROUTING_ENTRY1(25),
-	ROUTING_ENTRY1(26), ROUTING_ENTRY1(27),
-	ROUTING_ENTRY1(28), ROUTING_ENTRY1(29),
-	ROUTING_ENTRY1(30), ROUTING_ENTRY1(31),
-	ROUTING_ENTRY1(32), ROUTING_ENTRY1(33),
-	ROUTING_ENTRY1(34), ROUTING_ENTRY1(35),
-	ROUTING_ENTRY1(36), ROUTING_ENTRY1(37),
-	ROUTING_ENTRY1(38), ROUTING_ENTRY1(39),
-	ROUTING_ENTRY1(40), ROUTING_ENTRY1(41),
-	ROUTING_ENTRY1(42), ROUTING_ENTRY1(43),
-	ROUTING_ENTRY1(44), ROUTING_ENTRY1(45),
-	ROUTING_ENTRY1(46), ROUTING_ENTRY1(47),
-#endif
-#ifdef CONFIG_E2K
-	IOAPIC_ROUTING_ENTRY_NODE_1(0), IOAPIC_ROUTING_ENTRY_NODE_1(1),
-	IOAPIC_ROUTING_ENTRY_NODE_1(2), IOAPIC_ROUTING_ENTRY_NODE_1(3),
-	IOAPIC_ROUTING_ENTRY_NODE_1(4), IOAPIC_ROUTING_ENTRY_NODE_1(5),
-	IOAPIC_ROUTING_ENTRY_NODE_1(6), IOAPIC_ROUTING_ENTRY_NODE_1(7),
-	IOAPIC_ROUTING_ENTRY_NODE_1(8), IOAPIC_ROUTING_ENTRY_NODE_1(9),
-	IOAPIC_ROUTING_ENTRY_NODE_1(10), IOAPIC_ROUTING_ENTRY_NODE_1(11),
-	IOAPIC_ROUTING_ENTRY_NODE_1(12), IOAPIC_ROUTING_ENTRY_NODE_1(13),
-	IOAPIC_ROUTING_ENTRY_NODE_1(14), IOAPIC_ROUTING_ENTRY_NODE_1(15),
-	IOAPIC_ROUTING_ENTRY_NODE_1(16), IOAPIC_ROUTING_ENTRY_NODE_1(17),
-	IOAPIC_ROUTING_ENTRY_NODE_1(18), IOAPIC_ROUTING_ENTRY_NODE_1(19),
-	IOAPIC_ROUTING_ENTRY_NODE_1(20), IOAPIC_ROUTING_ENTRY_NODE_1(21),
-	IOAPIC_ROUTING_ENTRY_NODE_1(22), IOAPIC_ROUTING_ENTRY_NODE_1(23),
-
-	IOAPIC_ROUTING_ENTRY_NODE_2(0), IOAPIC_ROUTING_ENTRY_NODE_2(1),
-	IOAPIC_ROUTING_ENTRY_NODE_2(2), IOAPIC_ROUTING_ENTRY_NODE_2(3),
-	IOAPIC_ROUTING_ENTRY_NODE_2(4), IOAPIC_ROUTING_ENTRY_NODE_2(5),
-	IOAPIC_ROUTING_ENTRY_NODE_2(6), IOAPIC_ROUTING_ENTRY_NODE_2(7),
-	IOAPIC_ROUTING_ENTRY_NODE_2(8), IOAPIC_ROUTING_ENTRY_NODE_2(9),
-	IOAPIC_ROUTING_ENTRY_NODE_2(10), IOAPIC_ROUTING_ENTRY_NODE_2(11),
-	IOAPIC_ROUTING_ENTRY_NODE_2(12), IOAPIC_ROUTING_ENTRY_NODE_2(13),
-	IOAPIC_ROUTING_ENTRY_NODE_2(14), IOAPIC_ROUTING_ENTRY_NODE_2(15),
-	IOAPIC_ROUTING_ENTRY_NODE_2(16), IOAPIC_ROUTING_ENTRY_NODE_2(17),
-	IOAPIC_ROUTING_ENTRY_NODE_2(18), IOAPIC_ROUTING_ENTRY_NODE_2(19),
-	IOAPIC_ROUTING_ENTRY_NODE_2(20), IOAPIC_ROUTING_ENTRY_NODE_2(21),
-	IOAPIC_ROUTING_ENTRY_NODE_2(22), IOAPIC_ROUTING_ENTRY_NODE_2(23),
-
-	IOAPIC_ROUTING_ENTRY_NODE_3(0), IOAPIC_ROUTING_ENTRY_NODE_3(1),
-	IOAPIC_ROUTING_ENTRY_NODE_3(2), IOAPIC_ROUTING_ENTRY_NODE_3(3),
-	IOAPIC_ROUTING_ENTRY_NODE_3(4), IOAPIC_ROUTING_ENTRY_NODE_3(5),
-	IOAPIC_ROUTING_ENTRY_NODE_3(6), IOAPIC_ROUTING_ENTRY_NODE_3(7),
-	IOAPIC_ROUTING_ENTRY_NODE_3(8), IOAPIC_ROUTING_ENTRY_NODE_3(9),
-	IOAPIC_ROUTING_ENTRY_NODE_3(10), IOAPIC_ROUTING_ENTRY_NODE_3(11),
-	IOAPIC_ROUTING_ENTRY_NODE_3(12), IOAPIC_ROUTING_ENTRY_NODE_3(13),
-	IOAPIC_ROUTING_ENTRY_NODE_3(14), IOAPIC_ROUTING_ENTRY_NODE_3(15),
-	IOAPIC_ROUTING_ENTRY_NODE_3(16), IOAPIC_ROUTING_ENTRY_NODE_3(17),
-	IOAPIC_ROUTING_ENTRY_NODE_3(18), IOAPIC_ROUTING_ENTRY_NODE_3(19),
-	IOAPIC_ROUTING_ENTRY_NODE_3(20), IOAPIC_ROUTING_ENTRY_NODE_3(21),
-	IOAPIC_ROUTING_ENTRY_NODE_3(22), IOAPIC_ROUTING_ENTRY_NODE_3(23),
-#endif
-};
-
-int kvm_setup_apic_irq_routing(struct kvm *kvm)
+bool kvm_arch_has_irq_bypass(void)
 {
-	return kvm_set_irq_routing(kvm, default_routing,
-				   ARRAY_SIZE(default_routing), 0);
+	return kvm_irq_bypass;
 }
 
-int kvm_setup_epic_irq_routing(struct kvm *kvm)
+int kvm_irq_bypass_check_msi(struct kvm *kvm, struct kvm_kernel_irq_routing_entry *e)
 {
-	int i, node, ret;
-	struct kvm_irq_routing_entry *default_routing_ioepic;
-	int nr_entries = KVM_IOEPIC_NUM_PINS * 4;
+	kvm_nbsr_t *nbsr = kvm->arch.nbsr;
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[0];
+	struct kvm_vcpu *vcpu;
+	union IO_EPIC_MSG_ADDR_LOW addr_low;
+	union IO_EPIC_MSG_DATA data;
+	u32 g_rt_msi_lo, g_rt_msi_hi;
+	int i;
 
-	default_routing_ioepic = vmalloc(sizeof(struct kvm_irq_routing_entry) * nr_entries);
+	addr_low.raw = e->msi.address_lo;
+	data.raw = e->msi.data;
 
-	for (i = 0; i < nr_entries; i++) {
-		node = i / 64;
+	mutex_lock(&nbsr->lock);
+	g_rt_msi_lo = node_nbsr->regs[offset_to_no(SIC_rt_msi)];
+	g_rt_msi_hi = node_nbsr->regs[offset_to_no(SIC_rt_msi_h)];
+	mutex_unlock(&nbsr->lock);
 
-		default_routing_ioepic[i].gsi = i;
-		default_routing_ioepic[i].type = KVM_IRQ_ROUTING_IRQCHIP;
-		default_routing_ioepic[i].flags = 0;
-		default_routing_ioepic[i].u.irqchip.irqchip = KVM_IRQCHIP_IOEPIC_NODE0 + node;
-		default_routing_ioepic[i].u.irqchip.pin = i % 64;
+	/* Check for valid MSI address, msg_type, dlvm */
+	if (g_rt_msi_hi != e->msi.address_hi ||
+			g_rt_msi_lo >> E2K_SIC_ALIGN_RT_MSI != addr_low.bits.MSI ||
+			addr_low.bits.msg_type ||
+			data.bits.dlvm)
+		return -EINVAL;
+
+	/* Check for valid destination id */
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		int cepic_id = kvm_vcpu_to_full_cepic_id(vcpu);
+		if (kvm_epic_match_dest(cepic_id, -1, CEPIC_ICR_DST_FULL, addr_low.bits.dst))
+			return 0;
 	}
 
+	return -EINVAL;
+}
 
-	ret = kvm_set_irq_routing(kvm, default_routing_ioepic, nr_entries, 0);
+int kvm_irq_bypass_get_msi_entry(struct kvm *kvm, unsigned int host_irq,
+		unsigned int guest_irq, struct ioepic_vcpu_info *vcpu_info)
+{
+	struct kvm_kernel_irq_routing_entry *e;
+	struct kvm_irq_routing_table *irq_rt;
+	struct epic_irq_cfg *cfg = irq_get_chip_data(host_irq);
+	int idx, ret = 0;
 
-	vfree(default_routing_ioepic);
+	if (!kvm_arch_has_assigned_device(kvm))
+		return -EINVAL;
 
+	idx = srcu_read_lock(&kvm->irq_srcu);
+	irq_rt = srcu_dereference(kvm->irq_routing, &kvm->irq_srcu);
+	if (guest_irq >= irq_rt->nr_rt_entries ||
+	    hlist_empty(&irq_rt->map[guest_irq])) {
+		pr_warn("no route for guest_irq %u/%u (broken user space?)\n",
+			     guest_irq, irq_rt->nr_rt_entries);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	hlist_for_each_entry(e, &irq_rt->map[guest_irq], link) {
+		if (e->type != KVM_IRQ_ROUTING_MSI)
+			continue;
+
+		/* There should be only one MSI routing entry for a given guest irq */
+		if (vcpu_info->msi_valid) {
+			pr_warn("%s(): multiple MSI routing entries for guest irq %d\n",
+				__func__, guest_irq);
+			ret = -EINVAL;
+			goto out;
+		}
+
+		ret = kvm_irq_bypass_check_msi(kvm, e);
+		if (!ret) {
+			/* Valid configuration: pass to device, except use host MSI address */
+			get_io_epic_msi(cfg->node, &vcpu_info->msi.address_lo,
+				&vcpu_info->msi.address_hi);
+			vcpu_info->msi.address_lo |= e->msi.address_lo & (E2K_SIC_SIZE_RT_MSI - 1);
+			vcpu_info->msi.data = e->msi.data;
+		} else {
+			/*
+			 * If guest has an broken MSI configuration (e.g. between writing
+			 * MSI registers) - write zeroes to the device.
+			 */
+			pr_warn("%s(): invalid guest MSI configuration: irq %d : addr_hi = 0x%08x, addr_lo = 0x%08x, data = 0x%08x\n",
+				__func__, guest_irq, e->msi.address_hi, e->msi.address_lo,
+				e->msi.data);
+			vcpu_info->msi.address_hi = 0;
+			vcpu_info->msi.address_lo = 0;
+			vcpu_info->msi.data = 0;
+		}
+		vcpu_info->msi_valid = true;
+	}
+out:
+	srcu_read_unlock(&kvm->irq_srcu, idx);
 	return ret;
 }
 
-void kvm_irq_routing_update_epic(struct kvm *kvm)
+int kvm_arch_irq_bypass_add_producer(struct irq_bypass_consumer *cons,
+				      struct irq_bypass_producer *prod)
 {
-	if (ioepic_in_kernel(kvm) || !irqchip_in_kernel(kvm))
-		return;
-	kvm_make_scan_ioepic_request(kvm);
+	struct kvm_kernel_irqfd *irqfd =
+		container_of(cons, struct kvm_kernel_irqfd, consumer);
+	struct kvm *kvm = irqfd->kvm;
+	struct ioepic_vcpu_info info = {
+		.valid = true,
+		.msi_valid = false,
+		.ioepic_pt_pin = &kvm->arch.ioepic_pt_pin,
+		.vmid = kvm->arch.vmid.nr,
+		.int_table = __pa(page_address(kvm->arch.epic_pages))
+	};
+	int ret;
+
+	ret = kvm_irq_bypass_get_msi_entry(kvm, prod->irq, irqfd->gsi, &info);
+	if (ret)
+		return ret;
+
+	ret = irq_set_vcpu_affinity(prod->irq, &info);
+	if (!ret)
+		irqfd->producer = prod;
+
+	/* Do not forward error for PCI INTx */
+	if (ret == -EACCES)
+		return 0;
+	else
+		return ret;
+}
+void kvm_arch_irq_bypass_del_producer(struct irq_bypass_consumer *cons,
+				      struct irq_bypass_producer *prod)
+{
+	struct kvm_kernel_irqfd *irqfd =
+		container_of(cons, struct kvm_kernel_irqfd, consumer);
+	struct ioepic_vcpu_info info = {
+		.valid = false,
+		.ioepic_pt_pin = &irqfd->kvm->arch.ioepic_pt_pin
+	};
+	int ret;
+
+	irqfd->producer = NULL;
+
+	ret = irq_set_vcpu_affinity(prod->irq, &info);
+	if (ret && ret != -EACCES)
+		pr_err("%s(): error setting vcpu affinity\n", __func__);
 }
 
-void kvm_post_irq_routing_update_epic(struct kvm *kvm)
+void kvm_arch_irq_bypass_stop(struct irq_bypass_consumer *cons)
 {
-	if (ioepic_in_kernel(kvm) || !irqchip_in_kernel(kvm))
-		return;
-	kvm_make_scan_ioepic_request(kvm);
+	/* Nothing to do */
 }
 
-void kvm_irq_routing_update_apic(struct kvm *kvm)
+void kvm_arch_irq_bypass_start(struct irq_bypass_consumer *cons)
 {
-	if (ioapic_in_kernel(kvm) || !irqchip_in_kernel(kvm))
-		return;
-	kvm_make_scan_ioapic_request(kvm);
+	/* Nothing to do */
 }
 
-void kvm_post_irq_routing_update_apic(struct kvm *kvm)
+int kvm_arch_update_irqfd_routing(struct kvm *kvm, unsigned int host_irq,
+				   uint32_t guest_irq, bool set)
 {
-	if (ioapic_in_kernel(kvm) || !irqchip_in_kernel(kvm))
-		return;
-	kvm_make_scan_ioapic_request(kvm);
+	struct ioepic_vcpu_info info = {
+		.valid = true,
+		.msi_valid = false,
+		.ioepic_pt_pin = &kvm->arch.ioepic_pt_pin,
+		.vmid = kvm->arch.vmid.nr,
+		.int_table = __pa(page_address(kvm->arch.epic_pages))
+	};
+	int ret;
+
+	ret = kvm_irq_bypass_get_msi_entry(kvm, host_irq, guest_irq, &info);
+	if (ret)
+		return ret;
+
+	/* Routing updates come from QEMU, and QEMU controls only MSI routes */
+	if (!info.msi_valid) {
+		pr_info("%s(): skipping non-MSI route (guest irq %d)\n", __func__, guest_irq);
+		return 0;
+	}
+
+	pr_info("%s(): MSI irq %d : addr_hi = 0x%08x, addr_lo = 0x%08x, data = 0x%08x\n",
+		__func__, host_irq, info.msi.address_hi, info.msi.address_lo, info.msi.data);
+
+	/* No need to call set_vcpu_affinity, since we only need to update the MSI config */
+	pci_write_msi_msg(host_irq, &info.msi);
+
+	return 0;
 }
 
-void kvm_arch_irq_routing_update(struct kvm *kvm)
+void kvm_arch_start_assignment(struct kvm *kvm)
 {
-	kvm_irq_routing_update_pic(kvm);
+	atomic_inc(&kvm->arch.assigned_device_count);
 }
+EXPORT_SYMBOL_GPL(kvm_arch_start_assignment);
 
-void kvm_arch_post_irq_routing_update(struct kvm *kvm)
+void kvm_arch_end_assignment(struct kvm *kvm)
 {
-	kvm_post_irq_routing_update_pic(kvm);
+	atomic_dec(&kvm->arch.assigned_device_count);
 }
+EXPORT_SYMBOL_GPL(kvm_arch_end_assignment);
+
+bool kvm_arch_has_assigned_device(struct kvm *kvm)
+{
+	return atomic_read(&kvm->arch.assigned_device_count);
+}
+EXPORT_SYMBOL_GPL(kvm_arch_has_assigned_device);

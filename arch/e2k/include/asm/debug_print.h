@@ -4,7 +4,6 @@
 #include <linux/sched.h>
 #include <asm/current.h>
 
-#ifdef __KERNEL__
 #ifndef __ASSEMBLY__
 
 #ifdef E2K_P2V
@@ -41,6 +40,5 @@ do { \
 
 #endif
 
-#endif
 #endif
 #endif /* _DEBUG_PRINT_H_ */

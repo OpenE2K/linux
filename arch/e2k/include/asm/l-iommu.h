@@ -15,9 +15,7 @@
 #include <asm-l/swiotlb.h>
 
 
-#ifdef CONFIG_PM_SLEEP
-extern void l_iommu_stop_all(void);
-#endif
+extern void l_iommu_shutdown(void);
 
 #define L_IOMMU_CTRL		SIC_iommu_ctrl
 #define L_IOMMU_FLUSH_ALL	SIC_iommu_flush

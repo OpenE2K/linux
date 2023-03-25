@@ -547,7 +547,7 @@ pgprot_t ttm_io_prot(uint32_t caching_flags, pgprot_t tmp)
 #endif
 #if defined(__sparc__)
 #if defined(CONFIG_MCST) && defined(CONFIG_E90S)
-	if (e90s_get_cpu_type() > E90S_CPU_R2000 &&
+	if (e90s_get_cpu_type() >= E90S_CPU_R2000P + 1 /*Bug 140644*/ &&
 			caching_flags & TTM_PL_FLAG_WC) {
 		tmp = pgprot_writecombine(tmp);
 	} else {

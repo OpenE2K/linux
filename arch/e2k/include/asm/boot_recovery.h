@@ -6,6 +6,8 @@
 #ifndef _E2K_BOOT_RECOVERY_H
 #define _E2K_BOOT_RECOVERY_H
 
+#include <linux/sched.h>
+
 #include <asm/types.h>
 #include <asm/console.h>
 #include <asm/cpu_regs_types.h>

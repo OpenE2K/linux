@@ -34,23 +34,6 @@
 
 #ifdef	CONFIG_VIRTUALIZATION
 
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-static inline void
-copy_guest_user_pgd_to_kernel_root_pt(pgd_t *user_pgd)
-{
-	KVM_BUG_ON(MMU_IS_SEPARATE_PT());
-	copy_user_pgd_to_kernel_pgd_range(cpu_kernel_root_pt, user_pgd,
-						0, GUEST_USER_PTRS_PER_PGD);
-}
-static inline void
-copy_guest_kernel_pgd_to_kernel_root_pt(pgd_t *user_pgd)
-{
-	KVM_BUG_ON(MMU_IS_SEPARATE_PT());
-	copy_user_pgd_to_kernel_pgd_range(cpu_kernel_root_pt, user_pgd,
-						GUEST_KERNEL_PGD_PTRS_START,
-						GUEST_KERNEL_PGD_PTRS_END);
-}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 static inline int
 kvm_init_new_context(struct kvm *kvm, gmm_struct_t *gmm)
 {
@@ -90,7 +73,6 @@ kvm_mmu_set_init_gmm_root(struct kvm_vcpu *vcpu, hpa_t root)
 	}
 	if (VALID_PAGE(root)) {
 		gmm->root_hpa = root;
-		gmm->gk_root_hpa = root;
 	}
 	if (is_sep_virt_spaces(vcpu)) {
 		root_gpa = kvm_get_space_type_guest_os_root(vcpu);
@@ -117,43 +99,66 @@ static inline pgd_t *
 kvm_mmu_get_gmm_gk_root(struct gmm_struct *gmm)
 {
 	GTI_BUG_ON(gmm == NULL);
-	if (!VALID_PAGE(gmm->gk_root_hpa))
+	if (!VALID_PAGE(gmm->gk_root_hpa)) {
 		return NULL;
+	}
 	return (pgd_t *)__va(gmm->gk_root_hpa);
 }
+
+static inline hpa_t
+kvm_mmu_load_the_init_gmm_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+{
+	hpa_t root;
+
+	GTI_BUG_ON(!pv_vcpu_is_init_gmm(vcpu, gmm));
+
+	root = gmm->root_hpa;
+	GTI_BUG_ON(!VALID_PAGE(root));
+
+	if (unlikely(is_sep_virt_spaces(vcpu))) {
+		vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, gmm->os_pptb);
+		kvm_set_space_type_spt_os_root(vcpu, root);
+	} else {
+		vcpu->arch.mmu.set_vcpu_u_pptb(vcpu, gmm->u_pptb);
+		vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, gmm->u_vptb);
+		kvm_set_space_type_spt_os_root(vcpu, root);
+		kvm_set_space_type_spt_u_root(vcpu, root);
+		kvm_set_space_type_spt_gk_root(vcpu, root);
+	}
+	return root;
+}
+
+static inline hpa_t
+kvm_mmu_load_the_user_gmm_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+{
+	hpa_t root, gk_root;
+
+	root = gmm->root_hpa;
+	GTI_BUG_ON(!VALID_PAGE(root));
+	gk_root = gmm->gk_root_hpa;
+	GTI_BUG_ON(!VALID_PAGE(gk_root));
+
+	vcpu->arch.mmu.set_vcpu_u_pptb(vcpu, gmm->u_pptb);
+	kvm_set_space_type_spt_u_root(vcpu, root);
+	kvm_set_space_type_spt_gk_root(vcpu, gk_root);
+	if (likely(!is_sep_virt_spaces(vcpu))) {
+		vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, gmm->u_pptb);
+		kvm_set_space_type_spt_os_root(vcpu, root);
+	}
+	return gk_root;
+}
+
 static inline pgd_t *
 kvm_mmu_load_the_gmm_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
 {
-	pgd_t *root, *gk_root;
-	bool u_space = gmm != pv_vcpu_get_init_gmm(vcpu);
+	hpa_t root, gk_root;
 
-	GTI_BUG_ON(vcpu == NULL);
-	root = kvm_mmu_get_gmm_root(gmm);
-	if (unlikely(root == NULL))
-		return NULL;
-
-	if (unlikely(!u_space)) {
-		if (unlikely(is_sep_virt_spaces(vcpu))) {
-			vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, gmm->os_pptb);
-			kvm_set_space_type_spt_os_root(vcpu, (hpa_t)__pa(root));
-		} else {
-			vcpu->arch.mmu.set_vcpu_u_pptb(vcpu, gmm->u_pptb);
-			vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, gmm->u_vptb);
-			kvm_set_space_type_spt_os_root(vcpu, (hpa_t)__pa(root));
-			kvm_set_space_type_spt_u_root(vcpu, (hpa_t)__pa(root));
-			kvm_set_space_type_spt_gk_root(vcpu, (hpa_t)__pa(root));
-		}
-		return root;
+	if (unlikely(pv_vcpu_is_init_gmm(vcpu, gmm))) {
+		root = kvm_mmu_load_the_init_gmm_root(vcpu, gmm);
+		return (pgd_t *)__va(root);
 	} else {
-		vcpu->arch.mmu.set_vcpu_u_pptb(vcpu, gmm->u_pptb);
-		kvm_set_space_type_spt_u_root(vcpu, (hpa_t)__pa(root));
-		gk_root = kvm_mmu_get_gmm_gk_root(gmm);
-		kvm_set_space_type_spt_gk_root(vcpu, (hpa_t)__pa(gk_root));
-		if (likely(!is_sep_virt_spaces(vcpu))) {
-			vcpu->arch.mmu.set_vcpu_os_pptb(vcpu, gmm->u_pptb);
-			kvm_set_space_type_spt_os_root(vcpu, (hpa_t)__pa(root));
-		}
-		return gk_root;
+		gk_root = kvm_mmu_load_the_user_gmm_root(vcpu, gmm);
+		return (pgd_t *)__va(gk_root);
 	}
 }
 
@@ -206,7 +211,16 @@ kvm_mmu_load_init_root(struct kvm_vcpu *vcpu)
 {
 	return kvm_mmu_get_init_gmm_root(vcpu->kvm);
 }
+
+static inline hpa_t
+kvm_mmu_load_the_init_gmm_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm)
+{
+	return (hpa_t)kvm_mmu_load_init_root(vcpu);
+}
+
 #endif	/* CONFIG_KVM_HV_MMU */
+
+extern hpa_t kvm_convert_to_init_gmm(struct kvm_vcpu *vcpu, gthread_info_t *gti);
 
 static inline void
 switch_guest_pgd(pgd_t *next_pgd)
@@ -224,30 +238,23 @@ switch_guest_pgd(pgd_t *next_pgd)
 	KVM_BUG_ON(next_pgd == NULL);
 
 	if (unlikely(test_ti_thread_flag(thread_info, TIF_PARAVIRT_GUEST))) {
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-		if (!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL)
-			pgd_to_set = NULL;
-		else
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-			pgd_to_set = thread_info->vcpu_pgd;
+		pgd_to_set = thread_info->vcpu_pgd;
 		if (pgd_to_set) {
 			/* copy user part of PT including guest kernel part */
 			copy_pgd_range(pgd_to_set, next_pgd,
 						0, USER_PTRS_PER_PGD);
 		}
 	} else {
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-		if (!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL)
-			pgd_to_set = NULL;
-		else
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-			pgd_to_set = next_pgd;
+		pgd_to_set = next_pgd;
 	}
 
 	KVM_BUG_ON(PCSHTP_SIGN_EXTEND(NATIVE_READ_PCSHTP_REG_SVALUE()) != 0);
 
 	if (pgd_to_set != NULL) {
 		reload_root_pgd(pgd_to_set);
+		/* ALso update context for kvm_switch_mmu_pt_regs() */
+		if (!MMU_IS_SEPARATE_PT())
+			thread_info->vcpu->arch.sw_ctxt.sh_u_pptb = __pa(pgd_to_set);
 		/* FIXME: support of guest secondary space is not yet implemented
 		reload_secondary_page_dir(mm);
 		*/
@@ -267,9 +274,10 @@ switch_guest_mm(gthread_info_t *next_gti, struct gmm_struct *next_gmm)
 	DebugKVMSW("started to switch guest mm from GPID #%d to GPID #%d\n",
 		cur_gti->gpid->nid.nr, next_gti->gpid->nid.nr);
 	active_gmm = pv_vcpu_get_active_gmm(vcpu);
-	if (next_gmm == NULL ||
-			next_gti->gmm == NULL ||
-					next_gti->gmm_in_release) {
+	if (unlikely(next_gti->gmm_in_release)) {
+		/* it need switch to init gmm from guest user gmm in release */
+		next_gmm = pv_vcpu_get_init_gmm(vcpu);
+	} else if (next_gmm == NULL || next_gti->gmm == NULL) {
 #ifdef	DO_NOT_USE_ACTIVE_GMM
 		/* switch to guest kernel thread, but optimization */
 		/* has been turned OFF, so switch to init gmm & PTs */
@@ -303,6 +311,11 @@ switch_guest_mm(gthread_info_t *next_gti, struct gmm_struct *next_gmm)
 			goto to_init_root;
 		}
 		pv_vcpu_set_gmm(vcpu, next_gmm);
+	} else if (next_gti->gmm_in_release) {
+		hpa_t root_hpa;
+
+		root_hpa = kvm_convert_to_init_gmm(vcpu, next_gti);
+		next_pgd = (pgd_t *)__va(root_hpa);
 	} else {
 to_init_root:
 		next_pgd = kvm_mmu_load_init_root(vcpu);
@@ -332,10 +345,10 @@ out:
 static inline bool
 kvm_switch_to_init_guest_mm(struct kvm_vcpu *vcpu)
 {
-	gthread_info_t	*cur_gti = pv_vcpu_get_gti(vcpu);
+	gthread_info_t *cur_gti = pv_vcpu_get_gti(vcpu);
 	gmm_struct_t *init_gmm;
 	gmm_struct_t *active_gmm;
-	pgd_t *root;
+	hpa_t root_hpa;
 
 	init_gmm = pv_vcpu_get_init_gmm(vcpu);
 	active_gmm = pv_vcpu_get_active_gmm(vcpu);
@@ -344,13 +357,13 @@ kvm_switch_to_init_guest_mm(struct kvm_vcpu *vcpu)
 		return false;
 	}
 	KVM_BUG_ON(cur_gti->gmm != active_gmm);
-	root = kvm_mmu_load_the_gmm_root(vcpu, init_gmm);
-	switch_guest_pgd(root);
+	root_hpa = kvm_mmu_load_the_init_gmm_root(vcpu, init_gmm);
+	switch_guest_pgd((pgd_t *)__va(root_hpa));
 #ifdef	CONFIG_SMP
 	/* Stop flush ipis for the previous mm */
 	cpumask_clear_cpu(raw_smp_processor_id(), gmm_cpumask(active_gmm));
 #endif	/* CONFIG_SMP */
-	cur_gti->gmm_in_release = true;
+	kvm_init_gmm_get(vcpu, cur_gti);
 	pv_vcpu_set_active_gmm(vcpu, init_gmm);
 	pv_vcpu_clear_gmm(vcpu);
 	return true;

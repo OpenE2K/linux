@@ -187,7 +187,7 @@ unsigned long e2k_ptr_ptr(long low, long hiw, unsigned int min_size)
 }
 
 static inline
-unsigned long e2k_ptr_curptr(long low, long hiw)
+unsigned long e2k_ptr_curptr(u64 low, u64 hiw)
 {
 	e2k_ptr_t ptr;
 
@@ -198,7 +198,7 @@ unsigned long e2k_ptr_curptr(long low, long hiw)
 }
 
 static inline
-unsigned int e2k_ptr_size(long low, long hiw, unsigned int min_size)
+unsigned int e2k_ptr_size(u64 low, u64 hiw, unsigned int min_size)
 {
 	e2k_ptr_hi_t hi;
 	unsigned int ptr_size;
@@ -215,16 +215,16 @@ unsigned int e2k_ptr_size(long low, long hiw, unsigned int min_size)
 	}
 }
 
-static inline int e2k_ptr_str_check(char __user *str, u64 max_size)
+static inline bool e2k_ptr_str_check(char __user *str, u64 max_size)
 {
 	long slen;
 
 	slen = strnlen_user(str, max_size);
 
 	if (unlikely(!slen || slen > max_size))
-		return 1;
+		return true;
 
-	return 0;
+	return false;
 }
 
 static inline char __user *e2k_ptr_str(long low, long hiw, u64 sbr_hi)

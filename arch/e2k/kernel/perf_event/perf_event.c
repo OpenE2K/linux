@@ -93,6 +93,7 @@ static void e2k_pmu_read(struct perf_event *event);
 static int handle_event(struct perf_event *event, struct pt_regs *regs)
 {
 	struct hw_perf_event *hwc = &event->hw;
+	unsigned long ip = perf_instruction_pointer(regs);
 	struct perf_sample_data data;
 
 	/*
@@ -114,10 +115,11 @@ static int handle_event(struct perf_event *event, struct pt_regs *regs)
 			return 0;
 	}
 
-	if (!(event->attr.exclude_idle && is_idle_task(current)))
+	if (event->attr.exclude_idle && is_idle_task(current) &&
+			(cpu_in_idle(ip) || irq_count() == NMI_OFFSET))
+		return perf_event_account_interrupt(event);
+	else
 		return perf_event_overflow(event, &data, regs);
-
-	return 0;
 }
 
 static s64 monitor_pause(struct perf_event *event,

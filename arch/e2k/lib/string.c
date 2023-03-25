@@ -265,14 +265,8 @@ notrace_on_host void *__memcpy(void *dst, const void *src, size_t n)
 		n -= length;
 
 		/* Copy with tags. This is useful for access_process_vm. */
-		if (likely(length)) {
-			fast_tagged_memory_copy(dst, src, length,
-				TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				true);
-		}
+		if (likely(length))
+			fast_tagged_memory_copy(dst, src, length, true);
 
 		src += length;
 		dst += length;
@@ -384,12 +378,8 @@ void __memcpy_fromio(void *__restrict dst, const volatile void __iomem *__restri
 
 		n -= length;
 
-		fast_tagged_memory_copy(dst, (__force const void *__restrict) src, length,
-				TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				0);
+		fast_tagged_memory_copy(dst, (__force const void *__restrict) src,
+					length, 0);
 
 		src += length;
 		dst += length;
@@ -560,12 +550,8 @@ void __memcpy_toio(volatile void __iomem *__restrict dst, const void *__restrict
 
 		n -= length;
 
-		fast_tagged_memory_copy((__force void *__restrict) dst, src, length,
-				TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				true);
+		fast_tagged_memory_copy((__force void *__restrict) dst, src,
+					length, true);
 
 		src += length;
 		dst += length;
@@ -612,22 +598,12 @@ void __tagged_memcpy_8(void *dst, const void *src, size_t n)
 	for (;;) {
 		/* Copy with 8192 bytes blocks */
 		if (n >= 2 * 8192) {
-			fast_tagged_memory_copy(dst, src, 8192,
-				TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				true);
+			fast_tagged_memory_copy(dst, src, 8192, true);
 			n -= 8192;
 			src += 8192;
 			dst += 8192;
 		} else {
-			fast_tagged_memory_copy(dst, src, n & ~0x7,
-				TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-				true);
+			fast_tagged_memory_copy(dst, src, n & ~0x7, true);
 			break;
 		}
 	};
@@ -768,6 +744,201 @@ int memcmp(const void *p1, const void *p2, size_t n)
 }
 EXPORT_SYMBOL(memcmp);
 #endif
+
+
+#ifdef __HAVE_ARCH_MEMCHR
+typedef long long __v2di __attribute__((__vector_size__(16)));
+
+static inline size_t trailing_zero_bytes(u64 x)
+{
+	return __builtin_e2k_lzcntd(__builtin_e2k_bitrevd(x)) >> 3;
+}
+
+static inline size_t leading_zero_bytes(u64 x)
+{
+	return __builtin_e2k_lzcntd(x) >> 3;
+}
+
+/* bytes with 'c_in' -> bit mask */
+static inline u32 cmp(__v2di x, __v2di qcharmask)
+{
+	return __builtin_e2k_qpsgn2mskb(__builtin_e2k_qpcmpeqb(x, qcharmask));
+}
+
+/* bytes with 'c_in' -> predicate */
+static inline u32 cmp_pred(__v2di x, __v2di qcharmask)
+{
+	return __builtin_e2k_qpcmpeqbop(x, qcharmask);
+}
+
+#define E2K_BYTES_FROM_ALIGN(ptr, align) (((long) (ptr)) & ((align) - 1))
+#define PTR_ALIGN_DOWN(p, a) ((typeof(p)) ALIGN_DOWN((unsigned long) (p), (a)))
+
+/**
+ * memchr - Find a character in an area of memory.
+ * @s: The memory area
+ * @c: The byte to search for
+ * @n: The size of the area.
+ *
+ * returns the address of the first occurrence of @c, or %NULL
+ * if @c is not found
+ *
+ * Implementation is taken from glibc.
+ */
+void *memchr(const void *s, int c_in, size_t n)
+{
+	const void *end_ptr = s + n;
+	unsigned long long charmask;
+	size_t tail;
+	unsigned char c = (unsigned char) c_in;
+
+	if (n == 0)
+		return NULL;
+
+	if (end_ptr < s)
+		end_ptr = (const char *) ~0UL;
+
+	/* Set up a longword, each of whose bytes is C.  */
+	charmask = __builtin_e2k_pshufb(c, c, 0);
+
+#if __iset__ <= 4
+
+	u64 align = E2K_BYTES_FROM_ALIGN(s, 8);
+	const u64 *longword_ptr = PTR_ALIGN_DOWN(s, 8);
+	u64 longword = *longword_ptr++;
+	u64 mask = __builtin_e2k_pcmpeqb(longword, charmask) &
+			((-1LL) << (align * 8));
+
+	if (mask != 0 || longword_ptr >= end_ptr) {
+		tail = trailing_zero_bytes(mask);
+		s = (const char *) (longword_ptr - 1) + tail;
+		return s >= end_ptr ? NULL : (void *) s;
+	}
+
+	longword = *longword_ptr++;
+	mask = __builtin_e2k_pcmpeqb(longword, charmask);
+	if (mask == 0 && longword_ptr < end_ptr) {
+		/* We will test a 8 bytes at a time. */
+#pragma noprefetch
+#pragma loop count (100)
+#pragma unroll (1)
+		for (;;) {
+			longword = *longword_ptr++;
+			mask = __builtin_e2k_pcmpeqb(longword, charmask);
+			if (!(mask == 0 && longword_ptr < end_ptr))
+				break;
+		}
+	}
+	/* Which of the bytes was the zero? */
+	tail = trailing_zero_bytes(mask);
+	s = (const char *) (longword_ptr - 1) + tail;
+
+#elif __iset__ <= 5
+
+	const __v2di qcharmask = __builtin_e2k_qppackdl(charmask, charmask);
+	u32 align = E2K_BYTES_FROM_ALIGN(s, 16);
+	const __v2di *qword_ptr = PTR_ALIGN_DOWN(s, 16);
+	__v2di qword = *qword_ptr++;
+	u32 mask = cmp(qword, qcharmask) & ((-1) << align);
+
+	if (mask != 0 || (const void *) qword_ptr >= end_ptr) {
+		/* Which of the bytes was the zero? */
+		tail = __builtin_ctz(mask);
+		s = (const void *) (qword_ptr - 1) + tail;
+		return s >= end_ptr ? NULL : (void *) s;
+	}
+
+	qword = *qword_ptr++;
+	mask = cmp(qword, qcharmask);
+	if (mask == 0 && qword_ptr < end_ptr) {
+		/* We will test a 16 bytes at a time. */
+#pragma noprefetch
+#pragma loop count (15)
+		for (;;) {
+			qword = *qword_ptr++;
+			mask = cmp(qword, qcharmask);
+			if (!(mask == 0 && qword_ptr < end_ptr))
+				break;
+		}
+	}
+
+	/* Which of the bytes was the zero? */
+	tail = __builtin_ctz(mask);
+	s = (const void *) (qword_ptr - 1) + tail;
+
+#else /* __iset__ > 5 */
+
+	const __v2di qcharmask = __builtin_e2k_qppackdl(charmask, charmask);
+	const __v2di *qword_ptr = PTR_ALIGN_DOWN(s, 16);
+	__v2di qword, qword0, qword1;
+	u32 mask;
+
+	if (unlikely(E2K_BYTES_FROM_ALIGN(s, 4096) > 4080 &&
+			/* closely to page border */
+			PTR_ALIGN_DOWN(s, 4096) == PTR_ALIGN_DOWN(end_ptr - 1, 4096))) {
+		/* string ends at the same page */
+		/* Offsets 4081-4095 will be aligned into 4080 thus fit into page */
+		mask = cmp(*qword_ptr, qcharmask) >> (s - (const void *) qword_ptr);
+		/* Which of the bytes was C? */
+		s += __builtin_ctz(mask);
+		return s >= end_ptr ? NULL : (void *) s;
+	}
+
+	/* first qword load is unaligned */
+	qword = ((__v2di *) s)[0];
+	if (cmp_pred(qword, qcharmask) || s + 16 >= end_ptr) {
+		/* Which of the bytes was C? */
+		mask = cmp(qword, qcharmask);
+		s += __builtin_ctz(mask);
+		return s >= end_ptr ? NULL : (void *) s;
+	}
+
+	/* next qword load is aligned */
+	qword = qword_ptr[1];
+	if (cmp_pred(qword, qcharmask) || (const void *) (qword_ptr + 2) >= end_ptr) {
+		/* Which of the bytes was C? */
+		mask = cmp(qword, qcharmask);
+		tail = __builtin_ctz(mask);
+		s = (const void *) (qword_ptr + 1) + tail;
+		return s >= end_ptr ? NULL : (void *) s;
+	}
+	qword_ptr = PTR_ALIGN_DOWN(qword_ptr + 2, 32);
+
+	qword0 = qword_ptr[0];
+	qword1 = qword_ptr[1];
+	qword_ptr += 2;
+	if (!(cmp_pred(qword0, qcharmask) || cmp_pred(qword1, qcharmask) ||
+			qword_ptr >= end_ptr)) {
+		/* We will test a 32 bytes at a time.  */
+#pragma noprefetch
+#pragma loop count (100)
+#pragma unroll (1)
+		for (;;) {
+			qword0 = qword_ptr[0];
+			qword1 = qword_ptr[1];
+			qword_ptr += 2;
+			if (cmp_pred(qword0, qcharmask) || cmp_pred(qword1, qcharmask) ||
+					qword_ptr >= end_ptr) {
+				break;
+			}
+		}
+	}
+	/* Which of the bytes was C? */
+	unsigned int mask0, mask1;
+	mask0 = cmp(qword0, qcharmask);
+	mask1 = cmp(qword1, qcharmask);
+	mask = (mask1 << 16) | mask0;
+
+	tail = __builtin_ctz(mask);
+	s = (const void *) (qword_ptr - 2) + tail;
+
+#endif /* __iset__ > 5 */
+
+	return s >= end_ptr ? NULL : (void *) s;
+}
+EXPORT_SYMBOL(memchr);
+#endif
+
 
 #ifdef __HAVE_ARCH_STRNLEN
 size_t strnlen(const char *src, size_t count)

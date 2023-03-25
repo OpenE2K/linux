@@ -6,20 +6,16 @@
 
 #ifndef	CONFIG_BOOT_E2K
 static inline unsigned long
-pv_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+pv_fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
-	return pv_cpu_ops.fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+	return pv_cpu_ops.fast_tagged_memory_copy(dst, src, len, prefetch);
 }
 static inline unsigned long
 boot_pv_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
 		int prefetch)
 {
 	return BOOT_PARAVIRT_GET_CPU_FUNC(fast_tagged_memory_copy)(dst, src,
-				len, strd_opcode, ldrd_opcode, prefetch);
+				len, prefetch);
 }
 static inline unsigned long
 pv_fast_tagged_memory_set(void *addr, u64 val, u64 tag,
@@ -48,20 +44,14 @@ pv_extract_tags_32(u16 *dst, const void *src)
 
 #ifndef	CONFIG_BOOT_E2K
 static inline unsigned long
-fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
-	return pv_fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+	return pv_fast_tagged_memory_copy(dst, src, len, prefetch);
 }
 static inline unsigned long
-boot_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+boot_fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
-	return boot_pv_fast_tagged_memory_copy(dst, src,
-				len, strd_opcode, ldrd_opcode, prefetch);
+	return boot_pv_fast_tagged_memory_copy(dst, src, len,  prefetch);
 }
 static inline unsigned long
 fast_tagged_memory_set(void *addr, u64 val, u64 tag,

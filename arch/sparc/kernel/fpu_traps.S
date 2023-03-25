@@ -452,28 +452,6 @@ __set_d_fpreg:
 	SD(48); SD(50); SD(52); SD(54); SD(56); SD(58); SD(60); SD(62);
 	.size		__set_d_fpreg,.-__set_d_fpreg
 
-	.globl		__get_q_fpreg
-	.type		__get_q_fpreg,#function
-__get_q_fpreg:
-	set	1f, %o2
-	sll	%o1, 1, %o1
-	jmp	%o2 + %o1
-	 nop
-1:	 GQ(0);  GQ(4);  GQ(8); GQ(12); GQ(16); GQ(20); GQ(24); GQ(28);
-	GQ(32); GQ(36); GQ(40); GQ(44); GQ(48); GQ(52); GQ(56); GQ(60);
-	.size		__get_q_fpreg,.-__get_q_fpreg
-
-	.globl		__set_q_fpreg
-	.type		__set_q_fpreg,#function
-__set_q_fpreg:
-	set	1f, %o2
-	sll	%o1, 1, %o1
-	jmp	%o2 + %o1
-	 nop
-1:	 SQ(0);  SQ(4);  SQ(8); SQ(12); SQ(16); SQ(20); SQ(24); SQ(28);
-	SQ(32); SQ(36); SQ(40); SQ(44); SQ(48); SQ(52); SQ(56); SQ(60);
-	.size		__set_q_fpreg,.-__set_q_fpreg
-
 	.globl  get_xfsr
 	.type		get_xfsr,#function
 get_xfsr:

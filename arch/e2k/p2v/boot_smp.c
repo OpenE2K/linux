@@ -93,7 +93,6 @@ boot_native_smp_cpu_config(boot_info_t *bootblock)
 	} else if (bootblock->signature == X86BOOT_SIGNATURE) {
 		phys_cpu_num = boot_biosx86_smp_cpu_config(bootblock);
 	} else {
-		BOOT_BUG_POINT("boot_native_smp_cpu_config()");
 		BOOT_BUG("Unknown type of Boot information structure");
 	}
 	return phys_cpu_num;
@@ -155,7 +154,6 @@ boot_native_smp_node_config(boot_info_t *bootblock)
 	} else if (bootblock->signature == X86BOOT_SIGNATURE) {
 		boot_biosx86_smp_node_config(bootblock);
 	} else {
-		BOOT_BUG_POINT("boot_native_smp_node_config()");
 		BOOT_BUG("Unknown type of Boot information structure");
 	}
 }

@@ -125,7 +125,9 @@ IF_HAVE_PG_IDLE(PG_idle,		"idle"		)
 	{ VM_HW_STACK_PS,	"procedure_stack" }, \
 	{ VM_HW_STACK_PCS,	"chain_stack" }, \
 	{ VM_SIGNAL_STACK,	"signal_stack" }, \
-	{ VM_PRIVILEGED,	"priv" }
+	{ VM_PRIVILEGED,	"priv" }, \
+	{ VM_MPDMA,		"mpdma" }, \
+	{ VM_INT_PR,		"int_pr" }
 #elif !defined(CONFIG_MMU)
 #define __VM_ARCH_SPECIFIC_1 {VM_MAPPED_COPY,"mappedcopy"	}
 #else

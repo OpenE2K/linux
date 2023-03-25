@@ -763,6 +763,7 @@ unsigned char ddk768_edidGetExtension(
  *     -1   - Fail
  */
 long ddk768_edidReadMonitor(
+	struct smi_device *sdev,
     unsigned char *pEDIDBuffer,
     unsigned long bufferSize,
     unsigned char edidExtNo,
@@ -786,6 +787,7 @@ long ddk768_edidReadMonitor(
  *     -1   - Fail
  */
 long ddk768_edidReadMonitorEx(
+	struct smi_device *sdev,
     unsigned char *pEDIDBuffer,
     unsigned long bufferSize,
     unsigned char edidExtNo,
@@ -807,6 +809,7 @@ long ddk768_edidReadMonitorEx(
  *     -1   - Fail
  */
 long ddk768_edidReadMonitorExHwI2C(
+	struct smi_device *sdev,
     unsigned char *pEDIDBuffer,
     unsigned long bufferSize,
     unsigned char edidExtNo,

@@ -134,8 +134,8 @@ static inline void atomic_load_osgd_to_gd(void)
 /* or paravirtualized host and guest kernel */
 /* or pure guest kernel (not paravirtualized based on pv_ops) */
 #define	guest_task_mode(task)	\
-		test_ti_thread_flag(task_thread_info(task), \
-						TIF_VIRTUALIZED_GUEST)
+		(is_task_at_vcpu_intc_emul_mode(task) || \
+			is_task_at_vcpu_guest_mode(task))
 #define	native_user_mode(regs)		is_user_mode(regs, NATIVE_TASK_SIZE)
 #define	guest_user_mode(regs)		is_user_mode(regs, GUEST_TASK_SIZE)
 #define	native_kernel_mode(regs)	is_kernel_mode(regs, NATIVE_TASK_SIZE)
@@ -171,10 +171,8 @@ static inline void atomic_load_osgd_to_gd(void)
 /* it is host kernel with virtualization support */
 /* or paravirtualized host and guest kernel */
 
-#define user_mode(regs)		\
-		((regs) ? is_user_mode(regs, TASK_SIZE) : false)
-#define kernel_mode(regs)	\
-		((regs) ? is_kernel_mode(regs, TASK_SIZE) : true)
+#define user_mode(regs)   is_user_mode(regs, TASK_SIZE)
+#define kernel_mode(regs) is_kernel_mode(regs, TASK_SIZE)
 
 #ifdef	CONFIG_KVM_HW_VIRTUALIZATION
 /* guest kernel can be: */
@@ -299,8 +297,7 @@ static inline void atomic_load_osgd_to_gd(void)
 ({									\
 	bool is;							\
 									\
-	if (paravirt_enabled() ||					\
-		!test_thread_flag(TIF_VIRTUALIZED_GUEST))		\
+	if (paravirt_enabled() || !kvm_test_intc_emul_flag(regs))	\
 		/* It is guest and it cannot run own guest */		\
 		/* or trap is not on guest process */			\
 		is = false;						\
@@ -315,8 +312,7 @@ static inline void atomic_load_osgd_to_gd(void)
 /* trap occurred on guest process (guest user or guest kernel or on host */
 /* while running guest process (guest VCPU thread) */
 #define	trap_on_guest(regs)						\
-		(!paravirt_enabled() &&					\
-			test_thread_flag(TIF_VIRTUALIZED_GUEST))
+		(!paravirt_enabled() && kvm_test_intc_emul_flag(regs))
 #define	trap_on_pv_hv_guest(vcpu, regs)					\
 		((vcpu) != NULL && \
 			!((vcpu)->arch.is_hv) && trap_on_guest(regs))
@@ -358,8 +354,7 @@ static inline void atomic_load_osgd_to_gd(void)
 /* macros to detect guest traps on guest and on host */
 /* trap on guest user, kernel or on host kernel due to guest */
 #define	__guest_trap(regs)						\
-		(paravirt_enabled() ||					\
-			test_thread_flag(TIF_VIRTUALIZED_GUEST))
+		(paravirt_enabled() || kvm_test_intc_emul_flag(regs))
 
 #define	addr_from_guest_user(addr)	((addr) < GUEST_TASK_SIZE)
 #define	addr_from_guest_kernel(addr)	\
@@ -411,8 +406,7 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 	}
 }
 #define	IS_GUEST_USER_ADDRESS_TO_PVA(task, address)	\
-		(test_ti_thread_flag(task_thread_info(tsk), \
-						TIF_VIRTUALIZED_GUEST) && \
+		(test_ti_is_vcpu_thread(task_thread_info(tsk)) && \
 			IS_GUEST_USER_ADDRESS(address))
 #define	IS_GUEST_ADDRESS_TO_HOST(address)		\
 		(paravirt_enabled() && !IS_HV_GM() && \

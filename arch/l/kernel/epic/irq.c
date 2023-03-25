@@ -95,7 +95,7 @@ void epic_init_system_handlers_table(void)
 			"hc_emerg_interrupt");
 
 	setup_PIC_vector_handler(LINP1_INTERRUPT_VECTOR,
-			epic_iommu_interrupt, 1,
+			e2k_iommu_error_interrupt, 1,
 			"iommu_interrupt");
 
 	setup_PIC_vector_handler(LINP2_INTERRUPT_VECTOR,

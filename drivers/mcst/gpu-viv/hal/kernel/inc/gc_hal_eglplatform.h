@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -64,10 +64,7 @@ extern "C" {
 #endif
 
 
-#if defined(_WIN32) || defined(__VC32__) && !defined(__CYGWIN__) && !defined(__SCITECH_SNAP__)
-#ifndef WIN32_LEAN_AND_MEAN
-/* #define WIN32_LEAN_AND_MEAN 1 */
-#endif
+#if defined(_WIN32)
 #include <windows.h>
 
 typedef HDC                             HALNativeDisplayType;
@@ -80,38 +77,6 @@ typedef struct __BITFIELDINFO
     RGBQUAD       bmiColors[2];
 }
 BITFIELDINFO;
-
-#elif /* defined(__APPLE__) || */ defined(__WINSCW__) || defined(__SYMBIAN32__)  /* Symbian */
-
-#elif defined(WL_EGL_PLATFORM) || defined(EGL_API_WL) /* Wayland */
-
-#elif defined(__GBM__) /* GBM */
-
-#elif defined(__ANDROID__) || defined(ANDROID)
-
-#elif defined(MIR_EGL_PLATFORM) /* Mir */
-
-#elif defined(__QNXNTO__)
-
-#elif defined(__unix__) || defined(__APPLE__)
-
-#if defined(EGL_API_DFB)
-
-#elif defined(EGL_API_FB)
-
-#elif defined(EGL_API_NULLWS)
-
-
-#else
-
-/* X11 (tetative). */
-#endif
-
-#else
-#error "Platform not recognized"
-#endif
-
-#if defined(_WIN32) || defined(__VC32__) && !defined(__CYGWIN__) && !defined(__SCITECH_SNAP__)
 
 #include "gc_hal_eglplatform_type.h"
 

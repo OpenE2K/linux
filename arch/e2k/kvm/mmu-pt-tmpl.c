@@ -22,6 +22,7 @@
 #include <linux/srcu.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/delay.h>
 
 #include <asm/page.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
@@ -37,7 +38,10 @@
 #include "intercepts.h"
 #include "io.h"
 
+#undef	CHECK_MMU_PAGES_AVAILABLE
+
 /* now implemented only dynamic PT support for guest MMU */
+#define	GET_KVM_VCPU_PT_STRUCT(kvm)	mmu_get_kvm_vcpu_pt_struct(kvm)
 #define	GET_VCPU_PT_STRUCT(vcpu)	mmu_get_vcpu_pt_struct(vcpu)
 
 #if	PT_TYPE == E2K_PT_V3
@@ -424,6 +428,8 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#include "mmu-notifier-trace.h"
+
 #include <trace/events/kvm.h>
 
 static pgprot_t set_spte_pfn(struct kvm *kvm, pgprot_t spte, kvm_pfn_t pfn);
@@ -648,8 +654,9 @@ static int mmu_spte_clear_track_bits(struct kvm *kvm, pgprot_t *sptep)
 
 	DebugPTE("started for spte %px == 0x%lx\n",
 		sptep, pgprot_val(old_spte));
-	KVM_BUG_ON(!is_shadow_huge_pte(old_spte) &&
-			sp->role.level != PT_PAGE_TABLE_LEVEL);
+	KVM_BUG_ON(is_shadow_present_pte(kvm, old_spte) &&
+			!is_shadow_huge_pte(old_spte) &&
+				sp->role.level != PT_PAGE_TABLE_LEVEL);
 	if (!spte_has_volatile_bits(kvm, old_spte)) {
 		__update_clear_spte_fast(sptep,
 			(is_shadow_present_or_valid_pte(kvm, old_spte) &&
@@ -680,14 +687,12 @@ static int mmu_spte_clear_track_bits(struct kvm *kvm, pgprot_t *sptep)
 	 * kvm mmu, before reclaiming the page, we should
 	 * unmap it from mmu first.
 	 */
-	WARN_ON(!kvm_is_reserved_pfn(pfn) && !page_count(pfn_to_page(pfn)));
+	WARN_ON(!kvm_is_reserved_pfn(pfn) && !page_count(pfn_to_page(pfn)) &&
+		is_spte_writable_mask(kvm, old_spte));
 
-	if (!get_spte_accessed_mask(kvm) ||
-			is_spte_accessed_mask(kvm, old_spte))
+	if (is_spte_accessed_mask(kvm, old_spte))
 		kvm_set_pfn_accessed(pfn);
-	if ((get_spte_dirty_mask(kvm)) ?
-			is_spte_dirty_mask(kvm, old_spte) :
-				is_spte_writable_mask(kvm, old_spte))
+	if (is_spte_dirty_mask(kvm, old_spte))
 		kvm_set_pfn_dirty(pfn);
 	return 1;
 }
@@ -716,6 +721,11 @@ static void kvm_vmlpt_user_spte_set(struct kvm *kvm, pgprot_t *spte,
 static void mmu_spte_clear_no_track(pgprot_t *sptep)
 {
 	__update_clear_spte_fast(sptep, __pgprot(0ull));
+}
+
+static void mmu_spte_clear_as_valid(struct kvm *kvm, pgprot_t *sptep)
+{
+	__update_clear_spte_fast(sptep, __pgprot(get_spte_valid_mask(kvm)));
 }
 
 /*
@@ -827,7 +837,7 @@ static bool mmu_gfn_lpage_is_disallowed(struct kvm_vcpu *vcpu, gfn_t gfn,
 static unsigned long pv_vma_host_hugepage_size(struct kvm_vcpu *vcpu, gfn_t gfn)
 {
 	/* only pmd level huge pages is now supported */
-	return HPAGE_PMD_SIZE;
+	return PMD_SIZE;
 }
 static unsigned long hv_vma_host_hugepage_size(struct kvm_vcpu *vcpu, gfn_t gfn)
 {
@@ -1093,12 +1103,17 @@ static void validate_spte(struct kvm *kvm, pgprot_t *sptep)
 	__update_clear_spte_fast(sptep, __pgprot(get_spte_valid_mask(kvm)));
 }
 
-static void drop_spte(struct kvm *kvm, pgprot_t *sptep)
+static bool drop_spte(struct kvm *kvm, pgprot_t *sptep)
 {
+	bool rmap_removed = false;
+
 	DebugPTE("started for spte %px == 0x%lx\n",
 		sptep, pgprot_val(*sptep));
-	if (mmu_spte_clear_track_bits(kvm, sptep))
+	if (mmu_spte_clear_track_bits(kvm, sptep)) {
 		rmap_remove(kvm, sptep);
+		rmap_removed = true;
+	}
+	return rmap_removed;
 }
 
 
@@ -1318,14 +1333,26 @@ static bool kvm_zap_rmapp(struct kvm *kvm, struct kvm_rmap_head *rmap_head)
 	bool flush = false;
 
 	while ((sptep = rmap_get_first(kvm, rmap_head, &iter))) {
+		bool removed;
+
 		old_spte = *sptep;
 		rmap_printk("%s: spte %px %lx.\n",
 			__func__, sptep, pgprot_val(old_spte));
 
-		drop_spte(kvm, sptep);
+		removed = drop_spte(kvm, sptep);
+		if (unlikely(!kvm->arch.is_hv)) {
+			struct kvm_mmu_page *sp;
+			gmm_struct_t *gmm;
 
-		if (!kvm->arch.is_hv)
-			mmu_pt_flush_shadow_pt_level_tlb(kvm, sptep, old_spte);
+			sp = page_header(__pa(sptep));
+			gmm = kvm_get_sp_gmm(sp);
+			trace_kvm_unmap_rmap(sp, sptep, old_spte, gmm, removed);
+
+			if (removed) {
+				mmu_pt_flush_shadow_pt_level_tlb(kvm,
+							sptep, old_spte);
+			}
+		}
 		flush = true;
 	}
 
@@ -1362,10 +1389,22 @@ restart:
 		old_spte = *sptep;
 
 		if (pte_write(*ptep)) {
-			drop_spte(kvm, sptep);
-			if (!kvm->arch.is_hv)
-				mmu_pt_flush_shadow_pt_level_tlb(kvm, sptep,
-								 old_spte);
+			bool removed;
+
+			removed = drop_spte(kvm, sptep);
+			if (!kvm->arch.is_hv) {
+				struct kvm_mmu_page *sp;
+				gmm_struct_t *gmm;
+
+				sp = page_header(__pa(sptep));
+				gmm = kvm_get_sp_gmm(sp);
+				trace_kvm_set_pte_rmapp(ptep, sp, sptep, old_spte,
+							gmm, true);
+				if (removed) {
+					mmu_pt_flush_shadow_pt_level_tlb(kvm,
+								sptep, old_spte);
+				}
+			}
 			goto restart;
 		} else {
 			new_spte = set_spte_pfn(kvm, *sptep, new_pfn);
@@ -1376,9 +1415,17 @@ restart:
 
 			mmu_spte_clear_track_bits(kvm, sptep);
 			mmu_spte_set(kvm, sptep, new_spte);
-			if (!kvm->arch.is_hv)
+			if (!kvm->arch.is_hv) {
+				struct kvm_mmu_page *sp;
+				gmm_struct_t *gmm;
+
+				sp = page_header(__pa(sptep));
+				gmm = kvm_get_sp_gmm(sp);
+				trace_kvm_set_pte_rmapp(ptep, sp, sptep, old_spte,
+							gmm, false);
 				mmu_pt_flush_shadow_pt_level_tlb(kvm, sptep,
 								 old_spte);
+			}
 		}
 	}
 
@@ -1386,6 +1433,54 @@ restart:
 		kvm_flush_remote_tlbs(kvm);
 
 	return 0;
+}
+
+static int kvm_age_rmapp(struct kvm *kvm, struct kvm_rmap_head *rmap_head,
+			 struct kvm_memory_slot *slot, gfn_t gfn, int level,
+			 unsigned long data)
+{
+	pgprot_t *sptep;
+	struct rmap_iterator uninitialized_var(iter);
+	int young = 0;
+
+	BUG_ON(!get_spte_accessed_mask(kvm));
+
+	for_each_rmap_spte(kvm, rmap_head, &iter, sptep) {
+		if (is_spte_accessed_mask(kvm, *sptep)) {
+			young = 1;
+			clear_bit((ffs(get_spte_accessed_mask(kvm)) - 1),
+				 (unsigned long *)sptep);
+		}
+	}
+
+	trace_kvm_age_page(gfn, level, slot, young);
+	return young;
+}
+
+static int kvm_test_age_rmapp(struct kvm *kvm, struct kvm_rmap_head *rmap_head,
+			      struct kvm_memory_slot *slot, gfn_t gfn,
+			      int level, unsigned long data)
+{
+	pgprot_t *sptep;
+	struct rmap_iterator iter;
+	int young = 0;
+
+	/*
+	 * If there's no access bit in the secondary pte set by the
+	 * hardware it's up to gup-fast/gup to set the access bit in
+	 * the primary pte or in the page structure.
+	 */
+	if (!get_spte_accessed_mask(kvm))
+		goto out;
+
+	for_each_rmap_spte(kvm, rmap_head, &iter, sptep) {
+		if (is_spte_accessed_mask(kvm, *sptep)) {
+			young = 1;
+			break;
+		}
+	}
+out:
+	return young;
 }
 
 typedef struct slot_rmap_walk_iterator {
@@ -1544,61 +1639,26 @@ static int kvm_handle_hva(struct kvm *kvm, unsigned long hva,
 static int unmap_hva_range(struct kvm *kvm, unsigned long start,
 				unsigned long end, unsigned flags)
 {
+	trace_kvm_unmap_hva_range(kvm, start, end, flags);
 	return kvm_handle_hva_range(kvm, start, end, 0, kvm_unmap_rmapp);
 }
 
 static int set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte)
 {
-	kvm_handle_hva(kvm, hva, (unsigned long)&pte, kvm_set_pte_rmapp);
-	return 0;
+	trace_kvm_set_spte_hva(kvm, hva, pte);
+	return kvm_handle_hva(kvm, hva, (unsigned long)&pte, kvm_set_pte_rmapp);
 }
 
-static int kvm_age_rmapp(struct kvm *kvm, struct kvm_rmap_head *rmap_head,
-			 struct kvm_memory_slot *slot, gfn_t gfn, int level,
-			 unsigned long data)
+static int age_hva(struct kvm *kvm, unsigned long start, unsigned long end)
 {
-	pgprot_t *sptep;
-	struct rmap_iterator uninitialized_var(iter);
-	int young = 0;
-
-	BUG_ON(!get_spte_accessed_mask(kvm));
-
-	for_each_rmap_spte(kvm, rmap_head, &iter, sptep) {
-		if (is_spte_accessed_mask(kvm, *sptep)) {
-			young = 1;
-			clear_bit((ffs(get_spte_accessed_mask(kvm)) - 1),
-				 (unsigned long *)sptep);
-		}
-	}
-
-	trace_kvm_age_page(gfn, level, slot, young);
-	return young;
+	trace_kvm_age_hva(start, end);
+	return kvm_handle_hva_range(kvm, start, end, 0, kvm_age_rmapp);
 }
 
-static int kvm_test_age_rmapp(struct kvm *kvm, struct kvm_rmap_head *rmap_head,
-			      struct kvm_memory_slot *slot, gfn_t gfn,
-			      int level, unsigned long data)
+static int test_age_hva(struct kvm *kvm, unsigned long hva)
 {
-	pgprot_t *sptep;
-	struct rmap_iterator iter;
-	int young = 0;
-
-	/*
-	 * If there's no access bit in the secondary pte set by the
-	 * hardware it's up to gup-fast/gup to set the access bit in
-	 * the primary pte or in the page structure.
-	 */
-	if (!get_spte_accessed_mask(kvm))
-		goto out;
-
-	for_each_rmap_spte(kvm, rmap_head, &iter, sptep) {
-		if (is_spte_accessed_mask(kvm, *sptep)) {
-			young = 1;
-			break;
-		}
-	}
-out:
-	return young;
+	trace_kvm_test_age_hva(hva);
+	return kvm_handle_hva(kvm, hva, 0, kvm_test_age_rmapp);
 }
 
 #define RMAP_RECYCLE_THRESHOLD 1000
@@ -1614,42 +1674,6 @@ static void rmap_recycle(struct kvm_vcpu *vcpu, pgprot_t *spte, gfn_t gfn)
 
 	kvm_unmap_rmapp(vcpu->kvm, rmap_head, NULL, gfn, sp->role.level, 0);
 	mmu_flush_remote_tlbs(vcpu, spte, sp->role.level);
-}
-
-static int age_hva(struct kvm *kvm, unsigned long start, unsigned long end)
-{
-	/*
-	 * In case of absence of EPT Access and Dirty Bits supports,
-	 * emulate the accessed bit for EPT, by checking if this page has
-	 * an EPT mapping, and clearing it if it does. On the next access,
-	 * a new EPT mapping will be established.
-	 * This has some overhead, but not as much as the cost of swapping
-	 * out actively used pages or breaking up actively used hugepages.
-	 */
-	if (!get_spte_accessed_mask(kvm)) {
-#ifdef	KVM_ARCH_WANT_MMU_NOTIFIER
-		/*
-		 * We are holding the kvm->mmu_lock, and we are blowing up
-		 * shadow PTEs. MMU notifier consumers need to be kept at bay.
-		 * This is correct as long as we don't decouple the mmu_lock
-		 * protected regions (like invalidate_range_start|end does).
-		 */
-		kvm->mmu_notifier_seq++;
-		return kvm_handle_hva_range(kvm, start, end, 0,
-					    kvm_unmap_rmapp);
-#else	/* ! KVM_ARCH_WANT_MMU_NOTIFIER */
-		kvm_pr_unimpl("%s(): absence of TDP Access and Dirty Bits "
-			"supports is not implemented case\n",
-			__func__);
-#endif	/* KVM_ARCH_WANT_MMU_NOTIFIER */
-	}
-
-	return kvm_handle_hva_range(kvm, start, end, 0, kvm_age_rmapp);
-}
-
-static int test_age_hva(struct kvm *kvm, unsigned long hva)
-{
-	return kvm_handle_hva(kvm, hva, 0, kvm_test_age_rmapp);
 }
 
 #ifdef MMU_DEBUG
@@ -1685,8 +1709,8 @@ static void kvm_mmu_free_page(struct kvm *kvm, struct kvm_mmu_page *sp)
 	kmem_cache_free(mmu_page_header_cache, sp);
 }
 
-static void drop_parent_pte(struct kvm *kvm, struct kvm_mmu_page *sp,
-			    pgprot_t *parent_pte)
+static void do_drop_parent_pte(struct kvm *kvm, struct kvm_mmu_page *sp,
+			    pgprot_t *parent_pte, bool as_valid)
 {
 	struct kvm_mmu_page *parent_sp = page_header(__pa(parent_pte));
 
@@ -1696,8 +1720,24 @@ static void drop_parent_pte(struct kvm *kvm, struct kvm_mmu_page *sp,
 	} else {
 		mmu_page_remove_parent_pte(sp, parent_pte);
 	}
-	mmu_spte_clear_no_track(parent_pte);
+	if (likely(!as_valid)) {
+		mmu_spte_clear_no_track(parent_pte);
+	} else {
+		mmu_spte_clear_as_valid(kvm, parent_pte);
+	}
 	pv_mmu_drop_copied_parent_pte(kvm, sp, parent_sp, parent_pte);
+}
+
+static inline void drop_parent_pte(struct kvm *kvm, struct kvm_mmu_page *sp,
+				      pgprot_t *parent_pte)
+{
+	do_drop_parent_pte(kvm, sp, parent_pte, false);
+}
+
+static inline void drop_parent_pte_as_valid(struct kvm *kvm,
+			struct kvm_mmu_page *sp, pgprot_t *parent_pte)
+{
+	do_drop_parent_pte(kvm, sp, parent_pte, true);
 }
 
 static void mark_unsync(struct kvm *kvm, pgprot_t *spte, int level);
@@ -2079,6 +2119,7 @@ static void pv_mmu_drop_copied_parent_pte(struct kvm *kvm,
 		/* there is guest kernel pgd entry dropping */
 		/* it need issue request to sync all copied PTs entries */
 		KVM_BUG_ON(!pv_mmu_is_init_gmm(kvm, gmm));
+		trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 		if (!VALID_PAGE(gmm->gk_root_hpa))
 			return;
 		gk_root = (pgprot_t *)__va(gmm->gk_root_hpa);
@@ -2090,6 +2131,7 @@ static void pv_mmu_drop_copied_parent_pte(struct kvm *kvm,
 
 	KVM_BUG_ON(pv_mmu_is_init_gmm(kvm, gmm));
 
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	if (likely(!VALID_PAGE(gmm->gk_root_hpa)))
 		return;
 
@@ -2176,6 +2218,7 @@ static void sync_guest_kernel_root_range(struct kvm_vcpu *vcpu, gmm_struct_t *gm
 	gmm_struct_t *init_gmm;
 	pgprot_t *gk_root;
 
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	if (unlikely(!VALID_PAGE(gmm->gk_root_hpa))) {
 		/* gmm is now releasing */
 		return;
@@ -2282,6 +2325,7 @@ static void check_guest_kernel_root_user_range(struct kvm_vcpu *vcpu,
 		return;
 
 	u_root = (pgprot_t *)__va(gmm->root_hpa);
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	if (unlikely(!VALID_PAGE(gmm->gk_root_hpa)))
 		return;
 	gk_root = (pgprot_t *)__va(gmm->gk_root_hpa);
@@ -2298,6 +2342,7 @@ static void check_guest_kerne_root_init_range(struct kvm_vcpu *vcpu,
 
 	init_gmm = pv_vcpu_get_init_gmm(vcpu);
 	init_root = (pgprot_t *)__va(init_gmm->root_hpa);
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	if (unlikely(!VALID_PAGE(gmm->gk_root_hpa)))
 		return;
 	gk_root = (pgprot_t *)__va(gmm->gk_root_hpa);
@@ -2330,6 +2375,7 @@ static void check_and_sync_guest_user_root(struct kvm_vcpu *vcpu,
 	}
 
 	KVM_BUG_ON(pv_vcpu_is_init_gmm(vcpu, gmm));
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	KVM_BUG_ON(!VALID_PAGE(gmm->gk_root_hpa));
 
 	u_root = (pgprot_t *)__va(gmm->root_hpa);
@@ -2363,7 +2409,8 @@ static void check_and_sync_guest_kernel_root(struct kvm_vcpu *vcpu)
 	if (unlikely(!VALID_PAGE(init_root_hpa)))
 		return;
 
-	KVM_BUG_ON(init_root_hpa != init_gmm->gk_root_hpa);
+	trace_host_get_gmm_root_hpa(init_gmm, NATIVE_READ_IP_REG_VALUE());
+	KVM_BUG_ON(VALID_PAGE(init_gmm->gk_root_hpa));
 	init_root = (pgprot_t *)__va(init_root_hpa);
 
 	gmmid_table_lock(&vcpu->kvm->arch.gmmid_table);
@@ -2790,7 +2837,11 @@ static pf_res_t mmu_set_spte(struct kvm_vcpu *vcpu, pgprot_t *sptep,
 				 level);
 			child = page_header(kvm_spte_pfn_to_phys_addr(vcpu->kvm,
 									pte));
-			drop_parent_pte(vcpu->kvm, child, sptep);
+			if (likely(!only_validate)) {
+				drop_parent_pte(vcpu->kvm, child, sptep);
+			} else {
+				drop_parent_pte_as_valid(vcpu->kvm, child, sptep);
+			}
 			mmu_flush_remote_tlbs(vcpu, sptep, level);
 
 			/* child SP can be now released, because of */
@@ -2950,6 +3001,7 @@ static pf_res_t __direct_map(struct kvm_vcpu *vcpu, int write, int map_writable,
 
 	DebugNONP("started for level %d gfn 0x%llx pfn 0x%llx\n",
 		level, gfn, pfn);
+	trace_kvm_direct_map(vcpu, gfn, pfn, level, write, map_writable);
 
 	if (!VALID_PAGE(kvm_get_gp_phys_root(vcpu)))
 		return 0;
@@ -2959,17 +3011,22 @@ static pf_res_t __direct_map(struct kvm_vcpu *vcpu, int write, int map_writable,
 	}
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
+		pgprotval_t old_spte;
+
 		DebugNONP("iterator root 0x%llx level %d spte %px == 0x%lx\n",
 			iterator.shadow_addr, iterator.level, iterator.sptep,
 			pgprot_val(*iterator.sptep));
 		KVM_BUG_ON(iterator.level == vcpu->arch.mmu.shadow_root_level &&
 				iterator.shadow_addr != kvm_get_gp_phys_root(vcpu));
+		old_spte = pgprot_val(*iterator.sptep);
 		if (iterator.level == level) {
 			emulate = mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
 					       write, level, gfn, pfn, prefault,
 					       map_writable, false, 0);
 			DebugNONP("set spte %px == 0x%lx\n",
 				iterator.sptep, pgprot_val(*iterator.sptep));
+			trace_kvm_direct_map_spte(vcpu, iterator.sptep, old_spte,
+					  iterator.level);
 			if (emulate == PFRES_TRY_MMIO)
 				break;
 			direct_pte_prefetch(vcpu, iterator.sptep);
@@ -2994,6 +3051,8 @@ static pf_res_t __direct_map(struct kvm_vcpu *vcpu, int write, int map_writable,
 				iterator.level - 1, pseudo_gfn,
 				iterator.sptep, pgprot_val(*iterator.sptep));
 		}
+		trace_kvm_direct_map_spte(vcpu, iterator.sptep, old_spte,
+					  iterator.level);
 	}
 	return emulate;
 }
@@ -3248,6 +3307,7 @@ static pf_res_t nonpaging_map(struct kvm_vcpu *vcpu, gva_t v, u32 error_code,
 		return 0;
 
 	DebugNONP("there is slow page fault case\n");
+	trace_kvm_slow_nonpaging_map(vcpu, v, level, error_code);
 
 #ifdef	KVM_ARCH_WANT_MMU_NOTIFIER
 	mu_state->notifier_seq = vcpu->kvm->mmu_notifier_seq;
@@ -3264,6 +3324,7 @@ static pf_res_t nonpaging_map(struct kvm_vcpu *vcpu, gva_t v, u32 error_code,
 			return PFRES_NO_ERR;
 		DebugNONP("try_async_pf() returned pfn 0x%llx\n", pfn);
 	}
+	trace_kvm_nonpaging_map(vcpu, gfn, pfn);
 
 	if (handle_abnormal_pfn(vcpu, v, gfn, pfn, ACC_ALL, &r)) {
 		return r;
@@ -3427,6 +3488,8 @@ static pf_res_t nonpaging_page_fault(struct kvm_vcpu *vcpu, gva_t gva,
 	DebugNONP("VCPU #%d GPA 0x%llx, error 0x%x\n",
 		vcpu->vcpu_id, gpa, error_code);
 	pgprintk("%s: gpa 0x%llx error %x\n", __func__, gpa, error_code);
+
+	trace_kvm_nonpaging_page_fault(vcpu, gva, error_code);
 
 	if (gfnp != NULL)
 		*gfnp = gfn;
@@ -4093,8 +4156,7 @@ static void kvm_mmu_pte_write(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
 			if (gentry &&
 			      !((sp->role.word ^ vcpu->arch.mmu.base_role.word)
 			      & mask.word) && rmap_can_add(vcpu)) {
-				mmu_pte_write_new_pte(vcpu, sp, spte,
-							gpa, &gentry);
+				mmu_pte_write_new_pte(vcpu, sp, spte, gpa, gentry);
 			}
 			if (child && (child->released || child->gfn != new_gfn)) {
 				child->released = true;
@@ -4285,6 +4347,7 @@ static void mmu_flush_spte_tlb_range(struct kvm_vcpu *vcpu,
 					     pgprot_t *sptep, int level)
 {
 	struct kvm_mmu_page *sp;
+	gmm_struct_t *gmm;
 	gva_t start_gva, end_gva;
 	unsigned index;
 	const pt_level_t *spt_level;
@@ -4296,8 +4359,9 @@ static void mmu_flush_spte_tlb_range(struct kvm_vcpu *vcpu,
 	start_gva = sp->gva & get_pt_level_mask(spt_level);
 	start_gva = set_pt_level_addr_index(start_gva, index, spt_level);
 	end_gva = start_gva + get_pt_level_size(spt_level);
+	gmm = kvm_get_sp_gmm(sp);
 
-	host_flush_shadow_pt_tlb_range(vcpu, start_gva, end_gva, *sptep, level);
+	host_flush_shadow_pt_tlb_range(vcpu, gmm, start_gva, end_gva, *sptep, level);
 }
 
 static void mmu_flush_large_spte_tlb_range(struct kvm_vcpu *vcpu,
@@ -4336,6 +4400,583 @@ static void mmu_flush_shadow_pt_level_tlb(struct kvm *kvm,
 	host_flush_shadow_pt_level_tlb(kvm, gmm, gva, level, *sptep, old_spte);
 }
 
+typedef enum pte_type {
+	undefined_pte_type,
+	none_pte_type,
+	only_valid_pte_type,
+	huge_pte_type,
+	present_pte_type,
+} pte_type_t;
+
+static e2k_addr_t pt_level_next_addr(e2k_addr_t addr, e2k_addr_t end,
+					const pt_level_t *pt_level)
+{
+	e2k_addr_t boundary = (addr + pt_level->page_size) & pt_level->page_mask;
+
+	return (boundary - 1 < end - 1) ? boundary : end;
+}
+
+static int kvm_read_guest_pte(struct kvm *kvm, pgprotval_t *gpap, pgprotval_t *dst)
+{
+	gpa_t gpa = (gpa_t)gpap;
+	unsigned offset;
+	hva_t hva;
+	int ret;
+
+	offset = offset_in_page(gpa);
+
+	KVM_BUG_ON(sizeof(pgprotval_t) + offset > PAGE_SIZE);
+
+	hva = gfn_to_hva_prot(kvm, gpa_to_gfn(gpa), NULL);
+	if (unlikely(kvm_is_error_hva(hva))) {
+		return -EFAULT;
+	}
+	hva += offset;
+
+	ret = __copy_from_user(dst, (void __user *)hva, sizeof(pgprotval_t));
+	if (unlikely(ret)) {
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+static pte_type_t get_host_pte(struct kvm *kvm, pgprot_t *ptep, e2k_addr_t addr)
+{
+	pte_type_t pte_type;
+	pgprot_t pte;
+
+	pte = *ptep;
+	if (is_shadow_huge_pte(pte)) {
+		pte_type = huge_pte_type;
+	} else if (is_shadow_none_pte(pte) && !is_shadow_valid_pte(kvm, pte)) {
+		pte_type = none_pte_type;
+	} else if (is_shadow_valid_pte(kvm, pte) &&
+				!is_shadow_present_pte(kvm, pte)) {
+		pte_type = only_valid_pte_type;
+	} else {
+		pte_type = present_pte_type;
+	}
+	return pte_type;
+}
+
+static void dump_host_pte(struct kvm *kvm, pgprot_t *ptep, e2k_addr_t addr)
+{
+	pgprot_t pte;
+
+	pte = *ptep;
+	pr_cont("[%012lx]          : PTE %px : 0x%016lx ",
+		addr, ptep, pgprot_val(pte));
+	if (is_shadow_huge_pte(pte)) {
+		pr_cont("PTE of huge page\n");
+	} else if (is_shadow_none_pte(pte) && !is_shadow_valid_pte(kvm, pte)) {
+		pr_cont("none or bad\n");
+	} else if (is_shadow_valid_pte(kvm, pte) &&
+				!is_shadow_present_pte(kvm, pte)) {
+		pr_cont("only valid\n");
+	} else {
+		pr_cont("valid & present\n");
+	}
+}
+
+static pte_type_t get_guest_pte(struct kvm *kvm, pgprotval_t pte, e2k_addr_t addr)
+{
+	pte_type_t pte_type;
+
+	if (kvm_is_huge_gpte(kvm, pte)) {
+		pte_type = huge_pte_type;
+	} else if (is_none_gpte(pte) && !kvm_is_valid_gpte(kvm, pte)) {
+		pte_type = none_pte_type;
+	} else if (kvm_is_valid_gpte(kvm, pte) && !is_present_gpte(pte)) {
+		pte_type = only_valid_pte_type;
+	} else {
+		pte_type = present_pte_type;
+	}
+	return pte_type;
+}
+
+static void dump_guest_pte(struct kvm *kvm, pgprotval_t *ptep, pgprotval_t pte,
+			   e2k_addr_t addr)
+{
+	pr_cont("                        : PTE %px : 0x%016lx ",
+		ptep, pte);
+	if (kvm_is_huge_gpte(kvm, pte)) {
+		pr_cont("PTE of huge page\n");
+	} else if (is_none_gpte(pte) && !kvm_is_valid_gpte(kvm, pte)) {
+		pr_cont("none or bad\n");
+	} else if (kvm_is_valid_gpte(kvm, pte) && !is_present_gpte(pte)) {
+		pr_cont("only valid\n");
+	} else {
+		pr_cont("valid & present\n");
+	}
+}
+
+static void dump_host_and_guest_ptes(struct kvm *kvm,
+				pgprot_t *host_pmdp, pgprotval_t guest_pmd,
+				e2k_addr_t start, e2k_addr_t end,
+				bool do_dump_host_pte, bool do_dump_guest_pte)
+{
+	const pt_struct_t *host_pt_struct;
+	const pt_struct_t *guest_pt_struct;
+	const pt_level_t *host_pt_level;
+	const pt_level_t *guest_pt_level;
+	pgprot_t *host_ptep;
+	pgprotval_t *guest_pteb, *guest_ptep, guest_pte;
+	e2k_addr_t addr, hva_next, gva_next;
+	pte_type_t cur_host_pte_type, prev_host_pte_type;
+	pte_type_t cur_guest_pte_type, prev_guest_pte_type;
+	int host_pte_num, guest_pte_num;
+	pgprot_t *prev_host_ptep;
+	pgprotval_t *prev_guest_ptep, prev_guest_pte;
+	e2k_addr_t prev_host_addr, prev_guest_addr;
+	bool do_dump_cur_host, do_dump_cur_guest;
+	int ret;
+
+	host_pt_struct = mmu_pt_get_host_pt_struct(kvm);
+	host_pt_level = &host_pt_struct->levels[E2K_PTE_LEVEL_NUM];
+	guest_pt_struct = mmu_pt_get_kvm_vcpu_pt_struct(kvm);
+	guest_pt_level = &guest_pt_struct->levels[E2K_PTE_LEVEL_NUM];
+	guest_pteb = (pgprotval_t *)kvm_gpte_pfn_to_phys_addr(guest_pmd,
+								guest_pt_struct);
+
+	prev_host_pte_type = undefined_pte_type;
+	prev_guest_pte_type = undefined_pte_type;
+	host_pte_num = 0;
+	guest_pte_num = 0;
+	addr = start;
+	do {
+		hva_next = pt_level_next_addr(addr, end, host_pt_level);
+		gva_next = pt_level_next_addr(addr, end, guest_pt_level);
+		if (do_dump_host_pte) {
+			host_ptep = (pgprot_t *)pte_offset_map((pmd_t *)host_pmdp,
+								addr);
+			cur_host_pte_type = get_host_pte(kvm, host_ptep, addr);
+		} else {
+			cur_host_pte_type = undefined_pte_type;
+		}
+		if (do_dump_guest_pte) {
+			guest_ptep = (pgprotval_t *)(guest_pteb) + pte_index(addr);
+			ret = kvm_read_guest_pte(kvm, guest_ptep, &guest_pte);
+			if (unlikely(ret != 0)) {
+				pr_err("%s(); copy gpte from gpa %px failed, "
+					"error %d\n",
+					__func__, guest_ptep, ret);
+				guest_pte = 0;
+			}
+			cur_guest_pte_type = get_guest_pte(kvm, guest_pte, addr);
+		} else {
+			cur_guest_pte_type = undefined_pte_type;
+		}
+		do_dump_cur_host = false;
+		if (do_dump_host_pte) {
+			if (cur_host_pte_type == huge_pte_type ||
+					cur_host_pte_type == present_pte_type) {
+				prev_host_pte_type = cur_host_pte_type;
+				if (host_pte_num > 0) {
+					dump_host_pte(kvm, prev_host_ptep,
+						prev_host_addr);
+				}
+				do_dump_cur_host = true;
+			} else if (prev_host_pte_type != cur_host_pte_type) {
+				prev_host_pte_type = cur_host_pte_type;
+				if (host_pte_num > 0) {
+					dump_host_pte(kvm, prev_host_ptep,
+						prev_host_addr);
+				}
+				do_dump_cur_host = true;
+				host_pte_num = 1;
+			} else {
+				host_pte_num++;
+				if (host_pte_num == 3) {
+					pr_alert("                        : "
+						"--- ------------------\n");
+				}
+				prev_host_ptep = host_ptep;
+				prev_host_addr = addr;
+			}
+			if (!do_dump_cur_host &&
+					(cur_host_pte_type != cur_guest_pte_type ||
+					prev_host_pte_type != cur_host_pte_type)) {
+				dump_host_pte(kvm, host_ptep, addr);
+				host_pte_num = 0;
+			}
+		}
+		do_dump_cur_guest = false;
+		if (do_dump_guest_pte) {
+			if (cur_guest_pte_type == huge_pte_type ||
+					cur_guest_pte_type == present_pte_type) {
+				prev_guest_pte_type = cur_guest_pte_type;
+				if (guest_pte_num > 0) {
+					dump_guest_pte(kvm, prev_guest_ptep,
+						prev_guest_pte, prev_guest_addr);
+				}
+				do_dump_cur_guest = true;
+			} else if (prev_guest_pte_type != cur_guest_pte_type) {
+				prev_guest_pte_type = cur_guest_pte_type;
+				if (guest_pte_num > 0) {
+					dump_guest_pte(kvm, prev_guest_ptep,
+						prev_guest_pte, prev_guest_addr);
+				}
+				do_dump_cur_guest = true;
+				guest_pte_num = 1;
+			} else {
+				guest_pte_num++;
+				if (guest_pte_num == 3) {
+					pr_alert("                        : "
+						"--- ------------------\n");
+				}
+				prev_guest_ptep = guest_ptep;
+				prev_guest_pte = guest_pte;
+				prev_guest_addr = addr;
+			}
+			if (!do_dump_cur_guest &&
+					(cur_host_pte_type != cur_guest_pte_type ||
+					prev_guest_pte_type != cur_guest_pte_type)) {
+				dump_guest_pte(kvm, guest_ptep, guest_pte, addr);
+				guest_pte_num = 0;
+			}
+		}
+		if (do_dump_cur_host) {
+			dump_host_pte(kvm, host_ptep, addr);
+			do_dump_cur_host = false;
+			host_pte_num = 0;
+		}
+		if (do_dump_cur_guest) {
+			dump_guest_pte(kvm, guest_ptep, guest_pte, addr);
+			do_dump_cur_guest = false;
+			guest_pte_num = 0;
+		}
+		msleep(100);
+		addr = hva_next;
+	} while (addr < end);
+
+	if (do_dump_host_pte && host_pte_num > 1) {
+		dump_host_pte(kvm, host_ptep, addr);
+		host_pte_num = 0;
+	}
+	if (do_dump_guest_pte && guest_pte_num > 1) {
+		dump_guest_pte(kvm, guest_ptep, guest_pte, addr);
+		guest_pte_num = 0;
+	}
+}
+
+static bool dump_host_pmd(struct kvm *kvm, pgprot_t *pmdp, e2k_addr_t addr)
+{
+	pgprot_t pmd;
+	bool none_pte = false;
+
+	pmd = *pmdp;
+	pr_cont("[%012lx]       : PMD %px : 0x%016lx ",
+		addr, pmdp, pgprot_val(pmd));
+	if (is_shadow_huge_pte(pmd)) {
+		pr_cont("PTE of huge page\n");
+		none_pte = true;
+	} else if (is_shadow_none_pte(pmd) && !is_shadow_valid_pte(kvm, pmd)) {
+		pr_cont("none or bad\n");
+		none_pte = true;
+	} else if (is_shadow_valid_pte(kvm, pmd) &&
+				!is_shadow_present_pte(kvm, pmd)) {
+		pr_cont("only valid\n");
+		none_pte = true;
+	} else {
+		pr_cont("valid & present\n");
+	}
+	return !none_pte;
+}
+
+static bool dump_guest_pmd(struct kvm *kvm, pgprotval_t *pmdp, pgprotval_t pmd,
+			   e2k_addr_t addr)
+{
+	bool none_pte = false;
+
+	pr_cont("                     : PMD %px : 0x%016lx ",
+		pmdp, pmd);
+	if (kvm_is_huge_gpte(kvm, pmd)) {
+		pr_cont("PTE of huge page\n");
+		none_pte = true;
+	} else if (is_none_gpte(pmd) && !kvm_is_valid_gpte(kvm, pmd)) {
+		pr_cont("none or bad\n");
+		none_pte = true;
+	} else if (kvm_is_valid_gpte(kvm, pmd) && !is_present_gpte(pmd)) {
+		pr_cont("only valid\n");
+		none_pte = true;
+	} else {
+		pr_cont("valid & present\n");
+	}
+	return !none_pte;
+}
+
+static void dump_host_and_guest_pmds(struct kvm *kvm,
+				pgprot_t *host_pudp, pgprotval_t guest_pud,
+				e2k_addr_t start, e2k_addr_t end,
+				bool do_dump_host_pmd, bool do_dump_guest_pmd)
+{
+	const pt_struct_t *host_pt_struct;
+	const pt_struct_t *guest_pt_struct;
+	const pt_level_t *host_pt_level;
+	const pt_level_t *guest_pt_level;
+	pgprot_t *host_pmdp;
+	pgprotval_t *guest_pmdb, *guest_pmdp, guest_pmd;
+	e2k_addr_t addr, hva_next, gva_next;
+	bool do_dump_host_pte, do_dump_guest_pte;
+	int ret;
+
+	host_pt_struct = mmu_pt_get_host_pt_struct(kvm);
+	host_pt_level = &host_pt_struct->levels[E2K_PMD_LEVEL_NUM];
+	guest_pt_struct = mmu_pt_get_kvm_vcpu_pt_struct(kvm);
+	guest_pt_level = &guest_pt_struct->levels[E2K_PMD_LEVEL_NUM];
+	if (do_dump_guest_pmd) {
+		guest_pmdb = (pgprotval_t *)kvm_gpte_pfn_to_phys_addr(guest_pud,
+								guest_pt_struct);
+	}
+
+	addr = start;
+	do {
+		hva_next = pt_level_next_addr(addr, end, host_pt_level);
+		gva_next = pt_level_next_addr(addr, end, guest_pt_level);
+		if (do_dump_host_pmd) {
+			host_pmdp = (pgprot_t *)pmd_offset((pud_t *)host_pudp,
+								addr);
+			do_dump_host_pte = dump_host_pmd(kvm, host_pmdp, addr);
+		} else {
+			do_dump_host_pte = false;
+		}
+		if (do_dump_guest_pmd) {
+			guest_pmdp = (pgprotval_t *)(guest_pmdb) + pmd_index(addr);
+			ret = kvm_read_guest_pte(kvm, guest_pmdp, &guest_pmd);
+			if (unlikely(ret != 0)) {
+				pr_err("%s(); copy gpte from gpa %px failed, "
+					"error %d\n",
+					__func__, guest_pmdp, ret);
+				guest_pmd = 0;
+			}
+			do_dump_guest_pte = dump_guest_pmd(kvm, guest_pmdp,
+							   guest_pmd, addr);
+		} else {
+			do_dump_guest_pte = false;
+		}
+		if (likely(do_dump_host_pte || do_dump_guest_pte)) {
+			dump_host_and_guest_ptes(kvm, host_pmdp, guest_pmd,
+				addr, hva_next, do_dump_host_pte, do_dump_guest_pte);
+		}
+		addr = hva_next;
+	} while (addr < end);
+}
+
+static bool dump_host_pud(struct kvm *kvm, pgprot_t *pudp, e2k_addr_t addr)
+{
+	pgprot_t pud;
+	bool none_pmd = false;
+
+	pud = *pudp;
+	pr_cont("[%012lx]    : PUD %px : 0x%016lx ",
+		addr, pudp, pgprot_val(pud));
+	if (is_shadow_huge_pte(pud)) {
+		pr_cont("PTE of huge page\n");
+		none_pmd = true;
+	} else if (is_shadow_none_pte(pud) && !is_shadow_valid_pte(kvm, pud)) {
+		pr_cont("none or bad\n");
+		none_pmd = true;
+	} else if (is_shadow_valid_pte(kvm, pud) &&
+				!is_shadow_present_pte(kvm, pud)) {
+		pr_cont("only valid\n");
+		none_pmd = true;
+	} else {
+		pr_cont("valid & present\n");
+	}
+	return !none_pmd;
+}
+
+static bool dump_guest_pud(struct kvm *kvm, pgprotval_t *pudp, pgprotval_t pud,
+			   e2k_addr_t addr)
+{
+	bool none_pmd = false;
+
+	pr_cont("                  : PUD %px : 0x%016lx ",
+		pudp, pud);
+	if (kvm_is_huge_gpte(kvm, pud)) {
+		pr_cont("PTE of huge page\n");
+		none_pmd = true;
+	} else if (is_none_gpte(pud) && !kvm_is_valid_gpte(kvm, pud)) {
+		pr_cont("none or bad\n");
+		none_pmd = true;
+	} else if (kvm_is_valid_gpte(kvm, pud) && !is_present_gpte(pud)) {
+		pr_cont("only valid\n");
+		none_pmd = true;
+	} else {
+		pr_cont("valid & present\n");
+	}
+	return !none_pmd;
+}
+
+static void dump_host_and_guest_puds(struct kvm *kvm,
+			pgprot_t *host_pgdp, pgprotval_t guest_pgd,
+			e2k_addr_t start, e2k_addr_t end,
+			bool do_dump_host_pud, bool do_dump_guest_pud)
+{
+	const pt_struct_t *host_pt_struct;
+	const pt_struct_t *guest_pt_struct;
+	const pt_level_t *host_pt_level;
+	const pt_level_t *guest_pt_level;
+	pgprot_t *host_pudp;
+	pgprotval_t *guest_pudb, *guest_pudp, guest_pud;
+	e2k_addr_t addr, hva_next, gva_next;
+	bool do_dump_host_pmd, do_dump_guest_pmd;
+	int ret;
+
+	host_pt_struct = mmu_pt_get_host_pt_struct(kvm);
+	host_pt_level = &host_pt_struct->levels[E2K_PUD_LEVEL_NUM];
+	guest_pt_struct = mmu_pt_get_kvm_vcpu_pt_struct(kvm);
+	guest_pt_level = &guest_pt_struct->levels[E2K_PUD_LEVEL_NUM];
+	if (do_dump_guest_pud) {
+		guest_pudb = (pgprotval_t *)kvm_gpte_pfn_to_phys_addr(guest_pgd,
+								guest_pt_struct);
+	}
+
+	addr = start;
+	do {
+		hva_next = pt_level_next_addr(addr, end, host_pt_level);
+		gva_next = pt_level_next_addr(addr, end, guest_pt_level);
+		if (do_dump_host_pud) {
+			host_pudp = (pgprot_t *)pud_offset((pgd_t *)host_pgdp,
+								addr);
+			do_dump_host_pmd = dump_host_pud(kvm, host_pudp, addr);
+		} else {
+			do_dump_host_pmd = false;
+		}
+		if (likely(do_dump_guest_pud)) {
+			guest_pudp = (pgprotval_t *)(guest_pudb) + pud_index(addr);
+			ret = kvm_read_guest_pte(kvm, guest_pudp, &guest_pud);
+			if (unlikely(ret != 0)) {
+				pr_err("%s(); copy gpte from gpa %px failed, "
+					"error %d\n",
+					__func__, guest_pudp, ret);
+				guest_pud = 0;
+			}
+			do_dump_guest_pmd = dump_guest_pud(kvm, guest_pudp,
+							   guest_pud, addr);
+		} else {
+			do_dump_guest_pmd = false;
+		}
+		if (likely(do_dump_host_pmd || do_dump_guest_pmd)) {
+			dump_host_and_guest_pmds(kvm, host_pudp, guest_pud,
+				addr, hva_next, do_dump_host_pmd, do_dump_guest_pmd);
+		}
+		addr = hva_next;
+	} while (addr < end);
+}
+
+static bool dump_host_pgd(struct kvm *kvm, pgprot_t *pgdp, e2k_addr_t addr)
+{
+	pgprot_t pgd;
+	bool none_pud = false;
+
+	pgd = *pgdp;
+	pr_cont("[%012lx] : PGD %px : 0x%016lx ",
+		addr, pgdp, pgprot_val(pgd));
+	if (is_shadow_huge_pte(pgd)) {
+		pr_cont("PTE of huge page\n");
+		none_pud = true;
+	} else if (is_shadow_none_pte(pgd) && !is_shadow_valid_pte(kvm, pgd)) {
+		pr_cont("none or bad\n");
+		none_pud = true;
+	} else if (is_shadow_valid_pte(kvm, pgd) &&
+				!is_shadow_present_pte(kvm, pgd)) {
+		pr_cont("only valid\n");
+		none_pud = true;
+	} else {
+		pr_cont("valid & present\n");
+	}
+	return !none_pud;
+}
+
+static bool dump_guest_pgd(struct kvm *kvm, pgprotval_t *pgdp, pgprotval_t pgd,
+			   e2k_addr_t addr)
+{
+	bool none_pud = false;
+
+	pr_cont("               : PGD %px : 0x%016lx ", pgdp, pgd);
+	if (kvm_is_huge_gpte(kvm, pgd)) {
+		pr_cont("PTE of huge page\n");
+		none_pud = true;
+	} else if (is_none_gpte(pgd) && !kvm_is_valid_gpte(kvm, pgd)) {
+		pr_cont("none or bad\n");
+		none_pud = true;
+	} else if (kvm_is_valid_gpte(kvm, pgd) && !is_present_gpte(pgd)) {
+		pr_cont("only valid\n");
+		none_pud = true;
+	} else {
+		pr_cont("valid & present\n");
+	}
+	return !none_pud;
+}
+
+static void dump_host_and_guest_pts(struct kvm *kvm, gmm_struct_t *gmm,
+				 e2k_addr_t start, e2k_addr_t end)
+{
+	hpa_t host_root;
+	gpa_t guest_root;
+	const pt_struct_t *host_pt_struct;
+	const pt_struct_t *guest_pt_struct;
+	const pt_level_t *host_pt_level;
+	const pt_level_t *guest_pt_level;
+	pgprot_t *host_pgdp;
+	pgprotval_t *guest_pgdp, guest_pgd;
+	e2k_addr_t addr, hva_next, gva_next;
+	bool do_dump_host_pud, do_dump_guest_pud;
+	int ret, cpu;
+
+	host_root = gmm->root_hpa;
+	if (!VALID_PAGE(host_root)) {
+		/* shadow PT of the gmm has been already released */
+		pr_alert("host PT of gmm #%d was already released\n", gmm->id);
+		return;
+	}
+	guest_root = gmm->u_pptb;
+	host_pt_struct = mmu_pt_get_host_pt_struct(kvm);
+	host_pt_level = &host_pt_struct->levels[E2K_PGD_LEVEL_NUM];
+	guest_pt_struct = mmu_pt_get_kvm_vcpu_pt_struct(kvm);
+	guest_pt_level = &guest_pt_struct->levels[E2K_PGD_LEVEL_NUM];
+
+	pr_alert("\n\n===== Host & guest gmm #%d PTs state addr "
+		"range 0x%lx - 0x%lx =====\n",
+		gmm->id, start, end);
+	pr_alert("host pgd at 0x%llx guest pgd at 0x%llx "
+		"active on cpu mask 0x%lx\n",
+		host_root, guest_root, cpumask_bits(&gmm->cpu_vm_mask)[0]);
+	for_each_online_cpu(cpu) {
+		unsigned long cntx;
+
+		cntx = gmm->context.cpumsk[cpu];
+		pr_alert("   cpu #%d  context 0x%lx : version %llx "
+			"hardware context %03llx\n",
+			cpu, cntx, CTX_VERSION(cntx) >> CTX_VERSION_SHIFT,
+			CTX_HARDWARE(cntx));
+	}
+	addr = start;
+	do {
+		hva_next = pt_level_next_addr(addr, end, host_pt_level);
+		gva_next = pt_level_next_addr(addr, end, guest_pt_level);
+		host_pgdp = (pgprot_t *)(host_root) + pgd_index(addr);
+		host_pgdp = __va(host_pgdp);
+		do_dump_host_pud = dump_host_pgd(kvm, host_pgdp, addr);
+		guest_pgdp = (pgprotval_t *)(guest_root) + pgd_index(addr);
+		ret = kvm_read_guest_pte(kvm, guest_pgdp, &guest_pgd);
+		if (unlikely(ret != 0)) {
+			pr_err("%s(); copy gpte from gpa %px failed, error %d\n",
+				__func__, guest_pgdp, ret);
+			guest_pgd = 0;
+		}
+		do_dump_guest_pud = dump_guest_pgd(kvm, guest_pgdp, guest_pgd,
+						   addr);
+		if (likely(do_dump_host_pud || do_dump_guest_pud)) {
+			dump_host_and_guest_puds(kvm, host_pgdp, guest_pgd,
+				addr, hva_next, do_dump_host_pud, do_dump_guest_pud);
+		}
+		addr = hva_next;
+	} while (addr < end);
+}
+
 static void mmu_init_vcpu_pt_struct(struct kvm_vcpu *vcpu)
 {
 	const pt_struct_t *pt_struct;
@@ -4368,15 +5009,16 @@ static void kvm_init_nonpaging_pt_structs(struct kvm *kvm, hpa_t root)
 	if (kvm_is_phys_pt_enable(kvm)) {
 		mmu_set_gp_pt_struct(kvm, &pgtable_struct_e2k_v6_gp);
 	} else if (kvm_is_shadow_pt_enable(kvm)) {
-		pgprot_t *new_root;
-		int pt_index;
-
 		mmu_set_gp_pt_struct(kvm, kvm_get_mmu_host_pt_struct(kvm));
 
-		/* One PGD entry is the VPTB self-map. */
-		pt_index = pgd_index(KERNEL_VPTB_BASE_ADDR);
-		new_root = (pgprot_t *)__va(root);
-		kvm_vmlpt_kernel_spte_set(kvm, &new_root[pt_index], new_root);
+		/* Since V6 hardware support has been simplified
+		 * and self-pointing pgd is not required anymore. */
+		if (!cpu_has(CPU_FEAT_ISET_V6)) {
+			/* One PGD entry is the VPTB self-map. */
+			int pt_index = pgd_index(KERNEL_VPTB_BASE_ADDR);
+			pgprot_t *new_root = (pgprot_t *)__va(root);
+			kvm_vmlpt_kernel_spte_set(kvm, &new_root[pt_index], new_root);
+		}
 	} else {
 		KVM_BUG_ON(true);
 	}
@@ -4455,7 +5097,7 @@ void PTNAME(mmu_init_pt_interface)(struct kvm *kvm)
 	pt_ops->kvm_hv_mmu_page_fault = &kvm_hv_mmu_page_fault;
 	pt_ops->kvm_mmu_pte_write = &kvm_mmu_pte_write;
 	pt_ops->sync_shadow_pt_range = &sync_shadow_pt_range;
-	pt_ops->shadow_pt_protection_fault = &shadow_pt_protection_fault;
+	pt_ops->atomic_update_shadow_pt = &atomic_update_shadow_pt;
 	pt_ops->direct_unmap_prefixed_mmio_gfn = &direct_unmap_prefixed_mmio_gfn;
 	pt_ops->kvm_mmu_free_page = &kvm_mmu_free_page;
 	pt_ops->copy_guest_shadow_root_range = &copy_guest_shadow_root_range;
@@ -4477,12 +5119,11 @@ void PTNAME(mmu_init_pt_interface)(struct kvm *kvm)
 	pt_ops->slot_handle_largepage_remove_write_access =
 				&slot_handle_largepage_remove_write_access;
 
-	pt_ops->mmu_flush_spte_tlb_range =
-				&mmu_flush_spte_tlb_range;
-	pt_ops->mmu_flush_large_spte_tlb_range =
-				&mmu_flush_large_spte_tlb_range;
-	pt_ops->mmu_flush_shadow_pt_level_tlb =
-				&mmu_flush_shadow_pt_level_tlb;
+	pt_ops->mmu_flush_spte_tlb_range = &mmu_flush_spte_tlb_range;
+	pt_ops->mmu_flush_large_spte_tlb_range = &mmu_flush_large_spte_tlb_range;
+	pt_ops->mmu_flush_shadow_pt_level_tlb = &mmu_flush_shadow_pt_level_tlb;
+
+	pt_ops->dump_host_and_guest_pts = &dump_host_and_guest_pts;
 
 	pt_ops->mmu_init_vcpu_pt_struct = &mmu_init_vcpu_pt_struct;
 	pt_ops->kvm_init_mmu_pt_structs = &kvm_init_mmu_pt_structs;

@@ -178,7 +178,7 @@ typedef union {
 /*
  * Kernel virtual memory context
  */
-#define	E2K_KERNEL_CONTEXT	0x000
+#define	E2K_KERNEL_CONTEXT	0x000ull
 #define	E2K_KERNEL_PID		E2K_KERNEL_CONTEXT	/* renamed name */
 
 #define MMU_CONTEXT(context)	__mmu_reg(context)

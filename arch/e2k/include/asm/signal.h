@@ -75,10 +75,33 @@ typedef struct prot_sigaction_old {
 typedef struct prot_sigaction {
 	e2k_pl_t	sa_handler;
 	u64		sa_flags;
-	u64		_unused;
 	e2k_pl_t	sa_restorer;
 	sigset_t	sa_mask;
 } prot_sigaction_t;
+
+typedef union prot_sigval {
+	int		sival_int;
+	e2k_ptr_t	sival_ptr;
+} prot_sigval_t;
+
+#define PROT_SIGEV_MAX_SIZE 64
+#define PROT_SIGEV_PAD_SIZE \
+	((PROT_SIGEV_MAX_SIZE - (sizeof(int) * 2 + sizeof(prot_sigval_t))) / sizeof(int))
+
+typedef struct prot_sigevent {
+	prot_sigval_t sigev_value;
+	int sigev_signo;
+	int sigev_notify;
+	union {
+		int _pad[PROT_SIGEV_PAD_SIZE];
+		int _tid;
+
+		struct {
+			e2k_ptr_t _function;
+			e2k_ptr_t _attribute;
+		} _sigev_thread;
+	} _sigev_un;
+} prot_sigevent_t;
 
 #include <asm/sigcontext.h>
 
@@ -156,28 +179,6 @@ static inline void native_remove_ctx_signal_stack(u64 key)
 extern long do_sigreturn(void);
 extern void sighandler_trampoline(void);
 extern void sighandler_trampoline_continue(void);
-
-#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
-extern long sys_tgkill_info(int pid, int tgid, struct siginfo __user *uinfo);
-
-#define set_delayed_signal_handling(ti) \
-do { \
-	set_ti_status_flag(ti, TS_DELAYED_SIG_HANDLING); \
-} while (0)
-
-#define clear_delayed_signal_handling(ti) \
-do { \
-	clear_ti_status_flag(ti, TS_DELAYED_SIG_HANDLING); \
-} while (0)
-
-#define test_delayed_signal_handling(p, ti) \
-	(unlikely(test_ti_status_flag(ti, TS_DELAYED_SIG_HANDLING)) && \
-		  !__fatal_signal_pending(p))
-#else
-#define set_delayed_signal_handling(ti)
-#define clear_delayed_signal_handling(ti)
-#define test_delayed_signal_handling(p, ti)	(false)
-#endif
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* It is native paravirtualized guest kernel */

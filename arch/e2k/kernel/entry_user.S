@@ -22,17 +22,19 @@ $switch_to_user_func:
 		setbn rsz = 0x3, rbs = 0x4, rcur = 0x0
 		setbp psz = 0x0
 
-		rrd %cr1.hi, %dr4
+		rrd %cr1.hi, %dr6
 		ldd [ GCURTASK + TSK_TI + TI_K_USD_HI ], %dr5
 	}
 	{
+		rwd 0, %cr0.hi
 		disp %ctpr1, $do_switch_to_user_func
 
-		andd %dr4, 0xfffffffff, %dr4
+		andd %dr6, 0xfffffffff, %dr6
 		andd %dr5, 0xfffffff000000000, %dr5
 	}
 	{
-		ord %dr4, %dr5, %dr4
+		rwd 0, %cr1.lo
+		ord %dr6, %dr5, %dr6
 	}
 ALTERNATIVE_1_ALTINSTR
 /* CPU_HWBUG_INTC_CR_WRITE version */
@@ -42,7 +44,7 @@ ALTERNATIVE_1_ALTINSTR
 		/* Correct value in %cr1.hi (currently it holds
 		 * user data stack size while cr0.hi holds kernel IP) */
 		wait ma_c=1
-		rwd %dr4, %cr1.hi
+		rwd %dr6, %cr1.hi
 
 		addd 0, %dr1, %db[0]	/* start_func */
 		addd 0, %dr2, %db[1]	/* us_size */
@@ -55,7 +57,7 @@ ALTERNATIVE_2_OLDINSTR
 
 		/* Correct value in %cr1.hi (currently it holds
 		 * user data stack size while cr0.hi holds kernel IP) */
-		rwd %dr4, %cr1.hi
+		rwd %dr6, %cr1.hi
 
 		addd 0, %dr1, %db[0]	/* start_func */
 		addd 0, %dr2, %db[1]	/* us_size */
@@ -87,20 +89,21 @@ $protected_switch_to_user_func:
 		setbn rsz = 0x3, rbs = 0x5, rcur = 0x0
 		setbp psz = 0x0
 
-		rrd %cr1.hi, %dr5
+		rrd %cr1.hi, %dr7
 		ldd [ GCURTASK + TSK_TI + TI_K_USD_HI ], %dr6
 	}
 	{
+		rwd 0, %cr0.hi
 		disp %ctpr1, $do_switch_to_user_func
 
-		andd %dr5, 0xfffffffff, %dr5
-		andd %dr6, 0xfffffff000000000, %dr6
+		andd,1 %dr7, 0xfffffffff, %dr7
+		andd,3 %dr6, 0xfffffff000000000, %dr6
 
 		puttagd %dr0, 15, %dr0
 		puttagd %dr1, 12, %dr1
 	}
 	{
-		ord %dr5, %dr6, %dr5
+		ord %dr7, %dr6, %dr7
 	}
 ALTERNATIVE_1_ALTINSTR
 /* CPU_HWBUG_INTC_CR_WRITE version */
@@ -123,24 +126,30 @@ ALTERNATIVE_2_OLDINSTR
 
 		/* Correct value in %cr1.hi (currently it holds
 		 * user data stack size while cr0.hi holds kernel IP) */
-		rwd %dr5, %cr1.hi
+		rwd %dr7, %cr1.hi
 
 		addd 0,	%dr2, %db[0]	/* start_func */
 		addd 0,	%dr3, %db[1]	/* us_size */
 		addd 0,	%dr4, %db[2]	/* cui */
 	}
 ALTERNATIVE_3_FEATURE(CPU_HWBUG_INTC_CR_WRITE)
-
-	/*
-	 * Set `rtld_fini' parameter to NULL so that the main executable's
-	 * `_start ()' can distinguish between the cases when it's invoked
-         * directly by the kernel or ld.so.
-	 */
 	{
+		/*
+		* Set `rtld_fini' parameter to NULL so that the main executable's
+		* `_start ()' can distinguish between the cases when it's invoked
+		* directly by the kernel or ld.so.
+		*/
 		movtd	0x0, %dr2
 		movtd	0x0, %dr3
 	}
 	{
+		/* Clear kernel information from user's registers */
+		addd 0, 0, %db[3]
+		addd 0, 0, %db[4]
+		addd 0, 0, %db[5]
+		addd 0, 0, %db[6]
+		addd 0, 0, %db[7]
+
 		call	%ctpr1, wbs = 0x5
 	}
 .size $protected_switch_to_user_func, . - $protected_switch_to_user_func

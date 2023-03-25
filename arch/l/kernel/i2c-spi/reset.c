@@ -15,11 +15,7 @@
 #include <linux/pci_ids.h>
 #include <linux/delay.h>
 
-#ifdef CONFIG_E2K
-#include <asm/machdep_numa.h>
-#else
 #include <asm/machdep.h>
-#endif
 #include <asm/iolinkmask.h>
 #include <asm/sic_regs.h>
 #include <asm/epic.h>
@@ -147,16 +143,8 @@ spmc_halt:
 
 static void l_reset_set_control_func(struct pci_dev *dev)
 {
-#ifdef CONFIG_E2K
-	int nid;
-	for_each_node_has_dup_kernel(nid) {
-		the_node_machine(nid)->arch_reset = &l_reset_machine;
-		the_node_machine(nid)->arch_halt = &l_halt_machine;
-	}
-#else
 	machine.arch_reset = &l_reset_machine;
 	machine.arch_halt = &l_halt_machine;
-#endif
 	l_reset_device = dev;
 }
 
@@ -186,15 +174,29 @@ static int l_reset_init(void)
 
 	l_reset_set_control_func(dev);
 
-	duration = iohub_generation(l_reset_device) == 1 ?
-		L_IOHUB2_SOFT_RESET_DURATION : L_IOHUB_SOFT_RESET_DURATION;
-	pci_write_config_dword(dev, PCI_SOFT_RESET_DURATION,
-				duration);
+	switch (iohub_generation(dev)) {
+	case 0:
+		duration = L_IOHUB_SOFT_RESET_DURATION;
+		break;
+	case 1:
+		duration = L_IOHUB2_SOFT_RESET_DURATION;
+		break;
+	case 2:
+		duration = L_EIOHUB_SOFT_RESET_DURATION;
+		break;
+	default:
+		WARN(1, "reset duration is not set\n");
+		duration = 0;
+	}
+
+	if (duration) {
+		pci_write_config_dword(dev, PCI_SOFT_RESET_DURATION,
+						duration);
+	}
 
 	if (DEBUG_RESET_MODE) {
 		unsigned int reg;
-		pci_read_config_dword(l_reset_device,
-			PCI_SOFT_RESET_DURATION, &reg);
+		pci_read_config_dword(dev, PCI_SOFT_RESET_DURATION, &reg);
 		DebugRS("l_set_soft_reset_state() set Software Reset Duration "
 			"to 0x%x\n", reg);
 	}

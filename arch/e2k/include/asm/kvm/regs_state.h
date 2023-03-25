@@ -64,9 +64,9 @@
 
 #ifndef	CONFIG_E2K_ISET_VER
 #define	SAVE_GUEST_GREGS_EXCEPT_KERNEL(gregs)				\
-		(machine.host.save_guest_gregs(gregs))
+		(host_machine.save_guest_gregs(gregs))
 #define	RESTORE_GUEST_GREGS_EXCEPT_KERNEL(gregs)			\
-		(machine.host.restore_guest_gregs(gregs))
+		(host_machine.restore_guest_gregs(gregs))
 #elif	CONFIG_E2K_ISET_VER < 5
 #define	SAVE_GUEST_GREGS_EXCEPT_KERNEL(gregs)				\
 		DO_SAVE_GUEST_GREGS_EXCEPT_KERNEL_V3((gregs)->g)
@@ -239,21 +239,6 @@
 		__gl_regs, VCPU_STATE_GREGS_PAIR_LO);			\
 })
 
-#define	SAVE_GUEST_USER_REGS_AT_GTI(thread_info, gthread_info, save_upsr) \
-({									\
-	thread_info_t *__ti = (thread_info);				\
-	gthread_info_t *__gti = (gthread_info);				\
-	global_regs_t *__gregs = &__gti->gregs;				\
-									\
-	if (test_ti_thread_flag(__ti, TIF_VIRTUALIZED_GUEST)) {		\
-		SAVE_GUEST_KERNEL_GREGS_AT_GTI(__ti, __gti, __gregs);	\
-		SAVE_GUEST_HOST_GREGS_AT_TI(__ti->h_gregs.g,		\
-							__gregs->g);	\
-		if (save_upsr) {					\
-			SAVE_GUEST_USER_UPSR_AT_GTI(__ti, __gti);	\
-		}							\
-	}								\
-})
 #define	KVM_INIT_GUEST_USER_UPSR(thread_info, __upsr)			\
 ({									\
 	thread_info_t *__ti = (thread_info);				\

@@ -275,12 +275,13 @@ static int smi_pm_poweroff(struct device *dev)
 
 static int smi_enable_vblank(struct drm_device *dev, unsigned int pipe)
 {
+	struct smi_device *sdev = dev->dev_private;
 	if(g_specId == SPC_SM750)
 	{
 		hw750_en_dis_interrupt(1, pipe);
 	}else if(g_specId == SPC_SM768)
 	{
-		hw768_en_dis_interrupt(1, pipe);
+		hw768_en_dis_interrupt(sdev, 1, pipe);
 	}
 	return 0;
 }
@@ -288,12 +289,13 @@ static int smi_enable_vblank(struct drm_device *dev, unsigned int pipe)
 
 static void smi_disable_vblank(struct drm_device *dev, unsigned int pipe)
 {
+	struct smi_device *sdev = dev->dev_private;
 	if(g_specId == SPC_SM750)
 	{
 		hw750_en_dis_interrupt(0, pipe);
 	}else if(g_specId == SPC_SM768)
 	{
-		hw768_en_dis_interrupt(0, pipe);
+		hw768_en_dis_interrupt(sdev, 0, pipe);
 	}
 }
 
@@ -314,14 +316,14 @@ static int smi_irq_postinstall(struct drm_device *dev)
 
 static void smi_irq_uninstall(struct drm_device *dev)
 {
-
+	struct smi_device *sdev = dev->dev_private;
 	/* Disable *all* interrupts */
 	if(g_specId == SPC_SM750)
 	{
 		ddk750_disable_IntMask();
 	}else if(g_specId == SPC_SM768)
 	{
-		ddk768_disable_IntMask();
+		ddk768_disable_IntMask(sdev);
 	}
 
 }
@@ -330,6 +332,7 @@ static void smi_irq_uninstall(struct drm_device *dev)
 irqreturn_t smi_drm_interrupt(int irq, void *arg)
 {
 	struct drm_device *dev = (struct drm_device *) arg;
+	struct smi_device *sdev = dev->dev_private;
 	
 	int handled = 0;
 	
@@ -349,17 +352,17 @@ irqreturn_t smi_drm_interrupt(int irq, void *arg)
 		}
 	}else if(g_specId == SPC_SM768)
 	{
-		if (hw768_check_vsync_interrupt(0))
+		if (hw768_check_vsync_interrupt(sdev, 0))
 		{
 			/* Clear the panel VSync Interrupt */
 			drm_handle_vblank(dev, 0);
 			handled = 1;
-			hw768_clear_vsync_interrupt(0);
+			hw768_clear_vsync_interrupt(sdev, 0);
 		}	
-		if (hw768_check_vsync_interrupt(1)) {		
+		if (hw768_check_vsync_interrupt(sdev, 1)) {
 			drm_handle_vblank(dev, 1);
 			handled = 1;
-			hw768_clear_vsync_interrupt(1);
+			hw768_clear_vsync_interrupt(sdev, 1);
 		}
 	}
 	

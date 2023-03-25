@@ -2844,9 +2844,6 @@ PVRSRVRGXInitFirmwareKM(PVRSRV_DEVICE_NODE       *psDeviceNode,
                         FW_PERF_CONF             eFirmwarePerf,
                         IMG_UINT32               ui32ConfigFlagsExt)
 {
-#ifdef CONFIG_MCST
-	IMG_DEV_PHYADDR RegsCpuDevBase = { .uiAddr = 0 };
-#endif
 	PVRSRV_ERROR eError;
 	void *pvAppHintState = NULL;
 	IMG_UINT32 ui32AppHintDefault;

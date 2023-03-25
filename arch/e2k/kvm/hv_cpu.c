@@ -32,6 +32,7 @@
 #include "intercepts.h"
 #include "io.h"
 #include "pic.h"
+#include "trace-tlb-flush.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -593,68 +594,6 @@ void write_hw_ctxt_to_hv_vcpu_registers(struct kvm_vcpu *vcpu,
 	epic_write_guest_w(CEPIC_PNMIRR, cepic->pnmirr.counter);
 }
 
-noinline __interrupt
-static void launch_hv_vcpu(struct kvm_vcpu_arch *vcpu)
-{
-	struct thread_info *ti = current_thread_info();
-	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->intc_ctxt;
-	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->sw_ctxt;
-	u64 ctpr1 = AW(intc_ctxt->ctpr1), ctpr1_hi = AW(intc_ctxt->ctpr1_hi),
-	    ctpr2 = AW(intc_ctxt->ctpr2), ctpr2_hi = AW(intc_ctxt->ctpr2_hi),
-	    ctpr3 = AW(intc_ctxt->ctpr3), ctpr3_hi = AW(intc_ctxt->ctpr3_hi),
-	    lsr = intc_ctxt->lsr, lsr1 = intc_ctxt->lsr1,
-	    ilcr = intc_ctxt->ilcr, ilcr1 = intc_ctxt->ilcr1;
-
-	if (cpu_has(CPU_HWBUG_VIRT_PUSD_PSL)) {
-		e2k_pusd_lo_t pusd_lo;
-
-		AW(pusd_lo) = AW(sw_ctxt->usd_lo);
-		if (unlikely(pusd_lo.PUSD_lo_p)) {
-			KVM_BUG_ON(!pusd_lo.PUSD_lo_psl);
-			pusd_lo.PUSD_lo_psl -= 1;
-			AW(sw_ctxt->usd_lo) = AW(pusd_lo);
-		}
-	}
-
-	/*
-	 * Here kernel is on guest context including data stack
-	 * so nothing complex: calls, prints, etc
-	 */
-
-	__guest_enter(ti, vcpu, FULL_CONTEXT_SWITCH | USD_CONTEXT_SWITCH |
-				DEBUG_REGS_SWITCH);
-
-	NATIVE_WRITE_CTPR2_REG_VALUE(ctpr2);
-	NATIVE_WRITE_CTPR2_HI_REG_VALUE(ctpr2_hi);
-#ifdef CONFIG_USE_AAU
-	/* These registers must be restored after ctpr2 */
-	native_set_aau_aaldis_aaldas(ti->aalda, &sw_ctxt->aau_context);
-	NATIVE_RESTORE_AAU_MASK_REGS(sw_ctxt->aau_context.aaldm,
-			sw_ctxt->aau_context.aaldv, sw_ctxt->aasr);
-#endif
-	/* issue GLAUNCH instruction.
-	 * This macro does not restore %ctpr2 register because of ordering
-	 * with AAU restore. */
-	E2K_GLAUNCH(ctpr1, ctpr1_hi, ctpr2, ctpr2_hi, ctpr3, ctpr3_hi, lsr, lsr1, ilcr, ilcr1);
-
-	AW(intc_ctxt->ctpr1) = ctpr1;
-	/* Make sure that the first kernel memory access is store.
-	 * This is needed to flush SLT before trying to load anything. */
-	barrier();
-	AW(intc_ctxt->ctpr2) = ctpr2;
-	AW(intc_ctxt->ctpr3) = ctpr3;
-	AW(intc_ctxt->ctpr1_hi) = ctpr1_hi;
-	AW(intc_ctxt->ctpr2_hi) = ctpr2_hi;
-	AW(intc_ctxt->ctpr3_hi) = ctpr3_hi;
-	intc_ctxt->lsr = lsr;
-	intc_ctxt->lsr1 = lsr1;
-	intc_ctxt->ilcr = ilcr;
-	intc_ctxt->ilcr1 = ilcr1;
-
-	__guest_exit(ti, vcpu, FULL_CONTEXT_SWITCH | USD_CONTEXT_SWITCH |
-				DEBUG_REGS_SWITCH);
-}
-
 static inline bool calculate_g_th(const intc_info_cu_hdr_t *cu_hdr,
 		const struct kvm_intc_cpu_context *intc_ctxt)
 {
@@ -722,7 +661,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	intc_info_mu_t *mu = vcpu->arch.intc_ctxt.mu;
 	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->arch.intc_ctxt;
 	u64 exceptions;
-	int ret;
 	bool g_th;
 
 	raw_all_irq_disable();
@@ -753,7 +691,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	preempt_disable();
 
-	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu)) {
+	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu) || cpu_has(CPU_HWBUG_VIRT_TLU_IB)) {
+		trace_host_flush_tlb(vcpu);
 		kvm_vcpu_flush_tlb(vcpu);
 	}
 	if (kvm_check_request(KVM_REQ_MMU_SYNC, vcpu)) {
@@ -773,6 +712,15 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	/* Check if guest should enter trap handler after glaunch. */
 	g_th = calculate_g_th(&cu->header, intc_ctxt);
+
+	if (kvm_g_tmr) {
+		g_preempt_tmr_t tmr;
+
+		AW(tmr) = 0;
+		tmr.tmr = kvm_g_tmr;
+		tmr.v = 1;
+		WRITE_G_PREEMPT_TMR_REG(tmr);
+	}
 
 	restore_SBBP_TIRs(intc_ctxt->sbbp, intc_ctxt->TIRs, intc_ctxt->nr_TIRs,
 			cu->header.lo.tir_fz, g_th);
@@ -846,14 +794,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	preempt_enable();
 
 	/* This will enable interrupts */
-	ret = parse_INTC_registers(&vcpu->arch);
-
-	/* check requests after intercept handling and do */
-	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu)) {
-		kvm_vcpu_flush_tlb(vcpu);
-	}
-
-	return ret;
+	return parse_INTC_registers(&vcpu->arch);
 }
 
 static int do_startup_hv_vcpu(struct kvm_vcpu *vcpu, bool first_launch)
@@ -874,12 +815,6 @@ static int do_startup_hv_vcpu(struct kvm_vcpu *vcpu, bool first_launch)
 		raw_all_irq_enable();
 	}
 #endif	/* SWITCH_TO_GUEST_MMU_CONTEXT */
-
-	if (kvm_request_pending(vcpu)) {
-		if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu)) {
-			kvm_vcpu_flush_tlb(vcpu);
-		}
-	}
 
 	/* loop while some intercept event need be handled at user space */
 	do {
@@ -1073,24 +1008,24 @@ module_param_named(e2k_periodic_wakeup, periodic_wakeup, bool, 0600);
 void kvm_epic_start_idle_timer(struct kvm_vcpu *vcpu)
 {
 	struct hrtimer *hrtimer = &vcpu->arch.cepic_idle;
-	struct kvm_arch *kvm = &vcpu->kvm->arch;
+	struct kvm *kvm = vcpu->kvm;
 	u64 cepic_timer_cur = (u64) vcpu->arch.hw_ctxt.cepic->timer_cur;
 	u64 vcpu_idle_timeout_ns = jiffies_to_nsecs(VCPU_IDLE_TIMEOUT);
 	u64 delta_ns;
 
 	if (unlikely(cepic_timer_cur == 0 && !periodic_wakeup &&
-			!kvm_has_passthrough_device(kvm)))
+			!kvm_arch_has_assigned_device(kvm)))
 		return;
 
 	delta_ns = (cepic_timer_cur)
-			? ((u64) cepic_timer_cur * NSEC_PER_SEC / kvm->cepic_freq)
+			? ((u64) cepic_timer_cur * NSEC_PER_SEC / kvm->arch.cepic_freq)
 			: vcpu_idle_timeout_ns;
 
 	/* Make sure to wake up periodically to check for interrupts
 	 * from external devices.  Also do it if debugging option
 	 * [periodic_wakeup] is enabled. */
 	if (delta_ns > vcpu_idle_timeout_ns && (periodic_wakeup ||
-						kvm_has_passthrough_device(kvm)))
+						kvm_arch_has_assigned_device(kvm)))
 		delta_ns = vcpu_idle_timeout_ns;
 
 	ktime_t current_time = hrtimer->base->get_time();

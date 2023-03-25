@@ -50,8 +50,10 @@
 #define EL_ATOMIC_ADD		141
 #define EL_SET_MLOCK_CONTROL    153
 #define EL_UNSET_MLOCK_CONTROL  154
+/* #ifdef EL_TIMERFD_USING	*/
 #define EL_OPEN_TIMERFD		161
 #define EL_TIMERFD_SETTIME	162
+/* #endif EL_TIMERFD_USING */
 #define EL_SYNC_CYCLS		163
 #define EL_GET_TIMES		165
 #define EL_USER_TICK            166

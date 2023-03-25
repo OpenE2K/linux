@@ -80,7 +80,7 @@ static unsigned long copy_instr(unsigned long *src, unsigned long *dst,
 
 		replace_instruction(instr, phys_ip_dst, instr_size);
 
-		if (!duplicated_dst || !THERE_IS_DUP_KERNEL)
+		if (!duplicated_dst)
 			break;
 
 		/* Modules are not duplicated */
@@ -130,9 +130,6 @@ static void arch_replace_insn_all_nodes(unsigned long insn, unsigned long ip)
 		}
 
 		NATIVE_WRITE_MAS_D(phys_ip, insn, MAS_STORE_PA);
-
-		if (!THERE_IS_DUP_KERNEL)
-			break;
 	}
 }
 
@@ -170,48 +167,45 @@ void __kprobes arch_disarm_kprobe(struct kprobe *p)
 	flush_instruction(p);
 }
 
-static unsigned long __kprobes
-install_interrupt(struct pt_regs *regs, int single_step)
+static void __kprobes
+install_interrupt(struct pt_regs *regs, int single_step, kprobe_opcode_t **ret_addr)
 {
-	unsigned long flags, base, index, spilled, ret_addr;
-	e2k_mem_crs_t *frame;
-
-	raw_all_irq_save(flags);
-
-	base = AS(regs->stacks.pcsp_lo).base;
-	index = AS(regs->stacks.pcsp_hi).ind;
-	spilled = AS(READ_PCSP_HI_REG()).ind;
-
-	if (spilled <= index)
-		E2K_FLUSHC;
-
-	frame = (e2k_mem_crs_t *) (base + index);
-
 	/* Set exception to fire on return */
 	if (single_step) {
 		if (cpu_has(CPU_HWBUG_SS))
 			set_ts_flag(TS_SINGLESTEP_KERNEL);
-		AS(frame->cr1_lo).ss = 1;
-		AS(frame->cr1_lo).ie = 0;
-		AS(frame->cr1_lo).nmie = 0;
+		AS(regs->crs.cr1_lo).ss = 1;
+		AS(regs->crs.cr1_lo).ie = 0;
+		AS(regs->crs.cr1_lo).nmie = 0;
 	} else {
-		AS(frame->cr1_lo).lw = 1;
+		AS(regs->crs.cr1_lo).lw = 1;
 	}
 
 	/* Save return ip */
-	--frame;
-	ret_addr = AS(frame->cr0_hi).ip << 3;
+	if (ret_addr) {
+		unsigned long flags, base, index, spilled;
 
-	raw_all_irq_restore(flags);
+		raw_all_irq_save(flags);
 
-	return ret_addr;
+		base = regs->stacks.pcsp_lo.base;
+		index = regs->stacks.pcsp_hi.ind;
+		spilled = READ_PCSP_HI_REG().ind;
+
+		if (spilled <= index)
+			E2K_FLUSHC;
+
+		e2k_mem_crs_t *frame = (e2k_mem_crs_t *) (base + index) - 1;
+		*ret_addr = (kprobe_opcode_t *) (frame->cr0_hi.ip << 3);
+
+		raw_all_irq_restore(flags);
+	}
 }
 
 static void __kprobes prepare_singlestep(struct kprobe *p, struct pt_regs *regs)
 {
-	install_interrupt(regs, true);
+	install_interrupt(regs, true, NULL);
 
-	regs->crs.cr0_hi.fields.ip = (u64)(p->ainsn.insn) >> 3;
+	regs->crs.cr0_hi.ip = (u64)(p->ainsn.insn) >> 3;
 }
 
 static int maybe_is_call(void *instr)
@@ -321,8 +315,7 @@ void __kprobes kprobe_instr_debug_handle(struct pt_regs *regs)
 {
 	struct kprobe *cur = kprobe_running();
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
-	unsigned long flags, base, spilled, index;
-	e2k_mem_crs_t *frame;
+	unsigned long flags;
 	e2k_dibsr_t dibsr;
 	bool singlestep;
 
@@ -335,28 +328,21 @@ void __kprobes kprobe_instr_debug_handle(struct pt_regs *regs)
 	 */
 	raw_all_irq_save(flags);
 	dibsr = READ_DIBSR_REG();
-	singlestep = AS(dibsr).ss;
+	singlestep = dibsr.ss;
 	if (singlestep) {
 		if (cpu_has(CPU_HWBUG_SS))
 			clear_ts_flag(TS_SINGLESTEP_KERNEL);
-		AS(dibsr).ss = 0;
+		dibsr.ss = 0;
 		WRITE_DIBSR_REG(dibsr);
 	}
 
 	/*
 	 * Re-enable interrupts in %psr
 	 */
-	base = AS(regs->stacks.pcsp_lo).base;
-	index = AS(regs->stacks.pcsp_hi).ind;
-	spilled = AS(READ_PCSP_HI_REG()).ind;
-	if (spilled <= index)
-		E2K_FLUSHC;
-	frame = (e2k_mem_crs_t *) (base + index);
-	if (AS(frame->cr1_lo).uie)
-		AS(frame->cr1_lo).ie = 1;
-	if (AS(frame->cr1_lo).unmie)
-		AS(frame->cr1_lo).nmie = 1;
-
+	if (AS(regs->crs.cr1_lo).uie)
+		AS(regs->crs.cr1_lo).ie = 1;
+	if (AS(regs->crs.cr1_lo).unmie)
+		AS(regs->crs.cr1_lo).nmie = 1;
 	raw_all_irq_restore(flags);
 
 	if (!singlestep)
@@ -430,7 +416,7 @@ bool arch_within_kprobe_blacklist(unsigned long addr)
 void __kprobes arch_prepare_kretprobe(struct kretprobe_instance *ri,
 				      struct pt_regs *regs)
 {
-	ri->ret_addr = (kprobe_opcode_t *) install_interrupt(regs, false);
+	install_interrupt(regs, false, &ri->ret_addr);
 }
 
 int arch_trampoline_kprobe(struct kprobe *p)

@@ -15,6 +15,15 @@ config NESTED_PAGE_FAULT_INJECTION
 	  some probability. This way recovery operation will fail, and the
 	  code path in nested page fault handler will be tested.
 
+config HALF_SPEC_LOADS_INJECTION
+	bool "Inject half-speculative loads in kernel"
+	depends on HALF_SPECULATIVE_KERNEL
+	default n
+	help
+	  Inject half-speculative loads in various places in kernel to try
+	  to trigger problems with half-spec. mode support in page tables
+	  (i.e. valid bit is set or cleared as needed in kernel PTEs).
+
 config DEBUG_LCC_VOLATILE_ATOMIC
 	bool "Mark GNU asm with atomic operations as volatile"
 	depends on E2K_DEBUG_KERNEL
@@ -30,11 +39,6 @@ config DEBUG_PT_REGS
 	depends on E2K_DEBUG_KERNEL
 	default n
  
-config DEBUG_KMEM_AREA
-	bool "Enable checker of kernel memory area getting and freeing"
-	depends on E2K_DEBUG_KERNEL
-	default n
-
 config DEBUG_STACK_USAGE
 	bool "Stack utilization instrumentation"
 	depends on DEBUG_KERNEL

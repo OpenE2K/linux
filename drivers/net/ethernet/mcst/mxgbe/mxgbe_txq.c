@@ -48,9 +48,16 @@ int mxgbe_txq_alloc_all(mxgbe_priv_t *priv)
 			priv->txq[qn].que_size / sizeof(mxgbe_descr_t);
 		priv->txq[qn].tail = 0;
 
-		DEV_DBG(MXGBE_DBG_MSK_TX, &priv->pdev->dev,
-			"txq_alloc_all: txq[%d].descr_cnt=%d\n",
-			qn, priv->txq[qn].descr_cnt);
+		DEV_DBG(MXGBE_DBG_MSK_MEM, &priv->pdev->dev,
+			"txq_alloc_all: HW Queue: txq[%d].descr_cnt=%d  " \
+			"que_size=%u\n",
+			qn, priv->txq[qn].descr_cnt,
+			(unsigned int)priv->txq[qn].que_size);
+
+		DEV_DBG(MXGBE_DBG_MSK_MEM, &priv->pdev->dev,
+			"txq_alloc_all: que_addr=%p que_handle=%016llX\n",
+			priv->txq[qn].que_addr,
+			(unsigned long long)priv->txq[qn].que_handle);
 
 		/* Alloc RAM for TX ring */
 		priv->txq[qn].tx_buff = kzalloc_node(sizeof(mxgbe_tx_buff_t) *
@@ -284,7 +291,16 @@ int mxgbe_txq_send(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 	priv->tx_err_flags[qn].quefull_f = 0;
 
 	q_descr = ((mxgbe_descr_t *)(priv->txq[qn].que_addr)) + head;
-	*q_descr = *descr; /* copy */
+#ifdef USE_LONG_DESCR
+	q_descr->vlan.r = cpu_to_le64(descr->vlan.r);
+	q_descr->time.r = cpu_to_le64(descr->time.r);
+#endif /* USE_LONG_DESCR */
+	q_descr->addr.r = cpu_to_le64(descr->addr.r);
+	q_descr->ctrl.r = cpu_to_le64(descr->ctrl.r);
+
+	/* Force memory writes to complete before letting h/w
+	 * know there are new descriptors to fetch. */
+	wmb();
 
 	if (tx_buff) {
 		priv->txq[qn].tx_buff[head] = *tx_buff;

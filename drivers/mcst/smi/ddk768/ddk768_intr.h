@@ -11,6 +11,7 @@
 *******************************************************************/
 #ifndef _INTR_H_
 #define _INTR_H_
+#include "../smi_drv.h"
 
 
 /*******************************************************************
@@ -77,8 +78,8 @@ short unhookInterrupt(
 void notifyEndOfISR(void);
 
 
-void sb_IRQMask(int irq_num);
-void sb_IRQUnmask(int irq_num);
+void sb_IRQMask(struct smi_device *sdev, int irq_num);
+void sb_IRQUnmask(struct smi_device *sdev, int irq_num);
 
 #define SB_IRQ_VAL_TC3     	31
 #define SB_IRQ_VAL_TC2     	30

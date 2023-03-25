@@ -8,9 +8,9 @@
 #include <generated/asm-offsets.h>
 #include <asm/thread_info.h>
 #include <asm/cache.h>
+#include <asm/cpu_regs_types.h>
 #include <asm/vmlinux.lds.h>
 #include <asm/head.h>
-#include <asm/pv_info.h>
 #include <uapi/asm/kvm.h>
 
 OUTPUT_FORMAT("elf64-e2k", "elf64-e2k", "elf64-e2k")
@@ -92,8 +92,12 @@ SECTIONS
 			. = _t_entry + 0x8000;		/* hypercalls */
 				*(.ttable_entry16)	/* generic */
 			. = _t_entry + 0x8800;
-				*(.ttable_entry17)
+				*(.ttable_entry17)	/* light */
 			. = _t_entry + 0x9000;
+			__priv_host_entries_start = .;
+				*(.ttable_entry18)	/* privileged actions */
+			__priv_host_entries_end = .;
+			. = _t_entry + 0x9800;
 
 /* FIXME: following auxiliary entries should have fixed offsets into ttable */
 /* whole entry #10 to enable some updates of entries content within the fixed */
@@ -158,6 +162,11 @@ SECTIONS
 		__entry_handlers_hcalls_start = .;
 		*(.text.entry_hcalls)
 		__entry_handlers_hcalls_end = .;
+#ifdef	CONFIG_KVM_HOST_MODE
+		__entry_priv_handlers_hcalls_start = .;
+		*(.text.entry_priv_hcalls)
+		__entry_priv_handlers_hcalls_end = .;
+#endif	/* CONFIG_KVM_HOST_MODE */
 		__entry_handlers_end = .;
 		HEAD_TEXT
 #ifdef CONFIG_KPROBES
@@ -169,6 +178,9 @@ SECTIONS
 		__C3_wait_trap_start = .;
 		*(.C3_wait_trap.text)
 		__C3_wait_trap_end = .;
+		__uaccess_start = .;
+		*(.uaccess_functions)
+		__uaccess_end = .;
 		TEXT_TEXT
 		SCHED_TEXT
 		LOCK_TEXT
@@ -185,69 +197,64 @@ SECTIONS
 		*(.switch_to_phys)
 #endif
 	} /*:text*/
-	NOTES /*:kernel :note*/
 	.dummy : {
 		*(.dummy)
 	} /*:kernel*/
 
-	RO_DATA(E2K_MAX_PAGE_SIZE)
-
-	. = ALIGN(E2K_MAX_PAGE_SIZE);
-
+	. = ALIGN(E2K_MAX_PAGE_SIZE);  /* To map .text/.rodata with large pages */
 	_etext = .;			/* End of text section */
 
-	. = ALIGN(E2K_MAX_PAGE_SIZE);
+	__start_rodata_notes = .;
+		/* everything from this point to _sdata will be marked RO NX */
+		RODATA
+		NOTES
 
-	_sdata = .;
+		. = ALIGN(E2K_MAX_PAGE_SIZE); /* To map .rodata with large pages */
+	__end_rodata_notes = .;
 
-#ifdef	CONFIG_NUMA
-	__node_data_start = .;
-		.node.data : { *(.node.data) }
-		. = ALIGN(PAGE_SIZE);
-	__node_data_end = .;
-#endif	/* CONFIG_NUMA */
-
-	. = ALIGN(PAGE_SIZE);
-	__start_ro_after_init = .;
-	.data..ro_after_init : {
-		 *(.data..ro_after_init)
-	}
-	. = ALIGN(PAGE_SIZE);
-	__end_ro_after_init = .;
-
-	. = ALIGN(E2K_MAX_PAGE_SIZE);	/* Start of data segment */
-
+	. = ALIGN(E2K_MAX_PAGE_SIZE); /* To map .data/.bss with large pages */
+	_sdata_bss = .;
 	__common_data_begin = .;
+		BSS_SECTION(0, 0, 0)
 
-	EXCEPTION_TABLE(16)
+		_sdata = .;
 
-	/* We want to use OSGD for quick data access */
-	RW_DATA_SECTION(L2_CACHE_BYTES, PAGE_SIZE, E2K_ALIGN_GLOBALS_SZ)
+		/* We want to use OSGD for quick data access */
+		RW_DATA_SECTION(L2_CACHE_BYTES, PAGE_SIZE, E2K_ALIGN_GLOBALS_SZ)
 
-	.got : {
-		*(.got)
-	}
-	.sdata : {
-		*(.sdata)
-	}
-	_edata = .;	/* End of data section */
+		.got : {
+			*(.got)
+		}
+		.sdata : {
+			*(.sdata)
+		}
 
-	BSS_SECTION(0, 0, 0)
-
-	. = ALIGN(PAGE_SIZE);
+		. = ALIGN(E2K_MAX_PAGE_SIZE); /* To map .data/.bss with large pages */
 	__common_data_end = .;
 
-	. = ALIGN(E2K_MAX_PAGE_SIZE);
+	__special_data_begin = .;
+		__node_data_start = .;
+			.node.data : { *(.node.data) }
+			. = ALIGN(PAGE_SIZE);
+		__node_data_end = .;
 
+		. = ALIGN(PAGE_SIZE);
+		__start_ro_after_init = .;
+		.data..ro_after_init : {
+			 *(.data..ro_after_init)
+		}
+		EXCEPTION_TABLE(16)
+		. = ALIGN(PAGE_SIZE);
+		__end_ro_after_init = .;
+
+		. = ALIGN(PAGE_SIZE);
+		empty_zero_page = .;
+		. += PAGE_SIZE;
+	__special_data_end = .;
+
+	_edata = .;	/* End of data section */
 	_edata_bss = .;
 
-#ifndef CONFIG_NUMA
-	/* We want to map zero page with small pages to write-protect it,
-	 * so in !NUMA case it goes into different section */
-	. = ALIGN(PAGE_SIZE);
-	empty_zero_page = .;
-	. = . + PAGE_SIZE;
-#endif
 
 	__init_begin = .;
 
@@ -261,9 +268,9 @@ SECTIONS
 	.exit.text : {
 		EXIT_TEXT
 	}
-	__init_text_end = .;
 
 	. = ALIGN(PAGE_SIZE);
+	__init_text_end = .;
 
 	__init_data_begin = .;
 	.exit.data : {
@@ -304,6 +311,7 @@ SECTIONS
 		__cpuhas_initcalls_end = .;
 	}
 
+	. = ALIGN(PAGE_SIZE);
 	__init_data_end = .;
 
 	__init_end = .;
@@ -312,9 +320,6 @@ SECTIONS
 
 	.mdebug 0 : {
 		*(.mdebug)
-	}
-	.note 0 : {
-		*(.note)
 	}
 
 	STABS_DEBUG

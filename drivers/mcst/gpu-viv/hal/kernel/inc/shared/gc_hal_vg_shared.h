@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -55,6 +55,10 @@
 
 #ifndef __gc_hal_shared_vg_h_
 #define __gc_hal_shared_vg_h_
+
+#if defined(__QNXNTO__)
+#include <sys/siginfo.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -161,7 +165,7 @@ typedef struct _gcsVGCONTEXT
 
 #if defined(__QNXNTO__)
     gctSIGNAL                   userSignal;
-    gctINT32                    coid;
+    struct sigevent             event;
     gctINT32                    rcvid;
 #endif
 }
@@ -205,7 +209,7 @@ typedef struct _gcsTASK_MASTER_TABLE
     gctUINT                     size;
 
 #if defined(__QNXNTO__)
-    gctINT32                    coid;
+    struct sigevent             event;
     gctINT32                    rcvid;
 #endif
 }

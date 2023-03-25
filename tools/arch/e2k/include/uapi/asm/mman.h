@@ -22,8 +22,6 @@
 #define	PUT_CUI_TO_INT_PROT(prot, cui)	((((cui) & PROT_CUI_MASK) << \
 						    PROT_CUI_SHIFT) | prot)
 
-#define MAP_SHARED	0x000001	/* Share changes */
-#define MAP_PRIVATE	0x000002	/* Changes are private */
 #define MAP_TYPE	0x00000f	/* Mask for type of mapping */
 #define MAP_ANONYMOUS	0x000010	/* don't use a file */
 #define MAP_FIXED	0x000100	/* Interpret addr exactly */

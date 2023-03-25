@@ -539,7 +539,7 @@ static void __init_recv __setup_prepic(unsigned int node)
 #ifdef CONFIG_E2K
 	union prepic_linpn reg;
 	union prepic_err_int reg_err;
-	unsigned int dest = node_to_first_cpu(node);
+	unsigned int dest = cpumask_first(cpumask_of_node(node));
 
 	if (dest >= nr_cpu_ids) {
 		pr_err("Failed to find online cpu on node %d. PREPIC err and linp are routed to bsp\n",
@@ -912,22 +912,6 @@ __visible void epic_hc_emerg_interrupt(struct pt_regs *regs)
 	l_irq_exit();
 }
 
-__visible void epic_iommu_interrupt(struct pt_regs *regs)
-{
-#ifndef CONFIG_E2K
-	l_irq_enter();
-#endif
-
-#ifdef	CONFIG_E2K
-	e2k_iommu_error_interrupt();
-#endif
-
-#ifndef CONFIG_E2K
-	ack_epic_irq();
-	l_irq_exit();
-#endif
-}
-
 __visible void epic_uncore_interrupt(struct pt_regs *regs)
 {
 	l_irq_enter();
@@ -1003,7 +987,7 @@ __visible void epic_pcs_interrupt(struct pt_regs *regs)
 /*
  * Power management
  */
-#ifdef CONFIG_PM
+
 static int cepic_suspend(void)
 {
 	union cepic_ctrl reg_ctrl;
@@ -1021,6 +1005,7 @@ static int cepic_suspend(void)
 	return 0;
 }
 
+#ifdef CONFIG_PM
 static void cepic_resume(void)
 {
 	union cepic_ctrl reg_ctrl;
@@ -1053,3 +1038,9 @@ static int __init init_cepic_sysfs(void)
 /* local apic needs to resume before other devices access its registers. */
 core_initcall(init_cepic_sysfs);
 #endif	/* CONFIG_PM */
+
+void cepic_disable(void)
+{
+	cepic_timer_shutdown(NULL);
+	cepic_suspend();
+}

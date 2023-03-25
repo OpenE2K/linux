@@ -28,7 +28,7 @@
  * DTLB entry probe format
  */
 
-#define DTLB_ENTRY_ERROR_MASK_V3	0xbe00000000000000ULL
+#define DTLB_ENTRY_ERROR_MASK_V3	0xfc00000000000000ULL
 #define DTLB_ENTRY_PH_BOUND_V3		0x8000000000000000ULL
 #define	DTLB_ENTRY_ILLEGAL_PAGE_V3	0x4000000000000000ULL
 #define DTLB_ENTRY_PAGE_MISS_V3		0x2000000000000000ULL
@@ -103,25 +103,12 @@ covert_uni_dtlb_flags_to_dtlb_val_v3(const uni_dtlb_t uni_flags)
 		dtlb_flags |= (DTLB_ENTRY_NON_EX_U_S_V3);
 	if (uni_flags & UNI_PAGE_PFN)
 		dtlb_flags |= (DTLB_ENTRY_PHA_V3);
-	if (uni_flags & UNI_PAGE_MEM_TYPE_MA)
-		dtlb_flags |= (DTLB_ENTRY_PCD1_V3 | DTLB_ENTRY_PCD2_V3 |
-				DTLB_ENTRY_PWT_V3);
-	if (uni_flags & UNI_PAGE_WRITE_INT)
-		dtlb_flags |= (DTLB_ENTRY_WP_V3);
 	if (uni_flags & UNI_PAGE_INTL_RD)
 		dtlb_flags |= (DTLB_ENTRY_INTL_RD_V3);
 	if (uni_flags & UNI_PAGE_INTL_WR)
 		dtlb_flags |= (DTLB_ENTRY_INTL_WR_V3);
-	if (uni_flags & UNI_DTLB_EP_RES)
-		dtlb_flags |= (DTLB_EP_RES_V3);
-	if (uni_flags & UNI_DTLB_PH_ADDR_AP_RES)
-		dtlb_flags |= (PH_ADDR_AP_RES_V3);
-	if (uni_flags & UNI_DTLB_ERROR_MASK)
-		dtlb_flags |= (DTLB_ENTRY_ERROR_MASK_V3);
 	if (uni_flags & UNI_DTLB_MISS_LEVEL)
 		dtlb_flags |= (DTLB_ENTRY_MISS_LEVEL_MASK_V3);
-	if (uni_flags & UNI_DTLB_SUCCESSFUL)
-		dtlb_flags |= (DTLB_ENTRY_PROBE_DISABLED_V3);
 	if (uni_flags & UNI_DTLB_RES_BITS)
 		dtlb_flags |= (DTLB_ENTRY_RES_BITS_V3);
 

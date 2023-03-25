@@ -639,6 +639,34 @@ atomic_free_lock_writer(arch_rwlock_t *rw)
 	rval; \
 })
 
+#define __api_user_atomic32_op(insn, oparg, uaddr, mem_model, oldval) \
+({ \
+	int __ret; \
+	typeof(oparg) __stored_val; \
+	USER_ATOMIC_FETCH_OP(oparg, uaddr, oldval, __stored_val, \
+			       w, insn, mem_model, __ret); \
+	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
+	__builtin_expect(__ret, 0); \
+})
+
+#define __api_user_cmpxchg_word(old, new, addr, mem_model, oldval) \
+({ \
+	int __ret, __stored_val; \
+	USER_ATOMIC_CMPXCHG_WORD_RETURN(old, new, addr, __stored_val, \
+			oldval, mem_model, __ret); \
+	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
+	__builtin_expect(__ret, 0); \
+})
+
+#define __api_user_xchg(val, addr, size_letter, mem_model, oldval) \
+({ \
+	int __ret; \
+	USER_ATOMIC_XCHG_RETURN(val, addr, oldval, size_letter, \
+			mem_model, __ret); \
+	VIRT_HWBUG_AFTER_LD_ACQ_##mem_model(); \
+	__ret; \
+})
+
 
 /*
  * Atomic operations with return value and acquire/release semantics
@@ -804,9 +832,6 @@ atomic_cmpxchg_double(struct page page, void *freelist_old,
 #define __api_cmpxchg_double(addr1, addr2, old1, old2, new1, new2) \
 		virt_api_cmpxchg_double(addr1, addr2, old1, old2, \
 				       new1, new2, STRONG_MB)
-
-#define __api_futex_atomic32_op(insn, oparg, uaddr) \
-		virt_api_atomic_fetch_op(oparg, uaddr, w, insn, STRONG_MB)
 
 #define __api_atomic32_add_if_not_negative \
 		virt_api_atomic32_add_if_not_negative

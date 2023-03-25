@@ -4,10 +4,14 @@
 #include <linux/clocksource.h>
 #include <linux/types.h>
 #include <linux/percpu.h>
+#include <linux/kthread.h>
 #include <linux/sched.h>
 
 #include <asm/cpu_regs.h>
 #include <asm-l/l_timer.h>
+
+/* For kernel 4.9: */
+#define READ_SCURRENT_REG()	READ_CURRENT_REG()
 
 extern __interrupt u64 fast_syscall_read_sclkr(void);
 
@@ -57,7 +61,6 @@ static __always_inline u64 sclkr2ns(u64 sclkr, u32 freq, bool sync)
 {
 	u64 sclkr_sec, sclkr_lo, res;
 	e2k_sclkm1_t sclkm1 = READ_SCLKM1_REG();
-	/* we can not use __this_cpu_read/write(ema_freq) in fast syscall : */
 
 	sclkr_sec = sclkr >> 32;
 	sclkr_lo = ((u32) sclkr < freq) ? (u32) sclkr : (freq - 1);

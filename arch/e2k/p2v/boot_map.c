@@ -7,10 +7,10 @@
  */
 
 #include <asm/p2v/boot_v2p.h>
-
 #include <asm/pic.h>
 #include <asm/p2v/boot_phys.h>
 #include <asm/p2v/boot_map.h>
+#include <asm/p2v/boot_pgtable.h>
 #include <asm/process.h>
 #include <asm/mmu_regs_access.h>
 
@@ -23,11 +23,6 @@
 #undef	DebugME
 #define	DEBUG_MAP_EQUAL_MODE	0	/* Map equal addresses */
 #define	DebugME			if (DEBUG_MAP_EQUAL_MODE) do_boot_printk
-
-#undef	DEBUG_NUMA_MODE
-#undef	DebugNUMA
-#define	DEBUG_NUMA_MODE		0	/* Boot NUMA */
-#define	DebugNUMA		if (DEBUG_NUMA_MODE) do_boot_printk
 
 #undef	DEBUG_MAP_AREA_MODE
 #undef	DebugMA
@@ -50,38 +45,7 @@ e2k_tlb_t __initdata_recv dtlb_contents[NR_CPUS];
 e2k_tlb_t __initdata_recv itlb_contents[NR_CPUS];
 #endif	/* CONFIG_SMP */
 
-#ifdef	CONFIG_SMP
-#ifndef	CONFIG_NUMA
-static boot_spinlock_t boot_page_table_lock = __BOOT_SPIN_LOCK_UNLOCKED;
-#define	boot_numa_node_spin_lock(lock)	boot_spin_lock(&(lock))
-#define	boot_numa_node_spin_unlock(lock) boot_spin_unlock(&(lock))
-#define	init_numa_node_spin_lock(lock)	init_spin_lock(&(lock))
-#define	init_numa_node_spin_unlock(lock) init_spin_unlock(&(lock))
-#else	/* CONFIG_NUMA */
-static boot_spinlock_t __initdata_recv boot_page_table_lock[MAX_NUMNODES] = {
-	[ 0 ... (MAX_NUMNODES-1) ] = __BOOT_SPIN_LOCK_UNLOCKED
-};
-#define	boot_numa_node_spin_lock(lock)	boot_dup_node_spin_lock(lock)
-#define	boot_numa_node_spin_unlock(lock) boot_dup_node_spin_unlock(lock)
-#define	init_numa_node_spin_lock(lock)	init_dup_node_spin_lock(lock)
-#define	init_numa_node_spin_unlock(lock) init_dup_node_spin_unlock(lock)
-#endif	/* ! CONFIG_NUMA */
-#else	/* ! CONFIG_SMP */
-#define	boot_page_table_lock
-#define	boot_numa_node_spin_lock(lock)
-#define	boot_numa_node_spin_unlock(lock)
-#define	init_numa_node_spin_lock(lock)
-#define	init_numa_node_spin_unlock(lock)
-#endif	/* CONFIG_SMP */
-
-#ifdef	CONFIG_NUMA
-static boot_spinlock_t __initdata boot_node_init_map_lock[MAX_NUMNODES] = {
-	[ 0 ... (MAX_NUMNODES-1) ] = __BOOT_SPIN_LOCK_UNLOCKED
-};
-static int __initdata node_map_inited[MAX_NUMNODES] = { 0 };
-#define	boot_node_map_inited	\
-		boot_get_vo_value(node_map_inited[boot_numa_node_id()])
-#endif	/* CONFIG_NUMA */
+static DEFINE_BOOT_SPINLOCK(boot_page_table_lock);
 
 static inline int
 boot_get_pt_level_id(const pt_level_t *pt_level)
@@ -135,37 +99,6 @@ boot_get_huge_pte(e2k_addr_t virt_addr, pgprot_t *ptp, const pt_level_t *pt_leve
 	return (pte_t *)ptp;
 }
 
-static inline bool
-init_is_pt_level_of_page_size(e2k_size_t page_size, int level)
-{
-	return pgtable_struct.levels[level].page_size == page_size;
-}
-
-static inline const pt_level_t *
-init_find_pt_level_of_page_size(e2k_size_t page_size)
-{
-	int level;
-
-	for (level = pgtable_struct.levels_num; level > 0; level--) {
-		if (init_is_pt_level_of_page_size(page_size, level))
-			return &pgtable_struct.levels[level];
-	}
-	return NULL;
-}
-
-static inline pte_t *
-init_get_huge_pte(e2k_addr_t virt_addr, pgprot_t *ptp, const pt_level_t *pt_level)
-{
-	if (unlikely(!pt_level->is_huge)) {
-		INIT_BUG("Page table level #%d cannot contain page "
-			"table entries (pte)\n",
-			get_pt_level_id(pt_level));
-		return (pte_t *)-1;
-	}
-
-	return (pte_t *)ptp;
-}
-
 static inline __init_recv void
 boot_set_pte(e2k_addr_t addr, pte_t *ptep, pte_t pte, const pt_level_t *pt_level,
 		bool host_map)
@@ -187,241 +120,6 @@ boot_set_pte(e2k_addr_t addr, pte_t *ptep, pte_t pte, const pt_level_t *pt_level
 		(host_map) ? "host" : "native");
 	boot_set_pte_kernel(addr, ptep, pte);
 }
-
-/*
- * Get virtual address entry in the third-level page table.
- */
-
-static pte_t * __init_recv
-init_get_pte(e2k_addr_t virt_addr, const pt_level_t *pt_level)
-{
-	e2k_size_t page_size = pt_level->page_size;
-	int level;
-	pgd_t *pgdp;
-	pud_t *pudp;
-	pmd_t *pmdp;
-	pte_t *ptep;
-
-	/*
-	 * Get entry in the 4-th root-level page table
-	 */
-	DebugMAV("init_get_pte() started for virt addr 0x%lx page size 0x%lx\n",
-		virt_addr, page_size);
-
-	level = pgtable_struct.levels_num;
-	pgdp = pgd_offset_k(virt_addr);
-	DebugMAV("init_get_pte() pgd pointer is %px == 0x%lx\n",
-		pgdp, pgd_val(*pgdp));
-	if (init_is_pt_level_of_page_size(page_size, level))
-		return init_get_huge_pte(virt_addr, (pgprot_t *)pgdp, pt_level);
-	if (pgd_none(*pgdp))
-		return NULL;
-
-	/*
-	 * Get entry in the 3-th level (high part of middle) page table
-	 */
-	level--;
-	pudp = pud_offset(pgdp, virt_addr);
-	if (init_is_pt_level_of_page_size(page_size, level))
-		return init_get_huge_pte(virt_addr, (pgprot_t *)pudp, pt_level);
-	if (pud_none(*pudp))
-		return NULL;
-
-	/*
-	 * Get entry in the 2-nd level (low part of middle) page table
-	 */
-	level--;
-	pmdp = pmd_offset(pudp, virt_addr);
-	if (init_is_pt_level_of_page_size(page_size, level))
-		return init_get_huge_pte(virt_addr, (pgprot_t *)pmdp, pt_level);
-	if (pmd_none(*pmdp))
-		return NULL;
-
-	/*
-	 * Get entry in the 1-st-level page table
-	 */
-	level--;
-	ptep = pte_offset_kernel(pmdp, virt_addr);
-	DebugMAV("init_get_pte() pte pointer is %px == 0x%lx\n",
-		ptep, pte_val(*ptep));
-	return ptep;
-}
-
-static void inline
-init_pte_clear(pte_t *ptep, const pt_level_t *pt_level)
-{
-	if (unlikely(!pt_level->is_pte && !pt_level->is_huge)) {
-		INIT_BUG("Page table level #%d cannot contain page "
-			"table entries (pte)\n",
-			get_pt_level_id(pt_level));
-	}
-
-	pte_clear_kernel(ptep);
-}
-
-#ifdef	CONFIG_NUMA
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-
-static void __init_recv
-boot_all_cpus_pgd_set(int nid, int pgd_index, pgd_t pgd)
-{
-	pgd_t *pgdp;
-	int cpu;
-	cpumask_t node_cpus;
-
-	node_cpus = boot_node_to_cpumask(nid);
-	DebugNUMA("boot_all_cpus_pgd_set() node #%d online cpu mask 0x%lx\n",
-		nid, cpumask_test_cpu(0, &node_cpus));
-	boot_for_each_online_cpu_of_node(nid, cpu, node_cpus) {
-		pgdp = boot_node_cpu_pg_dir(nid, cpu);
-		DebugNUMA("boot_all_cpus_pgd_set() set own node CPU #%d pgd "
-			"entry 0x%lx to pud == 0x%lx\n",
-			cpu, &pgdp[pgd_index], pgd_val(pgd));
-		pgdp[pgd_index] = pgd;
-	}
-}
-
-/*
- * Set specified pgd entry to point to next-level page table PUD
- * Need populate the pgd entry into follow root page tables:
- *	- all CPUs of the current node;
- *	- all CPUs of other nodes which have not own copy of kernel image
- *	  (DUP KERNEL) and use duplicated kernel of this node
- */
-void __init_recv
-boot_pgd_set(pgd_t *my_pgdp, pud_t *pudp, int user)
-{
-	pgd_t pgd;
-	int pgd_index = pgd_to_index(my_pgdp);
-	int my_node = boot_numa_node_id();
-	int my_cpu = boot_smp_processor_id();
-	int dup_node;
-	int node;
-
-	DebugNUMA("boot_pgd_set_k() set own pgd entry 0x%lx to pud 0x%lx\n",
-		my_pgdp, pudp);
-	if (user) {
-		pgd = boot_mk_pgd_phys_u(pudp);
-	} else {
-		pgd = boot_mk_pgd_phys_k(pudp);
-	}
-	*my_pgdp = pgd;
-	if (!BOOT_NODE_THERE_IS_DUP_KERNEL()) {
-		DebugNUMA("boot_pgd_set_k() has not duplicated kernel, so "
-			"all CPUs use BS root PT\n");
-		return;
-	}
-
-	dup_node = boot_node_dup_kernel_nid(my_node);
-	if (dup_node == my_node) {
-		if (MMU_IS_SEPARATE_PT()) {
-			BOOT_BUG_ON(my_pgdp != &boot_node_root_pt[pgd_index],
-				"pgd should be on current the node\n");
-			boot_node_root_pt[pgd_index] = pgd;
-		} else {
-			BOOT_BUG_ON(my_pgdp !=
-					&boot_cpu_pg_dir(my_cpu)[pgd_index],
-			"pgd should be on current the node\n");
-			boot_all_cpus_pgd_set(my_node, pgd_index, pgd);
-		}
-	}
-	if (BOOT_NODE_DUP_KERNEL_NUM() >= boot_phys_nodes_num) {
-		DebugNUMA("boot_pgd_set_k() all %d nodes have duplicated "
-			"kernel so own root PT\n",
-			BOOT_NODE_DUP_KERNEL_NUM());
-		return;
-	}
-	if (dup_node != my_node) {
-		if (MMU_IS_SEPARATE_PT()) {
-			BOOT_BUG_ON(my_pgdp == &boot_node_root_pt[pgd_index],
-				"pgd cannot be on the node\n");
-			boot_the_node_root_pt(dup_node)[pgd_index] = pgd;
-		} else {
-			BOOT_BUG_ON(my_pgdp ==
-					&boot_cpu_pg_dir(my_cpu)[pgd_index],
-				"pgd cannot be on the node\n");
-			boot_all_cpus_pgd_set(dup_node, pgd_index, pgd);
-		}
-	}
-	boot_for_each_node_has_not_dup_kernel(node) {
-		DebugNUMA("boot_pgd_set_k() check other node #%d\n",
-			node);
-		if (node == my_node)
-			continue;
-		if (boot_node_dup_kernel_nid(node) != dup_node)
-			continue;
-		if (MMU_IS_SEPARATE_PT()) {
-			boot_the_node_root_pt(node)[pgd_index] = pgd;
-		} else {
-			boot_all_cpus_pgd_set(node, pgd_index, pgd);
-		}
-	}
-}
-#else	/* ! CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-
-/*
- * Set specified kernel pgd entry to point to next-level page table PUD
- * Need populate the pgd entry into follow root page tables:
- *	- PT of the specified node, if the node has duplicated kernel;
- *	- PT of node on which the node is duplicated
- *	- PTs of all other nodes which have not own copy of kernel image
- *	  (DUP KERNEL) and use duplicated kernel of this node or
- *	  are duplicated on the same node as this node
- */
-void __init_recv
-boot_pgd_set(pgd_t *my_pgdp, pud_t *pudp, int user)
-{
-	pgd_t pgd;
-	int pgd_index = pgd_to_index(my_pgdp);
-	int my_node = boot_numa_node_id();
-	int dup_node;
-	int node;
-
-	DebugNUMA("boot_pgd_set_k() set own pgd entry 0x%lx to pud 0x%lx\n",
-		my_pgdp, pudp);
-	BOOT_BUG_ON(!MMU_IS_SEPARATE_PT(),
-		"function can be call only for separate PT mode\n")
-	if (user) {
-		pgd = boot_mk_pgd_phys_u(pudp);
-	} else {
-		pgd = boot_mk_pgd_phys_k(pudp);
-	}
-	*my_pgdp = pgd;
-	if (!BOOT_NODE_THERE_IS_DUP_KERNEL()) {
-		DebugNUMA("boot_pgd_set_k() has not duplicated kernel, so "
-			"all CPUs use BS root PT\n");
-		return;
-	}
-
-	dup_node = boot_node_dup_kernel_nid(my_node);
-	if (dup_node == my_node) {
-		BOOT_BUG_ON(my_pgdp != &boot_node_root_pt[pgd_index],
-			"pgd should be on current the node\n");
-		boot_node_root_pt[pgd_index] = pgd;
-	}
-	if (BOOT_NODE_DUP_KERNEL_NUM() >= boot_phys_nodes_num) {
-		DebugNUMA("boot_pgd_set_k() all %d nodes have duplicated "
-			"kernel so own root PT\n",
-			BOOT_NODE_DUP_KERNEL_NUM());
-		return;
-	}
-	if (dup_node != my_node) {
-		BOOT_BUG_ON(my_pgdp == &boot_node_root_pt[pgd_index],
-			"pgd cannot be on the node\n");
-		boot_the_node_root_pt(dup_node)[pgd_index] = pgd;
-	}
-	boot_for_each_node_has_not_dup_kernel(node) {
-		DebugNUMA("boot_pgd_set_k() check other node #%d\n",
-			node);
-		if (node == my_node)
-			continue;
-		if (boot_node_dup_kernel_nid(node) != dup_node)
-			continue;
-		boot_the_node_root_pt(node)[pgd_index] = pgd;
-	}
-}
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-#endif	/* CONFIG_NUMA */
 
 /*
  * Allocate memory for first-level (high part of middle) page table directory
@@ -621,25 +319,6 @@ boot_get_pte(e2k_addr_t virt_addr, const pt_level_t *pt_level, int user, int va)
 }
 
 /*
- * Init. root-level page table directory
- * All page tables is virtually mapped into the same virtual space as kernel
- * Virtually mapped linear page table base address is passed as argument.
- * The entry conforming to root page table is set to itself.
- */
-static void __init
-boot_pgd_init(pgd_t *pgdp, e2k_addr_t vmlpt_base)
-{
-	int	entry;
-	int	root_pt_index;
-
-	for (entry = 0; entry < PTRS_PER_PGD; entry ++) {
-		pgd_clear_kernel(&pgdp[entry]);
-	}
-	root_pt_index = pgd_index(vmlpt_base);
-	boot_vmlpt_pgd_set(&pgdp[root_pt_index], pgdp);
-}
-
-/*
  * Init. TLB structure to simulate it contents
  */
 static void __init
@@ -662,140 +341,39 @@ boot_tlb_contents_simul_init(e2k_tlb_t *tlb)
  * Init. TLB structures (DTLB & ITLB) to simulate it contents
  */
 #ifndef	CONFIG_SMP
-static void __init
-boot_all_tlb_contents_simul_init(void)
+static void __init boot_cpu_tlb_contents_simul_init(int cpuid)
 {
 	boot_tlb_contents_simul_init(boot_dtlb_contents);
 	boot_tlb_contents_simul_init(boot_itlb_contents);
 }
 #else	/* CONFIG_SMP */
-static void __init
-boot_cpu_tlb_contents_simul_init(int cpuid)
+static void __init boot_cpu_tlb_contents_simul_init(int cpuid)
 {
 	boot_tlb_contents_simul_init(boot_vp_to_pp(&dtlb_contents[cpuid]));
 	boot_tlb_contents_simul_init(boot_vp_to_pp(&itlb_contents[cpuid]));
 }
-
-#ifndef	CONFIG_NUMA
-static void __init
-boot_all_tlb_contents_simul_init(void)
-{
-	int	cpuid;
-
-	for (cpuid = 0; cpuid < NR_CPUS; cpuid++) {
-		if (!boot_phys_cpu_present(cpuid))
-			continue;
-		boot_cpu_tlb_contents_simul_init(cpuid);
-	}
-}
-#endif	/* CONFIG_NUMA */
 #endif	/* ! CONFIG_SMP */
 
 /*
  * Initialization of boot-time support of physical areas mapping
  * to virtual space.
  */
+void __init boot_init_mapping(int bsp)
+{
+	int root_pt_index;
+	pgd_t *pgdp;
 
-#ifndef	CONFIG_NUMA
-void __init
-boot_init_mapping(void)
-{
-	boot_pgd_init(boot_root_pt, KERNEL_VPTB_BASE_ADDR);
-	boot_all_tlb_contents_simul_init();
-}
-#else	/* CONFIG_NUMA */
-static void __init
-boot_node_one_cpu_init_mapping(void)
-{
-	if (BOOT_TEST_AND_SET_NODE_LOCK(boot_node_init_map_lock,
-						boot_node_map_inited)) {
-		boot_cpu_tlb_contents_simul_init(boot_smp_processor_id());
-		DebugNUMA("boot_node_init_mapping() init mapping "
-			"%s on node #%d CPU #%d\n",
-			(boot_node_map_inited) ? "completed already"
-						:
-						"no memory",
-			boot_numa_node_id(), boot_smp_processor_id());
-		return;
-	}
-	if (!boot_node_has_dup_kernel()) {
-		goto no_init_mapping;
-	}
-	boot_pgd_init(boot_node_root_pt, KERNEL_VPTB_BASE_ADDR);
-	DebugNUMA("boot_node_init_mapping() init mapping on node #%d CPU #%d "
-		"root PT 0x%lx\n",
-		boot_numa_node_id(), boot_smp_processor_id(),
-		boot_node_root_pt);
-no_init_mapping:
 	boot_cpu_tlb_contents_simul_init(boot_smp_processor_id());
-	BOOT_NODE_UNLOCK(boot_node_init_map_lock, boot_node_map_inited);
+	/* Since V6 hardware support has been simplified
+	 * and self-pointing pgd is not required anymore. */
+	if (boot_machine.native_iset_ver >= E2K_ISET_V6)
+		return;
+
+	pgdp = boot_va_to_pa(swapper_pg_dir);
+	root_pt_index = pgd_index(KERNEL_VPTB_BASE_ADDR);
+	boot_vmlpt_pgd_set(&pgdp[root_pt_index], pgdp);
 }
-void __init
-boot_node_init_mapping(void)
-{
-	if (MMU_IS_SEPARATE_PT()) {
-		boot_node_one_cpu_init_mapping();
-	} else {
-#ifndef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-		boot_node_one_cpu_init_mapping();
-#else	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-		if (!BOOT_NODE_THERE_IS_DUP_KERNEL() && !BOOT_IS_BS_NODE) {
-			DebugNUMA("boot_node_init_mapping() will use "
-				"BS root PT 0x%lx\n",
-				boot_cpu_kernel_root_pt);
-			return;
-		}
-		boot_pgd_init(boot_cpu_kernel_root_pt, KERNEL_VPTB_BASE_ADDR);
-		DebugNUMA("boot_node_init_mapping() init mapping on node #%d "
-			"CPU #%d root PT 0x%lx\n",
-			boot_numa_node_id(), boot_smp_processor_id(),
-			boot_cpu_kernel_root_pt);
-		boot_cpu_tlb_contents_simul_init(boot_smp_processor_id());
-#endif	/* ! CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
-	}
-}
-#endif	/* ! CONFIG_NUMA */
 
-/*
- * Clear PTEs of kernel virtual page in the fourth-level page table.
- */
-
-static	int  __init_recv
-init_clear_ptes(e2k_addr_t virt_addr, bool ignore_absence, int pt_level_id)
-{
-	const pt_level_t *pt_level;
-	pte_t *ptep;
-
-	DebugME("init_clear_ptes() started for "
-		"virt addr 0x%lx page table level id %d\n",
-		virt_addr, pt_level_id);
-
-	pt_level = get_pt_level_on_id(pt_level_id);
-
-	/*
-	 * Clear entry in the third-level page table
-	 */
-	init_numa_node_spin_lock(boot_page_table_lock);
-	ptep = init_get_pte(virt_addr, pt_level);
-	if (ptep == NULL || pte_none(*ptep)) {
-		if (!ignore_absence) {
-			init_numa_node_spin_unlock(boot_page_table_lock);
-			INIT_BUG("Third level PTE[0x%lx] of virtual"
-				"address 0x%lx is absent",
-				(long)ptep, virt_addr);
-			return (1);
-		}
-		DebugME("PTE[0x%lx} of virt addr 0x%lx is already clear\n",
-			(long)ptep, virt_addr);
-	} else {
-		init_pte_clear(ptep, pt_level);
-		DebugME("clear PTE[0x%lx] of virt addr 0x%lx\n",
-			(long)ptep, virt_addr);
-	}
-	init_numa_node_spin_unlock(boot_page_table_lock);
-
-	return 0;
-}
 
 /*
  * Map the physical area to the kernel virtual space.
@@ -821,8 +399,8 @@ boot_do_map_phys_area(e2k_addr_t phys_area_addr, e2k_size_t phys_area_size,
 	page_size = pt_level->page_size;
 	if (phys_area_addr == (e2k_addr_t)-1) {
 		phys_addr = 0;
-		pages_num = (_PAGE_ALIGN_DOWN(area_virt_addr + phys_area_size,
-				page_size) - area_virt_addr) / page_size;
+		pages_num = (round_up(area_virt_addr + phys_area_size,
+				      page_size) - area_virt_addr) / page_size;
 		prot = pgprot_present_flag_reset(prot);
 	} else {
 		if ((phys_area_addr & (page_size - 1)) != 0) {
@@ -845,13 +423,13 @@ boot_do_map_phys_area(e2k_addr_t phys_area_addr, e2k_size_t phys_area_size,
 		"num 0x%x to virtual base 0x%lx\n",
 		phys_addr, pages_num, virt_addr);
 
-	boot_numa_node_spin_lock(boot_page_table_lock);
+	boot_spin_lock(&boot_page_table_lock);
 	for (page = 0; page < pages_num; page++) {
 		ptep = boot_get_pte(virt_addr, pt_level,
 					0,	/* user ? */
 					0	/* va ? */);
 		if (ptep == (pte_t *)-1) {
-			boot_numa_node_spin_unlock(boot_page_table_lock);
+			boot_spin_unlock(&boot_page_table_lock);
 			BOOT_BUG("Could not get PTE pointer to map virtual "
 				"address 0x%lx",
 				virt_addr);
@@ -862,8 +440,7 @@ boot_do_map_phys_area(e2k_addr_t phys_area_addr, e2k_size_t phys_area_size,
 				"empty\n",
 				ptep, pte_val(*ptep));
 			if (!ignore_busy) {
-				boot_numa_node_spin_unlock(
-						boot_page_table_lock);
+				boot_spin_unlock(&boot_page_table_lock);
 				boot_printk(" pte:%px pte_Val: 0x%px\n",
 					ptep,  pte_val(*ptep));
 				BOOT_BUG("The PTE entry is not empty to map "
@@ -882,17 +459,20 @@ boot_do_map_phys_area(e2k_addr_t phys_area_addr, e2k_size_t phys_area_size,
 			phys_addr += page_size;
 		virt_addr += page_size;
 	}
-	boot_numa_node_spin_unlock(boot_page_table_lock);
+	boot_spin_unlock(&boot_page_table_lock);
 	return page;
 }
 
-long __init_recv
-boot_map_phys_area(e2k_addr_t virt_phys_area_addr, e2k_size_t phys_area_size,
-	e2k_addr_t area_virt_addr, pgprot_t prot_flags,
-	e2k_size_t max_page_size, bool ignore_busy, bool host_map)
+__init_recv
+void boot_map_phys_area(const char *name, e2k_addr_t virt_phys_area_addr,
+		e2k_size_t phys_area_size, e2k_addr_t area_virt_addr,
+		pgprot_t prot_flags, e2k_size_t max_page_size,
+		bool ignore_busy, bool host_map)
 {
 	const pt_level_t *pt_level;
 	e2k_addr_t	phys_area_addr;
+	e2k_size_t	passed_page_size = max_page_size;
+	long ret;
 
 	if (virt_phys_area_addr == (e2k_addr_t) -1) {
 		phys_area_addr = virt_phys_area_addr;
@@ -900,17 +480,21 @@ boot_map_phys_area(e2k_addr_t virt_phys_area_addr, e2k_size_t phys_area_size,
 		phys_area_addr = boot_vpa_to_pa(virt_phys_area_addr);
 
 		if (!IS_ALIGNED(phys_area_addr, max_page_size)) {
-			BOOT_WARNING("phys address 0x%lx isn't page size 0x%lx "
-				     "aligned, so page size is reduced to 4K",
-				phys_area_addr, max_page_size);
+			BOOT_WARNING("%s: phys address 0x%lx isn't page size 0x%lx aligned, so page size is reduced to 4K",
+					name, phys_area_addr, max_page_size);
 			max_page_size = PAGE_SIZE;
 		}
 	}
 
 	if (!IS_ALIGNED(area_virt_addr, max_page_size)) {
-		BOOT_WARNING("virt address 0x%lx isn't page size 0x%lx "
-			     "aligned, so page size is reduced to 4K",
-			phys_area_addr, max_page_size);
+		BOOT_WARNING("%s: virt address 0x%lx isn't page size 0x%lx aligned, so page size is reduced to 4K",
+				name, phys_area_addr, max_page_size);
+		max_page_size = PAGE_SIZE;
+	}
+
+	if (!IS_ALIGNED(phys_area_size, max_page_size)) {
+		BOOT_WARNING("%s: size 0x%lx isn't page size 0x%lx aligned, so page size is reduced to 4K",
+				name, phys_area_size, max_page_size);
 		max_page_size = PAGE_SIZE;
 	}
 
@@ -922,12 +506,22 @@ boot_map_phys_area(e2k_addr_t virt_phys_area_addr, e2k_size_t phys_area_size,
 	pt_level = boot_find_pt_level_of_page_size(max_page_size);
 	if (pt_level == NULL) {
 		BOOT_BUG("Invalid page size 0x%lx", max_page_size);
-		return -EINVAL;
-	}
-
-	return boot_do_map_phys_area(phys_area_addr, phys_area_size,
+		ret = -EINVAL;
+	} else {
+		ret = boot_do_map_phys_area(phys_area_addr, phys_area_size,
 			area_virt_addr, prot_flags, pt_level,
 			ignore_busy, host_map);
+	}
+
+	BOOT_BUG_ON(ret <= 0, "Could not map kernel '%s' segment: base addr 0x%lx size 0x%lx page size 0x%x to virtual addr 0x%lx\n",
+			name, virt_phys_area_addr, phys_area_size,
+			passed_page_size, area_virt_addr);
+
+	boot_printk("The kernel '%s' segment: "
+		"base addr 0x%lx size 0x%lx is mapped to %d virtual "
+		"page(s) base addr 0x%lx page size 0x%x\n",
+		name, virt_phys_area_addr, phys_area_size, ret, area_virt_addr,
+		passed_page_size);
 }
 
 /*
@@ -1170,10 +764,10 @@ boot_write_pte_to_pt(pte_t pte, e2k_addr_t virt_addr, e2k_tlb_t *tlb,
 	DebugME("boot_write_pte_to_pt() started for address 0x%lx and "
 		"pte == 0x%lx\n",
 		virt_addr, pte_val(pte));
-	boot_numa_node_spin_lock(boot_page_table_lock);
-	ptep = boot_get_pte(virt_addr, pt_level, 1, va);
+	boot_spin_lock(&boot_page_table_lock);
+	ptep = boot_get_pte(virt_addr, pt_level, 0, va);
 	if (ptep == (pte_t *)-1) {
-		boot_numa_node_spin_unlock(boot_page_table_lock);
+		boot_spin_unlock(&boot_page_table_lock);
 		BOOT_BUG("Could not take PTE pointer to map virtual "
 			"address 0x%lx",
 			virt_addr);
@@ -1189,7 +783,7 @@ boot_write_pte_to_pt(pte_t pte, e2k_addr_t virt_addr, e2k_tlb_t *tlb,
 	if (!pte_none(*ptep)) {
 #ifdef	CONFIG_SMP
 		if (pte_val(*ptep) != pte_val(pte)) {
-			boot_numa_node_spin_unlock(boot_page_table_lock);
+			boot_spin_unlock(&boot_page_table_lock);
 #endif	/* CONFIG_SMP */
 			BOOT_BUG("The PTE entry is not empty - virtual "
 				"address 0x%lx has been already occupied "
@@ -1200,7 +794,7 @@ boot_write_pte_to_pt(pte_t pte, e2k_addr_t virt_addr, e2k_tlb_t *tlb,
 		} else {
 			set_num = boot_get_tlb_empty_set(virt_addr, tlb,
 					pt_level);
-			boot_numa_node_spin_unlock(boot_page_table_lock);
+			boot_spin_unlock(&boot_page_table_lock);
 			if (set_num < 0)
 				DebugME("Could not find empty entry set "
 					"of TLB for virtual address 0x%lx",
@@ -1218,7 +812,7 @@ boot_write_pte_to_pt(pte_t pte, e2k_addr_t virt_addr, e2k_tlb_t *tlb,
 
 	boot_set_pte(virt_addr, ptep, pte, pt_level, false);
 
-	boot_numa_node_spin_unlock(boot_page_table_lock);
+	boot_spin_unlock(&boot_page_table_lock);
 
 	DebugME("boot_write_pte_to_pt() set ptep 0x%lx to new pte 0x%lx\n",
 		ptep, pte_val(*ptep));
@@ -1345,183 +939,107 @@ boot_map_to_equal_virt_area(e2k_addr_t area_addr, e2k_size_t area_size,
 	return page;
 }
 
-/*
- * Flush the TLB entries mapping the virtually mapped linear page
- * table corresponding to address.
- */
-void
-init_flush_tlb_pgtable(e2k_addr_t address)
+
+static void __init_recv unmap_virt_to_equal_pte_range(const pmd_t *pmd,
+		unsigned long addr, unsigned long end)
 {
-
-	/* flush virtual mapping of PTE entries (third level of page table) */
-	flush_TLB_kernel_page(
-		pte_virt_offset(_PAGE_ALIGN_UP(address, PTE_SIZE)));
-
-	/* flush virtual mapping of PMD entries (second level of page table) */
-	flush_TLB_kernel_page(
-		pmd_virt_offset(_PAGE_ALIGN_UP(address, PMD_SIZE)));
-
-	/* flush virtual mapping of PUD entries (first level of page table) */
-	flush_TLB_kernel_page(
-		pud_virt_offset(_PAGE_ALIGN_UP(address, PUD_SIZE)));
-}
-
-/*
- * Clear PTE of the virtual address into the TLB.
- */
-
-static int __init_recv
-init_clear_tlb_entry(e2k_addr_t virt_addr, int tlb_mask)
-{
-
-	/*
-	 * Clear TLB entry
-	 */
-	flush_TLB_kernel_page(virt_addr);
-	init_flush_tlb_pgtable(virt_addr);
-
-	/*
-	 * Clear ICACHE lines if TLB is ITLB
-	 */
-	if (tlb_mask & ITLB_ACCESS_MASK) {
-		flush_ICACHE_kernel_line(virt_addr);
-	}
-
-	return 0;
-}
-
-/*
- * Clear all pages which were temporarly written to TLB only
- */
-static int __init_recv
-init_clear_temporary_tlb(e2k_tlb_t *tlb, int tlb_mask)
-{
-	int		line;
-	int		set;
-	e2k_tlb_line_t	*tlb_line;
-	int		ret;
-
-	if (tlb->entries_num <= 0)
-		return (0);
-	for (line = 0; line < NATIVE_TLB_LINES_NUM; line++) {
-		tlb_line = &tlb->lines[line];
-		if (tlb_line->sets_num == 0)
+	for (; addr < end; addr += PAGE_SIZE) {
+		pte_t *pte = pte_offset_kernel(pmd, addr);
+		if (pte_none(*pte))
 			continue;
-		for (set = 0; set < NATIVE_TLB_SETS_NUM; set++) {
-			if (!tlb_line->sets[set].valid_bit)
-				continue;
-			ret = init_clear_tlb_entry(
-				tlb_line->sets[set].virt_addr,
-				tlb_mask);
-			if (ret != 0) {
-				BOOT_BUG("Could not clear ITLB virtual address 0x%lx from line %d set %d",
-					tlb_line->sets[set].virt_addr,
-					line, set);
-				return (1);
-			}
-			tlb_line->sets[set].valid_bit = 0;
-			tlb_line->sets[set].virt_addr = 0;
-			tlb_line->sets[set].pt_level_id = 0;
-			tlb_line->sets_num --;
-			tlb->entries_num --;
-			if (tlb_line->sets_num <= 0)
-				break;
-		}
-		if (tlb->entries_num <= 0)
-			break;
+
+		set_pte(pte, __pte(0));
 	}
-	return (0);
 }
 
-/*
- * Clear all pages which were temporarly written to page table
- * Write to ITLB is not implemented - PTEs are temporarly written to page table
- * entries
- */
-static int __init_recv
-init_clear_temporary_pt(e2k_tlb_t *tlb, int tlb_mask)
+static void __init_recv unmap_virt_to_equal_pmd_range(const pud_t *pud,
+		unsigned long addr, unsigned long end)
 {
-	int		line;
-	int		set;
-	e2k_tlb_line_t	*tlb_line;
-	int		ret;
-
-	if (tlb->entries_num <= 0)
-		return 0;
-	for (line = 0; line < NATIVE_TLB_LINES_NUM; line++) {
-		tlb_line = &tlb->lines[line];
-		if (tlb_line->sets_num == 0)
+	unsigned long next = pmd_addr_end(addr, end);
+	for (; addr < end; addr = next, next = pmd_addr_end(addr, end)) {
+		pmd_t *pmd = pmd_offset(pud, addr);
+		if (pmd_none(*pmd))
 			continue;
-		for (set = 0; set < NATIVE_TLB_SETS_NUM; set++) {
-			if (!tlb_line->sets[set].valid_bit)
-				continue;
-			ret = init_clear_ptes(tlb_line->sets[set].virt_addr,
-#ifndef	CONFIG_SMP
-				false,	/* do not ignore the page absence */
-#else
-				true,	/* ignore the page absence */
-#endif	/* CONFIG_SMP */
-				tlb_line->sets[set].pt_level_id);
-			if (ret != 0) {
-				BOOT_BUG("Could not clear PT virtual address 0x%lx from line %d set %d",
-					tlb_line->sets[set].virt_addr,
-					line, set);
-				return 1;
+
+		if (kernel_pmd_huge(*pmd)) {
+			if (next - addr != PMD_SIZE) {
+				BOOT_WARNING("trying to unmap a part of pmd");
+			} else {
+				set_pmd(pmd, __pmd(0));
 			}
-			ret = init_clear_tlb_entry(
-				tlb_line->sets[set].virt_addr,
-				tlb_mask);
-			if (ret != 0) {
-				BOOT_BUG("Could not clear ITLB virtual address 0x%lx from line %d set %d",
-					tlb_line->sets[set].virt_addr,
-					line, set);
-				return (1);
-			}
-			tlb_line->sets[set].valid_bit = 0;
-			tlb_line->sets[set].virt_addr = 0;
-			tlb_line->sets[set].pt_level_id = 0;
-			tlb_line->sets_num --;
-			tlb->entries_num --;
-			if (tlb_line->sets_num <= 0)
-				break;
+		} else {
+			unmap_virt_to_equal_pte_range(pmd, addr, next);
+			if (next - addr == PMD_SIZE)
+				set_pmd(pmd, __pmd(0));
 		}
-		if (tlb->entries_num <= 0)
-			break;
 	}
-	return (0);
 }
 
-/*
- * Clear all PTEs, which were temporarly written to TLB or page table.
- * Write to ITLB is not implemented - PTEs are temporarly written to page table
- * entries
- */
-
-int __init_recv
-init_clear_temporary_ptes(int tlb_mask, int cpuid)
+static void __init_recv unmap_virt_to_equal_pud_range(const pgd_t *pgd,
+		unsigned long addr, unsigned long end)
 {
-	int	ret;
+	unsigned long next = pud_addr_end(addr, end);
+	for (; addr < end; addr = next, next = pud_addr_end(addr, end)) {
+		pud_t *pud = pud_offset(pgd, addr);
+		if (pud_none(*pud))
+			continue;
 
-	if (tlb_mask & ITLB_ACCESS_MASK) {
-#ifndef	CONFIG_SMP
-		ret = init_clear_temporary_pt(&itlb_contents, ITLB_ACCESS_MASK);
-#else
-		ret = init_clear_temporary_pt(&itlb_contents[cpuid],
-							ITLB_ACCESS_MASK);
-#endif	/* CONFIG_SMP */
-		if (ret != 0)
-			return ret;
+		if (kernel_pud_huge(*pud)) {
+			if (next - addr != PUD_SIZE) {
+				BOOT_WARNING("trying to unmap a part of pud");
+			} else {
+				set_pud(pud, __pud(0));
+			}
+		} else {
+			unmap_virt_to_equal_pmd_range(pud, addr, next);
+			if (next - addr == PUD_SIZE)
+				set_pud(pud, __pud(0));
+		}
 	}
-	if (tlb_mask & DTLB_ACCESS_MASK) {
-#ifndef	CONFIG_SMP
-		ret = init_clear_temporary_tlb(&dtlb_contents,
-							DTLB_ACCESS_MASK);
-#else
-		ret = init_clear_temporary_tlb(&dtlb_contents[cpuid],
-							DTLB_ACCESS_MASK);
-#endif	/* CONFIG_SMP */
-		if (ret != 0)
-			return ret;
+}
+
+static void __init_recv unmap_virt_to_equal_pgd_range(
+		unsigned long addr, unsigned long end)
+{
+	unsigned long next = pgd_addr_end(addr, end);
+	BOOT_BUG_ON(!PAGE_ALIGNED(addr) || !PAGE_ALIGNED(end), "unaligned arguments");
+
+	for (; addr < end; addr = next, next = pgd_addr_end(addr, end)) {
+		pgd_t *pgd = &swapper_pg_dir[pgd_index(addr)];
+		if (pgd_none(*pgd))
+			continue;
+
+		if (kernel_pgd_huge(*pgd)) {
+			if (next - addr != PGDIR_SIZE) {
+				BOOT_WARNING("trying to unmap a part of pgd");
+			} else {
+				set_pgd(pgd, __pgd(0));
+			}
+		} else {
+			unmap_virt_to_equal_pud_range(pgd, addr, next);
+			if (next - addr == PGDIR_SIZE)
+				set_pgd(pgd, __pgd(0));
+		}
 	}
-	return (0);
+}
+
+/* Remove mappings of physical memory into equal virtual addresses
+ * now that we have switched to virtual addressing mode */
+void __init_recv init_unmap_virt_to_equal_phys(bool bsp, int cpus_to_sync)
+{
+	/* Wait for all cpus to finish switching before clearing page tables */
+	init_sync_all_processors(cpus_to_sync);
+
+	if (bsp)
+		unmap_virt_to_equal_pgd_range(0, PAGE_OFFSET);
+
+	/* Wait for BSP to remove page tables before flushing TLB */
+	init_sync_all_processors(cpus_to_sync);
+
+	/* TODO after paravirtualizing flush_TLB_all() remove the check */
+	if (!IS_ENABLED(CONFIG_KVM_GUEST_MODE))
+		flush_TLB_all();
+
+	/* See comment before flush_pte_from_ic() for why this is needed */
+	__flush_icache_all();
 }

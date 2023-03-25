@@ -8,6 +8,7 @@ extern int set_memory_ro(unsigned long addr, int numpages);
 extern int set_memory_rw(unsigned long addr, int numpages);
 extern int set_memory_x(unsigned long addr, int numpages);
 extern int set_memory_nx(unsigned long addr, int numpages);
+extern int set_memory_np(unsigned long addr, int numpages);
 
 /* For usage of WC/UC helpers see comment before
  * PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */

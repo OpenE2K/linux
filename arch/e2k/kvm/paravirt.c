@@ -772,12 +772,9 @@ do_init_guest_system_handlers_table(void)
 }
 
 static unsigned long
-do_fast_tagged_memory_copy(void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
-		int prefetch)
+do_fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetch)
 {
-	return native_fast_tagged_memory_copy(dst, src, len,
-				strd_opcode, ldrd_opcode, prefetch);
+	return native_fast_tagged_memory_copy(dst, src, len, prefetch);
 }
 static void
 do_fast_tagged_memory_set(void *addr, u64 val, u64 tag,

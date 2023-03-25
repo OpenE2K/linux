@@ -44,6 +44,8 @@
 #include "intercepts.h"
 #include "io.h"
 
+#undef	CHECK_MMU_PAGES_AVAILABLE
+
 /*
  * When setting this variable to true it enables Two-Dimensional-Paging
  * where the hardware walks 2 page tables:
@@ -390,6 +392,7 @@ bool sync_dbg = false;
 
 #define CREATE_TRACE_POINTS
 #include "mmutrace-e2k.h"
+#include "mmu-notifier-trace.h"
 
 static struct kmem_cache *pte_list_desc_cache;
 struct kmem_cache *mmu_page_header_cache;
@@ -784,6 +787,7 @@ void kvm_arch_mmu_notifier_invalidate_range_end(struct kvm *kvm,
 				const struct mmu_notifier_range *range)
 {
 	spin_lock(&kvm->mmu_lock);
+	trace_kvm_unmap_hva_range_end(kvm, range->start, range->end, range->flags);
 	if (likely(kvm->mmu_notifier_count == 0)) {
 		kvm_mmu_notifier_wake_up(kvm);
 	}
@@ -877,7 +881,7 @@ static long nonpaging_sync_gva_range(struct kvm_vcpu *vcpu,
 
 static void nonpaging_update_spte(struct kvm_vcpu *vcpu,
 				  struct kvm_mmu_page *sp, pgprot_t *spte,
-				  const void *pte)
+				  pgprotval_t gpte)
 {
 	WARN_ON(1);
 }
@@ -1327,7 +1331,7 @@ void copy_host_kernel_root_range(struct kvm_vcpu *vcpu, pgprot_t *dst_root)
 	pgd_t *dst_pgd = (pgd_t *)dst_root;
 
 	KVM_BUG_ON(vcpu->cpu < 0);
-	copy_kernel_pgd_range(dst_pgd, cpu_kernel_root_pt);
+	copy_kernel_pgd_range(dst_pgd, mm_node_pgd(&init_mm, numa_node_id()));
 }
 
 static void release_guest_kernel_root_range(struct kvm *kvm, pgprot_t *root)
@@ -1412,7 +1416,7 @@ void kvm_get_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
 
 		if (level == E2K_PUD_LEVEL_NUM) {
 			*pud = pgprot_val(spte);
-			if (likely(!pud_huge(__pud(*pud)) &&
+			if (likely(!user_pud_huge(__pud(*pud)) &&
 					!pud_none(__pud(*pud)) &&
 						!pud_bad(__pud(*pud)))) {
 				continue;
@@ -1423,7 +1427,7 @@ void kvm_get_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
 
 		if (level == E2K_PMD_LEVEL_NUM) {
 			*pmd = pgprot_val(spte);
-			if (likely(!pmd_huge(__pmd(*pmd)) &&
+			if (likely(!user_pmd_huge(__pmd(*pmd)) &&
 					!pmd_none(__pmd(*pmd)) &&
 						!pmd_bad(__pmd(*pmd)))) {
 				continue;
@@ -1759,12 +1763,7 @@ static void set_vcpu_nonp_pt_context(struct kvm_vcpu *vcpu, unsigned flags)
 				vcpu->arch.mmu.sh_u_root_hpa;
 			vcpu->arch.sw_ctxt.sh_u_vptb =
 				vcpu->arch.mmu.sh_u_vptb;
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-			vcpu->arch.sw_ctxt.no_switch_pt =
-				!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL;
-#else	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 			vcpu->arch.sw_ctxt.no_switch_pt = false;
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 		}
 		if ((flags & OS_ROOT_PT_FLAG) && is_sep_virt_spaces(vcpu)) {
 			KVM_BUG_ON(!VALID_PAGE(vcpu->arch.mmu.sh_os_root_hpa));
@@ -2131,12 +2130,7 @@ static void set_vcpu_spt_pt_context(struct kvm_vcpu *vcpu, unsigned flags)
 					!is_sep_virt_spaces(vcpu))) {
 		set_vcpu_spt_u_pptb_context(vcpu);
 		vcpu->arch.sw_ctxt.sh_u_vptb = vcpu->arch.mmu.sh_u_vptb;
-#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
-		vcpu->arch.sw_ctxt.no_switch_pt =
-			!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL;
-#else	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 		vcpu->arch.sw_ctxt.no_switch_pt = false;
-#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
 	}
 	if ((flags & OS_ROOT_PT_FLAG) && is_sep_virt_spaces(vcpu)) {
 		KVM_BUG_ON(!VALID_PAGE(vcpu->arch.mmu.sh_os_root_hpa));
@@ -2366,10 +2360,6 @@ static void do_free_spt_root(struct kvm *kvm, hpa_t root_hpa, bool force)
 
 	spin_lock(&kvm->mmu_lock);
 	sp = page_header(root_hpa);
-	if (!sp) {
-		spin_unlock(&kvm->mmu_lock);
-		return;
-	}
 	if (!force) {
 		KVM_BUG_ON(sp->root_count <= 0);
 	} else {
@@ -2468,7 +2458,7 @@ static void e2k_mmu_free_roots(struct kvm_vcpu *vcpu, unsigned flags)
 		mmu_free_spt_root(vcpu, u_root);
 		kvm_set_space_type_spt_u_root(vcpu, E2K_INVALID_PAGE);
 		kvm_set_space_type_spt_gk_root(vcpu,
-					pv_vcpu_get_init_gk_root_hpa(vcpu));
+					pv_vcpu_get_init_root_hpa(vcpu));
 	}
 	if (unlikely(VALID_PAGE(os_root) && (flags & OS_ROOT_PT_FLAG))) {
 		mmu_free_spt_root(vcpu, os_root);
@@ -2496,7 +2486,7 @@ void mmu_free_roots(struct kvm_vcpu *vcpu, unsigned flags)
 	for (i = 0; i < 4; ++i) {
 		hpa_t root = vcpu->arch.mmu.pae_root[i];
 
-		if (root) {
+		if (root && root != E2K_INVALID_PAGE) {
 			root &= mmu_pt_get_spte_pfn_mask(vcpu->kvm);
 			sp = page_header(root);
 			--sp->root_count;
@@ -2534,10 +2524,14 @@ static int mmu_alloc_direct_roots(struct kvm_vcpu *vcpu)
 		MMU_WARN_ON(VALID_PAGE(kvm_get_gp_phys_root(vcpu)));
 
 		spin_lock(&vcpu->kvm->mmu_lock);
+#ifdef	CHECK_MMU_PAGES_AVAILABLE
 		if (make_mmu_pages_available(vcpu) < 0) {
 			spin_unlock(&vcpu->kvm->mmu_lock);
+			pr_err("%s(): there are not mmu available pages\n",
+				__func__);
 			return -ENOSPC;
 		}
+#endif	/* CHECK_MMU_PAGES_AVAILABLE */
 		sp = kvm_mmu_get_page(vcpu, 0, 0, PT64_ROOT_LEVEL,
 					true, 0,
 					ACC_ALL, false /* validate */);
@@ -2571,10 +2565,13 @@ static hpa_t e2k_mmu_alloc_spt_root(struct kvm_vcpu *vcpu, gfn_t root_gfn)
 	KVM_BUG_ON(vcpu->arch.mmu.root_level != PT64_ROOT_LEVEL);
 
 	spin_lock(&vcpu->kvm->mmu_lock);
+#ifdef	CHECK_MMU_PAGES_AVAILABLE
 	if (make_mmu_pages_available(vcpu) < 0) {
 		spin_unlock(&vcpu->kvm->mmu_lock);
+		pr_err("%s(): there are not mmu available pages\n", __func__);
 		return E2K_INVALID_PAGE;
 	}
+#endif	/* CHECK_MMU_PAGES_AVAILABLE */
 	sp = kvm_mmu_get_page(vcpu, root_gfn, 0, PT64_ROOT_LEVEL,
 			false, gfn_to_gpa(root_gfn),
 			ACC_WRITE_MASK,	/* PTD should be not executable */
@@ -3602,8 +3599,9 @@ void kvm_arch_async_page_not_present(struct kvm_vcpu *vcpu,
 		vcpu->arch.apf.host_apf_reason = KVM_APF_PAGE_IN_SWAP;
 		kvm_need_create_vcpu_exception(vcpu, exc_data_page_mask);
 	} else {
-		pr_err("Host: async_pf, %s, error while setting "
-				"apf_reason and apf_id\n", __func__);
+		pr_err("%s(); kill guest: Host: async_pf, error while "
+			"setting apf_reason and apf_id\n",
+			__func__);
 		force_sig(SIGKILL);
 	}
 }
@@ -3623,18 +3621,18 @@ void kvm_arch_async_page_present(struct kvm_vcpu *vcpu,
 			break;
 		case APIC_CONTROLLER:
 			/* TODO: support injecting page ready through APIC */
-			pr_err("Host: async_pf, %s, APIC is not supported\n",
-					__func__);
+			pr_err("%s(): kill guest: Host: async_pf, APIC is not"
+				"supported\n", __func__);
 			force_sig(SIGKILL);
 			break;
 		default:
-			pr_err("Host: async_pf, %s, unsupported type of"
-					" irq controller\n", __func__);
+			pr_err("%s(): kill guest: Host: async_pf, unsupported "
+				"type of irq controller\n", __func__);
 			force_sig(SIGKILL);
 		}
 	} else {
-		pr_err("Host: async_pf, %s, error while setting apf_reason"
-				" and apf_id\n", __func__);
+		pr_err("%s(): kill guest: Host: async_pf, error while setting "
+			"apf_reason and apf_id\n", __func__);
 		force_sig(SIGKILL);
 	}
 }
@@ -3673,6 +3671,8 @@ bool kvm_arch_can_inject_async_page_present(struct kvm_vcpu *vcpu)
 
 	if (kvm_get_apf_reason(vcpu, &guest_apf_reason) ||
 			kvm_get_apf_id(vcpu, &guest_apf_id)) {
+		pr_err("%s(): kill guest: get async page fault reason or ID "
+			"failed\n", __func__);
 		force_sig(SIGKILL);
 		return false;
 	}
@@ -4236,30 +4236,19 @@ static void kvm_invalidate_all_roots(struct kvm *kvm)
 }
 
 void mmu_pte_write_new_pte(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
-				pgprot_t *spte, gpa_t gpa, const void *new)
+			   pgprot_t *spte, gpa_t gpa, pgprotval_t new_gpte)
 {
-	DebugPTE("started for spte at %px == 0x%lx, new %px == 0x%lx\n",
-		spte, pgprot_val(*spte), new, pgprot_val(*(pgprot_t *)new));
-	if (sp->role.level != PT_PAGE_TABLE_LEVEL) {
-		int ret;
+	pgprot_t old_spte = *spte;
 
+	if (sp->role.level != PT_PAGE_TABLE_LEVEL) {
 		++vcpu->kvm->stat.mmu_pde_zapped;
-		DebugPTE("PT level %d is not pte level, it need set pde\n",
-			sp->role.level);
-		spin_unlock(&vcpu->kvm->mmu_lock);
-		ret = mmu_pt_shadow_pt_protection_fault(vcpu, gpa, sp);
-		KVM_BUG_ON(ret < 0);
-		DebugPTE("set PDE spte at %px == 0x%lx\n",
-			spte, pgprot_val(*spte));
-		spin_lock(&vcpu->kvm->mmu_lock);
-		return;
+	} else {
+		++vcpu->kvm->stat.mmu_pte_updated;
 	}
-	++vcpu->kvm->stat.mmu_pte_updated;
-	DebugPTE("set PTE spte at %px == 0x%lx\n",
-		spte, pgprot_val(*spte));
-	mmu_pt_update_spte(vcpu, sp, spte, new);
-	DebugPTE("updated to new spte at %px == 0x%lx\n",
-		spte, pgprot_val(*spte));
+	mmu_pt_update_spte(vcpu, sp, spte, new_gpte);
+	DebugPTE("updated spte at %px from %016lx to %016lx\n",
+		spte, pgprot_val(old_spte), pgprot_val(*spte));
+	trace_mmu_write_new_pte(vcpu, sp, spte, old_spte, kvm_get_sp_gmm(sp), gpa);
 }
 
 pgprotval_t mmu_pte_write_fetch_gpte(struct kvm_vcpu *vcpu, gpa_t *gpa,
@@ -4689,13 +4678,6 @@ void kvm_mmu_invalidate_zap_all_pages(struct kvm *kvm)
 
 	kvm_zap_obsolete_pages(kvm);
 
-	if (likely(VALID_PAGE(kvm->arch.nonp_root_hpa))) {
-		DebugKVMSH("will release nonpaging SPTs at 0x%llx\n",
-			kvm->arch.nonp_root_hpa);
-		mmu_release_spt_nonpaging_root(kvm, kvm->arch.nonp_root_hpa);
-		kvm->arch.nonp_root_hpa = E2K_INVALID_PAGE;
-	}
-
 	/* invalidate all page tables root pointers */
 	kvm_invalidate_all_roots(kvm);
 
@@ -4866,6 +4848,14 @@ static void kvm_setup_nonp_shadow_pt(struct kvm_vcpu *vcpu, hpa_t root)
 			KVM_BUG_ON(mmu->get_vcpu_sh_u_pptb(vcpu) != root);
 			mmu->set_vcpu_sh_u_vptb(vcpu, MMU_UNITED_USER_VPTB);
 		}
+
+#ifdef	CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT
+		vcpu->arch.sw_ctxt.no_switch_pt =
+			!MMU_IS_SEPARATE_PT() && THERE_IS_DUP_KERNEL;
+#else	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
+		vcpu->arch.sw_ctxt.no_switch_pt = false;
+#endif	/* CONFIG_COPY_USER_PGD_TO_KERNEL_ROOT_PT */
+
 		/* GP_* PTs cannot be used */
 		if (vcpu->arch.is_hv) {
 			/* shadow PTs cannot be used for host translations */
@@ -4971,9 +4961,6 @@ static int setup_shadow_root(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 {
 	hpa_t os_root, u_root, gp_root;
 	int ret;
-
-	/* setup page table structures type to properly manage PTs */
-	mmu_pt_setup_shadow_pt_structs(vcpu);
 
 	ret = kvm_mmu_load(vcpu, gmm, flags);
 	if (ret) {
@@ -5211,7 +5198,7 @@ static int kvm_create_user_root_kernel_copy(struct kvm_vcpu *vcpu,
 {
 	pgprot_t *gu_root;
 	pgprot_t *gk_root;
-	int vmlpt_index;
+	hpa_t old_root, old_gk_root;
 
 	gk_root = mmu_memory_cache_alloc(&vcpu->arch.mmu_page_cache);
 	gu_root = (pgprot_t *)__va(gmm->root_hpa);
@@ -5229,12 +5216,20 @@ static int kvm_create_user_root_kernel_copy(struct kvm_vcpu *vcpu,
 	/* copy host kernel PGDs to access to host kernel space */
 	copy_host_kernel_root_range(vcpu, gk_root);
 
-	/* One PGD entry is the VPTB self-map. */
-	vmlpt_index = kvm_vcpu_get_vmlpt_index(vcpu, gmm);
-	mmu_pt_kvm_vmlpt_kernel_spte_set(vcpu->kvm, &gk_root[vmlpt_index],
-					 gk_root);
+	/* Since V6 hardware support has been simplified
+	 * and self-pointing pgd is not required anymore. */
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		/* One PGD entry is the VPTB self-map. */
+		int vmlpt_index = kvm_vcpu_get_vmlpt_index(vcpu, gmm);
+		mmu_pt_kvm_vmlpt_kernel_spte_set(vcpu->kvm, &gk_root[vmlpt_index],
+						 gk_root);
+	}
 
+	old_root = gmm->root_hpa;
+	old_gk_root = gmm->gk_root_hpa;
 	gmm->gk_root_hpa = (hpa_t)__pa(gk_root);
+	trace_host_set_gmm_root_hpa(gmm, old_root, old_gk_root,
+				    NATIVE_READ_IP_REG_VALUE());
 
 	return 0;
 }
@@ -5242,8 +5237,9 @@ static int kvm_create_user_root_kernel_copy(struct kvm_vcpu *vcpu,
 void kvm_release_user_root_kernel_copy(struct kvm *kvm, gmm_struct_t *gmm)
 {
 	pgprot_t *gk_root;
-	int vmlpt_index;
+	hpa_t old_root, old_gk_root;
 
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	if (unlikely(!VALID_PAGE(gmm->gk_root_hpa))) {
 		/* gmm root copy has been already released */
 		return;
@@ -5255,9 +5251,13 @@ void kvm_release_user_root_kernel_copy(struct kvm *kvm, gmm_struct_t *gmm)
 
 	gk_root = (pgprot_t *)__va(gmm->gk_root_hpa);
 
-	/* Clear one PGD entry is the VPTB self-map. */
-	vmlpt_index = kvm_get_vmlpt_index(kvm, gmm);
-	kvm_vmlpt_spte_reset(kvm, &gk_root[vmlpt_index]);
+	/* Since V6 hardware support has been simplified
+	 * and self-pointing pgd is not required anymore. */
+	if (!cpu_has(CPU_FEAT_ISET_V6)) {
+		/* Clear one PGD entry is the VPTB self-map. */
+		int vmlpt_index = kvm_get_vmlpt_index(kvm, gmm);
+		kvm_vmlpt_spte_reset(kvm, &gk_root[vmlpt_index]);
+	}
 
 	/* Clear host kernel PGDs to access to host kernel space */
 	kvm_clear_host_kernel_root_range(kvm, gk_root);
@@ -5269,12 +5269,17 @@ void kvm_release_user_root_kernel_copy(struct kvm *kvm, gmm_struct_t *gmm)
 	release_guest_user_root_range(kvm, gk_root);
 
 out:
+	old_root = gmm->root_hpa;
+	old_gk_root = gmm->gk_root_hpa;
 	gmm->gk_root_hpa = E2K_INVALID_PAGE;
+	trace_host_set_gmm_root_hpa(gmm, old_root, old_gk_root,
+				    NATIVE_READ_IP_REG_VALUE());
 }
 
 int kvm_prepare_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 				gpa_t u_phys_ptb)
 {
+	hpa_t old_root, old_gk_root;
 	hpa_t root;
 	struct kvm_mmu_page *sp;
 	int ret;
@@ -5289,6 +5294,7 @@ int kvm_prepare_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		pr_err("%s(): could not create  memory caches on VCPU #%d "
 			"error %d\n",
 			__func__, vcpu->vcpu_id, ret);
+		old_gk_root = gmm->gk_root_hpa;
 		goto failed;
 	}
 
@@ -5301,7 +5307,11 @@ int kvm_prepare_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 
 	sp = page_header(root);
 	kvm_init_root_gmm_spt_list(gmm, sp);
+	old_root = gmm->root_hpa;
+	old_gk_root = gmm->gk_root_hpa;
 	gmm->root_hpa = root;	/* shadow PT root has been set */
+	trace_host_set_gmm_root_hpa(gmm, old_root, old_gk_root,
+				    NATIVE_READ_IP_REG_VALUE());
 
 	ret = kvm_create_user_root_kernel_copy(vcpu, gmm);
 	if (unlikely(ret != 0))
@@ -5324,9 +5334,13 @@ int kvm_prepare_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 failed_sync:
 	mmu_release_spt_root(vcpu->kvm, root);
 failed_copy:
+	old_gk_root = gmm->gk_root_hpa;
 	gmm->gk_root_hpa = E2K_INVALID_PAGE;
 failed:
+	old_root = gmm->root_hpa;
 	gmm->root_hpa = TO_ERROR_PAGE(ret);
+	trace_host_set_gmm_root_hpa(gmm, old_root, old_gk_root,
+				    NATIVE_READ_IP_REG_VALUE());
 	return ret;
 }
 
@@ -5334,6 +5348,7 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 				gpa_t u_phys_ptb)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
+	hpa_t old_root, old_gk_root;
 	hpa_t root;
 	struct kvm_mmu_page *sp;
 	e2k_addr_t sync_start, sync_end;
@@ -5368,6 +5383,7 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 		pr_err("%s(): could not load MMU support of VCPU #%d\n",
 			__func__, vcpu->vcpu_id);
 		ret = -ENOMEM;
+		old_gk_root = gmm->gk_root_hpa;
 		goto failed;
 	}
 	mmu->pid = gmm->nid.nr;
@@ -5382,13 +5398,18 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 
 	sp = page_header(root);
 	kvm_init_root_gmm_spt_list(gmm, sp);
+	old_root = gmm->root_hpa;
+	old_gk_root = gmm->gk_root_hpa;
 	gmm->root_hpa = root;	/* shadow PT root has been set */
+	trace_host_set_gmm_root_hpa(gmm, old_root, old_gk_root,
+				    NATIVE_READ_IP_REG_VALUE());
 
 	ret = kvm_create_user_root_kernel_copy(vcpu, gmm);
 	if (unlikely(ret != 0))
 		goto failed_copy;
 
 	/* activate copied guest kernel PT */
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	kvm_set_space_type_spt_gk_root(vcpu, gmm->gk_root_hpa);
 
 	/* guest user PT is now empty */
@@ -5421,9 +5442,13 @@ int kvm_create_shadow_user_pt(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 failed_sync:
 	mmu_release_spt_root(vcpu->kvm, root);
 failed_copy:
+	old_gk_root = gmm->gk_root_hpa;
 	gmm->gk_root_hpa = E2K_INVALID_PAGE;
 failed:
+	old_root = gmm->root_hpa;
 	gmm->root_hpa = TO_ERROR_PAGE(ret);
+	trace_host_set_gmm_root_hpa(gmm, old_root, old_gk_root,
+				    NATIVE_READ_IP_REG_VALUE());
 	return ret;
 }
 

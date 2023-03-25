@@ -22,9 +22,7 @@
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1
 
 /* Select e2k specific features in <linux/kvm.h> */
-#define __KVM_HAVE_IOAPIC
 #define	__KVM_HAVE_IRQ_LINE
-#define __KVM_HAVE_PIT
 #define __KVM_HAVE_DEVICE_ASSIGNMENT
 #define __KVM_HAVE_USER_NMI
 #define __KVM_HAVE_GUEST_DEBUG
@@ -180,14 +178,9 @@ struct kvm_ioapic_state {
 
 #define KVM_IOEPIC_NUM_PINS  64
 
-#define KVM_IRQCHIP_PIC_MASTER   0
-#define KVM_IRQCHIP_PIC_SLAVE    1
-#define KVM_IRQCHIP_IOAPIC       2
-#define KVM_IRQCHIP_IOEPIC_NODE0 3
-#define KVM_IRQCHIP_IOEPIC_NODE1 4
-#define KVM_IRQCHIP_IOEPIC_NODE2 5
-#define KVM_IRQCHIP_IOEPIC_NODE3 6
-#define KVM_NR_IRQCHIPS          7
+#define KVM_IRQCHIP_IOAPIC	0
+#define KVM_IRQCHIP_IOEPIC	1
+#define KVM_NR_IRQCHIPS		2
 
 /* for KVM_GET_REGS and KVM_SET_REGS */
 struct kvm_regs {

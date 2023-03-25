@@ -162,6 +162,9 @@ extern bool debug_guest_ust;
 					/* stack activations print */
 
 #define	CHECK_GUEST_VCPU_UPDATES
+
+#include "trace-virq.h"
+
 bool kvm_is_guest_TIRs_frozen(pt_regs_t *regs)
 {
 	if (check_is_guest_TIRs_frozen(regs, false)) {
@@ -297,12 +300,14 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 	}
 	if (!kvm_has_virqs_to_guest(vcpu)) {
 		/* nothing pending VIRQs to pass to guest */
+		trace_kvm_pass_virqs_to_guest(vcpu, no_pending_pass_virq);
 		goto out_unlock;
 	}
 	if (atomic_read(&vcpu->arch.host_ctxt.signal.traps_num) -
 			atomic_read(&vcpu->arch.host_ctxt.signal.in_work) > 1) {
 		/* VCPU is now at trap handling, probably VIRQs will */
 		/* handled too, if not, pending VIRQs will be passed later */
+		trace_kvm_pass_virqs_to_guest(vcpu, vcpu_in_trap_pass_virq);
 		goto some_later;
 	}
 	if (kvm_guest_vcpu_irqs_disabled(vcpu,
@@ -313,6 +318,10 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 		/* them to other appropriate case */
 		DebugVIRQs("IRQs is disabled on guest kernel thread, "
 			"could not pass\n");
+		trace_kvm_pass_virqs_to_guest(vcpu, irqs_disabled_pass_virq);
+		trace_kvm_irq_disabled_on_guest(vcpu, regs->crs.cr0_hi.CR0_hi_IP,
+			kvm_get_guest_vcpu_UPSR_value(vcpu),
+			kvm_get_guest_vcpu_PSR_value(vcpu));
 		goto some_later;
 	}
 
@@ -320,6 +329,7 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 
 	if (kvm_test_virqs_injected(vcpu)) {
 		KVM_BUG_ON(vcpu->arch.virq_wish);
+		trace_kvm_pass_virqs_to_guest(vcpu, already_injected_pass_virq);
 		goto already_injected;
 	}
 
@@ -338,6 +348,7 @@ unsigned long kvm_pass_virqs_to_guest(struct pt_regs *regs,
 		/* Convert last wish to interrupt and clear last wish flag */
 		vcpu->arch.virq_wish = false;
 	}
+	trace_kvm_pass_virqs_to_guest(vcpu, injected_pass_virq);
 
 	ret = exc_interrupt_mask;
 
@@ -583,6 +594,10 @@ unsigned long kvm_pass_page_fault_to_guest(struct pt_regs *regs,
 		/* page fault does not be injected to guest, and wiil be */
 		/* handled by host */
 		return KVM_NOT_GUEST_TRAP_RESULT;
+	}
+	if (ret < 0) {
+		/* page fault handling failed */
+		return ret;
 	}
 
 	/* could not handle, so host should to do it */
@@ -1145,6 +1160,12 @@ int kvm_correct_guest_trap_return_ip(unsigned long return_ip)
 	unsigned long ts_flag;
 	int ret;
 
+	if ((long)return_ip < 0) {
+		/* return IP was inverted to tell the host that the return */
+		/* should be on the host privileged action handler */
+		KVM_BUG_ON(current->thread.usr_pfault_jump == 0);
+		return_ip = current->thread.usr_pfault_jump;
+	}
 	context = get_signal_stack();
 	u_regs = &context->regs;
 	cr0_hi.CR0_hi_half = 0;
@@ -1162,6 +1183,17 @@ int kvm_correct_guest_trap_return_ip(unsigned long return_ip)
 	}
 	return ret;
 }
+
+
+unsigned long kvm_disabled_priv_hcall(unsigned long nr,
+			unsigned long arg1, unsigned long arg2,
+			unsigned long arg3, unsigned long arg4,
+			unsigned long arg5, unsigned long arg6,
+			unsigned long arg7)
+{
+	return -ENOSYS;
+}
+
 
 /* FIXME: kvm trap entry should be passed by guest kernel through common */
 /* locked area kvm_state_t or as arg of guest kernel entry_point to start it

@@ -198,7 +198,6 @@ extern void set_protected_mode_flags(void);
 # ifdef CONFIG_DATA_STACK_WINDOW
 extern int debug_datastack;
 # endif
-int fake_sysctl_compact_unevictable_allowed;
 #endif
 
 #ifdef CONFIG_IA64
@@ -1622,12 +1621,7 @@ static struct ctl_table vm_table[] = {
 	},
 	{
 		.procname	= "compact_unevictable_allowed",
-#ifdef CONFIG_E2K
-		/* Do not allow user to hang kernel */
-		.data		= &fake_sysctl_compact_unevictable_allowed,
-#else
 		.data		= &sysctl_compact_unevictable_allowed,
-#endif
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax_warn_RT_change,

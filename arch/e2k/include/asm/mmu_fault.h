@@ -146,9 +146,7 @@ native_move_tagged_qword(e2k_addr_t addr_from, e2k_addr_t addr_to)
 
 extern void native_handle_mpdma_fault(e2k_addr_t hva);
 
-extern e2k_addr_t print_address_ptes(pgd_t *pgdp, e2k_addr_t address,
-					int kernel);
-
+extern void print_address_ptes(pgd_t *pgdp, e2k_addr_t address, int kernel);
 
 /*
  * Paravirtualization support
@@ -264,6 +262,14 @@ store_tagged_dword(void *address, u64 data, u32 tag)
 {
 	recovery_faulted_tagged_store((e2k_addr_t) address, data, tag,
 			TAGGED_MEM_STORE_REC_OPC, 0, 0, 0, 1, 0, 0);
+}
+
+static inline void
+store_tagged_qword(void *address, u64 data_lo, u64 data_hi, u32 tag_lo, u32 tag_hi)
+{
+	recovery_faulted_tagged_store((unsigned long) address, data_lo, tag_lo,
+			TAGGED_MEM_STORE_REC_OPC, data_hi, tag_hi,
+			TAGGED_MEM_STORE_REC_OPC | 8ul, 0, 0, 1);
 }
 
 static inline void

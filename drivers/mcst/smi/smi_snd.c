@@ -36,18 +36,19 @@
 char sramTxSection = 0; /* updated section by firmware, Start with section 0 of SRAM */
 struct sm768chip *chip_irq_id=NULL;/*chip_irq_id is use for request and free irq*/
 
-static int SM768_AudioInit(unsigned long wordLength, unsigned long sampleRate)
+static int SM768_AudioInit(struct smi_device *sdev,
+			unsigned long wordLength, unsigned long sampleRate)
 {
 
 	// Set up I2S and GPIO registers to transmit/receive data.
-    iisOpen(wordLength, sampleRate);
+	iisOpen(sdev, wordLength, sampleRate);
     //Set I2S to DMA 256 DWord from SRAM starting at location 0 of SRAM
-    iisTxDmaSetup(0,SRAM_SECTION_SIZE);
+	iisTxDmaSetup(sdev, 0, SRAM_SECTION_SIZE);
 
 	// Init audio codec
-    if(uda1345_init())
+	if (uda1345_init(sdev))
     {
-        uda1345_deinit();
+		uda1345_deinit(sdev);
         return -1;
     }
 
@@ -57,36 +58,35 @@ static int SM768_AudioInit(unsigned long wordLength, unsigned long sampleRate)
 /*
  * This function call iis driver interface iisStart() to start play audio. 
  */
-static int SM768_AudioStart(void)
+static int SM768_AudioStart(struct sm768chip *chip)
 {
-    
-    iisStart();
-    uda1345_setpower(ADCOFF_DACON);
-	uda1345_setmute(NO_MUTE);
-	HDMI_Audio_Unmute();
+	iisStart(chip);
+	uda1345_setpower(chip->pvReg, ADCOFF_DACON);
+	uda1345_setmute(chip->pvReg, NO_MUTE);
+	HDMI_Audio_Unmute(chip->pvReg);
     return 0;
 }
 
 /*
  * Stop audio. 
  */
-static int SM768_AudioStop(void)
+static int SM768_AudioStop(struct sm768chip *chip)
 {
-	uda1345_setmute(MUTE);
-    uda1345_setpower(ADCOFF_DACOFF);
-	HDMI_Audio_Mute();
-    iisStop();
-	
+	uda1345_setmute(chip->pvReg, MUTE);
+	uda1345_setpower(chip->pvReg, ADCOFF_DACOFF);
+	HDMI_Audio_Mute(chip->pvReg);
+	iisStop(chip->pvReg);
+
     return 0;
 }
 
 
 
-static int SM768_AudioDeinit(void)
+static int SM768_AudioDeinit(struct smi_device *sdev)
 {
-	sb_IRQMask(SB_IRQ_VAL_I2S);
-	uda1345_deinit();
-	iisClose();
+	sb_IRQMask(sdev, SB_IRQ_VAL_I2S);
+	uda1345_deinit(sdev);
+	iisClose(sdev);
 
     return 0;
 }
@@ -145,7 +145,7 @@ static int snd_falconi2s_put_hw_play_volume(struct snd_kcontrol *kcontrol,
 
 	if (chip->playback_vol!= ucontrol->value.integer.value[0]) {
 		vol = chip->playback_vol = ucontrol->value.integer.value[0];
-		uda1345_setvolume(VolAuDrvToCodec(vol));
+		uda1345_setvolume(chip->pvReg, VolAuDrvToCodec(vol));
 		changed = 1;
 	}
 
@@ -178,7 +178,7 @@ static int snd_falconi2s_put_hw_capture_volume(struct snd_kcontrol *kcontrol,
 
 	if (chip->capture_vol!= ucontrol->value.integer.value[0]) {
 		vol = chip->capture_vol = ucontrol->value.integer.value[0];
-		uda1345_setvolume(VolAuDrvToCodec(vol));
+		uda1345_setvolume(chip->pvReg, VolAuDrvToCodec(vol));
 		changed = 1;
 		}
 
@@ -339,8 +339,8 @@ static int snd_falconi2s_pcm_prepare(struct snd_pcm_substream *substream)
 }
 
 /* trigger callback */
-static int snd_falconi2s_pcm_playback_trigger(struct snd_pcm_substream *substream,
-                                    int cmd)
+static int snd_falconi2s_pcm_playback_trigger(struct snd_pcm_substream
+						*substream, int cmd)
 {
 	struct sm768chip *chip = snd_pcm_substream_chip(substream);
 	dbg_msg("snd_falconi2s_pcm_trigger\n");
@@ -357,7 +357,7 @@ static int snd_falconi2s_pcm_playback_trigger(struct snd_pcm_substream *substrea
 		
 		/*enable IIS*/    
 		sramTxSection = 0;
-		SM768_AudioStart();
+		SM768_AudioStart(chip);
 		
 		sramTxSection = 1;
 
@@ -366,7 +366,7 @@ static int snd_falconi2s_pcm_playback_trigger(struct snd_pcm_substream *substrea
 		dbg_msg("SNDRV_PCM_TRIGGER_STOP\n");
 		
 		/*disable IIS*/    
-		SM768_AudioStop();
+		SM768_AudioStop(chip);
 
 		break;
 	default:
@@ -385,7 +385,8 @@ static int snd_falconi2s_pcm_playback_trigger(struct snd_pcm_substream *substrea
   	return 0;
  }
 
- static int snd_falconi2s_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
+static int snd_falconi2s_pcm_trigger(struct snd_pcm_substream *substream,
+									int cmd)
  {
 	 
 	  if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
@@ -462,9 +463,9 @@ static irqreturn_t snd_smi_interrupt(int irq, void *dev_id)
 	struct snd_pcm_runtime *runtime;
 	struct snd_pcm_substream *substream;
 
-	if(hw768_check_iis_interrupt())
+	if (hw768_check_iis_interrupt(chip->pvReg))
 	{
-		iisClearRawInt();//clear int
+		iisClearRawInt(chip); /*clear int */
 
 		substream = chip->substream;
 		if(substream == NULL){
@@ -506,7 +507,7 @@ static int snd_falconi2s_create(struct snd_card *card,
 {
 	int err;
 	struct pci_dev *pci = dev->pdev;
-	struct smi_device *smi_device = dev->dev_private;
+	struct smi_device *sdev = dev->dev_private;
 	struct sm768chip *chip;
 	static struct snd_device_ops ops = {
 		.dev_free = snd_falconi2s_dev_free,
@@ -528,15 +529,15 @@ static int snd_falconi2s_create(struct snd_card *card,
 	}
 	
 	//map register
-	chip->vidreg_start = smi_device->rmmio_base;
-	chip->vidreg_size = smi_device->rmmio_size;
+	chip->vidreg_start = sdev->rmmio_base;
+	chip->vidreg_size = sdev->rmmio_size;
 	dbg_msg("Audio MMIO phyAddr = 0x%x\n",chip->vidreg_start);
 
-	chip->pvReg = smi_device->rmmio;
+	chip->pvReg = sdev->rmmio;
 	dbg_msg("Audio MMIO virtual addr = %p\n",chip->pvReg);
 
 	//map video memory.
-	chip->vidmem_start = smi_device->mc.vram_base;
+	chip->vidmem_start = sdev->mc.vram_base;
 	chip->vidmem_size = 0x200000;   // change the video memory temperarily
 	dbg_msg("video memory phyAddr = 0x%x, size = (Dec)%d bytes\n",
 	chip->vidmem_start,chip->vidmem_size);
@@ -557,7 +558,7 @@ static int snd_falconi2s_create(struct snd_card *card,
 	dbg_msg("Audio pci irq :%d\n",chip->irq);
 
 
-	if(SM768_AudioInit(SAMPLE_BITS, SAMPLE_RATE)) {
+	if (SM768_AudioInit(sdev, SAMPLE_BITS, SAMPLE_RATE)) {
 		err_msg("Audio init failed!\n");	
 		snd_falconi2s_free(chip);
 		return -1;
@@ -566,7 +567,7 @@ static int snd_falconi2s_create(struct snd_card *card,
 	chip_irq_id=chip;/*Record chip_irq_id which will use in free_irq*/
 	dbg_msg("chip_irq_id=%d\n", chip_irq_id);
 
-	iisClearRawInt();//clear int
+	iisClearRawInt(chip); /*clear int*/
 
 	//Setup ISR. The ISR will move more data from DDR to SRAM.
 	
@@ -576,7 +577,7 @@ static int snd_falconi2s_create(struct snd_card *card,
 		snd_falconi2s_free(chip);
 		return -EBUSY;
 	}
-	sb_IRQUnmask(SB_IRQ_VAL_I2S); 
+	sb_IRQUnmask(sdev, SB_IRQ_VAL_I2S);
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(3,18,0)
 	snd_card_set_dev(card, &pci->dev);
@@ -653,6 +654,7 @@ void smi_audio_remove(struct drm_device *dev)
 {
 	struct pci_dev *pci = dev->pdev;
 	struct snd_card *card;
+	struct smi_device *sdev = dev->dev_private;
 
 	inf_msg("smi_pci_remove\n");
 	card = pci_get_drvdata(pci);
@@ -663,7 +665,7 @@ void smi_audio_remove(struct drm_device *dev)
 		dbg_msg("free irq\n");
 	}
 
-	SM768_AudioDeinit();
+	SM768_AudioDeinit(sdev);
 	
 	snd_card_free(card);
 	pci_set_drvdata(pci, NULL);

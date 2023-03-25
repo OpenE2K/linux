@@ -28,9 +28,6 @@
 
 #ifdef CONFIG_PROTECTED_MODE
 
-#define USER_SIVAL_PTR_OFFSET_LO 0
-#define USER_SIVAL_PTR_OFFSET_HI 8
-
 #define get_user_space(x)	arch_compat_alloc_user_space(x)
 
 
@@ -50,7 +47,7 @@ int i;
 #endif /* DEBUG_SYSCALLP */
 
 long protected_sys_mq_notify(const long arg1 /*mqdes*/,
-			     const unsigned long __user arg2 /*sevp*/)
+			     const void __user *arg2 /*sevp*/)
 {
 	unsigned int size;
 	long rval = -EINVAL;
@@ -71,32 +68,33 @@ long protected_sys_mq_notify(const long arg1 /*mqdes*/,
 #define MQ_NOTIFY_STRING "Bad sigevent stack descriptor for mq_notify\n"
 #define PROT_SIZEOF_SIGEVENT 80 /* structure size in the user space (in PM) */
 #define PROT_SIGEV_NOTIFY_OFFSET_DELTA 2 /* field offset shift in PM */
-	void *ev = NULL;
-	void *kernel_ptr = NULL;
-	long user_ptr_lo = 0, user_ptr_hi = 0;
+	void __user *ev = NULL;
+	void __user *kernel_ptr = NULL;
+	u64 user_ptr_lo = 0, user_ptr_hi = 0;
 	int sival_ptr_tags = 0;
 	int signum = 0;
 
-	DbgSCP("arg1 = %ld, arg2 = %px\n", arg1, (void *)arg2);
+	DbgSCP("arg1 = %ld, arg2 = %px\n", arg1, arg2);
 	if (arg2) {
 		long mask_type;
 		long align_type = MQ_NOTIFY_MASK_align1;
-		int  tag;
-		int *sigev_notify_ptr; /* pointer to the sigev_notify field */
+		int sigev_notify; /* pointer to the sigev_notify field */
 
 		size = PROT_SIZEOF_SIGEVENT;
 
-		TRY_USR_PFAULT {
-			NATIVE_LOAD_VAL_AND_TAGD(arg2 +
-				USER_SIVAL_PTR_OFFSET_LO,
-				user_ptr_lo, sival_ptr_tags);
-			NATIVE_LOAD_VAL_AND_TAGD(arg2 +
-				USER_SIVAL_PTR_OFFSET_HI,
-				user_ptr_hi, tag);
-		} CATCH_USR_PFAULT {
+		if (get_user_tagged_16(user_ptr_lo, user_ptr_hi,
+				sival_ptr_tags, arg2))
 			return -EFAULT;
-		} END_USR_PFAULT
-		sival_ptr_tags |= tag << 4;
+
+		switch (sival_ptr_tags & 0xf) {
+		case ETAGEWD:
+			sival_ptr_tags = 0; /* empty field */
+			break;
+		case ETAGEWS << 2:
+			/* This is integer value in the sigval union: */
+			sival_ptr_tags = ETAGNUM;
+			break;
+		}
 
 		switch (sival_ptr_tags) {
 		case ETAGNUM:
@@ -119,9 +117,10 @@ long protected_sys_mq_notify(const long arg1 /*mqdes*/,
 			mask_type = MQ_NOTIFY_MASK_typeI;
 		}
 		/* Checking the content of the 'sigev_notify' field: */
-		sigev_notify_ptr = (int *)(&(((sigevent_t *)arg2)->sigev_notify)
-					+ PROT_SIGEV_NOTIFY_OFFSET_DELTA);
-		if (*sigev_notify_ptr == SIGEV_THREAD) {
+		if (get_user(sigev_notify, (int *)(&(((sigevent_t *)arg2)->sigev_notify)
+					+ PROT_SIGEV_NOTIFY_OFFSET_DELTA)))
+			return -EFAULT;
+		if (sigev_notify == SIGEV_THREAD) {
 			align_type |= MQ_NOTIFY_MASK_align2;
 			mask_type  |= MQ_NOTIFY_MASK_type2;
 		}
@@ -134,8 +133,9 @@ long protected_sys_mq_notify(const long arg1 /*mqdes*/,
 			DbgSCP(MQ_NOTIFY_STRING);
 			return rval;
 		}
-		kernel_ptr = ((sigevent_t *)ev)->sigev_value.sival_ptr;
-		signum     = ((sigevent_t *)ev)->sigev_signo;
+		if (get_user(kernel_ptr, &((sigevent_t *)ev)->sigev_value.sival_ptr) ||
+				get_user(signum, &((sigevent_t *)ev)->sigev_signo))
+			return -EFAULT;
 	}
 	DbgSCP("sys_mq_notify(%ld, %px)\n", arg1, ev);
 	rval = sys_mq_notify((mqd_t)arg1, (const sigevent_t *) ev);

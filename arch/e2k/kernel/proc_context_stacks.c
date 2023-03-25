@@ -21,108 +21,72 @@
 int native_mkctxt_prepare_hw_user_stacks(void (*user_func)(void),
 					void *args, u64 args_size,
 					size_t d_stack_sz, bool protected,
-					void *ps_frames,
-					e2k_mem_crs_t *cs_frames)
+					void __user *ps_frames,
+					e2k_mem_crs_t __user *cs_frames)
 {
 	e2k_mem_crs_t crs_trampoline, crs_user;
 	unsigned long ts_flag;
 	int ret, i;
 
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	TRY_USR_PFAULT {
-		for (i = 0; i < args_size / 16; i++) {
-			u64 reg1_offset;
-#if DEBUG_CTX_STACK_MODE
-			u64 val_lo, val_hi;
-			u8 tag_lo, tag_hi;
+	for (i = 0; i < args_size / 16; i++) {
+		u64 val_lo, val_hi;
+		u8 tag_lo, tag_hi, tag;
 
-			load_qvalue_and_tagq((e2k_addr_t)(args + 16 * i),
+		if (IS_ALIGNED((unsigned long) args, 16)) {
+			load_qvalue_and_tagq((unsigned long) (args + 16 * i),
 					&val_lo, &val_hi, &tag_lo, &tag_hi);
-			DebugCTX_STACK("register arguments: 0x%llx 0x%llx\n",
-					val_lo, val_hi);
-#endif
+		} else {
+			/* Can happen in 32 and 64 bit modes */
+			load_value_and_tagd(args + 16 * i, &val_lo, &tag_lo);
+			load_value_and_tagd(args + 16 * i + 8, &val_hi, &tag_hi);
+		}
+		tag = (tag_hi << 4) | tag_lo;
+		DebugCTX_STACK("register arguments: 0x%llx 0x%llx\n",
+				val_lo, val_hi);
 
-			reg1_offset = (machine.native_iset_ver < E2K_ISET_V5) ?
-				8 : 16;
-
-			if (protected) {
-				/* We have to check for SAP */
-				u64 val_lo, val_hi;
-				u8 tag_lo, tag_hi;
+		if (protected) {
+			/* We have to check for SAP */
+			if (tag == ETAGAPQ && ((val_lo & AP_ITAG_MASK) >>
+						AP_ITAG_SHIFT) == SAP_ITAG) {
 				e2k_sap_lo_t sap;
 				e2k_ap_lo_t ap;
 
-				load_qvalue_and_tagq(
-					(e2k_addr_t)(args + 16 * i),
-					&val_lo, &val_hi, &tag_lo, &tag_hi);
-				if (((tag_hi << 4) | tag_lo) == ETAGAPQ &&
-						((val_lo & AP_ITAG_MASK) >>
-						 AP_ITAG_SHIFT) == SAP_ITAG) {
-					/*
-					 * SAP was passed, convert to AP
-					 * for the new context since it has
-					 * separate data stack.
-					 */
-					AW(sap) = val_lo;
-					AW(ap) = 0;
-					AS(ap).itag = AP_ITAG;
-					AS(ap).rw = AS(sap).rw;
-					AS(ap).base = AS(sap).base +
-						((u64)current->stack &
-						 0xFFFF00000000UL);
-					val_lo = AW(ap);
-					DebugCTX_STACK("\tfixed SAP: 0x%llx "
-						"0x%llx\n", val_lo, val_hi);
-				}
-				recovery_faulted_tagged_store((e2k_addr_t)
-						(ps_frames + EXT_4_NR_SZ * i),
-						val_lo, tag_lo,
-						TAGGED_MEM_STORE_REC_OPC,
-						val_hi, tag_hi,
-						TAGGED_MEM_STORE_REC_OPC |
-						reg1_offset,
-						1, 0, 0);
-			} else {
-				recovery_faulted_move((e2k_addr_t)
-						(args + 16 * i), (e2k_addr_t)
-						(ps_frames + EXT_4_NR_SZ * i),
-						0, 1, TAGGED_MEM_STORE_REC_OPC,
-						2, 0, 0, 1,
-						(tc_cond_t) {.word = 0});
-				recovery_faulted_move((e2k_addr_t)
-						(args + 16 * i + 8),
-						(e2k_addr_t)
-						(ps_frames + EXT_4_NR_SZ * i +
-						 reg1_offset),
-						0, 1, TAGGED_MEM_STORE_REC_OPC,
-						2, 0, 0, 1,
-						(tc_cond_t) {.word = 0});
+				/* SAP was passed, convert to AP
+				 * for the new context since it has
+				 * separate data stack. */
+				AW(sap) = val_lo;
+				AW(ap) = 0;
+				AS(ap).itag = AP_ITAG;
+				AS(ap).rw = AS(sap).rw;
+				AS(ap).base = AS(sap).base +
+					((u64) current->stack & 0xFFFF00000000UL);
+				val_lo = AW(ap);
+				DebugCTX_STACK("\tfixed SAP: 0x%llx 0x%llx\n", val_lo, val_hi);
 			}
 		}
 
-		if (2 * i < args_size / 8) {
-#if DEBUG_CTX_STACK_MODE
-			u64 val;
-			u8 tag;
-
-			recovery_faulted_load((e2k_addr_t) (args + 16 * i),
-					&val, &tag, TAGGED_MEM_LOAD_REC_OPC,
-					0, (tc_cond_t){.word = 0});
-			DebugCTX_STACK("register arguments: 0x%llx\n", val);
-#endif
-			recovery_faulted_move((e2k_addr_t)
-					(args + 16 * i), (e2k_addr_t)
-					(ps_frames + EXT_4_NR_SZ * i),
-					0, 1, TAGGED_MEM_STORE_REC_OPC,
-					2, 0, 0, 1,
-					(tc_cond_t) {.word = 0});
-		}
-
-	} CATCH_USR_PFAULT {
+		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		ret = __put_user_tagged_16_offset(val_lo, val_hi, tag,
+				ps_frames + EXT_4_NR_SZ * i, machine.qnr1_offset);
 		clear_ts_flag(ts_flag);
-		return -EFAULT;
-	} END_USR_PFAULT
-	clear_ts_flag(ts_flag);
+		if (ret)
+			return -EFAULT;
+	}
+
+	if (2 * i < args_size / 8) {
+		u64 val;
+		u8 tag;
+
+		load_value_and_tagd(args + 16 * i, &val, &tag);
+
+		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		ret = __put_user_tagged_8(val, tag,
+				(u64 __user *) (ps_frames + EXT_4_NR_SZ * i));
+		clear_ts_flag(ts_flag);
+		if (ret)
+			return -EFAULT;
+		DebugCTX_STACK("register arguments: 0x%llx\n", val);
+	}
 
 	/*
 	 * makecontext_trampoline()->do_longjmp() expects parameter area
@@ -132,10 +96,10 @@ int native_mkctxt_prepare_hw_user_stacks(void (*user_func)(void),
 			makecontext_trampoline_protected :
 				makecontext_trampoline,
 			KERNEL_C_STACK_SIZE, E2K_KERNEL_PSR_DISABLED,
-			protected ? 8 : 4, protected ? 8 : 4, false);
+			C_ABI_PSIZE(protected), C_ABI_PSIZE(protected), false);
 	ret = ret ?: chain_stack_frame_init(&crs_user, user_func,
 			d_stack_sz, E2K_USER_INITIAL_PSR,
-			protected ? 8 : 4, protected ? 8 : 4, true);
+			C_ABI_PSIZE(protected), C_ABI_PSIZE(protected), true);
 	if (ret)
 		return ret;
 

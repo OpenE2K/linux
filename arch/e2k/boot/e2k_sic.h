@@ -2,7 +2,6 @@
 #define _BOOT_E2K_SIC_H_
 
 #include <linux/init.h>
-#include <linux/numa.h>
 #include <linux/nodemask.h>
 
 #include <asm/e2k_api.h>

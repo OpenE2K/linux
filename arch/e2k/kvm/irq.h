@@ -90,6 +90,26 @@ kvm_get_guest_virqs_atomic_counter(struct kvm_vcpu *vcpu, int virq_id)
 	}
 }
 
+/* results of virq vcpu wake up (used only to trace virqs) */
+typedef enum virq_wake_up {
+	vcpu_virq_waked_up,		/* vcpu of virq successfully is waked up */
+	need_not_virq_wake_up,		/* need not do inject or wake up */
+	no_pending_virq_wake_up,	/* empty virqs counter */
+	current_vcpu_virq_wake_up,	/* vcpu of virq is current task */
+	active_vcpu_virq_wake_up,	/* vcpu of virq is not on idle or spin lock */
+					/* or on csd lock waiting state */
+} virq_wake_up_t;
+
+
+/* results of passing virqs to vcpu (pass interrupt, used only to trace virqs) */
+typedef enum pass_virq {
+	injected_pass_virq,		/* virq interrupt is successfully injected */
+	no_pending_pass_virq,		/* empty virqs counter */
+	irqs_disabled_pass_virq,	/* irqs mask is disabled on guest */
+	vcpu_in_trap_pass_virq,		/* vcpu is now at trap handling */
+	already_injected_pass_virq,	/* virq interrupt was already injected */
+} pass_virq_t;
+
 extern void kvm_init_clockdev(struct kvm_vcpu *vcpu);
 extern void kvm_cancel_clockdev(struct kvm_vcpu *vcpu);
 
@@ -120,7 +140,7 @@ extern int kvm_dec_vcpu_pending_virq(struct kvm_vcpu *vcpu, int virq_no);
 
 static inline int kvm_wake_up_pending_virqs(struct kvm_vcpu *vcpu)
 {
-	return kvm_find_pending_virqs(vcpu, false, true);
+	return kvm_find_pending_virqs(vcpu, true, false);
 }
 static inline int kvm_get_pending_virqs_num(struct kvm_vcpu *vcpu)
 {
@@ -263,6 +283,8 @@ kvm_guest_handled_virqs(struct kvm_vcpu *vcpu)
 #endif	/* CONFIG_DIRECT_VIRQ_INJECTION */
 
 extern void kvm_free_all_VIRQs(struct kvm *kvm);
+extern bool kvm_irq_bypass;
+extern bool kvm_ioepic_unsafe_direct_map;
 
 #endif /* __IRQ_H */
 

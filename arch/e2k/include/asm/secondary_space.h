@@ -6,13 +6,13 @@
 #define	_SECONDARY_SPACE_H
 
 #ifndef __ASSEMBLY__
-#include <linux/mm_types.h>
+#include <linux/spinlock.h>
+
 #include <asm/machdep.h>
 #include <asm/page.h>
 #include <asm/processor.h>
 #include <asm/types.h>
 #include <asm/smp.h>
-#include <asm/mmu_regs.h>
 #endif /* !__ASSEMBLY__ */
 
 #define BINCO_PROTOCOL_VERSION	4
@@ -81,6 +81,12 @@ s64 sys_el_binary(s64 work, s64 arg2, s64 arg3, s64 arg4);
 #define SET_IC_NEED_FLUSH_ON_SWITCH	13
 #define GET_UPT_SEC_AD_SHIFT_DSBL	14
 #define SET_UPT_SEC_AD_SHIFT_DSBL	15
+#define SET_BIN_COMP_INFO		16
+#define GET_BIN_COMP_INFO		17
+#define SET_RLIM			18
+#define GET_RLIM			19
+#define SET_BIN_COMP_FD			20
+#define BIN_COMP_FD_WRITE		21
 
 /* Selector numbers for GET_SECONDARY_SPACE_OFFSET */
 enum sel_num {
@@ -103,6 +109,31 @@ enum sel_num {
 	}						\
 	argm;						\
 })
+
+typedef struct bin_comp_info {
+	void		*info;
+	e2k_size_t	size;
+	rwlock_t	lock;
+} bin_comp_info_t;
+
+extern void free_bin_comp_info(bin_comp_info_t *bi);
+extern int copy_bin_comp_info(bin_comp_info_t *oldbi, struct mm_struct *mm);
+
+#define BC_RLIMIT_X86_DATA	0
+#define BC_RLIMIT_X86_STACK	1
+#define BC_RLIMIT_X86_AS	2
+#define BINCOMP_RLIM_NLIMITS	3
+
+#define BIN_COMP_FD_MAX		2
+
+typedef struct bin_comp_fdt {
+	struct file	*fd[BIN_COMP_FD_MAX];
+	int		pos;
+	atomic_t	usage;
+	rwlock_t	lock;
+} bin_comp_fdt_t;
+
+extern void free_bin_comp_fdt(bin_comp_fdt_t *fdt);
 
 #endif /* !__ASSEMBLY__ */
 #endif /* _SECONDARY_SPACE_H */

@@ -3,9 +3,9 @@
 #include "ddk768_help.h"
 #include "uda1345.h"
 
-static void setdat(int v);
-static void setclk(int v);
-static void setmode(int v);
+static void setdat(volatile unsigned char __iomem *rmmio, int v);
+static void setclk(volatile unsigned char __iomem *rmmio, int v);
+static void setmode(volatile unsigned char __iomem *rmmio, int v);
 
 static const u8 uda1346_reg[UDA1345_REGS_NUM] =
 {
@@ -32,56 +32,57 @@ static struct uda1345_data falcon_uda1345 =
     .cache_init = 0,
 };
 
-static void setdat(int v)
+static void setdat(volatile unsigned char __iomem *rmmio, int v)
 {
     unsigned long value;
 
-    value = __peekRegisterDWord(GPIO_DATA);
-    __pokeRegisterDWord(GPIO_DATA, 0 < v ? (value | (1 << GPIO_DATA_GPIO_CODEC_DATA_SHIFT)) : \
-                      (value & ~(1 << GPIO_DATA_GPIO_CODEC_DATA_SHIFT)));
+	value = __peekRegisterDWord(rmmio, GPIO_DATA);
+	__pokeRegisterDWord(rmmio, GPIO_DATA, 0 < v ? \
+					(value | (1 << GPIO_DATA_GPIO_CODEC_DATA_SHIFT)) : \
+					(value & ~(1 << GPIO_DATA_GPIO_CODEC_DATA_SHIFT)));
 
 }
 
-static void setclk(int v)
+static void setclk(volatile unsigned char __iomem *rmmio, int v)
 {
     unsigned long value;
 
-		value = __peekRegisterDWord(GPIO_DATA);
-		__pokeRegisterDWord(GPIO_DATA, 0 < v ? (value | (1 << GPIO_DATA_GPIO_CODEC_CLK_SHIFT)) : \
-						  (value & ~(1 << GPIO_DATA_GPIO_CODEC_CLK_SHIFT)));
+		value = __peekRegisterDWord(rmmio, GPIO_DATA);
+		__pokeRegisterDWord(rmmio, GPIO_DATA, 0 < v ? \
+						(value | (1 << GPIO_DATA_GPIO_CODEC_CLK_SHIFT)) : \
+						(value & ~(1 << GPIO_DATA_GPIO_CODEC_CLK_SHIFT)));
 
 
 }
 
-static void setmode(int v)
+static void setmode(volatile unsigned char __iomem *rmmio, int v)
 {
     unsigned long value;
 
-		value = __peekRegisterDWord(GPIO_DATA);
-		__pokeRegisterDWord(GPIO_DATA, 0 < v ? (value | (1 << GPIO_DATA_GPIO_CODEC_MODE_SHIFT)) : \
-						  (value & ~(1 << GPIO_DATA_GPIO_CODEC_MODE_SHIFT)));
+		value = __peekRegisterDWord(rmmio, GPIO_DATA);
+		__pokeRegisterDWord(rmmio, GPIO_DATA, 0 < v ? \
+						(value | (1 << GPIO_DATA_GPIO_CODEC_MODE_SHIFT)) : \
+						(value & ~(1 << GPIO_DATA_GPIO_CODEC_MODE_SHIFT)));
 
 }
 
-static void uda1345_GPIOInit(void)
+static void uda1345_GPIOInit(struct smi_device *sdev)
 {
     unsigned long value;
    		 /*l3 mode control pins*/
 
-		value = peekRegisterDWord(GPIO_MUX);
+		value = peekRegisterDWord(sdev->rmmio, GPIO_MUX);
 		value &= ~(1 << GPIO_MUX_GPIO_CODEC_MODE_SHIFT);
 		value &= ~(1 << GPIO_MUX_GPIO_CODEC_CLK_SHIFT);
 		value &= ~(1 << GPIO_MUX_GPIO_CODEC_DATA_SHIFT);
-		pokeRegisterDWord(GPIO_MUX, value);
+		pokeRegisterDWord(sdev->rmmio, GPIO_MUX, value);
 
 		/*set 3 pins as input*/
-		value = peekRegisterDWord(GPIO_DATA_DIRECTION);
+		value = peekRegisterDWord(sdev->rmmio, GPIO_DATA_DIRECTION);
 		value |= (1 << GPIO_DATA_DIRECTION_GPIO_CODEC_MODE_SHIFT);
 		value |= (1 << GPIO_DATA_DIRECTION_GPIO_CODEC_CLK_SHIFT);
 		value |= (1 << GPIO_DATA_DIRECTION_GPIO_CODEC_DATA_SHIFT);
-		pokeRegisterDWord(GPIO_DATA_DIRECTION, value);
-
-
+		pokeRegisterDWord(sdev->rmmio, GPIO_DATA_DIRECTION, value);
 }
 
 static inline unsigned int uda1345_read_reg_cache(struct uda1345_data *codec,
@@ -114,7 +115,8 @@ static inline int uda1345_write_reg_cache(struct uda1345_data *codec,
  * Write to the uda134x registers
  *
  */
-static int uda1345_write(unsigned int reg,
+static int uda1345_write(volatile unsigned char __iomem *rmmio,
+						unsigned int reg,
                          unsigned int value)
 {
     int ret;
@@ -143,7 +145,7 @@ static int uda1345_write(unsigned int reg,
         break;
     }
 
-    ret = l3_write(&falcon_uda1345.l3,
+	ret = l3_write(rmmio, &falcon_uda1345.l3,
                    addr, &data, 1);
    
    if (ret != 1)
@@ -152,7 +154,8 @@ static int uda1345_write(unsigned int reg,
     return 0;
 }
 
-int uda1345_setsysclkfs(enum uda1345_sysclkf sysclk)
+int uda1345_setsysclkfs(struct smi_device *sdev,
+					enum uda1345_sysclkf sysclk)
 {
     u8 data;
 	
@@ -174,11 +177,12 @@ int uda1345_setsysclkfs(enum uda1345_sysclkf sysclk)
         return -1;
     }
 	
-    return uda1345_write(UDA1345_STATUS,data);
+	return uda1345_write(sdev->rmmio, UDA1345_STATUS, data);
 
 }
 
-int uda1345_setformat(enum uda1345_input_format informat)
+int uda1345_setformat(struct smi_device *sdev,
+				enum uda1345_input_format informat)
 {
 
     u8 data;
@@ -213,12 +217,13 @@ int uda1345_setformat(enum uda1345_input_format informat)
     default:
         return -1;
     }
-    return  uda1345_write(UDA1345_STATUS,data);
+	return  uda1345_write(sdev->rmmio, UDA1345_STATUS, data);
 
 }
 
 
-int uda1345_setdcfilter(enum uda1345_dc_filter onoff)
+int uda1345_setdcfilter(struct smi_device *sdev,
+				enum uda1345_dc_filter onoff)
 {
 
     u8 data;
@@ -235,24 +240,25 @@ int uda1345_setdcfilter(enum uda1345_dc_filter onoff)
     default:
         return -1;
     }
-    return  uda1345_write(UDA1345_STATUS,data);
+	return  uda1345_write(sdev->rmmio, UDA1345_STATUS, data);
 
 }
 
 
-int uda1345_setvolume(u8 dB)
+int uda1345_setvolume(volatile unsigned char __iomem *rmmio, u8 dB)
 {
 
     u8 data;
     data = uda1345_read_reg_cache(&falcon_uda1345,UDA1345_DATA_VOLUME);
     data &= ~UDA1345_VOLUME_MASK;
     data |= (dB&UDA1345_VOLUME_MASK);
-    return  uda1345_write(UDA1345_DATA_VOLUME,data);
+	return  uda1345_write(rmmio, UDA1345_DATA_VOLUME, data);
 
 }
 
 
-int uda1345_setdemphasis(enum uda1345_de_emphasis emphasis)
+int uda1345_setdemphasis(struct smi_device *sdev,
+				enum uda1345_de_emphasis emphasis)
 {
     u8 data;
     data = uda1345_read_reg_cache(&falcon_uda1345,UDA1345_DATA_DE_MUTE);
@@ -275,11 +281,12 @@ int uda1345_setdemphasis(enum uda1345_de_emphasis emphasis)
 
         return -1;
     }
-    return uda1345_write(UDA1345_DATA_DE_MUTE,data);
+	return uda1345_write(sdev->rmmio, UDA1345_DATA_DE_MUTE, data);
 
 }
 
-int uda1345_setmute(enum uda1345_mute onoff)
+int uda1345_setmute(volatile unsigned char __iomem *rmmio,
+								enum uda1345_mute onoff)
 {
     u8 data;
     data = uda1345_read_reg_cache(&falcon_uda1345,UDA1345_DATA_DE_MUTE);
@@ -295,11 +302,12 @@ int uda1345_setmute(enum uda1345_mute onoff)
     default:
         return -1;
     }
-    return  uda1345_write(UDA1345_DATA_DE_MUTE,data);
+	return  uda1345_write(rmmio, UDA1345_DATA_DE_MUTE, data);
 
 }
 
-int uda1345_setpower(enum uda1345_power onoff)
+int uda1345_setpower(volatile unsigned char __iomem *rmmio,
+							enum uda1345_power onoff)
 {
     u8 data;
     data = uda1345_read_reg_cache(&falcon_uda1345,UDA1345_DATA_POWER);
@@ -321,13 +329,13 @@ int uda1345_setpower(enum uda1345_power onoff)
     default:
         return -1;
     }
-    return  uda1345_write(UDA1345_DATA_POWER,data);
+	return  uda1345_write(rmmio, UDA1345_DATA_POWER, data);
 
 }
 
-int uda1345_init(void)
+int uda1345_init(struct smi_device *sdev)
 {
-    uda1345_GPIOInit();    
+	uda1345_GPIOInit(sdev);
 
     if(0 ==  falcon_uda1345.cache_init)
     {
@@ -337,27 +345,27 @@ int uda1345_init(void)
         falcon_uda1345.cache_init = 1;
     }
 
-    if(uda1345_setsysclkfs(SYSCLKF_384FS))
+	if (uda1345_setsysclkfs(sdev, SYSCLKF_384FS))
         return -1;
-    if(uda1345_setformat(I2S_BUS))
+	if (uda1345_setformat(sdev, I2S_BUS))
         return -1;
-    if(uda1345_setdcfilter(NO_DC_FILTERING))
+	if (uda1345_setdcfilter(sdev, NO_DC_FILTERING))
         return -1;
-    if(uda1345_setdemphasis(NO_DE_EMPHASIS))
+	if (uda1345_setdemphasis(sdev, NO_DE_EMPHASIS))
         return -1;
-    if(uda1345_setvolume(0))
+	if (uda1345_setvolume(sdev->rmmio, 0))
         return -1;
-    if(uda1345_setmute(MUTE))
+	if (uda1345_setmute(sdev->rmmio, MUTE))
         return -1;
-    if(uda1345_setpower(ADCOFF_DACOFF))
+	if (uda1345_setpower(sdev->rmmio, ADCOFF_DACOFF))
         return -1;
 
     return 0;
 }
 
-int uda1345_deinit(void)
+int uda1345_deinit(struct smi_device *sdev)
 {
-    uda1345_setpower(ADCOFF_DACOFF);
+	uda1345_setpower(sdev->rmmio, ADCOFF_DACOFF);
     if(falcon_uda1345.cache_init&&falcon_uda1345.reg_cache)
     {
         falcon_uda1345.reg_cache = NULL;

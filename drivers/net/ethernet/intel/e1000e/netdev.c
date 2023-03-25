@@ -6353,8 +6353,12 @@ static int e1000e_pm_freeze(struct device *dev)
 
 		WARN_ON(test_bit(__E1000_RESETTING, &adapter->state));
 
+#ifdef CONFIG_MCST  /* dma-fault at kexec: bug 142970 */
+		e1000e_down(adapter, true);
+#else
 		/* Quiesce the device without resetting the hardware */
 		e1000e_down(adapter, false);
+#endif
 		e1000_free_irq(adapter);
 	}
 	rtnl_unlock();

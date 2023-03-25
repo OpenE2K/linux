@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -61,6 +61,7 @@
 
 #define VRAM_BAR       0
 #define GC2500_BAR     3
+#define GC8000_BAR     2
 
 
 static struct platform_device *mcst_dev;
@@ -78,61 +79,212 @@ _AdjustParam (
     OUT gcsMODULE_PARAMETERS *Args
     )
 {
-       struct pci_dev *pdev;
-       if (!mcst_dev || !mcst_dev->dev.parent)
-          return gcvSTATUS_NOT_FOUND;
+    struct pci_dev *pdev;
+    int bar, ret;
+    int core = gcvCORE_MAJOR;
 
-       pdev = to_pci_dev(mcst_dev->dev.parent);
-       Args->irqs[gcvCORE_MAJOR] = pdev->irq;
+    if (!mcst_dev || !mcst_dev->dev.parent)
+	return gcvSTATUS_NOT_FOUND;
 
-       Args->registerBases[gcvCORE_MAJOR] = pci_resource_start(pdev, GC2500_BAR);
-       Args->registerSizes[gcvCORE_MAJOR] = pci_resource_len(pdev, GC2500_BAR);
-       Args->contiguousSize = (128 << 20); /* Do not forget set CONFIG_FORCE_MAX_ZONEORDER=16 ! */
-       Args->bankSize = 65536;
+    pdev = to_pci_dev(mcst_dev->dev.parent);
 
-       return gcvSTATUS_OK;
+    switch (pdev->device) {
+    case PCI_DEVICE_ID_MCST_MGA2:
+        bar = GC2500_BAR;
+    	Args->irqs[core] = pdev->irq;
+    	Args->registerBases[core] = pci_resource_start(pdev, bar);
+    	Args->registerSizes[core] = pci_resource_len(pdev, bar);
+    	gcmkPRINT("%s: irqs[%d]: %d\n",
+              __FUNCTION__, core, Args->irqs[core]);
+    	gcmkPRINT("%s: registerBases[%d]: 0x%lx\n",
+              __FUNCTION__, core, Args->registerBases[core]);
+    	gcmkPRINT("%s: registerSizes[%d]: 0x%lx\n",
+              __FUNCTION__, core, Args->registerSizes[core]);
+        break;
+    case PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P:
+	{
+		int i;
+                u_long region_base;
+                u_long region_length;
+		int nr_vecs = pci_msix_vec_count(pdev);
+
+		if (nr_vecs > gcvCORE_COUNT)
+			nr_vecs = gcvCORE_COUNT;	
+
+		ret = pci_alloc_irq_vectors(pdev,
+			       	nr_vecs, nr_vecs, PCI_IRQ_MSIX);
+		if (ret < 0) {
+    		        gcmkPRINT("%s: msix vectors %d alloc failed.\n",
+				       	__FUNCTION__, nr_vecs);
+			return gcvSTATUS_OUT_OF_RESOURCES;
+    		}
+    		gcmkPRINT("%s: msix vectors: %d\n",
+			       	__FUNCTION__, nr_vecs);
+
+		Platform->flagBits |= gcvPLATFORM_FLAG_MSIX_ENABLED;
+
+		bar = GC8000_BAR;
+        	region_base = pci_resource_start(pdev, bar);
+        	region_length = pci_resource_len(pdev, bar);
+    	        gcmkPRINT("%s: bar base: 0x%lx\n",
+                      __FUNCTION__, region_base);
+    	        gcmkPRINT("%s: bar length: 0x%lx\n",
+                      __FUNCTION__, region_length);
+
+		region_length /= nr_vecs;
+
+		for (i = 0; i < nr_vecs; i++) {
+         		int vec = pci_irq_vector(pdev, i);
+        		Args->irqs[core] = vec;
+        	        Args->registerBases[core] = region_base;
+        	        Args->registerSizes[core] = region_length;
+    			gcmkPRINT("%s: irqs[%d]: %d\n",
+			      __FUNCTION__, core, vec);
+    			gcmkPRINT("%s: registerBases[%d]: 0x%lx\n",
+                              __FUNCTION__, core, Args->registerBases[core]);
+    	                gcmkPRINT("%s: registerSizes[%d]: 0x%lx\n",
+                              __FUNCTION__, core, Args->registerSizes[core]);
+			core++;
+			region_base += region_length;
+		}
+	}
+	break;
+    default:
+	return gcvSTATUS_INVALID_ARGUMENT;
+    }
+
+    /* Do not forget set CONFIG_FORCE_MAX_ZONEORDER=16 ! */
+    Args->contiguousSize = (128 << 20);
+    Args->bankSize = 65536;
+
+    return gcvSTATUS_OK;
+}
+
+#define vcfg_offset 0x40
+
+static gceSTATUS _GetPower(IN gcsPLATFORM * Platform)
+{
+	if (mcst_dev && mcst_dev->dev.parent) {
+		u32 pdata;
+		struct pci_dev *pdev = to_pci_dev(mcst_dev->dev.parent);
+
+		if (pdev->device != PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P)
+			return gcvSTATUS_OK;
+
+		/* Signal to PMC to turn power ON */
+		pci_read_config_dword(pdev, vcfg_offset, &pdata);
+		pdata = pdata & ~0x00000008;
+		pci_write_config_dword(pdev, vcfg_offset, pdata);
+		Platform->flagBits |= gcvPLATFORM_FLAG_PMC_POWER_ON;
+#ifdef DEBUG
+		gcmkPRINT("%s: signal to PMC to turn power ON.\n",
+			__func__);
+#endif
+	}
+	return gcvSTATUS_OK;
+}
+
+static gceSTATUS _PutPower(IN gcsPLATFORM * Platform)
+{
+	if (mcst_dev) {
+		struct pci_dev *pdev = to_pci_dev(mcst_dev->dev.parent);
+
+		if (pdev->device != PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P)
+			return gcvSTATUS_OK;
+
+		if (Platform->flagBits & gcvPLATFORM_FLAG_PMC_POWER_ON) {
+			u32 pdata;
+
+			Platform->flagBits &= ~gcvPLATFORM_FLAG_PMC_POWER_ON;
+			/* Signal to PMC to turn power OFF */
+			pci_read_config_dword(pdev, vcfg_offset, &pdata);
+			pdata = pdata | 0x00000008;
+			pci_write_config_dword(pdev, vcfg_offset, pdata);
+#ifdef DEBUG
+			gcmkPRINT("%s: signal to PMC to turn power OFF.\n",
+				__func__);
+#endif
+		}
+	}
+	return gcvSTATUS_OK;
 }
 
 static struct _gcsPLATFORM_OPERATIONS mcst_ops =
 {
     .adjustParam = _AdjustParam,
+	.getPower = _GetPower,
+	.putPower = _PutPower,
 };
 
 static struct _gcsPLATFORM mcst_platform =
 {
     .name = __FILE__,
     .ops  = &mcst_ops,
+#if defined(CONFIG_E90S)
+    .flagBits = 0,
+#else
     .flagBits = gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS,
+#endif
+};
+
+static const struct pci_device_id pciidlist[] = {
+	{ PCI_VDEVICE(MCST_TMP, PCI_DEVICE_ID_MCST_MGA2) }, /* e1c+ */
+	{ PCI_VDEVICE(MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P) }
 };
 
 int gckPLATFORM_Init(struct platform_driver *pdrv,
             struct _gcsPLATFORM **platform)
 {
-    int ret;
-    struct pci_dev *pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
-                             PCI_DEVICE_ID_MCST_MGA2, NULL);
+    int ret, i;
+    struct pci_dev *pdev = NULL;
+    
+    for (i = 0; i < ARRAY_SIZE(pciidlist); i++) {
+        pdev = pci_get_device(pciidlist[i].vendor, pciidlist[i].device, NULL);
+        if (pdev != NULL)
+            break;
+    }
+
     if (!pdev)
         return -ENODEV;
 
-    mcst_dev = platform_device_alloc(pdrv->driver.name, -1);
+#ifdef DEBUG
+    gcmkPRINT("galcore: build: " __DATE__ " " __TIME__ "\n");
+#ifdef __HASH__
+    gcmkPRINT("galcore: hash: " __HASH__ "\n");
+#endif
+#endif
+    gcmkPRINT("galcore: ven 0x%x dev 0x%x\n",
+              pciidlist[i].vendor, pciidlist[i].device);
 
+    ret = pci_enable_device(pdev);
+    if (ret < 0) {
+        pr_err("galcore: pci_enable_device failed.\n");
+    }
+
+    pci_set_master(pdev);
+
+    mcst_dev = platform_device_alloc(pdrv->driver.name, -1);
     if (!mcst_dev) {
-        printk(KERN_ERR "galcore: platform_device_alloc failed.\n");
+        pr_err("galcore: platform_device_alloc failed.\n");
         return -ENOMEM;
     }
+
     mcst_dev->dev.parent = &pdev->dev;
+
     /* Add device */
     ret = platform_device_add(mcst_dev);
     if (ret) {
-        printk(KERN_ERR "galcore: platform_device_add failed.\n");
+        pr_err("galcore: platform_device_add failed.\n");
         goto put_dev;
     }
 
     set_dma_ops(&mcst_dev->dev, get_dma_ops(&pdev->dev));
+    mcst_platform.device = mcst_dev;
     *platform = &mcst_platform;
     return 0;
 
 put_dev:
+    pci_disable_device(pdev);
     platform_device_put(mcst_dev);
 
     return ret;
@@ -141,7 +293,14 @@ put_dev:
 int gckPLATFORM_Terminate(struct _gcsPLATFORM *platform)
 {
     if (mcst_dev) {
-        pci_dev_put(to_pci_dev(mcst_dev->dev.parent));
+        struct pci_dev *pdev = to_pci_dev(mcst_dev->dev.parent);
+        pci_clear_master(pdev);
+	if (platform->flagBits & gcvPLATFORM_FLAG_MSIX_ENABLED) {
+		/* r2000+ */
+		pci_free_irq_vectors(pdev);
+	}
+    	pci_disable_device(pdev);
+        pci_dev_put(pdev);
         platform_device_unregister(mcst_dev);
         mcst_dev = NULL;
     }

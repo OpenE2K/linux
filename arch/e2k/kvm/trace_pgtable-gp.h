@@ -22,20 +22,20 @@
 		)) : "(none)", \
 	(print && entry != -1ULL && (entry & _PAGE_P_GP)) ? \
 		(__print_symbolic(_PAGE_MTCR_GET_VAL_GP(entry), \
-			{ MOST_STRONG_MTCR,	"More Strong MT" }, \
+			{ MOST_STRONG_MTCR,	"Most Strong MT" }, \
 			{ FROM_HYPERVISOR_MTCR,	"Hypervisor MT" }, \
 			{ FROM_GUEST_MTCR,	"Guest MT" }, \
 			{ 1,			"Reserved-1" })) \
 		: "" \
 	(print && entry != -1ULL && (entry & _PAGE_P_GP)) ? \
 		(__print_symbolic(_PAGE_MT_GET_VAL(entry), \
-			{ GEN_CACHE_MT,		"General Cacheable" }, \
-			{ GEN_NON_CACHE_MT,	"General nonCacheable" }, \
+			{ GEN_CACHE_MT,		"GC" }, \
+			{ GEN_NON_CACHE_MT,	"GnC" }, \
 			{ GEN_NON_CACHE_ORDERED_MT, \
-				"General nonCacheable Ordered (same as GnC in hardware)" }, \
-			{ EXT_PREFETCH_MT,	"External Prefetchable" }, \
-			{ EXT_NON_PREFETCH_MT,	"External nonPrefetchable" }, \
-			{ EXT_CONFIG_MT,	"External Configuration" }, \
+				"GnC Ordered (same as GnC in hardware)" }, \
+			{ EXT_PREFETCH_MT,	"XP" }, \
+			{ EXT_NON_PREFETCH_MT,	"XnP" }, \
+			{ EXT_CONFIG_MT,	"XC" }, \
 			{ 2,			"Reserved-2" }, \
 			{ 3,			"Reserved-3" }, \
 			{ 5,			"Reserved-5" })) \

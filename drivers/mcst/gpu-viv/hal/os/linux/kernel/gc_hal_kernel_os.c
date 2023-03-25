@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2021 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2021 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -73,6 +73,10 @@
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
 #include <linux/anon_inodes.h>
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
+#include <linux/io.h>
 #endif
 
 #if gcdLINUX_SYNC_FILE
@@ -281,11 +285,17 @@ _AllocateIntegerId(
 {
     int result;
     gctINT next;
+    unsigned long flags = 0;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 9, 0)
     idr_preload(GFP_KERNEL | gcdNOWARN);
 
-    spin_lock(&Database->lock);
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
+
 
     next = (Database->curr + 1 <= 0) ? 1 : Database->curr + 1;
 
@@ -299,7 +309,12 @@ _AllocateIntegerId(
         Database->curr = *Id = result;
     }
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
+
 
     idr_preload_end();
 
@@ -314,7 +329,12 @@ again:
         return gcvSTATUS_OUT_OF_MEMORY;
     }
 
-    spin_lock(&Database->lock);
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
+
 
     next = (Database->curr + 1 <= 0) ? 1 : Database->curr + 1;
 
@@ -326,7 +346,12 @@ again:
         Database->curr = *Id;
     }
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
+
 
     if (result == -EAGAIN)
     {
@@ -350,12 +375,23 @@ _QueryIntegerId(
     )
 {
     gctPOINTER pointer;
+    unsigned long flags = 0;
 
-    spin_lock(&Database->lock);
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
+
 
     pointer = idr_find(&Database->idr, Id);
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
+
 
     if (pointer)
     {
@@ -379,11 +415,23 @@ _DestroyIntegerId(
     IN gctUINT32 Id
     )
 {
-    spin_lock(&Database->lock);
+    unsigned long flags = 0;
+
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
+
 
     idr_remove(&Database->idr, Id);
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
+
 
     return gcvSTATUS_OK;
 }
@@ -415,6 +463,9 @@ _QueryProcessPageTable(
         struct vm_area_struct *vma;
         spinlock_t *ptl;
         pgd_t *pgd;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (5,9,0)
+        p4d_t *p4d;
+#endif
         pud_t *pud;
         pmd_t *pmd;
         pte_t *pte;
@@ -422,9 +473,9 @@ _QueryProcessPageTable(
         if (!current->mm)
             return gcvSTATUS_NOT_FOUND;
 
-        down_read(&current->mm->mmap_sem);
+        down_read(&current_mm_mmap_sem);
         vma = find_vma(current->mm, logical);
-        up_read(&current->mm->mmap_sem);
+        up_read(&current_mm_mmap_sem);
 
         /* To check if mapped to user. */
         if (!vma)
@@ -441,7 +492,15 @@ _QueryProcessPageTable(
     && LINUX_VERSION_CODE >= KERNEL_VERSION (4,11,0)
         pud = pud_offset((p4d_t*)pgd, logical);
 #else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (5,9,0)
+        p4d = p4d_offset(pgd, logical);
+        if (p4d_none(READ_ONCE(*p4d)))
+            return gcvSTATUS_NOT_FOUND;
+
+        pud = pud_offset(p4d, logical);
+#else
         pud = pud_offset(pgd, logical);
+#endif
 #endif
         if (pud_none(*pud) || pud_bad(*pud))
             return gcvSTATUS_NOT_FOUND;
@@ -451,11 +510,6 @@ _QueryProcessPageTable(
             return gcvSTATUS_NOT_FOUND;
 
         pte = pte_offset_map_lock(current->mm, pmd, logical, &ptl);
-        if (!pte)
-        {
-            spin_unlock(ptl);
-            return gcvSTATUS_NOT_FOUND;
-        }
 
         if (!pte_present(*pte))
         {
@@ -732,22 +786,18 @@ gckOS_Construct(
 
     spin_lock_init(&os->registerAccessLock);
 
-    gckOS_ImportAllocators(os);
 
-#if defined(CONFIG_IOMMU_SUPPORT)
-    if (0)
+    /* Check iommu. */
+    if (gcmIS_ERROR(gckIOMMU_Construct(os, &os->iommu)))
     {
-        /* Only use IOMMU when internal MMU is not enabled. */
-        if (gcmIS_ERROR(gckIOMMU_Construct(os, &os->iommu)))
-        {
-            gcmkTRACE_ZONE(
-                gcvLEVEL_INFO, gcvZONE_OS,
-                "%s(%d): Fail to setup IOMMU",
-                __FUNCTION__, __LINE__
-                );
-        }
+        gcmkTRACE_ZONE(
+            gcvLEVEL_INFO, gcvZONE_OS,
+            "%s(%d): Fail to setup IOMMU",
+            __FUNCTION__, __LINE__
+            );
     }
-#endif
+
+    gckOS_ImportAllocators(os);
 
 #if gcdDUMP_IN_KERNEL
     mutex_init(&os->dumpFilpMutex);
@@ -823,12 +873,10 @@ gckOS_Destroy(
 
     gckOS_FreeAllocators(Os);
 
-#ifdef CONFIG_IOMMU_SUPPORT
     if (Os->iommu)
     {
         gckIOMMU_Destory(Os, Os->iommu);
     }
-#endif
 
     /* Mark the gckOS object as unknown. */
     Os->object.type = gcvOBJ_UNKNOWN;
@@ -1364,6 +1412,7 @@ gckOS_AllocateNonPagedMemory(
     gctPOINTER addr;
     gceSTATUS status = gcvSTATUS_NOT_SUPPORTED;
     gckALLOCATOR allocator;
+    gctBOOL zoneDMA32 = gcvFALSE;
 
     gcmkHEADER_ARG("Os=%p InUserSpace=%d *Bytes=0x%zx",
                    Os, InUserSpace, gcmOPT_VALUE(Bytes));
@@ -1389,6 +1438,17 @@ gckOS_AllocateNonPagedMemory(
     }
 
     gcmkASSERT(Flag & gcvALLOC_FLAG_CONTIGUOUS);
+
+#if defined(CONFIG_ZONE_DMA32) || defined(CONFIG_ZONE_DMA)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
+    zoneDMA32 = gcvTRUE;
+#endif
+#endif
+
+    if ((Flag & gcvALLOC_FLAG_4GB_ADDR) && !zoneDMA32)
+    {
+        Flag &= ~gcvALLOC_FLAG_4GB_ADDR;
+    }
 
     /* Walk all allocators. */
     list_for_each_entry(allocator, &Os->allocatorList, link)
@@ -1797,6 +1857,18 @@ gckOS_ReadRegisterEx(
     OUT gctUINT32 * Data
     )
 {
+#if defined(CONFIG_E90S)
+    if (unlikely(Os->device->kernels[0]->device->powerState == gcvPOWER_OFF))
+    {
+         /*
+          * Read register while GPU power is off!
+          */
+         printk(KERN_ERR "[galcore]: BUG!!! %s(%d) GPU[%d]  POWER OFF!",
+                __func__, __LINE__, Core);
+         gcmkBUG_ON(1);
+         return gcvSTATUS_GENERIC_IO;
+    }
+#endif
     if (Address > Os->device->registerSizes[Core] - 1)
     {
         return gcvSTATUS_INVALID_ARGUMENT;
@@ -1882,6 +1954,18 @@ _WriteRegisterEx(
     IN gctBOOL Dump
     )
 {
+#if defined(CONFIG_E90S)
+    if (unlikely(Os->device->kernels[0]->device->powerState == gcvPOWER_OFF))
+    {
+         /*
+          * Write to register while GPU power is off!
+          */
+         printk(KERN_ERR "[galcore]: BUG!!! %s(%d) GPU[%d]  POWER OFF!",
+                __func__, __LINE__, Core);
+         gcmkBUG_ON(1);
+         return gcvSTATUS_GENERIC_IO;
+    }
+#endif
     if (Address > Os->device->registerSizes[Core] - 1)
     {
         return gcvSTATUS_INVALID_ARGUMENT;
@@ -2423,8 +2507,8 @@ gckOS_MapPhysical(
         {
             /* Map memory as cached memory. */
             request_mem_region(physical, Bytes, "MapRegion");
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
-            logical = (gctPOINTER) memremap(physical, Bytes, MEMREMAP_WT);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+            logical = (gctPOINTER) ioremap(physical, Bytes);
 #else
             logical = (gctPOINTER) ioremap_nocache(physical, Bytes);
 #endif
@@ -3086,6 +3170,48 @@ gckOS_Delay(
 
 /*******************************************************************************
 **
+**  gckOS_Udelay
+**
+**  Delay execution of the current thread for a number of microseconds.
+**
+**  INPUT:
+**
+**      gckOS Os
+**          Pointer to an gckOS object.
+**
+**      gctUINT32 Delay
+**          Delay to sleep, specified in microseconds.
+**
+**  OUTPUT:
+**
+**      Nothing.
+*/
+gceSTATUS
+gckOS_Udelay(
+    IN gckOS Os,
+    IN gctUINT32 Delay
+    )
+{
+    gcmkHEADER_ARG("Os=%p Delay=%u", Os, Delay);
+
+    if (Delay > 0)
+    {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+        ktime_t delay = ktime_set((Delay / USEC_PER_SEC), (Delay % USEC_PER_SEC) * NSEC_PER_USEC);
+        __set_current_state(TASK_UNINTERRUPTIBLE);
+        schedule_hrtimeout(&delay, HRTIMER_MODE_REL);
+#else
+        usleep_range((unsigned long)Delay, (unsigned long)Delay + 1);
+#endif
+    }
+
+    /* Success. */
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
+}
+
+/*******************************************************************************
+**
 **  gckOS_GetTicks
 **
 **  Get the number of milliseconds since the system started.
@@ -3310,10 +3436,11 @@ gckOS_AllocatePagedMemory(
     mdl = _CreateMdl(Os);
     if (mdl == gcvNULL)
     {
-        gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
+        status = gcvSTATUS_OUT_OF_MEMORY;
+        goto OnError;
     }
 
-#if defined(CONFIG_ZONE_DMA32) || defined(CONFIG_ZONE_DMA)
+#if defined(CONFIG_ZONE_DMA32) || defined(CONFIG_ZONE_DMA) || defined (CONFIG_E90S)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
     zoneDMA32 = gcvTRUE;
 #endif
@@ -3346,7 +3473,15 @@ gckOS_AllocatePagedMemory(
     }
 
     /* Check status. */
-    gcmkONERROR(status);
+    if (status == gcvSTATUS_OUT_OF_MEMORY)
+    {
+        /* Ignore error print in this function, leave it to high level function. */
+        goto OnError;
+    }
+    else
+    {
+        gcmkONERROR(status);
+    }
 
     mdl->dmaHandle  = 0;
     mdl->addr       = 0;
@@ -3550,6 +3685,9 @@ gckOS_MapPagesEx(
     gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
     gcmkVERIFY_ARGUMENT(Physical != gcvNULL);
     gcmkVERIFY_ARGUMENT(PageCount > 0);
+#if defined(CONFIG_E90S)
+    gcmkVERIFY_ARGUMENT((PageCount % (PAGE_SIZE/4096)) == 0);
+#endif
     gcmkVERIFY_ARGUMENT(PageTable != gcvNULL);
 
     /* Convert pointer to MDL. */
@@ -3587,10 +3725,16 @@ gckOS_MapPagesEx(
     while (PageCount-- > 0)
     {
         gctUINT i;
-        gctPHYS_ADDR_T phys = ~0U;
+        gctPHYS_ADDR_T phys = ~0ULL;
 
         gcmALLOCATOR_Physical(allocator, mdl, offset, &phys);
 
+#if defined(CONFIG_E90S)
+        if (!Os->iommu && !pfn_valid(phys >> PAGE_SHIFT)) {
+            gcmkPRINT("[galcore] %s(%d): BUG!!! phys=%llx\n", __FUNCTION__, __LINE__, phys);
+            gcmkBUG_ON(1);
+        }
+#endif
         gcmkVERIFY_OK(gckOS_CPUPhysicalToGPUPhysical(Os, phys, &phys));
 
         if (policyID)
@@ -3602,25 +3746,6 @@ gckOS_MapPagesEx(
             phys |= ((gctPHYS_ADDR_T)policyID << 36);
         }
 
-#ifdef CONFIG_IOMMU_SUPPORT
-        if (Os->iommu)
-        {
-            /* remove LSB. */
-            phys &= PAGE_MASK;
-
-            gcmkTRACE_ZONE(
-                gcvLEVEL_INFO, gcvZONE_OS,
-                "%s(%d): Setup mapping in IOMMU %x => %x",
-                __FUNCTION__, __LINE__,
-                Address + offset, phys
-                );
-
-            /* When use IOMMU, GPU use system PAGE_SIZE. */
-            gcmkONERROR(gckIOMMU_Map(
-                Os->iommu, Address + offset, phys, PAGE_SIZE));
-        }
-        else
-#endif
         {
             /* remove LSB. */
             phys &= ~(4096ull - 1);
@@ -3685,14 +3810,6 @@ gckOS_UnmapPages(
     IN gctUINT32 Address
     )
 {
-#ifdef CONFIG_IOMMU_SUPPORT
-    if (Os->iommu)
-    {
-        gcmkVERIFY_OK(gckIOMMU_Unmap(
-            Os->iommu, Address, PageCount * 4096));
-    }
-#endif
-
     return gcvSTATUS_OK;
 }
 
@@ -3713,7 +3830,6 @@ gckOS_Map1MPages(
     PLINUX_MDL mdl;
     gctUINT32* table;
     gctUINT32  offset = 0;
-
     gctSIZE_T bytes = PageCount * 4;
     gckALLOCATOR allocator;
 
@@ -3760,7 +3876,7 @@ gckOS_Map1MPages(
 
     while (PageCount-- > 0)
     {
-        gctPHYS_ADDR_T phys = ~0U;
+        gctPHYS_ADDR_T phys = ~0ULL;
 
         gcmALLOCATOR_Physical(allocator, mdl, offset, &phys);
 
@@ -3776,14 +3892,15 @@ gckOS_Map1MPages(
         }
 
         /* Get the start physical of 1M page. */
-        phys &= ~((1 << 20) - 1);
+        phys &= ~(gcd1M_PAGE_SIZE - 1);
 
-        gcmkONERROR(
-            gckMMU_SetPage(Os->device->kernels[Core]->mmu,
+        gcmkONERROR(gckMMU_SetPage(
+            Os->device->kernels[Core]->mmu,
             phys,
             gcvPAGE_TYPE_1M,
             Writable,
-            table++));
+            table++
+            ));
 
         offset += gcd1M_PAGE_SIZE;
     }
@@ -4169,6 +4286,14 @@ gckOS_WriteMemory(
     gcmkVERIFY_ARGUMENT(Address != gcvNULL);
 
     /* Write memory. */
+#ifdef CONFIG_SPARC
+    if (!put_user(Data, (gctUINT32*)Address))
+    {
+        /* User address. */
+        gcmkFOOTER();
+        return gcvSTATUS_OK;
+    }
+#else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
     if (access_ok(Address, 4))
 #else
@@ -4181,17 +4306,17 @@ gckOS_WriteMemory(
             gcmkONERROR(gcvSTATUS_INVALID_ADDRESS);
         }
     }
-    else if (virt_addr_valid(Address) || is_vmalloc_addr(Address))
+#endif
+    else
     {
+        /* don't check the virtual address, maybe it come from io memory or reserved memory */
         /* Kernel address. */
         *(gctUINT32 *)Address = Data;
     }
-    else
-    {
-        gcmkONERROR(gcvSTATUS_INVALID_ADDRESS);
-    }
 
+#ifndef CONFIG_SPARC
 OnError:
+#endif
     gcmkFOOTER();
     return status;
 }
@@ -4396,13 +4521,14 @@ _CacheOperation(
 
         mutex_unlock(&mdl->mapsMutex);
 
-        if (ProcessID && mdlMap == gcvNULL)
+        if (ProcessID && !mdlMap && !mdl->wrapFromPhysical && !mdl->wrapFromLogical)
         {
             return gcvSTATUS_INVALID_ARGUMENT;
         }
 
         if ((!ProcessID && mdl->cacheable) ||
-            (mdlMap && mdlMap->cacheable))
+            (mdlMap && mdlMap->cacheable)  ||
+            mdl->wrapFromLogical)
         {
             gcmALLOCATOR_Cache(allocator,
                 mdl, Offset, Logical, Bytes, Operation);
@@ -4696,9 +4822,53 @@ gckOS_Broadcast(
                                            gcvDB_IDLE,
                                            gcvNULL, gcvNULL, 0));
 
-        /* Put GPU ON. */
-        gcmkONERROR(
-            gckHARDWARE_SetPowerState(Hardware, gcvPOWER_ON_AUTO));
+#if gcdENABLE_PER_DEVICE_PM
+        if (Hardware->type == gcvHARDWARE_3D ||
+            Hardware->type == gcvHARDWARE_3D2D ||
+            Hardware->type == gcvHARDWARE_VIP)
+        {
+            gckKERNEL kernel = Hardware->kernel;
+            gckDEVICE device = kernel->device;
+            gctUINT32 broCoreMask;
+            gctUINT i;
+
+            gcmkONERROR(gckOS_AcquireMutex(Hardware->os, device->powerMutex, gcvINFINITE));
+
+            gcmkVERIFY_OK(gckOS_AtomGet(Hardware->os, kernel->atomBroCoreMask, (gctINT32_PTR)&broCoreMask));
+
+            /* I am along. */
+            if ((gceCORE)broCoreMask == Hardware->core)
+            {
+                /* Put GPU ON. */
+                gcmkONERROR(
+                    gckHARDWARE_SetPowerState(Hardware, gcvPOWER_ON_AUTO));
+            }
+            else
+            {
+                /* Power on all the brother cores. */
+                for (i = 0; i < device->coreNum; i++)
+                {
+                    kernel = device->coreInfoArray[i].kernel;
+
+                    if ((1 << i) & broCoreMask)
+                    {
+                        /* Put GPU ON. */
+                        gcmkONERROR(
+                            gckHARDWARE_SetPowerState(kernel->hardware, gcvPOWER_ON_AUTO));
+                    }
+                }
+            }
+
+            gcmkONERROR(gckOS_ReleaseMutex(Hardware->os, device->powerMutex));
+        }
+        else
+#endif
+        {
+            /* Put GPU ON. */
+            gcmkONERROR(
+                gckHARDWARE_SetPowerState(Hardware, gcvPOWER_ON_AUTO));
+        }
+
         break;
 
     case gcvBROADCAST_GPU_STUCK:
@@ -4933,7 +5103,7 @@ gckOS_TryAcquireSemaphore(
 {
     gceSTATUS status = gcvSTATUS_OK;
 
-    gcmkHEADER_ARG("Os=%p", Os);
+    gcmkHEADER_ARG("Os=%p Semaphore=%p", Os, Semaphore);
 
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
@@ -4989,7 +5159,6 @@ gckOS_ReleaseSemaphore(
     return gcvSTATUS_OK;
 }
 
-#if gcdENABLE_SW_PREEMPTION
 gceSTATUS
 gckOS_ReleaseSemaphoreEx(
     IN gckOS Os,
@@ -5024,7 +5193,6 @@ gckOS_ReleaseSemaphoreEx(
     gcmkFOOTER_NO();
     return gcvSTATUS_OK;
 }
-#endif
 
 /*******************************************************************************
 **
@@ -5118,6 +5286,104 @@ gckOS_GetThreadID(
     }
 
     /* Success. */
+    return gcvSTATUS_OK;
+}
+
+/*******************************************************************************
+**
+**  gckOS_SetClockState
+**
+**  Set the clock state on or off.
+**
+**  INPUT:
+**
+**      gckOS Os
+**          Pointer to a gckOS object.
+**
+**      gceCORE Core
+**          GPU whose power is set.
+**
+**      gctBOOL Clock
+**          gcvTRUE to turn on the clock, or gcvFALSE to turn off the clock.
+**
+**  OUTPUT:
+**
+**      Nothing.
+*/
+gceSTATUS
+gckOS_SetClockState(
+    IN gckOS Os,
+    IN gceCORE Core,
+    IN gctBOOL Clock
+    )
+{
+    gctBOOL clockChange = gcvFALSE;
+
+    gcmkHEADER_ARG("Os=%p Core=%d Clock=%d", Os, Core, Clock);
+    gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
+
+    clockChange = (Clock != Os->clockStates[Core]);
+
+    if (clockChange)
+    {
+        unsigned long flags;
+
+        if (!Clock)
+        {
+            spin_lock_irqsave(&Os->registerAccessLock, flags);
+
+            /* Record clock off, ahead. */
+            Os->clockStates[Core] = gcvFALSE;
+
+            spin_unlock_irqrestore(&Os->registerAccessLock, flags);
+        }
+
+
+        if (Clock)
+        {
+            spin_lock_irqsave(&Os->registerAccessLock, flags);
+
+            /* Record clock on, behind. */
+            Os->clockStates[Core] = gcvTRUE;
+
+            spin_unlock_irqrestore(&Os->registerAccessLock, flags);
+        }
+    }
+
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
+}
+
+/*******************************************************************************
+**
+**  gckOS_GetClockState
+**
+**  Get the clock state on or off.
+**
+**  INPUT:
+**
+**      gckOS Os
+**          Pointer to a gckOS object.
+**
+**      gceCORE Core
+**          GPU whose power is set.
+**
+**      gctBOOL Clock
+**          gcvTRUE to turn on the clock, or gcvFALSE to turn off the clock.
+**
+**  OUTPUT:
+**
+**      Nothing.
+*/
+gceSTATUS
+gckOS_GetClockState(
+    IN gckOS Os,
+    IN gceCORE Core,
+    IN gctBOOL * Clock
+    )
+{
+    *Clock = Os->clockStates[Core];
+
     return gcvSTATUS_OK;
 }
 
@@ -5348,15 +5614,16 @@ gckOS_QueryGPUFrequency(
     OUT gctUINT8 * Scale
     )
 {
-	/* In case of RT kernel pmc is not active,
-	 * so we define Frequency and Scale fro GPU as constants.
-	 */
-#ifdef CONFIG_MCST_RT
-	*Frequency = 533000;
-	*Scale = 64;
-#else
+#if defined(CONFIG_E2K) && !defined(CONFIG_MCST_RT)
 	*Frequency = pmc_l_gpufreq_get_frequency();
 	*Scale = pmc_l_gpufreq_get_scale();
+#else
+	/* In case of RT kernel pmc is not active,
+	 * so we define Frequency and Scale fro GPU as constants.
+	 * r2000+ pmc is not supported yet.
+	 */
+	*Frequency = 533000;
+	*Scale = 64;
 #endif
 	return gcvSTATUS_OK;
 }
@@ -5397,15 +5664,14 @@ gckOS_SetGPUFrequency(
     IN gctUINT8 Scale
     )
 {
-	/* In case of RT kernel pmc is not active
-	 * and we really don't set any scale.
-	 */
-#ifdef CONFIG_MCST_RT
-	return gcvSTATUS_OK;
-#else
+#if defined(CONFIG_E2K) && !defined(CONFIG_MCST_RT)
 	if (pmc_l_gpufreq_set_scale(Scale))
 		return gcvSTATUS_INVALID_ARGUMENT;
 #endif
+	/* In case of RT kernel pmc is not active
+	 * and we really don't set any scale.
+	 * r2000+ pmc is not supported yet.
+	 */
 	return gcvSTATUS_OK;
 }
 
@@ -6915,15 +7181,13 @@ gckOS_WaitNativeFence(
 
             if (ret == -ERESTARTSYS)
             {
-                status = gcvSTATUS_INTERRUPTED;
                 fence_put(f);
-                break;
+                gcmkONERROR(gcvSTATUS_INTERRUPTED);
             }
             else if (ret <= 0)
             {
-                status = gcvSTATUS_TIMEOUT;
                 fence_put(f);
-                break;
+                gcmkONERROR(gcvSTATUS_TIMEOUT);
             }
             else
             {
@@ -6993,13 +7257,13 @@ gckOS_WaitNativeFence(
 
             if (ret == -ERESTARTSYS)
             {
-                status = gcvSTATUS_INTERRUPTED;
-                break;
+                dma_fence_put(fence);
+                gcmkONERROR(gcvSTATUS_INTERRUPTED);
             }
             else if (ret <= 0)
             {
-                status = gcvSTATUS_TIMEOUT;
-                break;
+                dma_fence_put(fence);
+                gcmkONERROR(gcvSTATUS_TIMEOUT);
             }
             else
             {
@@ -7100,7 +7364,7 @@ gckOS_CPUPhysicalToGPUPhysical(
     )
 {
     gcsPLATFORM * platform;
-    gcmkHEADER_ARG("CPUPhysical=%p", CPUPhysical);
+    gcmkHEADER_ARG("CPUPhysical=%llx", CPUPhysical);
 
     platform = Os->device->platform;
 
@@ -7189,71 +7453,78 @@ gckOS_QueryOption(
 
     if (!strcmp(Option, "physBase"))
     {
-        *Value = device->physBase;
+        *Value = (gctUINT64)device->physBase;
     }
     else if (!strcmp(Option, "physSize"))
     {
-        *Value = device->physSize;
+        *Value = (gctUINT64)device->physSize;
     }
     else if (!strcmp(Option, "mmu"))
     {
 #if gcdSECURITY
         *Value = 0;
 #else
-        *Value = device->args.enableMmu;
+        *Value = (gctUINT64)device->args.enableMmu;
 #endif
     }
     else if (!strcmp(Option, "contiguousSize"))
     {
-        *Value = device->contiguousSize;
+        *Value = (gctUINT64)device->contiguousSize;
     }
     else if (!strcmp(Option, "contiguousBase"))
     {
-        *Value = device->contiguousBase;
+        *Value = (gctUINT64)device->contiguousBase;
     }
     else if (!strcmp(Option, "externalSize"))
     {
-        *Value = device->externalSize;
-        return gcvSTATUS_OK;
-    }
-    else if (!strcmp(Option, "exclusiveBase"))
-    {
-        *Value = device->exclusiveBase;
-        return gcvSTATUS_OK;
-    }
-    else if (!strcmp(Option, "exclusiveSize"))
-    {
-        *Value = device->exclusiveSize;
-        return gcvSTATUS_OK;
+        if (gcmSIZEOF(device->externalSize) >= gcmSIZEOF(gctSIZE_T) * gcdPLATFORM_DEVICE_COUNT)
+            memcpy(Value, device->externalSize, gcmSIZEOF(gctSIZE_T) * gcdPLATFORM_DEVICE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else if (!strcmp(Option, "externalBase"))
     {
-        *Value = device->externalBase;
-        return gcvSTATUS_OK;
+        if (gcmSIZEOF(device->externalBase) >= gcmSIZEOF(gctUINT64) * gcdPLATFORM_DEVICE_COUNT)
+            memcpy(Value, device->externalBase, gcmSIZEOF(gctUINT64) * gcdPLATFORM_DEVICE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
+    }
+    else if (!strcmp(Option, "exclusiveBase"))
+    {
+        if (gcmSIZEOF(device->exclusiveBase) >= gcmSIZEOF(gctUINT64) * gcdPLATFORM_DEVICE_COUNT)
+            memcpy(Value, device->exclusiveBase, gcmSIZEOF(gctUINT64) * gcdPLATFORM_DEVICE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
+    }
+    else if (!strcmp(Option, "exclusiveSize"))
+    {
+        if (gcmSIZEOF(device->exclusiveSize) >= gcmSIZEOF(gctSIZE_T) * gcdPLATFORM_DEVICE_COUNT)
+            memcpy(Value, device->exclusiveSize, gcmSIZEOF(gctSIZE_T) * gcdPLATFORM_DEVICE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else if (!strcmp(Option, "recovery"))
     {
-        *Value = device->args.recovery;
+        *Value = (gctUINT64)device->args.recovery;
     }
     else if (!strcmp(Option, "stuckDump"))
     {
-        *Value = device->args.stuckDump;
+        *Value = (gctUINT64)device->args.stuckDump;
     }
     else if (!strcmp(Option, "powerManagement"))
     {
-        *Value = device->args.powerManagement;
+        *Value = (gctUINT64)device->args.powerManagement;
     }
     else if (!strcmp(Option, "TA"))
     {
         *Value = 0;
     }
-    else if (!strcmp(Option, "gpuProfiler"))
+    else if (!strcmp(Option, "userClusterMasks"))
     {
-        *Value = device->args.gpuProfiler;
-    }
-    else if (!strcmp(Option, "userClusterMask"))
-    {
-        *Value = device->args.userClusterMask;
+        if (gcmSIZEOF(device->args.userClusterMasks) >= gcmSIZEOF(gctUINT32) * gcdMAX_MAJOR_CORE_COUNT)
+            memcpy(Value, device->args.userClusterMasks, gcmSIZEOF(gctUINT32) * gcdMAX_MAJOR_CORE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else if (!strcmp(Option, "smallBatch"))
     {
@@ -7261,47 +7532,78 @@ gckOS_QueryOption(
     }
     else if (!strcmp(Option, "sRAMBases"))
     {
-        memcpy(Value, device->args.sRAMBases, gcmSIZEOF(gctUINT64) * gcvSRAM_INTER_COUNT * gcvCORE_COUNT);
+        if (gcmSIZEOF(device->args.sRAMBases) >= gcmSIZEOF(gctUINT64) * gcvSRAM_INTER_COUNT * gcvCORE_COUNT)
+            memcpy(Value, device->args.sRAMBases, gcmSIZEOF(gctUINT64) * gcvSRAM_INTER_COUNT * gcvCORE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else if (!strcmp(Option, "sRAMSizes"))
     {
-        memcpy(Value, device->args.sRAMSizes, gcmSIZEOF(gctUINT32) * gcvSRAM_INTER_COUNT * gcvCORE_COUNT);
+        if (gcmSIZEOF(device->args.sRAMSizes) >= gcmSIZEOF(gctUINT32) * gcvSRAM_INTER_COUNT * gcvCORE_COUNT)
+            memcpy(Value, device->args.sRAMSizes, gcmSIZEOF(gctUINT32) * gcvSRAM_INTER_COUNT * gcvCORE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else if (!strcmp(Option, "extSRAMBases"))
     {
-        memcpy(Value, device->args.extSRAMBases, gcmSIZEOF(gctUINT64) * gcvSRAM_EXT_COUNT);
+        if (gcmSIZEOF(device->args.extSRAMBases) >= gcmSIZEOF(gctUINT64) * gcvSRAM_EXT_COUNT)
+            memcpy(Value, device->args.extSRAMBases, gcmSIZEOF(gctUINT64) * gcvSRAM_EXT_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else if (!strcmp(Option, "extSRAMSizes"))
     {
-        memcpy(Value, device->args.extSRAMSizes, gcmSIZEOF(gctUINT32) * gcvSRAM_EXT_COUNT);
+        if (gcmSIZEOF(device->args.extSRAMSizes) >= gcmSIZEOF(gctUINT32) * gcvSRAM_EXT_COUNT)
+            memcpy(Value, device->args.extSRAMSizes, gcmSIZEOF(gctUINT32) * gcvSRAM_EXT_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else if (!strcmp(Option, "sRAMRequested"))
     {
-        *Value = device->args.sRAMRequested;
+        *Value = (gctUINT64)device->args.sRAMRequested;
     }
     else if (!strcmp(Option, "sRAMLoopMode"))
     {
-        *Value = device->args.sRAMLoopMode;
+        *Value = (gctUINT64)device->args.sRAMLoopMode;
     }
     else if (!strcmp(Option, "platformFlagBits"))
     {
-        *Value = device->platform->flagBits;
+        *Value = (gctUINT64)device->platform->flagBits;
     }
     else if (!strcmp(Option, "mmuPageTablePool"))
     {
-        *Value = device->args.mmuPageTablePool;
+        *Value = (gctUINT64)device->args.mmuPageTablePool;
     }
     else if (!strcmp(Option, "mmuDynamicMap"))
     {
-        *Value = device->args.mmuDynamicMap;
+        *Value = (gctUINT64)device->args.mmuDynamicMap;
     }
     else if (!strcmp(Option, "allMapInOne"))
     {
-        *Value = device->args.allMapInOne;
+        *Value = (gctUINT64)device->args.allMapInOne;
     }
     else if (!strcmp(Option, "isrPoll"))
     {
-        *Value = device->args.isrPoll;
+        *Value = (gctUINT64)device->args.isrPoll;
+    }
+    else if (!strcmp(Option, "registerAPB"))
+    {
+        *Value = (gctUINT64)device->args.registerAPB;
+    }
+    else if (!strcmp(Option, "enableNN"))
+    {
+        *Value = (gctUINT64)device->args.enableNN;
+    }
+    else if (!strcmp(Option, "softReset"))
+    {
+        *Value = (gctUINT64)device->args.softReset;
+    }
+    else if (!strcmp(Option, "pdevCoreCount"))
+    {
+        if (gcmSIZEOF(device->args.pdevCoreCount) >= gcmSIZEOF(gctUINT32) * gcdPLATFORM_DEVICE_COUNT)
+            memcpy(Value, device->args.pdevCoreCount, gcmSIZEOF(gctUINT32) * gcdPLATFORM_DEVICE_COUNT);
+        else
+            return gcvSTATUS_NOT_SUPPORTED;
     }
     else
     {
@@ -7309,6 +7611,22 @@ gckOS_QueryOption(
     }
 
     return status;
+}
+
+gceSTATUS
+gckOS_QueryKernel(
+    IN gckKERNEL Kernel,
+    IN gctINT index,
+    OUT gckKERNEL * KernelOut
+    )
+{
+    if (Kernel && KernelOut)
+    {
+        gckGALDEVICE device = Kernel->os->device;
+        *KernelOut = device->kernels[index];
+    }
+
+    return gcvSTATUS_OK;
 }
 
 gceSTATUS
@@ -7442,8 +7760,19 @@ gckOS_WrapMemory(
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
     }
 
+    mdl->wrapFromPhysical = gcvFALSE;
+    mdl->wrapFromLogical  = gcvFALSE;
+
     if (Desc->flag & gcvALLOC_FLAG_DMABUF)
     {
+        if (IS_ERR(gcmUINT64_TO_PTR(Desc->dmabuf)))
+        {
+            /* Won't enter here currently, the caller confirms the dmabuf is valid. */
+
+            gcmkPRINT("Wrap memory: invalid dmabuf.\n");
+            gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+        }
+
         desc.dmaBuf.dmabuf = gcmUINT64_TO_PTR(Desc->dmabuf);
 
 #if defined(CONFIG_DMA_SHARED_BUFFER)
@@ -7459,10 +7788,15 @@ gckOS_WrapMemory(
         desc.userMem.physical = Desc->physical;
         desc.userMem.size     = Desc->size;
         bytes                 = Desc->size;
-    }
-    else if (Desc->flag & gcvALLOC_FLAG_EXTERNAL_MEMORY)
-    {
-        desc.externalMem.info = Desc->externalMemoryInfo;
+
+        if (Desc->physical == gcvINVALID_PHYSICAL_ADDRESS)
+        {
+            mdl->wrapFromLogical = gcvTRUE;
+        }
+        else
+        {
+            mdl->wrapFromPhysical = gcvTRUE;
+        }
     }
     else
     {
@@ -7480,17 +7814,6 @@ gckOS_WrapMemory(
         {
             status = gcvSTATUS_NOT_SUPPORTED;
             continue;
-        }
-
-        if (Desc->flag == gcvALLOC_FLAG_EXTERNAL_MEMORY)
-        {
-            /* Use name to match suitable allocator for external memory. */
-            if (!strncmp(Desc->externalMemoryInfo.allocatorName,
-                         allocator->name, gcdEXTERNAL_MEMORY_NAME_MAX))
-            {
-                status = gcvSTATUS_NOT_SUPPORTED;
-                continue;
-            }
         }
 
         status = gcmALLOCATOR_Attach(allocator, &desc, mdl);
@@ -7560,3 +7883,25 @@ gckOS_GetPolicyID(
 
     return status;
 }
+
+#if gcdENABLE_MP_SWITCH
+gceSTATUS
+gckOS_SwitchCoreCount(
+    IN gckOS Os,
+    OUT gctUINT32 *Count
+    )
+{
+    gceSTATUS status = gcvSTATUS_OK;
+    gcsPLATFORM * platform = Os->device->platform;
+
+    gcmkHEADER_ARG("Os=%p", Os);
+
+    status = (platform && platform->ops->switchCoreCount)
+           ? platform->ops->switchCoreCount(platform, Count)
+           : gcvSTATUS_OK;
+
+    gcmkFOOTER_ARG("*Count=%d", *Count);
+    return status;
+}
+#endif
+

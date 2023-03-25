@@ -21,6 +21,7 @@ extern int kvm_host_printk(const char *fmt, ...);
 #define	host_pr_info(fmt, args...)	host_printk(fmt, ##args)
 
 extern void host_dump_stack(void);
+extern void host_dump_stack_func(void);
 extern u64 host_print_all_TIRs(const e2k_tir_t *TIRs, u64 nr_TIRs);
 extern void host_print_tc_record(const trap_cellar_t *tcellar, int num);
 extern void host_print_all_TC(const trap_cellar_t *TC, int TC_count);

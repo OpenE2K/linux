@@ -177,25 +177,23 @@ static inline u64 context_current_key(void)
 
 static u32 ctx_key_hashfn(const void *data, u32 len, u32 seed)
 {
-	return jhash2(data, FIELD_SIZEOF(struct hw_context, key) / sizeof(u32),
-		      seed);
+	u64 key = *(const u64 *) data;
+	return jhash_2words(key, key >> 32, seed);
 }
 
 static u32 ctx_obj_hashfn(const void *data, u32 len, u32 seed)
 {
 	const struct hw_context *ctx = data;
-
-	return jhash2((const u32 *) &ctx->key,
-		      sizeof(ctx->key) / sizeof(u32), seed);
+	u64 key = ctx->key;
+	return jhash_2words(key, key >> 32, seed);
 }
 
 static inline int ctx_obj_cmpfn(struct rhashtable_compare_arg *arg,
-				     const void *obj)
+				const void *obj)
 {
-	const void *key = arg->key;
+	const u64 *key = arg->key;
 	const struct hw_context *ctx = obj;
-
-	return memcmp(&ctx->key, key, sizeof(ctx->key));
+	return *key != ctx->key;
 }
 
 static const struct rhashtable_params hash_params = {
@@ -210,7 +208,7 @@ static const struct rhashtable_params hash_params = {
 
 
 notrace noinline __interrupt __section(".entry.text")
-void makecontext_trampoline_continue()
+void makecontext_trampoline_continue(void)
 {
 	if (TASK_IS_PROTECTED(current))
 		DISABLE_US_CLW();
@@ -620,23 +618,18 @@ void hw_contexts_destroy(mm_context_t *mm_context)
 			hw_context_destroy_one, NULL);
 }
 
-static int set_user_ap(void *ptr, unsigned long addr, size_t len)
+static int set_user_ap(void __user *ptr, unsigned long addr, size_t len)
 {
 	unsigned long ts_flag;
-	e2k_ptr_t qptr;
-
-	qptr = MAKE_AP(addr, len);
+	int ret;
+	e2k_ptr_t qptr = MAKE_AP(addr, len);
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	TRY_USR_PFAULT {
-		E2K_SET_TAGS_AND_STORE_QUADRO(qptr, ptr);
-	} CATCH_USR_PFAULT {
-		clear_ts_flag(ts_flag);
-		return -EFAULT;
-	} END_USR_PFAULT
+	ret = __put_user_tagged_16_offset(qptr.lo, qptr.hi, ETAGAPQ,
+			ptr, machine.qnr1_offset);
 	clear_ts_flag(ts_flag);
 
-	return 0;
+	return ret;
 }
 
 __always_inline /* For performance since some arguments are constants */
@@ -760,12 +753,13 @@ struct longjmp_regs {
  */
 static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 		struct hw_context *ctx, void (*func)(void),
-		u64 args_size, void __user *args,
-		void *u_stk_base, size_t u_stk_size, bool protected)
+		u64 args_size, u64 __user *args,
+		void __user *u_stk_base, size_t u_stk_size, bool protected)
 {
 	struct pt_regs *regs = current_pt_regs();
 	e2k_stacks_t stacks;
-	e2k_mem_crs_t __user *cs_frames, crs_user, crs_trampoline;
+	e2k_mem_crs_t __user *cs_frames;
+	e2k_mem_crs_t crs_user, crs_trampoline;
 	void __user *ps_frame;
 	char args_buf[args_size];
 	u64 args_registers_size, args_stack_size, func_frame_size;
@@ -776,12 +770,12 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 		return -EINVAL;
 
 	AW(stacks.pcsp_lo) = 0;
-	AS(stacks.pcsp_lo).base = (u64) GET_PCS_BASE(&ctx->ti.u_hw_stack);
+	AS(stacks.pcsp_lo).base = (unsigned long) GET_PCS_BASE(&ctx->ti.u_hw_stack);
 	AS(stacks.pcsp_lo).rw = 3;
 	AS(stacks.pcsp_hi).size = get_hw_pcs_user_size(&ctx->ti.u_hw_stack);
 
 	AW(stacks.psp_lo) = 0;
-	AS(stacks.psp_lo).base = (u64) GET_PS_BASE(&ctx->ti.u_hw_stack);
+	AS(stacks.psp_lo).base = (unsigned long) GET_PS_BASE(&ctx->ti.u_hw_stack);
 	AS(stacks.psp_lo).rw = 3;
 	AS(stacks.psp_hi).size = get_hw_ps_user_size(&ctx->ti.u_hw_stack);
 
@@ -796,10 +790,10 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	/*
 	 * And this is space for user function and makecontext_trampoline()
 	 */
-	AS(stacks.psp_hi).ind = (protected ? 16 : 8) * EXT_4_NR_SZ;
+	AS(stacks.psp_hi).ind = 2 * C_ABI_PSIZE(protected) * EXT_4_NR_SZ;
 
 	ps_frame = GET_PS_BASE(&ctx->ti.u_hw_stack) +
-				(protected ? 8 : 4) * EXT_4_NR_SZ;
+		   C_ABI_PSIZE(protected) * EXT_4_NR_SZ;
 
 	/*
 	 * Set chain stack for the trampoline and user function
@@ -821,19 +815,19 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	args_stack_size = args_size - args_registers_size;
 	func_frame_ptr = (unsigned long) u_stk_base + u_stk_size
 			- func_frame_size;
-	if (!access_ok(func_frame_ptr, func_frame_size))
+	if (!access_ok((void __user *) func_frame_ptr, func_frame_size))
 		return -EFAULT;
 	DebugCTX("arguments: base 0x%lx, size %lld (regs %lld + stack %lld)\n",
 			args, args_size, args_registers_size, args_stack_size);
 
-	stacks.top = (u64) u_stk_base + u_stk_size;
+	stacks.top = (unsigned long) u_stk_base + u_stk_size;
 	AS(stacks.usd_hi).ind = 0;
 	AS(stacks.usd_hi).size = u_stk_size - func_frame_size;
 	if (protected) {
 		e2k_pusd_lo_t pusd_lo;
 
 		/* Check that the stack does not cross 4Gb boundary */
-		if (((u64) u_stk_base & ~0xffffffffULL) !=
+		if (((unsigned long) u_stk_base & ~0xffffffffULL) !=
 		    (stacks.top & ~0xffffffffULL)) {
 			DebugCTX("stack crosses 4Gb boundary\n");
 			return -EINVAL;
@@ -871,23 +865,21 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	 * Copy args from user memory to allocated kernel buffer
 	 * to avoid faults when further accessing user memory
 	 */
-	if (copy_from_user_with_tags((void *)&args_buf, args, args_size))
+	if (copy_from_user_with_tags((void *) &args_buf, args, args_size))
 		return -EFAULT;
 
-	ret = mkctxt_prepare_hw_user_stacks(func, (void *)&args_buf,
-					args_registers_size,
-					AS(stacks.usd_hi).size,
-					protected, ps_frame,
-					cs_frames);
+	ret = mkctxt_prepare_hw_user_stacks(func, (void *) &args_buf,
+			args_registers_size, AS(stacks.usd_hi).size,
+			protected, ps_frame, cs_frames);
 	if (ret)
 		return -EFAULT;
 
 	if (args_stack_size) {
 		DebugCTX("Copying stack arguments to 0x%lx\n",
-				(void *) func_frame_ptr + 64);
-		if (copy_to_user_with_tags((void *) func_frame_ptr +
+				(void __user *) func_frame_ptr + 64);
+		if (copy_to_user_with_tags((void __user *) func_frame_ptr +
 				(protected ? 128 : 64),
-				((void *)&args_buf) + args_registers_size,
+				((void *) &args_buf) + args_registers_size,
 				args_stack_size))
 			return -EFAULT;
 	}
@@ -910,11 +902,11 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	/*
 	 * Initialize thread_info
 	 */
-	ctx->ti.u_stack.bottom = (u64) u_stk_base;
+	ctx->ti.u_stack.bottom = (unsigned long) u_stk_base;
 	ctx->ti.u_stack.size = u_stk_size;
-	ctx->ti.u_stack.top = (u64) u_stk_base + u_stk_size;
+	ctx->ti.u_stack.top = (unsigned long) u_stk_base + u_stk_size;
 #ifdef CONFIG_PROTECTED_MODE
-	ctx->ti.g_list = 0;
+	ctx->ti.g_list = NULL;
 	ctx->ti.multithread_address = 0;
 	ctx->ti.lock = NULL;
 #endif
@@ -968,7 +960,9 @@ static void makecontext_prepare_ucp_pointer(struct hw_context *ctx,
 {
 	struct ucontext_32 __user *ucp_32 = ucp;
 	struct ucontext __user *ucp_64 = ucp;
+#ifdef CONFIG_PROTECTED_MODE
 	struct ucontext_prot __user *ucp_128 = ucp;
+#endif
 
 	ctx->ucp = ucp;
 	ctx->ptr_format = format;
@@ -976,8 +970,10 @@ static void makecontext_prepare_ucp_pointer(struct hw_context *ctx,
 		ctx->p_uc_link = &ucp_32->uc_link;
 	else if (format == CTX_64_BIT)
 		ctx->p_uc_link = &ucp_64->uc_link;
+#ifdef CONFIG_PROTECTED_MODE
 	else
 		ctx->p_uc_link = &ucp_128->uc_link;
+#endif
 }
 
 /**
@@ -990,7 +986,9 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 {
 	struct ucontext_32 __user *ucp_32 = ucp;
 	struct ucontext __user *ucp_64 = ucp;
+#ifdef CONFIG_PROTECTED_MODE
 	struct ucontext_prot __user *ucp_128 = ucp;
+#endif
 	e2k_fpcr_t fpcr;
 	e2k_fpsr_t fpsr;
 	e2k_pfpfr_t pfpfr;
@@ -1029,7 +1027,9 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 		ret |= __put_user(AW(fpcr), &ucp_64->uc_extra.fpcr);
 		ret |= __put_user(AW(fpsr), &ucp_64->uc_extra.fpsr);
 		ret |= __put_user(AW(pfpfr), &ucp_64->uc_extra.pfpfr);
-	} else { /* CTX_128_BIT */
+	}
+#ifdef CONFIG_PROTECTED_MODE
+	else { /* CTX_128_BIT */
 		ret = __clear_user(&ucp_128->uc_sigmask, sigsetsize);
 		ret |= __put_user(key, &ucp_128->uc_mcontext.sbr);
 		ret |= __put_user(AW(user_regs->cr0_hi), &ucp_128->uc_mcontext.cr0_hi);
@@ -1042,6 +1042,7 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 		ret |= __put_user(AW(fpsr), &ucp_128->uc_extra.fpsr);
 		ret |= __put_user(AW(pfpfr), &ucp_128->uc_extra.pfpfr);
 	}
+#endif
 
 	return ret ? -EFAULT : 0;
 }
@@ -1049,7 +1050,7 @@ static int makecontext_prepare_ucp_contents(void __user *ucp, int format,
 static int makecontext_prepare_ctx_and_ucp(struct hw_context *ctx,
 		void __user *ucp, int sigsetsize, int format,
 		void (*func)(void), u64 args_size, void __user *args,
-		void *u_stk_base, size_t u_stk_size, u64 key)
+		void __user *u_stk_base, size_t u_stk_size, u64 key)
 {
 	struct longjmp_regs user_regs;
 	int ret;
@@ -1065,12 +1066,14 @@ static int makecontext_prepare_ctx_and_ucp(struct hw_context *ctx,
 	if (ret)
 		return ret;
 
+#ifdef CONFIG_PROTECTED_MODE
 	if (format == CTX_128_BIT) {
 		/*
 		 * Fix global pointers before making the context available
 		 */
 		mark_all_global_sp(current_thread_info()->pt_regs, current->pid);
 	}
+#endif
 
 	return 0;
 }
@@ -1081,8 +1084,10 @@ static long do_makecontext(void __user *ucp, void (*func)(void),
 {
 	struct ucontext_32 __user *ucp_32 = ucp;
 	struct ucontext __user *ucp_64 = ucp;
+#ifdef CONFIG_PROTECTED_MODE
 	struct ucontext_prot __user *ucp_128 = ucp;
-	void *u_stk_base;
+#endif
+	void __user *u_stk_base;
 	size_t u_stk_size;
 	struct hw_context *ctx, *same_key_ctx;
 	mm_context_t *mm_context = &current->mm->context;
@@ -1101,14 +1106,16 @@ static long do_makecontext(void __user *ucp, void (*func)(void),
 		if (ret)
 			return ret;
 
-		u_stk_base = (void *) (unsigned long) __u_stk_base;
+		u_stk_base = (void __user *) (unsigned long) __u_stk_base;
 	} else if (format == CTX_64_BIT &&
 		   access_ok(ucp, sizeof(struct ucontext))) {
 		ret = __get_user(u_stk_base, &ucp_64->uc_stack.ss_sp);
 		ret = (ret) ?: __get_user(u_stk_size, &ucp_64->uc_stack.ss_size);
 		if (ret)
 			return ret;
-	} else if (access_ok(ucp, sizeof(struct ucontext_prot))) {
+	}
+#ifdef CONFIG_PROTECTED_MODE
+	else if (access_ok(ucp, sizeof(struct ucontext_prot))) {
 		/* CTX_128_BIT */
 		e2k_ptr_t stack_ptr;
 
@@ -1120,8 +1127,9 @@ static long do_makecontext(void __user *ucp, void (*func)(void),
 		if (AS(stack_ptr).size < u_stk_size)
 			return -EINVAL;
 
-		u_stk_base = (void *) E2K_PTR_PTR(stack_ptr, GET_SBR_HI());
+		u_stk_base = (void __user *) E2K_PTR_PTR(stack_ptr, GET_SBR_HI());
 	}
+#endif
 	if (ret)
 		return ret;
 
@@ -1419,71 +1427,206 @@ static void switch_hw_contexts(struct pt_regs *__restrict regs,
 	raw_all_irq_enable();
 }
 
-__always_inline
-static void save_ctx_32_bit(struct ucontext_32 __user *__restrict oucp,
-		u64 prev_key, e2k_mem_crs_t *__restrict k_crs,
-		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr,
-		sigset_t current_blocked_sigset)
-{
-	const struct pt_regs *regs = current_thread_info()->pt_regs;
+struct userspace_context {
+	u64 sigset;
+	e2k_pcsp_lo_t pcsp_lo;
+	e2k_pcsp_hi_t pcsp_hi;
+	e2k_cr0_hi_t cr0_hi;
+	e2k_cr1_lo_t cr1_lo;
+	e2k_cr1_hi_t cr1_hi;
+	e2k_fpcr_t fpcr;
+	e2k_fpsr_t fpsr;
+	e2k_pfpfr_t pfpfr;
+};
 
-	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
-	oucp->uc_mcontext.sbr = prev_key;
-	oucp->uc_mcontext.cr0_hi = AW(k_crs->cr0_hi);
-	oucp->uc_mcontext.cr1_lo = AW(k_crs->cr1_lo);
-	oucp->uc_mcontext.cr1_hi = AW(k_crs->cr1_hi);
-	oucp->uc_mcontext.pcsp_lo = AW(regs->stacks.pcsp_lo);
-	/* We want stack to point to user frame that called us,
-	 * not to the glibc glue */
-	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi) - SZ_OF_CR;
-	oucp->uc_extra.fpcr = AW(fpcr);
-	oucp->uc_extra.fpsr = AW(fpsr);
-	oucp->uc_extra.pfpfr = AW(pfpfr);
+
+#define LOAD_CTX(ucp, next_user_ctx, next_key) \
+do { \
+	*next_key = ucp->uc_mcontext.sbr; \
+	next_user_ctx->sigset = *(u64 __user *) &ucp->uc_sigmask; \
+	AW(next_user_ctx->fpcr) = ucp->uc_extra.fpcr; \
+	AW(next_user_ctx->fpsr) = ucp->uc_extra.fpsr; \
+	AW(next_user_ctx->pfpfr) = ucp->uc_extra.pfpfr; \
+	AW(next_user_ctx->pcsp_lo) = ucp->uc_mcontext.pcsp_lo; \
+	AW(next_user_ctx->pcsp_hi) = ucp->uc_mcontext.pcsp_hi; \
+	AW(next_user_ctx->cr0_hi) = ucp->uc_mcontext.cr0_hi; \
+	AW(next_user_ctx->cr1_lo) = ucp->uc_mcontext.cr1_lo; \
+	AW(next_user_ctx->cr1_hi) = ucp->uc_mcontext.cr1_hi; \
+} while (0)
+
+#define SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset) \
+do { \
+	e2k_fpcr_t __fpcr = READ_FPCR_REG(); \
+	e2k_fpsr_t __fpsr = READ_FPSR_REG(); \
+	e2k_pfpfr_t __pfpfr = READ_PFPFR_REG(); \
+ \
+	*((u64 __user *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0]; \
+	oucp->uc_mcontext.sbr = prev_key; \
+	oucp->uc_mcontext.cr0_hi = AW(k_crs->cr0_hi); \
+	oucp->uc_mcontext.cr1_lo = AW(k_crs->cr1_lo); \
+	oucp->uc_mcontext.cr1_hi = AW(k_crs->cr1_hi); \
+	oucp->uc_mcontext.pcsp_lo = AW(regs->stacks.pcsp_lo); \
+	/* We want stack to point to user frame that called us, \
+	 * not to the glibc glue */ \
+	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi) - SZ_OF_CR; \
+	oucp->uc_extra.fpcr = AW(__fpcr); \
+	oucp->uc_extra.fpsr = AW(__fpsr); \
+	oucp->uc_extra.pfpfr = AW(__pfpfr); \
+} while (0)
+
+UACCESS_FN_DEFINE3(load_ctx_32_fn, const struct ucontext_32 __user *, ucp,
+		struct userspace_context *__restrict, next_user_ctx,
+		u64 *__restrict, next_key)
+{
+	LOAD_CTX(ucp, next_user_ctx, next_key);
+	return 0;
 }
 
-__always_inline
-static void save_ctx_64_bit(struct ucontext __user *__restrict oucp,
-		u64 prev_key, e2k_mem_crs_t *__restrict k_crs,
-		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr,
-		sigset_t current_blocked_sigset)
+UACCESS_FN_DEFINE3(load_ctx_64_fn, const struct ucontext __user *, ucp,
+		struct userspace_context *__restrict, next_user_ctx,
+		u64 *__restrict, next_key)
 {
-	const struct pt_regs *regs = current_thread_info()->pt_regs;
-
-	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
-	oucp->uc_mcontext.sbr = prev_key;
-	oucp->uc_mcontext.cr0_hi = AW(k_crs->cr0_hi);
-	oucp->uc_mcontext.cr1_lo = AW(k_crs->cr1_lo);
-	oucp->uc_mcontext.cr1_hi = AW(k_crs->cr1_hi);
-	oucp->uc_mcontext.pcsp_lo = AW(regs->stacks.pcsp_lo);
-	/* We want stack to point to user frame that called us,
-	 * not to the glibc glue */
-	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi) - SZ_OF_CR;
-	oucp->uc_extra.fpcr = AW(fpcr);
-	oucp->uc_extra.fpsr = AW(fpsr);
-	oucp->uc_extra.pfpfr = AW(pfpfr);
+	LOAD_CTX(ucp, next_user_ctx, next_key);
+	return 0;
 }
 
-__always_inline
-static void save_ctx_128_bit(struct ucontext_prot __user *__restrict oucp,
-		u64 prev_key, e2k_mem_crs_t *__restrict k_crs,
-		e2k_fpcr_t fpcr, e2k_fpsr_t fpsr, e2k_pfpfr_t pfpfr,
-		sigset_t current_blocked_sigset)
+#ifdef CONFIG_PROTECTED_MODE
+UACCESS_FN_DEFINE3(load_ctx_128_fn, const struct ucontext_prot __user *, ucp,
+		struct userspace_context *__restrict, next_user_ctx,
+		u64 *__restrict, next_key)
 {
-	const struct pt_regs *regs = current_thread_info()->pt_regs;
+	/* Use USER_LD in protected mode */
+	USER_LD(*next_key, &ucp->uc_mcontext.sbr);
+	USER_LD(next_user_ctx->sigset, (u64 __user *) &ucp->uc_sigmask);
+	USER_LD(AW(next_user_ctx->fpcr), &ucp->uc_extra.fpcr);
+	USER_LD(AW(next_user_ctx->fpsr), &ucp->uc_extra.fpsr);
+	USER_LD(AW(next_user_ctx->pfpfr), &ucp->uc_extra.pfpfr);
+	USER_LD(AW(next_user_ctx->pcsp_lo), &ucp->uc_mcontext.pcsp_lo);
+	USER_LD(AW(next_user_ctx->pcsp_hi), &ucp->uc_mcontext.pcsp_hi);
+	USER_LD(AW(next_user_ctx->cr0_hi), &ucp->uc_mcontext.cr0_hi);
+	USER_LD(AW(next_user_ctx->cr1_lo), &ucp->uc_mcontext.cr1_lo);
+	USER_LD(AW(next_user_ctx->cr1_hi), &ucp->uc_mcontext.cr1_hi);
+	return 0;
+}
+#endif
 
-	*((u64 *) &oucp->uc_sigmask) = current_blocked_sigset.sig[0];
-	oucp->uc_mcontext.sbr = prev_key;
-	oucp->uc_mcontext.cr0_hi = AW(k_crs->cr0_hi);
-	oucp->uc_mcontext.cr1_lo = AW(k_crs->cr1_lo);
-	oucp->uc_mcontext.cr1_hi = AW(k_crs->cr1_hi);
-	oucp->uc_mcontext.pcsp_lo = AW(regs->stacks.pcsp_lo);
+UACCESS_FN_DEFINE4(save_ctx_32_fn, struct ucontext_32 __user *, oucp,
+		u64, prev_key, e2k_mem_crs_t *__restrict, k_crs,
+		sigset_t, current_blocked_sigset)
+{
+	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
+	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
+	return 0;
+}
+
+UACCESS_FN_DEFINE4(save_ctx_64_fn, struct ucontext __user *, oucp,
+		u64, prev_key, e2k_mem_crs_t *__restrict, k_crs,
+		sigset_t, current_blocked_sigset)
+{
+	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
+	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
+	return 0;
+}
+
+#ifdef CONFIG_PROTECTED_MODE
+UACCESS_FN_DEFINE4(save_ctx_128_fn, struct ucontext_prot __user *, oucp,
+		u64, prev_key, e2k_mem_crs_t *__restrict, k_crs,
+		sigset_t, current_blocked_sigset)
+{
+	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
+	e2k_fpcr_t fpcr = READ_FPCR_REG();
+	e2k_fpsr_t fpsr = READ_FPSR_REG();
+	e2k_pfpfr_t pfpfr = READ_PFPFR_REG();
+
+	/* Use USER_ST in protected mode */
+	USER_ST(current_blocked_sigset.sig[0], ((u64 __user *) &oucp->uc_sigmask));
+	USER_ST(prev_key, &oucp->uc_mcontext.sbr);
+	USER_ST(AW(k_crs->cr0_hi), &oucp->uc_mcontext.cr0_hi);
+	USER_ST(AW(k_crs->cr1_lo), &oucp->uc_mcontext.cr1_lo);
+	USER_ST(AW(k_crs->cr1_hi), &oucp->uc_mcontext.cr1_hi);
+	USER_ST(AW(regs->stacks.pcsp_lo), &oucp->uc_mcontext.pcsp_lo);
 	/* We want stack to point to user frame that called us,
 	 * not to the glibc glue */
-	oucp->uc_mcontext.pcsp_hi = AW(regs->stacks.pcsp_hi) - SZ_OF_CR;
-	oucp->uc_extra.fpcr = AW(fpcr);
-	oucp->uc_extra.fpsr = AW(fpsr);
-	oucp->uc_extra.pfpfr = AW(pfpfr);
+	USER_ST(AW(regs->stacks.pcsp_hi) - SZ_OF_CR, &oucp->uc_mcontext.pcsp_hi);
+	USER_ST(AW(fpcr), &oucp->uc_extra.fpcr);
+	USER_ST(AW(fpsr), &oucp->uc_extra.fpsr);
+	USER_ST(AW(pfpfr), &oucp->uc_extra.pfpfr);
+
+	return 0;
 }
+#endif
+
+UACCESS_FN_DEFINE7(save_and_load_ctx_32_fn,
+		const struct ucontext_32 __user *__restrict, ucp,
+		struct userspace_context *__restrict, next_user_ctx,
+		u64 *__restrict, next_key,
+		struct ucontext_32 __user *__restrict, oucp,
+		u64, prev_key, e2k_mem_crs_t *__restrict, k_crs,
+		sigset_t, current_blocked_sigset)
+{
+	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
+	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
+	LOAD_CTX(ucp, next_user_ctx, next_key);
+	return 0;
+}
+
+UACCESS_FN_DEFINE7(save_and_load_ctx_64_fn,
+		const struct ucontext __user *__restrict, ucp,
+		struct userspace_context *__restrict, next_user_ctx,
+		u64 *__restrict, next_key,
+		struct ucontext __user *__restrict, oucp,
+		u64, prev_key, e2k_mem_crs_t *__restrict, k_crs,
+		sigset_t, current_blocked_sigset)
+{
+	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
+	SAVE_CTX(oucp, regs, prev_key, k_crs, current_blocked_sigset);
+	LOAD_CTX(ucp, next_user_ctx, next_key);
+	return 0;
+}
+
+#ifdef CONFIG_PROTECTED_MODE
+UACCESS_FN_DEFINE7(save_and_load_ctx_128_fn,
+		const struct ucontext_prot __user *__restrict, ucp,
+		struct userspace_context *__restrict, next_user_ctx,
+		u64 *__restrict, next_key,
+		struct ucontext_prot __user *__restrict, oucp,
+		u64, prev_key, e2k_mem_crs_t *__restrict, k_crs,
+		sigset_t, current_blocked_sigset)
+{
+	struct pt_regs *__restrict regs = current_thread_info()->pt_regs;
+	e2k_fpcr_t fpcr = READ_FPCR_REG();
+	e2k_fpsr_t fpsr = READ_FPSR_REG();
+	e2k_pfpfr_t pfpfr = READ_PFPFR_REG();
+
+	/* Use USER_ST in protected mode */
+	USER_ST(current_blocked_sigset.sig[0], ((u64 __user *) &oucp->uc_sigmask));
+	USER_ST(prev_key, &oucp->uc_mcontext.sbr);
+	USER_ST(AW(k_crs->cr0_hi), &oucp->uc_mcontext.cr0_hi);
+	USER_ST(AW(k_crs->cr1_lo), &oucp->uc_mcontext.cr1_lo);
+	USER_ST(AW(k_crs->cr1_hi), &oucp->uc_mcontext.cr1_hi);
+	USER_ST(AW(regs->stacks.pcsp_lo), &oucp->uc_mcontext.pcsp_lo);
+	/* We want stack to point to user frame that called us,
+	 * not to the glibc glue */
+	USER_ST(AW(regs->stacks.pcsp_hi) - SZ_OF_CR, &oucp->uc_mcontext.pcsp_hi);
+	USER_ST(AW(fpcr), &oucp->uc_extra.fpcr);
+	USER_ST(AW(fpsr), &oucp->uc_extra.fpsr);
+	USER_ST(AW(pfpfr), &oucp->uc_extra.pfpfr);
+
+	/* Use USER_LD in protected mode */
+	USER_LD(*next_key, &ucp->uc_mcontext.sbr);
+	USER_LD(next_user_ctx->sigset, (u64 __user *) &ucp->uc_sigmask);
+	USER_LD(AW(next_user_ctx->fpcr), &ucp->uc_extra.fpcr);
+	USER_LD(AW(next_user_ctx->fpsr), &ucp->uc_extra.fpsr);
+	USER_LD(AW(next_user_ctx->pfpfr), &ucp->uc_extra.pfpfr);
+	USER_LD(AW(next_user_ctx->pcsp_lo), &ucp->uc_mcontext.pcsp_lo);
+	USER_LD(AW(next_user_ctx->pcsp_hi), &ucp->uc_mcontext.pcsp_hi);
+	USER_LD(AW(next_user_ctx->cr0_hi), &ucp->uc_mcontext.cr0_hi);
+	USER_LD(AW(next_user_ctx->cr1_lo), &ucp->uc_mcontext.cr1_lo);
+	USER_LD(AW(next_user_ctx->cr1_hi), &ucp->uc_mcontext.cr1_hi);
+
+	return 0;
+}
+#endif
 
 #if _NSIG != 64
 # error We read u64 value here...
@@ -1494,25 +1637,17 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 {
 	const struct ucontext_32 __user *ucp_32 = ucp;
 	const struct ucontext __user *ucp_64 = ucp;
+#ifdef CONFIG_PROTECTED_MODE
 	const struct ucontext_prot __user *ucp_128 = ucp;
+	struct ucontext_prot __user *oucp_128 = oucp;
+#endif
 	struct ucontext_32 __user *oucp_32 = oucp;
 	struct ucontext __user *oucp_64 = oucp;
-	struct ucontext_prot __user *oucp_128 = oucp;
 	u64 next_key, prev_key, sigset;
 	sigset_t k_sigset, current_blocked_sigset = current->blocked;
 	struct hw_context *prev_ctx;
 	mm_context_t *mm_context = &current->mm->context;
-	e2k_pcsp_lo_t pcsp_lo;
-	e2k_pcsp_hi_t pcsp_hi;
-	e2k_cr0_hi_t cr0_hi;
-	e2k_cr1_lo_t cr1_lo;
-	e2k_cr1_hi_t cr1_hi;
-	e2k_fpcr_t fpcr;
-	e2k_fpsr_t fpsr;
-	e2k_pfpfr_t pfpfr;
-	e2k_fpcr_t prev_fpcr = READ_FPCR_REG();
-	e2k_fpsr_t prev_fpsr = READ_FPSR_REG();
-	e2k_pfpfr_t prev_pfpfr = READ_PFPFR_REG();
+	struct userspace_context next_user_ctx;
 	struct pt_regs *regs = current_thread_info()->pt_regs;
 	e2k_mem_crs_t *__restrict k_crs = (e2k_mem_crs_t *__restrict)
 			AS(current_thread_info()->k_pcsp_lo).base;
@@ -1537,13 +1672,16 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 		    save_prev_ctx && !access_ok(oucp,
 						sizeof(struct ucontext)))
 			return -EFAULT;
-	} else {
+	}
+#ifdef CONFIG_PROTECTED_MODE
+	else {
 		/* CTX_128_BIT */
 		if (!access_ok(ucp, sizeof(struct ucontext_prot)) ||
 		    save_prev_ctx && !access_ok(oucp,
 						sizeof(struct ucontext_prot)))
 			return -EFAULT;
 	}
+#endif
 
 	/*
 	 * 2) If this is the first time this thread is changing contexts
@@ -1568,17 +1706,21 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 			prev_ctx->p_uc_link = &oucp_32->uc_link;
 		else if (format == CTX_64_BIT)
 			prev_ctx->p_uc_link = &oucp_64->uc_link;
+#ifdef CONFIG_PROTECTED_MODE
 		else /* CTX_128_BIT */
 			prev_ctx->p_uc_link = &oucp_128->uc_link;
+#endif
 
 		if (save_prev_ctx) {
-			u64 *sbr_addr;
+			u64 __user *sbr_addr;
 			if (format == CTX_32_BIT)
 				sbr_addr = &oucp_32->uc_mcontext.sbr;
 			else if (format == CTX_64_BIT)
 				sbr_addr = &oucp_64->uc_mcontext.sbr;
+#ifdef CONFIG_PROTECTED_MODE
 			else /* CTX_128_BIT */
 				sbr_addr = &oucp_128->uc_mcontext.sbr;
+#endif
 			if (put_user(prev_key, sbr_addr)) {
 				free_hw_context(prev_ctx, true, false);
 				return -EFAULT;
@@ -1617,61 +1759,48 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 	/*
 	 * 4) Save previous ucontext and load the next one.
 	 */
-	TRY_USR_PFAULT {
-		if (format == CTX_32_BIT) {
-			next_key = ucp_32->uc_mcontext.sbr;
-			AW(fpcr) = ucp_32->uc_extra.fpcr;
-			AW(fpsr) = ucp_32->uc_extra.fpsr;
-			AW(pfpfr) = ucp_32->uc_extra.pfpfr;
-			sigset = *(u64 *) &ucp_32->uc_sigmask;
-			AW(pcsp_lo) = ucp_32->uc_mcontext.pcsp_lo;
-			AW(pcsp_hi) = ucp_32->uc_mcontext.pcsp_hi;
-			AW(cr0_hi) = ucp_32->uc_mcontext.cr0_hi;
-			AW(cr1_lo) = ucp_32->uc_mcontext.cr1_lo;
-			AW(cr1_hi) = ucp_32->uc_mcontext.cr1_hi;
-		} else if (format == CTX_64_BIT) {
-			next_key = ucp_64->uc_mcontext.sbr;
-			AW(fpcr) = ucp_64->uc_extra.fpcr;
-			AW(fpsr) = ucp_64->uc_extra.fpsr;
-			AW(pfpfr) = ucp_64->uc_extra.pfpfr;
-			sigset = *(u64 *) &ucp_64->uc_sigmask;
-			AW(pcsp_lo) = ucp_64->uc_mcontext.pcsp_lo;
-			AW(pcsp_hi) = ucp_64->uc_mcontext.pcsp_hi;
-			AW(cr0_hi) = ucp_64->uc_mcontext.cr0_hi;
-			AW(cr1_lo) = ucp_64->uc_mcontext.cr1_lo;
-			AW(cr1_hi) = ucp_64->uc_mcontext.cr1_hi;
-		} else { /* CTX_128_BIT */
-			next_key = ucp_128->uc_mcontext.sbr;
-			AW(fpcr) = ucp_128->uc_extra.fpcr;
-			AW(fpsr) = ucp_128->uc_extra.fpsr;
-			AW(pfpfr) = ucp_128->uc_extra.pfpfr;
-			sigset = *(u64 *) &ucp_128->uc_sigmask;
-			AW(pcsp_lo) = ucp_128->uc_mcontext.pcsp_lo;
-			AW(pcsp_hi) = ucp_128->uc_mcontext.pcsp_hi;
-			AW(cr0_hi) = ucp_128->uc_mcontext.cr0_hi;
-			AW(cr1_lo) = ucp_128->uc_mcontext.cr1_lo;
-			AW(cr1_hi) = ucp_128->uc_mcontext.cr1_hi;
+	if (format == CTX_32_BIT) {
+		if (!save_prev_ctx) {
+			ret = __UACCESS_FN_CALL(load_ctx_32_fn, ucp_32,
+					&next_user_ctx, &next_key);
+		} else if (unlikely(ucp == oucp)) {
+			return __UACCESS_FN_CALL(save_ctx_32_fn, oucp_32,
+					prev_key, k_crs, current_blocked_sigset);
+		} else {
+			ret = __UACCESS_FN_CALL(save_and_load_ctx_32_fn,
+					ucp_32, &next_user_ctx, &next_key, oucp_32,
+					prev_key, k_crs, current_blocked_sigset);
 		}
-
-		if (save_prev_ctx) {
-			/* Frame at k_crs[0] was SPILLed at the previous step */
-			if (format == CTX_32_BIT) {
-				save_ctx_32_bit(oucp_32, prev_key, k_crs,
-						prev_fpcr, prev_fpsr, prev_pfpfr,
-						current_blocked_sigset);
-			} else if (format == CTX_64_BIT) {
-				save_ctx_64_bit(oucp_64, prev_key, k_crs,
-						prev_fpcr, prev_fpsr, prev_pfpfr,
-						current_blocked_sigset);
-			} else { /* CTX_128_BIT */
-				save_ctx_128_bit(oucp_128, prev_key, k_crs,
-						prev_fpcr, prev_fpsr, prev_pfpfr,
-						current_blocked_sigset);
-			}
+	} else if (format == CTX_64_BIT) {
+		if (!save_prev_ctx) {
+			ret = __UACCESS_FN_CALL(load_ctx_64_fn, ucp_64,
+					&next_user_ctx, &next_key);
+		} else if (unlikely(ucp == oucp)) {
+			return __UACCESS_FN_CALL(save_ctx_64_fn, oucp_64,
+					prev_key, k_crs, current_blocked_sigset);
+		} else {
+			ret = __UACCESS_FN_CALL(save_and_load_ctx_64_fn,
+					ucp_64, &next_user_ctx, &next_key, oucp_64,
+					prev_key, k_crs, current_blocked_sigset);
 		}
-	} CATCH_USR_PFAULT {
+	}
+#ifdef CONFIG_PROTECTED_MODE
+	else { /* CTX_128_BIT */
+		if (!save_prev_ctx) {
+			ret = __UACCESS_FN_CALL(load_ctx_128_fn, ucp_128,
+					&next_user_ctx, &next_key);
+		} else if (unlikely(ucp == oucp)) {
+			return __UACCESS_FN_CALL(save_ctx_128_fn, oucp_128,
+					prev_key, k_crs, current_blocked_sigset);
+		} else {
+			ret = __UACCESS_FN_CALL(save_and_load_ctx_128_fn,
+					ucp_128, &next_user_ctx, &next_key, oucp_128,
+					prev_key, k_crs, current_blocked_sigset);
+		}
+	}
+#endif
+	if (unlikely(ret))
 		return -EFAULT;
-	} END_USR_PFAULT
 
 	DebugCTX("prev_key %llx, next_key %llx\n", prev_key, next_key);
 
@@ -1687,7 +1816,8 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 
 		DebugCTX("switching from ctx %lx to ctx %lx\n", prev_ctx, next_ctx);
 
-		switch_hw_contexts(regs, prev_ctx, next_ctx, fpcr, fpsr, pfpfr);
+		switch_hw_contexts(regs, prev_ctx, next_ctx, next_user_ctx.fpcr,
+				next_user_ctx.fpsr, next_user_ctx.pfpfr);
 		current_thread_info()->this_hw_context = next_ctx;
 
 		(void) release_reference(prev_ctx, HWC_STATE_BUSY);
@@ -1701,9 +1831,10 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 	 * Skip glibc glue by subtracting SZ_OF_CR (the same this is done
 	 * when saving context in getcontext() and for oucp in swapcontext())
 	 */
+	sigset = next_user_ctx.sigset;
 	if (AS(regs->stacks.pcsp_lo).base + AS(regs->stacks.pcsp_hi).ind - SZ_OF_CR !=
-			AS(pcsp_lo).base + AS(pcsp_hi).ind ||
-			k_crs[0].cr0_hi.ip != cr0_hi.ip) {
+			AS(next_user_ctx.pcsp_lo).base + AS(next_user_ctx.pcsp_hi).ind ||
+			k_crs[0].cr0_hi.ip != next_user_ctx.cr0_hi.ip) {
 		/* Check if switch_hw_contexts() has restored FPU state already */
 		bool fpu_restored = (prev_key != next_key);
 
@@ -1715,9 +1846,12 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 		/* There is no place in struct ucontext to save %wd.psize
 		 * without breaking ABI, so we assume C calling convention
 		 * value of 4 (8 for protected mode). */
-		return do_longjmp(0, sigset, cr0_hi, cr1_lo, pcsp_lo, pcsp_hi,
-				AS(cr1_hi).br, format == CTX_128_BIT ? 0x80 : 0x40,
-				fpcr, fpsr, pfpfr, !fpu_restored);
+		return do_longjmp(0, sigset, next_user_ctx.cr0_hi,
+				next_user_ctx.cr1_lo, next_user_ctx.pcsp_lo,
+				next_user_ctx.pcsp_hi, AS(next_user_ctx.cr1_hi).br,
+				format == CTX_128_BIT ? 0x80 : 0x40,
+				next_user_ctx.fpcr, next_user_ctx.fpsr,
+				next_user_ctx.pfpfr, !fpu_restored);
 	}
 
 	if (stacks_switched)

@@ -261,7 +261,7 @@ boot_fast_memcpy(void *dst_va, const void *src_va, size_t n)
 		return;
 	}
 
-	prefetch_nospec_range(src, n);
+	prefetchr_nospec_range(src, n);
 	__E2K_WAIT(_ld_c);
 
 	/* Copy the head */
@@ -291,13 +291,7 @@ boot_fast_memcpy(void *dst_va, const void *src_va, size_t n)
 
 		n -= length;
 
-		/* Copy with tags. This is useful for access_process_vm. */
-		boot_fast_tagged_memory_copy(dst, src, length,
-				TAGGED_MEM_STORE_REC_OPC |
-				MAS_BYPASS_ALL_CACHES << LDST_REC_OPC_MAS_SHIFT,
-				TAGGED_MEM_LOAD_REC_OPC |
-				MAS_BYPASS_ALL_CACHES << LDST_REC_OPC_MAS_SHIFT,
-				0);
+		boot_fast_tagged_memory_copy(dst, src, length, 0);
 
 		src += length;
 		dst += length;

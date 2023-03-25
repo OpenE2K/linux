@@ -5,9 +5,10 @@
  * Copyright (C) 2001 Salavat Guiliazov <atic@mcst.ru>
  */
 
+#include <asm/p2v/boot_v2p.h>
 #include <linux/init_task.h>
 
-#include <asm/p2v/boot_v2p.h>
+#include <asm/p2v/boot_irqflags.h>
 #include <asm/p2v/boot_init.h>
 #include <asm/p2v/boot_param.h>
 #include <asm/p2v/boot_phys.h>
@@ -36,7 +37,7 @@
 #define	DEBUG_BOOT_MODE		0	/* Boot process */
 #define	DEBUG_BOOT_INFO_MODE	0	/* Boot info */
 #define	boot_printk		if (DEBUG_BOOT_MODE) do_boot_printk
-#define	DebugB			if (DEBUG_BOOT_MODE) printk
+#define	DebugB			if (DEBUG_BOOT_MODE) dump_printk
 
 atomic_t 	boot_cpucount = ATOMIC_INIT(0);
 
@@ -58,8 +59,8 @@ bootblock_struct_t *bootblock_phys;	/* bootblock structure */
 					/* physical pointer */
 bootblock_struct_t *bootblock_virt;	/* bootblock structure */
 					/* virtual pointer */
-#ifdef	CONFIG_SMP
 static atomic_t __initdata boot_bss_cleaning_finished = ATOMIC_INIT(0);
+#ifdef	CONFIG_SMP
 static atomic_t __initdata bootblock_checked = ATOMIC_INIT(0);
 static atomic_t __initdata boot_info_setup_finished = ATOMIC_INIT(0);
 #endif	/* CONFIG_SMP */
@@ -278,14 +279,14 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 #    error "E2K MACHINE type does not defined"
 #endif
 #else	/* ! CONFIG_E2K_MACHINE */
-	int		simul_flag;
-	int		mach_id = 0;
+	int mach_id = 0;
 
-	simul_flag = bootblock->info.mach_flags & SIMULATOR_MACH_FLAG;
-	if (simul_flag)
+	if (bootblock->info.mach_flags & SIMULATOR_MACH_FLAG)
 		mach_id |= MACHINE_ID_SIMUL;
 
 	mach_id |= boot_get_e2k_machine_id();
+	boot_native_machine_id = mach_id;
+
 	if (mach_id == MACHINE_ID_E2S_LMS ||
 			mach_id == MACHINE_ID_E2S) {
 		boot_e2s_setup_arch();
@@ -308,8 +309,6 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 			mach_id == MACHINE_ID_E2C3) {
 		boot_e2c3_setup_arch();
 	}
-
-	boot_native_machine_id = mach_id;
 #endif /* CONFIG_E2K_MACHINE */
 	boot_machine.native_id = boot_native_machine_id;
 }
@@ -344,19 +343,23 @@ boot_setup(bool bsp, bootblock_struct_t *bootblock)
 	/*
 	 * Set 'data/bss' segment CPU registers OSGD & GD
 	 * to kernel image unit
+	 *
+	 * TODO This conflicts with later usage of GD as a pointer
+	 * into current.  So this better be removed, but then
+	 * GD must not be relied on to pass _sdata address in p2v/.
 	 */
 
-	addr = (e2k_addr_t)_sdata;
+	addr = (e2k_addr_t)_sdata_bss;
 	BOOT_BUG_ON(addr & E2K_ALIGN_OS_GLOBALS_MASK,
 			"Kernel 'data' segment start address 0x%lx "
 			"is not aligned to mask 0x%lx\n",
 			addr, E2K_ALIGN_OS_GLOBALS_MASK);
-	addr = (e2k_addr_t)boot_vp_to_pp(&_sdata);
+	addr = (e2k_addr_t)boot_vp_to_pp(&_sdata_bss);
 	reg_lo.GD_lo_base = addr;
 	reg_lo._GD_lo_rw = E2K_GD_RW_PROTECTIONS;
 
 	/* Assume that BSS is placed immediately after data */
-	size = (e2k_addr_t)_edata_bss - (e2k_addr_t)_sdata;
+	size = (unsigned long) (_edata_bss - _sdata_bss);
 	size = ALIGN_TO_MASK(size, E2K_ALIGN_OS_GLOBALS_MASK);
 	reg_hi.GD_hi_size = size;
 	reg_hi._GD_hi_curptr = 0;
@@ -378,16 +381,12 @@ boot_setup(bool bsp, bootblock_struct_t *bootblock)
 	/*
 	 * Clear kernel BSS segment (on BSP only)
 	 */
-#ifdef	CONFIG_SMP
-	if (bsp) {
-#endif	/* CONFIG_SMP */
+	if (BOOT_IS_BSP(bsp)) {
 		boot_clear_bss();
-#ifdef	CONFIG_SMP
 		boot_set_event(&boot_bss_cleaning_finished);
 	} else {
 		boot_wait_for_event(&boot_bss_cleaning_finished);
 	}
-#endif	/* CONFIG_SMP */
 
 #ifdef CONFIG_NUMA
 	/*
@@ -449,25 +448,9 @@ boot_setup(bool bsp, bootblock_struct_t *bootblock)
 		size, boot_info->kernel_size);
 
 	/*
-	 * Set Trap Cellar pointer and MMU register to kernel image area
-	 * and reset Trap Counter register
-	 * In NUMA mode now we set pointer to base trap cellar on
-	 * bootstrap node
-	 */
-
-	boot_set_MMU_TRAP_POINT(boot_trap_cellar);
-	boot_reset_MMU_TRAP_COUNT();
-
-	boot_printk("Kernel trap cellar set to physical address 0x%lx "
-		"MMU_TRAP_CELLAR_MAX_SIZE 0x%x kernel_trap_cellar 0x%lx\n",
-		boot_kernel_trap_cellar, MMU_TRAP_CELLAR_MAX_SIZE,
-		BOOT_KERNEL_TRAP_CELLAR);
-
-	/*
 	 * Remember phys. address of boot information block in
 	 * an appropriate data structure.
 	 */
-
 #ifdef	CONFIG_SMP
 	if (bsp) {
 #endif	/* CONFIG_SMP */
@@ -507,6 +490,8 @@ static void __init
 boot_init_sequel(bool bsp, int cpuid, int cpus_to_sync)
 {
 	boot_set_kernel_MMU_state_after();
+
+	init_unmap_virt_to_equal_phys(bsp, cpus_to_sync);
 
 	va_support_on = 1;
 
@@ -549,22 +534,21 @@ boot_init_sequel(bool bsp, int cpuid, int cpus_to_sync)
 	/*
 	 * Show disabled caches
 	 */
-
 #ifdef	CONFIG_SMP
 	if (bsp) {
 #endif	/* CONFIG_SMP */
 		if (disable_caches != MMU_CR_CD_EN) {
 			if (disable_caches == MMU_CR_CD_D1_DIS)
-				pr_info("Disable L1 cache\n");
+				dump_printk("Disable L1 cache\n");
 			else if (disable_caches == MMU_CR_CD_D_DIS)
-				pr_info("Disable L1 and L2 caches\n");
+				dump_printk("Disable L1 and L2 caches\n");
 			else if (disable_caches == MMU_CR_CD_DIS)
-				pr_info("Disable L1, L2 and L3 caches\n");
+				dump_printk("Disable L1, L2 and L3 caches\n");
 		}
 		if (disable_secondary_caches)
-			pr_info("Disable secondary INTEL caches\n");
+			dump_printk("Disable secondary INTEL caches\n");
 		if (disable_IP)
-			pr_info("Disable IB prefetch\n");
+			dump_printk("Disable IB prefetch\n");
 		DebugB("MMU CR 0x%llx\n", AW(READ_MMU_CR()));
 #ifdef	CONFIG_SMP
 	}
@@ -655,19 +639,27 @@ boot_startup(bool bsp, bootblock_struct_t *bootblock)
 		EARLY_BOOT_TRACEPOINT("kernel boot-time init started");
 
 	/*
+	 * Be careful with initialization order here.
+	 *
+	 * 1) boot_setup_machine_id() sets the defaults for current processor
+	 * (including iset, mmu_separate_pt, etc).
+	 *
+	 * 2) Command line parameters could specify non-default values, so
+	 * boot_parse_param() is called next.
+	 *
+	 * 3) Now that we know what CPU we are executing on, we can call
+	 * boot_setup_iset_features() to initialize cpu_has() subsystem.
+	 */
+	if (!recovery && bsp)
+		boot_setup_machine_id(bootblock);
+
+	/*
 	 * An early parse of cmd line.
 	 */
-#ifdef	CONFIG_SMP
-	if (bsp) {
-#endif	/* CONFIG_SMP */
-		boot_machine.cmdline_iset_ver = false;
+	if (bsp)
 		boot_parse_param(bootblock);
-#ifdef	CONFIG_SMP
-	}
-#endif	/* CONFIG_SMP */
 
 	if (!recovery && bsp) {
-		boot_setup_machine_id(bootblock);
 		boot_setup_iset_features(&boot_machine);
 
 		/* set indicator of guest hardware virtualized VM */
@@ -682,9 +674,8 @@ boot_startup(bool bsp, bootblock_struct_t *bootblock)
 	boot_smp_set_processor_id(boot_early_pic_read_id());
 
 #if defined(CONFIG_SERIAL_BOOT_PRINTK)
-	if (!recovery) {
+	if (!recovery)
 		boot_setup_serial_console(bsp, &bootblock->info);
-	}
 #endif
 
 #ifdef	CONFIG_EARLY_VIRTIO_CONSOLE
@@ -750,12 +741,11 @@ boot_startup(bool bsp, bootblock_struct_t *bootblock)
 	}
 
 	/*
-	 * Set UPSR register in the initial state (where interrupts
-	 * are disabled). NMI should be disabled too, because of spureous
-	 * interrupts can be occur while booting time and kernel is not now
-	 * ready to handle any traps and interrupts.
-	 * Switch control from PSR register to UPSR if it needs
-	*/
+	 * Set UPSR register to the initial state with disabled interrupts.
+	 * NMI must be disabled too because spurious interrupts can occur
+	 * while booting and kernel is not ready yet to handle any traps
+	 * or interrupts. Also switch control from PSR register to UPSR.
+	 */
 	BOOT_SET_KERNEL_UPSR();
 
 	/*
@@ -768,7 +758,6 @@ boot_startup(bool bsp, bootblock_struct_t *bootblock)
 		/* Make sure the message gets out on !SMP kernels
 		 * which have spinlocks compiled out. */
 		if (!xchg(boot_vp_to_pp(&printed), 1)) {
-			BOOT_BUG_POINT("boot_startup()");
 			BOOT_BUG("CPU #%d : this processor number >= than max supported CPU number %d\n",
 				boot_smp_processor_id(), NR_CPUS);
 		}
@@ -800,7 +789,6 @@ static int __init boot_set_iset(char *cmd)
 	boot_printk("Setting machine iset version to %d\n", iset);
 
 	boot_machine.native_iset_ver = iset;
-	boot_machine.cmdline_iset_ver = true;
 
 	return 0;
 }
@@ -865,11 +853,6 @@ void __init init_native_terminate_boot_init(bool bsp, int cpuid)
 	 * instruction and data pages
 	 */
 	flush_ICACHE_all();
-
-	/*
-	 * Terminate boot-time initialization of virtual memory support
-	 */
-	init_mem_term(cpuid);
 
 	/*
 	 * Start kernel initialization process

@@ -164,8 +164,8 @@ struct {
 /*    Global Type Table (GTT) correction. C++ stuff hadling. */
 extern void rtl32_CorrectionType( rtl_Unit_t *unit_p );
 
-extern	long sys_load_cu_elf32_3P(char *name, kmdd_t *mdd);
-extern	long sys_load_cu_elf64_3P(char *name, kmdd_t *mdd);
+extern	long sys_load_cu_elf32_3P(const char __user *name, kmdd_t *mdd);
+extern	long sys_load_cu_elf64_3P(const char __user *name, kmdd_t *mdd);
 
 extern  long sys_unload_cu_elf32_3P(unsigned long glob_base,
 						size_t glob_size);

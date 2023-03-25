@@ -10,7 +10,6 @@ int fast_sys_getcpu(unsigned __user *cpup, unsigned __user *nodep,
 {
 	struct thread_info *const ti = READ_CURRENT_REG();
 	int cpu = task_cpu(thread_info_task(ti));
-	int node;
 
 	cpup = (typeof(cpup)) ((u64) cpup & E2K_VA_MASK);
 	nodep = (typeof(nodep)) ((u64) nodep & E2K_VA_MASK);
@@ -18,11 +17,10 @@ int fast_sys_getcpu(unsigned __user *cpup, unsigned __user *nodep,
 			|| (u64) nodep + sizeof(unsigned) > ti->addr_limit.seg))
 		return -EFAULT;
 
-	if (nodep)
-		node = cpu_to_node(cpu);
-
-	if (nodep)
+	if (nodep) {
+		int node = cpu_to_node(cpu);
 		*nodep = node;
+	}
 	if (cpup)
 		*cpup = cpu;
 

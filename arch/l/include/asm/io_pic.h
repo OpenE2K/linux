@@ -79,6 +79,16 @@ static inline void print_IO_PICs(void)
 		print_IO_APICs();
 }
 
+extern void disable_IO_APIC(void);
+extern void reset_io_epic(void);
+static inline void reset_io_pic(void)
+{
+	if (nr_ioepics)
+		reset_io_epic();
+	if (nr_ioapics)
+		disable_IO_APIC();
+}
+
 #else /* !(CONFIG_EPIC) */
 
 #include <asm/io_apic.h>
@@ -116,6 +126,12 @@ extern void print_IO_APICs(void);
 static inline void print_IO_PICs(void)
 {
 	print_IO_APICs();
+}
+
+extern void disable_IO_APIC(void);
+static inline void reset_io_pic(void)
+{
+	disable_IO_APIC();
 }
 
 #endif	/* !(CONFIG_EPIC) */

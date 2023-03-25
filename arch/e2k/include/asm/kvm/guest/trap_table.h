@@ -182,11 +182,10 @@ do { \
 	} \
 } while (false)
 
-static inline void
-exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
-			e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
+static inline void exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
+		e2k_usd_lo_t usd_lo, e2k_upsr_t upsr, e2k_mem_crs_t crs)
 {
-	kvm_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr);
+	kvm_exit_handle_syscall(sbr, usd_hi, usd_lo, upsr, crs);
 }
 
 #define	handle_guest_traps(regs)	/* none any guests */

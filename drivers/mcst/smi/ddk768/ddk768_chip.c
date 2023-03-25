@@ -23,23 +23,26 @@
 /*
  * This function returns frame buffer memory size in Byte units.
  */
-unsigned long ddk768_getFrameBufSize()
+unsigned long ddk768_getFrameBufSize(struct smi_device *sdev)
 {
 	return SMI_MEMORY_SIZE_SM768;
     unsigned long strapPin, ddrController, rValue;
 
-    strapPin = FIELD_GET(peekRegisterDWord(STRAP_PINS), STRAP_PINS, MEM_SIZE);
-    ddrController = peekRegisterDWord(DDR_CONTROL);
+    strapPin = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+						STRAP_PINS), STRAP_PINS, MEM_SIZE);
+    ddrController = peekRegisterDWord(sdev->rmmio, DDR_CONTROL);
 
     switch(strapPin)
     {
         case STRAP_PINS_MEM_SIZE_512M:
-        pokeRegisterDWord(DDR_CONTROL, ddrController | FIELD_SET(0, DDR_CONTROL, SIZE, 512M));
+        pokeRegisterDWord(sdev->rmmio, DDR_CONTROL, ddrController |
+						FIELD_SET(0, DDR_CONTROL, SIZE, 512M));
         rValue = MB(512);
         break;
 
         case STRAP_PINS_MEM_SIZE_1024M:
-        pokeRegisterDWord(DDR_CONTROL, ddrController | FIELD_SET(0, DDR_CONTROL, SIZE, 1024M));
+        pokeRegisterDWord(sdev->rmmio, DDR_CONTROL, ddrController |
+						FIELD_SET(0, DDR_CONTROL, SIZE, 1024M));
         rValue = MB(1024);
         break;
 
@@ -97,7 +100,8 @@ char *ddk768_getChipTypeString()
  *        -1 if fail.
  *
  */
-long ddk768_initChipParamEx(initchip_param_t * pInitParam)
+long ddk768_initChipParamEx(struct smi_device *sdev,
+				initchip_param_t * pInitParam)
 {
     unsigned long ulReg;
 
@@ -107,27 +111,27 @@ long ddk768_initChipParamEx(initchip_param_t * pInitParam)
 
     if (pInitParam->setAllEngOff == 1)
     {
-        ulReg = peekRegisterDWord(VIDEO_DISPLAY_CTRL);
+        ulReg = peekRegisterDWord(sdev->rmmio, VIDEO_DISPLAY_CTRL);
         ulReg = FIELD_SET(ulReg, VIDEO_DISPLAY_CTRL, PLANE, DISABLE); 
-        pokeRegisterDWord(VIDEO_DISPLAY_CTRL, ulReg); /* Channel 0 */
-        pokeRegisterDWord(VIDEO_DISPLAY_CTRL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
+        pokeRegisterDWord(sdev->rmmio, VIDEO_DISPLAY_CTRL, ulReg); /* Channel 0 */
+        pokeRegisterDWord(sdev->rmmio, VIDEO_DISPLAY_CTRL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
 
         /* Disable alpha plane, if a former application left it on */
-        ulReg = peekRegisterDWord(ALPHA_DISPLAY_CTRL);
+        ulReg = peekRegisterDWord(sdev->rmmio, ALPHA_DISPLAY_CTRL);
         ulReg = FIELD_SET(ulReg, ALPHA_DISPLAY_CTRL, PLANE, DISABLE); 
-        pokeRegisterDWord(ALPHA_DISPLAY_CTRL, ulReg); /* Channel 0 */
-        pokeRegisterDWord(ALPHA_DISPLAY_CTRL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
+        pokeRegisterDWord(sdev->rmmio, ALPHA_DISPLAY_CTRL, ulReg); /* Channel 0 */
+        pokeRegisterDWord(sdev->rmmio, ALPHA_DISPLAY_CTRL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
 
         /* Disable hardware cursor, if a former application left it on */
-        ulReg = peekRegisterDWord(HWC_CONTROL);
+        ulReg = peekRegisterDWord(sdev->rmmio, HWC_CONTROL);
         ulReg = FIELD_SET(ulReg, HWC_CONTROL, MODE, DISABLE); 
-        pokeRegisterDWord(HWC_CONTROL, ulReg); /* Channel 0 */
-        pokeRegisterDWord(HWC_CONTROL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
+        pokeRegisterDWord(sdev->rmmio, HWC_CONTROL, ulReg); /* Channel 0 */
+        pokeRegisterDWord(sdev->rmmio, HWC_CONTROL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
 	
-        ulReg = peekRegisterDWord(DISPLAY_CTRL);
+        ulReg = peekRegisterDWord(sdev->rmmio, DISPLAY_CTRL);
 	ulReg = l_ddk768_add_lvds_to_disp_ctrl_reg(ulReg);
-        pokeRegisterDWord(DISPLAY_CTRL, ulReg); /* Channel 0 */
-        pokeRegisterDWord(DISPLAY_CTRL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
+        pokeRegisterDWord(sdev->rmmio, DISPLAY_CTRL, ulReg); /* Channel 0 */
+        pokeRegisterDWord(sdev->rmmio, DISPLAY_CTRL+CHANNEL_OFFSET, ulReg); /* Channel 1 */
     }
 
     /* We can add more initialization as needed. */
@@ -144,7 +148,7 @@ long ddk768_initChipParamEx(initchip_param_t * pInitParam)
  * Return: 0 (or NO_ERROR) if successful.
  *        -1 if fail.
  */
-long ddk768_initChip()
+long ddk768_initChip(struct smi_device *sdev)
 {
     initchip_param_t initParam;
     
@@ -153,7 +157,7 @@ long ddk768_initChip()
     initParam.setAllEngOff = 1;
     
     
-    return(ddk768_initChipParamEx(&initParam));
+    return(ddk768_initChipParamEx(sdev, &initParam));
 }
 
 #if 0

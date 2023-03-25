@@ -6,8 +6,7 @@ void boot_e2s_setup_arch(void)
 {
 	boot_e2k_sic_setup_arch();
 
-	if (!boot_machine.cmdline_iset_ver)
-		boot_machine.native_iset_ver = ELBRUS_2S_ISET;
+	boot_machine.native_iset_ver = ELBRUS_2S_ISET;
 	boot_machine.mmu_pt_v6 = false;
 	boot_machine.mmu_separate_pt = false;
 	boot_machine.max_nr_node_cpus = E2S_MAX_NR_NODE_CPUS;
@@ -20,5 +19,6 @@ void boot_e2s_setup_arch(void)
 	boot_machine.sic_mc_count = E2S_SIC_MC_COUNT;
 	boot_machine.sic_mc1_ecc = SIC_mc1_ecc;
 	boot_machine.sic_io_str1 = SIC_io_str_hi;
+	boot_machine.qnr1_offset = E2S_QNR1_OFFSET;
 }
 

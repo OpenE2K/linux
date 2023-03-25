@@ -254,9 +254,7 @@ kvm_queue_spin_lock_to_wait(struct kvm *kvm, void *lock, unsigned long flags)
 
 	head = &kvm->arch.spinlock_hash[spinlock_hashfn(lock)];
 	waiter.ti = ti;
-	if (unlikely(gti == NULL)) {
-		GTI_BUG_ON(!test_ti_thread_flag(ti, TIF_PSEUDOTHREAD));
-	}
+	GTI_BUG_ON(gti == NULL);
 	waiter.gti = gti;
 	waiter.lock = lock;
 	INIT_HLIST_NODE(&waiter.wait_list);
@@ -412,8 +410,7 @@ kvm_queue_spin_lock_to_wait(struct kvm *kvm, void *lock, unsigned long flags)
 					(long)w->lock : *(long *)w->lock);
 			vcpu->arch.on_spinlock = false;
 			return -EINVAL;
-		} else if (!unlocked &&
-				!test_ti_thread_flag(w->ti, TIF_PSEUDOTHREAD)) {
+		} else if (!unlocked) {
 			DebugKVM("thread %s (%d) lock %px = 0x%lx detected "
 				"at spinlock waitqueue, waiting was "
 				"interrupted ret = %d, so continue waiting\n",

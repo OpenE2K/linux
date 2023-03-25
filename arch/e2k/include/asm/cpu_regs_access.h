@@ -34,37 +34,37 @@
 #define	boot_native_read_CORE_MODE_reg_value()	\
 ({ \
 	typeof(boot_machine.boot_rrd) func; \
-	func = boot_native_vp_to_pp(boot_machine.boot_rrd); \
+	func = boot_func_to_pa(boot_machine.boot_rrd); \
 	func(E2K_REG_CORE_MODE); \
 })
 #define	boot_native_write_CORE_MODE_reg_value(modes)	\
 ({ \
 	typeof(boot_machine.boot_rwd) func; \
-	func = boot_native_vp_to_pp(boot_machine.boot_rwd); \
+	func = boot_func_to_pa(boot_machine.boot_rwd); \
 	func(E2K_REG_CORE_MODE, modes); \
 })
 #define	boot_native_read_OSCUTD_reg_value()	\
 ({ \
 	typeof(boot_machine.boot_rrd) func; \
-	func = boot_native_vp_to_pp(boot_machine.boot_rrd); \
+	func = boot_func_to_pa(boot_machine.boot_rrd); \
 	func(E2K_REG_OSCUTD); \
 })
 #define	boot_native_write_OSCUTD_reg_value(v)	\
 ({ \
 	typeof(boot_machine.boot_rwd) func; \
-	func = boot_native_vp_to_pp(boot_machine.boot_rwd); \
+	func = boot_func_to_pa(boot_machine.boot_rwd); \
 	func(E2K_REG_OSCUTD, (v)); \
 })
 #define	boot_native_read_OSCUIR_reg_value()	\
 ({ \
 	typeof(boot_machine.boot_rrd) func; \
-	func = boot_native_vp_to_pp(boot_machine.boot_rrd); \
+	func = boot_func_to_pa(boot_machine.boot_rrd); \
 	func(E2K_REG_OSCUIR); \
 })
 #define	boot_native_write_OSCUIR_reg_value(v)	\
 ({ \
 	typeof(boot_machine.boot_rwd) func; \
-	func = boot_native_vp_to_pp(boot_machine.boot_rwd); \
+	func = boot_func_to_pa(boot_machine.boot_rwd); \
 	func(E2K_REG_OSCUIR, v); \
 })
 
@@ -135,6 +135,9 @@
 #define	BOOT_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value)			\
 		NATIVE_WRITE_OSGD_HI_REG_VALUE(OSGD_hi_value)
 #define WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
+		NATIVE_WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value)
+
+#define	WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value) \
 		NATIVE_WRITE_OSGD_REG_VALUE(OSGD_hi_value, OSGD_lo_value)
 
 /*

@@ -785,7 +785,10 @@ static int __init bootmem_init_numa(void)
 			numa_cpu_lookup_table[cpu] = NUMA_NO_NODE;
 			continue;
 		}
-		id = cpu_physical_id(cpu);
+		/* we need to use early_per_cpu because per_cpu
+		 * does not exist at this moment
+		 */
+		id = early_per_cpu(x86_cpu_to_apicid, cpu);
 		node = id / e90s_max_nr_node_cpus();
 		if (!node_online(node))
 			node = 0;
@@ -1393,6 +1396,10 @@ void __init paging_init(void)
 
 		memset(max_zone_pfns, 0, sizeof(max_zone_pfns));
 
+#if defined(CONFIG_ZONE_DMA32)
+		max_zone_pfns[ZONE_DMA32] = min(end_pfn,
+			__pa(PAGE_OFFSET + (1UL << 32)) >> PAGE_SHIFT);
+#endif
 		max_zone_pfns[ZONE_NORMAL] = end_pfn;
 
 		free_area_init_nodes(max_zone_pfns);

@@ -287,6 +287,15 @@ extern void kvm_complete_page_fault_to_guest(unsigned long what_complete);
 
 extern int do_hret_last_wish_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs);
 
+extern unsigned long (*ttable_entry18)(unsigned long, unsigned long, unsigned long,
+				       unsigned long, unsigned long, unsigned long,
+				       unsigned long, unsigned long);
+extern unsigned long kvm_disabled_priv_hcall(unsigned long nr,
+				unsigned long arg1, unsigned long arg2,
+				unsigned long arg3, unsigned long arg4,
+				unsigned long arg5, unsigned long arg6,
+				unsigned long arg7);
+
 extern void trap_handler_trampoline(void);
 extern void syscall_handler_trampoline(void);
 extern void host_mkctxt_trampoline(void);
@@ -324,13 +333,16 @@ kvm_init_guest_syscalls_handling(struct pt_regs *regs)
 	regs->in_fast_syscall = false;	/* only for host */
 }
 
-static inline void
-kvm_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
-			e2k_usd_lo_t usd_lo, e2k_upsr_t upsr)
+static inline void kvm_exit_handle_syscall(e2k_addr_t sbr, e2k_usd_hi_t usd_hi,
+		e2k_usd_lo_t usd_lo, e2k_upsr_t upsr, e2k_mem_crs_t crs)
 {
 	KVM_WRITE_UPSR_REG_VALUE(upsr.UPSR_reg);
 	KVM_WRITE_USD_REG(usd_hi, usd_lo);
 	KVM_WRITE_SBR_REG_VALUE(sbr);
+	KVM_NV_NOIRQ_WRITE_CR0_HI_REG_VALUE(AW(crs.cr0_hi));
+	KVM_NV_NOIRQ_WRITE_CR0_LO_REG_VALUE(AW(crs.cr0_lo));
+	KVM_NV_NOIRQ_WRITE_CR1_HI_REG_VALUE(AW(crs.cr1_hi));
+	KVM_NV_NOIRQ_WRITE_CR1_LO_REG_VALUE(AW(crs.cr1_lo));
 }
 
 /*
@@ -567,7 +579,7 @@ handle_guest_last_wish(struct pt_regs *regs)
 
 	return kvm_handle_guest_last_wish(regs);
 }
-static inline void
+static inline int
 kvm_host_instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 				const int async_instr)
 {
@@ -575,10 +587,10 @@ kvm_host_instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 
 	if (!kvm_test_intc_emul_flag(regs)) {
 		native_instr_page_fault(regs, ftype, async_instr);
-		return;
+		return 0;
 	}
 
-	kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, async_instr);
+	return kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, async_instr);
 }
 
 static inline int
@@ -593,6 +605,36 @@ kvm_host_do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 
 	return kvm_pv_mmu_aau_page_fault(current_thread_info()->vcpu, regs,
 					 address, condition, aa_no);
+}
+
+static bool
+kvm_check_sys_call_disable(pt_regs_t *regs,
+			   unsigned long TIR_hi, unsigned long TIR_lo)
+{
+	e2k_tir_lo_t tir_lo;
+	e2k_tir_hi_t tir_hi;
+	e2k_ctpr_t ctpr1;
+	unsigned long trap_ip, ctpr_ip, entry_ip;
+
+	tir_lo.TIR_lo_reg = TIR_lo;
+	tir_hi.TIR_hi_reg = TIR_hi;
+	trap_ip = tir_lo.TIR_lo_ip;
+	ctpr1 = regs->ctpr1;
+	ctpr_ip = ctpr1.CTPR_ta_base;
+	entry_ip = (unsigned long)&ttable_entry18;
+
+	if (likely(trap_ip != entry_ip && ctpr_ip != entry_ip)) {
+		/* real invalid instruction address: pass to guest  */
+		return false;
+	}
+
+	/* privileged action system call entry disabled by OSEM */
+	/* update ctpr IP to call disabled case of privileged actions */
+	ctpr1.CTPR_ta_base = (unsigned long)kvm_disabled_priv_hcall;
+	ctpr1.CTPR_ta_tag = CTPSL_CT_TAG;
+	regs->ctpr1 = ctpr1;
+	/* return flag to ignore the trap by host */
+	return true;
 }
 
 /*
@@ -635,12 +677,13 @@ pass_instr_page_fault_trap_to_guest(struct pt_regs *regs, int trap_no)
 	return true;
 
 }
-static inline unsigned long
+static inline long
 pass_the_trap_to_guest(struct pt_regs *regs,
 				unsigned long TIR_hi, unsigned long TIR_lo,
 				int trap_no)
 {
 	struct kvm_vcpu *vcpu;
+	int ret;
 
 	if (!kvm_test_intc_emul_flag(regs))
 		return 0;
@@ -664,7 +707,11 @@ pass_the_trap_to_guest(struct pt_regs *regs,
 
 		AW(ftype) = 0;
 		AS(ftype).page_miss = 1;
-		kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 0);
+		ret = kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 0);
+		if (unlikely(ret < 0)) {
+			/* page fault handling was failed */
+			goto failed;
+		}
 		return 1;
 	}
 	if (trap_no == exc_instr_page_prot_num) {
@@ -672,7 +719,11 @@ pass_the_trap_to_guest(struct pt_regs *regs,
 
 		AW(ftype) = 0;
 		AS(ftype).illegal_page = 1;
-		kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 0);
+		ret = kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 0);
+		if (unlikely(ret < 0)) {
+			/* page fault handling was failed */
+			goto failed;
+		}
 		return 1;
 	}
 	if (trap_no == exc_ainstr_page_miss_num) {
@@ -680,7 +731,11 @@ pass_the_trap_to_guest(struct pt_regs *regs,
 
 		AW(ftype) = 0;
 		AS(ftype).page_miss = 1;
-		kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 1);
+		ret = kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 1);
+		if (unlikely(ret < 0)) {
+			/* page fault handling was failed */
+			goto failed;
+		}
 		return 1;
 	}
 	if (trap_no == exc_ainstr_page_prot_num) {
@@ -688,7 +743,11 @@ pass_the_trap_to_guest(struct pt_regs *regs,
 
 		AW(ftype) = 0;
 		AS(ftype).illegal_page = 1;
-		kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 1);
+		ret = kvm_pv_mmu_instr_page_fault(vcpu, regs, ftype, 1);
+		if (unlikely(ret < 0)) {
+			/* page fault handling was failed */
+			goto failed;
+		}
 		return 1;
 	}
 	if (trap_no == exc_last_wish_num) {
@@ -706,6 +765,11 @@ pass_the_trap_to_guest(struct pt_regs *regs,
 		/* debug trap on host, handle by host */
 		return 0;
 	}
+	if (trap_no == exc_illegal_instr_addr_num) {
+		/* probably system call disabled by OSEM */
+		if (kvm_check_sys_call_disable(regs, TIR_hi, TIR_lo))
+			return 1;
+	}
 	if (kvm_vcpu_in_hypercall(vcpu)) {
 		/* the trap on host, so handles it by host */
 		return 0;
@@ -716,7 +780,16 @@ pass_the_trap_to_guest(struct pt_regs *regs,
 		return 0;
 	}
 	return kvm_pass_the_trap_to_guest(vcpu, regs, TIR_hi, TIR_lo, trap_no);
+
+failed:
+	if (unlikely(ret < 0)) {
+		pr_err("%s(): kill guest: fault handling failed, error %d\n",
+			__func__, ret);
+		do_group_exit(ret);
+	}
+	return ret;
 }
+
 static inline unsigned long
 pass_coredump_trap_to_guest(struct pt_regs *regs)
 {
@@ -758,10 +831,6 @@ pass_virqs_to_guest(struct pt_regs *regs,
 	if (!kvm_test_intc_emul_flag(regs))
 		return 0;
 
-	if (test_thread_flag(TIF_PSEUDOTHREAD)) {
-		/* it is VIRQ VCPU thread, it cannot handle interrupts */
-		return 0;
-	}
 	if (!test_thread_flag(TIF_VIRQS_ACTIVE)) {
 		/* VIRQ VCPU thread is not yet active */
 		return 0;
@@ -830,11 +899,19 @@ is_chain_stack_bounds(struct thread_info *ti, struct pt_regs *regs)
 
 #ifdef	CONFIG_VIRTUALIZATION
 /* it is host kernel with virtualization support */
-static inline void
+static inline int
 instr_page_fault(struct pt_regs *regs, tc_fault_type_t ftype,
 			const int async_instr)
 {
-	kvm_host_instr_page_fault(regs, ftype, async_instr);
+	int ret;
+
+	ret = kvm_host_instr_page_fault(regs, ftype, async_instr);
+	if (unlikely(ret < 0)) {
+		pr_err("%s(): kill guest: fault handling failed, error %d\n",
+			__func__, ret);
+		do_group_exit(ret);
+	}
+	return ret;
 }
 
 static inline int
@@ -842,8 +919,16 @@ do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 		const tc_cond_t condition, const tc_mask_t mask,
 		const unsigned int aa_no)
 {
-	return kvm_host_do_aau_page_fault(regs, address, condition, mask,
+	int ret;
+
+	ret = kvm_host_do_aau_page_fault(regs, address, condition, mask,
 					  aa_no);
+	if (unlikely(ret < 0)) {
+		pr_err("%s(): kill guest: fault handling failed, error %d\n",
+			__func__, ret);
+		do_group_exit(ret);
+	}
+	return ret;
 }
 #endif	/* CONFIG_VIRTUALIZATION */
 

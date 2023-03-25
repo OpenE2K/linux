@@ -64,7 +64,7 @@ extern void wait_for_startup(int cpuid, int hotplug);
 extern void smp_send_reschedule(int cpu);
 extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
-extern void smp_send_refresh(void);
+extern void native_stop_this_cpu_ipi(void *dummy);
 
 #ifdef	CONFIG_DATA_BREAKPOINT
 typedef struct hw_data_bp {
@@ -138,6 +138,7 @@ static inline void e2k_start_secondary(int cpuid) { }
 #define	native_wait_for_cpu_wake_up()
 #define	native_activate_cpu(vcpu_id)	0
 #define	native_activate_all_cpus(void)	0
+#define native_stop_this_cpu_ipi(dummy) do { } while (0)
 
 #define	DATA_BREAKPOINT_ON	false
 
@@ -200,6 +201,11 @@ static inline int
 activate_all_cpus(void)
 {
 	return native_activate_all_cpus();
+}
+static inline void
+stop_this_cpu_ipi(void *dummy)
+{
+	native_stop_this_cpu_ipi(dummy);
 }
 
 #if defined(CONFIG_VIRTUALIZATION)

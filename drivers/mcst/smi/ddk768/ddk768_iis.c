@@ -20,6 +20,7 @@
  * Set up I2S and GPIO registers to transmit/receive data.
  */
 void iisOpen(
+	struct smi_device *sdev,
    unsigned long wordLength, //Number of bits in IIS data: 16 bit, 24 bit, 32 bit
    unsigned long sampleRate  //Sampling rate.
 )
@@ -27,22 +28,22 @@ void iisOpen(
     unsigned long gpioPin, clockDivider;
     unsigned char ws;
 
-    ddk768_enableI2S(1); //Turn on I2S clock
+	ddk768_enableI2S(sdev, 1); /*Turn on I2S clock*/
 
     /* Configure GPIO Mux for I2s output */
-    gpioPin = peekRegisterDWord(GPIO_MUX);
+	gpioPin = peekRegisterDWord(sdev->rmmio, GPIO_MUX);
     gpioPin &= ~0x1E000000;    //Clear bit 28:25
     gpioPin |= 0x1000001c;    //Set up bit 28 and 4:2
-    pokeRegisterDWord(GPIO_MUX, gpioPin);
+	pokeRegisterDWord(sdev->rmmio, GPIO_MUX, gpioPin);
 
     /* Make sure GPIO data direction (0x10004) bit 28 = 0 (input) */
-    gpioPin = peekRegisterDWord(GPIO_DATA_DIRECTION);
+	gpioPin = peekRegisterDWord(sdev->rmmio, GPIO_DATA_DIRECTION);
     gpioPin &= ~0x10000000;
-    pokeRegisterDWord(GPIO_DATA_DIRECTION, gpioPin);
+	pokeRegisterDWord(sdev->rmmio, GPIO_DATA_DIRECTION, gpioPin);
 
     /* IIS register set up */
-    pokeRegisterDWord(I2S_TX_DATA_L, 0); //Clear Tx registers
-    pokeRegisterDWord(I2S_TX_DATA_R, 0);    
+	pokeRegisterDWord(sdev->rmmio, I2S_TX_DATA_L, 0); /*Clear Tx registers*/
+	pokeRegisterDWord(sdev->rmmio, I2S_TX_DATA_R, 0);
 
     //Figure out Word Select value
     switch (wordLength)
@@ -59,33 +60,34 @@ void iisOpen(
 
     clockDivider = (IIS_REF_CLOCK/(4*sampleRate*wordLength)) - 1;
 
-    pokeRegisterDWord(I2S_CTRL, 
+	pokeRegisterDWord(sdev->rmmio, I2S_CTRL,
           FIELD_VALUE(0, I2S_CTRL, CS, ws)
         | FIELD_VALUE(0, I2S_CTRL , CDIV, clockDivider));
 
-    pokeRegisterDWord(I2S_SRAM_DMA, 0);  //Default no DMA. Call another function to set up DMA
+	/* Default no DMA. Call another function to set up DMA */
+	pokeRegisterDWord(sdev->rmmio, I2S_SRAM_DMA, 0);
 }
 
 
 /*
  *    Turn off I2S and close GPIO 
  */
-void iisClose()
+void iisClose(struct smi_device *sdev)
 {
     unsigned long gpioPin;
 
     /* Close GPIO Mux for I2s output */
-    gpioPin = peekRegisterDWord(GPIO_MUX);
+	gpioPin = peekRegisterDWord(sdev->rmmio, GPIO_MUX);
     gpioPin &= ~0x1000001c;    //Clear bit 28 and 4:2
-    pokeRegisterDWord(GPIO_MUX, gpioPin);
+	pokeRegisterDWord(sdev->rmmio, GPIO_MUX, gpioPin);
 
-    pokeRegisterDWord(I2S_TX_DATA_L, 0); //Clear Tx registers
-    pokeRegisterDWord(I2S_TX_DATA_R, 0);    
-    pokeRegisterDWord(I2S_STATUS, 0);    //Disable Tx line out
-    pokeRegisterDWord(I2S_CTRL, 0);      //Clear clock setting.
-    pokeRegisterDWord(I2S_SRAM_DMA, 0);  //Clear DMA setting.
+	pokeRegisterDWord(sdev->rmmio, I2S_TX_DATA_L, 0);/*Clear Tx registers*/
+	pokeRegisterDWord(sdev->rmmio, I2S_TX_DATA_R, 0);
+	pokeRegisterDWord(sdev->rmmio, I2S_STATUS, 0);   /*Disable Tx line out*/
+	pokeRegisterDWord(sdev->rmmio, I2S_CTRL, 0);     /*Clear clock setting.*/
+	pokeRegisterDWord(sdev->rmmio, I2S_SRAM_DMA, 0); /*Clear DMA setting.*/
 
-    ddk768_enableI2S(0); //Turn off I2S clock
+	ddk768_enableI2S(sdev, 0); /*Turn off I2S clock*/
 }
 
 
@@ -102,6 +104,7 @@ void iisClose()
  *        Number of bytes to DMA (DWord aligned)
  */
 void iisTxDmaSetup(
+	struct smi_device *sdev,
     unsigned long offset, /* Offset from start of SRAM to start DMA */
     unsigned long len     /* Number of bytes to DMA */
     )
@@ -112,12 +115,13 @@ void iisTxDmaSetup(
     len >>= 2;
     len--; //I2S DMA register requires length to be expressed as DWord - 1.
 
-    dmaPointer = FIELD_GET(peekRegisterDWord(I2S_SRAM_DMA), I2S_SRAM_DMA, ADDRESS);
+	dmaPointer = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+							I2S_SRAM_DMA), I2S_SRAM_DMA, ADDRESS);
 
     //If DMA pointer already at the requested offset. Just set up the length.
     if (dmaPointer == offset)
     {
-        pokeRegisterDWord(I2S_SRAM_DMA,
+		pokeRegisterDWord(sdev->rmmio, I2S_SRAM_DMA,
           FIELD_SET(0, I2S_SRAM_DMA, STATE, ENABLE)
         | FIELD_VALUE(0, I2S_SRAM_DMA, SIZE, len)
         | FIELD_VALUE(0, I2S_SRAM_DMA, ADDRESS, offset));
@@ -128,15 +132,15 @@ void iisTxDmaSetup(
     //Position DMA pointer to the new base pointer (or offset).
     //Note that DMA reload base pointer only when it gets to end of SRAM.
     //Therefore, we need to advance DMA from current position to the end.
-    pokeRegisterDWord(I2S_SRAM_DMA,
+	pokeRegisterDWord(sdev->rmmio, I2S_SRAM_DMA,
           FIELD_SET(0, I2S_SRAM_DMA, STATE, ENABLE)
         | FIELD_VALUE(0, I2S_SRAM_DMA, SIZE, (0x1FF - dmaPointer))
         | FIELD_VALUE(0, I2S_SRAM_DMA, ADDRESS, dmaPointer));
 
-    iisStartNoTx();//Start DMA without output the old data from Tx line.
+	iisStartNoTx(sdev); /*Start DMA without output the old data from Tx line.*/
 
     //Once DMA starts, make the new base pointer ready.
-    pokeRegisterDWord(I2S_SRAM_DMA,
+	pokeRegisterDWord(sdev->rmmio, I2S_SRAM_DMA,
           FIELD_SET(0, I2S_SRAM_DMA, STATE, ENABLE)
         | FIELD_VALUE(0, I2S_SRAM_DMA, SIZE, len)
         | FIELD_VALUE(0, I2S_SRAM_DMA, ADDRESS, offset));
@@ -144,18 +148,20 @@ void iisTxDmaSetup(
     // When DMA get to the end of SRAM, it loads the new base pointer.
     do
     {
-      dmaPointer = FIELD_GET(peekRegisterDWord(I2S_SRAM_DMA), I2S_SRAM_DMA, ADDRESS);
+		dmaPointer = FIELD_GET(peekRegisterDWord(sdev->rmmio,
+							  I2S_SRAM_DMA), I2S_SRAM_DMA, ADDRESS);
     } while(dmaPointer != offset);
 
-    iisStop();
+	iisStop(sdev->rmmio);
 }
 
 /*
  * Return current IIS DMA position.
  */
-unsigned long iisDmaPointer(void)
+unsigned long iisDmaPointer(struct smi_device *sdev)
 {
-    return(FIELD_GET(peekRegisterDWord(I2S_SRAM_DMA), I2S_SRAM_DMA, ADDRESS));
+    return FIELD_GET(peekRegisterDWord(sdev->rmmio,
+				I2S_SRAM_DMA), I2S_SRAM_DMA, ADDRESS);
 }
 
 /*
@@ -163,12 +169,13 @@ unsigned long iisDmaPointer(void)
  * It can be used to flush left over SRAM data without
  * sending them to Codec.
  */
-void iisStartNoTx(void)
+void iisStartNoTx(struct smi_device *sdev)
 {
     unsigned long value;
 
-    value = FIELD_SET(peekRegisterDWord(I2S_CTRL), I2S_CTRL, MODE, MASTER);
-    pokeRegisterDWord(I2S_CTRL, value);
+	value = FIELD_SET(peekRegisterDWord(sdev->rmmio,
+							I2S_CTRL), I2S_CTRL, MODE, MASTER);
+	pokeRegisterDWord(sdev->rmmio, I2S_CTRL, value);
 }
 
 
@@ -180,28 +187,33 @@ void iisStartNoTx(void)
  *
  */
 
-void iisStart(void)
+void iisStart(struct sm768chip *chip)
 {
 	unsigned long value;
 	
-	pokeRegisterDWord(I2S_STATUS, FIELD_SET(0, I2S_STATUS, TX, ENABLE));  //Enable Tx line out
+	pokeRegisterDWord(chip->pvReg, I2S_STATUS,
+					FIELD_SET(0, I2S_STATUS, TX, ENABLE)); /*Enable Tx line out*/
 	
-	value = FIELD_SET(peekRegisterDWord(I2S_CTRL), I2S_CTRL, MODE, MASTER);
-	pokeRegisterDWord(I2S_CTRL, value);
+	value = FIELD_SET(peekRegisterDWord(chip->pvReg, I2S_CTRL),
+								I2S_CTRL, MODE, MASTER);
+	pokeRegisterDWord(chip->pvReg, I2S_CTRL, value);
 
 }
 
 /*
  * Stop audio. 
  */
-void iisStop(void)
+void iisStop(volatile unsigned char __iomem *rmmio)
 {
     unsigned long value;
 
-    value = FIELD_SET(peekRegisterDWord(I2S_CTRL), I2S_CTRL, MODE, SLAVE);
-    pokeRegisterDWord(I2S_CTRL, value);
+	value = FIELD_SET(peekRegisterDWord(rmmio, I2S_CTRL),
+									I2S_CTRL, MODE, SLAVE);
+	pokeRegisterDWord(rmmio, I2S_CTRL, value);
 
-    pokeRegisterDWord(I2S_STATUS, FIELD_SET(0, I2S_STATUS, TX, DISABLE));  //Disable Tx line out
+	/*Disable Tx line out*/
+	pokeRegisterDWord(rmmio, I2S_STATUS,
+					FIELD_SET(0, I2S_STATUS, TX, DISABLE));
 
 }
 
@@ -210,12 +222,13 @@ void iisStop(void)
  * Set values for left Tx and right Tx register.
  */
 void iisSetTx(
+	volatile unsigned char __iomem *rmmio,
     unsigned long left, //Data for left channel Tx
     unsigned long right //Data for right channel Tx
     )
 {
-    pokeRegisterDWord(I2S_TX_DATA_L, left);
-    pokeRegisterDWord(I2S_TX_DATA_R, right);
+	pokeRegisterDWord(rmmio, I2S_TX_DATA_L, left);
+	pokeRegisterDWord(rmmio, I2S_TX_DATA_R, right);
 }
 
 
@@ -227,13 +240,13 @@ void iisSetTx(
  * It has to be cleared, in order to distinguish between different sessions of countdown.
  *
  */
-void iisClearRawInt(void)
+void iisClearRawInt(struct sm768chip *chip)
 {
     /* Read I2S Control & TX to clear INT when IIS get data from Tx & Rx. */
-    peekRegisterDWord(I2S_STATUS);
+	peekRegisterDWord(chip->pvReg, I2S_STATUS);
 
     /* Write 0 to I2S SRAM DMA status when IIS get data from SRAM */
-    pokeRegisterDWord(I2S_SRAM_DMA_STATUS, 0);
+	pokeRegisterDWord(chip->pvReg, I2S_SRAM_DMA_STATUS, 0);
 
 }
 

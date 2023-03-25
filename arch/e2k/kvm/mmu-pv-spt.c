@@ -212,7 +212,7 @@ void kvm_fill_init_root_pt(struct kvm *kvm)
 
 	/* copy kernel part of root page table entries to enable host */
 	/* traps and hypercalls on guest */
-	copy_kernel_pgd_range(root, cpu_kernel_root_pt);
+	copy_kernel_pgd_range(root, mm_node_pgd(&init_mm, numa_node_id()));
 }
 
 void release_gmm_root_pt(struct kvm *kvm, gmm_struct_t *gmm)
@@ -224,6 +224,7 @@ void release_gmm_root_pt(struct kvm *kvm, gmm_struct_t *gmm)
 	gmm->pt_synced = false;
 
 	spin_lock(&kvm->mmu_lock);
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	gmm_root = gmm->root_hpa;
 	gk_root = gmm->gk_root_hpa;
 	if (unlikely(!VALID_PAGE(gmm_root))) {
@@ -232,7 +233,7 @@ void release_gmm_root_pt(struct kvm *kvm, gmm_struct_t *gmm)
 		spin_unlock(&kvm->mmu_lock);
 		return;
 	}
-	KVM_BUG_ON(!VALID_PAGE(gk_root));
+	KVM_BUG_ON(!VALID_PAGE(gk_root) && !pv_mmu_is_init_gmm(kvm, gmm));
 
 	if (unlikely(pv_mmu_is_init_gmm(kvm, gmm))) {
 		struct kvm_mmu_page *sp;
@@ -248,10 +249,15 @@ void release_gmm_root_pt(struct kvm *kvm, gmm_struct_t *gmm)
 		"kernel root 0x%llx\n",
 		gmm->nid.nr, gmm_root, gk_root);
 
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	kvm_release_user_root_kernel_copy(kvm, gmm);
+	trace_host_get_gmm_root_hpa(gmm, NATIVE_READ_IP_REG_VALUE());
 	KVM_BUG_ON(VALID_PAGE(gmm->gk_root_hpa));
+	gk_root = gmm->gk_root_hpa;
 
 	gmm->root_hpa = E2K_INVALID_PAGE;
+	trace_host_set_gmm_root_hpa(gmm, gmm_root, gk_root,
+				    NATIVE_READ_IP_REG_VALUE());
 	spin_unlock(&kvm->mmu_lock);
 
 	mmu_release_spt_root(kvm, gmm_root);
@@ -267,9 +273,9 @@ void release_gmm_root_pt(struct kvm *kvm, gmm_struct_t *gmm)
 			/* invalidate current VCPU SPT root */
 			kvm_set_space_type_spt_u_root(vcpu, E2K_INVALID_PAGE);
 			kvm_set_space_type_spt_os_root(vcpu,
-					pv_vcpu_get_init_gk_root_hpa(vcpu));
+					pv_vcpu_get_init_root_hpa(vcpu));
 			kvm_set_space_type_spt_gk_root(vcpu,
-					pv_vcpu_get_init_gk_root_hpa(vcpu));
+					pv_vcpu_get_init_root_hpa(vcpu));
 		}
 		spin_unlock(&kvm->mmu_lock);
 	}
@@ -612,35 +618,35 @@ static int kvm_pv_mmu_prepare_u_gmm(struct kvm_vcpu *vcpu,
 static int vcpu_init_pv_mmu_state(struct kvm_vcpu *vcpu,
 				  vcpu_gmmu_info_t *gmmu_info)
 {
-	gpa_t tc_gpa;
-	hpa_t tc_hpa, root;
+	hpa_t root;
 	e2k_core_mode_t core_mode;
 	bool updated;
 	int ret;
 
-	tc_gpa = gmmu_info->trap_cellar;
-	ret = vcpu_write_trap_point_mmu_reg(vcpu, tc_gpa, &tc_hpa);
-	if (ret != 0)
-		goto error;
+	if (gmmu_info->opcode & INIT_STATE_GMMU_TC_ONLY) {
+		hpa_t tc_hpa;
+		gpa_t tc_gpa = gmmu_info->trap_cellar;
+		return vcpu_write_trap_point_mmu_reg(vcpu, tc_gpa, &tc_hpa);
+	}
 
 	ret = vcpu_write_mmu_pid_reg(vcpu, gmmu_info->pid);
 	if (ret != 0)
-		goto error_tc;
+		goto error;
 
 	if (gmmu_info->sep_virt_space) {
 		set_sep_virt_spaces(vcpu);
 		ret = vcpu_write_mmu_os_pptb_reg(vcpu, gmmu_info->os_pptb,
 						 &updated, &root);
 		if (ret != 0)
-			goto error_tc;
+			goto error;
 
 		ret = vcpu_write_mmu_os_vptb_reg(vcpu, gmmu_info->os_vptb);
 		if (ret != 0)
-			goto error_tc;
+			goto error;
 
 		ret = vcpu_write_mmu_os_vab_reg(vcpu, gmmu_info->os_vab);
 		if (ret != 0)
-			goto error_tc;
+			goto error;
 	} else {
 		reset_sep_virt_spaces(vcpu);
 	}
@@ -653,22 +659,20 @@ static int vcpu_init_pv_mmu_state(struct kvm_vcpu *vcpu,
 	ret = vcpu_write_mmu_u_pptb_reg(vcpu, gmmu_info->u_pptb,
 					&updated, &root);
 	if (ret != 0)
-		goto error_tc;
+		goto error;
 
 	ret = vcpu_write_mmu_u_vptb_reg(vcpu, gmmu_info->u_vptb);
 	if (ret != 0)
-		goto error_tc;
+		goto error;
 
 	ret = vcpu_write_mmu_cr_reg(vcpu, gmmu_info->mmu_cr);
 	if (ret != 0)
-		goto error_tc;
+		goto error;
 
 	kvm_mmu_set_init_gmm_root(vcpu, E2K_INVALID_PAGE);
 
 	return 0;
 
-error_tc:
-	kvm_vcpu_release_trap_cellar(vcpu);
 error:
 	return ret;
 }
@@ -706,7 +710,7 @@ int kvm_pv_vcpu_mmu_state(struct kvm_vcpu *vcpu,
 			__func__, vcpu->vcpu_id);
 		return -EFAULT;
 	}
-	if (gmmu_info.opcode & INIT_STATE_GMMU_OPC) {
+	if (gmmu_info.opcode & (INIT_STATE_GMMU_OPC | INIT_STATE_GMMU_TC_ONLY)) {
 		return vcpu_init_pv_mmu_state(vcpu, &gmmu_info);
 	} else if (gmmu_info.opcode & SET_OS_VAB_GMMU_OPC) {
 		return vcpu_set_OS_VAB_pv_mmu_state(vcpu, &gmmu_info);
@@ -872,16 +876,46 @@ void *kvm_guest_ptr_to_host_ptr(void *guest_ptr, bool is_write,
 
 	return (void *)hva;
 }
+static void provide_jump_to_recovery_point(struct kvm_vcpu *vcpu, pt_regs_t *regs,
+					   trap_cellar_t *tcellar)
+{
+	tc_cond_t cond;
 
-static void inject_data_page_fault(struct kvm_vcpu *vcpu, pt_regs_t *regs,
+	KVM_BUG_ON(!KVM_TEST_RECOVERY_FAULTED(vcpu));
+	cond = tcellar->condition;
+	KVM_BUG_ON(!tc_test_is_as_kvm_recovery_user(cond));
+	correct_trap_return_ip(regs, KVM_GET_RECOVERY_JUMP_POINT(vcpu));
+	KVM_RESET_RECOVERY_FAULTED(vcpu);
+}
+
+static int inject_data_page_fault(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 					trap_cellar_t *tcellar)
 {
 	tc_cond_t cond;
 
 	cond = tcellar->condition;
+	if (KVM_TEST_RECOVERY_FAULTED(vcpu)) {
+		/* page fault on guest load/store recovery operation and */
+		/* fault should be on guest page handler, */
+		/* so does not inject new fault */
+		return 0;
+	}
+
 	tcellar->condition = tc_set_as_kvm_passed(cond);
 	kvm_inject_pv_vcpu_tc_entry(vcpu, tcellar);
 	kvm_inject_data_page_exc(vcpu, regs);
+	return 2;
+}
+
+static void set_recovery_user_page_fault(struct kvm_vcpu *vcpu,
+					 trap_cellar_t *tcellar)
+{
+	tc_cond_t cond;
+
+	cond = tcellar->condition;
+	cond = tc_set_kvm_fault_injected(cond);
+	cond = tc_set_kvm_recovery_user(cond);
+	tcellar->condition = cond;
 }
 
 static void inject_instr_page_fault(struct kvm_vcpu *vcpu, pt_regs_t *regs,
@@ -967,8 +1001,7 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	if (address >= NATIVE_TASK_SIZE) {
 		/* address from host page space range, so pass the fault */
 		/* to guest, let the guest itself handle whaut to do */
-		inject_data_page_fault(vcpu, regs, tcellar);
-		r = 2;
+		r = inject_data_page_fault(vcpu, regs, tcellar);
 		goto out;	/* fault injected to guest */
 	}
 
@@ -1045,6 +1078,12 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	mu_state->may_be_retried = true;
 	mu_state->ignore_notifier = false;
 
+	if (KVM_TEST_RECOVERY_FAULTED(vcpu)) {
+		/* page fault on guest load/store recovery operation */
+		/* set corresponding flag to don't recover by host */
+		set_recovery_user_page_fault(vcpu, tcellar);
+	}
+
 	/* clear flag to detect faulted address without update of PT entries */
 	kvm_clear_request(KVM_REQ_ADDR_FLUSH, vcpu);
 
@@ -1053,6 +1092,8 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	do {
 		pfres = mmu_pt_page_fault(vcpu, address, error_code,
 					  false, &gfn, &pfn);
+		if (unlikely(pfres == PFRES_ENOSPC))
+			break;
 		if (page_boundary) {
 			int pfres_hi;
 			e2k_addr_t address_hi;
@@ -1064,6 +1105,8 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 			pfres_hi = mmu_pt_page_fault(vcpu, address_hi, error_code,
 						     false, &gfn, &pfn);
 
+			if (unlikely(pfres == PFRES_ENOSPC))
+				break;
 			if (pfres == PFRES_ERR || pfres_hi == PFRES_ERR)
 				pfres = PFRES_ERR;
 			else if (pfres == PFRES_RETRY ||
@@ -1092,7 +1135,7 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		try++;
 #ifdef	KVM_ARCH_WANT_MMU_NOTIFIER
 		if ((try & 0xfff) == 0) {
-			pr_err("%s() too many retries #%ld : count is %ld "
+			pr_err("%s() too many retries %ld : count is %ld "
 				"seq from %ld to %ld\n",
 				__func__, try, vcpu->kvm->mmu_notifier_count,
 				mu_state->notifier_seq, vcpu->kvm->mmu_notifier_seq);
@@ -1109,16 +1152,19 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		r = 0;
 		goto out;	/* fault handled, but need recover */
 	} else if (pfres == PFRES_INJECTED) {
-		inject_data_page_fault(vcpu, regs, tcellar);
-		r = 2;
+		r = inject_data_page_fault(vcpu, regs, tcellar);
 		goto out;	/* fault injected to guest */
 	} else if (pfres == PFRES_DONT_INJECT) {
 		r = 3;
 		goto out;	/* fault cannot be injected to guest */
+	} else if (pfres == PFRES_ENOSPC) {
+		/* no space to allocate SPT: fault cannot be handled */
+		r = -ENOSPC;
+		goto out;
 	}
 	if (pfres != PFRES_WRITE_TRACK) {
 		/* error detected while page fault handling */
-		r = EFAULT;
+		r = -EFAULT;
 		goto out;
 	}
 	if ((error_code & PFERR_WAIT_LOCK_MASK) &&
@@ -1129,7 +1175,7 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 
 	/* fault handled but guest PT is protected at shadow PT of host */
 	/* so it need convert guest address to host HPA and */
-	/* recover based on not protected host address */
+	/* recovery based on not protected host address */
 	gpa = gfn_to_gpa(gfn);
 	gpa |= (address & ~PAGE_MASK);
 	if (likely(bytes == sizeof(pgprot_t))) {
@@ -1162,6 +1208,9 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 	}
 
 out:
+	if (KVM_TEST_RECOVERY_FAULTED(vcpu) && r == 0) {
+		provide_jump_to_recovery_point(vcpu, regs, tcellar);
+	}
 	if (kvm_check_request(KVM_REQ_ADDR_FLUSH, vcpu) &&
 				error_code & PFERR_ILLEGAL_PAGE_MASK) {
 		/*
@@ -1283,6 +1332,8 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 
 		if (pfres == PFRES_INJECTED)
 			break;
+		if (unlikely(pfres == PFRES_ENOSPC))
+			break;
 		address = (address & PAGE_MASK) + PAGE_SIZE;
 	} while (--instrs, instrs > 0);
 
@@ -1299,6 +1350,10 @@ int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 		}
 		r = 2;
 		goto out;	/* fault injected to guest */
+	} else if (pfres == PFRES_ENOSPC) {
+		/* no space to allocate SPT: fault cannot be handled */
+		r = -ENOSPC;
+		goto out;
 	}
 	/* error detected while page fault handling */
 	r = EFAULT;
@@ -1407,9 +1462,13 @@ int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		inject_aau_page_fault(vcpu, regs, aa_no);
 		r = 2;
 		goto out;	/* fault injected to guest */
+	} else if (pfres == PFRES_ENOSPC) {
+		/* no space to allocate SPT: fault cannot be handled */
+		r = -ENOSPC;
+		goto out;
 	} else {
 		/* error detected while page fault handling */
-		r = EFAULT;
+		r = -EFAULT;
 		goto out;
 	}
 
@@ -1527,6 +1586,9 @@ int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, int gmmid_nr,
 	DebugPTE("old pt %px == 0x%lx, new 0x%lx\n",
 		kaddr, pgprot_val(old_pt), pgprot_val(new_pt));
 
+	trace_gpte_atomic_update(vcpu, pgprot_val(old_pt), pgprot_val(new_pt),
+				 gmmid_nr, atomic_op, gpa);
+
 	kvm_vcpu_mark_page_dirty(vcpu, gfn);
 
 	if (likely(gmmid_nr >= 0)) {
@@ -1543,8 +1605,8 @@ int kvm_pv_mmu_pt_atomic_update(struct kvm_vcpu *vcpu, int gmmid_nr,
 			/* gmm is kernel thread init_gmm */
 			gmm = pv_vcpu_get_init_gmm(vcpu);
 		}
-		kvm_page_track_write(vcpu, gmm, gpa, (const void *)&new_pt,
-				sizeof(pgprot_t), flags);
+		mmu_pt_atomic_update_shadow_pt(vcpu, gmm, gpa,
+				pgprot_val(old_pt), pgprot_val(new_pt), flags);
 	} else {
 		/* gmm has been already released, ignore */
 		;
