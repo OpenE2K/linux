@@ -42,6 +42,9 @@
 #include <asm/set_memory.h>
 #include <asm/cpufeature.h>
 #endif
+#ifdef CONFIG_E2K
+#include <asm/set_memory.h>
+#endif
 #include <sound/core.h>
 #include <sound/initval.h>
 #include <sound/hdaudio.h>
@@ -195,7 +198,7 @@ module_param(align_buffer_size, bint, 0644);
 MODULE_PARM_DESC(align_buffer_size,
 		"Force buffer and period sizes to be multiple of 128 bytes.");
 
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 static int hda_snoop = -1;
 module_param_named(snoop, hda_snoop, bint, 0444);
 MODULE_PARM_DESC(snoop, "Enable/disable snooping");
@@ -268,6 +271,9 @@ enum {
 	AZX_DRIVER_TERA,
 	AZX_DRIVER_CTX,
 	AZX_DRIVER_CTHDA,
+#ifdef CONFIG_MCST
+	AZX_DRIVER_IOHUB2,
+#endif /* CONFIG_MCST */
 	AZX_DRIVER_CMEDIA,
 	AZX_DRIVER_ZHAOXIN,
 	AZX_DRIVER_GENERIC,
@@ -390,6 +396,9 @@ static char *driver_short_names[] = {
 	[AZX_DRIVER_CTHDA] = "HDA Creative",
 	[AZX_DRIVER_CMEDIA] = "HDA C-Media",
 	[AZX_DRIVER_ZHAOXIN] = "HDA Zhaoxin",
+#ifdef CONFIG_MCST
+	[AZX_DRIVER_IOHUB2] = "HDA MCST",
+#endif /* CONFIG_MCST */
 	[AZX_DRIVER_GENERIC] = "HD-Audio Generic",
 };
 
@@ -1741,6 +1750,11 @@ static int default_bdl_pos_adj(struct azx *chip)
 	case AZX_DRIVER_ICH:
 	case AZX_DRIVER_PCH:
 		return 1;
+#ifdef CONFIG_MCST
+	case AZX_DRIVER_IOHUB2:
+		/* iohub2 hda have problems with short buffers */
+		return 0;
+#endif /* CONFIG_MCST */
 	default:
 		return 32;
 	}
@@ -1833,6 +1847,29 @@ static int azx_create(struct snd_card *card, struct pci_dev *pci,
 		azx_free(chip);
 		return err;
 	}
+
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+	if (pci->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pci->device == PCI_DEVICE_ID_MCST_HDA) {
+		/* read codec twice to fix hardware syncronization error. */
+		if (iohub_generation(pci) == 1 &&
+				iohub_revision(pci) < 2) {
+			chip->bus.needs_retry_on_codec_write = 1;
+		}
+		if (pci->revision == 2) { /* with hdmi-codec */
+			/* let mga2 to initialize hdmi cores */
+			if ((err = request_module("mga2"))) {
+				dev_err(card->dev,
+					"Error requesting mga2: %d\n", err);
+				snd_device_free(card, chip);
+				azx_free(chip);
+				/* request_module() can return positive
+				 * error value so do not propagate it. */
+				return -EINVAL;
+			}
+		}
+	}
+#endif
 
 	/* continue probing in work context as may trigger request module */
 	INIT_WORK(&hda->probe_work, azx_probe_work);
@@ -2062,7 +2099,7 @@ static int disable_msi_reset_irq(struct azx *chip)
 static void pcm_mmap_prepare(struct snd_pcm_substream *substream,
 			     struct vm_area_struct *area)
 {
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 	struct azx_pcm *apcm = snd_pcm_substream_chip(substream);
 	struct azx *chip = apcm->chip;
 	if (chip->uc_buffer)
@@ -2415,6 +2452,10 @@ static void azx_shutdown(struct pci_dev *pci)
 
 /* PCI IDs */
 static const struct pci_device_id azx_ids[] = {
+#ifdef CONFIG_MCST
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_HDA),
+		      .driver_data = AZX_DRIVER_IOHUB2 },
+#endif /* CONFIG_MCST */
 	/* CPT */
 	{ PCI_DEVICE(0x8086, 0x1c20),
 	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH_NOPM },

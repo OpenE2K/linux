@@ -38,13 +38,16 @@ static inline void flush_tlb_range(struct vm_area_struct *vma,
 }
 
 void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+void flush_tlb_pending(void);
 
+#ifndef CONFIG_MCST_RT
 #define __HAVE_ARCH_ENTER_LAZY_MMU_MODE
 
-void flush_tlb_pending(void);
 void arch_enter_lazy_mmu_mode(void);
 void arch_leave_lazy_mmu_mode(void);
 #define arch_flush_lazy_mmu_mode()      do {} while (0)
+#endif
+
 
 /* Local cpu only.  */
 void __flush_tlb_all(void);

@@ -72,6 +72,9 @@ struct udl_device {
 	atomic_t bytes_identical; /* saved effort with backbuffer comparison */
 	atomic_t bytes_sent; /* to usb, after compression including overhead */
 	atomic_t cpu_kcycles_used; /* transpired during pixel processing */
+#ifdef CONFIG_MCST
+	struct device_dma_parameters dma_parms;
+#endif
 };
 
 #define to_udl(x) container_of(x, struct udl_device, drm)

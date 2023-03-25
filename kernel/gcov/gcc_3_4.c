@@ -280,7 +280,12 @@ struct gcov_info *gcov_info_dup(struct gcov_info *info)
 
 		dup->counts[i].num = ctr->num;
 		dup->counts[i].merge = ctr->merge;
+#ifdef CONFIG_MCST
+		/* TODO lcc bug 109896: remove when fixed */
+		dup->counts[i].values = size ? vmalloc(size) : NULL;
+#else
 		dup->counts[i].values = vmalloc(size);
+#endif
 		if (!dup->counts[i].values)
 			goto err_free;
 		memcpy(dup->counts[i].values, ctr->values, size);

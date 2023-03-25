@@ -1464,7 +1464,12 @@ static int kernel_migrate_pages(pid_t pid, unsigned long maxnode,
 
 	if (!scratch)
 		return -ENOMEM;
-
+#ifdef CONFIG_MCST
+	if (BITS_TO_LONGS(MAX_NUMNODES) < BITS_TO_LONGS(maxnode)) {
+		err = -EINVAL;
+		goto out;
+	}
+#endif
 	old = &scratch->mask1;
 	new = &scratch->mask2;
 
@@ -1475,7 +1480,12 @@ static int kernel_migrate_pages(pid_t pid, unsigned long maxnode,
 	err = get_nodes(new, new_nodes, maxnode);
 	if (err)
 		goto out;
-
+#ifdef CONFIG_MCST
+	if (nodes_empty(*new)) {
+		err = -EINVAL;
+		goto out;
+	}
+#endif
 	/* Find the mm_struct */
 	rcu_read_lock();
 	task = pid ? find_task_by_vpid(pid) : current;
@@ -1871,6 +1881,9 @@ unsigned int mempolicy_slab_node(void)
 
 	default:
 		BUG();
+#ifdef __LCC__
+		return 0;
+#endif
 	}
 }
 

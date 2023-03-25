@@ -2684,7 +2684,11 @@ static void virtnet_config_changed_work(struct work_struct *work)
 {
 	struct virtnet_info *vi =
 		container_of(work, struct virtnet_info, config_work);
+#ifndef CONFIG_MCST
 	u16 v;
+#else
+	u16 uninitialized_var(v);
+#endif
 
 	if (virtio_cread_feature(vi->vdev, VIRTIO_NET_F_STATUS,
 				 struct virtio_net_config, status, &v) < 0)
@@ -3072,7 +3076,11 @@ static int virtnet_probe(struct virtio_device *vdev)
 	int i, err = -ENOMEM;
 	struct net_device *dev;
 	struct virtnet_info *vi;
+#ifndef CONFIG_MCST
 	u16 max_queue_pairs;
+#else
+	u16 uninitialized_var(max_queue_pairs);
+#endif
 	int mtu;
 
 	/* Find if host supports multiqueue virtio_net device */

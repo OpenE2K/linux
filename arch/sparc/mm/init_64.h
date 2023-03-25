@@ -24,7 +24,11 @@ struct linux_prom_translation {
 };
 
 /* Exported for kernel TLB miss handling in ktlb.S */
+#ifdef CONFIG_E90S
+extern struct linux_prom_translation prom_trans[64];
+#else
 extern struct linux_prom_translation prom_trans[512];
+#endif
 extern unsigned int prom_trans_ents;
 
 /* Exported for SMP bootup purposes. */

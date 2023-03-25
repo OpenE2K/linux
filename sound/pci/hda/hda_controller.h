@@ -13,6 +13,9 @@
 #include <sound/initval.h>
 #include <sound/hda_codec.h>
 #include <sound/hda_register.h>
+#ifdef CONFIG_E2K
+#include <asm/pci.h>
+#endif
 
 #define AZX_MAX_CODECS		HDA_MAX_CODECS
 #define AZX_DEFAULT_CODECS	4
@@ -158,6 +161,9 @@ struct azx {
 
 static inline bool azx_snoop(struct azx *chip)
 {
+#ifdef CONFIG_E2K
+	return !use_pcie_no_snoop || chip->snoop;
+#endif
 	return !IS_ENABLED(CONFIG_X86) || chip->snoop;
 }
 

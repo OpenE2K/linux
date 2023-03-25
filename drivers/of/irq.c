@@ -161,6 +161,10 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 		 */
 		if (of_property_read_bool(ipar, "interrupt-controller")) {
 			pr_debug(" -> got it !\n");
+#ifdef CONFIG_MCST
+			of_node_put(ipar);
+			of_node_put(newpar);
+#endif
 			return 0;
 		}
 

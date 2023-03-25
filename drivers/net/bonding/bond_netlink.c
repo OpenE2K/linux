@@ -163,6 +163,9 @@ static int bond_changelink(struct net_device *bond_dev, struct nlattr *tb[],
 	struct bond_opt_value newval;
 	int miimon = 0;
 	int err;
+#if defined(CONFIG_MCST) && defined(__LCC__)
+	err = 0;
+#endif
 
 	if (!data)
 		return 0;

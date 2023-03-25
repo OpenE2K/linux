@@ -57,4 +57,17 @@ static inline void scr_memmovew(u16 *d, u16 *s, unsigned int n)
 
 #define VGA_MAP_MEM(x,s) (x)
 
+/*
+ * Our drivers doesn't use VGA legacy resources so
+ * we assume we can't have any conflicts
+ */
+#ifdef CONFIG_E2K
+#define __ARCH_HAS_VGA_CONFLICT
+struct pci_dev;
+static inline int vga_conflicts(struct pci_dev *p1, struct pci_dev *p2)
+{
+	return 0;
+}
+#endif /* CONFIG_MCST */
+
 #endif

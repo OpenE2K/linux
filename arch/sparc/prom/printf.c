@@ -56,7 +56,7 @@ void notrace prom_write(const char *buf, unsigned int n)
 
 	raw_spin_unlock_irqrestore(&console_write_lock, flags);
 }
-
+#ifndef CONFIG_E90S
 void notrace prom_printf(const char *fmt, ...)
 {
 	va_list args;
@@ -68,3 +68,4 @@ void notrace prom_printf(const char *fmt, ...)
 
 	prom_write(ppbuf, i);
 }
+#endif

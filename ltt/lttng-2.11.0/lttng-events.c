@@ -85,7 +85,7 @@ void synchronize_trace(void)
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0))
-#ifdef CONFIG_PREEMPT_RT_FULL
+#ifdef CONFIG_PREEMPT_RT
 	synchronize_rcu();
 #endif
 #else /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0)) */

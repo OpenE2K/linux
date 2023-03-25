@@ -3050,7 +3050,11 @@ void *copy_mount_options(const void __user * data)
 	 * the remainder of the page.
 	 */
 	/* copy_from_user cannot cross TASK_SIZE ! */
+#ifndef CONFIG_MCST
 	size = TASK_SIZE - (unsigned long)untagged_addr(data);
+#else
+	size = USER_DS.seg - (unsigned long)untagged_addr(data);
+#endif
 	if (size > PAGE_SIZE)
 		size = PAGE_SIZE;
 

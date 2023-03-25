@@ -237,6 +237,10 @@ __visible unsigned int __irq_entry do_IRQ(struct pt_regs *regs)
 	/* high bit used in ret_from_ code  */
 	unsigned vector = ~regs->orig_ax;
 
+#ifdef CONFIG_MCST
+	current_thread_info()->irq_enter_clk = get_cycles();
+#endif
+
 	entering_irq();
 
 	/* entering_irq() tells RCU that we're not quiescent.  Check it. */

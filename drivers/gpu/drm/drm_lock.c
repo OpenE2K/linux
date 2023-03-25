@@ -135,6 +135,11 @@ static int drm_legacy_lock_free(struct drm_lock_data *lock_data,
 	}
 	spin_unlock_bh(&lock_data->spinlock);
 
+#ifdef CONFIG_MCST
+	if (!lock) /* Device has been unregistered */
+		return 1;
+#endif
+
 	do {
 		old = *lock;
 		new = _DRM_LOCKING_CONTEXT(old);
@@ -169,8 +174,10 @@ int drm_legacy_lock(struct drm_device *dev, void *data,
 	struct drm_master *master = file_priv->master;
 	int ret = 0;
 
+#ifndef CONFIG_MCST /*Vivante galcore needs this*/
 	if (!drm_core_check_feature(dev, DRIVER_LEGACY))
 		return -EOPNOTSUPP;
+#endif
 
 	++file_priv->lock_count;
 
@@ -259,8 +266,10 @@ int drm_legacy_unlock(struct drm_device *dev, void *data, struct drm_file *file_
 	struct drm_lock *lock = data;
 	struct drm_master *master = file_priv->master;
 
+#ifndef CONFIG_MCST /*Vivante galcore needs this*/
 	if (!drm_core_check_feature(dev, DRIVER_LEGACY))
 		return -EOPNOTSUPP;
+#endif
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",

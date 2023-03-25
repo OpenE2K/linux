@@ -204,7 +204,7 @@ static const struct dmi_system_id inverted_x_screen[] = {
  * @buf: raw write data buffer.
  * @len: length of the buffer to write
  */
-static int goodix_i2c_read(struct i2c_client *client,
+static int __goodix_i2c_read(struct i2c_client *client,
 			   u16 reg, u8 *buf, int len)
 {
 	struct i2c_msg msgs[2];
@@ -233,7 +233,7 @@ static int goodix_i2c_read(struct i2c_client *client,
  * @buf: raw data buffer to write.
  * @len: length of the buffer to write
  */
-static int goodix_i2c_write(struct i2c_client *client, u16 reg, const u8 *buf,
+static int __goodix_i2c_write(struct i2c_client *client, u16 reg, const u8 *buf,
 			    unsigned len)
 {
 	u8 *addr_buf;
@@ -257,6 +257,24 @@ static int goodix_i2c_write(struct i2c_client *client, u16 reg, const u8 *buf,
 	kfree(addr_buf);
 	return ret < 0 ? ret : (ret != 1 ? -EIO : 0);
 }
+
+#define goodix_i2c_read(c,r,b,l)				\
+({								\
+	unsigned __val = __goodix_i2c_read(c,r,b,l);		\
+	int __l = l;						\
+	dev_dbg(&c->dev, "R%d: %x: %s\t%s:%d\n", 		\
+			__l, __val, # r, __func__, __LINE__);	\
+	__val;							\
+})
+
+#define goodix_i2c_write(c,r,b,l)				\
+({								\
+	unsigned __val = __goodix_i2c_write(c,r,b,l);		\
+	int __l = l;						\
+	dev_dbg(&c->dev, "W%d: %x: %s\t%s:%d\n", 		\
+			__l, __val, # r, __func__, __LINE__);	\
+	__val;							\
+})
 
 static int goodix_i2c_write_u8(struct i2c_client *client, u16 reg, u8 value)
 {
@@ -335,7 +353,7 @@ static int goodix_ts_read_input_report(struct goodix_ts_data *ts, u8 *data)
 	 * The Goodix panel will send spurious interrupts after a
 	 * 'finger up' event, which will always cause a timeout.
 	 */
-	return 0;
+	return -ENOMSG;
 }
 
 static void goodix_ts_report_touch_8b(struct goodix_ts_data *ts, u8 *coor_data)
@@ -655,21 +673,56 @@ static int goodix_get_gpio_config(struct goodix_ts_data *ts)
  *
  * Must be called during probe
  */
+#ifdef CONFIG_MCST
+#define i2c_quirk_exceeded(val, quirk) ((quirk) && ((val) > (quirk)))
+#endif /* CONFIG_MCST */
+
 static void goodix_read_config(struct goodix_ts_data *ts)
 {
 	u8 config[GOODIX_CONFIG_MAX_LENGTH];
 	int x_max, y_max;
 	int error;
-
-	error = goodix_i2c_read(ts->client, ts->chip->config_addr,
-				config, ts->chip->config_len);
-	if (error) {
-		dev_warn(&ts->client->dev, "Error reading config: %d\n",
-			 error);
-		ts->int_trigger_type = GOODIX_INT_TRIGGER;
-		ts->max_touch_num = GOODIX_MAX_CONTACTS;
-		return;
+#ifdef CONFIG_MCST
+	const struct i2c_adapter_quirks *q = ts->client->adapter->quirks;
+	if (i2c_quirk_exceeded(ts->chip->config_len, q->max_read_len)) {
+		u16 temp_addr = ts->chip->config_addr;
+		u16 len = q->max_read_len;
+		int rem_len = ts->chip->config_len;
+		int cycles;
+		int i;
+		if (rem_len % len == 0) {
+			cycles = rem_len / len;
+		} else {
+			cycles = (rem_len / len) + 1;
+		}
+		for (i = 0; i < cycles; i++) {
+			error = goodix_i2c_read(ts->client, temp_addr,
+					config + (len * i), (rem_len > len) ? len : rem_len);
+			if (error) {
+				dev_warn(&ts->client->dev, "Error reading config: %d\n",
+					 error);
+				ts->int_trigger_type = GOODIX_INT_TRIGGER;
+				ts->max_touch_num = GOODIX_MAX_CONTACTS;
+				return;
+			}
+			temp_addr += len;
+			rem_len -= len;
+		}
+	} else {
+#else
+		error = goodix_i2c_read(ts->client, ts->chip->config_addr,
+					config, ts->chip->config_len);
+		if (error) {
+			dev_warn(&ts->client->dev, "Error reading config: %d\n",
+				 error);
+			ts->int_trigger_type = GOODIX_INT_TRIGGER;
+			ts->max_touch_num = GOODIX_MAX_CONTACTS;
+			return;
+		}
+#endif /*CONFIG_MCST */
+#ifdef CONFIG_MCST
 	}
+#endif /*CONFIG_MCST */
 
 	ts->int_trigger_type = config[TRIGGER_LOC] & 0x03;
 	ts->max_touch_num = config[MAX_CONTACTS_LOC] & 0x0f;
@@ -931,7 +984,10 @@ static int goodix_ts_probe(struct i2c_client *client,
 			return error;
 		}
 	}
-
+#ifdef CONFIG_MCST
+	if (ts->gpiod_int)
+		client->irq = gpiod_to_irq(ts->gpiod_int);
+#endif
 	error = goodix_i2c_test(client);
 	if (error) {
 		dev_err(&client->dev, "I2C communication failure: %d\n", error);

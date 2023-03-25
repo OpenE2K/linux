@@ -68,6 +68,11 @@ extern union global_cpu_snapshot global_cpu_snapshot[NR_CPUS];
 		(regs)->tnpc = (val)+4; \
 	} while (0)
 #define user_stack_pointer(regs) ((regs)->u_regs[UREG_FP])
+
+#ifdef CONFIG_MCST
+#undef is_syscall_success
+#define is_syscall_success is_syscall_success
+#endif
 static inline int is_syscall_success(struct pt_regs *regs)
 {
 	return !(regs->tstate & (TSTATE_XCARRY | TSTATE_ICARRY));
@@ -75,7 +80,14 @@ static inline int is_syscall_success(struct pt_regs *regs)
 
 static inline long regs_return_value(struct pt_regs *regs)
 {
+#ifdef CONFIG_MCST
+	if (is_syscall_success(regs))
+		return regs->u_regs[UREG_I0];
+	else
+		return -regs->u_regs[UREG_I0];
+#else
 	return regs->u_regs[UREG_I0];
+#endif
 }
 #ifdef CONFIG_SMP
 unsigned long profile_pc(struct pt_regs *);

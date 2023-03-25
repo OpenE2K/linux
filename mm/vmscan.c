@@ -63,6 +63,10 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/vmscan.h>
 
+
+#ifdef CONFIG_MCST
+atomic_t num_shrink_page_list = ATOMIC_INIT(0);
+#endif
 struct scan_control {
 	/* How many pages shrink_list() should reclaim */
 	unsigned long nr_to_reclaim;
@@ -1134,6 +1138,10 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 	memset(stat, 0, sizeof(*stat));
 	cond_resched();
 
+#ifdef CONFIG_MCST
+	atomic_inc(&num_shrink_page_list);
+#endif
+
 	while (!list_empty(page_list)) {
 		struct address_space *mapping;
 		struct page *page;
@@ -1532,6 +1540,10 @@ keep:
 
 	list_splice(&ret_pages, page_list);
 	count_vm_events(PGACTIVATE, pgactivate);
+
+#ifdef CONFIG_MCST
+	atomic_dec(&num_shrink_page_list);
+#endif
 
 	return nr_reclaimed;
 }

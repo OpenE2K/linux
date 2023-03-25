@@ -9,7 +9,9 @@
 #include <linux/irqdomain.h>
 #include <linux/lockdep.h>
 #include <linux/pinctrl/pinctrl.h>
+#ifdef CONFIG_MCST
 #include <linux/pinctrl/pinconf-generic.h>
+#endif /* CONFIG_MCST */
 
 struct gpio_desc;
 struct of_phandle_args;

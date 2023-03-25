@@ -406,7 +406,15 @@ static void slob_free(void *block, int size)
 		slob_free_pages(b, 0);
 		return;
 	}
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	{ struct kmem_cache *c = page->slab_cache;
 
+		if (mem_san && pax_sanitize_slab &&
+				 !(c && (c->flags & SLAB_NO_SANITIZE))) {
+			memset(block, MEMORY_SANITIZE_VALUE, size);
+		}
+	}
+#endif
 	if (!slob_page_free(sp)) {
 		/* This slob page is about to become partially free. Easy! */
 		sp->units = units;

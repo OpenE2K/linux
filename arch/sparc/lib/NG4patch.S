@@ -30,7 +30,11 @@
 niagara4_patch_copyops:
 	NG_DO_PATCH(memcpy, NG4memcpy)
 	NG_DO_PATCH(raw_copy_from_user, NG4copy_from_user)
+#ifdef CONFIG_MCST
+	NG_DO_PATCH(_raw_copy_to_user, NG4copy_to_user)
+#else
 	NG_DO_PATCH(raw_copy_to_user, NG4copy_to_user)
+#endif /* CONFIG_MCST */
 	retl
 	 nop
 	.size	niagara4_patch_copyops,.-niagara4_patch_copyops

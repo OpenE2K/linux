@@ -101,6 +101,8 @@ obj-$(CONFIG_TRACEPOINTS) += trace/
 obj-$(CONFIG_IRQ_WORK) += irq_work.o
 obj-$(CONFIG_CPU_PM) += cpu_pm.o
 obj-$(CONFIG_BPF) += bpf/
+obj-$(CONFIG_MCST) += el_posix.o
+obj-$(CONFIG_WATCH_PREEMPT) += watch_preempt.o
 
 obj-$(CONFIG_PERF_EVENTS) += events/
 

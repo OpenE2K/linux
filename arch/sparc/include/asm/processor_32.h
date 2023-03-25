@@ -26,6 +26,10 @@
 struct task_struct;
 
 #ifdef __KERNEL__
+
+/* virtualization does not support */
+#define	paravirt_enabled()	false
+
 struct fpq {
 	unsigned long *insn_addr;
 	unsigned long insn;

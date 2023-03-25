@@ -238,13 +238,20 @@ int radeon_vce_resume(struct radeon_device *rdev)
 		dev_err(rdev->dev, "(%d) VCE map failed\n", r);
 		return r;
 	}
-
+#ifdef CONFIG_MCST
+	memset_io(cpu_addr, 0, radeon_bo_size(rdev->vce.vcpu_bo));
+#else
 	memset(cpu_addr, 0, radeon_bo_size(rdev->vce.vcpu_bo));
+#endif
 	if (rdev->family < CHIP_BONAIRE)
 		r = vce_v1_0_load_fw(rdev, cpu_addr);
 	else
+#ifdef CONFIG_MCST
+		memcpy_toio(cpu_addr, rdev->vce_fw->data, rdev->vce_fw->size);
+#else
 		memcpy(cpu_addr, rdev->vce_fw->data, rdev->vce_fw->size);
 
+#endif
 	radeon_bo_kunmap(rdev->vce.vcpu_bo);
 
 	radeon_bo_unreserve(rdev->vce.vcpu_bo);

@@ -105,7 +105,12 @@ typedef struct {
 } tag_storage_desc_t;
 
 typedef struct {
+#ifdef CONFIG_MCST
+	raw_spinlock_t		lock;
+	unsigned char		is_exit_mmap:1;
+#else
 	spinlock_t		lock;
+#endif
 	unsigned long		sparc64_ctx_val;
 	unsigned long		hugetlb_pte_count;
 	unsigned long		thp_pte_count;

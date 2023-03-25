@@ -151,7 +151,6 @@ config THERMAL_GOV_POWER_ALLOCATOR
 config CPU_THERMAL
 	bool "Generic cpu cooling support"
 	depends on CPU_FREQ
-	depends on THERMAL_OF
 	help
 	  This implements the generic cpu cooling mechanism through frequency
 	  reduction. An ACPI version of this already exists

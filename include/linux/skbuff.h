@@ -701,6 +701,9 @@ struct sk_buff {
 		};
 		struct rb_node		rbnode; /* used in netem, ip4 defrag, and tcp stack */
 		struct list_head	list;
+#ifdef CONFIG_MCST
+		struct list_head	napi_skb_list;
+#endif
 	};
 
 	union {

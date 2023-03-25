@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# PCS Layer Configuration
+#
+
+menu "PCS device drivers"
+
+source "drivers/net/pcs/mcst/Kconfig"
+
+endmenu

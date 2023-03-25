@@ -484,6 +484,9 @@ static bool assoc_array_insert_into_terminal_node(struct assoc_array_edit *edit,
 	bool have_meta;
 	int level, diff;
 	int slot, next_slot, free_slot, i, j;
+#ifdef CONFIG_MCST
+	j = 0;	/* Fix ompilation warning */
+#endif
 
 	node	= result->terminal_node.node;
 	level	= result->terminal_node.level;

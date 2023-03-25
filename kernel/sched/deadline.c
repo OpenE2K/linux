@@ -43,6 +43,30 @@ static inline int on_dl_rq(struct sched_dl_entity *dl_se)
 	return !RB_EMPTY_NODE(&dl_se->rb_node);
 }
 
+#ifdef CONFIG_MCST
+# ifdef CONFIG_RT_MUTEXES
+static inline struct sched_dl_entity *pi_of(struct sched_dl_entity *dl_se)
+{
+	return dl_se->pi_se;
+}
+
+static inline bool is_dl_boosted(struct sched_dl_entity *dl_se)
+{
+	return pi_of(dl_se) != dl_se;
+}
+# else
+static inline struct sched_dl_entity *pi_of(struct sched_dl_entity *dl_se)
+{
+	return dl_se;
+}
+
+static inline bool is_dl_boosted(struct sched_dl_entity *dl_se)
+{
+	return false;
+}
+# endif
+#endif
+
 #ifdef CONFIG_SMP
 static inline struct dl_bw *dl_bw_of(int i)
 {
@@ -657,7 +681,11 @@ static inline void setup_new_dl_entity(struct sched_dl_entity *dl_se)
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
 	struct rq *rq = rq_of_dl_rq(dl_rq);
 
+#ifndef CONFIG_MCST
 	WARN_ON(dl_se->dl_boosted);
+#else
+	WARN_ON(is_dl_boosted(dl_se));
+#endif
 	WARN_ON(dl_time_before(rq_clock(rq), dl_se->deadline));
 
 	/*
@@ -695,21 +723,34 @@ static inline void setup_new_dl_entity(struct sched_dl_entity *dl_se)
  * could happen are, typically, a entity voluntarily trying to overcome its
  * runtime, or it just underestimated it during sched_setattr().
  */
+#ifndef CONFIG_MCST
 static void replenish_dl_entity(struct sched_dl_entity *dl_se,
 				struct sched_dl_entity *pi_se)
+#else
+static void replenish_dl_entity(struct sched_dl_entity *dl_se)
+#endif
 {
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
 	struct rq *rq = rq_of_dl_rq(dl_rq);
 
+#ifndef CONFIG_MCST
 	BUG_ON(pi_se->dl_runtime <= 0);
+#else
+	BUG_ON(pi_of(dl_se)->dl_runtime <= 0);
+#endif
 
 	/*
 	 * This could be the case for a !-dl task that is boosted.
 	 * Just go with full inherited parameters.
 	 */
 	if (dl_se->dl_deadline == 0) {
+#ifndef CONFIG_MCST
 		dl_se->deadline = rq_clock(rq) + pi_se->dl_deadline;
 		dl_se->runtime = pi_se->dl_runtime;
+#else
+		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
+		dl_se->runtime = pi_of(dl_se)->dl_runtime;
+#endif
 	}
 
 	if (dl_se->dl_yielded && dl_se->runtime > 0)
@@ -722,8 +763,13 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se,
 	 * arbitrary large.
 	 */
 	while (dl_se->runtime <= 0) {
+#ifndef CONFIG_MCST
 		dl_se->deadline += pi_se->dl_period;
 		dl_se->runtime += pi_se->dl_runtime;
+#else
+		dl_se->deadline += pi_of(dl_se)->dl_period;
+		dl_se->runtime += pi_of(dl_se)->dl_runtime;
+#endif
 	}
 
 	/*
@@ -737,8 +783,13 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se,
 	 */
 	if (dl_time_before(dl_se->deadline, rq_clock(rq))) {
 		printk_deferred_once("sched: DL replenish lagged too much\n");
+#ifndef CONFIG_MCST
 		dl_se->deadline = rq_clock(rq) + pi_se->dl_deadline;
 		dl_se->runtime = pi_se->dl_runtime;
+#else
+		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
+		dl_se->runtime = pi_of(dl_se)->dl_runtime;
+#endif
 	}
 
 	if (dl_se->dl_yielded)
@@ -771,8 +822,12 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se,
  * task with deadline equal to period this is the same of using
  * dl_period instead of dl_deadline in the equation above.
  */
+#ifndef CONFIG_MCST
 static bool dl_entity_overflow(struct sched_dl_entity *dl_se,
 			       struct sched_dl_entity *pi_se, u64 t)
+#else
+static bool dl_entity_overflow(struct sched_dl_entity *dl_se, u64 t)
+#endif
 {
 	u64 left, right;
 
@@ -794,9 +849,17 @@ static bool dl_entity_overflow(struct sched_dl_entity *dl_se,
 	 * of anything below microseconds resolution is actually fiction
 	 * (but still we want to give the user that illusion >;).
 	 */
+#ifndef CONFIG_MCST
 	left = (pi_se->dl_deadline >> DL_SCALE) * (dl_se->runtime >> DL_SCALE);
+#else
+	left = (pi_of(dl_se)->dl_deadline >> DL_SCALE) * (dl_se->runtime >> DL_SCALE);
+#endif
 	right = ((dl_se->deadline - t) >> DL_SCALE) *
+#ifndef CONFIG_MCST
 		(pi_se->dl_runtime >> DL_SCALE);
+#else
+		(pi_of(dl_se)->dl_runtime >> DL_SCALE);
+#endif
 
 	return dl_time_before(right, left);
 }
@@ -881,24 +944,41 @@ static inline bool dl_is_implicit(struct sched_dl_entity *dl_se)
  * Please refer to the comments update_dl_revised_wakeup() function to find
  * more about the Revised CBS rule.
  */
+#ifndef CONFIG_MCST
 static void update_dl_entity(struct sched_dl_entity *dl_se,
 			     struct sched_dl_entity *pi_se)
+#else
+static void update_dl_entity(struct sched_dl_entity *dl_se)
+#endif
 {
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
 	struct rq *rq = rq_of_dl_rq(dl_rq);
 
 	if (dl_time_before(dl_se->deadline, rq_clock(rq)) ||
+#ifndef CONFIG_MCST
 	    dl_entity_overflow(dl_se, pi_se, rq_clock(rq))) {
+#else
+	    dl_entity_overflow(dl_se, rq_clock(rq))) {
+#endif
 
 		if (unlikely(!dl_is_implicit(dl_se) &&
 			     !dl_time_before(dl_se->deadline, rq_clock(rq)) &&
+#ifndef CONFIG_MCST
 			     !dl_se->dl_boosted)){
+#else
+			     !is_dl_boosted(dl_se))) {
+#endif
 			update_dl_revised_wakeup(dl_se, rq);
 			return;
 		}
 
+#ifndef CONFIG_MCST
 		dl_se->deadline = rq_clock(rq) + pi_se->dl_deadline;
 		dl_se->runtime = pi_se->dl_runtime;
+#else
+		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
+		dl_se->runtime = pi_of(dl_se)->dl_runtime;
+#endif
 	}
 }
 
@@ -997,7 +1077,11 @@ static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 	 * The task might have been boosted by someone else and might be in the
 	 * boosting/deboosting path, its not throttled.
 	 */
+#ifndef CONFIG_MCST
 	if (dl_se->dl_boosted)
+#else
+	if (is_dl_boosted(dl_se))
+#endif
 		goto unlock;
 
 	/*
@@ -1025,7 +1109,11 @@ static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 	 * but do not enqueue -- wait for our wakeup to do that.
 	 */
 	if (!task_on_rq_queued(p)) {
+#ifndef CONFIG_MCST
 		replenish_dl_entity(dl_se, dl_se);
+#else
+		replenish_dl_entity(dl_se);
+#endif
 		goto unlock;
 	}
 
@@ -1115,7 +1203,11 @@ static inline void dl_check_constrained_dl(struct sched_dl_entity *dl_se)
 
 	if (dl_time_before(dl_se->deadline, rq_clock(rq)) &&
 	    dl_time_before(rq_clock(rq), dl_next_period(dl_se))) {
+#ifndef CONFIG_MCST
 		if (unlikely(dl_se->dl_boosted || !start_dl_timer(p)))
+#else
+		if (unlikely(is_dl_boosted(dl_se) || !start_dl_timer(p)))
+#endif
 			return;
 		dl_se->dl_throttled = 1;
 		if (dl_se->runtime > 0)
@@ -1246,7 +1338,11 @@ throttle:
 			dl_se->dl_overrun = 1;
 
 		__dequeue_task_dl(rq, curr, 0);
+#ifndef CONFIG_MCST
 		if (unlikely(dl_se->dl_boosted || !start_dl_timer(curr)))
+#else
+		if (unlikely(is_dl_boosted(dl_se) || !start_dl_timer(curr)))
+#endif
 			enqueue_task_dl(rq, curr, ENQUEUE_REPLENISH);
 
 		if (!is_leftmost(curr, &rq->dl))
@@ -1440,8 +1536,12 @@ static void __dequeue_dl_entity(struct sched_dl_entity *dl_se)
 }
 
 static void
+#ifndef CONFIG_MCST
 enqueue_dl_entity(struct sched_dl_entity *dl_se,
 		  struct sched_dl_entity *pi_se, int flags)
+#else
+enqueue_dl_entity(struct sched_dl_entity *dl_se, int flags)
+#endif
 {
 	BUG_ON(on_dl_rq(dl_se));
 
@@ -1452,9 +1552,17 @@ enqueue_dl_entity(struct sched_dl_entity *dl_se,
 	 */
 	if (flags & ENQUEUE_WAKEUP) {
 		task_contending(dl_se, flags);
+#ifndef CONFIG_MCST
 		update_dl_entity(dl_se, pi_se);
+#else
+		update_dl_entity(dl_se);
+#endif
 	} else if (flags & ENQUEUE_REPLENISH) {
+#ifndef CONFIG_MCST
 		replenish_dl_entity(dl_se, pi_se);
+#else
+		replenish_dl_entity(dl_se);
+#endif
 	} else if ((flags & ENQUEUE_RESTORE) &&
 		  dl_time_before(dl_se->deadline,
 				 rq_clock(rq_of_dl_rq(dl_rq_of_se(dl_se))))) {
@@ -1471,6 +1579,7 @@ static void dequeue_dl_entity(struct sched_dl_entity *dl_se)
 
 static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 {
+#ifndef CONFIG_MCST
 	struct task_struct *pi_task = rt_mutex_get_top_task(p);
 	struct sched_dl_entity *pi_se = &p->dl;
 
@@ -1484,6 +1593,9 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 	 */
 	if (pi_task && dl_prio(pi_task->normal_prio) && p->dl.dl_boosted) {
 		pi_se = &pi_task->dl;
+#else
+	if (is_dl_boosted(&p->dl)) {
+#endif
 	} else if (!dl_prio(p->normal_prio)) {
 		/*
 		 * Special case in which we have a !SCHED_DEADLINE task
@@ -1492,7 +1604,11 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 		 * it, as it's going to return back to its original
 		 * scheduling class after this.
 		 */
+#ifndef CONFIG_MCST
 		BUG_ON(!p->dl.dl_boosted || flags != ENQUEUE_REPLENISH);
+#else
+		BUG_ON(!is_dl_boosted(&p->dl) || flags != ENQUEUE_REPLENISH);
+#endif
 		return;
 	}
 
@@ -1529,7 +1645,11 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 		return;
 	}
 
+#ifndef CONFIG_MCST
 	enqueue_dl_entity(&p->dl, pi_se, flags);
+#else
+	enqueue_dl_entity(&p->dl, flags);
+#endif
 
 	if (!task_current(rq, p) && p->nr_cpus_allowed > 1)
 		enqueue_pushable_dl_task(rq, p);
@@ -2698,11 +2818,17 @@ void __dl_clear_params(struct task_struct *p)
 	dl_se->dl_bw			= 0;
 	dl_se->dl_density		= 0;
 
+#if !defined(CONFIG_MCST)
 	dl_se->dl_boosted		= 0;
+#endif
 	dl_se->dl_throttled		= 0;
 	dl_se->dl_yielded		= 0;
 	dl_se->dl_non_contending	= 0;
 	dl_se->dl_overrun		= 0;
+
+#if defined(CONFIG_MCST) && defined(CONFIG_RT_MUTEXES)
+	dl_se->pi_se			= dl_se;
+#endif
 }
 
 bool dl_param_changed(struct task_struct *p, const struct sched_attr *attr)

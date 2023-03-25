@@ -74,8 +74,27 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 #endif /* CONFIG_PROFILE_ALL_BRANCHES */
 
 #else
+#ifdef CONFIG_MCST
+/* Wait for #113288 before dropping __builtin_expect_prob() */
+# ifdef __LCC__
+#  if __LCC__ > 125 || __LCC__ == 125 && __LCC_MINOR__ >= 9
+#   define likely(x)	__builtin_expect_with_probability(!!(x), 1, 0.9999)
+#   define unlikely(x)	__builtin_expect_with_probability(!!(x), 1, 0.0001)
+#  else
+#   define likely(x)	__builtin_expect_prob(!!(x), 0.9999)
+#   define unlikely(x)	__builtin_expect_prob(!!(x), 0.0001)
+#  endif
+# elif __GNUC__ >= 9
+#  define likely(x)	__builtin_expect_with_probability(!!(x), 1, 0.9999)
+#  define unlikely(x)	__builtin_expect_with_probability(!!(x), 1, 0.0001)
+# else
+#  define likely(x)	__builtin_expect(!!(x), 1)
+#  define unlikely(x)	__builtin_expect(!!(x), 0)
+# endif
+#else
 # define likely(x)	__builtin_expect(!!(x), 1)
 # define unlikely(x)	__builtin_expect(!!(x), 0)
+#endif
 #endif
 
 /* Optimization barrier */
@@ -325,6 +344,24 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 #include <asm/barrier.h>
 #include <linux/kasan-checks.h>
 
+#ifdef __LCC__	 /* bug # 84179 */
+# ifndef barrier_preemption
+#  define barrier_preemption()
+# endif
+#define __READ_ONCE(x, check)						\
+({									\
+	typeof(x) __dummy __attribute__((unused));			\
+	union { typeof(__dummy) __val; char __c[1]; } __u;		\
+	if (check)							\
+		__read_once_size(&(x), __u.__c, sizeof(x));		\
+	else								\
+		__read_once_size_nocheck(&(x), __u.__c, sizeof(x));	\
+	smp_read_barrier_depends(); /* Enforce dependency ordering from x */ \
+	/* Forbid lcc to move per-cpu global registers around */	\
+	barrier_preemption();						\
+	__u.__val;							\
+})
+#else /* __LCC__ */
 #define __READ_ONCE(x, check)						\
 ({									\
 	union { typeof(x) __val; char __c[1]; } __u;			\
@@ -335,6 +372,7 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 	smp_read_barrier_depends(); /* Enforce dependency ordering from x */ \
 	__u.__val;							\
 })
+#endif /* __LCC__ */
 #define READ_ONCE(x) __READ_ONCE(x, 1)
 
 /*
@@ -350,6 +388,16 @@ unsigned long read_word_at_a_time(const void *addr)
 	return *(unsigned long *)addr;
 }
 
+#ifdef __LCC__	 /* bug # 84179 */
+#define WRITE_ONCE(x, val) \
+({								\
+	typeof(x) __dummy __attribute__((unused));		\
+	union { typeof(__dummy) __val; char __c[1]; } __u =	\
+	{ .__val = (__force typeof(x)) (val) };			\
+	__write_once_size(&(x), __u.__c, sizeof(x));		\
+	__u.__val;						\
+})
+#else /* __LCC__ */
 #define WRITE_ONCE(x, val) \
 ({							\
 	union { typeof(x) __val; char __c[1]; } __u =	\
@@ -357,6 +405,7 @@ unsigned long read_word_at_a_time(const void *addr)
 	__write_once_size(&(x), __u.__c, sizeof(x));	\
 	__u.__val;					\
 })
+#endif /* __LCC__ */
 
 #endif /* __KERNEL__ */
 

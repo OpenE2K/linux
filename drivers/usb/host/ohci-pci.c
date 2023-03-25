@@ -140,7 +140,23 @@ static void ohci_quirk_nec_worker(struct work_struct *work)
 static int ohci_quirk_nec(struct usb_hcd *hcd)
 {
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
-
+#ifdef CONFIG_MCST
+	struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_OHCI) {
+		if (iohub_generation(pdev) == 1) {
+			ohci->flags |= OHCI_QUIRK_DISABLE_REMOTEWAKEUP_ON_RESET;
+			/*Bug 86897*/
+			ohci->flags |= OHCI_QUIRK_RESUME_STATE;
+			device_init_wakeup(&hcd->self.root_hub->dev, 0);
+			if (iohub_revision(pdev) > 1)
+				return 0;
+		} else if (iohub_generation(pdev) > 1) {
+			/* FIXUP: boot should have done this */
+			ohci->hc_control |= OHCI_CTRL_RWC;
+		}
+	}
+#endif
 	ohci->flags |= OHCI_QUIRK_NEC;
 	INIT_WORK(&ohci->nec_work, ohci_quirk_nec_worker);
 	ohci_dbg (ohci, "enabled NEC chipset lost interrupt quirk\n");
@@ -200,6 +216,12 @@ static const struct pci_device_id ohci_pci_quirks[] = {
 		PCI_DEVICE(PCI_VENDOR_ID_NEC, PCI_DEVICE_ID_NEC_USB),
 		.driver_data = (unsigned long)ohci_quirk_nec,
 	},
+#ifdef CONFIG_MCST
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_OHCI),
+		.driver_data = (unsigned long)ohci_quirk_nec,
+	},
+#endif
 	{
 		/* Toshiba portege 4000 */
 		.vendor		= PCI_VENDOR_ID_AL,

@@ -35,7 +35,7 @@
 #include <scsi/scsi_transport_fc.h>
 #include <scsi/fc/fc_fs.h>
 #include <linux/aer.h>
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 #include <asm/set_memory.h>
 #endif
 
@@ -15700,7 +15700,7 @@ lpfc_wq_create(struct lpfc_hba *phba, struct lpfc_queue *wq,
 
 			/* Enable combined writes for DPP aperture */
 			pg_addr = (unsigned long)(wq->dpp_regaddr) & PAGE_MASK;
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 			rc = set_memory_wc(pg_addr, 1);
 			if (rc) {
 				lpfc_printf_log(phba, KERN_ERR, LOG_INIT,

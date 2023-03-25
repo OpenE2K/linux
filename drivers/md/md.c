@@ -2467,7 +2467,11 @@ void md_kick_rdev_from_array(struct md_rdev *rdev)
 }
 EXPORT_SYMBOL_GPL(md_kick_rdev_from_array);
 
+#ifdef CONFIG_MCST
+static noinline void export_array(struct mddev *mddev)
+#else
 static void export_array(struct mddev *mddev)
+#endif
 {
 	struct md_rdev *rdev;
 

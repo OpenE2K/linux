@@ -70,9 +70,27 @@ static int load_elf_library(struct file *);
  * don't even try.
  */
 #ifdef CONFIG_ELF_CORE
+#if !defined(CONFIG_E2K) || (ELF_CLASS == ELFCLASS64)
 static int elf_core_dump(struct coredump_params *cprm);
+#endif		/* !CONFIG_E2K || (ELF_CLASS == ELFCLASS64) */
+# ifdef CONFIG_E2K
+/* Hardware stacks lie above 4Gb boundary in 32-bit applications on e2k
+ * so the same core dump function is used for all modes. */
+#if ELF_CLASS == ELFCLASS64
+int elf_core_dump_64(struct coredump_params *cprm)
+{
+	return elf_core_dump(cprm);
+}
+#else
+extern int elf_core_dump_64(struct coredump_params *cprm);
+#endif
+#endif	/* CONFIG_E2K */
+
 #else
 #define elf_core_dump	NULL
+#ifdef	CONFIG_E2K
+#define	elf_core_dump_64	NULL
+#endif	/* CONFIG_E2K */
 #endif
 
 #if ELF_EXEC_PAGESIZE > PAGE_SIZE
@@ -93,7 +111,11 @@ static struct linux_binfmt elf_format = {
 	.module		= THIS_MODULE,
 	.load_binary	= load_elf_binary,
 	.load_shlib	= load_elf_library,
+#if defined(CONFIG_E2K) && (ELF_CLASS != ELFCLASS64)
+	.core_dump	= elf_core_dump_64,
+#else
 	.core_dump	= elf_core_dump,
+#endif
 	.min_coredump	= ELF_EXEC_PAGESIZE,
 };
 
@@ -1257,6 +1279,8 @@ out:
 #endif /* #ifdef CONFIG_USELIB */
 
 #ifdef CONFIG_ELF_CORE
+#if !defined(CONFIG_E2K) || (ELF_CLASS == ELFCLASS64)
+
 /*
  * ELF core dumper
  *
@@ -1298,7 +1322,10 @@ static bool always_dump_vma(struct vm_area_struct *vma)
 /*
  * Decide what to dump of a segment, part, all or none.
  */
-static unsigned long vma_dump_size(struct vm_area_struct *vma,
+#ifndef CONFIG_E2K
+static
+#endif
+unsigned long vma_dump_size(struct vm_area_struct *vma,
 				   unsigned long mm_flags)
 {
 #define FILTER(type)	(mm_flags & (1UL << MMF_DUMP_##type))
@@ -2280,7 +2307,11 @@ static int elf_core_dump(struct coredump_params *cprm)
 	}
 
 	offset += vma_data_size;
+#ifdef CONFIG_E2K
+	offset += elf_core_extra_data_size(cprm);
+#else
 	offset += elf_core_extra_data_size();
+#endif /* CONFIG_E2K */
 	e_shoff = offset;
 
 	if (e_phnum == PN_XNUM) {
@@ -2346,7 +2377,21 @@ static int elf_core_dump(struct coredump_params *cprm)
 			struct page *page;
 			int stop;
 
+#ifdef CONFIG_E2K
+			/* Set TS_KERNEL_SYSCALL for core dumping of hw stacks
+			 * (it is checked in arch_vma_access_permitted()) */
+			if (vma->vm_flags & VM_PRIVILEGED) {
+				unsigned long ts_flag;
+
+				ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+				page = get_dump_page(addr);
+				clear_ts_flag(ts_flag);
+			} else {
+				page = get_dump_page(addr);
+			}
+#else
 			page = get_dump_page(addr);
+#endif
 			if (page) {
 				void *kaddr = kmap(page);
 				stop = !dump_emit(cprm, kaddr, PAGE_SIZE);
@@ -2381,6 +2426,7 @@ out:
 	return has_dumped;
 }
 
+#endif
 #endif		/* CONFIG_ELF_CORE */
 
 static int __init init_elf_binfmt(void)

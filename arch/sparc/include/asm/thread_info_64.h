@@ -30,6 +30,9 @@
 
 #include <asm/ptrace.h>
 #include <asm/types.h>
+#ifdef CONFIG_E90S
+#include <asm/pcr.h>
+#endif /* CONFIG_E90S */
 
 struct task_struct;
 
@@ -60,6 +63,17 @@ struct thread_info {
 	struct pt_regs		*kern_una_regs;
 	unsigned int		kern_una_insn;
 
+	int			preempt_lazy_count;	/* 0 => lazy preemptable
+							  <0 => BUG */
+#ifdef CONFIG_MCST
+	unsigned int		epic_core_priority;
+	long long               irq_enter_clk;
+#endif
+#ifdef CONFIG_E90S
+	__u64			kernel_cnt[E90S_PIC_NR];
+	__u64			pcr_regs[E90S_PIC_NR];
+
+#endif /* CONFIG_E90S */
 	unsigned long		fpregs[(7 * 256) / sizeof(unsigned long)]
 		__attribute__ ((aligned(64)));
 };
@@ -90,7 +104,12 @@ struct thread_info {
 #define TI_XFSR		0x00000430
 #define TI_KUNA_REGS	0x00000468
 #define TI_KUNA_INSN	0x00000470
-#define TI_FPREGS	0x00000480
+#define TI_LAZY_COUNT	0x00000474
+#ifndef CONFIG_E90S
+#define TI_FPREGS	0x000004c0
+#else /* CONFIG_E90S */
+#define TI_FPREGS	0x00000500
+#endif /* CONFIG_E90S */
 
 /* We embed this in the uppermost byte of thread_info->flags */
 #define FAULT_CODE_WRITE	0x01	/* Write access, implies D-TLB	   */
@@ -113,12 +132,24 @@ struct thread_info {
  */
 #ifndef __ASSEMBLY__
 
+#ifdef CONFIG_MCST
 #define INIT_THREAD_INFO(tsk)				\
 {							\
 	.task		=	&tsk,			\
 	.current_ds	=	ASI_P,			\
 	.preempt_count	=	INIT_PREEMPT_COUNT,	\
+	.preempt_lazy_count =	0,			\
+	.status		=	TS_UNALIGN_SIGBUS,	\
 }
+#else /* !CONFIG_MCST */
+#define INIT_THREAD_INFO(tsk)				\
+{							\
+	.task		=	&tsk,			\
+	.current_ds	=	ASI_P,			\
+	.preempt_count	=	INIT_PREEMPT_COUNT,	\
+	.preempt_lazy_count =	0,			\
+}
+#endif
 
 /* how to get the thread information struct from C */
 #ifndef BUILD_VDSO
@@ -180,7 +211,11 @@ extern struct thread_info *current_thread_info(void);
 #define TIF_NOTIFY_RESUME	1	/* callback before returning to user */
 #define TIF_SIGPENDING		2	/* signal pending */
 #define TIF_NEED_RESCHED	3	/* rescheduling necessary */
+#ifndef CONFIG_E90S
 /* flag bit 4 is available */
+#else /* CONFIG_E90S */
+#define TIF_PERFCTR		4	/* performance counters active */
+#endif /* CONFIG_E90S */
 #define TIF_UNALIGNED		5	/* allowed to do unaligned accesses */
 #define TIF_UPROBE		6	/* breakpointed or singlestepped */
 #define TIF_32BIT		7	/* 32-bit binary */
@@ -192,9 +227,17 @@ extern struct thread_info *current_thread_info(void);
  *       in using in assembly, else we can't use the mask as
  *       an immediate value in instructions such as andcc.
  */
-#define TIF_MCDPER		12	/* Precise MCD exception */
+#ifndef CONFIG_E90S
+/* flag bit 12 is available */
+#else /* CONFIG_E90S */
+#define TIF_FIRST_READ_PIC	12	/* first read pic counters */
+#endif /* CONFIG_E90S */
 #define TIF_MEMDIE		13	/* is terminating due to OOM killer */
 #define TIF_POLLING_NRFLAG	14
+#define TIF_NEED_RESCHED_LAZY	15	/* lazy rescheduling necessary */
+#ifdef CONFIG_MCST
+#define TIF_NAPI_WORK		31	/* napi_wq_worker() is running MCST addition */
+#endif
 
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1<<TIF_NOTIFY_RESUME)
@@ -208,6 +251,10 @@ extern struct thread_info *current_thread_info(void);
 #define _TIF_SYSCALL_AUDIT	(1<<TIF_SYSCALL_AUDIT)
 #define _TIF_SYSCALL_TRACEPOINT	(1<<TIF_SYSCALL_TRACEPOINT)
 #define _TIF_POLLING_NRFLAG	(1<<TIF_POLLING_NRFLAG)
+#define _TIF_NEED_RESCHED_LAZY	(1<<TIF_NEED_RESCHED_LAZY)
+#ifdef CONFIG_MCST
+#define _TIF_NAPI_WORK		(1 << TIF_NAPI_WORK)
+#endif
 
 #define _TIF_USER_WORK_MASK	((0xff << TI_FLAG_WSAVED_SHIFT) | \
 				 _TIF_DO_NOTIFY_RESUME_MASK | \
@@ -226,6 +273,12 @@ extern struct thread_info *current_thread_info(void);
  *
  * Note that there are only 8 bits available.
  */
+#define TS_LAZY_MMU		0x0002	/* lazy mmu mode is active */
+#define TS_RESTORE_SIGMASK	0x0001	/* restore signal mask in do_signal() */
+#ifdef CONFIG_MCST
+#define TS_UNALIGN_NOPRINT	0x0008	/* don't log unaligned accesses */
+#define TS_UNALIGN_SIGBUS	0x0004	/* generate SIGBUS on unaligned acc. */
+#endif
 
 #ifndef __ASSEMBLY__
 

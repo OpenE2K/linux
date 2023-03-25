@@ -30,6 +30,9 @@ static inline void ipi_set_tstate_mcde(void *arg)
 #define arch_calc_vm_prot_bits(prot, pkey) sparc_calc_vm_prot_bits(prot)
 static inline unsigned long sparc_calc_vm_prot_bits(unsigned long prot)
 {
+	if (prot & PROT_INVEND) 
+		return VM_INVEND;
+
 	if (adi_capable() && (prot & PROT_ADI)) {
 		struct pt_regs *regs;
 
@@ -49,13 +52,15 @@ static inline unsigned long sparc_calc_vm_prot_bits(unsigned long prot)
 #define arch_vm_get_page_prot(vm_flags) sparc_vm_get_page_prot(vm_flags)
 static inline pgprot_t sparc_vm_get_page_prot(unsigned long vm_flags)
 {
-	return (vm_flags & VM_SPARC_ADI) ? __pgprot(_PAGE_MCD_4V) : __pgprot(0);
+	return (vm_flags & VM_INVEND) ? __pgprot(_PAGE_IE) :
+	       (vm_flags & VM_SPARC_ADI) ? __pgprot(_PAGE_MCD_4V) : __pgprot(0);
 }
 
 #define arch_validate_prot(prot, addr) sparc_validate_prot(prot, addr)
 static inline int sparc_validate_prot(unsigned long prot, unsigned long addr)
 {
-	if (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC | PROT_SEM | PROT_ADI))
+	if (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC | PROT_SEM | PROT_ADI |
+			PROT_INVEND))
 		return 0;
 	return 1;
 }

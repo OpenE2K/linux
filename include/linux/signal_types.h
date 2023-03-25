@@ -49,7 +49,13 @@ struct sigaction {
 struct k_sigaction {
 	struct sigaction sa;
 #ifdef __ARCH_HAS_KA_RESTORER
+# if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	unsigned int sa_restorer_cui;
+# endif
 	__sigrestore_t ka_restorer;
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	unsigned int sa_handler_cui;
 #endif
 };
 

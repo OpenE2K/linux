@@ -309,6 +309,16 @@ static void fsnotify_iter_next(struct fsnotify_iter_info *iter_info)
 	}
 }
 
+#if defined CONFIG_MCST && defined CONFIG_FANOTIFY
+extern char fanotify_forwarded_chroot_task[TASK_COMM_LEN];
+static bool mnt_fully_visible(struct vfsmount *mnt)
+{
+	if (mnt->mnt_root != mnt->mnt_sb->s_root)
+		return false;
+	return true;
+}
+#endif
+
 /*
  * This is the main call to fsnotify.  The VFS calls into hook specific functions
  * in linux/fsnotify.h.  Those functions then in turn call here.  Here will call
@@ -333,6 +343,24 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 	if (mask & FS_EVENT_ON_CHILD)
 		mnt_or_sb_mask = 0;
 
+#if defined CONFIG_MCST && defined CONFIG_FANOTIFY
+	if (data_is == FSNOTIFY_EVENT_PATH &&
+				fanotify_forwarded_chroot_task[0]) {
+		struct vfsmount *vmnt = ((struct path *)data)->mnt;
+		if (!mnt_fully_visible(vmnt)) {
+			struct super_block *sb = vmnt->mnt_sb;
+			struct mount *m;
+			lock_mount_hash();
+			list_for_each_entry(m, &sb->s_mounts, mnt_instance) {
+				if (m->mnt.mnt_root == m->mnt.mnt_sb->s_root) {
+					mnt = real_mount(&m->mnt);
+					break;
+				}
+			}
+			unlock_mount_hash();
+		}
+	}
+#endif
 	/*
 	 * Optimization: srcu_read_lock() has a memory barrier which can
 	 * be expensive.  It protects walking the *_fsnotify_marks lists.

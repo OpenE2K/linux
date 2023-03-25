@@ -3,6 +3,7 @@
 #define ___ASM_SPARC_PAGE_H
 
 #define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)
+#define phys_to_page(phys)	(pfn_to_page(__phys_to_pfn(phys)))
 
 #if defined(__sparc__) && defined(__arch64__)
 #include <asm/page_64.h>

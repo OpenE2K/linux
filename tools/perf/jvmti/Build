@@ -19,3 +19,9 @@ $(OUTPUT)jvmti/libstring.o: ../lib/string.c FORCE
 $(OUTPUT)jvmti/libctype.o: ../lib/ctype.c FORCE
 	$(call rule_mkdir)
 	$(call if_changed_dep,cc_o_c)
+
+#MCST add this since our glibc doesn't have scnprintf()
+jvmti-y += vsprintf.o
+$(OUTPUT)jvmti/vsprintf.o: ../lib/vsprintf.c FORCE
+	$(call rule_mkdir)
+	$(call if_changed_dep,cc_o_c)

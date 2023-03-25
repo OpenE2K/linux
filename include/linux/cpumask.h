@@ -96,6 +96,10 @@ extern struct cpumask __cpu_active_mask;
 #define cpu_present_mask  ((const struct cpumask *)&__cpu_present_mask)
 #define cpu_active_mask   ((const struct cpumask *)&__cpu_active_mask)
 
+#ifdef CONFIG_MCST
+extern struct cpumask *rt_cpu_mask;
+#endif
+
 extern atomic_t __num_online_cpus;
 
 #if NR_CPUS > 1
@@ -118,6 +122,9 @@ static inline unsigned int num_online_cpus(void)
 #define cpu_possible(cpu)	cpumask_test_cpu((cpu), cpu_possible_mask)
 #define cpu_present(cpu)	cpumask_test_cpu((cpu), cpu_present_mask)
 #define cpu_active(cpu)		cpumask_test_cpu((cpu), cpu_active_mask)
+#ifdef CONFIG_MCST
+#define rt_cpu(cpu)		cpumask_test_cpu((cpu), rt_cpu_mask)
+#endif
 #else
 #define num_online_cpus()	1U
 #define num_possible_cpus()	1U
@@ -127,6 +134,9 @@ static inline unsigned int num_online_cpus(void)
 #define cpu_possible(cpu)	((cpu) == 0)
 #define cpu_present(cpu)	((cpu) == 0)
 #define cpu_active(cpu)		((cpu) == 0)
+#ifdef CONFIG_MCST
+#define rt_cpu(cpu)		0U
+#endif
 #endif
 
 extern cpumask_t cpus_booted_once_mask;

@@ -131,10 +131,14 @@ int drm_of_component_probe(struct device *dev,
 		port = of_parse_phandle(dev->of_node, "ports", i);
 		if (!port)
 			break;
-
 		if (of_device_is_available(port->parent))
+#ifdef CONFIG_MCST
+			drm_of_component_match_add(dev, &match, compare_of,
+						   port->parent);
+#else
 			drm_of_component_match_add(dev, &match, compare_of,
 						   port);
+#endif
 
 		of_node_put(port);
 	}

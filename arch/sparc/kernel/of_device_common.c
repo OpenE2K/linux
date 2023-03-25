@@ -24,6 +24,7 @@ unsigned int irq_of_parse_and_map(struct device_node *node, int index)
 }
 EXPORT_SYMBOL(irq_of_parse_and_map);
 
+#ifndef CONFIG_E90S
 int of_address_to_resource(struct device_node *node, int index,
 			   struct resource *r)
 {
@@ -50,6 +51,7 @@ void __iomem *of_iomap(struct device_node *node, int index)
 	return of_ioremap(r, 0, resource_size(r), (char *) r->name);
 }
 EXPORT_SYMBOL(of_iomap);
+#endif
 
 /* Take the archdata values for IOMMU, STC, and HOSTDATA found in
  * BUS and propagate to all child platform_device objects.

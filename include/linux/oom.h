@@ -121,10 +121,21 @@ extern int unregister_oom_notifier(struct notifier_block *nb);
 extern bool oom_killer_disable(signed long timeout);
 extern void oom_killer_enable(void);
 
+#ifdef CONFIG_MCST
+extern int oom_limit(struct task_struct *p);
+extern void set_oom_kill_time(void);
+#endif /* CONFIG_MCST */
+
 extern struct task_struct *find_lock_task_mm(struct task_struct *p);
 
 /* sysctls */
 extern int sysctl_oom_dump_tasks;
 extern int sysctl_oom_kill_allocating_task;
 extern int sysctl_panic_on_oom;
+
+#ifdef CONFIG_MCST
+extern int sysctl_oom_kill_root_task;
+extern int sysctl_oom_no_create_new_task;
+#endif /* CONFIG_MCST */
+
 #endif /* _INCLUDE_LINUX_OOM_H */

@@ -74,11 +74,35 @@ config PREEMPT_RT
 	  low level and critical code pathes (entry code, scheduler, low
 	  level interrupt handling) fully preemptible and brings most
 	  execution contexts under scheduler control.
-
+ 
 	  Select this if you are building a kernel for systems which
 	  require real-time guarantees.
-
+ 
 endchoice
+
+config MCST_RT
+	bool "MCST enhancement of PREEMPT_RT"
+	default y
+	depends on MCST && PREEMPT_RT
+	help
+	   Possibility to turn off some fair opportunuties
+	   for all tasks to decrease latency for RT tasks
+
+config MCST_RT_SMP
+        bool
+        depends on SMP
+
+config MCST_RT_GRQ
+        bool "MCST RT: Global Runqueue Additions"
+        depends on  MCST_RT && SMP
+        default y
+        select MCST_RT_SMP
+
+config MCST_RT_NUMA
+        bool "MCST RT NUMA additions"
+        depends on  MCST_RT && NUMA && !GROUP_SCHED && !CPUSETS
+        default y
+        select MCST_RT_SMP
 
 config PREEMPT_COUNT
        bool

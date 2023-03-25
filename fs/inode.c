@@ -181,7 +181,7 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	mapping->host = inode;
 	mapping->flags = 0;
 	mapping->wb_err = 0;
-	atomic_set(&mapping->i_mmap_writable, 0);
+ 	atomic_set(&mapping->i_mmap_writable, 0);
 #ifdef CONFIG_READ_ONLY_THP_FOR_FS
 	atomic_set(&mapping->nr_thps, 0);
 #endif
@@ -266,6 +266,9 @@ void __destroy_inode(struct inode *inode)
 		posix_acl_release(inode->i_acl);
 	if (inode->i_default_acl && !is_uncached_acl(inode->i_default_acl))
 		posix_acl_release(inode->i_default_acl);
+#endif
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_inode_free(inode);
 #endif
 	this_cpu_dec(nr_inodes);
 }
@@ -395,6 +398,9 @@ void inode_init_once(struct inode *inode)
 	INIT_LIST_HEAD(&inode->i_lru);
 	__address_space_init_once(&inode->i_data);
 	i_size_ordered_init(inode);
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	INIT_LIST_HEAD(&inode->el_posix_objects);
+#endif
 }
 EXPORT_SYMBOL(inode_init_once);
 

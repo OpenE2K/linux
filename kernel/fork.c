@@ -102,6 +102,17 @@
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
+#ifdef CONFIG_MCST
+#include <linux/mcst_rt.h>
+#include <linux/cpumask.h>
+#endif
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+#include <linux/el_posix.h>
+#endif
+
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
 
 #include <trace/events/sched.h>
 
@@ -688,6 +699,9 @@ void __mmdrop(struct mm_struct *mm)
 	BUG_ON(mm == &init_mm);
 	WARN_ON_ONCE(mm == current->mm);
 	WARN_ON_ONCE(mm == current->active_mm);
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_mm_destroy(mm);
+#endif
 	mm_free_pgd(mm);
 	destroy_context(mm);
 	mmu_notifier_mm_destroy(mm);
@@ -1048,6 +1062,13 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	RCU_INIT_POINTER(mm->exe_file, NULL);
 	mmu_notifier_mm_init(mm);
 	init_tlb_flush_pending(mm);
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	INIT_LIST_HEAD(&mm->el_posix.shared_objects);
+	init_rwsem(&mm->el_posix.lock);
+	mm->el_posix.mutexes = NULL;
+	mm->el_posix.others = NULL;
+	mm->el_posix.user = NULL;
+#endif
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 	mm->pmd_huge_pte = NULL;
 #endif
@@ -1310,6 +1331,10 @@ static int wait_for_vfork_done(struct task_struct *child,
  */
 static void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 {
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	exit_el_posix(tsk);
+#endif
+
 	uprobe_free_utask(tsk);
 
 	/* Get rid of any cached register state */
@@ -1364,8 +1389,14 @@ void exec_mm_release(struct task_struct *tsk, struct mm_struct *mm)
  *
  * Return: the duplicated mm or NULL on failure.
  */
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+static struct mm_struct *dup_mm(struct task_struct *tsk,
+				struct mm_struct *oldmm,
+				unsigned long clone_flags)
+#else
 static struct mm_struct *dup_mm(struct task_struct *tsk,
 				struct mm_struct *oldmm)
+#endif
 {
 	struct mm_struct *mm;
 	int err;
@@ -1379,6 +1410,11 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 	if (!mm_init(mm, tsk, mm->user_ns))
 		goto fail_nomem;
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	err = dup_mm_el_posix(oldmm, mm, clone_flags);
+	if (err)
+		goto free_pt;
+#endif
 	err = dup_mmap(mm, oldmm);
 	if (err)
 		goto free_pt;
@@ -1435,7 +1471,11 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	}
 
 	retval = -ENOMEM;
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	mm = dup_mm(tsk, current->mm, clone_flags);
+#else
 	mm = dup_mm(tsk, current->mm);
+#endif
 	if (!mm)
 		goto fail_nomem;
 
@@ -1600,6 +1640,10 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 
 	task_lock(current->group_leader);
 	memcpy(sig->rlim, current->signal->rlim, sizeof sig->rlim);
+#if defined(CONFIG_MCST) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	memcpy(sig->bin_comp_rlim, current->signal->bin_comp_rlim,
+	       sizeof sig->bin_comp_rlim);
+#endif
 	task_unlock(current->group_leader);
 
 	posix_cpu_timers_init_group(sig);
@@ -1814,6 +1858,13 @@ static __latent_entropy struct task_struct *copy_process(
 	struct file *pidfile = NULL;
 	u64 clone_flags = args->flags;
 
+#ifdef CONFIG_MCST
+	/* don't create not root process during sometime after oom_killer work*/
+	if (pid != &init_struct_pid && oom_limit(current)) {
+		return ERR_PTR(-ENOMEM);
+	}
+#endif
+
 	/*
 	 * Don't allow sharing the root directory with processes in a different
 	 * namespace
@@ -2015,11 +2066,20 @@ static __latent_entropy struct task_struct *copy_process(
 #ifdef CONFIG_DEBUG_MUTEXES
 	p->blocked_on = NULL; /* not blocked yet */
 #endif
+#ifdef CONFIG_MCST
+#ifndef CONFIG_PREEMPT_RT
+	p->wait_on_mutex = NULL;
+#endif
+	p->wait_on_rtmutex = NULL;
+#endif
 #ifdef CONFIG_BCACHE
 	p->sequential_io	= 0;
 	p->sequential_io_avg	= 0;
 #endif
 
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_init(p);
+#endif
 	/* Perform scheduler related setup. Assign this task to a CPU. */
 	retval = sched_fork(clone_flags, p);
 	if (retval)
@@ -2051,9 +2111,19 @@ static __latent_entropy struct task_struct *copy_process(
 	retval = copy_signal(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_sighand;
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+	el_posix_lock(clone_flags);
+	retval = copy_mm(clone_flags, p);
+	if (retval) {
+		el_posix_unlock(clone_flags);
+		goto bad_fork_cleanup_signal;
+	}
+	el_posix_unlock(clone_flags);	
+#else
 	retval = copy_mm(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_signal;
+#endif
 	retval = copy_namespaces(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_mm;
@@ -2382,6 +2452,22 @@ long _do_fork(struct kernel_clone_args *args)
 	int trace = 0;
 	long nr;
 
+#ifdef CONFIG_MCST
+	if (rts_act_mask & RTS_NO_FORK) {
+		p = current;
+		pr_warn("RTS_NO_FORK but %s-%d does. Parents:",
+			p->comm, p->pid);
+		while (p->real_parent) {
+			p = p->real_parent;
+			pr_warn(" %s-%d", p->comm, p->pid);
+			if (p->pid <= 2)
+				break;
+		}
+		pr_warn("\n");
+		if (!strncmp(p->comm, "kworker", 6))
+			WARN_ON(1);
+	}
+#endif
 	/*
 	 * Determine whether and which event to report to ptracer.  When
 	 * called from kernel_thread or CLONE_UNTRACED is explicitly
@@ -2423,6 +2509,22 @@ long _do_fork(struct kernel_clone_args *args)
 		init_completion(&vfork);
 		get_task_struct(p);
 	}
+
+#ifdef CONFIG_MCST
+#include <linux/cpumask.h>
+	if (cpumask_weight(&p->cpus_mask) > 1 &&
+			cpumask_intersects(&p->cpus_mask, rt_cpu_mask)) {
+		cpumask_var_t new_mask;
+
+		if (!alloc_cpumask_var(&new_mask, GFP_KERNEL))
+			return -ENOMEM;
+
+		cpumask_copy(new_mask, &p->cpus_mask);
+		cpumask_andnot(new_mask, new_mask, rt_cpu_mask);
+		set_cpus_allowed_ptr(p, new_mask);
+		free_cpumask_var(new_mask);
+	}
+#endif
 
 	wake_up_new_task(p);
 
@@ -2769,7 +2871,12 @@ void __init proc_caches_init(void)
 			offsetof(struct mm_struct, saved_auxv),
 			sizeof_field(struct mm_struct, saved_auxv),
 			NULL);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	vm_area_cachep = KMEM_CACHE(vm_area_struct, SLAB_PANIC|SLAB_ACCOUNT
+							| SLAB_NO_SANITIZE);
+#else
 	vm_area_cachep = KMEM_CACHE(vm_area_struct, SLAB_PANIC|SLAB_ACCOUNT);
+#endif
 	mmap_init();
 	nsproxy_cache_init();
 }

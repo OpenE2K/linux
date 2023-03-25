@@ -261,6 +261,8 @@ struct ohci_regs {
 #define OHCI_CTRL_RWC	(1 << 9)	/* remote wakeup connected */
 #define OHCI_CTRL_RWE	(1 << 10)	/* remote wakeup enable */
 
+#define OHCI_CTRL_DFLT	OHCI_CTRL_RWC
+
 /* pre-shifted values for HCFS */
 #	define OHCI_USB_RESET	(0 << 6)
 #	define OHCI_USB_RESUME	(1 << 6)
@@ -422,7 +424,10 @@ struct ohci_hcd {
 #define	OHCI_QUIRK_AMD_PREFETCH	0x400			/* pre-fetch for ISO transfer */
 #define	OHCI_QUIRK_GLOBAL_SUSPEND	0x800		/* must suspend ports */
 #define	OHCI_QUIRK_QEMU		0x1000			/* relax timing expectations */
-
+#ifdef CONFIG_MCST
+#define	OHCI_QUIRK_DISABLE_REMOTEWAKEUP_ON_RESET 0x10000000 /* disable remote wakeup bit on reset */
+#define	OHCI_QUIRK_RESUME_STATE		0x80000000	/* ohci states are broken */
+#endif
 	// there are also chip quirks/bugs in init logic
 
 	unsigned		prev_frame_no;

@@ -473,6 +473,13 @@ static int lm95245_init_client(struct lm95245_data *data)
 	if (ret < 0)
 		return ret;
 
+#if defined(CONFIG_E90S)
+	/* For proper operation, the diode model 2(MMBT3904) is selected. */
+	ret =  regmap_update_bits(data->regmap, LM95245_REG_RW_CONFIG2,
+				  CFG2_REMOTE_TT, 0);
+	if (ret < 0)
+		return ret;
+#endif
 	return regmap_update_bits(data->regmap, LM95245_REG_RW_CONFIG1,
 				  CFG_STOP, 0);
 }

@@ -1,0 +1,272 @@
+/*
+ * EL-2S-4
+ * LYUI.469555.052
+ * (Footballer / UEM-2U)
+ */
+/dts-v1/;
+
+/ {
+	/* version = ""; */
+	model = "e4c,mcst,el-2s-4,uem-2u";
+	compatible = "mcst,el-2s-4";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub i2c";
+
+		i2c@0 {
+			/* I2C_*0 */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			i2c-mux@8A {
+				/* i2c/muxes/i2c-mux-ltc4306.ko (DD48:LTC4306IUFD) */
+				#address-cells = <1>;
+				#size-cells = <0>;
+				compatible = "lltc,ltc4306";
+				reg = <0x8A>; /* LHH */
+				/* i2c-mux-idle-disconnect; */
+				i2c@0 {
+					/* I2C_*0_0 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+
+					/* CPU0 */
+					lm96163@4c {
+						/* hwmon/lm63.ko (0_DD2:LM96163CISD) */
+						compatible = "lm63";
+						reg = <0x4c>;
+						label = "FAN_CPU0";
+						/* trivial-devices */
+
+						temp1_label = "Internal diode";
+						temp2_label = "CPU0_TERM";
+					};
+					/* 0xA0 (0_X1:DIMM) */
+					/* 0xA2 (0_X2:DIMM) */
+					/* 0xA3 (0_X3:DIMM) */
+					/* (0_X4:Power) */
+				};
+				i2c@1 {
+					/* I2C_*0_1 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+
+					/* X35:PCIe */
+				};
+				i2c@2 {
+					/* I2C_*0_2 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <2>;
+
+					/* X36:PCIe */
+				};
+				i2c@3 {
+					/* I2C_*0_3 */
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <3>;
+
+					/* ???.ko (DD1:MAX3674ECM+)
+					 * 0xB4? - 500MHz CPU IOHUB1,2
+					 */
+					/* ???.ko (DD2:MAX3674ECM+)
+					 * 0xB6? - 500MHz IOL IOHUB1,2
+					 */
+					pdt003@1B {
+						/* hwmon/pmbus/pmbus.ko (DA7:PDT003A0X3-SRZ) */
+						compatible = "pmbus";
+						reg = <0x1B>; /* 033 */
+						label = "+3V3SB";
+					};
+					pdt012@2A {
+						/* hwmon/pmbus/pmbus.ko (DA1:PDT012A0X3-SRZ) */
+						compatible = "pmbus";
+						reg = <0x2A>; /* 052 */
+						label = "+2V5 IOHUB";
+					};
+					pdt012@11 {
+						/* hwmon/pmbus/pmbus.ko (DA2:PDT012A0X3-SRZ) */
+						compatible = "pmbus";
+						reg = <0x11>; /* 021 */
+						label = "+1V2 IOHUB";
+					};
+					service_gpio:pca9534@20 {
+						/* gpio/gpio-pca953x.ko (DD27:PCA9534PW) */
+						compatible = "nxp,pca9534";
+						reg = <0x20>; /* 0100 000 */
+						label = "Service Register";
+						gpio-controller;
+						ngpios = <8>;
+						#gpio-cells = <2>;
+						gpio-line-names =
+							"ModSel0",
+							"ModSel1",
+							"KCBB_SERVICE3",
+							"KCBB_SERVICE4",
+							"KCBB_CONF_DONE",
+							"KCBB_PWR_OK",
+							"SPEAKER",
+							"I2C_RESET#";
+					};
+					i2c-mux@B2 {
+						/* i2c/muxes/i2c-mux-ltc4306.ko (DD3:LTC4306IUFD) */
+						#address-cells = <1>;
+						#size-cells = <0>;
+						compatible = "lltc,ltc4306";
+						reg = <0xB2>; /* LHL */
+						/* i2c-mux-idle-disconnect; */
+						i2c@0 {
+							/* I2C00 */
+							#address-cells = <1>;
+							#size-cells = <0>;
+							reg = <0>;
+
+							lm96163@4c {
+								/* hwmon/lm63.ko (DD25:LM96163CISD) */
+								compatible = "lm63";
+								reg = <0x4c>;
+								label = "PWM2_FAN";
+								/* trivial-devices */
+
+								temp1_label = "Internal diode";
+								temp2_label = "not connected";
+							};
+						};
+						i2c@1 {
+							/* I2C10 */
+							#address-cells = <1>;
+							#size-cells = <0>;
+							reg = <1>;
+
+							lm96163@4c {
+								/* hwmon/lm63.ko (DD23:LM96163CISD) */
+								compatible = "lm63";
+								reg = <0x4c>;
+								label = "FAN_CPU0";
+								/* trivial-devices */
+
+								temp1_label = "Internal diode";
+								temp2_label = "not connected";
+							};
+						};
+						i2c@2 {
+							#address-cells = <1>;
+							#size-cells = <0>;
+							reg = <2>;
+
+							/* empty */
+						};
+						i2c@3 {
+							#address-cells = <1>;
+							#size-cells = <0>;
+							reg = <3>;
+
+							/* empty */
+						};
+					};
+					/* X23:KCBB
+					 *  - 0xA0 - Trans
+					 *  - 0x12, 0x1A, 0x2A - Power
+					 */
+				};
+			};
+		};
+		i2c@1 {
+			/* I2C_*1 */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			/* CPU1 */
+			lm96163@4c {
+				/* hwmon/lm63.ko (1_DD2:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN_CPU1";
+				/* trivial-devices */
+
+				temp1_label = "Internal diode";
+				temp2_label = "CPU1_TERM";
+			};
+			/* 0xA0 (1_X1:DIMM) */
+			/* 0xA2 (1_X2:DIMM) */
+			/* 0xA3 (1_X3:DIMM) */
+			/* (1_X4:Power) */
+		};
+		i2c@2 {
+			/* I2C_*2 */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* CPU2 */
+			lm96163@4c {
+				/* hwmon/lm63.ko (2_DD2:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN_CPU2";
+				/* trivial-devices */
+
+				temp1_label = "Internal diode";
+				temp2_label = "CPU2_TERM";
+			};
+			/* 0xA0 (2_X1:DIMM) */
+			/* 0xA2 (2_X2:DIMM) */
+			/* 0xA3 (2_X3:DIMM) */
+			/* (2_X4:Power) */
+		};
+		i2c@3 {
+			/* I2C_*3 */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* CPU3 */
+			lm96163@4c {
+				/* hwmon/lm63.ko (3_DD2:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "FAN_CPU3";
+				/* trivial-devices */
+
+				temp1_label = "Internal diode";
+				temp2_label = "CPU3_TERM";
+			};
+			/* 0xA0 (3_X1:DIMM) */
+			/* 0xA2 (3_X2:DIMM) */
+			/* 0xA3 (3_X3:DIMM) */
+			/* (3_X4:Power) */
+		};
+	};
+
+	/* IOHUB SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub spi";
+
+		boot@0 {
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+};

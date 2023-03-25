@@ -110,6 +110,10 @@ rtrap_nmi:	ldx			[%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
 		.align			64
 		.globl			rtrap_irq, rtrap, irqsz_patchme, rtrap_xcall
 rtrap_irq:
+#ifdef	CONFIG_E90S
+		mov			APIC_TASKPRI, %l0
+		stwa			%g0, [%l0] ASI_LAPIC
+#endif
 rtrap:
 		/* mm/ultra.S:xcall_report_regs KNOWS about this load. */
 		ldx			[%sp + PTREGS_OFF + PT_V9_TSTATE], %l1
@@ -200,11 +204,13 @@ rt_continue:	ldx			[%sp + PTREGS_OFF + PT_V9_G1], %g1
 		/* Normal globals are restored, go to trap globals.  */
 661:		wrpr			%g0, RTRAP_PSTATE_AG_IRQOFF, %pstate
 		nop
+#ifdef	CONFIG_SPARC64_SUN4V
 		.section		.sun4v_2insn_patch, "ax"
 		.word			661b
 		wrpr			%g0, RTRAP_PSTATE_IRQOFF, %pstate
 		SET_GL(1)
 		.previous
+#endif	/*CONFIG_SPARC64_SUN4V*/
 
 		mov			%l2, %g6
 
@@ -269,7 +275,13 @@ rt_continue:	ldx			[%sp + PTREGS_OFF + PT_V9_G1], %g1
 		.previous
 
 		ldx			[%g6 + TI_FLAGS], %g3
+#ifndef CONFIG_MCST
+		/* This is unnecessary (ASI_AIUS is in %asi already)
+		 * and may cause page fault deadlock in signal handler
+		 * after user_rtt_fill_fixup_common procedure.
+		 */
 		wr			%g0, ASI_AIUP, %asi
+#endif
 		rdpr			%cwp, %g1
 		andcc			%g3, _TIF_32BIT, %g0
 		sub			%g1, 1, %g1
@@ -315,14 +327,41 @@ to_kernel:
 		brnz			%l5, kern_fpucheck
 		 ldx			[%g6 + TI_FLAGS], %l5
 		andcc			%l5, _TIF_NEED_RESCHED, %g0
+#ifdef CONFIG_PREEMPT_LAZY
+		bne,pn			%xcc, do_preempt
+		 nop
+		ldsw                    [%g6 + TI_LAZY_COUNT], %l5
+		brnz			%l5, kern_fpucheck
+		 ldx			[%g6 + TI_FLAGS], %l5
+		set			_TIF_NEED_RESCHED_LAZY, %g1
+		andcc			%l5, %g1, %g0
+		be,pt			%xcc, kern_fpucheck
+do_preempt:
+#else
 		be,pt			%xcc, kern_fpucheck
 		 nop
+#endif
 		cmp			%l4, 0
 		bne,pn			%xcc, kern_fpucheck
+#ifdef CONFIG_MCST_RT
+		rdpr			%pil, %l6
+		wrpr			%g0, PIL_NORMAL_MAX, %pil
+		ldx			[%g6 + TI_FLAGS], %l5
+		andcc			%l5, _TIF_NEED_RESCHED, %g0
+		be,pt			%xcc, 1f
+		nop
+		call			preempt_schedule_irq
+		nop
+		wrpr			%g0, %l6, %pil
+		ba,pt                   %xcc, rtrap
+		nop
+1:		wrpr                    %g0, %l6, %pil
+#else
 		 nop
 		call			preempt_schedule_irq
 		 nop
 		ba,pt			%xcc, rtrap
+#endif
 #endif
 kern_fpucheck:	ldub			[%g6 + TI_FPDEPTH], %l5
 		brz,pt			%l5, rt_continue

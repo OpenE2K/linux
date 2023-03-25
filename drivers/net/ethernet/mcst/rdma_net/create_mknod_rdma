@@ -1,0 +1,8 @@
+#!/bin/bash
+
+mknod rdma_0_0 c 253 0
+mknod rdma_0_1 c 253 1
+mknod rdma_0_2 c 253 2
+mknod rdma_1_0 c 252 0
+mknod rdma_1_1 c 252 1
+mknod rdma_1_2 c 252 2

@@ -1,0 +1,183 @@
+/*
+ * M1R-UVP
+ * TVGI.469555.384 ver.1
+ * (UVM_KMI)
+ */
+/dts-v1/;
+
+/ {
+	/* version = ""; */
+	model = "r2000,mcst,m1r-uvp";
+	compatible = "mcst,m1r-uvp";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* IOHUB2 I2C */
+	l_i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+		compatible = "l_i2c";
+		label = "iohub2 i2c";
+
+		i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+
+			lm96163@4c {
+				/* hwmon/lm63.ko (DD19:LM96163CISD) */
+				compatible = "lm63";
+				reg = <0x4c>;
+				label = "IOHUB Temp Sensor";
+
+				temp1_label = "Internal Temp";
+				temp2_label = "IOHUB Temp";
+				/* no fan control */
+			};
+
+			/* config SENSORS_PMBUS */
+			pndt012@38 {
+				/* hwmon/pmbus/pmbus.ko (DA1:PNDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x38>;
+				label = "+0V9_CL0 R2000 (in +3V3)";
+			};
+			pndt012@39 {
+				/* hwmon/pmbus/pmbus.ko (DA2:PNDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x39>;
+				label = "+0V9_CL1 R2000 (in +3V3)";
+			};
+			pndt012@3A {
+				/* hwmon/pmbus/pmbus.ko (DA3:PNDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x3A>;
+				label = "+0V9_UN R2000 (in +5V)";
+			};
+			pndt006@3C {
+				/* hwmon/pmbus/pmbus.ko (DA5:PNDT006A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x3C>;
+				label = "+1V2 R2000 (in +5V)";
+			};
+			pndt012@3B {
+				/* hwmon/pmbus/pmbus.ko (DA4:PNDT012A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x3B>;
+				label = "+1V0 IOHUB2 (in +5V)";
+			};
+			pndt006@3E {
+				/* hwmon/pmbus/pmbus.ko (DA6:PNDT006A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x3E>;
+				label = "+2V5 IOHUB2 (in +5V)";
+			};
+		};
+		i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+
+			pndt006@38 {
+				/* hwmon/pmbus/pmbus.ko (PK-UVP:DA2:PNDT006A0X3-SRZ) */
+				compatible = "pmbus";
+				reg = <0x38>;
+				label = "+1V2 (in +3V3)";
+			};
+
+			/* KSZ9896CTX@64 from PK-UVP:I2C_1 (M2E:i2c@1) */
+			/*
+			 * reg = <0x64>;
+			 * DD2:KSZ9896CTX) "Ethernet Switch" ?@5F
+			 */
+
+			/* TODO: (DD3:NH82580EB) "Ethernet 0" */
+		};
+		i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+
+			/* KSZ9896CTX@64 from PK-UVP:I2C_2 (M2E:i2c@2) */
+			/*
+			 * reg = <0x64>;
+			 * DD1:KSZ9896CTX) "Ethernet Switch" ?@5F
+			 */
+
+			/* TODO: (DD4:NH82580EB) "Ethernet 1" */
+		};
+		i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+
+			/* empty */
+		};
+	};
+
+	/* IOHUB2 SPI */
+	l_spi@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "l_spi";
+		reg = <0>;
+		label = "iohub2 spi";
+
+		boot@0 {
+			/* (DD21:S25FL128SAGNFI001) */
+			compatible = "mcst,boot";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+		rtc-cy14b101p@1 {
+			/* (DD20:CY14B101PA-SFXI) */
+			compatible = "rtc-cy14b101p";
+			reg = <1>;
+			spi-max-frequency = <12500000>;
+		};
+	};
+
+	/* IOHUB2 GPIO */
+	gpio0:l_gpio@0 {
+		compatible = "mcst,gpio";
+		reg = <0x0>;
+		label = "L-GPIO";
+		gpio-controller;
+		ngpios = <32>;
+		#gpio-cells = <2>;
+
+		gpio-line-names =
+			/*  0.. 3 */ "LED_RED", "LED_GRN", "LED_YLW", "M2_RST",
+			/*  4.. 7 */ "GA0", "GA1", "nc", "nc",
+			/*  8..11 */ "nc", "nc", "nc", "nc",
+			/* 12..15 */ "nc", "nc", "nc", "nc",
+			/* 16..19 */ "nc", "I2C_0_ALERTn", "nc", "nc",
+			/* 20..23 */ "nc", "nc", "nc", "nc",
+			/* 24..27 */ "nc", "nc", "nc", "nc",
+			/* 28..31 */ "nc", "nc", "nc", "nc";
+	};
+
+	gpio_leds {
+		compatible = "gpio-leds";
+
+		pwm_r_led {
+			gpios = <&gpio0 0 0>; /* LED_RED */
+			linux,default-trigger = "none";
+			default-state = "off";
+			label = "red";
+		};
+		pwm_g_led {
+			gpios = <&gpio0 1 0>; /* LED_GRN */
+			linux,default-trigger = "none";
+			default-state = "on";
+			label = "green";
+		};
+		tpad_off_led {
+			gpios = <&gpio0 2 0>; /* LED_YLW */
+			linux,default-trigger = "none";
+			default-state = "off";
+			label = "yellow";
+		};
+	};
+};

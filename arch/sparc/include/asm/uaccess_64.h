@@ -8,8 +8,10 @@
 
 #include <linux/compiler.h>
 #include <linux/string.h>
+#include <linux/thread_info.h>
 #include <asm/asi.h>
 #include <asm/spitfire.h>
+#include <asm/console.h>
 #include <asm/extable_64.h>
 
 #include <asm/processor.h>
@@ -176,18 +178,34 @@ __asm__ __volatile__(							\
 int __get_user_bad(void);
 
 unsigned long __must_check raw_copy_from_user(void *to,
-					     const void __user *from,
-					     unsigned long size);
+					      const void __user *from,
+	   unsigned long size);
 
+#ifdef CONFIG_MCST
+unsigned long __must_check _raw_copy_to_user(void __user *to,
+					    const void *from,
+	unsigned long size);
+
+unsigned long mcst_copy_to_user(char __user *to,
+				void *from,
+				unsigned long size);
+
+static inline unsigned long __must_check raw_copy_to_user(void __user *to,
+							  const void *from,
+							  unsigned long size){
+	return mcst_copy_to_user(to, (void *)from, size);
+}
+#else
 unsigned long __must_check raw_copy_to_user(void __user *to,
-					   const void *from,
-					   unsigned long size);
+					    const void *from,
+	 unsigned long size);
+#endif /* CONFIG_MCST */
 #define INLINE_COPY_FROM_USER
 #define INLINE_COPY_TO_USER
 
 unsigned long __must_check raw_copy_in_user(void __user *to,
-					   const void __user *from,
-					   unsigned long size);
+					    const void __user *from,
+	 unsigned long size);
 
 unsigned long __must_check __clear_user(void __user *, unsigned long);
 
@@ -196,8 +214,9 @@ unsigned long __must_check __clear_user(void __user *, unsigned long);
 __must_check long strnlen_user(const char __user *str, long n);
 
 struct pt_regs;
-unsigned long compute_effective_address(struct pt_regs *,
+int compute_effective_address(struct pt_regs *,
 					unsigned int insn,
-					unsigned int rd);
+					unsigned int rd,
+					unsigned long *addr);
 
 #endif /* _ASM_UACCESS_H */

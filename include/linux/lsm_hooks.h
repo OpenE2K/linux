@@ -1807,6 +1807,7 @@ union security_list_options {
 	void (*audit_rule_free)(void *lsmrule);
 #endif /* CONFIG_AUDIT */
 
+
 #ifdef CONFIG_BPF_SYSCALL
 	int (*bpf)(int cmd, union bpf_attr *attr,
 				 unsigned int size);

@@ -452,6 +452,10 @@ struct mm_struct {
 		unsigned long start_brk, brk, start_stack;
 		unsigned long arg_start, arg_end, env_start, env_end;
 
+#ifdef CONFIG_MCST
+		unsigned long extra_vm_flags;
+#endif /* CONFIG_MCST_RT */
+
 		unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
 
 		/*
@@ -528,6 +532,35 @@ struct mm_struct {
 		atomic_long_t hugetlb_usage;
 #endif
 		struct work_struct async_put_work;
+
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+		struct {
+			/* structure used for accounting */
+			struct user_struct *user;
+
+			/* shared objects in this mm */
+			struct list_head shared_objects;
+
+			struct allocated_private_mutex_descs *mutexes;
+			struct allocated_private_other_descs *others;
+
+			/* protects list of private objects */
+			struct rw_semaphore lock;
+
+			/* If not set, every descriptor of a shared object is
+			 * associated with it's user counterpart and all invalid
+			 * invocations are detected, however operations on
+			 * shared objects will have worse execution time. */
+			char unsafe_shared_objects;
+		} el_posix;
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+		int	gmmid_nr;	/* only on guest: the guest */
+					/* user thread mm_struct agent */
+					/* ID number on host kernel */
+					/* to pass mm struct ID from guest */
+					/* to host at hypercalls */
+#endif	/* CONFIG_E2K  && CONFIG_VIRTUALIZATION */
 	} __randomize_layout;
 
 	/*

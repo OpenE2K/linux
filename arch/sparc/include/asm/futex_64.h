@@ -6,6 +6,33 @@
 #include <linux/uaccess.h>
 #include <asm/errno.h>
 
+#if CONFIG_RMO
+#define __futex_cas_op(insn, ret, oldval, uaddr, oparg)	\
+	__asm__ __volatile__(				\
+	"\n	membar #LoadLoad | #LoadStore\n"	\
+	"1:	lduwa	[%3] %%asi, %2\n"		\
+	"	" insn "\n"				\
+	"2:	casa	[%3] %%asi, %2, %1\n"		\
+	"	cmp	%2, %1\n"			\
+	"	bne,pn	%%icc, 1b\n"			\
+	"	 mov	0, %0\n"			\
+	"	membar #LoadStore | #StoreStore\n"	\
+	"3:\n"						\
+	"	.section .fixup,#alloc,#execinstr\n"	\
+	"	.align	4\n"				\
+	"4:	sethi	%%hi(3b), %0\n"			\
+	"	jmpl	%0 + %%lo(3b), %%g0\n"		\
+	"	 mov	%5, %0\n"			\
+	"	.previous\n"				\
+	"	.section __ex_table,\"a\"\n"		\
+	"	.align	4\n"				\
+	"	.word	1b, 4b\n"			\
+	"	.word	2b, 4b\n"			\
+	"	.previous\n"				\
+	: "=&r" (ret), "=&r" (oldval), "=&r" (tem)	\
+	: "r" (uaddr), "r" (oparg), "i" (-EFAULT)	\
+	: "memory")
+#else
 #define __futex_cas_op(insn, ret, oldval, uaddr, oparg)	\
 	__asm__ __volatile__(				\
 	"\n1:	lduwa	[%3] %%asi, %2\n"		\
@@ -29,6 +56,7 @@
 	: "=&r" (ret), "=&r" (oldval), "=&r" (tem)	\
 	: "r" (uaddr), "r" (oparg), "i" (-EFAULT)	\
 	: "memory")
+#endif
 
 static inline int arch_futex_atomic_op_inuser(int op, int oparg, int *oval,
 		u32 __user *uaddr)
@@ -75,7 +103,13 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	int ret = 0;
 
 	__asm__ __volatile__(
+#ifdef	CONFIG_RMO
+	"membar #LoadLoad | #LoadStore\n"
+#endif
 	"\n1:	casa	[%4] %%asi, %3, %1\n"
+#ifdef	CONFIG_RMO
+	"membar #StoreLoad | #StoreStore\n"
+#endif
 	"2:\n"
 	"	.section .fixup,#alloc,#execinstr\n"
 	"	.align	4\n"
