@@ -24,21 +24,21 @@ struct __old_kernel_stat {
 };
 
 struct stat {
-	dev_t		st_dev;
-	ino_t		st_ino;
-	mode_t		st_mode;
-	nlink_t		st_nlink;
-	uid_t		st_uid;
-	gid_t		st_gid;
-	dev_t		st_rdev;
-	off_t		st_size;
-	off_t		st_blksize;
-	off_t		st_blocks;
-	time_t		st_atime;
+	unsigned int	st_dev;
+	unsigned long	st_ino;
+	unsigned int	st_mode;
+	unsigned int	st_nlink;
+	unsigned int	st_uid;
+	unsigned int	st_gid;
+	unsigned int 	st_rdev;
+	long			st_size;
+	long			st_blksize;
+	long			st_blocks;
+	long			st_atime;
 	unsigned long	st_atime_nsec;
-	time_t		st_mtime;
+	long			st_mtime;
 	unsigned long	st_mtime_nsec;
-	time_t		st_ctime;
+	long			st_ctime;
 	unsigned long	st_ctime_nsec;
 };
 
