@@ -1518,6 +1518,40 @@ SYSCALL_DEFINE3(mq_getsetattr, mqd_t, mqdes,
 	return 0;
 }
 
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/protected_syscalls.h>
+
+notrace __section(".entry.text")
+long protected_sys_mq_notify(mqd_t mqdes,
+			const struct prot_sigevent __user *sevp,
+			long  unused3,
+			long  unused4,
+			long unused5,
+			long unused6,
+			const struct pt_regs *regs)
+{
+	struct sigevent n, *p = NULL;
+	int size;
+
+	if (sevp) {
+		size = e2k_ptr_size(regs->args[3], regs->args[4],
+			sizeof(struct prot_sigevent));
+		if (size == 0) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_PTR_SIZE_TOO_LITTLE,
+				__func__, "'sevp'",
+				size, sizeof(struct prot_sigevent));
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+			return -EINVAL;
+		}
+		if (get_prot_sigevent(&n, sevp, NOTIFY_COOKIE_LEN, 2, regs))
+			return -EFAULT;
+		p = &n;
+	}
+	return do_mq_notify(mqdes, p);
+}
+#endif
+
 #ifdef CONFIG_COMPAT
 
 struct compat_mq_attr {

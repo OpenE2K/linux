@@ -46,6 +46,8 @@
 
 MODULE_FIRMWARE("amdgpu/sienna_cichlid_sdma.bin");
 MODULE_FIRMWARE("amdgpu/navy_flounder_sdma.bin");
+MODULE_FIRMWARE("amdgpu/dimgrey_cavefish_sdma.bin");
+MODULE_FIRMWARE("amdgpu/beige_goby_sdma.bin");
 
 #define SDMA1_REG_OFFSET 0x600
 #define SDMA3_REG_OFFSET 0x400
@@ -87,6 +89,8 @@ static void sdma_v5_2_init_golden_registers(struct amdgpu_device *adev)
 	switch (adev->asic_type) {
 	case CHIP_SIENNA_CICHLID:
 	case CHIP_NAVY_FLOUNDER:
+	case CHIP_DIMGREY_CAVEFISH:
+	case CHIP_BEIGE_GOBY:
 		break;
 	default:
 		break;
@@ -160,6 +164,12 @@ static int sdma_v5_2_init_microcode(struct amdgpu_device *adev)
 	case CHIP_NAVY_FLOUNDER:
 		chip_name = "navy_flounder";
 		break;
+	case CHIP_DIMGREY_CAVEFISH:
+		chip_name = "dimgrey_cavefish";
+		break;
+	case CHIP_BEIGE_GOBY:
+		chip_name = "beige_goby";
+		break;
 	default:
 		BUG();
 	}
@@ -175,8 +185,8 @@ static int sdma_v5_2_init_microcode(struct amdgpu_device *adev)
 		goto out;
 
 	for (i = 1; i < adev->sdma.num_instances; i++) {
-		if (adev->asic_type == CHIP_SIENNA_CICHLID ||
-		    adev->asic_type == CHIP_NAVY_FLOUNDER) {
+		if (adev->asic_type >= CHIP_SIENNA_CICHLID &&
+			adev->asic_type <= CHIP_DIMGREY_CAVEFISH) {
 			memcpy((void*)&adev->sdma.instance[i],
 			       (void*)&adev->sdma.instance[0],
 			       sizeof(struct amdgpu_sdma_instance));
@@ -1168,7 +1178,11 @@ static int sdma_v5_2_early_init(void *handle)
 		adev->sdma.num_instances = 4;
 		break;
 	case CHIP_NAVY_FLOUNDER:
+	case CHIP_DIMGREY_CAVEFISH:
 		adev->sdma.num_instances = 2;
+		break;
+	case CHIP_BEIGE_GOBY:
+		adev->sdma.num_instances = 1;
 		break;
 	default:
 		break;
@@ -1566,6 +1580,8 @@ static int sdma_v5_2_set_clockgating_state(void *handle,
 	switch (adev->asic_type) {
 	case CHIP_SIENNA_CICHLID:
 	case CHIP_NAVY_FLOUNDER:
+	case CHIP_DIMGREY_CAVEFISH:
+	case CHIP_BEIGE_GOBY:
 		sdma_v5_2_update_medium_grain_clock_gating(adev,
 				state == AMD_CG_STATE_GATE ? true : false);
 		sdma_v5_2_update_medium_grain_light_sleep(adev,

@@ -74,8 +74,27 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 #endif /* CONFIG_PROFILE_ALL_BRANCHES */
 
 #else
+#ifdef CONFIG_MCST
+/* Wait for #113288 before dropping __builtin_expect_prob() */
+# ifdef __LCC__
+#  if __LCC__ > 125 || __LCC__ == 125 && __LCC_MINOR__ >= 9
+#   define likely(x)	__builtin_expect_with_probability(!!(x), 1, 0.9999)
+#   define unlikely(x)	__builtin_expect_with_probability(!!(x), 1, 0.0001)
+#  else
+#   define likely(x)	__builtin_expect_prob(!!(x), 0.9999)
+#   define unlikely(x)	__builtin_expect_prob(!!(x), 0.0001)
+#  endif
+# elif __GNUC__ >= 9
+#  define likely(x)	__builtin_expect_with_probability(!!(x), 1, 0.9999)
+#  define unlikely(x)	__builtin_expect_with_probability(!!(x), 1, 0.0001)
+# else
+#  define likely(x)	__builtin_expect(!!(x), 1)
+#  define unlikely(x)	__builtin_expect(!!(x), 0)
+# endif
+#else
 # define likely(x)	__builtin_expect(!!(x), 1)
 # define unlikely(x)	__builtin_expect(!!(x), 0)
+#endif
 #endif
 
 /* Optimization barrier */

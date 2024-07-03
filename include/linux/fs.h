@@ -470,7 +470,11 @@ struct address_space {
 	spinlock_t		private_lock;
 	struct list_head	private_list;
 	void			*private_data;
+#ifndef CONFIG_E2K
 } __attribute__((aligned(sizeof(long)))) __randomize_layout;
+#else
+} __randomize_layout;
+#endif
 	/*
 	 * On most architectures that alignment is already the case; but
 	 * must be enforced here for CRIS, to let the least significant bit
@@ -1807,6 +1811,13 @@ extern long compat_ptr_ioctl(struct file *file, unsigned int cmd,
 #define compat_ptr_ioctl NULL
 #endif
 
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+extern long ptr128_ioctl(struct file *file, unsigned long cmd,
+					unsigned long arg);
+#else
+#define ptr128_ioctl NULL
+#endif
+
 /*
  * VFS file helper functions.
  */
@@ -1892,6 +1903,9 @@ struct file_operations {
 	__poll_t (*poll) (struct file *, struct poll_table_struct *);
 	long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
 	long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	long (*ptr128_ioctl) (struct file *, unsigned long, unsigned long);
+#endif
 	int (*mmap) (struct file *, struct vm_area_struct *);
 	unsigned long mmap_supported_flags;
 	int (*open) (struct inode *, struct file *);

@@ -20,7 +20,7 @@
  *
  * This file is licenced under the GPL.
  */
-
+#define DEBUG
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/pci.h>
@@ -63,6 +63,7 @@
 /* On PA-RISC, PDC can leave IR set incorrectly; ignore it there. */
 #define	IR_DISABLE
 #endif
+
 
 #ifdef CONFIG_ARCH_OMAP
 /* OMAP doesn't support IR (no SMM; not needed) */
@@ -410,7 +411,7 @@ static int ohci_get_frame (struct usb_hcd *hcd)
 static void ohci_usb_reset (struct ohci_hcd *ohci)
 {
 	ohci->hc_control = ohci_readl (ohci, &ohci->regs->control);
-	ohci->hc_control &= OHCI_CTRL_RWC;
+	ohci->hc_control &= OHCI_CTRL_DFLT;
 	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
 	ohci->rh_state = OHCI_RH_HALTED;
 }
@@ -426,6 +427,24 @@ static void _ohci_shutdown(struct usb_hcd *hcd)
 	ohci = hcd_to_ohci (hcd);
 	ohci_writel(ohci, (u32) ~0, &ohci->regs->intrdisable);
 
+#ifdef CONFIG_MCST
+/*
+ * 3.64	ERR63 - usb ohci, (iommu error after host controller reset)
+ *
+ * Bug 99303: the problem is that ohci controller will leave 'resume' state
+ * on 'connection change status' condition after host_controller_reset.
+ * (most probably 'connection change status' condition is mistakenly
+ * detected in case of host_controller_reset)
+ *
+ * Workaround:
+ *    Prior to setting host_controller_reset,
+ *    clear bit [15] (Device Remote Wakeup Enable) in HcRhStatus register.
+ *    This is done by setting 1 in bit 31 of the register.
+ *    Hardware fix is not expected.
+ */
+	if (ohci->flags & OHCI_QUIRK_DISABLE_REMOTEWAKEUP_ON_RESET)
+		ohci_writel (ohci, RH_HS_CRWE, &ohci->regs->roothub.status);
+#endif
 	/* Software reset, after which the controller goes into SUSPEND */
 	ohci_writel(ohci, OHCI_HCR, &ohci->regs->cmdstatus);
 	ohci_readl(ohci, &ohci->regs->cmdstatus);	/* flush the writes */
@@ -577,13 +596,13 @@ static int ohci_run (struct ohci_hcd *ohci)
 		break;
 	case OHCI_USB_SUSPEND:
 	case OHCI_USB_RESUME:
-		ohci->hc_control &= OHCI_CTRL_RWC;
+		ohci->hc_control &= OHCI_CTRL_DFLT;
 		ohci->hc_control |= OHCI_USB_RESUME;
 		val = 10 /* msec wait */;
 		break;
 	// case OHCI_USB_RESET:
 	default:
-		ohci->hc_control &= OHCI_CTRL_RWC;
+		ohci->hc_control &= OHCI_CTRL_DFLT;
 		ohci->hc_control |= OHCI_USB_RESET;
 		val = 50 /* msec wait */;
 		break;
@@ -658,7 +677,7 @@ retry:
 	hcd->uses_new_polling = 1;
 
 	/* start controller operations */
-	ohci->hc_control &= OHCI_CTRL_RWC;
+	ohci->hc_control &= OHCI_CTRL_DFLT;
 	ohci->hc_control |= OHCI_CONTROL_INIT | OHCI_USB_OPER;
 	ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
 	ohci->rh_state = OHCI_RH_RUNNING;
@@ -874,6 +893,8 @@ static void io_watchdog_func(struct timer_list *t)
 }
 
 /* an interrupt happens */
+
+
 
 static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 {
@@ -1166,6 +1187,7 @@ int ohci_resume(struct usb_hcd *hcd, bool hibernated)
 	/* Normally just turn on port power and enable interrupts */
 	else {
 		ohci_dbg(ohci, "powerup ports\n");
+
 		for (port = 0; port < ohci->num_ports; port++)
 			ohci_writel(ohci, RH_PS_PPS,
 					&ohci->regs->roothub.portstatus[port]);

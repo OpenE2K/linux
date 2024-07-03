@@ -2008,9 +2008,16 @@ extern void tracing_log_err(struct trace_array *tr,
 #define internal_trace_puts(str) __trace_puts(_THIS_IP_, str, strlen(str))
 
 #undef FTRACE_ENTRY
+#ifdef CONFIG_E90S
+/* Prevent unaligned traps. */
+#define FTRACE_ENTRY(call, struct_name, id, tstruct, print)	\
+	extern struct trace_event_call					\
+	__aligned(8) event_##call;
+#else
 #define FTRACE_ENTRY(call, struct_name, id, tstruct, print)	\
 	extern struct trace_event_call					\
 	__aligned(4) event_##call;
+#endif
 #undef FTRACE_ENTRY_DUP
 #define FTRACE_ENTRY_DUP(call, struct_name, id, tstruct, print)	\
 	FTRACE_ENTRY(call, struct_name, id, PARAMS(tstruct), PARAMS(print))

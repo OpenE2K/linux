@@ -627,8 +627,11 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 	int nbufs = pipe->max_usage;
 	struct bio_vec *array = kcalloc(nbufs, sizeof(struct bio_vec),
 					GFP_KERNEL);
+#ifdef __LCC__
+	ssize_t ret = -EINVAL;
+#else
 	ssize_t ret;
-
+#endif
 	if (unlikely(!array))
 		return -ENOMEM;
 

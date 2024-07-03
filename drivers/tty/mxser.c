@@ -1006,11 +1006,25 @@ static int mxser_open(struct tty_struct *tty, struct file *filp)
 {
 	struct mxser_port *info;
 	int line;
+	unsigned int i, nport;
+	struct mxser_board *board = NULL;
 
 	line = tty->index;
 	if (line == MXSER_PORTS)
 		return 0;
-	info = &mxser_boards[line / MXSER_PORTS_PER_BOARD].ports[line % MXSER_PORTS_PER_BOARD];
+
+	for (nport = 0, i = 0; i < MXSER_BOARDS; i++)
+		if (line < nport + mxser_boards[i].info->nports) {
+			board = &mxser_boards[i];
+			break;
+		}
+		else
+			nport += mxser_boards[i].info->nports;
+
+	if (!board)
+		return -ENODEV;
+
+	info = &board->ports[line - nport];
 	if (!info->ioaddr)
 		return -ENODEV;
 
@@ -2561,14 +2575,16 @@ static int mxser_probe(struct pci_dev *pdev,
 {
 #ifdef CONFIG_PCI
 	struct mxser_board *brd;
-	unsigned int i, j;
+	unsigned int i, j, nport;
 	unsigned long ioaddress;
 	struct device *tty_dev;
 	int retval = -EINVAL;
 
-	for (i = 0; i < MXSER_BOARDS; i++)
+	for (nport = 0, i = 0; i < MXSER_BOARDS; i++)
 		if (mxser_boards[i].info == NULL)
 			break;
+		else
+			nport += mxser_boards[i].info->nports;
 
 	if (i >= MXSER_BOARDS) {
 		dev_err(&pdev->dev, "too many boards found (maximum %d), board "
@@ -2577,7 +2593,7 @@ static int mxser_probe(struct pci_dev *pdev,
 	}
 
 	brd = &mxser_boards[i];
-	brd->idx = i * MXSER_PORTS_PER_BOARD;
+	brd->idx = nport;
 	dev_info(&pdev->dev, "found MOXA %s board (BusNo=%d, DevNo=%d)\n",
 		mxser_cards[ent->driver_data].name,
 		pdev->bus->number, PCI_SLOT(pdev->devfn));
@@ -2705,7 +2721,7 @@ static int __init mxser_module_init(void)
 {
 	struct mxser_board *brd;
 	struct device *tty_dev;
-	unsigned int b, i, m;
+	unsigned int b, i, m, nport;
 	int retval;
 
 	mxvar_sdriver = alloc_tty_driver(MXSER_PORTS + 1);
@@ -2734,7 +2750,7 @@ static int __init mxser_module_init(void)
 	}
 
 	/* Start finding ISA boards here */
-	for (m = 0, b = 0; b < MXSER_BOARDS; b++) {
+	for (nport = 0, m = 0, b = 0; b < MXSER_BOARDS; b++) {
 		if (!ioaddr[b])
 			continue;
 
@@ -2755,7 +2771,7 @@ static int __init mxser_module_init(void)
 			continue;
 		}
 
-		brd->idx = m * MXSER_PORTS_PER_BOARD;
+		brd->idx = nport;
 		for (i = 0; i < brd->info->nports; i++) {
 			tty_dev = tty_port_register_device(&brd->ports[i].port,
 					mxvar_sdriver, brd->idx + i, NULL);
@@ -2774,6 +2790,7 @@ static int __init mxser_module_init(void)
 		if (brd->info == NULL)
 			continue;
 
+		nport += brd->info->nports;
 		m++;
 	}
 

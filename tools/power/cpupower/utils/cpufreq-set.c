@@ -193,6 +193,20 @@ static int do_one_cpu(unsigned int cpu, struct cpufreq_policy *new_pol,
 	}
 }
 
+#ifdef __e2k__
+void print_freq_setting(struct cpufreq_policy *new_pol, unsigned long freq)
+{
+	if (new_pol->min)
+		printf(_("Set min frequency: %lu kHz\n"), new_pol->min);
+	if (new_pol->max)
+		printf(_("Set max frequency: %lu kHz\n"), new_pol->max);
+	if (new_pol->governor)
+		printf(_("Set governor: %s\n"), new_pol->governor);
+	if (freq)
+		printf(_("Set frequency: %lu kHz\n"), freq);
+}
+#endif
+
 int cmd_freq_set(int argc, char **argv)
 {
 	extern char *optarg;
@@ -316,6 +330,9 @@ int cmd_freq_set(int argc, char **argv)
 	}
 
 
+#ifdef __e2k__
+	print_freq_setting(&new_pol, freq);
+#endif
 	/* loop over CPUs */
 	for (cpu = bitmask_first(cpus_chosen);
 	     cpu <= bitmask_last(cpus_chosen); cpu++) {

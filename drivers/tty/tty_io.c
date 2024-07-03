@@ -849,7 +849,15 @@ static int iterate_tty_read(struct tty_ldisc *ld, struct tty_struct *tty,
 	int retval = 0;
 	void *cookie = NULL;
 	unsigned long offset = 0;
+#ifdef CONFIG_MCST
+	/*
+	 * rm 15287: com port test failure. Increase buffer up to max of VMIN
+	 * to avoid short non-canonical reads with VMIN set.
+	 */
+	char kernel_buf[256];
+#else
 	char kernel_buf[64];
+#endif
 	size_t count = iov_iter_count(to);
 
 	do {
@@ -3174,7 +3182,9 @@ struct device *tty_register_device(struct tty_driver *driver, unsigned index,
 	return tty_register_device_attr(driver, index, device, NULL, NULL);
 }
 EXPORT_SYMBOL(tty_register_device);
-
+#ifdef CONFIG_MCST
+EXPORT_SYMBOL(tty_class); // MCST_SERIAL_8250
+#endif
 static void tty_device_create_release(struct device *dev)
 {
 	dev_dbg(dev, "releasing...\n");

@@ -462,7 +462,9 @@ int madera_core_init(struct madera_priv *priv)
 	int i;
 
 	/* trap undersized array initializers */
+#ifndef __LCC__ /* bug #126704 */ 
 	BUILD_BUG_ON(!madera_mixer_texts[MADERA_NUM_MIXER_INPUTS - 1]);
+#endif
 	BUILD_BUG_ON(!madera_mixer_values[MADERA_NUM_MIXER_INPUTS - 1]);
 
 	if (!dev_get_platdata(priv->madera->dev))

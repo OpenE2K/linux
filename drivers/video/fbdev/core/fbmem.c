@@ -35,6 +35,9 @@
 #include <linux/fbcon.h>
 #include <linux/mem_encrypt.h>
 #include <linux/pci.h>
+#ifdef CONFIG_MCST
+#include <linux/vgaarb.h>
+#endif
 
 #include <asm/fb.h>
 
@@ -1825,6 +1828,10 @@ int remove_conflicting_pci_framebuffers(struct pci_dev *pdev, const char *name)
 #ifdef CONFIG_X86
 	primary = pdev->resource[PCI_ROM_RESOURCE].flags &
 					IORESOURCE_ROM_SHADOW;
+#endif
+#ifdef CONFIG_MCST
+	if (!primary)
+		primary = pdev == vga_default_device();
 #endif
 	err = remove_conflicting_framebuffers(ap, name, primary);
 	kfree(ap);

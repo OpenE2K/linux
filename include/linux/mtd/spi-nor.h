@@ -54,7 +54,14 @@
 
 /* 4-byte address opcodes - used on Spansion and some Macronix flashes. */
 #define SPINOR_OP_READ_4B	0x13	/* Read data bytes (low frequency) */
+
+#ifndef CONFIG_E2K
 #define SPINOR_OP_READ_FAST_4B	0x0c	/* Read data bytes (high frequency) */
+#else
+/* bug 144949 */
+#define SPINOR_OP_READ_FAST_4B	0x13
+#endif
+
 #define SPINOR_OP_READ_1_1_2_4B	0x3c	/* Read data bytes (Dual Output SPI) */
 #define SPINOR_OP_READ_1_2_2_4B	0xbc	/* Read data bytes (Dual I/O SPI) */
 #define SPINOR_OP_READ_1_1_4_4B	0x6c	/* Read data bytes (Quad Output SPI) */

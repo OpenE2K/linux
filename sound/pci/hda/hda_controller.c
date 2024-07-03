@@ -875,7 +875,13 @@ static int azx_single_send_cmd(struct hdac_bus *bus, u32 val)
 	struct azx *chip = bus_to_azx(bus);
 	unsigned int addr = azx_command_addr(val);
 	int timeout = 50;
-
+#ifdef CONFIG_MCST /* bug 127935 */
+	int ret;
+	/* disable corb dma */
+	u8 r = azx_readb(chip, CORBCTL);
+	if (r & AZX_CORBCTL_RUN)
+		azx_writeb(chip, CORBCTL, 0);
+#endif
 	bus->last_cmd[azx_command_addr(val)] = val;
 	while (timeout--) {
 		/* check ICB busy bit */
@@ -886,10 +892,20 @@ static int azx_single_send_cmd(struct hdac_bus *bus, u32 val)
 			azx_writel(chip, IC, val);
 			azx_writew(chip, IRS, azx_readw(chip, IRS) |
 				   AZX_IRS_BUSY);
+#ifdef CONFIG_MCST
+				ret = azx_single_wait_for_response(chip, addr);
+				if (r & AZX_CORBCTL_RUN)
+					azx_writeb(chip, CORBCTL, r);
+				return ret;
+#endif
 			return azx_single_wait_for_response(chip, addr);
 		}
 		udelay(1);
 	}
+#ifdef CONFIG_MCST
+	if (r & AZX_CORBCTL_RUN)
+		azx_writeb(chip, CORBCTL, r);
+#endif
 	if (printk_ratelimit())
 		dev_dbg(chip->card->dev,
 			"send_cmd timeout: IRS=0x%x, val=0x%x\n",

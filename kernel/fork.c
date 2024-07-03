@@ -104,6 +104,10 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
+
 #include <trace/events/sched.h>
 
 #define CREATE_TRACE_POINTS
@@ -1628,6 +1632,10 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 
 	task_lock(current->group_leader);
 	memcpy(sig->rlim, current->signal->rlim, sizeof sig->rlim);
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	memcpy(sig->bin_comp_rlim, current->signal->bin_comp_rlim,
+	       sizeof sig->bin_comp_rlim);
+#endif
 	task_unlock(current->group_leader);
 
 	posix_cpu_timers_init_group(sig);
@@ -1900,6 +1908,13 @@ static __latent_entropy struct task_struct *copy_process(
 	u64 clone_flags = args->flags;
 	struct nsproxy *nsp = current->nsproxy;
 
+#ifdef CONFIG_MCST
+	/* don't create not root process during sometime after oom_killer work*/
+	if (pid != &init_struct_pid && oom_limit(current)) {
+		return ERR_PTR(-ENOMEM);
+	}
+#endif
+
 	/*
 	 * Don't allow sharing the root directory with processes in a different
 	 * namespace
@@ -2113,6 +2128,12 @@ static __latent_entropy struct task_struct *copy_process(
 #ifdef CONFIG_DEBUG_MUTEXES
 	p->blocked_on = NULL; /* not blocked yet */
 #endif
+#ifdef CONFIG_MCST
+#ifndef CONFIG_PREEMPT_RT
+	p->wait_on_mutex = NULL;
+#endif
+	p->wait_on_rtmutex = NULL;
+#endif
 #ifdef CONFIG_BCACHE
 	p->sequential_io	= 0;
 	p->sequential_io_avg	= 0;
@@ -2165,6 +2186,17 @@ static __latent_entropy struct task_struct *copy_process(
 	stackleak_task_init(p);
 
 	if (pid != &init_struct_pid) {
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+		if (is_bc_outmost_thread(task_thread_info(p))) {
+			p->signal->rlim[RLIMIT_NOFILE].rlim_cur = INR_OPEN_CUR;
+			p->signal->rlim[RLIMIT_NOFILE].rlim_max = INR_OPEN_MAX;
+
+			retval = bc_set_outmost_ns(p, clone_flags);
+			if (retval)
+				goto bad_fork_cleanup_thread;
+
+		}
+#endif
 		pid = alloc_pid(p->nsproxy->pid_ns_for_children, args->set_tid,
 				args->set_tid_size);
 		if (IS_ERR(pid)) {
@@ -2279,6 +2311,13 @@ static __latent_entropy struct task_struct *copy_process(
 		p->real_parent = current;
 		p->parent_exec_id = current->self_exec_id;
 		p->exit_signal = args->exit_signal;
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+		if (is_bc_outmost_thread(task_thread_info(p))) {
+			retval = bc_set_outmost_parent(p);
+			if (retval)
+				goto bad_fork_cancel_cgroup;
+		}
+#endif
 	}
 
 	klp_copy_process(p);
@@ -2543,6 +2582,14 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 
 	pid = get_task_pid(p, PIDTYPE_PID);
 	nr = pid_vnr(pid);
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	/*
+	 * Outer thread may not have pid in current namespace.
+	 * Return 1 to indicate that call was successful.
+	 */
+	if (nr == 0 && is_bc_outmost_thread(task_thread_info(p)))
+		nr = 1;
+#endif
 
 	if (clone_flags & CLONE_PARENT_SETTID)
 		put_user(nr, args->parent_tid);
@@ -2890,7 +2937,12 @@ void __init proc_caches_init(void)
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT,
 			NULL);
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	vm_area_cachep = KMEM_CACHE(vm_area_struct, SLAB_PANIC|SLAB_ACCOUNT
+							| SLAB_NO_SANITIZE);
+#else
 	vm_area_cachep = KMEM_CACHE(vm_area_struct, SLAB_PANIC|SLAB_ACCOUNT);
+#endif
 	mmap_init();
 	nsproxy_cache_init();
 }

@@ -1,0 +1,181 @@
+/dts-v1/;
+/plugin/;
+
+&{/pci@0} {
+	#address-cells = <3>;
+	#size-cells = <2>;
+
+	/* reg: DDDDDDDD bbbbbbbb dddddfff 00000000 */
+	display_subsystem: mga2_ext {
+		reg = <0xffffffff 0 0 0 0>;
+	};
+};
+
+#define VID0_STS "okay"
+
+&display_subsystem {
+	compatible = "mcst,mga26-pcie-proto";
+
+	reg-bar = <2>;
+	vram-bar = <4>;
+	ports = <&dc0>;
+
+	interrupt-parent = <&mga2x_pic>;
+	interrupts = <17>;
+
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	clock-frequency = <80000000>; /*Hz*/
+
+	dc@400 {
+		compatible = "mcst,mga2x-crtc";
+		reg = <0x400 0x400>;
+
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <3>;
+
+		dc0: port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			dc0_out0: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vid0_in0>;
+			};
+		};
+	};
+
+#define	CLK_DFLT_DIV_TABLE <   1    2    3    4    5    6    7    8    9>
+#define	CLK_DFLT_VAL_TABLE <0xa0 0xf2 0xf3 0xf4 0xf5 0xf6 0xf7 0xf0 0xf1>
+
+	dc0_pix: pclk@4c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x4c0 0x4>;
+		shift = <0>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+
+	dc0_aux: aclk@4c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x4c0 0x4>;
+		shift = <8>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+
+	mga2x_pic: pic@1c00 {
+		compatible = "mcst,mga2x-pic";
+		reg = <0x1c00 0x400>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
+	};
+
+	vid0: vid0@2000 {
+		reg = <0x2000 0x20>;
+		status = VID0_STS;
+	};
+	vga_bridge: vga_bridge {
+		status = VID0_STS;
+	};
+	vid0_txi2c: i2c@2020 {
+		reg = <0x2020 0x4>;
+		status = VID0_STS;
+	};
+	vid0_gpio: gpio@2040 {
+		reg = <0x2040 0x44>;
+		compatible = "mcst,mga2x-gpio";
+		#gpio-cells = <2>;
+		label = "mga2 vid0 gpio";
+		gpio-controller;
+		ngpios = <8>;
+		status = VID0_STS;
+	};
+	vid0_ddc: i2c@2030 {
+		compatible = "mcst,mga2x-i2c";
+		reg = <0x2030 0x4>;
+		status = VID0_STS;
+	};
+	vid3_ddc: i2c@2c30 {
+		reg = <0x2c30 0x4>;
+		status = VID0_STS;
+	};
+};
+
+&vid0 {
+	compatible = "mcst,mga2x-rgb";
+	ddc-i2c-bus = <&vid0_ddc>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>;
+
+	port@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		vid0_in0: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&dc0_out0>;
+		};
+	};
+	port@1 {
+		reg = <1>;
+		vid0_out: endpoint {
+			remote-endpoint = <&vga_bridge_in>;
+		};
+	};
+	port@2 { /* for dumb-vga-dac to find ddc bus */
+		reg = <2>;
+		vid0_in_aux: endpoint {
+			remote-endpoint = <&vga_bridge_out>;
+		};
+	};
+};
+
+&vga_bridge {
+	compatible = "dumb-vga-dac";
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+
+			vga_bridge_in: endpoint {
+				remote-endpoint = <&vid0_out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			vga_bridge_out: endpoint {
+				remote-endpoint = <&vid0_in_aux>;
+			};
+		};
+	};
+};
+
+&vid0_txi2c {
+	compatible = "i2c-gpio";
+	label = "mga2 vid0 tx i2c";
+	scl-gpios = <&vid0_gpio 1 0>;/*GPIO_ACTIVE_HIGH*/
+	sda-gpios = <&vid0_gpio 0 0>; /*GPIO_ACTIVE_HIGH*/
+
+};
+
+&vid3_ddc {
+	compatible = "mcst,mga2x-i2c";
+	label = "mga2 vid3 ddc";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+	dc0_pll: pll@69 {
+		compatible = "cypress,cy22394";
+		reg = <0x69>;
+		#clock-cells = <0>;
+	};
+};

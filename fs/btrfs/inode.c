@@ -10484,6 +10484,9 @@ static const struct file_operations btrfs_dir_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= btrfs_compat_ioctl,
 #endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl = btrfs_protected_ioctl,
+#endif
 	.release        = btrfs_release_file,
 	.fsync		= btrfs_sync_file,
 };

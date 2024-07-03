@@ -75,6 +75,30 @@ __setup_param("slub_nomerge", slub_nomerge, setup_slab_nomerge, 0);
 
 __setup("slab_nomerge", setup_slab_nomerge);
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+enum pax_sanitize_mode pax_sanitize_slab = PAX_SANITIZE_SLAB_FAST;
+static int __init pax_sanitize_slab_setup(char *str)
+{
+	if (!str)
+		return 0;
+
+	if (!strcmp(str, "0") || !strcmp(str, "off")) {
+		pr_info("PaX slab sanitization: %s\n", "disabled");
+		pax_sanitize_slab = PAX_SANITIZE_SLAB_OFF;
+	} else if (!strcmp(str, "1") || !strcmp(str, "fast")) {
+		pr_info("PaX slab sanitization: %s\n", "fast");
+		pax_sanitize_slab = PAX_SANITIZE_SLAB_FAST;
+	} else if (!strcmp(str, "full")) {
+		pr_info("PaX slab sanitization: %s\n", "full");
+		pax_sanitize_slab = PAX_SANITIZE_SLAB_FULL;
+	} else {
+		pr_err("PaX slab sanitization: unsupported option '%s'\n", str);
+	}
+	return 0;
+}
+early_param("pax_sanitize_slab", pax_sanitize_slab_setup);
+#endif
+
 /*
  * Determine the size of a slab object
  */
@@ -926,6 +950,9 @@ static void print_slabinfo_header(struct seq_file *m)
 #ifdef CONFIG_DEBUG_SLAB
 	seq_puts(m, " : globalstat <listallocs> <maxobjs> <grown> <reaped> <error> <maxfreeable> <nodeallocs> <remotefrees> <alienoverflow>");
 	seq_puts(m, " : cpustat <allochit> <allocmiss> <freehit> <freemiss>");
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	seq_puts(m, " : pax <sanitized> <not_sanitized>");
+#endif
 #endif
 	seq_putc(m, '\n');
 }

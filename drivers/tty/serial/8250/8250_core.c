@@ -686,7 +686,11 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
 }
 
 static struct console univ8250_console = {
+#if defined(CONFIG_MCST) && (defined(CONFIG_E2K) || defined(CONFIG_E90S))
+	.name		= "ttyM",
+#else
 	.name		= "ttyS",
+#endif
 	.write_atomic	= univ8250_console_write_atomic,
 	.write		= univ8250_console_write,
 	.device		= uart_console_device,
@@ -717,9 +721,15 @@ console_initcall(univ8250_console_init);
 static struct uart_driver serial8250_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "serial",
+#if defined(CONFIG_MCST) && (defined(CONFIG_E2K) || defined(CONFIG_E90S))
+	.dev_name		= "ttyM",
+	.major			= MCST_AUX_TTY_MAJOR,
+	.minor			= 0,
+#else
 	.dev_name		= "ttyS",
 	.major			= TTY_MAJOR,
 	.minor			= 64,
+#endif
 	.cons			= SERIAL8250_CONSOLE,
 };
 
@@ -1195,7 +1205,7 @@ static int __init serial8250_init(void)
 	pr_info("Serial: 8250/16550 driver, %d ports, IRQ sharing %sabled\n",
 		nr_uarts, share_irqs ? "en" : "dis");
 
-#ifdef CONFIG_SPARC
+#ifdef CONFIG_SERIAL_SUNCORE
 	ret = sunserial_register_minors(&serial8250_reg, UART_NR);
 #else
 	serial8250_reg.nr = UART_NR;
@@ -1231,7 +1241,7 @@ put_dev:
 unreg_pnp:
 	serial8250_pnp_exit();
 unreg_uart_drv:
-#ifdef CONFIG_SPARC
+#ifdef CONFIG_SERIAL_SUNCORE
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);
@@ -1256,7 +1266,7 @@ static void __exit serial8250_exit(void)
 
 	serial8250_pnp_exit();
 
-#ifdef CONFIG_SPARC
+#ifdef CONFIG_SERIAL_SUNCORE
 	sunserial_unregister_minors(&serial8250_reg, UART_NR);
 #else
 	uart_unregister_driver(&serial8250_reg);
@@ -1282,7 +1292,11 @@ MODULE_PARM_DESC(skip_txen_test, "Skip checking for the TXEN bug at init time");
 module_param_hw_array(probe_rsa, ulong, ioport, &probe_rsa_count, 0444);
 MODULE_PARM_DESC(probe_rsa, "Probe I/O ports for RSA");
 #endif
+#if defined(CONFIG_MCST) && (defined(CONFIG_E2K) || defined(CONFIG_E90S))
+MODULE_ALIAS_CHARDEV_MAJOR(MCST_AUX_TTY_MAJOR);
+#else
 MODULE_ALIAS_CHARDEV_MAJOR(TTY_MAJOR);
+#endif
 
 #ifdef CONFIG_SERIAL_8250_DEPRECATED_OPTIONS
 #ifndef MODULE

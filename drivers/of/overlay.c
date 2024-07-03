@@ -946,8 +946,14 @@ static int of_overlay_apply(const void *fdt, struct device_node *tree,
 		goto err_free_tree;
 
 	ret = init_overlay_changeset(ovcs, fdt, tree);
-	if (ret)
+	if (ret) {
+#ifdef CONFIG_MCST
+		/* Fix double-free of fdt */
+		goto err_free_overlay_changeset;
+#else
 		goto err_free_tree;
+#endif
+	}
 
 	/*
 	 * after overlay_notify(), ovcs->overlay_tree related pointers may have

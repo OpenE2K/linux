@@ -70,9 +70,8 @@ void *snd_malloc_sgbuf_pages(struct device *device,
 		return NULL;
 	if (dmab->dev.type == SNDRV_DMA_TYPE_DEV_UC_SG) {
 		type = SNDRV_DMA_TYPE_DEV_UC;
-#ifdef pgprot_noncached
-		prot = pgprot_noncached(PAGE_KERNEL);
-#endif
+		/* CONFIG_MCST: https://lkml.org/lkml/2021/10/19/820 */
+		prot = pgprot_writecombine(PAGE_KERNEL);
 	}
 	sgbuf->dev = device;
 	pages = snd_sgbuf_aligned_pages(size);

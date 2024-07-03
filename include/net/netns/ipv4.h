@@ -173,6 +173,10 @@ struct netns_ipv4 {
 	int sysctl_tcp_wmem[3];
 	int sysctl_tcp_rmem[3];
 	int sysctl_tcp_comp_sack_nr;
+#ifdef CONFIG_MCST
+	int sysctl_tcp_no_delayed_ack;
+	int sysctl_tcp_fast_tlp;
+#endif
 	unsigned long sysctl_tcp_comp_sack_delay_ns;
 	unsigned long sysctl_tcp_comp_sack_slack_ns;
 	struct inet_timewait_death_row tcp_death_row;

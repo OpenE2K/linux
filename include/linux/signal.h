@@ -61,7 +61,11 @@ enum siginfo_layout siginfo_layout(unsigned sig, int si_code);
    be atomic.  */
 static inline void sigaddset(sigset_t *set, int _sig)
 {
+#ifdef CONFIG_MCST
+	unsigned long sig = (_sig & 0x7f) - 1;
+#else
 	unsigned long sig = _sig - 1;
+#endif
 	if (_NSIG_WORDS == 1)
 		set->sig[0] |= 1UL << sig;
 	else
@@ -70,7 +74,11 @@ static inline void sigaddset(sigset_t *set, int _sig)
 
 static inline void sigdelset(sigset_t *set, int _sig)
 {
+#ifdef CONFIG_MCST
+	unsigned long sig = (_sig & 0x7f) - 1;
+#else
 	unsigned long sig = _sig - 1;
+#endif
 	if (_NSIG_WORDS == 1)
 		set->sig[0] &= ~(1UL << sig);
 	else
@@ -79,7 +87,11 @@ static inline void sigdelset(sigset_t *set, int _sig)
 
 static inline int sigismember(sigset_t *set, int _sig)
 {
+#ifdef CONFIG_MCST
+	unsigned long sig = (_sig & 0x7f) - 1;
+#else
 	unsigned long sig = _sig - 1;
+#endif
 	if (_NSIG_WORDS == 1)
 		return 1 & (set->sig[0] >> sig);
 	else

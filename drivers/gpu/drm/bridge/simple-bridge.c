@@ -5,7 +5,7 @@
  *
  * Maxime Ripard <maxime.ripard@free-electrons.com>
  */
-
+#define DEBUG
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
@@ -122,7 +122,11 @@ static int simple_bridge_attach(struct drm_bridge *bridge,
 				 &simple_bridge_con_helper_funcs);
 	ret = drm_connector_init_with_ddc(bridge->dev, &sbridge->connector,
 					  &simple_bridge_con_funcs,
+#ifdef CONFIG_MCST
+					  sbridge->next_bridge->type,
+#else
 					  sbridge->info->connector_type,
+#endif
 					  sbridge->next_bridge->ddc);
 	if (ret) {
 		DRM_ERROR("Failed to initialize connector\n");

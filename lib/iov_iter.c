@@ -1328,9 +1328,24 @@ ssize_t iov_iter_get_pages(struct iov_iter *i,
 			len = maxpages * PAGE_SIZE;
 		addr &= ~(PAGE_SIZE - 1);
 		n = DIV_ROUND_UP(len, PAGE_SIZE);
+#ifdef CONFIG_E2K
+		/*
+		 * Allow reading of privileged areas through
+		 * get_user_pages_unlocked without access_ok() check
+		 */
+		if (unlikely((iov_iter_rw(i) == WRITE) &&
+				!access_ok(addr, (n + 1) * PAGE_SIZE))) {
+			res = get_user_pages_unlocked(addr, n, pages, 0);
+		} else {
+			res = get_user_pages_fast(addr, n,
+				iov_iter_rw(i) != WRITE ? FOLL_WRITE : 0,
+				pages);
+		}
+#else
 		res = get_user_pages_fast(addr, n,
 				iov_iter_rw(i) != WRITE ?  FOLL_WRITE : 0,
 				pages);
+#endif
 		if (unlikely(res <= 0))
 			return res;
 		return (res == n ? len : res * PAGE_SIZE) - *start;
@@ -1754,7 +1769,13 @@ ssize_t __import_iovec(int type, const struct iovec __user *uvec,
 	for (seg = 0; seg < nr_segs; seg++) {
 		ssize_t len = (ssize_t)iov[seg].iov_len;
 
+#ifdef CONFIG_E2K
+		if ((type == READ && !access_ok(iov[seg].iov_base, len))
+			|| !__range_ok((unsigned long)iov[seg].iov_base, len,
+					PAGE_OFFSET)) {
+#else
 		if (!access_ok(iov[seg].iov_base, len)) {
+#endif
 			if (iov != *iovp)
 				kfree(iov);
 			*iovp = NULL;

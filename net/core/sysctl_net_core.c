@@ -329,6 +329,16 @@ static struct ctl_table net_core_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &min_rcvbuf,
 	},
+#ifdef CONFIG_MCST
+	{
+		.procname	= "sock_minrcvbuf",
+		.data		= &sysctl_sock_minrcvbuf,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &min_rcvbuf,
+	},
+#endif
 	{
 		.procname	= "wmem_default",
 		.data		= &sysctl_wmem_default,

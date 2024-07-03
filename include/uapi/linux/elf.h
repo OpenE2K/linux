@@ -156,9 +156,13 @@ typedef struct {
 #define ELF32_R_SYM(x) ((x) >> 8)
 #define ELF32_R_TYPE(x) ((x) & 0xff)
 
+#ifdef __LCC__
+#define ELF64_R_SYM(i)			(__u32)((i) >> 32)
+#define ELF64_R_TYPE(i)			(__u32)((i) & 0xffffffff)
+#else
 #define ELF64_R_SYM(i)			((i) >> 32)
 #define ELF64_R_TYPE(i)			((i) & 0xffffffff)
-
+#endif
 typedef struct elf32_rel {
   Elf32_Addr	r_offset;
   Elf32_Word	r_info;

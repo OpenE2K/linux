@@ -36,7 +36,7 @@
 #include <scsi/fc/fc_fs.h>
 #include <linux/aer.h>
 #include <linux/crash_dump.h>
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 #include <asm/set_memory.h>
 #endif
 
@@ -15874,7 +15874,7 @@ lpfc_wq_create(struct lpfc_hba *phba, struct lpfc_queue *wq,
 	uint8_t dpp_barset;
 	uint32_t dpp_offset;
 	uint8_t wq_create_version;
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 	unsigned long pg_addr;
 #endif
 
@@ -16066,7 +16066,7 @@ lpfc_wq_create(struct lpfc_hba *phba, struct lpfc_queue *wq,
 					wq->queue_id, pci_barset, db_offset,
 					wq->dpp_id, dpp_barset, dpp_offset);
 
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 			/* Enable combined writes for DPP aperture */
 			pg_addr = (unsigned long)(wq->dpp_regaddr) & PAGE_MASK;
 			rc = set_memory_wc(pg_addr, 1);

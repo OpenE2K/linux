@@ -2727,7 +2727,11 @@ static int v4l_enum_freq_bands(const struct v4l2_ioctl_ops *ops,
 struct v4l2_ioctl_info {
 	unsigned int ioctl;
 	u32 flags;
+#if defined CONFIG_MCST && defined __LCC__
+	char *name;
+#else
 	const char * const name;
+#endif
 	int (*func)(const struct v4l2_ioctl_ops *ops, struct file *file,
 		    void *fh, void *p);
 	void (*debug)(const void *arg, bool write_only);

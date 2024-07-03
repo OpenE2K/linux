@@ -75,7 +75,7 @@ config PREEMPT_RT
 	  low level and critical code paths (entry code, scheduler, low
 	  level interrupt handling) fully preemptible and brings most
 	  execution contexts under scheduler control.
-
+ 
 	  Select this if you are building a kernel for systems which
 	  require real-time guarantees.
 

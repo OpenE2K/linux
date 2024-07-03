@@ -10,6 +10,8 @@
 		     + __GNUC_MINOR__ * 100	\
 		     + __GNUC_PATCHLEVEL__)
 
+
+
 /* https://gcc.gnu.org/bugzilla/show_bug.cgi?id=58145 */
 #if GCC_VERSION < 40900
 # error Sorry, your version of GCC is too old - please use 4.9 or newer.
@@ -58,6 +60,9 @@
 #define __latent_entropy __attribute__((latent_entropy))
 #endif
 
+#if defined __LCC__ /* MCST */
+#define unreachable() __builtin_unreachable()
+#else
 /*
  * calling noreturn functions, __builtin_unreachable() and __builtin_trap()
  * confuse the stack allocation in gcc, leading to overly large stack
@@ -78,6 +83,7 @@
 		barrier_before_unreachable();	\
 		__builtin_unreachable();	\
 	} while (0)
+#endif /* __LCC__ */
 
 #if defined(RANDSTRUCT_PLUGIN) && !defined(__CHECKER__)
 #define __randomize_layout __attribute__((randomize_layout))
@@ -141,7 +147,10 @@
 #endif
 
 #if GCC_VERSION >= 50100
+# if !defined(__LCC__)
+/* bug #114613 */
 #define COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW 1
+# endif
 #endif
 
 /*

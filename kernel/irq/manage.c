@@ -764,6 +764,43 @@ static int set_irq_wake_real(unsigned int irq, unsigned int on)
 
 	return ret;
 }
+#ifdef CONFIG_MCST
+int
+mk_hndl_first(unsigned int irq, const char *name)
+{
+	struct irq_desc *desc = irq_to_desc(irq);
+	struct irqaction *prev_act = NULL, *cur_act, *first_actn = desc->action;
+	struct irqaction *moved_actn = NULL, *prev_moved;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&desc->lock, flags);
+	for (cur_act = first_actn; cur_act;
+			prev_act = cur_act, cur_act = cur_act->next) {
+		/* find last name */
+		if (!strcmp(cur_act->name, name)) {
+			moved_actn = cur_act;
+			prev_moved = prev_act;
+		}
+	}
+	if (moved_actn == NULL) {
+		pr_warn("There is no name '%s' in irq%d actions\n",
+			name, irq);
+		raw_spin_unlock_irqrestore(&desc->lock, flags);
+		return -EINVAL;
+	}
+	if (moved_actn == first_actn) {
+		raw_spin_unlock_irqrestore(&desc->lock, flags);
+		return 0;
+	}
+	/* last name in the list is found */
+	prev_moved->next = moved_actn->next;
+	moved_actn->next = first_actn;
+	desc->action = moved_actn;
+	raw_spin_unlock_irqrestore(&desc->lock, flags);
+	return 0;
+}
+EXPORT_SYMBOL(mk_hndl_first);
+#endif
 
 /**
  *	irq_set_irq_wake - control irq power management wakeup
@@ -1543,7 +1580,11 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 
 		if (!((old->flags & new->flags) & IRQF_SHARED) ||
 		    (oldtype != (new->flags & IRQF_TRIGGER_MASK)) ||
+#ifdef CONFIG_MCST
+		    0)
+#else
 		    ((old->flags ^ new->flags) & IRQF_ONESHOT))
+#endif
 			goto mismatch;
 
 		/* All handlers must agree on per-cpuness */
@@ -1600,7 +1641,11 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * all existing action->thread_mask bits.
 		 */
 		new->thread_mask = 1UL << ffz(thread_mask);
-
+#ifdef CONFIG_MCST
+		if (shared && !(desc->istate &  IRQS_ONESHOT)) {
+			desc->istate |= IRQS_ONESHOT;
+		}
+#endif
 	} else if (new->handler == irq_default_primary_handler &&
 		   !(desc->irq_data.chip->flags & IRQCHIP_ONESHOT_SAFE)) {
 		/*

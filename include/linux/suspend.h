@@ -569,4 +569,9 @@ static inline void queue_up_suspend_work(void) {}
 
 #endif /* !CONFIG_PM_AUTOSLEEP */
 
+#ifdef CONFIG_E2K
+int alloc_tag_pages(unsigned long pages, unsigned long *tags);
+void save_tag_for_pfn(unsigned long pfn);
+#endif
+
 #endif /* _LINUX_SUSPEND_H */

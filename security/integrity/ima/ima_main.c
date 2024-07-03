@@ -389,6 +389,7 @@ out:
 	return 0;
 }
 
+
 /**
  * ima_file_mmap - based on policy, collect/store measurement.
  * @file: pointer to the file to be measured (May be NULL)

@@ -1692,6 +1692,9 @@ ieee80211_process_tdls_channel_switch_resp(struct ieee80211_sub_if_data *sdata,
 	int baselen = offsetof(typeof(*tf), u.chan_switch_resp.variable);
 	struct ieee80211_tdls_ch_sw_params params = {};
 	int ret;
+#if defined(CONFIG_MCST) && defined(__LCC__)
+	ret = 0;
+#endif
 
 	params.action_code = WLAN_TDLS_CHANNEL_SWITCH_RESPONSE;
 	params.timestamp = rx_status->device_timestamp;

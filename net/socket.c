@@ -122,6 +122,10 @@ static long sock_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 static long compat_sock_ioctl(struct file *file,
 			      unsigned int cmd, unsigned long arg);
 #endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+#include <asm/protected_syscalls.h>
+static long ptr128_sock_ioctl(struct file *, unsigned long cmd, unsigned long arg);
+#endif
 static int sock_fasync(int fd, struct file *filp, int on);
 static ssize_t sock_sendpage(struct file *file, struct page *page,
 			     int offset, size_t size, loff_t *ppos, int more);
@@ -155,6 +159,9 @@ static const struct file_operations socket_file_ops = {
 	.unlocked_ioctl = sock_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = compat_sock_ioctl,
+#endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl = ptr128_sock_ioctl,
 #endif
 	.mmap =		sock_mmap,
 	.release =	sock_close,
@@ -3403,7 +3410,501 @@ static long compat_sock_ioctl(struct file *file, unsigned int cmd,
 
 	return ret;
 }
-#endif
+#endif /* CONFIG_COMPAT */
+
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+
+struct ptr128_if_settings {
+	unsigned int type;	/* Type of physical device or protocol */
+	unsigned int size;	/* Size of the data allocated by the caller */
+	e2k_ptr_t __user dscr;	/* interface settings */
+};
+
+struct ptr128_ifreq {
+	union {
+		char	ifrn_name[IFNAMSIZ];		/* if name, e.g. "en0" */
+	} ifr_ifrn;
+
+	union {
+		struct	sockaddr ifru_addr;
+		struct	sockaddr ifru_dstaddr;
+		struct	sockaddr ifru_broadaddr;
+		struct	sockaddr ifru_netmask;
+		struct  sockaddr ifru_hwaddr;
+		short	ifru_flags;
+		int	ifru_ivalue;
+		int	ifru_mtu;
+		struct  ifmap ifru_map;
+		char	ifru_slave[IFNAMSIZ];	/* Just fits the size */
+		char	ifru_newname[IFNAMSIZ];
+		e2k_ptr_t	ifru_data_dscr;
+		struct	ptr128_if_settings ifru_settings;
+	} ifr_ifru;
+};
+
+struct ptr128_ifconf  {
+	int		ifc_len;	/* size of buffer */
+	e2k_ptr_t	ifcu_buf_dscr;
+};
+
+struct ptr128_ethtool_rxnfc {
+	__u32				cmd;
+	__u32				flow_type;
+	e2k_ptr_t			data_dscr;
+	struct ethtool_rx_flow_spec	fs;
+	union {
+		__u32			rule_cnt;
+		__u32			rss_context;
+	};
+	__u32				rule_locs[0];
+};
+
+
+static int ptr128_dev_ifconf(struct net *net, struct ptr128_ifconf __user *uifc128)
+{
+	struct ptr128_ifconf ifc128;
+	struct ifconf ifc;
+	struct ifreq __user *ifc_req64; /* temporal buffer */
+	void *ifc_req128; /* req destination buffer */
+	int len128, buf_size, len;
+	int err;
+	int i;
+
+	if (copy_from_user(&ifc128, uifc128, sizeof(struct ptr128_ifconf)))
+		return -EFAULT;
+
+	len128 = ifc128.ifc_len;
+	ifc.ifc_len = len128;
+	/* Allocating temporal buffer for the requested data:
+	 * NB> 'stack_size' must be multiple of 16; otherwise
+	 *     we may get non-aligned space.
+	 */
+	buf_size = (len128 + 15) & ~0xf;
+	ifc_req64 = arch_protected_alloc_user_data_stack(buf_size);
+	ifc.ifc_req = (struct ifreq *) ifc_req64;
+
+	DbgSCP("%s(net=0x%lx, uifc128=0x%lx [ifc_len=%d, ifc_req64=0x%lx])\n",
+	       __func__, net, uifc128, ifc.ifc_len, ifc_req64);
+
+	rtnl_lock();
+	err = dev_ifconf(net, &ifc, sizeof(struct ifreq));
+	rtnl_unlock();
+	if (err)
+		return err;
+
+	/* Writing results back to uifc128: */
+	/* Copying the contents of the ifc_req buffer:
+	 * NB> sys_ioctl() writes an array of 'ifreq' structs
+	 *     into ifc_req buffer. Note that protected struct size
+	 *     exceeds the one of regular structure.
+	 */
+	/* ifreq array size in user's space. */
+	len = (ifc.ifc_len/sizeof(struct ifreq)) * sizeof(struct ptr128_ifreq);
+	if (len > len128)
+		len = len128;
+
+	ifc_req128 = (struct ifreq *) E2K_PTR_PTR(ifc128.ifcu_buf_dscr);
+	DbgSCP("%s() : ifc_req64=0x%lx --> ifc_req128=0x%lx\n", __func__,
+	       (unsigned long) ifc_req64, (unsigned long) ifc_req128);
+
+	for (i = 0; i < len; i += sizeof(struct ptr128_ifreq)) {
+		err = copy_to_user(ifc_req128 + i, ifc_req64++,
+				   sizeof(struct ifreq));
+		if (err) {
+			DbgSCP("%s:%d copy_to_user() failed\n",
+			       __FILE__, __LINE__);
+			return -EFAULT;
+		}
+	}
+	err = put_user(i, &uifc128->ifc_len);
+	if (err)
+		return err;
+
+	return 0;
+}
+
+static int ptr128_ethtool_ioctl(struct net *net, struct ptr128_ifreq __user *ifr128)
+{
+	struct ptr128_ethtool_rxnfc __user *ptr128_rxnfc;
+	bool convert_in = false, convert_out = false;
+	size_t buf_size = 0;
+	struct ethtool_rxnfc __user *rxnfc = NULL;
+	struct ifreq ifr;
+	u64 rule_cnt = 0, actual_rule_cnt;
+	u64 ethcmd;
+	e2k_ptr_t dscr;
+	int ret;
+
+	if (get_user(dscr.lo, &ifr128->ifr_ifru.ifru_data_dscr.lo) ||
+		get_user(dscr.hi, &ifr128->ifr_ifru.ifru_data_dscr.hi))
+		return -EFAULT;
+
+	ptr128_rxnfc = (struct ptr128_ethtool_rxnfc *)E2K_PTR_PTR(dscr);
+
+	if (get_user(ethcmd, &ptr128_rxnfc->cmd))
+		return -EFAULT;
+
+	/* Most ethtool structures are defined without padding.
+	 * Unfortunately struct ethtool_rxnfc is an exception.
+	 */
+	switch (ethcmd) {
+	default:
+		break;
+	case ETHTOOL_GRXCLSRLALL:
+		/* Buffer size is variable */
+		if (get_user(rule_cnt, &ptr128_rxnfc->rule_cnt))
+			return -EFAULT;
+		if (rule_cnt > KMALLOC_MAX_SIZE / sizeof(u32))
+			return -ENOMEM;
+		buf_size += rule_cnt * sizeof(u32);
+		fallthrough;
+	case ETHTOOL_GRXRINGS:
+	case ETHTOOL_GRXCLSRLCNT:
+	case ETHTOOL_GRXCLSRULE:
+	case ETHTOOL_SRXCLSRLINS:
+		convert_out = true;
+		fallthrough;
+	case ETHTOOL_SRXCLSRLDEL:
+		buf_size += sizeof(struct ethtool_rxnfc);
+		convert_in = true;
+		rxnfc = arch_protected_alloc_user_data_stack(buf_size);
+		break;
+	}
+
+	if (copy_from_user(&ifr.ifr_name, &ifr128->ifr_name, IFNAMSIZ))
+		return -EFAULT;
+
+	ifr.ifr_data = convert_in ? rxnfc : (void __user *)ptr128_rxnfc;
+
+	if (convert_in) {
+		/* We expect there to be holes between fs.m_ext and
+		 * fs.ring_cookie and at the end of fs, but nowhere else.
+		 */
+		BUILD_BUG_ON(offsetof(struct ptr128_ethtool_rxnfc, fs.m_ext) +
+			     sizeof(ptr128_rxnfc->fs.m_ext) !=
+			     offsetof(struct ethtool_rxnfc, fs.m_ext) + 8 +
+			     sizeof(rxnfc->fs.m_ext) +
+			     8 /* pad_align */);
+		BUILD_BUG_ON(
+			offsetof(struct ptr128_ethtool_rxnfc, fs.location) -
+			offsetof(struct ptr128_ethtool_rxnfc, fs.ring_cookie) !=
+			offsetof(struct ethtool_rxnfc, fs.location) -
+			offsetof(struct ethtool_rxnfc, fs.ring_cookie));
+
+		if (copy_in_user(rxnfc, ptr128_rxnfc,
+				 (void __user *)(&rxnfc->fs.m_ext + 1) -
+				 (void __user *)rxnfc) ||
+		    copy_in_user(&rxnfc->fs.ring_cookie,
+				 &ptr128_rxnfc->fs.ring_cookie,
+				 (void __user *)(&rxnfc->fs.location + 1) -
+				 (void __user *)&rxnfc->fs.ring_cookie))
+			return -EFAULT;
+		if (ethcmd == ETHTOOL_GRXCLSRLALL) {
+			if (put_user(rule_cnt, &rxnfc->rule_cnt))
+				return -EFAULT;
+		} else if (copy_in_user(&rxnfc->rule_cnt,
+					&ptr128_rxnfc->rule_cnt,
+					sizeof(rxnfc->rule_cnt)))
+			return -EFAULT;
+	}
+
+	ret = dev_ioctl(net, SIOCETHTOOL, &ifr, NULL);
+	if (ret)
+		return ret;
+
+	if (convert_out) {
+		if (copy_in_user(ptr128_rxnfc, rxnfc,
+				 (const void __user *)(&rxnfc->fs.m_ext + 1) -
+				 (const void __user *)rxnfc) ||
+		    copy_in_user(&ptr128_rxnfc->fs.ring_cookie,
+				 &rxnfc->fs.ring_cookie,
+				 (const void __user *)(&rxnfc->fs.location + 1) -
+				 (const void __user *)&rxnfc->fs.ring_cookie) ||
+		    copy_in_user(&ptr128_rxnfc->rule_cnt, &rxnfc->rule_cnt,
+				 sizeof(rxnfc->rule_cnt)))
+			return -EFAULT;
+
+		if (ethcmd == ETHTOOL_GRXCLSRLALL) {
+			/* As an optimisation, we only copy the actual
+			 * number of rules that the underlying
+			 * function returned.  Since Mallory might
+			 * change the rule count in user memory, we
+			 * check that it is less than the rule count
+			 * originally given (as the user buffer size),
+			 * which has been range-checked.
+			 */
+			if (get_user(actual_rule_cnt, &rxnfc->rule_cnt))
+				return -EFAULT;
+			if (actual_rule_cnt < rule_cnt)
+				rule_cnt = actual_rule_cnt;
+			if (copy_in_user(&ptr128_rxnfc->rule_locs[0],
+					 &rxnfc->rule_locs[0],
+					 rule_cnt * sizeof(u32)))
+				return -EFAULT;
+		}
+	}
+
+	return 0;
+}
+
+static int ptr128_siocwandev(struct net *net, struct ptr128_ifreq __user *uifr128)
+{
+	e2k_ptr_t dscr;
+	struct ifreq ifr;
+	void __user *saved;
+	int err;
+
+	if (copy_from_user(&ifr, uifr128, sizeof(struct ptr128_ifreq)))
+		return -EFAULT;
+
+	if (get_user(dscr.lo, &uifr128->ifr_settings.dscr.lo) ||
+		get_user(dscr.hi, &uifr128->ifr_settings.dscr.hi))
+		return -EFAULT;
+
+	saved = ifr.ifr_settings.ifs_ifsu.raw_hdlc;
+	ifr.ifr_settings.ifs_ifsu.raw_hdlc = (raw_hdlc_proto *) E2K_PTR_PTR(dscr);
+
+	err = dev_ioctl(net, SIOCWANDEV, &ifr, NULL);
+	if (!err) {
+		ifr.ifr_settings.ifs_ifsu.raw_hdlc = saved;
+		if (copy_to_user(uifr128, &ifr, sizeof(struct ptr128_ifreq)))
+			err = -EFAULT;
+	}
+	return err;
+}
+
+/* Handle ioctls that use ifreq::ifr_data and just need struct ifreq converted */
+static int ptr128_ifr_data_ioctl(struct net *net, unsigned int cmd,
+				 struct ptr128_ifreq __user *u_ifreq128)
+{
+	struct ifreq ifreq;
+	e2k_ptr_t dscr;
+
+	if (copy_from_user(ifreq.ifr_name, u_ifreq128->ifr_name, IFNAMSIZ))
+		return -EFAULT;
+	if (get_user(dscr.lo, &u_ifreq128->ifr_ifru.ifru_data_dscr.lo) ||
+		get_user(dscr.hi, &u_ifreq128->ifr_ifru.ifru_data_dscr.hi))
+		return -EFAULT;
+	ifreq.ifr_data = (void *) E2K_PTR_PTR(dscr);
+
+	return dev_ioctl(net, cmd, &ifreq, NULL);
+}
+
+static int ptr128_ifreq_ioctl(struct net *net, struct socket *sock,
+			      unsigned long cmd,
+			      struct ptr128_ifreq __user *uifr128)
+{
+	struct ifreq __user *uifr;
+	int err;
+
+	/* Handle the fact that while struct ifreq has the same *layout* on
+	 * 32/64 for everything but ifreq::ifru_ifmap and ifreq::ifru_data,
+	 * which are handled elsewhere, it still has different *size* due to
+	 * ifreq::ifru_ifmap (which is 16 bytes on 32 bit, 24 bytes on 64-bit,
+	 * resulting in struct ifreq being 32 and 40 bytes respectively).
+	 * As a result, if the struct happens to be at the end of a page and
+	 * the next page isn't readable/writable, we get a fault. To prevent
+	 * that, copy back and forth to the full size.
+	 */
+
+	uifr = arch_protected_alloc_user_data_stack(sizeof(*uifr128));
+	if (copy_in_user(uifr, uifr128, sizeof(*uifr128)))
+		return -EFAULT;
+
+	err = sock_do_ioctl(net, sock, cmd, (unsigned long)uifr);
+
+	if (!err) {
+		switch (cmd) {
+		case SIOCGIFFLAGS:
+		case SIOCGIFMETRIC:
+		case SIOCGIFMTU:
+		case SIOCGIFMEM:
+		case SIOCGIFHWADDR:
+		case SIOCGIFINDEX:
+		case SIOCGIFADDR:
+		case SIOCGIFBRDADDR:
+		case SIOCGIFDSTADDR:
+		case SIOCGIFNETMASK:
+		case SIOCGIFPFLAGS:
+		case SIOCGIFTXQLEN:
+		case SIOCGMIIPHY:
+		case SIOCGMIIREG:
+		case SIOCGIFNAME:
+			if (copy_in_user(uifr128, uifr, sizeof(*uifr128)))
+				err = -EFAULT;
+			break;
+		}
+	}
+	return err;
+}
+
+static int ptr128_sioc_ifmap(struct net *net, unsigned long cmd,
+			struct ptr128_ifreq __user *uifr128)
+{
+	struct ifreq ifr;
+	struct ifmap __user *uifmap;
+	int err;
+
+	uifmap = &uifr128->ifr_ifru.ifru_map;
+	err = copy_from_user(&ifr, uifr128, sizeof(ifr.ifr_name));
+	err |= get_user(ifr.ifr_map.mem_start, &uifmap->mem_start);
+	err |= get_user(ifr.ifr_map.mem_end, &uifmap->mem_end);
+	err |= get_user(ifr.ifr_map.base_addr, &uifmap->base_addr);
+	err |= get_user(ifr.ifr_map.irq, &uifmap->irq);
+	err |= get_user(ifr.ifr_map.dma, &uifmap->dma);
+	err |= get_user(ifr.ifr_map.port, &uifmap->port);
+	if (err)
+		return -EFAULT;
+
+	err = dev_ioctl(net, cmd, &ifr, NULL);
+
+	if (cmd == SIOCGIFMAP && !err) {
+		err = copy_to_user(uifr128, &ifr, sizeof(ifr.ifr_name));
+		err |= put_user(ifr.ifr_map.mem_start, &uifmap->mem_start);
+		err |= put_user(ifr.ifr_map.mem_end, &uifmap->mem_end);
+		err |= put_user(ifr.ifr_map.base_addr, &uifmap->base_addr);
+		err |= put_user(ifr.ifr_map.irq, &uifmap->irq);
+		err |= put_user(ifr.ifr_map.dma, &uifmap->dma);
+		err |= put_user(ifr.ifr_map.port, &uifmap->port);
+		if (err)
+			err = -EFAULT;
+	}
+	return err;
+}
+
+static int ptr128_sock_ioctl_trans(struct file *file, struct socket *sock,
+			 unsigned long cmd, unsigned long argp)
+{
+	struct sock *sk = sock->sk;
+	struct net *net = sock_net(sk);
+
+	DbgSCP("%s(file=0x%lx, sock=0x%lx, cmd=0x%lx, argp=0x%lx)\n",
+	       __func__, file, sock, cmd, argp);
+
+	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15))
+		return ptr128_ifr_data_ioctl(net, cmd, (void *) argp);
+
+	switch (cmd) {
+	case SIOCSIFBR:
+	case SIOCGIFBR:
+		return sock_ioctl(file, cmd, argp);
+	case SIOCGIFCONF:
+		return ptr128_dev_ifconf(net, (void *) argp);
+	case SIOCETHTOOL:
+		return ptr128_ethtool_ioctl(net, (void *) argp);
+	case SIOCWANDEV:
+		return ptr128_siocwandev(net, (void *) argp);
+	case SIOCGIFMAP:
+	case SIOCSIFMAP:
+		return ptr128_sioc_ifmap(net, cmd, (void *) argp);
+	case SIOCGSTAMP_OLD:
+	case SIOCGSTAMPNS_OLD:
+		if (!sock->ops->gettstamp)
+			return -ENOIOCTLCMD;
+		return sock->ops->gettstamp(sock, (void *) argp, cmd == SIOCGSTAMP_OLD,
+					    !COMPAT_USE_64BIT_TIME);
+
+	case SIOCBONDSLAVEINFOQUERY:
+	case SIOCBONDINFOQUERY:
+	case SIOCSHWTSTAMP:
+	case SIOCGHWTSTAMP:
+		return ptr128_ifr_data_ioctl(net, cmd, (void *) argp);
+
+	case FIOSETOWN:
+	case SIOCSPGRP:
+	case FIOGETOWN:
+	case SIOCGPGRP:
+	case SIOCBRADDBR:
+	case SIOCBRDELBR:
+	case SIOCGIFVLAN:
+	case SIOCSIFVLAN:
+	case SIOCADDDLCI:
+	case SIOCDELDLCI:
+	case SIOCGSKNS:
+	case SIOCGSTAMP_NEW:
+	case SIOCGSTAMPNS_NEW:
+		return sock_ioctl(file, cmd, (unsigned long) argp);
+
+	case SIOCGIFFLAGS:
+	case SIOCSIFFLAGS:
+	case SIOCGIFMETRIC:
+	case SIOCSIFMETRIC:
+	case SIOCGIFMTU:
+	case SIOCSIFMTU:
+	case SIOCGIFMEM:
+	case SIOCSIFMEM:
+	case SIOCGIFHWADDR:
+	case SIOCSIFHWADDR:
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+	case SIOCGIFINDEX:
+	case SIOCGIFADDR:
+	case SIOCSIFADDR:
+	case SIOCSIFHWBROADCAST:
+	case SIOCDIFADDR:
+	case SIOCGIFBRDADDR:
+	case SIOCSIFBRDADDR:
+	case SIOCGIFDSTADDR:
+	case SIOCSIFDSTADDR:
+	case SIOCGIFNETMASK:
+	case SIOCSIFNETMASK:
+	case SIOCSIFPFLAGS:
+	case SIOCGIFPFLAGS:
+	case SIOCGIFTXQLEN:
+	case SIOCSIFTXQLEN:
+	case SIOCBRADDIF:
+	case SIOCBRDELIF:
+	case SIOCGIFNAME:
+	case SIOCSIFNAME:
+	case SIOCGMIIPHY:
+	case SIOCGMIIREG:
+	case SIOCSMIIREG:
+	case SIOCBONDENSLAVE:
+	case SIOCBONDRELEASE:
+	case SIOCBONDSETHWADDR:
+	case SIOCBONDCHANGEACTIVE:
+		return ptr128_ifreq_ioctl(net, sock, cmd, (void *) argp);
+
+	case SIOCSARP:
+	case SIOCGARP:
+	case SIOCDARP:
+	case SIOCOUTQ:
+	case SIOCOUTQNSD:
+	case SIOCATMARK:
+		return sock_do_ioctl(net, sock, cmd, (unsigned long) argp);
+	}
+
+	return -ENOIOCTLCMD;
+}
+
+static long ptr128_sock_ioctl(struct file *file, unsigned long cmd,
+			      unsigned long arg)
+{
+	struct socket *sock = file->private_data;
+	int ret = -ENOIOCTLCMD;
+	struct sock *sk;
+	struct net *net;
+
+	DbgSCP("%s(file=0x%lx, cmd=0x%lx, arg=0x%lx)\n",
+	       __func__, file, cmd, arg);
+
+	sk = sock->sk;
+	net = sock_net(sk);
+
+	if (sock->ops->ptr128_ioctl)
+		ret = sock->ops->ptr128_ioctl(sock, cmd, arg);
+
+	if (ret == -ENOIOCTLCMD &&
+	    (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST))
+		ret = ptr128_wext_handle_ioctl(net, cmd, arg);
+
+	if (ret == -ENOIOCTLCMD)
+		ret = ptr128_sock_ioctl_trans(file, sock, cmd, arg);
+
+	return ret;
+}
+
+#endif /* CONFIG_PROTECTED_MODE */
 
 /**
  *	kernel_bind - bind an address to a socket (kernel space)

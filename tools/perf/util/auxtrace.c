@@ -53,6 +53,9 @@
 #include "arm-spe.h"
 #include "s390-cpumsf.h"
 #include "util/mmap.h"
+#ifdef __e2k__
+#include "e2k-dimtp.h"
+#endif
 
 #include <linux/ctype.h>
 #include "symbol/kallsyms.h"
@@ -1273,6 +1276,10 @@ int perf_event__process_auxtrace_info(struct perf_session *session,
 	case PERF_AUXTRACE_S390_CPUMSF:
 		err = s390_cpumsf_process_auxtrace_info(event, session);
 		break;
+#ifdef __e2k__
+	case PERF_AUXTRACE_E2K_DIMTP:
+		return e2k_dimtp_process_auxtrace_info(event, session);
+#endif
 	case PERF_AUXTRACE_UNKNOWN:
 	default:
 		return -EINVAL;

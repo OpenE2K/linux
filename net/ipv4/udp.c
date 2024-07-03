@@ -1061,7 +1061,7 @@ int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	int err, is_udplite = IS_UDPLITE(sk);
 	int corkreq = READ_ONCE(up->corkflag) || msg->msg_flags&MSG_MORE;
 	int (*getfrag)(void *, char *, int, int, int, struct sk_buff *);
-	struct sk_buff *skb;
+	struct sk_buff *skb = NULL;
 	struct ip_options_data opt_copy;
 
 	if (len > 0xFFFF)
@@ -1299,6 +1299,51 @@ out:
 out_free:
 	if (free)
 		kfree(ipc.opt);
+#ifdef CONFIG_MCST
+	/* The delay in return from udp_sendmsg() may be added
+	 * by sysctl to aviod packets loss in the neighbour.
+	 * The parameters may be set so:
+	 * echo period_usec > /proc/sys/net/ipv4/conf/all/snd_period_us
+	 * echo msg_numb_sent_after_period >
+	 *           /proc/sys/net/ipv4/conf/all/snd_num4period
+	 * echo lim_size_for_period >
+	 *           /proc/sys/net/ipv4/conf/all/snd_limsz4period
+	 * or
+	 * sysctl net.ipv4.conf.all.snd_period_us=period_usec
+	 * sysctl net.ipv4.conf.all.snd_num4period=msg_numb_sent_after_period
+	 * sysctl net.ipv4.conf.all.snd_limsz4period=lim_size_for_period
+	 */
+	{
+	struct net *net = sock_net(sk);
+	ktime_t prev_tm;
+	int snd_lim_sz;
+	long delts_us;
+	if (IPV4_DEVCONF_ALL(net, SND_NUMB) > 0) {
+		sk->udp_snd_sz += len;
+		sk->udp_snd_num++;
+		if (sk->udp_snd_num > IPV4_DEVCONF_ALL(net, SND_NUMB)) {
+			prev_tm = sk->udp_snd_tm;
+			delts_us = IPV4_DEVCONF_ALL(net, SND_PERIOD) -
+				ktime_to_us(ktime_sub(
+					ktime_get(), prev_tm));
+			snd_lim_sz = IPV4_DEVCONF_ALL(net, SND_LIMSZ);
+			if (snd_lim_sz == 0 && ktime_to_ns(prev_tm)) {
+				IPV4_DEVCONF_ALL(net, SND_PERIOD) =
+				    ktime_to_us(ktime_sub(ktime_get(),
+					sk->udp_snd_tm));
+			} else if (delts_us > 0 && ktime_to_ns(prev_tm) &&
+				delts_us < 1000000 &&
+				sk->udp_snd_sz / sk->udp_snd_num <
+							snd_lim_sz) {
+				usleep_range(delts_us + 200, delts_us + 500);
+			}
+			sk->udp_snd_num = 0;
+			sk->udp_snd_sz = 0;
+			sk->udp_snd_tm = ktime_get();
+		}
+	}
+	}
+#endif
 	if (!err)
 		return len;
 	/*
@@ -2087,6 +2132,10 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 {
 	struct udp_sock *up = udp_sk(sk);
 	int is_udplite = IS_UDPLITE(sk);
+#ifdef CONFIG_MCST
+	unsigned long flags;
+	int napi_work = 0;
+#endif
 
 	/*
 	 *	Charge it to the socket, dropping if the queue is full.
@@ -2176,6 +2225,10 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 
 	ipv4_pktinfo_prepare(sk, skb);
 	return __udp_queue_rcv_skb(sk, skb);
+#ifdef CONFIG_MCST
+	if (napi_work)
+		local_irq_restore(flags);
+#endif
 
 csum_error:
 	__UDP_INC_STATS(sock_net(sk), UDP_MIB_CSUMERRORS, is_udplite);

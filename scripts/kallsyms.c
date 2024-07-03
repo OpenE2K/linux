@@ -264,7 +264,9 @@ static int symbol_in_range(const struct sym_entry *s,
 
 static int symbol_valid(const struct sym_entry *s)
 {
+#if 0
 	const char *name = sym_name(s);
+#endif
 
 	/* if --all-symbols is not specified, then symbols outside the text
 	 * and inittext sections are discarded */
@@ -272,6 +274,20 @@ static int symbol_valid(const struct sym_entry *s)
 		if (symbol_in_range(s, text_ranges,
 				    ARRAY_SIZE(text_ranges)) == 0)
 			return 0;
+#if 0
+/*
+ * "Bug 69021 - Nondeterministic output from kallsyms ... maybe?
+ * Cause for inconsistent kallsyms data"
+ *
+ * https://bugzilla.kernel.org/show_bug.cgi?id=69021
+ *
+ * Dropping of a symbol " __stop___modver" in stage 2 causes
+ * reduction of 'kallsyms_addresses' structure size by 8 bytes,
+ * and the following comparison of stage 2 and stage 3 outputs
+ * changes. Workaround by removing the check.
+ *
+ * MCST
+ */
 		/* Corner case.  Discard any symbols with the same value as
 		 * _etext _einittext; they can move between pass 1 and 2 when
 		 * the kallsyms data are added.  If these symbols move then
@@ -283,6 +299,7 @@ static int symbol_valid(const struct sym_entry *s)
 		    (s->addr == text_range_inittext->end &&
 		     strcmp(name, text_range_inittext->end_sym)))
 			return 0;
+#endif
 	}
 
 	return 1;

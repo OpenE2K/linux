@@ -42,6 +42,10 @@
 
 #include <linux/pci_ids.h>
 
+#if defined(CONFIG_MCST) && defined(CONFIG_PCI_MSI)
+#define MCST_MSIX
+#endif
+
 #define PCI_STATUS_ERROR_BITS (PCI_STATUS_DETECTED_PARITY  | \
 			       PCI_STATUS_SIG_SYSTEM_ERROR | \
 			       PCI_STATUS_REC_MASTER_ABORT | \
@@ -475,6 +479,9 @@ struct pci_dev {
 #endif
 #ifdef CONFIG_PCI_MSI
 	const struct attribute_group **msi_irq_groups;
+#ifdef MCST_MSIX
+	void __iomem *mcst_msix_cap_base;
+#endif
 #endif
 	struct pci_vpd *vpd;
 #ifdef CONFIG_PCIE_DPC
@@ -648,6 +655,9 @@ struct pci_bus {
 	unsigned int		unsafe_warn:1;	/* warned about RW1C config write */
 };
 
+#ifdef CONFIG_MCST
+#define pci_bus_b(n)	list_entry(n, struct pci_bus, node)
+#endif
 #define to_pci_bus(n)	container_of(n, struct pci_bus, dev)
 
 static inline u16 pci_dev_id(struct pci_dev *dev)
@@ -1171,6 +1181,9 @@ int __must_check pci_enable_device_io(struct pci_dev *dev);
 int __must_check pci_enable_device_mem(struct pci_dev *dev);
 int __must_check pci_reenable_device(struct pci_dev *);
 int __must_check pcim_enable_device(struct pci_dev *pdev);
+#ifdef CONFIG_MCST
+int __must_check pcim_enable_device_mem(struct pci_dev *pdev);
+#endif
 void pcim_pin_device(struct pci_dev *pdev);
 
 static inline bool pci_intx_mask_supported(struct pci_dev *pdev)

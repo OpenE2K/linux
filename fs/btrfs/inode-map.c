@@ -256,7 +256,11 @@ void btrfs_unpin_free_ino(struct btrfs_root *root)
 	spinlock_t *rbroot_lock = &root->free_ino_pinned->tree_lock;
 	struct btrfs_free_space *info;
 	struct rb_node *n;
+#ifdef CONFIG_MCST
+	u64 count = 0;
+#else
 	u64 count;
+#endif
 
 	if (!btrfs_test_opt(root->fs_info, INODE_MAP_CACHE))
 		return;

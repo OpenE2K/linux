@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# Makefile for AppArmor Linux Security Module
 # Makefile for AppArmor Linux Security Module
 #
 obj-$(CONFIG_SECURITY_APPARMOR) += apparmor.o
@@ -8,7 +8,7 @@ apparmor-y := apparmorfs.o audit.o capability.o task.o ipc.o lib.o match.o \
               resource.o secid.o file.o policy_ns.o label.o mount.o net.o
 apparmor-$(CONFIG_SECURITY_APPARMOR_HASH) += crypto.o
 
-clean-files := capability_names.h rlim_names.h net_names.h
+clean-files := capability_names.h rlim_names.h net_names.h rlim_names_orig.h rlim_names_arch.h
 
 # Build a lower case string table of address family names
 # Transform lines from
@@ -43,7 +43,7 @@ cmd_make-sock = echo "static const char *sock_type_names[] = {" >> $@ ;\
 	sed $^ >>$@ -r -n \
 	-e 's/^\tSOCK_([A-Z0-9_]+)[\t]+=[ \t]+([0-9]+)(.*)/[\2] = "\L\1",/p';\
 	echo "};" >> $@
-
+ 
 # Build a lower case string table of capability names
 # Transforms lines from
 #    #define CAP_DAC_OVERRIDE     1
@@ -81,8 +81,8 @@ cmd_make-caps = echo "static const char *const capability_names[] = {" > $@ ;\
 #    #define RLIMIT_STACK		3	/* max stack size */
 # to
 # #define AA_SFS_RLIMIT_MASK "fsize stack"
-quiet_cmd_make-rlim = GEN     $@
-cmd_make-rlim = echo "static const char *const rlim_names[RLIM_NLIMITS] = {" \
+quiet_cmd_make-rlim_orig = GEN     $@
+cmd_make-rlim_orig = echo "static const char *const rlim_names[RLIM_NLIMITS] = {" \
 	> $@ ;\
 	sed $< >> $@ -r -n \
 	    -e 's/^\# ?define[ \t]+(RLIMIT_([A-Z0-9_]+)).*/[\1] = "\L\2",/p';\
@@ -94,15 +94,32 @@ cmd_make-rlim = echo "static const char *const rlim_names[RLIM_NLIMITS] = {" \
 	sed -r -n 's/^\# ?define[ \t]+RLIMIT_([A-Z0-9_]+).*/\L\1/p' $< | \
 	    tr '\n' ' ' | sed -e 's/ $$/"\n/' >> $@
 
+# Replace RLIMIT_P_STACK to RLIMIT_P_STACK_EXT and RLIMIT_PC_STACK to
+# RLIMIT_PC_STACK_EXT
+quiet_cmd_make-rlim = GEN     $@
+cmd_make-rlim =	sed "s/\(RLIMIT_P_STACK\|RLIMIT_PC_STACK\)/\1_EXT/g" $< > $@
+
+# Remove RLIMIT_P_STACK and RLIMIT_PC_STACK for not e2k archs
+quiet_cmd_make-rlim_arch = GEN     $@
+ifeq ($(ARCH), e2k)
+cmd_make-rlim_arch = sed -e '' $< > $@
+else
+cmd_make-rlim_arch = sed "/RLIMIT_PC_STACK\|RLIMIT_P_STACK/d" $< > $@
+endif
+
 $(obj)/capability.o : $(obj)/capability_names.h
 $(obj)/net.o : $(obj)/net_names.h
 $(obj)/resource.o : $(obj)/rlim_names.h
 $(obj)/capability_names.h : $(srctree)/include/uapi/linux/capability.h \
 			    $(src)/Makefile
 	$(call cmd,make-caps)
-$(obj)/rlim_names.h : $(srctree)/include/uapi/asm-generic/resource.h \
-		      $(src)/Makefile
+$(obj)/rlim_names.h : $(obj)/rlim_names_orig.h
 	$(call cmd,make-rlim)
+$(obj)/rlim_names_orig.h : $(obj)/rlim_names_arch.h
+	$(call cmd,make-rlim_orig)
+$(obj)/rlim_names_arch.h : $(srctree)/include/uapi/asm-generic/resource.h \
+			   $(src)/Makefile
+	$(call cmd,make-rlim_arch)
 $(obj)/net_names.h : $(srctree)/include/linux/socket.h \
 		     $(srctree)/include/linux/net.h \
 		     $(src)/Makefile

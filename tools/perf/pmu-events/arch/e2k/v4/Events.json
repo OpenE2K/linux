@@ -1,0 +1,812 @@
+[
+    {
+        "EventCode": "0x000",
+        "EventName": "L1_QUERY",
+        "BriefDescription": "0:00 количество обращений в память. Учитываются все значимые заявки (как синхронные, так и асинхронные от устройств CLW, TLU, AAU) с выхода DTLB (фаза Е2), успешно прошедшие трансляцию виртуального адреса (без \"exception\") или не требующие трансляции.",
+    },
+    {
+        "EventCode": "0x001",
+        "EventName": "L1_ST_HIT",
+        "BriefDescription": "0:01 количество попаданий в L1 кэш при операциях записи",
+    },
+    {
+        "EventCode": "0x002",
+        "EventName": "L1_INT_HIT",
+        "BriefDescription": "0:02 количество \"внутренних\" попаданий в L1 кэш",
+    },
+    {
+        "EventCode": "0x003",
+        "EventName": "L1_LINE",
+        "BriefDescription": "0:03 количество заведений новой строки в L1 кэш",
+    },
+    {
+        "EventCode": "0x010",
+        "EventName": "DTLB_QUERY",
+        "BriefDescription": "0:10 количество обращений в DTLB. Учитывается только первый проход заявки через DTLB (повторы из буферов, например после прописи из TLU или после отмены заявки из-за приоритетов по невыровненности или из-за блокировки MLT, CLW, не учитываются. Учитываются как синхронные заявки, фаза Е2 которых значима, так и асинхронные заявки от устройств CLW, TLU, AAU.",
+    },
+    {
+        "EventCode": "0x011",
+        "EventName": "DTLB_SRU_QUERY",
+        "BriefDescription": "0:11 количество обращений в DTLB от устройства SRU",
+    },
+    {
+        "EventCode": "0x012",
+        "EventName": "DTLB_TLU_QUERY",
+        "BriefDescription": "0:12 количество обращений в DTLB от устройства TLU",
+    },
+    {
+        "EventCode": "0x013",
+        "EventName": "DTLB_AAU_QUERY",
+        "BriefDescription": "0:13 количество обращений в DTLB от устройства AAU",
+    },
+    {
+        "EventCode": "0x014",
+        "EventName": "DTLB_CLW_QUERY",
+        "BriefDescription": "0:14 количество обращений в DTLB от устройства CLW",
+    },
+    {
+        "EventCode": "0x015",
+        "EventName": "STALL_DTLB_MAU",
+        "BriefDescription": "0:15 количество оборотов вертушки при блокировке исполнения от устройства MAU",
+    },
+    {
+        "EventCode": "0x016",
+        "EventName": "DTLB_3_HIT",
+        "BriefDescription": "0:16 количество попаданий в 3 столбец DTLB при pg_intel_4m",
+    },
+    {
+        "EventCode": "0x017",
+        "EventName": "STALL_DTLB_MISS",
+        "BriefDescription": "0:17 количество оборотов вертушки при блокировке исполнения от промаха в TLB",
+    },
+    {
+        "EventCode": "0x018",
+        "EventName": "STALL_DTLB_L1",
+        "BriefDescription": "0:18 количество оборотов вертушки при блокировке исполнения от L1 CACHE",
+    },
+    {
+        "EventCode": "0x019",
+        "EventName": "DTLB_INVALID_PAGES",
+        "BriefDescription": "0:19 число заведений инвалидных страниц в DTLB",
+    },
+    {
+        "EventCode": "0x020",
+        "EventName": "DAM_LINE",
+        "BriefDescription": "0:20 количество заведений новой строки в DAM",
+    },
+    {
+        "EventCode": "0x021",
+        "EventName": "MLT_LINE",
+        "BriefDescription": "0:21 количество заведений новой строки в MLT",
+    },
+    {
+        "EventCode": "0x022",
+        "EventName": "SLT_COUNT",
+        "BriefDescription": "0:22 количество заведений программных семафоров в SLT",
+    },
+    {
+        "EventCode": "0x023",
+        "EventName": "SLT_WAIT_LOCK",
+        "BriefDescription": "0:23 количество тактов нахождения программного семафорного регистра в SLT в состоянии Wait Lock",
+    },
+    {
+        "EventCode": "0x024",
+        "EventName": "SLT_LOCKED",
+        "BriefDescription": "0:24 количество тактов нахождения программного семафорного регистра в SLT в состоянии Locked",
+    },
+    {
+        "EventCode": "0x030",
+        "EventName": "MAU_LDBOVFL_STALL",
+        "BriefDescription": "0:30 количество тактов блокировки MAU по переполнению load_buff (LDB)",
+    },
+    {
+        "EventCode": "0x031",
+        "EventName": "MAU_STB2LDB_STALL",
+        "BriefDescription": "0:31 количество тактов блокировки load_buff по метке STB --> LDB",
+    },
+    {
+        "EventCode": "0x032",
+        "EventName": "MAU_STMB_MERGE",
+        "BriefDescription": "0:32 количество выдач признака merge в STMB с данными из MAU",
+    },
+    {
+        "EventCode": "0x033",
+        "EventName": "MAU_LDB_LINE",
+        "BriefDescription": "0:33 количество заведений новой строки в LDB",
+    },
+    {
+        "EventCode": "0x034",
+        "EventName": "MAU_LDB_MERGE",
+        "BriefDescription": "0:34 количество первичных подклеиваний в LDB",
+    },
+    {
+        "EventCode": "0x035",
+        "EventName": "MAU_QUERY_IN_STALL",
+        "BriefDescription": "0:35 количество запросов в память на фоне блокировки по переполнению",
+    },
+    {
+        "EventCode": "0x036",
+        "EventName": "MAU_STB2LDB_FLUSH",
+        "BriefDescription": "0:36 количество сбросов метки STB --> LDB",
+    },
+    {
+        "EventCode": "0x037",
+        "EventName": "MAU_LDB_MERGE2",
+        "BriefDescription": "0:37 количество вторичных подклеиваний в LDB",
+    },
+    {
+        "EventCode": "0x038",
+        "EventName": "MAU_READS",
+        "BriefDescription": "0:38 количество запросов в память из MAU типа read",
+    },
+    {
+        "EventCode": "0x039",
+        "EventName": "MAU_INVS",
+        "BriefDescription": "0:39 количество запросов в память из MAU типа inv",
+    },
+    {
+        "EventCode": "0x03a",
+        "EventName": "MAU_R_RI",
+        "BriefDescription": "0:3a количество запросов в память из MAU типа read + read&inv, для которых данные нашлись во внешнем L2",
+    },
+    {
+        "EventCode": "0x040",
+        "EventName": "L2_QUERY",
+        "BriefDescription": "0:40 количество обращений в L2 кэш",
+    },
+    {
+        "EventCode": "0x041",
+        "EventName": "L2_ST_HIT",
+        "BriefDescription": "0:41 количество попаданий в L2 кэш при операциях записи",
+    },
+    {
+        "EventCode": "0x042",
+        "EventName": "L2_LINE",
+        "BriefDescription": "0:42 количество заведений новой строки в L2 кэш",
+    },
+    {
+        "EventCode": "0x043",
+        "EventName": "L2_EXT_QUERY",
+        "BriefDescription": "0:43 количество внешних обращений в L2 кэш (когерентные запросы)",
+    },
+    {
+        "EventCode": "0x044",
+        "EventName": "L2_EXT_READ",
+        "BriefDescription": "0:44 количество внешних обращений \"coherent read 64\" в L2 кэш",
+    },
+    {
+        "EventCode": "0x045",
+        "EventName": "L2_TLB_STALL",
+        "BriefDescription": "0:45 количество тактов блокировки из L2 в TLB",
+    },
+    {
+        "EventCode": "0x046",
+        "EventName": "L2_WBQ_STALL",
+        "BriefDescription": "0:46 количество тактов блокировки wbq (L2 внутренняя)",
+    },
+    {
+        "EventCode": "0x048",
+        "EventName": "L2_ARB_QUEUE_STALL",
+        "BriefDescription": "0:48 количество тактов блокировки arb_queue (L2 внутренняя)",
+    },
+    {
+        "EventCode": "0x04a",
+        "EventName": "L2_WBQ_MAU_STALL",
+        "BriefDescription": "0:4a количество тактов блокировки WB-запросов в l2_wbq из-за заполненности MAU_STB",
+    },
+    {
+        "EventCode": "0x04b",
+        "EventName": "L2_SNOOP_STALL",
+        "BriefDescription": "0:4b количество тактов блокировки snoop-запросов из SNSW",
+    },
+    {
+        "EventCode": "0x100",
+        "EventName": "L1_HIT",
+        "BriefDescription": "1:00 количество попаданий в L1 кэш",
+    },
+    {
+        "EventCode": "0x101",
+        "EventName": "L1_ST_QUERY",
+        "BriefDescription": "1:01 количество обращений в L1 кэш по записи",
+    },
+    {
+        "EventCode": "0x102",
+        "EventName": "L1_LINE_DISCARD",
+        "BriefDescription": "1:02 количество вычеркиваний строки из L1 кэш",
+    },
+    {
+        "EventCode": "0x110",
+        "EventName": "DTLB_HIT",
+        "BriefDescription": "1:10 количество попаданий в DTLB. Учитывается только первый проход заявки через DTLB (повторы из буферов, например после прописи из TLU или после отмены заявки из-за приоритетов по невыровненности или из-за блокировки MLT, CLW, не учитываются). Учитываются как синхронные заявки, фаза Е2 которых значима, так и асинхронные заявки от устройств CLW, TLU, AAU.",
+    },
+    {
+        "EventCode": "0x111",
+        "EventName": "STALL_DTLB",
+        "BriefDescription": "1:11 количество оборотов вертушки при блокировке исполнения от устройства DTLB (суммарно). Асинхронные запросы от AAU не учитываются.",
+    },
+    {
+        "EventCode": "0x112",
+        "EventName": "TLU_BUSY",
+        "BriefDescription": "1:12 количество тактов занятости устройства TLU",
+    },
+    {
+        "EventCode": "0x113",
+        "EventName": "STALL_AAU",
+        "BriefDescription": "1:13 количество оборотов вертушки при блокировке исполнения от устройства AAU",
+    },
+    {
+        "EventCode": "0x114",
+        "EventName": "STALL_DTLB_CLW",
+        "BriefDescription": "1:14 количество оборотов вертушки при блокировке исполнения от устройства CLW",
+    },
+    {
+        "EventCode": "0x115",
+        "EventName": "STALL_DTLB_MLT",
+        "BriefDescription": "1:15 количество оборотов вертушки при блокировке исполнения от устройства MLT",
+    },
+    {
+        "EventCode": "0x116",
+        "EventName": "DTLB_MPTDW_MISS",
+        "BriefDescription": "1:16 количество промахов в буферах DTLB_MPT_DW",
+    },
+    {
+        "EventCode": "0x117",
+        "EventName": "DTLB_LINE_UNALIGNED",
+        "BriefDescription": "1:17 количество невыровненных обращений (чтение пересекает L1 line, запись пересекает dword).",
+    },
+    {
+        "EventCode": "0x118",
+        "EventName": "STALL_DTLB_UNALIGN",
+        "BriefDescription": "1:18 количество оборотов вертушки при блокировке исполнения от невыровненности (счит - до l1 line,запись - до dw)",
+    },
+    {
+        "EventCode": "0x119",
+        "EventName": "STALL_DTLB_SEMLOCK",
+        "BriefDescription": "1:19 количество оборотов вертушки при блокировке исполнения семафорных операций",
+    },
+    {
+        "EventCode": "0x120",
+        "EventName": "DAM_BELL",
+        "BriefDescription": "1:20 количество \"звонков\" в DAM",
+    },
+    {
+        "EventCode": "0x121",
+        "EventName": "DAM_OVFL",
+        "BriefDescription": "1:21 количество заведений новой строки в DAM c вытеснением (overflow)",
+    },
+    {
+        "EventCode": "0x122",
+        "EventName": "DAM_STORE_CONFLICT",
+        "BriefDescription": "1:22 количество \"звонков\" в DAM по конфликту со store в одной команде, определяемое по 12 разрядам",
+    },
+    {
+        "EventCode": "0x123",
+        "EventName": "SLT_BELL",
+        "BriefDescription": "1:23 количество \"звонков\" в SLT",
+    },
+    {
+        "EventCode": "0x124",
+        "EventName": "SLT_BUSY",
+        "BriefDescription": "1:24 тактов занятости программного семафорного регистра в SLT",
+    },
+    {
+        "EventCode": "0x130",
+        "EventName": "MAU_STB_OVFL_STALL",
+        "BriefDescription": "1:30 количество тактов блокировки MAU по переполнению store_buff",
+    },
+    {
+        "EventCode": "0x131",
+        "EventName": "MAU_ST_NO_WB",
+        "BriefDescription": "1:31 количество запросов в память из MAU по записи (не writeback)",
+    },
+    {
+        "EventCode": "0x132",
+        "EventName": "MAU_LDB_STB_CMP",
+        "BriefDescription": "1:32 количество сравнений входного адреса (Line) с адресами заявок, находящихся в store_buff (STB)",
+    },
+    {
+        "EventCode": "0x133",
+        "EventName": "MAU_LDB_FOUND_STB",
+        "BriefDescription": "1:33 количество когерентных запросов, данные для которых найдены в STB",
+    },
+    {
+        "EventCode": "0x134",
+        "EventName": "MAU_ST_WT",
+        "BriefDescription": "1:34 количество выполненных операций записи WT (writethrough)",
+    },
+    {
+        "EventCode": "0x135",
+        "EventName": "MAU_ST_NOWB_NOWP",
+        "BriefDescription": "1:35 количество входных заявок в STB не WB (writeback), не WP (write-protected)",
+    },
+    {
+        "EventCode": "0x136",
+        "EventName": "MAU_ST_AND_WB",
+        "BriefDescription": "1:36 количество запросов в память из MAU по записи + writeback",
+    },
+    {
+        "EventCode": "0x137",
+        "EventName": "MAU_READ_AND_INV",
+        "BriefDescription": "1:37 количество когерентных ответов (INV + READ + READ_INV)",
+    },
+    {
+        "EventCode": "0x138",
+        "EventName": "MAU_READ_RI",
+        "BriefDescription": "1:38 количество запросов в память из MAU типа read + read&inv",
+    },
+    {
+        "EventCode": "0x139",
+        "EventName": "MAU_READ_RI_LOCAL",
+        "BriefDescription": "1:39 количество запросов в память из MAU типа read + read&inv, для которых данные нашлись в локальной памяти",
+    },
+    {
+        "EventCode": "0x13a",
+        "EventName": "MAU_READ_RI_REMOTE",
+        "BriefDescription": "1:3a количество запросов в память из MAU типа read + read&inv, для которых данные нашлись в внешней памяти",
+    },
+    {
+        "EventCode": "0x140",
+        "EventName": "L2_HIT",
+        "BriefDescription": "1:40 количество попаданий в L2 кэш",
+    },
+    {
+        "EventCode": "0x141",
+        "EventName": "L2_ST_QUERY",
+        "BriefDescription": "1:41 количество обращений в L2 кэш по записи",
+    },
+    {
+        "EventCode": "0x142",
+        "EventName": "L2_LINE_DISCARD",
+        "BriefDescription": "1:42 количество вытеснений строки из L2 кэш (writeback)",
+    },
+    {
+        "EventCode": "0x143",
+        "EventName": "L2_EXT_INV",
+        "BriefDescription": "1:43 количество внешних обращений \"invalidate\" в L2 кэш",
+    },
+    {
+        "EventCode": "0x144",
+        "EventName": "L2_EXT_READINV",
+        "BriefDescription": "1:44 количество внешних обращений \"coherent read & invalidate\" в L2 кэш",
+    },
+    {
+        "EventCode": "0x145",
+        "EventName": "L2_MRQ_STALL",
+        "BriefDescription": "1:45 количество тактов блокировки mrq (L2 внутренняя)",
+    },
+    {
+        "EventCode": "0x146",
+        "EventName": "L2_STMB_HOLD_STALL",
+        "BriefDescription": "1:46 количество тактов блокировки stmb_hold (L2 внутренняя)",
+    },
+    {
+        "EventCode": "0x147",
+        "EventName": "L2_ARB_BUFF_STALL",
+        "BriefDescription": "1:47 количество тактов блокировки arb_buff (L2 внутренняя)",
+    },
+    {
+        "EventCode": "0x148",
+        "EventName": "L2_WCO_STALL",
+        "BriefDescription": "1:48 количество тактов блокировки arb_wco (L2 внутренняя)",
+    },
+    {
+        "EventCode": "0x14a",
+        "EventName": "L2_WBC_STALL",
+        "BriefDescription": "1:4a количество тактов блокировки WBC-запросов в l2_wbq из-за заполненности MAU_STB",
+    },
+    {
+        "EventCode": "0x14b",
+        "EventName": "L2_SNOOPM_HIT",
+        "BriefDescription": "1:4b количество snoop-попаданий с выдачей модифицированных данных",
+    },
+    {
+        "EventCode": "0x500",
+        "EventName": "IB_AHEAD_QUERY",
+        "BriefDescription": "2,3:00 количество обращений в itag для прямой ветви",
+    },
+    {
+        "EventCode": "0x501",
+        "EventName": "IB_AHEAD_MISS",
+        "BriefDescription": "2,3:01 количество промахов в itag для прямой ветви",
+    },
+    {
+        "EventCode": "0x502",
+        "EventName": "IB_DISP_QUERY",
+        "BriefDescription": "2,3:02 количество обращений в itag для подготовок",
+    },
+    {
+        "EventCode": "0x503",
+        "EventName": "IB_DISP_MISS",
+        "BriefDescription": "2,3:03 количество промахов в itag для подготовок",
+    },
+    {
+        "EventCode": "0x507",
+        "EventName": "IB_AHEAD_ITLB_MISS",
+        "BriefDescription": "2,3:07 количество промахов в itlb для прямой ветви",
+    },
+    {
+        "EventCode": "0x508",
+        "EventName": "IB_DISP_ITLB_MISS",
+        "BriefDescription": "2,3:08 количество промахов в itlb для подготовок",
+    },
+    {
+        "EventCode": "0x509",
+        "EventName": "IB_AHEAD_MEM_QUERY",
+        "BriefDescription": "2,3:09 количество обращений в память для прямой ветви",
+    },
+    {
+        "EventCode": "0x50a",
+        "EventName": "IB_DISP_MEM_QUERY",
+        "BriefDescription": "2,3:0a количество обращений в память для подготовок",
+    },
+    {
+        "EventCode": "0x20f",
+        "EventName": "HS_SW",
+        "BriefDescription": "2:0f количество выполненных команд, помеченных признаком HS.sw",
+    },
+    {
+        "EventCode": "0x510",
+        "EventName": "BUB_E0",
+        "BriefDescription": "2,3:10 количество повторов фазы E0",
+    },
+    {
+        "EventCode": "0x511",
+        "EventName": "BUB_E2",
+        "BriefDescription": "2,3:11 количество повторов фазы E2",
+    },
+    {
+        "EventCode": "0x512",
+        "EventName": "BUB_E2_FROM_E0",
+        "BriefDescription": "2,3:12 количество повторов фазы E2, вызванных условиями повтора фазы E0 (из-за динамики блокировок конвейера)",
+    },
+    {
+        "EventCode": "0x513",
+        "EventName": "EXEC",
+        "BriefDescription": "2,3:13 количество выполненных команд",
+    },
+    {
+        "EventCode": "0x515",
+        "EventName": "BUB_B_HWCMD",
+        "BriefDescription": "2,3:15 количество выполненных аппаратных команд (количество блокировок B по этой причине)",
+    },
+    {
+        "EventCode": "0x516",
+        "EventName": "TRAPS",
+        "BriefDescription": "2,3:16 количество прерываний",
+    },
+    {
+        "EventCode": "0x517",
+        "EventName": "RBRANCH",
+        "BriefDescription": "2,3:17 количество выполненных переходов по recovery branch",
+    },
+    {
+        "EventCode": "0x518",
+        "EventName": "IB_NO_COMMAND",
+        "BriefDescription": "2,3:18 количество тактов отсутствия команд, влияющего на производительность, то есть не скрытого блокировками конвейера",
+    },
+    {
+        "EventCode": "0x519",
+        "EventName": "BUB_B",
+        "BriefDescription": "2,3:19 количество тактов блокировки фазы B (по всем составляющим), не скрытой верхними блокировками конвейера",
+    },
+    {
+        "EventCode": "0x51a",
+        "EventName": "BUB_B_NOP",
+        "BriefDescription": "2,3:1a количество тактов блокировки фазы B из-за операций NOP, не скрытой верхними блокировками конвейера",
+    },
+    {
+        "EventCode": "0x51b",
+        "EventName": "BUB_B_E2_BLOCKS_RET",
+        "BriefDescription": "2,3:1b количество тактов блокировки фазы B из-за того что проц. переход ждет ухода пред. возврата из E2",
+    },
+    {
+        "EventCode": "0x51c",
+        "EventName": "BUB_B_CHAIN_RET_NRDY",
+        "BriefDescription": "2,3:1c количество тактов блокировки фазы B из-за неготовности связующей для возврата из процедуры, не скрытой верхними блокировками конвейера",
+    },
+    {
+        "EventCode": "0x51d",
+        "EventName": "BUB_B_CHAIN_RD_NRDY",
+        "BriefDescription": "2,3:1d количество тактов блокировки фазы B из-за неготовности связующей для считывания, не скрытой верхними блокировками конвейера",
+    },
+    {
+        "EventCode": "0x51e",
+        "EventName": "BUB_B_FAPB_CNFLCT",
+        "BriefDescription": "2,3:1e количество тактов блокировки фазы B из-за конфликтов при загрузке асинхронной программы, не скрытой верхними блокировками конвейера",
+    },
+    {
+        "EventCode": "0x51f",
+        "EventName": "BUB_B_IP_NRDY",
+        "BriefDescription": "2,3:1f количество тактов блокировки фазы B из-за неготовности IP для перехода, не скрытой верхними блокировками конвейера",
+    },
+    {
+        "EventCode": "0x520",
+        "EventName": "NO_CT_TAKEN",
+        "BriefDescription": "2,3:20 количество команд, которые не вызвали передачу управления, то есть команд, не содержащих операций передачи управления, и команд с условием перехода \"not taken\" (CT_TAKEN=EXEC-NO_CT_TAKEN)",
+    },
+    {
+        "EventCode": "0x521",
+        "EventName": "BUB_E0_PU",
+        "BriefDescription": "2,3:21 количество повторов фазы E0, инициированных PU",
+    },
+    {
+        "EventCode": "0x522",
+        "EventName": "BUB_E0_FCMP_CMP2",
+        "BriefDescription": "2,3:22 количество повторов фазы E0 из-за того, что FCMP в 2-х последних командах вызывающей процедуры конфликтуют по записи в PF с CMP в первой команде вызванной процедуры",
+    },
+    {
+        "EventCode": "0x523",
+        "EventName": "BUB_E0_FCMP_CHAIN",
+        "BriefDescription": "2,3:23 количество повторов фазы E0 из-за того, что два последовательных входа конфликтуют по записи в связующую, если первый дожидается FCMP, а второй - нет",
+    },
+    {
+        "EventCode": "0x524",
+        "EventName": "BUB_E0_FCMP_CMP",
+        "BriefDescription": "2,3:24 количество повторов фазы E0 из-за того, что существует конфликт по выдаче предиката из АЛУ для команд FCMP и CMP, спланированных через такт",
+    },
+    {
+        "EventCode": "0x225",
+        "EventName": "COND_ALU_FALSE",
+        "BriefDescription": "2:25 количество операций, отмененных по al0_cond + al1_cond + al2_cond + al3_cond + al4_cond + al5_cond",
+    },
+    {
+        "EventCode": "0x226",
+        "EventName": "COND_AM_FALSE",
+        "BriefDescription": "2:26 количество операций, отмененных по am2_cond + am5_cond",
+    },
+    {
+        "EventCode": "0x530",
+        "EventName": "BUB_E2_MEM",
+        "BriefDescription": "2,3:30 количество повторов фазы E2 из-за того, что нет операндов alu (сумма 31-36, чтение из памяти в т.ч. mova)",
+    },
+    {
+        "EventCode": "0x531",
+        "EventName": "BUB_E2_ALU0_MEM",
+        "BriefDescription": "2,3:31 количество повторов фазы E2 из-за того, что нет операндов alu0 из памяти",
+    },
+    {
+        "EventCode": "0x532",
+        "EventName": "BUB_E2_ALU1_MEM",
+        "BriefDescription": "2,3:32 количество повторов фазы E2 из-за того, что нет операндов alu1 из памяти",
+    },
+    {
+        "EventCode": "0x533",
+        "EventName": "BUB_E2_ALU2_MEM",
+        "BriefDescription": "2,3:33 количество повторов фазы E2 из-за того, что нет операндов alu2 из памяти",
+    },
+    {
+        "EventCode": "0x534",
+        "EventName": "BUB_E2_ALU3_MEM",
+        "BriefDescription": "2,3:34 количество повторов фазы E2 из-за того, что нет операндов alu3 из памяти",
+    },
+    {
+        "EventCode": "0x535",
+        "EventName": "BUB_E2_ALU4_MEM",
+        "BriefDescription": "2,3:35 количество повторов фазы E2 из-за того, что нет операндов alu4 из памяти",
+    },
+    {
+        "EventCode": "0x536",
+        "EventName": "BUB_E2_ALU5_MEM",
+        "BriefDescription": "2,3:36 количество повторов фазы E2 из-за того, что нет операндов alu5 из памяти",
+    },
+    {
+        "EventCode": "0x537",
+        "EventName": "BUB_E2_ALU0_OVFL",
+        "BriefDescription": "2,3:37 количество повторов фазы E2 из-за того, что переполнены буферы адресов назначения alu0",
+    },
+    {
+        "EventCode": "0x538",
+        "EventName": "BUB_E2_ALU2_OVFL",
+        "BriefDescription": "2,3:38 количество повторов фазы E2 из-за того, что переполнены буферы адресов назначения alu2",
+    },
+    {
+        "EventCode": "0x539",
+        "EventName": "BUB_E2_ALU3_OVFL",
+        "BriefDescription": "2,3:39 количество повторов фазы E2 из-за того, что переполнены буферы адресов назначения alu3",
+    },
+    {
+        "EventCode": "0x53a",
+        "EventName": "BUB_E2_ALU5_OVFL",
+        "BriefDescription": "2,3:3a количество повторов фазы E2 из-за того, что переполнены буферы адресов назначения alu5",
+    },
+    {
+        "EventCode": "0x53b",
+        "EventName": "BUB_E2_SETWD",
+        "BriefDescription": "2,3:3b количество повторов фазы E2 из-за того, что при расширении регистрового окна недовыполнены операции с dst, указывающим во вновь занимаемую область RF",
+    },
+    {
+        "EventCode": "0x53c",
+        "EventName": "BUB_E2_OPND",
+        "BriefDescription": "2,3:3c количество повторов фазы E2 из-за того, что нет операндов от арифм. операций (сумма 48-4a, 58-5a)",
+    },
+    {
+        "EventCode": "0x53d",
+        "EventName": "BUB_E2_OPND_ALL",
+        "BriefDescription": "2,3:3d количество повторов фазы E2 из-за того, что нет операндов alu (сумма 30, 3c)",
+    },
+    {
+        "EventCode": "0x540",
+        "EventName": "CONF_ALU0_OUT",
+        "BriefDescription": "2,3:40 количество конфликтов по выходу в alu0",
+    },
+    {
+        "EventCode": "0x541",
+        "EventName": "CONF_ALU1_OUT",
+        "BriefDescription": "2,3:41 количество конфликтов по выходу в alu1",
+    },
+    {
+        "EventCode": "0x542",
+        "EventName": "CONF_ALU2_OUT",
+        "BriefDescription": "2,3:42 количество конфликтов по выходу в alu2",
+    },
+    {
+        "EventCode": "0x543",
+        "EventName": "BUB_E2_ALU012",
+        "BriefDescription": "2,3:43 количество повторов фазы E2, инициированных alu0 или alu1 или alu2",
+    },
+    {
+        "EventCode": "0x544",
+        "EventName": "BUB_E2_ALU0_COMB",
+        "BriefDescription": "2,3:44 количество повторов фазы E2 из-за неверного планирования двухэтажных операций в alu0 (см. Правила планирования 1.5.4)",
+    },
+    {
+        "EventCode": "0x545",
+        "EventName": "BUB_E2_ALU1_COMB",
+        "BriefDescription": "2,3:45 количество повторов фазы E2 из-за неверного планирования двухэтажных операций в alu1 (см. Правила планирования 1.5.4)",
+    },
+    {
+        "EventCode": "0x546",
+        "EventName": "BUB_E2_FPSR_CONF",
+        "BriefDescription": "2,3:46 количество повторов фазы E2 из-за конфликта между считыванием и записью регистров FPCR, FPSR, PFPFR (см. Правила планирования 1.5.6.1)",
+    },
+    {
+        "EventCode": "0x547",
+        "EventName": "BUB_E2_PFPFR_COMB",
+        "BriefDescription": "2,3:47 количество повторов фазы E2 из-за конфликта между двухэтажной операцией и записью регистра PFPFR (см. Правила планирования 1.5.6.2)",
+    },
+    {
+        "EventCode": "0x548",
+        "EventName": "BUB_E2_ALU0_OPND",
+        "BriefDescription": "2,3:48 количество повторов фазы E2 из-за того, что нет операндов alu0 от арифм. операций",
+    },
+    {
+        "EventCode": "0x549",
+        "EventName": "BUB_E2_ALU1_OPND",
+        "BriefDescription": "2,3:49 количество повторов фазы E2 из-за того, что нет операндов alu1 от арифм. операций",
+    },
+    {
+        "EventCode": "0x54a",
+        "EventName": "BUB_E2_ALU2_OPND",
+        "BriefDescription": "2,3:4a количество повторов фазы E2 из-за того, что нет операндов alu2 от арифм. операций",
+    },
+    {
+        "EventCode": "0x550",
+        "EventName": "CONF_ALU3_OUT",
+        "BriefDescription": "2,3:50 количество конфликтов по выходу в alu3",
+    },
+    {
+        "EventCode": "0x551",
+        "EventName": "CONF_ALU4_OUT",
+        "BriefDescription": "2,3:51 количество конфликтов по выходу в alu4",
+    },
+    {
+        "EventCode": "0x552",
+        "EventName": "CONF_ALU5_OUT",
+        "BriefDescription": "2,3:52 количество конфликтов по выходу в alu5",
+    },
+    {
+        "EventCode": "0x553",
+        "EventName": "BUB_E2_ALU345",
+        "BriefDescription": "2,3:53 количество повторов фазы E2, инициированных alu3 или alu4 или alu5",
+    },
+    {
+        "EventCode": "0x554",
+        "EventName": "BUB_E2_ALU3_COMB",
+        "BriefDescription": "2,3:54 количество повторов фазы E2 из-за неверного планирования двухэтажных операций в alu3 (см. Правила планирования 1.5.4)",
+    },
+    {
+        "EventCode": "0x555",
+        "EventName": "BUB_E2_ALU4_COMB",
+        "BriefDescription": "2,3:55 количество повторов фазы E2 из-за неверного планирования двухэтажных операций в alu4 (см. Правила планирования 1.5.4)",
+    },
+    {
+        "EventCode": "0x556",
+        "EventName": "BUB_E2_DIV_SQRT1",
+        "BriefDescription": "2,3:56 количество повторов фазы E2 из-за неверного планирования операций деления, квадратного корня и остатка (см. Правила планирования 1.5.5.1)",
+    },
+    {
+        "EventCode": "0x557",
+        "EventName": "BUB_E2_DIV_SQRT2",
+        "BriefDescription": "2,3:57 количество повторов фазы E2 из-за неверного планирования операций деления, квадратного корня и остатка (см. Правила планирования 1.5.5.2 - 1.5.5.6)",
+    },
+    {
+        "EventCode": "0x558",
+        "EventName": "BUB_E2_ALU3_OPND",
+        "BriefDescription": "2,3:58 количество повторов фазы E2 из-за того, что нет операндов alu3 от арифм. операций",
+    },
+    {
+        "EventCode": "0x559",
+        "EventName": "BUB_E2_ALU4_OPND",
+        "BriefDescription": "2,3:59 количество повторов фазы E2 из-за того, что нет операндов alu4 от арифм. операций",
+    },
+    {
+        "EventCode": "0x55a",
+        "EventName": "BUB_E2_ALU5_OPND",
+        "BriefDescription": "2,3:5a количество повторов фазы E2 из-за того, что нет операндов alu5 от арифм. операций",
+    },
+    {
+        "EventCode": "0x560",
+        "EventName": "BUB_E0_CALL_BLOCKS_CHAIN",
+        "BriefDescription": "2,3:60 количество повторов фазы E0 из-за необходимости выровнять запись в связующую с предыдущей долгой записью по CALL",
+    },
+    {
+        "EventCode": "0x561",
+        "EventName": "BUB_E0_CNTXT_NRDY",
+        "BriefDescription": "2,3:61 количество повторов фазы E0 из-за того, что не готов контекст модуля",
+    },
+    {
+        "EventCode": "0x562",
+        "EventName": "BUB_E0_USD",
+        "BriefDescription": "2,3:62 количество повторов фазы E0 из-за того, что не готов USD для очередной операции getsp, getsap",
+    },
+    {
+        "EventCode": "0x563",
+        "EventName": "BUB_E0_TC_NRDY",
+        "BriefDescription": "2,3:63 количество повторов фазы E0 из-за неготовности TC (GETTC спланирована слишком близко к модификации TC)",
+    },
+    {
+        "EventCode": "0x564",
+        "EventName": "BUB_E0_CNTXT_PIPELINED",
+        "BriefDescription": "2,3:64 количество повторов фазы E0 из-за того что считывание контекста ожидает окончания считывания предыдущего",
+    },
+    {
+        "EventCode": "0x565",
+        "EventName": "BUB_B_CNTXT_READ",
+        "BriefDescription": "2,3:65 количество считываний контекста, блокировки фазы B",
+    },
+    {
+        "EventCode": "0x566",
+        "EventName": "BUB_B_CHAIN_SPILLFILL",
+        "BriefDescription": "2,3:66 количество spill/fill связующей (количество блокировок фазы B)",
+    },
+    {
+        "EventCode": "0x567",
+        "EventName": "BUB_B_RF_SPILLFILL",
+        "BriefDescription": "2,3:67 количество spill/fill регистрового файла (количество блокировок фазы B)",
+    },
+    {
+        "EventCode": "0x568",
+        "EventName": "BUB_E2_CHAIN_ST_CFLCT",
+        "BriefDescription": "2,3:68 количество повторов фазы E2 из-за конфликта по записи в связующую",
+    },
+    {
+        "EventCode": "0x569",
+        "EventName": "BUB_E2_CHAIN_SF_NRDY",
+        "BriefDescription": "2,3:69 количество повторов фазы E2 из-за неготовности связующей для операций spill и RW",
+    },
+    {
+        "EventCode": "0x570",
+        "EventName": "BPT0",
+        "BriefDescription": "2,3:70 срабатывание контрольной точки 0",
+    },
+    {
+        "EventCode": "0x571",
+        "EventName": "BPT1",
+        "BriefDescription": "2,3:71 срабатывание контрольной точки 1",
+    },
+    {
+        "EventCode": "0x572",
+        "EventName": "TICKS",
+        "BriefDescription": "2,3:72 количество тактов процессора",
+    },
+    {
+        "EventCode": "0x573",
+        "EventName": "TICKS_HIDDEN_TRAPS_MASKABLE",
+        "BriefDescription": "2,3:73 количество тактов процессора, проведенных под закрытой маской маскируемых внешних прерываний",
+    },
+    {
+        "EventCode": "0x574",
+        "EventName": "TICKS_HIDDEN_TRAPS_UNMASKABLE",
+        "BriefDescription": "2,3:74 количество тактов процессора, проведенных под закрытой маской немаскируемых внешних прерываний",
+    },
+]

@@ -1043,6 +1043,18 @@ static ssize_t pci_resource_io(struct file *filp, struct kobject *kobj,
 	int bar = (unsigned long)attr->private;
 	unsigned long port = off;
 
+#ifdef CONFIG_MCST
+	if ((pdev->vendor == PCI_VENDOR_ID_ELBRUS &&
+		pdev->device == PCI_DEVICE_ID_MCST_IDE) ||
+		(pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_IDE_SDHCI)) {
+		if (bar == 1 || bar == 3) {	/* only byte access to alt_status is allowed */
+			if (count != 1 || port != 2)
+				return -EINVAL;
+		}
+	}
+#endif
+
 	port += pci_resource_start(pdev, bar);
 
 	if (port > pci_resource_end(pdev, bar))

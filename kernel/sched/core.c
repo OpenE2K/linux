@@ -17,6 +17,10 @@
 #include <linux/kcov.h>
 #include <linux/scs.h>
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+#include <asm/e2k_debug.h>	/* to dump stacks of all VMs and all VCPUs */
+#endif
+
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
 
@@ -44,6 +48,9 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_util_est_se_tp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_update_nr_running_tp);
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+DEFINE_PER_CPU_SHARED_ALIGNED(bool, rcu_urgent_qsn);
+#endif
 
 #ifdef CONFIG_SCHED_DEBUG
 /*
@@ -66,9 +73,25 @@ const_debug unsigned int sysctl_sched_features =
  * Limited because this is done with IRQs disabled.
  */
 #ifdef CONFIG_PREEMPT_RT
+# if defined(CONFIG_MCST) && defined(CONFIG_SYSCTL)
+unsigned int sysctl_sched_nr_migrate = 8;
+unsigned int sysctl_sched_min_ns_no_migrate = 5000;
+# else
+#  if defined(CONFIG_MCST)
+const_debug unsigned int sysctl_sched_min_ns_no_migrate = 0;
+#  endif
 const_debug unsigned int sysctl_sched_nr_migrate = 8;
+# endif
 #else
+# if defined(CONFIG_MCST) && defined(CONFIG_SYSCTL)
+unsigned int sysctl_sched_nr_migrate = 32;
+unsigned int sysctl_sched_min_ns_no_migrate = 5000;
+# else
+#  if defined(CONFIG_MCST)
+const_debug unsigned int sysctl_sched_min_ns_no_migrate = 0;
+#  endif
 const_debug unsigned int sysctl_sched_nr_migrate = 32;
+# endif
 #endif
 
 /*
@@ -868,6 +891,28 @@ bool sched_can_stop_tick(struct rq *rq)
 #endif /* CONFIG_NO_HZ_FULL */
 #endif /* CONFIG_SMP */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+/*
+ * VIRQ VCPU is not same as common CPU or VCPU:
+ *  - has not other task, only VIRQ handler and idle;
+ *  - has not SMP processor ID
+ */
+void wake_up_idle_vcpu(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	if (rq->curr != rq->idle)
+		return;
+
+	/*
+	 * We can set TIF_RESCHED on the idle task of the other CPU
+	 * lockless. The worst case is that the other CPU runs the
+	 * idle task through an additional NOOP schedule()
+	 */
+	set_tsk_need_resched(rq->idle);
+}
+#endif /* CONFIG_E2K && CONFIG_VIRTUALIZATION */
+
 #if defined(CONFIG_RT_GROUP_SCHED) || (defined(CONFIG_FAIR_GROUP_SCHED) && \
 			(defined(CONFIG_SMP) || defined(CONFIG_CFS_BANDWIDTH)))
 /*
@@ -1651,6 +1696,10 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 	}
 
 	uclamp_rq_inc(rq, p);
+#ifdef CONFIG_MCST
+	if (cpu_queue_collect)
+		p->se.cpu_queue_tm -= (long long)sched_clock();
+#endif
 	p->sched_class->enqueue_task(rq, p, flags);
 }
 
@@ -1665,6 +1714,10 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	}
 
 	uclamp_rq_dec(rq, p);
+#ifdef CONFIG_MCST
+	if (cpu_queue_collect)
+		p->se.cpu_queue_tm += (long long)sched_clock();
+#endif
 	p->sched_class->dequeue_task(rq, p, flags);
 }
 
@@ -3028,6 +3081,7 @@ static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
 		rq_repin_lock(rq, rf);
 	}
 
+
 	if (rq->idle_stamp) {
 		u64 delta = rq_clock(rq) - rq->idle_stamp;
 		u64 max = 2*rq->max_idle_balance_cost;
@@ -3645,6 +3699,9 @@ int wake_up_state(struct task_struct *p, unsigned int state)
 {
 	return try_to_wake_up(p, state, 0);
 }
+#ifdef CONFIG_MCST /* CONFIG_DDI needs this */
+EXPORT_SYMBOL(wake_up_state);
+#endif
 
 /*
  * Perform scheduler related setup for a newly forked process p.
@@ -4368,6 +4425,10 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 	 * PREEMPT_COUNT kernels).
 	 */
 
+#ifdef CONFIG_MCST
+	if (cpu_queue_collect)
+		current->se.ctx_sw_tm += sched_clock();
+#endif
 	rq = finish_task_switch(prev);
 	preempt_enable();
 
@@ -5021,6 +5082,9 @@ restart:
 
 	/* The idle class should always have a runnable task: */
 	BUG();
+#ifdef __LCC__
+	return NULL;
+#endif
 }
 
 /*
@@ -5062,6 +5126,12 @@ restart:
  *
  * WARNING: must be called with preemption disabled!
  */
+#if defined(CONFIG_MCST) && defined(__LCC__)
+/* Sparc: This function has global declarations in GNU inline asm.
+ * e2k & Sparc: context switch is inlined, so we do not want to inline
+ * this (otherwise caller's locals will remain the same after switch). */
+noinline
+#endif
 static void __sched notrace __schedule(bool preempt, bool spinning_lock)
 {
 	struct task_struct *prev, *next;
@@ -5153,6 +5223,7 @@ static void __sched notrace __schedule(bool preempt, bool spinning_lock)
 	clear_tsk_need_resched_lazy(prev);
 	clear_preempt_need_resched();
 
+
 	if (likely(prev != next)) {
 		rq->nr_switches++;
 		/*
@@ -5181,8 +5252,15 @@ static void __sched notrace __schedule(bool preempt, bool spinning_lock)
 
 		trace_sched_switch(preempt, prev, next);
 
+#ifdef CONFIG_MCST
+		if (prev->se.oncpu_tm < 0)
+			prev->se.oncpu_tm += (long long)sched_clock();
+#endif
 		/* Also unlocks the rq: */
 		rq = context_switch(rq, prev, next, &rf);
+#ifdef CONFIG_MCST
+		current->se.oncpu_tm -= (long long)sched_clock();
+#endif
 	} else {
 		rq->clock_update_flags &= ~(RQCF_ACT_SKIP|RQCF_REQ_SKIP);
 
@@ -5510,7 +5588,7 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 	p->prio = prio;
 }
 
-#ifdef CONFIG_RT_MUTEXES
+#if defined(CONFIG_RT_MUTEXES)
 
 static inline int __rt_effective_prio(struct task_struct *pi_task, int prio)
 {
@@ -6628,7 +6706,6 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	if (retval)
 		goto out_free_new_mask;
 
-
 	cpuset_cpus_allowed(p, cpus_allowed);
 	cpumask_and(new_mask, in_mask, cpus_allowed);
 
@@ -6810,6 +6887,9 @@ int __sched _cond_resched(void)
 		preempt_schedule_common();
 		return 1;
 	}
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	if (unlikely(raw_cpu_read(rcu_urgent_qsn)))
+#endif
 	rcu_all_qs();
 	return 0;
 }
@@ -7124,11 +7204,22 @@ void sched_show_task(struct task_struct *p)
 
 	pr_info("task:%-15.15s state:%c", p->comm, task_state_to_char(p));
 
+#ifndef CONFIG_MCST
 	if (p->state == TASK_RUNNING)
 		pr_cont("  running task    ");
+#endif
 #ifdef CONFIG_DEBUG_STACK_USAGE
 	free = stack_not_used(p);
 #endif
+
+#ifdef CONFIG_MCST
+	if (task_curr(p))
+		pr_cont(" oncpu");
+	if (p->on_rq)
+		pr_cont(" on_rq %d", task_cpu(p));
+	pr_cont(" prio=%d, switches=%ld", p->prio, p->nvcsw + p->nivcsw);
+#endif
+
 	ppid = 0;
 	rcu_read_lock();
 	if (pid_alive(p))
@@ -7165,12 +7256,71 @@ state_filter_match(unsigned long state_filter, struct task_struct *p)
 	return true;
 }
 
+#if defined(CONFIG_E90S) && defined(CONFIG_SMP)
+int active_stacks_only = 0;
+atomic_t show_state_count = ATOMIC_INIT(0);
+static void show_other_cpus(void)
+{
+	cpu_bt_buf_t *bt_buf;
+	int i, j;
+	struct rq *rq;
+
+	smp_show_backtrace_all_cpus();
+
+	pr_alert("Processes on other cpus :\n");
+	for_each_possible_cpu(i) {
+		if (!cpu_online(i)) {
+			continue;
+		}
+		rq = cpu_rq(i);
+		pr_alert("RunQueue %d: nr_running = %u; rt_nr_running = %u\n",
+			i, rq->cfs.nr_running, rq->rt.rt_nr_running);
+		if (i == smp_processor_id()) {
+			sched_show_task(current);
+			continue;
+		}
+		bt_buf  = &per_cpu(cpu_bt_buf, i);
+		pr_alert("%-13.13s   pid = %ld on cpu %d %s  prio = %ld\n",
+			bt_buf->comm, bt_buf->pid, i,
+			bt_buf->need_resched ? "N" : "",  bt_buf->prio);
+		for (j = 0; j < 16; j++) {
+			if (bt_buf->fp[j] == 0) {
+				break;
+			}
+			pr_alert("    %08lx :     %pS",
+				 bt_buf->fp[j], (void *)bt_buf->fp[j]);
+		}
+	}
+}
+#endif
+
 
 void show_state_filter(unsigned long state_filter)
 {
 	struct task_struct *g, *p;
+#ifdef CONFIG_E2K
+	int cpu;
+#endif
+#ifdef CONFIG_MCST
+	migrate_disable();
+#endif
+#if defined(CONFIG_MCST) && defined(CONFIG_DETECT_HUNG_TASK)
+	sysctl_hung_task_warnings = 0;
+#endif
 
 	rcu_read_lock();
+
+#ifdef CONFIG_E2K
+	for_each_online_cpu(cpu)
+		sched_show_task(idle_task(cpu));
+#endif
+
+#if defined(CONFIG_E90S) && defined(CONFIG_SMP)
+	atomic_inc(&show_state_count);
+	show_other_cpus();
+	pr_alert("Other processes :\n");
+	if (!active_stacks_only)
+#endif
 	for_each_process_thread(g, p) {
 		/*
 		 * reset the NMI-timeout, listing all files on a slow
@@ -7185,6 +7335,11 @@ void show_state_filter(unsigned long state_filter)
 			sched_show_task(p);
 	}
 
+#if defined(CONFIG_E90S) && defined(CONFIG_SMP)
+	show_other_cpus();
+	atomic_dec(&show_state_count);
+#endif
+
 #ifdef CONFIG_SCHED_DEBUG
 	if (!state_filter)
 		sysrq_sched_debug_show();
@@ -7195,6 +7350,15 @@ void show_state_filter(unsigned long state_filter)
 	 */
 	if (!state_filter)
 		debug_show_all_locks();
+
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+	/* dump stacks of all VMs and all VCPUs */
+	print_all_guest_stacks();
+#endif
+
+#ifdef CONFIG_MCST
+	migrate_enable();
+#endif
 }
 
 /**
@@ -7205,7 +7369,11 @@ void show_state_filter(unsigned long state_filter)
  * NOTE: this function does not set the idle thread's NEED_RESCHED
  * flag, to make booting more robust.
  */
-void __init init_idle(struct task_struct *idle, int cpu)
+void
+#if !defined(CONFIG_E2K) || !defined(CONFIG_KVM_GUEST)
+__init
+#endif
+init_idle(struct task_struct *idle, int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long flags;
@@ -9126,6 +9294,10 @@ static int __maybe_unused cpu_period_quota_parse(char *buf,
 		*quotap = RUNTIME_INF;
 	else
 		return -EINVAL;
+
+#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
+        el_posix_adjust_pi(p);
+#endif
 
 	return 0;
 }

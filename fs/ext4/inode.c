@@ -48,6 +48,7 @@
 
 #include <trace/events/ext4.h>
 
+
 static __u32 ext4_inode_csum(struct inode *inode, struct ext4_inode *raw,
 			      struct ext4_inode_info *ei)
 {
@@ -3989,6 +3990,7 @@ int ext4_update_disksize_before_punch(struct inode *inode, loff_t offset,
 	return ret;
 }
 
+
 static void ext4_wait_dax_page(struct ext4_inode_info *ei)
 {
 	up_write(&ei->i_mmap_sem);
@@ -4119,6 +4121,7 @@ int ext4_punch_hole(struct file *file, loff_t offset, loff_t length)
 		truncate_pagecache_range(inode, first_block_offset,
 					 last_block_offset);
 	}
+
 
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS))
 		credits = ext4_writepage_trans_blocks(inode);
@@ -4256,6 +4259,7 @@ int ext4_truncate(struct inode *inode)
 
 	if (inode->i_size == 0 && !test_opt(inode->i_sb, NO_AUTO_DA_ALLOC))
 		ext4_set_inode_state(inode, EXT4_STATE_DA_ALLOC_CLOSE);
+
 
 	if (ext4_has_inline_data(inode)) {
 		int has_inline = 1;

@@ -41,7 +41,11 @@ static inline int queued_read_trylock(struct qrwlock *lock)
 
 	cnts = atomic_read(&lock->cnts);
 	if (likely(!(cnts & _QW_WMASK))) {
+#ifdef CONFIG_E2K
+		cnts = (u32)atomic_add_return_lock(_QR_BIAS, &lock->cnts);
+#else
 		cnts = (u32)atomic_add_return_acquire(_QR_BIAS, &lock->cnts);
+#endif
 		if (likely(!(cnts & _QW_WMASK)))
 			return 1;
 		atomic_sub(_QR_BIAS, &lock->cnts);
@@ -62,8 +66,12 @@ static inline int queued_write_trylock(struct qrwlock *lock)
 	if (unlikely(cnts))
 		return 0;
 
+#ifdef CONFIG_E2K
+	return likely(atomic_try_cmpxchg_lock(&lock->cnts, &cnts, _QW_LOCKED));
+#else
 	return likely(atomic_try_cmpxchg_acquire(&lock->cnts, &cnts,
 				_QW_LOCKED));
+#endif
 }
 /**
  * queued_read_lock - acquire read lock of a queue rwlock
@@ -73,7 +81,11 @@ static inline void queued_read_lock(struct qrwlock *lock)
 {
 	u32 cnts;
 
+#ifdef CONFIG_E2K
+	cnts = atomic_add_return_lock(_QR_BIAS, &lock->cnts);
+#else
 	cnts = atomic_add_return_acquire(_QR_BIAS, &lock->cnts);
+#endif
 	if (likely(!(cnts & _QW_WMASK)))
 		return;
 
@@ -89,7 +101,11 @@ static inline void queued_write_lock(struct qrwlock *lock)
 {
 	u32 cnts = 0;
 	/* Optimize for the unfair lock case where the fair flag is 0. */
+#ifdef CONFIG_E2K
+	if (likely(atomic_try_cmpxchg_lock(&lock->cnts, &cnts, _QW_LOCKED)))
+#else
 	if (likely(atomic_try_cmpxchg_acquire(&lock->cnts, &cnts, _QW_LOCKED)))
+#endif
 		return;
 
 	queued_write_lock_slowpath(lock);

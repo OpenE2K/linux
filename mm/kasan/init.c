@@ -251,8 +251,10 @@ int __ref kasan_populate_early_shadow(const void *shadow_start,
 			 * puds,pmds, so pgd_populate(), pud_populate()
 			 * is noops.
 			 */
+#if !defined(CONFIG_E2K) || !defined(__ARCH_HAS_5LEVEL_HACK)
 			pgd_populate(&init_mm, pgd,
 					lm_alias(kasan_early_shadow_p4d));
+#endif
 			p4d = p4d_offset(pgd, addr);
 			p4d_populate(&init_mm, p4d,
 					lm_alias(kasan_early_shadow_pud));

@@ -816,8 +816,10 @@ show_help:
 
 			if (browser->selection == NULL)
 				ui_helpline__puts("Huh? No selection. Report to linux-kernel@vger.kernel.org");
+#ifndef __e2k__
 			else if (browser->selection->offset == -1)
 				ui_helpline__puts("Actions are only available for assembly lines.");
+#endif
 			else if (!dl->ins.ops)
 				goto show_sup_ins;
 			else if (ins__is_ret(&dl->ins))

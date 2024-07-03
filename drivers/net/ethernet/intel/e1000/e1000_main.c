@@ -982,7 +982,7 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			if (pci_resource_len(pdev, i) == 0)
 				continue;
 			if (pci_resource_flags(pdev, i) & IORESOURCE_IO) {
-				hw->io_base = pci_resource_start(pdev, i);
+				hw->io_base = pci_iomap(pdev, i, 0);
 				break;
 			}
 		}
@@ -4872,7 +4872,7 @@ void e1000_pcix_set_mmrbc(struct e1000_hw *hw, int mmrbc)
 
 void e1000_io_write(struct e1000_hw *hw, unsigned long port, u32 value)
 {
-	outl(value, port);
+	iowrite32(value, (void __iomem *)port);
 }
 
 static bool e1000_vlan_used(struct e1000_adapter *adapter)

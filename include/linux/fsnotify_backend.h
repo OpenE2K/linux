@@ -399,11 +399,14 @@ struct fsnotify_mark {
 	struct hlist_node obj_list;
 	/* Head of list of marks for an object [mark ref] */
 	struct fsnotify_mark_connector *connector;
+#ifdef CONFIG_MCST
+	struct vfsmount *user_mnt;
+#endif
 	/* Events types to ignore [mark->lock, group->mark_mutex] */
 	__u32 ignored_mask;
-#define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY	0x01
-#define FSNOTIFY_MARK_FLAG_ALIVE		0x02
-#define FSNOTIFY_MARK_FLAG_ATTACHED		0x04
+#define FSNOTIFY_MARK_FLAG_IGNORED_SURV_MODIFY 0x01
+#define FSNOTIFY_MARK_FLAG_ALIVE	       0x02
+#define FSNOTIFY_MARK_FLAG_ATTACHED	       0x04
 	unsigned int flags;		/* flags [mark->lock] */
 };
 

@@ -39,6 +39,10 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock);
 void __lockfunc _raw_spin_unlock(raw_spinlock_t *lock)		__releases(lock);
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)	__releases(lock);
 void __lockfunc _raw_spin_unlock_irq(raw_spinlock_t *lock)	__releases(lock);
+#ifdef CONFIG_MCST
+void __lockfunc _raw_spin_unlock_no_resched(raw_spinlock_t *lock)	__releases(lock);
+void __lockfunc _raw_spin_unlock_irq_no_resched(raw_spinlock_t *lock)	__releases(lock);
+#endif
 void __lockfunc
 _raw_spin_unlock_irqrestore(raw_spinlock_t *lock, unsigned long flags)
 								__releases(lock);
@@ -69,6 +73,9 @@ _raw_spin_unlock_irqrestore(raw_spinlock_t *lock, unsigned long flags)
 
 #ifndef CONFIG_UNINLINE_SPIN_UNLOCK
 #define _raw_spin_unlock(lock) __raw_spin_unlock(lock)
+#ifdef CONFIG_MCST
+#define _raw_spin_unlock_no_resched(lock) __raw_spin_unlock_no_resched(lock)
+#endif
 #endif
 
 #ifdef CONFIG_INLINE_SPIN_UNLOCK_BH
@@ -77,6 +84,10 @@ _raw_spin_unlock_irqrestore(raw_spinlock_t *lock, unsigned long flags)
 
 #ifdef CONFIG_INLINE_SPIN_UNLOCK_IRQ
 #define _raw_spin_unlock_irq(lock) __raw_spin_unlock_irq(lock)
+#ifdef CONFIG_MCST
+#define _raw_spin_unlock_irq_no_resched(lock) \
+	__raw_spin_unlock_irq_no_resched(lock)
+#endif
 #endif
 
 #ifdef CONFIG_INLINE_SPIN_UNLOCK_IRQRESTORE
@@ -123,10 +134,29 @@ static inline unsigned long __raw_spin_lock_irqsave(raw_spinlock_t *lock)
 
 static inline void __raw_spin_lock_irq(raw_spinlock_t *lock)
 {
+#ifdef CONFIG_MCST
+	/* Spin with enabled interrupts */
+	unsigned long flags;
+
+	local_irq_save(flags);
+	preempt_disable();
+	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	/*
+	 * On lockdep we dont want the hand-coded irq-enable of
+	 * do_raw_spin_lock_flags() code, because lockdep assumes
+	 * that interrupts are not re-enabled during lock-acquire:
+	 */
+#ifdef CONFIG_LOCKDEP
+	LOCK_CONTENDED(lock, do_raw_spin_trylock, do_raw_spin_lock);
+#else
+	do_raw_spin_lock_flags(lock, &flags);
+#endif
+#else
 	local_irq_disable();
 	preempt_disable();
 	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
 	LOCK_CONTENDED(lock, do_raw_spin_trylock, do_raw_spin_lock);
+#endif
 }
 
 static inline void __raw_spin_lock_bh(raw_spinlock_t *lock)
@@ -152,6 +182,15 @@ static inline void __raw_spin_unlock(raw_spinlock_t *lock)
 	preempt_enable();
 }
 
+#ifdef CONFIG_MCST
+static inline void __raw_spin_unlock_no_resched(raw_spinlock_t *lock)
+{
+	spin_release(&lock->dep_map, _RET_IP_);
+	do_raw_spin_unlock(lock);
+	preempt_enable_no_resched();
+}
+#endif
+
 static inline void __raw_spin_unlock_irqrestore(raw_spinlock_t *lock,
 					    unsigned long flags)
 {
@@ -168,6 +207,16 @@ static inline void __raw_spin_unlock_irq(raw_spinlock_t *lock)
 	local_irq_enable();
 	preempt_enable();
 }
+
+#ifdef CONFIG_MCST
+static inline void __raw_spin_unlock_irq_no_resched(raw_spinlock_t *lock)
+{
+	spin_release(&lock->dep_map, _RET_IP_);
+	do_raw_spin_unlock(lock);
+	local_irq_enable();
+	preempt_enable_no_resched();
+}
+#endif
 
 static inline void __raw_spin_unlock_bh(raw_spinlock_t *lock)
 {

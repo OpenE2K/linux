@@ -444,6 +444,8 @@ static int write_cpudesc(struct feat_fd *ff,
 #define CPUINFO_PROC	{ "Processor", }
 #elif defined(__xtensa__)
 #define CPUINFO_PROC	{ "core ID", }
+#elif defined(__e2k__)
+#define CPUINFO_PROC	{ "model name", }
 #else
 #define CPUINFO_PROC	{ "model name", }
 #endif

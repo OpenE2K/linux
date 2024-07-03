@@ -70,6 +70,11 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 	int total_events = 0, nr_events[PERF_RECORD_MAX] = { 0, };
 	char sbuf[STRERR_BUFSIZE];
 
+#ifdef __e2k__
+	/* e2k uses fast syscalls instead of vdso, nothing to search here */
+	found_vdso_mmap = true;
+#endif
+
 	if (evlist == NULL) /* Fallback for kernels lacking PERF_COUNT_SW_DUMMY */
 		evlist = perf_evlist__new_default();
 

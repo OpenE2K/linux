@@ -1,0 +1,12 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+#
+# Mcst PHY device configuration
+#
+
+config ELDWCXPCS
+	tristate "MCST PCS PHY"
+	depends on PCI
+	help
+	  DesignWare Cores Ethernet PCS PHY (DWC_xpcs)

@@ -1161,7 +1161,11 @@ static int parse_protocol_change(struct rc_dev *dev, u64 *protocols,
 	const char *tmp;
 	unsigned count = 0;
 	bool enable, disable;
+#ifdef __LCC__
+	u64 mask = 0;
+#else
 	u64 mask;
+#endif
 	int i;
 
 	while ((tmp = strsep((char **)&buf, " \n")) != NULL) {

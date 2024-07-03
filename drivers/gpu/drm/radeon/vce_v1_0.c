@@ -187,6 +187,22 @@ int vce_v1_0_load_fw(struct radeon_device *rdev, uint32_t *data)
 		return -EINVAL;
 
 	data += (256 - 64) / 4;
+#ifdef CONFIG_MCST
+	 writel(sign->val[i].nonce[0], &data[0]);
+	 writel(sign->val[i].nonce[1], &data[1]);
+	 writel(sign->val[i].nonce[2], &data[2]);
+	 writel(sign->val[i].nonce[3], &data[3]);
+	 writel(cpu_to_le32(le32_to_cpu(sign->len) + 64), &data[4]);
+
+	memset_io(&data[5], 0, 44);
+	memcpy_toio(&data[16], &sign[1], rdev->vce_fw->size - sizeof(*sign));
+
+	data += le32_to_cpu(readl(&data[4])) / 4;
+	writel(sign->val[i].sigval[0], &data[0]);
+	writel(sign->val[i].sigval[1], &data[1]);
+	writel(sign->val[i].sigval[2], &data[2]);
+	writel(sign->val[i].sigval[3], &data[3]);
+#else
 	data[0] = sign->val[i].nonce[0];
 	data[1] = sign->val[i].nonce[1];
 	data[2] = sign->val[i].nonce[2];
@@ -201,6 +217,7 @@ int vce_v1_0_load_fw(struct radeon_device *rdev, uint32_t *data)
 	data[1] = sign->val[i].sigval[1];
 	data[2] = sign->val[i].sigval[2];
 	data[3] = sign->val[i].sigval[3];
+#endif
 
 	rdev->vce.keyselect = le32_to_cpu(sign->val[i].keyselect);
 

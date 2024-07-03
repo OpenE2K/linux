@@ -11,6 +11,11 @@
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/property.h>
+#ifdef CONFIG_MCST
+#include <linux/gpio/consumer.h>
+#include <linux/irq.h>
+#include <linux/interrupt.h>
+#endif /* CONFIG_MCST */
 #include "inv_mpu_iio.h"
 
 static const struct regmap_config inv_mpu_regmap_config = {
@@ -127,6 +132,23 @@ static int inv_mpu_probe(struct i2c_client *client,
 		return PTR_ERR(regmap);
 	}
 
+#ifdef CONFIG_MCST
+	if (!client->irq) {
+		struct gpio_desc *gpiod_int;
+
+		gpiod_int = devm_gpiod_get_optional(&client->dev,
+						    "irq", GPIOD_IN);
+		if (!IS_ERR(gpiod_int)) {
+			client->irq = gpiod_to_irq(gpiod_int);
+		}
+	}
+
+	if (!client->irq) {
+		dev_err(&client->dev, "No IRQ !!!\n");
+		return -EPROBE_DEFER;
+	}
+#endif /* CONFIG_MCST */
+
 	result = inv_mpu_core_probe(regmap, client->irq, name,
 				    inv_mpu_i2c_aux_setup, chip_type);
 	if (result < 0)
@@ -211,6 +233,10 @@ static const struct of_device_id inv_of_match[] = {
 	{
 		.compatible = "invensense,mpu9250",
 		.data = (void *)INV_MPU9250
+	},
+	{
+		.compatible = "invensense,mpu9255",
+		.data = (void *)INV_MPU9255
 	},
 	{
 		.compatible = "invensense,mpu9255",

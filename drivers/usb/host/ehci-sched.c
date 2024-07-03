@@ -1720,6 +1720,12 @@ itd_link(struct ehci_hcd *ehci, unsigned frame, struct ehci_itd *itd)
 
 	itd->itd_next = here;
 	itd->hw_next = *hw_p;
+#ifdef CONFIG_MCST
+	if (ehci->set_type_to_last_in_list &&
+				itd->hw_next == EHCI_LIST_END(ehci))
+		itd->hw_next |= cpu_to_hc32(ehci, Q_TYPE_QH);
+#endif
+
 	prev->itd = itd;
 	itd->frame = frame;
 	wmb();
@@ -2121,6 +2127,11 @@ sitd_link(struct ehci_hcd *ehci, unsigned frame, struct ehci_sitd *sitd)
 	/* note: sitd ordering could matter (CSPLIT then SSPLIT) */
 	sitd->sitd_next = ehci->pshadow[frame];
 	sitd->hw_next = ehci->periodic[frame];
+#ifdef CONFIG_MCST
+	if (ehci->set_type_to_last_in_list &&
+				sitd->hw_next == EHCI_LIST_END(ehci))
+		sitd->hw_next |= cpu_to_hc32(ehci, Q_TYPE_QH);
+#endif
 	ehci->pshadow[frame].sitd = sitd;
 	sitd->frame = frame;
 	wmb();

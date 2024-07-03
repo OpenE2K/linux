@@ -629,7 +629,11 @@ static void ip_vs_sync_conn_v0(struct netns_ipvs *ipvs, struct ip_vs_conn *cp,
  */
 void ip_vs_sync_conn(struct netns_ipvs *ipvs, struct ip_vs_conn *cp, int pkts)
 {
+#ifdef CONFIG_MCST
+	struct ip_vs_sync_mesg *m = NULL;
+#else
 	struct ip_vs_sync_mesg *m;
+#endif
 	union ip_vs_sync_conn *s;
 	struct ip_vs_sync_buff *buff;
 	struct ipvs_master_sync_state *ms;

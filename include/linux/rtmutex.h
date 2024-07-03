@@ -28,14 +28,17 @@ extern int max_lock_depth; /* for sysctl */
  *
  * @wait_lock:	spinlock to protect the structure
  * @waiters:	rbtree root to enqueue waiters in priority order;
- *              caches top-waiter (leftmost node).
+ *		caches top-waiter (leftmost node).
  * @owner:	the mutex owner
  */
 struct rt_mutex {
 	raw_spinlock_t		wait_lock;
-	struct rb_root_cached   waiters;
+	struct rb_root_cached	waiters;
 	struct task_struct	*owner;
 	int			save_state;
+#if defined(CONFIG_MCST)
+	unsigned long		mux_ip;
+#endif
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	struct lockdep_map	dep_map;
 #endif
@@ -115,5 +118,19 @@ extern int rt_mutex_lock_interruptible(struct rt_mutex *lock);
 extern int rt_mutex_trylock(struct rt_mutex *lock);
 
 extern void rt_mutex_unlock(struct rt_mutex *lock);
+
+#if defined(CONFIG_MCST) && defined(CONFIG_RT_MUTEXES)
+extern struct task_struct *get_rtmutex_owner(struct rt_mutex *lock);
+extern void *get_rtmutex_ip(struct rt_mutex *lock);
+#else
+static inline struct task_struct *get_rtmutex_owner(struct rt_mutex *lock)
+{
+	return NULL;
+}
+static inline void *get_rtmutex_ip(struct rt_mutex *lock)
+{
+	return NULL;
+}
+#endif
 
 #endif

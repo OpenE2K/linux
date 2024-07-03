@@ -48,6 +48,11 @@
 #define HIGH_ADDR_SHIFT 49
 #define NR_CHUNKS_LOW   NR_CHUNKS_256TB
 #define NR_CHUNKS_HIGH  0
+#elif defined __e2k__
+#define HIGH_ADDR_MARK  ADDR_MARK_256TB
+#define HIGH_ADDR_SHIFT 48
+#define NR_CHUNKS_LOW   7800
+#define NR_CHUNKS_HIGH  0
 #else
 #define HIGH_ADDR_MARK  ADDR_MARK_128TB
 #define HIGH_ADDR_SHIFT 48

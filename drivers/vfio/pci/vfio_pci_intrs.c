@@ -227,6 +227,14 @@ static int vfio_intx_enable(struct vfio_pci_device *vdev,
 		return ret;
 	}
 
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+	vdev->ctx[0].producer.token = trigger;
+	vdev->ctx[0].producer.irq = pdev->irq;
+	ret = irq_bypass_register_producer(&vdev->ctx[0].producer);
+	if (ret)
+		vdev->ctx[0].producer.token = NULL;
+#endif
+
 	return 0;
 }
 
@@ -256,6 +264,10 @@ static void vfio_intx_disable(struct vfio_pci_device *vdev)
 
 	vfio_virqfd_disable(&vdev->ctx[0].unmask);
 	vfio_virqfd_disable(&vdev->ctx[0].mask);
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+	if (vdev->ctx[0].trigger)
+		irq_bypass_unregister_producer(&vdev->ctx[0].producer);
+#endif
 	free_irq(pdev->irq, vdev);
 	if (vdev->ctx[0].trigger)
 		eventfd_ctx_put(vdev->ctx[0].trigger);

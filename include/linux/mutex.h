@@ -70,6 +70,9 @@ struct mutex {
 #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
 	struct optimistic_spin_queue osq; /* Spinner MCS lock */
 #endif
+#ifdef CONFIG_MCST
+	unsigned long mux_ip;
+#endif
 	struct list_head	wait_list;
 #ifdef CONFIG_DEBUG_MUTEXES
 	void			*magic;
@@ -206,20 +209,25 @@ enum mutex_trylock_recursive_enum {
 };
 
 /**
- * mutex_trylock_recursive - trylock variant that allows recursive locking
- * @lock: mutex to be locked
- *
- * This function should not be used, _ever_. It is purely for hysterical GEM
- * raisins, and once those are gone this will be removed.
- *
- * Returns:
- *  - MUTEX_TRYLOCK_FAILED    - trylock failed,
- *  - MUTEX_TRYLOCK_SUCCESS   - lock acquired,
- *  - MUTEX_TRYLOCK_RECURSIVE - we already owned the lock.
- */
+  * mutex_trylock_recursive - trylock variant that allows recursive locking
+  * @lock: mutex to be locked
+  *
+  * This function should not be used, _ever_. It is purely for hysterical GEM
+  * raisins, and once those are gone this will be removed.
+  *
+  * Returns:
+  *  - MUTEX_TRYLOCK_FAILED    - trylock failed,
+  *  - MUTEX_TRYLOCK_SUCCESS   - lock acquired,
+  *  - MUTEX_TRYLOCK_RECURSIVE - we already owned the lock.
+  */
 extern /* __deprecated */ __must_check enum mutex_trylock_recursive_enum
-mutex_trylock_recursive(struct mutex *lock);
+mutex_trylock_recursive(struct mutex *lock); 
 
 #endif /* !PREEMPT_RT */
+
+#if defined(CONFIG_MCST)
+extern struct task_struct *get_mutex_owner(struct mutex *lock);
+extern void *get_mutex_ip(struct mutex *lock);
+#endif
 
 #endif /* __LINUX_MUTEX_H */

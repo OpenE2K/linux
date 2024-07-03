@@ -85,7 +85,12 @@ EXPORT_SYMBOL_GPL(clocks_calc_mult_shift);
  * override_name:
  *	Name of the user-specified clocksource.
  */
+#if defined(CONFIG_MCST)
+struct clocksource *curr_clocksource;
+EXPORT_SYMBOL(curr_clocksource);
+#else
 static struct clocksource *curr_clocksource;
+#endif
 static struct clocksource *suspend_clocksource;
 static LIST_HEAD(clocksource_list);
 static DEFINE_MUTEX(clocksource_mutex);
@@ -1305,6 +1310,20 @@ static ssize_t current_clocksource_store(struct device *dev,
 	return ret;
 }
 static DEVICE_ATTR_RW(current_clocksource);
+
+#ifdef CONFIG_MCST
+void override_clocksource(const char *buf, size_t count)
+{
+	mutex_lock(&clocksource_mutex);
+
+	memcpy(override_name, buf, count);
+	override_name[count] = 0;
+	clocksource_select();
+
+	mutex_unlock(&clocksource_mutex);
+}
+EXPORT_SYMBOL_GPL(override_clocksource);
+#endif
 
 /**
  * unbind_clocksource_store - interface for manually unbinding clocksource

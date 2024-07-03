@@ -440,7 +440,11 @@ MPI mpi_read_raw_from_sgl(struct scatterlist *sgl, unsigned int nbytes)
 	unsigned int nbits, nlimbs;
 	int x, j, z, lzeros, ents;
 	unsigned int len;
+#ifdef __LCC__
+	const u8 *buff = NULL;
+#else
 	const u8 *buff;
+#endif
 	mpi_limb_t a;
 	MPI val = NULL;
 

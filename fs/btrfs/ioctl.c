@@ -5051,6 +5051,118 @@ long btrfs_ioctl(struct file *file, unsigned int
 	return -ENOTTY;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+#include <asm/protected_syscalls.h>
+#include <asm/convert_array.h>
+
+struct btrfs_protected_ioctl_vol_args_v2 {
+	__s64 fd;
+	__u64 transid;
+	__u64 flags;
+	union {
+		struct {
+			__u64 size;
+			e2k_ptr_t qgroup_inherit;
+		};
+		__u64 unused[4];
+	};
+	union {
+		char name[BTRFS_SUBVOL_NAME_MAX + 1];
+		__u64 devid;
+		__u64 subvolid;
+	};
+};
+
+static long btrfs_protected_ioctl_v2(struct file *file,
+					unsigned long cmd, unsigned long arg)
+{
+	/* Pointer to user's 128bit struct */
+	struct btrfs_protected_ioctl_vol_args_v2 __user *arg128 =
+				(struct btrfs_protected_ioctl_vol_args_v2 *)arg;
+	/* Pointer to converted struct */
+	struct btrfs_ioctl_vol_args_v2 *arg64;
+	__u64 flags;
+	long buf_size = sizeof(struct btrfs_ioctl_vol_args_v2);
+
+	/* Allocate a stack to convert user's arg128 to 64bit.
+	 * A memory alignment is not required.
+	 * (see arch_protected_alloc_user_data_stack() in arch/e2k/mm/fault.c)
+	 */
+	arg64 = arch_protected_alloc_user_data_stack(buf_size);
+
+	/* The structure is a monster(size=4112)!
+	 * Let's convert it semi-manually!
+	 */
+	if (get_user(flags, (__u64 __user *)&arg128->flags))
+		return -EFAULT;
+
+	if (flags & BTRFS_SUBVOL_QGROUP_INHERIT) {
+		/* Convert user's struct:
+		 * {long, long, long, long, descr;}
+		 */
+		if (get_pm_struct_simple(
+				(long __user *)arg128,
+				(long __user *)arg64,
+				sizeof(struct btrfs_protected_ioctl_vol_args_v2),
+				5, 1, 0x31111, 0x33311))
+			return -EINVAL;
+	} else {
+		/* __s64 fd, __u64 transid, __u64 flags; */
+		if (copy_in_user((void __user *)arg64, arg128, 3*8))
+			return -EFAULT;
+	}
+
+	/* name[BTRFS_SUBVOL_NAME_MAX+1=4040] */
+	if (copy_in_user((void __user *)&arg64->name[0],
+						(void __user *)(&arg128->name[0]),
+						 BTRFS_SUBVOL_NAME_MAX+1))
+		return -EFAULT;
+
+	return btrfs_ioctl(file, cmd, (unsigned long)arg64);
+}
+
+/* a size of struct btrfs_ioctl_send_args in PM */
+#define STRUCT_BTRFS_SEND_ARGS_SIZE 80
+
+static long btrfs_protected_send_ioctl(struct file *file,
+					 unsigned long cmd, unsigned long arg)
+{
+	/* Pointer to converted structure */
+	struct btrfs_ioctl_send_args *arg64;
+	long buf_size = sizeof(struct btrfs_ioctl_send_args);
+
+	/* Allocate a stack to convert user's arg to arg64. */
+	arg64 = arch_protected_alloc_user_data_stack(buf_size);
+
+	/* Convert user's arg to arg64:
+	 * user's struct {long; long; descr, long, long}
+	 */
+	if (get_pm_struct_simple(
+			(long __user *)arg, (long __user *)arg64,
+			STRUCT_BTRFS_SEND_ARGS_SIZE,
+			5, 1, 0x11311, 0x11311)) {
+		return -EINVAL;
+	}
+
+	return btrfs_ioctl(file, cmd, (unsigned long)arg64);
+}
+
+long btrfs_protected_ioctl(struct file *file, unsigned long cmd,
+					 unsigned long arg)
+{
+	switch (cmd) {
+	case BTRFS_IOC_SNAP_CREATE_V2:
+	case BTRFS_IOC_SUBVOL_CREATE_V2:
+	case BTRFS_IOC_SNAP_DESTROY_V2:
+	case BTRFS_IOC_RM_DEV_V2:
+		return btrfs_protected_ioctl_v2(file, cmd, arg);
+	case BTRFS_IOC_SEND:
+		return btrfs_protected_send_ioctl(file, cmd, arg);
+	}
+	return btrfs_ioctl(file, cmd, arg);
+}
+#endif
 #ifdef CONFIG_COMPAT
 long btrfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {

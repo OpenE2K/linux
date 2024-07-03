@@ -11,6 +11,9 @@ enum {
 	HW_BREAKPOINT_LEN_6 = 6,
 	HW_BREAKPOINT_LEN_7 = 7,
 	HW_BREAKPOINT_LEN_8 = 8,
+#ifdef __e2k__
+	HW_BREAKPOINT_LEN_16 = 16,
+#endif
 };
 
 enum {

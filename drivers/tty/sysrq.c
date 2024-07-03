@@ -444,6 +444,23 @@ static const struct sysrq_key_op sysrq_unrt_op = {
 	.enable_mask	= SYSRQ_ENABLE_RTNICE,
 };
 
+#if defined(CONFIG_MCST) && (defined(CONFIG_E2K) || defined(CONFIG_E90S))
+#include <asm-l/pic.h>
+#include <asm-l/io_pic.h>
+static void sysrq_show_pics(int key)
+{
+	print_IO_PICs();
+	print_local_pics(true);
+}
+
+static struct sysrq_key_op sysrq_show_pics_op= {
+	.handler	= sysrq_show_pics,
+	.help_msg	= "show_all_pics(y)",
+	.action_msg	= "Show All PICs",
+	.enable_mask	= SYSRQ_ENABLE_DUMP,
+};
+#endif
+
 /* Key Operations table and lock */
 static DEFINE_SPINLOCK(sysrq_key_table_lock);
 
@@ -502,7 +519,11 @@ static const struct sysrq_key_op *sysrq_key_table[62] = {
 	/* x: May be registered on sparc64 for global PMU dump */
 	NULL,				/* x */
 	/* y: May be registered on sparc64 for global register dump */
+#if defined(CONFIG_MCST) && (defined(CONFIG_E2K) || defined(CONFIG_E90S))
+	&sysrq_show_pics_op,		/* y */
+#else
 	NULL,				/* y */
+#endif
 	&sysrq_ftrace_dump_op,		/* z */
 	NULL,				/* A */
 	NULL,				/* B */

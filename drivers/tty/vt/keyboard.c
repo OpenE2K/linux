@@ -1246,7 +1246,7 @@ DECLARE_TASKLET_DISABLED_OLD(keyboard_tasklet, kbd_bh);
 
 #if defined(CONFIG_X86) || defined(CONFIG_IA64) || defined(CONFIG_ALPHA) ||\
     defined(CONFIG_MIPS) || defined(CONFIG_PPC) || defined(CONFIG_SPARC) ||\
-    defined(CONFIG_PARISC) || defined(CONFIG_SUPERH) ||\
+    defined(CONFIG_PARISC) || defined(CONFIG_SUPERH) || defined(CONFIG_E2K) ||\
     (defined(CONFIG_ARM) && defined(CONFIG_KEYBOARD_ATKBD) && !defined(CONFIG_ARCH_RPC))
 
 #define HW_RAW(dev) (test_bit(EV_MSC, dev->evbit) && test_bit(MSC_RAW, dev->mscbit) &&\
@@ -1390,11 +1390,13 @@ static void kbd_keycode(unsigned int keycode, int down, int hw_raw)
 				pr_warn("can't emulate rawmode for keycode %d\n",
 					keycode);
 
+#ifndef CONFIG_E90S
 #ifdef CONFIG_SPARC
 	if (keycode == KEY_A && sparc_l1_a_state) {
 		sparc_l1_a_state = false;
 		sun_do_break();
 	}
+#endif
 #endif
 
 	if (kbd->kbdmode == VC_MEDIUMRAW) {

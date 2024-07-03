@@ -51,6 +51,19 @@
 #define HARDIRQ_OFFSET	(1UL << HARDIRQ_SHIFT)
 #define NMI_OFFSET	(1UL << NMI_SHIFT)
 
+#if defined(CONFIG_MCST) && defined(CONFIG_WATCH_PREEMPT)
+extern int do_watch_preempt_disable;
+extern void save_tm_prmtdsbl(int val);
+extern void chck_tm_prmtdsbl(int val);
+
+#define NEVER_PWATCH            0x00000001
+#define NOPWATCH_DEAD           0x00000002
+#define NOPWATCH_TSBGROW        0x00000004
+#define NOPWATCH_LOCTIM         0x00000008
+#define NOPWATCH_SCHED          0x00000010
+#define NOPWATCH_EXITMM         0x00000020
+#endif
+
 #define SOFTIRQ_DISABLE_OFFSET	(2 * SOFTIRQ_OFFSET)
 
 #define PREEMPT_DISABLED	(PREEMPT_DISABLE_OFFSET + PREEMPT_ENABLED)
@@ -163,8 +176,38 @@ extern void preempt_count_sub(int val);
 #define preempt_count_dec_and_test() \
 	({ preempt_count_sub(1); should_resched(0); })
 #else
-#define preempt_count_add(val)	__preempt_count_add(val)
-#define preempt_count_sub(val)	__preempt_count_sub(val)
+
+
+# if defined(CONFIG_MCST) && defined(CONFIG_WATCH_PREEMPT)
+#  define preempt_count_add(val)                                         \
+	do {                                                            \
+		__preempt_count_add(val);                               \
+		if (unlikely(do_watch_preempt_disable))                 \
+			save_tm_prmtdsbl(val);                          \
+	} while (0)
+#  ifdef CONFIG_DEBUG_PREEMPT_COUNT
+#   define preempt_count_sub(val)                                         \
+	do {                                                            \
+		WARN_ONCE((val > preempt_count()),                 \
+			"preempt count(0x%08x) < val(%d)\n",            \
+			preempt_count(), val);                     \
+		if (unlikely(do_watch_preempt_disable))                 \
+			chck_tm_prmtdsbl(val);                          \
+		__preempt_count_sub(val);                               \
+	} while (0)
+#  else
+#   define preempt_count_sub(val)                                         \
+	do {                                                            \
+		if (unlikely(do_watch_preempt_disable))                 \
+			chck_tm_prmtdsbl(val);                          \
+		__preempt_count_sub(val);                               \
+	} while (0)
+#  endif
+# else
+#  define preempt_count_add(val)        __preempt_count_add(val)
+#  define preempt_count_sub(val)        __preempt_count_sub(val)
+# endif
+
 #define preempt_count_dec_and_test() __preempt_count_dec_and_test()
 #endif
 
@@ -310,7 +353,9 @@ do { \
 
 #endif /* CONFIG_PREEMPT_COUNT */
 
-#ifdef MODULE
+/* In our kernels local_irq_enable() and spin_unlock_no_resched()
+ * play preemption tricks */
+#if defined MODULE && !defined CONFIG_MCST
 /*
  * Modules have no business playing preemption tricks.
  */

@@ -407,10 +407,15 @@
 #define HDMI_GP_CONF0                           0x3500
 #define HDMI_GP_CONF1                           0x3501
 #define HDMI_GP_CONF2                           0x3502
+#ifdef CONFIG_MCST
+/*our ip-core has only this register */
+#define HDMI_GP_MASK                            0x3506
+#else
 #define HDMI_GP_STAT                            0x3503
 #define HDMI_GP_INT                             0x3504
 #define HDMI_GP_MASK                            0x3505
 #define HDMI_GP_POL                             0x3506
+#endif
 
 /* Audio DMA Registers */
 #define HDMI_AHB_DMA_CONF0                      0x3600

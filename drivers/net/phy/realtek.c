@@ -637,7 +637,11 @@ static struct phy_driver realtek_drvs[] = {
 		.ack_interrupt	= &rtl8211f_ack_interrupt,
 		.config_intr	= &rtl8211f_config_intr,
 		.suspend	= genphy_suspend,
+#ifdef CONFIG_MCST
+		.resume		= genphy_resume,
+#else
 		.resume		= rtl821x_resume,
+#endif
 		.read_page	= rtl821x_read_page,
 		.write_page	= rtl821x_write_page,
 	}, {

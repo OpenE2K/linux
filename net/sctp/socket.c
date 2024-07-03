@@ -8086,7 +8086,11 @@ static int sctp_get_port_local(struct sock *sk, union sctp_addr *addr)
 {
 	struct sctp_sock *sp = sctp_sk(sk);
 	bool reuse = (sk->sk_reuse || sp->reuse);
+#ifdef CONFIG_MCST
+	struct sctp_bind_hashbucket *head = NULL; /* hash list */
+#else
 	struct sctp_bind_hashbucket *head; /* hash list */
+#endif
 	struct net *net = sock_net(sk);
 	kuid_t uid = sock_i_uid(sk);
 	struct sctp_bind_bucket *pp;

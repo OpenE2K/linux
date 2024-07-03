@@ -21,7 +21,7 @@
 
 #define COPY4(dst, src)	\
 		put_unaligned(get_unaligned((const u32 *)(src)), (u32 *)(dst))
-#if defined(CONFIG_X86_64) || defined(CONFIG_ARM64)
+#if defined(CONFIG_X86_64) || defined(CONFIG_ARM64) || defined(CONFIG_E2K)
 #define COPY8(dst, src)	\
 		put_unaligned(get_unaligned((const u64 *)(src)), (u64 *)(dst))
 #else
@@ -31,7 +31,7 @@
 
 #if defined(__BIG_ENDIAN) && defined(__LITTLE_ENDIAN)
 #error "conflicting endian definitions"
-#elif defined(CONFIG_X86_64) || defined(CONFIG_ARM64)
+#elif defined(CONFIG_X86_64) || defined(CONFIG_ARM64) || defined(CONFIG_E2K)
 #define LZO_USE_CTZ64	1
 #define LZO_USE_CTZ32	1
 #define LZO_FAST_64BIT_MEMORY_ACCESS

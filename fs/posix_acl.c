@@ -32,6 +32,9 @@ static struct posix_acl **acl_by_type(struct inode *inode, int type)
 		return &inode->i_default_acl;
 	default:
 		BUG();
+#ifdef __LCC__
+		return NULL;
+#endif
 	}
 }
 

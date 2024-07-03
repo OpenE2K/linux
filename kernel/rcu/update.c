@@ -494,7 +494,11 @@ EXPORT_SYMBOL_GPL(rcutorture_sched_setaffinity);
 #ifdef CONFIG_RCU_STALL_COMMON
 int rcu_cpu_stall_ftrace_dump __read_mostly;
 module_param(rcu_cpu_stall_ftrace_dump, int, 0644);
+#ifdef CONFIG_MCST
+int rcu_cpu_stall_suppress __read_mostly = 1; // !0 = suppress stall warnings.
+#else
 int rcu_cpu_stall_suppress __read_mostly; // !0 = suppress stall warnings.
+#endif
 EXPORT_SYMBOL_GPL(rcu_cpu_stall_suppress);
 module_param(rcu_cpu_stall_suppress, int, 0644);
 int rcu_cpu_stall_timeout __read_mostly = CONFIG_RCU_CPU_STALL_TIMEOUT;

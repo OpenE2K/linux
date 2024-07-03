@@ -1872,3 +1872,22 @@ static int sysvipc_shm_proc_show(struct seq_file *s, void *it)
 	return 0;
 }
 #endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+unsigned long get_shm_segm_size(int shmid)
+{
+	struct ipc_namespace *ns;
+	struct shmid64_ds sem64;
+	int err;
+
+	if (shmid < 0)
+		return -EINVAL;
+
+	ns = current->nsproxy->ipc_ns;
+	err = shmctl_stat(ns, shmid, SHM_STAT_ANY, &sem64);
+	if (err < 0)
+		return err;
+
+	return sem64.shm_segsz;
+}
+#endif

@@ -2758,7 +2758,11 @@ int regmap_raw_read(struct regmap *map, unsigned int reg, void *val,
 	size_t val_bytes = map->format.val_bytes;
 	size_t val_count = val_len / val_bytes;
 	unsigned int v;
+#ifndef CONFIG_MCST
 	int ret, i;
+#else
+	int ret = 0, i;
+#endif
 
 	if (val_len % map->format.val_bytes)
 		return -EINVAL;

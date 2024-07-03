@@ -1615,7 +1615,11 @@ static u32 ieee80211_handle_pwr_constr(struct ieee80211_sub_if_data *sdata,
 {
 	bool has_80211h_pwr = false, has_cisco_pwr = false;
 	int chan_pwr = 0, pwr_reduction_80211h = 0;
+#if defined(CONFIG_MCST)
+	int pwr_level_cisco, pwr_level_80211h = 0;
+#else
 	int pwr_level_cisco, pwr_level_80211h;
+#endif
 	int new_ap_level;
 	__le16 capab = mgmt->u.probe_resp.capab_info;
 

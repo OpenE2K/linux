@@ -3072,6 +3072,9 @@ ssize_t btrfs_direct_IO(struct kiocb *iocb, struct iov_iter *iter);
 
 /* ioctl.c */
 long btrfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+long btrfs_protected_ioctl(struct file *file, unsigned long cmd, unsigned long arg);
+#endif
 long btrfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 int btrfs_ioctl_get_supported_features(void __user *arg);
 void btrfs_sync_inode_flags_to_i_flags(struct inode *inode);

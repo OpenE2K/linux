@@ -763,6 +763,10 @@ static int ksz9031_config_init(struct phy_device *phydev)
 				goto err_force_master;
 		}
 	}
+#ifdef CONFIG_MCST
+	/* write magik constant to CLK_PAD_SKEW */
+	phy_write_mmd(phydev, 2, MII_KSZ9031RN_CLK_PAD_SKEW, 0x03EF);
+#endif
 
 	return ksz9031_center_flp_timing(phydev);
 
@@ -1292,7 +1296,7 @@ static struct phy_driver ksphy_driver[] = {
 	.resume		= genphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ9021,
-	.phy_id_mask	= 0x000ffffe,
+	.phy_id_mask	= MICREL_PHY_ID_MASK,
 	.name		= "Micrel KSZ9021 Gigabit PHY",
 	/* PHY_GBIT_FEATURES */
 	.driver_data	= &ksz9021_type,
@@ -1397,7 +1401,7 @@ MODULE_AUTHOR("David J. Choi");
 MODULE_LICENSE("GPL");
 
 static struct mdio_device_id __maybe_unused micrel_tbl[] = {
-	{ PHY_ID_KSZ9021, 0x000ffffe },
+	{ PHY_ID_KSZ9021, MICREL_PHY_ID_MASK },
 	{ PHY_ID_KSZ9031, MICREL_PHY_ID_MASK },
 	{ PHY_ID_KSZ9131, MICREL_PHY_ID_MASK },
 	{ PHY_ID_KSZ8001, 0x00fffffc },

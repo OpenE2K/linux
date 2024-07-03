@@ -2033,6 +2033,27 @@ int pcim_enable_device(struct pci_dev *pdev)
 }
 EXPORT_SYMBOL(pcim_enable_device);
 
+#ifdef CONFIG_MCST
+int pcim_enable_device_mem(struct pci_dev *pdev)
+{
+	struct pci_devres *dr;
+	int rc;
+
+	dr = get_pci_dr(pdev);
+	if (unlikely(!dr))
+		return -ENOMEM;
+	if (dr->enabled)
+		return 0;
+
+	rc = pci_enable_device_mem(pdev);
+	if (!rc) {
+		pdev->is_managed = 1;
+		dr->enabled = 1;
+	}
+	return rc;
+}
+EXPORT_SYMBOL(pcim_enable_device_mem);
+#endif
 /**
  * pcim_pin_device - Pin managed PCI device
  * @pdev: PCI device to pin
@@ -5857,7 +5878,14 @@ u32 pcie_bandwidth_available(struct pci_dev *dev, struct pci_dev **limiting_dev,
 			if (width)
 				*width = next_width;
 		}
-
+#if defined(CONFIG_E90S) || defined(CONFIG_E2K)
+		/* Do do look higher then root port: it is the top of
+		 * the hierarchy */
+		if (pci_is_pcie(dev) && (pci_pcie_type(dev) ==
+					PCI_EXP_TYPE_ROOT_PORT)) {
+			break;
+		}
+#endif
 		dev = pci_upstream_bridge(dev);
 	}
 

@@ -53,6 +53,9 @@ struct bq24735 {
 	struct delayed_work		poll;
 	u32				poll_interval;
 	bool				charging;
+#ifdef CONFIG_MCST
+	bool				prev_state_charging;
+#endif /* CONFIG_MCST */
 };
 
 static inline struct bq24735 *to_bq24735(struct power_supply *psy)
@@ -63,6 +66,10 @@ static inline struct bq24735 *to_bq24735(struct power_supply *psy)
 static enum power_supply_property bq24735_charger_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_ONLINE,
+#ifdef CONFIG_MCST
+	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
+#endif /* CONFIG_MCST */
 };
 
 static int bq24735_charger_property_is_writeable(struct power_supply *psy,
@@ -81,12 +88,27 @@ static int bq24735_charger_property_is_writeable(struct power_supply *psy,
 static inline int bq24735_write_word(struct i2c_client *client, u8 reg,
 				     u16 value)
 {
+#ifdef CONFIG_MCST
+	value = cpu_to_le16(value);
+#endif /* CONFIG_MCST */
 	return i2c_smbus_write_word_data(client, reg, value);
 }
 
 static inline int bq24735_read_word(struct i2c_client *client, u8 reg)
 {
+#ifdef CONFIG_MCST
+	s32 ret = 0;
+	ret = i2c_smbus_read_word_data(client, reg);
+	if (ret < 0) {
+		dev_dbg(&client->dev,
+			"%s: i2c read at address 0x%x failed\n",
+			__func__, reg);
+		return ret;
+	}
+	return le16_to_cpu(ret);
+#else
 	return i2c_smbus_read_word_data(client, reg);
+#endif /* CONFIG_MCST */
 }
 
 static int bq24735_update_word(struct i2c_client *client, u8 reg,
@@ -94,8 +116,12 @@ static int bq24735_update_word(struct i2c_client *client, u8 reg,
 {
 	unsigned int tmp;
 	int ret;
-
+#ifdef CONFIG_MCST
+	value = cpu_to_le16(value);
+	mask = cpu_to_le16(mask);
+#endif /* CONFIG_MCST */
 	ret = bq24735_read_word(client, reg);
+
 	if (ret < 0)
 		return ret;
 
@@ -219,10 +245,30 @@ static void bq24735_update(struct bq24735 *charger)
 {
 	mutex_lock(&charger->lock);
 
+#ifdef CONFIG_MCST
+	/* Assume that we always work with broadcasting battery, so we don't
+	 * need to update values of charge and voltage every poll. We write this
+	 * values only on start of charge to minimize delay while charger receive
+	 * broadcast message from battery. For bq40z50 this delay can be from
+	 * 10 to 60 sec.
+	 */
+	if (charger->charging && bq24735_charger_is_present(charger)) {
+		if (!charger->prev_state_charging) {
+			bq24735_enable_charging(charger);
+			charger->prev_state_charging = true;
+		}
+	} else {
+		if (charger->prev_state_charging) {
+			bq24735_disable_charging(charger);
+			charger->prev_state_charging = false;
+		}
+	}
+#else
 	if (charger->charging && bq24735_charger_is_present(charger))
 		bq24735_enable_charging(charger);
 	else
 		bq24735_disable_charging(charger);
+#endif /* CONFIG_MCST */
 
 	mutex_unlock(&charger->lock);
 
@@ -272,6 +318,16 @@ static int bq24735_charger_get_property(struct power_supply *psy,
 			break;
 		}
 		break;
+#ifdef CONFIG_MCST
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		val->intval = bq24735_read_word(
+				charger->client, BQ24735_CHARGE_VOLTAGE);
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		val->intval = bq24735_read_word(
+				charger->client, BQ24735_CHARGE_CURRENT);
+		break;
+#endif /* CONFIG_MCST */
 	default:
 		return -EINVAL;
 	}
@@ -364,6 +420,9 @@ static int bq24735_charger_probe(struct i2c_client *client,
 
 	mutex_init(&charger->lock);
 	charger->charging = true;
+#ifdef CONFIG_MCST
+	charger->prev_state_charging = true;
+#endif /* CONFIG_MCST */
 	charger->pdata = client->dev.platform_data;
 
 	if (IS_ENABLED(CONFIG_OF) && !charger->pdata && client->dev.of_node)
@@ -430,7 +489,11 @@ static int bq24735_charger_probe(struct i2c_client *client,
 		if (ret < 0) {
 			dev_err(&client->dev, "Failed to read device id : %d\n", ret);
 			return ret;
+#ifdef CONFIG_MCST
+		} else if (ret != 0x000B && ret != 0x0008) {
+#else
 		} else if (ret != 0x000B) {
+#endif /* CONFIG_MCST */
 			dev_err(&client->dev,
 				"device id mismatch. 0x000b != 0x%04x\n", ret);
 			return -ENODEV;
@@ -500,6 +563,9 @@ MODULE_DEVICE_TABLE(i2c, bq24735_charger_id);
 
 static const struct of_device_id bq24735_match_ids[] = {
 	{ .compatible = "ti,bq24735", },
+#ifdef CONFIG_MCST
+	{ .compatible = "ti,bq24725", },
+#endif /* CONFIG_MCST */
 	{ /* end */ }
 };
 MODULE_DEVICE_TABLE(of, bq24735_match_ids);

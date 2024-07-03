@@ -3435,6 +3435,15 @@ void ___cache_free(struct kmem_cache *cachep, void *objp,
 	check_irq_off();
 	if (unlikely(slab_want_init_on_free(cachep)))
 		memset(objp, 0, cachep->object_size);
+
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	if (!(cachep->flags & (SLAB_POISON | SLAB_NO_SANITIZE))) {
+		if (mem_san)
+			memset(objp, MEMORY_SANITIZE_VALUE,
+					cachep->object_size);
+	}
+#endif
+
 	kmemleak_free_recursive(objp, cachep->flags);
 	objp = cache_free_debugcheck(cachep, objp, caller);
 	memcg_slab_free_hook(cachep, &objp, 1);
@@ -4070,6 +4079,16 @@ void slabinfo_show_stats(struct seq_file *m, struct kmem_cache *cachep)
 		seq_printf(m, " : cpustat %6lu %6lu %6lu %6lu",
 			   allochit, allocmiss, freehit, freemiss);
 	}
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	{
+		unsigned long sanitized =
+			atomic_read_unchecked(&cachep->sanitized);
+		unsigned long not_sanitized =
+			atomic_read_unchecked(&cachep->not_sanitized);
+
+		seq_printf(m, " : pax %6lu %6lu", sanitized, not_sanitized);
+	}
+#endif
 #endif
 }
 

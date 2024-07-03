@@ -27,6 +27,7 @@
 /* So that the fiemap access checks can't overflow on 32 bit machines. */
 #define FIEMAP_MAX_EXTENTS	(UINT_MAX / sizeof(struct fiemap_extent))
 
+
 /**
  * vfs_ioctl - call filesystem specific ioctl methods
  * @filp:	open file to invoke ioctl method on
@@ -849,4 +850,101 @@ COMPAT_SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd,
 
 	return error;
 }
-#endif
+#endif /* CONFIG_COMPAT */
+
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+
+#include <asm/protected_syscalls.h>
+
+#if (DYNAMIC_DEBUG_SYSCALLP_ENABLED)
+
+#undef DbgSCP
+#define DbgSCP(fmt, ...) \
+do { \
+	if (current->mm->context.pm_sc_debug_mode \
+		& PM_SC_DBG_MODE_COMPLEX_WRAPPERS) \
+		pr_info("%s [#%d]: " fmt, current->comm, \
+				current->pid, ##__VA_ARGS__); \
+} while (0)
+#endif /* DYNAMIC_DEBUG_SYSCALLP_ENABLED */
+
+/**
+ * ptr128_ioctl - generic implementation of .ptr128_ioctl file operation
+ *
+ * On most architectures, the ioctl() just passes all arguments to
+ * the corresponding ->ioctl handler.
+ *
+ * If any ioctl command handled by fops->unlocked_ioctl passes a plain
+ * integer instead of a pointer, or any of the passed data types
+ * is incompatible between 128-bit and 64-bit architectures, a proper
+ * handler is required instead of ptr128_ioctl.
+ */
+
+long ptr128_ioctl(struct file *file, unsigned long cmd, unsigned long arg)
+{
+	DbgSCP("%s(file=0x%lx, cmd=0x%lx, arg=0x%lx)\n",
+	       __func__, file, cmd, arg);
+	if (!file->f_op->unlocked_ioctl)
+		return -ENOIOCTLCMD;
+
+	return file->f_op->unlocked_ioctl(file, cmd, arg);
+}
+EXPORT_SYMBOL(ptr128_ioctl);
+
+
+SYSCALL_DEFINE3(protected_ioctl, unsigned int, fd, unsigned long, cmd, unsigned long, arg)
+{
+	struct fd f = fdget(fd);
+	int error = -EBADF;
+
+	if (!f.file)
+		return -EBADF;
+
+	DbgSCP("%s(fd=%d, cmd=0x%lx, arg=0x%lx)\n", __func__, fd, cmd, arg);
+
+	/* RED-PEN how should LSM module know it's handling 128 bit?
+	 * NB> Available security modules (Smack, Tomoyo, elmac)
+	 *				don't use 'arg' at all.
+	 */
+	error = security_file_ioctl(f.file, cmd, arg);
+	if (error)
+		goto out;
+
+	/*
+	 * To allow the protected ioctl handlers to be self contained
+	 * we need to check the common ioctls here first.
+	 * Just handle them with the standard handlers below.
+	 */
+	switch (cmd) {
+	/* FICLONE takes an int argument */
+	case FICLONE:
+		error = ioctl_file_clone(f.file, arg, 0, 0, 0);
+		break;
+	/*
+	 * everything else in do_vfs_ioctl() takes either a compatible
+	 * pointer argument or no argument -- call it as is.
+	 */
+	default:
+		error = do_vfs_ioctl(f.file, fd, cmd, arg);
+		if (error != -ENOIOCTLCMD)
+			break;
+
+		DbgSCP("%s() : f.file->f_op->ptr128_ioctl=0x%lx\n",
+		       __func__, (long)(f.file->f_op->ptr128_ioctl));
+		if (f.file->f_op->ptr128_ioctl)
+			error = f.file->f_op->ptr128_ioctl(f.file, cmd, arg);
+		else /* no specific handler; using regular one */
+			error = vfs_ioctl(f.file, cmd, arg);
+		if (error == -ENOIOCTLCMD)
+			error = -ENOTTY;
+		break;
+	}
+
+ out:
+	fdput(f);
+
+	return error;
+}
+
+#endif /* CONFIG_PROTECTED_MODE */
+

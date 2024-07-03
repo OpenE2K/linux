@@ -100,7 +100,7 @@
 #define PCIE_ICH8_SNOOP_ALL	PCIE_NO_SNOOP_ALL
 
 #define E1000_ICH_RAR_ENTRIES	7
-#define E1000_PCH2_RAR_ENTRIES	5	/* RAR[0], SHRA[0-3] */
+#define E1000_PCH2_RAR_ENTRIES	11	/* RAR[0-6], SHRA[0-3] */
 #define E1000_PCH_LPT_RAR_ENTRIES	12	/* RAR[0], SHRA[0-10] */
 
 #define PHY_PAGE_SHIFT		5
@@ -234,6 +234,10 @@
 #define I82579_LPI_CTRL_ENABLE_MASK		0x6000
 #define I82579_LPI_CTRL_FORCE_PLL_LOCK_COUNT	0x80
 
+/* 82579 DFT Control */
+#define I82579_DFT_CTRL			PHY_REG(769, 20)
+#define I82579_DFT_CTRL_GATE_PHY_RESET	0x0040	/* Gate PHY Reset on MAC Reset */
+
 /* Extended Management Interface (EMI) Registers */
 #define I82579_EMI_ADDR		0x10
 #define I82579_EMI_DATA		0x11
@@ -304,3 +308,6 @@ s32 e1000_write_emi_reg_locked(struct e1000_hw *hw, u16 addr, u16 data);
 s32 e1000_set_eee_pchlan(struct e1000_hw *hw);
 s32 e1000_enable_ulp_lpt_lp(struct e1000_hw *hw, bool to_sx);
 #endif /* _E1000E_ICH8LAN_H_ */
+#ifdef DYNAMIC_LTR_SUPPORT
+void e1000_demote_ltr(struct e1000_hw *hw, bool demote, bool link);
+#endif /* DYNAMIC_LTR_SUPPORT */

@@ -1221,7 +1221,10 @@ void kprobes_inc_nmissed_count(struct kprobe *p)
 }
 NOKPROBE_SYMBOL(kprobes_inc_nmissed_count);
 
-static void recycle_rp_inst(struct kretprobe_instance *ri)
+#ifndef CONFIG_E2K
+static
+#endif
+void recycle_rp_inst(struct kretprobe_instance *ri)
 {
 	struct kretprobe *rp = ri->rp;
 
@@ -1237,7 +1240,10 @@ static void recycle_rp_inst(struct kretprobe_instance *ri)
 }
 NOKPROBE_SYMBOL(recycle_rp_inst);
 
-static void kretprobe_hash_lock(struct task_struct *tsk,
+#ifndef CONFIG_E2K
+static
+#endif
+void kretprobe_hash_lock(struct task_struct *tsk,
 			 struct hlist_head **head, unsigned long *flags)
 __acquires(hlist_lock)
 {
@@ -1271,7 +1277,10 @@ __acquires(hlist_lock)
 }
 NOKPROBE_SYMBOL(kretprobe_table_lock);
 
-static void kretprobe_hash_unlock(struct task_struct *tsk,
+#ifndef CONFIG_E2K
+static
+#endif
+void kretprobe_hash_unlock(struct task_struct *tsk,
 			   unsigned long *flags)
 __releases(hlist_lock)
 {

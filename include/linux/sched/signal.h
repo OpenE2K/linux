@@ -13,6 +13,10 @@
 #include <linux/mm_types.h>
 #include <asm/ptrace.h>
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+#include <asm/secondary_space.h>
+#endif
+
 /*
  * Types defining task->signal and task->sighand and APIs using them:
  */
@@ -201,6 +205,10 @@ struct signal_struct {
 	 * have no need to disable irqs.
 	 */
 	struct rlimit rlim[RLIM_NLIMITS];
+
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	struct rlimit bin_comp_rlim[BINCOMP_RLIM_NLIMITS];
+#endif
 
 #ifdef CONFIG_BSD_PROCESS_ACCT
 	struct pacct_struct pacct;	/* per-process accounting information */

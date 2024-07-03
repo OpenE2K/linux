@@ -37,10 +37,21 @@ static const struct i2c_device_id tps40422_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, tps40422_id);
 
+#ifdef CONFIG_MCST
+static const struct of_device_id tps40422_of_match[] = {
+	{ .compatible = "ti,tps40422" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, tps40422_of_match);
+#endif
+
 /* This is the driver that will be inserted */
 static struct i2c_driver tps40422_driver = {
 	.driver = {
 		   .name = "tps40422",
+#ifdef CONFIG_MCST
+		   .of_match_table = of_match_ptr(tps40422_of_match)
+#endif
 		   },
 	.probe_new = tps40422_probe,
 	.remove = pmbus_do_remove,

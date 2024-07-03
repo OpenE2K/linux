@@ -732,7 +732,11 @@ static void rcu_exp_need_qs(void)
 {
 	__this_cpu_write(rcu_data.cpu_no_qs.b.exp, true);
 	/* Store .exp before .rcu_urgent_qs. */
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	smp_store_release(this_cpu_ptr(&rcu_urgent_qsn), true);
+#else
 	smp_store_release(this_cpu_ptr(&rcu_data.rcu_urgent_qs), true);
+#endif
 	set_tsk_need_resched(current);
 	set_preempt_need_resched();
 }

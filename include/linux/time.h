@@ -34,12 +34,16 @@ extern time64_t mktime64(const unsigned int year, const unsigned int mon,
 extern u32 (*arch_gettimeoffset)(void);
 #endif
 
+#ifdef CONFIG_MCST
+extern s64 getns64timeofday(void);
+#endif
+
 #ifdef CONFIG_POSIX_TIMERS
 extern void clear_itimer(void);
 #else
 static inline void clear_itimer(void) {}
 #endif
-
+ 
 extern long do_utimes(int dfd, const char __user *filename, struct timespec64 *times, int flags);
 
 /*

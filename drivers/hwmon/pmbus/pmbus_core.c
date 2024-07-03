@@ -731,9 +731,18 @@ static u16 pmbus_data2reg_linear(struct pmbus_data *data,
 
 	if (sensor->class == PSC_VOLTAGE_OUT) {
 		/* LINEAR16 does not support negative voltages */
+#ifdef CONFIG_MCST
+		if (val < 0 && (sensor->reg != PMBUS_VOUT_TRIM))
+#else
 		if (val < 0)
+#endif
 			return 0;
 
+#ifdef CONFIG_MCST
+		if (sensor->reg == PMBUS_VOUT_TRIM) {
+			return val & 0xffff;
+		} else {
+#endif
 		/*
 		 * For a static exponents, we don't have a choice
 		 * but to adjust the value to it.
@@ -744,6 +753,9 @@ static u16 pmbus_data2reg_linear(struct pmbus_data *data,
 			val >>= data->exponent[sensor->page];
 		val = DIV_ROUND_CLOSEST_ULL(val, 1000);
 		return clamp_val(val, 0, 0xffff);
+#ifdef CONFIG_MCST
+		}
+#endif
 	}
 
 	if (val < 0) {
@@ -1441,6 +1453,20 @@ static const struct pmbus_limit_attr vout_limit_attrs[] = {
 		.alarm = "crit_alarm",
 		.sbit = PB_VOLTAGE_OV_FAULT,
 	}, {
+#ifdef CONFIG_MCST
+		.reg = PMBUS_VOUT_MARGIN_HIGH,
+		.attr = "margin_high",
+	}, {
+		.reg = PMBUS_VOUT_MARGIN_LOW,
+		.attr = "margin_low",
+	}, {
+		.reg = PMBUS_VOUT_TRIM,
+		.attr = "trim",
+	}, {
+		.reg = PMBUS_VOUT_COMMAND,
+		.attr = "command",
+	}, {
+#endif
 		.reg = PMBUS_VIRT_READ_VOUT_AVG,
 		.update = true,
 		.attr = "average",

@@ -1,0 +1,437 @@
+#!/bin/bash
+
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+ 
+scname=`basename $0`
+scdir=`dirname $0`
+conf_script=./scripts/config
+conf_path=./arch/e2k/configs
+[ "`uname -m`" != "e2k" ] && export ARCH=e2k
+Confs()
+{
+cat <<EOF
+ e2k_nort e2k_rt e2k_nn e2k_nnrt e2k_host e2k_guest
+ e2c3_proto e12c_proto e16c_proto e48c_proto e8v7_proto
+ e8v7_nort e8v7_rt
+ e48c_nort e48c_rt e48c_nn e48c_nnrt
+ e12c_nort e12c_rt e12c_nn e12c_nnrt
+ e16c_nort e16c_rt e16c_nn e16c_nnrt
+ e1cp_nort e1cp_rt e1cp_host e1cp_guest
+ e2c3_nort e2c3_rt
+ e2s_nort e2s_rt e2s_nn e2s_nnrt e2s_host e2s_guest e2s_nort_debug
+ e8c_nort e8c_rt e8c_nn e8c_nnrt e8c_host e8c_guest e8c_nort_debug
+ e8c2_nort e8c2_rt e8c2_nn e8c2_nnrt e8c2_host e8c2_guest e8c2_nort_debug
+EOF
+}
+CONFS=`Confs | sed -e 's/$/ /g'`
+###############################################################################
+KnownConfs()
+{
+echo "Known <conf>s:"
+Confs
+}
+usage()
+{
+	echo "incorrect param: $1"
+	echo "usage: $scname [--def] [--release] --conf <conf> [--file <anyname>_defconfig] [CC=<cc>]" >&2
+	exit 1
+}
+Usage() {
+	cat >&2 <<EOL
+Usage:
+        $scname [--def] [--release] --conf <conf> [--output_directory/-o <path>] [--file <anyname>_defconfig]
+
+Generate .config or|and <defconfig> files for some kernel configuration
+from arch/e2k/configs/defconfig | arch/e2k/configs/rt_defconfig
+
+<defconfig>: ./arch/e2k/configs/<anyname>_defconfig
+             (default: ./arch/e2k/configs/gen_<conf>_defconfig)
+
+1. To generate <defconfig> file
+   $scname --def --conf <conf> [--file <anyname>_defconfig]
+2. To generate .config and <defconfig>
+   $scname --conf <conf> --file <anyname>_defconfig
+3. To generate .config only
+   $scname --conf <conf>
+4. To generate .config only in separate directory
+   $scname --conf <conf> -o <output directory>
+5. To generate .config for production kernel also use --release flag
+
+<conf>s meaning:
+
+         | realtime | NUMA
+  -------+----------+-----
+  *_nort |    -     |  +
+    *_nn |    -     |  -
+    *_rt |    +     |  +
+  *_nnrt |    +     |  -
+  ------------------------
+
+  *_debug configs also enable additional selftesting options.
+  *_host/*_guest are for virtualization without HW support.
+
+EOL
+KnownConfs
+exit 0
+}
+tmpf=tmp_$$_defconfig
+cleanup()
+{
+	rm -f $conf_path/$tmpf
+}
+localversion()
+{
+	l=`echo $DCONF | sed -e 's/_/-/' -e 's/nort_//' -e 's/nort//' -e 's/-$//'`
+	$conf_script --file $OUTPUT_DIR/.config --set-str CONFIG_LOCALVERSION "-${l}" \
+	|| exit 1
+}
+###############################################################################
+#CONFIG_DRM_MGA2	generic, e1cp, e2c3
+#CONFIG_DRM_MGA25	generic, e2c3, e8v7
+conf_no_builtin_gpu()
+{
+	$conf_script $OPTFILE \
+	-d CONFIG_DRM_IMX -d CONFIG_DRM_IMX_HDMI \
+ 	-d CONFIG_IMGTEC \
+ 	-d CONFIG_MEM2ALLOC -d CONFIG_HANTRODEC -d CONFIG_BIGE \
+	-d CONFIG_ELDWCXPCS -d CONFIG_MGB -d CONFIG_MXGBE \
+	|| exit 1
+}
+conf_e1cp()
+{
+	# e1cp has:
+	# 1) MGA2 - mga2.ko (CONFIG_DRM_MGA2),
+	#    dw_hdmi_imx.ko (CONFIG_DRM_IMX_HDMI)
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E1CP \
+	-d CONFIG_SMP \
+	|| exit 1
+	conf_no_builtin_gpu;
+	$conf_script $OPTFILE \
+	-m CONFIG_DRM_IMX_HDMI -m CONFIG_DRM_IMX \
+	|| exit 1
+}
+conf_e2s()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E2S \
+	|| exit 1;
+	conf_no_builtin_gpu;
+}
+conf_e8c()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E8C \
+	|| exit 1;
+	conf_no_builtin_gpu;
+}
+conf_e8c2()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E8C2 \
+	|| exit 1;
+	conf_no_builtin_gpu;
+}
+conf_e2c3()
+{
+	# e2c3 has:
+	# 1) MGA2.5 (MGA2 with more controllers, overlays and 2x 2D GPU) -
+	#    mga2 (CONFIG_DRM_MGA2),
+	#    dw_hdmi_imx (CONFIG_DRM_IMX_HDMI)
+	# 2) Imagination D5820 (decoder) - vxd.ko, img_mem.ko (CONFIG_IMGTEC)
+	# 3) Imagination E5510 (encoder) - vxekm.ko, imgvideo.ko (CONFIG_IMGTEC)
+	# 4) Google VP9 memory allocator - mem2alloc.ko (CONFIG_MEM2ALLOC)
+	# 5) Google VP9 decoder - hantrodec.ko (CONFIG_HANTRODEC)
+	# 6) Google VP9 encoder - bige.ko (CONFIG_BIGE)
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E2C3 \
+	|| exit 1;
+	conf_no_builtin_gpu;
+	$conf_script $OPTFILE \
+	-m CONFIG_DRM_IMX_HDMI -m CONFIG_DRM_IMX \
+	-m CONFIG_IMGTEC \
+	-m CONFIG_MEM2ALLOC -m CONFIG_HANTRODEC -m CONFIG_BIGE \
+	-m CONFIG_ELDWCXPCS -m CONFIG_MGB \
+	-e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
+	|| exit 1
+}
+conf_e12c()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E12C \
+	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
+	|| exit 1;
+	conf_no_builtin_gpu;
+	$conf_script $OPTFILE \
+	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
+	|| exit 1;
+}
+conf_e16c()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E16C \
+	|| exit 1;
+	conf_no_builtin_gpu;
+	$conf_script $OPTFILE \
+	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
+	|| exit 1;
+}
+conf_e48c()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E48C \
+	|| exit 1;
+	conf_no_builtin_gpu;
+}
+conf_e8v7()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E8V7 \
+	|| exit 1;
+	conf_no_builtin_gpu;
+}
+conf_nn()
+{
+	$conf_script $OPTFILE \
+	-d CONFIG_NUMA -u CONFIG_NUMA_BALANCING -u CONFIG_NUMA_BALANCING_DEFAULT_ENABLED \
+	|| exit 1
+}
+conf_prototype()
+{
+	# CONFIG_HZ is set to 10 to reduce hardware requirements
+	# CONFIG_IGB is builtin temporarily (e2c3 prototype uses it)
+	# CONFIG_BLK_DEV_LOOP is builtin temporarily (for virtualization on e2c3 prototype)
+	# CONFIG_KERNEL_GZIP is switched to CONFIG_KERNEL_LZ4 (for faster booting)
+	#
+	# Tracing is disabled for faster booting on prototype
+	# which is useful for faster iteration by engineers.
+	$conf_script $OPTFILE \
+	-d CONFIG_KERNEL_GZIP -e CONFIG_KERNEL_LZ4 \
+	-u CONFIG_HZ_100 -e CONFIG_HZ_10 \
+	-e CONFIG_BLK_DEV_LOOP \
+	-e CONFIG_IGB \
+	-d CONFIG_KPROBE_EVENTS -d CONFIG_FTRACE_SYSCALLS -d CONFIG_FUNCTION_TRACER \
+	|| exit 1
+}
+
+conf_virtio()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_VIRTIO \
+	-e CONFIG_VIRTIO_PCI \
+	-e CONFIG_VIRTIO_PCI_LEGACY \
+	-e CONFIG_VIRTIO_BLK \
+	-e CONFIG_SCSI_VIRTIO \
+	-e CONFIG_VIRTIO_NET \
+	-e CONFIG_VIRTIO_CONSOLE \
+	-m CONFIG_VSOCKETS \
+	-m CONFIG_VIRTIO_VSOCKETS \
+	-m CONFIG_VIRTIO_VSOCKETS_COMMON \
+	-m CONFIG_VIRTIO_BALLOON \
+	-m CONFIG_VIRTIO_INPUT \
+	-m CONFIG_DRM_VIRTIO_GPU \
+	-m CONFIG_VIRTIO_MMIO \
+	-e CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES \
+	|| exit 1
+}
+conf_vfio()
+{
+	$conf_script $OPTFILE \
+	-m CONFIG_VFIO \
+	-m CONFIG_VFIO_PCI \
+	-e CONFIG_VFIO_PCI_VGA \
+	|| exit 1
+}
+conf_kvm_common()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_VIRTUALIZATION \
+	-e CONFIG_KVM \
+	-e CONFIG_KVM_COMPAT \
+	-e CONFIG_KVM_GUEST \
+	-e CONFIG_KVM_PARAVIRTUALIZATION \
+	-e CONFIG_KVM_HW_VIRTUALIZATION \
+	-e CONFIG_DIRECT_VIRQ_INJECTION \
+	-e CONFIG_VIRQ_VCPU_INJECTION \
+	|| exit 1
+}
+conf_host()
+{
+	conf_kvm_common;
+	$conf_script $OPTFILE \
+	-d CONFIG_KVM_GUEST_KERNEL \
+	-e CONFIG_KVM_HOST_KERNEL \
+	-e CONFIG_KVM_HOST_MODE \
+	-e CONFIG_KVM_SHADOW_PT_ENABLE \
+	-e CONFIG_KVM_TDP_ENABLE \
+	-e CONFIG_KVM_NONPAGING_ENABLE \
+	-e CONFIG_KVM_PHYS_PT_ENABLE \
+	|| exit 1
+}
+conf_hardware_virt()
+{
+	conf_host;
+	conf_virtio;
+	conf_vfio;
+	$conf_script $OPTFILE \
+	-m CONFIG_DRM_BOCHS \
+	|| exit 1
+}
+conf_kvm_pv_guest()
+{
+	conf_kvm_common;
+	$conf_script $OPTFILE \
+	-d CONFIG_KVM_HOST_KERNEL \
+	-e CONFIG_KVM_GUEST_KERNEL \
+	-e CONFIG_KVM_GUEST_MODE \
+	-e CONFIG_KVM_GUEST_SMP \
+	-d CONFIG_KVM_GUEST_DEBUG \
+	-d CONFIG_KVM_GUEST_HW_HCALL \
+	-e CONFIG_KVM_GUEST_HW_PV \
+	-e CONFIG_KVM_SHADOW_PT \
+	|| exit 1
+}
+conf_guest()
+{
+	# Bug 129401 workaround: disable i2c/spi in guest (this also disables rtc/sclkr)
+	conf_kvm_pv_guest;
+	conf_virtio;
+	$conf_script $OPTFILE \
+	-e CONFIG_HVC_L \
+	-e CONFIG_EARLY_VIRTIO_CONSOLE \
+	-d CONFIG_L_I2C_CONTROLLER \
+	-d CONFIG_L_SPI_CONTROLLER \
+	|| exit 1
+}
+conf_power_efficient()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_WQ_POWER_EFFICIENT_DEFAULT \
+	|| exit 1
+}
+conf_rt()
+{
+	$conf_script $OPTFILE \
+	-d CONFIG_PREEMPT_VOLUNTARY -e CONFIG_PREEMPT_RT \
+	-d CONFIG_NO_HZ_IDLE -e CONFIG_HZ_PERIODIC \
+	|| exit 1;
+}
+e2k_nort()  { conf_hardware_virt; }
+e2k_rt()    { conf_hardware_virt; conf_rt; }
+e2k_nn()    { conf_hardware_virt; conf_nn; }
+e2k_nnrt()  { conf_hardware_virt; conf_nn; conf_rt; }
+e2k_host()  { conf_host; }
+e2k_guest() { conf_guest; }
+e1cp_nort() { conf_e1cp; conf_power_efficient; }
+e1cp_rt()   { conf_e1cp; conf_power_efficient; conf_rt; }
+e1cp_host() { conf_e1cp; conf_power_efficient; conf_host; }
+e1cp_guest(){ conf_e1cp; conf_power_efficient; conf_guest; }
+e2s_nort()  { conf_e2s; }
+e2s_rt()    { conf_e2s; conf_rt; }
+e2s_nn()    { conf_e2s; conf_nn; }
+e2s_nnrt()  { conf_e2s; conf_nn; conf_rt; }
+e2s_host()  { conf_e2s; conf_host; }
+e2s_guest() { conf_e2s; conf_guest; }
+e2s_nort_debug()  { conf_e2s; }
+e8c_nort()  { conf_e8c; }
+e8c_rt()    { conf_e8c; conf_rt; }
+e8c_nn()    { conf_e8c; conf_nn; }
+e8c_nnrt()  { conf_e8c; conf_nn; conf_rt; }
+e8c_host()  { conf_e8c; conf_host; }
+e8c_guest() { conf_e8c; conf_guest; }
+e8c_nort_debug() { conf_e8c; }
+e8c2_nort() { conf_e8c2; }
+e8c2_rt()   { conf_e8c2; conf_rt; }
+e8c2_nn()   { conf_e8c2; conf_nn; }
+e8c2_nnrt() { conf_e8c2; conf_nn; conf_rt; }
+e8c2_host() { conf_e8c2; conf_host; }
+e8c2_guest(){ conf_e8c2; conf_guest; }
+e8c2_nort_debug() { conf_e8c2; }
+e16c_nort() { conf_e16c; conf_hardware_virt; }
+e16c_rt()   { conf_e16c; conf_hardware_virt; conf_rt; }
+e16c_nn()   { conf_e16c; conf_hardware_virt; conf_nn; }
+e16c_nnrt() { conf_e16c; conf_hardware_virt; conf_nn; conf_rt; }
+e12c_nort() { conf_e12c; conf_hardware_virt; }
+e12c_rt()   { conf_e12c; conf_hardware_virt; conf_rt; }
+e12c_nn()   { conf_e12c; conf_hardware_virt; conf_nn; }
+e12c_nnrt() { conf_e12c; conf_hardware_virt; conf_nn; conf_rt; }
+e2c3_nort() { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; }
+e2c3_rt()   { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; conf_rt; }
+e48c_nort() { conf_e48c; conf_hardware_virt; }
+e48c_rt()   { conf_e48c; conf_hardware_virt; conf_rt; }
+e48c_nn()   { conf_e48c; conf_hardware_virt; conf_nn; }
+e48c_nnrt() { conf_e48c; conf_hardware_virt; conf_nn; conf_rt; }
+e8v7_nort() { conf_e8v7; conf_hardware_virt; conf_nn; }
+e8v7_rt()   { conf_e8v7; conf_hardware_virt; conf_nn; conf_rt; }
+e12c_proto(){ conf_e12c; conf_hardware_virt; conf_prototype; }
+e16c_proto(){ conf_e16c; conf_hardware_virt; conf_prototype; }
+e2c3_proto(){ conf_e2c3; conf_hardware_virt; conf_prototype; conf_power_efficient; conf_nn; }
+e48c_proto(){ conf_e48c; conf_hardware_virt; conf_prototype; }
+e8v7_proto(){ conf_e8v7; conf_hardware_virt; conf_prototype; }
+###############################################################################
+trap "cleanup" 1 2 3 6 15 EXIT
+OUTPUT_DIR=.
+while [ "$1" != "" ] ; do
+	opt="$1"
+	shift
+	case "$opt" in
+	--def|-d) def_flg=0;;
+	--release|-r) rel_flag=0;;
+	--conf|-c) [ x"$DCONF" != x ] && usage; DCONF="$1"; shift;;
+	--file|-f) [ x"$DFILE" != x ] && usage; DFILE="$1"; shift;;
+	--output_directory|-o) OUTPUT_DIR="$1"; shift;;
+	CC=*) optcc="$opt";;
+	V=*) optv="$opt";;
+	--help|-h) Usage;;
+	*) echo "incorrect param: $opt"; Usage;;
+	esac
+done
+[ x"$DCONF" == x ] && Usage
+if [[ "$CONFS" != *" $DCONF "* ]]; then
+	echo "unknown <conf>: $DCONF"
+	KnownConfs
+	exit 1
+fi
+# additional configuration files to use
+ADDITIONAL_CONFIGS="mcst.config"
+if [[ "$DCONF" == *"_rt"* ]] || [[ "$DCONF" == *"_nnrt"* ]]; then
+	ADDITIONAL_CONFIGS+=" mcst_rt.config "
+fi
+if [[  "$DCONF" == *"debug"* ]]; then
+	ADDITIONAL_CONFIGS=$ADDITIONAL_CONFIGS" mcst_debug.config "
+fi
+if [[ "$rel_flag" == "0" ]]; then
+	ADDITIONAL_CONFIGS+=" mcst_release.config "
+fi
+# src defconfig
+SFILE=$conf_path/defconfig
+# dst defconfig
+if [ x"$DFILE" == x ]; then
+	DFILENAME=$tmpf
+	[ x$def_flg == x0 ] && DFILENAME=gen_${DCONF}_defconfig
+else
+	if [[ $DFILE != *"_defconfig" ]]; then
+		usage "incorrect defconfig file name: $DFILE"
+	fi
+	DFILENAME=$DFILE
+fi
+DFILE=$conf_path/$DFILENAME
+OPTFILE="--file $DFILE"
+
+cd $scdir/../../.. || exit 1
+#pwd
+#echo "$DCONF $DFILENAME $DFILE $SFILE"
+#echo "$OPTFILE"
+#exit 0
+
+# Generate defconfig
+cp $SFILE $DFILE || exit 1
+$DCONF
+[ x$def_flg == x0 ] && exit 0
+
+# Generate .config; silence configs merging output by adding >/dev/null
+make O=$OUTPUT_DIR $DFILENAME $ADDITIONAL_CONFIGS $optcc $optv >/dev/null || exit 1
+localversion
+make O=$OUTPUT_DIR olddefconfig $optcc $optv
+exit $?

@@ -5,6 +5,46 @@
 
 menu "Security options"
 
+menu "Miscellaneous hardening features"
+
+config MCST_MEMORY_SANITIZE
+	bool "Sanitize all freed memory"
+	default y
+	help
+	  By saying Y here the kernel will erase memory pages and slab objects
+	  as soon as they are freed.  This in turn reduces the lifetime of data
+	  stored in them, making it less likely that sensitive information such
+	  as passwords, cryptographic secrets, etc stay in memory for too long.
+
+	  This is especially useful for programs whose runtime is short, long
+	  lived processes and the kernel itself benefit from this as long as
+	  they ensure timely freeing of memory that may hold sensitive
+	  information.
+
+	  A nice side effect of the sanitization of slab objects is the
+	  reduction of possible info leaks caused by padding bytes within the
+	  leaky structures.  Use-after-free bugs for structures containing
+	  pointers can also be detected as dereferencing the sanitized pointer
+	  will generate an access violation.
+
+	  The tradeoff is performance impact, on a single CPU system kernel
+	  compilation sees a 3% slowdown, other systems and workloads may vary
+	  and you are advised to test this feature on your expected workload
+	  before deploying it.
+
+	  The slab sanitization feature excludes a few slab caches per default
+	  for performance reasons.  To extend the feature to cover those as
+	  well, pass "pax_sanitize_slab=full" as kernel command line parameter.
+
+	  To reduce the performance penalty by sanitizing pages only, albeit
+	  limiting the effectiveness of this feature at the same time, slab
+	  sanitization can be disabled with the kernel command line parameter
+	  "pax_sanitize_slab=off".
+
+	  Note that this feature does not protect data stored in live pages,
+	  e.g., process memory swapped to disk may stay there for a long time.
+endmenu
+
 source "security/keys/Kconfig"
 
 config SECURITY_DMESG_RESTRICT
@@ -255,6 +295,7 @@ choice
 
 	config DEFAULT_SECURITY_SMACK
 		bool "Simplified Mandatory Access Control" if SECURITY_SMACK=y
+
 
 	config DEFAULT_SECURITY_TOMOYO
 		bool "TOMOYO" if SECURITY_TOMOYO=y

@@ -1,0 +1,590 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/pci@0} {
+	#address-cells = <3>;
+	#size-cells = <2>;
+
+	/* reg: DDDDDDDD bbbbbbbb dddddfff 00000000 */
+	display_subsystem: mga2_ext {
+		reg = <0xffffffff 0 0 0 0>;
+	};
+};
+#ifndef VID0_STS
+#define VID0_STS "disabled" /*rgb*/
+#endif
+#ifndef VID1_STS
+#define VID1_STS "okay"	/*dsi*/
+#endif
+#ifndef VID2_STS
+#define VID2_STS "disabled" /*dsi*/
+#endif
+#ifndef VID3_STS
+#define VID3_STS "disabled" /*lvds*/
+#endif
+
+#ifndef MGA2_LVDS_CHANNELS_NR
+#define MGA2_LVDS_CHANNELS_NR 0
+#endif
+
+#ifndef MGA2_LVDS_LVDS_PANEL_BITS
+#define MGA2_LVDS_LVDS_PANEL_BITS panel-8-bit
+#endif
+
+&display_subsystem {
+	compatible = "mcst,mga26-pcie";
+
+	reg-bar = <2>;
+	vram-bar = <4>;
+	ports = <&dc0>, <&dc1>, <&dc2>;
+
+	interrupt-parent = <&mga2x_pic>;
+	interrupts = <17>;
+
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	dc@400 {
+		compatible = "mcst,mga2x-crtc";
+		reg = <0x400 0x400>;
+
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <3>;
+
+		dc0: port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			dc0_out0: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vid0_in0>;
+			};
+			dc0_out1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&vid1_in0>;
+			};
+			dc0_out2: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&vid2_in0>;
+			};
+			dc0_out3: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&vid3_in0>;
+			};
+		};
+	};
+
+	dc@800 {
+		compatible = "mcst,mga2x-crtc";
+		reg = <0x800 0x400>;
+
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <4>;
+
+		dc1: port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			dc1_out0: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vid0_in1>;
+			};
+			dc1_out1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&vid1_in1>;
+			};
+			dc1_out2: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&vid2_in1>;
+			};
+			dc1_out3: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&vid3_in1>;
+			};
+		};
+	};
+	dc@c00 {
+		compatible = "mcst,mga2x-crtc";
+		reg = <0xc00 0x400>;
+
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <5>;
+
+		dc2: port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			dc2_out0: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&vid0_in2>;
+			};
+			dc2_out1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&vid1_in2>;
+			};
+			dc2_out2: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&vid2_in2>;
+			};
+			dc2_out3: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&vid3_in2>;
+			};
+		};
+	};
+	dc0_pll: pll@4c0 {
+		compatible = "mcst,tcitsmcn16";
+		reg = <0x4c0 0x40>;
+		#clock-cells = <0>;
+	};
+	dc1_pll: pll@8c0 {
+		compatible = "mcst,tcitsmcn16";
+		reg = <0x8c0 0x40>;
+		#clock-cells = <0>;
+	};
+	dc2_pll: pll@cc0 {
+		compatible = "mcst,tcitsmcn16";
+		reg = <0xcc0 0x40>;
+		#clock-cells = <0>;
+	};
+#define	CLK_DFLT_DIV_TABLE <   1    2    3    4    5    6    7    8    9>
+#define	CLK_DFLT_VAL_TABLE <0xa0 0xf2 0xf3 0xf4 0xf5 0xf6 0xf7 0xf0 0xf1>
+
+	dc0_pix: pclk@4c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x4c0 0x4>;
+		shift = <0>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+	dc1_pix: pclk@8c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x8c0 0x4>;
+		shift = <0>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+	dc2_pix: pclk@cc0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0xcc0 0x4>;
+		shift = <0>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+	dc0_aux: aclk@4c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x4c0 0x4>;
+		shift = <8>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+	dc1_aux: aclk@8c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x8c0 0x4>;
+		shift = <8>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+
+		#clock-cells = <0>;
+	};
+	dc2_aux: aclk@cc0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0xcc0 0x4>;
+		shift = <8>;
+		width = <8>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+	mga2x_pic: pic@1c00 {
+		compatible = "mcst,mga2x-pic";
+		reg = <0x1c00 0x400>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
+	};
+	vid0_txi2c: i2c@2020 {
+		reg = <0x2020 0x4>;
+		status = VID0_STS;
+	};
+	vid0_gpio: gpio@2040 {
+		reg = <0x2040 0x44>;
+		compatible = "mcst,mga2x-gpio";
+		#gpio-cells = <2>;
+		label = "mga2 vid0 gpio";
+		gpio-controller;
+		ngpios = <8>;
+		status = VID0_STS;
+	};
+	vid0_ddc: i2c@2030 {
+		reg = <0x2030 0x4>;
+		status = "disabled";
+	};
+	vid0: vid0@2000 {
+		reg = <0x2000 0x20>;
+		status = VID0_STS;
+	};
+	vid1_ddc: i2c@2430 {
+		reg = <0x2430 0x4>;
+		status = VID1_STS;
+	};
+	vid1_gpio: gpio@2440 {
+		reg = <0x2440 0x44>;
+		compatible = "mcst,mga2x-gpio";
+		#gpio-cells = <2>;
+		label = "mga2 vid1 gpio";
+		gpio-controller;
+		ngpios = <8>;
+		status = VID1_STS;
+	};
+	vid1: vid1@2400 {
+		reg = <0x2400 0x30>;
+		status = VID1_STS;
+	};
+	monitor: monitor {
+		status = VID1_STS;
+	};
+
+	vid2_gpio: gpio@2840 {
+		reg = <0x2840 0x44>;
+		compatible = "mcst,mga2x-gpio";
+		#gpio-cells = <2>;
+		label = "mga2 vid2 gpio";
+		gpio-controller;
+		ngpios = <8>;
+		status = VID2_STS;
+	};
+	vid2_ddc: i2c@2830 {
+		reg = <0x2830 0x4>;
+		status = VID2_STS;
+	};
+	vid2: vid2@2800 {
+		reg = <0x2800 0x30>;
+		status = VID2_STS;
+	};
+	monitor2: monitor2 {
+		status = VID2_STS;
+	};
+	panel: panel {
+		status = VID3_STS;
+	};
+	vid3: vid3@2c00 {
+		reg = <0x2c00 0x30>;
+		status = VID3_STS;
+	};
+};
+
+&vid0 {
+	compatible = "mcst,mga2x-rgb";
+	ddc-i2c-bus = <&vid0_ddc>;
+	dual-edge-data;
+
+	clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>,
+		 <&dc1_pll>, <&dc1_pix>, <&dc1_aux>,
+		 <&dc2_pll>, <&dc2_pix>, <&dc2_aux>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	port@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		vid0_in0: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&dc0_out0>;
+		};
+		vid0_in1: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&dc1_out0>;
+		};
+		vid0_in2: endpoint@2 {
+			reg = <2>;
+			remote-endpoint = <&dc2_out0>;
+		};
+	};
+	port@1 {
+		reg = <1>;
+		vid0_out: endpoint {
+			remote-endpoint = <&hdmi_bridge_in>;
+		};
+	};
+};
+
+&vid0_txi2c {
+	/*compatible = "mcst,mga2x-i2c";*/
+	compatible = "i2c-gpio";
+	scl-gpios = <&vid0_gpio 1 0>;/*GPIO_ACTIVE_HIGH*/
+	sda-gpios = <&vid0_gpio 0 0>; /*GPIO_ACTIVE_HIGH*/
+	label = "mga2 vid0 tx";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	hdmi_bridge@39 {
+		compatible = "sil,sii9022";
+		reg = <0x39>;
+		/*status = "disabled";*/
+		reset-gpios = <&vid0_gpio 3 1>; /*GPIO_ACTIVE_LOW*/
+		/*interrupts = <2 2>; IRQ_TYPE_EDGE_FALLING
+		interrupt-parent = <&vid0_gpio>;*/
+
+		port {
+			hdmi_bridge_in: endpoint {
+				remote-endpoint = <&vid0_out>;
+			};
+		};
+	};
+};
+
+&vid0_ddc {
+	compatible = "mcst,mga2x-i2c";
+	label = "mga2 vid0 ddc";
+};
+
+&vid1 {
+	compatible = "mcst,mga2x-dsi";
+
+	clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>,
+		 <&dc1_pll>, <&dc1_pix>, <&dc1_aux>,
+		 <&dc2_pll>, <&dc2_pix>, <&dc2_aux>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	port@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		vid1_in0: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&dc0_out1>;
+		};
+		vid1_in1: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&dc1_out1>;
+		};
+		vid1_in2: endpoint@2 {
+			reg = <2>;
+			remote-endpoint = <&dc2_out1>;
+		};
+	};
+	port@1 {
+		reg = <1>;
+		vid1_out: endpoint {
+			remote-endpoint = <&edp_bridge_in>;
+		};
+	};
+};
+
+&vid1_ddc {
+	compatible = "i2c-gpio";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	scl-gpios = <&vid1_gpio 1 0>;/*GPIO_ACTIVE_HIGH*/
+	sda-gpios = <&vid1_gpio 0 0>; /*GPIO_ACTIVE_HIGH*/
+
+	edp-bridge@2c {
+		compatible = "ti,sn65dsi86";
+		reg = <0x2c>;
+		enable-gpios = <&vid1_gpio 3 0>; /*GPIO_ACTIVE_HIGH*/
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				edp_bridge_in: endpoint {
+					remote-endpoint = <&vid1_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				edp_bridge_out: endpoint {
+					data-lanes = <0 1 2 3>;
+					remote-endpoint = <&monitor_in>;
+				};
+			};
+		};
+	};
+};
+
+&monitor {
+	compatible = "mcst,monitor";
+
+	port {
+		monitor_in: endpoint {
+			remote-endpoint = <&edp_bridge_out>;
+		};
+	};
+};
+
+&vid2 {
+	compatible = "mcst,mga2x-dsi";
+
+	clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>,
+		 <&dc1_pll>, <&dc1_pix>, <&dc1_aux>,
+		 <&dc2_pll>, <&dc2_pix>, <&dc2_aux>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	port@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		vid2_in0: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&dc0_out2>;
+		};
+		vid2_in1: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&dc1_out2>;
+		};
+		vid2_in2: endpoint@2 {
+			reg = <2>;
+			remote-endpoint = <&dc2_out2>;
+		};
+	};
+	port@1 {
+		reg = <1>;
+		vid2_out: endpoint {
+			remote-endpoint = <&edp_bridge2_in>;
+		};
+	};
+};
+
+&vid2_ddc {
+	compatible = "i2c-gpio";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	scl-gpios = <&vid2_gpio 1 0>;/*GPIO_ACTIVE_HIGH*/
+	sda-gpios = <&vid2_gpio 0 0>; /*GPIO_ACTIVE_HIGH*/
+
+	edp-bridge@2c {
+		compatible = "ti,sn65dsi86";
+		reg = <0x2c>;
+		enable-gpios = <&vid2_gpio 3 0>; /*GPIO_ACTIVE_HIGH*/
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				edp_bridge2_in: endpoint {
+					remote-endpoint = <&vid2_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				edp_bridge2_out: endpoint {
+					data-lanes = <0 1 2 3>;
+					remote-endpoint = <&monitor2_in>;
+				};
+			};
+		};
+	};
+};
+
+&monitor2 {
+	compatible = "mcst,monitor";
+
+	port {
+		monitor2_in: endpoint {
+			remote-endpoint = <&edp_bridge2_out>;
+		};
+	};
+};
+
+&vid3 {
+	compatible = "mcst,mga2x-lvds";
+
+	clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>,
+		 <&dc1_pll>, <&dc1_pix>, <&dc1_aux>,
+		 <&dc2_pll>, <&dc2_pix>, <&dc2_aux>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	port@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		vid3_in0: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&dc0_out3>;
+		};
+		vid3_in1: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&dc1_out3>;
+		};
+		vid3_in2: endpoint@2 {
+			reg = <2>;
+			remote-endpoint = <&dc2_out3>;
+		};
+	};
+	port@1 {
+		reg = <1>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		vid3_out0: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&panel_in_lvds0>;
+		};
+		vid3_out1: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&panel_in_lvds1>;
+		};
+	};
+};
+
+&panel {
+	compatible = "panel-lvds";
+	width-mm = <304>;
+	height-mm = <228>;
+	data-mapping = "vesa-24";
+
+	panel-timing {
+		/* 1920x1080 @60Hz */
+		clock-frequency = <172780000>;
+		hactive = <1920>;
+		hfront-porch = <120>;
+		hsync-len = <208>;
+		hback-porch = <328>;
+		vactive = <1080>;
+		vfront-porch = <1>;
+		vsync-len = <3>;
+		vback-porch = <34>;
+		hsync-active = <0>;
+		vsync-active = <1>;
+	};
+	port {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		panel_in_lvds0: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&vid3_out0>;
+		};
+		panel_in_lvds1: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&vid3_out1>;
+		};
+	};
+};

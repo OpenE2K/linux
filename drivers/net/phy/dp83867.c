@@ -496,8 +496,21 @@ static int dp83867_of_init(struct phy_device *phydev)
 	struct device_node *of_node = dev->of_node;
 	int ret;
 
+#ifdef CONFIG_MCST
+#ifdef __sparc__
+	dp83867->port_mirroring = DP83867_PORT_MIRROING_DIS;
+#endif
+#endif /* CONFIG_MCST */
+
+#ifdef CONFIG_MCST
+	if (!of_node) {
+		pr_warn(KBUILD_MODNAME ": devicetree for node not found!\n");
+		return 0;
+	}
+#else /* !CONFIG_MCST */
 	if (!of_node)
 		return -ENODEV;
+#endif /* CONFIG_MCST */
 
 	/* Optional configuration */
 	ret = of_property_read_u32(of_node, "ti,clk-output-sel",

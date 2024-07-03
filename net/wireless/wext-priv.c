@@ -247,3 +247,48 @@ int compat_private_call(struct net_device *dev, struct iwreq *iwr,
 	return ret;
 }
 #endif
+
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+
+struct ptr128_iw_point {
+	e2k_ptr_t __user dscr;	/* Pointer to the data  (in user space) */
+	__u16		length;	/* number of fields or size in bytes */
+	__u16		flags;	/* Optional params */
+};
+
+int ptr128_private_call(struct net_device *dev, struct iwreq *iwr,
+			unsigned int cmd, struct iw_request_info *info,
+			iw_handler handler)
+{
+	const struct iw_priv_args *descr;
+	int ret, extra_size;
+
+	extra_size = get_priv_descr_and_size(dev, cmd, &descr);
+
+	/* Check if we have a pointer to user space data or not. */
+	if (extra_size == 0) {
+		/* No extra arguments. Trivial to handle */
+		ret = handler(dev, info, &(iwr->u), (char *) &(iwr->u));
+	} else {
+		struct ptr128_iw_point *iwp_128;
+		struct iw_point iwp;
+
+		iwp_128 = (struct ptr128_iw_point *) &iwr->u.data;
+		iwp.pointer = (void *) E2K_PTR_PTR(iwp_128->dscr);
+		iwp.length = iwp_128->length;
+		iwp.flags = iwp_128->flags;
+
+		ret = ioctl_private_iw_point(&iwp, cmd, descr,
+					     handler, dev, info, extra_size);
+
+		iwp_128->length = iwp.length;
+		iwp_128->flags = iwp.flags;
+	}
+
+	/* Call commit handler if needed and defined */
+	if (ret == -EIWCOMMIT)
+		ret = call_commit_handler(dev);
+
+	return ret;
+}
+#endif /* CONFIG_PROTECTED_MODE */

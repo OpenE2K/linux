@@ -305,6 +305,10 @@ struct e1000_adapter {
 
 	bool fc_autoneg;
 
+#ifdef CONFIG_MCST
+	u32 eeprom_bad;
+#endif
+
 	unsigned int flags;
 	unsigned int flags2;
 	struct work_struct downshift_task;
@@ -573,6 +577,14 @@ static inline s32 e1000_get_phy_info(struct e1000_hw *hw)
 
 static inline u32 __er32(struct e1000_hw *hw, unsigned long reg)
 {
+#ifdef CONFIG_E2K
+	/*
+	 * 3.31 ERR 31 - PCI-Express root hub (pcie)
+	 *
+	 */
+	mb();
+#endif
+
 	return readl(hw->hw_addr + reg);
 }
 

@@ -68,9 +68,11 @@
 #define APBLOCK_MAJOR		38   /* AP1000 Block device */
 #define DDV_MAJOR		39   /* AP1000 DDV block device */
 #define NBD_MAJOR		43   /* Network block device	*/
+#define MCST_AUX_TTY_MAJOR	44
 #define RISCOM8_NORMAL_MAJOR	48
 #define DAC960_MAJOR		48   /* 48..55 */
 #define RISCOM8_CALLOUT_MAJOR	49
+#define MSPS_MAJOR		54   /* MSPS for e2k architecture, project aporia */
 #define MKISS_MAJOR		55
 #define DSP56K_MAJOR		55   /* DSP56001 processor device */
 

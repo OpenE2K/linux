@@ -386,7 +386,7 @@ config ARCH_WANT_FRAME_POINTERS
 
 config FRAME_POINTER
 	bool "Compile the kernel with frame pointers"
-	depends on DEBUG_KERNEL && (M68K || UML || SUPERH) || ARCH_WANT_FRAME_POINTERS
+	depends on DEBUG_KERNEL && (E2K || M68K || UML || SUPERH) || ARCH_WANT_FRAME_POINTERS
 	default y if (DEBUG_INFO && UML) || ARCH_WANT_FRAME_POINTERS
 	help
 	  If you say Y here the resulting kernel image will be slightly
@@ -1145,6 +1145,13 @@ config DEBUG_PREEMPT
 	  This option has potential to introduce high runtime overhead,
 	  depending on workload as it triggers debugging routines for each
 	  this_cpu operation. It should only be used for debugging purposes.
+
+config DEBUG_PREEMPT_COUNT
+	bool "Debug preempt count decreasing < 0"
+	depends on WATCH_PREEMPT
+	default n
+	help
+	 Check in sub_preempt_count preempt_count becomes negative
 
 menu "Lock Debugging (spinlocks, mutexes, etc...)"
 
@@ -2461,7 +2468,7 @@ config TEST_FREE_PAGES
 
 config TEST_FPU
 	tristate "Test floating point operations in kernel space"
-	depends on X86 && !KCOV_INSTRUMENT_ALL
+	depends on (X86 || E2K) && !KCOV_INSTRUMENT_ALL
 	help
 	  Enable this option to add /sys/kernel/debug/selftest_helpers/test_fpu
 	  which will trigger a sequence of floating point operations. This is used

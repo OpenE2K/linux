@@ -1,0 +1,13 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+#
+# E2K CPU Idle drivers
+#
+
+config E2K_CPUIDLE
+	bool "CPU Idle driver for e2k machines"
+	depends on CPU_IDLE && E2K && !KVM_GUEST_KERNEL
+	default y
+	help
+	  This adds the CPU Idle driver for e2k machines

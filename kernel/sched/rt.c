@@ -391,6 +391,7 @@ static void enqueue_pushable_task(struct rq *rq, struct task_struct *p)
 
 static void dequeue_pushable_task(struct rq *rq, struct task_struct *p)
 {
+
 	plist_del(&p->pushable_tasks, &rq->rt.pushable_tasks);
 
 	/* Update the new highest prio pushable task */
@@ -1004,6 +1005,7 @@ static void update_curr_rt(struct rq *rq)
 	struct sched_rt_entity *rt_se = &curr->rt;
 	u64 delta_exec;
 	u64 now;
+
 
 	if (curr->sched_class != &rt_sched_class)
 		return;
@@ -1928,6 +1930,9 @@ retry:
 	 * higher priority than current. If that's the case
 	 * just reschedule current.
 	 */
+#ifdef CONFIG_MCST
+	if (!rt_rq_throttled(&rq->rt))
+#endif
 	if (unlikely(next_task->prio < rq->curr->prio)) {
 		resched_curr(rq);
 		return 0;
@@ -2170,6 +2175,7 @@ static void pull_rt_task(struct rq *this_rq)
 	struct rq *src_rq;
 	int rt_overload_count = rt_overloaded(this_rq);
 
+
 	if (likely(!rt_overload_count))
 		return;
 
@@ -2284,6 +2290,7 @@ static void task_woken_rt(struct rq *rq, struct task_struct *p)
 			    (dl_task(rq->curr) || rt_task(rq->curr)) &&
 			    (rq->curr->nr_cpus_allowed < 2 ||
 			     rq->curr->prio <= p->prio);
+
 
 	if (need_to_push)
 		push_rt_tasks(rq);

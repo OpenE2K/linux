@@ -1283,6 +1283,9 @@ static inline int dma_maxpq(struct dma_device *dma, enum dma_ctrl_flags flags)
 	if (dmaf_continue(flags))
 		return dma_dev_to_maxpq(dma) - 3;
 	BUG();
+#ifdef __LCC__
+	return -4;
+#endif
 }
 
 static inline size_t dmaengine_get_icg(bool inc, bool sgl, size_t icg,

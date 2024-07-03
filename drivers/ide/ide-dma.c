@@ -140,7 +140,16 @@ static int ide_dma_map_sg(ide_drive_t *drive, struct ide_cmd *cmd)
 		cmd->sg_dma_direction = DMA_TO_DEVICE;
 	else
 		cmd->sg_dma_direction = DMA_FROM_DEVICE;
-
+#ifdef CONFIG_MCST
+	if (dev_is_pci(hwif->dev)) { /*see comment in l_ide.c */
+		struct pci_dev *pdev = to_pci_dev(hwif->dev);
+		if ((pdev->vendor == PCI_VENDOR_ID_MCST_TMP) &&
+			(pdev->device == PCI_DEVICE_ID_MCST_IDE_SDHCI) &&
+				(iohub_revision(pdev) <= 3)) {
+			cmd->sg_dma_direction = DMA_BIDIRECTIONAL;
+		}
+	}
+#endif
 	i = dma_map_sg(hwif->dev, sg, cmd->sg_nents, cmd->sg_dma_direction);
 	if (i) {
 		cmd->orig_sg_nents = cmd->sg_nents;

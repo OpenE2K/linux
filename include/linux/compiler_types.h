@@ -120,9 +120,21 @@ struct ftrace_likely_data {
 #define notrace			__attribute__((hotpatch(0, 0)))
 #elif defined(CC_USING_PATCHABLE_FUNCTION_ENTRY)
 #define notrace			__attribute__((patchable_function_entry(0, 0)))
+#elif defined(__LCC__) && __LCC__ >= 128
+#define notrace			__attribute__((__no_instrument_function__)) \
+				__attribute__((__no_profile_instrument_function__))
 #else
 #define notrace			__attribute__((__no_instrument_function__))
 #endif
+
+#ifdef	CONFIG_MCST
+/* Some functions cannot be traced only on the host mode */
+#ifdef	CONFIG_KVM_HOST_KERNEL
+#define	notrace_on_host		notrace
+#else	/* !CONFIG_KVM_HOST_KERNEL */
+#define	notrace_on_host
+#endif	/* CONFIG_KVM_HOST_KERNEL */
+#endif	/* CONFIG_MCST */
 
 /*
  * it doesn't make sense on ARM (currently the only user of __naked)

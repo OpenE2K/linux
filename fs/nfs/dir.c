@@ -566,7 +566,7 @@ int nfs_readdir_page_filler(nfs_readdir_descriptor_t *desc, struct nfs_entry *en
 	struct page *scratch;
 	struct nfs_cache_array *array;
 	unsigned int count = 0;
-	int status;
+	int status = 0;
 
 	scratch = alloc_page(GFP_KERNEL);
 	if (scratch == NULL)

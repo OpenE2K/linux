@@ -1,0 +1,227 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ *
+ **************** E2K PROTECTED MODE SPECIFIC ERROR MESSAGES *****************
+ *
+ * NB> Add new messages at the bottom because message index is used as ID and tests depend on these.
+ *
+ */
+
+#ifndef _E2K_PROTECTED_ERR_MSG_LIST_IN_
+#define _E2K_PROTECTED_ERR_MSG_LIST_IN_
+
+static
+char const *protected_error_list_C[] = {
+	"ALERT: wrong protected error message ID\n",
+
+	"System call #%u/%s: unexpected tag (0x%x) in arg #%d.\n", /* ... */
+	"System call #%u/%s: pointer size is too little (%d < %zu) in arg #%d.\n",
+	"System call #%u/%s: value %zu in arg '%s' exceeds maximum allowed descriptor size (2**31).\n",
+	"System call #%u/%s: value %zu in arg #%d exceeds maximum allowed descriptor size (2**31).\n",
+	"System call #%u/%s: not a pointer is not allowed in arg #%d.\n",
+	"System call #%u/%s: not a descriptor in argument '%s'.\n",
+	"System call #%u/%s: unexpected descriptor in arg #%d.\n",
+	"System call #%u/%s: not a null-terminated string in arg #%d.\n",
+	"System call #%u/%s: count exceeds descriptor size (%u > %u) in arg #%d.\n",
+	"System call #%u/%s: negative size value (%ld) in arg #%d.\n",
+	"System call #%u/%s: bad structure '%s' in arg #%d.\n",
+	"System call #%u/%s: bad or unsupported '%s' value (0x%lx) in arg #%d.\n",
+	"%s: '%s' pointer size is too little: %u < %zu\n",	/* f, ... */
+	"System call %s: unexpected value (tag=0x%x) at '%s' structure field #%d: %ld\n",
+	"System call #%u/%s: not function pointer (tag=0x%x) in argument #%d\n",
+	"System call %s: not descriptor (tag=0x%x) at field #%d: 0x%lx : 0x%lx\n",
+	"System call %s: not descriptor (tag=0x%x) at structure '%s' field '%s': 0x%lx : 0x%lx\n",
+
+	"System call %s: bad structure '%s' in argument '%s'.\n",
+	"System call %s: bad field structure '%s' in structure '%s' (argument '%s').\n",
+	"System call %s: failed to load library\n",
+	"System call %s: errorneous arguments ('%s' = %ld)\n",
+	"System call %s: size of argument '%s' (%zu) mismatches the one of structure '%s' (%zu)\n",
+	"System call %s: size of argument '%s' (%u) is less than required by '%s' field (%zu)\n",
+	"System call %s: failed to update structure '%s' (0x%lx); error code = %d\n",
+	"System call %s: wrong value in argument '%s' 0x%lx\n",
+	"System call %s: wrong value in argument '%s' 0x%lx (tag 0x%x)\n",
+	"System call %s: wrong value in argument '%s' %ld (expected %ld)\n",
+	"System call %s(%s=%d): wrong value in argument '%s' 0x%lx\n",
+	"System call %s: value in argument '%s' (%ld) exceeds descriptor '%s' size (%u)\n",
+	"System call %s: unsupported value in argument '%s' = %d\n",
+	"System call %s: size of argument '%s' is too little: %u < %zu\n",	/* f, ... */
+	"System call %s: not a descriptor in argument '%s' (tag 0x%x)\n",
+
+	/* Structure analysis related messages: */
+	"%s(0x%lx): unaligned descriptor supplied\n",
+	"Structure 0x%lx: uninitialized value (tag=0x%x) at 'field #%d: 0x%lx\n",
+	"Structure 0x%lx: unexpected value (tag=0x%x) at field #%d: 0x%lx\n",
+	"Structure 0x%lx: not function pointer (tag=0x%x) at field #%d: 0x%lx\n",
+	"Structure 0x%lx: not descriptor (tag=0x%x) at field #%d: 0x%lx : 0x%lx\n",
+	"FATAL ERROR in %s(0x%llx): failed to read field %d !!!\n", /* f, ... */
+	"System call %s: size of structure '%s' is too little: %u < %zu\n",
+
+	/* convert_array related messages: */
+	"FATAL ERROR in %s(): calculated structure size (%u) > 'max_prot_array_size' (%u)\n",
+	"FATAL ERROR in %s(): argument '%s' (0x%lx) must be properly aligned\n",
+	"Structure '%s' 0x%lx doesn't contain descriptor\n",
+
+	/* sigaltstack() related message: */
+	"Both 'ss' and 'old_ss' arguments to sigaltstack() are empty\n",
+	/* clean_descriptors() related message: */
+	"System call clean_descriptors(ptr=0x%lx:0x%lx, size=%ld): 'size' exceeds length of 'ptr' (%d)\n",
+	"System call %s: clean_descriptors(ptr=0x%lx, size=0x%lx) exited with error code %d\n",
+	/* mmap() related messages: */
+	"System call %s: trying to map %ld (0x%lx) bytes\n",
+	"Cannot allocate over 2**31 bytes (2Gb) in protected mode\n",
+	"System call %s: cannot remap more than available: old_size (%lu) > %u\n",
+	"System call %s: flag '%s' is not supported in the protected execution mode ('%s' = 0x%lx)\n",
+	/* mprotect() related message: */
+	"System call %s: access rights in descriptor mismatch value in arg '%s'\n",
+	/* Other messages: */
+	"System call %s: empty field '%s' in structure '%s' (argument '%s')\n",
+	"System call %s: iov count number (%d) exceeds UIO_MAXIOV (%u)\n",
+	"System call %s: unexpected tag (0x%x) at field '%s', structure '%s' (argument '%s')\n",
+	/* Warnings: */
+	"System call %s: delivered descriptor without access rights:\n\tbase = 0x%lx  size = 0x%lx  prot = PROT_NONE\n",
+	"Socket call RECVMSG: failed to return '%s'\n",
+	"System call %s: %s failed with error code %ld\n",
+	"System call #%u/%s: tags in '%s' area (0x%lx) will be lost when read back\n",
+	"System call #%u/%s: negative descriptor size (%ld) in arg #%d\n",
+	"System call #%u/%s: For security reason signals never return descriptor in the protected mode.\n\tField 'sigev_value.sival_ptr' of structure 'sigevent' stored address 0x%lx.\n",
+
+	"!!! System call #%d (%s) is not available in the protected execution mode !!!\n",
+	"!!! System call #%d (%s): function %s() is not available in the protected execution mode !!!\n",
+	"FATAL ERROR in %s(0x%lx): failed to read from 0x%lx !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): failed to read from 0x%lx !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): failed to write at 0x%lx !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): failed to write at 0x%lx (field %d) !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): descriptor 0x%lx in stack (SAP, not AP); argument '%s' !!!\n", /* f, ... */
+
+	"[pid #%d] Execution of %s terminated. Error code: %d\n",
+
+	/*	Comment messages: */
+	"\t\tCount truncated down to the descriptor size (%u)\n",
+	"\t\tArgument #%d is missed or uninitialized.\n",
+	"\t\tValue in field #%d ignored; replaced with zero\n",
+	"\t\t base 0x%llx :  size (0x%lx) < offset (0x%lx)\n",
+
+	/* read/write related message: */
+	"System call %s: descriptor without right-to-read in arg #%d\n",
+	"System call %s: descriptor without right-to-write in arg #%d\n",
+	"System call #%u/%s: unexpected tag 0x%x in buffer 0x%lx (count %d) at 0x%lx\n",
+
+	/* NB> New messages to add above this line */
+
+	/*	Intro diagnostic messages: */
+	"protected mode runtime error",
+	"protected mode runtime warning",
+};
+
+static
+char const *protected_error_list_RU[] = {
+	"ОШИБКА: подан неверный номер ошибки\n",
+
+	"Системный вызов #%u/%s: неверный тэг (0x%x) у аргумента #%d.\n", /* ... */
+	"Системный вызов #%u/%s: недостаточный размер дескриптора (%d < %zu) у аргумента #%d.\n",
+	"Системный вызов #%u/%s: значение %zu в аргументе '%s' превышает допустимый размер дескриптора (2**31).\n",
+	"Системный вызов #%u/%s: значение %zu в аргументе #%d превышает допустимый размер дескриптора (2**31).\n",
+	"Системный вызов #%u/%s: в аргумент #%d подан не дескриптор.\n",
+	"Системный вызов #%u/%s: в аргумент '%s' подан не дескриптор.\n",
+	"Системный вызов #%u/%s: в аргумент #%d ошибочно подан дескриптор.\n",
+	"Системный вызов #%u/%s: в аргументе #%d не строка (с завершающим '\\0').\n",
+	"Системный вызов #%u/%s: количество превышает размер дескриптора (%u > %u); аргумент #%d.\n",
+	"Системный вызов #%u/%s: отрицательный размер (%ld) в аргументе #%d.\n",
+	"Системный вызов #%u/%s: дефект структуры '%s'; аргумент #%d.\n",
+	"Системный вызов #%u/%s: неверное/неподдерживаемое значение '%s' (0x%lx); аргумент #%d.\n",
+	"%s: недостаточный размер дескриптора '%s': %u < %zu\n",    /* f, ... */
+	"Системный вызов %s: неожиданное значение (tag=0x%x) в поле '%s' структуры #%d: %ld\n",
+	"Системный вызов #%u/%s: не указатель на функцию (tag=0x%x) в аргументе #%d\n",
+	"Системный вызов %s: не дескриптор (tag=0x%x) в поле #%d: 0x%lx : 0x%lx\n",
+	"Системный вызов %s: не дескриптор (tag=0x%x) в структуре '%s', поле '%s': 0x%lx : 0x%lx\n",
+
+	"Системный вызов %s: дефект структуры '%s'; аргумент '%s'.\n",
+	"Системный вызов %s: дефект структуры в поле '%s' структуры '%s' (аргумент '%s').\n",
+	"Системный вызов %s: не смогли загрузить библиотеку\n",
+	"Системный вызов %s: критическая ошибка в аргументах ('%s' = %ld)\n",
+	"Системный вызов %s: размер аргумента '%s' (%zu) не соответствует размеру структуры '%s' (%zu)\n",
+	"Системный вызов %s: размер аргумента '%s' (%u) меньше, чем требует значение поля '%s' (%zu)\n",
+	"Системный вызов %s: ошибка записи в структуру '%s' (0x%lx); код ошибки = %d\n",
+	"Системный вызов %s: неверное значение аргумента '%s' 0x%lx\n",
+	"Системный вызов %s: неверное значение аргумента '%s' 0x%lx (тэг 0x%x)\n",
+	"Системный вызов %s: неверное значение аргумента '%s' %ld (ожидается %ld)\n",
+	"Системный вызов %s(%s=%d): неверное значение аргумента '%s' 0x%lx\n",
+	"Системный вызов %s: значение аргумента '%s' (%lu) превышает размер дескриптора '%s' (%u)\n",
+	"Системный вызов %s: неподдерживаемое значение в аргументе '%s' = %d\n",
+	"Системный вызов %s: недостаточный размер аргумента '%s' : %u < %zu\n",
+	"Системный вызов %s: в аргумент '%s' подан не дескриптор (тэг 0x%x)\n",
+
+	/* Structure analysis related messages: */
+	"%s(0x%lx): подан невыровненный дескриптор\n",
+	"Структура 0x%lx: неинициализированное значение (tag=0x%x) в поле #%d: 0x%lx\n",
+	"Структура 0x%lx: неожиданное значение (tag=0x%x) в поле #%d: 0x%lx\n",
+	"Структура 0x%lx: не указатель на функцию (tag=0x%x) в поле #%d: 0x%lx\n",
+	"Структура 0x%lx: не дескриптор (tag=0x%x) в поле #%d: 0x%lx : 0x%lx\n",
+	"Критическая ошибка в %s(0x%llx): ошибка чтения из поля #%d !!!\n", /* f, ... */
+	"Системный вызов %s: недостаточный размер структуры '%s': %u < %zu\n",
+
+	/* convert_array related messages: */
+	"FATAL ERROR in %s(): размер структуры (%u) > 'max_prot_array_size'(%u)\n",
+	"FATAL ERROR in %s(): дескриптор '%s' (0x%lx) не выровнен\n",
+	"Структура '%s' 0x%lx не содержит дескриптор\n",
+
+	/* sigaltstack related messages: */
+	"В системный вызов sigaltstack() поданы пустые параметры 'ss' и 'old_ss'\n",
+	/* clean_descriptors related message: */
+	"Системный вызов clean_descriptors(ptr=0x%lx:0x%lx, size=%lu): 'size' превышает размер 'ptr' (%u)\n",
+	"Системный вызов %s: clean_descriptors(ptr=0x%lx, size=0x%lx) завершилась с ошибкой %d\n",
+	/* mmap() related messages: */
+	"Системный вызов %s: попытка выделить память размером %ld (0x%lx) байт\n",
+	"В режиме безопасных вычислений невозможно выделить более 2**31 байт (2Gb) памяти\n",
+	"Системный вызов %s: невозможно перемаппировать более того, что было выделено: old_size (%lu) > %u\n",
+	"Системный вызов %s: флаг '%s' не поддерживается в режиме безопасных вычислений ('%s' = 0x%lx)\n",
+	/* mprotect() related message: */
+	"Системный вызов %s: права доступа дескриптора не соответствуют значению в аргументе '%s'\n",
+	/* Other messages: */
+	"Системный вызов %s: пустое поле '%s' в структуре '%s' (аргумент '%s')\n",
+	"Системный вызов %s: количество сегментов iov (%u) превышает UIO_MAXIOV (%u)\n",
+	"Системный вызов %s: неожиданный тэг (0x%x) поля '%s' структуры '%s' (аргумент '%s')\n",
+	/* Warnings: */
+	"Системный вызов %s: выделена память без прав доступа:\n\tbase = 0x%lx  size = 0x%lx  prot = PROT_NONE\n",
+	"Системный вызов socketcall(RECVMSG): ошибка записи в поле '%s'\n",
+	"Системный вызов %s: завершение %s с ошибкой %ld\n",
+	"Системный вызов #%u/%s: теги в массиве '%s' (0x%lx) будут потеряны при считывании\n",
+	"Системный вызов #%u/%s: отрицательный размер дескриптора (%ld) в аргументе #%d\n",
+	"Системный вызов #%u/%s: В РБВ по соображениям безопасности сигналы не могут возвращать декскриптор.\n\tВ поле 'sigev_value.sival_ptr' структуры 'sigevent' (0x%lx) записан адрес 0x%lx.\n",
+
+	"!!! Системный вызов #%d (%s) невозможен в режиме безопасных вычислений !!!\n",
+	"!!! Системный вызов #%d (%s): функция %s() не работает в режиме безопасных вычислений !!!\n",
+	"Критическая ошибка в %s: ошибка чтения из 0x%lx !!!\n", /* f, ... */
+	"Критическая ошибка в %s(0x%lx): ошибка чтения из 0x%lx !!!\n", /* f, ... */
+	"Критическая ошибка в %s(): ошибка записи в 0x%lx !!!\n", /* f, ... */
+	"Критическая ошибка в %s(): ошибка записи в 0x%lx (поле %d) !!!\n", /* f, ... */
+	"Критическая ошибка в %s(): дескриптор 0x%lx в стеке (SAP, не AP); аргумент '%s' !!!\n", /* f, ... */
+
+	"[процесс #%d] Исполнение %s прервано. Код ошибки %d\n",
+
+	/*	Comment messages: */
+	"\t\tРазмер снижен до размера дескриптора (%u)\n",
+	"\t\tАргумент #%d не подан или неинициализирован.\n",
+	"\t\tЗначение в поле #%d игнорируется; заменено на ноль\n",
+	"\t\t base 0x%llx :  size (0x%lx) < offset (0x%lx)\n",
+
+	/* read/write related message: */
+	"Системный вызов %s: дескриптор без прав на чтение в аргументе #%d\n",
+	"Системный вызов %s: дескриптор без прав на запись в аргументе #%d\n",
+	"Системный вызов #%u/%s: обнаружен тэг 0x%x в буфере 0x%lx (объемом %d) по адресу 0x%lx\n",
+
+	/* NB> New messages to add above this line */
+
+	/*	Intro diagnostic messages: */
+	"ошибка режима безопасных вычислений",
+	"потенциальная ошибка режима безопасных вычислений",
+};
+
+#include "protected_error_messages.in.KOI8"
+
+char const **protected_error_list = &protected_error_list_C[0];
+
+#endif /* _E2K_PROTECTED_ERR_MSG_LIST_IN_ */
+

@@ -256,7 +256,6 @@ struct hc_driver {
 
 	/* irq handler */
 	irqreturn_t	(*irq) (struct usb_hcd *hcd);
-
 	int	flags;
 #define	HCD_MEMORY	0x0001		/* HC regs use memory (else I/O) */
 #define	HCD_DMA		0x0002		/* HC uses DMA */

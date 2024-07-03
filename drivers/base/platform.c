@@ -172,7 +172,7 @@ EXPORT_SYMBOL_GPL(devm_platform_ioremap_resource_byname);
 int platform_get_irq_optional(struct platform_device *dev, unsigned int num)
 {
 	int ret;
-#ifdef CONFIG_SPARC
+#if defined(CONFIG_SPARC) && !defined(CONFIG_E90S)
 	/* sparc does not have irqs represented as IORESOURCE_IRQ resources */
 	if (!dev || num >= dev->archdata.num_irqs)
 		return -ENXIO;

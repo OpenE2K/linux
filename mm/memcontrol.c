@@ -3198,17 +3198,36 @@ retry:
 		stock->nr_bytes = 0;
 	}
 
-	obj_cgroup_put(old);
+	/*
+	 * MCST, mainline discussion:
+	 * https://marc.info/?l=linux-cgroups&m=166480092307247
+	 *
+	 * Clear pointer before freeing memory so that
+	 * drain_all_stock() -> obj_stock_flush_required()
+	 * does not see a freed pointer.
+	 */
 	stock->cached_objcg = NULL;
+	obj_cgroup_put(old);
 }
 
 static bool obj_stock_flush_required(struct memcg_stock_pcp *stock,
 				     struct mem_cgroup *root_memcg)
 {
+	struct obj_cgroup *objcg;
 	struct mem_cgroup *memcg;
 
-	if (stock->cached_objcg) {
-		memcg = obj_cgroup_memcg(stock->cached_objcg);
+	/*
+	 * MCST, mainline discussion:
+	 * https://marc.info/?l=linux-cgroups&m=166480092307247
+	 *
+	 * stock->cached_objcg can be changed asynchronously, so read
+	 * it using READ_ONCE(). The objcg can't go away though because
+	 * obj_stock_flush_required() is called from within a rcu read
+	 * section.
+	 */
+	objcg = READ_ONCE(stock->cached_objcg);
+	if (objcg) {
+		memcg = obj_cgroup_memcg(objcg);
 		if (memcg && mem_cgroup_is_descendant(memcg, root_memcg))
 			return true;
 	}
@@ -3645,6 +3664,9 @@ static u64 mem_cgroup_read_u64(struct cgroup_subsys_state *css,
 		return (u64)memcg->soft_limit * PAGE_SIZE;
 	default:
 		BUG();
+#ifdef __LCC__
+		return 0;
+#endif
 	}
 }
 

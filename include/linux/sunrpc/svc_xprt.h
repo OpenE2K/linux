@@ -189,6 +189,9 @@ static inline size_t svc_addr_len(const struct sockaddr *sa)
 		return sizeof(struct sockaddr_in6);
 	}
 	BUG();
+#ifdef __LCC__
+	return (size_t)0;
+#endif
 }
 
 static inline unsigned short svc_xprt_local_port(const struct svc_xprt *xprt)

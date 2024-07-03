@@ -1,0 +1,12 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+config RTC_PROC_FS
+	tristate "procfs support for binary compiler"
+	depends on PROC_FS && !KVM_GUEST_KERNEL
+	default y
+	help
+	  Special filesystem for binary compiler (rtc) that helps with
+	  hiding compiler-specific data from files in /proc when they
+	  are opened by recompiled application.  Can be done in userspace
+	  but kernel-side implementation is faster.

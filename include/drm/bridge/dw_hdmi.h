@@ -180,9 +180,25 @@ void dw_hdmi_set_high_tmds_clock_ratio(struct dw_hdmi *hdmi,
 
 /* PHY configuration */
 void dw_hdmi_phy_i2c_set_addr(struct dw_hdmi *hdmi, u8 address);
-void dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
+void __dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
 			   unsigned char addr);
+#define dw_hdmi_phy_i2c_write(_hdmi, _val, _offset) do {	\
+	unsigned _v = _val, _o = _offset;			\
+	DRM_DEBUG("hdmi: i2c wr: %s (%x): 0x%02x\n",		\
+			#_offset, _o, _v);			\
+	__dw_hdmi_phy_i2c_write(_hdmi, _v, _o);			\
+} while (0)
 
+#ifdef CONFIG_MCST
+unsigned short __dw_hdmi_phy_i2c_read(struct dw_hdmi *hdmi, unsigned char addr);
+#define dw_hdmi_phy_i2c_read(_hdmi, _offset) ({		\
+	unsigned _o = _offset, _v;				\
+	_v = __dw_hdmi_phy_i2c_read(_hdmi, _o);			\
+	DRM_DEBUG("hdmi: i2c rd: %02x: %04x\n",			\
+			_o, _v);				\
+	_v;							\
+})
+#endif
 void dw_hdmi_phy_gen2_pddq(struct dw_hdmi *hdmi, u8 enable);
 void dw_hdmi_phy_gen2_txpwron(struct dw_hdmi *hdmi, u8 enable);
 void dw_hdmi_phy_reset(struct dw_hdmi *hdmi);

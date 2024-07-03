@@ -91,7 +91,7 @@
 		SRII(PIXEL_RATE_CNTL, OTG, 2),\
 		SRII(PIXEL_RATE_CNTL, OTG, 3)
 
-#if defined(CONFIG_DRM_AMD_DC_DCN3_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 #define CS_COMMON_REG_LIST_DCN3_0(index, pllid) \
 		SRI(PIXCLK_RESYNC_CNTL, PHYPLL, pllid),\
 		SRII(PHASE, DP_DTO, 0),\
@@ -106,8 +106,35 @@
 		SRII(PIXEL_RATE_CNTL, OTG, 1),\
 		SRII(PIXEL_RATE_CNTL, OTG, 2),\
 		SRII(PIXEL_RATE_CNTL, OTG, 3)
-#endif
 
+#define CS_COMMON_REG_LIST_DCN3_02(index, pllid) \
+		SRI(PIXCLK_RESYNC_CNTL, PHYPLL, pllid),\
+		SRII(PHASE, DP_DTO, 0),\
+		SRII(PHASE, DP_DTO, 1),\
+		SRII(PHASE, DP_DTO, 2),\
+		SRII(PHASE, DP_DTO, 3),\
+		SRII(PHASE, DP_DTO, 4),\
+		SRII(MODULO, DP_DTO, 0),\
+		SRII(MODULO, DP_DTO, 1),\
+		SRII(MODULO, DP_DTO, 2),\
+		SRII(MODULO, DP_DTO, 3),\
+		SRII(MODULO, DP_DTO, 4),\
+		SRII(PIXEL_RATE_CNTL, OTG, 0),\
+		SRII(PIXEL_RATE_CNTL, OTG, 1),\
+		SRII(PIXEL_RATE_CNTL, OTG, 2),\
+		SRII(PIXEL_RATE_CNTL, OTG, 3),\
+		SRII(PIXEL_RATE_CNTL, OTG, 4)
+
+#define CS_COMMON_REG_LIST_DCN3_03(index, pllid) \
+		SRI(PIXCLK_RESYNC_CNTL, PHYPLL, pllid),\
+		SRII(PHASE, DP_DTO, 0),\
+		SRII(PHASE, DP_DTO, 1),\
+		SRII(MODULO, DP_DTO, 0),\
+		SRII(MODULO, DP_DTO, 1),\
+		SRII(PIXEL_RATE_CNTL, OTG, 0),\
+		SRII(PIXEL_RATE_CNTL, OTG, 1)
+
+#endif
 #define CS_COMMON_MASK_SH_LIST_DCN2_0(mask_sh)\
 	CS_SF(DP_DTO0_PHASE, DP_DTO0_PHASE, mask_sh),\
 	CS_SF(DP_DTO0_MODULO, DP_DTO0_MODULO, mask_sh),\
@@ -221,7 +248,7 @@ bool dcn20_clk_src_construct(
 	const struct dce110_clk_src_shift *cs_shift,
 	const struct dce110_clk_src_mask *cs_mask);
 
-#if defined(CONFIG_DRM_AMD_DC_DCN3_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 bool dcn3_clk_src_construct(
 	struct dce110_clk_src *clk_src,
 	struct dc_context *ctx,
@@ -241,7 +268,7 @@ struct pixel_rate_range_table_entry {
 	unsigned short div_factor;
 };
 
-#if defined(CONFIG_DRM_AMD_DC_DCN3_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 extern const struct pixel_rate_range_table_entry video_optimized_pixel_rates[];
 const struct pixel_rate_range_table_entry *look_up_in_video_optimized_rate_tlb(
 		unsigned int pixel_rate_khz);

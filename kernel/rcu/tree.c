@@ -945,7 +945,11 @@ void __rcu_irq_enter_check_tick(void)
 			 "Illegal rcu_irq_enter_check_tick() from extended quiescent state");
 
 	if (!tick_nohz_full_cpu(rdp->cpu) ||
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	    !READ_ONCE(__this_cpu_read(rcu_urgent_qsn)) ||
+#else
 	    !READ_ONCE(rdp->rcu_urgent_qs) ||
+#endif
 	    READ_ONCE(rdp->rcu_forced_tick)) {
 		// RCU doesn't need nohz_full help from this CPU, or it is
 		// already getting that help.
@@ -959,7 +963,11 @@ void __rcu_irq_enter_check_tick(void)
 	// prevents self-deadlock.  So we can safely recheck under the lock.
 	// Note that the nohz_full state currently cannot change.
 	raw_spin_lock_rcu_node(rdp->mynode);
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	if (__this_cpu_read(rcu_urgent_qsn) && !rdp->rcu_forced_tick) {
+#else
 	if (rdp->rcu_urgent_qs && !rdp->rcu_forced_tick) {
+#endif
 		// A nohz_full CPU is in the kernel and RCU needs a
 		// quiescent state.  Turn on the tick!
 		WRITE_ONCE(rdp->rcu_forced_tick, true);
@@ -1087,7 +1095,11 @@ void rcu_irq_enter_irqson(void)
 static void rcu_disable_urgency_upon_qs(struct rcu_data *rdp)
 {
 	raw_lockdep_assert_held_rcu_node(rdp->mynode);
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	__this_cpu_write(rcu_urgent_qsn, false);
+#else
 	WRITE_ONCE(rdp->rcu_urgent_qs, false);
+#endif
 	WRITE_ONCE(rdp->rcu_need_heavy_qs, false);
 	if (tick_nohz_full_cpu(rdp->cpu) && rdp->rcu_forced_tick) {
 		tick_dep_clear_cpu(rdp->cpu, TICK_DEP_BIT_RCU);
@@ -1132,7 +1144,11 @@ void rcu_request_urgent_qs_task(struct task_struct *t)
 	cpu = task_cpu(t);
 	if (!task_curr(t))
 		return; /* This task is not running on that CPU. */
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	smp_store_release(per_cpu_ptr(&rcu_urgent_qsn, cpu), true);
+#else
 	smp_store_release(per_cpu_ptr(&rcu_data.rcu_urgent_qs, cpu), true);
+#endif
 }
 
 #if defined(CONFIG_PROVE_RCU) && defined(CONFIG_HOTPLUG_CPU)
@@ -1278,7 +1294,11 @@ static int rcu_implicit_dynticks_qs(struct rcu_data *rdp)
 	 * is set way high.
 	 */
 	jtsq = READ_ONCE(jiffies_to_sched_qs);
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	ruqp = per_cpu_ptr(&rcu_urgent_qsn, rdp->cpu);
+#else
 	ruqp = per_cpu_ptr(&rcu_data.rcu_urgent_qs, rdp->cpu);
+#endif
 	rnhqp = &per_cpu(rcu_data.rcu_need_heavy_qs, rdp->cpu);
 	if (!READ_ONCE(*rnhqp) &&
 	    (time_after(jiffies, rcu_state.gp_start + jtsq * 2) ||
@@ -2580,13 +2600,21 @@ void rcu_sched_clock_irq(int user)
 	lockdep_assert_irqs_disabled();
 	raw_cpu_inc(rcu_data.ticks_this_gp);
 	/* The load-acquire pairs with the store-release setting to true. */
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	if (smp_load_acquire(this_cpu_ptr(&rcu_urgent_qsn))) {
+#else
 	if (smp_load_acquire(this_cpu_ptr(&rcu_data.rcu_urgent_qs))) {
+#endif
 		/* Idle and userspace execution already are quiescent states. */
 		if (!rcu_is_cpu_rrupt_from_idle() && !user) {
 			set_tsk_need_resched(current);
 			set_preempt_need_resched();
 		}
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+		__this_cpu_write(rcu_urgent_qsn, false);
+#else
 		__this_cpu_write(rcu_data.rcu_urgent_qs, false);
+#endif
 	}
 	rcu_flavor_sched_clock_irq(user);
 	if (rcu_pending(user))

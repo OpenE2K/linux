@@ -40,8 +40,16 @@ extern u32 screen_glyph_unicode(const struct vc_data *vc, int offset);
 extern void complement_pos(struct vc_data *vc, int offset);
 extern void invert_screen(struct vc_data *vc, int offset, int count, bool viewed);
 
+#ifndef __LCC__
 extern void getconsxy(const struct vc_data *vc, unsigned char xy[static 2]);
 extern void putconsxy(struct vc_data *vc, unsigned char xy[static const 2]);
+#else
+/*
+ * lcc supports such constructions only in gnu99 mode
+ */
+extern void getconsxy(const struct vc_data *vc, unsigned char xy[]);
+extern void putconsxy(struct vc_data *vc, unsigned char xy[]);
+#endif
 
 extern u16 vcs_scr_readw(const struct vc_data *vc, const u16 *org);
 extern void vcs_scr_writew(struct vc_data *vc, u16 val, u16 *org);

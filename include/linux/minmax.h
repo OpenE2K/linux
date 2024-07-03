@@ -16,9 +16,13 @@
  *   constant expressions (to avoid tripping VLA warnings in stack
  *   allocation usage).
  */
+#if !defined(CONFIG_MCST) || !defined(__LCC__)
 #define __typecheck(x, y) \
 	(!!(sizeof((typeof(x) *)1 == (typeof(y) *)1)))
-
+#else
+#define __typecheck(x, y)	(1)
+#endif
+ 
 #define __no_side_effects(x, y) \
 		(__is_constexpr(x) && __is_constexpr(y))
 

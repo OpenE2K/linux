@@ -406,6 +406,10 @@ asmlinkage long sys_inotify_rm_watch(int fd, __s32 wd);
 /* fs/ioctl.c */
 asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd,
 				unsigned long arg);
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+asmlinkage long sys_protected_ioctl(unsigned int fd, unsigned long cmd,
+				unsigned long arg);
+#endif
 
 /* fs/ioprio.c */
 asmlinkage long sys_ioprio_set(int which, int who, int ioprio);
@@ -1056,6 +1060,15 @@ asmlinkage long sys_spu_run(int fd, __u32 __user *unpc,
 asmlinkage long sys_spu_create(const char __user *name,
 		unsigned int flags, umode_t mode, int fd);
 
+#ifdef CONFIG_MCST
+asmlinkage long sys_el_posix(int req, void *a1, void *a2, void *a3, int a4);
+asmlinkage long sys_compat_el_posix(int req, void *a1, void *a2, void *a3, int a4);
+#endif
+#ifdef CONFIG_E2K
+asmlinkage long sys_arch_prctl(int option,
+				unsigned long arg2, unsigned long arg3,
+				unsigned long arg4, unsigned long arg5);
+#endif
 
 /*
  * Deprecated system calls which are still defined in

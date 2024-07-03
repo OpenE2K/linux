@@ -1591,6 +1591,9 @@ static void ahci_postreset(struct ata_link *link, unsigned int *class)
 	struct ata_port *ap = link->ap;
 	void __iomem *port_mmio = ahci_port_base(ap);
 	u32 new_tmp, tmp;
+#ifdef CONFIG_MCST
+	struct ahci_port_priv *pp = ap->private_data;
+#endif
 
 	ata_std_postreset(link, class);
 
@@ -1604,6 +1607,12 @@ static void ahci_postreset(struct ata_link *link, unsigned int *class)
 		writel(new_tmp, port_mmio + PORT_CMD);
 		readl(port_mmio + PORT_CMD); /* flush */
 	}
+#ifdef CONFIG_MCST
+	if (ap->flags & ATA_FLAG_E2C3_REV0) {  /*bug#130272*/
+		pp->intr_mask |= PORT_IRQ_PIOS_FIS;
+		writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+	}
+#endif
 }
 
 static unsigned int ahci_fill_sg(struct ata_queued_cmd *qc, void *cmd_tbl)
@@ -1640,6 +1649,8 @@ static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc)
 		return sata_pmp_qc_defer_cmd_switch(qc);
 }
 
+
+
 static enum ata_completion_errors ahci_qc_prep(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
@@ -1658,11 +1669,22 @@ static enum ata_completion_errors ahci_qc_prep(struct ata_queued_cmd *qc)
 
 	ata_tf_to_fis(&qc->tf, qc->dev->link->pmp, 1, cmd_tbl);
 	if (is_atapi) {
+#ifdef CONFIG_MCST
+		/* handle hw bug: problems with dma on packet commands:
+			use pio instead */
+		if (qc->tf.flags & ATA_TFLAG_WRITE &&
+				ap->flags & ATA_FLAG_IOHUB2_REV2) {
+			u8 *fis = cmd_tbl;
+			fis[3] &= ~ATAPI_PKT_DMA;
+		}
+#endif
+
 		memset(cmd_tbl + AHCI_CMD_TBL_CDB, 0, 32);
 		memcpy(cmd_tbl + AHCI_CMD_TBL_CDB, qc->cdb, qc->dev->cdb_len);
 	}
 
 	n_elem = 0;
+
 	if (qc->flags & ATA_QCFLAG_DMAMAP)
 		n_elem = ahci_fill_sg(qc, cmd_tbl);
 
@@ -1897,6 +1919,16 @@ static void ahci_handle_port_interrupt(struct ata_port *ap,
 		ehi->action |= ATA_EH_RESET;
 		ata_port_freeze(ap);
 	}
+#ifdef CONFIG_MCST
+	else if (!qc_active && ap->flags & ATA_FLAG_E2C3_REV0 && /*bug#130272*/
+		ap->link.device->class == ATA_DEV_ATAPI &&
+		pp->intr_mask & PORT_IRQ_PIOS_FIS &&
+		readl(port_mmio + PORT_IRQ_STAT) & PORT_IRQ_PIOS_FIS) {
+		ata_link_dbg(&ap->link, "mask Setup FIS Interrupt\n");
+		pp->intr_mask &= ~PORT_IRQ_PIOS_FIS;
+		writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+	}
+#endif
 }
 
 static void ahci_port_intr(struct ata_port *ap)
@@ -1990,6 +2022,45 @@ static irqreturn_t ahci_single_level_irq_intr(int irq, void *dev_instance)
 	return IRQ_RETVAL(rc);
 }
 
+#ifdef CONFIG_MCST
+static void l_atapi_wait_for_command(void *data, async_cookie_t cookie)
+{
+	struct ata_port *ap = data;
+	void __iomem *port_mmio = ahci_port_base(ap);
+	struct ahci_port_priv *pp = ap->private_data;
+	int timeout = 15;
+	u64 ap_qc_active, qc_active;
+	do {
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(msecs_to_jiffies(20));
+		ap_qc_active = ap->qc_active;
+		if (pp->fbs_enabled) {
+			if (ap->qc_active) {
+				qc_active = readl(port_mmio + PORT_SCR_ACT);
+				qc_active |= readl(port_mmio + PORT_CMD_ISSUE);
+			}
+		} else {
+			/* pp->active_link is valid iff any command is in flight */
+			if (ap_qc_active && pp->active_link->sactive)
+				qc_active = readl(port_mmio + PORT_SCR_ACT);
+			else
+				qc_active = readl(port_mmio + PORT_CMD_ISSUE);
+		}
+
+		if (ap_qc_active & (1ULL << ATA_TAG_INTERNAL)) {
+			qc_active |= (qc_active & 0x01) << ATA_TAG_INTERNAL;
+			qc_active ^= qc_active & 0x01;
+		}
+
+		if (ap_qc_active ^ qc_active) {
+			ahci_port_intr(ap);
+			break;
+		}
+	} while (timeout--);
+	__set_current_state(TASK_RUNNING);
+}
+#endif
+
 unsigned int ahci_qc_issue(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
@@ -2015,6 +2086,15 @@ unsigned int ahci_qc_issue(struct ata_queued_cmd *qc)
 
 	writel(1 << qc->hw_tag, port_mmio + PORT_CMD_ISSUE);
 
+#ifdef CONFIG_MCST /*bug#130272*/
+	if (qc->tf.protocol == ATA_PROT_PIO &&
+			ap->flags & ATA_FLAG_E2C3_REV0 &&
+			ap->link.device->class == ATA_DEV_ATAPI &&
+			!(pp->intr_mask & PORT_IRQ_PIOS_FIS)) {
+		ata_link_dbg(&ap->link, "scheduling Setup FIS Interrupt\n");
+		async_schedule(l_atapi_wait_for_command, ap);
+	}
+#endif
 	ahci_sw_activity(qc->dev->link);
 
 	return 0;

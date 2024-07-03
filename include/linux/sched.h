@@ -458,6 +458,9 @@ struct sched_statistics {
 #endif
 };
 
+#ifdef CONFIG_MCST
+extern int cpu_queue_collect;
+#endif
 struct sched_entity {
 	/* For load-balancing: */
 	struct load_weight		load;
@@ -472,6 +475,16 @@ struct sched_entity {
 
 	u64				nr_migrations;
 
+#ifdef CONFIG_MCST
+	long long			cpu_queue_tm;
+	long long			cpu_queue_res;
+	long long			oncpu_tm;
+	long long			oncpu_tm_res;
+	long long			ctx_sw_tm;
+	long long			ctx_sw_tm_res;
+	long long			prev_runtime;
+	long long			delt_exec_runtime;
+#endif
 	struct sched_statistics		statistics;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -673,6 +686,9 @@ struct task_struct {
 	refcount_t			usage;
 	/* Per task flags (PF_*), defined further below: */
 	unsigned int			flags;
+#ifdef CONFIG_MCST              /* for RT_MLOCK_CONTROL */
+	unsigned int extra_flags;
+#endif
 	unsigned int			ptrace;
 
 #ifdef CONFIG_SMP
@@ -773,6 +789,7 @@ struct task_struct {
 	struct plist_node		pushable_tasks;
 	struct rb_node			pushable_dl_tasks;
 #endif
+
 
 	struct mm_struct		*mm;
 	struct mm_struct		*active_mm;
@@ -1351,6 +1368,22 @@ struct task_struct {
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 	unsigned long			task_state_change;
 #endif
+#ifdef CONFIG_MCST
+	unsigned long long	wakeup_tm;	/* clock_source of last wakeup */
+	unsigned long long	sched_enter_tm;	/* cl_source of schedule enter */
+	unsigned long long	sched_lock_tm;	/* clock_source of  */
+	unsigned long long	cntx_swb_tm;	/* context switch begine */
+	unsigned long long	cntx_swe_tm;	/* context switch end */
+	unsigned long long	waken_tm;	/* cl_source of lw for it's wakeuper */
+	unsigned long long	intr_sc;	/* clock of last scheduler intr */
+	unsigned long		last_ipi_prmt_enable;
+	unsigned long		my_last_ipi_prmt_enable;
+	cycles_t		last_tm_on_cpu;
+	struct rt_mutex		*wait_on_rtmutex;
+#ifndef CONFIG_PREEMPT_RT
+	struct mutex		*wait_on_mutex;
+#endif
+#endif
 	int				pagefault_disabled;
 #ifdef CONFIG_MMU
 	struct task_struct		*oom_reaper_list;
@@ -1589,6 +1622,9 @@ extern struct pid *cad_pid;
 #define PF_MEMALLOC_NOCMA	0x10000000	/* All allocation request will have _GFP_MOVABLE cleared */
 #define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+#ifdef CONFIG_MCST
+#define RT_MLOCK_CONTROL	0x00000008	/* prohibit new mmap() & PF occurence */
+#endif
 
 /*
  * Only the _current_ task can read/write to tsk->flags, but other
@@ -1703,6 +1739,20 @@ static inline int set_cpus_allowed_ptr(struct task_struct *p, const struct cpuma
 		return -EINVAL;
 	return 0;
 }
+#endif
+
+#define mcst_rt_affinity(a) 0
+static inline void dec_unbound_tasks(void) {}
+
+#ifdef CONFIG_MCST
+extern long do_change_rts_mode_mask(long mode, long mask);
+#ifdef SHOW_WOKEN_TIME
+extern int show_woken_time;
+#endif
+# if defined(CONFIG_SCLKR_CLOCKSOURCE)
+extern struct clocksource clocksource_sclkr;
+extern int sclkr_unstable;
+# endif
 #endif
 
 extern int yield_to(struct task_struct *p, bool preempt);
@@ -2071,6 +2121,7 @@ extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 #ifndef TASK_SIZE_OF
 #define TASK_SIZE_OF(tsk)	TASK_SIZE
 #endif
+
 
 #ifdef CONFIG_RSEQ
 

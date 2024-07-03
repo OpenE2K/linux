@@ -315,7 +315,9 @@ static int sbs_read_word_data(struct i2c_client *client, u8 address)
 			__func__, address);
 		return ret;
 	}
-
+#ifdef CONFIG_MCST
+	ret = le16_to_cpu(ret);
+#endif /* CONFIG_MCST */
 	return ret;
 }
 
@@ -425,7 +427,9 @@ static int sbs_write_word_data(struct i2c_client *client, u8 address,
 	struct sbs_info *chip = i2c_get_clientdata(client);
 	int retries = chip->i2c_retry_count;
 	s32 ret = 0;
-
+#ifdef CONFIG_MCST
+	value = cpu_to_le16(value);
+#endif /* CONFIG_MCST */
 	while (retries > 0) {
 		ret = i2c_smbus_write_word_data(client, address, value);
 		if (ret >= 0)

@@ -70,7 +70,7 @@ void
 			     struct nf_conntrack_expect *exp) __read_mostly;
 EXPORT_SYMBOL_GPL(nf_nat_pptp_hook_expectfn);
 
-#if defined(DEBUG) || defined(CONFIG_DYNAMIC_DEBUG)
+#if defined(CONFIG_MCST) || defined(DEBUG) || defined(CONFIG_DYNAMIC_DEBUG)
 /* PptpControlMessageType names */
 static const char *const pptp_msg_name_array[PPTP_MSG_MAX + 1] = {
 	[0]				= "UNKNOWN_MESSAGE",

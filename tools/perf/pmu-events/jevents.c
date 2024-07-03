@@ -265,6 +265,11 @@ static struct map {
 	{ "hisi_sccl,l3c", "hisi_sccl,l3c" },
 	{ "L3PMC", "amd_l3" },
 	{ "DFPMC", "amd_df" },
+	/* e2k */
+	{ "sic_0_MCM", "sic_0_MCM" },
+	{ "sic_1_MCM", "sic_1_MCM" },
+	{ "sic_2_MCM", "sic_2_MCM" },
+	{ "sic_3_MCM", "sic_3_MCM" },
 	{}
 };
 

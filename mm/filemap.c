@@ -1151,7 +1151,10 @@ static void wake_up_page_bit(struct page *page, int bit_nr)
 	spin_unlock_irqrestore(&q->lock, flags);
 }
 
-static void wake_up_page(struct page *page, int bit)
+#ifndef CONFIG_E2K
+static
+#endif
+void wake_up_page(struct page *page, int bit)
 {
 	if (!PageWaiters(page))
 		return;

@@ -1520,13 +1520,19 @@ drm_atomic_helper_wait_for_vblanks(struct drm_device *dev,
 	}
 
 	for_each_old_crtc_in_state(old_state, crtc, old_crtc_state, i) {
+		int timeout = msecs_to_jiffies(100);
+#ifdef CONFIG_MCST
+#if HZ < 100 /* suppose it is processor prototype */
+		timeout *= 100;
+#endif
+#endif
 		if (!(crtc_mask & drm_crtc_mask(crtc)))
 			continue;
 
 		ret = wait_event_timeout(dev->vblank[i].queue,
 				old_state->crtcs[i].last_vblank_count !=
 					drm_crtc_vblank_count(crtc),
-				msecs_to_jiffies(100));
+				timeout);
 
 		WARN(!ret, "[CRTC:%d:%s] vblank wait timed out\n",
 		     crtc->base.id, crtc->name);

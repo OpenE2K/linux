@@ -879,7 +879,7 @@ void parport_unregister_device(struct pardevice *dev)
 	 * Make sure we haven't left any pointers around in the wait
 	 * list.
 	 */
-	spin_lock_irq(&port->waitlist_lock);
+	spin_lock_irq (&port->waitlist_lock);
 	if (dev->waitprev || dev->waitnext || port->waithead == dev) {
 		if (dev->waitprev)
 			dev->waitprev->waitnext = dev->waitnext;
@@ -890,7 +890,7 @@ void parport_unregister_device(struct pardevice *dev)
 		else
 			port->waittail = dev->waitprev;
 	}
-	spin_unlock_irq(&port->waitlist_lock);
+	spin_unlock_irq (&port->waitlist_lock);
 
 	kfree(dev->state);
 	device_unregister(&dev->dev);
@@ -1225,9 +1225,53 @@ irqreturn_t parport_irq_handler(int irq, void *dev_id)
 {
 	struct parport *port = dev_id;
 
+#ifdef _WORKAROUND_MCST_PP
+	struct parport_pc_private *priv = port->private_data;
+
+#define DPRINTK(args...) printk(args);
+	if (priv->driver_data == mcst_pp_iee1284){
+		short ppc_sr = 0;
+		short ppc_sr_cl = 0;
+		char icr = 0;
+		char icr_cl = 0;
+		struct parport *p = (struct parport *) dev_id;
+		ppc_sr = inw(PPC_SR(p));
+		icr = inb(ICR(p));
+
+		if (ppc_sr & DMA_SysReqErr)
+			DPRINTK("Parport Interrupt: DMA_SysReqErr interrupt !!! \n");
+		if (ppc_sr & PIO_SysReqErr)
+			DPRINTK("Parport Interrupt: PIO_SysReqErr interrupt !!! \n");
+		if (ppc_sr & reqFIFOErr)
+			DPRINTK("Parport Interrupt: reqFIFOErr interrupt !!! \n");
+		if (ppc_sr & ECP_Err)
+			DPRINTK("Parport Interrupt: ECP_Err interrupt !!! \n");
+		if (ppc_sr & TO)
+			DPRINTK("Parport Interrupt: TimeOut interrupt !!! \n");
+
+		if (ppc_sr & (Full_Intr_Allowed)) {
+			ppc_sr_cl = ppc_sr & Full_Intr_Allowed;
+			outw(ppc_sr_cl, PPC_SR(p));
+			icr_cl = icr & Full_Intr_AllowedEn | 0x80;
+			outb(icr_cl, ICR(p));
+			DPRINTK("parport_pc_interrupt: status 0x%x, status after clearing, 0x%x, icr 0x%x\n",
+						ppc_sr, inw(PPC_SR(p)), inb(ICR(p)));
+			parport_generic_irq((struct parport *) dev_id);
+			return IRQ_HANDLED;
+		}else{
+			return IRQ_NONE;
+		}
+		
+	}else{
+		parport_generic_irq((struct parport *) dev_id);
+		/* FIXME! Was it really ours? */
+		return IRQ_HANDLED;
+	}
+#else
 	parport_generic_irq(port);
 
 	return IRQ_HANDLED;
+#endif /* _WORKAROUND_MCST_PP */
 }
 EXPORT_SYMBOL(parport_irq_handler);
 

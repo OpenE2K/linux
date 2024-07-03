@@ -1,0 +1,211 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/pci@0} {
+	#address-cells = <3>;
+	#size-cells = <2>;
+
+	/* reg: DDDDDDDD bbbbbbbb dddddfff 00000000 */
+	display_subsystem: mga2_ext {
+		reg = <0xffffffff 0 0 0 0>;
+	};
+};
+
+&display_subsystem {
+	compatible = "mcst,mga20";
+
+	reg-bar = <2>;
+	vram-bar = <0>;
+
+	ports = <&dc0>, <&dc1>;
+
+	interrupt-parent = <&mga2x_pic>;
+	interrupts = <11>;
+
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	dc@800 {
+		compatible = "mcst,mga2x-crtc";
+		reg = <0x800 0x400>;
+
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <2>;
+
+		dc0: port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			dc0_out1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&vid1_in0>;
+			};
+			dc0_out2: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&vid2_in0>;
+			};
+#ifdef VID3_STS
+			dc0_out3: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&vid3_in0>;
+			};
+#endif
+		};
+	};
+	dc@c00 {
+		compatible = "mcst,mga2x-crtc";
+		reg = <0xc00 0x400>;
+
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <3>;
+
+		dc1: port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			dc1_out1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&vid1_in1>;
+			};
+			dc1_out2: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&vid2_in1>;
+			};
+#ifdef VID3_STS
+			dc1_out3: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&vid3_in1>;
+			};
+#endif
+		};
+	};
+	dc0_pll: clk@8c0 {
+		compatible = "mcst,tcitsmcn40";
+		reg = <0x8c0 0x40>;
+		#clock-cells = <0>;
+	};
+	dc1_pll: clk@cc0 {
+		compatible = "mcst,tcitsmcn40";
+		reg = <0xcc0 0x40>;
+		#clock-cells = <0>;
+	};
+
+#define	CLK_DFLT_DIV_TABLE <   1    2    4    6    7>
+#define	CLK_DFLT_VAL_TABLE <0x1c 0x14 0x15 0x16 0x17>
+
+	dc0_pix: pclk@8c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x8c0 0x4>;
+		shift = <20>;
+		width = <5>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+	dc0_aux: aclk@8c0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0x8c0 0x4>;
+		shift = <15>;
+		width = <5>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+
+	dc1_pix: pclk@cc0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0xcc0 0x4>;
+		shift = <20>;
+		width = <5>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+	dc1_aux: aclk@cc0 {
+		compatible = "mcst,clk-mux-mga2";
+		reg = <0xcc0 0x4>;
+		shift = <15>;
+		width = <5>;
+		div-table = CLK_DFLT_DIV_TABLE;
+		val-table = CLK_DFLT_VAL_TABLE;
+		#clock-cells = <0>;
+	};
+
+	mga2x_pic: pic@2000 {
+		reg = <0x2000 0x400>;
+		compatible = "mcst,mga2x-pic";
+		interrupt-controller;
+		#interrupt-cells = <1>;
+	};
+
+	vid1_ddc: i2c@2830 {
+		reg = <0x2830 0x4>;
+		compatible = "mcst,mga2x-i2c";
+		label = "mga2 vid1 ddc";
+	};
+	vid1@2800 {
+		reg = <0x40000 0x20000>, <0x2800 0x30>;
+		compatible = "mcst,mga20-hdmi";
+
+		reg-io-width = <4>;
+		ddc-i2c-bus = <&vid1_ddc>;
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <22>;
+		clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>,
+			 <&dc1_pll>, <&dc1_pix>, <&dc1_aux>;
+
+		port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vid1_in0: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&dc0_out1>;
+			};
+			vid1_in1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&dc1_out1>;
+			};
+		};
+	};
+
+	vid2_ddc: i2c@2c30 {
+		reg = <0x2c30 0x4>;
+		compatible = "mcst,mga2x-i2c";
+		label = "mga2 vid2 ddc";
+	};
+	vid2@2c00 {
+		reg = <0x60000 0x20000>, <0x2c00 0x30>;
+		compatible = "mcst,mga20-hdmi";
+
+		reg-io-width = <4>;
+		ddc-i2c-bus = <&vid2_ddc>;
+		interrupt-parent = <&mga2x_pic>;
+		interrupts = <20>;
+		clocks = <&dc0_pll>, <&dc0_pix>, <&dc0_aux>,
+			 <&dc1_pll>, <&dc1_pix>, <&dc1_aux>;
+
+		port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vid2_in0: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&dc0_out2>;
+			};
+			vid2_in1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&dc1_out2>;
+			};
+		};
+	};
+#ifdef VID3_STS
+	vid3: vid3@2c00 {
+		reg = <0x3000 0x30>;
+		status = VID3_STS;
+	};
+#endif
+};

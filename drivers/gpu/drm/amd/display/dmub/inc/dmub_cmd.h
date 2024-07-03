@@ -189,7 +189,8 @@ union dmub_fw_boot_options {
 		uint32_t pemu_env : 1;
 		uint32_t fpga_env : 1;
 		uint32_t optimized_init : 1;
-		uint32_t reserved : 29;
+		uint32_t skip_phy_init_panel_sequence: 1;
+		uint32_t reserved : 28;
 	} bits;
 	uint32_t all;
 };

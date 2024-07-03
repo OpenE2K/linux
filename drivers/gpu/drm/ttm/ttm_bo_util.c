@@ -401,14 +401,23 @@ pgprot_t ttm_io_prot(uint32_t caching_flags, pgprot_t tmp)
 		tmp = pgprot_noncached(tmp);
 #endif
 #if defined(__ia64__) || defined(__arm__) || defined(__aarch64__) || \
-    defined(__powerpc__) || defined(__mips__)
+    defined(__powerpc__) || defined(__mips__) || defined(__e2k__)
 	if (caching_flags & TTM_PL_FLAG_WC)
 		tmp = pgprot_writecombine(tmp);
 	else
 		tmp = pgprot_noncached(tmp);
 #endif
 #if defined(__sparc__)
+#if defined(CONFIG_MCST) && defined(CONFIG_E90S)
+	if (e90s_get_cpu_type() >= E90S_CPU_R2000P + 1 /*Bug 140644*/ &&
+			caching_flags & TTM_PL_FLAG_WC) {
+		tmp = pgprot_writecombine(tmp);
+	} else {
+		tmp = pgprot_noncached(tmp);
+	}
+#else
 	tmp = pgprot_noncached(tmp);
+#endif
 #endif
 	return tmp;
 }

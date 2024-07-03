@@ -376,8 +376,12 @@ static s32 igb_read_invm_i210(struct e1000_hw *hw, u16 offset,
 						     &data[1]);
 		ret_val |= igb_read_invm_word_i210(hw, (u8)offset+2,
 						     &data[2]);
-		if (ret_val)
+		if (ret_val) {
 			hw_dbg("MAC Addr not found in iNVM\n");
+#ifdef CONFIG_MCST
+			ret_val = 0;
+#endif
+		}
 		break;
 	case NVM_INIT_CTRL_2:
 		ret_val = igb_read_invm_word_i210(hw, (u8)offset, data);

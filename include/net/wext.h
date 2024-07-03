@@ -11,7 +11,6 @@ int wext_handle_ioctl(struct net *net, unsigned int cmd,
 		      void __user *arg);
 int compat_wext_handle_ioctl(struct net *net, unsigned int cmd,
 			     unsigned long arg);
-
 struct iw_statistics *get_wireless_stats(struct net_device *dev);
 int call_commit_handler(struct net_device *dev);
 #else
@@ -26,6 +25,19 @@ static inline int compat_wext_handle_ioctl(struct net *net, unsigned int cmd,
 	return -EINVAL;
 }
 #endif
+
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+#ifdef CONFIG_WEXT_CORE
+int ptr128_wext_handle_ioctl(struct net *net, unsigned long cmd,
+			     unsigned long arg);
+#else
+static inline int ptr128_wext_handle_ioctl(struct net *net, unsigned long cmd,
+					   unsigned long arg)
+{
+	return -EINVAL;
+}
+#endif
+#endif /* CONFIG_PROTECTED_MODE */
 
 #ifdef CONFIG_WEXT_PROC
 int wext_proc_init(struct net *net);
@@ -57,5 +69,14 @@ int iw_handler_get_private(struct net_device *		dev,
 #define compat_private_call NULL
 #endif
 
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+#ifdef CONFIG_WEXT_PRIV
+int ptr128_private_call(struct net_device *dev, struct iwreq *iwr,
+			unsigned int cmd, struct iw_request_info *info,
+			iw_handler handler);
+#else
+#define ptr128_private_call NULL
+#endif
+#endif /* CONFIG_PROTECTED_MODE */
 
 #endif /* __NET_WEXT_H */

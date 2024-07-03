@@ -593,6 +593,30 @@ SYSCALL_DEFINE3(timer_create, const clockid_t, which_clock,
 	return do_timer_create(which_clock, NULL, created_timer_id);
 }
 
+
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+#include <asm/protected_syscalls.h>
+
+notrace __section(".entry.text")
+long protected_sys_timer_create(clockid_t which_clock,
+	struct prot_sigevent __user *user_sev, timer_t __user *timerid,
+	u64 unused4, u64 unused5, u64 unused6, const struct pt_regs *regs)
+{
+
+	if (user_sev) {
+		sigevent_t event;
+
+		if (get_prot_sigevent(&event, user_sev, 0, 2, regs))
+			return -EFAULT;
+		return do_timer_create(which_clock, &event, timerid);
+	}
+	return do_timer_create(which_clock, NULL, timerid);
+}
+#endif
+
+
 #ifdef CONFIG_COMPAT
 COMPAT_SYSCALL_DEFINE3(timer_create, clockid_t, which_clock,
 		       struct compat_sigevent __user *, timer_event_spec,

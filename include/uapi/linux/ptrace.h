@@ -20,8 +20,10 @@
 #define PTRACE_SINGLESTEP	   9
 
 #define PTRACE_ATTACH		  16
+/* CONFIG_MCST: in order to prevent overlapping request numbers (bug 135261) */
+#if !(defined(__sparc__) && defined(__arch64__))
 #define PTRACE_DETACH		  17
-
+#endif
 #define PTRACE_SYSCALL		  24
 
 /* 0x4200-0x4300 are reserved for architecture-independent additions.  */

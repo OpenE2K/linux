@@ -955,6 +955,7 @@ static void tick_nohz_full_update_tick(struct tick_sched *ts)
 
 static bool can_stop_idle_tick(int cpu, struct tick_sched *ts)
 {
+
 	/*
 	 * If this CPU is offline and it is the one which updates
 	 * jiffies, then give up the assignment and let it be taken by

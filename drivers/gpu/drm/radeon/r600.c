@@ -2620,7 +2620,7 @@ u32 r600_gfx_get_rptr(struct radeon_device *rdev,
 	u32 rptr;
 
 	if (rdev->wb.enabled)
-		rptr = rdev->wb.wb[ring->rptr_offs/4];
+		rptr = le32_to_cpu(rdev->wb.wb[ring->rptr_offs/4]);
 	else
 		rptr = RREG32(R600_CP_RB_RPTR);
 

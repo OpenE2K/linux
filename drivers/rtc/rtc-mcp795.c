@@ -19,6 +19,19 @@
 #include <linux/of.h>
 #include <linux/bcd.h>
 #include <linux/delay.h>
+#ifdef CONFIG_MCST
+#include <linux/kthread.h>
+#include <linux/clocksource.h>
+# ifdef CONFIG_E2K
+#include <asm/sclkr.h>
+#include <asm/bootinfo.h>
+# endif
+#if defined(CONFIG_E90S)
+#include <asm-l/clk_rt.h>
+#include <asm/bootinfo.h>
+#endif
+static atomic_t rtc4clk_src = ATOMIC_INIT(0); 
+#endif	/* CONFIG_MCST */
 
 /* MCP795 Instructions, see datasheet table 3-1 */
 #define MCP795_EEREAD	0x03
@@ -50,6 +63,11 @@
 #define MCP795_OSCON_BIT	BIT(5)
 #define MCP795_ALM0_BIT		BIT(4)
 #define MCP795_ALM1_BIT		BIT(5)
+#if defined(CONFIG_MCST)
+#define MCP795_SQWEN_BIT	BIT(6)
+#define MCP795_SQWFS0_BIT	BIT(0)
+#define MCP795_SQWFS1_BIT	BIT(1)
+#endif
 #define MCP795_ALM0IF_BIT	BIT(3)
 #define MCP795_ALM0C0_BIT	BIT(4)
 #define MCP795_ALM0C1_BIT	BIT(5)
@@ -186,6 +204,15 @@ static int mcp795_set_time(struct device *dev, struct rtc_time *tim)
 	u8 data[7];
 	bool extosc;
 
+#if defined(CONFIG_MCST)
+	if (atomic_read(&rtc4clk_src) && dev->id == 0 &&  pps_debug & 1) {
+		dev_warn(dev, "mcp795_set_time while RTC is for clocksource."
+			" %02d.%02d.%d %02d:%02d:%02d\n",
+			tim->tm_mday, tim->tm_mon + 1,
+			tim->tm_year + 1900,
+			tim->tm_hour, tim->tm_min, tim->tm_sec);
+	}
+#endif
 	/* Stop RTC and store current value of EXTOSC bit */
 	ret = mcp795_stop_oscillator(dev, &extosc);
 	if (ret)
@@ -265,6 +292,14 @@ static int mcp795_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 	u8 tmp[6];
 	int ret;
 
+#if defined(config_mcst)
+	if (atomic_read(&rtc4clk_src) && dev->id == 0) {
+		dev_warn(dev, "mcp795_set_alarm: "
+			"rtc is used for clocksource. "
+			"alarm functionality is disabled\n");
+		return -einval;
+	}
+#endif
 	/* Read current time from RTC hardware */
 	ret = mcp795_read_time(dev, &now_tm);
 	if (ret)
@@ -343,6 +378,14 @@ static int mcp795_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 
 static int mcp795_alarm_irq_enable(struct device *dev, unsigned int enabled)
 {
+#if defined(CONFIG_MCST)
+	if (atomic_read(&rtc4clk_src) && dev->id == 0) {
+		dev_warn(dev, "mcp795_alarm_irq_enable: "
+			"rtc is used for clocksource. "
+			"alarm functionality is disabled\n");
+		return -EINVAL;
+	}
+#endif
 	return mcp795_update_alarm(dev, !!enabled);
 }
 
@@ -378,6 +421,75 @@ static const struct rtc_class_ops mcp795_rtc_ops = {
 		.alarm_irq_enable = mcp795_alarm_irq_enable
 };
 
+#ifdef CONFIG_MCST
+static void init_pps(struct spi_device *spi)
+{
+	struct rtc_device *rtc;
+	rtc = devm_rtc_device_register(&spi->dev, "rtc-mcp795",
+					&mcp795_rtc_ops, THIS_MODULE);
+#if defined(CONFIG_E2K)
+	if (machine.native_iset_ver >= E2K_ISET_V3 &&
+		(sclkr_mode == -1 || sclkr_mode == SCLKR_RTC) &&
+		/* only first RTC is used for SCLKR while there is now flag which */
+		(atomic_cmpxchg(&rtc4clk_src, 0, 1) == 0)) {
+		int	error;
+		static struct task_struct *sclkregistask;
+		struct device	*dev = &spi->dev;
+		struct mutex	*lock = &rtc->ops_lock;
+
+		mutex_lock(lock);
+		mcp795_rtcc_set_bits(dev, MCP795_REG_CONTROL,
+			MCP795_SQWEN_BIT |
+			MCP795_SQWFS0_BIT | MCP795_SQWFS1_BIT |
+			MCP795_ALM0_BIT | MCP795_ALM1_BIT,
+			MCP795_SQWEN_BIT);
+		mutex_unlock(lock);
+		sclkregistask = kthread_run(sclk_register,
+			(void *)SCLKR_RTC, "sclkregister");
+		if (IS_ERR(sclkregistask)) {
+			error = PTR_ERR(sclkregistask);
+			dev_err(dev, "Failed to start"
+				" sclk register"
+				" thread, error: %d\n", error);
+		}
+		dev_warn(dev, "RTC dev.id=%d is used for clocksource."
+					" Alarm functionality is disabled\n", dev->id);
+	}
+#endif	/* CONFIG_E2K */
+#if defined(CONFIG_E90S)
+	if (clk_rt_enabled() &&
+		/* only first RTC is used for SCLKR while there is now flag which */
+		atomic_cmpxchg(&rtc4clk_src, 0, 1)) {
+		int	error;
+		static struct task_struct *clk_rt_registask;
+		struct device	*dev = &spi->dev;
+		struct mutex	*lock = &rtc->ops_lock;
+
+		mutex_lock(lock);
+		mcp795_rtcc_set_bits(dev, MCP795_REG_CONTROL,
+			MCP795_SQWEN_BIT |
+			MCP795_SQWFS0_BIT | MCP795_SQWFS1_BIT |
+			MCP795_ALM0_BIT | MCP795_ALM1_BIT,
+			MCP795_SQWEN_BIT);
+		mutex_unlock(lock);
+		if (atomic_inc_and_test(&num_clk_rt_register)) {
+			clk_rt_registask = kthread_run(clk_rt_register,
+				(void *)CLK_RT_RTC, "clk_rt_register");
+			if (IS_ERR(clk_rt_registask)) {
+				error = PTR_ERR(clk_rt_registask);
+				dev_warn(dev, "Failed to start"
+					" clk_rt register"
+					" thread, error: %d\n", error);
+			}
+		}
+		dev_warn(dev, "RTC is used for clocksource. "
+			"Alarm functionality is disabled\n");
+	}
+#endif	/* CONFIG_E90S */
+	return;
+}
+#endif	/* CONFIG_MCST */
+
 static int mcp795_probe(struct spi_device *spi)
 {
 	struct rtc_device *rtc;
@@ -403,6 +515,13 @@ static int mcp795_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, rtc);
 
+#ifdef CONFIG_MCST
+	/* Disable UIE mode, because we don't use interrupts
+	 * from rtc
+	 */
+	rtc->uie_unsupported = 1;
+	init_pps(spi);
+#endif	/* CONFIG_MCST */
 	if (spi->irq > 0) {
 		dev_dbg(&spi->dev, "Alarm support enabled\n");
 
@@ -420,6 +539,12 @@ static int mcp795_probe(struct spi_device *spi)
 		else
 			device_init_wakeup(&spi->dev, true);
 	}
+#ifdef CONFIG_MCST
+	/* Disable UIE mode, because we don't use interrupts
+	 * from rtc
+	 */
+	rtc->uie_unsupported = 1;
+#endif
 	return 0;
 }
 
@@ -430,11 +555,44 @@ static const struct of_device_id mcp795_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, mcp795_of_match);
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_MCST)
+#ifdef CONFIG_PM
+static int mcp795_rtc_suspend(struct device *dev)
+{
+	dev_warn(dev, "DEBUG: mcp795_rtc_suspend.\n");
+	if (strcmp(curr_clocksource->name, "sclkr") == 0) {
+		if (timekeeping_notify(&lt_cs)) {
+			pr_warn("susp_sclkr: can't set lt clocksourse\n");
+		}
+	}
+	return 0;
+}
+
+static int mcp795_rtc_resume(struct device *dev)
+{
+	struct spi_device *spi = to_spi_device(dev);
+
+	dev_warn(dev, "DEBUG: mcp795_rtc_resume.\n");
+	init_pps(spi);
+	return 0;
+}
+#else
+#define mcp795_rtc_suspend NULL
+#define mcp795_rtc_resume NULL
+#endif
+static const struct dev_pm_ops mcp795_rtc_pm_ops = {
+	.suspend = mcp795_rtc_suspend,
+	.resume = mcp795_rtc_resume,
+};
+#endif		/* CONFIG_MCST */
 
 static struct spi_driver mcp795_driver = {
 		.driver = {
 				.name = "rtc-mcp795",
 				.of_match_table = of_match_ptr(mcp795_of_match),
+#if defined(CONFIG_E2K) && defined(CONFIG_MCST)
+				.pm = &mcp795_rtc_pm_ops,
+#endif		/* CONFIG_MCST */
 		},
 		.probe = mcp795_probe,
 };

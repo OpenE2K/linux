@@ -3214,6 +3214,11 @@ megasas_build_io_fusion(struct megasas_instance *instance,
 
 	sge_count = megasas_make_sgl(instance, scp, cmd);
 
+#ifdef CONFIG_MCST
+	if (sge_count < 0)
+		return sge_count;
+#endif
+
 	if (sge_count > instance->max_num_sge || (sge_count < 0)) {
 		dev_err(&instance->pdev->dev,
 			"%s %d sge_count (%d) is out of range. Range is:  0-%d\n",

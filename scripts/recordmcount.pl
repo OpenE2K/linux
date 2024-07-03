@@ -404,9 +404,35 @@ if ($arch eq "x86_64") {
 } elsif ($arch eq "csky") {
     $mcount_regex = "^\\s*([0-9a-fA-F]+):\\s*R_CKCORE_PCREL_JSR_IMM26BY2\\s+_mcount\$";
     $alignment = 2;
+} elsif ($arch eq "e2k") {
+    $type = ".quad";
+    $alignment = 8;
+
+    # force flags for this arch
+    $ld .= " -m elf64_e2k";
+    $objdump = "env LANG=en_US LC_ALL=C $objdump -w -b elf64-e2k";
+    $objcopy .= " -O elf64-e2k";
+    $cc .= " -mptr64";
 } else {
     die "Arch $arch is not supported with CONFIG_FTRACE_MCOUNT_RECORD";
 }
+
+# Additional variables for e2k architecture
+my $ip = hex 0;
+my $disp_ip = hex 0;
+my $mcount_disp_found = 0;
+my $icall_found = 0;
+my $disp_ctpr = "";
+my $mcount_ctpr = "";
+my $ip_regex = "^\\s*([0-9a-fA-F]+):\\s+([0-9a-fA-F][0-9a-fA-F])+";
+my $ip_new_regex = "^\\s*([0-9a-fA-F]+):\\s*\\n";
+my $branch_regex = "^\\s*[ir]branch";
+my $ct_regex = "^\\s*ct ";
+my $disp_regex = "^\\s*disp %(ctpr[1-3]),";
+my $mcount_disp_regex = "^\\s*[0-9a-fA-F]+:\\s*R_E2K_DISP\\s*_mcount";
+my $icall_regex = "^\\s*icall\\s";
+my $call_regex_begin = "^\\s*call %";
+my $call_regex_end = ", wbs = 0x[0-9a-fA-F]+";
 
 my $text_found = 0;
 my $read_function = 0;
@@ -432,6 +458,25 @@ if ($filename =~ m,^(.*)(\.\S),) {
 } else {
     $prefix = $filename;
     $ext = "";
+}
+
+if ($arch eq "e2k") {
+    if ($filename =~ /iset_v3\.o|iset_v5\.o|iset_v6\.o|hv_cpu\.o/) {
+	$cc =~ s/-mtune=elbrus-4c|-mtune=elbrus-8c2|-mtune=elbrus-1c\+|
+		 -mtune=elbrus-8c|-mtune=elbrus-12c|-mtune=elbrus-16c|
+		 -mtune=elbrus-2c3|-mtune=elbrus-48c|-mtune=elbrus-8v7//x;
+    }
+
+    if ($filename eq "iset_v3.o") {
+        $cc .= " -march=elbrus-v3";
+    }
+
+    if ($filename eq "iset_v5.o") {
+        $cc .= " -march=elbrus-v5";
+    }
+    if ($filename eq "iset_v6.o" || $filename eq "hv_cpu.o") {
+        $cc .= " -march=elbrus-v6";
+    }
 }
 
 my $mcount_s = $dirname . "/.tmp_mc_" . $prefix . ".s";
@@ -571,8 +616,51 @@ while (<IN>) {
 	}
     }
     # is this a call site to mcount? If so, record it to print later
-    if ($text_found && /$mcount_regex/) {
-	push(@offsets, (hex $1) + $mcount_adjust);
+    if ($text_found) {
+	if ($arch eq "e2k") {
+	    if (/$ip_regex/) {
+		$ip = hex $1;
+	    } elsif (/$ip_new_regex/) {
+		$ip = hex $1;
+	    } elsif (/$disp_regex/) {
+		$disp_ctpr = $1;
+		$icall_found = 0;
+	    } elsif (/$icall_regex/) {
+		$icall_found = 1;
+	    } elsif (/$mcount_disp_regex/) {
+		if ($icall_found) {
+		    #printf "icall found at %x\n", $ip;
+		    $icall_found = 0;
+		    push(@offsets, $ip);
+		} else {
+		    if ($mcount_disp_found) {
+			print STDERR "ERROR: mcount_disp_found is already set!\n" .
+				"\tip = 0x$ip, mcount_ctpr = $mcount_ctpr.\n";
+			exit(-1);
+		    }
+		    #printf "mcount disp found at %x, ctpr is %s\n", $ip, $disp_ctpr;
+
+		    $mcount_disp_found = 1;
+		    $mcount_ctpr = $disp_ctpr;
+		}
+	    } elsif ($mcount_disp_found) {
+		if (/$branch_regex/) {
+		    print STDERR "ERROR: there is a branch at ip $ip\n";
+		    exit(-1);
+		}
+		if (/$ct_regex/) {
+		    print STDERR "ERROR: there is a ct at ip $ip\n";
+		    exit(-1);
+		}
+		if (/$call_regex_begin$mcount_ctpr$call_regex_end/) {
+		    #printf "mcount call found at %x, ctpr is %s\n", $ip, $mcount_ctpr;
+		    $mcount_disp_found = 0;
+		    push(@offsets, $ip);
+		}
+	    }
+	} elsif (/$mcount_regex/) {
+	    push(@offsets, (hex $1) + $mcount_adjust);
+	}
     }
 }
 

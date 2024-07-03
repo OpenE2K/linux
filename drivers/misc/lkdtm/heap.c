@@ -6,6 +6,11 @@
 #include "lkdtm.h"
 #include <linux/slab.h>
 #include <linux/sched.h>
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+#include <linux/pagemap.h>
+#include <linux/swap.h>
+#include <linux/bio.h>
+#endif
 
 static struct kmem_cache *double_free_cache;
 static struct kmem_cache *a_cache;
@@ -53,6 +58,14 @@ void lkdtm_WRITE_AFTER_FREE(void)
 		pr_info("Hmm, didn't get the same memory range.\n");
 }
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+static void end_bio_sntz2(struct bio *bio)
+{
+	unlock_page(bio->bi_io_vec->bv_page);
+	bio_put(bio);
+}
+#endif
+
 void lkdtm_READ_AFTER_FREE(void)
 {
 	int *base, *val, saw;
@@ -89,65 +102,61 @@ void lkdtm_READ_AFTER_FREE(void)
 	if (saw != *val) {
 		/* Good! Poisoning happened, so declare a win. */
 		pr_info("Memory correctly poisoned (%x)\n", saw);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	{
+		int got_val;
+		struct page *page;
+		struct bio *bio;
+		struct block_device *bdev;
+
+		if (swap_sanit_page == 0) {
+			pr_info("lkdtm: swap_sanit_page is not set\n");
+			return;
+		}
+		if (test_sntz_sect == 0) {
+			pr_info("lkdtm: swap test_sntz_sect is not set\n");
+			return;
+		}
+		page = alloc_page(GFP_KERNEL);
+		if (page == NULL) {
+			pr_info("lkdtm_READ_AFTER_FREE ERR page == NULL\n");
+			return;
+		}
+		bio = bio_alloc(GFP_NOIO, 1);
+		if (bio == NULL) {
+			pr_info("lkdtm_READ_AFTER_FREE ERR bio == NULL\n");
+			unlock_page(page);
+			return;
+		}
+		lock_page(page);
+		bio->bi_iter.bi_sector = test_sntz_sect;
+		bio_set_dev(bio, bdev);
+		bio_add_page(bio, page, PAGE_SIZE, 0);
+		bio->bi_end_io = end_bio_sntz2;
+		bio_set_op_attrs(bio, REQ_OP_READ, REQ_SYNC);
+		bio_get(bio);
+		submit_bio(bio);
+		wait_on_page_locked(page);
+		got_val = ((u32 *)page_address(page))[0];
+		pr_info("lkdtm_READ_AFTER_FREE bi_sector=0x%llx\n",
+					bio->bi_iter.bi_sector);
+		if (got_val == SANITIZE_VALUE)
+			pr_info("Freed swap page contains SANITIZE_VALUE=%x."
+				" PASS\n",
+				got_val);
+		else	
+			pr_info("Freed swap page has 0x%x != "
+				"SANITIZE_VALUE=0x%x. FAIL\n",
+				got_val, SANITIZE_VALUE);
+		return;
+	}
+	/* For MCST tests run it is noot need do reboot if memory
+	   sanitise is sucsessfully perfomed.  So BUG() is not colled */
+#else
 		BUG();
+#endif
 	}
 	pr_info("Memory was not poisoned\n");
-
-	kfree(val);
-}
-
-void lkdtm_WRITE_BUDDY_AFTER_FREE(void)
-{
-	unsigned long p = __get_free_page(GFP_KERNEL);
-	if (!p) {
-		pr_info("Unable to allocate free page\n");
-		return;
-	}
-
-	pr_info("Writing to the buddy page before free\n");
-	memset((void *)p, 0x3, PAGE_SIZE);
-	free_page(p);
-	schedule();
-	pr_info("Attempting bad write to the buddy page after free\n");
-	memset((void *)p, 0x78, PAGE_SIZE);
-	/* Attempt to notice the overwrite. */
-	p = __get_free_page(GFP_KERNEL);
-	free_page(p);
-	schedule();
-}
-
-void lkdtm_READ_BUDDY_AFTER_FREE(void)
-{
-	unsigned long p = __get_free_page(GFP_KERNEL);
-	int saw, *val;
-	int *base;
-
-	if (!p) {
-		pr_info("Unable to allocate free page\n");
-		return;
-	}
-
-	val = kmalloc(1024, GFP_KERNEL);
-	if (!val) {
-		pr_info("Unable to allocate val memory.\n");
-		free_page(p);
-		return;
-	}
-
-	base = (int *)p;
-
-	*val = 0x12345678;
-	base[0] = *val;
-	pr_info("Value in memory before free: %x\n", base[0]);
-	free_page(p);
-	pr_info("Attempting to read from freed memory\n");
-	saw = base[0];
-	if (saw != *val) {
-		/* Good! Poisoning happened, so declare a win. */
-		pr_info("Memory correctly poisoned (%x)\n", saw);
-		BUG();
-	}
-	pr_info("Buddy page was not poisoned\n");
 
 	kfree(val);
 }
@@ -218,4 +227,60 @@ void __exit lkdtm_heap_exit(void)
 	kmem_cache_destroy(double_free_cache);
 	kmem_cache_destroy(a_cache);
 	kmem_cache_destroy(b_cache);
+}
+
+void lkdtm_WRITE_BUDDY_AFTER_FREE(void)
+{
+	unsigned long p = __get_free_page(GFP_KERNEL);
+	if (!p) {
+		pr_info("Unable to allocate free page\n");
+		return;
+	}
+
+	pr_info("Writing to the buddy page before free\n");
+	memset((void *)p, 0x3, PAGE_SIZE);
+	free_page(p);
+	schedule();
+	pr_info("Attempting bad write to the buddy page after free\n");
+	memset((void *)p, 0x78, PAGE_SIZE);
+	/* Attempt to notice the overwrite. */
+	p = __get_free_page(GFP_KERNEL);
+	free_page(p);
+	schedule();
+}
+
+void lkdtm_READ_BUDDY_AFTER_FREE(void)
+{
+	unsigned long p = __get_free_page(GFP_KERNEL);
+	int saw, *val;
+	int *base;
+
+	if (!p) {
+		pr_info("Unable to allocate free page\n");
+		return;
+	}
+
+	val = kmalloc(1024, GFP_KERNEL);
+	if (!val) {
+		pr_info("Unable to allocate val memory.\n");
+		free_page(p);
+		return;
+	}
+
+	base = (int *)p;
+
+	*val = 0x12345678;
+	base[0] = *val;
+	pr_info("Value in memory before free: %x\n", base[0]);
+	free_page(p);
+	pr_info("Attempting to read from freed memory\n");
+	saw = base[0];
+	if (saw != *val) {
+		/* Good! Poisoning happened, so declare a win. */
+		pr_info("Memory correctly poisoned (%x)\n", saw);
+		BUG();
+	}
+	pr_info("Buddy page was not poisoned\n");
+
+	kfree(val);
 }

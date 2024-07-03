@@ -5447,7 +5447,11 @@ int btrfs_next_leaf(struct btrfs_root *root, struct btrfs_path *path)
 int btrfs_next_old_leaf(struct btrfs_root *root, struct btrfs_path *path,
 			u64 time_seq)
 {
+#ifdef CONFIG_MCST
+	int slot = 0;
+#else
 	int slot;
+#endif
 	int level;
 	struct extent_buffer *c;
 	struct extent_buffer *next;

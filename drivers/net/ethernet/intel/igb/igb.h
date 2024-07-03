@@ -106,8 +106,14 @@ struct vf_data_storage {
 struct vf_mac_filter {
 	struct list_head l;
 	int vf;
+#ifdef CONFIG_MCST
+/* This define fix compilation fail in igb_set_vf_mac_filter (bug 123517) */
+	u8 vf_mac[ETH_ALEN];
+	bool free;
+#else
 	bool free;
 	u8 vf_mac[ETH_ALEN];
+#endif
 };
 
 #define IGB_VF_FLAG_CTS            0x00000001 /* VF is clear to send data */

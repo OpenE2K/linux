@@ -39,6 +39,22 @@
 #include <linux/rculist.h>
 #include <net/busy_poll.h>
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/protected_syscalls.h>
+
+typedef union prot_epoll_event_data {
+	e2k_ptr_t	ptr;
+	u64		numval;
+} prot_epoll_event_data_t;
+
+struct prot_epoll_event {
+	__poll_t events;
+	unsigned size; /* descriptor size */
+	u64	address; /* alignment field; same as 'data' in epoll_event; unused in PM */
+	prot_epoll_event_data_t data;
+};
+
+#endif
 /*
  * LOCKING:
  * There are three level of locking required by epoll :
@@ -1644,6 +1660,14 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi,
 	 */
 	epi->event.events = event->events; /* need barrier below */
 	epi->event.data = event->data; /* protected by mtx */
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	/* NB> In the protected execution mode epoll_event structute includes
+	 *     additional field (descriptor size).
+	 */
+	if (TASK_IS_PROTECTED(current))
+		((struct prot_epoll_event *)(&epi->event))->size =
+				((struct prot_epoll_event *)&event)->size;
+#endif
 	if (epi->event.events & EPOLLWAKEUP) {
 		if (!ep_has_wakeup_source(epi))
 			ep_create_wakeup_source(epi);
@@ -1752,6 +1776,11 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 			continue;
 
 		if (__put_user(revents, &uevent->events) ||
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+		    TASK_IS_PROTECTED(current) &&
+		    __put_user(((struct prot_epoll_event *)&epi->event)->size,
+				&((struct prot_epoll_event __user *)uevent)->size) ||
+#endif
 		    __put_user(epi->event.data, &uevent->data)) {
 			list_add(&epi->rdllink, head);
 			ep_pm_stay_awake(epi);
@@ -2449,7 +2478,6 @@ static int __init eventpoll_init(void)
 	/* Allocates slab cache used to allocate "struct epitem" items */
 	epi_cache = kmem_cache_create("eventpoll_epi", sizeof(struct epitem),
 			0, SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT, NULL);
-
 	/* Allocates slab cache used to allocate "struct eppoll_entry" */
 	pwq_cache = kmem_cache_create("eventpoll_pwq",
 		sizeof(struct eppoll_entry), 0, SLAB_PANIC|SLAB_ACCOUNT, NULL);
@@ -2457,3 +2485,335 @@ static int __init eventpoll_init(void)
 	return 0;
 }
 fs_initcall(eventpoll_init);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+#if 0 /* debug print */
+
+static void print_epoll_event(void __user *ptr, const char *header, const char *comm)
+{
+	long hi, lo;
+	int ret;
+	ret  = get_user(lo, (long *)ptr);
+	ret |= get_user(hi, ((long *)ptr + 1));
+	pr_info("%s%s: 0x%lx :: event64.lo=0x%lx, event64.hi=0x%lx\n",
+		header, comm, (long)ptr, lo, hi);
+}
+
+#else
+#define print_epoll_event(...)
+#endif /* debug print */
+
+static void __user *get_user_space(unsigned long len)
+{
+	void __user *uspace;
+	long ret;
+
+	uspace = __get_user_space(len);
+	if (!uspace) {
+		pr_warn("%s:%d : %s() failed to allocate %lu bytes of user stack\n",
+			__FILE__, __LINE__, __func__, len);
+		pm_deliver_exception(SIGABRT, SI_KERNEL, ENOMEM);
+	}
+	ret = clear_user(uspace, len);
+	if (ret) {
+		pr_warn("%s() failed to clear %lu bytes at %s:%d\n",
+			__func__, ret, __FILE__, __LINE__);
+		pm_deliver_exception(SIGABRT, SI_KERNEL, EFAULT);
+	}
+
+	return uspace;
+}
+
+/* Converting user protected event structure into (user) regular structure:
+ * NB> We exploit the fact that protected epoll event structure size is
+ *     twice bigger than the regular structure size.
+ *     Therefore we can fill in alignment dword in the protected structure with address
+ *     while keeping descriptor field untouched, and use it as input regular epoll_event structure.
+ *     Also we save descriptor size in the 'size' field of the prot_epoll_event structure.
+ * Returns error number or 0 if OK.
+ */
+static int convert_epoll_event_128_to_64(struct prot_epoll_event __user *event,
+					 const struct pt_regs *regs, const int arg_num)
+{
+	e2k_ptr_t data;
+	unsigned long address;
+	int tag, rval, size;
+
+	if (!event)
+		return 0;
+	if (((unsigned long)&event->data) & (DESCRIPTOR_SIZE - 1)) {
+		/* descriptor 'event' appeared improperly aligned */
+		rval = -EINVAL;
+		PROTECTED_MODE_ALERT(PMCNVSTRMSG_STRUCT_DESCR_UNALIGNED,
+				sys_call_ID_to_name[regs->sys_num],
+				"event->data", (unsigned long)&event->data);
+		goto err_out;
+	}
+
+	rval = get_user_tagged_16(data.lo, data.hi, tag, &event->data);
+	if (unlikely(rval))
+		goto err_out;
+
+	if (tag && (tag != ETAGAPQ)) {
+		if (!(tag & 0x3)) /* Numerical tag in the lowest word */
+		    tag = 0; /* This is definitely 'fd' field in the union */
+		else
+		    goto err_out;
+	}
+	if (tag) {
+		/* This is pointer; filling field 'address' in: */
+		address = E2K_PTR_PTR(data);
+		size = (int)data.size - (int)data.curptr;
+	} else {
+		address = (unsigned long) (unsigned int) data.lo;
+		size = 0;
+	}
+	/* Filling regular epoll_event fields in: */
+	rval = put_user(address, &((struct epoll_event *)event)->data);
+	rval |= put_user(size, &event->size);
+	print_epoll_event(event, __func__, "[128]");
+	print_epoll_event((char *)event + 16, __func__, "[128]");
+	if (likely(!rval))
+		return 0;
+
+err_out:
+	PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+	     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+	     "epoll_event", arg_num);
+	PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+	return -EFAULT;
+}
+
+/* Converting user protected event structures into (user) regular structures: */
+static
+int prot_epoll_events_to_64(struct prot_epoll_event __user *events_128,
+			    struct epoll_event __user *events_64,
+			    const int count,
+			    const struct pt_regs *regs, const int arg_num)
+{
+	int rval, i;
+
+	if (!events_128 || !events_64 || !count)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		rval = convert_epoll_event_128_to_64(&events_128[i], regs, arg_num);
+		if (unlikely(rval)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+			     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+			     "epoll_event", arg_num);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+			return -EFAULT;
+		}
+
+		rval = copy_in_user(&events_64[i], &events_128[i], sizeof(*events_64));
+		if (unlikely(rval)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT,
+				     __func__, (long) &events_128[i].data);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+			return -EFAULT;
+		}
+	}
+
+	return rval;
+}
+
+/* Converting (user) regular event structure into (user) protected structure: */
+static int copy_epoll_event_64_to_128(struct epoll_event __user *event64,
+				      struct prot_epoll_event __user *event128,
+				      const struct pt_regs *regs, const int arg_num)
+{
+	unsigned long base;
+	unsigned size, tag;
+	unsigned long lo, hi;
+	int ret;
+
+	ret = copy_in_user(event128, event64, sizeof(*event64));
+
+	ret |= get_user(base, &((struct prot_epoll_event __user *)event64)->address);
+	ret |= get_user(size, &((struct prot_epoll_event __user *)event64)->size);
+
+	if (base && size) {
+		lo = make_ap_lo(base, size, 0, e2k_ptr_rw(regs->args[arg_num * 2 - 1]));
+		hi = make_ap_hi(base, size, 0, e2k_ptr_rw(regs->args[arg_num * 2 - 1]));
+		tag = ETAGAPQ;
+	} else {
+		lo = base;
+		hi = 0;
+		tag = 0;
+	}
+
+	ret |= put_user_tagged_16(lo, hi, tag, &event128->data);
+	if (ret) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT, __func__,
+						(long) &event128->data);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+	}
+	print_epoll_event(event128, __func__, "[128]");
+	print_epoll_event((char *)event128 + 16, __func__, "[128]");
+
+	return ret;
+}
+
+/* Converting user protected event structures into (user) regular structures: */
+static
+int epoll_events_64_to_128(struct epoll_event __user *events_64,
+			   struct prot_epoll_event __user *events_128,
+			   const int count,
+			   const struct pt_regs *regs, const int arg_num)
+{
+	int rval, i;
+
+	if (!events_128 || !events_64 || !count)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		rval = copy_epoll_event_64_to_128(&events_64[i], &events_128[i], regs, arg_num);
+		if (unlikely(rval)) {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
+			     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+			     "epoll_event", arg_num);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+			return -EINVAL;
+		}
+	}
+
+	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_epoll_ctl(const unsigned long epfd,	/* a1 */
+			     const unsigned long op,	/* a2 */
+			     const unsigned long fd,	/* a3 */
+			     void __user	*event,	/* a4 */
+				const unsigned long unused5,
+				const unsigned long unused6,
+				const struct pt_regs *regs)
+{
+	long rval;
+
+	DbgSCP("(epfd=0x%lx, op=0x%lx, fd=0x%lx, event=0x%lx)\n",
+					epfd, op, fd, event);
+
+/* Linux Programmer's Manual for epoll_ctl states:
+ * NB> In kernel versions before 2.6.9, the EPOLL_CTL_DEL operation
+ *     required a non-null pointer in event, even though this argument
+ *     is ignored.  Since Linux 2.6.9, event can be specified as NULL
+ *     when using EPOLL_CTL_DEL.  Applications that need to be portable
+ *     to kernels before 2.6.9 should specify a non-null pointer in event.
+ */
+	if (ep_op_has_event(op)) {
+		rval = convert_epoll_event_128_to_64(event, regs, 4/*arg_num*/);
+		if (rval)
+			return rval;
+	}
+
+	rval = sys_epoll_ctl(epfd, op, fd, event);
+	DbgSCP("(epfd=0x%lx, op=0x%lx, fd=0x%lx, event=0x%lx) == %ld\n",
+					epfd, op, fd, event, rval);
+
+	return rval;
+}
+
+notrace __section(".entry.text")
+long protected_sys_epoll_wait(const unsigned long epfd,		/* a1 */
+			      void __user	*event,		/* a2 */
+			      const long	maxevents,	/* a3 */
+			      const long	timeout,	/* a4 */
+				const unsigned long unused5,
+				const unsigned long unused6,
+				const struct pt_regs *regs)
+{
+	long rval;
+	size_t events_size;
+	void __user *events64; /* converted array of epoll events */
+	int size, ret;
+
+	DbgSCP("(epfd=0x%lx, event=0x%lx, maxevents=%ld, timeout=%ld)\n",
+					epfd, event, maxevents, timeout);
+	if (maxevents <= 0)
+		return -EINVAL;
+
+	size = e2k_ptr_size(regs->args[3], regs->args[4], 0);
+	events_size = sizeof(struct prot_epoll_event) * maxevents;
+	if (size < events_size) {
+		if (size) {
+			if (!size_exceeds_descr_max_capacity(events_size, "maxevents",
+								maxevents, regs))
+				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
+					     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+					     (int) size, events_size, 2);
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+		}
+		return -EFAULT;
+	}
+
+	events64 = get_user_space(sizeof(struct epoll_event) * maxevents);
+	rval = prot_epoll_events_to_64(event, events64, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	ret = sys_epoll_wait(epfd, events64, maxevents, timeout);
+	if (ret < 0)
+		return ret;
+
+	rval = epoll_events_64_to_128(events64, event, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_epoll_pwait(const unsigned long	epfd,		/* a1 */
+			       void __user		*event,		/* a2 */
+			       const long		maxevents,	/* a3 */
+			       const long		timeout,	/* a4 */
+			       const unsigned long __user sigmask,	/* a5 */
+			       const unsigned long	sigsetsize,	/* a6 */
+			       const struct pt_regs *regs)
+{
+	long rval;
+	size_t events_size;
+	void __user *events64; /* converted array of epoll events */
+	int size, ret;
+
+	DbgSCP("(epfd=0x%lx, event=0x%lx, maxevents=%ld, timeout=%ld, sigmask, sigsetsize=%ld)\n",
+		epfd, event, maxevents, timeout, sigsetsize);
+
+	if (maxevents <= 0)
+		return -EINVAL;
+
+	size = e2k_ptr_size(regs->args[3], regs->args[4], 0);
+	events_size = sizeof(struct epoll_event) * maxevents;
+	if (size < events_size) {
+		if (size) {
+			if (!size_exceeds_descr_max_capacity(events_size, "maxevents",
+								maxevents, regs))
+				PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
+					     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+					     (int) size, events_size, 2);
+			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);
+		}
+		return -EFAULT;
+	}
+
+	events64 = get_user_space(events_size);
+	rval = prot_epoll_events_to_64(event, events64, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	ret = sys_epoll_pwait(epfd, events64, maxevents,
+			      timeout, (sigset_t __user *) sigmask, sigsetsize);
+	if (ret < 0)
+		return ret;
+
+	rval = epoll_events_64_to_128(events64, event, maxevents, regs, 2/*arg_num*/);
+	if (rval)
+		return rval;
+
+	return ret;
+}
+
+#endif /* CONFIG_PROTECTED_MODE */

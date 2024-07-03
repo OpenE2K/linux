@@ -963,6 +963,9 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 	struct timer_base *base, *new_base;
 	unsigned int idx = UINT_MAX;
 	int ret = 0;
+#if defined(CONFIG_MCST_4RT) && defined(CONFIG_NO_HZ_COMMON) && defined(CONFIG_SMP)
+	int cpu;
+#endif
 
 	BUG_ON(!timer->function);
 
@@ -1003,6 +1006,7 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 		idx = calc_wheel_index(expires, clk, &bucket_expiry);
 
 		/*
+		 *
 		 * Retrieve and compare the array index of the pending
 		 * timer. If it matches set the expiry to the new value so a
 		 * subsequent call will exit in the expires check above.

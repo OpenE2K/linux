@@ -582,6 +582,14 @@ struct mm_struct {
 #ifdef CONFIG_IOMMU_SUPPORT
 		u32 pasid;
 #endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+		int	gmmid_nr;	/* only on guest: the guest */
+					/* user thread mm_struct agent */
+					/* ID number on host kernel */
+					/* to pass mm struct ID from guest */
+					/* to host at hypercalls */
+#endif	/* CONFIG_E2K  && CONFIG_VIRTUALIZATION */
 	} __randomize_layout;
 
 	/*

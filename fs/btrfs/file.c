@@ -3614,6 +3614,9 @@ const struct file_operations btrfs_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= btrfs_compat_ioctl,
 #endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl = btrfs_protected_ioctl,
+#endif
 	.remap_file_range = btrfs_remap_file_range,
 };
 

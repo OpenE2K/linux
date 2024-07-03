@@ -105,7 +105,8 @@ do
 
 	if [ "$leak_error" = 1 ]; then
 		echo "error: $INFILE: leak $c to user-space" >&2
-		exit 1
+		#MCST: bug #123008
+		#exit 1
 	fi
 done
 

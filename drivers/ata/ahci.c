@@ -32,6 +32,10 @@
 #include <linux/libata.h>
 #include <linux/ahci-remap.h>
 #include <linux/io-64-nonatomic-lo-hi.h>
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+#include <asm/sic_regs.h>
+#include <asm/epic.h>
+#endif
 #include "ahci.h"
 
 #define DRV_NAME	"ahci"
@@ -662,6 +666,22 @@ MODULE_PARM_DESC(mobile_lpm_policy, "Default LPM policy for mobile chipsets");
 static void ahci_pci_save_initial_config(struct pci_dev *pdev,
 					 struct ahci_host_priv *hpriv)
 {
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+	if (cpu_has_epic() && iohub_generation(pdev) == 2 && /* Bug 127617 */
+			pdev->revision == 2 &&
+			pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
+		sys_mon_1_t r;
+		int node = dev_to_node(&pdev->dev);
+		if (node < 0)
+			node = 0;
+		r.word = sic_read_node_nbsr_reg(node, PMC_SYS_MON_1);
+		/* disable unused ports to prevent irq lockup */
+		if (r.pin_sataeth_config) /*2 & 3 phy-s are routed to ethernet*/
+			hpriv->force_port_map = 3;
+	}
+#endif
+
 	if (pdev->vendor == PCI_VENDOR_ID_JMICRON && pdev->device == 0x2361) {
 		dev_info(&pdev->dev, "JMB361 has only one port\n");
 		hpriv->force_port_map = 1;
@@ -871,6 +891,28 @@ static int ahci_avn_hardreset(struct ata_link *link, unsigned int *class,
 	return rc;
 }
 
+#ifdef CONFIG_MCST
+void mcst_ahci_port_reset(struct pci_dev *pdev)
+{
+	struct ata_host *host = pci_get_drvdata(pdev);
+
+	/*
+	 * ERR 23 - sata (ahci port reg reset)
+	 */
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
+		int i;
+		for (i = 0; i < host->n_ports; i++) {
+			void __iomem *port_mmio =
+					__ahci_port_base(host, i);
+			u32 tmp = readl(port_mmio + PORT_CMD);
+			/* disable FIS reception */
+			tmp &= ~PORT_CMD_FIS_RX;
+			writel(tmp, port_mmio + PORT_CMD);
+		}
+	}
+}
+#endif
 
 #ifdef CONFIG_PM
 static void ahci_pci_disable_interrupts(struct ata_host *host)
@@ -904,6 +946,9 @@ static int ahci_pci_device_runtime_resume(struct device *dev)
 	struct ata_host *host = pci_get_drvdata(pdev);
 	int rc;
 
+#ifdef CONFIG_MCST
+	mcst_ahci_port_reset(pdev);
+#endif
 	rc = ahci_pci_reset_controller(host);
 	if (rc)
 		return rc;
@@ -939,6 +984,9 @@ static int ahci_pci_device_resume(struct device *dev)
 		ahci_mcp89_apple_enable(pdev);
 
 	if (pdev->dev.power.power_state.event == PM_EVENT_SUSPEND) {
+#ifdef CONFIG_MCST
+		mcst_ahci_port_reset(pdev);
+#endif
 		rc = ahci_pci_reset_controller(host);
 		if (rc)
 			return rc;
@@ -1758,10 +1806,15 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	/* acquire resources */
+#ifdef CONFIG_MCST
+	 /* Bug 143381: boot does not assign io-bars,
+	    so enable only required mem-bar */
+	rc = pcim_enable_device_mem(pdev);
+#else
 	rc = pcim_enable_device(pdev);
+#endif
 	if (rc)
 		return rc;
-
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL &&
 	    (pdev->device == 0x2652 || pdev->device == 0x2653)) {
 		u8 map;
@@ -1778,10 +1831,15 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		}
 	}
 
+#ifdef CONFIG_MCST
+	 /* Bug 143381: boot does not assign io-bars */
+	rc = pcim_iomap_regions(pdev, 1 << ahci_pci_bar, DRV_NAME);
+#else
 	/* AHCI controllers often implement SFF compatible interface.
 	 * Grab all PCI BARs just in case.
 	 */
 	rc = pcim_iomap_regions_request_all(pdev, 1 << ahci_pci_bar, DRV_NAME);
+#endif
 	if (rc == -EBUSY)
 		pcim_pin_device(pdev);
 	if (rc)
@@ -1854,6 +1912,20 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	if (hpriv->cap & HOST_CAP_PMP)
 		pi.flags |= ATA_FLAG_PMP;
+
+#ifdef CONFIG_MCST
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_SATA) {
+		if (iohub_generation(pdev) == 1 &&
+				iohub_revision(pdev) < 3) {
+			pi.flags |= ATA_FLAG_IOHUB2_REV2;
+		} else if (IS_ENABLED(CONFIG_E2K) &&
+				iohub_generation(pdev) == 2 &&
+				pdev->revision == 2) {
+			pi.flags |= ATA_FLAG_E2C3_REV0;
+		}
+	}
+#endif
 
 	ahci_set_em_messages(hpriv, &pi);
 
@@ -1949,6 +2021,9 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (rc)
 		return rc;
 
+#ifdef CONFIG_MCST
+	mcst_ahci_port_reset(pdev);
+#endif
 	rc = ahci_pci_reset_controller(host);
 	if (rc)
 		return rc;

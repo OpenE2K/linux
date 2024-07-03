@@ -23,6 +23,10 @@
 #include "hda_jack.h"
 #include <sound/hda_hwdep.h>
 #include <sound/hda_component.h>
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+#include <linux/pci_ids.h>
+#include <asm/pci.h>
+#endif
 
 #define codec_in_pm(codec)		snd_hdac_is_in_pm(&codec->core)
 #define hda_codec_is_power_on(codec)	snd_hdac_is_power_on(&codec->core)
@@ -40,7 +44,12 @@ static int codec_exec_verb(struct hdac_device *dev, unsigned int cmd,
 	struct hda_codec *codec = container_of(dev, struct hda_codec, core);
 	struct hda_bus *bus = codec->bus;
 	int err;
-
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+	int i, retry = 1;
+	/* read codec twice to fix hardware syncronization error. */
+	if (bus->needs_retry_on_codec_write)
+		retry = 2;
+#endif
 	if (cmd == ~0)
 		return -1;
 
@@ -49,8 +58,16 @@ static int codec_exec_verb(struct hdac_device *dev, unsigned int cmd,
 	mutex_lock(&bus->core.cmd_mutex);
 	if (flags & HDA_RW_NO_RESPONSE_FALLBACK)
 		bus->no_response_fallback = 1;
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+	for (err = i = 0; i < retry && !err; i++) {
+#endif
 	err = snd_hdac_bus_exec_verb_unlocked(&bus->core, codec->core.addr,
 					      cmd, res);
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+	if (err)
+		break;
+	}
+#endif
 	bus->no_response_fallback = 0;
 	mutex_unlock(&bus->core.cmd_mutex);
 	snd_hda_power_down_pm(codec);

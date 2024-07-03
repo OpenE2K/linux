@@ -132,7 +132,12 @@ const struct consw *conswitchp;
  */
 #define DEFAULT_BELL_PITCH	750
 #define DEFAULT_BELL_DURATION	(HZ/8)
+
+#if defined(CONFIG_MCST) && HZ < 100 /* suppose it is processor-prototype */
+#define DEFAULT_CURSOR_BLINK_MS	2000
+#else
 #define DEFAULT_CURSOR_BLINK_MS	200
+#endif
 
 struct vc vc_cons [MAX_NR_CONSOLES];
 
@@ -4765,14 +4770,22 @@ unsigned short *screen_pos(const struct vc_data *vc, int w_offset, bool viewed)
 }
 EXPORT_SYMBOL_GPL(screen_pos);
 
+#ifndef __LCC__
 void getconsxy(const struct vc_data *vc, unsigned char xy[static 2])
+#else
+void getconsxy(const struct vc_data *vc, unsigned char xy[])
+#endif
 {
 	/* clamp values if they don't fit */
 	xy[0] = min(vc->state.x, 0xFFu);
 	xy[1] = min(vc->state.y, 0xFFu);
 }
 
+#ifndef __LCC__
 void putconsxy(struct vc_data *vc, unsigned char xy[static const 2])
+#else
+void putconsxy(struct vc_data *vc, unsigned char xy[])
+#endif
 {
 	hide_cursor(vc);
 	gotoxy(vc, xy[0], xy[1]);

@@ -948,6 +948,7 @@ struct rq {
 	 */
 	unsigned long		nr_uninterruptible;
 
+
 	struct task_struct __rcu	*curr;
 	struct task_struct	*idle;
 	struct task_struct	*stop;
@@ -2088,8 +2089,13 @@ extern void deactivate_task(struct rq *rq, struct task_struct *p, int flags);
 
 extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SYSCTL)
+extern unsigned int sysctl_sched_nr_migrate;
+extern unsigned int sysctl_sched_migration_cost;
+#else
 extern const_debug unsigned int sysctl_sched_nr_migrate;
 extern const_debug unsigned int sysctl_sched_migration_cost;
+#endif
 
 #ifdef CONFIG_SCHED_HRTICK
 

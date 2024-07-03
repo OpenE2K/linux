@@ -12,6 +12,9 @@
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_device.h>
 #include <linux/libata.h>
+#ifdef CONFIG_MCST
+#include <linux/pci.h>
+#endif
 
 #include "libata.h"
 #include "libata-transport.h"
@@ -515,6 +518,120 @@ int sata_set_spd(struct ata_link *link)
 }
 EXPORT_SYMBOL_GPL(sata_set_spd);
 
+#ifdef CONFIG_MCST
+/* Bug 131730: force sata link speed to 6.0 Gbps */
+struct reg_wr_data {
+	u32 data;
+	u32 phy_num;
+	u32 reg_address;
+};
+/* See: dwc_ent12mp_phy_tsmc16ffpgl_databook.pdf */
+static struct reg_wr_data preset3516_0[4] = {
+	{0xc7f8, 0x09, 0x1002},
+	{0xc7f8, 0x09, 0x1102},
+	{0xc7f8, 0x08, 0x1002},
+	{0xc7f8, 0x08, 0x1102},
+};
+
+static struct reg_wr_data preset3516_1[4] = {
+	{0x2800, 0x09, 0x1003},
+	{0x2800, 0x09, 0x1103},
+	{0x2800, 0x08, 0x1003},
+	{0x2800, 0x08, 0x1103},
+};
+
+static struct reg_wr_data preset3520_0[4] = {
+	{0xc7f8, 0x09, 0x1002},
+	{0xc7f8, 0x09, 0x1102},
+	{0xc7f8, 0x08, 0x1002},
+	{0xc7f8, 0x08, 0x1102},
+};
+
+static struct reg_wr_data preset3520_1[4] = {
+	{0x2A00, 0x09, 0x1003},
+	{0x2A00, 0x09, 0x1103},
+	{0x2A00, 0x08, 0x1003},
+	{0x2A00, 0x08, 0x1103},
+};
+
+static struct reg_wr_data link_retrain[4] = {
+	{0x008d, 0x09, 0x3005},
+	{0x008d, 0x09, 0x3105},
+	{0x008d, 0x08, 0x3005},
+	{0x008d, 0x08, 0x3105},
+};
+
+static struct reg_wr_data set_rx_reset[4] = {
+	{0x4785, 0x09, 0x1005},
+	{0x4785, 0x09, 0x1105},
+	{0x4785, 0x08, 0x1005},
+	{0x4785, 0x08, 0x1105},
+};
+
+static struct reg_wr_data down_rx_reset[4] = {
+	{0x0784, 0x09, 0x1005},
+	{0x0784, 0x09, 0x1105},
+	{0x0784, 0x08, 0x1005},
+	{0x0784, 0x08, 0x1105},
+};
+
+static struct reg_wr_data force_enable_off_0[4] = {
+	{0x0784, 0x09, 0x1005},
+	{0x0784, 0x09, 0x1105},
+	{0x0784, 0x08, 0x1005},
+	{0x0784, 0x08, 0x1105},
+};
+
+static struct reg_wr_data force_enable_off_1[4] = {
+	{0x000d, 0x09, 0x3005},
+	{0x000d, 0x09, 0x3105},
+	{0x000d, 0x08, 0x3005},
+	{0x000d, 0x08, 0x3105},
+};
+
+static int conf_write(struct pci_dev *dev, struct reg_wr_data *d)
+{
+	u32 v;
+	int t = 50;
+	u32 cmd = (3 << 29) | (d->phy_num << 16) | d->reg_address;
+	/* See: eioh_e2c3.pdf */
+	pci_write_config_dword(dev, 0x70, d->data);
+	pci_write_config_dword(dev, 0x6c, cmd);
+	do {
+		pci_read_config_dword(dev, 0x6c, &v);
+		if ((v & (1 << 31)) == 0)
+			return 0;
+		udelay(20);
+	} while (--t);
+	return -ETIME;
+}
+
+static int port_phy_setup(struct pci_dev *dev, u32 port)
+{
+	if (conf_write(dev, &preset3516_0[port]) ||
+	    conf_write(dev, &preset3516_1[port]) ||
+	    conf_write(dev, &preset3520_0[port]) ||
+	    conf_write(dev, &preset3520_1[port]) ||
+	    conf_write(dev, &link_retrain[port]) ||
+	    conf_write(dev, &set_rx_reset[port]))
+		return -EIO;
+	return 0;
+}
+
+static int port_phy_down_reset(struct pci_dev *dev, u32 port)
+{
+	return conf_write(dev, &down_rx_reset[port]);
+}
+
+static int force_enable_off(struct pci_dev *dev, u32 port)
+{
+	if (conf_write(dev, &force_enable_off_0[port]) ||
+	    conf_write(dev, &force_enable_off_1[port]))
+		return -EIO;
+	return 0;
+}
+#endif /* CONFIG_MCST */
+
 /**
  *	sata_link_hardreset - reset link via SATA phy reset
  *	@link: link to reset
@@ -545,6 +662,12 @@ int sata_link_hardreset(struct ata_link *link, const unsigned long *timing,
 {
 	u32 scontrol;
 	int rc;
+#ifdef CONFIG_MCST /* Bug 131730 */
+	bool restore_phy = false;
+	struct ata_host *host = link->ap->host;
+	struct pci_dev *pdev = to_pci_dev(host->dev->parent);
+	int port = link->ap->local_port_no;
+#endif
 
 	DPRINTK("ENTER\n");
 
@@ -552,6 +675,12 @@ int sata_link_hardreset(struct ata_link *link, const unsigned long *timing,
 		*online = false;
 
 	if (sata_set_spd_needed(link)) {
+#ifdef CONFIG_MCST
+		if (!is_prototype() && link->ap->flags & ATA_FLAG_E2C3_REV0 &&
+				WARN_ON(rc = force_enable_off(pdev, port)))
+			goto out;
+#endif
+
 		/* SATA spec says nothing about how to reconfigure
 		 * spd.  To be on the safe side, turn off phy during
 		 * reconfiguration.  This works for at least ICH7 AHCI
@@ -567,6 +696,14 @@ int sata_link_hardreset(struct ata_link *link, const unsigned long *timing,
 
 		sata_set_spd(link);
 	}
+#ifdef CONFIG_MCST /* the prototype has a different phy */
+	else if (!is_prototype() && link->ap->flags & ATA_FLAG_E2C3_REV0) {
+			ata_link_info(link, "force link speed to 6.0 Gbps\n");
+		if (WARN_ON(rc = port_phy_setup(pdev, port)))
+			goto out;
+		restore_phy = true;
+	}
+#endif
 
 	/* issue phy wake/reset */
 	if ((rc = sata_scr_read(link, SCR_CONTROL, &scontrol)))
@@ -576,6 +713,11 @@ int sata_link_hardreset(struct ata_link *link, const unsigned long *timing,
 
 	if ((rc = sata_scr_write_flush(link, SCR_CONTROL, scontrol)))
 		goto out;
+
+#ifdef CONFIG_MCST
+	if (restore_phy && WARN_ON(rc = port_phy_down_reset(pdev, port)))
+		goto out;
+#endif
 
 	/* Couldn't find anything in SATA I/II specs, but AHCI-1.1
 	 * 10.4.2 says at least 1 ms.

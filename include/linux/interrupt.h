@@ -185,6 +185,10 @@ request_percpu_irq(unsigned int irq, irq_handler_t handler,
 				    devname, percpu_dev_id);
 }
 
+#ifdef CONFIG_MCST
+extern int mk_hndl_first(unsigned int irq, const char *name);
+#endif
+
 extern int __must_check
 request_percpu_nmi(unsigned int irq, irq_handler_t handler,
 		   const char *devname, void __percpu *dev);

@@ -204,6 +204,11 @@ obj-$(CONFIG_WATCHDOG_SUN4V)		+= sun4v_wdt.o
 
 # XTENSA Architecture
 
+# E2K Arhitecture
+
+# L Architecture
+obj-$(CONFIG_L_WDT) += lwdt.o
+
 # Xen
 obj-$(CONFIG_XEN_WDT) += xen_wdt.o
 

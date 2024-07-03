@@ -472,6 +472,12 @@ void dcn30_init_hw(struct dc *dc)
 		hws->funcs.disable_vga(dc->hwseq);
 	}
 
+	// Set default OPTC memory power states
+	if (dc->debug.enable_mem_low_power.bits.optc) {
+		// Shutdown when unassigned and light sleep in VBLANK
+		REG_SET_2(ODM_MEM_PWR_CTRL3, 0, ODM_MEM_UNASSIGNED_PWR_MODE, 3, ODM_MEM_VBLANK_PWR_MODE, 1);
+	}
+
 	if (dc->ctx->dc_bios->fw_info_valid) {
 		res_pool->ref_clocks.xtalin_clock_inKhz =
 				dc->ctx->dc_bios->fw_info.pll_info.crystal_frequency;
@@ -732,4 +738,17 @@ bool dcn30_apply_idle_power_optimizations(struct dc *dc, bool enable)
 	}
 
 	return true;
+}
+
+bool dcn30_does_plane_fit_in_mall(struct dc *dc, struct dc_plane_state *plane)
+{
+	// add meta size?
+	unsigned int surface_size = plane->plane_size.surface_pitch * plane->plane_size.surface_size.height *
+					(plane->format >= SURFACE_PIXEL_FORMAT_GRPH_ARGB16161616 ? 8 : 4);
+	unsigned int mall_size = dc->caps.mall_size_total;
+
+	if (dc->debug.mall_size_override)
+		mall_size = 1024 * 1024 * dc->debug.mall_size_override;
+
+	return (surface_size + dc->caps.cursor_cache_size) < mall_size;
 }

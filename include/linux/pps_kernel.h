@@ -117,4 +117,9 @@ static inline void pps_sub_ts(struct pps_event_time *ts, struct timespec64 delta
 #endif
 }
 
+#ifdef CONFIG_MCST
+extern int have_pps_mpv;
+extern int (*send_pps_mpv)(u32 bus, int enable);
+extern int (*mpv_get_freq_ptr)(u32 bus);
+#endif
 #endif /* LINUX_PPS_KERNEL_H */

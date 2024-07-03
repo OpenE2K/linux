@@ -19,6 +19,9 @@
 #include <linux/cpumask.h>
 #include <linux/cpuhotplug.h>
 
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+DECLARE_PER_CPU_SHARED_ALIGNED(bool, rcu_urgent_qsn);
+#endif
 struct device;
 struct device_node;
 struct attribute_group;

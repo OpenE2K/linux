@@ -182,7 +182,7 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	if (sb->s_type->fs_flags & FS_THP_SUPPORT)
 		__set_bit(AS_THP_SUPPORT, &mapping->flags);
 	mapping->wb_err = 0;
-	atomic_set(&mapping->i_mmap_writable, 0);
+ 	atomic_set(&mapping->i_mmap_writable, 0);
 #ifdef CONFIG_READ_ONLY_THP_FOR_FS
 	atomic_set(&mapping->nr_thps, 0);
 #endif

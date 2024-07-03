@@ -4655,7 +4655,11 @@ int sdhci_setup_host(struct sdhci_host *host)
 		mmc->max_segs = SDHCI_MAX_SEGS;
 	} else if (host->flags & SDHCI_USE_SDMA) {
 		mmc->max_segs = 1;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		if (swiotlb_max_segment(swiotlb_node(mmc_dev(mmc)))) {
+#else
 		if (swiotlb_max_segment()) {
+#endif
 			unsigned int max_req_size = (1 << IO_TLB_SHIFT) *
 						IO_TLB_SEGSIZE;
 			mmc->max_req_size = min(mmc->max_req_size,

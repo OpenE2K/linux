@@ -3,4 +3,5 @@ ccflags-y := -DSRCTREE='"$(srctree)"' -DOBJTREE='"$(objtree)"'
 
 obj-y := base.o fs.o
 obj-$(CONFIG_CC_IS_GCC) += gcc_base.o gcc_4_7.o
+obj-$(CONFIG_CC_IS_LCC) += gcc_base.o gcc_4_7.o
 obj-$(CONFIG_CC_IS_CLANG) += clang.o

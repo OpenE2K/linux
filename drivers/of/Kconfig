@@ -14,7 +14,7 @@ if OF
 
 config OF_UNITTEST
 	bool "Device Tree runtime unit tests"
-	depends on !SPARC
+	depends on (!SPARC || E90S)
 	select IRQ_DOMAIN
 	select OF_EARLY_FLATTREE
 	select OF_RESOLVE
@@ -64,11 +64,11 @@ config OF_DYNAMIC
 
 config OF_ADDRESS
 	def_bool y
-	depends on !SPARC && (HAS_IOMEM || UML)
+	depends on ((!SPARC || E90S) && (HAS_IOMEM || UML))
 
 config OF_IRQ
 	def_bool y
-	depends on !SPARC && IRQ_DOMAIN
+	depends on (!SPARC || E90S) && IRQ_DOMAIN
 
 config OF_NET
 	depends on NETDEVICES

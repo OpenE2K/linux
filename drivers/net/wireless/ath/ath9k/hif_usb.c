@@ -1307,7 +1307,11 @@ static int send_eject_command(struct usb_interface *interface)
 	struct usb_host_interface *iface_desc = interface->cur_altsetting;
 	struct usb_endpoint_descriptor *endpoint;
 	unsigned char *cmd;
+#ifdef MCST
+	u8 bulk_out_ep = 0;
+#else
 	u8 bulk_out_ep;
+#endif
 	int r;
 
 	if (iface_desc->desc.bNumEndpoints < 2)

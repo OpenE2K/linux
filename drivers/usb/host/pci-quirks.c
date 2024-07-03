@@ -17,7 +17,10 @@
 #include <linux/acpi.h>
 #include <linux/dmi.h>
 #include <linux/of.h>
-#include <linux/iopoll.h>
+#include <linux/iopoll.h> 
+#if defined CONFIG_MCST && defined CONFIG_USB
+#include <linux/usb.h>
+#endif
 
 #include "pci-quirks.h"
 #include "xhci-ext-caps.h"
@@ -1243,6 +1246,12 @@ static void quirk_usb_early_handoff(struct pci_dev *pdev)
 {
 	struct device_node *parent;
 	bool is_rpi;
+
+#if defined CONFIG_MCST && defined CONFIG_USB
+	/* Bug 77519: when usb is disabled do not touch usb registers */
+	if (usb_disabled())
+		return;
+#endif
 
 	/* Skip Netlogic mips SoC's internal PCI USB controller.
 	 * This device does not need/support EHCI/OHCI handoff

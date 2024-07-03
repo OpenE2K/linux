@@ -2764,7 +2764,12 @@ bool tcp_schedule_loss_probe(struct sock *sk, bool advancing_rto)
 	 */
 	if (tp->srtt_us) {
 		timeout_us = tp->srtt_us >> 2;
+#ifndef CONFIG_MCST
 		if (tp->packets_out == 1)
+#else
+		if (tp->packets_out == 1 &&
+				!sock_net(sk)->ipv4.sysctl_tcp_fast_tlp)
+#endif
 			timeout_us += tcp_rto_min_us(sk);
 		else
 			timeout_us += TCP_TIMEOUT_MIN_US;

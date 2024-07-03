@@ -44,13 +44,30 @@
 #include <linux/swapops.h>
 #include <linux/swap_cgroup.h>
 
+#ifdef CONFIG_E2K
+#include <asm/page_io.h>
+#endif  /* CONFIG_E2K */
+
+
+#undef DEBUG
+/* #define DEBUG 1 */
+
+#ifdef DEBUG
+#define DBG(x...) printk(x)
+#else
+#define DBG(x...)
+#endif
+
 static bool swap_count_continued(struct swap_info_struct *, pgoff_t,
 				 unsigned char);
 static void free_swap_count_continuations(struct swap_info_struct *);
 static sector_t map_swap_entry(swp_entry_t, struct block_device**);
 
 DEFINE_SPINLOCK(swap_lock);
-static unsigned int nr_swapfiles;
+#if !defined(CONFIG_E2K)
+static
+#endif
+unsigned int nr_swapfiles;
 atomic_long_t nr_swap_pages;
 /*
  * Some modules use swappable objects and may try to swap them out under
@@ -200,7 +217,11 @@ static int discard_swap(struct swap_info_struct *si)
 	return err;		/* That will often be -EOPNOTSUPP */
 }
 
+#ifndef CONFIG_E2K
 static struct swap_extent *
+#else
+struct swap_extent *
+#endif
 offset_to_swap_extent(struct swap_info_struct *sis, unsigned long offset)
 {
 	struct swap_extent *se;
@@ -2339,6 +2360,9 @@ sector_t map_swap_page(struct page *page, struct block_device **bdev)
 	entry.val = page_private(page);
 	return map_swap_entry(entry, bdev);
 }
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+EXPORT_SYMBOL(map_swap_page); /* for lkdm testing */
+#endif
 
 /*
  * Free all of a swapdev's extent information
@@ -2695,7 +2719,6 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 		spin_lock(&swap_lock);
 		spin_lock(&p->lock);
 	}
-
 	swap_file = p->swap_file;
 	old_block_size = p->old_block_size;
 	p->swap_file = NULL;
@@ -2718,6 +2741,13 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	vfree(swap_map);
 	kvfree(cluster_info);
 	kvfree(frontswap_map);
+#ifdef CONFIG_E2K
+	/* can not use free() under spinlock */
+	e2k_remove_swap(p);
+#endif /* CONFIG_E2K */
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	kfree(swap_sanit_page);
+#endif
 	/* Destroy swap account information */
 	swap_cgroup_swapoff(p->type);
 	exit_swap_address_space(p->type);
@@ -3192,6 +3222,9 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 	struct page *page = NULL;
 	struct inode *inode = NULL;
 	bool inced_nr_rotate_swap = false;
+#ifdef CONFIG_E2K
+	unsigned long *tag_swap_map = NULL;
+#endif /* CONFIG_E2K */
 
 	if (swap_flags & ~SWAP_FLAGS_VALID)
 		return -EINVAL;
@@ -3254,6 +3287,33 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		error = -EINVAL;
 		goto bad_swap_unlock_inode;
 	}
+
+#ifdef CONFIG_E2K
+	e2k_swap_setup(p->type, 512);
+
+	maxpages = SWAP_REAL_MAX_PAGES(maxpages);
+	if (unlikely(!maxpages)) {
+		error = -EINVAL;
+		goto bad_swap_unlock_inode;
+	}
+	p->highest_bit = maxpages - 1;
+	DBG(" %s(%d) maxpages =%ld\n", __func__, __LINE__, maxpages);
+
+	tag_swap_map = vzalloc((maxpages * 2 + 7) / 8);
+	p->tag_swap_map = tag_swap_map;
+	if (!tag_swap_map) {
+		error = -ENOMEM;
+		goto bad_swap_unlock_inode;
+	}
+#endif
+
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	if (mem_san) {
+		swap_sanit_page = alloc_page(GFP_KERNEL);
+		memset(page_address(swap_sanit_page), SANITIZE_VALUE,
+				PAGE_SIZE);
+	}
+#endif
 
 	/* OK, set up the swap map and apply the bad block list */
 	swap_map = vzalloc(maxpages);
@@ -3380,7 +3440,9 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		prio =
 		  (swap_flags & SWAP_FLAG_PRIO_MASK) >> SWAP_FLAG_PRIO_SHIFT;
 	enable_swap_info(p, prio, swap_map, cluster_info, frontswap_map);
-
+#ifdef CONFIG_E2K
+	tags_swap_init(p->type, tag_swap_map);
+#endif /* CONFIG_E2K */
 	pr_info("Adding %uk swap on %s.  Priority:%d extents:%d across:%lluk %s%s%s%s%s\n",
 		p->pages<<(PAGE_SHIFT-10), name->name, p->prio,
 		nr_extents, (unsigned long long)span<<(PAGE_SHIFT-10),
@@ -3416,6 +3478,10 @@ bad_swap:
 	p->swap_file = NULL;
 	p->flags = 0;
 	spin_unlock(&swap_lock);
+#ifdef CONFIG_E2K
+	vfree(tag_swap_map);
+	p->tag_swap_map = NULL;
+#endif /* CONFIG_E2K */
 	vfree(swap_map);
 	kvfree(cluster_info);
 	kvfree(frontswap_map);

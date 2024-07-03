@@ -35,7 +35,7 @@ config DRM_DW_HDMI_CEC
 	  Designware HDMI block.
 
 config DRM_DW_MIPI_DSI
-	tristate
+	tristate "Synopsis Designware DSI interface"
 	select DRM_KMS_HELPER
 	select DRM_MIPI_DSI
 	select DRM_PANEL_BRIDGE

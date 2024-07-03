@@ -1947,6 +1947,10 @@ static u16 printk_sprint(char *text, u16 size, int facility, enum log_flags *lfl
 	return text_len;
 }
 
+#if defined(CONFIG_MCST) && defined(CONFIG_NVRAM_PANIC)
+extern void write_to_nvram_panic_area(const char *str, int len);
+#endif
+
 __printf(4, 0)
 static int vprintk_store(int facility, int level,
 			 const struct dev_printk_info *dev_info,
@@ -2041,6 +2045,13 @@ static int vprintk_store(int facility, int level,
 
 	/* fill message */
 	text_len = printk_sprint(&r.text_buf[0], reserve_size, facility, &lflags, fmt, args);
+#if defined(CONFIG_MCST) && defined(CONFIG_NVRAM_PANIC)
+	if (raw_smp_processor_id() == atomic_read(&panic_cpu)) {
+		write_to_nvram_panic_area(&r.text_buf[0], text_len);
+		if (lflags & LOG_NEWLINE)
+			write_to_nvram_panic_area("\n", 1);
+	}
+#endif	
 	if (trunc_msg_len)
 		memcpy(&r.text_buf[text_len], trunc_msg, trunc_msg_len);
 	r.info->text_len = text_len + trunc_msg_len;
@@ -2472,6 +2483,9 @@ void suspend_console(void)
 	if (!console_suspend_enabled)
 		return;
 	pr_info("Suspending console(s) (use no_console_suspend to debug)\n");
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_KEXEC)
+	pr_flush(1000, true);
+#endif
 	console_lock();
 	console_suspended = 1;
 	up_console_sem();
@@ -2504,6 +2518,10 @@ static int console_cpu_notify(unsigned int cpu)
 	}
 	return 0;
 }
+#ifdef CONFIG_E2K
+//TODO switch to __bug_table and remove this
+EXPORT_SYMBOL(console_flush_on_panic);
+#endif
 
 /**
  * console_lock - lock the console system for exclusive use.

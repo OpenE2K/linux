@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0-only
 menu "CPU Idle"
 
 config CPU_IDLE
@@ -20,9 +19,11 @@ config CPU_IDLE_MULTIPLE_DRIVERS
 
 config CPU_IDLE_GOV_LADDER
 	bool "Ladder governor (for periodic timer tick)"
+	default m
 
 config CPU_IDLE_GOV_MENU
 	bool "Menu governor (for tickless system)"
+	default m
 
 config CPU_IDLE_GOV_TEO
 	bool "Timer events oriented (TEO) governor (for tickless systems)"
@@ -47,6 +48,11 @@ config CPU_IDLE_GOV_HALTPOLL
 config DT_IDLE_STATES
 	bool
 
+menu "E90S CPU Idle Drivers"
+depends on E90S
+source "drivers/cpuidle/Kconfig.e90s"
+endmenu
+
 menu "ARM CPU Idle Drivers"
 depends on ARM || ARM64
 source "drivers/cpuidle/Kconfig.arm"
@@ -60,6 +66,11 @@ endmenu
 menu "POWERPC CPU Idle Drivers"
 depends on PPC
 source "drivers/cpuidle/Kconfig.powerpc"
+endmenu
+
+menu "E2K CPU Idle Drivers"
+depends on E2K
+source "drivers/cpuidle/Kconfig.e2k"
 endmenu
 
 config HALTPOLL_CPUIDLE

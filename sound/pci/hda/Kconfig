@@ -26,6 +26,16 @@ config SND_HDA_INTEL
 	  To compile this driver as a module, choose M here: the module
 	  will be called snd-hda-intel.
 
+config L_SND_HDA
+	tristate "Elbrus HD Audio PCI"
+	depends on SND_PCI
+	default m if MCST
+	help
+	  This option enables stripped version of Intel "High
+	  Definition Audio" for using with analog codec tlv320aic26
+	  To compile this driver as a module, choose M here: the module
+	  will be called l-snd-hda
+
 config SND_HDA_TEGRA
 	tristate "NVIDIA Tegra HD Audio"
 	depends on ARCH_TEGRA

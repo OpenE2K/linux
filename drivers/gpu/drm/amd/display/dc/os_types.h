@@ -82,6 +82,10 @@
 		preempt_enable(); \
 	} \
 }
+#elif defined(CONFIG_E2K)
+#include <asm/fpu/api.h>
+#define DC_FP_START() kernel_fpu_begin()
+#define DC_FP_END() kernel_fpu_end()
 #endif
 #endif
 

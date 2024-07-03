@@ -73,6 +73,10 @@
 #include <linux/perf_event.h>
 #include <linux/ptrace.h>
 #include <linux/vmalloc.h>
+#ifdef CONFIG_MCST
+#include <linux/delay.h>
+#include <linux/mcst_rt.h>
+#endif 
 
 #include <trace/events/kmem.h>
 
@@ -318,7 +322,9 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 		return;
 
 	p4d = p4d_offset(pgd, start);
+#ifndef CONFIG_E2K
 	pgd_clear(pgd);
+#endif
 	p4d_free_tlb(tlb, p4d, start);
 }
 
@@ -939,7 +945,11 @@ copy_pte_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	struct mm_struct *src_mm = src_vma->vm_mm;
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *src_ptl, *dst_ptl = NULL;
+#else
 	spinlock_t *src_ptl, *dst_ptl;
+#endif
 	int progress, ret = 0;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
@@ -1693,7 +1703,11 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 	struct mm_struct *mm = vma->vm_mm;
 	int retval;
 	pte_t *pte;
+#ifdef CONFIG_MCST
+	spinlock_t *ptl = NULL;
+#else
 	spinlock_t *ptl;
+#endif
 
 	retval = validate_page_before_insert(page);
 	if (retval)
@@ -2202,7 +2216,11 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long pfn, pgprot_t prot)
 {
 	pte_t *pte, *mapped_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *ptl = NULL;
+#else
 	spinlock_t *ptl;
+#endif
 	int err = 0;
 
 	mapped_pte = pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
@@ -4756,11 +4774,19 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 	smp_wmb(); /* See comment in __pte_alloc */
 
 	spin_lock(&mm->page_table_lock);
+#if !defined(CONFIG_E2K) || !defined(__ARCH_HAS_5LEVEL_HACK)
 	if (!p4d_present(*p4d)) {
 		mm_inc_nr_puds(mm);
 		p4d_populate(mm, p4d, new);
 	} else	/* Another has populated it */
 		pud_free(mm, new);
+#else
+	if (!pgd_present(*p4d)) {
+		mm_inc_nr_puds(mm);
+		pgd_populate(mm, p4d, new);
+	} else	/* Another has populated it */
+		pud_free(mm, new);
+#endif /* !CONFIG_E2K || !__ARCH_HAS_5LEVEL_HACK */
 	spin_unlock(&mm->page_table_lock);
 	return 0;
 }

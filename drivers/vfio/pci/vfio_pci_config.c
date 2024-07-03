@@ -701,7 +701,11 @@ static int vfio_pm_config_write(struct vfio_pci_device *vdev, int pos,
 		return count;
 
 	if (offset == PCI_PM_CTRL) {
+#ifndef CONFIG_MCST
 		pci_power_t state;
+#else
+		pci_power_t state = PCI_UNKNOWN;
+#endif
 
 		switch (le32_to_cpu(val) & PCI_PM_CTRL_STATE_MASK) {
 		case 0:

@@ -5,6 +5,10 @@
 #include <linux/err.h>
 #include <linux/sched.h>
 
+#ifdef CONFIG_MCST
+extern atomic_t num_shrink_page_list;
+#endif
+
 struct mm_struct;
 
 __printf(4, 5)

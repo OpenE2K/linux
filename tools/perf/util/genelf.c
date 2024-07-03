@@ -285,6 +285,21 @@ jit_write_elf(int fd, uint64_t load_addr, const char *sym,
 	ehdr->e_entry = GEN_ELF_TEXT_OFFSET;
 	ehdr->e_version = EV_CURRENT;
 	ehdr->e_shstrndx= unwinding ? 4 : 2; /* shdr index for section name */
+#ifdef __e2k__
+	__builtin_cpu_init();
+	if (__builtin_cpu_is("elbrus-v1"))
+		ehdr->e_flags = (1 << 24) | 0x10;
+	else if (__builtin_cpu_is("elbrus-v2"))
+		ehdr->e_flags = (2 << 24) | 0x10;
+	else if (__builtin_cpu_is("elbrus-v3"))
+		ehdr->e_flags = (3 << 24) | 0x10;
+	else if (__builtin_cpu_is("elbrus-v4"))
+		ehdr->e_flags = (4 << 24) | 0x10;
+	else if (__builtin_cpu_is("elbrus-v5"))
+		ehdr->e_flags = (5 << 24) | 0x10;
+	else if (__builtin_cpu_is("elbrus-v6"))
+		ehdr->e_flags = (6 << 24) | 0x10;
+#endif
 
 	/*
 	 * setup program header

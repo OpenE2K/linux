@@ -55,6 +55,15 @@ struct mousedev_hw_data {
 	unsigned long buttons;
 };
 
+#ifdef CONFIG_MCST
+#define NO_TS		0	/* not a touchscreen device */
+#define EGALAX_TS	1	/* eGalax touchscreen device */
+#define ZYTRONIC_TS	2	/* Zytronic touchscreen device */
+#define ELO_TS		3	/* Elo touchscreen device */
+#define XIROKU_TS	4	/* Xiroku touchscreen device */
+#define TOUCH_3M_TS	5	/* 3M touchscreen device */
+
+#endif /* CONFIG_MCST */
 struct mousedev {
 	int open;
 	struct input_handle handle;
@@ -77,6 +86,10 @@ struct mousedev {
 
 	int (*open_device)(struct mousedev *mousedev);
 	void (*close_device)(struct mousedev *mousedev);
+#ifdef CONFIG_MCST
+	int touchscreen;	/* touchscreen device */
+
+#endif /* CONFIG_MCST */
 };
 
 enum mousedev_emul {
@@ -172,6 +185,13 @@ static void mousedev_abs_event(struct input_dev *dev, struct mousedev *mousedev,
 	switch (code) {
 
 	case ABS_X:
+#ifdef CONFIG_MCST
+		if (mousedev->touchscreen) {
+			mousedev->packet.abs_event = 1;
+			mousedev->packet.x = value;
+			break;
+		};
+#endif /* CONFIG_MCST */
 		min = input_abs_get_min(dev, ABS_X);
 		max = input_abs_get_max(dev, ABS_X);
 
@@ -186,6 +206,13 @@ static void mousedev_abs_event(struct input_dev *dev, struct mousedev *mousedev,
 		break;
 
 	case ABS_Y:
+#ifdef CONFIG_MCST
+		if (mousedev->touchscreen) {
+			mousedev->packet.abs_event = 1;
+			mousedev->packet.y = value;
+			break;
+		};
+#endif /* CONFIG_MCST */
 		min = input_abs_get_min(dev, ABS_Y);
 		max = input_abs_get_max(dev, ABS_Y);
 
@@ -288,11 +315,20 @@ static void mousedev_notify_readers(struct mousedev *mousedev,
 			client->pos_y = packet->y;
 		}
 
+#ifdef CONFIG_MCST
+		if (mousedev->touchscreen == NO_TS) {
+#endif /* CONFIG_MCST */
 		client->pos_x += packet->dx;
 		client->pos_x = clamp_val(client->pos_x, 0, xres);
 
 		client->pos_y += packet->dy;
 		client->pos_y = clamp_val(client->pos_y, 0, yres);
+#ifdef CONFIG_MCST
+		} else {
+			client->pos_x = packet->x;
+			client->pos_y = packet->y;
+		};
+#endif /* CONFIG_MCST */
 
 		p->dx += packet->dx;
 		p->dy += packet->dy;
@@ -355,12 +391,27 @@ static void mousedev_event(struct input_handle *handle,
 		if (test_bit(BTN_TRIGGER, handle->dev->keybit))
 			return;
 
+#ifndef CONFIG_MCST
 		if (test_bit(BTN_TOOL_FINGER, handle->dev->keybit))
+#else /* CONFIG_MCST */
+		if (test_bit(BTN_TOOL_FINGER, handle->dev->keybit) &&
+				(mousedev->touchscreen == NO_TS)) {
+#endif /* CONFIG_MCST */
 			mousedev_touchpad_event(handle->dev,
 						mousedev, code, value);
+#ifndef CONFIG_MCST
 		else
 			mousedev_abs_event(handle->dev, mousedev, code, value);
 
+#else /* CONFIG_MCST */
+		} else if (mousedev->touchscreen) {
+			mousedev_abs_event(handle->dev, mousedev,
+				ABS_X + (code & 1), value);
+		} else {
+			mousedev_abs_event(handle->dev, mousedev, code,
+				value);
+		};
+#endif /* CONFIG_MCST */
 		break;
 
 	case EV_REL:
@@ -391,7 +442,12 @@ static void mousedev_event(struct input_handle *handle,
 			}
 
 			mousedev_notify_readers(mousedev, &mousedev->packet);
+#ifndef CONFIG_MCST
 			mousedev_notify_readers(mousedev_mix, &mousedev->packet);
+#else /* CONFIG_MCST */
+			if (mousedev->touchscreen == NO_TS)
+				mousedev_notify_readers(mousedev_mix, &mousedev->packet);
+#endif /* CONFIG_MCST */
 
 			mousedev->packet.dx = mousedev->packet.dy =
 				mousedev->packet.dz = 0;
@@ -607,6 +663,19 @@ static void mousedev_packet(struct mousedev_client *client, u8 *ps2_data)
 
 	case MOUSEDEV_EMUL_PS2:
 	default:
+#ifdef CONFIG_MCST
+		if (client->mousedev->touchscreen) {
+			/* for touchscreens */
+			ps2_data[0] = 0x80 | p->buttons;
+			ps2_data[1] = (client->pos_x >> 8);
+			ps2_data[2] = (client->pos_x & 0xFF);
+			ps2_data[3] = (client->pos_y >> 8);
+			ps2_data[4] = (client->pos_y & 0xFF);
+			p->dz = 0;
+			client->bufsiz = 5;
+			break;
+		};
+#endif /* CONFIG_MCST */
 		p->dz = 0;
 
 		ps2_data[0] |= ((p->buttons & 0x10) >> 3) |
@@ -867,6 +936,9 @@ static struct mousedev *mousedev_create(struct input_dev *dev,
 			     mixdev ? SINGLE_DEPTH_NESTING : 0);
 	init_waitqueue_head(&mousedev->wait);
 
+#ifdef CONFIG_MCST
+	mousedev->touchscreen = NO_TS;
+#endif /* CONFIG_MCST */
 	if (mixdev) {
 		dev_set_name(&mousedev->dev, "mice");
 
@@ -877,6 +949,27 @@ static struct mousedev *mousedev_create(struct input_dev *dev,
 		/* Normalize device number if it falls into legacy range */
 		if (dev_no < MOUSEDEV_MINOR_BASE + MOUSEDEV_MINORS)
 			dev_no -= MOUSEDEV_MINOR_BASE;
+#ifdef CONFIG_MCST
+
+		if ((dev != 0) && (memcmp(dev->name, "eGalax", 6) == 0)) {
+			mousedev->touchscreen = EGALAX_TS;
+			pr_info("eGalax: Touchscreen connected to "
+			"/dev/input/mouse%d\n", dev_no);
+		} else if ((dev != 0) && (memcmp(dev->name, "Xiroku", 6) == 0)) {
+			mousedev->touchscreen = XIROKU_TS;
+			pr_info("Xiroku: Touchscreen connected to "
+				"/dev/input/mouse%d\n", dev_no);
+		} else if ((dev != 0) && (memcmp(dev->name, "Zytronic", 8) == 0)) {
+			mousedev->touchscreen = ZYTRONIC_TS;
+			pr_info("Zytronic: Touchscreen connected to "
+				"/dev/input/mouse%d\n", dev_no);
+		} else if ((dev != 0) && (memcmp(dev->name, "3M 3M", 5) == 0)) {
+			mousedev->touchscreen = TOUCH_3M_TS;
+			pr_info("3M: Touchscreen connected to "
+				"/dev/input/mouse%d\n", dev_no);
+		}
+
+#endif /* CONFIG_MCST */
 		dev_set_name(&mousedev->dev, "mouse%d", dev_no);
 
 		mousedev->open_device = mousedev_open_device;
