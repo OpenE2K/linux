@@ -7270,16 +7270,16 @@ qla2x00_timer(struct timer_list *t)
 #define FW_ISP27XX	10
 #define FW_ISP28XX	11
 
-#define FW_FILE_ISP21XX	"ql2100_fw.bin"
-#define FW_FILE_ISP22XX	"ql2200_fw.bin"
-#define FW_FILE_ISP2300	"ql2300_fw.bin"
-#define FW_FILE_ISP2322	"ql2322_fw.bin"
-#define FW_FILE_ISP24XX	"ql2400_fw.bin"
-#define FW_FILE_ISP25XX	"ql2500_fw.bin"
-#define FW_FILE_ISP81XX	"ql8100_fw.bin"
-#define FW_FILE_ISP82XX	"ql8200_fw.bin"
-#define FW_FILE_ISP2031	"ql2600_fw.bin"
-#define FW_FILE_ISP8031	"ql8300_fw.bin"
+#define FW_FILE_ISP21XX	"qlogic/ql2100_fw.bin"
+#define FW_FILE_ISP22XX	"qlogic/ql2200_fw.bin"
+#define FW_FILE_ISP2300	"qlogic/ql2300_fw.bin"
+#define FW_FILE_ISP2322	"qlogic/ql2322_fw.bin"
+#define FW_FILE_ISP24XX	"qlogic/ql2400_fw.bin"
+#define FW_FILE_ISP25XX	"qlogic/ql2500_fw.bin"
+#define FW_FILE_ISP81XX	"qlogic/ql8100_fw.bin"
+#define FW_FILE_ISP82XX	"qlogic/ql8200_fw.bin"
+#define FW_FILE_ISP2031	"qlogic/ql2600_fw.bin"
+#define FW_FILE_ISP8031	"qlogic/ql8300_fw.bin"
 #define FW_FILE_ISP27XX	"ql2700_fw.bin"
 #define FW_FILE_ISP28XX	"ql2800_fw.bin"
 

@@ -1463,7 +1463,11 @@ static bool elf_fdpic_dump_segments(struct coredump_params *cprm,
 	for (i = 0; i < vma_count; i++) {
 		struct core_vma_metadata *meta = vma_meta + i;
 
+#ifndef CONFIG_E2K
 		if (!dump_user_range(cprm, meta->start, meta->dump_size))
+#else
+		if (!dump_user_range(cprm, meta->start, meta->dump_size, meta->flags))
+#endif
 			return false;
 	}
 	return true;

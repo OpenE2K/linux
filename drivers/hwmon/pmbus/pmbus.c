@@ -232,11 +232,42 @@ static const struct i2c_device_id pmbus_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, pmbus_id);
 
+#ifdef CONFIG_MCST
+static const struct of_device_id pmbus_of_match[] = {
+	{ .compatible =   "adp4000", .data = &pmbus_info_one      },
+	{ .compatible =    "bmr453", .data = &pmbus_info_one      },
+	{ .compatible =    "bmr454", .data = &pmbus_info_one      },
+	{ .compatible =    "dps460", .data = &pmbus_info_one_skip },
+	{ .compatible =  "dps650ab", .data = &pmbus_info_one_skip },
+	{ .compatible =    "dps800", .data = &pmbus_info_one_skip },
+	{ .compatible =    "mdt040", .data = &pmbus_info_one      },
+	{ .compatible =   "ncp4200", .data = &pmbus_info_one      },
+	{ .compatible =   "ncp4208", .data = &pmbus_info_one      },
+	{ .compatible =    "pdt003", .data = &pmbus_info_one      },
+	{ .compatible =    "pdt006", .data = &pmbus_info_one      },
+	{ .compatible =    "pdt012", .data = &pmbus_info_one      },
+	{ .compatible =     "pmbus", .data = &pmbus_info_zero     },
+	{ .compatible =    "sgd009", .data = &pmbus_info_one_skip },
+	{ .compatible =  "tps40400", .data = &pmbus_info_one      },
+	{ .compatible = "tps544b20", .data = &pmbus_info_one      },
+	{ .compatible = "tps544b25", .data = &pmbus_info_one      },
+	{ .compatible = "tps544c20", .data = &pmbus_info_one      },
+	{ .compatible = "tps544c25", .data = &pmbus_info_one      },
+	{ .compatible =    "udt020", .data = &pmbus_info_one      },
+	{}
+};
+
+MODULE_DEVICE_TABLE(of, pmbus_of_match);
+#endif
+
 /* This is the driver that will be inserted */
 static struct i2c_driver pmbus_driver = {
 	.driver = {
-		   .name = "pmbus",
-		   },
+		.name = "pmbus",
+#ifdef CONFIG_MCST
+		.of_match_table = of_match_ptr(pmbus_of_match),
+#endif
+	},
 	.probe_new = pmbus_probe,
 	.remove = pmbus_do_remove,
 	.id_table = pmbus_id,

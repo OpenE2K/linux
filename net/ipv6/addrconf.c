@@ -5628,7 +5628,6 @@ static inline void __snmp6_fill_stats64(u64 *stats, void __percpu *mib,
 	int i, c;
 	u64 buff[IPSTATS_MIB_MAX];
 	int pad = bytes - sizeof(u64) * IPSTATS_MIB_MAX;
-
 	BUG_ON(pad < 0);
 
 	memset(buff, 0, sizeof(buff));
@@ -5639,7 +5638,13 @@ static inline void __snmp6_fill_stats64(u64 *stats, void __percpu *mib,
 			buff[i] += snmp_get_cpu_field64(mib, c, i, syncpoff);
 	}
 
+#ifdef CONFIG_MCST
+	/* stats is 4-bytes aligned */
+	for (i = 0; i < IPSTATS_MIB_MAX; i++)
+		put_unaligned(buff[i], stats + i);
+#else
 	memcpy(stats, buff, IPSTATS_MIB_MAX * sizeof(u64));
+#endif
 	memset(&stats[IPSTATS_MIB_MAX], 0, pad);
 }
 

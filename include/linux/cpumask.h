@@ -96,6 +96,7 @@ extern struct cpumask __cpu_active_mask;
 #define cpu_present_mask  ((const struct cpumask *)&__cpu_present_mask)
 #define cpu_active_mask   ((const struct cpumask *)&__cpu_active_mask)
 
+
 extern atomic_t __num_online_cpus;
 
 #if NR_CPUS > 1

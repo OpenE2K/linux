@@ -38,6 +38,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/vmalloc.h>
 #include <linux/mlx5/driver.h>
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif
 
 #include "mlx5_core.h"
 
@@ -52,12 +55,36 @@ struct mlx5_db_pgdir {
  * register it in a memory region at HCA virtual address 0.
  */
 
+#ifdef CONFIG_E2K
 static void *mlx5_dma_zalloc_coherent_node(struct mlx5_core_dev *dev,
 					   size_t size, dma_addr_t *dma_handle,
 					   int node)
 {
 	struct device *device = mlx5_core_dma_dev(dev);
 	struct mlx5_priv *priv = &dev->priv;
+	int original_node;
+	void *cpu_handle;
+
+	if (!l_iommu_has_numa_bug()) {
+		mutex_lock(&priv->alloc_mutex);
+		original_node = dev_to_node(device);
+		set_dev_node(device, node);
+	}
+	cpu_handle = dma_alloc_coherent(device, size, dma_handle,
+					GFP_KERNEL);
+	if (!l_iommu_has_numa_bug()) {
+		set_dev_node(device, original_node);
+		mutex_unlock(&priv->alloc_mutex);
+	}
+	return cpu_handle;
+}
+#else
+static void *mlx5_dma_zalloc_coherent_node(struct mlx5_core_dev *dev,
+					   size_t size, dma_addr_t *dma_handle,
+					   int node)
+{
+	struct mlx5_priv *priv = &dev->priv;
+	struct device *device = dev->device;
 	int original_node;
 	void *cpu_handle;
 
@@ -70,6 +97,7 @@ static void *mlx5_dma_zalloc_coherent_node(struct mlx5_core_dev *dev,
 	mutex_unlock(&priv->alloc_mutex);
 	return cpu_handle;
 }
+#endif
 
 static int mlx5_buf_alloc_node(struct mlx5_core_dev *dev, int size,
 			       struct mlx5_frag_buf *buf, int node)

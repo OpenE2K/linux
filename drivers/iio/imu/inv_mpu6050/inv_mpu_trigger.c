@@ -225,6 +225,10 @@ int inv_mpu6050_probe_trigger(struct iio_dev *indio_dev, int irq_type)
 	int ret;
 	struct inv_mpu6050_state *st = iio_priv(indio_dev);
 
+#ifdef CONFIG_MCST
+	dev_info(&indio_dev->dev,
+		 "trigger_alloc: %s-dev%d", indio_dev->name, indio_dev->id);
+#endif /* CONFIG_MCST */
 	st->trig = devm_iio_trigger_alloc(&indio_dev->dev,
 					  "%s-dev%d",
 					  indio_dev->name,
@@ -232,6 +236,10 @@ int inv_mpu6050_probe_trigger(struct iio_dev *indio_dev, int irq_type)
 	if (!st->trig)
 		return -ENOMEM;
 
+#ifdef CONFIG_MCST
+	dev_info(&indio_dev->dev,
+		 "request_irq: %d, type %d\n", st->irq, irq_type);
+#endif /* CONFIG_MCST */
 	ret = devm_request_irq(&indio_dev->dev, st->irq,
 			       &iio_trigger_generic_data_rdy_poll,
 			       irq_type,

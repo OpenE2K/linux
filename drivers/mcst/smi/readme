@@ -1,0 +1,41 @@
+1. Introduction
+SiliconMotion SM750/SM768 Graphics PCI-E DRM Driver
+
+2. Usage
+This driver can be compiled under the kernel 5.x. 
+1)  Please make sure that you are in console and run as root user.
+2)  Open this driver directory, and use the "make" command, it will to generate the "smifb.ko".
+3)	Install the module.
+	make install
+4)  use "depmod -a" to handle dependency descriptions for loadable kernel modules.
+5)  On some ubuntu or debian OS, we need to update initramfs update-initramfs -u
+5)	Reboot and restart graphic interface, 
+
+Build essential package:
+If there is build-mistake such as "/lib/modules/.../build: No such file or directory"
+(Ubuntu version)
+apt-get install linux-headers-$(uname -r) build-essential
+(Fedora version)
+yum install kernel-devel-$(uname -r) kernel-headers-$(uname -r)
+
+
+Module Options
+==============
+
+Special configuration for smifb is usually unnecessary. There are a few
+options, however.
+
+
+From the command line, pass options to modprobe
+modprobe smifb.ko lvds=1 width=1024 height=768
+
+Or modify options on the fly at /sys/module/smifb/parameters directory 
+change the parameter in place, and save the file.
+
+
+Or for permanent option, create file like /etc/modprobe.d/smifb.conf with text
+options smifb lvds=1 width=1024 height=768
+
+Module Parameter
+==============
+You can use "modinfo smifb" to get detail information.

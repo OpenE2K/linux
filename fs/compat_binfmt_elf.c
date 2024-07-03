@@ -61,7 +61,9 @@
  * differ from the native ones, or omitted when they match.
  */
 
+#ifndef CONFIG_E2K
 #undef	ELF_ARCH
+#endif
 #undef	elf_check_arch
 #define	elf_check_arch	compat_elf_check_arch
 

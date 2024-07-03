@@ -18,10 +18,20 @@
 #include <linux/module.h>
 #include <linux/rtc.h>
 #include <linux/audit.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#include <linux/delay.h>
+
+#include <asm/sclkr.h>
+#endif
 
 #include "ntp_internal.h"
 #include "timekeeping_internal.h"
 
+
+#ifdef CONFIG_MCST
+int pps_debug = 0;
+EXPORT_SYMBOL(pps_debug);
+#endif
 
 /*
  * NTP timekeeping variables:
@@ -103,7 +113,11 @@ static time64_t			ntp_next_leap_sec = TIME64_MAX;
 
 static int pps_valid;		/* signal watchdog counter */
 static long pps_tf[3];		/* phase median filter */
+#ifdef CONFIG_MCST
+static long pps_jitter = 0;	/* current jitter (ns) */
+#else
 static long pps_jitter;		/* current jitter (ns) */
+#endif
 static struct timespec64 pps_fbase; /* beginning of the last freq interval */
 static int pps_shift;		/* current interval duration (s) (shift) */
 static int pps_intcnt;		/* interval counter */
@@ -276,6 +290,12 @@ static void ntp_update_frequency(void)
 	 */
 	tick_length		+= new_base - tick_length_base;
 	tick_length_base	 = new_base;
+#ifdef CONFIG_MCST
+	if (pps_debug & 4)
+		pr_warn("upd_freq tick_nsec %ld new_base %lld"
+			"second_length %lld tick_length %lld\n",
+			tick_nsec, new_base, second_length, tick_length);
+#endif
 }
 
 static inline s64 ntp_update_offset_fll(s64 offset64, long secs)
@@ -797,6 +817,19 @@ int __do_adjtimex(struct __kernel_timex *txc, const struct timespec64 *ts,
 	return result;
 }
 
+#ifdef CONFIG_MCST
+int		do_log_stv = 0;
+EXPORT_SYMBOL(do_log_stv);
+
+void
+set_pps_stat2(int new_st)
+{
+	update_tmstatus_for_ntp(&time_status,
+		STA_PPSTIME | STA_PPSFREQ, new_st);
+}
+EXPORT_SYMBOL(set_pps_stat2);
+#endif
+
 #ifdef	CONFIG_NTP_PPS
 
 /* actually struct pps_normtime is good old struct timespec, but it is
@@ -937,7 +970,11 @@ static long hardpps_update_freq(struct pps_normtime freq_norm)
 }
 
 /* correct REALTIME clock phase error against PPS signal */
+#ifdef CONFIG_MCST
+static void hardpps_update_phase(long error, int sec)
+#else
 static void hardpps_update_phase(long error)
+#endif
 {
 	long correction = -error;
 	long jitter;
@@ -950,10 +987,18 @@ static void hardpps_update_phase(long error)
 	 * threshold, the sample is discarded; otherwise, if so enabled,
 	 * the time offset is updated.
 	 */
+#ifdef CONFIG_MCST
+	if (pps_jitter && jitter > (pps_jitter << PPS_POPCORN)) {
+		if (pps_debug & 8)
+			pr_warn("hardpps: PPSJITTER: on %d sec "
+				"jitter=%ld > %ld\n",
+				sec, jitter, pps_jitter << PPS_POPCORN);
+#else
 	if (jitter > (pps_jitter << PPS_POPCORN)) {
 		printk_deferred(KERN_WARNING
 				"hardpps: PPSJITTER: jitter=%ld, limit=%ld\n",
 				jitter, (pps_jitter << PPS_POPCORN));
+#endif
 		time_status |= STA_PPSJITTER;
 		pps_jitcnt++;
 	} else if (time_status & STA_PPSTIME) {
@@ -965,8 +1010,18 @@ static void hardpps_update_phase(long error)
 	}
 	/* update jitter */
 	pps_jitter += (jitter - pps_jitter) >> PPS_INTMIN;
+#ifdef CONFIG_MCST
+	if (pps_debug & 8)
+		pr_warn("phase: er pj j f; %ld; %ld; %ld; %ld\n",
+			(long)error, pps_jitter, jitter,
+			(long)shift_right((time_freq >> PPM_SCALE_INV_SHIFT)
+				* PPM_SCALE_INV, NTP_SCALE_SHIFT));
+#endif
 }
 
+#ifdef CONFIG_MCST
+static int prev_error_sec = 0;
+#endif
 /*
  * __hardpps() - discipline CPU clock oscillator to external PPS signal
  *
@@ -1010,7 +1065,15 @@ void __hardpps(const struct timespec64 *phase_ts, const struct timespec64 *raw_t
 		time_status |= STA_PPSJITTER;
 		/* restart the frequency calibration interval */
 		pps_fbase = *raw_ts;
+#ifdef CONFIG_MCST
+		if (pts_norm.sec - prev_error_sec > 30) {
+			pr_err("hardpps: Incorrect pulse_per_second period "
+			" = %lld.%9ld sec. Time: %lld (secs since 1970)\n",
+			freq_norm.sec, freq_norm.nsec, pts_norm.sec);
+		}
+#else
 		printk_deferred(KERN_ERR "hardpps: PPSJITTER: bad pulse\n");
+#endif
 		return;
 	}
 
@@ -1021,10 +1084,20 @@ void __hardpps(const struct timespec64 *phase_ts, const struct timespec64 *raw_t
 		pps_calcnt++;
 		/* restart the frequency calibration interval */
 		pps_fbase = *raw_ts;
+#ifdef CONFIG_MCST
+		if (pps_debug & 4)
+			pr_warn("hardpps: freq_norm = %ld.%9ld s\n",
+				(signed long)freq_norm.sec,
+				(signed long)freq_norm.nsec);
+#endif
 		hardpps_update_freq(freq_norm);
 	}
 
+#ifdef CONFIG_MCST
+	hardpps_update_phase(pts_norm.nsec, pts_norm.sec);
+#else
 	hardpps_update_phase(pts_norm.nsec);
+#endif
 
 }
 #endif	/* CONFIG_NTP_PPS */

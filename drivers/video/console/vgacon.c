@@ -389,6 +389,7 @@ static void vgacon_init(struct vc_data *c, int init)
 	} else
 		vc_resize(c, vga_video_num_columns, vga_video_num_lines);
 
+	c->vc_scan_lines = vga_scan_lines;
 	c->vc_complement_mask = 0x7700;
 	if (vga_512_chars)
 		c->vc_hi_font_mask = 0x0800;

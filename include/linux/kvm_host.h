@@ -888,8 +888,11 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg);
 vm_fault_t kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf);
 
+#ifdef CONFIG_E2K
+int kvm_vm_ioctl_check_extension(struct kvm *kvm, int ext);
+#else
 int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext);
-
+#endif
 void kvm_arch_mmu_enable_log_dirty_pt_masked(struct kvm *kvm,
 					struct kvm_memory_slot *slot,
 					gfn_t gfn_offset,
@@ -939,8 +942,13 @@ void kvm_arch_exit(void);
 
 void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu);
 
+#ifndef	CONFIG_E2K
 void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu);
 void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu);
+#else	/* CONFIG_E2K */
+void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu, bool schedule);
+void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule);
+#endif	/* ! CONFIG_E2K */
 int kvm_arch_vcpu_precreate(struct kvm *kvm, unsigned int id);
 int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu);
 void kvm_arch_vcpu_postcreate(struct kvm_vcpu *vcpu);
@@ -1169,6 +1177,11 @@ static inline gfn_t gpa_to_gfn(gpa_t gpa)
 static inline hpa_t pfn_to_hpa(kvm_pfn_t pfn)
 {
 	return (hpa_t)pfn << PAGE_SHIFT;
+}
+
+static inline kvm_pfn_t hpa_to_pfn(hpa_t hpa)
+{
+	return (kvm_pfn_t)(hpa >> PAGE_SHIFT);
 }
 
 static inline struct page *kvm_vcpu_gpa_to_page(struct kvm_vcpu *vcpu,

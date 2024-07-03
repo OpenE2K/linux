@@ -2353,6 +2353,7 @@ static int radeonfb_pci_register(struct pci_dev *pdev,
 	    rinfo->family == CHIP_FAMILY_RS200)
 		rinfo->errata |= CHIP_ERRATA_PLL_DELAY;
 
+#ifndef CONFIG_MCST
 #if defined(CONFIG_PPC) || defined(CONFIG_SPARC)
 	/* On PPC, we obtain the OF device-node pointer to the firmware
 	 * data for this chip
@@ -2363,6 +2364,7 @@ static int radeonfb_pci_register(struct pci_dev *pdev,
 		       pci_name(rinfo->pdev));
 
 #endif /* CONFIG_PPC || CONFIG_SPARC */
+#endif
 #ifdef CONFIG_PPC
 	/* On PPC, the firmware sets up a memory mapping that tends
 	 * to cause lockups when enabling the engine. We reconfigure

@@ -50,6 +50,10 @@
 
 #include <linux/uaccess.h>
 
+#ifdef CONFIG_E2K
+#include <asm/rlimits.h>
+#endif
+
 #include <linux/errno.h>
 #include <linux/time.h>
 #include <linux/proc_fs.h>
@@ -590,6 +594,10 @@ static const struct limit_names lnames[RLIM_NLIMITS] = {
 	[RLIMIT_NICE] = {"Max nice priority", NULL},
 	[RLIMIT_RTPRIO] = {"Max realtime priority", NULL},
 	[RLIMIT_RTTIME] = {"Max realtime timeout", "us"},
+#ifdef	CONFIG_E2K
+	[RLIMIT_P_STACK_EXT] = {"Max procedure stack size", "bytes"},
+	[RLIMIT_PC_STACK_EXT] = {"Max chain stack size", "bytes"},
+#endif
 };
 
 /* Display limits for a process */
@@ -1006,6 +1014,107 @@ static const struct file_operations proc_environ_operations = {
 	.llseek		= generic_file_llseek,
 	.release	= mem_release,
 };
+
+#ifdef	CONFIG_E2K
+static int mem_tags_open(struct inode *inode, struct file *file)
+{
+	int ret = __mem_open(inode, file, PTRACE_MODE_ATTACH);
+
+	/* OK to pass negative loff_t, we can catch out-of-range */
+	file->f_mode |= FMODE_UNSIGNED_OFFSET;
+
+	return ret;
+}
+
+static ssize_t mem_tags_read(struct file *file, char __user *buf,
+			size_t count, loff_t *ppos)
+{
+	struct mm_struct *mm = file->private_data;
+	unsigned long src = *ppos;
+	ssize_t read;
+	char *page;
+	int i;
+
+	if (!mm)
+		return 0;
+
+	page = (char *)__get_free_page(GFP_KERNEL);
+	if (!page)
+		return -ENOMEM;
+
+	read = 0;
+	if (!atomic_inc_not_zero(&mm->mm_users))
+		goto free;
+
+	while (count > 0) {
+		int this_len = min(PAGE_SIZE / 16, count);
+
+		this_len = access_remote_vm(mm, 16 * src, page,
+				16 * this_len, 0);
+		this_len /= 16;
+		if (!this_len) {
+			if (!read)
+				read = -EIO;
+			break;
+		}
+
+		/* Extract tags. We can do in-place conversion since
+		 * all tags will fit in (PAGE_SIZE / 16) bytes and we
+		 * extract them from the left to the right. */
+		for (i = 0; i < (this_len + 1) / 2; i++)
+			extract_tags_32((u16 *)(&page[2 * i]), &page[32 * i]);
+
+		if (copy_to_user(buf, page, this_len)) {
+			read = -EFAULT;
+			break;
+		}
+
+		src += this_len;
+		buf += this_len;
+		read += this_len;
+		count -= this_len;
+	}
+	*ppos = src;
+
+	mmput(mm);
+free:
+	free_page((unsigned long) page);
+
+	return read;
+}
+
+static loff_t mem_tags_lseek(struct file *file, loff_t offset, int orig)
+{
+	switch (orig) {
+	case 0:
+		file->f_pos = offset;
+		break;
+	case 1:
+		file->f_pos += offset;
+		break;
+	default:
+		return -EINVAL;
+	}
+	force_successful_syscall_return();
+	return file->f_pos;
+}
+
+static int mem_tags_release(struct inode *inode, struct file *file)
+{
+	struct mm_struct *mm = file->private_data;
+	if (mm)
+		mmdrop(mm);
+	return 0;
+}
+
+
+static const struct file_operations proc_mem_tags_operations = {
+	.llseek		= mem_tags_lseek,
+	.read		= mem_tags_read,
+	.open		= mem_tags_open,
+	.release	= mem_tags_release,
+};
+#endif	/* CONFIG_E2K */
 
 static int auxv_open(struct inode *inode, struct file *file)
 {
@@ -2843,6 +2952,7 @@ static const struct pid_entry apparmor_attr_dir_stuff[] = {
 LSM_DIR_OPS(apparmor);
 #endif
 
+
 static const struct pid_entry attr_dir_stuff[] = {
 	ATTR(NULL, "current",		0666),
 	ATTR(NULL, "prev",		0444),
@@ -3286,6 +3396,12 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_TASK_IO_ACCOUNTING
 	ONE("io",	S_IRUSR, proc_tgid_io_accounting),
 #endif
+#ifdef CONFIG_E2K
+	REG("mem_tags", S_IRUSR, proc_mem_tags_operations),
+# ifdef CONFIG_MONITORS
+	REG("monitors_events", S_IRUGO, proc_pid_monitors_events_operations),
+# endif
+#endif
 #ifdef CONFIG_USER_NS
 	REG("uid_map",    S_IRUGO|S_IWUSR, proc_uid_map_operations),
 	REG("gid_map",    S_IRUGO|S_IWUSR, proc_gid_map_operations),
@@ -3575,6 +3691,12 @@ static const struct pid_entry tid_base_stuff[] = {
 	REG("numa_maps", S_IRUGO, proc_pid_numa_maps_operations),
 #endif
 	REG("mem",       S_IRUSR|S_IWUSR, proc_mem_operations),
+#ifdef CONFIG_E2K
+	REG("mem_tags",  S_IRUSR, proc_mem_tags_operations),
+# ifdef CONFIG_MONITORS
+	REG("monitors_events", S_IRUGO, proc_pid_monitors_events_operations),
+# endif
+#endif
 	LNK("cwd",       proc_cwd_link),
 	LNK("root",      proc_root_link),
 	LNK("exe",       proc_exe_link),

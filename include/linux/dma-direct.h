@@ -11,6 +11,9 @@
 #include <linux/memblock.h> /* for min_low_pfn */
 #include <linux/mem_encrypt.h>
 #include <linux/swiotlb.h>
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif
 
 extern unsigned int zone_dma_bits;
 
@@ -106,7 +109,12 @@ static inline bool dma_capable(struct device *dev, dma_addr_t addr, size_t size,
 	if (is_ram && !IS_ENABLED(CONFIG_ARCH_DMA_ADDR_T_64BIT) &&
 	    min(addr, end) < phys_to_dma(dev, PFN_PHYS(min_low_pfn)))
 		return false;
-
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (l_iommu_has_numa_bug()) {
+		if (page_to_nid(phys_to_page(addr)) !=  dev_to_node(dev))
+			return false;
+	}
+#endif
 	return end <= min_not_zero(*dev->dma_mask, dev->bus_dma_limit);
 }
 

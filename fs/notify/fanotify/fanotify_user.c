@@ -1,3 +1,6 @@
+#ifdef CONFIG_MCST
+#include <linux/module.h>
+#endif
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/fanotify.h>
 #include <linux/fcntl.h>
@@ -89,6 +92,16 @@ static int fanotify_event_info_len(unsigned int fid_mode,
 	return info_len;
 }
 
+#ifdef CONFIG_MCST
+char fanotify_forwarded_chroot_task[TASK_COMM_LEN];
+module_param_string(forwarded_chroot_task, fanotify_forwarded_chroot_task,
+			sizeof(fanotify_forwarded_chroot_task), 0644);
+static char fanotify_forwarded_mount[TASK_COMM_LEN];
+module_param_string(forwarded_mount, fanotify_forwarded_mount,
+			sizeof(fanotify_forwarded_mount), 0644);
+struct vfsmount *fanotify_user_mnt;
+#endif
+
 /*
  * Get an fanotify notification event if one exists and is small
  * enough to fit in "count". Return an error pointer if the count
@@ -124,12 +137,41 @@ out:
 	spin_unlock(&group->notification_lock);
 	return event;
 }
+#ifdef CONFIG_MCST
+static bool mnt_fully_visible(struct vfsmount *mnt)
+{
+	if (mnt->mnt_root != mnt->mnt_sb->s_root)
+		return false;
+	return true;
+}
+
+static struct vfsmount *get_mnt_fully_visible(struct vfsmount *mnt)
+{
+	struct super_block *sb = mnt->mnt_sb;
+	struct mount *m;
+	lock_mount_hash();
+	list_for_each_entry(m, &sb->s_mounts, mnt_instance) {
+		if (m->mnt.mnt_root == m->mnt.mnt_sb->s_root)
+			break;
+	}
+	unlock_mount_hash();
+	return &m->mnt;
+}
+#endif
 
 static int create_fd(struct fsnotify_group *group, struct path *path,
 		     struct file **file)
 {
 	int client_fd;
 	struct file *new_file;
+#ifdef CONFIG_MCST
+	struct path hack_path = {
+		.dentry = path->dentry,
+		.mnt = path->mnt
+	};
+	bool hack = path->dentry && path->mnt &&
+			 !strcmp(current->comm, fanotify_forwarded_chroot_task);
+#endif
 
 	client_fd = get_unused_fd_flags(group->fanotify_data.f_flags);
 	if (client_fd < 0)
@@ -139,7 +181,33 @@ static int create_fd(struct fsnotify_group *group, struct path *path,
 	 * we need a new file handle for the userspace program so it can read even if it was
 	 * originally opened O_WRONLY.
 	 */
+#ifdef CONFIG_MCST
+	if (hack) {
+		if (fanotify_user_mnt && hack_path.mnt->mnt_sb ==
+					fanotify_user_mnt->mnt_sb) {
+			hack_path.mnt = fanotify_user_mnt;
+		} else {
+			struct fsnotify_mark *fsn_mark;
+			if (!mnt_fully_visible(hack_path.mnt))
+				hack_path.mnt = get_mnt_fully_visible(hack_path.mnt);
+
+			mutex_lock(&group->mark_mutex);
+			fsn_mark = fsnotify_find_mark(
+				&real_mount(hack_path.mnt)->mnt_fsnotify_marks,
+				group);
+			mutex_unlock(&group->mark_mutex);
+			if (fsn_mark) {
+				if (fsn_mark->user_mnt)
+					hack_path.mnt = fsn_mark->user_mnt;
+				fsnotify_put_mark(fsn_mark);
+			}
+		}
+	}
+
+	new_file = dentry_open(&hack_path,
+#else
 	new_file = dentry_open(path,
+#endif
 			       group->fanotify_data.f_flags | FMODE_NONOTIFY,
 			       current_cred());
 	if (IS_ERR(new_file)) {
@@ -777,8 +845,21 @@ static int fanotify_remove_vfsmount_mark(struct fsnotify_group *group,
 					 struct vfsmount *mnt, __u32 mask,
 					 unsigned int flags, __u32 umask)
 {
+#ifndef CONFIG_MCST
 	return fanotify_remove_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
 				    mask, flags, umask);
+#else
+	int ret = fanotify_remove_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
+				    mask, flags, umask);
+
+	if (!ret && fanotify_user_mnt) {
+		bool hack = !strcmp(current->comm,
+					fanotify_forwarded_chroot_task);
+		if (hack && mnt->mnt_sb == fanotify_user_mnt->mnt_sb)
+			fanotify_user_mnt = NULL;
+	}
+	return ret;
+#endif
 }
 
 static int fanotify_remove_sb_mark(struct fsnotify_group *group,
@@ -846,7 +927,11 @@ static struct fsnotify_mark *fanotify_add_new_mark(struct fsnotify_group *group,
 static int fanotify_add_mark(struct fsnotify_group *group,
 			     fsnotify_connp_t *connp, unsigned int type,
 			     __u32 mask, unsigned int flags,
+#ifndef CONFIG_MCST
 			     __kernel_fsid_t *fsid)
+#else
+			     __kernel_fsid_t *fsid, struct vfsmount *user_mnt)
+#endif
 {
 	struct fsnotify_mark *fsn_mark;
 	__u32 added;
@@ -859,6 +944,9 @@ static int fanotify_add_mark(struct fsnotify_group *group,
 			mutex_unlock(&group->mark_mutex);
 			return PTR_ERR(fsn_mark);
 		}
+#ifdef CONFIG_MCST
+		fsn_mark->user_mnt = user_mnt;
+#endif
 	}
 	added = fanotify_mark_add_to_mask(fsn_mark, mask, flags);
 	if (added & ~fsnotify_conn_mask(fsn_mark->connector))
@@ -873,8 +961,37 @@ static int fanotify_add_vfsmount_mark(struct fsnotify_group *group,
 				      struct vfsmount *mnt, __u32 mask,
 				      unsigned int flags, __kernel_fsid_t *fsid)
 {
+#ifdef CONFIG_MCST
+	struct vfsmount *user_mnt = NULL;
+	if (!strcmp(current->comm, fanotify_forwarded_chroot_task)) {
+		struct super_block *sb = mnt->mnt_sb;
+		struct mount *m;
+		lock_mount_hash();
+		list_for_each_entry(m, &sb->s_mounts, mnt_instance) {
+			char b[256], *p;
+			p = dentry_path(m->mnt_mountpoint, b, sizeof(b));
+			if (fanotify_forwarded_mount[0]) {
+				if (!strcmp(p, fanotify_forwarded_mount)) {
+					fanotify_user_mnt = &m->mnt;
+					break;
+				}
+			} else if (m->mnt.mnt_root == m->mnt.mnt_sb->s_root) {
+				user_mnt = mnt;
+				mnt = &m->mnt;
+				break;
+			}
+		}
+		unlock_mount_hash();
+	}
+#endif
+
 	return fanotify_add_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
+#ifndef CONFIG_MCST
 				 FSNOTIFY_OBJ_TYPE_VFSMOUNT, mask, flags, fsid);
+#else
+				 FSNOTIFY_OBJ_TYPE_VFSMOUNT, mask, flags, fsid,
+				 user_mnt);
+#endif
 }
 
 static int fanotify_add_sb_mark(struct fsnotify_group *group,
@@ -882,7 +999,11 @@ static int fanotify_add_sb_mark(struct fsnotify_group *group,
 				unsigned int flags, __kernel_fsid_t *fsid)
 {
 	return fanotify_add_mark(group, &sb->s_fsnotify_marks,
+#ifndef CONFIG_MCST
 				 FSNOTIFY_OBJ_TYPE_SB, mask, flags, fsid);
+#else
+				 FSNOTIFY_OBJ_TYPE_SB, mask, flags, fsid, NULL);
+#endif
 }
 
 static int fanotify_add_inode_mark(struct fsnotify_group *group,
@@ -902,7 +1023,12 @@ static int fanotify_add_inode_mark(struct fsnotify_group *group,
 		return 0;
 
 	return fanotify_add_mark(group, &inode->i_fsnotify_marks,
+#ifndef CONFIG_MCST
 				 FSNOTIFY_OBJ_TYPE_INODE, mask, flags, fsid);
+#else
+				 FSNOTIFY_OBJ_TYPE_INODE, mask, flags, fsid,
+				 NULL);
+#endif
 }
 
 static struct fsnotify_event *fanotify_alloc_overflow_event(void)

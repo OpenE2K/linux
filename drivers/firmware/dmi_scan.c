@@ -10,6 +10,9 @@
 #include <linux/random.h>
 #include <asm/dmi.h>
 #include <asm/unaligned.h>
+#ifdef CONFIG_E2K
+#include <asm/bootinfo.h>
+#endif
 
 #ifndef SMBIOS_ENTRY_POINT_SCAN_START
 #define SMBIOS_ENTRY_POINT_SCAN_START 0xF0000
@@ -565,7 +568,6 @@ static void __init dmi_format_ids(char *buf, size_t len)
 static int __init dmi_present(const u8 *buf)
 {
 	u32 smbios_ver;
-
 	if (memcmp(buf, "_SM_", 4) == 0 &&
 	    buf[5] < 32 && dmi_checksum(buf, buf[5])) {
 		smbios_ver = get_unaligned_be16(buf + 6);
@@ -648,6 +650,28 @@ static int __init dmi_smbios3_present(const u8 *buf)
 	return 1;
 }
 
+#ifdef CONFIG_E2K
+static int __init __elbrus_scan(void)
+{
+	/* We work here on Elbrus, we're gotta add
+	 * smbios entry point from boot without searching
+	 */
+	char __iomem *dmi_base;
+	char buf[32];
+	boot_info_t *boot_info = &bootblock_virt->info;
+	__u64 dmi_info = boot_info->dmi_info;
+	dmi_base = dmi_early_remap(dmi_info, 0x10000);
+	if (dmi_base == NULL)
+		return 1;
+	memcpy_fromio(buf, dmi_base, 32);
+	if (!dmi_present(buf)) {
+		dmi_available = 1;
+		dmi_early_unmap(dmi_base, 0x10000);
+	}
+	return 0;
+}
+#endif
+
 static void __init dmi_scan_machine(void)
 {
 	char __iomem *p, *q;
@@ -697,6 +721,11 @@ static void __init dmi_scan_machine(void)
 			return;
 		}
 	} else if (IS_ENABLED(CONFIG_DMI_SCAN_MACHINE_NON_EFI_FALLBACK)) {
+#ifdef CONFIG_E2K
+		if (__elbrus_scan())
+			goto error;
+		return;
+#endif
 		p = dmi_early_remap(SMBIOS_ENTRY_POINT_SCAN_START, 0x10000);
 		if (p == NULL)
 			goto error;
@@ -752,13 +781,20 @@ static BIN_ATTR(DMI, S_IRUSR, raw_table_read, NULL, 0);
 
 static int __init dmi_init(void)
 {
+#ifdef CONFIG_E2K
+	dmi_scan_machine();
+	if (!dmi_available)
+		return 0;
+
+	dmi_memdev_walk();
+	dump_stack_set_arch_desc("%s", dmi_ids_string);
+#endif
 	struct kobject *tables_kobj;
 	u8 *dmi_table;
 	int ret = -ENOMEM;
 
 	if (!dmi_available)
 		return 0;
-
 	/*
 	 * Set up dmi directory at /sys/firmware/dmi. This entry should stay
 	 * even after farther error, as it can be used by other modules like
@@ -989,6 +1025,7 @@ const struct dmi_device *dmi_find_device(int type, const char *name,
 			list_entry(d, struct dmi_device, list);
 
 		if (((type == DMI_DEV_TYPE_ANY) || (dev->type == type)) &&
+
 		    ((name == NULL) || (strcmp(dev->name, name) == 0)))
 			return dev;
 	}

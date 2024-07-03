@@ -13,6 +13,10 @@
 #include <linux/module.h>
 #include <linux/log2.h>
 #include <linux/workqueue.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#include <linux/delay.h>
+#include <asm/sclkr.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/rtc.h>
@@ -155,7 +159,18 @@ int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 	if (!rtc->ops)
 		err = -ENODEV;
 	else if (rtc->ops->set_time)
+#if defined(CONFIG_MCST) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+		if (strcmp(curr_clocksource->name, "sclkr") == 0 &&
+					sclkr_mode == SCLKR_RTC) {
+			prepare_sclkr_rtc_set();
+			err = rtc->ops->set_time(rtc->dev.parent, tm);
+			finish_sclkr_rtc_set();
+		} else {
+			err = rtc->ops->set_time(rtc->dev.parent, tm);
+		}
+#else
 		err = rtc->ops->set_time(rtc->dev.parent, tm);
+#endif
 	else
 		err = -EINVAL;
 

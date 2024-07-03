@@ -617,9 +617,10 @@ bool strarray__strtoul_flags(struct strarray *sa, char *bf, size_t size, u64 *re
 			if (!strarray__strtoul(sa, tok, toklen, &val))
 				return false;
 		} else {
-			bool is_hexa = tok[0] == 0 && (tok[1] = 'x' || tok[1] == 'X');
-
-			val = strtoul(tok, NULL, is_hexa ? 16 : 0);
+			/* Backport 96b731412d51c6d19c5269f8e6bf2b6621d3b994
+			 * perf trace: Fix incorrectly parsed hexadecimal
+			 *             value for flags in filter */
+			val = strtoul(tok, NULL, 0);
 		}
 
 		*ret |= (1 << (val - 1));

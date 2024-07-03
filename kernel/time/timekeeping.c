@@ -24,6 +24,9 @@
 #include <linux/compiler.h>
 #include <linux/audit.h>
 #include <linux/random.h>
+#ifdef CONFIG_MCST
+#include <linux/mcst_rt.h>
+#endif
 
 #include "tick-internal.h"
 #include "ntp_internal.h"
@@ -820,6 +823,25 @@ void ktime_get_real_ts64(struct timespec64 *ts)
 }
 EXPORT_SYMBOL(ktime_get_real_ts64);
 
+#ifdef CONFIG_MCST
+s64 getns64timeofday()
+{
+	struct timekeeper *tk = &tk_core.timekeeper;
+	ktime_t base;
+	unsigned long seq;
+	s64 nsecs = 0;
+
+	do {
+		seq = read_seqcount_begin(&tk_core.seq);
+		base = tk->tkr_mono.base;
+		nsecs = timekeeping_get_ns(&tk->tkr_mono);
+
+	} while (read_seqcount_retry(&tk_core.seq, seq));
+	return base + nsecs;
+}
+EXPORT_SYMBOL(getns64timeofday);
+#endif
+
 ktime_t ktime_get(void)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
@@ -1305,7 +1327,6 @@ int do_settimeofday64(const struct timespec64 *ts)
 
 	if (!timespec64_valid_settod(ts))
 		return -EINVAL;
-
 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
 	write_seqcount_begin(&tk_core.seq);
 
@@ -1485,6 +1506,9 @@ int timekeeping_notify(struct clocksource *clock)
 	tick_clock_notify();
 	return tk->tkr_mono.clock == clock ? 0 : -1;
 }
+#ifdef CONFIG_MCST
+EXPORT_SYMBOL(timekeeping_notify);
+#endif
 
 /**
  * ktime_get_raw_ts64 - Returns the raw monotonic time in a timespec
@@ -2461,6 +2485,9 @@ int do_adjtimex(struct __kernel_timex *txc)
 
 	return ret;
 }
+#ifdef CONFIG_MCST
+EXPORT_SYMBOL(do_adjtimex);
+#endif
 
 #ifdef CONFIG_NTP_PPS
 /**
@@ -2480,6 +2507,22 @@ void hardpps(const struct timespec64 *phase_ts, const struct timespec64 *raw_ts)
 }
 EXPORT_SYMBOL(hardpps);
 #endif /* CONFIG_NTP_PPS */
+
+#ifdef CONFIG_MCST
+extern void update_tmstatus_for_ntp(int *status, int reset, int set)
+{
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&timekeeper_lock, flags);
+	write_seqcount_begin(&tk_core.seq);
+
+	*status &= ~reset;
+	*status |= set;
+
+	write_seqcount_end(&tk_core.seq);
+	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
+}
+#endif
 
 /**
  * xtime_update() - advances the timekeeping infrastructure

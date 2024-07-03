@@ -1367,7 +1367,11 @@ struct inode *ext4_orphan_get(struct super_block *sb, unsigned long ino)
 {
 	unsigned long max_ino = le32_to_cpu(EXT4_SB(sb)->s_es->s_inodes_count);
 	ext4_group_t block_group;
+#ifdef __LCC__
+	int bit = -1;
+#else
 	int bit;
+#endif
 	struct buffer_head *bitmap_bh = NULL;
 	struct inode *inode = NULL;
 	int err = -EFSCORRUPTED;

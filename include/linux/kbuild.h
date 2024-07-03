@@ -2,10 +2,16 @@
 #ifndef __LINUX_KBUILD_H
 #define __LINUX_KBUILD_H
 
-#define DEFINE(sym, val) \
-	asm volatile("\n.ascii \"->" #sym " %0 " #val "\"" : : "i" (val))
+#if defined CONFIG_E2K && defined __LCC__
+# define pragma_no_asm_inline _Pragma ("no_asm_inline")
+#else
+# define pragma_no_asm_inline
+#endif
 
-#define BLANK() asm volatile("\n.ascii \"->\"" : : )
+#define DEFINE(sym, val) \
+	pragma_no_asm_inline asm volatile("\n.ascii \"->" #sym " %0 " #val "\"" : : "i" (val))
+
+#define BLANK() pragma_no_asm_inline asm volatile("\n.ascii \"->\"" : : )
 
 #define OFFSET(sym, str, mem) \
 	DEFINE(sym, offsetof(struct str, mem))

@@ -158,7 +158,11 @@ __acquires(ohci->lock)
 	ohci->autostop = 0;
 	ohci->hc_control = ohci_readl (ohci, &ohci->regs->control);
 
+#ifdef CONFIG_MCST
+	if (ohci->hc_control & OHCI_SCHED_ENABLES) {
+#else
 	if (ohci->hc_control & (OHCI_CTRL_IR | OHCI_SCHED_ENABLES)) {
+#endif
 		/* this can happen after resuming a swsusp snapshot */
 		if (ohci->rh_state != OHCI_RH_RUNNING) {
 			ohci_dbg (ohci, "BIOS/SMM active, control %03x\n",
@@ -214,6 +218,9 @@ __acquires(ohci->lock)
 
 	temp = ohci_readl (ohci, &ohci->regs->control);
 	temp &= OHCI_CTRL_HCFS;
+#ifdef CONFIG_MCST
+	if (!(ohci->flags & OHCI_QUIRK_RESUME_STATE))
+#endif
 	if (temp != OHCI_USB_RESUME) {
 		ohci_err (ohci, "controller won't resume\n");
 		spin_lock_irq(&ohci->lock);
@@ -243,13 +250,18 @@ skip_resume:
 		ohci_writel (ohci, OHCI_INTR_SF, &ohci->regs->intrenable);
 
 	/* Then re-enable operations */
-	ohci_writel (ohci, OHCI_USB_OPER, &ohci->regs->control);
+#ifdef CONFIG_MCST
+	temp = OHCI_USB_OPER | (ohci->hc_control & OHCI_CTRL_IR);
+#else
+	temp = OHCI_USB_OPER;
+#endif
+	ohci_writel (ohci, temp, &ohci->regs->control);
 	(void) ohci_readl (ohci, &ohci->regs->control);
 	if (!autostopped)
 		msleep (3);
 
 	temp = ohci->hc_control;
-	temp &= OHCI_CTRL_RWC;
+	temp &= OHCI_CTRL_DFLT;
 	temp |= OHCI_CONTROL_INIT | OHCI_USB_OPER;
 	ohci->hc_control = temp;
 	ohci_writel (ohci, temp, &ohci->regs->control);

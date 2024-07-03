@@ -60,9 +60,17 @@ void end_swap_bio_write(struct bio *bio)
 		 * Also clear PG_reclaim to avoid rotate_reclaimable_page()
 		 */
 		set_page_dirty(page);
+#ifdef CONFIG_MCST
+		pr_alert("%s: Write-error %d on swap-device (%u:%u:%llu)\n",
+			 current->comm, bio->bi_status,
+			 MAJOR(bio_dev(bio)), MINOR(bio_dev(bio)),
+			 (unsigned long long)bio->bi_iter.bi_sector);
+
+#else
 		pr_alert("Write-error on swap-device (%u:%u:%llu)\n",
 			 MAJOR(bio_dev(bio)), MINOR(bio_dev(bio)),
 			 (unsigned long long)bio->bi_iter.bi_sector);
+#endif
 		ClearPageReclaim(page);
 	}
 	end_page_writeback(page);
@@ -298,6 +306,10 @@ int __swap_writepage(struct page *page, struct writeback_control *wbc,
 		end_page_writeback(page);
 		return ret;
 	}
+
+#ifdef CONFIG_E2K
+	tag_swap_write_page(page, wbc);
+#endif  /* CONFIG_E2K */
 
 	ret = bdev_write_page(sis->bdev, swap_page_sector(page), page, wbc);
 	if (!ret) {

@@ -838,6 +838,14 @@ void rcu_all_qs(void)
 {
 	unsigned long flags;
 
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	preempt_disable();
+	if (!smp_load_acquire(this_cpu_ptr(&rcu_urgent_qsn))) {
+		preempt_enable();
+		return;
+	}
+	this_cpu_write(rcu_urgent_qsn, false);
+#else
 	if (!raw_cpu_read(rcu_data.rcu_urgent_qs))
 		return;
 	preempt_disable();
@@ -847,6 +855,7 @@ void rcu_all_qs(void)
 		return;
 	}
 	this_cpu_write(rcu_data.rcu_urgent_qs, false);
+#endif          /* CONFIG_MCST   bug 139936 comment 71 */
 	if (unlikely(raw_cpu_read(rcu_data.rcu_need_heavy_qs))) {
 		local_irq_save(flags);
 		rcu_momentary_dyntick_idle();
@@ -865,9 +874,15 @@ void rcu_note_context_switch(bool preempt)
 	trace_rcu_utilization(TPS("Start context switch"));
 	rcu_qs();
 	/* Load rcu_urgent_qs before other flags. */
+#ifdef CONFIG_MCST    /* bug 139936 comment 71 */
+	if (!smp_load_acquire(this_cpu_ptr(&rcu_urgent_qsn)))
+		goto out;
+	this_cpu_write(rcu_urgent_qsn, false);
+#else
 	if (!smp_load_acquire(this_cpu_ptr(&rcu_data.rcu_urgent_qs)))
 		goto out;
 	this_cpu_write(rcu_data.rcu_urgent_qs, false);
+#endif          /* CONFIG_MCST   bug 139936 comment 71 */
 	if (unlikely(raw_cpu_read(rcu_data.rcu_need_heavy_qs)))
 		rcu_momentary_dyntick_idle();
 	rcu_tasks_qs(current, preempt);

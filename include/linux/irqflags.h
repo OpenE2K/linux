@@ -40,6 +40,12 @@ struct irqtrace_events {
 	unsigned long	hardirq_disable_ip;
 	unsigned int	hardirq_enable_event;
 	unsigned int	hardirq_disable_event;
+#ifdef CONFIG_MCST
+	unsigned long	hardirq_enable_trace[16];
+	unsigned long	hardirq_enable_trace_len;
+	unsigned long	hardirq_disable_trace[16];
+	unsigned long	hardirq_disable_trace_len;
+#endif
 	unsigned long	softirq_disable_ip;
 	unsigned long	softirq_enable_ip;
 	unsigned int	softirq_disable_event;

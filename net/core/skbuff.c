@@ -4323,14 +4323,24 @@ void __init skb_init(void)
 	skbuff_head_cache = kmem_cache_create_usercopy("skbuff_head_cache",
 					      sizeof(struct sk_buff),
 					      0,
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+					      SLAB_HWCACHE_ALIGN|SLAB_PANIC
+							| SLAB_NO_SANITIZE,
+#else
 					      SLAB_HWCACHE_ALIGN|SLAB_PANIC,
+#endif
 					      offsetof(struct sk_buff, cb),
 					      sizeof_field(struct sk_buff, cb),
 					      NULL);
 	skbuff_fclone_cache = kmem_cache_create("skbuff_fclone_cache",
 						sizeof(struct sk_buff_fclones),
 						0,
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+						SLAB_HWCACHE_ALIGN|SLAB_PANIC
+							| SLAB_NO_SANITIZE,
+#else
 						SLAB_HWCACHE_ALIGN|SLAB_PANIC,
+#endif
 						NULL);
 	skb_extensions_init();
 }

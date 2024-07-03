@@ -1,0 +1,14 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+config SECONDARY_SPACE_SUPPORT
+	bool "Support Secondary Space feature in OS"
+	default y
+	help
+	  Select 'y' if you are going to run native Linux-x86 code under
+	  this OS.
+
+config MLT_STORAGE
+	def_bool SECONDARY_SPACE_SUPPORT
+
+source "arch/e2k/sec_space/rtc_procfs/Kconfig"

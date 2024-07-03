@@ -12,4 +12,7 @@ extern int __do_adjtimex(struct __kernel_timex *txc,
 			 const struct timespec64 *ts,
 			 s32 *time_tai, struct audit_ntp_data *ad);
 extern void __hardpps(const struct timespec64 *phase_ts, const struct timespec64 *raw_ts);
+#ifdef CONFIG_MCST
+extern void update_tmstatus_for_ntp(int *status, int reset, int set);
+#endif
 #endif /* _LINUX_NTP_INTERNAL_H */

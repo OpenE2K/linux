@@ -2509,8 +2509,12 @@ cifs_set_file_size(struct inode *inode, struct iattr *attrs,
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
 	struct tcon_link *tlink = NULL;
 	struct cifs_tcon *tcon = NULL;
+#ifdef CONFIG_MCST
+	struct TCP_Server_Info *server = NULL;
+#else
 	struct TCP_Server_Info *server;
-
+	struct cifs_io_parms io_parms;
+#endif
 	/*
 	 * To avoid spurious oplock breaks from server, in the case of
 	 * inodes that we already have open, avoid doing path based

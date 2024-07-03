@@ -1127,6 +1127,76 @@ int compat_wext_handle_ioctl(struct net *net, unsigned int cmd,
 }
 #endif
 
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+
+struct ptr128_iw_point {
+	e2k_ptr_t __user dscr;	/* Pointer to the data  (in user space) */
+	__u16		length;	/* number of fields or size in bytes */
+	__u16		flags;	/* Optional params */
+};
+
+static int ptr128_standard_call(struct net_device	*dev,
+				struct iwreq		*iwr,
+				unsigned int		cmd,
+				struct iw_request_info	*info,
+				iw_handler		handler)
+{
+	const struct iw_ioctl_description *descr;
+	struct ptr128_iw_point *iwp_128;
+	struct iw_point iwp;
+	int err;
+
+	descr = standard_ioctl + IW_IOCTL_IDX(cmd);
+
+	if (descr->header_type != IW_HEADER_TYPE_POINT)
+		return ioctl_standard_call(dev, iwr, cmd, info, handler);
+
+	iwp_128 = (struct ptr128_iw_point *) &iwr->u.data;
+	iwp.pointer = (void *) E2K_PTR_PTR(iwp_128->dscr);
+	iwp.length = iwp_128->length;
+	iwp.flags = iwp_128->flags;
+
+	err = ioctl_standard_iw_point(&iwp, cmd, descr, handler, dev, info);
+
+	iwp_128->length = iwp.length;
+	iwp_128->flags = iwp.flags;
+
+	return err;
+}
+
+int ptr128_wext_handle_ioctl(struct net *net, unsigned long cmd,
+			     unsigned long arg)
+{
+	void __user *argp = (void __user *)arg;
+	struct iw_request_info info;
+	struct iwreq iwr;
+	char *colon;
+	int ret;
+
+	if (copy_from_user(&iwr, argp, sizeof(struct iwreq)))
+		return -EFAULT;
+
+	iwr.ifr_name[IFNAMSIZ-1] = 0;
+	colon = strchr(iwr.ifr_name, ':');
+	if (colon)
+		*colon = 0;
+
+	info.cmd = cmd;
+	info.flags = IW_REQUEST_FLAG_COMPAT;
+
+	ret = wext_ioctl_dispatch(net, &iwr, cmd, &info,
+				  ptr128_standard_call,
+				  ptr128_private_call);
+
+	if (ret >= 0 &&
+	    IW_IS_GET(cmd) &&
+	    copy_to_user(argp, &iwr, sizeof(struct iwreq)))
+		return -EFAULT;
+
+	return ret;
+}
+#endif /* CONFIG_PROTECTED_MODE */
+
 char *iwe_stream_add_event(struct iw_request_info *info, char *stream,
 			   char *ends, struct iw_event *iwe, int event_len)
 {

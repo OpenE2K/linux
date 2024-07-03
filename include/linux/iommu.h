@@ -87,6 +87,12 @@ struct iommu_domain {
 	void *handler_token;
 	struct iommu_domain_geometry geometry;
 	void *iova_cookie;
+#ifdef CONFIG_MCST /* support CPU_HWBUG_CANNOT_DO_DMA_IN_NEIGHBOUR_NODE*/
+	unsigned long map_base;
+	unsigned long *orig_phys_lo;
+	struct idr idr_hi;
+	rwlock_t lock_hi;
+#endif
 };
 
 enum iommu_cap {

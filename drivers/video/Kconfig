@@ -35,6 +35,47 @@ config VIDEOMODE_HELPERS
 config HDMI
 	bool
 
+config FB_MGAM83
+	tristate
+	depends on FB
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select FB_SOFT_CURSOR
+	default n
+
+config PCI_FB_MGAM83
+	tristate "PCI MGAM83 Frame buffer driver"
+	depends on PCI && FB
+	select FB_MGAM83
+	default y
+
+config MGA_HWCOPYAREA
+	bool "PCI - Harware accelerator for \"fb_copyarea\" enabling"
+	depends on PCI_FB_MGAM83
+	default y
+
+config MGA_HWIMAGEBLIT
+	bool "Harware accelerator for \"fb_imageblit\" enabling"
+	depends on PCI_FB_MGAM83
+	default y
+
+config SBUS_FB_MGAM83
+	tristate "SBUS MGAM83 Frame buffer driver"
+	depends on SBUS && FB
+	select FB_MGAM83
+	default y
+
+config SBUS_MGA_HWCOPYAREA
+	bool "SBUS - Harware accelerator for \"fb_copyarea\" enabling"
+	depends on SBUS_FB_MGAM83 
+	default y
+
+config FB_MGA3D
+	tristate "MGA3D framebuffer driver"
+	depends on PCI && FB
+	default m
+
 endif # HAS_IOMEM
 
 if VT

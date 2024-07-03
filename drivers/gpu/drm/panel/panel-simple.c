@@ -3911,7 +3911,26 @@ static const struct panel_desc arm_rtsm = {
 	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
 };
 
+#ifdef CONFIG_MCST
+static const struct panel_desc mcst_monitor = {
+	.modes = NULL,
+	.num_modes = 0,
+	.bpc = 8,
+	.size = {
+		.width = 400,
+		.height = 300,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
+};
+#endif
+
 static const struct of_device_id platform_of_match[] = {
+#ifdef CONFIG_MCST
+	{
+		.compatible = "mcst,monitor",
+		.data = &mcst_monitor
+	},
+#endif
 	{
 		.compatible = "ampire,am-1280800n3tzqw-t00h",
 		.data = &ampire_am_1280800n3tzqw_t00h,

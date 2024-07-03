@@ -889,6 +889,7 @@ static int ext4_clear_blocks(handle_t *handle, struct inode *inode,
 	for (p = first; p < last; p++)
 		*p = 0;
 
+
 	ext4_free_blocks(handle, inode, NULL, block_to_free, count, flags);
 	return 0;
 out_err:

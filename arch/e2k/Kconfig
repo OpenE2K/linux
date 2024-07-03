@@ -1,0 +1,1202 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+
+config E2K
+	bool
+	default y
+	select ARCH_CACHES
+	select ARCH_ENABLE_HUGEPAGE_MIGRATION if HUGETLB_PAGE && MIGRATION
+	select ARCH_ENABLE_SPLIT_PMD_PTLOCK
+	select ARCH_ENABLE_THP_MIGRATION if TRANSPARENT_HUGEPAGE
+	select ARCH_HAVE_NMI_SAFE_CMPXCHG
+	select ARCH_HAS_DEBUG_VIRTUAL
+	select ARCH_HAS_ELF_RANDOMIZE
+	select ARCH_HAS_GCOV_PROFILE_ALL
+	select ARCH_HAS_GIGANTIC_PAGE
+	select ARCH_HAS_PTE_SPECIAL
+	select ARCH_HAS_SET_MEMORY
+	select ARCH_HAS_SG_CHAIN
+	select ARCH_HAS_STRICT_KERNEL_RWX
+	select ARCH_HAS_STRICT_MODULE_RWX
+	select ARCH_INLINE_READ_LOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_LOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_LOCK_IRQ if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_LOCK_IRQSAVE if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_READ_UNLOCK if !PREEMPTION
+	select ARCH_INLINE_READ_UNLOCK_BH if !PREEMPTION
+	select ARCH_INLINE_READ_UNLOCK_IRQ if !PREEMPTION
+	select ARCH_INLINE_READ_UNLOCK_IRQRESTORE if !PREEMPTION
+	select ARCH_INLINE_WRITE_LOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_WRITE_LOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_WRITE_LOCK_IRQ if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_WRITE_LOCK_IRQSAVE if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_WRITE_UNLOCK if !PREEMPTION
+	select ARCH_INLINE_WRITE_UNLOCK_BH if !PREEMPTION
+	select ARCH_INLINE_WRITE_UNLOCK_IRQ if !PREEMPTION
+	select ARCH_INLINE_WRITE_UNLOCK_IRQRESTORE if !PREEMPTION
+	select ARCH_INLINE_SPIN_TRYLOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_TRYLOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK_BH if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK_IRQ if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_LOCK_IRQSAVE if !PREEMPTION && !CPU_E8C
+	select ARCH_INLINE_SPIN_UNLOCK if !PREEMPTION
+	select ARCH_INLINE_SPIN_UNLOCK_BH if !PREEMPTION
+	select ARCH_INLINE_SPIN_UNLOCK_IRQ if !PREEMPTION
+	select ARCH_INLINE_SPIN_UNLOCK_IRQRESTORE if !PREEMPTION
+	select ARCH_KEEP_MEMBLOCK
+	select ARCH_USE_BUILTIN_BSWAP
+	select ARCH_USE_CMPXCHG_LOCKREF
+	select ARCH_USE_QUEUED_RWLOCKS
+	select ARCH_USE_QUEUED_SPINLOCKS
+	select ARCH_USES_HIGH_VMA_FLAGS
+	select ARCH_PROC_KCORE_TEXT
+	select ARCH_THREAD_STACK_ALLOCATOR
+	select ARCH_SUPPORTS_ATOMIC_RMW
+	select ARCH_SUPPORTS_DEFERRED_STRUCT_PAGE_INIT
+	select ARCH_SUPPORTS_INT128
+	select ARCH_SUPPORTS_MSI
+	select ARCH_SUPPORTS_NUMA_BALANCING
+	select ARCH_SUPPORTS_RT
+	select ARCH_WANT_COMPAT_IPC_PARSE_VERSION
+	select ARCH_WANT_IPC_PARSE_VERSION
+	select ARCH_WANT_OPTIONAL_GPIOLIB
+	select ARCH_WEAK_RELEASE_ACQUIRE
+	select DCACHE_WORD_ACCESS
+	select DMA_REMAP
+	select EDAC_SUPPORT
+	select GENERIC_IDLE_POLL_SETUP
+	select GENERIC_IRQ_PROBE
+	select GENERIC_IRQ_SHOW
+	select GENERIC_PENDING_IRQ if SMP
+	select GENERIC_SMP_IDLE_THREAD
+	select HAVE_ALIGNED_STRUCT_PAGE
+	select HAVE_ARCH_BITREVERSE
+	select HAVE_ARCH_COMPILER_H
+	select HAVE_ARCH_HUGE_VMAP if !KVM_GUEST_KERNEL
+	select HAVE_ARCH_MMAP_RND_BITS
+	select HAVE_ARCH_MMAP_RND_COMPAT_BITS if COMPAT
+	select HAVE_ARCH_SECCOMP_FILTER
+	select HAVE_ARCH_TRANSPARENT_HUGEPAGE
+	# THP for PUDs is supported only for DAX filesystems
+	# so should not be enabled until e2k has such filesystems.
+	# select HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
+	select HAVE_ARCH_VMAP_STACK
+	# Note that faulting atomic stores and loads in kernel are supported
+	# since v6 only (see do_recovery_load() for details).  This one is
+	# used for non-faulting cmpxchg_double() only so works on v5 too.
+	select HAVE_CMPXCHG_DOUBLE if CPU_ISET_MIN >= 5
+	select HAVE_CONTEXT_TRACKING
+	select HAVE_COPY_THREAD_TLS
+	select HAVE_DEBUG_BUGVERBOSE
+	select HAVE_DEBUG_KMEMLEAK
+	select HAVE_DYNAMIC_FTRACE
+	select HAVE_EFFICIENT_UNALIGNED_ACCESS
+	select HAVE_FAST_GUP
+	select HAVE_FTRACE_MCOUNT_RECORD
+	select HAVE_FUNCTION_TRACER
+	select HAVE_FUNCTION_GRAPH_TRACER
+	select HAVE_FUTEX_CMPXCHG if FUTEX
+	select HAVE_HW_BREAKPOINT # Always on as it is used to implement ptrace
+	select HAVE_IDE
+	select HAVE_IOREMAP_PROT
+	#select HAVE_KERNEL_BZIP2 -- worse than XZ on e2k
+	select HAVE_KERNEL_GZIP # Stands between LZ4 and XZ
+	select HAVE_KERNEL_LZ4 # Fastest compression/decompression
+	#select HAVE_KERNEL_LZMA -- worse than XZ on e2k
+	#select HAVE_KERNEL_LZO -- worse than GZIP on e2k
+	select HAVE_KERNEL_XZ # Smallest kernel
+	select HAVE_MEMBLOCK
+	select HAVE_MEMBLOCK_NODE_MAP
+	select HAVE_PCI
+	select HAVE_PERF_EVENTS
+	select HAVE_PREEMPT_LAZY
+	select HAVE_REGS_AND_STACK_ACCESS_API
+	select HAVE_RSEQ
+	select HAVE_TRACE_CLOCK
+	select HAVE_SYSCALL_TRACEPOINTS
+	select HAVE_ARCH_AUDITSYSCALL
+	select HAVE_KPROBES
+	select HAVE_KRETPROBES
+	select HAVE_EXIT_THREAD
+	select INTERVAL_TREE if PROTECTED_MODE
+	select IRQ_FORCED_THREADING
+	select MODULES_USE_ELF_RELA
+	select PANIC_ON_OOPS
+	select PCI_MSI_ARCH_FALLBACKS if PCI_MSI
+	select PERF_EVENTS
+	select RTC_CLASS
+	select SET_FS
+	select SPARSE_IRQ
+	select SPARSEMEM_VMEMMAP_ENABLE
+	select SYSCTL_EXCEPTION_TRACE
+	select THREAD_INFO_IN_TASK
+	select TTY
+	select USER_STACKTRACE_SUPPORT
+	select IRQ_DOMAIN
+	select SWIOTLB
+	select GENERIC_ALLOCATOR
+	select IOMMU_DMA
+	select IOMMU_API
+	select ARCH_HAS_PHYS_TO_DMA
+	select COMMON_CLK
+	select HAVE_POSIX_CPU_TIMERS_TASK_WORK
+	help
+	  This is a port of Linux on Elbrus microprocessor architecture.
+
+config SWIOTLB
+	def_bool y
+
+config ARCH_SPARSEMEM_ENABLE
+	def_bool y
+
+config ARCH_SUPPORTS_DEBUG_PAGEALLOC
+	def_bool y
+
+config ARCH_HIBERNATION_POSSIBLE
+	def_bool y
+
+config 64BIT
+	def_bool y
+
+config MMU
+	bool
+	default y
+
+config NEED_DMA_MAP_STATE
+	def_bool y
+
+config ZONE_DMA
+	def_bool y
+
+config ARCH_PROC_KCORE_TEXT
+	def_bool y
+	depends on PROC_KCORE
+
+config GENERIC_FIND_FIRST_BIT
+    def_bool y
+
+config GENERIC_FIND_NEXT_BIT
+    def_bool y
+
+config GENERIC_CALIBRATE_DELAY
+	bool
+	default y
+
+config GENERIC_BUG
+	def_bool y if BUG
+
+config GENERIC_BUG_RELATIVE_POINTERS
+	def_bool y
+
+config EARLY_PRINTK
+	bool
+	default y
+	depends on EARLY_DUMP_CONSOLE
+
+config ARCH_WANT_GENERAL_HUGETLB
+	def_bool y
+
+config GREGS_CONTEXT
+	def_bool y
+
+config GENERIC_IOMAP
+	bool
+	default y
+
+config PGTABLE_LEVELS
+	default 4
+
+config HAVE_GENERIC_GUP
+	def_bool y
+
+config HAVE_SETUP_PER_CPU_AREA
+	def_bool y
+
+config NEED_PER_CPU_EMBED_FIRST_CHUNK
+	def_bool y
+	
+config NEED_PER_CPU_PAGE_FIRST_CHUNK
+	def_bool y
+
+config NEED_SG_DMA_LENGTH
+	def_bool y
+
+config SYS_SUPPORTS_HUGETLBFS
+	def_bool y
+
+config ARCH_SUSPEND_POSSIBLE
+	def_bool y
+	depends on RECOVERY
+
+config ARCH_BOOT_TRACE_POSSIBLE
+	def_bool y
+
+config HOTPLUG_CPU
+	def_bool y
+	depends on SMP
+	select GENERIC_IRQ_MIGRATION
+	help
+	  Say Y here to allow turning CPUs off and on. CPUs can be
+	  controlled through /sys/devices/system/cpu.
+	  ( Note: power management support will enable this option
+	    automatically on SMP systems. )
+	  Say N if you want to disable CPU hotplug.
+
+config GENERIC_GPIO
+	def_bool y
+
+config ARCH_DMA_ADDR_T_64BIT
+	def_bool y
+
+config ARCH_ENABLE_MEMORY_HOTPLUG
+	def_bool y
+
+config ARCH_ENABLE_MEMORY_HOTREMOVE
+        def_bool y
+
+config DEFERRED_STRUCT_PAGE_INIT
+	def_bool y
+	depends on SMP
+
+config HOLES_IN_ZONE
+	def_bool y
+
+config ARCH_MMAP_RND_BITS_MIN
+	default 28
+
+config ARCH_MMAP_RND_BITS_MAX
+	default 32
+
+config ARCH_MMAP_RND_COMPAT_BITS_MIN
+	default 8
+
+config ARCH_MMAP_RND_COMPAT_BITS_MAX
+	default 16
+
+config ARCH_USES_PG_UNCACHED
+	def_bool y
+
+menu "Processor type and features"
+
+config E2K_MACHINE_SIC
+	def_bool y
+
+config E2K_MACHINE_IOHUB
+	def_bool y
+
+config LOCKDEP_SUPPORT
+	def_bool y
+
+config STACKTRACE_SUPPORT
+	def_bool y
+
+config E2K_MACHINE
+	bool "E2K machines support"
+	default n
+	help
+	  If you say Y only one specified machine type will be supported
+	  by this kernel which is better for performance.
+
+config E2K_SIMULATOR
+	bool "E2K simulator"
+	depends on E2K_MACHINE
+	default n
+	help
+	  You can choose this when you are working on a machine simulator.
+
+choice
+	prompt "Subarchitecture Type"
+        depends on E2K_MACHINE
+
+config E2K_E2S
+	bool "Elbrus 2S (NUMA, 4 cores, IOHUB, SIC)"
+	help
+	  Support for Elbrus 2S systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 2S system.
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E8C
+	bool "Elbrus 8C (NUMA, 8 cores, IOHUB-2, SIC)"
+	help
+	  Support for Elbrus 8C systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 8C system.
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E1CP
+	bool "Elbrus 1C+ (1 core + GC, IOHUB-2, Legacy SIC)"
+	help
+	  Support for Elbrus 1C+ systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 1C+ system.
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E8C2
+	bool "Elbrus 8C2 (NUMA, 8 cores, IOHUB-2, SIC)"
+	help
+	  Support for Elbrus 8C systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 8C2 system.
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E12C
+	bool "Elbrus 12C (NUMA, 12 cores, IOHUB-2 , SOC)"
+	help
+	  Support for Elbrus 12C systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 12C System On Chip
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E16C
+	bool "Elbrus 16C (NUMA, 16 cores, IOHUB-2 , SOC)"
+	help
+	  Support for Elbrus 16C systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 16C System On Chip
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E2C3
+	bool "Elbrus 2C3 (NUMA, 2 cores + GPU, IOHUB-2 , SOC)"
+	help
+	  Support for Elbrus 2C3 systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 2C + embeded GPU, System On Chip
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E48C
+	bool "Elbrus 48C (NUMA, 48 cores, IOHUB-2 , SOC)"
+	depends on LCC_VERSION >= 12800
+	help
+	  Support for Elbrus 48C systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 48C System On Chip
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+config E2K_E8V7
+	bool "Elbrus 8V7 (NUMA, 48 cores, IOHUB-2 , SOC)"
+	depends on LCC_VERSION >= 12800
+	help
+	  Support for Elbrus 8V7 systems.  Say 'Y' here if this kernel is
+	  supposed to run on an Elbrus 8V7 System On Chip
+	  Only choose this option if you have such a system and cannot run
+	  the kernel on other machines types,
+	  otherwise you should say N here.
+
+endchoice
+
+choice
+	prompt "Minimum supported E2K generation"
+	depends on !E2K_MACHINE
+	default E2K_MINVER_V3
+	help
+	  Support all Elbrus systems starting from selected architecture
+	  generation. This allows to have better optimized kernel without
+	  quirks for older systems.
+
+config E2K_MINVER_V3
+	bool "Elbrus v3"
+	help
+	  This options enables kernel with minimally supported Elbrus v3
+	  CPU architecture (Elbrus 4c and later).
+
+config E2K_MINVER_V4
+	bool "Elbrus v4"
+	help
+	  This options enables kernel with minimally supported Elbrus v4
+	  CPU architecture (Elbrus 8c, 1c+ and later).
+
+config E2K_MINVER_V5
+	bool "Elbrus v5"
+	help
+	  This options enables kernel with minimally supported Elbrus v5
+	  CPU architecture (Elbrus 8c2 and later).
+
+config E2K_MINVER_V6
+	bool "Elbrus v6"
+	help
+	  This options enables kernel with minimally supported Elbrus v6
+	  CPU architecture (Elbrus 12c, 16c, 2c3 and later).
+
+config E2K_MINVER_V7
+	bool "Elbrus v7"
+	help
+	  This options enables kernel with minimally supported Elbrus v7
+	  CPU architecture (Elbrus 48c, 8v7 and later).
+endchoice
+
+
+# Minimum supported iset version; is always initialized to non-0 value.
+# If E2K_MACHINE=y then this is also the maximum supported iset version.
+config CPU_ISET_MIN
+	int
+	default 3 if E2K_MINVER_V3
+	default 4 if E2K_MINVER_V4
+	default 5 if E2K_MINVER_V5
+	default 6 if E2K_MINVER_V6
+	default 7 if E2K_MINVER_V7
+	default 3 if E2K_E2S
+	default 4 if E2K_E8C || E2K_E1CP
+	default 5 if E2K_E8C2
+	default 6 if E2K_E16C || E2K_E12C || E2K_E2C3
+	default 7 if E2K_E48C || E2K_E8V7
+
+# These show whether particular CPU is supported by current
+# configuration regardless of whether any other CPUs are supported.
+
+config CPU_E2S
+	def_bool E2K_E2S || !E2K_MACHINE && CPU_ISET_MIN <= 3
+
+config CPU_E8C
+	def_bool E2K_E8C || !E2K_MACHINE && CPU_ISET_MIN <= 4
+
+config CPU_E1CP
+	def_bool E2K_E1CP || !E2K_MACHINE && CPU_ISET_MIN <= 4
+
+config CPU_E8C2
+	def_bool E2K_E8C2 || !E2K_MACHINE && CPU_ISET_MIN <= 5
+
+config CPU_E12C
+	def_bool E2K_E12C || !E2K_MACHINE && CPU_ISET_MIN <= 6
+
+config CPU_E16C
+	def_bool E2K_E16C || !E2K_MACHINE && CPU_ISET_MIN <= 6
+
+config CPU_E2C3
+	def_bool E2K_E2C3 || !E2K_MACHINE && CPU_ISET_MIN <= 6
+
+config CPU_E48C
+	def_bool E2K_E48C || !E2K_MACHINE && CPU_ISET_MIN <= 7
+	depends on LCC_VERSION >= 12800
+
+config CPU_E8V7
+	def_bool E2K_E8V7 || !E2K_MACHINE && CPU_ISET_MIN <= 7
+	depends on LCC_VERSION >= 12800
+
+config MIGHT_HAVE_CPU_HWBUG_L1I_STOPS_WORKING
+	def_bool CPU_ISET_MIN <= 6
+
+# Since iset v5 hardware clears RF automatically.
+# For fully virtualized guest hypervisor does
+# all the clearing instead of hardware.
+config CPU_HW_CLEAR_RF
+	def_bool CPU_ISET_MIN >= 5 || KVM_GUEST_KERNEL
+
+# 134709 - ibranch does not work in some cases
+# Workaround - insert NOPs after ibranch in some places
+config CPU_HWBUG_IBRANCH
+	def_bool CPU_ISET_MIN <= 5
+
+
+menu "MMU Page Tables features"
+
+config MMU_PT_V6
+	bool "MMU Page Table V6 basic mode"
+	depends on !E2K_MACHINE || CPU_ISET_MIN >= 6
+	default y
+	help
+	  Support for basic (new) structure of Page Tables entries.
+	  Say 'Y' here if this kernel is supposed to run on
+	  an Elbrus 12C/2C3/16C Systems and should use new structures of
+	  Page Tables. Say 'N' if kernel should be run only on legacy mode of
+	  Page Tables
+
+config MMU_SEP_VIRT_SPACE
+	bool "MMU Separate Page Tables for kernel and users"
+	depends on !E2K_MACHINE || CPU_ISET_MIN >= 6
+	default y
+	help
+	  Enables MMU Separate Page Tables for kernel and users.
+	  Say 'Y' here if this kernel is supposed to run on
+	  an Elbrus 12C/2C3/16C (iset V6 and higher) Systems.
+	  The feature should be enabled to support hardware virtualization mode
+
+config MMU_SEP_VIRT_SPACE_ONLY
+	def_bool E2K_MACHINE && MMU_SEP_VIRT_SPACE
+	help
+	  Enabled if this kernel does not support execution
+	  without enabled MMU Separate Page Tables mode.
+
+config HALF_SPECULATIVE_KERNEL
+	bool "Enable half-speculative loads in kernel code"
+	depends on !PREEMPT_RT && !KVM_GUEST_KERNEL
+	default n
+	help
+	  This kernel feature will enable compilation of kernel with
+	  half-speculative loads.  The kernel will run faster with
+	  them but at the cost of more IPIs: every kernel mapping
+	  function (vmap()/ioremap()) will now trigger whole-system
+	  IPIs to flush so-called "empty" entries from DTLB.  Thus
+	  this mode might degrade performance on very large NUMA
+	  systems.
+	  
+	  This should not be enabled on PREEMPT_RT as IPIs will be
+	  a constant source of non-deterministic delays. Also this
+	  would lead to too much overhead for virtualized guests
+	  since every get_user()/put_user() would issue two
+	  hypercalls (for enabling and disabling user access).
+
+# Whether to use AAU in kernel
+config AAU_IN_KERNEL
+	bool "Enable AAU in kernel code"
+	depends on HALF_SPECULATIVE_KERNEL
+	default y
+	help
+	  Whether to use AAU for accelerating loads in long loops
+	  in kernel.  This will require inserting additional barriers
+	  around different operations so may degrade performance in
+	  some cases.
+
+endmenu
+
+config SECCOMP
+	def_bool y
+	prompt "Enable seccomp to safely compute untrusted bytecode"
+	help
+	  This kernel feature is useful for number crunching applications
+	  that may need to compute untrusted bytecode during their
+	  execution. By using pipes or other transports made available to
+	  the process as file descriptors supporting the read/write
+	  syscalls, it's possible to isolate those applications in
+	  their own address space using seccomp. Once seccomp is
+	  enabled via prctl(PR_SET_SECCOMP), it cannot be disabled
+	  and the task is only allowed to execute a few safe syscalls
+	  defined by each seccomp mode.
+
+	  If unsure, say Y. Only embedded should say N here.
+
+config ENABLE_EXTMEM
+	def_bool y
+	help
+	  E2K can use more than 4 Gigabytes of physical memory.
+	  However, the address space of e2k processors has two regions with
+	  hole between them:
+
+	     low region from 0 up to 2 Gigabytes            0 -        8000 0000
+	     high region from 2**32 up to 2**48   n 0000 0000 - 1 0000 0000 0000
+
+source "kernel/Kconfig.hz"
+
+config GLOBAL_CONTEXT
+	def_bool y
+	help
+	  Choose this option to map virtual space of kernel to
+	  global context, so all kernel virtual pages and
+	  page tables will be global for all processes.
+	  It should reduce TLB and caches missing
+	  
+	  CONFIG_GLOBAL_CONTEXT is always enabled because when kernel is
+	  constantly switching %PID/%ROOT_PTB it is possible that
+	  IB/ITLB would cache the same address multiple times: first it
+	  checks for a hit with current %PID value, then asks TLB/L2 for
+	  actual data, and when writing the new line to IB/ITLB it will
+	  use the new %PID value which might have changed. And IB/ITLB
+	  does not work properly when multiple entries exist.
+
+source "arch/e2k/sec_space/Kconfig"
+
+# Note that iset v6 actually supports 48 bits but that
+# requires finding space for the linear mapping and for
+# vmalloc area if we use pcpu_embed_first_chunk().
+config E2K_PA_BITS
+	int
+	range 40 48
+	default 44 if CPU_ISET_MIN >= 6 && !KVM_GUEST_KERNEL
+	default 40
+
+config ONLY_HIGH_PHYS_MEM
+	bool "Use only high region of address space of physical memory"
+	depends on !E2K_E1CP
+	default y
+	help
+	  Physical memory of e2k machines can be mapped into two addresses
+	  regions:
+		low region  (below 2**32)
+		high region (above 2**32)
+	  Low memory cut out some area from high region
+	  If you say here Y then only high region addresses will be used
+	  to access to physical memory.
+	  It allows to extend the low MMIO and PCI addresses areas
+	  and map physical memory to virtual pages of max order
+
+config	ONLY_BSP_MEMORY
+	bool "Only specified nodes memory can be used by other CPUs"
+	default n
+	help
+	  CPUs can have own memory and access to memory of other CPUs.
+	  If you see Y then all CPUs can use only memory of nodes from
+	  following config parametr
+	  and ignore own
+
+config MEMORY_PRES_MAP
+	int "Specify mask of nodes with memory"
+	default 1
+	depends on ONLY_BSP_MEMORY
+	range 1 65536
+
+config FORCE_MAX_ZONEORDER
+	int "Maximum zone order"
+
+	range 11 64
+	default "16"
+	help
+	  The kernel memory allocator divides physically contiguous memory
+	  blocks into "zones", where each zone is a power of two number of
+	  pages.  This option selects the largest power of two that the kernel
+	  keeps in the memory allocator.  If you need to allocate very large
+	  blocks of physically contiguous memory, then you may need to
+	  increase this value.
+
+	  This config option is actually maximum order plus one. For example,
+	  a value of 11 means that the largest free memory block is 2^10 pages.
+
+	  The page size is not necessarily 4KB. Keep
+	  this in mind when choosing a value for this option.
+
+# Max 8 Nodes now limited by BOOT_MAX_MEM_NUMNODES to confirm
+# to boot_info structure size
+config NODES_SHIFT
+	int "Maximum memory (NUMA) Nodes (as a power of 2)"
+	range 0 3
+	default "2" if SMP
+	default "0"
+	depends on NEED_MULTIPLE_NODES
+	help
+	  Specify the maximum number of memory (NUMA) Nodes available on the target
+	  system.  Increases memory reserved to accommodate various tables.
+
+# Some NUMA nodes can have memory ranges that span other nodes.
+# Even though a pfn is valid and between a node's start and end
+# pfns, it may not reside on that node.
+# For example when a few nodes have memory in low and high range.
+config NODES_SPAN_OTHER_NODES
+	def_bool y
+
+config NUMA
+	bool "NUMA support"
+	default n
+	depends on SMP
+
+config USE_PERCPU_NUMA_NODE_ID
+        def_bool y
+        depends on NUMA
+
+config KTHREAD_ON_CPU
+	bool "Create kernel threads on specified CPU"
+	default n
+	depends on NUMA
+	help
+		Support creation of kernel threads on cpecified CPU
+		to allocate memory resources on the node of this CPU
+
+config BOOT_PRINTK
+	def_bool n
+
+config SERIAL_BOOT_PRINTK
+	bool "boot_printk() support"
+	default y
+	select BOOT_PRINTK
+	help
+	  boot_printk() outputs directly to serial port bypassing all
+	  buffers and locks and can work both before and after the switch
+	  to virtual memory addressing. It is useful for hardware debugging.
+
+	  Only two devices are supported currently: ns16550 (== 8550)
+	  and l_zilog (== am85c30).
+
+	  On simulator boot_printk() also outputs to LMS console.
+
+config SERIAL_AM85C30_BOOT_CONSOLE
+	bool "Boot-time serial console on Am85c30 zilog and compatible devices"
+	depends on SERIAL_BOOT_PRINTK
+	default y
+	help
+	  Sey Y to support boot-time console based on Am85c30 serial
+	  PCI device.
+
+config BOOT_SERIAL_BAUD
+	int "Boot printk serial rate (4800-115200)"
+	range 4800 115200
+	depends on SERIAL_BOOT_PRINTK || SERIAL_PRINTK
+	default "115200"
+	help
+	  Speed rate for boot printk console
+
+config EARLY_VIRTIO_CONSOLE
+	bool "Early VIRTIO console on guest kernel"
+	depends on VIRTIO_CONSOLE && KVM
+	default n
+	select BOOT_PRINTK
+	select L_EARLY_PRINTK
+	help
+	  Sey Y to support early console based on VIRTIO
+	  and pseudo HVC interface
+
+config ILLEGAL_POINTER_VALUE
+       hex
+       default 0xdead000000000000
+
+config MEMLIMIT
+	int "Physical memory probing range (main region of RAM)"
+	range 0 2048
+	default 64
+
+config EXT_MEMLIMIT
+	int "Extended physical memory probing range (Megabytes)"
+	depends on ENABLE_EXTMEM
+	range 0 61440
+	default 2048
+
+choice
+	prompt "Embeded Video RAM size"
+	default VRAM_SIZE_128
+	help
+		Embeded graphical controller video ram size
+		Option is usfull only for e2k internal boot loader on simulator
+
+config VRAM_SIZE_128
+	bool "128 Mb"
+	help
+		Embeded graphical controller video ram size
+		is 128 Mb
+		Option is usfull only for e2k internal boot loader on simulator
+
+config VRAM_SIZE_256
+	bool "256 Mb"
+	help
+		Embeded graphical controller video ram size
+		is 256 Mb
+		Option is usfull only for e2k internal boot loader on simulator
+
+config VRAM_SIZE_512
+	bool "512 Mb"
+	help
+		Embeded graphical controller video ram size
+		is 512 Mb
+		Option is usfull only for e2k internal boot loader on simulator
+
+config VRAM_SIZE_1024
+	bool "1 Gb"
+	help
+		Embeded graphical controller video ram size
+		is 1 Gb
+		Option is usfull only for e2k internal boot loader on simulator
+
+config VRAM_DISABLE
+	bool "Disable embeded graphic support"
+	help
+		Embeded graphical controller video ram can be disabled
+		Option is usfull only for e2k internal boot loader on simulator
+
+endchoice
+
+config GLOBAL_IRQ_MASK
+	def_bool y
+	depends on VIRTUALIZATION && KVM_GUEST_KERNEL
+	help
+		Global interrupts mask (PSR.ie/PSR.nmie) as needed for kernel
+		can be if it is supported by the hardware.
+		There are currently no such hardware isets, but it is possible
+		to emulate in the guest virtualized kernel and host support.
+
+config ACCESS_CONTROL
+	bool
+	default N
+
+config USR_CONTROL_INTERRUPTS
+	bool "USER can control interrupts"
+	default N
+	help
+		USER can use UPSR register to control interrupts
+                 (only for hardware debugging)
+                To control interrupts in user mode it needs to call:
+                e2k_syswork(USER_CONTROL_INTERRUPT, 1, 0); // start
+                e2k_syswork(USER_CONTROL_INTERRUPT, 0, 0); // stop
+
+config KERNEL_TIMES_ACCOUNT
+	bool "Collect kernel traps and system calls clock time info"
+	default N
+
+config MAX_KERNEL_TIMES_NUM
+	depends on KERNEL_TIMES_ACCOUNT
+	int "Max Number of last events to collect (1-1024)"
+	range 1 1024
+	default 20
+
+config CLI_CHECK_TIME
+	bool "CLI check time"
+
+# bool 'Symmetric multi-processing support' CONFIG_SMP
+
+config CMDLINE_PROMPT
+	bool "Enable prompt for kernel command string"
+	default n
+
+config MAKE_ALL_PAGES_VALID
+	bool "Make all virtual pages valid"
+	default y
+
+config USE_AAU
+	def_bool y
+
+config DATA_STACK_WINDOW
+	bool "Enable kernel data stack show while fancy stack listing"
+	default y
+	help
+	    Say Y here to enable printing of data stack while stack's
+	    printing.
+
+	    Do "echo 1 > /proc/sys/debug/datastack" to show the stack.
+
+config BINFMT_ELF32
+	tristate "Kernel support for 32-bit ELF binaries"
+	default y
+	select COMPAT_BINFMT_ELF if BINFMT_ELF
+
+config COMPAT
+	def_bool y
+	depends on BINFMT_ELF32
+	select ARCH_WANT_OLD_COMPAT_IPC
+
+config PROTECTED_MODE
+	tristate "Security mode"
+	default y
+
+config DBG_RTL_TRACE
+	bool "Enable printing rtl messages in security mode"
+	depends on PROTECTED_MODE
+	default n
+
+config CLW_ENABLE
+	bool "Enable clean of user stack window"
+        depends on PROTECTED_MODE
+        default y
+
+config TC_STORAGE
+	bool "Store Table Cache default line"
+	help
+	   Flushing Table Cashe and storing default string of TC
+	   when tasks switch
+	default y
+
+config IGNORE_MEM_LOCK_AS
+	bool "Ignore exc_mem_lock_as"
+	help
+	   Ignore mem_lock_as exception in binary compiler task
+	default n
+
+config RECOVERY
+	bool "Enable system recovery"
+	select PM
+	help
+	   Enable mode to support Suspend to RAM
+	default y
+
+config MONITORS
+	bool "Hardware monitor counters support"
+	depends on PROC_FS
+	default y
+	help
+	   Say Y here to enable the monitors supporting mechanism used
+	   for counting of variuos hardware events
+
+config E2K_KEXEC
+	bool "kexec for E2K"
+	default y
+	help
+	  Say Y here to enable support of kexec implementation for E2K.
+
+config DUMP_ALL_STACKS
+	bool "Enable dump of all stacks"
+	default y
+
+config TRACE_PT_ATOMIC
+	bool "Enable tracing of page tables entries atomic modification"
+	default n
+	help
+	  Set this option to 'Y' to enable tracing of the native PT entries
+	  atomic modification.
+	  In this case all inline functions of atomic modifications
+	  will be replaced by its non-inline versions that have
+	  tracing properties
+
+config CMDLINE
+	string "Command line of kernel's builtin boot"
+	default "root=/dev/sda3 console=ttyS0,115200 init=/root/init.sh ipv6.disable=1 usbcore.nousb raid=noautodetect force_C3"
+
+config CMDLINE_OVERRIDE
+	bool "Built-in command line overrides boot loader arguments"
+	help
+	  Set this option to 'Y' to have the kernel ignore the boot loader
+	  command line, and use ONLY the built-in command line.
+
+	  This is used to work around broken boot loaders.  This should
+	  be set to 'N' under normal conditions.
+
+#
+# Define implied options from the CPU selection here
+#
+
+config SMP
+	bool "Symmetric multi-processing support"
+	default n
+	help
+	  This enables support for systems with more than one CPU. If you have
+	  a system with only one CPU, like most personal computers, say N. If
+	  you have a system with more than one CPU, say Y.
+
+	  If you say N here, the kernel will run on single and multiprocessor
+	  machines, but will use only one CPU of a multiprocessor machine. If
+	  you say Y here, the kernel will run on many, but not all,
+	  singleprocessor machines. On a singleprocessor machine, the kernel
+	  will run faster if you say N here.
+
+	  Note that if you say Y here and choose architecture "586" or
+	  "Pentium" under "Processor family", the kernel will not work on 486
+	  architectures. Similarly, multiprocessor kernels for the "PPro"
+	  architecture may not work on all Pentium based boards.
+
+	  People using multiprocessor machines who say Y here should also say
+	  Y to "Enhanced Real Time Clock Support", below. The "Advanced Power
+	  Management" code will be disabled if you say Y here.
+
+	  See also the <file:Documentation/smp.txt>,
+	  <file:Documentation/i386/IO-APIC.txt>,
+	  <file:Documentation/nmi_watchdog.txt> and the SMP-HOWTO available at
+	  <http://www.tldp.org/docs.html#howto>.
+
+	  If you don't know what to do here, say N.
+
+config NR_CPUS
+	int "Maximum number of CPUs (1-256)"
+	range 1 256
+	depends on SMP
+	default 256 if !E2K_MACHINE
+	default 1 if E2K_E1CP
+	default 2 if E2K_E2C3
+	default 8 if E2K_E8V7
+	default 4 if E2K_E2S && !NUMA
+	default 16 if E2K_E2S && NUMA
+	default 8 if (E2K_E8C || E2K_E8C2) && !NUMA
+	default 64 if (E2K_E8C || E2K_E8C2) && NUMA
+	default 12 if E2K_E12C && !NUMA
+	default 64 if E2K_E12C && NUMA
+	default 16 if E2K_E16C && !NUMA
+	default 64 if E2K_E16C && NUMA
+	default 48 if E2K_E48C && !NUMA
+	default 256 if E2K_E48C && NUMA
+	help
+	  This allows you to specify the maximum number of CPUs which this
+	  kernel will support.  The maximum supported value is 256 and the
+	  minimum value which makes sense is 1.
+
+	  This is purely to save memory - each supported CPU adds
+	  approximately hundred kilobytes to the kernel image.
+
+config SCHED_MC
+	def_bool y
+	depends on NUMA
+	help
+	  Multi-core scheduler support improves the CPU scheduler's decision
+	  making when dealing with multi-core CPU chips at a cost of slightly
+	  increased overhead in some places.
+
+config MCST
+	bool "MCST additions"
+	default y
+
+config ARCH_HAS_CACHE_LINE_SIZE
+	def_bool y
+
+config GENERIC_TIME
+	def_bool y
+
+config GENERIC_TIME_VSYSCALL
+	def_bool y
+
+config GENERIC_CMOS_UPDATE
+	def_bool y
+
+config GENERIC_CLOCKEVENTS
+	def_bool y
+
+config SCLKR_CLOCKSOURCE
+	def_bool y
+
+config BIOS
+	bool "Enable bios chipset settings"
+	default y
+	help
+	  Enable bios chipset settings such as io apic serial ports
+	  keyboard, mouse etc.
+
+config ENABLE_BIOS_MPTABLE
+	bool "Set mptable"
+	depends on BIOS && L_IO_APIC
+	default y
+	help
+	  Constructing bios MP configuration table.
+
+config CEPIC_TIMER_FREQUENCY
+	int "CEPIC timer and %scklr register frequency as Mhz"
+	depends on ENABLE_BIOS_MPTABLE
+	range 1 1000
+	default 100
+	help
+	  The simulator may have a CEPIC timer frequency different from
+	  the actual frequency of the hardware implementation.
+	  Define here the frequency of simulator in such case or if it does
+	  not suit the defaul value.
+
+config ENABLE_ELBRUS_PCIBIOS
+	bool "Enable pcibios"
+	depends on BIOS
+	default y
+	help
+	  Enable pci initialization in bios.
+
+config ENABLE_IDE
+	bool "Enable hard drive"
+	depends on BIOS
+	default y
+	help
+	  Enable ide in southbridge chip.
+
+config ENABLE_KEYBOARD
+	bool "Enable keyboard"
+	depends on BIOS
+	default y
+	help
+	  Enable keyboard in superio chip.
+	  
+config ENABLE_MOUSE
+	bool "Enable mouse"
+	depends on BIOS
+	default y
+	help
+	  Enable mouse in superio chip.
+	  
+config ENABLE_FLOPPY
+	bool "Enable floppy"
+	depends on BIOS
+	default y
+	help
+	  Enable fdc in superio chip.
+
+config ENABLE_MGA
+	bool "Enable MGA"
+	depends on BIOS
+	default y
+	  
+  
+config ENABLE_RTC
+	bool "Enable rtc"
+	depends on BIOS
+	default y
+	help
+	  Enable rtc in southbridge chip.
+	  
+config ENABLE_SERIAL
+	bool "Enable serial ports"
+	depends on BIOS
+	default y
+	help
+	  Enable com1 com2 in superio chip.
+	  
+config ENABLE_PARALLEL_PORT
+	bool "Enable parallel port"
+	depends on BIOS
+	default y
+	help
+	  Enable lpt in superio chip.
+
+config ENABLE_IOAPIC
+	bool "Enable IO APIC"
+	depends on BIOS
+	default y
+	help
+	  Set southbridge XBCS register io apic enable.
+
+# Needed to initialize "fp" field which is used to correct fp stack
+# in longjmp/copy_thread
+#
+# Also used to work around problems with leaf call optimization
+# (for details see comments in _mcount()).
+config HAVE_FUNCTION_GRAPH_FP_TEST
+	def_bool y
+	depends on FUNCTION_GRAPH_TRACER
+
+config EPROF_KERNEL
+	bool "Enable libeprof-based kernel profiling"
+	default n
+	help
+	This option enables libeprof-based branch profiling in kernel.
+
+	If unsure, say N.
+
+config USE_PGO
+	bool "Mark kernel as built with Profile Guided Optimization"
+	default n
+	help
+	  Profile should be specified manually by adding
+	  "PROFILE_USE=<path_to_prof.sum>" to `make` command.
+
+	  If unsure, say N.
+endmenu
+
+source "arch/l/Kconfig"
+
+
+
+menu "Power management options"
+
+source "kernel/power/Kconfig"
+
+source "drivers/acpi/Kconfig"
+
+source "drivers/cpufreq/Kconfig"
+
+source "drivers/cpuidle/Kconfig"
+
+endmenu
+
+
+
+menu "Bus options (PCI)"
+
+source "arch/l/pci/Kconfig" # should be set allways for e2k #
+
+endmenu
+
+
+config SYSVIPC_COMPAT
+	def_bool y
+	depends on SYSVIPC && COMPAT
+
+source "arch/e2k/Kconfig.virt"
+
+# Mark as expert because too many people got it wrong.
+# The code disables itself when not needed.
+config DMI
+	default y
+	select DMI_SCAN_MACHINE_NON_EFI_FALLBACK
+	bool "Enable DMI scanning" if EXPERT
+	help
+	  Enabled scanning of DMI to identify machine quirks. Say Y
+	  here unless you have verified that your setup is not
+	  affected by entries in the DMI blacklist. Required by PNP
+	  BIOS code.

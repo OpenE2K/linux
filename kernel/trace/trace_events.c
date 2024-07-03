@@ -2430,7 +2430,7 @@ void trace_event_eval_update(struct trace_eval_map **map, int len)
 	struct trace_event_call *call, *p;
 	const char *last_system = NULL;
 	bool first = false;
-	int last_i;
+	int last_i = 0;
 	int i;
 
 	down_write(&trace_event_sem);

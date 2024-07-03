@@ -34,8 +34,25 @@
 #  define FB_WRITEL fb_writel
 #  define FB_READL  fb_readl
 #else
+#if defined(CONFIG_MCST) && defined(CONFIG_E90S) /* hack for sm768 */
+#  define FB_WRITEL(_v, _addr)	do {			\
+	u64 _q = _v;					\
+	volatile void __iomem *_a = _addr;		\
+	if (fb_be_math(p))				\
+		 fb_writeq(_q, _a);			\
+	else						\
+		 writeq(_q, _a);			\
+} while (0)
+
+#  define FB_READL(_addr)	({			\
+	const volatile void __iomem *_a = _addr;	\
+	fb_be_math(p) ?					\
+		 fb_readq(_a) : readq(_a);		\
+})
+#else
 #  define FB_WRITEL fb_writeq
 #  define FB_READL  fb_readq
+#endif
 #endif
 
     /*

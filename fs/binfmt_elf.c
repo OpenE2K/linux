@@ -78,9 +78,27 @@ static int load_elf_library(struct file *);
  * don't even try.
  */
 #ifdef CONFIG_ELF_CORE
+#if !defined(CONFIG_E2K) || (ELF_CLASS == ELFCLASS64)
 static int elf_core_dump(struct coredump_params *cprm);
+#endif		/* !CONFIG_E2K || (ELF_CLASS == ELFCLASS64) */
+# ifdef CONFIG_E2K
+/* Hardware stacks lie above 4Gb boundary in 32-bit applications on e2k
+ * so the same core dump function is used for all modes. */
+#if ELF_CLASS == ELFCLASS64
+int elf_core_dump_64(struct coredump_params *cprm)
+{
+	return elf_core_dump(cprm);
+}
+#else
+extern int elf_core_dump_64(struct coredump_params *cprm);
+#endif
+#endif	/* CONFIG_E2K */
+
 #else
 #define elf_core_dump	NULL
+#ifdef	CONFIG_E2K
+#define	elf_core_dump_64	NULL
+#endif	/* CONFIG_E2K */
 #endif
 
 #if ELF_EXEC_PAGESIZE > PAGE_SIZE
@@ -101,7 +119,11 @@ static struct linux_binfmt elf_format = {
 	.module		= THIS_MODULE,
 	.load_binary	= load_elf_binary,
 	.load_shlib	= load_elf_library,
+#if defined(CONFIG_E2K) && (ELF_CLASS != ELFCLASS64)
+	.core_dump	= elf_core_dump_64,
+#else
 	.core_dump	= elf_core_dump,
+#endif
 	.min_coredump	= ELF_EXEC_PAGESIZE,
 };
 
@@ -1423,6 +1445,8 @@ out:
 #endif /* #ifdef CONFIG_USELIB */
 
 #ifdef CONFIG_ELF_CORE
+#if !defined(CONFIG_E2K) || (ELF_CLASS == ELFCLASS64)
+
 /*
  * ELF core dumper
  *
@@ -2219,7 +2243,11 @@ static int elf_core_dump(struct coredump_params *cprm)
 	dataoff = offset = roundup(offset, ELF_EXEC_PAGESIZE);
 
 	offset += cprm->vma_data_size;
+#ifdef CONFIG_E2K
+	offset += elf_core_extra_data_size(cprm);
+#else
 	offset += elf_core_extra_data_size();
+#endif /* CONFIG_E2K */
 	e_shoff = offset;
 
 	if (e_phnum == PN_XNUM) {
@@ -2279,7 +2307,11 @@ static int elf_core_dump(struct coredump_params *cprm)
 	for (i = 0; i < cprm->vma_count; i++) {
 		struct core_vma_metadata *meta = cprm->vma_meta + i;
 
+#ifndef CONFIG_E2K
 		if (!dump_user_range(cprm, meta->start, meta->dump_size))
+#else
+		if (!dump_user_range(cprm, meta->start, meta->dump_size, meta->flags))
+#endif
 			goto end_coredump;
 	}
 	dump_truncate(cprm);
@@ -2299,6 +2331,7 @@ end_coredump:
 	return has_dumped;
 }
 
+#endif
 #endif		/* CONFIG_ELF_CORE */
 
 static int __init init_elf_binfmt(void)

@@ -52,6 +52,9 @@
 #include "internal.h"
 
 #include <trace/events/sched.h>
+#ifdef CONFIG_E2K
+#include <asm/coredump.h>
+#endif /* CONFIG_E2K */
 
 static bool dump_vma_snapshot(struct coredump_params *cprm);
 static void free_vma_snapshot(struct coredump_params *cprm);
@@ -512,6 +515,9 @@ static void coredump_finish(struct mm_struct *mm, bool core_dumped)
 		wake_up_process(task);
 	}
 
+#ifdef CONFIG_E2K
+	clear_delayed_free_hw_stacks(mm);
+#endif /* CONFIG_E2K */
 	mm->core_state = NULL;
 }
 
@@ -630,8 +636,15 @@ void do_coredump(const kernel_siginfo_t *siginfo)
 		cred->fsuid = GLOBAL_ROOT_UID;	/* Dump root private */
 		need_suid_safe = true;
 	}
-
+#ifdef CONFIG_MCST
+	/* We are going to return si_code in return status for wait*/
+	retval = coredump_wait(siginfo->si_signo |
+		((siginfo->si_signo && siginfo->si_code > 0 &&
+					siginfo->si_code < 0x80) ?
+			siginfo->si_code << 16 : 0), &core_state);
+#else
 	retval = coredump_wait(siginfo->si_signo, &core_state);
+#endif
 	if (retval < 0)
 		goto fail_creds;
 
@@ -887,8 +900,13 @@ int dump_skip(struct coredump_params *cprm, size_t nr)
 EXPORT_SYMBOL(dump_skip);
 
 #ifdef CONFIG_ELF_CORE
+#ifndef CONFIG_E2K
 int dump_user_range(struct coredump_params *cprm, unsigned long start,
 		    unsigned long len)
+#else
+int dump_user_range(struct coredump_params *cprm, unsigned long start,
+		    unsigned long len, unsigned long flags)
+#endif
 {
 	unsigned long addr;
 
@@ -903,7 +921,23 @@ int dump_user_range(struct coredump_params *cprm, unsigned long start,
 		 * NULL when encountering an empty page table entry that would
 		 * otherwise have been filled with the zero page.
 		 */
+#ifdef CONFIG_E2K
+		/*
+		 * Set TS_KERNEL_SYSCALL for core dumping of hw stacks
+		 * (it is checked in arch_vma_access_permitted())
+		 */
+		if (flags & VM_PRIVILEGED) {
+			unsigned long ts_flag;
+
+			ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+			page = get_dump_page(addr);
+			clear_ts_flag(ts_flag);
+		} else {
+			page = get_dump_page(addr);
+		}
+#else
 		page = get_dump_page(addr);
+#endif
 		if (page) {
 			void *kaddr = kmap(page);
 
@@ -983,7 +1017,10 @@ static bool always_dump_vma(struct vm_area_struct *vma)
 /*
  * Decide how much of @vma's contents should be included in a core dump.
  */
-static unsigned long vma_dump_size(struct vm_area_struct *vma,
+#ifndef CONFIG_E2K
+static
+#endif
+unsigned long vma_dump_size(struct vm_area_struct *vma,
 				   unsigned long mm_flags)
 {
 #define FILTER(type)	(mm_flags & (1UL << MMF_DUMP_##type))

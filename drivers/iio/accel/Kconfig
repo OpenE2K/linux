@@ -457,4 +457,17 @@ config STK8BA50
 	  Choosing M will build the driver as a module. If so, the module
 	  will be called stk8ba50.
 
+config ICM20948
+	tristate "TDK InvenSence ICM-20948 9-axis MotionTracking Driver"
+	depends on I2C
+	select IIO_BUFFER
+	select IIO_TRIGGERED_BUFFER
+	default m if E90S
+	help
+	  Say yes here to get support for the TDK InvenSense ICM-20948 9-Axis 
+	  MEMS sensor device.
+
+	  Choosing M will build the driver as a module. If so, the module
+	  will be called icm20948.
+
 endmenu

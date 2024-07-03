@@ -47,11 +47,13 @@
  * for all hugepage allocations.
  */
 unsigned long transparent_hugepage_flags __read_mostly =
+#ifndef CONFIG_E90S
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS
 	(1<<TRANSPARENT_HUGEPAGE_FLAG)|
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_MADVISE
 	(1<<TRANSPARENT_HUGEPAGE_REQ_MADV_FLAG)|
+#endif
 #endif
 	(1<<TRANSPARENT_HUGEPAGE_DEFRAG_REQ_MADV_FLAG)|
 	(1<<TRANSPARENT_HUGEPAGE_DEFRAG_KHUGEPAGED_FLAG)|
@@ -1420,7 +1422,15 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf, pmd_t pmd)
 	bool migrated = false;
 	bool was_writable;
 	int flags = 0;
+#if	defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+	struct mmu_notifier_range range;
 
+	/* the e2k-arch host should be notified to unmap migrated pmd */
+	/* and provide tracking of changes in gfn<->pfn translations */
+	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma, vma->vm_mm,
+				haddr, haddr + HPAGE_PMD_SIZE);
+	mmu_notifier_invalidate_range_start(&range);
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
 	if (unlikely(!pmd_same(pmd, *vmf->pmd)))
 		goto out_unlock;
@@ -1554,6 +1564,11 @@ out_unlock:
 	spin_unlock(vmf->ptl);
 
 out:
+#if	defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+	/* the e2k-arch host should be notified to unmap migrated pmd */
+	/* and provide tracking of changes in gfn<->pfn translations */
+	mmu_notifier_invalidate_range_end(&range);
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 	if (anon_vma)
 		page_unlock_anon_vma_read(anon_vma);
 
@@ -1994,7 +2009,11 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	pgtable_t pgtable;
+#ifdef CONFIG_E2K
+	pmd_t _pmd = __pmd(0), old_pmd;
+#else
 	pmd_t _pmd, old_pmd;
+#endif
 	int i;
 
 	/*
@@ -2031,7 +2050,11 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	struct mm_struct *mm = vma->vm_mm;
 	struct page *page;
 	pgtable_t pgtable;
+#ifdef CONFIG_E2K
+	pmd_t old_pmd, _pmd = __pmd(0);
+#else
 	pmd_t old_pmd, _pmd;
+#endif
 	bool young, write, soft_dirty, pmd_migration = false, uffd_wp = false;
 	unsigned long addr;
 	int i;

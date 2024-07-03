@@ -1220,6 +1220,26 @@ static struct ctl_table ipv4_net_table[] = {
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_ONE,
 	},
+#ifdef CONFIG_MCST
+	{
+		.procname	= "tcp_no_delayed_ack",
+		.data		= &init_net.ipv4.sysctl_tcp_no_delayed_ack,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "tcp_fast_tlp",
+		.data		= &init_net.ipv4.sysctl_tcp_fast_tlp,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+#endif
 	{
 		.procname	= "tcp_invalid_ratelimit",
 		.data		= &init_net.ipv4.sysctl_tcp_invalid_ratelimit,

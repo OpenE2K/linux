@@ -2560,6 +2560,11 @@ static struct devinet_sysctl_table {
 					      "route_localnet"),
 		DEVINET_SYSCTL_FLUSHING_ENTRY(DROP_UNICAST_IN_L2_MULTICAST,
 					      "drop_unicast_in_l2_multicast"),
+#ifdef CONFIG_MCST
+		DEVINET_SYSCTL_RW_ENTRY(SND_PERIOD, "snd_period_us"),
+		DEVINET_SYSCTL_RW_ENTRY(SND_NUMB, "snd_num4period"),
+		DEVINET_SYSCTL_RW_ENTRY(SND_LIMSZ, "snd_limsz4period"),
+#endif
 	},
 };
 

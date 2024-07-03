@@ -3460,7 +3460,10 @@ err_unlock:
  * Process a futex-list entry, check whether it's owned by the
  * dying task, and do notification if so:
  */
-static int handle_futex_death(u32 __user *uaddr, struct task_struct *curr,
+#if !defined(CONFIG_E2K) || !defined(CONFIG_PROTECTED_MODE)
+static
+#endif
+int handle_futex_death(u32 __user *uaddr, struct task_struct *curr,
 			      bool pi, bool pending_op)
 {
 	u32 uval, nval, mval;

@@ -114,6 +114,8 @@ const char *amdgpu_asic_name[] = {
 	"NAVI12",
 	"SIENNA_CICHLID",
 	"NAVY_FLOUNDER",
+	"DIMGREY_CAVEFISH",
+	"BEIGE_GOBY",
 	"LAST",
 };
 
@@ -305,6 +307,35 @@ void amdgpu_device_vram_access(struct amdgpu_device *adev, loff_t pos,
 /*
  * register access helper functions.
  */
+
+/* Check if hw access should be skipped because of hotplug or device error */
+bool amdgpu_device_skip_hw_access(struct amdgpu_device *adev)
+{
+	if (adev->no_hw_access)
+		return true;
+
+#ifdef CONFIG_LOCKDEP
+	/*
+	 * This is a bit complicated to understand, so worth a comment. What we assert
+	 * here is that the GPU reset is not running on another thread in parallel.
+	 *
+	 * For this we trylock the read side of the reset semaphore, if that succeeds
+	 * we know that the reset is not running in paralell.
+	 *
+	 * If the trylock fails we assert that we are either already holding the read
+	 * side of the lock or are the reset thread itself and hold the write side of
+	 * the lock.
+	 */
+	if (in_task()) {
+		if (down_read_trylock(&adev->reset_sem))
+			up_read(&adev->reset_sem);
+		else
+			lockdep_assert_held(&adev->reset_sem);
+	}
+#endif
+	return false;
+}
+
 /**
  * amdgpu_device_rreg - read a memory mapped IO or indirect register
  *
@@ -319,7 +350,7 @@ uint32_t amdgpu_device_rreg(struct amdgpu_device *adev,
 {
 	uint32_t ret;
 
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return 0;
 
 	if ((reg * 4) < adev->rmmio_size) {
@@ -356,7 +387,7 @@ uint32_t amdgpu_device_rreg(struct amdgpu_device *adev,
  */
 uint8_t amdgpu_mm_rreg8(struct amdgpu_device *adev, uint32_t offset)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return 0;
 
 	if (offset < adev->rmmio_size)
@@ -381,7 +412,7 @@ uint8_t amdgpu_mm_rreg8(struct amdgpu_device *adev, uint32_t offset)
  */
 void amdgpu_mm_wreg8(struct amdgpu_device *adev, uint32_t offset, uint8_t value)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return;
 
 	if (offset < adev->rmmio_size)
@@ -404,7 +435,7 @@ void amdgpu_device_wreg(struct amdgpu_device *adev,
 			uint32_t reg, uint32_t v,
 			uint32_t acc_flags)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return;
 
 	if ((reg * 4) < adev->rmmio_size) {
@@ -431,7 +462,7 @@ void amdgpu_device_wreg(struct amdgpu_device *adev,
 void amdgpu_mm_wreg_mmio_rlc(struct amdgpu_device *adev,
 			     uint32_t reg, uint32_t v)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return;
 
 	if (amdgpu_sriov_fullaccess(adev) &&
@@ -454,7 +485,7 @@ void amdgpu_mm_wreg_mmio_rlc(struct amdgpu_device *adev,
  */
 u32 amdgpu_io_rreg(struct amdgpu_device *adev, u32 reg)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return 0;
 
 	if ((reg * 4) < adev->rio_mem_size)
@@ -476,7 +507,7 @@ u32 amdgpu_io_rreg(struct amdgpu_device *adev, u32 reg)
  */
 void amdgpu_io_wreg(struct amdgpu_device *adev, u32 reg, u32 v)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return;
 
 	if ((reg * 4) < adev->rio_mem_size)
@@ -498,7 +529,7 @@ void amdgpu_io_wreg(struct amdgpu_device *adev, u32 reg, u32 v)
  */
 u32 amdgpu_mm_rdoorbell(struct amdgpu_device *adev, u32 index)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return 0;
 
 	if (index < adev->doorbell.num_doorbells) {
@@ -521,7 +552,7 @@ u32 amdgpu_mm_rdoorbell(struct amdgpu_device *adev, u32 index)
  */
 void amdgpu_mm_wdoorbell(struct amdgpu_device *adev, u32 index, u32 v)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return;
 
 	if (index < adev->doorbell.num_doorbells) {
@@ -542,7 +573,7 @@ void amdgpu_mm_wdoorbell(struct amdgpu_device *adev, u32 index, u32 v)
  */
 u64 amdgpu_mm_rdoorbell64(struct amdgpu_device *adev, u32 index)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return 0;
 
 	if (index < adev->doorbell.num_doorbells) {
@@ -565,7 +596,7 @@ u64 amdgpu_mm_rdoorbell64(struct amdgpu_device *adev, u32 index)
  */
 void amdgpu_mm_wdoorbell64(struct amdgpu_device *adev, u32 index, u64 v)
 {
-	if (adev->in_pci_err_recovery)
+	if (amdgpu_device_skip_hw_access(adev))
 		return;
 
 	if (index < adev->doorbell.num_doorbells) {
@@ -1789,6 +1820,8 @@ static int amdgpu_device_parse_gpu_info_fw(struct amdgpu_device *adev)
 	case CHIP_VEGA20:
 	case CHIP_SIENNA_CICHLID:
 	case CHIP_NAVY_FLOUNDER:
+	case CHIP_DIMGREY_CAVEFISH:
+	case CHIP_BEIGE_GOBY:
 	default:
 		return 0;
 	case CHIP_VEGA10:
@@ -1997,6 +2030,8 @@ static int amdgpu_device_ip_early_init(struct amdgpu_device *adev)
 	case  CHIP_NAVI12:
 	case  CHIP_SIENNA_CICHLID:
 	case  CHIP_NAVY_FLOUNDER:
+	case  CHIP_DIMGREY_CAVEFISH:
+	case  CHIP_BEIGE_GOBY:
 		adev->family = AMDGPU_FAMILY_NV;
 
 		r = nv_set_ip_blocks(adev);
@@ -2013,6 +2048,8 @@ static int amdgpu_device_ip_early_init(struct amdgpu_device *adev)
 	adev->pm.pp_feature = amdgpu_pp_feature_mask;
 	if (amdgpu_sriov_vf(adev) || sched_policy == KFD_SCHED_POLICY_NO_HWS)
 		adev->pm.pp_feature &= ~PP_GFXOFF_MASK;
+	if (amdgpu_sriov_vf(adev) && adev->asic_type == CHIP_SIENNA_CICHLID)
+		adev->pm.pp_feature &= ~PP_OVERDRIVE_MASK;
 
 	for (i = 0; i < adev->num_ip_blocks; i++) {
 		if ((amdgpu_ip_block_mask & (1 << i)) == 0) {
@@ -3014,10 +3051,10 @@ bool amdgpu_device_asic_has_dc_support(enum amd_asic_type asic_type)
 	case CHIP_NAVI14:
 	case CHIP_NAVI12:
 	case CHIP_RENOIR:
-#endif
-#if defined(CONFIG_DRM_AMD_DC_DCN3_0)
 	case CHIP_SIENNA_CICHLID:
 	case CHIP_NAVY_FLOUNDER:
+	case CHIP_DIMGREY_CAVEFISH:
+	case CHIP_BEIGE_GOBY:
 #endif
 		return amdgpu_dc != 0;
 #endif
@@ -4185,6 +4222,9 @@ bool amdgpu_device_should_recover_gpu(struct amdgpu_device *adev)
 		case CHIP_NAVI14:
 		case CHIP_NAVI12:
 		case CHIP_SIENNA_CICHLID:
+		case CHIP_NAVY_FLOUNDER:
+		case CHIP_DIMGREY_CAVEFISH:
+		case CHIP_BEIGE_GOBY:
 			break;
 		default:
 			goto disabled;
@@ -5029,9 +5069,9 @@ pci_ers_result_t amdgpu_pci_slot_reset(struct pci_dev *pdev)
 		goto out;
 	}
 
-	adev->in_pci_err_recovery = true;	
+	adev->no_hw_access = true;	
 	r = amdgpu_device_pre_asic_reset(adev, NULL, &need_full_reset);
-	adev->in_pci_err_recovery = false;
+	adev->no_hw_access = false;
 	if (r)
 		goto out;
 

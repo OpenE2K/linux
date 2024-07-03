@@ -213,6 +213,9 @@ const char netif_msg_class_names[][ETH_GSTRING_LEN] = {
 	[NETIF_MSG_PKTDATA_BIT]		= "pktdata",
 	[NETIF_MSG_HW_BIT]		= "hw",
 	[NETIF_MSG_WOL_BIT]		= "wol",
+#ifdef CONFIG_MCST
+	[NETIF_MSG_1588_BIT]		= "1588",
+#endif	
 };
 static_assert(ARRAY_SIZE(netif_msg_class_names) == NETIF_MSG_CLASS_COUNT);
 

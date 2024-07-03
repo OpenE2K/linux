@@ -119,9 +119,19 @@ TRACE_MAKE_SYSTEM_STR();
 	static struct trace_event_class event_class_##name;
 
 #undef DEFINE_EVENT
+#ifdef CONFIG_E90S
+/* gcc rounds up to the biggest alignment, but lcc aligns to what is written.
+ * So we have to fix the alignment in order to prevent unaligned traps
+ * at module load.
+ */
+#define DEFINE_EVENT(template, name, proto, args)	\
+	static struct trace_event_call	__used		\
+	__attribute__((__aligned__(8))) event_##name
+#else
 #define DEFINE_EVENT(template, name, proto, args)	\
 	static struct trace_event_call	__used		\
 	__attribute__((__aligned__(4))) event_##name
+#endif
 
 #undef DEFINE_EVENT_FN
 #define DEFINE_EVENT_FN(template, name, proto, args, reg, unreg)	\

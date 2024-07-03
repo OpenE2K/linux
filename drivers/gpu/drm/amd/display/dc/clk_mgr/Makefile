@@ -104,11 +104,14 @@ ifdef CONFIG_PPC64
 CFLAGS_$(AMDDALPATH)/dc/clk_mgr/dcn21/rn_clk_mgr.o := $(call cc-option,-mno-gnu-attribute)
 endif
 
+#prevent segmantation fault during compillation (bug148339)
+ifdef CONFIG_E2K
+CFLAGS_$(AMDDALPATH)/dc/clk_mgr/dcn21/rn_clk_mgr.o := $(call cc-option,-fno-devirtualize)
+endif
+
 AMD_DAL_CLK_MGR_DCN21 = $(addprefix $(AMDDALPATH)/dc/clk_mgr/dcn21/,$(CLK_MGR_DCN21))
 
 AMD_DISPLAY_FILES += $(AMD_DAL_CLK_MGR_DCN21)
-endif
-ifdef CONFIG_DRM_AMD_DC_DCN3_0
 ###############################################################################
 # DCN30
 ###############################################################################

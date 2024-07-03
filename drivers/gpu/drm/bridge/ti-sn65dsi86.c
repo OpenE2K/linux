@@ -271,6 +271,15 @@ static enum drm_mode_status
 ti_sn_bridge_connector_mode_valid(struct drm_connector *connector,
 				  struct drm_display_mode *mode)
 {
+#ifdef CONFIG_MCST
+	struct ti_sn_bridge *pdata = connector_to_ti_sn_bridge(connector);
+	unsigned bit_rate_mhz = (mode->clock / 1000) *
+			mipi_dsi_pixel_format_to_bpp(pdata->dsi->format);
+	unsigned clk_freq_mhz = bit_rate_mhz / (pdata->dsi->lanes * 2);
+
+	if (clk_freq_mhz > 750)
+		return MODE_CLOCK_HIGH;
+#endif
 	/* maximum supported resolution is 4K at 60 fps */
 	if (mode->clock > 594000)
 		return MODE_CLOCK_HIGH;
@@ -349,6 +358,8 @@ static int ti_sn_bridge_attach(struct drm_bridge *bridge,
 
 	drm_connector_helper_add(&pdata->connector,
 				 &ti_sn_bridge_connector_helper_funcs);
+	pdata->connector.polled = DRM_CONNECTOR_POLL_CONNECT |
+			DRM_CONNECTOR_POLL_DISCONNECT;
 	drm_connector_attach_encoder(&pdata->connector, bridge->encoder);
 
 	/*
@@ -379,7 +390,11 @@ static int ti_sn_bridge_attach(struct drm_bridge *bridge,
 	/* TODO: setting to 4 MIPI lanes always for now */
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
+#ifdef CONFIG_MCST /* dw-mipi-dsi.c can work only with this */
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO_BURST;
+#else
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO;
+#endif
 
 	/* check if continuous dsi clock is required or not */
 	pm_runtime_get_sync(pdata->dev);
@@ -1251,17 +1266,15 @@ static int ti_sn_bridge_remove(struct i2c_client *client)
 
 	if (!pdata)
 		return -EINVAL;
-
+	if (pdata->dsi && of_find_mipi_dsi_host_by_node(pdata->host_node)) {
+		mipi_dsi_detach(pdata->dsi);
+		mipi_dsi_device_unregister(pdata->dsi);
+	}
 	ti_sn_debugfs_remove(pdata);
 
 	of_node_put(pdata->host_node);
 
 	pm_runtime_disable(pdata->dev);
-
-	if (pdata->dsi) {
-		mipi_dsi_detach(pdata->dsi);
-		mipi_dsi_device_unregister(pdata->dsi);
-	}
 
 	drm_bridge_remove(&pdata->bridge);
 

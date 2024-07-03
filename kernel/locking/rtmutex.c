@@ -153,7 +153,12 @@ static int rt_mutex_real_waiter(struct rt_mutex_waiter *waiter)
  * set up.
  */
 #ifndef CONFIG_DEBUG_RT_MUTEXES
+#if defined CONFIG_E2K && ((defined CONFIG_CPU_E2S && defined CONFIG_NUMA) || \
+			   defined CONFIG_CPU_E8C)
+# define rt_mutex_cmpxchg_acquire(l,c,n) (cmpxchg_lock(&l->owner, c, n) == c)
+#else
 # define rt_mutex_cmpxchg_acquire(l,c,n) (cmpxchg_acquire(&l->owner, c, n) == c)
+#endif
 # define rt_mutex_cmpxchg_release(l,c,n) (cmpxchg_release(&l->owner, c, n) == c)
 
 /*
@@ -947,6 +952,10 @@ static int __try_to_take_rt_mutex(struct rt_mutex *lock,
 	raw_spin_unlock(&task->pi_lock);
 
 takeit:
+#if defined(CONFIG_MCST)
+	lock->mux_ip = _RET_IP_;
+#endif
+
 	/* We got the lock. */
 	debug_rt_mutex_lock(lock);
 
@@ -968,10 +977,19 @@ static inline void rt_spin_lock_fastlock(struct rt_mutex *lock,
 {
 	might_sleep_no_state_check();
 
+#if defined(CONFIG_MCST)
+	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current))) {
+		lock->mux_ip = _RET_IP_;
+		return;
+	} else {
+		slowfn(lock);
+	}
+#else
 	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current)))
 		return;
 	else
 		slowfn(lock);
+#endif
 }
 
 static inline void rt_spin_lock_fastunlock(struct rt_mutex *lock,
@@ -1001,6 +1019,10 @@ static int adaptive_wait(struct rt_mutex *lock,
 		 * checking the above to be valid.
 		 */
 		barrier();
+#ifdef CONFIG_MCST
+		if (owner == NULL)	/* bug 141258 */
+			break;
+#endif
 		if (!owner->on_cpu) {
 			res = 1;
 			break;
@@ -1067,7 +1089,15 @@ void __sched rt_spin_lock_slowlock_locked(struct rt_mutex *lock,
 		raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
 
 		if (top_waiter != waiter || adaptive_wait(lock, lock_owner))
+#ifdef CONFIG_MCST
+		{
+			current->wait_on_rtmutex = lock;
+#endif
 			preempt_schedule_lock();
+#ifdef CONFIG_MCST
+			current->wait_on_rtmutex = NULL;
+		}
+#endif
 
 		raw_spin_lock_irqsave(&lock->wait_lock, flags);
 
@@ -1580,7 +1610,13 @@ __rt_mutex_slowlock(struct rt_mutex *lock, int state,
 
 		raw_spin_unlock_irq(&lock->wait_lock);
 
+#ifdef CONFIG_MCST
+		current->wait_on_rtmutex = lock;
 		schedule();
+		current->wait_on_rtmutex = NULL;
+#else
+		schedule();
+#endif
 
 		raw_spin_lock_irq(&lock->wait_lock);
 		set_current_state(state);
@@ -1906,7 +1942,14 @@ rt_mutex_fastlock(struct rt_mutex *lock, int state,
 				struct ww_acquire_ctx *ww_ctx))
 {
 	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current)))
+#ifdef CONFIG_MCST
+	{
+		lock->mux_ip = _RET_IP_;
+#endif
 		return 0;
+#ifdef CONFIG_MCST
+	}
+#endif
 
 	return slowfn(lock, state, NULL, RT_MUTEX_MIN_CHAINWALK, ww_ctx);
 }
@@ -1915,8 +1958,15 @@ static inline int
 rt_mutex_fasttrylock(struct rt_mutex *lock,
 		     int (*slowfn)(struct rt_mutex *lock))
 {
+#ifdef CONFIG_MCST
+	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current))) {
+		lock->mux_ip = _RET_IP_;
+		return 1;
+	}
+#else
 	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current)))
 		return 1;
+#endif
 
 	return slowfn(lock);
 }
@@ -2560,4 +2610,16 @@ int __rt_mutex_owner_current(struct rt_mutex *lock)
 	return rt_mutex_owner(lock) == current;
 }
 EXPORT_SYMBOL(__rt_mutex_owner_current);
+#endif
+
+#if defined(CONFIG_MCST)
+struct task_struct *get_rtmutex_owner(struct rt_mutex *lock)
+{
+	return rt_mutex_owner(lock);
+}
+
+void *get_rtmutex_ip(struct rt_mutex *lock)
+{
+	return (void *)(lock->mux_ip);
+}
 #endif

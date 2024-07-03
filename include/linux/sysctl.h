@@ -36,6 +36,9 @@ struct nsproxy;
 struct ctl_table_root;
 struct ctl_table_header;
 struct ctl_dir;
+#ifdef CONFIG_MCST
+typedef struct ctl_table ctl_table;
+#endif
 
 /* Keep the same order as in fs/proc/proc_sysctl.c */
 #define SYSCTL_NEG_ONE			((void *)&sysctl_vals[0])

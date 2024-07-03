@@ -546,8 +546,15 @@ static int correct_chipset(struct atyfb_par *par)
 	return 0;
 }
 
+#ifndef CONFIG_MCST
 static char ram_dram[] __maybe_unused = "DRAM";
 static char ram_resv[] __maybe_unused = "RESV";
+#else
+#if defined(CONFIG_FB_ATY_CT) || defined(CONFIG_FB_ATY_GX)
+static const char ram_dram[] = "DRAM";
+static const char ram_resv[] = "RESV";
+#endif
+#endif /* CONFIG_MCST */
 #ifdef CONFIG_FB_ATY_GX
 static char ram_vram[] = "VRAM";
 #endif /* CONFIG_FB_ATY_GX */

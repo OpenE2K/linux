@@ -246,6 +246,9 @@ extern int rtc_hctosys_ret;
 #else
 #define rtc_hctosys_ret -ENODEV
 #endif
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+extern int sclk_register(void *);
+#endif
 
 #ifdef CONFIG_RTC_NVMEM
 int rtc_nvmem_register(struct rtc_device *rtc,

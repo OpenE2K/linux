@@ -2041,6 +2041,14 @@ config WATCHDOG_SUN4V
 
 # XTENSA Architecture
 
+# E2K Architecture
+
+config L_WDT
+	tristate "Elbrus Watchdog timer"
+	depends on WATCHDOG
+	help
+	  i2c_spi watchdog timer supprot.
+
 # Xen Architecture
 
 config XEN_WDT

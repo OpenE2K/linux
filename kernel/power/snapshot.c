@@ -1145,7 +1145,9 @@ void clear_free_pages(void)
 	if (WARN_ON(!(free_pages_map)))
 		return;
 
+#ifndef CONFIG_MCST_MEMORY_SANITIZE
 	if (IS_ENABLED(CONFIG_PAGE_POISONING_ZERO) || want_init_on_free()) {
+#endif
 		memory_bm_position_reset(bm);
 		pfn = memory_bm_next_pfn(bm);
 		while (pfn != BM_END_OF_MAP) {
@@ -1156,7 +1158,9 @@ void clear_free_pages(void)
 		}
 		memory_bm_position_reset(bm);
 		pr_info("free pages cleared after restore\n");
+#ifndef CONFIG_MCST_MEMORY_SANITIZE
 	}
+#endif
 }
 
 /**
@@ -1421,6 +1425,10 @@ static void copy_data_pages(struct memory_bitmap *copy_bm,
 		if (unlikely(pfn == BM_END_OF_MAP))
 			break;
 		copy_data_page(memory_bm_next_pfn(copy_bm), pfn);
+#ifdef CONFIG_E2K
+		save_tag_for_pfn(pfn);
+#endif
+
 	}
 }
 
@@ -1692,6 +1700,9 @@ int hibernate_preallocate_memory(void)
 	struct zone *zone;
 	unsigned long saveable, size, max_size, count, highmem, pages = 0;
 	unsigned long alloc, save_highmem, pages_highmem, avail_normal;
+#ifdef CONFIG_E2K
+	unsigned long tags;
+#endif
 	ktime_t start, stop;
 	int error;
 
@@ -1716,6 +1727,13 @@ int hibernate_preallocate_memory(void)
 	/* Count the number of saveable data pages. */
 	save_highmem = count_highmem_pages();
 	saveable = count_data_pages();
+#ifdef CONFIG_E2K
+	/* Add number of pages required for tags (e2k only). */
+	error = alloc_tag_pages(saveable, &tags);
+	if (error)
+		goto err_out;
+	saveable += tags;
+#endif
 
 	/*
 	 * Compute the total number of page frames we can use (count) and the

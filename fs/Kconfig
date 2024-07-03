@@ -291,6 +291,7 @@ source "fs/vboxsf/Kconfig"
 
 endif # MISC_FILESYSTEMS
 
+
 menuconfig NETWORK_FILESYSTEMS
 	bool "Network File Systems"
 	default y

@@ -185,7 +185,9 @@ struct rcu_data {
 	long dynticks_nmi_nesting;	/* Track irq/NMI nesting level. */
 	atomic_t dynticks;		/* Even value for idle, else odd. */
 	bool rcu_need_heavy_qs;		/* GP old, so heavy quiescent state! */
+#ifndef CONFIG_MCST    /* bug 139936 comment 71 */
 	bool rcu_urgent_qs;		/* GP old need light quiescent state. */
+#endif
 	bool rcu_forced_tick;		/* Forced tick to provide QS. */
 	bool rcu_forced_tick_exp;	/*   ... provide QS to expedited GP. */
 #ifdef CONFIG_RCU_FAST_NO_HZ

@@ -34,3 +34,9 @@ obj-$(CONFIG_MIPS_CPS_CPUIDLE)		+= cpuidle-cps.o
 # POWERPC drivers
 obj-$(CONFIG_PSERIES_CPUIDLE)		+= cpuidle-pseries.o
 obj-$(CONFIG_POWERNV_CPUIDLE)		+= cpuidle-powernv.o
+
+###############################################################################
+# MCST E2K & E90S drivers
+
+obj-$(CONFIG_E2K_CPUIDLE)		+= cpuidle-e2k.o
+obj-$(CONFIG_E90S_CPUIDLE)              += cpuidle-e90s.o

@@ -51,6 +51,14 @@ static const struct i2c_device_id ee1004_ids[] = {
 };
 MODULE_DEVICE_TABLE(i2c, ee1004_ids);
 
+#ifdef CONFIG_MCST
+static const struct of_device_id ee1004_of_match[] = {
+	{ .compatible = "ee1004" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, ee1004_of_match);
+#endif
+
 /*-------------------------------------------------------------------------*/
 
 static int ee1004_get_current_page(void)
@@ -278,6 +286,9 @@ static int ee1004_remove(struct i2c_client *client)
 static struct i2c_driver ee1004_driver = {
 	.driver = {
 		.name = "ee1004",
+#ifdef CONFIG_MCST
+		.of_match_table = of_match_ptr(ee1004_of_match)
+#endif
 	},
 	.probe = ee1004_probe,
 	.remove = ee1004_remove,

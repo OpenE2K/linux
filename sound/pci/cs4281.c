@@ -1152,7 +1152,11 @@ static void snd_cs4281_proc_init(struct cs4281 *chip)
 		entry->content = SNDRV_INFO_CONTENT_DATA;
 		entry->private_data = chip;
 		entry->c.ops = &snd_cs4281_proc_ops_BA1;
+#ifndef	CONFIG_MCST
 		entry->size = CS4281_BA1_SIZE;
+#else
+		entry->size = pci_resource_len(chip->pci, 1);
+#endif
 	}
 }
 
@@ -1281,7 +1285,12 @@ static int snd_cs4281_free(struct cs4281 *chip)
 		free_irq(chip->irq, chip);
 	iounmap(chip->ba0);
 	iounmap(chip->ba1);
+
+#ifdef	CONFIG_MCST
+	pci_release_region(chip->pci, 0);
+#else
 	pci_release_regions(chip->pci);
+#endif
 	pci_disable_device(chip->pci);
 
 	kfree(chip);
@@ -1302,7 +1311,6 @@ static int snd_cs4281_create(struct snd_card *card,
 			     int dual_codec)
 {
 	struct cs4281 *chip;
-	unsigned int tmp;
 	int err;
 	static const struct snd_device_ops ops = {
 		.dev_free =	snd_cs4281_dev_free,
@@ -1327,7 +1335,12 @@ static int snd_cs4281_create(struct snd_card *card,
 	}
 	chip->dual_codec = dual_codec;
 
+#ifdef	CONFIG_MCST
+	/* l-gpio uses BAR1 */
+	if ((err = pci_request_region(pci, 0, "CS4281")) < 0) {
+#else
 	if ((err = pci_request_regions(pci, "CS4281")) < 0) {
+#endif
 		kfree(chip);
 		pci_disable_device(pci);
 		return err;
@@ -1351,10 +1364,10 @@ static int snd_cs4281_create(struct snd_card *card,
 	chip->irq = pci->irq;
 	card->sync_irq = chip->irq;
 
-	tmp = snd_cs4281_chip_init(chip);
-	if (tmp) {
+	err = snd_cs4281_chip_init(chip);
+	if (err) {
 		snd_cs4281_free(chip);
-		return tmp;
+		return err;
 	}
 
 	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, chip, &ops)) < 0) {

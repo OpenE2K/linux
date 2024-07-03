@@ -82,7 +82,11 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
 unsigned int sysctl_sched_wakeup_granularity			= 1000000UL;
 static unsigned int normalized_sysctl_sched_wakeup_granularity	= 1000000UL;
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SYSCTL)
+unsigned int sysctl_sched_migration_cost		= 500000UL;
+#else
 const_debug unsigned int sysctl_sched_migration_cost	= 500000UL;
+#endif
 
 int sched_thermal_decay_shift;
 static int __init setup_sched_thermal_decay_shift(char *str)
@@ -627,7 +631,7 @@ static struct sched_entity *__pick_next_entity(struct sched_entity *se)
 	return rb_entry(next, struct sched_entity, run_node);
 }
 
-#ifdef CONFIG_SCHED_DEBUG
+#if defined(CONFIG_SCHED_DEBUG) || defined(CONFIG_MCST)
 struct sched_entity *__pick_last_entity(struct cfs_rq *cfs_rq)
 {
 	struct rb_node *last = rb_last(&cfs_rq->tasks_timeline.rb_root);
@@ -7935,6 +7939,15 @@ static int detach_tasks(struct lb_env *env)
 			if (sched_feat(LB_MIN) &&
 			    load < 16 && !env->sd->nr_balance_failed)
 				goto next;
+
+#ifdef CONFIG_MCST
+			if (p->last_tm_on_cpu == 0)
+				goto next;
+
+			if (getns64timeofday() < p->last_tm_on_cpu +
+					sysctl_sched_min_ns_no_migrate)
+				goto next;
+#endif
 
 			/*
 			 * Make sure that we don't migrate too much load.

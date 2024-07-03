@@ -290,7 +290,19 @@ static inline bool should_wake_ksoftirqd(void)
 static inline void invoke_softirq(void)
 {
 	if (should_wake_ksoftirqd())
+#if defined(CONFIG_E90S) && defined(CONFIG_MCST) && defined(CONFIG_FTRACE)
+	{
+		if (!__this_cpu_read(ksoftirqd)) {
+			preempt_disable();
+			__do_softirq();
+			preempt_enable_no_resched();
+		} else {
+#endif
 		wakeup_softirqd();
+#if defined(CONFIG_E90S) && defined(CONFIG_MCST) && defined(CONFIG_FTRACE)
+		}
+	}
+#endif
 }
 
 #else /* CONFIG_PREEMPT_RT */
@@ -379,7 +391,12 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 		 * Run softirq if any pending. And do it in its own stack
 		 * as we may be calling this deep in a task call stack already.
 		 */
+#ifdef CONFIG_MCST  /* napi_wq_worker() is as in_interrupt() */
+		if (!test_thread_flag(TIF_NAPI_WORK))
+			do_softirq();
+#else
 		do_softirq();
+#endif
 	}
 
 	preempt_count_dec();

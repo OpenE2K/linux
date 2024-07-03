@@ -250,6 +250,9 @@ struct amdgpu_virt {
 
 static inline bool is_virtual_machine(void)
 {
+#ifdef CONFIG_E2K
+	return IS_HV_GM();
+#endif
 #ifdef CONFIG_X86
 	return boot_cpu_has(X86_FEATURE_HYPERVISOR);
 #else

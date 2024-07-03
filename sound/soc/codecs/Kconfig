@@ -1364,8 +1364,12 @@ config SND_SOC_TLV320AIC23_SPI
 	select SND_SOC_TLV320AIC23
 
 config SND_SOC_TLV320AIC26
-	tristate
+	tristate "Texas Instruments TLV320AIC26 audio codec"
 	depends on SPI
+	help
+	  Enable support for Texas Instruments TLV320AIC26 SPI audio codec.
+	  This module has been separated from SND_SOC_ALL_CODECS config
+	  for using with Elbrus r2000+ family machines.
 
 config SND_SOC_TLV320AIC31XX
 	tristate "Texas Instruments TLV320AIC31xx CODECs"

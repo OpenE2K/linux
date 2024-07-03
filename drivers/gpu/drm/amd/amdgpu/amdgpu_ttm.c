@@ -1357,7 +1357,11 @@ static int amdgpu_ttm_tt_populate(struct ttm_bo_device *bdev,
 	}
 
 #ifdef CONFIG_SWIOTLB
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (adev->need_swiotlb && swiotlb_nr_tbl(swiotlb_node(adev->dev))) {
+# else
 	if (adev->need_swiotlb && swiotlb_nr_tbl()) {
+# endif
 		return ttm_dma_populate(&gtt->ttm, adev->dev, ctx);
 	}
 #endif
@@ -1401,7 +1405,11 @@ static void amdgpu_ttm_tt_unpopulate(struct ttm_bo_device *bdev, struct ttm_tt *
 	adev = amdgpu_ttm_adev(bdev);
 
 #ifdef CONFIG_SWIOTLB
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (adev->need_swiotlb && swiotlb_nr_tbl(adev->dev)) {
+# else
 	if (adev->need_swiotlb && swiotlb_nr_tbl()) {
+# endif
 		ttm_dma_unpopulate(&gtt->ttm, adev->dev);
 		return;
 	}
@@ -1814,11 +1822,8 @@ static int amdgpu_ttm_reserve_tmr(struct amdgpu_device *adev)
 	bool mem_train_support = false;
 
 	if (!amdgpu_sriov_vf(adev)) {
-		ret = amdgpu_mem_train_support(adev);
-		if (ret == 1)
+		if (amdgpu_atomfirmware_mem_training_supported(adev))
 			mem_train_support = true;
-		else if (ret == -1)
-			return -EINVAL;
 		else
 			DRM_DEBUG("memory training does not support!\n");
 	}
@@ -2589,7 +2594,11 @@ int amdgpu_ttm_debugfs_init(struct amdgpu_device *adev)
 	count = ARRAY_SIZE(amdgpu_ttm_debugfs_list);
 
 #ifdef CONFIG_SWIOTLB
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (!(adev->need_swiotlb && swiotlb_nr_tbl(swiotlb_node(adev->dev))))
+# else
 	if (!(adev->need_swiotlb && swiotlb_nr_tbl()))
+# endif
 		--count;
 #endif
 

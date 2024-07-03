@@ -3592,7 +3592,7 @@ static __poll_t snd_pcm_poll(struct file *file, poll_table *wait)
  * Only on coherent architectures, we can mmap the status and the control records
  * for effcient data transfer.  On others, we have to use HWSYNC ioctl...
  */
-#if defined(CONFIG_X86) || defined(CONFIG_PPC) || defined(CONFIG_ALPHA)
+#if defined(CONFIG_X86) || defined(CONFIG_PPC) || defined(CONFIG_ALPHA) || defined(CONFIG_E2K)
 /*
  * mmap status record
  */

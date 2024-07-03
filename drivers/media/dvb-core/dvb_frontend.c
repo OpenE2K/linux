@@ -2538,8 +2538,13 @@ static int dvb_frontend_handle_ioctl(struct file *file,
 
 	case FE_DISEQC_SEND_BURST:
 		if (fe->ops.diseqc_send_burst) {
+#if defined(CONFIG_MCST) && defined(__LCC__)
+			err = fe->ops.diseqc_send_burst(fe,
+					(enum fe_sec_mini_cmd)((long long)parg));
+#else
 			err = fe->ops.diseqc_send_burst(fe,
 						(enum fe_sec_mini_cmd)parg);
+#endif
 			fepriv->state = FESTATE_DISEQC;
 			fepriv->status = 0;
 		}
@@ -2547,9 +2552,15 @@ static int dvb_frontend_handle_ioctl(struct file *file,
 
 	case FE_SET_TONE:
 		if (fe->ops.set_tone) {
+#if defined(CONFIG_MCST) && defined(__LCC__)
+			err = fe->ops.set_tone(fe,
+					       (enum fe_sec_tone_mode)((long long)parg));
+			fepriv->tone = (enum fe_sec_tone_mode)((long long)parg);
+#else
 			err = fe->ops.set_tone(fe,
 					       (enum fe_sec_tone_mode)parg);
 			fepriv->tone = (enum fe_sec_tone_mode)parg;
+#endif
 			fepriv->state = FESTATE_DISEQC;
 			fepriv->status = 0;
 		}
@@ -2557,9 +2568,15 @@ static int dvb_frontend_handle_ioctl(struct file *file,
 
 	case FE_SET_VOLTAGE:
 		if (fe->ops.set_voltage) {
+#if defined(CONFIG_MCST) && defined(__LCC__)
+			err = fe->ops.set_voltage(fe,
+						  (enum fe_sec_voltage)((long long)parg));
+			fepriv->voltage = (enum fe_sec_voltage)((long long)parg);
+#else
 			err = fe->ops.set_voltage(fe,
 						  (enum fe_sec_voltage)parg);
 			fepriv->voltage = (enum fe_sec_voltage)parg;
+#endif
 			fepriv->state = FESTATE_DISEQC;
 			fepriv->status = 0;
 		}

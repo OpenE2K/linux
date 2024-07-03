@@ -1819,6 +1819,41 @@ pci_moxa_setup(struct serial_private *priv,
 
 	return setup_port(priv, port, bar, offset, 0);
 }
+#ifdef CONFIG_MCST
+static int mpkm_init(struct pci_dev *dev)
+{
+	int offset, num_ports, port;
+	u8 __iomem *p = pci_ioremap_bar(dev, 0);
+	if (p == NULL)
+		return -ENOMEM;
+
+	num_ports = 4;
+	offset = num_ports * 8;
+	/*TODO: add comment */
+	for (port = 0; port < num_ports; port++)
+		writeb(0x74, p + offset + num_ports + port);
+	iounmap(p);
+
+	return 0;
+}
+
+static int mpk2m_init(struct pci_dev *dev)
+{
+	int offset, num_ports, port;
+	u8 __iomem *p = pci_ioremap_bar(dev, 0);
+	if (p == NULL)
+		return -ENOMEM;
+
+	num_ports = 8;
+	offset = num_ports * 8;
+	/*TODO: add comment */
+	for (port = 0; port < num_ports; port++)
+		writeb(0x6, p + offset + num_ports + port);
+	iounmap(p);
+
+	return 0;
+}
+#endif
 
 #define PCI_VENDOR_ID_SBSMODULARIO	0x124B
 #define PCI_SUBVENDOR_ID_SBSMODULARIO	0x124B
@@ -1937,6 +1972,30 @@ pci_moxa_setup(struct serial_private *priv,
  * Specific entries must come before more generic entries.
  */
 static struct pci_serial_quirk pci_serial_quirks[] __refdata = {
+#ifdef CONFIG_MCST
+	/*
+	 * MCST MPKM
+	 */
+	{
+		.vendor		= PCI_VENDOR_ID_ELBRUS,
+		.device		= PCI_DEVICE_ID_MCST_MPKM,
+		.subvendor	= PCI_ANY_ID,
+		.subdevice	= PCI_ANY_ID,
+		.init		= mpkm_init,
+		.setup		= pci_default_setup,
+	},
+	/*
+	 * MCST MPKM2
+	 */
+	{
+		.vendor		= PCI_VENDOR_ID_ELBRUS,
+		.device		= PCI_DEVICE_ID_MCST_MPKM2,
+		.subvendor	= PCI_ANY_ID,
+		.subdevice	= PCI_ANY_ID,
+		.init		= mpk2m_init,
+		.setup		= pci_default_setup,
+	},
+#endif
 	/*
 	* ADDI-DATA GmbH communication cards <info@addi-data.com>
 	*/
@@ -2806,6 +2865,9 @@ enum pci_board_num_t {
 	pbn_b0_1_921600,
 	pbn_b0_2_921600,
 	pbn_b0_4_921600,
+#ifdef CONFIG_MCST
+	pbn_b0_8_921600,
+#endif
 
 	pbn_b0_2_1130000,
 
@@ -3044,7 +3106,14 @@ static struct pciserial_board pci_boards[] = {
 		.base_baud	= 1843200,
 		.uart_offset	= 8,
 	},
-
+#ifdef CONFIG_MCST
+	[pbn_b0_8_921600] = {
+		.flags		= FL_BASE0,
+		.num_ports	= 8,
+		.base_baud	= 921600,
+		.uart_offset	= 8,
+	},
+#endif
 	[pbn_b0_1_3906250] = {
 		.flags		= FL_BASE0,
 		.num_ports	= 1,
@@ -4168,6 +4237,12 @@ static SIMPLE_DEV_PM_OPS(pciserial_pm_ops, pciserial_suspend_one,
 			 pciserial_resume_one);
 
 static const struct pci_device_id serial_pci_tbl[] = {
+#ifdef CONFIG_MCST
+	{	PCI_DEVICE(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_MPKM),
+		.driver_data = pbn_b0_4_921600 },
+	{	PCI_DEVICE(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_MPKM2),
+		.driver_data = pbn_b0_8_921600 },
+#endif
 	{	PCI_VENDOR_ID_ADVANTECH, PCI_DEVICE_ID_ADVANTECH_PCI1600,
 		PCI_DEVICE_ID_ADVANTECH_PCI1600_1611, PCI_ANY_ID, 0, 0,
 		pbn_b0_4_921600 },

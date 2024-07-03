@@ -1,0 +1,216 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+config IOMMU_HELPER
+        bool
+        default y
+	select GENERIC_ALLOCATOR
+
+menu "Elbrus Architecture Linux Kernel Configuration"
+
+config EPIC
+	bool "Elbrus PIC support"
+	depends on E90S || (E2K && (!E2K_MACHINE || CPU_ISET_MIN >= 6 || KVM_HOST_MODE))
+	def_bool y
+	help
+	  Elbrus Programmable Interrupt Controller supports multiprocessor
+	  systems with up to 1024 cores and uses 10 bit vectors for
+	  masked interrupts.
+	  Controller implements hardware support for interrupt virtualization.
+	  Consists of CEPIC (per core), PREPIC (per processor) and IOEPIC.
+	  Say 'Y' to enable EPIC support in kernel
+
+menu "Boot/prom console support"
+
+config L_EARLY_PRINTK
+	def_bool n
+
+config SERIAL_PRINTK
+	bool "dump_printk() support"
+	depends on E2K || E90S
+	default y
+	select L_EARLY_PRINTK
+	help
+	  dump_printk() outputs directly to serial port bypassing all
+	  buffers and locks. It is useful for hardware debugging.
+
+	  Only two devices are supported currently: ns16550 (== 8550)
+	  and l_zilog (== am85c30).
+
+	  On simulator dump_printk() also outputs to LMS console.
+
+	  Kernel parameter "boot_printk_all" is added. If set, dump_print()
+	  will be used everywhere instead of printk().
+
+config NVRAM_PANIC
+	bool "save panic output to nvram"
+	depends on E2K || E90S
+	default y
+	help
+	   panic output is saved into nvram. It can be extracted from
+	   nvram after reboot using /proc/sys/kernel/nvram_panic
+
+config SERIAL_AM85C30_CONSOLE
+	bool "Init-time serial console on Am85c30 zilog and compatible devices"
+	depends on SERIAL_PRINTK && (!E2K || SERIAL_AM85C30_BOOT_CONSOLE)
+	default y
+	help
+	  Say Y to support simple console based on Am85c30 serial port.
+
+config EARLY_DUMP_CONSOLE
+	bool "Early serial console based on Am85c30/8250 or hvc"
+	depends on L_EARLY_PRINTK
+	default y
+	help
+	  Say Y to enable early serial console support.
+	  Useful when debugging kernel boot process.
+
+endmenu # "Boot/prom console support"
+
+config MCST
+	bool
+	default y
+
+config CLKR_CLOCKSOURCE
+	def_bool E90S
+
+config CLKR_SYNCHRONIZATION_WARNING
+	bool
+	depends on CLKR_CLOCKSOURCE && SMP
+	default n
+	help
+	  Set to Y to enable warnings about CLKR registers synchronization
+	  across several CPUs.
+
+config CLKR_OFFSET
+	bool
+	depends on CLKR_CLOCKSOURCE && SMP
+	default y
+	help
+	  Set to Y when different cpus' clock registers have the same
+	  frequency but different initial values. Then per-cpu offset
+	  will be added to each cpu's register value.
+
+config IOHUB_GPIO
+	tristate "IOHUB Gpiolib"
+	depends on GPIOLIB
+	default m
+	help
+	   Gpiolib implementation for Elbrus IOHUB.
+
+config L_LOCAL_APIC
+	def_bool y
+	depends on E2K || E90S
+
+config L_IO_APIC
+	def_bool y
+	depends on E2K || E90S
+ 
+config L_PCI_QUIRKS
+	def_bool PCI_MSI
+	depends on L_IO_APIC
+	select PCI_QUIRKS
+
+config L_PMC
+	tristate "Elbrus-1C+ Power Management Controller"
+	depends on E2K
+	select CPU_FREQ
+	select PM_OPP
+	default m
+	help
+	  Power Management Controller for Elbrus-1C+
+
+config S2_PMC
+	bool "R2000 Power Management Controller (S2 PMC)"
+	depends on E90S
+	select CPU_IDLE
+	select CPU_FREQ
+	default y # we need s2_get_freq_mult() for r2000
+	help
+	 Power Management Controller (PMC) for MCST R2000 (E90S/SPARC v9) CPU
+
+config I2C_SPI_RESET_CONTROLLER
+	bool "MCST I2C SPI Controller Support"
+	depends on PCI && (E2K || E90S)
+	default y
+	help
+	  Support for MCST I2C SPI Controller
+
+config L_I2C_CONTROLLER
+	tristate "Elbrus I2C Controller"
+	depends on I2C && I2C_SPI_RESET_CONTROLLER
+	default y
+	help
+	  If you say yes to this option, support will be
+	  included for the Elbrus I2C controller that is
+	  part of Elbrus IOHUB.
+
+config L_SPI_CONTROLLER
+	tristate "Elbrus SPI controller"
+	depends on SPI && I2C_SPI_RESET_CONTROLLER
+	default y
+	help
+	  If you say yes to this option, support will be
+	  included for the Elbrus SPI controller that is
+	  part of Elbrus IOHUB.
+
+config I2C_SPI_IRQ
+	bool
+	depends on L_SPI_CONTROLLER || L_I2C_CONTROLLER
+	default n
+
+config L_MTD_SPI_NOR
+	bool "Elbrus MTD support"
+	depends on L_SPI_CONTROLLER && MTD_SPI_NOR && MTD_CMDLINE_PARTS && MTD_BLOCK && ROMFS_FS
+	default n
+	help
+	  If you say yes to this option, embedded flash (S25FL064A or similar) driver will
+	  be switched from SPIDEV to SPI-NOR.
+	  Both can be used by flashrom userspace tool, but SPI-NOR/MTD also requires mtd-utils
+	  package. Selecting SPIDEV by default
+
+config IPE2ST_POWER
+	tristate "Elbrus IPE2-ST Power Source"
+	depends on E2K && L_I2C_CONTROLLER && GPIO_PCA953X && ISL22317
+	default m
+	help
+	   If you say yes to this option, support will be included for the
+	   Elbrus IPE2-ST Power Source. IPE2-ST uses GPIO_PCA953x and ISL22317
+	   by modprobing them from /etc.
+
+config ACPI_L_SPMC
+	bool "Processor-8 SPMC Controller (SCI, PM Timer, sleep states)"
+	default y
+	help
+	   If you say yes to this option, support will be
+	   included for the Processor-8 SPMC Controller (SCI, PM Timer,
+	   sleep states) that is part of IOHUB-2.
+
+menu "Device Tree"
+config OF
+	bool "Device Tree support"
+	default y
+	select DTC if E2K
+	select OF_EARLY_FLATTREE
+	select PROC_DEVICETREE
+	select OF_FLATTREE if E90S
+	select OF_ADDRESS if E90S
+	help
+	   If you say yes to this option, support will be included for
+	   Device Tree data structure. The tree will be displaed in
+	   /proc/device-tree.
+config DTB_L_TEST
+	bool "Use kernel's built-in dtb blob"
+	default n
+	depends on OF
+	help
+	   If you say yes to this option, kernel will use built-in dtb blob
+	   instead of trying to get it from bootloader. Built-in blob is an
+	   array defined in arch/l/kernel/devtree.c.
+
+endmenu
+endmenu # "Elbrus Architecture Linux Kernel Configuration"

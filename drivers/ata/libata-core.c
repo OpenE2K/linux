@@ -2433,6 +2433,11 @@ int ata_dev_configure(struct ata_device *dev)
 		return 0;
 	}
 
+#ifdef CONFIG_MCST
+	if (!(ap->flags & ATA_FLAG_IOHUB2_REV2))
+		 dev->horkage &= ~ATA_HORKAGE_FIX_ERROR_ON_WRITE;
+#endif
+
 	if ((!atapi_enabled || (ap->flags & ATA_FLAG_NO_ATAPI)) &&
 	    dev->class == ATA_DEV_ATAPI) {
 		ata_dev_warn(dev, "WARNING: ATAPI is %s, device ignored\n",
@@ -4041,7 +4046,9 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 	{ "WDC WD2500JD-*",		NULL,	ATA_HORKAGE_WD_BROKEN_LPM },
 	{ "WDC WD3000JD-*",		NULL,	ATA_HORKAGE_WD_BROKEN_LPM },
 	{ "WDC WD3200JD-*",		NULL,	ATA_HORKAGE_WD_BROKEN_LPM },
-
+#ifdef CONFIG_MCST
+	{ "ASUS     DRW-24F1MT",	NULL, ATA_HORKAGE_FIX_ERROR_ON_WRITE },
+#endif
 	/* End Marker */
 	{ }
 };
@@ -6208,6 +6215,9 @@ static int __init ata_parse_force_one(char **cur,
 		{ "rstonce",	.lflags		= ATA_LFLAG_RST_ONCE },
 		{ "atapi_dmadir", .horkage_on	= ATA_HORKAGE_ATAPI_DMADIR },
 		{ "disable",	.horkage_on	= ATA_HORKAGE_DISABLE },
+#ifdef CONFIG_MCST
+		{ "fix-atapi-write", .horkage_on = ATA_HORKAGE_FIX_ERROR_ON_WRITE },
+#endif
 	};
 	char *start = *cur, *p = *cur;
 	char *id, *val, *endp;

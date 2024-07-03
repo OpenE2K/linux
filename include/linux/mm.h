@@ -32,6 +32,10 @@
 #include <linux/sched.h>
 #include <linux/pgtable.h>
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	extern int mem_san;
+#endif
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
@@ -76,6 +80,10 @@ static inline void totalram_pages_add(long count)
 {
 	atomic_long_add(count, &_totalram_pages);
 }
+
+#if defined(CONFIG_MCST) && !defined(CONFIG_X86_64)
+extern unsigned long totalram_real_pages;
+#endif
 
 extern void * high_memory;
 extern int page_cluster;
@@ -338,6 +346,13 @@ extern unsigned int kobjsize(const void *objp);
 #elif defined(CONFIG_ARM64)
 # define VM_ARM64_BTI	VM_ARCH_1	/* BTI guarded page, a.k.a. GP bit */
 # define VM_ARCH_CLEAR	VM_ARM64_BTI
+#elif defined(CONFIG_E2K)
+# define VM_MEMTYPE_TRACKED VM_ARCH_1
+# define VM_INT_PR	VM_HIGH_ARCH_0	/* PTE.int_pr for protected mode */
+# define VM_HW_STACK_PS	VM_HIGH_ARCH_1	/* Procedure stack area */
+# define VM_HW_STACK_PCS VM_HIGH_ARCH_2	/* Chain stack area */
+# define VM_PRIVILEGED	VM_HIGH_ARCH_3	/* Pages are privileged */
+# define VM_MPDMA	VM_HIGH_ARCH_4	/* Pages are under MPDMA hardware protection */
 #elif !defined(CONFIG_MMU)
 # define VM_MAPPED_COPY	VM_ARCH_1	/* T if mapped copy of data (nommu mmap) */
 #endif
@@ -1732,6 +1747,13 @@ static inline void unmap_shared_mapping_range(struct address_space *mapping,
 	unmap_mapping_range(mapping, holebegin, holelen, 0);
 }
 
+#ifdef CONFIG_E2K
+extern pmd_t *pmd_alloc_cont(struct mm_struct *mm, pud_t *pud,
+			     unsigned long address);
+extern pte_t *pte_alloc_cont(struct mm_struct *mm, pmd_t *pmd,
+			     unsigned long address, spinlock_t **ptlp);
+#endif
+
 extern int access_process_vm(struct task_struct *tsk, unsigned long addr,
 		void *buf, int len, unsigned int gup_flags);
 extern int access_remote_vm(struct mm_struct *mm, unsigned long addr,
@@ -2127,6 +2149,11 @@ int __pte_alloc_kernel(pmd_t *pmd);
 
 #if defined(CONFIG_MMU)
 
+/*
+ * The following ifdef needed to get the 5level-fixup.h header to work.
+ * Remove it when 5level-fixup.h has been removed.
+ */
+#if !defined(CONFIG_E2K) || !defined(__ARCH_HAS_5LEVEL_HACK)
 static inline p4d_t *p4d_alloc(struct mm_struct *mm, pgd_t *pgd,
 		unsigned long address)
 {
@@ -2140,6 +2167,7 @@ static inline pud_t *pud_alloc(struct mm_struct *mm, p4d_t *p4d,
 	return (unlikely(p4d_none(*p4d)) && __pud_alloc(mm, p4d, address)) ?
 		NULL : pud_offset(p4d, address);
 }
+#endif /* !CONFIG_E2K || !__ARCH_HAS_5LEVEL_HACK */
 
 static inline pmd_t *pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 {

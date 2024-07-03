@@ -693,6 +693,18 @@ static bool symbol__is_idle(const char *name)
 		"pseries_dedicated_idle_sleep",
 		"psw_idle",
 		"psw_idle_exit",
+#ifdef __e2k__
+		"native_default_idle",
+		"return_from_cpuidle",
+		"C1_enter_v3",
+		"C1_enter_v6",
+		"C2_enter",
+		"C3_enter_v3",
+		"C3_enter_v6",
+#endif
+#if defined(CONFIG_MCST) && defined(CONFIG_E90S)
+		"e90s_enter_idle",
+#endif
 		NULL
 	};
 	int i;

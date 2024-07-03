@@ -658,7 +658,11 @@ static int radeon_ttm_tt_populate(struct ttm_bo_device *bdev,
 #endif
 
 #ifdef CONFIG_SWIOTLB
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (rdev->need_swiotlb && swiotlb_nr_tbl(swiotlb_node(rdev->dev))) {
+# else
 	if (rdev->need_swiotlb && swiotlb_nr_tbl()) {
+# endif
 		return ttm_dma_populate(&gtt->ttm, rdev->dev, ctx);
 	}
 #endif
@@ -689,7 +693,11 @@ static void radeon_ttm_tt_unpopulate(struct ttm_bo_device *bdev, struct ttm_tt *
 #endif
 
 #ifdef CONFIG_SWIOTLB
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (rdev->need_swiotlb && swiotlb_nr_tbl(swiotlb_node(rdev->dev))) {
+# else
 	if (rdev->need_swiotlb && swiotlb_nr_tbl()) {
+# endif
 		ttm_dma_unpopulate(&gtt->ttm, rdev->dev);
 		return;
 	}
@@ -1100,7 +1108,11 @@ static int radeon_ttm_debugfs_init(struct radeon_device *rdev)
 	count = ARRAY_SIZE(radeon_ttm_debugfs_list);
 
 #ifdef CONFIG_SWIOTLB
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (!(rdev->need_swiotlb && swiotlb_nr_tbl(swiotlb_node(rdev->dev))))
+# else
 	if (!(rdev->need_swiotlb && swiotlb_nr_tbl()))
+# endif
 		--count;
 #endif
 

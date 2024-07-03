@@ -2174,12 +2174,29 @@ static int vfio_unregister_iommu_notifier(struct vfio_group *group,
 	return ret;
 }
 
+#if defined(CONFIG_MCST) && defined(CONFIG_E2K)
+#include <asm/e2k-iommu.h>
+void vfio_group_set_kvm(struct vfio_group *group, struct kvm *kvm)
+{
+	struct vfio_device *device;
+
+	mutex_lock(&group->device_lock);
+	list_for_each_entry(device, &group->device_list, group_next)
+		e2k_iommu_set_kvm_device(device->dev, kvm);
+	mutex_unlock(&group->device_lock);
+
+	group->kvm = kvm;
+	blocking_notifier_call_chain(&group->notifier,
+				VFIO_GROUP_NOTIFY_SET_KVM, kvm);
+}
+#else
 void vfio_group_set_kvm(struct vfio_group *group, struct kvm *kvm)
 {
 	group->kvm = kvm;
 	blocking_notifier_call_chain(&group->notifier,
 				VFIO_GROUP_NOTIFY_SET_KVM, kvm);
 }
+#endif
 EXPORT_SYMBOL_GPL(vfio_group_set_kvm);
 
 static int vfio_register_group_notifier(struct vfio_group *group,

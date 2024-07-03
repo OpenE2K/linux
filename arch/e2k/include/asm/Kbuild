@@ -1,0 +1,14 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+### generic
+
+generic-y += errno.h
+generic-y += hugetlb.h
+generic-y += ioctl.h
+generic-y += mcs_spinlock.h
+generic-y += param.h
+generic-y += qrwlock.h
+generic-y += statfs.h
+generic-y += termios.h
+

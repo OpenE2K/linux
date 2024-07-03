@@ -5,6 +5,8 @@
 
 menu "PCS device drivers"
 
+source "drivers/net/pcs/mcst/Kconfig"
+
 config PCS_XPCS
 	tristate "Synopsys DesignWare XPCS controller"
 	depends on MDIO_DEVICE && MDIO_BUS

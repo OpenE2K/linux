@@ -39,6 +39,9 @@
 #endif
 #include <linux/i2c.h>
 #include "igb.h"
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif
 
 enum queue_mode {
 	QUEUE_MODE_STRICT_PRIORITY,
@@ -65,12 +68,18 @@ static const struct pci_device_id igb_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I354_SGMII) },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I354_BACKPLANE_2_5GBPS) },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I211_COPPER), board_82575 },
+#ifdef CONFIG_MCST
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I210_UNPROGRAMMED), board_82575 },
+#endif
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I210_COPPER), board_82575 },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I210_FIBER), board_82575 },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I210_SERDES), board_82575 },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I210_SGMII), board_82575 },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I210_COPPER_FLASHLESS), board_82575 },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I210_SERDES_FLASHLESS), board_82575 },
+#ifdef CONFIG_MCST
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I350_UNPROGRAMMED), board_82575 },
+#endif
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I350_COPPER), board_82575 },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I350_FIBER), board_82575 },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I350_SERDES), board_82575 },
@@ -316,7 +325,7 @@ static void igb_regdump(struct e1000_hw *hw, struct igb_reg_info *reginfo)
 		break;
 	case E1000_TDBAL(0):
 		for (n = 0; n < 4; n++)
-			regs[n] = rd32(E1000_RDBAL(n));
+			regs[n] = rd32(E1000_TDBAL(n));
 		break;
 	case E1000_TDBAH(0):
 		for (n = 0; n < 4; n++)
@@ -936,7 +945,11 @@ static int igb_request_msix(struct igb_adapter *adapter)
 	int i, err = 0, vector = 0, free_vector = 0;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  igb_msix_other, 0, netdev->name, adapter);
+			  igb_msix_other, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+				, netdev->name, adapter);
 	if (err)
 		goto err_out;
 
@@ -966,8 +979,11 @@ static int igb_request_msix(struct igb_adapter *adapter)
 			sprintf(q_vector->name, "%s-unused", netdev->name);
 
 		err = request_irq(adapter->msix_entries[vector].vector,
-				  igb_msix_ring, 0, q_vector->name,
-				  q_vector);
+				  igb_msix_ring, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, q_vector->name, q_vector);
 		if (err)
 			goto err_free;
 	}
@@ -1437,8 +1453,11 @@ static int igb_request_irq(struct igb_adapter *adapter)
 	igb_assign_vector(adapter->q_vector[0], 0);
 
 	if (adapter->flags & IGB_FLAG_HAS_MSI) {
-		err = request_irq(pdev->irq, igb_intr_msi, 0,
-				  netdev->name, adapter);
+		err = request_irq(pdev->irq, igb_intr_msi, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, adapter);
 		if (!err)
 			goto request_done;
 
@@ -1447,8 +1466,11 @@ static int igb_request_irq(struct igb_adapter *adapter)
 		adapter->flags &= ~IGB_FLAG_HAS_MSI;
 	}
 
-	err = request_irq(pdev->irq, igb_intr, IRQF_SHARED,
-			  netdev->name, adapter);
+	err = request_irq(pdev->irq, igb_intr, IRQF_SHARED
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+		, netdev->name, adapter);
 
 	if (err)
 		dev_err(&pdev->dev, "Error %d getting interrupt\n",
@@ -3142,6 +3164,10 @@ static s32 igb_init_i2c(struct igb_adapter *adapter)
 	return status;
 }
 
+#ifdef CONFIG_MCST
+int l_set_ethernet_macaddr(struct pci_dev *pdev, char *macaddr);
+#endif
+
 /**
  *  igb_probe - Device Initialization Routine
  *  @pdev: PCI device information struct
@@ -3225,6 +3251,11 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	netdev->netdev_ops = &igb_netdev_ops;
 	igb_set_ethtool_ops(netdev);
+#ifdef CONFIG_E2K
+	if (is_prototype())
+		netdev->watchdog_timeo = 50 * HZ;
+	else
+#endif
 	netdev->watchdog_timeo = 5 * HZ;
 
 	strncpy(netdev->name, pci_name(pdev), sizeof(netdev->name) - 1);
@@ -3349,8 +3380,10 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	default:
 		if (hw->nvm.ops.validate(hw) < 0) {
 			dev_err(&pdev->dev, "The NVM Checksum Is Not Valid\n");
+#ifndef CONFIG_MCST
 			err = -EIO;
 			goto err_eeprom;
+#endif
 		}
 		break;
 	}
@@ -3360,6 +3393,12 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		if (hw->mac.ops.read_mac_addr(hw))
 			dev_err(&pdev->dev, "NVM Read Error\n");
 	}
+
+#ifdef CONFIG_MCST
+	if (!is_valid_ether_addr(hw->mac.addr)) {
+		l_set_ethernet_macaddr(pdev, (char *)hw->mac.addr);
+	}
+#endif
 
 	memcpy(netdev->dev_addr, hw->mac.addr, netdev->addr_len);
 
@@ -8858,6 +8897,13 @@ static bool igb_alloc_mapped_page(struct igb_ring *rx_ring,
 		return true;
 
 	/* alloc new page for storage */
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug())
+		page = alloc_pages_node(dev_to_node(rx_ring->dev),
+			GFP_ATOMIC | __GFP_NOWARN | __GFP_COMP |
+			__GFP_THISNODE | __GFP_MEMALLOC, 0);
+	else
+#endif
 	page = dev_alloc_pages(igb_rx_pg_order(rx_ring));
 	if (unlikely(!page)) {
 		rx_ring->rx_stats.alloc_failed++;

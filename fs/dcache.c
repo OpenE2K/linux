@@ -3231,7 +3231,12 @@ void __init vfs_caches_init_early(void)
 void __init vfs_caches_init(void)
 {
 	names_cachep = kmem_cache_create_usercopy("names_cache", PATH_MAX, 0,
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_NO_SANITIZE,
+						0, PATH_MAX, NULL);
+#else
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC, 0, PATH_MAX, NULL);
+#endif
 
 	dcache_init();
 	inode_init();

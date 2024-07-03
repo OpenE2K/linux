@@ -223,6 +223,15 @@ enum e1000_serdes_link_state {
 	e1000_serdes_link_forced_up
 };
 
+#ifndef __le16
+#define __le16 u16
+#endif
+#ifndef __le32
+#define __le32 u32
+#endif
+#ifndef __le64
+#define __le64 u64
+#endif
 /* Receive Descriptor - Extended */
 union e1000_rx_desc_extended {
 	struct {
@@ -688,6 +697,10 @@ struct e1000_dev_spec_ich8lan {
 	bool eee_disable;
 	u16 eee_lp_ability;
 	enum e1000_ulp_state ulp_state;
+#ifdef DYNAMIC_LTR_SUPPORT
+	u16 lat_enc;
+	u16 max_ltr_enc;
+#endif
 };
 
 struct e1000_hw {
@@ -708,6 +721,9 @@ struct e1000_hw {
 		struct e1000_dev_spec_80003es2lan e80003es2lan;
 		struct e1000_dev_spec_ich8lan ich8lan;
 	} dev_spec;
+#ifdef CONFIG_MCST
+	int has_nvram;
+#endif
 };
 
 #include "82571.h"

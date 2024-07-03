@@ -2,7 +2,7 @@
 VERSION = 5
 PATCHLEVEL = 10
 SUBLEVEL = 218
-EXTRAVERSION =
+EXTRAVERSION = -2-open
 NAME = Dare mighty things
 
 # *DOCUMENTATION*
@@ -443,6 +443,20 @@ OBJDUMP		= llvm-objdump
 READELF		= llvm-readelf
 STRIP		= llvm-strip
 else
+ifeq  ($(call cc-lcc-yn),y)
+# By default GNU Make assigns "cc" to CC, but that assignment
+# does not always work; this does make it work...
+CC		:= $(CC)
+
+LD              := $(shell $(CC) -print-prog-name=ld)
+AR		:= $(shell $(CC) -print-prog-name=ar)
+NM		:= $(shell $(CC) -print-prog-name=nm)
+OBJCOPY		:= $(shell $(CC) -print-prog-name=objcopy)
+OBJDUMP		:= $(shell $(CC) -print-prog-name=objdump)
+READELF		:= $(shell $(CC) -print-prog-name=readelf)
+OBJSIZE		:= $(shell $(CC) -print-prog-name=size)
+STRIP		:= $(shell $(CC) -print-prog-name=strip)
+else
 CC		= $(CROSS_COMPILE)gcc
 LD		= $(CROSS_COMPILE)ld
 AR		= $(CROSS_COMPILE)ar
@@ -451,6 +465,7 @@ OBJCOPY		= $(CROSS_COMPILE)objcopy
 OBJDUMP		= $(CROSS_COMPILE)objdump
 READELF		= $(CROSS_COMPILE)readelf
 STRIP		= $(CROSS_COMPILE)strip
+endif
 endif
 PAHOLE		= pahole
 RESOLVE_BTFIDS	= $(objtree)/tools/bpf/resolve_btfids/resolve_btfids
@@ -484,6 +499,8 @@ CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
 LDFLAGS_vmlinux =
 
+-include .kernelvariables
+
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
 		-I$(srctree)/arch/$(SRCARCH)/include/uapi \
@@ -502,11 +519,22 @@ LINUXINCLUDE    := \
 		$(USERINCLUDE)
 
 KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
+ifeq  ($(call cc-lcc-yn),y)
+# Although lcc-1.24 supports -fshort-wchar many users are still
+# using lcc-1.23, so when they compile kernel modules themselves
+# we must avoid passing "-fshort-wchar" to it.
 KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
-		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
+		   -fno-strict-aliasing -fno-common -fno-PIE \
 		   -Werror=implicit-function-declaration -Werror=implicit-int \
 		   -Werror=return-type -Wno-format-security \
 		   -std=gnu89
+else
+KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
+		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
+		   -Werror=implicit-function-declaration -Werror=implicit-int \
+		   -Wno-format-security \
+		   -std=gnu89
+endif
 KBUILD_CPPFLAGS := -D__KERNEL__
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
@@ -672,9 +700,14 @@ endif # KBUILD_EXTMOD
 # Defaults to vmlinux, but the arch makefile usually adds further targets
 all: vmlinux
 
+ifneq  ($(call cc-lcc-yn),y)
 CFLAGS_GCOV	:= -fprofile-arcs -ftest-coverage \
 	$(call cc-option,-fno-tree-loop-im) \
 	$(call cc-disable-warning,maybe-uninitialized,)
+else
+CFLAGS_GCOV	:= -fprofile-arcs -ftest-coverage \
+	$(call cc-disable-warning,maybe-uninitialized,)
+endif
 export CFLAGS_GCOV
 
 # The arch Makefiles can override CC_FLAGS_FTRACE. We may also append it later.
@@ -958,8 +991,13 @@ KBUILD_CFLAGS += $(call cc-disable-warning, restrict)
 # Enabled with W=2, disabled by default as noisy
 KBUILD_CFLAGS += $(call cc-disable-warning, maybe-uninitialized)
 
+# MCST: The original gcc bug which caused introduction of -fno-strict-overflow
+# (optimizing away pointer overflow checking) does not exist in lcc, and this
+# option prohibits many compiler optimizations.
+ifneq  ($(call cc-lcc-yn),y)
 # disable invalid "can't wrap" optimizations for signed / pointers
 KBUILD_CFLAGS	+= -fno-strict-overflow
+endif
 
 # Make sure -fstack-check isn't enabled (like gentoo apparently did)
 KBUILD_CFLAGS  += -fno-stack-check

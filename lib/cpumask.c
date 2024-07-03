@@ -230,6 +230,9 @@ unsigned int cpumask_local_spread(unsigned int i, int node)
 		}
 	}
 	BUG();
+#ifdef __LCC__
+	return 0;
+#endif
 }
 EXPORT_SYMBOL(cpumask_local_spread);
 

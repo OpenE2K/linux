@@ -25,6 +25,14 @@ config CC_VERSION_TEXT
 	    dependency. When the compiler is updated, syncconfig will touch it
 	    and then every file will be rebuilt.
 
+config CC_IS_LCC
+	def_bool $(success,$(CC) --version | head -n 1 | grep -q lcc)
+
+config LCC_VERSION
+	int
+	default $(shell,$(srctree)/scripts/lcc-version.sh $(CC)) if CC_IS_LCC
+	default 0
+
 config CC_IS_GCC
 	def_bool $(success,echo "$(CC_VERSION_TEXT)" | grep -q gcc)
 
@@ -1329,7 +1337,7 @@ config CC_OPTIMIZE_FOR_PERFORMANCE
 
 config CC_OPTIMIZE_FOR_PERFORMANCE_O3
 	bool "Optimize more for performance (-O3)"
-	depends on ARC
+	depends on ARC || E2K
 	help
 	  Choosing this option will pass "-O3" to your compiler to optimize
 	  the kernel yet more for performance.
@@ -1867,6 +1875,16 @@ config DEBUG_PERF_USE_VMALLOC
 	  that don't require it.
 
 	  Say N if unsure.
+
+config WATCH_PREEMPT
+        default n
+        bool "Monitor non preempible intervals"
+        depends on MCST && !ENABLE_DEFAULT_TRACERS
+        help
+         To turn on monitoring echo 1 > /proc/watch-preempt
+         To turn off monitoring echo 0 > /proc/watch-preempt
+         cat /proc/watch-preempt shows maximum interval of preempt
+           disable time for each CPU
 
 endmenu
 

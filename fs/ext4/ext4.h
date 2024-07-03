@@ -1241,6 +1241,7 @@ struct ext4_inode_info {
 #define EXT4_MOUNT2_DAX_INODE		0x00000040 /* For printing options only */
 
 
+
 #define clear_opt(sb, opt)		EXT4_SB(sb)->s_mount_opt &= \
 						~EXT4_MOUNT_##opt
 #define set_opt(sb, opt)		EXT4_SB(sb)->s_mount_opt |= \
@@ -3595,7 +3596,7 @@ extern void ext4_ext_replay_shrink_inode(struct inode *inode, ext4_lblk_t end);
 extern int ext4_ext_replay_set_iblocks(struct inode *inode);
 extern int ext4_ext_replay_update_ex(struct inode *inode, ext4_lblk_t start,
 		int len, int unwritten, ext4_fsblk_t pblk);
-extern int ext4_ext_clear_bb(struct inode *inode);
+extern int ext4_ext_clear_bb(struct inode *inode); 
 
 
 /* move_extent.c */
@@ -3625,6 +3626,7 @@ extern int ext4_bio_write_page(struct ext4_io_submit *io,
 			       bool keep_towrite);
 extern struct ext4_io_end_vec *ext4_alloc_io_end_vec(ext4_io_end_t *io_end);
 extern struct ext4_io_end_vec *ext4_last_io_end_vec(ext4_io_end_t *io_end);
+
 
 /* mmp.c */
 extern int ext4_multi_mount_protect(struct super_block *, ext4_fsblk_t);
@@ -3687,6 +3689,7 @@ static inline void ext4_clear_io_unwritten_flag(ext4_io_end_t *io_end)
 extern const struct iomap_ops ext4_iomap_ops;
 extern const struct iomap_ops ext4_iomap_overwrite_ops;
 extern const struct iomap_ops ext4_iomap_report_ops;
+
 
 static inline int ext4_buffer_uptodate(struct buffer_head *bh)
 {

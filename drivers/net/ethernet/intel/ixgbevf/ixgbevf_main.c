@@ -1569,8 +1569,11 @@ static int ixgbevf_request_msix_irqs(struct ixgbevf_adapter *adapter)
 			/* skip this unused q_vector */
 			continue;
 		}
-		err = request_irq(entry->vector, &ixgbevf_msix_clean_rings, 0,
-				  q_vector->name, q_vector);
+		err = request_irq(entry->vector, &ixgbevf_msix_clean_rings, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, q_vector->name, q_vector);
 		if (err) {
 			hw_dbg(&adapter->hw,
 			       "request_irq failed for MSIX interrupt Error: %d\n",
@@ -1580,7 +1583,11 @@ static int ixgbevf_request_msix_irqs(struct ixgbevf_adapter *adapter)
 	}
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  &ixgbevf_msix_other, 0, netdev->name, adapter);
+			  &ixgbevf_msix_other, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, adapter);
 	if (err) {
 		hw_dbg(&adapter->hw, "request_irq for msix_other failed: %d\n",
 		       err);

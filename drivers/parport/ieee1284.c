@@ -31,6 +31,12 @@
 #undef DEBUG /* Don't want a garbled console */
 #endif
 
+#ifdef _WORKAROUND_MCST_PP
+
+extern size_t parport_write_block_dma_compat (struct parport *port,
+					       const void *buf, size_t length);
+#endif /*   _WORKAROUND_MCST_PP  */
+
 /* Make parport_wait_peripheral wake up.
  * It will be useful to call this from an interrupt handler. */
 static void parport_ieee1284_wakeup (struct parport *port)
@@ -214,7 +220,23 @@ int parport_wait_peripheral(struct parport *port,
 static void parport_ieee1284_terminate (struct parport *port)
 {
 	int r;
+#ifdef _WORKAROUND_MCST_PP
+	struct parport_pc_private *priv = port->private_data;
+#endif /* _WORKAROUND_MCST_PP */
+
 	port = port->physport;
+
+#ifdef _WORKAROUND_MCST_PP
+	if (priv->driver_data == mcst_pp_iee1284){
+		char ppc_cr = 0;
+
+		/* Turn controler in mPS2 mode */
+		ppc_cr = inb(ECONTROL(port));
+		ppc_cr = ((ppc_cr & 0xf8) | mPS2);
+
+		outb(ppc_cr, ECONTROL(port));
+	}
+#endif /* _WORKAROUND_MCST_PP */
 
 	/* EPP terminates differently. */
 	switch (port->ieee1284.mode) {
@@ -295,6 +317,25 @@ static void parport_ieee1284_terminate (struct parport *port)
 	port->ieee1284.mode = IEEE1284_MODE_COMPAT;
 	port->ieee1284.phase = IEEE1284_PH_FWD_IDLE;
 
+#ifdef _WORKAROUND_MCST_PP
+	/* Now controller resetting step */
+	if (priv->driver_data == mcst_pp_iee1284) {
+
+		char icr = Full_Intr_AllowedEn;
+		short ppc_sr = Full_Intr_Allowed;
+		char ppc_cr;
+
+		ppc_cr = inb(ECONTROL(port));
+		ppc_cr = ((ppc_cr & 0xfd) | (1 << 5)); /* reset bit */
+		outb(ppc_cr, ECONTROL(port));
+		udelay(50);
+
+	/* Interrups enabling */
+		outw(ppc_sr, PPC_SR(port));
+		outb(icr, ICR(port));
+	}
+#endif /* _WORKAROUND_MCST_PP */
+
 	pr_debug("%s: In compatibility (forward idle) mode\n", port->name);
 }		
 #endif /* IEEE1284 support */
@@ -326,6 +367,11 @@ int parport_negotiate (struct parport *port, int mode)
 	int r;
 	unsigned char xflag;
 
+#ifdef _WORKAROUND_MCST_PP
+	struct parport_pc_private *priv = port->private_data;
+	char ppc_cr = 0;
+#endif /* _WORKAROUND_MCST_PP */
+
 	port = port->physport;
 
 	/* Is there anything to do? */
@@ -345,6 +391,14 @@ int parport_negotiate (struct parport *port, int mode)
 	if (mode == IEEE1284_MODE_COMPAT)
 		/* Compatibility mode: no negotiation. */
 		return 0; 
+
+#ifdef _WORKAROUND_MCST_PP
+	/* Put controller in HOST */
+	if (priv->driver_data == mcst_pp_iee1284) {
+		ppc_cr = 0xa3;
+		outb(ppc_cr, PPC_MODE(port));
+	}
+#endif /* _WORKAROUND_MCST_PP */
 
 	switch (mode) {
 	case IEEE1284_MODE_ECPSWE:
@@ -562,6 +616,138 @@ void parport_ieee1284_interrupt (void *handle)
 #endif /* IEEE1284 support */
 }
 
+#ifdef _WORKAROUND_MCST_PP
+#include <asm/dma.h>
+#include <linux/pci.h>
+
+size_t parport_write_block_dma_compat (struct parport *port,
+					       const void *buf, size_t length)
+{
+	int ret = 0;
+	unsigned long dmaflag;
+	size_t left = (length / 4); /* words */
+	const struct parport_pc_private *priv = port->physport->private_data;
+	dma_addr_t dma_addr = 0;
+	dma_addr_t dma_handle = 0;
+	size_t maxlen = 0x1000000; /* max number of 4 bytes per DMA transfer */
+	char regval = 0;
+	char icr = 0;
+	char ppc_cr = 0;
+	int cnt = 0;
+
+	/* put it in mSPPh mode */
+	ppc_cr = inb(ECONTROL(port));
+	outb(((ppc_cr & 0xf8) | mSPPh), ECONTROL(port));
+
+	pr_debug( "enter parport_write_block_dma_compat, length = 0x%lx\n", length);
+	if (length >= (maxlen * 4)){
+		printk("parport_write_block_dma_compat: too much given data length: 0x%lx\n",
+			length);
+		return length - (left * 4);
+	}
+	dma_addr = dma_handle = pci_map_single(priv->dev, (void *)buf, length,
+				       		PCI_DMA_TODEVICE);
+	pr_debug("parport_write_block_dma_compat: given buf addr: 0x%lx, dma addr: 0x%x\n",
+		(unsigned long)buf, (unsigned int)dma_addr);
+	port = port->physport;
+
+	/* We don't want to get Periph_IntrEn every character, so disable it. */
+	
+	icr = Full_Intr_AllowedEn & ~ Periph_IntrEn;
+	outb(icr, ICR(port));
+	/* Forward mode. */
+	parport_pc_data_forward (port); /* Must be in mSPPh mode (for Compatibility) */
+
+	/* set dma direction 1: RAM -> device */
+
+	ppc_cr = inb(ECONTROL(port));
+	ppc_cr = ppc_cr | (1 << 4);
+	outb(ppc_cr, ECONTROL(port));
+
+	local_save_flags(dmaflag);
+	do {
+		unsigned long expire = jiffies + port->cad->timeout;
+
+		size_t count = left & 0xfffff8;
+
+		outl(dma_addr, DMAADDR(port));			/* set dma addr */
+		outl((count & 0xfffff8), DMACOUNT(port));	/* set dma count */
+		regval = inb(ECONTROL(port));
+		outb((regval | (1 << 6)), ECONTROL(port)); 	/* enable dma */
+			
+		if (cnt != 5){
+			pr_debug("parport_write_block_dma_compat: count = 0x%lx, dma_addr = 0x%lx\n", 
+											count, dma_addr);
+		}
+		/* assume DMA will be successful */
+		left -= count;
+		buf  += (count * 4);
+		if (dma_handle) dma_addr += (count * 4);
+
+		/* Wait for interrupt. */
+		mdelay(500);
+		ret = parport_wait_event (port, 100*HZ);
+		if (ret < 0) {
+			printk("parport_write_block_dma_compat: some error has happend\n");
+			break; /* Error.. for example signal pending */
+		}
+		
+		while (!time_before (jiffies, expire)) {
+			if (inw (PPC_SR(port)) & 0x2)
+			    break;
+			mdelay(500);
+		}
+		ret = 0;
+		if (!time_before (jiffies, expire)) {
+			/* Timed out. */
+			printk ("parport_write_block_dma_compat: DMA write timed out\n");
+			break;
+		}
+		regval = inb(ECONTROL(port));
+		outb((regval & ~ (1 << 6)), ECONTROL(port)); 	/* disable dma */
+		udelay(500);
+		count = inl(DMACOUNT(port));			/* get dma residue */
+
+		if (cnt != 5)
+			pr_debug("parport_write_block_dma_compat: new count = 0x%lx, dma_addr = 0x%lx\n", 
+				count, dma_addr);
+		cnt++;
+
+		cond_resched(); /* Can't yield the port. */
+
+		/* Anyone else waiting for the port? */
+		if (port->waithead) {
+			printk ("parport_write_block_dma_compat: Somebody wants the port\n");
+			break;
+		}
+
+		/* update for possible DMA residue ! */
+		buf  -= (count * 4);
+		if (dma_handle)
+			dma_addr -= (count * 4);
+	} while(0);
+
+	/* Maybe got here through break, so adjust for DMA residue! */
+	regval = inb(ECONTROL(port));
+	outb((regval & ~ (1 << 6)), ECONTROL(port)); /* disable dma */
+	left += inl(DMACOUNT(port));		/* get dma residue */
+
+	icr = Full_Intr_AllowedEn;
+	outb(icr, ICR(port));
+
+	if (dma_handle)
+		pci_unmap_single(priv->dev, dma_handle, length, PCI_DMA_TODEVICE);
+
+	pr_debug("leave parport_write_block_dma_compat, written 0x%lx bytes\n", 
+		length - (left * 4));
+
+	// Reset dma
+	outb(mPS2, ECONTROL(port));
+	udelay(500);
+	return length - (left * 4);
+}
+#endif
+
 /**
  *	parport_write - write a block of data to a parallel port
  *	@port: port to write to
@@ -589,6 +775,10 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 	int mode = port->ieee1284.mode;
 	int addr = mode & IEEE1284_ADDR;
 	size_t (*fn) (struct parport *, const void *, size_t, int);
+#ifdef _WORKAROUND_MCST_PP
+	char ppc_cr = 0;
+	struct parport_pc_private *priv = port->private_data;
+#endif /* _WORKAROUND_MCST_PP */
 
 	/* Ignore the device-ID-request bit and the address bit. */
 	mode &= ~(IEEE1284_DEVICEID | IEEE1284_ADDR);
@@ -601,11 +791,44 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 		fallthrough;
 	case IEEE1284_MODE_COMPAT:
 		pr_debug("%s: Using compatibility mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if ((priv->driver_data == mcst_pp_iee1284) ) {
+			/* put it in mSPPh mode */
+			if (len & 0x3ffffe0) {
+				retval = parport_write_block_dma_compat(port, buffer, (len & 0x3ffffe0));
+				pr_debug("parport_write: wrote by dma in compatibility 0x%lx bytes ********\n", retval);
+				if (retval < len) {
+					len = len - retval;
+					buffer = buffer + retval;
+					pr_debug("parport_write: only 0x%lx bytes has been written by dma operation\n",
+						retval);
+				} else if (retval > len) {
+					pr_debug("parport_write: wrote by dma in compatibility 0x%lx bytes cannot be "
+					       " > given len : 0x%lx\n", retval, len);
+					return retval;
+				} else if (retval == len) {
+					pr_debug("parport_write: given buf size is 32 bytes aligned and has been written !!!\n");
+					return retval;
+					
+				}
+			}
+			ppc_cr = inb(ECONTROL(port));
+			outb(((ppc_cr & 0xf8) | mSPPs), ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		fn = port->ops->compat_write_data;
 		break;
 
 	case IEEE1284_MODE_EPP:
 		pr_debug("%s: Using EPP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mEPP mode, epp 1.9 by default */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mEPP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		if (addr) {
 			fn = port->ops->epp_write_addr;
 		} else {
@@ -614,6 +837,14 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 		break;
 	case IEEE1284_MODE_EPPSWE:
 		pr_debug("%s: Using software-emulated EPP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mEPP mode, epp 1.9 by default */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mEPP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		if (addr) {
 			fn = parport_ieee1284_epp_write_addr;
 		} else {
@@ -623,6 +854,14 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 	case IEEE1284_MODE_ECP:
 	case IEEE1284_MODE_ECPRLE:
 		pr_debug("%s: Using ECP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mECP mode */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mECP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		if (addr) {
 			fn = port->ops->ecp_write_addr;
 		} else {
@@ -632,6 +871,14 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 
 	case IEEE1284_MODE_ECPSWE:
 		pr_debug("%s: Using software-emulated ECP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mECP mode */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mECP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		/* The caller has specified that it must be emulated,
 		 * even if we have ECP hardware! */
 		if (addr) {
@@ -647,7 +894,11 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 		return -ENOSYS;
 	}
 
+#ifdef _WORKAROUND_MCST_PP
+	retval = retval + (*fn) (port, buffer, len, 0);
+#else
 	retval = (*fn) (port, buffer, len, 0);
+#endif
 	pr_debug("%s: wrote %zd/%zu bytes\n", port->name, retval, len);
 	return retval;
 #endif /* IEEE1284 support */
@@ -681,6 +932,10 @@ ssize_t parport_read (struct parport *port, void *buffer, size_t len)
 	int addr = mode & IEEE1284_ADDR;
 	size_t (*fn) (struct parport *, void *, size_t, int);
 
+#ifdef _WORKAROUND_MCST_PP
+	char ppc_cr = 0;
+	struct parport_pc_private *priv = port->private_data;
+#endif /* _WORKAROUND_MCST_PP */
 	/* Ignore the device-ID-request bit and the address bit. */
 	mode &= ~(IEEE1284_DEVICEID | IEEE1284_ADDR);
 
@@ -696,6 +951,14 @@ ssize_t parport_read (struct parport *port, void *buffer, size_t len)
 		    !parport_negotiate (port, IEEE1284_MODE_BYTE)) {
 			/* got into BYTE mode OK */
 			pr_debug("%s: Using byte mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+			if (priv->driver_data == mcst_pp_iee1284) {
+				/* put it in mSP2 mode */
+				ppc_cr = inb(ECONTROL(port));
+				ppc_cr = ((ppc_cr & 0xf8) | mPS2);
+				outb(ppc_cr, ECONTROL(port));
+			}
+#endif /* _WORKAROUND_MCST_PP */
 			fn = port->ops->byte_read_data;
 			break;
 		}
@@ -705,16 +968,43 @@ ssize_t parport_read (struct parport *port, void *buffer, size_t len)
 		fallthrough;	/* to NIBBLE */
 	case IEEE1284_MODE_NIBBLE:
 		pr_debug("%s: Using nibble mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			if (parport_negotiate (port, IEEE1284_MODE_NIBBLE)) {
+				return -EIO;
+			}
+			/* put it in mSPPh mode */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mSPPh);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		fn = port->ops->nibble_read_data;
 		break;
 
 	case IEEE1284_MODE_BYTE:
 		pr_debug("%s: Using byte mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mSP2 mode */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mPS2);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		fn = port->ops->byte_read_data;
 		break;
 
 	case IEEE1284_MODE_EPP:
 		pr_debug("%s: Using EPP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mEPP mode, epp 1.9 by default */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mEPP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		if (addr) {
 			fn = port->ops->epp_read_addr;
 		} else {
@@ -723,6 +1013,14 @@ ssize_t parport_read (struct parport *port, void *buffer, size_t len)
 		break;
 	case IEEE1284_MODE_EPPSWE:
 		pr_debug("%s: Using software-emulated EPP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mEPP mode, epp 1.9 by default */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mEPP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		if (addr) {
 			fn = parport_ieee1284_epp_read_addr;
 		} else {
@@ -732,11 +1030,27 @@ ssize_t parport_read (struct parport *port, void *buffer, size_t len)
 	case IEEE1284_MODE_ECP:
 	case IEEE1284_MODE_ECPRLE:
 		pr_debug("%s: Using ECP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mECP mode */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mECP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		fn = port->ops->ecp_read_data;
 		break;
 
 	case IEEE1284_MODE_ECPSWE:
 		pr_debug("%s: Using software-emulated ECP mode\n", port->name);
+#ifdef _WORKAROUND_MCST_PP
+		if (priv->driver_data == mcst_pp_iee1284) {
+			/* Turn controler in mECP mode */
+			ppc_cr = inb(ECONTROL(port));
+			ppc_cr = ((ppc_cr & 0xf8) | mECP);
+			outb(ppc_cr, ECONTROL(port));
+		}
+#endif /* _WORKAROUND_MCST_PP */
 		fn = parport_ieee1284_ecp_read_data;
 		break;
 
@@ -778,6 +1092,7 @@ long parport_set_timeout (struct pardevice *dev, long inactivity)
 	return old;
 }
 
+#if !defined(PARPORT_MCSTBPP)
 /* Exported symbols for modules. */
 
 EXPORT_SYMBOL(parport_negotiate);
@@ -787,3 +1102,4 @@ EXPORT_SYMBOL(parport_wait_peripheral);
 EXPORT_SYMBOL(parport_wait_event);
 EXPORT_SYMBOL(parport_set_timeout);
 EXPORT_SYMBOL(parport_ieee1284_interrupt);
+#endif /* _WORKAROUND_MCST_PP */

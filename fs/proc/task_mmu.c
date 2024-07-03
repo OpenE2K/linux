@@ -20,6 +20,9 @@
 #include <linux/uaccess.h>
 #include <linux/pkeys.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
 #include <asm/elf.h>
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
@@ -678,6 +681,13 @@ static void show_smap_vma_flags(struct seq_file *m, struct vm_area_struct *vma)
 		[ilog2(VM_PKEY_BIT4)]	= "",
 #endif
 #endif /* CONFIG_ARCH_HAS_PKEYS */
+#if defined(CONFIG_E2K)
+		[ilog2(VM_PRIVILEGED)]	= "pv",
+		[ilog2(VM_SIGNAL_STACK)] = "ss",
+		[ilog2(VM_HW_STACK_PCS)] = "cs",
+		[ilog2(VM_HW_STACK_PS)]	= "rs",
+		[ilog2(VM_CUT)]		= "cu"
+#endif
 	};
 	size_t i;
 
@@ -1884,10 +1894,16 @@ static int show_numa_map(struct seq_file *m, void *v)
 	struct vm_area_struct *vma = v;
 	struct numa_maps *md = &numa_priv->md;
 	struct file *file = vma->vm_file;
+#ifdef CONFIG_E2K
+	struct task_struct *task = proc_priv->task;
+#endif
 	struct mm_struct *mm = vma->vm_mm;
 	struct mempolicy *pol;
 	char buffer[64];
 	int nid;
+#ifdef CONFIG_E2K
+	struct thread_info *ti = task_thread_info(task);
+#endif
 
 	if (!mm)
 		return 0;
@@ -1913,6 +1929,17 @@ static int show_numa_map(struct seq_file *m, void *v)
 	} else if (is_stack(vma)) {
 		seq_puts(m, " stack");
 	}
+#ifdef	CONFIG_E2K
+	if (vma->vm_start >= (u64) GET_PS_BASE(&ti->u_hw_stack) &&
+		 vma->vm_start < ((u64) GET_PS_BASE(&ti->u_hw_stack) +
+				  get_hw_ps_user_size(&ti->u_hw_stack))) {
+		seq_printf(m, " procedure stack");
+	} else if (vma->vm_start >= (u64) GET_PCS_BASE(&ti->u_hw_stack) &&
+		   vma->vm_start < ((u64) GET_PCS_BASE(&ti->u_hw_stack) +
+				    get_hw_pcs_user_size(&ti->u_hw_stack))) {
+		seq_printf(m, " chain stack");
+	}
+#endif	/* CONFIG_E2K */
 
 	if (is_vm_hugetlb_page(vma))
 		seq_puts(m, " huge");
