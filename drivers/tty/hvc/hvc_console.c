@@ -46,7 +46,12 @@
  * native transfer size. We could make them selectable in the
  * future to better deal with backends that want other buffer sizes.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_HVC_L)
+/* a guest uses hypercalls to deliver messages to the host */
+#define N_OUTBUF	128
+#else	/* !CONFIG_E2K || !CONFIG_HVC_L */
 #define N_OUTBUF	16
+#endif	/* CONFIG_E2K && CONFIG_HVC_L */
 #define N_INBUF		16
 
 #define __ALIGNED__ __attribute__((__aligned__(L1_CACHE_BYTES)))

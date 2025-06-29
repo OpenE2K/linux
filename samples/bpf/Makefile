@@ -430,6 +430,9 @@ $(BPF_SKELS_LINKED): $(BPF_OBJS_LINKED) $(BPFTOOL)
 # with native target, e.g., x64, arm64, etc. 'opt' does bpf CORE IR builtin
 # processing (llvm12) and IR optimizations. 'llvm-dis' converts
 # 'opt' output to IR, and finally 'llc' generates bpf byte code.
+# MCST: add '-fms-extensions' flag to enable Microsoft extensions
+# since e2k kernel uses them. Also, suppress clang warnings about the usage
+# of Microsoft extentions with '-Wno-microsoft-anon-tag' flag
 $(obj)/%.o: $(src)/%.c
 	@echo "  CLANG-bpf " $@
 	$(Q)$(CLANG) $(NOSTDINC_FLAGS) $(LINUXINCLUDE) $(BPF_EXTRA_CFLAGS) \
@@ -440,6 +443,8 @@ $(obj)/%.o: $(src)/%.c
 		-Wno-gnu-variable-sized-type-not-at-end \
 		-Wno-address-of-packed-member -Wno-tautological-compare \
 		-Wno-unknown-warning-option $(CLANG_ARCH_ARGS) \
+		-Wno-microsoft-anon-tag \
+		-fms-extensions \
 		-fno-asynchronous-unwind-tables \
 		-I$(srctree)/samples/bpf/ -include asm_goto_workaround.h \
 		-O2 -emit-llvm -Xclang -disable-llvm-passes -c $< -o - | \

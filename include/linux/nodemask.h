@@ -96,6 +96,11 @@
 #include <linux/numa.h>
 #include <linux/random.h>
 
+/* Header cycle break: linux/prandom.h <-> linux/random.h */
+#ifdef CONFIG_MCST
+#include <linux/prandom.h>
+#endif
+
 typedef struct { DECLARE_BITMAP(bits, MAX_NUMNODES); } nodemask_t;
 extern nodemask_t _unused_nodemask_arg_;
 

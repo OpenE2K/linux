@@ -703,6 +703,9 @@ static const struct spi_device_id spidev_spi_ids[] = {
 	{ .name = "spi-petra" },
 	{ .name = "spi-authenta" },
 	{ .name = "em3581" },
+#ifdef CONFIG_MCST
+	{ .name = "boot" },
+#endif
 	{},
 };
 MODULE_DEVICE_TABLE(spi, spidev_spi_ids);
@@ -732,6 +735,9 @@ static const struct of_device_id spidev_dt_ids[] = {
 	{ .compatible = "rohm,dh2228fv", .data = &spidev_of_check },
 	{ .compatible = "semtech,sx1301", .data = &spidev_of_check },
 	{ .compatible = "silabs,em3581", .data = &spidev_of_check },
+#ifdef CONFIG_MCST
+	{ .compatible = "mcst,boot", .data = &spidev_of_check },
+#endif
 	{},
 };
 MODULE_DEVICE_TABLE(of, spidev_dt_ids);

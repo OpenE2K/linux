@@ -356,7 +356,10 @@ static int add_changeset_property(struct overlay_changeset *ovcs,
 		ret = of_changeset_update_property(&ovcs->cset, target->np,
 						   new_prop);
 	}
-
+#ifdef CONFIG_E2K
+	/* Suppress warning for legacy platforms */
+	if (cpu_has(CPU_FEAT_ISET_V7))
+#endif
 	if (!of_node_check_flag(target->np, OF_OVERLAY))
 		pr_err("WARNING: memory leak will occur if overlay removed, property: %pOF/%s\n",
 		       target->np, new_prop->name);

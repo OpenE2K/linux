@@ -70,7 +70,12 @@ static int nft_limit_init(struct nft_limit_priv *priv,
 		return -EINVAL;
 
 	unit = be64_to_cpu(nla_get_be64(tb[NFTA_LIMIT_UNIT]));
+#ifdef __LCC__
+	/* bug #155946 */
+	if (check_mul_overflow(unit, (unsigned long)NSEC_PER_SEC, &priv->nsecs))
+#else
 	if (check_mul_overflow(unit, NSEC_PER_SEC, &priv->nsecs))
+#endif
 		return -EOVERFLOW;
 
 	if (tb[NFTA_LIMIT_BURST])

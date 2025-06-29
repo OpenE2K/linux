@@ -1719,6 +1719,7 @@ static void device_links_purge(struct device *dev)
 					 DL_FLAG_PM_RUNTIME)
 
 static u32 fw_devlink_flags = FW_DEVLINK_FLAGS_ON;
+
 static int __init fw_devlink_setup(char *arg)
 {
 	if (!arg)
@@ -3173,7 +3174,11 @@ void device_initialize(struct device *dev)
 	dev->dma_coherent = dma_default_coherent;
 #endif
 #ifdef CONFIG_SWIOTLB
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	dev->dma_io_tlb_mem = __io_tlb_default_mem;
+# else
 	dev->dma_io_tlb_mem = &io_tlb_default_mem;
+# endif
 #endif
 }
 EXPORT_SYMBOL_GPL(device_initialize);

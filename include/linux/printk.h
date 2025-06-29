@@ -651,6 +651,11 @@ struct pi_entry {
 	no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
 #endif
 
+#ifdef CONFIG_E2K
+/* Useful for debug prints just before powering CPU off */
+extern bool pr_flush(int timeout_ms, bool reset_on_progress);
+#endif
+
 /*
  * ratelimited messages with local ratelimit_state,
  * no local ratelimit_state used in the !PRINTK case

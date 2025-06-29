@@ -1,0 +1,161 @@
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "apic-vectors.h"
+
+#ifndef NODE
+# error NODE undefined
+#endif
+
+
+#ifndef CELLS
+# error CELLS undefined
+#endif
+
+#if CELLS == 1
+# define REG reg32
+#else
+# define REG reg
+#endif
+
+#ifndef PIC
+# define __PIC(_n) pic ## _n
+# define _PIC(_n) __PIC(_n)
+# define PIC _PIC
+#endif
+
+#ifndef LVT
+# define __LVT(_n) lvt ## _n
+# define _LVT(_n) __LVT(_n)
+# define LVT _LVT(NODE)
+#endif
+
+# define __IOMMU(_n) iommu ## _n
+# define _IOMMU(_n) __IOMMU(_n)
+# define IOMMU _IOMMU(NODE)
+
+# define __PCICFG_ADDRL(_a, _n) 0x2 ## _n ## _a
+# define _PCICFG_ADDRL(_a, _n) __PCICFG_ADDRL(_a, _n)
+# define PCICFG_ADDRL(_a) _PCICFG_ADDRL(_a, NODE)
+
+# define __PCICFG_ADDR(_a, _n) 0x2 0x0 ## _n ## _a
+# define _PCICFG_ADDR(_a, _n) __PCICFG_ADDR(_a, _n)
+# define PCICFG_ADDR(_a) _PCICFG_ADDR(_a, NODE)
+
+# define __NSR_ADDR(_a, _n) 0x1 0x10 ## _n ## _a
+# define _NSR_ADDR(_a, _n) __NSR_ADDR(_a, _n)
+# define NSR_ADDR(_a) _NSR_ADDR(_a, NODE)
+
+
+
+	PIC: pic@NODE {
+		compatible = "mcst,ioapic";
+
+		bus-reg64         = /bits/ 64 <PCICFG_ADDRL(0008018) 4>;
+		regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(0011040) 20>;
+
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+		#interrupt-cells = <2>;
+	};
+
+	IOMMU: iommu@NODE {
+		compatible = "mcst,l-iommu";
+		/* reg = <0x1 0x10000380 0 0x80>; not used */
+		#iommu-cells = <1>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LVT3_INTERRUPT_VECTOR 3 0>;
+	};
+
+	pci@NODE {
+		compatible = "mcst,l-pci";
+		REG = <PCICFG_ADDR(0000000) 0 0x10000000>, /*E2S_PCICFG_AREA_PHYS_BASE*/
+			<NSR_ADDR(00050) 0 4>, /*SIC_rt_pciio0*/
+			<NSR_ADDR(00040) 0 4>, /*SIC_rt_pcim0*/
+			<NSR_ADDR(00070) 0 4>, /*SIC_rt_pcimp_b0*/
+			<NSR_ADDR(00080) 0 4>; /*SIC_rt_pcimp_e0*/
+		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
+
+		linux,pci-domain = <NODE>;
+		numa-node-id = <NODE>;
+		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+		/*rid-base,iommu,iommu-base,length*/
+		iommu-map = <0x0 &IOMMU 0x0 0x10000>;
+		/* 1:1 translation, max size (48-bit) of e2k address space */
+		ranges = <  0 0 0 /* child address */
+#if CELLS == 1
+			      0 /* parent address */
+#elif CELLS == 2
+			      0 0 /* parent address */
+#else
+# error CELLS not supported
+#endif
+			0x10000 0>;/* child size */
+		interrupt-parent = <&PIC>;
+		interrupts = <22 IRQ_TYPE_LEVEL_HIGH>; /*SERR (all devices)*/
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/* reg: 00000000 00000000 dddddfff 00000000 */
+		pci@0,0 { /* PCI-Express Bridge */
+			reg = <0x00000000 0 0 0 0>;
+			interrupts =	<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+					<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+					<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+					<19 IRQ_TYPE_LEVEL_HIGH>; /*PCI IRQ D*/
+		};
+		pci@1,0 {
+			reg = <0x00000800 0 0 0 0>;
+			ranges;
+			#address-cells = <3>;
+			#size-cells = <2>;
+			pci@0,0 { /*PCI-to-PCI Bridge*/
+				reg = <0x00000000 0 0 0 0>;
+				interrupts =	<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<19 IRQ_TYPE_LEVEL_HIGH>; /*PCI IRQ D*/
+			};
+			pci@1,0 { /*Ethernet controller*/
+				reg = <0x00000800 0 0 0 0>;
+				interrupts = <10 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@2,0 { /*IDE controller*/
+				reg = <0x00001000 0 0 0 0>;
+				interrupts = <11 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@2,1 { /*i2c-spi*/
+				reg = <0x000001100 0 0 0 0>;
+				interrupts =	<23 IRQ_TYPE_LEVEL_HIGH>, /*I2C-SPI*/
+						<8 IRQ_TYPE_LEVEL_HIGH>; /*GPIO0, WD Timer*/
+			};
+			pci@2,2 { /*Serial and Parallel ports*/
+				reg = <0x00001200 0 0 0 0>;
+				interrupt-parent = <&PIC>;
+				interrupts =	<3 IRQ_TYPE_LEVEL_HIGH>,/*Serial Port*/
+						<7 IRQ_TYPE_LEVEL_HIGH>;/*Parallel Port*/
+			};
+			pci@2,3 { /*Audio & GPIO controller */
+				reg = <0x00001300 0 0 0 0>;
+				interrupts =	<5 IRQ_TYPE_LEVEL_HIGH>, /*Audio controller*/
+						<8 IRQ_TYPE_LEVEL_HIGH>, /*GPIO0, WD Timer*/
+						<9 IRQ_TYPE_LEVEL_HIGH>; /*GPIO1*/
+				interrupt-names = "audio", "gpio0", "gpio1";
+			};
+			pci@3,0 { /*SATA controller*/
+				reg = <0x00001800 0 0 0 0>;
+				interrupt-parent = <&PIC>;
+				interrupts = <21 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@4,0 { /*USB Controller (ohci)*/
+				reg = <0x00002000 0 0 0 0>;
+				interrupts = <20 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@4,1 { /*USB Controller (ehci)*/
+				reg = <0x00002100 0 0 0 0>;
+				interrupts = <20 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+	};

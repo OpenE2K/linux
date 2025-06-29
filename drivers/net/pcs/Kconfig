@@ -5,6 +5,8 @@
 
 menu "PCS device drivers"
 
+source "drivers/net/pcs/mcst/Kconfig"
+
 config PCS_XPCS
 	tristate
 	select PHYLINK

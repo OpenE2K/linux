@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+
+menu "Elbrus chipset PCI support"
+
+config PCI_ELBRUS
+       def_bool (E2K || E90S) && PCI
+       help
+         Elbrus PCI controller designed for machines based on both
+	 microprocessors arch: e2k and e90s
+
+config IOHUB_DOMAINS
+	def_bool PCI_ELBRUS && NUMA && (E2K || E90S)
+	select PCI_DOMAINS
+	help
+          Each node on Elbrus NUMA based machine has a few IO links
+          so system can have multiple IOHUBs to support PCI domains
+	  If say Y then PCI controllers will be scaned on each online
+	  node
+	  If say N then only one root IOHUB will be enabled on node 0
+
+endmenu # "Elbrus chipset PCI support"

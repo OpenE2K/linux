@@ -376,11 +376,11 @@ static int __init numa_register_nodes(void)
 static int __init numa_init(int (*init_func)(void))
 {
 	int ret;
-
+#ifndef CONFIG_MCST /* save earlier registrations */
 	nodes_clear(numa_nodes_parsed);
 	nodes_clear(node_possible_map);
 	nodes_clear(node_online_map);
-
+#endif
 	ret = numa_alloc_distance();
 	if (ret < 0)
 		return ret;

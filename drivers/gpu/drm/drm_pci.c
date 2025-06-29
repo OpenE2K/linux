@@ -144,9 +144,12 @@ static void drm_legacy_pci_agp_init(struct drm_device *dev)
 	}
 }
 
-static int drm_legacy_get_pci_dev(struct pci_dev *pdev,
-				  const struct pci_device_id *ent,
-				  const struct drm_driver *driver)
+#if !defined(CONFIG_MCST)
+static
+#endif
+int drm_legacy_get_pci_dev(struct pci_dev *pdev,
+			  const struct pci_device_id *ent,
+			  const struct drm_driver *driver)
 {
 	struct drm_device *dev;
 	int ret;
@@ -186,6 +189,9 @@ err_free:
 	drm_dev_put(dev);
 	return ret;
 }
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(drm_legacy_get_pci_dev);
+#endif
 
 /**
  * drm_legacy_pci_init - shadow-attach a legacy DRM PCI driver

@@ -11,8 +11,30 @@
 #define HCI_H
 
 
+#ifdef CONFIG_E2K
+
+#include <linux/pci.h>
+
+/* This trick is just to use read_reg, which uses printk, in DBG args */
+static inline void DBG_func(const char *fmt, ...)
+{
+	va_list va;
+	va_start(va, fmt);
+	vprintk(fmt, va);
+	va_end(va);
+}
+/* #define I3C_PCI_DEBUG */
+#ifdef I3C_PCI_DEBUG
+#define DBG(fmt, ...)   DBG_func(KERN_INFO "%s: "  fmt "\n", __func__, ##__VA_ARGS__)
+#else
+#define DBG(fmt, ...)
+#endif
+
+#else /* CONFIG_E2K */
+
 /* Handy logging macro to save on line length */
 #define DBG(x, ...) pr_devel("%s: " x "\n", __func__, ##__VA_ARGS__)
+#endif
 
 /* 32-bit word aware bit and mask macros */
 #define W0_MASK(h, l)  GENMASK((h) - 0,  (l) - 0)
@@ -51,6 +73,11 @@ struct i3c_hci {
 	void *DAT_data;
 	unsigned int DCT_entries;
 	unsigned int DCT_entry_size;
+#ifdef CONFIG_E2K
+	resource_size_t ioaddr;
+	struct pci_dev *pdev;
+	struct msix_entry msix_entries[3];
+#endif
 	u8 version_major;
 	u8 version_minor;
 	u8 revision;

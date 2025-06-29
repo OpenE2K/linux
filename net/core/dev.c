@@ -6995,7 +6995,11 @@ static int __netdev_walk_all_upper_dev(struct net_device *dev,
 				       struct netdev_nested_priv *priv)
 {
 	struct net_device *udev, *next, *now, *dev_stack[MAX_NEST_DEV + 1];
+#ifndef CONFIG_MCST
 	struct list_head *niter, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#else
+	struct list_head *niter = 0, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#endif
 	int ret, cur = 0;
 	bool ignore;
 
@@ -7044,7 +7048,11 @@ int netdev_walk_all_upper_dev_rcu(struct net_device *dev,
 				  struct netdev_nested_priv *priv)
 {
 	struct net_device *udev, *next, *now, *dev_stack[MAX_NEST_DEV + 1];
+#ifndef CONFIG_MCST
 	struct list_head *niter, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#else
+	struct list_head *niter = 0, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#endif
 	int ret, cur = 0;
 
 	now = dev;
@@ -7218,7 +7226,11 @@ int netdev_walk_all_lower_dev(struct net_device *dev,
 			      struct netdev_nested_priv *priv)
 {
 	struct net_device *ldev, *next, *now, *dev_stack[MAX_NEST_DEV + 1];
+#ifndef CONFIG_MCST
 	struct list_head *niter, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#else
+	struct list_head *niter = 0, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#endif
 	int ret, cur = 0;
 
 	now = dev;
@@ -7265,7 +7277,11 @@ static int __netdev_walk_all_lower_dev(struct net_device *dev,
 				       struct netdev_nested_priv *priv)
 {
 	struct net_device *ldev, *next, *now, *dev_stack[MAX_NEST_DEV + 1];
+#ifndef CONFIG_MCST
 	struct list_head *niter, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#else
+	struct list_head *niter = 0, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#endif
 	int ret, cur = 0;
 	bool ignore;
 
@@ -7403,7 +7419,11 @@ int netdev_walk_all_lower_dev_rcu(struct net_device *dev,
 				  struct netdev_nested_priv *priv)
 {
 	struct net_device *ldev, *next, *now, *dev_stack[MAX_NEST_DEV + 1];
+#ifndef CONFIG_MCST
 	struct list_head *niter, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#else
+	struct list_head *niter = 0, *iter, *iter_stack[MAX_NEST_DEV + 1];
+#endif
 	int ret, cur = 0;
 
 	now = dev;
@@ -11572,3 +11592,4 @@ out:
 }
 
 subsys_initcall(net_dev_init);
+

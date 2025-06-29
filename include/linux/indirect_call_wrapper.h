@@ -18,11 +18,19 @@
 	({								\
 		likely(f == f1) ? f1(__VA_ARGS__) : f(__VA_ARGS__);	\
 	})
+# ifdef __LCC__
+#define INDIRECT_CALL_2(f, f2, f1, ...)					\
+	({								\
+		(f == f2) ? f2(__VA_ARGS__) :			\
+				  INDIRECT_CALL_1(f, f1, __VA_ARGS__);	\
+	})
+# else
 #define INDIRECT_CALL_2(f, f2, f1, ...)					\
 	({								\
 		likely(f == f2) ? f2(__VA_ARGS__) :			\
 				  INDIRECT_CALL_1(f, f1, __VA_ARGS__);	\
 	})
+# endif
 #define INDIRECT_CALL_3(f, f3, f2, f1, ...)					\
 	({									\
 		likely(f == f3) ? f3(__VA_ARGS__) :				\

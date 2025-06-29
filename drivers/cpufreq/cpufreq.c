@@ -29,6 +29,9 @@
 #include <linux/syscore_ops.h>
 #include <linux/tick.h>
 #include <linux/units.h>
+#ifdef CONFIG_MCST
+#include <linux/timex.h>
+#endif
 #include <trace/events/power.h>
 
 static LIST_HEAD(cpufreq_policy_list);
@@ -388,6 +391,10 @@ static void cpufreq_notify_transition(struct cpufreq_policy *policy,
 
 		cpufreq_stats_record_transition(policy, freqs->new);
 		policy->cur = freqs->new;
+
+#ifdef CONFIG_MCST
+		cpu_freq_hz = policy->cur * 1000;
+#endif
 	}
 }
 

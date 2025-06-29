@@ -1,0 +1,34 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+/dts-v1/;
+
+#define NODES 1
+
+#ifndef NODES
+# error NODES undefined
+#endif
+
+#define NODE 0
+
+#ifndef CELLS
+#define CELLS 2
+#endif
+
+/ {
+	version = "1.0_2025-02-14";
+	model = "Elbrus-generic";
+	compatible = "mcst,e32c-generic";
+
+	#address-cells = <CELLS>;
+	#size-cells = <CELLS>;
+
+
+#include "include/e2c3.dtsi"
+#include "include/e32c-node.dtsi"
+#include "include/eioh2.dtsi"
+#undef NODE
+
+};

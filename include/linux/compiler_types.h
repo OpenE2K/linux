@@ -143,6 +143,15 @@ struct ftrace_likely_data {
 #define notrace			__attribute__((__no_instrument_function__))
 #endif
 
+#ifdef	CONFIG_MCST
+/* Some functions cannot be traced only on the host mode */
+#ifdef	CONFIG_KVM_HOST_KERNEL
+#define	notrace_on_host		notrace
+#else	/* !CONFIG_KVM_HOST_KERNEL */
+#define	notrace_on_host
+#endif	/* CONFIG_KVM_HOST_KERNEL */
+#endif	/* CONFIG_MCST */
+
 /*
  * it doesn't make sense on ARM (currently the only user of __naked)
  * to trace naked functions because then mcount is called without

@@ -2828,9 +2828,28 @@ enum {
 	ALC262_FIXUP_BENQ_T31,
 	ALC262_FIXUP_INV_DMIC,
 	ALC262_FIXUP_INTEL_BAYLEYBAY,
+#ifdef CONFIG_MCST
+	ALC262_FIXUP_MCST,
+#endif
 };
 
 static const struct hda_fixup alc262_fixups[] = {
+#ifdef CONFIG_MCST
+	[ALC262_FIXUP_MCST] = {
+		.type = HDA_FIXUP_VERBS,
+		.v.verbs = (const struct hda_verb[]) {
+			/* Set Input Amplifier and Set Left Amplifier*/
+			{ 0x09, AC_VERB_SET_AMP_GAIN_MUTE, 0x6000 },
+			/* Set Input Amplifier and Set Right Amplifier*/
+			{ 0x09, AC_VERB_SET_AMP_GAIN_MUTE, 0x5000 },
+			/* Set VREF to 0V for DMIC */
+			{ 0x12, AC_VERB_SET_PIN_WIDGET_CONTROL, 0x20 },
+			/* Switch MIXER to the DMIC line */
+			{ 0x22, AC_VERB_SET_CONNECT_SEL, 0x09 },
+			{}
+		}
+	},
+#endif /* CONFIG_MCST*/
 	[ALC262_FIXUP_FSC_H270] = {
 		.type = HDA_FIXUP_PINS,
 		.v.pins = (const struct hda_pintbl[]) {
@@ -2922,6 +2941,9 @@ static const struct hda_model_fixup alc262_fixup_models[] = {
 	{.id = ALC262_FIXUP_BENQ, .name = "benq"},
 	{.id = ALC262_FIXUP_BENQ_T31, .name = "benq-t31"},
 	{.id = ALC262_FIXUP_INTEL_BAYLEYBAY, .name = "bayleybay"},
+#ifdef CONFIG_MCST
+	{.id = ALC262_FIXUP_MCST, .name = "mcst"},
+#endif
 	{}
 };
 
@@ -2950,6 +2972,18 @@ static int patch_alc262(struct hda_codec *codec)
 	alc_fix_pll_init(codec, 0x20, 0x0a, 10);
 
 	alc_pre_init(codec);
+
+#ifdef CONFIG_MCST
+	if (codec->bus->pci) {
+		u16 v = codec->bus->pci->vendor;
+		u16 d = codec->bus->pci->device;
+		if (v == PCI_VENDOR_ID_MCST_TMP &&
+				d == PCI_DEVICE_ID_MCST_HDA) {
+			kfree(codec->modelname);
+			codec->modelname = kstrdup("mcst", GFP_KERNEL);
+		}
+	}
+#endif /* CONFIG_MCST */
 
 	snd_hda_pick_fixup(codec, alc262_fixup_models, alc262_fixup_tbl,
 		       alc262_fixups);

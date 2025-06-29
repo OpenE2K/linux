@@ -1,0 +1,207 @@
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "epic-vectors.h"
+
+#ifndef NODE
+# error NODE undefined
+#endif
+#ifndef CELLS
+# error CELLS undefined
+#endif
+
+#if CELLS == 1
+# define REG reg32
+#else
+# define REG reg
+#endif
+
+#ifndef PIC
+# define __PIC(_n) pic ## _n
+# define _PIC(_n) __PIC(_n)
+# define PIC _PIC
+#endif
+
+#ifndef LVT
+# define __LVT(_n) lvt ## _n
+# define _LVT(_n) __LVT(_n)
+# define LVT _LVT(NODE)
+#endif
+
+# define __IOMMU(_n) iommu ## _n
+# define _IOMMU(_n) __IOMMU(_n)
+# define IOMMU _IOMMU(NODE)
+
+# define __PCICFG_ADDRL(_a, _n) 0x2 ## _n ## _a
+# define _PCICFG_ADDRL(_a, _n) __PCICFG_ADDRL(_a, _n)
+# define PCICFG_ADDRL(_a) _PCICFG_ADDRL(_a, NODE)
+
+# define __PCICFG_ADDR(_a, _n) 0x2 0x0 ## _n ## _a
+# define _PCICFG_ADDR(_a, _n) __PCICFG_ADDR(_a, _n)
+# define PCICFG_ADDR(_a) _PCICFG_ADDR(_a, NODE)
+
+# define __NSR_ADDR(_a, _n) 0x1 0x10 ## _n ## _a
+# define _NSR_ADDR(_a, _n) __NSR_ADDR(_a, _n)
+# define NSR_ADDR(_a) _NSR_ADDR(_a, NODE)
+
+
+	PIC: pic@NODE {
+		compatible = "mcst,ioepic";
+
+		bus-reg64         = /bits/ 64 <PCICFG_ADDRL(0000018) 4>;
+		regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(001101c) 0x100000>;
+
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+		#interrupt-cells = <2>;
+	};
+
+	IOMMU: iommu@NODE {
+		compatible = "mcst,e2k-iommu";
+		REG = <NSR_ADDR(00380) 0 0x80>,
+			<NSR_ADDR(05080) 0 0x380>; /* for embedded devices */
+		#iommu-cells = <1>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP1_INTERRUPT_VECTOR 1 0>;
+	};
+
+	pci@NODE {
+		compatible = "mcst,l-pci";
+		REG = <PCICFG_ADDR(0000000) 0 0x10000000>, /*E2S_PCICFG_AREA_PHYS_BASE*/
+			<NSR_ADDR(00050) 0 4>, /*SIC_rt_pciio0*/
+			<NSR_ADDR(00040) 0 4>, /*SIC_rt_pcim0*/
+			<NSR_ADDR(00070) 0 4>, /*SIC_rt_pcimp_b0*/
+			<NSR_ADDR(00080) 0 4>; /*SIC_rt_pcimp_e0*/
+		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
+
+		linux,pci-domain = <NODE>;
+		numa-node-id = <NODE>;
+		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+		/*rid-base,iommu,iommu-base,length*/
+		iommu-map = <0x0 &IOMMU 0x0 0x10000>;
+		/* 1:1 translation, max size (48-bit) of e2k address space */
+		ranges = <  0 0 0 /* child address */
+#if CELLS == 1
+			      0 /* parent address */
+#elif CELLS == 2
+			      0 0 /* parent address */
+#else
+# error CELLS not supported
+#endif
+			0x10000 00000000>;/* child size */
+		interrupt-parent = <&PIC>;
+		interrupts = <22 IRQ_TYPE_LEVEL_HIGH>, /*SERR (all devices)*/
+				<29 IRQ_TYPE_LEVEL_HIGH>; /*WLCC*/
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+		/* reg: 00000000 00000000 dddddfff 00000000 */
+		pci@0,0 {
+			reg = <0x00000000 0 0 0 0>;
+			ranges;
+			#address-cells = <3>;
+			#size-cells = <2>;
+
+			interrupts =	<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+					<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+					<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+					<19 IRQ_TYPE_LEVEL_HIGH>; /*PCI IRQ D*/
+
+			pci@0,0 { /*USB 3.0 xHCI*/
+				reg = <0x00000000 0 0 0 0>;
+				interrupts =	<28 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@1,0 { /*Ethernet controller*/
+				reg = <0x00000800 0 0 0 0>;
+				interrupts =	<3 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_tx0*/
+						<4 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_tx1*/
+						<5 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_rx0*/
+						<6 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_rx1*/
+						<7 IRQ_TYPE_LEVEL_HIGH>; /*Ethernet0_sys*/
+			};
+			pci@1,1 { /*Ethernet controller*/
+				reg = <0x00000900 0 0 0 0>;
+				interrupts =	<23 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet1_tx0*/
+						<24 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet1_tx1*/
+						<25 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet1_rx0*/
+						<26 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet1_rx1*/
+						<27 IRQ_TYPE_LEVEL_HIGH>; /*Ethernet1_sys*/
+			};
+			pci@2,0 { /*GPIO MPV*/
+				reg = <0x00001000 0 0 0 0>;
+				interrupts =    < 9 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers0*/
+ 						<10 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers1*/
+ 						<11 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers1*/
+ 						<12 IRQ_TYPE_LEVEL_HIGH>, /*GPIO0*/
+ 						<13 IRQ_TYPE_LEVEL_HIGH>; /*GPIO1*/
+				interrupt-names = "mpv0", "mpv1", "mpv2", "gpio0", "gpio1";
+			};
+			pci@2,1 { /*i2c-spi*/
+				reg = <0x000001100 0 0 0 0>;
+				interrupts =	<15 IRQ_TYPE_LEVEL_HIGH>, /*I2C-SPI*/
+						<20 IRQ_TYPE_LEVEL_HIGH>, /* WD Timer */
+						< 0 IRQ_TYPE_LEVEL_HIGH>; /* IPMB */
+			};
+			pci@2,2 { /*Serial and Parallel ports*/
+				reg = <0x00001200 0 0 0 0>;
+				interrupts =	<14 IRQ_TYPE_LEVEL_HIGH>;/*Serial Port*/
+			};
+			pci@2,3 { /*Audio controller*/
+				reg = <0x00001300 0 0 0 0>;
+				interrupts = <8 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@3,0 { /*SATA controller*/
+				reg = <0x00001800 0 0 0 0>;
+				interrupt-parent = <&PIC>;
+				interrupts = <21 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@9,0 { /*SPMC System Power Managment Controller*/
+				reg = <0x00004800 0 0 0 0>;
+				interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+#ifdef GRAPHIC_DEVICES
+		mga2@0,d0 /*1a.0 */ { /*MGA2 graphic controller*/
+			reg = <0x0000d000 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<32 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1a,1 { /*HDA audio controller*/
+			reg = <0x0000d100 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<33 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1a,2 { /*HDA audio controller*/
+			reg = <0x0000d200 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<34 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1b,0 { /*3D GPU GX6650*/
+			reg = <0x0000d800 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<35 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1c,0 { /*Video encoder E5810MP3*/
+			reg = <0x0000e000 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<36 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1d,0 { /*Video decoder D5520MP3*/
+			reg = <0x0000e800 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<37 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1e,0 { /*Video encoder BigEv2*/
+			reg = <0x0000f000 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<38 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1f,0 { /*Video decoder G2*/
+			reg = <0x0000f800 0 0 0 0>;
+			interrupt-parent = <&PIC>;
+			interrupts =	<39 IRQ_TYPE_LEVEL_HIGH>;
+		};
+#endif
+	};
+

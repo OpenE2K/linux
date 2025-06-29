@@ -11,6 +11,10 @@
 #include <linux/module.h>
 #include <linux/platform_data/emc2305.h>
 #include <linux/thermal.h>
+#ifdef CONFIG_MCST
+#include <linux/mutex.h>
+#include <linux/pwm.h>
+#endif
 
 static const unsigned short
 emc2305_normal_i2c[] = { 0x27, 0x2c, 0x2d, 0x2e, 0x2f, 0x4c, 0x4d, I2C_CLIENT_END };
@@ -41,6 +45,9 @@ emc2305_normal_i2c[] = { 0x27, 0x2c, 0x2d, 0x2e, 0x2f, 0x4c, 0x4d, I2C_CLIENT_EN
 #define EMC2305_REG_FAN_DRIVE(n)	(0x30 + 0x10 * (n))
 #define EMC2305_REG_FAN_MIN_DRIVE(n)	(0x38 + 0x10 * (n))
 #define EMC2305_REG_FAN_TACH(n)		(0x3e + 0x10 * (n))
+#ifdef CONFIG_MCST
+#define EMC2305_REG_FAN_CONFIGURATION_1(n)	(0x32 + 0x10 * (n))
+#endif
 
 enum emc230x_product_id {
 	EMC2305 = 0x34,
@@ -102,6 +109,10 @@ struct emc2305_data {
 	bool pwm_separate;
 	u8 pwm_min[EMC2305_PWM_MAX];
 	struct emc2305_cdev_data cdev_data[EMC2305_PWM_MAX];
+#ifdef CONFIG_MCST
+	struct mutex lock;
+	struct pwm_chip chip;
+#endif
 };
 
 static char *emc2305_fan_name[] = {
@@ -528,6 +539,80 @@ static int emc2305_identify(struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_MCST
+static inline struct emc2305_data *to_pwm(struct pwm_chip *chip)
+{
+	return container_of(chip, struct emc2305_data, chip);
+}
+
+static int emc2305_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
+				const struct pwm_state *state)
+{
+	struct emc2305_data *data = to_pwm(chip);
+	struct i2c_client *client = data->client;
+	const u8 reg_fan_conf1 = EMC2305_REG_FAN_CONFIGURATION_1(pwm->hwpwm);
+	int status, ret = -EINVAL;
+	u8 val, fan_manual_mode_shift = 7;
+
+	status = i2c_smbus_read_byte_data(client, reg_fan_conf1);
+
+	if (status < 0)
+		return status;
+	/*
+	 * Fan Configuration Registers(0x32, 0x42, 0x52, 0x62, 0x72).
+	 * Bit 7(ENAGx):
+	 * 1 - Changes to Fan Setting register are ignored.
+	 * 0 - Changes to the Fan Setting register will change the PWM Duty Cycle
+	 */
+	if (status & (1 << fan_manual_mode_shift))
+		return -EPERM;
+
+	if (state->period > 1) {
+		mutex_lock(&data->lock);
+		val = state->duty_cycle * 255 / (state->period - 1);
+		val = clamp_val(val, 0, 255);
+		ret = i2c_smbus_write_byte_data(client,
+					EMC2305_REG_FAN_DRIVE(pwm->hwpwm), val);
+		mutex_unlock(&data->lock);
+	}
+
+	return ret;
+}
+
+static const struct pwm_ops emc2305_pwm_ops = {
+	.apply = emc2305_pwm_apply,
+	.owner = THIS_MODULE,
+};
+
+static void emc2305_pwm_remove(void *arg)
+{
+	struct emc2305_data *data = arg;
+
+	pwmchip_remove(&data->chip);
+}
+
+static void emc2305_init_pwm(struct emc2305_data *data)
+{
+	struct i2c_client *client = data->client;
+	int ret;
+
+	/* Initialize chip */
+
+	data->chip.dev = &client->dev;
+	data->chip.ops = &emc2305_pwm_ops;
+	data->chip.base = -1;
+	data->chip.npwm = EMC2305_PWM_MAX;
+
+	ret = pwmchip_add(&data->chip);
+	if (ret < 0) {
+		dev_err(&client->dev, "pwmchip_add() failed: %d\n", ret);
+		return;
+	}
+
+	devm_add_action(&client->dev, emc2305_pwm_remove, data);
+}
+#endif
+
 static int emc2305_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct i2c_adapter *adapter = client->adapter;
@@ -551,6 +636,9 @@ static int emc2305_probe(struct i2c_client *client, const struct i2c_device_id *
 
 	i2c_set_clientdata(client, data);
 	data->client = client;
+#ifdef CONFIG_MCST
+	mutex_init(&data->lock);
+#endif
 
 	ret = emc2305_identify(dev);
 	if (ret)
@@ -584,7 +672,11 @@ static int emc2305_probe(struct i2c_client *client, const struct i2c_device_id *
 	if (IS_ERR(data->hwmon_dev))
 		return PTR_ERR(data->hwmon_dev);
 
+#ifdef CONFIG_MCST
+	if (IS_REACHABLE(CONFIG_THERMAL) && !IS_ENABLED(CONFIG_THERMAL_OF)) {
+#else
 	if (IS_REACHABLE(CONFIG_THERMAL)) {
+#endif
 		ret = emc2305_set_tz(dev);
 		if (ret != 0)
 			return ret;
@@ -596,6 +688,10 @@ static int emc2305_probe(struct i2c_client *client, const struct i2c_device_id *
 		if (ret < 0)
 			return ret;
 	}
+#ifdef CONFIG_MCST
+	if (IS_ENABLED(CONFIG_PWM))
+		emc2305_init_pwm(data);
+#endif
 
 	return 0;
 }
@@ -608,10 +704,23 @@ static void emc2305_remove(struct i2c_client *client)
 		emc2305_unset_tz(dev);
 }
 
+#ifdef CONFIG_MCST
+static const struct of_device_id __maybe_unused emc2305_of_match[] = {
+	{
+		.compatible = "smsc,emc2305",
+	},
+	{},
+};
+MODULE_DEVICE_TABLE(of, emc2305_of_match);
+#endif
+
 static struct i2c_driver emc2305_driver = {
 	.class  = I2C_CLASS_HWMON,
 	.driver = {
 		.name = "emc2305",
+#ifdef CONFIG_MCST
+		.of_match_table = of_match_ptr(emc2305_of_match),
+#endif
 	},
 	.probe    = emc2305_probe,
 	.remove	  = emc2305_remove,

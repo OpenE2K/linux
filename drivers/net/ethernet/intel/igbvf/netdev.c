@@ -1061,27 +1061,37 @@ static int igbvf_request_msix(struct igbvf_adapter *adapter)
 	}
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  igbvf_intr_msix_tx, 0, adapter->tx_ring->name,
-			  netdev);
+			igbvf_intr_msix_tx, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, adapter->tx_ring->name, netdev);
 	if (err)
-		goto out;
+		goto free_irq_tx;
 
 	adapter->tx_ring->itr_register = E1000_EITR(vector);
 	adapter->tx_ring->itr_val = adapter->current_itr;
 	vector++;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  igbvf_intr_msix_rx, 0, adapter->rx_ring->name,
-			  netdev);
+			igbvf_intr_msix_rx, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, adapter->rx_ring->name, netdev);
 	if (err)
-		goto free_irq_tx;
+		goto out;
 
 	adapter->rx_ring->itr_register = E1000_EITR(vector);
 	adapter->rx_ring->itr_val = adapter->current_itr;
 	vector++;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
-			  igbvf_msix_other, 0, netdev->name, netdev);
+			igbvf_msix_other, 0
+#ifdef CONFIG_MCST
+			 | IRQF_NO_THREAD | IRQF_ONESHOT
+#endif
+			, netdev->name, netdev);
 	if (err)
 		goto free_irq_rx;
 

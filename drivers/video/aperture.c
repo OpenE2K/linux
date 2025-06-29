@@ -323,6 +323,10 @@ int aperture_remove_conflicting_pci_devices(struct pci_dev *pdev, const char *na
 #ifdef CONFIG_X86
 	primary = pdev->resource[PCI_ROM_RESOURCE].flags & IORESOURCE_ROM_SHADOW;
 #endif
+#ifdef CONFIG_MCST
+	if (!primary)
+		primary = pdev == vga_default_device();
+#endif
 
 	if (primary)
 		sysfb_disable();

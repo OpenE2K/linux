@@ -147,7 +147,11 @@ static FORCE_INLINE void LZ4_writeLE16(void *memPtr, U16 value)
  * as-if it were standard compliant, so it can inline it in freestanding
  * environments. This is needed when decompressing the Linux Kernel, for example.
  */
+#ifdef CONFIG_E2K
+#define LZ4_memcpy(dst, src, size) memcpy(dst, src, size)
+#else
 #define LZ4_memcpy(dst, src, size) __builtin_memcpy(dst, src, size)
+#endif
 #define LZ4_memmove(dst, src, size) __builtin_memmove(dst, src, size)
 
 static FORCE_INLINE void LZ4_copy8(void *dst, const void *src)

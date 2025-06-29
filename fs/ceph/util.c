@@ -54,7 +54,11 @@ void ceph_file_layout_to_legacy(struct ceph_file_layout *fl,
 
 int ceph_flags_to_mode(int flags)
 {
+#ifdef CONFIG_MCST
+	int mode = 0;
+#else
 	int mode;
+#endif
 
 #ifdef O_DIRECTORY  /* fixme */
 	if ((flags & O_DIRECTORY) == O_DIRECTORY)

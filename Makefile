@@ -2,7 +2,7 @@
 VERSION = 6
 PATCHLEVEL = 1
 SUBLEVEL = 128
-EXTRAVERSION =
+EXTRAVERSION = -1.2
 NAME = Curry Ramen
 
 # *DOCUMENTATION*
@@ -498,6 +498,21 @@ OBJDUMP		= $(LLVM_PREFIX)llvm-objdump$(LLVM_SUFFIX)
 READELF		= $(LLVM_PREFIX)llvm-readelf$(LLVM_SUFFIX)
 STRIP		= $(LLVM_PREFIX)llvm-strip$(LLVM_SUFFIX)
 else
+# Cannot use CONFIG_CC_IS_LCC this early, hack around
+$(shell if test -z "$(CC)"; then false; else $(CC) -v 2>&1 | grep lcc > /dev/null; fi);
+ifeq ($(.SHELLSTATUS),0)
+# By default GNU Make assigns "cc" to CC, but that assignment
+# does not always work; this does make it work...
+CC		:= $(CC)
+LD              := $(shell $(CC) -print-prog-name=ld)
+AR		:= $(shell $(CC) -print-prog-name=ar)
+NM		:= $(shell $(CC) -print-prog-name=nm)
+OBJCOPY		:= $(shell $(CC) -print-prog-name=objcopy)
+OBJDUMP		:= $(shell $(CC) -print-prog-name=objdump)
+READELF		:= $(shell $(CC) -print-prog-name=readelf)
+OBJSIZE		:= $(shell $(CC) -print-prog-name=size)
+STRIP		:= $(shell $(CC) -print-prog-name=strip)
+else
 CC		= $(CROSS_COMPILE)gcc
 LD		= $(CROSS_COMPILE)ld
 AR		= $(CROSS_COMPILE)ar
@@ -506,6 +521,7 @@ OBJCOPY		= $(CROSS_COMPILE)objcopy
 OBJDUMP		= $(CROSS_COMPILE)objdump
 READELF		= $(CROSS_COMPILE)readelf
 STRIP		= $(CROSS_COMPILE)strip
+endif
 endif
 RUSTC		= rustc
 RUSTDOC		= rustdoc
@@ -545,6 +561,8 @@ CFLAGS_KERNEL	=
 RUSTFLAGS_KERNEL =
 AFLAGS_KERNEL	=
 LDFLAGS_vmlinux =
+
+-include .kernelvariables
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
@@ -829,6 +847,9 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, address-of-packed-member)
 ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
 KBUILD_CFLAGS += -O2
 KBUILD_RUSTFLAGS += -Copt-level=2
+else ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
+KBUILD_CFLAGS += -O3
+KBUILD_RUSTFLAGS += -Copt-level=3
 else ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS += -Os
 KBUILD_RUSTFLAGS += -Copt-level=s
@@ -855,8 +876,10 @@ ifdef CONFIG_READABLE_ASM
 KBUILD_CFLAGS += -fno-reorder-blocks -fno-ipa-cp-clone -fno-partial-inlining
 endif
 
+ifndef CONFIG_CC_IS_LCC
 ifneq ($(CONFIG_FRAME_WARN),0)
 KBUILD_CFLAGS += -Wframe-larger-than=$(CONFIG_FRAME_WARN)
+endif
 endif
 
 stackp-flags-y                                    := -fno-stack-protector
@@ -1055,8 +1078,13 @@ endif
 KBUILD_CFLAGS-$(call gcc-min-version, 90100) += -Wno-alloc-size-larger-than
 KBUILD_CFLAGS += $(KBUILD_CFLAGS-y) $(CONFIG_CC_IMPLICIT_FALLTHROUGH)
 
+# MCST: The original gcc bug which caused introduction of -fno-strict-overflow
+# (optimizing away pointer overflow checking) does not exist in lcc, and this
+# option prohibits many compiler optimizations.
+ifndef CONFIG_CC_IS_LCC
 # disable invalid "can't wrap" optimizations for signed / pointers
 KBUILD_CFLAGS	+= -fno-strict-overflow
+endif
 
 # Make sure -fstack-check isn't enabled (like gentoo apparently did)
 KBUILD_CFLAGS  += -fno-stack-check

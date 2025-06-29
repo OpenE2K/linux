@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
+# Disable -Wmaybe-uninitialized everywhere besides e2k
+# because while it is noisy, it still catches real bugs.
+subdir-ccflags-y := -Werror -Wswitch -Wenum-compare -Wmaybe-uninitialized
+
+obj-y += kernel/ mm/ net/ p2v/ fast_syscalls/
+
+obj-$(CONFIG_SECONDARY_SPACE_SUPPORT) += sec_space/
+
+# KVM hypervisor and guest support
+obj-$(CONFIG_KVM) += kvm/

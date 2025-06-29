@@ -3385,7 +3385,6 @@ int spi_controller_resume(struct spi_controller *ctlr)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(spi_controller_resume);
-
 /*-------------------------------------------------------------------------*/
 
 /* Core methods for spi_message alterations */

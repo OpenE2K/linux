@@ -711,7 +711,10 @@ int dma_mmap_noncontiguous(struct device *dev, struct vm_area_struct *vma,
 }
 EXPORT_SYMBOL_GPL(dma_mmap_noncontiguous);
 
-static int dma_supported(struct device *dev, u64 mask)
+#ifndef CONFIG_MCST
+static
+#endif
+int dma_supported(struct device *dev, u64 mask)
 {
 	const struct dma_map_ops *ops = get_dma_ops(dev);
 

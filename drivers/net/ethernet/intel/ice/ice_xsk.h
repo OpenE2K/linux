@@ -9,6 +9,8 @@
 
 #ifdef __clang__
 #define loop_unrolled_for _Pragma("clang loop unroll_count(8)") for
+#elif defined(CONFIG_CC_IS_LCC)
+#define loop_unrolled_for _Pragma("loop count (8)") for
 #elif __GNUC__ >= 8
 #define loop_unrolled_for _Pragma("GCC unroll 8") for
 #else

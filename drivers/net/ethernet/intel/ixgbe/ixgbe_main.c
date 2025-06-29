@@ -47,6 +47,10 @@
 #include "ixgbe_model.h"
 #include "ixgbe_txrx_common.h"
 
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif
+
 char ixgbe_driver_name[] = "ixgbe";
 static const char ixgbe_driver_string[] =
 			      "Intel(R) 10 Gigabit PCI Express Network Driver";
@@ -151,7 +155,11 @@ MODULE_PARM_DESC(max_vfs,
 		 "Maximum number of virtual functions to allocate per physical function - default is zero and maximum value is 63. (Deprecated)");
 #endif /* CONFIG_PCI_IOV */
 
+#ifdef CONFIG_MCST
+static bool allow_unsupported_sfp = true;
+#else
 static bool allow_unsupported_sfp;
+#endif
 module_param(allow_unsupported_sfp, bool, 0);
 MODULE_PARM_DESC(allow_unsupported_sfp,
 		 "Allow unsupported and untested SFP+ modules on 82599-based adapters");
@@ -274,7 +282,13 @@ static void ixgbe_service_event_schedule(struct ixgbe_adapter *adapter)
 	if (!test_bit(__IXGBE_DOWN, &adapter->state) &&
 	    !test_bit(__IXGBE_REMOVING, &adapter->state) &&
 	    !test_and_set_bit(__IXGBE_SERVICE_SCHED, &adapter->state))
+#ifdef CONFIG_MCST
+		if (!queue_work(ixgbe_wq, &adapter->service_task)) {
+			clear_bit(__IXGBE_SERVICE_SCHED, &adapter->state);
+		}
+#else
 		queue_work(ixgbe_wq, &adapter->service_task);
+#endif
 }
 
 static void ixgbe_remove_adapter(struct ixgbe_hw *hw)
@@ -1539,6 +1553,15 @@ static bool ixgbe_alloc_mapped_page(struct ixgbe_ring *rx_ring,
 		return true;
 
 	/* alloc new page for storage */
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug())
+		page = alloc_pages_node(dev_to_node(rx_ring->dev),
+			GFP_ATOMIC | __GFP_NOWARN | __GFP_COMP |
+			__GFP_THISNODE | __GFP_MEMALLOC,
+			ixgbe_rx_pg_order(rx_ring));
+	else
+
+#endif
 	page = dev_alloc_pages(ixgbe_rx_pg_order(rx_ring));
 	if (unlikely(!page)) {
 		rx_ring->rx_stats.alloc_rx_page_failed++;
@@ -3217,6 +3240,9 @@ static int ixgbe_request_msix_irqs(struct ixgbe_adapter *adapter)
 	struct net_device *netdev = adapter->netdev;
 	unsigned int ri = 0, ti = 0;
 	int vector, err;
+#ifdef CONFIG_MCST
+	unsigned long flags = IRQF_NO_THREAD | IRQF_ONESHOT;
+#endif
 
 	for (vector = 0; vector < adapter->num_q_vectors; vector++) {
 		struct ixgbe_q_vector *q_vector = adapter->q_vector[vector];
@@ -3236,8 +3262,12 @@ static int ixgbe_request_msix_irqs(struct ixgbe_adapter *adapter)
 			/* skip this unused q_vector */
 			continue;
 		}
+#ifndef CONFIG_MCST
 		err = request_irq(entry->vector, &ixgbe_msix_clean_rings, 0,
-				  q_vector->name, q_vector);
+#else
+		err = request_irq(entry->vector, &ixgbe_msix_clean_rings, flags,
+#endif
+			q_vector->name, q_vector);
 		if (err) {
 			e_err(probe, "request_irq failed for MSIX interrupt "
 			      "Error: %d\n", err);
@@ -3252,7 +3282,11 @@ static int ixgbe_request_msix_irqs(struct ixgbe_adapter *adapter)
 	}
 
 	err = request_irq(adapter->msix_entries[vector].vector,
+#ifndef CONFIG_MCST
 			  ixgbe_msix_other, 0, netdev->name, adapter);
+#else
+			  ixgbe_msix_other, flags, netdev->name, adapter);
+#endif
 	if (err) {
 		e_err(probe, "request_irq for msix_other failed: %d\n", err);
 		goto free_queue_irqs;
@@ -3360,15 +3394,26 @@ static int ixgbe_request_irq(struct ixgbe_adapter *adapter)
 {
 	struct net_device *netdev = adapter->netdev;
 	int err;
+#ifdef CONFIG_MCST
+	unsigned long flags = IRQF_NO_THREAD | IRQF_ONESHOT;
+#endif
 
 	if (adapter->flags & IXGBE_FLAG_MSIX_ENABLED)
 		err = ixgbe_request_msix_irqs(adapter);
 	else if (adapter->flags & IXGBE_FLAG_MSI_ENABLED)
+#ifndef CONFIG_MCST
 		err = request_irq(adapter->pdev->irq, ixgbe_intr, 0,
-				  netdev->name, adapter);
+#else
+		err = request_irq(adapter->pdev->irq, ixgbe_intr, flags,
+#endif
+				netdev->name, adapter);
 	else
+#ifndef CONFIG_MCST
 		err = request_irq(adapter->pdev->irq, ixgbe_intr, IRQF_SHARED,
-				  netdev->name, adapter);
+#else
+		err = request_irq(adapter->pdev->irq, ixgbe_intr, IRQF_SHARED | flags,
+#endif
+			netdev->name, adapter);
 
 	if (err)
 		e_err(probe, "request_irq failed, Error %d\n", err);
@@ -6528,6 +6573,9 @@ int ixgbe_setup_tx_resources(struct ixgbe_ring *tx_ring)
 	tx_ring->size = tx_ring->count * sizeof(union ixgbe_adv_tx_desc);
 	tx_ring->size = ALIGN(tx_ring->size, 4096);
 
+#ifdef CONFIG_E2K
+	if (!l_iommu_has_numa_bug())
+#endif
 	set_dev_node(dev, ring_node);
 	tx_ring->desc = dma_alloc_coherent(dev,
 					   tx_ring->size,
@@ -6629,7 +6677,10 @@ int ixgbe_setup_rx_resources(struct ixgbe_adapter *adapter,
 	rx_ring->size = rx_ring->count * sizeof(union ixgbe_adv_rx_desc);
 	rx_ring->size = ALIGN(rx_ring->size, 4096);
 
-	set_dev_node(dev, ring_node);
+#ifdef CONFIG_E2K
+	if (!l_iommu_has_numa_bug())
+#endif
+		set_dev_node(dev, ring_node);
 	rx_ring->desc = dma_alloc_coherent(dev,
 					   rx_ring->size,
 					   &rx_ring->dma,

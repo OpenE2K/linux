@@ -15,6 +15,9 @@
 #include <linux/i3c/master.h>
 #include <linux/io.h>
 
+#ifdef CONFIG_E2K
+#include <linux/dma-map-ops.h>
+#endif
 #include "hci.h"
 #include "cmd.h"
 #include "ibi.h"
@@ -25,6 +28,8 @@
  * Some of them could be determined at run time eventually.
  */
 
+#ifndef CONFIG_E2K
+
 #define XFER_RINGS			1	/* max: 8 */
 #define XFER_RING_ENTRIES		16	/* max: 255 */
 
@@ -33,12 +38,46 @@
 #define IBI_CHUNK_CACHELINES		1	/* max: 256 bytes equivalent */
 #define IBI_CHUNK_POOL_SIZE		128	/* max: 1023 */
 
+#else
+
+#define XFER_RINGS			2	/* max: 8 */
+/* Done by not standart. CR_RING_SIZE holds last index, not size */
+#define XFER_RING_ENTRIES		256	/* max: 255 */
+
+#define IBI_RINGS			2	/* max: 8 */
+
+/* Done by not standart. CR_RING_SIZE holds last index, not size */
+#define IBI_STATUS_RING_ENTRIES		256	/* max: 255 */
+#define IBI_CHUNK_CACHELINES		1	/* max: 256 bytes equivalent */
+#define IBI_CHUNK_POOL_SIZE		128	/* max: 1023 */
+
+#endif
+
+
 /*
  * Ring Header Preamble
  */
+#ifdef CONFIG_E2K
 
+#ifdef I3C_PCI_DEBUG
+#define rhs_reg_read(r)		\
+({	\
+	u64 __r__ = readl(hci->RHS_regs + (RHS_##r));		\
+	pr_info("%s: read rhs reg %d = %#llx\n", __func__, (RHS_##r), __r__);	\
+	__r__;							\
+})
+#define rhs_reg_write(r, v)	{pr_info("%s: write rhs reg %d = %#llx\n",	\
+				 __func__, (RHS_##r), (u64)(v));		\
+				 writel(v, hci->RHS_regs + (RHS_##r));		\
+				}
+#else
 #define rhs_reg_read(r)		readl(hci->RHS_regs + (RHS_##r))
 #define rhs_reg_write(r, v)	writel(v, hci->RHS_regs + (RHS_##r))
+#endif
+#else /* !CONFIG_E2K */
+#define rhs_reg_read(r)		readl(hci->RHS_regs + (RHS_##r))
+#define rhs_reg_write(r, v)	writel(v, hci->RHS_regs + (RHS_##r))
+#endif
 
 #define RHS_CONTROL			0x00
 #define PREAMBLE_SIZE			GENMASK(31, 24)	/* Preamble Section Size */
@@ -51,10 +90,28 @@
 /*
  * Ring Header (Per-Ring Bundle)
  */
+#ifdef CONFIG_E2K
 
+#ifdef I3C_PCI_DEBUG
+#define rh_reg_read(r)		\
+({	\
+	u64 __r__ = readl(rh->regs + (RH_##r));			\
+	pr_info("%s: read ring reg %#x = %#llx\n", __func__, (RH_##r), __r__);	\
+	__r__;	\
+})
+#define rh_reg_write(r, v)	{pr_info("%s: write ring reg %#x = %#llx\n",	\
+				 __func__, (RH_##r), (u64)(v));			\
+				 writel(v, rh->regs + (RH_##r));		\
+				}
+#else
 #define rh_reg_read(r)		readl(rh->regs + (RH_##r))
 #define rh_reg_write(r, v)	writel(v, rh->regs + (RH_##r))
 
+#endif
+#else /* !CONFIG_E2K */
+#define rh_reg_read(r)		readl(rh->regs + (RH_##r))
+#define rh_reg_write(r, v)	writel(v, rh->regs + (RH_##r))
+#endif
 #define RH_CR_SETUP			0x00	/* Command/Response Ring */
 #define CR_XFER_STRUCT_SIZE		GENMASK(31, 24)
 #define CR_RESP_STRUCT_SIZE		GENMASK(23, 16)
@@ -267,7 +324,12 @@ static int hci_dma_init(struct i3c_hci *hci)
 		rh_reg_write(RESP_RING_BASE_LO, lo32(rh->resp_dma));
 		rh_reg_write(RESP_RING_BASE_HI, hi32(rh->resp_dma));
 
+#ifdef CONFIG_E2K
+		/* Field holds last index, not size */
+		regval = FIELD_PREP(CR_RING_SIZE, rh->xfer_entries - 1);
+#else
 		regval = FIELD_PREP(CR_RING_SIZE, rh->xfer_entries);
+#endif
 		rh_reg_write(CR_SETUP, regval);
 
 		rh_reg_write(INTR_STATUS_ENABLE, 0xffffffff);
@@ -351,7 +413,7 @@ static void hci_dma_unmap_xfer(struct i3c_hci *hci,
 		if (!xfer->data)
 			continue;
 		dma_unmap_single(&hci->master.dev,
-				 xfer->data_dma, xfer->data_len,
+			 	 xfer->data_dma, xfer->data_len,
 				 xfer->rnw ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
 	}
 }
@@ -373,6 +435,16 @@ static int hci_dma_queue_xfer(struct i3c_hci *hci,
 	for (i = 0; i < n; i++) {
 		struct hci_xfer *xfer = xfer_list + i;
 		u32 *ring_data = rh->xfer + rh->xfer_struct_sz * enqueue_ptr;
+#ifdef CONFIG_E2K
+#define CMD_OF_XFER(xfer)       FIELD_GET(GENMASK(14, 7), (xfer)->cmd_desc[0])
+#define TID_OF_XFER(xfer)       FIELD_GET(GENMASK(6, 3), (xfer)->cmd_desc[0])
+#define DEVI_OF_XFER(xfer)      FIELD_GET(GENMASK(20, 16), (xfer)->cmd_desc[0])
+		DBG("xfer = %#lx. cmd = 0x%02x, tid = %d, dev_ind = %d."
+		    " data = %#lx, len = %d in list %d",
+			xfer, CMD_OF_XFER(xfer), TID_OF_XFER(xfer),
+			DEVI_OF_XFER(xfer), xfer->data, xfer->data_len, i);
+#endif
+
 
 		/* store cmd descriptor */
 		*ring_data++ = xfer->cmd_desc[0];
@@ -387,7 +459,7 @@ static int hci_dma_queue_xfer(struct i3c_hci *hci,
 			xfer->data_len = 0;
 		*ring_data++ =
 			FIELD_PREP(DATA_BUF_BLOCK_SIZE, xfer->data_len) |
-			((i == n - 1) ? DATA_BUF_IOC : 0);
+					  ((i == n - 1) ? DATA_BUF_IOC : 0);
 
 		/* 2nd and 3rd words of Data Buffer Descriptor Structure */
 		if (xfer->data) {
@@ -449,14 +521,21 @@ static bool hci_dma_dequeue_xfer(struct i3c_hci *hci,
 	unsigned int i;
 	bool did_unqueue = false;
 
+#ifdef CONFIG_E2K
+	DBG(" called from %ps", __builtin_return_address(0));
+#endif
 	/* stop the ring */
 	rh_reg_write(RING_CONTROL, RING_CTRL_ABORT);
 	if (wait_for_completion_timeout(&rh->op_done, HZ) == 0) {
 		/*
 		 * We're deep in it if ever this condition is ever met.
 		 * Hardware might still be writing to memory, etc.
+		 * Better suspend the world than risking silent corruption.
 		 */
 		dev_crit(&hci->master.dev, "unable to abort the ring\n");
+#ifdef CONFIG_E2K
+		return false;
+#endif
 		WARN_ON(1);
 	}
 
@@ -479,6 +558,12 @@ static bool hci_dma_dequeue_xfer(struct i3c_hci *hci,
 				*ring_data++ = 0;
 				*ring_data++ = 0;
 			}
+#ifdef CONFIG_E2K
+			*ring_data++ = idx;
+			DBG("Cleaning dma addr %08x%08x by %#x", *ring_data, *(ring_data + 1), idx);
+			*ring_data++ = idx;
+			*ring_data++ = idx;
+#endif
 
 			/* disassociate this xfer struct */
 			rh->src_xfers[idx] = NULL;
@@ -513,10 +598,29 @@ static void hci_dma_xfer_done(struct i3c_hci *hci, struct hci_rh_data *rh)
 		DBG("resp = 0x%08x", resp);
 
 		xfer = rh->src_xfers[done_ptr];
+#ifdef CONFIG_E2K
+		DBG("done_ptr = %d, resp = 0x%08x, xfer = %#lx", done_ptr, resp, xfer);
+#endif
 		if (!xfer) {
 			DBG("orphaned ring entry");
 		} else {
 			hci_dma_unmap_xfer(hci, xfer, 1);
+#ifdef CONFIG_E2K
+			u32 idx = xfer->ring_entry;
+			u32 *ring_data = rh->xfer + rh->xfer_struct_sz * idx;
+
+			/* store no-op cmd descriptor */
+			*ring_data++ = FIELD_PREP(CMD_0_ATTR, 0x7);
+			*ring_data++ = 0;
+			if (hci->cmd == &mipi_i3c_hci_cmd_v2) {
+				*ring_data++ = 0;
+				*ring_data++ = 0;
+			}
+			*ring_data++ = idx;
+			DBG("Cleaning dma addr %08x%08x by %#x", *ring_data, *(ring_data + 1), idx);
+			*ring_data++ = idx;
+			*ring_data++ = idx;
+#endif
 			xfer->ring_entry = -1;
 			xfer->response = resp;
 			if (tid != xfer->cmd_tid) {
@@ -525,8 +629,15 @@ static void hci_dma_xfer_done(struct i3c_hci *hci, struct hci_rh_data *rh)
 					tid, xfer->cmd_tid);
 				/* TODO: do something about it? */
 			}
+#ifdef CONFIG_E2K
+			if (xfer->completion) {
+				DBG(" complete");
+				complete(xfer->completion);
+			}
+#else
 			if (xfer->completion)
 				complete(xfer->completion);
+#endif
 		}
 
 		done_ptr = (done_ptr + 1) % rh->xfer_entries;
@@ -738,6 +849,9 @@ static bool hci_dma_irq_handler(struct i3c_hci *hci, unsigned int mask)
 	unsigned int i;
 	bool handled = false;
 
+#ifdef CONFIG_E2K
+	DBG("enter mask = %#x", mask);
+#endif
 	for (i = 0; mask && i < rings->total; i++) {
 		struct hci_rh_data *rh;
 		u32 status;
@@ -753,12 +867,24 @@ static bool hci_dma_irq_handler(struct i3c_hci *hci, unsigned int mask)
 			continue;
 		rh_reg_write(INTR_STATUS, status);
 
+
 		if (status & INTR_IBI_READY)
 			hci_dma_process_ibi(hci, rh);
+#ifdef CONFIG_E2K
+		if (status & (INTR_TRANSFER_COMPLETION | INTR_TRANSFER_ERR)) {
+			DBG("calling hci_dma_xfer_done");
+			hci_dma_xfer_done(hci, rh);
+		}
+		if (status & INTR_RING_OP) {
+			DBG("calling complete");
+			complete(&rh->op_done);
+		}
+#else
 		if (status & (INTR_TRANSFER_COMPLETION | INTR_TRANSFER_ERR))
 			hci_dma_xfer_done(hci, rh);
 		if (status & INTR_RING_OP)
 			complete(&rh->op_done);
+#endif
 
 		if (status & INTR_TRANSFER_ABORT)
 			dev_notice_ratelimited(&hci->master.dev,

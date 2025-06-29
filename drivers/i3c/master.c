@@ -17,10 +17,23 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
+#ifdef CONFIG_E2K
+#include <linux/pci.h>
+#endif
 #include "internals.h"
+
+#ifdef CONFIG_E2K
+#undef DBG
+#if 0
+#define DBG(x, y ...) pr_info("%s: " x "\n", __func__ , ## y)
+#else
+#define DBG(x, y ...)
+#endif
+#endif
 
 static DEFINE_IDR(i3c_bus_idr);
 static DEFINE_MUTEX(i3c_core_lock);
+static int __i3c_first_dynamic_bus_num;
 
 /**
  * i3c_bus_maintenance_lock - Lock the bus for a maintenance operation
@@ -279,8 +292,7 @@ static int i3c_device_uevent(struct device *dev, struct kobj_uevent_env *env)
 	struct i3c_device_info devinfo;
 	u16 manuf, part, ext;
 
-	if (i3cdev->desc)
-		devinfo = i3cdev->desc->info;
+	i3c_device_get_info(i3cdev, &devinfo);
 	manuf = I3C_PID_MANUF_ID(devinfo.pid);
 	part = I3C_PID_PART_ID(devinfo.pid);
 	ext = I3C_PID_EXTRA_INFO(devinfo.pid);
@@ -340,12 +352,14 @@ struct bus_type i3c_bus_type = {
 	.probe = i3c_device_probe,
 	.remove = i3c_device_remove,
 };
-
+#ifdef CONFIG_E2K
+EXPORT_SYMBOL(i3c_bus_type);
+#endif
 static enum i3c_addr_slot_status
-i3c_bus_get_addr_slot_status_mask(struct i3c_bus *bus, u16 addr, u32 mask)
+i3c_bus_get_addr_slot_status(struct i3c_bus *bus, u16 addr)
 {
 	unsigned long status;
-	int bitpos = addr * I3C_ADDR_SLOT_STATUS_BITS;
+	int bitpos = addr * 2;
 
 	if (addr > I2C_MAX_ADDR)
 		return I3C_ADDR_SLOT_RSVD;
@@ -353,33 +367,22 @@ i3c_bus_get_addr_slot_status_mask(struct i3c_bus *bus, u16 addr, u32 mask)
 	status = bus->addrslots[bitpos / BITS_PER_LONG];
 	status >>= bitpos % BITS_PER_LONG;
 
-	return status & mask;
+	return status & I3C_ADDR_SLOT_STATUS_MASK;
 }
 
-static enum i3c_addr_slot_status
-i3c_bus_get_addr_slot_status(struct i3c_bus *bus, u16 addr)
+static void i3c_bus_set_addr_slot_status(struct i3c_bus *bus, u16 addr,
+					 enum i3c_addr_slot_status status)
 {
-	return i3c_bus_get_addr_slot_status_mask(bus, addr, I3C_ADDR_SLOT_STATUS_MASK);
-}
-
-static void i3c_bus_set_addr_slot_status_mask(struct i3c_bus *bus, u16 addr,
-					      enum i3c_addr_slot_status status, u32 mask)
-{
-	int bitpos = addr * I3C_ADDR_SLOT_STATUS_BITS;
+	int bitpos = addr * 2;
 	unsigned long *ptr;
 
 	if (addr > I2C_MAX_ADDR)
 		return;
 
 	ptr = bus->addrslots + (bitpos / BITS_PER_LONG);
-	*ptr &= ~((unsigned long)mask << (bitpos % BITS_PER_LONG));
-	*ptr |= ((unsigned long)status & mask) << (bitpos % BITS_PER_LONG);
-}
-
-static void i3c_bus_set_addr_slot_status(struct i3c_bus *bus, u16 addr,
-					 enum i3c_addr_slot_status status)
-{
-	i3c_bus_set_addr_slot_status_mask(bus, addr, status, I3C_ADDR_SLOT_STATUS_MASK);
+	*ptr &= ~((unsigned long)I3C_ADDR_SLOT_STATUS_MASK <<
+						(bitpos % BITS_PER_LONG));
+	*ptr |= (unsigned long)status << (bitpos % BITS_PER_LONG);
 }
 
 static bool i3c_bus_dev_addr_is_avail(struct i3c_bus *bus, u8 addr)
@@ -391,44 +394,13 @@ static bool i3c_bus_dev_addr_is_avail(struct i3c_bus *bus, u8 addr)
 	return status == I3C_ADDR_SLOT_FREE;
 }
 
-/*
- * ┌────┬─────────────┬───┬─────────┬───┐
- * │S/Sr│ 7'h7E RnW=0 │ACK│ ENTDAA  │ T ├────┐
- * └────┴─────────────┴───┴─────────┴───┘    │
- * ┌─────────────────────────────────────────┘
- * │  ┌──┬─────────────┬───┬─────────────────┬────────────────┬───┬─────────┐
- * └─►│Sr│7'h7E RnW=1  │ACK│48bit UID BCR DCR│Assign 7bit Addr│PAR│ ACK/NACK│
- *    └──┴─────────────┴───┴─────────────────┴────────────────┴───┴─────────┘
- * Some master controllers (such as HCI) need to prepare the entire above transaction before
- * sending it out to the I3C bus. This means that a 7-bit dynamic address needs to be allocated
- * before knowing the target device's UID information.
- *
- * However, some I3C targets may request specific addresses (called as "init_dyn_addr"), which is
- * typically specified by the DT-'s assigned-address property. Lower addresses having higher IBI
- * priority. If it is available, i3c_bus_get_free_addr() preferably return a free address that is
- * not in the list of desired addresses (called as "init_dyn_addr"). This allows the device with
- * the "init_dyn_addr" to switch to its "init_dyn_addr" when it hot-joins the I3C bus. Otherwise,
- * if the "init_dyn_addr" is already in use by another I3C device, the target device will not be
- * able to switch to its desired address.
- *
- * If the previous step fails, fallback returning one of the remaining unassigned address,
- * regardless of its state in the desired list.
- */
 static int i3c_bus_get_free_addr(struct i3c_bus *bus, u8 start_addr)
 {
 	enum i3c_addr_slot_status status;
 	u8 addr;
 
 	for (addr = start_addr; addr < I3C_MAX_ADDR; addr++) {
-		status = i3c_bus_get_addr_slot_status_mask(bus, addr,
-							   I3C_ADDR_SLOT_EXT_STATUS_MASK);
-		if (status == I3C_ADDR_SLOT_FREE)
-			return addr;
-	}
-
-	for (addr = start_addr; addr < I3C_MAX_ADDR; addr++) {
-		status = i3c_bus_get_addr_slot_status_mask(bus, addr,
-							   I3C_ADDR_SLOT_STATUS_MASK);
+		status = i3c_bus_get_addr_slot_status(bus, addr);
 		if (status == I3C_ADDR_SLOT_FREE)
 			return addr;
 	}
@@ -462,9 +434,9 @@ static void i3c_bus_cleanup(struct i3c_bus *i3cbus)
 	mutex_unlock(&i3c_core_lock);
 }
 
-static int i3c_bus_init(struct i3c_bus *i3cbus)
+static int i3c_bus_init(struct i3c_bus *i3cbus, struct device_node *np)
 {
-	int ret;
+	int ret, start, end, id = -1;
 
 	init_rwsem(&i3cbus->lock);
 	INIT_LIST_HEAD(&i3cbus->devs.i2c);
@@ -472,8 +444,19 @@ static int i3c_bus_init(struct i3c_bus *i3cbus)
 	i3c_bus_init_addrslots(i3cbus);
 	i3cbus->mode = I3C_BUS_MODE_PURE;
 
+	if (np)
+		id = of_alias_get_id(np, "i3c");
+
 	mutex_lock(&i3c_core_lock);
-	ret = idr_alloc(&i3c_bus_idr, i3cbus, 0, 0, GFP_KERNEL);
+	if (id >= 0) {
+		start = id;
+		end = start + 1;
+	} else {
+		start = __i3c_first_dynamic_bus_num;
+		end = 0;
+	}
+
+	ret = idr_alloc(&i3c_bus_idr, i3cbus, start, end, GFP_KERNEL);
 	mutex_unlock(&i3c_core_lock);
 
 	if (ret < 0)
@@ -557,88 +540,6 @@ static ssize_t i2c_scl_frequency_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(i2c_scl_frequency);
 
-static int i3c_set_hotjoin(struct i3c_master_controller *master, bool enable)
-{
-	int ret;
-
-	if (!master || !master->ops)
-		return -EINVAL;
-
-	if (!master->ops->enable_hotjoin || !master->ops->disable_hotjoin)
-		return -EINVAL;
-
-	i3c_bus_normaluse_lock(&master->bus);
-
-	if (enable)
-		ret = master->ops->enable_hotjoin(master);
-	else
-		ret = master->ops->disable_hotjoin(master);
-
-	master->hotjoin = enable;
-
-	i3c_bus_normaluse_unlock(&master->bus);
-
-	return ret;
-}
-
-static ssize_t hotjoin_store(struct device *dev, struct device_attribute *attr,
-			     const char *buf, size_t count)
-{
-	struct i3c_bus *i3cbus = dev_to_i3cbus(dev);
-	int ret;
-	bool res;
-
-	if (!i3cbus->cur_master)
-		return -EINVAL;
-
-	if (kstrtobool(buf, &res))
-		return -EINVAL;
-
-	ret = i3c_set_hotjoin(i3cbus->cur_master->common.master, res);
-	if (ret)
-		return ret;
-
-	return count;
-}
-
-/*
- * i3c_master_enable_hotjoin - Enable hotjoin
- * @master: I3C master object
- *
- * Return: a 0 in case of success, an negative error code otherwise.
- */
-int i3c_master_enable_hotjoin(struct i3c_master_controller *master)
-{
-	return i3c_set_hotjoin(master, true);
-}
-EXPORT_SYMBOL_GPL(i3c_master_enable_hotjoin);
-
-/*
- * i3c_master_disable_hotjoin - Disable hotjoin
- * @master: I3C master object
- *
- * Return: a 0 in case of success, an negative error code otherwise.
- */
-int i3c_master_disable_hotjoin(struct i3c_master_controller *master)
-{
-	return i3c_set_hotjoin(master, false);
-}
-EXPORT_SYMBOL_GPL(i3c_master_disable_hotjoin);
-
-static ssize_t hotjoin_show(struct device *dev, struct device_attribute *da, char *buf)
-{
-	struct i3c_bus *i3cbus = dev_to_i3cbus(dev);
-	ssize_t ret;
-
-	i3c_bus_normaluse_lock(i3cbus);
-	ret = sysfs_emit(buf, "%d\n", i3cbus->cur_master->common.master->hotjoin);
-	i3c_bus_normaluse_unlock(i3cbus);
-
-	return ret;
-}
-
-static DEVICE_ATTR_RW(hotjoin);
-
 static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_mode.attr,
 	&dev_attr_current_master.attr,
@@ -649,7 +550,6 @@ static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_pid.attr,
 	&dev_attr_dynamic_address.attr,
 	&dev_attr_hdrcap.attr,
-	&dev_attr_hotjoin.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(i3c_masterdev);
@@ -804,7 +704,7 @@ static int i3c_master_send_ccc_cmd_locked(struct i3c_master_controller *master,
 	ret = master->ops->send_ccc_cmd(master, cmd);
 	if (ret) {
 		if (cmd->err != I3C_ERROR_UNKNOWN)
-			return cmd->err;
+			ret = cmd->err;
 
 		return ret;
 	}
@@ -822,7 +722,6 @@ i3c_master_find_i2c_dev_by_addr(const struct i3c_master_controller *master,
 		if (dev->addr == addr)
 			return dev;
 	}
-
 	return NULL;
 }
 
@@ -887,14 +786,21 @@ static int i3c_master_rstdaa_locked(struct i3c_master_controller *master,
 		return -EINVAL;
 
 	addrstat = i3c_bus_get_addr_slot_status(&master->bus, addr);
-	if (addr != I3C_BROADCAST_ADDR && addrstat != I3C_ADDR_SLOT_I3C_DEV)
+	if (addr != I3C_BROADCAST_ADDR && addrstat != I3C_ADDR_SLOT_I3C_DEV) {
+		dev_err(&master->dev,
+			"i3c_master_rstdaa_locked: wrongaddrstat != I3C_ADDR_SLOT_I3C_DEV %d\n",
+			addrstat);
 		return -EINVAL;
-
+	}
 	i3c_ccc_cmd_dest_init(&dest, addr, 0);
 	i3c_ccc_cmd_init(&cmd, false,
 			 I3C_CCC_RSTDAA(addr == I3C_BROADCAST_ADDR),
 			 &dest, 1);
 	ret = i3c_master_send_ccc_cmd_locked(master, &cmd);
+	if (ret) {
+		dev_err(&master->dev,
+			"i3c_master_rstdaa_locked: i3c_master_send_ccc_cmd_locked %d\n", ret);
+	}
 	i3c_ccc_cmd_dest_cleanup(&dest);
 
 	return ret;
@@ -1099,11 +1005,9 @@ static int i3c_master_setda_locked(struct i3c_master_controller *master,
 
 	if (!oldaddr || !newaddr)
 		return -EINVAL;
-
 	setda = i3c_ccc_cmd_dest_init(&dest, oldaddr, sizeof(*setda));
 	if (!setda)
 		return -ENOMEM;
-
 	setda->addr = newaddr << 1;
 	i3c_ccc_cmd_init(&cmd, false,
 			 setdasa ? I3C_CCC_SETDASA : I3C_CCC_SETNEWDA,
@@ -1407,7 +1311,7 @@ static void i3c_master_put_i3c_addrs(struct i3c_dev_desc *dev)
 					     I3C_ADDR_SLOT_FREE);
 
 	if (dev->boardinfo && dev->boardinfo->init_dyn_addr)
-		i3c_bus_set_addr_slot_status(&master->bus, dev->boardinfo->init_dyn_addr,
+		i3c_bus_set_addr_slot_status(&master->bus, dev->info.dyn_addr,
 					     I3C_ADDR_SLOT_FREE);
 }
 
@@ -1422,7 +1326,11 @@ static int i3c_master_get_i3c_addrs(struct i3c_dev_desc *dev)
 	if (dev->info.static_addr) {
 		status = i3c_bus_get_addr_slot_status(&master->bus,
 						      dev->info.static_addr);
-		if (status != I3C_ADDR_SLOT_FREE)
+		/* Since static address and assigned dynamic address can be
+		 * equal, allow this case to pass.
+		 */
+		if (status != I3C_ADDR_SLOT_FREE &&
+		    dev->info.static_addr != dev->boardinfo->init_dyn_addr)
 			return -EBUSY;
 
 		i3c_bus_set_addr_slot_status(&master->bus,
@@ -1492,9 +1400,16 @@ static int i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 				       u8 old_dyn_addr)
 {
 	struct i3c_master_controller *master = i3c_dev_get_master(dev);
+	enum i3c_addr_slot_status status;
 	int ret;
 
-	if (dev->info.dyn_addr != old_dyn_addr) {
+	if (dev->info.dyn_addr != old_dyn_addr &&
+	    (!dev->boardinfo ||
+	     dev->info.dyn_addr != dev->boardinfo->init_dyn_addr)) {
+		status = i3c_bus_get_addr_slot_status(&master->bus,
+						      dev->info.dyn_addr);
+		if (status != I3C_ADDR_SLOT_FREE)
+			return -EBUSY;
 		i3c_bus_set_addr_slot_status(&master->bus,
 					     dev->info.dyn_addr,
 					     I3C_ADDR_SLOT_I3C_DEV);
@@ -1557,6 +1472,7 @@ static int i3c_master_early_i3c_dev_add(struct i3c_master_controller *master,
 {
 	struct i3c_device_info info = {
 		.static_addr = boardinfo->static_addr,
+		.pid = boardinfo->pid,
 	};
 	struct i3c_dev_desc *i3cdev;
 	int ret;
@@ -1804,6 +1720,7 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 		status = i3c_bus_get_addr_slot_status(&master->bus,
 						      i2cboardinfo->base.addr);
 		if (status != I3C_ADDR_SLOT_FREE) {
+			dev_err(&master->dev, "i3c_master_bus_init: status != I3C_ADDR_SLOT_FREE\n");
 			ret = -EBUSY;
 			goto err_detach_devs;
 		}
@@ -1817,24 +1734,29 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 						  i2cboardinfo->lvr);
 		if (IS_ERR(i2cdev)) {
 			ret = PTR_ERR(i2cdev);
+			dev_err(&master->dev,
+				"i3c_master_bus_init: i3c_master_alloc_i2c_dev failed\n");
 			goto err_detach_devs;
 		}
 
 		ret = i3c_master_attach_i2c_dev(master, i2cdev);
 		if (ret) {
+			dev_err(&master->dev,
+				"i3c_master_bus_init: i3c_master_attach_i2c_dev failed\n");
 			i3c_master_free_i2c_dev(i2cdev);
 			goto err_detach_devs;
 		}
 	}
-
 	/*
 	 * Now execute the controller specific ->bus_init() routine, which
 	 * might configure its internal logic to match the bus limitations.
 	 */
 	ret = master->ops->bus_init(master);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev,
+			"i3c_master_bus_init: master->ops->bus_init failed\n");
 		goto err_detach_devs;
-
+	}
 	/*
 	 * The master device should have been instantiated in ->bus_init(),
 	 * complain if this was not the case.
@@ -1846,33 +1768,25 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 		goto err_bus_cleanup;
 	}
 
-	if (master->ops->set_speed) {
-		ret = master->ops->set_speed(master, I3C_OPEN_DRAIN_SLOW_SPEED);
-		if (ret)
-			goto err_bus_cleanup;
-	}
-
 	/*
 	 * Reset all dynamic address that may have been assigned before
 	 * (assigned by the bootloader for example).
 	 */
 	ret = i3c_master_rstdaa_locked(master, I3C_BROADCAST_ADDR);
-	if (ret && ret != I3C_ERROR_M2)
+	if (ret && ret != I3C_ERROR_M2) {
+		dev_err(&master->dev,
+			"i3c_master_bus_init: ret && ret != I3C_ERROR_M2\n");
 		goto err_bus_cleanup;
-
-	if (master->ops->set_speed) {
-		master->ops->set_speed(master, I3C_OPEN_DRAIN_NORMAL_SPEED);
-		if (ret)
-			goto err_bus_cleanup;
 	}
-
 	/* Disable all slave events before starting DAA. */
 	ret = i3c_master_disec_locked(master, I3C_BROADCAST_ADDR,
 				      I3C_CCC_EVENT_SIR | I3C_CCC_EVENT_MR |
 				      I3C_CCC_EVENT_HJ);
-	if (ret && ret != I3C_ERROR_M2)
+	if (ret && ret != I3C_ERROR_M2) {
+		dev_err(&master->dev,
+			"i3c_master_bus_init: ret && ret != I3C_ERROR_M2 (2)\n");
 		goto err_bus_cleanup;
-
+	}
 	/*
 	 * Reserve init_dyn_addr first, and then try to pre-assign dynamic
 	 * address and retrieve device information if needed.
@@ -1892,15 +1806,15 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 		ret = i3c_bus_get_addr_slot_status(&master->bus,
 						   i3cboardinfo->init_dyn_addr);
 		if (ret != I3C_ADDR_SLOT_FREE) {
+			dev_err(&master->dev,
+				"i3c_master_bus_init: status != I3C_ADDR_SLOT_FREE (2)\n");
 			ret = -EBUSY;
 			goto err_rstdaa;
 		}
 
-		/* Do not mark as occupied until real device exist in bus */
-		i3c_bus_set_addr_slot_status_mask(&master->bus,
-						  i3cboardinfo->init_dyn_addr,
-						  I3C_ADDR_SLOT_EXT_DESIRED,
-						  I3C_ADDR_SLOT_EXT_STATUS_MASK);
+		i3c_bus_set_addr_slot_status(&master->bus,
+					     i3cboardinfo->init_dyn_addr,
+					     I3C_ADDR_SLOT_I3C_DEV);
 
 		/*
 		 * Only try to create/attach devices that have a static
@@ -1915,9 +1829,11 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 	}
 
 	ret = i3c_master_do_daa(master);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev,
+			"i3c_master_bus_init: i3c_master_do_daa failed\n");
 		goto err_rstdaa;
-
+	}
 	return 0;
 
 err_rstdaa:
@@ -1963,8 +1879,11 @@ i3c_master_search_i3c_dev_duplicate(struct i3c_dev_desc *refdev)
 	struct i3c_dev_desc *i3cdev;
 
 	i3c_bus_for_each_i3cdev(&master->bus, i3cdev) {
-		if (i3cdev != refdev && i3cdev->info.pid == refdev->info.pid)
+		if (i3cdev != refdev && i3cdev->info.pid == refdev->info.pid) {
+			DBG(" Double found. pid = %#llx, old = %#llx, new = %#llx\n",
+			    refdev->info.pid, i3cdev, refdev);
 			return i3cdev;
+		}
 	}
 
 	return NULL;
@@ -2002,15 +1921,12 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 	newdev = i3c_master_alloc_i3c_dev(master, &info);
 	if (IS_ERR(newdev))
 		return PTR_ERR(newdev);
-
 	ret = i3c_master_attach_i3c_dev(master, newdev);
 	if (ret)
 		goto err_free_dev;
-
 	ret = i3c_master_retrieve_dev_info(newdev);
 	if (ret)
 		goto err_detach_dev;
-
 	i3c_master_attach_boardinfo(newdev);
 
 	olddev = i3c_master_search_i3c_dev_duplicate(newdev);
@@ -2031,16 +1947,11 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 			ibireq.max_payload_len = olddev->ibi->max_payload_len;
 			ibireq.num_slots = olddev->ibi->num_slots;
 
-			if (olddev->ibi->enabled)
+			if (olddev->ibi->enabled) {
 				enable_ibi = true;
-			/*
-			 * The olddev should not receive any commands on the
-			 * i3c bus as it does not exist and has been assigned
-			 * a new address. This will result in NACK or timeout.
-			 * So, update the olddev->ibi->enabled flag to false
-			 * to avoid DISEC with OldAddr.
-			 */
-			olddev->ibi->enabled = false;
+				i3c_dev_disable_ibi_locked(olddev);
+			}
+
 			i3c_dev_free_ibi_locked(olddev);
 		}
 		mutex_unlock(&olddev->ibi_lock);
@@ -2068,8 +1979,7 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 	else
 		expected_dyn_addr = newdev->info.dyn_addr;
 
-	if (newdev->info.dyn_addr != expected_dyn_addr &&
-	    i3c_bus_get_addr_slot_status(&master->bus, expected_dyn_addr) == I3C_ADDR_SLOT_FREE) {
+	if (newdev->info.dyn_addr != expected_dyn_addr) {
 		/*
 		 * Try to apply the expected dynamic address. If it fails, keep
 		 * the address assigned by the master.
@@ -2082,6 +1992,8 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 			newdev->info.dyn_addr = expected_dyn_addr;
 			i3c_master_reattach_i3c_dev(newdev, old_dyn_addr);
 		} else {
+			dev_err(&master->dev, "i3c_master_setnewda_locked(m, %d, %d) = %d",
+				newdev->info.dyn_addr, expected_dyn_addr, ret);
 			dev_err(&master->dev,
 				"Failed to assign reserved/old address to device %d%llx",
 				master->bus.id, newdev->info.pid);
@@ -2733,9 +2645,10 @@ int i3c_master_register(struct i3c_master_controller *master,
 		return -ENOTSUPP;
 
 	ret = i3c_master_check_ops(ops);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev, "%s: i3c_master_check_ops failed = %d\n", __func__, ret);
 		return ret;
-
+	}
 	master->dev.parent = parent;
 	master->dev.of_node = of_node_get(parent->of_node);
 	master->dev.bus = &i3c_bus_type;
@@ -2746,17 +2659,19 @@ int i3c_master_register(struct i3c_master_controller *master,
 	INIT_LIST_HEAD(&master->boardinfo.i2c);
 	INIT_LIST_HEAD(&master->boardinfo.i3c);
 
-	ret = i3c_bus_init(i3cbus);
-	if (ret)
+	ret = i3c_bus_init(i3cbus, master->dev.of_node);
+	if (ret) {
+		dev_err(&master->dev, "%s: i3c_bus_init failed = %d\n", __func__, ret);
 		return ret;
-
+	}
 	device_initialize(&master->dev);
 	dev_set_name(&master->dev, "i3c-%d", i3cbus->id);
 
 	ret = of_populate_i3c_bus(master);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev, "%s: of_populate_i3c_bus failed = %d\n", __func__, ret);
 		goto err_put_dev;
-
+	}
 	list_for_each_entry(i2cbi, &master->boardinfo.i2c, node) {
 		switch (i2cbi->lvr & I3C_LVR_I2C_INDEX_MASK) {
 		case I3C_LVR_I2C_INDEX(0):
@@ -2772,6 +2687,8 @@ int i3c_master_register(struct i3c_master_controller *master,
 				mode = I3C_BUS_MODE_MIXED_SLOW;
 			break;
 		default:
+			dev_err(&master->dev, "%s: wrong I3C_LVR_I2C_INDEX_MASK %ld\n",
+				__func__, i2cbi->lvr & I3C_LVR_I2C_INDEX_MASK);
 			ret = -EINVAL;
 			goto err_put_dev;
 		}
@@ -2781,31 +2698,58 @@ int i3c_master_register(struct i3c_master_controller *master,
 	}
 
 	ret = i3c_bus_set_mode(i3cbus, mode, i2c_scl_rate);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev, "%s: i3c_bus_set_mode failed = %d\n", __func__, ret);
 		goto err_put_dev;
-
+	}
 	master->wq = alloc_workqueue("%s", 0, 0, dev_name(parent));
 	if (!master->wq) {
+		dev_err(&master->dev, "%s: alloc_workqueue failed\n", __func__);
 		ret = -ENOMEM;
 		goto err_put_dev;
 	}
-
+#ifndef CONFIG_E2K
 	ret = i3c_master_bus_init(master);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev, "i3c_master_register: i3c_master_bus_init failed\n");
 		goto err_put_dev;
-
+	}
 	ret = device_add(&master->dev);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev, "i3c_master_register: device_add failed\n");
 		goto err_cleanup_bus;
-
+	}
 	/*
 	 * Expose our I3C bus as an I2C adapter so that I2C devices are exposed
 	 * through the I2C subsystem.
 	 */
 	ret = i3c_master_i2c_adapter_init(master);
-	if (ret)
+	if (ret) {
+		dev_err(&master->dev, "i3c_master_register: i3c_master_i2c_adapter_init failed\n");
 		goto err_del_dev;
-
+	}
+#else
+	master->dev.init_name = NULL;
+	ret = device_add(&master->dev);
+	if (ret) {
+		dev_err(&master->dev, "i3c_master_register: device_add failed\n");
+		goto err_put_dev;
+	}
+	ret = i3c_master_bus_init(master);
+	if (ret) {
+		dev_err(&master->dev, "i3c_master_register: i3c_master_bus_init failed\n");
+		goto err_del_dev;
+	}
+	/*
+	 * Expose our I3C bus as an I2C adapter so that I2C devices are exposed
+	 * through the I2C subsystem.
+	 */
+	ret = i3c_master_i2c_adapter_init(master);
+	if (ret) {
+		dev_err(&master->dev, "i3c_master_register: i3c_master_i2c_adapter_init failed\n");
+		goto err_cleanup_bus;
+	}
+#endif
 	/*
 	 * We're done initializing the bus and the controller, we can now
 	 * register I3C devices discovered during the initial DAA.
@@ -2817,12 +2761,19 @@ int i3c_master_register(struct i3c_master_controller *master,
 
 	return 0;
 
+#ifndef CONFIG_E2K
 err_del_dev:
 	device_del(&master->dev);
 
 err_cleanup_bus:
 	i3c_master_bus_cleanup(master);
 
+#else
+err_cleanup_bus:
+	i3c_master_bus_cleanup(master);
+err_del_dev:
+	device_del(&master->dev);
+#endif
 err_put_dev:
 	put_device(&master->dev);
 
@@ -2844,6 +2795,25 @@ void i3c_master_unregister(struct i3c_master_controller *master)
 	device_unregister(&master->dev);
 }
 EXPORT_SYMBOL_GPL(i3c_master_unregister);
+
+int i3c_dev_setdasa_locked(struct i3c_dev_desc *dev)
+{
+	struct i3c_master_controller *master;
+
+	if (!dev)
+		return -ENOENT;
+
+	master = i3c_dev_get_master(dev);
+	if (!master)
+		return -EINVAL;
+
+	if (!dev->boardinfo || !dev->boardinfo->init_dyn_addr ||
+		!dev->boardinfo->static_addr)
+		return -EINVAL;
+
+	return i3c_master_setdasa_locked(master, dev->info.static_addr,
+						dev->boardinfo->init_dyn_addr);
+}
 
 int i3c_dev_do_priv_xfers_locked(struct i3c_dev_desc *dev,
 				 struct i3c_priv_xfer *xfers,
@@ -2951,8 +2921,16 @@ void i3c_dev_free_ibi_locked(struct i3c_dev_desc *dev)
 
 static int __init i3c_init(void)
 {
-	int res = bus_register_notifier(&i2c_bus_type, &i2cdev_notifier);
+	int res;
 
+	res = of_alias_get_highest_id("i3c");
+	if (res >= 0) {
+		mutex_lock(&i3c_core_lock);
+		__i3c_first_dynamic_bus_num = res + 1;
+		mutex_unlock(&i3c_core_lock);
+	}
+
+	res = bus_register_notifier(&i2c_bus_type, &i2cdev_notifier);
 	if (res)
 		return res;
 
@@ -2967,7 +2945,11 @@ out_unreg_notifier:
 
 	return res;
 }
+#ifdef CONFIG_E2K
+postcore_initcall(i3c_init);
+#else
 subsys_initcall(i3c_init);
+#endif
 
 static void __exit i3c_exit(void)
 {

@@ -610,3 +610,15 @@ void __sched mutex_unlock(struct mutex *lock)
 EXPORT_SYMBOL(mutex_unlock);
 
 #endif /* CONFIG_PREEMPT_RT */
+
+#if defined(CONFIG_MCST)
+struct task_struct *get_rtmutex_owner(struct rt_mutex_base *lock)
+{
+	return rt_mutex_owner(lock);
+}
+
+void *get_rtmutex_ip(struct rt_mutex_base *lock)
+{
+	return (void *)(lock->mux_ip);
+}
+#endif

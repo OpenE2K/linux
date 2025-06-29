@@ -663,7 +663,7 @@ def main() -> None:
   def ftw(path: str, parents: Sequence[str],
           action: Callable[[Sequence[str], os.DirEntry], None]) -> None:
     """Replicate the directory/file walking behavior of C's file tree walk."""
-    for item in os.scandir(path):
+    for item in sorted(os.scandir(path), key=(lambda item: item.name)):
       action(parents, item)
       if item.is_dir():
         ftw(item.path, parents + [item.name], action)

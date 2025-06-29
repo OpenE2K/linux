@@ -1893,7 +1893,10 @@ static void free_rp_inst_rcu(struct rcu_head *head)
 }
 NOKPROBE_SYMBOL(free_rp_inst_rcu);
 
-static void recycle_rp_inst(struct kretprobe_instance *ri)
+#ifndef CONFIG_E2K
+static
+#endif
+void recycle_rp_inst(struct kretprobe_instance *ri)
 {
 	struct kretprobe *rp = get_kretprobe(ri);
 

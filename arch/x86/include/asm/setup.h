@@ -31,6 +31,11 @@
 #include <asm/bootparam.h>
 #include <asm/x86_init.h>
 
+#ifdef CONFIG_MCST
+struct pci_dev;
+extern int l_set_ethernet_macaddr(struct pci_dev *pdev, char *macaddr);
+#endif
+
 extern u64 relocated_ramdisk;
 
 /* Interrupt control for vSMPowered x86_64 systems */

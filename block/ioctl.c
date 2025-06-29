@@ -674,6 +674,10 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		return put_u64(argp, bdev_nr_bytes(bdev));
 
 	/* Incompatible alignment on i386 */
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+	case BLKTRACESETUPBC32:
+		fallthrough;
+#endif
 	case BLKTRACESETUP32:
 		return blk_trace_ioctl(bdev, cmd, argp);
 	default:

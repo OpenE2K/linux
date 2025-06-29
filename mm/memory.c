@@ -77,6 +77,10 @@
 #include <linux/ptrace.h>
 #include <linux/vmalloc.h>
 #include <linux/sched/sysctl.h>
+#ifdef CONFIG_MCST
+#include <linux/delay.h>
+#include <linux/mcst_rt.h>
+#endif 
 
 #include <trace/events/kmem.h>
 
@@ -1029,7 +1033,11 @@ copy_pte_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	struct mm_struct *src_mm = src_vma->vm_mm;
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *src_ptl, *dst_ptl = NULL;
+#else
 	spinlock_t *src_ptl, *dst_ptl;
+#endif
 	int progress, ret = 0;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
@@ -1883,7 +1891,11 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 {
 	int retval;
 	pte_t *pte;
+#ifdef CONFIG_MCST
+	spinlock_t *ptl = NULL;
+#else
 	spinlock_t *ptl;
+#endif
 
 	retval = validate_page_before_insert(page);
 	if (retval)
@@ -2392,7 +2404,11 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long pfn, pgprot_t prot)
 {
 	pte_t *pte, *mapped_pte;
+#ifdef CONFIG_MCST
+	spinlock_t *ptl = NULL;
+#else
 	spinlock_t *ptl;
+#endif
 	int err = 0;
 
 	mapped_pte = pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
@@ -5092,6 +5108,17 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	pgd_t *pgd;
 	p4d_t *p4d;
 	vm_fault_t ret;
+
+#ifdef CONFIG_MCST_4RT
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* Attempt to allocate page when VM_MLOCK_DONE set */
+		/* for gracefully exit() */
+		mm->extra_vm_flags &= ~VM_MLOCK_DONE;
+		pr_err("Attempt to allocate page when VM_MLOCK_DONE"
+				"(after mlockall())\n");
+		return VM_FAULT_SIGBUS;
+	}
+#endif  /* CONFIG_MCST_4RT */
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);

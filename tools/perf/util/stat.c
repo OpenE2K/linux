@@ -340,7 +340,13 @@ static int check_per_pkg(struct evsel *counter, struct perf_counts_values *vals,
 	 */
 	d = cpu__get_die_id(cpu);
 	if (d < 0)
+#ifdef __e2k__
+		/* Only PerPkg events get here.  Fix reading of `die_id`
+		 * instead opf creating and unneeded die_id attribute. */
+		d = 0;
+#else
 		return -1;
+#endif
 
 	key = malloc(sizeof(*key));
 	if (!key)

@@ -3,7 +3,10 @@
  * Real-Time Scheduling Class (mapped to the SCHED_FIFO and SCHED_RR
  * policies)
  */
-
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#endif
+ 
 int sched_rr_timeslice = RR_TIMESLICE;
 /* More than 4 hours if BW_SHIFT equals 20. */
 static const u64 max_rt_runtime = MAX_BW;
@@ -435,6 +438,16 @@ static inline void rt_queue_pull_task(struct rq *rq)
 
 static void enqueue_pushable_task(struct rq *rq, struct task_struct *p)
 {
+#ifdef CONFIG_MCST_RT_SMP
+	if (mcst_rt_rq(rq) || mcst_rt_affinity(p)) {
+		DEBUG_MCST_SMP("empty action %s[%d]\n", p->comm, p->pid);
+		return;
+	}
+#endif
+#ifdef CONFIG_MCST_RT
+        if (rts_act_mask & RTS_NO_CPU_BLNC)
+		return;
+#endif
 	plist_del(&p->pushable_tasks, &rq->rt.pushable_tasks);
 	plist_node_init(&p->pushable_tasks, p->prio);
 	plist_add(&p->pushable_tasks, &rq->rt.pushable_tasks);
@@ -446,6 +459,17 @@ static void enqueue_pushable_task(struct rq *rq, struct task_struct *p)
 
 static void dequeue_pushable_task(struct rq *rq, struct task_struct *p)
 {
+#ifdef CONFIG_MCST_RT_SMP
+	if (mcst_rt_rq(rq) || mcst_rt_affinity(p)) {
+		DEBUG_MCST_SMP("empty action %s[%d]\n", p->comm, p->pid);
+		return;
+	}
+#endif
+#ifdef CONFIG_MCST_RT
+        if (rts_act_mask & RTS_NO_CPU_BLNC)
+		return;
+#endif
+
 	plist_del(&p->pushable_tasks, &rq->rt.pushable_tasks);
 
 	/* Update the new highest prio pushable task */
@@ -1022,8 +1046,20 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 		 * but accrue some time due to boosting.
 		 */
 		if (likely(rt_b->rt_runtime)) {
+#ifdef CONFIG_MCST
+			rt_rq->rt_runtime = RUNTIME_INF;
+			rt_rq->rt_time = 0;
+			printk_deferred("sched: RT throttling NOT activated for %s %d\n",
+				rq_of_rt_rq(rt_rq)->curr->comm,
+				rq_of_rt_rq(rt_rq)->curr->pid);
+#else
 			rt_rq->rt_throttled = 1;
 			printk_deferred_once("sched: RT throttling activated\n");
+#endif
+#ifdef CONFIG_MCST_RT_SMP
+			if (mcst_rt_affinity(rq_of_rt_rq(rt_rq)->curr))
+				return 0;
+#endif
 		} else {
 			/*
 			 * In case we did anyway, make it go away,
@@ -1053,6 +1089,13 @@ static void update_curr_rt(struct rq *rq)
 	u64 delta_exec;
 	u64 now;
 
+#ifdef CONFIG_MCST_RT_SMP
+	if (mcst_rt_rq(rq)) {
+		DEBUG_MCST_SMP("empty action rq = %p\n", rq);
+		return;
+	}
+#endif
+
 	if (curr->sched_class != &rt_sched_class)
 		return;
 
@@ -1080,7 +1123,12 @@ static void update_curr_rt(struct rq *rq)
 			rt_rq->rt_time += delta_exec;
 			exceeded = sched_rt_runtime_exceeded(rt_rq);
 			if (exceeded)
+#ifdef CONFIG_MCST_RT_SMP
+				if (!mcst_rt_affinity(curr))
+					resched_curr(rq);
+#else
 				resched_curr(rq);
+#endif
 			raw_spin_unlock(&rt_rq->rt_runtime_lock);
 			if (exceeded)
 				do_start_rt_bandwidth(sched_rt_bandwidth(rt_rq));
@@ -1803,6 +1851,72 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 	return rt_task_of(rt_se);
 }
 
+#ifdef CONFIG_MCST_RT_SMP
+static inline struct task_struct *pick_next_task_mcst_rt(struct rq *rq,
+							 struct task_struct *p)
+{
+	struct rq *ext_rq = NULL;
+	int ext_idx = MAX_RT_PRIO;
+	int __maybe_unused g_idx, __maybe_unused n_idx;
+	struct task_struct *up = p;
+#ifdef CONFIG_MCST_RT_NUMA
+	struct rq *n_rq = node_rq[numa_node_id()];
+#endif
+
+#ifdef CONFIG_MCST_RT_NUMA
+	if (unlikely(n_rq->nr_running != 0)) {
+		n_idx = sched_find_first_bit(n_rq->rt.active.bitmap);
+		if (n_idx < ext_idx) {
+			ext_rq = n_rq;
+			ext_idx = n_idx;
+		}
+	}
+#endif
+
+#ifdef CONFIG_MCST_RT_GRQ
+	if (unlikely(g_rq->nr_running != 0)) {
+		g_idx = sched_find_first_bit(g_rq->rt.active.bitmap);
+		if (g_idx < ext_idx) {
+			ext_rq = g_rq;
+			ext_idx = g_idx;
+		}
+	}
+#endif
+	if (ext_idx < MAX_RT_PRIO && (!p || ext_idx <= p->prio)) {
+		struct task_struct *ext_task;
+		int ext_first;
+
+		raw_spin_lock(&ext_rq->__lock);
+		ext_task = _pick_next_task_rt(ext_rq);
+
+		ext_first = time_before(ext_rq->mcst_rt_timestamp,
+					    rq->mcst_rt_timestamp);
+		ext_first = ext_first && (p && ext_task &&
+				ext_task->prio == p->prio);
+
+		if (ext_task && (!p || ext_task->prio < p->prio
+				    || ext_first)) {
+			up = ext_task;
+			deactivate_task(ext_rq, up, 0);
+			set_task_cpu(up, rq->cpu);
+			activate_task(rq, up, 0);
+
+			ext_rq->mcst_rt_timestamp = jiffies;
+		} else if (p) {
+			rq->mcst_rt_timestamp = jiffies;
+		}
+		raw_spin_unlock(&ext_rq->__lock);
+	} else {
+		rq->mcst_rt_timestamp = jiffies;
+	}
+	if (p != up) {
+		DEBUG_MCST_SMP("%s[%d] on cpu %d\n",
+			up->comm, up->pid, rq->cpu);
+	}
+	return up;
+}
+#endif
+
 static struct task_struct *pick_task_rt(struct rq *rq)
 {
 	struct task_struct *p;
@@ -1811,6 +1925,9 @@ static struct task_struct *pick_task_rt(struct rq *rq)
 		return NULL;
 
 	p = _pick_next_task_rt(rq);
+#ifdef CONFIG_MCST_RT_SMP
+	p = pick_next_task_mcst_rt(rq, p);
+#endif
 
 	return p;
 }
@@ -2364,6 +2481,11 @@ static void pull_rt_task(struct rq *this_rq)
 	struct rq *src_rq;
 	int rt_overload_count = rt_overloaded(this_rq);
 
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_NO_CPU_BLNC)
+		return;
+#endif
+
 	if (likely(!rt_overload_count))
 		return;
 
@@ -2480,6 +2602,15 @@ static void task_woken_rt(struct rq *rq, struct task_struct *p)
 			    (rq->curr->nr_cpus_allowed < 2 ||
 			     rq->curr->prio <= p->prio);
 
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_NO_CPU_BLNC)
+		return;
+#endif
+#ifdef CONFIG_MCST_RT_SMP
+	if (mcst_rt_rq(rq))
+		return;
+#endif
+
 	if (need_to_push)
 		push_rt_tasks(rq);
 }
@@ -2512,6 +2643,13 @@ static void rq_offline_rt(struct rq *rq)
  */
 static void switched_from_rt(struct rq *rq, struct task_struct *p)
 {
+#ifdef CONFIG_MCST_RT_SMP
+	p->mcst_smp_cpu = 0;
+	if (mcst_rt_rq(rq)) {
+		DEBUG_MCST_SMP("%s[%d]\n", p->comm, p->pid);
+		return;
+	}
+#endif
 	/*
 	 * If there are other RT tasks then we will reschedule
 	 * and the scheduling of the other RT tasks will handle
@@ -2543,6 +2681,9 @@ void __init init_sched_rt_class(void)
  */
 static void switched_to_rt(struct rq *rq, struct task_struct *p)
 {
+#ifdef CONFIG_MCST_RT_SMP
+	p->mcst_smp_cpu = 0;
+#endif
 	/*
 	 * If we are running, update the avg_rt tracking, as the running time
 	 * will now on be accounted into the latter.
@@ -2603,6 +2744,9 @@ prio_changed_rt(struct rq *rq, struct task_struct *p, int oldprio)
 		 * greater than the current running task
 		 * then reschedule.
 		 */
+#ifdef CONFIG_MCST_RT_SMP
+		if (!mcst_rt_rq(rq))
+#endif
 		if (p->prio < rq->curr->prio)
 			resched_curr(rq);
 	}

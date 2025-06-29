@@ -111,6 +111,9 @@ extern int hibernate_preallocate_memory(void);
 
 extern void clear_or_poison_free_pages(void);
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+extern void clear_free_pages(void);
+#endif
 /**
  *	Auxiliary structure used for reading the snapshot image data and
  *	metadata from and writing them to the list of page backup entries

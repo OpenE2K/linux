@@ -108,7 +108,7 @@ static inline void native_apic_mem_write(u32 reg, u32 v)
 		       ASM_OUTPUT2("0" (v), "m" (*addr)));
 }
 
-static inline u32 native_apic_mem_read(u32 reg)
+static inline u32 __no_sanitize_address native_apic_mem_read(u32 reg)
 {
 	return readl((void __iomem *)(APIC_BASE + reg));
 }

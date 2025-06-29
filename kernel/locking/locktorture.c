@@ -888,6 +888,13 @@ static void lock_torture_cleanup(void)
 	kfree(cxt.lrsa);
 	cxt.lrsa = NULL;
 
+#ifdef CONFIG_MCST
+	/* Wait for callbacks to RCU from .writeunlock to complete
+	 * before freeing memory where corresponding rcu_head was
+	 * allocated */
+	rcu_barrier();
+#endif
+
 end:
 	if (cxt.init_called) {
 		if (cxt.cur_ops->exit)

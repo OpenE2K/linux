@@ -45,6 +45,9 @@
 #define __latent_entropy __attribute__((latent_entropy))
 #endif
 
+#if defined __LCC__ /* MCST */
+#define unreachable() __builtin_unreachable()
+#else
 /*
  * calling noreturn functions, __builtin_unreachable() and __builtin_trap()
  * confuse the stack allocation in gcc, leading to overly large stack
@@ -65,6 +68,7 @@
 		barrier_before_unreachable();	\
 		__builtin_unreachable();	\
 	} while (0)
+#endif /* __LCC__ */
 
 /*
  * GCC 'asm goto' with outputs miscompiles certain code sequences:

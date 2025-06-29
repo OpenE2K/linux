@@ -37,6 +37,10 @@
 #include <linux/iova_bitmap.h>
 #include "vfio.h"
 
+#ifdef CONFIG_E2K
+#include <asm/e2k-iommu.h>
+#endif
+
 #define DRIVER_VERSION	"0.3"
 #define DRIVER_AUTHOR	"Alex Williamson <alex.williamson@redhat.com>"
 #define DRIVER_DESC	"VFIO - User Level meta-driver"
@@ -1662,9 +1666,19 @@ EXPORT_SYMBOL_GPL(vfio_file_enforced_coherent);
 void vfio_file_set_kvm(struct file *file, struct kvm *kvm)
 {
 	struct vfio_group *group = file->private_data;
+#ifdef CONFIG_E2K
+	struct vfio_device *device;
+#endif
 
 	if (!vfio_file_is_group(file))
 		return;
+
+#ifdef CONFIG_E2K
+	mutex_lock(&group->device_lock);
+	list_for_each_entry(device, &group->device_list, group_next)
+		e2k_iommu_set_kvm_device(device->dev, kvm);
+	mutex_unlock(&group->device_lock);
+#endif
 
 	mutex_lock(&group->group_lock);
 	group->kvm = kvm;

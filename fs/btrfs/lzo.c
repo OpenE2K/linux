@@ -330,7 +330,11 @@ int lzo_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 	const struct btrfs_fs_info *fs_info = btrfs_sb(cb->inode->i_sb);
 	const u32 sectorsize = fs_info->sectorsize;
 	char *kaddr;
+#ifdef CONFIG_MCST
+	int ret = 0;
+#else
 	int ret;
+#endif
 	/* Compressed data length, can be unaligned */
 	u32 len_in;
 	/* Offset inside the compressed data */

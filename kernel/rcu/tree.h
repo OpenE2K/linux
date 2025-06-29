@@ -192,7 +192,9 @@ struct rcu_data {
 	/* 3) dynticks interface. */
 	int dynticks_snap;		/* Per-GP tracking for dynticks. */
 	bool rcu_need_heavy_qs;		/* GP old, so heavy quiescent state! */
+#ifndef CONFIG_MCST    /* bug 139936 comment 71 */
 	bool rcu_urgent_qs;		/* GP old need light quiescent state. */
+#endif
 	bool rcu_forced_tick;		/* Forced tick to provide QS. */
 	bool rcu_forced_tick_exp;	/*   ... provide QS to expedited GP. */
 

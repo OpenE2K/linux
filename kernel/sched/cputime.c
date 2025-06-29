@@ -1,3 +1,7 @@
+#if defined(CONFIG_E2K) && defined(CONFIG_PARAVIRT)
+#include <asm/paravirt.h>
+#endif
+
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Simple CPU accounting cgroup controller

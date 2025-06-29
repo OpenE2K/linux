@@ -39,6 +39,10 @@ static __always_inline void rtlock_lock(struct rt_mutex_base *rtm)
 {
 	if (unlikely(!rt_mutex_cmpxchg_acquire(rtm, NULL, current)))
 		rtlock_slowlock(rtm);
+#ifdef CONFIG_MCST
+	else
+		rtm->mux_ip = _RET_IP_;
+#endif
 }
 
 static __always_inline void __rt_spin_lock(spinlock_t *lock)
@@ -105,6 +109,9 @@ static __always_inline int __rt_spin_trylock(spinlock_t *lock)
 
 	if (ret) {
 		spin_acquire(&lock->dep_map, 0, 1, _RET_IP_);
+#ifdef CONFIG_MCST
+		lock->lock.mux_ip = _RET_IP_;
+#endif
 		rcu_read_lock();
 		migrate_disable();
 	}
@@ -177,7 +184,14 @@ static __always_inline void rwbase_rtmutex_unlock(struct rt_mutex_base *rtm)
 static __always_inline int  rwbase_rtmutex_trylock(struct rt_mutex_base *rtm)
 {
 	if (likely(rt_mutex_cmpxchg_acquire(rtm, NULL, current)))
+#ifdef CONFIG_MCST
+	{
+		rtm->mux_ip = _RET_IP_;
+#endif
 		return 1;
+#ifdef CONFIG_MCST
+	}
+#endif
 
 	return rt_mutex_slowtrylock(rtm);
 }
@@ -197,6 +211,9 @@ int __sched rt_read_trylock(rwlock_t *rwlock)
 
 	ret = rwbase_read_trylock(&rwlock->rwbase);
 	if (ret) {
+#ifdef CONFIG_MCST
+		rwlock->rwbase.rtmutex.mux_ip = _RET_IP_;
+#endif
 		rwlock_acquire_read(&rwlock->dep_map, 0, 1, _RET_IP_);
 		rcu_read_lock();
 		migrate_disable();
@@ -211,6 +228,9 @@ int __sched rt_write_trylock(rwlock_t *rwlock)
 
 	ret = rwbase_write_trylock(&rwlock->rwbase);
 	if (ret) {
+#ifdef CONFIG_MCST
+		rwlock->rwbase.rtmutex.mux_ip = _RET_IP_;
+#endif
 		rwlock_acquire(&rwlock->dep_map, 0, 1, _RET_IP_);
 		rcu_read_lock();
 		migrate_disable();
@@ -224,6 +244,9 @@ void __sched rt_read_lock(rwlock_t *rwlock)
 	rtlock_might_resched();
 	rwlock_acquire_read(&rwlock->dep_map, 0, 0, _RET_IP_);
 	rwbase_read_lock(&rwlock->rwbase, TASK_RTLOCK_WAIT);
+#ifdef CONFIG_MCST
+	rwlock->rwbase.rtmutex.mux_ip = _RET_IP_;
+#endif
 	rcu_read_lock();
 	migrate_disable();
 }
@@ -234,6 +257,9 @@ void __sched rt_write_lock(rwlock_t *rwlock)
 	rtlock_might_resched();
 	rwlock_acquire(&rwlock->dep_map, 0, 0, _RET_IP_);
 	rwbase_write_lock(&rwlock->rwbase, TASK_RTLOCK_WAIT);
+#ifdef CONFIG_MCST
+	rwlock->rwbase.rtmutex.mux_ip = _RET_IP_;
+#endif
 	rcu_read_lock();
 	migrate_disable();
 }
