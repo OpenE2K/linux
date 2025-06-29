@@ -19,4 +19,7 @@ extern void ntp_notify_cmos_timer(void);
 static inline void ntp_notify_cmos_timer(void) { }
 #endif
 
+#ifdef CONFIG_MCST
+extern void update_tmstatus_for_ntp(int *status, int reset, int set);
+#endif
 #endif /* _LINUX_NTP_INTERNAL_H */

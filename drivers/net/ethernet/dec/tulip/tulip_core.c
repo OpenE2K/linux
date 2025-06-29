@@ -87,6 +87,8 @@ static int csr0 = 0x01A00000 | 0x9000;
 static int csr0 = 0x01A00000 | 0x4800;
 #elif defined(__mips__)
 static int csr0 = 0x00200000 | 0x4000;
+#elif defined(__e2k__)
+static int csr0 = 0x01A00000;
 #else
 static int csr0;
 #endif

@@ -312,6 +312,8 @@ static inline bool is_virtual_machine(void)
 	return boot_cpu_has(X86_FEATURE_HYPERVISOR);
 #elif defined(CONFIG_ARM64)
 	return !is_kernel_in_hyp_mode();
+#elif defined(CONFIG_E2K)
+	return IS_HV_GM();
 #else
 	return false;
 #endif

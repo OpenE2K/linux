@@ -1156,7 +1156,11 @@ static void snd_cs4281_proc_init(struct cs4281 *chip)
 		entry->content = SNDRV_INFO_CONTENT_DATA;
 		entry->private_data = chip;
 		entry->c.ops = &snd_cs4281_proc_ops_BA1;
+#ifndef	CONFIG_MCST
 		entry->size = CS4281_BA1_SIZE;
+#else
+		entry->size = pci_resource_len(chip->pci, 1);
+#endif
 	}
 }
 
@@ -1305,7 +1309,12 @@ static int snd_cs4281_create(struct snd_card *card,
 	}
 	chip->dual_codec = dual_codec;
 
+#ifdef	CONFIG_MCST
+	/* l-gpio uses BAR1 */
+	err = pcim_iomap_regions(pci, 0x1, "CS4281");
+#else
 	err = pcim_iomap_regions(pci, 0x03, "CS4281"); /* 2 BARs */
+#endif
 	if (err < 0)
 		return err;
 	chip->ba0_addr = pci_resource_start(pci, 0);

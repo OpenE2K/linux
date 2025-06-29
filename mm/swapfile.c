@@ -2541,6 +2541,9 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	vfree(swap_map);
 	kvfree(cluster_info);
 	kvfree(frontswap_map);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	kfree(swap_sanit_page);
+#endif
 	/* Destroy swap account information */
 	swap_cgroup_swapoff(p->type);
 	exit_swap_address_space(p->type);
@@ -3078,6 +3081,13 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		error = -EINVAL;
 		goto bad_swap_unlock_inode;
 	}
+
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	if (mem_san) {
+		swap_sanit_page = alloc_page(GFP_KERNEL);
+		memset(page_address(swap_sanit_page), SANITIZE_VALUE, PAGE_SIZE);
+	}
+#endif
 
 	/* OK, set up the swap map and apply the bad block list */
 	swap_map = vzalloc(maxpages);

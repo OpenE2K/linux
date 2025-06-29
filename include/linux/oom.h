@@ -112,4 +112,9 @@ extern void oom_killer_enable(void);
 
 extern struct task_struct *find_lock_task_mm(struct task_struct *p);
 
+#ifdef CONFIG_MCST
+extern int oom_limit(struct task_struct *p);
+extern void set_oom_kill_time(void);
+#endif /* CONFIG_MCST */
+
 #endif /* _INCLUDE_LINUX_OOM_H */

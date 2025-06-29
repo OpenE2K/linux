@@ -4,6 +4,10 @@
 #include <core/option.h>
 #include <core/subdev.h>
 
+#ifdef CONFIG_E2K
+#pragma diag_suppress 3302
+#endif
+
 int nvkm_firmware_get(const struct nvkm_subdev *, const char *fwname, int ver,
 		      const struct firmware **);
 void nvkm_firmware_put(const struct firmware *);

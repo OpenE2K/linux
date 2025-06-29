@@ -2,3 +2,5 @@
 net_names.h
 capability_names.h
 rlim_names.h
+rlim_names_orig.h
+rlim_names_arch.h

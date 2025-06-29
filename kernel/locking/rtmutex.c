@@ -1161,6 +1161,10 @@ try_to_take_rt_mutex(struct rt_mutex_base *lock, struct task_struct *task,
 	raw_spin_unlock(&task->pi_lock);
 
 takeit:
+#if defined(CONFIG_MCST)
+	lock->mux_ip = _RET_IP_;
+#endif
+
 	/*
 	 * This either preserves the RT_MUTEX_HAS_WAITERS bit if there
 	 * are still waiters or clears it.
@@ -1376,7 +1380,14 @@ static int __sched rt_mutex_slowtrylock(struct rt_mutex_base *lock)
 static __always_inline int __rt_mutex_trylock(struct rt_mutex_base *lock)
 {
 	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current)))
+#ifdef CONFIG_MCST
+	{
+		lock->mux_ip = _RET_IP_;
+#endif
 		return 1;
+#ifdef CONFIG_MCST
+	}
+#endif
 
 	return rt_mutex_slowtrylock(lock);
 }
@@ -1613,7 +1624,15 @@ static int __sched rt_mutex_slowlock_block(struct rt_mutex_base *lock,
 		raw_spin_unlock_irq(&lock->wait_lock);
 
 		if (!owner || !rtmutex_spin_on_owner(lock, waiter, owner))
+#ifdef CONFIG_MCST
+		{		
+			current->wait_on_rtmutex = lock;
+#endif
 			schedule();
+#ifdef CONFIG_MCST
+			current->wait_on_rtmutex = NULL;
+		}
+#endif
 
 		raw_spin_lock_irq(&lock->wait_lock);
 		set_current_state(state);
@@ -1757,7 +1776,14 @@ static __always_inline int __rt_mutex_lock(struct rt_mutex_base *lock,
 					   unsigned int state)
 {
 	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current)))
+#ifdef CONFIG_MCST
+	{
+		lock->mux_ip = _RET_IP_;
+#endif
 		return 0;
+#ifdef CONFIG_MCST
+	}
+#endif
 
 	return rt_mutex_slowlock(lock, NULL, state);
 }
@@ -1803,7 +1829,15 @@ static void __sched rtlock_slowlock_locked(struct rt_mutex_base *lock)
 		raw_spin_unlock_irq(&lock->wait_lock);
 
 		if (!owner || !rtmutex_spin_on_owner(lock, &waiter, owner))
+#ifdef CONFIG_MCST
+		{
+			current->wait_on_rtmutex = lock;
+#endif
 			schedule_rtlock();
+#ifdef CONFIG_MCST
+			current->wait_on_rtmutex = NULL;
+		}
+#endif
 
 		raw_spin_lock_irq(&lock->wait_lock);
 		set_current_state(TASK_RTLOCK_WAIT);

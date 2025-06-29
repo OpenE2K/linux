@@ -10,7 +10,8 @@
 #include <asm/byteorder.h>
 
 #define __get_unaligned_t(type, ptr) ({						\
-	const struct { type x; } __packed *__pptr = (typeof(__pptr))(ptr);	\
+	UNALIGNED_LD const struct { type x; } __packed *__pptr = \
+			(UNALIGNED_LD typeof(__pptr))(ptr);	\
 	__pptr->x;								\
 })
 

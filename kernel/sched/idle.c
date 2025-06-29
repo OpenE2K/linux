@@ -58,7 +58,14 @@ static noinline int __cpuidle cpu_idle_poll(void)
 
 	while (!tif_need_resched() &&
 	       (cpu_idle_force_poll || tick_check_broadcast_expired()))
+#ifdef CONFIG_MCST_RT
+	{
+		idle_check_delayed_works(smp_processor_id());
+#endif
 		cpu_relax();
+#ifdef CONFIG_MCST_RT
+	}
+#endif
 
 	ct_idle_exit();
 	start_critical_timings();
@@ -186,6 +193,9 @@ static void cpuidle_idle_call(void)
 	 */
 
 	if (cpuidle_not_available(drv, dev)) {
+#if defined(CONFIG_E90S)
+		if (e90s_get_cpu_type() != E90S_CPU_R1000)
+#endif /* CONFIG_E90S */
 		tick_nohz_idle_stop_tick();
 
 		default_idle_call();
@@ -277,10 +287,24 @@ static void do_idle(void)
 	tick_nohz_idle_enter();
 
 	while (!need_resched()) {
+#ifdef CONFIG_MCST
+			long long next_tm;
+
+			next_tm = per_cpu(next_rt_intr, smp_processor_id());
+			if (next_tm > 1) {
+				continue;
+			}
+#endif
+
 		rmb();
 
 		local_irq_disable();
-
+#ifdef CONFIG_MCST
+		if (need_resched()) {
+			local_irq_enable();
+			break;
+		}
+#endif
 		if (cpu_is_offline(cpu)) {
 			tick_nohz_idle_stop_tick();
 			cpuhp_report_idle_dead();
@@ -394,6 +418,9 @@ EXPORT_SYMBOL_GPL(play_idle_precise);
 
 void cpu_startup_entry(enum cpuhp_state state)
 {
+#if defined(CONFIG_MCST) && defined(CONFIG_WATCH_PREEMPT)
+	this_cpu_or(nowatch_set, NEVER_PWATCH);
+#endif
 	current->flags |= PF_IDLE;
 	arch_cpu_idle_prepare();
 	cpuhp_online_idle(state);

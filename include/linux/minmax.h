@@ -2,6 +2,9 @@
 #ifndef _LINUX_MINMAX_H
 #define _LINUX_MINMAX_H
 
+#if defined(CONFIG_MCST) && defined(__LCC__)
+#include <linux/bug.h>
+#endif
 #include <linux/build_bug.h>
 #include <linux/compiler.h>
 #include <linux/const.h>
@@ -44,12 +47,21 @@
 
 #define __cmp(op, x, y)	((x) __cmp_op_##op (y) ? (x) : (y))
 
+#if defined(CONFIG_MCST) && defined(__LCC__)
+/* bug #156246 */
+#define __cmp_once(op, x, y, unique_x, unique_y) ({	\
+	typeof(x) unique_x = (x);			\
+	typeof(y) unique_y = (y);			\
+	BUG_ON(!__types_ok(x, y));			\
+	__cmp(op, unique_x, unique_y); })
+#else
 #define __cmp_once(op, x, y, unique_x, unique_y) ({	\
 		typeof(x) unique_x = (x);		\
 		typeof(y) unique_y = (y);		\
 		static_assert(__types_ok(x, y),		\
 			#op "(" #x ", " #y ") signedness error, fix types or consider u" #op "() before " #op "_t()"); \
 		__cmp(op, unique_x, unique_y); })
+#endif
 
 #define __careful_cmp(op, x, y)					\
 	__builtin_choose_expr(__is_constexpr((x) - (y)),	\

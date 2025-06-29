@@ -7,6 +7,11 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/sched.h>
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+#include <linux/pagemap.h>
+#include <linux/swap.h>
+#include <linux/bio.h>
+#endif
 
 static struct kmem_cache *double_free_cache;
 static struct kmem_cache *a_cache;
@@ -87,6 +92,14 @@ static void lkdtm_WRITE_AFTER_FREE(void)
 		pr_info("Hmm, didn't get the same memory range.\n");
 }
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+static void end_bio_sntz2(struct bio *bio)
+{
+	unlock_page(bio->bi_io_vec->bv_page);
+	bio_put(bio);
+}
+#endif
+
 static void lkdtm_READ_AFTER_FREE(void)
 {
 	int *base, *val, saw;
@@ -123,11 +136,64 @@ static void lkdtm_READ_AFTER_FREE(void)
 	if (saw != *val) {
 		/* Good! Poisoning happened, so declare a win. */
 		pr_info("Memory correctly poisoned (%x)\n", saw);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	{
+		int got_val;
+		struct page *page;
+		struct bio *bio;
+		struct block_device *bdev;
+
+		if (swap_sanit_page == 0) {
+			pr_info("lkdtm: swap_sanit_page is not set\n");
+			goto out;
+		}
+		if (test_sntz_sect == 0) {
+			pr_info("lkdtm: swap test_sntz_sect is not set\n");
+			goto out;
+		}
+
+		page = alloc_page(GFP_KERNEL);
+		if (page == NULL) {
+			pr_info("lkdtm_READ_AFTER_FREE ERR page == NULL\n");
+			goto out;
+		}
+
+		bio = bio_alloc(bdev, 1, REQ_OP_READ | REQ_SYNC, GFP_NOIO);
+		if (bio == NULL) {
+			pr_info("lkdtm_READ_AFTER_FREE ERR bio == NULL\n");
+			__free_page(page);
+			goto out;
+		}
+
+		lock_page(page);
+
+		bio->bi_iter.bi_sector = test_sntz_sect;
+		bio_add_page(bio, page, PAGE_SIZE, 0);
+		bio->bi_end_io = end_bio_sntz2;
+
+		submit_bio(bio);
+		wait_on_page_locked(page);
+
+		got_val = ((u32 *)page_address(page))[0];
+		pr_info("lkdtm_READ_AFTER_FREE bi_sector=0x%llx\n", bio->bi_iter.bi_sector);
+		if (got_val == SANITIZE_VALUE)
+			pr_info("Freed swap page contains SANITIZE_VALUE=%x. PASS\n", got_val);
+		else	
+			pr_info("Freed swap page has 0x%x != SANITIZE_VALUE=0x%x. FAIL\n",
+				got_val, SANITIZE_VALUE);
+
+		__free_page(page);
+		goto out;
+	}
+#endif
 	} else {
 		pr_err("FAIL: Memory was not poisoned!\n");
 		pr_expected_config_param(CONFIG_INIT_ON_FREE_DEFAULT_ON, "init_on_free");
 	}
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	out:
+#endif
 	kfree(val);
 }
 

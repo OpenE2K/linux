@@ -15,13 +15,35 @@
 #include "cmd.h"
 #include "ibi.h"
 
+#ifdef CONFIG_E2K
+#include <linux/printk.h>
+#endif
 
 /*
  * PIO Access Area
  */
+#ifdef CONFIG_E2K
 
+#ifdef I3C_PCI_DEBUG
+
+#define pio_reg_read(r)	\
+({										\
+	u32 _r__ = readl(hci->PIO_regs + (PIO_##r));				\
+	pr_info("%s: read pio reg %#x = %#08x\n", __func__, (PIO_##r), _r__);	\
+	_r__;									\
+})
+#define pio_reg_write(r, v)	{pr_info("%s: write pio reg %#x = %#llx\n",	\
+				  __func__, (PIO_##r), (u64)(v));		\
+				 writel(v, hci->PIO_regs + (PIO_##r));		\
+				}
+#else
 #define pio_reg_read(r)		readl(hci->PIO_regs + (PIO_##r))
 #define pio_reg_write(r, v)	writel(v, hci->PIO_regs + (PIO_##r))
+#endif
+#else /* !CONFIG_E2K */
+#define pio_reg_read(r)		readl(hci->PIO_regs + (PIO_##r))
+#define pio_reg_write(r, v)	writel(v, hci->PIO_regs + (PIO_##r))
+#endif
 
 #define PIO_COMMAND_QUEUE_PORT		0x00
 #define PIO_RESPONSE_QUEUE_PORT		0x04

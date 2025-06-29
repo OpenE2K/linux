@@ -71,12 +71,24 @@ struct io_tlb_slot {
 static bool swiotlb_force_bounce;
 static bool swiotlb_force_disable;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+struct io_tlb_mem __io_tlb_default_mem[MAX_NUMNODES];
+#define io_tlb_default_mem	__io_tlb_default_mem[node]
+#else
 struct io_tlb_mem io_tlb_default_mem;
+#endif
 
 phys_addr_t swiotlb_unencrypted_base;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static unsigned long __default_nslabs[MAX_NUMNODES];
+#define default_nslabs	__default_nslabs[node]
+static unsigned long __default_nareas[MAX_NUMNODES];
+#define default_nareas	__default_nareas[node]
+#else
 static unsigned long default_nslabs = IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT;
 static unsigned long default_nareas;
+#endif
 
 /**
  * struct io_tlb_area - IO TLB memory area descriptor
@@ -104,7 +116,11 @@ struct io_tlb_area {
  *
  * Return true if default_nslabs is rounded up.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static bool round_up_default_nslabs(int node)
+#else
 static bool round_up_default_nslabs(void)
+#endif
 {
 	if (!default_nareas)
 		return false;
@@ -125,7 +141,11 @@ static bool round_up_default_nslabs(void)
  * The default size of the memory pool may also change to meet minimum area
  * size requirements.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static void swiotlb_adjust_nareas(unsigned int nareas, int node)
+#else
 static void swiotlb_adjust_nareas(unsigned int nareas)
+#endif
 {
 	if (!nareas)
 		nareas = 1;
@@ -135,7 +155,11 @@ static void swiotlb_adjust_nareas(unsigned int nareas)
 	default_nareas = nareas;
 
 	pr_info("area num %d.\n", nareas);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (round_up_default_nslabs(node))
+#else
 	if (round_up_default_nslabs())
+#endif
 		pr_info("SWIOTLB bounce buffer size roundup to %luMB",
 			(default_nslabs << IO_TLB_SHIFT) >> 20);
 }
@@ -160,15 +184,33 @@ static unsigned int limit_nareas(unsigned int nareas, unsigned long nslots)
 static int __init
 setup_io_tlb_npages(char *str)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
+#endif
+
 	if (isdigit(*str)) {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		SWIOTLB_NODE_CYCLE_BEGIN
+#endif
 		/* avoid tail segment of size < IO_TLB_SEGSIZE */
 		default_nslabs =
 			ALIGN(simple_strtoul(str, &str, 0), IO_TLB_SEGSIZE);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		SWIOTLB_NODE_CYCLE_END
+#endif
 	}
 	if (*str == ',')
 		++str;
 	if (isdigit(*str))
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	{
+		SWIOTLB_NODE_CYCLE_BEGIN
+		swiotlb_adjust_nareas(simple_strtoul(str, &str, 0), node);
+		SWIOTLB_NODE_CYCLE_END
+	}
+#else
 		swiotlb_adjust_nareas(simple_strtoul(str, &str, 0));
+#endif
 	if (*str == ',')
 		++str;
 	if (!strcmp(str, "force"))
@@ -180,7 +222,11 @@ setup_io_tlb_npages(char *str)
 }
 early_param("swiotlb", setup_io_tlb_npages);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+unsigned int swiotlb_max_segment(int node)
+#else
 unsigned int swiotlb_max_segment(void)
+#endif
 {
 	if (!io_tlb_default_mem.nslabs)
 		return 0;
@@ -188,12 +234,20 @@ unsigned int swiotlb_max_segment(void)
 }
 EXPORT_SYMBOL_GPL(swiotlb_max_segment);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+unsigned long swiotlb_size_or_default(int node)
+#else
 unsigned long swiotlb_size_or_default(void)
+#endif
 {
 	return default_nslabs << IO_TLB_SHIFT;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void __init swiotlb_adjust_size(unsigned long size, int node)
+#else
 void __init swiotlb_adjust_size(unsigned long size)
+#endif
 {
 	/*
 	 * If swiotlb parameter has not been specified, give a chance to
@@ -205,14 +259,26 @@ void __init swiotlb_adjust_size(unsigned long size)
 
 	size = ALIGN(size, IO_TLB_SIZE);
 	default_nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	if (round_up_default_nslabs(node))
+#else
 	if (round_up_default_nslabs())
+#endif
 		size = default_nslabs << IO_TLB_SHIFT;
 	pr_info("SWIOTLB bounce buffer size adjusted to %luMB", size >> 20);
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void swiotlb_print_info(int node)
+#else
 void swiotlb_print_info(void)
+#endif
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
+
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	pr_info("swiotlb node%d:\n", node);
+#endif
 
 	if (!mem->nslabs) {
 		pr_warn("No low mem\n");
@@ -267,7 +333,11 @@ static void *swiotlb_mem_remap(struct io_tlb_mem *mem, unsigned long bytes)
  * call SWIOTLB when the operations are possible.  It needs to be called
  * before the SWIOTLB memory is used.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void __init swiotlb_update_mem_attributes(int node)
+#else
 void __init swiotlb_update_mem_attributes(void)
+#endif
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
 	void *vaddr;
@@ -360,8 +430,13 @@ static void __init *swiotlb_memblock_alloc(unsigned long nslabs,
  * Statically reserve bounce buffer space and initialize bounce buffer data
  * structures for the software IO TLB used to implement the DMA API.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
+		int (*remap)(void *tlb, unsigned long nslabs), int node)
+#else
 void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		int (*remap)(void *tlb, unsigned long nslabs))
+#endif
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
 	unsigned long nslabs;
@@ -375,13 +450,18 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 		return;
 
 	if (!default_nareas)
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		swiotlb_adjust_nareas(num_possible_cpus(), node);
+#else
 		swiotlb_adjust_nareas(num_possible_cpus());
+#endif
 
 	nslabs = default_nslabs;
 	nareas = limit_nareas(default_nareas, nslabs);
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
 		if (nslabs <= IO_TLB_MIN_SLABS)
 			return;
+
 		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
 		nareas = limit_nareas(nareas, nslabs);
 	}
@@ -411,12 +491,24 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 				default_nareas);
 
 	if (flags & SWIOTLB_VERBOSE)
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		swiotlb_print_info(node);
+#else
 		swiotlb_print_info();
+#endif
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void __init swiotlb_init(bool addressing_limit, unsigned int flags, int node)
+#else
 void __init swiotlb_init(bool addressing_limit, unsigned int flags)
+#endif
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	swiotlb_init_remap(addressing_limit, flags, NULL, node);
+#else
 	swiotlb_init_remap(addressing_limit, flags, NULL);
+#endif
 }
 
 /*
@@ -424,8 +516,13 @@ void __init swiotlb_init(bool addressing_limit, unsigned int flags)
  * initialize the swiotlb later using the slab allocator if needed.
  * This should be just like above, but with some error catching.
  */
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+int swiotlb_init_late(size_t size, gfp_t gfp_mask,
+		int (*remap)(void *tlb, unsigned long nslabs), int node)
+#else
 int swiotlb_init_late(size_t size, gfp_t gfp_mask,
 		int (*remap)(void *tlb, unsigned long nslabs))
+#endif
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
 	unsigned long nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
@@ -434,20 +531,34 @@ int swiotlb_init_late(size_t size, gfp_t gfp_mask,
 	unsigned int order, area_order;
 	bool retried = false;
 	int rc = 0;
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct page *p;
+#endif
 
 	if (swiotlb_force_disable)
 		return 0;
 
 	if (!default_nareas)
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		swiotlb_adjust_nareas(num_possible_cpus(), node);
+#else
 		swiotlb_adjust_nareas(num_possible_cpus());
+#endif
 
 retry:
 	order = get_order(nslabs << IO_TLB_SHIFT);
 	nslabs = SLABS_PER_PAGE << order;
 
 	while ((SLABS_PER_PAGE << order) > IO_TLB_MIN_SLABS) {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+		struct page *p = alloc_pages_node(node, gfp_mask | __GFP_THISNODE | __GFP_NOWARN,
+						  order);
+		vstart = p ? page_address(p) : NULL;
+
+#else
 		vstart = (void *)__get_free_pages(gfp_mask | __GFP_NOWARN,
 						  order);
+#endif
 		if (vstart)
 			break;
 		order--;
@@ -477,13 +588,24 @@ retry:
 
 	nareas = limit_nareas(default_nareas, nslabs);
 	area_order = get_order(array_size(sizeof(*mem->areas), nareas));
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	p = alloc_pages_node(node, GFP_KERNEL | __GFP_ZERO, area_order);
+	mem->areas = p ? page_address(p) : NULL;
+#else
 	mem->areas = (struct io_tlb_area *)
 		__get_free_pages(GFP_KERNEL | __GFP_ZERO, area_order);
+#endif
 	if (!mem->areas)
 		goto error_area;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	p = alloc_pages_node(node, GFP_KERNEL | __GFP_ZERO,
+		get_order(array_size(sizeof(*mem->slots), nslabs)));
+	mem->slots = p ? page_address(p) : NULL;
+#else
 	mem->slots = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
 		get_order(array_size(sizeof(*mem->slots), nslabs)));
+#endif
 	if (!mem->slots)
 		goto error_slots;
 
@@ -492,7 +614,11 @@ retry:
 	swiotlb_init_io_tlb_mem(mem, virt_to_phys(vstart), nslabs, 0, true,
 				nareas);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	swiotlb_print_info(node);
+#else
 	swiotlb_print_info();
+#endif
 	return 0;
 
 error_slots:
@@ -502,7 +628,11 @@ error_area:
 	return -ENOMEM;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void __init swiotlb_exit(int node)
+#else
 void __init swiotlb_exit(void)
+#endif
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
 	unsigned long tbl_vaddr;
@@ -551,7 +681,11 @@ static unsigned int swiotlb_align_offset(struct device *dev, u64 addr)
 static void swiotlb_bounce(struct device *dev, phys_addr_t tlb_addr, size_t size,
 			   enum dma_data_direction dir)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct io_tlb_mem *mem = &dev->dma_io_tlb_mem[swiotlb_node(dev)];
+#else
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
+#endif
 	int index = (tlb_addr - mem->start) >> IO_TLB_SHIFT;
 	phys_addr_t orig_addr = mem->slots[index].orig_addr;
 	size_t alloc_size = mem->slots[index].alloc_size;
@@ -648,7 +782,11 @@ static int swiotlb_do_find_slots(struct device *dev, int area_index,
 		phys_addr_t orig_addr, size_t alloc_size,
 		unsigned int alloc_align_mask)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct io_tlb_mem *mem = &dev->dma_io_tlb_mem[swiotlb_node(dev)];
+#else
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
+#endif
 	struct io_tlb_area *area = mem->areas + area_index;
 	unsigned long boundary_mask = dma_get_seg_boundary(dev);
 	dma_addr_t tbl_dma_addr =
@@ -744,7 +882,11 @@ found:
 static int swiotlb_find_slots(struct device *dev, phys_addr_t orig_addr,
 		size_t alloc_size, unsigned int alloc_align_mask)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct io_tlb_mem *mem = &dev->dma_io_tlb_mem[swiotlb_node(dev)];
+#else
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
+#endif
 	int start = raw_smp_processor_id() & (mem->nareas - 1);
 	int i = start, index;
 
@@ -775,7 +917,11 @@ phys_addr_t swiotlb_tbl_map_single(struct device *dev, phys_addr_t orig_addr,
 		unsigned int alloc_align_mask, enum dma_data_direction dir,
 		unsigned long attrs)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct io_tlb_mem *mem = &dev->dma_io_tlb_mem[swiotlb_node(dev)];
+#else
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
+#endif
 	unsigned int offset = swiotlb_align_offset(dev, orig_addr);
 	unsigned int i;
 	int index;
@@ -827,7 +973,11 @@ phys_addr_t swiotlb_tbl_map_single(struct device *dev, phys_addr_t orig_addr,
 
 static void swiotlb_release_slots(struct device *dev, phys_addr_t tlb_addr)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct io_tlb_mem *mem = &dev->dma_io_tlb_mem[swiotlb_node(dev)];
+#else
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
+#endif
 	unsigned long flags;
 	unsigned int offset = swiotlb_align_offset(dev, tlb_addr);
 	int index = (tlb_addr - offset - mem->start) >> IO_TLB_SHIFT;
@@ -973,8 +1123,12 @@ static int io_tlb_used_get(void *data, u64 *val)
 }
 DEFINE_DEBUGFS_ATTRIBUTE(fops_io_tlb_used, io_tlb_used_get, NULL, "%llu\n");
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static void swiotlb_create_debugfs_files(struct io_tlb_mem *mem, const char *dirname, int node)
+#else
 static void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
 					 const char *dirname)
+#endif
 {
 	mem->debugfs = debugfs_create_dir(dirname, io_tlb_default_mem.debugfs);
 	if (!mem->nslabs)
@@ -987,7 +1141,17 @@ static void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
 
 static int __init __maybe_unused swiotlb_create_default_debugfs(void)
 {
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	int node;
+	char fname[16];
+
+	SWIOTLB_NODE_CYCLE_BEGIN
+	sprintf(fname, "swiotlb%d", node);
+	swiotlb_create_debugfs_files(&io_tlb_default_mem, fname, node);
+	SWIOTLB_NODE_CYCLE_END
+#else
 	swiotlb_create_debugfs_files(&io_tlb_default_mem, "swiotlb");
+#endif
 	return 0;
 }
 
@@ -1110,3 +1274,14 @@ static int __init rmem_swiotlb_setup(struct reserved_mem *rmem)
 
 RESERVEDMEM_OF_DECLARE(dma, "restricted-dma-pool", rmem_swiotlb_setup);
 #endif /* CONFIG_DMA_RESTRICTED_POOL */
+
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static int __init swiotlb_init_internals(void)
+{
+	for (int i = 0; i < MAX_NUMNODES; i++)
+		__default_nslabs[i] = (IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT);
+
+	return 0;
+}
+subsys_initcall(swiotlb_init_internals)
+#endif

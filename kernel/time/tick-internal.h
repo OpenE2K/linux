@@ -190,7 +190,11 @@ void hrtimers_resume_local(void);
  * shrinks, so values greater than 8 overflow 32bits when
  * HZ=100.
  */
-#if HZ < 34
+#if HZ < 10	/* only under CONFIG_MCST for simulators & prototypes */
+#define JIFFIES_SHIFT	4
+#elif HZ < 16	/* only under CONFIG_MCST for simulators & prototypes */
+#define JIFFIES_SHIFT	5
+#elif HZ < 34
 #define JIFFIES_SHIFT	6
 #elif HZ < 67
 #define JIFFIES_SHIFT	7

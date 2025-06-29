@@ -1082,7 +1082,11 @@ int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	int err, is_udplite = IS_UDPLITE(sk);
 	int corkreq = udp_test_bit(CORK, sk) || msg->msg_flags & MSG_MORE;
 	int (*getfrag)(void *, char *, int, int, int, struct sk_buff *);
+#ifdef CONFIG_MCST
+	struct sk_buff *skb = NULL;
+#else
 	struct sk_buff *skb;
+#endif
 	struct ip_options_data opt_copy;
 
 	if (len > 0xFFFF)
@@ -2117,13 +2121,17 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 	int drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	struct udp_sock *up = udp_sk(sk);
 	int is_udplite = IS_UDPLITE(sk);
+#ifdef CONFIG_MCST
+	unsigned long flags;
+	int napi_work = 0;
+#endif
 
 	/*
 	 *	Charge it to the socket, dropping if the queue is full.
 	 */
 	if (!xfrm4_policy_check(sk, XFRM_POLICY_IN, skb)) {
 		drop_reason = SKB_DROP_REASON_XFRM_POLICY;
-		goto drop;
+ 		goto drop;
 	}
 	nf_reset_ct(skb);
 
@@ -2211,6 +2219,10 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 
 	ipv4_pktinfo_prepare(sk, skb, true);
 	return __udp_queue_rcv_skb(sk, skb);
+#ifdef CONFIG_MCST
+	if (napi_work)
+		local_irq_restore(flags);
+#endif
 
 csum_error:
 	drop_reason = SKB_DROP_REASON_UDP_CSUM;

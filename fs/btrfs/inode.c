@@ -1936,7 +1936,11 @@ static noinline int run_delalloc_nocow(struct btrfs_inode *inode,
 		struct btrfs_file_extent_item *fi;
 		struct extent_buffer *leaf;
 		u64 extent_end;
+#ifdef CONFIG_MCST
+		u64 ram_bytes = 0;
+#else
 		u64 ram_bytes;
+#endif
 		u64 nocow_end;
 		int extent_type;
 
@@ -7550,7 +7554,11 @@ static int btrfs_get_blocks_direct_write(struct extent_map **map,
 	const bool nowait = (iomap_flags & IOMAP_NOWAIT);
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
 	struct extent_map *em = *map;
+#ifdef CONFIG_MCST
+	int type = BTRFS_ORDERED_REGULAR;
+#else
 	int type;
+#endif
 	u64 block_start, orig_start, orig_block_len, ram_bytes;
 	struct btrfs_block_group *bg;
 	bool can_nocow = false;
@@ -10627,7 +10635,11 @@ ssize_t btrfs_encoded_read(struct kiocb *iocb, struct iov_iter *iter,
 	struct extent_io_tree *io_tree = &inode->io_tree;
 	ssize_t ret;
 	size_t count = iov_iter_count(iter);
+#ifdef CONFIG_MCST
+	u64 start, lockend, disk_bytenr, disk_io_size = 0;
+#else
 	u64 start, lockend, disk_bytenr, disk_io_size;
+#endif
 	struct extent_state *cached_state = NULL;
 	struct extent_map *em;
 	bool unlocked = false;
@@ -11497,6 +11509,9 @@ static const struct file_operations btrfs_dir_file_operations = {
 	.unlocked_ioctl	= btrfs_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= btrfs_compat_ioctl,
+#endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl = btrfs_protected_ioctl,
 #endif
 	.release        = btrfs_release_file,
 	.fsync		= btrfs_sync_file,

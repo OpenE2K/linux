@@ -23,7 +23,7 @@ config VFIO_PCI
 if VFIO_PCI
 config VFIO_PCI_VGA
 	bool "Generic VFIO PCI support for VGA devices"
-	depends on X86 && VGA_ARB
+	depends on (X86 || E2K)  && VGA_ARB
 	help
 	  Support for VGA extension to VFIO PCI.  This exposes an additional
 	  region on VGA devices for accessing legacy VGA addresses used by

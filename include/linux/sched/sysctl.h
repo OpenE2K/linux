@@ -6,6 +6,10 @@
 
 struct ctl_table;
 
+#if defined(CONFIG_MCST) && defined(CONFIG_SYSCTL)
+extern unsigned int sysctl_sched_min_ns_no_migrate;
+#endif
+
 #ifdef CONFIG_DETECT_HUNG_TASK
 /* used for hung_task and block/ */
 extern unsigned long sysctl_hung_task_timeout_secs;

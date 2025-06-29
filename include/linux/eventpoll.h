@@ -75,11 +75,19 @@ epoll_put_uevent(__poll_t revents, __u64 data,
 		 struct epoll_event __user *uevent);
 #else
 static inline struct epoll_event __user *
+# if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+epoll_put_uevent(__poll_t revents, void *data,
+# else
 epoll_put_uevent(__poll_t revents, __u64 data,
+# endif
 		 struct epoll_event __user *uevent)
 {
 	if (__put_user(revents, &uevent->events) ||
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	    __put_user((__u64) data, (__u64 *) &uevent->data))
+#else
 	    __put_user(data, &uevent->data))
+#endif
 		return NULL;
 
 	return uevent+1;

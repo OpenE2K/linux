@@ -100,6 +100,10 @@ extern struct cpumask __cpu_dying_mask;
 #define cpu_active_mask   ((const struct cpumask *)&__cpu_active_mask)
 #define cpu_dying_mask    ((const struct cpumask *)&__cpu_dying_mask)
 
+#ifdef CONFIG_MCST_4RT
+extern struct cpumask *rt_cpu_mask;
+#endif
+
 extern atomic_t __num_online_cpus;
 
 extern cpumask_t cpus_booted_once_mask;
@@ -1050,6 +1054,13 @@ static inline bool cpu_dying(unsigned int cpu)
 	return cpumask_test_cpu(cpu, cpu_dying_mask);
 }
 
+#ifdef CONFIG_MCST_4RT
+static inline bool rt_cpu(unsigned int cpu)
+{
+	return cpumask_test_cpu((cpu), rt_cpu_mask);
+}
+#endif
+
 #else
 
 #define num_online_cpus()	1U
@@ -1081,6 +1092,13 @@ static inline bool cpu_dying(unsigned int cpu)
 {
 	return false;
 }
+
+#ifdef CONFIG_MCST_4RT
+static inline bool rt_cpu(unsigned int cpu)
+{
+	return false;
+}
+#endif
 
 #endif /* NR_CPUS > 1 */
 

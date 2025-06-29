@@ -167,6 +167,10 @@ struct netns_ipv4 {
 	u8 sysctl_tcp_tso_rtt_log;
 	u8 sysctl_tcp_autocorking;
 	u8 sysctl_tcp_reflect_tos;
+#ifdef CONFIG_MCST
+	int sysctl_tcp_no_delayed_ack;
+	int sysctl_tcp_fast_tlp;
+#endif
 	int sysctl_tcp_invalid_ratelimit;
 	int sysctl_tcp_pacing_ss_ratio;
 	int sysctl_tcp_pacing_ca_ratio;

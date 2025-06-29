@@ -1053,11 +1053,43 @@ retry_get_irq_gpio:
  *
  * Must be called during probe
  */
+#ifdef CONFIG_MCST
+#define i2c_quirk_exceeded(val, quirk) ((quirk) && ((val) > (quirk)))
+#endif /* CONFIG_MCST */
+
 static void goodix_read_config(struct goodix_ts_data *ts)
 {
 	int x_max, y_max;
 	int error;
+#ifdef CONFIG_MCST
+	const struct i2c_adapter_quirks *q = ts->client->adapter->quirks;
 
+	if (i2c_quirk_exceeded(ts->chip->config_len, q->max_read_len)) {
+		u16 temp_addr = ts->chip->config_addr;
+		u16 len = q->max_read_len;
+		int rem_len = ts->chip->config_len;
+		int cycles;
+		int i;
+		if (rem_len % len == 0) {
+			cycles = rem_len / len;
+		} else {
+			cycles = (rem_len / len) + 1;
+		}
+		for (i = 0; i < cycles; i++) {
+			error = goodix_i2c_read(ts->client, temp_addr,
+					ts->config + (len * i), (rem_len > len) ? len : rem_len);
+			if (error) {
+				dev_warn(&ts->client->dev, "Error reading config: %d\n",
+					 error);
+				ts->int_trigger_type = GOODIX_INT_TRIGGER;
+				ts->max_touch_num = GOODIX_MAX_CONTACTS;
+				return;
+			}
+			temp_addr += len;
+			rem_len -= len;
+		}
+	} else {
+#endif /* CONFIG_MCST */
 	/*
 	 * On controllers where we need to upload the firmware
 	 * (controllers without flash) ts->config already has the config
@@ -1072,6 +1104,9 @@ static void goodix_read_config(struct goodix_ts_data *ts)
 			return;
 		}
 	}
+#ifdef CONFIG_MCST
+	}
+#endif /* CONFIG_MCST */
 
 	ts->int_trigger_type = ts->config[TRIGGER_LOC] & 0x03;
 	ts->max_touch_num = ts->config[MAX_CONTACTS_LOC] & 0x0f;
@@ -1367,6 +1402,11 @@ reset:
 		if (error)
 			return error;
 	}
+
+#ifdef CONFIG_MCST
+	if (ts->gpiod_int)
+		client->irq = gpiod_to_irq(ts->gpiod_int);
+#endif
 
 	error = goodix_i2c_test(client);
 	if (error) {

@@ -55,6 +55,12 @@
 static int sysctl_panic_on_oom;
 static int sysctl_oom_kill_allocating_task;
 static int sysctl_oom_dump_tasks = 1;
+#if defined(CONFIG_MCST) && defined(CONFIG_SYSCTL)
+#ifdef CONFIG_SYSCTL
+static int sysctl_oom_kill_root_task = 0;
+#endif
+static int sysctl_oom_no_create_new_task = 1;
+#endif /* CONFIG_MCST */
 
 /*
  * Serializes oom killer invocations (out_of_memory()) from all contexts to
@@ -157,6 +163,39 @@ static inline bool is_sysrq_oom(struct oom_control *oc)
 {
 	return oc->order == -1;
 }
+
+#ifdef CONFIG_MCST
+# define OOM_PAUSE 10			/* time no fork after oom_killer*/
+struct timespec64 time_oom_last = {0, 0};
+
+void set_oom_kill_time(void)
+{
+	ktime_get_real_ts64(&time_oom_last);
+}
+
+int oom_limit(struct task_struct *p)
+{
+	struct timespec64 now;
+
+#if defined(CONFIG_SYSCTL)
+	if (!sysctl_oom_no_create_new_task)
+		return 0;
+#endif
+
+	if (!from_kuid(&init_user_ns, task_uid(p)))
+		return 0;
+
+	ktime_get_real_ts64(&now);
+
+	if (!(time_oom_last.tv_sec == 0 && time_oom_last.tv_nsec == 0) &&
+		(now.tv_sec > time_oom_last.tv_sec) &&
+		now.tv_sec  < (time_oom_last.tv_sec + OOM_PAUSE))
+		return 1;
+
+	return 0;
+}
+
+#endif /* CONFIG_MCST */
 
 /* return true if the task is not adequate as candidate victim task. */
 static bool oom_unkillable_task(struct task_struct *p)
@@ -726,6 +765,22 @@ static struct ctl_table vm_oom_kill_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_MCST
+	{
+		.procname	= "oom_kill_root_task",
+		.data		= &sysctl_oom_kill_root_task,
+		.maxlen		= sizeof(sysctl_oom_kill_root_task),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "oom_no_create_task",
+		.data		= &sysctl_oom_no_create_new_task,
+		.maxlen		= sizeof(sysctl_oom_no_create_new_task),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif /* CONFIG_MCST */
 	{}
 };
 #endif
@@ -1032,6 +1087,10 @@ static void oom_kill_process(struct oom_control *oc, const char *message)
 	}
 	task_unlock(victim);
 
+#ifdef CONFIG_MCST
+	set_oom_kill_time();
+#endif /* CONFIG_MCST */
+
 	if (__ratelimit(&oom_rs))
 		dump_header(oc, victim);
 
@@ -1162,6 +1221,9 @@ bool out_of_memory(struct oom_control *oc)
 	if (!oc->chosen) {
 		dump_header(oc, NULL);
 		pr_warn("Out of memory and no killable processes...\n");
+#ifdef CONFIG_MCST
+		show_state();
+#endif
 		/*
 		 * If we got here due to an actual allocation at the
 		 * system level, we cannot survive this and will enter

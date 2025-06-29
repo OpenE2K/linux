@@ -69,6 +69,9 @@ struct mutex {
 #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
 	struct optimistic_spin_queue osq; /* Spinner MCS lock */
 #endif
+#ifdef CONFIG_MCST
+	unsigned long mux_ip;
+#endif
 	struct list_head	wait_list;
 #ifdef CONFIG_DEBUG_MUTEXES
 	void			*magic;
@@ -246,6 +249,11 @@ extern int mutex_trylock(struct mutex *lock);
 extern void mutex_unlock(struct mutex *lock);
 
 extern int atomic_dec_and_mutex_lock(atomic_t *cnt, struct mutex *lock);
+
+#if defined(CONFIG_MCST)
+extern struct task_struct *get_mutex_owner(struct mutex *lock);
+extern void *get_mutex_ip(struct mutex *lock);
+#endif
 
 DEFINE_GUARD(mutex, struct mutex *, mutex_lock(_T), mutex_unlock(_T))
 DEFINE_FREE(mutex, struct mutex *, if (_T) mutex_unlock(_T))

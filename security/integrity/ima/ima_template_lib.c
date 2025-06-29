@@ -318,6 +318,10 @@ static int ima_eventdigest_init_common(const u8 *digest, u32 digestsize,
 				      hash_algo_name[hash_algo]);
 	}
 
+#ifdef CONFIG_MCST
+	WARN_ON(!digest && hash_algo == HASH_ALGO__LAST);
+#endif
+
 	if (digest) {
 		memcpy(buffer + offset, digest, digestsize);
 	} else {

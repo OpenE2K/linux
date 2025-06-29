@@ -633,6 +633,9 @@ extern const struct spi_nor_manufacturer spi_nor_sst;
 extern const struct spi_nor_manufacturer spi_nor_winbond;
 extern const struct spi_nor_manufacturer spi_nor_xilinx;
 extern const struct spi_nor_manufacturer spi_nor_xmc;
+#ifdef CONFIG_MCST
+extern const struct spi_nor_manufacturer spi_nor_zetta;
+#endif
 
 extern const struct attribute_group *spi_nor_sysfs_groups[];
 

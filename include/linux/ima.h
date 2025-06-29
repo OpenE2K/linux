@@ -52,6 +52,7 @@ extern void ima_add_kexec_buffer(struct kimage *image);
 #endif
 
 #else
+
 static inline enum hash_algo ima_get_current_hash_algo(void)
 {
 	return HASH_ALGO__LAST;

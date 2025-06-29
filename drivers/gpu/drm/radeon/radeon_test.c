@@ -23,12 +23,28 @@
  * Authors: Michel Dänzer
  */
 
+#ifdef CONFIG_E2K
+#include <linux/reboot.h>
+#endif
+
 #include <drm/radeon_drm.h>
 #include "radeon_reg.h"
 #include "radeon.h"
 
 #define RADEON_TEST_COPY_BLIT 1
 #define RADEON_TEST_COPY_DMA  0
+
+#ifdef CONFIG_MCST
+#if BITS_PER_LONG == 32
+#define	fb_readp	fb_readl
+#define	fb_writep	fb_writel
+#elif BITS_PER_LONG == 64
+#define	fb_readp	fb_readq
+#define	fb_writep	fb_writeq
+#else
+#error BITS_PER_LONG not 32 or 64
+#endif
+#endif
 
 
 /* Test BO GTT->VRAM and VRAM->GTT GPU copies across the whole GTT aperture */
@@ -59,6 +75,10 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 	 */
 	n = rdev->mc.gtt_size - rdev->gart_pin_size;
 	n /= size;
+#ifdef CONFIG_E2K
+	if (cpu_has(CPU_HWBUG_BAD_RESET))
+		n = 2;
+#endif
 
 	gtt_obj = kcalloc(n, sizeof(*gtt_obj), GFP_KERNEL);
 	if (!gtt_obj) {
@@ -149,11 +169,19 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 		     vram_start = vram_map, vram_end = vram_map + size;
 		     vram_start < vram_end;
 		     gtt_start++, vram_start++) {
+#ifdef CONFIG_MCST
+			if ((void *) fb_readp(vram_start) != gtt_start) {
+#else
 			if (*vram_start != gtt_start) {
+#endif
 				DRM_ERROR("Incorrect GTT->VRAM copy %d: Got 0x%p, "
 					  "expected 0x%p (GTT/VRAM offset "
 					  "0x%16llx/0x%16llx)\n",
+#ifdef CONFIG_MCST
+					  i, (void *)fb_readp(vram_start), (void *)gtt_start,
+#else
 					  i, *vram_start, gtt_start,
+#endif
 					  (unsigned long long)
 					  (gtt_addr - rdev->mc.gtt_start +
 					   (void*)gtt_start - gtt_map),
@@ -161,9 +189,20 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 					  (vram_addr - rdev->mc.vram_start +
 					   (void*)gtt_start - gtt_map));
 				radeon_bo_kunmap(vram_obj);
+#ifdef CONFIG_E2K
+				if (cpu_has(CPU_HWBUG_BAD_RESET)) {
+					pr_emerg("Bad reset detected."
+						" Restarting machine\n");
+					machine_restart(NULL);
+				}
+#endif
 				goto out_lclean_unpin;
 			}
+#ifdef CONFIG_MCST
+			fb_writep((unsigned long) vram_start, vram_start);
+#else
 			*vram_start = vram_start;
+#endif
 		}
 
 		radeon_bo_kunmap(vram_obj);
@@ -212,6 +251,13 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 					  (gtt_addr - rdev->mc.gtt_start +
 					   (void*)vram_start - vram_map));
 				radeon_bo_kunmap(gtt_obj[i]);
+#ifdef CONFIG_E2K
+				if (cpu_has(CPU_HWBUG_BAD_RESET)) {
+					pr_emerg("Bad reset detected."
+						" Restarting machine\n");
+					machine_restart(NULL);
+				}
+#endif
 				goto out_lclean_unpin;
 			}
 		}

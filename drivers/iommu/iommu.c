@@ -25,6 +25,11 @@
 #include <linux/platform_device.h>
 #include <linux/property.h>
 #include <linux/fsl/mc.h>
+#ifdef CONFIG_E2K
+#ifdef CONFIG_I3C
+#include <linux/i3c/master.h>
+#endif
+#endif
 #include <linux/module.h>
 #include <linux/cc_platform.h>
 #include <trace/events/iommu.h>
@@ -122,6 +127,11 @@ static struct bus_type * const iommu_buses[] = {
 #endif
 #ifdef CONFIG_TEGRA_HOST1X_CONTEXT_BUS
 	&host1x_context_device_bus_type,
+#endif
+#ifdef CONFIG_E2K
+#ifdef CONFIG_I3C
+	&i3c_bus_type,
+#endif
 #endif
 };
 
@@ -2259,7 +2269,10 @@ static int __iommu_map_pages(struct iommu_domain *domain, unsigned long iova,
 	int ret;
 
 	pgsize = iommu_pgsize(domain, iova, paddr, size, &count);
-
+#ifdef CONFIG_MCST
+	if (pgsize >= size)
+		prot |= IOMMU_LAST_PAGE;
+#endif
 	pr_debug("mapping: iova 0x%lx pa %pa pgsize 0x%zx count %zu\n",
 		 iova, &paddr, pgsize, count);
 

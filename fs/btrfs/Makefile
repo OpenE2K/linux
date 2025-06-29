@@ -9,7 +9,8 @@ subdir-ccflags-y += -Wold-style-definition
 subdir-ccflags-y += -Wmissing-include-dirs
 condflags := \
 	$(call cc-option, -Wunused-but-set-variable)		\
-	$(call cc-option, -Wunused-const-variable)		\
+# -Wunused-const-variable is so noisy in e2k
+#	$(call cc-option, -Wunused-const-variable)		\
 	$(call cc-option, -Wpacked-not-aligned)			\
 	$(call cc-option, -Wstringop-truncation)
 subdir-ccflags-y += $(condflags)
@@ -18,6 +19,9 @@ subdir-ccflags-y += -Wno-missing-field-initializers
 subdir-ccflags-y += -Wno-sign-compare
 subdir-ccflags-y += -Wno-type-limits
 subdir-ccflags-y += -Wno-shift-negative-value
+
+# -Wignored-qualifiers (in -Wextra) is so noisy in e2k
+subdir-ccflags-y += $(call cc-disable-warning, ignored-qualifiers)
 
 obj-$(CONFIG_BTRFS_FS) := btrfs.o
 

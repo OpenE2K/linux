@@ -2290,6 +2290,14 @@ static u16 printk_sprint(char *text, u16 size, int facility,
 	return text_len;
 }
 
+#if defined(CONFIG_MCST) && defined(CONFIG_NVRAM_PANIC)
+extern void write_to_nvram_panic_area(const char *str, int len);
+#endif
+
+#ifdef CONFIG_MCST
+static long long ts_nsec_printk_start = 0;
+#endif
+
 __printf(4, 0)
 int vprintk_store(int facility, int level,
 		  const struct dev_printk_info *dev_info,
@@ -2319,6 +2327,13 @@ int vprintk_store(int facility, int level,
 	 * timestamp with respect to the caller.
 	 */
 	ts_nsec = local_clock();
+
+#ifdef CONFIG_MCST
+	if (ts_nsec_printk_start)
+		ts_nsec -= ts_nsec_printk_start;
+	else
+		ts_nsec_printk_start = ts_nsec;
+#endif
 
 	caller_id = printk_caller_id();
 
@@ -2381,6 +2396,13 @@ int vprintk_store(int facility, int level,
 
 	/* fill message */
 	text_len = printk_sprint(&r.text_buf[0], reserve_size, facility, &flags, fmt, args);
+#if defined(CONFIG_MCST) && defined(CONFIG_NVRAM_PANIC)
+	if (raw_smp_processor_id() == atomic_read(&panic_cpu)) {
+		write_to_nvram_panic_area(&r.text_buf[0], text_len);
+		if (flags & LOG_NEWLINE)
+			write_to_nvram_panic_area("\n", 1);
+	}
+#endif	
 	if (trunc_msg_len)
 		memcpy(&r.text_buf[text_len], trunc_msg, trunc_msg_len);
 	r.info->text_len = text_len + trunc_msg_len;
@@ -2560,7 +2582,10 @@ err_out:
 }
 #endif /* CONFIG_HAVE_ATOMIC_CONSOLE */
 
-static bool pr_flush(int timeout_ms, bool reset_on_progress);
+#ifndef CONFIG_E2K
+static
+#endif
+bool pr_flush(int timeout_ms, bool reset_on_progress);
 static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progress);
 
 static void printk_start_kthread(struct console *con);
@@ -2599,7 +2624,10 @@ static void call_console_driver(struct console *con, const char *text, size_t le
 {
 }
 static bool suppress_message_printing(int level) { return false; }
-static bool pr_flush(int timeout_ms, bool reset_on_progress) { return true; }
+#ifndef CONFIG_E2K
+static
+#endif
+bool pr_flush(int timeout_ms, bool reset_on_progress) { return true; }
 static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progress) { return true; }
 static void printk_start_kthread(struct console *con) { }
 static bool allow_direct_printing(void) { return true; }
@@ -2832,6 +2860,10 @@ static int console_cpu_notify(unsigned int cpu)
 	}
 	return 0;
 }
+#ifdef CONFIG_E2K
+//TODO switch to __bug_table and remove this
+EXPORT_SYMBOL(console_flush_on_panic);
+#endif
 
 /*
  * Return true when this CPU should unlock console_sem without pushing all
@@ -4001,7 +4033,10 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
  * Context: Process context. May sleep while acquiring console lock.
  * Return: true if all enabled printers are caught up.
  */
-static bool pr_flush(int timeout_ms, bool reset_on_progress)
+#ifndef CONFIG_E2K
+static
+#endif
+bool pr_flush(int timeout_ms, bool reset_on_progress)
 {
 	return __pr_flush(NULL, timeout_ms, reset_on_progress);
 }

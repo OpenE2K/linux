@@ -61,7 +61,11 @@ static int hci_extcap_multi_bus(struct i3c_hci *hci, void __iomem *base)
 	u32 bus_instance = readl(base + 0x04);
 	unsigned int count = FIELD_GET(GENMASK(3, 0), bus_instance);
 
+#ifdef CONFIG_E2K
+	dev_info(&hci->master.dev, "%d bus instances, reg = %#x\n", count, bus_instance);
+#else
 	dev_info(&hci->master.dev, "%d bus instances\n", count);
+#endif
 	return 0;
 }
 
@@ -269,6 +273,11 @@ int i3c_hci_parse_ext_caps(struct i3c_hci *hci)
 		cap_id = FIELD_GET(CAP_HEADER_ID, cap_header);
 		cap_length = FIELD_GET(CAP_HEADER_LENGTH, cap_header);
 		DBG("id=0x%02x length=%d", cap_id, cap_length);
+#ifdef CONFIG_E2K
+		if (cap_id == 0) {
+			break;
+		}
+#endif
 		if (!cap_length)
 			break;
 		if (curr_cap + cap_length * 4 >= end) {

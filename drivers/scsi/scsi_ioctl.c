@@ -611,6 +611,19 @@ error_free_buffer:
 	return err;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static inline int make_n_put_descriptor(unsigned long base, long size, void *ptr)
+{
+	e2k_ptr_t dscr;
+	int ret;
+
+	dscr = new_ap(base, size, 0, RW_ENABLE);
+	ret = put_user_tagged_16(dscr.qword, ETAGAPQ, ptr);
+
+	return ret;
+}
+#endif /* CONFIG_PROTECTED_MODE */
+
 int put_sg_io_hdr(const struct sg_io_hdr *hdr, void __user *argp)
 {
 #ifdef CONFIG_COMPAT
@@ -646,6 +659,51 @@ int put_sg_io_hdr(const struct sg_io_hdr *hdr, void __user *argp)
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (TASK_IS_PROTECTED(current)) {
+		int ret;
+		struct ptr128_sg_io_hdr hdr128 =  {
+			.interface_id	 = hdr->interface_id,
+			.dxfer_direction = hdr->dxfer_direction,
+			.cmd_len	 = hdr->cmd_len,
+			.mx_sb_len	 = hdr->mx_sb_len,
+			.iovec_count	 = hdr->iovec_count,
+			.dxfer_len	 = hdr->dxfer_len,
+		/*	.dxferp.lo	 = hdr->dxferp, */
+		/*	.cmdp.lo	 = hdr->cmdp, */
+		/*	.sbp.lo		 = hdr->sbp, */
+			.timeout	 = hdr->timeout,
+			.flags		 = hdr->flags,
+			.pack_id	 = hdr->pack_id,
+			.usr_ptr.lo	 = (u64)hdr->usr_ptr,
+			.usr_ptr.hi	 = 0UL,
+			.status		 = hdr->status,
+			.masked_status	 = hdr->masked_status,
+			.msg_status	 = hdr->msg_status,
+			.sb_len_wr	 = hdr->sb_len_wr,
+			.host_status	 = hdr->host_status,
+			.driver_status	 = hdr->driver_status,
+			.resid		 = hdr->resid,
+			.duration	 = hdr->duration,
+			.info		 = hdr->info,
+		};
+
+		/* Here we construct descriptors which we can restore from pointers: */
+		ret = make_n_put_descriptor((unsigned long)hdr->dxferp, hdr->dxfer_len,
+					    &hdr128.dxferp);
+		ret = ret ?: make_n_put_descriptor((unsigned long)hdr->cmdp, hdr->cmd_len,
+						    &hdr128.cmdp);
+		ret = ret ?: make_n_put_descriptor((unsigned long)hdr->sbp, hdr->mx_sb_len,
+						    &hdr128.sbp);
+		if (ret)
+			return ret;
+
+		if (copy_to_user(argp, &hdr128, sizeof(hdr128)))
+			return -EFAULT;
+
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 
 	if (copy_to_user(argp, hdr, sizeof(*hdr)))
 		return -EFAULT;
@@ -691,6 +749,41 @@ int get_sg_io_hdr(struct sg_io_hdr *hdr, const void __user *argp)
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (TASK_IS_PROTECTED(current)) {
+		struct ptr128_sg_io_hdr hdr128;
+
+		if (copy_from_user(&hdr128, argp, sizeof(hdr128)))
+			return -EFAULT;
+
+		*hdr = (struct sg_io_hdr) {
+			.interface_id	 = hdr128.interface_id,
+			.dxfer_direction = hdr128.dxfer_direction,
+			.cmd_len	 = hdr128.cmd_len,
+			.mx_sb_len	 = hdr128.mx_sb_len,
+			.iovec_count	 = hdr128.iovec_count,
+			.dxfer_len	 = hdr128.dxfer_len,
+			.dxferp		 = (void *)AP_PTR(hdr128.dxferp),
+			.cmdp		 = (void *)AP_PTR(hdr128.cmdp),
+			.sbp		 = (void *)AP_PTR(hdr128.sbp),
+			.timeout	 = hdr128.timeout,
+			.flags		 = hdr128.flags,
+			.pack_id	 = hdr128.pack_id,
+			.usr_ptr	 = (void *)AP_PTR(hdr128.usr_ptr),
+			.status		 = hdr128.status,
+			.masked_status	 = hdr128.masked_status,
+			.msg_status	 = hdr128.msg_status,
+			.sb_len_wr	 = hdr128.sb_len_wr,
+			.host_status	 = hdr128.host_status,
+			.driver_status	 = hdr128.driver_status,
+			.resid		 = hdr128.resid,
+			.duration	 = hdr128.duration,
+			.info		 = hdr128.info,
+		};
+
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 
 	if (copy_from_user(hdr, argp, sizeof(*hdr)))
 		return -EFAULT;
@@ -713,6 +806,23 @@ struct compat_cdrom_generic_command {
 	compat_caddr_t	unused;
 };
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+struct ptr128_cdrom_generic_command {
+	unsigned char		cmd[CDROM_PACKET_SIZE];
+	e2k_ptr_t		buffer;
+	unsigned int		buflen;
+	int			stat;
+	struct request_sense	sense;
+	unsigned char		data_direction;
+	unsigned char		pad[3];
+	int			quiet;
+	int			timeout;
+	union {
+		e2k_ptr_t	reserved[1];   /* unused, actually */
+		e2k_ptr_t	unused;
+	};
+};
+#endif /* CONFIG_PROTECTED_MODE */
 
 static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 				      const void __user *arg)
@@ -738,6 +848,27 @@ static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (TASK_IS_PROTECTED(current)) {
+		struct ptr128_cdrom_generic_command cgc128;
+
+		if (copy_from_user(&cgc128, arg, sizeof(cgc128)))
+			return -EFAULT;
+
+		*cgc = (struct cdrom_generic_command) {
+			.buffer		= (void *)AP_PTR(cgc128.buffer),
+			.buflen		= cgc128.buflen,
+			.stat		= cgc128.stat,
+			.data_direction	= cgc128.data_direction,
+			.quiet		= cgc128.quiet,
+			.timeout	= cgc128.timeout,
+			.unused		= (void *)AP_PTR(cgc128.unused),
+		};
+		memcpy(&cgc->cmd, &cgc128.cmd, CDROM_PACKET_SIZE);
+		memcpy(&cgc->sense, &cgc128.sense, sizeof(*cgc->sense));
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 	if (copy_from_user(cgc, arg, sizeof(*cgc)))
 		return -EFAULT;
 
@@ -767,6 +898,34 @@ static int scsi_put_cdrom_generic_arg(const struct cdrom_generic_command *cgc,
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (TASK_IS_PROTECTED(current)) {
+		int ret;
+		struct ptr128_cdrom_generic_command cgc128 = {
+			.buflen		= cgc->buflen,
+			.stat		= cgc->stat,
+			.data_direction	= cgc->data_direction,
+			.quiet		= cgc->quiet,
+			.timeout	= cgc->timeout,
+		};
+		memcpy(&cgc128.cmd, &cgc->cmd, CDROM_PACKET_SIZE);
+
+		/* Here we construct descriptor which we can restore from pointers: */
+		ret = make_n_put_descriptor((unsigned long)cgc->buffer, cgc->buflen,
+					    &cgc128.buffer);
+		if (ret)
+			return ret;
+
+		memcpy(&cgc128.sense, &cgc->sense, sizeof(*cgc->sense));
+		cgc128.unused.qword.lo	= (uintptr_t)(cgc->unused);
+		cgc128.unused.qword.hi	= 0UL;
+
+		if (copy_to_user(arg, &cgc128, sizeof(cgc128)))
+			return -EFAULT;
+
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 	if (copy_to_user(arg, cgc, sizeof(*cgc)))
 		return -EFAULT;
 
@@ -932,6 +1091,14 @@ int scsi_ioctl(struct scsi_device *sdev, fmode_t mode, int cmd,
 		return sdev->host->hostt->compat_ioctl(sdev, cmd, arg);
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (TASK_IS_PROTECTED(current)) {
+		if (!sdev->host->hostt->ptr128_ioctl)
+			return -EINVAL;
+		return sdev->host->hostt->ptr128_ioctl(sdev, cmd, arg);
+	}
+#endif /* CONFIG_PROTECTED_MODE */
+
 	if (!sdev->host->hostt->ioctl)
 		return -EINVAL;
 	return sdev->host->hostt->ioctl(sdev, cmd, arg);

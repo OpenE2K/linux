@@ -253,6 +253,20 @@ static inline void clear_highpage_kasan_tagged(struct page *page)
 	page_kasan_tag_set(page, tag);
 }
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+static inline void sanitize_highpage(struct page *page)
+{
+	void *kaddr;
+	unsigned long flags;
+
+	local_irq_save(flags);
+	kaddr = kmap_atomic(page);
+	clear_page(kaddr);
+	kunmap_atomic(kaddr);
+	local_irq_restore(flags);
+}
+#endif
+
 #ifndef __HAVE_ARCH_TAG_CLEAR_HIGHPAGE
 
 static inline void tag_clear_highpage(struct page *page)

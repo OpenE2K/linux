@@ -49,7 +49,7 @@
 #define ATOM_TONGA_PP_THERMALCONTROLLER_ADT7473_WITH_INTERNAL   0x89    /* ADT7473 Fan Control + Internal Thermal Controller */
 #define ATOM_TONGA_PP_THERMALCONTROLLER_EMC2103_WITH_INTERNAL   0x8D    /* EMC2103 Fan Control + Internal Thermal Controller */
 
-/*/* ATOM_TONGA_POWERPLAYTABLE::ulPlatformCaps */
+/* ATOM_TONGA_POWERPLAYTABLE::ulPlatformCaps */
 #define ATOM_TONGA_PP_PLATFORM_CAP_VDDGFX_CONTROL              0x1            /* This cap indicates whether vddgfx will be a separated power rail. */
 #define ATOM_TONGA_PP_PLATFORM_CAP_POWERPLAY                   0x2            /* This cap indicates whether this is a mobile part and CCC need to show Powerplay page. */
 #define ATOM_TONGA_PP_PLATFORM_CAP_SBIOSPOWERSOURCE            0x4            /* This cap indicates whether power source notificaiton is done by SBIOS directly. */

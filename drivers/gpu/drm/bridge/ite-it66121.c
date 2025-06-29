@@ -29,6 +29,15 @@
 #include <drm/drm_probe_helper.h>
 
 #include <sound/hdmi-codec.h>
+#ifdef CONFIG_MCST
+#include <linux/of_device.h>
+
+#define IT66121_CHIP 66121
+#define IT6613_CHIP  6613
+
+#define IT6613_VENDOR_ID1			0xCA
+#define IT6613_DEVICE_ID0			0x13
+#endif /* CONFIG_MCST */
 
 #define IT66121_VENDOR_ID0_REG			0x00
 #define IT66121_VENDOR_ID1_REG			0x01
@@ -286,11 +295,31 @@
 #define IT66121_AUD_SWL_16BIT			0x2
 #define IT66121_AUD_SWL_NOT_INDICATED		0x0
 
+
+#ifdef CONFIG_MCST
+#define IT6613_RTERM_SEL_REG                0x63
+#define IT6613_CAL_RING_REG                 0x65
+#define IT6613_AFE_ENTEST_REG               0x66
+#define IT6613_AFELFSR_REG                  0x67
+
+#define IT6613_AFE_XP_MORE_80MHz             0x88
+#define IT6613_AFE_XP_LESS_80MHz             0x18
+#define IT6613_RTERM_SEL_MORE_AND_LESS_80MHz 0x10
+#define IT66121_AFE_IP_MORE_80MHz            0x84
+#define IT66121_AFE_IP_LESS_80MHz            0x0C
+#define IT6613_CAL_RING_REG_DEFAULT_VALUE    0x0
+#define IT6613_AFE_ENTEST_REG_DEFAULT_VALUE  0x10
+#define IT6613_AFELFSR_REG_DEFAULT_VALUE     0x0
+#endif /* CONFIG_MCST */
+
+#ifndef CONFIG_MCST
 #define IT66121_VENDOR_ID0			0x54
 #define IT66121_VENDOR_ID1			0x49
 #define IT66121_DEVICE_ID0			0x12
 #define IT66121_DEVICE_ID1			0x06
 #define IT66121_DEVICE_MASK			0x0F
+#endif /* CONFIG_MCST */
+
 #define IT66121_AFE_CLK_HIGH			80000 /* Khz */
 
 struct it66121_ctx {
@@ -305,6 +334,9 @@ struct it66121_ctx {
 	u32 bus_width;
 	struct mutex lock; /* Protects fields below and device registers */
 	struct hdmi_avi_infoframe hdmi_avi_infoframe;
+#ifdef CONFIG_MCST
+	long unsigned ite_chip;
+#endif
 	struct {
 		struct platform_device *pdev;
 		u8 ch_enable;
@@ -447,6 +479,105 @@ static int it66121_configure_afe(struct it66121_ctx *ctx,
 
 	return it66121_fire_afe(ctx);
 }
+
+#ifdef CONFIG_MCST
+static int it6613_configure_afe(struct it66121_ctx *ctx,
+				 const struct drm_display_mode *mode)
+{
+	int ret = 0;
+
+	ret = regmap_write(ctx->regmap, IT66121_AFE_DRV_REG,
+			   IT66121_AFE_DRV_RST);
+	if (ret)
+		return ret;
+
+	if (mode->clock > IT66121_AFE_CLK_HIGH) {
+		ret = regmap_write_bits(ctx->regmap, IT66121_AFE_XP_REG,
+					IT66121_AFE_XP_GAINBIT |
+					IT66121_AFE_XP_ENO,
+					IT66121_AFE_XP_GAINBIT);
+		if (ret)
+			return ret;
+
+		ret = regmap_write_bits(ctx->regmap, IT66121_AFE_IP_REG,
+					IT66121_AFE_IP_GAINBIT |
+					IT66121_AFE_IP_ER0 |
+					IT66121_AFE_IP_EC1,
+					IT66121_AFE_IP_GAINBIT);
+		if (ret)
+			return ret;
+
+		ret = regmap_write(ctx->regmap,
+			IT66121_AFE_DRV_REG, IT66121_INPUT_CSC_NO_CONV);
+		ret = regmap_write(ctx->regmap,
+			IT66121_AFE_XP_REG, IT6613_AFE_XP_MORE_80MHz);
+		ret = regmap_write(ctx->regmap,
+			IT6613_RTERM_SEL_REG, IT6613_RTERM_SEL_MORE_AND_LESS_80MHz);
+		ret = regmap_write(ctx->regmap,
+			IT66121_AFE_IP_REG, IT66121_AFE_IP_MORE_80MHz);
+		ret = regmap_write(ctx->regmap,
+			IT6613_CAL_RING_REG, IT6613_CAL_RING_REG_DEFAULT_VALUE);
+		ret = regmap_write(ctx->regmap,
+			IT6613_AFE_ENTEST_REG, IT6613_AFE_ENTEST_REG_DEFAULT_VALUE);
+		ret = regmap_write(ctx->regmap,
+			IT6613_AFELFSR_REG, IT6613_AFELFSR_REG_DEFAULT_VALUE);
+
+		if (ret)
+			return ret;
+
+	} else {
+		ret = regmap_write_bits(ctx->regmap, IT66121_AFE_XP_REG,
+					IT66121_AFE_XP_GAINBIT |
+					IT66121_AFE_XP_ENO,
+					IT66121_AFE_XP_ENO);
+		if (ret)
+			return ret;
+
+		ret = regmap_write_bits(ctx->regmap, IT66121_AFE_IP_REG,
+					IT66121_AFE_IP_GAINBIT |
+					IT66121_AFE_IP_ER0 |
+					IT66121_AFE_IP_EC1, IT66121_AFE_IP_ER0 |
+					IT66121_AFE_IP_EC1);
+		if (ret)
+			return ret;
+
+		ret = regmap_write(ctx->regmap,
+			IT66121_AFE_DRV_REG, IT66121_INPUT_CSC_NO_CONV);
+		ret = regmap_write(ctx->regmap,
+			IT66121_AFE_XP_REG, IT6613_AFE_XP_LESS_80MHz);
+		ret = regmap_write(ctx->regmap,
+			IT6613_RTERM_SEL_REG, IT6613_RTERM_SEL_MORE_AND_LESS_80MHz);
+		ret = regmap_write(ctx->regmap,
+			IT66121_AFE_IP_REG, IT66121_AFE_IP_LESS_80MHz);
+		ret = regmap_write(ctx->regmap,
+			IT6613_CAL_RING_REG, IT6613_CAL_RING_REG_DEFAULT_VALUE);
+		ret = regmap_write(ctx->regmap,
+			IT6613_AFE_ENTEST_REG, IT6613_AFE_ENTEST_REG_DEFAULT_VALUE);
+		ret = regmap_write(ctx->regmap,
+			IT6613_AFELFSR_REG, IT6613_AFELFSR_REG_DEFAULT_VALUE);
+
+		if (ret)
+			return ret;
+	}
+
+	/* Clear reset flags */
+	ret = regmap_write_bits(ctx->regmap, IT66121_SW_RST_REG,
+				IT66121_SW_RST_REF | IT66121_SW_RST_VID, 0);
+	if (ret)
+		return ret;
+
+	return it66121_fire_afe(ctx);
+}
+
+static int ite_configure_afe(struct it66121_ctx *ctx,
+				 const struct drm_display_mode *mode)
+{
+	if (ctx->ite_chip == IT6613_CHIP)
+		return it6613_configure_afe(ctx, mode);
+
+	return it66121_configure_afe(ctx, mode);
+}
+#endif /* CONFIG_MCST */
 
 static inline int it66121_wait_ddc_ready(struct it66121_ctx *ctx)
 {
@@ -845,7 +976,11 @@ void it66121_bridge_mode_set(struct drm_bridge *bridge,
 	if (it66121_configure_input(ctx))
 		goto unlock;
 
+#ifdef CONFIG_MCST
+	if (ite_configure_afe(ctx, adjusted_mode))
+#else
 	if (it66121_configure_afe(ctx, adjusted_mode))
+#endif
 		goto unlock;
 
 	regmap_write_bits(ctx->regmap, IT66121_CLK_BANK_REG, IT66121_CLK_BANK_PWROFF_TXCLK, 0);
@@ -1516,6 +1651,41 @@ static int it66121_audio_codec_init(struct it66121_ctx *ctx, struct device *dev)
 	return PTR_ERR_OR_ZERO(ctx->audio.pdev);
 }
 
+#ifdef CONFIG_MCST
+static inline int check_ids_it66121(const u32 *vendor_ids,
+					const u32 *device_ids)
+{
+	if (vendor_ids[0] != IT66121_VENDOR_ID0 || vendor_ids[1] != IT66121_VENDOR_ID1 ||
+		device_ids[0] != IT66121_DEVICE_ID0 || device_ids[1] != IT66121_DEVICE_ID1) {
+
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+static inline int check_ids_it6613(const u32 *vendor_ids,
+				const u32 *device_ids)
+{
+	if (vendor_ids[0] != IT6613_VENDOR_ID1 ||
+		device_ids[0] != IT6613_DEVICE_ID0 || device_ids[1] != IT66121_DEVICE_ID1) {
+
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+static inline int check_ids(const long unsigned ite_chip,
+					const u32 *vendor_ids, const u32 *device_ids)
+{
+	if (ite_chip == IT6613_CHIP)
+		return check_ids_it6613(vendor_ids, device_ids);
+
+	return check_ids_it66121(vendor_ids, device_ids);
+}
+#endif /* CONFIG_MCST */
+
 static int it66121_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
@@ -1524,6 +1694,9 @@ static int it66121_probe(struct i2c_client *client,
 	int ret;
 	struct it66121_ctx *ctx;
 	struct device *dev = &client->dev;
+#ifdef CONFIG_MCST
+	long unsigned ite_chip = (long unsigned)of_device_get_match_data(dev);
+#endif
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(dev, "I2C check functionality failed.\n");
@@ -1540,6 +1713,9 @@ static int it66121_probe(struct i2c_client *client,
 
 	ctx->dev = dev;
 	ctx->client = client;
+#ifdef CONFIG_MCST
+	ctx->ite_chip = ite_chip;
+#endif
 
 	of_property_read_u32(ep, "bus-width", &ctx->bus_width);
 	of_node_put(ep);
@@ -1590,8 +1766,18 @@ static int it66121_probe(struct i2c_client *client,
 		return PTR_ERR(ctx->regmap);
 	}
 
-	regmap_read(ctx->regmap, IT66121_VENDOR_ID0_REG, &vendor_ids[0]);
-	regmap_read(ctx->regmap, IT66121_VENDOR_ID1_REG, &vendor_ids[1]);
+#ifdef CONFIG_MCST
+	if (ite_chip == IT66121_CHIP) {
+#endif /* CONFIG_MCST */
+		regmap_read(ctx->regmap, IT66121_VENDOR_ID0_REG, &vendor_ids[0]);
+		regmap_read(ctx->regmap, IT66121_VENDOR_ID1_REG, &vendor_ids[1]);
+#ifdef CONFIG_MCST
+	} else if (ite_chip == IT6613_CHIP) {
+		regmap_read(ctx->regmap, IT66121_VENDOR_ID1_REG, &vendor_ids[0]);
+	} else {
+		return -ENODEV;
+	}
+#endif /* CONFIG_MCST */
 	regmap_read(ctx->regmap, IT66121_DEVICE_ID0_REG, &device_ids[0]);
 	regmap_read(ctx->regmap, IT66121_DEVICE_ID1_REG, &device_ids[1]);
 
@@ -1599,18 +1785,31 @@ static int it66121_probe(struct i2c_client *client,
 	revision_id = FIELD_GET(IT66121_REVISION_MASK, device_ids[1]);
 	device_ids[1] &= IT66121_DEVICE_ID1_MASK;
 
-	if (vendor_ids[0] != IT66121_VENDOR_ID0 || vendor_ids[1] != IT66121_VENDOR_ID1 ||
-	    device_ids[0] != IT66121_DEVICE_ID0 || device_ids[1] != IT66121_DEVICE_ID1) {
+#ifdef CONFIG_MCST
+	if (check_ids(ite_chip, vendor_ids, device_ids)) {
 		ite66121_power_off(ctx);
 		return -ENODEV;
 	}
+#else
+	if (vendor_ids[0] != IT66121_VENDOR_ID0 || vendor_ids[1] != IT66121_VENDOR_ID1 ||
+		device_ids[0] != IT66121_DEVICE_ID0 || device_ids[1] != IT66121_DEVICE_ID1) {
+		ite66121_power_off(ctx);
+		return -ENODEV;
+	}
+#endif /* CONFIG_MCST */
 
 	ctx->bridge.funcs = &it66121_bridge_funcs;
 	ctx->bridge.of_node = dev->of_node;
 	ctx->bridge.type = DRM_MODE_CONNECTOR_HDMIA;
 	ctx->bridge.ops = DRM_BRIDGE_OP_DETECT | DRM_BRIDGE_OP_EDID | DRM_BRIDGE_OP_HPD;
 
-	ret = devm_request_threaded_irq(dev, client->irq, NULL,	it66121_irq_threaded_handler,
+#ifdef CONFIG_MCST
+	if (client->irq <= 0)
+		ctx->bridge.ops = DRM_BRIDGE_OP_DETECT | DRM_BRIDGE_OP_EDID;
+	else
+#endif
+		ret = devm_request_threaded_irq(dev, client->irq, NULL,
+					it66121_irq_threaded_handler,
 					IRQF_ONESHOT, dev_name(dev), ctx);
 	if (ret < 0) {
 		dev_err(dev, "Failed to request irq %d:%d\n", client->irq, ret);
@@ -1636,14 +1835,26 @@ static void it66121_remove(struct i2c_client *client)
 	mutex_destroy(&ctx->lock);
 }
 
+#ifdef CONFIG_MCST
+static const struct of_device_id it66121_dt_match[] = {
+	{ .compatible = "ite,it66121", .data = (void *)(IT66121_CHIP) },
+	{ .compatible = "ite,it6613",  .data = (void *)(IT6613_CHIP)  },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, it66121_dt_match);
+#else
 static const struct of_device_id it66121_dt_match[] = {
 	{ .compatible = "ite,it66121" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, it66121_dt_match);
+#endif /* CONFIG_MCST */
 
 static const struct i2c_device_id it66121_id[] = {
 	{ "it66121", 0 },
+#ifdef CONFIG_MCST
+	{ "it6613",  0 },
+#endif /* CONFIG_MCST */
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, it66121_id);

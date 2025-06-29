@@ -30,6 +30,10 @@
 #include <linux/kasan.h>
 #include <linux/memremap.h>
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+extern int mem_san;
+#endif
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
@@ -71,6 +75,10 @@ static inline void totalram_pages_add(long count)
 {
 	atomic_long_add(count, &_totalram_pages);
 }
+
+#if defined(CONFIG_MCST) && !defined(CONFIG_X86_64)
+extern unsigned long totalram_real_pages;
+#endif
 
 extern void * high_memory;
 extern int page_cluster;
@@ -358,6 +366,13 @@ extern unsigned int kobjsize(const void *objp);
 #elif defined(CONFIG_ARM64)
 # define VM_ARM64_BTI	VM_ARCH_1	/* BTI guarded page, a.k.a. GP bit */
 # define VM_ARCH_CLEAR	VM_ARM64_BTI
+#elif defined(CONFIG_E2K)
+# define VM_MEMTYPE_TRACKED VM_ARCH_1
+# define VM_INT_PR	VM_HIGH_ARCH_0	/* PTE.int_pr for protected mode */
+# define VM_HW_STACK_PS	VM_HIGH_ARCH_1	/* Procedure stack area */
+# define VM_HW_STACK_PCS VM_HIGH_ARCH_2	/* Chain stack area */
+# define VM_PRIVILEGED	VM_HIGH_ARCH_3	/* Pages are privileged */
+# define VM_MPDMA	VM_HIGH_ARCH_4	/* Pages are under MPDMA hardware protection */
 #elif !defined(CONFIG_MMU)
 # define VM_MAPPED_COPY	VM_ARCH_1	/* T if mapped copy of data (nommu mmap) */
 #endif

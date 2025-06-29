@@ -22,6 +22,10 @@ struct inode;
 struct pci_dev;
 struct pci_controller;
 
+#ifdef CONFIG_MCST
+#define DRM_ARRAY_SIZE(x) ARRAY_SIZE(x)
+#endif
+
 
 /**
  * enum switch_power_state - power state of drm device

@@ -74,8 +74,18 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 #endif /* CONFIG_PROFILE_ALL_BRANCHES */
 
 #else
+#ifdef CONFIG_MCST
+# if __GNUC__ >= 9
+#  define likely(x)	__builtin_expect_with_probability(!!(x), 1, 0.9999)
+#  define unlikely(x)	__builtin_expect_with_probability(!!(x), 1, 0.0001)
+# else
+#  define likely(x)	__builtin_expect(!!(x), 1)
+#  define unlikely(x)	__builtin_expect(!!(x), 0)
+# endif
+#else
 # define likely(x)	__builtin_expect(!!(x), 1)
 # define unlikely(x)	__builtin_expect(!!(x), 0)
+#endif
 # define likely_notrace(x)	likely(x)
 # define unlikely_notrace(x)	unlikely(x)
 #endif

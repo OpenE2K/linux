@@ -222,6 +222,55 @@ fail:
 	return false;
 }
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+struct page *swap_sanit_page = NULL;
+EXPORT_SYMBOL(swap_sanit_page);
+
+u64 test_sntz_sect = 0;
+EXPORT_SYMBOL(test_sntz_sect);
+
+static void end_bio_sntz(struct bio *bio)
+{
+	unlock_page(swap_sanit_page);
+	bio_put(bio);
+}
+
+static void sanitize_swap_page(struct page *page)
+{
+	struct swap_info_struct *sis = page_swap_info(page);
+	struct bio *bio;
+
+	bio = bio_alloc(sis->bdev, 1, REQ_OP_WRITE, GFP_NOIO);
+	if (bio == NULL) {
+		return;
+	}
+	if (swap_sanit_page == NULL) {
+		return;
+	}
+	/* prepare write swap_sanit_page to the swap location of 'page' */
+	lock_page(swap_sanit_page);
+	page_private(swap_sanit_page) = page_private(page);
+	bio->bi_iter.bi_sector = swap_page_sector(page);
+	if (bio->bi_iter.bi_sector == 0) {
+		unlock_page(swap_sanit_page);
+		bio_put(bio);
+		return;
+	}
+	/* For swap sanitize testimg with lkdtm module: */
+	bio_add_page(bio, swap_sanit_page, PAGE_SIZE, 0);
+	bio->bi_end_io = end_bio_sntz;
+	count_vm_event(PSWPOUT);
+	bio_get(bio);
+	test_sntz_sect = bio->bi_iter.bi_sector;
+	submit_bio(bio);
+	wait_on_page_locked(swap_sanit_page);
+
+#ifdef CONFIG_E2K
+	arch_swap_invalidate_page(sis->type, __page_file_index(page));
+#endif
+}
+#endif
+
 /*
  * This must be called only on folios that have
  * been verified to be in the swap cache and locked.
@@ -309,8 +358,16 @@ void free_pages_and_swap_cache(struct page **pages, int nr)
 	int i;
 
 	lru_add_drain();
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	for (i = 0; i < nr; i++) {
+		if (mem_san && PageSwapCache(pagep[i]))
+			sanitize_swap_page(pagep[i]);
+		free_swap_cache(pagep[i]);
+	}
+#else
 	for (i = 0; i < nr; i++)
 		free_swap_cache(pagep[i]);
+#endif
 	release_pages(pagep, nr);
 }
 

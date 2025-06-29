@@ -29,6 +29,11 @@
 #define CMD_A0_CMD(v)			FIELD_PREP(W0_MASK(14,  7), v)
 #define CMD_A0_TID(v)			FIELD_PREP(W0_MASK( 6,  3), v)
 
+#ifdef CONFIG_E2K
+#define CMD_OF_XFER(xfer)	FIELD_GET(GENMASK(14, 7), (xfer)->cmd_desc[0])
+#define TID_OF_XFER(xfer)	FIELD_GET(GENMASK(6, 3), (xfer)->cmd_desc[0])
+#define DEVI_OF_XFER(xfer)	FIELD_GET(GENMASK(20, 16), (xfer)->cmd_desc[0])
+#endif
 /*
  * Immediate Data Transfer Command
  */
@@ -87,6 +92,7 @@
 #define CMD_C0_CP				   W0_BIT_(15)
 #define CMD_C0_CMD(v)			FIELD_PREP(W0_MASK(14,  7), v)
 #define CMD_C0_TID(v)			FIELD_PREP(W0_MASK( 6,  3), v)
+
 
 /*
  * Internal Control Command
@@ -186,8 +192,15 @@ static int hci_cmd_v1_prep_ccc(struct i3c_hci *hci,
 
 	if (ccc_addr != I3C_BROADCAST_ADDR) {
 		ret = mipi_i3c_hci_dat_v1.get_index(hci, ccc_addr);
+#ifdef CONFIG_E2K
+		if (ret < 0) {
+			DBG("mipi_i3c_hci_dat_v1.get_index(hci, %d) = %d", ccc_addr, ret);
+			return ret;
+		}
+#else
 		if (ret < 0)
 			return ret;
+#endif
 		dat_idx = ret;
 	}
 
@@ -296,8 +309,12 @@ static int hci_cmd_v1_daa(struct i3c_hci *hci)
 	u8 next_addr = 0;
 	u64 pid;
 	unsigned int dcr, bcr;
+#ifndef CONFIG_E2K
 	DECLARE_COMPLETION_ONSTACK(done);
 
+#else
+	DBG("called from %ps", __builtin_return_address(0));
+#endif
 	xfer = hci_alloc_xfer(2);
 	if (!xfer)
 		return -ENOMEM;
@@ -310,13 +327,30 @@ static int hci_cmd_v1_daa(struct i3c_hci *hci)
 	 * Yes, there is room for improvements.
 	 */
 	for (;;) {
+#ifdef CONFIG_E2K
+		DECLARE_COMPLETION_ONSTACK(done);
+#endif
 		ret = mipi_i3c_hci_dat_v1.alloc_entry(hci);
+#ifdef CONFIG_E2K
+		if (ret < 0) {
+			DBG("mipi_i3c_hci_dat_v1.alloc_entry(hci) = %d", ret);
+			break;
+		}
+#else
 		if (ret < 0)
 			break;
+#endif
 		dat_idx = ret;
 		ret = i3c_master_get_free_addr(&hci->master, next_addr);
+#ifdef CONFIG_E2K
+		if (ret < 0) {
+			DBG("i3c_master_get_free_addr(&hci->master, next_addr) = %d", ret);
+			break;
+		}
+#else
 		if (ret < 0)
 			break;
+#endif
 		next_addr = ret;
 
 		DBG("next_addr = 0x%02x, DAA using DAT %d", next_addr, dat_idx);
@@ -332,18 +366,32 @@ static int hci_cmd_v1_daa(struct i3c_hci *hci)
 			CMD_A0_DEV_COUNT(1) |
 			CMD_A0_ROC | CMD_A0_TOC;
 		xfer->cmd_desc[1] = 0;
+#ifdef CONFIG_E2K
+		xfer->completion = &done;
+#endif
 		hci->io->queue_xfer(hci, xfer, 1);
 		if (!wait_for_completion_timeout(&done, HZ) &&
 		    hci->io->dequeue_xfer(hci, xfer, 1)) {
+#ifdef CONFIG_E2K
+			DBG(" - timeout");
+#endif
 			ret = -ETIME;
 			break;
 		}
 		if (RESP_STATUS(xfer[0].response) == RESP_ERR_NACK &&
+#ifdef CONFIG_E2K
+		    RESP_DATA_LENGTH(xfer->response) == 1) {
+#else
 		    RESP_STATUS(xfer[0].response) == 1) {
+#endif
 			ret = 0;  /* no more devices to be assigned */
 			break;
 		}
 		if (RESP_STATUS(xfer[0].response) != RESP_SUCCESS) {
+#ifdef CONFIG_E2K
+			DBG(" RESP_STATUS(xfer[0].response) = %ld",
+				RESP_STATUS(xfer[0].response));
+#endif
 			ret = -EIO;
 			break;
 		}
@@ -352,20 +400,25 @@ static int hci_cmd_v1_daa(struct i3c_hci *hci)
 		DBG("assigned address %#x to device PID=0x%llx DCR=%#x BCR=%#x",
 		    next_addr, pid, dcr, bcr);
 
-		mipi_i3c_hci_dat_v1.free_entry(hci, dat_idx);
-		dat_idx = -1;
-
 		/*
 		 * TODO: Extend the subsystem layer to allow for registering
 		 * new device and provide BCR/DCR/PID at the same time.
 		 */
 		ret = i3c_master_add_i3c_dev_locked(&hci->master, next_addr);
+		mipi_i3c_hci_dat_v1.free_entry(hci, dat_idx);
+		dat_idx = -1;
 		if (ret)
 			break;
 	}
-
+#ifdef CONFIG_E2K
+	if (dat_idx >= 0) {
+		DBG("free entry %d", dat_idx);
+		mipi_i3c_hci_dat_v1.free_entry(hci, dat_idx);
+	}
+#else
 	if (dat_idx >= 0)
 		mipi_i3c_hci_dat_v1.free_entry(hci, dat_idx);
+#endif
 	hci_free_xfer(xfer, 1);
 	return ret;
 }

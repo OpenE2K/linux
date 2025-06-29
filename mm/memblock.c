@@ -1370,7 +1370,11 @@ __next_mem_pfn_range_in_zone(u64 *idx, struct zone *zone,
  * Return:
  * Physical address of allocated memory block on success, %0 on failure.
  */
-phys_addr_t __init memblock_alloc_range_nid(phys_addr_t size,
+phys_addr_t
+#if !defined(CONFIG_E2K) || !defined(CONFIG_E2K_KEXEC)
+__init
+#endif
+memblock_alloc_range_nid(phys_addr_t size,
 					phys_addr_t align, phys_addr_t start,
 					phys_addr_t end, int nid,
 					bool exact_nid)
@@ -1439,7 +1443,11 @@ done:
  * Return: physical address of the allocated memory block on success,
  * %0 on failure.
  */
-phys_addr_t __init memblock_phys_alloc_range(phys_addr_t size,
+phys_addr_t
+#if !defined(CONFIG_E2K) || !defined(CONFIG_E2K_KEXEC)
+__init
+#endif
+memblock_phys_alloc_range(phys_addr_t size,
 					     phys_addr_t align,
 					     phys_addr_t start,
 					     phys_addr_t end)

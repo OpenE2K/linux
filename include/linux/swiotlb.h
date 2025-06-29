@@ -34,12 +34,41 @@ struct scatterlist;
 /* default to 64MB */
 #define IO_TLB_DEFAULT_SIZE (64UL<<20)
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+# define SWIOTLB_NODE_CYCLE_BEGIN	\
+	for_each_online_node(node) {	\
+		if (!NODE_DATA(node))	\
+			continue;
+
+# define SWIOTLB_NODE_CYCLE_END	\
+	}
+
+static inline int swiotlb_node(struct device *dev)
+{
+	int node = dev->numa_node;
+
+	if (node < 0 || node >= MAX_NUMNODES || !node_online(node))
+		node = first_online_node;
+
+	return node;
+}
+#endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+unsigned long swiotlb_size_or_default(int node);
+void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
+	int (*remap)(void *tlb, unsigned long nslabs), int node);
+int swiotlb_init_late(size_t size, gfp_t gfp_mask,
+	int (*remap)(void *tlb, unsigned long nslabs), int node);
+extern void __init swiotlb_update_mem_attributes(int node);
+#else
 unsigned long swiotlb_size_or_default(void);
 void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	int (*remap)(void *tlb, unsigned long nslabs));
 int swiotlb_init_late(size_t size, gfp_t gfp_mask,
 	int (*remap)(void *tlb, unsigned long nslabs));
 extern void __init swiotlb_update_mem_attributes(void);
+#endif
 
 phys_addr_t swiotlb_tbl_map_single(struct device *hwdev, phys_addr_t phys,
 		size_t mapping_size, size_t alloc_size,
@@ -103,30 +132,56 @@ struct io_tlb_mem {
 	struct io_tlb_area *areas;
 	struct io_tlb_slot *slots;
 };
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+extern struct io_tlb_mem __io_tlb_default_mem[MAX_NUMNODES];
+# else
 extern struct io_tlb_mem io_tlb_default_mem;
+# endif
 
 static inline bool is_swiotlb_buffer(struct device *dev, phys_addr_t paddr)
 {
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct io_tlb_mem *mem = &dev->dma_io_tlb_mem[swiotlb_node(dev)];
+# else
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
+# endif
 
 	return mem && paddr >= mem->start && paddr < mem->end;
 }
 
 static inline bool is_swiotlb_force_bounce(struct device *dev)
 {
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+	struct io_tlb_mem *mem = &dev->dma_io_tlb_mem[swiotlb_node(dev)];
+# else
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
+# endif
 
 	return mem && mem->force_bounce;
 }
 
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void swiotlb_init(bool addressing_limited, unsigned int flags, int node);
+void __init swiotlb_exit(int node);
+unsigned int swiotlb_max_segment(int node);
+# else
 void swiotlb_init(bool addressing_limited, unsigned int flags);
 void __init swiotlb_exit(void);
 unsigned int swiotlb_max_segment(void);
+# endif
 size_t swiotlb_max_mapping_size(struct device *dev);
 bool is_swiotlb_active(struct device *dev);
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+void __init swiotlb_adjust_size(unsigned long size, int node);
+# else
 void __init swiotlb_adjust_size(unsigned long size);
+# endif
 #else
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static inline void swiotlb_init(bool addressing_limited, unsigned int flags, int node)
+# else
 static inline void swiotlb_init(bool addressing_limited, unsigned int flags)
+# endif
 {
 }
 static inline bool is_swiotlb_buffer(struct device *dev, phys_addr_t paddr)
@@ -137,10 +192,18 @@ static inline bool is_swiotlb_force_bounce(struct device *dev)
 {
 	return false;
 }
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static inline void swiotlb_exit(int node)
+# else
 static inline void swiotlb_exit(void)
+# endif
 {
 }
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static inline unsigned int swiotlb_max_segment(int node)
+# else
 static inline unsigned int swiotlb_max_segment(void)
+# endif
 {
 	return 0;
 }
@@ -154,12 +217,20 @@ static inline bool is_swiotlb_active(struct device *dev)
 	return false;
 }
 
+# if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+static inline void swiotlb_adjust_size(unsigned long size, int node)
+# else
 static inline void swiotlb_adjust_size(unsigned long size)
+# endif
 {
 }
 #endif /* CONFIG_SWIOTLB */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_NUMA)
+extern void swiotlb_print_info(int node);
+#else
 extern void swiotlb_print_info(void);
+#endif
 
 #ifdef CONFIG_DMA_RESTRICTED_POOL
 struct page *swiotlb_alloc(struct device *dev, size_t size);

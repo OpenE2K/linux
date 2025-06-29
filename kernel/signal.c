@@ -55,6 +55,21 @@
 #include <asm/siginfo.h>
 #include <asm/cacheflush.h>
 #include <asm/syscall.h>	/* for syscall_get_* */
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/protected_syscalls.h>
+#endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#undef DebugSCP
+#define DebugSCP(fmt, ...) \
+do { \
+	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_SIGNALS)) \
+		pr_info("%s: " fmt, __func__,  ##__VA_ARGS__); \
+} while (0)
+#else
+#define DebugSCP(...)
+#endif /* CONFIG_PROTECTED_MODE */
+
 
 /*
  * SLAB caches for signal bits.
@@ -1004,6 +1019,10 @@ static void complete_signal(int sig, struct task_struct *p, enum pid_type type)
 {
 	struct signal_struct *signal = p->signal;
 	struct task_struct *t;
+#ifdef CONFIG_MCST
+	int fullsig = sig;
+	sig = sig & 0x7f;
+#endif
 
 	/*
 	 * Now find a thread we can wake up to take the signal off the queue.
@@ -1056,7 +1075,11 @@ static void complete_signal(int sig, struct task_struct *p, enum pid_type type)
 			 * thread has the fatal signal pending.
 			 */
 			signal->flags = SIGNAL_GROUP_EXIT;
+#ifdef CONFIG_MCST
+			signal->group_exit_code = fullsig;
+#else
 			signal->group_exit_code = sig;
+#endif
 			signal->group_stop_count = 0;
 			t = p;
 			do {
@@ -1191,7 +1214,22 @@ out_set:
 			sigaddset(signal, sig);
 		}
 	}
-
+#ifdef CONFIG_MCST
+	/* We are going to return si_code in return status for wait*/
+		switch ((unsigned long) info) {
+		case (unsigned long) SEND_SIG_NOINFO:
+			sig |= (SI_USER << 16);
+			break;
+		case (unsigned long) SEND_SIG_PRIV:
+			sig |= (SI_KERNEL << 16);
+			break;
+		default:
+			if (info->si_code > 0 && info->si_code < 0x80) {
+				sig |= (info->si_code << 16);
+			}
+			break;
+		}
+#endif
 	complete_signal(sig, t, type);
 ret:
 	trace_signal_generate(sig, info, t, type != PIDTYPE_PID, result);
@@ -1330,6 +1368,29 @@ force_sig_info_to_task(struct kernel_siginfo *info, struct task_struct *t,
 	int ret, blocked, ignored;
 	struct k_sigaction *action;
 	int sig = info->si_signo;
+
+#if defined(CONFIG_E2K) && defined(E2K_DELAYED_SIGNALS)
+	if (in_atomic()) {
+		struct task_struct *t = current;
+
+		if (WARN_ON_ONCE(t->forced_info.si_signo))
+			return 0;
+
+		if (is_si_special(info)) {
+			WARN_ON_ONCE(info != SEND_SIG_PRIV);
+			t->forced_info.si_signo = info->si_signo;
+			t->forced_info.si_errno = 0;
+			t->forced_info.si_code = SI_KERNEL;
+			t->forced_info.si_pid = 0;
+			t->forced_info.si_uid = 0;
+		} else {
+			t->forced_info = *info;
+		}
+
+		set_tsk_thread_flag(t, TIF_NOTIFY_RESUME);
+		return 0;
+	}
+#endif
 
 	spin_lock_irqsave(&t->sighand->siglock, flags);
 	action = &t->sighand->action[sig-1];
@@ -2001,6 +2062,12 @@ int send_sigqueue(struct sigqueue *q, struct pid *pid, enum pid_type type)
 	pending = (type != PIDTYPE_PID) ? &t->signal->shared_pending : &t->pending;
 	list_add_tail(&q->list, &pending->list);
 	sigaddset(&pending->signal, sig);
+#ifdef CONFIG_MCST
+	/* We are going to return si_code in return status for wait*/
+	if (q->info.si_code > 0 && q->info.si_code < 0x80) {
+		sig |= (q->info.si_code << 16);
+	}
+#endif
 	complete_signal(sig, t, type);
 	result = TRACE_SIGNAL_DELIVERED;
 out:
@@ -2868,7 +2935,12 @@ relock:
 		/*
 		 * Death signals, no core dump.
 		 */
+#ifdef CONFIG_MCST
+		do_group_exit(ksig->info.si_signo |
+			ksig->info.si_code << 16);
+#else
 		do_group_exit(ksig->info.si_signo);
+#endif
 		/* NOTREACHED */
 	}
 	spin_unlock_irq(&sighand->siglock);
@@ -3572,6 +3644,245 @@ int copy_siginfo_from_user32(struct kernel_siginfo *to,
 }
 #endif /* CONFIG_COMPAT */
 
+
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+static inline e2k_ptr_t make_fake_ap(void *p)
+{
+	e2k_ptr_t ap;
+	ap.hi = 0;
+	ap.lo = (u64)p;
+	return ap;
+}
+
+
+void _copy_siginfo_to_prot_user(struct prot_siginfo *to,
+		struct kernel_siginfo *from)
+{
+	enum siginfo_layout layout;
+
+	memset(to, 0, sizeof(*to));
+
+	to->si_signo = from->si_signo;
+	to->si_errno = from->si_errno;
+	to->si_code  = from->si_code;
+	layout = siginfo_layout(from->si_signo, from->si_code);
+	DebugSCP("si_signo=%d si_code=%d layout=%d\n", to->si_signo, to->si_code, layout);
+	switch (layout) {
+	case SIL_KILL:
+		to->si_pid = from->si_pid;
+		to->si_uid = from->si_uid;
+		break;
+	case SIL_TIMER:
+		to->si_tid     = from->si_tid;
+		to->si_overrun = from->si_overrun;
+		to->si_int     = from->si_int;
+		break;
+	case SIL_POLL:
+		to->si_band = from->si_band;
+		to->si_fd   = from->si_fd;
+		break;
+	case SIL_FAULT:
+		to->si_addr = from->si_addr;
+		break;
+	case SIL_FAULT_TRAPNO:
+		to->si_addr = from->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		break;
+	case SIL_FAULT_MCEERR:
+		to->si_addr = from->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		to->si_addr_lsb = from->si_addr_lsb;
+		break;
+	case SIL_FAULT_BNDERR:
+		to->si_addr = from->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		to->si_lower = from->si_lower;
+		to->si_upper = from->si_upper;
+		break;
+	case SIL_FAULT_PKUERR:
+		to->si_addr = from->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		to->si_pkey = from->si_pkey;
+		break;
+	case SIL_FAULT_PERF_EVENT:
+		to->si_addr = from->si_addr;
+		to->si_perf_data = from->si_perf_data;
+		to->si_perf_type = from->si_perf_type;
+		to->si_perf_flags = from->si_perf_flags;
+		break;
+	case SIL_CHLD:
+		to->si_pid = from->si_pid;
+		to->si_uid = from->si_uid;
+		to->si_status = from->si_status;
+		to->si_utime = from->si_utime;
+		to->si_stime = from->si_stime;
+		break;
+	case SIL_RT:
+		to->si_pid = from->si_pid;
+		to->si_uid = from->si_uid;
+		DebugSCP("to->si_ptr = 0x%llx\n", from->si_ptr);
+		/* NB> We use the biggest union field over here: */
+		to->si_ptr = make_fake_ap(from->si_ptr);
+		break;
+	case SIL_SYS:
+		to->si_call_addr = from->si_call_addr;
+		to->si_syscall   = from->si_syscall;
+		to->si_arch      = from->si_arch;
+		break;
+	}
+
+}
+
+int copy_siginfo_to_prot_user(struct prot_siginfo __user *to,
+			   const struct kernel_siginfo *from)
+{
+	struct prot_siginfo  new;
+
+	_copy_siginfo_to_prot_user(&new, (kernel_siginfo_t *)from);
+	return copy_to_user(to, &new, sizeof(struct prot_siginfo));
+}
+
+
+
+static inline int  set_sigval_from_prot_siginfo(kernel_siginfo_t *to,
+		const struct prot_siginfo __user *usi)
+{
+	e2k_ptr_t kap;
+	int tag;
+
+	/* in SIL_RT si_errno is not used.
+	 * We use it to recjgnize ap in union
+	 */
+	if (!get_user_tagged_16(kap.qword, tag, &usi->si_ptr) || IS_AP(kap, tag)) {
+		to->si_ptr = (void *)AP_PTR(kap);
+		to->si_errno = 1;
+		DebugSCP("to->si_ptr = 0x%llx\n", to->si_ptr);
+		return 1;
+	}
+	return 0;
+}
+
+static int post_copy_siginfo_from_prot_user(kernel_siginfo_t *to,
+			struct prot_siginfo *from,
+			const struct prot_siginfo *pusi)
+{
+	clear_siginfo(to);
+	to->si_signo = from->si_signo;
+	to->si_errno = from->si_errno;
+	to->si_code  = from->si_code;
+	switch (siginfo_layout(from->si_signo, from->si_code)) {
+	case SIL_KILL:
+		to->si_pid = from->si_pid;
+		to->si_uid = from->si_uid;
+		break;
+	case SIL_TIMER:
+		to->si_tid     = from->si_tid;
+		to->si_overrun = from->si_overrun;
+		to->si_int     = from->si_int;
+		break;
+	case SIL_POLL:
+		to->si_band = from->si_band;
+		to->si_fd   = from->si_fd;
+		break;
+	case SIL_FAULT:
+		to->si_addr = pusi->si_addr;
+		break;
+	case SIL_FAULT_TRAPNO:
+		to->si_addr = pusi->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		break;
+	case SIL_FAULT_MCEERR:
+		to->si_addr = pusi->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		to->si_addr_lsb = from->si_addr_lsb;
+		break;
+	case SIL_FAULT_BNDERR:
+		to->si_addr = pusi->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		to->si_lower = pusi->si_lower;
+		to->si_upper = pusi->si_upper;
+		break;
+	case SIL_FAULT_PKUERR:
+		to->si_addr = pusi->si_addr;
+#ifdef __ARCH_SI_TRAPNO
+		to->si_trapno = from->si_trapno;
+#endif
+		to->si_pkey = from->si_pkey;
+		break;
+	case SIL_FAULT_PERF_EVENT:
+		to->si_addr = pusi->si_addr;
+		to->si_perf_data = pusi->si_perf_data;
+		to->si_perf_type = pusi->si_perf_type;
+		to->si_perf_flags = pusi->si_perf_flags;
+		break;
+	case SIL_CHLD:
+		to->si_pid    = from->si_pid;
+		to->si_uid    = from->si_uid;
+		to->si_status = from->si_status;
+		to->si_utime = from->si_utime;
+		to->si_stime = from->si_stime;
+		break;
+	case SIL_RT:
+		to->si_pid = from->si_pid;
+		to->si_uid = from->si_uid;
+		if (!set_sigval_from_prot_siginfo(to, pusi)) {
+			to->si_int = from->si_int;
+		}
+		break;
+	case SIL_SYS:
+		to->si_call_addr = pusi->si_call_addr;
+		to->si_syscall   = from->si_syscall;
+		to->si_arch      = from->si_arch;
+		break;
+	}
+	return 0;
+}
+
+static int copy_siginfo_from_prot_user(int sig, kernel_siginfo_t *to,
+					 const void *usi)
+{
+	struct prot_siginfo from;
+
+	if (copy_from_user((void *)&from, usi, sizeof(struct prot_siginfo))) {
+		return -EFAULT;
+	}
+	from.si_signo = sig;
+
+	return post_copy_siginfo_from_prot_user(to, &from, (const struct prot_siginfo *)usi);
+}
+
+
+static int _copy_siginfo_from_prot_user(kernel_siginfo_t *to,
+					 const void *usi)
+{
+	struct prot_siginfo from;
+
+	if (copy_from_user((void *)&from, usi, sizeof(struct prot_siginfo))) {
+		return -EFAULT;
+	}
+
+	return post_copy_siginfo_from_prot_user(to, &from,
+				(const struct prot_siginfo *)usi);
+}
+#endif /* CONFIG_E2K && CONFIG_PROTECTED_MODE */
+
+
 /**
  *  do_sigtimedwait - wait for queued signals specified in @which
  *  @which: queued signals to wait for
@@ -3766,6 +4077,47 @@ COMPAT_SYSCALL_DEFINE4(rt_sigtimedwait_time32, compat_sigset_t __user *, uthese,
 #endif
 #endif
 
+
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+long prot_rt_sigtimedwait(
+		sigset_t __user *uthese,
+		struct prot_siginfo __user *uinfo,
+		struct __kernel_timespec __user *uts,
+		size_t sigsetsize,
+		const unsigned long unused5,
+		const unsigned long unused6,
+		const struct pt_regs *regs)
+{
+	sigset_t these;
+	struct timespec64 ts;
+	kernel_siginfo_t info;
+	int ret;
+
+	if (sigsetsize != sizeof(sigset_t))
+		return -EINVAL;
+
+	if (copy_from_user(&these, uthese, sizeof(these)))
+		return -EFAULT;
+
+	if (uts) {
+		if (get_old_timespec32(&ts, uts))
+			return -EFAULT;
+	}
+
+	ret = do_sigtimedwait(&these, &info, uts ? &ts : NULL);
+
+
+	if (ret > 0 && uinfo) {
+		if (copy_siginfo_to_prot_user(uinfo, &info))
+			ret = -EFAULT;
+	}
+
+	return ret;
+}
+#endif
+
 static inline void prepare_kill_siginfo(int sig, struct kernel_siginfo *info)
 {
 	clear_siginfo(info);
@@ -3823,6 +4175,16 @@ static int copy_siginfo_from_user_any(kernel_siginfo_t *kinfo,
 	if (in_compat_syscall())
 		return copy_siginfo_from_user32(
 			kinfo, (struct compat_siginfo __user *)info);
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	/*
+	 * Avoid hooking up protected syscalls and instead handle necessary
+	 * conversions here. Note, this is a stop-gap measure and should not be
+	 * considered a generic solution.
+	 */
+	if (TASK_IS_PROTECTED(current))
+		return _copy_siginfo_from_prot_user(
+			kinfo, (struct prot_siginfo __user *)info);
 #endif
 	return copy_siginfo_from_user(kinfo, info);
 }
@@ -4030,6 +4392,32 @@ COMPAT_SYSCALL_DEFINE3(rt_sigqueueinfo,
 }
 #endif
 
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+notrace __section(".entry.text")
+long protected_sys_rt_sigqueueinfo(const long		tgid,	/* a1 */
+				   const long		sig,	/* a2 */
+				   const void __user *uinfo, /* a3 */
+				   const unsigned long unused4,
+				   const unsigned long unused5,
+				   const unsigned long unused6,
+				   const struct pt_regs *regs)
+{
+	kernel_siginfo_t info;
+	int ret;
+
+	DebugSCP("tgid=%ld sig=%ld\n", tgid, sig);
+	ret = copy_siginfo_from_prot_user(sig, &info, uinfo);
+	if (unlikely(ret))
+		return ret;
+
+	return do_rt_sigqueueinfo(tgid, sig, &info);
+}
+#endif
+
+
+
 static int do_rt_tgsigqueueinfo(pid_t tgid, pid_t pid, int sig, kernel_siginfo_t *info)
 {
 	/* This is only valid for single tasks */
@@ -4071,6 +4459,25 @@ COMPAT_SYSCALL_DEFINE4(rt_tgsigqueueinfo,
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+notrace __section(".entry.text")
+long protected_sys_rt_tgsigqueueinfo(const long		tgid,	/* a1 */
+				     const long         tid,    /* a2 */
+				     const long		sig,	/* a3 */
+				     const void __user *uinfo, /* a4 */
+				     const unsigned long unused5,
+				     const unsigned long unused6,
+				     const struct pt_regs *regs)
+{
+	kernel_siginfo_t info;
+	int ret = copy_siginfo_from_prot_user(sig, &info, uinfo);
+	if (unlikely(ret))
+		return ret;
+
+	return do_rt_tgsigqueueinfo(tgid, tid, sig, &info);
+}
+#endif
 /*
  * For kthreads only, must not be used if cloned with CLONE_SIGHAND
  */
@@ -4327,6 +4734,96 @@ int __compat_save_altstack(compat_stack_t __user *uss, unsigned long sp)
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+static inline int bad_ap(const e2k_ptr_t *ptr, size_t size)
+{
+	e2k_ap_t ap;
+	int tag;
+
+	if (get_user_tagged_16(ap.qword, tag, ptr)) {
+		return -EFAULT;
+	}
+	if (!IS_AP(ap, tag)) {
+		return -EINVAL;
+	}
+	if ((AP_IND(ap) < 0) || (AP_IND(ap) >= AP_SIZE(ap))) {
+		return -EINVAL;
+	}
+	if (AP_SIZE(ap) - AP_IND(ap) < size) {
+		return -EINVAL;
+	}
+	return 0;
+}
+
+
+static int do_prot_sigaltstack(const struct prot_stack __user *uss_ptr,
+				 struct prot_stack __user *uoss_ptr)
+{
+	stack_t uss, uoss;
+	int ret;
+
+	if (uss_ptr) {
+		struct prot_stack uss128;
+
+		if (copy_from_user(&uss128, uss_ptr, sizeof(struct prot_stack)))
+			return -EFAULT;
+		if (bad_ap(&uss_ptr->ss_sp, uss128.ss_size)) {
+			return -EFAULT;
+		}
+		uss.ss_flags = uss128.ss_flags;
+		uss.ss_size = uss128.ss_size;
+		uss.ss_sp = (void *)AP_PTR(uss128.ss_sp);
+	}
+	ret = do_sigaltstack(uss_ptr ? &uss : NULL, &uoss,
+			     current_user_stack_pointer(),
+			     MINSIGSTKSZ);
+	if (ret >= 0 && uoss_ptr)  {
+		if (PUT_USER_AP(&uoss_ptr->ss_sp, (u64)uoss.ss_sp, uoss.ss_size,
+				0, 3) ||
+				put_user(uoss.ss_size, &uoss_ptr->ss_size) ||
+				put_user(uoss.ss_flags, &uoss_ptr->ss_flags)) {
+			return -EFAULT;
+		}
+	}
+	return ret;
+}
+
+notrace __section(".entry.text")
+long protected_sys_sigaltstack(const struct prot_stack __user *ss_128,
+				struct prot_stack __user *old_ss_128,
+				const unsigned long     unused3,
+				const unsigned long     unused4,
+				const unsigned long     unused5,
+				const unsigned long     unused6,
+				const struct pt_regs    *regs)
+
+{
+	return do_prot_sigaltstack(ss_128, old_ss_128);
+}
+
+int prot_restore_altstack(const struct prot_stack __user *uss)
+{
+	int err = do_prot_sigaltstack(uss, NULL);
+	/* squash all but -EFAULT for now */
+	return err == -EFAULT ? err : 0;
+}
+
+int __prot_save_altstack(struct prot_stack __user *uss, unsigned long sp)
+{
+	struct task_struct *t = current;
+	if (PUT_USER_AP(&uss->ss_sp, t->sas_ss_sp,
+			t->sas_ss_size,	0, 3) ||
+		__put_user(t->sas_ss_flags, &uss->ss_flags) ||
+		__put_user(t->sas_ss_size, &uss->ss_size)) {
+		return -EFAULT;
+	}
+	if (t->sas_ss_flags & SS_AUTODISARM)
+		sas_ss_reset(t);
+	return 0;
+}
+#endif
+
 #ifdef __ARCH_WANT_SYS_SIGPENDING
 
 /**
@@ -4489,6 +4986,121 @@ COMPAT_SYSCALL_DEFINE4(rt_sigaction, int, sig,
 	return ret;
 }
 #endif
+
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+long protected_sys_rt_sigaction(int sig,
+		const struct prot_sigaction __user *act,
+		struct prot_sigaction __user *oact,
+		const size_t sigsetsize)
+{
+	long rval;
+	struct k_sigaction new_ka, old_ka;
+	int tag;
+
+	DebugSCP("sig=%d, act=0x%lx, oact=0x%lx, sigsetsize=%zd\n",
+		 sig, (unsigned long)act, (unsigned long)oact, sigsetsize);
+
+	if (sigsetsize != sizeof(sigset_t)) {
+		if (sigsetsize > sizeof(sigset_t)
+			&& !(sigsetsize >> 8)) { /* reasonable positive value */
+			pr_err("%s:%d : SigSetSize seems extended beyond 64 bits.\n",
+			       __FILE__, __LINE__);
+		} else {
+			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_UNEXPECTED_ARG_VALUE,
+					     "rt_sigaction", "sigsetsize",
+					     sigsetsize, sizeof(sigset_t));
+			PM_EXCEPTION_IF_ORTH_MODE(SIGILL, ILL_ILLOPN, -EINVAL);
+		}
+		return -EINVAL;
+	}
+
+	if (act) {
+		e2k_pl_t pl;
+
+		/* Note that I intentionally ignore sa_restorer below */
+		/* because it seems to be useless on E2K. */
+		if (get_user_tagged_16(pl.qword, tag, &act->sa_handler)) {
+			DebugSCP("%s: get_user_tagged_16(%llx, %llx, tag, %px) failed\n", __func__,
+				LO(pl), HI(pl), &act->sa_handler);
+			return -EFAULT;
+		}
+		if (IS_PL(pl, tag)) {
+			new_ka.sa.sa_handler = (__sighandler_t)pl.target;
+		} else if (tag == ETAGNUM) {
+			if ((LO(pl) == (u64)SIG_DFL)) {
+				new_ka.sa.sa_handler = SIG_DFL;
+			} else if ((LO(pl) == (u64)SIG_IGN)) {
+				new_ka.sa.sa_handler = SIG_IGN;
+			} else {
+				DebugSCP("Wrong act->sa_handler tag=0x%x LO/HI=0x%llx:0x%llx sig = %d\n",
+					tag, LO(pl), HI(pl), sig);
+				return -EINVAL;
+			}
+		} else {
+			DebugSCP("Wrong act->sa_handler tag=0x%x pl=0x%llx:0x%llx sig = %d\n",
+				tag, LO(pl), HI(pl), sig);
+			return -EINVAL;
+		}
+		if (copy_from_user(&new_ka.sa.sa_mask, &act->sa_mask,
+				sizeof(new_ka.sa.sa_mask)) ||
+			get_user(new_ka.sa.sa_flags,
+				&act->sa_flags)) {
+			DebugSCP("copy_from_user or get_user failed\n");
+			return -EFAULT;
+		}
+	}
+
+	rval = do_sigaction(sig, (act) ? &new_ka : NULL,
+				(oact) ? &old_ka : NULL);
+	if (rval) {
+		DebugSCP("do_sigaction(%d, %px, %px = %ld\n", sig,
+				(act) ? &new_ka : NULL, (oact) ? &old_ka : NULL, rval);
+	}
+
+	if (!rval && oact) {
+		if (old_ka.sa.sa_handler == SIG_DFL) {
+			if (put_user_tagged_16(((e2k_qreg_t) { .lo = (u64)SIG_DFL }),
+					ETAGNUM, &oact->sa_handler)) {
+				return -EFAULT;
+			}
+		} else if (old_ka.sa.sa_handler == SIG_IGN) {
+			if (put_user_tagged_16(((e2k_qreg_t) { .lo = (u64)SIG_IGN }),
+					ETAGNUM, &oact->sa_handler)) {
+				return -EFAULT;
+			}
+		} else if (!old_ka.sa.sa_handler) {
+			if (put_user_tagged_16(((e2k_qreg_t) { .lo = 0, .hi = 0 }),
+					ETAGNUM, &oact->sa_handler)) {
+				return -EFAULT;
+			}
+		} else {
+			int cui = find_cui_by_ip((unsigned long)old_ka.sa.sa_handler);
+
+			if (cui < 0) {
+				PROTECTED_MODE_WARNING(PMSCERRMSG_SC_FAILED_TO_UPDATE_STRUCT,
+					       "rt_sigaction", "sa_handler",
+						old_ka.sa.sa_handler, (long)cui);
+				return (long)cui;
+			}
+			if (PUT_USER_PL(&oact->sa_handler, (u64)old_ka.sa.sa_handler, cui)) {
+				return -EFAULT;
+			}
+		}
+		if (copy_to_user(&oact->sa_mask, &old_ka.sa.sa_mask,
+				sizeof(old_ka.sa.sa_mask)) ||
+			   put_user(old_ka.sa.sa_flags, &oact->sa_flags)) {
+			PROTECTED_MODE_WARNING(PMSCERRMSG_SC_FAILED_TO_UPDATE_STRUCT,
+					       "rt_sigaction", "oldact", oact, rval);
+			return -EFAULT;
+		}
+	}
+
+	return rval;
+}
+
+
+#endif	/* CONFIG_PROTECTED_MODE */
 #endif /* !CONFIG_ODD_RT_SIGACTION */
 
 #ifdef CONFIG_OLD_SIGACTION

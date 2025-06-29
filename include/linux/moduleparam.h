@@ -70,7 +70,11 @@ struct kernel_param {
 	const char *name;
 	struct module *mod;
 	const struct kernel_param_ops *ops;
+#ifdef CONFIG_MCST	/* to avoid lcc warning */
+	u16 perm;
+#else
 	const u16 perm;
+#endif
 	s8 level;
 	u8 flags;
 	union {

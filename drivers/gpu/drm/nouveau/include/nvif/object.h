@@ -3,6 +3,10 @@
 #define __NVIF_OBJECT_H__
 #include <nvif/os.h>
 
+#ifdef CONFIG_E2K
+#pragma diag_suppress 3302
+#endif
+
 struct nvif_sclass {
 	s32 oclass;
 	int minver;

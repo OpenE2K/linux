@@ -216,6 +216,9 @@ void free_vm_area(struct vm_struct *area);
 extern struct vm_struct *remove_vm_area(const void *addr);
 extern struct vm_struct *find_vm_area(const void *addr);
 struct vmap_area *find_vmap_area(unsigned long addr);
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+extern struct vm_struct *find_io_vm_area(const void *addr);
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 
 static inline bool is_vm_area_hugepages(const void *addr)
 {

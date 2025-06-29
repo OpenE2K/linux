@@ -3181,7 +3181,11 @@ static int scrub_raid56_data_stripe_for_parity(struct scrub_ctx *sctx,
 	struct btrfs_root *extent_root = btrfs_extent_root(fs_info, logical);
 	struct btrfs_root *csum_root = btrfs_csum_root(fs_info, logical);
 	u64 cur_logical = logical;
+#ifdef CONFIG_MCST
+	int ret = 0;
+#else
 	int ret;
+#endif
 
 	ASSERT(map->type & BTRFS_BLOCK_GROUP_RAID56_MASK);
 

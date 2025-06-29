@@ -1,0 +1,65 @@
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "epic-vectors.h"
+
+#ifndef NODE
+# error NODE undefined
+#endif
+
+# define __PIC(_n) pic ## _n
+# define _PIC(_n) __PIC(_n)
+# define PIC _PIC(NODE)
+
+	lpic: lpic {
+		compatible = "mcst,epic";
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		interrupt-parent = <&lpic>;
+		numa-node-id = <NODE>;
+		interrupts =
+			<ERROR_EPIC_VECTOR		0>,
+			<SPURIOUS_EPIC_VECTOR		0>,
+			<EPIC_RESCHEDULE_VECTOR		0>,
+			<EPIC_CALL_FUNCTION_VECTOR	0>,
+			<EPIC_CALL_FUNCTION_SINGLE_VECTOR 0>,
+			<EPIC_IRQ_WORK_VECTOR		0>,
+			<EPIC_MANAGED_IRQ_SHUTDOWN_VECTOR 0>;
+			interrupt-names = "ERR",
+				"SPU Spurious interrupts",
+				"RES Rescheduling interrupts",
+				"CAL Function call interrupts",
+				"CAL Function single call interrupts",
+				"IWI IRQ work interrupts",
+				"IMI IRQ move cleanup interrupts";
+	};
+	lmsi: lmsi {
+		compatible = "mcst,l-msi";
+		interrupt-parent = <&lpic>;
+		msi-controller;
+	};
+	timer {
+		compatible = "mcst,lt";
+		interrupt-parent = <&PIC>;
+		interrupts = <2 IRQ_TYPE_EDGE_RISING>;
+		requester-id = <0x111>;
+		numa-node-id = <NODE>;
+	};
+	epic_timer {
+		compatible = "mcst,epic-timer";
+		interrupt-parent = <&lpic>;
+		interrupts = <CEPIC_TIMER_VECTOR 0>;
+		numa-node-id = <NODE>;
+	};
+	kvm {
+		compatible = "mcst,kvm";
+		interrupt-parent = <&lpic>;
+		interrupts =
+			<SYSRQ_SHOWSTATE_EPIC_VECTOR	0>,
+			<KVM_NMI_EPIC_VECTOR		0>,
+			<ASYNC_PF_WAKE_VECTOR		0>,
+			<CEPIC_EPIC_INT_VECTOR		0>;
+		interrupt-names =
+			"KVM SysRq showstate",
+			"KVM NMI",
+			"ASYNC PF WAKE interrupt",
+			"CEPIC EPIC interrupt";
+	};

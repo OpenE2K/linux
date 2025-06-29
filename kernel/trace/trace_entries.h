@@ -156,7 +156,12 @@ FTRACE_ENTRY_DUP(wakeup, ctx_switch_entry,
  * Stack-trace entry:
  */
 
+#ifdef CONFIG_E2K
+/* We have deep call chains... */
+#define FTRACE_STACK_ENTRIES	16
+#else
 #define FTRACE_STACK_ENTRIES	8
+#endif
 
 FTRACE_ENTRY(kernel_stack, stack_entry,
 

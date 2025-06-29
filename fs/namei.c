@@ -359,6 +359,7 @@ static int acl_permission_check(struct user_namespace *mnt_userns,
 	/* Only RWX matters for group/other mode bits */
 	mask &= 7;
 
+
 	/*
 	 * Are the group permissions different from
 	 * the other permissions in the bits we care
@@ -400,6 +401,7 @@ int generic_permission(struct user_namespace *mnt_userns, struct inode *inode,
 		       int mask)
 {
 	int ret;
+
 
 	/*
 	 * Do the basic permission checks.
@@ -508,6 +510,7 @@ int inode_permission(struct user_namespace *mnt_userns,
 	retval = sb_permission(inode->i_sb, inode, mask);
 	if (retval)
 		return retval;
+
 
 	if (unlikely(mask & MAY_WRITE)) {
 		/*

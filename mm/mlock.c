@@ -25,6 +25,9 @@
 #include <linux/memcontrol.h>
 #include <linux/mm_inline.h>
 #include <linux/secretmem.h>
+#ifdef CONFIG_MCST
+#include <uapi/linux/mcst_rt.h>
+#endif
 
 #include "internal.h"
 
@@ -720,6 +723,16 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 	if (!ret && (flags & MCL_CURRENT))
 		mm_populate(0, TASK_SIZE);
 
+#ifdef CONFIG_MCST_4RT
+	if (current->extra_flags & RT_MLOCK_CONTROL) {
+		/* RT task done mlockall() and need to check PF occurence */
+		if ((flags & MCL_CURRENT) && !(flags & MCL_ONFAULT)) {
+			down_write(&current->mm->mmap_lock);
+			current->mm->extra_vm_flags |=  VM_MLOCK_DONE;
+			up_write(&current->mm->mmap_lock);
+		}
+	}
+#endif  /* CONFIG_MCST_4RT */
 	return ret;
 }
 
@@ -730,6 +743,10 @@ SYSCALL_DEFINE0(munlockall)
 	if (mmap_write_lock_killable(current->mm))
 		return -EINTR;
 	ret = apply_mlockall_flags(0);
+#ifdef CONFIG_MCST_4RT
+	if (current->extra_flags & RT_MLOCK_CONTROL)
+		current->mm->extra_vm_flags &= ~VM_MLOCK_DONE;
+#endif /* CONFIG_MCST_4RT */
 	mmap_write_unlock(current->mm);
 	return ret;
 }

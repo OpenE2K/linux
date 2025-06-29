@@ -1275,7 +1275,7 @@ static void kbd_bh(struct tasklet_struct *unused)
 
 #if defined(CONFIG_X86) || defined(CONFIG_IA64) || defined(CONFIG_ALPHA) ||\
     defined(CONFIG_MIPS) || defined(CONFIG_PPC) || defined(CONFIG_SPARC) ||\
-    defined(CONFIG_PARISC) || defined(CONFIG_SUPERH) ||\
+    defined(CONFIG_PARISC) || defined(CONFIG_SUPERH) || defined(CONFIG_E2K) ||\
     (defined(CONFIG_ARM) && defined(CONFIG_KEYBOARD_ATKBD) && !defined(CONFIG_ARCH_RPC))
 
 static inline bool kbd_is_hw_raw(const struct input_dev *dev)
@@ -1428,11 +1428,13 @@ static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 				pr_warn("can't emulate rawmode for keycode %d\n",
 					keycode);
 
+#ifndef CONFIG_E90S
 #ifdef CONFIG_SPARC
 	if (keycode == KEY_A && sparc_l1_a_state) {
 		sparc_l1_a_state = false;
 		sun_do_break();
 	}
+#endif
 #endif
 
 	if (kbd->kbdmode == VC_MEDIUMRAW) {

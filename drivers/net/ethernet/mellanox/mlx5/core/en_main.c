@@ -39,6 +39,9 @@
 #include <linux/filter.h>
 #include <net/page_pool.h>
 #include <net/xdp_sock_drv.h>
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif
 #include "eswitch.h"
 #include "en.h"
 #include "en/txrx.h"
@@ -775,7 +778,12 @@ static int mlx5e_alloc_rq(struct mlx5e_params *params,
 		pp_params.order     = 0;
 		pp_params.flags     = 0; /* No-internal DMA mapping in page_pool */
 		pp_params.pool_size = pool_size;
+#ifdef CONFIG_E2K
+		pp_params.nid	    = l_iommu_has_numa_bug() ?
+						dev_to_node(rq->pdev) : node;
+#else
 		pp_params.nid       = node;
+#endif
 		pp_params.dev       = rq->pdev;
 		pp_params.dma_dir   = rq->buff.map_dir;
 

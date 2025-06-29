@@ -222,6 +222,17 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		spurious_oc:1;
 	unsigned		is_aspeed:1;
 	unsigned		zx_wakeup_clear_needed:1;
+#ifdef CONFIG_MCST
+	unsigned		set_type_to_last_in_list:1; /* set type to QH of
+					hw_next field for itd and sitd structu-
+					res in the last element of the list */
+	unsigned		align_descs_to_64:1; /* ehci can not handle dma
+					reodering, align descriptors to prevent
+					such cases */
+	unsigned		short_read_does_not_supported:1; /* short read
+					does not supported for low/full speed
+					devices */
+#endif
 
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
@@ -258,6 +269,9 @@ struct ehci_hcd {			/* one per controller */
 						/* us budgeted per uframe */
 	struct list_head	tt_list;
 
+#ifdef CONFIG_MCST
+	struct work_struct	iohub2_work;	/* Worker for iohub2 quirk */
+#endif
 	/* platform-specific data -- must come last */
 	unsigned long		priv[] __aligned(sizeof(s64));
 };

@@ -24,6 +24,20 @@
 #include <linux/regmap.h>
 #include <linux/watchdog.h>
 
+#ifdef CONFIG_E2K
+#include <linux/kthread.h>
+#include <linux/clocksource.h>
+#include <asm/sclkr.h>
+#include <asm/bootinfo.h>
+#endif
+
+#ifdef CONFIG_E90S
+#include <linux/kthread.h>
+#include <linux/clocksource.h>
+#include <asm-l/clk_rt.h>
+#include <asm/bootinfo.h>
+#endif
+
 /*
  * We can't determine type by probing, but if we expect pre-Linux code
  * to have set the chip up as a clock (turning on the oscillator and
@@ -203,6 +217,13 @@ struct chip_desc {
 	bool			charge_default;
 };
 
+#if defined(CONFIG_MCST)
+static atomic_t rtc4clk_src = ATOMIC_INIT(0); 
+#define MCP794XX_1_HZ_EN	0x40
+#define MCP794XX_REG_TRIM		0x08
+#	define MCP794XX_CRSTRIM		0x04
+#endif
+
 static const struct chip_desc chips[last_ds_type];
 
 static int ds1307_get_time(struct device *dev, struct rtc_time *t)
@@ -330,6 +351,15 @@ static int ds1307_set_time(struct device *dev, struct rtc_time *t)
 		t->tm_hour, t->tm_mday,
 		t->tm_mon, t->tm_year, t->tm_wday);
 
+#if defined(CONFIG_MCST)
+	if (atomic_read(&rtc4clk_src) &&  pps_debug & 1) {
+		dev_warn(ds1307->dev, "RTC set_time while RTC is used for clocksource. "
+			" %02d.%02d.%d %02d:%02d:%02d\n",
+			t->tm_mday, t->tm_mon + 1,
+			t->tm_year + 1900,
+			t->tm_hour, t->tm_min, t->tm_sec);
+	}
+#endif
 	if (t->tm_year < 100)
 		return -EINVAL;
 
@@ -455,6 +485,15 @@ static int ds1337_set_alarm(struct device *dev, struct rtc_wkalrm *t)
 	unsigned char		regs[9];
 	u8			control, status;
 	int			ret;
+
+#if defined(CONFIG_MCST)
+	if (atomic_read(&rtc4clk_src)) {
+		dev_warn(ds1307->dev, "RTC set_alarm: "
+			"RTC is used for clocksource. "
+			"Alarm functionality is disabled\n");
+		return -EINVAL;
+	}
+#endif
 
 	dev_dbg(dev, "%s secs=%d, mins=%d, "
 		"hours=%d, mday=%d, enabled=%d, pending=%d\n",
@@ -1047,6 +1086,9 @@ static const struct chip_desc chips[last_ds_type] = {
 
 static const struct i2c_device_id ds1307_id[] = {
 	{ "ds1307", ds_1307 },
+#if defined(CONFIG_MCST)
+	{ "1512ai2t", ds_1307 },
+#endif
 	{ "ds1308", ds_1308 },
 	{ "ds1337", ds_1337 },
 	{ "ds1338", ds_1338 },
@@ -1073,6 +1115,12 @@ static const struct of_device_id ds1307_of_match[] = {
 		.compatible = "dallas,ds1307",
 		.data = (void *)ds_1307
 	},
+#if defined(CONFIG_MCST)
+	{
+		.compatible = "integral,1512ai2t",
+		.data = (void *)ds_1307
+	},
+#endif
 	{
 		.compatible = "dallas,ds1308",
 		.data = (void *)ds_1308
@@ -1712,6 +1760,69 @@ static const struct regmap_config regmap_config = {
 	.val_bits = 8,
 };
 
+#if defined(CONFIG_MCST)
+static void init_pps(struct ds1307 *ds1307)
+{
+		dev_warn(ds1307->dev, "RTC dev.id=%d\n", ds1307->dev->id);
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	if (machine.native_iset_ver >= E2K_ISET_V3 &&
+		(sclkr_mode == -1 || sclkr_mode == SCLKR_RTC) &&
+		/* only first RTC is used for SCLKR while there is now flag which */
+		(atomic_cmpxchg(&rtc4clk_src, 0, 1) == 0)) {
+		
+		int	error;
+		static struct task_struct *sclkregistask;
+
+		regmap_write(ds1307->regmap, MCP794XX_REG_CONTROL, MCP794XX_1_HZ_EN);
+		sclkregistask = kthread_run(sclk_register,
+			(void *)SCLKR_RTC, "sclkregister");
+		if (IS_ERR(sclkregistask)) {
+			error = PTR_ERR(sclkregistask);
+			dev_err(ds1307->dev, "Failed to start sclk register thread, error: %d\n",
+				error);
+		}
+		dev_warn(ds1307->dev, "RTC dev.id=%d is used for clocksource."
+					" Alarm functionality is disabled\n", ds1307->dev->id);
+		if (1 || /* it is usefull for sclkr to turn off OSCTRIM but not for bug only */
+			cpu_has(CPU_HWBUG_SCLKM1_DIV)) {
+			int trim_val;
+			regmap_read(ds1307->regmap, MCP794XX_REG_TRIM,
+								&trim_val);
+			if (trim_val != 0) {
+				dev_warn(ds1307->dev, "WARNING: RTC OSCTRIM register=%x != 0. Set it to 0\n",
+					trim_val);
+				regmap_write(ds1307->regmap,
+					MCP794XX_REG_TRIM, 0);
+			}
+		}
+		clear_bit(RTC_FEATURE_ALARM, ds1307->rtc->features);
+	}
+#endif
+#if defined(CONFIG_E90S)
+	if (clk_rt_enabled() &&
+		/* only first RTC is used for SCLKR while there is now flag which */
+		atomic_cmpxchg(&rtc4clk_src, 0, 1) == 0) {
+		int	error;
+		static struct task_struct *clk_rt_registask;
+
+		regmap_write(ds1307->regmap, MCP794XX_REG_CONTROL, MCP794XX_1_HZ_EN);
+		if (atomic_inc_and_test(&num_clk_rt_register)) {
+			clk_rt_registask = kthread_run(clk_rt_register,
+				(void *)CLK_RT_RTC, "clk_rt_register");
+			if (IS_ERR(clk_rt_registask)) {
+				error = PTR_ERR(clk_rt_registask);
+				dev_err(ds1307->dev, "Failed to start clk_rt register thread, error: %d\n",
+					error);
+			}
+		}
+		dev_warn(ds1307->dev, "RTC is used for clocksource. Alarm functionality is disabled\n");
+		clear_bit(RTC_FEATURE_ALARM, ds1307->rtc->features);
+	}
+#endif
+	return;
+}
+#endif
+
 static int ds1307_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
@@ -1725,6 +1836,9 @@ static int ds1307_probe(struct i2c_client *client,
 	unsigned char		regs[8];
 	struct ds1307_platform_data *pdata = dev_get_platdata(&client->dev);
 	u8			trickle_charger_setup = 0;
+#if defined(CONFIG_MCST)
+	char *nvram_name;
+#endif
 
 	ds1307 = devm_kzalloc(&client->dev, sizeof(struct ds1307), GFP_KERNEL);
 	if (!ds1307)
@@ -1982,9 +2096,24 @@ static int ds1307_probe(struct i2c_client *client,
 	if (err)
 		return err;
 
+#if defined(CONFIG_MCST)
+	init_pps(ds1307);
+#endif
+
+#if defined(CONFIG_MCST)
+	/* ds1307 type is used for 1512ai2t rtc */
+	if (ds1307->type == ds_1307)
+		nvram_name = "1512ai2t_nvram";
+	else
+		nvram_name = "ds1307_nvram";
+#endif
 	if (chip->nvram_size) {
 		struct nvmem_config nvmem_cfg = {
+#if defined(CONFIG_MCST)
+			.name = nvram_name,
+#else
 			.name = "ds1307_nvram",
+#endif
 			.word_size = 1,
 			.stride = 1,
 			.size = chip->nvram_size,
@@ -2006,10 +2135,44 @@ exit:
 	return err;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#ifdef CONFIG_PM
+static int ds1307_rtc_suspend(struct device *dev)
+{
+	dev_warn(dev, "DEBUG: ds1307_rtc_suspend.\n");
+	if (strcmp(curr_clocksource->name, "sclkr") == 0) {
+		if (timekeeping_notify(&lt_cs)) {
+			pr_warn("susp_sclkr: can't set lt clocksourse\n");
+		}
+	}
+	return 0;
+}
+
+static int ds1307_rtc_resume(struct device *dev)
+{
+	struct ds1307	*ds1307 = dev_get_drvdata(dev);
+
+	dev_warn(dev, "DEBUG: ds1307_rtc_resume.\n");
+	init_pps(ds1307);
+	return 0;
+}
+#else
+#define ds1307_rtc_suspend NULL
+#define ds1307_rtc_resume NULL
+#endif
+static const struct dev_pm_ops ds1307_rtc_pm_ops = {
+	.suspend = ds1307_rtc_suspend,
+	.resume = ds1307_rtc_resume,
+};
+#endif
+
 static struct i2c_driver ds1307_driver = {
 	.driver = {
 		.name	= "rtc-ds1307",
 		.of_match_table = ds1307_of_match,
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+		.pm = &ds1307_rtc_pm_ops,
+#endif
 	},
 	.probe		= ds1307_probe,
 	.id_table	= ds1307_id,

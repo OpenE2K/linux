@@ -1,0 +1,53 @@
+
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#ifndef _E2K_PAGE_SIZE_H
+#define _E2K_PAGE_SIZE_H
+
+#include <linux/const.h>
+
+#define IOREMAP_MAX_ORDER PMD_SHIFT
+#define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
+
+#define	E2K_4K_PAGE_SHIFT		12		/*  4 KBytes page */
+#define	E2K_2M_PAGE_SHIFT		21		/*  2 MBytes page */
+#define E2K_1G_PAGE_SHIFT		30		/*  1 GBytes page */
+
+#define	E2K_SMALL_PAGE_SHIFT		E2K_4K_PAGE_SHIFT
+
+#define	E2K_LARGE_PAGE_SHIFT		E2K_2M_PAGE_SHIFT
+#define	BOOT_E2K_LARGE_PAGE_SHIFT	E2K_2M_PAGE_SHIFT
+
+#define E2K_GIANT_PAGE_SHIFT		E2K_1G_PAGE_SHIFT
+
+/*  4 KBytes page */
+#define	PAGE_SHIFT			E2K_SMALL_PAGE_SHIFT
+
+#ifndef __ASSEMBLY__
+#define	E2K_2M_PAGE_SIZE		(1UL << E2K_2M_PAGE_SHIFT)
+#endif /* !(__ASSEMBLY__) */
+
+#define	E2K_SMALL_PAGE_SIZE		(1 << E2K_SMALL_PAGE_SHIFT)
+
+#define	E2K_LARGE_PAGE_SIZE		(1 << E2K_LARGE_PAGE_SHIFT)
+#define	BOOT_E2K_LARGE_PAGE_SIZE	(1 << BOOT_E2K_LARGE_PAGE_SHIFT)
+
+#define E2K_GIANT_PAGE_SIZE		(1 << E2K_1G_PAGE_SHIFT)
+
+#define PAGE_SIZE			_BITUL(PAGE_SHIFT)
+#define LARGE_PAGE_SIZE			E2K_LARGE_PAGE_SIZE
+#define GIANT_PAGE_SIZE			E2K_GIANT_PAGE_SIZE
+
+#define E2K_MAX_PAGE_SIZE		(1 << E2K_2M_PAGE_SHIFT)
+
+#define	PAGE_MASK			(~(PAGE_SIZE - 1))
+
+#define HPAGE_SHIFT			E2K_LARGE_PAGE_SHIFT
+#define HPAGE_SIZE			((1UL) << HPAGE_SHIFT)
+#define HUGETLB_PAGE_ORDER		(HPAGE_SHIFT - PAGE_SHIFT)
+#define HUGE_MAX_HSTATE			2
+
+#endif /* _E2K_PAGE_SIZE_H */

@@ -697,7 +697,11 @@ static int ti_sn_attach_host(struct auxiliary_device *adev, struct ti_sn65dsi86 
 	/* TODO: setting to 4 MIPI lanes always for now */
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
+#ifdef CONFIG_MCST /* dw-mipi-dsi.c can work only with this */
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO_BURST;
+#else
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO;
+#endif
 
 	/* check if continuous dsi clock is required or not */
 	pm_runtime_get_sync(dev);
@@ -762,6 +766,16 @@ ti_sn_bridge_mode_valid(struct drm_bridge *bridge,
 			const struct drm_display_info *info,
 			const struct drm_display_mode *mode)
 {
+#ifdef CONFIG_MCST
+	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
+	unsigned bit_rate_mhz = (mode->clock / 1000) *
+			mipi_dsi_pixel_format_to_bpp(pdata->dsi->format);
+	unsigned clk_freq_mhz = bit_rate_mhz / (pdata->dsi->lanes * 2);
+
+	if (clk_freq_mhz > 750)
+		return MODE_CLOCK_HIGH;
+#endif
+
 	/* maximum supported resolution is 4K at 60 fps */
 	if (mode->clock > 594000)
 		return MODE_CLOCK_HIGH;

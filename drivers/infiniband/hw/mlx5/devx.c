@@ -2225,7 +2225,12 @@ static unsigned int devx_umem_find_best_pgsize(struct ib_umem *umem,
 	/* Don't bother checking larger page sizes as offset must be zero and
 	 * total DEVX umem length must be equal to total umem length.
 	 */
+#ifdef CONFIG_E2K
+	/* bug #137715 */
+	pgsz_bitmap &= __GENMASK_ULL(max_t(u64, order_base_2(umem->length),
+#else
 	pgsz_bitmap &= GENMASK_ULL(max_t(u64, order_base_2(umem->length),
+#endif
 					 PAGE_SHIFT),
 				   MLX5_ADAPTER_PAGE_SHIFT);
 	if (!pgsz_bitmap)
@@ -2275,7 +2280,12 @@ static int devx_umem_reg_cmd_alloc(struct mlx5_ib_dev *dev,
 	 */
 	ret = uverbs_get_const_default(&pgsz_bitmap, attrs,
 			MLX5_IB_ATTR_DEVX_UMEM_REG_PGSZ_BITMAP,
+#ifdef CONFIG_E2K
+			/* bug #137715 */
+			__GENMASK_ULL(63,
+#else
 			GENMASK_ULL(63,
+#endif
 				    min(PAGE_SHIFT, MLX5_ADAPTER_PAGE_SHIFT)));
 	if (ret)
 		return ret;

@@ -4,6 +4,10 @@
 
 #include <asm/page_64_types.h>
 
+#ifdef CONFIG_MCST
+#include <asm/cpufeatures.h>
+#endif
+
 #ifndef __ASSEMBLY__
 #include <asm/cpufeatures.h>
 #include <asm/alternative.h>

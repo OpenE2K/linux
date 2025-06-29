@@ -30,6 +30,10 @@
 #include <linux/vmalloc.h>
 #include <trace/events/swiotlb.h>
 
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif 
+ 
 #include "dma-iommu.h"
 
 struct iommu_dma_msi_page {
@@ -910,10 +914,117 @@ static void iommu_dma_free_noncontiguous(struct device *dev, size_t size,
 	kfree(sh);
 }
 
+#ifdef CONFIG_E2K
+#define IO_PAGE_SHIFT		12
+#define IO_PAGE_SIZE		(1UL << IO_PAGE_SHIFT)
+#define IO_PAGE_MASK		(~(IO_PAGE_SIZE-1))
+#define IO_PAGE_ALIGN(addr)	ALIGN(addr, IO_PAGE_SIZE)
+
+enum l_dma_sync_target {
+	SYNC_FOR_CPU = 0,
+	SYNC_FOR_DEVICE = 1,
+};
+
+static bool l_dom_iova_hi(unsigned long iova)
+{
+	return iova & (~0UL << 32) ? true : false;
+}
+
+static unsigned l_dom_page_indx(struct iommu_domain *d, unsigned long iova)
+{
+	if (!l_dom_iova_hi(iova))
+		return iova / IO_PAGE_SIZE;
+
+	return (iova - d->map_base) / IO_PAGE_SIZE;
+}
+
+static phys_addr_t l_dom_lookup_buffer(struct iommu_domain *d,
+				     unsigned long iova)
+{
+	void *p;
+	unsigned long flags;
+	unsigned i = l_dom_page_indx(d, iova);
+	if (!l_dom_iova_hi(iova))
+		return d->orig_phys_lo[i];
+
+	read_lock_irqsave(&d->lock_hi, flags);
+	p = idr_find(&d->idr_hi, i);
+	read_unlock_irqrestore(&d->lock_hi, flags);
+
+	return (phys_addr_t)p;
+}
+
+static void __l_sync_single(struct iommu_domain *d,
+				dma_addr_t iova, size_t sz,
+				enum dma_data_direction dir,
+				enum l_dma_sync_target target)
+{
+	phys_addr_t orig_phys, phys;
+	unsigned offset = offset_in_page(iova);
+
+	orig_phys = l_dom_lookup_buffer(d, iova);
+	if (!orig_phys)
+		return;
+
+	phys = iommu_iova_to_phys(d, iova);
+
+	switch (target) {
+	case SYNC_FOR_CPU:
+		if (dir == DMA_FROM_DEVICE || dir == DMA_BIDIRECTIONAL) {
+			void *to   = __va(orig_phys) + offset;
+			void *from = __va(phys)      + offset;
+			memcpy(to, from, sz);
+		} else {
+			BUG_ON(dir != DMA_TO_DEVICE);
+		}
+		break;
+	case SYNC_FOR_DEVICE:
+		if (dir == DMA_TO_DEVICE || dir == DMA_BIDIRECTIONAL) {
+			void *from = __va(orig_phys) + offset;
+			void   *to = __va(phys)      + offset;
+			memcpy(to, from, sz);
+		} else {
+			BUG_ON(dir != DMA_FROM_DEVICE);
+		}
+		break;
+	default:
+		BUG();
+	}
+}
+
+#define offset_in_iopage(p) (((unsigned long)p) % IO_PAGE_SIZE)
+
+static void l_sync_single(struct iommu_domain *d,
+				dma_addr_t iova, size_t sz,
+				enum dma_data_direction dir,
+				enum l_dma_sync_target target)
+{
+	if (!l_iommu_supported())
+		return;
+	do {
+		unsigned this_step = min((IO_PAGE_SIZE -
+						offset_in_iopage(iova)), sz);
+
+		__l_sync_single(d, iova, this_step, dir, target);
+
+		sz   -= this_step;
+		iova += this_step;
+	} while (sz > 0);
+}
+#endif /* CONFIG_E2K */
+
 static void iommu_dma_sync_single_for_cpu(struct device *dev,
 		dma_addr_t dma_handle, size_t size, enum dma_data_direction dir)
 {
 	phys_addr_t phys;
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		struct iommu_domain *d = iommu_get_dma_domain(dev);
+		l_sync_single(d, dma_handle, size, dir, SYNC_FOR_CPU);
+		return;
+	}
+#endif
 
 	if (dev_is_dma_coherent(dev) && !dev_use_swiotlb(dev))
 		return;
@@ -930,6 +1041,14 @@ static void iommu_dma_sync_single_for_device(struct device *dev,
 		dma_addr_t dma_handle, size_t size, enum dma_data_direction dir)
 {
 	phys_addr_t phys;
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		struct iommu_domain *d = iommu_get_dma_domain(dev);
+		l_sync_single(d, dma_handle, size, dir, SYNC_FOR_DEVICE);
+		return;
+	}
+#endif
 
 	if (dev_is_dma_coherent(dev) && !dev_use_swiotlb(dev))
 		return;
@@ -949,6 +1068,18 @@ static void iommu_dma_sync_sg_for_cpu(struct device *dev,
 	struct scatterlist *sg;
 	int i;
 
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		for_each_sg(sgl, sg, nelems, i) {
+			if (sg_dma_len(sg) == 0)
+				break;
+			iommu_dma_sync_single_for_cpu(dev, sg_dma_address(sg),
+					sg_dma_len(sg), dir);
+		}
+		return;
+	}
+#endif
+
 	if (dev_use_swiotlb(dev))
 		for_each_sg(sgl, sg, nelems, i)
 			iommu_dma_sync_single_for_cpu(dev, sg_dma_address(sg),
@@ -964,6 +1095,19 @@ static void iommu_dma_sync_sg_for_device(struct device *dev,
 {
 	struct scatterlist *sg;
 	int i;
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug()) {
+		for_each_sg(sgl, sg, nelems, i) {
+			if (sg_dma_len(sg) == 0)
+				break;
+			iommu_dma_sync_single_for_device(dev,
+					sg_dma_address(sg),
+					sg_dma_len(sg), dir);
+		}
+		return;
+	}
+#endif
 
 	if (dev_use_swiotlb(dev))
 		for_each_sg(sgl, sg, nelems, i)
@@ -1028,6 +1172,13 @@ static dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
 	iova = __iommu_dma_map(dev, phys, size, prot, dma_mask);
 	if (iova == DMA_MAPPING_ERROR && is_swiotlb_buffer(dev, phys))
 		swiotlb_tbl_unmap_single(dev, phys, size, dir, attrs);
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug() && !(attrs & DMA_ATTR_SKIP_CPU_SYNC) &&
+			iova != DMA_MAPPING_ERROR)
+		iommu_dma_sync_single_for_device(dev, iova, size, dir);
+#endif
+
 	return iova;
 }
 
@@ -1198,6 +1349,9 @@ static int iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	unsigned long mask = dma_get_seg_boundary(dev);
 	ssize_t ret;
 	int i;
+#ifdef CONFIG_E2K
+	int res;
+#endif
 
 	if (static_branch_unlikely(&iommu_deferred_attach_enabled)) {
 		ret = iommu_deferred_attach(dev, domain);
@@ -1291,7 +1445,14 @@ static int iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	if (ret < 0 || ret < iova_len)
 		goto out_free_iova;
 
+#ifndef CONFIG_E2K
 	return __finalise_sg(dev, sg, nents, iova);
+#else
+	res = __finalise_sg(dev, sg, nents, iova);
+	if (!(attrs & DMA_ATTR_SKIP_CPU_SYNC))
+		iommu_dma_sync_sg_for_device(dev, sg, nents, dir);
+	return res;
+#endif
 
 out_free_iova:
 	iommu_dma_free_iova(cookie, iova, iova_len, NULL);
@@ -1367,7 +1528,12 @@ static void iommu_dma_unmap_resource(struct device *dev, dma_addr_t handle,
 	__iommu_dma_unmap(dev, handle, size);
 }
 
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+static void __iommu_dma_free(struct device *dev, size_t size,
+			      void *cpu_addr, unsigned long attrs)
+#else
 static void __iommu_dma_free(struct device *dev, size_t size, void *cpu_addr)
+#endif
 {
 	size_t alloc_size = PAGE_ALIGN(size);
 	int count = alloc_size >> PAGE_SHIFT;
@@ -1402,7 +1568,11 @@ static void iommu_dma_free(struct device *dev, size_t size, void *cpu_addr,
 		dma_addr_t handle, unsigned long attrs)
 {
 	__iommu_dma_unmap(dev, handle, size);
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+	__iommu_dma_free(dev, size, cpu_addr, attrs);
+#else
 	__iommu_dma_free(dev, size, cpu_addr);
+#endif
 }
 
 static void *iommu_dma_alloc_pages(struct device *dev, size_t size,
@@ -1450,10 +1620,34 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 	struct page *page = NULL;
 	void *cpu_addr;
 
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug())	/* force the allocation from */
+		gfp |= __GFP_THISNODE;	/* the device node */
+#endif
+
 	gfp |= __GFP_ZERO;
 
 	if (gfpflags_allow_blocking(gfp) &&
 	    !(attrs & DMA_ATTR_FORCE_CONTIGUOUS)) {
+#if defined CONFIG_MCST && defined CONFIG_E2K
+		/*
+		 * Optimization: first try to allocate memory directly
+		 * from linear area, because allocating through vmalloc()
+		 * is slow on e2k for 2 reasons:
+		 *  - it uses flush_cache_vmap() which is not null on e2k;
+		 *  - e2k (like x86) requires using set_memory_uc/wc()
+		 *    functions, and they are slower for VMALLOC area.
+		 */
+		cpu_addr = iommu_dma_alloc_pages(dev, size, &page, gfp | __GFP_NOWARN, attrs);
+		if (likely(cpu_addr)) {
+			*handle = __iommu_dma_map(dev, page_to_phys(page), size,
+						  ioprot, dev->coherent_dma_mask);
+			if (likely(*handle != DMA_MAPPING_ERROR)) {
+				return cpu_addr;
+			}
+			__iommu_dma_free(dev, size, cpu_addr, attrs);
+		}
+#endif
 		return iommu_dma_alloc_remap(dev, size, handle, gfp,
 				dma_pgprot(dev, PAGE_KERNEL, attrs), attrs);
 	}
@@ -1470,7 +1664,11 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 	*handle = __iommu_dma_map(dev, page_to_phys(page), size, ioprot,
 			dev->coherent_dma_mask);
 	if (*handle == DMA_MAPPING_ERROR) {
+#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
+		__iommu_dma_free(dev, size, cpu_addr, attrs);
+#else
 		__iommu_dma_free(dev, size, cpu_addr);
+#endif
 		return NULL;
 	}
 

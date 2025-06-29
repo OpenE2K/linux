@@ -194,12 +194,14 @@ define do_install_plugins
        done
 endef
 
+# MCST (bug 125573): "sed -e 's/@@.*//'" added below to workaround
+# compilation problem with binutils-2.35
 define do_generate_dynamic_list_file
 	symbol_type=`$(NM) -u -D $1 | awk 'NF>1 {print $$1}' | \
 	xargs echo "U w W" | tr 'w ' 'W\n' | sort -u | xargs echo`;\
 	if [ "$$symbol_type" = "U W" ];then				\
 		(echo '{';                                              \
-		$(NM) -u -D $1 | awk 'NF>1 {sub("@.*", "", $$2); print "\t"$$2";"}' | sort -u;\
+		$(NM) -u -D $1 | sed -e 's/@@.*//' | awk 'NF>1 {sub("@.*", "", $$2); print "\t"$$2";"}' | sort -u;\
 		echo '};';                                              \
 		) > $2;                                                 \
 	else                                                            \

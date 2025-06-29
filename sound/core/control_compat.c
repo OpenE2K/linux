@@ -164,6 +164,20 @@ struct snd_ctl_elem_value_x32 {
 };
 #endif /* CONFIG_X86_X32_ABI */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+/* x86_32 has a different alignment for 64bit values from e2k32 */
+struct snd_ctl_elem_value_bc32 {
+	struct snd_ctl_elem_id id;
+	unsigned int indirect;	/* bit-field causes misalignment */
+	union {
+		s32 integer[128];
+		unsigned char data[512];
+		bc32_misaligned_s64 integer64[64];
+	} value;
+	unsigned char reserved[128];
+};
+#endif
+
 /* get the value type and count of the control */
 static int get_ctl_type(struct snd_card *card, struct snd_ctl_elem_id *id,
 			int *countp)
@@ -361,6 +375,20 @@ static int snd_ctl_elem_write_user_x32(struct snd_ctl_file *file,
 }
 #endif /* CONFIG_X86_X32_ABI */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+static int snd_ctl_elem_read_user_bc32(struct snd_card *card,
+				      struct snd_ctl_elem_value_bc32 __user *data32)
+{
+	return ctl_elem_read_user(card, data32, &data32->value);
+}
+
+static int snd_ctl_elem_write_user_bc32(struct snd_ctl_file *file,
+				       struct snd_ctl_elem_value_bc32 __user *data32)
+{
+	return ctl_elem_write_user(file, data32, &data32->value);
+}
+#endif
+
 /* add or replace a user control */
 static int snd_ctl_elem_add_compat(struct snd_ctl_file *file,
 				   struct snd_ctl_elem_info32 __user *data32,
@@ -422,6 +450,10 @@ enum {
 	SNDRV_CTL_IOCTL_ELEM_READ_X32 = _IOWR('U', 0x12, struct snd_ctl_elem_value_x32),
 	SNDRV_CTL_IOCTL_ELEM_WRITE_X32 = _IOWR('U', 0x13, struct snd_ctl_elem_value_x32),
 #endif /* CONFIG_X86_X32_ABI */
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	SNDRV_IOCTL_ELEM_READ_BC32 = _IOWR('U', 0x12, struct snd_ctl_elem_value_bc32),
+	SNDRV_IOCTL_ELEM_WRITE_BC32 = _IOWR('U', 0x13, struct snd_ctl_elem_value_bc32),
+#endif
 };
 
 static inline long snd_ctl_ioctl_compat(struct file *file, unsigned int cmd, unsigned long arg)
@@ -466,6 +498,12 @@ static inline long snd_ctl_ioctl_compat(struct file *file, unsigned int cmd, uns
 	case SNDRV_CTL_IOCTL_ELEM_WRITE_X32:
 		return snd_ctl_elem_write_user_x32(ctl, argp);
 #endif /* CONFIG_X86_X32_ABI */
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	case SNDRV_IOCTL_ELEM_READ_BC32:
+		return snd_ctl_elem_read_user_bc32(ctl->card, argp);
+	case SNDRV_IOCTL_ELEM_WRITE_BC32:
+		return snd_ctl_elem_write_user_bc32(ctl, argp);
+#endif
 	}
 
 	down_read(&snd_ioctl_rwsem);

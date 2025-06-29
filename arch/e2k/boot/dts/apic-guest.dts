@@ -1,0 +1,34 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+
+/dts-v1/;
+/plugin/;
+
+#ifndef CELLS
+#define CELLS 2
+#endif
+
+#ifndef SIZE_CELLS
+#define SIZE_CELLS CELLS
+#endif
+
+# define __PIC(_n) pic ## _n
+# define _PIC(_n) __PIC(_n)
+# define PIC _PIC(NODE)
+
+
+&{/} {
+	#address-cells = <CELLS>;
+	#size-cells = <SIZE_CELLS>;
+
+
+#define NODE 0
+#include "include/e2s.dtsi"
+#include "include/e2s-node.dtsi"
+#include "include/iohub-guest.dtsi"
+#undef NODE
+
+};

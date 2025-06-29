@@ -1,0 +1,12 @@
+menu "MCST Vivante GPU support (galcore v7.0.0.36)"
+	depends on DRM
+
+config MCST_GPU_VIV_E8V7
+	tristate "Vivante GPU support for E8V7 SoC (galcore v7.0.0.36)"
+	depends on ARCH_FORCE_MAX_ORDER > 15 && CPU_E8V7
+	select DRM_VM
+	default m
+	help
+         Say Y to get the GPU driver support.
+
+endmenu

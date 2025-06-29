@@ -506,9 +506,25 @@ void print_events(const char *event_glob, bool name_only, bool quiet_flag,
 		return;
 
 	if (!name_only) {
+#ifdef __e2k__
+		if (__builtin_cpu_is("elbrus-v3") || __builtin_cpu_is("elbrus-v4") ||
+		    __builtin_cpu_is("elbrus-v5") || __builtin_cpu_is("elbrus-v6")) {
+			printf("  %-50s [%s]\n",
+			       "rMNN where M=0/1 (DDM), M=2/3 (DIM), NN - event",
+			       event_type_descriptors[PERF_TYPE_RAW]);
+		} else {
+			printf("  %-50s [%s]\n",
+			       "rMNN where M=0/1 (DDM), M=2/3 (DIM), M=6/7 (DDM1), M=8/9 (DIM1), NN - event",
+			       event_type_descriptors[PERF_TYPE_RAW]);
+		}
+		printf("  %-50s [%s]\n",
+		       "rID00NN where I - DIM mask, D - DDM mask, NN - event",
+		       event_type_descriptors[PERF_TYPE_RAW]);
+#else
 		printf("  %-50s [%s]\n",
 		       "rNNN",
 		       event_type_descriptors[PERF_TYPE_RAW]);
+#endif
 		printf("  %-50s [%s]\n",
 		       "cpu/t1=v1[,t2=v2,t3 ...]/modifier",
 		       event_type_descriptors[PERF_TYPE_RAW]);

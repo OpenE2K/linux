@@ -1059,6 +1059,24 @@ bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 	hdr->size = size;
 	hole = min_t(unsigned int, size - (proglen + sizeof(*hdr)),
 		     PAGE_SIZE - sizeof(*hdr));
+#ifdef CONFIG_E2K
+	/*
+	 * If `hole' is greater than PAGE_SIZE - 0x140, `start' can also be
+	 * greater than PAGE_SIZE - 0x140. In this case e2k JIT compiler with
+	 * CPU_HWBUG_CODE_PLACEMENT workaround will move the start of jited program
+	 * from 'bad' region [0xee0 - 0xff8]. So the pointer to jited program
+	 * will be the start of the next page, and arch-independent BPF JIT
+	 * deallocator `bpf_jit_free()' will fail to free program's memory
+	 * correctly.
+	 *
+	 * 0x140 is a sum of:
+	 * 1) 0x1000 - 0xee0 = 0x120 - the length of 'bad' region;
+	 * 2) 0x8 = offsetof(struct bpf_binary_header, image);
+	 * 3) 0x8 - 'tail call offset' in eBPF JIT;
+	 * 4) 0x10 - just in case;
+	 */
+	hole = min_t(unsigned int, hole, PAGE_SIZE - 0x140);
+#endif /* CONFIG_E2K */
 	start = prandom_u32_max(hole) & ~(alignment - 1);
 
 	/* Leave a random number of instructions before BPF code. */

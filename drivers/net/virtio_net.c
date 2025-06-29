@@ -3332,7 +3332,11 @@ static void virtnet_config_changed_work(struct work_struct *work)
 {
 	struct virtnet_info *vi =
 		container_of(work, struct virtnet_info, config_work);
+#ifndef CONFIG_MCST
 	u16 v;
+#else
+	u16 v = 0;
+#endif
 
 	if (virtio_cread_feature(vi->vdev, VIRTIO_NET_F_STATUS,
 				 struct virtio_net_config, status, &v) < 0)
@@ -3764,7 +3768,11 @@ static int virtnet_probe(struct virtio_device *vdev)
 	int i, err = -ENOMEM;
 	struct net_device *dev;
 	struct virtnet_info *vi;
+#ifndef CONFIG_MCST
 	u16 max_queue_pairs;
+#else
+	u16 max_queue_pairs = 0;
+#endif
 	int mtu = 0;
 
 	/* Find if host supports multiqueue/rss virtio_net device */
@@ -3772,7 +3780,7 @@ static int virtnet_probe(struct virtio_device *vdev)
 	if (virtio_has_feature(vdev, VIRTIO_NET_F_MQ) || virtio_has_feature(vdev, VIRTIO_NET_F_RSS))
 		max_queue_pairs =
 		     virtio_cread16(vdev, offsetof(struct virtio_net_config, max_virtqueue_pairs));
-
+ 
 	/* We need at least 2 queue's */
 	if (max_queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN ||
 	    max_queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX ||

@@ -43,9 +43,17 @@ static void end_swap_bio_write(struct bio *bio)
 		 * Also clear PG_reclaim to avoid folio_rotate_reclaimable()
 		 */
 		set_page_dirty(page);
+#ifdef CONFIG_MCST
+		pr_alert_ratelimited("%s: Write-error %d on swap-device (%u:%u:%llu)\n",
+			 current->comm, bio->bi_status,
+			 MAJOR(bio_dev(bio)), MINOR(bio_dev(bio)),
+			 (unsigned long long)bio->bi_iter.bi_sector);
+
+#else
 		pr_alert_ratelimited("Write-error on swap-device (%u:%u:%llu)\n",
 				     MAJOR(bio_dev(bio)), MINOR(bio_dev(bio)),
 				     (unsigned long long)bio->bi_iter.bi_sector);
+#endif
 		ClearPageReclaim(page);
 	}
 	end_page_writeback(page);

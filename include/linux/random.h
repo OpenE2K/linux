@@ -169,7 +169,9 @@ declare_get_random_var_wait(long, unsigned long)
  * users, but for now we include it from <linux/random.h>
  * for legacy reasons.
  */
+#ifndef CONFIG_MCST	/* Header cycle break: linux/prandom.h <-> linux/random.h */
 #include <linux/prandom.h>
+#endif
 
 #include <asm/archrandom.h>
 

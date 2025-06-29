@@ -8,6 +8,10 @@
 #include <generated/utsrelease.h>
 #include <linux/crash_dump.h>
 
+#ifdef CONFIG_E2K_DCA
+#include <linux/dca.h>
+#endif
+
 /* Local includes */
 #include "i40e.h"
 #include "i40e_diag.h"
@@ -3474,6 +3478,11 @@ static int i40e_configure_tx_ring(struct i40e_ring *ring)
 	tx_ctx.fd_ena = !!(vsi->back->flags & (I40E_FLAG_FD_SB_ENABLED |
 					       I40E_FLAG_FD_ATR_ENABLED));
 	tx_ctx.timesync_ena = !!(vsi->back->flags & I40E_FLAG_PTP);
+
+#ifdef CONFIG_E2K_DCA
+	tx_ctx.tphwdesc_ena = !!(vsi->back->flags & I40E_FLAG_TPH_ENABLED);
+#endif
+
 	/* FDIR VSI tx ring can still use RS bit and writebacks */
 	if (vsi->type != I40E_VSI_FDIR)
 		tx_ctx.head_wb_ena = 1;
@@ -3639,6 +3648,10 @@ static int i40e_configure_rx_ring(struct i40e_ring *ring)
 	rx_ctx.showiv = 0;
 	/* set the prefena field to 1 because the manual says to */
 	rx_ctx.prefena = 1;
+
+#ifdef CONFIG_E2K_DCA
+	rx_ctx.tphwdesc_ena = !!(vsi->back->flags & I40E_FLAG_TPH_ENABLED);
+#endif
 
 	/* clear the context in the HMC */
 	err = i40e_clear_lan_rx_queue_context(hw, pf_q);
@@ -16158,6 +16171,30 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		}
 	}
 
+#ifdef CONFIG_E2K_DCA
+	{
+		u32 pci_dword;
+		int pos;
+
+		pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_TPH);
+		if (!pos) {
+			dev_info(&pdev->dev, "No TPH Requester Capability found. DCA disabled\n");
+			goto no_dca;
+		}
+
+		if (is_e2k_dca_enabled(pdev))
+			goto no_dca;
+
+		pci_read_config_dword(pdev, pos + PCI_TPH_CTRL, &pci_dword);
+		/* [9:8] = 11b - a card is permitted to issue transactions
+		 *  with TPH and Extended TPH as Requester
+		 */
+		pci_dword |= 0x300;
+		pci_write_config_dword(pdev, pos + PCI_TPH_CTRL, pci_dword);
+		pf->flags |= I40E_FLAG_TPH_ENABLED;
+	}
+no_dca:
+#endif
 	/* get the requested speeds from the fw */
 	err = i40e_aq_get_phy_capabilities(hw, false, false, &abilities, NULL);
 	if (err)

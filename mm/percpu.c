@@ -3200,6 +3200,7 @@ void __init __weak pcpu_populate_pte(unsigned long addr)
 		p4d_t *new;
 
 		new = memblock_alloc(P4D_TABLE_SIZE, P4D_TABLE_SIZE);
+
 		if (!new)
 			goto err_alloc;
 		pgd_populate(&init_mm, pgd, new);
