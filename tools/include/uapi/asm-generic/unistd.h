@@ -860,8 +860,17 @@ __SYSCALL(__NR_faccessat2, sys_faccessat2)
 #define __NR_process_madvise 440
 __SYSCALL(__NR_process_madvise, sys_process_madvise)
 
+#ifdef CONFIG_MCST
+#define	__NR_el_posix		500
+__SYSCALL(__NR_el_posix, sys_el_posix)
+#define	__NR_macctl		501
+__SYSCALL(__NR_macctl, sys_macctl)
+#undef __NR_syscalls
+#define __NR_syscalls 502
+#else
 #undef __NR_syscalls
 #define __NR_syscalls 441
+#endif     /* CONFIG_MCST */
 
 /*
  * 32 bit systems traditionally used different

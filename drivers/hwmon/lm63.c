@@ -36,6 +36,10 @@
 #include <linux/of_device.h>
 #include <linux/sysfs.h>
 #include <linux/types.h>
+#ifdef CONFIG_MCST
+#include <linux/pwm.h>
+#include <linux/thermal.h>
+#endif
 
 /*
  * Addresses to scan
@@ -91,6 +95,9 @@ static const unsigned short normal_i2c[] = { 0x18, 0x4c, 0x4e, I2C_CLIENT_END };
 #define LM96163_REG_REMOTE_TEMP_U_MSB	0x31
 #define LM96163_REG_REMOTE_TEMP_U_LSB	0x32
 #define LM96163_REG_CONFIG_ENHANCED	0x45
+#ifdef CONFIG_MCST
+#define LM96163_REG_RDTF_CMP_MODE	0xBF
+#endif
 
 #define LM63_MAX_CONVRATE		9
 
@@ -130,6 +137,16 @@ static const unsigned short normal_i2c[] = { 0x18, 0x4c, 0x4e, I2C_CLIENT_END };
 			((1000 << (LM63_MAX_CONVRATE - (rate))) / (max))
 
 enum chips { lm63, lm64, lm96163 };
+
+#ifdef CONFIG_MCST
+#define MAX_SENSORS	2
+
+struct lm63_thermal_sensor {
+	struct lm63_data *data;
+	struct thermal_zone_device *tz;
+	unsigned int sensor_id;
+};
+#endif
 
 /*
  * Client data (each client gets its own)
@@ -173,7 +190,18 @@ struct lm63_data {
 	bool lut_temp_highres;
 	bool remote_unsigned; /* true if unsigned remote upper limits */
 	bool trutherm;
+#ifdef CONFIG_MCST
+	struct pwm_chip chip;
+	struct lm63_thermal_sensor thermal_sensor[MAX_SENSORS];
+#endif
 };
+
+#ifdef CONFIG_MCST
+static inline struct lm63_data *to_pwm(struct pwm_chip *chip)
+{
+	return container_of(chip, struct lm63_data, chip);
+}
+#endif
 
 static inline int temp8_from_reg(struct lm63_data *data, int nr)
 {
@@ -420,6 +448,9 @@ static ssize_t pwm1_enable_store(struct device *dev,
 	struct i2c_client *client = data->client;
 	unsigned long val;
 	int err;
+
+	if (of_get_property(dev->of_node, "#pwm-cells", NULL))
+		return -EPERM;
 
 	err = kstrtoul(buf, 10, &val);
 	if (err)
@@ -969,7 +1000,9 @@ static int lm63_detect(struct i2c_client *client,
 {
 	struct i2c_adapter *adapter = client->adapter;
 	u8 man_id, chip_id, reg_config1, reg_config2;
+#ifndef __e2k__
 	u8 reg_alert_status, reg_alert_mask;
+#endif
 	int address = client->addr;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
@@ -980,15 +1013,24 @@ static int lm63_detect(struct i2c_client *client,
 
 	reg_config1 = i2c_smbus_read_byte_data(client, LM63_REG_CONFIG1);
 	reg_config2 = i2c_smbus_read_byte_data(client, LM63_REG_CONFIG2);
+#ifndef __e2k__
 	reg_alert_status = i2c_smbus_read_byte_data(client,
 			   LM63_REG_ALERT_STATUS);
 	reg_alert_mask = i2c_smbus_read_byte_data(client, LM63_REG_ALERT_MASK);
+#endif
 
+#ifndef __e2k__
 	if (man_id != 0x01 /* National Semiconductor */
 	 || (reg_config1 & 0x18) != 0x00
 	 || (reg_config2 & 0xF8) != 0x00
 	 || (reg_alert_status & 0x20) != 0x00
 	 || (reg_alert_mask & 0xA4) != 0xA4) {
+#else
+	/* For e2k: reduce sensor detection time. Very bad strut. Emkr. */
+	if (man_id != 0x01 /* National Semiconductor */
+	 || (reg_config1 & 0x18) != 0x00
+	 || (reg_config2 & 0xF8) != 0x00) {
+#endif
 		dev_dbg(&adapter->dev,
 			"Unsupported chip (man_id=0x%02X, chip_id=0x%02X)\n",
 			man_id, chip_id);
@@ -1018,6 +1060,9 @@ static void lm63_init_client(struct lm63_data *data)
 	u8 convrate;
 
 	data->config = i2c_smbus_read_byte_data(client, LM63_REG_CONFIG1);
+#ifdef CONFIG_MCST
+	i2c_smbus_write_byte_data(client, LM63_REG_CONFIG_FAN, 0x20);
+#endif
 	data->config_fan = i2c_smbus_read_byte_data(client,
 						    LM63_REG_CONFIG_FAN);
 
@@ -1028,6 +1073,55 @@ static void lm63_init_client(struct lm63_data *data)
 		i2c_smbus_write_byte_data(client, LM63_REG_CONFIG1,
 					  data->config);
 	}
+#ifdef CONFIG_MCST
+	if (data->kind == lm96163) {
+		/* MCST Boot knows nothing about configuration of sensor,
+		 * we do it ourselves: */
+		i2c_smbus_write_byte_data(client, 0x4b, 0x3f);
+
+		/*
+		* Configuration register (0x3):
+		* 1) Enable alerts;
+		* 2) Set mode to operational;
+		* 3) Enable PWM;
+		* 4) Enable TACH;
+		* 5) Unlock T_CRIT for overriding.
+		*/
+		data->config = 0x6;
+		i2c_smbus_write_byte_data(client, LM63_REG_CONFIG1,
+							data->config);
+		/*
+		* Enhanced configuration (reg 0x45):
+		* 0x68
+		*/
+		i2c_smbus_write_byte_data(client, LM96163_REG_CONFIG_ENHANCED,
+									0x68);
+
+		/*
+		* Enable manual mode for pwm (regs 0x4a, 0x4d):
+		* 1) Enable writing to PWM value register;
+		* 2) Set dircet PWM polarity;
+		* 3) Set master PWM clock to 1,4 kHz;
+		* 4) Enable least effort TACH monitoring.
+		*/
+		i2c_smbus_write_byte_data(client, LM63_REG_CONFIG_FAN, 0x2b);
+		i2c_smbus_write_byte_data(client, LM63_REG_PWM_FREQ, 23);
+
+		/* Set ALERT pin to behave as a comparator, asserting itself
+		* when an ALERT condition exists, de-asserting itself when
+		* the ALERT condition goes away.*/
+		i2c_smbus_write_byte_data(client, LM96163_REG_RDTF_CMP_MODE,
+									0x1);
+	} else {
+		/* Start converting if needed */
+		if (data->config & 0x40) { /* standby */
+			dev_dbg(dev, "Switching to oper. mode\n");
+			data->config &= 0xA7;
+			i2c_smbus_write_byte_data(client, LM63_REG_CONFIG1,
+							data->config);
+		}
+	}
+#endif
 	/* Tachometer is always enabled on LM64 */
 	if (data->kind == lm64)
 		data->config |= 0x04;
@@ -1087,9 +1181,139 @@ static void lm63_init_client(struct lm63_data *data)
 		(data->config_fan & 0x20) ? "manual" : "auto");
 }
 
-static const struct i2c_device_id lm63_id[];
+#ifdef CONFIG_MCST
+static int lm63_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
+				const struct pwm_state *state)
+{
+	struct lm63_data *data = to_pwm(chip);
+	struct i2c_client *client = data->client;
+	int ret = -EINVAL;
+	u8 val;
+	u8 pwm_mode;
 
-static int lm63_probe(struct i2c_client *client)
+	pwm_mode = i2c_smbus_read_byte_data(client, LM63_REG_CONFIG_FAN);
+	if (!(pwm_mode >> 5))
+		return -EPERM;
+
+	if (state->period > 1) {
+		mutex_lock(&data->update_lock);
+		val = state->duty_cycle * 255 / (state->period - 1);
+		val = clamp_val(val, 0, 255);
+		val = data->pwm_highres ? val :
+				(val * data->pwm1_freq * 2 + 127) / 255;
+		ret = i2c_smbus_write_byte_data(client, LM63_REG_PWM_VALUE, val);
+		mutex_unlock(&data->update_lock);
+	}
+
+	return ret;
+}
+
+static const struct pwm_ops lm63_pwm_ops = {
+	.apply = lm63_pwm_apply,
+	.owner = THIS_MODULE,
+};
+
+static void lm63_pwm_remove(void *arg)
+{
+	struct lm63_data *data = arg;
+
+	pwmchip_remove(&data->chip);
+}
+
+static void lm63_init_pwm(struct lm63_data *data)
+{
+	struct i2c_client *client = data->client;
+	int ret;
+
+	/* Initialize chip */
+
+	data->chip.dev = &client->dev;
+	data->chip.ops = &lm63_pwm_ops;
+	data->chip.base = -1;
+	data->chip.npwm = 1;
+
+	ret = pwmchip_add(&data->chip);
+	if (ret < 0) {
+		dev_warn(&client->dev, "pwmchip_add() failed: %d\n", ret);
+		return;
+	}
+
+	devm_add_action(&client->dev, lm63_pwm_remove, data);
+}
+
+static int lm63_get_temp(void *data, int *temp)
+{
+	struct lm63_thermal_sensor *thermal_sensor = data;
+	*temp = i2c_smbus_read_byte_data(thermal_sensor->data->client,
+			LM63_REG_LOCAL_TEMP + thermal_sensor->sensor_id) * 1000;
+
+	return 0;
+}
+
+static int lm63_get_trend(void *data, int trip,
+				    enum thermal_trend *trend)
+{
+	struct lm63_thermal_sensor *thermal_sensor = data;
+	struct thermal_zone_device *tz = thermal_sensor->tz;
+	int trip_temp, trip_hyst, temp, last_temp, ret;
+
+	if (!tz)
+		return -EINVAL;
+
+	ret = tz->ops->get_trip_temp(thermal_sensor->tz, trip, &trip_temp);
+	if (ret)
+		return ret;
+
+	ret = tz->ops->get_trip_hyst(thermal_sensor->tz, trip, &trip_hyst);
+	if (ret)
+		return ret;
+
+	temp = READ_ONCE(tz->temperature);
+	last_temp = READ_ONCE(tz->last_temperature);
+
+	if (temp > trip_temp) {
+		if (temp >= last_temp)
+			*trend = THERMAL_TREND_RAISING;
+		else
+			*trend = THERMAL_TREND_STABLE;
+	} else if (temp <= trip_temp - trip_hyst) {
+		*trend = THERMAL_TREND_DROPPING;
+	} else {
+		*trend = THERMAL_TREND_STABLE;
+	}
+
+	return 0;
+}
+
+
+static const struct thermal_zone_of_device_ops lm63_tz_ops = {
+	.get_temp = lm63_get_temp,
+	.get_trend = lm63_get_trend,
+};
+
+static void lm63_init_thermal(struct lm63_data *data)
+{
+	struct i2c_client *client = data->client;
+	struct lm63_thermal_sensor *thermal_sensor;
+	unsigned int i;
+
+	thermal_sensor = data->thermal_sensor;
+	for (i = 0; i < MAX_SENSORS; i++, thermal_sensor++) {
+		thermal_sensor->data = data;
+		thermal_sensor->sensor_id = i;
+		thermal_sensor->tz = devm_thermal_zone_of_sensor_register(&client->dev,
+						 i, thermal_sensor, &lm63_tz_ops);
+
+		if (IS_ERR(thermal_sensor->tz)) {
+			dev_warn(&client->dev, "unable to register thermal sensor %ld\n",
+				 PTR_ERR(thermal_sensor->tz));
+		}
+	}
+}
+#endif
+
+static int lm63_probe(struct i2c_client *client,
+		      const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct device *hwmon_dev;
@@ -1107,7 +1331,7 @@ static int lm63_probe(struct i2c_client *client)
 	if (client->dev.of_node)
 		data->kind = (enum chips)of_device_get_match_data(&client->dev);
 	else
-		data->kind = i2c_match_id(lm63_id, client)->driver_data;
+		data->kind = id->driver_data;
 	if (data->kind == lm64)
 		data->temp2_offset = 16000;
 
@@ -1126,7 +1350,14 @@ static int lm63_probe(struct i2c_client *client)
 
 	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
 							   data, data->groups);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	if (IS_ERR(hwmon_dev))
+		return PTR_ERR(hwmon_dev);
+#ifdef CONFIG_MCST
+	lm63_init_thermal(data);
+	if (IS_ENABLED(CONFIG_PWM))
+		lm63_init_pwm(data);
+#endif
+	return 0;
 }
 
 /*
@@ -1164,7 +1395,7 @@ static struct i2c_driver lm63_driver = {
 		.name	= "lm63",
 		.of_match_table = of_match_ptr(lm63_of_match),
 	},
-	.probe_new	= lm63_probe,
+	.probe		= lm63_probe,
 	.id_table	= lm63_id,
 	.detect		= lm63_detect,
 	.address_list	= normal_i2c,

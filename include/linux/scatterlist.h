@@ -238,7 +238,12 @@ static inline void sg_unmark_end(struct scatterlist *sg)
  *   on the sg page.
  *
  **/
+#ifdef CONFIG_MCST
+/* phys_addr_t and dma_addr_t may have different size */
+static inline phys_addr_t sg_phys(struct scatterlist *sg)
+#else
 static inline dma_addr_t sg_phys(struct scatterlist *sg)
+#endif
 {
 	return page_to_phys(sg_page(sg)) + sg->offset;
 }

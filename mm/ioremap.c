@@ -248,6 +248,9 @@ int ioremap_page_range(unsigned long addr,
 
 	return err;
 }
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(ioremap_page_range);
+#endif
 
 #ifdef CONFIG_GENERIC_IOREMAP
 void __iomem *ioremap_prot(phys_addr_t addr, size_t size, unsigned long prot)

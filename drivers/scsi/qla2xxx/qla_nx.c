@@ -2643,7 +2643,11 @@ qla82xx_write_flash_data(struct scsi_qla_host *vha, __le32 *dwptr,
 	int ret;
 	uint32_t liter;
 	uint32_t rest_addr;
+#ifdef CONFIG_MCST
+	dma_addr_t optrom_dma = 0;
+#else
 	dma_addr_t optrom_dma;
+#endif
 	void *optrom = NULL;
 	int page_mode = 0;
 	struct qla_hw_data *ha = vha->hw;

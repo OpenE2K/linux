@@ -113,3 +113,11 @@ config HVCS
 	  will depend on arch specific APIs exported from hvcserver.ko
 	  which will also be compiled when this driver is built as a
 	  module.
+
+config HVC_L
+	bool "E2K (Elbrus) Hypervisor Console support"
+	depends on E2K && KVM
+	select HVC_DRIVER
+	default n
+	help
+	  E2K (Elbrus) virtual console device driver

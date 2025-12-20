@@ -5716,7 +5716,7 @@ u32 si_get_csb_size(struct radeon_device *rdev)
 	return count;
 }
 
-void si_get_csb_buffer(struct radeon_device *rdev, volatile u32 *buffer)
+void si_get_csb_buffer(struct radeon_device *rdev, u32 __iomem *buffer)
 {
 	u32 count = 0, i;
 	const struct cs_section_def *sect = NULL;
@@ -5727,53 +5727,70 @@ void si_get_csb_buffer(struct radeon_device *rdev, volatile u32 *buffer)
 	if (buffer == NULL)
 		return;
 
-	buffer[count++] = cpu_to_le32(PACKET3(PACKET3_PREAMBLE_CNTL, 0));
-	buffer[count++] = cpu_to_le32(PACKET3_PREAMBLE_BEGIN_CLEAR_STATE);
+	writel(PACKET3(PACKET3_PREAMBLE_CNTL, 0), buffer + count);
+	count++;
+	writel(PACKET3_PREAMBLE_BEGIN_CLEAR_STATE, buffer + count);
+	count++;
 
-	buffer[count++] = cpu_to_le32(PACKET3(PACKET3_CONTEXT_CONTROL, 1));
-	buffer[count++] = cpu_to_le32(0x80000000);
-	buffer[count++] = cpu_to_le32(0x80000000);
+	writel(PACKET3(PACKET3_CONTEXT_CONTROL, 1), buffer + count);
+	count++;
+	writel(0x80000000, buffer + count);
+	count++;
+	writel(0x80000000, buffer + count);
+	count++;
 
 	for (sect = rdev->rlc.cs_data; sect->section != NULL; ++sect) {
 		for (ext = sect->section; ext->extent != NULL; ++ext) {
 			if (sect->id == SECT_CONTEXT) {
-				buffer[count++] =
-					cpu_to_le32(PACKET3(PACKET3_SET_CONTEXT_REG, ext->reg_count));
-				buffer[count++] = cpu_to_le32(ext->reg_index - 0xa000);
-				for (i = 0; i < ext->reg_count; i++)
-					buffer[count++] = cpu_to_le32(ext->extent[i]);
+				writel(PACKET3(PACKET3_SET_CONTEXT_REG,
+					ext->reg_count), buffer + count);
+				count++;
+				writel(ext->reg_index - 0xa000, buffer + count);
+				count++;
+				for (i = 0; i < ext->reg_count; i++, count++)
+					writel(ext->extent[i], buffer + count);
 			} else {
 				return;
 			}
 		}
 	}
 
-	buffer[count++] = cpu_to_le32(PACKET3(PACKET3_SET_CONTEXT_REG, 1));
-	buffer[count++] = cpu_to_le32(PA_SC_RASTER_CONFIG - PACKET3_SET_CONTEXT_REG_START);
+	writel(PACKET3(PACKET3_SET_CONTEXT_REG, 1), buffer + count);
+	count++;
+	writel(PA_SC_RASTER_CONFIG - PACKET3_SET_CONTEXT_REG_START, buffer + count);
+	count++;
 	switch (rdev->family) {
 	case CHIP_TAHITI:
 	case CHIP_PITCAIRN:
-		buffer[count++] = cpu_to_le32(0x2a00126a);
+		writel(0x2a00126a, buffer + count);
+		count++;
 		break;
 	case CHIP_VERDE:
-		buffer[count++] = cpu_to_le32(0x0000124a);
+		writel(0x0000124a, buffer + count);
+		count++;
 		break;
 	case CHIP_OLAND:
-		buffer[count++] = cpu_to_le32(0x00000082);
+		writel(0x00000082, buffer + count);
+		count++;
 		break;
 	case CHIP_HAINAN:
-		buffer[count++] = cpu_to_le32(0x00000000);
+		writel(0x00000000, buffer + count);
+		count++;
 		break;
 	default:
-		buffer[count++] = cpu_to_le32(0x00000000);
+		writel(0x00000000, buffer + count);
+		count++;
 		break;
 	}
 
-	buffer[count++] = cpu_to_le32(PACKET3(PACKET3_PREAMBLE_CNTL, 0));
-	buffer[count++] = cpu_to_le32(PACKET3_PREAMBLE_END_CLEAR_STATE);
+	writel(PACKET3(PACKET3_PREAMBLE_CNTL, 0), buffer + count);
+	count++;
+	writel(PACKET3_PREAMBLE_END_CLEAR_STATE, buffer + count);
+	count++;
 
-	buffer[count++] = cpu_to_le32(PACKET3(PACKET3_CLEAR_STATE, 0));
-	buffer[count++] = cpu_to_le32(0);
+	writel(PACKET3(PACKET3_CLEAR_STATE, 0), buffer + count);
+	count++;
+	writel(0, buffer + count);
 }
 
 static void si_init_pg(struct radeon_device *rdev)

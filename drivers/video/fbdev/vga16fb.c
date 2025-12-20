@@ -21,6 +21,9 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/screen_info.h>
+#if defined(CONFIG_E90S) || defined(CONFIG_E2K)
+#include <linux/pci.h>
+#endif
 
 #include <asm/io.h>
 #include <video/vga.h>
@@ -1325,7 +1328,18 @@ static int vga16fb_probe(struct platform_device *dev)
 	struct vga16fb_par *par;
 	int i;
 	int ret = 0;
-
+#if defined(CONFIG_E90S) || defined(CONFIG_E2K)
+#define PCI_VENDOR_ID_SMI	0x126f
+	/* start vga16fb driver if only vga pci-class device exits */
+	struct pci_dev *pdev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, NULL);
+	if (!pdev)
+		return -ENODEV;
+	if (pdev->vendor == PCI_VENDOR_ID_SMI) {/* smi does not work */
+		pci_dev_put(pdev);
+		return -ENODEV;
+	}
+	pci_dev_put(pdev);
+#endif
 	printk(KERN_DEBUG "vga16fb: initializing\n");
 	info = framebuffer_alloc(sizeof(struct vga16fb_par), &dev->dev);
 

@@ -115,7 +115,11 @@ static void uart_stop(struct tty_struct *tty)
 {
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
+#ifdef __LCC__
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 
 	port = uart_port_lock(state, flags);
 	if (port)
@@ -136,7 +140,11 @@ static void uart_start(struct tty_struct *tty)
 {
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
+#ifdef __LCC__
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 
 	port = uart_port_lock(state, flags);
 	__uart_start(tty);
@@ -550,7 +558,11 @@ static int uart_put_char(struct tty_struct *tty, unsigned char c)
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
 	struct circ_buf *circ;
+#ifdef __LCC__
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 	int ret = 0;
 
 	circ = &state->xmit;
@@ -580,7 +592,11 @@ static int uart_write(struct tty_struct *tty,
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
 	struct circ_buf *circ;
+#ifdef __LCC__
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 	int c, ret = 0;
 
 	/*
@@ -621,7 +637,11 @@ static int uart_write_room(struct tty_struct *tty)
 {
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
+#ifdef __LCC__
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 	int ret;
 
 	port = uart_port_lock(state, flags);
@@ -634,7 +654,11 @@ static int uart_chars_in_buffer(struct tty_struct *tty)
 {
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
+#ifdef __LCC__
+	unsigned long flags = 0;
+#else	
 	unsigned long flags;
+#endif
 	int ret;
 
 	port = uart_port_lock(state, flags);
@@ -647,7 +671,11 @@ static void uart_flush_buffer(struct tty_struct *tty)
 {
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
+#ifdef __LCC__
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 
 	/*
 	 * This means you called this function _after_ the port was

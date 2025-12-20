@@ -6420,7 +6420,7 @@ static void cik_enable_gds_pg(struct radeon_device *rdev, bool enable)
 
 void cik_init_cp_pg_table(struct radeon_device *rdev)
 {
-	volatile u32 *dst_ptr;
+	u32 __iomem *dst_ptr;
 	int me, i, max_me = 4;
 	u32 bo_offset = 0;
 	u32 table_offset, table_size;
@@ -6471,8 +6471,8 @@ void cik_init_cp_pg_table(struct radeon_device *rdev)
 			}
 
 			for (i = 0; i < table_size; i ++) {
-				dst_ptr[bo_offset + i] =
-					cpu_to_le32(le32_to_cpu(fw_data[table_offset + i]));
+				writel(le32_to_cpu(fw_data[table_offset + i]),
+						dst_ptr + bo_offset + i);
 			}
 			bo_offset += table_size;
 		} else {
@@ -6494,8 +6494,8 @@ void cik_init_cp_pg_table(struct radeon_device *rdev)
 			}
 
 			for (i = 0; i < table_size; i ++) {
-				dst_ptr[bo_offset + i] =
-					cpu_to_le32(be32_to_cpu(fw_data[table_offset + i]));
+				writel(be32_to_cpu(fw_data[table_offset + i]),
+						dst_ptr + bo_offset + i);
 			}
 			bo_offset += table_size;
 		}

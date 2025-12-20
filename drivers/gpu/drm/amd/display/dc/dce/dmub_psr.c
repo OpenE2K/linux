@@ -96,6 +96,7 @@ static bool dmub_psr_set_version(struct dmub_psr *dmub, struct dc_stream_state *
 	if (stream->link->psr_settings.psr_version == DC_PSR_VERSION_UNSUPPORTED)
 		return false;
 
+	memset(&cmd, 0, sizeof(cmd));
 	cmd.psr_set_version.header.type = DMUB_CMD__PSR;
 	cmd.psr_set_version.header.sub_type = DMUB_CMD__PSR_SET_VERSION;
 	switch (stream->link->psr_settings.psr_version) {
@@ -125,6 +126,7 @@ static void dmub_psr_enable(struct dmub_psr *dmub, bool enable, bool wait)
 	struct dc_context *dc = dmub->ctx;
 	uint32_t retry_count, psr_state = 0;
 
+	memset(&cmd, 0, sizeof(cmd));
 	cmd.psr_enable.header.type = DMUB_CMD__PSR;
 
 	if (enable)
@@ -177,6 +179,7 @@ static void dmub_psr_set_level(struct dmub_psr *dmub, uint16_t psr_level)
 	if (psr_state == 0)
 		return;
 
+	memset(&cmd, 0, sizeof(cmd));
 	cmd.psr_set_level.header.type = DMUB_CMD__PSR;
 	cmd.psr_set_level.header.sub_type = DMUB_CMD__PSR_SET_LEVEL;
 	cmd.psr_set_level.header.payload_bytes = sizeof(struct dmub_cmd_psr_set_level_data);
@@ -226,6 +229,7 @@ static bool dmub_psr_copy_settings(struct dmub_psr *dmub,
 	link->link_enc->funcs->psr_program_secondary_packet(link->link_enc,
 			psr_context->sdpTransmitLineNumDeadline);
 
+	memset(&cmd, 0, sizeof(cmd));
 	cmd.psr_copy_settings.header.type = DMUB_CMD__PSR;
 	cmd.psr_copy_settings.header.sub_type = DMUB_CMD__PSR_COPY_SETTINGS;
 	cmd.psr_copy_settings.header.payload_bytes = sizeof(struct dmub_cmd_psr_copy_settings_data);

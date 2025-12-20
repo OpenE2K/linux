@@ -31,6 +31,9 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/vga_switcheroo.h>
+#ifdef CONFIG_MCST
+#include <linux/console.h>
+#endif
 
 #include <drm/drm_agpsupport.h>
 #include <drm/drm_fb_helper.h>
@@ -127,6 +130,10 @@ int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags)
 	    !pci_is_thunderbolt_attached(dev->pdev))
 		flags |= RADEON_IS_PX;
 
+#ifdef CONFIG_MCST
+	/* lock console to avoid hw deadlock on output to vga console */
+	console_lock();
+#endif
 	/* radeon_device_init should report only fatal error
 	 * like memory allocation failure or iomapping failure,
 	 * or memory manager initialization failure, it must
@@ -134,6 +141,9 @@ int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags)
 	 * VRAM allocation
 	 */
 	r = radeon_device_init(rdev, dev, dev->pdev, flags);
+#ifdef CONFIG_MCST
+	console_unlock();
+#endif
 	if (r) {
 		dev_err(&dev->pdev->dev, "Fatal error during GPU init\n");
 		goto out;

@@ -23,6 +23,9 @@
 #include <linux/blk-cgroup.h>
 #include <linux/fadvise.h>
 #include <linux/sched/mm.h>
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#endif 
 
 #include "internal.h"
 
@@ -179,6 +182,11 @@ void page_cache_ra_unbounded(struct readahead_control *ractl,
 	LIST_HEAD(page_pool);
 	gfp_t gfp_mask = readahead_gfp_mask(mapping);
 	unsigned long i;
+
+#ifdef CONFIG_MCST_RT
+	if (rts_act_mask & RTS_NO_RD_AHEAD)
+		return;
+#endif
 
 	/*
 	 * Partway through the readahead operation, we will have added

@@ -304,6 +304,9 @@ static ide_startstop_t ide_special_rq(ide_drive_t *drive, struct request *rq)
 		return ide_do_reset(drive);
 	default:
 		BUG();
+#ifdef __LCC__
+		return ide_stopped;
+#endif
 	}
 }
 

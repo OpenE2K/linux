@@ -1219,7 +1219,17 @@ static const struct hv_ops hv_ops = {
 int __init virtio_cons_early_init(int (*put_chars)(u32, const char *, int))
 {
 	early_put_chars = put_chars;
+#if	defined(CONFIG_MCST) && defined(CONFIG_E2K) && defined(CONFIG_HVC_L)
+	/*
+	 * FIXME: Community patch 4b0a2c5ff7215206ea6135a405f17c5f6fca7d00
+	 * broke early virtio console.
+	 * Early console should have the same vtermno, as the real console,
+	 * which is now 1.
+	 */
+	return hvc_instantiate(1, 0, &hv_ops);
+#else
 	return hvc_instantiate(0, 0, &hv_ops);
+#endif
 }
 
 static int init_port_console(struct port *port)

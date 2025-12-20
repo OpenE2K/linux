@@ -450,8 +450,13 @@ void __init anon_vma_init(void)
 	anon_vma_cachep = kmem_cache_create("anon_vma", sizeof(struct anon_vma),
 			0, SLAB_TYPESAFE_BY_RCU|SLAB_PANIC|SLAB_ACCOUNT,
 			anon_vma_ctor);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	anon_vma_chain_cachep = KMEM_CACHE(anon_vma_chain,
+			SLAB_PANIC|SLAB_ACCOUNT | SLAB_NO_SANITIZE);
+#else
 	anon_vma_chain_cachep = KMEM_CACHE(anon_vma_chain,
 			SLAB_PANIC|SLAB_ACCOUNT);
+#endif
 }
 
 /*

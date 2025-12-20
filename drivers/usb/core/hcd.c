@@ -2154,6 +2154,12 @@ int hcd_bus_suspend(struct usb_device *rhdev, pm_message_t msg)
 	}
 
 	if (!hcd->driver->bus_suspend) {
+#ifdef CONFIG_MCST
+		clear_bit(HCD_FLAG_RH_RUNNING, &hcd->flags);
+		usb_set_device_state(rhdev, USB_STATE_SUSPENDED);
+		hcd->state = HC_STATE_SUSPENDED;
+		return 0;
+#endif
 		status = -ENOENT;
 	} else {
 		clear_bit(HCD_FLAG_RH_RUNNING, &hcd->flags);
@@ -2212,8 +2218,20 @@ int hcd_bus_resume(struct usb_device *rhdev, pm_message_t msg)
 			return status;
 	}
 
-	if (!hcd->driver->bus_resume)
+	if (!hcd->driver->bus_resume) {
+#ifdef CONFIG_MCST
+		spin_lock_irq(&hcd_root_hub_lock);
+		usb_set_device_state(rhdev, rhdev->actconfig
+					? USB_STATE_CONFIGURED
+					: USB_STATE_ADDRESS);
+		set_bit(HCD_FLAG_RH_RUNNING, &hcd->flags);
+		hcd->state = HC_STATE_RUNNING;
+		spin_unlock_irq(&hcd_root_hub_lock);
+		return 0;
+#else
 		return -ENOENT;
+#endif
+	}
 	if (HCD_RH_RUNNING(hcd))
 		return 0;
 

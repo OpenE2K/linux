@@ -11,7 +11,10 @@
 #include <linux/dma-mapping.h>
 #include <linux/genalloc.h>
 #include <linux/vmalloc.h>
-#ifdef CONFIG_X86
+#ifdef CONFIG_MCST
+#include <linux/pci.h>
+#endif
+#if defined CONFIG_X86 || defined CONFIG_E2K
 #include <asm/set_memory.h>
 #endif
 #include <sound/memalloc.h>
@@ -23,6 +26,26 @@
  */
 
 #ifdef CONFIG_HAS_DMA
+#ifdef CONFIG_MCST
+static const struct pci_device_id snd_dma_bug_ids[] = {
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338A), 0},
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338B), 0},
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8738), 0},
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8738B), 0},
+	{PCI_VDEVICE(AL, PCI_DEVICE_ID_CMEDIA_CM8738), 0},
+	{0,},
+};
+
+static int add_pad_for_buggy_cards(struct device *dev)
+{
+	if (dev_is_pci(dev) &&
+		pci_match_id(snd_dma_bug_ids, to_pci_dev(dev))) {
+		return PAGE_SIZE;
+	}
+	return 0;
+}
+#endif /*CONFIG_MCST*/
+
 /* allocate the coherent DMA pages */
 static void snd_malloc_dev_pages(struct snd_dma_buffer *dmab, size_t size)
 {
@@ -32,9 +55,13 @@ static void snd_malloc_dev_pages(struct snd_dma_buffer *dmab, size_t size)
 		| __GFP_COMP	/* compound page lets parts be mapped */
 		| __GFP_NORETRY /* don't trigger OOM-killer */
 		| __GFP_NOWARN; /* no stack trace print - this call is non-critical */
+
+#ifdef CONFIG_MCST
+	size += add_pad_for_buggy_cards(dmab->dev.dev);
+#endif
 	dmab->area = dma_alloc_coherent(dmab->dev.dev, size, &dmab->addr,
 					gfp_flags);
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 	if (dmab->area && dmab->dev.type == SNDRV_DMA_TYPE_DEV_UC)
 		set_memory_wc((unsigned long)dmab->area,
 			      PAGE_ALIGN(size) >> PAGE_SHIFT);
@@ -44,12 +71,24 @@ static void snd_malloc_dev_pages(struct snd_dma_buffer *dmab, size_t size)
 /* free the coherent DMA pages */
 static void snd_free_dev_pages(struct snd_dma_buffer *dmab)
 {
+#ifdef CONFIG_MCST
+	size_t size = dmab->bytes + add_pad_for_buggy_cards(dmab->dev.dev);
+#endif
 #ifdef CONFIG_X86
 	if (dmab->dev.type == SNDRV_DMA_TYPE_DEV_UC)
 		set_memory_wb((unsigned long)dmab->area,
 			      PAGE_ALIGN(dmab->bytes) >> PAGE_SHIFT);
 #endif
+#ifdef CONFIG_E2K
+	if (dmab->dev.type == SNDRV_DMA_TYPE_DEV_UC)
+		set_memory_wb((unsigned long)dmab->area,
+			      PAGE_ALIGN(size) >> PAGE_SHIFT);
+#endif
+#ifdef CONFIG_MCST
+	dma_free_coherent(dmab->dev.dev, size, dmab->area, dmab->addr);
+#else
 	dma_free_coherent(dmab->dev.dev, dmab->bytes, dmab->area, dmab->addr);
+#endif
 }
 
 #ifdef CONFIG_GENERIC_ALLOCATOR

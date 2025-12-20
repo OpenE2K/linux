@@ -47,10 +47,22 @@ static const struct i2c_device_id ir38064_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, ir38064_id);
 
+#ifdef CONFIG_MCST
+static const struct of_device_id ir38064_of_match[] = {
+	{ .compatible = "infineon,ir38064" },
+	{}
+};
+
+MODULE_DEVICE_TABLE(of, ir38064_of_match);
+#endif
+
 /* This is the driver that will be inserted */
 static struct i2c_driver ir38064_driver = {
 	.driver = {
 		   .name = "ir38064",
+#ifdef CONFIG_MCST
+		   .of_match_table = of_match_ptr(ir38064_of_match)
+#endif
 		   },
 	.probe_new = ir38064_probe,
 	.remove = pmbus_do_remove,

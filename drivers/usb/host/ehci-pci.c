@@ -106,6 +106,24 @@ static int ehci_pci_setup(struct usb_hcd *hcd)
 	 * init and reset; they are located here too.
 	 */
 	switch (pdev->vendor) {
+#ifdef CONFIG_MCST
+	case PCI_VENDOR_ID_MCST_TMP:
+		if (pdev->device == PCI_DEVICE_ID_MCST_EHCI &&
+					iohub_generation(pdev) == 1) {
+			if (iohub_revision(pdev) < 2)
+				ehci->has_synopsys_hc_bug = 1;
+
+			if (iohub_revision(pdev) < 3) {
+				ehci->set_type_to_last_in_list = 1;
+				ehci->short_read_does_not_supported = 1;
+#ifdef CONFIG_E2K
+				if (IS_MACHINE_E2S)
+					ehci->align_descs_to_64 = 1;
+#endif
+			}
+		}
+		break;
+#endif
 	case PCI_VENDOR_ID_TOSHIBA_2:
 		/* celleb's companion chip */
 		if (pdev->device == 0x01b5) {
@@ -327,6 +345,14 @@ static int ehci_pci_setup(struct usb_hcd *hcd)
 		}
 	}
 
+#ifdef CONFIG_MCST
+	if (pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			pdev->device == PCI_DEVICE_ID_MCST_EHCI &&
+				iohub_generation(pdev) == 1) {
+		ehci->no_selective_suspend = 1;
+		device_init_wakeup(&pdev->dev, 0);
+	}
+#endif
 #ifdef	CONFIG_PM
 	if (ehci->no_selective_suspend && device_can_wakeup(&pdev->dev))
 		ehci_warn(ehci, "selective suspend/wakeup unavailable\n");

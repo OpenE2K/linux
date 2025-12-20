@@ -464,6 +464,11 @@ static int thread_signal_callback(void *arg)
 		rcu_read_lock();
 		do {
 			f2 = dma_fence_get_rcu_safe(&t->fences[!t->id]);
+#ifdef CONFIG_MCST
+			rcu_read_unlock();
+			cond_resched();
+			rcu_read_lock();
+#endif
 		} while (!f2 && !kthread_should_stop());
 		rcu_read_unlock();
 

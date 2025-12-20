@@ -3423,7 +3423,11 @@ void __init buffer_init(void)
 	bh_cachep = kmem_cache_create("buffer_head",
 			sizeof(struct buffer_head), 0,
 				(SLAB_RECLAIM_ACCOUNT|SLAB_PANIC|
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+				SLAB_MEM_SPREAD | SLAB_NO_SANITIZE),
+#else
 				SLAB_MEM_SPREAD),
+#endif
 				NULL);
 
 	/*

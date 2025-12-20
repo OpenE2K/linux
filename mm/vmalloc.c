@@ -2125,7 +2125,9 @@ struct vm_struct *get_vm_area_caller(unsigned long size, unsigned long flags,
 	return __get_vm_area_node(size, 1, flags, VMALLOC_START, VMALLOC_END,
 				  NUMA_NO_NODE, GFP_KERNEL, caller);
 }
-
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(get_vm_area_caller);
+#endif
 /**
  * find_vm_area - find a continuous kernel virtual area
  * @addr:	  base address
@@ -2146,6 +2148,31 @@ struct vm_struct *find_vm_area(const void *addr)
 
 	return va->vm;
 }
+#ifdef CONFIG_MCST
+/* unified_map_um() needs it.
+ * See: drivers/mcst/video-imgtec/linux/mem_man/img_mem_unified.c
+ */
+EXPORT_SYMBOL_GPL(find_vm_area);
+#endif /*CONFIG_MCST*/
+
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+struct vm_struct *find_io_vm_area(const void *addr)
+{
+	struct vmap_area *va;
+	unsigned long flags;
+	bool locked;
+
+	locked = spin_trylock_irqsave(&vmap_area_lock, flags);
+	va = __find_vmap_area((unsigned long)addr);
+	if (locked)
+		spin_unlock_irqrestore(&vmap_area_lock, flags);
+
+	if (!va)
+		return NULL;
+
+	return va->vm;
+}
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 
 /**
  * remove_vm_area - find and remove a continuous kernel virtual area

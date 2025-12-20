@@ -300,6 +300,22 @@ int scsi_compat_ioctl(struct scsi_device *sdev, int cmd, void __user *arg)
 EXPORT_SYMBOL(scsi_compat_ioctl);
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+int scsi_ptr128_ioctl(struct scsi_device *sdev, int cmd, void __user *arg)
+{
+	int ret = scsi_ioctl_common(sdev, cmd, arg);
+
+	if (ret != -ENOIOCTLCMD)
+		return ret;
+
+	if (sdev->host->hostt->ptr128_ioctl)
+		return sdev->host->hostt->ptr128_ioctl(sdev, cmd, arg);
+
+	return ret;
+}
+EXPORT_SYMBOL(scsi_ptr128_ioctl);
+#endif /* CONFIG_PROTECTED_MODE */
+
 /*
  * We can process a reset even when a device isn't fully operable.
  */

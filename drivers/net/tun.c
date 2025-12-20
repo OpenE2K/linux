@@ -1760,11 +1760,19 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	struct tun_pi pi = { 0, cpu_to_be16(ETH_P_IP) };
 	struct sk_buff *skb;
 	size_t total_len = iov_iter_count(from);
+#ifdef CONFIG_MCST
+	size_t len = total_len, align = tun->align, linear = 0;
+#else
 	size_t len = total_len, align = tun->align, linear;
+#endif
 	struct virtio_net_hdr gso = { 0 };
 	struct tun_pcpu_stats *stats;
 	int good_linear;
+#ifdef CONFIG_MCST
+	int copylen = 0;
+#else
 	int copylen;
+#endif
 	bool zerocopy = false;
 	int err;
 	u32 rxhash = 0;

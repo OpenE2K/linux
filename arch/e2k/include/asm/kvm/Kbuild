@@ -1,0 +1,11 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+
+### e2k virtualization
+
+unifdef-y += guest/
+
+unifdef-y += guest.h
+unifdef-y += threads.h
+

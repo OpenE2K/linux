@@ -84,6 +84,9 @@ filelayout_get_dserver_offset(struct pnfs_layout_segment *lseg, loff_t offset)
 	}
 
 	BUG();
+#ifdef __LCC__
+	return (loff_t)0;
+#endif
 }
 
 static void filelayout_reset_write(struct nfs_pgio_header *hdr)

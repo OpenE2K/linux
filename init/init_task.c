@@ -65,6 +65,11 @@ struct task_struct init_task
 #ifdef CONFIG_ARCH_TASK_STRUCT_ON_STACK
 	__init_task_data
 #endif
+#ifdef CONFIG_E2K
+/* To use stgd upon kernel entry task_struct must be aligned
+ * (since %gd_lo.base points to it) */
+	__aligned(E2K_ALIGN_GLOBALS_SZ)
+#endif
 	__aligned(L1_CACHE_BYTES)
 = {
 #ifdef CONFIG_THREAD_INFO_IN_TASK

@@ -31,6 +31,8 @@ ifeq ($(DEBUG),1)
   CFLAGS += -O0
 else ifeq ($(CC_NO_CLANG), 0)
   CFLAGS += -O3
+else ifeq ($(CC_NO_LCC), 0)
+  CFLAGS += -O3
 else
   CFLAGS += -O6
 endif

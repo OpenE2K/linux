@@ -1208,6 +1208,10 @@ enum sctp_disposition sctp_sf_backbeat_8_3(struct net *net,
 	struct sctp_transport *link;
 	unsigned long max_interval;
 	union sctp_addr from_addr;
+#ifdef CONFIG_MCST
+	unsigned long sent_at;
+	__u64 hb_nonce;
+#endif
 
 	if (!sctp_vtag_verify(chunk, asoc))
 		return sctp_sf_pdiscard(net, ep, asoc, type, arg, commands);
@@ -1243,14 +1247,26 @@ enum sctp_disposition sctp_sf_backbeat_8_3(struct net *net,
 	}
 
 	/* Validate the 64-bit random nonce. */
+#ifdef CONFIG_MCST
+	hb_nonce = get_unaligned(&hbinfo->hb_nonce);
+	if (hb_nonce != link->hb_nonce)
+		return SCTP_DISPOSITION_DISCARD;
+#else
 	if (hbinfo->hb_nonce != link->hb_nonce)
 		return SCTP_DISPOSITION_DISCARD;
+#endif
 
 	max_interval = link->hbinterval + link->rto;
 
 	/* Check if the timestamp looks valid.  */
+#ifdef CONFIG_MCST
+	sent_at = get_unaligned(&hbinfo->sent_at);
+	if (time_after(sent_at, jiffies) ||
+	    time_after(jiffies, sent_at + max_interval)) {
+#else
 	if (time_after(hbinfo->sent_at, jiffies) ||
 	    time_after(jiffies, hbinfo->sent_at + max_interval)) {
+#endif
 		pr_debug("%s: HEARTBEAT ACK with invalid timestamp received "
 			 "for transport:%p\n", __func__, link);
 

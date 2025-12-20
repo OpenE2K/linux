@@ -26,10 +26,96 @@
 
 #include "pci.h"
 
+#if defined(CONFIG_MCST) && defined(MCST_MSIX)
+# define MCST_MSIX_DEBUG
+# undef MCST_MSIX_DEBUG
+#endif
+
 static int pci_msi_enable = 1;
 int pci_msi_ignore_mask;
 
 #define msix_table_size(flags)	((flags & PCI_MSIX_FLAGS_QSIZE) + 1)
+
+#ifdef MCST_MSIX
+static int inline supports_msix(struct pci_dev *dev)
+{
+       return (dev->msix_cap || dev->mcst_msix_cap_base);
+}
+
+static void pci_read_msix_cap_word(struct pci_dev *dev, int shift, u16 *w)
+{
+       if (dev->mcst_msix_cap_base) {
+#ifdef MCST_MSIX_DEBUG
+       printk("pci_read_msix_cap_word %p + %d  start\n",
+               dev->mcst_msix_cap_base, shift);
+#endif
+               *w = readw(dev->mcst_msix_cap_base + shift);
+#ifdef MCST_MSIX_DEBUG
+       printk("pci_read_msix_cap_word + %d. val = 0x%x\n", shift, *w);
+#endif
+       } else {
+               pci_read_config_word(dev, dev->msix_cap + shift, w);
+       }
+}
+
+
+static void pci_read_msix_cap_dword(struct pci_dev *dev, int shift, u32 *w)
+{
+       if (dev->mcst_msix_cap_base) {
+#ifdef MCST_MSIX_DEBUG
+       printk("pci_read_msix_cap_dword %p + %d  start\n",
+               dev->mcst_msix_cap_base, shift);
+#endif
+               *w = readl(dev->mcst_msix_cap_base + shift);
+#ifdef MCST_MSIX_DEBUG
+       printk("pci_read_msix_cap_dword + %d. val = 0x%x\n", shift, *w);
+#endif
+       } else {
+               pci_read_config_dword(dev, dev->msix_cap + shift, w);
+       }
+}
+
+
+static void pci_write_msix_cap_word(struct pci_dev *dev, int shift, u16 w)
+{
+       if (dev->mcst_msix_cap_base) {
+#ifdef MCST_MSIX_DEBUG
+       printk("pci_write_msix_cap_word %p + %d. val = 0x%x\n",
+               dev->mcst_msix_cap_base, shift, w);
+#endif
+               writew(w, dev->mcst_msix_cap_base + shift);
+#ifdef MCST_MSIX_DEBUG
+       printk("pci_write_msix_cap_word end\n");
+#endif
+       } else {
+               pci_write_config_word(dev, dev->msix_cap + shift, w);
+       }
+}
+
+#if 0
+static void pci_write_msix_cap_dword(struct pci_dev *dev, int shift, u32 w)
+{
+       if (dev->mcst_msix_cap_base) {
+               writel(dev->mcst_msix_cap_base + shift, w);
+       } else {
+               pci_write_config_dword(dev, dev->msix_cap + shift, w);
+       }
+}
+#endif
+
+
+#define pci_msix_clear_and_set_ctrl	mcst_pci_msix_clear_and_set_ctrl
+static inline void mcst_pci_msix_clear_and_set_ctrl(struct pci_dev *dev, u16 clear, u16 set)
+{
+	u16 ctrl;
+
+	pci_read_msix_cap_word(dev, PCI_MSIX_FLAGS, &ctrl);
+	ctrl &= ~clear;
+	ctrl |= set;
+	pci_write_msix_cap_word(dev, PCI_MSIX_FLAGS, ctrl);
+}
+
+#endif
 
 #ifdef CONFIG_PCI_MSI_IRQ_DOMAIN
 static int pci_msi_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
@@ -226,6 +312,12 @@ u32 __pci_msix_desc_mask_irq(struct msi_desc *desc, u32 flag)
 
 	writel(mask_bits, desc_addr + PCI_MSIX_ENTRY_VECTOR_CTRL);
 
+#ifdef MCST_MSIX_DEBUG
+	printk("default_msix_mask_irq flag = %d. addr = %p + 0x%x,mask = 0x%08x\n",
+		flag, pci_msix_desc_addr(desc), PCI_MSIX_ENTRY_VECTOR_CTRL,
+		mask_bits);
+#endif
+
 	return mask_bits;
 }
 
@@ -337,6 +429,11 @@ void __pci_write_msi_msg(struct msi_desc *entry, struct msi_msg *msg)
 		writel(msg->address_lo, base + PCI_MSIX_ENTRY_LOWER_ADDR);
 		writel(msg->address_hi, base + PCI_MSIX_ENTRY_UPPER_ADDR);
 		writel(msg->data, base + PCI_MSIX_ENTRY_DATA);
+
+#ifdef MCST_MSIX_DEBUG
+		printk("__write_msi_msg at %p: data = 0x%08x, lo_addr = 0x%08x, hi_addr = 0x%08x\n",
+			base, msg->data, msg->address_lo, msg->address_hi);
+#endif
 
 		if (unmasked)
 			__pci_msix_desc_mask_irq(entry, 0);
@@ -703,8 +800,16 @@ static void __iomem *msix_map_region(struct pci_dev *dev, unsigned nr_entries)
 	unsigned long flags;
 	u8 bir;
 
+#ifdef MCST_MSIX
+#ifdef MCST_MSIX_DEBUG
+	void __iomem *ioa;
+#endif
+	pci_read_msix_cap_dword(dev, PCI_MSIX_TABLE, &table_offset);
+#else
 	pci_read_config_dword(dev, dev->msix_cap + PCI_MSIX_TABLE,
 			      &table_offset);
+#endif
+
 	bir = (u8)(table_offset & PCI_MSIX_TABLE_BIR);
 	flags = pci_resource_flags(dev, bir);
 	if (!flags || (flags & IORESOURCE_UNSET))
@@ -713,7 +818,15 @@ static void __iomem *msix_map_region(struct pci_dev *dev, unsigned nr_entries)
 	table_offset &= PCI_MSIX_TABLE_OFFSET;
 	phys_addr = pci_resource_start(dev, bir) + table_offset;
 
+#ifdef MCST_MSIX_DEBUG
+	ioa = ioremap(phys_addr, nr_entries * PCI_MSIX_ENTRY_SIZE);
+	printk("MSIX map reg bir %d, off 0x%x: phys_addr = 0x%llx, sz = %u, ioaddr = %p\n",
+		bir, table_offset, phys_addr,
+		nr_entries * PCI_MSIX_ENTRY_SIZE, ioa);
+	return ioa;
+#else
 	return ioremap(phys_addr, nr_entries * PCI_MSIX_ENTRY_SIZE);
+#endif
 }
 
 static int msix_setup_entries(struct pci_dev *dev, void __iomem *base,
@@ -819,7 +932,11 @@ static int msix_capability_init(struct pci_dev *dev, struct msix_entry *entries,
 	pci_msix_clear_and_set_ctrl(dev, 0, PCI_MSIX_FLAGS_MASKALL |
 				    PCI_MSIX_FLAGS_ENABLE);
 
+#ifdef MCST_MSIX
+	pci_read_msix_cap_word(dev, PCI_MSIX_FLAGS, &control);
+#else
 	pci_read_config_word(dev, dev->msix_cap + PCI_MSIX_FLAGS, &control);
+#endif
 	/* Request & Map MSI-X table region */
 	tsize = msix_table_size(control);
 	base = msix_map_region(dev, tsize);
@@ -992,6 +1109,14 @@ void pci_disable_msi(struct pci_dev *dev)
 }
 EXPORT_SYMBOL(pci_disable_msi);
 
+#ifdef CONFIG_MCST
+static const struct pci_device_id r2000p_msix_buglist[] = {
+	{ PCI_VDEVICE(MCST_TMP, 0x803d), .driver_data = 9 },
+	{ PCI_VDEVICE(MCST_TMP, PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P),
+					.driver_data = 4 },
+	{ /* sentinel */ }
+};
+#endif
 /**
  * pci_msix_vec_count - return the number of device's MSI-X table entries
  * @dev: pointer to the pci_dev data structure of MSI-X device function
@@ -1004,10 +1129,24 @@ int pci_msix_vec_count(struct pci_dev *dev)
 {
 	u16 control;
 
+#ifdef MCST_MSIX
+	const struct pci_device_id *id;
+
+	if (!supports_msix(dev))
+		return -EINVAL;
+
+	/* Bug 138348 */
+	id = pci_match_id(r2000p_msix_buglist, dev);
+	if (id)
+		return id->driver_data;
+
+	pci_read_msix_cap_word(dev, PCI_MSIX_FLAGS, &control);
+#else
 	if (!dev->msix_cap)
 		return -EINVAL;
 
 	pci_read_config_word(dev, dev->msix_cap + PCI_MSIX_FLAGS, &control);
+#endif
 	return msix_table_size(control);
 }
 EXPORT_SYMBOL(pci_msix_vec_count);

@@ -52,7 +52,8 @@
 #define EM_BPF		247	/* Linux BPF - in-kernel virtual machine */
 #define EM_CSKY		252	/* C-SKY */
 #define EM_FRV		0x5441	/* Fujitsu FR-V */
-
+/* CONFIG_E2K */
+#define EM_MCST_ELBRUS  175     /* MCST Elbrus hardware architecture */
 /*
  * This is an interim value that we will use until the committee comes
  * up with a final number.

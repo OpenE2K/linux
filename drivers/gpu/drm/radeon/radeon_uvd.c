@@ -791,6 +791,19 @@ int radeon_uvd_get_create_msg(struct radeon_device *rdev, int ring,
 		return r;
 
 	/* stitch together an UVD create msg */
+#ifdef CONFIG_MCST
+	writel(0x00000de4, msg + 0);
+	writel(0x00000000, msg + 1);
+	writel(handle, msg + 2);
+	writel(0x00000000, msg + 3);
+	writel(0x00000000, msg + 4);
+	writel(0x00000000, msg + 5);
+	writel(0x00000000, msg + 6);
+	writel(0x00000780, msg + 7);
+	writel(0x00000440, msg + 8);
+	writel(0x00000000, msg + 9);
+	writel(0x01b37000, msg + 10);
+#else
 	msg[0] = cpu_to_le32(0x00000de4);
 	msg[1] = cpu_to_le32(0x00000000);
 	msg[2] = cpu_to_le32(handle);
@@ -802,8 +815,13 @@ int radeon_uvd_get_create_msg(struct radeon_device *rdev, int ring,
 	msg[8] = cpu_to_le32(0x00000440);
 	msg[9] = cpu_to_le32(0x00000000);
 	msg[10] = cpu_to_le32(0x01b37000);
+#endif
 	for (i = 11; i < 1024; ++i)
+#ifdef CONFIG_MCST
+		writel(0x0, msg + i);
+#else
 		msg[i] = cpu_to_le32(0x0);
+#endif
 
 	r = radeon_uvd_send_msg(rdev, ring, addr, fence);
 	radeon_bo_unreserve(rdev->uvd.vcpu_bo);
@@ -827,12 +845,23 @@ int radeon_uvd_get_destroy_msg(struct radeon_device *rdev, int ring,
 		return r;
 
 	/* stitch together an UVD destroy msg */
+#ifdef CONFIG_MCST
+	writel(0x00000de4, msg + 0);
+	writel(0x00000002, msg + 1);
+	writel(handle, msg + 2);
+	writel(0x00000000, msg + 3);
+#else
 	msg[0] = cpu_to_le32(0x00000de4);
 	msg[1] = cpu_to_le32(0x00000002);
 	msg[2] = cpu_to_le32(handle);
 	msg[3] = cpu_to_le32(0x00000000);
+#endif
 	for (i = 4; i < 1024; ++i)
+#ifdef CONFIG_MCST
+		writel(0x0, msg + i);
+#else
 		msg[i] = cpu_to_le32(0x0);
+#endif
 
 	r = radeon_uvd_send_msg(rdev, ring, addr, fence);
 	radeon_bo_unreserve(rdev->uvd.vcpu_bo);

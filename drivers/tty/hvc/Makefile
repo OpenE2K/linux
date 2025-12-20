@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+
 obj-$(CONFIG_HVC_CONSOLE)	+= hvc_vio.o hvsi_lib.o
 obj-$(CONFIG_HVC_OPAL)		+= hvc_opal.o hvsi_lib.o
 obj-$(CONFIG_HVC_OLD_HVSI)	+= hvsi.o
@@ -11,3 +11,4 @@ obj-$(CONFIG_HVC_IUCV)		+= hvc_iucv.o
 obj-$(CONFIG_HVC_UDBG)		+= hvc_udbg.o
 obj-$(CONFIG_HVC_RISCV_SBI)	+= hvc_riscv_sbi.o
 obj-$(CONFIG_HVCS)		+= hvcs.o
+obj-$(CONFIG_HVC_L)		+= hvc_l.o

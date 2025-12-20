@@ -26,6 +26,9 @@
 MODULE_DESCRIPTION("ASoC TLV320AIC26 codec driver");
 MODULE_AUTHOR("Grant Likely <grant.likely@secretlab.ca>");
 MODULE_LICENSE("GPL");
+#ifdef CONFIG_MCST
+MODULE_ALIAS("spi:tlv320aic26");
+#endif /*CONFIG_MCST*/
 
 /* AIC26 driver private data */
 struct aic26 {
@@ -118,10 +121,18 @@ static int aic26_hw_params(struct snd_pcm_substream *substream,
 	snd_soc_component_write(component, AIC26_REG_PLL_PROG2, reg);
 
 	/* Audio Control 3 (master mode, fsref rate) */
+#ifdef CONFIG_MCST
+	reg = 0x0000;
+	if (aic26->master)
+		reg |= 0x0800; /* D11 bit: 0 for slave(reset val), 1 for master */
+	if (fsref == 44100)
+		reg |= 0x2000; /* D13 bit: 0 for 48kHz(reset val), 1 for 44.1 kHz */
+#else
 	if (aic26->master)
 		reg = 0x0800;
 	if (fsref == 48000)
 		reg = 0x2000;
+#endif /* CONFIG_MCST */
 	snd_soc_component_update_bits(component, AIC26_REG_AUDIO_CTRL3, 0xf800, reg);
 
 	/* Audio Control 1 (FSref divisor) */
@@ -131,7 +142,45 @@ static int aic26_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-/*
+#ifdef CONFIG_MCST
+/**
+ * aic26_mute_stream - Mute control to reduce noise when changing audio format
+ */
+static int aic26_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
+{
+	struct snd_soc_component *component = dai->component;
+	struct aic26 *aic26 = snd_soc_component_get_drvdata(component);
+	u16 reg;
+
+	dev_dbg(&aic26->spi->dev, "aic26_mute(dai=%p, mute=%i)\n",
+		dai, mute);
+
+
+	if (mute) {
+		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+			reg = 0x8080;
+			snd_soc_component_update_bits(component,
+					AIC26_REG_DAC_GAIN, 0x8080, reg);
+		} else {
+			reg = 0x8000;
+			snd_soc_component_update_bits(component,
+					AIC26_REG_ADC_GAIN, 0x8000, reg);
+		}
+	} else {
+		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+			reg = 0xffff;
+			snd_soc_component_update_bits(component,
+					AIC26_REG_DAC_GAIN, 0x8080, ~reg);
+		} else {
+			reg = 0x0000;
+			snd_soc_component_update_bits(component,
+					AIC26_REG_ADC_GAIN, 0x8000, reg);
+		}
+	}
+	return 0;
+}
+#else
+/**
  * aic26_mute - Mute control to reduce noise when changing audio format
  */
 static int aic26_mute(struct snd_soc_dai *dai, int mute, int direction)
@@ -151,6 +200,7 @@ static int aic26_mute(struct snd_soc_dai *dai, int mute, int direction)
 
 	return 0;
 }
+#endif /*CONFIG_MCST*/
 
 static int aic26_set_sysclk(struct snd_soc_dai *codec_dai,
 			    int clk_id, unsigned int freq, int dir)
@@ -211,7 +261,11 @@ static int aic26_set_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 
 static const struct snd_soc_dai_ops aic26_dai_ops = {
 	.hw_params	= aic26_hw_params,
-	.mute_stream	= aic26_mute,
+#ifdef CONFIG_MCST
+	.mute_stream = aic26_mute_stream,
+#else
+	.mute_stream = aic26_mute,
+#endif /*CONFIG_MCST*/
 	.set_sysclk	= aic26_set_sysclk,
 	.set_fmt	= aic26_set_fmt,
 	.no_capture_mute = 1,
@@ -235,6 +289,16 @@ static struct snd_soc_dai_driver aic26_dai = {
 	},
 	.ops = &aic26_dai_ops,
 };
+
+#ifdef CONFIG_MCST
+#if defined(CONFIG_OF)
+static const struct of_device_id tlv320aic26_of_match[] = {
+	{ .compatible = "ti,tlv320aic26"},
+	{},
+};
+MODULE_DEVICE_TABLE(of, tlv320aic26_of_match);
+#endif /* CONFIG_OF */
+#endif /*CONFIG_MCST*/
 
 /* ---------------------------------------------------------------------
  * ALSA controls
@@ -321,8 +385,20 @@ static int aic26_probe(struct snd_soc_component *component)
 	return 0;
 }
 
+#ifdef CONFIG_MCST
+static void aic26_remove(struct snd_soc_component *component)
+{
+	struct aic26 *aic26 = dev_get_drvdata(component->dev);
+	/* Remove SysFs file */
+	device_remove_file(component->dev, &dev_attr_keyclick);
+}
+#endif /*CONFIG_MCST*/
+
 static const struct snd_soc_component_driver aic26_soc_component_dev = {
 	.probe			= aic26_probe,
+#ifdef CONFIG_MCST
+	.remove			= aic26_remove,
+#endif /*CONFIG_MCST*/
 	.controls		= aic26_snd_controls,
 	.num_controls		= ARRAY_SIZE(aic26_snd_controls),
 	.dapm_widgets		= tlv320aic26_dapm_widgets,
@@ -373,6 +449,9 @@ static int aic26_spi_probe(struct spi_device *spi)
 static struct spi_driver aic26_spi = {
 	.driver = {
 		.name = "tlv320aic26-codec",
+#ifdef CONFIG_MCST
+		.of_match_table = of_match_ptr(tlv320aic26_of_match),
+#endif /*CONFIG_MCST*/
 	},
 	.probe = aic26_spi_probe,
 };

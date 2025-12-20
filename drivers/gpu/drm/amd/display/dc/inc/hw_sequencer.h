@@ -209,10 +209,10 @@ struct hw_sequencer_funcs {
 
 	void (*set_pipe)(struct pipe_ctx *pipe_ctx);
 
-#if defined(CONFIG_DRM_AMD_DC_DCN3_0)
 	/* Idle Optimization Related */
 	bool (*apply_idle_power_optimizations)(struct dc *dc, bool enable);
-#endif
+
+	bool (*does_plane_fit_in_mall)(struct dc *dc, struct dc_plane_state *plane);
 
 };
 

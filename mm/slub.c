@@ -930,6 +930,10 @@ static int check_object(struct kmem_cache *s, struct page *page,
 		 * freepointer while object is allocated.
 		 */
 		return 1;
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	if (!(s->flags & SLAB_CONSISTENCY_CHECKS))
+		return 1;
+#endif
 
 	/* Check free pointer validity */
 	if (!check_valid_pointer(s, page, get_freepointer(s, p))) {
@@ -4193,6 +4197,16 @@ void kfree(const void *x)
 		__free_pages(page, order);
 		return;
 	}
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	{ struct kmem_cache *c = page->slab_cache;
+
+		if (mem_san && pax_sanitize_slab &&
+				 !(c && (c->flags & SLAB_NO_SANITIZE))) {
+			memset(object, MEMORY_SANITIZE_VALUE,
+					c->object_size);
+		}
+	}
+#endif
 	slab_free(page->slab_cache, page, object, NULL, 1, _RET_IP_);
 }
 EXPORT_SYMBOL(kfree);

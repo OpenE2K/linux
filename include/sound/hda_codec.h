@@ -51,6 +51,9 @@ struct hda_bus {
 	DECLARE_BITMAP(pcm_dev_bits, SNDRV_PCM_DEVICES);
 
 	/* misc op flags */
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+	unsigned int needs_retry_on_codec_write :1;
+#endif
 	unsigned int allow_bus_reset:1;	/* allow bus reset at fatal error */
 	/* status for codec/controller */
 	unsigned int shutdown :1;	/* being unloaded */

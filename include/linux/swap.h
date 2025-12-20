@@ -219,6 +219,11 @@ struct swap_cluster_info {
 #define CLUSTER_FLAG_NEXT_NULL 2 /* This cluster has no next cluster */
 #define CLUSTER_FLAG_HUGE 4 /* This cluster is backing a transparent huge page */
 
+struct swap_cluster_list {
+	struct swap_cluster_info head;
+	struct swap_cluster_info tail;
+};
+
 /*
  * We assign a cluster to each CPU, so each CPU can allocate swap entry from
  * its own cluster and swapout sequentially. The purpose is to optimize swapout
@@ -229,10 +234,38 @@ struct percpu_cluster {
 	unsigned int next; /* Likely next allocation offset */
 };
 
-struct swap_cluster_list {
-	struct swap_cluster_info head;
-	struct swap_cluster_info tail;
-};
+#ifdef CONFIG_E2K
+/*
+ * E2K system of memory used taged dates
+ * Size of tags  - 4 bits. Size of data - 8 bytes
+ * There 3 version
+ * To store page of memory we story page of date(PAGE_SIZE)
+ * and than story tags (TAGS_PAGE_SIZE)
+ * The size of stored tags are max(1/16 PAGE_SIZE, block_size(swap device))
+ *  1 - CONFIG_SOFTWARE_SWAP_TAGS (Salavat idea - best idea)
+ *      The tags of all user virtual pages are mapped to user virtual space
+ *      We reserved VMA for tags (== 1/16 size of memory) and can use
+ *      common swap algorithm for tag_page
+ *      The address of tag for the page is equal
+ *         USER_TAG_MEM_BASE + SWAP_SECTOR_OFFSET(page)*((PAGE_SIZE)/16)
+ *  2 - CONFIG_SOFTWARE_SWAP_TAGS_V2
+ *       The 1/16 part of swap_file - tags_swap_file
+ *  3 - CONFIG_SOFTWARE_SWAP_TAGS_V3
+ *       we consider that page of swap == PAGE_SIZE + TAGS_PAGE_SIZE)
+ *       It's similar as CONFIG_SOFTWARE_SWAP_TAGS_V2 but little better
+ *       (tag + date)  are arranged in a row )
+ *   To minimaze changes in arch independend source use SWAP_REAL_PAGE
+ *   and SWAP_REAL_OFFSET
+ */
+extern void e2k_swap_setup(int type, int block_size);
+extern void e2k_map_swap_page(struct page *page, struct bio *bio,
+			      struct block_device **bdev);
+
+extern unsigned int nr_swapfiles;
+
+#define SWAP_REAL_MAX_PAGES(x) ((x * PAGE_SIZE)  \
+		/ (PAGE_SIZE + PAGE_SIZE/8))
+#endif /* CONFIG_E2K */
 
 /*
  * The in-memory structure used to track swap areas.
@@ -262,6 +295,13 @@ struct swap_info_struct {
 	unsigned long *frontswap_map;	/* frontswap in-use, one bit per page */
 	atomic_t frontswap_pages;	/* frontswap pages in-use counter */
 #endif
+#ifdef CONFIG_E2K
+	unsigned long *tag_swap_map;	/*  optimization for null tags
+					 *  needs one bit for every page
+					 *  if bit =1 we must write and read
+					 *  tags. Owherwise NO WRITE/READ tags
+					 */
+#endif /* CONFIG_E2K */
 	spinlock_t lock;		/*
 					 * protect map scan related fields like
 					 * swap_map, lowest_bit, highest_bit,
@@ -275,7 +315,7 @@ struct swap_info_struct {
 					 * both locks need hold, hold swap_lock
 					 * first.
 					 */
-	spinlock_t cont_lock;		/*
+	spinlock_t cont_lock;           /*
 					 * protect swap count continuation page
 					 * list.
 					 */
@@ -291,14 +331,15 @@ struct swap_info_struct {
 					   * And it has to be an array so that
 					   * plist_for_each_* can work.
 					   */
+
 };
 
 #ifdef CONFIG_64BIT
-#define SWAP_RA_ORDER_CEILING	5
+#define SWAP_RA_ORDER_CEILING  5
 #else
 /* Avoid stack overflow, because we need to save part of page table */
-#define SWAP_RA_ORDER_CEILING	3
-#define SWAP_RA_PTE_CACHE_SIZE	(1 << SWAP_RA_ORDER_CEILING)
+#define SWAP_RA_ORDER_CEILING  3
+#define SWAP_RA_PTE_CACHE_SIZE (1 << SWAP_RA_ORDER_CEILING)
 #endif
 
 struct vma_swap_readahead {
@@ -401,6 +442,13 @@ int add_swap_extent(struct swap_info_struct *sis, unsigned long start_page,
 		unsigned long nr_pages, sector_t start_block);
 int generic_swapfile_activate(struct swap_info_struct *, struct file *,
 		sector_t *);
+#ifdef CONFIG_E2K
+extern int  e2k_swap_readpage(struct page *);
+extern void e2k_swap_writepage(struct page *page,
+			       struct writeback_control *wbc);
+extern void tag_swap_write_page(struct page *page,
+				struct writeback_control *wbc);
+#endif  /* CONFIG_E2K */
 
 /* linux/mm/swap_state.c */
 /* One swap address space for each 64M swap space */
@@ -712,6 +760,11 @@ static inline bool mem_cgroup_swap_full(struct page *page)
 {
 	return vm_swap_full();
 }
+#endif
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+extern struct page *swap_sanit_page;
+extern u64 test_sntz_sect;
+#define SANITIZE_VALUE	(0xfefefefe)
 #endif
 
 #endif /* __KERNEL__*/

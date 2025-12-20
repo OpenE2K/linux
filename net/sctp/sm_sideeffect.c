@@ -729,6 +729,9 @@ static void sctp_cmd_transport_on(struct sctp_cmd_seq *cmds,
 {
 	struct sctp_sender_hb_info *hbinfo;
 	int was_unconfirmed = 0;
+#ifdef CONFIG_MCST
+	unsigned long sent_at;
+#endif
 
 	/* 8.3 Upon the receipt of the HEARTBEAT ACK, the sender of the
 	 * HEARTBEAT should clear the error counter of the destination
@@ -782,7 +785,12 @@ static void sctp_cmd_transport_on(struct sctp_cmd_seq *cmds,
 		t->rto_pending = 1;
 
 	hbinfo = (struct sctp_sender_hb_info *)chunk->skb->data;
+#ifdef CONFIG_MCST
+	sent_at = get_unaligned(&hbinfo->sent_at);
+	sctp_transport_update_rto(t, (jiffies - sent_at));
+#else
 	sctp_transport_update_rto(t, (jiffies - hbinfo->sent_at));
+#endif
 
 	/* Update the heartbeat timer.  */
 	sctp_transport_reset_hb_timer(t);

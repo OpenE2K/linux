@@ -8,6 +8,10 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#if defined CONFIG_MCST
+#include <linux/pci.h>
+#include <linux/pci_ids.h>
+#endif
 #include <sound/core.h>
 #include <sound/tlv.h>
 #include <sound/hda_codec.h>
@@ -49,6 +53,9 @@ enum {
 	CS420X_MBP101,
 	CS420X_MBP81,
 	CS420X_MBA42,
+#ifdef CONFIG_MCST
+	CS420X_IOHUB2,
+#endif /* CONFIG_MCST */
 	CS420X_AUTO,
 	/* aliases */
 	CS420X_IMAC27_122 = CS420X_GPIO_23,
@@ -297,8 +304,17 @@ static int cs_init(struct hda_codec *codec)
 	struct cs_spec *spec = codec->spec;
 
 	if (spec->vendor_nid == CS420X_VENDOR_NID) {
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+		int saved = codec->bus->needs_retry_on_codec_write;
+		/* apply errata without retries */
+		codec->bus->needs_retry_on_codec_write = 0;
+#endif
 		/* init_verb sequence for C0/C1/C2 errata*/
 		snd_hda_sequence_write(codec, cs_errata_init_verbs);
+
+#if defined(CONFIG_MCST) && (defined(CONFIG_E90S) || defined(CONFIG_E2K))
+		codec->bus->needs_retry_on_codec_write = saved;
+#endif
 		snd_hda_sequence_write(codec, cs_coef_init_verbs);
 	} else if (spec->vendor_nid == CS4208_VENDOR_NID) {
 		snd_hda_sequence_write(codec, cs4208_coef_init_verbs);
@@ -383,6 +399,9 @@ static const struct hda_model_fixup cs420x_models[] = {
 	{ .id = CS420X_MBP101, .name = "mbp101" },
 	{ .id = CS420X_MBP81, .name = "mbp81" },
 	{ .id = CS420X_MBA42, .name = "mba42" },
+#ifdef CONFIG_MCST
+	{ .id = CS420X_IOHUB2, .name = "iohub2" },
+#endif /* CONFIG_MCST */
 	{}
 };
 
@@ -406,6 +425,20 @@ static const struct snd_pci_quirk cs420x_fixup_tbl[] = {
 	{} /* terminator */
 };
 
+#ifdef CONFIG_MCST
+
+static const struct hda_pintbl iohub2_pincfgs[] = {
+	{ 0x09, 0x01014060 },
+	{ 0x0a, 0x01016061 },
+	{ 0x0b, 0x01011062 },
+#if 0
+	{ 0x10, 0x40000063 },
+	{ 0x15, 0x40000064 },
+#endif
+	{} /* terminator */
+};
+
+#endif /* CONFIG_MCST */
 static const struct hda_pintbl mbp53_pincfgs[] = {
 	{ 0x09, 0x012b4050 },
 	{ 0x0a, 0x90100141 },
@@ -517,6 +550,13 @@ static void cs420x_fixup_gpio_23(struct hda_codec *codec,
 }
 
 static const struct hda_fixup cs420x_fixups[] = {
+#ifdef CONFIG_MCST
+	[CS420X_IOHUB2] = {
+		.type = HDA_FIXUP_PINS,
+		.v.pins = iohub2_pincfgs,
+		.chained = false,
+	},
+#endif /* CONFIG_MCST */
 	[CS420X_MBP53] = {
 		.type = HDA_FIXUP_PINS,
 		.v.pins = mbp53_pincfgs,
@@ -577,7 +617,12 @@ static struct cs_spec *cs_alloc_spec(struct hda_codec *codec, int vendor_nid)
 		return NULL;
 	codec->spec = spec;
 	spec->vendor_nid = vendor_nid;
+#ifdef CONFIG_MCST
+	/*  do not use advanced PM: silence is recorded at pc101 */
+	codec->power_save_node = 0;
+#else
 	codec->power_save_node = 1;
+#endif
 	snd_hda_gen_spec_init(&spec->gen);
 
 	return spec;
@@ -596,6 +641,17 @@ static int patch_cs420x(struct hda_codec *codec)
 	spec->gen.automute_hook = cs_automute;
 	codec->single_adc_amp = 1;
 
+#ifdef CONFIG_MCST
+	if (codec->bus->pci) {
+		u16 v = codec->bus->pci->vendor;
+		u16 d = codec->bus->pci->device;
+		if (v == PCI_VENDOR_ID_MCST_TMP &&
+					d == PCI_DEVICE_ID_MCST_HDA) {
+			kfree(codec->modelname);
+			codec->modelname = kstrdup("iohub2", GFP_KERNEL);
+		}
+	}
+#endif /* CONFIG_MCST */
 	snd_hda_pick_fixup(codec, cs420x_models, cs420x_fixup_tbl,
 			   cs420x_fixups);
 	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PRE_PROBE);
@@ -1045,7 +1101,10 @@ static void parse_cs421x_digital(struct hda_codec *codec)
 	struct cs_spec *spec = codec->spec;
 	struct auto_pin_cfg *cfg = &spec->gen.autocfg;
 	int i;
-
+#ifdef CONFIG_MCST
+	/*don't touch digital outs: they introduce noise*/
+	return;
+#endif
 	for (i = 0; i < cfg->dig_outs; i++) {
 		hda_nid_t nid = cfg->dig_out_pins[i];
 		if (get_wcaps(codec, nid) & AC_WCAP_UNSOL_CAP) {

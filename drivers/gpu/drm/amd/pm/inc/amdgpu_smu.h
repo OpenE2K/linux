@@ -31,6 +31,51 @@
 #define SMU_THERMAL_MINIMUM_ALERT_TEMP		0
 #define SMU_THERMAL_MAXIMUM_ALERT_TEMP		255
 #define SMU_TEMPERATURE_UNITS_PER_CENTIGRADES	1000
+#define SMU_FW_NAME_LEN			0x24
+
+#define SMU_DPM_USER_PROFILE_RESTORE (1 << 0)
+
+// Power Throttlers
+#define SMU_THROTTLER_PPT0_BIT			0
+#define SMU_THROTTLER_PPT1_BIT			1
+#define SMU_THROTTLER_PPT2_BIT			2
+#define SMU_THROTTLER_PPT3_BIT			3
+#define SMU_THROTTLER_SPL_BIT			4
+#define SMU_THROTTLER_FPPT_BIT			5
+#define SMU_THROTTLER_SPPT_BIT			6
+#define SMU_THROTTLER_SPPT_APU_BIT		7
+
+// Current Throttlers
+#define SMU_THROTTLER_TDC_GFX_BIT		16
+#define SMU_THROTTLER_TDC_SOC_BIT		17
+#define SMU_THROTTLER_TDC_MEM_BIT		18
+#define SMU_THROTTLER_TDC_VDD_BIT		19
+#define SMU_THROTTLER_TDC_CVIP_BIT		20
+#define SMU_THROTTLER_EDC_CPU_BIT		21
+#define SMU_THROTTLER_EDC_GFX_BIT		22
+#define SMU_THROTTLER_APCC_BIT			23
+
+// Temperature
+#define SMU_THROTTLER_TEMP_GPU_BIT		32
+#define SMU_THROTTLER_TEMP_CORE_BIT		33
+#define SMU_THROTTLER_TEMP_MEM_BIT		34
+#define SMU_THROTTLER_TEMP_EDGE_BIT		35
+#define SMU_THROTTLER_TEMP_HOTSPOT_BIT		36
+#define SMU_THROTTLER_TEMP_SOC_BIT		37
+#define SMU_THROTTLER_TEMP_VR_GFX_BIT		38
+#define SMU_THROTTLER_TEMP_VR_SOC_BIT		39
+#define SMU_THROTTLER_TEMP_VR_MEM0_BIT		40
+#define SMU_THROTTLER_TEMP_VR_MEM1_BIT		41
+#define SMU_THROTTLER_TEMP_LIQUID0_BIT		42
+#define SMU_THROTTLER_TEMP_LIQUID1_BIT		43
+#define SMU_THROTTLER_VRHOT0_BIT		44
+#define SMU_THROTTLER_VRHOT1_BIT		45
+#define SMU_THROTTLER_PROCHOT_CPU_BIT		46
+#define SMU_THROTTLER_PROCHOT_GFX_BIT		47
+
+// Other
+#define SMU_THROTTLER_PPM_BIT			56
+#define SMU_THROTTLER_FIT_BIT			57
 
 struct smu_hw_power_state {
 	unsigned int magic;
@@ -158,6 +203,20 @@ enum smu_power_src_type
 	SMU_POWER_SOURCE_COUNT,
 };
 
+enum smu_ppt_limit_type
+{
+	SMU_DEFAULT_PPT_LIMIT = 0,
+	SMU_FAST_PPT_LIMIT,
+};
+
+enum smu_ppt_limit_level
+{
+	SMU_PPT_LIMIT_MIN = -1,
+	SMU_PPT_LIMIT_CURRENT,
+	SMU_PPT_LIMIT_DEFAULT,
+	SMU_PPT_LIMIT_MAX,
+};
+
 enum smu_memory_pool_size
 {
     SMU_MEMORY_POOL_SIZE_ZERO   = 0,
@@ -165,6 +224,23 @@ enum smu_memory_pool_size
     SMU_MEMORY_POOL_SIZE_512_MB = 0x20000000,
     SMU_MEMORY_POOL_SIZE_1_GB   = 0x40000000,
     SMU_MEMORY_POOL_SIZE_2_GB   = 0x80000000,
+};
+
+struct smu_user_dpm_profile {
+	uint32_t fan_mode;
+	uint32_t power_limit;
+	uint32_t fan_speed_percent;
+	uint32_t flags;
+	uint32_t user_od;
+
+	/* user clock state information */
+	uint32_t clk_mask[SMU_CLK_COUNT];
+	uint32_t clk_dependency;
+};
+
+enum smu_event_type {
+
+	SMU_EVENT_RESET_COMPLETE = 0,
 };
 
 #define SMU_TABLE_INIT(tables, table_id, s, a, d)	\
@@ -225,6 +301,8 @@ struct smu_bios_boot_up_values
 	uint32_t			format_revision;
 	uint32_t			content_revision;
 	uint32_t			fclk;
+	uint32_t			lclk;
+	uint32_t			firmware_caps;
 };
 
 enum smu_table_id
@@ -275,6 +353,7 @@ struct smu_table_context
 
 	void				*overdrive_table;
 	void                            *boot_overdrive_table;
+	void				*user_overdrive_table;
 
 	uint32_t			gpu_metrics_table_size;
 	void				*gpu_metrics_table;
@@ -420,6 +499,7 @@ struct smu_context
 
 	bool od_enabled;
 	uint32_t current_power_limit;
+	uint32_t default_power_limit;
 	uint32_t max_power_limit;
 
 	/* soft pptable */
@@ -456,7 +536,14 @@ struct smu_context
 	struct work_struct interrupt_work;
 
 	unsigned fan_max_rpm;
-	unsigned manual_fan_speed_rpm;
+	unsigned manual_fan_speed_percent;
+
+	uint32_t gfx_default_hard_min_freq;
+	uint32_t gfx_default_soft_max_freq;
+	uint32_t gfx_actual_hard_min_freq;
+	uint32_t gfx_actual_soft_max_freq;
+
+	struct smu_user_dpm_profile user_dpm_profile;
 };
 
 struct i2c_adapter;
@@ -475,6 +562,13 @@ struct pptable_funcs {
 	int (*set_od_percentage)(struct smu_context *smu,
 				 enum smu_clk_type clk_type,
 				 uint32_t value);
+
+	/**
+	 * @restore_user_od_settings: Restore the user customized
+	 *                            OD settings on S3/S4/Runpm resume.
+	 */
+	int (*restore_user_od_settings)(struct smu_context *smu);
+
 	int (*od_edit_dpm_table)(struct smu_context *smu,
 				 enum PP_OD_DPM_TABLE_COMMAND type,
 				 long *input, uint32_t size);
@@ -500,7 +594,11 @@ struct pptable_funcs {
 	int (*notify_smc_display_config)(struct smu_context *smu);
 	int (*set_cpu_power_state)(struct smu_context *smu);
 	bool (*is_dpm_running)(struct smu_context *smu);
-	int (*get_fan_speed_rpm)(struct smu_context *smu, uint32_t *speed);
+
+	/**
+	 * @get_fan_speed_percent: Get the current fan speed in percent.
+	 */
+	int (*get_fan_speed_percent)(struct smu_context *smu, uint32_t *speed);
 	int (*set_watermarks_table)(struct smu_context *smu,
 				    struct pp_smu_wm_range_sets *clock_ranges);
 	int (*get_thermal_temperature_range)(struct smu_context *smu, struct smu_temperature_range *range);
@@ -509,7 +607,17 @@ struct pptable_funcs {
 	int (*set_performance_level)(struct smu_context *smu, enum amd_dpm_forced_level level);
 	int (*display_disable_memory_clock_switch)(struct smu_context *smu, bool disable_memory_clock_switch);
 	void (*dump_pptable)(struct smu_context *smu);
-	int (*get_power_limit)(struct smu_context *smu);
+	int (*get_power_limit)(struct smu_context *smu,
+			       uint32_t *current_power_limit,
+			       uint32_t *default_power_limit,
+			       uint32_t *max_power_limit);
+
+	/**
+	 * @get_ppt_limit: Get the device's ppt limits.
+	 */
+	int (*get_ppt_limit)(struct smu_context *smu, uint32_t *ppt_limit,
+			enum smu_ppt_limit_type limit_type, enum smu_ppt_limit_level limit_level);
+
 	int (*set_df_cstate)(struct smu_context *smu, enum pp_df_cstate state);
 	int (*allow_xgmi_power_down)(struct smu_context *smu, bool en);
 	int (*update_pcie_parameters)(struct smu_context *smu, uint32_t pcie_gen_cap, uint32_t pcie_width_cap);
@@ -545,7 +653,15 @@ struct pptable_funcs {
 	int (*set_allowed_mask)(struct smu_context *smu);
 	int (*get_enabled_mask)(struct smu_context *smu, uint32_t *feature_mask, uint32_t num);
 	int (*feature_is_enabled)(struct smu_context *smu, enum smu_feature_mask mask);
-	int (*disable_all_features_with_exception)(struct smu_context *smu, enum smu_feature_mask mask);
+
+	/**
+	 * @disable_all_features_with_exception: Disable all features with
+	 *                                       exception to those in &mask.
+	 */
+	int (*disable_all_features_with_exception)(struct smu_context *smu,
+						   bool no_hw_disablement,
+						   enum smu_feature_mask mask);
+
 	int (*notify_display_change)(struct smu_context *smu);
 	int (*set_power_limit)(struct smu_context *smu, uint32_t n);
 	int (*init_max_sustainable_clocks)(struct smu_context *smu);
@@ -575,8 +691,18 @@ struct pptable_funcs {
 	int (*conv_power_profile_to_pplib_workload)(int power_profile);
 	uint32_t (*get_fan_control_mode)(struct smu_context *smu);
 	int (*set_fan_control_mode)(struct smu_context *smu, uint32_t mode);
+
+	/**
+	 * @set_mp1_state: put SMU into a correct state for comming
+	 *                 resume from runpm or gpu reset.
+	 */
+	int (*set_mp1_state)(struct smu_context *smu,
+			     enum pp_mp1_state mp1_state);
+
+	/**
+	 * @set_fan_speed_percent: Set a static fan speed in percent.
+	 */
 	int (*set_fan_speed_percent)(struct smu_context *smu, uint32_t speed);
-	int (*set_fan_speed_rpm)(struct smu_context *smu, uint32_t speed);
 	int (*set_xgmi_pstate)(struct smu_context *smu, uint32_t pstate);
 	int (*gfx_off_control)(struct smu_context *smu, bool enable);
 	uint32_t (*get_gfx_off_status)(struct smu_context *smu);
@@ -604,6 +730,27 @@ struct pptable_funcs {
 	int (*get_fan_parameters)(struct smu_context *smu);
 	int (*post_init)(struct smu_context *smu);
 	void (*interrupt_work)(struct smu_context *smu);
+	int (*gpo_control)(struct smu_context *smu, bool enablement);
+	/**
+	 * @gfx_state_change_set: Send the current graphics state to the SMU.
+	 */
+	int (*gfx_state_change_set)(struct smu_context *smu, uint32_t state);
+
+	/**
+	 * @set_fine_grain_gfx_freq_parameters: Set fine grain graphics clock
+	 *                                      parameters to defaults.
+	 */
+	int (*set_fine_grain_gfx_freq_parameters)(struct smu_context *smu);
+
+	/**
+	 * @set_light_sbr:  Set light sbr mode for the SMU.
+	 */
+	int (*set_light_sbr)(struct smu_context *smu, bool enable);
+
+	/**
+	 * @wait_for_event:  Wait for events from SMU.
+	 */
+	int (*wait_for_event)(struct smu_context *smu, enum smu_event_type event, uint64_t event_arg);
 };
 
 typedef enum {
@@ -634,6 +781,8 @@ typedef enum {
 	METRICS_TEMPERATURE_VRMEM,
 	METRICS_THROTTLER_STATUS,
 	METRICS_CURR_FANSPEED,
+	METRICS_VOLTAGE_VDDSOC,
+	METRICS_VOLTAGE_VDDGFX,
 } MetricsMember_t;
 
 enum smu_cmn2asic_mapping_type {
@@ -680,7 +829,7 @@ int smu_set_fan_speed_rpm(struct smu_context *smu, uint32_t speed);
 
 int smu_get_power_limit(struct smu_context *smu,
 			uint32_t *limit,
-			bool max_setting);
+			enum smu_ppt_limit_level limit_level);
 
 int smu_set_power_limit(struct smu_context *smu, uint32_t limit);
 int smu_print_clk_levels(struct smu_context *smu, enum smu_clk_type clk_type, char *buf);
@@ -787,7 +936,7 @@ int smu_sys_set_pp_feature_mask(struct smu_context *smu, uint64_t new_mask);
 int smu_force_clk_levels(struct smu_context *smu,
 			 enum smu_clk_type clk_type,
 			 uint32_t mask);
-int smu_set_mp1_state(struct smu_context *smu,
+int smu_set_mp1_state(void *handle,
 		      enum pp_mp1_state mp1_state);
 int smu_set_df_cstate(struct smu_context *smu,
 		      enum pp_df_cstate state);

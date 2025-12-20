@@ -187,6 +187,17 @@ MODULE_PARM_DESC(quirks, "Add/modify USB quirks by specifying quirks=vendorID:pr
  * 	3) Class ID
  */
 static const struct usb_device_id usb_quirk_list[] = {
+#ifdef CONFIG_MCST
+	/* hub integrated in pc401 */
+	{ USB_DEVICE(0x04b4, 0x6560), .driver_info = USB_QUIRK_RESET_RESUME },
+	/* SMSC hubs. Bug 115080 */
+	{ USB_DEVICE(0x0424, 0x2512), .driver_info = USB_QUIRK_RESET_RESUME },
+	{ USB_DEVICE(0x0424, 0x2517), .driver_info = USB_QUIRK_RESET_RESUME },
+	/* SMSC hubs. Bug 135190 */
+	{ USB_DEVICE(0x0424, 0x2514), .driver_info = USB_QUIRK_RESET_RESUME },
+	/* Terminus Technology Inc. Hub */
+	{ USB_DEVICE(0x1a40, 0x0101), .driver_info = USB_QUIRK_RESET_RESUME },
+#endif
 	/* CBM - Flash disk */
 	{ USB_DEVICE(0x0204, 0x6025), .driver_info = USB_QUIRK_RESET_RESUME },
 

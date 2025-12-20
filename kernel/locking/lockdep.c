@@ -4018,9 +4018,17 @@ void print_irqtrace_events(struct task_struct *curr)
 	printk("hardirqs last  enabled at (%u): [<%px>] %pS\n",
 		trace->hardirq_enable_event, (void *)trace->hardirq_enable_ip,
 		(void *)trace->hardirq_enable_ip);
+#ifdef CONFIG_MCST
+	stack_trace_print(trace->hardirq_enable_trace,
+			  trace->hardirq_enable_trace_len, 4);
+#endif
 	printk("hardirqs last disabled at (%u): [<%px>] %pS\n",
 		trace->hardirq_disable_event, (void *)trace->hardirq_disable_ip,
 		(void *)trace->hardirq_disable_ip);
+#ifdef CONFIG_MCST
+	stack_trace_print(trace->hardirq_disable_trace,
+			  trace->hardirq_disable_trace_len, 4);
+#endif
 	printk("softirqs last  enabled at (%u): [<%px>] %pS\n",
 		trace->softirq_enable_event, (void *)trace->softirq_enable_ip,
 		(void *)trace->softirq_enable_ip);
@@ -4281,6 +4289,10 @@ skip_checks:
 	/* we'll do an OFF -> ON transition: */
 	__this_cpu_write(hardirqs_enabled, 1);
 	trace->hardirq_enable_ip = ip;
+#ifdef CONFIG_MCST
+	trace->hardirq_enable_trace_len = stack_trace_save(trace->hardirq_enable_trace,
+			ARRAY_SIZE(trace->hardirq_enable_trace), 0);
+#endif
 	trace->hardirq_enable_event = ++trace->irq_events;
 	debug_atomic_inc(hardirqs_on_events);
 }
@@ -4320,6 +4332,11 @@ void noinstr lockdep_hardirqs_off(unsigned long ip)
 		 */
 		__this_cpu_write(hardirqs_enabled, 0);
 		trace->hardirq_disable_ip = ip;
+#ifdef CONFIG_MCST
+		trace->hardirq_disable_trace_len = stack_trace_save(
+				trace->hardirq_disable_trace,
+				ARRAY_SIZE(trace->hardirq_disable_trace), 0);
+#endif
 		trace->hardirq_disable_event = ++trace->irq_events;
 		debug_atomic_inc(hardirqs_off_events);
 	} else {

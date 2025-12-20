@@ -30,6 +30,10 @@ struct module;
 
 #include <vdso/clocksource.h>
 
+#ifdef CONFIG_MCST
+extern void override_clocksource(const char *buf, size_t count);
+#endif
+
 /**
  * struct clocksource - hardware abstraction for a free running counter
  *	Provides mostly state-free accessors to the underlying hardware.

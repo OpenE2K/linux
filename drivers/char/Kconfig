@@ -461,7 +461,7 @@ source "drivers/char/xillybus/Kconfig"
 
 config ADI
 	tristate "SPARC Privileged ADI driver"
-	depends on SPARC64
+	depends on SPARC64 && !E90S
 	default m
 	help
 	  SPARC M7 and newer processors utilize ADI (Application Data

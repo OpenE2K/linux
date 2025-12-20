@@ -19,6 +19,12 @@
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_MCST
+static int pwm_bl_default_brightness = 0;
+module_param_named(default_brightness, pwm_bl_default_brightness, int, 0644);
+MODULE_PARM_DESC(default_brightness, "set default brightness level percentage");
+#endif
+
 struct pwm_bl_data {
 	struct pwm_device	*pwm;
 	struct device		*dev;
@@ -602,6 +608,12 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 		 */
 		pb->scale = data->max_brightness;
 	}
+#ifdef CONFIG_MCST
+	if (pwm_bl_default_brightness) {
+		data->dft_brightness =
+			data->max_brightness * pwm_bl_default_brightness / 100;
+	}
+#endif
 
 	pb->lth_brightness = data->lth_brightness * (div_u64(state.period,
 				pb->scale));

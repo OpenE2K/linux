@@ -103,7 +103,7 @@ struct sil164_priv {
 /* HW access functions */
 
 static void
-sil164_write(struct i2c_client *client, uint8_t addr, uint8_t val)
+__sil164_write(struct i2c_client *client, uint8_t addr, uint8_t val)
 {
 	uint8_t buf[] = {addr, val};
 	int ret;
@@ -115,7 +115,7 @@ sil164_write(struct i2c_client *client, uint8_t addr, uint8_t val)
 }
 
 static uint8_t
-sil164_read(struct i2c_client *client, uint8_t addr)
+__sil164_read(struct i2c_client *client, uint8_t addr)
 {
 	uint8_t val;
 	int ret;
@@ -135,6 +135,21 @@ fail:
 		   ret, addr);
 	return 0;
 }
+
+#define sil164_write(_client, _addr, _val) do {			\
+	unsigned __val2 = _val;					\
+	DRM_DEBUG("%x: wr: 0x%02x: 0x%02x\n",			\
+		(_client)->addr, _addr, __val2);		\
+	__sil164_write(_client, _addr, _val);			\
+} while (0)
+
+#define sil164_read(_client, _addr)				\
+({								\
+	uint8_t _val = __sil164_read(_client, _addr);		\
+	DRM_DEBUG("%x: rd: 0x%02x: 0x%02x\n",			\
+		(_client)->addr, _addr, _val);			\
+	_val;							\
+})
 
 static void
 sil164_save_state(struct i2c_client *client, uint8_t *state)
@@ -172,6 +187,14 @@ sil164_init_state(struct i2c_client *client,
 		  struct sil164_encoder_params *config,
 		  bool duallink)
 {
+	/*
+	* Sil 1178 Magic from datashit
+	*/
+	if (strcmp(client->name, "sil1178") == 0) {
+		sil164_write(client, 0x0F, 0x44);
+		sil164_write(client, 0x0F, 0x4C);
+	}
+
 	sil164_write(client, SIL164_CONTROL0,
 		     SIL164_CONTROL0_HSYNC_ON |
 		     SIL164_CONTROL0_VSYNC_ON |
@@ -384,9 +407,10 @@ sil164_detect_slave(struct i2c_client *client)
 		.addr = SIL164_I2C_ADDR_SLAVE,
 		.len = 0,
 	};
-	const struct i2c_board_info info = {
+	struct i2c_board_info info = {
 		I2C_BOARD_INFO("sil164", SIL164_I2C_ADDR_SLAVE)
 	};
+	strcpy(info.type, client->name);
 
 	if (i2c_transfer(adap, &msg, 1) != 1) {
 		sil164_dbg(adap, "No dual-link slave found.");
@@ -420,6 +444,7 @@ sil164_encoder_init(struct i2c_client *client,
 
 static const struct i2c_device_id sil164_ids[] = {
 	{ "sil164", 0 },
+	{ "sil1178", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, sil164_ids);

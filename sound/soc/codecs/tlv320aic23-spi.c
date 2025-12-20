@@ -31,9 +31,22 @@ static int aic23_spi_probe(struct spi_device *spi)
 	return tlv320aic23_probe(&spi->dev, regmap);
 }
 
+#ifdef CONFIG_MCST
+#if defined(CONFIG_OF)
+static const struct of_device_id tlv320aic23_spi_of_match[] = {
+	{ .compatible = "ti,tlv320aic23-spi"},
+	{},
+};
+MODULE_DEVICE_TABLE(of, tlv320aic23_spi_of_match);
+#endif /* CONFIG_OF */
+#endif /*CONFIG_MCST*/
+
 static struct spi_driver aic23_spi = {
 	.driver = {
 		.name = "tlv320aic23",
+#ifdef CONFIG_MCST
+		.of_match_table = of_match_ptr(tlv320aic23_spi_of_match),
+#endif /*CONFIG_MCST*/
 	},
 	.probe = aic23_spi_probe,
 };

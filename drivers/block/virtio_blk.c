@@ -495,7 +495,11 @@ static int init_vq(struct virtio_blk *vblk)
 	vq_callback_t **callbacks;
 	const char **names;
 	struct virtqueue **vqs;
+#ifndef CONFIG_MCST
 	unsigned short num_vqs;
+#else
+	unsigned short num_vqs = 0;
+#endif
 	struct virtio_device *vdev = vblk->vdev;
 	struct irq_affinity desc = { 0, };
 
@@ -575,7 +579,11 @@ static int virtblk_name_format(char *prefix, int index, char *buf, int buflen)
 
 static int virtblk_get_cache_mode(struct virtio_device *vdev)
 {
+#ifndef CONFIG_MCST
 	u8 writeback;
+#else
+	u8 writeback = 0;
+#endif
 	int err;
 
 	err = virtio_cread_feature(vdev, VIRTIO_BLK_F_CONFIG_WCE,
@@ -703,9 +711,15 @@ static int virtblk_probe(struct virtio_device *vdev)
 	struct request_queue *q;
 	int err, index;
 
+#ifndef CONFIG_MCST
 	u32 v, blk_size, max_size, sg_elems, opt_io_size;
 	u16 min_io_size;
 	u8 physical_block_exp, alignment_offset;
+#else
+	u32 v = 0, blk_size = 0, max_size, sg_elems = 0, opt_io_size = 0;
+	u16 min_io_size = 0;
+	u8 physical_block_exp = 0, alignment_offset = 0;
+#endif
 
 	if (!vdev->config->get) {
 		dev_err(&vdev->dev, "%s failure: config access disabled\n",

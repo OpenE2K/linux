@@ -2078,6 +2078,10 @@ void bond_3ad_unbind_slave(struct slave *slave)
 	struct list_head *iter;
 	bool dummy_slave_update; /* Ignore this value as caller updates array */
 
+#if defined(CONFIG_MCST) && defined(__LCC__)
+	new_aggregator = NULL;
+#endif
+
 	/* Sync against bond_3ad_state_machine_handler() */
 	spin_lock_bh(&bond->mode_lock);
 	aggregator = &(SLAVE_AD_INFO(slave)->aggregator);

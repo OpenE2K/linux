@@ -388,6 +388,13 @@ static int follow_pfn_pte(struct vm_area_struct *vma, unsigned long address,
 static inline bool can_follow_write_pte(pte_t pte, unsigned int flags)
 {
 	return pte_write(pte) ||
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+		/*
+		 * The page is protected from DMA write, but is accessed
+		 * and can be accesed by hypervisor or guest.
+		 */
+		(flags & FOLL_MPDMA) ||
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
 		((flags & FOLL_FORCE) && (flags & FOLL_COW) && pte_dirty(pte));
 }
 
@@ -930,7 +937,18 @@ static int check_vma_flags(struct vm_area_struct *vma, unsigned long gup_flags)
 		return -EFAULT;
 
 	if (write) {
+#if !defined(CONFIG_E2K) || !defined(CONFIG_VIRTUALIZATION)
 		if (!(vm_flags & VM_WRITE)) {
+#else	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
+		/*
+		 * The page should be:
+		 *	- writable;
+		 *	- or protected from DMA write, but can be written
+		 *	  by hypervisor and guest.
+		 */
+		if (!(vm_flags & VM_WRITE) &&
+			!((vm_flags & VM_MPDMA) && (gup_flags & FOLL_MPDMA))) {
+#endif	/* !CONFIG_E2K || !CONFIG_VIRTUALIZATION */
 			if (!(gup_flags & FOLL_FORCE))
 				return -EFAULT;
 			/*
@@ -1065,6 +1083,25 @@ static long __get_user_pages(struct mm_struct *mm,
 				ctx.page_mask = 0;
 				goto next_page;
 			}
+
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+			/*
+			 * VMA can be not writable to protect from DMA write,
+			 * but should be written by hypervisor and guest.
+			 */
+			if (vma) {
+				vm_flags_t vm_flags = vma->vm_flags;
+
+				BUG_ON((vm_flags & VM_WRITE) &&
+						(vm_flags & VM_MPDMA));
+				if (vm_flags & VM_MPDMA) {
+					gup_flags |= FOLL_MPDMA;
+				} else {
+					gup_flags &= ~FOLL_MPDMA;
+				}
+				foll_flags = gup_flags;
+			}
+#endif	/* !CONFIG_E2K || !CONFIG_VIRTUALIZATION */
 
 			if (!vma || check_vma_flags(vma, gup_flags)) {
 				ret = -EFAULT;

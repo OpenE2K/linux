@@ -134,12 +134,25 @@ static inline struct task_struct *__mutex_trylock_or_owner(struct mutex *lock)
 		 */
 		flags &= ~MUTEX_FLAG_HANDOFF;
 
+#ifdef CONFIG_E2K
+		old = atomic_long_cmpxchg_lock(&lock->owner, owner, curr | flags);
+#else
 		old = atomic_long_cmpxchg_acquire(&lock->owner, owner, curr | flags);
+#endif
+#ifdef CONFIG_MCST
+		if (old == owner)
+			lock->mux_ip = _RET_IP_;
+#endif
 		if (old == owner)
 			return NULL;
 
 		owner = old;
 	}
+
+#ifdef CONFIG_MCST
+		if (!__owner_task(owner))
+			lock->mux_ip = _RET_IP_;
+#endif
 
 	return __owner_task(owner);
 }
@@ -168,8 +181,19 @@ static __always_inline bool __mutex_trylock_fast(struct mutex *lock)
 	unsigned long curr = (unsigned long)current;
 	unsigned long zero = 0UL;
 
+#ifdef CONFIG_MCST
+# ifdef CONFIG_E2K
+	if (atomic_long_try_cmpxchg_lock(&lock->owner, &zero, curr)) {
+# else
+	if (atomic_long_try_cmpxchg_acquire(&lock->owner, &zero, curr)) {
+# endif
+		lock->mux_ip = _RET_IP_;
+		return true;
+	}
+#else
 	if (atomic_long_try_cmpxchg_acquire(&lock->owner, &zero, curr))
 		return true;
+#endif
 
 	return false;
 }
@@ -1044,7 +1068,13 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 		}
 
 		spin_unlock(&lock->wait_lock);
+#ifdef CONFIG_MCST
+		current->wait_on_mutex = lock;
+#endif
 		schedule_preempt_disabled();
+#ifdef CONFIG_MCST
+		current->wait_on_mutex = NULL;
+#endif
 
 		first = __mutex_waiter_is_first(lock, &waiter);
 		if (first)
@@ -1485,3 +1515,15 @@ int atomic_dec_and_mutex_lock(atomic_t *cnt, struct mutex *lock)
 	return 1;
 }
 EXPORT_SYMBOL(atomic_dec_and_mutex_lock);
+
+#if defined(CONFIG_MCST)
+struct task_struct *get_mutex_owner(struct mutex *lock)
+{
+	return __mutex_owner(lock);
+}
+
+void *get_mutex_ip(struct mutex *lock)
+{
+	return (void *)(lock->mux_ip);
+}
+#endif

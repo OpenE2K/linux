@@ -194,6 +194,47 @@ static void fanotify_unhash_event(struct fsnotify_group *group,
 	hlist_del_init(&event->merge_list);
 }
 
+#ifdef CONFIG_MCST
+static char fanotify_forwarded_chroot_task[TASK_COMM_LEN];
+module_param_string(forwarded_chroot_task, fanotify_forwarded_chroot_task,
+			sizeof(fanotify_forwarded_chroot_task), 0644);
+
+static bool mnt_fully_visible(struct vfsmount *mnt)
+{
+	struct mount *m = real_mount(mnt);
+	if (mnt->mnt_root != mnt->mnt_sb->s_root)
+		return false;
+	if (m->mnt_ns != current->nsproxy->mnt_ns)
+		return false;
+	return true;
+}
+
+static struct vfsmount *get_mnt_fully_visible(struct vfsmount *mnt)
+{
+	struct super_block *sb;
+	struct mount *m;
+	bool found = false;
+
+	if (mnt == NULL || mnt_fully_visible(mnt))
+		return mnt;
+
+	sb = mnt->mnt_sb;
+	lock_mount_hash();
+	list_for_each_entry(m, &sb->s_mounts, mnt_instance) {
+		if (mnt_fully_visible(&m->mnt)) {
+			found = true;
+			break;
+		}
+	}
+	unlock_mount_hash();
+	if (found)
+		return &m->mnt;
+
+	m = real_mount(mnt);
+	return get_mnt_fully_visible(&m->mnt_parent->mnt);
+}
+#endif
+
 /*
  * Get an fanotify notification event if one exists and is small
  * enough to fit in "count". Return an error pointer if the count
@@ -242,11 +283,22 @@ static int create_fd(struct fsnotify_group *group, const struct path *path,
 {
 	int client_fd;
 	struct file *new_file;
+#ifdef CONFIG_MCST
+	struct path hack_path = *path;
+	path = &hack_path;
+#endif
 
 	client_fd = get_unused_fd_flags(group->fanotify_data.f_flags);
 	if (client_fd < 0)
 		return client_fd;
-
+#ifdef CONFIG_MCST
+	if (!strcmp(current->comm, fanotify_forwarded_chroot_task)) {
+		struct vfsmount *vm;
+		vm = get_mnt_fully_visible(path->mnt);
+		if (vm)
+			hack_path.mnt = vm;
+	}
+#endif
 	/*
 	 * we need a new file handle for the userspace program so it can read even if it was
 	 * originally opened O_WRONLY.
@@ -1621,6 +1673,12 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		break;
 	case FAN_MARK_MOUNT:
 		obj_type = FSNOTIFY_OBJ_TYPE_VFSMOUNT;
+#ifdef CONFIG_MCST
+		if (!strcmp(current->comm, fanotify_forwarded_chroot_task)) {
+			mark_type = FAN_MARK_FILESYSTEM;
+			obj_type = FSNOTIFY_OBJ_TYPE_SB;
+		}
+#endif
 		break;
 	case FAN_MARK_FILESYSTEM:
 		obj_type = FSNOTIFY_OBJ_TYPE_SB;

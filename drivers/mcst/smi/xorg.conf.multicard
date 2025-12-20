@@ -1,0 +1,16 @@
+# On Xorg1.19 
+
+#Section "Device"
+#    Identifier  "SiliconMotion"
+#    Driver      "modesetting"
+#    Option      "PageFlip" "false"
+#EndSection
+
+
+# On Xorg1.20 and above
+Section "OutputClass"
+    Identifier "SiliconMotion"
+    MatchDriver "smifb"
+    Driver "modesetting"
+    Option "PageFlip" "false"
+EndSection

@@ -1,0 +1,335 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Copyright (c) 2023 MCST
+ 
+#
+# KVM configuration
+#
+
+source "virt/kvm/Kconfig"
+
+menuconfig KVM
+	tristate "Kernel-based Virtual Machine (KVM) support"
+	depends on VIRTUALIZATION
+	default y
+	select KVM_GUEST
+	select PREEMPT_NOTIFIERS
+	select HAVE_KVM_IRQCHIP
+	select HAVE_KVM_IRQFD
+	select HAVE_KVM_EVENTFD
+	select HAVE_KVM_IRQ_ROUTING
+	select HAVE_KVM_MSI
+	select IRQ_BYPASS_MANAGER
+	select HAVE_KVM_IRQ_BYPASS
+	select KVM_APIC_ARCHITECTURE
+	select SRCU
+	select MMU_NOTIFIER
+	select KVM_VFIO
+	select KVM_GENERIC_DIRTYLOG_READ_PROTECT
+	select KVM_MMIO if KVM_HOST_MODE
+	# FIXME: Async page faults support is not yet implemented
+	# for Paravirt-2.0
+	select KVM_ASYNC_PF if KVM_HOST_MODE && KVM_HW_VIRTUALIZATION
+	select DIRECT_VIRQ_INJECTION
+	select PARAVIRT_SPINLOCKS if SMP
+	select KVM_XFER_TO_GUEST_WORK
+
+	help
+	  Support hosting:
+	   - paravirtualized guest kernels
+	   - fully virtualized guest machines based on hardware
+	     virtualization extensions (only for CPUs ISET >= V6)
+	  If unsure, say N.
+
+if KVM
+config KVM_GUEST
+	bool # KVM guest machine support
+	help
+	  This allows support of KVM guest machines
+
+config KVM_PARAVIRTUALIZATION
+	bool "Hypervisor software paravirtualization enable"
+	default y
+	help
+	  Say Y here if hypervisor based on KVM should support
+	  software paravirtualized mode. In this case guest kernel
+	  is modified to make some privileged actions through
+	  hypercalls and other software engines
+
+config KVM_HW_VIRTUALIZATION
+	bool "Hypervisor based on hardware virtualization and KVM support"
+	default y
+	depends on MMU_SEP_VIRT_SPACE
+	help
+	  Say Y here if machine hardware has virtualization support
+	  and to enable host kernel and hypervisor based on KVM
+
+config KVM_HW_PARAVIRTUALIZATION
+	bool "Hypervisor based on hardware virtualization and paravirtulized guest"
+	depends on KVM_HW_VIRTUALIZATION
+	select KVM_PARAVIRTUALIZATION
+	help
+	  Say Y here if machine hardware has virtualization support
+	  and to enable host kernel and hypervisor based on KVM.
+	  In addition hypervisor supports guest paravirtualized kernels
+	  based on hardware virtualization extensions
+	default KVM_HW_VIRTUALIZATION
+
+choice
+	prompt "KVM host and guest kernels support type"
+	depends on KVM_GUEST
+	default KVM_HOST_KERNEL
+
+config KVM_HOST_KERNEL
+	bool "KVM hypervisor and host kernel support"
+	select KVM_HOST_MODE
+	help
+	  Say Y here to get host kernel which can be run
+	  only as host kernel with hypervisor functionality
+	  and support any guest machines based on KVM
+
+config KVM_GUEST_KERNEL
+	bool "Virtualized guest kernel support"
+	select KVM_GUEST_MODE
+	help
+	  Say Y here to get virtualized guest kernel which can be run
+	  only as guest kernel on any hypervisor based on KVM
+endchoice
+
+config KVM_GUEST_HW_PV
+	bool "Paravirtualized guest kernel based on hardware virtualization"
+	depends on KVM_HW_VIRTUALIZATION
+	default y
+	help
+	  Say Y here to get paravirtualized guest kernel which can be run
+	  only as guest kernel and only on hypervisor based on hardware
+	  virtualization extensions
+
+config KVM_SHADOW_PT_ENABLE
+	bool "Enable Shadow Page Tables support"
+	depends on KVM_HOST_MODE
+	default n
+	select KVM_HV_MMU
+	help
+	  Say Y here to enable support of shadow page tables by hypervisor
+	  This mode can be applyed for hardware and software virtualization,
+	  and based on common type of shadow PTs for both kind of
+	  virtualization.
+	  Old mode of software virtualization based on own implementation of
+	  PTs and special hypercalls to updatem them from guest. If say N here
+	  then only old style of PTs will be enabled for software mode
+
+config GUEST_MM_SPT_LIST
+	bool "Enable Guest MM Shadow Page Tables list support"
+	depends on KVM_SHADOW_PT_ENABLE && KVM_PARAVIRTUALIZATION
+	default n
+	help
+	  Say Y here to enable support of separate list of shadow page tables
+	  for each guest MM structure. Any allocation shadow page tables for
+	  guest MM adds the new structure SP to the list and any release of
+	  the shadow page table deletes the structure SP from the list.
+	  It allows to control the complete release of all shadow PTs when
+	  the guest mm released.
+
+config KVM_PARAVIRT_TLB_FLUSH
+	bool "Enable flush tlb through hypercall by paravirt guest"
+	depends on (KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE) || (KVM_GUEST_MODE && KVM_SHADOW_PT)
+	default y
+	help
+	  Say Y to permit guest to edit the lowest level (PTE) of guest
+	  page table without getting page fault. Shadow page table is
+	  synchronized with guest page table when guest calls hypercall
+	  KVM_HCALL_FLUSH_TLB_RANGE
+
+config KVM_GVA_CACHE
+	bool "Enable caching of gva's to accelerate their translation on host side"
+	depends on KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE
+	default n
+	help
+	  Say Y to enable caching of guest virtual addresses in special cache on
+	  the host side to make further translation of these addresses faster.
+	  This option is useful for hypercalls, which copy data to/from guest
+	  addresses (copy guest stacks, reexecuting operations in tcellar)
+
+config KVM_GVA_CACHE_DEBUG
+	bool "Enable debug prints in functions for work with gva->gpa cache"
+	depends on KVM_GVA_CACHE
+	default n
+	help
+	  Say Y to enable debug prints for different events (lookups, hits,
+	  flushes, etc.) in functions for working with cache of guest
+	  virtual addresses on host side.
+
+config KVM_GVA_CACHE_STAT
+	bool "Collect statistics of working gva->gpa cache"
+	depends on KVM_GVA_CACHE && !KVM_GVA_CACHE_DEBUG
+	default n
+	help
+	  Say Y to collect detailed statistics (hit/miss rate, flushes, etc.) for
+	  cache of guest virtual addresses on host side. Statistics will be
+	  avialable through character device. Major of character device will be
+	  printed during boot of host kernel.
+
+choice
+	prompt "KVM guest kernel & user shadow PTs support type"
+	depends on KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE
+	default KVM_SHARED_GUEST_VIRT_SPACE
+
+config KVM_SHARED_GUEST_VIRT_SPACE
+	bool "Guest virtual memory is divided into two adjacent parts: user & kernel"
+	help
+	  Say Y here to have traditional one common guest virtual space
+	  divided into two adjacent parts:
+	    - lower addresses is user space
+	    - upper addresses is guest kernel space
+	  In this case a shadow PTs of the host for a guest user mappings
+	  do not contain translation for the virtual space of the guest
+	  kernel. This allows to exclude spontaneous and malicious access
+	  to the kernel space from user processes.
+endchoice
+
+config KVM_TDP_ENABLE
+	bool "Enable Two Dimensional Page Tables (gva->gpa->hpa) support"
+	depends on KVM_HOST_MODE && KVM_HW_VIRTUALIZATION
+	depends on KVM_SHADOW_PT_ENABLE
+	default n
+	select KVM_HV_MMU
+	select KVM_PHYS_PT_ENABLE
+	help
+	  Say Y here to enable support of two dimensional paging by hypervisor.
+	  This mode can be applyed only for hardware virtualization and
+	  only if the mode is enabled by hardware. Both mode TDP and
+	  shadow PTs can be turn ON.
+
+config KVM_NONPAGING_ENABLE
+	bool "Nonpaging mode of KVM MMU is enable"
+	depends on KVM_HOST_MODE && KVM_SHADOW_PT_ENABLE
+	default n
+	select KVM_HV_MMU
+	help
+	  Say Y here to enable non paging mode by hypervisor.
+	  This mode is applyed only for hardware virtualization and
+	  allows to boot guest with disabled translation of virtual addresses.
+	  Guest physical addresses can be translated by hypervosor
+	  shadow PT or direct translation GPA -> PA by TDP
+
+config KVM_PHYS_PT_ENABLE
+	bool "Guest physical addresses translation is enable"
+	depends on KVM_HOST_MODE && KVM_HW_VIRTUALIZATION
+	depends on KVM_SHADOW_PT_ENABLE
+	default n
+	select KVM_HV_MMU
+	help
+	  Say Y here to enable translation of guest physical addresses
+	  by hypervisor using hardware supported Guest Page tables (GP_*PTB)
+	  This mode is applyed only for hardware virtualization and
+	  allows to boot guest on physical mode (TLB disabled) and direct
+	  translation GPA -> PA
+
+config KVM_GUEST_HW_HCALL
+	bool "Guest kernel can use hardware supported hypercalls"
+	depends on KVM_HW_VIRTUALIZATION
+	select KVM_GUEST_HW_PV
+	default y
+	help
+	  Say Y here to enable hardware supported hypercalls for guest kernel.
+	  It can be done only for guest kernel and only on hypervisor
+	  based on hardware virtualization extensions.
+	  In other cases guest can use special system calls instead of HCALLs
+	  as at paravirtualization mode.
+
+config PRIV_HYPERCALLS
+	bool "Privileged actions software hypercalls is enable"
+	depends on (KVM_HOST_MODE || KVM_GUEST_MODE) && KVM_PARAVIRTUALIZATION
+	default y
+	help
+	  Say Y here to enable software hypercalls to make some privileged
+	  actions by host? but in the guest cpu/mmy context. This hypercall
+	  allows to significantly optimize some guest functions.
+	  All possible privileged actions are granted and performed
+	  only by host.
+	  This hypercalls can be called only from system admin mode
+
+config KVM_SHADOW_PT
+	bool "Guest kernel PTs based on host Shadow Page Tables support"
+	depends on KVM_GUEST_MODE
+	default n
+	help
+	  Host should support shadow PTs and guest kernel knows about that
+	  and can manage own PTs based on host shadow PTs features.
+	  If say N than only old style of software virtualization PTs
+	  support can be enabled for guest
+
+config DYNAMIC_PT_STRUCT
+	bool "Enable dynamic support of Page Tables structures"
+	depends on KVM_HV_MMU
+	default n
+	help
+	  Host should support all Page Tables structures dynamicaly.
+	  Otherwise, separate support will be created fot each possible
+	  version of the Page Tables structures.
+	  In the case of dynamical PT support the size of the kernel is reduced,
+	  but at the same time performance is reduced too.
+	  Other case suggests performance improvement and kernel size growth
+
+config KVM_HOST_MODE
+	bool # Enable run the kernel as host kernel
+	help
+	  This allows support of KVM on kernel
+
+config KVM_GUEST_MODE
+	bool # Enable run the kernel as guest kernel
+	help
+	  This allows building of KVM guest kernel
+
+config KVM_HV_MMU
+	bool # Guest MMU support based on shadow PT, TDP, nonpaging
+	help
+	  This adds to hypervisor support of guest MMU
+	  based on sgadow PT, Two Dimensional Paging and
+	  non paging booting
+
+config KVM_GUEST_SMP
+	bool # Enable SMP mode on guest kernel
+	depends on (KVM_GUEST_MODE && SMP)
+	default y
+	help
+	  This allows SMP mode of building of KVM guest kernel
+
+endif	# KVM
+
+config PARAVIRT_SPINLOCKS
+	bool "Paravirtualization layer for spinlocks"
+	depends on SMP
+	help
+	  Paravirtualized spinlocks allow to use hypercall-based backend to
+	  replace the spinlock implementation with virtualization-friendly
+	  blocking of the virtual CPU rather than spinning.
+
+	  Unfortunately the downside is an up to 5% performance hit on
+	  native kernels, with various workloads.
+
+	  If you are unsure how to answer this question, answer N.
+
+config QUEUED_LOCK_STAT
+	bool "Paravirt queued spinlock statistics"
+	depends on PARAVIRT_SPINLOCKS && DEBUG_FS
+	help
+	  Enable the collection of statistical data on the slowpath
+	  behavior of paravirtualized queued spinlocks and report
+	  them on debugfs.
+
+config KVM_GUEST_DEBUG
+	bool "KVM guest kernel debugging"
+	depends on KVM_GUEST_KERNEL
+	help
+	  Enable to debug KVM guest kernel. This mode turn on
+	  compilation with debugging info (-g option) to enable
+	  run guest kernel under gdb
+
+config	DIRECT_VIRQ_INJECTION
+	tristate "Enable direct injection of virtual IRQs to guest kernel"
+	depends on KVM
+	default y
+	help
+	  Direct injection of VIRQs to guest kernel VCPU through standard
+	  mechanism of traps passing from host to guest

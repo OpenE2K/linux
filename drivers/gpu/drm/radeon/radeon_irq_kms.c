@@ -107,9 +107,10 @@ static void radeon_dp_work_func(struct work_struct *work)
 	struct drm_mode_config *mode_config = &dev->mode_config;
 	struct drm_connector *connector;
 
-	/* this should take a mutex */
+	mutex_lock(&mode_config->mutex);
 	list_for_each_entry(connector, &mode_config->connector_list, head)
 		radeon_connector_hotplug(connector);
+	mutex_unlock(&mode_config->mutex);
 }
 /**
  * radeon_driver_irq_preinstall_kms - drm irq preinstall callback
@@ -546,6 +547,11 @@ void radeon_irq_kms_disable_hpd(struct radeon_device *rdev, unsigned hpd_mask)
 		rdev->irq.hpd[i] &= !(hpd_mask & (1 << i));
 	radeon_irq_set(rdev);
 	spin_unlock_irqrestore(&rdev->irq.lock, irqflags);
+#ifdef CONFIG_MCST
+	/*rm 26374: panic on shutdown */
+	cancel_work_sync(&rdev->dp_work);
+	cancel_delayed_work_sync(&rdev->hotplug_work);
+#endif
 }
 
 /**

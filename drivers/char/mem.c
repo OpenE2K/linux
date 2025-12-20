@@ -399,7 +399,11 @@ static int mmap_mem(struct file *file, struct vm_area_struct *vma)
 	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
 						 size,
 						 vma->vm_page_prot);
-
+#ifdef CONFIG_E2K
+	/* Legacy: smi Xorg driver uses this flag */
+	if (vma->vm_flags & VM_WRITECOMBINED)
+		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+#endif /* CONFIG_E2K */
 	vma->vm_ops = &mmap_mem_ops;
 
 	/* Remap-pfn-range will mark the range VM_IO */

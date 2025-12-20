@@ -57,6 +57,9 @@ struct dw_mipi_dsi_plat_data {
 	const struct dw_mipi_dsi_host_ops *host_ops;
 
 	void *priv_data;
+#ifdef CONFIG_MCST
+	struct regmap *regm;
+#endif
 };
 
 struct dw_mipi_dsi *dw_mipi_dsi_probe(struct platform_device *pdev,

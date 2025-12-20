@@ -525,7 +525,6 @@ int fsnotify(__u32 mask, const void *data, int data_type, struct inode *dir,
 		inode2 = dir;
 		inode2_type = FSNOTIFY_ITER_TYPE_PARENT;
 	}
-
 	/*
 	 * Optimization: srcu_read_lock() has a memory barrier which can
 	 * be expensive.  It protects walking the *_fsnotify_marks lists.

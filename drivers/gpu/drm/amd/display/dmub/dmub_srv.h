@@ -88,9 +88,9 @@ enum dmub_asic {
 	DMUB_ASIC_NONE = 0,
 	DMUB_ASIC_DCN20,
 	DMUB_ASIC_DCN21,
-#ifdef CONFIG_DRM_AMD_DC_DCN3_0
 	DMUB_ASIC_DCN30,
-#endif
+	DMUB_ASIC_DCN302,
+	DMUB_ASIC_DCN303,
 	DMUB_ASIC_MAX,
 };
 
@@ -211,6 +211,23 @@ struct dmub_srv_fb_info {
 	struct dmub_fb fb[DMUB_WINDOW_TOTAL];
 };
 
+/*
+ * struct dmub_srv_hw_params - params for dmub hardware initialization
+ * @fb: framebuffer info for each region
+ * @fb_base: base of the framebuffer aperture
+ * @fb_offset: offset of the framebuffer aperture
+ * @psp_version: psp version to pass for DMCU init
+ * @load_inst_const: true if DMUB should load inst const fw
+ */
+struct dmub_srv_hw_params {
+	struct dmub_fb *fb[DMUB_WINDOW_TOTAL];
+	uint64_t fb_base;
+	uint64_t fb_offset;
+	uint32_t psp_version;
+	bool load_inst_const;
+	bool skip_panel_power_sequence;
+};
+
 /**
  * struct dmub_srv_base_funcs - Driver specific base callbacks
  */
@@ -271,8 +288,13 @@ struct dmub_srv_hw_funcs {
 	bool (*is_hw_init)(struct dmub_srv *dmub);
 
 	bool (*is_phy_init)(struct dmub_srv *dmub);
+	void (*enable_dmub_boot_options)(struct dmub_srv *dmub,
+					const struct dmub_srv_hw_params *params);
 
-	bool (*is_auto_load_done)(struct dmub_srv *dmub);
+	void (*skip_dmub_panel_power_sequence)(struct dmub_srv *dmub, bool skip);
+
+	union dmub_fw_boot_status (*get_fw_status)(struct dmub_srv *dmub);
+
 
 	void (*set_gpint)(struct dmub_srv *dmub,
 			  union dmub_gpint_data_register reg);
@@ -299,22 +321,6 @@ struct dmub_srv_create_params {
 	enum dmub_asic asic;
 	uint32_t fw_version;
 	bool is_virtual;
-};
-
-/*
- * struct dmub_srv_hw_params - params for dmub hardware initialization
- * @fb: framebuffer info for each region
- * @fb_base: base of the framebuffer aperture
- * @fb_offset: offset of the framebuffer aperture
- * @psp_version: psp version to pass for DMCU init
- * @load_inst_const: true if DMUB should load inst const fw
- */
-struct dmub_srv_hw_params {
-	struct dmub_fb *fb[DMUB_WINDOW_TOTAL];
-	uint64_t fb_base;
-	uint64_t fb_offset;
-	uint32_t psp_version;
-	bool load_inst_const;
 };
 
 /**
@@ -595,6 +601,19 @@ enum dmub_status dmub_srv_get_gpint_response(struct dmub_srv *dmub,
  * Can be called after software initialization.
  */
 void dmub_flush_buffer_mem(const struct dmub_fb *fb);
+
+/**
+ * dmub_srv_get_fw_boot_status() - Returns the DMUB boot status bits.
+ *
+ * @dmub: the dmub service
+ * @status: out pointer for firmware status
+ *
+ * Return:
+ *   DMUB_STATUS_OK - success
+ *   DMUB_STATUS_INVALID - unspecified error, unsupported
+ */
+enum dmub_status dmub_srv_get_fw_boot_status(struct dmub_srv *dmub,
+											union dmub_fw_boot_status *status);
 
 #if defined(__cplusplus)
 }
