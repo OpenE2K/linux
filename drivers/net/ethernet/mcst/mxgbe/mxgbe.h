@@ -37,6 +37,10 @@
 #include <linux/mii.h>
 #include <linux/mdio.h>
 
+#include <linux/tcp.h>
+#include <linux/udp.h>
+#include <net/ip.h>
+
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
@@ -246,6 +250,7 @@ typedef struct mxgbe_priv {
 	/* MAC */
 	struct task_struct	*mac_task;
 
+	netdev_features_t hw_features;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry		*mxgbe_dbg_board;
 	u32			reg_last_value;

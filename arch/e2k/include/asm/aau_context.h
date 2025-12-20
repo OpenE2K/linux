@@ -89,6 +89,11 @@ native_set_array_descriptors(const e2k_aau_t *context)
 	NATIVE_SET_ARRAY_DESCRIPTORS(context);
 }
 
+static __always_inline void native_clear_array_descriptors(void)
+{
+	NATIVE_CLEAR_ARRAY_DESCRIPTORS();
+}
+
 static inline void
 native_get_synchronous_part_v3(e2k_aau_t *context)
 {
@@ -106,10 +111,20 @@ native_set_synchronous_part(const e2k_aau_t *context)
 	NATIVE_SET_SYNCHRONOUS_PART(context);
 }
 
+static __always_inline void native_clear_synchronous_part(void)
+{
+	NATIVE_CLEAR_SYNCHRONOUS_PART();
+}
+
 static __always_inline void
 native_set_all_aaldis(const u64 aaldis[])
 {
 	NATIVE_SET_ALL_AALDIS(aaldis);
+}
+
+static __always_inline void native_clear_all_aaldis(void)
+{
+	NATIVE_CLEAR_ALL_AALDIS();
 }
 
 static __always_inline void
@@ -121,12 +136,24 @@ native_set_all_aaldas(const e2k_aalda_t aaldas_p[])
 	NATIVE_SET_ALL_AALDAS(aaldas_p);
 }
 
+static __always_inline void native_clear_all_aaldas(void)
+{
+	NATIVE_CLEAR_ALL_AALDAS();
+}
+
 /* set current array prefetch buffer indices values */
 static __always_inline void native_set_aau_aaldis_aaldas(
 		const e2k_aalda_t *aaldas, const e2k_aau_t *aau_regs)
 {
 	native_set_all_aaldis(aau_regs->aaldi);
 	native_set_all_aaldas(aaldas);
+}
+
+/* clear current array prefetch buffer indices values */
+static __always_inline void native_clear_aau_aaldis_aaldas(void)
+{
+	native_clear_all_aaldis();
+	native_clear_all_aaldas();
 }
 
 /*
@@ -152,6 +179,11 @@ static __always_inline void native_set_aau_context(const e2k_aau_t *context,
 		const e2k_aalda_t *aalda, e2k_aasr_t aasr)
 {
 	NATIVE_SET_AAU_CONTEXT(context, aalda, aasr);
+}
+
+static __always_inline void native_clear_aau_context(void)
+{
+	NATIVE_CLEAR_AAU_CONTEXT();
 }
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
@@ -192,6 +224,9 @@ static __always_inline void native_set_aau_context(const e2k_aau_t *context,
 
 #define RESTORE_AADS(aau_regs)					\
 		NATIVE_RESTORE_AADS(aau_regs)
+
+#define CLEAR_AADS() \
+		NATIVE_CLEAR_AADS()
 
 
 #define SAVE_AALDIS_V3(regs)	NATIVE_SAVE_AALDIS_V3(regs)
@@ -241,14 +276,19 @@ static __always_inline void set_aau_context(e2k_aau_t *context,
 	native_set_aau_context(context, aalda, aasr);
 }
 
+static __always_inline void clear_aau_context(void)
+{
+	native_clear_aau_context();
+}
+
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
 /* 
  * for code optimization
- */ 
+ */
 static inline int aau_working(e2k_aasr_t aasr)
 {
-	return unlikely(AW(aasr) & (AAU_AASR_IAB | AAU_AASR_STB));
+	return unlikely(aasr.iab || aasr.stb);
 }
 
 #endif /* _E2K_AAU_CONTEXT_H */

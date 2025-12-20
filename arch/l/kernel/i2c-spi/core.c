@@ -84,6 +84,7 @@ static int i2c_spi_probe(struct pci_dev *pdev,
 	if (pdev_id < 0)
 		pdev_id = 0;
 #ifdef CONFIG_EPIC
+	/* Handle eioh + iohub2 hardware configuration: */
 	if ((cpu_has_epic() && pdev->device !=
 				PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI) ||
 		(!cpu_has_epic() && pdev->device ==

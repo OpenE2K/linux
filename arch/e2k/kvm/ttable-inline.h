@@ -535,7 +535,7 @@ void return_to_injected_syscall(thread_info_t *ti, pt_regs_t *regs)
 	/*
 	 * This can page fault so call with open interrupts
 	 */
-	wsz = get_wsz(FROM_PV_VCPU_SYSCALL);
+	wsz = get_wsz();
 	pv_vcpu_user_hw_stacks_prepare(ti->vcpu, regs, wsz,
 					FROM_PV_VCPU_SYSCALL, true);
 
@@ -707,7 +707,7 @@ static __always_inline void guest_mkctxt_complete(void)
 	regs.stacks.pcshtp = SZ_OF_CR;
 
 	/* Handle all pending events before exiting to guest's usermode */
-	wsz = get_wsz(FROM_SYSCALL_N_PROT);
+	wsz = get_wsz();
 	return_to_user = true;
 	exit_to_usermode_loop(&regs, FROM_SYSCALL_N_PROT,
 				&return_to_user, wsz, true);

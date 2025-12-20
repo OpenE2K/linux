@@ -213,8 +213,6 @@ void mxgbe_rx_init(mxgbe_priv_t *priv)
 	u32 offs, bsize;
 	u32 val;
 
-	FDEBUG;
-
 	/* clean */
 	for (i = 0; i < MXGBE_MAX_REG_PRI; i++) {
 		mxgbe_wreg32(base, RX_OFFS_PRI0 + (i << 2), 0);
@@ -224,33 +222,14 @@ void mxgbe_rx_init(mxgbe_priv_t *priv)
 		mxgbe_wreg32(base, RX_Q_CH0 + (i << 2), RX_Q_CH_DEF);
 	}
 
-	/* real init */
+	/* A single rx buffer with 0-th priority */
 	offs = 0;
-	bsize = priv->hw_rx_bufsize >> 3; /* /8 */
-
+	bsize = priv->hw_rx_bufsize;
 	mxgbe_wreg32(base, RX_OFFS_PRI0, offs);
 	mxgbe_wreg32(base, RX_SIZE_PRI0, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, RX_OFFS_PRI1, offs);
-	mxgbe_wreg32(base, RX_SIZE_PRI1, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, RX_OFFS_PRI2, offs);
-	mxgbe_wreg32(base, RX_SIZE_PRI2, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, RX_OFFS_PRI3, offs);
-	mxgbe_wreg32(base, RX_SIZE_PRI3, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, RX_OFFS_PRI4, offs);
-	mxgbe_wreg32(base, RX_SIZE_PRI4, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, RX_OFFS_PRI5, offs);
-	mxgbe_wreg32(base, RX_SIZE_PRI5, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, RX_OFFS_PRI6, offs);
-	mxgbe_wreg32(base, RX_SIZE_PRI6, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, RX_OFFS_PRI7, offs);
-	mxgbe_wreg32(base, RX_SIZE_PRI7, bsize);
+	mxgbe_wreg32(base, RX_MASK_PRI0, 0xFF);
+	for (i = 1; i < MXGBE_MAX_REG_PRI; i++)
+		mxgbe_wreg32(base, RX_MASK_PRI0 + (i << 2), 0x00);
 
 	mxgbe_wreg32(base, RX_CTRL, 0
 		     | RX_CTRL_RWODSTMAC	/* ignore DSTMAC flt */

@@ -43,6 +43,9 @@
 #include <asm/tag_mem.h>
 #endif
 
+#ifdef CONFIG_MCST_RT
+#include <linux/mcst_rt.h>
+#endif
 
 #include <asm/trace.h>
 
@@ -2905,9 +2908,9 @@ bool handle_uaccess_trap(struct pt_regs *regs, bool exc_diag)
 			AS(cond).chan = 1;
 			recovery_faulted_move((unsigned long) &efault, dr0_addr,
 					0ul /* reg_hi */, 1 /* vr */,
-					LDST_DWORD_FMT << LDST_REC_OPC_FMT_SHIFT,
-					0, false /* qp_load */, false /* atomic_load */,
-					true /* first_time */, cond);
+					ldst_rec_dword(), 0,
+					false /* qp_load */, false /* atomic_load */,
+					false /* big_endian */, true /* first_time */, cond);
 		}
 		raw_all_irq_restore(flags);
 
@@ -3647,7 +3650,6 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	const bool qp = (fmt == LDST_QP_FMT || fmt == TC_FMT_QPWORD_Q);
 	int addr_num;
 	int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
-	vm_fault_t major = 0;
 
 	DebugPF("started for addr 0x%lx\n", address);
 #ifdef CONFIG_KVM_ASYNC_PF
@@ -3713,6 +3715,13 @@ int do_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 	if (regs->trap->nr_page_fault_exc == exc_instr_page_miss_num ||
 	    regs->trap->nr_page_fault_exc == exc_instr_page_prot_num)
 		flags |= FAULT_FLAG_INSTRUCTION;
+
+#ifdef CONFIG_MCST_RT
+	if ((rts_act_mask & RTS_PGFLT_RTWRN && rt_task(current)) ||
+			rts_act_mask & RTS_PGFLT_WRN)
+		pr_info("page fault while RTS mode %lx in %d/%s addr=%08lx\n",
+			rts_act_mask, current->pid, current->comm, address);
+#endif
 
 	if (address >= TASK_SIZE)
 		return handle_kernel_address(address, regs, mode, ftype);
@@ -3865,7 +3874,6 @@ retry:
 			return bad_area(str, address, regs, mode, addr_num, SEGV_ACCERR);
 
 		fault = handle_mm_fault(vma, address, flags, regs);
-		major |= fault & VM_FAULT_MAJOR;
 		DebugPF("handle_mm_fault() returned %x\n", fault);
 
 		if (unlikely(fault & VM_FAULT_RETRY)) {
@@ -3885,17 +3893,6 @@ retry:
 
 		if (unlikely(fault & VM_FAULT_ERROR))
 			return mm_fault_error(vma, address, regs, mode, (unsigned int) fault);
-
-		if (major) {
-			current->maj_flt++;
-			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ,
-				      1, regs, address);
-		} else {
-			/* VM_FAULT_MINOR */
-			current->min_flt++;
-			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN,
-				      1, regs, address);
-		}
 
 		if (fault == VM_FAULT_NOPAGE) {
 			sync_mm_addr(address);
@@ -3943,7 +3940,7 @@ retry:
 }
 
 /**
- * get_recovery_mas - check for special cases when we have to use
+ * get_load_recovery_mas - check for special cases when we have to use
  *		      different mas from what was specified in trap cellar
  * @condition: trap condition from trap cellar
  *
@@ -3952,7 +3949,7 @@ retry:
  *
  * 2) Do not lock SLT
  */
-static unsigned int get_recovery_mas(tc_cond_t condition, int fmt)
+static unsigned int get_load_recovery_mas(tc_cond_t condition, int fmt)
 {
 	unsigned int mas = AS(condition).mas;
 	unsigned int mod = (mas & MAS_MOD_MASK) >> MAS_MOD_SHIFT;
@@ -3960,9 +3957,11 @@ static unsigned int get_recovery_mas(tc_cond_t condition, int fmt)
 	int chan = AS(condition).chan;
 	tc_opcode_t opcode;
 	int root = AS(condition).root; /* secondary space */
-	int store = AS(condition).store;
 
 	AW(opcode) = AS(condition).opcode;
+
+	/* Stores do not require special handling */
+	BUG_ON(condition.store);
 
 	/*
 	 * #127500 Do not execute "secondary lock trap on store" and
@@ -3971,8 +3970,7 @@ static unsigned int get_recovery_mas(tc_cond_t condition, int fmt)
 	 *   "secondary lock trap on store" -> "secondary normal"
 	 *   "secondary lock trap on load/store" -> "secondary normal"
 	 */
-	if (root && !store && !spec_mode && (chan == 0 ||
-					     chan == 2 && fmt == LDST_QWORD_FMT)) {
+	if (root && !spec_mode && (chan == 0 || chan == 2 && fmt == LDST_QWORD_FMT)) {
 		if (is_mas_secondary_lock_trap_on_store(mas) ||
 		    is_mas_secondary_lock_trap_on_load_store(mas))
 			return _MAS_MODE_LOAD_OPERATION;
@@ -3991,11 +3989,10 @@ static unsigned int get_recovery_mas(tc_cond_t condition, int fmt)
 			return _MAS_MODE_LOAD_OPERATION;
 
 		if (machine.native_iset_ver >= E2K_ISET_V3 && root &&
-				chan <= 1 && !store && mas == MAS_SEC_SLT)
+				chan <= 1 && mas == MAS_SEC_SLT)
 			return _MAS_MODE_LOAD_OPERATION;
 
-		if (machine.native_iset_ver >= E2K_ISET_V5 && !root &&
-				chan <= 1 && !store &&
+		if (machine.native_iset_ver >= E2K_ISET_V5 && !root && chan <= 1 &&
 				mas == _MAS_MODE_LOAD_OP_WAIT_1)
 			return _MAS_MODE_LOAD_OPERATION;
 	}
@@ -4005,29 +4002,31 @@ static unsigned int get_recovery_mas(tc_cond_t condition, int fmt)
 	 * to get the value with tags. It is possible only using
 	 * the special MAS in nonprotected mode
 	 */
-	if (mod == 0 || AS(opcode).fmt == 5 && !root) {
-		return MAS_FILL_OPERATION;
-	}
-	if (((chan == 0 || chan == 2) &&
-		((mod == _MAS_MODE_LOAD_OP_CHECK && !spec_mode)		||
-		(mod == _MAS_MODE_LOAD_OP_UNLOCK && !spec_mode)		||
-		(mod == _MAS_MODE_LOAD_OP_LOCK_CHECK && spec_mode)	||
-		(mod == _MAS_MODE_FILL_OP && !spec_mode)		||
-		(mod == _MAS_MODE_LOAD_OP_SPEC_LOCK_CHECK && spec_mode)	||
-		(mod == _MAS_MODE_LOAD_OP_SPEC && spec_mode)))		||
+	if (!AS(opcode).npsp && TASK_IS_PROTECTED(current)) {
+		if (mod == 0 ||
+		    AS(opcode).fmt == 5 && !root && mod != MAS_MODE_STORE_MMU_AAU_SPEC) {
+			return (mas & ~MAS_MOD_MASK) | MAS_FILL_OPERATION;
+		}
+		if (((chan == 0 || chan == 2) &&
+		     ((mod == _MAS_MODE_LOAD_OP_CHECK && !spec_mode)		||
+		      (mod == _MAS_MODE_LOAD_OP_UNLOCK && !spec_mode)		||
+		      (mod == _MAS_MODE_LOAD_OP_LOCK_CHECK && spec_mode)	||
+		      (mod == _MAS_MODE_FILL_OP && !spec_mode)		||
+		      (mod == _MAS_MODE_LOAD_OP_SPEC_LOCK_CHECK && spec_mode)	||
+		      (mod == _MAS_MODE_LOAD_OP_SPEC && spec_mode)))		||
 
-		((chan == 1 || chan == 3) &&
-		((mod == MAS_MODE_LOAD_OP_CHECK && !spec_mode)		||
-		(mod == MAS_MODE_LOAD_OP_UNLOCK && !spec_mode)		||
-		(mod == MAS_MODE_LOAD_OP_LOCK_CHECK && spec_mode)	||
-		(mod == MAS_MODE_FILL_OP && !spec_mode)			||
-		(mod == MAS_MODE_LOAD_OP_SPEC_LOCK_CHECK && spec_mode)	||
-		(mod == MAS_MODE_LOAD_OP_SPEC && spec_mode)))) {
-		return MAS_FILL_OPERATION;
-	} else {
-		printk("get_recovery_mas(): we do not know how to recover "
-			"protected access with MAS 0x%x\n", mas);
-		BUG();
+		    ((chan == 1 || chan == 3) &&
+		     ((mod == MAS_MODE_LOAD_OP_CHECK && !spec_mode)		||
+		      (mod == MAS_MODE_LOAD_OP_UNLOCK && !spec_mode)		||
+		      (mod == MAS_MODE_LOAD_OP_LOCK_CHECK && spec_mode)	||
+		      (mod == MAS_MODE_FILL_OP && !spec_mode)			||
+		      (mod == MAS_MODE_LOAD_OP_SPEC_LOCK_CHECK && spec_mode)	||
+		      (mod == MAS_MODE_LOAD_OP_SPEC && spec_mode)))) {
+			return (mas & ~MAS_MOD_MASK) | MAS_FILL_OPERATION;
+		} else {
+			panic("get_load_recovery_mas(): we do not know how to recover protected access with MAS 0x%x\n",
+					mas);
+		}
 	}
 
 	return mas;
@@ -4581,10 +4580,9 @@ static void recovery_load_with_bytes(unsigned long address,
 			reg_address = reg_address_hi;
 		if (vr || byte >= 4) {
 			recovery_faulted_move(address, reg_address, 0,
-					1 /* vr */, AW(ld_rec_opc), chan,
-					0 /* qp_load */, 0 /* atomic_load */,
-					first_time /* is it first move? */,
-					cond);
+					1 /* vr */, ld_rec_opc, chan, 0 /* qp_load */,
+					0 /* atomic_load */, false /* big_endian */,
+					first_time /* is it first move? */, cond);
 		}
 	}
 }
@@ -4673,6 +4671,8 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 	bool atomic_q_load = is_atomic_q_load(regs, tcellar, next_tcellar, address, fmt, chan);
 	bool atomic_load = (atomic_q_load || atomic_qp_load);
 
+	bool big_endian = tc_cond_is_big_endian(tcellar->condition);
+
 	/*
 	 * Skip second part of an atomic quadro load which takes up 2 records in cellar (it is
 	 * reexecuted together with first part).
@@ -4708,7 +4708,7 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 
 	/* BUG 79642: ignore AS(tcellar->condition).empt field */
 	AW(ld_rec_opc) = 0;
-	ld_rec_opc.mas = get_recovery_mas(tcellar->condition, fmt);
+	ld_rec_opc.mas = get_load_recovery_mas(tcellar->condition, fmt);
 	ld_rec_opc.prot = !(AS(tcellar->condition).npsp);
 	ld_rec_opc.root = AS(tcellar->condition).root;
 	if (fmt == TC_FMT_QPWORD_Q || fmt == TC_FMT_DWORD_Q)
@@ -4751,10 +4751,11 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 		uaccess_enable();
 		if (likely(!hva_page_offset)) {
 			recovery_faulted_move(address, reg_address,
-					reg_address_hi, vr, AW(ld_rec_opc),
-					chan, qp_load, atomic_load, 1,
-					tcellar->condition);
+					reg_address_hi, vr, ld_rec_opc,
+					chan, qp_load, atomic_load, big_endian,
+					1, tcellar->condition);
 		} else {
+			/* TODO paravirt: MAS.be=1 QP loads require special handling (below too) */
 			recovery_load_with_bytes(address, address_hi_hva,
 					hva_page_offset, reg_address,
 					reg_address_hi, vr, ld_rec_opc, chan,
@@ -4785,8 +4786,8 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 		uaccess_enable();
 		if (likely(!hva_page_offset)) {
 			recovery_faulted_load_to_greg(address, greg_num_d, vr,
-					AW(ld_rec_opc), chan, qp_load,
-					atomic_load, saved_greg_lo,
+					ld_rec_opc, chan, qp_load,
+					atomic_load, big_endian, saved_greg_lo,
 					saved_greg_hi, tcellar->condition);
 		} else {
 			u64 tmp[2] __aligned(16);
@@ -4797,12 +4798,10 @@ static enum exec_mmu_ret do_recovery_load(struct pt_regs *regs,
 					tc_cond_to_size(tcellar->condition),
 					tcellar->condition);
 			if (!saved_greg_lo) {
-				recovery_faulted_load_to_greg(
-						(unsigned long) tmp,
-						greg_num_d, vr,
-						AW(ld_rec_opc), chan, qp_load,
-						atomic_load, NULL, NULL,
-						tcellar->condition);
+				recovery_faulted_load_to_greg((unsigned long) tmp,
+						greg_num_d, vr, ld_rec_opc, chan,
+						qp_load, atomic_load, big_endian,
+						NULL, NULL, tcellar->condition);
 			}
 		}
 		uaccess_disable();

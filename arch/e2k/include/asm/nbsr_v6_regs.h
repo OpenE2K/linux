@@ -7,6 +7,13 @@
 
 #include <asm/types.h>
 
+
+#define	SIC_rt_msi	0xb0
+#define	SIC_rt_msi_h	0xb4
+
+/* Host Controller */
+#define HC_CTRL		0x0340
+
 /* HC monitors */
 #define HC_MCR		0x360
 #define HC_MID		0x364
@@ -26,6 +33,17 @@
 /* Additional IOMMU monitors - e2c3 only.
  * EDBC_IOMMU_* registers are used only to broadcast
  * writing into ED{26-31}_IOMMU_* registers. */
+#define EDBC_IOMMU_CTRL		0x5080
+#define EDBC_IOMMU_BA_LO	0x5090
+#define EDBC_IOMMU_BA_HI	0x5094
+#define EDBC_IOMMU_DTBA_LO	0x5098
+#define EDBC_IOMMU_DTBA_HI	0x509c
+#define EDBC_IOMMU_CMD_C_LO	0x50a0
+#define EDBC_IOMMU_CMD_C_HI	0x50a4
+#define EDBC_IOMMU_ERR		0x50b0
+#define EDBC_IOMMU_ERR1		0x50b4
+#define EDBC_IOMMU_ERR_INFO_LO	0x50b8
+#define EDBC_IOMMU_ERR_INFO_HI	0x50bc
 #define EDBC_IOMMU_MCR		0x50c0
 #define EDBC_IOMMU_MID		0x50c4
 #define EDBC_IOMMU_MAR0_LO	0x50c8

@@ -130,7 +130,6 @@
  * majority of lm sensors. Use it to emulate
  * SMBUS_QUICK that is absent in IOHUB. */
 #define HWMON_MAN_ID		0xfe
-static int i2c_adapters_per_controller = 4;
 
 /* Multimaster i2c configuration can require l_xfer retry in case of
  * bus collision. Limit number of retries. */
@@ -138,6 +137,7 @@ static int i2c_adapters_per_controller = 4;
 
 struct l_i2c {
 	struct i2c_adapter adapter[I2C_MAX_BUSSES];
+	int adapters_nr;
 	unsigned bus_speed[I2C_MAX_BUSSES];
 	struct platform_device *pdev;
 	void __iomem *cbase;
@@ -265,7 +265,7 @@ static s32 __l_smbus_xfer(struct i2c_adapter *adap, u16 addr,
 	struct l_i2c *l_i2c = i2c_get_adapdata(adap);
 	int ret = 0;
 	int i, len = 0;
-	int bus_id = ((adap->nr) % i2c_adapters_per_controller);
+	int bus_id = adap->nr % l_i2c->adapters_nr;
 	unsigned int value;
 	unsigned char quick = 0;
 	void __iomem *daddr;
@@ -527,7 +527,7 @@ static s32 l_smbus_xfer(struct i2c_adapter *adap, u16 addr,
 static s32 l_i2c_xfer_one_msg(struct i2c_adapter *adap, struct i2c_msg *m)
 {
 	struct l_i2c *l_i2c = i2c_get_adapdata(adap);
-	int bus_id = ((adap->nr) % i2c_adapters_per_controller);
+	int bus_id = adap->nr % l_i2c->adapters_nr;
 	int ret = 0, i;
 	int f = m->flags, len = m->len;
 	u32 v = m->addr;
@@ -641,7 +641,7 @@ static void l_i2c_init_hw(struct l_i2c *l_i2c)
 	/* Reset status bits: write ones to RW1C bits of I2C Status. */
 	w_i2c(r_i2c(SMBSTATUS), SMBSTATUS);
 
-	for (i = 0; i < i2c_adapters_per_controller; i++) {
+	for (i = 0; i < l_i2c->adapters_nr; i++) {
 		unsigned speed = l_i2c->bus_speed[i], m = 0;
 		int k = i == 4 ? 1 : 0;
 		if (speed >= 1000 * 1000)
@@ -721,14 +721,15 @@ static int l_i2c_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 	int i;
-	int id;
 	struct resource *r;
 	struct l_i2c *l_i2c = kzalloc(sizeof(*l_i2c), GFP_KERNEL);
 	if (!l_i2c)
 		return -ENOMEM;
 
-	if (to_pci_dev(pdev->dev.parent)->device == PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI) {
-		i2c_adapters_per_controller = 5;
+	l_i2c->adapters_nr = 4;
+	if (to_pci_dev(pdev->dev.parent)->device ==
+			PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI) {
+		l_i2c->adapters_nr = 5;
 	}
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -750,7 +751,8 @@ static int l_i2c_probe(struct platform_device *pdev)
 	l_i2c->pdev = pdev;
 	init_completion(&l_i2c->xfer_complete);
 
-	for (i = 0; i < i2c_adapters_per_controller; i++) {
+	for (i = 0; i < l_i2c->adapters_nr; i++) {
+		int id;
 		char s[64];
 		struct i2c_adapter *i2c = &l_i2c->adapter[i];
 
@@ -760,8 +762,11 @@ static int l_i2c_probe(struct platform_device *pdev)
 		if (i2c->dev.of_node &&
 			!of_device_is_available(i2c->dev.of_node))
 			continue;
+		id = -1; /* -1 means dynamically assign bus id */
+		/* Assign id only for system busses: */
+		if (pdev->id < MAX_NUMNODES)
+			id = pdev->id * l_i2c->adapters_nr + i;
 
-		id = pdev->id * i2c_adapters_per_controller + i;
 		/* set up the sysfs linkage to our parent device */
 		i2c->dev.parent = &pdev->dev;
 		/* init adapter himself */
@@ -795,7 +800,7 @@ static int l_i2c_probe(struct platform_device *pdev)
 	return ret;
 
 cleanup:
-	for (i = 0; i < i2c_adapters_per_controller; i++)
+	for (i = 0; i < l_i2c->adapters_nr; i++)
 		i2c_del_adapter(&l_i2c->adapter[i]);
 	return ret;
 }
@@ -804,7 +809,7 @@ static int l_i2c_remove(struct platform_device *pdev)
 {
 	struct l_i2c *l_i2c = platform_get_drvdata(pdev);
 	int i;
-	for (i = 0; i < i2c_adapters_per_controller; i++)
+	for (i = 0; i < l_i2c->adapters_nr; i++)
 		i2c_del_adapter(&l_i2c->adapter[i]);
 	kfree(l_i2c);
 	return 0;

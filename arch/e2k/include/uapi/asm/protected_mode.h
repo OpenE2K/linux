@@ -74,6 +74,9 @@
 /* Print out contents of string syscall arguments: */
 #define PM_SC_DBG_STRING_ARGS		0x100000
 
+/* Enable 'ptrace' syscall in PM: */
+#define PM_SC_PTRACE_ENABLED           0x200000
+
 /* Enable all debug/diagnostic output: */
 #define PM_SC_DBG_MODE_ALL		(PM_SC_DBG_MODE_INIT \
 					| PM_SC_DBG_MODE_DEBUG \

@@ -35,8 +35,6 @@ OUTPUT_FORMAT("elf64-e2k", "elf64-e2k", "elf64-e2k")
  OUTPUT_ARCH(elbrus-v6)
  #elif defined(CONFIG_E2K_E16C)
  OUTPUT_ARCH(elbrus-v6)
- #elif defined(CONFIG_E2K_E48C)
- OUTPUT_ARCH(elbrus-v7)
  #elif defined(CONFIG_E2K_E8V7)
  OUTPUT_ARCH(elbrus-v7)
  #else

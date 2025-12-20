@@ -81,11 +81,10 @@ struct l_gpio_data {
 
 struct l_gpio {
 	struct gpio_chip chip; /*Must be the first*/
-	resource_size_t base;
-	void __iomem *base_ioaddr;
+	struct irq_chip irq_chip;
+	void __iomem *regs;
 	struct pci_dev *pdev;
 	raw_spinlock_t lock;
-	int irq_base;
 	struct l_gpio *next;
 	struct l_gpio_data data;
 };
@@ -138,44 +137,43 @@ static int register_l_gpio_bound_devices(void)
 /*
  * Set the state of an output GPIO line.
  */
-static void l_gpio_set_value(struct gpio_chip *c,
+static void l_gpio_set_value(struct gpio_chip *gc,
 				unsigned int offset, int state)
 {
-	struct l_gpio *chip = (struct l_gpio *)c;
+	struct l_gpio *c = gpiochip_get_data(gc);
 	unsigned long flags;
 	unsigned int x;
 
-	raw_spin_lock_irqsave(&chip->lock, flags);
-	x = readl(chip->base_ioaddr + L_GPIO_DATA);
+	raw_spin_lock_irqsave(&c->lock, flags);
+	x = readl(c->regs + L_GPIO_DATA);
 	if (state)
 		x |= L_GPIO_ONE_MASK(offset);
 	else
 		x &= L_GPIO_ZERO_MASK(offset);
 
-	writel(x, chip->base_ioaddr + L_GPIO_DATA);
-	raw_spin_unlock_irqrestore(&chip->lock, flags);
+	writel(x, c->regs + L_GPIO_DATA);
+	raw_spin_unlock_irqrestore(&c->lock, flags);
 }
 
 /*
  * Read the state of a GPIO line.
  */
-static int __l_gpio_get_value(struct gpio_chip *c, unsigned int offset)
+static int __l_gpio_get_value(struct l_gpio *c, unsigned int offset)
 {
-	struct l_gpio *chip = (struct l_gpio *)c;
-	unsigned int x = readl(chip->base_ioaddr + L_GPIO_DATA);
+	unsigned int x = readl(c->regs + L_GPIO_DATA);
 
 	return (x & L_GPIO_ONE_MASK(offset)) ? 1 : 0;
 }
 
-static int l_gpio_get_value(struct gpio_chip *c, unsigned int offset)
+static int l_gpio_get_value(struct gpio_chip *gc, unsigned int offset)
 {
-	struct l_gpio *chip = (struct l_gpio *)c;
+	struct l_gpio *c = gpiochip_get_data(gc);
 	unsigned long flags;
 	int x;
 
-	raw_spin_lock_irqsave(&chip->lock, flags);
+	raw_spin_lock_irqsave(&c->lock, flags);
 	x = __l_gpio_get_value(c, offset);
-	raw_spin_unlock_irqrestore(&chip->lock, flags);
+	raw_spin_unlock_irqrestore(&c->lock, flags);
 
 	return x;
 }
@@ -183,17 +181,17 @@ static int l_gpio_get_value(struct gpio_chip *c, unsigned int offset)
 /*
  * Configure the GPIO line as an input.
  */
-static int l_gpio_direction_input(struct gpio_chip *c, unsigned offset)
+static int l_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 {
-	struct l_gpio *chip = (struct l_gpio *)c;
+	struct l_gpio *c = gpiochip_get_data(gc);
 	unsigned long flags;
 	unsigned int x;
 
-	raw_spin_lock_irqsave(&chip->lock, flags);
-	x = readl(chip->base_ioaddr + L_GPIO_CNTRL);
+	raw_spin_lock_irqsave(&c->lock, flags);
+	x = readl(c->regs + L_GPIO_CNTRL);
 	x &= L_GPIO_ZERO_MASK(offset);
-	writel(x, chip->base_ioaddr + L_GPIO_CNTRL);
-	raw_spin_unlock_irqrestore(&chip->lock, flags);
+	writel(x, c->regs + L_GPIO_CNTRL);
+	raw_spin_unlock_irqrestore(&c->lock, flags);
 
 	return 0;
 }
@@ -201,31 +199,21 @@ static int l_gpio_direction_input(struct gpio_chip *c, unsigned offset)
 /*
  * Configure the GPIO line as an output.
  */
-static int l_gpio_direction_output(struct gpio_chip *c, unsigned offset,
+static int l_gpio_direction_output(struct gpio_chip *gc, unsigned offset,
 				      int val)
 {
-	struct l_gpio *chip = (struct l_gpio *)c;
+	struct l_gpio *c = gpiochip_get_data(gc);
 	unsigned long flags;
 	unsigned int x;
 
-	raw_spin_lock_irqsave(&chip->lock, flags);
-	x = readl(chip->base_ioaddr + L_GPIO_CNTRL);
+	raw_spin_lock_irqsave(&c->lock, flags);
+	x = readl(c->regs + L_GPIO_CNTRL);
 	x |= L_GPIO_ONE_MASK(offset);
-	writel(x, chip->base_ioaddr + L_GPIO_CNTRL);
-	raw_spin_unlock_irqrestore(&chip->lock, flags);
-	l_gpio_set_value(c, offset, val);
+	writel(x, c->regs + L_GPIO_CNTRL);
+	raw_spin_unlock_irqrestore(&c->lock, flags);
+	l_gpio_set_value(gc, offset, val);
 
 	return 0;
-}
-
-/*
- * Map GPIO line to IRQ number.
- */
-static int l_gpio_to_irq(struct gpio_chip *c, unsigned int pin)
-{
-	struct l_gpio *chip = (struct l_gpio *)c;
-
-	return (chip->irq_base + pin);
 }
 
 /* GPIOLIB interface */
@@ -234,67 +222,60 @@ static struct l_gpio *l_gpios_set;
 /*
  * GPIO IRQ
  */
-
-static int irq_to_gpio(unsigned int irq)
-{
-	struct l_gpio *chip = irq_get_chip_data(irq);
-
-	return (irq - chip->irq_base);
-}
-
-static void l_gpio_irq_disable(struct irq_data *irq_data)
+static void l_gpio_irq_disable(struct irq_data *idt)
 {
 	unsigned long flags;
 	unsigned int x;
-	unsigned int irq = irq_data->irq;
-	struct l_gpio *chip = irq_get_chip_data(irq);
-	int offset = irq_to_gpio(irq);
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(idt);
+	struct l_gpio *c = gpiochip_get_data(gc);
+	int offset = irqd_to_hwirq(idt);
 
-	raw_spin_lock_irqsave(&chip->lock, flags);
-	x = readl(chip->base_ioaddr + L_GPIO_INT_EN);
+	raw_spin_lock_irqsave(&c->lock, flags);
+	x = readl(c->regs + L_GPIO_INT_EN);
 	x &= L_GPIO_ZERO_MASK(offset);
-	writel(x, chip->base_ioaddr + L_GPIO_INT_EN);
-	raw_spin_unlock_irqrestore(&chip->lock, flags);
+	writel(x, c->regs + L_GPIO_INT_EN);
+	raw_spin_unlock_irqrestore(&c->lock, flags);
 
 	return;
 }
 
-static void l_gpio_irq_enable(struct irq_data *irq_data)
+static void l_gpio_irq_enable(struct irq_data *idt)
 {
 	unsigned long flags;
 	unsigned int x;
-	unsigned int irq = irq_data->irq;
-	struct l_gpio *chip = irq_get_chip_data(irq);
-	int offset = irq_to_gpio(irq);
+	struct gpio_chip *ch = irq_data_get_irq_chip_data(idt);
+	struct l_gpio *c = gpiochip_get_data(ch);
+	int offset = irqd_to_hwirq(idt);
 
-	raw_spin_lock_irqsave(&chip->lock, flags);
-	x = readl(chip->base_ioaddr + L_GPIO_INT_EN);
+	raw_spin_lock_irqsave(&c->lock, flags);
+	x = readl(c->regs + L_GPIO_INT_EN);
 	x |= L_GPIO_ONE_MASK(offset);
-	writel(x, chip->base_ioaddr + L_GPIO_INT_EN);
-	raw_spin_unlock_irqrestore(&chip->lock, flags);
+	writel(x, c->regs + L_GPIO_INT_EN);
+	raw_spin_unlock_irqrestore(&c->lock, flags);
 
 	return;
 }
 
-static int l_gpio_irq_type(struct irq_data *irq_data, unsigned type)
+static int l_gpio_irq_type(struct irq_data *idt, unsigned type)
 {
 	unsigned long flags;
-	unsigned int irq = irq_data->irq;
-	struct l_gpio *chip = irq_get_chip_data(irq);
-	int offset = irq_to_gpio(irq);
+	irq_flow_handler_t handler;
+	struct gpio_chip *ch = irq_data_get_irq_chip_data(idt);
+	struct l_gpio *c = gpiochip_get_data(ch);
+	int offset = irqd_to_hwirq(idt);
 	unsigned int cls, lvl;
 
-	if (offset < 0 || offset > chip->chip.ngpio) {
+	if (offset < 0 || offset > ch->ngpio)
 		return -EINVAL;
-	}
 
-	raw_spin_lock_irqsave(&chip->lock, flags);
+	raw_spin_lock_irqsave(&c->lock, flags);
 
-	cls = readl(chip->base_ioaddr + L_GPIO_INT_CLS);
-	lvl = readl(chip->base_ioaddr + L_GPIO_INT_LVL);
+	cls = readl(c->regs + L_GPIO_INT_CLS);
+	lvl = readl(c->regs + L_GPIO_INT_LVL);
 
 	switch (type) {
 	case IRQ_TYPE_EDGE_BOTH:
+		handler = handle_edge_irq;
 		cls |= L_GPIO_ONE_MASK(offset);
 		/*
 		 * Since the hardware doesn't support interrupts on both edges,
@@ -302,120 +283,104 @@ static int l_gpio_irq_type(struct irq_data *irq_data, unsigned type)
 		 * interrupt and switching to the opposite edge while ACKing
 		 * the interrupt
 		 */
-		if (__l_gpio_get_value(&chip->chip, offset))
+		if (__l_gpio_get_value(c, offset))
 			lvl &= L_GPIO_ZERO_MASK(offset); /* falling */
 		else
 			lvl |= L_GPIO_ONE_MASK(offset); /* rising */
 		break;
 	case IRQ_TYPE_EDGE_RISING:
+		handler = handle_edge_irq;
 		cls |= L_GPIO_ONE_MASK(offset);
 		lvl |= L_GPIO_ONE_MASK(offset);
 		break;
 	case IRQ_TYPE_EDGE_FALLING:
+		handler = handle_edge_irq;
 		cls |= L_GPIO_ONE_MASK(offset);
 		lvl &= L_GPIO_ZERO_MASK(offset);
 		break;
 	case IRQ_TYPE_LEVEL_HIGH:
+		handler = handle_level_irq;
 		cls &= L_GPIO_ZERO_MASK(offset);
 		lvl |= L_GPIO_ONE_MASK(offset);
 		break;
 	case IRQ_TYPE_LEVEL_LOW:
+		handler = handle_level_irq;
 		cls &= L_GPIO_ZERO_MASK(offset);
 		lvl &= L_GPIO_ZERO_MASK(offset);
 		break;
 	default:
-		break;
+		raw_spin_unlock_irqrestore(&c->lock, flags);
+		return -EINVAL;
 	}
-	writel(lvl, chip->base_ioaddr + L_GPIO_INT_LVL);
-	writel(cls, chip->base_ioaddr + L_GPIO_INT_CLS);
+	writel(lvl, c->regs + L_GPIO_INT_LVL);
+	writel(cls, c->regs + L_GPIO_INT_CLS);
 
-	raw_spin_unlock_irqrestore(&chip->lock, flags);
-
+	raw_spin_unlock_irqrestore(&c->lock, flags);
+	irq_set_handler_locked(idt, handler);
 	return 0;
 }
 
-static int l_gpio_irq_set_affinity(struct irq_data *irq_data,
-		const struct cpumask *mask, bool force)
+static irqreturn_t l_gpio_irq_handler(int irq, void *dev_id)
 {
-#ifdef CONFIG_SMP
-	int ret = 0, i;
-	unsigned int irq = irq_data->irq;
-	struct l_gpio *chip = irq_get_chip_data(irq);
-	struct irq_data *iopic_data;
-	struct irq_chip *iopic_chip;
-
-	for (i = 0; chip->data.irq[i].nr && ret == 0; i++) {
-		iopic_data = irq_get_irq_data(chip->data.irq[i].nr);
-		iopic_chip = irq_get_chip(chip->data.irq[i].nr);
-
-		if (iopic_chip)
-			ret = iopic_chip->irq_set_affinity(iopic_data, mask, force);
-	else
-		pr_alert("Error: gpio: could not set IRQ#%d affinity. Did not boot pass info about it?\n",
-			chip->data.irq[i].nr);
-	}
-	return ret;
-#else
-	return IRQ_SET_MASK_OK;
-#endif
-}
-
-static void l_gpio_irq_handler(struct irq_desc *desc)
-{
-	int irq = irq_desc_get_irq(desc);
 	unsigned int x;
 	unsigned int i;
-	struct irq_chip *ch = irq_desc_get_chip(desc);
-	struct l_gpio *chip = irq_desc_get_handler_data(desc);
-	unsigned start = 0, end = chip->chip.ngpio;
-	chained_irq_enter(ch, desc);
+	irqreturn_t ret = IRQ_NONE;
+	struct l_gpio *c = dev_id;
+	struct gpio_chip *gc = &c->chip;
+	unsigned start = 0, end = gc->ngpio;
 
-	x = readl(chip->base_ioaddr + L_GPIO_INT_STS);
+	x = readl(c->regs + L_GPIO_INT_STS);
 
-	for (i = 0; chip->data.irq[i].nr &&
-		     i < ARRAY_SIZE(chip->data.irq); i++) {
-		if (chip->data.irq[i].nr == irq && chip->data.irq[i].end) {
-			start = chip->data.irq[i].start;
-			end = chip->data.irq[i].end;
+	for (i = 0; c->data.irq[i].nr &&
+		     i < ARRAY_SIZE(c->data.irq); i++) {
+		if (c->data.irq[i].nr == irq && c->data.irq[i].end) {
+			start = c->data.irq[i].start;
+			end = c->data.irq[i].end;
 			break;
 		}
 	}
 	for (i = start; i <= end; i++) {
-		int pin_irq = chip->irq_base + i;
-		u32 type = irq_get_trigger_type(pin_irq);
+		u32 type;
 		if (!(x & (1 << i)))
 			continue;
+		irq = irq_find_mapping(gc->irq.domain, i);
+		type = irq_get_trigger_type(irq);
+
 		/*
 		 * Switch the interrupt edge to the opposite edge
 		 * of the interrupt which got triggered for the case
 		 * of emulating both edges
 		 */
 		if ((type & IRQ_TYPE_SENSE_MASK) == IRQ_TYPE_EDGE_BOTH) {
-			l_gpio_irq_type(irq_get_irq_data(pin_irq),
+			l_gpio_irq_type(irq_get_irq_data(irq),
 						IRQ_TYPE_EDGE_BOTH);
 		}
-		generic_handle_irq(pin_irq);
+		generic_handle_irq(irq);
+		ret = IRQ_HANDLED;
 	}
 
-	writel(x, chip->base_ioaddr + L_GPIO_INT_STS);
-	chained_irq_exit(ch, desc);
+	if (ret == IRQ_HANDLED)
+		writel(x, c->regs + L_GPIO_INT_STS);
+
+	return ret;
 }
 
-static struct irq_chip l_gpio_irqchip = {
+static const struct irq_chip l_gpio_irqchip = {
 	.name = "l-gpio-irqchip",
 	.irq_enable  = l_gpio_irq_enable,
 	.irq_disable = l_gpio_irq_disable,
 	.irq_unmask  = l_gpio_irq_enable,
 	.irq_mask    = l_gpio_irq_disable,
 	.irq_set_type = l_gpio_irq_type,
-	.irq_set_affinity = l_gpio_irq_set_affinity,
+	.flags = IRQCHIP_SET_TYPE_MASKED | IRQCHIP_MASK_ON_SUSPEND,
 };
 
-static int __init l_gpio_probe(struct pci_dev *pdev,
-				  const struct pci_device_id *pci_id,
-				  struct l_gpio *c)
+static int l_gpio_probe(struct pci_dev *pdev, struct l_gpio *c)
 {
 	int err;
+	struct device *dev = &pdev->dev;
+	struct gpio_chip *gc = &c->chip;
+	struct irq_chip *girq = &c->irq_chip;
 	int i, bar = c->data.bar;
 
 	err = pci_enable_device_mem(pdev);
@@ -425,78 +390,72 @@ static int __init l_gpio_probe(struct pci_dev *pdev,
 	}
 
 	/* set up the driver-specific struct */
-	c->base = pci_resource_start(pdev, bar);
-	c->base_ioaddr = pci_iomap(pdev, bar, 0);
+	c->regs = pci_iomap(pdev, bar, 0);
 	c->pdev = pdev;
 	raw_spin_lock_init(&(c->lock));
 
-	dev_info(&pdev->dev, "allocated PCI BAR #%d: base 0x%llx\n", bar,
-		 (unsigned long long)c->base);
 #if 0 /* do not touch boot settings */
 	/* Default Input/Output mode for all pins: */
-	writel(L_GPIO_CNTRL_DEF, c->base_ioaddr + L_GPIO_CNTRL);
+	writel(L_GPIO_CNTRL_DEF, c->regs + L_GPIO_CNTRL);
 	/* Default interrupt enable/disable for all pins: */
-	writel(L_GPIO_INT_EN_DEF, c->base_ioaddr + L_GPIO_INT_EN);
+	writel(L_GPIO_INT_EN_DEF, c->regs + L_GPIO_INT_EN);
 	/* Default interrupt mode level/edge for all pins: */
-	writel(L_GPIO_INT_CLS_DEF, c->base_ioaddr + L_GPIO_INT_CLS);
+	writel(L_GPIO_INT_CLS_DEF, c->regs + L_GPIO_INT_CLS);
 	/* Default rising/falling edge detection for all pins (if edge): */
-	writel(L_GPIO_INT_LVL_DEF, c->base_ioaddr + L_GPIO_INT_LVL);
+	writel(L_GPIO_INT_LVL_DEF, c->regs + L_GPIO_INT_LVL);
 #endif
-	/* finally, register with the generic GPIO API */
-	err = gpiochip_add(&(c->chip));
-	if (err)
-		goto release_region;
 
+	err = gpiochip_add_data(gc, c);
+	if (err)
+		goto err;
 	for (i = 0; c->data.irq[i].nr && i < ARRAY_SIZE(c->data.irq); i++)
 		;
 	if (i == 0)
 		goto out;
+	*girq = l_gpio_irqchip;
 
-	/*TODO: rewrite to gpiochip_irqchip_add() */
-	c->irq_base = irq_alloc_descs_from(get_nr_irqs_gsi(), (c->chip).ngpio,
-					   pcibus_to_node(pdev->bus));
-	if (c->irq_base < 0) {
-		dev_err(&pdev->dev, "could not reserve %d irq numbers for l-gpio\n",
-				(c->chip).ngpio);
-		goto release_chip;
+	err = gpiochip_irqchip_add(gc, girq, 0, handle_level_irq,  IRQ_TYPE_NONE);
+	if (err) {
+		dev_err(dev, "cannot add irqchip\n");
+		goto err;
+	}
+	for (i = 0; !err && c->data.irq[i].nr &&
+				i < ARRAY_SIZE(c->data.irq); i++) {
+		err = request_irq(c->data.irq[i].nr, l_gpio_irq_handler,
+			IRQF_SHARED, "l-gpio", c);
+	}
+	if (err) {
+		dev_err(&pdev->dev, "IRQ handler registering failed (%d)\n", err);
+		for (i = i - 1; i >= 0; i--)
+			free_irq(c->data.irq[i].nr, c);
+		goto err2;
 	}
 
-	for (i = 0; c->data.irq[i].nr &&
-			i < ARRAY_SIZE(c->data.irq); i++) {
-		irq_set_handler_data(c->data.irq[i].nr, c);
-		irq_set_chained_handler(c->data.irq[i].nr,
-						l_gpio_irq_handler);
-	}
-
-	/* To virtual irq_desc's: */
-	for (i = 0; i < (c->chip).ngpio; i++) {
-		irq_set_chip_and_handler(i + c->irq_base,
-					      &l_gpio_irqchip,
-					      handle_simple_irq);
-		irq_set_chip_data(i + c->irq_base, c);
-	}
 out:
 	dev_info(&pdev->dev, DRV_NAME
-		": L-GPIO support successfully loaded (irq base: %d).\n",
-		c->irq_base);
+		": L-GPIO support successfully loaded.\n");
 	return 0;
-
-release_chip:
-	gpiochip_remove(&(c->chip));
-release_region:
-	pci_iounmap(pdev, c->base_ioaddr);
+err2:
+	gpiochip_remove(gc);
+err:
+	pci_iounmap(pdev, c->regs);
 	pci_release_region(pdev, c->data.bar);
 done:
 	return err;
 }
 
-static void __exit l_gpio_remove(struct l_gpio *p)
+static void __exit l_gpio_remove(struct l_gpio *c)
 {
-	struct pci_dev *pdev = p->pdev;
-	int bar = p->data.bar;
+	int i;
+	struct pci_dev *pdev = c->pdev;
+	struct gpio_chip *gc = &c->chip;
+	int bar = c->data.bar;
 
-	gpiochip_remove(&(p->chip));
-	pci_iounmap(pdev, p->base_ioaddr);
+	gpiochip_remove(gc);
+	for (i = 0; c->data.irq[i].nr && i < ARRAY_SIZE(c->data.irq); i++) {
+		free_irq(c->data.irq[i].nr, c);
+	}
+	pci_iounmap(pdev, c->regs);
 	pci_release_region(pdev, bar);
 }
 
@@ -543,14 +502,13 @@ static struct pci_device_id __initdata l_gpio_pci_tbl[] = {
 	{},
 };
 
-MODULE_DEVICE_TABLE(pci, l_gpio_pci_tbl);
-
 #ifdef CONFIG_OF_GPIO
 static struct device_node *l_gpio_get_of_node(struct pci_dev *pdev,
 			struct l_gpio_data *d)
 {
 	int node = dev_to_node(&pdev->dev);
 	char path[32];
+
 	if (pdev->dev.of_node)
 		return pdev->dev.of_node;
 
@@ -570,6 +528,7 @@ static struct device_node *l_gpio_get_of_node(struct pci_dev *pdev,
 		memset(d->irq, 0, sizeof(d->irq));
 		return NULL;
 	}
+
 	if (node < 0)
 		node = 0;
 	sprintf(path, "/l_gpio@%d", node);
@@ -586,74 +545,87 @@ static struct device_node *l_gpio_get_of_node(struct pci_dev *pdev,
  * and keep track of the devices that we're using.
  */
 
+static int l_gpio_init_one(struct pci_dev *pdev, const struct l_gpio_data *drv_data)
+{
+	int err = -ENODEV;
+	struct l_gpio *next, *old = NULL;
+
+	struct l_gpio_data *d;
+	struct gpio_chip *c;
+	if (!(next = kzalloc(sizeof(*next), GFP_KERNEL)))
+		return -ENOMEM;
+	d = &next->data;
+	memcpy(d, drv_data, sizeof(*d));
+
+	c = (struct gpio_chip *)next;
+	c->owner = THIS_MODULE;
+	c->label = DRV_NAME;
+	c->direction_input = l_gpio_direction_input;
+	c->direction_output = l_gpio_direction_output;
+	c->get = l_gpio_get_value;
+	c->set = l_gpio_set_value;
+	c->ngpio = d->lines;
+	c->can_sleep = 0;
+	c->of_node = l_gpio_get_of_node(pdev, d);
+	/*just to make gpiochip_irqchip_add() happy (linux-5.4)*/
+	c->parent = &pdev->dev;
+
+	/*
+	* GPIO/MPV in IOHub2 has 4 IOAPIC IRQs:
+	* 6 and 9 - for MPV
+	* 7 and 11 - for GPIO
+	* On EPIC systems IRQs are recalculated in
+	* fixup_iohub2_dev_irq(), and pdev->irq has the
+	* IRQ for MPV. Add 1 to get IRQ for GPIO.
+	*/
+	if (cpu_has_epic() && d == &l_iohub2_private_data)
+		d->irq[0].nr = pdev->irq + 1;
+
+	err = l_gpio_probe(pdev, next);
+
+	if (err)
+		pci_dev_put(pdev);
+	if (old)
+		old->next = next;
+	else
+		l_gpios_set = next;
+	old = next;
+
+
+	if (!l_gpios_set)
+		err = register_l_gpio_bound_devices();
+
+	return err;
+}
+/*
+ * We can't use the standard PCI driver registration stuff here, since
+ * that allows only one driver to bind to each PCI device (and we want
+ * multiple drivers to be able to bind to the device: AC97 and GPIO).
+ * Instead, manually scan for the PCI device, request a single region,
+ * and keep track of the devices that we're using.
+ */
+
 static int __init l_gpio_init(void)
 {
 	struct pci_dev *pdev = NULL;
-	int err = -ENODEV;
-	int i, j = 0, base = 0;
-	struct l_gpio *next, *old = NULL;
+	int err = 0;
+	int i;
 
 	for (i = 0; i < ARRAY_SIZE(l_gpio_pci_tbl) - 1; i++) {
 		while ((pdev = pci_get_device(l_gpio_pci_tbl[i].vendor,
 					      l_gpio_pci_tbl[i].device,
 					      pdev))) {
-			struct l_gpio_data *d;
-			struct gpio_chip *c;
-			if (!(next = kzalloc(sizeof(*next), GFP_KERNEL)))
-				return -ENOMEM;
-			d = &next->data;
-			memcpy(d, (void *)l_gpio_pci_tbl[i].driver_data, sizeof(*d));
-
-			c = (struct gpio_chip *)next;
-			c->owner = THIS_MODULE;
-			c->label = DRV_NAME;
-			c->direction_input = l_gpio_direction_input;
-			c->direction_output = l_gpio_direction_output;
-			c->get = l_gpio_get_value;
-			c->set = l_gpio_set_value;
-			c->to_irq = l_gpio_to_irq;
-			c->base = base;
-			c->ngpio = d->lines;
-			c->can_sleep = 0;
-#ifdef CONFIG_OF_GPIO
-			c->of_node = l_gpio_get_of_node(pdev, d);
-#endif
-
-			/*
-			 * GPIO/MPV in IOHub2 has 4 IOAPIC IRQs:
-			 * 6 and 9 - for MPV
-			 * 7 and 11 - for GPIO
-			 * On EPIC systems IRQs are recalculated in
-			 * fixup_iohub2_dev_irq(), and pdev->irq has the
-			 * IRQ for MPV. Add 1 to get IRQ for GPIO.
-			 */
-			if (cpu_has_epic() && d == &l_iohub2_private_data)
-				d->irq[0].nr = pdev->irq + 1;
-
-			/* FIXME: We need universal function to choose between
-			 * native_ioapic_set_affinity and native_ioepic_set_affinity
-			 * in l_gpio_irq_set_affinity */
-			if (cpu_has_epic() && d == &l_iohub3_private_data) {
-				l_gpio_irqchip.irq_set_affinity = NULL;
-			}
-
-			err = l_gpio_probe(pdev, &l_gpio_pci_tbl[i], next);
-
+			struct l_gpio_data *d = (struct l_gpio_data *)
+					l_gpio_pci_tbl[i].driver_data;
+			err = l_gpio_init_one(pdev, d);
 			if (err)
-				pci_dev_put(pdev);
-			if (old)
-				old->next = next;
-			else
-				l_gpios_set = next;
-			old = next;
-			base += d->lines;
-			j++;
+				goto out;
 		}
 	}
 
 	if (l_gpios_set)
 		err = register_l_gpio_bound_devices();
-
+out:
 	return err;
 }
 

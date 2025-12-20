@@ -12,6 +12,7 @@
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/pci.h>
 
 #include <asm/sic_regs.h>
 #ifdef CONFIG_E2K
@@ -39,6 +40,16 @@ enum {
 static raw_spinlock_t sicreg_lock;
 static u32 sicreg_offset;
 static u32 sicreg_format;
+
+
+int hwdebug = 0;
+
+static int __init hwdebug_setup(char *str)
+{
+	hwdebug = 1;
+	return 1;
+}
+__setup("hwdebug", hwdebug_setup);
 
 
 #ifdef CONFIG_E2K
@@ -423,6 +434,9 @@ static const struct proc_ops sicwrite_proc_ops = {
 
 static int __init init_procregs(void)
 {
+	if (!hwdebug && !is_prototype())
+		return 0;
+
 	if (HAS_MACHINE_L_SIC) {
 		proc_create(SICREAD_FILENAME, S_IRUGO, NULL,
 			&sicread_proc_ops);

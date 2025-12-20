@@ -296,9 +296,6 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 	case MACHINE_ID_E2C3:
 		boot_e2c3_setup_arch();
 		break;
-	case MACHINE_ID_E48C:
-		boot_e48c_setup_arch();
-		break;
 	case MACHINE_ID_E8V7:
 		boot_e8v7_setup_arch();
 		break;

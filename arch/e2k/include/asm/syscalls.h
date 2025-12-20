@@ -103,6 +103,13 @@ extern long protected_sys_clone(const unsigned long	a1,	/* flags */
 			 const unsigned long __user a5,/* tls */
 			 const unsigned long	unused6,
 			 struct pt_regs	*regs);
+extern long protected_sys_clone3(struct protected_clone_args __user *protected_uargs,
+				 const size_t			size,
+			 const unsigned long	unused3,
+			 const unsigned long	unused4,
+			 const unsigned long	unused5,
+			 const unsigned long	unused6,
+			 struct pt_regs	*regs);
 extern long protected_sys_execve(const char __user *a1,/* filename*/
 			  unsigned long __user *u_argv,/* argv[] */
 			  unsigned long __user *u_envp,/* envp[] */
@@ -173,6 +180,27 @@ extern long protected_sys_mremap(const unsigned long __user old_address,
 				const unsigned long __user new_address,
 				const unsigned long a6,	/* unused */
 				struct pt_regs *regs);
+extern long protected_sys_mlock(unsigned long	addr,
+				size_t	len,
+				const unsigned long unused3,
+				const unsigned long unused4,
+				const unsigned long unused5,
+				const unsigned long unused6,
+				const struct pt_regs *regs);
+extern long protected_sys_mlock2(unsigned long	addr,
+				 size_t		len,
+				 unsigned int	flags,
+				const unsigned long unused4,
+				const unsigned long unused5,
+				const unsigned long unused6,
+				const struct pt_regs *regs);
+extern long protected_sys_munlock(unsigned long	addr,
+				  size_t	len,
+				const unsigned long unused3,
+				const unsigned long unused4,
+				const unsigned long unused5,
+				const unsigned long unused6,
+				const struct pt_regs *regs);
 extern long protected_sys_open(const char __user *pathname,
 			       int		flags,
 			       mode_t		mode,

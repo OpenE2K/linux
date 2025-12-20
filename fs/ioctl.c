@@ -880,9 +880,9 @@ do { \
  * handler is required instead of ptr128_ioctl.
  */
 
-long ptr128_ioctl(struct file *file, unsigned long cmd, unsigned long arg)
+long ptr128_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	DbgSCP("%s(file=0x%lx, cmd=0x%lx, arg=0x%lx)\n",
+	DbgSCP("%s(file=0x%lx, cmd=0x%x, arg=0x%lx)\n",
 	       __func__, file, cmd, arg);
 	if (!file->f_op->unlocked_ioctl)
 		return -ENOIOCTLCMD;

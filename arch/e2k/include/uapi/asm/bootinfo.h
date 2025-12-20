@@ -43,7 +43,6 @@
 #define CPU_TYPE_E12C		0xa	/* E12C */
 #define CPU_TYPE_E16C		0xb	/* E16C */
 #define CPU_TYPE_E2C3		0xc	/* E2C3 */
-#define CPU_TYPE_E48C		0xd	/* E48C */
 #define CPU_TYPE_E8V7		0xe	/* E8V7 */
 
 #define CPU_TYPE_SIMUL		0x3e    /* simulator */
@@ -83,9 +82,6 @@
 		break;					\
 	case CPU_TYPE_E2C3:				\
 		name = "E2C3";				\
-		break;					\
-	case CPU_TYPE_E48C:				\
-		name = "E48C";				\
 		break;					\
 	case CPU_TYPE_E8V7:				\
 		name = "E8V7";				\

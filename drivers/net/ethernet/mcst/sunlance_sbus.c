@@ -88,6 +88,9 @@ static int sparc_lance_probe_one(struct of_device *op,
 
 	if (sparc_lance_debug && version_printed++ == 0)
 		printk (KERN_INFO "%s", version);
+#ifdef CONFIG_MCST_RT
+        raw_spin_lock_init(&lp->rt_stuff_lock);
+#endif
         raw_spin_lock_init(&lp->init_lock);
 	raw_spin_lock_init(&lp->lock);
 	lance_setup_mac(dev);

@@ -2637,7 +2637,7 @@ static int create_info_device_attr(struct device *dev)
 		num_files = 6;
 		break;
 	case MACHINE_ID_E2C3:
-		num_files = 7;
+		num_files = 8;
 		break;
 	case MACHINE_ID_E8C:
 		num_files = 4;

@@ -1085,12 +1085,19 @@ recovery_faulted_load_to_cpu_greg(e2k_addr_t addr, u32 greg_num_d,
 	int vr = args.vr;
 	int ret = -EAGAIN;
 
+	u64 opc_lo = ld_rec_opc;
+	u64 opc_hi = opc_lo | 8ULL;
+
+	if (args.big_endian) {
+		swap(opc_lo, opc_hi);
+	}
+
 	if (atomic_load) {
-		TRY_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr,
-			ld_rec_opc, greg_num_d, vr, qp_load, ret);
+		TRY_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc_lo, opc_hi,
+				greg_num_d, vr, qp_load, ret);
 	} else {
-		TRY_RECOVERY_LOAD_TO_A_GREG_CH_VR(addr,
-			ld_rec_opc, greg_num_d, chan_opc, vr, qp_load, ret);
+		TRY_RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, opc_lo, opc_hi,
+				greg_num_d, chan_opc, vr, qp_load, ret);
 	}
 	return ret;
 }
@@ -1308,9 +1315,9 @@ UACCESS_FN_DEFINE6(recovery_faulted_move_fn,
 		e2k_addr_t, addr_from, e2k_addr_t, addr_to, e2k_addr_t, addr_to_hi,
 		union recovery_faulted_arg, arg, u64, ld_rec_opc, u32, first_time)
 {
-	native_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
-			arg.vr, ld_rec_opc, arg.chan, arg.qp, arg.atomic,
-			first_time);
+	native_recovery_faulted_move(addr_from, addr_to, addr_to_hi, arg.vr,
+			(ldst_rec_op_t) { .word = ld_rec_opc }, arg.chan, arg.qp,
+			arg.atomic, arg.big_endian, first_time);
 	return 0;
 }
 
@@ -1371,7 +1378,8 @@ UACCESS_FN_DEFINE6(recovery_faulted_load_to_greg_fn, e2k_addr_t, address,
 		u64, ld_rec_opc, u64 *, saved_greg_lo, u64 *, saved_greg_hi)
 {
 	native_recovery_faulted_load_to_greg(address, greg_num_d, arg.vr,
-			ld_rec_opc, arg.chan, arg.qp, arg.atomic,
+			(ldst_rec_op_t) { .word = ld_rec_opc }, arg.chan,
+			arg.qp, arg.atomic, arg.big_endian,
 			(u64 *) saved_greg_lo, (u64 *) saved_greg_hi);
 	return 0;
 }

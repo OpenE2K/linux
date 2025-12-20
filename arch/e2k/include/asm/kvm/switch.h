@@ -448,6 +448,16 @@ static inline void kvm_switch_clw_regs(struct kvm_sw_cpu_context *sw_ctxt, bool 
 }
 #endif
 
+static inline void kvm_switch_gregs(struct kvm_sw_cpu_context *sw_ctxt, bool guest_enter)
+{
+	if (guest_enter) {
+		machine.save_kernel_gregs(&sw_ctxt->host_k_gregs);
+		NATIVE_RESTORE_KERNEL_GREGS(&sw_ctxt->vcpu_k_gregs);
+	} else {
+		machine.save_kernel_gregs(&sw_ctxt->vcpu_k_gregs);
+		NATIVE_RESTORE_KERNEL_GREGS(&sw_ctxt->host_k_gregs);
+	}
+}
 
 static inline void
 switch_ctxt_trap_enable_mask(struct kvm_sw_cpu_context *sw_ctxt)
@@ -518,7 +528,7 @@ static inline void host_guest_enter(struct thread_info *ti,
 
 		/* For hypercalls skip the extended part. */
 		if (!(flags & DONT_AAU_CONTEXT_SWITCH)) {
-			HOST_RESTORE_HOST_GREGS(ti);
+			kvm_switch_gregs(sw_ctxt, true);
 		}
 	} else if (flags & FULL_CONTEXT_SWITCH) {
 
@@ -550,6 +560,10 @@ static inline void host_guest_enter(struct thread_info *ti,
 			}
 		}
 
+		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
+			kvm_switch_gregs(sw_ctxt, true);
+		}
+
 #ifdef CONFIG_USE_AAU
 		if (!(flags & DONT_AAU_CONTEXT_SWITCH)) {
 			/*
@@ -566,11 +580,6 @@ static inline void host_guest_enter(struct thread_info *ti,
 			NATIVE_RESTORE_AADS(&sw_ctxt->aau_context);
 		}
 #endif
-
-		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
-			/* For interceptions restore extended part */
-			NATIVE_RESTORE_KERNEL_GREGS(&ti->k_gregs);
-		}
 	} else {
 		/*
 		 * Return from emulation of interseption to virtualized
@@ -669,8 +678,7 @@ static inline void host_guest_exit(struct thread_info *ti,
 		sw_ctxt->in_hypercall = true;
 
 		/* For hypercalls skip the extended part. */
-		HOST_SAVE_HOST_GREGS(ti);
-		ONLY_SET_KERNEL_GREGS(ti);
+		kvm_switch_gregs(sw_ctxt, false);
 
 		NATIVE_SAVE_INTEL_REGS(sw_ctxt);
 
@@ -735,9 +743,7 @@ static inline void host_guest_exit(struct thread_info *ti,
 			E2K_DISP_CTPRS();
 
 		if (likely(!(flags & DONT_SAVE_KGREGS_SWITCH))) {
-			/* For interceptions save extended part. */
-			machine.save_kernel_gregs(&ti->k_gregs);
-			ONLY_SET_KERNEL_GREGS(ti);
+			kvm_switch_gregs(sw_ctxt, false);
 		}
 
 		NATIVE_SAVE_INTEL_REGS(sw_ctxt);

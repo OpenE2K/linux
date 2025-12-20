@@ -423,8 +423,14 @@ static int get_sg_io_pack_id(int *pack_id, void __user *buf, size_t count)
 			struct compat_sg_io_hdr __user *hp = buf;
 
 			return get_user(*pack_id, &hp->pack_id);
-		}
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		} else if (TASK_IS_PROTECTED(current) &&
+		    count >= sizeof(struct prot_sg_io_hdr)) {
+			struct prot_sg_io_hdr __user *hp = buf;
 
+			return get_user(*pack_id, &hp->pack_id);
+#endif /* CONFIG_PROTECTED_MODE */
+		}
 		if (count >= sizeof(struct sg_io_hdr)) {
 			struct sg_io_hdr __user *hp = buf;
 
@@ -564,6 +570,13 @@ sg_new_read(Sg_fd * sfp, char __user *buf, size_t count, Sg_request * srp)
 			err = -EINVAL;
 			goto err_out;
 		}
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	} else if (TASK_IS_PROTECTED(current)) {
+		if (count < sizeof(struct prot_sg_io_hdr)) {
+			err = -EINVAL;
+			goto err_out;
+		}
+#endif /* CONFIG_PROTECTED_MODE */
 	} else if (count < SZ_SG_IO_HDR) {
 		err = -EINVAL;
 		goto err_out;
@@ -1180,6 +1193,26 @@ static long sg_compat_ioctl(struct file *filp, unsigned int cmd_in, unsigned lon
 	return scsi_compat_ioctl(sdp->device, cmd_in, p);
 }
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static long sg_ptr128_ioctl(struct file *filp, unsigned int cmd_in, unsigned long arg)
+{
+	void __user *p = (void *)arg;
+	Sg_device *sdp;
+	Sg_fd *sfp;
+	int ret;
+
+	sfp = (Sg_fd *) filp->private_data;
+	sdp = sfp->parentdp;
+	if (!sfp || !sdp)
+		return -ENXIO;
+
+	ret = sg_ioctl_common(filp, sdp, sfp, cmd_in, p);
+	if (ret != -ENOIOCTLCMD)
+		return ret;
+
+	return scsi_ptr128_ioctl(sdp->device, cmd_in, p);
+}
+#endif  /* CONFIG_PROTECTED_MODE */
 
 static __poll_t
 sg_poll(struct file *filp, poll_table * wait)
@@ -1436,6 +1469,9 @@ static const struct file_operations sg_fops = {
 	.unlocked_ioctl = sg_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = sg_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = sg_ptr128_ioctl,
 #endif
 	.open = sg_open,
 	.mmap = sg_mmap,

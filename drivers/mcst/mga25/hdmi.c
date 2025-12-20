@@ -154,10 +154,27 @@ static int mga25_hdmi_atomic_check(struct drm_encoder *e,
 	return 0;
 }
 
+static enum drm_mode_status
+mga2_hdmi_encoder_mode_valid(struct drm_encoder *encoder,
+			    const struct drm_display_mode *mode)
+{
+	struct mga25_hdmi *m = to_mga25_hdmi(encoder);
+	unsigned long max = 600.e+06; /* HDMI 2.0 */
+	if (mga20(m->dev_id))
+		max = 340.e+06 /* HDMI 1.4b */;
+
+	if (mode->clock < 10000)
+		return MODE_CLOCK_LOW;
+	if (mode->clock <= max / 1000)
+		return MODE_OK;
+	return MODE_CLOCK_HIGH;
+}
+
 static const struct drm_encoder_helper_funcs mga20_hdmi_encoder_helper_funcs = {
 	.enable	    = mga20_hdmi_encoder_enable,
 	.disable    = mga25_hdmi_encoder_disable,
 	.atomic_check = mga25_hdmi_atomic_check,
+	.mode_valid = mga2_hdmi_encoder_mode_valid,
 };
 
 static const struct drm_encoder_helper_funcs mga25_hdmi_encoder_helper_funcs = {
@@ -169,19 +186,6 @@ static const struct drm_encoder_helper_funcs mga25_hdmi_encoder_helper_funcs = {
 static const struct drm_encoder_funcs mga25_hdmi_encoder_funcs = {
 	.destroy = drm_encoder_cleanup,
 };
-
-static enum drm_mode_status
-mga25_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
-		       const struct drm_display_info *info,
-		       const struct drm_display_mode *mode)
-{
-	unsigned long max = 552.75e+06 / 1000;
-	if (mode->clock < 10000)
-		return MODE_CLOCK_LOW;
-	if (mode->clock <= max)
-		return MODE_OK;
-	return MODE_CLOCK_HIGH;
-}
 
 static const struct dw_hdmi_mpll_config mga20_mpll_cfg[] = {
 	{
@@ -322,7 +326,7 @@ static const struct mga25_hdmi_phy_params mga25_hdmi_phy_params[] = {
 	{  380.5e+06, 0x0640, 0x3041, 0x0205 },
 	{  475.2e+06, 0x0640, 0x3080, 0x0005 },
 	{ 505.25e+06, 0x0640, 0x3080, 0x0005 },
-	{ 552.75e+06, 0x0640, 0x3080, 0x0005 },
+	{ 600.00e+06, 0x0640, 0x3080, 0x0005 },
 	{  /* sentinel */ },
 };
 
@@ -339,9 +343,9 @@ struct mga25_hdmi_phy_drvr_vltg_lvl {
 
 static const struct mga25_hdmi_phy_drvr_vltg_lvl mga25_hdmi_phy_drvr_vltg_lvl[] = {
 	/*	       tx_symon    ck_symon,     txlvl,   txterm */
-	{    165e+06, (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 < 1.65Gbps */
-	{    340e+06, (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 > 1.65Gbps */
-	{ 552.75e+06, (0xf << 4) | (5 << 0), (12 << 5), (0 << 0) /*  50 Omh */ }, /* HDMI 2.0 (Data rate greater than 3.4 Gbps)*/
+	{ 165e+06, (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 < 1.65Gbps */
+	{ 340e+06, (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 > 1.65Gbps */
+	{ 600e+06, (0xf << 4) | (5 << 0), (12 << 5), (0 << 0) /*  50 Omh */ }, /* HDMI 2.0 (Data rate greater than 3.4 Gbps)*/
 	{ /* sentinel */ },
 };
 
@@ -382,10 +386,8 @@ static struct dw_hdmi_plat_data mga20_drv_data = {
 	.mpll_cfg = mga20_mpll_cfg,
 	.cur_ctr  = mga20_cur_ctr,
 	.phy_config = mga20_phy_config,
-	.mode_valid = mga25_hdmi_mode_valid,
 };
 static const struct dw_hdmi_plat_data mga25_drv_data = {
-	.mode_valid = mga25_hdmi_mode_valid,
 	.configure_phy	= mga25_hdmi_phy_configure,
 };
 

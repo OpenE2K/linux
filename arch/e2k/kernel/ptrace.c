@@ -313,6 +313,8 @@ static inline int get_user_regs_struct_size(
 
 	ret = get_user(val, &uregs->sizeof_struct);
 	if (!ret) {
+		if (val > sizeof(struct user_regs_struct))
+			val = sizeof(struct user_regs_struct);
 		*size = val;
 		if (val < offsetof(struct user_regs_struct, idr))
 			ret = -EPERM;
@@ -364,7 +366,7 @@ static int execute_user_gd_cud_regs(struct task_struct *child,
 	size_t copied;
 
 	/* index checkup */
-	if (!(user_regs->cuir >> (CR1_lo_cuir_size)))
+	if (machine.native_iset_ver < E2K_ISET_V6 && !(user_regs->cuir >> (CR1_lo_cuir_size)))
 		return 0;
 	cutd.word = user_regs->cutd;
 	pnt_cut_entry = cutd.CUTD_base + 32 * (user_regs->cuir & CUIR_mask);
@@ -380,10 +382,12 @@ static int execute_user_gd_cud_regs(struct task_struct *child,
 			__func__, child->pid, pnt_cut_entry, copied, sizeof(e2k_cute_t));
 		return -ENODATA;
 	}
-	user_regs->gd_lo = p_cute->gd_base;
-	user_regs->gd_hi = p_cute->gd_size;
-	user_regs->cud_lo = p_cute->cud_base;
-	user_regs->cud_hi = p_cute->cud_size;
+
+	user_regs->cud_lo = AW(p_cute->dw0);
+	user_regs->cud_hi = AW(p_cute->dw1);
+	user_regs->gd_lo = AW(p_cute->dw2);
+	user_regs->gd_hi = AW(p_cute->dw3);
+
 	return 0;
 }
 
@@ -625,10 +629,37 @@ void core_pt_regs_to_user_regs (struct pt_regs *pt_regs,
 		}
 
 		/* SBBP */
-		if (trap->sbbp)
-			memcpy(user_regs->sbbp, trap->sbbp,
-					sizeof(user_regs->sbbp));
+		memcpy(user_regs->sbbp, trap->sbbp, sizeof(user_regs->sbbp));
+	} else {
+		user_regs->arg1     = pt_regs->args[1];
+		user_regs->arg2     = pt_regs->args[2];
+		user_regs->arg3     = pt_regs->args[3];
+		user_regs->arg4     = pt_regs->args[4];
+		user_regs->arg5     = pt_regs->args[5];
+		user_regs->arg6     = pt_regs->args[6];
+#ifdef CONFIG_PROTECTED_MODE
+		if (pt_regs->kernel_entry == 8) {
+			user_regs->arg7     = pt_regs->args[7];
+			user_regs->arg8     = pt_regs->args[8];
+			user_regs->arg9     = pt_regs->args[9];
+			user_regs->arg10    = pt_regs->args[10];
+			user_regs->arg11    = pt_regs->args[11];
+			user_regs->arg12    = pt_regs->args[12];
+			user_regs->arg_tags = pt_regs->tags;
+			user_regs->sys_rval_lo = pt_regs->rval1;
+			user_regs->sys_rval_hi = pt_regs->rval2;
+			user_regs->sys_rval_tag = pt_regs->rv1_tag |
+						(pt_regs->rv2_tag << 4);
+			user_regs->flags = TASK_IS_PROTECTED(current) ?
+					USER_REGS_FLAG_PROTECTED_MODE : 0;
+			if (pt_regs->return_desk)
+				user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
+		}
+#endif /* CONFIG_PROTECTED_MODE */
+		user_regs->sys_rval = pt_regs->sys_rval;
+		user_regs->sys_num  = (s64) (s32) pt_regs->sys_num;
 	}
+
 	(void) execute_user_gd_cud_regs(current, user_regs);
 }
 
@@ -670,15 +701,14 @@ static void ptrace_hbp_triggered(struct perf_event *bp,
 	force_sig_info(&info);
 }
 
-static int register_ptrace_breakpoint(struct task_struct *child,
-		unsigned long bp_addr, int bp_len, int bp_type,
-		int idx, int enabled)
+static int register_ptrace_breakpoint(struct task_struct *child, bool is_data_bp,
+				      unsigned long bp_addr, int bp_len,
+				      int bp_type, int idx, int enabled)
 {
 	struct perf_event_attr attr;
 	struct perf_event *event;
-	int ret;
 
-	if (bp_type & HW_BREAKPOINT_RW)
+	if (is_data_bp)
 		event = child->thread.debug.hbp_data[idx];
 	else
 		event = child->thread.debug.hbp_instr[idx];
@@ -697,34 +727,49 @@ static int register_ptrace_breakpoint(struct task_struct *child,
 		if (IS_ERR(event))
 			return PTR_ERR(event);
 
-		if (bp_type & HW_BREAKPOINT_RW)
-			child->thread.debug.hbp_data[idx] = event;
-		else
-			child->thread.debug.hbp_instr[idx] = event;
-
-		ret = 0;
 	} else {
-		attr = event->attr;
-		attr.bp_addr = bp_addr;
-		attr.bp_len = bp_len;
-		attr.bp_type = bp_type;
-		attr.disabled = !enabled;
+		if (enabled) {
+			attr = event->attr;
+			attr.bp_addr = bp_addr;
+			attr.bp_len = bp_len;
+			attr.bp_type = bp_type;
+			attr.disabled = 0;
 
-		ret = modify_user_hw_breakpoint(event, &attr);
+			return modify_user_hw_breakpoint(event, &attr);
+		}
+
+		unregister_hw_breakpoint(event);
+		event = NULL;
 	}
 
-	return ret;
+	if (is_data_bp)
+		child->thread.debug.hbp_data[idx] = event;
+	else
+		child->thread.debug.hbp_instr[idx] = event;
+
+	return 0;
 }
-#endif
+#else /* CONFIG_HAVE_HW_BREAKPOINT */
+static inline int register_ptrace_breakpoint(struct task_struct *child, bool is_data_bp,
+					     unsigned long bp_addr, int bp_len,
+					     int bp_type, int idx, int enabled)
+{
+	/* Not supported */
+	return -ENODEV;
+}
+#endif /* CONFIG_HAVE_HW_BREAKPOINT */
 
 static inline int get_hbp_len(int lng)
 {
-	return 1 << (lng - 1);
+	if (lng >= 1 && lng <= 5)
+		return 1 << (lng - 1);
+	/* Values 0, 6 and 7 are reserved */
+	return 0;
 }
 
 static inline int get_hbp_type(int rw)
 {
-	int bp_type = 0;
+	int bp_type = HW_BREAKPOINT_EMPTY;
 
 	if (rw & 1)
 		bp_type |= HW_BREAKPOINT_W;
@@ -750,28 +795,28 @@ static int ptrace_write_hbp_registers(struct task_struct *child,
 	AW(ddbsr) = user_regs->ddbsr;
 
 	ret = 0;
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, false,
 			user_regs->dibar[0], HW_BREAKPOINT_LEN_8,
 			HW_BREAKPOINT_X, 0, dibcr.v0 && !dibsr.b0);
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, false,
 			user_regs->dibar[1], HW_BREAKPOINT_LEN_8,
 			HW_BREAKPOINT_X, 1, dibcr.v1 && !dibsr.b1);
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, false,
 			user_regs->dibar[2], HW_BREAKPOINT_LEN_8,
 			HW_BREAKPOINT_X, 2, dibcr.v2 && !dibsr.b2);
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, false,
 			user_regs->dibar[3], HW_BREAKPOINT_LEN_8,
 			HW_BREAKPOINT_X, 3, dibcr.v3 && !dibsr.b3);
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, true,
 			user_regs->ddbar[0], get_hbp_len(ddbcr.lng0),
 			get_hbp_type(ddbcr.rw0), 0, ddbcr.v0 && !ddbsr.b0);
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, true,
 			user_regs->ddbar[1], get_hbp_len(ddbcr.lng1),
 			get_hbp_type(ddbcr.rw1), 1, ddbcr.v1 && !ddbsr.b1);
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, true,
 			user_regs->ddbar[2], get_hbp_len(ddbcr.lng2),
 			get_hbp_type(ddbcr.rw2), 2, ddbcr.v2 && !ddbsr.b2);
-	ret = ret ?: register_ptrace_breakpoint(child,
+	ret = ret ?: register_ptrace_breakpoint(child, true,
 			user_regs->ddbar[3], get_hbp_len(ddbcr.lng3),
 			get_hbp_type(ddbcr.rw3), 3, ddbcr.v3 && !ddbsr.b3);
 	if (ret)
@@ -1021,9 +1066,7 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 		}
 
 		/* SBBP */
-		if (trap->sbbp)
-			memcpy(user_regs->sbbp, trap->sbbp,
-					sizeof(user_regs->sbbp));
+		memcpy(user_regs->sbbp, trap->sbbp, sizeof(user_regs->sbbp));
 
 		user_regs->sys_num  = -1UL;
 	} else {
@@ -1042,7 +1085,7 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 			user_regs->arg10    = pt_regs->args[10];
 			user_regs->arg11    = pt_regs->args[11];
 			user_regs->arg12    = pt_regs->args[12];
-			if (size >= offsetofend(struct user_regs_struct, arg_tags)) {
+			if (size >= offsetofend(struct user_regs_struct, flags)) {
 				user_regs->arg_tags = pt_regs->tags;
 				user_regs->sys_rval_lo = pt_regs->rval1;
 				user_regs->sys_rval_hi = pt_regs->rval2;
@@ -1139,23 +1182,31 @@ static bool is_priv_desc(u64 val_lo, u64 val_hi, u32 tag)
  * Check if aad doesn't constitute AP-type descriptor,
  * pointing to privilidged area
  */
-bool is_priv_aad(unsigned int aad_lo, unsigned long aad_hi)
+static bool is_priv_aad(e2k_aadj_t aad)
 {
 	unsigned long addr_limit = current_thread_info()->addr_limit.seg;
 
-	if (aad_lo & (7ULL << 54) == 0x4) {
-		unsigned long base = aad_lo & 0xffffffffffff;
-		unsigned int size = aad_hi & 0xffffffff;
+	if (aad.fields.lo.tag == AAD_AAUAP) {
+		unsigned long base = aad.fields.lo.ap_base;
+		unsigned int size = aad.fields.hi.size;
 
 		if (base >= addr_limit || base + size >= addr_limit)
 			return true;
 	}
 
+	if (aad.fields.lo.tag == AAD_AAUSAP)
+		return true;
+
 	return false;
 }
 
-static int check_permissions(struct user_regs_struct *user_regs, long size,
-				e2k_aau_t *aau_regs)
+/* Check if aad contains a segment descriptor */
+static bool is_sd_aad(e2k_aadj_t aad)
+{
+	return aad.fields.lo.tag == AAD_AAUDS;
+}
+
+static int check_permissions(struct user_regs_struct *user_regs, e2k_aau_t *aau_regs)
 {
 	e2k_ctpr_t ctpr1, ctpr2, ctpr3;
 	e2k_dibcr_t dibcr;
@@ -1190,19 +1241,6 @@ static int check_permissions(struct user_regs_struct *user_regs, long size,
 		 */
 		if (dimcr.u_m_en)
 			return -EIO;
-
-		if (size >= offsetofend(struct user_regs_struct, dimtp_hi)) {
-			e2k_dimtp_t dimtp = {
-				.lo = user_regs->dimtp_lo,
-				.hi = user_regs->dimtp_hi
-			};
-
-			/*
-			 * Disallow setting up buffer in kernel
-			 */
-			if (!access_ok((void __user *) dimtp.base, dimtp.size))
-				return -EIO;
-		}
 	}
 
 	/* Check, that all ctprs contain only user-space labels */
@@ -1226,8 +1264,12 @@ static int check_permissions(struct user_regs_struct *user_regs, long size,
 	/* Check that aad don't contain privilidged descs */
 	if (aau_regs) {
 		for (i = 0; i < 2*32; i += 2) {
-			if (is_priv_aad(user_regs->aad[i],
-					user_regs->aad[i + 1]))
+			e2k_aadj_t aad;
+
+			aad.word.lo = user_regs->aad[i];
+			aad.word.hi = user_regs->aad[i + 1];
+
+			if (is_priv_aad(aad) || is_sd_aad(aad))
 				return -EPERM;
 		}
 	}
@@ -1255,8 +1297,7 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 		TASK_IS_BINCO(child) ? "true" : "false");
 
 	/* Sanity check; note that 'pt_regs' may be empty at this point. */
-	ret = check_permissions(user_regs, size,
-				pt_regs ? pt_regs->aau_context : NULL);
+	ret = check_permissions(user_regs, pt_regs ? pt_regs->aau_context : NULL);
 	if (ret)
 		return ret;
 
@@ -1317,11 +1358,6 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 	sw_regs->dimar1 = user_regs->dimar[1];
 	sw_regs->ddmar0 = user_regs->ddmar[0];
 	sw_regs->ddmar1 = user_regs->ddmar[1];
-	if (machine.native_iset_ver >= E2K_ISET_V6 &&
-			size >= offsetofend(struct user_regs_struct, dimtp_hi)) {
-		sw_regs->dimtp.lo = user_regs->dimtp_lo;
-		sw_regs->dimtp.hi = user_regs->dimtp_hi;
-	}
 
 	AW(sw_regs->cutd) = user_regs->cutd;
 	/*  = user_regs->cuir; */

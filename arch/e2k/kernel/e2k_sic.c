@@ -106,23 +106,26 @@ static int sic_mc_ecc_reg_offset(int node, int num)
 	return 0;
 }
 
-unsigned int sic_get_mc_ecc(int node, int num)
+e2k_mc_ecc_t sic_get_mc_ecc(int node, int num)
 {
 	int reg_offset;
 
-	if (reg_offset = sic_mc_ecc_reg_offset(node, num))
-		return sic_read_node_mc_nbsr_reg(node, num, reg_offset);
+	if (reg_offset = sic_mc_ecc_reg_offset(node, num)) {
+		return (e2k_mc_ecc_t) {
+			.word = sic_read_node_mc_nbsr_reg(node, num, reg_offset)
+		};
+	}
 
-	return 0;
+	return E2K_MC_ECC_DISABLED;
 }
 EXPORT_SYMBOL(sic_get_mc_ecc);
 
-void sic_set_mc_ecc(int node, int num, unsigned int reg_value)
+void sic_set_mc_ecc(int node, int num, e2k_mc_ecc_t reg_value)
 {
 	int reg_offset;
 
 	if (reg_offset = sic_mc_ecc_reg_offset(node, num))
-		sic_write_node_mc_nbsr_reg(node, num, reg_offset, reg_value);
+		sic_write_node_mc_nbsr_reg(node, num, reg_offset, AW(reg_value));
 }
 
 
@@ -343,7 +346,7 @@ e2k_sic_init(void)
 	}
 	for_each_online_node(node) {
 		phys_base = (unsigned long long)THE_NODE_NBSR_PHYS_BASE(node);
-		nbsr_base = (unsigned char __iomem *) ioremap(phys_base, NODE_NBSR_SIZE);
+		nbsr_base = (unsigned char __iomem *) ioremap_np(phys_base, NODE_NBSR_SIZE);
 		if (nbsr_base == NULL) {
 			printk("e2k_sic_init() could not map NBSR registers "
 				"of node #%d, phys base 0x%llx, size 0x%lx\n",
@@ -616,9 +619,7 @@ static void sic_mc_regs_dump(int node)
 
 		for (; i < SIC_MC_COUNT; i++) {
 			char s[256];
-			e2k_mc_ecc_struct_t ecc;
-
-			ecc.E2K_MC_ECC_reg = sic_get_mc_ecc(node, i);
+			e2k_mc_ecc_t ecc = sic_get_mc_ecc(node, i);
 			pr_emerg("%s\n", l_mc_get_error_str(&ecc, i, s, sizeof(s)));
 		}
 

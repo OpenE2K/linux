@@ -62,6 +62,15 @@
 	} \
 })
 
+#define KVM_CLEAR_AADS() \
+({ \
+	if (IS_HV_GM()) { \
+		NATIVE_CLEAR_AADS(); \
+	} else { \
+		PREFIX_CLEAR_AADS(kvm); \
+	} \
+})
+
 #define KVM_SAVE_AALDIS(regs)	\
 ({ \
 	if (IS_HV_GM()) { \
@@ -254,7 +263,12 @@ static inline void kvm_get_aau_context(e2k_aau_t *context, e2k_aasr_t aasr)
 static __always_inline void kvm_set_aau_context(e2k_aau_t *context,
 		const e2k_aalda_t *aalda, e2k_aasr_t aasr)
 {
-	/* AAU contesxt should restore host */
+	/* AAU context should be restored by host */
+}
+
+static __always_inline void kvm_clear_aau_context(void)
+{
+	/* AAU context should be restored by host */
 }
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
@@ -271,6 +285,8 @@ static __always_inline void kvm_set_aau_context(e2k_aau_t *context,
 
 #define RESTORE_AADS(aau_regs)	\
 		KVM_RESTORE_AADS(aau_regs)
+
+#define CLEAR_AADS()		KVM_CLEAR_AADS()
 
 #define SAVE_AALDIS_V3(regs)	KVM_SAVE_AALDIS_V3(regs)
 #define SAVE_AALDIS_V5(regs)	KVM_SAVE_AALDIS_V5(regs)
@@ -320,6 +336,11 @@ static __always_inline void set_aau_context(e2k_aau_t *context,
 		const e2k_aalda_t *aalda, e2k_aasr_t aasr)
 {
 	kvm_set_aau_context(context, aalda, aasr);
+}
+
+static __always_inline void clear_aau_context(void)
+{
+	kvm_clear_aau_context();
 }
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */

@@ -47,6 +47,7 @@
 #include <linux/uaccess.h>
 #include <asm/irq_regs.h>
 #include <asm/cacheflush.h>
+#include <asm-l/clk_rt.h>
 
 #include "entry.h"
 #include "kernel.h"
@@ -787,7 +788,15 @@ EXPORT_SYMBOL(__delay);
 
 void udelay(unsigned long usecs)
 {
-	__delay(tb_ticks_per_usec * usecs);
+	if (likely(clk_rt_initialized)) {
+		unsigned long end_nsec = read_clk_rt(NULL) + usecs * 1000;
+
+		do {
+			;
+		} while (read_clk_rt(NULL) < end_nsec);
+	} else {
+		__delay(tb_ticks_per_usec * usecs);
+	}
 }
 EXPORT_SYMBOL(udelay);
 

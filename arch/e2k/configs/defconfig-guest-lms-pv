@@ -1941,6 +1941,7 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
 # CONFIG_BACKLIGHT_ARCXCNN is not set
 # CONFIG_PCI_FB_MGAM83 is not set
 # CONFIG_FB_MGA3D is not set
+# CONFIG_FB_LYNXFB is not set
 
 #
 # Console display driver support

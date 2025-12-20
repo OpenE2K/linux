@@ -29,8 +29,6 @@
 		E16C_PCICFG_AREA_SIZE * ((unsigned long) domain))
 #define e2c3_domain_pci_conf_base(domain) (E2C3_PCICFG_AREA_PHYS_BASE + \
 		E2C3_PCICFG_AREA_SIZE * ((unsigned long) domain))
-#define e48c_domain_pci_conf_base(domain) (E48C_PCICFG_AREA_PHYS_BASE + \
-		E48C_PCICFG_AREA_SIZE * ((unsigned long) domain))
 #define e8v7_domain_pci_conf_base(domain) (E8V7_PCICFG_AREA_PHYS_BASE + \
 		E8V7_PCICFG_AREA_SIZE * ((unsigned long) domain))
 
@@ -52,8 +50,6 @@ static inline unsigned long bios_get_domain_pci_conf_base(unsigned int domain)
 	conf_base = e16c_domain_pci_conf_base(domain);
 #elif	defined(CONFIG_E2C3)
 	conf_base = e2c3_domain_pci_conf_base(domain);
-#elif	defined(CONFIG_E48C)
-	conf_base = e48c_domain_pci_conf_base(domain);
 #elif	defined(CONFIG_E8V7)
 	conf_base = e8v7_domain_pci_conf_base(domain);
 #else

@@ -230,7 +230,7 @@ void kvm_reset_cpu_state(struct kvm_vcpu *vcpu)
 	kvm_reset_guest_vcpu_regs_status(vcpu);
 }
 
-e2k_idr_t kvm_vcpu_get_idr(struct kvm_vcpu *vcpu)
+e2k_idr_t kvm_vcpu_get_idr(const struct kvm_vcpu *vcpu)
 {
 	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
 	e2k_idr_t idr = read_IDR_reg();

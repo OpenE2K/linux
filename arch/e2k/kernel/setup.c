@@ -111,7 +111,6 @@ struct resource standard_io_resources[] = {
 #define MACH_TYPE_NAME_E12C		5
 #define MACH_TYPE_NAME_E16C		6
 #define MACH_TYPE_NAME_E2C3		7
-#define MACH_TYPE_NAME_E48C		8
 #define MACH_TYPE_NAME_E8V7		9
 
 /*
@@ -127,7 +126,6 @@ static const char const *native_cpu_type_name[] = {
 	"e12c",
 	"e16c",
 	"e2c3",
-	"e48c",
 	"e8v7",
 };
 static const char const *native_mach_type_name[] = {
@@ -139,7 +137,6 @@ static const char const *native_mach_type_name[] = {
 	"Elbrus-e2k-e12c",
 	"Elbrus-e2k-e16c",
 	"Elbrus-e2k-e2c3",
-	"Elbrus-e2k-e48c",
 	"Elbrus-e2k-e8v7",
 };
 const char *e2k_get_cpu_type_name(int mach_type_id)
@@ -195,12 +192,6 @@ int e2k_get_machine_type_name(int mach_id)
 	case MACHINE_ID_E2C3_LMS:
 	case MACHINE_ID_E2C3:
 		mach_type = MACH_TYPE_NAME_E2C3;
-		break;
-#endif
-#ifdef CONFIG_CPU_E48C
-	case MACHINE_ID_E48C_LMS:
-	case MACHINE_ID_E48C:
-		mach_type = MACH_TYPE_NAME_E48C;
 		break;
 #endif
 #ifdef CONFIG_CPU_E8V7
@@ -476,23 +467,25 @@ void thread_init(void)
 int __init
 parse_bootinfo(void)
 {
+	char *src, *dst = boot_command_line;
 	boot_info_t	*bootblock = &bootblock_virt->info;
 
 	if (bootblock->signature == BOOTBLOCK_BOOT_SIGNATURE ||
 			bootblock->signature == BOOTBLOCK_ROMLOADER_SIGNATURE ||
 			bootblock->signature == BOOTBLOCK_KVM_GUEST_SIGNATURE) {
-		if (!strncmp(bootblock->kernel_args_string,
+
+		if (dst[0]) /* Expand devtree command line */
+			strlcat(dst, " ", COMMAND_LINE_SIZE);
+
+		src = !strncmp(bootblock->kernel_args_string,
 				KERNEL_ARGS_STRING_EX_SIGNATURE,
-				KERNEL_ARGS_STRING_EX_SIGN_SIZE))
+				KERNEL_ARGS_STRING_EX_SIGN_SIZE) ?
 			/* Extended command line (512 bytes) */
-			strncpy(boot_command_line,
-				bootblock->bios.kernel_args_string_ex,
-				KSTRMAX_SIZE_EX);
-		else
+			(char *)bootblock->bios.kernel_args_string_ex :
 			/* Standart command line (128 bytes) */
-			strncpy(boot_command_line,
-				bootblock->kernel_args_string,
-				KSTRMAX_SIZE);
+			bootblock->kernel_args_string;
+
+		strlcat(dst, src, COMMAND_LINE_SIZE);
 
 		machine_serial_num = bootblock->mach_serialn;
 
@@ -665,7 +658,7 @@ next_char:
 	*to = '\0';
 	*cmdline_p = command_line;
 	strlcpy(boot_command_line, command_line, COMMAND_LINE_SIZE);
-	pr_notice("Full kernel command line: %s\n", saved_boot_cmdline);
+	pr_notice("Boot kernel command line: %s\n", saved_boot_cmdline);
 }
 
 static void __init rlim_init(void)
@@ -720,6 +713,9 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_SMP
 	nmi_call_function_init();
 #endif
+	/* get cmdline for devtree */
+	if (bootblock_virt->info.bios.devtree)
+		early_init_dt_scan(__va(bootblock_virt->info.bios.devtree));
 
 	parse_bootinfo();
 	parse_cmd_line(cmdline_p);
@@ -770,9 +766,8 @@ void __init setup_arch(char **cmdline_p)
 
 	apply_alternative_instructions();
 
-#ifdef CONFIG_OF
-	device_tree_init();
-#endif
+	unflatten_device_tree();
+
 	/* Must be called after paging_init() & device_tree_init() */
 	l_setup_vga();
 

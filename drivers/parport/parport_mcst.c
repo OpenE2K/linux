@@ -105,8 +105,6 @@
 #define DPRINTK(stuff...)
 #endif
 
-#define	MCST_PP_IEE1284_IRQ	7	/* IRQ number on MCST IOHUB */
-
 #define PCI_DEVICE_ID_PARPORTMCST	0x8007
 
 #define NR_SUPERIOS 3
@@ -2195,11 +2193,14 @@ struct parport *parport_pc_probe_port(unsigned long int base,
 			}
 		}
 	} else 
-#ifdef __sparc__
 	p->irq = pcidev->irq;
-#else	
-	p->irq = MCST_PP_IEE1284_IRQ;
-#endif
+	if (pcidev->vendor == PCI_VENDOR_ID_MCST_TMP &&
+		(pcidev->device == PCI_DEVICE_ID_PARPORTMCST ||
+		 pcidev->device == PCI_DEVICE_ID_MCST_PARALLEL_SERIAL)) {
+		/* Fix irq nr: iohub & iohub2 use 7 ioapic pin and
+		  * boot sets pin 5 (serial) to device */
+		p->irq += 7 - 5;
+	}
 #else
 	if (p->irq == PARPORT_IRQ_AUTO) {
 		p->irq = PARPORT_IRQ_NONE;

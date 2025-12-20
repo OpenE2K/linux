@@ -4,7 +4,7 @@
  */
 
 /*
- * EDAC ECC kernel module for e2k platforms e8c* (P1, P9), e16c, e2c3, e12c, e48c, e8v7
+ * EDAC ECC kernel module for e2k platforms e8c* (P1, P9), e16c, e2c3, e12c, e8v7
  */
 
 #include <linux/module.h>
@@ -43,7 +43,7 @@ static LIST_HEAD(e2k_edac_list);
 
 #define DIMM_ON_CHANNEL 2
 
-typedef e2k_mc_ecc_struct_t ecc_struct_t;
+typedef e2k_mc_ecc_t ecc_struct_t;
 
 static int use_cfg_reg = 1;
 static int total_mc_num = 0;
@@ -78,15 +78,14 @@ struct e2k_mci_priv {
 
 static inline u32 ecc_get_error_cnt(ecc_struct_t *ecc, int node, int nr)
 {
-	ecc->E2K_MC_ECC_reg = sic_get_mc_ecc(node, nr);
-	return ecc->E2K_MC_ECC_secnt;
+	*ecc = sic_get_mc_ecc(node, nr);
+	return ecc->secnt;
 }
 
 static inline bool ecc_enabled(void)
 {
-	ecc_struct_t ecc;
-	ecc.E2K_MC_ECC_reg = sic_get_mc_ecc(0, 0);
-	return ecc.E2K_MC_ECC_ee;
+	ecc_struct_t ecc = sic_get_mc_ecc(0, 0);
+	return ecc.ee;
 }
 
 #define ecc_supported()	HAS_MACHINE_L_SIC
@@ -109,13 +108,9 @@ static void e2k_ecc_check(struct mem_ctl_info *mci)
 	current_cnt = cnt - dev->last_ecc_ce;
 /*
 	e2k_info("node %d mc%d secnt %d of %d ue %d reg 0x%x.\n",
-		 node, i,
-		 ecc.E2K_MC_ECC_secnt,
-		 ecc.E2K_MC_ECC_of,
-		 ecc.E2K_MC_ECC_ue,
-		 ecc.E2K_MC_ECC_reg);
+		 node, i, ecc.secnt, ecc.of, ecc.ue, ecc.reg);
 */
-	if (!dev->last_ecc_ue && ecc.E2K_MC_ECC_ue) {
+	if (!dev->last_ecc_ue && ecc.ue) {
 		/* e2k_err("node %d mc%d: unrecoverable error.\n", node, i); */
 		dev->last_ecc_ue = 1;
 		edac_mc_handle_error(HW_EVENT_ERR_UNCORRECTED, mci,
@@ -132,7 +127,7 @@ static void e2k_ecc_check(struct mem_ctl_info *mci)
 	dev->last_ecc_ce = cnt;
 
 	snprintf(s, 30, "");
-	if (ecc.E2K_MC_ECC_of) {
+	if (ecc.of) {
 		snprintf(s, 30, "(error buffer overflow)");
 	}
 	/*
@@ -278,7 +273,6 @@ static inline int get_chip_memory_type(void)
 	 * machine.native_id == MACHINE_ID_E12C
 	 * machine.native_id == MACHINE_ID_E16C
 	 * machine.native_id == MACHINE_ID_E2C3
-	 * machine.native_id == MACHINE_ID_E48C
 	 * machine.native_id == MACHINE_ID_E8V7
 	 */
 	return MEM_DDR4;
@@ -423,7 +417,6 @@ static inline int cpu_supported(void)
 	    machine.native_id != MACHINE_ID_E12C &&
 	    machine.native_id != MACHINE_ID_E16C &&
 	    machine.native_id != MACHINE_ID_E2C3 &&
-	    machine.native_id != MACHINE_ID_E48C &&
 	    machine.native_id != MACHINE_ID_E8V7)
 		return 0;
 

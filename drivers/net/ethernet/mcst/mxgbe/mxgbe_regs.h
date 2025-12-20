@@ -120,7 +120,7 @@
 /* Q_ADDR - [63:05], [04:00]==0 */
 /* Q_TAILADDR - [63:02], [01:00]==0 */
 /* Q_SIZE registers bits */
-#define Q_SIZE_MIN		(1 << 8)
+#define Q_SIZE_MIN		(1 << 9)
 #define Q_SIZE_MAX		(1 << 16)
 /* Q_HEAD registers bits */
 #define Q_HEAD_SET_PTR(d)	SET_FIELD((d), 0, 0xFFFF)	/* RW [15:00] */

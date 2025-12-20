@@ -27,6 +27,7 @@
 #define RTL821x_PAGE_SELECT			0x1f
 
 #define RTL8211F_PHYCR1				0x18
+#define RTL8211F_PHYCR2				0x19
 #define RTL8211F_INSR				0x1d
 
 #define RTL8211F_TX_DELAY			BIT(8)
@@ -35,6 +36,8 @@
 #define RTL8211F_ALDPS_PLL_OFF			BIT(1)
 #define RTL8211F_ALDPS_ENABLE			BIT(2)
 #define RTL8211F_ALDPS_XTAL_OFF			BIT(12)
+
+#define RTL8211F_PHY_MODE_EEE_ENABLE		BIT(5)
 
 #define RTL8211E_CTRL_DELAY			BIT(13)
 #define RTL8211E_TX_DELAY			BIT(12)
@@ -185,8 +188,17 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	u16 val;
 	int ret;
 
+#ifdef CONFIG_MCST
+	/* 1. ALDPS is OFF (by default). If it's ON, a device enteres Link Down Power Saving Mode
+	 *    when a cable not plugged in.
+	 * 2. Disable EEE support (enable by default)
+	 */
+	phy_modify_paged_changed(phydev, 0xa43, RTL8211F_PHYCR2,
+				 RTL8211F_PHY_MODE_EEE_ENABLE, 0);
+#else
 	val = RTL8211F_ALDPS_ENABLE | RTL8211F_ALDPS_PLL_OFF | RTL8211F_ALDPS_XTAL_OFF;
 	phy_modify_paged_changed(phydev, 0xa43, RTL8211F_PHYCR1, val, val);
+#endif
 
 	switch (phydev->interface) {
 	case PHY_INTERFACE_MODE_RGMII:

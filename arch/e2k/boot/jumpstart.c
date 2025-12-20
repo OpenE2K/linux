@@ -150,7 +150,7 @@ extern void video_bios(void);
  #define HI_MEMORY_START		E8C_HI_MEMORY_START
  #define HI_MEMORY_NODE_MAX_SIZE	E8C_HI_MEMORY_NODE_MAX_SIZE
 #elif defined(CONFIG_E2C3) || defined(CONFIG_E12C) || defined(CONFIG_E16C) || \
-	defined(CONFIG_E48C) || defined(CONFIG_E8V7)
+	defined(CONFIG_E8V7)
  #define HI_MEMORY_START		E16C_HI_MEMORY_START
  #define HI_MEMORY_NODE_MAX_SIZE	E16C_HI_MEMORY_NODE_MAX_SIZE
 #else
@@ -2704,8 +2704,6 @@ void jump(void)
 	max_cpus_num = E12C_NR_NODE_CPUS;
 #elif	defined(CONFIG_E16C)
 	max_cpus_num = E16C_NR_NODE_CPUS;
-#elif	defined(CONFIG_E48C)
-	max_cpus_num = E48C_NR_NODE_CPUS;
 #elif	defined(CONFIG_E8V7)
 	max_cpus_num = E8V7_NR_NODE_CPUS;
 #else
@@ -2914,8 +2912,6 @@ void jump(void)
 			bios_info->cpu_type = CPU_TYPE_E16C;
 		else if (NATIVE_IS_MACHINE_E2C3)
 			bios_info->cpu_type = CPU_TYPE_E2C3;
-		else if (NATIVE_IS_MACHINE_E48C)
-			bios_info->cpu_type = CPU_TYPE_E48C;
 		else if (NATIVE_IS_MACHINE_E8V7)
 			bios_info->cpu_type = CPU_TYPE_E8V7;
 		rom_printk("CPU & MicroProcessor: %s\n",

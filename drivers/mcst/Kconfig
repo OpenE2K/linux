@@ -3,6 +3,13 @@
  
 menu "Elbrus MCST Device Drivers"
 
+config R2000P_EDAC
+	tristate "r2000+ processor Error Detection And Correction (EDAC) driver"
+	depends on PCI && E90S
+	default m
+	select EDAC
+	select EDAC_DEBUG
+
 config DRM_MGA25
 	tristate "MGA 2.5 and higher video adapter"
 	depends on PCI && DRM && (CPU_E2C3 || CPU_E8V7 || E90S)
@@ -165,6 +172,27 @@ config VXD_FPGA
         def_bool y
         depends on IMGTEC
 
+config MCST_GPU_IMGTEC
+        tristate "MCST support Imagination`s GPU support for E2C3 SoC"
+        select DRM_VM
+        depends on IMGTEC
+        default m
+choice
+        prompt "Choice Imagination`s GPU module version to build"
+        default MCST_GPU_IMGTEC_R5878540
+
+        config MCST_GPU_IMGTEC_R4991288
+                bool "Rogue_DDK_Linux_WS_REL_1.9@4991288 with desktop OpenGL"
+        	depends on IMGTEC
+        config MCST_GPU_IMGTEC_R5878540
+                bool "Rogue_DDK_Linux_WS_REL_1.13@5878540 w/o desktop OpenGL"
+        	depends on IMGTEC
+endchoice
+source "drivers/mcst/gpu-imgtec.r4991288/Kconfig"
+source "drivers/mcst/gpu-imgtec.r5878540/Kconfig"
+
+source "drivers/mcst/gpu-viv/Kconfig"
+
 source "drivers/mcst/smi/Kconfig"
 
 config SMI_PWM
@@ -187,6 +215,13 @@ config SENSORS_EMC2305
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called emc2305.
+
+config PMC_R2KP
+	bool "R2000+ Power Management Controller"
+	depends on E90S
+	default y #
+	help
+	  Power Management Controller (PMC) for MCST R2000+ (E90S/SPARC v9) CPU
 
 config HW_CHECK
 	tristate "Hardware checker (ipcc, mem, bitrate, pins) for engineers"
@@ -211,5 +246,14 @@ config L_I2S
 		To compile this driver as a module, choose M here: the module
 		will be called l-i2s.
 
+config DS125DF111
+	tristate "DS125DF111 - Multi-Protocol 2-Channel Retimer"
+	depends on E2K && CPU_E16C
+	default m
+	help
+		Say Y here to include support for DS125DF111 Retimer.
+
+		To compile this driver as a module, choose M here: the module
+		will be called ds125df111.
 
 endmenu

@@ -359,21 +359,25 @@ static ssize_t pwm_set_temp(struct device *dev,
     return count;
 }
 
-#define TEMP_TO_HWMON(v) (((v)/8)* 1000 + (((v) & 0x7) * 125))
+static int temp_to_millidegrees(term_ts_regs_t v)
+{
+	if (!v.valid || v.fault)
+		return 0;
+	/* 9.3 fixed point */
+	return v.temp * 1000 / (1 << 3);
+}
 
 static ssize_t pmc_show_temp(struct device *dev,
 	struct device_attribute *devattr,
 	char *buf)
 {
-    struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-    struct pcsm_data *data = dev_get_drvdata(dev);
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct pcsm_data *data = dev_get_drvdata(dev);
+	int addr = ts_map[attr->index].addr;
+	term_ts_regs_t reg = { .word = sic_read_node_nbsr_reg(data->node,
+		PCSM_BASE_ADDR + addr) };
 
-    int addr = ts_map[attr->index].addr;
-
-    term_ts_regs_t regs = { .word = sic_read_node_nbsr_reg(data->node,
-	    PCSM_BASE_ADDR + addr) };
-
-    return snprintf(buf, PAGE_SIZE - 1, "%d\n", TEMP_TO_HWMON(regs.temp));
+	return snprintf(buf, PAGE_SIZE - 1, "%d\n", temp_to_millidegrees(reg));
 }
 
 static ssize_t pmc_show_temp_max(struct device *dev,
@@ -390,9 +394,11 @@ static ssize_t pmc_show_temp_max(struct device *dev,
     }
 
     for (index = 0; index < ts_count; index++) {
-	term_ts_regs_t regs = { .word = sic_read_node_nbsr_reg(data->node,
-		PCSM_BASE_ADDR + ts_map[index].addr) };
-	int ts_val = TEMP_TO_HWMON(regs.temp);
+	term_ts_regs_t reg = {
+		.word = sic_read_node_nbsr_reg(data->node,
+				PCSM_BASE_ADDR + ts_map[index].addr)
+	};
+	int ts_val = temp_to_millidegrees(reg);
 
 	if (ts_val > ts_max)
 	    ts_max = ts_val;

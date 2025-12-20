@@ -183,8 +183,8 @@ mga2_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
 		     const struct drm_display_info *info,
 		     const struct drm_display_mode *mode)
 {
-	unsigned long max = 552.75e+06;
-	if (mode->clock <=max)
+	unsigned long max = 340.e+06 /* HDMI 1.4b */;
+	if (mode->clock <= max / 1000)
 		return MODE_OK;
 	return MODE_CLOCK_HIGH;	
 }
@@ -369,7 +369,6 @@ static struct dw_hdmi_plat_data mga2_drv_data = {
 	.mode_valid = mga2_hdmi_mode_valid,
 };
 static const struct dw_hdmi_plat_data mga25_drv_data = {
-	.mode_valid = mga2_hdmi_mode_valid,
 	.configure_phy	= mga25_hdmi_phy_configure,
 };
 

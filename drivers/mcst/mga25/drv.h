@@ -184,6 +184,10 @@ struct mga25_gem_object {
 	 * @hw_unref_time: The time, when the object can be safely freed.
 	 */
 	unsigned long hw_unref_time;
+	/**
+	 * @framedur_us: frame duration in us.
+	 */
+	unsigned long framedur_us;
 };
 
 #define to_mga25_obj(x) container_of(x, struct mga25_gem_object, base)

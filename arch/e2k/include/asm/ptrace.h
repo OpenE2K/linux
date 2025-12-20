@@ -114,7 +114,7 @@ typedef struct trap_pt_regs {
 	e2k_addr_t	srp_ip;
 	e2k_tir_t	TIRs[TIR_NUM];
 	trap_cellar_t	tcellar[HW_TC_SIZE];
-	u64 *sbbp;
+	u64 sbbp[SBBP_ENTRIES_NUM];
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	e2k_mlt_t	mlt_state;	  /* MLT state for binco */
 #endif
@@ -152,6 +152,7 @@ typedef	struct pt_regs {
 					/* registers */
 	e2k_mem_crs_t	crs;		/* current chain window regs state */
 	e2k_wd_t	wd;		/* current window descriptor	*/
+	e2k_rndpr_t	rndpr;
 	int		sys_num;	/* to restart sys_call		*/
 	int		kernel_entry;
 	union pt_regs_flags flags;
@@ -193,8 +194,8 @@ typedef	struct pt_regs {
 	clw_reg_t	us_cl_b;
 #endif	/* CONFIG_CLW_ENABLE */
         /* for bin_comp */
-        u64             rpr_lo; 
-        u64             rpr_hi; 
+        u64             rpr_lo;
+        u64             rpr_hi;
 #ifdef	CONFIG_VIRTUALIZATION
 	u64		sys_func;	/* need only for guest */
 	e2k_stacks_t	g_stacks;	/* current state of guest kernel */
@@ -265,7 +266,7 @@ typedef struct sw_regs {
 	e2k_usd_lo_t	usd_lo;
 	e2k_usd_hi_t	usd_hi;
 	e2k_psp_lo_t	psp_lo;	 	/* procedure stack pointer(as empty)*/
-	e2k_psp_hi_t 	psp_hi;	 	 
+	e2k_psp_hi_t 	psp_hi;
 	e2k_pcsp_lo_t 	pcsp_lo; 	/* procedure chaine stack pointer   */
 	e2k_pcsp_hi_t 	pcsp_hi; 	/* (as empty)		    	    */
 	e2k_psr_t	psr;
@@ -310,18 +311,18 @@ typedef struct sw_regs {
 	e2k_dimtp_t	dimtp;
 
 	/*
-	 * in the case we switch from/to a BINCO task, we 
+	 * in the case we switch from/to a BINCO task, we
 	 * need to backup/restore these registers in task switching
 	 */
 	u64		cs_lo;
 	u64		cs_hi;
-	u64		ds_lo;	
-	u64		ds_hi;	
+	u64		ds_lo;
+	u64		ds_hi;
 	u64		es_lo;
-	u64		es_hi;	
+	u64		es_hi;
 	u64		fs_lo;
 	u64		fs_hi;
-	u64		gs_lo;	
+	u64		gs_lo;
 	u64		gs_hi;
 	u64		ss_lo;
 	u64		ss_hi;
@@ -509,7 +510,6 @@ typedef struct signal_stack_context {
 #ifdef CONFIG_GREGS_CONTEXT
 	struct local_gregs	l_gregs;
 #endif
-	u64			sbbp[SBBP_ENTRIES_NUM];
 	struct pv_vcpu_ctxt	vcpu_ctxt;
 } signal_stack_context_t;
 

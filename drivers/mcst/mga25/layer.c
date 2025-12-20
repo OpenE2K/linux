@@ -5,16 +5,24 @@
 
 
 
-static unsigned long get_next_vblank_time(struct drm_crtc *crtc)
+static unsigned long get_frame_duration(struct drm_crtc *crtc)
 {
 	struct drm_device *drm = crtc->dev;
-	struct mga2 *mga2 = drm->dev_private;
 	struct mga25_crtc *mcrtc = to_mga25_crtc(crtc);
 	unsigned int pipe = drm_crtc_index(crtc);
 	struct drm_vblank_crtc *vblank = &drm->vblank[pipe];
+
+	return vblank->framedur_ns;
+}
+
+static unsigned long get_next_vblank_time(struct drm_crtc *crtc,
+				unsigned long framedur_ns)
+{
+	struct drm_device *drm = crtc->dev;
+	struct mga2 *mga2 = drm->dev_private;
 	if (mga25_proto(mga2->dev_id))
 		return jiffies + 5 * HZ;
-	return jiffies + nsecs_to_jiffies(vblank->framedur_ns) + 1;
+	return jiffies + nsecs_to_jiffies(framedur_ns) + 1;
 }
 
 struct mga25_layer {
@@ -97,7 +105,8 @@ static void mga25_overlay_atomic_disable(struct drm_plane *plane,
 	if (fb_changed) {
 		struct mga25_gem_object *mo =
 			to_mga25_obj(to_mga25_framebuffer(old_state->fb)->gobj);
-		mo->hw_unref_time = get_next_vblank_time(old_state->crtc);
+		mo->hw_unref_time = get_next_vblank_time(old_state->crtc,
+					mo->framedur_us);
 	}
 }
 
@@ -399,7 +408,8 @@ static void mga25_overlay_atomic_update(struct drm_plane *plane,
 	if (fb_changed) {
 		struct mga25_gem_object *mo =
 			to_mga25_obj(to_mga25_framebuffer(old_state->fb)->gobj);
-		mo->hw_unref_time = get_next_vblank_time(crtc);
+		mo->framedur_us = get_frame_duration(crtc);
+		mo->hw_unref_time = get_next_vblank_time(crtc, mo->framedur_us);
 	}
 }
 
@@ -630,20 +640,20 @@ static void mga25_primary_atomic_update(struct drm_plane *plane,
 					      struct drm_plane_state *old_state)
 {
 
-	unsigned long hw_unref_time;
-	struct mga25_gem_object *mo;
+	unsigned long t;
 	struct drm_format_name_buf format_name;
 	struct drm_plane_state *state = plane->state;
 	struct drm_framebuffer *fb = state->fb;
-	struct mga25_framebuffer *mga25_fb = to_mga25_framebuffer(fb);
 	struct mga25_crtc *mcrtc = to_mga25_crtc(state->crtc);
-	unsigned offset = to_mga25_obj(mga25_fb->gobj)->dma_addr;
+	struct mga25_framebuffer *mga25_fb = to_mga25_framebuffer(fb);
+	struct mga25_gem_object *mo = to_mga25_obj(mga25_fb->gobj);
+	unsigned offset = mo->dma_addr;
 	int x = state->src_x >> 16;
 	int y = state->src_y >> 16;
 	int pix = mga25_format_to_primary(mcrtc, fb->format->format);
 	bool fb_changed = old_state->fb && old_state->fb != state->fb;
 
-	WARN_ON(to_mga25_obj(mga25_fb->gobj)->dma_addr & (-1LL << 32));
+	WARN_ON(mo->dma_addr & (-1LL << 32));
 	if (WARN_ON(pix < 0))
 		return;
 
@@ -670,15 +680,17 @@ static void mga25_primary_atomic_update(struct drm_plane *plane,
 	* the time of the release of the old framebuffer in order
 	* to check it while freeing.
 	*/
-	hw_unref_time = get_next_vblank_time(state->crtc);
+	mo->framedur_us = max(mo->framedur_us, get_frame_duration(state->crtc));
 	if (fb_changed) {
 		mo = to_mga25_obj(to_mga25_framebuffer(old_state->fb)->gobj);
-		mo->hw_unref_time = hw_unref_time;
+		t = get_next_vblank_time(state->crtc, mo->framedur_us);
+		mo->hw_unref_time = t;
 	}
 	if (mcrtc->fb_unref_gem) {
 		struct drm_gem_object *gem = mcrtc->fb_unref_gem;
 		mo = to_mga25_gem(gem);
-		mo->hw_unref_time = hw_unref_time;
+		t = get_next_vblank_time(state->crtc, mo->framedur_us);
+		mo->hw_unref_time = t;
 		mcrtc->fb_unref_gem = NULL;
 		async_schedule(mga25_put_fb_unref_gem, gem);
 	}

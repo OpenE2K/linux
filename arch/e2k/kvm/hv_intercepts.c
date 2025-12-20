@@ -777,7 +777,6 @@ static int do_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	gva_t address;
 	tc_cond_t cond;
 	tc_fault_type_t ftype;
-	bool nonpaging = !is_paging(vcpu);
 	int ret;
 
 	gpa = intc_info_mu->gpa;
@@ -1573,16 +1572,14 @@ static void do_write_cu_sclk_reg(struct kvm_vcpu *vcpu, intc_info_cu_t *cu,
 		kvm_delete_intc_info_cu(vcpu, rw_event);
 }
 
-static int do_write_cu_sclk_regs(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
+static void do_write_cu_sclk_regs(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
 {
 	do_write_cu_sclk_reg(vcpu, cu, SCLKR_cu_reg_no);
 	do_write_cu_sclk_reg(vcpu, cu, SCLKM1_cu_reg_no);
 	do_write_cu_sclk_reg(vcpu, cu, SCLKM2_cu_reg_no);
-
-	return 0;
 }
 
-static int do_write_cu_sclkm3(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
+static void do_write_cu_sclkm3(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
 {
 	struct kvm_arch *ka = &vcpu->kvm->arch;
 	unsigned long flags;
@@ -1594,8 +1591,6 @@ static int do_write_cu_sclkm3(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
 		WRITE_SH_SCLKM3_REG_VALUE(ka->sh_sclkm3);
 		raw_spin_unlock_irqrestore(&ka->sh_sclkr_lock, flags);
 	}
-
-	return 0;
 }
 
 /* Bug 127993: to ignore guest's CU write, delete it from INTC_INFO_CU */
@@ -1603,21 +1598,16 @@ static int write_reg_intc_cu(struct kvm_vcpu *vcpu,
 			intc_info_cu_t *intc_info_cu, pt_regs_t *regs)
 {
 	u64 rw_events = intc_info_cu->header.lo.evn_c;
-	int ret = 0, r;
 
 	/* Ignore guest's writes to sclkr, sclkm1, sclkm2 */
 	if (rw_events & intc_cu_evn_c_rw_sclkr_mask) {
-		r = do_write_cu_sclk_regs(vcpu, intc_info_cu);
-		if (r != 0)
-			ret |= r;
+		do_write_cu_sclk_regs(vcpu, intc_info_cu);
 		rw_events &= ~intc_cu_evn_c_rw_sclkr_mask;
 	}
 
 	/* Ignore guest's writes to sclkm3 */
 	if (rw_events & intc_cu_evn_c_rw_sclkm3_mask) {
-		r = do_write_cu_sclkm3(vcpu, intc_info_cu);
-		if (r != 0)
-			ret |= r;
+		do_write_cu_sclkm3(vcpu, intc_info_cu);
 		rw_events &= ~intc_cu_evn_c_rw_sclkm3_mask;
 	}
 
@@ -1626,7 +1616,7 @@ static int write_reg_intc_cu(struct kvm_vcpu *vcpu,
 			__func__, rw_events);
 	}
 
-	return ret;
+	return 0;
 }
 
 static unsigned long long do_hcem_intc(struct kvm_vcpu *vcpu, intc_info_cu_t *cu)
@@ -1695,7 +1685,7 @@ static int handle_cu_cond_events(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-static int wait_trap_intc_cu(struct kvm_vcpu *vcpu, pt_regs_t *regs)
+static void wait_trap_intc_cu(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
 	/* Go to scheduler to wait for a wake up event. */
 	DebugWTR("VCPU #%d interception on wait trap, block and wait for wake up\n",
@@ -1706,45 +1696,97 @@ static int wait_trap_intc_cu(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 	vcpu->arch.unhalted = false;
 	DebugWTR("VCPU #%d has been woken up, so run guest again\n", vcpu->vcpu_id);
+}
 
-	return 0;
+static int handle_cu_rr(struct kvm_vcpu *vcpu, intc_info_cu_entry_t *entry)
+{
+	switch (entry->lo.reg_num) {
+	case CU_HW0_cu_reg_no:
+		/* Allow guest to see real CU_HW0 value */
+		return 0;
+	default:
+		pr_err("kvm: register 0x%x read is not allowed\n", entry->lo.reg_num);
+		return -EINVAL;
+	}
+}
+
+static int handle_cu_rw(struct kvm_vcpu *vcpu, intc_info_cu_entry_t *entry)
+{
+	switch (entry->lo.reg_num) {
+	case CU_HW0_cu_reg_no:
+		/* Do not allow guest to change CU_HW0 value, this
+		 * register is not intended to be changed dynamically */
+		entry->hi = READ_CU_HW0_REG_VALUE();
+		kvm_set_intc_info_cu_is_updated(vcpu);
+		return 0;
+	default:
+		pr_err("kvm: register 0x%x write is not allowed\n", entry->lo.reg_num);
+		return -EINVAL;
+	}
 }
 
 static int handle_cu_uncond_events(struct kvm_vcpu *vcpu,
 			intc_info_cu_t *cu, pt_regs_t *regs)
 {
-	u64 uncond_evn = cu->header.lo.evn_u;
+	intc_info_cu_hdr_lo_t cu_hdr_lo = cu->header.lo;
+	int ret;
 
-	if ((uncond_evn & intc_cu_evn_u_hv_int_mask) ||
-			(uncond_evn & intc_cu_evn_u_hv_nm_int_mask)) {
+	if (cu_hdr_lo.hv_int || cu_hdr_lo.hv_nm_int) {
 		/* should be already handled, so ignore here */
-		uncond_evn &= ~(intc_cu_evn_u_hv_int_mask |
-				intc_cu_evn_u_hv_nm_int_mask);
+		cu_hdr_lo.hv_int = 0;
+		cu_hdr_lo.hv_nm_int = 0;
 	}
-	if (uncond_evn & intc_cu_evn_u_wait_trap_mask) {
-		uncond_evn &= ~intc_cu_evn_u_wait_trap_mask;
+	if (cu_hdr_lo.wait_trap) {
+		cu_hdr_lo.wait_trap = 0;
 		wait_trap_intc_cu(vcpu, regs);
 	}
-	if (uncond_evn & intc_cu_evn_u_dbg_mask) {
+	if (cu_hdr_lo.dbg) {
 		/* May be sent by:
 		 * - simulator, with -bI option
 		 * - JTAG, when manually switching to hypervisor mode after
 		 *   stop_hard in guest
 		 */
-		uncond_evn &= ~intc_cu_evn_u_dbg_mask;
+		cu_hdr_lo.dbg = 0;
 		coredump_in_future();
 	}
-	if (uncond_evn & intc_cu_evn_u_exc_mem_error_mask) {
-		uncond_evn &= ~intc_cu_evn_u_exc_mem_error_mask;
+	if (cu_hdr_lo.exc_mem_error) {
+		cu_hdr_lo.exc_mem_error = 0;
 		do_mem_error(regs);
 	}
-	if (uncond_evn & intc_cu_evn_u_g_tmr_mask) {
+	if (cu_hdr_lo.g_tmr) {
 		/* Ignore G_PREEMPT_TMR */
-		uncond_evn &= ~intc_cu_evn_u_g_tmr_mask;
+		cu_hdr_lo.g_tmr = 0;
 	}
-	if (uncond_evn != 0) {
-		pr_err("%s(): is not yet implemented, events: 0x%llx\n",
-			__func__, uncond_evn);
+
+	if (cu_hdr_lo.rr) {
+		int i, cu_num = vcpu->arch.intc_ctxt.cu_num;
+		for (i = 0; i < cu_num; i++) {
+			intc_info_cu_entry_t *entry = &cu->entry[i];
+			if (entry->lo.event_code == ICE_READ_CU) {
+				ret = handle_cu_rr(vcpu, entry);
+				if (ret)
+					return ret;
+			}
+		}
+		cu_hdr_lo.rr = 0;
+	}
+
+	if (cu_hdr_lo.rw) {
+		int i, cu_num = vcpu->arch.intc_ctxt.cu_num;
+		for (i = 0; i < cu_num; i++) {
+			intc_info_cu_entry_t *entry = &cu->entry[i];
+			if (entry->lo.event_code == ICE_WRITE_CU) {
+				ret = handle_cu_rw(vcpu, entry);
+				if (ret)
+					return ret;
+			}
+		}
+		cu_hdr_lo.rw = 0;
+	}
+
+	if (cu_hdr_lo.evn_u) {
+		pr_err("%s(): is not yet implemented, events: 0x%x\n",
+			__func__, cu_hdr_lo.evn_u);
 	}
 
 	return 0;
@@ -2690,7 +2732,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 {
 	struct pt_regs regs;
 	struct trap_pt_regs trap;
-	u64 sbbp[SBBP_ENTRIES_NUM];
 	kvm_hw_cpu_context_t *hw_ctxt = &vcpu->hw_ctxt;
 	kvm_sw_cpu_context_t *sw_ctxt = &vcpu->sw_ctxt;
 	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->intc_ctxt;
@@ -2734,8 +2775,7 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	trap.flags = 0;
 	CLEAR_CLW_REQUEST_COUNT(&regs);
 
-	memcpy(sbbp, intc_ctxt->sbbp, sizeof(sbbp));
-	trap.sbbp = sbbp;
+	memcpy(&trap.sbbp, intc_ctxt->sbbp, sizeof(trap.sbbp));
 
 	AW(regs.flags) = 0;
 	regs.flags.kvm_hw_intercept = 1;

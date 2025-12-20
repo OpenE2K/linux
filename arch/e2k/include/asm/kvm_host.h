@@ -842,14 +842,12 @@ typedef struct kvm_sw_cpu_context {
 	/*
 	 * Guest has own global registers context (vcpu) different
 	 * from QEMU (host).
-	 * The VCPU (guest) context should be restored while vcpu_load()
-	 * after saving the host (QEMU) context and be saved while vcpu_put()
-	 * before restoring the host (QEMU) context.
-	 * Only one current VCPU or host context should be saved and restored
-	 * while switch to/from other processes.
+	 *
+	 * Gregs used by kernel are switched just before guest
+	 * enter and after guest exit.  Other gregs are switched
+	 * in vcpu_load()/vcpu_put().
 	 */
-	e2k_global_regs_t vcpu_gregs;
-	e2k_global_regs_t host_gregs;
+	e2k_global_regs_t gregs;
 	kernel_gregs_t vcpu_k_gregs;
 	kernel_gregs_t host_k_gregs;
 #endif	/* CONFIG_GREGS_CONTEXT */
@@ -1310,7 +1308,6 @@ struct kvm_arch {
 	unsigned long vm_type;	/* virtual machine type */
 	unsigned long flags;
 	kvm_nid_t vmid;		/* VM ID */
-	unsigned int bsp_vcpu_id;
 	bool is_pv;		/* paravirtualized VM */
 	bool is_hv;		/* hardware virtualized VM */
 	bool shadow_pt_enable;	/* shadow PT is supported and is base of */

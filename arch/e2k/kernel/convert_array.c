@@ -77,6 +77,23 @@ void __user *align_user_ptr_up(void __user *ptr, const int alignment)
 	return ptr;
 }
 
+/* Delivering "PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD" error message: */
+static inline
+void error_STRUCT_NOT_DSCR_IN_FIELD(const uintptr_t address, const int tag, const int field_num,
+				    const long lval_lo, const long lval_hi,
+				    const struct pt_regs *regs)
+{
+	if (regs == NULL) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD,
+			address, tag, field_num, lval_lo, lval_hi);
+	} else {
+
+		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_NOT_DESCR_IN_FIELD,
+			regs->sys_num, sys_call_ID_to_name[regs->sys_num],
+			tag, field_num, lval_lo, lval_hi, address);
+	}
+}
+
 /*
  * This function converts the array of structures, which can contain
  * protected user pointers to memory, function descriptors, and int values.
@@ -127,7 +144,8 @@ int get_pm_struct(const void	__user *prot_array,
 			 const int max_prot_array_size, const int fields,
 			 const int items, const long mask_type,
 			 const long mask_align, const long mask_rw,
-			 const int rval_mode)
+			 const int rval_mode,
+			 const struct pt_regs *regs)
 {
 /* Field type, 4 bits: (mask_type & 0xf) */
 #define _INT_FIELD		0x0  /* int value */
@@ -305,7 +323,7 @@ load_current_element:
 							__func__, (long) ptr_from, j);
 					return -EFAULT;
 				}
-
+load_int_element:
 				if ((tag == ETAGEWS) && may_be_uninitialized) {
 					val_int = 0; /* we don't copy trash */
 				} else if (likely((pat_rw & 0xf) != _WRITEABLE) &&
@@ -358,7 +376,7 @@ load_current_element:
 							__func__, (long) ptr_from, j);
 					return -EFAULT;
 				}
-
+load_long_element:
 				if ((tag == ETAGEWD) && may_be_uninitialized) {
 					val_long = 0; /* we don't copy trash */
 				} else if (likely((pat_rw & 0xf) != _WRITEABLE) &&
@@ -436,6 +454,7 @@ load_current_element:
 							__func__, (long) ptr_from, j);
 					return -EFAULT;
 				}
+load_descr_element:
 				tag = dtag & 0xf;
 
 				/* Copy valid pointer field */
@@ -452,10 +471,9 @@ load_current_element:
 				/* Something different found: */
 				else if (tag || (val_long || next_val_long) &&
 						!(rval_mode & CONV_ARR_IGNORE_DSCR_FLD_ERR)) {
-					PROTECTED_MODE_ALERT(
-						PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD,
+					error_STRUCT_NOT_DSCR_IN_FIELD(
 						((uintptr_t) prot_array + struct_len * i),
-						dtag, j, val_long, next_val_long);
+						dtag, j, val_long, next_val_long, regs);
 					if (rval_mode & CONV_ARR_WRONG_DSCR_FLD)
 						rval = -EFAULT;
 					if (!CONVERT_WARN_ONLY)
@@ -472,20 +490,25 @@ eo_ptr_field:
 			case _INT_PTR_FIELD:
 			case _LONG_PTR_FIELD: {
 				/* Check for descriptor tag in the field: */
-				if (get_user_tagged_8(val_long, tag, (long __user *) ptr_from)) {
+				if (get_user_tagged_16(val_long, next_val_long, dtag, ptr_from)) {
 					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (long) ptr_from, j);
 					return -EFAULT;
 				}
-				if (tag == E2K_AP_LO_ETAG) {
+				if (dtag == ETAGAPQ) {
 					/* This must be descriptor: */
 					elem_type = _PTR_FIELD;
-				} else {/* This is 'int' or 'long' */
-					elem_type &= 0x3;
-					/* _INT_PTR_FIELD -> _INT_FIELD */
-					/* _LONG_PTR_FIELD -> _LONG_FIELD */
+					goto load_descr_element;
 				}
-				goto load_current_element;
+				/* This is 'int' or 'long' */
+				elem_type &= 0x3;
+				tag = dtag & 0xf;
+				if (elem_type == _LONG_FIELD)
+					goto load_long_element;
+				/* This is 'int' */
+				/* _INT_PTR_FIELD -> _INT_FIELD */
+				val_int = (int)val_long;
+				goto load_int_element;
 			}
 			case _PTR__FUNC_FIELD: {
 				/* Check for descriptor tag in the field: */
@@ -649,7 +672,8 @@ unsigned long get_mask4_from_mask2(unsigned long mask2)
 int convert_array_3(const void __user *prot_array, void __user *new_array,
 		    const int max_prot_array_size, const int fields, const int items,
 		    unsigned long mask_type, unsigned long mask_align,
-		    unsigned long mask_rw, const int rval_mode)
+		    unsigned long mask_rw, const int rval_mode,
+		    const struct pt_regs *regs)
 {
 	long mask_type4, mask_align4, mask_rw4;
 
@@ -659,7 +683,7 @@ int convert_array_3(const void __user *prot_array, void __user *new_array,
 
 	return get_pm_struct(prot_array, new_array,
 				max_prot_array_size, fields, items,
-				mask_type4, mask_align4, mask_rw4, rval_mode);
+				mask_type4, mask_align4, mask_rw4, rval_mode, regs);
 }
 
 #endif /* CONFIG_PROTECTED_MODE */

@@ -913,7 +913,6 @@ static void mgb_write_psf_data1(struct mgb_private *ep, u32 val)
 	writel(val, ep->base_ioaddr + PSF_DATA1);
 }
 
-
 /** TITLE: PHY handling */
 
 #define MGB_PHY_WAIT_NUM	500
@@ -3839,6 +3838,24 @@ static void mgb_phy_reset(struct mgb_private *ep)
 		mgb_write_mgio_csr(ep, r);
 		raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
 		mdelay(100);				/* wait for reset min 15ms@156 */
+
+		if (PCI_FUNC(ep->pci_dev->devfn) == 1) {
+			/* For Synopsys PHY configurations: Bypass Power-Up Sequence
+			 * When this bit is set to 1, the DWC_xpcs bypasses the normal
+			 * flow of the power-up sequence and reaches the Power_Good
+			 * state to enable transmission or reception.
+			 * When this bit is set, the DWC_xpcs does not wait for the MPLL
+			 * and Transmit or Receive PLL status from the Synopsys PHY.
+			 * You can use this feature in the following scenarios:
+			 * 1. When the DWC_xpcs is configured to interface with
+			 *  a specific Synopsys PHY.
+			 * 2. When the data path needs to be interfaced to some other PHY.
+			 */
+			int reg = mgb_pcs_read(ep, VR_MII_DIG_CTRL1);
+
+			reg |= (1 << 1); /* BYP_PWRUP=1 */
+			mgb_pcs_write(ep, VR_MII_DIG_CTRL1, reg);
+		}
 	}
 }
 
@@ -4751,7 +4768,7 @@ static int mgb_set_ringparam(struct net_device *dev,
 	if (tx > MGB_MAX_TX_RING_SIZE || tx == 0 || (tx & (tx - 1))) {
 		return -EINVAL;
 	}
-	if ((rx == ep->log_rx_buffs) && (tx == TX_RING_SIZE)) {
+	if ((rx == RX_RING_SIZE) && (tx == TX_RING_SIZE)) {
 		return 0;
 	}
 	while (1) {
@@ -5888,7 +5905,11 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	raw_spin_lock_init(&ep->mgio_lock);
 	mutex_init(&ep->mx);
 
-	l_set_ethernet_macaddr(pdev, dev->dev_addr);
+	int r = l_set_ethernet_macaddr(pdev, dev->dev_addr);
+	if (r < 0) {
+		goto err_iounmap;
+	}
+
 	dev_info(&pdev->dev,
 #ifdef __sparc__
 		 "MAC = %012llX\n", be64_to_cpu(*(u64 *)(dev->dev_addr) >> 16));

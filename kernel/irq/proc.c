@@ -460,6 +460,12 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 	proc_create_single_data("spurious", 0444, desc->dir,
 			irq_spurious_proc_show, (void *)(long)irq);
  
+#if defined(CONFIG_MCST_RT_SMP)
+	proc_create_data("handl_fst", 0444, desc->dir,
+			 &irq_fst_proc_ops, (void *)(long)irq);
+	proc_create_data("handl_seq", 0444, desc->dir,
+			 &irq_seq_proc_ops, (void *)(long)irq);
+#endif
 
 out_unlock:
 	mutex_unlock(&register_lock);
@@ -482,6 +488,10 @@ void unregister_irq_proc(unsigned int irq, struct irq_desc *desc)
 # endif
 #endif
 	remove_proc_entry("spurious", desc->dir);
+#ifdef CONFIG_MCST_RT_SMP
+	remove_proc_entry("handl_fst", desc->dir);
+	remove_proc_entry("handl_seq", desc->dir);
+#endif
 
 	sprintf(name, "%u", irq);
 	remove_proc_entry(name, root_irq_dir);

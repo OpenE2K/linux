@@ -213,6 +213,15 @@ static void reinit_rxbuf_descr(mxgbe_priv_t *priv, int qn, u16 tail_cur)
 	}
 } /* reinit_rxbuf_descr */
 
+static int mxgbe_rx_csum(mxgbe_ctrl_t *descr_ctrl)
+{
+	if (((descr_ctrl->RD.TYPE == 4) || (descr_ctrl->RD.TYPE == 5)) &&
+	    (descr_ctrl->RD.IPCSUMOK && (descr_ctrl->RD.L4CSUM &&
+	    descr_ctrl->RD.L4CSUMOK)))
+		return CHECKSUM_UNNECESSARY;
+
+	return CHECKSUM_NONE;
+}
 /**
  * The Rx function
  * Get one descriptor
@@ -225,40 +234,20 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	mxgbe_rx_buff_t *rxq_buff;
 	mxgbe_descr_t *descr;
 	struct sk_buff *skb;
-	/* unsigned long flags; */ /* spin_lock */
 	unsigned timestart;
 	mxgbe_addr_t descr_addr;
 	mxgbe_ctrl_t descr_ctrl;
 	s64 t1, t2;
 	void __iomem *base = priv->bar0_base;
 
-
-	FDEBUG;
-
-	assert(priv);
 	ndev = priv->ndev;
-	assert(ndev);
-	if (!ndev)
-		return 1;
-
-
-	/* raw_spin_lock_irqsave(&priv->rxq[qn].lock, flags); */
 
 	tail_cur = priv->rxq[qn].tail; /* new rx descr */
 
 	/* Get HW TAIL */
 	tail_hw = Q_TAIL_GET_PTR(mxgbe_rreg32(base, RXQ_REG_ADDR(qn, Q_TAIL)));
-	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-		"net_hw_rx(qn=%d): tail_ram=%d\n",
-		qn, tail_hw);
 	if (tail_cur == tail_hw) {
 		/* no new data - exit */
-		/* raw_spin_unlock_irqrestore(&priv->rxq[qn].lock, flags); */
-		DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-			"net_hw_rx(qn=%d): tail_cur(%d) == tail_hw(%d), exit\n",
-			qn, tail_cur, tail_hw);
-		DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-			"========== net_hw_rx ========== EXIT ==========\n");
 		return 0;  /* done */
 	}
 
@@ -268,14 +257,7 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 
 	/* tail ++ */
 	INC_RXQ_INDEX(tail_new, tail_cur, qn);
-
-	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-		"net_hw_rx(qn=%d): tail_cur=%d, tail_new=%d, tail_hw=%d\n",
-		qn, tail_cur, tail_new, tail_hw);
-
-	/* tail ++ */
 	priv->rxq[qn].tail = tail_new;
-
 
 	/* Wait for OWNER */
 	t1 = ktime_to_ns(ktime_get());
@@ -304,8 +286,6 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 					"RX ERROR: OWNER not changed " \
 					"- %lld ns\n",
 					t2 - t1);
-				DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-					"########## OWNER ##########\n");
 				return 1; /* continue */
 			}
 			if (timestart == 1) {
@@ -323,24 +303,8 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 
 	descr_ctrl.r = le64_to_cpu(READ_ONCE(descr->ctrl.r));
 
-	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-		"net_hw_rx(qn=%d): descr=%p, rxq_buff=%p\n",
-		qn, descr, rxq_buff);
-	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-		"net_hw_rx(qn=%d): descr: %016llX %016llX\n",
-		qn, descr_ctrl.r, descr_addr.r);
-
-	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-		"net_hw_rx(qn=%d): dma=%llX, size=%u, skb=%p\n",
-		qn, rxq_buff->dma, (unsigned)rxq_buff->size, rxq_buff->skb);
-
-/*#ifdef DEBUG*/
-	if (0 == rxq_buff->dma || 0 == rxq_buff->size) {
-		DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-			"net_hw_rx(qn=%d): dma==0 or size==0\n", qn);
+	if (0 == rxq_buff->dma || 0 == rxq_buff->size)
 		return 1; /* continue */
-	}
-/*#endif*/ /* DEBUG */
 
 	/* Init SKB */
 	pci_unmap_single(priv->pdev, rxq_buff->dma, rxq_buff->size,
@@ -348,56 +312,31 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	skb = rxq_buff->skb;
 	skb_put(skb, descr_ctrl.RD.FRMSIZE + 1);
 	rxq_buff->dma = 0;
-	/* -= process descr =- */
-
-#ifdef DEBUG
-	if ((mxgbe_debug_mask & MXGBE_DBG_MSK_NET_RX) &
-	    (mxgbe_debug_mask & MXGBE_DBG_MSK_NET_SKB)) {
-		mxgbe_rx_dbg_prn_descr_s(priv, qn, descr, tail_cur);
-		print_skb(skb, priv, 0);
-	}
-#endif /* DEBUG */
-
 
 	/* Reinit Rx buf & descr */
 	reinit_rxbuf_descr(priv, qn, tail_cur);
 
-	/* raw_spin_unlock_irqrestore(&priv->rxq[qn].lock, flags); */
-
 	/* Process SKB */
-	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-		"net_hw_rx(qn=%d): len=%d\n", qn, (int)skb->len);
-
-	/* nothing receive */
 	if (skb->len < (MXGBE_ETH_HEAD_LEN)) {
-		dev_err(&ndev->dev,
-			"ERROR: Very small Rx packet's size\n");
 		dev_kfree_skb_any(skb);
-		DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-			"========== net_hw_rx ========== WRONG ==========\n");
 		return 1; /* continue */
 	}
 
-#ifdef USE_HW_CSUM
-	/* IPv4 CS */
 	if (((descr_ctrl.RD.TYPE == 4) || (descr_ctrl.RD.TYPE == 5)) &&
-	    (descr_ctrl.RD.IPCSUMOK == 0)) {
-		dev_err(&ndev->dev,
-			"ERROR: Wrong IPv4 CSUM\n");
+		(!descr_ctrl.RD.IPCSUMOK || (descr_ctrl.RD.L4CSUM &&
+		!descr_ctrl.RD.L4CSUMOK))) {
 		dev_kfree_skb_any(skb);
 		priv->stats.rx_dropped++;
 		return 1; /* continue */
 	}
-#endif /* USE_HW_CSUM */
 
 	priv->stats.rx_packets++;
 	priv->stats.rx_bytes += skb->len;
 
+	skb->ip_summed = mxgbe_rx_csum(&descr_ctrl);
 	skb->protocol = eth_type_trans(skb, ndev);
-	netif_receive_skb(skb);
+	napi_gro_receive(&(priv->vector[qn].napi), skb);
 
-	DEV_DBG(MXGBE_DBG_MSK_NET_RX, &ndev->dev,
-		"========== net_hw_rx ========== DONE ==========\n");
 	return 1; /* continue */
 } /* mxgbe_net_hw_rx */
 
@@ -658,6 +597,44 @@ static inline int mxgbe_tx_q_mapping(mxgbe_priv_t *priv, struct sk_buff *skb)
 	return r_idx;
 } /* mxgbe_tx_q_mapping */
 
+static int mxgbe_get_tx_ip_csum_flag(struct sk_buff *skb)
+{
+	if (skb->ip_summed != CHECKSUM_PARTIAL)
+		return 0;
+	if (skb->protocol != htons(ETH_P_IP))
+		goto calc_sum;
+	if (ip_is_fragment(ip_hdr(skb)))
+		goto calc_sum;
+
+	ip_hdr(skb)->check = 0;
+	return 1;
+
+calc_sum:
+	skb_checksum_help(skb);
+
+	return 0;
+}
+
+static int mxgbe_get_tx_l4_csum_flag(struct sk_buff *skb)
+{
+	if (!mxgbe_get_tx_ip_csum_flag(skb))
+		return 0;
+
+	if (skb->csum_offset == offsetof(struct tcphdr, check)) {
+		tcp_hdr(skb)->check = 0;
+		return 1;
+	}
+	if (skb->csum_offset == offsetof(struct udphdr, check)) {
+		udp_hdr(skb)->check = 0;
+		return 1;
+	}
+
+	skb_checksum_help(skb);
+	ip_hdr(skb)->check = 0;
+
+	return 0;
+}
+
 /**
  * The network interface transmission function
  * @skb: socket buffer for tx
@@ -673,70 +650,70 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 	mxgbe_descr_t descr;
 	dma_addr_t dmaaddr;
 	mxgbe_tx_buff_t tx_buff;
-	ssize_t size;
+	ssize_t size = skb->len;
 	int nq;
-
-	FDEBUG;
-
-	priv = netdev_priv(ndev);
-	assert(priv);
-	if (!priv)
-		return -1;
+	int ipv6 = 0;
+	int ipcsum = 0;
+	int l4csum = 0;
+	int ntcp_udp = 0;
+	int iphdr = 0;
+	int tcphdr = 0;
+	int l4hdr = 0;
 
 	if (netif_queue_stopped(ndev))
-		return 1;
+		goto tx_free_skb;
+
+	if (size > MXGBE_MTU)
+		goto tx_free_skb;
+
+	if (skb_put_padto(skb, ETH_ZLEN))
+		goto tx_free_skb;
+
+	priv = netdev_priv(ndev);
 
 	nq = mxgbe_tx_q_mapping(priv, skb);
 
-	/* Check packet's size */
-#if 0
-	if (skb->len < ETH_ZLEN) {
-		if (skb_padto(skb, ETH_ZLEN)) {
-			dev_err(&ndev->dev,
-				"ERROR: Very small Tx packet's size\n");
-			goto tx_free_skb;
-		}
-		skb->len = ETH_ZLEN;
-	}
-#endif
-	if (skb->len > MXGBE_MTU) {
-		dev_err(&ndev->dev,
-			"ERROR: Very large Tx packet's size\n");
+	if (__netif_subqueue_stopped(ndev, nq))
 		goto tx_free_skb;
-	}
-
-	if (skb_put_padto(skb, ETH_ZLEN)) {
-		/*if (netif_msg_tx_queued(ep))*/
-			dev_err(&ndev->dev,
-				 "%s: Could not skb_put_padto\n", __func__);
-
-		return NETDEV_TX_OK;
-	}
-	if (__netif_subqueue_stopped(ndev, nq)) {
-		/*if (netif_msg_tx_queued(ep))*/
-			dev_info(&ndev->dev,
-				 "%s: xmit to queue %d stopped\n",
-				 __func__, nq);
-
-		return NETDEV_TX_BUSY;
-	}
-
-	/* start_xmit_to_q */
-
-	size = skb->len;
 
 	dmaaddr = pci_map_single(priv->pdev, skb->data, size,
 				 PCI_DMA_TODEVICE);
-	assert((dmaaddr & 0x01) == 0);
+	if (pci_dma_mapping_error(priv->pdev, dmaaddr))
+		goto tx_free_skb;
 
-	DEV_DBG(MXGBE_DBG_MSK_NET_TX, &ndev->dev,
-		"start_xmit: adr=%p, dma=%llX, len=%ld\n",
-		skb->data, dmaaddr, size);
+	if (skb->protocol == htons(ETH_P_IP)) {
+		ipv6 = 0; /* ipv4 */
+		iphdr = skb_network_header(skb) - skb->data - 1;
+		l4hdr = ip_hdr(skb)->ihl - 1;
+		switch (ip_hdr(skb)->protocol) {
+		case IPPROTO_UDP:
+			ntcp_udp = 1;
+			break;
+		case IPPROTO_TCP:
+			ntcp_udp = 0;
+			break;
+		default:
+			l4hdr = 0;
+			iphdr = 0; /* as a 'raw' packet */
+		}
+	} else {
+		iphdr = 0; /* as a 'raw' packet */
+	}
 
-	netif_trans_update(ndev); /* qn ? */
+	if (iphdr) {
+		ipcsum = mxgbe_get_tx_ip_csum_flag(skb);
+		l4csum = mxgbe_get_tx_l4_csum_flag(skb);
+	}
 
 	/* Create descriptor */
 	descr.ctrl.r = 0;
+	descr.ctrl.TC.IPV6 = ipv6;
+	descr.ctrl.TC.IPCSUM = ipcsum;
+	descr.ctrl.TC.L4CSUM = l4csum;
+	descr.ctrl.TC.NTCP_UDP = ntcp_udp;
+	descr.ctrl.TC.TCPHDR = tcphdr;
+	descr.ctrl.TC.IPHDR = iphdr;
+	descr.ctrl.TC.L4HDR = l4hdr;
 	descr.ctrl.TC.BUFSIZE = (size >> 3); /* QWORDs - 1 */
 	descr.ctrl.TC.MSS = TC_MSS_NOSPLIT;
 	descr.ctrl.TC.FRMSIZE = size - 1;
@@ -755,31 +732,20 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 	tx_buff.skb = skb;
 	tx_buff.dma = dmaaddr;
 
-#ifdef DEBUG
-	if ((mxgbe_debug_mask & MXGBE_DBG_MSK_NET_TX) &
-	    (mxgbe_debug_mask & MXGBE_DBG_MSK_NET_SKB)) {
-		mxgbe_tx_dbg_prn_descr_s(priv, &descr);
-		print_skb(skb, priv, 1);
-	}
-#endif /* DEBUG */
-
 	ret = mxgbe_txq_send(priv, nq, &descr, &tx_buff);
-	if (ret < 0)
+	if (ret < 0) {
+		pci_unmap_single(priv->pdev,
+				 dmaaddr, size, PCI_DMA_TODEVICE);
 		goto tx_free_skb;
-
-	DEV_DBG(MXGBE_DBG_MSK_NET_TX, &ndev->dev,
-		"start_xmit: OK\n");
+	}
 
 	return NETDEV_TX_OK;
 
 tx_free_skb:
 	priv->stats.tx_dropped++;
-	dev_kfree_skb(skb);
+	dev_kfree_skb_any(skb);
 
-	DEV_DBG(MXGBE_DBG_MSK_NET_TX, &ndev->dev,
-		"start_xmit: ERROR\n");
-
-	return -1;
+	return NETDEV_TX_OK;
 } /* mxgbe_start_xmit */
 
 
@@ -990,6 +956,25 @@ static void mxgbe_tx_timeout(struct net_device *ndev)
 } /* mxgbe_tx_timeout */
 #endif /* 0 */
 
+static int mxgbe_set_features(struct net_device *dev,
+			      netdev_features_t features)
+{
+	mxgbe_priv_t *priv = netdev_priv(dev);
+
+	dev->features = priv->hw_features;
+
+	return 1;
+}
+
+static netdev_features_t mxgbe_fix_features(struct net_device *dev,
+					    netdev_features_t features)
+{
+	mxgbe_priv_t *priv = netdev_priv(dev);
+
+	features = priv->hw_features;
+
+	return features;
+}
 
 /**
  * net_device_ops
@@ -1000,6 +985,8 @@ const struct net_device_ops mxgbe_netdev_ops = {
 	.ndo_start_xmit		= mxgbe_start_xmit,
 	/*.ndo_select_queue	= mxgbe_select_queue,*/
 	/*.ndo_set_rx_mode	= mxgbe_set_rx_mode,*/	/* TODO */
+	.ndo_set_features	= mxgbe_set_features,
+	.ndo_fix_features	= mxgbe_fix_features,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= mxgbe_set_mac_addr,
 	.ndo_change_mtu		= mxgbe_change_mtu,
@@ -1086,15 +1073,9 @@ int mxgbe_net_register(mxgbe_priv_t *priv)
 	ndev->watchdog_timeo = MXGBE_WATCHDOG_PERIOD;
 	mxgbe_set_ethtool_ops(ndev);
 
-#ifdef USE_HW_CSUM
-	ndev->features |= 0
-		| NETIF_F_IP_CSUM		/* IPv4 CS */
-		/* | NETIF_F_HW_CSUM */		/* CS all */
-		/* | NETIF_F_IPV6_CSUM */	/* IPV6 XS */
-		;
-#else
-	ndev->hw_features = 0;
-#endif /* USE_HW_CSUM */
+	priv->hw_features = NETIF_F_IP_CSUM;
+	ndev->features = priv->hw_features;
+	ndev->hw_features = ndev->features;
 
 	/* MTU range: 68 - 16366 */
 	ndev->min_mtu = ETH_MIN_MTU;

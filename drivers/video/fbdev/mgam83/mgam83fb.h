@@ -29,13 +29,10 @@
 
 #define MGA_MEM_CLOCK		7518
 
-//
-// PCI
-// 
-#	define PCI_VENDOR_ID_MGAM83	0x108e
-#	define PCI_DEVICE_ID_MGAM83	0x8000
-
-	// Indexes of pci_dev.resource[]
+/*
+ * PCI
+ */
+	/* Indexes of pci_dev.resource[] */
 #	define PCI_MMIO_BAR		0
 #	define PCI_MEM_BAR		1
 #	define PCI_I2C_BAR		2

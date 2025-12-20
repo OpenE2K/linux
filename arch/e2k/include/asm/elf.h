@@ -35,7 +35,7 @@
 #define ELF_CLASS	ELFCLASS64
 #define ELF_DATA	ELFDATA2LSB
 
-#define ELF_CORE_EFLAGS (CONFIG_CPU_ISET_MIN << 24)
+#define ELF_CORE_EFLAGS (machine.native_iset_ver << 24)
 
 //  #define CORE_DUMP_USE_REGSET !!!!
 
@@ -133,10 +133,6 @@ static inline bool elf_check_e2k_mtype(unsigned long mt, bool incompat)
 		break;
 	case 23:
 		if (IS_MACHINE_E2C3)
-			return true;
-		break;
-	case 24:
-		if (IS_MACHINE_E48C)
 			return true;
 		break;
 	case 25:

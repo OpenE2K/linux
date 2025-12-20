@@ -298,8 +298,6 @@ native_setup_machine(void)
 	e16c_setup_machine();
 # elif defined(CONFIG_E2K_E2C3)
 	e2c3_setup_machine();
-# elif defined(CONFIG_E2K_E48C)
-	e48c_setup_machine();
 # elif defined(CONFIG_E2K_E8V7)
 	e8v7_setup_machine();
 # else
@@ -335,10 +333,6 @@ native_setup_machine(void)
 		case MACHINE_ID_E2C3_LMS:
 		case MACHINE_ID_E2C3:
 			e2c3_setup_machine();
-			break;
-		case MACHINE_ID_E48C_LMS:
-		case MACHINE_ID_E48C:
-			e48c_setup_machine();
 			break;
 		case MACHINE_ID_E8V7_LMS:
 		case MACHINE_ID_E8V7:

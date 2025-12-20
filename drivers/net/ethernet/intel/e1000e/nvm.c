@@ -589,7 +589,7 @@ s32 e1000_read_mac_addr_generic(struct e1000_hw *hw)
 
 #ifdef CONFIG_MCST
 	if (hw->has_nvram == 0) { /* No nvram or nvram wrong */
-		l_set_ethernet_macaddr(NULL, hw->mac.perm_addr);
+		l_set_ethernet_macaddr(hw->adapter->pdev, hw->mac.perm_addr);
        }
 #endif  /* CONFIG_MCST */
 

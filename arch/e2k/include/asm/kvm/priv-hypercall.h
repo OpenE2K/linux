@@ -255,7 +255,7 @@ HYPERVISOR_priv_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 {
 	return HYPERVISOR_recovery_faulted_move(addr_from, addr_to, addr_to_hi,
 				args.vr, ld_rec_opc, args.chan, args.qp,
-				args.atomic, first_time);
+				args.atomic, args.big_endian, first_time);
 }
 static inline long
 HYPERVISOR_priv_recovery_faulted_load_to_greg(e2k_addr_t addr, u32 greg_num_d,
@@ -264,7 +264,7 @@ HYPERVISOR_priv_recovery_faulted_load_to_greg(e2k_addr_t addr, u32 greg_num_d,
 {
 	return HYPERVISOR_recovery_faulted_load_to_greg(addr, greg_num_d,
 			args.vr, ld_rec_opc, args.chan, args.qp, args.atomic,
-			saved_greg_lo, saved_greg_hi);
+			args.big_endian, saved_greg_lo, saved_greg_hi);
 }
 
 #endif	/* CONFIG_PRIV_HYPERCALLS */

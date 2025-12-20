@@ -12,9 +12,8 @@ Confs()
 {
 cat <<EOF
  e2k_nort e2k_rt e2k_nn e2k_nnrt e2k_host e2k_guest
- e2c3_proto e12c_proto e16c_proto e48c_proto e8v7_proto
+ e2c3_proto e12c_proto e16c_proto e8v7_proto
  e8v7_nort e8v7_rt
- e48c_nort e48c_rt e48c_nn e48c_nnrt
  e12c_nort e12c_rt e12c_nn e12c_nnrt
  e16c_nort e16c_rt e16c_nn e16c_nnrt
  e1cp_nort e1cp_rt e1cp_host e1cp_guest
@@ -92,16 +91,19 @@ localversion()
 conf_no_builtin_gpu()
 {
 	$conf_script $OPTFILE \
+	-d CONFIG_MCST_GPU_VIV -d CONFIG_DRM_VIVANTE \
 	-d CONFIG_DRM_IMX -d CONFIG_DRM_IMX_HDMI \
- 	-d CONFIG_IMGTEC \
- 	-d CONFIG_MEM2ALLOC -d CONFIG_HANTRODEC -d CONFIG_BIGE \
+	-d CONFIG_MCST_GPU_IMGTEC -d CONFIG_IMGTEC \
+	-d CONFIG_MEM2ALLOC -d CONFIG_HANTRODEC -d CONFIG_BIGE \
 	-d CONFIG_ELDWCXPCS -d CONFIG_MGB -d CONFIG_MXGBE \
 	|| exit 1
 }
 conf_e1cp()
 {
 	# e1cp has:
-	# 1) MGA2 - mga2.ko (CONFIG_DRM_MGA2),
+	# 1) Vivante 3D GPU GC2500 (25 GFLOPS FP32) -
+	#    galcore.ko (CONFIG_MCST_GPU_VIV), vivante.ko (CONFIG_DRM_VIVANTE)
+	# 2) MGA2 - mga2.ko (CONFIG_DRM_MGA2),
 	#    dw_hdmi_imx.ko (CONFIG_DRM_IMX_HDMI)
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E1CP \
@@ -109,6 +111,7 @@ conf_e1cp()
 	|| exit 1
 	conf_no_builtin_gpu;
 	$conf_script $OPTFILE \
+	-m CONFIG_MCST_GPU_VIV -m CONFIG_DRM_VIVANTE \
 	-m CONFIG_DRM_IMX_HDMI -m CONFIG_DRM_IMX \
 	|| exit 1
 }
@@ -139,18 +142,20 @@ conf_e2c3()
 	# 1) MGA2.5 (MGA2 with more controllers, overlays and 2x 2D GPU) -
 	#    mga2 (CONFIG_DRM_MGA2),
 	#    dw_hdmi_imx (CONFIG_DRM_IMX_HDMI)
-	# 2) Imagination D5820 (decoder) - vxd.ko, img_mem.ko (CONFIG_IMGTEC)
-	# 3) Imagination E5510 (encoder) - vxekm.ko, imgvideo.ko (CONFIG_IMGTEC)
-	# 4) Google VP9 memory allocator - mem2alloc.ko (CONFIG_MEM2ALLOC)
-	# 5) Google VP9 decoder - hantrodec.ko (CONFIG_HANTRODEC)
-	# 6) Google VP9 encoder - bige.ko (CONFIG_BIGE)
+	# 2) Imagination 3D GX6650 GPU (300 GFLOPS FP32) - pvrsrvkm.ko,
+	#    dolly_drv.ko (CONFIG_MCST_GPU_IMGTEC)
+	# 3) Imagination D5820 (decoder) - vxd.ko, img_mem.ko (CONFIG_IMGTEC)
+	# 4) Imagination E5510 (encoder) - vxekm.ko, imgvideo.ko (CONFIG_IMGTEC)
+	# 5) Google VP9 memory allocator - mem2alloc.ko (CONFIG_MEM2ALLOC)
+	# 6) Google VP9 decoder - hantrodec.ko (CONFIG_HANTRODEC)
+	# 7) Google VP9 encoder - bige.ko (CONFIG_BIGE)
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E2C3 \
 	|| exit 1;
 	conf_no_builtin_gpu;
 	$conf_script $OPTFILE \
 	-m CONFIG_DRM_IMX_HDMI -m CONFIG_DRM_IMX \
-	-m CONFIG_IMGTEC \
+	-m CONFIG_MCST_GPU_IMGTEC -m CONFIG_IMGTEC \
 	-m CONFIG_MEM2ALLOC -m CONFIG_HANTRODEC -m CONFIG_BIGE \
 	-m CONFIG_ELDWCXPCS -m CONFIG_MGB \
 	-e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
@@ -160,7 +165,6 @@ conf_e12c()
 {
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E12C \
-	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
 	|| exit 1;
 	conf_no_builtin_gpu;
 	$conf_script $OPTFILE \
@@ -176,13 +180,6 @@ conf_e16c()
 	$conf_script $OPTFILE \
 	-m CONFIG_ELDWCXPCS -m CONFIG_MGB -m CONFIG_MXGBE \
 	|| exit 1;
-}
-conf_e48c()
-{
-	$conf_script $OPTFILE \
-	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E48C \
-	|| exit 1;
-	conf_no_builtin_gpu;
 }
 conf_e8v7()
 {
@@ -224,8 +221,10 @@ conf_virtio()
 	-e CONFIG_VIRTIO_BLK \
 	-e CONFIG_SCSI_VIRTIO \
 	-e CONFIG_VIRTIO_NET \
+	-e CONFIG_VHOST_NET \
 	-e CONFIG_VIRTIO_CONSOLE \
 	-m CONFIG_VSOCKETS \
+	-m CONFIG_VHOST_VSOCK \
 	-m CONFIG_VIRTIO_VSOCKETS \
 	-m CONFIG_VIRTIO_VSOCKETS_COMMON \
 	-m CONFIG_VIRTIO_BALLOON \
@@ -237,6 +236,7 @@ conf_virtio()
 }
 conf_vfio()
 {
+return
 	$conf_script $OPTFILE \
 	-m CONFIG_VFIO \
 	-m CONFIG_VFIO_PCI \
@@ -269,9 +269,16 @@ conf_host()
 	-e CONFIG_KVM_PHYS_PT_ENABLE \
 	|| exit 1
 }
+conf_qxl()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_DRM_QXL \
+	|| exit 1
+}
 conf_hardware_virt()
 {
 	conf_host;
+	conf_qxl;
 	conf_virtio;
 	conf_vfio;
 	$conf_script $OPTFILE \
@@ -358,16 +365,11 @@ e12c_nn()   { conf_e12c; conf_hardware_virt; conf_nn; }
 e12c_nnrt() { conf_e12c; conf_hardware_virt; conf_nn; conf_rt; }
 e2c3_nort() { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; }
 e2c3_rt()   { conf_e2c3; conf_hardware_virt; conf_power_efficient; conf_nn; conf_rt; }
-e48c_nort() { conf_e48c; conf_hardware_virt; }
-e48c_rt()   { conf_e48c; conf_hardware_virt; conf_rt; }
-e48c_nn()   { conf_e48c; conf_hardware_virt; conf_nn; }
-e48c_nnrt() { conf_e48c; conf_hardware_virt; conf_nn; conf_rt; }
 e8v7_nort() { conf_e8v7; conf_hardware_virt; conf_nn; }
 e8v7_rt()   { conf_e8v7; conf_hardware_virt; conf_nn; conf_rt; }
 e12c_proto(){ conf_e12c; conf_hardware_virt; conf_prototype; }
 e16c_proto(){ conf_e16c; conf_hardware_virt; conf_prototype; }
 e2c3_proto(){ conf_e2c3; conf_hardware_virt; conf_prototype; conf_power_efficient; conf_nn; }
-e48c_proto(){ conf_e48c; conf_hardware_virt; conf_prototype; }
 e8v7_proto(){ conf_e8v7; conf_hardware_virt; conf_prototype; }
 ###############################################################################
 trap "cleanup" 1 2 3 6 15 EXIT

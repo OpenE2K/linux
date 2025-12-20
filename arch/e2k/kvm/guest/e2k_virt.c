@@ -252,8 +252,8 @@ e2k_virt_setup_arch(void)
 	kvm_fast_tagged_memory_set_user(NULL, 0, 0, 0, NULL, 0);
 	kvm_recovery_faulted_tagged_store(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 	kvm_recovery_faulted_load(0, NULL, NULL, 0, 0, (tc_cond_t) { .word = 0 });
-	kvm_recovery_faulted_move(0, 0, 0, 0, 0, 0, 0, 0, 0, (tc_cond_t) { .word = 0 });
-	kvm_recovery_faulted_load_to_greg(0, 0, 0, 0, 0, 0, 0, NULL, NULL,
+	kvm_recovery_faulted_move(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (tc_cond_t) { .word = 0 });
+	kvm_recovery_faulted_load_to_greg(0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL,
 					  (tc_cond_t) { .word = 0 });
 }
 

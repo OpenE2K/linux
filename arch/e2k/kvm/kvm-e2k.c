@@ -218,11 +218,9 @@ static int kvm_arch_any_vcpu_init(struct kvm_vcpu *vcpu);
 static void kvm_arch_any_vcpu_uninit(struct kvm_vcpu *vcpu);
 static int kvm_arch_any_vcpu_setup(struct kvm_vcpu *vcpu);
 
-static user_area_t *kvm_find_memory_region(struct kvm *kvm,
-			int slot, e2k_addr_t address, e2k_size_t size,
-			kvm_guest_mem_type_t type);
-static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
-				kvm_guest_area_alloc_t __user *what);
+static user_area_t *kvm_find_memory_region(struct kvm *kvm, int slot, e2k_addr_t address,
+			e2k_size_t size, kvm_guest_mem_type_t type);
+static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm, kvm_guest_area_alloc_t __user *what);
 void kvm_arch_vcpu_free(struct kvm_vcpu *vcpu);
 static void kvm_arch_vcpu_release(struct kvm_vcpu *vcpu);
 static void vcpu_release_to_reboot(struct kvm_vcpu *vcpu, int order_no);
@@ -442,7 +440,6 @@ int kvm_arch_vcpu_precreate(struct kvm *kvm, unsigned int id)
 
 int kvm_arch_hardware_enable(void)
 {
-	DebugKVM("started\n");
 	if (kvm_is_hv_vm_available() || kvm_is_hw_pv_vm_available())
 		kvm_hardware_virt_enable();
 	return 0;
@@ -1913,25 +1910,27 @@ static int kvm_setup_guest_info(struct kvm *kvm, void __user *user_info)
 	kvm_guest_info_t *guest_info = &kvm->arch.guest_info;
 	int ret;
 
-	if (copy_from_user(guest_info, user_info, sizeof(*guest_info))) {
-		pr_err("%s(): could not copy info from user\n", __func__);
+	if (copy_from_user(guest_info, user_info, sizeof(*guest_info)))
 		return -EFAULT;
+
+	if (guest_info->cpu_iset > machine.native_iset_ver || guest_info->cpu_iset < 0) {
+		pr_info_ratelimited("KVM: cannot run guest compiled with newer iset %d on host with older iset %d\n",
+				guest_info->cpu_iset, machine.native_iset_ver);
+		return -EINVAL;
 	}
 
 	guest_info->is_stranger = guest_info->cpu_iset < E2K_ISET_V6;
 	if (guest_info->is_stranger) {
 		if (kvm_is_epic(kvm)) {
-			pr_err("%s(): KVM was set to use 'EPIC', but guest "
-				"cpu iset V%d needs at 'APIC'\n",
-				__func__, guest_info->cpu_iset);
+			pr_info_ratelimited("KVM was set to use 'EPIC', but guest cpu iset V%d needs at 'APIC'\n",
+				guest_info->cpu_iset);
 			return -EINVAL;
 		}
 		guest_info->mmu_support_pt_v6 = false;
 	} else {
 		if (!kvm_is_epic(kvm)) {
-			pr_err("%s(): KVM was set to use 'APIC', but guest "
-				"cpu iset V%d needs at 'EPIC'\n",
-				__func__, guest_info->cpu_iset);
+			pr_info_ratelimited("KVM was set to use 'APIC', but guest cpu iset V%d needs at 'EPIC'\n",
+				guest_info->cpu_iset);
 			return -EINVAL;
 		}
 	}
@@ -2061,9 +2060,6 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long vm_type)
 	kvm->arch.vm_type = vm_type;
 
 	kvm_arch_init_vm_mmap(kvm);
-
-	/* BSP id can be defined by ioctl(), now set to default 0 */
-	kvm->arch.bsp_vcpu_id = 0;
 
 	err = kvm_alloc_vmid(kvm);
 	if (err)
@@ -3689,23 +3685,12 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu, bool schedule)
 	if (vcpu->arch.is_hv)
 		machine.save_kvm_context(&vcpu->arch);
 
-	if (!schedule) {
-		machine.save_gregs_dirty_bgr(&vcpu->arch.sw_ctxt.vcpu_gregs);
-		copy_k_gregs_to_k_gregs(
-			&vcpu->arch.sw_ctxt.vcpu_k_gregs,
-			&current_thread_info()->k_gregs);
-		machine.restore_gregs(&vcpu->arch.sw_ctxt.host_gregs);
-		copy_k_gregs_to_k_gregs(
-			&current_thread_info()->k_gregs,
-			&vcpu->arch.sw_ctxt.host_k_gregs);
-		if (vcpu->arch.is_hv) {
-			;
-		} else if (vcpu->arch.is_pv) {
-			/* switch VCPU guset context to host context */
-			pv_vcpu_exit_to_host(vcpu);
-		} else {
-			E2K_KVM_BUG_ON(true);
-		}
+	machine.save_gregs_dirty_bgr(&vcpu->arch.sw_ctxt.gregs);
+	machine.restore_gregs(&current->thread.sw_regs.gregs);
+
+	if (!schedule && vcpu->arch.is_pv) {
+		/* switch VCPU guset context to host context */
+		pv_vcpu_exit_to_host(vcpu);
 	}
 	local_irq_restore(flags);
 
@@ -3757,23 +3742,12 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu, bool schedule)
 	trace_kvm_pid(FROM_VCPU_LOAD, vcpu->kvm->arch.vmid.nr, vcpu->vcpu_id,
 		read_guest_PID_reg(vcpu));
 
-	if (!schedule) {
-		machine.save_gregs_dirty_bgr(&vcpu->arch.sw_ctxt.host_gregs);
-		copy_k_gregs_to_k_gregs(
-			&vcpu->arch.sw_ctxt.host_k_gregs,
-			&current_thread_info()->k_gregs);
-		machine.restore_gregs(&vcpu->arch.sw_ctxt.vcpu_gregs);
-		copy_k_gregs_to_k_gregs(
-			&current_thread_info()->k_gregs,
-			&vcpu->arch.sw_ctxt.vcpu_k_gregs);
-		if (vcpu->arch.is_hv) {
-			;
-		} else if (vcpu->arch.is_pv) {
-			/* switch VCPU host context to guest context */
-			pv_vcpu_enter_to_guest(vcpu);
-		} else {
-			E2K_KVM_BUG_ON(true);
-		}
+	machine.save_gregs_dirty_bgr(&current->thread.sw_regs.gregs);
+	machine.restore_gregs(&vcpu->arch.sw_ctxt.gregs);
+
+	if (!schedule && vcpu->arch.is_pv) {
+		/* switch VCPU host context to guest context */
+		pv_vcpu_enter_to_guest(vcpu);
 	}
 	local_irq_restore(flags);
 }
@@ -4193,27 +4167,22 @@ gpa_t kvm_vcpu_gva_to_gpa(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
 	return kvm_mmu_gvpa_to_gpa(gvpa);
 }
 
-static user_area_t *kvm_do_find_memory_region(struct kvm *kvm,
-			int slot, e2k_addr_t address, e2k_size_t size,
-			bool phys_mem, e2k_addr_t *virt_address,
-			kvm_guest_mem_type_t type)
+static user_area_t *kvm_do_find_memory_region(struct kvm *kvm, int slot, e2k_addr_t address,
+			e2k_size_t size, bool phys_mem, e2k_addr_t *virt_address,
+			kvm_guest_mem_type_t type, bool reverse)
 {
-	struct kvm_memory_slot *memslot;
-	user_area_t *guest_area;
-	kvm_guest_mem_type_t guest_type;
-	gpa_t base_gpa;
-	e2k_size_t area_size;
 	int id, as_id, as_id_from, as_id_to;
 
 	DebugKVM("started for slot %d address 0x%lx size 0x%lx type %s\n",
-		slot, address, size,
-		(type & guest_vram_mem_type) ? "VRAM" : "RAM");
+		slot, address, size, (type & guest_vram_mem_type) ? "VRAM" : "RAM");
+
 	if (slot >= 0) {
 		if (slot >= KVM_USER_MEM_SLOTS) {
 			DebugKVM("slot %d is outside of slots number %d\n",
 				slot, KVM_USER_MEM_SLOTS);
 			return NULL;
 		}
+
 		as_id = slot >> 16;
 		id = (u16)slot;
 		as_id_from = as_id;
@@ -4223,100 +4192,116 @@ static user_area_t *kvm_do_find_memory_region(struct kvm *kvm,
 		as_id_from = 0;
 		as_id_to = KVM_ADDRESS_SPACE_NUM - 1;
 	}
+
 	if (type == 0)
 		type = guest_ram_mem_type;
 
 	for (as_id = as_id_from; as_id <= as_id_to; as_id++) {
-		kvm_for_each_memslot(memslot, __kvm_memslots(kvm, as_id)) {
+		struct kvm_memslots *slots = __kvm_memslots(kvm, as_id);
+		int memslots_count = slots->used_slots;
+
+		DebugKVM("as_id %d\n", as_id);
+
+		while (memslots_count) {
+			struct kvm_memory_slot *memslot = NULL;
+			user_area_t *guest_area;
+			kvm_guest_mem_type_t guest_type;
+
+			memslot = reverse ?
+				&slots->memslots[memslots_count - 1] :
+				&slots->memslots[slots->used_slots - memslots_count];
+			memslots_count--;
+
+			DebugKVM("id %d memslot->id %d\n", id, memslot->id);
+
 			if ((id >= 0) && (id != memslot->id)) {
-				DebugKVM("slot %d is not slot to find %d\n",
-					memslot->id, id);
+				DebugKVM("slot %d is not slot to find %d\n", memslot->id, id);
 				continue;
 			}
+
 			if (memslot->arch.guest_areas.area == NULL) {
 				DebugKVM("slot %d is empty\n", memslot->id);
 				continue;
 			}
+
 			guest_type = memslot->arch.guest_areas.type;
+
 			if ((guest_type & type) == 0) {
-				DebugKVM("slot %d has other memory type "
-					"0x%x != 0x%x to find\n",
+				DebugKVM("slot %d has other memory type 0x%x != 0x%x to find\n",
 					memslot->id, guest_type, type);
 				continue;
 			}
+
 			guest_area = memslot->arch.guest_areas.area;
+
 			if (phys_mem) {
-				base_gpa = gfn_to_gpa(memslot->base_gfn);
-				area_size = guest_area->area_end -
-						guest_area->area_start;
-				if (address < base_gpa ||
-					address + size >
-						base_gpa + area_size) {
-					DebugKVM("start phys address 0x%lx "
-						"or end 0x%lx is outside of "
-						"slot #%d region from 0x%llx "
-						"to 0x%llx\n",
-						address, address + size,
-						memslot->id,
-						base_gpa,
+				gpa_t base_gpa = gfn_to_gpa(memslot->base_gfn);
+				e2k_size_t area_size =
+						guest_area->area_end - guest_area->area_start;
+
+				if (address < base_gpa || address + size > base_gpa + area_size) {
+					DebugKVM("start phys address 0x%lx or end 0x%lx is outside of slot #%d region from 0x%llx to 0x%llx\n",
+						address, address + size, memslot->id, base_gpa,
 						base_gpa + area_size);
 					continue;
 				}
-				/* convert physical address to virtual */
-				/* address of area */
-				address = guest_area->area_start +
-						(address - base_gpa);
+				/* convert physical address to virtual address of area */
+				address = guest_area->area_start + (address - base_gpa);
 			}
-			if (address != 0 &&
-				(address < guest_area->area_start ||
+
+			if (address != 0 && (address < guest_area->area_start ||
 					address >= guest_area->area_end)) {
-				DebugKVM("address 0x%lx outside of slot #%d "
-					"region from 0x%lx to 0x%lx\n",
-					address, memslot->id,
-					guest_area->area_start,
+				DebugKVM("address 0x%lx outside of slot #%d region from 0x%lx to 0x%lx\n",
+					address, memslot->id, guest_area->area_start,
 					guest_area->area_end);
 				continue;
 			}
-			if (size > guest_area->area_end -
-						guest_area->area_start) {
-				DebugKVM("size 0x%lx of slot #%d < memory "
-					"region size 0x%lx to find\n",
+
+			if (size > guest_area->area_end - guest_area->area_start) {
+				DebugKVM("size 0x%lx of slot #%d < memory region size 0x%lx to find\n",
 					size, memslot->id,
-					guest_area->area_end -
-						guest_area->area_start);
+					guest_area->area_end - guest_area->area_start);
 				continue;
 			}
-			DebugKVM("found memory region from 0x%lx to 0x%lx "
-				"at slot #%d\n",
-				guest_area->area_start, guest_area->area_end,
-				memslot->id);
+
+			DebugKVM("found memory region from 0x%lx to 0x%lx at slot #%d\n",
+				guest_area->area_start, guest_area->area_end, memslot->id);
+
 			if (phys_mem && virt_address != NULL)
 				*virt_address = address;
+
 			return guest_area;
 		}
 	}
+
 	DebugKVM("could not find any suitable memory slot\n");
+
 	return NULL;
 }
 
-static user_area_t *kvm_find_memory_region(struct kvm *kvm,
-			int slot, e2k_addr_t address, e2k_size_t size,
-			kvm_guest_mem_type_t type)
+static user_area_t *kvm_find_memory_region(struct kvm *kvm, int slot, e2k_addr_t address,
+			e2k_size_t size, kvm_guest_mem_type_t type)
 {
-	return kvm_do_find_memory_region(kvm, slot, address, size,
-			false, /* phys memory ? */ NULL, type);
+	return kvm_do_find_memory_region(kvm, slot, address, size, false,
+			/* phys memory ? */ NULL, type, false);
 }
 
-static user_area_t *kvm_find_phys_memory_region(struct kvm *kvm,
-			int slot, gpa_t gpa, e2k_size_t size,
-			e2k_addr_t *virt_address, kvm_guest_mem_type_t type)
+static user_area_t *kvm_find_memory_region_reverse(struct kvm *kvm, int slot, e2k_addr_t address,
+			e2k_size_t size, kvm_guest_mem_type_t type)
 {
-	return kvm_do_find_memory_region(kvm, slot, gpa, size,
-			true, /* phys memory ? */ virt_address, type);
+	DebugKVM("started\n");
+	return kvm_do_find_memory_region(kvm, slot, address, size, false,
+			/* phys memory ? */ NULL, type, true);
 }
 
-static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
-				kvm_guest_area_alloc_t __user *what)
+static user_area_t *kvm_find_phys_memory_region(struct kvm *kvm, int slot, gpa_t gpa,
+			e2k_size_t size, e2k_addr_t *virt_address, kvm_guest_mem_type_t type)
+{
+	return kvm_do_find_memory_region(kvm, slot, gpa, size, true,
+			/* phys memory ? */ virt_address, type, false);
+}
+
+static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm, kvm_guest_area_alloc_t __user *what)
 {
 	kvm_guest_area_alloc_t guest_chunk;
 	user_area_t *guest_area;
@@ -4333,13 +4318,16 @@ static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 			&guest_chunk, what);
 		return -EFAULT;
 	}
+
 	DebugKVM("started for region %px, start 0x%lx, size 0x%lx type %s "
 		"align 0x%lx\n",
 		guest_chunk.region, guest_chunk.start, guest_chunk.size,
 		(guest_chunk.type & guest_vram_mem_type) ? "VRAM" : "RAM",
 		guest_chunk.align);
+
 	size = guest_chunk.size;
 	type = guest_chunk.type;
+
 	if (type == 0)
 		type = guest_ram_mem_type;
 	if (type & guest_ram_mem_type) {
@@ -4351,6 +4339,7 @@ static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 				return -ENOMEM;
 		}
 	}
+
 	if (guest_chunk.region != NULL) {
 		region_addr = (e2k_addr_t)guest_chunk.region;
 	} else if (guest_chunk.start != 0) {
@@ -4359,6 +4348,7 @@ static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 	} else {
 		region_addr = 0;
 	}
+
 	/* FIXME: mutex cannot be locked here, because of following */
 	/* user_alloc_xxx() functions take this mutex too. */
 	/* Now memory slots only are created and deleted and not updated, */
@@ -4368,43 +4358,51 @@ static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 	/* functionality. Probably it can be get_xxx()/put_xxx() -> */
 	/* free_xxx() type mechanism to lock guest_area & memory slot */
 	/* updates */
-/*	mutex_lock(&kvm->slots_lock); */
-	if (!phys_mem) {
-		guest_area = kvm_find_memory_region(kvm, -1, region_addr,
-					size, type);
-	} else {
-		guest_area = kvm_find_phys_memory_region(kvm, -1, region_addr,
-					size, &guest_chunk.start, type);
-	}
+	/* mutex_lock(&kvm->slots_lock); */
+
+	flags = guest_chunk.flags;
+
+	if (!phys_mem)
+		guest_area = (flags & KVM_ALLOC_AREA_LOW) ?
+			kvm_find_memory_region_reverse(kvm, -1, region_addr, size, type) :
+			kvm_find_memory_region(kvm, -1, region_addr, size, type);
+
+	else
+		guest_area = kvm_find_phys_memory_region(kvm, -1, region_addr, size,
+			&guest_chunk.start, type);
+
 	if (guest_area == NULL) {
 		DebugKVM("could not find memory region for address 0x%lx\n",
 			region_addr);
 		ret = -EINVAL;
 		goto out_unlock;
 	}
-	flags = guest_chunk.flags;
-	if (flags & KVM_ALLOC_AREA_PRESENT) {
+
+	if (flags & KVM_ALLOC_AREA_PRESENT)
 		chunk = user_area_alloc_present(guest_area, guest_chunk.start,
 				guest_chunk.size, guest_chunk.align, flags);
-	} else if (flags & KVM_ALLOC_AREA_ZEROED) {
+	else if (flags & KVM_ALLOC_AREA_ZEROED)
 		chunk = user_area_alloc_zeroed(guest_area, guest_chunk.start,
 				guest_chunk.size, guest_chunk.align, flags);
-	} else if (flags & KVM_ALLOC_AREA_LOCKED) {
+	else if (flags & KVM_ALLOC_AREA_LOCKED)
 		chunk = user_area_alloc_locked(guest_area, guest_chunk.start,
 				guest_chunk.size, guest_chunk.align, flags);
-	} else {
+	else
 		chunk = user_area_get(guest_area, guest_chunk.start,
 				guest_chunk.size, guest_chunk.align, flags);
-	}
+
 	if (chunk == NULL) {
 		DebugKVM("could not allocate guest area size of 0x%lx\n",
 			guest_chunk.size);
 		ret = -ENOMEM;
 		goto out_unlock;
 	}
+
 	DebugKVM("allocated guest area from %px, size of 0x%lx\n",
 		chunk, guest_chunk.size);
+
 	guest_chunk.area = chunk;
+
 	if (copy_to_user(what, &guest_chunk, sizeof(guest_chunk))) {
 		DebugKVM("copy from %px to user %px failed\n",
 			what, &guest_chunk);
@@ -4412,8 +4410,9 @@ static long kvm_arch_ioctl_alloc_guest_area(struct kvm *kvm,
 		ret = -EFAULT;
 		goto out_unlock;
 	}
+
 out_unlock:
-/*	mutex_unlock(&kvm->slots_lock); see FIXME above */
+	/* mutex_unlock(&kvm->slots_lock); see FIXME above */
 	return ret;
 }
 

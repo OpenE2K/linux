@@ -154,15 +154,30 @@ do { \
 		protected_mode_message(1, MSG_ID, ##__VA_ARGS__); \
 } while (0)
 
+#define PM_SC_DBG_MODE_MSG_TYPE_ERROR		1
+#define PM_SC_DBG_MODE_MSG_TYPE_WARNING		2
+#define PM_SC_DBG_MODE_MSG_TYPE_PWARNING	3 /* maybe programmer's error */
+
 #define PROTECTED_MODE_WARNING(MSG_ID, ...) \
 do { \
 	if ((arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES) == 0) \
 	    && IF_PM_DBG_MODE(PM_SC_DBG_ISSUE_WARNINGS)) { \
 		if (IF_PM_DBG_MODE(PM_SC_DBG_WARNINGS_AS_ERRORS)) { \
-			protected_mode_message(1, MSG_ID, ##__VA_ARGS__); \
+			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_ERROR, \
+						MSG_ID, ##__VA_ARGS__); \
 		} else { \
-			protected_mode_message(2, MSG_ID, ##__VA_ARGS__); \
+			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_WARNING, \
+						MSG_ID, ##__VA_ARGS__); \
 		} \
+	} \
+} while (0)
+
+#define PROTECTED_MODE_PWARNING(MSG_ID, ...) \
+do { \
+	if ((arch_init_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES) == 0) \
+	    && IF_PM_DBG_MODE(PM_SC_DBG_ISSUE_WARNINGS)) { \
+			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_PWARNING, \
+						MSG_ID, ##__VA_ARGS__); \
 	} \
 } while (0)
 
@@ -273,11 +288,16 @@ enum pm_syscall_err_msg_id {
 	PMSCERRMSG_DSCR_WITHOUT_WRITE_PERM,
 	PMSCERRMSG_UNEXPECTED_TAG_IN_BUFF,
 
+	/* iset-specific messages: */
+	/* __iset__ >= 6 */
+	PMSCWARN_MMAP_SHARED_FLAG,
+
 	/* NB> New messages to add above this line */
 
 	/* Intro diagnostic messages: */
 	PMSCERRMSG_RUNTIME_ERROR,
 	PMSCERRMSG_RUNTIME_WARNING,
+	PMSCERRMSG_RUNTIME_PWARNING,
 
 	/* Total message number: */
 	PMSCERRMSG_NUMBER,

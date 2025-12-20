@@ -407,6 +407,9 @@ SYM_FUNC_END(__recovery_memcpy_8)
 
 SYM_FUNC_START(recovery_memcpy_fault)
 	{
+		setbp psz=0
+	}
+	{
 		nop
 		cmpldb %dr14, 0, %pred0
 		return %ctpr3

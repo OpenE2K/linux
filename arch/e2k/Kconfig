@@ -115,7 +115,6 @@ config E2K
 	select HAVE_MEMBLOCK_NODE_MAP
 	select HAVE_PCI
 	select HAVE_PERF_EVENTS
-	select HAVE_PREEMPT_LAZY
 	select HAVE_REGS_AND_STACK_ACCESS_API
 	select HAVE_RSEQ
 	select HAVE_TRACE_CLOCK
@@ -377,18 +376,8 @@ config E2K_E2C3
 	  the kernel on other machines types,
 	  otherwise you should say N here.
 
-config E2K_E48C
-	bool "Elbrus 48C (NUMA, 48 cores, IOHUB-2 , SOC)"
-	depends on LCC_VERSION >= 12800
-	help
-	  Support for Elbrus 48C systems.  Say 'Y' here if this kernel is
-	  supposed to run on an Elbrus 48C System On Chip
-	  Only choose this option if you have such a system and cannot run
-	  the kernel on other machines types,
-	  otherwise you should say N here.
-
 config E2K_E8V7
-	bool "Elbrus 8V7 (NUMA, 48 cores, IOHUB-2 , SOC)"
+	bool "Elbrus 8V7 (NUMA, 8 cores, IOHUB-2 , SOC)"
 	depends on LCC_VERSION >= 12800
 	help
 	  Support for Elbrus 8V7 systems.  Say 'Y' here if this kernel is
@@ -436,7 +425,7 @@ config E2K_MINVER_V7
 	bool "Elbrus v7"
 	help
 	  This options enables kernel with minimally supported Elbrus v7
-	  CPU architecture (Elbrus 48c, 8v7 and later).
+	  CPU architecture (Elbrus 32c, 8v7 and later).
 endchoice
 
 
@@ -453,7 +442,7 @@ config CPU_ISET_MIN
 	default 4 if E2K_E8C || E2K_E1CP
 	default 5 if E2K_E8C2
 	default 6 if E2K_E16C || E2K_E12C || E2K_E2C3
-	default 7 if E2K_E48C || E2K_E8V7
+	default 7 if E2K_E8V7
 
 # These show whether particular CPU is supported by current
 # configuration regardless of whether any other CPUs are supported.
@@ -478,10 +467,6 @@ config CPU_E16C
 
 config CPU_E2C3
 	def_bool E2K_E2C3 || !E2K_MACHINE && CPU_ISET_MIN <= 6
-
-config CPU_E48C
-	def_bool E2K_E48C || !E2K_MACHINE && CPU_ISET_MIN <= 7
-	depends on LCC_VERSION >= 12800
 
 config CPU_E8V7
 	def_bool E2K_E8V7 || !E2K_MACHINE && CPU_ISET_MIN <= 7
@@ -934,18 +919,33 @@ config TRACE_PT_ATOMIC
 	  will be replaced by its non-inline versions that have
 	  tracing properties
 
+choice
+	prompt "Kernel command line"
+	optional
+	default CMDLINE_OVERWRITE
+	help
+	  Setting this option allows the kernel command line arguments
+	  to be set.
+
+config CMDLINE_OVERWRITE
+	bool "Overwrite bootloader kernel arguments"
+	help
+	  Given string will overwrite any arguments passed in by
+	  a bootloader.
+
+config CMDLINE_EXTEND
+	bool "Extend bootloader kernel arguments"
+	help
+	  Given string will be concatenated with arguments passed in
+	  by a bootloader.
+
+endchoice
+
 config CMDLINE
+	string "Kernel command line arguments string"
+	depends on CMDLINE_OVERWRITE || CMDLINE_EXTEND
 	string "Command line of kernel's builtin boot"
 	default "root=/dev/sda3 console=ttyS0,115200 init=/root/init.sh ipv6.disable=1 usbcore.nousb raid=noautodetect force_C3"
-
-config CMDLINE_OVERRIDE
-	bool "Built-in command line overrides boot loader arguments"
-	help
-	  Set this option to 'Y' to have the kernel ignore the boot loader
-	  command line, and use ONLY the built-in command line.
-
-	  This is used to work around broken boot loaders.  This should
-	  be set to 'N' under normal conditions.
 
 #
 # Define implied options from the CPU selection here
@@ -997,8 +997,6 @@ config NR_CPUS
 	default 64 if E2K_E12C && NUMA
 	default 16 if E2K_E16C && !NUMA
 	default 64 if E2K_E16C && NUMA
-	default 48 if E2K_E48C && !NUMA
-	default 256 if E2K_E48C && NUMA
 	help
 	  This allows you to specify the maximum number of CPUs which this
 	  kernel will support.  The maximum supported value is 256 and the
@@ -1014,10 +1012,6 @@ config SCHED_MC
 	  Multi-core scheduler support improves the CPU scheduler's decision
 	  making when dealing with multi-core CPU chips at a cost of slightly
 	  increased overhead in some places.
-
-config MCST
-	bool "MCST additions"
-	default y
 
 config ARCH_HAS_CACHE_LINE_SIZE
 	def_bool y
@@ -1200,3 +1194,12 @@ config DMI
 	  here unless you have verified that your setup is not
 	  affected by entries in the DMI blacklist. Required by PNP
 	  BIOS code.
+
+config HAVE_PREEMPT_LAZY
+	default n
+	bool "Enable PREEMPT_LAZY"
+	help
+	  This LAZY bit will be promoted to the full NEED_RESCHED bit on tick.
+	  As such, the average delay between setting LAZY and actually rescheduling
+	  will be TICK_NSEC/2.
+	  The goal is to bridge the performance gap with Voluntary.

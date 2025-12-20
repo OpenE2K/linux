@@ -63,9 +63,6 @@ boot_do_sic_write_node_nbsr_reg(unsigned char __iomem *node_nbsr, int reg_offset
 #define nbsr_writew(value, addr)	writew((value), (addr))
 #define nbsr_write_relaxed(value, addr)	writel_relaxed((value), (addr))
 
-unsigned int sic_get_mc_ecc(int node, int num);
-void sic_set_mc_ecc(int node, int num, unsigned int reg_value);
-
 unsigned int sic_get_mc_opmb(int node, int num);
 unsigned int sic_get_mc_cfg(int node, int num);
 

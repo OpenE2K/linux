@@ -678,6 +678,15 @@ static inline bool tc_cond_is_special_mmu_aau(tc_cond_t cond)
 	return false;
 }
 
+static inline bool tc_cond_is_big_endian(tc_cond_t cond)
+{
+	if (tc_cond_is_special_mmu_aau(cond) || cond.root)
+		return false;
+
+	/* MASF1 has been handled so this is MASF{2-4} */
+	return !!(cond.mas & MAS_BIGENDIAN);
+}
+
 static inline bool tc_cond_is_check_ld(tc_cond_t cond)
 {
 	unsigned int mas = cond.mas;
@@ -976,15 +985,11 @@ typedef union {
 	};
 	unsigned long word;
 } ldst_rec_op_t;
-#define	LD_ST_REC_OPC_index(ld_st_rec)	(ld_st_rec.index)
-#define	LD_ST_REC_OPC_mas(ld_st_rec)	(ld_st_rec.mas)
-#define	LD_ST_REC_OPC_prot(ld_st_rec)	(ld_st_rec.prot)
-#define	LD_ST_REC_OPC_fmt(ld_st_rec)	(ld_st_rec.fmt)
-#define	LD_ST_REC_OPC_root(ld_st_rec)	(ld_st_rec.root)
-#define	LD_ST_REC_OPC_fmt_h(ld_st_rec)	(ld_st_rec.fmt_h)
-#define	LD_ST_REC_OPC_mode_h(ld_st_rec)	(ld_st_rec.mode_h)
-#define	LD_ST_REC_OPC_mask(ld_st_rec)	(ld_st_rec.mask)
-#define	LD_ST_REC_OPC_reg(ld_st_rec)	(ld_st_rec.word)
+
+static inline ldst_rec_op_t ldst_rec_dword(void)
+{
+	return (ldst_rec_op_t) { .fmt = LDST_DWORD_FMT };
+}
 
 #endif	/* ! __ASSEMBLY__ */
 

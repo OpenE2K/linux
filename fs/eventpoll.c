@@ -2606,7 +2606,7 @@ int prot_epoll_events_to_64(struct prot_epoll_event __user *events_128,
 			PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
 			     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
 			     "epoll_event", arg_num);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
 			return -EFAULT;
 		}
 
@@ -2614,7 +2614,7 @@ int prot_epoll_events_to_64(struct prot_epoll_event __user *events_128,
 		if (unlikely(rval)) {
 			PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT,
 				     __func__, (long) &events_128[i].data);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
 			return -EFAULT;
 		}
 	}
@@ -2633,8 +2633,12 @@ static int copy_epoll_event_64_to_128(struct epoll_event __user *event64,
 	int ret;
 
 	ret = copy_in_user(event128, event64, sizeof(*event64));
+	if (ret) {
+		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT, __func__, (long) event128);
+		return -EFAULT;
+	}
 
-	ret |= get_user(base, &((struct prot_epoll_event __user *)event64)->address);
+	ret = get_user(base, &((struct prot_epoll_event __user *)event64)->address);
 	ret |= get_user(size, &((struct prot_epoll_event __user *)event64)->size);
 
 	if (base && size) {
@@ -2648,11 +2652,11 @@ static int copy_epoll_event_64_to_128(struct epoll_event __user *event64,
 	}
 
 	ret |= put_user_tagged_16(lo, hi, tag, &event128->data);
-	if (ret) {
+
+	if (ret)
 		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT, __func__,
 						(long) &event128->data);
-		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-	}
+
 	print_epoll_event(event128, __func__, "[128]");
 	print_epoll_event((char *)event128 + 16, __func__, "[128]");
 
@@ -2677,8 +2681,8 @@ int epoll_events_64_to_128(struct epoll_event __user *events_64,
 			PROTECTED_MODE_ALERT(PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
 			     regs->sys_num, sys_call_ID_to_name[regs->sys_num],
 			     "epoll_event", arg_num);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
-			return -EINVAL;
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, rval);
+			return rval;
 		}
 	}
 
@@ -2753,10 +2757,6 @@ long protected_sys_epoll_wait(const unsigned long epfd,		/* a1 */
 	}
 
 	events64 = get_user_space(sizeof(struct epoll_event) * maxevents);
-	rval = prot_epoll_events_to_64(event, events64, maxevents, regs, 2/*arg_num*/);
-	if (rval)
-		return rval;
-
 	ret = sys_epoll_wait(epfd, events64, maxevents, timeout);
 	if (ret < 0)
 		return ret;

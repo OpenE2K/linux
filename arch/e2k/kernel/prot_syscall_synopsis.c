@@ -351,8 +351,8 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0x00000000000202,	/*	mmap	90		?LLLLL	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_munmap] =
-		{ 0xFFFFFFFF000101,	/*	munmap	91		PL	*/
-					-2, 0, 0, 0, 0, 0 },
+		{ 0xFFFFFFFF000100,	/*	munmap	91		PL	*/
+					0, 0, 0, 0, 0, 0 },
 	[__NR_truncate] =
 		{ 0xFFFFFFFF001300,	/*	truncate 92		SL	*/
 					0, 0, 0, 0, 0, 0 },
@@ -434,7 +434,7 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFFFFFFFFFF0100,	/*	sysinfo	116		PX	*/
 					sizeof(struct sysinfo), 0, 0, 0, 0, 0 },
 	[__NR_ipc] =
-		{ 0x80810200040400,	/*	ipc	117		IIL?pl	*/
+		{ 0x80820200040400,	/*	ipc	117		IIL?pl	*/
 					0, 0, 0, 0, 0, 0 },
 	[__NR_fsync] =
 		{ 0xFFFFFFFFFF0400,	/*	fsync	118		IX	*/
@@ -1328,7 +1328,7 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 					0, 0, 0, 0, 0, 0 },
 	[__NR_clone3] =
 		{ 0xFFFFFFFF000100,	/*	clone3	426		PL	*/
-					-2, 0, 0, 0, 0, 0 },
+					0, 0, 0, 0, 0, 0 }, /* arg check in the wrapper */
 	[__NR_fsopen] =
 		{ 0xFFFFFFFF040300,	/*	fsopen	427		SI	*/
 					0, 0, 0, 0, 0, 0 },

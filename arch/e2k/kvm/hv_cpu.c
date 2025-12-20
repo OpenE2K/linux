@@ -720,7 +720,6 @@ bool kvm_vcpu_exit_request(struct kvm_vcpu *vcpu)
 int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
 	gthread_info_t *gti = current_thread_info()->gthread_info;
-	e2k_upsr_t guest_upsr;
 	intc_info_cu_t *cu = &vcpu->arch.intc_ctxt.cu;
 	intc_info_mu_t *mu = vcpu->arch.intc_ctxt.mu;
 	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->arch.intc_ctxt;
@@ -732,7 +731,6 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (unlikely(r))
 		return r;
 
-	preempt_disable();
 	raw_all_irq_disable();
 
 	/*
@@ -749,7 +747,6 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (kvm_vcpu_exit_request(vcpu)) {
 		smp_store_mb(vcpu->mode, OUTSIDE_GUEST_MODE);
 		raw_all_irq_enable();
-		preempt_enable();
 		vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 		return 0;
 	}
@@ -808,7 +805,7 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
 	 * so it must be read before TIRs.
 	 */
-	SAVE_SBBP(intc_ctxt->sbbp);
+	save_sbbp(intc_ctxt->sbbp);
 
 	/*
 	 * Save guest TIRs should be at any case, including empty state
@@ -821,12 +818,12 @@ int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	intc_ctxt->exceptions = exceptions;
 
 	/* save current state of guest kernel UPSR */
-	NATIVE_DO_SAVE_UPSR_REG(guest_upsr);
 	if (gti != NULL) {
+		e2k_upsr_t guest_upsr;
+
+		NATIVE_DO_SAVE_UPSR_REG(guest_upsr);
 		DO_SAVE_GUEST_KERNEL_UPSR(gti, guest_upsr);
 	}
-
-	preempt_enable();
 
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 

@@ -147,12 +147,12 @@ static const int cap_last_cap = CAP_LAST_CAP;
 #ifdef CONFIG_DETECT_HUNG_TASK
 static unsigned long hung_task_timeout_max = (LONG_MAX/HZ);
 #endif
+#ifdef CONFIG_FANOTIFY
+#include <linux/fanotify.h>
+#endif
 
 #ifdef CONFIG_INOTIFY_USER
 #include <linux/inotify.h>
-#endif
-#ifdef CONFIG_FANOTIFY
-#include <linux/fanotify.h>
 #endif
 
 #ifdef CONFIG_SPARC64

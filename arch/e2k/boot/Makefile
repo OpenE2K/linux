@@ -91,26 +91,15 @@ else
 			  -DCONFIG_L_IOH2 \
 			  $(FLAGS_EPIC_EIOH)
       else
-       ifeq ($(CONFIG_E48C),y)
-	  KBUILD_CFLAGS += -DCONFIG_E48C \
-			   -DCONFIG_E2K_FULL_SIC \
-			   -DCONFIG_L_IOH2 \
-			   $(FLAGS_EPIC_EIOH)
-	  KBUILD_AFLAGS += -DCONFIG_E48C \
-			   -DCONFIG_E2K_FULL_SIC \
-			   -DCONFIG_L_IOH2 \
-			   $(FLAGS_EPIC_EIOH)
-       else
-        ifeq ($(CONFIG_E8V7),y)
-	 KBUILD_CFLAGS += -DCONFIG_E8V7 \
-			  -DCONFIG_E2K_FULL_SIC \
-			  -DCONFIG_L_IOH2 \
-			  $(FLAGS_EPIC_EIOH)
-	 KBUILD_AFLAGS += -DCONFIG_E8V7 \
-			  -DCONFIG_E2K_FULL_SIC \
-			  -DCONFIG_L_IOH2 \
-			  $(FLAGS_EPIC_EIOH)
-	endif
+       ifeq ($(CONFIG_E8V7),y)
+	KBUILD_CFLAGS += -DCONFIG_E8V7 \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
+	KBUILD_AFLAGS += -DCONFIG_E8V7 \
+			 -DCONFIG_E2K_FULL_SIC \
+			 -DCONFIG_L_IOH2 \
+			 $(FLAGS_EPIC_EIOH)
        endif
       endif
      endif

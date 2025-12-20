@@ -111,8 +111,6 @@ static void configure_iohub_apic(int domain)
 	tmp = E16C_SAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E2C3)
 	tmp = E2C3_SAPICINT_BASE + (domain * (APICINT_SIZE));
-#elif	defined(CONFIG_E48C)
-	tmp = E48C_SAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E8V7)
 	tmp = E8V7_SAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
@@ -145,8 +143,6 @@ static void configure_iohub_apic(int domain)
 	tmp = E16C_LAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E2C3)
 	tmp = E2C3_LAPICINT_BASE + (domain * (APICINT_SIZE));
-#elif	defined(CONFIG_E48C)
-	tmp = E48C_LAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E8V7)
 	tmp = E8V7_LAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
@@ -181,8 +177,6 @@ static void configure_iohub_apic(int domain)
 	tmp = E16C_IOAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E2C3)
 	tmp = E2C3_IOAPICINT_BASE + (domain * (APICINT_SIZE));
-#elif	defined(CONFIG_E48C)
-	tmp = E48C_IOAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E8V7)
 	tmp = E8V7_IOAPICINT_BASE + (domain * (APICINT_SIZE));
 #else

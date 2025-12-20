@@ -122,7 +122,7 @@ EXPORT_SYMBOL(enable_collect_interrupt_ticks);
 
 long TIME=0;
 long TIME1=0;
-extern const char *exc_tbl_name[];       
+extern const char *exc_tbl_name[];
 extern unsigned long sys_call_table[NR_syscalls];
 
 static void clear_interrupt_info(void)
@@ -147,11 +147,11 @@ static void print_interrupt_info(void)
 	pr_info("\t\t  ==============PROFILE  INFO=(%ld(ticks) /%ld(mks)/)"
 		"==============\n",
 		TIME1 - TIME, (TIME1 - TIME) / freq);
-    
+
 	for_each_possible_cpu(j) {
 
 	pr_info("\t\t\t CPU%d\n", j);
-        pnt = (time_info_t*) &system_info[j].max_disabled_interrupt;    
+        pnt = (time_info_t*) &system_info[j].max_disabled_interrupt;
         for (i = 0; i < sizeof(system_info_name)/sizeof(void *); i++) {
 		pr_info("  %30s  max time=%10ld   average=%10ld  "
 			"number=%10ld\n",
@@ -177,38 +177,38 @@ static void print_interrupt_info(void)
                     disable_interrupt[j].syscall_time[i]/freq/
                             ((disable_interrupt[j].syscall[i] == 0)? 1
                              : disable_interrupt[j].syscall[i]),
-                    disable_interrupt[j].syscall[i]);           
-            }    
+                    disable_interrupt[j].syscall[i]);
+            }
         }
-        
+
         printk("\n\t\t\t\t interrupts   \n");
         for (i = 0; i < exc_max_num; i++) {
             if (disable_interrupt[j].interrupts[i]) {
                 printk("  %30s max time=%5ld average=%5ld   number=%10ld \n",
-                    exc_tbl_name[i],  
+                    exc_tbl_name[i],
                     disable_interrupt[j].max_interrupts_time[i]/freq ,
                     disable_interrupt[j].interrupts_time[i]/freq/
                            ((disable_interrupt[j].interrupts[i] == 0) ?1
                               : disable_interrupt[j].interrupts[i]),
-                    disable_interrupt[j].interrupts[i]);           
-            }    
+                    disable_interrupt[j].interrupts[i]);
+            }
 
-        }    
+        }
         printk("\n\t\t\t\t DO_IRQ   \n");
-        for (i = 0; i < NR_VECTORS; i++) { 
+        for (i = 0; i < NR_VECTORS; i++) {
             if (disable_interrupt[j].do_irq[i]) {
                 printk("  %5d max time=%5ld average=%5ld   number=%10ld \n",
-                    i,  
+                    i,
                     disable_interrupt[j].max_do_irq_time[i]/freq ,
                     disable_interrupt[j].do_irq_time[i]/freq/
                             ((disable_interrupt[j].do_irq[i] ==0)? 1
                                : disable_interrupt[j].do_irq[i]),
-                    disable_interrupt[j].do_irq[i]);           
-            }    
-        }    
+                    disable_interrupt[j].do_irq[i]);
+            }
+        }
 
-    }    
-    
+    }
+
 };
 static void stop_interrupt_info(void)
 {
@@ -221,14 +221,14 @@ static void stop_interrupt_info(void)
            " begin_time(max_disabled_interrupt 1) =%lx "
            " end_time =%lx  max_time =%lx \n",
            TIME, TIME1,  system_info[0].max_disabled_interrupt.begin_time,
-           system_info[0].max_disabled_interrupt.begin_time 
+           system_info[0].max_disabled_interrupt.begin_time
                 +system_info[0].max_disabled_interrupt.max_time,
-           system_info[0].max_disabled_interrupt.max_time, 
-           system_info[1].max_disabled_interrupt.begin_time, 
-           system_info[1].max_disabled_interrupt.begin_time 
+           system_info[0].max_disabled_interrupt.max_time,
+           system_info[1].max_disabled_interrupt.begin_time,
+           system_info[1].max_disabled_interrupt.begin_time
                 +system_info[1].max_disabled_interrupt.max_time,
            system_info[1].max_disabled_interrupt.max_time);
-    
+
  };
 
 #else /* !CONFIG_E2K_PROFILING */
@@ -358,7 +358,7 @@ void fill_trap_stack_regs(const pt_regs_t *trap_pt_regs,
 		regs_trap->lsr1 = trap_pt_regs->lsr1;
 		regs_trap->ilcr1 = trap_pt_regs->ilcr1;
 	}
-	if (trap_pt_regs->trap && trap_pt_regs->trap->sbbp) {
+	if (trap_pt_regs->trap) {
 		memcpy(regs_trap->sbbp, trap_pt_regs->trap->sbbp,
 				sizeof(regs_trap->sbbp));
 	} else {
@@ -516,14 +516,12 @@ static void copy_proc_stack_regs(const struct pt_regs *limit_regs,
 		if (copied != sz)
 			memmove(regs->base_psp_stack - copied, dst, copied);
 
+		regs->orig_base_psp_stack_u = (unsigned long) u_src + sz - copied;
 		if (copied) {
 			regs->base_psp_stack -= copied;
 			regs->size_psp_stack += copied;
 			regs->orig_base_psp_stack_k -= copied;
-			regs->orig_base_psp_stack_u = (unsigned long) u_src + sz - copied;
 			regs->user_size_psp_stack += (on_reserve_stack()) ? 0 : copied;
-		} else {
-			regs->orig_base_psp_stack_u = 0;
 		}
 	} else {
 		regs->orig_base_psp_stack_u = 0;
@@ -614,14 +612,12 @@ static int copy_chain_stack_regs(const struct pt_regs *limit_regs,
 		if (copied != sz)
 			memmove(regs->base_chain_stack - copied, dst, copied);
 
+		regs->orig_base_chain_stack_u = (unsigned long) u_src + sz - copied;
 		if (copied) {
 			regs->base_chain_stack -= copied;
 			regs->size_chain_stack += copied;
 			regs->orig_base_chain_stack_k -= copied;
-			regs->orig_base_chain_stack_u = (unsigned long) u_src + sz - copied;
 			regs->user_size_chain_stack += (on_reserve_stack()) ? 0 : copied;
-		} else {
-			regs->orig_base_chain_stack_u = 0;
 		}
 	} else {
 		regs->orig_base_chain_stack_u = 0;
@@ -898,15 +894,15 @@ void tt0_prolog_ticks(long ticks)
 void
 print_cli_info(void)
 {
-	
-	printk("print_cli_info: for CPU 0\n");	
+
+	printk("print_cli_info: for CPU 0\n");
 	printk("Max_tt0_prolog %ld\n", tt0_info[0].max_tt0_prolog);
 	printk("max_cli %ld max_cli_ip 0x%lx max_cli_cl %ld end_cl %ld\n",
 		cli_info[0].max_cli,
 		cli_info[0].max_cli_ip,
 		cli_info[0].max_cli_cl,
 		cli_info[0].max_cli_cl + cli_info[0].max_cli);
-	
+
 	printk("max_gcli %ld max_gcli_ip 0x%lx max_gcli_cl %ld\n",
 		cli_info[0].max_gcli,
 		cli_info[0].max_gcli_ip,
@@ -921,7 +917,7 @@ print_cli_info(void)
 		cli_info[1].max_cli_ip,
 		cli_info[1].max_cli_cl,
 		cli_info[1].max_cli_cl + cli_info[1].max_cli);
-	
+
 	printk("max_gcli %ld max_gcli_ip 0x%lx max_gcli_cl %ld\n",
 		cli_info[1].max_gcli,
 		cli_info[1].max_gcli_ip,
@@ -929,7 +925,7 @@ print_cli_info(void)
 }
 #else // CONFIG_CLI_CHECK_TIME
 void
-print_cli_info(void) {}	
+print_cli_info(void) {}
 #endif
 
 void print_mmap(struct task_struct *task)
@@ -980,7 +976,7 @@ void print_mmap(struct task_struct *task)
 		} else {
 			pr_cont("\n");
 		}
-	}	
+	}
 	printk("============ END OF MMAP AREAS all_sz %ld ======\n", all_sz);
 
 	if (locked)
@@ -1166,10 +1162,10 @@ void print_tc_record(const trap_cellar_t *tcellar, int num)
 	       "                 clw      0x%x, rcv       0x%x  dst_rcv 0x%x\n",
 	       num,
 	       (u64) tcellar->address, data, data_tag,
-	       (u64) AW(tcellar->condition), 
-	       (u32)AW(dst), (u32)(AS(dst).address), (u32)(AS(dst).vl), 
+	       (u64) AW(tcellar->condition),
+	       (u32)AW(dst), (u32)(AS(dst).address), (u32)(AS(dst).vl),
 	       (u32)(AS(dst).vr),
-	       (u32)AW(opcode), (u32)(AS(opcode).fmt),(u32)(AS(opcode).npsp), 
+	       (u32)AW(opcode), (u32)(AS(opcode).fmt),(u32)(AS(opcode).npsp),
 	       (u32)AS(tcellar->condition).store,
 	       (u32)AS(tcellar->condition).s_f,
 	       (u32)AS(tcellar->condition).mas,
@@ -1186,9 +1182,9 @@ void print_tc_record(const trap_cellar_t *tcellar, int num)
 	       (u32)AS(ftype).prot_page,	(u32)AS(ftype).priv_page,
 	       (u32)AS(ftype).illegal_page,	(u32)AS(ftype).nwrite_page,
 	       (u32)AS(ftype).page_miss,	(u32)AS(ftype).ph_bound,
-	       (u32)AS(tcellar->condition).miss_lvl, 
-	       (u32)AS(tcellar->condition).num_align, 
-	       (u32)AS(tcellar->condition).empt, 
+	       (u32)AS(tcellar->condition).miss_lvl,
+	       (u32)AS(tcellar->condition).num_align,
+	       (u32)AS(tcellar->condition).empt,
 	       (u32)AS(tcellar->condition).clw,
 	       (u32)AS(tcellar->condition).rcv,
 	       (u32)AS(tcellar->condition).dst_rcv);
@@ -1209,9 +1205,6 @@ void print_all_TC(const trap_cellar_t *TC, int TC_count)
 void print_SBBP_pt_regs(const struct trap_pt_regs *trap)
 {
 	int i;
-
-	if (unlikely(trap->sbbp == NULL))
-		return;
 
 	for (i = 0; i < SBBP_ENTRIES_NUM; i += 4) {
 		pr_alert("sbbp%-2d  0x%-12llx 0x%-12llx 0x%-12llx 0x%-12llx\n",
@@ -1287,7 +1280,7 @@ void print_pt_regs(const pt_regs_t *regs)
 #endif
 
 		exceptions = print_all_TIRs(trap->TIRs, trap->nr_TIRs);
-		if (regs->trap && regs->trap->sbbp) {
+		if (regs->trap) {
 			print_SBBP_pt_regs(trap);
 		}
 		print_all_TC(trap->tcellar, trap->tc_count);
@@ -1341,7 +1334,10 @@ void notrace arch_trigger_cpumask_backtrace(const cpumask_t *mask,
 		if (cpu == this_cpu)
 			continue;
 
-		stack_regs->show_trap_regs = debug_trap;
+		/* Always show trap regs for user threads and
+		 * skip by default fo kernel threads to make
+		 * panic's stacks more robust. */
+		stack_regs->show_trap_regs = debug_trap || !(current->flags & PF_KTHREAD);
 		stack_regs->show_user_regs = debug_userstack;
 # ifdef CONFIG_DATA_STACK_WINDOW
 		stack_regs->show_k_data_stack = debug_datastack;
@@ -1656,7 +1652,7 @@ notrace noinline long parse_chain_stack(bool user, struct task_struct *p,
 }
 
 
-#ifdef CONFIG_USR_CONTROL_INTERRUPTS        
+#ifdef CONFIG_USR_CONTROL_INTERRUPTS
 static notrace int correct_psr_register(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 		unsigned long corrected_frame_addr, chain_write_fn_t write_frame, void *arg)
 {
@@ -1776,7 +1772,10 @@ print_stack_frames(struct task_struct *task, const struct pt_regs *pt_regs,
 		pr_alert("  %d: print stack: works already on cpu %d\n",
 				task_pid_nr(current), cpu);
 	} else {
-		stack_regs->show_trap_regs = debug_trap;
+		/* Always show trap regs for user threads and
+		 * skip by default fo kernel threads to make
+		 * panic's stacks more robust. */
+		stack_regs->show_trap_regs = debug_trap || !(current->flags & PF_KTHREAD);
 		stack_regs->show_user_regs = debug_userstack;
 #ifdef CONFIG_DATA_STACK_WINDOW
 		stack_regs->show_k_data_stack = debug_datastack;
@@ -3173,7 +3172,7 @@ sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
 	case PRINT_REGS:
 		DbgESW("PRINT_PT_REGS\n");
 		print_cpu_regs((char *) arg2);
-		break;	
+		break;
 	case START_CLI_INFO:
 		#ifdef CONFIG_CLI_CHECK_TIME
 			start_cli_info();
@@ -3205,17 +3204,17 @@ sys_e2k_syswork(long syswork, long arg2, long arg3, long arg4, long arg5)
                 unsigned long psr;
                 arg2 = !!arg2;
                 current_thread_info()->flags &= ~_TIF_USR_CONTROL_INTERRUPTS;
-                current_thread_info()->flags |= 
+                current_thread_info()->flags |=
                                             arg2 << TIF_USR_CONTROL_INTERRUPTS;
                 if (arg2) {
-                        psr = (PSR_UIE | PSR_UNMIE | PSR_NMIE | PSR_IE | PSR_SGE); 
+                        psr = (PSR_UIE | PSR_UNMIE | PSR_NMIE | PSR_IE | PSR_SGE);
                 } else {
-                        psr = (PSR_NMIE | PSR_IE | PSR_SGE); 
-                }    
+                        psr = (PSR_NMIE | PSR_IE | PSR_SGE);
+                }
 		parse_chain_stack(true, current, correct_psr_register, (void *) psr);
             }
-#endif /* CONFIG_USR_CONTROL_INTERRUPTS */ 
-                break; 
+#endif /* CONFIG_USR_CONTROL_INTERRUPTS */
+                break;
 	default:
 		rval = -1;
 		goto user_syswork;

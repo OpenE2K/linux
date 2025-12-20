@@ -1275,4 +1275,9 @@ static __always_inline void native_write_aads_4_reg(int AADs_no,
 	}
 }
 
+static __always_inline void native_clear_aads(void)
+{
+	NATIVE_CLEAR_AAU_AADS();
+}
+
 #endif /* _NATIVE_AAU_REGS_ACCESS_H_ */

@@ -78,48 +78,62 @@ native_recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
 }
 static inline void
 native_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
-		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load, u32 first_time)
+		e2k_addr_t addr_to_hi, int vr, ldst_rec_op_t ld_rec_opc, int chan,
+		int qp_load, int atomic_load, bool big_endian, u32 first_time)
 {
+	u64 opc_lo = AW(ld_rec_opc);
+	u64 opc_hi = opc_lo | 8ULL;
+
+	if (qp_load && big_endian) {
+		swap(opc_lo, opc_hi);
+	}
+
 	if (atomic_load) {
 		NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_VR_ATOMIC(addr_from, addr_to,
-				addr_to_hi, vr, ld_rec_opc);
+				addr_to_hi, vr, opc_lo, opc_hi);
 	} else {
 		NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_CH_VR(addr_from, addr_to,
-				addr_to_hi, vr, ld_rec_opc, chan, qp_load,
+				addr_to_hi, vr, opc_lo, opc_hi, chan, qp_load,
 				first_time);
 	}
 }
 
 static inline void
 native_recovery_faulted_load_to_cpu_greg(e2k_addr_t address, u32 greg_num_d,
-		int vr, u64 ld_rec_opc, int chan_opc,
-		int qp_load, int atomic_load)
+		int vr, ldst_rec_op_t ld_rec_opc, int chan_opc,
+		int qp_load, int atomic_load, bool big_endian)
 {
+	u64 opc_lo = AW(ld_rec_opc);
+	u64 opc_hi = opc_lo | 8ULL;
+
+	if (qp_load && big_endian) {
+		swap(opc_lo, opc_hi);
+	}
+
 	if (atomic_load) {
-		NATIVE_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(address,
-				ld_rec_opc, greg_num_d, vr, qp_load);
+		NATIVE_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(address, opc_lo, opc_hi,
+				greg_num_d, vr, qp_load);
 	} else {
-		NATIVE_RECOVERY_LOAD_TO_A_GREG_CH_VR(address,
-				ld_rec_opc, greg_num_d, chan_opc, vr, qp_load);
+		NATIVE_RECOVERY_LOAD_TO_A_GREG_CH_VR(address, opc_lo, opc_hi,
+				greg_num_d, chan_opc, vr, qp_load);
 	}
 }
 
 static inline void
 native_recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
-		int vr, u64 ld_rec_opc, int chan_opc,
-		int qp_load, int atomic_load, u64 *saved_greg_lo,
+		int vr, ldst_rec_op_t ld_rec_opc, int chan_opc,
+		int qp_load, int atomic_load, bool big_endian, u64 *saved_greg_lo,
 		u64 *saved_greg_hi)
 {
 	if (!saved_greg_lo) {
 		native_recovery_faulted_load_to_cpu_greg(address,
 				greg_num_d, vr, ld_rec_opc, chan_opc, qp_load,
-				atomic_load);
+				atomic_load, big_endian);
 	} else {
 		native_recovery_faulted_move(address,
 				(u64) saved_greg_lo, (u64) saved_greg_hi,
 				vr, ld_rec_opc, chan_opc, qp_load,
-				atomic_load, 1);
+				atomic_load, big_endian, 1);
 	}
 }
 
@@ -190,22 +204,21 @@ recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
 }
 static inline void
 recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
-		int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load, u64 *saved_greg_lo,
-		u64 *saved_greg_hi, tc_cond_t cond)
+		int vr, ldst_rec_op_t ld_rec_opc, int chan,
+		int qp_load, int atomic_load, bool big_endian,
+		u64 *saved_greg_lo, u64 *saved_greg_hi, tc_cond_t cond)
 {
-	native_recovery_faulted_load_to_greg(address, greg_num_d,
-			vr, ld_rec_opc, chan, qp_load, atomic_load,
+	native_recovery_faulted_load_to_greg(address, greg_num_d, vr, ld_rec_opc,
+			chan, qp_load, atomic_load, big_endian,
 			saved_greg_lo, saved_greg_hi);
 }
 static inline void
-recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
-		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load, u32 first_time,
-		tc_cond_t cond)
+recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to, e2k_addr_t addr_to_hi,
+		int vr, ldst_rec_op_t ld_rec_opc, int chan, int qp_load,
+		int atomic_load, bool big_endian, u32 first_time, tc_cond_t cond)
 {
 	native_recovery_faulted_move(addr_from, addr_to, addr_to_hi, vr,
-			ld_rec_opc, chan, qp_load, atomic_load, first_time);
+			ld_rec_opc, chan, qp_load, atomic_load, big_endian, first_time);
 }
 
 static inline bool

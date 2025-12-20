@@ -433,6 +433,9 @@ void untrack_pfn(struct vm_area_struct *vma, unsigned long pfn, unsigned long si
 	phys_addr_t paddr = PFN_PHYS(pfn);
 	unsigned long prot;
 
+	if (vma && !(vma->vm_flags & VM_MEMTYPE_TRACKED))
+		return;
+
 	/* PCI memory is always of external type, nothing to untrack here */
 	if (!region_is_ram_only(paddr, paddr + PAGE_SIZE))
 		return;

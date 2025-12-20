@@ -102,6 +102,22 @@ struct clone_args {
 	__aligned_u64 set_tid_size;
 	__aligned_u64 cgroup;
 };
+#if defined(__e2k__) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+struct protected_clone_args {
+	__aligned_u64 flags;
+	e2k_ptr_t     pidfd;
+	e2k_ptr_t     child_tid;
+	e2k_ptr_t     parent_tid;
+	__aligned_u64 exit_signal;
+	e2k_ptr_t     stack;
+	__aligned_u64 stack_size;
+	e2k_ptr_t     tls;
+	e2k_ptr_t     set_tid;
+	__aligned_u64 set_tid_size;
+	__aligned_u64 cgroup;
+};
+#endif /* CONFIG_PROTECTED_MODE */
 #endif
 
 #define CLONE_ARGS_SIZE_VER0 64 /* sizeof first published struct */

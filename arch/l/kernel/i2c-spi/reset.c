@@ -35,7 +35,116 @@
 
 static struct pci_dev *l_reset_device = NULL;
 
-int (*l_set_boot_mode)(int);
+
+/*
+ * This is the only way to put data to boot while reset
+ */
+
+#define E_CSR		0x00 /* Ethernet Control/Status Register */
+# define STOP		(1 << 2)  /* RW1, Stop */
+#define E_BASE_ADDR	0x0c /* Ethernet	Base Address Register */
+static int set_iohub_eth_for_special_reset(int m, void __iomem *eth_addr)
+{
+	int i;
+
+	if (!eth_addr)
+		return -1;
+
+	/* At first stop the card */
+	boot_writel(STOP, eth_addr + E_CSR);
+
+	/* wait for stop */
+	for (i = 0; i < 1000; i++) {
+		if (boot_readl(eth_addr + E_CSR) & STOP)
+			break;
+	}
+	if (i == 1000) {
+		return -1;
+	}
+
+	boot_writel(m, eth_addr + E_BASE_ADDR);
+	(void)boot_readl(eth_addr + E_BASE_ADDR);
+
+	pr_info("Special reboot data written to 0x%llx\n",
+		(u64)(eth_addr + E_BASE_ADDR));
+	return 0;
+}
+
+#define MGB_E_BASE_ADDR	0x18 /* Ethernet Base Address Register */
+static int set_eioh_eth_for_special_reset(int m, void __iomem *eth_addr)
+{
+	int i;
+
+	if (!eth_addr)
+		return -1;
+
+	/* At first stop the card */
+	boot_writel(STOP, eth_addr + E_CSR);
+
+	/* wait for stop */
+	for (i = 0; i < 1000; i++) {
+		if (boot_readl(eth_addr + E_CSR) & STOP)
+			break;
+	}
+	if (i == 1000) {
+		return -1;
+	}
+
+	boot_writel(m, eth_addr + MGB_E_BASE_ADDR);
+	(void)boot_readl(eth_addr + MGB_E_BASE_ADDR);
+	pr_info("Special reboot data written to 0x%llx\n",
+		(u64)(eth_addr + MGB_E_BASE_ADDR));
+	return 0;
+}
+
+static const struct pci_device_id l_iohub_eth_devices[] = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_E1000) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_ETH) },
+	{ }	/* terminate list */
+};
+
+static const struct pci_device_id l_eioh_eth_devices[] = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGB) },
+	{ }	/* terminate list */
+};
+
+static int __l_set_boot_mode(int mode,
+		const struct pci_device_id *eth_devices,
+		int (*l_set_boot_mode_hook)(int mode, void __iomem *eth_addr))
+{
+	int ret;
+	u64 phys_regs;
+	struct pci_dev *pdev = NULL;
+	const struct pci_device_id *ent;
+	/* Check on board cards for KPI2 and eioh */
+	/* to define card for special reset.	  */
+	for_each_pci_dev(pdev) {
+		ent = pci_match_id(eth_devices, pdev);
+		if (ent && dev_to_node(&pdev->dev) <= 0 &&
+				PCI_FUNC(pdev->devfn) == 0) {
+			goto found;
+		}
+	}
+	return -ENOENT;
+found:
+	phys_regs = pci_resource_start(pdev, 0);
+
+	ret = pci_enable_device(pdev);
+	if (WARN_ON(ret))
+		return ret;
+	return l_set_boot_mode_hook(mode, (void *)phys_regs);
+}
+
+static int l_set_boot_mode(int mode)
+{
+	if (cpu_has_epic()) {
+		return __l_set_boot_mode(mode, l_eioh_eth_devices,
+					set_eioh_eth_for_special_reset);
+	} else {
+		return __l_set_boot_mode(mode, l_iohub_eth_devices,
+					set_iohub_eth_for_special_reset);
+	}
+}
 
 
 bool check_reset_by_lwdt(void)
@@ -111,7 +220,7 @@ static void l_reset_machine(char *cmd)
 		l_reset_pcie();
 	}
 
-	if (cmd && !strcmp(cmd, "bootcmd") && l_set_boot_mode)
+	if (cmd && !strcmp(cmd, "bootcmd"))
 		l_set_boot_mode(BOOT_MODE_BOOTCMD);
 
 	DebugRS("l_reset_machine() write to:0x%x val:0x%x\n",

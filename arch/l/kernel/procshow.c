@@ -591,18 +591,13 @@ static const struct proc_ops bootlog_proc_ops = {
 
 static int __init init_procshow(void)
 {
-	const char *signature;
 
 	if (bootblock_virt == NULL) {
 		return -EINVAL;
 	}
 
-	signature = (char *) bootblock_virt->info.bios.signature;
-	if (!strcmp(signature, BIOS_INFO_SIGNATURE)) {
-		if (!proc_create(BOOTDATA_FILENAME, S_IRUGO, NULL,
-				 &bootdata_proc_ops))
-			return -ENOMEM;
-	}
+	if (!proc_create(BOOTDATA_FILENAME, S_IRUGO, NULL, &bootdata_proc_ops))
+		return -ENOMEM;
 
 	if (!proc_create(LOADTIME_FILENAME, S_IRUGO, NULL, &loadtime_proc_ops))
 		return -ENOMEM;

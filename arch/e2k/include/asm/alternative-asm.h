@@ -85,7 +85,7 @@
 .endm
 
 /* CPU_HWBUG_JUMP: mark labels that are not targets of a call or jump */
-#if CONFIG_LCC_VERSION >= 12700 && __iset__ <= 6
+#if __LCC__ >= 127 && __iset__ <= 6
 # define NONTARGET_LABEL(num) .non_target_label num;
 #else
 # define NONTARGET_LABEL(num) num:

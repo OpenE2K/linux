@@ -42,15 +42,9 @@
 
 long long sclkr_sched_offset = 0;
 int sclkr_initialized = 0;
-#ifdef DEBUG_SCLKR_FREQ
-static int rtc_wr_sec = 0;
-#endif
-
 static DEFINE_MUTEX(sclkr_set_lock); /* for /proc/sclkr_src */
-#ifdef DEBUG_SCLKR_FREQ
-static DEFINE_PER_CPU(u32, prev_freq);
-static DEFINE_PER_CPU(u32, freq_print) = 0;
-#endif
+static int print_sec = 0;
+static int num_double_pulse = 0;
 
 u64 basic_freq_hz = 1;	/* 1 means there was not call to basic_freq_setup()
 			 * and will be used hardware setting */
@@ -59,12 +53,6 @@ int __init basic_freq_setup(char *str)
 	if (!str)
 		return 0;
 	basic_freq_hz = simple_strtoul(str, &str, 0);
-#ifdef DEBUG_SCLKR_FREQ
-	int cpu;
-
-	for_each_possible_cpu(cpu)
-		per_cpu(prev_freq, cpu) = basic_freq_hz;
-#endif
 	return 1;
 }
 __setup("sclkr_hz=", basic_freq_setup);
@@ -80,122 +68,71 @@ __setup("watch_sclkr", set_watch4sclkr);
 /* Use an aligned structure to make it occupy a whole cache line */
 struct prev_sclkr prev_sclkr = { ATOMIC64_INIT(0) };
 
-/* exponential moving average of frequency */
-DEFINE_PER_CPU(int, ema_freq);
-#define OSCIL_JIT_SHFT	10
-
-static u64 read_sclkr(struct clocksource *cs)
+notrace
+static u64 read_sclkr_com(int sync, int print)
 {
 	u64 sclkr_sec, sclkr, res;
 	u32 freq;
-	e2k_sclkm1_t sclkm1;
 	unsigned long flags;
-#ifdef DEBUG_SCLKR_FREQ
-	u32 this_prev_freq;
+	e2k_sclkm1_t sclkm1;
 
-	this_prev_freq = __this_cpu_read(prev_freq);
-#endif
 	raw_all_irq_save(flags);
 	sclkr = READ_SSCLKR_REG();
 	sclkm1 = READ_SSCLKM1_REG();
 	sclkr_sec = sclkr >> 32;
 	freq = sclkm1.div + 1;
 
-	if (unlikely(sclkr_mode != SCLKR_INT && !sclkm1.mode ||
+	if (print) {
+		if (unlikely(sclkr_mode != SCLKR_INT && !sclkm1.mode ||
 			!sclkm1.sw || !freq)) {
-		panic("sclkr ERROR: sclkr_mode is not internal but sclkm1.mode was unset (by hardware ?).\n"
+			panic("sclkr ERROR: sclkr_mode is not internal but sclkm1.mode was unset (by hardware ?).\n"
 			"There is no PulsePerSecond signal. Do set sclkr=no in cmdline.\n"
 			"CPU%02d sclkr=.%09lld, freq=%u Hz, sclkm1=0x%llx, sclkr_mode=%d\n",
 			raw_smp_processor_id(), (u64) (u32) sclkr, freq,
 			AW(sclkm1), sclkr_mode);
-	}
-#ifdef DEBUG_SCLKR_FREQ
-	if (unlikely(abs(this_prev_freq - freq) >
-		     (this_prev_freq >> OSCIL_JIT_SHFT))) {
-		if (abs(freq - __this_cpu_read(freq_print)) > 2 &&
-				/* write to RTC may change PPS phase */
-				rtc_wr_sec != sclkr_sec &&
-				(rtc_wr_sec + 1) != sclkr_sec) {
-			__this_cpu_write(freq_print, freq);
-			pr_err("CPU %d SCLKR ERROR freq(div)= %u prev=%u rtcwr=%d sec=%lld\n",
-				raw_smp_processor_id(), freq, this_prev_freq,
-				rtc_wr_sec, sclkr_sec);
 		}
-
-		freq = basic_freq_hz;
 	}
-	__this_cpu_write(prev_freq, freq);
-#endif
-	res = sclkr2ns(sclkr, freq, true);
+	if (unlikely(freq < 1000)) {
+		num_double_pulse++;
+		if (print) {
+			if (sclkr_sec - print_sec > 1000) {
+				print_sec = sclkr_sec;
+				pr_err("CPU %d SCLKR ERROR: double PPS after %lld ns. sclkm1.div=%u << basic_freq=%llu is set %d times. sclkr.sec=%lld\n",
+					raw_smp_processor_id(),
+					freq * NSEC_PER_SEC / basic_freq_hz, freq,
+					basic_freq_hz, num_double_pulse,
+					sclkr_sec);
+				num_double_pulse = 0;
+			}
+		}
+		freq = basic_freq_hz;
+		sclkm1 = (e2k_sclkm1_t) { .sw = 1, .trn = 0, .mdiv = 1,
+				.mode = 1, .div = basic_freq_hz};
+		WRITE_SSCLKM1_REG(sclkm1);
+		sclkr -= (1LL << 32);
+		WRITE_SSCLKR_REG(sclkr);
+		/* it would be more correct to add freq to sclkr.lo */
+	}
+	res = sclkr2ns(sclkr, freq, sync);
 	raw_all_irq_restore(flags);
+
 	return res;
 }
-
+static u64 read_sclkr(struct clocksource *cs)
+{
+	return read_sclkr_com(1, 1);
+}
 
 notrace
 u64 read_sclkr_nosync(void)
 {
-	u64 sclkr, res;
-	u32 freq;
-	unsigned long flags;
-	e2k_sclkm1_t sclkm1;
-#ifdef DEBUG_SCLKR_FREQ
-	u32 this_prev_freq;
-
-	this_prev_freq = __this_cpu_read(prev_freq);
-#endif
-	raw_all_irq_save(flags);
-
-	sclkr = READ_SSCLKR_REG();
-	sclkm1 = READ_SSCLKM1_REG();
-	freq = sclkm1.div + 1;
-
-	if (unlikely(!freq)) {
-		res = 0;
-	} else {
-#ifdef DEBUG_SCLKR_FREQ
-		if (unlikely(abs(this_prev_freq - freq) > (this_prev_freq >> OSCIL_JIT_SHFT)))
-			freq = basic_freq_hz;
-		__this_cpu_write(prev_freq, freq);
-#endif
-		res = sclkr2ns(sclkr, freq, false);
-	}
-	raw_all_irq_restore(flags);
-
-	return res;
+	return read_sclkr_com(0, 0);
 }
 
 notrace
 u64 read_sclkr_sync(void)
 {
-	u64 sclkr, res;
-	u32 freq;
-	unsigned long flags;
-	e2k_sclkm1_t sclkm1;
-#ifdef DEBUG_SCLKR_FREQ
-	u32 this_prev_freq;
-
-	this_prev_freq = __this_cpu_read(prev_freq);
-#endif
-	raw_all_irq_save(flags);
-
-	sclkr = READ_SSCLKR_REG();
-	sclkm1 = READ_SSCLKM1_REG();
-	freq = sclkm1.div + 1;
-
-	if (unlikely(!freq)) {
-		res = 0;
-	} else {
-#ifdef DEBUG_SCLKR_FREQ
-		if (unlikely(abs(this_prev_freq - freq) > (this_prev_freq >> OSCIL_JIT_SHFT)))
-			freq = basic_freq_hz;
-		__this_cpu_write(prev_freq, freq);
-#endif
-		res = sclkr2ns(sclkr, freq, true);
-	}
-	raw_all_irq_restore(flags);
-
-	return res;
+	return read_sclkr_com(1, 0);
 }
 /* For PTP in mgb Ethernet controller */
 EXPORT_SYMBOL(read_sclkr_sync);
@@ -420,8 +357,6 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 	pr_info("sclk_register old mod %d new %ld basic_fr_hz=%lld m1=%llx\n",
 		sclkr_mode, new_sclkr_mode, basic_freq_hz,
 		READ_SSCLKM1_REG().word);
-	for_each_possible_cpu(cpu)
-		per_cpu(ema_freq, cpu) = basic_freq_hz;
 #ifdef DEBUG_SCLKR_FREQ
 	for_each_possible_cpu(cpu)
 		per_cpu(prev_freq, cpu) = basic_freq_hz;
@@ -493,7 +428,7 @@ noinline int sclk_register(void *new_sclkr_src_arg)
 
 	all_irq_save(flags);
 	freq = basic_freq_hz;
-	safe_lo = (freq >> 2) + (freq >> 3) + (freq >> 4) + (freq >> 5);	/* 46% reserve */
+	safe_lo = (freq * 15) >> 5;	/* 15/32 or +-0,47 sec from the seconds borders */
 	safe_lo2 = freq - safe_lo;
 	pr_info("sclkr INFO safe_lo=%u %u fr=%u div=%u bas=%llu\n",
 		safe_lo, safe_lo2, freq, READ_SSCLKM1_REG().div, basic_freq_hz);

@@ -1233,6 +1233,8 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 	regs->wd.psize = 0;
 	ti->u_hw_stack = u_hw_stack;
 
+	regs->rndpr = E2K_INITIAL_RNDPR;
+
 	return;
 
 fatal_error:
@@ -1932,6 +1934,10 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 		new_ti->signal_stack.base = 0;
 		new_ti->signal_stack.size = 0;
 		new_ti->signal_stack.used = 0;
+
+		childregs->rndpr = E2K_INITIAL_RNDPR;
+
+		childregs->aasr = E2K_NULL_AASR;
 	} else {
 		/*
 		 * User process creation
@@ -2132,7 +2138,11 @@ void machine_power_off(void)
  */
 void native_default_idle(void)
 {
-	/* loop is done by the caller */
+	/* Using interceptable wait by default even before cpuidle
+	 * initialization speeds up virtual machine boot on highly
+	 * loaded servers by avoiding meaningless hogging of CPUs
+	 * with idle loops. */
+	C1_enter_v3();
 	local_irq_enable();
 }
 EXPORT_SYMBOL(native_default_idle);
@@ -2302,7 +2312,7 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	}
 #endif
 
-	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(next);
+	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(next, prev->mm == next->mm);
 #ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
 	if (!MMU_IS_SEPARATE_PT()) {
 		if (IS_ENABLED(CONFIG_NUMA) && next_pgd) {
@@ -2347,7 +2357,7 @@ int find_cui_by_ip(unsigned long ip)
 
 	/* Trampolines in kernel space use kernel's CUI */
 	if (is_trampoline(ip))
-		return 0;
+		return KERNEL_CODES_INDEX;
 
 	mutex_lock(&mm->context.cut_mask_lock);
 

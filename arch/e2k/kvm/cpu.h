@@ -73,7 +73,7 @@ extern noinline __interrupt void startup_pv_vcpu(struct kvm_vcpu *vcpu,
 extern noinline __interrupt unsigned long launch_pv_vcpu(struct kvm_vcpu *vcpu,
 						unsigned switch_flags);
 extern void kvm_reset_cpu_state_idr(struct kvm_vcpu *vcpu);
-extern e2k_idr_t kvm_vcpu_get_idr(struct kvm_vcpu *vcpu);
+extern e2k_idr_t kvm_vcpu_get_idr(const struct kvm_vcpu *vcpu);
 
 /* guest kernel trap table base address: ttable0 */
 extern char __kvm_pv_vcpu_ttable_entry0[];

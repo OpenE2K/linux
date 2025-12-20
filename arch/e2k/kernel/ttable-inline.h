@@ -332,8 +332,8 @@ user_hw_stacks_restore(e2k_stacks_t *stacks, u64 cur_window_q,
 	if (cpu_has(CPU_FEAT_FILLC) && cpu_has(CPU_FEAT_FILLR))
 		user_hw_stacks_restore__hw(stacks, cur_window_q, clear_fn);
 	else
-		user_hw_stacks_restore__sw(stacks, cur_window_q, clear_fn,
-					sw_fill_sequel, sw_fill_window_q);
+		user_hw_stacks_restore__sw(stacks, cur_window_q, clear_fn, sw_fill_sequel,
+			sw_fill_window_q);
 }
 
 static __always_inline void
@@ -342,26 +342,20 @@ native_jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 	if (from & (FROM_SYSCALL_N_PROT | FROM_PV_VCPU_SYSCALL)) {
 		switch (regs->kernel_entry) {
 		case 1:
-			__E2K_JUMP_WITH_ARGUMENTS_7(ttable_entry1,
-					regs->sys_num,
-					regs->args[1], regs->args[2],
-					regs->args[3], regs->args[4],
-					regs->args[5], regs->args[6],
-					!is_paravirt_kernel());
+			__E2K_JUMP_RNDPR_7(ttable_entry1, regs->sys_num,
+					regs->args[1], regs->args[2], regs->args[3],
+					regs->args[4], regs->args[5], regs->args[6],
+					!is_paravirt_kernel(), regs->rndpr);
 		case 3:
-			__E2K_JUMP_WITH_ARGUMENTS_7(ttable_entry3,
-					regs->sys_num,
-					regs->args[1], regs->args[2],
-					regs->args[3], regs->args[4],
-					regs->args[5], regs->args[6],
-					!is_paravirt_kernel());
+			__E2K_JUMP_RNDPR_7(ttable_entry3, regs->sys_num,
+					regs->args[1], regs->args[2], regs->args[3],
+					regs->args[4], regs->args[5], regs->args[6],
+					!is_paravirt_kernel(), regs->rndpr);
 		case 4:
-			__E2K_JUMP_WITH_ARGUMENTS_7(ttable_entry4,
-					-(s32) regs->sys_num,
-					regs->args[1], regs->args[2],
-					regs->args[3], regs->args[4],
-					regs->args[5], regs->args[6],
-					!is_paravirt_kernel());
+			__E2K_JUMP_RNDPR_7(ttable_entry4, -(s32) regs->sys_num,
+					regs->args[1], regs->args[2], regs->args[3],
+					regs->args[4], regs->args[5], regs->args[6],
+					!is_paravirt_kernel(), regs->rndpr);
 		default:
 			BUG();
 		}
@@ -372,7 +366,7 @@ native_jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 				regs->args[4], regs->args[5], regs->args[6],
 				regs->args[7], regs->args[8], regs->args[9],
 				regs->args[10], regs->args[11], regs->args[12],
-				regs->tags);
+				regs->tags, regs->rndpr);
 #endif
 	} else {
 		BUG();
@@ -567,8 +561,9 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 }
 
 static __noreturn __always_inline void finish_user_trap_handler_done(struct thread_info *ti,
-		struct pt_regs *regs, restore_caller_t from)
+		const struct pt_regs *regs, restore_caller_t from)
 {
+	e2k_rndpr_t rndpr = regs->rndpr;
 #ifdef CONFIG_USE_AAU
 	struct e2k_aau_context *aau_regs = regs->aau_context;
 #endif
@@ -591,11 +586,11 @@ static __noreturn __always_inline void finish_user_trap_handler_done(struct thre
 				(e2k_aaldv_t) { .word = 0 }, regs->aasr);
 #endif
 		if (from & FROM_SIGRETURN) {
-			CLEAR_DO_SIGRETURN_INTERRUPT();
+			CLEAR_DO_SIGRETURN_INTERRUPT(rndpr);
 		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
-			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW();
+			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr);
 		} else {
-			CLEAR_USER_TRAP_HANDLER_WINDOW();
+			CLEAR_USER_TRAP_HANDLER_WINDOW(rndpr);
 		}
 #ifdef CONFIG_USE_AAU
 	} else {
@@ -603,11 +598,11 @@ static __noreturn __always_inline void finish_user_trap_handler_done(struct thre
 		native_set_aau_aaldis_aaldas(ti->aalda, aau_regs);
 		RESTORE_AAU_MASK_REGS(aau_regs->aaldm, aau_regs->aaldv, regs->aasr);
 		if (from & FROM_SIGRETURN) {
-			CLEAR_DO_SIGRETURN_INTERRUPT();
+			CLEAR_DO_SIGRETURN_INTERRUPT(rndpr);
 		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
-			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW();
+			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr);
 		} else {
-			CLEAR_USER_TRAP_HANDLER_WINDOW();
+			CLEAR_USER_TRAP_HANDLER_WINDOW(rndpr);
 		}
 	}
 #endif
@@ -674,6 +669,19 @@ finish_user_trap_handler_switched_stacks(struct pt_regs *regs, struct trap_pt_re
 	unreachable();
 }
 
+/*
+ * This calculation is based on user_hw_stacks_restore() calculation of register window size
+ */
+static __always_inline u64 get_finish_handler_wbs(struct e2k_stacks *stacks, u64 finish_wsz)
+{
+	u64 wsz = get_wsz();
+
+	if (cpu_has(CPU_FEAT_FILLC) && cpu_has(CPU_FEAT_FILLR))
+		return wsz;
+
+	return max(wsz, finish_wsz);
+}
+
 static __noreturn __always_inline void
 finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 {
@@ -686,7 +694,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	e2k_pshtp_t pshtp;
 	e2k_pcshtp_t pcshtp;
 	e2k_ctpr_t ctpr3;
-	u64 wsz, num_q;
+	u64 wsz, finish_wsz, num_q;
 
 #ifdef CONFIG_USE_AAU
 	if (unlikely(AAU_STOPPED(regs->aasr)))
@@ -697,12 +705,12 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	/*
 	 * This can page fault so call with open interrupts
 	 */
-	BUILD_BUG_ON(from & ~(FROM_SIGRETURN | FROM_USER_TRAP |
-				FROM_RETURN_PV_VCPU_TRAP));
-	wsz = get_wsz(from);
-	host_user_hw_stacks_prepare(&regs->stacks, regs, wsz, from, false);
+	BUILD_BUG_ON(from & ~(FROM_SIGRETURN | FROM_USER_TRAP | FROM_RETURN_PV_VCPU_TRAP));
+	wsz = get_wsz();
+	finish_wsz = get_finish_handler_wbs(&regs->stacks, finish_user_trap_handler_sw_fill_wsz);
+	host_user_hw_stacks_prepare(&regs->stacks, regs, finish_wsz, from, false);
 
-	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, wsz, false);
+	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, finish_wsz, false);
 
 #ifdef CONFIG_USE_AAU
 	clear_apb();
@@ -712,7 +720,7 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 
 	exception_exit(trap->prev_state);
 
-	num_q = get_ps_clear_size(wsz, pshtp);
+	num_q = get_ps_clear_size(finish_wsz, pshtp);
 
 	clear_fn = get_clear_rf_fn(num_q);
 
@@ -819,6 +827,7 @@ static __always_inline __noreturn
 void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller from,
 		    bool return_to_user, bool ts_host_at_vcpu_mode)
 {
+	e2k_rndpr_t rndpr = regs->rndpr;
 	u64 rval = regs->sys_rval;
 	int return_desk = regs->return_desk;
 
@@ -859,30 +868,30 @@ void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller fr
 
 			if (from & FROM_SIGRETURN)
 				CLEAR_DO_SIGRETURN_SYSCALL_PROT(flag, 0,
-						rval1, rval2, rv1_tag, rv2_tag);
+						rval1, rval2, rv1_tag, rv2_tag, rndpr);
 #ifdef CONFIG_PROTECTED_MODE
 			else
 				CLEAR_TTABLE_ENTRY_8_WINDOW_PROT(flag, 0,
-						rval1, rval2, rv1_tag, rv2_tag);
+						rval1, rval2, rv1_tag, rv2_tag, rndpr);
 #endif
 		}
 
 		/* Check for 'wsz' modifiers first */
 		if (unlikely(from & (FROM_SIGRETURN | FROM_RET_FROM_FORK))) {
 			if (from & FROM_SIGRETURN)
-				CLEAR_DO_SIGRETURN_SYSCALL(rval);
+				CLEAR_DO_SIGRETURN_SYSCALL(rval, rndpr);
 			else /* (from & FROM_RET_FROM_FORK) */
-				CLEAR_RET_FROM_FORK_WINDOW(rval);
+				CLEAR_RET_FROM_FORK_WINDOW(rval, rndpr);
 		} else if (from & FROM_SYSCALL_N_PROT) {
-			CLEAR_HANDLE_SYS_CALL_WINDOW(rval);
+			CLEAR_HANDLE_SYS_CALL_WINDOW(rval, rndpr);
 #ifdef CONFIG_PROTECTED_MODE
 		} else if (from & FROM_SYSCALL_PROT_8) {
-			CLEAR_TTABLE_ENTRY_8_WINDOW(rval);
+			CLEAR_TTABLE_ENTRY_8_WINDOW(rval, rndpr);
 #endif
 		} else if (from & FROM_PV_VCPU_SYSCALL) {
-			CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(rval);
+			CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(rval, rndpr);
 		} else if (from & FROM_PV_VCPU_SYSFORK) {
-			CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(rval);
+			CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(rval, rndpr);
 		} else {
 			BUG();
 		}
@@ -894,27 +903,27 @@ void finish_syscall_switched_stacks(struct pt_regs *regs, enum restore_caller fr
 }
 
 static __always_inline __noreturn
-void finish_syscall(struct pt_regs *regs, enum restore_caller from,
-		    bool return_to_user)
+void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_to_user)
 {
 	e2k_pshtp_t pshtp;
-	u64 wsz, num_q;
+	u64 wsz, finish_wsz, num_q;
 	bool ts_host_at_vcpu_mode, intc_emul_flag;
 	clear_rf_t clear_fn;
 
 	/*
 	 * This can page fault so call with open interrupts
 	 */
-	wsz = get_wsz(from);
-	host_user_hw_stacks_prepare(&regs->stacks, regs, wsz, from,
+	wsz = get_wsz();
+	finish_wsz = get_finish_handler_wbs(&regs->stacks, finish_syscall_sw_fill_wsz);
+	host_user_hw_stacks_prepare(&regs->stacks, regs, finish_wsz, from,
 		!(from & ~(FROM_SYSCALL_N_PROT | FROM_SYSCALL_PROT_8)));
 
-	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, wsz, true);
+	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, finish_wsz, true);
 
 	intc_emul_flag = kvm_test_intc_emul_flag(regs);
 	ts_host_at_vcpu_mode = ts_host_at_vcpu_mode() || intc_emul_flag;
 
-	num_q = get_ps_clear_size(wsz, pshtp);
+	num_q = get_ps_clear_size(finish_wsz, pshtp);
 
 	debug_inject_half_spec_loads(true);
 

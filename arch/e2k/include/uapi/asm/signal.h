@@ -89,14 +89,23 @@ struct siginfo;
 #define SIGSTKSZ	8192
 
 
-# ifndef __ASSEMBLY__
+#ifndef __ASSEMBLY__
+
+# ifndef __KERNEL__
+struct sigaction {
+	__sighandler_t sa_handler;
+	unsigned long sa_flags;
+	__sigrestore_t sa_restorer;
+	sigset_t sa_mask;		/* mask last for extensibility */
+};
+# endif
+
 typedef struct sigaltstack {
 	void __user *ss_sp;
 	int ss_flags;
 	size_t ss_size;
 } stack_t;
 
-
-# endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLY__ */
 
 #endif /* _UAPI_E2K_SIGNAL_H_ */

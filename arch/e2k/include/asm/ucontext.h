@@ -60,6 +60,11 @@ typedef struct rt_sigframe {
 		struct ucontext_prot	uc_prot;
 #endif
 	};
+
+	/* Remember original return IP, so that we can detect whether
+	 * signal handler has changed it (in which case we should skip trap
+	 * cellar handling in sys_sigreturn). */
+	u64 orig_return_ip;
 } rt_sigframe_t;
 
 extern int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *);

@@ -114,8 +114,6 @@ void mxgbe_tx_init(mxgbe_priv_t *priv)
 	void __iomem *base = priv->bar0_base;
 	u32 offs, bsize;
 
-	FDEBUG;
-
 	/* clean */
 	for (i = 0; i < MXGBE_MAX_REG_PRI; i++) {
 		mxgbe_wreg32(base, TX_OFFS_PRI0 + (i << 2), 0);
@@ -125,33 +123,14 @@ void mxgbe_tx_init(mxgbe_priv_t *priv)
 		mxgbe_wreg32(base, TX_Q_CH0 + (i << 2), TX_Q_CH_DEF);
 	}
 
-	/* real init */
+	/* A single tx buffer with 0-th priority */
 	offs = 0;
-	bsize = priv->hw_tx_bufsize >> 3; /* /8 */
-
+	bsize = priv->hw_tx_bufsize;
 	mxgbe_wreg32(base, TX_OFFS_PRI0, offs);
 	mxgbe_wreg32(base, TX_SIZE_PRI0, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, TX_OFFS_PRI1, offs);
-	mxgbe_wreg32(base, TX_SIZE_PRI1, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, TX_OFFS_PRI2, offs);
-	mxgbe_wreg32(base, TX_SIZE_PRI2, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, TX_OFFS_PRI3, offs);
-	mxgbe_wreg32(base, TX_SIZE_PRI3, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, TX_OFFS_PRI4, offs);
-	mxgbe_wreg32(base, TX_SIZE_PRI4, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, TX_OFFS_PRI5, offs);
-	mxgbe_wreg32(base, TX_SIZE_PRI5, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, TX_OFFS_PRI6, offs);
-	mxgbe_wreg32(base, TX_SIZE_PRI6, bsize);
-	offs += bsize;
-	mxgbe_wreg32(base, TX_OFFS_PRI7, offs);
-	mxgbe_wreg32(base, TX_SIZE_PRI7, bsize);
+	mxgbe_wreg32(base, TX_MASK_PRI0, 0xFF);
+	for (i = 1; i < MXGBE_MAX_REG_PRI; i++)
+		mxgbe_wreg32(base, TX_MASK_PRI0 + (i << 2), 0x00);
 } /* mxgbe_tx_init */
 
 
@@ -278,8 +257,6 @@ int mxgbe_txq_send(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 	void __iomem *base = priv->bar0_base;
 	unsigned long flags;
 
-	FDEBUG;
-
 	spin_lock_irqsave(&priv->txq[qn].hlock, flags);
 
 	head = Q_HEAD_GET_PTR(mxgbe_rreg32(base, TXQ_REG_ADDR(qn, Q_HEAD)));
@@ -290,10 +267,6 @@ int mxgbe_txq_send(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 		if (!priv->tx_err_flags[qn].quefull_f) {
 			priv->tx_err_flags[qn].quefull_f = 1;
 			priv->tx_err_flags[qn].quefull_c += 1;
-			dev_err(&priv->pdev->dev,
-				"txq_send ERROR: queue %d full - "
-				"head=%u, tail=%u\n",
-				qn, head, tail);
 		}
 		spin_unlock_irqrestore(&priv->txq[qn].hlock, flags);
 		return -EBUSY;
@@ -312,26 +285,13 @@ int mxgbe_txq_send(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 	 * know there are new descriptors to fetch. */
 	wmb();
 
-	if (tx_buff) {
+	if (tx_buff)
 		priv->txq[qn].tx_buff[head] = *tx_buff;
-
-		DEV_DBG(MXGBE_DBG_MSK_TX, &priv->pdev->dev,
-			"txq_send: dma=%llX, skb=%p\n",
-			priv->txq[qn].tx_buff[head].dma,
-			(void *)priv->txq[qn].tx_buff[head].skb);
-	}
 
 	/* start Tx */
 	mxgbe_wreg32(base, TXQ_REG_ADDR(qn, Q_HEAD), Q_HEAD_SET_PTR(new_head));
 
 	spin_unlock_irqrestore(&priv->txq[qn].hlock, flags);
-
-	DEV_DBG(MXGBE_DBG_MSK_TX, &priv->pdev->dev,
-		"txq_send: qn=%d, new_head=%u, tail=%u, descr=%p\n",
-		qn, new_head, tail, q_descr);
-	DEV_DBG(MXGBE_DBG_MSK_TX, &priv->pdev->dev,
-		"txq_send: descr: %016llX %016llX\n",
-		q_descr->ctrl.r, q_descr->addr.r);
 
 	return 0;
 } /* mxgbe_txq_send */

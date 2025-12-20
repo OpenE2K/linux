@@ -78,7 +78,7 @@ static int is_cy14b101p_exist(void)
 static int register_spi_devices(void)
 {
 #ifdef CONFIG_OF
-	if (devtree_detected)
+	if (of_have_populated_dt())
 		return 0;
 #endif
 	/* Declare SPI devices to the SPI core */

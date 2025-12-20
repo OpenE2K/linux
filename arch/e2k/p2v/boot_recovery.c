@@ -53,7 +53,7 @@ init_switch_to_interrupted_process(void)
 	 * switching to the interrupted task as end of recovery of the system
 	 */
 	NATIVE_FLUSHCPU;
-	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task);
+	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task, false);
 
 	/*
 	 * Return to interrupted point

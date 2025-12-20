@@ -9,9 +9,6 @@
  *
  * Released under the GPLv2 only.
  */
-#ifdef CONFIG_MCST
-#define DEBUG
-#endif
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/module.h>

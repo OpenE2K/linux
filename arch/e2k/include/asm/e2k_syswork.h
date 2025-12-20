@@ -9,12 +9,14 @@
 #include <uapi/asm/e2k_syswork.h>
 
 
-/* This macro fills missing arguments with "(u64) (0)". */
-#define EXPAND_ARGS_TO_8(...) \
-		__EXPAND_ARGS_TO_8(__VA_ARGS__, 0, 0, 0, 0, 0, 0, 0)
+/* This macroses fill missing arguments with "(u64) (0)". */
+#define EXPAND_ARGS_TO_8(...)	__EXPAND_ARGS_TO_8(__VA_ARGS__, 0, 0, 0, 0, 0, 0, 0)
 #define __EXPAND_ARGS_TO_8(fmt, a1, a2, a3, a4, a5, a6, a7, ...) \
 		fmt, (u64) (a1), (u64) (a2), (u64) (a3), \
 		(u64) (a4), (u64) (a5), (u64) (a6), (u64) (a7)
+#define EXPAND_ARGS_TO_7(...)	__EXPAND_ARGS_TO_7(__VA_ARGS__, 0, 0, 0, 0, 0, 0)
+#define __EXPAND_ARGS_TO_7(fmt, a1, a2, a3, a4, a5, a6, ...) \
+		fmt, (u64) (a1), (u64) (a2), (u64) (a3), (u64) (a4), (u64) (a5), (u64) (a6)
 
 /* This macro is used to avoid printks with variable number of arguments
  * inside of functions with __check_stack attribute.
@@ -26,8 +28,11 @@
  * from within an __interrupt function is 8! */
 #define printk_fixed_args(...) \
 		__printk_fixed_args(EXPAND_ARGS_TO_8(__VA_ARGS__))
-#define __trace_bprintk_fixed_args(...) \
-		____trace_bprintk_fixed_args(EXPAND_ARGS_TO_8(__VA_ARGS__))
+#define trace_printk_fixed_args(fmt, args...) \
+({ \
+	static const char *trace_printk_fmt __used __section("__trace_printk_fmt") = fmt; \
+	____trace_bprintk_fixed_args(_THIS_IP_, EXPAND_ARGS_TO_7(fmt, ##args)); \
+})
 #define panic_fixed_args(...) \
 		__panic_fixed_args(EXPAND_ARGS_TO_8(__VA_ARGS__))
 #define delay_printk_fixed_args(...) \

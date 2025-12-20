@@ -234,6 +234,12 @@
 	KVM_SET_AAU_AAD(((AAD_4_no) + 2), &(mem_4_p)[2]);		\
 	KVM_SET_AAU_AAD(((AAD_4_no) + 3), &(mem_4_p)[3]);		\
 })
+#define KVM_CLEAR_AAU_AADS(zero_aad_p)					\
+({									\
+	int __i;							\
+	for (__i = 0; __i < AADS_REGS_NUM; __i++)			\
+		KVM_SET_AAU_AAD(__i, (zero_aad_p));			\
+})
 #define KVM_SET_AAU_AAIND(AAIND_no, value)				\
 		GUEST_SET_AAU_AAIND(AAIND_no, value)
 #define KVM_SET_AAU_AAINDS_VAL(AAIND1_no, AAIND2_no, val1, val2)	\
@@ -613,6 +619,16 @@ static inline void
 kvm_write_aads_4_reg(int AADs_no, e2k_aadj_t *mem_p)
 {
 	KVM_SET_AAU_4_AADs(AADs_no, mem_p);
+}
+
+static inline void kvm_clear_aads(void)
+{
+	e2k_aadj_t zero_aad;
+
+	AW(zero_aad).lo = 0;
+	AW(zero_aad).hi = 0;
+
+	KVM_CLEAR_AAU_AADS(&zero_aad);
 }
 
 #define	kvm_clear_apb()	/* AAU context should restore host */

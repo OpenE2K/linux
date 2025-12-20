@@ -86,9 +86,8 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 	ldst_rec_op_t ldst_rec_op;
 	int ret;
 
-	LD_ST_REC_OPC_reg(ldst_rec_op) = ldrd_opcode;
-	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
-		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+	AW(ldst_rec_op) = ldrd_opcode;
+	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
 		if (!IS_GUEST_PHYS_ADDRESS((e2k_addr_t)src)) {
 			pr_err("%s(): bad guest phys src %px ldrd 0x%lx"
 				"phys start 0x%lx end 0x%lx\n",
@@ -97,12 +96,11 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 			ret = -EFAULT;
 			goto failed;
 		}
-		LD_ST_REC_OPC_mas(ldst_rec_op) = MAS_LOAD_OPERATION;
-		ldrd_opcode = LD_ST_REC_OPC_reg(ldst_rec_op);
+		ldst_rec_op.mas = MAS_LOAD_OPERATION;
+		ldrd_opcode = AW(ldst_rec_op);
 	}
-	LD_ST_REC_OPC_reg(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
-	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
-		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+	AW(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
+	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
 		if (!IS_GUEST_PHYS_ADDRESS((e2k_addr_t)dst)) {
 			pr_err("%s(): bad guest phys dst %px ldrd 0x%lx "
 				"phys start 0x%lx end 0x%lx\n",
@@ -111,8 +109,8 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 			ret = -EFAULT;
 			goto failed;
 		}
-		LD_ST_REC_OPC_mas(ldst_rec_op) = MAS_STORE_OPERATION;
-		strd_opcode = LD_ST_REC_OPC_reg(ldst_rec_op);
+		ldst_rec_op.mas = MAS_STORE_OPERATION;
+		strd_opcode = AW(ldst_rec_op);
 	}
 	return kvm_vcpu_copy_guest_virt_system(vcpu, dst, src, len, copied,
 				strd_opcode, ldrd_opcode, prefetch);
@@ -129,15 +127,14 @@ kvm_fast_guest_tagged_memory_set(struct kvm_vcpu *vcpu,
 	ldst_rec_op_t ldst_rec_op;
 	int ret;
 
-	LD_ST_REC_OPC_reg(ldst_rec_op) = strd_opcode;
-	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
-		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+	AW(ldst_rec_op) = strd_opcode;
+	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
 		if (!IS_GUEST_PHYS_ADDRESS((e2k_addr_t)addr)) {
 			ret = -EFAULT;
 			goto failed;
 		}
-		LD_ST_REC_OPC_mas(ldst_rec_op) = MAS_STORE_OPERATION;
-		strd_opcode = LD_ST_REC_OPC_reg(ldst_rec_op);
+		ldst_rec_op.mas = MAS_STORE_OPERATION;
+		strd_opcode = AW(ldst_rec_op);
 	}
 	return kvm_vcpu_set_guest_virt_system(vcpu, addr, val, tag, len,
 						cleared, strd_opcode);
@@ -155,15 +152,13 @@ kvm_fast_guest_user_tagged_memory_copy(struct kvm_vcpu *vcpu,
 	ldst_rec_op_t ldst_rec_op;
 	int ret;
 
-	LD_ST_REC_OPC_reg(ldst_rec_op) = ldrd_opcode;
-	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
-		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+	AW(ldst_rec_op) = ldrd_opcode;
+	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
 		ret = -EFAULT;
 		goto failed;
 	}
-	LD_ST_REC_OPC_reg(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
-	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
-		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+	AW(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
+	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
 		ret = -EFAULT;
 		goto failed;
 	}
@@ -182,9 +177,8 @@ kvm_fast_guest_user_tagged_memory_set(struct kvm_vcpu *vcpu,
 	ldst_rec_op_t ldst_rec_op;
 	int ret;
 
-	LD_ST_REC_OPC_reg(ldst_rec_op) = strd_opcode;
-	if (LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_LOAD_PA ||
-		LD_ST_REC_OPC_mas(ldst_rec_op) == MAS_STORE_PA) {
+	AW(ldst_rec_op) = strd_opcode;
+	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
 		ret = -EFAULT;
 		goto failed;
 	}

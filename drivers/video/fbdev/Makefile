@@ -132,6 +132,7 @@ obj-$(CONFIG_FB_SIMPLE)           += simplefb.o
 
 
 obj-$(CONFIG_FB_MGAM83)		  += mgam83/
+obj-$(CONFIG_FB_LYNXFB)		  += lynxfb/
 
 # the test framebuffer is last
 obj-$(CONFIG_FB_VIRTUAL)          += vfb.o

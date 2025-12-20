@@ -512,20 +512,24 @@ static void fixup_vga(struct pci_dev *pdev)
 		return;
 
 	pci_read_config_word(pdev, PCI_COMMAND, &cmd);
-	if ((cmd & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) !=
-				(PCI_COMMAND_IO | PCI_COMMAND_MEMORY))
+	if ((pdev->class >> 8) != PCI_CLASS_DISPLAY_VGA) { /* mgam83 */
+		if ((cmd & (PCI_COMMAND_MEMORY)) != (PCI_COMMAND_MEMORY))
+			return;
+	} else if ((cmd & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) !=
+				(PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) {
 		return;
+	}
 
 	if ((iohub_generation(pdev) == 0 &&
 				l_check_iohub_vga_enable(pdev)) ||
 		 (iohub_generation(pdev) == 1 &&
 				l_check_iohub2_vga_enable(pdev))) {
-
 		vga_set_default_device(pdev);
 	}
 }
 DECLARE_PCI_FIXUP_CLASS_FINAL(PCI_ANY_ID, PCI_ANY_ID,
 			      PCI_CLASS_DISPLAY_VGA, 8, fixup_vga);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MGAM83, PCI_DEVICE_ID_MGAM83, fixup_vga);
 
 #define	 MGA2_REGS_SIZE	(512 * 1024)
 #define	 MGA2_DC0_CTRL		0x00800

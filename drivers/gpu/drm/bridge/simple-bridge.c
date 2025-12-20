@@ -132,7 +132,10 @@ static int simple_bridge_attach(struct drm_bridge *bridge,
 		DRM_ERROR("Failed to initialize connector\n");
 		return ret;
 	}
-
+#ifdef CONFIG_MCST
+	sbridge->connector.polled = DRM_CONNECTOR_POLL_CONNECT |
+				DRM_CONNECTOR_POLL_DISCONNECT;
+#endif
 	drm_connector_attach_encoder(&sbridge->connector, bridge->encoder);
 
 	return 0;

@@ -93,7 +93,7 @@ static __always_inline bool __preempt_count_dec_and_test(void)
 		return false;
 	return test_thread_flag(TIF_NEED_RESCHED_LAZY);
 #else
-	return unlikely(old == 1);
+	return unlikely(old == 3);
 #endif
 }
 

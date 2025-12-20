@@ -34,12 +34,12 @@ extern long kvm_recovery_faulted_load(e2k_addr_t address, u64 *ld_val,
 				tc_cond_t cond);
 extern long kvm_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load, u32 first_time,
+		int qp_load, int atomic_load, bool big_endian, u32 first_time,
 		tc_cond_t cond);
 extern long kvm_recovery_faulted_load_to_greg(e2k_addr_t address,
 		u32 greg_num_d, int vr, u64 ld_rec_opc, int chan,
 		int qp_load, int atomic_load,
-		void *saved_greg_lo, void *saved_greg_hi,
+		bool big_endian, void *saved_greg_lo, void *saved_greg_hi,
 		tc_cond_t cond);
 extern void kvm_move_tagged_word(e2k_addr_t addr_from, e2k_addr_t addr_to);
 extern void kvm_move_tagged_dword(e2k_addr_t addr_from, e2k_addr_t addr_to);
@@ -121,34 +121,33 @@ recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
 					data_tag, ld_rec_opc, chan, cond);
 }
 static inline void
-recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
-		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load, u32 first_time,
-		tc_cond_t cond)
+recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to, e2k_addr_t addr_to_hi,
+		int vr, ldst_rec_op_t ld_rec_opc, int chan, int qp_load,
+		int atomic_load, bool big_endian, u32 first_time, tc_cond_t cond)
 {
 	if (likely(IS_HV_GM()))
 		native_recovery_faulted_move(addr_from, addr_to,
 				addr_to_hi, vr, ld_rec_opc, chan,
-				qp_load, atomic_load, first_time);
+				qp_load, atomic_load, big_endian, first_time);
 	else
 		kvm_recovery_faulted_move(addr_from, addr_to,
-				addr_to_hi, vr, ld_rec_opc, chan,
-				qp_load, atomic_load, first_time, cond);
+				addr_to_hi, vr, AW(ld_rec_opc), chan,
+				qp_load, atomic_load, big_endian, first_time, cond);
 }
 static inline void
 recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d, int vr,
-		u64 ld_rec_opc, int chan, int qp_load, int atomic_load,
-		void *saved_greg_lo, void *saved_greg_hi,
+		ldst_rec_op_t ld_rec_opc, int chan, int qp_load, int atomic_load,
+		bool big_endian, void *saved_greg_lo, void *saved_greg_hi,
 		tc_cond_t cond)
 {
 	if (likely(IS_HV_GM()))
 		native_recovery_faulted_load_to_greg(address, greg_num_d,
 				vr, ld_rec_opc, chan, qp_load, atomic_load,
-				saved_greg_lo, saved_greg_hi);
+				big_endian, saved_greg_lo, saved_greg_hi);
 	else
 		kvm_recovery_faulted_load_to_greg(address, greg_num_d,
-				vr, ld_rec_opc, chan, qp_load, atomic_load,
-				saved_greg_lo, saved_greg_hi, cond);
+				vr, AW(ld_rec_opc), chan, qp_load, atomic_load,
+				big_endian, saved_greg_lo, saved_greg_hi, cond);
 }
 static inline void
 move_tagged_word(e2k_addr_t addr_from, e2k_addr_t addr_to)

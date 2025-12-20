@@ -21,18 +21,19 @@
 #  define HANDLE_PV_VCPU_SYS_FORK_SIZE 0x1
 # endif
 
-# define CLEAR_RETURN_PV_VCPU_TRAP_WINDOW()		E2K_DONE()
-# define CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(r0)	E2K_SYSCALL_RETURN(r0)
-# define CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(r0)	E2K_SYSCALL_RETURN(r0)
+# define CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr)	E2K_DONE_RNDPR(rndpr)
+# define CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(r0, rndpr) E2K_SYSCALL_RETURN(r0, rndpr)
+# define CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(r0, rndpr) E2K_SYSCALL_RETURN(r0, rndpr)
 
 #else	/* ! CONFIG_CPU_HW_CLEAR_RF */
 
 # ifdef GENERATING_HEADER
-#  define CLEAR_RETURN_PV_VCPU_TRAP_WINDOW()	E2K_EMPTY_CMD(: "ctpr3")
-#  define CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(r0)	\
-		E2K_EMPTY_CMD([_r0] "ir" (r0) : "ctpr3")
-#  define CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(r0)	\
-		E2K_EMPTY_CMD([_r0] "ir" (r0) : "ctpr3")
+#  define CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(_rndpr) \
+		E2K_EMPTY_CMD([rndpr] "ir" (AW(_rndpr)) : "ctpr3")
+#  define CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(r0, _rndpr)	\
+		E2K_EMPTY_CMD([_r0] "ir" (r0), [rndpr] "ir" (AW(_rndpr)) : "ctpr3")
+#  define CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(r0, _rndpr)	\
+		E2K_EMPTY_CMD([_r0] "ir" (r0), [rndpr] "ir" (AW(_rndpr)) : "ctpr3")
 #  define RETURN_PV_VCPU_TRAP_SIZE 0x1
 #  define HANDLE_PV_VCPU_SYS_CALL_SIZE 0x1
 #  define HANDLE_PV_VCPU_SYS_FORK_SIZE 0x1
@@ -44,9 +45,9 @@
 /* It is native guest kernel whithout virtualization support */
 /* Virtualiztion in guest mode cannot be supported */
 
-# define CLEAR_RETURN_PV_VCPU_TRAP_WINDOW()
-# define CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(rval)
-# define CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(rval)
+# define CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr)
+# define CLEAR_HANDLE_PV_VCPU_SYS_CALL_WINDOW(rval, rndpr)
+# define CLEAR_HANDLE_PV_VCPU_SYS_FORK_WINDOW(rval, rndpr)
 
 #endif	/* CONFIG_KVM_HOST_MODE */
 

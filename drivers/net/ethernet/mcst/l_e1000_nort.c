@@ -236,8 +236,6 @@ struct e1000_private {
 };
 
 
-static void *iohub_eth_base_addr;
-
 static int e1000_debug = 0;
 
 static unsigned int rx_prev_etmr = 0;	/* for debug */
@@ -729,39 +727,6 @@ static void l_e1000_hwtstamp(struct e1000_private *ep, struct sk_buff *skb,
 	memset(hwtstamps, 0, sizeof(*hwtstamps));
 	hwtstamps->hwtstamp = ns_to_ktime(ns);
 }
-
-/*
- * This is the only way to put data to boot while reset
- */
-#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
-#ifndef MODULE
-static int set_iohub_eth_for_special_reset(int m)
-{
-	int i;
-
-	if (!iohub_eth_base_addr)
-		return -1;
-
-	/* At first stop the card */
-	writel(STOP, iohub_eth_base_addr + E_CSR);
-
-	/* wait for stop */
-        for (i = 0; i < 1000; i++) {
-		if (readl(iohub_eth_base_addr + E_CSR) & STOP)
-			break;
-	}
-	if (i == 1000) {
-		return -1;
-	}
-
-	writel(m, iohub_eth_base_addr + E_BASE_ADDR);
-	(void)readl(iohub_eth_base_addr + E_BASE_ADDR);
-
-	return 0;
-}
-#endif /* MODULE */
-#endif /* CONFIG_E2K) || CONFIG_E90S */
-
 
 /** TITLE: PHY/MDIO stuff */
 
@@ -3458,13 +3423,9 @@ static int e1000_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	if (l_e1000_num_chanels(pdev) != 1) {
 		l_set_ethernet_macaddr(NULL, dev->dev_addr);
 	} else {
-		if (l_set_ethernet_macaddr(pdev, dev->dev_addr)) {
-#if defined(CONFIG_E2K) || defined(CONFIG_E90S)
-			iohub_eth_base_addr = base_ioaddr;
-#ifndef MODULE
-			l_set_boot_mode = set_iohub_eth_for_special_reset;
-#endif /* MODULE */
-#endif /* CONFIG_E2K || CONFIG_E90S */
+		int r = l_set_ethernet_macaddr(pdev, dev->dev_addr);
+		if (r < 0) {
+			goto err_release_region;
 		}
 	}
 	/* eth_hw_addr_random(dev); */
@@ -3941,9 +3902,7 @@ static void e1000_remove(struct pci_dev *pdev)
 	free_netdev(dev);
 
 	/* cleanup e1000_probe_pci_bar: */
-
-	if (iohub_eth_base_addr != ep->base_ioaddr)
-		iounmap(ep->base_ioaddr);
+	iounmap(ep->base_ioaddr);
 
 	release_mem_region(pci_resource_start(pdev, ep->bar),
 			   E1000_TOTAL_SIZE);

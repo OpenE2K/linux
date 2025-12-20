@@ -116,6 +116,14 @@ static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 #define NATIVE_RESTORE_AADS(aau_regs)	\
 		PREFIX_RESTORE_AADS(NATIVE, native, aau_regs)
 
+#define PREFIX_CLEAR_AADS(pv_type)					\
+({									\
+	pv_type##_clear_aads();						\
+})
+
+#define NATIVE_CLEAR_AADS()	\
+		PREFIX_CLEAR_AADS(native)
+
 #define PREFIX_SAVE_AALDIS(PV_TYPE, pv_type, ISET, iset, regs)		\
 ({									\
 	PV_TYPE##_READ_AALDI_REG_VALUE_##ISET(0, regs[0], regs[32]); \
@@ -347,6 +355,36 @@ static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 #define	NATIVE_SET_ARRAY_DESCRIPTORS(aau_context)	\
 		PREFIX_SET_ARRAY_DESCRIPTORS(NATIVE, native, aau_context)
 
+#define	PREFIX_CLEAR_ARRAY_DESCRIPTORS(PV_TYPE, pv_type)		\
+({									\
+	/*								\
+	 * clear AAINDs, omit the AAIND0 restoring since		\
+	 * it has predefined 0 value.					\
+	 */								\
+	pv_type##_write_aainds_pair_value(1, 0, 0);			\
+	pv_type##_write_aainds_pair_value(3, 0, 0);			\
+	pv_type##_write_aainds_pair_value(5, 0, 0);			\
+	pv_type##_write_aainds_pair_value(7, 0, 0);			\
+	pv_type##_write_aainds_pair_value(9, 0, 0);			\
+	pv_type##_write_aainds_pair_value(11, 0, 0);			\
+	pv_type##_write_aainds_pair_value(13, 0, 0);			\
+	pv_type##_write_aaind_reg_value(15, 0);				\
+									\
+	/*								\
+	 * clear AAINCRs, omit the AAINCR0 restoring since		\
+	 * it has predefined 1 value.					\
+	 */								\
+	pv_type##_write_aaincrs_pair_value(1, 0, 0);			\
+	pv_type##_write_aaincrs_pair_value(3, 0, 0);			\
+	pv_type##_write_aaincrs_pair_value(5, 0, 0);			\
+	pv_type##_write_aaincr_reg_value(7, 0);				\
+									\
+	/* 0x2 is empty tag for AAIND and AAINCR registers */		\
+	PV_TYPE##_SET_AAU_AAIND_AAINCR_TAGS(0xaaaaaaaa, 0xaaaa);	\
+})
+#define	NATIVE_CLEAR_ARRAY_DESCRIPTORS() \
+		PREFIX_CLEAR_ARRAY_DESCRIPTORS(NATIVE, native)
+
 #define	PREFIX_GET_SYNCHRONOUS_PART_V3(PV_TYPE, pv_type, aau_context)	\
 ({									\
 	u64	*const aastis = (aau_context)->aastis;			\
@@ -445,6 +483,23 @@ static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 #define	NATIVE_SET_SYNCHRONOUS_PART(aau_context)	\
 		PREFIX_SET_SYNCHRONOUS_PART(NATIVE, native, aau_context)
 
+#define	PREFIX_CLEAR_SYNCHRONOUS_PART(PV_TYPE, pv_type)			\
+({									\
+	/* clear AASTIs */						\
+	pv_type##_write_aastis_pair_value(0, 0, 0);	\
+	pv_type##_write_aastis_pair_value(2, 0, 0);	\
+	pv_type##_write_aastis_pair_value(4, 0, 0);	\
+	pv_type##_write_aastis_pair_value(6, 0, 0);	\
+	pv_type##_write_aastis_pair_value(8, 0, 0);	\
+	pv_type##_write_aastis_pair_value(10, 0, 0);	\
+	pv_type##_write_aastis_pair_value(12, 0, 0);	\
+	pv_type##_write_aastis_pair_value(14, 0, 0);	\
+	/* 0x2 is empty tag for AASTI register */	\
+	pv_type##_write_aasti_tags_reg_value(0xaaaaaaaa); \
+})
+#define	NATIVE_CLEAR_SYNCHRONOUS_PART() \
+		PREFIX_CLEAR_SYNCHRONOUS_PART(NATIVE, native)
+
 #define	PREFIX_SET_ALL_AALDIS(PV_TYPE, pv_type, aaldis)			\
 ({									\
 	pv_type##_write_aaldi_reg_value(0, aaldis[0], aaldis[32]);	\
@@ -482,6 +537,44 @@ static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 })
 #define	NATIVE_SET_ALL_AALDIS(aaldis)	\
 		PREFIX_SET_ALL_AALDIS(NATIVE, native, aaldis)
+
+#define	PREFIX_CLEAR_ALL_AALDIS(pv_type)		\
+({							\
+	pv_type##_write_aaldi_reg_value(0, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(1, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(2, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(3, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(4, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(5, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(6, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(7, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(8, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(9, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(10, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(11, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(12, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(13, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(14, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(15, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(16, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(17, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(18, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(19, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(20, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(21, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(22, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(23, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(24, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(25, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(26, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(27, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(28, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(29, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(30, 0, 0);	\
+	pv_type##_write_aaldi_reg_value(31, 0, 0);	\
+})
+#define	NATIVE_CLEAR_ALL_AALDIS()	\
+		PREFIX_CLEAR_ALL_AALDIS(native)
 
 #define	PREFIX_SET_ALL_AALDAS(PV_TYPE, pv_type, aaldas_p)		\
 ({									\
@@ -563,6 +656,16 @@ do { \
 } while (0)
 #define	NATIVE_SET_AAU_CONTEXT(aau_context, aalda, aasr) \
 	PREFIX_SET_AAU_CONTEXT(NATIVE, native, (aau_context), (aalda), (aasr))
+
+#define	PREFIX_CLEAR_AAU_CONTEXT(pv_type) \
+do { \
+	/* clear synchronous part of APB */ \
+	pv_type##_clear_synchronous_part(); \
+	/* clear descriptors & auxiliary registers */ \
+	pv_type##_clear_array_descriptors(); \
+} while (0)
+#define	NATIVE_CLEAR_AAU_CONTEXT() \
+	PREFIX_CLEAR_AAU_CONTEXT(native)
 
 #define PREFIX_SAVE_AALDAS(PV_TYPE, pv_type, aaldas_p)			\
 ({									\

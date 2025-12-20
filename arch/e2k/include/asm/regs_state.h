@@ -54,6 +54,9 @@
 #ifdef CONFIG_MLT_STORAGE
 #include <asm/mlt.h>
 #endif
+#ifdef CONFIG_USE_AAU
+#include <asm/aau_context.h>
+#endif
 
 #endif /* __ASSEMBLY__ */
 
@@ -1138,7 +1141,7 @@ NATIVE_DO_RESTORE_TASK_USER_REGS_TO_SWITCH(struct sw_regs *sw_regs,
 }
 
 static inline void
-NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task)
+NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task, bool is_thread_switch)
 {
 	struct sw_regs *sw_regs = &task->thread.sw_regs;
 	u64 top = sw_regs->top;
@@ -1177,6 +1180,28 @@ NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 		e2k_fpcr_t fpcr = sw_regs->fpu.fpcr;
 		e2k_fpsr_t fpsr = sw_regs->fpu.fpsr;
 		e2k_pfpfr_t pfpfr = sw_regs->fpu.pfpfr;
+
+#ifdef CONFIG_USE_AAU
+		struct pt_regs *regs = task->thread_info.pt_regs;
+
+		/*
+		 * Clear AAU registers so that next task can't peek previous task addresses
+		 * from them. We do not need to clear AAU registers during thread switch.
+		 * If the next task was stopped in a trap, clear registers under conditions
+		 * opposite to the ones used in AAU registers restore in return from trap.
+		 * If the next task was stopped in a syscall, always clear AAU registers.
+		 */
+		if (!is_thread_switch && regs && (from_syscall(regs) || !aau_working(regs->aasr))) {
+			clear_aau_context();
+			CLEAR_AADS();
+		}
+		if (!is_thread_switch && regs && (from_syscall(regs) || !AAU_STOPPED(regs->aasr))) {
+			native_clear_aau_aaldis_aaldas();
+			RESTORE_AAU_MASK_REGS((e2k_aaldm_t) { .word = 0 },
+					      (e2k_aaldv_t) { .word = 0 },
+					      regs->aasr);
+		}
+#endif
 
 #ifdef CONFIG_GREGS_CONTEXT
 		restore_gregs_fn(&task->thread.sw_regs.gregs);
@@ -1259,12 +1284,15 @@ NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
 	all_interrupts & (exc_all_mask | aau_exc_mask);			\
 })
 #define UNFREEZE_TIRs()	NATIVE_WRITE_TIR_LO_REG_VALUE(0)
-#define SAVE_SBBP(sbbp) \
-do { \
-	int i; \
-	for (i = 0; i < SBBP_ENTRIES_NUM; i++) \
-		(sbbp)[i] = NATIVE_READ_SBBP_REG_VALUE(); \
-} while (0)
+
+static inline void save_sbbp(u64 *sbbp)
+{
+	BUILD_BUG_ON(SBBP_ENTRIES_NUM != 32);
+	int i;
+#pragma unroll(32)
+	for (i = 0; i < SBBP_ENTRIES_NUM; i++)
+		(sbbp)[i] = NATIVE_READ_SBBP_REG_VALUE();
+}
 
 static inline void set_osgd_task_struct(struct task_struct *task)
 {

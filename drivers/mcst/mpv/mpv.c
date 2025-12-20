@@ -1803,6 +1803,9 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
 #endif /* SBUS or PCI2SBUS */
+#if defined(CONFIG_MCST_RT) && defined(CONFIG_PCI)
+		mk_hndl_first(mpv_st->irq, MPV_NAME);
+#endif
 		break;
 	}
 	case MPVIO_RUN_DEVICE:
@@ -2814,7 +2817,6 @@ mpv_intr_handler(int irq, void *arg)
 			waiter_item = list_entry(tmp, raw_wqueue_t, task_list);
 			wake_up_process(waiter_item->task);
 		}
-		do_postpone_tick(prev_interv);
 	};
 	/* wake up for ioctl(MPVIO_WAIT_INTR) -- any interrupt */
 out:	list_for_each_safe(tmp, next, &mpv_st->any_in_task_list) {
@@ -2822,6 +2824,8 @@ out:	list_for_each_safe(tmp, next, &mpv_st->any_in_task_list) {
 		wake_up_process(waiter_item->task);
 	}
 	raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
+	/* do it for the last mpv_in but not under spinlock */
+	do_postpone_tick(prev_interv);
 	if (waitqueue_active(&mpv_st->pollhead))
 		return IRQ_WAKE_THREAD;
 	return IRQ_HANDLED;

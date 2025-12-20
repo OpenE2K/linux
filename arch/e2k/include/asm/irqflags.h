@@ -548,8 +548,35 @@ do { \
 		((IS_IRQ_MASK_GLOBAL()) ? __raw_glob_irqs_disabled_flags(flags) : \
 					  __raw_loc_irqs_disabled_flags(flags))
 
-#define SAVE_CURR_TIME_SWITCH_TO
-#define CALCULATE_TIME_SWITCH_TO
+#ifdef CONFIG_MCST_RT
+
+#define SAVE_CURR_TIME_SWITCH_TO                                        \
+{ 									\
+        cpu_times[raw_smp_processor_id()].curr_time_switch_to =         \
+						READ_CLKR_REG_VALUE();	\
+} 
+
+#define CALCULATE_TIME_SWITCH_TO                                        \
+{                                                                       \
+        int cpu = raw_smp_processor_id();                               \
+	cpu_times[cpu].curr_time_switch_to = READ_CLKR_REG_VALUE() -	\
+                              cpu_times[cpu].curr_time_switch_to;       \
+        if (cpu_times[cpu].curr_time_switch_to <                        \
+            cpu_times[cpu].min_time_switch_to){                         \
+            cpu_times[cpu].min_time_switch_to =                         \
+                               cpu_times[cpu].curr_time_switch_to;      \
+        }                                                               \
+        if (cpu_times[cpu].curr_time_switch_to >                        \
+            cpu_times[cpu].max_time_switch_to){                         \
+            cpu_times[cpu].max_time_switch_to =                         \
+                                cpu_times[cpu].curr_time_switch_to;     \
+        }                                                               \
+}
+
+#else /* !CONFIG_MCST_RT */
+ #define SAVE_CURR_TIME_SWITCH_TO
+ #define CALCULATE_TIME_SWITCH_TO
+#endif /* CONFIG_MCST_RT */
 
 #ifdef CONFIG_CLI_CHECK_TIME
 

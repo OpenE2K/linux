@@ -171,6 +171,7 @@ OFFSET(PT_LSR, pt_regs, lsr);
 OFFSET(PT_ILCR, pt_regs, ilcr);
 OFFSET(PT_LSR1, pt_regs, lsr1);
 OFFSET(PT_ILCR1, pt_regs, ilcr1);
+OFFSET(PT_RNDPR, pt_regs, rndpr);
 OFFSET(PT_STACK, pt_regs, stacks);
 OFFSET(PT_SYS_NUM, pt_regs, sys_num);
 OFFSET(PT_KERNEL_ENTRY, pt_regs, kernel_entry);

@@ -5102,7 +5102,7 @@ static long btrfs_protected_ioctl_v2(struct file *file,
 				(long __user *)arg128,
 				(long __user *)arg64,
 				sizeof(struct btrfs_protected_ioctl_vol_args_v2),
-				5, 1, 0x31111, 0x33311))
+				5, 1, 0x31111, 0x33311, NULL))
 			return -EINVAL;
 	} else {
 		/* __s64 fd, __u64 transid, __u64 flags; */
@@ -5138,14 +5138,14 @@ static long btrfs_protected_send_ioctl(struct file *file,
 	if (get_pm_struct_simple(
 			(long __user *)arg, (long __user *)arg64,
 			STRUCT_BTRFS_SEND_ARGS_SIZE,
-			5, 1, 0x11311, 0x11311)) {
+			5, 1, 0x11311, 0x11311, NULL)) {
 		return -EINVAL;
 	}
 
 	return btrfs_ioctl(file, cmd, (unsigned long)arg64);
 }
 
-long btrfs_protected_ioctl(struct file *file, unsigned long cmd,
+long btrfs_protected_ioctl(struct file *file, unsigned int cmd,
 					 unsigned long arg)
 {
 	switch (cmd) {

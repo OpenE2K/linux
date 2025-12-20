@@ -22,7 +22,6 @@ CFLAGS_REMOVE_e8c2.o = -pg
 CFLAGS_REMOVE_e12c.o = -pg
 CFLAGS_REMOVE_e16c.o = -pg
 CFLAGS_REMOVE_e2c3.o = -pg
-CFLAGS_REMOVE_e48c.o = -pg
 CFLAGS_REMOVE_e8v7.o = -pg
 endif
 
@@ -33,7 +32,6 @@ CFLAGS_e8c2.o			= $(CFLAGS_E8C2)
 CFLAGS_e12c.o			= $(CFLAGS_E12C)
 CFLAGS_e16c.o			= $(CFLAGS_E16C)
 CFLAGS_e2c3.o			= $(CFLAGS_E2C3)
-CFLAGS_e48c.o			= $(CFLAGS_E48C)
 CFLAGS_e8v7.o			= $(CFLAGS_E8V7)
 obj-$(CONFIG_CPU_E2S)		+= e2s.o
 obj-$(CONFIG_CPU_E8C)		+= e8c.o
@@ -42,6 +40,5 @@ obj-$(CONFIG_CPU_E8C2)		+= e8c2.o
 obj-$(CONFIG_CPU_E12C)		+= e12c.o
 obj-$(CONFIG_CPU_E16C)		+= e16c.o
 obj-$(CONFIG_CPU_E2C3)		+= e2c3.o
-obj-$(CONFIG_CPU_E48C)		+= e48c.o
 obj-$(CONFIG_CPU_E8V7)		+= e8v7.o
 

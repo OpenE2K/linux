@@ -93,9 +93,6 @@
 #define SIC_rt_ioapicintb 0x94
 #define SIC_rt_lapicintb 0xa0
 
-#define	SIC_rt_msi	0xb0
-#define	SIC_rt_msi_h	0xb4
-
 #define	SIC_rt_pcicfgb	0x90
 #define	SIC_rt_pcicfged	0x98
 
@@ -121,9 +118,6 @@
 #define	SIC_prepic_linp4	0x8c10
 #define	SIC_prepic_linp5	0x8c14
 
-/* Host Controller */
-#define SIC_hc_ctrl		0x0340
-
 /* IOMMU */
 #define SIC_iommu_ctrl		0x0380
 #define SIC_iommu_ba_lo		0x0390
@@ -140,18 +134,6 @@
 #define SIC_iommu_err1		0x03b4
 #define SIC_iommu_err_info_lo	0x03b8
 #define SIC_iommu_err_info_hi	0x03bc
-
-#define SIC_edbc_iommu_ctrl		0x5080
-#define SIC_edbc_iommu_ba_lo		0x5090
-#define SIC_edbc_iommu_ba_hi		0x5094
-#define SIC_edbc_iommu_dtba_lo		0x5098
-#define SIC_edbc_iommu_dtba_hi		0x509c
-#define SIC_edbc_iommu_cmd_c_lo		0x50a0
-#define SIC_edbc_iommu_cmd_c_hi		0x50a4
-#define SIC_edbc_iommu_err		0x50b0
-#define SIC_edbc_iommu_err1		0x50b4
-#define SIC_edbc_iommu_err_info_lo	0x50b8
-#define SIC_edbc_iommu_err_info_hi	0x50bc
 
 #define SIC_iommu_reg_base	SIC_iommu_ctrl
 #define SIC_iommu_reg_size	0x0080
@@ -601,7 +583,7 @@ typedef	union e2k_rt_lcfg_struct {		/* Structure of lower word */
 #define	E2K_RT_LCFG_cln		E2S_RT_LCFG_cln
 #elif	defined(CONFIG_E8C) || defined(CONFIG_E8C2) || \
 	defined(CONFIG_E12C) || defined(CONFIG_E16C) || defined(CONFIG_E2C3) || \
-	defined(CONFIG_E48C) || defined(CONFIG_E8V7)
+	defined(CONFIG_E8V7)
 #define	E2K_RT_LCFG_pln		E8C_RT_LCFG_pln
 #define	E2K_RT_LCFG_cln		E8C_RT_LCFG_cln
 #endif	/* CONFIG_E2S */
@@ -1105,28 +1087,22 @@ typedef unsigned int	e2k_sic_mar_lo_t;	/* single word (32 bits) */
 /*
  * Read/Write MCX_ECC (X={0, 1, 2, 3}) registers
  */
-typedef	unsigned int	e2k_mc_ecc_t;	/* single word (32 bits) */
-typedef	struct e2k_mc_ecc_fields {
-	e2k_mc_ecc_t	ee		: 1;	/* [0] */
-	e2k_mc_ecc_t	dmode		: 1;	/* [1] */
-	e2k_mc_ecc_t	of		: 1;	/* [2] */
-	e2k_mc_ecc_t	ue		: 1;	/* [3] */
-	e2k_mc_ecc_t	reserved	: 12;	/* [15:4] */
-	e2k_mc_ecc_t	secnt		: 16;	/* [31:16] */
-} e2k_mc_ecc_fields_t;
-typedef	union e2k_mc_ecc_struct {		/* Structure word */
-	e2k_mc_ecc_fields_t	fields;		/* as fields */
-	e2k_mc_ecc_t		word;		/* as entire register */
-} e2k_mc_ecc_struct_t;
+typedef	union {
+	struct {
+		u32 ee		: 1;	/* [0] */
+		u32 dmode	: 1;	/* [1] */
+		u32 of		: 1;	/* [2] */
+		u32 ue		: 1;	/* [3] */
+		u32 reserved	: 12;	/* [15:4] */
+		u32 secnt	: 16;	/* [31:16] */
+	};
+	u32 word;		/* as entire register */
+} e2k_mc_ecc_t;
 
-#define E2K_MC_ECC_ee		fields.ee	/* ECC mode on/off */
-#define E2K_MC_ECC_dmode	fields.dmode	/* diagnostic mode on/off */
-#define E2K_MC_ECC_of		fields.of	/* single error counter */
-						/* overflow flag */
-#define E2K_MC_ECC_ue		fields.ue	/* multiple-error flag */
-#define E2K_MC_ECC_secnt	fields.secnt	/* single error counter */
-#define E2K_MC_ECC_reg		word
+#define E2K_MC_ECC_DISABLED	((e2k_mc_ecc_t) { .word = 0 })
 
+e2k_mc_ecc_t sic_get_mc_ecc(int node, int num);
+void sic_set_mc_ecc(int node, int num, e2k_mc_ecc_t value);
 
 /*
  * Read/Write MCX_OPMb (X={0, 1, 2, 3}) registers

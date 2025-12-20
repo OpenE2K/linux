@@ -56,6 +56,9 @@
 #ifdef CONFIG_E2K
 #include <asm/process.h>
 #endif
+#ifdef CONFIG_MCST_4RT
+#include <uapi/linux/mcst_rt.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/mmap.h>
@@ -1414,6 +1417,13 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	int pkey = 0;
 
 	*populate = 0;
+#ifdef CONFIG_MCST_4RT
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* That is RT task, which done mlockall().
+		 * New mmap() is impossible */
+		return -EFAULT;
+	}
+#endif
 
 	if (!len)
 		return -EINVAL;

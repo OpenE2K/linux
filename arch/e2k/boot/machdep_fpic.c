@@ -29,8 +29,6 @@ int cpu_to_iset(int cpu)
 		iset = ELBRUS_16C_ISET;
 	case IDR_E2C3_MDL:
 		iset = ELBRUS_2C3_ISET;
-	case IDR_E48C_MDL:
-		iset = ELBRUS_48C_ISET;
 	case IDR_E8V7_MDL:
 		iset = ELBRUS_8V7_ISET;
 	}

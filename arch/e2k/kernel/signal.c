@@ -92,7 +92,7 @@ static int setup_frame(struct sigcontext __user *sigc,
 					 &sigc->cr1_lo);
 	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->crs.cr1_hi),
 					 &sigc->cr1_hi);
-	
+
 	rval = (rval) ?: __put_priv_user(user_regs->stacks.top, &sigc->sbr);
 	rval = (rval) ?: __put_priv_user(AS_WORD(user_regs->stacks.usd_lo),
 					 &sigc->usd_lo);
@@ -273,6 +273,10 @@ static int setup_rt_frame(rt_sigframe_t __user *frame,
 	DebugHS("info=%px signal=%d ->thread.flags=0x%lx IS_PROTECTED=%ld\n",
 		info, current_thread_info()->ksig.sig, current->thread.flags,
 		TASK_IS_PROTECTED(current));
+
+	if (__put_priv_user(get_return_ip(regs), &frame->orig_return_ip))
+		return -EFAULT;
+
 #ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
 		e2k_ptr_t ss_sp;
@@ -432,8 +436,10 @@ int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *ka)
 	if (ka->sa.sa_flags & SA_SIGINFO) {
 		e2k_ctpr_t ctpr1, ctpr2, ctpr3;
 		e2k_cr0_hi_t cr0_hi;
+		u64 orig_return_ip;
 		struct pt_regs *regs = current_pt_regs();
 
+		ret = (ret) ?: __get_user(orig_return_ip, &frame->orig_return_ip);
 		ret = (ret) ?: __get_user(AW(cr0_hi), cr0_hi_ptr);
 		ret = (ret) ?: __get_user(AW(ctpr1), &uc_extra_ptr->ctpr1);
 		ret = (ret) ?: __get_user(AW(ctpr2), &uc_extra_ptr->ctpr2);
@@ -441,28 +447,30 @@ int restore_rt_frame(rt_sigframe_t __user *frame, struct k_sigaction *ka)
 		if (ret)
 			return -EFAULT;
 
-		if (AS(regs->crs.cr0_hi).ip != AS(cr0_hi).ip &&
+		/*
+		 * There could be such situation:
+		 *   - user's signal handler changes IP
+		 *   - kernel ignores the trap cellar in this case and
+		 *     start to deliver the next signal
+		 *   - user's signal handler doesn't change IP
+		 *   - kernel starts to handle trap cellar again
+		 * Kernel should never handle trap cellar after user's signal
+		 * handler changed IP. So kernel should give up the trap cellar.
+		 */
+		if (orig_return_ip != (AS(cr0_hi).ip << 3) &&
 				(AS(cr0_hi).ip << 3) < TASK_SIZE) {
-			/*
-			 * There could be such situation:
-			 *   - user's signal handler changes IP
-			 *   - kernel ignores the trap cellar in this case and
-			 *     start to deliver the next signal
-			 *   - user's signal handler doesn't change IP
-			 *   - kernel starts to handle trap cellar again
-			 * Kernel should never handle trap cellar after user's
-			 * signal handler changed IP. So kernel should give up
-			 * the trap cellar.
-			 */
 			if (regs->trap) {
 				regs->trap->tc_count = 0;
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 				regs->trap->rp = 0;
 #endif
 			}
-
-			AS(regs->crs.cr0_hi).ip = AS(cr0_hi).ip;
 		}
+
+		/* User could have changed chain stack in memory, but
+		 * values from uc_mcontext should take priority so we
+		 * update cr0_hi unconditionally here. */
+		AS(regs->crs.cr0_hi).ip = AS(cr0_hi).ip;
 
 		if (TASK_IS_BINCO(current)) {
 			copy_user_ctpr(&regs->ctpr1, ctpr1);
@@ -495,14 +503,6 @@ static int copy_context_to_signal_stack(
 		 * stack could be reallocated (use signal_pt_regs_to_trap()
 		 * instead), so put bogus value in it to help catch errors. */
 		ret = ret ?: __put_priv_user((void *) 1, &context->regs.trap);
-
-		if (regs->trap->sbbp) {
-			ret = ret ?: __copy_to_priv_user(&context->sbbp,
-					regs->trap->sbbp,
-					sizeof(regs->trap->sbbp[0]) * SBBP_ENTRIES_NUM);
-			ret = ret ?: __put_priv_user((unsigned long long *)&context->sbbp[0],
-						&context->trap.sbbp);
-		}
 	}
 
 #ifdef CONFIG_USE_AAU

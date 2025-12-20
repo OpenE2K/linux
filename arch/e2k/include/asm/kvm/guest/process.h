@@ -131,7 +131,7 @@ kvm_jump_to_ttable_entry(struct pt_regs *regs, enum restore_caller from)
 			 * because of only host can recover initial state of stacks
 			 * and some other registers state to restart system call
 			 */
-			E2K_SYSCALL_RETURN(regs->sys_rval);
+			E2K_SYSCALL_RETURN(regs->sys_rval, regs->rndpr);
 		default:
 			BUG();
 		}

@@ -20,6 +20,7 @@ extern struct clocksource clocksource_clk_rt;
 extern struct clocksource lt_cs;
 extern struct clocksource *curr_clocksource;
 extern u64 read_clk_rt(struct clocksource *cs);
+extern int clk_rt_initialized;
 
 bool clk_rt_enabled(void);
 

@@ -334,7 +334,7 @@ static struct dte *dev_to_dte(struct e2k_iommu *i, struct device *dev)
 #define	E2K_IOMMU_CEP_OVERFLOW		(1 << 8)
 
 #define E2K_IOMMU_ERR_INFO		SIC_iommu_err_info_lo
-#define E2K_IOMMU_EDBC_OFFSET		(SIC_edbc_iommu_ctrl - SIC_iommu_ctrl)
+#define E2K_IOMMU_EDBC_OFFSET		(EDBC_IOMMU_CTRL - SIC_iommu_ctrl)
 #define E2K_IOMMU_EMBEDDED_OFFSET	(SIC_embedded_iommu_base - SIC_iommu_ctrl)
 #define E2K_IOMMU_NR			SIC_e2c3_iommu_nr
 #define E2K_IOMMU_EDID_GUEST_MASK	(1 << 12)
@@ -468,8 +468,8 @@ static void e2k_iommu_init_hw(struct e2k_iommu *i)
 		e2k_iommu_flush_all(i);
 
 	/* enable error sending to device */
-	c = sic_read_node_nbsr_reg(node, SIC_hc_ctrl);
-	sic_write_node_nbsr_reg(node, SIC_hc_ctrl, c | 1);
+	c = sic_read_node_nbsr_reg(node, HC_CTRL);
+	sic_write_node_nbsr_reg(node, HC_CTRL, c | 1);
 }
 
 static void *__e2k_iommu_alloc_pages(size_t size, gfp_t gfp, int node)
@@ -1250,6 +1250,47 @@ static void e2k_iommu_release_device(struct device *dev)
 {
 }
 
+static struct pci_dev *e2k_check_iohub2_bridge(struct pci_dev *pdev)
+{
+	struct pci_bus *bus = pdev->bus;
+
+	while (bus) {
+		struct pci_dev *b = bus->self;
+		if (!b)
+			goto next;
+		if (b->vendor == PCI_VENDOR_ID_MCST_TMP &&
+				b->device == PCI_DEVICE_ID_MCST_PCI_BRIDGE) {
+			return b;
+		}
+next:		bus = bus->parent;
+	}
+	return pdev;
+}
+
+static struct pci_dev *e2k_check_iohub2_usb(struct pci_dev *p)
+{
+	/* hw bug: ohci uses ehci device-id, so put them to one group */
+	if (p->vendor == PCI_VENDOR_ID_MCST_TMP &&
+			(p->device == PCI_DEVICE_ID_MCST_OHCI ||
+			 p->device == PCI_DEVICE_ID_MCST_EHCI)) {
+		p = pci_get_domain_bus_and_slot(
+				pci_domain_nr(p->bus),
+				p->bus->number,
+				PCI_DEVFN(PCI_SLOT(p->devfn),
+				PCI_FUNC(p->devfn) ^ 1));
+		return p;
+	}
+	return NULL;
+}
+
+static struct pci_dev *e2k_fix_iohub2_devices(struct pci_dev *pdev)
+{
+	struct pci_dev *p = e2k_check_iohub2_usb(pdev);
+	if (p)
+		return p;
+	return e2k_check_iohub2_bridge(pdev);
+}
+
 static struct iommu_group *e2k_iommu_device_group(struct device *dev)
 {
 	struct pci_dev *p;
@@ -1272,24 +1313,14 @@ static struct iommu_group *e2k_iommu_device_group(struct device *dev)
 		p = e2k_dev_to_parent_pcidev(dev);
 		return iommu_group_ref_get(p->dev.iommu_group);
 	}
-	/* hw bug: ohci uses ehci device-id, so put them to one group */
 	p = to_pci_dev(dev);
-	if (p->vendor == PCI_VENDOR_ID_MCST_TMP &&
-			(p->device == PCI_DEVICE_ID_MCST_OHCI ||
-			 p->device == PCI_DEVICE_ID_MCST_EHCI)) {
-		struct pci_dev *pdev = pci_get_domain_bus_and_slot(
-					pci_domain_nr(p->bus),
-					p->bus->number,
-					PCI_DEVFN(PCI_SLOT(p->devfn),
-					PCI_FUNC(p->devfn) ^ 1));
-		if (!pdev)
-			return NULL;
-		if (pdev->dev.iommu_group)
-			return iommu_group_ref_get(pdev->dev.iommu_group);
-		else
-			generic_device_group(dev);
-	}
-	return generic_device_group(dev);
+	p = e2k_fix_iohub2_devices(p);
+	if (!p)
+		return NULL;
+	if (p->dev.iommu_group)
+		return iommu_group_ref_get(p->dev.iommu_group);
+
+	return generic_device_group(&p->dev);
 }
 
 static bool e2k_iommu_capable(enum iommu_cap cap)

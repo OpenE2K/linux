@@ -534,6 +534,9 @@ static const struct net_device_ops e1000_netdev_ops = {
 	.ndo_do_ioctl   = e1000_rt_ioctl,
 	.ndo_get_stats  = e1000_rt_get_stats,
 	.ndo_set_mac_address    = eth_mac_addr,
+#ifdef CONFIG_MCST_RT
+	.ndo_unlocked_ioctl     = 1,
+#endif
 };
 
 
@@ -1722,7 +1725,7 @@ int e1000_rt_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	raw_spin_lock_init(&ep->lock);
 
 	/* Setup HW (MAC), also known as "Physical" address. */
-	l_set_ethernet_macaddr(NULL, dev->dev_addr);
+	l_set_ethernet_macaddr(pdev, dev->dev_addr);
 
 	fdx = 1; mii = 1; gmii = 1;
 	SET_NETDEV_DEV(dev, &pdev->dev);

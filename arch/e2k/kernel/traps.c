@@ -1127,19 +1127,10 @@ static void do_addr_not_aligned(struct pt_regs *regs)
 {
 	if (kernel_mode(regs)) {
 		e2k_upsr_t upsr = NATIVE_NV_READ_UPSR_REG();
-
-		pr_err("TRAP addr not aligned, UPSR.ac is %d\n",
-			upsr.UPSR_ac);
-		if (upsr.UPSR_ac) {
+		if (WARN_ONCE(upsr.UPSR_ac, "TRAP addr not aligned, UPSR.ac is set\n")) {
 			upsr.UPSR_ac = 0;
 			NATIVE_WRITE_UPSR_REG(upsr);
-		} else {
-			/* goto infinite loop to avoid recursion */
-			do {
-				mb();	/* to do not delete loop */
-					/* by compiler */
-				E2K_LMS_HALT_OK;
-			} while (true);
+			return;
 		}
 	}
 
@@ -1534,6 +1525,15 @@ irqreturn_t native_do_interrupt(struct pt_regs *regs)
 
 	if (unlikely(is_from_wait_trap(regs)))
 		handle_wtrap(regs);
+
+#if defined(CONFIG_MCST_4RT) && defined(SHOW_WOKEN_TIME)
+	if (unlikely(show_woken_time) > 1 && system_state == SYSTEM_RUNNING) {
+		per_cpu(prev_intr_clock, smp_processor_id()) =
+				__this_cpu_read(last_intr_clock);
+		per_cpu(last_intr_clock, smp_processor_id()) =
+			getns64timeofday();
+	}
+#endif
 
 	/*
 	 * We store the interrupt vector to detect cases when this irq is moved

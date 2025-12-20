@@ -545,6 +545,25 @@ static inline int blk_send_start_stop(struct request_queue *q,
 	return __blk_send_generic(q, bd_disk, GPCMD_START_STOP_UNIT, data);
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+static inline unsigned long e2k_ptr_ptr(e2k_ptr_t descr)
+{
+	return descr.lo ? descr.base + descr.curptr : 0;
+}
+
+static inline int make_n_put_descriptor(unsigned long base, long size, int access, void *ptr)
+{
+	e2k_ptr_t dscr;
+	int ret;
+
+	dscr.lo = MAKE_AP_LO(base, size, 0, access);
+	dscr.hi = MAKE_AP_HI(base, size, 0, access);
+	ret = put_user_tagged_16(dscr.lo, dscr.hi, ETAGAPQ, ptr);
+	return ret;
+}
+#endif /* CONFIG_PROTECTED_MODE */
+
 int put_sg_io_hdr(const struct sg_io_hdr *hdr, void __user *argp)
 {
 #ifdef CONFIG_COMPAT
@@ -580,6 +599,51 @@ int put_sg_io_hdr(const struct sg_io_hdr *hdr, void __user *argp)
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (TASK_IS_PROTECTED(current)) {
+		int ret;
+		struct prot_sg_io_hdr hd128 =  {
+			.interface_id	 = hdr->interface_id,
+			.dxfer_direction = hdr->dxfer_direction,
+			.cmd_len	 = hdr->cmd_len,
+			.mx_sb_len	 = hdr->mx_sb_len,
+			.iovec_count	 = hdr->iovec_count,
+			.dxfer_len	 = hdr->dxfer_len,
+		/*	.dxferp.lo	 = hdr->dxferp, */
+		/*	.cmdp.lo	 = hdr->cmdp, */
+		/*	.sbp.lo		 = hdr->sbp, */
+			.timeout	 = hdr->timeout,
+			.flags		 = hdr->flags,
+			.pack_id	 = hdr->pack_id,
+			.usr_ptr.lo	 = (u64)hdr->usr_ptr,
+			.usr_ptr.hi	 = 0UL,
+			.status		 = hdr->status,
+			.masked_status	 = hdr->masked_status,
+			.msg_status	 = hdr->msg_status,
+			.sb_len_wr	 = hdr->sb_len_wr,
+			.host_status	 = hdr->host_status,
+			.driver_status	 = hdr->driver_status,
+			.resid		 = hdr->resid,
+			.duration	 = hdr->duration,
+			.info		 = hdr->info,
+		};
+
+		/* Here we construct descriptors which we can restore from pointers: */
+		ret = make_n_put_descriptor((unsigned long)hdr->dxferp, hdr->dxfer_len,
+					    RW_ENABLE, &hd128.dxferp);
+		ret = ret ?: make_n_put_descriptor((unsigned long)hdr->cmdp, hdr->cmd_len,
+						    RW_ENABLE, &hd128.cmdp);
+		ret = ret ?: make_n_put_descriptor((unsigned long)hdr->sbp, hdr->mx_sb_len,
+						    RW_ENABLE, &hd128.sbp);
+		if (ret)
+			return ret;
+
+		if (copy_to_user(argp, &hd128, sizeof(hd128)))
+			return -EFAULT;
+
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 
 	if (copy_to_user(argp, hdr, sizeof(*hdr)))
 		return -EFAULT;
@@ -625,6 +689,41 @@ int get_sg_io_hdr(struct sg_io_hdr *hdr, const void __user *argp)
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	struct prot_sg_io_hdr hd128;
+
+	if (TASK_IS_PROTECTED(current)) {
+		if (copy_from_user(&hd128, argp, sizeof(hd128)))
+			return -EFAULT;
+
+		*hdr = (struct sg_io_hdr) {
+			.interface_id	 = hd128.interface_id,
+			.dxfer_direction = hd128.dxfer_direction,
+			.cmd_len	 = hd128.cmd_len,
+			.mx_sb_len	 = hd128.mx_sb_len,
+			.iovec_count	 = hd128.iovec_count,
+			.dxfer_len	 = hd128.dxfer_len,
+			.dxferp		 = (void *)e2k_ptr_ptr(hd128.dxferp),
+			.cmdp		 = (void *)e2k_ptr_ptr(hd128.cmdp),
+			.sbp		 = (void *)e2k_ptr_ptr(hd128.sbp),
+			.timeout	 = hd128.timeout,
+			.flags		 = hd128.flags,
+			.pack_id	 = hd128.pack_id,
+			.usr_ptr	 = (void *)e2k_ptr_ptr(hd128.usr_ptr),
+			.status		 = hd128.status,
+			.masked_status	 = hd128.masked_status,
+			.msg_status	 = hd128.msg_status,
+			.sb_len_wr	 = hd128.sb_len_wr,
+			.host_status	 = hd128.host_status,
+			.driver_status	 = hd128.driver_status,
+			.resid		 = hd128.resid,
+			.duration	 = hd128.duration,
+			.info		 = hd128.info,
+		};
+
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 
 	if (copy_from_user(hdr, argp, sizeof(*hdr)))
 		return -EFAULT;

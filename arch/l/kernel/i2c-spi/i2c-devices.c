@@ -210,7 +210,7 @@ static struct i2c_board_info __initdata butterfly_i2c_devices_bus3[] = {
 static int __init i2c_board_info_init(void)
 {
 #ifdef CONFIG_OF
-	if (devtree_detected)
+	if (of_have_populated_dt())
 		return 0;
 #endif
 

@@ -1237,7 +1237,13 @@ unsigned long kvm_generic_hcalls(unsigned long hcall_num, unsigned long arg1,
 	}
 	case KVM_HCALL_FTRACE_STOP:
 		if (kvm_ftrace_dump) {
+			/* Use tracing_stop() instead of tracing_off() to make
+			 * sure we output full contents of ring buffer */
+			tracing_stop();
+			synchronize_rcu();
 			ftrace_dump(DUMP_ALL);
+			tracing_start();
+
 			tracing_on();
 		} else {
 			tracing_off();
@@ -1390,13 +1396,10 @@ skip_hcall:
 		trace_host_get_gmm_root_hpa(pv_vcpu_get_gmm(vcpu),
 					    NATIVE_READ_IP_REG_VALUE());
 	}
-	__guest_enter(ti, &vcpu->arch, guest_enter_flags);
+
 	if (guest_enter_flags & DONT_RESTORE_HOST_GREGS) {
 		CLEAR_HOST_KERNEL_GREGS();
 	}
-
-	/* from here cannot by any traps including BUG/BUG_ON/E2K_KVM_BUG_ON */
-	/* because of host context is switched to guest context */
 
 	/*
 	 * Return control from UPSR register to PSR, if UPSR
@@ -1408,6 +1411,11 @@ skip_hcall:
 	 * while global registers manipulations
 	 */
 	NATIVE_RETURN_LWISH_TO_KERNEL_IRQ_MASK_REG(irq_flags, need_inject);
+
+	__guest_enter(ti, &vcpu->arch, guest_enter_flags);
+
+	/* from here cannot by any traps including BUG/BUG_ON/E2K_KVM_BUG_ON */
+	/* because of host context is switched to guest context */
 
 	if (!from_sdisp) {
 		E2K_HRET(ret);

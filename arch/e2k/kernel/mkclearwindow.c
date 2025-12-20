@@ -32,6 +32,7 @@ static void print_header(int wsz, int rbs, int rsz, int type)
 		return_printed = 1;
 		printf(B "return %%%%ctpr3" E);
 	}
+	printf(B "rwd %%[rndpr], %%%%rndpr" E);
 	if (type == TYPE_SYSCALL_PROT) {
 		printf(B "puttagd %%[_r2], %%[_tag2], %%%%dr2" E);
 		printf(B "puttagd %%[_r3], %%[_tag3], %%%%dr3" E);
@@ -80,7 +81,9 @@ static void print_clear_macro(char *name, int regs, int type)
 		printf("r%d%s", i, (i + 1 != keep) ? ", " : "");
 	if (type == TYPE_SYSCALL_PROT)
 		printf(", tag2, tag3");
-	printf( ") \\\n"
+	if (keep != 0 || type == TYPE_SYSCALL_PROT)
+		printf(", ");
+	printf( "_rndpr) \\\n"
 		"do { \\\n"
 		"\tasm volatile ( \\\n");
 
@@ -110,7 +113,9 @@ static void print_clear_macro(char *name, int regs, int type)
 
 	if (type == TYPE_INTERRUPT) {
 		/* #80747: must repeat interrupted barriers */
-		printf(B "{wait st_c=1} {nop 2; mmurw %%%%db[0], %%%%dam_inv} {done}" E);
+		printf(B "{wait st_c=1}" E);
+		printf(B "{nop 2; mmurw %%%%db[0], %%%%dam_inv}" E);
+		printf(B "{done}" E);
 	} else {
 		/* System call return */
 		printf(B "{nop 2; mmurw %%%%db[0], %%%%dam_inv}" E);
@@ -121,8 +126,12 @@ static void print_clear_macro(char *name, int regs, int type)
 	for (i = 0; i < keep; i++)
 		printf(" [_r%d] \"ir\" (r%d)%s",
 				i, i, (i + 1 != keep) ? "," : "");
-	if (type == TYPE_SYSCALL_PROT)
-		printf(", \\\n\t\t[_tag2] \"ir\" (tag2), [_tag3] \"ir\" (tag3)");
+	if (type == TYPE_SYSCALL_PROT) {
+		printf(", \\\n\t\t[_tag2] \"ir\" (tag2), [_tag3] \"ir\" (tag3), ");
+	} else if (keep != 0) {
+		printf(", ");
+	}
+	printf("\\\n\t\t[rndpr] \"ir\" (AW(_rndpr))");
 	printf(" \\\n\t\t: \"ctpr3\"");
 	printf("); \\\n");
 	printf("} while (0)\n");

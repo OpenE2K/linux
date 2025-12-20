@@ -352,6 +352,16 @@ typedef unsigned long __e2k_syscall_arg_t;
 	__res;							\
 })
 
+#define rd_sclkr() \
+({ \
+	register __e2k_u64_t sclkr_v;				\
+	register __e2k_u64_t res;				\
+	sclkr_v = E2K_GET_DSREG(sclkr);				\
+	res = (sclkr_v >> 32) * 1000000000LL +			\
+	(sclkr_v & 0xffffffff) * 1000000000LL /			\
+			(E2K_GET_DSREG(sclkm1) & 0xffffffff);	\
+	res;							\
+})
 #endif /* !__ASSEMBLY__ */
 
 

@@ -286,7 +286,7 @@ static void restore_image(pgd_t *resume_pg_dir, struct pbe *restore_pblist)
 	 * switching to the interrupted task as end of recovery of the system
 	 */
 
-	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task);
+	NATIVE_RESTORE_TASK_REGS_TO_SWITCH(task, false);
 
 	/* Start receiving NMIs again */
 	raw_local_irq_disable();

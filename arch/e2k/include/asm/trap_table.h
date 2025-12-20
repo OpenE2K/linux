@@ -278,6 +278,7 @@ static void init_pt_regs_for_syscall(struct pt_regs *regs)
 #endif
 
 	AW(regs->flags) = 0;
+	regs->aasr = E2K_NULL_AASR;
 	init_guest_syscalls_handling(regs);
 }
 #endif

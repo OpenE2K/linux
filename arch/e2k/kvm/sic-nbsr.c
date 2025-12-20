@@ -448,34 +448,27 @@ nbsr_debug_dump_prepic(int node_id, unsigned int reg_offset,
 static int node_nbsr_read_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-	bool is_rt_mlo = false;
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 	bool is_rt_mhi = false;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_mlo0:
 		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo0)];
 		reg_name = "rt_mlo0";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mlo1:
 		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo1)];
 		reg_name = "rt_mlo1";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mlo2:
 		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo2)];
 		reg_name = "rt_mlo2";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mlo3:
 		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mlo3)];
 		reg_name = "rt_mlo3";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mhi0:
 		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_mhi0)];
@@ -498,11 +491,7 @@ static int node_nbsr_read_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 		is_rt_mhi = true;
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
@@ -510,48 +499,38 @@ static int node_nbsr_read_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 	if (is_rt_mhi) {
 		nbsr_debug_dump_rt_mhi(node_id, reg_offset, false, *reg_val,
 					reg_name);
-	} else if (is_rt_mlo) {
+	} else {
 		nbsr_debug_dump_rt_mlo(node_id, reg_offset, false, *reg_val,
 					reg_name);
-	} else {
-		nbsr_debug("%s(): node #%d %s offset 0x%04x value 0x%x\n",
-			__func__, node_id, reg_name, reg_offset, *reg_val);
 	}
 
 	return 0;
 }
 
-static void node_nbsr_write_rt_mem(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-	bool is_rt_mlo = false;
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 	bool is_rt_mhi = false;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_mlo0:
 		node_nbsr->regs[offset_to_no(SIC_rt_mlo0)] = reg_value;
 		reg_name = "rt_mlo0";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mlo1:
 		node_nbsr->regs[offset_to_no(SIC_rt_mlo1)] = reg_value;
 		reg_name = "rt_mlo1";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mlo2:
 		node_nbsr->regs[offset_to_no(SIC_rt_mlo2)] = reg_value;
 		reg_name = "rt_mlo2";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mlo3:
 		node_nbsr->regs[offset_to_no(SIC_rt_mlo3)] = reg_value;
 		reg_name = "rt_mlo3";
-		is_rt_mlo = true;
 		break;
 	case SIC_rt_mhi0:
 		node_nbsr->regs[offset_to_no(SIC_rt_mhi0)] = reg_value;
@@ -574,33 +553,24 @@ static void node_nbsr_write_rt_mem(struct kvm_nbsr *nbsr, int node_id,
 		is_rt_mhi = true;
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
 	if (is_rt_mhi) {
-		nbsr_debug_dump_rt_mhi(node_id, reg_offset, true, reg_value,
-					reg_name);
-	} else if (is_rt_mlo) {
-		nbsr_debug_dump_rt_mlo(node_id, reg_offset, true, reg_value,
-					reg_name);
+		nbsr_debug_dump_rt_mhi(node_id, reg_offset, true, reg_value, reg_name);
 	} else {
-		nbsr_debug("%s(): node #%d %s offset 0x%04x value 0x%x\n",
-			__func__, node_id, reg_name, reg_offset, reg_value);
+		nbsr_debug_dump_rt_mlo(node_id, reg_offset, true, reg_value, reg_name);
 	}
+	return 0;
 }
 
 static int node_nbsr_read_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
-					unsigned int reg_offset, u32 *reg_val)
+				  unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -621,28 +591,20 @@ static int node_nbsr_read_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_lcfg3";
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_lcfg(node_id, reg_offset, false, *reg_val,
-				reg_name);
-
+	nbsr_debug_dump_rt_lcfg(node_id, reg_offset, false, *reg_val, reg_name);
 	return 0;
 }
 
-static void node_nbsr_write_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -663,25 +625,20 @@ static void node_nbsr_write_rt_lcfg(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_lcfg3";
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_lcfg(node_id, reg_offset, true, reg_value,
-				reg_name);
+	nbsr_debug_dump_rt_lcfg(node_id, reg_offset, true, reg_value, reg_name);
+	return 0;
 }
 
 static int node_nbsr_read_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -702,28 +659,20 @@ static int node_nbsr_read_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_pcim3";
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pcim(node_id, reg_offset, false, *reg_val,
-				reg_name);
-
+	nbsr_debug_dump_rt_pcim(node_id, reg_offset, false, *reg_val, reg_name);
 	return 0;
 }
 
-static void node_nbsr_write_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -744,25 +693,20 @@ static void node_nbsr_write_rt_pcim(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_pcim3";
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pcim(node_id, reg_offset, true, reg_value,
-				reg_name);
+	nbsr_debug_dump_rt_pcim(node_id, reg_offset, true, reg_value, reg_name);
+	return -EOPNOTSUPP;
 }
 
 static int node_nbsr_read_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -783,28 +727,20 @@ static int node_nbsr_read_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_pciio3";
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pciio(node_id, reg_offset, false, *reg_val,
-				reg_name);
-
+	nbsr_debug_dump_rt_pciio(node_id, reg_offset, false, *reg_val, reg_name);
 	return 0;
 }
 
-static void node_nbsr_write_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -824,26 +760,18 @@ static void node_nbsr_write_rt_pciio(struct kvm_nbsr *nbsr, int node_id,
 		node_nbsr->regs[offset_to_no(SIC_rt_pciio3)] = reg_value;
 		reg_name = "rt_pciio3";
 		break;
-	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
-		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pciio(node_id, reg_offset, true, reg_value,
-				reg_name);
+	nbsr_debug_dump_rt_pciio(node_id, reg_offset, true, reg_value, reg_name);
+	return -EOPNOTSUPP;
 }
 
 static int node_nbsr_read_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -864,28 +792,20 @@ static int node_nbsr_read_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_pcimp_b3";
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, false, *reg_val,
-				reg_name, false);
-
+	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, false, *reg_val, reg_name, false);
 	return 0;
 }
 
 static int node_nbsr_read_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -906,28 +826,20 @@ static int node_nbsr_read_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_pcimp_e3";
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, false, *reg_val,
-				reg_name, true);
-
+	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, false, *reg_val, reg_name, true);
 	return 0;
 }
 
 static int node_nbsr_read_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_pcicfgb)];
@@ -935,17 +847,14 @@ static int node_nbsr_read_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
 	mutex_unlock(&nbsr->lock);
 
 	nbsr_debug_dump_rt_pcicfgb(node_id, reg_offset, false, *reg_val, reg_name);
-
 	return 0;
 }
 
-static void node_nbsr_write_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -966,25 +875,20 @@ static void node_nbsr_write_rt_pcimp_b(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_pcimp_b3";
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, true, reg_value,
-				reg_name, false);
+	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, true, reg_value, reg_name, false);
+	return -EOPNOTSUPP;
 }
 
-static void node_nbsr_write_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -1005,25 +909,20 @@ static void node_nbsr_write_rt_pcimp_e(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_pcimp_e3";
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, true, reg_value,
-				reg_name, true);
+	nbsr_debug_dump_rt_pcimp(node_id, reg_offset, true, reg_value, reg_name, true);
+	return -EOPNOTSUPP;
 }
 
-static void node_nbsr_write_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	node_nbsr->regs[offset_to_no(SIC_rt_pcicfgb)] = reg_value;
@@ -1031,15 +930,14 @@ static void node_nbsr_write_rt_pcicfgb(struct kvm_nbsr *nbsr, int node_id,
 	mutex_unlock(&nbsr->lock);
 
 	nbsr_debug_dump_rt_pcicfgb(node_id, reg_offset, true, reg_value, reg_name);
+	return -EOPNOTSUPP;
 }
 
 static int node_nbsr_read_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -1060,28 +958,20 @@ static int node_nbsr_read_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_ioapic3";
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_ioapic(node_id, reg_offset, false, *reg_val,
-				reg_name);
-
+	nbsr_debug_dump_rt_ioapic(node_id, reg_offset, false, *reg_val, reg_name);
 	return 0;
 }
 
-static void node_nbsr_write_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_write_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -1102,51 +992,37 @@ static void node_nbsr_write_rt_ioapic(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "rt_ioapic3";
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_rt_ioapic(node_id, reg_offset, true, reg_value,
-				reg_name);
+	nbsr_debug_dump_rt_ioapic(node_id, reg_offset, true, reg_value, reg_name);
+	return 0;
 }
 
 static int node_nbsr_read_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_msi:
 		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_msi)];
-		break;
-	case SIC_rt_msi_h:
-		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_msi_h)];
-		break;
-	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-	}
-	mutex_unlock(&nbsr->lock);
-
-	switch (reg_offset) {
-	case SIC_rt_msi:
 		nbsr_debug_dump_rt_msi(node_id, reg_offset, false, *reg_val,
 				"rt_msi");
 		break;
 	case SIC_rt_msi_h:
+		*reg_val = node_nbsr->regs[offset_to_no(SIC_rt_msi_h)];
 		nbsr_debug_dump_rt_msi_h(node_id, reg_offset, false, *reg_val,
 				"rt_msi_h");
 		break;
+	default:
+		WARN_ON_ONCE(1);
+		break;
 	}
+	mutex_unlock(&nbsr->lock);
 
 	return 0;
 }
@@ -1154,9 +1030,7 @@ static int node_nbsr_read_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_pmc(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	*reg_val = node_nbsr->regs[offset_to_no(reg_offset)];
@@ -1170,28 +1044,19 @@ static int node_nbsr_read_pmc(struct kvm_nbsr *nbsr, int node_id,
 static int node_nbsr_read_l3(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_l3_ctrl:
 		*reg_val = node_nbsr->regs[offset_to_no(SIC_l3_ctrl)];
-		break;
-	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-	}
-	mutex_unlock(&nbsr->lock);
-
-	switch (reg_offset) {
-	case SIC_l3_ctrl:
 		nbsr_debug_dump_l3(node_id, reg_offset, false, *reg_val, "l3_ctrl");
 		break;
+	default:
+		WARN_ON_ONCE(1);
+		break;
 	}
+	mutex_unlock(&nbsr->lock);
 
 	return 0;
 }
@@ -1201,7 +1066,7 @@ static int node_nbsr_readll_iommu(struct kvm_nbsr *nbsr, int node_id,
 {
 	kvm_nbsr_regs_t *node_nbsr;
 	char *reg_name = "???";
-	int ret = 0;
+	int ret;
 	u64 reg_lo, reg_hi;
 
 	node_nbsr = &nbsr->nodes[node_id];
@@ -1209,12 +1074,14 @@ static int node_nbsr_readll_iommu(struct kvm_nbsr *nbsr, int node_id,
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_iommu_ba_lo:
+		ret = 0;
 		reg_lo = node_nbsr->regs[offset_to_no(SIC_iommu_ba_lo)];
 		reg_hi = node_nbsr->regs[offset_to_no(SIC_iommu_ba_hi)];
 		*reg_val = reg_lo | (reg_hi << 32);
 		reg_name = "iommu_ba";
 		break;
 	case SIC_iommu_dtba_lo:
+		ret = 0;
 		reg_lo = node_nbsr->regs[offset_to_no(SIC_iommu_dtba_lo)];
 		reg_hi = node_nbsr->regs[offset_to_no(SIC_iommu_dtba_hi)];
 		*reg_val = reg_lo | (reg_hi << 32);
@@ -1231,27 +1098,22 @@ static int node_nbsr_readll_iommu(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "iommu_err_info";
 		break;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not"
-			"yet supported, so return 0x%llx\n",
-			__func__, node_id, reg_offset, *reg_val);
+		WARN_ON_ONCE(1);
+		ret = -EOPNOTSUPP;
+		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_prepic(node_id, reg_offset, false, *reg_val,
-			reg_name);
-
+	nbsr_debug_dump_prepic(node_id, reg_offset, false, *reg_val, reg_name);
 	return ret;
 }
 
 static int node_nbsr_read_prepic(struct kvm_nbsr *nbsr, int node_id,
 		unsigned int reg_offset, u32 *reg_val)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 	int ret = 0;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -1294,53 +1156,74 @@ static int node_nbsr_read_prepic(struct kvm_nbsr *nbsr, int node_id,
 		reg_name = "prepic_linp5";
 		break;
 	default:
-		*reg_val = -1;
-		reg_name = "???";
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
+		WARN_ON_ONCE(1);
+		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_prepic(node_id, reg_offset, false, *reg_val,
-				reg_name);
-
+	nbsr_debug_dump_prepic(node_id, reg_offset, false, *reg_val, reg_name);
 	return ret;
 }
 
-static void node_nbsr_write_rt_msi(struct kvm_nbsr *nbsr, int node_id,
+static int node_nbsr_read_mc_ecc(const struct kvm_vcpu *vcpu, u32 *reg_val)
+{
+	/* Return ECC with disabled checking */
+	*reg_val = AW(E2K_MC_ECC_DISABLED);
+	return 0;
+}
+
+static int node_nbsr_write_mc_ecc(int node_id, unsigned int reg_offset, u32 reg_value)
+{
+	/* Just ignore it and keep ECC checking in guest disabled */
+	return 0;
+}
+
+static int node_nbsr_read_generic(struct kvm_nbsr *nbsr, int node_id,
+				  unsigned int reg_offset, u32 *reg_val)
+{
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+
+	mutex_lock(&nbsr->lock);
+	*reg_val = node_nbsr->regs[offset_to_no(reg_offset)];
+	mutex_unlock(&nbsr->lock);
+
+	return 0;
+}
+
+static int node_nbsr_write_generic(struct kvm_nbsr *nbsr, int node_id,
+				   unsigned int reg_offset, u32 reg_value)
+{
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+
+	mutex_lock(&nbsr->lock);
+	node_nbsr->regs[offset_to_no(reg_offset)] = reg_value;
+	mutex_unlock(&nbsr->lock);
+
+	return 0;
+}
+
+static int node_nbsr_write_rt_msi(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_rt_msi:
 		node_nbsr->regs[offset_to_no(SIC_rt_msi)] = reg_value;
+		nbsr_debug_dump_rt_msi(node_id, reg_offset, true, reg_value, "rt_msi");
 		break;
 	case SIC_rt_msi_h:
 		node_nbsr->regs[offset_to_no(SIC_rt_msi_h)] = reg_value;
+		nbsr_debug_dump_rt_msi_h(node_id, reg_offset, true, reg_value, "rt_msi_h");
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	switch (reg_offset) {
-	case SIC_rt_msi:
-		nbsr_debug_dump_rt_msi(node_id, reg_offset, true, reg_value,
-				"rt_msi");
-		break;
-	case SIC_rt_msi_h:
-		nbsr_debug_dump_rt_msi_h(node_id, reg_offset, true, reg_value,
-				"rt_msi_h");
-		break;
-	}
+	return -EOPNOTSUPP;
 }
 
 static void nbsr_update_iommu_tdp(struct kvm *kvm, kvm_nbsr_regs_t *nbsr)
@@ -1355,11 +1238,9 @@ static void nbsr_update_iommu_tdp(struct kvm *kvm, kvm_nbsr_regs_t *nbsr)
 static int node_nbsr_write_iommu(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = NULL;
 	int ret = 0;
-
-	node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
@@ -1370,17 +1251,14 @@ static int node_nbsr_write_iommu(struct kvm_nbsr *nbsr, int node_id,
 		ret = -EOPNOTSUPP;
 		break;
 	default:
-		pr_err("%s(): node #%d IOMMU reg with offset 0x%04x does not "
-			"support 32-bit writes, so ignore it\n",
+		pr_err_ratelimited("%s(): node #%d IOMMU reg with offset 0x%04x does not support 32-bit writes, so ignore it\n",
 			__func__, node_id, reg_offset);
 		reg_name = "???";
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_iommu(node_id, reg_offset, reg_value, true, reg_name,
-		false);
-
+	nbsr_debug_dump_iommu(node_id, reg_offset, reg_value, true, reg_name, false);
 	return ret;
 }
 
@@ -1397,18 +1275,14 @@ static u32 kvm_write_pmc_sleep(u32 reg_value)
 static int node_nbsr_write_pmc(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	int ret = 0;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	node_nbsr->regs[offset_to_no(reg_offset)] = kvm_write_pmc_sleep(reg_value);
 	mutex_unlock(&nbsr->lock);
 
 	nbsr_debug_dump_pmc(node_id, reg_offset, reg_value, true, "pmc_sleep");
-
-	return ret;
+	return 0;
 }
 
 static u32 kvm_write_l3_ctrl(struct kvm_nbsr *nbsr, u32 reg_value)
@@ -1424,42 +1298,29 @@ static u32 kvm_write_l3_ctrl(struct kvm_nbsr *nbsr, u32 reg_value)
 static int node_nbsr_write_l3(struct kvm_nbsr *nbsr, int node_id,
 					unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	int ret = 0;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
 
 	mutex_lock(&nbsr->lock);
 	switch (reg_offset) {
 	case SIC_l3_ctrl:
-		node_nbsr->regs[offset_to_no(SIC_l3_ctrl)] = kvm_write_l3_ctrl(nbsr, reg_value);
+		node_nbsr->regs[offset_to_no(SIC_l3_ctrl)] =
+				kvm_write_l3_ctrl(nbsr, reg_value);
+		nbsr_debug_dump_l3(node_id, reg_offset, reg_value, true, "l3_ctrl");
 		break;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	switch (reg_offset) {
-	case SIC_l3_ctrl:
-		nbsr_debug_dump_l3(node_id, reg_offset, reg_value, true, "l3_ctrl");
-		break;
-	}
-
-	return ret;
+	return 0;
 }
 
 static int node_nbsr_write_prepic(struct kvm_nbsr *nbsr, int node_id,
-					unsigned int reg_offset,
-					u32 reg_value)
+				  unsigned int reg_offset, u32 reg_value)
 {
-	kvm_nbsr_regs_t *node_nbsr;
-	char *reg_name;
-	int ret = 0;
-
-	node_nbsr = &nbsr->nodes[node_id];
+	kvm_nbsr_regs_t *node_nbsr = &nbsr->nodes[node_id];
+	char *reg_name = "???";
 
 	mutex_lock(&nbsr->lock);
 	/*
@@ -1468,63 +1329,49 @@ static int node_nbsr_write_prepic(struct kvm_nbsr *nbsr, int node_id,
 	 */
 	switch (reg_offset) {
 	case SIC_prepic_ctrl2:
-		ret = -EOPNOTSUPP;
 		node_nbsr->regs[offset_to_no(SIC_prepic_ctrl2)] = reg_value;
 		reg_name = "prepic_ctrl2";
 		break;
 	/* SIC_prepic_err_stat is emulated only in qemu */
 	case SIC_prepic_err_stat:
-		ret = -EOPNOTSUPP;
 		reg_name = "prepic_err_stat";
 		break;
 	/* SIC_prepic_err_int is emulated only in qemu */
 	case SIC_prepic_err_int:
-		ret = -EOPNOTSUPP;
 		reg_name = "prepic_err_int";
 		break;
 	case SIC_prepic_linp0:
-		ret = -EOPNOTSUPP;
 		node_nbsr->regs[offset_to_no(SIC_prepic_linp0)] = reg_value;
 		reg_name = "prepic_linp0";
 		break;
 	case SIC_prepic_linp1:
-		ret = -EOPNOTSUPP;
 		node_nbsr->regs[offset_to_no(SIC_prepic_linp1)] = reg_value;
 		reg_name = "prepic_linp1";
 		break;
 	case SIC_prepic_linp2:
-		ret = -EOPNOTSUPP;
 		node_nbsr->regs[offset_to_no(SIC_prepic_linp2)] = reg_value;
 		reg_name = "prepic_linp2";
 		break;
 	case SIC_prepic_linp3:
-		ret = -EOPNOTSUPP;
 		node_nbsr->regs[offset_to_no(SIC_prepic_linp3)] = reg_value;
 		reg_name = "prepic_linp3";
 		break;
 	case SIC_prepic_linp4:
-		ret = -EOPNOTSUPP;
 		node_nbsr->regs[offset_to_no(SIC_prepic_linp4)] = reg_value;
 		reg_name = "prepic_linp4";
 		break;
 	case SIC_prepic_linp5:
-		ret = -EOPNOTSUPP;
 		node_nbsr->regs[offset_to_no(SIC_prepic_linp5)] = reg_value;
 		reg_name = "prepic_linp5";
 		break;
 	default:
-		pr_err("%s(): node #%d prepic reg with offset 0x%04x "
-			"doesn't support 32-bit writes, so ignore it\n",
-			__func__, node_id, reg_offset);
-		reg_name = "???";
+		WARN_ON_ONCE(1);
 		break;
 	}
 	mutex_unlock(&nbsr->lock);
 
-	nbsr_debug_dump_prepic(node_id, reg_offset, reg_value, true,
-				reg_name);
-
-	return ret;
+	nbsr_debug_dump_prepic(node_id, reg_offset, reg_value, true, reg_name);
+	return -EOPNOTSUPP;
 }
 
 static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
@@ -1587,65 +1434,55 @@ static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
 	return ret;
 }
 
-static int node_nbsr_sic_read(struct kvm_nbsr *nbsr, int node_id,
-				unsigned int reg_offset, u32 *reg_val)
+static int unsupported_reg_read(int node_id, unsigned int reg_offset, u32 *reg_val)
 {
-	ASSERT(reg_offset < MAX_SUPPORTED_NODE_NBSR_OFFSET);
+	*reg_val = -1;
+	pr_err_ratelimited("node #%d NBSR reg with offset 0x%04x is not supported so return 0x%x\n",
+			node_id, reg_offset, *reg_val);
+	return -EOPNOTSUPP;
+}
 
+static int node_nbsr_sic_read_v3(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			      int node_id, unsigned int reg_offset, u32 *reg_val)
+{
 	switch (reg_offset) {
-	case SIC_rt_mlo0:
-	case SIC_rt_mlo1:
-	case SIC_rt_mlo2:
-	case SIC_rt_mlo3:
-	case SIC_rt_mhi0:
-	case SIC_rt_mhi1:
-	case SIC_rt_mhi2:
-	case SIC_rt_mhi3:
-		return node_nbsr_read_rt_mem(nbsr, node_id,
-						reg_offset, reg_val);
-	case SIC_rt_lcfg0:
-	case SIC_rt_lcfg1:
-	case SIC_rt_lcfg2:
-	case SIC_rt_lcfg3:
-		return node_nbsr_read_rt_lcfg(nbsr, node_id,
-						reg_offset, reg_val);
-	case SIC_rt_pcim0:
-	case SIC_rt_pcim1:
-	case SIC_rt_pcim2:
-	case SIC_rt_pcim3:
-		return node_nbsr_read_rt_pcim(nbsr, node_id,
-						reg_offset, reg_val);
-	case SIC_rt_pciio0:
-	case SIC_rt_pciio1:
-	case SIC_rt_pciio2:
-	case SIC_rt_pciio3:
-		return node_nbsr_read_rt_pciio(nbsr, node_id,
-						reg_offset, reg_val);
-	case SIC_rt_pcimp_b0:
-	case SIC_rt_pcimp_b1:
-	case SIC_rt_pcimp_b2:
-	case SIC_rt_pcimp_b3:
-		return node_nbsr_read_rt_pcimp_b(nbsr, node_id,
-						reg_offset, reg_val);
-	case SIC_rt_pcimp_e0:
-	case SIC_rt_pcimp_e1:
-	case SIC_rt_pcimp_e2:
-	case SIC_rt_pcimp_e3:
-		return node_nbsr_read_rt_pcimp_e(nbsr, node_id,
-						reg_offset, reg_val);
-	case SIC_rt_pcicfgb:
-		return node_nbsr_read_rt_pcicfgb(nbsr, node_id,
-						reg_offset, reg_val);
 	case SIC_rt_ioapic0:
 	case SIC_rt_ioapic1:
 	case SIC_rt_ioapic2:
 	case SIC_rt_ioapic3:
-		return node_nbsr_read_rt_ioapic(nbsr, node_id,
-						reg_offset, reg_val);
-	case SIC_rt_msi:
-	case SIC_rt_msi_h:
-		return node_nbsr_read_rt_msi(nbsr, node_id,
-						reg_offset, reg_val);
+		return node_nbsr_read_rt_ioapic(nbsr, node_id, reg_offset, reg_val);
+	case SIC_mc0_ecc:
+	case SIC_mc1_ecc:
+	case SIC_mc2_ecc:
+		return node_nbsr_read_mc_ecc(vcpu, reg_val);
+	default:
+		return unsupported_reg_read(node_id, reg_offset, reg_val);
+	}
+}
+
+static int node_nbsr_sic_read_v4_v5(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			      int node_id, unsigned int reg_offset, u32 *reg_val)
+{
+	switch (reg_offset) {
+	case SIC_rt_ioapic0:
+	case SIC_rt_ioapic1:
+	case SIC_rt_ioapic2:
+	case SIC_rt_ioapic3:
+		return node_nbsr_read_rt_ioapic(nbsr, node_id, reg_offset, reg_val);
+	case SIC_mc0_ecc:
+	case SIC_mc1_ecc:
+	case SIC_mc2_ecc:
+	case SIC_mc3_ecc:
+		return node_nbsr_read_mc_ecc(vcpu, reg_val);
+	default:
+		return unsupported_reg_read(node_id, reg_offset, reg_val);
+	}
+}
+
+static int node_nbsr_sic_read_v6_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			      int node_id, unsigned int reg_offset, u32 *reg_val)
+{
+	switch (reg_offset) {
 	case PMC_FREQ_CORE_N_SLEEP(0):
 	case PMC_FREQ_CORE_N_SLEEP(1):
 	case PMC_FREQ_CORE_N_SLEEP(2):
@@ -1662,7 +1499,63 @@ static int node_nbsr_sic_read(struct kvm_nbsr *nbsr, int node_id,
 	case PMC_FREQ_CORE_N_SLEEP(13):
 	case PMC_FREQ_CORE_N_SLEEP(14):
 	case PMC_FREQ_CORE_N_SLEEP(15):
-		return  node_nbsr_read_pmc(nbsr, node_id, reg_offset, reg_val);
+		return node_nbsr_read_pmc(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_msi:
+	case SIC_rt_msi_h:
+		return node_nbsr_read_rt_msi(nbsr, node_id, reg_offset, reg_val);
+	case MC_ECC:
+		return node_nbsr_read_mc_ecc(vcpu, reg_val);
+	case HC_CTRL:
+	case MC_CH:
+	case HMU_MIC:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+	default:
+		return unsupported_reg_read(node_id, reg_offset, reg_val);
+	}
+}
+
+static int node_nbsr_sic_read(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			      int node_id, unsigned int reg_offset, u32 *reg_val)
+{
+	ASSERT(reg_offset < MAX_SUPPORTED_NODE_NBSR_OFFSET);
+
+	switch (reg_offset) {
+	case SIC_rt_mlo0:
+	case SIC_rt_mlo1:
+	case SIC_rt_mlo2:
+	case SIC_rt_mlo3:
+	case SIC_rt_mhi0:
+	case SIC_rt_mhi1:
+	case SIC_rt_mhi2:
+	case SIC_rt_mhi3:
+		return node_nbsr_read_rt_mem(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_lcfg0:
+	case SIC_rt_lcfg1:
+	case SIC_rt_lcfg2:
+	case SIC_rt_lcfg3:
+		return node_nbsr_read_rt_lcfg(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_pcim0:
+	case SIC_rt_pcim1:
+	case SIC_rt_pcim2:
+	case SIC_rt_pcim3:
+		return node_nbsr_read_rt_pcim(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_pciio0:
+	case SIC_rt_pciio1:
+	case SIC_rt_pciio2:
+	case SIC_rt_pciio3:
+		return node_nbsr_read_rt_pciio(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_pcimp_b0:
+	case SIC_rt_pcimp_b1:
+	case SIC_rt_pcimp_b2:
+	case SIC_rt_pcimp_b3:
+		return node_nbsr_read_rt_pcimp_b(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_pcimp_e0:
+	case SIC_rt_pcimp_e1:
+	case SIC_rt_pcimp_e2:
+	case SIC_rt_pcimp_e3:
+		return node_nbsr_read_rt_pcimp_e(nbsr, node_id, reg_offset, reg_val);
+	case SIC_rt_pcicfgb:
+		return node_nbsr_read_rt_pcicfgb(nbsr, node_id, reg_offset, reg_val);
 	case SIC_l3_ctrl:
 		return node_nbsr_read_l3(nbsr, node_id, reg_offset, reg_val);
 	case SIC_prepic_ctrl2:
@@ -1674,24 +1567,26 @@ static int node_nbsr_sic_read(struct kvm_nbsr *nbsr, int node_id,
 	case SIC_prepic_linp3:
 	case SIC_prepic_linp4:
 	case SIC_prepic_linp5:
-		return node_nbsr_read_prepic(nbsr, node_id,
-						reg_offset, reg_val);
+		return node_nbsr_read_prepic(nbsr, node_id, reg_offset, reg_val);
 	case EFUSE_RAM_ADDR:
 	case EFUSE_RAM_DATA:
 		*reg_val = -1;
-		pr_err_once("%s(): node #%d NBSR : regs of EFUSE_RAM "
-			"(offset 0x%04x) is not yet supported, so return 0x%x\n",
+		pr_err_once("%s(): node #%d NBSR regs of EFUSE_RAM (offset 0x%04x) is not yet supported, so return 0x%x\n",
 			__func__, node_id, reg_offset, *reg_val);
-		break;
+		return 0;
 	default:
-		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
-		break;
+		/* Not a common register, now try iset-specific ones */
+		switch (vcpu->kvm->arch.guest_info.cpu_iset) {
+		case 1 ... 3:
+			return node_nbsr_sic_read_v3(vcpu, nbsr, node_id, reg_offset, reg_val);
+		case 4 ... 5:
+			return node_nbsr_sic_read_v4_v5(vcpu, nbsr, node_id, reg_offset, reg_val);
+		case 6 ... 7:
+			return node_nbsr_sic_read_v6_v7(vcpu, nbsr, node_id, reg_offset, reg_val);
+		default:
+			return unsupported_reg_read(node_id, reg_offset, reg_val);
+		}
 	}
-
-	return 0;
 }
 
 static int node_nbsr_sic_readll(struct kvm_nbsr *nbsr, int node_id,
@@ -1704,12 +1599,10 @@ static int node_nbsr_sic_readll(struct kvm_nbsr *nbsr, int node_id,
 	case SIC_iommu_dtba_lo:
 	case SIC_iommu_err:
 	case SIC_iommu_err_info_lo:
-		return node_nbsr_readll_iommu(nbsr, node_id,
-						reg_offset, reg_val);
+		return node_nbsr_readll_iommu(nbsr, node_id, reg_offset, reg_val);
 	default:
 		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%llx\n",
+		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet supported, so return 0x%llx\n",
 			__func__, node_id, reg_offset, *reg_val);
 		break;
 	}
@@ -1813,7 +1706,7 @@ static void node_nbsr_write_bc_mp_stat(struct kvm_nbsr *nbsr, int node_id,
 		__func__, node_id, AW(reg));
 }
 
-static void node_nbsr_bc_write(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+static int node_nbsr_bc_write(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 			int node_id, unsigned int reg_offset, u32 reg_value)
 {
 	kvm_nbsr_regs_t *node_nbsr;
@@ -1821,8 +1714,8 @@ static void node_nbsr_bc_write(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 
 	nbsr_debug_dump_bc_reg(node_id, reg_offset, true, reg_value);
 
-	BUG_ON(!nbsr_bc_reg_in_range(reg_offset));
-	BUG_ON(!vcpu);
+	if (WARN_ON_ONCE(!vcpu || !nbsr_bc_reg_in_range(reg_offset)))
+		return -EINVAL;
 
 	reg_no = nbsr_bc_reg_offset_to_no(reg_offset);
 	node_nbsr = &nbsr->nodes[node_id];
@@ -1831,8 +1724,7 @@ static void node_nbsr_bc_write(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 
 	switch (reg_offset) {
 	case BC_MP_T_CORR:
-		node_nbsr_write_bc_mp_t_corr(
-			vcpu, nbsr, node_id, reg_no, reg_value);
+		node_nbsr_write_bc_mp_t_corr(vcpu, nbsr, node_id, reg_no, reg_value);
 		break;
 	case BC_MP_STAT:
 		node_nbsr_write_bc_mp_stat(nbsr, node_id, reg_no, reg_value);
@@ -1843,6 +1735,8 @@ static void node_nbsr_bc_write(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 	}
 
 	mutex_unlock(&nbsr->lock);
+
+	return 0;
 }
 
 static int node_nbsr_bc_read(struct kvm_nbsr *nbsr, int node_id,
@@ -1851,7 +1745,8 @@ static int node_nbsr_bc_read(struct kvm_nbsr *nbsr, int node_id,
 	kvm_nbsr_regs_t *node_nbsr;
 	unsigned int reg_no;
 
-	BUG_ON(!nbsr_bc_reg_in_range(reg_offset));
+	if (WARN_ON_ONCE(!nbsr_bc_reg_in_range(reg_offset)))
+		return -EINVAL;
 
 	reg_no = nbsr_bc_reg_offset_to_no(reg_offset);
 	node_nbsr = &nbsr->nodes[node_id];
@@ -1865,26 +1760,24 @@ static int node_nbsr_bc_read(struct kvm_nbsr *nbsr, int node_id,
 	return 0;
 }
 
-static int node_nbsr_read(struct kvm_nbsr *nbsr, int node_id,
-				unsigned int reg_offset, u32 *reg_val)
+static int node_nbsr_read(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			  int node_id, unsigned int reg_offset, u32 *reg_val)
 {
 	if (!nbsr_is_node_online(nbsr, node_id)) {
 		*reg_val = -1;
-		pr_err("%s(): node #%d is not online, so return 0x%x "
-			"for reg offset 0x%04x\n",
-			__func__, node_id, *reg_val, reg_offset);
+		pr_err("node #%d is not online, so return 0x%x for reg offset 0x%04x\n",
+			node_id, *reg_val, reg_offset);
 		return 0;
 	}
 
 	if (nbsr_bc_reg_in_range(reg_offset)) {
 		return node_nbsr_bc_read(nbsr, node_id, reg_offset, reg_val);
 	} else if (reg_offset < MAX_SUPPORTED_NODE_NBSR_OFFSET) {
-		return node_nbsr_sic_read(nbsr, node_id, reg_offset, reg_val);
+		return node_nbsr_sic_read(vcpu, nbsr, node_id, reg_offset, reg_val);
 	} else {
 		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so return 0x%x\n",
-			__func__, node_id, reg_offset, *reg_val);
+		pr_err("node #%d NBSR reg with offset 0x%04x is not yet supported, so return 0x%x\n",
+			node_id, reg_offset, *reg_val);
 	}
 
 	return 0;
@@ -1895,109 +1788,70 @@ static int node_nbsr_readll(struct kvm_nbsr *nbsr, int node_id,
 {
 	if (!nbsr_is_node_online(nbsr, node_id)) {
 		*reg_val = -1;
-		pr_err("%s(): node #%d is not online, so return 0x%llx "
-			"for reg offset 0x%04x\n",
+		pr_err("%s(): node #%d is not online, so return 0x%llx for reg offset 0x%04x\n",
 			__func__, node_id, *reg_val, reg_offset);
 		return 0;
 	}
 
 	if (reg_offset < MAX_SUPPORTED_NODE_NBSR_OFFSET) {
-		return node_nbsr_sic_readll(nbsr, node_id,
-						reg_offset, reg_val);
+		return node_nbsr_sic_readll(nbsr, node_id, reg_offset, reg_val);
 	} else {
 		*reg_val = -1;
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x does not "
-			"support 64-bit reads, so return 0x%llx\n",
+		pr_err("%s(): node #%d NBSR reg with offset 0x%04x does not support 64-bit reads, so return 0x%llx\n",
 			__func__, node_id, reg_offset, *reg_val);
 	}
 
 	return 0;
 }
 
-static int node_nbsr_sic_write(struct kvm_nbsr *nbsr, int node_id,
-				unsigned int reg_offset, u32 reg_value)
+static int unsupported_reg_write(int node_id, unsigned int reg_offset)
 {
-	int ret = 0;
+	pr_err_ratelimited("node #%d NBSR reg with offset 0x%04x is not yet supported, so ignore write\n",
+			node_id, reg_offset);
+	return -EOPNOTSUPP;
+}
 
-	ASSERT(reg_offset < MAX_SUPPORTED_NODE_NBSR_OFFSET);
-
+static int node_nbsr_sic_write_v3(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			       int node_id, unsigned int reg_offset, u32 reg_value)
+{
 	switch (reg_offset) {
-	case SIC_rt_mlo0:
-	case SIC_rt_mlo1:
-	case SIC_rt_mlo2:
-	case SIC_rt_mlo3:
-	case SIC_rt_mhi0:
-	case SIC_rt_mhi1:
-	case SIC_rt_mhi2:
-	case SIC_rt_mhi3:
-		node_nbsr_write_rt_mem(nbsr, node_id, reg_offset, reg_value);
-		break;
-	case SIC_rt_lcfg0:
-	case SIC_rt_lcfg1:
-	case SIC_rt_lcfg2:
-	case SIC_rt_lcfg3:
-		node_nbsr_write_rt_lcfg(nbsr, node_id, reg_offset, reg_value);
-		break;
-	case SIC_rt_pcim0:
-	case SIC_rt_pcim1:
-	case SIC_rt_pcim2:
-	case SIC_rt_pcim3:
-		node_nbsr_write_rt_pcim(nbsr, node_id, reg_offset, reg_value);
-		ret = -EOPNOTSUPP;
-		break;
-	case SIC_rt_pciio0:
-	case SIC_rt_pciio1:
-	case SIC_rt_pciio2:
-	case SIC_rt_pciio3:
-		node_nbsr_write_rt_pciio(nbsr, node_id, reg_offset, reg_value);
-		ret = -EOPNOTSUPP;
-		break;
-	case SIC_rt_pcimp_b0:
-	case SIC_rt_pcimp_b1:
-	case SIC_rt_pcimp_b2:
-	case SIC_rt_pcimp_b3:
-		node_nbsr_write_rt_pcimp_b(nbsr, node_id, reg_offset,
-						reg_value);
-		ret = -EOPNOTSUPP;
-		break;
-	case SIC_rt_pcimp_e0:
-	case SIC_rt_pcimp_e1:
-	case SIC_rt_pcimp_e2:
-	case SIC_rt_pcimp_e3:
-		node_nbsr_write_rt_pcimp_e(nbsr, node_id, reg_offset,
-						reg_value);
-		ret = -EOPNOTSUPP;
-		break;
-	case SIC_rt_pcicfgb:
-		node_nbsr_write_rt_pcicfgb(nbsr, node_id, reg_offset,
-						reg_value);
-		ret = -EOPNOTSUPP;
-		break;
 	case SIC_rt_ioapic0:
 	case SIC_rt_ioapic1:
 	case SIC_rt_ioapic2:
 	case SIC_rt_ioapic3:
-		node_nbsr_write_rt_ioapic(nbsr, node_id, reg_offset, reg_value);
-		break;
-	case SIC_rt_msi:
-	case SIC_rt_msi_h:
-		node_nbsr_write_rt_msi(nbsr, node_id, reg_offset, reg_value);
-		ret = -EOPNOTSUPP;
-		break;
-	case SIC_iommu_ctrl:
-	case SIC_iommu_ba_lo:
-	case SIC_iommu_ba_hi:
-	case SIC_iommu_dtba_lo:
-	case SIC_iommu_dtba_hi:
-	case SIC_iommu_flush:
-	case SIC_iommu_flushP:
-	case SIC_iommu_err:
-	case SIC_iommu_err1:
-	case SIC_iommu_err_info_lo:
-	case SIC_iommu_err_info_hi:
-		ret = node_nbsr_write_iommu(nbsr, node_id, reg_offset,
-			reg_value);
-		break;
+		return node_nbsr_write_rt_ioapic(nbsr, node_id, reg_offset, reg_value);
+	case SIC_mc0_ecc:
+	case SIC_mc1_ecc:
+	case SIC_mc2_ecc:
+		return node_nbsr_write_mc_ecc(node_id, reg_offset, reg_value);
+	default:
+		return unsupported_reg_write(node_id, reg_offset);
+	}
+}
+
+static int node_nbsr_sic_write_v4_v5(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			       int node_id, unsigned int reg_offset, u32 reg_value)
+{
+	switch (reg_offset) {
+	case SIC_rt_ioapic0:
+	case SIC_rt_ioapic1:
+	case SIC_rt_ioapic2:
+	case SIC_rt_ioapic3:
+		return node_nbsr_write_rt_ioapic(nbsr, node_id, reg_offset, reg_value);
+	case SIC_mc0_ecc:
+	case SIC_mc1_ecc:
+	case SIC_mc2_ecc:
+	case SIC_mc3_ecc:
+		return node_nbsr_write_mc_ecc(node_id, reg_offset, reg_value);
+	default:
+		return unsupported_reg_write(node_id, reg_offset);
+	}
+}
+
+static int node_nbsr_sic_write_v6_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			       int node_id, unsigned int reg_offset, u32 reg_value)
+{
+	switch (reg_offset) {
 	case PMC_FREQ_CORE_N_SLEEP(0):
 	case PMC_FREQ_CORE_N_SLEEP(1):
 	case PMC_FREQ_CORE_N_SLEEP(2):
@@ -2014,11 +1868,77 @@ static int node_nbsr_sic_write(struct kvm_nbsr *nbsr, int node_id,
 	case PMC_FREQ_CORE_N_SLEEP(13):
 	case PMC_FREQ_CORE_N_SLEEP(14):
 	case PMC_FREQ_CORE_N_SLEEP(15):
-		ret = node_nbsr_write_pmc(nbsr, node_id, reg_offset, reg_value);
-		break;
+		return node_nbsr_write_pmc(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_msi:
+	case SIC_rt_msi_h:
+		return node_nbsr_write_rt_msi(nbsr, node_id, reg_offset, reg_value);
+	case MC_ECC:
+		return node_nbsr_write_mc_ecc(node_id, reg_offset, reg_value);
+	case HC_CTRL:
+	case MC_CH:
+	case EDBC_IOMMU_CTRL ... EDBC_IOMMU_ERR_INFO_HI:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
+	default:
+		return unsupported_reg_write(node_id, reg_offset);
+	}
+}
+
+static int node_nbsr_sic_write(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+			       int node_id, unsigned int reg_offset, u32 reg_value)
+{
+	ASSERT(reg_offset < MAX_SUPPORTED_NODE_NBSR_OFFSET);
+
+	switch (reg_offset) {
+	case SIC_rt_mlo0:
+	case SIC_rt_mlo1:
+	case SIC_rt_mlo2:
+	case SIC_rt_mlo3:
+	case SIC_rt_mhi0:
+	case SIC_rt_mhi1:
+	case SIC_rt_mhi2:
+	case SIC_rt_mhi3:
+		return node_nbsr_write_rt_mem(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_lcfg0:
+	case SIC_rt_lcfg1:
+	case SIC_rt_lcfg2:
+	case SIC_rt_lcfg3:
+		return node_nbsr_write_rt_lcfg(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_pcim0:
+	case SIC_rt_pcim1:
+	case SIC_rt_pcim2:
+	case SIC_rt_pcim3:
+		return node_nbsr_write_rt_pcim(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_pciio0:
+	case SIC_rt_pciio1:
+	case SIC_rt_pciio2:
+	case SIC_rt_pciio3:
+		return node_nbsr_write_rt_pciio(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_pcimp_b0:
+	case SIC_rt_pcimp_b1:
+	case SIC_rt_pcimp_b2:
+	case SIC_rt_pcimp_b3:
+		return node_nbsr_write_rt_pcimp_b(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_pcimp_e0:
+	case SIC_rt_pcimp_e1:
+	case SIC_rt_pcimp_e2:
+	case SIC_rt_pcimp_e3:
+		return node_nbsr_write_rt_pcimp_e(nbsr, node_id, reg_offset, reg_value);
+	case SIC_rt_pcicfgb:
+		return node_nbsr_write_rt_pcicfgb(nbsr, node_id, reg_offset, reg_value);
+	case SIC_iommu_ctrl:
+	case SIC_iommu_ba_lo:
+	case SIC_iommu_ba_hi:
+	case SIC_iommu_dtba_lo:
+	case SIC_iommu_dtba_hi:
+	case SIC_iommu_flush:
+	case SIC_iommu_flushP:
+	case SIC_iommu_err:
+	case SIC_iommu_err1:
+	case SIC_iommu_err_info_lo:
+	case SIC_iommu_err_info_hi:
+		return node_nbsr_write_iommu(nbsr, node_id, reg_offset, reg_value);
 	case SIC_l3_ctrl:
-		ret = node_nbsr_write_l3(nbsr, node_id, reg_offset, reg_value);
-		break;
+		return node_nbsr_write_l3(nbsr, node_id, reg_offset, reg_value);
 	case SIC_prepic_ctrl2:
 	case SIC_prepic_err_stat:
 	case SIC_prepic_err_int:
@@ -2028,23 +1948,28 @@ static int node_nbsr_sic_write(struct kvm_nbsr *nbsr, int node_id,
 	case SIC_prepic_linp3:
 	case SIC_prepic_linp4:
 	case SIC_prepic_linp5:
-		ret = node_nbsr_write_prepic(nbsr, node_id, reg_offset,
-			reg_value);
-		break;
+		return node_nbsr_write_prepic(nbsr, node_id, reg_offset, reg_value);
 	case EFUSE_RAM_ADDR:
 	case EFUSE_RAM_DATA:
-		pr_err_once("%s(): node #%d NBSR : regs of EFUSE_RAM "
-			"(offset 0x%04x) is not yet supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		break;
+		pr_err_once("node #%d NBSR reg of EFUSE_RAM (offset 0x%04x) is not yet supported, so ignore write\n",
+			node_id, reg_offset);
+		return 0;
 	default:
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
-			"supported, so ignore write\n",
-			__func__, node_id, reg_offset);
-		break;
+		/* Not a common register, now try iset-specific ones */
+		switch ((vcpu) ? vcpu->kvm->arch.guest_info.cpu_iset : -1) {
+		case 1 ... 3:
+			return node_nbsr_sic_write_v3(vcpu, nbsr, node_id,
+						      reg_offset, reg_value);
+		case 4 ... 5:
+			return node_nbsr_sic_write_v4_v5(vcpu, nbsr, node_id,
+							 reg_offset, reg_value);
+		case 6 ... 7:
+			return node_nbsr_sic_write_v6_v7(vcpu, nbsr, node_id,
+							 reg_offset, reg_value);
+		default:
+			return unsupported_reg_write(node_id, reg_offset);
+		}
 	}
-
-	return ret;
 }
 
 static int node_nbsr_write(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
@@ -2060,9 +1985,9 @@ static int node_nbsr_write(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 	}
 
 	if (nbsr_bc_reg_in_range(reg_offset)) {
-		node_nbsr_bc_write(vcpu, nbsr, node_id, reg_offset, reg_value);
+		ret = node_nbsr_bc_write(vcpu, nbsr, node_id, reg_offset, reg_value);
 	} else if (reg_offset < MAX_SUPPORTED_NODE_NBSR_OFFSET) {
-		ret = node_nbsr_sic_write(nbsr, node_id, reg_offset, reg_value);
+		ret = node_nbsr_sic_write(vcpu, nbsr, node_id, reg_offset, reg_value);
 	} else {
 		pr_err("%s(): node #%d NBSR reg with offset 0x%04x is not yet "
 			"supported, so ignore write\n",
@@ -2085,14 +2010,10 @@ static int node_nbsr_writell(struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 	}
 
 	/* Fail silently for writes to IOMMU for embedded devices */
-	if (reg_offset >= SIC_iommu_ctrl &&
-		reg_offset < SIC_iommu_err_info_hi) {
-		ret = node_nbsr_writell_iommu(
-				nbsr, node_id, reg_offset, reg_value);
-	} else if (!(reg_offset >= SIC_edbc_iommu_ctrl &&
-			reg_offset < SIC_edbc_iommu_err_info_hi)) {
-		pr_err("%s(): node #%d NBSR reg with offset 0x%04x does not "
-			"support 64-bit writes, so ignore it\n",
+	if (reg_offset >= SIC_iommu_ctrl && reg_offset < SIC_iommu_err_info_hi) {
+		ret = node_nbsr_writell_iommu(nbsr, node_id, reg_offset, reg_value);
+	} else if (!(reg_offset >= EDBC_IOMMU_CTRL && reg_offset <= EDBC_IOMMU_ERR_INFO_HI)) {
+		pr_err("%s(): node #%d NBSR reg with offset 0x%04x does not support 64-bit writes, so ignore it\n",
 			__func__, node_id, reg_offset);
 	}
 
@@ -2340,14 +2261,17 @@ static int nbsr_mmio_read(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	if (!nbsr_in_range(nbsr, addr))
 		return -EOPNOTSUPP;
 
-	ASSERT(len == 4 || len == 8); /* 8 bytes access is only for IOMMU */
+	/* 8 bytes access is only for IOMMU */
+	if (unlikely(len != 4 && len != 8)) {
+		pr_err_ratelimited("KVM: invalid guest NBSR read of %d bytes\n", len);
+		return -EOPNOTSUPP;
+	}
 
 	node_id = nbsr_addr_to_node(nbsr, addr);
 	reg_offset = nbsr_addr_to_reg_offset(nbsr, addr);
 
 	if (len == 4)
-		return node_nbsr_read(nbsr, node_id,
-					reg_offset, (u32 *)val);
+		return node_nbsr_read(vcpu, nbsr, node_id, reg_offset, (u32 *)val);
 	else
 		return node_nbsr_readll(nbsr, node_id,
 					reg_offset, (u64 *)val);
@@ -2364,20 +2288,22 @@ static int nbsr_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	if (!nbsr_in_range(nbsr, addr))
 		return -EOPNOTSUPP;
 
-	ASSERT(len == 4 || len == 8); /* 8 bytes access is only for IOMMU */
+	/* 8 bytes access is only for IOMMU */
+	if (unlikely(len != 4 && len != 8)) {
+		pr_err_ratelimited("KVM: invalid guest NBSR write of %d bytes\n", len);
+		return -EOPNOTSUPP;
+	}
 
 	node_id = nbsr_addr_to_node(nbsr, addr);
 	reg_offset = nbsr_addr_to_reg_offset(nbsr, addr);
 	if (len == 4) {
 		u32 reg_value = *(u32 *)val;
 
-		ret = node_nbsr_write(vcpu, nbsr, node_id, reg_offset,
-			reg_value);
+		ret = node_nbsr_write(vcpu, nbsr, node_id, reg_offset, reg_value);
 	} else {
 		u64 reg_value = *(u64 *)val;
 
-		ret = node_nbsr_writell(
-				vcpu, nbsr, node_id, reg_offset, reg_value);
+		ret = node_nbsr_writell(vcpu, nbsr, node_id, reg_offset, reg_value);
 	}
 
 	return ret;

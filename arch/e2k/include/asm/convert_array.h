@@ -16,10 +16,10 @@
 /* New mask format: 4 bits per structure field */
 #define get_pm_struct_simple(struct128, struct64,	\
 			max_prot_array_size, fields, \
-			items, mask_type, mask_align) \
+			items, mask_type, mask_align, regs) \
 	get_pm_struct(struct128, struct64,	\
 			max_prot_array_size, fields, \
-			items, mask_type, mask_align, 0, 0)
+			items, mask_type, mask_align, 0, 0, regs)
 
 
 extern int get_pm_struct(const void	__user *struct128,
@@ -27,7 +27,8 @@ extern int get_pm_struct(const void	__user *struct128,
 			 const int max_prot_array_size, const int fieldnum,
 			 const int items, const long mask_type,
 			 const long mask_align, const long mask_rw,
-			 const int rval_mode);
+			 const int rval_mode,
+			 const struct pt_regs *regs);
 /*
  * Converts protected structure (array of structures), which can contain
  * protected user pointers to memory, function descriptors, and int values.
@@ -93,16 +94,17 @@ extern int convert_array_3(const void	__user *prot_array,
 			 const int max_prot_array_size, const int fields,
 			 const int items, unsigned long mask_type,
 			 unsigned long mask_align, unsigned long mask_rw,
-			 const int rval_mode);
+			 const int rval_mode,
+			 const struct pt_regs *regs);
 
 
 /* This is deprecated. Not recommended to use.
  * Old mask format: 2 bits per structure field
  */
 #define convert_array(prot_array, new_array, max_prot_array_size, fields, \
-			items, mask_type, mask_align) \
+			items, mask_type, mask_align, regs) \
 	convert_array_3(prot_array, new_array, max_prot_array_size, fields, \
-			items, mask_type, mask_align, 0, 0)
+			items, mask_type, mask_align, 0, 0, regs)
 
 #else
 # define convert_array(...)		0

@@ -2052,7 +2052,7 @@ boot_is_pfn_valid(e2k_size_t pfn)
 void __init boot_map_kernel_image(bool populate_on_host)
 {
 	e2k_addr_t virt_base;
-	e2k_size_t size, delta;
+	e2k_size_t size, delta, size_huge;
 
 	/* Kernel image duplication on NUMA is done later
 	 * (see duplicate_kernel_image()) */
@@ -2061,9 +2061,18 @@ void __init boot_map_kernel_image(bool populate_on_host)
 
 	virt_base = (unsigned long) _stext;
 	size = (unsigned long) (_etext - _stext);
-	boot_map_phys_area(".text", virt_base + delta, size, virt_base,
+	size_huge = min(16 * E2K_LARGE_PAGE_SIZE,
+			round_down(size, E2K_LARGE_PAGE_SIZE));
+	boot_map_phys_area(".text", virt_base + delta,
+			size_huge, virt_base,
 			PAGE_KERNEL_TEXT, BOOT_E2K_KERNEL_PAGE_SIZE,
 			false, populate_on_host);
+	if (size != size_huge) {
+		boot_map_phys_area(".text", virt_base + delta + size_huge,
+				size - size_huge, virt_base + size_huge,
+				PAGE_KERNEL_TEXT, E2K_SMALL_PAGE_SIZE,
+				false, populate_on_host);
+	}
 	boot_text_virt_base = virt_base;
 
 	virt_base = (unsigned long) __start_rodata_notes;

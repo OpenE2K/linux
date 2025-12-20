@@ -32,7 +32,10 @@ KBUILD_CFLAGS += -fprofile-generate-kernel
 endif
 ifeq ($(origin PROFILE_USE), undefined)
 else
-KBUILD_CFLAGS += -fprofile-use="$(PROFILE_USE)"
+ KBUILD_CFLAGS += -fprofile-use="$(PROFILE_USE)" -Wno-missing-profile
+ ifeq ($(call cc-option-yn,-O3 -fprofile-correction),y)
+  KBUILD_CFLAGS += -fprofile-correction
+ endif
 endif
 
 KBUILD_CFLAGS += -Werror=bad-initializer-type
@@ -60,15 +63,13 @@ CFLAGS_E8C2	:= -mtune=elbrus-8c2
 CFLAGS_E12C	:= -mtune=elbrus-12c
 CFLAGS_E16C	:= -mtune=elbrus-16c
 CFLAGS_E2C3	:= -mtune=elbrus-2c3
-CFLAGS_E48C	:= -march=elbrus-v7
 CFLAGS_E8V7	:= -march=elbrus-v7
 
 CFLAGS_ALL_CPUS	:= $(CFLAGS_E2S) $(CFLAGS_E8C) $(CFLAGS_E1CP) $(CFLAGS_E8C2) \
-		   $(CFLAGS_E12C) $(CFLAGS_E16C) $(CFLAGS_E2C3) $(CFLAGS_E48C) \
-		   $(CFLAGS_E8V7)
+		   $(CFLAGS_E12C) $(CFLAGS_E16C) $(CFLAGS_E2C3) $(CFLAGS_E8V7)
 
 export	CFLAGS_E2S CFLAGS_E8C CFLAGS_E1CP CFLAGS_E8C2 CFLAGS_E2C3 CFLAGS_E12C \
-	CFLAGS_E16C CFLAGS_E48C CFLAGS_E8V7 CFLAGS_ALL_CPUS
+	CFLAGS_E16C CFLAGS_E8V7 CFLAGS_ALL_CPUS
 
 ifneq ($(CONFIG_E2K_MACHINE),y)
   KBUILD_CFLAGS	+= $(CFLAGS_GENERIC) -ffix-lcc-bug123567
@@ -104,16 +105,12 @@ else
     KBUILD_CFLAGS += $(CFLAGS_E2C3)
     KBUILD_AFLAGS += $(CFLAGS_E2C3)
     TARGET_MDL    := 0c
-  else ifeq ($(CONFIG_E2K_E48C),y)
-    KBUILD_CFLAGS += $(CFLAGS_E48C)
-    KBUILD_AFLAGS += $(CFLAGS_E48C)
-    TARGET_MDL    := 0d
   else ifeq ($(CONFIG_E2K_E8V7),y)
     KBUILD_CFLAGS += $(CFLAGS_E8V7)
     KBUILD_AFLAGS += $(CFLAGS_E8V7)
     TARGET_MDL    := 0e
   else
-    error "Invalid e2k machine type"
+    $(error Invalid e2k machine type)
   endif
 endif
 
@@ -164,19 +161,12 @@ e16cboot: vmlinux
 e2c3boot: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) need-builtin=1 CONFIG_E2C3=y boot
 
-e48cboot: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) need-builtin=1 CONFIG_E48C=y boot
-
 e8v7boot: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) need-builtin=1 CONFIG_E8V7=y boot
 
 image: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) CONFIG_BOOT=y $(objtree)/image.boot
-	$(Q)echo "Target mdl: $(TARGET_MDL)"; \
-	echo $(TARGET_MDL) | \
-		xxd -r -p | \
-		dd of=$(objtree)/image.boot bs=1 seek=258 count=1 conv=notrunc 2>/dev/null; \
-	echo 00000000 | xxd -r -p | \
+	$(Q)echo 00000000 | xxd -r -p | \
 		dd of=$(objtree)/image.boot bs=1 seek=1588 count=4 conv=notrunc 2>/dev/null; \
 	e2k_kernel_csum=`cksum $(objtree)/image.boot | awk '{ printf "%08x\n", $$1 }'`; \
 	echo "Kernel image check sum: $$e2k_kernel_csum"; \
@@ -188,11 +178,7 @@ image: vmlinux
 
 zImage: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) CONFIG_BOOT=y $(objtree)/zImage
-	$(Q)echo "Target mdl: $(TARGET_MDL)"; \
-	echo $(TARGET_MDL) | \
-		xxd -r -p | \
-		dd of=$(objtree)/zImage bs=1 seek=258 count=1 conv=notrunc 2>/dev/null; \
-	echo 00000000 | xxd -r -p | \
+	$(Q)echo 00000000 | xxd -r -p | \
 		dd of=$(objtree)/zImage bs=1 seek=1588 count=4 conv=notrunc 2>/dev/null; \
 	e2k_kernel_csum=`cksum $(objtree)/zImage | awk '{ printf "%08x\n", $$1 }'`; \
 	echo "Kernel image check sum: $$e2k_kernel_csum"; \
@@ -233,7 +219,6 @@ define archhelp
   echo  '  e12cboot		- Build kernel boot image with small embedded boot for e12c simulator'
   echo  '  e16cboot		- Build kernel boot image with small embedded boot for e16c simulator'
   echo  '  e2c3boot		- Build kernel boot image with small embedded boot for e2c3 simulator'
-  echo  '  e48cboot		- Build kernel boot image with small embedded boot for e48c simulator'
   echo  '  e8v7boot		- Build kernel boot image with small embedded boot for e8v7 simulator'
   echo  '  [with_kernel=1]	- When building boot, build in compressed kernel into the boot image'
   echo  ''

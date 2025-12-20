@@ -7,6 +7,8 @@
 #define _E2K_API_H_
 
 #include <linux/stringify.h>
+#include <linux/typecheck.h>
+
 #include <asm/alternative.h>
 #include <asm/compiler.h>
 #include <asm/cpu_features.h>
@@ -28,7 +30,7 @@ typedef unsigned long long __e2k_u64_t;
 typedef void *__e2k_ptr_t;
 
 /* CPU_HWBUG_JUMP: mark labels that are not targets of a call or jump */
-#if CONFIG_LCC_VERSION >= 12700 && __iset__ <= 6
+#if __LCC__ >= 127 && __iset__ <= 6
 # define NONTARGET_LABEL(num) ".non_target_label "num";"
 #else
 # define NONTARGET_LABEL(num) num":"
@@ -1065,13 +1067,15 @@ do { \
 			"{rws %[upsr], %%upsr;" \
 			" scld %[wd], 32, %[wd]}" \
 			"{rwd %[wd], %%wd;" \
-			" nop 5}\n" \
+			" nop 4}" \
+			"{nop}\n" \
 		      ALTERNATIVE_2_OLDINSTR \
 		      /* Default version */ \
 			"{rws %[upsr], %%upsr;" \
 			" scld %[wd], 32, %[wd]}" \
 			"{rwd %[wd], %%wd;" \
-			" nop 7}\n" \
+			" nop 6}" \
+			"{nop}\n" \
 		      ALTERNATIVE_3_FEATURE(%[cpu_feat_iset_not_v7]) \
 		      : [wd] "=&r" (__ehs_wd) \
 		      : [sbr] "ri" ((u64) (_sbr)), \
@@ -1392,6 +1396,47 @@ do { \
 		      : "r" (mem_p), [facility] "i" (CPU_FEAT_ISET_V6) \
 		      : "%b[0]", "%b[1]", "%b[2]", "%b[3]", \
 			"%b[4]", "%b[5]", "%b[6]", "%b[7]"); \
+} while (0)
+
+#define NATIVE_CLEAR_AAU_AADS() \
+do { \
+	__uint128_t empty_aad; \
+	asm ("addd 0x0, 0x0, %L[empty_aad]\n" \
+	     "addd 0x0, 0x0, %H[empty_aad]\n" \
+	     "aaurwq %[empty_aad], %%aad0\n" \
+	     "aaurwq %[empty_aad], %%aad1\n" \
+	     "aaurwq %[empty_aad], %%aad2\n" \
+	     "aaurwq %[empty_aad], %%aad3\n" \
+	     "aaurwq %[empty_aad], %%aad4\n" \
+	     "aaurwq %[empty_aad], %%aad5\n" \
+	     "aaurwq %[empty_aad], %%aad6\n" \
+	     "aaurwq %[empty_aad], %%aad7\n" \
+	     "aaurwq %[empty_aad], %%aad8\n" \
+	     "aaurwq %[empty_aad], %%aad9\n" \
+	     "aaurwq %[empty_aad], %%aad10\n" \
+	     "aaurwq %[empty_aad], %%aad11\n" \
+	     "aaurwq %[empty_aad], %%aad12\n" \
+	     "aaurwq %[empty_aad], %%aad13\n" \
+	     "aaurwq %[empty_aad], %%aad14\n" \
+	     "aaurwq %[empty_aad], %%aad15\n" \
+	     "aaurwq %[empty_aad], %%aad16\n" \
+	     "aaurwq %[empty_aad], %%aad17\n" \
+	     "aaurwq %[empty_aad], %%aad18\n" \
+	     "aaurwq %[empty_aad], %%aad19\n" \
+	     "aaurwq %[empty_aad], %%aad20\n" \
+	     "aaurwq %[empty_aad], %%aad21\n" \
+	     "aaurwq %[empty_aad], %%aad22\n" \
+	     "aaurwq %[empty_aad], %%aad23\n" \
+	     "aaurwq %[empty_aad], %%aad24\n" \
+	     "aaurwq %[empty_aad], %%aad25\n" \
+	     "aaurwq %[empty_aad], %%aad26\n" \
+	     "aaurwq %[empty_aad], %%aad27\n" \
+	     "aaurwq %[empty_aad], %%aad28\n" \
+	     "aaurwq %[empty_aad], %%aad29\n" \
+	     "aaurwq %[empty_aad], %%aad30\n" \
+	     "aaurwq %[empty_aad], %%aad31\n" \
+	     : [empty_aad] "=r" (empty_aad) \
+	     : ); \
 } while (0)
 
 /* Clear AAU to prepare it for restoring */
@@ -1854,14 +1899,13 @@ do { \
  * vr: set to 0 if we want to preserve the lower 4-byte word
  *     (same as vr in cellar)
  */
-#define NATIVE_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc, greg_no, \
-		_chan, _vr, _quadro) \
+#define NATIVE_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc_lo, _opc_hi, \
+		greg_no, _chan, _vr, _quadro) \
 do { \
-	u64 val, val_8; \
+	u64 val_lo, val_hi; \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
 	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	u64 __opc = (_opc); \
 	asm volatile ( \
 		"{disp %%ctpr1, qpswitchd_sm\n" \
 		" cmpesb,0 %[chan], 0, %%pred20\n" \
@@ -1872,26 +1916,26 @@ do { \
 		" cmpesb,1 %[chan_q], 1, %%pred25\n" \
 		" cmpesb,3 %[chan_q], 2, %%pred26\n" \
 		" cmpesb,4 %[chan_q], 3, %%pred27}\n" \
-		"{ldrd,0 [ %[addr] + %[opc] ], %[val] ? %%pred20\n" \
-		" ldrd,2 [ %[addr] + %[opc] ], %[val] ? %%pred21\n" \
-		" ldrd,3 [ %[addr] + %[opc] ], %[val] ? %%pred22\n" \
-		" ldrd,5 [ %[addr] + %[opc] ], %[val] ? %%pred23\n" \
+		"{ldrd,0 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred20\n" \
+		" ldrd,2 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred21\n" \
+		" ldrd,3 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred22\n" \
+		" ldrd,5 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred23\n" \
 		" cmpesb,1 %[quadro], 0, %%pred18\n" \
 		" cmpesb,4 %[vr], 0, %%pred19}\n" \
 		"{nop 3\n" \
-		" ldrd,0 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred24\n" \
-		" ldrd,2 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred25\n" \
-		" ldrd,3 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred26\n" \
-		" ldrd,5 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred27}\n" \
-		"{movts %%g" #greg_no ", %[val] ? %%pred19}\n" \
-		"{movtd %[val_8], %%dg" #greg_no " ? ~ %%pred18\n" \
+		" ldrd,0 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred24\n" \
+		" ldrd,2 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred25\n" \
+		" ldrd,3 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred26\n" \
+		" ldrd,5 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred27}\n" \
+		"{movts %%g" #greg_no ", %[val_lo] ? %%pred19}\n" \
+		"{movtd %[val_hi], %%dg" #greg_no " ? ~ %%pred18\n" \
 		" addd %[greg], 0, %%db[0] ? ~ %%pred18\n" \
 		" call %%ctpr1, wbs=%# ? ~ %%pred18}\n" \
-		"{movtd %[val], %%dg" #greg_no "}\n" \
-		: [val] "=&r" (val), [val_8] "=&r" (val_8) \
+		"{movtd %[val_lo], %%dg" #greg_no "}\n" \
+		: [val_lo] "=&r" (val_lo), [val_hi] "=&r" (val_hi) \
 		: [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
 		  [chan] "ir" (__chan), [chan_q] "ir" (__chan_q), \
-		  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull),	\
+		  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 		  [quadro] "r" (__quadro), [greg] "i" ((u64) (greg_no)) \
 		: "call", "memory", "pred18", "pred19", "pred20", "pred21", \
 		  "pred22", "pred23", "pred24", "pred25", "pred26", "pred27", \
@@ -1903,14 +1947,13 @@ do { \
  * If recovery operations complete successfully, then '_ret' sets to 0.
  * If execution is interrupted by page fault, then '_ret' value does not change.
  */
-#define TRY_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc, greg_no, \
-		_chan, _vr, _quadro, _ret) \
+#define TRY_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc_lo, _opc_hi, \
+		greg_no, _chan, _vr, _quadro, _ret) \
 do { \
-	u64 val, val_8; \
+	u64 val_lo, val_hi; \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
 	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	u64 __opc = (_opc); \
 	asm volatile ( \
 		"{disp %%ctpr1, qpswitchd_sm\n" \
 		" cmpesb,0 %[chan], 0, %%pred20\n" \
@@ -1921,42 +1964,42 @@ do { \
 		" cmpesb,1 %[chan_q], 1, %%pred25\n" \
 		" cmpesb,3 %[chan_q], 2, %%pred26\n" \
 		" cmpesb,4 %[chan_q], 3, %%pred27}\n" \
-		"{ldrd,0 [ %[addr] + %[opc] ], %[val] ? %%pred20\n" \
-		" ldrd,2 [ %[addr] + %[opc] ], %[val] ? %%pred21\n" \
-		" ldrd,3 [ %[addr] + %[opc] ], %[val] ? %%pred22\n" \
-		" ldrd,5 [ %[addr] + %[opc] ], %[val] ? %%pred23\n" \
+		"{ldrd,0 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred20\n" \
+		" ldrd,2 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred21\n" \
+		" ldrd,3 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred22\n" \
+		" ldrd,5 [ %[addr] + %[opc_lo] ], %[val_lo] ? %%pred23\n" \
 		" cmpesb,1 %[quadro], 0, %%pred18\n" \
 		" cmpesb,4 %[vr], 0, %%pred19}\n" \
 		"{nop 3\n" \
-		" ldrd,0 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred24\n" \
-		" ldrd,2 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred25\n" \
-		" ldrd,3 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred26\n" \
-		" ldrd,5 [ %[addr] + %[opc_8] ], %[val_8] ? %%pred27}\n" \
-		"{movts %%g" #greg_no ", %[val] ? %%pred19}\n" \
-		"{movtd %[val_8], %%dg" #greg_no " ? ~ %%pred18\n" \
+		" ldrd,0 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred24\n" \
+		" ldrd,2 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred25\n" \
+		" ldrd,3 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred26\n" \
+		" ldrd,5 [ %[addr] + %[opc_hi] ], %[val_hi] ? %%pred27}\n" \
+		"{movts %%g" #greg_no ", %[val_lo] ? %%pred19}\n" \
+		"{movtd %[val_hi], %%dg" #greg_no " ? ~ %%pred18\n" \
 		" addd %[greg], 0, %%db[0] ? ~ %%pred18\n" \
 		" call %%ctpr1, wbs=%# ? ~ %%pred18}\n" \
 		"{addd 0, 0, %[ret]\n" \
-		" movtd %[val], %%dg" #greg_no "}\n" \
-		: [val] "=&r" (val), [val_8] "=&r" (val_8), \
+		" movtd %[val_lo], %%dg" #greg_no "}\n" \
+		: [val_lo] "=&r" (val_lo), [val_hi] "=&r" (val_hi), \
 		  [ret] "=r" (_ret) \
 		: [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
 		  [chan] "ir" (__chan), [chan_q] "ir" (__chan_q), \
-		  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull),	\
+		  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 		  [quadro] "r" (__quadro), [greg] "i" ((u64) (greg_no)) \
 		: "call", "memory", "pred18", "pred19", "pred20", "pred21", \
 		  "pred22", "pred23", "pred24", "pred25", "pred26", "pred27", \
 		  "g" #greg_no); \
 } while (0)
 
-#define RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc, greg_no, \
+#define RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc_lo, _opc_hi, greg_no, \
 		_chan, _vr, _quadro, _try, _ret) \
 ({ \
 	if (_try) { \
-		TRY_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc, \
+		TRY_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc_lo, _opc_hi, \
 				greg_no, _chan, _vr, _quadro, _ret); \
 	} else { \
-		NATIVE_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc, \
+		NATIVE_RECOVERY_LOAD_TO_THE_GREG_CH_VR(_addr, _opc_lo, _opc_hi, \
 				greg_no, _chan, _vr, _quadro); \
 	} \
 })
@@ -1965,15 +2008,14 @@ do { \
  * As NATIVE_RECOVERY_LOAD_TO_THE_GREG_CH_VR but repeats from cellar
  * an aligned atomic 16-bytes load.
  */
-#define NATIVE_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, _opc, \
-		greg_no, _vr) \
+#define NATIVE_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, _opc_lo, _opc_hi, greg_no, _vr) \
 do { \
-	u64 tmp, __opc = (_opc); \
+	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 		" nop 4\n" \
-		" ldrd,0 [ %[addr] + %[opc] ], %%db[0]\n" \
-		" ldrd,2 [ %[addr] + %[opc_8] ], %%db[1]\n" \
+		" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
+		" ldrd,2 [ %[addr] + %[opc_hi] ], %%db[1]\n" \
 		" cmpesb,1 %[vr], 0, %%pred19}\n" \
 		"{movts,0 %%g" #greg_no ", %%b[0] ? %%pred19\n" \
 		" movtd,1 %%db[1], %%dg" #greg_no "}\n" \
@@ -1982,7 +2024,7 @@ do { \
 		" call %%ctpr1, wbs=%#}\n" \
 		"{movtd,0 %[tmp], %%dg" #greg_no "}\n" \
 		: [tmp] "=&r" (tmp) \
-		: [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
+		: [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 		  [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
 		  [greg] "i" ((u64) (greg_no)) \
 		: "call", "memory", "pred19", "g" #greg_no); \
@@ -1993,15 +2035,15 @@ do { \
  * If recovery operations complete successfully, then '_ret' sets to 0.
  * If execution is interrupted by page fault, then '_ret' value does not change.
  */
-#define TRY_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, _opc, \
+#define TRY_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, _opc_lo, _opc_hi, \
 		greg_no, _vr, _ret) \
 do { \
-	u64 tmp, __opc = (_opc); \
+	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 		" nop 4\n" \
-		" ldrd,0 [ %[addr] + %[opc] ], %%db[0]\n" \
-		" ldrd,2 [ %[addr] + %[opc_8] ], %%db[1]\n" \
+		" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
+		" ldrd,2 [ %[addr] + %[opc_hi] ], %%db[1]\n" \
 		" cmpesb,1 %[vr], 0, %%pred19}\n" \
 		"{movts,0 %%g" #greg_no ", %%b[0] ? %%pred19\n" \
 		" movtd,1 %%db[1], %%dg" #greg_no "}\n" \
@@ -2012,34 +2054,34 @@ do { \
 		" movtd,0 %[tmp], %%dg" #greg_no "}\n" \
 		: [tmp] "=&r" (tmp), \
 		  [ret] "=r" (_ret) \
-		: [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
+		: [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 		  [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
 		  [greg] "i" ((u64) (greg_no)) \
 		: "call", "memory", "pred19", "g" #greg_no); \
 } while (false)
 
-#define RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, _opc, \
+#define RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, _opc_lo, _opc_hi, \
 		greg_no, _vr, _try, _ret) \
 ({ \
 	if (_try) { \
 		TRY_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, \
-				_opc, greg_no, _vr, _ret); \
+				_opc_lo, _opc_hi, greg_no, _vr, _ret); \
 	} else { \
 		NATIVE_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(_addr, \
-				_opc, greg_no, _vr); \
+				_opc_lo, _opc_hi, greg_no, _vr); \
 	} \
 })
 
-#define NATIVE_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc, \
+#define NATIVE_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc_lo, _opc_hi, \
 		greg_no_lo, greg_no_hi, _vr, _qp_load) \
 do { \
-	u64 tmp, __opc = (_opc); \
+	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	if (_qp_load) { \
 		asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 			" nop 4\n" \
-			" ldrd,0 [ %[addr] + %[opc] ], %%db[0]\n" \
-			" ldrd,2 [ %[addr] + %[opc_8] ], %%db[1]\n" \
+			" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
+			" ldrd,2 [ %[addr] + %[opc_hi] ], %%db[1]\n" \
 			" cmpesb,1 %[vr], 0, %%pred19}\n" \
 			"{movts,0 %%g" #greg_no_lo ", %%b[0] ? %%pred19\n" \
 			" movtd,1 %%db[1], %%dg" #greg_no_lo "}\n" \
@@ -2049,19 +2091,19 @@ do { \
 			"{movtd %[tmp], %%dg" #greg_no_lo "}\n" \
 			: [tmp] "=&r" (tmp) \
 			: [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
-			  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
+			  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 			  [greg] "i" ((u64) (greg_no_lo)) \
 			: "call", "memory", "pred19", "g" #greg_no_lo); \
 	} else { \
 		asm (	"{nop 4\n" \
-			" ldrd,0 [ %[addr] + %[opc] ], %%g" #greg_no_lo "\n" \
-			" ldrd,2 [ %[addr] + %[opc_8] ], %%g" #greg_no_hi "\n" \
+			" ldrd,0 [ %[addr] + %[opc_lo] ], %%g" #greg_no_lo "\n" \
+			" ldrd,2 [ %[addr] + %[opc_hi] ], %%g" #greg_no_hi "\n" \
 			" movts,1 %%g" #greg_no_lo ", %[tmp]\n" \
 			" cmpesb,4 %[vr], 0, %%pred19}\n" \
 			"{movts,0 %[tmp], %%g" #greg_no_lo " ? %%pred19}\n" \
 			: [tmp] "=&r" (tmp) \
 			: [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
-			  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
+			  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 			  [greg] "i" ((u64) (greg_no_lo)) \
 			: "memory", "pred19", "g" #greg_no_lo, "g" #greg_no_hi); \
 	} \
@@ -2072,16 +2114,16 @@ do { \
  * If recovery operations complete successfully, then '_ret' sets to 0.
  * If execution is interrupted by page fault, then '_ret' value does not change.
  */
-#define TRY_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc, \
+#define TRY_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc_lo, _opc_hi, \
 		greg_no_lo, greg_no_hi, _vr, _qp_load, _ret) \
 do { \
-	u64 tmp, __opc = (_opc); \
+	u64 tmp; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	if (_qp_load) { \
 		asm (	"{disp %%ctpr1, qpswitchd_sm\n" \
 			" nop 4\n" \
-			" ldrd,0 [ %[addr] + %[opc] ], %%db[0]\n" \
-			" ldrd,2 [ %[addr] + %[opc_8] ], %%db[1]\n" \
+			" ldrd,0 [ %[addr] + %[opc_lo] ], %%db[0]\n" \
+			" ldrd,2 [ %[addr] + %[opc_hi] ], %%db[1]\n" \
 			" cmpesb,1 %[vr], 0, %%pred19}\n" \
 			"{movts,0 %%g" #greg_no_lo ", %%b[0] ? %%pred19\n" \
 			" movtd,1 %%db[1], %%dg" #greg_no_lo "}\n" \
@@ -2093,13 +2135,13 @@ do { \
 			: [tmp] "=&r" (tmp), \
 			  [ret] "=r" (_ret) \
 			: [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
-			  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
+			  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 			  [greg] "i" ((u64) (greg_no_lo)) \
 			: "call", "memory", "pred19", "g" #greg_no_lo); \
 	} else { \
 		asm (	"{nop 4\n" \
-			" ldrd,0 [ %[addr] + %[opc] ], %%g" #greg_no_lo "\n" \
-			" ldrd,2 [ %[addr] + %[opc_8] ], %%g" #greg_no_hi "\n" \
+			" ldrd,0 [ %[addr] + %[opc_lo] ], %%g" #greg_no_lo "\n" \
+			" ldrd,2 [ %[addr] + %[opc_hi] ], %%g" #greg_no_hi "\n" \
 			" movts,1 %%g" #greg_no_lo ", %[tmp]\n" \
 			" cmpesb,4 %[vr], 0, %%pred19}\n" \
 			"{addd 0, 0, %[ret]\n" \
@@ -2107,90 +2149,90 @@ do { \
 			: [tmp] "=&r" (tmp), \
 			  [ret] "=r" (_ret) \
 			: [addr] "r" (_addr), [vr] "ir" ((u32) (_vr)), \
-			  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
+			  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 			  [greg] "i" ((u64) (greg_no_lo)) \
 			: "memory", "pred19", "g" #greg_no_lo, "g" #greg_no_hi); \
 	} \
 } while (false)
 
-#define RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc, \
+#define RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc_lo, _opc_hi, \
 		greg_no_lo, greg_no_hi, _vr, _qp_load, _try, _ret) \
 ({ \
 	if (_try) { \
-		TRY_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc, \
-			greg_no_lo, greg_no_hi, _vr, _qp_load, _ret); \
+		TRY_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc_lo, _opc_hi, \
+				greg_no_lo, greg_no_hi, _vr, _qp_load, _ret); \
 	} else { \
-		NATIVE_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc, \
-			greg_no_lo, greg_no_hi, _vr, _qp_load); \
+		NATIVE_RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(_addr, _opc_lo, _opc_hi, \
+				greg_no_lo, greg_no_hi, _vr, _qp_load); \
 	} \
 })
 
-#define RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, opc, greg_num, \
+#define RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, _opc_lo, _opc_hi, greg_num, \
 		chan_opc, vr, quadro, _try, _ret) \
 do { \
 	switch (greg_num) { \
 	case  0: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 0, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 0, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  1: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 1, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 1, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  2: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 2, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 2, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  3: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 3, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 3, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  4: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 4, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 4, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  5: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 5, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 5, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  6: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 6, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 6, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  7: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 7, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 7, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  8: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 8, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 8, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case  9: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 9, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 9, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 10: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 10, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 10, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 11: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 11, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 11, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 12: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 12, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 12, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 13: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 13, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 13, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 14: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 14, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 14, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 15: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 15, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 15, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	/* Do not load g16-g19 as they are used by kernel */ \
@@ -2200,51 +2242,51 @@ do { \
 	case 19: \
 		break; \
 	case 20: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 20, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 20, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 21: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 21, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 21, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 22: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 22, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 22, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 23: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 23, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 23, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 24: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 24, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 24, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 25: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 25, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 25, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 26: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 26, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 26, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 27: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 27, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 27, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 28: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 28, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 28, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 29: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 29, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 29, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 30: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 30, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 30, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	case 31: \
-		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, opc, 31, \
+		RECOVERY_LOAD_TO_THE_GREG_CH_VR(addr, _opc_lo, _opc_hi, 31, \
 					chan_opc, vr, quadro, _try, _ret); \
 		break; \
 	default: \
@@ -2253,11 +2295,11 @@ do { \
 	} \
 } while (0)
 
-#define NATIVE_RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, opc, greg_num, \
+#define NATIVE_RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, _opc_lo, _opc_hi, greg_num, \
 		chan_opc, vr, quadro) \
 ({ \
 	long unused; \
-	RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, opc, greg_num, \
+	RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, _opc_lo, _opc_hi, greg_num, \
 			chan_opc, vr, quadro, 0, unused); \
 })
 
@@ -2266,77 +2308,77 @@ do { \
  * If recovery operations complete successfully, then '_ret' sets to 0.
  * If execution is interrupted by page fault, then '_ret' value does not change.
  */
-#define TRY_RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, opc, greg_num, \
+#define TRY_RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, _opc_lo, _opc_hi, greg_num, \
 		chan_opc, vr, quadro, _ret) \
-		RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, opc, greg_num, \
+		RECOVERY_LOAD_TO_A_GREG_CH_VR(addr, _opc_lo, _opc_hi, greg_num, \
 			chan_opc, vr, quadro, 1, _ret)
 
-#define RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc, greg_num, \
+#define RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc_lo, opc_hi, greg_num, \
 		vr, qp_load, _try, _ret) \
 do { \
 	switch (greg_num) { \
 	case  0: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				0, 1, vr, qp_load, _try, _ret); \
 		break; \
 	case  1: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 1, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 1, \
 				vr, _try, _ret); \
 		break; \
 	case  2: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				2, 3, vr, qp_load, _try, _ret); \
 		break; \
 	case  3: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 3, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 3, \
 				vr, _try, _ret); \
 		break; \
 	case  4: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				4, 5, vr, qp_load, _try, _ret); \
 		break; \
 	case  5: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 5, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 5, \
 				vr, _try, _ret); \
 		break; \
 	case  6: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				6, 7, vr, qp_load, _try, _ret); \
 		break; \
 	case  7: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 7, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 7, \
 				vr, _try, _ret); \
 		break; \
 	case  8: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				8, 9, vr, qp_load, _try, _ret); \
 		break; \
 	case  9: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 9, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 9, \
 				vr, _try, _ret); \
 		break; \
 	case 10: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				10, 11, vr, qp_load, _try, _ret); \
 		break; \
 	case 11: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 11, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 11, \
 				vr, _try, _ret); \
 		break; \
 	case 12: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				12, 13, vr, qp_load, _try, _ret); \
 		break; \
 	case 13: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 13, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 13, \
 				vr, _try, _ret); \
 		break; \
 	case 14: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				14, 15, vr, qp_load, _try, _ret); \
 		break; \
 	case 15: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 15, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 15, \
 				vr, _try, _ret); \
 		break; \
 	/* Do not load g16-g19 as they are used by kernel */ \
@@ -2346,51 +2388,51 @@ do { \
 	case 19: \
 		break; \
 	case 20: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				20, 21, vr, qp_load, _try, _ret); \
 		break; \
 	case 21: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 21, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 21, \
 				vr, _try, _ret); \
 		break; \
 	case 22: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				22, 23, vr, qp_load, _try, _ret); \
 		break; \
 	case 23: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 23, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 23, \
 				vr, _try, _ret); \
 		break; \
 	case 24: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				24, 25, vr, qp_load, _try, _ret); \
 		break; \
 	case 25: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 25, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 25, \
 				vr, _try, _ret); \
 		break; \
 	case 26: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				26, 27, vr, qp_load, _try, _ret); \
 		break; \
 	case 27: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 27, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 27, \
 				vr, _try, _ret); \
 		break; \
 	case 28: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				28, 29, vr, qp_load, _try, _ret); \
 		break; \
 	case 29: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 29, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 29, \
 				vr, _try, _ret); \
 		break; \
 	case 30: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP_OR_Q(addr, opc_lo, opc_hi, \
 				30, 31, vr, qp_load, _try, _ret); \
 		break; \
 	case 31: \
-		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc, 31, \
+		RECOVERY_LOAD_TO_THE_GREG_VR_ATOMIC_QP(addr, opc_lo, opc_hi, 31, \
 				vr, _try, _ret); \
 		break; \
 	default: \
@@ -2399,11 +2441,10 @@ do { \
 	} \
 } while (0)
 
-#define NATIVE_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc, greg_num, vr, qp_load) \
+#define NATIVE_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc_lo, opc_hi, greg_num, vr, qp_load) \
 ({ \
 	long unused; \
-	RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc, greg_num, vr, qp_load, \
-						0, unused); \
+	RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc_lo, opc_hi, greg_num, vr, qp_load, 0, unused); \
 })
 
 /*
@@ -2411,9 +2452,8 @@ do { \
  * If recovery operations complete successfully, then '_ret' sets to 0.
  * If execution is interrupted by page fault, then '_ret' value does not change.
  */
-#define TRY_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc, greg_num, vr, qp_load, _ret) \
-		RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc, greg_num, vr, qp_load, \
-							1, _ret)
+#define TRY_RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc_lo, opc_hi, greg_num, vr, qp_load, _ret) \
+	RECOVERY_LOAD_TO_A_GREG_VR_ATOMIC(addr, opc_lo, opc_hi, greg_num, vr, qp_load, 1, _ret)
 
 #define NATIVE_RECOVERY_STORE(_addr, _val, _opc, _chan) \
 do { \
@@ -2654,14 +2694,13 @@ do { \
  *                  the faulting load into a series of 1-byte loads - only
  *                  the first one should clear the register then.
  */
-#define NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_CH_VR(_from, _to, _to_hi, _vr, _opc, \
-		_chan, _quadro, _not_single_byte) \
+#define NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_CH_VR(_from, _to, _to_hi, _vr, \
+		_opc_lo, _opc_hi, _chan, _quadro, _not_single_byte) \
 do { \
-	u64 prev, val, val_8; \
+	u64 prev, val_lo, val_hi; \
 	u32 __chan = (u32) (_chan); \
 	u32 __quadro = (u32) (_quadro); \
 	u32 __chan_q = (__quadro) ? __chan : 4; /* Not existent channel - skip */ \
-	u64 __opc = (_opc); \
 	asm (	"{cmpesb %[quadro], 0, %%pred18\n" \
 		" cmpesb %[vr], 0, %%pred19\n" \
 		" cmpesb %[not_single_byte], 0, %%pred28}\n" \
@@ -2674,25 +2713,25 @@ do { \
 		" cmpesb,3 %[chan_q], 2, %%pred26\n" \
 		" cmpesb,4 %[chan_q], 3, %%pred27\n" \
 		" ldrd [ %[to] + %[opc_ld] ], %[prev] ? %%pred19}\n" \
-		"{ldrd,0 [ %[from] + %[opc] ], %[val] ? %%pred20\n" \
-		" ldrd,2 [ %[from] + %[opc] ], %[val] ? %%pred21\n" \
-		" ldrd,3 [ %[from] + %[opc] ], %[val] ? %%pred22\n" \
-		" ldrd,5 [ %[from] + %[opc] ], %[val] ? %%pred23}\n" \
+		"{ldrd,0 [ %[from] + %[opc_lo] ], %[val_lo] ? %%pred20\n" \
+		" ldrd,2 [ %[from] + %[opc_lo] ], %[val_lo] ? %%pred21\n" \
+		" ldrd,3 [ %[from] + %[opc_lo] ], %[val_lo] ? %%pred22\n" \
+		" ldrd,5 [ %[from] + %[opc_lo] ], %[val_lo] ? %%pred23}\n" \
 		"{nop 3\n" \
-		" ldrd,0 [ %[from] + %[opc_8] ], %[val_8] ? %%pred24\n" \
-		" ldrd,2 [ %[from] + %[opc_8] ], %[val_8] ? %%pred25\n" \
-		" ldrd,3 [ %[from] + %[opc_8] ], %[val_8] ? %%pred26\n" \
-		" ldrd,5 [ %[from] + %[opc_8] ], %[val_8] ? %%pred27}\n" \
-		"{movts,1 %[prev], %[val] ? %%pred19}\n" \
-		"{strd,2 [ %[to] + %[opc_st_byte] ], %[val] ? %%pred28}\n" \
-		"{strd,2 [ %[to] + %[opc_st] ], %[val] ? ~%%pred28\n" \
-		" strd,5 [ %[to_hi] + %[opc_st] ], %[val_8] ? ~ %%pred18}\n" \
-		: [prev] "=&r" (prev), [val] "=&r" (val), \
-		  [val_8] "=&r" (val_8) \
+		" ldrd,0 [ %[from] + %[opc_hi] ], %[val_hi] ? %%pred24\n" \
+		" ldrd,2 [ %[from] + %[opc_hi] ], %[val_hi] ? %%pred25\n" \
+		" ldrd,3 [ %[from] + %[opc_hi] ], %[val_hi] ? %%pred26\n" \
+		" ldrd,5 [ %[from] + %[opc_hi] ], %[val_hi] ? %%pred27}\n" \
+		"{movts,1 %[prev], %[val_lo] ? %%pred19}\n" \
+		"{strd,2 [ %[to] + %[opc_st_byte] ], %[val_lo] ? %%pred28}\n" \
+		"{strd,2 [ %[to] + %[opc_st] ], %[val_lo] ? ~%%pred28\n" \
+		" strd,5 [ %[to_hi] + %[opc_st] ], %[val_hi] ? ~ %%pred18}\n" \
+		: [prev] "=&r" (prev), \
+		  [val_lo] "=&r" (val_lo), [val_hi] "=&r" (val_hi) \
 		: [from] "r" (_from), [to] "r" (_to), [to_hi] "r" (_to_hi), \
 		  [vr] "ir" ((u32) (_vr)), [quadro] "r" (__quadro), \
 		  [chan] "ir" (__chan), [chan_q] "ir" (__chan_q), \
-		  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull),  \
+		  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)),  \
 		  [not_single_byte] "ir" (_not_single_byte), \
 		  [opc_ld] "i" (TAGGED_MEM_LOAD_REC_OPC), \
 		  [opc_st_byte] "i" (MEM_STORE_REC_OPC_B), \
@@ -2761,17 +2800,15 @@ do { \
  * As NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_CH_VR but repeats from cellar
  * an aligned atomic 16-bytes load.
  */
-#define NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_VR_ATOMIC(_from, _to, _to_hi, \
-		_vr, _opc) \
+#define NATIVE_MOVE_TAGGED_DWORD_WITH_OPC_VR_ATOMIC(_from, _to, _to_hi, _vr, _opc_lo, _opc_hi) \
 do { \
 	u64 prev; \
 	/* #133760 Use a real quadro register when repeating atomic load */ \
 	register u64 val asm("%b[0]"); \
 	register u64 val_8 asm("%b[1]"); \
-	u64 __opc = (_opc); \
 	asm (	"{cmpesb %[vr], 0, %%pred19}\n" \
-		"{ldrd,0 [ %[from] + %[opc] ], %[val]\n" \
-		" ldrd,2 [ %[from] + %[opc_8] ], %[val_8]}\n" \
+		"{ldrd,0 [ %[from] + %[opc_lo] ], %[val]\n" \
+		" ldrd,2 [ %[from] + %[opc_hi] ], %[val_8]}\n" \
 		"{nop 4\n" \
 		" ldrd [ %[to] + %[opc_ld] ], %[prev] ? %%pred19}\n" \
 		"{movts,1 %[prev], %[val] ? %%pred19}\n" \
@@ -2781,7 +2818,7 @@ do { \
 		  [val_8] "=&r" (val_8) \
 		: [from] "r" (_from), [to] "r" (_to), [to_hi] "r" (_to_hi), \
 		  [vr] "ir" ((u32) (_vr)), \
-		  [opc] "r" (__opc), [opc_8] "r" (__opc | 8ull), \
+		  [opc_lo] "r" ((u64) (_opc_lo)), [opc_hi] "r" ((u64) (_opc_hi)), \
 		  [opc_ld] "i" (TAGGED_MEM_LOAD_REC_OPC), \
 		  [opc_st] "i" (TAGGED_MEM_STORE_REC_OPC) \
 		: "memory", "pred19"); \
@@ -5258,16 +5295,43 @@ do { \
 		      : "ctpr3"); \
 } while (0)
 
+/* Add ctpr3 to clobbers to explain to lcc that this
+ * GNU asm does a return. */
+#define E2K_DONE_RNDPR(_rndpr) \
+do { \
+	typecheck(e2k_rndpr_t, _rndpr); \
+	/* #80747: must repeat interrupted barriers */ \
+	asm volatile ("{wait st_c=1\n" \
+		      " rwd %[rndpr], %%rndpr}\n" \
+		      "{mmurw %[zero], %%dam_inv}\n" \
+		      ALTERNATIVE("nop 2", "nop 4", %[iset_v7]) \
+		      "{done}" \
+		      : \
+		      : [zero] "r" (0ull), \
+			[rndpr] "ir" ((u64) (AW(_rndpr))), \
+			[iset_v7] "i" (CPU_FEAT_ISET_V7) \
+		      : "ctpr3"); \
+} while (0)
+
 #define NATIVE_RETURN() \
 do { \
-	asm volatile(   "{\n" \
-			"return %%ctpr3\n" \
-			"}\n" \
-			"{\n" \
-			"ct %%ctpr3\n" \
-			"}\n" \
+	asm volatile(	"{return %%ctpr3}\n" \
+			"{ct %%ctpr3}" \
 			: \
 			: \
+			: "ctpr3"); \
+} while (0)
+
+#define NATIVE_RETURN_RNDPR(_rndpr) \
+do { \
+	typecheck(e2k_rndpr_t, _rndpr); \
+	asm volatile(	"{return %%ctpr3\n" \
+			" rwd %[rndpr], %%rndpr}\n" \
+			ALTERNATIVE("nop 4", "nop 5", %[iset_v7]) \
+			"{ct %%ctpr3}\n" \
+			: \
+			: [rndpr] "ir" ((u64) (AW(_rndpr))), \
+			  [iset_v7] "i" (CPU_FEAT_ISET_V7) \
 			: "ctpr3"); \
 } while (0)
 
@@ -5292,22 +5356,26 @@ do { \
 			: "ctpr3"); \
 } while (0)
 
-#define E2K_SYSCALL_RETURN(rval) \
+#define E2K_SYSCALL_RETURN(rval, _rndpr) \
 do { \
+	typecheck(e2k_rndpr_t, _rndpr); \
 	asm volatile(   "{return %%ctpr3\n" \
+			" rwd %[rndpr], %%rndpr\n" \
 			" addd %[r0], 0, %%dr0\n" \
 			" addd 0, 0, %%dr1\n" \
 			" addd 0, 0, %%dr2\n" \
 			" addd 0, 0, %%dr3\n" \
-			" addd 0, 0, %%dr4\n" \
-			" addd 0, 0, %%dr5\n}\n" \
-			"{nop 4\n" \
-			" mmurw %[zero], %%dam_inv}\n" \
-			"{addd 0, 0, %%dr6\n" \
+			" addd 0, 0, %%dr4\n}\n" \
+			"{mmurw %[zero], %%dam_inv}\n" \
+			ALTERNATIVE("nop 3", "nop 4", %[iset_v7]) \
+			"{addd 0, 0, %%dr5\n" \
+			" addd 0, 0, %%dr6\n" \
 			" addd 0, 0, %%dr7\n" \
 			" ct %%ctpr3}\n" \
 			: \
-			: [r0] "ir" (rval), [zero] "r" (0ull) \
+			: [r0] "ir" (rval), [zero] "r" (0ull), \
+			  [rndpr] "ir" ((u64) (AW(_rndpr))), \
+			  [iset_v7] "i" (CPU_FEAT_ISET_V7) \
 			: "ctpr3"); \
 } while (0)
 
@@ -5316,21 +5384,23 @@ do { \
 	asm volatile ("{nop}" :: input); \
 } while (0)
 
-#define E2K_PSYSCALL_RETURN(r0, r1, r2, r3, tag2, tag3) \
+#define E2K_PSYSCALL_RETURN(r0, r1, r2, r3, tag2, tag3, _rndpr) \
 do { \
+	typecheck(e2k_rndpr_t, _rndpr); \
 	asm volatile (	"{return %%ctpr3\n" \
+			" rwd %[rndpr], %%rndpr\n" \
 			" puttagd %[_r2], %[_tag2], %%dr2\n" \
 			" puttagd %[_r3], %[_tag3], %%dr3\n" \
 			" addd %[_r0], 0, %%dr0\n" \
 			" addd %[_r1], 0, %%dr1\n" \
-			" addd 0, 0, %%dr4\n" \
-			" addd 0, 0, %%dr5}\n" \
-			"{nop 4\n" \
+			" addd 0, 0, %%dr4}\n" \
+			"{mmurw %[zero], %%dam_inv\n" \
+			" addd 0, 0, %%dr5\n" \
 			" addd 0, 0, %%dr6\n" \
 			" addd 0, 0, %%dr7\n" \
 			" addd 0, 0, %%dr8\n" \
-			" addd 0, 0, %%dr9\n" \
-			" mmurw %[zero], %%dam_inv}\n" \
+			" addd 0, 0, %%dr9}\n" \
+			ALTERNATIVE("nop 3", "nop 4", %[iset_v7]) \
 			"{addd 0, 0, %%dr10\n" \
 			" addd 0, 0, %%dr11\n" \
 			" addd 0, 0, %%dr12\n" \
@@ -5341,7 +5411,9 @@ do { \
 			:: [_r0] "ir" (r0), [_r1] "ir" (r1), \
 			   [_r2] "ir" (r2), [_r3] "ir" (r3), \
 			   [_tag2] "ir" (tag2), [_tag3] "ir" (tag3), \
-			   [zero] "r" (0ull) \
+			   [zero] "r" (0ull), \
+			   [rndpr] "ir" ((u64) (AW(_rndpr))), \
+			   [iset_v7] "i" (CPU_FEAT_ISET_V7) \
 			: "ctpr3"); \
 } while (0)
 
@@ -6186,6 +6258,70 @@ do { \
 		__E2K_JUMP_FUNC_WITH_ARGUMENTS_8(FUNC_TO_NAME(func), \
 				arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
 
+#define __E2K_JUMP_FUNC_RNDPR_7(func, arg1, arg2, arg3, arg4, arg5, arg6, arg7, _rndpr) \
+do { \
+	typecheck(e2k_rndpr_t, _rndpr); \
+	asm volatile (	"{disp %%ctpr1, %7\n" \
+			" rwd %[rndpr], %%rndpr\n" \
+			" addd  %0, 0, %%dr0\n" \
+			" addd  %1, 0, %%dr1\n" \
+			" addd  %2, 0, %%dr2\n" \
+			" addd  %3, 0, %%dr3\n" \
+			" addd  %4, 0, %%dr4}\n" \
+			ALTERNATIVE("nop 3", "nop 5", %[iset_v7]) \
+			"{addd  %5, 0, %%dr5\n" \
+			" addd  %6, 0, %%dr6\n" \
+			" ct %%ctpr1}\n" \
+			: \
+			: "ri" ((u64) (arg1)), "ri" ((u64) (arg2)), \
+			  "ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
+			  "ri" ((u64) (arg5)), "ri" ((u64) (arg6)), \
+			  "ri" ((u64) (arg7)), "i" (&(func)), \
+			  [rndpr] "ir" ((u64) (AW(_rndpr))), \
+			  [iset_v7] "i" (CPU_FEAT_ISET_V7) \
+			: "ctpr1", "r0", "r1", "r2", "r3", "r4", "r5", "r6"); \
+	unreachable(); \
+} while (0)
+
+#define __E2K_JUMP_FUNC_ADDR_RNDPR_7(_func_addr, \
+			arg1, arg2, arg3, arg4, arg5, arg6, arg7, _rndpr) \
+do { \
+	typecheck(e2k_rndpr_t, _rndpr); \
+	asm volatile (	"{rwd %[rndpr], %%rndpr\n" \
+			" movtd,sm %[func_addr], %%ctpr1\n" \
+			" addd  %0, 0, %%dr0\n" \
+			" addd  %1, 0, %%dr1\n" \
+			" addd  %2, 0, %%dr2\n" \
+			" addd  %3, 0, %%dr3}\n" \
+			ALTERNATIVE("nop 3", "nop 5", %[iset_v7]) \
+			"{addd  %4, 0, %%dr4\n" \
+			" addd  %5, 0, %%dr5\n" \
+			" addd  %6, 0, %%dr6\n" \
+			" ct %%ctpr1}\n" \
+			: \
+			: [func_addr] "r" (_func_addr), \
+			  "ri" ((u64) (arg1)), "ri" ((u64) (arg2)), \
+			  "ri" ((u64) (arg3)), "ri" ((u64) (arg4)), \
+			  "ri" ((u64) (arg5)), "ri" ((u64) (arg6)), \
+			  "ri" ((u64) (arg7)), \
+			  [rndpr] "ir" ((u64) (AW(_rndpr))), \
+			  [iset_v7] "i" (CPU_FEAT_ISET_V7) \
+			: "ctpr1", "r0", "r1", "r2", "r3", "r4", "r5", "r6"); \
+	unreachable(); \
+} while (false)
+
+#define __E2K_JUMP_RNDPR_7(func, \
+			arg1, arg2, arg3, arg4, arg5, arg6, arg7, is_name, _rndpr) \
+do { \
+	if (is_name) { \
+		__E2K_JUMP_FUNC_RNDPR_7(func, \
+			arg1, arg2, arg3, arg4, arg5, arg6, arg7, _rndpr); \
+	} else { \
+		__E2K_JUMP_FUNC_ADDR_RNDPR_7(func, \
+			arg1, arg2, arg3, arg4, arg5, arg6, arg7, _rndpr); \
+	} \
+} while (false)
+
 #ifdef CONFIG_CPU_HWBUG_IBRANCH
 # define WORKAROUND_IBRANCH_HWBUG "{nop} {nop} \n"
 #else
@@ -6411,18 +6547,20 @@ do { \
 })
 
 #define __E2K_RESTART_TTABLE_ENTRY10_C(func, arg0, arg1, arg2, arg3, arg4, \
-					arg5, arg6, arg7, tags) \
+					arg5, arg6, arg7, tags, _rndpr) \
 do { \
+	typecheck(e2k_rndpr_t, _rndpr); \
 	asm volatile ("{\n" \
 		      "disp %%ctpr1, " #func "\n" \
+		      "rwd %[rndpr], %%rndpr\n" \
 		      "addd  %0, 0, %%dr0\n" \
 		      "addd  %1, 0, %%dr1\n" \
 		      "addd  %2, 0, %%dr2\n" \
 		      "addd  %3, 0, %%dr3\n" \
 		      "addd  %4, 0, %%dr4\n" \
-		      "addd  %5, 0, %%dr5\n" \
 		      "}\n" \
 		      "{\n" \
+		      "addd  %5, 0, %%dr5\n" \
 		      "addd  %6, 0, %%dr6\n" \
 		      "addd  %7, 0, %%dr7\n" \
 		      "addd  %8, 0, %%dr8\n" \
@@ -6462,18 +6600,20 @@ do { \
 		      : \
 		      : "ri" (arg0), "ri" (arg1), "ri" (arg2), "ri" (arg3), \
 			"ri" (arg4), "ri" (arg5), "ri" (arg6), "ri" (arg7), \
-			"ri" (tags) \
+			"ri" (tags), [rndpr] "ir" ((u64) (AW(_rndpr))) \
 		      : "ctpr1", "r0", "r1", "r2", "r3", "r4", "r5", "r6", \
 			"r7", "r8"); \
 	unreachable(); \
 } while (0)
 
 #define __E2K_RESTART_TTABLE_ENTRY8_C(func, _sys_num, arg1, arg2, arg3, arg4, \
-		arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, _tags) \
+		arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, _tags, _rndpr) \
 do { \
 	u64 tag_lo, tag_hi; \
+	typecheck(e2k_rndpr_t, _rndpr); \
 	asm volatile ( \
 		"{\n" \
+		"rwd %[rndpr], %%rndpr\n" \
 		"disp %%ctpr1, " #func "\n" \
 		"shrd,1 %[tags], 8, %[tag_lo]\n" \
 		"shrd,4 %[tags], 12, %[tag_hi]\n" \
@@ -6519,7 +6659,8 @@ do { \
 		  [a2] "ri" (arg2), [a3] "ri" (arg3), [a4] "ri" (arg4), \
 		  [a5] "ri" (arg5), [a6] "ri" (arg6), [a7] "ri" (arg7), \
 		  [a8] "ri" (arg8), [a9] "ri" (arg9), [a10] "ri" (arg10), \
-		  [a11] "ri" (arg11), [a12] "ri" (arg12), [tags] "ri" (_tags) \
+		  [a11] "ri" (arg11), [a12] "ri" (arg12), [tags] "ri" (_tags), \
+		  [rndpr] "ir" ((u64) (AW(_rndpr))) \
 		: "ctpr1", "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", \
 		  "r8", "r9", "r10", "r11", "r12", "r13"); \
 	unreachable(); \
@@ -8072,6 +8213,30 @@ do { \
 		   [aalda24] "r" (aaldas[6]), [aalda56] "r" (aaldas[14]), \
 		   [aalda28] "r" (aaldas[7]), [aalda60] "r" (aaldas[15]), \
 		   [facility] "i" (CPU_FEAT_ISET_V6)); \
+} while (0)
+
+#define NATIVE_CLEAR_ALL_AALDAS() \
+do { \
+	if (!cpu_has(CPU_FEAT_ISET_V6)) { \
+		u32 __tmp = 0; \
+		asm ("aaurws,2 %[tmp], %%aalda0\n" \
+		     "aaurws,5 %[tmp], %%aalda0\n" \
+		     "aaurws,2 %[tmp], %%aalda4\n" \
+		     "aaurws,5 %[tmp], %%aalda4\n" \
+		     "aaurws,2 %[tmp], %%aalda8\n" \
+		     "aaurws,5 %[tmp], %%aalda8\n" \
+		     "aaurws,2 %[tmp], %%aalda12\n" \
+		     "aaurws,5 %[tmp], %%aalda12\n" \
+		     "aaurws,2 %[tmp], %%aalda16\n" \
+		     "aaurws,5 %[tmp], %%aalda16\n" \
+		     "aaurws,2 %[tmp], %%aalda20\n" \
+		     "aaurws,5 %[tmp], %%aalda20\n" \
+		     "aaurws,2 %[tmp], %%aalda24\n" \
+		     "aaurws,5 %[tmp], %%aalda24\n" \
+		     "aaurws,2 %[tmp], %%aalda28\n" \
+		     "aaurws,5 %[tmp], %%aalda28\n" \
+		     : [tmp] "=r" (__tmp)); \
+	} \
 } while (0)
 
 /* Force load OSGD->GD */

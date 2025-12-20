@@ -20,7 +20,6 @@
  *
  * This file is licenced under the GPL.
  */
-#define DEBUG
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/pci.h>
@@ -894,6 +893,31 @@ static void io_watchdog_func(struct timer_list *t)
 
 /* an interrupt happens */
 
+#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
+static irqreturn_t ohci_preirq(struct usb_hcd *hcd)
+{
+	struct ohci_hcd         *ohci = hcd_to_ohci(hcd);
+	int   ints = ohci_readl(ohci, &ohci->regs->intrstatus);
+
+	/* Check for an all 1's result which is a typical consequence
+	 * of dead, unclocked, or unplugged (CardBus...) devices
+	 */
+	if (ints == ~(u32)0) {
+		ohci->rh_state = OHCI_RH_HALTED;
+		ohci_dbg(ohci, "device removed!\n");
+		usb_hc_died(hcd);
+		return IRQ_HANDLED;
+	}
+
+	/* We only care about interrupts that are enabled */
+	ints &= ohci_readl(ohci, &ohci->regs->intrenable);
+
+	/* interrupt for some other device? */
+	if (ints == 0 || unlikely(ohci->rh_state == OHCI_RH_HALTED))
+		return IRQ_NOTMINE;
+	return IRQ_WAKE_THREAD;
+}
+#endif
 
 
 static irqreturn_t ohci_irq (struct usb_hcd *hcd)
@@ -1221,6 +1245,9 @@ static const struct hc_driver ohci_hc_driver = {
 	 * generic hardware linkage
 	*/
 	.irq =                  ohci_irq,
+#if defined(CONFIG_MCST_RT) && defined(CONFIG_USB_IRQ_ON_THREAD)
+	.preirq =               ohci_preirq,
+#endif
 	.flags =                HCD_MEMORY | HCD_DMA | HCD_USB11,
 
 	/*

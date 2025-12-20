@@ -38,7 +38,7 @@
 #if defined(CONFIG_E16C) || defined(CONFIG_E12C) || defined(CONFIG_E2C3)
 # define CEPIC_ID_CEPICN_MASK	0xf
 # define CEPIC_ID_CEPICN_BITS	0x4
-#elif defined(CONFIG_E48C) || defined(CONFIG_E8V7)
+#elif defined(CONFIG_E8V7)
 # define CEPIC_ID_CEPICN_MASK	0x3f
 # define CEPIC_ID_CEPICN_BITS	0x6
 #endif

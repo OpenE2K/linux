@@ -53,6 +53,9 @@ SYM_FUNC_START(ttable_entry0)
 		/* #80747: must repeat interrupted barriers */
 		wait fl_c=1
 	}
+	{
+		setbp psz=0
+	}
 	/* Important: the first memory access in kernel is store, not load.
 	 * This is needed to flush SLT before trying to load anything. */
 	KERNEL_ENTRY(TSK_TI_TMP_, /* not a syscall */, 0 /* crp */)
@@ -287,10 +290,12 @@ SYM_FUNC_START(ttable_entry0)
 	}
 #endif
 	{
+	rrd	%rndpr, %dr38
 	std	%dr6, [%dr0 + PT_CTRP1];	// regs->ctpr1 = ctpr1
 	std	%dr5, [%dr0 + PT_CTRP2];	// regs->ctpr2 = ctpr2
 	}
 	{
+	rwd	-1ULL, %rndpr
 	std	%dr3, [%dr0 + PT_CTRP3];	// regs->ctpr3 = ctpr3
 	std	%dr16, [%dr0 + PT_LSR];		// regs->lsr = lsr
 	}
@@ -318,7 +323,10 @@ SYM_FUNC_START(ttable_entry0)
 	std	%dr18, [%dr0 + PT_CTPR2_HI]
 	}
 	{
-	std,2	%dr19, [%dr0 + PT_CTPR3_HI]
+	std	%dr19, [%dr0 + PT_CTPR3_HI]
+	std	%dr38, [%dr0 + PT_RNDPR]
+	}
+	{
 	SMP_ONLY(ldd,5 GCPUOFFSET, __per_cpu_offset, GCPUOFFSET)
 	ct	%ctpr1 ? %pred2 // user_trap_handler()
 	}
@@ -380,10 +388,11 @@ SYM_FUNC_START(ttable_entry0)
 	}
 SYM_FUNC_END(ttable_entry0)
 
-#define WSZ 11
+#define WSZ 12
 #define SYS_CALL(sys_call_table, FORMAT_32, ENTRY) \
 	{								\
 		setwd	wsz = WSZ, nfx = 1;				\
+		setbp psz=0; \
 		ldgdd,2	0, TSK_STACK, %dr10;				\
 		ldgdd,3	0, TSK_K_USD_HI, %dr8; 				\
 		puttags,5 %r0, 0, %r0;					\
@@ -462,9 +471,9 @@ SYM_FUNC_END(ttable_entry0)
 		addd GCURTASK, TSK_TI, %dr7;				\
 	}								\
 	{								\
+		rrd %rndpr, %dr22; \
 		sxt,4	6, %r1, %dr1 ? %pred2;				\
 		sxt,1	6, %r2, %dr2 ? %pred2;				\
-		sxt,0	6, %r3, %dr3 ? %pred2;				\
 		sxt,3	6, %r4, %dr4 ? %pred2;				\
 		stw,2	%r15, GCURTASK, TSK_UPSR;			\
 		puttagd,5 %dr6, 0, %dr6;				\
@@ -479,11 +488,13 @@ SYM_FUNC_END(ttable_entry0)
 	 */								\
 	SAVE_HOST_GREGS_TO_VIRT_UNEXT %dr7, %dr10			\
 	{								\
+		rwd	-1ULL, %rndpr; \
 		/* MMU registers can be written only after disabling	\
 		 * CLW/AAU (so at any point for a 32/64 bit syscall).	\
 		 * "wait all_e" from MMURW_WAIT_ASYNC_TLB is done before \
 		 * switching hardware stacks */				\
 		mmurw %dr13, %cont;					\
+		sxt	6, %r3, %dr3 ? %pred2;				\
 	}								\
 									\
 	ALTERNATIVE_1_ALTINSTR						\
@@ -529,8 +540,11 @@ SYM_FUNC_END(ttable_entry0)
 		sxt,4	6, %r6, %dr6 ? %pred2;				\
 	}								\
 	{								\
-		addd,1	%dr7, 64, %dr7;					\
 		std,2	%dr11, [(%dr7 + 64) + PT_STACK+ST_TOP];		\
+		std,5	%dr22, [(%dr7 + 64) + PT_RNDPR]; \
+	}								\
+	{								\
+		addd,1	%dr7, 64, %dr7;					\
 		addd,4	%dr14, 0, %dr0;					\
 		/* regs->g_stacks.sbr/top = %sbr */			\
 		PV_VCPU(std	%dr21, [(%dr7 + 64) + PT_G_STACK+G_ST_SBR]); \
@@ -562,6 +576,7 @@ SYM_FUNC_START(native_ttable_entry4)
 		/* wsz here must be not smaller than in ttable_entry3
 		 * and SYS_CALL() to workaround hw bug #68012 */
 		setwd	wsz = WSZ, nfx = 1
+		setbp psz=0
 		ipd 0
 		disp	%ctpr1, compatibility_call
 		/* %dr7 = current->thread.flags */
@@ -612,6 +627,7 @@ SYM_FUNC_START(ttable_entry5)
 	VFRPSZ(4)
 	setwd		wsz = 0x8
 	setbn		rbs = 0x4, rsz = 0x3, rcur = 0x0
+	setbp psz=0
 }
 {
 	/* If dr0 holds value with a bad tag, we will be SIGILL'ed.
@@ -702,6 +718,7 @@ SYM_FUNC_START(ttable_entry6)
 	VFRPSZ(4)
 	setwd		wsz = 0x8
 	setbn		rbs = 0x4, rsz = 0x3, rcur = 0x0
+	setbp psz=0
 }
 {
 	/* If dr0 holds value with a bad tag, we will be SIGILL'ed.
@@ -805,6 +822,7 @@ SYM_FUNC_START(ttable_entry7)
 	VFRPSZ(8)
 	setwd wsz = 0xd
 	setbn rsz=3, rbs=9, rcur=0
+	setbp psz=0
 
 	rrd %sbr, %dr16
 
@@ -894,6 +912,7 @@ SYM_FUNC_START(ttable_entry8)
 	SWITCH_HW_STACKS_SYSCALL()
 	{
 		setwd	wsz = 18, nfx = 1
+		setbp psz=0
 		ldgdd,0 TSK_STACK, %dr1
 		ldgdd,3 TSK_K_USD_HI, %dr25
 		addd,1	0, 1, %dr28
@@ -1047,6 +1066,7 @@ SYM_FUNC_START(ttable_entry8)
 		nop 2
 		wait all_c=1
 
+		rrd %rndpr, %dr34
 		puttagd,2 %dr7, 0, %dr7
 		puttags,5 %r0, 0, %r0
 	}
@@ -1062,6 +1082,7 @@ SYM_FUNC_START(ttable_entry8)
 		puttagd,5 %dr9, 0, %dr9
 	}
 	{
+		rwd -1ULL, %rndpr
 		/* %dr20: current_thread_info */
 		addd GCURTASK, TSK_TI, %dr20;
 		sxt,4 6, %r0, %dr0
@@ -1115,11 +1136,12 @@ SYM_FUNC_START(ttable_entry8)
 		std,5 %dr13, [%dr14 + PT_ARG_12]
 	}
 	{
+		std,2 %dr34, [%dr14 + PT_RNDPR]
+		std,5 %dr15, [%dr14 + PT_STACK+ST_TOP]
+	}
+	{
 		addd,0 %dr14, 0, %dr6
-
 		stw,2	%r8, [ %dr14 + PT_KERNEL_ENTRY ]
-		std %dr15, [%dr14 + PT_STACK+ST_TOP]
-
 		ct %ctpr1 ? %pred4
 	}
 	ibranch save_dam_and_jump_ctpr1
@@ -1143,14 +1165,6 @@ SYM_FUNC_START(save_dam_and_jump_ctpr1)
 		ct %ctpr1
 	}
 SYM_FUNC_END(save_dam_and_jump_ctpr1)
-
-SYM_FUNC_START(sys_backtrace_return)
-	{
-		nop 3
-		return %ctpr3
-	}
-	ct %ctpr3
-SYM_FUNC_END(sys_backtrace_return)
 
 .section ".init.text", "ax"
 .global __trampolines_start
@@ -1176,6 +1190,7 @@ SYM_FUNC_START(sighandler_trampoline_32)
 	nop 4
 	setwd wsz=8
 	setbn rsz=3, rbs=4, rcur=0
+	setbp psz=0
 	sdisp %ctpr2, 1
 }
 {
@@ -1193,6 +1208,7 @@ SYM_FUNC_START(sighandler_trampoline_64)
 	nop 4
 	setwd wsz=8
 	setbn rsz=3, rbs=4, rcur=0
+	setbp psz=0
 	sdisp %ctpr2, 3
 }
 {
@@ -1210,6 +1226,7 @@ SYM_FUNC_START(sighandler_trampoline_128)
 	nop 4
 	setwd wsz=16
 	setbn rsz=7, rbs=8, rcur=0
+	setbp psz=0
 	sdisp %ctpr2, 8
 }
 {
@@ -1227,6 +1244,7 @@ SYM_FUNC_START(makecontext_trampoline_32)
 	nop 4
 	setwd wsz=8
 	setbn rsz=3, rbs=4, rcur=0
+	setbp psz=0
 	sdisp %ctpr2, 1
 	cmpedb %dr0, 0, %pred0
 }
@@ -1255,6 +1273,7 @@ SYM_FUNC_START(makecontext_trampoline_64)
 	nop 4
 	setwd wsz=8
 	setbn rsz=3, rbs=4, rcur=0
+	setbp psz=0
 	sdisp %ctpr2, 3
 	cmpedb %dr0, 0, %pred0
 }
@@ -1308,5 +1327,14 @@ SYM_FUNC_START(makecontext_trampoline_128)
 }
 	setsft
 SYM_FUNC_END(makecontext_trampoline_128)
+
+.align 256
+SYM_FUNC_START(sys_backtrace_return)
+	{
+		nop 3
+		return %ctpr3
+	}
+	ct %ctpr3
+SYM_FUNC_END(sys_backtrace_return)
 
 __trampolines_end:

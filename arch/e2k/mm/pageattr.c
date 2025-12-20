@@ -948,6 +948,7 @@ static int kernel_duplicate_one_page(int node, pte_t *ptep)
 
 		tagged_memcpy_8(dup_addr, (void *) pte_page_vaddr(*ptep),
 				PTE_SIZE);
+		smp_wmb(); /* See comment in __pte_alloc */
 
 		spin_lock(&duplication_lock);
 		if (node != page_to_nid(pte_page(*ptep))) {
@@ -1010,6 +1011,7 @@ static int kernel_duplicate_huge_pmd(int node, pmd_t *pmd,
 		dup_phys = page_to_phys(dup_hpage);
 		tagged_memcpy_8(__va(dup_phys), (void *) pmd_page_vaddr(*pmd),
 				PMD_SIZE);
+		smp_wmb(); /* See comment in __pte_alloc */
 
 		spin_lock(&duplication_lock);
 		if (node != page_to_nid(pmd_page(*pmd))) {

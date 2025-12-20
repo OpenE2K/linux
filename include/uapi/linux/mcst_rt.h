@@ -9,8 +9,8 @@
 
 #define RT_BIT_HZ_RT		2  /* no tickless (tick_nohz_enabled=off) */
 #define RT_BIT_NO_CPU_BLNC	4  /* scheduler no migration, no balancing */
-#define RT_BIT_NO_RD_AHEAD	7  /* turn off on read ahead or warn if any */
-#define RT_BIT_NO_IO_SCHED	8  /* turn off on IO schediling (elevator) */
+#define RT_BIT_NO_RD_AHEAD	7  /* turn off read ahead or warn if any */
+#define RT_BIT_NO_IO_SCHED	8  /* turn off IO schediling (elevator) */
 #define RT_BIT_MLOCK_DONE       14 /* prohibit new mmap() & PF occurence */
 #define RT_BIT_NO_FORK		16 /* warning if forking */
 #define RT_BIT_PGFLT_RTWRN	17 /* warn if page fault in rt task */
@@ -36,7 +36,7 @@
 			RTS_NO_IO_SCHED | RTS_HZ_RT)
 
 /* MCST_RT hard flags: */
-#define RTS_HARD__RT	RTS_SOFT__RT | RTS_FLUSH_ALL | RTS_PGFLT_WRN | RTS_PGFLT_WRN
+#define RTS_HARD__RT	(RTS_SOFT__RT | RTS_PGFLT_WRN)
 #define RTS__SOFT_RT RTS_SOFT__RT
 
 #define EL_GET_CPUS_NUM		100
@@ -60,6 +60,7 @@
 #define EL_TIMERFD_SETTIME	162
 /* #endif EL_TIMERFD_USING */
 #define EL_SYNC_CYCLS		163
+#define EL_WAKEUP_LAT		164
 #define EL_GET_TIMES		165
 #define EL_USER_TICK            166
 #define EL_RT_CPU		167

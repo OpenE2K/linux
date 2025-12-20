@@ -2923,7 +2923,11 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 	struct drm_connector *connector = &hdmi->connector;
 	struct cec_connector_info conn_info;
 	struct cec_notifier *notifier;
-
+#ifdef CONFIG_MCST
+	struct device_node *np = hdmi->dev->of_node;
+	int connector_type = of_property_read_bool(np, "dvi-connector") ?
+		DRM_MODE_CONNECTOR_DVID : DRM_MODE_CONNECTOR_HDMIA;
+#endif
 	if (hdmi->version >= 0x200a)
 		connector->ycbcr_420_allowed =
 			hdmi->plat_data->ycbcr_420_allowed;
@@ -2937,7 +2941,11 @@ static int dw_hdmi_connector_create(struct dw_hdmi *hdmi)
 
 	drm_connector_init_with_ddc(hdmi->bridge.dev, connector,
 				    &dw_hdmi_connector_funcs,
+#ifdef CONFIG_MCST
+				    connector_type,
+#else
 				    DRM_MODE_CONNECTOR_HDMIA,
+#endif
 				    hdmi->ddc);
 
 	/*
@@ -3235,11 +3243,11 @@ static int dw_hdmi_bridge_atomic_check(struct drm_bridge *bridge,
 
 	hdmi->hdmi_data.enc_in_bus_format =
 			bridge_state->input_bus_cfg.format;
-
+#ifndef CONFIG_MCST /* rm #22708 */
 	dev_dbg(hdmi->dev, "input format 0x%04x, output format 0x%04x\n",
 		bridge_state->input_bus_cfg.format,
 		bridge_state->output_bus_cfg.format);
-
+#endif
 	return 0;
 }
 

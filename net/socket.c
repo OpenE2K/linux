@@ -124,7 +124,7 @@ static long compat_sock_ioctl(struct file *file,
 #endif
 #if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
 #include <asm/protected_syscalls.h>
-static long ptr128_sock_ioctl(struct file *, unsigned long cmd, unsigned long arg);
+static long ptr128_sock_ioctl(struct file *, unsigned int cmd, unsigned long arg);
 #endif
 static int sock_fasync(int fd, struct file *filp, int on);
 static ssize_t sock_sendpage(struct file *file, struct page *page,
@@ -3877,7 +3877,7 @@ static int ptr128_sock_ioctl_trans(struct file *file, struct socket *sock,
 	return -ENOIOCTLCMD;
 }
 
-static long ptr128_sock_ioctl(struct file *file, unsigned long cmd,
+static long ptr128_sock_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long arg)
 {
 	struct socket *sock = file->private_data;
@@ -3885,7 +3885,7 @@ static long ptr128_sock_ioctl(struct file *file, unsigned long cmd,
 	struct sock *sk;
 	struct net *net;
 
-	DbgSCP("%s(file=0x%lx, cmd=0x%lx, arg=0x%lx)\n",
+	DbgSCP("%s(file=0x%lx, cmd=0x%x, arg=0x%lx)\n",
 	       __func__, file, cmd, arg);
 
 	sk = sock->sk;

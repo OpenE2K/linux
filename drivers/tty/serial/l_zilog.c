@@ -1777,10 +1777,11 @@ static int serial_zilog_probe(struct pci_dev *dev,
 	unsigned long irq_flags;
 
 	DebugZ("%s: serial_zilog_probe() started\n", pci_name(dev));
-	 /* Bug 143381: boot does not assign io-bars,
+	/* Trying to enable both serial (mem) & parallel (io) */
+	ret = pci_enable_device(dev);
+	/* Bug 143381: boot does not assign io-bars,
 	    so enable only mem-bar */
-	ret = pci_enable_device_mem(dev);
-	if (ret) {
+	if (ret && (ret = pci_enable_device_mem(dev))) {
 		printk("Zilog: Unable to make enable device\n");
 		return ret;
 	}

@@ -938,6 +938,23 @@ typedef	e2k_rwsap_struct_t	pusd_struct_t;
 #ifndef __ASSEMBLY__
 
 /*
+ * State of random predicates generator
+ */
+
+typedef union {
+	struct {
+		u64 f1 : 17;
+		u64    : 15;
+		u64 f2 : 18;
+		u64    : 14;
+	};
+	u64 word;
+} e2k_rndpr_t;
+
+#define E2K_INITIAL_RNDPR ((e2k_rndpr_t) { .word = ULL(-1) })
+
+
+/*
  * Instruction structure
  */
 
@@ -2307,7 +2324,6 @@ typedef	union e2k_idr {
 #define IDR_E12C_MDL		CPU_TYPE_E12C
 #define IDR_E16C_MDL		CPU_TYPE_E16C
 #define IDR_E2C3_MDL		CPU_TYPE_E2C3
-#define IDR_E48C_MDL		CPU_TYPE_E48C
 #define IDR_E8V7_MDL		CPU_TYPE_E8V7
 
 #define	IDR_E2K_VIRT_MDL	0x00	/* machine is virtual, so CPUs also */
@@ -2637,6 +2653,7 @@ typedef enum cu_reg_no {
 	DIMAR1_cu_reg_no = 0x4d,
 	DTARF_cu_reg_no = 0x4e,
 	DTART_cu_reg_no = 0x4f,
+	CU_HW0_cu_reg_no = 0x78,
 } cu_reg_no_t;
 
 #endif /* ! __ASSEMBLY__ */

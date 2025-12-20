@@ -11,12 +11,10 @@
 #include <asm/e2k_debug.h>
 #include <asm/process.h>
 
-/* Does nothing, just return */
-extern void sys_backtrace_return(void);
 
 static int is_privileged_return(u64 ip)
 {
-	return ip == (u64) &sys_backtrace_return;
+	return ip == sys_backtrace_return;
 }
 
 struct get_backtrace_args {
@@ -187,7 +185,7 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 
 	/* Special case of "just return" function */
 	if (step == 8 && ip == -1ULL || step != 8 && ip == 0xffffffffULL)
-		ip = (u64) &sys_backtrace_return;
+		ip = sys_backtrace_return;
 
 	if (!is_privileged_return(prev_ip) && (!pvma ||
 			pvma->vm_start > prev_ip || pvma->vm_end <= prev_ip)) {
@@ -231,14 +229,14 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 			return -EPERM;
 	}
 
+	frame->cr1_lo.pm = 0;
+
 	if (is_privileged_return(ip)) {
-		frame->cr1_lo.pm = 1;
 		if (machine.native_iset_ver < E2K_ISET_V6)
 			frame->cr1_lo.ic = 0;
 		else
 			frame->cr1_lo.cui = KERNEL_CODES_INDEX;
 	} else {
-		frame->cr1_lo.pm = 0;
 		if (machine.native_iset_ver < E2K_ISET_V6) {
 			frame->cr1_lo.ic = 1;
 		} else {

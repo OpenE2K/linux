@@ -28,7 +28,7 @@ int hw_breakpoint_arch_parse(struct perf_event *bp,
 	switch (attr->bp_type) {
 	case HW_BREAKPOINT_W:
 	case HW_BREAKPOINT_R:
-	case HW_BREAKPOINT_W | HW_BREAKPOINT_R:
+	case HW_BREAKPOINT_RW:
 		break;
 	case HW_BREAKPOINT_X:
 		/*
@@ -151,11 +151,35 @@ int arch_install_hw_breakpoint(struct perf_event *bp)
 {
 	struct arch_hw_breakpoint *info = counter_arch_bp(bp);
 	int i, is_data_bp;
+	struct thread_struct *thread = &current->thread;
+	struct perf_event **slot;
 
-	is_data_bp = info->type & (HW_BREAKPOINT_R|HW_BREAKPOINT_W);
+	is_data_bp = info->type & HW_BREAKPOINT_RW;
 
+	/*
+	 * Firstly, try to find event 'bp' in hbp_data or hbp_instr arrays.
+	 * If found, this event is set via ptrace. The index of event in
+	 * hbp_data or hbp_instr is the number of the breakpoint. Check that
+	 * the corresponding slot is free and if so, put event into this slot
+	 * and go on installing the breakpoint.
+	 */
 	for (i = 0; i < HBP_NUM; i++) {
-		struct perf_event **slot = get_bp_slot_ptr(i, is_data_bp);
+		if (is_data_bp && bp == thread->debug.hbp_data[i] ||
+		    !is_data_bp && bp == thread->debug.hbp_instr[i]) {
+			slot = get_bp_slot_ptr(i, is_data_bp);
+			if (WARN_ONCE(*slot, "Slot %d is already busy", i))
+				return -EBUSY;
+			*slot = bp;
+			goto finish;
+		}
+	}
+
+	/*
+	 * If the event was not found in hbp_data or hbp_instr array, this is
+	 * a perf event. Find the first free slot and put the event into it.
+	 */
+	for (i = 0; i < HBP_NUM; i++) {
+		slot = get_bp_slot_ptr(i, is_data_bp);
 
 		if (!*slot) {
 			*slot = bp;
@@ -166,6 +190,7 @@ int arch_install_hw_breakpoint(struct perf_event *bp)
 	if (WARN_ONCE(i == HBP_NUM, "Can't find any breakpoint slot"))
 		return -EBUSY;
 
+finish:
 	return __arch_install_hw_breakpoint(i, is_data_bp, info);
 }
 
@@ -196,11 +221,36 @@ void arch_uninstall_hw_breakpoint(struct perf_event *bp)
 {
 	struct arch_hw_breakpoint *info = counter_arch_bp(bp);
 	int i, is_data_bp;
+	struct thread_struct *thread = &current->thread;
+	struct perf_event **slot;
 
-	is_data_bp = info->type & (HW_BREAKPOINT_R|HW_BREAKPOINT_W);
+	is_data_bp = info->type & HW_BREAKPOINT_RW;
 
+	/*
+	 * Firstly, try to find event 'bp' in hbp_data or hbp_instr arrays.
+	 * If found, this event is set via ptrace. The index of event in
+	 * hbp_data or hbp_instr is the number of the breakpoint. Check that
+	 * the corresponding slot is occupied by event 'bp' and if so, put NULL
+	 * into this slot to free it and go on uninstalling the breakpoint.
+	 */
 	for (i = 0; i < HBP_NUM; i++) {
-		struct perf_event **slot = get_bp_slot_ptr(i, is_data_bp);
+		if (is_data_bp && bp == thread->debug.hbp_data[i] ||
+		    !is_data_bp && bp == thread->debug.hbp_instr[i]) {
+			slot = get_bp_slot_ptr(i, is_data_bp);
+			if (WARN_ONCE(*slot != bp, "Slot %d does not correspond to breakpoint being unregistered", i))
+				return;
+			*slot = NULL;
+			goto finish;
+		}
+	}
+
+	/*
+	 * If the event was not found in hbp_data or hbp_instr array, this
+	 * is a perf event. Find the slot that corresponds to event 'bp' and
+	 * set it free by writing NULL.
+	 */
+	for (i = 0; i < HBP_NUM; i++) {
+		slot = get_bp_slot_ptr(i, is_data_bp);
 
 		if (*slot == bp) {
 			*slot = NULL;
@@ -208,9 +258,11 @@ void arch_uninstall_hw_breakpoint(struct perf_event *bp)
 		}
 	}
 
-	if (WARN_ONCE(i == HBP_NUM, "Can't find any breakpoint slot"))
+	if (WARN_ONCE(i == HBP_NUM,
+		"Can't find breakpoint slot that corresponds to breakpoint being unregistered"))
 		return;
 
+finish:
 	__arch_uninstall_hw_breakpoint(i, is_data_bp);
 }
 

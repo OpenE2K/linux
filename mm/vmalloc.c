@@ -2125,7 +2125,9 @@ struct vm_struct *get_vm_area_caller(unsigned long size, unsigned long flags,
 	return __get_vm_area_node(size, 1, flags, VMALLOC_START, VMALLOC_END,
 				  NUMA_NO_NODE, GFP_KERNEL, caller);
 }
-
+#if defined(CONFIG_MCST)
+EXPORT_SYMBOL(get_vm_area_caller);
+#endif
 /**
  * find_vm_area - find a continuous kernel virtual area
  * @addr:	  base address

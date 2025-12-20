@@ -281,6 +281,20 @@
 #define	WRITE_WD_REG_VALUE(WD_value)					\
 		NATIVE_WRITE_WD_REG_VALUE(WD_value)
 
+/*
+ * Read/write double-word Random state Predicates Register (RNDPR)
+ */
+static inline e2k_rndpr_t read_RNDPR_reg(void)
+{
+	return (e2k_rndpr_t) { .word = NATIVE_GET_DSREG_OPEN(wd) };
+}
+
+static inline void write_RNDPR_reg(e2k_rndpr_t rndpr)
+{
+	NATIVE_SET_DSREG_CLOSED_NOEXC(rndpr, AW(rndpr), 5, 7);
+}
+
+
 #ifdef	NEED_PARAVIRT_LOOP_REGISTERS
 /*
  * Read/write double-word Loop Status Register (LSR)

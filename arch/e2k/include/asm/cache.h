@@ -23,8 +23,6 @@
 #  define	L3_CACHE_SHIFT		E12C_L3_CACHE_SHIFT
 # elif defined(CONFIG_E2K_E16C)
 #  define	L3_CACHE_SHIFT		E16C_L3_CACHE_SHIFT
-# elif defined(CONFIG_E2K_E48C)
-#  define	L3_CACHE_SHIFT		E48C_L3_CACHE_SHIFT
 # elif defined(CONFIG_E2K_E8V7)
 #  define	L3_CACHE_SHIFT		E8V7_L3_CACHE_SHIFT
 # endif

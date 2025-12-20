@@ -229,7 +229,7 @@ dup_chain_stack_frame_to_user(e2k_mem_crs_t *crs, e2k_stacks_t *stacks)
  #error "Undefined virtualization mode"
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
-static __always_inline u64 get_wsz(enum restore_caller from)
+static __always_inline u64 get_wsz(void)
 {
 	return NATIVE_READ_WD_REG().size >> 4;
 }

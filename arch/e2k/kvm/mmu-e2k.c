@@ -755,7 +755,7 @@ void kvm_mmu_notifier_wait(struct kvm *kvm, unsigned long mmu_seq)
 	spin_unlock(&kvm->mmu_lock);
 
 	for (;;) {
-		prepare_to_swait_exclusive(wqp, &wait, TASK_INTERRUPTIBLE);
+		prepare_to_swait_exclusive(wqp, &wait, TASK_UNINTERRUPTIBLE);
 
 		if (mmu_arch_notifier_retry(kvm, mmu_seq) != WAIT_FOR_MMU_RETRY)
 			break;

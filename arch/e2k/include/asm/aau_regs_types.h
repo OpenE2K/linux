@@ -48,8 +48,7 @@ enum {
 	AASR_ACTIVE = 3,
 	AASR_STOPPED = 5
 };
-#define AAU_AASR_STB 0x20
-#define AAU_AASR_IAB 0x40
+
 typedef union e2k_aasr {                       /* aadj quad-word */
 	struct {
 		u32 reserved    : 5;    /* [4:0] */
@@ -61,6 +60,7 @@ typedef union e2k_aasr {                       /* aadj quad-word */
 } e2k_aasr_t;
 
 #define E2K_FULL_AASR ((e2k_aasr_t) { .stb = 1, .iab = 1, .lds = AASR_STOPPED })
+#define E2K_NULL_AASR ((e2k_aasr_t) { .lds = AASR_NULL })
 
 /* Check up AAU state */
 #define AAU_NULL(aasr)		(aasr.lds == AASR_NULL)

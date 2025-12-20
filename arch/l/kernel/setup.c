@@ -104,8 +104,10 @@ void __init l_setup_vga(void)
 #define L_MAC_MAX 32
 static unsigned char l_base_mac_addr[6] = {0};
 static int l_mac_last_nr = 0;
+static bool l_get_all_mac_addr_from_boot = 1;
 
 static const struct pci_device_id l_iohub_eth_devices[] = {
+	{ PCI_DEVICE(SUNLANCE_PCI_VENDOR_ID, SUNLANCE_PCI_DEVICE_ID) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_ELBRUS, PCI_DEVICE_ID_MCST_E1000) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_ETH) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGB) },
@@ -147,7 +149,12 @@ static int __init l_ethernet_mac_addr_init(void)
 	int i = 0;
 	struct pci_dev *pdev = NULL;
 	const struct pci_device_id *ent;
-	struct l_pdev_mac *m = kmalloc(sizeof(*m) * L_MAC_MAX, GFP_KERNEL);
+	struct l_pdev_mac *m;
+	ioh_eth_mac_table_entry_t *head = (ioh_eth_mac_table_entry_t *)
+				bootblock_virt->info.mac_table_ptr;
+	if (l_get_all_mac_addr_from_boot && head) /* boot sets all addresses */
+		return 0;
+	m = kmalloc(sizeof(*m) * L_MAC_MAX, GFP_KERNEL);
 	if (!m)
 		return -ENOMEM;
 	for_each_pci_dev(pdev) {
@@ -171,7 +178,7 @@ static int __init l_ethernet_mac_addr_init(void)
 /* Needs to be done after pci initialization which are subsys_initcall. */
 subsys_initcall_sync(l_ethernet_mac_addr_init);
 
-int l_set_ethernet_macaddr(struct pci_dev *pdev, char *macaddr)
+static int l_set_ethernet_macaddr_old(struct pci_dev *pdev, char *macaddr)
 {
 	static DEFINE_SPINLOCK(lock);
 	struct l_pdev_mac *m = l_pdev_mac;
@@ -211,6 +218,41 @@ out:
 	spin_unlock_irq(&lock);
 	return ret;
 }
+
+static int l_set_ethernet_macaddr_new(ioh_eth_mac_table_entry_t *h,
+				struct pci_dev *pdev, char *macaddr)
+{
+	int domain = pci_domain_nr(pdev->bus);
+	int bus    = pdev->bus->number;
+	int slot   = PCI_SLOT(pdev->devfn);
+	int func   = PCI_FUNC(pdev->devfn);
+	for (; h; h = h->next) {
+		h = __va(h);
+		if (domain == h->pci_domain && bus == h->bus &&
+				slot == h->slot && func == h->func) {
+			memcpy(macaddr, h->mac_addr, sizeof(h->mac_addr));
+			dev_info(&pdev->dev, "ethernet MAC %pM\n", macaddr);
+			return 0;
+		}
+	}
+	memcpy(macaddr, l_base_mac_addr, sizeof(l_base_mac_addr));
+	WARN(1, "%s: failed to find MAC address\n", pci_name(pdev));
+	return -ENOENT;
+}
+
+int l_set_ethernet_macaddr(struct pci_dev *pdev, char *macaddr)
+{
+	ioh_eth_mac_table_entry_t *head = (ioh_eth_mac_table_entry_t *)
+				bootblock_virt->info.mac_table_ptr;
+	if (l_get_all_mac_addr_from_boot && head) {/* boot sets all addresses */
+		if (!pdev) {
+			memcpy(macaddr, l_base_mac_addr, sizeof(l_base_mac_addr));
+			return -EINVAL;
+		}
+		return l_set_ethernet_macaddr_new(head, pdev, macaddr);
+	}
+	return l_set_ethernet_macaddr_old(pdev, macaddr);
+}
 EXPORT_SYMBOL(l_set_ethernet_macaddr);
 
 static int get_long_option(char **str, u64 *pint)
@@ -228,7 +270,11 @@ static int get_long_option(char **str, u64 *pint)
 static int __init machine_mac_addr_setup(char *str)
 {
 	u64 machine_mac_addr;
-	if (get_long_option(&str, &machine_mac_addr)) {
+	if (!strcmp(str, "new")) {
+		l_get_all_mac_addr_from_boot = 1;
+	} else if (!strcmp(str, "old")) {
+		l_get_all_mac_addr_from_boot = 0;
+	} else if (get_long_option(&str, &machine_mac_addr)) {
 		u64 tmp = be64_to_cpu(machine_mac_addr);
 		memcpy(l_base_mac_addr, ((u8 *)&tmp) + 2,
 		       			sizeof(l_base_mac_addr));

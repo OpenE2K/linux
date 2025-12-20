@@ -444,7 +444,6 @@ int kvm_trap_handler(void)
 {
 	pt_regs_t	pt_regs;
 	trap_pt_regs_t	trap;
-	u64		sbbp[SBBP_ENTRIES_NUM];
 #ifdef CONFIG_USE_AAU
 	e2k_aau_t	aau_context;
 #endif /* CONFIG_USE_AAU */
@@ -457,7 +456,6 @@ int kvm_trap_handler(void)
 	bool		irqs_under_upsr;
 	bool		in_user_mode;
 	bool		has_irqs = false;
-	int		save_sbbp;
 
 	DebugGT("started\n");
 
@@ -502,7 +500,6 @@ int kvm_trap_handler(void)
 	 */
 	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, true	/* user mode trap */);
-	save_sbbp = task->ptrace || debug_trap;
 
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	/* FIXME: secondary space support does not implemented for guest */
@@ -525,12 +522,7 @@ int kvm_trap_handler(void)
 	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
 	 * so it must be read before TIRs.
 	 */
-	if (unlikely(save_sbbp)) {
-		kvm_guest_save_sbbp(sbbp);
-		trap.sbbp = sbbp;
-	} else {
-		trap.sbbp = NULL;
-	}
+	kvm_guest_save_sbbp(trap.sbbp);
 
 	/*
 	 * Now we can store all needed trap context into the

@@ -155,9 +155,6 @@ mga25_rgb_mode_valid(struct drm_encoder *e,
 				clock > 39 * 1000) {/* 800x600 */
 		return MODE_CLOCK_HIGH;
 	}
-
-	if (clock > 150 * 1000) /* full-hd/duallink */
-		return MODE_CLOCK_HIGH;
 	return MODE_OK;
 }
 

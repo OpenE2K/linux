@@ -167,12 +167,10 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 	}
 
 	/* = Tx/Rx queue prio = */
-	for (i = 0; i < priv->num_tx_queues; i++) {
-		priv->txq[i].prio = 7;	/* TODO: */
-	}
-	for (i = 0; i < priv->num_rx_queues; i++) {
-		priv->rxq[i].prio = 7;	/* TODO: */
-	}
+	for (i = 0; i < priv->num_tx_queues; i++)
+		priv->txq[i].prio = 0;
+	for (i = 0; i < priv->num_rx_queues; i++)
+		priv->rxq[i].prio = 0;
 
 	/* = Alloc pages for Tx queue = */
 	err = mxgbe_txq_alloc_all(priv);

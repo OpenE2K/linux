@@ -1335,7 +1335,14 @@ nfsd_create_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	 * Callers expect new file metadata to be committed even
 	 * if the attributes have not changed.
 	 */
+#ifdef CONFIG_MCST
+	/* Problem setting security labels when creating file, RM #22633.
+	 * Backport from commit 442d27ff09a218b61020ab56387dbc508ad6bfa6
+	 */
+	if (iap->ia_valid || (attrs->na_seclabel && attrs->na_seclabel->len))
+#else
 	if (iap->ia_valid)
+#endif
 		status = nfsd_setattr(rqstp, resfhp, attrs, 0, (time64_t)0);
 	else
 		status = nfserrno(commit_metadata(resfhp));

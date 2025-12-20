@@ -936,7 +936,7 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 #endif
 	SYSTEM_CALL_TBL_ENTRY(sys_eventfd2),
-	SYSTEM_CALL_TBL_ENTRY(sys_recvmmsg_time32),
+	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_recvmmsg_time32),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 350 */
 #ifdef CONFIG_TIMERFD
 	SYSTEM_CALL_TBL_ENTRY(sys_timerfd_create),
@@ -1017,9 +1017,8 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_socketpair),		/* 414 */
 	SYSTEM_CALL_TBL_ENTRY(sys_setsockopt),		/* 415 */
 	SYSTEM_CALL_TBL_ENTRY(sys_getsockopt),		/* 416 */
-
+	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_recvmmsg_time64),      /* 417 */
 	/* free (unused) items */
-	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 417 */
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 418 */
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 419 */
 
@@ -1487,7 +1486,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_execveat),
 	PROT_SYSCALL_TBL_ENTRY(sys_userfaultfd),
 	PROT_SYSCALL_TBL_ENTRY(sys_membarrier),		/* 390 */
-	PROT_SYSCALL_TBL_ENTRY(sys_mlock2),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_mlock2),
 	/* added in linux-4.9 */
 	PROT_SYSCALL_TBL_ENTRY(sys_seccomp),
 	PROT_SYSCALL_TBL_ENTRY(sys_shutdown),
@@ -1532,7 +1531,7 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_clean_descriptors), /* 424 */
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_unuselib), /* 425 */
 
-	PROT_SYSCALL_TBL_ENTRY(sys_clone3),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_clone3),
 	PROT_SYSCALL_TBL_ENTRY(sys_fsopen),
 	PROT_SYSCALL_TBL_ENTRY(sys_fsconfig),
 	PROT_SYSCALL_TBL_ENTRY(sys_fsmount),
@@ -1710,8 +1709,8 @@ const system_call_func sys_call_table_deprecated[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_getsid),
 	SYSTEM_CALL_TBL_ENTRY(sys_fdatasync),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
-	SYSTEM_CALL_TBL_ENTRY(sys_mlock),	/* 150 */
-	SYSTEM_CALL_TBL_ENTRY(sys_munlock),
+	SYSTEM_CALL_TBL_ENTRY(protected_sys_mlock), /* 150 */
+	SYSTEM_CALL_TBL_ENTRY(protected_sys_munlock),
 	SYSTEM_CALL_TBL_ENTRY(sys_mlockall),
 	SYSTEM_CALL_TBL_ENTRY(sys_munlockall),
 	SYSTEM_CALL_TBL_ENTRY(sys_sched_setparam),

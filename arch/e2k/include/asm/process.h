@@ -85,6 +85,7 @@
 #define makecontext_trampoline_32	(E2K_TRAMPOLINES_START + 0x300)
 #define makecontext_trampoline_64	(E2K_TRAMPOLINES_START + 0x400)
 #define makecontext_trampoline_128	(E2K_TRAMPOLINES_START + 0x500)
+#define sys_backtrace_return		(E2K_TRAMPOLINES_START + 0x600)
 
 /*
  * additional arch-dep flags for clone()

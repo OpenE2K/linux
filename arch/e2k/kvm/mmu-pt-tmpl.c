@@ -3233,7 +3233,7 @@ static bool fast_page_fault(struct kvm_vcpu *vcpu, gva_t gva, int level,
 	 * same address again.
 	 */
 	if (!is_shadow_present_pte(vcpu->kvm, spte)) {
-		ret = true;
+		ret = false;
 		DebugNONP("the mapping has been changed, SPTE 0x%lx\n",
 			pgprot_val(spte));
 		goto exit;

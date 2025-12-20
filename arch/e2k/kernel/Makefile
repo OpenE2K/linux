@@ -134,7 +134,6 @@ obj-$(CONFIG_HOTPLUG_CPU) += hotplug-cpu.o
 ifeq ($(PROFILE_GENERATE), 1)
 obj-$(CONFIG_EPROF_KERNEL) += libeprof/
 endif
-obj-$(CONFIG_OF) += devtree.o
 obj-$(CONFIG_E2K_KEXEC) += kexec.o
 
 # For E2K_WAIT_ALL and atomic operations support on phys memory

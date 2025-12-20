@@ -585,7 +585,6 @@ user_trap_handler(struct pt_regs *regs)
 	register trap_times_t	*trap_times;
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 	u64 exceptions;
-	int save_sbbp = current->ptrace || debug_trap;
 
 	trap = pt_regs_to_trap_regs(regs);
 	trap->flags = 0;
@@ -640,6 +639,12 @@ user_trap_handler(struct pt_regs *regs)
 	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, true	/* user mode trap */);
 
+	/*
+	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
+	 * so it must be read before TIRs.
+	 */
+	save_sbbp(trap->sbbp);
+
 #ifdef CONFIG_USE_AAU
 	/*
 	 * Put some distance between reading AASR (above) and using it here
@@ -667,18 +672,6 @@ user_trap_handler(struct pt_regs *regs)
 	}
 	regs->aau_context = aau_regs;
 #endif
-
-	/*
-	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
-	 * so it must be read before TIRs.
-	 */
-	if (unlikely(save_sbbp || ts_host_at_vcpu_mode())) {
-		trap->sbbp = __builtin_alloca(sizeof(*trap->sbbp) *
-					      SBBP_ENTRIES_NUM);
-		SAVE_SBBP(trap->sbbp);
-	} else {
-		trap->sbbp = NULL;
-	}
 
 	/*
 	 * Now we can store all needed trap context into the
@@ -866,7 +859,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #endif	/* CONFIG_KERNEL_TIMES_ACCOUNT */
 	e2k_upsr_t		upsr;
 	u64 exceptions, nmi, hw_overflow, kstack_pf_addr;
-	int save_sbbp = current->ptrace || debug_trap;
 #if	defined(CONFIG_VIRTUALIZATION) && !defined(CONFIG_KVM_GUEST_KERNEL)
 	int			to_save_runstate;
 #endif	/* CONFIG_VIRTUALIZATION && ! CONFIG_KVM_GUEST_KERNEL */
@@ -930,6 +922,12 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	AW(regs->flags) = 0;
 	init_guest_traps_handling(regs, false	/* user mode trap */);
 
+	/*
+	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
+	 * so it must be read before TIRs.
+	 */
+	save_sbbp(trap->sbbp);
+
 #ifdef CONFIG_USE_AAU
 	/*
 	 * Put some distance between reading AASR (above) and using it here
@@ -947,18 +945,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	}
 	regs->aau_context = aau_regs;
 #endif
-
-	/*
-	 * %sbbp LIFO stack is unfreezed by writing %TIR register,
-	 * so it must be read before TIRs.
-	 */
-	if (unlikely(save_sbbp)) {
-		trap->sbbp = __builtin_alloca(sizeof(*trap->sbbp) *
-					      SBBP_ENTRIES_NUM);
-		SAVE_SBBP(trap->sbbp);
-	} else {
-		trap->sbbp = NULL;
-	}
 
 	/*
 	 * Now we can store all needed trap context into the
@@ -1626,7 +1612,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u32 tag, const u64 mask, u32
 
 static inline
 int check_arg_descr_size(int sys_num, int arg_num, int neg_size,
-			 struct pt_regs *regs, int adjust_bufsize,
+			 struct pt_regs *regs, u64 mask,
 			 long *arg3, long *arg5, long *arg7)
 /* In case of negative size in syscall argument mask,
  * calculate effective argument size and update args3-7
@@ -1636,8 +1622,12 @@ int check_arg_descr_size(int sys_num, int arg_num, int neg_size,
  */
 {
 	int size, descr_size, index;
+	int adjust_bufsize;
+	u8 msk;
 
-	if (((regs->tags >> (arg_num * 8)) & 0xff) != ETAGAPQ)
+	if (((regs->tags >> (arg_num * 8)) & 0xff) == ETAGAPQ)
+		adjust_bufsize = mask & ADJUST_SIZE_MASK;
+	else
 		adjust_bufsize = 0; /* this is not descriptor */
 
 	if (neg_size >= 0) {
@@ -1647,7 +1637,8 @@ int check_arg_descr_size(int sys_num, int arg_num, int neg_size,
 	}
 
 	index = -neg_size*2 - 1;
-	size = regs->args[index];
+	msk = (mask >> (index * 8)) & 0xf;
+	size = (msk == MASK_PROT_ARG_INT) ? (long)(int)regs->args[index] : regs->args[index];
 	if (!adjust_bufsize)
 		return size;
 
@@ -1908,13 +1899,11 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 
 	if (likely(sys_num < NR_syscalls)) {
 		if (size1 < 0)
-			size1 = check_arg_descr_size(sys_num, 1, size1, regs,
-						     mask & ADJUST_SIZE_MASK,
+			size1 = check_arg_descr_size(sys_num, 1, size1, regs, mask,
 						     &arg3, &arg5, &arg7);
 		size3 = prot_syscall_arg_masks[sys_num].size3;
 		if (size3 < 0)
-			size3 = check_arg_descr_size(sys_num, 3, size3, regs,
-						     mask & ADJUST_SIZE_MASK,
+			size3 = check_arg_descr_size(sys_num, 3, size3, regs, mask,
 						     &arg3, &arg5, &arg7);
 		size4 = prot_syscall_arg_masks[sys_num].size4;
 		/* So far we don't have negative size in the 4th row.
@@ -1929,8 +1918,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 			size5 = regs->args[-size5];
 		 */
 		if (size2 < 0)
-			size2 = check_arg_descr_size(sys_num, 2, size2, regs,
-						     mask & ADJUST_SIZE_MASK,
+			size2 = check_arg_descr_size(sys_num, 2, size2, regs, mask,
 						     &arg3, &arg5, &arg7);
 		size6 = prot_syscall_arg_masks[sys_num].size6;
 		/* So far we don't have negative size in the 6th row.
@@ -2001,7 +1989,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 		SAVE_SYSCALL_RVAL(regs, rval);
 	} else if (likely(!wrong_arg)) {
 		/* Trace syscall enter */
-		syscall_trace_entry(regs);
+		rval = syscall_trace_entry(regs);
 
 		/* Update system call number, since tracer could have changed it */
 		if (regs->kernel_entry == 8) {
@@ -2014,8 +2002,10 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 			BUG();
 		}
 
-		rval = sys_call(a1, a2, a3, a4, a5, a6, regs);
-		SAVE_SYSCALL_RVAL(regs, rval);
+		if (!rval) {
+			rval = sys_call(a1, a2, a3, a4, a5, a6, regs);
+			SAVE_SYSCALL_RVAL(regs, rval);
+		}
 
 		/* Trace syscall exit */
 		syscall_trace_leave(regs);
@@ -2023,7 +2013,7 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 		RESTORE_SYSCALL_RVAL(regs, rval);
 
 	} else /* (unlikely(wrong_arg)) */ {
-		rval = -EFAULT;
+		rval = -EFAULT; /* NB> This error code expected from several syscalls. */
 		SAVE_SYSCALL_RVAL(regs, rval);
 	}
 
@@ -2180,7 +2170,7 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 			BUG();
 		}
 
-		if (rval != -1 && regs->sys_num != -1) {
+		if (!rval && regs->sys_num != -1) {
 			rval = sys_call((unsigned long) arg1, (unsigned long) arg2,
 					(unsigned long) arg3, (unsigned long) arg4,
 					(unsigned long) arg5, (unsigned long) arg6);
@@ -2243,12 +2233,6 @@ int copy_context_from_signal_stack(struct local_gregs *l_gregs,
 		ret = ret ?: __copy_from_priv_user_with_tags(trap, &context->trap,
 								sizeof(*trap));
 		regs->trap = trap;
-
-		if (likely(sbbp && trap->sbbp)) {
-			ret = ret ?: __copy_from_priv_user(sbbp, &context->sbbp,
-					sizeof(sbbp[0]) * SBBP_ENTRIES_NUM);
-			trap->sbbp = sbbp;
-		}
 	}
 
 #ifdef CONFIG_USE_AAU

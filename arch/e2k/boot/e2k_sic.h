@@ -121,8 +121,6 @@ __boot_writew_eg_reg(unsigned short reg_value, unsigned int reg_offset)
 #  define BOOT_NSR_AREA_PHYS_BASE	E16C_NSR_AREA_PHYS_BASE
 # elif defined(CONFIG_E2C3)
 #  define BOOT_NSR_AREA_PHYS_BASE	E2C3_NSR_AREA_PHYS_BASE
-# elif	defined(CONFIG_E48C)
-#  define BOOT_NSR_AREA_PHYS_BASE	E48C_NSR_AREA_PHYS_BASE
 # elif	defined(CONFIG_E8V7)
 #  define BOOT_NSR_AREA_PHYS_BASE	E8V7_NSR_AREA_PHYS_BASE
 # endif

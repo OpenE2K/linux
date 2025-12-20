@@ -33,13 +33,8 @@
 #endif
 
 /* Make sure there are no surprises from improper parameter area size */
-#if CONFIG_CPU_ISET_MIN >= 3
-# define VFRPSZ_SETWD(size) { vfrpsz rpsz=size; setwd wsz=size }
-# define VFRPSZ(size) vfrpsz rpsz=size
-#else
-# define VFRPSZ_SETWD(size) { setwd wsz=size }
-# define VFRPSZ(size)
-#endif
+#define VFRPSZ_SETWD(size) { vfrpsz rpsz=size; setwd wsz=size; setbp psz=0 }
+#define VFRPSZ(size) vfrpsz rpsz=size
 
 /*
  * Important: the first memory access in kernel is store, not load.

@@ -1040,22 +1040,6 @@ static int __init l_iommu_setup(char *str)
 }
 __setup("iommu=", l_iommu_setup);
 
-static int l_init_uncached_pool(void)
-{
-	struct gen_pool *p;
-	int ret = 0;
-
-	p = gen_pool_create(PAGE_SHIFT, 0);
-	if (!p) {
-		ret = -ENOMEM;
-		goto error;
-	}
-	gen_pool_set_algo(p, gen_pool_first_fit_order_align, NULL);
-
-error:
-	return ret;
-}
-
 static int __init l_iommu_init(void)
 {
 	int ret;
@@ -1063,7 +1047,6 @@ static int __init l_iommu_init(void)
 	size_t idr_sz = 1UL + INT_MAX;
 	size_t tbl_sz = l_iommu_win_sz / IO_PAGE_SIZE * sizeof(iopte_t);
 
-	WARN_ON(l_init_uncached_pool());
 #if defined(CONFIG_SWIOTLB) || defined(CONFIG_E2K)
 	if (e2k_iommu_supported() && !l_use_swiotlb)
 		return 0;

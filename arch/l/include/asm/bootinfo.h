@@ -90,6 +90,15 @@ typedef struct s3_info {
 	__u64 size;		/* size in bytes of DDR4-PHY Mem registers */
 } s3_info_t;
 
+typedef struct ioh_eth_mac_table_entry_t {
+	struct ioh_eth_mac_table_entry_t *next; /* next entry ptr */
+	__u8 pci_domain;
+	__u8 bus; /* PCI Bus number */
+	__u8 slot; /* PCI Device number */
+	__u8 func; /* PCI function number */
+	__u8 mac_addr[6]; /* MAC Address for Ethernet node */
+} ioh_eth_mac_table_entry_t;
+
 typedef struct bios_info {
 	__u8	signature[BIOS_INFO_SIGN_SIZE];		/* signature, */
 							/* 'E2KBIOS' */
@@ -102,7 +111,7 @@ typedef struct bios_info {
 							/* used to pass */
 							/* command line */
 							/* from e2k BIOS */
-	__u8	reserved1;				/* reserved1 */
+	__u8	reset_type;				/* reset type */
 	__u32	cache_lines_damaged;			/* number of damaged */
 							/* cache lines */
 
@@ -127,8 +136,9 @@ typedef struct bios_info {
 typedef struct boot_info {
 	__u16	signature;	/* signature, 0x8086 */
 	__u8	target_mdl;	/* target cpu model number */
-	__u8	reserved1;	/* reserved1 */
-	__u16	reserved2;	/* reserved2 */
+	__u8	target_iset_min;/* target minimal iset version number */
+	__u8	target_iset_max;/* target maximum iset version number */
+	__u8	progr_divf;	/* e2k v6 cpu freq divider value */
 	__u8	vga_mode;	/* vga mode */
 	__u8	num_of_banks;	/* number of available physical memory banks */
 				/* see below bank array */
@@ -154,7 +164,7 @@ typedef struct boot_info {
 	__u64	nodes_map;	/* online nodes map */
 	__u64	mach_serialn;	/* serial number of the machine */
 	__u8	mac_addr[6];	/* base MAC address for ethernet cards */
-	__u16	reserved3;	/* reserved3 */
+	__u16	reserved2;	/* reserved2 */
 
 	char	kernel_args_string[KSTRMAX_SIZE]; /* command line of kernel */
 						  /* used to pass command line */
@@ -172,7 +182,9 @@ typedef struct boot_info {
 							/* restore them state */
 	u64		dmp_deprecated[20];	/* Info for future work of */
 						/* dump analyzer */
-	__u64		reserved4[12];	/* reserved4 */
+	__u64		mac_table_ptr; /* Pointer to the beginning
+					  of the list of MAC addresses */
+	__u64		reserved4[11];	/* reserved4 */
 	__u64           dmi_info;	/* smbios and dmi address */
 	__u8		mb_name[16];	/* Motherboard product name */
 	__u32		reserved5;	/* reserved5 */

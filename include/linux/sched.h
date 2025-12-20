@@ -790,6 +790,9 @@ struct task_struct {
 	struct rb_node			pushable_dl_tasks;
 #endif
 
+#ifdef CONFIG_MCST_RT_SMP
+	int mcst_smp_cpu;
+#endif
 
 	struct mm_struct		*mm;
 	struct mm_struct		*active_mm;
@@ -1741,8 +1744,36 @@ static inline int set_cpus_allowed_ptr(struct task_struct *p, const struct cpuma
 }
 #endif
 
+#ifdef CONFIG_MCST_RT_SMP
+#define UNBOUND_CPU (NR_CPUS + MAX_NUMNODES)
+static inline int mcst_rt_affinity(struct task_struct *tsk)
+{
+	int ret = 0;
+#ifdef CONFIG_MCST_RT_GRQ
+	ret |= (tsk->mcst_smp_cpu == UNBOUND_CPU);
+#endif
+
+#ifdef CONFIG_MCST_RT_NUMA
+	ret |= (tsk->mcst_smp_cpu < UNBOUND_CPU &&
+		tsk->mcst_smp_cpu >= NR_CPUS);
+#endif
+	WARN_ON_ONCE(ret && !tsk->mm && !(tsk->flags & PF_EXITING));
+
+	return ret;
+}
+static inline int task_unbound(struct task_struct *tsk)
+{
+	return tsk->mcst_smp_cpu == UNBOUND_CPU;
+}
+static inline void dec_unbound_tasks(void)
+{
+	extern atomic_t num_unbound;
+	atomic_dec(&num_unbound);
+}
+#else
 #define mcst_rt_affinity(a) 0
 static inline void dec_unbound_tasks(void) {}
+#endif /* CONFIG_MCST_RT_SMP */
 
 #ifdef CONFIG_MCST
 extern long do_change_rts_mode_mask(long mode, long mask);
@@ -2122,6 +2153,52 @@ extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 #define TASK_SIZE_OF(tsk)	TASK_SIZE
 #endif
 
+#ifdef CONFIG_MCST_4RT
+extern int mcst_rt_prio(struct task_struct *tsk);
+
+/*
+ * This struct and defines are used to calculate all cpu_times(switch_to, )
+ * New fields may be added in stucture below
+ * To init fields - sched.c
+ * To print fields  - dintr_proc_show (file fs/proc/dintr_time.c
+ */
+typedef struct {
+	long long	curr_time_switch_to;
+	long long	max_time_switch_to;
+	long long	min_time_switch_to;
+} cpu_times_t;
+
+extern cpu_times_t cpu_times[];
+
+#define SWITCH_CPU (NR_CPUS + MAX_NUMNODES + 1)
+
+extern void el_resched_cpu(int cpu);
+
+#define DINTR_TIMER_WASNT_USE	0
+#define DINTR_TIMER_RUNNING	1
+#define DINTR_TIMER_STOPPED	2
+
+extern int dintr_timer_state;
+DECLARE_PER_CPU(unsigned long, dintr_time_min);
+DECLARE_PER_CPU(unsigned long, dintr_time_max);
+
+extern void idle_check_delayed_works(int cpu);
+extern void wakeup_delayed_posix_timer(int cpu);
+extern void wakeup_delayed_softirq(int cpu);
+
+/* Possible values for modes see <linux/mcst_rt.h>. search RTCPU */
+DECLARE_PER_CPU(int, delayed_posix_timer);
+DECLARE_PER_CPU(int, delayed_softirq);
+
+#define my_rt_cpu_data	 (&per_cpu(rt_cpu_data, raw_smp_processor_id()))
+#define rt_cpu_data(cpu) (&per_cpu(rt_cpu_data, cpu))
+
+extern long rts_mode;
+
+# ifdef CONFIG_WATCH_PREEMPT
+DECLARE_PER_CPU(u32, nowatch_set);
+# endif
+#endif	/* CONFIG_MCST_4RT */
 
 #ifdef CONFIG_RSEQ
 

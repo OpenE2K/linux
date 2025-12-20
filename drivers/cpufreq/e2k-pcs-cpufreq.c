@@ -48,7 +48,7 @@
  */
 #define PCS_CPUFREQ_SUPPORTED() \
 		((IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C || \
-		IS_MACHINE_E8C2 || IS_MACHINE_E48C || IS_MACHINE_E8V7) && \
+		IS_MACHINE_E8C2 || IS_MACHINE_E8V7) && \
 		!IS_HV_GM() && !IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) && \
 		!is_prototype())
 
@@ -351,10 +351,14 @@ static struct pcs_data *get_pcs_data(int node)
 {
 	freq_core_mon_t mon;
 	struct pcs_data *data;
-
+	boot_info_t *boot_info = &bootblock_virt->info;
+	uint8_t progr_divF, divF_min;
 
 	mon.word = sic_read_node_nbsr_reg(node, PMC_FREQ_CORE_0_MON);
-	if (mon.divF_init >= mon.divF_limit_hi) {
+	progr_divF = boot_info->progr_divf;
+	divF_min = progr_divF != 0 ? progr_divF : mon.divF_init;
+
+	if (divF_min > mon.divF_limit_hi || divF_min != mon.divF_curr) {
 		return NULL;
 	}
 
@@ -363,8 +367,8 @@ static struct pcs_data *get_pcs_data(int node)
 		return NULL;
 	}
 	data->div_max = mon.divF_limit_hi;
-	data->div_min = mon.divF_init;
-	data->table = pcs_l_calc_freq_tables(node, mon.divF_init, mon.divF_limit_hi);
+	data->div_min = divF_min;
+	data->table = pcs_l_calc_freq_tables(node, divF_min, mon.divF_limit_hi);
 	if (data->table == NULL) {
 		kfree(data);
 		return NULL;

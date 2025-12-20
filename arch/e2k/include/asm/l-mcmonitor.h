@@ -9,13 +9,13 @@
 #include <asm/io.h>
 #include <asm/sic_regs.h>
 
-typedef e2k_mc_ecc_struct_t l_mc_ecc_struct_t;
+typedef e2k_mc_ecc_t l_mc_ecc_struct_t;
 
 static inline u32 l_mc_get_error_cnt(l_mc_ecc_struct_t *ecc, int node,
 				     int nr)
 {
-	ecc->E2K_MC_ECC_reg = sic_get_mc_ecc(node, nr);
-	return ecc->E2K_MC_ECC_secnt;
+	*ecc = sic_get_mc_ecc(node, nr);
+	return ecc->secnt;
 }
 
 static inline char *l_mc_get_error_str(l_mc_ecc_struct_t *ecc, int nr,
@@ -23,20 +23,14 @@ static inline char *l_mc_get_error_str(l_mc_ecc_struct_t *ecc, int nr,
 {
 	snprintf(error_msg, error_msg_len,
 		 "MC%d_ECC=0x%x (ee=%d dmode=%d of=%d ue=%d secnt=%d)",
-		 nr,
-		 ecc->E2K_MC_ECC_reg,
-		 ecc->E2K_MC_ECC_ee,
-		 ecc->E2K_MC_ECC_dmode,
-		 ecc->E2K_MC_ECC_of,
-		 ecc->E2K_MC_ECC_ue, ecc->E2K_MC_ECC_secnt);
+		 nr, AWP(ecc), ecc->ee, ecc->dmode, ecc->of, ecc->ue, ecc->secnt);
 	return error_msg;
 }
 
 static inline bool l_mcmonitor_eec_enabled(void)
 {
-	l_mc_ecc_struct_t ecc;
-	ecc.E2K_MC_ECC_reg = sic_get_mc_ecc(0, 0);
-	return ecc.E2K_MC_ECC_ee;
+	l_mc_ecc_struct_t ecc = sic_get_mc_ecc(0, 0);
+	return ecc.ee;
 }
 
 
@@ -50,16 +44,16 @@ static inline void l_mcmonitor_fill_data(u64 *a, bool make_error)
 {
 	int i, mc = SIC_MC_COUNT;
 	int sz = L_MCMONITOR_TEST_SIZE / L_MC_ECC_WORDS_NR / sizeof(*a);
-	e2k_mc_ecc_struct_t mc_ecc[SIC_MAX_MC_COUNT];
+	e2k_mc_ecc_t mc_ecc[SIC_MAX_MC_COUNT];
 	a = (void *)__pa(a);
 
 	for (i = 0; i < mc; i++)
-		mc_ecc[i].E2K_MC_ECC_reg = sic_get_mc_ecc(0, i);
+		mc_ecc[i] = sic_get_mc_ecc(0, i);
 
 	for (i = 0; i < mc; i++) {
 		l_mc_ecc_struct_t e = mc_ecc[i];
-		e.E2K_MC_ECC_dmode = 1;
-		sic_set_mc_ecc(0, i, e.E2K_MC_ECC_reg);
+		e.dmode = 1;
+		sic_set_mc_ecc(0, i, e);
 	}
 	mb();
 
@@ -76,7 +70,7 @@ static inline void l_mcmonitor_fill_data(u64 *a, bool make_error)
 	}
 
 	for (i = 0; i < mc; i++)
-		sic_set_mc_ecc(0, i, mc_ecc[i].E2K_MC_ECC_reg);
+		sic_set_mc_ecc(0, i, mc_ecc[i]);
 	mb();
 }
 

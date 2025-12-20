@@ -343,12 +343,12 @@ typedef union pwm_regs {
 
 typedef union pmc_term_ts_regs {
     struct {
-	u32 temp:       12;
-	u32 val:        1;
+	short temp:    12; /* 9.3 fixed point */
+	u32 valid:      1;
 	u32 diag:       1;
 	u32 fault:      1;
 	u32 rsv:        1;
-	u32 addr:       12;
+	u32 addr:      12;
 	u32 rsv2:       2;
 	u32 enable:     1;
 	u32 rmwen:      1;
@@ -366,6 +366,6 @@ typedef union pwm_tach_control_regs {
 	u8 reserv:	    3;
     };
     u8 byte;
-} pwm_tach_control_regs_t;
+} __packed pwm_tach_control_regs_t;
 
 #endif /* _PCSM_H_ */

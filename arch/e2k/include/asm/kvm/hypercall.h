@@ -354,10 +354,13 @@ HYPERVISOR_switch_to_guest_init_mm(void)
 
 typedef union recovery_faulted_arg {
 	struct {
-		char vr;
-		char chan;
-		char qp;
-		char atomic;
+		struct {
+			u16 vr         : 1;
+			u16 chan       : 1;
+			u16 qp         : 1;
+			u16 atomic     : 1;
+			u16 big_endian : 1;
+		};
 		u16 tag;
 		u16 tag_ext;
 	};
@@ -1121,13 +1124,14 @@ HYPERVISOR_recovery_faulted_guest_load(e2k_addr_t address,
 static inline unsigned long
 HYPERVISOR_recovery_faulted_guest_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load, u32 first_time)
+		int qp_load, int atomic_load, bool big_endian, u32 first_time)
 {
 	union recovery_faulted_arg arg = {
 		.vr = vr,
 		.chan = chan,
 		.qp = !!qp_load,
-		.atomic = !!atomic_load
+		.atomic = !!atomic_load,
+		.big_endian = big_endian,
 	};
 	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_GUEST_MOVE,
 				addr_from, addr_to, addr_to_hi,
@@ -1136,14 +1140,15 @@ HYPERVISOR_recovery_faulted_guest_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 static inline unsigned long
 HYPERVISOR_recovery_faulted_load_to_guest_greg(e2k_addr_t address,
 		u32 greg_num_d, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load,
+		int qp_load, int atomic_load, bool big_endian,
 		void *saved_greg_lo, void *saved_greg_hi)
 {
 	union recovery_faulted_arg arg = {
 		.vr = vr,
 		.chan = chan,
 		.qp = !!qp_load,
-		.atomic = !!atomic_load
+		.atomic = !!atomic_load,
+		.big_endian = big_endian,
 	};
 	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_LOAD_TO_GUEST_GREG,
 			address, greg_num_d, ld_rec_opc, arg.entire,
@@ -1171,13 +1176,14 @@ HYPERVISOR_recovery_faulted_load(e2k_addr_t address, u64 *ld_val,
 static inline unsigned long
 HYPERVISOR_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 		e2k_addr_t addr_to_hi, int vr, u64 ld_rec_opc, int chan,
-		int qp_load, int atomic_load, u32 first_time)
+		int qp_load, int atomic_load, bool big_endian, u32 first_time)
 {
 	union recovery_faulted_arg arg = {
 		.vr = vr,
 		.chan = chan,
 		.qp = !!qp_load,
-		.atomic = !!atomic_load
+		.atomic = !!atomic_load,
+		.big_endian = big_endian,
 	};
 	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_MOVE,
 				addr_from, addr_to, addr_to_hi,
@@ -1186,13 +1192,14 @@ HYPERVISOR_recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to,
 static inline unsigned long
 HYPERVISOR_recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d,
 		int vr, u64 ld_rec_opc, int chan, int qp_load,
-		int atomic_load, void *saved_greg_lo, void *saved_greg_hi)
+		int atomic_load, bool big_endian, void *saved_greg_lo, void *saved_greg_hi)
 {
 	union recovery_faulted_arg arg = {
 		.vr = vr,
 		.chan = chan,
 		.qp = !!qp_load,
-		.atomic = !!atomic_load
+		.atomic = !!atomic_load,
+		.big_endian = big_endian,
 	};
 	return generic_hypercall6(KVM_HCALL_RECOVERY_FAULTED_LOAD_TO_GREG,
 				address, greg_num_d, ld_rec_opc, arg.entire,

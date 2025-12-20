@@ -139,7 +139,11 @@ static void set_prescaler(struct l_i2c2 *i2c, int value)
 }
 
 
-#define	PMC_I2C_TIMEOUT_USEC	(1000 * 1000)
+/* 1 byte transaction takes:
+ * 1 byte * 10 bit / 100kHz = 6600 us.
+ * Round it to 1 ms.
+ */
+#define	PMC_I2C_BYTE_TIMEOUT_USEC	1000
 
 static int i2c_send(struct l_i2c2 *i2c, int cmd, int data)
 {
@@ -150,7 +154,7 @@ static int i2c_send(struct l_i2c2 *i2c, int cmd, int data)
 
 	i2c_write(i2c, I2C_REG_CR, cmd);
 
-	for (i = 0; i < PMC_I2C_TIMEOUT_USEC; i++) {
+	for (i = 0; i < PMC_I2C_BYTE_TIMEOUT_USEC; i++) {
 		unsigned status = i2c_read(i2c, I2C_REG_SR);
 		if (status & I2C_SR_AL) {
 			dev_dbg(&i2c->adap.dev, "i2c_send: busy: arbitration lost\n");
@@ -305,10 +309,11 @@ static const struct i2c_algorithm l_i2c2_algo = {
 static void l_i2c2_init_hw(struct l_i2c2 *i2c)
 {
 	struct l_i2c2_platform_data *pdata = dev_get_platdata(&i2c->pdev->dev);
-
 	/* Prescaler divider evaluates as (BASE_FREQ/(4*SCLK))-1 */
-	set_prescaler(i2c, pdata->base_freq_hz / 4 /
-				pdata->desired_freq_hz - 1);
+	unsigned long d = pdata->desired_freq_hz * 4;
+	d = DIV_ROUND_UP(pdata->base_freq_hz, d);
+
+	set_prescaler(i2c, d - 1);
 
 	/* Enable I2C core */
 	i2c_write(i2c, I2C_REG_CTR, I2C_CTR_EN);

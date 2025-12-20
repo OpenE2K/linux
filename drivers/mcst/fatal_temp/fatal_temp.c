@@ -31,7 +31,7 @@ static ssize_t fatal_temp_read(struct file *filp, char __user *buffer,
 			      size_t count, loff_t *ppos)
 {
 	char str[300];
-	size_t len;
+	size_t len = 0;
 	int curr_node;
 	int T_fatal;
 	int PMC_DBG_val;
@@ -118,7 +118,7 @@ static struct kobject *fatal_kobj;
 
 static ssize_t fatal_show(struct kobject *kobj, struct kobj_attribute *attr, char *buffer)
 {
-	int T_fatal;
+	int T_fatal = 0;
 	int PMC_DBG_val;
 	char *str;
 	pcs_ctrl2_e8c2_t ctrl_e8c2;
@@ -214,6 +214,9 @@ static struct kobj_attribute fatal_attr = __ATTR(fatal_temp, 0660, fatal_show, f
 
 static int __init fatal_init(void)
 {
+	if (!IS_MACHINE_E8C && !IS_MACHINE_E8C2 && !IS_MACHINE_E2C3 && !IS_MACHINE_E16C &&
+			!IS_MACHINE_E12C)
+		return 0;
 
 	fatal_kobj = kobject_create_and_add("fatal_temp", kernel_kobj);
 	if (!fatal_kobj) {
@@ -243,8 +246,13 @@ static int __init fatal_init(void)
 
 static void __exit fatal_exit(void)
 {
+	if (!IS_MACHINE_E8C && !IS_MACHINE_E8C2 && !IS_MACHINE_E2C3 && !IS_MACHINE_E16C &&
+			!IS_MACHINE_E12C)
+		return;
+
 	sysfs_remove_file(fatal_kobj, &fatal_attr.attr);
 	kobject_put(fatal_kobj);
+
 #ifdef CONFIG_DEBUG_FS
 	if (dbgfs_fatal) {
 		debugfs_remove_recursive(dbgfs_fatal);

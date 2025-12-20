@@ -60,7 +60,7 @@ extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure */
 #else
 # if defined(CONFIG_E2S) || defined(CONFIG_E8C) || defined(CONFIG_E1CP) || \
 	defined(CONFIG_E8C2) || defined(CONFIG_E12C) || defined(CONFIG_E16C) || \
-	defined(CONFIG_E2C3) || defined(CONFIG_E48C) || defined(CONFIG_E8V7)
+	defined(CONFIG_E2C3) || defined(CONFIG_E8V7)
 #  define boot_native_machine_id	(native_machine_id)
 # else
 #  define boot_native_machine_id	boot_get_vo_value(native_machine_id)

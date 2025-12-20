@@ -503,6 +503,7 @@ static int mgam83fb_set_par(struct fb_info* info)
 	DEBUG_MSG_SET_PAR("mgam83fb_set_par: p->bits_per_pixel = 0x%x\n", p->bits_per_pixel);
 	p->pixclock		= mode->pixclock;
 	DEBUG_MSG_SET_PAR("mgam83fb_set_par: p->pixclock = 0x%x\n", p->pixclock);
+	p->sync		= mode->sync;
 	DEBUG_MSG_SET_PAR("mgam83fb_set_par: p->sync = 0x%x\n", p->sync);	
 
 #ifdef MGA_DEBUG
@@ -899,7 +900,7 @@ static int expand_dma_buf(struct pci_dev *dev, struct dma_image *d,
 		for (map = virt_to_page(d->virt_addr); map <= mapend; map++)
 			ClearPageReserved(map);
 
-		pci_unmap_single(dev, d->dma_addr, d->size, PCI_DMA_FROMDEVICE);
+		pci_unmap_single(dev, d->dma_addr, d->size, PCI_DMA_TODEVICE);
 		free_pages(d->virt_addr, get_order(d->size));
 	}
 
@@ -915,7 +916,7 @@ static int expand_dma_buf(struct pci_dev *dev, struct dma_image *d,
 	for (map = virt_to_page(d->virt_addr); map <= mapend; map++)
 		SetPageReserved(map);
 	d->dma_addr = pci_map_single(dev, (void *)d->virt_addr,
-				     size, PCI_DMA_FROMDEVICE);
+				     size, PCI_DMA_TODEVICE);
 	if (pci_dma_mapping_error(dev, d->dma_addr))
 		goto clear_page;
 
