@@ -641,6 +641,9 @@ static const struct proto_ops svc_proto_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl =	svc_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	svc_ioctl,
+#endif
 	.gettstamp =	sock_gettstamp,
 	.listen =	svc_listen,
 	.shutdown =	svc_shutdown,

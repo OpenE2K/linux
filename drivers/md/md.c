@@ -2606,7 +2606,11 @@ void md_kick_rdev_from_array(struct md_rdev *rdev)
 }
 EXPORT_SYMBOL_GPL(md_kick_rdev_from_array);
 
+#ifdef CONFIG_MCST
+static noinline void export_array(struct mddev *mddev)
+#else
 static void export_array(struct mddev *mddev)
+#endif
 {
 	struct md_rdev *rdev;
 
@@ -7969,6 +7973,9 @@ const struct block_device_operations md_fops =
 	.ioctl		= md_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= md_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= md_ioctl,
 #endif
 	.getgeo		= md_getgeo,
 	.check_events	= md_check_events,

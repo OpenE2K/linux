@@ -56,11 +56,13 @@
  * for all hugepage allocations.
  */
 unsigned long transparent_hugepage_flags __read_mostly =
+#ifndef CONFIG_E90S
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS
 	(1<<TRANSPARENT_HUGEPAGE_FLAG)|
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE_MADVISE
 	(1<<TRANSPARENT_HUGEPAGE_REQ_MADV_FLAG)|
+#endif
 #endif
 	(1<<TRANSPARENT_HUGEPAGE_DEFRAG_REQ_MADV_FLAG)|
 	(1<<TRANSPARENT_HUGEPAGE_DEFRAG_KHUGEPAGED_FLAG)|
@@ -610,10 +612,17 @@ static unsigned long __thp_get_unmapped_area(struct file *filp,
 
 	if (!IS_ENABLED(CONFIG_64BIT) || in_compat_syscall())
 		return 0;
-
 	if (off_end <= off_align || (off_end - off_align) < size)
 		return 0;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS) && in_ptr128_syscall()) {
+		unsigned long align_mask = ap_align_mask(len);
+		if (align_mask + 1 > size) {
+			size = align_mask + 1;
+		}
+	}
+#endif
 	len_pad = len + size;
 	if (len_pad < len || (off + len_pad) < off)
 		return 0;
@@ -2012,7 +2021,11 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	pgtable_t pgtable;
+#ifdef CONFIG_E2K
+	pmd_t _pmd = __pmd(0), old_pmd;
+#else
 	pmd_t _pmd, old_pmd;
+#endif
 	int i;
 
 	/*
@@ -2049,7 +2062,11 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	struct mm_struct *mm = vma->vm_mm;
 	struct page *page;
 	pgtable_t pgtable;
+#ifdef CONFIG_E2K
+	pmd_t old_pmd, _pmd = __pmd(0);
+#else
 	pmd_t old_pmd, _pmd;
+#endif
 	bool young, write, soft_dirty, pmd_migration = false, uffd_wp = false;
 	bool anon_exclusive = false, dirty = false;
 	unsigned long addr;

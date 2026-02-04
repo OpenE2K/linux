@@ -116,6 +116,17 @@ struct scsi_host_template {
 			    void __user *arg);
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	/*
+	 * Compat handler. Handle 128bit ABI.
+	 * When unknown ioctl is passed return -ENOIOCTLCMD.
+	 *
+	 * Status: OPTIONAL
+	 */
+	int (*ptr128_ioctl)(struct scsi_device *dev, unsigned int cmd,
+			    void __user *arg);
+#endif /* CONFIG_PROTECTED_MODE */
+
 	int (*init_cmd_priv)(struct Scsi_Host *shost, struct scsi_cmnd *cmd);
 	int (*exit_cmd_priv)(struct Scsi_Host *shost, struct scsi_cmnd *cmd);
 

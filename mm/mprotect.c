@@ -38,6 +38,9 @@
 #include <asm/tlb.h>
 
 #include "internal.h"
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
 
 static inline bool can_change_pte_writable(struct vm_area_struct *vma,
 					   unsigned long addr, pte_t pte)
@@ -556,6 +559,9 @@ mprotect_fixup(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	bool try_change_writable;
 	pgoff_t pgoff;
 	int error;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	pgprot_t oldprot = vma->vm_page_prot;
+#endif
 
 	if (newflags == oldflags) {
 		*pprev = vma;
@@ -646,6 +652,30 @@ success:
 	change_protection(tlb, vma, start, end, vma->vm_page_prot,
 			  try_change_writable ? MM_CP_TRY_CHANGE_WRITABLE : 0);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	/*
+	 * we may need to change valid bits in 2 cases:
+	 *
+	 * 1) !prot_none -> prot_none - can remove the valid bit to avoid
+	 * performance loss when semispeculative loads hit this area.
+	 *
+	 * 2) prot_none -> !prot_none - must set the valid bit for
+	 * semispeculative loads to work.
+	 *
+	 * we must do the tlb flush _after_ changing the valid bit
+	 * regardless of whether the flush has been done before.
+	 *
+	 * also change_protection() function does not flush tlb in
+	 * the second case above.
+	 */
+	if (_PAGE_TEST_VALID(pgprot_val(oldprot) ^
+					pgprot_val(vma->vm_page_prot))) {
+		if (make_all_vma_pages_valid(vma, MV_FLUSH))
+			printk_once(KERN_WARNING "make_all_vma_pages_valid() "
+				"failed in change_protection()\n");
+	}
+#endif
+
 	/*
 	 * Private VM_LOCKED VMA becoming writable: trigger COW to avoid major
 	 * fault on access.
@@ -715,6 +745,14 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 	error = -ENOMEM;
 	if (!vma)
 		goto out;
+
+#ifdef CONFIG_E2K
+	if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
+			__is_privileged_range(current->mm, start, start + len)) {
+		error = -EPERM;
+		goto out;
+	}
+#endif
 
 	if (unlikely(grows & PROT_GROWSDOWN)) {
 		if (vma->vm_start >= end)

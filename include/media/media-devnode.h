@@ -51,6 +51,9 @@ struct media_file_operations {
 	__poll_t (*poll) (struct file *, struct poll_table_struct *);
 	long (*ioctl) (struct file *, unsigned int, unsigned long);
 	long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	long (*ptr128_ioctl) (struct file *, unsigned int, unsigned long);
+#endif
 	int (*open) (struct file *);
 	int (*release) (struct file *);
 };

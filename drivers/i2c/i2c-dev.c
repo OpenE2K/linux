@@ -582,6 +582,113 @@ static long compat_i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned lo
 #define compat_i2cdev_ioctl NULL
 #endif
 
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+struct i2c_smbus_ioctl_data128 {
+	u8 read_write;
+	u8 command;
+	u32 size;
+	e2k_ap_t data; /* union i2c_smbus_data *data */
+};
+
+struct i2c_msg128 {
+	u16 addr;
+	u16 flags;
+	u16 len;
+	e2k_ap_t buf;
+};
+
+struct i2c_rdwr_ioctl_data128 {
+	e2k_ap_t msgs; /* struct i2c_msg __user *msgs */
+	u32 nmsgs;
+};
+
+static long ptr128_i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct i2c_client *client = file->private_data;
+	e2k_ap_t ap;
+	int      tag;
+
+	if (!TASK_IS_PROTECTED(current)) { /* can't be, but */
+		return i2cdev_ioctl(file, cmd, arg);
+	}
+	switch (cmd) {
+	case I2C_RDWR: {
+		struct i2c_rdwr_ioctl_data128 *argp = (struct i2c_rdwr_ioctl_data128 *)arg;
+		u32 nmsgs;
+		struct i2c_msg128 __user *p;
+		struct i2c_msg *rdwr_pa;
+		int i;
+
+		if (get_user_tagged_16(ap.qword, tag, &argp->msgs) || !IS_AP(ap, tag)) {
+			return -EFAULT;
+		}
+		if (get_user(nmsgs, &argp->nmsgs)) {
+			return -EFAULT;
+		}
+		if (nmsgs > I2C_RDWR_IOCTL_MAX_MSGS)
+			return -EINVAL;
+		if (nmsgs == 0)
+			return -EINVAL;
+		if (AP_OBJ_SIZE(ap) < nmsgs * sizeof(struct i2c_msg)) {
+			return -EFAULT;
+		}
+
+		rdwr_pa = kmalloc_array(nmsgs, sizeof(struct i2c_msg),
+				      GFP_KERNEL);
+		if (!rdwr_pa)
+			return -ENOMEM;
+
+		p = (struct i2c_msg128 __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+		for (i = 0; i < nmsgs; i++) {
+			struct i2c_msg128 umsg;
+			if (copy_from_user(&umsg, p, sizeof(umsg))) {
+				kfree(rdwr_pa);
+				return -EFAULT;
+			}
+			if (get_user_tagged_16(ap.qword, tag, &p->buf) || !IS_AP(ap, tag)) {
+				kfree(rdwr_pa);
+				return -EFAULT;
+			}
+			if (AP_OBJ_SIZE(ap) < umsg.len) {
+				kfree(rdwr_pa);
+				return -EFAULT;
+			}
+			rdwr_pa[i] = (struct i2c_msg) {
+				.addr = umsg.addr,
+				.flags = umsg.flags,
+				.len = umsg.len,
+				.buf = (__force __u8 *)AP_PTR(ap),
+			};
+			p++;
+		}
+		set_max_u_border();
+		return i2cdev_ioctl_rdwr(client, nmsgs, rdwr_pa);
+	}
+	case I2C_SMBUS: {
+		struct i2c_smbus_ioctl_data128	data128;
+		struct i2c_smbus_ioctl_data128 __user *datap =
+					(struct i2c_smbus_ioctl_data128 __user *)arg;
+		if (copy_from_user(&data128, datap, sizeof(data128)))
+			return -EFAULT;
+		if (get_user_tagged_16(ap.qword, tag, &datap->data) || !IS_AP(ap, tag)) {
+			return -EFAULT;
+		}
+		if (AP_OBJ_SIZE(ap) < data128.size) {
+			return -EFAULT;
+		}
+		set_ap_u_border(ap);
+		return i2cdev_ioctl_smbus(client, data128.read_write, data128.command,
+					  data128.size, (void *)AP_PTR(ap));
+	}
+	default:
+		return i2cdev_ioctl(file, cmd, arg);
+	}
+}
+#endif
+
 static int i2cdev_open(struct inode *inode, struct file *file)
 {
 	unsigned int minor = iminor(inode);
@@ -630,6 +737,9 @@ static const struct file_operations i2cdev_fops = {
 	.write		= i2cdev_write,
 	.unlocked_ioctl	= i2cdev_ioctl,
 	.compat_ioctl	= compat_i2cdev_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= ptr128_i2cdev_ioctl,
+#endif
 	.open		= i2cdev_open,
 	.release	= i2cdev_release,
 };

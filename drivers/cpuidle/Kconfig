@@ -51,6 +51,11 @@ config DT_IDLE_GENPD
 	depends on PM_GENERIC_DOMAINS_OF
 	bool
 
+menu "E90S CPU Idle Drivers"
+depends on E90S
+source "drivers/cpuidle/Kconfig.e90s"
+endmenu
+
 menu "ARM CPU Idle Drivers"
 depends on ARM || ARM64
 source "drivers/cpuidle/Kconfig.arm"
@@ -64,6 +69,11 @@ endmenu
 menu "POWERPC CPU Idle Drivers"
 depends on PPC
 source "drivers/cpuidle/Kconfig.powerpc"
+endmenu
+
+menu "E2K CPU Idle Drivers"
+depends on E2K
+source "drivers/cpuidle/Kconfig.e2k"
 endmenu
 
 menu "RISC-V CPU Idle Drivers"

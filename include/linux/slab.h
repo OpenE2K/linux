@@ -43,6 +43,11 @@
 #define SLAB_STORE_USER		((slab_flags_t __force)0x00010000U)
 /* Panic if kmem_cache_create() fails */
 #define SLAB_PANIC		((slab_flags_t __force)0x00040000U)
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+/* PaX: Do not sanitize objs on free */
+#define SLAB_NO_SANITIZE	0x000080000UL
+#endif
+
 /*
  * SLAB_TYPESAFE_BY_RCU - **WARNING** READ THIS!
  *
@@ -156,6 +161,7 @@ struct mem_cgroup;
  */
 void __init kmem_cache_init(void);
 bool slab_is_available(void);
+
 
 struct kmem_cache *kmem_cache_create(const char *name, unsigned int size,
 			unsigned int align, slab_flags_t flags,

@@ -3240,6 +3240,9 @@ static const struct file_operations fuse_file_operations = {
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 	.unlocked_ioctl	= fuse_file_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= fuse_file_ioctl,
+#endif
 	.compat_ioctl	= fuse_file_compat_ioctl,
 	.poll		= fuse_file_poll,
 	.fallocate	= fuse_file_fallocate,

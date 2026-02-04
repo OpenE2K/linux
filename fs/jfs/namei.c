@@ -1541,6 +1541,9 @@ const struct file_operations jfs_dir_operations = {
 	.fsync		= jfs_fsync,
 	.unlocked_ioctl = jfs_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = jfs_ioctl,
+#endif
 	.llseek		= generic_file_llseek,
 };
 

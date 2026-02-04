@@ -118,6 +118,9 @@ static const struct proto_ops pvc_proto_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = vcc_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	vcc_ioctl,
+#endif
 	.gettstamp =	sock_gettstamp,
 	.listen =	sock_no_listen,
 	.shutdown =	pvc_shutdown,

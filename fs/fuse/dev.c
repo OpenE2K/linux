@@ -2304,6 +2304,9 @@ const struct file_operations fuse_dev_operations = {
 	.fasync		= fuse_dev_fasync,
 	.unlocked_ioctl = fuse_dev_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = fuse_dev_ioctl,
+#endif
 };
 EXPORT_SYMBOL_GPL(fuse_dev_operations);
 

@@ -611,6 +611,7 @@ error_free_buffer:
 	return err;
 }
 
+
 int put_sg_io_hdr(const struct sg_io_hdr *hdr, void __user *argp)
 {
 #ifdef CONFIG_COMPAT
@@ -646,6 +647,54 @@ int put_sg_io_hdr(const struct sg_io_hdr *hdr, void __user *argp)
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		e2k_ap_t ap1, ap2, ap3, ap4;
+		int tag1, tag2, tag3, tag4;
+		struct ptr128_sg_io_hdr __user *uhdr128p = argp;
+		struct ptr128_sg_io_hdr hdr128 =  {
+			.interface_id	 = hdr->interface_id,
+			.dxfer_direction = hdr->dxfer_direction,
+			.cmd_len	 = hdr->cmd_len,
+			.mx_sb_len	 = hdr->mx_sb_len,
+			.iovec_count	 = hdr->iovec_count,
+			.dxfer_len	 = hdr->dxfer_len,
+			.timeout	 = hdr->timeout,
+			.flags		 = hdr->flags,
+			.pack_id	 = hdr->pack_id,
+			.status		 = hdr->status,
+			.masked_status	 = hdr->masked_status,
+			.msg_status	 = hdr->msg_status,
+			.sb_len_wr	 = hdr->sb_len_wr,
+			.host_status	 = hdr->host_status,
+			.driver_status	 = hdr->driver_status,
+			.resid		 = hdr->resid,
+			.duration	 = hdr->duration,
+			.info		 = hdr->info,
+		};
+		if (get_user_tagged_16(ap1.qword, tag1, &uhdr128p->dxferp))
+			return -EFAULT;
+		if (get_user_tagged_16(ap2.qword, tag2, &uhdr128p->cmdp))
+			return -EFAULT;
+		if (get_user_tagged_16(ap3.qword, tag3, &uhdr128p->sbp))
+			return -EFAULT;
+		if (get_user_tagged_16(ap4.qword, tag4, &uhdr128p->usr_ptr))
+			return -EFAULT;
+
+		if (copy_to_user(argp, &hdr128, sizeof(hdr128)))
+			return -EFAULT;
+
+		if (put_user_tagged_16(ap1.qword, tag1, &uhdr128p->dxferp))
+			return -EFAULT;
+		if (put_user_tagged_16(ap2.qword, tag2, &uhdr128p->cmdp))
+			return -EFAULT;
+		if (put_user_tagged_16(ap3.qword, tag3, &uhdr128p->sbp))
+			return -EFAULT;
+		if (put_user_tagged_16(ap4.qword, tag4, &uhdr128p->usr_ptr))
+			return -EFAULT;
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 
 	if (copy_to_user(argp, hdr, sizeof(*hdr)))
 		return -EFAULT;
@@ -691,6 +740,65 @@ int get_sg_io_hdr(struct sg_io_hdr *hdr, const void __user *argp)
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		struct ptr128_sg_io_hdr hdr128;
+		const struct ptr128_sg_io_hdr __user *hdr128p = argp;
+		e2k_ap_t	ap;
+		int		tag;
+
+		if (copy_from_user(&hdr128, hdr128p, sizeof(hdr128)))
+			return -EFAULT;
+
+		*hdr = (struct sg_io_hdr) {
+			.interface_id	 = hdr128.interface_id,
+			.dxfer_direction = hdr128.dxfer_direction,
+			.cmd_len	 = hdr128.cmd_len,
+			.mx_sb_len	 = hdr128.mx_sb_len,
+			.iovec_count	 = hdr128.iovec_count,
+			.dxfer_len	 = hdr128.dxfer_len,
+			.timeout	 = hdr128.timeout,
+			.flags		 = hdr128.flags,
+			.pack_id	 = hdr128.pack_id,
+			.usr_ptr	 = NULL,
+			.status		 = hdr128.status,
+			.masked_status	 = hdr128.masked_status,
+			.msg_status	 = hdr128.msg_status,
+			.sb_len_wr	 = hdr128.sb_len_wr,
+			.host_status	 = hdr128.host_status,
+			.driver_status	 = hdr128.driver_status,
+			.resid		 = hdr128.resid,
+			.duration	 = hdr128.duration,
+			.info		 = hdr128.info,
+		};
+		if (hdr128.dxfer_len) {
+			if (get_user_tagged_16(ap.qword, tag, &hdr128p->dxferp) ||
+			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hdr128.dxfer_len)
+				return -EFAULT;
+			hdr->dxferp = (void __user *)AP_PTR(ap);
+		} else {
+			hdr->dxferp = NULL;
+		}
+		if (hdr128.cmd_len) {
+			if (get_user_tagged_16(ap.qword, tag, &hdr128p->cmdp) ||
+			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hdr128.cmd_len)
+				return -EFAULT;
+			hdr->cmdp = (void __user *)AP_PTR(ap);
+		} else {
+			hdr->cmdp = NULL;
+		}
+		if (hdr128.mx_sb_len) {
+			if (get_user_tagged_16(ap.qword, tag, &hdr128p->sbp) ||
+			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hdr128.mx_sb_len)
+				return -EFAULT;
+			hdr->sbp = (void __user *)AP_PTR(ap);
+		} else {
+			hdr->sbp = NULL;
+		}
+		set_max_u_border();
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 
 	if (copy_from_user(hdr, argp, sizeof(*hdr)))
 		return -EFAULT;
@@ -713,6 +821,23 @@ struct compat_cdrom_generic_command {
 	compat_caddr_t	unused;
 };
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+struct ptr128_cdrom_generic_command {
+	unsigned char		cmd[CDROM_PACKET_SIZE];
+	e2k_ap_t		buffer; /* (void __user *) */
+	unsigned int		buflen;
+	int			stat;
+	e2k_ap_t		sense; /* (struct request_sense __user *) */
+	unsigned char		data_direction;
+	unsigned char		pad[3];
+	int			quiet;
+	int			timeout;
+	union {
+		e2k_ap_t	reserved[1];   /* unused, actually */
+		e2k_ap_t	unused;
+	};
+};
+#endif /* CONFIG_PROTECTED_MODE */
 
 static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 				      const void __user *arg)
@@ -738,6 +863,55 @@ static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		struct ptr128_cdrom_generic_command cgc128;
+		const struct ptr128_cdrom_generic_command __user *arg128 = arg;
+		e2k_ap_t	ap;
+		int		tag;
+
+		if (copy_from_user(&cgc128, arg, sizeof(cgc128)))
+			return -EFAULT;
+
+		*cgc = (struct cdrom_generic_command) {
+			.buffer		= (void *)AP_PTR(cgc128.buffer),
+			.buflen		= cgc128.buflen,
+			.stat		= cgc128.stat,
+			.data_direction	= cgc128.data_direction,
+			.quiet		= cgc128.quiet,
+			.timeout	= cgc128.timeout,
+			.unused		= NULL,
+		};
+		if (cgc128.buflen) {
+			if (get_user_tagged_16(ap.qword, tag, &arg128->buffer) ||
+			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < cgc128.buflen)
+				return -EFAULT;
+			cgc->buffer = (void __user *)AP_PTR(ap);
+		} else {
+			cgc->buffer = NULL;
+		}
+		if (get_user_tagged_16(ap.qword, tag, &arg128->sense))
+			return -EFAULT;
+		if (IS_AP(ap, tag)) {
+			if (AP_OBJ_SIZE(ap) < sizeof(struct request_sense))
+				return -EFAULT;
+			cgc->sense = (void __user *)AP_PTR(ap);
+		} else {
+			cgc->sense = NULL;
+		}
+		if (get_user_tagged_16(ap.qword, tag, &arg128->sense))
+			return -EFAULT;
+		if (IS_AP(ap, tag)) {
+			if (AP_OBJ_SIZE(ap) < sizeof(struct request_sense))
+				return -EFAULT;
+			cgc->sense = (void __user *)AP_PTR(ap);
+		} else {
+			cgc->sense = NULL;
+		}
+		memcpy(&cgc->cmd, &cgc128.cmd, CDROM_PACKET_SIZE);
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 	if (copy_from_user(cgc, arg, sizeof(*cgc)))
 		return -EFAULT;
 
@@ -767,6 +941,40 @@ static int scsi_put_cdrom_generic_arg(const struct cdrom_generic_command *cgc,
 		return 0;
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		e2k_ap_t ap1, ap2, ap3;
+		int  tag1, tag2, tag3;
+		struct ptr128_cdrom_generic_command  __user *arg128 = arg;
+		struct ptr128_cdrom_generic_command cgc128 = {
+			.buflen		= cgc->buflen,
+			.stat		= cgc->stat,
+			.data_direction	= cgc->data_direction,
+			.quiet		= cgc->quiet,
+			.timeout	= cgc->timeout,
+		};
+		memcpy(&cgc128.cmd, &cgc->cmd, CDROM_PACKET_SIZE);
+
+		if (get_user_tagged_16(ap1.qword, tag1, &arg128->buffer))
+			return -EFAULT;
+		if (get_user_tagged_16(ap2.qword, tag2, &arg128->sense))
+			return -EFAULT;
+		if (get_user_tagged_16(ap3.qword, tag3, &arg128->unused))
+			return -EFAULT;
+
+
+		if (copy_to_user(arg, &cgc128, sizeof(cgc128)))
+			return -EFAULT;
+
+		if (put_user_tagged_16(ap1.qword, tag1, &arg128->buffer))
+			return -EFAULT;
+		if (put_user_tagged_16(ap2.qword, tag2, &arg128->sense))
+			return -EFAULT;
+		if (put_user_tagged_16(ap3.qword, tag3, &arg128->unused))
+			return -EFAULT;
+		return 0;
+	}
+#endif /* CONFIG_PROTECTED_MODE */
 	if (copy_to_user(arg, cgc, sizeof(*cgc)))
 		return -EFAULT;
 
@@ -932,6 +1140,14 @@ int scsi_ioctl(struct scsi_device *sdev, fmode_t mode, int cmd,
 		return sdev->host->hostt->compat_ioctl(sdev, cmd, arg);
 	}
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		if (!sdev->host->hostt->ptr128_ioctl)
+			return -EINVAL;
+		return sdev->host->hostt->ptr128_ioctl(sdev, cmd, arg);
+	}
+#endif /* CONFIG_PROTECTED_MODE */
+
 	if (!sdev->host->hostt->ioctl)
 		return -EINVAL;
 	return sdev->host->hostt->ioctl(sdev, cmd, arg);

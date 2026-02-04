@@ -3570,6 +3570,9 @@ static const struct file_operations cxlflash_chr_fops = {
 	.open           = cxlflash_chr_open,
 	.unlocked_ioctl	= cxlflash_chr_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= cxlflash_chr_ioctl,
+#endif
 };
 
 /**

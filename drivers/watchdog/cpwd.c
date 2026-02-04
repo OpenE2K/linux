@@ -503,6 +503,9 @@ static const struct file_operations cpwd_fops = {
 	.owner =		THIS_MODULE,
 	.unlocked_ioctl =	cpwd_ioctl,
 	.compat_ioctl =		cpwd_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	cpwd_ioctl,
+#endif
 	.open =			cpwd_open,
 	.write =		cpwd_write,
 	.read =			cpwd_read,

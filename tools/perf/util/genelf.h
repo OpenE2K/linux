@@ -19,6 +19,9 @@ int jit_add_debug_info(Elf *e, uint64_t code_addr, void *debug, int nr_debug_ent
 #elif defined(__aarch64__)
 #define GEN_ELF_ARCH	EM_AARCH64
 #define GEN_ELF_CLASS	ELFCLASS64
+#elif defined(__e2k__)
+#define GEN_ELF_ARCH	EM_MCST_ELBRUS
+#define GEN_ELF_CLASS	ELFCLASS64
 #elif defined(__x86_64__)
 #define GEN_ELF_ARCH	EM_X86_64
 #define GEN_ELF_CLASS	ELFCLASS64
@@ -42,6 +45,9 @@ int jit_add_debug_info(Elf *e, uint64_t code_addr, void *debug, int nr_debug_ent
 #define GEN_ELF_CLASS	ELFCLASS64
 #elif defined(__riscv) && __riscv_xlen == 64
 #define GEN_ELF_ARCH	EM_RISCV
+#define GEN_ELF_CLASS	ELFCLASS64
+#elif defined(__e2k__)
+#define GEN_ELF_ARCH	EM_E2K
 #define GEN_ELF_CLASS	ELFCLASS64
 #else
 #error "unsupported architecture"

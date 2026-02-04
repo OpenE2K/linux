@@ -240,6 +240,13 @@ bool cpufreq_supports_freq_invariance(void);
 struct kobject *get_governor_parent_kobj(struct cpufreq_policy *policy);
 void cpufreq_enable_fast_switch(struct cpufreq_policy *policy);
 void cpufreq_disable_fast_switch(struct cpufreq_policy *policy);
+# if defined(CONFIG_MCST) && defined(CONFIG_CPU_FREQ_GOV_PSTATES)
+/* Used at l_spmc.c and cpufreq_pstates.c*/
+extern unsigned int cpu_pwr_limit;
+extern unsigned int init_cpu_pwr_limit;
+extern unsigned int battery_pwr;
+extern int set_cpu_pwr_limit(int new_cpu_pwr_limit);
+# endif /* CONFIG_MCST && CONFIG_CPU_FREQ_GOV_PSTATES */
 #else
 static inline unsigned int cpufreq_get(unsigned int cpu)
 {

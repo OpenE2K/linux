@@ -505,6 +505,10 @@ static const struct tty_operations master_pty_ops_bsd = {
 	.unthrottle = pty_unthrottle,
 	.ioctl = pty_bsd_ioctl,
 	.compat_ioctl = pty_bsd_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = pty_bsd_ioctl,
+#endif
+
 	.cleanup = pty_cleanup,
 	.resize = pty_resize,
 	.remove = pty_remove
@@ -754,6 +758,10 @@ static const struct tty_operations ptm_unix98_ops = {
 	.unthrottle = pty_unthrottle,
 	.ioctl = pty_unix98_ioctl,
 	.compat_ioctl = pty_unix98_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = pty_unix98_ioctl,
+#endif
+
 	.resize = pty_resize,
 	.cleanup = pty_cleanup,
 	.show_fdinfo = pty_show_fdinfo,

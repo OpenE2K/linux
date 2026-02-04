@@ -2903,6 +2903,7 @@ static int _ext4_show_options(struct seq_file *seq, struct super_block *sb,
 		int opt_2 = m->flags & MOPT_2;
 		unsigned int mount_opt, def_mount_opt;
 
+
 		if (((m->flags & (MOPT_SET|MOPT_CLEAR)) == 0) ||
 		    m->flags & MOPT_SKIP)
 			continue;

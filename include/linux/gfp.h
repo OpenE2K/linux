@@ -291,7 +291,11 @@ extern unsigned long get_zeroed_page(gfp_t gfp_mask);
 
 void *alloc_pages_exact(size_t size, gfp_t gfp_mask) __alloc_size(1);
 void free_pages_exact(void *virt, size_t size);
+#ifdef CONFIG_E2K
+void *alloc_pages_exact_nid(int nid, size_t size, gfp_t gfp_mask) __alloc_size(2);
+#else
 __meminit void *alloc_pages_exact_nid(int nid, size_t size, gfp_t gfp_mask) __alloc_size(2);
+#endif
 
 #define __get_free_page(gfp_mask) \
 		__get_free_pages((gfp_mask), 0)

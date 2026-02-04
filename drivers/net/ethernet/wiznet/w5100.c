@@ -509,7 +509,40 @@ static int w5100_writebulk(struct w5100_priv *priv, u32 addr, const u8 *buf,
 }
 
 #endif
+#ifdef CONFIG_MCST
+#define SPI_MEM_SIZE 64
+static int w5100_readbuf_spi(struct w5100_priv *priv, u32 addr, u8 *buf, int len)
+{
+	int addr_cmd_len = 3;
+	int spi_data_len = SPI_MEM_SIZE - addr_cmd_len;
+	int i = 0, ret;
 
+	while (len  > spi_data_len) {
+		ret = w5100_readbulk(priv, addr + i, buf + i, spi_data_len);
+		if (ret)
+			return ret;
+		i += spi_data_len;
+		len -= spi_data_len;
+	}
+	return w5100_readbulk(priv, addr + i, buf + i, len);
+}
+
+static int w5100_writebuf_spi(struct w5100_priv *priv, u32 addr, const u8 *buf, int len)
+{
+	int addr_cmd_len = 3;
+	int spi_data_len = SPI_MEM_SIZE - addr_cmd_len;
+	int i = 0, ret;
+
+	while (len  > spi_data_len) {
+		ret = w5100_writebulk(priv, addr + i, buf + i, spi_data_len);
+		if (ret)
+			return ret;
+		i += spi_data_len;
+		len -= spi_data_len;
+	}
+	return w5100_writebulk(priv, addr + i, buf + i, len);
+}
+#endif
 static int w5100_readbuf(struct w5100_priv *priv, u16 offset, u8 *buf, int len)
 {
 	u32 addr;
@@ -526,11 +559,19 @@ static int w5100_readbuf(struct w5100_priv *priv, u16 offset, u8 *buf, int len)
 		len = mem_size - offset;
 	}
 
+#ifdef CONFIG_MCST
+	ret = w5100_readbuf_spi(priv, addr, buf, len);
+#else
 	ret = w5100_readbulk(priv, addr, buf, len);
+#endif
 	if (ret || !remain)
 		return ret;
 
+#ifdef CONFIG_MCST
+	return w5100_readbuf_spi(priv, mem_start, buf + len, remain);
+#else
 	return w5100_readbulk(priv, mem_start, buf + len, remain);
+#endif
 }
 
 static int w5100_writebuf(struct w5100_priv *priv, u16 offset, const u8 *buf,
@@ -550,11 +591,19 @@ static int w5100_writebuf(struct w5100_priv *priv, u16 offset, const u8 *buf,
 		len = mem_size - offset;
 	}
 
+#ifdef CONFIG_MCST
+	ret = w5100_writebuf_spi(priv, addr, buf, len);
+#else
 	ret = w5100_writebulk(priv, addr, buf, len);
+#endif
 	if (ret || !remain)
 		return ret;
 
+#ifdef CONFIG_MCST
+	return w5100_writebuf_spi(priv, mem_start, buf + len, remain);
+#else
 	return w5100_writebulk(priv, mem_start, buf + len, remain);
+#endif
 }
 
 static int w5100_reset(struct w5100_priv *priv)

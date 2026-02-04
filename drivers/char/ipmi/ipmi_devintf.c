@@ -776,11 +776,203 @@ static long compat_ipmi_ioctl(struct file *filep, unsigned int cmd,
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+/*
+ * The following code contains code for supporting 128 compatible
+ * ioctls on 64-bit kernels.  This allows running 128t apps on the
+ * 64-bit kernel
+ */
+#define PTR128_IPMICTL_SEND_COMMAND	\
+	_IOR(IPMI_IOC_MAGIC, 13, struct ptr128_ipmi_req)
+#define PTR128_IPMICTL_SEND_COMMAND_SETTIME	\
+	_IOR(IPMI_IOC_MAGIC, 21, struct ptr128_ipmi_req_settime)
+#define PTR128_IPMICTL_RECEIVE_MSG	\
+	_IOWR(IPMI_IOC_MAGIC, 12, struct ptr128_ipmi_recv)
+#define PTR128_IPMICTL_RECEIVE_MSG_TRUNC	\
+	_IOWR(IPMI_IOC_MAGIC, 11, struct ptr128_ipmi_recv)
+
+struct ptr128_ipmi_msg {
+	u8		netfn;
+	u8		cmd;
+	u16		data_len;
+	e2k_ap_t	data;
+};
+
+struct ptr128_ipmi_req {
+	e2k_ap_t	addr;
+	unsigned int	addr_len;
+	long		msgid;
+	struct ptr128_ipmi_msg	msg;
+};
+
+struct ptr128_ipmi_recv {
+	int			recv_type;
+	e2k_ap_t		addr;
+	unsigned int		addr_len;
+	long			msgid;
+	struct ptr128_ipmi_msg	msg;
+};
+
+struct ptr128_ipmi_req_settime {
+	struct ptr128_ipmi_req	req;
+	int			retries;
+	unsigned int		retry_time_ms;
+};
+
+/*
+ * Define some helper functions for copying IPMI data
+ */
+static int get_ptr128_ipmi_msg(struct ipmi_msg *p64,
+				struct ptr128_ipmi_msg __user *p128)
+{
+	e2k_ap_t ap;
+	int tag;
+
+	if (get_user(p64->netfn, &p128->netfn) || get_user(p64->cmd, &p128->cmd) ||
+			get_user(p64->data_len, &p128->data_len))
+		return -EFAULT;
+	if (p64->data_len) {
+		if (get_user_tagged_16(ap.qword, tag, &p128->data) || !IS_AP(ap, tag))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(ap) < p64->data_len)
+			return -EFAULT;
+		p64->data = (void __user *)AP_PTR(ap);
+	} else {
+		p64->data = NULL;
+	}
+	return 0;
+}
+
+static int get_ptr128_ipmi_req(struct ipmi_req *p64,
+				struct ptr128_ipmi_req __user *p128)
+{
+	e2k_ap_t ap;
+	int tag;
+	if (get_user(p64->addr_len, &p128->addr_len) || get_user(p64->msgid, &p128->msgid))
+		return -EFAULT;
+	if (p64->addr_len) {
+		if (get_user_tagged_16(ap.qword, tag, &p128->addr) || !IS_AP(ap, tag))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(ap) < p64->addr_len)
+			return -EFAULT;
+		p64->addr = (void __user *)AP_PTR(ap);
+	} else {
+		p64->addr = NULL;
+	}
+	if (get_ptr128_ipmi_msg(&p64->msg, &p128->msg))
+		return -EFAULT;
+	set_max_u_border();
+	return 0;
+}
+
+static int get_ptr128_ipmi_req_settime(struct ipmi_req_settime *p64,
+		struct ptr128_ipmi_req_settime __user *p128)
+{
+	if (get_ptr128_ipmi_req(&p64->req, &p128->req))
+		return -EFAULT;
+	if (get_user(p64->retries, &p128->retries) ||
+	    get_user(p64->retry_time_ms, &p128->retry_time_ms))
+		return -EFAULT;
+	set_max_u_border();
+	return 0;
+}
+
+static int get_ptr128_ipmi_recv(struct ipmi_recv *p64,
+				 struct ptr128_ipmi_recv __user *p128)
+{
+	e2k_ap_t ap;
+	int tag;
+	memset(p64, 0, sizeof(struct ipmi_recv));
+	if (get_user(p64->recv_type, &p128->recv_type) ||
+	    get_user(p64->addr_len, &p128->addr_len) ||
+	    get_user(p64->msgid, &p128->msgid))
+		return -EFAULT;
+	if (p64->addr_len) {
+		if (get_user_tagged_16(ap.qword, tag, &p128->addr) || !IS_AP(ap, tag))
+			return -EFAULT;
+		if (AP_OBJ_SIZE(ap) < p64->addr_len)
+			return -EFAULT;
+		p64->addr = (void __user *)AP_PTR(ap);
+	} else {
+		p64->addr = NULL;
+	}
+	if (get_ptr128_ipmi_msg(&p64->msg, &p128->msg))
+		return -EFAULT;
+	set_max_u_border();
+	return 0;
+}
+
+
+static int copyout_recv128(struct ipmi_recv *p64, void *arg)
+{
+	struct ptr128_ipmi_recv  __user *to = (struct ptr128_ipmi_recv  __user *)arg;
+	if (put_user(p64->recv_type, &to->recv_type) || put_user(p64->addr_len, &to->addr_len) ||
+	    put_user(p64->msgid, &to->msgid) || put_user(p64->msg.netfn, &to->msg.netfn) ||
+	    put_user(p64->msg.cmd, &to->msg.cmd) ||
+	    put_user(p64->msg.data_len, &to->msg.data_len)) {
+		return -EFAULT;
+	}
+	return 0;
+}
+/*
+ * Handle compatibility ioctls
+ */
+static long ptr128_ipmi_ioctl(struct file *filep, unsigned int cmd,
+			      unsigned long arg)
+{
+	struct ipmi_file_private *priv = filep->private_data;
+
+	switch (cmd) {
+	case PTR128_IPMICTL_SEND_COMMAND:
+	{
+		struct ipmi_req	rp;
+		int retries;
+		unsigned int retry_time_ms;
+
+		if (get_ptr128_ipmi_req(&rp, (void __user *)arg))
+			return -EFAULT;
+
+		mutex_lock(&priv->recv_mutex);
+		retries = priv->default_retries;
+		retry_time_ms = priv->default_retry_time_ms;
+		mutex_unlock(&priv->recv_mutex);
+
+		return handle_send_req(priv->user, &rp,
+				       retries, retry_time_ms);
+	}
+	case PTR128_IPMICTL_SEND_COMMAND_SETTIME:
+	{
+		struct ipmi_req_settime	sp;
+
+		if (get_ptr128_ipmi_req_settime(&sp, (void __user *)arg))
+			return -EFAULT;
+		return handle_send_req(priv->user, &sp.req,
+				sp.retries, sp.retry_time_ms);
+	}
+	case PTR128_IPMICTL_RECEIVE_MSG:
+	case PTR128_IPMICTL_RECEIVE_MSG_TRUNC:
+	{
+		struct ipmi_recv   recv64;
+		if (get_ptr128_ipmi_recv(&recv64, (struct ptr128_ipmi_recv __user *)arg))
+			return -EFAULT;
+		return handle_recv(priv,
+				 cmd == PTR128_IPMICTL_RECEIVE_MSG_TRUNC,
+				 &recv64, copyout_recv128, (void __user *)arg);
+	}
+	default:
+		return ipmi_ioctl(filep, cmd, arg);
+	}
+}
+#endif
 static const struct file_operations ipmi_fops = {
 	.owner		= THIS_MODULE,
 	.unlocked_ioctl	= ipmi_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl   = compat_ipmi_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = ptr128_ipmi_ioctl,
 #endif
 	.open		= ipmi_open,
 	.release	= ipmi_release,

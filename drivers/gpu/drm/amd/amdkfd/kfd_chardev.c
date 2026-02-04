@@ -59,6 +59,9 @@ static const struct file_operations kfd_fops = {
 	.open = kfd_open,
 	.release = kfd_release,
 	.mmap = kfd_mmap,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = kfd_ioctl,
+#endif
 };
 
 static int kfd_char_dev_major = -1;

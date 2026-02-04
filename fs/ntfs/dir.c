@@ -1087,7 +1087,11 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 {
 	s64 ia_pos, ia_start, prev_ia_pos, bmp_pos;
 	loff_t i_size;
+#if defined(CONFIG_MCST) && defined(__LCC__)
+	struct inode *bmp_vi = NULL, *vdir = file_inode(file);
+#else
 	struct inode *bmp_vi, *vdir = file_inode(file);
+#endif
 	struct super_block *sb = vdir->i_sb;
 	ntfs_inode *ndir = NTFS_I(vdir);
 	ntfs_volume *vol = NTFS_SB(sb);

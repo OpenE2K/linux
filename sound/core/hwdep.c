@@ -319,7 +319,9 @@ static int snd_hwdep_control_ioctl(struct snd_card *card,
 #else
 #define snd_hwdep_ioctl_compat	NULL
 #endif
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include "hwdep_ptr128.c"
+#endif
 /*
 
  */
@@ -335,6 +337,9 @@ static const struct file_operations snd_hwdep_f_ops =
 	.poll =		snd_hwdep_poll,
 	.unlocked_ioctl =	snd_hwdep_ioctl,
 	.compat_ioctl =	snd_hwdep_ioctl_compat,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	snd_hwdep_ioctl_ptr128,
+#endif
 	.mmap =		snd_hwdep_mmap,
 };
 
@@ -531,6 +536,9 @@ static int __init alsa_hwdep_init(void)
 	snd_hwdep_proc_init();
 	snd_ctl_register_ioctl(snd_hwdep_control_ioctl);
 	snd_ctl_register_ioctl_compat(snd_hwdep_control_ioctl);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	snd_ctl_register_ioctl_ptr128(snd_hwdep_control_ioctl);
+#endif
 	return 0;
 }
 
@@ -538,6 +546,9 @@ static void __exit alsa_hwdep_exit(void)
 {
 	snd_ctl_unregister_ioctl(snd_hwdep_control_ioctl);
 	snd_ctl_unregister_ioctl_compat(snd_hwdep_control_ioctl);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	snd_ctl_unregister_ioctl_ptr128(snd_hwdep_control_ioctl);
+#endif
 	snd_hwdep_proc_done();
 }
 

@@ -285,6 +285,11 @@ PHONY += install
 install:
 	$(call cmd,install)
 
+# MCST
+PHONY += build-install
+build-install:
+	$(CONFIG_SHELL) scripts/gen-osl-build -l $(srctree) -m $(MODLIB)
+
 PHONY += vdso_install
 vdso_install:
 	$(Q)$(MAKE) $(build)=arch/x86/entry/vdso $@

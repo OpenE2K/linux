@@ -447,6 +447,9 @@ static const struct file_operations wdt_fops = {
 	.write		= wdt_write,
 	.unlocked_ioctl	= wdt_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = wdt_ioctl,
+#endif
 	.open		= wdt_open,
 	.release	= wdt_release,
 };

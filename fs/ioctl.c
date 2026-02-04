@@ -30,6 +30,7 @@
 /* So that the fiemap access checks can't overflow on 32 bit machines. */
 #define FIEMAP_MAX_EXTENTS	(UINT_MAX / sizeof(struct fiemap_extent))
 
+
 /**
  * vfs_ioctl - call filesystem specific ioctl methods
  * @filp:	open file to invoke ioctl method on
@@ -45,6 +46,16 @@ long vfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int error = -ENOTTY;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		if (!filp->f_op->ptr128_ioctl)
+			return -ENOTTY;
+		error = filp->f_op->ptr128_ioctl(filp, cmd, arg);
+		if (error == -ENOIOCTLCMD)
+			error = -ENOTTY;
+		return error;
+	}
+#endif
 	if (!filp->f_op->unlocked_ioctl)
 		goto out;
 
@@ -975,4 +986,63 @@ COMPAT_SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd,
 
 	return error;
 }
-#endif
+#endif /* CONFIG_COMPAT */
+
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+
+#include <asm/protected_syscalls.h>
+
+#if (DYNAMIC_DEBUG_SYSCALLP_ENABLED)
+
+#undef DbgSCP
+#define DbgSCP(fmt, ...) \
+do { \
+	if (current->mm->context.pm_sc_debug_mode \
+		& PM_SC_DBG_MODE_COMPLEX_WRAPPERS) \
+		pr_info("%s [#%d]: " fmt, current->comm, \
+				current->pid, ##__VA_ARGS__); \
+} while (0)
+#endif /* DYNAMIC_DEBUG_SYSCALLP_ENABLED */
+
+/**
+ * ptr128_ioctl - generic implementation of .ptr128_ioctl file operation
+ *
+ * On most architectures, the ioctl() just passes all arguments to
+ * the corresponding ->ioctl handler.
+ *
+ * If any ioctl command handled by fops->unlocked_ioctl passes a plain
+ * integer instead of a pointer, or any of the passed data types
+ * is incompatible between 128-bit and 64-bit architectures, a proper
+ * handler is required instead of ptr128_ioctl.
+ */
+
+long ptr128_ioctl(struct file *file, unsigned long cmd, unsigned long arg)
+{
+	DbgSCP("%s(file=0x%px, cmd=0x%lx, arg=0x%lx)\n",
+	       __func__, file, cmd, arg);
+	if (!file->f_op->unlocked_ioctl)
+		return -ENOIOCTLCMD;
+
+	return file->f_op->unlocked_ioctl(file, cmd, arg);
+}
+EXPORT_SYMBOL(ptr128_ioctl);
+
+
+long sys_protected_ioctl(unsigned long fd, unsigned long cmd, unsigned long arg,
+			 long arg4, long arg5, long arg6, struct pt_regs *regs)
+{
+	long res;
+
+	if (prot_arg_is_int(regs, 2)) {
+		return sys_ioctl(fd, cmd, arg);
+	} else if (!prot_arg_is_ap(regs, 2)) {
+		return -EINVAL;
+	}
+	set_ap_u_border(regs->qargs[2]);
+	res = sys_ioctl(fd, cmd, (unsigned long)AP_PTR(regs->qargs[2]));
+	set_u_border(MAX_U_BORDER);
+	return res;
+}
+
+#endif /* CONFIG_PROTECTED_MODE */
+

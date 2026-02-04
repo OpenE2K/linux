@@ -1124,6 +1124,27 @@ static int hci_sock_compat_ioctl(struct socket *sock, unsigned int cmd,
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+static int hci_sock_ptr128_ioctl(struct socket *sock, unsigned int cmd,
+				 unsigned long arg)
+{
+	switch (cmd) {
+	case HCIDEVUP:
+	case HCIDEVDOWN:
+	case HCIDEVRESET:
+	case HCIDEVRESTAT:
+		return hci_sock_ioctl(sock, cmd, arg);
+	}
+	e2k_ap_t        ap;
+	int             tag;
+	if (get_user_tagged_16(ap.qword, tag, (void __user *)arg) || !IS_AP(ap, tag)) {
+		return -EFAULT;
+	}
+	set_ap_u_border(ap);
+	return hci_sock_ioctl(sock, cmd, AP_PTR(ap));
+}
+#endif
 static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,
 			 int addr_len)
 {
@@ -2109,6 +2130,9 @@ static const struct proto_ops hci_sock_ops = {
 	.ioctl		= hci_sock_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= hci_sock_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= hci_sock_ptr128_ioctl,
 #endif
 	.poll		= datagram_poll,
 	.listen		= sock_no_listen,

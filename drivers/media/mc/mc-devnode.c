@@ -133,6 +133,17 @@ static long media_compat_ioctl(struct file *filp, unsigned int cmd,
 
 #endif /* CONFIG_COMPAT */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static long media_ptr128_ioctl(struct file *filp, unsigned int cmd,
+			       unsigned long arg)
+{
+	struct media_devnode *devnode = media_devnode_data(filp);
+
+	return __media_ioctl(filp, cmd, arg, devnode->fops->ptr128_ioctl);
+}
+
+#endif /* CONFIG_COMPAT */
+
 /* Override for the open function */
 static int media_open(struct inode *inode, struct file *filp)
 {
@@ -198,6 +209,9 @@ static const struct file_operations media_devnode_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = media_compat_ioctl,
 #endif /* CONFIG_COMPAT */
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = media_ptr128_ioctl,
+#endif
 	.release = media_release,
 	.poll = media_poll,
 	.llseek = no_llseek,

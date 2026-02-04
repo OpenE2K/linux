@@ -110,6 +110,20 @@ struct compat_blk_user_trace_setup {
 
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+struct compat_blk_user_trace_setup_bc32 {
+	char name[BLKTRACE_BDEV_SIZE];
+	u16 act_mask;
+	u32 buf_size;
+	u32 buf_nr;
+	bc32_misaligned_u64  start_lba;
+	bc32_misaligned_u64  end_lba;
+	u32 pid;
+};
+
+#define BLKTRACESETUPBC32 _IOWR(0x12, 115, struct compat_blk_user_trace_setup_bc32)
+#endif
+
 void blk_fill_rwbs(char *rwbs, blk_opf_t opf);
 
 static inline sector_t blk_rq_trace_sector(struct request *rq)

@@ -839,6 +839,9 @@ static const struct file_operations stm_fops = {
 	.mmap		= stm_char_mmap,
 	.unlocked_ioctl	= stm_char_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = stm_char_ioctl,
+#endif
 	.llseek		= no_llseek,
 };
 

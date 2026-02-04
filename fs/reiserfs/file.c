@@ -241,6 +241,9 @@ const struct file_operations reiserfs_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = reiserfs_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = reiserfs_ioctl,
+#endif
 	.mmap = generic_file_mmap,
 	.open = reiserfs_file_open,
 	.release = reiserfs_file_release,

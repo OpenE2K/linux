@@ -5,6 +5,7 @@
 
 menuconfig HW_RANDOM
 	tristate "Hardware Random Number Generator Core support"
+	depends on !E2K && !E90S
 	default m
 	help
 	  Hardware Random Number Generator Core infrastructure.
@@ -126,7 +127,7 @@ config HW_RANDOM_GEODE
 
 config HW_RANDOM_N2RNG
 	tristate "Niagara2 Random Number Generator support"
-	depends on SPARC64
+	depends on SPARC64 && !E90S
 	default HW_RANDOM
 	help
 	  This driver provides kernel-side support for the Random Number

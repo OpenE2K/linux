@@ -254,7 +254,7 @@ int of_irq_parse_raw(const __be32 *addr, struct of_phandle_args *out_irq)
 		imap = of_get_property(ipar, "interrupt-map", &imaplen);
 		if (intc &&
 		    (!imap || of_device_compatible_match(ipar, of_irq_imap_abusers))) {
-			pr_debug(" -> got it !\n");
+ 			pr_debug(" -> got it !\n");
 			return 0;
 		}
 

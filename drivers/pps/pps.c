@@ -347,6 +347,9 @@ static const struct file_operations pps_cdev_fops = {
 	.fasync		= pps_cdev_fasync,
 	.compat_ioctl	= pps_cdev_compat_ioctl,
 	.unlocked_ioctl	= pps_cdev_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= pps_cdev_ioctl,
+#endif
 	.open		= pps_cdev_open,
 	.release	= pps_cdev_release,
 };

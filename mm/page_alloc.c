@@ -245,6 +245,11 @@ EXPORT_SYMBOL(_totalram_pages);
 unsigned long totalreserve_pages __read_mostly;
 unsigned long totalcma_pages __read_mostly;
 
+#if defined(CONFIG_MCST) && !defined(CONFIG_X86_64)
+unsigned long totalram_real_pages __read_mostly;
+EXPORT_SYMBOL(totalram_real_pages);
+#endif
+
 int percpu_pagelist_high_fraction;
 gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
 DEFINE_STATIC_KEY_MAYBE(CONFIG_INIT_ON_ALLOC_DEFAULT_ON, init_on_alloc);
@@ -1382,6 +1387,21 @@ static void kernel_init_pages(struct page *page, int numpages)
 	kasan_enable_current();
 }
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+int mem_san = 0;
+EXPORT_SYMBOL(mem_san);
+
+static int __init set_memory_sanitize(char *s)
+{
+	if (!strcmp(s, "1"))
+		mem_san = 1;
+	else
+		mem_san = 0;
+	return 1;
+}
+__setup("memory_sanitize=", set_memory_sanitize);
+#endif
+
 static __always_inline bool free_pages_prepare(struct page *page,
 			unsigned int order, bool check_free, fpi_t fpi_flags)
 {
@@ -1465,6 +1485,14 @@ static __always_inline bool free_pages_prepare(struct page *page,
 		debug_check_no_obj_freed(page_address(page),
 					   PAGE_SIZE << order);
 	}
+
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	if (mem_san) {
+		unsigned long index = 1UL << order;
+		for (; index; --index)
+			sanitize_highpage(page + index - 1);
+	}
+#endif
 
 	kernel_poison_pages(page, 1 << order);
 
@@ -4361,6 +4389,13 @@ try_this_zone:
 static void warn_alloc_show_mem(gfp_t gfp_mask, nodemask_t *nodemask)
 {
 	unsigned int filter = SHOW_MEM_FILTER_NODES;
+#ifdef CONFIG_MCST
+	static atomic_t show = ATOMIC_INIT(0);
+
+	if (atomic_cmpxchg(&show, 0, 1)) {
+		return;
+	}
+#endif
 
 	/*
 	 * This documents exceptions given to allocations in certain
@@ -4375,6 +4410,10 @@ static void warn_alloc_show_mem(gfp_t gfp_mask, nodemask_t *nodemask)
 		filter &= ~SHOW_MEM_FILTER_NODES;
 
 	__show_mem(filter, nodemask, gfp_zone(gfp_mask));
+
+#ifdef CONFIG_MCST
+	atomic_set(&show, 0);
+#endif
 }
 
 void warn_alloc(gfp_t gfp_mask, nodemask_t *nodemask, const char *fmt, ...)
@@ -5903,7 +5942,11 @@ EXPORT_SYMBOL(alloc_pages_exact);
  *
  * Return: pointer to the allocated area or %NULL in case of error.
  */
+#ifdef CONFIG_E2K
+void * alloc_pages_exact_nid(int nid, size_t size, gfp_t gfp_mask)
+#else
 void * __meminit alloc_pages_exact_nid(int nid, size_t size, gfp_t gfp_mask)
+#endif
 {
 	unsigned int order = get_order(size);
 	struct page *p;

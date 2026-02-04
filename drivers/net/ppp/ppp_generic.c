@@ -1053,6 +1053,108 @@ static long ppp_compat_ioctl(struct file *file, unsigned int cmd, unsigned long 
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+
+#ifdef CONFIG_PPP_FILTER
+struct sock_fprog128 {    /* Required for SO_ATTACH_FILTER. */
+	unsigned short          len;    /* Number of filter blocks */
+	e2k_ap_t		filter;
+};
+#define PPPIOCSPASS128		_IOW('t', 71, struct sock_fprog128)
+#define PPPIOCSACTIVE128	_IOW('t', 70, struct sock_fprog128)
+
+static struct bpf_prog *ptr128_ppp_get_filter(struct sock_fprog128 __user *p)
+{
+	struct sock_fprog uprog;
+	e2k_ap_t ap;
+	int tag;
+	if (get_user(uprog.len, &p->len))
+		return ERR_PTR(-EFAULT);
+	if (get_user_tagged_16(ap.qword, tag, &p->filter) || !IS_AP(ap, tag))
+		return ERR_PTR(-EFAULT);
+	uprog.filter = (void __user *)AP_PTR(ap);
+	set_ap_u_border(ap);
+	return get_filter(&uprog);
+}
+#endif /* CONFIG_PPP_FILTER */
+
+struct ppp_option_data128 {
+	e2k_ap_t		ptr;
+	u32			length;
+	u32			transmit;
+};
+#define PPPIOCSCOMPRESS128	_IOW('t', 77, struct ppp_option_data128)
+
+static long ppp_ptr128_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct ppp_file *pf;
+	int err = -ENOIOCTLCMD;
+	void __user *argp = (void __user *)arg;
+
+	mutex_lock(&ppp_mutex);
+
+	pf = file->private_data;
+	if (pf && pf->kind == INTERFACE) {
+		struct ppp *ppp = PF_TO_PPP(pf);
+		switch (cmd) {
+#ifdef CONFIG_PPP_FILTER
+		case PPPIOCSPASS128:
+		case PPPIOCSACTIVE128:
+		{
+			struct bpf_prog *filter = ptr128_ppp_get_filter(argp);
+			struct bpf_prog **which;
+
+			if (IS_ERR(filter)) {
+				err = PTR_ERR(filter);
+				break;
+			}
+			if (cmd == PPPIOCSPASS128)
+				which = &ppp->pass_filter;
+			else
+				which = &ppp->active_filter;
+			ppp_lock(ppp);
+			if (*which)
+				bpf_prog_destroy(*which);
+			*which = filter;
+			ppp_unlock(ppp);
+			err = 0;
+			break;
+		}
+#endif /* CONFIG_PPP_FILTER */
+		case PPPIOCSCOMPRESS128:
+		{
+			struct ppp_option_data128 data128;
+			struct ppp_option_data128 __user *data128p = argp;
+			e2k_ap_t ap;
+			int tag;
+			if (copy_from_user(&data128, data128p, sizeof(data128))) {
+				err = -EFAULT;
+				break;
+			}
+			if (get_user_tagged_16(ap.qword, tag, &data128p->ptr) || !IS_AP(ap, tag)) {
+				err = -EFAULT;
+				break;
+			}
+			struct ppp_option_data data = {	.ptr = (void __user *)AP_PTR,
+							.length = data128.length,
+							.transmit = data128.transmit
+						      };
+			set_ap_u_border(ap);
+			err = ppp_set_compress(ppp, &data);
+			break;
+		}
+		} /* switch */
+	}
+	mutex_unlock(&ppp_mutex);
+
+	/* all other commands have compatible arguments */
+	if (err == -ENOIOCTLCMD)
+		err = ppp_ioctl(file, cmd, arg);
+
+	return err;
+}
+#endif
 static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
 			struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -1123,6 +1225,9 @@ static const struct file_operations ppp_device_fops = {
 	.unlocked_ioctl	= ppp_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ppp_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= ppp_ptr128_ioctl,
 #endif
 	.open		= ppp_open,
 	.release	= ppp_release,

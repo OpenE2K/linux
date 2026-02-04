@@ -2595,6 +2595,9 @@ const struct file_operations ceph_file_fops = {
 	.splice_write = iter_file_splice_write,
 	.unlocked_ioctl = ceph_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = ceph_ioctl,
+#endif
 	.fallocate	= ceph_fallocate,
 	.copy_file_range = ceph_copy_file_range,
 };

@@ -900,6 +900,9 @@ static const struct file_operations ipmi_wdog_fops = {
 	.write   = ipmi_write,
 	.unlocked_ioctl = ipmi_unlocked_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = ipmi_unlocked_ioctl,
+#endif
 	.open    = ipmi_open,
 	.release = ipmi_close,
 	.fasync  = ipmi_fasync,

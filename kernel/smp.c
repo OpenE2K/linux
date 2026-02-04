@@ -414,7 +414,11 @@ static void __csd_lock_wait(struct __call_single_data *csd)
 	smp_acquire__after_ctrl_dep();
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_csd_lock_wait(struct __call_single_data *csd)
+#else
 static __always_inline void csd_lock_wait(struct __call_single_data *csd)
+#endif
 {
 	if (static_branch_unlikely(&csdlock_debug_enabled)) {
 		__csd_lock_wait(csd);
@@ -448,13 +452,21 @@ static void csd_lock_record(struct __call_single_data *csd)
 {
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_csd_lock_wait(struct __call_single_data *csd)
+#else
 static __always_inline void csd_lock_wait(struct __call_single_data *csd)
+#endif
 {
 	smp_cond_load_acquire(&csd->node.u_flags, !(VAL & CSD_FLAG_LOCK));
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_csd_lock(struct __call_single_data *csd)
+#else
 static __always_inline void csd_lock(struct __call_single_data *csd)
+#endif
 {
 	csd_lock_wait(csd);
 	csd->node.u_flags |= CSD_FLAG_LOCK;
@@ -467,7 +479,19 @@ static __always_inline void csd_lock(struct __call_single_data *csd)
 	smp_wmb();
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_arch_csd_lock_async(struct __call_single_data *csd)
+{
+	csd->node.u_flags = CSD_FLAG_LOCK;
+	smp_wmb();
+}
+#endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+void native_csd_unlock(struct __call_single_data *csd)
+#else
 static __always_inline void csd_unlock(struct __call_single_data *csd)
+#endif
 {
 	WARN_ON(!(csd->node.u_flags & CSD_FLAG_LOCK));
 
@@ -826,8 +850,12 @@ int smp_call_function_single_async(int cpu, struct __call_single_data *csd)
 		goto out;
 	}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+	arch_csd_lock_async(csd);
+#else
 	csd->node.u_flags = CSD_FLAG_LOCK;
 	smp_wmb();
+#endif
 
 	err = generic_exec_single(cpu, csd);
 
@@ -995,6 +1023,12 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 			call_single_data_t *csd;
 
 			csd = &per_cpu_ptr(cfd->pcpu, cpu)->csd;
+
+#if	defined(CONFIG_E2K) && defined(CONFIG_VIRTUALIZATION)
+			if (cond_func && !cond_func(cpu, info))
+				continue;
+#endif	/* CONFIG_E2K && CONFIG_VIRTUALIZATION */
+
 			csd_lock_wait(csd);
 		}
 	}

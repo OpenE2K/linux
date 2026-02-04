@@ -810,6 +810,9 @@ static const struct file_operations wdm_fops = {
 	.poll =		wdm_poll,
 	.unlocked_ioctl = wdm_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = wdm_ioctl,
+#endif
 	.llseek =	noop_llseek,
 };
 

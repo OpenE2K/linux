@@ -687,6 +687,41 @@ static int compat_blk_trace_setup(struct request_queue *q, char *name,
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+static int compat_blk_trace_setup_bc32(struct request_queue *q, char *name,
+				  dev_t dev, struct block_device *bdev,
+				  char __user *arg)
+{
+	struct blk_user_trace_setup buts;
+	struct compat_blk_user_trace_setup_bc32 cbuts;
+	int ret;
+
+	if (copy_from_user(&cbuts, arg, sizeof(cbuts)))
+		return -EFAULT;
+
+	buts = (struct blk_user_trace_setup) {
+		.act_mask = cbuts.act_mask,
+		.buf_size = cbuts.buf_size,
+		.buf_nr = cbuts.buf_nr,
+		.start_lba = cbuts.start_lba,
+		.end_lba = cbuts.end_lba,
+		.pid = cbuts.pid,
+	};
+
+	ret = do_blk_trace_setup(q, name, dev, bdev, &buts);
+	if (ret)
+		return ret;
+
+	if (copy_to_user(arg, &buts.name, ARRAY_SIZE(buts.name))) {
+		__blk_trace_remove(q);
+		return -EFAULT;
+	}
+
+	return 0;
+}
+#endif
+
+
 static int __blk_trace_startstop(struct request_queue *q, int start)
 {
 	struct blk_trace *bt;
@@ -748,6 +783,12 @@ int blk_trace_ioctl(struct block_device *bdev, unsigned cmd, char __user *arg)
 	case BLKTRACESETUP32:
 		snprintf(b, sizeof(b), "%pg", bdev);
 		ret = compat_blk_trace_setup(q, b, bdev->bd_dev, bdev, arg);
+		break;
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	case BLKTRACESETUPBC32:
+		snprintf(b, sizeof(b), "%pg", bdev);
+		ret = compat_blk_trace_setup_bc32(q, b, bdev->bd_dev, bdev, arg);
 		break;
 #endif
 	case BLKTRACESTART:

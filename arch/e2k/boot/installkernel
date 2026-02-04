@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
+#!/bin/bash
+
+KERNELRELEASE="$1"
+BOOTIMAGE_SRC="$2"
+SYSTEMMAP_SRC="$3"
+INSTALL_PATH="$4"
+[ x"$INSTALL_PATH" == x ] && INSTALL_PATH=/boot
+
+BOOTIMAGE=image-${KERNELRELEASE}
+INITRD=initrd-${KERNELRELEASE}.img
+SYSTEMMAP=System.map-${KERNELRELEASE}
+OSLUP="linux-${KERNELRELEASE}"
+
+BOOTCONF=/boot/boot.conf
+FMODULES=/etc/modules-${KERNELRELEASE}
+FINITRD=/boot/${INITRD}
+FSTAB=/etc/fstab
+
+dstr="mcstd"
+[ -e /etc/debian_version ] && dstr="elbrusd"
+################################################################################
+# install imagaes
+install_images()
+{
+	[ x"$INSTALL_PATH" != x'/boot' ] && mkdir -p ${INSTALL_PATH}
+	cp ${BOOTIMAGE_SRC} ${INSTALL_PATH}/${BOOTIMAGE} || exit 1
+	cp ${SYSTEMMAP_SRC} ${INSTALL_PATH}/${SYSTEMMAP} || exit 1
+	cp `dirname ${SYSTEMMAP_SRC}`/.config ${INSTALL_PATH}/config-${KERNELRELEASE} || exit 1
+}
+################################################################################
+# create /boot/initrd-<kernelrelease>.img
+do_ramfs()
+{
+	[ x"$DONT_MAKE_INITRAMFS" == xYES ] && return
+	if [ x"$dstr" == xelbrusd ]; then
+		/usr/sbin/mkinitramfs -k ${KERNELRELEASE} -o ${FINITRD} || exit 1
+	else
+		/usr/sbin/mkinitramfs -k ${KERNELRELEASE} || exit 1
+	fi
+}
+################################################################################
+# create /etc/modules-<kernelrelease>
+etc_modules()
+{
+	[ ! -e /lib/modules/${KERNELRELEASE} ] && return
+	[ -f "$FMODULES" ] && return
+	mkdir -p `dirname "$FMODULES"`
+
+	mver="$(uname -r)"
+	fmod0=`find '/etc' '/etc/sysconfig' -maxdepth 1 -type f -name "modules-${mver}" 2>/dev/null`
+	declare -A mod0=()
+
+	[[ -z "$fmod0" ]] \
+	|| while read -r modline; do
+		read -r mod _ <<<"$modline"
+		[[ "$mod" != '#'* ]] && mod0["$mod"]="$modline"
+	done 0<"$fmod0"
+
+	dmod="/lib/modules/$KERNELRELEASE/kernel"
+	for mod in `find "$dmod" -name '*\.ko' -printf '%f\n' | LC_ALL=C sort -V | xargs basename -a -s '.ko'`; do
+		[[ -n "${mod0[$mod]+Y}" ]] && echo "${mod0[$mod]}" \
+		|| echo "# $mod"
+	done 1>"$FMODULES"
+}
+################################################################################
+# update /boot/boot.conf
+backup_bootconf()
+{
+	d=`date +%g%m%d%H%M`
+	cp $BOOTCONF ${BOOTCONF}.$d
+}
+add_label()
+{	
+	ROOTDEV=`cat $FSTAB | grep -E '[[:space:]]/[[:space:]]' | grep -v "^[[:space:]]*#" | awk '{print $1}'`
+	BOOTDEV=`cat $FSTAB | grep -E '[[:space:]]/boot[[:space:]]' | grep -v "^[[:space:]]*#" | awk '{print $1}'`
+	if [ x"$BOOTDEV" == x ]; then
+		BOOTDEV=$ROOTDEV
+		BOOTIMAGE_PATH=/boot/${BOOTIMAGE}
+		INITRD_PATH=/boot/${INITRD}
+		SYSTEMMAP_PATH=/boot/$SYSTEMMAP
+		[ ! -e /$BOOTCONF ] && ln -s -r $BOOTCONF /
+	else
+		BOOTIMAGE_PATH=/${BOOTIMAGE}
+		INITRD_PATH=/${INITRD}
+		SYSTEMMAP_PATH=/$SYSTEMMAP
+	fi
+	if [ -n  "`echo ${BOOTDEV} | grep 'UUID'`" ] ; then
+		BOOTUUID=`echo $BOOTDEV | sed 's/UUID=//g'`
+		BOOTDEV=`blkid -U $BOOTUUID`
+	fi
+	PARTNUM=`echo $BOOTDEV | sed -e 's/.*[a-zA-Z]//'`
+	BOOTPART=`expr $PARTNUM - 1`
+	CURRENT_CMDLINE=`cat /proc/cmdline | sed -e 's/root=[^[:space:]]*//g'`
+	CMDLINE="${CURRENT_CMDLINE} root=$ROOTDEV"
+
+if [ x"$DONT_MAKE_INITRAMFS" == xYES ]; then
+cat >> $BOOTCONF << EOF
+label=$OSLUP
+	partition=$BOOTPART
+	image=$BOOTIMAGE_PATH
+	cmdline=$CMDLINE
+EOF
+else
+cat >> $BOOTCONF << EOF
+label=$OSLUP
+	partition=$BOOTPART
+	image=$BOOTIMAGE_PATH
+	initrd=$INITRD_PATH
+	cmdline=$CMDLINE
+EOF
+fi
+}
+delete_label()
+{
+	n1=`cat $BOOTCONF | sed -e 's/[\t ]*//g' | sed -e 's/#.*//g' | grep -n "label=${OSLUP}" | sed 's/:.*//g'`
+	n2=`cat $BOOTCONF | sed -e 's/[\t ]*//g' | sed -e 's/#.*//g' | grep -n "label=" | sed -n "/label=${OSLUP}/{n;p;}" | sed 's/:.*//g'`
+	if [ x"$n2" == x ]; then
+		n2=`cat $BOOTCONF | wc -l`
+	else
+		(( n2-- ))
+	fi
+	sed -i "${n1},${n2}d" $BOOTCONF
+}
+default_label()
+{
+	n=`grep -n "^default=" $BOOTCONF | tail -n 1 | cut -d ":" -f 1`
+	(( n++ ))
+	sed -i "$n i default=${OSLUP}" $BOOTCONF
+}
+oslup_label()
+{
+	cat $BOOTCONF | sed -e 's/[\t ]*//g' | grep -v "^#" | sed -e 's/#.*//g' | grep "^label=${OSLUP}$" >/dev/null 2>&1
+	[ $? -eq 0 ] && delete_label
+	add_label
+	default_label
+}
+update_bootconf()
+{
+	backup_bootconf
+	oslup_label
+}
+################################################################################
+install_images
+[ x"$INSTALL_PATH" != x'/boot' ] && exit 0 
+etc_modules
+do_ramfs
+update_bootconf

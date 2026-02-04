@@ -53,6 +53,13 @@
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
+#ifdef CONFIG_MCST_4RT
+#include <uapi/linux/mcst_rt.h>
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/mmap.h>
 
@@ -1269,6 +1276,13 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	validate_mm(mm);
 	*populate = 0;
+#ifdef CONFIG_MCST_4RT
+	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
+		/* That is RT task, which done mlockall().
+		 * New mmap() is impossible */
+		return -EFAULT;
+	}
+#endif
 
 	if (!len)
 		return -EINVAL;
@@ -2069,6 +2083,9 @@ int expand_downwards(struct vm_area_struct *vma, unsigned long address)
 	MA_STATE(mas, &mm->mm_mt, vma->vm_start, vma->vm_start);
 	struct vm_area_struct *prev;
 	int error = 0;
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	unsigned long start = vma->vm_start;
+#endif
 
 	if (!(vma->vm_flags & VM_GROWSDOWN))
 		return -EFAULT;
@@ -2142,6 +2159,10 @@ int expand_downwards(struct vm_area_struct *vma, unsigned long address)
 	anon_vma_unlock_write(vma->anon_vma);
 	khugepaged_enter_vma(vma, vma->vm_flags);
 	mas_destroy(&mas);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (!error && address < start && (vma->vm_flags & VM_PAGESVALID))
+		error = make_vma_pages_valid(vma, address, start);
+#endif
 	return error;
 }
 
@@ -2647,6 +2668,12 @@ int do_mas_munmap(struct ma_state *mas, struct mm_struct *mm,
 	if (!vma)
 		return 0;
 
+#ifdef CONFIG_E2K
+	if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
+			__is_privileged_range(mm, start, start + len))
+		return -EPERM;
+#endif
+
 	return do_mas_align_munmap(mas, vma, mm, start, end, uf, downgrade);
 }
 
@@ -2766,7 +2793,7 @@ cannot_expand:
 		error = -ENOMEM;
 		goto free_vma;
 	}
-
+ 
 	if (file) {
 		vma->vm_file = get_file(file);
 		error = mmap_file(file, vma);
@@ -2774,7 +2801,13 @@ cannot_expand:
 			goto unmap_and_free_file_vma;
 
 		/* Drivers cannot alter the address of the VMA. */
-		WARN_ON_ONCE(addr != vma->vm_start);
+		WARN_ON_ONCE(addr != vma->vm_start); 
+
+#ifdef CONFIG_E2K
+		if (cpu_has(CPU_FEAT_ISET_V7))
+			vma->vm_page_prot =
+				__pgprot(pgprot_val(vma->vm_page_prot) | _PAGE_NWAT_V7);
+#endif
 
 		/*
 		 * Drivers should not permit writability when previously it was
@@ -2863,6 +2896,17 @@ expanded:
 
 	if (file)
 		uprobe_mmap(vma);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (vm_flags & VM_PAGESVALID) {
+		int ret = make_vma_pages_valid(vma, addr, addr + len);
+
+		if (ret) {
+			do_munmap(mm, addr, len, uf);
+			return ret;
+		}
+	}
+#endif
 
 	/*
 	 * New (or expanded) vma always get soft dirty status.
@@ -3158,6 +3202,14 @@ out:
 		mm->locked_vm += (len >> PAGE_SHIFT);
 	vma->vm_flags |= VM_SOFTDIRTY;
 	validate_mm(mm);
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (flags & VM_PAGESVALID) {
+		int ret;
+		ret = make_vma_pages_valid(vma, addr, addr + len);
+		if (ret)
+			goto mas_store_fail;
+	}
+#endif
 	return 0;
 
 mas_store_fail:
@@ -3571,6 +3623,16 @@ static struct vm_area_struct *__install_special_mapping(
 	perf_event_mmap(vma);
 
 	validate_mm_mt(mm);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
+	if (vm_flags & VM_PAGESVALID) {
+		int ret = make_vma_pages_valid(vma, addr, addr + len);
+
+		if (ret)
+			goto out;
+	}
+#endif
+
 	return vma;
 
 out:

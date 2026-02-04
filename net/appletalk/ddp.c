@@ -1902,6 +1902,68 @@ static int atalk_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned lo
 }
 #endif /* CONFIG_COMPAT */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+static int atalk_ptr128_routing_ioctl(struct sock *sk, unsigned int cmd,
+		struct ptr128_rtentry __user *ur)
+{
+	struct rtentry	rt;
+	e2k_ap_t	ap;
+	int tag		tag;
+	if (copy_from_user(&rt.rt_dst, &ur->rt_dst,
+			3 * sizeof(struct sockaddr)) ||
+	    get_user(rt.rt_flags, &ur->rt_flags) ||
+	    get_user(rt.rt_metric, &ur->rt_metric) ||
+	    get_user(rt.rt_mtu, &ur->rt_mtu) ||
+	    get_user(rt.rt_window, &ur->rt_window) ||
+	    get_user(rt.rt_irtt, &ur->rt_irtt))
+		return -EFAULT;
+	if (get_user_tagged_16(ap.qword, tag, &ur->rt_dev)) {
+		return -EFAULT;
+	}
+	if (IS_AP(ap, tag)) {
+		rt.rt_dev = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+	} else {
+		rt.rt_dev = NULL;
+	}
+	switch (cmd) {
+	case SIOCDELRT:
+		if (rt.rt_dst.sa_family != AF_APPLETALK)
+			return -EINVAL;
+		return atrtr_delete(&((struct sockaddr_at *)
+				      &rt.rt_dst)->sat_addr);
+
+	case SIOCADDRT:
+		rt.rt_dev = compat_ptr(rtdev);
+		return atrtr_ioctl_addrt(&rt);
+	default:
+		return -EINVAL;
+	}
+}
+
+static int atalk_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	void __user *argp = (void __user *)arg;
+	struct sock *sk = sock->sk;
+
+	switch (cmd) {
+	case SIOCADDRT:
+	case SIOCDELRT:
+		return atalk_compat_routing_ioctl(sk, cmd, argp);
+	/*
+	 * SIOCATALKDIFADDR is a SIOCPROTOPRIVATE ioctl number, so we
+	 * cannot handle it in common code. The data we access if ifreq
+	 * here is compatible, so we can simply call the native
+	 * handler.
+	 */
+	case SIOCATALKDIFADDR:
+		return atalk_ioctl(sock, cmd, (unsigned long)argp);
+	default:
+		return -ENOIOCTLCMD;
+	}
+}
+#endif /* CONFIG_PROTECTED_MODE */
 
 static const struct net_proto_family atalk_family_ops = {
 	.family		= PF_APPLETALK,
@@ -1923,6 +1985,9 @@ static const struct proto_ops atalk_dgram_ops = {
 	.gettstamp	= sock_gettstamp,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= atalk_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= atalk_ptr128_ioctl,
 #endif
 	.listen		= sock_no_listen,
 	.shutdown	= sock_no_shutdown,

@@ -34,6 +34,7 @@ config MIPI_I3C_HCI
 	tristate "MIPI I3C Host Controller Interface driver (EXPERIMENTAL)"
 	depends on I3C
 	depends on HAS_IOMEM
+	depends on !E2K || E2K_HAS_I3C
 	help
 	  Support for hardware following the MIPI Aliance's I3C Host Controller
 	  Interface specification.

@@ -1056,6 +1056,54 @@ static int inet_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned lon
 }
 #endif /* CONFIG_COMPAT */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+static int inet_ptr128_routing_ioctl(struct sock *sk, unsigned int cmd,
+		struct ptr128_rtentry __user *ur)
+{
+	struct rtentry	rt;
+	e2k_ap_t	ap;
+	int		tag;
+	if (copy_from_user(&rt.rt_dst, &ur->rt_dst,
+			3 * sizeof(struct sockaddr)) ||
+	    get_user(rt.rt_flags, &ur->rt_flags) ||
+	    get_user(rt.rt_metric, &ur->rt_metric) ||
+	    get_user(rt.rt_mtu, &ur->rt_mtu) ||
+	    get_user(rt.rt_window, &ur->rt_window) ||
+	    get_user(rt.rt_irtt, &ur->rt_irtt))
+		return -EFAULT;
+	if (get_user_tagged_16(ap.qword, tag, &ur->rt_dev)) {
+		return -EFAULT;
+	}
+	if (IS_AP(ap, tag)) {
+		rt.rt_dev = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+	} else {
+		rt.rt_dev = NULL;
+	}
+	return ip_rt_ioctl(sock_net(sk), cmd, &rt);
+}
+
+static int inet_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	void __user *argp = (void __user *)arg;
+	struct sock *sk = sock->sk;
+	int err;
+
+	switch (cmd) {
+	case SIOCADDRT:
+	case SIOCDELRT:
+		return inet_ptr128_routing_ioctl(sk, cmd, argp);
+	default:
+		if (sk->sk_prot->ptr128_ioctl) {
+			err = sk->sk_prot->ptr128_ioctl(sk, cmd, arg);
+			if (err != -ENOIOCTLCMD)
+				return err;
+		}
+		return inet_ioctl(sock, cmd, arg);
+	}
+}
+#endif /* CONFIG_PROTECTED_MODE */
 const struct proto_ops inet_stream_ops = {
 	.family		   = PF_INET,
 	.owner		   = THIS_MODULE,
@@ -1088,6 +1136,9 @@ const struct proto_ops inet_stream_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = inet_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = inet_ptr128_ioctl,
+#endif
 	.set_rcvlowat	   = tcp_set_rcvlowat,
 };
 EXPORT_SYMBOL(inet_stream_ops);
@@ -1117,6 +1168,9 @@ const struct proto_ops inet_dgram_ops = {
 	.set_peek_off	   = sk_set_peek_off,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = inet_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = inet_ptr128_ioctl,
 #endif
 };
 EXPORT_SYMBOL(inet_dgram_ops);
@@ -1148,6 +1202,9 @@ static const struct proto_ops inet_sockraw_ops = {
 	.sendpage	   = inet_sendpage,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = inet_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = inet_ptr128_ioctl,
 #endif
 };
 

@@ -1279,7 +1279,11 @@ int crash_prepare_elf64_headers(struct crash_mem *mem, int need_kernel_map,
 	/* Prepare one phdr of type PT_NOTE for each present CPU */
 	for_each_present_cpu(cpu) {
 		phdr->p_type = PT_NOTE;
+#ifdef CONFIG_E2K
+		notes_addr = __pa(crash_notes[cpu]);
+#else
 		notes_addr = per_cpu_ptr_to_phys(per_cpu_ptr(crash_notes, cpu));
+#endif /* CONFIG_E2K */
 		phdr->p_offset = phdr->p_paddr = notes_addr;
 		phdr->p_filesz = phdr->p_memsz = sizeof(note_buf_t);
 		(ehdr->e_phnum)++;

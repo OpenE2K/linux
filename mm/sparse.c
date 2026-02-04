@@ -17,6 +17,7 @@
 
 #include "internal.h"
 #include <asm/dma.h>
+#include <linux/crash_dump.h>
 
 /*
  * Permanent SPARSEMEM data:
@@ -206,6 +207,7 @@ void __init subsection_map_init(unsigned long pfn, unsigned long nr_pages)
 		pfns = min(nr_pages, PAGES_PER_SECTION
 				- (pfn & ~PAGE_SECTION_MASK));
 		ms = __nr_to_section(nr);
+
 		subsection_mask_set(ms->usage->subsection_map, pfn, pfns);
 
 		pr_debug("%s: sec: %lu pfns: %lu set(%d, %d)\n", __func__, nr,
@@ -524,8 +526,12 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 		if (pnum >= pnum_end)
 			break;
 
+#ifdef CONFIG_E2K
 		map = __populate_section_memmap(pfn, PAGES_PER_SECTION,
-				nid, NULL, NULL);
+				is_kdump_kernel() ? NUMA_NO_NODE : nid, NULL, NULL);
+#else
+		map = __populate_section_memmap(pfn, PAGES_PER_SECTION, nid, NULL, NULL);
+#endif
 		if (!map) {
 			pr_err("%s: node[%d] memory map backing failed. Some memory will not be available.",
 			       __func__, nid);

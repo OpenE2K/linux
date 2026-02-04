@@ -169,6 +169,38 @@ static int bnep_sock_compat_ioctl(struct socket *sock, unsigned int cmd, unsigne
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int bnep_sock_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	void __user *argp = compat_ptr(arg);
+	if (cmd == BNEPGETCONNLIST) {
+		struct bnep_connlist_req cl;
+		struct bnep_ptr128_connlist_req *p = (struct bnep_ptr128_connlist_req *)argp;
+		e2k_ap_t ap;
+		int tag;
+		int err;
+
+		if (get_user(cl.cnum, &p->cnum))
+			return -EFAULT;
+		if (cl.cnum <= 0)
+			return -EINVAL;
+		if (get_user_tagged_16(ap.qword, tag, &p->ci) || !IS_AP(ap, tag)) {
+			return -EFAULT;
+		}
+		cl.ci = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+		err = bnep_get_connlist(&cl);
+
+		set_u_border(MAX_U_BORDER);
+		if (!err && put_user(cl.cnum, &p->cnum))
+			err = -EFAULT;
+
+		return err;
+	}
+
+	return do_bnep_sock_ioctl(sock, cmd, argp);
+}
+#endif
 static const struct proto_ops bnep_sock_ops = {
 	.family		= PF_BLUETOOTH,
 	.owner		= THIS_MODULE,
@@ -176,6 +208,9 @@ static const struct proto_ops bnep_sock_ops = {
 	.ioctl		= bnep_sock_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= bnep_sock_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= bnep_sock_ptr128_ioctl,
 #endif
 	.bind		= sock_no_bind,
 	.getname	= sock_no_getname,

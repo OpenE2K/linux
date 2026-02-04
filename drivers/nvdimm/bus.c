@@ -1291,6 +1291,9 @@ static const struct file_operations nvdimm_bus_fops = {
 	.open = nd_open,
 	.unlocked_ioctl = bus_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = bus_ioctl,
+#endif
 	.llseek = noop_llseek,
 };
 
@@ -1299,6 +1302,9 @@ static const struct file_operations nvdimm_fops = {
 	.open = nd_open,
 	.unlocked_ioctl = dimm_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= dimm_ioctl,
+#endif
 	.llseek = noop_llseek,
 };
 

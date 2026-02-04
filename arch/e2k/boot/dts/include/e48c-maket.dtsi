@@ -1,0 +1,19 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#define NODES 1
+#define CELLS 2
+#define NODE 0
+
+/ {
+	#address-cells = <CELLS>;
+	#size-cells = <CELLS>;
+
+#include <e2k/e2k-v7.dtsi>
+#include <e2k/e2k-v7-uncore.dtsi>
+#include <e2k/eioh2-maket.dtsi>
+#undef NODE
+
+};

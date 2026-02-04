@@ -723,6 +723,9 @@ const struct proto_ops inet6_stream_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = inet6_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = inet6_ioctl,
+#endif
 	.set_rcvlowat	   = tcp_set_rcvlowat,
 };
 
@@ -750,6 +753,9 @@ const struct proto_ops inet6_dgram_ops = {
 	.set_peek_off	   = sk_set_peek_off,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = inet6_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = inet6_ioctl,
 #endif
 };
 

@@ -155,7 +155,11 @@ static ssize_t crash_notes_show(struct device *dev,
 	 * boot up and this data does not change there after. Hence this
 	 * operation should be safe. No locking required.
 	 */
+#ifdef CONFIG_E2K
+	addr = __pa((unsigned long)crash_notes[cpunum]);
+#else
 	addr = per_cpu_ptr_to_phys(per_cpu_ptr(crash_notes, cpunum));
+#endif
 
 	return sysfs_emit(buf, "%llx\n", addr);
 }

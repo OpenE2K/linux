@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+config IOMMU_HELPER
+        bool
+        default y
+	select GENERIC_ALLOCATOR
+
+menu "Elbrus Architecture Linux Kernel Configuration"
+
+config EPIC
+	def_bool E90S || (E2K && (!E2K_MACHINE || CPU_ISET_MIN >= 6 || KVM_HOST_MODE))
+	help
+	  Elbrus Programmable Interrupt Controller supports multiprocessor
+	  systems with up to 1024 cores and uses 10 bit vectors for
+	  masked interrupts.
+	  Controller implements hardware support for interrupt virtualization.
+	  Consists of CEPIC (per core), PREPIC (per processor) and IOEPIC.
+	  Say 'Y' to enable EPIC support in kernel
+
+config EIOHUB_PCI
+	def_bool  EPIC
+	help
+	  Support plugging EIOHub/IOEPIC PCI card into an older APIC-based system.
+	  Boot should not pass IOEPIC info and IRQs (no boot modification required)
+
+config IOHUB2_PCI
+	def_bool  EPIC
+	help
+	  Support plugging IOHub2/IOAPIC PCI card into a EPIC-based system.
+	  Boot should pass both IOEPIC and IOAPIC info and IRQs in MP-table.
+
+menu "Boot/prom console support"
+
+config L_EARLY_PRINTK
+	def_bool n
+
+config SERIAL_PRINTK
+	bool "dump_printk() support"
+	depends on E2K || E90S
+	default y
+	select L_EARLY_PRINTK
+	help
+	  dump_printk() outputs directly to serial port bypassing all
+	  buffers and locks. It is useful for hardware debugging.
+
+	  Only two devices are supported currently: ns16550 (== 8550)
+	  and l_zilog (== am85c30).
+
+	  On simulator dump_printk() also outputs to LMS console.
+
+	  Kernel parameter "boot_printk_all" is added. If set, dump_print()
+	  will be used everywhere instead of printk().
+
+config NVRAM_PANIC
+	bool "save panic output to nvram"
+	depends on E2K || E90S
+	default y
+	help
+	   panic output is saved into nvram. It can be extracted from
+	   nvram after reboot using /proc/sys/kernel/nvram_panic
+
+config SERIAL_AM85C30_CONSOLE
+	def_bool  SERIAL_PRINTK && (!E2K || SERIAL_AM85C30_BOOT_CONSOLE)
+	help
+	  Init-time serial console on Am85c30 zilog and compatible devices
+
+config EARLY_DUMP_CONSOLE
+	def_bool  L_EARLY_PRINTK
+	help
+	  Early serial console based on Am85c30/8250 or hvc
+
+endmenu # "Boot/prom console support"
+
+config MCST
+	bool "MCST additions"
+	default y
+
+config MCST_4RT
+	bool "MCST additions for RT without rt-patch"
+	default y
+	help
+	  Say Y here to enable support RT additions
+	  such as rts_mode, rts_mask, EL_RT_CPU, EL_SET_MLOCK_CONTROL.
+	  It helps to get hard rt properties for OS with
+	  as well as without Ingo Molner's rt-patch.
+
+config CLKR_CLOCKSOURCE
+	def_bool E90S
+
+config LT_CLOCKSOURCE
+	def_bool E2K || E90S
+
+config CLKR_SYNCHRONIZATION_WARNING
+	bool
+	depends on CLKR_CLOCKSOURCE && SMP
+	default n
+	help
+	  Set to Y to enable warnings about CLKR registers synchronization
+	  across several CPUs.
+
+config CLKR_OFFSET
+	bool
+	depends on CLKR_CLOCKSOURCE && SMP
+	default y
+	help
+	  Set to Y when different cpus' clock registers have the same
+	  frequency but different initial values. Then per-cpu offset
+	  will be added to each cpu's register value.
+
+
+config L_LOCAL_APIC
+	def_bool y
+	depends on E2K || E90S
+
+config L_IO_APIC
+	def_bool y
+	depends on E2K || E90S
+
+config L_PCI_QUIRKS
+	def_bool PCI_MSI
+	depends on L_IO_APIC
+	select PCI_QUIRKS
+
+config L_PMC
+	tristate "Elbrus-1C+ Power Management Controller"
+	depends on E2K
+	select CPU_FREQ if !MCST_RT
+	select PM_OPP
+	default m
+	help
+	  Power Management Controller for Elbrus-1C+
+
+config S2_PMC
+	bool "R2000 Power Management Controller (S2 PMC)"
+	depends on E90S
+	select CPU_IDLE  if !MCST_RT
+	select CPU_FREQ  if !MCST_RT
+	default y # we need s2_get_freq_mult() for r2000
+	help
+	 Power Management Controller (PMC) for MCST R2000 (E90S/SPARC v9) CPU
+menu "Device Tree"
+config OF
+	bool "Device Tree support"
+	default y
+	select DTC if E2K
+	select OF_EARLY_FLATTREE
+	select TIMER_OF
+	select PROC_DEVICETREE
+	select OF_DYNAMIC
+	select OF_OVERLAY
+	select OF_DMA_DEFAULT_COHERENT
+	help
+	   If you say yes to this option, support will be included for
+	   Device Tree data structure. The tree will be displaed in
+	   /proc/device-tree.
+config DTB_L_TEST
+	bool "Use kernel's built-in dtb blob"
+	default n
+	depends on OF
+	help
+	   If you say yes to this option, kernel will use built-in dtb blob
+	   instead of trying to get it from bootloader. Built-in blob is an
+	   array defined in arch/l/kernel/devtree.c.
+
+endmenu
+endmenu # "Elbrus Architecture Linux Kernel Configuration"

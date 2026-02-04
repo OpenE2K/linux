@@ -788,6 +788,9 @@ static const struct file_operations lp_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= lp_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= lp_ioctl,
+#endif
 	.open		= lp_open,
 	.release	= lp_release,
 #ifdef CONFIG_PARPORT_1284

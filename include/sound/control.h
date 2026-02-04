@@ -155,6 +155,10 @@ int snd_ctl_unregister_ioctl_compat(snd_kctl_ioctl_func_t fcn);
 #define snd_ctl_unregister_ioctl_compat(fcn)
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+int snd_ctl_register_ioctl_ptr128(snd_kctl_ioctl_func_t fcn);
+int snd_ctl_unregister_ioctl_ptr128(snd_kctl_ioctl_func_t fcn);
+#endif
 int snd_ctl_request_layer(const char *module_name);
 void snd_ctl_register_layer(struct snd_ctl_layer_ops *lops);
 void snd_ctl_disconnect_layer(struct snd_ctl_layer_ops *lops);

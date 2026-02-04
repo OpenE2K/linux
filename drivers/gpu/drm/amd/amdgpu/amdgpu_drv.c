@@ -2759,6 +2759,9 @@ static const struct file_operations amdgpu_driver_kms_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = amdgpu_kms_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = amdgpu_kms_ptr128_ioctl,
+#endif
 #ifdef CONFIG_PROC_FS
 	.show_fdinfo = amdgpu_show_fdinfo
 #endif

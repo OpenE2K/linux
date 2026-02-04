@@ -1746,10 +1746,18 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	struct tun_pi pi = { 0, cpu_to_be16(ETH_P_IP) };
 	struct sk_buff *skb;
 	size_t total_len = iov_iter_count(from);
+#ifdef CONFIG_MCST
+	size_t len = total_len, align = tun->align, linear = 0;
+#else
 	size_t len = total_len, align = tun->align, linear;
+#endif
 	struct virtio_net_hdr gso = { 0 };
 	int good_linear;
+#ifdef CONFIG_MCST
+	int copylen = 0;
+#else
 	int copylen;
+#endif
 	bool zerocopy = false;
 	int err;
 	u32 rxhash = 0;
@@ -3400,7 +3408,18 @@ static long tun_chr_ioctl(struct file *file,
 {
 	return __tun_chr_ioctl(file, cmd, arg, sizeof (struct ifreq));
 }
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	/*
+	 * ptr128_ifreq is longer than ifreq. All fields that are used in this
+	 * driver are compatible though, we don't need to convert the
+	 * contents.
+	 */
+static long tun_chr_ptr128_ioctl(struct file *file,
+			  unsigned int cmd, unsigned long arg)
+{
+	return __tun_chr_ioctl(file, cmd, arg, sizeof(struct ifreq));
+}
+#endif
 #ifdef CONFIG_COMPAT
 static long tun_chr_compat_ioctl(struct file *file,
 			 unsigned int cmd, unsigned long arg)
@@ -3525,6 +3544,9 @@ static const struct file_operations tun_fops = {
 	.unlocked_ioctl	= tun_chr_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = tun_chr_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = tun_chr_ptr128_ioctl,
 #endif
 	.open	= tun_chr_open,
 	.release = tun_chr_close,

@@ -282,6 +282,26 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 		}
 	}
 
+#ifdef	CONFIG_E2K
+	/*
+	 * It is important for guest mode running. Guest kernel is not loaded
+	 * by boot loader or some other bios. So resources of PCI devices are
+	 * not allocated or assigned and it should be made by kernel itself.
+	 * Zero PCI IO address is invalid (see 8250_core driver), force reassignment.
+	 */
+	if (res->flags & IORESOURCE_IO) {
+		if (l64 == 0 && sz64 != 0) {
+			res->flags |= IORESOURCE_UNSET;
+			res->start = 0;
+			res->end = sz64 - 1;
+			dev_printk(KERN_DEBUG, &dev->dev, "reg 0x%x: initial "
+				"IO BAR value 0x%04llx:0x%04llx is unset\n",
+				pos, l64, sz64);
+			goto out;
+		}
+	}
+#endif	/* CONFIG_E2K */
+
 	region.start = l64;
 	region.end = l64 + sz64 - 1;
 
@@ -1139,8 +1159,10 @@ static struct pci_bus *pci_alloc_child_bus(struct pci_bus *parent,
 	 * the root bus.
 	 */
 	if (!pci_bridge_child_ext_cfg_accessible(bridge)) {
+#ifndef CONFIG_E2K /*extended config space always accessible on e2k */
 		child->bus_flags |= PCI_BUS_FLAGS_NO_EXTCFG;
 		pci_info(child, "extended config space not accessible\n");
+#endif
 	}
 
 	/* Set up default resource pointers and names */
@@ -2916,7 +2938,7 @@ static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
 
 	/* Go find them, Rover! */
 	for (devfn = 0; devfn < 256; devfn += 8)
-		pci_scan_slot(bus, devfn);
+		pci_scan_slot(bus, devfn); 
 
 	/* Reserve buses for SR-IOV capability */
 	used_buses = pci_iov_bus_range(bus);
@@ -3104,6 +3126,14 @@ int pci_host_probe(struct pci_host_bridge *bridge)
 	if (pci_has_flag(PCI_PROBE_ONLY)) {
 		pci_bus_claim_resources(bus);
 	} else {
+#ifdef	CONFIG_E2K
+		/*
+		 * The guest kernel starts without bootloader (bios)
+		 * and PCI resources can only be partially initialized.
+		 * It need to claim existing resources and assign unassigned ones.
+		 */
+		pci_bus_claim_resources(bus);
+#endif	/* CONFIG_E2K */
 		pci_bus_size_bridges(bus);
 		pci_bus_assign_resources(bus);
 

@@ -25,7 +25,11 @@
  */
 extern struct resource crashk_res;
 extern struct resource crashk_low_res;
+#ifdef CONFIG_E2K
+extern note_buf_t *crash_notes[NR_CPUS];
+#else
 extern note_buf_t __percpu *crash_notes;
+#endif /* CONFIG_E2K */
 
 #ifdef CONFIG_KEXEC_CORE
 #include <linux/list.h>
@@ -387,7 +391,11 @@ struct kimage {
 
 /* kexec interface functions */
 extern void machine_kexec(struct kimage *image);
+#ifdef CONFIG_E2K
+extern int machine_kexec_prepare(struct kimage *image, unsigned long flags);
+#else
 extern int machine_kexec_prepare(struct kimage *image);
+#endif
 extern void machine_kexec_cleanup(struct kimage *image);
 extern int kernel_kexec(void);
 extern struct page *kimage_alloc_control_pages(struct kimage *image,
@@ -413,11 +421,24 @@ extern int kexec_load_disabled;
 #endif
 
 /* List of defined/legal kexec flags */
+#ifdef CONFIG_E2K
+
+#ifndef CONFIG_KEXEC_JUMP
+#define KEXEC_FLAGS    (KEXEC_ON_CRASH | KEXEC_E2K_LINTEL_IMAGE)
+#else
+#define KEXEC_FLAGS    (KEXEC_ON_CRASH | KEXEC_PRESERVE_CONTEXT | \
+			KEXEC_E2K_LINTEL_IMAGE)
+#endif
+
+#else
+
 #ifndef CONFIG_KEXEC_JUMP
 #define KEXEC_FLAGS    KEXEC_ON_CRASH
 #else
 #define KEXEC_FLAGS    (KEXEC_ON_CRASH | KEXEC_PRESERVE_CONTEXT)
 #endif
+
+#endif /* CONFIG_E2K */
 
 /* List of defined/legal kexec file flags */
 #define KEXEC_FILE_FLAGS	(KEXEC_FILE_UNLOAD | KEXEC_FILE_ON_CRASH | \

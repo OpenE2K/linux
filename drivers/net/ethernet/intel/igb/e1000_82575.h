@@ -149,12 +149,20 @@ struct e1000_adv_tx_context_desc {
 #define E1000_DCA_CTRL_DCA_MODE_CB2     0x02 /* DCA Mode CB2 */
 
 #define E1000_DCA_RXCTRL_CPUID_MASK 0x0000001F /* Rx CPUID Mask */
+#ifdef CONFIG_E2K_DCA
+#define E1000_DCA_RXCTRL_DESC_WB_TPH_EN BIT(1) /* TPH Rx Desc writeback enable */
+#define E1000_DCA_RXCTRL_HEAD_TPH_EN BIT(2) /* TPH Rx header enable */
+#define E1000_DCA_RXCTRL_DATA_TPH_EN BIT(3) /* TPH Rx payload enable */
+#endif
 #define E1000_DCA_RXCTRL_DESC_DCA_EN BIT(5) /* DCA Rx Desc enable */
 #define E1000_DCA_RXCTRL_HEAD_DCA_EN BIT(6) /* DCA Rx Desc header enable */
 #define E1000_DCA_RXCTRL_DATA_DCA_EN BIT(7) /* DCA Rx Desc payload enable */
 #define E1000_DCA_RXCTRL_DESC_RRO_EN BIT(9) /* DCA Rx rd Desc Relax Order */
 
 #define E1000_DCA_TXCTRL_CPUID_MASK 0x0000001F /* Tx CPUID Mask */
+#ifdef CONFIG_E2K_DCA
+#define E1000_DCA_TXCTRL_DESC_WB_TPH_EN BIT(1) /* TPH Tx Desc writeback enable */
+#endif
 #define E1000_DCA_TXCTRL_DESC_DCA_EN BIT(5) /* DCA Tx Desc enable */
 #define E1000_DCA_TXCTRL_DESC_RRO_EN BIT(9) /* Tx rd Desc Relax Order */
 #define E1000_DCA_TXCTRL_TX_WB_RO_EN BIT(11) /* Tx Desc writeback RO bit */

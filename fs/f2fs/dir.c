@@ -1203,4 +1203,7 @@ const struct file_operations f2fs_dir_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl   = f2fs_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= f2fs_ioctl,
+#endif
 };

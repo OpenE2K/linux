@@ -97,7 +97,12 @@ EXPORT_SYMBOL_GPL(clocks_calc_mult_shift);
  * override_name:
  *	Name of the user-specified clocksource.
  */
+#if defined(CONFIG_MCST)
+struct clocksource *curr_clocksource;
+EXPORT_SYMBOL(curr_clocksource);
+#else
 static struct clocksource *curr_clocksource;
+#endif
 static struct clocksource *suspend_clocksource;
 static LIST_HEAD(clocksource_list);
 static DEFINE_MUTEX(clocksource_mutex);

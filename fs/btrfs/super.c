@@ -2678,6 +2678,9 @@ static const struct file_operations btrfs_ctl_fops = {
 	.open = btrfs_control_open,
 	.unlocked_ioctl	 = btrfs_control_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = btrfs_control_ioctl,
+#endif
 	.owner	 = THIS_MODULE,
 	.llseek = noop_llseek,
 };

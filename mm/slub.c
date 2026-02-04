@@ -1161,6 +1161,10 @@ static int check_object(struct kmem_cache *s, struct slab *slab,
 		 * freepointer while object is allocated.
 		 */
 		return 1;
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	if (!(s->flags & SLAB_CONSISTENCY_CHECKS))
+		return 1;
+#endif
 
 	/* Check free pointer validity */
 	if (!check_valid_pointer(s, slab, get_freepointer(s, p))) {

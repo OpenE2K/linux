@@ -39,3 +39,8 @@ obj-$(CONFIG_POWERNV_CPUIDLE)		+= cpuidle-powernv.o
 ###############################################################################
 # RISC-V drivers
 obj-$(CONFIG_RISCV_SBI_CPUIDLE)		+= cpuidle-riscv-sbi.o
+
+###############################################################################
+# MCST E2K & E90S drivers
+obj-$(CONFIG_E2K_CPUIDLE)		+= cpuidle-e2k.o
+obj-$(CONFIG_E90S_CPUIDLE)              += cpuidle-e90s.o

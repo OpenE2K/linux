@@ -3174,7 +3174,10 @@ static unsigned int video_translate_cmd(unsigned int cmd)
 #endif
 	if (in_compat_syscall())
 		return v4l2_compat_translate_cmd(cmd);
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		return v4l2_ptr128_translate_cmd(cmd);
+#endif
 	return cmd;
 }
 
@@ -3212,6 +3215,11 @@ static int video_get_user(void __user *arg, void *parg,
 	} else if (in_compat_syscall()) {
 		memset(parg, 0, n);
 		err = v4l2_compat_get_user(arg, parg, cmd);
+#if !defined(CONFIG_64BIT) && defined(CONFIG_COMPAT_32BIT_TIME)
+	} else if (in_ptr128_syscall()) {
+		memset(parg, 0, n);
+		err = v4l2_ptr128_get_user(arg, parg, cmd);
+#endif
 	} else {
 		memset(parg, 0, n);
 #if !defined(CONFIG_64BIT) && defined(CONFIG_COMPAT_32BIT_TIME)
@@ -3268,7 +3276,10 @@ static int video_put_user(void __user *arg, void *parg,
 
 	if (in_compat_syscall())
 		return v4l2_compat_put_user(arg, parg, cmd);
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		return v4l2_ptr128_put_user(arg, parg, cmd);
+#endif
 #if !defined(CONFIG_64BIT) && defined(CONFIG_COMPAT_32BIT_TIME)
 	switch (cmd) {
 	case VIDIOC_DQEVENT_TIME32: {
@@ -3372,6 +3383,12 @@ video_usercopy(struct file *file, unsigned int orig_cmd, unsigned long arg,
 			err = v4l2_compat_get_array_args(file, array_buf,
 							 user_ptr, array_size,
 							 orig_cmd, parg);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		else if (in_ptr128_syscall())
+			err = v4l2_ptr128_get_array_args(file, array_buf,
+							 user_ptr, array_size,
+							 orig_cmd, parg);
+#endif
 		else
 			err = copy_from_user(array_buf, user_ptr, array_size) ?
 								-EFAULT : 0;
@@ -3412,6 +3429,17 @@ video_usercopy(struct file *file, unsigned int orig_cmd, unsigned long arg,
 							     orig_cmd, parg);
 			if (put_err)
 				err = put_err;
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		} else if (in_ptr128_syscall()) {
+			int put_err;
+
+			put_err = v4l2_ptr128_put_array_args(file, user_ptr,
+							     array_buf,
+							     array_size,
+							     orig_cmd, parg);
+			if (put_err)
+				err = put_err;
+#endif
 		} else if (copy_to_user(user_ptr, array_buf, array_size)) {
 			err = -EFAULT;
 		}

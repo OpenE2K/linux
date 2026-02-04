@@ -64,12 +64,22 @@
 #include <linux/mount.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/pid.h>
+#ifdef CONFIG_MCST
+#include <linux/interrupt.h>
+#endif
 
 #include "../lib/kstrtox.h"
 
 #include <linux/uaccess.h>
 #include <asm/processor.h>
 
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+#include <asm/sclkr.h>
+#endif
+#ifdef CONFIG_E2K
+#include <asm/traps.h>
+#include <asm/e2k_debug.h>
+#endif
 #ifdef CONFIG_X86
 #include <asm/nmi.h>
 #include <asm/stacktrace.h>
@@ -95,6 +105,9 @@ EXPORT_SYMBOL_GPL(sysctl_long_vals);
 
 #ifdef CONFIG_PERF_EVENTS
 static const int six_hundred_forty_kb = 640 * 1024;
+#endif
+#ifdef CONFIG_MCST
+extern int shadow_console;
 #endif
 
 
@@ -141,6 +154,13 @@ int sysctl_legacy_va_layout;
 /*
  * /proc/sys support
  */
+
+#ifdef CONFIG_SPARC64
+extern int sysctl_tsb_ratio;
+#ifdef CONFIG_MCST
+extern int instruction_emulation_warning;
+#endif
+#endif
 
 #ifdef CONFIG_PROC_SYSCTL
 
@@ -1714,6 +1734,15 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_MCST
+	{
+		.procname	= "instruction-emulation-warning",
+		.data		= &instruction_emulation_warning,
+		.maxlen		= sizeof (int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 #endif
 #ifdef CONFIG_PARISC
 	{
@@ -1743,6 +1772,22 @@ static struct ctl_table kern_table[] = {
 	},
 #endif
 #ifdef CONFIG_TRACING
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_STACKS_TRACER)
+	{
+		.procname	= "stack_tracer_enabled",
+		.data		= &stack_tracer_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= stack_trace_sysctl,
+	},
+	{
+		.procname	= "stack_tracer_kernel_only",
+		.data		= &stack_tracer_kernel_only,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{
 		.procname	= "ftrace_dump_on_oops",
 		.data		= &ftrace_dump_on_oops,
@@ -2090,6 +2135,26 @@ static struct ctl_table kern_table[] = {
 		.extra1		= SYSCTL_ONE,
 		.extra2		= SYSCTL_INT_MAX,
 	},
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	{
+		.procname	= "sclkr_src",
+		.data		= &proc_sclkr_cmd,
+		.maxlen		= SCLKR_CMD_LEN,
+		.mode		= 0644,
+		.proc_handler	= proc_sclkr,
+	},
+#endif
+#ifdef CONFIG_MCST
+# if defined(CONFIG_IRQ_FORCED_THREADING) && !defined(CONFIG_PREEMPT_RT)
+	{
+		.procname	= "force_irqthreads",
+		.data		= &force_irqthreads_key,
+		.maxlen		= sizeof(bool),
+		.mode		= 0644,
+		.proc_handler	= proc_do_static_key,
+	},
+# endif
 #endif
 	{ }
 };
@@ -2466,6 +2531,29 @@ static struct ctl_table vm_table[] = {
 	{ }
 };
 
+#ifdef CONFIG_E2K
+# if CONFIG_CPU_ISET_MIN <= 6
+static int set_protected_mode(struct ctl_table *table, int write,
+				void __user *buffer, size_t *lenp,
+				loff_t *ppos)
+{
+	int error;
+
+	if (cpu_has(CPU_FEAT_ISET_V7))
+		return 0;
+
+	error = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (error)
+		return error;
+
+	if (write)
+		set_protected_mode_flags();
+
+	return 0;
+}
+#endif
+#endif /* CONFIG_E2K */
+
 static struct ctl_table debug_table[] = {
 #ifdef CONFIG_SYSCTL_EXCEPTION_TRACE
 	{
@@ -2476,6 +2564,63 @@ static struct ctl_table debug_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 #endif
+#ifdef CONFIG_E2K
+	{
+		.procname	= "sigdebug",
+		.data		= NULL,
+		.maxlen		= SIG_PF_DEBUG_STATUS_MAXLEN,
+		.mode		= 0644,
+		.proc_handler	= proc_sigdebug_handler
+	},
+	{
+		.procname	= "userstack",
+		.data		= &debug_userstack,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "pagefault",
+		.data		= NULL,
+		.maxlen		= SIG_PF_DEBUG_STATUS_MAXLEN,
+		.mode		= 0644,
+		.proc_handler	= proc_debug_pagefault_handler
+	},
+	{
+		.procname	= "semispec",
+		.data		= &debug_semi_spec,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "windowregs",
+		.data		= &print_window_regs,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+#ifdef CONFIG_E2K
+# if CONFIG_CPU_ISET_MIN <= 6
+	{
+		.procname	= "no_stack_prot",
+		.data		= &debug_protected_mode,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= set_protected_mode
+	},
+# endif
+#endif
+# ifdef CONFIG_DATA_STACK_WINDOW
+	{
+		.procname	= "datastack",
+		.data		= &debug_datastack,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+# endif
+#endif /* CONFIG_E2K */
 	{ }
 };
 

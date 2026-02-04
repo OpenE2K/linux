@@ -24,6 +24,9 @@ struct rt_mutex_base {
 	raw_spinlock_t		wait_lock;
 	struct rb_root_cached   waiters;
 	struct task_struct	*owner;
+#if defined(CONFIG_MCST)
+	unsigned long		mux_ip;
+#endif
 };
 
 #define __RT_MUTEX_BASE_INITIALIZER(rtbasename)				\
@@ -51,7 +54,7 @@ extern void rt_mutex_base_init(struct rt_mutex_base *rtb);
  *
  * @wait_lock:	spinlock to protect the structure
  * @waiters:	rbtree root to enqueue waiters in priority order;
- *              caches top-waiter (leftmost node).
+ *		caches top-waiter (leftmost node).
  * @owner:	the mutex owner
  */
 struct rt_mutex {
@@ -118,5 +121,19 @@ extern int rt_mutex_lock_killable(struct rt_mutex *lock);
 extern int rt_mutex_trylock(struct rt_mutex *lock);
 
 extern void rt_mutex_unlock(struct rt_mutex *lock);
+
+#if defined(CONFIG_MCST) && defined(CONFIG_RT_MUTEXES)
+extern struct task_struct *get_rtmutex_owner(struct rt_mutex_base *lock);
+extern void *get_rtmutex_ip(struct rt_mutex_base *lock);
+#else
+static inline struct task_struct *get_rtmutex_owner(struct rt_mutex_base *lock)
+{
+	return NULL;
+}
+static inline void *get_rtmutex_ip(struct rt_mutex_base *lock)
+{
+	return NULL;
+}
+#endif
 
 #endif

@@ -445,6 +445,9 @@ static const struct file_operations nvme_ns_head_chr_fops = {
 	.release	= nvme_ns_head_chr_release,
 	.unlocked_ioctl	= nvme_ns_head_chr_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = nvme_ns_head_chr_ioctl,
+#endif
 	.uring_cmd	= nvme_ns_head_chr_uring_cmd,
 	.uring_cmd_iopoll = nvme_ns_head_chr_uring_cmd_iopoll,
 };

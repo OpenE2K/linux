@@ -1348,6 +1348,101 @@ static long fb_compat_ioctl(struct file *file, unsigned int cmd,
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+
+struct fb_cmap128 {
+	u32			start;
+	u32			len;
+	e2k_ap_t	red;
+	e2k_ap_t	green;
+	e2k_ap_t	blue;
+	e2k_ap_t	transp;
+};
+
+static int fb_getput_cmap128(struct fb_info *info, unsigned int cmd,
+			  unsigned long arg)
+{
+	struct fb_cmap128 cmap128;
+	struct fb_cmap cmap_from;
+	struct fb_cmap_user cmap;
+	struct fb_cmap128 __user *cmapp = (struct fb_cmap128 __user *)arg;
+	e2k_ap_t ap;
+	int tag;
+
+	if (copy_from_user(&cmap128, cmapp, sizeof(cmap128)))
+		return -EFAULT;
+
+	cmap.start = cmap128.start;
+	cmap.len   = cmap128.len;
+	if (get_user_tagged_16(ap.qword, tag, &cmapp->red) || !IS_AP(ap, tag) ||
+			AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
+		return -EFAULT;
+	cmap.red = (void *)AP_PTR(ap);
+	if (get_user_tagged_16(ap.qword, tag, &cmapp->green) || !IS_AP(ap, tag) ||
+			AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
+		return -EFAULT;
+	cmap.green = (void *)AP_PTR(ap);
+	if (get_user_tagged_16(ap.qword, tag, &cmapp->blue) || !IS_AP(ap, tag) ||
+			AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
+		return -EFAULT;
+	cmap.blue = (void *)AP_PTR(ap);
+	if (get_user_tagged_16(ap.qword, tag, &cmapp->transp))
+		return -EFAULT;
+	if (IS_AP(ap, tag)) {
+		if (AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
+			return -EFAULT;
+		cmap.transp = (void *)AP_PTR(ap);
+	} else if (AP_NULL(ap, tag)) {
+		cmap.transp = NULL;
+	} else {
+		return -EFAULT;
+	}
+	set_u_border(MAX_U_BORDER);
+	if (cmd == FBIOPUTCMAP)
+		return fb_set_user_cmap(&cmap, info);
+
+	lock_fb_info(info);
+	cmap_from = info->cmap;
+	unlock_fb_info(info);
+
+	return fb_cmap_to_user(&cmap_from, &cmap);
+}
+
+static long fb_ptr128_ioctl(struct file *file, unsigned int cmd,
+			    unsigned long arg)
+{
+	struct fb_info *info = file_fb_info(file);
+	const struct fb_ops *fb;
+	long ret = -ENOIOCTLCMD;
+
+	if (!info)
+		return -ENODEV;
+	fb = info->fbops;
+	switch (cmd) {
+	case FBIOGET_VSCREENINFO:
+	case FBIOPUT_VSCREENINFO:
+	case FBIOPAN_DISPLAY:
+	case FBIOGET_CON2FBMAP:
+	case FBIOPUT_CON2FBMAP:
+	case FBIOGET_FSCREENINFO:
+	case FBIOBLANK:
+		ret = do_fb_ioctl(info, cmd, arg);
+		break;
+	case FBIOGETCMAP:
+	case FBIOPUTCMAP:
+		ret = fb_getput_cmap128(info, cmd, arg);
+		break;
+
+	default:
+		if (fb->fb_ptr128_ioctl)
+			ret = fb->fb_ptr128_ioctl(info, cmd, arg);
+		break;
+	}
+	return ret;
+}
+#endif
+
 static int
 fb_mmap(struct file *file, struct vm_area_struct * vma)
 {
@@ -1491,6 +1586,9 @@ static const struct file_operations fb_fops = {
 	.unlocked_ioctl = fb_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = fb_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = fb_ptr128_ioctl,
 #endif
 	.mmap =		fb_mmap,
 	.open =		fb_open,

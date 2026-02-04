@@ -26,11 +26,17 @@ static int hci_extcap_hardware_id(struct i3c_hci *hci, void __iomem *base)
 	hci->vendor_mipi_id	= readl(base + 0x04);
 	hci->vendor_version_id	= readl(base + 0x08);
 	hci->vendor_product_id	= readl(base + 0x0c);
-
+#ifdef CONFIG_E2K
+	if (mipi_verbose) {
+		dev_info(&hci->master.dev, "vendor MIPI ID: %#x\n", hci->vendor_mipi_id);
+		dev_info(&hci->master.dev, "vendor version ID: %#x\n", hci->vendor_version_id);
+		dev_info(&hci->master.dev, "vendor product ID: %#x\n", hci->vendor_product_id);
+	}
+#else
 	dev_info(&hci->master.dev, "vendor MIPI ID: %#x\n", hci->vendor_mipi_id);
 	dev_info(&hci->master.dev, "vendor version ID: %#x\n", hci->vendor_version_id);
 	dev_info(&hci->master.dev, "vendor product ID: %#x\n", hci->vendor_product_id);
-
+#endif
 	/* ought to go in a table if this grows too much */
 	switch (hci->vendor_mipi_id) {
 	case MIPI_VENDOR_NXP:
@@ -49,7 +55,12 @@ static int hci_extcap_master_config(struct i3c_hci *hci, void __iomem *base)
 	static const char * const functionality[] = {
 		"(unknown)", "master only", "target only",
 		"primary/secondary master" };
+#ifdef CONFIG_E2K
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "operation mode: %s\n", functionality[operation_mode]);
+#else
 	dev_info(&hci->master.dev, "operation mode: %s\n", functionality[operation_mode]);
+#endif
 	if (operation_mode & 0x1)
 		return 0;
 	dev_err(&hci->master.dev, "only master mode is currently supported\n");
@@ -61,7 +72,12 @@ static int hci_extcap_multi_bus(struct i3c_hci *hci, void __iomem *base)
 	u32 bus_instance = readl(base + 0x04);
 	unsigned int count = FIELD_GET(GENMASK(3, 0), bus_instance);
 
+#ifdef CONFIG_E2K
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "%d bus instances, reg = %#x\n", count, bus_instance);
+#else
 	dev_info(&hci->master.dev, "%d bus instances\n", count);
+#endif
 	return 0;
 }
 
@@ -129,7 +145,12 @@ static int hci_extcap_auto_command(struct i3c_hci *hci, void __iomem *base)
 
 static int hci_extcap_debug(struct i3c_hci *hci, void __iomem *base)
 {
+#ifdef CONFIG_E2K
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "debug registers present\n");
+#else
 	dev_info(&hci->master.dev, "debug registers present\n");
+#endif
 	hci->DEBUG_regs = base;
 	return 0;
 }
@@ -269,6 +290,11 @@ int i3c_hci_parse_ext_caps(struct i3c_hci *hci)
 		cap_id = FIELD_GET(CAP_HEADER_ID, cap_header);
 		cap_length = FIELD_GET(CAP_HEADER_LENGTH, cap_header);
 		DBG("id=0x%02x length=%d", cap_id, cap_length);
+#ifdef CONFIG_E2K
+		if (cap_id == 0) {
+			break;
+		}
+#endif
 		if (!cap_length)
 			break;
 		if (curr_cap + cap_length * 4 >= end) {

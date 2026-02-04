@@ -21,6 +21,9 @@
 #define IOMMU_CACHE	(1 << 2) /* DMA cache coherency */
 #define IOMMU_NOEXEC	(1 << 3)
 #define IOMMU_MMIO	(1 << 4) /* e.g. things like MSI doorbells */
+#ifdef CONFIG_MCST
+#define IOMMU_LAST_PAGE	(1 << 31) /* to set prefetch pte bit */
+#endif
 /*
  * Where the bus hardware includes a privilege level as part of its access type
  * markings, and certain devices are capable of issuing transactions marked as

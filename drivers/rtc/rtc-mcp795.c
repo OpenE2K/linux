@@ -20,6 +20,15 @@
 #include <linux/bcd.h>
 #include <linux/delay.h>
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE
+#include <asm/sclkr.h>
+#endif
+
+#if defined(CONFIG_E90S)
+#include <linux/kthread.h>
+#include <asm-l/clk_rt.h>
+#endif
+
 /* MCP795 Instructions, see datasheet table 3-1 */
 #define MCP795_EEREAD	0x03
 #define MCP795_EEWRITE	0x02
@@ -50,6 +59,11 @@
 #define MCP795_OSCON_BIT	BIT(5)
 #define MCP795_ALM0_BIT		BIT(4)
 #define MCP795_ALM1_BIT		BIT(5)
+#if defined(CONFIG_MCST)
+#define MCP795_SQWEN_BIT	BIT(6)
+#define MCP795_SQWFS0_BIT	BIT(0)
+#define MCP795_SQWFS1_BIT	BIT(1)
+#endif
 #define MCP795_ALM0IF_BIT	BIT(3)
 #define MCP795_ALM0C0_BIT	BIT(4)
 #define MCP795_ALM0C1_BIT	BIT(5)
@@ -180,12 +194,28 @@ static int mcp795_update_alarm(struct device *dev, bool enable)
 	return ret;
 }
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+static bool used_for_clk(struct spi_device *spi)
+{
+	struct rtc_device *rtc = spi_get_drvdata(spi);
+	return READ_ONCE(clk_rtc) == rtc;
+}
+#endif
+
 static int mcp795_set_time(struct device *dev, struct rtc_time *tim)
 {
 	int ret;
 	u8 data[7];
 	bool extosc;
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(to_spi_device(dev)) && sclk_uses_hardware_rtc() && (pps_debug & 1)) {
+		dev_warn(dev, "mcp795_set_time while RTC is for clocksource."
+			" %02d.%02d.%d %02d:%02d:%02d\n",
+			tim->tm_mday, tim->tm_mon + 1, tim->tm_year + 1900,
+			tim->tm_hour, tim->tm_min, tim->tm_sec);
+	}
+#endif
 	/* Stop RTC and store current value of EXTOSC bit */
 	ret = mcp795_stop_oscillator(dev, &extosc);
 	if (ret)
@@ -265,6 +295,12 @@ static int mcp795_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 	u8 tmp[6];
 	int ret;
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(to_spi_device(dev))) {
+		dev_warn(dev, "mcp795_set_alarm: rtc is used for clocksource. Alarm functionality is disabled\n");
+		return -EINVAL;
+	}
+#endif
 	/* Read current time from RTC hardware */
 	ret = mcp795_read_time(dev, &now_tm);
 	if (ret)
@@ -343,6 +379,12 @@ static int mcp795_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 
 static int mcp795_alarm_irq_enable(struct device *dev, unsigned int enabled)
 {
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	if (used_for_clk(to_spi_device(dev))) {
+		dev_warn(dev, "mcp795_alarm_irq_enable: rtc is used for clocksource. Alarm functionality is disabled\n");
+		return -EINVAL;
+	}
+#endif
 	return mcp795_update_alarm(dev, !!enabled);
 }
 
@@ -377,6 +419,68 @@ static const struct rtc_class_ops mcp795_rtc_ops = {
 		.alarm_irq_enable = mcp795_alarm_irq_enable
 };
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+static void init_pps(struct spi_device *spi, struct rtc_device *rtc)
+{
+	/* Disable UIE mode, because we don't use interrupts
+	 * from rtc
+	 */
+	clear_bit(RTC_FEATURE_UPDATE_INTERRUPT, rtc->features);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_SCLKR_CLOCKSOURCE)
+	if ((sclkr_mode == -1 || sclkr_mode == SCLKR_RTC) &&
+			/* only first RTC is used for SCLKR while there is now flag which */
+			cmpxchg(&clk_rtc, NULL, rtc) == NULL) {
+		struct device	*dev = &spi->dev;
+		struct mutex	*lock = &rtc->ops_lock;
+
+		mutex_lock(lock);
+		mcp795_rtcc_set_bits(dev, MCP795_REG_CONTROL,
+			MCP795_SQWEN_BIT |
+			MCP795_SQWFS0_BIT | MCP795_SQWFS1_BIT |
+			MCP795_ALM0_BIT | MCP795_ALM1_BIT,
+			MCP795_SQWEN_BIT);
+		mutex_unlock(lock);
+
+		if (!sclk_register_rtc()) {
+			dev_warn(dev, "used for clocksource, alarm functionality is disabled\n");
+		}
+	}
+#endif
+#if defined(CONFIG_E90S)
+	if (clk_rt_enabled() &&
+			/* only first RTC is used for SCLKR while there is now flag which */
+			cmpxchg(&clk_rtc, NULL, rtc) == NULL) {
+		int	error;
+		static struct task_struct *clk_rt_registask;
+		struct device	*dev = &spi->dev;
+		struct mutex	*lock = &rtc->ops_lock;
+
+		mutex_lock(lock);
+		mcp795_rtcc_set_bits(dev, MCP795_REG_CONTROL,
+			MCP795_SQWEN_BIT |
+			MCP795_SQWFS0_BIT | MCP795_SQWFS1_BIT |
+			MCP795_ALM0_BIT | MCP795_ALM1_BIT,
+			MCP795_SQWEN_BIT);
+		mutex_unlock(lock);
+		if (atomic_inc_and_test(&num_clk_rt_register)) {
+			clk_rt_registask = kthread_run(clk_rt_register,
+				(void *)CLK_RT_RTC, "clk_rt_register");
+			if (IS_ERR(clk_rt_registask)) {
+				error = PTR_ERR(clk_rt_registask);
+				dev_warn(dev, "Failed to start"
+					" clk_rt register"
+					" thread, error: %d\n", error);
+			}
+		}
+		dev_warn(dev, "RTC is used for clocksource. "
+			"Alarm functionality is disabled\n");
+	}
+#endif
+	return;
+}
+#endif
+
 static int mcp795_probe(struct spi_device *spi)
 {
 	struct rtc_device *rtc;
@@ -402,6 +506,9 @@ static int mcp795_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, rtc);
 
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+	init_pps(spi, rtc);
+#endif
 	if (spi->irq > 0) {
 		dev_dbg(&spi->dev, "Alarm support enabled\n");
 
@@ -419,8 +526,26 @@ static int mcp795_probe(struct spi_device *spi)
 		else
 			device_init_wakeup(&spi->dev, true);
 	}
+#ifdef CONFIG_MCST
+	/* Disable UIE mode, because we don't use interrupts
+	 * from rtc
+	 */
+	clear_bit(RTC_FEATURE_UPDATE_INTERRUPT, rtc->features);
+#endif
 	return 0;
 }
+
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+void mcp795_remove(struct spi_device *spi)
+{
+	if (used_for_clk(spi)) {
+# ifdef CONFIG_SCLKR_CLOCKSOURCE
+		sclk_unregister_rtc();
+# endif
+		WRITE_ONCE(clk_rtc, NULL);
+	}
+}
+#endif
 
 #ifdef CONFIG_OF
 static const struct of_device_id mcp795_of_match[] = {
@@ -442,6 +567,9 @@ static struct spi_driver mcp795_driver = {
 				.of_match_table = of_match_ptr(mcp795_of_match),
 		},
 		.probe = mcp795_probe,
+#if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE || defined CONFIG_E90S
+		.remove = mcp795_remove,
+#endif
 		.id_table = mcp795_spi_ids,
 };
 

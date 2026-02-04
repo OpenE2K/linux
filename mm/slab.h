@@ -260,6 +260,30 @@ extern struct list_head slab_caches;
 /* The slab cache that manages slab cache information */
 extern struct kmem_cache *kmem_cache;
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+#ifdef CONFIG_X86_32
+#define MEMORY_SANITIZE_VALUE	('\xff')
+#else
+#define MEMORY_SANITIZE_VALUE	('\xfe')
+#endif
+enum pax_sanitize_mode {
+	PAX_SANITIZE_SLAB_OFF = 0,
+	PAX_SANITIZE_SLAB_FAST,
+	PAX_SANITIZE_SLAB_FULL,
+};
+
+extern enum pax_sanitize_mode pax_sanitize_slab;
+
+static inline unsigned long pax_sanitize_slab_flags(unsigned long flags)
+{
+	if (pax_sanitize_slab == PAX_SANITIZE_SLAB_OFF)
+		flags |= SLAB_NO_SANITIZE;
+	else if (pax_sanitize_slab == PAX_SANITIZE_SLAB_FULL)
+		flags &= ~SLAB_NO_SANITIZE;
+	return flags;
+}
+#endif
+
 /* A table of kmalloc cache names and sizes */
 extern const struct kmalloc_info_struct {
 	const char *name[NR_KMALLOC_TYPES];
@@ -345,6 +369,21 @@ static inline slab_flags_t kmem_cache_flags(unsigned int object_size,
 #define CACHE_CREATE_MASK (SLAB_CORE_FLAGS | SLAB_DEBUG_FLAGS | SLAB_CACHE_FLAGS)
 
 /* Common flags permitted for kmem_cache_create */
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+#define SLAB_FLAGS_PERMITTED (SLAB_NO_SANITIZE | \
+			      SLAB_CORE_FLAGS | \
+			      SLAB_RED_ZONE | \
+			      SLAB_POISON | \
+			      SLAB_STORE_USER | \
+			      SLAB_TRACE | \
+			      SLAB_CONSISTENCY_CHECKS | \
+			      SLAB_MEM_SPREAD | \
+			      SLAB_NOLEAKTRACE | \
+			      SLAB_RECLAIM_ACCOUNT | \
+			      SLAB_TEMPORARY | \
+			      SLAB_ACCOUNT | \
+			      SLAB_NO_USER_FLAGS)
+#else
 #define SLAB_FLAGS_PERMITTED (SLAB_CORE_FLAGS | \
 			      SLAB_RED_ZONE | \
 			      SLAB_POISON | \
@@ -357,6 +396,7 @@ static inline slab_flags_t kmem_cache_flags(unsigned int object_size,
 			      SLAB_TEMPORARY | \
 			      SLAB_ACCOUNT | \
 			      SLAB_NO_USER_FLAGS)
+#endif
 
 bool __kmem_cache_empty(struct kmem_cache *);
 int __kmem_cache_shutdown(struct kmem_cache *);

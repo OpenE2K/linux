@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
+#
+# Mcst PHY device configuration
+#
+
+config ELDWCXPCS
+	tristate "MCST PCS PHY"
+	depends on PCI
+	# On e2k used on isets v6 - v7
+	depends on E90S || E2K && CPU_ISET_MAX >= 6 && CPU_ISET_MIN <= 7
+	help
+	  DesignWare Cores Ethernet PCS PHY (DWC_xpcs)

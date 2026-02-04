@@ -914,6 +914,9 @@ const struct file_operations ext4_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ext4_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= ext4_ioctl,
+#endif
 	.mmap		= ext4_file_mmap,
 	.mmap_supported_flags = MAP_SYNC,
 	.open		= ext4_file_open,

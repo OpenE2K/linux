@@ -1198,6 +1198,119 @@ static long mon_bin_compat_ioctl(struct file *file,
 }
 #endif /* CONFIG_COMPAT */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+
+#define MON_IOCX_GET128 _IOW(MON_IOC_MAGIC, 6, struct mon_bin_get128)
+#define MON_IOCX_MFETCH128 _IOWR(MON_IOC_MAGIC, 7, struct mon_bin_mfetch128)
+#define MON_IOCX_GETX128   _IOW(MON_IOC_MAGIC, 10, struct mon_bin_get128)
+
+struct mon_bin_get128 {
+	e2k_ap_t hdr;	/* Can be 48 bytes or 64. */
+	e2k_ap_t data;
+	size_t alloc;		/* Length of data (can be zero) */
+};
+
+struct mon_bin_mfetch128 {
+	e2k_ap_t offvec;	/* Vector of events fetched */
+	u32 nfetch;		/* Number of events to fetch (out: fetched) */
+	u32 nflush;		/* Number of events to flush */
+};
+static long mon_bin_ptr128_ioctl(struct file *file,
+				 unsigned int cmd, unsigned long arg)
+{
+	struct mon_reader_bin *rp = file->private_data;
+	int ret;
+	e2k_ap_t ap;
+	int tag;
+
+
+	switch (cmd) {
+
+	case MON_IOCX_GET128:
+	case MON_IOCX_GETX128:
+		{
+		struct mon_bin_get128 getb;
+		struct mon_bin_get128 __user *argp = (struct mon_bin_get128 __user *)arg;
+		void *datap = NULL;
+		void *hdrp;
+
+		if (copy_from_user(&getb, (void __user *)arg,
+					    sizeof(struct mon_bin_get32)))
+			return -EFAULT;
+		if (getb.alloc) {
+			if (get_user_tagged_16(ap.qword, tag, &argp->data) || !IS_AP(ap, tag)) {
+				return -EFAULT;
+			}
+			if (AP_OBJ_SIZE(ap) < getb.alloc)
+				return -EFAULT;
+			datap = (void *)AP_PTR(ap);
+		}
+		if (get_user_tagged_16(ap.qword, tag, &argp->hdr) || !IS_AP(ap, tag)) {
+			return -EFAULT;
+		}
+		if (AP_OBJ_SIZE(ap) < ((cmd == MON_IOCX_GET32) ? PKT_SZ_API0 : PKT_SZ_API1))
+			return -EFAULT;
+		hdrp = (void *)AP_PTR(ap);
+		set_u_border(MAX_U_BORDER);
+		ret = mon_bin_get_event(file, rp, hdrp,
+					(cmd == MON_IOCX_GET32) ? PKT_SZ_API0 : PKT_SZ_API1,
+					datap, getb.alloc);
+		if (ret < 0)
+			return ret;
+		}
+		return 0;
+
+	case MON_IOCX_MFETCH128:
+		{
+		struct mon_bin_mfetch128 mfetch;
+		struct mon_bin_mfetch128 __user *uptr;
+		u32 __user *offvec = NULL;
+
+		uptr = (struct mon_bin_mfetch128 __user *)arg;
+
+		if (copy_from_user(&mfetch, uptr, sizeof(mfetch)))
+			return -EFAULT;
+
+		if (mfetch.nflush) {
+			ret = mon_bin_flush(rp, mfetch.nflush);
+			if (ret < 0)
+				return ret;
+			if (put_user(ret, &uptr->nflush))
+				return -EFAULT;
+		}
+		if (mfetch.nfetch) {
+			if (get_user_tagged_16(ap.qword, tag, &uptr->offvec) || !IS_AP(ap, tag)) {
+				return -EFAULT;
+			}
+			if (AP_OBJ_SIZE(ap) < sizeof(u32) * mfetch.nfetch)
+				return -EFAULT;
+			offvec = (u32 __user *)AP_PTR(ap);
+		}
+		set_u_border(MAX_U_BORDER);
+		ret = mon_bin_fetch(file, rp, offvec, mfetch.nfetch);
+		if (ret < 0)
+			return ret;
+		if (put_user(ret, &uptr->nfetch))
+			return -EFAULT;
+		}
+		return 0;
+
+	case MON_IOCG_STATS:
+	case MON_IOCQ_URB_LEN:
+	case MON_IOCQ_RING_SIZE:
+	case MON_IOCT_RING_SIZE:
+	case MON_IOCH_MFLUSH:
+		return mon_bin_ioctl(file, cmd, arg);
+
+	default:
+		;
+	}
+	return -ENOTTY;
+}
+#endif /* CONFIG_PROTECTED_MODE */
+
+
 static __poll_t
 mon_bin_poll(struct file *file, struct poll_table_struct *wait)
 {
@@ -1294,6 +1407,9 @@ static const struct file_operations mon_fops_binary = {
 	.unlocked_ioctl = mon_bin_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl =	mon_bin_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = mon_bin_ptr128_ioctl,
 #endif
 	.release =	mon_bin_release,
 	.mmap =		mon_bin_mmap,

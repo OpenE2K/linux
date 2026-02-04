@@ -1236,6 +1236,9 @@ nouveau_driver_fops = {
 #if defined(CONFIG_COMPAT)
 	.compat_ioctl = nouveau_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = nouveau_ptr128_ioctl,
+#endif
 	.llseek = noop_llseek,
 };
 

@@ -547,6 +547,12 @@ struct sock {
 #if IS_ENABLED(CONFIG_PROVE_LOCKING) && IS_ENABLED(CONFIG_MODULES)
 	struct module		*sk_owner;
 #endif
+
+#ifdef CONFIG_MCST
+	int udp_snd_num;
+	int udp_snd_sz;
+	ktime_t udp_snd_tm;
+#endif
 };
 
 enum sk_pacing {
@@ -1280,6 +1286,10 @@ struct proto {
 #ifdef CONFIG_COMPAT
 	int			(*compat_ioctl)(struct sock *sk,
 					unsigned int cmd, unsigned long arg);
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	int			(*ptr128_ioctl)(struct sock *sk,
+					int cmd, unsigned long arg);
 #endif
 	int			(*sendmsg)(struct sock *sk, struct msghdr *msg,
 					   size_t len);
@@ -3013,6 +3023,9 @@ void sk_get_meminfo(const struct sock *sk, u32 *meminfo);
 
 extern __u32 sysctl_wmem_max;
 extern __u32 sysctl_rmem_max;
+#ifdef CONFIG_MCST
+extern __u32 sysctl_sock_minrcvbuf;
+#endif
 
 extern int sysctl_tstamp_allow_data;
 extern int sysctl_optmem_max;

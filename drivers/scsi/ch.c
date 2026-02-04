@@ -987,6 +987,9 @@ static const struct file_operations changer_fops = {
 	.release	= ch_release,
 	.unlocked_ioctl	= ch_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= ch_ioctl,
+#endif
 	.llseek		= noop_llseek,
 };
 

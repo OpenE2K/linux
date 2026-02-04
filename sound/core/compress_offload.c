@@ -1049,6 +1049,10 @@ static const struct file_operations snd_compr_file_ops = {
 #ifdef CONFIG_COMPAT
 		.compat_ioctl = snd_compr_ioctl_compat,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		.ptr128_ioctl = snd_compr_ioctl,
+#endif
+
 		.mmap =		snd_compr_mmap,
 		.poll =		snd_compr_poll,
 };

@@ -23,13 +23,42 @@
 #include "dat.h"
 
 
+
 /*
  * Host Controller Capabilities and Operation Registers
  */
+#ifdef CONFIG_E2K
+#ifdef I3C_PCI_DEBUG
 
+
+#define reg_read(r)					\
+({							\
+	u32 __r__ = readl(hci->base_regs + (r));	\
+	pr_info("%s: read hci reg %d = %#x\n", __func__, (r), __r__);	\
+	__r__;						\
+})
+#define reg_write(r, v)        {pr_info("%s: write hci reg %d = %#llx\n",  \
+						 __func__, (r), (u64)(v)); \
+				writel(v, hci->base_regs + (r));	   \
+			       }
+#define reg_set(r, v)			\
+({					\
+	u32 _r_ = reg_read(r);		\
+	reg_write(r, _r_ | (v))		\
+})
+
+
+#else
 #define reg_read(r)		readl(hci->base_regs + (r))
 #define reg_write(r, v)		writel(v, hci->base_regs + (r))
 #define reg_set(r, v)		reg_write(r, reg_read(r) | (v))
+#endif
+int mipi_verbose = 0;
+#else /* !CONFIG_E2K */
+#define reg_read(r)		readl(hci->base_regs + (r))
+#define reg_write(r, v)		writel(v, hci->base_regs + (r))
+#define reg_set(r, v)		reg_write(r, reg_read(r) | (v))
+#endif
 #define reg_clear(r, v)		reg_write(r, reg_read(r) & ~(v))
 
 #define HCI_VERSION			0x00	/* HCI Version (in BCD) */
@@ -116,12 +145,58 @@
 
 #define DEV_CTX_BASE_LO			0x60
 #define DEV_CTX_BASE_HI			0x64
+#ifdef CONFIG_E2K
+#define DEV_CTX_SG			0x68
+#endif
 
 
+#ifdef CONFIG_E2K
+#ifdef I3C_PCI_DEBUG
+static char *get_ccc_cmd_name(int cmd)
+{
+	switch (cmd & 0xf) {
+	case 0: return "I3C_CCC_ENEC";
+	case 1: return "I3C_CCC_DISEC";
+	case 2: return "I3C_CCC_ENTAS";
+	case 6: return "I3C_CCC_RSTDAA";
+	case 9: return "I3C_CCC_SETMWL";
+	case 10: return "I3C_CCC_SETMRL";
+	case 0x28:
+	case 0x98: return "I3C_CCC_SETXTIME";
+	case 0x61:
+	case 0xe0: return "I3C_CCC_VENDOR";
+	default:
+		switch (cmd) {
+		case I3C_CCC_ENTDAA: return "I3C_CCC_ENTDAA";
+		case I3C_CCC_DEFSLVS: return "I3C_CCC_DEFSLVS";
+		case I3C_CCC_ENTTM: return "I3C_CCC_ENTTM";
+		case I3C_CCC_SETDASA: return "I3C_CCC_SETDASA";
+		case I3C_CCC_SETNEWDA: return "I3C_CCC_SETNEWDA";
+		case I3C_CCC_GETMWL: return "I3C_CCC_GETMWL";
+		case I3C_CCC_GETMRL: return "I3C_CCC_GETMRL";
+		case I3C_CCC_GETPID: return "I3C_CCC_GETPID";
+		case I3C_CCC_GETBCR: return "I3C_CCC_GETBCR";
+		case I3C_CCC_GETDCR: return "I3C_CCC_GETDCR";
+		case I3C_CCC_GETSTATUS: return "I3C_CCC_GETSTATUS";
+		case I3C_CCC_GETACCMST: return "I3C_CCC_GETACCMST";
+		case I3C_CCC_SETBRGTGT: return "I3C_CCC_SETBRGTGT";
+		case I3C_CCC_GETMXDS: return "I3C_CCC_GETMXDS";
+		case I3C_CCC_GETHDRCAP: return "I3C_CCC_GETHDRCAP";
+		case I3C_CCC_GETXTIME: return "I3C_CCC_GETXTIME";
+		default: return "";
+		}
+	}
+}
+#else /* #ifdef I3C_PCI_DEBUG */
+#define get_ccc_cmd_name(cmd) ""
+#endif
+#endif
 static inline struct i3c_hci *to_i3c_hci(struct i3c_master_controller *m)
 {
 	return container_of(m, struct i3c_hci, master);
 }
+
+
 
 static int i3c_hci_bus_init(struct i3c_master_controller *m)
 {
@@ -131,12 +206,13 @@ static int i3c_hci_bus_init(struct i3c_master_controller *m)
 
 	DBG("");
 
+#ifndef CONFIG_E2K
 	if (hci->cmd == &mipi_i3c_hci_cmd_v1) {
 		ret = mipi_i3c_hci_dat_v1.init(hci);
 		if (ret)
 			return ret;
 	}
-
+#endif
 	ret = i3c_master_get_free_addr(m, 0);
 	if (ret < 0)
 		return ret;
@@ -151,10 +227,11 @@ static int i3c_hci_bus_init(struct i3c_master_controller *m)
 	ret = hci->io->init(hci);
 	if (ret)
 		return ret;
-
+#ifdef CONFIG_E2K
+	reg_set(HC_CONTROL, HC_CONTROL_IBA_INCLUDE);
+#endif
 	reg_set(HC_CONTROL, HC_CONTROL_BUS_ENABLE);
 	DBG("HC_CONTROL = %#x", reg_read(HC_CONTROL));
-
 	return 0;
 }
 
@@ -198,10 +275,16 @@ static int i3c_hci_send_ccc_cmd(struct i3c_master_controller *m,
 	unsigned int nxfers = ccc->ndests + prefixed;
 	DECLARE_COMPLETION_ONSTACK(done);
 	int i, last, ret = 0;
-
+#ifdef CONFIG_E2K
+	DBG(" %s : called from %ps", get_ccc_cmd_name(ccc->id), __builtin_return_address(0));
+	DBG("cmd=%#x prefixed=%d rnw=%d ndests=%d dests[0].payload.data = %#lx,"
+	    " dests[0].payload.len=%d",
+	    ccc->id, prefixed, ccc->rnw, ccc->ndests,
+	    ccc->dests[0].payload.data, ccc->dests[0].payload.len);
+#else
 	DBG("cmd=%#x rnw=%d ndests=%d data[0].len=%d",
 	    ccc->id, ccc->rnw, ccc->ndests, ccc->dests[0].payload.len);
-
+#endif
 	xfer = hci_alloc_xfer(nxfers);
 	if (!xfer)
 		return -ENOMEM;
@@ -210,8 +293,17 @@ static int i3c_hci_send_ccc_cmd(struct i3c_master_controller *m,
 		xfer->data = NULL;
 		xfer->data_len = 0;
 		xfer->rnw = false;
+#ifdef CONFIG_E2K
+		ret = hci->cmd->prep_ccc(hci, xfer, I3C_BROADCAST_ADDR,
+				   ccc->id, true);
+		if (ret) {
+			DBG("hci->cmd->prep_ccc prefixed = %d", ret);
+			goto out;
+		}
+#else
 		hci->cmd->prep_ccc(hci, xfer, I3C_BROADCAST_ADDR,
 				   ccc->id, true);
+#endif
 		xfer++;
 	}
 
@@ -221,8 +313,15 @@ static int i3c_hci_send_ccc_cmd(struct i3c_master_controller *m,
 		xfer[i].rnw = ccc->rnw;
 		ret = hci->cmd->prep_ccc(hci, &xfer[i], ccc->dests[i].addr,
 					 ccc->id, raw);
+#ifdef CONFIG_E2K
+		if (ret) {
+			DBG("hci->cmd->prep_ccc = %d", ret);
+			goto out;
+		}
+#else
 		if (ret)
 			goto out;
+#endif
 		xfer[i].cmd_desc[0] |= CMD_0_ROC;
 	}
 	last = i - 1;
@@ -233,18 +332,48 @@ static int i3c_hci_send_ccc_cmd(struct i3c_master_controller *m,
 		xfer--;
 
 	ret = hci->io->queue_xfer(hci, xfer, nxfers);
+#ifdef CONFIG_E2K
+	if (ret) {
+		DBG("hci->io->queue_xfer = %d", ret);
+		goto out;
+	}
+#else
 	if (ret)
 		goto out;
+#endif
+#ifdef CONFIG_MCST
+	if (!wait_for_completion_timeout(&done, HZ)) {
+		DBG("timeout");
+		if (hci->io->dequeue_xfer(hci, xfer, nxfers)) {
+			ret = -ETIME;
+		 } else {
+			DBG("xfer completed (!), xfer freed (?)");
+		}
+		return ret;
+	}
+#else
 	if (!wait_for_completion_timeout(&done, HZ) &&
 	    hci->io->dequeue_xfer(hci, xfer, nxfers)) {
 		ret = -ETIME;
 		goto out;
 	}
+#endif
 	for (i = prefixed; i < nxfers; i++) {
 		if (ccc->rnw)
 			ccc->dests[i - prefixed].payload.len =
 				RESP_DATA_LENGTH(xfer[i].response);
+#ifdef CONFIG_E2K
+		if ((RESP_STATUS(xfer[i].response) == RESP_ERR_ADDR_HEADER) &&
+		    !(ccc->id & I3C_CCC_DIRECT)) {
+			/* 6.13.1.4. Occurs if no Target device to ack broadcast */
+			ccc->err = I3C_ERROR_M2;
+		}
+#endif
 		if (RESP_STATUS(xfer[i].response) != RESP_SUCCESS) {
+#ifdef CONFIG_E2K
+			DBG("RESP_STATUS(xfer[%d].response = %ld %s",
+			    i, RESP_STATUS(xfer[i].response), dma_response_name(xfer[i].response));
+#endif
 			ret = -EIO;
 			goto out;
 		}
@@ -309,11 +438,21 @@ static int i3c_hci_priv_xfers(struct i3c_dev_desc *dev,
 	ret = hci->io->queue_xfer(hci, xfer, nxfers);
 	if (ret)
 		goto out;
+#ifdef CONFIG_MCST
+	if (!wait_for_completion_timeout(&done, HZ)) {
+		DBG("timeout");
+		if (hci->io->dequeue_xfer(hci, xfer, nxfers)) {
+		}
+		ret = -ETIME;
+		goto out;
+	}
+#else
 	if (!wait_for_completion_timeout(&done, HZ) &&
 	    hci->io->dequeue_xfer(hci, xfer, nxfers)) {
 		ret = -ETIME;
 		goto out;
 	}
+#endif
 	for (i = 0; i < nxfers; i++) {
 		if (i3c_xfers[i].rnw)
 			i3c_xfers[i].len = RESP_DATA_LENGTH(xfer[i].response);
@@ -396,6 +535,10 @@ static int i3c_hci_attach_i3c_dev(struct i3c_dev_desc *dev)
 		dev_data->dat_idx = ret;
 	}
 	i3c_dev_set_master_data(dev, dev_data);
+#ifdef CONFIG_E2K
+	DBG("dev = %ps, dev_data = %ps, dat_idx = %d, dyn_addr = %d",
+	    dev, dev_data, ret, dev->info.dyn_addr);
+#endif
 	return 0;
 }
 
@@ -404,9 +547,13 @@ static int i3c_hci_reattach_i3c_dev(struct i3c_dev_desc *dev, u8 old_dyn_addr)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct i3c_hci *hci = to_i3c_hci(m);
 	struct i3c_hci_dev_data *dev_data = i3c_dev_get_master_data(dev);
-
+#ifdef CONFIG_E2K
+	DBG("dev = %ps, dev_data = %ps", dev, dev_data);
+	DBG("dev = %ps, dev_data = %ps, dat_idx = %d, dyn_addr = %d",
+	    dev, dev_data, dev_data->dat_idx, dev->info.dyn_addr);
+#else
 	DBG("");
-
+#endif
 	if (hci->cmd == &mipi_i3c_hci_cmd_v1)
 		mipi_i3c_hci_dat_v1.set_dynamic_addr(hci, dev_data->dat_idx,
 					     dev->info.dyn_addr);
@@ -419,7 +566,7 @@ static void i3c_hci_detach_i3c_dev(struct i3c_dev_desc *dev)
 	struct i3c_hci *hci = to_i3c_hci(m);
 	struct i3c_hci_dev_data *dev_data = i3c_dev_get_master_data(dev);
 
-	DBG("");
+	DBG("0x%llx", (u64)dev);
 
 	i3c_dev_set_master_data(dev, NULL);
 	if (hci->cmd == &mipi_i3c_hci_cmd_v1)
@@ -497,7 +644,6 @@ static int i3c_hci_enable_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct i3c_hci *hci = to_i3c_hci(m);
 	struct i3c_hci_dev_data *dev_data = i3c_dev_get_master_data(dev);
-
 	mipi_i3c_hci_dat_v1.clear_flags(hci, dev_data->dat_idx, DAT_0_SIR_REJECT, 0);
 	return i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
 }
@@ -611,31 +757,62 @@ static int i3c_hci_init(struct i3c_hci *hci)
 	hci->DAT_regs = offset ? hci->base_regs + offset : NULL;
 	hci->DAT_entries = FIELD_GET(DAT_TABLE_SIZE, regval);
 	hci->DAT_entry_size = FIELD_GET(DAT_ENTRY_SIZE, regval);
+#ifdef CONFIG_E2K
+	if (hci->DAT_entry_size == 0) {
+		hci->DAT_entry_size = 8;
+	}
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "DAT: %u %u-bytes entries at offset %#x\n",
+			 hci->DAT_entries, hci->DAT_entry_size * 4, offset);
+#else
 	dev_info(&hci->master.dev, "DAT: %u %u-bytes entries at offset %#x\n",
 		 hci->DAT_entries, hci->DAT_entry_size * 4, offset);
-
+#endif
 	regval = reg_read(DCT_SECTION);
 	offset = FIELD_GET(DCT_TABLE_OFFSET, regval);
 	hci->DCT_regs = offset ? hci->base_regs + offset : NULL;
 	hci->DCT_entries = FIELD_GET(DCT_TABLE_SIZE, regval);
 	hci->DCT_entry_size = FIELD_GET(DCT_ENTRY_SIZE, regval);
+#ifdef CONFIG_E2K
+	if (hci->DCT_entry_size == 0) {
+		hci->DCT_entry_size = 8;
+	}
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "DCT: %u %u-bytes entries at offset %#x\n",
+			 hci->DCT_entries, hci->DCT_entry_size * 4, offset);
+#else
 	dev_info(&hci->master.dev, "DCT: %u %u-bytes entries at offset %#x\n",
 		 hci->DCT_entries, hci->DCT_entry_size * 4, offset);
-
+#endif
 	regval = reg_read(RING_HEADERS_SECTION);
 	offset = FIELD_GET(RING_HEADERS_OFFSET, regval);
 	hci->RHS_regs = offset ? hci->base_regs + offset : NULL;
+#ifdef CONFIG_E2K
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "Ring Headers at offset %#x\n", offset);
+#else
 	dev_info(&hci->master.dev, "Ring Headers at offset %#x\n", offset);
+#endif
 
 	regval = reg_read(PIO_SECTION);
 	offset = FIELD_GET(PIO_REGS_OFFSET, regval);
 	hci->PIO_regs = offset ? hci->base_regs + offset : NULL;
+#ifdef CONFIG_E2K
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "PIO section at offset %#x\n", offset);
+#else
 	dev_info(&hci->master.dev, "PIO section at offset %#x\n", offset);
+#endif
 
 	regval = reg_read(EXT_CAPS_SECTION);
 	offset = FIELD_GET(EXT_CAPS_OFFSET, regval);
 	hci->EXTCAPS_regs = offset ? hci->base_regs + offset : NULL;
+#ifdef CONFIG_E2K
+	if (mipi_verbose)
+		dev_info(&hci->master.dev, "Extended Caps at offset %#x\n", offset);
+#else
 	dev_info(&hci->master.dev, "Extended Caps at offset %#x\n", offset);
+#endif
 
 	ret = i3c_hci_parse_ext_caps(hci);
 	if (ret)
@@ -705,7 +882,12 @@ static int i3c_hci_init(struct i3c_hci *hci)
 			ret = -EIO;
 		} else {
 			hci->io = &mipi_i3c_hci_dma;
+#ifdef CONFIG_E2K
+			if (mipi_verbose)
+				dev_info(&hci->master.dev, "Using DMA\n");
+#else
 			dev_info(&hci->master.dev, "Using DMA\n");
+#endif
 		}
 	}
 
@@ -713,7 +895,12 @@ static int i3c_hci_init(struct i3c_hci *hci)
 	if (!hci->io && hci->PIO_regs) {
 		reg_set(HC_CONTROL, HC_CONTROL_PIO_MODE);
 		if (!(reg_read(HC_CONTROL) & HC_CONTROL_PIO_MODE)) {
+#ifdef CONFIG_E2K
+			if (mipi_verbose)
+				dev_err(&hci->master.dev, "DMA mode is stuck\n");
+#else
 			dev_err(&hci->master.dev, "DMA mode is stuck\n");
+#endif
 			ret = -EIO;
 		} else {
 			hci->io = &mipi_i3c_hci_pio;
@@ -727,10 +914,16 @@ static int i3c_hci_init(struct i3c_hci *hci)
 			ret = -EINVAL;
 		return ret;
 	}
+#ifdef CONFIG_E2K
+	if (hci->cmd == &mipi_i3c_hci_cmd_v1) {
+		return mipi_i3c_hci_dat_v1.init(hci);
+	}
+#endif
 
 	return 0;
 }
 
+#ifndef CONFIG_E2K
 static int i3c_hci_probe(struct platform_device *pdev)
 {
 	struct i3c_hci *hci;
@@ -790,6 +983,257 @@ static struct platform_driver i3c_hci_driver = {
 };
 module_platform_driver(i3c_hci_driver);
 
+#else /* CONFIG_E2K */
+ /* i3c as PCI device */
+
+#include <linux/dma-map-ops.h>
+
+#define MCST_I3C_MODNAME	"I3C_PCI"
+#define	MCST_I3C_RH0_IRQ	"I3C_PCI_RH0"
+#define	MCST_I3C_RH1_IRQ	"I3C_PCI_RH1"
+#define	MCST_I3C_PIO_IRQ	"I3C_PCI_PIO"
+
+
+static irqreturn_t i3c_pio_hci_irq_handler(int irq, void *dev_id)
+{
+	struct i3c_hci *hci = dev_id;
+	return IRQ_RETVAL(hci->io->irq_handler(hci, 0));
+}
+
+static irqreturn_t i3c_rh0_hci_irq_handler(int irq, void *dev_id)
+{
+        struct i3c_hci *hci = dev_id;
+	return hci->io->irq_handler(hci, BIT(0));
+}
+
+static irqreturn_t i3c_rh1_hci_irq_handler(int irq, void *dev_id)
+{
+        struct i3c_hci *hci = dev_id;
+	return hci->io->irq_handler(hci, BIT(1));
+}
+
+static int request_i3cpci_irqs(struct pci_dev *pdev, struct i3c_hci *hci)
+{
+	int ret;
+
+
+	hci->msix_entries[0].entry = 0;
+	hci->msix_entries[1].entry = 1;
+	hci->msix_entries[2].entry = 2;
+
+	if (reg_read(HC_CONTROL) & HC_CONTROL_PIO_MODE) { /* we work in PIO mode */
+		ret = pci_enable_msix_range(pdev, hci->msix_entries, 2, 2);
+		if (ret < 0) {
+			dev_err(&pdev->dev, "pci_enable_msix_range failed err = %d\n", ret);
+			return ret;
+		}
+		ret = request_irq(hci->msix_entries[0].vector,
+				       i3c_hci_irq_handler, 0, MCST_I3C_MODNAME, hci);
+		if (ret) {
+			pci_free_irq_vectors(pdev);
+			return ret;
+		}
+		ret = request_irq(hci->msix_entries[1].vector,
+				       i3c_pio_hci_irq_handler, 0, MCST_I3C_PIO_IRQ, hci);
+		if (ret) {
+			free_irq(hci->msix_entries[0].vector, hci);
+			pci_free_irq_vectors(pdev);
+			return ret;
+		}
+	} else {/* dma mode */
+		ret = pci_enable_msix_range(pdev, hci->msix_entries, 3, 3);
+		if (ret < 0) {
+			dev_err(&pdev->dev, "pci_enable_msix_range failed err = %d\n", ret);
+			return ret;
+		}
+		ret = request_threaded_irq(hci->msix_entries[0].vector, NULL,
+				       i3c_hci_irq_handler, 0, MCST_I3C_MODNAME, hci);
+		if (ret) {
+			pci_free_irq_vectors(pdev);
+			return ret;
+		}
+		ret = request_threaded_irq(hci->msix_entries[1].vector, NULL,
+				       i3c_rh0_hci_irq_handler, 0, MCST_I3C_RH0_IRQ, hci);
+		if (ret) {
+			free_irq(hci->msix_entries[0].vector, hci);
+			pci_free_irq_vectors(pdev);
+			return ret;
+		}
+		ret = request_threaded_irq(hci->msix_entries[2].vector, NULL,
+				       i3c_rh1_hci_irq_handler, 0, MCST_I3C_RH1_IRQ, hci);
+		if (ret) {
+			free_irq(hci->msix_entries[0].vector, hci);
+			free_irq(hci->msix_entries[1].vector, hci);
+			pci_free_irq_vectors(pdev);
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static int i3c_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+{
+	struct i3c_hci *hci;
+	int err;
+	resource_size_t ioaddr;
+	struct resource *res;
+
+	hci = devm_kzalloc(&pdev->dev, sizeof(*hci), GFP_KERNEL);
+	if (!hci)
+		return -ENOMEM;
+	err = pci_enable_device(pdev);
+	if (err < 0) {
+		dev_err(&pdev->dev, "failed to enable device -- err=%d\n", err);
+		return err;
+	}
+	pci_set_master(pdev);
+
+	ioaddr = pci_resource_start(pdev, 0);
+	if (!ioaddr) {
+		dev_err(&pdev->dev, "card has no PCI resource0\n");
+		err = -ENODEV;
+		goto err1;
+	}
+	res = request_mem_region(pci_resource_start(pdev, 0), pci_resource_len(pdev, 0),
+				 MCST_I3C_MODNAME);
+	if (res == NULL) {
+		dev_err(&pdev->dev, "memio address range 0x%llx + 0x%llx already allocated\n",
+			pci_resource_start(pdev, 0), pci_resource_len(pdev, 0));
+		err = -EBUSY;
+		goto err1;
+	}
+
+	hci->base_regs = ioremap(ioaddr, pci_resource_len(pdev, 0));
+	if (hci->base_regs == NULL) {
+		dev_err(&pdev->dev,
+			"unable to map base ioaddr = 0x%llx\n", ioaddr);
+		err = -ENOMEM;
+		goto err_release_reg;
+	}
+	
+	hci->ioaddr = ioaddr;
+	pci_set_drvdata(pdev, hci);
+	hci->pdev = pdev;
+
+	/* temporary for dev_printk's, to be replaced in i3c_master_register */
+	hci->master.dev.init_name = dev_name(&pdev->dev);
+
+	err = i3c_hci_init(hci);
+	if (err) {
+		dev_err(&pdev->dev, "i3c_hci_init failed\n");
+		goto err_release_reg;
+	}
+
+	err = request_i3cpci_irqs(pdev, hci);
+	if (err) {
+		dev_err(&pdev->dev, "request_i3cpci_irqs failed\n");
+		goto err_iounmap;
+	}
+	err = dma_coerce_mask_and_coherent(&hci->master.dev, *pdev->dev.dma_mask);
+	if (err) {
+		dev_err(&pdev->dev, "dma_coerce_mask_and_coherent failed\n");
+		goto err_free_irqs;
+	}
+	err = i3c_master_register(&hci->master, &pdev->dev,
+				  &i3c_hci_ops, false);
+	if (err) {
+		dev_err(&pdev->dev, "i3c_master_register failed\n");
+		goto err_free_irqs;
+	}
+	DBG("device %04u:%02u.%u configured",
+	    pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
+	return 0;
+
+err_free_irqs:
+	if (!(reg_read(HC_CONTROL) & HC_CONTROL_PIO_MODE)) {
+		free_irq(hci->msix_entries[2].vector, hci);
+	}
+	free_irq(hci->msix_entries[1].vector, hci);
+	free_irq(hci->msix_entries[0].vector, hci);
+	pci_free_irq_vectors(pdev);
+err_iounmap:
+	iounmap(hci->base_regs);
+err_release_reg:
+	release_mem_region(ioaddr, pci_resource_len(pdev, 0));
+err1:
+	dev_set_drvdata(&pdev->dev, NULL);
+	pci_disable_device(pdev);
+	return err;
+	
+}
+
+static void i3c_pci_remove(struct pci_dev *pdev)
+{
+	struct i3c_hci *hci = dev_get_drvdata(&pdev->dev);
+	if (!(reg_read(HC_CONTROL) & HC_CONTROL_PIO_MODE)) {
+		free_irq(hci->msix_entries[2].vector, hci);
+	}
+	i3c_master_unregister(&hci->master);
+	iounmap(hci->base_regs);
+	release_mem_region(pci_resource_start(pdev, 0), pci_resource_len(pdev, 0));
+	free_irq(hci->msix_entries[1].vector, hci);
+	free_irq(hci->msix_entries[0].vector, hci);
+	pci_free_irq_vectors(pdev);
+	pci_disable_device(pdev);
+}
+
+
+const struct pci_device_id i3c_pci_tbl[] = {
+	{
+		.vendor = PCI_VENDOR_ID_MCST_TMP,
+		.device = 0x8051,
+		.subvendor = PCI_ANY_ID,
+		.subdevice = PCI_ANY_ID,
+	},
+	{ 0, }
+};
+
+MODULE_DEVICE_TABLE(pci, i3c_pci_tbl);
+
+static struct pci_driver i3c_pci_driver = {
+	.name		= KBUILD_MODNAME,
+	.id_table	= i3c_pci_tbl,
+	.probe		= i3c_pci_probe,
+	.remove		= i3c_pci_remove,
+#if 0
+	.shutdown	= i3c_shutdown,
+	.resume		= mgb_resume,
+	.suspend	= mgb_suspend,
+#endif
+};
+
+static void __exit i3c_pci_cleanup_module(void)
+{
+	pci_unregister_driver(&i3c_pci_driver);
+
+}
+
+static int __init i3c_pci_init_module(void)
+{
+	int status;
+
+
+	status = pci_register_driver(&i3c_pci_driver);
+	if (status != 0) {
+		pr_err(KBUILD_MODNAME ": Could not register driver\n");
+	}
+
+	return status;
+}
+
+
+module_param(xfer_ring_sz, int, 0444);
+MODULE_PARM_DESC(xfer_ring_sz, KBUILD_MODNAME " xfer ring size");
+
+module_param(ibi_ring_sz, int, 0444);
+MODULE_PARM_DESC(ibi_ring_sz, KBUILD_MODNAME " ibi status ring size");
+
+module_param(mipi_verbose, int, 0444);
+MODULE_PARM_DESC(mipi_verbose, KBUILD_MODNAME " verbose mode of init");
+
+module_init(i3c_pci_init_module);
+module_exit(i3c_pci_cleanup_module);
+#endif /* CONFIG_E2K */
 MODULE_AUTHOR("Nicolas Pitre <npitre@baylibre.com>");
 MODULE_DESCRIPTION("MIPI I3C HCI driver");
 MODULE_LICENSE("Dual BSD/GPL");

@@ -49,8 +49,13 @@
 atomic_t __kexec_lock = ATOMIC_INIT(0);
 
 /* Per cpu memory for storing cpu states in case of system crash. */
+#ifdef CONFIG_E2K
+/* note_buf_t structure must be located in continuous physical pages,
+ * so it's impossible to use percpu allocator */
+note_buf_t *crash_notes[NR_CPUS];
+#else
 note_buf_t __percpu *crash_notes;
-
+#endif
 /* Flag to indicate we are going to kexec a new kernel */
 bool kexec_in_progress = false;
 
@@ -1082,7 +1087,11 @@ void crash_save_cpu(struct pt_regs *regs, int cpu)
 	 * squirrelled away.  ELF notes happen to provide
 	 * all of that, so there is no need to invent something new.
 	 */
+#ifdef CONFIG_E2K
+	buf = (u32 *)crash_notes[cpu];
+#else
 	buf = (u32 *)per_cpu_ptr(crash_notes, cpu);
+#endif /* CONFIG_E2K */
 	if (!buf)
 		return;
 	memset(&prstatus, 0, sizeof(prstatus));
@@ -1115,6 +1124,17 @@ static int __init crash_notes_memory_init(void)
 	 * Break compile if size is bigger than PAGE_SIZE since crash_notes
 	 * definitely will be in 2 pages with that.
 	 */
+#ifdef CONFIG_E2K
+		int cpu;
+		for_each_possible_cpu(cpu) {
+		crash_notes[cpu] = (note_buf_t *)__get_free_pages(
+			GFP_KERNEL | __GFP_ZERO, get_order(size));
+		if (!crash_notes[cpu]) {
+			pr_warn("Memory allocation for saving cpu register states failed\n");
+			return -ENOMEM;
+		}
+	}
+#else
 	BUILD_BUG_ON(size > PAGE_SIZE);
 
 	crash_notes = __alloc_percpu(size, align);
@@ -1122,6 +1142,7 @@ static int __init crash_notes_memory_init(void)
 		pr_warn("Memory allocation for saving cpu register states failed\n");
 		return -ENOMEM;
 	}
+#endif /* CONFIG_E2K */
 	return 0;
 }
 subsys_initcall(crash_notes_memory_init);

@@ -369,4 +369,7 @@ static const struct file_operations sync_file_fops = {
 	.poll = sync_file_poll,
 	.unlocked_ioctl = sync_file_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = sync_file_ioctl,
+#endif
 };

@@ -165,6 +165,9 @@ int radeon_dpm = -1;
 int radeon_aspm = -1;
 int radeon_runtime_pm = -1;
 int radeon_hard_reset = 0;
+#ifdef CONFIG_MCST
+int radeon_fbdev_accel = 1;
+#endif
 int radeon_vm_size = 8;
 int radeon_vm_block_size = -1;
 int radeon_deep_color = 0;
@@ -240,6 +243,11 @@ module_param_named(runpm, radeon_runtime_pm, int, 0444);
 
 MODULE_PARM_DESC(hard_reset, "PCI config reset (1 = force enable, 0 = disable (default))");
 module_param_named(hard_reset, radeon_hard_reset, int, 0444);
+
+#ifdef CONFIG_MCST
+MODULE_PARM_DESC(fbdev_accel, "Disable/Enable linux console framebuffer acceleration");
+module_param_named(fbdev_accel, radeon_fbdev_accel, int, 0444);
+#endif
 
 MODULE_PARM_DESC(vm_size, "VM address space size in gigabytes (default 4GB)");
 module_param_named(vm_size, radeon_vm_size, int, 0444);
@@ -369,7 +377,7 @@ radeon_pci_shutdown(struct pci_dev *pdev)
 	if (radeon_device_is_virtual())
 		radeon_pci_remove(pdev);
 
-#if defined(CONFIG_PPC64) || defined(CONFIG_MACH_LOONGSON64)
+#if defined(CONFIG_PPC64) || defined(CONFIG_MACH_LOONGSON64) || defined(CONFIG_MCST)
 	/*
 	 * Some adapters need to be suspended before a
 	 * shutdown occurs in order to prevent an error
@@ -520,6 +528,18 @@ static long radeon_kms_compat_ioctl(struct file *filp, unsigned int cmd, unsigne
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static long radeon_kms_ptr128_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	unsigned int nr = DRM_IOCTL_NR(cmd);
+
+	if (nr < DRM_COMMAND_BASE)
+		return drm_ptr128_ioctl(filp, cmd, arg);
+
+	return radeon_drm_ioctl(filp, cmd, arg);
+}
+#endif
+
 static const struct dev_pm_ops radeon_pm_ops = {
 	.suspend = radeon_pmops_suspend,
 	.resume = radeon_pmops_resume,
@@ -542,6 +562,9 @@ static const struct file_operations radeon_driver_kms_fops = {
 	.read = drm_read,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = radeon_kms_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = radeon_kms_ptr128_ioctl,
 #endif
 };
 

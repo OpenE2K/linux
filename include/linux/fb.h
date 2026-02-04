@@ -289,7 +289,11 @@ struct fb_ops {
 	/* Handle 32bit compat ioctl (optional) */
 	int (*fb_compat_ioctl)(struct fb_info *info, unsigned cmd,
 			unsigned long arg);
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	/* Handle e2k ptr128 ioctl (optional) */
+	int (*fb_ptr128_ioctl)(struct fb_info *info, unsigned cmd,
+			unsigned long arg);
+#endif
 	/* perform fb specific mmap */
 	int (*fb_mmap)(struct fb_info *info, struct vm_area_struct *vma);
 
@@ -535,7 +539,7 @@ static inline struct apertures_struct *alloc_apertures(unsigned int max_num) {
 #define STUPID_ACCELF_TEXT_SHIT
 
 // This will go away
-#if defined(__sparc__)
+#if defined(__sparc__) && defined(CONFIG_SBUS)
 
 /* We map all of our framebuffers such that big-endian accesses
  * are what we want, so the following is sufficient.
@@ -556,8 +560,9 @@ static inline struct apertures_struct *alloc_apertures(unsigned int max_num) {
 
 #elif defined(__i386__) || defined(__alpha__) || defined(__x86_64__) ||	\
 	defined(__hppa__) || defined(__sh__) || defined(__powerpc__) ||	\
-	defined(__arm__) || defined(__aarch64__) || defined(__mips__)
-
+	defined(__arm__) || defined(__aarch64__) || defined(__mips__) || \
+	defined(__e2k__) || (defined(__sparc__) && !defined(CONFIG_SBUS))
+ 
 #define fb_readb __raw_readb
 #define fb_readw __raw_readw
 #define fb_readl __raw_readl

@@ -619,7 +619,7 @@ bool strarray__strtoul_flags(struct strarray *sa, char *bf, size_t size, u64 *re
 		if (isalpha(*tok) || *tok == '_') {
 			if (!strarray__strtoul(sa, tok, toklen, &val))
 				return false;
-		} else
+		} else 
 			val = strtoul(tok, NULL, 0);
 
 		*ret |= (1 << (val - 1));

@@ -842,7 +842,12 @@ long ksys_shmget(key_t key, size_t size, int shmflg)
 	struct ipc_params shm_params;
 
 	ns = current->nsproxy->ipc_ns;
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (cpu_has(CPU_FEAT_ISET_V7) && in_ptr128_syscall()) {
+		unsigned long align_mask = ap_align_mask(size);
+		size = (size + align_mask) & ~align_mask;
+	}
+#endif
 	shm_params.key = key;
 	shm_params.flg = shmflg;
 	shm_params.u.size = size;
@@ -1882,5 +1887,24 @@ static int sysvipc_shm_proc_show(struct seq_file *s, void *it)
 		   swp * PAGE_SIZE);
 
 	return 0;
+}
+#endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+unsigned long get_shm_segm_size(int shmid)
+{
+	struct ipc_namespace *ns;
+	struct shmid64_ds sem64;
+	int err;
+
+	if (shmid < 0)
+		return -EINVAL;
+
+	ns = current->nsproxy->ipc_ns;
+	err = shmctl_stat(ns, shmid, SHM_STAT_ANY, &sem64);
+	if (err < 0)
+		return err;
+
+	return sem64.shm_segsz;
 }
 #endif

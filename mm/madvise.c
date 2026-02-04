@@ -1019,6 +1019,13 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 	struct anon_vma_name *anon_name;
 	unsigned long new_flags = vma->vm_flags;
 
+#ifdef CONFIG_E2K
+	if ((vma->vm_flags & VM_PRIVILEGED) && !test_ts_flag(TS_KERNEL_SYSCALL)) {
+		*prev = vma;
+		return 0;
+	}
+#endif
+
 	switch (behavior) {
 	case MADV_REMOVE:
 		return madvise_remove(vma, prev, start, end);

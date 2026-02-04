@@ -27,6 +27,10 @@
 #include <linux/tick.h>
 #include <linux/irq.h>
 #include <linux/wait_bit.h>
+#ifdef CONFIG_MCST_RT
+#include <linux/sched/rt.h>
+#include <linux/mcst_rt.h>
+#endif 
 
 #include <asm/softirq_stack.h>
 
@@ -294,7 +298,19 @@ static inline bool should_wake_ksoftirqd(void)
 static inline void invoke_softirq(void)
 {
 	if (should_wake_ksoftirqd())
+#if defined(CONFIG_E90S) && defined(CONFIG_MCST) && defined(CONFIG_FTRACE)
+	{
+		if (!__this_cpu_read(ksoftirqd)) {
+			preempt_disable();
+			__do_softirq();
+			preempt_enable_no_resched();
+		} else {
+#endif
 		wakeup_softirqd();
+#if defined(CONFIG_E90S) && defined(CONFIG_MCST) && defined(CONFIG_FTRACE)
+		}
+	}
+#endif
 }
 
 #define SCHED_SOFTIRQ_MASK	BIT(SCHED_SOFTIRQ)
@@ -403,7 +419,12 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 		 * Run softirq if any pending. And do it in its own stack
 		 * as we may be calling this deep in a task call stack already.
 		 */
+#ifdef CONFIG_MCST  /* napi_wq_worker() is as in_interrupt() */
+		if (!test_thread_flag(TIF_NAPI_WORK))
+			do_softirq();
+#else
 		do_softirq();
+#endif
 	}
 
 	preempt_count_dec();
@@ -482,6 +503,17 @@ asmlinkage __visible void do_softirq(void)
 }
 
 #endif /* !CONFIG_PREEMPT_RT */
+
+#ifdef CONFIG_MCST_RT
+void wakeup_delayed_softirq(int cpu)
+{
+	/* Called in idle or in __schedule with preempt_disabled */
+	struct task_struct *tsk = __this_cpu_read(ksoftirqd);
+	if (tsk && tsk->__state != TASK_RUNNING)
+		wake_up_process(tsk);
+}
+#endif
+
 
 /*
  * We restart softirq processing for at most MAX_SOFTIRQ_RESTART times,

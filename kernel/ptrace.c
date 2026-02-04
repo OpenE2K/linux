@@ -783,6 +783,16 @@ static int ptrace_peek_siginfo(struct task_struct *child,
 
 		} else
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		if (in_ptr128_syscall()) {
+			BUILD_BUG_ON(sizeof(siginfo_t) != sizeof(struct prot_siginfo));
+			if (copy_siginfo_to_prot_user((void __user *)data, &info)) {
+				ret = -EFAULT;
+				break;
+			}
+
+		} else
+#endif
 		{
 			siginfo_t __user *uinfo = (siginfo_t __user *) data;
 

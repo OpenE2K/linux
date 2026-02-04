@@ -3201,6 +3201,9 @@ static const struct block_device_operations mtip_block_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= mtip_block_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= mtip_block_ioctl,
+#endif
 	.getgeo		= mtip_block_getgeo,
 	.free_disk	= mtip_block_free_disk,
 	.owner		= THIS_MODULE

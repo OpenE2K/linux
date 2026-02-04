@@ -311,6 +311,9 @@ const struct file_operations exfat_dir_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = exfat_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = exfat_ioctl,
+#endif
 	.fsync		= exfat_file_fsync,
 };
 

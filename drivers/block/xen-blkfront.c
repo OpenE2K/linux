@@ -2506,6 +2506,9 @@ static const struct block_device_operations xlvbd_block_fops =
 	.getgeo = blkif_getgeo,
 	.ioctl = blkif_ioctl,
 	.compat_ioctl = blkdev_compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = blkif_ioctl,
+#endif
 };
 
 

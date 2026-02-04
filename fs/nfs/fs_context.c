@@ -1201,7 +1201,70 @@ static void nfs4_compat_mount_data_conv(struct nfs4_mount_data *data)
 	data->flags = compat->flags;
 	data->version = compat->version;
 }
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+/* Tags are lost, but no protection violation
+ * because of user data just will be read
+ */
+struct ptr128_nfs_string {
+	unsigned int	len;
+	e2k_ap_t	data;
+};
 
+static inline void ptr128_nfs_string(struct nfs_string *dst,
+				     struct ptr128_nfs_string __user *src)
+{
+	dst->data = (void __user *)AP_PTR(src->data);
+	dst->len = src->len;
+}
+
+struct ptr128_nfs4_mount_data_v1 {
+	int version;
+	int flags;
+	int rsize;
+	int wsize;
+	int timeo;
+	int retrans;
+	int acregmin;
+	int acregmax;
+	int acdirmin;
+	int acdirmax;
+	struct ptr128_nfs_string client_addr;
+	struct ptr128_nfs_string mnt_path;
+	struct ptr128_nfs_string hostname;
+	unsigned int	host_addrlen;
+	e2k_ap_t	host_addr;
+	int proto;
+	int auth_flavourlen;
+	e2k_ap_t auth_flavours;
+};
+
+static void nfs4_ptr128_mount_data_conv(struct nfs4_mount_data *m)
+{
+	struct ptr128_nfs4_mount_data_v1 *compat =
+			(struct ptr128_nfs4_mount_data_v1 *)m;
+	struct nfs4_mount_data data;
+
+	data.auth_flavours = (void __user *)AP_PTR(compat->auth_flavours);
+	data.auth_flavourlen = compat->auth_flavourlen;
+	data.proto = compat->proto;
+	data.host_addr = (void __user *)AP_PTR(compat->host_addr);
+	data.host_addrlen = compat->host_addrlen;
+	ptr128_nfs_string(&data.hostname, &compat->hostname);
+	ptr128_nfs_string(&data.mnt_path, &compat->mnt_path);
+	ptr128_nfs_string(&data.client_addr, &compat->client_addr);
+	data.acdirmax = compat->acdirmax;
+	data.acdirmin = compat->acdirmin;
+	data.acregmax = compat->acregmax;
+	data.acregmin = compat->acregmin;
+	data.retrans = compat->retrans;
+	data.timeo = compat->timeo;
+	data.wsize = compat->wsize;
+	data.rsize = compat->rsize;
+	data.flags = compat->flags;
+	data.version = compat->version;
+	memcpy(m, &data, sizeof(data));
+}
+#endif
 /*
  * Validate NFSv4 mount options
  */
@@ -1227,7 +1290,10 @@ static int nfs4_parse_monolithic(struct fs_context *fc,
 
 	if (in_compat_syscall())
 		nfs4_compat_mount_data_conv(data);
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		nfs4_ptr128_mount_data_conv(data);
+#endif
 	if (data->host_addrlen > sizeof(ctx->nfs_server.address))
 		goto out_no_address;
 	if (data->host_addrlen == 0)

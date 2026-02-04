@@ -232,7 +232,13 @@ struct compat_fib_ioctl {
 	s32	wait;
 	compat_uptr_t fib;
 };
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+struct ptr128_fib_ioctl {
+	u32	fibctx;
+	s32	wait;
+	e2k_ap_t fib;
+};
+#endif
 /**
  *	next_getadapter_fib	-	get the next fib
  *	@dev: adapter to use
@@ -259,6 +265,22 @@ static int next_getadapter_fib(struct aac_dev * dev, void __user *arg)
 		f.fibctx = cf.fibctx;
 		f.wait = cf.wait;
 		f.fib = compat_ptr(cf.fib);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	} else if (in_ptr128_syscall()) {
+		e2k_ap_t ap;
+		int tag;
+		if (copy_from_user(&f, arg, sizeof(struct fib_ioctl)))
+			return -EFAULT;
+		if (get_user_tagged_16(ap.qword, tag,
+		    &((struct ptr128_fib_ioctl __user *)arg)->fib))
+			return -EFAULT;
+		if (IS_AP(ap, tag)) {
+			set_ap_u_border(ap);
+			f.fib = (void __user *)AP_PTR(ap);
+		} else {
+			f.fib = NULL;
+		}
+#endif
 	} else {
 		if (copy_from_user(&f, arg, sizeof(struct fib_ioctl)))
 			return -EFAULT;

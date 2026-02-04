@@ -1600,9 +1600,9 @@ struct net_device_ops {
 						      u32 maxrate);
 	int			(*ndo_get_iflink)(const struct net_device *dev);
 	int			(*ndo_fill_metadata_dst)(struct net_device *dev,
-						       struct sk_buff *skb);
+							struct sk_buff *skb);
 	void			(*ndo_set_rx_headroom)(struct net_device *dev,
-						       int needed_headroom);
+							int needed_headroom);
 	int			(*ndo_bpf)(struct net_device *dev,
 					   struct netdev_bpf *bpf);
 	int			(*ndo_xdp_xmit)(struct net_device *dev, int n,
@@ -1621,6 +1621,10 @@ struct net_device_ops {
 	ktime_t			(*ndo_get_tstamp)(struct net_device *dev,
 						  const struct skb_shared_hwtstamps *hwtstamps,
 						  bool cycles);
+
+#ifdef CONFIG_MCST_RT
+	int                     ndo_unlocked_ioctl;
+#endif
 };
 
 /**
@@ -2375,6 +2379,13 @@ struct net_device {
 	struct rtnl_hw_stats64	*offload_xstats_l3;
 };
 #define to_net_dev(d) container_of(d, struct net_device, dev)
+
+#ifdef CONFIG_MCST
+static inline bool napi_scheduled(struct napi_struct *n)
+{
+	return !!test_bit(NAPI_STATE_SCHED, &n->state);
+}
+#endif /* CONFIG_MCST */
 
 static inline bool netif_elide_gro(const struct net_device *dev)
 {
@@ -4291,6 +4302,9 @@ enum {
 	NETIF_MSG_PKTDATA_BIT,
 	NETIF_MSG_HW_BIT,
 	NETIF_MSG_WOL_BIT,
+#ifdef CONFIG_MCST
+	NETIF_MSG_1588_BIT,
+#endif
 
 	/* When you add a new bit above, update netif_msg_class_names array
 	 * in net/ethtool/common.c
@@ -4318,6 +4332,9 @@ static_assert(NETIF_MSG_CLASS_COUNT <= 32);
 #define NETIF_MSG_PKTDATA	__NETIF_MSG(PKTDATA)
 #define NETIF_MSG_HW		__NETIF_MSG(HW)
 #define NETIF_MSG_WOL		__NETIF_MSG(WOL)
+#ifdef CONFIG_MCST
+#define NETIF_MSG_1588		__NETIF_MSG(1588)
+#endif
 
 #define netif_msg_drv(p)	((p)->msg_enable & NETIF_MSG_DRV)
 #define netif_msg_probe(p)	((p)->msg_enable & NETIF_MSG_PROBE)
@@ -4334,6 +4351,11 @@ static_assert(NETIF_MSG_CLASS_COUNT <= 32);
 #define netif_msg_pktdata(p)	((p)->msg_enable & NETIF_MSG_PKTDATA)
 #define netif_msg_hw(p)		((p)->msg_enable & NETIF_MSG_HW)
 #define netif_msg_wol(p)	((p)->msg_enable & NETIF_MSG_WOL)
+#ifdef CONFIG_MCST
+#define netif_msg_1588(p)	((p)->msg_enable & NETIF_MSG_1588)
+#else
+#define netif_msg_1588(p)	(0)
+#endif
 
 static inline u32 netif_msg_init(int debug_value, int default_msg_enable_bits)
 {

@@ -104,6 +104,14 @@
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
+#ifdef CONFIG_MCST_4RT
+#include <linux/mcst_rt.h>
+#include <linux/cpumask.h>
+#endif
+
+#ifdef CONFIG_E2K
+#include <asm/process.h>
+#endif
 
 #include <trace/events/sched.h>
 
@@ -488,8 +496,13 @@ void vm_area_free(struct vm_area_struct *vma)
 
 static void account_kernel_stack(struct task_struct *tsk, int account)
 {
+#ifdef CONFIG_E2K
+	struct vm_struct *vm = task_stack_vm_area(tsk);
+	if (vm) {
+#else
 	if (IS_ENABLED(CONFIG_VMAP_STACK)) {
 		struct vm_struct *vm = task_stack_vm_area(tsk);
+#endif
 		int i;
 
 		for (i = 0; i < THREAD_SIZE / PAGE_SIZE; i++)
@@ -513,6 +526,9 @@ void exit_task_stack_account(struct task_struct *tsk)
 		int i;
 
 		vm = task_stack_vm_area(tsk);
+#ifdef CONFIG_E2K
+		if (vm)
+#endif
 		for (i = 0; i < THREAD_SIZE / PAGE_SIZE; i++)
 			memcg_kmem_uncharge_page(vm->pages[i], 0);
 	}
@@ -1726,6 +1742,10 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 
 	task_lock(current->group_leader);
 	memcpy(sig->rlim, current->signal->rlim, sizeof sig->rlim);
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	memcpy(sig->bin_comp_rlim, current->signal->bin_comp_rlim,
+	       sizeof(sig->bin_comp_rlim));
+#endif
 	task_unlock(current->group_leader);
 
 	posix_cpu_timers_init_group(sig);
@@ -2095,6 +2115,13 @@ static __latent_entropy struct task_struct *copy_process(
 	const u64 clone_flags = args->flags;
 	struct nsproxy *nsp = current->nsproxy;
 
+#ifdef CONFIG_MCST
+	/* don't create not root process during sometime after oom_killer work*/
+	if (pid != &init_struct_pid && oom_limit(current)) {
+		return ERR_PTR(-ENOMEM);
+	}
+#endif
+
 	/*
 	 * Don't allow sharing the root directory with processes in a different
 	 * namespace
@@ -2308,6 +2335,12 @@ static __latent_entropy struct task_struct *copy_process(
 #ifdef CONFIG_DEBUG_MUTEXES
 	p->blocked_on = NULL; /* not blocked yet */
 #endif
+#ifdef CONFIG_MCST
+#ifndef CONFIG_PREEMPT_RT
+	p->wait_on_mutex = NULL;
+#endif
+	p->wait_on_rtmutex = NULL;
+#endif
 #ifdef CONFIG_BCACHE
 	p->sequential_io	= 0;
 	p->sequential_io_avg	= 0;
@@ -2315,7 +2348,7 @@ static __latent_entropy struct task_struct *copy_process(
 #ifdef CONFIG_BPF_SYSCALL
 	RCU_INIT_POINTER(p->bpf_storage, NULL);
 	p->bpf_ctx = NULL;
-#endif
+#endif 
 
 	/* Perform scheduler related setup. Assign this task to a CPU. */
 	retval = sched_fork(clone_flags, p);
@@ -2364,6 +2397,17 @@ static __latent_entropy struct task_struct *copy_process(
 	stackleak_task_init(p);
 
 	if (pid != &init_struct_pid) {
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+		if (is_bc_outmost_thread(task_thread_info(p))) {
+			p->signal->rlim[RLIMIT_NOFILE].rlim_cur = INR_OPEN_CUR;
+			p->signal->rlim[RLIMIT_NOFILE].rlim_max = INR_OPEN_MAX;
+
+			retval = bc_set_outmost_ns(p, clone_flags);
+			if (retval)
+				goto bad_fork_cleanup_thread;
+
+		}
+#endif
 		pid = alloc_pid(p->nsproxy->pid_ns_for_children, args->set_tid,
 				args->set_tid_size);
 		if (IS_ERR(pid)) {
@@ -2487,6 +2531,13 @@ static __latent_entropy struct task_struct *copy_process(
 		p->real_parent = current;
 		p->parent_exec_id = current->self_exec_id;
 		p->exit_signal = args->exit_signal;
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+		if (is_bc_outmost_thread(task_thread_info(p))) {
+			retval = bc_set_outmost_parent(p);
+			if (retval)
+				goto bad_fork_cancel_cgroup;
+		}
+#endif
 	}
 
 	klp_copy_process(p);
@@ -2526,6 +2577,11 @@ static __latent_entropy struct task_struct *copy_process(
 		init_task_pid(p, PIDTYPE_PID, pid);
 		if (thread_group_leader(p)) {
 			init_task_pid(p, PIDTYPE_TGID, pid);
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+			if (is_bc_outmost_thread(task_thread_info(p)))
+				init_task_pid(p, PIDTYPE_PGID, pid);
+			else
+#endif
 			init_task_pid(p, PIDTYPE_PGID, task_pgrp(current));
 			init_task_pid(p, PIDTYPE_SID, task_session(current));
 
@@ -2722,6 +2778,22 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	int trace = 0;
 	pid_t nr;
 
+#ifdef CONFIG_MCST_4RT
+	if (rts_act_mask & RTS_NO_FORK) {
+		p = current;
+		pr_warn("RTS_NO_FORK but %s-%d does. Parents:",
+			p->comm, p->pid);
+		while (p->real_parent) {
+			p = p->real_parent;
+			pr_warn(" %s-%d", p->comm, p->pid);
+			if (p->pid <= 2)
+				break;
+		}
+		pr_warn("\n");
+		if (!strncmp(p->comm, "kworker", 6))
+			WARN_ON(1);
+	}
+#endif
 	/*
 	 * For legacy clone() calls, CLONE_PIDFD uses the parent_tid argument
 	 * to return the pidfd. Hence, CLONE_PIDFD and CLONE_PARENT_SETTID are
@@ -2768,6 +2840,16 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 
 	pid = get_task_pid(p, PIDTYPE_PID);
 	nr = pid_vnr(pid);
+#if defined(CONFIG_E2K) && defined(CONFIG_SECONDARY_SPACE_SUPPORT)
+	/*
+	 * If the pid ns has been changed, the outer thread pid may be missing
+	 * from the current pid ns and, therefore, nr will be 0. Returning of
+	 * '1' will indicate that clone was successfull, and child was moved to
+	 * bin_comp_init_ns().
+	 */
+	if (nr == 0 && is_bc_outmost_thread(task_thread_info(p)))
+		nr = 1;
+#endif
 
 	if (clone_flags & CLONE_PARENT_SETTID)
 		put_user(nr, args->parent_tid);
@@ -2777,6 +2859,22 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 		init_completion(&vfork);
 		get_task_struct(p);
 	}
+
+#ifdef CONFIG_MCST_4RT
+#include <linux/cpumask.h>
+	if (cpumask_weight(&p->cpus_mask) > 1 &&
+			cpumask_intersects(&p->cpus_mask, rt_cpu_mask)) {
+		cpumask_var_t new_mask;
+
+		if (!alloc_cpumask_var(&new_mask, GFP_KERNEL))
+			return -ENOMEM;
+
+		cpumask_copy(new_mask, &p->cpus_mask);
+		cpumask_andnot(new_mask, new_mask, rt_cpu_mask);
+		set_cpus_allowed_ptr(p, new_mask);
+		free_cpumask_var(new_mask);
+	}
+#endif
 
 	if (IS_ENABLED(CONFIG_LRU_GEN) && !(clone_flags & CLONE_VM)) {
 		/* lock the task to synchronize with memcg migration */
@@ -3139,7 +3237,12 @@ void __init proc_caches_init(void)
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT,
 			NULL);
 
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	vm_area_cachep = KMEM_CACHE(vm_area_struct, SLAB_PANIC|SLAB_ACCOUNT
+							| SLAB_NO_SANITIZE);
+#else
 	vm_area_cachep = KMEM_CACHE(vm_area_struct, SLAB_PANIC|SLAB_ACCOUNT);
+#endif
 	mmap_init();
 	nsproxy_cache_init();
 }

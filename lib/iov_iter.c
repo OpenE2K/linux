@@ -10,6 +10,9 @@
 #include <linux/vmalloc.h>
 #include <linux/splice.h>
 #include <linux/compat.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/prot_compat.h>
+#endif
 #include <net/checksum.h>
 #include <linux/scatterlist.h>
 #include <linux/instrumented.h>
@@ -1457,7 +1460,19 @@ static ssize_t __iov_iter_get_pages_alloc(struct iov_iter *i,
 		n = want_pages_array(pages, maxsize, *start, maxpages);
 		if (!n)
 			return -ENOMEM;
+#ifdef CONFIG_E2K
+		/*
+		 * Allow reading of privileged areas through
+		 * get_user_pages_unlocked without access_ok() check
+		 */
+		if (unlikely((iov_iter_rw(i) == WRITE) &&
+				!access_ok(addr, (n + 1) * PAGE_SIZE)))
+			res = get_user_pages_unlocked(addr, n, *pages, 0);
+		else
+			res = get_user_pages_fast(addr, n, gup_flags, *pages);
+#else
 		res = get_user_pages_fast(addr, n, gup_flags, *pages);
+#endif
 		if (unlikely(res <= 0))
 			return res;
 		maxsize = min_t(size_t, maxsize, res * PAGE_SIZE - *start);
@@ -1711,7 +1726,43 @@ uaccess_end:
 	user_access_end();
 	return ret;
 }
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int copy_ptr128_iovec_from_user(struct iovec *iov,
+		const struct iovec __user *uvec, unsigned long nr_segs)
+{
+	const struct prot_iovec __user *uiov =
+		(const struct prot_iovec __user *)uvec;
+	int ret = -EFAULT, i;
 
+	for (i = 0; i < nr_segs; i++) {
+		ssize_t len;
+		e2k_ap_t ap;
+		int tag;
+
+		if (get_user(len, &uiov[i].iov_len)) {
+			goto uaccess_end;
+		}
+		if (len > 0) {
+			if (get_user_tagged_16(ap.qword, tag, &uiov[i].iov_base)
+					|| !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < len) {
+				goto uaccess_end;
+			}
+			iov[i].iov_base = (void __user *)AP_PTR(ap);
+		} else if (len == 0) {
+			iov[i].iov_base = NULL;
+		} else {
+			ret = -EINVAL;
+			goto uaccess_end;
+		}
+		iov[i].iov_len = len;
+	}
+	set_max_u_border();
+	ret = 0;
+uaccess_end:
+	user_access_end();
+	return ret;
+}
+#endif
 static int copy_iovec_from_user(struct iovec *iov,
 		const struct iovec __user *uvec, unsigned long nr_segs)
 {
@@ -1749,6 +1800,11 @@ struct iovec *iovec_from_user(const struct iovec __user *uvec,
 			return ERR_PTR(-ENOMEM);
 	}
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		ret = copy_ptr128_iovec_from_user(iov, uvec, nr_segs);
+	else
+#endif
 	if (compat)
 		ret = copy_compat_iovec_from_user(iov, uvec, nr_segs);
 	else
@@ -1787,7 +1843,13 @@ ssize_t __import_iovec(int type, const struct iovec __user *uvec,
 	for (seg = 0; seg < nr_segs; seg++) {
 		ssize_t len = (ssize_t)iov[seg].iov_len;
 
+#ifdef CONFIG_E2K
+		if (!in_ptr128_syscall())
+			if ((type == READ && !access_ok(iov[seg].iov_base, len)) ||
+			    !__range_ok((unsigned long)iov[seg].iov_base, len, PAGE_OFFSET)) {
+#else
 		if (!access_ok(iov[seg].iov_base, len)) {
+#endif
 			if (iov != *iovp)
 				kfree(iov);
 			*iovp = NULL;

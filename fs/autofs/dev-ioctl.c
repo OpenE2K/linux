@@ -707,6 +707,9 @@ static long autofs_dev_ioctl_compat(struct file *file, unsigned int command,
 static const struct file_operations _dev_ioctl_fops = {
 	.unlocked_ioctl	 = autofs_dev_ioctl,
 	.compat_ioctl = autofs_dev_ioctl_compat,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = autofs_dev_ioctl,
+#endif
 	.owner	 = THIS_MODULE,
 	.llseek = noop_llseek,
 };

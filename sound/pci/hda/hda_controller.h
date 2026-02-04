@@ -13,6 +13,9 @@
 #include <sound/initval.h>
 #include <sound/hda_codec.h>
 #include <sound/hda_register.h>
+#ifdef CONFIG_E2K
+#include <asm/pci.h>
+#endif
 
 #define AZX_MAX_CODECS		HDA_MAX_CODECS
 #define AZX_DEFAULT_CODECS	4

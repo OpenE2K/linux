@@ -605,6 +605,10 @@ struct i40e_pf {
 #define I40E_FLAG_TOTAL_PORT_SHUTDOWN_ENABLED	BIT(27)
 #define I40E_FLAG_VF_VLAN_PRUNING		BIT(28)
 
+#ifdef CONFIG_E2K_DCA
+#define I40E_FLAG_TPH_ENABLED			BIT(30)
+#endif
+
 	struct i40e_client_instance *cinst;
 	bool stat_offsets_loaded;
 	struct i40e_hw_port_stats stats;

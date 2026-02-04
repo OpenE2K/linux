@@ -1623,6 +1623,14 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi,
 	 */
 	epi->event.events = event->events; /* need barrier below */
 	epi->event.data = event->data; /* protected by mtx */
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	/* NB> In the protected execution mode epoll_event structute includes
+	 *     additional field (descriptor size).
+	 */
+	if (TASK_IS_PROTECTED(current))
+		((struct prot_epoll_event *)(&epi->event))->size =
+				((struct prot_epoll_event *)&event)->size;
+#endif
 	if (epi->event.events & EPOLLWAKEUP) {
 		if (!ep_has_wakeup_source(epi))
 			ep_create_wakeup_source(epi);
@@ -1738,7 +1746,13 @@ static int ep_send_events(struct eventpoll *ep,
 			continue;
 
 		events = epoll_put_uevent(revents, epi->event.data, events);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		if (!events || TASK_IS_PROTECTED(current) &&
+				__put_user(((struct prot_epoll_event *)&epi->event)->size,
+					&((struct prot_epoll_event __user *)events)->size)) {
+#else
 		if (!events) {
+#endif
 			list_add(&epi->rdllink, &txlist);
 			ep_pm_stay_awake(epi);
 			if (!res)

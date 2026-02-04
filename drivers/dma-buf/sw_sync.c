@@ -409,4 +409,7 @@ const struct file_operations sw_sync_debugfs_fops = {
 	.release        = sw_sync_debugfs_release,
 	.unlocked_ioctl = sw_sync_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = sw_sync_ioctl,
+#endif
 };

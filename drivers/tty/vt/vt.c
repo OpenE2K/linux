@@ -132,7 +132,12 @@ const struct consw *conswitchp;
  */
 #define DEFAULT_BELL_PITCH	750
 #define DEFAULT_BELL_DURATION	(HZ/8)
+
+#if defined(CONFIG_MCST) && HZ < 100 /* suppose it is processor-prototype */
+#define DEFAULT_CURSOR_BLINK_MS	2000
+#else
 #define DEFAULT_CURSOR_BLINK_MS	200
+#endif
 
 struct vc vc_cons [MAX_NR_CONSOLES];
 
@@ -3567,6 +3572,9 @@ static const struct tty_operations con_ops = {
 	.ioctl = vt_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = vt_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = vt_ptr128_ioctl,
 #endif
 	.stop = con_stop,
 	.start = con_start,

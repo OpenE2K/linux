@@ -717,6 +717,9 @@ static const struct file_operations joydev_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= joydev_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= joydev_ioctl,
+#endif
 	.fasync		= joydev_fasync,
 	.llseek		= no_llseek,
 };

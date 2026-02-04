@@ -2,6 +2,12 @@
 
 # Do not instrument the tracer itself:
 
+ifdef CONFIG_E2K
+# kernel/trace/ deals with stack traces and function
+# inlining causes some frames to be lost
+subdir-ccflags-y += $(call lcc-option,-finline-only-native)
+endif
+
 ccflags-remove-$(CONFIG_FUNCTION_TRACER) += $(CC_FLAGS_FTRACE)
 
 ifdef CONFIG_FUNCTION_TRACER

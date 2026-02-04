@@ -13,7 +13,10 @@
 #include <linux/genalloc.h>
 #include <linux/highmem.h>
 #include <linux/vmalloc.h>
-#ifdef CONFIG_X86
+#ifdef CONFIG_MCST
+#include <linux/pci.h>
+#endif
+#if defined CONFIG_X86 || defined CONFIG_E2K
 #include <asm/set_memory.h>
 #endif
 #include <sound/memalloc.h>
@@ -301,7 +304,7 @@ static void *do_alloc_pages(struct device *dev, size_t size, dma_addr_t *addr,
 			goto again;
 		}
 	}
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 	if (wc)
 		set_memory_wc((unsigned long)(p), size >> PAGE_SHIFT);
 #endif
@@ -310,7 +313,7 @@ static void *do_alloc_pages(struct device *dev, size_t size, dma_addr_t *addr,
 
 static void do_free_pages(void *p, size_t size, bool wc)
 {
-#ifdef CONFIG_X86
+#if defined CONFIG_X86 || defined CONFIG_E2K
 	if (wc)
 		set_memory_wb((unsigned long)(p), size >> PAGE_SHIFT);
 #endif
@@ -462,17 +465,47 @@ static const struct snd_malloc_ops snd_dma_iram_ops = {
 };
 #endif /* CONFIG_GENERIC_ALLOCATOR */
 
+#ifdef CONFIG_MCST
+static const struct pci_device_id snd_dma_bug_ids[] = {
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338A), 0},
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338B), 0},
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8738), 0},
+	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8738B), 0},
+	{PCI_VDEVICE(AL, PCI_DEVICE_ID_CMEDIA_CM8738), 0},
+	{0,},
+};
+
+static int add_pad_for_buggy_cards(struct device *dev)
+{
+	if (dev_is_pci(dev) &&
+		pci_match_id(snd_dma_bug_ids, to_pci_dev(dev))) {
+		return PAGE_SIZE;
+	}
+	return 0;
+}
+#endif
+
 /*
  * Coherent device pages allocator
  */
 static void *snd_dma_dev_alloc(struct snd_dma_buffer *dmab, size_t size)
 {
+#ifdef CONFIG_MCST
+	size += add_pad_for_buggy_cards(dmab->dev.dev);
+#endif
+
 	return dma_alloc_coherent(dmab->dev.dev, size, &dmab->addr, DEFAULT_GFP);
 }
 
 static void snd_dma_dev_free(struct snd_dma_buffer *dmab)
 {
+#ifdef CONFIG_MCST
+	size_t size = dmab->bytes + add_pad_for_buggy_cards(dmab->dev.dev);
+
+	dma_free_coherent(dmab->dev.dev, size, dmab->area, dmab->addr);
+#else
 	dma_free_coherent(dmab->dev.dev, dmab->bytes, dmab->area, dmab->addr);
+#endif
 }
 
 static int snd_dma_dev_mmap(struct snd_dma_buffer *dmab,

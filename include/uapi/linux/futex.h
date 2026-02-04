@@ -63,7 +63,11 @@
  */
 struct futex_waitv {
 	__u64 val;
+#ifndef __ptr128__
 	__u64 uaddr;
+#else /* __ptr128__ */
+	void *uaddr;
+#endif /* __ptr128__ */
 	__u32 flags;
 	__u32 __reserved;
 };

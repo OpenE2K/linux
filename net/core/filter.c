@@ -87,8 +87,8 @@ static_assert(sizeof(struct bpf_fib_lookup) == 64, "struct bpf_fib_lookup size c
 
 static const struct bpf_func_proto *
 bpf_sk_base_func_proto(enum bpf_func_id func_id);
-
 int copy_bpf_fprog_from_user(struct sock_fprog *dst, sockptr_t src, int len)
+
 {
 	if (in_compat_syscall()) {
 		struct compat_sock_fprog f32;
@@ -100,6 +100,30 @@ int copy_bpf_fprog_from_user(struct sock_fprog *dst, sockptr_t src, int len)
 		memset(dst, 0, sizeof(*dst));
 		dst->len = f32.len;
 		dst->filter = compat_ptr(f32.filter);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	} else if (in_ptr128_syscall() && !src.is_kernel) {
+		/* kernel can't produce ptr128 structure */
+		e2k_ap_t ap;
+		int tag;
+		unsigned short l;
+		struct ptr128_sock_fprog __user *f128p =
+				(struct ptr128_sock_fprog __user *)src.user;
+		if (len != sizeof(*f128p))
+			return -EINVAL;
+		if (get_user(l, &f128p->len))
+			return -EFAULT;
+		if (l) {
+			if (get_user_tagged_16(ap.qword, tag, &f128p->filter) || !IS_AP(ap, tag))
+				return -EFAULT;
+			dst->len = l;
+			dst->filter = (struct sock_filter __user *)AP_PTR(ap);
+			set_ap_u_border(ap);
+		} else {
+			dst->len = 0;
+			dst->filter = NULL;
+			set_u_border(0);
+		}
+#endif
 	} else {
 		if (len != sizeof(*dst))
 			return -EINVAL;

@@ -317,6 +317,9 @@ static const struct block_device_operations aoe_bdops = {
 	.release = aoeblk_release,
 	.ioctl = aoeblk_ioctl,
 	.compat_ioctl = blkdev_compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = aoeblk_ioctl,
+#endif
 	.getgeo = aoeblk_getgeo,
 	.owner = THIS_MODULE,
 };

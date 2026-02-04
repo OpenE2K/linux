@@ -6,3 +6,10 @@
 config DCA
 	tristate
 
+config E2K_DCA
+	bool "E2K DCA provider support in intel network cards"
+	select DCA
+	depends on E2K_E48C
+	help
+	  Add a E2K DCA provider to support a TPH mode in intel network cards.
+

@@ -324,6 +324,9 @@ static const struct proc_ops proc_bus_pci_ops = {
 #ifdef CONFIG_COMPAT
 	.proc_compat_ioctl = proc_bus_pci_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.proc_ptr128_ioctl = proc_bus_pci_ioctl,
+#endif
 #ifdef HAVE_PCI_MMAP
 	.proc_open	= proc_bus_pci_open,
 	.proc_release	= proc_bus_pci_release,

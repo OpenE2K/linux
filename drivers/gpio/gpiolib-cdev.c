@@ -345,6 +345,9 @@ static const struct file_operations linehandle_fileops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = linehandle_ioctl_compat,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = linehandle_ioctl,
+#endif
 };
 
 static int linehandle_create(struct gpio_device *gdev, void __user *ip)
@@ -1760,6 +1763,9 @@ static const struct file_operations line_fileops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = linereq_ioctl_compat,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = linereq_ioctl,
+#endif
 #ifdef CONFIG_PROC_FS
 	.show_fdinfo = linereq_show_fdinfo,
 #endif
@@ -2131,6 +2137,9 @@ static const struct file_operations lineevent_fileops = {
 	.unlocked_ioctl = lineevent_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = lineevent_ioctl_compat,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = lineevent_ioctl,
 #endif
 };
 
@@ -2879,6 +2888,9 @@ static const struct file_operations gpio_fileops = {
 	.unlocked_ioctl = gpio_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = gpio_ioctl_compat,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = gpio_ioctl,
 #endif
 };
 

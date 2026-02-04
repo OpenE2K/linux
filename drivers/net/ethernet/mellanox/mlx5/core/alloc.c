@@ -38,6 +38,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/vmalloc.h>
 #include <linux/mlx5/driver.h>
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif
 
 #include "mlx5_core.h"
 
@@ -61,13 +64,25 @@ static void *mlx5_dma_zalloc_coherent_node(struct mlx5_core_dev *dev,
 	int original_node;
 	void *cpu_handle;
 
+#ifdef CONFIG_E2K
+	if (!l_iommu_has_numa_bug()) {
+#endif
 	mutex_lock(&priv->alloc_mutex);
 	original_node = dev_to_node(device);
 	set_dev_node(device, node);
+#ifdef CONFIG_E2K
+	}
+#endif
 	cpu_handle = dma_alloc_coherent(device, size, dma_handle,
 					GFP_KERNEL);
+#ifdef CONFIG_E2K
+	if (!l_iommu_has_numa_bug()) {
+#endif
 	set_dev_node(device, original_node);
 	mutex_unlock(&priv->alloc_mutex);
+#ifdef CONFIG_E2K
+	}
+#endif
 	return cpu_handle;
 }
 

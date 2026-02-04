@@ -75,6 +75,10 @@ static inline bool drm_arch_can_wc_memory(void)
 	 * memory regions.
 	 */
 	return false;
+#elif defined(CONFIG_E90S)
+	if (e90s_get_cpu_type() <= E90S_CPU_R2000)
+		return false;
+	return true;
 #else
 	return true;
 #endif

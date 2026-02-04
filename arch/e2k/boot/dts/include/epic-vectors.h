@@ -1,0 +1,67 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#ifndef _EPIC_VECTORS_H
+#define _EPIC_VECTORS_H
+
+/*
+ * Reserve the lowest usable vector (and hence lowest priority)  0x20 for
+ * triggering cleanup after irq migration. 0x21-0x2f will still be used
+ * for device interrupts.
+ */
+#define EPIC_IRQ_MOVE_CLEANUP_VECTOR		0x20
+
+/* EPIC system vectors have the highest priority level of 3 (0x300 - 0x3ff) */
+#define LINP0_INTERRUPT_VECTOR		0x3c0
+#define LINP1_INTERRUPT_VECTOR		0x3c1
+#define LINP2_INTERRUPT_VECTOR		0x3c2
+#define LINP3_INTERRUPT_VECTOR		0x3c3
+#define LINP4_INTERRUPT_VECTOR		0x3c4
+#define LINP5_INTERRUPT_VECTOR		0x3c5
+#define LINP6_INTERRUPT_VECTOR		0x3c6
+#define LINP7_INTERRUPT_VECTOR		0x3c7
+#define LINP8_INTERRUPT_VECTOR		0x3c8
+#define LINP9_INTERRUPT_VECTOR		0x3c9
+#define LINP10_INTERRUPT_VECTOR		0x3ca
+#define LINP11_INTERRUPT_VECTOR		0x3cb
+#define LINP12_INTERRUPT_VECTOR		0x3cc
+#define LINP13_INTERRUPT_VECTOR		0x3cd
+#define LINP14_INTERRUPT_VECTOR		0x3ce
+#define LINP15_INTERRUPT_VECTOR		0x3cf
+#define LINP16_INTERRUPT_VECTOR		0x3d0
+#define LINP17_INTERRUPT_VECTOR		0x3d1
+#define LINP18_INTERRUPT_VECTOR		0x3d2
+#define LINP19_INTERRUPT_VECTOR		0x3d3
+#define LINP20_INTERRUPT_VECTOR		0x3d4
+#define LINP21_INTERRUPT_VECTOR		0x3d5
+#define LINP22_INTERRUPT_VECTOR		0x3d6
+#define LINP23_INTERRUPT_VECTOR		0x3d7
+#define LINP24_INTERRUPT_VECTOR		0x3d8
+#define LINP25_INTERRUPT_VECTOR		0x3d9
+#define LINP26_INTERRUPT_VECTOR		0x3da
+#define LINP27_INTERRUPT_VECTOR		0x3db
+#define LINP28_INTERRUPT_VECTOR		0x3dc
+#define LINP29_INTERRUPT_VECTOR		0x3dd
+#define LINP30_INTERRUPT_VECTOR		0x3de
+#define LINP31_INTERRUPT_VECTOR		0x3df
+
+/* VIRQ vector to emulate NMI on guest kernel */
+#define	KVM_NMI_EPIC_VECTOR			0x3e3
+#define CEPIC_TIMER_VECTOR			0x3e4
+
+#define CEPIC_EPIC_INT_VECTOR			0x3f5
+#define EPIC_MANAGED_IRQ_SHUTDOWN_VECTOR	0x3f6
+#define EPIC_IRQ_WORK_VECTOR			0x3f7
+#define ASYNC_PF_WAKE_VECTOR			0x3f8
+#define PREPIC_ERROR_VECTOR			0x3f9
+/* VIRQ vector to emulate SysRq on guest kernel */
+#define	SYSRQ_SHOWSTATE_EPIC_VECTOR		0x3fa
+#define EPIC_CALL_FUNCTION_SINGLE_VECTOR	0x3fb
+#define EPIC_CALL_FUNCTION_VECTOR		0x3fc
+#define EPIC_RESCHEDULE_VECTOR			0x3fd
+#define ERROR_EPIC_VECTOR			0x3fe
+#define SPURIOUS_EPIC_VECTOR			0x3ff
+
+#endif

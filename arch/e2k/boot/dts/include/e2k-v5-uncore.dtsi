@@ -1,0 +1,27 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#include "e2k-v3-uncore.dtsi"
+
+#if CELLS == 2
+	PMC_FREQ: pmc_freq@NODE,cb0 {
+		compatible = "mcst,pmc-freq";
+		reg = <NSR_ADDR(00cb0) 0 0x10>;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
+	UNCORE_MC: uncore_mc@NODE,0 {
+		compatible = "mcst,uncore_mc";
+		reg = <NSR_ADDR(00000) 0 0x1000>, <NSR_ADDR(04000) 0 0x8000>;
+		nonposted-mmio;
+	};
+	L_PCS: pcs@NODE,cc4 {
+		compatible = "mcst,l_pcs";
+		reg = <NSR_ADDR(00cc4) 0 0x14>;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+		#thermal-sensor-cells = <1>;
+	};
+#endif

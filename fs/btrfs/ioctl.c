@@ -5633,6 +5633,144 @@ long btrfs_ioctl(struct file *file, unsigned int
 	return -ENOTTY;
 }
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+#include <asm/protected_syscalls.h>
+#include <asm/convert_array.h>
+
+struct btrfs_protected_ioctl_vol_args_v2 {
+	__s64 fd;
+	__u64 transid;
+	__u64 flags;
+	union {
+		struct {
+			__u64 size;
+			e2k_ptr_t qgroup_inherit;
+		};
+		__u64 unused[4];
+	};
+	union {
+		char name[BTRFS_SUBVOL_NAME_MAX + 1];
+		__u64 devid;
+		__u64 subvolid;
+	};
+};
+
+static long btrfs_protected_ioctl_v2(struct file *file,
+					unsigned long cmd, unsigned long arg)
+{
+	/* Pointer to user's 128bit struct */
+	struct btrfs_protected_ioctl_vol_args_v2 __user *arg128 =
+				(struct btrfs_protected_ioctl_vol_args_v2 *)arg;
+	/* Pointer to converted struct */
+	struct btrfs_ioctl_vol_args_v2 *arg64p;
+	__u64 size;
+	__u64 flags;
+
+	/* struct btrfs_ioctl_vol_args_v2 is huge. Avoid to allocate it in stack */
+
+	if (arg + sizeof(struct btrfs_protected_ioctl_vol_args_v2) > get_u_border()) {
+		return -EFAULT;
+	}
+	arg64p = arch_protected_alloc_user_data_stack(sizeof(struct btrfs_ioctl_vol_args_v2));
+	if (arg64p == NULL) {
+		return -ENOMEM;
+	}
+	set_u_border(MAX_U_BORDER);
+	if (copy_in_user(arg64p, arg128, 3 * sizeof(__u64))) {
+		/* fd, transid, flags */
+		return -EFAULT;
+	}
+	if (copy_in_user(arg64p + offsetof(struct btrfs_ioctl_vol_args_v2, devid),
+		     arg128 + offsetof(struct btrfs_protected_ioctl_vol_args_v2, devid),
+		     sizeof(struct btrfs_ioctl_vol_args_v2) -
+			    offsetof(struct btrfs_ioctl_vol_args_v2, devid))) {
+		/* union {name, devid, subvolid */
+		return -EFAULT;
+	}
+	if (get_user(flags, (__u64 __user *)&arg128->flags))
+		return -EFAULT;
+	if (!(flags & BTRFS_SUBVOL_QGROUP_INHERIT)) {
+		/* qgroup_inherit not used */
+		return btrfs_ioctl(file, cmd, (unsigned long)arg64p);
+	}
+	/* struct btrfs_qgroup_inherit __user *qgroup_inherit is in use conversion required */
+	e2k_ap_t ap;
+	int tag;
+	if (get_user(size, &arg128->size))
+		return -EFAULT;
+	if (get_user_tagged_16(ap.qword, tag, &arg128->qgroup_inherit) || !IS_AP(ap, tag) ||
+					AP_OBJ_SIZE(ap) < size) {
+		return -EFAULT;
+	}
+	if (put_user((void *)AP_PTR, &arg64p->qgroup_inherit) ||
+	    put_user(size, &arg64p->size))
+		return -EFAULT;
+	return btrfs_ioctl(file, cmd, (unsigned long)arg64p);
+}
+
+
+struct btrfs_ptr128_ioctl_send_args {
+	__s64 send_fd;			/* in */
+	__u64 clone_sources_count;	/* in */
+	e2k_ap_t  clone_sources;	/* in */
+	__u64 parent_root;		/* in */
+	__u64 flags;			/* in */
+	__u32 version;			/* in */
+	__u8  reserved[28];		/* in */
+};
+static long btrfs_protected_send_ioctl(struct file *file,
+					 unsigned long cmd, unsigned long arg)
+{
+	/* Pointer to converted structure */
+	struct btrfs_ioctl_send_args *arg64p;
+	struct btrfs_ptr128_ioctl_send_args arg128;
+	struct btrfs_ptr128_ioctl_send_args __user *arg128p =
+			(struct btrfs_ptr128_ioctl_send_args __user *)arg;
+	long buf_size;
+	e2k_ap_t ap;
+	int tag;
+
+	if (copy_from_user(&arg128, arg128p, sizeof(struct btrfs_ptr128_ioctl_send_args))) {
+		return -EFAULT;
+	}
+	arg64p = arch_protected_alloc_user_data_stack(sizeof(struct btrfs_ioctl_send_args));
+	if (arg64p == NULL) {
+		return -ENOMEM;
+	}
+	buf_size = array_size(sizeof(__u64), arg128.clone_sources_count);
+	if (buf_size && (get_user_tagged_16(ap.qword, tag, &arg128p->clone_sources) ||
+			!IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < buf_size)) {
+		return -EFAULT;
+	}
+	set_u_border(MAX_U_BORDER);
+	if (put_user(arg128.clone_sources_count, &arg64p->clone_sources_count) ||
+	    arg128.clone_sources_count ?
+		put_user((__u64 *)AP_PTR(ap), &arg64p->clone_sources) : 0 ||
+	    put_user(arg128.send_fd, &arg64p->send_fd) ||
+	    put_user(arg128.parent_root, &arg64p->parent_root) ||
+	    put_user(arg128.flags, &arg64p->flags) ||
+	    put_user(arg128.version, &arg64p->version)) {
+		return -EFAULT;
+	}
+	return btrfs_ioctl(file, cmd, (unsigned long)arg64p);
+}
+
+long btrfs_protected_ioctl(struct file *file, unsigned int cmd,
+					 unsigned long arg)
+{
+	switch (cmd) {
+	case BTRFS_IOC_SNAP_CREATE_V2:
+	case BTRFS_IOC_SUBVOL_CREATE_V2:
+	case BTRFS_IOC_SNAP_DESTROY_V2:
+	case BTRFS_IOC_RM_DEV_V2:
+		return btrfs_protected_ioctl_v2(file, cmd, arg);
+	case BTRFS_IOC_SEND:
+		return btrfs_protected_send_ioctl(file, cmd, arg);
+	}
+	return btrfs_ioctl(file, cmd, arg);
+}
+#endif
 #ifdef CONFIG_COMPAT
 long btrfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {

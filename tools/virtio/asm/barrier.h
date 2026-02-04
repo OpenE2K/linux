@@ -26,6 +26,20 @@
 # define mb() abort()
 # define dma_rmb() abort()
 # define dma_wmb() abort()
+#elif defined(__e2k__)
+#define barrier() asm volatile("" ::: "memory")
+#define virt_mb() __sync_synchronize()
+#define virt_rmb() __sync_synchronize()
+#define virt_wmb() __sync_synchronize()
+#define virt_store_mb(var, value)  do { \
+	typeof(var) virt_store_mb_value = (value); \
+	__atomic_exchange(&(var), &virt_store_mb_value, &virt_store_mb_value, \
+			  __ATOMIC_SEQ_CST); \
+	barrier(); \
+} while (0);
+# define mb() __sync_synchronize()
+# define dma_rmb() __sync_synchronize()
+# define dma_wmb() __sync_synchronize()
 #else
 #error Please fill in barrier macros
 #endif

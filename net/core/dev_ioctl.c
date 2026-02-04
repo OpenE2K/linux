@@ -12,6 +12,9 @@
 
 #include "dev.h"
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+#endif
 /*
  *	Map an interface index to its name (SIOCGIFNAME)
  */
@@ -51,6 +54,34 @@ int dev_ifconf(struct net *net, struct ifconf __user *uifc)
 		pos = compat_ptr(ifc32.ifcbuf);
 		len = ifc32.ifc_len;
 		size = sizeof(struct compat_ifreq);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	} else if (in_ptr128_syscall()) {
+		e2k_ap_t ap;
+		int tag;
+		struct ptr128_ifconf __user *uifc128 = (struct ptr128_ifconf __user *)uifc;
+		if (get_user_tagged_16(ap.qword, tag, &uifc128->ap))
+			return -EFAULT;
+		if (!IS_AP(ap, tag)) {
+			if (AP_NULL(ap, tag)) {
+				/* request just to know size for data to request in next call */
+				pos = NULL;
+				len = 0;
+			} else {
+				return -EFAULT;
+			}
+		} else {
+			/* real request */
+			pos = (void *)AP_PTR(ap);
+			if (get_user(len, &uifc128->ifc_len)) {
+				return -EFAULT;
+			}
+			if (len > AP_OBJ_SIZE(ap)) {
+				len = AP_OBJ_SIZE(ap);
+			}
+			set_u_border(MAX_U_BORDER);
+		}
+	size = sizeof(struct ptr128_ifreq);
+#endif
 	} else {
 		struct ifconf ifc;
 
@@ -452,6 +483,29 @@ void dev_load(struct net *net, const char *name)
 }
 EXPORT_SYMBOL(dev_load);
 
+
+#ifdef CONFIG_MCST_RT
+static int mcst_dev_ifsioc(struct net *net, struct ifreq *ifr, void __user *data,
+			   unsigned int cmd)
+{
+	int err;
+	struct net_device *dev = __dev_get_by_name(net, ifr->ifr_name);
+	const struct net_device_ops *ops;
+
+	if (!dev)
+		return -ENODEV;
+	ops = dev->netdev_ops;
+	if (!ops->ndo_unlocked_ioctl || (cmd < SIOCDEVPRIVATE) ||
+		(cmd > (SIOCDEVPRIVATE + 15))) {
+		rtnl_lock();
+		err = dev_ifsioc(net, ifr, data, cmd);
+		rtnl_unlock();
+		return err;
+	}
+        return dev_ifsioc(net, ifr, data, cmd);
+}
+#endif
+
 /*
  *	This function handles all "interface"-type I/O control requests. The actual
  *	'doing' part of this is dev_ifsioc above.
@@ -538,9 +592,13 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr,
 		dev_load(net, ifr->ifr_name);
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
+#ifdef CONFIG_MCST_RT
+		ret = mcst_dev_ifsioc(net, ifr, data, cmd);
+#else
 		rtnl_lock();
 		ret = dev_ifsioc(net, ifr, data, cmd);
 		rtnl_unlock();
+#endif
 		if (colon)
 			*colon = ':';
 		return ret;
@@ -609,9 +667,13 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr,
 		    (cmd >= SIOCDEVPRIVATE &&
 		     cmd <= SIOCDEVPRIVATE + 15)) {
 			dev_load(net, ifr->ifr_name);
+#ifdef CONFIG_MCST_RT
+			ret = mcst_dev_ifsioc(net, ifr, data, cmd);
+#else
 			rtnl_lock();
 			ret = dev_ifsioc(net, ifr, data, cmd);
 			rtnl_unlock();
+#endif
 			return ret;
 		}
 		return -ENOTTY;

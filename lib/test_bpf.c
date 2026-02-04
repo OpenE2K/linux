@@ -10376,6 +10376,26 @@ static struct bpf_test tests[] = {
 	{
 		"BPF_MAXINSNS: jump over MSH",
 		{ },
+#if defined(CONFIG_E2K) && defined(CONFIG_BPF_JIT)
+		/*
+		 * This test fails during convertion to eBPF,
+		 * because it consists of more than 4k MSH
+		 * instructions. cBPF MSH instruction is quite
+		 * complex and each one translates into about 15
+		 * eBPF instructions. In this test, the jump
+		 * from the beginning to the end of filter
+		 * requires an offset longer than the one
+		 * that can be encoded in signed 16-bit field
+		 * 'off' in eBPF command. Thats why this filter
+		 * is rejected by bpf_convert_filter().
+		 *
+		 * However, this filter is absolutely correct
+		 * from cBPF point of view, and cBPF JIT compiler
+		 * for e2k has no reason to reject it. So this
+		 * test fails with error "UNEXPECTED_PASS" when
+		 * cBPF JIT is turned on.
+		 */
+#endif
 		CLASSIC | FLAG_EXPECTED_FAIL,
 		{ 0xfa, 0xfb, 0xfc, 0xfd, },
 		{ { 4, 0xabababab } },

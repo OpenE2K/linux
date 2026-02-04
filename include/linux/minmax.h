@@ -86,16 +86,16 @@
 	({ type ux = (x); type uy = (y); __cmp(op, ux, uy); })
 
 #define __cmp_once(op, type, x, y) \
-	__cmp_once_unique(op, type, x, y, __UNIQUE_ID(x_), __UNIQUE_ID(y_))
+	__cmp_once_unique(op, type, x, y, __UNIQUE_ID(x_), __UNIQUE_ID(y_)) 
 
 #define __careful_cmp_once(op, x, y, ux, uy) ({		\
 	__auto_type ux = (x); __auto_type uy = (y);	\
 	BUILD_BUG_ON_MSG(!__types_ok(ux, uy),		\
 		#op"("#x", "#y") signedness error");	\
-	__cmp(op, ux, uy); })
+	__cmp(op, ux, uy); }) 
 
 #define __careful_cmp(op, x, y) \
-	__careful_cmp_once(op, x, y, __UNIQUE_ID(x_), __UNIQUE_ID(y_))
+	__careful_cmp_once(op, x, y, __UNIQUE_ID(x_), __UNIQUE_ID(y_)) 
 
 /**
  * min - return minimum of two values of the same or compatible types

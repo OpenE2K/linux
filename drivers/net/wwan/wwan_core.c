@@ -860,6 +860,9 @@ static const struct file_operations wwan_port_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = compat_ptr_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = wwan_port_fops_ioctl,
+#endif
 	.llseek = noop_llseek,
 };
 

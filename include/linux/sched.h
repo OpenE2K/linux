@@ -544,6 +544,9 @@ struct sched_statistics {
 #endif /* CONFIG_SCHEDSTATS */
 } ____cacheline_aligned;
 
+#ifdef CONFIG_MCST
+extern int cpu_queue_collect;
+#endif
 struct sched_entity {
 	/* For load-balancing: */
 	struct load_weight		load;
@@ -557,6 +560,17 @@ struct sched_entity {
 	u64				prev_sum_exec_runtime;
 
 	u64				nr_migrations;
+
+#ifdef CONFIG_MCST
+	long long			cpu_queue_tm;
+	long long			cpu_queue_res;
+	long long			oncpu_tm;
+	long long			oncpu_tm_res;
+	long long			ctx_sw_tm;
+	long long			ctx_sw_tm_res;
+	long long			prev_runtime;
+	long long			delt_exec_runtime;
+#endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	int				depth;
@@ -759,6 +773,9 @@ struct task_struct {
 	refcount_t			usage;
 	/* Per task flags (PF_*), defined further below: */
 	unsigned int			flags;
+#ifdef CONFIG_MCST              /* for RT_MLOCK_CONTROL */
+	unsigned int extra_flags;
+#endif
 	unsigned int			ptrace;
 
 #ifdef CONFIG_SMP
@@ -865,6 +882,10 @@ struct task_struct {
 #ifdef CONFIG_SMP
 	struct plist_node		pushable_tasks;
 	struct rb_node			pushable_dl_tasks;
+#endif
+
+#ifdef CONFIG_MCST_RT_SMP
+	int mcst_smp_cpu;
 #endif
 
 	struct mm_struct		*mm;
@@ -1106,6 +1127,11 @@ struct task_struct {
 	/* Restored if set_restore_sigmask() was used: */
 	sigset_t			saved_sigmask;
 	struct sigpending		pending;
+
+#if defined(CONFIG_E2K) && defined(CONFIG_E2K_DELAYED_SIGNALS)
+	struct kernel_siginfo		forced_info;
+#endif
+
 	unsigned long			sas_ss_sp;
 	size_t				sas_ss_size;
 	unsigned int			sas_ss_flags;
@@ -1457,6 +1483,22 @@ struct task_struct {
 	unsigned long			saved_state_change;
 # endif
 #endif
+#ifdef CONFIG_MCST
+	unsigned long long	wakeup_tm;	/* clock_source of last wakeup */
+	unsigned long long	sched_enter_tm;	/* cl_source of schedule enter */
+	unsigned long long	sched_lock_tm;	/* clock_source of  */
+	unsigned long long	cntx_swb_tm;	/* context switch begine */
+	unsigned long long	cntx_swe_tm;	/* context switch end */
+	unsigned long long	waken_tm;	/* cl_source of lw for it's wakeuper */
+	unsigned long long	intr_sc;	/* clock of last scheduler intr */
+	unsigned long		last_ipi_prmt_enable;
+	unsigned long		my_last_ipi_prmt_enable;
+	cycles_t		last_tm_on_cpu;
+	struct rt_mutex_base	*wait_on_rtmutex;
+#ifndef CONFIG_PREEMPT_RT
+	struct mutex		*wait_on_mutex;
+#endif
+#endif
 	int				pagefault_disabled;
 #ifdef CONFIG_MMU
 	struct task_struct		*oom_reaper_list;
@@ -1748,6 +1790,10 @@ extern struct pid *cad_pid;
 #define PF__HOLE__40000000	0x40000000
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
 
+#ifdef CONFIG_MCST
+#define RT_MLOCK_CONTROL	0x00000008	/* prohibit new mmap() & PF occurence */
+#endif
+
 /*
  * Only the _current_ task can read/write to tsk->flags, but other
  * tasks can access tsk->flags in readonly mode for example
@@ -1881,6 +1927,45 @@ static inline int dl_task_check_affinity(struct task_struct *p, const struct cpu
 {
 	return 0;
 }
+#endif
+
+#ifdef CONFIG_MCST_RT_SMP
+#define UNBOUND_CPU (NR_CPUS + MAX_NUMNODES)
+static inline int mcst_rt_affinity(struct task_struct *tsk)
+{
+	int ret = 0;
+#ifdef CONFIG_MCST_RT_GRQ
+	ret |= (tsk->mcst_smp_cpu == UNBOUND_CPU);
+#endif
+
+#ifdef CONFIG_MCST_RT_NUMA
+	ret |= (tsk->mcst_smp_cpu < UNBOUND_CPU &&
+		tsk->mcst_smp_cpu >= NR_CPUS);
+#endif
+	WARN_ON_ONCE(ret && !tsk->mm && !(tsk->flags & PF_EXITING));
+
+	return ret;
+}
+static inline int task_unbound(struct task_struct *tsk)
+{
+	return tsk->mcst_smp_cpu == UNBOUND_CPU;
+}
+static inline void dec_unbound_tasks(void)
+{
+	extern atomic_t num_unbound;
+	atomic_dec(&num_unbound);
+}
+#endif /* CONFIG_MCST_RT_SMP */
+
+#ifdef CONFIG_MCST
+extern long do_change_rts_mode_mask(long mode, long mask);
+# ifdef SHOW_WOKEN_TIME
+extern int show_woken_time;
+# endif
+# if defined(CONFIG_SCLKR_CLOCKSOURCE)
+extern struct clocksource clocksource_sclkr;
+extern int sclkr_unstable;
+# endif
 #endif
 
 extern int yield_to(struct task_struct *p, bool preempt);
@@ -2331,6 +2416,53 @@ static inline bool owner_on_cpu(struct task_struct *owner)
 /* Returns effective CPU energy utilization, as seen by the scheduler */
 unsigned long sched_cpu_util(int cpu);
 #endif /* CONFIG_SMP */
+
+#ifdef CONFIG_MCST_4RT
+extern int mcst_rt_prio(struct task_struct *tsk);
+
+/*
+ * This struct and defines are used to calculate all cpu_times(switch_to, )
+ * New fields may be added in stucture below
+ * To init fields - sched.c
+ * To print fields  - dintr_proc_show (file fs/proc/dintr_time.c
+ */
+typedef struct {
+	long long	curr_time_switch_to;
+	long long	max_time_switch_to;
+	long long	min_time_switch_to;
+} cpu_times_t;
+
+extern cpu_times_t cpu_times[];
+
+#define SWITCH_CPU (NR_CPUS + MAX_NUMNODES + 1)
+
+extern void el_resched_cpu(int cpu);
+
+#define DINTR_TIMER_WASNT_USE	0
+#define DINTR_TIMER_RUNNING	1
+#define DINTR_TIMER_STOPPED	2
+
+extern int dintr_timer_state;
+DECLARE_PER_CPU(unsigned long, dintr_time_min);
+DECLARE_PER_CPU(unsigned long, dintr_time_max);
+
+extern void idle_check_delayed_works(int cpu);
+extern void wakeup_delayed_posix_timer(int cpu);
+extern void wakeup_delayed_softirq(int cpu);
+
+/* Possible values for modes see <linux/mcst_rt.h>. search RTCPU */
+DECLARE_PER_CPU(int, delayed_posix_timer);
+DECLARE_PER_CPU(int, delayed_softirq);
+
+#define my_rt_cpu_data	 (&per_cpu(rt_cpu_data, raw_smp_processor_id()))
+#define rt_cpu_data(cpu) (&per_cpu(rt_cpu_data, cpu))
+
+extern long rts_mode;
+
+# ifdef CONFIG_WATCH_PREEMPT
+DECLARE_PER_CPU(u32, nowatch_set);
+# endif
+#endif	/* CONFIG_MCST_4RT */
 
 #ifdef CONFIG_RSEQ
 

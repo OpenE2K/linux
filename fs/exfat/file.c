@@ -389,6 +389,9 @@ const struct file_operations exfat_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = exfat_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = exfat_ioctl,
+#endif
 	.mmap		= generic_file_mmap,
 	.fsync		= exfat_file_fsync,
 	.splice_read	= generic_file_splice_read,

@@ -429,6 +429,9 @@ static const struct file_operations snd_mixer_oss_f_ops =
 	.llseek =	no_llseek,
 	.unlocked_ioctl =	snd_mixer_oss_ioctl,
 	.compat_ioctl =	snd_mixer_oss_ioctl_compat,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	snd_mixer_oss_ioctl,
+#endif
 };
 
 /*

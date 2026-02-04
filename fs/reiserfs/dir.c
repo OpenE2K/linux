@@ -26,6 +26,10 @@ const struct file_operations reiserfs_dir_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = reiserfs_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = reiserfs_ioctl,
+#endif
+
 };
 
 static int reiserfs_dir_fsync(struct file *filp, loff_t start, loff_t end,

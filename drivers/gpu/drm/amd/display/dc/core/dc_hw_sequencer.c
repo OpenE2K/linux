@@ -324,7 +324,12 @@ void get_surface_visual_confirm_color(
 		if (pipe_ctx->plane_state->layer_index > 0) {
 			/* set border color to pink */
 			color->color_b_cb = color_value;
+#ifdef CONFIG_E2K
+			/* bug 119618: -fforbid-fp mode */
+			color->color_g_y = color_value / 2;
+#else
 			color->color_g_y = color_value * 0.5;
+#endif
 		}
 		break;
 
@@ -352,7 +357,12 @@ void get_surface_visual_confirm_color(
 		color->color_g_y = color_value;
 		if (pipe_ctx->plane_state->layer_index > 0) {
 			/* set border color to orange */
+#ifdef CONFIG_E2K
+			/* bug 119618: -fforbid-fp mode */
+			color->color_g_y = 11 * color_value / 50;
+#else
 			color->color_g_y = 0.22 * color_value;
+#endif
 			color->color_b_cb = 0;
 		}
 		break;

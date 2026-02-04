@@ -36,7 +36,7 @@ config DRM_IMX_LDB
 config DRM_IMX_HDMI
 	tristate "Freescale i.MX DRM HDMI"
 	select DRM_DW_HDMI
-	depends on DRM_IMX && OF
+	depends on DRM_IMX && OF || E90S || E2K && (CPU_E1CP || CPU_E2C3)
 	help
 	  Choose this if you want to use HDMI on i.MX6.
 

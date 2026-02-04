@@ -674,6 +674,10 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		return put_u64(argp, bdev_nr_bytes(bdev));
 
 	/* Incompatible alignment on i386 */
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+	case BLKTRACESETUPBC32:
+		fallthrough;
+#endif
 	case BLKTRACESETUP32:
 		return blk_trace_ioctl(bdev, cmd, argp);
 	default:
@@ -687,3 +691,64 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	return ret;
 }
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+long ptr128_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
+{
+	struct block_device *bdev = I_BDEV(file->f_mapping->host);
+	void __user *argp = (void __user *)arg;
+	fmode_t mode = file->f_mode;
+	int ret;
+
+	/*
+	 * O_NDELAY can be altered using fcntl(.., F_SETFL, ..), so we have
+	 * to updated it before every ioctl.
+	 */
+	if (file->f_flags & O_NDELAY)
+		mode |= FMODE_NDELAY;
+	else
+		mode &= ~FMODE_NDELAY;
+
+	switch (cmd) {
+	/* These need separate implementations for the data structure */
+	case HDIO_GETGEO:
+		return blkdev_getgeo(bdev, argp);
+	case BLKPG:
+		return blkpg_ioctl(bdev, argp);
+
+	/* Compat mode returns 32-bit data instead of 'long' */
+	case BLKRAGET:
+	case BLKFRAGET:
+		if (!argp)
+			return -EINVAL;
+		return put_long(argp,
+			(bdev->bd_disk->bdi->ra_pages * PAGE_SIZE) / 512);
+	case BLKGETSIZE:
+		if (bdev_nr_sectors(bdev) > ~0UL)
+			return -EFBIG;
+		return put_ulong(argp, bdev_nr_sectors(bdev));
+
+	/* The data is compatible, but the command number is different */
+	case BLKBSZGET: /* get block device soft block size (cf. BLKSSZGET) */
+		return put_int(argp, block_size(bdev));
+	case BLKBSZSET:
+		return blkdev_bszset(bdev, mode, argp);
+	case BLKGETSIZE64:
+		return put_u64(argp, bdev_nr_bytes(bdev));
+
+	/* Incompatible alignment on i386 */
+	case BLKTRACESETUP:
+		return blk_trace_ioctl(bdev, cmd, argp);
+	default:
+		break;
+	}
+
+	ret = blkdev_common_ioctl(bdev, mode, cmd, arg, argp);
+	if (ret != -ENOIOCTLCMD)
+		return ret;
+
+	if (!bdev->bd_disk->fops->ptr128_ioctl)
+		return -ENOTTY;
+	return bdev->bd_disk->fops->ptr128_ioctl(bdev, mode, cmd, arg);
+}
+#endif
+

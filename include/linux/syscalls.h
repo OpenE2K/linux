@@ -411,6 +411,10 @@ asmlinkage long sys_inotify_rm_watch(int fd, __s32 wd);
 /* fs/ioctl.c */
 asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd,
 				unsigned long arg);
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+asmlinkage long sys_protected_ioctl(unsigned long fd, unsigned long cmd, unsigned long arg,
+				    long arg4, long arg5, long arg6, struct pt_regs *regs);
+#endif
 
 /* fs/ioprio.c */
 asmlinkage long sys_ioprio_set(int which, int who, int ioprio);
@@ -621,7 +625,7 @@ asmlinkage long sys_get_robust_list(int pid,
 asmlinkage long sys_set_robust_list(struct robust_list_head __user *head,
 				    size_t len);
 
-asmlinkage long sys_futex_waitv(struct futex_waitv *waiters,
+asmlinkage long sys_futex_waitv(struct futex_waitv __user *waiters,
 				unsigned int nr_futexes, unsigned int flags,
 				struct __kernel_timespec __user *timeout, clockid_t clockid);
 
@@ -1014,7 +1018,7 @@ asmlinkage long sys_seccomp(unsigned int op, unsigned int flags,
 asmlinkage long sys_getrandom(char __user *buf, size_t count,
 			      unsigned int flags);
 asmlinkage long sys_memfd_create(const char __user *uname_ptr, unsigned int flags);
-asmlinkage long sys_bpf(int cmd, union bpf_attr *attr, unsigned int size);
+asmlinkage long sys_bpf(int cmd, union bpf_attr __user *attr, unsigned int size);
 asmlinkage long sys_execveat(int dfd, const char __user *filename,
 			const char __user *const __user *argv,
 			const char __user *const __user *envp, int flags);
@@ -1086,6 +1090,15 @@ asmlinkage long sys_spu_run(int fd, __u32 __user *unpc,
 asmlinkage long sys_spu_create(const char __user *name,
 		unsigned int flags, umode_t mode, int fd);
 
+#ifdef CONFIG_MCST
+asmlinkage long sys_el_posix(int req, void *a1, void *a2, void *a3, int a4);
+asmlinkage long sys_compat_el_posix(int req, void *a1, void *a2, void *a3, int a4);
+#endif
+#ifdef CONFIG_E2K
+asmlinkage long sys_arch_prctl(int option,
+				unsigned long arg2, unsigned long arg3,
+				unsigned long arg4, unsigned long arg5);
+#endif
 
 /*
  * Deprecated system calls which are still defined in

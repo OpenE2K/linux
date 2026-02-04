@@ -14,6 +14,9 @@ get_c_compiler_info()
 	Clang	__clang_major__  __clang_minor__  __clang_patchlevel__
 	#elif defined(__INTEL_COMPILER)
 	ICC	__INTEL_COMPILER  __INTEL_COMPILER_UPDATE
+	/* Test lcc before gcc since it is gcc-compatible */
+	#elif defined(__LCC__)
+	LCC __LCC__  __LCC_MINOR__
 	#elif defined(__GNUC__)
 	GCC	__GNUC__  __GNUC_MINOR__  __GNUC_PATCHLEVEL__
 	#else
@@ -42,6 +45,10 @@ case "$name" in
 GCC)
 	version=$2.$3.$4
 	min_version=$($min_tool_version gcc)
+	;;
+LCC)
+	version=$(($2 / 100)).$(($2 % 100)).$3
+	min_version=$($min_tool_version lcc)
 	;;
 Clang)
 	version=$2.$3.$4

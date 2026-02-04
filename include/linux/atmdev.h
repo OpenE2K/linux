@@ -28,6 +28,13 @@ struct compat_atm_iobuf {
 	compat_uptr_t buffer;
 };
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+struct ptr128_atm_iobuf {
+	int length;
+	e2k_ap_t buffer;
+};
+#endif
 
 struct k_atm_aal_stats {
 #define __HANDLE_ITEM(i) atomic_t i

@@ -755,6 +755,9 @@ static const struct proto_ops l2tp_ip6_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	   = inet6_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	   = inet6_ioctl,
+#endif
 };
 
 static struct inet_protosw l2tp_ip6_protosw = {

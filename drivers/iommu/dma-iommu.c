@@ -30,6 +30,10 @@
 #include <linux/vmalloc.h>
 #include <trace/events/swiotlb.h>
 
+#ifdef CONFIG_E2K
+#include <asm/l-iommu.h>
+#endif 
+ 
 #include "dma-iommu.h"
 
 struct iommu_dma_msi_page {
@@ -1028,6 +1032,7 @@ static dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
 	iova = __iommu_dma_map(dev, phys, size, prot, dma_mask);
 	if (iova == DMA_MAPPING_ERROR && is_swiotlb_buffer(dev, phys))
 		swiotlb_tbl_unmap_single(dev, phys, size, dir, attrs);
+
 	return iova;
 }
 
@@ -1367,7 +1372,12 @@ static void iommu_dma_unmap_resource(struct device *dev, dma_addr_t handle,
 	__iommu_dma_unmap(dev, handle, size);
 }
 
+#ifdef CONFIG_E2K
+static void __iommu_dma_free(struct device *dev, size_t size,
+				void *cpu_addr, unsigned long attrs)
+#else
 static void __iommu_dma_free(struct device *dev, size_t size, void *cpu_addr)
+#endif
 {
 	size_t alloc_size = PAGE_ALIGN(size);
 	int count = alloc_size >> PAGE_SHIFT;
@@ -1386,7 +1396,11 @@ static void __iommu_dma_free(struct device *dev, size_t size, void *cpu_addr)
 		pages = dma_common_find_pages(cpu_addr);
 		if (!pages)
 			page = vmalloc_to_page(cpu_addr);
+#ifdef CONFIG_E2K
+		dma_common_free_remap(cpu_addr, alloc_size, attrs);
+#else
 		dma_common_free_remap(cpu_addr, alloc_size);
+#endif
 	} else {
 		/* Lowmem means a coherent atomic or CMA allocation */
 		page = virt_to_page(cpu_addr);
@@ -1394,6 +1408,7 @@ static void __iommu_dma_free(struct device *dev, size_t size, void *cpu_addr)
 
 	if (pages)
 		__iommu_dma_free_pages(pages, count);
+
 	if (page)
 		dma_free_contiguous(dev, page, alloc_size);
 }
@@ -1402,7 +1417,11 @@ static void iommu_dma_free(struct device *dev, size_t size, void *cpu_addr,
 		dma_addr_t handle, unsigned long attrs)
 {
 	__iommu_dma_unmap(dev, handle, size);
+#ifdef CONFIG_E2K
+	__iommu_dma_free(dev, size, cpu_addr, attrs);
+#else
 	__iommu_dma_free(dev, size, cpu_addr);
+#endif
 }
 
 static void *iommu_dma_alloc_pages(struct device *dev, size_t size,
@@ -1448,12 +1467,39 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 	bool coherent = dev_is_dma_coherent(dev);
 	int ioprot = dma_info_to_prot(DMA_BIDIRECTIONAL, coherent, attrs);
 	struct page *page = NULL;
-	void *cpu_addr;
+	void *cpu_addr = NULL;
+
+#ifdef CONFIG_E2K
+	if (l_iommu_has_numa_bug())	/* force the allocation from */
+		gfp |= __GFP_THISNODE;	/* the device node */
+#endif
 
 	gfp |= __GFP_ZERO;
 
 	if (gfpflags_allow_blocking(gfp) &&
 	    !(attrs & DMA_ATTR_FORCE_CONTIGUOUS)) {
+#if defined CONFIG_MCST && defined CONFIG_E2K
+		/*
+		 * Optimization: first try to allocate memory directly
+		 * from linear area, because allocating through vmalloc()
+		 * is slow on e2k for 2 reasons:
+		 *  - it uses flush_cache_vmap() which is not null on e2k;
+		 *  - e2k (like x86) requires using set_memory_uc/wc()
+		 *    functions, and they are slower for VMALLOC area.
+		 */
+		cpu_addr = attrs & DMA_ATTR_WRITE_COMBINE ?
+				NULL :
+				iommu_dma_alloc_pages(dev,
+					size, &page, gfp | __GFP_NOWARN, attrs);
+		if (likely(cpu_addr)) {
+			*handle = __iommu_dma_map(dev, page_to_phys(page), size,
+						  ioprot, dev->coherent_dma_mask);
+			if (likely(*handle != DMA_MAPPING_ERROR)) {
+				return cpu_addr;
+			}
+			__iommu_dma_free(dev, size, cpu_addr, attrs);
+		}
+#endif
 		return iommu_dma_alloc_remap(dev, size, handle, gfp,
 				dma_pgprot(dev, PAGE_KERNEL, attrs), attrs);
 	}
@@ -1470,7 +1516,11 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 	*handle = __iommu_dma_map(dev, page_to_phys(page), size, ioprot,
 			dev->coherent_dma_mask);
 	if (*handle == DMA_MAPPING_ERROR) {
+#ifdef CONFIG_E2K
+		__iommu_dma_free(dev, size, cpu_addr, attrs);
+#else
 		__iommu_dma_free(dev, size, cpu_addr);
+#endif
 		return NULL;
 	}
 

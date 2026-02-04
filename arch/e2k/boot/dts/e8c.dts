@@ -1,0 +1,60 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+
+/dts-v1/;
+/plugin/;
+
+#ifndef NODES
+# error NODES undefined
+#endif
+
+#ifndef CELLS
+#define CELLS 1
+#endif
+
+#ifndef SIZE_CELLS
+#define SIZE_CELLS CELLS
+#endif
+
+# define __PIC(_n) pic ## _n
+# define _PIC(_n) __PIC(_n)
+# define PIC _PIC(NODE)
+
+
+&{/} {
+	#address-cells = <CELLS>;
+	#size-cells = <SIZE_CELLS>;
+
+
+#define NODE 0
+#include "include/e2k-v4.dtsi"
+# undef NODE
+
+/* linux initializes devices in reverse order */
+#if NODES > 3
+# define NODE 3
+# include "include/e2k-v4-uncore.dtsi"
+# include "include/iohub2.dtsi"
+# undef NODE
+#endif
+#if NODES > 2
+# define NODE 2
+# include "include/e2k-v4-uncore.dtsi"
+# include "include/iohub2.dtsi"
+# undef NODE
+#endif
+#if NODES > 1
+# define NODE 1
+# include "include/e2k-v4-uncore.dtsi"
+# include "include/iohub2.dtsi"
+# undef NODE
+#endif
+#define NODE 0
+#include "include/e2k-v4-uncore.dtsi"
+#include "include/iohub2.dtsi"
+#undef NODE
+
+};

@@ -157,6 +157,9 @@ static const struct file_operations posix_clock_file_operations = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= posix_clock_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= posix_clock_ioctl,
+#endif
 };
 
 int posix_clock_register(struct posix_clock *clk, struct device *dev)

@@ -2112,6 +2112,9 @@ static const struct file_operations _ctl_fops = {
 	.poll    = dm_poll,
 	.unlocked_ioctl	 = dm_ctl_ioctl,
 	.compat_ioctl = dm_compat_ctl_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	 = dm_ctl_ioctl,
+#endif
 	.owner	 = THIS_MODULE,
 	.llseek  = noop_llseek,
 };

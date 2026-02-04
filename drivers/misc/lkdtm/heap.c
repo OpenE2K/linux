@@ -7,6 +7,11 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/sched.h>
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+#include <linux/pagemap.h>
+#include <linux/swap.h>
+#include <linux/bio.h>
+#endif
 
 static struct kmem_cache *double_free_cache;
 static struct kmem_cache *a_cache;
@@ -115,6 +120,11 @@ static void lkdtm_READ_AFTER_FREE(void)
 	*val = 0x12345678;
 	base[offset] = *val;
 	pr_info("Value in memory before free: %x\n", base[offset]);
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+	/* Force pageout(base) to test swap sanitizing.
+	 * Read base[offset] will swapin */
+	pageout4sanit(virt_to_page(base));
+#endif
 
 	kfree(base);
 
@@ -122,12 +132,11 @@ static void lkdtm_READ_AFTER_FREE(void)
 	saw = base[offset];
 	if (saw != *val) {
 		/* Good! Poisoning happened, so declare a win. */
-		pr_info("Memory correctly poisoned (%x)\n", saw);
+		pr_info("Memory correctly poisoned by value %x\n", saw);
 	} else {
 		pr_err("FAIL: Memory was not poisoned!\n");
 		pr_expected_config_param(CONFIG_INIT_ON_FREE_DEFAULT_ON, "init_on_free");
 	}
-
 	kfree(val);
 }
 

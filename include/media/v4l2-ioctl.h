@@ -695,7 +695,27 @@ int v4l2_compat_get_array_args(struct file *file, void *mbuf,
 int v4l2_compat_put_array_args(struct file *file, void __user *user_ptr,
 			       void *mbuf, size_t array_size,
 			       unsigned int cmd, void *arg);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+/**
+ * v4l2_ioctl -128 ptr Bits compatibility layer for 64 bits processors
+ *
+ * @file: Pointer to struct &file.
+ * @cmd: Ioctl name.
+ * @arg: Ioctl argument.
+ */
+long int v4l2_ptr128_ioctl(struct file *file, unsigned int cmd,
+			     unsigned long arg);
 
+unsigned int v4l2_ptr128_translate_cmd(unsigned int cmd);
+int v4l2_ptr128_get_user(void __user *arg, void *parg, unsigned int cmd);
+int v4l2_ptr128_put_user(void __user *arg, void *parg, unsigned int cmd);
+int v4l2_ptr128_get_array_args(struct file *file, void *mbuf,
+			       void __user *user_ptr, size_t array_size,
+			       unsigned int cmd, void *arg);
+int v4l2_ptr128_put_array_args(struct file *file, void __user *user_ptr,
+			       void *mbuf, size_t array_size,
+			       unsigned int cmd, void *arg);
+#endif
 /**
  * typedef v4l2_kioctl - Typedef used to pass an ioctl handler.
  *

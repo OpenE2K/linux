@@ -86,4 +86,21 @@ epoll_put_uevent(__poll_t revents, __u64 data,
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+typedef union prot_epoll_event_data {
+	e2k_ptr_t	ptr;
+	u64		numval;
+} prot_epoll_event_data_t;
+
+struct prot_epoll_event {
+	__poll_t events;
+	unsigned size; /* descriptor size */
+	u64	address; /* alignment field; this is 'data' in epoll_event */
+	prot_epoll_event_data_t data;
+};
+
+#endif /* CONFIG_PROTECTED_MODE */
+
+
 #endif /* #ifndef _LINUX_EVENTPOLL_H */

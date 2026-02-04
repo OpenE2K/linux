@@ -3318,6 +3318,18 @@ static struct record record = {
 	},
 };
 
+#ifdef __e2k__
+#include "../arch/e2k/include/cpuinfo.h"
+
+__attribute__((constructor))
+static void init_freq(void)
+{
+	if (1 == e2k_cpuinfo_feature("prototype", NULL)) {
+		record.opts.freq = 200;
+	}
+}
+#endif
+
 const char record_callchain_help[] = CALLCHAIN_RECORD_HELP
 	"\n\t\t\t\tDefault: fp";
 

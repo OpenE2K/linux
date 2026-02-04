@@ -182,6 +182,9 @@ static const struct file_operations watchdog_fops = {
 	.write		= watchdog_write,
 	.unlocked_ioctl	= watchdog_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= watchdog_ioctl,
+#endif
 	.open		= watchdog_open,
 	.release	= watchdog_release,
 };

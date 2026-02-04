@@ -87,6 +87,10 @@
 #include <linux/ctype.h>
 #include <perf/mmap.h>
 
+#ifdef __e2k__
+#include "../arch/e2k/include/cpuinfo.h"
+#endif
+
 static volatile int done;
 static volatile int resize;
 
@@ -1440,6 +1444,13 @@ int cmd_top(int argc, const char **argv)
 	};
 	struct record_opts *opts = &top.record_opts;
 	struct target *target = &opts->target;
+
+#ifdef __e2k__
+	if (1 == e2k_cpuinfo_feature("prototype", NULL)) {
+		top.record_opts.freq = 200;
+	}
+#endif
+
 	const struct option options[] = {
 	OPT_CALLBACK('e', "event", &top.evlist, "event",
 		     "event selector. use 'perf list' to list available events",

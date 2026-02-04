@@ -1138,6 +1138,9 @@ void __weak module_memfree(void *module_region)
 	WARN_ON(in_interrupt());
 	vfree(module_region);
 }
+#if defined(CONFIG_E2K) && defined(CONFIG_TEST_KERNEL_PT_SYNC_MODULE)
+EXPORT_SYMBOL(module_memfree);
+#endif
 
 void __weak module_arch_cleanup(struct module *mod)
 {

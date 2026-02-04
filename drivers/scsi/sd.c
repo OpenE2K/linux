@@ -1869,6 +1869,9 @@ static const struct block_device_operations sd_fops = {
 	.ioctl			= sd_ioctl,
 	.getgeo			= sd_getgeo,
 	.compat_ioctl		= blkdev_compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl		= sd_ioctl,
+#endif
 	.check_events		= sd_check_events,
 	.unlock_native_capacity	= sd_unlock_native_capacity,
 	.report_zones		= sd_zbc_report_zones,

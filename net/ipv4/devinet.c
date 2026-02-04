@@ -61,6 +61,9 @@
 #include <net/rtnetlink.h>
 #include <net/net_namespace.h>
 #include <net/addrconf.h>
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+#endif
 
 #define IPV6ONLY_FLAGS	\
 		(IFA_F_NODAD | IFA_F_OPTIMISTIC | IFA_F_DADFAILED | \
@@ -1265,7 +1268,12 @@ int inet_gifconf(struct net_device *dev, char __user *buf, int len, int size)
 	const struct in_ifaddr *ifa;
 	struct ifreq ifr;
 	int done = 0;
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		if (WARN_ON(size > sizeof(struct ptr128_ifreq)))
+			goto out;
+	} else
+#endif
 	if (WARN_ON(size > sizeof(struct ifreq)))
 		goto out;
 

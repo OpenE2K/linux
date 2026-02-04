@@ -308,6 +308,9 @@ static const struct file_operations rpmsg_eptdev_fops = {
 	.poll = rpmsg_eptdev_poll,
 	.unlocked_ioctl = rpmsg_eptdev_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = rpmsg_eptdev_ioctl,
+#endif
 };
 
 static ssize_t name_show(struct device *dev, struct device_attribute *attr,

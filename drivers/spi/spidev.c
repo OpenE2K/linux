@@ -677,6 +677,9 @@ static const struct file_operations spidev_fops = {
 	.read =		spidev_read,
 	.unlocked_ioctl = spidev_ioctl,
 	.compat_ioctl = spidev_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = spidev_ioctl,
+#endif
 	.open =		spidev_open,
 	.release =	spidev_release,
 	.llseek =	no_llseek,
@@ -703,6 +706,9 @@ static const struct spi_device_id spidev_spi_ids[] = {
 	{ .name = "spi-petra" },
 	{ .name = "spi-authenta" },
 	{ .name = "em3581" },
+#ifdef CONFIG_MCST
+	{ .name = "boot" },
+#endif
 	{},
 };
 MODULE_DEVICE_TABLE(spi, spidev_spi_ids);
@@ -732,6 +738,9 @@ static const struct of_device_id spidev_dt_ids[] = {
 	{ .compatible = "rohm,dh2228fv", .data = &spidev_of_check },
 	{ .compatible = "semtech,sx1301", .data = &spidev_of_check },
 	{ .compatible = "silabs,em3581", .data = &spidev_of_check },
+#ifdef CONFIG_MCST
+	{ .compatible = "mcst,boot", .data = &spidev_of_check },
+#endif
 	{},
 };
 MODULE_DEVICE_TABLE(of, spidev_dt_ids);

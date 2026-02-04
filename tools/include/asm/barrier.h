@@ -6,6 +6,10 @@
 #include "../../arch/arm/include/asm/barrier.h"
 #elif defined(__aarch64__)
 #include "../../arch/arm64/include/asm/barrier.h"
+#elif defined(__e2k__)
+# define mb()	__sync_synchronize()
+# define rmb()	__sync_synchronize()
+# define wmb()	__sync_synchronize()
 #elif defined(__powerpc__)
 #include "../../arch/powerpc/include/asm/barrier.h"
 #elif defined(__s390__)

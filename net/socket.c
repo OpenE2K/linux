@@ -45,6 +45,7 @@
  *		Tigran Aivazian	:	sys_send(args) calls sys_sendto(args, NULL, 0)
  *		Tigran Aivazian	:	Made listen(2) backlog sanity checks
  *					protocol-independent
+ *		<rev@mcst.ru>	:	Support e2k 128bit ptr apps ioctls 
  *
  *	This module is effectively the top level interface to the BSD socket
  *	paradigm.
@@ -124,6 +125,11 @@ static long sock_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 static long compat_sock_ioctl(struct file *file,
 			      unsigned int cmd, unsigned long arg);
 #endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+#include <linux/inetdevice.h>
+#include <asm/protected_syscalls.h>
+static long ptr128_sock_ioctl(struct file *, unsigned int cmd, unsigned long arg);
+#endif
 static int sock_fasync(int fd, struct file *filp, int on);
 static ssize_t sock_sendpage(struct file *file, struct page *page,
 			     int offset, size_t size, loff_t *ppos, int more);
@@ -158,6 +164,9 @@ static const struct file_operations socket_file_ops = {
 	.unlocked_ioctl = sock_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = compat_sock_ioctl,
+#endif
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+	.ptr128_ioctl = ptr128_sock_ioctl,
 #endif
 	.mmap =		sock_mmap,
 	.release =	sock_close,
@@ -3253,6 +3262,40 @@ void socket_seq_show(struct seq_file *seq)
 }
 #endif				/* CONFIG_PROC_FS */
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <net/ptr128.h>
+
+int get_user_ifreq128(struct ifreq *ifr, void __user **ifrdata, void __user *arg)
+{
+	e2k_ap_t	ap;
+	int tag;
+	struct ptr128_ifreq __user *arg128 = arg;
+
+	if (copy_from_user(ifr, arg, sizeof(*ifr)))
+		return -EFAULT;
+	if (ifrdata == NULL)
+		return 0;
+	if (!IS_ALIGNED((unsigned long)&arg128->ifr_data, 16)) {
+		/* sock_do_ioctl tries go get ifreq for ioctl cmds wich not requiered ireq */
+		*ifrdata = NULL;
+		return 0;
+	}
+
+	if (get_user_tagged_16(ap.qword, tag, &arg128->ifr_data))
+		return -EFAULT;
+	if (IS_AP(ap, tag)) {
+		*ifrdata = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+	} else {
+		/* sock_do_ioctl tries go get ifreq for ioctl cmds wich not requiered ireq */
+		*ifrdata = NULL;
+	}
+	return 0;
+}
+
+#endif
+
+
 /* Handle the fact that while struct ifreq has the same *layout* on
  * 32/64 for everything but ifreq::ifru_ifmap and ifreq::ifru_data,
  * which are handled elsewhere, it still has different *size* due to
@@ -3276,7 +3319,11 @@ int get_user_ifreq(struct ifreq *ifr, void __user **ifrdata, void __user *arg)
 
 		return 0;
 	}
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall()) {
+		return get_user_ifreq128(ifr, ifrdata, arg);
+	}
+#endif
 	if (copy_from_user(ifr, arg, sizeof(*ifr)))
 		return -EFAULT;
 
@@ -3287,6 +3334,24 @@ int get_user_ifreq(struct ifreq *ifr, void __user **ifrdata, void __user *arg)
 }
 EXPORT_SYMBOL(get_user_ifreq);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static int put_user_ifreq128(struct ifreq *ifr, void __user *arg)
+{
+	struct ptr128_ifreq __user *arg128 = arg;
+	e2k_ap_t ap;
+	int tag;
+	set_u_border(MAX_U_BORDER);
+	if (get_user_tagged_16(ap.qword, tag, &arg128->ifr_data))
+		return -EFAULT;
+	if (copy_to_user(arg, ifr, sizeof(*ifr)))
+		return -EFAULT;
+	if (!IS_AP(ap, tag))
+		return 0;
+	if (put_user_tagged_16(ap.qword, tag, &arg128->ifr_data))
+		return -EFAULT;
+	return 0;
+}
+#endif
 int put_user_ifreq(struct ifreq *ifr, void __user *arg)
 {
 	size_t size = sizeof(*ifr);
@@ -3294,6 +3359,10 @@ int put_user_ifreq(struct ifreq *ifr, void __user *arg)
 	if (in_compat_syscall())
 		size = sizeof(struct compat_ifreq);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		return put_user_ifreq128(ifr, arg);
+#endif
 	if (copy_to_user(arg, ifr, size))
 		return -EFAULT;
 
@@ -3461,7 +3530,178 @@ static long compat_sock_ioctl(struct file *file, unsigned int cmd,
 
 	return ret;
 }
-#endif
+#endif /* CONFIG_COMPAT */
+
+#if defined CONFIG_E2K && defined CONFIG_PROTECTED_MODE
+
+
+static int ptr128_siocwandev(struct net *net, struct ptr128_ifreq __user *uifr128)
+{
+	struct ifreq ifr;
+	e2k_ap_t ap;
+	int tag;
+	u64 saved_ub = get_u_border();
+	int err;
+
+	if (copy_from_user(&ifr, uifr128, sizeof(ifr)))
+		return -EFAULT;
+
+	if (get_user_tagged_16(ap.qword, tag, &uifr128->ifr_settings.ap) || !IS_AP(ap, tag))
+		return -EFAULT;
+
+	ifr.ifr_settings.ifs_ifsu.raw_hdlc = (void __user *)AP_PTR(ap);
+	set_ap_u_border(ap);
+	err = dev_ioctl(net, SIOCWANDEV, &ifr, NULL, NULL);
+	set_u_border(saved_ub);
+	if (!err) {
+		if (copy_to_user(uifr128, &ifr, sizeof(ifr)))
+			return -EFAULT;
+		if (put_user_tagged_16(ap.qword, tag, &uifr128->ifr_settings.ap))
+			return -EFAULT;
+	}
+	return err;
+}
+
+/* Handle ioctls that use ifreq::ifr_data and just need struct ifreq converted */
+static int ptr128_ifr_data_ioctl(struct net *net, unsigned int cmd,
+				 struct ptr128_ifreq __user *u_ifreq128)
+{
+	struct ifreq ifreq;
+	void __user *data;
+
+	if (!is_socket_ioctl_cmd(cmd))
+		return -ENOTTY;
+	if (get_user_ifreq(&ifreq, &data, u_ifreq128))
+		return -EFAULT;
+	ifreq.ifr_data = data;
+
+	return dev_ioctl(net, cmd, &ifreq, data, NULL);
+}
+
+
+static int ptr128_sock_ioctl_trans(struct file *file, struct socket *sock,
+			 unsigned int cmd, unsigned long arg)
+{
+	void __user *argp = (void __user *)arg;
+	struct sock *sk = sock->sk;
+	struct net *net = sock_net(sk);
+
+	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15))
+		return sock_ioctl(file, cmd, arg);
+
+	switch (cmd) {
+	case SIOCWANDEV:
+		return ptr128_siocwandev(net, argp);
+	case SIOCGSTAMP_OLD:
+	case SIOCGSTAMPNS_OLD:
+		if (!sock->ops->gettstamp)
+			return -ENOIOCTLCMD;
+		return sock->ops->gettstamp(sock, argp, cmd == SIOCGSTAMP_OLD, false);
+	case SIOCETHTOOL:
+	case SIOCBONDSLAVEINFOQUERY:
+	case SIOCBONDINFOQUERY:
+	case SIOCSHWTSTAMP:
+	case SIOCGHWTSTAMP:
+		return ptr128_ifr_data_ioctl(net, cmd, argp);
+
+	case FIOSETOWN:
+	case SIOCSPGRP:
+	case FIOGETOWN:
+	case SIOCGPGRP:
+	case SIOCBRADDBR:
+	case SIOCBRDELBR:
+	case SIOCGIFVLAN:
+	case SIOCSIFVLAN:
+	case SIOCGSKNS:
+	case SIOCGSTAMP_NEW:
+	case SIOCGSTAMPNS_NEW:
+	case SIOCGIFCONF:
+	case SIOCSIFBR:
+	case SIOCGIFBR:
+		return sock_ioctl(file, cmd, arg);
+
+	case SIOCGIFFLAGS:
+	case SIOCSIFFLAGS:
+	case SIOCGIFMAP:
+	case SIOCSIFMAP:
+	case SIOCGIFMETRIC:
+	case SIOCSIFMETRIC:
+	case SIOCGIFMTU:
+	case SIOCSIFMTU:
+	case SIOCGIFMEM:
+	case SIOCSIFMEM:
+	case SIOCGIFHWADDR:
+	case SIOCSIFHWADDR:
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+	case SIOCGIFINDEX:
+	case SIOCGIFADDR:
+	case SIOCSIFADDR:
+	case SIOCSIFHWBROADCAST:
+	case SIOCDIFADDR:
+	case SIOCGIFBRDADDR:
+	case SIOCSIFBRDADDR:
+	case SIOCGIFDSTADDR:
+	case SIOCSIFDSTADDR:
+	case SIOCGIFNETMASK:
+	case SIOCSIFNETMASK:
+	case SIOCSIFPFLAGS:
+	case SIOCGIFPFLAGS:
+	case SIOCGIFTXQLEN:
+	case SIOCSIFTXQLEN:
+	case SIOCBRADDIF:
+	case SIOCBRDELIF:
+	case SIOCGIFNAME:
+	case SIOCSIFNAME:
+	case SIOCGMIIPHY:
+	case SIOCGMIIREG:
+	case SIOCSMIIREG:
+	case SIOCBONDENSLAVE:
+	case SIOCBONDRELEASE:
+	case SIOCBONDSETHWADDR:
+	case SIOCBONDCHANGEACTIVE:
+	case SIOCSARP:
+	case SIOCGARP:
+	case SIOCDARP:
+	case SIOCOUTQ:
+	case SIOCOUTQNSD:
+	case SIOCATMARK:
+		return sock_do_ioctl(net, sock, cmd, arg);
+	}
+
+	return -ENOIOCTLCMD;
+}
+
+
+static long ptr128_sock_ioctl(struct file *file, unsigned int cmd,
+			      unsigned long arg)
+{
+	struct socket *sock = file->private_data;
+	int ret = -ENOIOCTLCMD;
+	struct sock *sk;
+	struct net *net;
+
+	DbgSCP("%s(file=0x%p, cmd=0x%x, arg=0x%lx)\n",
+	       __func__, file, cmd, arg);
+
+	sk = sock->sk;
+	net = sock_net(sk);
+
+	if (sock->ops->ptr128_ioctl) {
+		ret = sock->ops->ptr128_ioctl(sock, cmd, arg);
+	}
+	if (ret == -ENOIOCTLCMD &&
+	    (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST)) {
+		ret = ptr128_wext_handle_ioctl(net, cmd, arg);
+	}
+	if (ret == -ENOIOCTLCMD) {
+		ret = ptr128_sock_ioctl_trans(file, sock, cmd, arg);
+	}
+
+	return ret;
+}
+
+#endif /* CONFIG_PROTECTED_MODE */
 
 /**
  *	kernel_bind - bind an address to a socket (kernel space)

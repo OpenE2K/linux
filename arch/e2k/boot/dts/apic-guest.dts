@@ -1,0 +1,36 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+/dts-v1/;
+
+#ifndef CELLS
+#define CELLS 2
+#endif
+
+#ifndef SIZE_CELLS
+#define SIZE_CELLS CELLS
+#endif
+
+# define __PIC(_n) pic ## _n
+# define _PIC(_n) __PIC(_n)
+# define PIC _PIC(NODE)
+
+
+/ {
+	version = "1.0_2025-10-23";
+	model = "Elbrus-generic";
+	compatible = "mcst,apic-guest";
+
+	#address-cells = <CELLS>;
+	#size-cells = <SIZE_CELLS>;
+
+
+#define NODE 0
+#include "include/e2k-v3.dtsi"
+#include "include/e2k-v3-uncore.dtsi"
+#include "include/iohub-guest.dtsi"
+#undef NODE
+
+};

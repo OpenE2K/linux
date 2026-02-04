@@ -1967,6 +1967,9 @@ static const struct file_operations fuse_dir_operations = {
 	.release	= fuse_dir_release,
 	.fsync		= fuse_dir_fsync,
 	.unlocked_ioctl	= fuse_dir_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= fuse_dir_ioctl,
+#endif
 	.compat_ioctl	= fuse_dir_compat_ioctl,
 };
 

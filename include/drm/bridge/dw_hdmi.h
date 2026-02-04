@@ -6,6 +6,10 @@
 #ifndef __DW_HDMI__
 #define __DW_HDMI__
 
+#ifdef CONFIG_MCST
+#include <drm/drm_print.h>
+#endif
+
 #include <sound/hdmi-codec.h>
 
 struct drm_display_info;
@@ -191,8 +195,29 @@ void dw_hdmi_set_high_tmds_clock_ratio(struct dw_hdmi *hdmi,
 
 /* PHY configuration */
 void dw_hdmi_phy_i2c_set_addr(struct dw_hdmi *hdmi, u8 address);
+
+#ifdef CONFIG_MCST
+void __dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
+			     unsigned char addr);
+#define dw_hdmi_phy_i2c_write(_hdmi, _val, _offset) do {	\
+	unsigned _v = _val, _o = _offset;			\
+	DRM_DEBUG("hdmi: i2c wr: %s (%x): 0x%02x\n",		\
+			#_offset, _o, _v);			\
+	__dw_hdmi_phy_i2c_write(_hdmi, _v, _o);			\
+} while (0)
+
+unsigned short __dw_hdmi_phy_i2c_read(struct dw_hdmi *hdmi, unsigned char addr);
+#define dw_hdmi_phy_i2c_read(_hdmi, _offset) ({		\
+	unsigned _o = _offset, _v;				\
+	_v = __dw_hdmi_phy_i2c_read(_hdmi, _o);			\
+	DRM_DEBUG("hdmi: i2c rd: %02x: %04x\n",			\
+			_o, _v);				\
+	_v;							\
+})
+#else
 void dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
 			   unsigned char addr);
+#endif
 
 void dw_hdmi_phy_gen1_reset(struct dw_hdmi *hdmi);
 

@@ -1,0 +1,56 @@
+[
+    {
+        "MetricExpr": "100 * (CT_I - BP_MISS_I) / CT_I",
+        "MetricGroup": "hit_rate",
+        "MetricName": "bp_i_hit_rate",
+        "BriefDescription": "процент попаданий предсказателя переходов для операций неподготовленной передачи управления = (ct_i - bp_miss_i) / ct_i"
+    },
+    {
+        "MetricExpr": "100 * L1_LD_HIT / L1_LD_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l1_ld_hit_rate",
+        "BriefDescription": "процент попаданий чтений в L1 = l1_ld_hit / l1_ld_query"
+    },
+    {
+        "MetricExpr": "100 * L1_ST_HIT / L1_ST_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l1_st_hit_rate",
+        "BriefDescription": "процент попаданий записей в L1 = l1_st_hit / l1_st_query"
+    },
+    {
+        "MetricExpr": "100 * (L2_LD_QUERY - L2_LD_MISS) / L2_LD_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l2_ld_hit_rate",
+        "BriefDescription": "процент попаданий чтений в L2 = (l2_ld_query - l2_ld_miss) / l2_ld_query"
+    },
+    {
+        "MetricExpr": "100 * L2_ST_HIT / L2_ST_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "l2_st_hit_rate",
+        "BriefDescription": "процент попаданий записей в L2 = l2_st_hit / l2_st_query"
+    },
+    {
+        "MetricExpr": "100 * DTLB_HIT / DTLB_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "dtlb_hit_rate",
+        "BriefDescription": "процент попаданий чтений и записей в DTLB = dtlb_hit / dtlb_query"
+    },
+    {
+        "MetricExpr": "100 * (DTLB_LD_QUERY - DTLB_LD_MISS) / DTLB_LD_QUERY",
+        "MetricGroup": "hit_rate",
+        "MetricName": "dtlb_ld_hit_rate",
+        "BriefDescription": "процент попаданий чтений в DTLB = (dtlb_ld_query - dtlb_ld_miss) / dtlb_ld_query"
+    },
+    {
+        "MetricExpr": "100 * (TICKS - IB_NO_COMMAND) / TICKS",
+        "MetricGroup": "hit_rate",
+        "MetricName": "ib_hit_rate",
+        "BriefDescription": "процент попаданий в IB = (ticks - ib_no_command) / ticks"
+    },
+    {
+        "MetricExpr": "100 * (TICKS - BUB_E3_OPND * 6) / TICKS",
+        "MetricGroup": "hit_rate",
+        "MetricName": "alu_channel_hit_rate",
+        "BriefDescription": "процент попаданий в канал с результатом вычислений ALU (удачность планирования компилятором инструкций по каналам) = (ticks - bub_e3_opnd * 6) / ticks"
+    }
+]

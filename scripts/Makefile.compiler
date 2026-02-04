@@ -51,6 +51,26 @@ __cc-option = $(call try-run,\
 cc-option = $(call __cc-option, $(CC),\
 	$(KBUILD_CPPFLAGS) $(KBUILD_CFLAGS),$(1),$(2))
 
+# lcc-option
+# Usage: cflags-y += $(call lcc-option,-fkernel)
+# Disable unsupported by gcc options and use `-flb-option=` prefix for clang
+#
+# Use `or` for lazy evalution so that compiler is invoked only once if possible.
+lcc-option = $(or \
+	$(call __cc-option, $(CC), $(KBUILD_CPPFLAGS) $(KBUILD_CFLAGS),$(1),),\
+	$(call __cc-option, $(CC), $(KBUILD_CPPFLAGS) $(KBUILD_CFLAGS),-flb-option=$(1),)\
+)
+
+# lcc-options
+# Usage: cflags-y += $(call lcc-options,-opt1 -opt2 -opt3)
+# Same as lcc-option but supports several options separated by whitespace.
+# If option itself contains whitespace than use lcc-option instead.
+lcc-options = $(or \
+	$(call __cc-option, $(CC), $(KBUILD_CPPFLAGS) $(KBUILD_CFLAGS),$(1),)\
+	$(call __cc-option, $(CC), $(KBUILD_CPPFLAGS) $(KBUILD_CFLAGS),\
+			    $(foreach option,$(1),-flb-option=$(option)),)\
+)
+
 # cc-option-yn
 # Usage: flag := $(call cc-option-yn,-march=winchip-c6)
 cc-option-yn = $(call try-run,\

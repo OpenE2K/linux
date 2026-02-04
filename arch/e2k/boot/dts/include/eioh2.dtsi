@@ -1,0 +1,856 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "epic-vectors.h"
+
+#ifndef NODE
+# error NODE undefined
+#endif
+#ifndef CELLS
+# error CELLS undefined
+#endif
+
+#if CELLS == 1
+# define REG reg32
+#else
+# define REG reg
+#endif
+
+#ifndef  DMN_1_STS
+# define DMN_1_STS "disabled"
+#endif
+#ifndef  DMN_2_STS
+# define DMN_2_STS "disabled"
+#endif
+#ifndef  DMN_3_STS
+# define DMN_3_STS "disabled"
+#endif
+#ifndef  DMN_4_STS
+# define DMN_4_STS "disabled"
+#endif
+
+#if NODE == 0
+# define PCICFG_ADDRL(_a) 0x2 ## _a
+# define PCICFG_ADDR(_a) 0x2 _a
+
+# define DMN_0 0
+# define DMN_1 1
+# define DMN_2 2
+# define DMN_3 3
+# define DMN_4 4
+# define IOMMU_0 iommu0
+# define IOMMU_1 iommu1
+# define IOMMU_2 iommu2
+# define IOMMU_3 iommu3
+# define IOMMU_4 iommu4
+
+# define PIC_0 pic0
+# define PIC_1 pic1
+# define PIC_2 pic2
+# define PIC_3 pic3
+# define PIC_4 pic4
+
+# define L_GPIO l_gpio0
+# define L_SPI l_spi0
+
+# define L_I2C0 l_i2c0
+# define L_I2C1 l_i2c1
+# define L_I2C2 l_i2c2
+# define L_I2C3 l_i2c3
+# define L_I2C4 l_i2c4
+# define L_I2C5 l_i2c5
+
+# define SERIAL_0 serial0
+# define SERIAL_1 serial1
+
+# define PCI7_I3C_0 pci7_i3c0
+# define PCI7_I3C_1 pci7_i3c1
+
+#elif NODE == 1
+# define PCICFG_ADDRL(_a) 0x3 ## _a
+# define PCICFG_ADDR(_a) 0x3 _a
+
+# define DMN_0 5
+# define DMN_1 6
+# define DMN_2 7
+# define DMN_3 8
+# define DMN_4 9
+# define IOMMU_0 iommu5
+# define IOMMU_1 iommu6
+# define IOMMU_2 iommu7
+# define IOMMU_3 iommu8
+# define IOMMU_4 iommu9
+
+# define PIC_0 pic5
+# define PIC_1 pic6
+# define PIC_2 pic7
+# define PIC_3 pic8
+# define PIC_4 pic9
+
+# define L_GPIO l_gpio1
+# define L_SPI l_spi1
+
+# define L_I2C0 l_i2c6
+# define L_I2C1 l_i2c7
+# define L_I2C2 l_i2c8
+# define L_I2C3 l_i2c9
+# define L_I2C4 l_i2c10
+# define L_I2C5 l_i2c11
+
+# define SERIAL_0 serial2
+# define SERIAL_1 serial3
+
+# define PCI7_I3C_0 pci7_i3c2
+# define PCI7_I3C_1 pci7_i3c3
+
+#elif NODE == 2
+# define PCICFG_ADDRL(_a) 0x4 ## _a
+# define PCICFG_ADDR(_a) 0x4 _a
+
+# define DMN_0 10
+# define DMN_1 11
+# define DMN_2 12
+# define DMN_3 13
+# define DMN_4 14
+# define IOMMU_0 iommu10
+# define IOMMU_1 iommu11
+# define IOMMU_2 iommu12
+# define IOMMU_3 iommu13
+# define IOMMU_4 iommu14
+
+# define PIC_0 pic10
+# define PIC_1 pic11
+# define PIC_2 pic12
+# define PIC_3 pic13
+# define PIC_4 pic14
+
+# define L_GPIO l_gpio2
+# define L_SPI l_spi3
+
+# define L_I2C0 l_i2c12
+# define L_I2C1 l_i2c13
+# define L_I2C2 l_i2c14
+# define L_I2C3 l_i2c15
+# define L_I2C4 l_i2c16
+# define L_I2C5 l_i2c17
+
+# define SERIAL_0 serial4
+# define SERIAL_1 serial5
+
+# define PCI7_I3C_0 pci7_i3c4
+# define PCI7_I3C_1 pci7_i3c5
+
+#elif NODE == 3
+# define PCICFG_ADDRL(_a) 0x5 ## _a
+# define PCICFG_ADDR(_a) 0x5 _a
+
+# define DMN_0 15
+# define DMN_1 16
+# define DMN_2 17
+# define DMN_3 18
+# define DMN_4 19
+# define IOMMU_0 iommu15
+# define IOMMU_1 iommu16
+# define IOMMU_2 iommu17
+# define IOMMU_3 iommu18
+# define IOMMU_4 iommu19
+
+# define PIC_0 pic15
+# define PIC_1 pic16
+# define PIC_2 pic17
+# define PIC_3 pic18
+# define PIC_4 pic19
+
+# define L_GPIO l_gpio0
+# define L_SPI l_spi0
+
+# define L_I2C0 l_i2c18
+# define L_I2C1 l_i2c19
+# define L_I2C2 l_i2c20
+# define L_I2C3 l_i2c21
+# define L_I2C4 l_i2c22
+# define L_I2C5 l_i2c23
+
+# define SERIAL_0 serial6
+# define SERIAL_1 serial7
+
+# define PCI7_I3C_0 pci7_i3c6
+# define PCI7_I3C_1 pci7_i3c7
+
+#else
+# error NODE
+#endif
+
+	PIC_0: PIC_0 {
+		compatible = "mcst,ioepic";
+
+		bus-reg64         = /bits/ 64 <PCICFG_ADDRL(00000018) 4>;
+		regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(0005801c) 0x100000>;
+
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+
+		#interrupt-cells = <2>;
+	};
+
+	IOMMU_0: iommu@DMN_0,380 {
+		compatible = "mcst,e2k-iommu";
+		REG = <NSR_ADDR(00380) 0 0x80>,
+			<NSR_ADDR(05080) 0 0x380>; /* for embedded devices */
+		nonposted-mmio;
+
+		#iommu-cells = <1>;
+
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP1_INTERRUPT_VECTOR   1 0>
+#ifdef E8V7
+			    ,<LINP26_INTERRUPT_VECTOR 26 0>
+			    ,<LINP27_INTERRUPT_VECTOR 27 0>
+			    ,<LINP28_INTERRUPT_VECTOR 28 0>
+			    ,<LINP29_INTERRUPT_VECTOR 29 0>
+			    ,<LINP30_INTERRUPT_VECTOR 30 0>
+			    ,<LINP31_INTERRUPT_VECTOR 31 0>
+#endif
+		;
+	};
+
+	pci@DMN_0 {
+		compatible = "mcst,l-pci";
+		REG = <PCICFG_ADDR(0x00000000) 0 0x10000000>, /*E2S_PCICFG_AREA_PHYS_BASE*/
+			<NSR_ADDR(00240) 0 4>,
+			<NSR_ADDR(00220) 0 4>,
+			<NSR_ADDR(00260) 0 4>,
+			<NSR_ADDR(00280) 0 4>;
+
+		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
+
+		linux,pci-domain = <DMN_0>;
+		numa-node-id = <NODE>;
+		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+
+		/*rid-base,iommu,iommu-base,length*/
+		iommu-map = <0x0 &IOMMU_0 0x0 0x10000>;
+		/* 1:1 translation, max size (48-bit) of e2k address space */
+		ranges = <  0 0 0 /* child address */
+			      0 0 /* parent address */
+			0x10000 0>;/* child size */
+		interrupt-parent = <&PIC>;
+		interrupts = <22 IRQ_TYPE_LEVEL_HIGH>, /*SERR (all devices)*/
+			     <29 IRQ_TYPE_LEVEL_HIGH>; /*WLCC*/
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/*devices: eioh2_doc/pe5_cxl/pe5_cxl_x16x4.pdf*/
+		/*ioepic pins: eioh2_doc/spi_ctrl/eioh2_spi.odt*/
+		/* reg: 00000000 00000000 dddddfff 00000000 */
+		pci@0,0 {
+			reg = <0x00000000 0 0 0 0>;
+			ranges;
+
+			#address-cells = <3>;
+			#size-cells = <2>;
+
+			pci@2,0 { /*SATA controller*/
+				reg = <0x00001000 0 0 0 0>;
+				interrupts = <21 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@3,0 { /*USB 3.0 xHCI*/
+				reg = <0x00001800 0 0 0 0>;
+				interrupts =	<28 IRQ_TYPE_LEVEL_HIGH>, /*USB*/
+ 						<29 IRQ_TYPE_LEVEL_HIGH>; /*usb_chrg_int*/
+			};
+			pci@3,1 { /*USB 3.0 xHCI*/
+				reg = <0x00001900 0 0 0 0>;
+				interrupts =	<28 IRQ_TYPE_LEVEL_HIGH>, /*USB*/
+ 						<29 IRQ_TYPE_LEVEL_HIGH>; /*usb_chrg_int*/
+			};
+			pci@4,0 { /*USB 3.0 xHCI*/
+				reg = <0x00002000 0 0 0 0>;
+				interrupts =	<30 IRQ_TYPE_LEVEL_HIGH>, /*USB*/
+ 						<31 IRQ_TYPE_LEVEL_HIGH>; /*usb_chrg_int*/
+			};
+			pci@4,1 { /*USB 3.0 xHCI*/
+				reg = <0x00002100 0 0 0 0>;
+				interrupts =	<30 IRQ_TYPE_LEVEL_HIGH>, /*USB*/
+ 						<31 IRQ_TYPE_LEVEL_HIGH>; /*usb_chrg_int*/
+			};
+			pci@5,0 { /*Audio controller*/
+				reg = <0x00002800 0 0 0 0>;
+				interrupts = <8 IRQ_TYPE_LEVEL_HIGH>;
+			};
+			pci@5,1 { /*GPIO MPV*/
+				reg = <0x00002900 0 0 0 0>;
+
+				#address-cells = <2>;
+				#size-cells = <1>;
+
+				/*ranges will added in gpio-mpv driver */
+				L_GPIO: gpio@0,0 {
+					compatible = "mcst,l-gpio";
+					reg = <0 /*bar 0*/ 0 32>;
+					interrupts =    <12 IRQ_TYPE_LEVEL_HIGH>, /*GPIO0*/
+							<13 IRQ_TYPE_LEVEL_HIGH>; /*GPIO1*/
+					interrupt-names = "gpio0", "gpio1";
+					ngpios = <16>;
+					interrupt-controller;
+
+					#interrupt-cells = <2>;
+
+					gpio-controller;
+				};
+				mpv@0,1 {
+					compatible = "mcst,mpv";
+					reg = <1 /*bar 1*/ 0 128>;
+					interrupts =    < 9 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers0*/
+							<10 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers1*/
+							<11 IRQ_TYPE_LEVEL_HIGH>; /*Mpv_timers1*/
+					interrupt-names = "mpv0", "mpv1", "mpv2";
+				};
+			};
+			pci@6,0 { /*Ethernet 1G controller*/
+				reg = <0x00003000 0 0 0 0>;
+				interrupts =	<3 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_tx0*/
+						<4 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_tx1*/
+						<5 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_rx0*/
+						<6 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_rx1*/
+						<7 IRQ_TYPE_LEVEL_HIGH>; /*Ethernet0_sys*/
+			};
+			pci@6,1 { /*Ethernet 1G controller*/
+				reg = <0x00003100 0 0 0 0>;
+				interrupts =	<23 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_tx0*/
+						<24 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_tx1*/
+						<25 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_rx0*/
+						<26 IRQ_TYPE_LEVEL_HIGH>, /*Ethernet0_rx1*/
+						<27 IRQ_TYPE_LEVEL_HIGH>; /*Ethernet0_sys*/
+			};
+			PCI7_I3C_0: pci@7,0 { /* i3c controller */
+				reg = <0x00003800 0 0 0 0>;
+
+				#address-cells = <3>;
+				#size-cells = <0>;
+			};
+			PCI7_I3C_1: pci@7,1 { /*i3c controller*/
+				reg = <0x00003900 0 0 0 0>;
+
+				#address-cells = <3>;
+				#size-cells = <0>;
+			};
+			L_I2C0: pci@8,0 { /*i2c controller*/
+				reg = <0x00004000 0 0 0 0>;
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+			L_I2C1: pci@8,1 { /*i2c controller*/
+				reg = <0x00004100 0 0 0 0>;
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+			L_I2C2: pci@8,2 { /*i2c controller*/
+				reg = <0x00004200 0 0 0 0>;
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+			L_I2C3: pci@8,3 { /*i2c controller*/
+				reg = <0x00004300 0 0 0 0>;
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+			L_I2C4: pci@8,4 { /*i2c controller*/
+				reg = <0x00004400 0 0 0 0>;
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+			L_I2C5: pci@8,5 { /*i2c controller*/
+				reg = <0x00004500 0 0 0 0>;
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+			SERIAL_0: pci@9,0 { /*Serial ports*/
+				reg = <0x00004800 0 0 0 0>;
+				interrupts =	<14 IRQ_TYPE_LEVEL_HIGH>; /*Serial Port*/
+			};
+			SERIAL_1: pci@9,1 { /*Serial ports*/
+				reg = <0x00004900 0 0 0 0>;
+				interrupts =	<17 IRQ_TYPE_LEVEL_HIGH>; /*Serial Port*/
+			};
+			pci@a,0 { /*SMPC controller*/
+				reg = <0x000005000 0 0 0 0>;
+				interrupts =	< 1 IRQ_TYPE_LEVEL_HIGH>; /*SCI*/
+			};
+			L_SPI: pci@b,0 { /*SPI controller*/
+				reg = <0x000005800 0 0 0 0>;
+				interrupts =	<15 IRQ_TYPE_LEVEL_HIGH>, /*SPI*/
+						<20 IRQ_TYPE_LEVEL_HIGH>, /*WD Timer*/
+						< 0 IRQ_TYPE_LEVEL_HIGH>; /*WD_RST_INT_SPI*/
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+		};
+#ifdef E8V7
+		display_subsystem: pci@1a,0 { /* 2D GPU MGA 2.7 */
+			reg = <0x0000d000 0 0 0 0>;
+				interrupts = <32 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1a,1 { /* I2S0 */
+			reg = <0x0000d100 0 0 0 0>;
+			interrupts = <33 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1a,2 { /* I2S1 */
+			reg = <0x0000d200 0 0 0 0>;
+			interrupts = <34 IRQ_TYPE_LEVEL_HIGH>;
+		};
+		pci@1b,0 { /* 3D GPU, drivers/mcst/gpu-viv-e8v7 */
+			reg = <0x0000d800 0 0 0 0>;
+			interrupts = <35 IRQ_TYPE_LEVEL_HIGH>;
+			iommus = <&IOMMU_0 0>; /*for generated subdevices*/
+		};
+		pci@1d,0 { /* Video decoder (VPU) HEVC/H264/JPEG/AV1/VP9 */
+			reg = <0x0000e800 0 0 0 0>;
+			interrupts = <37 IRQ_TYPE_LEVEL_HIGH>;
+			iommus = <&IOMMU_0 0>; /*for generated subdevices*/
+		};
+		pci@1e,0 { /* Video encoder BigEv2, drivers/mcst/BigEv2 */
+			reg = <0x0000f000 0 0 0 0>;
+			interrupts = <38 IRQ_TYPE_LEVEL_HIGH>;
+			iommus = <&IOMMU_0 0>; /*for generated subdevices*/
+		};
+#endif /*E8V7*/
+	};
+
+	IOMMU_1: iommu@DMN_1,a380 {
+		compatible = "mcst,e2k-iommu";
+		status = DMN_1_STS;
+		REG = <NSR_ADDR(0a380) 0 0x80>;
+		nonposted-mmio;
+
+		#iommu-cells = <1>;
+
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP16_INTERRUPT_VECTOR 16 0>;
+	};
+	/* eioh2/eioh2_doc/pe5_cxl/pe5_cxl_x16x4.pdf */
+	PIC_1: PIC_1 {
+		compatible = "mcst,ioepic";
+		status = DMN_1_STS;
+		regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(10000010) 0x100000>;
+
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+
+		#interrupt-cells = <2>;
+	};
+	pci@DMN_1 {
+		compatible = "mcst,l-pci";
+		status = DMN_1_STS;
+		REG = <PCICFG_ADDR(0x10000000) 0 0x10000000>,
+			<NSR_ADDR(00244) 0 4>,
+			<NSR_ADDR(00224) 0 4>,
+			<NSR_ADDR(00264) 0 4>,
+			<NSR_ADDR(00284) 0 4>;
+		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
+
+		linux,pci-domain = <DMN_1>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&PIC_1>;
+		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+
+		/*rid-base,iommu,iommu-base,length*/
+		iommu-map = <0x0 &IOMMU_1 0x0 0x10000>;
+		/* 1:1 translation, max size (48-bit) of e2k address space */
+		ranges = <  0 0 0 /* child address */
+			      0 0 /* parent address */
+			0x10000 0>;/* child size */
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/* reg: 00000000 00000000 dddddfff 00000000 */
+		pci@0,0 {
+			reg = <0x00000000 0 0 0 0>;
+			ranges;
+
+			#address-cells = <3>;
+			#size-cells = <2>;
+
+			pci@0,0 { /*CXL/PCIe Root complex x16*/
+				reg = <0x00000000 0 0 0 0>;
+				interrupts =	< 1 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 2 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 3 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 4 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						< 5 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@1,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00000800 0 0 0 0>;
+				interrupts =	< 6 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 7 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 8 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 9 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<10 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@2,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001000 0 0 0 0>;
+				interrupts =	<11 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<12 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<13 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<14 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<15 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@3,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001800 0 0 0 0>;
+				interrupts =	<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<20 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+		};
+	};
+
+	IOMMU_2: iommu@DMN_2,b380 {
+		compatible = "mcst,e2k-iommu";
+		status = DMN_2_STS;
+		REG = <NSR_ADDR(0b380) 0 0x80>;
+		nonposted-mmio;
+
+		#iommu-cells = <1>;
+
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP17_INTERRUPT_VECTOR 17 0>;
+	};
+	PIC_2: PIC_2 {
+		compatible = "mcst,ioepic";
+		status = DMN_2_STS;
+		regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(20000010) 0x100000>;
+
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+
+		#interrupt-cells = <2>;
+	};
+	pci@DMN_2 {
+		compatible = "mcst,l-pci";
+		status = DMN_2_STS;
+		REG = <PCICFG_ADDR(0x20000000) 0 0x10000000>,
+			<NSR_ADDR(00248) 0 4>,
+			<NSR_ADDR(00228) 0 4>,
+			<NSR_ADDR(00268) 0 4>,
+			<NSR_ADDR(00288) 0 4>;
+		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
+
+		linux,pci-domain = <DMN_2>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&PIC_2>;
+		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+
+		/*rid-base,iommu,iommu-base,length*/
+		iommu-map = <0x0 &IOMMU_2 0x0 0x10000>;
+		/* 1:1 translation, max size (48-bit) of e2k address space */
+		ranges = <  0 0 0 /* child address */
+			      0 0 /* parent address */
+			0x10000 0>;/* child size */
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/* reg: 00000000 00000000 dddddfff 00000000 */
+		pci@0,0 {
+			reg = <0x00000000 0 0 0 0>;
+			ranges;
+
+			#address-cells = <3>;
+			#size-cells = <2>;
+
+			pci@0,0 { /*CXL/PCIe Root complex x16*/
+				reg = <0x00000000 0 0 0 0>;
+				interrupts =	< 1 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 2 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 3 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 4 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						< 5 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@1,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00000800 0 0 0 0>;
+				interrupts =	< 6 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 7 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 8 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 9 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<10 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@2,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001000 0 0 0 0>;
+				interrupts =	<11 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<12 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<13 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<14 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<15 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@3,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001800 0 0 0 0>;
+				interrupts =	<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<20 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+		};
+	};
+
+	IOMMU_3: iommu@DMN_3,c380 {
+		compatible = "mcst,e2k-iommu";
+		status = DMN_3_STS;
+		REG = <NSR_ADDR(0c380) 0 0x80>;
+		nonposted-mmio;
+
+		#iommu-cells = <1>;
+
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP18_INTERRUPT_VECTOR 18 0>;
+	};
+	PIC_3: PIC_3 {
+		compatible = "mcst,ioepic";
+		status = DMN_3_STS;
+		regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(30000010) 0x100000>;
+
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+
+		#interrupt-cells = <2>;
+	};
+	pci@DMN_3 {
+		compatible = "mcst,l-pci";
+		status = DMN_3_STS;
+		REG = <PCICFG_ADDR(0x30000000) 0 0x10000000>,
+			<NSR_ADDR(0024c) 0 4>,
+			<NSR_ADDR(0022c) 0 4>,
+			<NSR_ADDR(0026c) 0 4>,
+			<NSR_ADDR(0028c) 0 4>;
+		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
+
+		linux,pci-domain = <DMN_3>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&PIC_3>;
+		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+
+		/*rid-base,iommu,iommu-base,length*/
+		iommu-map = <0x0 &IOMMU_3 0x0 0x10000>;
+		/* 1:1 translation, max size (48-bit) of e2k address space */
+		ranges = <  0 0 0 /* child address */
+			      0 0 /* parent address */
+			0x10000 0>;/* child size */
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/* reg: 00000000 00000000 dddddfff 00000000 */
+		pci@0,0 {
+			reg = <0x00000000 0 0 0 0>;
+			ranges;
+
+			#address-cells = <3>;
+			#size-cells = <2>;
+
+			pci@0,0 { /*CXL/PCIe Root complex x16*/
+				reg = <0x00000000 0 0 0 0>;
+				interrupts =	< 0 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 1 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 2 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 3 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						< 4 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@1,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00000800 0 0 0 0>;
+				interrupts =	< 5 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 6 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 7 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 8 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						< 9 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@2,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001000 0 0 0 0>;
+				interrupts =	<10 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<11 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<12 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<13 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<14 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@3,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001800 0 0 0 0>;
+				interrupts =	<15 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<19 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+		};
+	};
+
+	IOMMU_4: iommu@DMN_4,d380 {
+		compatible = "mcst,e2k-iommu";
+		status = DMN_4_STS;
+		REG = <NSR_ADDR(0d380) 0 0x80>;
+		nonposted-mmio;
+
+		#iommu-cells = <1>;
+
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP19_INTERRUPT_VECTOR 19 0>;
+	};
+	PIC_4: PIC_4 {
+		compatible = "mcst,ioepic";
+		status = DMN_4_STS;
+		regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(40000010) 0x100000>;
+
+		interrupt-parent = <&lpic>;
+		interrupt-controller;
+		numa-node-id = <NODE>;
+
+		#interrupt-cells = <2>;
+	};
+	pci@DMN_4 {
+		compatible = "mcst,l-pci";
+		status = DMN_4_STS;
+		REG = <PCICFG_ADDR(0x40000000) 0 0x10000000>,
+			<NSR_ADDR(0024c) 0 4>,
+			<NSR_ADDR(0022c) 0 4>,
+			<NSR_ADDR(0026c) 0 4>,
+			<NSR_ADDR(0028c) 0 4>;
+		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
+
+		linux,pci-domain = <DMN_4>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&PIC_4>;
+		msi-parent = <&lmsi>;
+		linux,pci-probe-only = <1>;
+
+		/*rid-base,iommu,iommu-base,length*/
+		iommu-map = <0x0 &IOMMU_4 0x0 0x10000>;
+		/* 1:1 translation, max size (48-bit) of e2k address space */
+		ranges = <  0 0 0 /* child address */
+			      0 0 /* parent address */
+			0x10000 0>;/* child size */
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/* reg: 00000000 00000000 dddddfff 00000000 */
+		pci@0,0 {
+			reg = <0x00000000 0 0 0 0>;
+			ranges;
+
+			#address-cells = <3>;
+			#size-cells = <2>;
+
+			pci@0,0 { /*CXL/PCIe Root complex x16*/
+				reg = <0x00000000 0 0 0 0>;
+				interrupts =	< 0 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 1 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 2 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 3 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						< 4 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@1,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00000800 0 0 0 0>;
+				interrupts =	< 5 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						< 6 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						< 7 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						< 8 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						< 9 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@2,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001000 0 0 0 0>;
+				interrupts =	<10 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<11 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<12 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<13 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<14 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+			pci@3,0 { /*CXL/PCIe Root complex x8*/
+				reg = <0x00001800 0 0 0 0>;
+				interrupts =	<15 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
+						<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
+						<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
+						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ D*/
+						<19 IRQ_TYPE_LEVEL_HIGH>; /*error/hot-plug,link-drop*/
+			};
+		};
+	};
+
+#undef PCICFG_ADDR
+#undef PCICFG_ADDRL
+
+#undef DMN_0_STS
+#undef DMN_1_STS
+#undef DMN_2_STS
+#undef DMN_3_STS
+#undef DMN_4_STS
+
+#undef DMN_0
+#undef DMN_1
+#undef DMN_2
+#undef DMN_3
+#undef DMN_4
+
+#undef PIC_0
+#undef PIC_1
+#undef PIC_2
+#undef PIC_3
+#undef PIC_4
+
+#undef L_GPIO
+#undef L_SPI
+
+#undef L_I2C0
+#undef L_I2C1
+#undef L_I2C2
+#undef L_I2C3
+#undef L_I2C4
+#undef L_I2C5
+
+#undef IOMMU_0
+#undef IOMMU_1
+#undef IOMMU_2
+#undef IOMMU_3
+#undef IOMMU_4
+
+#undef SERIAL_0
+#undef SERIAL_1
+#undef SERIAL_2
+#undef SERIAL_3
+#undef SERIAL_4
+#undef SERIAL_5
+#undef SERIAL_6
+#undef SERIAL_7
+
+#undef PCI7_I3C_0
+#undef PCI7_I3C_1
+#undef PCI7_I3C_2
+#undef PCI7_I3C_3
+#undef PCI7_I3C_4
+#undef PCI7_I3C_5
+#undef PCI7_I3C_6
+#undef PCI7_I3C_7

@@ -35,10 +35,43 @@
 /*	DAT_0_IBI_PAYLOAD		W0_BIT_(12) */
 #define DAT_0_STATIC_ADDRESS		W0_MASK(6, 0)
 
+#ifdef CONFIG_E2K
+
+#ifdef I3C_PCI_DEBUG
+
+#define dat_w0_read(i) \
+({                                                                              \
+	u32 _r__ = readl(hci->DAT_regs + (i) * 8);					\
+	pr_info("%s: dat_w0_read slot %d reg %#x = %#08x\n", __func__, i, (i) * 8, _r__);   \
+	_r__;                                                                   \
+})
+#define dat_w0_write(i, v)     {pr_info("%s: dat_w0_write slot %d reg %#x = %#llx\n",	\
+				__func__, i, (i) * 8, (u64)(v));			\
+				writel(v, hci->DAT_regs + (i) * 8);			\
+			       }
+#define dat_w1_read(i) \
+({ \
+	u32 _r__ = readl(hci->DAT_regs + (i) * 8 +4);		\
+	pr_info("%s: dat_w1_read slot %d reg %#x = %#08x\n",	\
+	__func__, i, (i) * 8 + 4, _r__);			\
+	_r__;							\
+})
+#define dat_w1_write(i, v)     {pr_info("%s: dat_w1_write slot %d reg %#x = %#llx\n",	\
+				__func__, i, (i) * 8 + 4, (u64)(v));			\
+				writel(v, hci->DAT_regs + (i) * 8 + 4);			\
+			       }
+#else
 #define dat_w0_read(i)		readl(hci->DAT_regs + (i) * 8)
 #define dat_w1_read(i)		readl(hci->DAT_regs + (i) * 8 + 4)
 #define dat_w0_write(i, v)	writel(v, hci->DAT_regs + (i) * 8)
 #define dat_w1_write(i, v)	writel(v, hci->DAT_regs + (i) * 8 + 4)
+#endif
+#else /* !CONFIG_E2K */
+#define dat_w0_read(i)		readl(hci->DAT_regs + (i) * 8)
+#define dat_w1_read(i)		readl(hci->DAT_regs + (i) * 8 + 4)
+#define dat_w0_write(i, v)	writel(v, hci->DAT_regs + (i) * 8)
+#define dat_w1_write(i, v)	writel(v, hci->DAT_regs + (i) * 8 + 4)
+#endif
 
 static inline bool dynaddr_parity(unsigned int addr)
 {
@@ -100,15 +133,25 @@ static int hci_dat_v1_alloc_entry(struct i3c_hci *hci)
 	if (dat_idx >= hci->DAT_entries)
 		return -ENOENT;
 	__set_bit(dat_idx, hci->DAT_data);
+#ifdef CONFIG_E2K
+	DBG("alloc entry=== %d", dat_idx);
+#endif
 
 	/* default flags */
 	dat_w0_write(dat_idx, DAT_0_SIR_REJECT | DAT_0_MR_REJECT);
-
+#ifdef CONFIG_MCST
+	/* rm25336, comm 111 */
+	dat_w1_write(dat_idx, FIELD_PREP(DAT_1_AUTOCMD_VALUE, 1));
+#endif
 	return dat_idx;
 }
 
 static void hci_dat_v1_free_entry(struct i3c_hci *hci, unsigned int dat_idx)
 {
+#ifdef CONFIG_E2K
+	u32 dat_w0 =  dat_w0_read(dat_idx);
+	DBG("entry %d for addr %u", dat_idx, FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0));
+#endif
 	dat_w0_write(dat_idx, 0);
 	dat_w1_write(dat_idx, 0);
 	if (hci->DAT_data)
@@ -120,6 +163,9 @@ static void hci_dat_v1_set_dynamic_addr(struct i3c_hci *hci,
 {
 	u32 dat_w0;
 
+#ifdef CONFIG_E2K
+	DBG("dat_idx = %d, address = %d", dat_idx, address);
+#endif
 	dat_w0 = dat_w0_read(dat_idx);
 	dat_w0 &= ~(DAT_0_DYNAMIC_ADDRESS | DAT_0_DYNADDR_PARITY);
 	dat_w0 |= FIELD_PREP(DAT_0_DYNAMIC_ADDRESS, address) |
@@ -169,12 +215,21 @@ static int hci_dat_v1_get_index(struct i3c_hci *hci, u8 dev_addr)
 	unsigned int dat_idx;
 	u32 dat_w0;
 
+#ifdef CONFIG_E2K
+	DBG("searching dev_addr %d", dev_addr);
+#endif
 	for_each_set_bit(dat_idx, hci->DAT_data, hci->DAT_entries) {
 		dat_w0 = dat_w0_read(dat_idx);
+#ifdef CONFIG_E2K
+		DBG("FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0) of index %d = %ld",
+			dat_idx, FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0));
+#endif
 		if (FIELD_GET(DAT_0_DYNAMIC_ADDRESS, dat_w0) == dev_addr)
 			return dat_idx;
 	}
-
+#ifdef CONFIG_E2K
+	DBG(" returns -ENODEV\n");
+#endif
 	return -ENODEV;
 }
 

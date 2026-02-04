@@ -1015,6 +1015,9 @@
 
 /* TPH Requester */
 #define PCI_TPH_CAP		4	/* capability register */
+/* #ifdef CONFIG_E2K_DCA */
+#define PCI_TPH_CTRL		8	/* control register */
+/* #endif CONFIG_E2K_DCA */
 #define  PCI_TPH_CAP_LOC_MASK	0x600	/* location mask */
 #define   PCI_TPH_LOC_NONE	0x000	/* no location */
 #define   PCI_TPH_LOC_CAP	0x200	/* in capability */

@@ -140,6 +140,8 @@ struct seccomp_data {
 #  define __NR_seccomp 337
 # elif defined(__sh__)
 #  define __NR_seccomp 372
+# elif defined(__e2k__)
+#  define __NR_seccomp 392
 # else
 #  warning "seccomp syscall number unknown for this architecture"
 #  define __NR_seccomp 0xffff
@@ -1838,6 +1840,10 @@ TEST_F(TRACE_poke, getpid_runs_normally)
 # define ARCH_REGS		struct pt_regs
 # define SYSCALL_NUM(_regs)	(_regs).regs[3]
 # define SYSCALL_RET(_regs)	(_regs).regs[0]
+#elif defined(__e2k__)
+# define ARCH_REGS		struct user_regs_struct
+# define SYSCALL_NUM(_regs)	(_regs).sys_num
+# define SYSCALL_RET(_regs)	(_regs).sys_rval
 #else
 # error "Do not know how to find your architecture's registers and syscalls"
 #endif
@@ -1905,6 +1911,12 @@ const bool ptrace_entry_set_syscall_ret =
 #if defined(__x86_64__) || defined(__i386__) || defined(__mips__)
 # define ARCH_GETREGS(_regs)	ptrace(PTRACE_GETREGS, tracee, 0, &(_regs))
 # define ARCH_SETREGS(_regs)	ptrace(PTRACE_SETREGS, tracee, 0, &(_regs))
+#elif defined(__e2k__)
+# define ARCH_GETREGS(_regs)	({					\
+		_regs.sizeof_struct = sizeof(_regs);			\
+		ptrace(PTRACE_GETREGS, tracee, 0, &(_regs));		\
+	})
+# define ARCH_SETREGS(_regs)   ptrace(PTRACE_SETREGS, tracee, 0, &(_regs))
 #else
 # define ARCH_GETREGS(_regs)	({					\
 		struct iovec __v;					\

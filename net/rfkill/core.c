@@ -1379,6 +1379,9 @@ static const struct file_operations rfkill_fops = {
 	.release	= rfkill_fop_release,
 	.unlocked_ioctl	= rfkill_fop_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = rfkill_fop_ioctl,
+#endif
 	.llseek		= no_llseek,
 };
 

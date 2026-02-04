@@ -130,7 +130,11 @@ static int br_dev_read_uargs(unsigned long *args, size_t nr_args,
 			goto fault;
 		*argp = (void __user *)args[1];
 	}
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	if (in_ptr128_syscall())
+		/* size lost. protection tot works */
+		set_max_u_border();
+#endif
 	return 0;
 fault:
 	return -EFAULT;

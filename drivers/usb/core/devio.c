@@ -2843,6 +2843,9 @@ const struct file_operations usbdev_file_operations = {
 	.poll =		  usbdev_poll,
 	.unlocked_ioctl = usbdev_ioctl,
 	.compat_ioctl =   compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = usbdev_ioctl,
+#endif
 	.mmap =           usbdev_mmap,
 	.open =		  usbdev_open,
 	.release =	  usbdev_release,

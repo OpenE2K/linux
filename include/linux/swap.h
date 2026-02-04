@@ -728,6 +728,11 @@ static inline bool mem_cgroup_swap_full(struct folio *folio)
 	return vm_swap_full();
 }
 #endif
+#ifdef CONFIG_MCST_MEMORY_SANITIZE
+extern struct page *swap_sanit_page;
+#define SANITIZE_VALUE	(0xfefefefe)
+void pageout4sanit(struct page *page);
+#endif
 
 #endif /* __KERNEL__*/
 #endif /* _LINUX_SWAP_H */

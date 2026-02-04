@@ -1,0 +1,10 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2025 MCST
+ */
+
+#include "e2k-v6.dtsi"
+
+	esclk_timer {
+		compatible = "mcst,esclk-timer";
+	};

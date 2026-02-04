@@ -488,6 +488,9 @@ static const struct proto_ops mctp_dgram_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= mctp_compat_ioctl,
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= mctp_ioctl,
+#endif
 };
 
 static void mctp_sk_expire_keys(struct timer_list *timer)

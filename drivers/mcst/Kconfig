@@ -1,0 +1,376 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023 MCST
+
+menu "Elbrus MCST Device Drivers"
+
+config GPIO_MPV
+	tristate "MCST GPIO-MPV Controller Support"
+	depends on E2K || E90S
+	default y
+	help
+	GPIO-MPV base driver
+
+config MCST_LTD
+	tristate "MCST LTD (Log Transmit Device) Support"
+	depends on E2K || E90S
+	select REGMAP_MMIO
+	default m
+	help
+	Support for MCST PMC logger
+
+config I2C_SPI_RESET_CONTROLLER
+	bool "MCST I2C SPI Controller Support"
+	depends on PCI && (E2K || E90S)
+	default y
+	help
+	  Support for MCST I2C SPI Controller
+
+config L_I2C_CONTROLLER
+	tristate "Elbrus I2C Controller"
+	depends on I2C && I2C_SPI_RESET_CONTROLLER
+	default y
+	help
+	  If you say yes to this option, support will be
+	  included for the Elbrus I2C controller that is
+	  part of Elbrus IOHUB.
+
+config L_SPI_CONTROLLER
+	tristate "Elbrus SPI controller"
+	depends on SPI && I2C_SPI_RESET_CONTROLLER
+	default y
+	help
+	  If you say yes to this option, support will be
+	  included for the Elbrus SPI controller that is
+	  part of Elbrus IOHUB.
+
+config I2C_SPI_IRQ
+	bool
+	depends on L_SPI_CONTROLLER || L_I2C_CONTROLLER
+	default n
+
+config L_MTD_SPI_NOR
+	bool "Elbrus MTD support"
+	depends on L_SPI_CONTROLLER && MTD_SPI_NOR && MTD_CMDLINE_PARTS && MTD_BLOCK && ROMFS_FS
+	default n
+	help
+	  If you say yes to this option, embedded flash (S25FL064A or similar) driver will
+	  be switched from SPIDEV to SPI-NOR.
+	  Both can be used by flashrom userspace tool, but SPI-NOR/MTD also requires mtd-utils
+	  package. Selecting SPIDEV by default
+
+config IPE2ST_POWER
+	tristate "Elbrus IPE2-ST Power Source"
+	depends on E2K && L_I2C_CONTROLLER && GPIO_PCA953X && ISL22317
+	default m
+	help
+	   If you say yes to this option, support will be included for the
+	   Elbrus IPE2-ST Power Source. IPE2-ST uses GPIO_PCA953x and ISL22317
+	   by modprobing them from /etc.
+
+config ACPI_L_SPMC
+	bool "Processor-8 SPMC Controller (SCI, PM Timer, sleep states)"
+	depends on E2K || E90S
+	default y
+	help
+	   If you say yes to this option, support will be
+	   included for the Processor-8 SPMC Controller (SCI, PM Timer,
+	   sleep states) that is part of IOHUB-2.
+
+
+config IOHUB_GPIO
+	tristate "IOHUB Gpiolib"
+	depends on GPIOLIB && (E2K || E90S)
+	default m
+	help
+	   Gpiolib implementation for Elbrus IOHUB.
+
+config R2000P_EDAC
+	tristate "r2000+ processor Error Detection And Correction (EDAC) driver"
+	depends on PCI && E90S
+	default m
+	select EDAC
+	select EDAC_DEBUG
+
+config DRM_MGA2
+	tristate "MGA 2 and higher video adapter"
+	depends on PCI && DRM && (CPU_E1CP || CPU_E2C3 || CPU_E8V7 || E90S)
+	default m
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select VIDEOMODE_HELPERS
+	select DRM_KMS_HELPER
+	select DRM_KMS_FB_HELPER
+	select DRM_DW_HDMI
+	select DRM_DW_HDMI_CEC
+	select DRM_I2C_SIL164
+	select DRM_PANEL_LVDS
+	select BACKLIGHT_PWM
+	select DRM_SIMPLE_BRIDGE
+	select DRM_SII902X
+	select DRM_TI_SN65DSI86
+	select DRM_PANEL_SIMPLE
+	select DRM_DISPLAY_CONNECTOR
+	select DRM_MIPI_DSI
+	select DRM_DW_MIPI_DSI
+	select I2C_GPIO
+	select REGULATOR_LP872X
+	select DRM_GEM_DMA_HELPER
+	select REGULATOR_FIXED_VOLTAGE
+	select DRM_ITE_IT66121
+
+config E2C3_DEVFREQ
+	tristate "E2C3 devfreq provider driver for graphic devices"
+	depends on E2K && PM_DEVFREQ
+	default m
+	help
+		"E2C3 devfreq provider driver for graphic devices"
+		""
+		""
+		""
+
+config MPV
+	tristate "MPV driver"
+	depends on MCST && PCI
+
+config MGPM
+        tristate "MGPM PCI driver"
+        depends on PCI
+
+config MMRM
+	tristate "MMRM PCI driver"
+	depends on PCI
+	help
+	  Driver for MMR (Manchester code) on PCI".
+
+config MMRSE
+	tristate "MMRSE PCI driver"
+	depends on PCI
+	default m
+	help
+	  New driver for MMRM module
+
+config MOKM
+    tristate "MOKM PCI driver"
+    depends on PCI
+
+
+config RDMA
+	tristate "RDMA driver"
+	depends on E2K
+	default m
+
+config RDMA_SIC
+	tristate "RDMA_SIC driver"
+	depends on (E2K || E90S) && NUMA
+	default m
+
+config RDMA_M
+	tristate "RDMA_M driver"
+	depends on (E2K || E90S) && NUMA
+	default m
+
+config MOKX
+	tristate "MOKX driver"
+	depends on E2K && NUMA
+	default m
+
+config WD
+	bool "WD driver"
+	depends on E2K
+	help
+	  System work(watchdog) control manager.
+	  /dev/watchdog major 10 minor 130
+
+config M2MLC
+	tristate "M2MLC driver"
+        depends on PCI
+	default m
+	help
+	  Driver for Node Interconnect Controller.
+
+config APKPWR
+	tristate "APKPWR driver"
+	depends on I2C
+	default m
+	help
+	  Driver for MUP-4C power supply module (used in APK-NT4C and APK-PC4C).
+
+config MEM2ALLOC
+	tristate "DMA memory allocator"
+	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
+	help
+	  DMA memory allocator.
+
+config HANTRODEC
+	tristate "Google hantrodec VP9 driver"
+	default m
+	depends on E2K && PCI && CPU_E2C3
+	help
+	  Google VP9 driver.
+
+config MCST_VC9000D
+	tristate "Verisilicon hantrodec VC9000D driver"
+	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
+	help
+	  Verisilicon VC9000D video decoder technological driver.
+
+config MCST_HANTRO_DRIVER
+	tristate "Verisilicon Hantro DRM driver for VA-API"
+	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
+	help
+	  Verisilicon Hantro DRM driver for VA-API (for VC9000D video decoder in e8v7 SoC).
+
+config BIGE
+	tristate "Google bige VP9 encoder driver"
+	default m
+	depends on E2K && PCI && (CPU_E2C3 || CPU_E8V7)
+	select UIO
+	help
+	  Google VP9 encoder driver.
+
+config E8CPCS
+	tristate "E8C Power Control System (PCS) hwmon driver"
+	depends on E2K && (CPU_E8C || CPU_E8C2)
+	default m
+
+config DDRMEM
+	tristate "Memory Test driver"
+	depends on E2K && (CPU_E8C2 || CPU_E2C3 || CPU_E16C)
+	default m
+
+config PCSM
+	tristate "Power Control System (PCS) for e8c* and e2c3 system's"
+	depends on E2K
+	default m
+	help
+	  Needed for power management system (based on e1c+ or other)
+
+config IMGTEC
+	tristate "Imagination codec driver"
+	depends on E2K && CPU_E2C3
+	default m
+	select BUS_MASTERING
+	select VXD_FPGA
+	help
+	  Imagination codec driver.
+
+config BUS_MASTERING
+        def_bool y
+        depends on IMGTEC
+
+config VXD_FPGA
+        def_bool y
+        depends on IMGTEC
+
+config MCST_GPU_IMGTEC
+        tristate "MCST support Imagination`s GPU support for E2C3 SoC"
+        select DRM_VM
+        depends on IMGTEC
+        default m
+
+config MCST_GPU_IMGTEC_R4991288
+        bool "Rogue_DDK_Linux_WS_REL_1.9@4991288 with desktop OpenGL"
+      	depends on IMGTEC
+	    default y
+
+config MCST_GPU_IMGTEC_R5878540
+        bool "Rogue_DDK_Linux_WS_REL_1.13@5878540 w/o desktop OpenGL"
+     	depends on IMGTEC
+	    default y
+
+source "drivers/mcst/gpu-imgtec.r4991288/Kconfig"
+source "drivers/mcst/gpu-imgtec.r5878540/Kconfig"
+
+source "drivers/mcst/gpu-viv/Kconfig"
+source "drivers/mcst/gpu-viv-e8v7/Kconfig"
+
+source "drivers/mcst/smi/Kconfig"
+
+config SMI_PWM
+	tristate "Silicon Motion pulse-width modulation (PWM) driver"
+        depends on PWM
+	default m
+
+config SMI_GPIO
+	tristate "Silicon Motion GPIO driver"
+        depends on GPIOLIB
+	select GPIOLIB_IRQCHIP
+	default m
+
+config SENSORS_EMC2305
+	tristate "SMSC EMC2305"
+	depends on I2C
+	help
+	  If you say yes here you get support for the SMSC EMC2305/EMC2303
+	  fan controller chips.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called emc2305.
+
+config PMC_R2KP
+	bool "R2000+ Power Management Controller"
+	depends on E90S
+	default y #
+	help
+	  Power Management Controller (PMC) for MCST R2000+ (E90S/SPARC v9) CPU
+
+config HW_CHECK
+	tristate "Hardware checker (ipcc, mem, bitrate, pins) for engineers"
+	depends on (E2K || E90S)
+	default m
+	help
+	  Module for checking memory bitrate, ipcc bitrate,
+	  pins configuration, multiproccesor links info and memory links info.
+
+config FATAL_TEMP
+	tristate "Setting fatal temperature"
+	depends on E2K
+	default m
+	help
+	  Module for setting fatal temperature
+
+config L_I2S
+	tristate "MCST I2S controller"
+	help
+		Say Y here to include support for MCST I2S controller.
+
+		To compile this driver as a module, choose M here: the module
+		will be called l-i2s.
+
+config DS125DF111
+	tristate "DS125DF111 - Multi-Protocol 2-Channel Retimer"
+	depends on E2K && CPU_E16C
+	default m
+	help
+		Say Y here to include support for DS125DF111 Retimer.
+
+		To compile this driver as a module, choose M here: the module
+		will be called ds125df111.
+
+config I2C_V7
+	tristate "MCST I2C V7 master controller"
+	depends on E2K
+	default m
+	help
+	  Module for MCST I2C master controller for V7 architecture.
+
+endmenu
+
+config MCST_QDMA_PF
+	tristate "Xilinx qdma-pf driver"
+	depends on E2K && PCI
+	default n
+	help
+	 taken from https://github.com/Xilinx/dma_ip_drivers/DDMA/linux-kernel/driver and adopted 
+
+config MCST_QDMA_VF
+	tristate "Xilinx qdma-vf driver"
+	depends on E2K && PCI
+	default n
+	help
+	 taken from https://github.com/Xilinx/dma_ip_drivers/DDMA/linux-kernel/driver and adopted
+

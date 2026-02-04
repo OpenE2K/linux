@@ -124,6 +124,9 @@ static const struct file_operations rpmsg_ctrldev_fops = {
 	.release = rpmsg_ctrldev_release,
 	.unlocked_ioctl = rpmsg_ctrldev_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl   = rpmsg_ctrldev_ioctl,
+#endif
 };
 
 static void rpmsg_ctrldev_release_device(struct device *dev)

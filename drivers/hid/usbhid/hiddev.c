@@ -854,6 +854,9 @@ static const struct file_operations hiddev_fops = {
 	.unlocked_ioctl =	hiddev_ioctl,
 	.fasync =	hiddev_fasync,
 	.compat_ioctl	= compat_ptr_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl =	hiddev_ioctl,
+#endif
 	.llseek		= noop_llseek,
 };
 

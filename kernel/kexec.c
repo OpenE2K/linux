@@ -129,7 +129,13 @@ static int do_kexec_load(unsigned long entry, unsigned long nr_segments,
 	if (flags & KEXEC_PRESERVE_CONTEXT)
 		image->preserve_context = 1;
 
+#ifdef CONFIG_E2K
+	/* Need to pass flags argument, because lintel image has different
+	 * offset of its entry point */
+	ret = machine_kexec_prepare(image, flags);
+#else
 	ret = machine_kexec_prepare(image);
+#endif
 	if (ret)
 		goto out;
 

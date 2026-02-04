@@ -131,6 +131,13 @@ struct bnep_connlist_req {
 	struct bnep_conninfo __user *ci;
 };
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+struct bnep_ptr128_connlist_req {
+	__u32    cnum;
+	e2k_ap_t ci;
+};
+#endif
 struct bnep_proto_filter {
 	__u16 start;
 	__u16 end;

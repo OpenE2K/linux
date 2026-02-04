@@ -96,7 +96,7 @@ drm_clflush_pages(struct page *pages[], unsigned long num_pages)
 	if (wbinvd_on_all_cpus())
 		pr_err("Timed out waiting for cache flush\n");
 
-#elif defined(__powerpc__)
+#elif defined(__powerpc__) || defined(CONFIG_E2K)
 	unsigned long i;
 
 	for (i = 0; i < num_pages; i++) {
@@ -107,8 +107,12 @@ drm_clflush_pages(struct page *pages[], unsigned long num_pages)
 			continue;
 
 		page_virtual = kmap_atomic(page);
+# ifndef CONFIG_E2K
 		flush_dcache_range((unsigned long)page_virtual,
 				   (unsigned long)page_virtual + PAGE_SIZE);
+# else
+		flush_DCACHE_range((void *)page_virtual, PAGE_SIZE);
+# endif
 		kunmap_atomic(page_virtual);
 	}
 #else

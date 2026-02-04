@@ -3616,6 +3616,10 @@ static const struct tty_operations ops = {
 	.flush_buffer = flush_buffer,
 	.ioctl = ioctl,
 	.compat_ioctl = slgt_compat_ioctl,
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl = ioctl,
+#endif
+
 	.throttle = throttle,
 	.unthrottle = unthrottle,
 	.send_xchar = send_xchar,

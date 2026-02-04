@@ -220,6 +220,116 @@ static int hidp_sock_compat_ioctl(struct socket *sock, unsigned int cmd, unsigne
 }
 #endif
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/e2k_ptypes.h>
+struct ptr128_hidp_connadd_req {
+	int   ctrl_sock;	/* Connected control socket */
+	int   intr_sock;	/* Connected interrupt socket */
+	__u16 parser;
+	__u16 rd_size;
+	e2k_ap_t rd_data;
+	__u8  country;
+	__u8  subclass;
+	__u16 vendor;
+	__u16 product;
+	__u16 version;
+	__u32 flags;
+	__u32 idle_to;
+	char  name[128];
+};
+
+struct hidp_ptr128_connlist_req {
+	__u32  cnum;
+	e2k_ap_t *ci;
+};
+static int hidp_sock_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	e2k_ap_t ap;
+	int tag;
+	int err;
+
+	if (cmd == HIDPGETCONNLIST) {
+		struct hidp_connlist_req cl;
+		struct hidp_ptr128_connlist_req __user *clp =
+			(struct hidp_ptr128_connlist_req __user *)arg;
+
+		if (get_user(cl.cnum, &clp->cnum))
+			return -EFAULT;
+		if (cl.cnum <= 0)
+			return -EINVAL;
+		if (get_user_tagged_16(ap.qword, tag, &clp->ci) || !IS_AP(ap, tag)) {
+			return -EFAULT;
+		}
+		cl.ci = (void __user *)AP_PTR(ap);
+		set_ap_u_border(ap);
+
+		err = hidp_get_connlist(&cl);
+
+		set_u_border(MAX_U_BORDER);
+		if (!err && put_user(cl.cnum, &clp->cnum))
+			err = -EFAULT;
+
+		return err;
+	}
+	if (cmd == HIDPCONNADD) {
+		struct compat_hidp_connadd_req ca128;
+		struct compat_hidp_connadd_req __user *ca128p =
+						(struct compat_hidp_connadd_req __user *)arg;
+		struct hidp_connadd_req ca;
+		struct socket *csock;
+		struct socket *isock;
+
+		if (!capable(CAP_NET_ADMIN))
+			return -EPERM;
+
+		if (copy_from_user(&ca128, (void __user *) arg, sizeof(ca128)))
+			return -EFAULT;
+
+		if (get_user_tagged_16(ap.qword, tag, &ca128p->rd_data) || !IS_AP(ap, tag)) {
+			return -EFAULT;
+		}
+		ca.rd_data = (void __user *)AP_PTR(ap);
+
+		ca.ctrl_sock = ca128.ctrl_sock;
+		ca.intr_sock = ca128.intr_sock;
+		ca.parser = ca128.parser;
+		ca.rd_size = ca128.rd_size;
+		ca.country = ca128.country;
+		ca.subclass = ca128.subclass;
+		ca.vendor = ca128.vendor;
+		ca.product = ca128.product;
+		ca.version = ca128.version;
+		ca.flags = ca128.flags;
+		ca.idle_to = ca128.idle_to;
+		ca128.name[sizeof(ca128.name) - 1] = '\0';
+		memcpy(ca.name, ca128.name, 128);
+
+		csock = sockfd_lookup(ca.ctrl_sock, &err);
+		if (!csock)
+			return err;
+
+		isock = sockfd_lookup(ca.intr_sock, &err);
+		if (!isock) {
+			sockfd_put(csock);
+			return err;
+		}
+		set_ap_u_border(ap);
+
+		err = hidp_connection_add(&ca, csock, isock);
+
+		set_u_border(MAX_U_BORDER);
+		if (!err && copy_to_user(ca128p, &ca128, sizeof(ca128)))
+			err = -EFAULT;
+
+		sockfd_put(csock);
+		sockfd_put(isock);
+
+		return err;
+	}
+
+	return hidp_sock_ioctl(sock, cmd, arg);
+}
+#endif
 static const struct proto_ops hidp_sock_ops = {
 	.family		= PF_BLUETOOTH,
 	.owner		= THIS_MODULE,
@@ -227,6 +337,9 @@ static const struct proto_ops hidp_sock_ops = {
 	.ioctl		= hidp_sock_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= hidp_sock_compat_ioctl,
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	.ptr128_ioctl	= hidp_sock_ptr128_ioctl,
 #endif
 	.bind		= sock_no_bind,
 	.getname	= sock_no_getname,

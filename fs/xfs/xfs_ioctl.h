@@ -64,7 +64,13 @@ xfs_file_compat_ioctl(
 	struct file		*file,
 	unsigned int		cmd,
 	unsigned long		arg);
-
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+extern long
+xfs_file_ptr128_ioctl(
+	struct file		*file,
+	unsigned int		cmd,
+	unsigned long		arg);
+#endif
 int xfs_fsbulkstat_one_fmt(struct xfs_ibulk *breq,
 			   const struct xfs_bulkstat *bstat);
 int xfs_fsinumbers_fmt(struct xfs_ibulk *breq, const struct xfs_inumbers *igrp);

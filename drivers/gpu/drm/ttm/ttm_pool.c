@@ -36,7 +36,7 @@
 #include <linux/highmem.h>
 #include <linux/sched/mm.h>
 
-#ifdef CONFIG_X86
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
 #include <asm/set_memory.h>
 #endif
 
@@ -135,7 +135,7 @@ static void ttm_pool_free_page(struct ttm_pool *pool, enum ttm_caching caching,
 	struct ttm_pool_dma *dma;
 	void *vaddr;
 
-#ifdef CONFIG_X86
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
 	/* We don't care that set_pages_wb is inefficient here. This is only
 	 * used when we have to shrink and CPU overhead is irrelevant then.
 	 */
@@ -162,7 +162,7 @@ static void ttm_pool_free_page(struct ttm_pool *pool, enum ttm_caching caching,
 static int ttm_pool_apply_caching(struct page **first, struct page **last,
 				  enum ttm_caching caching)
 {
-#ifdef CONFIG_X86
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
 	unsigned int num_pages = last - first;
 
 	if (!num_pages)
@@ -289,7 +289,7 @@ static struct ttm_pool_type *ttm_pool_select_type(struct ttm_pool *pool,
 	if (pool->use_dma_alloc)
 		return &pool->caching[caching].orders[order];
 
-#ifdef CONFIG_X86
+#if defined(CONFIG_X86) || defined(CONFIG_E2K)
 	switch (caching) {
 	case ttm_write_combined:
 		if (pool->use_dma32)

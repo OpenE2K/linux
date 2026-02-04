@@ -177,6 +177,19 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 				return -EFAULT;
 			buf = compat_ptr(cbuf);
 #endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		} else if (in_ptr128_syscall()) {
+			struct ptr128_atm_iobuf __user *iobuf = argp;
+			e2k_ap_t	cbuf;
+			int		tag;
+			len = &iobuf->length;
+			if (get_user_tagged_16(cbuf.qword, tag, &iobuf->buffer) ||
+								!IS_AP(cbuf, tag)) {
+				return -EFAULT;
+			}
+			buf = (void __user *)AP_PTR(cbuf);
+			set_ap_u_border(cbuf);
+#endif
 		} else {
 			struct atm_iobuf __user *iobuf = argp;
 			len = &iobuf->length;
@@ -198,6 +211,21 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 			buf = compat_ptr(carg);
 			if (get_user(number, &csioc->number))
 				return -EFAULT;
+#endif
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		} else if (TASK_IS_PROTECTED(current)) {
+			struct ptr128_atmif_sioc __user *sioc = argp;
+			e2k_ap_t	ap;
+			int		tag;
+			len = &sioc->length;
+			if (get_user_tagged_16(ap.qword, tag, &sioc->arg) ||
+								!IS_AP(ap, tag)) {
+				return -EFAULT;
+			}
+			if (get_user(number, &sioc->number))
+				return -EFAULT;
+			buf = (void __user *)AP_PTR(ap);
+			set_ap_u_border(ap);
 #endif
 		} else {
 			struct atmif_sioc __user *sioc = argp;

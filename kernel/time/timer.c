@@ -1016,6 +1016,9 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 	struct timer_base *base, *new_base;
 	unsigned int idx = UINT_MAX;
 	int ret = 0;
+#if defined(CONFIG_MCST_4RT) && defined(CONFIG_NO_HZ_COMMON) && defined(CONFIG_SMP)
+	int cpu;
+#endif
 
 	debug_assert_init(timer);
 
@@ -1064,6 +1067,7 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 		idx = calc_wheel_index(expires, clk, &bucket_expiry);
 
 		/*
+		 *
 		 * Retrieve and compare the array index of the pending
 		 * timer. If it matches set the expiry to the new value so a
 		 * subsequent call will exit in the expires check above.
@@ -1093,7 +1097,17 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 	if (!ret && (options & MOD_TIMER_PENDING_ONLY))
 		goto out_unlock;
 
+#if defined(CONFIG_MCST_4RT) && defined(CONFIG_NO_HZ_COMMON) && defined(CONFIG_SMP)
+	cpu = smp_processor_id();
+	if (timer->flags != TIMER_PINNED && rt_cpu(cpu)) {
+		cpu = get_nohz_timer_target();
+		new_base = get_timer_cpu_base(timer->flags, cpu);
+	} else {
+		new_base = get_target_base(base, timer->flags);
+	}
+#else
 	new_base = get_target_base(base, timer->flags);
+#endif
 
 	if (base != new_base) {
 		/*

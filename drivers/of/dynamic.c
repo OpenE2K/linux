@@ -15,6 +15,9 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/proc_fs.h>
+#ifdef CONFIG_MCST
+#include <linux/platform_device.h>
+#endif
 
 #include "of_private.h"
 
@@ -227,6 +230,10 @@ static void __of_attach_node(struct device_node *np)
 	np->sibling = np->parent->child;
 	np->parent->child = np;
 	of_node_clear_flag(np, OF_DETACHED);
+#ifdef CONFIG_MCST
+	/* See kernel.org 1a50d9403fb90cbe4dea0ec9fd0351d2ecbd8924*/
+	if (platform_bus_type.p) /* the bus is not initialized yet */
+#endif
 	np->fwnode.flags |= FWNODE_FLAG_NOT_DEVICE;
 }
 

@@ -39,8 +39,13 @@ extern void dump_skip_to(struct coredump_params *cprm, unsigned long to);
 extern void dump_skip(struct coredump_params *cprm, size_t nr);
 extern int dump_emit(struct coredump_params *cprm, const void *addr, int nr);
 extern int dump_align(struct coredump_params *cprm, int align);
+#ifndef CONFIG_E2K
 int dump_user_range(struct coredump_params *cprm, unsigned long start,
 		    unsigned long len);
+#else
+int dump_user_range(struct coredump_params *cprm, unsigned long start,
+		    unsigned long len, unsigned long flags);
+#endif
 extern void do_coredump(const kernel_siginfo_t *siginfo);
 #else
 static inline void do_coredump(const kernel_siginfo_t *siginfo) {}

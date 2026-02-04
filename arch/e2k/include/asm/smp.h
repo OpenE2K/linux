@@ -1,0 +1,258 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2023 MCST
+ */
+
+#ifndef __ASM_SMP_H
+#define __ASM_SMP_H
+
+/*
+ * We need the APIC definitions automatically as part of 'smp.h'
+ */
+#ifndef ASSEMBLY
+#include <linux/threads.h>
+#include <linux/cpumask.h>
+#include <linux/list.h>
+#include <linux/nodemask.h>
+#endif
+
+#ifdef CONFIG_L_LOCAL_APIC
+#ifndef ASSEMBLY
+#include <asm/bitops.h>
+#include <asm/mpspec.h>
+#include <asm/glob_regs.h>
+#include <asm/e2s.h>
+#endif /* !ASSEMBLY */
+#endif /* CONFIG_L_LOCAL_APIC */
+
+#ifdef CONFIG_SMP
+#ifndef ASSEMBLY
+
+typedef struct tlb_page {
+	struct vm_area_struct	*vma;
+	e2k_addr_t		addr;
+} tlb_page_t;
+
+typedef struct tlb_range {
+	struct mm_struct	*mm;
+	e2k_addr_t		start;
+	e2k_addr_t		end;
+} tlb_range_t;
+
+typedef struct icache_page {
+	struct vm_area_struct	*vma;
+	struct page		*page;
+} icache_page_t;
+
+struct call_data_struct {
+	void (*func) (void *info);
+	void *info;
+	atomic_t started;
+	atomic_t finished;
+	int wait;
+};
+
+/*
+ * Private routines/data
+ */
+
+extern atomic_t	cpu_present_num;
+extern unsigned long smp_invalidate_needed;
+extern int pic_mode;
+extern cpumask_t callin_go;
+
+extern void e2k_start_secondary(int cpuid);
+extern void start_secondary_resume(int cpuid, int cpu);
+extern void wait_for_startup(int cpuid, int hotplug);
+extern void smp_send_reschedule(int cpu);
+extern void arch_send_call_function_single_ipi(int cpu);
+extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
+extern void native_stop_this_cpu_ipi(void *dummy);
+
+#ifdef	CONFIG_DATA_BREAKPOINT
+typedef struct hw_data_bp {
+	void	*address;
+	int	size;
+	bool	write;
+	bool	read;
+	bool	stop;
+	int	cp_num;
+} hw_data_bp_t;
+extern atomic_t hw_data_breakpoint_num;
+#define	DATA_BREAKPOINT_ON	(atomic_read(&hw_data_breakpoint_num) >= 0)
+
+extern void smp_set_data_breakpoint(void *address, u64 size,
+			bool write, bool read, bool stop, const int cp_num);
+extern int smp_reset_data_breakpoint(void *address);
+#else	/* ! CONFIG_DATA_BREAKPOINT */
+#define	DATA_BREAKPOINT_ON	false
+#endif	/* CONFIG_DATA_BREAKPOINT */
+
+extern void native_wait_for_cpu_booting(void);
+extern void native_wait_for_cpu_wake_up(void);
+extern int native_activate_cpu(int vcpu_id);
+extern int native_activate_all_cpus(void);
+
+register unsigned long long __cpu_preempt_reg ASM_GREG(SMP_CPU_ID_GREG);
+#define raw_smp_processor_id() ((unsigned int) __cpu_preempt_reg)
+
+#define set_smp_processor_id(cpu) \
+do { \
+	__cpu_preempt_reg = (__cpu_preempt_reg & 0xffffffff00000000ull) | \
+			    ((u64) (u32) (cpu)); \
+} while (0)
+
+#endif /* !ASSEMBLY */
+
+#define NO_PROC_ID	0xFF		/* No processor magic marker */
+
+/*
+ *	This magic constant controls our willingness to transfer
+ *	a process across CPUs. Such a transfer incurs misses on the L1
+ *	cache, and on a P6 or P5 with multiple L2 caches L2 hits. My
+ *	gut feeling is this will vary by board in value. For a board
+ *	with separate L2 cache it probably depends also on the RSS, and
+ *	for a board with shared L2 cache it ought to decay fast as other
+ *	processes are run.
+ */
+
+#define PROC_CHANGE_PENALTY	15		/* Schedule penalty */
+
+#else	/* ! CONFIG_SMP */
+static inline void e2k_start_secondary(int cpuid) { }
+
+#define	native_wait_for_cpu_booting()
+#define	native_wait_for_cpu_wake_up()
+#define	native_activate_cpu(vcpu_id)	0
+#define	native_activate_all_cpus(void)	0
+#define native_stop_this_cpu_ipi(dummy) do { } while (0)
+
+#define	DATA_BREAKPOINT_ON	false
+
+#endif	/* CONFIG_SMP */
+
+#ifndef	ASSEMBLY
+
+extern int hard_smp_processor_id(void);
+
+#endif /* ! ASSEMBLY */
+
+#ifdef	CONFIG_HOTPLUG_CPU
+/* Upping and downing of CPUs */
+extern int __cpu_disable (void);
+extern void __cpu_die (unsigned int cpu);
+#endif	/* CONFIG_HOTPLUG_CPU */
+
+#if defined(CONFIG_VIRTUALIZATION)
+#include <linux/smp.h>
+
+extern void native_csd_lock_wait(struct __call_single_data *csd);
+extern void native_csd_lock(struct __call_single_data *csd);
+extern void native_arch_csd_lock_async(struct __call_single_data *csd);
+extern void native_csd_unlock(struct __call_single_data *csd);
+#endif	/* CONFIG_VIRTUALIZATION */
+
+#ifdef	CONFIG_KVM_GUEST_KERNEL
+/* it is virtualized guest kernel */
+#include <asm/kvm/guest/smp.h>
+#else	/* !CONFIG_KVM_GUEST_KERNEL */
+/* it is native kernel without virtualization support */
+/* or native kernel with virtualization support */
+
+# ifdef	CONFIG_KVM_HW_VIRTUALIZATION
+/* it is host kernel with hardware virtualization support */
+extern void hv_vcpu_wait_for_booting(int vcpu_id, struct cpumask *vcpu_mask);
+extern void hv_vcpu_wait_for_wake_up(int vcpu_id, struct cpumask *vcpu_mask);
+extern int hv_vcpu_activate(int cpu_id);
+
+static inline void wait_for_cpu_booting(int cpuid)
+{
+	if (likely(!IS_HV_GM())) {
+		return native_wait_for_cpu_booting();
+	} else {
+		hv_vcpu_wait_for_booting(cpuid, &callin_go);
+	}
+}
+
+static inline void wait_for_cpu_wake_up(int cpuid)
+{
+	if (likely(!IS_HV_GM())) {
+		return native_wait_for_cpu_wake_up();
+	} else {
+		hv_vcpu_wait_for_wake_up(cpuid, &callin_go);
+	}
+}
+
+static inline int activate_cpu(int cpu_id)
+{
+	if (likely(!IS_HV_GM())) {
+		return native_activate_cpu(cpu_id);
+	} else {
+		return hv_vcpu_activate(cpu_id);
+	}
+}
+
+# else	/* !CONFIG_KVM_HW_VIRTUALIZATION */
+/* it is native kernel without hardware virtualization support */
+static inline void wait_for_cpu_booting(int cpuid)
+{
+	native_wait_for_cpu_booting();
+}
+
+static inline void wait_for_cpu_wake_up(int cpuid)
+{
+	native_wait_for_cpu_wake_up();
+}
+
+static inline int activate_cpu(int cpu_id)
+{
+	return native_activate_cpu(cpu_id);
+}
+# endif	/* CONFIG_KVM_HW_VIRTUALIZATION */
+
+static inline int
+activate_all_cpus(void)
+{
+	return native_activate_all_cpus();
+}
+static inline void
+stop_this_cpu_ipi(void *dummy)
+{
+	native_stop_this_cpu_ipi(dummy);
+}
+
+#if defined(CONFIG_VIRTUALIZATION)
+static inline void csd_lock_wait(struct __call_single_data *data)
+{
+	native_csd_lock_wait(data);
+}
+static inline void csd_lock(struct __call_single_data *data)
+{
+	native_csd_lock(data);
+}
+static inline void arch_csd_lock_async(struct __call_single_data *csd)
+{
+	native_arch_csd_lock_async(csd);
+}
+static inline void csd_unlock(struct __call_single_data *data)
+{
+	native_csd_unlock(data);
+}
+#endif	/* CONFIG_VIRTUALIZATION */
+
+static inline void
+setup_local_pic_virq(unsigned int cpu)
+{
+	/* native and host kernel does not use virtual IRQs */
+	/* and its handlers */
+}
+static inline void
+startup_local_pic_virq(unsigned int cpuid)
+{
+	/* native and host kernel does not use virtual IRQs */
+	/* and its handlers */
+}
+
+#endif	/* CONFIG_KVM_GUEST_KERNEL */
+
+#endif	/* __ASM_SMP_H */

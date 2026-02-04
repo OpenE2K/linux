@@ -1824,7 +1824,11 @@ static int search_leaf(struct btrfs_trans_handle *trans,
 	struct extent_buffer *leaf = path->nodes[0];
 	int leaf_free_space = -1;
 	int search_low_slot = 0;
+#ifdef CONFIG_MCST
+	int ret = 0;
+#else
 	int ret;
+#endif
 	bool do_bin_search = true;
 
 	/*
@@ -4748,7 +4752,11 @@ next:
 int btrfs_next_old_leaf(struct btrfs_root *root, struct btrfs_path *path,
 			u64 time_seq)
 {
+#ifdef CONFIG_MCST
+	int slot = 0;
+#else
 	int slot;
+#endif
 	int level;
 	struct extent_buffer *c;
 	struct extent_buffer *next;
