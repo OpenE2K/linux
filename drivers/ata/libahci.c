@@ -57,7 +57,7 @@ static int ahci_scr_write(struct ata_link *link, unsigned int sc_reg, u32 val);
 static bool ahci_qc_fill_rtf(struct ata_queued_cmd *qc);
 static int ahci_port_start(struct ata_port *ap);
 static void ahci_port_stop(struct ata_port *ap);
-static void ahci_qc_prep(struct ata_queued_cmd *qc);
+static enum ata_completion_errors ahci_qc_prep(struct ata_queued_cmd *qc);
 static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc);
 static void ahci_freeze(struct ata_port *ap);
 static void ahci_thaw(struct ata_port *ap);
@@ -1575,6 +1575,9 @@ static void ahci_postreset(struct ata_link *link, unsigned int *class)
 	struct ata_port *ap = link->ap;
 	void __iomem *port_mmio = ahci_port_base(ap);
 	u32 new_tmp, tmp;
+#ifdef CONFIG_MCST
+	struct ahci_port_priv *pp = ap->private_data;
+#endif
 
 	ata_std_postreset(link, class);
 
@@ -1588,6 +1591,12 @@ static void ahci_postreset(struct ata_link *link, unsigned int *class)
 		writel(new_tmp, port_mmio + PORT_CMD);
 		readl(port_mmio + PORT_CMD); /* flush */
 	}
+#ifdef CONFIG_MCST
+	if (ap->flags & ATA_FLAG_E2C3_REV0) {
+		pp->intr_mask |= PORT_IRQ_PIOS_FIS;
+		writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+	}
+#endif
 }
 
 static unsigned int ahci_fill_sg(struct ata_queued_cmd *qc, void *cmd_tbl)
@@ -1626,7 +1635,7 @@ static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc)
 
 
 
-static void ahci_qc_prep(struct ata_queued_cmd *qc)
+static enum ata_completion_errors ahci_qc_prep(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
 	struct ahci_port_priv *pp = ap->private_data;
@@ -1673,6 +1682,8 @@ static void ahci_qc_prep(struct ata_queued_cmd *qc)
 		opts |= AHCI_CMD_ATAPI | AHCI_CMD_PREFETCH;
 
 	ahci_fill_cmd_slot(pp, qc->hw_tag, opts);
+
+	return AC_ERR_OK;
 }
 
 static void ahci_fbs_dec_intr(struct ata_port *ap)
@@ -1892,6 +1903,16 @@ static void ahci_handle_port_interrupt(struct ata_port *ap,
 		ehi->action |= ATA_EH_RESET;
 		ata_port_freeze(ap);
 	}
+#ifdef CONFIG_MCST
+	else if (!qc_active && ap->flags & ATA_FLAG_E2C3_REV0 && /*bug#130272*/
+		ap->link.device->class == ATA_DEV_ATAPI &&
+		pp->intr_mask & PORT_IRQ_PIOS_FIS &&
+		readl(port_mmio + PORT_IRQ_STAT) & PORT_IRQ_PIOS_FIS) {
+		ata_link_info(&ap->link, "mask Setup FIS Interrupt\n");
+		pp->intr_mask &= ~PORT_IRQ_PIOS_FIS;
+		writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+	}
+#endif
 }
 
 static void ahci_port_intr(struct ata_port *ap)
