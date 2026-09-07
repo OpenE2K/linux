@@ -797,10 +797,12 @@ static int i3c_master_rstdaa_locked(struct i3c_master_controller *master,
 			 I3C_CCC_RSTDAA(addr == I3C_BROADCAST_ADDR),
 			 &dest, 1);
 	ret = i3c_master_send_ccc_cmd_locked(master, &cmd);
+#ifndef CONFIG_E2K
 	if (ret) {
 		dev_err(&master->dev,
 			"i3c_master_rstdaa_locked: i3c_master_send_ccc_cmd_locked %d\n", ret);
 	}
+#endif
 	i3c_ccc_cmd_dest_cleanup(&dest);
 
 	return ret;
@@ -1290,7 +1292,7 @@ static int i3c_master_retrieve_dev_info(struct i3c_dev_desc *dev)
 
 	if (dev->info.bcr & I3C_BCR_HDR_CAP) {
 		ret = i3c_master_gethdrcap_locked(master, &dev->info);
-		if (ret)
+		if (ret && ret != -ENOTSUPP)
 			return ret;
 	}
 
@@ -1472,6 +1474,9 @@ static int i3c_master_early_i3c_dev_add(struct i3c_master_controller *master,
 {
 	struct i3c_device_info info = {
 		.static_addr = boardinfo->static_addr,
+#ifdef CONFIG_E2K
+		.dyn_addr = boardinfo->init_dyn_addr,
+#endif
 		.pid = boardinfo->pid,
 	};
 	struct i3c_dev_desc *i3cdev;
@@ -1536,9 +1541,14 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
 		desc->dev->dev.type = &i3c_device_type;
 		desc->dev->dev.bus = &i3c_bus_type;
 		desc->dev->dev.release = i3c_device_release;
+#ifndef CONFIG_MCST
 		dev_set_name(&desc->dev->dev, "%d-%llx", master->bus.id,
 			     desc->info.pid);
 
+#else
+		dev_set_name(&desc->dev->dev, "%d-%llx-%02x", master->bus.id,
+			     desc->info.pid, desc->info.dyn_addr);
+#endif
 		if (desc->boardinfo)
 			desc->dev->dev.of_node = desc->boardinfo->of_node;
 
@@ -2110,6 +2120,10 @@ of_i3c_master_add_i3c_boardinfo(struct i3c_master_controller *master,
 		if (addrstatus != I3C_ADDR_SLOT_FREE)
 			return -EINVAL;
 	}
+#ifdef CONFIG_MCST
+	else
+		init_dyn_addr = boardinfo->static_addr;
+#endif
 
 	boardinfo->pid = ((u64)reg[1] << 32) | reg[2];
 
@@ -2325,6 +2339,8 @@ static int i3c_i2c_notifier_call(struct notifier_block *nb, unsigned long action
 	case BUS_NOTIFY_DEL_DEVICE:
 		ret = i3c_master_i2c_detach(adap, client);
 		break;
+	default:
+		ret = -EINVAL;
 	}
 	i3c_bus_maintenance_unlock(&master->bus);
 
@@ -2407,6 +2423,9 @@ static void i3c_master_unregister_i3c_devs(struct i3c_master_controller *master)
  */
 void i3c_master_queue_ibi(struct i3c_dev_desc *dev, struct i3c_ibi_slot *slot)
 {
+	if (!dev->ibi || !slot)
+		return;
+
 	atomic_inc(&dev->ibi->pending_ibis);
 	queue_work(dev->common.master->wq, &slot->work);
 }

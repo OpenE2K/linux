@@ -62,7 +62,7 @@ void io_free_file_tables(struct io_file_table *table)
 
 static int io_install_fixed_file(struct io_ring_ctx *ctx, struct file *file,
 				 u32 slot_index)
-	__must_hold(&req->ctx->uring_lock)
+	__must_hold(&ctx->uring_lock)
 {
 	bool needs_switch = false;
 	struct io_fixed_file *file_slot;
@@ -98,7 +98,7 @@ static int io_install_fixed_file(struct io_ring_ctx *ctx, struct file *file,
 	*io_get_tag_slot(ctx->file_data, slot_index) = 0;
 	io_fixed_file_set(file_slot, file);
 	io_file_bitmap_set(&ctx->file_table, slot_index);
-	return 0;
+	ret = 0;
 err:
 	if (needs_switch)
 		io_rsrc_node_switch(ctx, ctx->file_data);
