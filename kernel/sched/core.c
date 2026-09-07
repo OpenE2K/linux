@@ -71,12 +71,6 @@
 # endif
 #endif
 
-#ifdef CONFIG_MCST_4RT
-# include <linux/cpumask.h>
-# include <linux/rtmutex.h>
-# include <linux/mcst_rt.h>
-#endif
- 
 #include <uapi/linux/sched/types.h>
 
 #include <asm/irq_regs.h>
@@ -121,19 +115,11 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_util_est_cfs_tp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_util_est_se_tp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_update_nr_running_tp);
 
+DEFINE_PER_CPU(struct rnd_state, sched_rnd_state);
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+
 #ifdef CONFIG_MCST    /* bug 139936 comment 71 */
 DEFINE_PER_CPU_SHARED_ALIGNED(bool, rcu_urgent_qsn);
-#endif
-
-#ifdef CONFIG_MCST_RT_SMP
-#ifdef CONFIG_MCST_RT_GRQ
-struct rq *g_rq;
-#endif
-#ifdef CONFIG_MCST_RT_NUMA
-struct rq *node_rq[MAX_NUMNODES];
-#endif
-static int try_to_run_mcst_rt_task(struct task_struct *p, int this_cpu);
 #endif
 
 #ifdef CONFIG_SCHED_DEBUG
@@ -1132,9 +1118,6 @@ int get_nohz_timer_target(void)
 	struct sched_domain *sd;
 	const struct cpumask *hk_mask;
 
-#ifdef CONFIG_MCST_4RT
-	if (!rt_cpu(cpu))
-#endif
 	if (housekeeping_cpu(cpu, HK_TYPE_TIMER)) {
 		if (!idle_cpu(cpu))
 			return cpu;
@@ -1148,11 +1131,6 @@ int get_nohz_timer_target(void)
 		for_each_cpu_and(i, sched_domain_span(sd), hk_mask) {
 			if (cpu == i)
 				continue;
-
-#ifdef CONFIG_MCST_4RT
-			if (rt_cpu(i))
-				continue;
-#endif
 
 			if (!idle_cpu(i)) {
 				cpu = i;
@@ -2276,11 +2254,6 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
-#ifdef CONFIG_MCST_RT_SMP
-	if (unlikely(mcst_rt_rq(rq)))
-		return;
-#endif
-
 	if (p->sched_class == rq->curr->sched_class)
 		rq->curr->sched_class->check_preempt_curr(rq, p, flags);
 	else if (sched_class_above(p->sched_class, rq->curr->sched_class))
@@ -3843,11 +3816,6 @@ static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
 		rq_repin_lock(rq, rf);
 	}
 
-#ifdef CONFIG_MCST_4RT
-	if (rts_act_mask & RTS_NO_CPU_BLNC)
-		return;
-#endif
-
 	if (rq->idle_stamp) {
 		u64 delta = rq_clock(rq) - rq->idle_stamp;
 		u64 max = 2*rq->max_idle_balance_cost;
@@ -4144,70 +4112,6 @@ bool ttwu_state_match(struct task_struct *p, unsigned int state, int *success)
 	return false;
 }
 
-#ifdef CONFIG_MCST_RT_SMP
-static int try_to_run_mcst_rt_task(struct task_struct *p, int this_cpu)
-{
-	int i;
-	unsigned long flags;
-	int prio = 0;
-	int intr_cpu = nr_cpu_ids;
-	struct rq *rq;
-
-	if (p->on_cpu || !p->on_rq)
-		return 0;
-	if (p->__state != TASK_RUNNING)
-		return 0;
-
-	for_each_online_cpu(i) {
-		if (i == this_cpu)
-			continue;
-		rq = &per_cpu(runqueues, i);
-		if ((p)->prio < (rq)->curr->prio && prio < rq->curr->prio) {
-			prio = rq->curr->prio;
-			intr_cpu = i;
-		}
-	}
-	if (intr_cpu >= nr_cpu_ids)
-		return 0;
-
-	for (i = 0; i < nr_cpu_ids; i++) {
-		int tmp_cpu;
-		/* Workaround to not to do two cycles */
-		if (i + intr_cpu >= nr_cpu_ids)
-			tmp_cpu = i + intr_cpu - nr_cpu_ids;
-		else
-			tmp_cpu = i + intr_cpu;
-
-		if (!cpu_online(tmp_cpu)) {
-			continue;
-		}
-
-		rq = &per_cpu(runqueues, tmp_cpu);
-		if (!((p)->prio < (rq)->curr->prio)) {
-			continue;
-		}
-		raw_spin_lock_irqsave(&rq->__lock, flags);
-		if ((p->__state != TASK_RUNNING)
-			|| p->on_cpu || !p->on_rq || !mcst_rt_rq(task_rq(p))) {
-			raw_spin_unlock_irqrestore(&rq->__lock, flags);
-			return 0;
-		}
-		if ((p)->prio < (rq)->curr->prio) {
-			if (rq->curr->on_rq)
-				resched_curr(rq);
-			/* Unlock, restore irq and reschedule if necessary */
-			raw_spin_unlock_irqrestore(&rq->__lock, flags);
-
-			if (tmp_cpu == this_cpu)
-				return 1;
-			return 0;
-		}
-		raw_spin_unlock_irqrestore(&rq->__lock, flags);
-	}
-	return 0;
-}
-#endif
-
 /*
  * Notes on Program-Order guarantees on SMP systems.
  *
@@ -4331,10 +4235,6 @@ static int try_to_run_mcst_rt_task(struct task_struct *p, int this_cpu)
 static int
 try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 {
-#ifdef CONFIG_MCST_RT_SMP
-	struct rq *rq;
-	struct rq_flags rf;
-#endif /* CONFIG_MCST_RT_SMP */
 	unsigned long flags;
 	int cpu, success = 0;
 
@@ -4352,49 +4252,13 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		 *    it disabling IRQs (this allows not taking ->pi_lock).
 		 */
 		if (!ttwu_state_match(p, state, &success))
-#ifdef CONFIG_MCST_4RT
-		{
-			cpu = task_cpu(p);
-#endif
 			goto out;
-#ifdef CONFIG_MCST_4RT
-		}
-#endif
 
 		trace_sched_waking(p);
 		WRITE_ONCE(p->__state, TASK_RUNNING);
 		trace_sched_wakeup(p);
 		goto out;
 	}
-
-#ifdef CONFIG_MCST_4RT
-	if (system_state == SYSTEM_RUNNING) {
-		p->waken_tm = 0;
-		p->wakeup_tm = getns64timeofday();
-#if defined(SHOW_WOKEN_TIME)
-		if (show_woken_time > 1) {
-			p->sched_enter_tm = 0;
-			p->sched_lock_tm = 0;
-		}
-#endif
-	}
-#include <linux/cpumask.h>
-	cpu = task_cpu(p);
-	if (cpumask_test_cpu(cpu, rt_cpu_mask) &&
-			cpumask_weight(&p->cpus_mask) > 1) {
-		/* move from rtCPU task which is bounded to any CPU */
-		cpumask_var_t new_mask;
-		if (!alloc_cpumask_var(&new_mask, GFP_KERNEL)) {
-			preempt_enable();
-			return -ENOMEM;
-		}
-		cpumask_copy(new_mask, &p->cpus_mask);
-		cpumask_andnot(new_mask, new_mask,
-			rt_cpu_mask);
-		set_cpus_allowed_ptr(p, new_mask);
-		free_cpumask_var(new_mask);
-	}
-#endif
 
 	/*
 	 * If we are going to wake up a thread waiting for CONDITION we
@@ -4503,11 +4367,6 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 */
 	smp_cond_load_acquire(&p->on_cpu, !VAL);
 
-#ifdef CONFIG_MCST_RT_SMP
-	if (mcst_rt_affinity(p))
-		goto out_mcst_rt;
-#endif /* CONFIG_MCST_RT_SMP */
-
 	cpu = select_task_rq(p, p->wake_cpu, wake_flags | WF_TTWU);
 	if (task_cpu(p) != cpu) {
 		if (p->in_iowait) {
@@ -4532,18 +4391,6 @@ out:
 	preempt_enable();
 
 	return success;
-#ifdef CONFIG_MCST_RT_SMP
-out_mcst_rt:
-	rq = __task_rq_lock(p, &rf);
-	update_rq_clock(rq);
-	ttwu_do_activate(rq, p, 0, &rf);
-	__task_rq_unlock(rq, &rf);
-	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
-	if (mcst_rt_rq(rq))
-		try_to_run_mcst_rt_task(p, rq->cpu);
-	preempt_enable();
-	return success;
-#endif /* CONFIG_MCST_RT_SMP */
 }
 
 static bool __task_needs_rq_lock(struct task_struct *p)
@@ -4697,12 +4544,6 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->se.prev_sum_exec_runtime	= 0;
 	p->se.nr_migrations		= 0;
 	p->se.vruntime			= 0;
-#ifdef CONFIG_MCST_4RT
-	p->se.cpu_queue_tm		= 0;
-	p->se.oncpu_tm			= 0;
-	p->se.ctx_sw_tm			= 0;
-	p->se.prev_runtime		= 0;
-#endif
 	INIT_LIST_HEAD(&p->se.group_node);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -4939,6 +4780,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 			p->policy = SCHED_NORMAL;
 			p->static_prio = NICE_TO_PRIO(0);
 			p->rt_priority = 0;
+			p->timer_slack_ns = p->default_timer_slack_ns;
 		} else if (PRIO_TO_NICE(p->static_prio) < 0)
 			p->static_prio = NICE_TO_PRIO(0);
 
@@ -4967,9 +4809,6 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		memset(&p->sched_info, 0, sizeof(p->sched_info));
 #endif
 #if defined(CONFIG_SMP)
-#ifdef CONFIG_MCST_RT_SMP
-	p->mcst_smp_cpu = 0;
-#endif
 	p->on_cpu = 0;
 #endif
 	init_task_preempt_count(p);
@@ -5017,7 +4856,7 @@ void sched_post_fork(struct task_struct *p)
 	uclamp_post_fork(p);
 }
 
-unsigned long to_ratio(u64 period, u64 runtime)
+u64 to_ratio(u64 period, u64 runtime)
 {
 	if (runtime == RUNTIME_INF)
 		return BW_UNIT;
@@ -5044,25 +4883,6 @@ void wake_up_new_task(struct task_struct *p)
 {
 	struct rq_flags rf;
 	struct rq *rq;
-
-#ifdef CONFIG_MCST_4RT
-	if (cpumask_weight(&p->cpus_mask) > 1 &&
-			cpumask_intersects(&(p->cpus_mask),
-				rt_cpu_mask)) {
-		/* move from rtCPU task which is bounded to any CPU */
-		cpumask_var_t new_mask;
-		if (alloc_cpumask_var(&new_mask, GFP_KERNEL)) {
-			cpumask_copy(new_mask, &p->cpus_mask);
-			cpumask_andnot(new_mask, new_mask,
-				rt_cpu_mask);
-			set_cpus_allowed_ptr(p, new_mask);
-			free_cpumask_var(new_mask);
-		} else {
-			pr_err("sched_exec %s/-%d alloc_cpumask_var: no mem\n",
-				p->comm, p->pid);
-		}
-	}
-#endif
 
 	raw_spin_lock_irqsave(&p->pi_lock, rf.flags);
 	WRITE_ONCE(p->__state, TASK_RUNNING);
@@ -5226,10 +5046,6 @@ static void do_balance_callbacks(struct rq *rq, struct balance_callback *head)
 	void (*func)(struct rq *rq);
 	struct balance_callback *next;
 
-#ifdef CONFIG_MCST_4RT
-	if (rts_act_mask & RTS_NO_CPU_BLNC)
-		return;
-#endif
 
 	lockdep_assert_rq_held(rq);
 
@@ -5548,9 +5364,6 @@ static __always_inline struct rq *
 context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next, struct rq_flags *rf)
 {
-#ifdef CONFIG_MCST_4RT
-	long long cur_sch_clk;
-#endif
 	prepare_task_switch(rq, prev, next);
 
 	/*
@@ -5599,23 +5412,8 @@ context_switch(struct rq *rq, struct task_struct *prev,
 
 	prepare_lock_switch(rq, next, rf);
 
-#ifdef CONFIG_MCST_4RT
-	if (cpu_queue_collect) {
-		cur_sch_clk = sched_clock();
-			next->se.ctx_sw_tm -= cur_sch_clk;
-		if (prev->se.oncpu_tm < 0)
-			prev->se.oncpu_tm += cur_sch_clk;
-	}
-#endif
 	/* Here we just switch the register state and the stack. */
 	switch_to(prev, next, prev);
-#ifdef CONFIG_MCST_4RT
-	if (cpu_queue_collect) {
-		cur_sch_clk = sched_clock();
-		current->se.oncpu_tm -= cur_sch_clk;
-		current->se.ctx_sw_tm += cur_sch_clk;
-	}
-#endif
 	barrier();
 
 	return finish_task_switch(prev);
@@ -5730,25 +5528,6 @@ void sched_exec(void)
 	struct task_struct *p = current;
 	unsigned long flags;
 	int dest_cpu;
-
-#ifdef CONFIG_MCST_4RT
-	if (cpumask_weight(&p->cpus_mask) > 1 &&
-			cpumask_intersects(&(p->cpus_mask),
-				rt_cpu_mask)) {
-		/* move from rtCPU task which is bounded to any CPU */
-		cpumask_var_t new_mask;
-		if (alloc_cpumask_var(&new_mask, GFP_KERNEL)) {
-			cpumask_copy(new_mask, &p->cpus_mask);
-			cpumask_andnot(new_mask, new_mask,
-				rt_cpu_mask);
-			set_cpus_allowed_ptr(p, new_mask);
-			free_cpumask_var(new_mask);
-		} else {
-			pr_err("sched_exec %s/-%d alloc_cpumask_var: no mem\n",
-				p->comm, p->pid);
-		}
-	}
-#endif
 
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	dest_cpu = p->sched_class->select_task_rq(p, task_cpu(p), WF_EXEC);
@@ -5913,9 +5692,6 @@ void scheduler_tick(void)
 	curr->sched_class->task_tick(rq, curr, 0);
 	if (sched_feat(LATENCY_WARN))
 		resched_latency = cpu_resched_latency(rq);
-#ifdef CONFIG_MCST_4RT
-	if (!(rts_act_mask & RTS_NO_CPU_BLNC))
-#endif
 	calc_global_load_tick(rq);
 	sched_core_tick(rq);
 
@@ -5928,9 +5704,6 @@ void scheduler_tick(void)
 
 #ifdef CONFIG_SMP
 	rq->idle_balance = idle_cpu(cpu);
-#ifdef CONFIG_MCST_4RT
-	if (!(rts_act_mask & RTS_NO_CPU_BLNC))
-#endif
 	trigger_load_balance(rq);
 #endif
 }
@@ -6291,38 +6064,11 @@ restart:
 	BUG(); /* The idle class should always have a runnable task. */
 }
 
-#ifdef CONFIG_MCST_RT
-DEFINE_PER_CPU(int, delayed_posix_timer);
-DEFINE_PER_CPU(int, delayed_softirq);
-
-#define DELTA_NS	(NSEC_PER_SEC / HZ / 4)
-
-void idle_check_delayed_works(int cpu)
-{
-	long long cur_time;
-	long long next_time;
-
-	next_time = per_cpu(next_rt_intr, cpu);
-	if (next_time) {
-		cur_time = ktime_to_ns(ktime_get());
-		if (cur_time > next_time - DELTA_NS &&
-			cur_time < next_time + DELTA_NS) {
-			return;
-		}
-	}
-#if 0 /* no posix timers in this version */
-	if (per_cpu(delayed_posix_timer, cpu) &&
-			per_cpu(next_rt_intr, cpu) == 0) {
-		per_cpu(delayed_posix_timer, cpu) = 0;
-		wakeup_delayed_posix_timer(cpu);
-	}
+#ifdef CONFIG_MCST
+DEFINE_PER_CPU(u64, next_rt_intr) = 0;
+EXPORT_SYMBOL(next_rt_intr);
+DEFINE_PER_CPU(u64, must_do_timer) = 0;
 #endif
-	if (per_cpu(delayed_softirq, cpu)) {
-		per_cpu(delayed_softirq, cpu) = 0;
-		wakeup_delayed_softirq(cpu);
-	}
-}
-#endif /* CONFIG_MCST_RT */
 
 #ifdef CONFIG_SCHED_CORE
 static inline bool is_task_rq_idle(struct task_struct *t)
@@ -6884,16 +6630,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	struct rq_flags rf;
 	struct rq *rq;
 	int cpu;
-#if defined(CONFIG_MCST_4RT)
-	s64 cur_tm;
-#if defined(SHOW_WOKEN_TIME)
-	s64 enter_tm = 0, lock_tm = 0;
-	int show_woken_time_val = show_woken_time;
-
-	if (unlikely(show_woken_time_val > 1) && system_state == SYSTEM_RUNNING)
-		enter_tm = getns64timeofday();
-#endif
-#endif
 
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);
@@ -6905,9 +6641,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		hrtick_clear(rq);
 
 	local_irq_disable();
-#ifdef CONFIG_MCST_4RT
-	if (!rt_cpu(cpu))
-#endif
 	rcu_note_context_switch(!!sched_mode);
 
 	/*
@@ -6927,11 +6660,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	 */
 	rq_lock(rq, &rf);
 	smp_mb__after_spinlock();
-
-#if defined(CONFIG_MCST_4RT) && defined(SHOW_WOKEN_TIME)
-	if (unlikely(show_woken_time_val > 1) && system_state == SYSTEM_RUNNING)
-		lock_tm = getns64timeofday();
-#endif
 
 	/* Promote REQ to ACT */
 	rq->clock_update_flags <<= 1;
@@ -6985,25 +6713,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	rq->last_seen_need_resched_ns = 0;
 #endif
 
-#if defined(CONFIG_MCST_4RT) && defined(SHOW_WOKEN_TIME)
-	if (unlikely(show_woken_time_val > 1) &&
-			system_state == SYSTEM_RUNNING) {
-		next->sched_enter_tm = enter_tm;
-		next->sched_lock_tm = lock_tm;
-		next->cntx_swb_tm = getns64timeofday();
-		next->last_ipi_prmt_enable = prev->my_last_ipi_prmt_enable;
-	}
-#endif
-
 	if (likely(prev != next)) {
-#if defined(CONFIG_MCST_4RT) && defined(SHOW_WOKEN_TIME)
-		if (unlikely(show_woken_time_val > 1) &&
-				system_state == SYSTEM_RUNNING) {
-			next->last_tm_on_cpu = 0;
-			prev->last_tm_on_cpu = getns64timeofday();
-		}
-#endif
-
 		rq->nr_switches++;
 		/*
 		 * RCU users of rcu_dereference(rq->curr) may not see
@@ -7048,25 +6758,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		__balance_callbacks(rq);
 		raw_spin_rq_unlock_irq(rq);
 	}
-
-#ifdef CONFIG_MCST_RT
-	if (!rt_task(current))
-		(void) idle_check_delayed_works(cpu);
-#endif
-
-#if defined(CONFIG_MCST_4RT)
-	if (system_state == SYSTEM_RUNNING) {
-		cur_tm = getns64timeofday();
-		if (current->waken_tm == 0)
-			current->waken_tm = cur_tm;
-#if defined(SHOW_WOKEN_TIME)
-		if (unlikely(show_woken_time_val > 1)) {
-			current->cntx_swe_tm = cur_tm;
-			current->intr_s = last_intr_clock;
-		}
-#endif
-	}
-#endif
 }
 
 void __noreturn do_task_dead(void)
@@ -7492,16 +7183,6 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	 */
 	if (prio == p->prio && !dl_prio(prio))
 		goto out_unlock;
-
-#ifdef CONFIG_MCST_RT_SMP
-	if (mcst_rt_rq(rq)) {
-		WARN_ON_ONCE(p->on_cpu);
-		dequeue_task(rq, p, 0);
-		p->prio = prio;
-		enqueue_task(rq, p, 0);
-		goto out_unlock;
-	}
-#endif
 
 	/*
 	 * Idle task boosting is a nono in general. There is one
@@ -8701,10 +8382,6 @@ int dl_task_check_affinity(struct task_struct *p, const struct cpumask *mask)
 }
 #endif
 
-#ifdef CONFIG_MCST_RT_SMP
-atomic_t num_unbound = ATOMIC_INIT(0); /* For debug purposes */
-#endif
-
 static int
 __sched_setaffinity(struct task_struct *p, const struct cpumask *mask)
 {
@@ -8739,12 +8416,6 @@ again:
 		cpumask_copy(new_mask, cpus_allowed);
 		goto again;
 	}
-
-#ifdef CONFIG_MCST_RT_GRQ
-	if (mcst_rt_affinity(p))
-		atomic_dec(&num_unbound);
-	p->mcst_smp_cpu = 0;
-#endif
 
 out_free_new_mask:
 	free_cpumask_var(new_mask);
@@ -8788,17 +8459,6 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	retval = security_task_setscheduler(p);
 	if (retval)
 		goto out_put_task;
-
-#ifdef CONFIG_MCST_RT_GRQ
-	if (p->sched_class == &rt_sched_class &&
-			p->mm && cpumask_empty(in_mask)) {
-		if (!mcst_rt_affinity(p))
-			atomic_inc(&num_unbound);
-		p->mcst_smp_cpu = UNBOUND_CPU;
-		retval = 0;
-		goto out_put_task;
-	}
-#endif
 
 	retval = __sched_setaffinity(p, in_mask);
 out_put_task:
@@ -9496,14 +9156,15 @@ SYSCALL_DEFINE2(sched_rr_get_interval_time32, pid_t, pid,
 
 void sched_show_task(struct task_struct *p)
 {
+#ifdef CONFIG_MCST
+	const struct cpumask *cpus_ptr;
+#ifdef CONFIG_DEBUG_STACK_USAGE
 	unsigned long free = 0;
+#endif
+#else
+	unsigned long free = 0;
+#endif
 	int ppid;
-#if defined(CONFIG_MCST_4RT)
-	struct rt_mutex_base *wait_on_rtmutex;
-#ifndef CONFIG_PREEMPT_RT
-	struct mutex *wait_on_mutex;
-#endif
-#endif
 
 	if (!try_get_task_stack(p))
 		return;
@@ -9513,17 +9174,17 @@ void sched_show_task(struct task_struct *p)
 #ifndef CONFIG_MCST
 	if (task_is_running(p))
 		pr_cont("  running task    ");
-#endif
-#ifdef CONFIG_DEBUG_STACK_USAGE
-	free = stack_not_used(p);
-#endif
-
-#ifdef CONFIG_MCST
+#else
 	if (task_curr(p))
 		pr_cont(" oncpu");
 	if (p->on_rq)
 		pr_cont(" on_rq %d", task_cpu(p));
-	pr_cont(" prio=%d, switches=%ld", p->prio, p->nvcsw + p->nivcsw);
+	cpus_ptr = p->cpus_ptr;
+	pr_cont(" prio=%d, switches=%ld, aff=%*pbl", p->prio, p->nvcsw + p->nivcsw,
+		cpumask_pr_args(cpus_ptr));
+#endif
+#ifdef CONFIG_DEBUG_STACK_USAGE
+	free = stack_not_used(p);
 #endif
 
 	ppid = 0;
@@ -9531,34 +9192,15 @@ void sched_show_task(struct task_struct *p)
 	if (pid_alive(p))
 		ppid = task_pid_nr(rcu_dereference(p->real_parent));
 	rcu_read_unlock();
+
+#if defined(CONFIG_MCST) && !defined(CONFIG_DEBUG_STACK_USAGE)
+	pr_cont(" pid:%-5d ppid:%-6d flags:0x%08lx\n",
+		task_pid_nr(p), ppid,
+		read_task_thread_flags(p));
+#else
 	pr_cont(" stack:%-5lu pid:%-5d ppid:%-6d flags:0x%08lx\n",
 		free, task_pid_nr(p), ppid,
 		read_task_thread_flags(p));
-
-#if defined(CONFIG_MCST_4RT)
-#ifndef CONFIG_PREEMPT_RT
-	wait_on_mutex = p->wait_on_mutex;
-	if (wait_on_mutex) {
-		struct task_struct *o;
-		o = get_mutex_owner(wait_on_mutex);
-		if (o)
-			pr_alert("Waits for mutex %px locked by pid %d; IP = %pS\n",
-				wait_on_mutex, o->pid, get_mutex_ip(wait_on_mutex));
-		else
-			pr_alert("Waits for mutex %px but owner NULL\n", wait_on_mutex);
-	}
-#endif
-	wait_on_rtmutex = p->wait_on_rtmutex;
-	if (wait_on_rtmutex) {
-		struct task_struct *o;
-		o = get_rtmutex_owner(wait_on_rtmutex);
-		if (o)
-			pr_alert("Waits for rt-mutex %px locked by pid %d; IP = %pS\n",
-				wait_on_rtmutex, o->pid,
-				get_rtmutex_ip(wait_on_rtmutex));
-		else
-			pr_alert("Waits for rt-mutex %px but owner NULL\n", wait_on_rtmutex);
-	}
 #endif
 
 	print_worker_info(KERN_INFO, p);
@@ -9757,9 +9399,6 @@ init_idle(struct task_struct *idle, int cpu)
 	rcu_assign_pointer(rq->curr, idle);
 	idle->on_rq = TASK_ON_RQ_QUEUED;
 #ifdef CONFIG_SMP
-#ifdef CONFIG_MCST_RT_SMP
-	idle->mcst_smp_cpu = 0;
-#endif
 	idle->on_cpu = 1;
 #endif
 	raw_spin_rq_unlock(rq);
@@ -10330,6 +9969,8 @@ void __init sched_init_smp(void)
 {
 	sched_init_numa(NUMA_NO_NODE);
 
+	prandom_init_once(&sched_rnd_state);
+
 	/*
 	 * There's no userspace yet to cause hotplug operations; hence all the
 	 * CPU masks are stable and all blatant races in the below code cannot
@@ -10383,43 +10024,6 @@ LIST_HEAD(task_groups);
 /* Cacheline aligned slab cache for task_group */
 static struct kmem_cache *task_group_cache __read_mostly;
 #endif
-
-#ifdef CONFIG_MCST_RT_SMP
-struct rq *mcst_init_rq(int cpu)
-{
-	struct rq *rq;
-
-	rq = kzalloc(sizeof(struct rq), GFP_KERNEL);
-	if (!rq)
-		panic("Unable to allocate memory for mcst_rt_smp\n");
-	raw_spin_lock_init(&rq->__lock);
-	rq->nr_running = 0;
-	rq->calc_load_active = 0;
-	rq->calc_load_update = jiffies + LOAD_FREQ;
-	init_cfs_rq(&rq->cfs);
-	init_rt_rq(&rq->rt);
-
-	rq->rt.rt_runtime = def_rt_bandwidth.rt_runtime;
-
-	rq->sd = NULL;
-	rq->rd = NULL;
-	rq->active_balance = 0;
-	rq->next_balance = jiffies;
-	rq->mcst_rt_timestamp = jiffies;
-	rq->push_cpu = 0;
-	rq->cpu = cpu;
-	rq->online = 0;
-	rq->curr = NULL;
-	rq->idle_stamp = 0;
-	rq->avg_idle = 2*sysctl_sched_migration_cost;
-	rq_attach_root(rq, &def_root_domain);
-
-	hrtick_rq_init(rq);
-	atomic_set(&rq->nr_iowait, 0);
-
-	return rq;
-}
-#endif /* CONFIG_MCST_RT_SMP */
 
 void __init sched_init(void)
 {
@@ -10569,15 +10173,6 @@ void __init sched_init(void)
 		rq->core_cookie = 0UL;
 #endif
 	}
-
-#ifdef CONFIG_MCST_RT_GRQ
-	g_rq = mcst_init_rq(UNBOUND_CPU); /* Never fails */
-#endif /* CONFIG_MCST_RT_GRQ */
-
-#ifdef CONFIG_MCST_RT_NUMA
-	for (i = 0; i < MAX_NUMNODES; i++)
-		node_rq[i] = mcst_init_rq(NR_CPUS+i); /* Never fails */
-#endif /* CONFIG_MCST_RT_NUMA */
 
 	set_load_weight(&init_task, false);
 
@@ -11867,10 +11462,6 @@ static int __maybe_unused cpu_period_quota_parse(char *buf,
 		*quotap = RUNTIME_INF;
 	else
 		return -EINVAL;
-
-#ifdef CONFIG_HAVE_EL_POSIX_SYSCALL
-        el_posix_adjust_pi(p);
-#endif
 
 	return 0;
 }

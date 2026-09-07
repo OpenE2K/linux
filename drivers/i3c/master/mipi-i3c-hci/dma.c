@@ -280,7 +280,7 @@ static int hci_dma_init(struct i3c_hci *hci)
 	nr_rings = FIELD_GET(MAX_HEADER_COUNT_CAP, regval);
 #ifdef CONFIG_E2K
 	if (mipi_verbose)
-		dev_info(&hci->master.dev, "%d DMA rings available\n", nr_rings);
+	dev_info(&hci->master.dev, "%d DMA rings available\n", nr_rings);
 #else
 	dev_info(&hci->master.dev, "%d DMA rings available\n", nr_rings);
 #endif
@@ -323,9 +323,9 @@ static int hci_dma_init(struct i3c_hci *hci)
 #else
 		spin_lock_init(&rh->lock);
 		init_completion(&rh->op_done);
+
 		rh->xfer_entries = XFER_RING_ENTRIES;
 #endif
-
 
 		regval = rh_reg_read(CR_SETUP);
 		rh->xfer_struct_sz = FIELD_GET(CR_XFER_STRUCT_SIZE, regval);
@@ -456,7 +456,7 @@ static void hci_dma_unmap_xfer(struct i3c_hci *hci,
 		if (!xfer->data)
 			continue;
 		dma_unmap_single(&hci->master.dev,
-			 	 xfer->data_dma, xfer->data_len,
+				 xfer->data_dma, xfer->data_len,
 				 xfer->rnw ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
 	}
 }
@@ -494,7 +494,7 @@ static int hci_dma_queue_xfer(struct i3c_hci *hci,
 			xfer->data_len = 0;
 		*ring_data++ =
 			FIELD_PREP(DATA_BUF_BLOCK_SIZE, xfer->data_len) |
-					  ((i == n - 1) ? DATA_BUF_IOC : 0);
+			((i == n - 1) ? DATA_BUF_IOC : 0);
 
 		/* 2nd and 3rd words of Data Buffer Descriptor Structure */
 		if (xfer->data) {
@@ -584,10 +584,9 @@ static bool hci_dma_dequeue_xfer(struct i3c_hci *hci,
 		/*
 		 * We're deep in it if ever this condition is ever met.
 		 * Hardware might still be writing to memory, etc.
-		 * Better suspend the world than risking silent corruption.
 		 */
 		dev_crit(&hci->master.dev, "unable to abort the ring\n");
-		WARN_ON_ONCE(1);
+		WARN_ON(1);
 	}
 
 	for (i = 0; i < n; i++) {
@@ -603,7 +602,7 @@ static bool hci_dma_dequeue_xfer(struct i3c_hci *hci,
 			u32 *ring_data = rh->xfer + rh->xfer_struct_sz * idx;
 
 			/* store no-op cmd descriptor */
-			*ring_data++ = FIELD_PREP(CMD_0_ATTR, 0x7);
+			*ring_data++ = FIELD_PREP(CMD_0_ATTR, 0x7) | FIELD_PREP(CMD_0_TID, xfer->cmd_tid);
 			*ring_data++ = 0;
 			if (hci->cmd == &mipi_i3c_hci_cmd_v2) {
 				*ring_data++ = 0;
@@ -630,7 +629,9 @@ static bool hci_dma_dequeue_xfer(struct i3c_hci *hci,
 #ifdef CONFIG_MCST
 	rh_reg_write(CHUNK_CONTROL, 0);
 #endif
+	mipi_i3c_hci_resume(hci);
 	rh_reg_write(RING_CONTROL, RING_CTRL_ENABLE);
+	rh_reg_write(RING_CONTROL, RING_CTRL_ENABLE | RING_CTRL_RUN_STOP);
 #ifdef CONFIG_MCST
 	rh_reg_write(INTR_STATUS_ENABLE, 0xffffffff);
 	rh->done_ptr = 0;
@@ -697,6 +698,10 @@ static void hci_dma_xfer_done(struct i3c_hci *hci, struct hci_rh_data *rh)
 				DBG(" complete");
 				complete(xfer->completion);
 			}
+			if (RESP_STATUS(resp) != RESP_SUCCESS) {
+				rh_reg_write(RING_CONTROL,
+					     rh_reg_read(RING_CONTROL) | RING_CTRL_RUN_STOP);
+			} 
 #else
 			if (xfer->completion)
 				complete(xfer->completion);
@@ -818,7 +823,10 @@ next_ibi_data:
 		if (!(ibi_status & IBI_LAST_STATUS)) {
 			ibi_size += chunks * rh->ibi_chunk_sz;
 		} else {
-			ibi_size += FIELD_GET(IBI_DATA_LENGTH, ibi_status);
+			if (chunks) {
+				ibi_size += (chunks - 1) * rh->ibi_chunk_sz;
+				ibi_size += FIELD_GET(IBI_DATA_LENGTH, ibi_status);
+			}
 			last_ptr = ptr;
 			break;
 		}
@@ -992,10 +1000,9 @@ static bool hci_dma_irq_handler(struct i3c_hci *hci, unsigned int mask)
 		if (status & INTR_WARN_INS_STOP_MODE)
 			dev_warn_ratelimited(&hci->master.dev,
 				"ring %d: Inserted Stop on Mode Change\n", i);
-		if (status & INTR_IBI_RING_FULL) {
+		if (status & INTR_IBI_RING_FULL)
 			dev_err_ratelimited(&hci->master.dev,
 				"ring %d: IBI Ring Full Condition\n", i);
-		}
 
 		handled = true;
 	}

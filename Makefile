@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 6
 PATCHLEVEL = 1
-SUBLEVEL = 158
-EXTRAVERSION = -1.9
+SUBLEVEL = 180
+EXTRAVERSION = -1.17-open
 NAME = Curry Ramen
 
 # *DOCUMENTATION*
@@ -2186,3 +2186,6 @@ FORCE:
 # Declare the contents of the PHONY variable as phony.  We keep that
 # information in a variable so we can use it in if_changed and friends.
 .PHONY: $(PHONY)
+PHONY += run-command
+run-command:
+	$(Q)$(KBUILD_RUN_COMMAND)

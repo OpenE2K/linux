@@ -93,7 +93,6 @@
 #define CMD_C0_CMD(v)			FIELD_PREP(W0_MASK(14,  7), v)
 #define CMD_C0_TID(v)			FIELD_PREP(W0_MASK( 6,  3), v)
 
-
 /*
  * Internal Control Command
  */
@@ -375,7 +374,7 @@ static int hci_cmd_v1_daa(struct i3c_hci *hci)
 #ifdef CONFIG_E2K
 			DBG(" - timeout");
 #endif
-			ret = -ETIME;
+			ret = -ETIMEDOUT;
 			break;
 		}
 		if (RESP_STATUS(xfer[0].response) == RESP_ERR_NACK &&
