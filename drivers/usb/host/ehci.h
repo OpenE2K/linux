@@ -218,6 +218,7 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		frame_index_bug:1; /* MosChip (AKA NetMos) */
 	unsigned		need_oc_pp_cycle:1; /* MPC834X port power */
 	unsigned		imx28_write_fix:1; /* For Freescale i.MX28 */
+	unsigned		is_aspeed:1;
 #ifdef CONFIG_MCST
 	unsigned		set_type_to_last_in_list:1; /* set type to QH of
 					hw_next field for itd and sitd structu-
@@ -229,6 +230,7 @@ struct ehci_hcd {			/* one per controller */
 					does not supported for low/full speed
 					devices */
 #endif
+
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
 	#define OHCI_USB_OPER           (2 << 6)
