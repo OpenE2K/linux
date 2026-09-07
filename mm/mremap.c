@@ -257,6 +257,9 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 	unsigned long src_new_addr = new_addr;
 #endif
 
+	if (!len)
+		return 0;
+
 	old_end = old_addr + len;
 	flush_cache_range(vma, old_addr, old_end);
 
