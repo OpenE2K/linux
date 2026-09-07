@@ -156,7 +156,7 @@ static int __init init_zero_pfn(void)
 	zero_pfn = page_to_pfn(ZERO_PAGE(0));
 	return 0;
 }
-core_initcall(init_zero_pfn);
+early_initcall(init_zero_pfn);
 
 
 #if defined(SPLIT_RSS_COUNTING)
@@ -1048,18 +1048,7 @@ again:
 	do {
 		pte_t ptent = *pte;
 		if (pte_none(ptent))
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		{
-			if (pte_valid(ptent)) {
-				if (!test_ts_flag(TS_KEEP_PAGES_VALID))
-					pte_clear_not_present_full(mm, addr,
-							pte, tlb->fullmm);
-			}
-#endif
 			continue;
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		}
-#endif
 
 		if (need_resched())
 			break;
@@ -1188,7 +1177,18 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			else if (zap_huge_pmd(tlb, vma, pmd, addr))
 				goto next;
 			/* fall through */
+		} else if (details && details->single_page &&
+			   PageTransCompound(details->single_page) &&
+			   next - addr == HPAGE_PMD_SIZE && pmd_none(*pmd)) {
+			spinlock_t *ptl = pmd_lock(tlb->mm, pmd);
+			/*
+			 * Take and drop THP pmd lock so that we cannot return
+			 * prematurely, while zap_huge_pmd() has cleared *pmd,
+			 * but not yet decremented compound_mapcount().
+			 */
+			spin_unlock(ptl);
 		}
+
 		/*
 		 * Here there can be other concurrent MADV_DONTNEED or
 		 * trans huge page faults running, and if the pmd is
@@ -1197,48 +1197,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		 * mode.
 		 */
 		if (pmd_none_or_trans_huge_or_clear_bad(pmd))
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		{
-			while (pmd_valid(*pmd) &&
-					!test_ts_flag(TS_KEEP_PAGES_VALID)) {
-				spinlock_t *ptl = pmd_lockptr(vma->vm_mm, pmd);
-				int cleared;
-
-				/*
-				 * Must clear the valid bit. Only 2 cases here:
-				 * 1) Clear it on the whole pmd.
-				 * 2) Allocate the next level and descend to it.
-				 *
-				 * All of this must be protected with pmd_lock.
-				 */
-				spin_lock(ptl);
-				if (pmd_trans_huge(*pmd) ||
-				    pmd_none(*pmd) && next - addr == PMD_SIZE) {
-					validate_pmd_at(vma->vm_mm, addr, pmd,
-						__pmd(_PAGE_CLEAR_VALID(pmd_val(*pmd))));
-					cleared = 1;
-				} else {
-					cleared = 0;
-				}
-				spin_unlock(ptl);
-				if (cleared)
-					break;
-
-				if (__pte_alloc(vma->vm_mm, pmd)) {
-					pr_err("%s: couldn't allocate pte page for pmd 0x%lx\n",
-							__func__, pmd);
-					break;
-				}
-
-				if (!pmd_trans_unstable(pmd))
-					goto zap;
-			}
-#endif
 			goto next;
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		}
-zap:
-#endif
 		next = zap_pte_range(tlb, vma, pmd, addr, next, details);
 next:
 		cond_resched();
@@ -1267,27 +1226,7 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 			/* fall through */
 		}
 		if (pud_none_or_clear_bad(pud))
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		{
-			if (pud_valid(*pud) &&
-					!test_ts_flag(TS_KEEP_PAGES_VALID)) {
-				if ((addr & PUD_MASK) == addr &&
-						end >= pud_addr_bound(addr)) {
-					invalidate_pud_at(vma->vm_mm,
-								addr, pud);
-				} else if (!pmd_alloc(vma->vm_mm, pud, addr)) {
-					pr_err("%s: couldn't allocate pmd page for pud 0x%lx\n",
-							__func__, pud);
-				} else {
-					goto zap;
-				}
-			}
-#endif
 			continue;
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		}
-zap:
-#endif
 		next = zap_pmd_range(tlb, vma, pud, addr, next, details);
 next:
 		cond_resched();
@@ -1329,27 +1268,7 @@ void unmap_page_range(struct mmu_gather *tlb,
 	do {
 		next = pgd_addr_end(addr, end);
 		if (pgd_none_or_clear_bad(pgd))
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		{
-			if (pgd_valid(*pgd) &&
-					!test_ts_flag(TS_KEEP_PAGES_VALID)) {
-				if ((addr & PGDIR_MASK) == addr &&
-						end >= pgd_addr_bound(addr)) {
-					invalidate_pgd_at(vma->vm_mm,
-								addr, pgd);
-				} else if (!pud_alloc(vma->vm_mm, pgd, addr)) {
-					pr_err("%s: couldn't allocate pud page for pgd 0x%lx\n",
-							__func__, pgd);
-				} else {
-					goto zap;
-				}
-			}
-#endif
 			continue;
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		}
-zap:
-#endif
 		next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
 	} while (pgd++, addr = next, addr != end);
 	tlb_end_vma(tlb, vma);
@@ -1912,7 +1831,7 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long addr, unsigned long end,
 			unsigned long pfn, pgprot_t prot)
 {
-	pte_t *pte;
+	pte_t *pte, *mapped_pte;
 #ifdef CONFIG_MCST
 	spinlock_t *uninitialized_var(ptl);
 #else
@@ -1920,7 +1839,7 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 #endif
 	int err = 0;
 
-	pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
+	mapped_pte = pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
 		return -ENOMEM;
 	arch_enter_lazy_mmu_mode();
@@ -1934,7 +1853,7 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 		pfn++;
 	} while (pte++, addr += PAGE_SIZE, addr != end);
 	arch_leave_lazy_mmu_mode();
-	pte_unmap_unlock(pte - 1, ptl);
+	pte_unmap_unlock(mapped_pte, ptl);
 	return err;
 }
 
@@ -2588,11 +2507,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		 * seen in the presence of one thread doing SMC and another
 		 * thread doing COW.
 		 */
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-		ptep_clear_flush_as_valid(vma, vmf->address, vmf->pte);
-#else
 		ptep_clear_flush_notify(vma, vmf->address, vmf->pte);
-#endif
 		page_add_new_anon_rmap(new_page, vma, vmf->address, false);
 		mem_cgroup_commit_charge(new_page, memcg, false, false);
 		lru_cache_add_active_or_unevictable(new_page, vma);
@@ -2862,17 +2777,7 @@ static void unmap_mapping_range_vma(struct vm_area_struct *vma,
 		unsigned long start_addr, unsigned long end_addr,
 		struct zap_details *details)
 {
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-        /*
-	 * vma is not destroyed here, but zap_page_range will clear
-	 * vma ptes, so keep valid bit to handle pagefaults.
-	 */
-	set_ts_flag(TS_KEEP_PAGES_VALID);
-#endif
 	zap_page_range_single(vma, start_addr, end_addr - start_addr, details);
-#if defined(CONFIG_E2K) && defined(CONFIG_MAKE_ALL_PAGES_VALID)
-	clear_ts_flag(TS_KEEP_PAGES_VALID);
-#endif
 }
 
 static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
@@ -2898,6 +2803,36 @@ static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
 			((zea - vba + 1) << PAGE_SHIFT) + vma->vm_start,
 				details);
 	}
+}
+
+/**
+ * unmap_mapping_page() - Unmap single page from processes.
+ * @page: The locked page to be unmapped.
+ *
+ * Unmap this page from any userspace process which still has it mmaped.
+ * Typically, for efficiency, the range of nearby pages has already been
+ * unmapped by unmap_mapping_pages() or unmap_mapping_range().  But once
+ * truncation or invalidation holds the lock on a page, it may find that
+ * the page has been remapped again: and then uses unmap_mapping_page()
+ * to unmap it finally.
+ */
+void unmap_mapping_page(struct page *page)
+{
+	struct address_space *mapping = page->mapping;
+	struct zap_details details = { };
+
+	VM_BUG_ON(!PageLocked(page));
+	VM_BUG_ON(PageTail(page));
+
+	details.check_mapping = mapping;
+	details.first_index = page->index;
+	details.last_index = page->index + hpage_nr_pages(page) - 1;
+	details.single_page = page;
+
+	i_mmap_lock_write(mapping);
+	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+		unmap_mapping_range_tree(&mapping->i_mmap, &details);
+	i_mmap_unlock_write(mapping);
 }
 
 /**
@@ -4364,9 +4299,9 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 }
 #endif /* __PAGETABLE_PMD_FOLDED */
 
-static int __follow_pte_pmd(struct mm_struct *mm, unsigned long address,
-			    struct mmu_notifier_range *range,
-			    pte_t **ptepp, pmd_t **pmdpp, spinlock_t **ptlp)
+int follow_invalidate_pte(struct mm_struct *mm, unsigned long address,
+			  struct mmu_notifier_range *range, pte_t **ptepp,
+			  pmd_t **pmdpp, spinlock_t **ptlp)
 {
 	pgd_t *pgd;
 	p4d_t *p4d;
@@ -4431,31 +4366,33 @@ out:
 	return -EINVAL;
 }
 
-static inline int follow_pte(struct mm_struct *mm, unsigned long address,
-			     pte_t **ptepp, spinlock_t **ptlp)
+/**
+ * follow_pte - look up PTE at a user virtual address
+ * @mm: the mm_struct of the target address space
+ * @address: user virtual address
+ * @ptepp: location to store found PTE
+ * @ptlp: location to store the lock for the PTE
+ *
+ * On a successful return, the pointer to the PTE is stored in @ptepp;
+ * the corresponding lock is taken and its location is stored in @ptlp.
+ * The contents of the PTE are only stable until @ptlp is released;
+ * any further use, if any, must be protected against invalidation
+ * with MMU notifiers.
+ *
+ * Only IO mappings and raw PFN mappings are allowed.  The mmap semaphore
+ * should be taken for read.
+ *
+ * KVM uses this function.  While it is arguably less bad than ``follow_pfn``,
+ * it is not a good general-purpose API.
+ *
+ * Return: zero on success, -ve otherwise.
+ */
+int follow_pte(struct mm_struct *mm, unsigned long address,
+	       pte_t **ptepp, spinlock_t **ptlp)
 {
-	int res;
-
-	/* (void) is needed to make gcc happy */
-	(void) __cond_lock(*ptlp,
-			   !(res = __follow_pte_pmd(mm, address, NULL,
-						    ptepp, NULL, ptlp)));
-	return res;
+	return follow_invalidate_pte(mm, address, NULL, ptepp, NULL, ptlp);
 }
-
-int follow_pte_pmd(struct mm_struct *mm, unsigned long address,
-		   struct mmu_notifier_range *range,
-		   pte_t **ptepp, pmd_t **pmdpp, spinlock_t **ptlp)
-{
-	int res;
-
-	/* (void) is needed to make gcc happy */
-	(void) __cond_lock(*ptlp,
-			   !(res = __follow_pte_pmd(mm, address, range,
-						    ptepp, pmdpp, ptlp)));
-	return res;
-}
-EXPORT_SYMBOL(follow_pte_pmd);
+EXPORT_SYMBOL_GPL(follow_pte);
 
 /**
  * follow_pfn - look up PFN at a user virtual address
@@ -4464,6 +4401,9 @@ EXPORT_SYMBOL(follow_pte_pmd);
  * @pfn: location to store found PFN
  *
  * Only IO mappings and raw PFN mappings are allowed.
+ *
+ * This function does not allow the caller to read the permissions
+ * of the PTE.  Do not use it.
  *
  * Return: zero and the pfn at @pfn on success, -ve otherwise.
  */
@@ -4855,17 +4795,19 @@ long copy_huge_page_from_user(struct page *dst_page,
 	void *page_kaddr;
 	unsigned long i, rc = 0;
 	unsigned long ret_val = pages_per_huge_page * PAGE_SIZE;
+	struct page *subpage = dst_page;
 
-	for (i = 0; i < pages_per_huge_page; i++) {
+	for (i = 0; i < pages_per_huge_page;
+	     i++, subpage = mem_map_next(subpage, dst_page, i)) {
 		if (allow_pagefault)
-			page_kaddr = kmap(dst_page + i);
+			page_kaddr = kmap(subpage);
 		else
-			page_kaddr = kmap_atomic(dst_page + i);
+			page_kaddr = kmap_atomic(subpage);
 		rc = copy_from_user(page_kaddr,
 				(const void __user *)(src + i * PAGE_SIZE),
 				PAGE_SIZE);
 		if (allow_pagefault)
-			kunmap(dst_page + i);
+			kunmap(subpage);
 		else
 			kunmap_atomic(page_kaddr);
 

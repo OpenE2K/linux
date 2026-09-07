@@ -58,6 +58,7 @@ static inline int elf_core_copy_task_xfpregs(struct task_struct *t, elf_fpxregse
 }
 #endif
 
+#if (defined(CONFIG_UML) && defined(CONFIG_X86_32)) || defined(CONFIG_IA64) || defined(CONFIG_E2K)
 /*
  * These functions parameterize elf_core_dump in fs/binfmt_elf.c to write out
  * extra segments containing the gate DSO contents.  Dumping its
@@ -71,10 +72,31 @@ extern int
 elf_core_write_extra_phdrs(struct coredump_params *cprm, loff_t offset);
 extern int
 elf_core_write_extra_data(struct coredump_params *cprm);
-#ifndef CONFIG_E2K
+# ifndef CONFIG_E2K
 extern size_t elf_core_extra_data_size(void);
-#else
+# else
 extern size_t elf_core_extra_data_size(struct coredump_params *cprm);
-#endif /* CONFIG_E2K */
+# endif /* CONFIG_E2K */
+#else
+static inline Elf_Half elf_core_extra_phdrs(void)
+{
+	return 0;
+}
+
+static inline int elf_core_write_extra_phdrs(struct coredump_params *cprm, loff_t offset)
+{
+	return 1;
+}
+
+static inline int elf_core_write_extra_data(struct coredump_params *cprm)
+{
+	return 1;
+}
+
+static inline size_t elf_core_extra_data_size(void)
+{
+	return 0;
+}
+#endif
 
 #endif /* _LINUX_ELFCORE_H */
