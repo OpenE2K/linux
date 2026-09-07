@@ -1472,7 +1472,7 @@ static void copy_data_pages(struct memory_bitmap *copy_bm,
 			break;
 		copy_data_page(memory_bm_next_pfn(copy_bm), pfn);
 #ifdef CONFIG_E2K
-		save_tag_for_pfn(pfn);
+		save_tag_clr_for_pfn(pfn);
 #endif
 
 	}

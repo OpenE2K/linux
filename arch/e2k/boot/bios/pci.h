@@ -8,7 +8,7 @@
 
 #include <linux/types.h>
 #include <linux/pci.h>
-#include "../boot_io.h"
+#include "boot_io.h"
 
 extern void *malloc(int size);
 
@@ -17,7 +17,7 @@ extern void *malloc(int size);
 
 #define BIOS_DEBUG PCIBIOS_DEBUG
 
-#include "printk.h"
+#include "console/printk.h"
 
 #undef	DEBUG_PCI_MODE
 #undef	DebugCI
@@ -29,7 +29,6 @@ extern void *malloc(int size);
 /*
  * PCI memory and IO ports mapping
  */
-#ifdef	CONFIG_E2K_SIC
 #define	PCI_IO_START		0x00000000
 #define	PCI_IO_DOMAIN_SIZE	0x00004000
 #define	PCI_IO_END		0x00010000
@@ -62,14 +61,13 @@ extern void *malloc(int size);
 		(PCI_MEM_DOMAIN_END(domain) - IOHUB_SCRB_DOMAIN_SIZE)
 #define	IOHUB_SCRB_DOMAIN_END(domain)   \
 		(PCI_MEM_DOMAIN_END(domain))
-#endif /* CONFIG_E2K_SIC */
 
 
 /*
  * Under PCI, each device has 256 bytes of configuration address space,
  * of which the first 64 bytes are standardized as follows:
  */
-#ifdef CONFIG_E2K_SIC
+
 /* Additional registers in PCI configuration space for virtual PCI to PCI bridges */
 #if	defined(CONFIG_L_IOH2)
 /* IOHUB Device Number register */
@@ -144,7 +142,6 @@ extern void *malloc(int size);
 #define	E12C_IOAPICINT_BASE	0x122000000
 #define	E16C_IOAPICINT_BASE	E12C_IOAPICINT_BASE
 #define	E2C3_IOAPICINT_BASE	E12C_IOAPICINT_BASE
-#define	E48C_IOAPICINT_BASE	E12C_IOAPICINT_BASE
 #define	E8V7_IOAPICINT_BASE	E12C_IOAPICINT_BASE
 
 /* LAPICINT and SAPICINT do not exist on EPIC systems */
@@ -158,13 +155,8 @@ extern void *malloc(int size);
 #define	E2C3_LAPICINT_BASE	E8C_LAPICINT_BASE
 #define	E2C3_SAPICINT_BASE	E8C_SAPICINT_BASE
 
-#define	E48C_LAPICINT_BASE	E8C_LAPICINT_BASE
-#define	E48C_SAPICINT_BASE	E8C_SAPICINT_BASE
-
 #define	E8V7_LAPICINT_BASE	E8C_LAPICINT_BASE
 #define	E8V7_SAPICINT_BASE	E8C_SAPICINT_BASE
-#endif
-
 #endif
 
 #define INTEL_MULTIFUNC_VENDOR	PCI_VENDOR_ID_INTEL
@@ -177,7 +169,7 @@ extern void *malloc(int size);
 #define  PCI_BRIDGE_CTL_MASTER_ABORT 0x20  /* Report master aborts */
 #define  PCI_BRIDGE_CTL_BUS_RESET 0x40	/* Secondary bus reset */
 #define  PCI_BRIDGE_CTL_FAST_BACK 0x80	/* Fast Back2Back enabled on secondary interface */
-#ifdef CONFIG_E2K_SIC
+
 /* SCRB registers only for bus after virual bus */
 #define B0_SE			0x104	/* 8/0x03 		PCIe brigde Spaces Enable   0:N:0{04} */
 #define B0_BN			0x118   /* 32/0x00ffffff	PCIe brigde Bus Number	    0:N:0{0x18-0x1b} */
@@ -285,7 +277,6 @@ extern void *malloc(int size);
 
 /* Registers for Real Pci 2 Pci Bridge */
 #define Arb_CtlSta		0x78	/* Arbitration Control (Real Pci 2 Pci Configuration Space) */
-#endif
 
 
 /*
@@ -361,7 +352,6 @@ extern struct bios_pci_bus  pci_root[];		/* root buses */
 extern int pci_root_num;
 extern struct bios_pci_dev *pci_devices;	/* list of all devices */
 
-#ifdef CONFIG_E2K_SIC
 static inline int bios_pci_domain_nr(struct bios_pci_bus *bus)
 {
 	return ((unsigned long)bus->sysdata);
@@ -370,7 +360,6 @@ static inline void bios_set_pci_domain_nr(struct bios_pci_bus *bus, int domain)
 {
 	bus->sysdata = (void *)(long)domain;
 }
-#endif /* CONFIG_E2K_SIC */
 
 /*
  * Error values that may be returned by the PCI bios.
@@ -422,7 +411,6 @@ int pcibios_debugwrite_config_word(int domain, unsigned char bus, unsigned char 
 int pcibios_debugwrite_config_dword(int domain, unsigned char bus, unsigned char dev_fn,
 				unsigned char where, u32 val);
 
-#ifdef CONFIG_E2K_SIC
 #ifndef	CONFIG_L_IOH2
 int system_commutator_e2s_ioh_write_byte(int domain, unsigned char bus,
 							int where, u8 value);
@@ -445,7 +433,6 @@ int system_commutator_e2s_ioh_read_dword(int domain, unsigned char bus,
 #define system_commutator_e2s_ioh_write_dword(domain, bus, where, value)
 #define system_commutator_e2s_ioh_read_dword(domain, bus, where, value)
 #endif	/* ! CONFIG_L_IOH2 */
-#endif /* CONFIG_E2K_SIC */
 
 
 /* Don't use these in new code, use pci_find_... instead */
@@ -487,7 +474,6 @@ void pci_zero_irq_settings(void);
 void intel_conf_writeb(unsigned long port, unsigned char value);
 unsigned char intel_conf_readb(unsigned long port);
 
-#ifdef CONFIG_E2K_SIC
 static inline unsigned int get_iohub_revision_id(int domain)
 {
 	int devfn;
@@ -520,7 +506,6 @@ static inline void set_iohub_dev_num(int domain)
 #endif	/* CONFIG_L_IOH2 */
 	DebugPCI("set_iohub_dev_num() set device number to 0x%04x\n", reg);
 }
-#endif	/* CONFIG_E2K_SIC */
 
 // Rounding for boundaries.
 // Due to some chip bugs, go ahead and roung IO to 16
@@ -575,7 +560,7 @@ struct superio {
 	// LPT is in transition, so we leave this here for the moment.
 	// The winbond chips really stretched the way this works.
 	// so many functions!
-	unsigned int ide, floppy, lpt;
+	unsigned int ide, lpt;
 	unsigned int keyboard, cir, game;
 	unsigned int gpio1, gpio2, gpio3;
 	unsigned int acpi,hwmonitor;

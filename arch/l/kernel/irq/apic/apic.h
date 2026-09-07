@@ -116,14 +116,18 @@ static inline unsigned int read_apic_id(void)
 	return default_get_apic_id(reg);
 }
 
+/*
+ * Get the maximum number of local vector table entries
+ */
+static inline int lapic_get_maxlvt(void)
+{
+	return GET_APIC_MAXLVT(apic_read(APIC_LVR));
+}
+
 extern int apic_get_vector(void);
 
 struct msi_msg;
 struct irq_cfg;
-
-extern void __irq_msi_compose_msg(struct irq_cfg *cfg, struct msi_msg *msg,
-				  bool dmar);
-
 
 DECLARE_EARLY_PER_CPU_READ_MOSTLY(u16, cpu_to_picid);
 /* P2V */

@@ -530,7 +530,12 @@ static void __init pud_clear_tests(struct pgtable_debug_args *args)
 	pr_debug("Validating PUD clear\n");
 	pud = __pud(pud_val(pud) | RANDOM_ORVALUE);
 	WRITE_ONCE(*args->pudp, pud);
+#if defined CONFIG_E2K && defined CONFIG_SEMI_SPECULATIVE_KERNEL
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_pud(args->pudp, __pud(0ul));
+#else
 	pud_clear(args->pudp);
+#endif
 	pud = READ_ONCE(*args->pudp);
 	WARN_ON(!pud_none(pud));
 }
@@ -567,7 +572,12 @@ static void __init p4d_clear_tests(struct pgtable_debug_args *args)
 	pr_debug("Validating P4D clear\n");
 	p4d = __p4d(p4d_val(p4d) | RANDOM_ORVALUE);
 	WRITE_ONCE(*args->p4dp, p4d);
+#if defined CONFIG_E2K && defined CONFIG_SEMI_SPECULATIVE_KERNEL
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_p4d(args->p4dp, __p4d(0ul));
+#else
 	p4d_clear(args->p4dp);
+#endif
 	p4d = READ_ONCE(*args->p4dp);
 	WARN_ON(!p4d_none(p4d));
 }
@@ -584,8 +594,14 @@ static void __init p4d_populate_tests(struct pgtable_debug_args *args)
 	 * This entry points to next level page table page.
 	 * Hence this must not qualify as p4d_bad().
 	 */
+#if defined CONFIG_E2K && defined CONFIG_SEMI_SPECULATIVE_KERNEL
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_pud(args->pudp, __pud(0ul));
+	set_p4d(args->p4dp, __p4d(0ul));
+#else
 	pud_clear(args->pudp);
 	p4d_clear(args->p4dp);
+#endif
 	p4d_populate(args->mm, args->p4dp, args->start_pudp);
 	p4d = READ_ONCE(*args->p4dp);
 	WARN_ON(p4d_bad(p4d));
@@ -601,7 +617,12 @@ static void __init pgd_clear_tests(struct pgtable_debug_args *args)
 	pr_debug("Validating PGD clear\n");
 	pgd = __pgd(pgd_val(pgd) | RANDOM_ORVALUE);
 	WRITE_ONCE(*args->pgdp, pgd);
+#if defined CONFIG_E2K && defined CONFIG_SEMI_SPECULATIVE_KERNEL
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_pgd(args->pgdp, __pgd(0ul));
+#else
 	pgd_clear(args->pgdp);
+#endif
 	pgd = READ_ONCE(*args->pgdp);
 	WARN_ON(!pgd_none(pgd));
 }
@@ -618,8 +639,14 @@ static void __init pgd_populate_tests(struct pgtable_debug_args *args)
 	 * This entry points to next level page table page.
 	 * Hence this must not qualify as pgd_bad().
 	 */
+#if defined CONFIG_E2K && defined CONFIG_SEMI_SPECULATIVE_KERNEL
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_p4d(args->p4dp, __p4d(0ul));
+	set_pgd(args->pgdp, __pgd(0ul));
+#else
 	p4d_clear(args->p4dp);
 	pgd_clear(args->pgdp);
+#endif
 	pgd_populate(args->mm, args->pgdp, args->start_p4dp);
 	pgd = READ_ONCE(*args->pgdp);
 	WARN_ON(pgd_bad(pgd));
@@ -666,7 +693,12 @@ static void __init pmd_clear_tests(struct pgtable_debug_args *args)
 	pr_debug("Validating PMD clear\n");
 	pmd = __pmd(pmd_val(pmd) | RANDOM_ORVALUE);
 	WRITE_ONCE(*args->pmdp, pmd);
+#if defined CONFIG_E2K && defined CONFIG_SEMI_SPECULATIVE_KERNEL
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_pmd(args->pmdp, __pmd(0ul));
+#else
 	pmd_clear(args->pmdp);
+#endif
 	pmd = READ_ONCE(*args->pmdp);
 	WARN_ON(!pmd_none(pmd));
 }

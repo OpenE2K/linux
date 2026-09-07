@@ -342,7 +342,7 @@ unsigned long deGetTransparency(void)
 /*
  * This function sets the pixel format that will apply to the 2D Engine.
  */
-void deSetPixelFormat(
+static void deSetPixelFormat(
     unsigned long bpp
 )
 {
@@ -1664,7 +1664,7 @@ unsigned long rop2)       /* ROP value */
  * to simplify the deRotateBlt function.
  *
  */
-void deRotate(
+static void deRotate(
     unsigned long sx,               /* X Coordinate of the source */
     unsigned long sy,               /* Y Coordinate of the source */
     unsigned long dx,               /* X Coordinate of the destination */
@@ -2814,6 +2814,7 @@ long deVideoMem2VideoMemAlphaBlendBlt(
     return 0;
 }
 
+#if 0
 /*
  * This function sets the monochrome pattern on the pattern registers.
  */
@@ -2954,3 +2955,4 @@ long deRectPatternFill(
 
     return 0;
 }
+#endif

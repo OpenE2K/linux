@@ -81,7 +81,7 @@ static int xfs_ptr128_ioc_fsbulkstat(struct file		*file,
 	if (IS_AP(ap, tag)) {
 		if (AP_OBJ_SIZE(ap) < sizeof(xfs_ino_t))
 			return -EFAULT;
-		bulkreq.lastip = (void __user *)AP_PTR(ap);
+		bulkreq.lastip = U_AP_PTR(ap);
 	} else if (AP_NULL(ap, tag)) {
 		bulkreq.lastip = NULL;
 	} else {
@@ -93,7 +93,7 @@ static int xfs_ptr128_ioc_fsbulkstat(struct file		*file,
 	if (get_user_tagged_16(ap.qword, tag, &p128->ubuffer) || !IS_AP(ap, tag) ||
 			AP_OBJ_SIZE(ap) < bulkreq.icount)
 		return -EFAULT;
-	bulkreq.ubuffer = (void __user *)AP_PTR;
+	bulkreq.ubuffer = U_AP_PTR(ap);
 
 	if (get_user_tagged_16(ap.qword, tag, &p128->ocount)) {
 		return -EFAULT;
@@ -101,7 +101,7 @@ static int xfs_ptr128_ioc_fsbulkstat(struct file		*file,
 	if (IS_AP(ap, tag)) {
 		if (AP_OBJ_SIZE(ap) < sizeof(__s64))
 			return -EFAULT;
-		bulkreq.ocount = (void __user *)AP_PTR(ap);
+		bulkreq.ocount = U_AP_PTR(ap);
 	} else if (AP_NULL(ap, tag)) {
 		bulkreq.ocount = NULL;
 	} else {
@@ -202,14 +202,14 @@ xfs_ptr128_handlereq_copyin(int cmd,
 		if (get_user_tagged_16(ap.qword, tag, &arg128->ohandle) ||
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < osize)
 			return -EFAULT;
-		hreq->ohandle = (void __user *)AP_PTR(ap);
+		hreq->ohandle = U_AP_PTR(ap);
 		if (get_user_tagged_16(ap.qword, tag, &arg128->ohandlen) ||
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < sizeof(__u32))
 			return -EFAULT;
-		hreq->ohandlen = (void __user *)AP_PTR(ap);
+		hreq->ohandlen = U_AP_PTR(ap);
 		if (get_user_tagged_16(ap.qword, tag, &arg128->path) || !IS_AP(ap, tag))
 			return -EFAULT;
-		hreq->path = (void __user *)AP_PTR(ap);
+		hreq->path = U_AP_PTR(ap);
 		break;
 	case XFS_IOC_OPEN_BY_HANDLE_128:
 		if (get_user(hreq->ihandlen, &arg128->ihandlen))
@@ -217,7 +217,7 @@ xfs_ptr128_handlereq_copyin(int cmd,
 		if (get_user_tagged_16(ap.qword, tag, &arg128->ihandle) ||
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hreq->ihandlen)
 			return -EFAULT;
-		hreq->ihandle = (void __user *)AP_PTR(ap);
+		hreq->ihandle = U_AP_PTR(ap);
 		if (get_user(hreq->oflags, &arg128->oflags))
 			return -EFAULT;
 		break;
@@ -226,19 +226,19 @@ xfs_ptr128_handlereq_copyin(int cmd,
 		if (get_user_tagged_16(ap.qword, tag, &arg128->ohandlen) ||
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < sizeof(__u32))
 			return -EFAULT;
-		hreq->ohandlen =  (void __user *)AP_PTR(ap);
+		hreq->ohandlen =  U_AP_PTR(ap);
 		if (get_user(olen, hreq->ohandlen))
 			return -EFAULT;
 		if (get_user_tagged_16(ap.qword, tag, &arg128->ohandle) ||
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < olen)
 			return -EFAULT;
-		hreq->ohandle = (void __user *)AP_PTR(ap);
+		hreq->ohandle = U_AP_PTR(ap);
 		if (get_user(hreq->ihandlen, &arg128->ihandlen))
 			return -EFAULT;
 		if (get_user_tagged_16(ap.qword, tag, &arg128->ihandle) ||
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hreq->ihandlen)
 			return -EFAULT;
-		hreq->ihandle = (void __user *)AP_PTR(ap);
+		hreq->ihandle = U_AP_PTR(ap);
 		break;
 	}
 	default:
@@ -263,7 +263,7 @@ static struct dentry *xfs_ptr128_handlereq_to_dentry(struct file		*parfilp,
 	if (get_user_tagged_16(ap.qword, tag, &hreq->ihandle) ||
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < ihandlen)
 		return ERR_PTR(-EFAULT);
-	return xfs_handle_to_dentry(parfilp, (void __user *)AP_PTR(ap), ihandlen);
+	return xfs_handle_to_dentry(parfilp, U_AP_PTR(ap), ihandlen);
 }
 
 typedef struct xfs_attr_multiop128 {
@@ -322,7 +322,7 @@ static int xfs_ptr128_attrmulti_by_handle(struct file	*parfilp,
 		goto out_dput;
 	}
 	set_u_border(MAX_U_BORDER);
-	uops = (void __user *)AP_PTR(ap);
+	uops = U_AP_PTR(ap);
 	ops = memdup_user(uops, size);
 	if (IS_ERR(ops)) {
 		error = PTR_ERR(ops);
@@ -337,10 +337,11 @@ static int xfs_ptr128_attrmulti_by_handle(struct file	*parfilp,
 		    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < ops[i].am_length) {
 			goto free_ops;
 		}
+		am_attrvalue = U_AP_PTR(ap);
 		if (get_user_tagged_16(ap.qword, tag, &uops[i].am_attrname) || !IS_AP(ap, tag)) {
 			goto free_ops;
 		}
-		am_attrvalue = (void __user *)AP_PTR(ap);
+		am_attrname = U_AP_PTR(ap);
 		ops[i].am_error = xfs_ioc_attrmulti_one(parfilp,
 				d_inode(dentry), ops[i].am_opcode,
 				am_attrname, am_attrvalue,
@@ -394,7 +395,7 @@ static int xfs_ptr128_attrlist_by_handle(struct file		*parfilp,
 	}
 	set_u_border(MAX_U_BORDER);
 	error = xfs_ioc_attr_list(XFS_I(d_inode(dentry)),
-			(void __user *)AP_PTR(ap), al_hreq128.buflen,
+			U_AP_PTR(ap), al_hreq128.buflen,
 			al_hreq128.flags, &p->pos);
 	dput(dentry);
 	return error;

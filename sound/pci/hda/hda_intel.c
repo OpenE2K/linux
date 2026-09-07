@@ -1086,11 +1086,20 @@ static int azx_resume(struct device *dev)
 static int azx_freeze_noirq(struct device *dev)
 {
 	struct snd_card *card = dev_get_drvdata(dev);
+#if defined(CONFIG_MCST)
+	struct azx *chip;
+	struct pci_dev *pci;
+#else
 	struct azx *chip = card->private_data;
 	struct pci_dev *pci = to_pci_dev(dev);
+#endif
 
 	if (!azx_is_pm_ready(card))
 		return 0;
+#if defined(CONFIG_MCST)
+	chip = card->private_data;
+	pci = to_pci_dev(dev);
+#endif
 	if (chip->driver_type == AZX_DRIVER_SKL)
 		pci_set_power_state(pci, PCI_D3hot);
 
@@ -1100,11 +1109,20 @@ static int azx_freeze_noirq(struct device *dev)
 static int azx_thaw_noirq(struct device *dev)
 {
 	struct snd_card *card = dev_get_drvdata(dev);
+#if defined(CONFIG_MCST)
+	struct azx *chip;
+	struct pci_dev *pci;
+#else
 	struct azx *chip = card->private_data;
 	struct pci_dev *pci = to_pci_dev(dev);
+#endif
 
 	if (!azx_is_pm_ready(card))
 		return 0;
+#if defined(CONFIG_MCST)
+	chip = card->private_data;
+	pci = to_pci_dev(dev);
+#endif
 	if (chip->driver_type == AZX_DRIVER_SKL)
 		pci_set_power_state(pci, PCI_D0);
 

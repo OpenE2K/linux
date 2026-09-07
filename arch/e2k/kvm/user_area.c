@@ -58,7 +58,9 @@
 static struct kmem_cache *user_area_cachep = NULL;
 static struct kmem_cache *user_area_chunk_cachep = NULL;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void user_area_free_queued_chunks(user_area_t *user_area);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 int
 user_area_caches_init(void)
@@ -189,10 +191,13 @@ user_area_find_chunk(user_chunk_t **chunk_list, user_chunk_t ***prev,
 			next, next->start, next->end);
 		addr = next->start;
 		addr = ALIGN_TO_SIZE(addr, align);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		if (vmap_base != NULL) {
 			if (next->vmap_base == vmap_base)
 				break;
-		} else if (start == 0) {
+		} else
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+		if (start == 0) {
 			if (next->end - addr >= size)
 				break;
 		} else if (start < next->end) {
@@ -259,6 +264,7 @@ user_area_find_busy_chunk(user_area_t *user_area, e2k_addr_t start,
 		"end 0x%lx\n", next->start, next->end);
 	return next;
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline user_chunk_t *
 user_area_find_vmap_chunk(user_area_t *user_area, void *vmap_base)
 {
@@ -278,6 +284,7 @@ user_area_find_vmap_chunk(user_area_t *user_area, void *vmap_base)
 		next->start, next->end);
 	return next;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline int
 user_area_is_busy(user_area_t *user_area, e2k_addr_t address,
@@ -443,6 +450,7 @@ user_area_insert_free_chunk(user_area_t *user_area,
 		free_chunk->next, free_chunk->prev);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Insert the chunk of the user virtual memory area to the list of
  * ready to free chunks.
@@ -467,6 +475,7 @@ user_area_insert_to_free_chunk(user_area_t *user_area,
 		"chunk: chunk->next %px chunk->prev %px\n",
 		to_free_chunk->next, to_free_chunk->prev);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Init new structure of chunk of user virtual memory area
@@ -483,9 +492,11 @@ user_area_init_chunk(user_chunk_t *new_chunk, e2k_addr_t chunk_start,
 	new_chunk->size = chunk_size;
 	new_chunk->next = NULL;
 	new_chunk->prev = NULL;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	new_chunk->pages = NULL;
 	new_chunk->nr_pages = 0;
 	new_chunk->vmap_base = NULL;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	DebugUA("user_area_init_chunk() finished: start 0x%lx size 0x%lx\n",
 		chunk_start, chunk_size);
@@ -521,6 +532,7 @@ user_area_create_empty_chunk(void)
 static inline void
 user_area_release_chunk(user_chunk_t *chunk)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	BUG_ON(chunk->pages != NULL || chunk->nr_pages != 0);
 	if (chunk->vmap_base != NULL) {
 		pr_err("%s: virtual mapping is not yet freed, chunk from 0x%lx "
@@ -530,6 +542,7 @@ user_area_release_chunk(user_chunk_t *chunk)
 	BUG_ON(chunk->vmap_base != NULL);
 	BUG_ON(chunk->flags & (USER_AREA_PRESENT | USER_AREA_LOCKED |
 				USER_AREA_VMAPPED));
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kmem_cache_free(user_area_chunk_cachep, chunk);
 }
 
@@ -651,8 +664,7 @@ user_area_occupy_chunk(user_area_t *user_area, user_chunk_t *chunk)
  * The function returns 0 on success and < 0 (-errno) if fails.
  */
 user_area_t *
-user_area_create(e2k_addr_t area_start, e2k_size_t area_size,
-						unsigned long flags)
+user_area_create(e2k_addr_t area_start, e2k_size_t area_size, unsigned long flags)
 {
 	user_area_t *new_area;
 	user_chunk_t *free_chunk;
@@ -676,7 +688,9 @@ user_area_create(e2k_addr_t area_start, e2k_size_t area_size,
 	if (free_chunk == NULL)
 		return NULL;
 	new_area->free_list = free_chunk;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	new_area->to_free_list = NULL;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	new_area->freebytes = area_size;
 	DebugUA("user_area_create() returns area start 0x%lx size 0x%lx "
 		"flags 0x%lx\n", area_start, area_size, flags);
@@ -710,7 +724,9 @@ user_area_reserve_chunk(user_area_t *user_area, e2k_addr_t area_start,
 			"reserved area failed\n");
 		return error;
 	}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	area_chunk->flags = USER_AREA_RESERVED;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	user_area_insert_busy_chunk(user_area, area_chunk);
 
 	DebugUA("user_area_reserve_chunk() finished: start 0x%lx size 0x%lx\n",
@@ -793,8 +809,10 @@ user_area_get_chunk(user_area_t *user_area, e2k_addr_t start, e2k_addr_t size,
 	DebugUA("user_area_get_chunk() started: kmem area 0x%px start 0x%lx "
 		"size 0x%lx align 0x%lx\n",
 		user_area, start, size, align);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (user_area->to_free_list != NULL)
 		user_area_free_queued_chunks(user_area);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (start != ALIGN_TO_SIZE(start, align)) {
 		printk(KERN_ERR "user_area_get_chunk() start address "
 			"0x%lx is not aligned to 0x%lx\n",
@@ -969,6 +987,7 @@ user_area_put_chunk(user_area_t *user_area, user_chunk_t *chunk)
 	user_area_insert_free_chunk(user_area, chunk);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void user_area_free_present_chunk(user_chunk_t *area_chunk)
 {
 	DebugUA("user_area_free_present_chunk() started for area: start 0x%lx "
@@ -1104,14 +1123,17 @@ out:
 	user_area_free_chunk_vmapped(area_chunk);
 	return ret;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void __user *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 				e2k_addr_t size, e2k_addr_t align,
 				unsigned long flags)
 {
 	user_chunk_t *area_chunk;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	unsigned long add_flags;
 	int ret;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	if (start != ALIGN_TO_SIZE(start, PAGE_SIZE)) {
 		DebugUA("user_area_alloc_chunk() start address 0x%lx is not "
@@ -1135,8 +1157,8 @@ void __user *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 			start, size, align);
 		return NULL;
 	}
-	add_flags = 0;
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	add_flags = 0;
 	if (flags & KVM_ALLOC_AREA_MAP_FLAGS) {
 		unsigned long prot = 0;
 
@@ -1159,7 +1181,6 @@ void __user *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 			add_flags |= (flags & KVM_ALLOC_AREA_MAP_FLAGS);
 		}
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (flags & UA_VMAP_TO_KERNEL) {
 		ret = user_area_do_alloc_chunk_pages(area_chunk);
 		add_flags |= USER_AREA_VMAPPED;
@@ -1197,21 +1218,25 @@ void __user *user_area_alloc_chunk(user_area_t *user_area, e2k_addr_t start,
 		area_chunk->flags |= USER_AREA_LOCKED;
 #endif	/* !USER_AREA_LOCX_ENABLE */
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	user_area_insert_busy_chunk(user_area, area_chunk);
 	return (void __user *)area_chunk->start;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 out_free_alloc:
 	user_area_free_chunk_alloc(area_chunk);
 out_put_chunk:
 	user_area_put_chunk(user_area, area_chunk);
 	return NULL;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
-void *map_user_area_to_vmalloc_range(user_area_t *user_area, void *user_base,
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+void *map_user_area_to_vmalloc_range(user_area_t *user_area, void __user *user_base,
 					pgprot_t prot)
 {
-	e2k_addr_t	start = (e2k_addr_t)user_base;
+	e2k_addr_t	start = (e2k_addr_t)(unsigned long)user_base;
 	user_chunk_t	*tmp;
 	void		*vmap_base;
 	unsigned long	irq_flags;
@@ -1271,11 +1296,14 @@ only_vmap:
 	if (tmp != NULL)
 		tmp->vmap_base = NULL;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void
 user_area_free_chunk_pages(user_area_t *user_area, user_chunk_t *chunk)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	user_area_free_chunk_alloc(chunk);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	user_area_put_chunk(user_area, chunk);
 }
 
@@ -1322,13 +1350,16 @@ user_area_do_free_chunk(user_area_t *user_area, void __user *chunk_base,
 			&user_area->busy_list, user_area->busy_list);
 	}
 	spin_unlock_irqrestore(&user_area->area_list_lock, irq_flags);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (flags & USER_AREA_QUEUE) {
 		user_area_insert_to_free_chunk(user_area, tmp);
 		return;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	user_area_free_chunk_pages(user_area, tmp);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void
 user_area_free_queued_chunks(user_area_t *user_area)
 {
@@ -1363,17 +1394,22 @@ user_area_free_queued_chunks(user_area_t *user_area)
 	DebugUA("user_area_free_queued_chunks() returns with freeed "
 		"chunks num %d\n", total);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void user_area_free_chunk(user_area_t *user_area, void __user *chunk)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	user_area_free_queued_chunks(user_area);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	user_area_do_free_chunk(user_area, chunk, USER_AREA_FREE);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void user_area_queue_chunk_to_free(user_area_t *user_area, void __user *chunk)
 {
 	user_area_do_free_chunk(user_area, chunk, USER_AREA_QUEUE);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void user_area_free_all_busy_chunks(user_area_t *user_area)
 {
@@ -1413,7 +1449,9 @@ static void user_area_release_all_free_chunks(user_area_t *user_area)
 		"start 0x%lx end 0x%lx\n",
 		user_area, user_area->area_start, user_area->area_end);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	user_area_free_queued_chunks(user_area);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	spin_lock_irqsave(&user_area->area_list_lock, irq_flags);
 	queue_to_free = user_area->free_list;
@@ -1442,11 +1480,15 @@ void user_area_release(user_area_t *user_area)
 		user_area, user_area->area_start, user_area->area_end);
 	user_area_free_all_busy_chunks(user_area);
 	user_area_release_all_free_chunks(user_area);
-	if (user_area->busy_list || user_area->free_list ||
-		user_area->to_free_list) {
-		printk(KERN_ERR "user_area_release() not empty some of lists: "
-			"busy %px or free %px or queue to free %px\n",
-			user_area->busy_list, user_area->free_list,
-			user_area->to_free_list);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	if (user_area->busy_list || user_area->free_list || user_area->to_free_list) {
+		pr_err("user_area_release() not empty some of lists: busy %px or free %px or queue to free %px\n",
+			user_area->busy_list, user_area->free_list, user_area->to_free_list);
 	}
+#else
+	if (user_area->busy_list || user_area->free_list) {
+		pr_err("user_area_release() not empty some of lists: busy %px or free %px\n",
+			user_area->busy_list, user_area->free_list);
+	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }

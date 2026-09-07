@@ -95,6 +95,9 @@ extern int pwm_ctrl;
 struct smi_750_register;
 struct smi_768_register;
 
+extern int lvds_channel;
+extern int clk_phase;
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
 #define DRM_FILE_PAGE_OFFSET (0x100000000ULL >> PAGE_SHIFT)
 #endif
@@ -239,7 +242,6 @@ void smi_audio_resume(void);
 #endif
 
 irqreturn_t smi_drm_interrupt(DRM_IRQ_ARGS);
-
 
 
 #define smi_LUT_SIZE 256

@@ -116,7 +116,7 @@ int copy_bpf_fprog_from_user(struct sock_fprog *dst, sockptr_t src, int len)
 			if (get_user_tagged_16(ap.qword, tag, &f128p->filter) || !IS_AP(ap, tag))
 				return -EFAULT;
 			dst->len = l;
-			dst->filter = (struct sock_filter __user *)AP_PTR(ap);
+			dst->filter = U_AP_PTR(ap);
 			set_ap_u_border(ap);
 		} else {
 			dst->len = 0;

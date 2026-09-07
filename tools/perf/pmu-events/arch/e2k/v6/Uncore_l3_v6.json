@@ -1,0 +1,1262 @@
+[
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x0",
+        "EventName": "L3_V6.CLOCKTICKS_0",
+        "BriefDescription": "Подсчет числа тактов с момента запуска счетчиков."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x1",
+        "EventName": "L3_V6.CNT0_OCCUPANCY_0",
+        "BriefDescription": "Только для счетчика 1. Подсчет инкремента счетчика 0."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x4",
+        "EventName": "L3_V6.IFACE_N2B_IRQ_0",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x5",
+        "EventName": "L3_V6.IFACE_B2N_IRQ_0",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x6",
+        "EventName": "L3_V6.IFACE_N2B_SRQ_0",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x7",
+        "EventName": "L3_V6.IFACE_B2N_SRQ_0",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x8",
+        "EventName": "L3_V6.IFACE_N2B_DAT_0",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x9",
+        "EventName": "L3_V6.IFACE_B2N_DAT_0",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0xa",
+        "EventName": "L3_V6.IFACE_N2B_ACK_0",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с короткими ответами-подтверждениями (ACK)"
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0xb",
+        "EventName": "L3_V6.IFACE_B2N_ACK_0",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с короткими ответами-подтверждениями (ACK)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0xc",
+        "EventName": "L3_V6.IFACE_N2B_HAK_0",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0xd",
+        "EventName": "L3_V6.IFACE_B2N_HAK_0",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0xe",
+        "EventName": "L3_V6.IFACE_N2B_RLS_0",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0xf",
+        "EventName": "L3_V6.IFACE_B2N_RLS_0",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x10",
+        "EventName": "L3_V6.IRQ_BLOCKS_0",
+        "BriefDescription": "Подсчет блокировок первичных запросов (IRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x11",
+        "EventName": "L3_V6.IRQ_ACCEPT_0",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x12",
+        "EventName": "L3_V6.IRQ_L3_LOOKUP_0",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x13",
+        "EventName": "L3_V6.IRQ_LD_LOOKUP_0",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x14",
+        "EventName": "L3_V6.SRQ_PIPE_0",
+        "BriefDescription": "Подсчет блокировок глобальных снуп-запросов (SRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x15",
+        "EventName": "L3_V6.SRQ_ACCEPT_0",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x16",
+        "EventName": "L3_V6.SRQ_L3_LOOKUP_0",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x17",
+        "EventName": "L3_V6.SRQ_LD_LOOKUP_0",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x18",
+        "EventName": "L3_V6.INJC_PIPE_0",
+        "BriefDescription": "Подсчет по событиям в конвейере при запросах на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x19",
+        "EventName": "L3_V6.INJC_ACCEPT_0",
+        "BriefDescription": "Подсчет по типу запросов на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x1a",
+        "EventName": "L3_V6.INJC_L3_LOOKUP_0",
+        "BriefDescription": "Подсчет по состоянию при обращении в L3 при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x1b",
+        "EventName": "L3_V6.INJC_LD_LOOKUP_0",
+        "BriefDescription": "Подсчет по состоянию при обращении к локальному справочнику при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x1c",
+        "EventName": "L3_V6.VICTIMS_0",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x1d",
+        "EventName": "L3_V6.VICTIMS_L3_0",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x1e",
+        "EventName": "L3_V6.VICTIMS_LD_0",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x20",
+        "EventName": "L3_V6.TA_DRD_BYPASS_0",
+        "BriefDescription": "Подсчет чтений данных из памяти L3 при bypass’е со стадии t4 конвейера."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x24",
+        "EventName": "L3_V6.TA_IRQ_ARB_0",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при IRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x25",
+        "EventName": "L3_V6.TA_SRQ_ARB_0",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при SRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x26",
+        "EventName": "L3_V6.TA_LDD_ARB_0",
+        "BriefDescription": "Подсчет по событиям записи в LDD из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x27",
+        "EventName": "L3_V6.TA_LDX_ARB_0",
+        "BriefDescription": "Подсчет по событиям записи в LDX из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x28",
+        "EventName": "L3_V6.TA_IRQ_PARAMS_0",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов IRQ."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x29",
+        "EventName": "L3_V6.TA_SRQ_PARAMS_0",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов SRQ."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x2a",
+        "EventName": "L3_V6.TA_INJC_PARAMS_0",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов INJC."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x2b",
+        "EventName": "L3_V6.IRQB_REQUEST_0",
+        "BriefDescription": "Подсчет по событиям буфера IRQB."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x2c",
+        "EventName": "L3_V6.SRQB_REQUEST_0",
+        "BriefDescription": "Подсчет по событиям буфера SRQB."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x30",
+        "EventName": "L3_V6.IRQQ_OCCUPANCY_0",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди IRQQ."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x31",
+        "EventName": "L3_V6.SRQQ_OCCUPANCY_0",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди SRQQ."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x32",
+        "EventName": "L3_V6.IRQB_OCCUPANCY_0",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере IRQB."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x33",
+        "EventName": "L3_V6.SRQB_OCCUPANCY_0",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере SRQB."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x34",
+        "EventName": "L3_V6.RIB_OCCUPANCY_0",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере RIB."
+    },
+    {
+        "Unit" : "l3_v6_0",
+        "PerPkg": "1",
+        "EventCode": "0x35",
+        "EventName": "L3_V6.WBB_OCCUPANCY_0",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере WBB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x0",
+        "EventName": "L3_V6.CLOCKTICKS_1",
+        "BriefDescription": "Подсчет числа тактов с момента запуска счетчиков."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x1",
+        "EventName": "L3_V6.CNT0_OCCUPANCY_1",
+        "BriefDescription": "Только для счетчика 1. Подсчет инкремента счетчика 0."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x4",
+        "EventName": "L3_V6.IFACE_N2B_IRQ_1",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x5",
+        "EventName": "L3_V6.IFACE_B2N_IRQ_1",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x6",
+        "EventName": "L3_V6.IFACE_N2B_SRQ_1",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x7",
+        "EventName": "L3_V6.IFACE_B2N_SRQ_1",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x8",
+        "EventName": "L3_V6.IFACE_N2B_DAT_1",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x9",
+        "EventName": "L3_V6.IFACE_B2N_DAT_1",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0xa",
+        "EventName": "L3_V6.IFACE_N2B_ACK_1",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с короткими ответами-подтверждениями (ACK)"
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0xb",
+        "EventName": "L3_V6.IFACE_B2N_ACK_1",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с короткими ответами-подтверждениями (ACK)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0xc",
+        "EventName": "L3_V6.IFACE_N2B_HAK_1",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0xd",
+        "EventName": "L3_V6.IFACE_B2N_HAK_1",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0xe",
+        "EventName": "L3_V6.IFACE_N2B_RLS_1",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0xf",
+        "EventName": "L3_V6.IFACE_B2N_RLS_1",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x10",
+        "EventName": "L3_V6.IRQ_BLOCKS_1",
+        "BriefDescription": "Подсчет блокировок первичных запросов (IRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x11",
+        "EventName": "L3_V6.IRQ_ACCEPT_1",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x12",
+        "EventName": "L3_V6.IRQ_L3_LOOKUP_1",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x13",
+        "EventName": "L3_V6.IRQ_LD_LOOKUP_1",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x14",
+        "EventName": "L3_V6.SRQ_PIPE_1",
+        "BriefDescription": "Подсчет блокировок глобальных снуп-запросов (SRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x15",
+        "EventName": "L3_V6.SRQ_ACCEPT_1",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x16",
+        "EventName": "L3_V6.SRQ_L3_LOOKUP_1",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x17",
+        "EventName": "L3_V6.SRQ_LD_LOOKUP_1",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x18",
+        "EventName": "L3_V6.INJC_PIPE_1",
+        "BriefDescription": "Подсчет по событиям в конвейере при запросах на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x19",
+        "EventName": "L3_V6.INJC_ACCEPT_1",
+        "BriefDescription": "Подсчет по типу запросов на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x1a",
+        "EventName": "L3_V6.INJC_L3_LOOKUP_1",
+        "BriefDescription": "Подсчет по состоянию при обращении в L3 при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x1b",
+        "EventName": "L3_V6.INJC_LD_LOOKUP_1",
+        "BriefDescription": "Подсчет по состоянию при обращении к локальному справочнику при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x1c",
+        "EventName": "L3_V6.VICTIMS_1",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x1d",
+        "EventName": "L3_V6.VICTIMS_L3_1",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x1e",
+        "EventName": "L3_V6.VICTIMS_LD_1",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x20",
+        "EventName": "L3_V6.TA_DRD_BYPASS_1",
+        "BriefDescription": "Подсчет чтений данных из памяти L3 при bypass’е со стадии t4 конвейера."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x24",
+        "EventName": "L3_V6.TA_IRQ_ARB_1",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при IRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x25",
+        "EventName": "L3_V6.TA_SRQ_ARB_1",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при SRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x26",
+        "EventName": "L3_V6.TA_LDD_ARB_1",
+        "BriefDescription": "Подсчет по событиям записи в LDD из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x27",
+        "EventName": "L3_V6.TA_LDX_ARB_1",
+        "BriefDescription": "Подсчет по событиям записи в LDX из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x28",
+        "EventName": "L3_V6.TA_IRQ_PARAMS_1",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов IRQ."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x29",
+        "EventName": "L3_V6.TA_SRQ_PARAMS_1",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов SRQ."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x2a",
+        "EventName": "L3_V6.TA_INJC_PARAMS_1",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов INJC."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x2b",
+        "EventName": "L3_V6.IRQB_REQUEST_1",
+        "BriefDescription": "Подсчет по событиям буфера IRQB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x2c",
+        "EventName": "L3_V6.SRQB_REQUEST_1",
+        "BriefDescription": "Подсчет по событиям буфера SRQB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x30",
+        "EventName": "L3_V6.IRQQ_OCCUPANCY_1",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди IRQQ."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x31",
+        "EventName": "L3_V6.SRQQ_OCCUPANCY_1",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди SRQQ."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x32",
+        "EventName": "L3_V6.IRQB_OCCUPANCY_1",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере IRQB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x33",
+        "EventName": "L3_V6.SRQB_OCCUPANCY_1",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере SRQB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x34",
+        "EventName": "L3_V6.RIB_OCCUPANCY_1",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере RIB."
+    },
+    {
+        "Unit" : "l3_v6_1",
+        "PerPkg": "1",
+        "EventCode": "0x35",
+        "EventName": "L3_V6.WBB_OCCUPANCY_1",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере WBB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x0",
+        "EventName": "L3_V6.CLOCKTICKS_2",
+        "BriefDescription": "Подсчет числа тактов с момента запуска счетчиков."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x1",
+        "EventName": "L3_V6.CNT0_OCCUPANCY_2",
+        "BriefDescription": "Только для счетчика 1. Подсчет инкремента счетчика 0."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x4",
+        "EventName": "L3_V6.IFACE_N2B_IRQ_2",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x5",
+        "EventName": "L3_V6.IFACE_B2N_IRQ_2",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x6",
+        "EventName": "L3_V6.IFACE_N2B_SRQ_2",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x7",
+        "EventName": "L3_V6.IFACE_B2N_SRQ_2",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x8",
+        "EventName": "L3_V6.IFACE_N2B_DAT_2",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x9",
+        "EventName": "L3_V6.IFACE_B2N_DAT_2",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0xa",
+        "EventName": "L3_V6.IFACE_N2B_ACK_2",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с короткими ответами-подтверждениями (ACK)"
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0xb",
+        "EventName": "L3_V6.IFACE_B2N_ACK_2",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с короткими ответами-подтверждениями (ACK)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0xc",
+        "EventName": "L3_V6.IFACE_N2B_HAK_2",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0xd",
+        "EventName": "L3_V6.IFACE_B2N_HAK_2",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0xe",
+        "EventName": "L3_V6.IFACE_N2B_RLS_2",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0xf",
+        "EventName": "L3_V6.IFACE_B2N_RLS_2",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x10",
+        "EventName": "L3_V6.IRQ_BLOCKS_2",
+        "BriefDescription": "Подсчет блокировок первичных запросов (IRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x11",
+        "EventName": "L3_V6.IRQ_ACCEPT_2",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x12",
+        "EventName": "L3_V6.IRQ_L3_LOOKUP_2",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x13",
+        "EventName": "L3_V6.IRQ_LD_LOOKUP_2",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x14",
+        "EventName": "L3_V6.SRQ_PIPE_2",
+        "BriefDescription": "Подсчет блокировок глобальных снуп-запросов (SRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x15",
+        "EventName": "L3_V6.SRQ_ACCEPT_2",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x16",
+        "EventName": "L3_V6.SRQ_L3_LOOKUP_2",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x17",
+        "EventName": "L3_V6.SRQ_LD_LOOKUP_2",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x18",
+        "EventName": "L3_V6.INJC_PIPE_2",
+        "BriefDescription": "Подсчет по событиям в конвейере при запросах на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x19",
+        "EventName": "L3_V6.INJC_ACCEPT_2",
+        "BriefDescription": "Подсчет по типу запросов на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x1a",
+        "EventName": "L3_V6.INJC_L3_LOOKUP_2",
+        "BriefDescription": "Подсчет по состоянию при обращении в L3 при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x1b",
+        "EventName": "L3_V6.INJC_LD_LOOKUP_2",
+        "BriefDescription": "Подсчет по состоянию при обращении к локальному справочнику при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x1c",
+        "EventName": "L3_V6.VICTIMS_2",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x1d",
+        "EventName": "L3_V6.VICTIMS_L3_2",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x1e",
+        "EventName": "L3_V6.VICTIMS_LD_2",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x20",
+        "EventName": "L3_V6.TA_DRD_BYPASS_2",
+        "BriefDescription": "Подсчет чтений данных из памяти L3 при bypass’е со стадии t4 конвейера."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x24",
+        "EventName": "L3_V6.TA_IRQ_ARB_2",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при IRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x25",
+        "EventName": "L3_V6.TA_SRQ_ARB_2",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при SRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x26",
+        "EventName": "L3_V6.TA_LDD_ARB_2",
+        "BriefDescription": "Подсчет по событиям записи в LDD из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x27",
+        "EventName": "L3_V6.TA_LDX_ARB_2",
+        "BriefDescription": "Подсчет по событиям записи в LDX из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x28",
+        "EventName": "L3_V6.TA_IRQ_PARAMS_2",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов IRQ."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x29",
+        "EventName": "L3_V6.TA_SRQ_PARAMS_2",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов SRQ."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x2a",
+        "EventName": "L3_V6.TA_INJC_PARAMS_2",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов INJC."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x2b",
+        "EventName": "L3_V6.IRQB_REQUEST_2",
+        "BriefDescription": "Подсчет по событиям буфера IRQB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x2c",
+        "EventName": "L3_V6.SRQB_REQUEST_2",
+        "BriefDescription": "Подсчет по событиям буфера SRQB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x30",
+        "EventName": "L3_V6.IRQQ_OCCUPANCY_2",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди IRQQ."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x31",
+        "EventName": "L3_V6.SRQQ_OCCUPANCY_2",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди SRQQ."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x32",
+        "EventName": "L3_V6.IRQB_OCCUPANCY_2",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере IRQB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x33",
+        "EventName": "L3_V6.SRQB_OCCUPANCY_2",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере SRQB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x34",
+        "EventName": "L3_V6.RIB_OCCUPANCY_2",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере RIB."
+    },
+    {
+        "Unit" : "l3_v6_2",
+        "PerPkg": "1",
+        "EventCode": "0x35",
+        "EventName": "L3_V6.WBB_OCCUPANCY_2",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере WBB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x0",
+        "EventName": "L3_V6.CLOCKTICKS_3",
+        "BriefDescription": "Подсчет числа тактов с момента запуска счетчиков."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x1",
+        "EventName": "L3_V6.CNT0_OCCUPANCY_3",
+        "BriefDescription": "Только для счетчика 1. Подсчет инкремента счетчика 0."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x4",
+        "EventName": "L3_V6.IFACE_N2B_IRQ_3",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x5",
+        "EventName": "L3_V6.IFACE_B2N_IRQ_3",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с первичными запросами (IRQ)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x6",
+        "EventName": "L3_V6.IFACE_N2B_SRQ_3",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x7",
+        "EventName": "L3_V6.IFACE_B2N_SRQ_3",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов со снуп-запросами (SRQ)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x8",
+        "EventName": "L3_V6.IFACE_N2B_DAT_3",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x9",
+        "EventName": "L3_V6.IFACE_B2N_DAT_3",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с данными (DAT)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0xa",
+        "EventName": "L3_V6.IFACE_N2B_ACK_3",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с короткими ответами-подтверждениями (ACK)"
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0xb",
+        "EventName": "L3_V6.IFACE_B2N_ACK_3",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с короткими ответами-подтверждениями (ACK)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0xc",
+        "EventName": "L3_V6.IFACE_N2B_HAK_3",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0xd",
+        "EventName": "L3_V6.IFACE_B2N_HAK_3",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с ответами-подтверждениями от Home-устройства (HAK)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0xe",
+        "EventName": "L3_V6.IFACE_N2B_RLS_3",
+        "BriefDescription": "Подсчет поступивших в банк L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0xf",
+        "EventName": "L3_V6.IFACE_B2N_RLS_3",
+        "BriefDescription": "Подсчет отправленных из банка L3-кэша пакетов с сообщениями о завершении транзакции (RLS)."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x10",
+        "EventName": "L3_V6.IRQ_BLOCKS_3",
+        "BriefDescription": "Подсчет блокировок первичных запросов (IRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x11",
+        "EventName": "L3_V6.IRQ_ACCEPT_3",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x12",
+        "EventName": "L3_V6.IRQ_L3_LOOKUP_3",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x13",
+        "EventName": "L3_V6.IRQ_LD_LOOKUP_3",
+        "BriefDescription": "Подсчет принятых в обработку первичных запросов (IRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x14",
+        "EventName": "L3_V6.SRQ_PIPE_3",
+        "BriefDescription": "Подсчет блокировок глобальных снуп-запросов (SRQ) в конвейере тэгов."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x15",
+        "EventName": "L3_V6.SRQ_ACCEPT_3",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x16",
+        "EventName": "L3_V6.SRQ_L3_LOOKUP_3",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x17",
+        "EventName": "L3_V6.SRQ_LD_LOOKUP_3",
+        "BriefDescription": "Подсчет принятых в обработку глобальных снупзапросов (SRQ) с учетом состояния адресуемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x18",
+        "EventName": "L3_V6.INJC_PIPE_3",
+        "BriefDescription": "Подсчет по событиям в конвейере при запросах на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x19",
+        "EventName": "L3_V6.INJC_ACCEPT_3",
+        "BriefDescription": "Подсчет по типу запросов на инъекцию."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x1a",
+        "EventName": "L3_V6.INJC_L3_LOOKUP_3",
+        "BriefDescription": "Подсчет по состоянию при обращении в L3 при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x1b",
+        "EventName": "L3_V6.INJC_LD_LOOKUP_3",
+        "BriefDescription": "Подсчет по состоянию при обращении к локальному справочнику при инъекции."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x1c",
+        "EventName": "L3_V6.VICTIMS_3",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом их типа."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x1d",
+        "EventName": "L3_V6.VICTIMS_L3_3",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в L3 кэше."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x1e",
+        "EventName": "L3_V6.VICTIMS_LD_3",
+        "BriefDescription": "Подсчет вытеснений из L3 кэша с учетом состояния вытесняемой строки в локальном справочнике."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x20",
+        "EventName": "L3_V6.TA_DRD_BYPASS_3",
+        "BriefDescription": "Подсчет чтений данных из памяти L3 при bypass’е со стадии t4 конвейера."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x24",
+        "EventName": "L3_V6.TA_IRQ_ARB_3",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при IRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x25",
+        "EventName": "L3_V6.TA_SRQ_ARB_3",
+        "BriefDescription": "Подсчет по событиям в арбитре конвейера при SRQ-запросах."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x26",
+        "EventName": "L3_V6.TA_LDD_ARB_3",
+        "BriefDescription": "Подсчет по событиям записи в LDD из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x27",
+        "EventName": "L3_V6.TA_LDX_ARB_3",
+        "BriefDescription": "Подсчет по событиям записи в LDX из RIB и WBB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x28",
+        "EventName": "L3_V6.TA_IRQ_PARAMS_3",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов IRQ."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x29",
+        "EventName": "L3_V6.TA_SRQ_PARAMS_3",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов SRQ."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x2a",
+        "EventName": "L3_V6.TA_INJC_PARAMS_3",
+        "BriefDescription": "Подсчет по параметрам обрабатываемых запросов INJC."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x2b",
+        "EventName": "L3_V6.IRQB_REQUEST_3",
+        "BriefDescription": "Подсчет по событиям буфера IRQB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x2c",
+        "EventName": "L3_V6.SRQB_REQUEST_3",
+        "BriefDescription": "Подсчет по событиям буфера SRQB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x30",
+        "EventName": "L3_V6.IRQQ_OCCUPANCY_3",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди IRQQ."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x31",
+        "EventName": "L3_V6.SRQQ_OCCUPANCY_3",
+        "BriefDescription": "Подсчет числа занятых ячеек в очереди SRQQ."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x32",
+        "EventName": "L3_V6.IRQB_OCCUPANCY_3",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере IRQB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x33",
+        "EventName": "L3_V6.SRQB_OCCUPANCY_3",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере SRQB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x34",
+        "EventName": "L3_V6.RIB_OCCUPANCY_3",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере RIB."
+    },
+    {
+        "Unit" : "l3_v6_3",
+        "PerPkg": "1",
+        "EventCode": "0x35",
+        "EventName": "L3_V6.WBB_OCCUPANCY_3",
+        "BriefDescription": "Подсчет числа занятых ячеек в буфере WBB."
+    }
+]

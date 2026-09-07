@@ -1511,6 +1511,9 @@ bool cfg80211_valid_disable_subchannel_bitmap(u16 *bitmap,
 		start_freq = chandef->center_freq1 - 160;
 		break;
 	default:
+#ifdef CONFIG_MCST
+		start_freq = 0;
+#endif
 		*bitmap = 0;
 		break;
 	}

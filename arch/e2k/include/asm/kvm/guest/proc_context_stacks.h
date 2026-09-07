@@ -28,7 +28,7 @@ kvm_mkctxt_prepare_hw_user_stacks(void __user *user_func, void __user *args,
 	if (args_size > MAX_ARGS_SIZE)
 		return -EINVAL;
 
-	if (copy_from_user_with_tags(args_buf, args, args_size))
+	if (copy_from_user_tagged(args_buf, args, args_size))
 		return -EFAULT;
 
 	/* Get kernel address for procedure stack */

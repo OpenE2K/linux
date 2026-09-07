@@ -53,9 +53,6 @@ static char lancestr[] = "LANCE";
 #include <asm/auxio.h>		/* For tpe-link-test? setting */
 #endif
 #endif
-#if defined CONFIG_PCI2SBUS || defined CONFIG_PCI2SBUS_MODULE
-#include <linux/mcst/p2ssbus.h>
-#endif
 
 #ifdef SUNLANCE_BODY_FOR_PCI
 #include <linux/pci.h>
@@ -64,9 +61,6 @@ static char lancestr[] = "LANCE";
 
 #include <linux/mcst_net_rt.h>
 
-#ifdef CONFIG_MCST_RT
-//#define SUNLANCE_USES_POLL
-#endif
 
 #ifndef CONFIG_SPARC
 #define DMA_CSR          0x00UL            /* rw  DMA control/status register    0x00   */
@@ -372,15 +366,6 @@ struct lance_init_block {
 #define libbuff_offset(rt, elem) \
 ((__u32)(((unsigned long)(&(((struct lance_init_block *)0)->rt[elem][0])))))
 
-#ifdef CONFIG_MCST_RT
-struct lance_rt;
-/* Bits for RT synchronization */
-#define	RT_BIT_OPEN	0
-#define	RT_BIT_READY	1
-#define	RT_BIT_RD	2
-#define	RT_BIT_WR	3
-
-#endif
 
 
 struct sunlance_access;
@@ -408,16 +393,6 @@ struct lance_private {
 	void __iomem	*dregs;		/* DMA controller regs.		*/
 	struct lance_init_block __iomem *init_block_iomem;
 	struct lance_init_block *init_block_mem;
-#ifdef CONFIG_MCST_RT
-	unsigned long	rt_bits;
-	raw_spinlock_t    rt_stuff_lock;
-	struct lance_rt  *rt_stuff;
-#ifdef CONFIG_E90
-	unsigned long long   t_start;
-	int                  t_max_loop;
-	int                  calculate_t_max_loop;
-#endif
-#endif
 	struct napi_struct	napi;
 #if defined(CONFIG_SYSCTL) && defined(CONFIG_MCST)
 	int			napi_cpu;
@@ -755,9 +730,6 @@ static void sunlance_watchdog(struct timer_list *t)
 }
 
 static netdev_tx_t lance_start_xmit_generic(struct sk_buff *skb, struct net_device *dev, struct lance_private *lp);
-#ifdef CONFIG_MCST_RT
-static int lance_set_promuscuous(struct net_device *dev, int on);
-#endif
 
 #ifndef MODULE
 static int sunlance_uses_poll = 0;
@@ -777,389 +749,6 @@ static int __init set_sunlance_uses_poll(char *str)
 }
 __setup("sunlance_uses_poll=", set_sunlance_uses_poll);
 #endif
-
-#ifdef CONFIG_MCST_RT
-	/*
-	     lance RT stuff handling. It's implemented for fast
-	      poit-to-point sequential data exchange
-	 */
-struct lance_rt {
-	char rx_buf[ETH_DATA_LEN];
-	struct sk_buff *skb_tx;
-	int recieved;
-	int rx_len;
-	int proto;
-	struct task_struct *rx_waiter;
-	u16    saved_mode;
-};
-
-static int
-sunlance_rt_open(struct net_device *dev, struct lance_private *lp)
-{
-	struct lance_rt *rt_stuff;
-	struct sk_buff *skb_tx;
-	struct lance_init_block *ib_mem = lp->init_block_mem;
-	u16 mode;
-	int r = 0;
-
-	if (test_and_set_bit(RT_BIT_OPEN, &lp->rt_bits)) {
-		return -EBUSY;
-	}
-	if (test_bit(RT_BIT_READY, &lp->rt_bits)) {
-		clear_bit(RT_BIT_OPEN, &lp->rt_bits);
-		return 0;
-	}
-	rt_stuff = kmalloc(sizeof ( struct lance_rt), GFP_KERNEL);
-	if (rt_stuff == NULL) {
-		return -ENOMEM;
-	}
-	skb_tx = dev_alloc_skb(ETH_DATA_LEN + 2);
-	if (skb_tx == NULL) {
-		kfree(rt_stuff);
-		return -ENOMEM;
-	}
-	memset(rt_stuff, 0, sizeof ( struct lance_rt));
-	rt_stuff->skb_tx = skb_tx;
-	mode = flip_16(ib_mem->mode);
-	rt_stuff->saved_mode = mode;
-	if (!(mode & LE_MO_PROM)) {
-		r = lance_set_promuscuous(dev, 1);
-	}
-	lp->rt_stuff = rt_stuff;
-	if (lp->mii) {
-		del_timer_sync(&lp->watchdog_timer);
-	}
-	set_bit(RT_BIT_READY, &lp->rt_bits);
-	clear_bit(RT_BIT_OPEN, &lp->rt_bits);
-	return 0;
-}
-
-
-static void
-sunlance_rt_close(struct net_device *dev, struct lance_private *lp)
-{
-	struct lance_rt *rt_stuff;
-	u16 mode;
-
-	while (test_and_set_bit(RT_BIT_OPEN, &lp->rt_bits)) {
-		cpu_relax();
-	}
-	if (!test_and_clear_bit(RT_BIT_READY, &lp->rt_bits)) {
-		clear_bit(RT_BIT_OPEN, &lp->rt_bits);
-		return;
-	}
-	while (test_bit(RT_BIT_RD, &lp->rt_bits)) {
-		cpu_relax();
-	}
-	while (test_bit(RT_BIT_WR, &lp->rt_bits)) {
-		cpu_relax();
-	}
-	rt_stuff = lp->rt_stuff;
-	if (rt_stuff == NULL) {
-		raw_spin_unlock_irq(&lp->rt_stuff_lock);
-		return;
-	}
-	lp->rt_stuff = NULL;
-	mode = rt_stuff->saved_mode;
-	if (!(mode & LE_MO_PROM)) {
-		 lance_set_promuscuous(dev, 0);
-	}
-	if (rt_stuff->skb_tx) {
-		dev_kfree_skb(rt_stuff->skb_tx);
-	}
-	if (rt_stuff->rx_waiter) {
-		wake_up_process(rt_stuff->rx_waiter);
-	}
-	kfree(rt_stuff);
-	if (lp->mii) {
-		mod_timer(&(lp->watchdog_timer), LANCE_WATCHDOG_TIMEOUT);
-	}
-	clear_bit(RT_BIT_OPEN, &lp->rt_bits);
-	return;
-}
-
-static void
-sunlance_rt_rx_complete(struct lance_private *lp, char *data, int len)
-{
-	unsigned long flags;
-	struct lance_rt *rt_stuff;
-	 struct task_struct *rx_waiter;
-
-	raw_spin_lock_irqsave(&lp->rt_stuff_lock, flags);
-	rt_stuff = lp->rt_stuff;
-	if (rt_stuff == NULL) {
-		 raw_spin_unlock_irqrestore(&lp->rt_stuff_lock, flags);
-		return;
-	}
-	memcpy(rt_stuff->rx_buf, data + ETH_HLEN, len - ETH_HLEN);
-	rt_stuff->rx_len = len - ETH_HLEN;
-	rt_stuff->recieved++;
-	rt_stuff->proto = (int)be16_to_cpu(*((u16 *)(data + 2 * ETH_ALEN)));
-	rx_waiter = rt_stuff->rx_waiter;
-	raw_spin_unlock_irqrestore(&lp->rt_stuff_lock, flags);
-	if (rx_waiter) {
-		wake_up_process(rx_waiter);
-	}
-}
-
-static int sunlance_rt_read(struct lance_private *lp, struct ifreq *rq)
-{
-	struct lance_rt *rt_stuff;
-	el_netdev_udata_t *ud;
-	char *buf = NULL;
-	int skipped;
-	int proto;
-	int len = -1;
-	int r;
-	int timeout= -1;
-
-	if (test_and_set_bit(RT_BIT_RD, &lp->rt_bits)) {
-		return -EBUSY;
-	}
-	if (!test_bit(RT_BIT_READY, &lp->rt_bits)) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EINVAL;
-	}
-	ud = (el_netdev_udata_t *)(rq->ifr_data);
-	r = get_user(len, &ud->rx_len);
-	r |= get_user(timeout, &ud->timeout);
-	r |= get_user(buf, &ud->rx_buf);
-	if (r) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EFAULT;
-	}
-	if (len < ETH_HLEN) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EINVAL;
-	}
-	if (timeout > 0) {
-		timeout = (timeout * HZ) / 1000;
-	}
-	rt_stuff = lp->rt_stuff;
-retry :
-	raw_spin_lock_irq(&lp->rt_stuff_lock);
-	if (!rt_stuff->recieved) {
-		// we dont have data
-		if (timeout == 0) {
-			raw_spin_unlock_irq(&lp->rt_stuff_lock);
-			clear_bit(RT_BIT_RD, &lp->rt_bits);
-			return -ETIMEDOUT;
-		}
-		current->__state = TASK_INTERRUPTIBLE;
-		rt_stuff->rx_waiter = current;
-		raw_spin_unlock_irq(&lp->rt_stuff_lock);
-		if (timeout > 0) {
-			timeout = schedule_timeout(timeout);
-		} else {
-			schedule();
-		}
-		rt_stuff->rx_waiter = NULL;
-		if (rt_stuff->recieved) {
-			goto retry;
-		}
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -ETIMEDOUT;
-	}
-	skipped = rt_stuff->recieved - 1;
-	proto = rt_stuff->proto;
-	len = (len > rt_stuff->rx_len) ? rt_stuff->rx_len : len;
-	rt_stuff->recieved = 0;
-	raw_spin_unlock_irq(&lp->rt_stuff_lock);
-	if (copy_to_user(buf, rt_stuff->rx_buf, len)) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EFAULT;
-	}
-	r  = put_user(len, &ud->rx_len);
-	r |= put_user(skipped, &ud->skipped);
-	r |= put_user(proto, &ud->proto);
-	clear_bit(RT_BIT_RD, &lp->rt_bits);
-	if (r) {
-		return -EFAULT;
-	}
-	return 0;
-}
-
-
-
-
-static int sunlance_rt_write(struct net_device *dev, struct ifreq *rq)
-{
-	struct lance_private *lp = netdev_priv(dev);
-	el_netdev_udata_t ud, *udp;
-	struct lance_rt *rt_stuff;
-	struct sk_buff *skb;
-	int r;
-
-	if (test_and_set_bit(RT_BIT_WR, &lp->rt_bits)) {
-		return -EBUSY;
-	}
-	if (!test_bit(RT_BIT_READY, &lp->rt_bits)) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EINVAL;
-	}
-	udp = (el_netdev_udata_t *)(rq->ifr_data);
-	if (copy_from_user(&ud, udp, sizeof (el_netdev_udata_t))) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EFAULT;
-	}
-	if (ud.tx_len <= 0) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EINVAL;
-	}
-	if (ud.tx_len > ETH_DATA_LEN) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EINVAL;
-	}
-	rt_stuff = lp->rt_stuff;
-	skb = rt_stuff->skb_tx;
-	if (copy_from_user(skb->data + ETH_HLEN, ud.tx_buf, ud.tx_len)) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EFAULT;
-	}
-	memcpy(skb->data, ud.dst_mac, ETH_ALEN);
-	memcpy(skb->data + ETH_ALEN, ud.src_mac, ETH_ALEN);
-	*((u16 *)(skb->data + 2 * ETH_ALEN)) = cpu_to_be16((u16)(ud.proto));
-	skb->len = ud.tx_len + ETH_HLEN;
-	raw_spin_lock_irq(&lp->lock);
-	r = lance_start_xmit_generic(skb, dev, lp);
-	raw_spin_unlock_irq(&lp->lock);
-	clear_bit(RT_BIT_WR, &lp->rt_bits);
-	return r;
-}
-
-#ifdef CONFIG_COMPAT
-
-
-
-static int sunlance_rt_compat_read(struct lance_private *lp, struct ifreq *rq)
-{
-	struct lance_rt *rt_stuff;
-	el_netdev_udata_compat_t *udp, ud;
-	char *buf = NULL;
-	int skipped;
-	int proto;
-	int len = -1;
-	int r;
-	int timeout= -1;
-
-	if (test_and_set_bit(RT_BIT_RD, &lp->rt_bits)) {
-		return -EBUSY;
-	}
-	if (!test_bit(RT_BIT_READY, &lp->rt_bits)) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EINVAL;
-	}
-	udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
-	if (copy_from_user(&ud, udp, sizeof(ud))) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EFAULT;
-	}
-	len = ud.rx_len;
-	if (len < ETH_HLEN) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EINVAL;
-	}
-	timeout = ud.timeout;
-	buf = (char *)(long)ud.rx_buf;
-	if (timeout > 0) {
-		timeout = (timeout * HZ) / 1000;
-	}
-	rt_stuff = lp->rt_stuff;
-retry :
-	raw_spin_lock_irq(&lp->rt_stuff_lock);
-	if (!rt_stuff->recieved) {
-		// we dont have data
-		if (timeout == 0) {
-			raw_spin_unlock_irq(&lp->rt_stuff_lock);
-			clear_bit(RT_BIT_RD, &lp->rt_bits);
-			return -ETIMEDOUT;
-		}
-		current->__state = TASK_INTERRUPTIBLE;
-		rt_stuff->rx_waiter = current;
-		raw_spin_unlock_irq(&lp->rt_stuff_lock);
-		if (timeout > 0) {
-			timeout = schedule_timeout(timeout);
-		} else {
-			schedule();
-		}
-		rt_stuff->rx_waiter = NULL;
-		if (rt_stuff->recieved) {
-			goto retry;
-		}
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -ETIMEDOUT;
-	}
-	skipped = rt_stuff->recieved - 1;
-	proto = rt_stuff->proto;
-	len = (len > rt_stuff->rx_len) ? rt_stuff->rx_len : len;
-	rt_stuff->recieved = 0;
-	raw_spin_unlock_irq(&lp->rt_stuff_lock);
-	if (copy_to_user(buf, rt_stuff->rx_buf, len)) {
-		clear_bit(RT_BIT_RD, &lp->rt_bits);
-		return -EFAULT;
-	}
-	r  = put_user(len, &udp->rx_len);
-	r |= put_user(skipped, &udp->skipped);
-	r |= put_user(proto, &udp->proto);
-	clear_bit(RT_BIT_RD, &lp->rt_bits);
-	if (r) {
-		return -EFAULT;
-	}
-	return 0;
-}
-
-
-
-static int sunlance_rt_compat_write(struct net_device *dev, struct ifreq *rq)
-{
-	struct lance_private *lp = netdev_priv(dev);
-	el_netdev_udata_compat_t ud, *udp;
-	struct lance_rt *rt_stuff;
-	struct sk_buff *skb;
-	char *buf;
-	int r;
-
-	if (test_and_set_bit(RT_BIT_WR, &lp->rt_bits)) {
-		return -EBUSY;
-	}
-	if (!test_bit(RT_BIT_READY, &lp->rt_bits)) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EINVAL;
-	}
-	udp = (el_netdev_udata_compat_t *)(rq->ifr_data);
-	if (copy_from_user(&ud, udp, sizeof(ud))) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EFAULT;
-	}
-	if (ud.tx_len <= 0) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EINVAL;
-	}
-	if (ud.tx_len > ETH_DATA_LEN) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EINVAL;
-	}
-	rt_stuff = lp->rt_stuff;
-	buf = (char *)(long)ud.tx_buf;
-	skb = rt_stuff->skb_tx;
-	if (copy_from_user(skb->data + ETH_HLEN, buf, ud.tx_len)) {
-		clear_bit(RT_BIT_WR, &lp->rt_bits);
-		return -EFAULT;
-	}
-	memcpy(skb->data, ud.dst_mac, ETH_ALEN);
-	memcpy(skb->data + ETH_ALEN, ud.src_mac, ETH_ALEN);
-	*((u16 *)(skb->data + 2 * ETH_ALEN)) = cpu_to_be16((u16)(ud.proto));
-	skb->len = ud.tx_len + ETH_HLEN;
-	raw_spin_lock_irq(&lp->lock);
-	r = lance_start_xmit_generic(skb, dev, lp);
-	raw_spin_unlock_irq(&lp->lock);
-	clear_bit(RT_BIT_WR, &lp->rt_bits);
-	return r;
-}
-
-#endif //CONFIG_COMPAT
-#endif  /* CONFIG_MCST_RT */
-
 
 #if defined(CONFIG_E90) && defined(SUNLANCE_BODY_FOR_SBUS)
 
@@ -1464,42 +1053,6 @@ static int our_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 
 		res = 0;
 		break;
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
-	case SIOCDEVPRIVATE + 11 :
-		i = lp->t_max_loop;
-		lp->calculate_t_max_loop = rq->ifr_ifindex;
-		lp->t_max_loop = 0;
-		rq->ifr_ifindex = i;
-		res = 0;
-		break;
-#endif
-#ifdef CONFIG_MCST_RT
-	case SIOCDEV_RTND_OPEN :
-		res = sunlance_rt_open(dev, lp);
-		break;
-	case SIOCDEV_RTND_CLOSE :
-		sunlance_rt_close(dev, lp);
-		res = 0;
-		break;
-	case SIOCDEV_RTND_READ :
-#ifdef CONFIG_COMPAT
-		if (is_compat_task()) {
-			res = sunlance_rt_compat_read(lp, rq);
-			break;
-		}
-#endif
-		res = sunlance_rt_read(lp, rq);
-		break;
-	case SIOCDEV_RTND_WRITE :
-#ifdef CONFIG_COMPAT
-		if (is_compat_task()) {
-			res = sunlance_rt_compat_write(dev, rq);
-			break;
-		}
-#endif
-		res = sunlance_rt_write(dev, rq);
-		break;
-#endif
 	default:
 #if defined(CONFIG_E90) && defined(SUNLANCE_BODY_FOR_SBUS)
 		res =  lance_ioctl(dev, rq, cmd);
@@ -1766,16 +1319,6 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 		}
 	}
 
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
-	if (lp->calculate_t_max_loop && lp->t_start) {
-		int t = (int)(get_cycles() - lp->t_start);
-		if (t > lp->t_max_loop) {
-			lp->t_max_loop = t;
-		}
-		lp->t_start = 0;
-	}
-#endif
-
 	entry = lp->rx_new;
 	rd = &ib->brx_ring [entry];
 
@@ -1816,12 +1359,6 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 		  //      printk("lance_rx: for %s, we got an err, bits 0x%x\n", dev->name, bits);
 		} else {
 			len = (flip_16(rd->mblength) & 0xfff) - 4;
-#ifdef CONFIG_MCST_RT
-			if (unlikely(lp->rt_stuff)) {
-				sunlance_rt_rx_complete(lp, ib->rx_buf [entry], len);
-				goto complete;
-			}
-#endif
 			skb = dev_alloc_skb(len + 2);
 
 			if (unlikely(skb == NULL)) {
@@ -1852,9 +1389,6 @@ static int lance_rx_dvma(struct net_device *dev, int budget)
 						 &napi_work1->napi_list);
 			else
 				netif_receive_skb(skb);
-#ifdef CONFIG_MCST_RT
-complete :
-#endif
 			dev->stats.rx_bytes += len;
 			dev->stats.rx_packets++;
 			work_done++;
@@ -2265,11 +1799,6 @@ static irqreturn_t lance_interrupt(int irq, void *dev_id)
 		lance_writew(LE_C0_INEA | csr0_orig, lp->lregs.rdp);
 		return IRQ_HANDLED;
 	}
-#ifdef CONFIG_MCST_RT
-	if (unlikely(lp->rt_stuff))
-		lance_poll(&lp->napi, LANCE_NAPI_WEIGHT);
-	else
-#endif
 		/* we will ack (LE_C0_TINT | LE_C0_RINT | LE_C0_MERR) in
 		 * lance_poll. If we could not start (&lp->napi);
 		 * we will get interrupts again
@@ -2348,14 +1877,8 @@ static int lance_open(struct net_device *dev)
 		printk(KERN_ERR "Lance: Can't get irq %d\n", dev->irq);
 		return -EAGAIN;
 	}
-#elif defined(CONFIG_PCI2SBUS) || defined(CONFIG_PCI2SBUS_MODULE)  
-	if (sbus_request_irq(dev->irq, &lance_interrupt, NULL,
-			flags, dev->name, (void *) dev)) {
-		printk(KERN_ERR "Lance: Can't get irq %d\n", dev->irq);
-		return -EAGAIN;
-	}
 #else
-	printk("sbus_sunlance driver may be loaded only under SBUS || PCI2SBUS || PCI2SBUS_MODULE configs\n");
+	pr_err("sbus_sunlance driver may be loaded only under SBUS configs\n");
 	return -EAGAIN;
 #endif
 #else /* Seems to be SUNLANCE_BODY_FOR_PCI */
@@ -2587,13 +2110,6 @@ static  netdev_tx_t lance_start_xmit(struct sk_buff *skb, struct net_device *dev
 	netdev_tx_t r = NETDEV_TX_BUSY;
 
 	raw_spin_lock_irq(&lp->lock);
-#ifdef CONFIG_MCST_RT
-	if (lp->rt_stuff) {
-		/* card works in special rt mode */
-		raw_spin_unlock_irq(&lp->lock);
-		return NETDEV_TX_BUSY;
-	}
-#endif
 	r = lance_start_xmit_generic(skb, dev, lp);
 	raw_spin_unlock_irq(&lp->lock);
 	dev_kfree_skb(skb);
@@ -2652,11 +2168,6 @@ netdev_tx_t lance_start_xmit_generic(struct sk_buff *skb, struct net_device *dev
 
 	if (TX_BUFFS_AVAIL <= 0)
 		netif_stop_queue(dev);
-#if defined(CONFIG_MCST_RT) && defined(CONFIG_E90)
-	if (lp->calculate_t_max_loop) {
-		lp->t_start = get_cycles();
-	}
-#endif
 
 	/* Kick the lance: transmit now */
 	lance_kick_xmit(lp);
@@ -2726,47 +2237,6 @@ static void lance_load_multicast(struct net_device *dev)
 		}
 	}
 }
-
-
-#ifdef CONFIG_MCST_RT
-static int lance_set_promuscuous(struct net_device *dev, int on)
-{
-	struct lance_private *lp = netdev_priv(dev);
-	struct lance_init_block *ib_mem = lp->init_block_mem;
-	struct lance_init_block __iomem *ib_iomem = lp->init_block_iomem;
-	u16 mode;
-
-	netif_trans_update(dev);
-	netif_stop_queue(dev);
-
-	raw_spin_lock_irq(&lp->init_lock);
-	STOP_LANCE(lp);
-	lp->init_ring(dev);
-
-	if (lp->pio_buffer)
-		mode = lance_readw(&ib_iomem->mode);
-	else
-		mode = flip_16(ib_mem->mode);
-	if (on) {
-		mode |= LE_MO_PROM;
-		if (lp->pio_buffer)
-			lance_writew(mode, &ib_iomem->mode);
-		else
-			ib_mem->mode = flip_16(mode);
-	} else {
-		mode &= ~LE_MO_PROM;
-		if (lp->pio_buffer)
-			lance_writew(mode, &ib_iomem->mode);
-		else
-			ib_mem->mode = flip_16(mode);
-	}
-	init_restart_lance(lp);
-	raw_spin_unlock_irq(&lp->init_lock);
-	netif_wake_queue(dev);
-	return 0;
-}
-#endif
-
 
 static void lance_set_multicast(struct net_device *dev)
 {
@@ -2851,9 +2321,6 @@ static const struct net_device_ops lance_ops = {
 	.ndo_validate_addr      = eth_validate_addr,
 	.ndo_get_stats          = lance_get_stats,
 	.ndo_do_ioctl           = our_ioctl,
-#ifdef CONFIG_MCST_RT
-	.ndo_unlocked_ioctl	= 1,
-#endif
 };
 
 static int lance_common_init(struct net_device *dev, struct lance_private *lp)

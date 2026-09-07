@@ -6,8 +6,6 @@
 #ifndef _ASM_E2K_ALTERNATIVE_H
 #define _ASM_E2K_ALTERNATIVE_H
 
-#ifndef __ASSEMBLY__
-
 #include <linux/types.h>
 
 #include <asm/e2k_api.h>
@@ -84,7 +82,7 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
 
 #define OLDINSTR_PADDING(oldinstr, num)					\
 	".if " oldinstr_pad_len(num) " >= 576\n"			\
-		"\t.error Expand with NOPs manually; use of ibranch here is not recommended (see bug 142105)\n" \
+		"\t.error Expand with NOPs manually; use of ibranch here is not recommended (see CPU_HWBUG_CODE_PLACEMENT)\n" \
 	".else\n"							\
 		OLDINSTR_PAD_64_BYTES(num, 512)				\
 		OLDINSTR_PAD_64_BYTES(num, 448)				\
@@ -287,7 +285,5 @@ void apply_alternatives(struct alt_instr *start, struct alt_instr *end);
 	ALTINSTR_ENTRY(facility1, 1) \
 	ALTINSTR_ENTRY(facility2, 2) \
 	".popsection\n"
-
-#endif /* __ASSEMBLY__ */
 
 #endif /* _ASM_E2K_ALTERNATIVE_H */

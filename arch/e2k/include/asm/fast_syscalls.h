@@ -13,6 +13,7 @@
 #include <linux/timex.h>	/* for clocksource_esclk */
 #endif
 
+#include <asm/cpu_regs.h>
 #include <asm/sections.h>
 #include <asm/signal.h>
 #include <asm/sclkr.h>
@@ -20,7 +21,6 @@
 #include <asm/gregs.h>
 #include <asm/hw_stacks.h>
 #include <asm/ucontext.h>
-#include <asm/cpu_regs_access.h>
 
 #include <asm/sclkr.h>
 struct fast_syscalls_data {
@@ -96,7 +96,9 @@ int native_fast_sys_siggetmask(u64 __user *oset, size_t sigsetsize);
 /* it is native host kernel withounr virtualization */
 /* or host kernel with virtualization support */
 
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+
+#ifdef CONFIG_KVM_HOST_KERNEL
 extern long ret_from_fast_sys_call(void);
 
 static __always_inline long kvm_return_from_fast_syscall(thread_info_t *ti, long arg1)
@@ -123,7 +125,6 @@ static __always_inline long kvm_return_from_fast_syscall(thread_info_t *ti, long
 	return arg1;
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static __always_inline long kvm_set_return_user_ip(thread_info_t *gti, u64 ip, int flags)
 {
 	e2k_pcsp_t pcsp;
@@ -142,7 +143,7 @@ static __always_inline long kvm_set_return_user_ip(thread_info_t *gti, u64 ip, i
 	pcsp = read_PCSP_reg();	/* We don't use %pcsp_hi.size */
 
 	base = (e2k_mem_crs_t __force *) GET_PCS_BASE(&gti->u_hw_stack);
-	frame = (e2k_mem_crs_t *)PCSP_PTR(pcsp);
+	frame = (e2k_mem_crs_t *)U_PCSP_PTR(pcsp);
 
 	do {
 		--frame;
@@ -160,8 +161,9 @@ static __always_inline long kvm_set_return_user_ip(thread_info_t *gti, u64 ip, i
 	frame->cr0 = cr0;
 	return 0;
 }
+#endif /* CONFIG_KVM_HOST_KERNEL */
+
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
-#endif /* CONFIG_KVM_HOST_MODE */
 
 /* trap table entry started by direct branch (it is closer to fast system */
 /* call wirthout switch and use user local data stack */
@@ -431,7 +433,7 @@ static __always_inline int native_fast_sys_set_return(u64 ip, int flags)
 	pcsp = read_PCSP_reg();	/* We don't use %pcsp_hi.size */
 
 	base = GET_PCS_BASE(&ti->u_hw_stack);
-	frame = (e2k_mem_crs_t __priv *)PCSP_PTR(pcsp);
+	frame = U_PCSP_PTR(pcsp);
 
 	do {
 		--frame;

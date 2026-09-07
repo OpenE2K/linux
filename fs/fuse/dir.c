@@ -480,6 +480,9 @@ static int get_security_context(struct dentry *entry, umode_t mode,
 	const char *name;
 	size_t namelen;
 
+#ifdef CONFIG_MCST
+	namelen = 0;
+#endif
 	err = security_dentry_init_security(entry, mode, &entry->d_name,
 					    &name, &ctx, &ctxlen);
 	if (err) {

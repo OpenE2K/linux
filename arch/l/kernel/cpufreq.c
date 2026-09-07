@@ -10,6 +10,8 @@
 
 #include <asm/timex.h>
 #include <asm-l/l_timer.h>
+#include <asm/setup.h>
+
 
 #ifdef CONFIG_E2K
 # ifdef CONFIG_CPU_IDLE
@@ -77,6 +79,7 @@ unsigned long measure_cpu_freq(int cpu)
 	if ((freq = per_cpu(cpu_freq, cpu)))
 		return freq;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/*
 	 * Workaround for paravirtualization: do not call smp_call_function from
 	 * e2k_start_secondary: it leads to a WARN_ON(cpu_online && irqs_disabled)
@@ -84,9 +87,12 @@ unsigned long measure_cpu_freq(int cpu)
 	if (cpu == smp_processor_id()) {
 		measure_cpu_freq_ipi(&freq);
 	} else {
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		/* If cpufreq failed, then calibrate using lt timer from iohub */
 		smp_call_function_single(cpu, measure_cpu_freq_ipi, &freq, true);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	per_cpu(cpu_freq, cpu) = freq;
 

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #endif
 
-#include "printk.h"
+#include "console/printk.h"
 
 int int16_handler(void)
 {

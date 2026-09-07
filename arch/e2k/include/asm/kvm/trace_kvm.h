@@ -1208,6 +1208,7 @@ TRACE_EVENT(
 		__entry->handler)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	kvm_unmap_rmap,
 
@@ -1284,6 +1285,7 @@ TRACE_EVENT(
 		__entry->pte, __entry->sptep, __entry->old_spte, __entry->spte,
 		(__entry->dropped) ? "is dropped" : "is updated to new pfn")
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	rmap_add_sp_entry,
@@ -1802,6 +1804,7 @@ TRACE_EVENT(
 		__entry->rmap_head, __entry->sptep, __entry->spte, __entry->val)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define kvm_switch_to_host_type						\
 	{ undefined_sw_to_host, "Undefined" },				\
 	{ syscall_sw_to_host, "Syscall from guest" },			\
@@ -1846,6 +1849,7 @@ TRACE_EVENT(
 		  __entry->gmm_id, __entry->gmm_pid
 	)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(kvm_e2k_msi,
 	    TP_PROTO(__u64 address, __u64 data),

@@ -28,13 +28,9 @@ static struct device_node *l_get_pci_bus_np_and_pin(struct pci_dev *dev,
 	return l_get_pci_bus_np_and_pin(b->self, pin);
 }
 
-int pcibios_alloc_irq(struct pci_dev *dev)
+static int l_of_pci_configure_irq(struct pci_dev *dev, struct device_node *np)
 {
-	u8 pin;
-	u8 line;
-	struct of_phandle_args oirq;
-	int ret = 0, irq = 0, i;
-	struct device_node *np = pci_device_to_OF_node(dev);
+	int ret = 0, i;
 	int nr = of_irq_count(np);
 	/* map all the device irqs from device tree */
 	for (i = 0; i < nr && ret >= 0; i++)
@@ -43,8 +39,18 @@ int pcibios_alloc_irq(struct pci_dev *dev)
 		return ret;
 	if (nr)
 		dev->irq = of_irq_get(np, 0);
+	return 0;
+}
+
+int pcibios_alloc_irq(struct pci_dev *dev)
+{
+	u8 pin, line;
+	int ret = 0, irq = 0;
+	struct of_phandle_args oirq;
+	struct device_node *np = pci_device_to_OF_node(dev);
+
 	if (np)
-		return 0;
+		return l_of_pci_configure_irq(dev, np);
 
 	pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &pin);
 	pci_read_config_byte(dev, PCI_INTERRUPT_LINE, &line);
@@ -75,6 +81,7 @@ int pcibios_alloc_irq(struct pci_dev *dev)
 
 	pci_dbg(dev, "line:%d, pin:%d; pic pin: got %d (%d) node: %pOF\n",
 		line, pin, dev->irq, oirq.args[0], oirq.np);
+
 	if (line == 0) /* bootloader asigned nothing */
 		line = oirq.args[0];
 
@@ -86,24 +93,9 @@ int pcibios_alloc_irq(struct pci_dev *dev)
 		return -ENXIO;
 	return 0;
 }
-EXPORT_SYMBOL(pcibios_alloc_irq); /*for e8v7 galcore */
 
 void pcibios_free_irq(struct pci_dev *dev)
 {
 }
 
-void pcibios_add_bus(struct pci_bus *bus)
-{
-	/* lock consoles to prevent output to pci consoles while scanning */
-	console_lock();
-}
-/*
- *  Called after each bus is probed, but before its children
- *  are examined.
- */
-
-void pcibios_fixup_bus(struct pci_bus *b)
-{
-	console_unlock();
-}
 

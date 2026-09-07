@@ -220,14 +220,14 @@
 #define    MISC_RTRY	(1<<26)
 
 typedef struct init_block {
-	u16	mode;
+	__le16	mode;
 	u8	paddr[6];
-	u64	laddrf;
-	u32	rdra; /* 31:4 = addr of recieving desc ring (16 bytes align) + 
+	__le64	laddrf;
+	__le32	rdra; /* 31:4 = addr of recieving desc ring (16 bytes align) + 
 		       * 3:0  = number of descriptors (the power of two) 
 		       * 0x09 is max value (desc number = 512 if [3:0] >= 0x09)
 		       */
-	u32	tdra; /* 31:4 = addr of transm desc ring (16 bytes align) + 
+	__le32	tdra; /* 31:4 = addr of transm desc ring (16 bytes align) + 
 		       * 3:0  = number of descriptors (the power of two) 
 		       * 0x09 is max value (desc number = 512 if [3:0] >= 0x09)
 		       */
@@ -238,11 +238,6 @@ typedef struct init_block {
 #define	L_E1000_NOMSI	0
 #define	L_E1000_MSI	1
 #define	L_E1000_MSIX	2
-
-extern int e1000_rt_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
-		int shared, struct pci_dev *pdev, struct resource *res,
-		int bar, struct msix_entry *msix_entries, int msi_status);
-extern void e1000_rt_remove(struct pci_dev *pdev);
 
 #define CAN_DISABLE_TXINT(ep)                   \
 	(!(ep->pci_dev->vendor == PCI_VENDOR_ID_INTEL && ep->revision < 2))

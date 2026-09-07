@@ -94,7 +94,7 @@ char const *protected_error_list_C[] = {
 /* EPM#37 */ [PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD] =
 	"Structure 0x%lx: not descriptor (tag=0x%x) at field #%d: 0x%lx : 0x%lx\n",
 /* EPM#38 */ [PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD] =
-	"FATAL ERROR in %s(0x%llx): failed to read field %d !!!\n", /* f, ... */
+	"FATAL ERROR in %s(0x%llx): failed to read field %d\n", /* f, ... */
 /* EPM#39 */ [PMSCERRMSG_INSUFFICIENT_STRUCT_SIZE] =
 	"System call %s: size of structure '%s' is too little: %u < %zu\n",
 
@@ -148,19 +148,19 @@ char const *protected_error_list_C[] = {
 	"System call #%u/%s: For security reason signals never return descriptor in the protected mode.\n\tField 'sigev_value.sival_ptr' of structure 'sigevent' stored address 0x%lx.\n",
 
 /* EPM#60 */ [PMSCERRMSG_SC_NOT_AVAILABLE_IN_PM] =
-	"!!! System call #%d (%s) is not available in the protected execution mode !!!\n",
+	"System call #%d (%s) is not available in the protected execution mode\n",
 /* EPM#61 */ [PMSCERRMSG_FUNC_NOT_AVAILABLE_IN_PM] =
-	"!!! System call #%d (%s): function %s() is not available in the protected execution mode !!!\n",
+	"System call #%d (%s): function %s() is not available in the protected execution mode\n",
 /* EPM#62 */ [PMSCERRMSG_FATAL_READ_FROM] =
-	"FATAL ERROR in %s(0x%lx): failed to read from 0x%lx !!!\n", /* f, ... */
+	"FATAL ERROR in %s(0x%lx): failed to read from 0x%lx\n", /* f, ... */
 /* EPM#63 */ [PMSCERRMSG_FATAL_READ_ERR_FROM] =
-	"FATAL ERROR in %s(): failed to read from 0x%lx !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): failed to read from 0x%lx\n", /* f, ... */
 /* EPM#64 */ [PMSCERRMSG_FATAL_WRITE_AT] =
-	"FATAL ERROR in %s(): failed to write at 0x%lx !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): failed to write at 0x%lx\n", /* f, ... */
 /* EPM#65 */ [PMSCERRMSG_FATAL_WRITE_AT_FIELD] =
-	"FATAL ERROR in %s(): failed to write at 0x%lx (field %d) !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): failed to write at 0x%lx (field %d)\n", /* f, ... */
 /* EPM#66 */ [PMSCERRMSG_FATAL_DESCR_IN_STACK] =
-	"FATAL ERROR in %s(): descriptor 0x%lx in stack (SAP, not AP); argument '%s' !!!\n", /* f, ... */
+	"FATAL ERROR in %s(): descriptor 0x%lx in stack (SAP, not AP); argument '%s'\n", /* f, ... */
 
 /* EPM#67 */ [PMSCERRMSG_EXECUTION_TERMINATED] =
 	"[pid #%d] Execution of %s terminated. Error code: %d\n",
@@ -197,23 +197,33 @@ char const *protected_error_list_C[] = {
 	/* iset-specific messages: */
 	/* __iset__ >= 6 */
 /* EPM#80 */ [PMSCWARN_MMAP_SHARED_FLAG] =
-	"System call #%u/%s: memory 0x%lx allocated with flag MAP_SHARED won't contain tagged data\n",
+	"System call #%u/%s: saving tagged data in memory 0x%lx allocated with flag MAP_SHARED is not allowed\n",
 
 	/* MISC: */
 /* EPM#81 */ [PMSCWARN_UNALIGNED_PL_IN_ARG] =
 	"System call %s: unaligned procedure pointer 0x%lx in arg #%d\n",
 /* EPM#82 */ [PMSCERRMSG_SC_NOT_ENABLED] =
-	"!!! System call #%d (%s) is not enabled in the current kernel configuration !!!\n",
+	"System call #%d (%s) is not enabled in the current kernel configuration\n",
 /* EPM#83 */ [PMSCWARN_UNALIGNED_DSCR_IN_ARG] =
-	"System call %s: unaligned  pointer 0x%lx in arg #%d\n",
+	"System call %s: unaligned pointer 0x%lx in arg #%d\n",
 /* EPM#84 */ [PMSCERRMSG_SC_ALLOWED_IN_SOFT_MODE] =
-	"!!! System call #%d (%s) allowed in the SOFT protected execution mode only !!!\n",
+	"System call #%d (%s) allowed in the SOFT protected execution mode only\n",
+/* ERM#85 */ [PMSCERRMSG_SC_CLEAN_DESCR_IN_UNSAFE] =
+	"Invalidation of freed descriptor not recommended in unsafe protected mode\n",
+/* EPM#86 */ [PMSCERRMSG_SC_WRONG_ARG_VALUE_LX_vs_LX] =
+	"Системный вызов %s: неверное значение аргумента '%s' 0x%lx %s 0x%lx\n",
 
 	/* NB> New messages to add above this line */
 /* Unclassified */ [PMSCERRMSG_FILLING_FREED_MEM_BLOCKED] =
 	"Protected execution mode: Erasing of freed memory is blocked in this run.\n",
-/* Unclassified */ [PMSCERRMSG_FILLING_FREED_MEM_IN_NON_HM] =
-	"!!! Turning off erasing of freed memory allowed in hybrid execution mode only !!!\n",
+/* Unclassified */ [PMSCERRMSG_FILLING_FREED_MEM_IN_UNSAFE_PM] =
+	"Turning off erasing of freed memory recommended in unsafe secure execution mode only\n",
+/* Unclassified */ [PMSCERRMSG_THIS_IS_UNSAFE_BINARY] =
+	"[pid #%d] Bynary '%s' works in unsafe secure execution mode\n",
+/* Unclassified */ [PMSCERRMSG_UNSAFE_SAP] =
+	"[pid #%d] Binary '%s' utilizes restored descriptor to stack area 0x%lx\n",
+/* Unclassified */ [PMSCERRMSG_USE_TECH48] =
+	"ADVICE: try on building your application in unsafe PM mode with technology-48 option\n",
 
 	/*	Intro diagnostic messages: */
 	"protected mode runtime error",
@@ -303,7 +313,7 @@ char const *protected_error_list_RU[] = {
 /* EPM#37 */ [PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD] =
 	"Структура 0x%lx: не дескриптор (tag=0x%x) в поле #%d: 0x%lx : 0x%lx\n",
 /* EPM#38 */ [PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD] =
-	"Критическая ошибка в %s(0x%llx): ошибка чтения из поля #%d !!!\n", /* f, ... */
+	"Критическая ошибка в %s(0x%llx): ошибка чтения из поля #%d\n", /* f, ... */
 /* EPM#39 */ [PMSCERRMSG_INSUFFICIENT_STRUCT_SIZE] =
 	"Системный вызов %s: недостаточный размер структуры '%s': %u < %zu\n",
 
@@ -354,12 +364,12 @@ char const *protected_error_list_RU[] = {
 /* EPM#58 */ [PMSCWARN_NEGATIVE_DSCR_SIZE] =
 	"Системный вызов #%u/%s: отрицательный размер дескриптора (%ld) в аргументе #%d\n",
 /* EPM#59 */ [PMSCWARN_ADDR_IN_SIGINFO] =
-	"Системный вызов #%u/%s: В РБВ по соображениям безопасности сигналы не могут возвращать декскриптор.\n\tВ поле 'sigev_value.sival_ptr' структуры 'sigevent' (0x%lx) записан адрес 0x%lx.\n",
+	"Системный вызов #%u/%s: В РБВ по соображениям безопасности сигналы не могут возвращать дескриптор.\n\tВ поле 'sigev_value.sival_ptr' структуры 'sigevent' (0x%lx) записан адрес 0x%lx.\n",
 
 /* EPM#60 */ [PMSCERRMSG_SC_NOT_AVAILABLE_IN_PM] =
-	"!!! Системный вызов #%d (%s) невозможен в режиме безопасных вычислений !!!\n",
+	"Системный вызов #%d (%s) невозможен в режиме безопасных вычислений\n",
 /* EPM#61 */ [PMSCERRMSG_FUNC_NOT_AVAILABLE_IN_PM] =
-	"!!! Системный вызов #%d (%s): функция %s() не работает в режиме безопасных вычислений !!!\n",
+	"Системный вызов #%d (%s): функция %s() не работает в режиме безопасных вычислений !!!\n",
 /* EPM#62 */ [PMSCERRMSG_FATAL_READ_FROM] =
 	"Критическая ошибка в %s: ошибка чтения из 0x%lx !!!\n", /* f, ... */
 /* EPM#63 */ [PMSCERRMSG_FATAL_READ_ERR_FROM] =
@@ -406,23 +416,33 @@ char const *protected_error_list_RU[] = {
 	/* iset-specific messages: */
 	/* __iset__ >= 6 */
 /* EPM#80 */ [PMSCWARN_MMAP_SHARED_FLAG] =
-	"Системный вызов #%u/%s: память 0x%lx выделена с флагом MAP_SHARED, не может содержать теговые данные\n",
+	"Системный вызов #%u/%s: сохранение тегированных данных в памяти 0x%lx с флагом MAP_SHARED запрещено\n",
 
 	/* MISC: */
 /* EPM#81 */ [PMSCWARN_UNALIGNED_PL_IN_ARG] =
 	"Системный вызов %s: невыровненный указатель процедуры 0x%lx в аргументе #%d\n",
 /* EPM#82 */ [PMSCERRMSG_SC_NOT_ENABLED] =
-	"!!! Системный вызов #%d (%s) не разрешен в текущей конфигурации ядра !!!\n",
+	"Системный вызов #%d (%s) не разрешен в текущей конфигурации ядра !!!\n",
 /* EPM#83 */ [PMSCWARN_UNALIGNED_DSCR_IN_ARG] =
 	"Системный вызов %s: невыровненный указатель 0x%lx в аргументе #%d\n",
 /* EPM#84 */ [PMSCERRMSG_SC_ALLOWED_IN_SOFT_MODE] =
-	"!!! Системный вызов #%d (%s) разрешен только в мягком (SOFT) режиме работы РБВ !!!\n",
+	"Системный вызов #%d (%s) разрешен только в мягком (SOFT) режиме работы РБВ !!!\n",
+/* ERM#85 */ [PMSCERRMSG_SC_CLEAN_DESCR_IN_UNSAFE] =
+	"Инвалидация освобождаемых дескрипторов не рекомендована в unsafe-РБВ\n",
+/* EPM#86 */ [PMSCERRMSG_SC_WRONG_ARG_VALUE_LX_vs_LX] =
+	"Системный вызов %s: неверное значение аргумента '%s' 0x%lx %s 0x%lx\n",
 
 	/* NB> New messages to add above this line only */
 /* Unclassified */ [PMSCERRMSG_FILLING_FREED_MEM_BLOCKED] =
 	"РБВ: Чистка освобождаемой памяти выключена в этом запуске.\n",
-/* Unclassified */ [PMSCERRMSG_FILLING_FREED_MEM_IN_NON_HM] =
-	"!!! Отключение очистки освобождаемой памяти возможно только в гибридном режиме !!!\n",
+/* Unclassified */ [PMSCERRMSG_FILLING_FREED_MEM_IN_UNSAFE_PM] =
+	"Отключение очистки освобождаемой памяти рекомендуется делать только в unsafe-РБВ !!!\n",
+/* Unclassified */ [PMSCERRMSG_THIS_IS_UNSAFE_BINARY] =
+	"[процесс #%d] Приложение '%s' исполняется в режиме unsafe-РБВ\n",
+/* Unclassified */ [PMSCERRMSG_UNSAFE_SAP] =
+	"[процесс #%d] Приложение '%s' использует восстановленный дескриптор в стек 0x%lx\n",
+/* Unclassified */ [PMSCERRMSG_USE_TECH48] =
+	"СОВЕТ: попробуйте собрать Ваше приложение в режиме unsafe-РБВ с опцией 'технология-48'\n",
 
 	/*	Intro diagnostic messages: */
 	"ошибка режима безопасных вычислений",

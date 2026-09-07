@@ -89,12 +89,8 @@ extern long protected_sys_mq_notify(mqd_t mqdes,
 				long,
 				const struct pt_regs	*regs);
 extern long protected_sys_timer_create(clockid_t which_clock,
-		struct prot_sigevent __user *user_sev, timer_t *timerid,
+		struct prot_sigevent __user *user_sev, timer_t __user *timerid,
 		u64 unused4, u64 unused5, u64 unused6, const struct pt_regs *regs);
-extern long protected_sys_rt_sigtimedwait(const sigset_t __user *set,
-		siginfo_t __user *info,
-		const struct __kernel_timespec __user *timeout,
-		size_t sigsetsize);
 extern long protected_sys_sysctl(const unsigned long a1);
 extern long protected_sys_clone(const unsigned long	a1,	/* flags */
 			 const unsigned long	a2,	/* new_stackptr */
@@ -304,23 +300,23 @@ extern long protected_sys_recvfrom(const int sockfd,
 				   void __user *buff, size_t size, const unsigned flags,
 				   struct sockaddr __user *src_addr, int __user *strlen,
 				const struct pt_regs	*regs);
-extern long protected_sys_sendmsg(const unsigned long	sockfd,
+extern long protected_sys_sendmsg(const unsigned int	sockfd,
 			      const void __user		*msg,
-			      const unsigned long	flags,
+			      const unsigned int	flags,
 			      const unsigned long unused4,
 			      const unsigned long unused5,
 			      const unsigned long unused6,
 			      const struct pt_regs	*regs);
-extern long protected_sys_sendmmsg(const unsigned long	sockfd,
+extern long protected_sys_sendmmsg(const unsigned int	sockfd,
 				   struct protected_mmsghdr __user *msgvec,
 				   const unsigned int	vlen,
-				   const unsigned long	flags,
+				   const unsigned int	flags,
 				   const unsigned long unused5,
 				   const unsigned long unused6,
 				   const struct pt_regs		*regs);
-extern long protected_sys_recvmsg(const unsigned long	socket,
+extern long protected_sys_recvmsg(const unsigned int	socket,
 			      const void __user		*message,
-			      const unsigned long	flags,
+			      const unsigned int	flags,
 			      const unsigned long unused4,
 			      const unsigned long unused5,
 			      const unsigned long unused6,
@@ -516,6 +512,12 @@ extern long protected_sys_io_uring_register(unsigned int fd,
 				     const unsigned long unused5,
 				     const unsigned long unused6,
 				     const struct pt_regs *regs);
+extern long protected_sys_io_uring_enter(unsigned int fd, u32 to_submit,
+				  u32 min_complete, u32 flags,
+				  const void __user *argp,      /* a5 */
+				  size_t argsz,                 /* a6 */
+				  const struct pt_regs *regs);
+
 extern long protected_sys_kexec_load(unsigned long entry, unsigned long nr_segments,
 		unsigned long segments, unsigned long flags, unsigned long unused5,
 		unsigned long unused6, const struct pt_regs *regs);
@@ -556,7 +558,7 @@ extern long protected_sys_sched_getattr(pid_t pid,
 				 const struct pt_regs *regs);
 extern long sys_unsafe_uint64_to_ptr(unsigned long		addr,
 				     unsigned long		options,
-				const unsigned long unused3,
+				     void __user		*ret_addr,
 				const unsigned long unused4,
 				const unsigned long unused5,
 				const unsigned long unused6,

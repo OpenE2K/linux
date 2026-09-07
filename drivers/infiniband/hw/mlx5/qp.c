@@ -3840,6 +3840,9 @@ static int modify_raw_packet_qp(struct mlx5_ib_dev *dev, struct mlx5_ib_qp *qp,
 			return -EINVAL;
 
 		modify_rq = 0;
+#ifdef CONFIG_MCST
+		rq_state = MLX5_RQC_STATE_ERR;
+#endif
 		sq_state = MLX5_SQC_STATE_RDY;
 		break;
 	case MLX5_CMD_OP_INIT2INIT_QP:

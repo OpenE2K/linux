@@ -8,25 +8,19 @@
 
 #include <asm/page_size.h>
 
-#ifdef __KERNEL__
-
 #include <linux/init.h>
 #include <linux/threads.h>
 
 #include <asm/types.h>
 #include <asm/errors_hndl.h>
-#ifndef __ASSEMBLY__
 #include <asm/atomic.h>
 #include <asm/e2k_api.h>
 #include <asm/bootinfo.h>
 #include <asm/string.h>
 #include <asm/pv_info.h>
-#endif /* !(__ASSEMBLY__) */
 
 
 #define	ALIGN_TO_SIZE(addr, size)	(((size) == 0) ? (addr) : __ALIGN_MASK(addr, ((size)-1)))
-
-#ifndef __ASSEMBLY__
 
 #define CLEAR_MEMORY_TAG ETAGNUM /* memory filling mode: zeroing */
 /* #define CLEAR_MEMORY_TAG ETAGEWD / * memory filling mode: emptying */
@@ -40,28 +34,23 @@
  */
 
 #define clear_memory_8(addr, size, tag) \
-		fast_tagged_memory_set(addr, 0, tag, size, \
-		LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT | \
-		MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT)
+	fast_tagged_memory_set(addr, 0, tag, size, ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1))
 
 #define clear_page(addr) clear_memory_8((addr), PAGE_SIZE, CLEAR_MEMORY_TAG)
 
 #define clear_user_page(addr, vaddr, page) \
 do { \
-	u64 strd_opcode; \
+	ldst_rec_op_t strd_opcode; \
 	/* Use WC stores to clear huge pages. \
 	 * e4c does not have shared L3 so cacheable stores are not _that_ \
 	 * bad and it also has hardware bug which forces to issue memory \
 	 * barrier after WC stores, so we avoid WC there. */ \
 	if (!IS_MACHINE_E2S && PageCompound(page)) { \
-		strd_opcode = LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT | \
-			MAS_BYPASS_ALL_CACHES << LDST_REC_OPC_MAS_SHIFT; \
+		strd_opcode = ldst_rec_tagged_store_bypass(CACHE_BYPASS_ALL); \
 	} else { \
-		strd_opcode = LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT | \
-			MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT; \
+		strd_opcode = ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1); \
 	} \
-	fast_tagged_memory_set((addr), 0, CLEAR_MEMORY_TAG, \
-				PAGE_SIZE, strd_opcode); \
+	fast_tagged_memory_set((addr), 0, CLEAR_MEMORY_TAG, PAGE_SIZE, strd_opcode); \
 } while (0)
 
 #define clear_user_highpage(page, vaddr) \
@@ -75,17 +64,32 @@ do { \
 #define copy_highpage(to, from) \
 		copy_page(page_address(to), page_address(from))
 
-#define copy_tagged_page(to, from)	__tagged_memcpy_8(to, from, PAGE_SIZE)
-
-#define copy_page(to, from)					\
-do {								\
-	if (cpu_has(CPU_FEAT_ISET_V7))				\
-		colored_page_copy((to), (from));		\
-	else							\
-		copy_tagged_page((to), (from));	\
+extern void colored_page_copy(volatile void *dst, const volatile void *src);
+#define copy_page(to, from) \
+do { \
+	if (cpu_has(CPU_FEAT_MADM)) \
+		colored_page_copy((to), (from)); \
+	else \
+		fast_tagged_memory_copy((to), (from), PAGE_SIZE, true); \
 } while (0)
 
 #define copy_user_page(to, from, vaddr, page)	copy_page(to, from)
+
+/*
+ * Copy page by physical address, without tags
+ */
+static inline void copy_page_pa(phys_addr_t to, phys_addr_t from)
+{
+	ldst_rec_op_t strd_opcode = ldst_rec_disabled_translation(CACHE_BYPASS_NONE);
+	ldst_rec_op_t ldrd_opcode = ldst_rec_disabled_translation(CACHE_BYPASS_L1);
+	if (cpu_has(CPU_FEAT_ISET_V5)) {
+		__recovery_memcpy_16((void *) to, (void *) from, PAGE_SIZE,
+				strd_opcode, ldrd_opcode, 0);
+	} else {
+		__recovery_memcpy_8((void *) to, (void *) from, PAGE_SIZE,
+				strd_opcode, ldrd_opcode, 0);
+	}
+}
 
 typedef struct page *pgtable_t;
 
@@ -235,7 +239,10 @@ typedef struct e2k_busy_mem {
 	busy_mem_type_t	type;		/* memory type */
 } e2k_busy_mem_t;
 
-#define BOOT_RESERVED_AREAS_SIZE	(2 * PAGE_SIZE)
+#define BOOT_RESERVED_AREAS_SIZE \
+	(PAGE_ALIGN(\
+		sizeof(e2k_busy_mem_t[E2K_MAX_PRERESERVED_AREAS])))
+
 
 /* max number of prereserved areas at boot-time */
 #define	BOOT_MAX_PRERESERVED_AREAS	\
@@ -325,10 +332,6 @@ extern e2k_addr_t kernel_address_to_pva(e2k_addr_t address);
 # define HAVE_ARCH_FREE_PAGE
 extern void arch_free_page(struct page *page, int order);
 #endif
-
-#endif /* !(__ASSEMBLY__) */
-
-#endif /* !(__KERNEL__) */
 
 #include <asm-generic/memory_model.h>
 

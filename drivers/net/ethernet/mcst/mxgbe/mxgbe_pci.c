@@ -14,10 +14,6 @@
 #include "kcompat.h"
 
 
-/* extern */
-int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
-		     phys_addr_t bar_addr_bus[]);
-void mxgbe_release_board(struct pci_dev *pdev);
 
 /* eldwcxpcs.ko */
 int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);

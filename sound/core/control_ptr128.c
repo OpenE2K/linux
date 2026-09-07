@@ -35,7 +35,7 @@ static int snd_ctl_elem_list_ptr128(struct snd_card *card,
 	/* pids */
 	if (get_user_tagged_16(ap.qword, tag, &data128->pids) || !IS_AP(ap, tag))
 		return -EFAULT;
-	data.pids = (struct snd_ctl_elem_id __user *)AP_PTR(ap);
+	data.pids = U_AP_PTR(ap);
 	saved_u_border = get_u_border();
 	set_ap_u_border(ap);
 	err = snd_ctl_elem_list(card, &data);

@@ -73,6 +73,9 @@ struct mlx5_devcom *mlx5_devcom_register_device(struct mlx5_core_dev *dev)
 	u64 sguid0, sguid1;
 	int idx, i;
 
+#ifdef CONFIG_MCST
+	idx = -1;
+#endif
 	if (!mlx5_core_is_pf(dev))
 		return NULL;
 	if (MLX5_CAP_GEN(dev, num_lag_ports) != MLX5_DEVCOM_PORTS_SUPPORTED)

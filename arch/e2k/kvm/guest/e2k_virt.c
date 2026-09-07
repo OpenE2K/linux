@@ -26,7 +26,7 @@
 #include <asm/smp.h>
 #include <asm/ptrace.h>
 #include <asm/console.h>
-#include <asm/host_printk.h>
+#include <asm/kvm/paravirt_sw/host_printk.h>
 
 #include <asm/sections.h>
 #include <linux/uaccess.h>
@@ -179,7 +179,7 @@ void kvm_clock_off(void)
 
 	/* Make sure we do not race with `callin_go` write */
 	raw_all_irq_save(flags);
-	if (!cpumask_test_cpu(raw_smp_processor_id(), &callin_go))
+	if (!physid_isset(raw_smp_processor_id(), callin_go))
 		e2k_virt_restart_machine("Restarting from kvm_clock_off()");
 	raw_all_irq_restore(flags);
 }

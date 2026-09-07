@@ -32,7 +32,7 @@
 #endif /* CONFIG_PROTECTED_MODE */
 #include <asm/traps.h>
 #include <asm/e2k_debug.h>
-#include <asm/kvm/ctx_signal_stacks.h>
+#include <asm/kvm/paravirt_sw/ctx_signal_stacks.h>
 
 #undef	DEBUG_SIG_MODE
 #undef	DebugSig
@@ -50,9 +50,6 @@
 
 static void copy_jmp_regs(pt_regs_t *to, const pt_regs_t *from)
 {
-	CHECK_PT_REGS_CHAIN((pt_regs_t *)from, USD_PTR(native_read_USD_reg()),
-			    (u64) current->stack + KERNEL_C_STACK_SIZE);
-
 	to->stacks.top = from->stacks.top;
 	to->wd = from->wd;
 	to->stacks.usd = from->stacks.usd;
@@ -98,8 +95,8 @@ static int sig_save_local_gregs(struct extra_ucontext __user *extra,
 			load_qvalue_and_tagq(&l_gregs->g[i], &data, &tag, 16);
 			g[i] = data.lo;
 			g[i + 1] = data.hi;
-			gext[i] = (u64) (u16) l_gregs->g[i].ext;
-			gext[i + 1] = (u64) (u16) l_gregs->g[i + 1].ext;
+			gext[i] = l_gregs->g[i].v3_ext;
+			gext[i + 1] = l_gregs->g[i + 1].v3_ext;
 			gtag[i] = tag & 0xf;
 			gtag[i + 1] = tag >> 4;
 		}
@@ -169,10 +166,10 @@ static int setup_extra(struct extra_ucontext __user *extra, const pt_regs_t *use
 			user_regs->sys_rval == -ERESTARTSYS && (ka->sa.sa_flags & SA_RESTART)));
 	rval = __put_user(sc_need_rstrt, &extra->sc_need_rstrt);
 
-	rval = (rval) ?: __put_user(PCSP_PTR(user_regs->stacks.pcsp) +
+	rval = (rval) ?: __put_user((unsigned long)U_PCSP_PTR(user_regs->stacks.pcsp) +
 					SZ_OF_CR - (unsigned long) CURRENT_PCS_BASE(),
 				    &extra->chain_stack_offset);
-	rval = (rval) ?: __put_user(PSP_PTR(user_regs->stacks.psp) -
+	rval = (rval) ?: __put_user((unsigned long)U_PSP_PTR(user_regs->stacks.psp) -
 					(unsigned long) CURRENT_PS_BASE(),
 				    &extra->proc_stack_offset);
 
@@ -381,6 +378,7 @@ static int setup_rt_frame(rt_sigframe_t __user *frame, kernel_siginfo_t *info,
 #endif
 	struct k_sigaction *ka = &current_thread_info()->ksig.ka;
 	int ret = 0;
+	u64 sp = user_stack_pointer(regs);
 
 	if (!access_ok(frame, sizeof(*frame))) {
 		DebugHS("access failed to user stack frame %px\n", frame);
@@ -395,19 +393,11 @@ static int setup_rt_frame(rt_sigframe_t __user *frame, kernel_siginfo_t *info,
 
 #ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
-		e2k_ap_t ss_sp = new_ap(current->sas_ss_sp, current->sas_ss_size, 0, RW_ENABLE);
-
 		ret = setup_prot_frame(&frame->uc_prot.uc_mcontext,
 				       &frame->uc_prot.uc_extra, regs);
 		ret = (ret) ?: __copy_to_user(&frame->uc_prot.uc_sigmask,
 					      set, sizeof(*set));
-
-		ret = (ret) ?: __put_user(ss_sp.lo, &frame->uc_prot.uc_stack.ss_sp.lo);
-		ret = (ret) ?: __put_user(ss_sp.hi, &frame->uc_prot.uc_stack.ss_sp.hi);
-		ret = (ret) ?: __put_user(sas_ss_flags(USD_PTR(regs->stacks.usd)),
-					  &frame->uc_prot.uc_stack.ss_flags);
-		ret = (ret) ?: __put_user(current->sas_ss_size,
-					  &frame->uc_prot.uc_stack.ss_size);
+		ret = (ret) ?: __prot_save_altstack(&frame->uc_prot.uc_stack, sp);
 	} else
 #endif
 	if (!(current->thread.flags & E2K_FLAG_32BIT)) {
@@ -415,8 +405,7 @@ static int setup_rt_frame(rt_sigframe_t __user *frame, kernel_siginfo_t *info,
 				  &frame->uc.uc_extra, regs);
 		ret = (ret) ?: __copy_to_user(&frame->uc.uc_sigmask,
 					      set, sizeof(*set));
-		ret = (ret) ?: __save_altstack(&frame->uc.uc_stack,
-					       USD_PTR(regs->stacks.usd));
+		ret = (ret) ?: __save_altstack(&frame->uc.uc_stack, sp);
 	}
 #ifdef CONFIG_COMPAT
 	else {
@@ -424,8 +413,7 @@ static int setup_rt_frame(rt_sigframe_t __user *frame, kernel_siginfo_t *info,
 				  &frame->uc_32.uc_extra, regs);
 		ret = (ret) ?: __copy_to_user(&frame->uc_32.uc_sigmask,
 					      cset, sizeof(*cset));
-		ret = (ret) ?: __compat_save_altstack(&frame->uc_32.uc_stack,
-						      USD_PTR(regs->stacks.usd));
+		ret = (ret) ?: __compat_save_altstack(&frame->uc_32.uc_stack, sp);
 	}
 #endif /* CONFIG_COMPAT */
 	/*
@@ -485,6 +473,7 @@ int restore_rt_frame(const rt_sigframe_t __user *frame, struct k_sigaction *ka)
 	const unsigned long long __user *cr0_hi_ptr;
 	const struct extra_ucontext __user *uc_extra_ptr;
 	const void __user *set_ptr;
+	unsigned long uc_flags;
 	sigset_t set;
 	int ret = 0;
 
@@ -493,27 +482,10 @@ int restore_rt_frame(const rt_sigframe_t __user *frame, struct k_sigaction *ka)
 
 #ifdef CONFIG_PROTECTED_MODE
 	if (TASK_IS_PROTECTED(current)) {
-		e2k_ptr_t ptr;
-		stack_t stack;
-		stack_t __user *pustack;
-		int ret;
-
-		ret = __get_user(stack.ss_flags,
-				 &frame->uc_prot.uc_stack.ss_flags);
-		ret = (ret) ?: __get_user(stack.ss_size,
-					  &frame->uc_prot.uc_stack.ss_size);
-		ret = (ret) ?: __get_user(ptr.lo,
-					  &frame->uc_prot.uc_stack.ss_sp.lo);
-		ret = (ret) ?: __get_user(ptr.hi,
-					  &frame->uc_prot.uc_stack.ss_sp.hi);
-		if (ret)
+		if (__get_user(uc_flags, &frame->uc_prot.uc_flags))
 			return -EFAULT;
 
-		stack.ss_sp = (void __user *) AP_PTR(ptr);
-
-		pustack = __get_user_space(sizeof(stack_t));
-		ret = copy_to_user(pustack, &stack, sizeof(stack_t));
-		ret = restore_altstack(pustack);
+		ret = prot_restore_altstack(&frame->uc_prot.uc_stack);
 
 		set_ptr = &frame->uc_prot.uc_sigmask;
 		cr0_hi_ptr = &frame->uc_prot.uc_mcontext.cr0_hi;
@@ -522,6 +494,11 @@ int restore_rt_frame(const rt_sigframe_t __user *frame, struct k_sigaction *ka)
 #endif
 #ifdef CONFIG_COMPAT
 	if (current->thread.flags & E2K_FLAG_32BIT) {
+		unsigned int uc_flags_32;
+		if (__get_user(uc_flags_32, &frame->uc_32.uc_flags))
+			return -EFAULT;
+		uc_flags = uc_flags_32;
+
 		ret = compat_restore_altstack(&frame->uc_32.uc_stack);
 
 		set_ptr = (sigset_t __user *) &frame->uc_32.uc_sigmask;
@@ -530,6 +507,9 @@ int restore_rt_frame(const rt_sigframe_t __user *frame, struct k_sigaction *ka)
 	} else
 #endif /* CONFIG_COMPAT */
 	{
+		if (__get_user(uc_flags, &frame->uc.uc_flags))
+			return -EFAULT;
+
 		ret = restore_altstack(&frame->uc.uc_stack);
 		set_ptr = &frame->uc.uc_sigmask;
 		cr0_hi_ptr = &frame->uc.uc_mcontext.cr0_hi;
@@ -579,13 +559,14 @@ int restore_rt_frame(const rt_sigframe_t __user *frame, struct k_sigaction *ka)
 		 * Kernel should never handle trap cellar after user's signal
 		 * handler changed IP. So kernel should give up the trap cellar.
 		 */
-		if (orig_return_ip != get_cr0_ip(cr0) && get_cr0_ip(cr0) < TASK_SIZE) {
-			if (regs->trap) {
+		if (orig_return_ip != get_cr0_ip(cr0) && get_cr0_ip(cr0) < TASK_SIZE &&
+				regs->trap) {
+			if (!(uc_flags & UC_HANDLE_SIGRETURN_CELLAR)) {
 				regs->trap->tc_count = 0;
-#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
-				regs->trap->rp = 0;
-#endif
 			}
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+			regs->trap->rp = 0;
+#endif
 		}
 
 		/* User could have changed chain stack in memory, but
@@ -1048,12 +1029,12 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 	} else {
 #ifdef CONFIG_PROTECTED_MODE
 		e2k_ap_t ap;
-		ap = new_ap((u64) rt_sigframe, 64, 0, RW_ENABLE);
+		ap = MAKE_AP((u64) rt_sigframe, 64);
 		store_tagged_qword(&pframe[0],	ap.qword, ETAGAPQ, 8 * reg1_offset);
 		pframe[4] = ksig->sig;
-		ap = new_ap((u64)u_si, u_si_size, 0, RW_ENABLE);
+		ap = MAKE_AP((u64)u_si, u_si_size);
 		store_tagged_qword(&pframe[8], ap.qword, ETAGAPQ, 8 * reg1_offset);
-		ap = new_ap((u64)uc, uc_size, 0, RW_ENABLE);
+		ap = MAKE_AP((u64)uc, uc_size);
 		store_tagged_qword(&pframe[12], ap.qword, ETAGAPQ, 8 * reg1_offset);
 #endif
 	}
@@ -1063,7 +1044,7 @@ int prepare_sighandler_frame(struct e2k_stacks *stacks,
 	 */
 	void __user *handler = (!TASK_IS_PROTECTED(current))
 			? (void __user *) ksig->ka.sa.sa_handler
-			: (void __user *) ((e2k_pl_t) {
+			: (void __user __force *) ((e2k_pl_t) {
 				.lo = (unsigned long)ksig->ka.sa.sa_handler
 			}).target;
 	ret = chain_stack_frame_init(crs, (unsigned long) handler, USD_IND(usd), 0,
@@ -1085,7 +1066,7 @@ int copy_sighandler_frame(struct e2k_stacks *stacks, struct trap_pt_regs *trap,
 {
 	size_t pframe_size;
 	unsigned long flags;
-	void __priv *u_pframe;
+	volatile void __priv *u_pframe;
 	e2k_mem_crs_t *k_crs;
 	int ret;
 
@@ -1103,7 +1084,7 @@ int copy_sighandler_frame(struct e2k_stacks *stacks, struct trap_pt_regs *trap,
 			return ret;
 	}
 
-	u_pframe = (void __priv *) PSP_PTR(stacks->psp);
+	u_pframe = U_PSP_PTR(stacks->psp);
 	if (copy_to_priv_tagged(u_pframe, pframe, pframe_size))
 		return -EFAULT;
 
@@ -1143,8 +1124,8 @@ int signal_rt_frame_setup(pt_regs_t *regs)
 	register rt_sigframe_t __user	*rt_sigframe;
 	u64 ss_sp, ss_stk_size, tmp_sp, tmp_sz;
 
-	DebugHS("start addr %lx regs %px fn %px\n",
-		(trap) ? trap->tcellar[trap->curr_cnt].address : 0UL,
+	DebugHS("start addr %llx regs %px fn %px\n",
+		(trap) ? trap->tcellar[trap->curr_cnt].address : 0ULL,
 		regs, ka->sa.sa_handler);
 
 	BUG_ON(!user_mode(regs));
@@ -1214,7 +1195,7 @@ int signal_rt_frame_setup(pt_regs_t *regs)
 	ss_stk_size -= (tmp_sp - ss_sp);
 	BUG_ON(ss_stk_size >= tmp_sz || ss_sp >= tmp_sp);
 
-	rt_sigframe = (rt_sigframe_t __user *) ss_sp;
+	rt_sigframe = (rt_sigframe_t __user __force *) ss_sp;
 	DebugHS("rt_sigframe %px\n", rt_sigframe);
 
 	if (TASK_IS_BINCO(current))
@@ -1227,7 +1208,7 @@ int signal_rt_frame_setup(pt_regs_t *regs)
 	 * Update stack limits in thread_info - signal handler should use
 	 * its own stack (be it altstack or just a part of main C stack).
 	 */
-	update_u_stack_limits(ss_sp - ss_stk_size, ss_sp);
+	update_u_stack_limits(ss_stk_size, ss_sp);
 	DebugHS("sig #%d sig_info %px\n", ti->ksig.sig, &rt_sigframe->info);
 
 	return 0;
@@ -1365,9 +1346,6 @@ void do_signal(struct pt_regs *regs)
 		 */
 		trap_cellar_resume(regs);
 	}
-	CHECK_PT_REGS_CHAIN(regs,
-			    NATIVE_NV_READ_USD_LO_REG().USD_lo_base,
-			    (u64) current->stack + KERNEL_C_STACK_SIZE);
 
 	/*
 	 * If there's no signal to deliver, we just put the saved sigmask
@@ -1536,7 +1514,7 @@ static int unwind_stack(e2k_pcsp_t jmp_pcsp,
 	calculate_e2k_dstack_parameters(stacks, dstack_sp,
 					dstack_free, dstack_top);
 
-	jmp_frame_address = PCSP_PTR(jmp_pcsp);
+	jmp_frame_address = (unsigned long)U_PCSP_PTR(jmp_pcsp);
 	ret = find_in_old_u_pcs_list(PCSP_BASE(jmp_pcsp), &delta);
 	if (ret) {
 		SIGDEBUG_PRINT("SIGKILL. do_longjmp(): couldn't find new_u_pcs\n");
@@ -1559,7 +1537,7 @@ static int unwind_stack(e2k_pcsp_t jmp_pcsp,
 	*psp_delta = 0;
 	*pcsp_delta = 0;
 
-	ret = parse_chain_stack(true, NULL, __unwind_stack, &args);
+	ret = parse_chain_stack(true, false, NULL, __unwind_stack, &args);
 	if (ret == 0) {
 		SIGDEBUG_PRINT("SIGKILL. longjmp(): could not find jump frame\n");
 		force_sig(SIGKILL);
@@ -1609,7 +1587,6 @@ static int longjmp_check_wsz_overflow(const struct e2k_stacks *stacks,
 				      const e2k_mem_crs_t *crs, e2k_wd_t wd)
 {
 	hw_stack_t *u_hw_stack = &current_thread_info()->u_hw_stack;
-	unsigned long new_fp;
 	int ret;
 
 	/* Hardware will generate exception in case of overflow
@@ -1624,9 +1601,9 @@ static int longjmp_check_wsz_overflow(const struct e2k_stacks *stacks,
 		goto signal;
 	}
 
-	new_fp = PCSP_PTR(stacks->pcsp);
-	if (new_fp > (unsigned long) GET_PCS_BASE(u_hw_stack)) {
-		e2k_mem_crs_t __priv *u_cframe = (e2k_mem_crs_t __priv *) new_fp - 1;
+	e2k_mem_crs_t __priv *new_fp = U_PCSP_PTR(stacks->pcsp);
+	if (new_fp > (e2k_mem_crs_t __priv *)GET_PCS_BASE(u_hw_stack)) {
+		e2k_mem_crs_t __priv *u_cframe = new_fp - 1;
 		e2k_cr1_t cr1;
 
 		if (get_priv(LO(cr1), &LO(u_cframe->cr1)) ||
@@ -1731,13 +1708,11 @@ out:
 static void longjmp_update_hw_stacks(e2k_stacks_t *stacks,
 				     u64 psp_delta, u64 pcsp_delta)
 {
-	unsigned long new_fp;
-
 	/*
 	 * Calculate new %psp
 	 */
-	new_fp = PSP_PTR(stacks->psp) - psp_delta;
-	update_psp_regs(new_fp, &stacks->psp);
+	volatile void __priv *new_pp = U_PSP_PTR(stacks->psp) - psp_delta;
+	update_psp_regs(new_pp, &stacks->psp);
 
 	BUG_ON(PSHTP_MEM_INDEX(stacks->pshtp));
 	DebugSLJ("new PSP base 0x%llx size 0x%llx ind 0x%llx PSHTP 0x%llx\n",
@@ -1747,7 +1722,8 @@ static void longjmp_update_hw_stacks(e2k_stacks_t *stacks,
 	/*
 	 * Calculate new %pcsp
 	 */
-	new_fp = PCSP_PTR(stacks->pcsp) - pcsp_delta;
+	void __priv *new_fp = U_PCSP_PTR(stacks->pcsp);
+	new_fp -= pcsp_delta;
 	update_pcsp_regs(new_fp, &stacks->pcsp);
 
 	/* See comment in user_hw_stacks_copy_full() */
@@ -1768,9 +1744,9 @@ static void longjmp_update_hw_stacks(e2k_stacks_t *stacks,
 int native_longjmp_copy_user_to_kernel_hw_stacks(const pt_regs_t *regs)
 {
 	e2k_mem_crs_t *k_crs = (e2k_mem_crs_t *) PCSP_BASE(current_thread_info()->k_pcsp);
-	e2k_mem_crs_t __priv *u_cframe = (e2k_mem_crs_t __priv *) PCSP_PTR(regs->stacks.pcsp);
-	return copy_priv_to_current_hw_stack(k_crs, u_cframe - 1,
-					     sizeof(*k_crs), regs, true);
+	e2k_mem_crs_t __priv *u_cframe = U_PCSP_PTR(regs->stacks.pcsp);
+
+	return copy_from_user_pcsp_to_current_hw_stack(k_crs, u_cframe - 1, sizeof(*k_crs), regs);
 }
 
 static int longjmp_switch_to_new_context(pt_regs_t *regs, pt_regs_t *new_regs,
@@ -1796,7 +1772,7 @@ static int longjmp_switch_to_new_context(pt_regs_t *regs, pt_regs_t *new_regs,
 		goto out;
 	}
 
-	update_u_stack_limits(dstack_sp - dstack_free, dstack_top);
+	update_u_stack_limits(dstack_top - (dstack_sp - dstack_free), dstack_top);
 
 	copy_jmp_regs(regs, new_regs);
 

@@ -70,7 +70,11 @@ static void build_check_rule(void)
 
 static struct landlock_rule *
 create_rule(struct landlock_object *const object,
+#ifdef CONFIG_MCST
+	    struct landlock_layer (*const layers)[], const u32 num_layers,
+#else
 	    const struct landlock_layer (*const layers)[], const u32 num_layers,
+#endif
 	    const struct landlock_layer *const new_layer)
 {
 	struct landlock_rule *new_rule;
@@ -118,8 +122,9 @@ static void build_check_ruleset(void)
 		.num_layers = ~0,
 	};
 	typeof(ruleset.fs_access_masks[0]) fs_access_mask = ~0;
-
+#ifndef CONFIG_MCST
 	BUILD_BUG_ON(ruleset.num_rules < LANDLOCK_MAX_NUM_RULES);
+#endif
 	BUILD_BUG_ON(ruleset.num_layers < LANDLOCK_MAX_NUM_LAYERS);
 	BUILD_BUG_ON(fs_access_mask < LANDLOCK_MASK_ACCESS_FS);
 }
@@ -144,7 +149,11 @@ static void build_check_ruleset(void)
  */
 static int insert_rule(struct landlock_ruleset *const ruleset,
 		       struct landlock_object *const object,
+#ifdef CONFIG_MCST
+		       struct landlock_layer (*const layers)[],
+#else
 		       const struct landlock_layer (*const layers)[],
+#endif
 		       size_t num_layers)
 {
 	struct rb_node **walker_node;

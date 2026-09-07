@@ -12,10 +12,6 @@
 #include <asm/io.h>
 
 #include "sbus_mgam83fb.h"
-#if defined(CONFIG_SBUS)
-#elif defined(CONFIG_PCI2SBUS_MODULE)
-#include <linux/mcst/p2ssbus.h>
-#endif
 
 /*******************************************************************************
  * I2C Registers
@@ -405,7 +401,7 @@ void __sbus_init_pixclock( int bus_type, unsigned long i2c_vbase )
 	ramdac_write(bus_type, i2c_vbase, 0x10, 0 );
 
 	switch( bus_type ) {
-#if defined(CONFIG_SBUS) || defined(CONFIG_PCI2SBUS_MODULE)
+#if defined(CONFIG_SBUS)
 	case BUS_TYPE_SBUS :
 		{
 			sbus_clk_t memclk =__sbus_calc( SBUS_MEM_PIXCLOCK );
@@ -454,7 +450,7 @@ void __sbus_set_pixclock( int bus_type, unsigned long i2c_vbase, uint32_t pixclo
 	ramdac_write(bus_type, i2c_vbase, 0x08, 0x0 );
 
 	switch(bus_type ) {
-#if defined(CONFIG_SBUS) || defined(CONFIG_PCI2SBUS_MODULE)
+#if defined(CONFIG_SBUS)
 	case BUS_TYPE_SBUS :	
 		trace_func(7);
 		ramdac_write(bus_type, i2c_vbase, 0x0A, 0x0 ); break;
@@ -472,7 +468,7 @@ void __sbus_set_pixclock( int bus_type, unsigned long i2c_vbase, uint32_t pixclo
 
 
 	switch( bus_type ) {
-#if defined(CONFIG_SBUS) || defined(CONFIG_PCI2SBUS_MODULE)
+#if defined(CONFIG_SBUS)
 	case BUS_TYPE_SBUS :
 		trace_func(11);
 		__set_clk_fs(bus_type, i2c_vbase, FS_PPL2_0, FS_PPL2_0, FS_PPL3_0 );

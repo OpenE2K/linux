@@ -25,6 +25,7 @@
 #include <asm/qspinlock.h>
 #include <asm/regs_state.h>
 #include <asm-l/hw_irq.h>
+#include <asm/kexec.h>
 
 
 #define DEBUG_SMP_BOOT_MODE	0	/* SMP Booting process */
@@ -59,10 +60,9 @@
  */
 
 static int bsp_cpu;
-cpumask_t callin_go;
+physid_mask_t callin_go;
 
 static int old_num_online_cpus;
-
 
 void native_wait_for_cpu_booting(void)
 {
@@ -116,11 +116,18 @@ void wait_for_startup(int cpuid, int hotplug)
 		wait_for_cpu_booting(cpuid);
 		if (!cpu_has(CPU_HWBUG_C3) && hotplug && machine.clk_off)
 			machine.clk_off();
-	} while (!cpumask_test_cpu(cpuid, &callin_go));
+	} while (!physid_isset(cpuid, callin_go));
 
 #ifdef CONFIG_KASAN
 	/* Drop "empty" cached values for shadow area */
 	local_flush_tlb_all();
+#endif
+	/* Paired with smp_wmb() in kexec_wakeup_offline_cpus */
+	smp_rmb();
+
+#ifdef CONFIG_KEXEC
+	if (kexec_wakeup_offline)
+		__cpu_wait_jump(NULL);
 #endif
 }
 
@@ -189,7 +196,7 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 
 	DebugSMPB("Stack at about %px\n", &cpuid);
 
-	if (!(paravirt_enabled() && !IS_HV_GM())) {
+	if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL)) {
 		store_cpu_info(cpu);
 	}
 
@@ -203,7 +210,7 @@ void e2k_start_secondary_switched_stacks(int cpuid, int cpu)
 	/* secondary CPU Local PIC VIRQs handler can be now started up */
 	startup_local_pic_virq(cpu);
 
-	cpumask_clear_cpu(cpuid, &callin_go);
+	physid_clear(cpuid, callin_go);
 
 	/* wake up BSP CPU waiting for this CPU start up */
 	wmb();
@@ -369,7 +376,7 @@ static int e2k_smp_boot_cpu(unsigned int cpu, int hotplug)
 	 */
 	smp_wmb();
 
-	cpumask_set_cpu(cpuid, &callin_go);
+	physid_set(cpuid, callin_go);
 
 	/* Barrier between write to callin_go and sending
 	 * a wakeup (be it machine.clk_on or a hypercall) */
@@ -380,7 +387,7 @@ static int e2k_smp_boot_cpu(unsigned int cpu, int hotplug)
 		machine.clk_on(cpu);
 
 	DebugSMPB("wait for CPU %d to come online\n", cpu);
-	while (!cpu_online(cpu) || cpumask_test_cpu(cpuid, &callin_go))
+	while (!cpu_online(cpu) || physid_isset(cpuid, callin_go))
 		wait_for_cpu_wake_up(cpuid);
 
 	DebugSMPB("finished for CPU #%d\n", cpu);
@@ -390,6 +397,8 @@ static int e2k_smp_boot_cpu(unsigned int cpu, int hotplug)
 void __init smp_prepare_boot_cpu(void)
 {
 	int c, cpu = smp_processor_id();
+
+	bsp_cpu = cpu;
 
 	/* Set per_cpu area pointer */
 	set_my_cpu_offset(__per_cpu_offset[cpu]);
@@ -412,6 +421,13 @@ void __init smp_prepare_boot_cpu(void)
 		__pv_init_lock_hash();
 #endif /* CONFIG_PARAVIRT_SPINLOCKS */
 }
+
+#ifdef CONFIG_RECOVERY
+void smp_prepare_boot_cpu_to_recover(void)
+{
+	bsp_cpu = smp_processor_id();
+}
+#endif
 
 int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 {

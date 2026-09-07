@@ -341,17 +341,42 @@ struct mga2_hdmi_phy_drvr_vltg_lvl {
 	u16 txterm;
 };
 
+
+#ifdef __LITTLE_ENDIAN
+union cksymtxctrl {
+	u16	raw;
+	struct {
+		u16	ck_symon	: 4,
+			tx_symon	: 4,
+			tx_trbon	: 1,
+			tx_traon	: 1,
+			slopeboost	: 4,
+			reserved	: 1,
+			override_5	: 1;
+	} __packed;
+};
+#endif
+
 static const struct mga2_hdmi_phy_drvr_vltg_lvl mga2_hdmi_phy_drvr_vltg_lvl[] = {
-	/*	       tx_symon    ck_symon,     txlvl,   txterm */
-	{ 165e+06, (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 < 1.65Gbps */
-	{ 340e+06, (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 > 1.65Gbps */
-	{ 600e+06, (0xf << 4) | (5 << 0), (12 << 5), (0 << 0) /*  50 Omh */ }, /* HDMI 2.0 (Data rate greater than 3.4 Gbps)*/
+	/*	   override_5   tx_symon    ck_symon,     txlvl,   txterm */
+	{ 165e+06, (1 << 15) | (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 < 1.65Gbps */
+	{ 340e+06, (1 << 15) | (0xc << 4) | (8 << 0), (12 << 5), (4 << 0) /* 100 Omh */ }, /* HDMI 1.4 > 1.65Gbps */
+	{ 600e+06, (1 << 15) | (0xf << 4) | (5 << 0), (12 << 5), (0 << 0) /*  50 Omh */ }, /* HDMI 2.0 (Data rate greater than 3.4 Gbps)*/
 	{ /* sentinel */ },
 };
+
+static int mga25_txlvl = -1;
+module_param_named(txlvl, mga25_txlvl, int, 0400);
+MODULE_PARM_DESC(txlvl, "Force Transmitter Level value");
+
+static int mga25_cksymtxctrl[6] = { [0] = -1 };
+module_param_array_named(cksymtxctrl, mga25_cksymtxctrl, int, NULL, 0400);
+MODULE_PARM_DESC(cksymtxctrl, "Force cksymtxctrl register: Override_5,ck_symon,tx_symon,tx_trbon,tx_traon,slopeboost");
 
 static int mga2_hdmi_phy_configure(struct dw_hdmi *m, void *pdata,
 				    unsigned long mpixelclock)
 {
+	u16 v;
 	const struct mga2_hdmi_phy_params *p = mga2_hdmi_phy_params;
 	const struct mga2_hdmi_phy_drvr_vltg_lvl *d =
 					mga2_hdmi_phy_drvr_vltg_lvl;
@@ -366,10 +391,27 @@ static int mga2_hdmi_phy_configure(struct dw_hdmi *m, void *pdata,
 	if (d->mpixelclock == 0)
 		return -EINVAL;
 
-	dw_hdmi_phy_i2c_write(m, d->cksymtxctrl,
+	v = d->cksymtxctrl;
+	if (mga25_cksymtxctrl[0] != -1) {
+		union cksymtxctrl c = {
+			.override_5 = mga25_cksymtxctrl[0],
+			.ck_symon = mga25_cksymtxctrl[1],
+			.tx_symon = mga25_cksymtxctrl[2],
+			.tx_trbon = mga25_cksymtxctrl[3],
+			.tx_traon = mga25_cksymtxctrl[4],
+			.slopeboost = mga25_cksymtxctrl[5],
+		};
+		v = c.raw;
+	}
+	dw_hdmi_phy_i2c_write(m, v,
 			      MGA25_HDMI_PHY_CKSYMTXCTRL);
-	dw_hdmi_phy_i2c_write(m, d->vlevctrl_pllmeasctrl,
+
+	v = d->vlevctrl_pllmeasctrl;
+	if (mga25_txlvl != -1)
+		v = (mga25_txlvl & 0x1f) << 5;
+	dw_hdmi_phy_i2c_write(m, v,
 			      MGA25_HDMI_PHY_VLEVCTRL_PLLMEASCTRL);
+
 	dw_hdmi_phy_i2c_write(m, d->txterm,
 				MGA25_HDMI_PHY_TXTERM);
 
@@ -394,7 +436,7 @@ static const struct dw_hdmi_plat_data mga2_drv_data = {
 static int mga2_hdmi_bind(struct device *dev, struct device *master,
 			    void *data)
 {
-	int ret, i;
+	int ret = 0, i;
 	struct drm_device *drm = data;
 	struct mga2_hdmi *m = dev_get_drvdata(dev);
 	struct drm_encoder *e = &m->base;

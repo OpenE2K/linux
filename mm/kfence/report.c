@@ -16,9 +16,6 @@
 #include <linux/stacktrace.h>
 #include <linux/string.h>
 #include <trace/events/error_report.h>
-#if defined(CONFIG_E2K) && defined(CONFIG_KFENCE_KUNIT_TEST)
-#include <trace/events/printk.h>
-#endif
 
 #include <asm/kfence.h>
 
@@ -186,24 +183,6 @@ static const char *get_access_type(bool is_write)
 	return is_write ? "write" : "read";
 }
 
-#if defined(CONFIG_E2K) && defined(CONFIG_KFENCE_KUNIT_TEST)
-__printf(1, 2)
-static void do_trace_console(const char *fmt, ...)
-{
-	va_list args;
-	char buf[256];
-	int len;
-
-	va_start(args, fmt);
-
-	memset(buf, 0, 256);
-	len = vsnprintf(buf, 256, fmt, args);
-
-	trace_console(buf, len);
-}
-
-#endif
-
 void kfence_report_error(unsigned long address, bool is_write, struct pt_regs *regs,
 			 const struct kfence_metadata *meta, enum kfence_error_type type)
 {
@@ -222,12 +201,11 @@ void kfence_report_error(unsigned long address, bool is_write, struct pt_regs *r
 	/* Require non-NULL meta, except if KFENCE_ERROR_INVALID. */
 	if (WARN_ON(type != KFENCE_ERROR_INVALID && !meta))
 		return;
-#ifdef CONFIG_MCST
+#if defined CONFIG_MCST && !defined CONFIG_KFENCE_KUNIT_TEST
 #define MAX_KFENCE_ITEMS	20
 	static unsigned long kfence_items[MAX_KFENCE_ITEMS];
 	static int cur_kfence_items_id;
-	static raw_spinlock_t kfi_lock;
-	int i;
+	static DEFINE_RAW_SPINLOCK(kfi_lock);
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&kfi_lock, flags);
@@ -236,15 +214,12 @@ void kfence_report_error(unsigned long address, bool is_write, struct pt_regs *r
 		raw_spin_unlock_irqrestore(&kfi_lock, flags);
 		return;
 	}
-	for (i = 0; i < MAX_KFENCE_ITEMS; i++) {
+	for (int i = 0; i < MAX_KFENCE_ITEMS; i++) {
 		if (stack_entries[skipnr] == kfence_items[i]) {
-			break;
+			/* this case is handled already */
+			raw_spin_unlock_irqrestore(&kfi_lock, flags);
+			return;
 		}
-	}
-	if (i < MAX_KFENCE_ITEMS) {
-		/* this case already handled */
-		raw_spin_unlock_irqrestore(&kfi_lock, flags);
-		return;
 	}
 	kfence_items[cur_kfence_items_id] = stack_entries[skipnr];
 	cur_kfence_items_id++;
@@ -275,14 +250,6 @@ void kfence_report_error(unsigned long address, bool is_write, struct pt_regs *r
 		       get_access_type(is_write), (void *)address,
 		       left_of_object ? meta->addr - address : address - meta->addr,
 		       left_of_object ? "left" : "right", object_index);
-#if defined(CONFIG_E2K) && defined(CONFIG_KFENCE_KUNIT_TEST)
-		do_trace_console("BUG: KFENCE: out-of-bounds %s in %pS\n\n", get_access_type(is_write),
-		       (void *)stack_entries[skipnr]);
-		do_trace_console("Out-of-bounds %s at 0x%p (%luB %s of kfence-#%td):\n",
-		       get_access_type(is_write), (void *)address,
-		       left_of_object ? meta->addr - address : address - meta->addr,
-		       left_of_object ? "left" : "right", object_index);
-#endif
 		break;
 	}
 	case KFENCE_ERROR_UAF:
@@ -290,44 +257,23 @@ void kfence_report_error(unsigned long address, bool is_write, struct pt_regs *r
 		       (void *)stack_entries[skipnr]);
 		pr_err("Use-after-free %s at 0x%p (in kfence-#%td):\n",
 		       get_access_type(is_write), (void *)address, object_index);
-#if defined(CONFIG_E2K) && defined(CONFIG_KFENCE_KUNIT_TEST)
-		do_trace_console("BUG: KFENCE: use-after-free %s in %pS\n\n", get_access_type(is_write),
-		       (void *)stack_entries[skipnr]);
-		do_trace_console("Use-after-free %s at 0x%p (in kfence-#%td):\n",
-		       get_access_type(is_write), (void *)address, object_index);
-#endif
 		break;
 	case KFENCE_ERROR_CORRUPTION:
 		pr_err("BUG: KFENCE: memory corruption in %pS\n\n", (void *)stack_entries[skipnr]);
 		pr_err("Corrupted memory at 0x%p ", (void *)address);
 		print_diff_canary(address, 16, meta);
 		pr_cont(" (in kfence-#%td):\n", object_index);
-#if defined(CONFIG_E2K) && defined(CONFIG_KFENCE_KUNIT_TEST)
-		do_trace_console("BUG: KFENCE: memory corruption in %pS\n\n", (void *)stack_entries[skipnr]);
-		do_trace_console("Corrupted memory at 0x%p ", (void *)address);
-#endif
 		break;
 	case KFENCE_ERROR_INVALID:
 		pr_err("BUG: KFENCE: invalid %s in %pS\n\n", get_access_type(is_write),
 		       (void *)stack_entries[skipnr]);
 		pr_err("Invalid %s at 0x%p:\n", get_access_type(is_write),
 		       (void *)address);
-#if defined(CONFIG_E2K) && defined(CONFIG_KFENCE_KUNIT_TEST)
-		do_trace_console("BUG: KFENCE: invalid %s in %pS\n\n", get_access_type(is_write),
-		       (void *)stack_entries[skipnr]);
-		do_trace_console("Invalid %s at 0x%p:\n", get_access_type(is_write),
-		       (void *)address);
-#endif
 		break;
 	case KFENCE_ERROR_INVALID_FREE:
 		pr_err("BUG: KFENCE: invalid free in %pS\n\n", (void *)stack_entries[skipnr]);
 		pr_err("Invalid free of 0x%p (in kfence-#%td):\n", (void *)address,
 		       object_index);
-#if defined(CONFIG_E2K) && defined(CONFIG_KFENCE_KUNIT_TEST)
-		do_trace_console("BUG: KFENCE: invalid free in %pS\n\n", (void *)stack_entries[skipnr]);
-		do_trace_console("Invalid free of 0x%p (in kfence-#%td):\n", (void *)address,
-		       object_index);
-#endif
 		break;
 	}
 

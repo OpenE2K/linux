@@ -170,7 +170,7 @@ static void modify_pte_page(pte_t *ptep, enum sma_mode mode)
 		new = pte_mk_uc(*ptep);
 		break;
 	case SMA_SPLIT:
-		break;
+		return;
 	default:
 		BUG();
 	};
@@ -430,7 +430,7 @@ static void modify_pmd_page(pmd_t *pmdp, enum sma_mode mode)
 		new = pmd_mk_uc(*pmdp);
 		break;
 	case SMA_SPLIT:
-		break;
+		return;
 	default:
 		BUG();
 	};
@@ -594,7 +594,7 @@ static void modify_pud_page(pud_t *pudp, enum sma_mode mode)
 		new = pud_mk_uc(*pudp);
 		break;
 	case SMA_SPLIT:
-		break;
+		return;
 	default:
 		BUG();
 	}
@@ -1347,7 +1347,7 @@ static int sma_main(unsigned long start, unsigned long end,
 	 */
 
 #ifndef CONFIG_DEBUG_PAGEALLOC
-	struct pool *pools[MAX_NUMNODES];
+	struct pool *pools[MAX_NUMNODES] = { 0 };
 
 	if (!is_kfence_address((void *)start) || !arch_kfence_initialized) {
 		ret = alloc_split_pools(pools, start, end);
@@ -1388,7 +1388,7 @@ unlock:
 	if (dontflush)
 		need_flush = 0;
 
-	if (IS_ENABLED(CONFIG_KVM_GUEST_MODE) && !IS_ENABLED(CONFIG_KVM_SHADOW_PT) || need_flush) {
+	if (IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) && !IS_ENABLED(CONFIG_KVM_SHADOW_PT) || need_flush) {
 		/* Sometimes allocators are called under closed interrupts so use NMI version of
 		 * flush_tlb_kernel_range() here. We can't call flush under disabled NMIs
 		 * because of a deadlock. */
@@ -1516,7 +1516,7 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
 {
 	unsigned long addr = (unsigned long) page_address(page);
 
-	set_memory_attr(addr, addr + numpages * PAGE_SIZE, (enable) ? SMA_P : SMA_NP, 0);
+	set_memory_attr(addr, addr + numpages * PAGE_SIZE, (enable) ? SMA_PV : SMA_NPV, 0);
 }
 #endif
 

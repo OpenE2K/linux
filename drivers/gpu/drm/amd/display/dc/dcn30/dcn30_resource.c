@@ -1657,6 +1657,9 @@ noinline bool dcn30_internal_validate_bw(
 	int pipe_cnt, i, pipe_idx, vlevel;
 	struct vba_vars_st *vba = &context->bw_ctx.dml.vba;
 
+#ifdef CONFIG_MCST
+	vlevel = 0;
+#endif
 	ASSERT(pipes);
 	if (!pipes)
 		return false;

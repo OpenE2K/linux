@@ -775,7 +775,11 @@ static int spidev_probe(struct spi_device *spi)
 	int			status;
 	unsigned long		minor;
 
+#ifdef CONFIG_MCST
+	match = (int (*)(struct device *dev))device_get_match_data(&spi->dev);
+#else
 	match = device_get_match_data(&spi->dev);
+#endif
 	if (match) {
 		status = match(&spi->dev);
 		if (status)

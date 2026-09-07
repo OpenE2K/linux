@@ -6,10 +6,6 @@
 #ifndef	_E2K_KVM_CPU_HV_REGS_ACCESS_H_
 #define	_E2K_KVM_CPU_HV_REGS_ACCESS_H_
 
-#ifdef __KERNEL__
-
-#ifndef __ASSEMBLY__
-
 #include <linux/kvm_host.h>
 #include <asm/e2k_api.h>
 #include <asm/kvm/cpu_hv_regs_types.h>
@@ -27,6 +23,11 @@ static __always_inline e2k_usd_t native_read_guest_USD_reg(void)
 	u64 lo = RRSH_DREG(usd.lo);
 	u64 hi = RRSH_DREG(usd.hi);
 	return (e2k_usd_t) { .lo = lo, .hi = hi };
+}
+
+static __always_inline u64 native_read_guest_USD_lo(void)
+{
+	return RRSH_DREG(usd.lo);
 }
 
 /*
@@ -329,7 +330,7 @@ static __always_inline u64 read_INTC_INFO_CU_reg_value(void)
 
 static __always_inline void write_INTC_INFO_CU_pair_value(u64 lo, u64 hi)
 {
-	NATIVE_SET_DREGS_EXC(6, intc_info_cu, intc_info_cu, lo, hi);
+	NATIVE_SET_DREGS_NOEXC(6, intc_info_cu, intc_info_cu, lo, hi);
 }
 
 /* Clear INTC_INFO_CU header and INTC_PTR_CU */
@@ -393,9 +394,5 @@ static inline void restore_intc_info_cu(const intc_info_cu_t *info, int num)
 		write_INTC_INFO_CU_pair_value(info->entry[i].lo, info->entry[i].hi);
 	}
 }
-
-#endif /*  __ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
 
 #endif /* _E2K_KVM_CPU_HV_REGS_ACCESS_H_ */

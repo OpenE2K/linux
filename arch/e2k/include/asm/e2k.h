@@ -64,10 +64,6 @@
 						MACHINE_ID_E2K_LEGACY_SIC | \
 						MACHINE_ID_E2K_FULL_SIC | \
 						MACHINE_ID_E2K_IOMMU)
-#define	MACHINE_ID_E48C			(IDR_E48C_MDL | \
-						MACHINE_ID_E2K_LEGACY_SIC | \
-						MACHINE_ID_E2K_FULL_SIC | \
-						MACHINE_ID_E2K_IOMMU)
 #define	MACHINE_ID_E8V7			(IDR_E8V7_MDL | \
 						MACHINE_ID_E2K_LEGACY_SIC | \
 						MACHINE_ID_E2K_FULL_SIC | \
@@ -89,7 +85,6 @@
 #define	MACHINE_ID_E12C_LMS		(MACHINE_ID_E12C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E16C_LMS		(MACHINE_ID_E16C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E2C3_LMS		(MACHINE_ID_E2C3 | MACHINE_ID_SIMUL)
-#define	MACHINE_ID_E48C_LMS		(MACHINE_ID_E48C | MACHINE_ID_SIMUL)
 #define	MACHINE_ID_E8V7_LMS		(MACHINE_ID_E8V7 | MACHINE_ID_SIMUL)
 
 #define	MACHINE_ID_VIRT_E2S		(MACHINE_ID_E2S | MACHINE_ID_VIRT)
@@ -99,7 +94,6 @@
 #define	MACHINE_ID_VIRT_E12C		(MACHINE_ID_E12C | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E16C		(MACHINE_ID_E16C | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E2C3		(MACHINE_ID_E2C3 | MACHINE_ID_VIRT)
-#define	MACHINE_ID_VIRT_E48C		(MACHINE_ID_E48C | MACHINE_ID_VIRT)
 #define	MACHINE_ID_VIRT_E8V7		(MACHINE_ID_E8V7 | MACHINE_ID_VIRT)
 
 #ifdef CONFIG_E2K_SIMULATOR
@@ -123,8 +117,6 @@
   #define native_machine_id	(MACHINE_ID_E16C | MACHINE_SIMUL_FLAG)
  #elif	defined(CONFIG_E2K_E2C3)
   #define native_machine_id	(MACHINE_ID_E2C3 | MACHINE_SIMUL_FLAG)
- #elif	defined(CONFIG_E2K_E48C)
-  #define native_machine_id	(MACHINE_ID_E48C | MACHINE_SIMUL_FLAG)
  #elif	defined(CONFIG_E2K_E8V7)
   #define native_machine_id	(MACHINE_ID_E8V7 | MACHINE_SIMUL_FLAG)
  #else
@@ -144,8 +136,6 @@
  #define	native_machine_id	MACHINE_ID_E16C_LMS
 #elif	defined(CONFIG_E2C3)	/* can be defined only for tiny boot on lms */
  #define	native_machine_id	MACHINE_ID_E2C3_LMS
-#elif	defined(CONFIG_E48C)	/* can be defined only for tiny boot on lms */
- #define	native_machine_id	MACHINE_ID_E48C_LMS
 #elif	defined(CONFIG_E8V7)	/* can be defined only for tiny boot on lms */
  #define	native_machine_id	MACHINE_ID_E8V7_LMS
 #else	/* ! CONFIG_E2K_MACHINE && ! our boot on lms */
@@ -173,8 +163,6 @@ extern const char *native_get_mach_type_name(void);
 		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E16C_MDL)
 #define	IS_THE_MACHINE_E2C3(mach_id)	\
 		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E2C3_MDL)
-#define	IS_THE_MACHINE_E48C(mach_id)	\
-		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E48C_MDL)
 #define	IS_THE_MACHINE_E8V7(mach_id)	\
 		(((mach_id) & MACHINE_ID_CPU_TYPE_MASK) == IDR_E8V7_MDL)
 #define	IS_THE_MACHINE_E2K_VIRT(mach_id)	\
@@ -209,8 +197,6 @@ extern const char *native_get_mach_type_name(void);
 		IS_THE_MACHINE_E16C(native_machine_id)
 #define	NATIVE_IS_MACHINE_E2C3		\
 		IS_THE_MACHINE_E2C3(native_machine_id)
-#define	NATIVE_IS_MACHINE_E48C		\
-		IS_THE_MACHINE_E48C(native_machine_id)
 #define	NATIVE_IS_MACHINE_E8V7		\
 		IS_THE_MACHINE_E8V7(native_machine_id)
 #define	NATIVE_IS_MACHINE_E2K_VIRT	(false)
@@ -229,8 +215,6 @@ extern const char *native_get_mach_type_name(void);
 		IS_THE_MACHINE_E16C(boot_native_machine_id)
 #define	BOOT_NATIVE_IS_MACHINE_E2C3	\
 		IS_THE_MACHINE_E2C2(boot_native_machine_id)
-#define	BOOT_NATIVE_IS_MACHINE_E48C	\
-		IS_THE_MACHINE_E48C(boot_native_machine_id)
 #define	BOOT_NATIVE_IS_MACHINE_E8V7	\
 		IS_THE_MACHINE_E8V7(boot_native_machine_id)
 #define	BOOT_NATIVE_IS_MACHINE_E2K_VIRT	false
@@ -292,8 +276,6 @@ static inline void set_mach_type_id(void)
 		IS_THE_MACHINE_E16C(get_machine_id())
 #define	IS_MACHINE_E2C3		\
 		IS_THE_MACHINE_E2C3(get_machine_id())
-#define	IS_MACHINE_E48C		\
-		IS_THE_MACHINE_E48C(get_machine_id())
 #define	IS_MACHINE_E8V7		\
 		IS_THE_MACHINE_E8V7(get_machine_id())
 #define IS_MACHINE_E2K_VIRT	\
@@ -324,8 +306,6 @@ static inline void set_mach_type_id(void)
 		IS_THE_MACHINE_E16C(boot_get_machine_id())
 #define	BOOT_IS_MACHINE_E2C3	\
 		IS_THE_MACHINE_E2C3(boot_get_machine_id())
-#define	BOOT_IS_MACHINE_E48C	\
-		IS_THE_MACHINE_E48C(boot_get_machine_id())
 #define	BOOT_IS_MACHINE_E8V7	\
 		IS_THE_MACHINE_E8V7(boot_get_machine_id())
 #define BOOT_IS_MACHINE_VIRT	\
@@ -342,7 +322,7 @@ static inline void set_mach_type_id(void)
 #define	BOOT_HAS_MACHINE_L_SIC		\
 		HAS_THE_MACHINE_L_SIC(boot_get_machine_id())
 
-#define	MAX_NODE_CPUS		E48C_MAX_NR_NODE_CPUS	/* all 48 CPU cores on a node */
+#define	MAX_NODE_CPUS		E8V7_MAX_NR_NODE_CPUS	/* all 64 CPU cores on a node */
 
 #define	E2K_MAX_NODE_IOLINKS	2	/* each node can has max 2 IO links */
 					/* connected to IOHUB or RDMA */

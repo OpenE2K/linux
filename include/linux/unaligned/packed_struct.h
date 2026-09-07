@@ -7,7 +7,7 @@ struct __una_u16 { u16 x; } __packed;
 struct __una_u32 { u32 x; } __packed;
 struct __una_u64 { u64 x; } __packed;
 
-#if defined CONFIG_E2K && defined CONFIG_CPU_E48C
+#if defined CONFIG_E2K && (defined CONFIG_CPU_E8V7)
 /* rm 26193 - CPU_HWBUG_UNALIGNED_LOADS workaround, mark unaligned loads with volatile.
  * Avoid dynamic checks cause they would be more costly then the workaround. */
 # define UNALIGNED_LD volatile

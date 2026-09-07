@@ -10,7 +10,6 @@
 #ifndef _SECONDARY_SPACE_H
 #define	_SECONDARY_SPACE_H
 
-#ifndef __ASSEMBLY__
 #include <linux/spinlock.h>
 
 #include <asm/machdep.h>
@@ -18,10 +17,9 @@
 #include <asm/processor.h>
 #include <asm/types.h>
 #include <asm/smp.h>
-#endif /* !__ASSEMBLY__ */
 
 
-#define BINCO_PROTOCOL_VERSION	7
+#define BINCO_PROTOCOL_VERSION	8
 
 #define SS_SIZE	0x800000000000UL
 
@@ -47,8 +45,6 @@
 #else
 #define ADDR_IN_SS(a)		0
 #endif
-
-#ifndef __ASSEMBLY__
 
 extern long sys_el_binary(s64 work, s64 arg2, s64 arg3, s64 arg4, s64 arg5, s64 arg6);
 
@@ -155,9 +151,10 @@ extern int copy_bin_comp_info(bin_comp_info_t *oldbi, bin_comp_info_t *bi);
 
 extern int bc_set_outmost_ns(struct task_struct *t, u64 clone_flags);
 extern int bc_set_outmost_parent(struct task_struct *t);
+extern struct pid *rtcfs_tgid_pidfd_to_pid(const struct file *file);
 
 /* x86-32 data types */
 typedef u64 __aligned(4) bc32_misaligned_u64;
 typedef s64 __aligned(4) bc32_misaligned_s64;
-#endif /* !__ASSEMBLY__ */
+
 #endif /* _SECONDARY_SPACE_H */

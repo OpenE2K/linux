@@ -10,11 +10,9 @@
 #ifndef	_E2K_MMU_REGS_ACCESS_H_
 #define	_E2K_MMU_REGS_ACCESS_H_
 
-#ifndef __ASSEMBLY__
 #include <linux/types.h>
-#include <asm/e2k_api.h>
-#endif /* __ASSEMBLY__ */
 
+#include <asm/e2k_api.h>
 #include <asm/mmu_regs_types.h>
 #include <asm/mas.h>
 
@@ -22,7 +20,7 @@
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is virtualized guest kernel */
-#include <asm/kvm/mmu_regs_access.h>
+#include <asm/kvm/guest/mmu_regs_access.h>
 #else /* !CONFIG_KVM_GUEST_KERNEL */
 /* it is native kernel without any virtualization */
 /* or host kernel with virtualization support */
@@ -30,8 +28,6 @@
 /*
  * MMU registers operations
  */
-
-#ifndef __ASSEMBLY__
 
 static inline void set_MMU_TRAP_POINT(unsigned long trap_cellar)
 {
@@ -96,11 +92,6 @@ static inline void reset_MMU_TRAP_COUNT(void)
 #define WRITE_L1_FAULT_REG	NATIVE_WRITE_L1_FAULT_REG
 
 /*
- * Clear DCACHE L1 set
- */
-#define	CLEAR_DCACHE_L1_SET	NATIVE_CLEAR_DCACHE_L1_SET
-
-/*
  * DCACHE L2 registers
  */
 #define	WRITE_L2_REG		NATIVE_WRITE_L2_REG
@@ -127,11 +118,6 @@ static inline void reset_MMU_TRAP_COUNT(void)
  * Get Entry probe for virtual address
  */
 #define	ENTRY_PROBE_MMU_OP	NATIVE_ENTRY_PROBE_MMU_OP
-
-/*
- * Get physical address for virtual address
- */
-#define	ADDRESS_PROBE_MMU_OP	NATIVE_ADDRESS_PROBE_MMU_OP
 
 /*
  * CLW registers access
@@ -167,11 +153,7 @@ static inline void reset_MMU_TRAP_COUNT(void)
 #define	WRITE_DDMCR_REG_VALUE		NATIVE_WRITE_DDMCR_REG_VALUE
 #define	WRITE_DDMCR1_REG_VALUE		NATIVE_WRITE_DDMCR1_REG_VALUE
 
-#endif /* ! __ASSEMBLY__ */
-
 #endif /* CONFIG_KVM_GUEST_KERNEL */
-
-#ifndef __ASSEMBLY__
 
 #define	READ_DDBCR_REG()	\
 ({ \
@@ -201,7 +183,5 @@ static inline void reset_MMU_TRAP_COUNT(void)
 #define	WRITE_DDMAR3_REG(value)	WRITE_DDMAR3_REG_VALUE(value)
 #define	WRITE_DDMCR_REG(value)	WRITE_DDMCR_REG_VALUE(AW(value))
 #define	WRITE_DDMCR1_REG(value)	WRITE_DDMCR1_REG_VALUE(AW(value))
-
-#endif /* ! __ASSEMBLY__ */
 
 #endif /* _E2K_MMU_REGS_ACCESS_H_ */

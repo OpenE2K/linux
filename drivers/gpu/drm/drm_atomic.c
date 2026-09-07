@@ -467,6 +467,9 @@ static int drm_atomic_connector_check(struct drm_connector *connector,
 	struct drm_writeback_job *writeback_job = state->writeback_job;
 	const struct drm_display_info *info = &connector->display_info;
 
+#ifdef CONFIG_MCST
+	crtc_state = NULL;
+#endif
 	state->max_bpc = info->bpc ? info->bpc : 8;
 	if (connector->max_bpc_property)
 		state->max_bpc = min(state->max_bpc, state->max_requested_bpc);

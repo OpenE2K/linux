@@ -9,13 +9,9 @@
 #include <linux/clocksource.h>
 #include <linux/types.h>
 #include <linux/percpu.h>
-#include <linux/kthread.h>
 #include <linux/pci.h>
 #include <linux/rtc.h>
 #include <linux/seq_file.h>
-
-#include <asm/cpu_regs_access.h>
-#include <asm-l/l_timer.h>
 
 #ifdef CONFIG_SCLKR_CLOCKSOURCE
 extern u64 fast_syscall_read_sclkr(void);

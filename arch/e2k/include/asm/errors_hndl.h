@@ -10,8 +10,6 @@
 #ifndef _E2K_ERRORS_HNDL_H
 #define	_E2K_ERRORS_HNDL_H
 
-#ifndef __ASSEMBLY__
-
 #include <asm/types.h>
 #include <asm/console.h>
 #include <asm/p2v/boot_console.h>
@@ -61,7 +59,5 @@ do { \
 			__FILE__, __LINE__, __FUNCTION__); \
 	init_warning(format); \
 } while (0)
-
-#endif /* !(__ASSEMBLY__) */
 
 #endif /* !(_E2K_ERRORS_HNDL_H) */

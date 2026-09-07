@@ -30,12 +30,14 @@ typedef struct kvm_nbsr {
 	gpa_t base;		/* NBSR registers base address */
 	int size;		/* size of all registers of all nodes */
 	int node_size;		/* size of all registers on one node */
-	e2k_iset_ver_t iset_no;	/* guest cpu iset version */
+	int iset_no;		/* guest cpu iset version */
 	struct kvm_io_device dev;
 	struct kvm *kvm;
 	unsigned nodes_online;
 	struct mutex lock;
 	kvm_nbsr_regs_t nodes[MAX_NUMNODES];
+	gpa_t lo_mem_base, lo_mem_size;
+	gpa_t hi_mem_base, hi_mem_size;
 } kvm_nbsr_t;
 
 #define DEBUG
@@ -71,6 +73,7 @@ do {									\
 #define	RT_XMU_d	'd'
 
 extern int kvm_nbsr_init(struct kvm *kvm, unsigned long cpu_iset);
+extern void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr);
 extern void kvm_nbsr_destroy(struct kvm *kvm);
 extern int nbsr_setup_memory_region(struct kvm_nbsr *nbsr, int node_id,
 					gpa_t base, gpa_t size);

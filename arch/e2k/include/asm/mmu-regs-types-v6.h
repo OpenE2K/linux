@@ -21,8 +21,6 @@
  * NOTE: E2K has four levels of page tables.
  */
 
-#ifndef __ASSEMBLY__
-
 #include <linux/types.h>
 #include <linux/bug.h>
 #include <asm/mmu_types.h>
@@ -139,7 +137,5 @@ clear_dtlb_val_v6_flags(probe_entry_t dtlb_val, uni_dtlb_t uni_flags)
 {
 	return dtlb_val & ~convert_uni_dtlb_flags_to_dtlb_val_v6(uni_flags);
 }
-
-#endif	/* ! __ASSEMBLY__ */
 
 #endif /* ! _ASM_E2K_MMU_REGS_TYPES_V6_H */

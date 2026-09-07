@@ -3,18 +3,22 @@
  * Copyright (c) 2023 MCST
  */
 
+#include <linux/idr.h>
 #include <linux/interrupt.h>
 #include <linux/irqchip.h>
 #include <linux/irq.h>
 #include <linux/of_platform.h>
 #include <linux/pci.h>
-#include <linux/idr.h>
-
+#include <linux/syscore_ops.h>
 #include <asm/sic_regs_access.h>
+#include <asm/iolinkmask.h>
+#include <asm/pic.h>
 
 #include "io_pic.h"
 
 static DEFINE_IDR(iopic_dev_ids);
+
+#define for_each_iopic(pic, i) idr_for_each_entry(&iopic_dev_ids, pic, i)
 
 unsigned io_pic_read_by_id(unsigned id, unsigned reg)
 {
@@ -154,7 +158,7 @@ static void l_irqdomain_free(struct irq_domain *dmn, unsigned int virq,
 	irq_domain_free_irqs_top(dmn, virq, nr_irqs);
 }
 
-const struct irq_domain_ops iopic_irqdomain_ops = {
+static const struct irq_domain_ops iopic_irqdomain_ops = {
 	.alloc		= l_irqdomain_alloc,
 	.free		= l_irqdomain_free,
 	.translate	= irq_domain_translate_twocell,
@@ -178,9 +182,10 @@ static void __init iopic_exit(struct iopic *ip)
 static int __init iopic_init(struct device_node *np,
 			struct device_node *parent, struct iopic_chip *ic)
 {
-	u64 b[2], v;
-	int bus = -1;
 	int ret;
+	int bus = -1;
+	u64 b[2], v, regs_pa;
+	void __iomem *a;
 	struct fwnode_handle *fn = of_node_to_fwnode(np);
 	struct iopic *ip = kzalloc(sizeof(*ip), GFP_KERNEL);
 
@@ -188,7 +193,7 @@ static int __init iopic_init(struct device_node *np,
 		return -ENOMEM;
 
 	if (!of_property_read_u64_array(np, "bus-reg64", b, ARRAY_SIZE(b))) {
-		v = boot_readl((void *)b[0]);
+		v = boot_readl((void __iomem __force *)b[0]);
 		bus = (v >> 8) & 0xFF;
 	}
 
@@ -200,25 +205,44 @@ static int __init iopic_init(struct device_node *np,
 		b[0] &= ~(PCIE_ECAM_BUS_MASK << PCIE_ECAM_BUS_SHIFT);
 		b[0] |= bus << PCIE_ECAM_BUS_SHIFT;
 	}
-	v = boot_readl((void *)b[0]);
+	a = (void __iomem __force *)b[0];
+	v = boot_readl(a);
 	if (WARN(v == 0 || v == 0xffffFFFF,
 			"%pOF: bad io_pic base address: %llx\n", np, v)) {
 		ret = -ENODEV;
 		goto err;
 	}
+
 	raw_spin_lock_init(&ip->lock);
 	ip->iopic_chip = ic;
 
 	v &= PCI_BASE_ADDRESS_MEM_MASK;
-	ip->regs = ioremap(v, b[1]);
+	regs_pa = v;
+	ip->regs = ioremap(regs_pa, b[1]);
 
 	if (WARN(!ip->regs, "%pOF: Failed to map: [%llx-%llx]\n", np, v, b[1])) {
 		ret = -ENXIO;
 		goto err;
 	}
 
+	v = PCIE_ECAM_REG_MASK;
+	b[0] &= ~v;
+	a = (void __iomem __force *)b[0];
+	v = boot_readw(a + PCI_COMMAND);
+	/* Enable access to pic. Boot does not do it for us
+		 in eioh + iohub2 configurations*/
+	boot_writew(v | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER,
+				a + PCI_COMMAND);
+
 	ip->iopic_chip->iopic_get_id_ver_pins(ip, &ip->id, &ip->version,
 					&ip->nr_pins);
+
+	/* iopic pins may contain garbage, for example, after
+	 * kexec previous kernel can't properly end some interrupts,
+	 * so we need reset here */
+	if (ip->iopic_chip->iopic_reset)
+		ip->iopic_chip->iopic_reset(ip);
+
 	ip->of_nodes = kzalloc(sizeof(*ip->of_nodes) * ip->nr_pins, GFP_KERNEL);
 	if (WARN(!ip->of_nodes, "%pOF: Failed to allocate memory\n", np)) {
 		ret = -ENOMEM;
@@ -226,8 +250,16 @@ static int __init iopic_init(struct device_node *np,
 	}
 	if ((ret = iopic_parse_devtree(ip, np)))
 		goto err;
-	ret = of_node_to_nid(np);
-	ip->node = ret == NUMA_NO_NODE ? 0 : ret;
+	/* hw bug 170189: iohub2 interrupts can
+	* be handled only by processor 0, but
+	* end of interrupt should be sent from
+	* processor to which iohub2 is connected,
+	* so check real-numa-node-id property */
+	if (of_property_read_u32(np, "real-numa-node-id", &ip->node))
+		ip->node = of_node_to_nid(np);
+
+	if (ip->node == NUMA_NO_NODE)
+		ip->node = 0;
 
 	alloc_iopic_saved_registers(ip);
 	ip->irqdomain = irq_domain_create_linear(fn, ip->nr_pins,
@@ -243,13 +275,21 @@ static int __init iopic_init(struct device_node *np,
 
 	ret = idr_alloc(&iopic_dev_ids, ip, ip->id, ip->id + 1, GFP_KERNEL);
 
-	if (WARN(ret < 0, "%pOF: failed to map id: %d: %llx #%d version %d with %d pins\n",
+	if (ret == -ENOSPC && ip->iopic_chip->iopic_set_id) {
+		ret = idr_alloc(&iopic_dev_ids, ip, 1, 0, GFP_KERNEL);
+		if (WARN_ON(ret < 0))
+			goto err;
+		pr_warn("%pOF: boot bug: changing pic physical id from %d to %d\n",
+				np, ip->id, ret);
+		ip->id = ret;
+		ip->iopic_chip->iopic_set_id(ip, ip->id);
+	} else if (WARN(ret < 0, "%pOF: failed to map id: %d: %llx #%d version %d with %d pins\n",
 		np, ret,
-		v, ip->id, ip->version, ip->nr_pins)) {
+		regs_pa, ip->id, ip->version, ip->nr_pins)) {
 		goto err;
 	}
 	pr_info("%pOF: @%llx #%d version %d with %d pins\n", np,
-		v, ip->id, ip->version, ip->nr_pins);
+		regs_pa, ip->id, ip->version, ip->nr_pins);
 
 	return 0;
 err:
@@ -257,7 +297,28 @@ err:
 	return ret;
 }
 
-void get_io_pic_msi(int node, u32 *lo, u32 *hi)
+
+#define MSI_LO_ADDRESS			0x48
+#define MSI_HI_ADDRESS			0x4c
+
+static void get_io_apic_msi(int node, u32 *lo, u32 *hi)
+{
+	u32 bus, devfn = PCI_DEVFN(0, 0); /* it is iohub2 */
+
+	if (node < 0 || !iohub_online(node))
+		node = 0;
+
+	if (IS_MACHINE_E2S) /* it is iohub */
+		devfn = PCI_DEVFN(1, 0);
+	conf_inl(node, 0,  CONFIG_CMD(0, devfn, PCI_PRIMARY_BUS), &bus);
+
+	bus = (bus >> 8) & 0xFF;
+	/* Read from i2c-spi controller */
+	conf_inl(node, bus,  CONFIG_CMD(bus, PCI_DEVFN(2, 1), MSI_LO_ADDRESS), lo);
+	conf_inl(node, bus,  CONFIG_CMD(bus, PCI_DEVFN(2, 1), MSI_HI_ADDRESS), hi);
+}
+
+static void get_io_epic_msi(int node, u32 *lo, u32 *hi)
 {
 	if (node < 0)
 		node = 0;
@@ -271,17 +332,75 @@ void get_io_pic_msi(int node, u32 *lo, u32 *hi)
 	}
 }
 
+void get_io_pic_msi(int node, u32 *lo, u32 *hi)
+{
+	/*
+	 * QEMU always creates EIOHUB for all CPU models, so we can
+	 * safely use the address from NBSR in guest.
+	 */
+	if (cpu_has_epic() || IS_HV_GM())
+		return get_io_epic_msi(node, lo, hi);
+
+	get_io_apic_msi(node, lo, hi);
+}
+
+void __cold print_IO_PICs(void)
+{
+	int iopic_idx;
+	struct iopic *pic;
+
+	for_each_iopic(pic, iopic_idx) {
+		print_IO_PIC(pic, iopic_idx);
+	}
+}
+
+#ifdef CONFIG_PM
+static int iopic_suspend(void)
+{
+	struct iopic *pic;
+	int i;
+
+	for_each_iopic(pic, i) {
+		int ret = pic->iopic_chip->iopic_suspend(pic);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static void iopic_resume(void)
+{
+	struct iopic *pic;
+	int i;
+
+	for_each_iopic(pic, i) {
+		pic->iopic_chip->iopic_resume(pic);
+	}
+}
+
+static struct syscore_ops iopic_syscore_ops = {
+	.suspend = iopic_suspend,
+	.resume = iopic_resume,
+};
+
+static int __init iopic_init_ops(void)
+{
+	register_syscore_ops(&iopic_syscore_ops);
+	return 0;
+}
+device_initcall(iopic_init_ops);
+#endif /* CONFIG_PM */
+
 #ifdef CONFIG_L_IO_APIC
-static int __init ioapic_init(struct device_node *np,
-			struct device_node *parent)
+static int __init ioapic_init(struct device_node *np, struct device_node *parent)
 {
 	return iopic_init(np, parent, &iopic_ioapic_chip);
 }
 IRQCHIP_DECLARE(apic, "mcst,ioapic", ioapic_init);
 #endif
 #ifdef CONFIG_EPIC
-static int __init ioepic_init(struct device_node *np,
-			struct device_node *parent)
+static int __init ioepic_init(struct device_node *np, struct device_node *parent)
 {
 	return iopic_init(np, parent, &iopic_ioepic_chip);
 }

@@ -35,7 +35,7 @@ long AxifeWriteRegs(struct axife_t *dev, struct core_desc *core);
 int hantro_axife_probe(dtbnode *pnode, int loop, struct axife_t *axifecore);
 void hantro_axife_cleanup(void);
 int hantroaxife_init(void);
-int AXIFEFlush(volatile unsigned char *hwregs);
-void AXIFEEnable(volatile unsigned char *hwregs);
+int AXIFEFlush(volatile u8 __iomem *hwregs);
+void AXIFEEnable(volatile u8 __iomem *hwregs);
 
 #endif //_HANTRO_DEC400_H_

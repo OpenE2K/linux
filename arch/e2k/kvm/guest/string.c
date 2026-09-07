@@ -13,7 +13,7 @@
 
 #include <asm/pv_info.h>
 #include <asm/kvm/hypercall.h>
-#include <asm/kvm/priv-hypercall.h>
+#include <asm/kvm/paravirt_sw/priv-hypercall.h>
 #include <asm/kvm/guest/string.h>
 #include <asm-generic/bug.h>
 

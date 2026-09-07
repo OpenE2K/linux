@@ -35,6 +35,7 @@
 #include <asm/spmc_regs.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
+#include <asm/l_spmc.h>
 
 #ifdef CONFIG_E2K
 #include <asm/boot_recovery.h>
@@ -67,19 +68,19 @@ static struct acpi_spmc_data *gdata;
 
 /* ACPI tainted interfaces and variables */
 
-struct kobject *acpi_kobj;
+static struct kobject *acpi_kobj;
 
 #define ACPI_BUS_FILE_ROOT      "acpi"
-struct proc_dir_entry   *acpi_root_dir;
+static struct proc_dir_entry   *acpi_root_dir;
 #define ACPI_MAX_STRING		80
 
 /* Global vars for handling event proc entry */
 static DEFINE_SPINLOCK(acpi_system_event_lock);
-int event_is_open = 0;
+static int event_is_open = 0;
 static DEFINE_SPINLOCK(acpi_bus_event_lock);
 
-LIST_HEAD(acpi_bus_event_list);
-DECLARE_WAIT_QUEUE_HEAD(acpi_bus_event_queue);
+static LIST_HEAD(acpi_bus_event_list);
+static DECLARE_WAIT_QUEUE_HEAD(acpi_bus_event_queue);
 
 typedef char acpi_bus_id[8];
 typedef char acpi_device_name[40];
@@ -113,7 +114,7 @@ struct acpi_bus_event {
 
 #define ACPI_FIXED_HARDWARE_EVENT	0x00
 
-int acpi_bus_generate_proc_event(const char *device_class, const char *bus_id, u8 type, int data)
+static int acpi_bus_generate_proc_event(const char *device_class, const char *bus_id, u8 type, int data)
 {
 	struct acpi_bus_event *event;
 	unsigned long flags = 0;
@@ -126,8 +127,8 @@ int acpi_bus_generate_proc_event(const char *device_class, const char *bus_id, u
 	if (!event)
 		return -ENOMEM;
 
-	strcpy(event->device_class, device_class);
-	strcpy(event->bus_id, bus_id);
+	strscpy(event->device_class, device_class, sizeof(event->device_class));
+	strscpy(event->bus_id, bus_id, sizeof(event->bus_id));
 	event->type = type;
 	event->data = data;
 
@@ -140,7 +141,7 @@ int acpi_bus_generate_proc_event(const char *device_class, const char *bus_id, u
 	return 0;
 }
 
-int acpi_bus_receive_event(struct acpi_bus_event *event)
+static int acpi_bus_receive_event(struct acpi_bus_event *event)
 {
 	unsigned long flags = 0;
 	struct acpi_bus_event *entry = NULL;
@@ -249,12 +250,12 @@ static int acpi_system_close_event(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static unsigned int acpi_system_poll_event(struct file *file, poll_table * wait)
+static __poll_t acpi_system_poll_event(struct file *file, poll_table * wait)
 {
 	poll_wait(file, &acpi_bus_event_queue, wait);
 	if (!list_empty(&acpi_bus_event_list))
-		return POLLIN | POLLRDNORM;
-	return 0;
+		return EPOLLIN | EPOLLRDNORM;
+	return (__poll_t)0;
 }
 
 static const struct proc_ops acpi_system_event_ops = {
@@ -540,6 +541,12 @@ static ssize_t spmc_store_slptyp(struct device *dev,
 	if (val < SLP_TYP_S0 || val > SLP_TYP_S5)
 		return -EINVAL;
 
+	if (val != SLP_TYP_S0 &&
+		val != SLP_TYP_S3 &&
+		val != SLP_TYP_S4 &&
+		val != SLP_TYP_S5)
+		return -EINVAL;
+
 	raw_spin_lock_irqsave(&c->lock, flags);
 	pci_read_config_dword(c->pdev, ACPI_SPMC_PM1_CNT, &pm1_cnt.reg);
 	pm1_cnt.slp_typx = val;
@@ -811,7 +818,13 @@ static void l_spmc_s3_enter(void *arg)
 
 static int l_spmc_suspend_enter(suspend_state_t state)
 {
+	/* S3 powers off CPUs so save/restore their state */
+	save_processor_state();
+
 	restart_system(l_spmc_s3_enter, l_spmc_pdev);
+
+	restore_processor_state();
+
 	return 0;
 }
 

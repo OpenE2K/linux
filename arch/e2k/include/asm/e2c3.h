@@ -6,14 +6,12 @@
 #ifndef _ASM_E2C3_H_
 #define _ASM_E2C3_H_
 
-#ifndef __ASSEMBLY__
 #ifdef CONFIG_CPU_E2C3
 extern void boot_e2c3_setup_arch(void);
 extern void e2c3_setup_machine(void);
 #else
 static inline void boot_e2c3_setup_arch(void) { }
 static inline void e2c3_setup_machine(void) { }
-#endif
 #endif
 
 #define	E2C3_NR_NODE_CPUS		2

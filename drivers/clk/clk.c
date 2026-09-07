@@ -5424,8 +5424,11 @@ void __init of_clk_init(const struct of_device_id *matches)
 			of_node_put(np);
 			return;
 		}
-
+#ifdef CONFIG_MCST
+		parent->clk_init_cb = (void (*)(struct device_node *))match->data;
+#else
 		parent->clk_init_cb = match->data;
+#endif
 		parent->np = of_node_get(np);
 		list_add_tail(&parent->node, &clk_provider_list);
 	}

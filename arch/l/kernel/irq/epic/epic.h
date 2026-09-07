@@ -114,8 +114,8 @@ extern void __init setup_bsp_epic(void);
  */
 #if defined(CONFIG_E16C) || defined(CONFIG_E2C3) || defined(CONFIG_E12C)
 # define EPIC_MAX_NODE_CPUS	E16C_MAX_NR_NODE_CPUS
-#elif defined(CONFIG_E48C) || defined(CONFIG_E8V7)
-# define EPIC_MAX_NODE_CPUS	E48C_MAX_NR_NODE_CPUS
+#elif defined(CONFIG_E8V7)
+# define EPIC_MAX_NODE_CPUS	E8V7_MAX_NR_NODE_CPUS
 # else
 # define EPIC_MAX_NODE_CPUS	(machine.max_nr_node_cpus)
 #endif

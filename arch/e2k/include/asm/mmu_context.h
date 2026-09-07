@@ -263,8 +263,20 @@ static inline void native_uaccess_restore(const struct uaccess_regs *ua_regs)
  */
 static inline void native_uaccess_enable(void)
 {
-	if (cpu_has(CPU_FEAT_SVSC))
+	if (cpu_has(CPU_FEAT_SVSC)) {
+		/*
+		 * UACCESS_FN_CALL() API assumes that all page faults happen
+		 * in the called function.  This means that compiler must not
+		 * move semi-spec. load at a potentially bad address inside
+		 * the uaccess_{en/dis}able() critical section.
+		 *
+		 * To achieve it uaccess_{en/dis}able() themselves must be
+		 * compiler barriers, and for that *every* path in them must
+		 * contain such a barrier.
+		 */
+		barrier();
 		return;
+	}
 
 	/* Sometimes functions that access user memory are called
 	 * from kernel threads without mm, for example:
@@ -282,8 +294,11 @@ static inline void native_uaccess_disable(void)
 {
 	u64 k_root_ptb;
 
-	if (cpu_has(CPU_FEAT_SVSC))
+	if (cpu_has(CPU_FEAT_SVSC)) {
+		/* See comment in uaccess_enable() */
+		barrier();
 		return;
+	}
 
 	VM_BUG_ON(current->mm && READ_MMU_PID() == E2K_KERNEL_CONTEXT);
 #ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY

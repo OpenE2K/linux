@@ -107,7 +107,7 @@ struct mga2_clk {
 	struct device *dev;
 	void __iomem *regs;
 	int dev_id;
-	const struct mga2_pll *pll;
+	struct mga2_pll pll;
 };
 
 #define __rcrtc(__offset)	 ({				\
@@ -145,6 +145,14 @@ struct mclk {
 	long long nf_i, nf_f;
 };
 
+MODULE_PARM_DESC(pll_frac, "Use pll fraction divisor");
+static bool pll_frac = 0;
+module_param_named(pll_frac, pll_frac, bool, 0400);
+
+static long force_pll[4] = { [0 ... 3] = -1 };
+module_param_array_named(pll, force_pll, long, NULL, 0400);
+MODULE_PARM_DESC(pll, "Force pll settings: nr,nf_i,nf_f,od");
+
 static long mga2_calc_pll(const struct mga2_pll *pll, unsigned long rate,
 				struct mclk *clk, bool verbose)
 {
@@ -169,10 +177,19 @@ static long mga2_calc_pll(const struct mga2_pll *pll, unsigned long rate,
 			fb_div, frac_fb_div, ref_div, post_div);
 	}
 
-	clk->nf_i = fb_div;
-	clk->nf_f = frac_fb_div;
-	clk->nr = ref_div;
-	clk->od = post_div;
+	if (force_pll[0] != -1) {
+		clk->nr = force_pll[0];
+		clk->nf_i = force_pll[1];
+		clk->nf_f = force_pll[2];
+		clk->od = force_pll[3];
+		DRM_DEBUG_KMS("Force dividers - M: %lld.%lld N: %d, postdiv: %d\n",
+			clk->nf_i, clk->nf_f, clk->nr, clk->od);
+	} else {
+		clk->nf_i = fb_div;
+		clk->nf_f = frac_fb_div;
+		clk->nr = ref_div;
+		clk->od = post_div;
+	}
 	clk->nb = 1;
 
 	if (ret) {
@@ -341,7 +358,7 @@ static unsigned long mga2_pll_recalc_rate(struct clk_hw *hw,
 	struct mclk clk;
 	struct mga2_clk *m = to_mga2(hw);
 	return parent_rate;
-	return mga2_calc_pll(m->pll, parent_rate, &clk, false);
+	return mga2_calc_pll(&m->pll, parent_rate, &clk, false);
 }
 
 static long mga2_pll_round_rate(struct clk_hw *hw, unsigned long rate,
@@ -350,7 +367,7 @@ static long mga2_pll_round_rate(struct clk_hw *hw, unsigned long rate,
 	struct mclk clk;
 	struct mga2_clk *m = to_mga2(hw);
 	return rate;
-	return mga2_calc_pll(m->pll, rate, &clk, false);
+	return mga2_calc_pll(&m->pll, rate, &clk, false);
 }
 
 static int mga20_pll_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -358,7 +375,7 @@ static int mga20_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 {
 	struct mclk clk;
 	struct mga2_clk *m = to_mga2(hw);
-	long ret = mga2_calc_pll(m->pll, rate, &clk, true);
+	long ret = mga2_calc_pll(&m->pll, rate, &clk, true);
 	if (ret < 0)
 		return ret;
 	ret = mga20_set_pll(hw, &clk);
@@ -372,7 +389,7 @@ static int mga2_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 {
 	struct mclk clk;
 	struct mga2_clk *m = to_mga2(hw);
-	long ret = mga2_calc_pll(m->pll, rate, &clk, true);
+	long ret = mga2_calc_pll(&m->pll, rate, &clk, true);
 	if (ret < 0)
 		return ret;
 	ret = mga2_set_pll(hw, &clk);
@@ -415,7 +432,9 @@ static int mga2_pll_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	m->dev_id = mga2_get_version(parent);
 	m->dev = dev;
-	m->pll = of_device_get_match_data(dev);
+	memcpy(&m->pll, of_device_get_match_data(dev), sizeof(m->pll));
+	if (pll_frac)
+		m->pll.flags |= MGA2_PLL_USE_FRAC_FB_DIV;
 
 	m->regs = devm_ioremap(dev, res->start, resource_size(res));
 	if (IS_ERR(m->regs))

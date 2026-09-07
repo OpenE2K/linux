@@ -12,7 +12,7 @@
 #include <linux/types.h>
 #include <linux/smp.h>
 #include <linux/tracepoint.h>
-#include <asm/kvm/csd_lock.h>
+#include <asm/kvm/paravirt_sw/csd_lock.h>
 #include <asm/kvm/hypercall.h>
 
 #define	TRACE_PRINT_CSD_CTL(ctl_no) \
@@ -457,7 +457,7 @@ TRACE_EVENT(
 #endif /* _KVM_TRACE_CSD_LOCK_CTL_H */
 
 #undef	TRACE_INCLUDE_PATH
-#define	TRACE_INCLUDE_PATH ../arch/e2k/kvm/paravirt_sw
+#define	TRACE_INCLUDE_PATH ../../arch/e2k/kvm/paravirt_sw
 #undef	TRACE_INCLUDE_FILE
 #define	TRACE_INCLUDE_FILE trace-csd-lock
 

@@ -1,0 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2026 MCST
+ */
+
+	sclkr_timer {
+        compatible = "mcst,sclkr-timer";
+        clock-frequency = <100000000>; /*Hz*/
+	};

@@ -24,7 +24,7 @@ static inline void kvm_print_all_tlb(void)
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */
 
-#include <asm/kvm/vcpu-regs-debug-inline.h>
+#include <asm/kvm/guest/vcpu-regs-debug-inline.h>
 
 #define	debug_guest_regs(task)	false	/* none any guests */
 #define	get_cpu_type_name()	"VCPU"	/* virtual CPU */
@@ -40,10 +40,6 @@ static inline void print_address_tlb(unsigned long address)
 }
 
 static inline void print_all_guest_stacks(void)
-{
-	/* nothing to do, guest has not other guest processes */
-}
-static inline void print_guest_vcpu_stack(struct kvm_vcpu *vcpu)
 {
 	/* nothing to do, guest has not other guest processes */
 }

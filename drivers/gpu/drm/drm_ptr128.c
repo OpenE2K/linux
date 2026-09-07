@@ -63,7 +63,7 @@ static int ptr128_drm_version(struct file *file, unsigned int cmd,
 	if (v.name_len) {
 		if (get_user_tagged_16(ap.qword, tag, &v128p->name) || !IS_AP(ap, tag))
 			return -EFAULT;
-		v.name = (char __user *)AP_PTR(ap);
+		v.name = (char __user *)U_AP_PTR(ap);
 	} else {
 		v.name = NULL;
 	}
@@ -73,7 +73,7 @@ static int ptr128_drm_version(struct file *file, unsigned int cmd,
 	if (v.date_len) {
 		if (get_user_tagged_16(ap.qword, tag, &v128p->date) || !IS_AP(ap, tag))
 			return -EFAULT;
-		v.date = (char __user *)AP_PTR(ap);
+		v.date = (char __user *)U_AP_PTR(ap);
 	} else {
 		v.date = NULL;
 	}
@@ -83,7 +83,7 @@ static int ptr128_drm_version(struct file *file, unsigned int cmd,
 	if (v.desc_len) {
 		if (get_user_tagged_16(ap.qword, tag, &v128p->desc) || !IS_AP(ap, tag))
 			return -EFAULT;
-		v.desc = (char __user *)AP_PTR(ap);
+		v.desc = (char __user *)U_AP_PTR(ap);
 	} else {
 		v.desc = NULL;
 	}
@@ -126,7 +126,7 @@ static int ptr128_drm_getunique(struct file *file, unsigned int cmd,
 	if (uq.unique_len) {
 		if (get_user_tagged_16(ap.qword, tag, &uq128p->unique) || !IS_AP(ap, tag))
 			return -EFAULT;
-		uq.unique = (char __user *)AP_PTR(ap);
+		uq.unique = U_AP_PTR(ap);
 	} else {
 		 uq.unique = NULL;
 	}
@@ -183,7 +183,7 @@ static int ptr128_drm_getmap(struct file *file, unsigned int cmd,
 	m128.size = map.size;
 	m128.type = map.type;
 	m128.flags = map.flags;
-	m128.handle = MAKE_AP(map.handle, 0);
+	m128.handle = MAKE_FAKE_AP(map.handle);
 	m128.mtrr = map.mtrr;
 	if (copy_to_user(argp, &m128, sizeof(m128)))
 		return -EFAULT;
@@ -214,7 +214,7 @@ static int ptr128_drm_addmap(struct file *file, unsigned int cmd,
 
 	m128.offset = map.offset;
 	m128.mtrr = map.mtrr;
-	m128.handle = MAKE_AP(map.handle, 0);
+	m128.handle = MAKE_FAKE_AP(map.handle);
 
 	if (copy_to_user(argp, &m128, sizeof(m128)))
 		return -EFAULT;
@@ -254,7 +254,7 @@ static int copy_one_buf128(void *data, int count, struct drm_buf_entry *from)
 				 .size = from->buf_size,
 				 .low_mark = from->low_mark,
 				 .high_mark = from->high_mark};
-	to = (struct drm_buf_desc __user *)AP_PTR(ap);
+	to = (struct drm_buf_desc __user *)U_AP_PTR(ap);
 	set_u_border(AP_PTR(ap) + AP_OBJ_SIZE(ap));
 	if (copy_to_user(to + count, &v, offsetof(struct drm_buf_desc, flags))) {
 		set_u_border(saved_u_border);
@@ -328,7 +328,7 @@ static int map_one_buf128(void *data, int idx, unsigned long virtual,
 	v.used = 0;
 	if (copy_to_user(to, &v, 3 * sizeof(int)))
 		return -EFAULT;
-	MAKE_TAGGED_AP(v.address, tag, virtual + buf->offset, buf->total);
+	MAKE_TAGGED_AP(v.address, tag, virtual + buf->offset, buf->total, 0);
 	if (put_user_tagged_16(v.address.qword, tag, &to->address))
 		return -EFAULT;
 	return 0;
@@ -376,7 +376,8 @@ static int ptr128_drm_mapbufs(struct file *file, unsigned int cmd,
 	set_u_border(saved_ub);
 	if (put_user(req128.count, &argp->count))
 		return -EFAULT;
-	MAKE_TAGGED_AP(req128.virtual, tag, req64.virtual, req128.count * sizeof(drm_buf_pub128_t));
+	MAKE_TAGGED_AP(req128.virtual, tag,
+		req64.virtual, req128.count * sizeof(drm_buf_pub128_t), 0);
 	if (put_user_tagged_16(req128.virtual.qword, tag, &argp->virtual))
 		return -EFAULT;
 
@@ -400,7 +401,7 @@ static int ptr128_drm_freebufs(struct file *file, unsigned int cmd,
 		return -EFAULT;
 	if (get_user_tagged_16(ap.qword, tag, &argp->list) || !IS_AP(ap, tag))
 		return -EFAULT;
-	request.list = (void __user *)AP_PTR(ap);
+	request.list = U_AP_PTR(ap);
 	set_u_border(AP_PTR(ap) + AP_OBJ_SIZE(ap));
 	return drm_ioctl_kernel(file, drm_legacy_freebufs, &request, DRM_AUTH);
 }
@@ -433,7 +434,6 @@ static int ptr128_drm_getsareactx(struct file *file, unsigned int cmd,
 	drm_ctx_priv_map128_t __user *argp = (void __user *)arg;
 	int err;
 	e2k_ap_t ap;
-	int tag;
 
 	if (get_user(req.ctx_id, &argp->ctx_id))
 		return -EFAULT;
@@ -442,7 +442,7 @@ static int ptr128_drm_getsareactx(struct file *file, unsigned int cmd,
 	if (err)
 		return err;
 
-	MAKE_TAGGED_AP(ap, tag, req.handle, 0);
+	ap = MAKE_FAKE_AP(req.handle);
 	if (put_user_tagged_16(ap.qword, 0, &argp->handle))
 		return -EFAULT;
 
@@ -466,7 +466,7 @@ static int ptr128_drm_resctx(struct file *file, unsigned int cmd,
 		return -EFAULT;
 
 	res.count = res128.count;
-	res.contexts = (struct drm_ctx __user *)AP_PTR(res128.contexts);
+	res.contexts = (struct drm_ctx __user *)U_AP_PTR(res128.contexts);
 	err = drm_ioctl_kernel(file, drm_legacy_resctx, &res, DRM_AUTH);
 	if (err)
 		return err;
@@ -512,12 +512,12 @@ static int ptr128_drm_dma(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		if (AP_OBJ_SIZE(ap) < d.send_count * sizeof(int *))
 			return -EFAULT;
-		d.send_indices = (int __user *)AP_PTR(ap);
+		d.send_indices = (int __user *)U_AP_PTR(ap);
 		if (get_user_tagged_16(ap.qword, tag, &argp->send_sizes) || !IS_AP(ap, tag))
 			return -EFAULT;
 		if (AP_OBJ_SIZE(ap) < d.send_count * sizeof(int *))
 			return -EFAULT;
-		d.send_sizes = (int __user *)AP_PTR(ap);
+		d.send_sizes = (int __user *)U_AP_PTR(ap);
 	} else {
 		d.send_indices = NULL;
 		d.send_sizes = NULL;
@@ -529,12 +529,12 @@ static int ptr128_drm_dma(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		if (AP_OBJ_SIZE(ap) < d.request_count * sizeof(int *))
 			return -EFAULT;
-		d.request_indices = (int __user *)AP_PTR(ap);
+		d.request_indices = (int __user *)U_AP_PTR(ap);
 		if (get_user_tagged_16(ap.qword, tag, &argp->request_sizes) || !IS_AP(ap, tag))
 			return -EFAULT;
 		if (AP_OBJ_SIZE(ap) < d.send_count * sizeof(int *))
 			return -EFAULT;
-		d.request_sizes = (int __user *)AP_PTR(ap);
+		d.request_sizes = (int __user *)U_AP_PTR(ap);
 	} else {
 		d.request_indices = NULL;
 		d.request_sizes = NULL;

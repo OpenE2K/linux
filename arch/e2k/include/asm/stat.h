@@ -8,7 +8,6 @@
 
 #include <uapi/asm/stat.h>
 
-
 /*
  * "struct stat64" should be the same as glibc "struct stat64"
  */

@@ -2087,6 +2087,11 @@ static void rt2800_config_ht_opmode(struct rt2x00_dev *rt2x00dev,
 			gf20_rate = gf40_rate = 0x0003;
 		}
 		break;
+#ifdef CONFIG_MCST
+	default:
+		mm20_mode = mm40_mode = gf20_mode = gf40_mode = 0;
+		break;
+#endif
 	}
 
 	/* check for STAs not supporting greenfield mode */

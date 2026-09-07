@@ -7,14 +7,10 @@
 #ifndef	_E2K_HB_REGS_H_
 #define	_E2K_HB_REGS_H_
 
-#ifdef __KERNEL__
-
 #include <linux/types.h>
-#ifndef	__ASSEMBLY__
 #include <linux/pci.h>
 #include <asm/e2k.h>
 #include <asm/e2k_sic.h>
-#endif	/* __ASSEMBLY__ */
 
 #undef  DEBUG_ERALY_HB_MODE
 #undef  DebugEHB
@@ -140,8 +136,6 @@
 /* Embeded Graphic MSI address register */
 #define	EG_PCI_MSGADDR		0x48			/* 32 bits */
  #define EG_PCI_MESSADGEADDRESS	0xfffffffc		/* [31: 2] */
-
-#ifndef __ASSEMBLY__
 
 /*
  * Host bridge & embeded graphic see as PCI devices on bus #0
@@ -415,9 +409,5 @@ boot_get_legacy_nbsr_base(void)
 	return boot_readll_hb_reg(HB_PCI_LEGACY_BAR) &
 					HB_PCI_LEGACY_MEMORY_BAR;
 }
-
-#endif /* ! __ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
 
 #endif  /* _E2K_HB_REGS_H_ */

@@ -6,10 +6,10 @@
 /dts-v1/;
 
 / {
-	version = "1.0_2024-03-04";
+	version = "1.0_2026-06-18";
 	model = "Elbrus-generic";
 	compatible = "mcst,elbrus-generic";
 
-	#address-cells = <1>;
-	#size-cells = <1>;
+	#address-cells = <2>;
+	#size-cells = <2>;
 };

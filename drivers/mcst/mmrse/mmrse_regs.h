@@ -83,7 +83,7 @@
 
 /* Common_Status Reg  | reset 0x0000:0000 */
 #define COMMON_STATUS_REG		0x00
-#define P_COMMON_STATUS_REG(x)		((void *)((x) + COMMON_STATUS_REG))
+#define P_COMMON_STATUS_REG(x)		((x) + COMMON_STATUS_REG)
   #define COMMON_STATUS_GET_VERSION(r)	GET_FIELD(r, 24, 0xFF)	/* RO [31:24] */
   #define COMMON_STATUS_GET_INTSRC(r)	GET_FIELD(r, 0, 0x07)	/* RO [02:00] */
     #define COMMON_STATUS_INTSRC_BM	4
@@ -93,7 +93,7 @@
 
 /* DMA_Latency Reg  | reset 0x0000:0000 | RO [31:00] */
 #define DMA_LATENCY_REG			0x04
-#define P_DMA_LATENCY_REG(x)		((void *)((x) + DMA_LATENCY_REG))
+#define P_DMA_LATENCY_REG(x)		((x) + DMA_LATENCY_REG)
 
 
 /**
@@ -104,7 +104,7 @@
 
 /* BC_Command Reg     | reset 0x0000:0000 | FIFO x16 */
 #define BC_COMMAND_REG			0x10
-#define P_BC_COMMAND_REG(x)		((void *)((x) + BC_COMMAND_REG))
+#define P_BC_COMMAND_REG(x)		((x) + BC_COMMAND_REG)
   /* Data Word (DW) in Mode Command with Data Word (Receive) */
   #define BC_COMMAND_SET_DW(d)		SET_FIELD(d, 16, 0xFFFF)/* RW [31:16] */
   /* Command Word (CW) next CW in format 3 and 8 */
@@ -116,7 +116,7 @@
 
 /* BC_Result Reg      | reset 0x0000:0000 | no FIFO */
 #define BC_RESULT_REG			0x14
-#define P_BC_RESULT_REG(x)		((void *)((x) + BC_RESULT_REG))
+#define P_BC_RESULT_REG(x)		(((x) + BC_RESULT_REG))
   /* Data Word (DW) in Mode Command with Data Word  (Transmit) */
   #define BC_RESULT_GET_DW(r)		GET_FIELD(r, 16, 0xFFFF)/* RO [31:16] */
   /* Status Word (SW) next SW in format 3 and 8 */
@@ -128,7 +128,7 @@
 
 /* BC_Control Reg     | reset 0x0000:0000 */
 #define BC_CONTROL_REG			0x18
-#define P_BC_CONTROL_REG(x)		((void *)((x) + BC_CONTROL_REG))
+#define P_BC_CONTROL_REG(x)		((x) + BC_CONTROL_REG)
   /* buffer address in system memory */
   #define BC_CONTROL_SET_BUFADDR(d)	(0xFFFFF000UL & (d))	/* RW [31:12] */
   /* interrupt mode */
@@ -142,7 +142,7 @@
 
 /* BC_Status Reg      | reset 0x0000:0100 */
 #define BC_STATUS_REG			0x1C
-#define P_BC_STATUS_REG(x)		((void *)((x) + BC_STATUS_REG))
+#define P_BC_STATUS_REG(x)		((x) + BC_STATUS_REG)
   /* Status Word (SW) in Mode Command - status defines */
   #define BC_STATUS_GET_SW(r)		GET_FIELD(r, 16, 0xFFFF)/* RO [31:16] */
   /* Status Word (SW) Valid */
@@ -178,7 +178,7 @@
 
 /* RT_Control Reg     | reset 0x0000:0000 */
 #define RT_CONTROL_REG			0x20
-#define P_RT_CONTROL_REG(x)		((void *)((x) + RT_CONTROL_REG))
+#define P_RT_CONTROL_REG(x)		((x) + RT_CONTROL_REG)
   /* Data Word (DW) in Mode Command: transmit vector word */
   #define RT_CONTROL_SET_VW(d)		SET_FIELD(d, 16, 0xFFFF)/* RW [31:16] */
   /* Set Dynamic Bus Control Bit in Status Word */
@@ -207,7 +207,7 @@
 
 /* RT_Status Reg      | reset 0x0000:0000 */
 #define RT_STATUS_REG			0x24
-#define P_RT_STATUS_REG(x)		((void *)((x) + RT_STATUS_REG))
+#define P_RT_STATUS_REG(x)		((x) + RT_STATUS_REG)
   /* Data Word (DW) in Mode Command: transmit BIT word */
   #define RT_STATUS_GET_BITW(r)		GET_FIELD(r, 16, 0xFFFF)/* RO [31:16] */
   /* Disable RT (enable through RT_Control.SET_RTA) */
@@ -242,7 +242,7 @@
 
 /* RT_Command Reg     | reset 0x0000:0000 | FIFO*4 - ! FIFO ! */
 #define RT_COMMAND_REG			0x28
-#define P_RT_COMMAND_REG(x)		((void *)((x) + RT_COMMAND_REG))
+#define P_RT_COMMAND_REG(x)		((x) + RT_COMMAND_REG)
   /* Data Word (DW) in Mode Command with Data Word */
   #define RT_COMMAND_GET_DW(r)		GET_FIELD(r, 16, 0xFFFF)/* RO [31:16] */
   /* Command Word (SW) in Mode Command */
@@ -250,41 +250,41 @@
 
 /* RT_Task Reg        | reset 0x0000:0000 */
 #define RT_TASK_REG			0x2C
-#define P_RT_TASK_REG(x)		((void *)((x) + RT_TASK_REG))
+#define P_RT_TASK_REG(x)		((x) + RT_TASK_REG)
   #define RT_TASK_SET_DMAADDR(d)	(0xFFFFFFC0UL & (d))	/* RW [31:06] */
   #define RT_TASK_SET_BUFNUM(d)		SET_FIELD(d, 0, 0x3F)	/* RW [05:00] */
 
 /* RT_IValid Reg      | reset 0x0000:0000 */
 #define RT_IVALID_REG			0x30
-#define P_RT_IVALID_REG(x)		((void *)((x) + RT_IVALID_REG))  /* RW1C */
+#define P_RT_IVALID_REG(x)		((x) + RT_IVALID_REG)  /* RW1C */
 
 /* RT_IFlag Reg       | reset 0x0000:0000 */
 #define RT_IFLAG_REG			0x34
-#define P_RT_IFLAG_REG(x)		((void *)((x) + RT_IFLAG_REG))	/* RO */
+#define P_RT_IFLAG_REG(x)		((x) + RT_IFLAG_REG)	/* RO */
 
 /* RT_IMode Reg       | reset 0x0000:0000 */
 #define RT_IMODE_REG			0x38
-#define P_RT_IMODE_REG(x)		((void *)((x) + RT_IMODE_REG))	/* RW */
+#define P_RT_IMODE_REG(x)		((x) + RT_IMODE_REG)	/* RW */
 
 /* RT_IMask Reg       | reset 0x0000:0000 */
 #define RT_IMASK_REG			0x3C
-#define P_RT_IMASK_REG(x)		((void *)((x) + RT_IMASK_REG))	/* RW */
+#define P_RT_IMASK_REG(x)		((x) + RT_IMASK_REG)	/* RW */
 
 /* RT_OValid Reg      | reset 0x0000:0000 */
 #define RT_OVALID_REG			0x40
-#define P_RT_OVALID_REG(x)		((void *)((x) + RT_OVALID_REG))  /* RW1S */
+#define P_RT_OVALID_REG(x)		((x) + RT_OVALID_REG)  /* RW1S */
 
 /* RT_OFlag Reg       | reset 0x0000:0000 */
 #define RT_OFLAG_REG			0x44
-#define P_RT_OFLAG_REG(x)		((void *)((x) + RT_OFLAG_REG))   /* RW1C */
+#define P_RT_OFLAG_REG(x)		((x) + RT_OFLAG_REG)   /* RW1C */
 
 /* RT_OMode Reg       | reset 0x0000:0000 */
 #define RT_OMODE_REG			0x48
-#define P_RT_OMODE_REG(x)		((void *)((x) + RT_OMODE_REG))	/* RW */
+#define P_RT_OMODE_REG(x)		((x) + RT_OMODE_REG)	/* RW */
 
 /* RT_OMask Reg       | reset 0x0000:0000 */
 #define RT_OMASK_REG			0x4C
-#define P_RT_OMASK_REG(x)		((void *)((x) + RT_OMASK_REG))	/* RW */
+#define P_RT_OMASK_REG(x)		((x) + RT_OMASK_REG)	/* RW */
 
 
 /**
@@ -295,7 +295,7 @@
 
 /* BM_Control Reg     | reset 0x0000:0000 */
 #define BM_CONTROL_REG			0x50
-#define P_BM_CONTROL_REG(x)		((void *)((x) + BM_CONTROL_REG))
+#define P_BM_CONTROL_REG(x)		((x) + BM_CONTROL_REG)
   #define BM_CONTROL_LOG_MASK		((0x3 << 16) | (0x3 << 14))
   /* Log size */
   #define BM_CONTROL_SET_LOGSIZE(d)	SET_FIELD(d, 16, 0x3)	/* RW [17:16] */
@@ -319,12 +319,12 @@
 
 /* BM_SAddr Reg       | reset 0x0000:0000 */
 #define BM_SADDR_REG			0x54
-#define P_BM_SADDR_REG(x)		((void *)((x) + BM_SADDR_REG))
+#define P_BM_SADDR_REG(x)		((x) + BM_SADDR_REG)
   #define BM_SADDR_SET_LOGADDR(d)	(0xFFFFF000UL & (d))	/* RW [31:12] */
 
 /* BM_WPtr Reg        | reset 0x0000:0000 */
 #define BM_WPTR_REG			0x58
-#define P_BM_WPTR_REG(x)		((void *)((x) + BM_WPTR_REG))
+#define P_BM_WPTR_REG(x)		((x) + BM_WPTR_REG)
   /* Int Status */
   #define BM_WPTR_GET_INTSTAT(r)	GET_BIT(r, 31)		/* RW1S [31] */
   #define BM_WPTR_SET_INTACK		SET_BIT(31)		/* RW1S [31] */
@@ -333,7 +333,7 @@
 
 /* BM_RPtr Reg        | reset 0x0000:0000 */
 #define BM_RPTR_REG			0x5C
-#define P_BM_RPTR_REG(x)		((void *)((x) + BM_RPTR_REG))
+#define P_BM_RPTR_REG(x)		((x) + BM_RPTR_REG)
   /* Log Rptr */
   #define BM_RPTR_GET_LOGRPTR(r)	GET_FIELD(r, 0, 0x3FFFF)/* RW [17:00] */
   #define BM_RPTR_SET_LOGRPTR(d)	SET_FIELD(d, 0, 0x3FFFF)/* RW [17:00] */

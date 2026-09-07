@@ -20,13 +20,6 @@
 
 typedef	unsigned long	e2k_addr_t;	/* phys & virt address (64 bits) */
 typedef	unsigned long	e2k_size_t;	/* size of objects (64 bits) */
-		/* what should it be ????? */
-
-/*
- * __xx is ok: it doesn't pollute the POSIX namespace. Use these in the
- * header files exported to user space
- */
-
 
 #endif	/* !(__ASSEMBLY__) */
 

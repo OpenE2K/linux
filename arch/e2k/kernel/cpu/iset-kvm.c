@@ -38,9 +38,9 @@
  * mem_wait_vcpumask_set/reset() waits for interrupt or set/reset vcpu bit in vcpus mask.
  * Note that there can be spurious wakeups as only whole cache lines can be watched.
  */
-static void mem_wait_vcpumask_set_reset(int vcpuid, struct cpumask *vcpumask, bool set)
+static void mem_wait_vcpumask_set_reset(int vcpuid, physid_mask_t *vcpumask, bool set)
 {
-	unsigned long *addr = cpumask_bits(vcpumask);
+	unsigned long *addr = physid_bits(vcpumask);
 	unsigned long *vcpu_p = (addr) + BIT_WORD(vcpuid);
 	unsigned long vcpu_mask = BIT_MASK(vcpuid);
 
@@ -50,11 +50,11 @@ static void mem_wait_vcpumask_set_reset(int vcpuid, struct cpumask *vcpumask, bo
 		E2K_WATCH_FOR_MASK_RESET_64(vcpu_p, vcpu_mask);
 	}
 }
-void mem_wait_vcpumask_set(int vcpuid, struct cpumask *vcpumask)
+void mem_wait_vcpumask_set(int vcpuid, physid_mask_t *vcpumask)
 {
 	mem_wait_vcpumask_set_reset(vcpuid, vcpumask, true);
 }
-void mem_wait_vcpumask_reset(int vcpuid, struct cpumask *vcpumask)
+void mem_wait_vcpumask_reset(int vcpuid, physid_mask_t *vcpumask)
 {
 	mem_wait_vcpumask_set_reset(vcpuid, vcpumask, false);
 }
@@ -66,6 +66,17 @@ static void clear_guest_epic(void)
 	reg.raw = epic_read_w(CEPIC_CTRL2);
 	reg.clear_gst = 1;
 	epic_write_w(CEPIC_CTRL2, reg.raw);
+
+	/*
+	 * Writes to CEPIC_PNMIRR_OR in restore_epic_context() do not
+	 * clear implicit NMI block which can lead to stale blocks left
+	 * from previous guests executing on the same physical CPU.
+	 *
+	 * So clear stale blocks by writing to CEPIC_PNMIRR.  This can
+	 * lead to spurious unblocks but that's OK as we block NMIs
+	 * through %psr and %upsr.
+	 */
+	epic_write_guest_w(CEPIC_PNMIRR, 0);
 }
 
 void save_epic_context(struct kvm_vcpu_arch *vcpu)

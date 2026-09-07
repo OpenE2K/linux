@@ -11,7 +11,6 @@
 #include <linux/kvm_host.h>
 #include <kvm/iodev.h>
 
-#include <asm/host_printk.h>
 #include <asm/io.h>
 #include <asm/spmc_regs.h>
 
@@ -19,10 +18,13 @@
 
 #include "cpu.h"
 #include "mmu.h"
-#include "paravirt_sw/gaccess.h"
 #include "io.h"
 #include "pic.h"
 #include "intercepts.h"
+# ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include "paravirt_sw/gaccess.h"
+#include <asm/kvm/paravirt_sw/host_printk.h>
+# endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #include <trace/events/kvm.h>
 #include <asm/kvm/trace_kvm_hv.h>
@@ -58,13 +60,13 @@
 #define	DIRECT_IO_PORT_ACCESS	0	/* do direct access to IO port from */
 					/* here */
 
-static void copy_io_intc_info_data(void *mmio_data, void *intc_data, void *intc_data_ext,
-					gpa_t gpa, int size, bool to_intc)
+static int copy_io_intc_info_data(void *mmio_data, volatile void *intc_data,
+		volatile void *intc_data_ext, gpa_t gpa, int size, bool to_intc)
 {
 	switch (size) {
 	case 1: {
-		u8 *mmio = (u8 *)mmio_data;
-		u8 *intc = (u8 *)intc_data;
+		u8 *mmio = mmio_data;
+		volatile u8 *intc = intc_data;
 
 		if (to_intc) {
 			*intc = *mmio;
@@ -72,11 +74,11 @@ static void copy_io_intc_info_data(void *mmio_data, void *intc_data, void *intc_
 			int u8_no = (gpa & (sizeof(u64) - 1)) >> 0;
 			*mmio = intc[u8_no];
 		}
-		return;
+		return 0;
 	}
 	case 2: {
-		u16 *mmio = (u16 *)mmio_data;
-		u16 *intc = (u16 *)intc_data;
+		u16 *mmio = mmio_data;
+		volatile u16 *intc = intc_data;
 
 		if (to_intc) {
 			*intc = *mmio;
@@ -84,76 +86,100 @@ static void copy_io_intc_info_data(void *mmio_data, void *intc_data, void *intc_
 			int u16_no = (gpa & (sizeof(u64) - 1)) >> 1;
 			*mmio = intc[u16_no];
 		}
-		return;
+		return 0;
 	}
 	case 4: {
-		u32 *mmio = (u32 *)mmio_data;
-		u32 *intc = (u32 *)intc_data;
+		u32 *mmio = mmio_data;
+		volatile u32 *intc = intc_data;
 
 		if (to_intc) {
 			*intc = *mmio;
 		} else {
 			int u32_no = (gpa & (sizeof(u64) - 1)) >> 2;
-			*mmio = intc[u32_no];
+			u64 val;
+			u8 tag;
+
+			load_value_and_tagd(intc, &val, &tag);
+			if (!u32_no && (tag & 0x3) || u32_no && (tag & 0xc))
+				pr_info_ratelimited("kvm: tagged write to I/O 0x%llx\n", gpa);
+
+			*mmio = (u32_no) ? (val >> 32) : (u32)val;
 		}
-		return;
+		return 0;
 	}
 	case 8: {
-		u64 *mmio = (u64 *)mmio_data;
-		u64 *intc = (u64 *)intc_data;
+		u64 *mmio = mmio_data;
+		volatile u64 *intc = intc_data;
 
 		if (to_intc) {
 			*intc = *mmio;
 		} else {
-			int u64_no = (gpa & (sizeof(u64) - 1)) >> 3;
-			*mmio = intc[u64_no];
+			u64 val;
+			u8 tag;
+
+			load_value_and_tagd(intc, &val, &tag);
+			if (tag)
+				pr_info_ratelimited("kvm: tagged write to I/O 0x%llx\n", gpa);
+
+			*mmio = val;
 		}
-		return;
+		return 0;
 	}
 	case 16: {
-		u64 *mmio = (u64 *)mmio_data;
-		u64 *intc = (u64 *)intc_data;
-		u64 *intc_ext = (u64 *)intc_data_ext;
+		u64 *mmio = mmio_data;
+		volatile u64 *intc = intc_data;
+		volatile u64 *intc_ext = intc_data_ext;
 
-		E2K_KVM_BUG_ON(!intc_ext);
+		if (!intc_ext)
+			return -EINVAL;
 
 		if (to_intc) {
 			*intc = mmio[0];
 			*intc_ext = mmio[1];
 		} else {
-			mmio[0] = *intc;
-			mmio[1] = *intc_ext;
+			u64 val_lo, val_hi;
+			u8 tag_lo, tag_hi;
+
+			load_value_and_tagd(intc, &val_lo, &tag_lo);
+			load_value_and_tagd(intc_ext, &val_hi, &tag_hi);
+			if (tag_lo || tag_hi)
+				pr_info_ratelimited("kvm: tagged write to I/O 0x%llx\n", gpa);
+
+			mmio[0] = val_lo;
+			mmio[1] = val_hi;
 		}
-		return;
+		return 0;
 	}
 	default:
-		E2K_KVM_BUG_ON(true);
+		return -EINVAL;
 	}
 }
 
 int vcpu_mmio_write(struct kvm_vcpu *vcpu, gpa_t addr, int len,
 			   const void *v)
 {
-	if (vcpu->arch.apic &&
-		!kvm_iodevice_write(vcpu, &vcpu->arch.apic->dev, addr, len, v))
+	if (vcpu->arch.apic && !kvm_iodevice_write(vcpu, &vcpu->arch.apic->dev, addr, len, v))
 		return 0;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.epic &&
 		!kvm_iodevice_write(vcpu, &vcpu->arch.epic->dev, addr, len, v))
 		return 0;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return kvm_io_bus_write(vcpu, KVM_MMIO_BUS, addr, len, v);
 }
 
 int vcpu_mmio_read(struct kvm_vcpu *vcpu, gpa_t addr, int len, void *v)
 {
-	if (vcpu->arch.apic &&
-		!kvm_iodevice_read(vcpu, &vcpu->arch.apic->dev, addr, len, v))
+	if (vcpu->arch.apic && !kvm_iodevice_read(vcpu, &vcpu->arch.apic->dev, addr, len, v))
 		return 0;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.epic &&
 		!kvm_iodevice_read(vcpu, &vcpu->arch.epic->dev, addr, len, v))
 		return 0;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return kvm_io_bus_read(vcpu, KVM_MMIO_BUS, addr, len, v);
 }
@@ -184,8 +210,10 @@ static int vcpu_mmio_local_write(struct kvm_vcpu *vcpu, gpa_t gpa,
 	unsigned long data;
 	int ret;
 
-	copy_io_intc_info_data(&data, &intc_info_mu->data, &intc_info_mu->data_ext,
-		gpa, size, false);
+	ret = copy_io_intc_info_data(&data, &intc_info_mu->data,
+			&intc_info_mu->data_ext, gpa, size, false);
+	if (ret)
+		return ret;
 
 	ret = vcpu_mmio_write(vcpu, gpa, size, &data);
 	if (ret != 0) {
@@ -209,8 +237,11 @@ static int vcpu_mmio_local_read(struct kvm_vcpu *vcpu, gpa_t gpa,
 		return ret;
 	}
 
-	copy_io_intc_info_data(&data, &intc_info_mu->data, &intc_info_mu->data_ext,
-		gpa, size, true);
+	ret = copy_io_intc_info_data(&data, &intc_info_mu->data,
+			&intc_info_mu->data_ext, gpa, size, true);
+	if (ret)
+		return ret;
+
 	complete_intc_info_io_read(vcpu, intc_info_mu);
 	return 0;
 }
@@ -257,8 +288,11 @@ static pf_res_t kvm_hv_mmio_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 
 	/* MMIO request should be passed to user space emulation */
 	if (is_write) {
-		copy_io_intc_info_data(vcpu->arch.mmio_data,
-				&intc_info_mu->data, &intc_info_mu->data_ext, gpa, size, false);
+		ret = copy_io_intc_info_data(vcpu->arch.mmio_data, &intc_info_mu->data,
+				&intc_info_mu->data_ext, gpa, size, false);
+		if (ret)
+			return ret;
+
 		DebugMMIOPF("write data 0x%llx data_ext 0x%llx to 0x%llx size %d byte(s)\n",
 			vcpu->arch.mmio_data[0], vcpu->arch.mmio_data[1], gpa, size);
 	}
@@ -297,8 +331,11 @@ static pf_res_t kvm_hv_io_port_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 
 	/* IO port request should be passed to user space emulation */
 	if (is_write) {
-		copy_io_intc_info_data(&vcpu->arch.ioport.data,
+		int ret = copy_io_intc_info_data(&vcpu->arch.ioport.data,
 				&intc_info_mu->data, NULL, gpa, size, false);
+		if (ret)
+			return ret;
+
 		DebugIOPF("write data 0x%llx to port 0x%x size %d byte(s)\n",
 			vcpu->arch.ioport.data, port, size);
 	}
@@ -325,10 +362,8 @@ pf_res_t kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa, intc_info_mu_t *
 	spec = !!cond.spec;
 
 	if (spec && !is_write) {
-		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data,
-			ITAGDWD_IO_DEBUG, ETAGDWD);
-		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data_ext,
-			ITAGDWD_IO_DEBUG, ETAGDWD);
+		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data, ITAGDWD_IO_DEBUG, ETAGDWD);
+		NATIVE_STORE_VALUE_WITH_TAG(&intc_info_mu->data_ext, ITAGDWD_IO_DEBUG, ETAGDWD);
 		complete_intc_info_io_read(vcpu, intc_info_mu);
 		DebugKVMIO("speculative read from IO area - return diag value\n");
 		return 0;
@@ -357,10 +392,12 @@ static int kvm_complete_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 	vcpu->arch.io_intc_info = NULL;
 
 	if (!is_write) {
-		copy_io_intc_info_data(io_data,
-				&intc_info_mu->data, &intc_info_mu->data_ext, gpa, size, true);
-		DebugIOPF("read data 0x%lx data_ext 0x%lx from 0x%llx size %d byte(s)\n",
-			intc_info_mu->data, intc_info_mu->data_ext, gpa, size);
+		int ret = copy_io_intc_info_data(io_data, &intc_info_mu->data,
+				&intc_info_mu->data_ext, gpa, size, true);
+		if (ret)
+			return ret;
+
+		DebugIOPF("read from 0x%llx size %d byte(s)\n", gpa, size);
 		complete_intc_info_io_read(vcpu, intc_info_mu);
 	} else {
 		complete_intc_info_io_write(vcpu, intc_info_mu);
@@ -824,25 +861,5 @@ out:
  */
 int kvm_prefetch_mmio_areas(struct kvm_vcpu *vcpu)
 {
-#if 0
-	struct kvm *kvm = vcpu->kvm;
-	int ret;
-
-	if (!kvm_is_epic(kvm) || !kvm->arch.is_hv)
-		return 0;
-
-	/* Populate the CEPIC page (for HW CEPIC only) */
-	ret = kvm_prefetch_mmu_area(vcpu, EPIC_DEFAULT_PHYS_BASE,
-			EPIC_DEFAULT_PHYS_BASE + PAGE_SIZE,
-			PFERR_NOT_PRESENT_MASK | PFERR_WRITE_MASK);
-	if (ret != 0) {
-		pr_err("%s(): Failed to populate CEPIC page\n", __func__);
-		return ret;
-	}
-	pr_info("%s(): Mapping CEPIC page GPA 0x%x -> HPA 0x%x\n",
-		__func__, EPIC_DEFAULT_PHYS_BASE, EPIC_DEFAULT_PHYS_BASE);
-
-	/* Populate the passthrough IOEPIC page */
-#endif
 	return 0;
 }

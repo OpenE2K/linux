@@ -6,8 +6,6 @@
 #ifndef _E2K_3P_H_ 
 #define _E2K_3P_H_
 
-#ifdef __KERNEL__
-
 #include <asm/mmu_types.h>
 #include <asm/tags.h>
 #include <asm/prot_loader.h>
@@ -67,33 +65,5 @@ struct global_store_trace_record {
 	 * as a backup.
 	 */
 };
-
-#define	IS_SAP_LO(addr)						\
-({								\
-	e2k_rwsap_lo_struct_t *sap_lo;				\
-	sap_lo = (e2k_rwsap_lo_struct_t *) addr; 		\
-	(AS_SAP_STRUCT((*sap_lo)).itag == E2K_SAP_ITAG ?	\
-	(NATIVE_LOAD_TAGD(addr) == E2K_SAP_LO_ETAG ? 1 : 0) : 0); \
-})
-
-#define	IS_SAP_HI(addr)                                  	\
-({                                                              \
-	(NATIVE_LOAD_TAGD(addr) == E2K_SAP_HI_ETAG ? 1 : 0);	\
-})
-
-#define	IS_AP_LO(addr)						\
-({								\
-	e2k_rwap_lo_struct_t *ap_lo;				\
-	ap_lo = (e2k_rwap_lo_struct_t *) addr; 		        \
-	(AS_AP_STRUCT((*ap_lo)).itag == E2K_AP_ITAG ?	        \
-	(NATIVE_LOAD_TAGD(addr) == E2K_AP_LO_ETAG ? 1 : 0) : 0); \
-})
-
-#define	IS_AP_HI(addr)                                  	\
-({                                                              \
-	(NATIVE_LOAD_TAGD(addr) == E2K_AP_HI_ETAG ? 1 : 0);	\
-})
-
-#endif /* __KERNEL__ */
 
 #endif /* _E2K_3P_H_ */

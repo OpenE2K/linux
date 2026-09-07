@@ -4,7 +4,7 @@
 #endif
 
 #include "init.h"
-#include "printk.h"
+#include "console/printk.h"
 
 void x86emu_dump_xregs(void);
 

@@ -171,6 +171,9 @@ int get_descriptor_ranges_on_mm(unsigned long addr, e2k_addr_t *base,
 	end = vma->vm_end;
 	ret = 0;
 
+	if (check_pm_sc_debug_mode(PM_SC_UNSAFE_EXT_REPAIRED_BOUNDARIES) == 0)
+		goto out;
+
 	/* Trying to extend lower boundary: */
 	for (vma = vma_lookup(mm, start - 1); vma && vma->vm_flags & flags;
 	     vma = vma_lookup(mm, start - 1))
@@ -249,8 +252,16 @@ int get_descriptor_ranges_on_global_or_pl(unsigned long addr, e2k_addr_t *base,
 /* used by soft_pm: */
 EXPORT_SYMBOL_GPL(get_descriptor_ranges_on_global_or_pl);
 
+/**
+ * sys_unsafe_uint64_to_ptr() - search for valid memory area allocated on the given address
+ * @addr: address to search for
+ * @options: see defines PM_SC_UNSAFE_UINT64_TO_PTR_*
+ * @ret_addr: to put formed "unsafe" descriptor at this address if any
+ *
+ * Return: 0 - "unsafe" descriptor formed; error code otherwise.
+ */
 notrace __section(".entry.text") long sys_unsafe_uint64_to_ptr(
-	unsigned long addr, unsigned long options, const unsigned long unused3,
+	unsigned long addr, unsigned long options, void __user *ret_addr,
 	const unsigned long unused4, const unsigned long unused5,
 	const unsigned long unused6, struct pt_regs *regs)
 {
@@ -265,27 +276,26 @@ notrace __section(".entry.text") long sys_unsafe_uint64_to_ptr(
 	       check_pm_sc_debug_mode(PM_SC_UNSAFE_UINT64_TO_PTR_ENABLED));
 
 	if (check_pm_sc_debug_mode(PM_SC_UNSAFE_UINT64_TO_PTR_ENABLED) == 0) {
-		PROTECTED_MODE_WARNING(PMSCERRMSG_SC_NOT_ENABLED,
+		PROTECTED_MODE_ERR_ONCE(PMSCERRMSG_SC_NOT_ENABLED,
 				       regs->sys_num, sys_call_ID_to_name[regs->sys_num]);
-		PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EPERM);
 		return sys_ni_syscall();
 	}
 
-	if (addr < mmap_min_addr) {
-		PROTECTED_MODE_WARNING(PMSCERRMSG_SC_WRONG_ARG_VALUE_LX,
-				     sys_call_ID_to_name[regs->sys_num], "addr", addr);
-		PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EINVAL);
-		goto out_err;
-	} else if (!addr ||
-	    addr >= user_addr_max()) { /* it doesn't look like valid address */
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_WRONG_ARG_VALUE_LX,
-				     sys_call_ID_to_name[regs->sys_num], "addr", addr);
+	if (addr < mmap_min_addr) { /* This must be a numerical value, not a pointer */
+		PROTECTED_MODE_WARN_ONCE(PMSCERRMSG_SC_WRONG_ARG_VALUE_LX_vs_LX,
+			sys_call_ID_to_name[regs->sys_num], "addr", addr, "<", mmap_min_addr);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+		goto out_err;
+	} else if (!addr || addr >= user_addr_max()) { /* it doesn't look like a valid address */
+		PROTECTED_MODE_ERROR(PMSCERRMSG_SC_WRONG_ARG_VALUE_LX_vs_LX,
+			sys_call_ID_to_name[regs->sys_num], "addr", addr, ">=", user_addr_max());
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
+		PROTECTED_MODE_WARN_ONCE(PMSCERRMSG_USE_TECH48);
 		goto out_err;
 	}
 
 	if (unlikely(prot_sc_arg_tag(1, regs))) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_UNEXP_ARG_TAG_ID, regs->sys_num,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_UNEXP_ARG_TAG_ID, regs->sys_num,
 				     sys_call_ID_to_name[regs->sys_num],
 				     prot_sc_arg_tag(1, regs), 1 /*argN*/);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EINVAL);
@@ -294,6 +304,7 @@ notrace __section(".entry.text") long sys_unsafe_uint64_to_ptr(
 
 	/* Calculating descriptor boundaries: */
 	bool is_global = false, is_pl = false;
+
 	/* Looking for boundaries in globals and code sections: */
 	rval = get_descriptor_ranges_on_global_or_pl(addr, &base, &length, &pl,
 						     &is_global, &is_pl, regs);
@@ -304,11 +315,19 @@ notrace __section(".entry.text") long sys_unsafe_uint64_to_ptr(
 	if (is_global)
 		goto boundaries_found;
 
-	/* Looking for boundaries in stacks: */
+	/* Looking for boundaries in stack: */
 	rval = get_descriptor_ranges_on_stacks(addr, &base, &length, options,
 					       regs);
-	if (!rval)
+	if (!rval) {
+		PROTECTED_MODE_WARN_ONCE(PMSCERRMSG_THIS_IS_UNSAFE_BINARY,
+					 current->pid, current->comm);
+		if (check_pm_sc_debug_mode(PM_SC_DBG_WARN_ON_REPAIRED_SAP) &&
+				!check_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES))
+			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_WARNING,
+					       PMSCERRMSG_UNSAFE_SAP,
+					       current->pid, current->comm, addr);
 		goto boundaries_found;
+	}
 
 	/* Looking for boundaries in MM: */
 	rval = get_descriptor_ranges_on_mm(addr, &base, &length, regs);
@@ -324,19 +343,25 @@ notrace __section(".entry.text") long sys_unsafe_uint64_to_ptr(
 
 boundaries_found: /* for stacks, mm and globals */
 	if (!access_ok((void __user *)base, length)) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_WRONG_ARG_VALUE_LX,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_SC_WRONG_ARG_VALUE_LX,
 				     sys_call_ID_to_name[regs->sys_num], "addr",
 				     addr);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EPERM);
 		goto out_err;
 	}
+	if (check_pm_sc_debug_mode(PM_SC_NO_CLEAN_DESCRIPTORS) == 0)
+		PROTECTED_MODE_WARN_ONCE(PMSCERRMSG_SC_CLEAN_DESCR_IN_UNSAFE);
+	PROTECTED_MODE_WARN_ONCE(PMSCERRMSG_THIS_IS_UNSAFE_BINARY, current->pid, current->comm);
 	offset = addr - base;
 	DbgSCP("(0x%lx) :: base=0x%lx length=0x%lx offset=0x%lx // 1st out byte: 0x%lx\n",
 	       addr, base, length, addr - base, base + length);
 
-	ap = new_ap(base, length, offset, RW_ENABLE);
+	ap = MAKE_AP_IND(base, length, offset);
 	rv1_tag = E2K_AP_LO_ETAG;
 	rv2_tag = E2K_AP_HI_ETAG;
+
+	if (ret_addr && (options & PM_SC_UNSAFE_UINT64_TO_PTR_RETURN_MODE))
+		rval = put_user_tagged_16(ap.qword, ETAGAPQ, ret_addr);
 
 ap_out:
 	DbgSCP("(0x%lx) :: rval = %ld (0x%lx) dscr = 0x%llx : 0x%llx.%.8llx  t1/t2=0x%x/0x%x\n",

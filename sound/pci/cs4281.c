@@ -1127,7 +1127,11 @@ static ssize_t snd_cs4281_BA1_read(struct snd_info_entry *entry,
 				   size_t count, loff_t pos)
 {
 	struct cs4281 *chip = entry->private_data;
-	
+
+#ifdef	CONFIG_MCST
+	/* l-gpio uses BAR1 */
+	return -ENODEV;
+#endif
 	if (copy_to_user_fromio(buf, chip->ba1 + pos, count))
 		return -EFAULT;
 	return count;

@@ -178,9 +178,9 @@ typedef struct {
 	intc_info_mu_hdr_t hdr;
 	unsigned long gpa;
 	unsigned long gva;
-	unsigned long data;
+	volatile u64 data;
 	tc_cond_t condition;
-	unsigned long data_ext;
+	volatile u64 data_ext;
 	tc_mask_t mask;
 	bool no_restore;
 	bool modify_data;

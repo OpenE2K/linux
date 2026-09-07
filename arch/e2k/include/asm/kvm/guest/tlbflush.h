@@ -15,7 +15,7 @@
 #define _E2K_KVM_GUEST_TLBFLUSH_H
 
 #include <linux/mm_types.h>
-#include <asm/kvm/tlbflush.h>
+#include <asm/kvm/paravirt_sw/tlbflush.h>
 #include <asm/tlbflush.h>
 
 #ifdef CONFIG_KVM_GUEST_KERNEL

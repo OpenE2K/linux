@@ -13,6 +13,7 @@
 #include <linux/module.h>
 
 #include <asm/bootinfo.h>
+#include <linux/mtd/mtd.h>
 
 #ifdef CONFIG_BOOT_TRACE
 #include <asm/boot_profiling.h>
@@ -34,6 +35,30 @@
 
 #define	BOOTDATA_FILENAME	"bootdata"
 #define LOADTIME_FILENAME	"loadtime"
+#define BOOTDATA_SYS_FILENAME	"boot"
+
+#define SER_STR_SIZE	32
+#define MAC_STR_SIZE	32
+#define UUID_STR_SIZE	64
+
+#define BOOT_COMMIT_STR_SIZE	32
+#define BOOT_DATE_STR_SIZE		32
+#define BOOT_VER_SIZE_STR		64
+#define BOOT_COMMIT_SIZE_STR	64
+#define BOOT_TARGET_SIZE_STR	64
+#define BOOT_TYPE_STR_SIZE		64
+
+#define DATE_INDEX		0
+#define VERSION_INDEX	1
+#define COMPILER_INDEX	2
+#define AUTHOR_INDEX	3
+#define RAW_INDEX		4
+#define MTD_PARTITION_NUMBER 0
+
+#define MAX_ITEMS				256
+#define MAX_PNS_CHECKSUM_SIZE	9
+#define MAX_KEY_SIZE			64
+#define MAX_VALUE_SIZE			256
 
 
 #ifdef CONFIG_BOOT_TRACE
@@ -55,19 +80,31 @@ static loadtime_tpnt_t 	loadtime_tpnt_arr[LOADTIME_TPNT_NUM] = {
 };
 #endif	/* CONFIG_BOOT_TRACE */
 
+struct key_value_pair {
+	char key[MAX_KEY_SIZE];
+	char value[MAX_VALUE_SIZE];
+};
+
+struct private_data {
+	struct key_value_pair items[MAX_ITEMS];
+	size_t last_item;
+	char pns_checksum[MAX_PNS_CHECKSUM_SIZE];
+	struct mutex mutex_mtd;
+};
+
+struct procshow_data {
+	struct kobject kobj;
+	struct private_data *priv;
+};
 
 #if defined(CONFIG_E2K) || defined(CONFIG_E90S)
 #define RDMA_FILENAME		"rdmainfo"
-struct proc_dir_entry	*rdma_entry = NULL;
-EXPORT_SYMBOL(rdma_entry);
-const struct proc_ops *rdma_proc_ops_pointer = NULL;
-EXPORT_SYMBOL(rdma_proc_ops_pointer);
+static struct proc_dir_entry	*rdma_entry = NULL;
+static const struct proc_ops *rdma_proc_ops_pointer = NULL;
 
 #define NODES_FILENAME		"nodesinfo"
-struct proc_dir_entry *nodes_entry = NULL;
-EXPORT_SYMBOL(nodes_entry);
-const struct proc_ops *nodes_proc_ops_pointer = NULL;
-EXPORT_SYMBOL(nodes_proc_ops_pointer);
+static struct proc_dir_entry *nodes_entry = NULL;
+static const struct proc_ops *nodes_proc_ops_pointer = NULL;
 #endif
 
 
@@ -79,14 +116,14 @@ EXPORT_SYMBOL(nodes_proc_ops_pointer);
 	 ((bootblock_virt->info.bootlog_len % BOOTLOG_BLOCK_SIZE) ? \
 			1 : 0))
 
-static void get_uuid(__u8 *uuid, char *uuidstr)
+static void get_uuid_clean(__u8 *uuid, char *uuidstr)
 {
 	int i;
 	uuidstr[0] = 0;
 	for (i = 0; i < 16; i++) {
 		if (uuid[i] != 0) {
-			snprintf(uuidstr, 64,
-				"uuid='%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x'\n",
+			snprintf(uuidstr, UUID_STR_SIZE,
+				"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
 				uuid[0], uuid[1], uuid[2], uuid[3],
 				uuid[4], uuid[5], uuid[6], uuid[7],
 				uuid[8], uuid[9], uuid[10], uuid[11],
@@ -96,31 +133,50 @@ static void get_uuid(__u8 *uuid, char *uuidstr)
 	}
 }
 
-static void get_macaddr(__u8 *mac_addr, char *macstr)
+static void get_macaddr_clean(__u8 *mac_addr, char *macstr)
 {
 	macstr[0] = 0;
 	if (mac_addr[3] != 0 && mac_addr[4] != 0 && mac_addr[5] != 0) {
-		snprintf(macstr, 32,
-			"mac='%02X:%02X:%02X:%02X:%02X:%02X'\n",
+		snprintf(macstr, MAC_STR_SIZE,
+			"%02X:%02X:%02X:%02X:%02X:%02X",
 			mac_addr[0], mac_addr[1],
 			mac_addr[2], mac_addr[3],
 			mac_addr[4], mac_addr[5]);
 	}
+}
+static void get_uuid(__u8 *uuid, char *uuidstr)
+{
+	char clean_uuidstr[UUID_STR_SIZE];
+	get_uuid_clean(bootblock_virt->info.uuid, clean_uuidstr);
+	if (strlen(clean_uuidstr))
+		snprintf(uuidstr, UUID_STR_SIZE, "uuid='%s'\n", clean_uuidstr);
+	else
+		snprintf(uuidstr, UUID_STR_SIZE, "");
+}
+
+static void get_macaddr(__u8 *mac_addr, char *macstr)
+{
+	char clean_macstr[MAC_STR_SIZE];
+	get_macaddr_clean(bootblock_virt->info.mac_addr, clean_macstr);
+	if (strlen(clean_macstr))
+		snprintf(macstr, MAC_STR_SIZE, "mac='%s'\n", clean_macstr);
+	else
+		snprintf(macstr, MAC_STR_SIZE, "");
 }
 
 static void get_sernum(__u64 mach_serialn, char *serstr)
 {
 	serstr[0] = 0;
 	if (mach_serialn != 0) {
-		snprintf(serstr, 32, "serial='%llu'\n", mach_serialn);
+		snprintf(serstr, SER_STR_SIZE, "serial='%llu'\n", mach_serialn);
 	}
 }
 
 static int bootdata_proc_show(struct seq_file *m, void *data)
 {
-	char serstr[32];
-	char macstr[32];
-	char uuidstr[64];
+	char serstr[SER_STR_SIZE];
+	char macstr[MAC_STR_SIZE];
+	char uuidstr[UUID_STR_SIZE];
 
 	get_sernum(bootblock_virt->info.mach_serialn, serstr);
 	get_macaddr(bootblock_virt->info.mac_addr, macstr);
@@ -590,6 +646,600 @@ static const struct proc_ops bootlog_proc_ops = {
 	.proc_release = seq_release
 };
 
+static struct kobject *bootdata_sys_kobj;
+static struct kobject *bootbin_sys_kobj;
+
+static ssize_t boot_ver_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	char boot_ver_clean[BOOT_VER_SIZE_STR] = "unknown";
+	const char *raw_ver = bootblock_virt->info.boot_ver;
+
+	if (!raw_ver)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", boot_ver_clean);
+
+	const char *p_colons = strstr(raw_ver, "::");
+
+	if (p_colons) {
+		const char *start = raw_ver;
+
+		while ((start < p_colons) && (*start == ' ' || *start == '\t'
+				|| *start == '\n' || *start == '\r'))
+			start++;
+
+		const char *end = p_colons;
+
+		while (end > start && (*(end - 1) == ' ' || *(end - 1) == '\t' ||
+				*(end - 1) == '\n' || *(end - 1) == '\r'))
+			end--;
+
+		const char *p_release_end = strstr(start, "-");
+
+		if (p_release_end && (p_release_end - start == 3) &&
+				strncmp(start, "pre", 3) == 0) {
+			p_release_end = strstr(p_release_end + 1, "-");
+		}
+
+		if (p_release_end && p_release_end < end) {
+			p_release_end++;
+			size_t boot_ver_len = end - p_release_end;
+			if (boot_ver_len > 0 && boot_ver_len < sizeof(boot_ver_clean)) {
+				strncpy(boot_ver_clean, p_release_end, boot_ver_len);
+				boot_ver_clean[boot_ver_len] = '\0';
+			}
+		}
+	}
+	return scnprintf(buf, PAGE_SIZE, "%s\n", boot_ver_clean);
+}
+
+static ssize_t boot_type_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	char boot_type[BOOT_TYPE_STR_SIZE] = "unknown";
+	const char *raw_ver = bootblock_virt->info.boot_ver;
+
+	if (!raw_ver)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", boot_type);
+
+	const char *p_colons = strstr(raw_ver, "::");
+
+	if (p_colons) {
+		const char *start = raw_ver;
+
+		while ((start < p_colons) && (*start == ' ' || *start == '\t'
+				|| *start == '\n' || *start == '\r'))
+			start++;
+
+		const char *end = p_colons;
+
+		while (end > start && (*(end - 1) == ' ' || *(end - 1) == '\t' ||
+				*(end - 1) == '\n' || *(end - 1) == '\r'))
+			end--;
+
+		const char *p_release_end = strstr(start, "-");
+
+		if (p_release_end && (p_release_end - start == 3) &&
+				strncmp(start, "pre", 3) == 0) {
+			p_release_end = strstr(p_release_end + 1, "-");
+		}
+
+		size_t len = end - start;
+
+		if (p_release_end && p_release_end < end) {
+			size_t len_release = p_release_end - start;
+			if (len_release >= sizeof(boot_type))
+				len_release = sizeof(boot_type) - 1;
+
+			strncpy(boot_type, start, len_release);
+			boot_type[len_release] = '\0';
+		} else {
+			if (len > 0 && len < sizeof(boot_type)) {
+				strncpy(boot_type, start, len);
+				boot_type[len] = '\0';
+			}
+		}
+	}
+	return scnprintf(buf, PAGE_SIZE, "%s\n", boot_type);
+}
+
+static ssize_t boot_target_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	char boot_target[BOOT_TARGET_SIZE_STR] = "unknown";
+	const char *raw_ver = bootblock_virt->info.boot_ver;
+
+	if (!raw_ver)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", boot_target);
+
+	const char *p_commit = strstr(raw_ver, "commit ");
+
+	if (p_commit) {
+		const char *end = NULL;
+		const char *start = strchr(p_commit, '(');
+
+		if (start)
+			end = strchr(start, ')');
+
+		if (start && end && end > start) {
+			start++;
+			size_t boot_target_len = end - start;
+			strncpy(boot_target, start, boot_target_len);
+			boot_target[boot_target_len] = '\0';
+		}
+	}
+	return scnprintf(buf, PAGE_SIZE, "%s\n", boot_target);
+}
+
+static ssize_t boot_commit_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	char boot_commit[BOOT_COMMIT_SIZE_STR] = "unknown";
+	const char *raw_ver = bootblock_virt->info.boot_ver;
+
+	if (!raw_ver)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", boot_commit);
+
+	const char *p_commit = strstr(raw_ver, "commit ");
+
+	if (p_commit) {
+		p_commit += 7;
+		strscpy(boot_commit, p_commit, sizeof(boot_commit));
+
+		char *comma = strchr(boot_commit, ',');
+		if (comma)
+			*comma = '\0';
+	}
+	return scnprintf(buf, PAGE_SIZE, "%s\n", boot_commit);
+}
+
+static ssize_t boot_commit_date_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	char boot_date_iso[BOOT_DATE_STR_SIZE] = "unknown";
+	const char *raw_ver = bootblock_virt->info.boot_ver;
+
+	if (!raw_ver)
+		return scnprintf(buf, PAGE_SIZE, "%s\n", boot_date_iso);
+
+	char *p_commit = strstr(raw_ver, "commit ");
+
+	if (p_commit) {
+		p_commit += 7;
+
+		char *comma = strchr(p_commit, ',');
+		if (comma) {
+			const char *date_src = comma + 1;
+
+			while (*date_src == ' ' || *date_src == '\t')
+				date_src++;
+
+			bool date_exist = true;
+
+			for (int i = 0; i < 12; i++)
+				if (!isdigit((unsigned char)date_src[i])) {
+					date_exist = false;
+					break;
+				}
+
+			if (date_exist)
+				snprintf(boot_date_iso, sizeof(boot_date_iso),
+					"%c%c%c%c-%c%c-%c%cT%c%c:%c%c",
+					date_src[0], date_src[1], date_src[2],
+					date_src[3], date_src[4], date_src[5],
+					date_src[6], date_src[7], date_src[8],
+					date_src[9], date_src[10], date_src[11]);
+		}
+	}
+	return scnprintf(buf, PAGE_SIZE, "%s\n", boot_date_iso);
+}
+
+static ssize_t mb_type_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", mcst_mb_name);
+}
+
+static ssize_t mb_type_raw_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "0x%x\n", bootblock_virt->info.mb_type);
+}
+
+static ssize_t cpu_type_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", GET_CPU_TYPE_NAME(bootblock_virt->info.cpu_type));
+}
+
+static ssize_t cache_lines_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%lu\n",
+					(unsigned long)bootblock_virt->info.cache_lines_damaged);
+}
+
+static ssize_t reset_type_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "0x%x\n", bootblock_virt->info.reset_type);
+}
+
+static ssize_t uuid_boot_part_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	char clean_uuidstr[UUID_STR_SIZE];
+	get_uuid_clean(bootblock_virt->info.uuid, clean_uuidstr);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", clean_uuidstr);
+}
+
+static ssize_t mac_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	char clean_macstr[MAC_STR_SIZE];
+	get_macaddr_clean(bootblock_virt->info.mac_addr, clean_macstr);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", clean_macstr);
+}
+
+static struct kobj_attribute boot_type_attr = __ATTR_RO(boot_type);
+static struct kobj_attribute boot_ver_attr = __ATTR_RO(boot_ver);
+static struct kobj_attribute boot_commit_attr = __ATTR_RO(boot_commit);
+static struct kobj_attribute boot_commit_date_attr = __ATTR_RO(boot_commit_date);
+static struct kobj_attribute boot_target_attr = __ATTR_RO(boot_target);
+static struct kobj_attribute mb_type_attr = __ATTR_RO(mb_type);
+static struct kobj_attribute mb_type_raw_attr = __ATTR_RO(mb_type_raw);
+static struct kobj_attribute cpu_type_attr = __ATTR_RO(cpu_type);
+static struct kobj_attribute cache_lines_attr = __ATTR_RO(cache_lines);
+static struct kobj_attribute reset_type_attr = __ATTR_RO(reset_type);
+static struct kobj_attribute uuid_boot_part_attr = __ATTR_RO(uuid_boot_part);
+static struct kobj_attribute mac_attr = __ATTR_RO(mac);
+
+static struct attribute *boot_sys_attrs[] = {
+	&boot_type_attr.attr,
+	&boot_ver_attr.attr,
+	&boot_commit_attr.attr,
+	&boot_commit_date_attr.attr,
+	&boot_target_attr.attr,
+	&mb_type_attr.attr,
+	&mb_type_raw_attr.attr,
+	&cpu_type_attr.attr,
+	&cache_lines_attr.attr,
+	&reset_type_attr.attr,
+	&mac_attr.attr,
+	&uuid_boot_part_attr.attr,
+	NULL,
+};
+
+static struct attribute_group bootdata_sys_attr_group = {
+	.attrs = boot_sys_attrs,
+};
+
+#ifdef CONFIG_MTD
+int read_keys(struct mtd_info *mtd, size_t *offset, struct private_data *priv)
+{
+	char *key_p;
+	char *val_p;
+	size_t bytes_read;
+	size_t key_len;
+	size_t val_len;
+
+	size_t bytes_in_buf = 0;
+	size_t cur_pos = 0;
+	int was_border = 1;
+	char *buf = kzalloc(0x2000, GFP_KERNEL);
+
+	while (buf) {
+		if (*offset >= mtd->size) {
+			pr_warn("Second BOOTBOOT in Signature not found: reached end of MTD device!\n");
+			kfree(buf);
+			return -1;
+		}
+		if (priv->last_item >= MAX_ITEMS) {
+			pr_warn("Signature contains too many key-value pairs (> %d)\n", MAX_ITEMS);
+			kfree(buf);
+			return -1;
+		}
+		if (was_border) {
+			size_t bytes_over = bytes_in_buf - cur_pos;
+			if (bytes_over > 0)
+				memmove(buf, buf + cur_pos, bytes_over);
+			cur_pos = 0;
+			bytes_in_buf = bytes_over;
+
+			int err = mtd_read(mtd, *offset, 0x1000, &bytes_read, buf + bytes_in_buf);
+			if (err && err != -EUCLEAN) {
+				kfree(buf);
+				return -1;
+			}
+			if (!bytes_read) {
+				kfree(buf);
+				return -1;
+			}
+			*offset += bytes_read;
+			bytes_in_buf += bytes_read;
+			was_border = 0;
+		}
+
+		key_p = buf + cur_pos;
+		key_len = strnlen(key_p, bytes_in_buf - cur_pos);
+
+		if (cur_pos + key_len == bytes_in_buf) {
+			was_border = 1;
+			continue;
+		}
+
+		if (!strcmp(key_p, "BOOTBOOT")) {
+			kfree(buf);
+			return 0;
+		}
+
+		cur_pos += key_len + 1;
+		while (cur_pos < bytes_in_buf && buf[cur_pos] == '\0')
+			cur_pos++;
+
+		val_p = buf + cur_pos;
+		val_len = strnlen(val_p, bytes_in_buf - cur_pos);
+
+		if (cur_pos + val_len == bytes_in_buf) {
+			was_border = 1;
+			cur_pos = key_p - buf;
+			continue;
+		}
+
+		cur_pos += val_len + 1;
+		while (cur_pos < bytes_in_buf && buf[cur_pos] == '\0')
+			cur_pos++;
+
+		if (!strncmp(key_p, "BFLAGS", strlen("BFLAGS")))
+			continue;
+		if (!strncmp(key_p, "DATE", strlen("DATE"))) {
+			strlcpy(priv->items[DATE_INDEX].key, "DATE", MAX_KEY_SIZE);
+			strlcpy(priv->items[DATE_INDEX].value, val_p, MAX_VALUE_SIZE);
+			continue;
+		}
+		if (!strncmp(key_p, "VERSION", strlen("VERSION"))) {
+			strlcpy(priv->items[VERSION_INDEX].key, "VERSION", MAX_KEY_SIZE);
+			strlcpy(priv->items[VERSION_INDEX].value, val_p, MAX_VALUE_SIZE);
+			continue;
+		}
+		if (!strncmp(key_p, "COMPILER", strlen("COMPILER"))) {
+			strlcpy(priv->items[COMPILER_INDEX].key, "COMPILER", MAX_KEY_SIZE);
+			strlcpy(priv->items[COMPILER_INDEX].value, val_p, MAX_VALUE_SIZE);
+			continue;
+		}
+		if (!strncmp(key_p, "AUTHOR", strlen("AUTHOR"))) {
+			strlcpy(priv->items[AUTHOR_INDEX].key, "AUTHOR", MAX_KEY_SIZE);
+			strlcpy(priv->items[AUTHOR_INDEX].value, val_p, MAX_VALUE_SIZE);
+			continue;
+		}
+		strlcpy(priv->items[priv->last_item].key, key_p, MAX_KEY_SIZE);
+		strlcpy(priv->items[priv->last_item].value, val_p, MAX_VALUE_SIZE);
+		priv->last_item++;
+	}
+	kfree(buf);
+	return 0;
+}
+
+static int mtd_access(struct private_data *priv)
+{
+	size_t bytes_read;
+	struct mtd_info *mtd;
+	char *read_buf = NULL;
+	size_t offset = 0;
+	int err = 0;
+	uint64_t pns_size = 0;
+	int read_status = 0;
+
+	mtd = get_mtd_device(NULL, MTD_PARTITION_NUMBER);
+	if (IS_ERR(mtd))
+		return PTR_ERR(mtd);
+
+	read_buf = kzalloc(0x1000, GFP_KERNEL);
+	if (!read_buf) {
+		put_mtd_device(mtd);
+		return -ENOMEM;
+	}
+	*read_buf = '\0';
+
+	while (!err || err == -EUCLEAN) {
+		if (offset >= mtd->size) {
+			pr_warn("Signature not found: reached end of MTD device!\n");
+			kfree(read_buf);
+			if (mtd)
+				put_mtd_device(mtd);
+			return -1;
+		}
+		if (!strncmp(read_buf, "BOOTBOOT", strlen("BOOTBOOT"))) {
+			pns_size =	(uint64_t)(read_buf[15]) << 56 |
+						(uint64_t)(read_buf[14]) << 48 |
+						(uint64_t)(read_buf[13]) << 40 |
+						(uint64_t)(read_buf[12]) << 32 |
+						(uint64_t)(read_buf[11]) << 24 |
+						(uint64_t)(read_buf[10]) << 16 |
+						(uint64_t)(read_buf[9]) << 8  |
+						(uint64_t)(read_buf[8]);
+			offset += 0x10;
+			read_status = read_keys(mtd, &offset, priv);
+			break;
+		}
+		offset += 0x10000;
+		err = mtd_read(mtd, offset, 0x1000, &bytes_read, read_buf);
+	}
+
+	if (pns_size) {
+		err = mtd_read(mtd, pns_size - 0x8, 0x8, &bytes_read, read_buf);
+		if (!err || err == -EUCLEAN)
+			strlcpy(priv->pns_checksum, read_buf, MAX_PNS_CHECKSUM_SIZE);
+	}
+
+	kfree(read_buf);
+
+	if (mtd)
+		put_mtd_device(mtd);
+
+	return 0;
+}
+#endif /* CONFIG_MTD */
+
+static ssize_t date_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct procshow_data *data = container_of(kobj, struct procshow_data, kobj);
+	struct private_data *priv_data;
+
+	if (!data || !data->priv)
+		return -ENODATA;
+
+	priv_data = data->priv;
+#ifdef CONFIG_MTD
+	int ret;
+
+	mutex_lock(&priv_data->mutex_mtd);
+	if (!strcmp(priv_data->items[DATE_INDEX].value, "unknown"))
+		ret = mtd_access(priv_data);
+	mutex_unlock(&priv_data->mutex_mtd);
+#endif
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", priv_data->items[DATE_INDEX].value);
+}
+
+static ssize_t version_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct procshow_data *data = container_of(kobj, struct procshow_data, kobj);
+	struct private_data *priv_data;
+
+	if (!data || !data->priv)
+		return -ENODATA;
+
+	priv_data = data->priv;
+#ifdef CONFIG_MTD
+	int ret;
+
+	mutex_lock(&priv_data->mutex_mtd);
+	if (!strcmp(priv_data->items[VERSION_INDEX].value, "unknown"))
+		ret = mtd_access(priv_data);
+	mutex_unlock(&priv_data->mutex_mtd);
+#endif
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", priv_data->items[VERSION_INDEX].value);
+}
+
+static ssize_t compiler_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct procshow_data *data = container_of(kobj, struct procshow_data, kobj);
+	struct private_data *priv_data;
+
+	if (!data || !data->priv)
+		return -ENODATA;
+
+	priv_data = data->priv;
+#ifdef CONFIG_MTD
+	int ret;
+
+	mutex_lock(&priv_data->mutex_mtd);
+	if (!strcmp(priv_data->items[COMPILER_INDEX].value, "unknown"))
+		ret = mtd_access(priv_data);
+	mutex_unlock(&priv_data->mutex_mtd);
+#endif
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", priv_data->items[COMPILER_INDEX].value);
+}
+
+static ssize_t author_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct procshow_data *data = container_of(kobj, struct procshow_data, kobj);
+	struct private_data *priv_data;
+
+	if (!data || !data->priv)
+		return -ENODATA;
+
+	priv_data = data->priv;
+#ifdef CONFIG_MTD
+	int ret;
+
+	mutex_lock(&priv_data->mutex_mtd);
+	if (!strcmp(priv_data->items[AUTHOR_INDEX].value, "unknown"))
+		ret = mtd_access(priv_data);
+	mutex_unlock(&priv_data->mutex_mtd);
+#endif
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", priv_data->items[AUTHOR_INDEX].value);
+}
+
+static ssize_t raw_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct procshow_data *data = container_of(kobj, struct procshow_data, kobj);
+	struct private_data *priv_data;
+	ssize_t offset = 0;
+
+	if (!data || !data->priv)
+		return -ENODATA;
+
+	priv_data = data->priv;
+#ifdef CONFIG_MTD
+	int ret;
+
+	mutex_lock(&priv_data->mutex_mtd);
+	if (!strcmp(priv_data->items[RAW_INDEX].value, "unknown"))
+		ret = mtd_access(priv_data);
+	mutex_unlock(&priv_data->mutex_mtd);
+#endif
+
+	for (int i = 0; i < MAX_ITEMS; ++i) {
+		if (i == priv_data->last_item)
+			break;
+		if (strcmp(priv_data->items[i].value, "unknown")) {
+			offset += scnprintf(buf + offset, PAGE_SIZE - offset, "%s:%s\n",
+				priv_data->items[i].key, priv_data->items[i].value);
+		}
+	}
+
+	return offset;
+}
+
+static ssize_t cksum_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct procshow_data *data = container_of(kobj, struct procshow_data, kobj);
+	struct private_data *priv_data;
+
+	if (!data || !data->priv)
+		return -ENODATA;
+
+	priv_data = data->priv;
+#ifdef CONFIG_MTD
+	int ret;
+
+	mutex_lock(&priv_data->mutex_mtd);
+	if (!strcmp(priv_data->pns_checksum, "unknown"))
+		ret = mtd_access(priv_data);
+	mutex_unlock(&priv_data->mutex_mtd);
+#endif
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", priv_data->pns_checksum);
+}
+
+static struct kobj_attribute date_attr = __ATTR_RO(date);
+static struct kobj_attribute version_attr = __ATTR_RO(version);
+static struct kobj_attribute compiler_attr = __ATTR_RO(compiler);
+static struct kobj_attribute author_attr = __ATTR_RO(author);
+static struct kobj_attribute raw_attr = __ATTR_RO(raw);
+static struct kobj_attribute cksum_attr = __ATTR_RO(cksum);
+
+static struct attribute *bootbin_attrs[] = {
+	&date_attr.attr,
+	&version_attr.attr,
+	&compiler_attr.attr,
+	&author_attr.attr,
+	&raw_attr.attr,
+	&cksum_attr.attr,
+	NULL,
+};
+
+static struct attribute_group bootbin_sys_attr_group = {
+	.attrs = bootbin_attrs,
+};
+
+static void procshow_release(struct kobject *kobj)
+{
+	struct procshow_data *data = container_of(kobj, struct procshow_data, kobj);
+	kfree(data->priv);
+	kfree(data);
+}
+
+static struct kobj_type kobj_type_bootbin = {
+	.sysfs_ops = &kobj_sysfs_ops,
+	.release = &procshow_release,
+};
+
+
 static int __init init_procshow(void)
 {
 	if (bootblock_virt == NULL)
@@ -634,6 +1284,53 @@ static int __init init_procshow(void)
 			return -ENOMEM;
 	}
 
+	bootdata_sys_kobj = kobject_create_and_add(BOOTDATA_SYS_FILENAME, firmware_kobj);
+	if (!bootdata_sys_kobj) {
+		pr_err("Failed to create boot info\n");
+		return -ENOMEM;
+	}
+
+	if (sysfs_create_group(bootdata_sys_kobj, &bootdata_sys_attr_group)) {
+		pr_err("Failed to create sysfs group\n");
+		kobject_put(bootdata_sys_kobj);
+		return -ENOMEM;
+	}
+
+	struct procshow_data *data = kzalloc(sizeof(struct procshow_data), GFP_KERNEL);
+
+	if (!data)
+		return -ENOMEM;
+
+	data->priv = kzalloc(sizeof(struct private_data), GFP_KERNEL);
+
+	if (!data->priv) {
+		kfree(data);
+		return -ENOMEM;
+	}
+
+	data->priv->last_item = RAW_INDEX;
+	for (int i = 0; i < MAX_ITEMS; i++)
+		strlcpy(data->priv->items[i].value, "unknown", MAX_VALUE_SIZE);
+	strlcpy(data->priv->pns_checksum, "unknown", MAX_VALUE_SIZE);
+
+	int ret = kobject_init_and_add(&data->kobj, &kobj_type_bootbin,
+						bootdata_sys_kobj, "bootbin");
+	if (ret) {
+		kfree(data->priv);
+		kfree(data);
+		pr_err("Failed to create boot bin\n");
+		return ret;
+	}
+	bootbin_sys_kobj = &data->kobj;
+
+	if (sysfs_create_group(bootbin_sys_kobj, &bootbin_sys_attr_group)) {
+		kfree(data->priv);
+		kfree(data);
+		pr_err("Failed to create sysfs group\n");
+		kobject_put(&data->kobj);
+		return -ENOMEM;
+	}
+	mutex_init(&data->priv->mutex_mtd);
 	return 0;
 }
 

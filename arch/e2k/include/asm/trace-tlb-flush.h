@@ -185,7 +185,7 @@ TRACE_EVENT(
 #endif /* _ASM_E2K_TRACE_TLB_FLUSH_H */
 
 #undef	TRACE_INCLUDE_PATH
-#define	TRACE_INCLUDE_PATH ../arch/e2k/include/asm
+#define	TRACE_INCLUDE_PATH ../../arch/e2k/include/asm
 #undef	TRACE_INCLUDE_FILE
 #define	TRACE_INCLUDE_FILE trace-tlb-flush
 

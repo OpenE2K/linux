@@ -65,13 +65,32 @@ static int epic_starting_cpu(unsigned int cpu)
 	union cepic_ctrl reg_ctrl;
 	union cepic_svr reg_svr = {};
 	union cepic_esr2 reg_esr2 = {};
+	union cepic_cpr reg_cpr = {};
+	unsigned int value;
 
 	local_irq_save(flags);
 
-	/* Enable CEPIC */
-	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
-	reg_ctrl.soft_en = 1;
-	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+	/*
+	 * CPR may contain too high priority after kexec which calls
+	 * nmi_call_function before jump.
+	 */
+	reg_cpr.raw = epic_read_w(CEPIC_CPR);
+	reg_cpr.cpr = 0;
+	epic_write_w(CEPIC_CPR, reg_cpr.raw);
+
+	/*
+	* After a crash, we no longer service the interrupts and a pending
+	* interrupt from previous kernel might still have IRR bit set.
+	*/
+
+	/* handle PNMIRR */
+	epic_read_w(CEPIC_PNMIRR);
+	epic_write_w(CEPIC_PNMIRR, CEPIC_PNMIRR_BIT_MASK);
+
+	 /* handle PMIRR */
+	reg_svr.raw = epic_read_w(CEPIC_SVR);
+	while ((value = epic_get_vector()) != reg_svr.vect)
+		ack_epic_irq();
 
 	/* Set up spurious IRQ vector */
 	if (spurious_interrupts_vector >= 0) {
@@ -83,6 +102,31 @@ static int epic_starting_cpu(unsigned int cpu)
 	if (error_interrupts_vector >= 0) {
 		reg_esr2.vect = error_interrupts_vector;
 		epic_write_w(CEPIC_ESR2, reg_esr2.raw);
+	}
+
+	/* Enable CEPIC */
+	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
+	reg_ctrl.soft_en = 1;
+	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+
+	/*
+	 * CIR/PMIRR might have some old interrupts from kexec or suspend
+	 */
+	int acked = 0;
+	while (((union cepic_cir) { .raw = epic_read_w(CEPIC_CIR) }).stat) {
+		union cepic_vect_inta vect_inta = {
+			.raw = epic_read_w(CEPIC_VECT_INTA),
+		};
+		union cepic_eoi eoi = {
+			.rcpr = vect_inta.cpr,
+		};
+		epic_write_w(CEPIC_EOI, eoi.raw);
+
+		acked++;
+		if (acked > 1024) {
+			pr_err("CEPIC pending interrupts after %d EOI\n", acked);
+			break;
+		}
 	}
 
 	local_irq_restore(flags);
@@ -135,27 +179,27 @@ static void epic_ack_edge(struct irq_data *irqd)
 	epic_ack_irq(irqd);
 }
 
-static void epic_msi_compose_msg(struct irq_data *irqd,
+static void epic_chip_eoi(struct irq_data *irqd)
+{
+	ack_epic_irq();
+}
+
+static void epic_compose_msi_msg(struct irq_data *irqd,
 				       struct msi_msg *msg)
 {
+	int node = irq_data_get_node(irqd);
 	struct irq_cfg *cfg = irqd_cfg(irqd);
-	union IO_EPIC_MSG_ADDR_LOW lo;
-	union IO_EPIC_MSG_DATA data;
-	u32 hi = 0;
+	union IO_EPIC_MSG_ADDR_LOW *lo = (void *)&msg->address_lo;
+	union IO_EPIC_MSG_DATA *d = (void *)&msg->data;
 
-	memset(msg, 0, sizeof(*msg));
-	lo.raw = 0;
 	BUG_ON(!cpu_has_epic());
-	get_io_pic_msi(irq_data_get_node(irqd), &lo.raw, &hi);
+	memset(msg, 0, sizeof(*msg));
 
-	lo.dst = cepic_id_short_to_full(cfg->dest_apicid);
+	/*set address for compatibility with old devtrees */
+	get_io_pic_msi(node, &msg->address_lo, &msg->address_hi);
 
-	data.raw = 0;
-	data.vector = cfg->vector;
-
-	msg->data = data.raw;
-	msg->address_lo = lo.raw;
-	msg->address_hi = hi;
+	lo->dst = cepic_id_short_to_full(cfg->dest_apicid);
+	d->vector = cfg->vector;
 
 	WARN_ON_ONCE(cfg->dest_apicid > 0x3FF);
 }
@@ -163,16 +207,26 @@ static void epic_msi_compose_msg(struct irq_data *irqd,
 static bool epic_check_sys_vect(unsigned v)
 {
 	BUG_ON(v > 0x3FF);
-	return v < FIRST_EXTERNAL_VECTOR + 1 && v >= FIRST_EPIC_SYSTEM_VECTOR;
+	return v < FIRST_EXTERNAL_VECTOR + 1 || v >= FIRST_EPIC_SYSTEM_VECTOR;
 }
 
 static void epic_irq_enable(struct irq_data *d)
 {
+	int cpu;
 	unsigned vector = irqd_to_hwirq(d);
 	int node = irq_data_get_node(d);
-	int cpu = irq_is_percpu_devid(d->irq) ?
-				smp_processor_id() :
-				cpumask_first(cpumask_of_node(node));
+	int percpu = irq_is_percpu_devid(d->irq);
+	if (!percpu && WARN_ON(node < 0))
+		return;
+
+	if (!percpu && WARN_ON(!node_online(node)))
+		return;
+	if (!percpu && cpumask_weight(cpumask_of_node(node)) < 1)
+		return;
+
+	cpu = percpu ?
+		smp_processor_id() :
+		cpumask_first(cpumask_of_node(node));
 
 	if (!vector && !WARN_ON(epic_check_sys_vect(vector)))
 		return;
@@ -194,7 +248,7 @@ static void epic_irq_disable(struct irq_data *d)
 		return;
 	WARN_ON(IS_ERR_OR_NULL(per_cpu(vector_irq, cpu)[vector]));
 
-	per_cpu(vector_irq, cpu)[vector] = __setup_vector_irq(vector);
+	per_cpu(vector_irq, cpu)[vector] = VECTOR_UNUSED;
 }
 
 static void epic_ipi_send_single(struct irq_data *d, unsigned int cpu)
@@ -206,10 +260,10 @@ static void epic_ipi_send_single(struct irq_data *d, unsigned int cpu)
 struct irq_chip epic_controller = {
 	.name			= "EPIC",
 	.irq_ack		= epic_ack_edge,
+	.irq_eoi                = epic_chip_eoi,
 	.irq_set_affinity	= pic_set_affinity,
-	.irq_compose_msi_msg	= epic_msi_compose_msg,
+	.irq_compose_msi_msg	= epic_compose_msi_msg,
 	.irq_retrigger		= epic_retrigger_irq,
-
 	.irq_enable		= epic_irq_enable,
 	.irq_disable		= epic_irq_disable,
 	.ipi_send_single	= epic_ipi_send_single,

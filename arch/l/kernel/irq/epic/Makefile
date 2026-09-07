@@ -10,6 +10,6 @@
 KCOV_INSTRUMENT		:= n
 
 obj-$(CONFIG_EPIC)	+= epic.o epic_irqchip.o epic_ipi.o epic_linp.o \
-				epic_timer.o io_epic.o epic_nmi.o
+			   epic_timer.o io_epic.o epic_nmi.o debug.o
 
-obj-$(CONFIG_SMP)		+= epic_ipi.o
+obj-$(CONFIG_SMP)	+= epic_ipi.o

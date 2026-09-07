@@ -6,16 +6,10 @@
 #ifndef _E2K_KVM_PTRACE_H
 #define _E2K_KVM_PTRACE_H
 
-#ifdef __KERNEL__
-
-#ifndef __ASSEMBLY__
 #include <linux/types.h>
 #include <linux/threads.h>
-#endif /* __ASSEMBLY__ */
 
 #include <asm/page.h>
-
-#ifndef __ASSEMBLY__
 #include <asm/bug.h>
 #include <asm/e2k_api.h>
 #include <asm/pv_info.h>
@@ -25,10 +19,6 @@
 #include <asm/aau_regs_access.h>
 #include <asm/mlt.h>
 #include <asm/ptrace-abi.h>
-
-#endif /* __ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
 
 typedef enum inject_caller {
 	FROM_HOST_INJECT = 1 << 0,
@@ -41,7 +31,7 @@ typedef enum inject_caller {
 
 #ifdef	CONFIG_VIRTUALIZATION
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 /* it is native host kernel with virtualization support */
 #define BOOT_TASK_SIZE	(BOOT_HOST_TASK_SIZE)
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
@@ -49,10 +39,8 @@ typedef enum inject_caller {
 #include <asm/kvm/guest/pv_info.h>
 /* #define TASK_SIZE		(GUEST_TASK_SIZE) */
 /* #define BOOT_TASK_SIZE	(BOOT_GUEST_TASK_SIZE) */
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
 #endif /* CONFIG_VIRTUALIZATION */
-
-#ifdef __KERNEL__
 
 /*
  * We could check CR.pm and TIR.ip here, but that is not needed
@@ -83,6 +71,7 @@ typedef enum inject_caller {
 #define	from_user_IP(cr0)	is_from_user_IP(cr0, TASK_SIZE)
 #define	from_kernel_IP(cr0)	is_from_kernel_IP(cr0, TASK_SIZE)
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define is_trap_from_user(regs, __USER_SPACE_TOP__)			\
 ({									\
 	((regs)->TIR.ip < (__USER_SPACE_TOP__))				\
@@ -91,8 +80,9 @@ typedef enum inject_caller {
 ({									\
 	((regs)->TIR.ip >= (__KERNEL_SPACE_BOTTOM__))			\
 })
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* or host kernel with virtualization support */
 
@@ -107,11 +97,13 @@ static inline void atomic_load_osgd_to_gd(void)
 # include <asm/kvm/guest/ptrace.h>
 #else
 # error "Undefined type of virtualization"
-#endif /* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
+#endif /* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_KERNEL */
 
 #ifdef	CONFIG_VIRTUALIZATION
 /* it is host kernel with virtualization support */
 /* or virtualized guest kernel */
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	guest_task_mode(task)	\
 		(is_task_at_vcpu_intc_emul_mode(task) || \
 			is_task_at_vcpu_guest_mode(task))
@@ -145,12 +137,17 @@ static inline void atomic_load_osgd_to_gd(void)
 		((__HOST__) ?						\
 			is_call_from_host_kernel(cr0, cr1) :		\
 				is_call_from_guest_kernel(cr0, cr1))
+#else
+#define	guest_task_mode(task)	false
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifndef	CONFIG_KVM_GUEST_KERNEL
 /* it is host kernel with virtualization support */
 
 #define user_mode(regs)   is_user_mode(regs, TASK_SIZE)
 #define kernel_mode(regs) is_kernel_mode(regs, TASK_SIZE)
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 
 #ifdef	CONFIG_KVM_HW_VIRTUALIZATION
 /* guest kernel can be: */
@@ -167,9 +164,6 @@ static inline void atomic_load_osgd_to_gd(void)
 #define	from_guest_kernel(cr0, cr1)	\
 		(from_guest_kernel_mode(cr1) && from_guest_kernel_IP(cr0))
 #endif /* CONFIG_KVM_HW_VIRTUALIZATION */
-
-#define	is_trap_from_host_kernel(regs)	\
-		is_trap_from_kernel(regs, NATIVE_TASK_SIZE)
 
 #define	is_call_from_host_user(cr0, cr1)				\
 		(from_host_user_IP(cr0) && from_host_user_mode(cr1))
@@ -194,95 +188,26 @@ static inline void atomic_load_osgd_to_gd(void)
 #define	call_from_guest_kernel(regs)					\
 		is_call_from_guest_kernel((regs)->crs.cr0, (regs)->crs.cr1)
 
-#define	is_trap_on_user(regs, __HOST__)					\
-		((__HOST__) ?						\
-			trap_from_host_user(regs) :	\
-				trap_from_guest_user(regs))
-#define	is_trap_on_kernel(regs, __HOST__)			\
-		((__HOST__) ?						\
-			trap_from_host_kernel(regs) :	\
-				(trap_from_guest_kernel(regs) || \
-					is_trap_from_host_kernel(regs)))
-
 #define	ON_HOST_KERNEL()	(native_read_PSR_reg().pm)
-
-#define __trap_from_user(regs)		\
-		is_trap_on_user(regs, ON_HOST_KERNEL())
-#define	__trap_from_kernel(regs)	\
-		is_trap_on_kernel(regs, ON_HOST_KERNEL())
-#define	trap_on_user(regs)	__trap_from_user(regs)
-#define	trap_on_kernel(regs)	__trap_from_kernel(regs)
 
 #define	call_from_user_mode(cr0, cr1)					\
 		is_call_from_user(cr0, cr1, ON_HOST_KERNEL())
 #define	call_from_kernel_mode(cr0, cr1)					\
 		is_call_from_kernel(cr0, cr1, ON_HOST_KERNEL())
-#define	call_from_user(regs)						\
-		call_from_user_mode((regs)->crs.cr0, (regs)->crs.cr1)
-#define	call_from_kernel(regs)						\
-		call_from_kernel_mode((regs)->crs.cr0, (regs)->crs.cr1)
 
-#define __trap_from_host_user(regs)	native_user_mode(regs)
 #define	__trap_from_host_kernel(regs)	native_kernel_mode(regs)
 #define __trap_from_guest_user(regs)	guest_user_mode(regs)
-#define	__trap_from_guest_kernel(regs)	guest_kernel_mode(regs)
-
-#define	__call_from_kernel(regs)	call_from_kernel(regs)
-#define	__call_from_user(regs)		call_from_user(regs)
-
-#define	trap_on_guest_kernel_mode(regs)					\
-		from_guest_kernel_mode((regs)->crs.cr1)
-#define	trap_on_guest_kernel_IP(regs)					\
-		(from_guest_kernel_IP((regs)->crs.cr0) &&		\
-			!from_host_kernel_IP((regs)->crs.cr0))
-#define	host_trap_guest_user_mode(regs)					\
-		(from_guest_user_mode((regs)->crs.cr1) &&		\
-			__trap_from_guest_user(regs))
-#define	host_trap_guest_kernel_mode(regs)				\
-		(from_guest_kernel((regs)->crs.cr0,			\
-					(regs)->crs.cr1) &&		\
-			__trap_from_guest_kernel(regs))
 #define	guest_trap_user_mode(regs)					\
 		(from_guest_kernel((regs)->crs.cr0,			\
 					(regs)->crs.cr1) &&		\
 			__trap_from_guest_user(regs))
-#define	guest_trap_kernel_mode(regs)					\
-		(from_guest_kernel((regs)->crs.cr0,			\
-					(regs)->crs.cr1) &&		\
-			__trap_from_guest_kernel(regs))
 
 #define	trap_from_host_kernel_mode(regs)				\
 		from_host_kernel_mode((regs)->crs.cr1)
-#define	trap_from_host_kernel_IP(regs)					\
-		from_host_kernel_IP((regs)->crs.cr0)
 #define	trap_from_host_kernel(regs)					\
 		(trap_from_host_kernel_mode(regs) &&			\
 			__trap_from_host_kernel(regs))
-#define	trap_from_host_user(regs)					\
-		(from_host_user_mode((regs)->crs.cr1) &&		\
-			__trap_from_host_user(regs))
-/* macros to detect guest kernel traps on guest and on host */
-/* trap only on guest kernel */
-#define	trap_from_guest_kernel(regs)					\
-		(from_guest_kernel_mode((regs)->crs.cr1) &&		\
-			__trap_from_guest_kernel(regs))
-/* macros to detect guest traps on host, guest has not own guest, so */
-/* macros should always return 'false' for guest */
-/* trap occurred on guest user only */
-#define trap_from_guest_user(regs)					\
-({									\
-	bool is;							\
-									\
-	if (paravirt_enabled() || !kvm_test_intc_emul_flag(regs))	\
-		/* It is guest and it cannot run own guest */		\
-		/* or trap is not on guest process */			\
-		is = false;						\
-	else if (host_trap_guest_user_mode(regs))			\
-		is = true;						\
-	else								\
-		is = false;						\
-	is;								\
-})
+
 /* macroses to detect guest traps on host, guest has not own guest, so */
 /* macroses should always return 'false' for guest */
 /* trap occurred on guest process (guest user or guest kernel or on host */
@@ -292,49 +217,15 @@ static inline void atomic_load_osgd_to_gd(void)
 #define	trap_on_pv_hv_guest(vcpu, regs)					\
 		((vcpu) != NULL && \
 			!((vcpu)->arch.is_hv) && trap_on_guest(regs))
-/* guest trap occurred on guest user or kernel */
-#define	guest_trap_on_host(regs)					\
-		(trap_on_guest(regs) && user_mode(regs))
-#define	guest_trap_on_pv_hv_host(vcpu, regs)				\
-		(trap_on_pv_hv_guest(vcpu, regs) && user_mode(regs))
-/* trap occurred on guest kernel or user, but in host mode */
-/* and the trap can be due to guest or not */
-#define	host_trap_on_guest(regs)					\
-		(guest_trap_on_host(regs) &&				\
-			trap_from_host_kernel_mode(regs) &&		\
-				trap_from_host_kernel_IP(regs))
 /* guest trap occurred on guest user or kernel or on host but due to guest */
 /* for example guest kernel address in hypercalls */
-#define	due_to_guest_trap_on_host(regs)					\
-		(trap_on_guest(regs) &&					\
-			(user_mode(regs) ||				\
-			LIGHT_HYPERCALL_MODE(regs) ||			\
-			GENERIC_HYPERCALL_MODE()))
 #define	due_to_guest_trap_on_pv_hv_host(vcpu, regs)			\
 		(trap_on_pv_hv_guest(vcpu, regs) &&			\
 			(user_mode(regs) ||				\
 			LIGHT_HYPERCALL_MODE(regs) ||			\
 			GENERIC_HYPERCALL_MODE()))
-/* page fault is from intercept */
-#define	due_to_intc_page_fault(vcpu, regs)				\
-		((vcpu) != NULL &&					\
-			(vcpu)->arch.is_hv &&				\
-				(regs)->trap->is_intc)
-/* trap occurred on guest user only */
-#define	guest_user_trap_on_host(regs)					\
-		(trap_on_guest(regs) && guest_trap_user_mode(regs))
-/* trap occurred on guest kernel only */
-#define	guest_kernel_trap_on_host(regs)					\
-		(trap_on_guest(regs) && guest_trap_kernel_mode(regs))
-
-/* macros to detect guest traps on guest and on host */
-/* trap on guest user, kernel or on host kernel due to guest */
-#define	__guest_trap(regs)						\
-		(paravirt_enabled() || kvm_test_intc_emul_flag(regs))
 
 #define	addr_from_guest_user(addr)	((addr) < GUEST_TASK_SIZE)
-#define	addr_from_guest_kernel(addr)	\
-		((addr) >= GUEST_TASK_SIZE && (addr) < HOST_TASK_SIZE)
 
 #define guest_user_addr_mode_page_fault(regs, instr_page, addr)		\
 		((instr_page) ? guest_user_mode(regs) :			\
@@ -343,24 +234,6 @@ static inline void atomic_load_osgd_to_gd(void)
 				(!trap_from_host_kernel(regs) ||	\
 					LIGHT_HYPERCALL_MODE(regs) ||	\
 					GENERIC_HYPERCALL_MODE())))
-/* macros to detect guest user address on host, */
-/* guest has not own guest, so macros should always return 'false' for guest */
-/* faulted address is from guest user space */
-#define	guest_mode_page_fault(regs, instr_page, addr)			\
-		(trap_on_guest(regs) &&					\
-			guest_user_addr_mode_page_fault(regs,		\
-						instr_page, addr))
-/* macros to detect instruction page fault on guest kernel access */
-/* such traps should be handled by host because of guest kernel */
-/* is user of host */
-#define	guest_kernel_instr_page_fault(regs)				\
-		(trap_on_guest(regs) &&					\
-			guest_trap_kernel_mode(regs) &&			\
-				trap_on_guest_kernel_IP(regs))
-/* macros to detect instruction page fault on guest user access */
-/* such traps should be handled by guest kernel */
-#define	guest_user_instr_page_fault(regs)				\
-		(trap_on_guest(regs) &&	guest_user_mode(regs))
 
 static inline e2k_addr_t
 check_is_user_address(struct task_struct *task, e2k_addr_t address)
@@ -383,8 +256,18 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 		(test_ti_is_vcpu_thread(task_thread_info(tsk)) && \
 			IS_GUEST_USER_ADDRESS(address))
 #define	IS_GUEST_ADDRESS_TO_HOST(address)		\
-		(paravirt_enabled() && !IS_HV_GM() && \
-				IS_HOST_KERNEL_ADDRESS(address))
+		(IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) && IS_HOST_KERNEL_ADDRESS(address))
+#else
+#define	call_from_user_mode(cr0, cr1) \
+	((is_from_user_IP(cr0, NATIVE_TASK_SIZE) && from_user_mode(cr1)))
+#define	call_from_kernel_mode(cr0, cr1)	((cr1).pm)
+
+static inline e2k_addr_t
+check_is_user_address(struct task_struct *task, e2k_addr_t address)
+{
+	return native_check_is_user_address(task, address);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_KVM_GUEST_HW_PV
 /* FIXME Instead of ifdef, this should check for is_pv */
@@ -432,56 +315,16 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 #define	is_call_from_kernel(cr0, cr1, __HOST__)				\
 		is_call_from_host_kernel(cr0, cr1)
 
-#define __trap_from_user(regs)		is_trap_from_user(regs, TASK_SIZE)
-#define	__trap_from_kernel(regs)	is_trap_from_kernel(regs, TASK_SIZE)
-#define	trap_on_user(regs)		user_mode(regs)
-#define	trap_on_kernel(regs)		kernel_mode(regs)
-
 /* macroses to detect guest traps on host */
 /* Virtualization is off, so nothing guests exist, */
 /* so macroses should always return 'false' */
 #define	trap_on_guest(regs)	false
-/* trap occurred on guest user or kernel */
-#define	guest_trap_on_host(regs)					\
-		false		/* guest is not supported */
-/* trap occurred on guest kernel or user, but in host mode */
-/* and the trap can be due to guest or not */
-#define	host_trap_on_guest(regs)					\
-		false		/* guest is not supported */
-/* trap occurred on guest user or kernel or on host but due to guest */
-#define	due_to_guest_trap_on_host(regs)					\
-		false		/* guest is not supported */
-/* page fault is from intercept */
-#define	due_to_intc_page_fault(vcpu, regs)				\
-		false		/* guest is not supported */
-/* trap occurred on guest user only */
-#define	guest_user_trap_on_host(regs)					\
-		false		/* guest is not supported */
-/* trap occurred on guest kernel only */
-#define	guest_kernel_trap_on_host(regs)					\
-		false		/* guest is not supported */
-
-/* macros to detect guest traps on guest and on host */
-/* trap on guest user, kernel or on host kernel due to guest */
-#define	__guest_trap(regs)						\
-		false		/* guest is not supported */
-/* macros to detect guest kernel traps on guest and on host */
-/* trap only on guest kernel */
-#define	trap_from_guest_kernel(regs)					\
-		false		/* guest is not supported */
-
-#define	__call_from_kernel(regs)	from_kernel_mode((regs)->crs.cr1)
-#define	__call_from_user(regs)		from_user_mode((regs)->crs.cr1)
 
 #define	ON_HOST_KERNEL()	true
 #define	call_from_user_mode(cr0, cr1)					\
 		is_call_from_user(cr0, cr1, ON_HOST_KERNEL())
 #define	call_from_kernel_mode(cr0, cr1)					\
 		is_call_from_kernel(cr0, cr1, ON_HOST_KERNEL())
-#define	call_from_user(regs)						\
-		call_from_user_mode((regs)->crs.cr0, (regs)->crs.cr1)
-#define	call_from_kernel(regs)						\
-		call_from_kernel_mode((regs)->crs.cr0, (regs)->crs.cr1)
 
 static inline e2k_addr_t
 check_is_user_address(struct task_struct *task, e2k_addr_t address)
@@ -496,9 +339,9 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 #define	print_host_user_address_ptes(mm, address)	\
 		native_print_host_user_address_ptes(mm, address)
 
-#define	guest_mode_page_fault(regs, instr_page, addr)	false
-
 #endif	/* CONFIG_VIRTUALIZATION */
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 
 #ifndef	CONFIG_VIRTUALIZATION
 /* it is native kernel without virtualization support */
@@ -508,7 +351,7 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 #define	IN_LIGHT_HYPERCALL()			0 /* hypercalls not supported */
 #define	IN_GENERIC_HYPERCALL()			0 /* hypercalls not supported */
 #define	IN_HYPERCALL()				0 /* hypercalls not supported */
-#elif	defined(CONFIG_KVM_HOST_MODE)
+#elif	defined(CONFIG_KVM_HOST_KERNEL)
 /* It is native host kernel with virtualization support on */
 
 #define	LIGHT_HYPERCALL_MODE(pt_regs)					\
@@ -537,7 +380,7 @@ check_is_user_address(struct task_struct *task, e2k_addr_t address)
 	(IN_LIGHT_HYPERCALL() || IN_GENERIC_HYPERCALL())
 #endif	/* !CONFIG_VIRTUALIZATION */
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 /* It is native host kernel with virtualization support on */
 
 /*
@@ -561,7 +404,7 @@ typedef struct pv_vcpu_ctxt {
 	unsigned long sigreturn_entry;	/* guest signal return start IP */
 } pv_vcpu_ctxt_t;
 
-#else /* !CONFIG_KVM_HOST_MODE */
+#else /* !CONFIG_KVM_HOST_KERNEL */
 /* it is native kernel without any virtualization */
 /* or virtualized guest kernel */
 
@@ -569,7 +412,8 @@ typedef struct pv_vcpu_ctxt {
 	/* empty structure */
 } pv_vcpu_ctxt_t;
 
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
+
 
 #ifdef	CONFIG_VIRTUALIZATION
 
@@ -601,6 +445,8 @@ static inline struct pt_regs *find_guest_user_regs(struct pt_regs *regs)
 }
 #endif /* CONFIG_VIRTUALIZATION */
 
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 #if defined(CONFIG_SMP)
 extern unsigned long profile_pc(struct pt_regs *regs);
 #else
@@ -610,6 +456,4 @@ extern void show_regs(struct pt_regs *);
 extern int syscall_trace_entry(struct pt_regs *regs);
 extern void syscall_trace_leave(struct pt_regs *regs);
 
-#endif /* __KERNEL__ */
 #endif /* _E2K_KVM_PTRACE_H */
-

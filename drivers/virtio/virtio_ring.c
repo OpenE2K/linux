@@ -533,6 +533,9 @@ static inline int virtqueue_add_split(struct virtqueue *_vq,
 	int head;
 	bool indirect;
 
+#ifdef CONFIG_MCST
+	prev = 0;
+#endif
 	START_USE(vq);
 
 	BUG_ON(data == NULL);
@@ -1369,6 +1372,10 @@ static inline int virtqueue_add_packed(struct virtqueue *_vq,
 	u16 head, id, prev, curr, avail_used_flags;
 	int err;
 
+#ifdef CONFIG_MCST
+	head_flags = 0;
+	prev = 0;
+#endif
 	START_USE(vq);
 
 	BUG_ON(data == NULL);

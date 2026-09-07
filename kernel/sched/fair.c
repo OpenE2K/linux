@@ -6923,7 +6923,11 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 {
 	bool has_idle_core = false;
 	struct sched_domain *sd;
+#ifdef CONFIG_MCST
+	unsigned long task_util = 0, util_min = 0, util_max = 0;
+#else
 	unsigned long task_util, util_min, util_max;
+#endif
 	int i, recent_used_cpu;
 
 	/*

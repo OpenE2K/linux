@@ -18,6 +18,22 @@ register unsigned long sp asm("r15");
 register unsigned long sp asm("rsp");
 #elif __XTENSA__
 register unsigned long sp asm("a1");
+#elif __e2k__
+# ifdef __ptr128__
+#  define sp							\
+({								\
+	void *__sp;						\
+	asm ("{getsap 0, %[sp]}" : : [sp] "ri" (__sp));		\
+	(unsigned long) __sp;					\
+})
+# else
+#  define sp							\
+({								\
+	unsigned long __sp;					\
+	asm ("{getsp 0, %[sp]}" : : [sp] "ri" (__sp));		\
+	__sp;							\
+})
+# endif
 #else
 #error "implement current_stack_pointer equivalent"
 #endif

@@ -15,6 +15,7 @@
 #include <linux/irq_work.h>
 #include <linux/irqdomain.h>
 #include <linux/of_irq.h>
+#include <asm/pic.h>
 #include "pic.h"
 
 int irq_move_cleanup_vector;

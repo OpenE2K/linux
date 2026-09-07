@@ -319,7 +319,7 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_set_backtrace),
 	SYSTEM_CALL_TBL_ENTRY(sys_get_backtrace),
 	SYSTEM_CALL_TBL_ENTRY(sys_access_hw_stacks),
-	SYSTEM_CALL_TBL_ENTRY(sys_el_posix),		/* 255 */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),		/* 255 */
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_setup),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_enter),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_register),
@@ -343,7 +343,7 @@ const system_call_func sys_call_table[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_msgrcv),
 	SYSTEM_CALL_TBL_ENTRY(sys_msgsnd),
 	SYSTEM_CALL_TBL_ENTRY(sys_semget),
-	SYSTEM_CALL_TBL_ENTRY(sys_old_semctl),		/* 275 */
+	SYSTEM_CALL_TBL_ENTRY(sys_semctl),		/* 275 */
 	SYSTEM_CALL_TBL_ENTRY(sys_semtimedop),
 	SYSTEM_CALL_TBL_ENTRY(sys_semop),
 	SYSTEM_CALL_TBL_ENTRY(sys_shmget),
@@ -822,7 +822,7 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_set_backtrace),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_get_backtrace),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_access_hw_stacks),
-	SYSTEM_CALL_TBL_ENTRY(sys_el_posix),	/* 255 */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 255 */
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_setup),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_enter),
 	SYSTEM_CALL_TBL_ENTRY(sys_io_uring_register),
@@ -846,7 +846,7 @@ const system_call_func sys_call_table_32[NR_syscalls] =
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_msgrcv),
 	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_msgsnd),
 	SYSTEM_CALL_TBL_ENTRY(sys_semget),
-	SYSTEM_CALL_TBL_ENTRY(sys_old_semctl),	/* 275 */
+	COMPAT_SYSTEM_CALL_TBL_ENTRY(sys_semctl),	/* 275 */
 	SYSTEM_CALL_TBL_ENTRY(sys_semtimedop_time32),
 	SYSTEM_CALL_TBL_ENTRY(sys_semop),
 	SYSTEM_CALL_TBL_ENTRY(sys_shmget),
@@ -1337,10 +1337,10 @@ const protected_system_call_func sys_call_table_entry8[NR_syscalls] = {
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_set_backtrace),
 	PROT_SYSCALL_TBL_ENTRY(protected_sys_get_backtrace),
 	PROT_SYSCALL_TBL_ENTRY(sys_access_hw_stacks),
-	PROT_SYSCALL_TBL_ENTRY(sys_el_posix),		/* 255 */
+	PROT_SYSCALL_TBL_ENTRY(sys_ni_syscall),		/* 255 */
 	PROT_SYSCALL_TBL_ENTRY(sys_io_uring_setup),
-	PROT_SYSCALL_TBL_ENTRY(protected_syscall_notyetsupported),
-	PROT_SYSCALL_TBL_ENTRY(protected_syscall_notyetsupported),
+	PROT_SYSCALL_TBL_ENTRY(protected_sys_io_uring_enter),
+	PROT_SYSCALL_TBL_ENTRY(protected_syscall_notyetsupported), /* 258 - sys_io_uring_register */
 	PROT_SYSCALL_TBL_ENTRY(sys_set_tid_address),
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	PROT_SYSCALL_TBL_ENTRY(sys_el_binary),		/* 260 */
@@ -1857,7 +1857,7 @@ const system_call_func sys_call_table_deprecated[NR_syscalls] =
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
-	SYSTEM_CALL_TBL_ENTRY(sys_el_posix),	/* 255 */
+	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),	/* 255 */
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
 	SYSTEM_CALL_TBL_ENTRY(sys_ni_syscall),
@@ -2176,7 +2176,7 @@ const char *sys_call_ID_to_name[NR_syscalls] = {
 	"getdents64",	/* 220 */
 	"fcntl64",	/* 221 */
 	"core",		/* place holder / ni_syscal */
-	"macctl",	/* 223 */
+	"RESERVED",	/* 223 */
 	"newfstatat",
 	"emergency",	/* 225 place holder / ni_syscal */
 	"e2k_setjmp",	/* ditto */
@@ -2208,7 +2208,7 @@ const char *sys_call_ID_to_name[NR_syscalls] = {
 	"set_backtrace",
 	"get_backtrace",
 	"access_hw_stacks",
-	"el_posix",	/* 255 */
+	"RESERVED",	/* 255 */
 	"io_uring_setup",
 	"io_uring_enter",
 	"io_uring_register",

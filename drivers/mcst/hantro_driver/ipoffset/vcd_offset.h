@@ -21,7 +21,10 @@
   If with vcmd, didn't need config this file
   Only need config this array whithout VCMD
 */
+#if 0
 unsigned long long multicorebase[8] = {
     0x000800ULL,
    // {0x500800 },
 };
+#endif
+

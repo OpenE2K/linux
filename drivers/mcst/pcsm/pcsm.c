@@ -46,7 +46,6 @@
 #define CPU_E12C                        0xA
 #define CPU_E16C                        0xB
 #define CPU_E2C3                        0xC
-#define CPU_E48C                        0xD
 #define CPU_E8V7                        0xE
 
 
@@ -563,22 +562,26 @@ static ssize_t pcsm_dbg_core_address_write(struct file *filp,
 
 	memset(core_buffer, 0, sizeof(char) * CORE_STR_MAX_SIZE);
 	if (count > CORE_STR_MAX_SIZE - 1) {
-		ret = -EINVAL;
-	} else if (copy_from_user(core_buffer, buffer, count)) {
-		ret = -EFAULT;
-	} else {
-		ret = sscanf(core_buffer, "0x%X\n", &addr);
-		if (ret != 1) {
-			dev_err(&adapter->dev,
-				"Failed to write address (invalid string).\n");
-			ret = -EINVAL;
-		} else {
-			mutex_lock(&data->core_lock);
-			data->core_address = addr;
-			mutex_unlock(&data->core_lock);
-			ret = count;
-		}
+		return -EINVAL;
 	}
+	if (copy_from_user(core_buffer, buffer, count)) {
+		return -EFAULT;
+	}
+	ret = sscanf(core_buffer, "0x%X\n", &addr);
+	if (ret != 1) {
+		dev_err(&adapter->dev,
+			"Failed to write address (invalid string).\n");
+		return -EINVAL;
+	}
+	if (addr > 0xffc) {
+		dev_err(&adapter->dev,
+			"Invalid reg address value (valid range 0x0-0xffc).\n");
+		return -EINVAL;
+	}
+	mutex_lock(&data->core_lock);
+	data->core_address = addr;
+	mutex_unlock(&data->core_lock);
+	ret = count;
 
 	return ret;
 }
@@ -675,29 +678,36 @@ static ssize_t pcsm_dbg_forcepr_write(struct file *filp,
 	struct i2c_client *client = data->client;
 	struct i2c_adapter *adapter = client->adapter;
 	char input[CORE_STR_MAX_SIZE];
-	int  ret;
-	u32  value;
+	int ret;
+	u32 value;
+	u8 divf_max = 0x2f;
+	u8 forcepr_max = (divf_max << 2) | 1;
 
 	memset(input, 0, sizeof(char) * CORE_STR_MAX_SIZE);
 	if (count > CORE_STR_MAX_SIZE - 1) {
-		ret = -EINVAL;
-	} else if (copy_from_user(input, buffer, count)) {
-		ret = -EFAULT;
-	} else {
-		ret = sscanf(input, "0x%X\n", &value);
-		if (ret != 1) {
-			dev_err(&adapter->dev,
-				"Failed to write forcepr (invalid string).\n");
-			ret = -EINVAL;
-		} else {
-			mutex_lock(&data->core_lock);
-			i2c_smbus_write_byte_data(client,
-						  PMCM_REG(PMCM_RW_FORCEPR),
-						  value);
-			mutex_unlock(&data->core_lock);
-			ret = count;
-		}
+		return -EINVAL;
 	}
+	if (copy_from_user(input, buffer, count)) {
+		return -EFAULT;
+	}
+	ret = sscanf(input, "0x%X\n", &value);
+	if (ret != 1) {
+		dev_err(&adapter->dev,
+			"Failed to write forcepr (invalid string).\n");
+		return -EINVAL;
+	}
+	if (value > forcepr_max) {
+		dev_err(&adapter->dev,
+			"Invalid forcepr value (valid range 0x0-0x%x).\n",
+			forcepr_max);
+		return -EINVAL;
+	}
+	mutex_lock(&data->core_lock);
+	i2c_smbus_write_byte_data(client,
+				  PMCM_REG(PMCM_RW_FORCEPR),
+				  value);
+	mutex_unlock(&data->core_lock);
+	ret = count;
 
 	return ret;
 }
@@ -744,7 +754,7 @@ static void core_request_process(struct pcsm_data *data, char *data_string)
 	}
 
 	cfg_lo = ((data->core_address >> 2) & 0xF) << 4; /* setup low addr */
-	cfg_hi = ((data->core_address >> 6) & 0xF);
+	cfg_hi = ((data->core_address >> 6) & 0x3F);
 	if (data->use_rcn) {
 		cfg_lo |= 2;
 	}
@@ -1341,6 +1351,12 @@ static ssize_t set_pwm_ct(struct device *dev,
 		return err;
 	}
 
+	if (value > 0xff) {
+		dev_err(dev,
+			"Invalid pwm control value (valid range 0x0-0xff).\n");
+		return -EINVAL;
+	}
+
 	if (k == 0) {
 		reg = (i * PCSM_TWO_OFFSET) + PCSM_RW_CONTROL;
 	} else {
@@ -1415,68 +1431,6 @@ static struct events_mon events_mon_e8v7 = {
 		"MC[0,2,4,6] Throttle",
 		"MC[1,3,5,7] Throttle",
 		"CPU Force Power Mode"
-	}
-};
-
-static struct events_mon events_mon_e48c = {
-	.events_ecc_name = {
-		"Memory controller 0 Error",
-		"Memory controller 1 Error",
-		"Memory controller 2 Error",
-		"Memory controller 3 Error",
-		"Memory controller 4 Error",
-		"Memory controller 5 Error",
-		"Memory controller 6 Error",
-		"Memory controller 7 Error"
-	},
-	.events_main_name = {
-		"MC[0,2,4,6] DIMM Error",
-		"MC[1,3,5,7] DIMM Error",
-		"MotherBoard Error",
-		"PMC SMBus[0] Error",
-		"PMC SMBus[1] Error",
-		"CPU Fault"
-	},
-	.events_therm_name = {
-		"PCS FAN0 Error",
-		"PCS FAN1 Error",
-		"MotherBoard Error",
-		"CPU state HOT",
-		"MC[0,2,4,6] Throttle",
-		"MC[1,3,5,7] Throttle",
-		"CPU Force Power Mode"
-	}
-};
-
-static struct events_mon events_mon_e48c_rev0 = {
-	.events_ecc_name = {
-		"Memory controller 0 Error",
-		"Memory controller 1 Error",
-		"Memory controller 2 Error",
-		"Memory controller 3 Error",
-		"Memory controller 4 Error",
-		"Memory controller 5 Error",
-		"Memory controller 6 Error",
-		"Memory controller 7 Error"
-	},
-	.events_main_name = {
-		"MC[0,2,4,6] DIMM Error",
-		"MC[1,3,5,7] DIMM Error",
-		"MC[0,2,4,6] Power Error",
-		"MC[1,3,5,7] Power Error",
-		"CPU Power Error",
-		"MotherBoard Power Error",
-		"MotherBoard Error",
-		"CPU Fault"
-	},
-	.events_therm_name = {
-		"PCS FAN0 Error",
-		"PCS FAN1 Error",
-		"CPU state HOT",
-		"MC[0,2,4,6] Throttle",
-		"MC[1,3,5,7] Throttle",
-		"CPU Force Power Mode",
-		"PMC SMBus Error"
 	}
 };
 
@@ -1838,17 +1792,6 @@ static void pcsm_init_data(struct pcsm_data *data)
 		data->ecc.names = events_mon_e8v7.events_ecc_name;
 		data->main.names = events_mon_e8v7.events_main_name;
 		data->therm.names = events_mon_e8v7.events_therm_name;
-		break;
-	case CPU_E48C:
-		if (data->revision == 0) {
-			data->ecc.names = events_mon_e48c_rev0.events_ecc_name;
-			data->main.names = events_mon_e48c_rev0.events_main_name;
-			data->therm.names = events_mon_e48c_rev0.events_therm_name;
-		} else {
-			data->ecc.names = events_mon_e48c.events_ecc_name;
-			data->main.names = events_mon_e48c.events_main_name;
-			data->therm.names = events_mon_e48c.events_therm_name;
-		}
 		break;
 	default:
 		data->ecc.names = events_mon_v6.events_ecc_name;

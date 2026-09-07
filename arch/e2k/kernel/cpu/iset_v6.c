@@ -151,7 +151,7 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 
 		if (!user) {
 			fapb = *fapb_addr;
-		} else if ((ret = host_get_user(AW(fapb), (u64 __user *) fapb_addr, regs))) {
+		} else if ((ret = host_get_user(AW(fapb), (u64 __user __force *)fapb_addr, regs))) {
 			if (ret == -EAGAIN)
 				break;
 			goto die;
@@ -166,7 +166,7 @@ void do_aau_fault_v6(int aa_field, struct pt_regs *regs)
 			if (!user) {
 				fapb = *fapb_addr;
 			} else if ((ret = host_get_user(AW(fapb),
-					(u64 __user *) fapb_addr, regs))) {
+					(u64 __user __force *) fapb_addr, regs))) {
 				if (ret == -EAGAIN)
 					break;
 				goto die;
@@ -282,7 +282,7 @@ void __cpuidle C3_enter_v6(void)
 	unsigned int node = numa_node_id();
 	phys_addr_t nbsr_phys = sic_get_node_nbsr_phys_base(node);
 	int core = read_pic_id() % cpu_max_cores_num();
-	int reg = PMC_FREQ_CORE_N_SLEEP(core);
+	int reg = PMC_FREQ_CORE_SLEEP(core, cpu_has(CPU_FEAT_ISET_V7));
 	freq_core_sleep_t C3 = { .cmd = 3 };
 	struct hw_prefetchers_state pref_state;
 

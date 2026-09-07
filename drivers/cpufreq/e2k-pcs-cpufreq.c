@@ -19,9 +19,10 @@
  */
 #define PCS_CPUFREQ_SUPPORTED() \
 		((IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C || \
-		IS_MACHINE_E8C2 || IS_MACHINE_E48C || IS_MACHINE_E8V7) && \
-		!IS_HV_GM() && !IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) && \
-		!IS_ENABLED(CONFIG_E2K_SIMULATOR) && !is_prototype())
+		IS_MACHINE_E8C2 || IS_MACHINE_E8V7) && !IS_HV_GM() && \
+		!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) && !IS_ENABLED(CONFIG_E2K_SIMULATOR) && \
+		!is_prototype())
+
 /*
  * module param throttling:
  * bit [0]: responsible for enabling throttling
@@ -89,7 +90,7 @@ static inline bool check_bfs_bypass(struct pcs_freq_data *data)
 {
 	pcs_ctrl3_t ctrl;
 
-	ctrl.word = readl(data->base + SIC_pcs_ctrl3);
+	ctrl.word = readl(data->base + SIC_pcs_ctrl3_shift);
 
 	return (ctrl.bfs_freq == 8);
 }
@@ -98,7 +99,7 @@ static inline int get_pcs_mode_e8c2(struct pcs_freq_data *data)
 {
 	pcs_ctrl1_t ctrl;
 
-	ctrl.word = readl(data->base + SIC_pcs_ctrl1);
+	ctrl.word = readl(data->base + SIC_pcs_ctrl1_shift);
 
 	return ctrl.pcs_mode;
 }
@@ -108,9 +109,9 @@ static inline void set_pcs_mode(throttling_data_t *throttling_data,
 {
 	pcs_ctrl1_t ctrl;
 
-	ctrl.word = readl(data->base + SIC_pcs_ctrl1);
+	ctrl.word = readl(data->base + SIC_pcs_ctrl1_shift);
 	ctrl.pcs_mode = throttling_data->enable ? V5_PCS_MODE_7 : V5_PCS_MODE_3;
-	writel(ctrl.word, data->base + SIC_pcs_ctrl1);
+	writel(ctrl.word, data->base + SIC_pcs_ctrl1_shift);
 }
 
 static void throttling_handle(struct pcs_freq_data *data, int node)
@@ -129,8 +130,8 @@ static unsigned int get_f_pll_v6(void __iomem *fuse_base)
 	efuse_data_t efuse_data;
 	unsigned int addr;
 	unsigned int f_pll;
-	uint32_t pll_clkr, pll_clkod;
-	uint16_t flags;
+	uint32_t pll_clkr = 0, pll_clkod = 0;
+	uint16_t flags = 0;
 	union {
 		struct {
 			u64 lo     : 13;
@@ -143,8 +144,8 @@ static unsigned int get_f_pll_v6(void __iomem *fuse_base)
 	} pll_clkf;
 
 	for (addr = EFUSE_START_ADDR; addr < EFUSE_END_ADDR_V6; addr++) {
-		writel(addr, fuse_base + EFUSE_RAM_ADDR);
-		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA);
+		writel(addr, fuse_base + EFUSE_RAM_ADDR_SHIFT);
+		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA_SHIFT);
 #ifdef DEBUG
 		print_efuse_data(&efuse_data);
 #endif
@@ -223,8 +224,8 @@ static unsigned int get_f_pll_e8v7(void __iomem *fuse_base)
 	uint16_t flags = 0;
 
 	for (addr = EFUSE_START_ADDR; addr < EFUSE_END_ADDR_E8V7; addr++) {
-		writel(addr, fuse_base + EFUSE_RAM_ADDR);
-		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA);
+		writel(addr, fuse_base + EFUSE_RAM_ADDR_SHIFT);
+		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA_SHIFT);
 #ifdef DEBUG
 		print_efuse_data_v7(&efuse_data);
 #endif
@@ -279,105 +280,6 @@ static unsigned int get_f_pll_e8v7(void __iomem *fuse_base)
 	return f_pll;
 }
 
-static unsigned int get_f_pll_e48c(void __iomem *fuse_base)
-{
-	efuse_data_t efuse_data;
-	unsigned int addr, addr_end = EFUSE_END_ADDR_E48C;
-	unsigned int addr_offset = 1;
-	unsigned int f_pll;
-	uint16_t pll_clkod = DEF_PLL_CLKOD_E48C;
-	uint16_t flags = 0;
-	union {
-		struct {
-			u32 lo    : 3;
-			u32 hi    : 3;
-			u32 empty : 26;
-		};
-		u32 reg;
-	} pll_clkr = {
-		.reg = DEF_PLL_CLKR_E48C
-	};
-	union {
-		struct {
-			u32 lo    : 12;
-			u32 hi    : 1;
-			u32 empty : 19;
-		};
-		u32 reg;
-	} pll_clkf = {
-		.reg = DEF_PLL_CLKF_E48C
-	};
-
-	/*
-	 * bugzilla #166393 addr_end = 0xff for e48c.rev0
-	 * rm #32944 addr_offset = 0x4 for e48c.rev0
-	 */
-	if (cpu_has(CPU_FEAT_E48C_MAKET)) {
-		addr_end = EFUSE_END_ADDR_E48C_REV0;
-		addr_offset = 4;
-	}
-
-	for (addr = EFUSE_START_ADDR; addr < addr_end; addr += addr_offset) {
-		writel(addr, fuse_base + EFUSE_RAM_ADDR);
-		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA);
-#ifdef DEBUG
-		print_efuse_data_v7(&efuse_data);
-#endif
-		if (efuse_data.v7.val && !efuse_data.v7.disable
-				&& (efuse_data.v7.addr == PLL_BFS_CORE_ADDR_V7)) {
-			switch (efuse_data.v7.part_num) {
-			case 5:
-				if (cpu_has(CPU_FEAT_E48C_MAKET)) {
-					/* pll_clkr[2:0] */
-					pll_clkr.lo = efuse_data.e48c_rev0_partnum5.pll_clkr_lo;
-
-					/* pll_clkf[12:0] */
-					pll_clkf.reg = efuse_data.e48c_rev0_partnum5.pll_clkf;
-
-					/* pll_clkod[3:0] */
-					pll_clkod = efuse_data.e48c_rev0_partnum5.pll_clkod;
-				} else {
-					/* pll_clkf[11:0] */
-					pll_clkf.lo = efuse_data.e48c_partnum5.pll_clkf_lo;
-
-					/* pll_clkod[3:0] */
-					pll_clkod = efuse_data.e48c_partnum5.pll_clkod;
-				}
-				flags |= PART_NUM_5;
-				break;
-			case 6:
-				if (cpu_has(CPU_FEAT_E48C_MAKET)) {
-					/* pll_clkr[5:3] */
-					pll_clkr.hi = efuse_data.e48c_rev0_partnum6.pll_clkr_hi;
-				} else {
-					/* pll_clkf[12] */
-					pll_clkf.hi = efuse_data.e48c_partnum6.pll_clkf_hi;
-
-					/* pll_clkr[5:0] */
-					pll_clkr.reg = efuse_data.e48c_partnum6.pll_clkr;
-				}
-				flags |= PART_NUM_6;
-				break;
-			}
-		}
-		if (flags == (PART_NUM_5 | PART_NUM_6))
-			break;
-	}
-
-	if (pll_clkr.reg == 0 && pll_clkod == 0 && pll_clkf.reg == 0) {
-		pll_clkr.reg = DEF_PLL_CLKR_E48C;
-		pll_clkod = DEF_PLL_CLKOD_E48C;
-		pll_clkf.reg = DEF_PLL_CLKF_E48C;
-	}
-
-	f_pll = F_REF * (pll_clkf.reg + 1) / ((pll_clkr.reg + 1) * (pll_clkod + 1));
-
-	if (cpu_has(CPU_FEAT_E48C_MAKET) && f_pll > DEF_F_PLL_E48C_REV0)
-		f_pll = DEF_F_PLL_E48C_REV0;
-
-	return f_pll;
-}
-
 #define GET_FREQ(div, pll) (16000*pll/(1 << div/16)/(div%16 + 16)) /* Khz */
 
 static int pcs_l_create_freq_table(struct platform_device *pdev,
@@ -418,8 +320,6 @@ static int pcs_l_create_freq_table(struct platform_device *pdev,
 
 	if (IS_MACHINE_E8V7)
 		f_pll = get_f_pll_e8v7(fuse_base);
-	else if (IS_MACHINE_E48C)
-		f_pll = get_f_pll_e48c(fuse_base);
 	else
 		f_pll = get_f_pll_v6(fuse_base);
 
@@ -440,15 +340,15 @@ static int pcs_l_create_freq_table(struct platform_device *pdev,
 	return 0;
 }
 
-int get_idx_by_n_sys(int n_sys)
+static int get_idx_by_n_sys(int n_sys)
 {
 	return n_sys - 8;
 }
 
-int n_sys[] = {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+static int n_sys[] = {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
 	       20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
-int f_base_rev0[] = {900, 1000, 1050, 1100, 1125, 1175, 1200, 1300};
-int f_base_rev1[] = {900, 1000, 1100, 1200, 1300, 1400, 1500, 1550};
+static int f_base_rev0[] = {900, 1000, 1050, 1100, 1125, 1175, 1200, 1300};
+static int f_base_rev1[] = {900, 1000, 1100, 1200, 1300, 1400, 1500, 1550};
 
 static int pcs_l_create_freq_table_e8c2(struct platform_device *pdev,
 					struct pcs_freq_data *data,
@@ -470,7 +370,7 @@ static int pcs_l_create_freq_table_e8c2(struct platform_device *pdev,
 	if (!data->table)
 		return -ENOMEM;
 
-	ctrl.word = readl(data->base + SIC_pcs_ctrl3);
+	ctrl.word = readl(data->base + SIC_pcs_ctrl3_shift);
 
 	if (!read_IDR_reg().rev)
 		f_base = f_base_rev0[ctrl.pll_mode];
@@ -500,7 +400,7 @@ static unsigned int pcs_l_cpufreq_get_e8c2(struct pcs_freq_data *data,
 	pcs_ctrl1_t ctrl;
 	struct cpufreq_frequency_table *table = data->table;
 
-	ctrl.word = readl(data->base + SIC_pcs_ctrl1);
+	ctrl.word = readl(data->base + SIC_pcs_ctrl1_shift);
 
 	target_idx = get_idx_by_n_sys(ctrl.n) - get_idx_by_n_sys(table[0].driver_data);
 
@@ -512,7 +412,7 @@ static unsigned int _pcs_l_cpufreq_get(struct pcs_freq_data *data, unsigned int 
 	freq_core_mon_t mon;
 	int core = cpu_to_cpuid(cpu) % cpu_max_cores_num();
 
-	mon.word = readl(data->base + PMC_FREQ_CORE_N_MON(core));
+	mon.word = readl(data->base + PMC_FREQ_CORE_N_MON_SHIFT(core));
 	WARN_ON_ONCE(mon.divF_curr < data->div_min || mon.divF_curr > data->div_max);
 
 	return data->table[mon.divF_curr - data->div_min].frequency;
@@ -541,7 +441,7 @@ static int get_pcs_freq_data(struct platform_device *pdev,
 	boot_info_t *boot_info = &bootblock_virt->info;
 	uint8_t progr_divF, divF_min;
 
-	mon.word = readl(data->base + PMC_FREQ_CORE_0_MON);
+	mon.word = readl(data->base + PMC_FREQ_CORE_0_MON_SHIFT);
 	progr_divF = boot_info->progr_divf;
 	divF_min = progr_divF != 0 ? progr_divF : mon.divF_init;
 
@@ -568,7 +468,7 @@ static int get_pcs_freq_data_e8c2(struct platform_device *pdev,
 	int ret;
 	pcs_ctrl1_t ctrl;
 
-	ctrl.word = readl(data->base + SIC_pcs_ctrl1);
+	ctrl.word = readl(data->base + SIC_pcs_ctrl1_shift);
 
 	data->div_min = ctrl.n_fmin;
 	data->div_max = ctrl.n;
@@ -645,10 +545,10 @@ static void pcs_l_cpufreq_set_e8c2(struct pcs_freq_data *data,
 	unsigned int div = policy->freq_table[index].driver_data;
 	pcs_ctrl1_t ctrl;
 
-	ctrl.word = readl(data->base + SIC_pcs_ctrl1);
+	ctrl.word = readl(data->base + SIC_pcs_ctrl1_shift);
 	ctrl.pcs_mode = get_pcs_mode_e8c2(data) < 4 ? V5_PCS_MODE_3 : V5_PCS_MODE_7;
 	ctrl.n_fprogr = div;
-	writel(ctrl.word, data->base + SIC_pcs_ctrl1);
+	writel(ctrl.word, data->base + SIC_pcs_ctrl1_shift);
 }
 
 static void pcs_l_cpufreq_set(struct pcs_freq_data *data,
@@ -659,7 +559,7 @@ static void pcs_l_cpufreq_set(struct pcs_freq_data *data,
 	unsigned int div = policy->freq_table[index].driver_data;
 	freq_core_ctrl_t ctrl;
 
-	ctrl.word = readl(data->base + PMC_FREQ_CORE_N_CTRL(core));
+	ctrl.word = readl(data->base + PMC_FREQ_CORE_N_CTRL_SHIFT(core));
 	if (IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C) {
 		if (!ctrl.v6.enable) {
 			pr_err("%s: frequency scaling is disabled for core %d\n",
@@ -679,7 +579,7 @@ static void pcs_l_cpufreq_set(struct pcs_freq_data *data,
 		if (ctrl.v7.rmwen)
 			ctrl.v7.rmwen = 0;
 	}
-	writel(ctrl.word, data->base + PMC_FREQ_CORE_N_CTRL(core));
+	writel(ctrl.word, data->base + PMC_FREQ_CORE_N_CTRL_SHIFT(core));
 }
 
 static int pcs_l_cpufreq_target_index(struct cpufreq_policy *policy,
@@ -856,5 +756,5 @@ static struct platform_driver pcs_cpufreq_platdrv = {
 module_platform_driver(pcs_cpufreq_platdrv);
 
 MODULE_AUTHOR("MCST");
-MODULE_DESCRIPTION("E2K CPUFreq Driver");
+MODULE_DESCRIPTION("E2K CPUFreq Driver for v5, v6, v7");
 MODULE_LICENSE("GPL v2");

@@ -5,7 +5,7 @@
 
 #include <linux/linkage.h>
 
-#include <asm/trap_table.h>
+#include <asm/trap_table.S.h>
 
 .section ".entry.text", "ax"
 

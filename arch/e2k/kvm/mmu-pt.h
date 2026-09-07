@@ -11,13 +11,16 @@
 #include <linux/kvm_host.h>
 #include <asm/pgtable_def.h>
 #include <asm/kvm/mmu.h>
+#include <asm/kvm/mmu_exc.h>
 #include <asm/kvm/mmu_pte.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
 
 #include "mmu-e2k.h"
 #include "hv_mmu.h"
-#include "mmu_defs.h"
 #include "pgtable-gp.h"
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include "paravirt_sw/mmu_defs.h"
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_PT_STRUCT_MODE
 #undef	DebugPTS
@@ -52,9 +55,6 @@
 #define	PF_RETRIES_MAX_NUM	1
 /* common number of one try and retries to handle page fault */
 #define	PF_TRIES_MAX_NUM	(1 + PF_RETRIES_MAX_NUM)
-
-#define	HW_REEXECUTE_IS_SUPPORTED	true
-#define	HW_MOVE_TO_TC_IS_SUPPORTED	true
 
 /* all available page tables abstructs */
 extern pt_struct_t pgtable_struct_e2k_v3;
@@ -136,7 +136,9 @@ static inline const pt_struct_t *kvm_get_cpu_mmu_pt_struct(struct kvm_vcpu *vcpu
 	kvm_guest_info_t *guest_info = &vcpu->kvm->arch.guest_info;
 	bool pt_v6;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_hv) {
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		e2k_core_mode_t core_mode;
 
 		core_mode = read_SH_CORE_MODE_reg();
@@ -147,9 +149,11 @@ static inline const pt_struct_t *kvm_get_cpu_mmu_pt_struct(struct kvm_vcpu *vcpu
 				__func__, vcpu->vcpu_id, pt_v6);
 			guest_info->mmu_support_pt_v6 = pt_v6;
 		}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else {
 		pt_v6 = guest_info->mmu_support_pt_v6;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	return get_cpu_iset_mmu_pt_struct(guest_info->cpu_iset, pt_v6);
 }
 
@@ -158,6 +162,7 @@ static inline const pt_struct_t *kvm_get_mmu_host_pt_struct(struct kvm *kvm)
 	return kvm_get_cpu_host_pt_struct(kvm);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline const pt_struct_t *kvm_get_mmu_guest_pt_struct(struct kvm_vcpu *vcpu)
 {
 	if (vcpu->arch.is_hv) {
@@ -173,6 +178,12 @@ static inline const pt_struct_t *kvm_get_mmu_guest_pt_struct(struct kvm_vcpu *vc
 
 	return NULL;
 }
+#else
+static inline const pt_struct_t *kvm_get_mmu_guest_pt_struct(struct kvm_vcpu *vcpu)
+{
+	return kvm_get_cpu_mmu_pt_struct(vcpu);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline const pt_struct_t *mmu_pt_get_host_pt_struct(struct kvm *kvm)
 {
@@ -235,6 +246,7 @@ mmu_pt_gfn_to_index(struct kvm *kvm, gfn_t gfn, gfn_t base_gfn, int level_id)
 	return kvm->arch.mmu_pt_ops.kvm_gfn_to_index(kvm, gfn, base_gfn, level_id);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool
 mmu_pt_kvm_is_thp_gpmd_invalidate(struct kvm_vcpu *vcpu,
 				pgprot_t old_gpmd,  pgprot_t new_gpmd)
@@ -292,6 +304,7 @@ mmu_pt_mmu_unsync_walk(struct kvm *kvm, kvm_mmu_page_t *sp,
 	return kvm->arch.mmu_pt_ops.mmu_unsync_walk(kvm, sp, pvec,
 							pt_entries_level);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline unsigned int
 mmu_pt_get_pte_val_memory_type_v3(pgprot_t pte)
@@ -313,15 +326,11 @@ mmu_pt_set_pte_val_memory_type_v6(pgprot_t pte, unsigned int mtype)
 {
 	return __pgprot(set_pte_val_v6_memory_type(pgprot_val(pte), mtype));
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned int
 mmu_pt_get_pte_val_memory_type_gp(pgprot_t pte)
 {
 	return get_pte_val_gp_memory_type(pgprot_val(pte));
-}
-static inline pgprot_t
-mmu_pt_set_pte_val_memory_type_gp(pgprot_t pte, unsigned int mtype)
-{
-	return __pgprot(set_pte_val_gp_memory_type(pgprot_val(pte), mtype));
 }
 static inline unsigned int
 mmu_pt_get_pte_val_memory_type_rule_gp(pgprot_t pte)
@@ -346,14 +355,12 @@ mmu_pt_account_shadowed(struct kvm *kvm, struct kvm_mmu_page *sp)
 	kvm->arch.mmu_pt_ops.account_shadowed(kvm, sp);
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int
 mmu_pt_walk_shadow_pts(struct kvm_vcpu *vcpu, gva_t addr,
 			struct kvm_shadow_trans *st, hpa_t spt_root)
 {
 	return vcpu->kvm->arch.mmu_pt_ops.walk_shadow_pts(vcpu, addr, st, spt_root);
 }
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void
 mmu_pt_unaccount_shadowed(struct kvm *kvm, struct kvm_mmu_page *sp)
@@ -384,6 +391,7 @@ mmu_pt_shadow_protection_fault(struct kvm_vcpu *vcpu,
 {
 	return vcpu->kvm->arch.mmu_pt_ops.shadow_protection_fault(vcpu, addr, sp);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline long
 mmu_pt_hv_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
@@ -393,6 +401,7 @@ mmu_pt_hv_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 								intc_info_mu);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool
 mmu_pt_slot_gfn_write_protect(struct kvm *kvm, struct kvm_memory_slot *slot,
 			      u64 gfn)
@@ -411,6 +420,7 @@ mmu_pt_gfn_allow_lpage(struct kvm *kvm, struct kvm_memory_slot *slot, gfn_t gfn)
 {
 	kvm->arch.mmu_pt_ops.mmu_gfn_allow_lpage(kvm, slot, gfn);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void
 mmu_pt_direct_unmap_prefixed_mmio_gfn(struct kvm *kvm, gfn_t gfn)
@@ -418,11 +428,13 @@ mmu_pt_direct_unmap_prefixed_mmio_gfn(struct kvm *kvm, gfn_t gfn)
 	kvm->arch.mmu_pt_ops.direct_unmap_prefixed_mmio_gfn(kvm, gfn);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pgprot_t
 mmu_pt_nonpaging_gpa_to_pte(struct kvm_vcpu *vcpu, gva_t addr)
 {
 	return vcpu->kvm->arch.mmu_pt_ops.nonpaging_gpa_to_pte(vcpu, addr);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void
 mmu_pt_free_page(struct kvm *kvm, struct kvm_mmu_page *sp)
@@ -430,6 +442,7 @@ mmu_pt_free_page(struct kvm *kvm, struct kvm_mmu_page *sp)
 	kvm->arch.mmu_pt_ops.kvm_mmu_free_page(kvm, sp);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 mmu_pt_copy_guest_shadow_root_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			pgprot_t *dst_root, pgprot_t *src_root,
@@ -458,23 +471,13 @@ mmu_pt_mark_parents_unsync(struct kvm *kvm, kvm_mmu_page_t *sp)
 {
 	kvm->arch.mmu_pt_ops.mark_parents_unsync(kvm, sp);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline int
 mmu_pt_prepare_zap_page(struct kvm *kvm, kvm_mmu_page_t *sp,
 			struct list_head *invalid_list)
 {
 	return kvm->arch.mmu_pt_ops.prepare_zap_page(kvm, sp, invalid_list);
-}
-
-static inline bool
-mmu_pt_slot_handle_ptes_level_range(struct kvm *kvm,
-		const struct kvm_memory_slot *memslot,
-		slot_level_handler fn, int start_level, int end_level,
-		gfn_t start_gfn, gfn_t end_gfn, bool lock_flush_tlb)
-{
-	return kvm->arch.mmu_pt_ops.slot_handle_ptes_level_range(kvm,
-				memslot, fn, start_level, end_level,
-				start_gfn, end_gfn, lock_flush_tlb);
 }
 
 static inline bool
@@ -486,6 +489,7 @@ mmu_pt_slot_handle_rmap_write_protect(struct kvm *kvm,
 						memslot, fn, lock_flush_tlb);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool
 mmu_pt_slot_handle_collapsible_sptes(struct kvm *kvm,
 		const struct kvm_memory_slot *memslot,
@@ -495,42 +499,13 @@ mmu_pt_slot_handle_collapsible_sptes(struct kvm *kvm,
 						memslot, fn, lock_flush_tlb);
 }
 
-static inline bool
-mmu_pt_slot_handle_clear_dirty(struct kvm *kvm,
-		const struct kvm_memory_slot *memslot,
-		slot_level_handler fn, bool lock_flush_tlb)
-{
-	return kvm->arch.mmu_pt_ops.slot_handle_clear_dirty(kvm,
-						memslot, fn, lock_flush_tlb);
-}
-
-static inline bool
-mmu_pt_slot_handle_largepage_remove_write_access(struct kvm *kvm,
-		const struct kvm_memory_slot *memslot,
-		slot_level_handler fn, bool lock_flush_tlb)
-{
-	return kvm->arch.mmu_pt_ops.slot_handle_largepage_remove_write_access(kvm,
-						memslot, fn, lock_flush_tlb);
-}
-
-static inline bool
-mmu_pt_slot_handle_set_dirty(struct kvm *kvm,
-		const struct kvm_memory_slot *memslot,
-		slot_level_handler fn, bool lock_flush_tlb)
-{
-	return kvm->arch.mmu_pt_ops.slot_handle_set_dirty(kvm,
-						memslot, fn, lock_flush_tlb);
-}
-
 static inline gpa_t
 mmu_pt_gva_to_gpa(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
 		kvm_arch_exception_t *exception, gw_attr_t *gw_res)
 {
-	return (vcpu->arch.mmu.gva_to_gpa) ?
-			vcpu->arch.mmu.gva_to_gpa(vcpu, gva, access,
-						  exception, gw_res)
-			:
-			(gpa_t)gva;
+	return (vcpu->arch.mmu.gva_to_gpa)
+			? vcpu->arch.mmu.gva_to_gpa(vcpu, gva, access, exception, gw_res)
+			: (gpa_t)gva;
 }
 
 static inline long
@@ -539,6 +514,7 @@ mmu_pt_sync_gva_range(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 {
 	return vcpu->arch.mmu.sync_gva_range(vcpu, gmm, gva_start, gva_end);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline pf_res_t
 mmu_pt_page_fault(struct kvm_vcpu *vcpu, gva_t addr, u32 error_code,
@@ -561,12 +537,14 @@ mmu_pt_inject_page_fault(struct kvm_vcpu *vcpu, struct kvm_arch_exception *fault
 	}
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 mmu_pt_update_spte(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 			pgprot_t *spte, pgprotval_t gpte)
 {
 	vcpu->arch.mmu.update_spte(vcpu, sp, spte, gpte);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void mmu_pt_init_vcpu_pt_struct(struct kvm_vcpu *vcpu)
 {
@@ -583,6 +561,7 @@ static inline void mmu_pt_init_nonpaging_pt_structs(struct kvm *kvm, hpa_t root)
 	kvm->arch.mmu_pt_ops.kvm_init_nonpaging_pt_structs(kvm, root);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void mmu_pt_setup_shadow_pt_structs(struct kvm_vcpu *vcpu)
 {
 	vcpu->kvm->arch.mmu_pt_ops.setup_shadow_pt_structs(vcpu);
@@ -593,6 +572,7 @@ static inline void mmu_pt_init_mmu_spt_context(struct kvm_vcpu *vcpu,
 {
 	vcpu->kvm->arch.mmu_pt_ops.kvm_init_mmu_spt_context(vcpu, context);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void mmu_pt_init_mmu_tdp_context(struct kvm_vcpu *vcpu,
 						struct kvm_mmu *context)

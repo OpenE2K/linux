@@ -8,19 +8,8 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/unistd.h>
-#include <generated/asm-offsets.h>
-#include <asm/pv_info.h>
-#include <asm/mmu_types.h>
-#include <asm/trap_table.h>
+#include <asm/asm-offsets.h>
 #include <asm/trap_table.S.h>
-#include <asm/thread_info.h>
-
-#ifdef CONFIG_SMP
-# define SMP_ONLY(...) __VA_ARGS__
-#else
-# define SMP_ONLY(...)
-#endif
 
 #ifdef CONFIG_CLW_ENABLE
 # define CLW_ONLY(...) __VA_ARGS__
@@ -673,7 +662,7 @@ SYM_FUNC_START(ttable_entry5)
 }
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 compat_guest_syscall:
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 	/*
 	 * This sycall is from guest user. Guest ttable entry handler
 	 * will be executed on current hw stack frame. Prepare parameters
@@ -694,7 +683,7 @@ compat_guest_syscall:
 {
 	call		%ctpr1, wbs = 0x4
 }
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 SYM_FUNC_END(ttable_entry5)
 #endif /* CONFIG_COMPAT */
@@ -759,7 +748,7 @@ SYM_FUNC_START(ttable_entry6)
 }
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 guest_syscall:
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 	/*
 	 * This sycall is from guest user. Guest ttable entry handler
 	 * will be executed on current hw stack frame. Prepare parameters
@@ -776,11 +765,13 @@ guest_syscall:
 {
 	call		%ctpr1, wbs = 0x4
 }
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 SYM_FUNC_END(ttable_entry6)
 
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+
+#ifdef CONFIG_KVM_HOST_KERNEL
 /* Function to return to it from guest's fast syscall */
 SYM_FUNC_START(ret_from_fast_sys_call)
 {
@@ -795,7 +786,9 @@ SYM_FUNC_START(ret_from_fast_sys_call)
 	ct %ctpr3
 }
 SYM_FUNC_END(ret_from_fast_sys_call)
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
+
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_PROTECTED_MODE
 .section	.ttable_entry7, "ax",@progbits

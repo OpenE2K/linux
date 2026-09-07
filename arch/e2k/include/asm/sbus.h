@@ -18,8 +18,6 @@
 
 static __inline__ u8 _sbus_readb(unsigned long addr)
 {
-	/* PCI2SBUS doesn't receive 1-byte read good. It's hardware bug */
-
 	return (*(volatile uint32_t *)(addr & _ALIGN_MASK) >> (addr & (0x3))*0x8) & 0xFF;
 }
 

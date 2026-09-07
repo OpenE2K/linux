@@ -19,8 +19,6 @@
 #include <linux/types.h>
 #include <asm/pgtable_types.h>
 
-#ifndef __ASSEMBLY__
-
 /*
  * PTE-V6 format
  */
@@ -39,6 +37,10 @@
 #define _PAGE_SW1_BIT_V6	10	/* SoftWare bit #1 */
 #define _PAGE_SW2_BIT_V6	11	/* SoftWare bit #2 */
 #define	_PAGE_PFN_SHIFT_V6	12	/* shift of Physical Page Number */
+
+/* Important: this is for debug builds only so can use reserved bits */
+#define _PAGE_KERNEL_MARK_BIT_V6 55
+
 #define _PAGE_SW3_BIT_V6	56	/* SoftWare bit #3 */
 #define _PAGE_SW4_BIT_V6	57	/* SoftWare bit #4 */
 #define	_PAGE_MT_SHIFT_V6	60	/* shift of Memory Type field */
@@ -68,6 +70,9 @@
 #define _PAGE_SW4_V6	(1ULL << _PAGE_SW4_BIT_V6)
 #define	_PAGE_MT_V6	(((1ULL << _PAGE_MT_BITS_NUM_V6) - 1) << _PAGE_MT_SHIFT_V6)
 #define _PAGE_NON_EX_V6	(1ULL << _PAGE_NON_EX_BIT_V6)
+
+/* Important: this is for debug builds only so can use reserved bits */
+#define _PAGE_KERNEL_MARK_V6	(1ULL << _PAGE_KERNEL_MARK_BIT_V6)
 
 #define _PAGE_SW3_V7	(1ULL << _PAGE_SW3_BIT_V7)
 #define _PAGE_SW4_V7	(1ULL << _PAGE_SW4_BIT_V7)
@@ -185,6 +190,8 @@ convert_uni_pte_flags_to_pte_val_v6(uni_pteval_t uni_flags)
 		pte_flags |= _PAGE_SWP_UFFD_WP_V6;
 	if (uni_flags & UNI_PAGE_DEVMAP)
 		pte_flags |= _PAGE_DEVMAP_V6;
+	if (uni_flags & UNI_PAGE_KERNEL_MARK)
+		pte_flags |= _PAGE_KERNEL_MARK_V6;
 
 	BUG_ON(pte_flags == 0);
 
@@ -279,7 +286,5 @@ convert_swap_entry_to_pte_v6(swp_entry_t swap_entry)
 #endif	/* CONFIG_MAKE_ALL_PAGES_VALID */
 	return pte;
 }
-
-#endif	/* ! __ASSEMBLY__ */
 
 #endif /* ! _ASM_E2K_PGTABLE_V6_H */

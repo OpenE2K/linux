@@ -40,10 +40,10 @@
 /* virtualization support */
 #include <asm/kvm/page.h>
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #ifndef	CONFIG_VIRTUALIZATION
 /* it is native kernel without any virtualization */
 #define	IS_HOST_KERNEL_ADDRESS(addr)	((addr) >= NATIVE_TASK_SIZE)
-#define	IS_HOST_USER_ADDRESS(addr)	((addr) < NATIVE_TASK_SIZE)
 #define	IS_GUEST_KERNEL_ADDRESS(addr)	false
 #define	IS_GUEST_USER_ADDRESS(addr)	false
 #define	IS_GUEST_PHYS_ADDRESS(addr)	false
@@ -52,13 +52,11 @@
 /* or virtualized guest kernel */
 #define HOST_TASK_SIZE	(HOST_PAGE_OFFSET)
 #define GUEST_TASK_SIZE	(GUEST_PAGE_OFFSET)
-#define HOST_TASK_TOP	HOST_TASK_SIZE
 #define GUEST_TASK_TOP	GUEST_TASK_SIZE
 #define	BOOT_HOST_TASK_SIZE	HOST_TASK_SIZE
 #define	BOOT_GUEST_TASK_SIZE	GUEST_TASK_SIZE
 
 #define	IS_HOST_KERNEL_ADDRESS(addr)	((addr) >= HOST_TASK_SIZE)
-#define	IS_HOST_USER_ADDRESS(addr)	((addr) < HOST_TASK_SIZE)
 #define	IS_GUEST_KERNEL_ADDRESS(addr)	((addr) >= GUEST_TASK_SIZE &&	\
 						(addr) < HOST_TASK_SIZE)
 #define	IS_GUEST_USER_ADDRESS(addr)	((addr) < GUEST_TASK_SIZE)
@@ -66,6 +64,14 @@
 		((e2k_addr_t)(addr) >= GUEST_PAGE_OFFSET && \
 			(e2k_addr_t)(addr) < GUEST_PAGE_OFFSET + MAX_PM_SIZE)
 #endif	/* ! CONFIG_VIRTUALIZATION */
+#else
+#ifdef CONFIG_VIRTUALIZATION
+/* it is host kernel with virtualization support */
+/* or virtualized guest kernel */
+#define HOST_TASK_SIZE	(HOST_PAGE_OFFSET)
+#define	BOOT_HOST_TASK_SIZE	HOST_TASK_SIZE
+#endif	/* CONFIG_VIRTUALIZATION */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* virtualized guest kernel */
@@ -76,8 +82,8 @@
 /* or host kernel with virtualization support */
 #define	TASK_SIZE			NATIVE_TASK_SIZE
 
-#define paravirt_enabled()		(IS_HV_GM() || false)
-#define	boot_paravirt_enabled()		(BOOT_IS_HV_GM() || false)
+#define paravirt_enabled()		IS_HV_GM()
+#define	boot_paravirt_enabled()		BOOT_IS_HV_GM()
 #define	is_paravirt_kernel()		false
 
 #ifndef	CONFIG_VIRTUALIZATION
@@ -96,6 +102,8 @@
 
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	kernel_is_privileged()		(!paravirt_enabled() || IS_HV_GM())
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif /* __ASM_E2K_PV_INFO_H */

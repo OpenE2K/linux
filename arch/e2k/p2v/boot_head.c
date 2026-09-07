@@ -30,7 +30,9 @@
 #include <asm/mmu_regs_access.h>
 #include <asm/simul.h>
 #include <asm/p2v/boot_console.h>
-#include <asm/kvm/boot.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/boot.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #include <asm/kvm/hvc-console.h>
 
 #include "boot_string.h"
@@ -77,6 +79,16 @@ static bool cpu_model_mismatch;
 static bool pv_ops_is_set = false;
 #define	boot_pv_ops_is_set	boot_native_get_vo_value(pv_ops_is_set)
 
+/*
+ * Determine whether current CPU supports QP format.
+ * Can be used before cpu features subsystem initialization.
+ */
+static bool boot_early_get_qp(void)
+{
+	u32 mdl = boot_read_IDR_reg().mdl;
+	return !(mdl <= IDR_E2S_MDL || mdl == IDR_E8C_MDL || mdl == IDR_E1CP_MDL);
+}
+
 /* SCALL 12 is used as a kernel jumpstart */
 void notrace __section(".ttable_entry12")
 __visible ttable_entry12(int n, bootblock_struct_t *bootblock)
@@ -86,6 +98,8 @@ __visible ttable_entry12(int n, bootblock_struct_t *bootblock)
 	/* CPU will stall if we have unfinished memory operations.
 	 * This shows bootloader problems if they present */
 	__E2K_WAIT_ALL;
+
+	boot_write_UPSR_reg(E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL);
 
 	bsp = boot_early_pic_is_bsp();
 	/* Convert virtual PV_OPS function addresses to physical */
@@ -97,9 +111,12 @@ __visible ttable_entry12(int n, bootblock_struct_t *bootblock)
 			native_cpu_relax();
 	}
 
-	/* Clear global registers and set current pointers to 0 */
-	/* to indicate that current_thread_info() is not ready yet */
-	BOOT_INIT_G_REGS();
+	/*
+	 * Clear global registers and set current pointers to 0
+	 * to indicate that current_thread_info() is not ready yet.
+	 */
+	bool clear_qp = boot_early_get_qp();
+	BOOT_INIT_G_REGS(clear_qp);
 
 	boot_startup(bsp, bootblock);
 }
@@ -119,12 +136,7 @@ static void boot_setup_machine_cpu_features(struct machdep *machine)
 	guest_cpu = cpu;
 #endif
 
-	if (iset_ver >= E2K_ISET_V6) {
-		e2k_core_mode_t core_mode = boot_native_read_CORE_MODE_reg();
-		is_hardware_guest = core_mode.gmi;
-	} else {
-		is_hardware_guest = false;
-	}
+	is_hardware_guest = boot_native_read_CORE_MODE_reg().gmi;
 
 	start = (cpuhas_initcall_t *) __cpuhas_initcalls;
 	end = (cpuhas_initcall_t *) __cpuhas_initcalls_end;
@@ -146,41 +158,38 @@ static void __init_recv boot_setup_iset_features(struct machdep *machine)
 	if (machine->native_iset_ver < E2K_ISET_V5) {
 		machine->save_global_gregs = &save_global_gregs_v3;
 		machine->restore_global_gregs = &restore_global_gregs_v3;
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
-		machine->save_local_gregs = &save_local_gregs_v3;
-#endif
 		machine->restore_local_gregs = &restore_local_gregs_v3;
 		machine->save_scratch_gregs = &save_scratch_gregs_v3;
 		machine->restore_scratch_gregs = &restore_scratch_gregs_v3;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+		machine->save_local_gregs = &save_local_gregs_v3;
 		machine->save_gregs_on_mask = &save_gregs_on_mask_v3;
 		machine->restore_gregs_on_mask = &restore_gregs_on_mask_v3;
+#endif
 	} else {
 		machine->save_global_gregs = &save_global_gregs_v5;
 		machine->restore_global_gregs = &restore_global_gregs_v5;
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
-		machine->save_local_gregs = &save_local_gregs_v5;
-#endif
 		machine->restore_local_gregs = &restore_local_gregs_v5;
 		machine->save_scratch_gregs = &save_scratch_gregs_v5;
 		machine->restore_scratch_gregs = &restore_scratch_gregs_v5;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+		machine->save_local_gregs = &save_local_gregs_v5;
 		machine->save_gregs_on_mask = &save_gregs_on_mask_v5;
 		machine->restore_gregs_on_mask = &restore_gregs_on_mask_v5;
+#endif
 	}
 
 	if (machine->native_iset_ver < E2K_ISET_V5) {
 		machine->calculate_aau_aaldis_aaldas = &calculate_aau_aaldis_aaldas_v3;
 		machine->do_aau_fault = &do_aau_fault_v3;
-		machine->save_aaldi = &save_aaldi_v3;
 		machine->get_aau_context = &get_aau_context_v3;
 	} else if (machine->native_iset_ver == E2K_ISET_V5) {
 		machine->calculate_aau_aaldis_aaldas = &calculate_aau_aaldis_aaldas_v5;
 		machine->do_aau_fault = &do_aau_fault_v5;
-		machine->save_aaldi = &save_aaldi_v5;
 		machine->get_aau_context = &get_aau_context_v5;
 	} else {
 		machine->calculate_aau_aaldis_aaldas = &calculate_aau_aaldis_aaldas_v6;
 		machine->do_aau_fault = &do_aau_fault_v6;
-		machine->save_aaldi = &save_aaldi_v5;
 		machine->get_aau_context = &get_aau_context_v5;
 	}
 
@@ -215,7 +224,14 @@ static void __init_recv boot_setup_iset_features(struct machdep *machine)
 #endif
 }
 
-noinline __interrupt  /* To simplify chain stack `ussz` conversion */
+noinline
+static void set_usfs_v7(u64 usfs)
+{
+	e2k_cr1_t cr1 = read_CR1_reg();
+	write_CR1_reg(set_cr1_ussz(cr1, usfs));
+}
+
+noinline
 static void convert_cpu_regs_to_v7(void)
 {
 	e2k_psp_t	psp;
@@ -223,16 +239,21 @@ static void convert_cpu_regs_to_v7(void)
 	e2k_usd_t	usd;
 	e2k_gd_t	gd;
 	e2k_cud_t	cud;
-	e2k_mem_crs_t	*crsp;
+	e2k_mem_crs_t 	*crsp;
 	e2k_dimtp_t	dimtp;
 	e2k_sbr_t sbr;
 
 	e2k_core_mode_t cm = native_read_CORE_MODE_reg();
 	if (cm.descr_v7) {
+		cm.macp_enbl = cpu_has(CPU_FEAT_MADM);
 		cm.getsp_v7 = 1;
 		native_write_CORE_MODE_reg(cm);
 		return;
 	}
+
+	/*
+	 * 1) Read v6 registers
+	 */
 
 	E2K_FLUSHCPU;
 
@@ -246,46 +267,63 @@ static void convert_cpu_regs_to_v7(void)
 
 	psp  = new_psp(psp.Base, psp.Size, psp.Ind);
 	pcsp = new_pcsp(pcsp.Base, pcsp.Size, pcsp.Ind);
-	usd  = new_usd(usd.Ptr - usd.Ind, round_up((u64) usd.Ind, 32), usd.Ind);
-	sbr  = (e2k_sbr_t) { .base = USD_BASE(usd) + USD_SIZE(usd) };
 	gd   = new_gd(gd.Base, _edata_bss - _sdata_bss);
 	cud  = new_cud(cud.Base, _end - _start, 1, cud_m64);
 
-	/* We won't correct the bottom cr1 because we never return from it */
-	u64 prev_ussz = USD_SIZE(usd);
-	for (crsp = (e2k_mem_crs_t *)PCSP_BASE(pcsp);
-	     crsp < (e2k_mem_crs_t *)PCSP_PTR(pcsp);
-	     crsp++) {
+	/*
+	 * 2) Update ussz field in chain stack
+	 */
+
+	/* v6 %usd does not have full size, try to get it from chain stack */
+	u64 usd_full_size = 0;
+
+	u64 prev_ussz = 0;
+	for (crsp = (e2k_mem_crs_t *)PCSP_BASE(pcsp); crsp < K_PCSP_PTR(pcsp); crsp++) {
 		u64 ussz = get_cr1_ussz(crsp->cr1);
-		if (ussz == 0) {
-			/* empty fake frame at the bottom, skip it */
-			continue;
-		}
-		if (ussz == USD_SIZE(usd)) {
-			/* first valuable frame, can't fix it, no return to it */
-			continue;
-		}
-		crsp->cr1 = set_cr1_ussz(crsp->cr1, prev_ussz - ussz);
+		usd_full_size = max(usd_full_size, ussz);
+
+		/*
+		 * At least the first frame will be empty because there is
+		 * nowhere to return from it.  Also for this reason we have
+		 * no needed information to update the second frame.
+		 */
+		set_cr1p_ussz(&crsp->cr1, (prev_ussz > ussz) ? (prev_ussz - ussz) : 0);
+
 		prev_ussz = ussz;
 	}
 
 	e2k_cr1_t cr1 = read_CR1_reg();
-	write_CR1_reg(set_cr1_ussz(cr1, prev_ussz - get_cr1_ussz(cr1)));
+	u64 cr1_ussz = get_cr1_ussz(cr1);
+	write_CR1_reg(set_cr1_ussz(cr1, prev_ussz - cr1_ussz));
+
+	/*
+	 * 3) Calculate new %usd/%sbr values now that we have usd_full_size
+	 */
+
+	usd  = new_usd(usd.Ptr - usd.Ind, usd_full_size, usd.Ind);
+	sbr  = (e2k_sbr_t) { .base = USD_BASE(usd) + USD_SIZE_V7(usd) };
+
+	/*
+	 * 4) Write all registers
+	 */
 
 	/* Must be before all other regs write */
 	cm.descr_v7 = 1;
 	cm.getsp_v7 = 1;
-	if (!boot_cpu_has(CPU_HWBUG_MADM_REGISTERS)) {
-		cm.macp_enbl = 1;
-	}
+	cm.macp_enbl = cpu_has(CPU_FEAT_MADM);
 	native_write_CORE_MODE_reg(cm);
 
+	/* Also clears %usfs */
 	native_write_stacks(psp, pcsp, usd, sbr);
+
 	native_write_GD_reg(gd);
 	native_write_CUD_reg(cud);
 	native_write_OSGD_reg(gd);
 	native_write_OSCUD_reg(cud);
 	native_write_DIMTP_reg(dimtp);
+
+	/* Set %usfs */
+	set_usfs_v7(cr1_ussz - USD_IND(usd));
 }
 
 void __init_recv
@@ -340,9 +378,6 @@ void boot_native_setup_machine_id(bootblock_struct_t *bootblock)
 		break;
 	case MACHINE_ID_E2C3:
 		boot_e2c3_setup_arch();
-		break;
-	case MACHINE_ID_E48C:
-		boot_e48c_setup_arch();
 		break;
 	case MACHINE_ID_E8V7:
 		boot_e8v7_setup_arch();
@@ -546,29 +581,6 @@ void __init boot_init_sequel(bool bsp, int cpuid, int cpus_to_sync)
 #if defined(CONFIG_SERIAL_PRINTK)
 	setup_serial_dump_console(&bootblock_virt->info);
 #endif
-
-	/*
-	 * Show disabled caches
-	 */
-#ifdef	CONFIG_SMP
-	if (bsp) {
-#endif /* CONFIG_SMP */
-		if (disable_caches != MMU_CR_CD_EN) {
-			if (disable_caches == MMU_CR_CD_D1_DIS)
-				dump_printk("Disable L1 cache\n");
-			else if (disable_caches == MMU_CR_CD_D_DIS)
-				dump_printk("Disable L1 and L2 caches\n");
-			else if (disable_caches == MMU_CR_CD_DIS)
-				dump_printk("Disable L1, L2 and L3 caches\n");
-		}
-		if (disable_secondary_caches)
-			dump_printk("Disable secondary INTEL caches\n");
-		if (disable_IP)
-			dump_printk("Disable IB prefetch\n");
-		DebugB("MMU CR 0x%llx\n", AW(get_MMU_CR()));
-#ifdef	CONFIG_SMP
-	}
-#endif /* CONFIG_SMP */
 
 	/*
 	 * Terminate boot-time initialization and start kernel init

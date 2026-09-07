@@ -113,9 +113,9 @@ extern void write_back_cache_range(unsigned long start, size_t size);
  * Flush multiple DCACHE lines
  */
 static inline void
-native_flush_DCACHE_range(void *addr, size_t len)
+native_flush_DCACHE_range(const void *addr, size_t len)
 {
-	char *cp, *end;
+	const char *cp, *end;
 	unsigned long stride;
 
 	DebugMR("Flush DCACHE range: virtual addr 0x%lx, len %lx\n", (unsigned long) addr, len);
@@ -133,21 +133,6 @@ native_flush_DCACHE_range(void *addr, size_t len)
 	flush_DCACHE_line_end(false);
 }
 
-/*
- * Clear multiple DCACHE L1 lines
- */
-static inline void
-native_clear_DCACHE_L1_range(void *virt_addr, size_t len)
-{
-	unsigned long cp;
-	unsigned long end = (unsigned long) virt_addr + len;
-	unsigned long stride;
-
-	stride = cacheinfo_get_l1d_line_size();
-
-	for (cp = (u64) virt_addr; cp < end; cp += stride)
-		clear_DCACHE_L1_line(cp);
-}
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is virtualized guest kernel */
@@ -172,14 +157,9 @@ __flush_icache_page(struct vm_area_struct *vma, struct page *page)
 }
 
 static inline void
-flush_DCACHE_range(void *addr, size_t len)
+flush_DCACHE_range(const void *addr, size_t len)
 {
 	native_flush_DCACHE_range(addr, len);
-}
-static inline void
-clear_DCACHE_L1_range(void *virt_addr, size_t len)
-{
-	native_clear_DCACHE_L1_range(virt_addr, len);
 }
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
@@ -196,14 +176,15 @@ static inline void copy_to_user_page(struct vm_area_struct *vma,
 	flush_icache_range((unsigned long) dst, (unsigned long) dst + len);
 }
 
-extern u8 get_tag_and_color_from_user_page(const void *src);
+extern u8 get_tag_and_color_from_user_page(const volatile void *src);
 
 static inline void copy_from_user_page(struct vm_area_struct *vma,
 		struct page *page, unsigned long vaddr, void *dst,
 		const void *src, size_t len)
 {
 	if (test_ts_flag(TS_PTRACE_WANTS_TAG)) {
-		*(unsigned long *)dst = get_tag_and_color_from_user_page(src);
+		*(unsigned long *)dst = get_tag_and_color_from_user_page(
+							(const volatile void *) src);
 		return;
 	}
 	memcpy(dst, src, len);

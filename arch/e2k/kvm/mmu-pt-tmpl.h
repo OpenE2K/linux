@@ -84,42 +84,12 @@ mmu_set_gp_pt_struct(struct kvm *kvm, const pt_struct_t *pt_struct)
 	}
 }
 
-static inline void
-mmu_set_gp_pt_struct_func(struct kvm *kvm, get_pt_struct_func_t func)
-{
-	kvm->arch.mmu_pt_ops.get_gp_pt_struct = func;
-}
-
 static inline const pt_struct_t *
 kvm_get_host_pt_struct(struct kvm *kvm)
 {
 #if	PT_TYPE == E2K_PT_DYNAMIC
 	BUG_ON(kvm->arch.mmu_pt_ops.get_host_pt_struct(kvm) == NULL);
 	return kvm->arch.mmu_pt_ops.get_host_pt_struct(kvm);
-#else	/* PT_TYPE != E2K_PT_DYNAMIC */
-	BUILD_BUG_ON(true);
-	return NULL;
-#endif	/* PT_TYPE == E2K_PT_DYNAMIC */
-}
-
-static inline const pt_struct_t *
-kvm_get_vcpu_pt_struct(struct kvm_vcpu *vcpu)
-{
-#if	PT_TYPE == E2K_PT_DYNAMIC
-	BUG_ON(vcpu->kvm->arch.mmu_pt_ops.get_vcpu_pt_struct == NULL);
-	return vcpu->kvm->arch.mmu_pt_ops.get_vcpu_pt_struct(vcpu);
-#else	/* PT_TYPE != E2K_PT_DYNAMIC */
-	BUILD_BUG_ON(true);
-	return NULL;
-#endif	/* PT_TYPE == E2K_PT_DYNAMIC */
-}
-
-static inline const pt_struct_t *
-kvm_get_gp_pt_struct(struct kvm *kvm)
-{
-#if	PT_TYPE == E2K_PT_DYNAMIC
-	BUG_ON(kvm->arch.mmu_pt_ops.get_gp_pt_struct == NULL);
-	return kvm->arch.mmu_pt_ops.get_gp_pt_struct(kvm);
 #else	/* PT_TYPE != E2K_PT_DYNAMIC */
 	BUILD_BUG_ON(true);
 	return NULL;
@@ -311,6 +281,7 @@ static inline pgprot_t clear_spte_accessed_mask(struct kvm *kvm, pgprot_t spte)
 	return __pgprot(pgprot_val(spte) & ~mask);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pgprotval_t get_pte_mode_mask(const pt_struct_t *pt_struct)
 {
 	if (pt_struct->user_mask != 0)
@@ -336,6 +307,7 @@ static inline pgprotval_t get_gpte_mode_mask(struct kvm_vcpu *vcpu)
 
 	return get_pte_mode_mask(gpt);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline pgprotval_t get_spte_user_mask(struct kvm *kvm)
 {
@@ -358,12 +330,14 @@ static inline pgprotval_t get_spte_priv_mask(struct kvm *kvm)
 	return spt->priv_mask;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pgprotval_t get_gpte_priv_mask(struct kvm_vcpu *vcpu)
 {
 	const pt_struct_t *gpt = mmu_pt_get_vcpu_pt_struct(vcpu);
 
 	return gpt->priv_mask;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool is_spte_user_mask(struct kvm *kvm, pgprot_t spte)
 {
@@ -395,10 +369,12 @@ static inline pgprot_t clear_spte_user_mask(struct kvm *kvm, pgprot_t spte)
 {
 	const pt_struct_t *spt = mmu_pt_get_host_pt_struct(kvm);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (kvm->arch.is_pv && !kvm->arch.is_hv)
 		/* software paravirtualized guest */
 		/* can be run only at user mode */
 		return spte;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (spt->user_mask != 0)
 		return __pgprot(pgprot_val(spte) & ~spt->user_mask);
 	else if (spt->priv_mask != 0)
@@ -426,10 +402,12 @@ static inline pgprot_t set_spte_priv_mask(struct kvm *kvm, pgprot_t spte)
 {
 	const pt_struct_t *spt = mmu_pt_get_host_pt_struct(kvm);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (kvm->arch.is_pv && !kvm->arch.is_hv)
 		/* software paravirtualized guest */
 		/* can be run only at user mode */
 		return spte;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (spt->priv_mask != 0)
 		return __pgprot(pgprot_val(spte) | spt->priv_mask);
 	else if (spt->user_mask != 0)
@@ -452,6 +430,7 @@ static inline pgprot_t clear_spte_priv_mask(struct kvm *kvm, pgprot_t spte)
 		;
 	return spte;
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pgprot_t set_spte_user_priv_mask(struct kvm *kvm, pgprot_t spte)
 {
 	const pt_struct_t *spt = mmu_pt_get_host_pt_struct(kvm);
@@ -482,6 +461,7 @@ static inline pgprot_t clear_spte_user_priv_mask(struct kvm *kvm, pgprot_t spte)
 	}
 	return spte;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static inline bool is_spte_dirty_mask(struct kvm *kvm, pgprot_t spte)
 {
 	pgprotval_t mask;
@@ -574,12 +554,14 @@ static inline pgprotval_t get_spte_nx_mask(struct kvm *kvm)
 
 	return get_pte_nx_mask(spt);
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pgprotval_t get_gpte_nx_mask(struct kvm_vcpu *vcpu)
 {
 	const pt_struct_t *gpt = mmu_pt_get_vcpu_pt_struct(vcpu);
 
 	return get_pte_nx_mask(gpt);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static inline bool is_spte_x_mask(struct kvm *kvm, pgprot_t spte)
 {
 	const pt_struct_t *spt = mmu_pt_get_host_pt_struct(kvm);
@@ -692,14 +674,13 @@ set_spte_val_memory_type(struct kvm_vcpu *vcpu, pgprot_t spte, unsigned mtype)
 	return spt->set_pte_val_memory_type(spte, mtype);
 #elif	PT_TYPE == E2K_PT_V3 || PT_TYPE == E2K_PT_V5 || PT_TYPE == E2K_PT_V6_OLD
 	return mmu_pt_set_pte_val_memory_type_v3(spte, mtype);
-#elif	PT_TYPE == E2K_PT_V6_NEW
+#elif	PT_TYPE == E2K_PT_V6_NEW || PT_TYPE == E2K_PT_V6_GP
 	return mmu_pt_set_pte_val_memory_type_v6(spte, mtype);
-#elif	PT_TYPE == E2K_PT_V6_GP
-	return mmu_pt_set_pte_val_memory_type_gp(spte, mtype);
 #else
 # error	"Invalid page table structures type"
 #endif
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool is_shadow_zero_bits_set(struct kvm_mmu *mmu, pgprot_t spte,
 					   int level)
 {
@@ -708,6 +689,7 @@ static inline bool is_shadow_zero_bits_set(struct kvm_mmu *mmu, pgprot_t spte,
 	}
 	return false;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define SPTE_HOST_WRITABLE_SW_MASK(__spt)	((__spt)->sw_bit1_mask)
 #define SPTE_MMU_WRITABLE_SW_MASK(__spt)	((__spt)->sw_bit2_mask)
@@ -799,32 +781,15 @@ static inline pgprot_t set_spte_memory_type_mask(struct kvm_vcpu *vcpu,
 	unsigned int mem_type;
 
 	/*
-	 * FIXME: here comments for x86, probably it can be useful for e2k,
-	 * so keep its
-	 * For VT-d and EPT combination
-	 * 1. MMIO: always map as UC
-	 * 2. EPT with VT-d:
-	 *   a. VT-d without snooping control feature: can't guarantee the
-	 *	result, try to trust guest.
-	 *   b. VT-d with snooping control feature: snooping control feature of
-	 *	VT-d engine can guarantee the cache correctness. Just set it
-	 *	to WB to keep consistent with host. So the same as item 3.
-	 * 3. EPT without VT-d: always map as WB and set IPAT=1 to keep
-	 *    consistent with host MTRR
+	 * In general we have two memory types (MT) for spte: XP for MMIO and GC
+	 * for system RAM. In case when guest's page table has another MT
+	 * hardware uses stronger MT because of MTCR set to 0.
 	 */
 
-	/*
-	 * FIXME: now is implemented only two case of memory type
-	 *  a. MMIO: always map as "External Configuration"
-	 *  b. Physical memory: always map as "General Cacheable"
-	 */
-	if (unlikely(is_mmio_prefixed_gfn(vcpu, gfn)))
-		mem_type = EXT_NON_PREFETCH_MT;
+	if (is_mmio)
+		mem_type = EXT_PREFETCH_MT;
 	else
-		if (is_mmio)
-			mem_type = EXT_CONFIG_MT;
-		else
-			mem_type = GEN_CACHE_MT;
+		mem_type = GEN_CACHE_MT;
 
 	return set_spte_val_memory_type(vcpu, spte, mem_type);
 }
@@ -896,6 +861,7 @@ kvm_spte_pfn_to_phys_addr(struct kvm *kvm, pgprot_t spte)
 
 	return kvm_pte_pfn_to_phys_addr(spte, spt);
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline gpa_t
 kvm_gpte_gfn_to_phys_addr(struct kvm_vcpu *vcpu, pgprot_t gpte)
 {
@@ -908,6 +874,7 @@ static inline gfn_t gpte_to_gfn(struct kvm_vcpu *vcpu, pgprotval_t gpte)
 {
 	return gpa_to_gfn(kvm_gpte_gfn_to_phys_addr(vcpu, __pgprot(gpte)));
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline pgprotval_t get_spte_pfn_mask(struct kvm *kvm)
 {
@@ -1084,10 +1051,12 @@ static inline pgprotval_t get_gpte_huge_mask(struct kvm_vcpu *vcpu)
 	return get_gpte_bit_mask(vcpu, false, false, true);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pgprotval_t get_gpte_unmapped_mask(struct kvm_vcpu *vcpu)
 {
 	return (pgprotval_t) 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool is_none_gpte(pgprotval_t pte)
 {
@@ -1099,10 +1068,12 @@ static inline bool is_present_gpte(pgprotval_t pte)
 	return pte & PT_PRESENT_MASK;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool is_unmapped_gpte(struct kvm_vcpu *vcpu, pgprotval_t pte)
 {
 	return pte == get_gpte_unmapped_mask(vcpu);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool is_only_valid_gpte(struct kvm_vcpu *vcpu, pgprotval_t pte)
 {
@@ -1151,6 +1122,7 @@ static inline bool has_pt_level_huge_gpte(struct kvm_vcpu *vcpu, int level)
 	return is_huge_pt_struct_level(gpt, level);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline gfn_t
 gpte_to_gfn_level(struct kvm_vcpu *vcpu,
 		  pgprotval_t gpte, const pt_level_t *pt_level)
@@ -1211,6 +1183,7 @@ static gfn_t kvm_mmu_sp_get_gfn(struct kvm_mmu_page *sp, int index)
 
 	return sp->gfn + (index << ((sp->role.level - 1) * PT64_LEVEL_BITS));
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* KVM Hugepage definitions for host machine */
 static inline int

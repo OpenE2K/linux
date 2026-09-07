@@ -10,11 +10,8 @@
 #include <asm/types.h>
 #include <asm/page.h>
 #include <asm/e2k_api.h>
-#ifndef __ASSEMBLY__
 #include <asm/sections.h>
-#endif /* _ASSEMBLY__ */
 
-#define	EOS_RAM_BASE_LABEL	_data
 #define	KERNEL_START_LABEL	_start		/* start label of Linux Image */
 #define	KERNEL_END_LABEL	_end		/* end label of Linux Image */
 
@@ -23,30 +20,12 @@
 #define	TTABLE_END_LABEL	__ttable_end	/* end label of kernel */
 						/* trap table */
 
-#ifdef __ASSEMBLY__
-
-#define	KERNEL_BASE	[KERNEL_START_LABEL]	/* virtual address of Linux */
-						/* Image begining */
-#define	KERNEL_END	[KERNEL_END_LABEL]	/* virtual address of Linux */
-						/* Image end */
-#define	EOS_RAM_BASE	[EOS_RAM_BASE_LABEL]
-
-#define	KERNEL_TTABLE_BASE	[TTABLE_START_LABEL]	/* kernel trap table */
-							/* start address */
-#define	KERNEL_TTABLE_END	[TTABLE_END_LABEL]	/* kernel trap table */
-							/* end address */
-
-#else /* !(__ASSEMBLY__) */
-
-#define	EOS_RAM_BASE	((e2k_addr_t)&EOS_RAM_BASE_LABEL)
 
 #define	KERNEL_BASE	((e2k_addr_t)&KERNEL_START_LABEL)
 #define	KERNEL_END	((e2k_addr_t)&KERNEL_END_LABEL)
 
 #define	KERNEL_TTABLE_BASE	((e2k_addr_t)&TTABLE_START_LABEL)
 #define	KERNEL_TTABLE_END	((e2k_addr_t)&TTABLE_END_LABEL)
-
-#endif /* !(__ASSEMBLY__) */
 
 
 #define	E2K_EOS_RAM_PAGE_SIZE	E2K_SMALL_PAGE_SIZE	/* Loader warks into */
@@ -63,36 +42,14 @@
 							/* size */
 #define BOOT_E2K_EQUAL_MAP_PAGE_SIZE	BOOT_E2K_KERNEL_PAGE_SIZE
 
-#define	E2K_KERNEL_PS_PAGE_SIZE	E2K_SMALL_PAGE_SIZE	/* kernel procedure */
-							/* stack loads into */
-							/* the small pages */
+/* kernel procedure stack size at boot-time */
+#define	E2K_BOOT_KERNEL_PS_SIZE		(16 * PAGE_SIZE)
 
-							/* kernel procedure */
-							/* stack size 8 * 4KB */
-							/* at boot-time */
-#define	E2K_BOOT_KERNEL_PS_SIZE		(16 * E2K_KERNEL_PS_PAGE_SIZE)
+/* kernel chain stack size at boot-time */
+#define	E2K_BOOT_KERNEL_PCS_SIZE	(4 * PAGE_SIZE)
 
-							/* kernel procedure */
-							/* chain stack loads */
-							/* into the small */
-							/* pages */
-#define	E2K_KERNEL_PCS_PAGE_SIZE	E2K_SMALL_PAGE_SIZE
-
-							/* kernel procedure */
-							/* chain stack size */
-							/* at boot-time */
-							/* 4 * 4KB */
-#define	E2K_BOOT_KERNEL_PCS_SIZE	(4 * E2K_KERNEL_PCS_PAGE_SIZE)
-
-							/* kernel stack loads */
-							/* into the small */
-							/* pages */
-#define	E2K_KERNEL_US_PAGE_SIZE		E2K_SMALL_PAGE_SIZE
-
-							/* kernel stack size */
-							/* at boot-time */
-							/* 8 * 4KB */
-#define	E2K_BOOT_KERNEL_US_SIZE		(4 * E2K_KERNEL_US_PAGE_SIZE)
+/* kernel stack size at boot-time */
+#define	E2K_BOOT_KERNEL_US_SIZE		(4 * PAGE_SIZE)
 
 							/* map initrd using */
 							/* 4K pages (4Mb in */
@@ -132,11 +89,7 @@
  * Size of the top of kernel stack to map to equal virtual addresses to ensure
  * switching from physical to virtual addressing
  */
-#ifndef __ASSEMBLY__
 #define	E2K_KERNEL_US_PAGE_SWITCHING_SIZE	(128 * sizeof(long))
-#else
-#define	E2K_KERNEL_US_PAGE_SWITCHING_SIZE	(128 * 8)
-#endif /* !(__ASSEMBLY__) */
 
 /*
  * Kernel virtual memory layout

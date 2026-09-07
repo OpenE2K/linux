@@ -6,7 +6,7 @@
 #include <asm/head.h>
 #include "init_kbd.h"
 
-#include "../boot_io.h"
+#include "boot_io.h"
 
 #undef	DEBUG_KBD_MODE
 #undef	DebugKBD

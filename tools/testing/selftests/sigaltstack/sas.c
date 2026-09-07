@@ -84,6 +84,14 @@ void my_usr2(int sig, siginfo_t *si, void *u)
 
 	ksft_print_msg("[RUN]\tsignal USR2\n");
 	aa = alloca(1024);
+#if defined(__e2k__) && defined(__ptr128__)
+	/*
+	 * All the code below is just a dirty hack and may be interrupted
+	 * by CLW. Return immediately to avoid executing this code.
+	 */
+	(void)p;
+	return;
+#endif
 	/* dont run valgrind on this */
 	/* try to find the data stored by previous sighandler */
 	p = memmem(aa, 1024, msg, strlen(msg));
@@ -111,7 +119,18 @@ int main(void)
 
 	/* Make sure more than the required minimum. */
 	stack_size = getauxval(AT_MINSIGSTKSZ) + SIGSTKSZ;
+#ifdef __e2k__
+	/*
+	 * Although wrong printf() specifier ('lu' instead of 'u') fires
+	 * only in protected mode (__ptr128__), fix it for any mode.
+	 * Note: the specifier is fixed in kernel 6.7
+	 * commit a8cfb036115c
+	 * "selftests/sigaltstack: Fix wrong format specifier"
+	 */
+	ksft_print_msg("[NOTE]\tthe stack size is %u\n", stack_size);
+#else
 	ksft_print_msg("[NOTE]\tthe stack size is %lu\n", stack_size);
+#endif
 
 	ksft_print_header();
 	ksft_set_plan(3);
@@ -176,7 +195,15 @@ int main(void)
 	uc.uc_link = NULL;
 	uc.uc_stack.ss_sp = ustack;
 	uc.uc_stack.ss_size = stack_size;
+#ifndef __e2k__
 	makecontext(&uc, switch_fn, 0);
+#else
+	err = makecontext_e2k(&uc, switch_fn, 0);
+	if (err) {
+		ksft_exit_fail_msg("makecontext_e2k() - %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+#endif
 	raise(SIGUSR1);
 
 	err = sigaltstack(NULL, &stk);

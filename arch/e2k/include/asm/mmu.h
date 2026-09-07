@@ -22,7 +22,7 @@
 #include <asm/umalloc.h>
 #include <asm/e2k_api.h>
 #include <asm/secondary_space.h>
-
+#include <asm/protected_diag_msg_ids.h>
 
 /* hw_context_lifetime.state possible values.
  * Actual values are important because we use atomic_inc/dec to switch states.
@@ -67,7 +67,7 @@ struct coroutine {
 
 	/* Data from thread_info */
 	struct {
-		data_stack_t	u_stack;	/* User data stack info */
+		struct data_stack u_stack;	/* User data stack info */
 		hw_stack_t	u_hw_stack;	/* User hardware stacks info */
 		struct list_head	getsp_adj;
 		struct list_head	old_u_pcs_list;
@@ -156,10 +156,12 @@ typedef struct {
 	struct list_head delay_free_stacks;
 	struct rw_semaphore core_lock;
 #ifdef CONFIG_PROTECTED_MODE
-	/* The field below controls different debug/error output
+	/* The fields below controls different debug/error output
 	 * purposed to support porting libraries to protected mode:
 	 */
 	unsigned long		pm_sc_debug_mode;
+	/* Bit mask to register messages already delivered: */
+	DECLARE_BITMAP(pm_sc_warned_once_msgs, PMSCERRMSG_NUMBER);
 	/* Controls extra info and issues identified by kernel to journal.
 	 * Use command 'dmesg' to display these messages.
 	 * For particular controls see:

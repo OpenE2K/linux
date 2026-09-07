@@ -20,7 +20,7 @@
 #include <asm-l/clk_rt.h>
 #endif
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #if defined CONFIG_E2K && defined CONFIG_SCLKR_CLOCKSOURCE
 #include <asm/sclkr.h>
 #endif
@@ -307,6 +307,7 @@ static void init_pps(struct spi_device *spi, struct rtc_device *rtc)
 		c &= ~FM_CC_AL_SW;
 		fm33256_write(&spi->dev, c, FM_COMPANION_CONTROL);
 		if (!sclk_register_rtc()) {
+			clear_bit(RTC_FEATURE_ALARM, rtc->features);
 			fm33256_ops.set_alarm = NULL;
 			dev_warn(&spi->dev, "used for clocksource, alarm functionality is disabled\n");
 		}

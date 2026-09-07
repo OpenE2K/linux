@@ -10,13 +10,11 @@
 #include <asm/e2k_debug.h>
 #include <asm/e2k.h>
 
-#include "pci_isa_config.h"
 #include "ide_config.h"
-#include "southbridge.h"
 #include "pci.h"
 #include "mga.h"
 
-#include "../e2k_sic.h"
+#include "e2k_sic.h"
 
 #ifdef	CONFIG_E2K_LEGACY_SIC
 #include <asm/hb_regs.h>
@@ -33,7 +31,7 @@
 
 typedef struct {
 	int div;	// [6:0] Linear output divider
-	
+
 	int q;	// [7:0] PPL*_Q
 	int p;	// [9:0] PPL*_P
 	int po;	// [0:0] PPL_PO
@@ -58,12 +56,12 @@ clk_t __calc( int pixclock )
 
 static inline void mga_write(unsigned long v, unsigned long reg)
 {
-	NATIVE_WRITE_MAS_W(reg, v, MAS_IOADDR);
+	NATIVE_WRITE_MAS_W(reg, v, MAS_IO_OPERATION);
 }
 
 static inline unsigned long mga_read(unsigned long reg)
 {
-	return NATIVE_READ_MAS_W(reg, MAS_IOADDR);
+	return NATIVE_READ_MAS_W(reg, MAS_IO_OPERATION);
 }
 
 static inline void i2c_write(unsigned long i2c_vbase, unsigned long reg, uint8_t val )
@@ -89,20 +87,10 @@ static inline uint8_t i2c_read(unsigned long i2c_vbase, unsigned long reg )
 
 static void i2c_send(unsigned long i2c_vbase, int cmd, int data )
 {
-#if 0
-	unsigned char status;
-#endif	
-	if (cmd & I2C_CR_WR) 
+	if (cmd & I2C_CR_WR)
 		i2c_write(i2c_vbase, I2C_REG_TXR, data );
 
 	i2c_write(i2c_vbase, I2C_REG_CR, cmd );
-
-#if 0
-	while ( ( status = i2c_read(i2c_vbase, I2C_REG_SR ) & I2C_SR_TIP ) ) {
-//		mdelay(1);
-		DEBUG_MSG( "waiting 1 msec...\n" );
-	}
-#endif
 }
 
 
@@ -166,7 +154,7 @@ static uint8_t ramdac_read(unsigned long i2c_vbase, unsigned long ramdac_reg )
 	return val;
 }
 
-static void set_prescaler(unsigned long i2c_vbase, int value) 
+static void set_prescaler(unsigned long i2c_vbase, int value)
 {
 	DEBUG_MSG("set_prescaler start\n");
 	i2c_write(i2c_vbase, I2C_REG_PRER_LO, value & 0xFF );
@@ -179,7 +167,7 @@ static void __set_clk_fs(unsigned long i2c_vbase, uint8_t a, uint8_t b, uint8_t 
 	uint8_t d = FS_REF;
 
 	DEBUG_MSG("__set_clk_fs start\n");
-	// ClkA_FS[2:0]	
+	// ClkA_FS[2:0]
 	ramdac_write(i2c_vbase, 0x08, ( ramdac_read(i2c_vbase, 0x08 ) & 0x7F ) | ( ( a & 0x01 ) << 7 ) );
 	ramdac_write(i2c_vbase, 0x0E, ( ramdac_read(i2c_vbase, 0x0E ) & 0xFC ) | ( ( a & 0x06 ) >> 1 ) );
 	// ClkB_FS[2:0]
@@ -206,7 +194,7 @@ static void __set_ppl(unsigned long i2c_vbase, int index, uint8_t Q, uint16_t P,
 		base = 0x14;
 		break;
 	default :
-		rom_printk( "Invalid PPL index %d\n", index );	
+		rom_printk( "Invalid PPL index %d\n", index );
 		return;
 	}
 	DEBUG_MSG("__set_ppl start\n");
@@ -218,21 +206,21 @@ static void __set_ppl(unsigned long i2c_vbase, int index, uint8_t Q, uint16_t P,
 	{
 		uint8_t val;
 		uint8_t LF = 0x0;
-		
+
 		int P_T = ( 2 * ( (P & 0x3FF) + 3 ) ) + (PO & 0x01);
 
-		if ( P_T <= 231 ) 
+		if ( P_T <= 231 )
 			LF = 0x0;
-		else if ( P_T <= 626 ) 
+		else if ( P_T <= 626 )
 			LF = 0x1;
-		else if ( P_T <= 834 ) 
+		else if ( P_T <= 834 )
 			LF = 0x2;
-		else if ( P_T <= 1043 ) 
+		else if ( P_T <= 1043 )
 			LF = 0x3;
-		else if ( P_T <= 1600 ) 
+		else if ( P_T <= 1600 )
 			LF = 0x4;
 
-	
+
 		// PPL*_En, PPL*_LF, PPL*_PO, PPL*_P[9:8]
 		val  = ( P & 0x300 ) >> 8;
 		val |= ( PO & 0x1 ) << 2;
@@ -258,11 +246,11 @@ static void __set_enabled(unsigned long i2c_vbase, int index, uint8_t enabled )
 		base = 0x14;
 		break;
 	default :
-		rom_printk( "Invalid PPL index %d\n", index );	
+		rom_printk( "Invalid PPL index %d\n", index );
 		return;
 	}
 
-	DEBUG_MSG("__set_enabled start\n");	
+	DEBUG_MSG("__set_enabled start\n");
 	val = ramdac_read(i2c_vbase, base + 2 );
 	val = val & (~(0x01 << 6));
 	val |= (enabled & 0x01) << 6;
@@ -311,8 +299,8 @@ static void MMIO_WRITE( struct mgam83fb_par* p, unsigned long reg, uint32_t val 
 struct fb_bitfield {
 	__u32 offset;			/* beginning of bitfield	*/
 	__u32 length;			/* length of bitfield		*/
-	__u32 msb_right;		/* != 0 : Most significant bit is */ 
-					/* right */ 
+	__u32 msb_right;		/* != 0 : Most significant bit is */
+					/* right */
 };
 #undef MGA_TEST
 #ifdef MGA_TEST
@@ -377,7 +365,7 @@ int __set_mode( struct mgam83fb_par* p )
 	DEBUG_MSG( "hsync: %d hgdel: %d hgate %d\n", hsync, hgdel, hgate );
 	DEBUG_MSG( "vsync: %d vgdel: %d vgate %d\n", vsync, vgdel, vgate );
 	DEBUG_MSG( "hlen: %d vlen: %d\n", hlen, vlen );
-	MMIO_WRITE( p, REG_CTRL, ctrl | CTRL_VEN );	
+	MMIO_WRITE( p, REG_CTRL, ctrl | CTRL_VEN );
 	DEBUG_MSG("__set_mode: finish\n");
 	return 0;
 }
@@ -387,17 +375,17 @@ int __set_mode( struct mgam83fb_par* p )
 static inline void
 bios_writel(u32 l, volatile void *addr)
 {
-	NATIVE_WRITE_MAS_W((e2k_addr_t)addr, l, MAS_IOADDR);
+	NATIVE_WRITE_MAS_W((e2k_addr_t)addr, l, MAS_IO_OPERATION);
 }
 
 static inline void
 bios_writell(u64 q, volatile void *addr)
 {
-	NATIVE_WRITE_MAS_D((e2k_addr_t)addr, q, MAS_IOADDR);
+	NATIVE_WRITE_MAS_D((e2k_addr_t)addr, q, MAS_IO_OPERATION);
 }
 
-void drawStripe( unsigned long addr, 
-				 int yB, int yE, 
+void drawStripe( unsigned long addr,
+				 int yB, int yE,
 				 int rB, int rE, int gB, int gE, int bB, int bE )
 {
 	int x, y;
@@ -410,19 +398,10 @@ void drawStripe( unsigned long addr,
 		   "		bB = %d, bE = %d\n", addr, yB, yE, rB, rE, gB, gE, bB, bE); */
 	for ( y = yB; y < yE; y++ ) {
 		for ( x = 0; x < xres; x++ ) {
-/*			float factor = (float)x / (float)xres;
-			unsigned int r = rB + factor * ( rE - rB );
-			unsigned int g = gB + factor * ( gE - gB );
-			unsigned int b = bB + factor * ( bE - bB );*/
 			unsigned int r = rB + 1 * ( rE - rB );
 			unsigned int g = gB + 1 * ( gE - gB );
 			unsigned int b = bB + 1 * ( bE - bB );
-#if 0
-			if (once != 757){			
-				rom_printk("r = %d, g = %d, b = %d\n", r, g, b);
-				once++;
-			}
-#endif
+
 			bios_writel(r << colors.red.offset |
 					g << colors.green.offset |
 					b << colors.blue.offset, (void *)addr);
@@ -442,7 +421,7 @@ void draw(struct bios_pci_dev *dev)
 	int bE = ( 1 << colors.red.length ) - 1;
 
 	fb_phys_addr = dev->base_address[PCI_MEM_BAR];
-	
+
 	drawStripe( fb_phys_addr,                0, 1 * stripeHeight, 0, rE, 0, gE, 0, bE );
 	drawStripe( fb_phys_addr, 1 * stripeHeight, 2 * stripeHeight, 0, 0, 0, 0, 0, bE );
 	drawStripe( fb_phys_addr, 2 * stripeHeight, 3 * stripeHeight, 0, 0, 0, gE, 0, 0 );
@@ -460,11 +439,10 @@ void enable_mga(void)
 
 	dev = bios_pci_find_device(PCI_VENDOR_ID_MGAM83, PCI_DEVICE_ID_MGAM83,
 					NULL);
-	
+
 	if (dev) {
-		SB_bus = dev->bus->number;
-		SB_device = PCI_SLOT(dev->devfn);
-		rom_printk("found on bus %d device %d\n", SB_bus, SB_device);
+		rom_printk("found on bus %d device %d\n",
+			   dev->bus->number, PCI_SLOT(dev->devfn));
 		DebugMGA("--------- VIDEO BIOS ------\n");
 		DebugMGA("Class: %X\n", dev->class);
 		DebugMGA("command: %x\n", dev->command);
@@ -485,14 +463,14 @@ void enable_mga(void)
 		p.mem.base 		= dev->base_address[PCI_MEM_BAR];
 		p.mem.len 		= dev->size[PCI_MEM_BAR];
 		p.mem.vbase		= dev->base_address[PCI_MEM_BAR];
-		
+
 		p.mmio.base		= dev->base_address[PCI_MMIO_BAR];
 		p.mmio.len		= dev->size[PCI_MMIO_BAR];
 		p.mmio.vbase 	 	= dev->base_address[PCI_MMIO_BAR];
 
 		p.i2c.base		= dev->base_address[PCI_I2C_BAR];
 		p.i2c.len		= dev->size[PCI_I2C_BAR];
-		p.i2c.vbase 		= dev->base_address[PCI_I2C_BAR];	
+		p.i2c.vbase 		= dev->base_address[PCI_I2C_BAR];
 
 		/* Update par */
 		p.xres			= 0x280;
@@ -510,7 +488,7 @@ void enable_mga(void)
 		p.bits_per_pixel	= 0x20;
 		p.pixclock		= 0x9b29;
 		p.sync			= 0;
-		
+
 		DEBUG_MSG("!!! enable_mga: setting pixclock !!!\n");
 		__set_pixclock( (unsigned long)p.i2c.vbase, p.pixclock );
 		__set_mode( &p );

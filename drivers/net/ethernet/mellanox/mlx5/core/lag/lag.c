@@ -1543,6 +1543,9 @@ int mlx5_lag_query_cong_counters(struct mlx5_core_dev *dev,
 	int ret, i, j;
 	void *out;
 
+#ifdef CONFIG_MCST
+	ret = 0;
+#endif
 	out = kvzalloc(outlen, GFP_KERNEL);
 	if (!out)
 		return -ENOMEM;

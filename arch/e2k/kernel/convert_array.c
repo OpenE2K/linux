@@ -82,11 +82,11 @@ static inline
 void error_STRUCT_NOT_DSCR_IN_FIELD(const uintptr_t address, const int tag, const int field_num, const long lval_lo, const long lval_hi, const struct pt_regs *regs)
 {
 	if (regs == NULL) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD,
 			address, tag, field_num, lval_lo, lval_hi);
 	} else {
 
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_NOT_DESCR_IN_FIELD,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_SC_NOT_DESCR_IN_FIELD,
 			regs->sys_num, sys_call_ID_to_name[regs->sys_num],
 			tag, field_num, lval_lo, lval_hi, address);
 	}
@@ -200,7 +200,7 @@ int get_pm_struct(const void	__user *prot_array,
 	}
 
 	if ((uintptr_t)prot_array & 0x7) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_UNALIGNED_DESCR,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_UNALIGNED_DESCR,
 				     __func__, prot_array);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGILL, ILL_ILLOPN, EINVAL);
 		return -EINVAL;
@@ -247,7 +247,7 @@ int get_pm_struct(const void	__user *prot_array,
 	 * size of this array in user space
 	 */
 	if (prot_len > max_prot_array_size) {
-		PROTECTED_MODE_ALERT(PMCNVSTRMSG_STRUCT_SIZE_EXCEEDS_MAX,
+		PROTECTED_MODE_ERROR(PMCNVSTRMSG_STRUCT_SIZE_EXCEEDS_MAX,
 				     __func__, prot_len, max_prot_array_size);
 		if (misaligned_ptr_from)
 			protected_mode_message(0, PMCNVSTRMSG_STRUCT_DESCR_UNALIGNED,
@@ -264,7 +264,7 @@ int get_pm_struct(const void	__user *prot_array,
 		/* NB> Alignment required not to lose tags */
 		lptr = (long *) (((uintptr_t) lptr + 15) & ~0xf);
 		/* Copy original array with tags to tmp array for converting */
-		if (copy_from_user_with_tags(lptr, prot_array, prot_len)) {
+		if (copy_from_user_tagged(lptr, prot_array, prot_len)) {
 			pr_err("pid#%d Copying original structure (0x%lx : %d) failed\n",
 			       current->pid, (long) lptr, prot_len);
 			kfree(lptr);
@@ -315,7 +315,7 @@ load_current_element:
 			case _INT_FIELD:
 				/* Load word (4 bytes) with tags */
 				if (get_user_tagged_4(val_int, tag, ptr_from)) {
-					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
+					PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (unsigned long) ptr_from, j);
 					return -EFAULT;
 				}
@@ -327,14 +327,14 @@ load_int_element:
 						!(rval_mode & CONV_ARR_IGNORE_INT_FLD_ERR)) {
 					/* Check for valid 'int' field failed */
 					if (tag == ETAGEWS) {
-						PROTECTED_MODE_ALERT(
+						PROTECTED_MODE_ERROR(
 							PMSCERRMSG_STRUCT_UNINIT_INT_FIELD,
 							((uintptr_t) prot_array + struct_len * i),
 							tag, j, (long) val_int);
 						PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL,
 									  EINVAL);
 					} else {
-						PROTECTED_MODE_ALERT(
+						PROTECTED_MODE_ERROR(
 							PMSCERRMSG_STRUCT_BAD_TAG_INT_FIELD,
 							((uintptr_t) prot_array + struct_len * i),
 							tag, j, (long) val_int);
@@ -368,7 +368,7 @@ load_int_element:
 			case _LONG_FIELD:
 				/* Load dword (8 bytes) with tags */
 				if (get_user_tagged_8(val_long, tag, (u64 __user *) ptr_from)) {
-					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
+					PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (unsigned long) ptr_from, j);
 					return -EFAULT;
 				}
@@ -380,14 +380,14 @@ load_long_element:
 						!(rval_mode & CONV_ARR_IGNORE_LONG_FLD_ERR)) {
 					/* Check for valid 'long' field failed */
 					if (tag == ETAGEWD) {
-						PROTECTED_MODE_ALERT(
+						PROTECTED_MODE_ERROR(
 							PMSCERRMSG_STRUCT_UNINIT_INT_FIELD,
 							((uintptr_t) prot_array + struct_len * i),
 							tag, j, val_long);
 						PM_EXCEPTION_IF_ORTH_MODE(SIGILL, ILL_ILLOPN,
 									  EINVAL);
 					} else {
-						PROTECTED_MODE_ALERT(
+						PROTECTED_MODE_ERROR(
 							PMSCERRMSG_STRUCT_BAD_TAG_INT_FIELD,
 							((uintptr_t) prot_array + struct_len * i),
 							tag, j, val_long);
@@ -413,7 +413,7 @@ load_long_element:
 			case _FUNC_FIELD:
 				/* Load func.pointer (two dwords - 16 bytes) with tags */
 				if (get_user_tagged_16(qptr.qword, dtag, ptr_from)) {
-					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
+					PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (unsigned long) ptr_from, j);
 					return -EFAULT;
 				}
@@ -429,7 +429,7 @@ load_long_element:
 						!IS_PL(qptr, dtag) && qptr.lo &&
 						!(rval_mode & CONV_ARR_IGNORE_FUNC_FLD_ERR)) {
 					/* Check for valid func field failed */
-					PROTECTED_MODE_ALERT(
+					PROTECTED_MODE_ERROR(
 						PMSCERRMSG_STRUCT_NOT_PL_IN_FIELD,
 						((uintptr_t) prot_array + struct_len * i),
 						tag, j, qptr.lo);
@@ -448,7 +448,7 @@ eo_PL_field:
 			case _PTR_FIELD: {
 				/* Load descriptor (two dwords - 16 bytes) with tags: */
 				if (get_user_tagged_16(qptr.qword, dtag, ptr_from)) {
-					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
+					PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (unsigned long) ptr_from, j);
 					return -EFAULT;
 				}
@@ -490,7 +490,7 @@ eo_APTR_field:
 			case _LONG_PTR_FIELD: {
 				/* Check for descriptor tag in the field: */
 				if (get_user_tagged_16(qptr.qword, dtag, ptr_from)) {
-					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
+					PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (unsigned long) ptr_from, j);
 					return -EFAULT;
 				}
@@ -514,7 +514,7 @@ eo_APTR_field:
 				/* Check for descriptor tag in the field: */
 				if (get_user_tagged_16(qptr.qword,
 						tag, (long __user *) ptr_from)) {
-					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
+					PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (unsigned long) ptr_from, j);
 					return -EFAULT;
 				}
@@ -529,7 +529,7 @@ eo_APTR_field:
 							(long __user *) ptr_from) ||
 				    !aligned && get_user_tagged_8(val_long, tag,
 							(long __user *) ptr_from)) {
-					PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
+					PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
 							__func__, (unsigned long) ptr_from, j);
 					return -EFAULT;
 				}
@@ -648,7 +648,7 @@ eo_APTR_field:
 
 out:
 	if (failed_2_write) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_FATAL_WRITE_AT_FIELD,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_FATAL_WRITE_AT_FIELD,
 				     __func__, (unsigned long) ptr_to, j /*field*/);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGILL, ILL_ILLOPN, EINVAL);
 	}
@@ -656,7 +656,7 @@ out:
 	return rval;
 
 err_read_to:
-	PROTECTED_MODE_ALERT(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD, __func__,
+	PROTECTED_MODE_ERROR(PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD, __func__,
 			     (unsigned long) ptr_to, j);
 	PM_EXCEPTION_IF_ORTH_MODE(SIGILL, ILL_ILLOPN, EINVAL);
 	return -EFAULT;

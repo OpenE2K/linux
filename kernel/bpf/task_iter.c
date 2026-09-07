@@ -455,7 +455,11 @@ static struct vm_area_struct *
 task_vma_seq_get_next(struct bpf_iter_seq_task_vma_info *info)
 {
 	enum bpf_task_vma_iter_find_op op;
+#ifdef CONFIG_MCST
+	struct vm_area_struct *curr_vma = NULL;
+#else
 	struct vm_area_struct *curr_vma;
+#endif
 	struct task_struct *curr_task;
 	struct mm_struct *curr_mm;
 	u32 saved_tid = info->tid;

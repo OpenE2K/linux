@@ -32,7 +32,11 @@
 #include <linux/spinlock.h>
 #include <asm/io.h>
 #include <linux/pci.h>
+#ifdef CONFIG_MCST
+#include <linux/uaccess.h>
+#else
 #include <asm/uaccess.h>
+#endif
 #include <linux/ioport.h>
 #include <asm/irq.h>
 #include <linux/version.h>

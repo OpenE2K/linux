@@ -79,7 +79,6 @@
 #include <linux/sched/sysctl.h>
 #ifdef CONFIG_MCST
 #include <linux/delay.h>
-#include <linux/mcst_rt.h>
 #endif 
 
 #include <trace/events/kmem.h>
@@ -3815,7 +3814,11 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct folio *swapcache, *folio = NULL;
+#ifdef CONFIG_MCST
+	struct page *page = NULL;
+#else
 	struct page *page;
+#endif
 	struct swap_info_struct *si = NULL;
 	rmap_t rmap_flags = RMAP_NONE;
 	bool need_clear_cache = false;
@@ -5132,17 +5135,6 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	pgd_t *pgd;
 	p4d_t *p4d;
 	vm_fault_t ret;
-
-#ifdef CONFIG_MCST_4RT
-	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
-		/* Attempt to allocate page when VM_MLOCK_DONE set */
-		/* for gracefully exit() */
-		mm->extra_vm_flags &= ~VM_MLOCK_DONE;
-		pr_err("Attempt to allocate page when VM_MLOCK_DONE"
-				"(after mlockall())\n");
-		return VM_FAULT_SIGBUS;
-	}
-#endif  /* CONFIG_MCST_4RT */
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);

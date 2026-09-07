@@ -56,11 +56,14 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_unmapped_area_info info;
-	unsigned long begin, end, ret, hole_size;
+	unsigned long begin, end;
 	unsigned long is_protected = TASK_IS_PROTECTED(current);
 	unsigned long is_32bit = (current->thread.flags & E2K_FLAG_32BIT) &&
 				 !is_protected;
 
+	if (is_protected && !cpu_has(CPU_FEAT_V7_CPU_REGS) && (len >> 31)) {
+		return -ENOMEM;
+	}
 	if (flags & MAP_FIXED) {
 		if (!test_ts_flag(TS_KERNEL_SYSCALL)) {
 			if (!__range_ok(addr, len, USER_ADDR_MAX))
@@ -95,20 +98,19 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	}
 #endif
 
-	hole_size = 0;
-
 	info.flags = 0;
-	info.length = len + 2 * hole_size;
+	info.length = len;
 	info.low_limit = begin;
 	info.high_limit = end;
-	info.align_mask = (is_protected && cpu_has(CPU_FEAT_V7_CPU_REGS)) ? ap_align_mask(len) : 0;
+	info.align_mask = 0;
 	info.align_offset = 0;
+	if (is_protected && cpu_has(CPU_FEAT_V7_CPU_REGS)) {
+		unsigned long align_mask = ap_align_mask(len);
+		info.length = ((len + align_mask) & ~align_mask);
+		info.align_mask = align_mask;
+	}
 
-	ret = vm_unmapped_area(&info);
-	if (!(ret & ~PAGE_MASK))
-		ret += hole_size;
-
-	return ret;
+	return vm_unmapped_area(&info);
 }
 
 unsigned long arch_mmap_rnd(void)

@@ -27,11 +27,11 @@
 #define DRIVER_VERSION		"1.5"
 
 /* Regs index */
-#define PCS_CTRL5	0x0CC4
-#define PCS_CTRL6	0x0CC8
-#define PCS_CTRL7	0x0CCC
-#define PCS_CTRL8	0x0CD0
-#define PCS_CTRL9	0x0CD4
+#define PCS_CTRL5_OFFSET	0x0
+#define PCS_CTRL6_OFFSET	0x4
+#define PCS_CTRL7_OFFSET	0x8
+#define PCS_CTRL8_OFFSET	0xC
+#define PCS_CTRL9_OFFSET	0x10
 
 /* Number of sensors for each CPU type */
 #define SENSORS_E8C	9
@@ -46,15 +46,15 @@ struct pcs_ctrl_info {
 };
 
 static const struct pcs_ctrl_info pcs_ctrls[] = {
-	{ PCS_CTRL5,  0}, /* Temp_r_scan0 */
-	{ PCS_CTRL5, 12}, /* Temp_r_scan1 */
-	{ PCS_CTRL6,  0}, /* Temp_r_scan2 */
-	{ PCS_CTRL6, 12}, /* Temp_r_scan3 */
-	{ PCS_CTRL7,  0}, /* Temp_r_scan4 */
-	{ PCS_CTRL7, 12}, /* Temp_r_scan5 */
-	{ PCS_CTRL8,  0}, /* Temp_r_scan6 */
-	{ PCS_CTRL8, 12}, /* Temp_r_scan7 */
-	{ PCS_CTRL9, 14}, /* T_max_cr */
+	{ PCS_CTRL5_OFFSET,  0}, /* Temp_r_scan0 */
+	{ PCS_CTRL5_OFFSET, 12}, /* Temp_r_scan1 */
+	{ PCS_CTRL6_OFFSET,  0}, /* Temp_r_scan2 */
+	{ PCS_CTRL6_OFFSET, 12}, /* Temp_r_scan3 */
+	{ PCS_CTRL7_OFFSET,  0}, /* Temp_r_scan4 */
+	{ PCS_CTRL7_OFFSET, 12}, /* Temp_r_scan5 */
+	{ PCS_CTRL8_OFFSET,  0}, /* Temp_r_scan6 */
+	{ PCS_CTRL8_OFFSET, 12}, /* Temp_r_scan7 */
+	{ PCS_CTRL9_OFFSET, 14}, /* T_max_cr */
 	{ 0x0000, 0}
 };
 
@@ -72,7 +72,7 @@ static int read_temp(int node, int idx, void __iomem *base)
 {
 	int val;
 
-	val = readl(base + pcs_ctrls[idx].offset - 0xcc4);
+	val = readl(base + pcs_ctrls[idx].offset);
 	val = (val >> pcs_ctrls[idx].shift) & PCS_CTRL_MASK;
 
 	int temp_mc = val; /* 12b signed integer temperature value in 125 mC */
@@ -247,7 +247,9 @@ static int pcs_get_temp(struct thermal_zone_device *tz, int *temp)
 	struct pcs_data *pcs = tz->devdata;
 	int val;
 
-	val = readl(pcs->base + pcs_ctrls[8].offset - 0xcc4);
+	val = readl(pcs->base + pcs_ctrls[8].offset);
+	val = (val >> pcs_ctrls[8].shift) & PCS_CTRL_MASK;
+
 	*temp = ((val << 20) / 0x100000) * 125;
 	return 0;
 }
@@ -337,10 +339,12 @@ static int pcs_probe(struct platform_device *pdev)
 	void __iomem *base;
 	struct resource *r;
 	char str[64];
+	char new_dev_name[64];
 	int node;
 	struct pcs_data *pcs;
 	struct device_node *np;
 	struct device *hwmon_dev;
+	int ret = 0;
 
 	if (!sensors)
 		initialize_sensors(dev);
@@ -358,7 +362,11 @@ static int pcs_probe(struct platform_device *pdev)
 	np = pdev->dev.of_node;
 
 	if (np) {
-		sscanf(np->full_name, "pcs@%d", &node);
+		int count = sscanf(np->full_name, "pcs@%d", &node);
+
+		if (count != 1 || node < 0 || node >= MAX_NUMNODES)
+			return -EINVAL;
+
 		if (!node_online(node))
 			return -ENODEV;
 	} else {
@@ -370,6 +378,13 @@ static int pcs_probe(struct platform_device *pdev)
 		sprintf(str, "/pcs@%d", node);
 		np = of_find_node_by_path(str);
 		pdev->dev.of_node = np;
+	}
+
+	snprintf(new_dev_name, sizeof(new_dev_name), "pcs.%d", node);
+	ret = device_rename(&pdev->dev, new_dev_name);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to rename device to %s: %d\n", new_dev_name, ret);
+		return ret;
 	}
 
 	pcs = devm_kzalloc(&pdev->dev, sizeof(*pcs), GFP_KERNEL);

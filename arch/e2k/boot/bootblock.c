@@ -32,8 +32,6 @@ extern u64 __kernel_size;
 #  define TARGET_MDL		IDR_E16C_MDL
 # elif defined(CONFIG_E2K_E2C3)
 #  define TARGET_MDL		IDR_E2C3_MDL
-# elif defined(CONFIG_E2K_E48C)
-#  define TARGET_MDL		IDR_E48C_MDL
 # elif defined(CONFIG_E2K_E8V7)
 #  define TARGET_MDL		IDR_E8V7_MDL
 # else

@@ -23,9 +23,9 @@
 /*fence related code*/
 /*for fence's seqno, maybe each domain shoul hold one*/
 static unsigned long seqno;
-DEFINE_IDR(fence_idr);
+static DEFINE_IDR(fence_idr);
 /*a mutex for fence*/
-struct mutex fence_mutex;
+static struct mutex fence_mutex;
 
 static const char *hantro_fence_get_driver_name(hantro_fence_t *fence)
 {
@@ -97,12 +97,12 @@ static hantro_fence_t *alloc_fence(unsigned int ctxno)
 	set_bit(HANTRO_FENCE_FLAG_ENABLE_SIGNAL_BIT, &fobj->flags);
 	return fobj;
 }
-
+#if 0
 static int isHantrofence(hantro_fence_t *fence)
 {
 	return (fence->ops == &hantro_fenceops);
 }
-
+#endif
 int init_hantro_resv(struct dma_resv *presv,
 		     struct drm_gem_hantro_object *cma_obj)
 {
@@ -115,7 +115,7 @@ int init_hantro_resv(struct dma_resv *presv,
 	//reservation_object_add_excl_fence(presv, (hantro_fence_t *)fobj);
 	return 0;
 }
-
+#if 0
 int hantro_waitfence(hantro_fence_t *pfence)
 {
 	if (test_bit(HANTRO_FENCE_FLAG_SIGNAL_BIT, &pfence->flags))
@@ -127,7 +127,7 @@ int hantro_waitfence(hantro_fence_t *pfence)
 	else
 		return hantro_fence_wait_timeout(pfence, true, 30 * HZ);
 }
-
+#endif
 /*it's obselete, left here for compiling compatible*/
 int hantro_setdomain(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)

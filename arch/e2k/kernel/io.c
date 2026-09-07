@@ -90,7 +90,7 @@ native_conf_inb(unsigned int domain, unsigned int bus, unsigned long port,
 
 	conf_base = get_domain_pci_conf_base(domain);
 	conf_port = conf_base + port;
-	*byte = NATIVE_READ_MAS_B(conf_port, MAS_IOADDR);
+	*byte = NATIVE_READ_MAS_B(conf_port, MAS_IO_OPERATION);
 	DebugCIO("value %x read from port %lx, domain #%d "
 		"(node %d, IO link %d)\n",
 		(u32) *byte, conf_port, domain,
@@ -106,7 +106,7 @@ native_conf_inw(unsigned int domain, unsigned int bus, unsigned long port,
 
 	conf_base = get_domain_pci_conf_base(domain);
 	conf_port = conf_base + port;
-	*hword = NATIVE_READ_MAS_H(conf_port, MAS_IOADDR);
+	*hword = NATIVE_READ_MAS_H(conf_port, MAS_IO_OPERATION);
 	DebugCIO("value %x read from port %lx, domain #%d "
 		"(node %d, IO link %d)\n",
 		(u32) *hword, conf_port, domain,
@@ -122,7 +122,7 @@ native_conf_inl(unsigned int domain, unsigned int bus, unsigned long port,
 
 	conf_base = get_domain_pci_conf_base(domain);
 	conf_port = conf_base + port;
-	*word = NATIVE_READ_MAS_W(conf_port, MAS_IOADDR);
+	*word = NATIVE_READ_MAS_W(conf_port, MAS_IO_OPERATION);
 	DebugCIO("value %x read from port %lx, domain #%d "
 		"(node %d, IO link %d)\n",
 		(u32) *word, conf_port, domain,
@@ -142,7 +142,7 @@ native_conf_outb(unsigned int domain, unsigned int bus, unsigned long port,
 		"(node %d, IO link %d)\n",
 		(u32) byte, conf_port, domain,
 		iohub_domain_to_node(domain), iohub_domain_to_link(domain));
-	NATIVE_WRITE_MAS_B(conf_port, byte, MAS_IOADDR);
+	NATIVE_WRITE_MAS_B(conf_port, byte, MAS_IO_OPERATION);
 }
 
 void
@@ -158,7 +158,7 @@ native_conf_outw(unsigned int domain, unsigned int bus, unsigned long port,
 		"(node %d, IO link %d)\n",
 		(u32) hword, conf_port, domain,
 		iohub_domain_to_node(domain), iohub_domain_to_link(domain));
-	NATIVE_WRITE_MAS_H(conf_port, hword, MAS_IOADDR);
+	NATIVE_WRITE_MAS_H(conf_port, hword, MAS_IO_OPERATION);
 }
 
 void
@@ -174,5 +174,5 @@ native_conf_outl(unsigned int domain, unsigned int bus, unsigned long port,
 		"(node %d, IO link %d)\n",
 		(u32) word, conf_port, domain,
 		iohub_domain_to_node(domain), iohub_domain_to_link(domain));
-	NATIVE_WRITE_MAS_W(conf_port, word, MAS_IOADDR);
+	NATIVE_WRITE_MAS_W(conf_port, word, MAS_IO_OPERATION);
 }

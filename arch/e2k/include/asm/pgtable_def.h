@@ -45,8 +45,6 @@ do { \
 
 #define MAX_POSSIBLE_PHYSMEM_BITS CONFIG_E2K_PA_BITS
 
-#ifndef __ASSEMBLY__
-
 
 /* See comment before PAGE_UNCACHED/PAGE_COHERENT in pgtable.c */
 enum page_cache_mode {
@@ -413,7 +411,7 @@ get_pte_val_restricted_mask(void)
 #define	_PAGE_PFN_MASK			_PAGE_INIT(UNI_PAGE_PFN)
 
 #ifdef CONFIG_MARK_KERNEL_PAGE_TABLES
-# define KERNEL_PT_MARK (1ull << 59)
+# define KERNEL_PT_MARK _PAGE_INIT(UNI_PAGE_KERNEL_MARK)
 #else
 # define KERNEL_PT_MARK 0ull
 #endif
@@ -1240,7 +1238,5 @@ static inline pte_t pte_mk_uc(pte_t pte)
 #define	pte_virt_offset_u(virt_addr)	(USER_VPTB_BASE_ADDR | \
 					(((virt_addr) & PTE_MASK) >> \
 					(E2K_VA_SIZE - PGDIR_SHIFT)))
-
-#endif	/* !(__ASSEMBLY__) */
 
 #endif /* !(_ASM_E2K_PGTABLE_DEF_H) */

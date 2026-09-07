@@ -78,7 +78,7 @@ static inline void boot_native_set_kernel_MMU_state_after(void)
 	E2K_WAIT_ALL;
 }
 
-#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* it is native host kernel with virtualization support */
 
@@ -95,6 +95,6 @@ static inline void boot_set_kernel_MMU_state_after(void)
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is virtualized guest kernel */
 #include <asm/kvm/guest/boot_mmu_context.h>
-#endif /* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
+#endif /* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_KERNEL */
 
 #endif /* _E2K_P2V_BOOT_MMU_CONTEXT_H_ */

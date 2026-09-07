@@ -272,7 +272,7 @@ struct vcmd_subsys_info {
 	u16 io_size[SUB_MOD_MAX]; /* reg size of each module, in bytes*/
 
 	/* for dbgfs */
-	volatile u8 *hwregs[SUB_MOD_MAX];
+	void __iomem *hwregs[SUB_MOD_MAX];
 };
 
 struct vcmd_hw_features {
@@ -289,7 +289,7 @@ struct hantrovcmd_dev {
 	u32 core_id;
 	struct vcmd_hw_features hw_feature;
 
-	volatile u8 *hwregs; /* registers IO mem base */
+	void __iomem *hwregs; /* registers IO mem base */
 
 	u32 reg_mirror[ASIC_VCMD_SWREG_AMOUNT];
 

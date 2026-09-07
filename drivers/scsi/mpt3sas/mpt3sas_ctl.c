@@ -1577,6 +1577,9 @@ _ctl_diag_register_2(struct MPT3SAS_ADAPTER *ioc,
 	u32 ioc_state;
 	u8 issue_reset = 0;
 
+#ifdef CONFIG_MCST
+	buffer_type = 0xff;
+#endif
 	dctlprintk(ioc, ioc_info(ioc, "%s\n",
 				 __func__));
 
@@ -2652,7 +2655,7 @@ _ctl_ptr128_mpt_command(struct MPT3SAS_ADAPTER *ioc, unsigned cmd,
 	if (AP_OBJ_SIZE(ap) < karg.data_in_size) {
 		return -EFAULT;
 	}
-	karg.data_in_buf_ptr = (void *)AP_PTR(ap);
+	karg.data_in_buf_ptr = U_AP_PTR(ap);
 	if (get_user_tagged_16(ap.qword, tag, &uarg->data_out_buf_ptr) ||
 				!IS_AP(ap, tag)) {
 		return -EFAULT;
@@ -2660,7 +2663,7 @@ _ctl_ptr128_mpt_command(struct MPT3SAS_ADAPTER *ioc, unsigned cmd,
 	if (AP_OBJ_SIZE(ap) < karg.data_out_size) {
 		return -EFAULT;
 	}
-	karg.data_out_buf_ptr = (void *)AP_PTR(ap);
+	karg.data_out_buf_ptr = U_AP_PTR(ap);
 	if (get_user_tagged_16(ap.qword, tag, &uarg->sense_data_ptr) ||
 				!IS_AP(ap, tag)) {
 		return -EFAULT;
@@ -2668,7 +2671,7 @@ _ctl_ptr128_mpt_command(struct MPT3SAS_ADAPTER *ioc, unsigned cmd,
 	if (AP_OBJ_SIZE(ap) < karg.max_sense_bytes) {
 		return -EFAULT;
 	}
-	karg.sense_data_ptr = (void *)AP_PTR(ap);
+	karg.sense_data_ptr = U_AP_PTR(ap);
 	set_u_border(MAX_U_BORDER);
 	/* not check mf size because it just copy_from_user */
 	return _ctl_do_mpt_command(ioc, karg, &uarg->mf);

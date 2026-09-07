@@ -1098,8 +1098,14 @@ enum virtchnl_rss_algorithm {
 	((hdr)->type = VIRTCHNL_PROTO_HDR_ ## hdr_type)
 #define VIRTCHNL_GET_PROTO_HDR_TYPE(hdr) \
 	(((hdr)->type) >> PROTO_HDR_SHIFT)
+#ifdef CONFIG_MCST
+/* *E2K* Add direct cast to int to prevent werror because of different enums */
+#define VIRTCHNL_TEST_PROTO_HDR_TYPE(hdr, val) \
+	((int)(hdr)->type == ((int)(val) >> PROTO_HDR_SHIFT))
+#else
 #define VIRTCHNL_TEST_PROTO_HDR_TYPE(hdr, val) \
 	((hdr)->type == ((val) >> PROTO_HDR_SHIFT))
+#endif /* CONFIG_MCST */
 #define VIRTCHNL_TEST_PROTO_HDR(hdr, val) \
 	(VIRTCHNL_TEST_PROTO_HDR_TYPE((hdr), (val)) && \
 	 VIRTCHNL_TEST_PROTO_HDR_FIELD((hdr), (val)))

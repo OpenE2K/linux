@@ -3,7 +3,11 @@
  * Copyright (c) 2025 MCST
  */
 
-#include "e2k-v6.dtsi"
+#include <dt-bindings/interrupt-controller/irq.h>
+
+#include "e2k-macro.dtsi"
+#include "epic.dtsi"
+#include "cpufreq.dtsi"
 
 	esclk_timer {
 		compatible = "mcst,esclk-timer";

@@ -58,7 +58,7 @@ UACCESS_FN_DEFINE3(fill_user_fn, void __user *, to, unsigned long, n, u64, b)
 	n_aligned = round_down(n, 16);
 	SET_USR_PFAULT("$recovery_memset_fault", true);
 	cleared = fast_tagged_memory_set_user(to_aligned, b, ETAGNVQ,
-			n_aligned, &cleared, AW(strd_opcode));
+			n_aligned, &cleared, strd_opcode);
 	RESTORE_USR_PFAULT(true);
 	if (unlikely(cleared != n_aligned))
 		return n - cleared;
@@ -590,11 +590,11 @@ copy_tail:
 /*
  * All arguments must be aligned
  */
-unsigned long raw_copy_in_user_with_tags(void __user *to, const void __user *from,
-		unsigned long n)
+unsigned long raw_copy_in_user_with_tags(volatile void __user *to,
+					 const volatile void __user *from, unsigned long n)
 {
-	void __user *dst = to;
-	const void __user *src = from;
+	volatile void __user *dst = to;
+	volatile const void __user *src = from;
 
 	if (unlikely(!IS_ALIGNED((unsigned long) to, 8) ||
 			!IS_ALIGNED((unsigned long) from, 8) ||
@@ -625,11 +625,11 @@ unsigned long raw_copy_in_user_with_tags(void __user *to, const void __user *fro
 /*
  * All arguments must be aligned
  */
-unsigned long raw_copy_from_user_with_tags(void *to, const void __user *from,
+unsigned long raw_copy_from_user_with_tags(volatile void *to, const volatile void __user *from,
 		unsigned long n)
 {
-	void *dst = to;
-	const void __user *src = from;
+	volatile void *dst = to;
+	volatile void __user *src = ( volatile void __user * __force)from;
 
 	if (unlikely(!IS_ALIGNED((unsigned long) to, 8) ||
 			!IS_ALIGNED((unsigned long) from, 8) ||
@@ -661,17 +661,18 @@ unsigned long raw_copy_from_user_with_tags(void *to, const void __user *from,
  * All arguments must be aligned
  * NB> This is "copy-to-user" action.
  */
-unsigned long raw_copy_to_user_with_tags(void __user *to, const void *from,
+unsigned long raw_copy_to_user_with_tags(volatile void __user *to, const volatile void *from,
 		unsigned long n)
 {
-	void __user *dst = to;
-	const void *src = from;
+	volatile void __user *dst = to;
+	const volatile void *src = from;
 
 	if (unlikely(!IS_ALIGNED((unsigned long) to, 8) ||
 			!IS_ALIGNED((unsigned long) from, 8) ||
-			!IS_ALIGNED(n, 8)))
+			!IS_ALIGNED(n, 8))) {
+		pr_info("%s: not aligned to=%px, from=%px, n=0x%lx\n", __func__, to, from, n);
 		return n;
-
+	}
 	do {
 		size_t length = (n >= 2 * 8192) ? 8192 : n;
 		size_t copied;
@@ -705,7 +706,7 @@ unsigned long __fill_user_with_tags(void __user *to, unsigned long n,
 		return n;
 
 	SET_USR_PFAULT("$recovery_memset_fault", false);
-	cleared = fast_tagged_memory_set_user(to, dw, tag, n, &cleared, AW(strd_opcode));
+	cleared = fast_tagged_memory_set_user(to, dw, tag, n, &cleared, strd_opcode);
 	RESTORE_USR_PFAULT(false);
 
 	return n - cleared;

@@ -26,7 +26,7 @@ void mxgbe_txq_start(mxgbe_priv_t *priv, int qn);
 
 
 int mxgbe_txq_send(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
-		   mxgbe_tx_buff_t *tx_buff);
+		   mxgbe_buff_t *tx_buff);
 
 irqreturn_t mxgbe_txq_irq_handler(int irq, void *dev_id);
 

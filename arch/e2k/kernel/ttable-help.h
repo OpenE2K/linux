@@ -45,7 +45,7 @@
 		E2K_PSYSCALL_RETURN(r0, r1, r2, r3, tag2, tag3, rndpr)
 # define CLEAR_RET_FROM_FORK_WINDOW(r0, rndpr)	E2K_SYSCALL_RETURN(r0, rndpr)
 # define CLEAR_HANDLE_SYS_CALL_WINDOW(r0, rndpr) E2K_SYSCALL_RETURN(r0, rndpr)
-# define CLEAR_DO_SIGRETURN_INTERRUPT(rndpr)	NATIVE_RETURN_RNDPR(rndpr)
+# define CLEAR_DO_SIGRETURN_INTERRUPT_ASM	NATIVE_RETURN_RNDPR_ASM
 # define CLEAR_DO_SIGRETURN_SYSCALL(r0, rndpr)	E2K_SYSCALL_RETURN(r0, rndpr)
 # define CLEAR_DO_SIGRETURN_SYSCALL_PROT(r0, r1, r2, r3, tag2, tag3, rndpr) \
 		E2K_PSYSCALL_RETURN(r0, r1, r2, r3, tag2, tag3, rndpr)
@@ -69,13 +69,13 @@
 #  include "ttable_wbs.h"
 # endif
 
-# define CLEAR_USER_TRAP_HANDLER_WINDOW(rndpr)	E2K_DONE_RNDPR(rndpr)
+# define CLEAR_USER_TRAP_HANDLER_WINDOW_ASM	E2K_DONE_RNDPR_ASM
+# define CLEAR_DO_SIGRETURN_INTERRUPT_ASM	E2K_DONE_RNDPR_ASM
 # define CLEAR_TTABLE_ENTRY_8_WINDOW(r0, rndpr)	E2K_SYSCALL_RETURN(r0, rndpr)
 # define CLEAR_TTABLE_ENTRY_8_WINDOW_PROT(r0, r1, r2, r3, tag2, tag3, rndpr) \
 		E2K_PSYSCALL_RETURN(r0, r1, r2, r3, tag2, tag3, rndpr)
 # define CLEAR_RET_FROM_FORK_WINDOW(r0, rndpr)	E2K_SYSCALL_RETURN(r0, rndpr)
 # define CLEAR_HANDLE_SYS_CALL_WINDOW(r0, rndpr) E2K_SYSCALL_RETURN(r0, rndpr)
-# define CLEAR_DO_SIGRETURN_INTERRUPT(rndpr)	E2K_DONE_RNDPR(rndpr)
 # define CLEAR_DO_SIGRETURN_SYSCALL(r0, rndpr)	E2K_SYSCALL_RETURN(r0, rndpr)
 # define CLEAR_DO_SIGRETURN_SYSCALL_PROT(r0, r1, r2, r3, tag2, tag3, rndpr) \
 		E2K_PSYSCALL_RETURN(r0, r1, r2, r3, tag2, tag3, rndpr)
@@ -83,8 +83,8 @@
 #else	/* ! CONFIG_CPU_HW_CLEAR_RF */
 
 # ifdef GENERATING_HEADER
-#  define CLEAR_USER_TRAP_HANDLER_WINDOW(_rndpr) \
-		E2K_DUMMY_CLEARWINDOW([rndpr] "ir" (AW(_rndpr)) : "ctpr3")
+#  define CLEAR_USER_TRAP_HANDLER_WINDOW_ASM	""
+#  define CLEAR_DO_SIGRETURN_INTERRUPT_ASM	""
 #  define CLEAR_TTABLE_ENTRY_8_WINDOW(r0, _rndpr) \
 		E2K_DUMMY_CLEARWINDOW([_r0] "ir" (r0), [rndpr] "ir" (AW(_rndpr)) : "ctpr3")
 #  define CLEAR_TTABLE_ENTRY_8_WINDOW_PROT(r0, r1, r2, r3, tag2, tag3, _rndpr) \
@@ -96,8 +96,6 @@
 		E2K_DUMMY_CLEARWINDOW([_r0] "ir" (r0), [rndpr] "ir" (AW(_rndpr)) : "ctpr3")
 #  define CLEAR_HANDLE_SYS_CALL_WINDOW(r0, _rndpr) \
 		E2K_DUMMY_CLEARWINDOW([_r0] "ir" (r0), [rndpr] "ir" (AW(_rndpr)) : "ctpr3")
-#  define CLEAR_DO_SIGRETURN_INTERRUPT(_rndpr) \
-		E2K_DUMMY_CLEARWINDOW([rndpr] "ir" (AW(_rndpr)) : "ctpr3")
 #  define CLEAR_DO_SIGRETURN_SYSCALL(r0, _rndpr) \
 		E2K_DUMMY_CLEARWINDOW([_r0] "ir" (r0), [rndpr] "ir" (AW(_rndpr)) : "ctpr3")
 #  define CLEAR_DO_SIGRETURN_SYSCALL_PROT(r0, r1, r2, r3, tag2, tag3, _rndpr) \

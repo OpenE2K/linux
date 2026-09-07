@@ -9,7 +9,7 @@ KASAN_SANITIZE := n
 GCOV_PROFILE := n
 
 subdir-ccflags-y := -DE2K_P2V $(call lcc-option,-fno-semi-spec-ld) \
-		    $(call lcc-option,-fno-spec-ld) \
+		    $(call lcc-option,-fno-spec-ld) -fno-jump-tables \
 		    -ftrivial-auto-var-init=uninitialized
 ccflags-remove-$(CONFIG_FUNCTION_TRACER) += $(CC_FLAGS_FTRACE)
 ccflags-remove-y += -fprofile-generate-kernel

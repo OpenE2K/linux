@@ -114,7 +114,7 @@ MODULE_LICENSE("GPL");
  * some checks on the correctness of module [de]duplication mechanism.
  */
 
-char *torture_type = "kernel_pt_sync";
+static char *torture_type = "kernel_pt_sync";
 
 torture_param(int, duplication_threads_num, -1,
 	      "Number of threads that test kernel memory duplication");
@@ -228,7 +228,7 @@ enum thread_type {
 	MODULE_DUPLICATION_THREAD
 };
 
-char *type_to_str(enum thread_type type)
+static char *type_to_str(enum thread_type type)
 {
 	switch (type) {
 	case COLLAPSE_THREAD:

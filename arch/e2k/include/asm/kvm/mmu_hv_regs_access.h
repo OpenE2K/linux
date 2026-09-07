@@ -23,30 +23,24 @@
  * MMU registers operations
  */
 
-#ifndef __ASSEMBLY__
-
 #define	READ_VIRT_CTRL_MU_REG() \
-	((virt_ctrl_mu_t) { .word = NATIVE_GET_MMUREG(virt_ctrl_mu) })
-#define	WRITE_VIRT_CTRL_MU_REG_VALUE(v) NATIVE_SET_MMUREG(virt_ctrl_mu, (v))
+	((virt_ctrl_mu_t) { .word = NATIVE_GET_MMUREG_ISET(6, virt_ctrl_mu) })
 #define	WRITE_VIRT_CTRL_MU_REG(v) \
 do { \
 	typecheck(virt_ctrl_mu_t, (v)); \
-	NATIVE_SET_MMUREG(virt_ctrl_mu, (v).word); \
+	NATIVE_SET_MMUREG_ISET(6, virt_ctrl_mu, (v).word); \
 } while (0)
 
 #define	READ_G_W_IMASK_MMU_CR_REG_VALUE()	\
-		NATIVE_GET_MMUREG(g_w_imask_mmu_cr)
+		NATIVE_GET_MMUREG_ISET(6, g_w_imask_mmu_cr)
 #define	WRITE_G_W_IMASK_MMU_CR_REG_VALUE(val)	\
-		NATIVE_SET_MMUREG(g_w_imask_mmu_cr, (val))
+		NATIVE_SET_MMUREG_ISET(6, g_w_imask_mmu_cr, (val))
 
-#define	READ_GID_REG_VALUE()		NATIVE_GET_MMUREG(gid)
-#define	WRITE_GID_REG_VALUE(val)	NATIVE_SET_MMUREG(gid, (val))
+#define	READ_GID_REG_VALUE()		NATIVE_GET_MMUREG_ISET(6, gid)
+#define	WRITE_GID_REG_VALUE(val)	NATIVE_SET_MMUREG_ISET(6, gid, (val))
 
-#define	READ_GP_VPTB_REG_VALUE()	NATIVE_GET_MMUREG(gp_vptb)
-#define	WRITE_GP_VPTB_REG_VALUE(val)	NATIVE_SET_MMUREG(gp_vptb, (val))
-
-#define	READ_GP_PPTB_REG_VALUE()	NATIVE_GET_MMUREG(gp_pptb)
-#define	WRITE_GP_PPTB_REG_VALUE(val)	NATIVE_SET_MMUREG(gp_pptb, (val))
+#define	READ_GP_PPTB_REG_VALUE()	NATIVE_GET_MMUREG_ISET(6, gp_pptb)
+#define	WRITE_GP_PPTB_REG_VALUE(val)	NATIVE_SET_MMUREG_ISET(6, gp_pptb, (val))
 
 #define	READ_INTC_INFO_MU()		NATIVE_GET_MMUREG(intc_info_mu)
 #define	WRITE_INTC_INFO_MU(x)		NATIVE_SET_MMUREG(intc_info_mu, (x))
@@ -79,9 +73,9 @@ static inline void __save_intc_info_mu(intc_info_mu_t *info, int *num)
 		info[i].hdr = (intc_info_mu_hdr_t) READ_INTC_INFO_MU();
 		info[i].gpa = (u64) READ_INTC_INFO_MU();
 		info[i].gva = (u64) READ_INTC_INFO_MU();
-		NATIVE_STORE_TAGGED_MMUREG(&info[i].data, intc_info_mu);
+		STORE_TAGGED_MMUREG(&info[i].data, intc_info_mu);
 		info[i].condition = TOS(tc_cond_t, READ_INTC_INFO_MU());
-		NATIVE_STORE_TAGGED_MMUREG(&info[i].data_ext, intc_info_mu);
+		STORE_TAGGED_MMUREG(&info[i].data_ext, intc_info_mu);
 		info[i].mask = TOS(tc_mask_t, READ_INTC_INFO_MU());
 		++i;
 		info_ptr -= INTC_INFO_MU_ITEM_SIZE;
@@ -98,7 +92,7 @@ do { \
 		e2k_pcsp_t bu_pcsp; \
  \
 		bu_pcsp = read_BU_PCSP_reg(); \
-		frame = (e2k_mem_crs_t *)PCSP_PTR(bu_pcsp); \
+		frame = K_PCSP_PTR(bu_pcsp); \
 		--frame; \
 		if (!frame->cr1.pm) { \
 			int entry; \
@@ -138,9 +132,9 @@ static inline void restore_intc_info_mu(const intc_info_mu_t *info, int num)
 			WRITE_INTC_INFO_MU(AW(info[i].hdr));
 			WRITE_INTC_INFO_MU(info[i].gpa);
 			WRITE_INTC_INFO_MU(info[i].gva);
-			NATIVE_TAGGED_LOAD_TO_MMUREG(intc_info_mu, &info[i].data);
+			TAGGED_LOAD_TO_MMUREG(intc_info_mu, &info[i].data);
 			WRITE_INTC_INFO_MU(AW(info[i].condition));
-			NATIVE_TAGGED_LOAD_TO_MMUREG(intc_info_mu, &info[i].data_ext);
+			TAGGED_LOAD_TO_MMUREG(intc_info_mu, &info[i].data_ext);
 			WRITE_INTC_INFO_MU(AW(info[i].mask));
 		}
 	}
@@ -181,142 +175,124 @@ do { \
 	(vcpu)->arch.intc_ctxt.mu_updated; \
 })
 
-#define	READ_SH_OS_PPTB_REG_VALUE()	NATIVE_GET_MMUREG(sh_os_pptb)
-#define	WRITE_SH_OS_PPTB_REG_VALUE(val)	NATIVE_SET_MMUREG(sh_os_pptb, (val))
+#define	READ_SH_OS_PPTB_REG_VALUE()	NATIVE_GET_MMUREG_ISET(6, sh_os_pptb)
+#define	WRITE_SH_OS_PPTB_REG_VALUE(val)	NATIVE_SET_MMUREG_ISET(6, sh_os_pptb, (val))
 
-#define	READ_SH_OS_VPTB_REG_VALUE()	NATIVE_GET_MMUREG(sh_os_vptb)
-#define	WRITE_SH_OS_VPTB_REG_VALUE(val)	NATIVE_SET_MMUREG(sh_os_vptb, (val))
+#define	READ_SH_OS_VPTB_REG_VALUE()	NATIVE_GET_MMUREG_ISET(6, sh_os_vptb)
+#define	WRITE_SH_OS_VPTB_REG_VALUE(val)	NATIVE_SET_MMUREG_ISET(6, sh_os_vptb, (val))
 
-#define	READ_SH_OS_VAB_REG_VALUE()	NATIVE_GET_MMUREG(sh_os_vab)
-#define	WRITE_SH_OS_VAB_REG_VALUE(val)	NATIVE_SET_MMUREG(sh_os_vab, (val))
+#define	READ_SH_OS_VAB_REG_VALUE()	NATIVE_GET_MMUREG_ISET(6, sh_os_vab)
+#define	WRITE_SH_OS_VAB_REG_VALUE(val)	NATIVE_SET_MMUREG_ISET(6, sh_os_vab, (val))
 
-#define	READ_SH_PID_REG_VALUE()		NATIVE_GET_MMUREG(sh_pid)
-#define	WRITE_SH_PID_REG_VALUE(val)	NATIVE_SET_MMUREG(sh_pid, (val))
+#define	READ_SH_PID_REG_VALUE()		NATIVE_GET_MMUREG_ISET(6, sh_pid)
+#define	WRITE_SH_PID_REG_VALUE(val)	NATIVE_SET_MMUREG_ISET(6, sh_pid, (val))
 
-#define	READ_SH_OS_MADMR_REG_VALUE()	NATIVE_GET_MMUREG(sh_os_madmr)
-#define	WRITE_SH_OS_MADMR_REG_VALUE(val) NATIVE_SET_MMUREG(sh_os_madmr, (val))
+#define	READ_SH_OS_MADMR_REG_VALUE()	NATIVE_GET_MMUREG_ISET(7, sh_os_madmr)
+#define	WRITE_SH_OS_MADMR_REG_VALUE(val) NATIVE_SET_MMUREG_ISET(7, sh_os_madmr, (val))
 
-#define	READ_CR_G_W_IMASK_REG_VALUE()	NATIVE_GET_MMUREG(g_w_imask_mmu_cr)
-#define	WRITE_CR_G_W_IMASK_REG_VALUE(val) \
-		NATIVE_SET_MMUREG(g_w_imask_mmu_cr, (val))
+#define	READ_SH_MMU_CR_REG_VALUE()	NATIVE_GET_MMUREG_ISET(6, sh_mmu_cr)
+#define	WRITE_SH_MMU_CR_REG_VALUE(val)	NATIVE_SET_MMUREG_ISET(6, sh_mmu_cr, (val))
 
-#define	READ_SH_MMU_CR_REG_VALUE()	NATIVE_GET_MMUREG(sh_mmu_cr)
-#define	WRITE_SH_MMU_CR_REG_VALUE(val)	NATIVE_SET_MMUREG(sh_mmu_cr, (val))
-
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 static inline virt_ctrl_mu_t read_VIRT_CTRL_MU_reg(void)
 {
-	virt_ctrl_mu_t virt_ctrl;
-
-	virt_ctrl.VIRT_CTRL_MU_reg = host_machine.read_VIRT_CTRL_MU();
-	return virt_ctrl;
+	return READ_VIRT_CTRL_MU_REG();
 }
 
 static inline void write_VIRT_CTRL_MU_reg(virt_ctrl_mu_t virt_ctrl)
 {
-	host_machine.write_VIRT_CTRL_MU(virt_ctrl.VIRT_CTRL_MU_reg);
+	WRITE_VIRT_CTRL_MU_REG(virt_ctrl);
 }
 
 static inline unsigned int read_GID_reg(void)
 {
-	return host_machine.read_GID();
+	return READ_GID_REG_VALUE();
 }
 
 static inline void write_GID_reg(unsigned int mmu_gid)
 {
-	host_machine.write_GID(MMU_GID(mmu_gid));
+	WRITE_GID_REG_VALUE(MMU_GID(mmu_gid));
 }
 
 static inline e2k_mmu_cr_t read_SH_MMU_CR_reg(void)
 {
-	return (e2k_mmu_cr_t) { .word = host_machine.read_SH_MMU_CR() };
+	return (e2k_mmu_cr_t) { .word = READ_SH_MMU_CR_REG_VALUE() };
 }
 
 static inline void write_SH_MMU_CR_reg(e2k_mmu_cr_t mmu_cr)
 {
-	host_machine.write_SH_MMU_CR(AW(mmu_cr));
+	WRITE_SH_MMU_CR_REG_VALUE(AW(mmu_cr));
 }
 
 static inline e2k_mmu_cr_t read_G_W_IMASK_MMU_CR_reg(void)
 {
-	return (e2k_mmu_cr_t) { .word = host_machine.read_G_W_IMASK_MMU_CR() };
+	return (e2k_mmu_cr_t) { .word = READ_G_W_IMASK_MMU_CR_REG_VALUE() };
 }
 
 static inline void write_G_W_IMASK_MMU_CR_reg(e2k_mmu_cr_t mmu_cr_mask)
 {
-	host_machine.write_G_W_IMASK_MMU_CR(AW(mmu_cr_mask));
+	WRITE_G_W_IMASK_MMU_CR_REG_VALUE(AW(mmu_cr_mask));
 }
 
 static inline unsigned int read_SH_PID_reg(void)
 {
-	return host_machine.read_SH_PID();
+	return READ_SH_PID_REG_VALUE();
 }
 
 static inline void write_SH_PID_reg(unsigned int mmu_pid)
 {
-	host_machine.write_SH_PID(MMU_PID(mmu_pid));
+	WRITE_SH_PID_REG_VALUE(MMU_PID(mmu_pid));
 }
 
 static inline e2k_madmr_t read_SH_OS_MADMR_reg(void)
 {
-	return (e2k_madmr_t) { .word = host_machine.read_SH_OS_MADMR() };
+	return (e2k_madmr_t) { .word = READ_SH_OS_MADMR_REG_VALUE() };
 }
 
 static inline void write_SH_OS_MADMR_reg(e2k_madmr_t madmr)
 {
-	host_machine.write_SH_OS_MADMR(AW(madmr));
+	WRITE_SH_OS_MADMR_REG_VALUE(AW(madmr));
 }
 
 static inline e2k_addr_t read_SH_OS_PPTB_reg(void)
 {
-	return host_machine.read_SH_OS_PPTB();
+	return READ_SH_OS_PPTB_REG_VALUE();
 }
 
 static inline void write_SH_OS_PPTB_reg(e2k_addr_t phys_addr)
 {
-	host_machine.write_SH_OS_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
+	WRITE_SH_OS_PPTB_REG_VALUE(MMU_ADDR_TO_PPTB(phys_addr));
 }
 
 static inline e2k_addr_t read_SH_OS_VPTB_reg(void)
 {
-	return host_machine.read_SH_OS_VPTB();
+	return READ_SH_OS_VPTB_REG_VALUE();
 }
 
 static inline void write_SH_OS_VPTB_reg(e2k_addr_t virt_addr)
 {
-	host_machine.write_SH_OS_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
+	WRITE_SH_OS_VPTB_REG_VALUE(MMU_ADDR_TO_VPTB(virt_addr));
 }
 
 static inline e2k_addr_t read_GP_PPTB_reg(void)
 {
-	return host_machine.read_GP_PPTB();
+	return READ_GP_PPTB_REG_VALUE();
 }
 
 static inline void write_GP_PPTB_reg(e2k_addr_t phys_addr)
 {
-	host_machine.write_GP_PPTB(MMU_ADDR_TO_PPTB(phys_addr));
-}
-
-static inline e2k_addr_t read_GP_VPTB_reg(void)
-{
-	return host_machine.read_GP_VPTB();
-}
-
-static inline void write_GP_VPTB_reg(e2k_addr_t virt_addr)
-{
-	host_machine.write_GP_VPTB(MMU_ADDR_TO_VPTB(virt_addr));
+	WRITE_GP_PPTB_REG_VALUE(MMU_ADDR_TO_PPTB(phys_addr));
 }
 
 static inline e2k_addr_t read_SH_OS_VAB_reg(void)
 {
-	return host_machine.read_SH_OS_VAB();
+	return READ_SH_OS_VAB_REG_VALUE();
 }
 
 static inline void write_SH_OS_VAB_reg(e2k_addr_t virt_addr)
 {
-	host_machine.write_SH_OS_VAB(MMU_ADDR_TO_VAB(virt_addr));
+	WRITE_SH_OS_VAB_REG_VALUE(MMU_ADDR_TO_VAB(virt_addr));
 }
-#endif /* CONFIG_KVM_HOST_MODE */
-#endif /* ! __ASSEMBLY__ */
+#endif /* CONFIG_KVM_HOST_KERNEL */
 
 #endif /* _E2K_KVM_MMU_HV_REGS_ACCESS_H_ */

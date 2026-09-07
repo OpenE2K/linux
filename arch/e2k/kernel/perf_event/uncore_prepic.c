@@ -7,7 +7,6 @@
 #include <linux/perf_event.h>
 #include <linux/nodemask.h>
 #include <linux/slab.h>
-#include <asm/nbsr_v6_regs.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/perf_event_uncore.h>
@@ -59,15 +58,15 @@ static u64 get_prepic_str_cnt(struct e2k_uncore *uncore,
 	switch (config.counter) {
 	case 0:
 		do {
-			mar_hi = sic_read_node_nbsr_reg(node, PREPIC_MAR0_HI);
-			mar_lo = sic_read_node_nbsr_reg(node, PREPIC_MAR0_LO);
-		} while (mar_hi != sic_read_node_nbsr_reg(node, PREPIC_MAR0_HI));
+			mar_hi = sic_read_node_nbsr_reg(node, SIC_prepic_mar0_hi);
+			mar_lo = sic_read_node_nbsr_reg(node, SIC_prepic_mar0_lo);
+		} while (mar_hi != sic_read_node_nbsr_reg(node, SIC_prepic_mar0_hi));
 		break;
 	case 1:
 		do {
-			mar_hi = sic_read_node_nbsr_reg(node, PREPIC_MAR1_HI);
-			mar_lo = sic_read_node_nbsr_reg(node, PREPIC_MAR1_LO);
-		} while (mar_hi != sic_read_node_nbsr_reg(node, PREPIC_MAR1_HI));
+			mar_hi = sic_read_node_nbsr_reg(node, SIC_prepic_mar1_hi);
+			mar_lo = sic_read_node_nbsr_reg(node, SIC_prepic_mar1_lo);
+		} while (mar_hi != sic_read_node_nbsr_reg(node, SIC_prepic_mar1_hi));
 		break;
 	}
 
@@ -82,19 +81,19 @@ static void modify_mid(int node, prepic_config_attr_t config)
 {
 	e2k_prepic_mid_t mid;
 
-	AW(mid) = sic_read_node_nbsr_reg(node, PREPIC_MID);
+	AW(mid) = sic_read_node_nbsr_reg(node, SIC_prepic_mid);
 	if (config.counter)
 		mid.id1 = config.id;
 	else
 		mid.id0 = config.id;
-	sic_write_node_nbsr_reg(node, PREPIC_MID, AW(mid));
+	sic_write_node_nbsr_reg(node, SIC_prepic_mid, AW(mid));
 }
 
 static void modify_mcr(int node, prepic_config_attr_t config, bool enable)
 {
 	e2k_prepic_mcr_t mcr;
 
-	AW(mcr) = sic_read_node_nbsr_reg(node, PREPIC_MCR);
+	AW(mcr) = sic_read_node_nbsr_reg(node, SIC_prepic_mcr);
 	if (config.counter) {
 		mcr.vc1 = !!enable;
 		mcr.es1 = config.event;
@@ -102,7 +101,7 @@ static void modify_mcr(int node, prepic_config_attr_t config, bool enable)
 		mcr.vc0 = !!enable;
 		mcr.es0 = config.event;
 	}
-	sic_write_node_nbsr_reg(node, PREPIC_MCR, AW(mcr));
+	sic_write_node_nbsr_reg(node, SIC_prepic_mcr, AW(mcr));
 
 	pr_debug("set_cfg 0x%x\n", AW(mcr));
 }
@@ -134,12 +133,12 @@ static void set_prepic_str_cnt(struct e2k_uncore *uncore,
 
 	switch (config.counter) {
 	case 0:
-		sic_write_node_nbsr_reg(node, PREPIC_MAR0_LO, mar_lo);
-		sic_write_node_nbsr_reg(node, PREPIC_MAR0_HI, mar_hi);
+		sic_write_node_nbsr_reg(node, SIC_prepic_mar0_lo, mar_lo);
+		sic_write_node_nbsr_reg(node, SIC_prepic_mar0_hi, mar_hi);
 		break;
 	case 1:
-		sic_write_node_nbsr_reg(node, PREPIC_MAR1_LO, mar_lo);
-		sic_write_node_nbsr_reg(node, PREPIC_MAR1_HI, mar_hi);
+		sic_write_node_nbsr_reg(node, SIC_prepic_mar1_lo, mar_lo);
+		sic_write_node_nbsr_reg(node, SIC_prepic_mar1_hi, mar_hi);
 		break;
 	}
 

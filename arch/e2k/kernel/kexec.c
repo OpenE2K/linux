@@ -638,7 +638,6 @@ static void do_kexec_reboot(void *info)
 	all_irq_disable();
 
 	pic_disable();
-	fixup_irqs_pic();
 
 	DebugInitKE("switch to phys memory started for smp param 0x%px, phys smp param 0x%llx\n",
 		param, e2k_virt_to_phys(param));
@@ -980,7 +979,7 @@ static long kexec_reboot(struct kexec_reboot_param __user *param)
 		goto out_initrd;
 
 	if (p.initrd_size) {
-		if ((ret = copy_initrd_mem(&initrd, (void __user *) p.initrd)))
+		if ((ret = copy_initrd_mem(&initrd, (void __user __force *) p.initrd)))
 			goto out_initrd;
 	}
 
@@ -1102,7 +1101,7 @@ static long lintel_reboot(struct lintel_reboot_param __user *param)
 	if ((ret = copy_bootblock_mem(bootblock, bootblock_virt)))
 		goto out_code;
 
-	if ((ret = copy_lintel_code_mem(&image, (void __user *) p.image)))
+	if ((ret = copy_lintel_code_mem(&image, (void __user __force *) p.image)))
 		goto out_code;
 
 	if ((ret = find_continuous_lintel_code_mem(&image)))

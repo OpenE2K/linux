@@ -11,6 +11,7 @@
 #include <linux/mm.h>
 #include <linux/err.h>
 #include <asm/page.h>
+#include <asm/stacks.h>
 
 static vm_fault_t trampolines_fault(const struct vm_special_mapping *sm,
 		struct vm_area_struct *vma, struct vm_fault *vmf)
@@ -43,13 +44,10 @@ static int setup_additional_pages(struct mm_struct *mm)
 	struct vm_area_struct *vma;
 	unsigned long base, size;
 
+	base = USER_TRAMPOLINES_BASE;
+
 	BUG_ON(!PAGE_ALIGNED(__trampolines_start) || !PAGE_ALIGNED(__trampolines_end));
 	size = (unsigned long) __trampolines_end - (unsigned long) __trampolines_start;
-
-	/* Find virtual address to map to */
-	base = get_unmapped_area(NULL, 0, size, 0, 0);
-	if (IS_ERR_VALUE(base))
-		return base;
 
 	/* Create the mapping */
 	vma = _install_special_mapping(mm, base, size,

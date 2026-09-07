@@ -18,7 +18,7 @@
 #include <linux/clockchips.h>
 #include <linux/kernel_stat.h>
 
-#include <asm/kvm/guest.h>
+#include <asm/kvm/paravirt_sw/guest.h>
 #include "kvm_time.h"
 
 /*

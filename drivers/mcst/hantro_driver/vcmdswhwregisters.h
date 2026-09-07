@@ -139,14 +139,14 @@ static inline u32 vcmd_get_register_mirror_value(u32 *reg_mirror,
 	return regVal;
 }
 
-u32 vcmd_read_reg(const void *hwregs, u32 offset);
+u32 vcmd_read_reg(void __iomem *hwregs, u32 offset);
 
-void vcmd_write_reg(const void *hwregs, u32 offset, u32 val);
+void vcmd_write_reg(void __iomem *hwregs, u32 offset, u32 val);
 
-void vcmd_write_register_value(const void *hwregs, u32 *reg_mirror,
+void vcmd_write_register_value(void __iomem *hwregs, u32 *reg_mirror,
 			       regVcmdName name, u32 value);
 
-u32 vcmd_get_register_value(const void *hwregs, u32 *reg_mirror,
+u32 vcmd_get_register_value(void __iomem *hwregs, u32 *reg_mirror,
 			    regVcmdName name);
 
 #if defined(__LP64__) || defined(_WIN64) || defined(_WIN32)

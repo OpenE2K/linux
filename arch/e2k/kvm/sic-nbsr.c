@@ -21,9 +21,11 @@
 
 #include "sic-nbsr.h"
 #include "mmu.h"
-#include "paravirt_sw/gaccess.h"
 #include "pic.h"
 #include "irq.h"
+# ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include "paravirt_sw/gaccess.h"
+# endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #if 0
 #define nbsr_debug(fmt, arg...)		pr_warn(fmt, ##arg)
@@ -37,14 +39,8 @@
 #define nbsr_warn(fmt, arg...)
 #endif
 
-#define	ALIGN_DOWN_TO_MASK(addr, mask)	((addr) & ~(mask))
-#define	ALIGN_UP_TO_MASK(addr, mask)	(((addr) + (mask)) & ~(mask))
-#define	ALIGN_DOWN_TO_SIZE(addr, size)	\
-		(((size) == 0) ? (addr) : ALIGN_DOWN_TO_MASK(addr, ((size)-1)))
-#define	ALIGN_UP_TO_SIZE(addr, size)	\
-		(((size) == 0) ? (addr) : ALIGN_UP_TO_MASK(addr, ((size)-1)))
-
-#define	NBSR_LOW_MEMORY_BOUND		(1UL << 32)
+#define	NBSR_PCI_BOUND			(1UL << 32)
+#define	NBSR_LOW_MEMORY_BOUND		(0x80000000)
 #define	NBSR_HI_MEMORY_BOUND		(1UL << 48)	/* physical memory size */
 
 #define NBSR_ADDR64(hi, lo)		((((u64)hi) << 32) + ((u64)lo))
@@ -389,17 +385,6 @@ nbsr_get_rt_pcim_end(unsigned int reg_value)
 	return rt_pcim.end << E2K_SIC_ALIGN_RT_PCIM;
 }
 
-static inline unsigned int
-nbsr_set_rt_pcim_reg(unsigned int start, unsigned int end)
-{
-	e2k_rt_pcim_t rt_pcim;
-
-	AW(rt_pcim) = 0;
-	rt_pcim.bgn = start >> E2K_SIC_ALIGN_RT_PCIM;
-	rt_pcim.end = end >> E2K_SIC_ALIGN_RT_PCIM;
-	return AW(rt_pcim);
-}
-
 static inline void
 nbsr_debug_dump_rt_pcim(int node_id, unsigned int reg_offset, bool write,
 			unsigned int reg_value, char *reg_name)
@@ -492,7 +477,7 @@ nbsr_set_rt_pciio_reg_v6(unsigned int start, unsigned int end)
 	e2k_rt_pciio_t rt_pciio;
 
 	AW(rt_pciio) = 0;
-	rt_pciio.bgn = (start >> E2K_SIC_ALIGN_RT_PCIIO) & 0xff;
+	rt_pciio.bgn = (start >> E2K_SIC_ALIGN_RT_PCIIO) & 0xf;
 	rt_pciio.end = (end >> E2K_SIC_ALIGN_RT_PCIIO) & 0xf;
 	return AW(rt_pciio);
 }
@@ -515,7 +500,7 @@ nbsr_debug_dump_rt_pciio(int node_id, unsigned int reg_offset, bool write,
 	nbsr_debug("%s(): node #%d %s %s 0x%04x [%08x:%08x]\n",
 		   __func__, node_id, (write) ? "write" : "read",
 		   reg_name, reg_offset,
-		   nbsr_get_rt_pciio_bgn(reg_value, iset_no);
+		   nbsr_get_rt_pciio_bgn(reg_value, iset_no),
 		   nbsr_get_rt_pciio_end(reg_value, iset_no) |
 		   (E2K_SIC_SIZE_RT_PCIIO - 1));
 }
@@ -621,12 +606,10 @@ nbsr_debug_dump_rt_msi(int node_id, unsigned int reg_offset, bool write,
 	e2k_rt_msi_t rt_msi;
 
 	AW(rt_msi) = reg_value;
-	nbsr_debug("%s(): node #%d %s %s 0x%04x [%08x:%08x]\n",
+	nbsr_debug("%s(): node #%d %s %s 0x%04x [%08x]\n",
 		   __func__, node_id, (write) ? "write" : "read",
 		   reg_name, reg_offset,
-		   (rt_msi.bgn << E2K_SIC_ALIGN_RT_MSI),
-		   (rt_msi.end << E2K_SIC_ALIGN_RT_MSI) |
-		   (E2K_SIC_SIZE_RT_MSI - 1));
+		   (rt_msi.bgn << E2K_SIC_ALIGN_RT_MSI));
 }
 
 static inline void
@@ -636,9 +619,9 @@ nbsr_debug_dump_rt_msi_h(int node_id, unsigned int reg_offset, bool write,
 	e2k_rt_msi_h_t rt_msi_h;
 
 	AW(rt_msi_h) = reg_value;
-	nbsr_debug("%s(): node #%d %s %s 0x%04x [%08x:%08x]\n",
+	nbsr_debug("%s(): node #%d %s %s 0x%04x [%08x]\n",
 		   __func__, node_id, (write) ? "write" : "read",
-		   reg_name, reg_offset, rt_msi_h.bgn, rt_msi_h.end);
+		   reg_name, reg_offset, rt_msi_h.bgn);
 }
 
 static inline void
@@ -1090,6 +1073,7 @@ static int node_nbsr_read_rt_pcim_xmu(struct kvm_nbsr *nbsr, int node_id,
 
 	return 0;
 }
+
 
 static int node_nbsr_write_rt_pcim_xmu(struct kvm_nbsr *nbsr, int node_id,
 					char xmu_k, u32 reg_value)
@@ -1929,6 +1913,7 @@ static int node_nbsr_read_generic(struct kvm_nbsr *nbsr, int node_id,
 	return 0;
 }
 
+
 static int node_nbsr_write_generic(struct kvm_nbsr *nbsr, int node_id,
 				   unsigned int reg_offset, u32 reg_value)
 {
@@ -2220,11 +2205,11 @@ static int node_nbsr_writell_iommu(struct kvm_nbsr *nbsr, int node_id,
 	return ret;
 }
 
-static __cold int unsupported_reg_read(int node_id, unsigned int reg_offset, u32 *reg_val)
+static __cold int unsupported_reg_read(char *ver, int node_id, unsigned int reg_offset, u32 *reg_val)
 {
 	*reg_val = -1;
-	pr_err_ratelimited("node #%d NBSR reg with offset 0x%04x is not supported so return 0x%x\n",
-			node_id, reg_offset, *reg_val);
+	pr_err_ratelimited("%s: node #%d NBSR reg with offset 0x%04x is not supported so return 0x%x\n",
+			ver, node_id, reg_offset, *reg_val);
 	return -EOPNOTSUPP;
 }
 
@@ -2244,7 +2229,7 @@ static int node_nbsr_sic_read_v3(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 	case SIC_hw1:
 		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
 	default:
-		return unsupported_reg_read(node_id, reg_offset, reg_val);
+		return unsupported_reg_read("v3", node_id, reg_offset, reg_val);
 	}
 }
 
@@ -2277,13 +2262,43 @@ static int node_nbsr_sic_read_v4_v5(const struct kvm_vcpu *vcpu, struct kvm_nbsr
 	case SIC_io_csr:
 		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
 	default:
-		return unsupported_reg_read(node_id, reg_offset, reg_val);
+		return unsupported_reg_read("v5", node_id, reg_offset, reg_val);
 	}
+}
+
+/* Now implement access just for guest of same arch and only one node */
+static void  node_nbsr_read_mc_v6_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
+				     int node_id, unsigned int reg_offset, u32 *reg_val)
+{
+	u32 mc_ch;
+
+	if (node_id != 0) {
+		*reg_val = 0xffffffff;
+		return;
+	}
+	if (machine.native_id != vcpu->kvm->arch.guest_info.cpu_mdl) {
+		*reg_val = 0xffffffff;
+		return;
+	}
+	node_nbsr_read_generic(nbsr, node_id, MC_CH, &mc_ch);
+	if (mc_enabled_mask[node_id] & (1 << mc_ch))
+		*reg_val = sic_read_node_v7_mc_nbsr_reg(node_id, mc_ch, reg_offset);
+	else
+		*reg_val = 0;
 }
 
 static int node_nbsr_sic_read_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 			      int node_id, unsigned int reg_offset, u32 *reg_val)
 {
+	if (is_pmc_freq_core_mon(reg_offset, false) ||
+	    is_pmc_freq_core_ctrl(reg_offset, false) ||
+	    is_pmc_freq_graphic_mon(reg_offset, false) ||
+	    is_pmc_freq_graphic_ctrl(reg_offset, false))
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+
+	if (is_pmc_freq_core_sleep(reg_offset, false))
+		return node_nbsr_read_pmc(nbsr, node_id, reg_offset, reg_val);
+
 	switch (reg_offset) {
 	case PMC_INFO:
 		return node_nbsr_read_pmc_info(nbsr, node_id, reg_offset, reg_val);
@@ -2324,68 +2339,11 @@ static int node_nbsr_sic_read_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 	case PMC_FREQ_OCN_TABLE5:
 	case PMC_FREQ_OCN_TABLE6:
 	case PMC_FREQ_OCN_TABLE7:
-	case PMC_FREQ_CORE_N_MON(0):
-	case PMC_FREQ_CORE_N_MON(1):
-	case PMC_FREQ_CORE_N_MON(2):
-	case PMC_FREQ_CORE_N_MON(3):
-	case PMC_FREQ_CORE_N_MON(4):
-	case PMC_FREQ_CORE_N_MON(5):
-	case PMC_FREQ_CORE_N_MON(6):
-	case PMC_FREQ_CORE_N_MON(7):
-	case PMC_FREQ_CORE_N_MON(8):
-	case PMC_FREQ_CORE_N_MON(9):
-	case PMC_FREQ_CORE_N_MON(10):
-	case PMC_FREQ_CORE_N_MON(11):
-	case PMC_FREQ_CORE_N_MON(12):
-	case PMC_FREQ_CORE_N_MON(13):
-	case PMC_FREQ_CORE_N_MON(14):
-	case PMC_FREQ_CORE_N_MON(15):
-	case PMC_FREQ_CORE_N_CTRL(0):
-	case PMC_FREQ_CORE_N_CTRL(1):
-	case PMC_FREQ_CORE_N_CTRL(2):
-	case PMC_FREQ_CORE_N_CTRL(3):
-	case PMC_FREQ_CORE_N_CTRL(4):
-	case PMC_FREQ_CORE_N_CTRL(5):
-	case PMC_FREQ_CORE_N_CTRL(6):
-	case PMC_FREQ_CORE_N_CTRL(7):
-	case PMC_FREQ_CORE_N_CTRL(8):
-	case PMC_FREQ_CORE_N_CTRL(9):
-	case PMC_FREQ_CORE_N_CTRL(10):
-	case PMC_FREQ_CORE_N_CTRL(11):
-	case PMC_FREQ_CORE_N_CTRL(12):
-	case PMC_FREQ_CORE_N_CTRL(13):
-	case PMC_FREQ_CORE_N_CTRL(14):
-	case PMC_FREQ_CORE_N_CTRL(15):
 	case PMC_FREQ_OCN_MON:
 	case PMC_FREQ_OCN_CTRL:
-	case PMC_FREQ_GRAPHIC_N_MON(0):
-	case PMC_FREQ_GRAPHIC_N_MON(1):
-	case PMC_FREQ_GRAPHIC_N_MON(2):
-	case PMC_FREQ_GRAPHIC_N_MON(3):
-	case PMC_FREQ_GRAPHIC_N_CTRL(0):
-	case PMC_FREQ_GRAPHIC_N_CTRL(1):
-	case PMC_FREQ_GRAPHIC_N_CTRL(2):
-	case PMC_FREQ_GRAPHIC_N_CTRL(3):
 	case PMC_SYS_MON_1:
 	case PMC_FAN_CFG:
 		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
-	case PMC_FREQ_CORE_N_SLEEP(0):
-	case PMC_FREQ_CORE_N_SLEEP(1):
-	case PMC_FREQ_CORE_N_SLEEP(2):
-	case PMC_FREQ_CORE_N_SLEEP(3):
-	case PMC_FREQ_CORE_N_SLEEP(4):
-	case PMC_FREQ_CORE_N_SLEEP(5):
-	case PMC_FREQ_CORE_N_SLEEP(6):
-	case PMC_FREQ_CORE_N_SLEEP(7):
-	case PMC_FREQ_CORE_N_SLEEP(8):
-	case PMC_FREQ_CORE_N_SLEEP(9):
-	case PMC_FREQ_CORE_N_SLEEP(10):
-	case PMC_FREQ_CORE_N_SLEEP(11):
-	case PMC_FREQ_CORE_N_SLEEP(12):
-	case PMC_FREQ_CORE_N_SLEEP(13):
-	case PMC_FREQ_CORE_N_SLEEP(14):
-	case PMC_FREQ_CORE_N_SLEEP(15):
-		return node_nbsr_read_pmc(nbsr, node_id, reg_offset, reg_val);
 	case MC_ECC:
 		return node_nbsr_read_mc_ecc(vcpu, reg_val);
 	case HC_CTRL:
@@ -2419,32 +2377,64 @@ static int node_nbsr_sic_read_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
 	case EFUSE_RAM_DATA:
 		return node_nbsr_read_efuse(nbsr, node_id, reg_offset, reg_val);
+	case MC_CTL :
+		node_nbsr_read_mc_v6_v7(vcpu, nbsr, node_id, MC_CTL, reg_val);
+		return 0;
 	default:
-		return unsupported_reg_read(node_id, reg_offset, reg_val);
+		return unsupported_reg_read("v6", node_id, reg_offset, reg_val);
 	}
 }
 
 static int node_nbsr_sic_read_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 			      int node_id, unsigned int reg_offset, u32 *reg_val)
 {
-	switch (reg_offset) {
-	case PMC_FREQ_CORE_N_SLEEP_V7(0):
-	case PMC_FREQ_CORE_N_SLEEP_V7(1):
-	case PMC_FREQ_CORE_N_SLEEP_V7(2):
-	case PMC_FREQ_CORE_N_SLEEP_V7(3):
-	case PMC_FREQ_CORE_N_SLEEP_V7(4):
-	case PMC_FREQ_CORE_N_SLEEP_V7(5):
-	case PMC_FREQ_CORE_N_SLEEP_V7(6):
-	case PMC_FREQ_CORE_N_SLEEP_V7(7):
-	case PMC_FREQ_CORE_N_SLEEP_V7(8):
-	case PMC_FREQ_CORE_N_SLEEP_V7(9):
-	case PMC_FREQ_CORE_N_SLEEP_V7(10):
-	case PMC_FREQ_CORE_N_SLEEP_V7(11):
-	case PMC_FREQ_CORE_N_SLEEP_V7(12):
-	case PMC_FREQ_CORE_N_SLEEP_V7(13):
-	case PMC_FREQ_CORE_N_SLEEP_V7(14):
-	case PMC_FREQ_CORE_N_SLEEP_V7(15):
+	if (is_pmc_freq_core_mon(reg_offset, true) ||
+	    is_pmc_freq_core_ctrl(reg_offset, true) ||
+	    is_pmc_freq_graphic_mon(reg_offset, true) ||
+	    is_pmc_freq_graphic_ctrl(reg_offset, true))
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+
+	if (is_pmc_freq_core_sleep(reg_offset, true))
 		return node_nbsr_read_pmc(nbsr, node_id, reg_offset, reg_val);
+
+	switch (reg_offset) {
+	case PMC_TERM_CTRL:
+	case PMC_TERM_CONV:
+	case PMC_TERM_TS0:
+	case PMC_TERM_TS1:
+	case PMC_TERM_TS2:
+	case PMC_TERM_TS3:
+	case PMC_TERM_TS4:
+	case PMC_TERM_TS5:
+	case PMC_TERM_TS6:
+	case PMC_TERM_TS7:
+	case PMC_FREQ_CFG:
+	case PMC_FREQ_STEPS:
+	case PMC_FREQ_C2:
+	case PMC_FREQ_BND:
+	case PMC_FREQ_CORE_FLOAT:
+	case PMC_FREQ_OCN_FLOAT:
+	case PMC_FREQ_CORE_TABLE0:
+	case PMC_FREQ_CORE_TABLE1:
+	case PMC_FREQ_CORE_TABLE2:
+	case PMC_FREQ_CORE_TABLE3:
+	case PMC_FREQ_CORE_TABLE4:
+	case PMC_FREQ_CORE_TABLE5:
+	case PMC_FREQ_CORE_TABLE6:
+	case PMC_FREQ_CORE_TABLE7:
+	case PMC_FREQ_OCN_TABLE0:
+	case PMC_FREQ_OCN_TABLE1:
+	case PMC_FREQ_OCN_TABLE2:
+	case PMC_FREQ_OCN_TABLE3:
+	case PMC_FREQ_OCN_TABLE4:
+	case PMC_FREQ_OCN_TABLE5:
+	case PMC_FREQ_OCN_TABLE6:
+	case PMC_FREQ_OCN_TABLE7:
+	case PMC_FREQ_OCN_MON:
+	case PMC_FREQ_OCN_CTRL:
+	case PMC_SYS_MON_1:
+	case PMC_FAN_CFG:
+		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
 	case MC_ECC:
 		return node_nbsr_read_mc_ecc(vcpu, reg_val);
 	case SIC_rt_pcim0_xmu_l:
@@ -2491,10 +2481,15 @@ static int node_nbsr_sic_read_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *n
 	case MC_CH:
 	case HMU_MIC:
 		return node_nbsr_read_generic(nbsr, node_id, reg_offset, reg_val);
+	case MC_CTL :
+		node_nbsr_read_mc_v6_v7(vcpu, nbsr, node_id, MC_CTL, reg_val);
+		return 0;
 	default:
-		return unsupported_reg_read(node_id, reg_offset, reg_val);
+		return unsupported_reg_read("v7", node_id, reg_offset, reg_val);
 	}
 }
+
+
 
 static int node_nbsr_sic_read(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 			      int node_id, unsigned int reg_offset, u32 *reg_val)
@@ -2578,7 +2573,7 @@ static int node_nbsr_sic_read(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr
 		case 7:
 			return node_nbsr_sic_read_v7(vcpu, nbsr, node_id, reg_offset, reg_val);
 		default:
-			return unsupported_reg_read(node_id, reg_offset, reg_val);
+			return unsupported_reg_read("v?", node_id, reg_offset, reg_val);
 		}
 	}
 }
@@ -2811,10 +2806,11 @@ static int node_nbsr_write_ignore(int node_id, unsigned int reg_offset, u32 reg_
 	return 0;
 }
 
-static __cold int unsupported_reg_write(int node_id, unsigned int reg_offset)
+static __cold int unsupported_reg_write(char *ver, int node_id,
+					unsigned int reg_offset, u32 reg_value)
 {
-	pr_err_ratelimited("node #%d NBSR reg with offset 0x%04x is not yet supported, so ignore write\n",
-			node_id, reg_offset);
+	pr_err_ratelimited("%s: node %02d: write 0x%08x to NBSR reg with offset 0x%04x not supported\n",
+			ver, node_id, reg_value, reg_offset);
 	return -EOPNOTSUPP;
 }
 
@@ -2834,7 +2830,7 @@ static int node_nbsr_sic_write_v3(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 	case SIC_hw1:
 		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
 	default:
-		return unsupported_reg_write(node_id, reg_offset);
+		return unsupported_reg_write("v3", node_id, reg_offset, reg_value);
 	}
 }
 
@@ -2867,13 +2863,22 @@ static int node_nbsr_sic_write_v4_v5(const struct kvm_vcpu *vcpu, struct kvm_nbs
 	case SIC_io_csr:
 		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
 	default:
-		return unsupported_reg_write(node_id, reg_offset);
+		return unsupported_reg_write("v4-5", node_id, reg_offset, reg_value);
 	}
 }
 
 static int node_nbsr_sic_write_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 			       int node_id, unsigned int reg_offset, u32 reg_value)
 {
+	if (is_pmc_freq_core_mon(reg_offset, false) ||
+	    is_pmc_freq_core_ctrl(reg_offset, false) ||
+	    is_pmc_freq_graphic_mon(reg_offset, false) ||
+	    is_pmc_freq_graphic_ctrl(reg_offset, false))
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
+
+	if (is_pmc_freq_core_sleep(reg_offset, false))
+		return node_nbsr_write_pmc(nbsr, node_id, reg_offset, reg_value);
+
 	switch (reg_offset) {
 	case PMC_INFO:
 		return node_nbsr_write_pmc_info(nbsr, node_id, reg_offset, reg_value);
@@ -2914,68 +2919,11 @@ static int node_nbsr_sic_write_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 	case PMC_FREQ_OCN_TABLE5:
 	case PMC_FREQ_OCN_TABLE6:
 	case PMC_FREQ_OCN_TABLE7:
-	case PMC_FREQ_CORE_N_MON(0):
-	case PMC_FREQ_CORE_N_MON(1):
-	case PMC_FREQ_CORE_N_MON(2):
-	case PMC_FREQ_CORE_N_MON(3):
-	case PMC_FREQ_CORE_N_MON(4):
-	case PMC_FREQ_CORE_N_MON(5):
-	case PMC_FREQ_CORE_N_MON(6):
-	case PMC_FREQ_CORE_N_MON(7):
-	case PMC_FREQ_CORE_N_MON(8):
-	case PMC_FREQ_CORE_N_MON(9):
-	case PMC_FREQ_CORE_N_MON(10):
-	case PMC_FREQ_CORE_N_MON(11):
-	case PMC_FREQ_CORE_N_MON(12):
-	case PMC_FREQ_CORE_N_MON(13):
-	case PMC_FREQ_CORE_N_MON(14):
-	case PMC_FREQ_CORE_N_MON(15):
-	case PMC_FREQ_CORE_N_CTRL(0):
-	case PMC_FREQ_CORE_N_CTRL(1):
-	case PMC_FREQ_CORE_N_CTRL(2):
-	case PMC_FREQ_CORE_N_CTRL(3):
-	case PMC_FREQ_CORE_N_CTRL(4):
-	case PMC_FREQ_CORE_N_CTRL(5):
-	case PMC_FREQ_CORE_N_CTRL(6):
-	case PMC_FREQ_CORE_N_CTRL(7):
-	case PMC_FREQ_CORE_N_CTRL(8):
-	case PMC_FREQ_CORE_N_CTRL(9):
-	case PMC_FREQ_CORE_N_CTRL(10):
-	case PMC_FREQ_CORE_N_CTRL(11):
-	case PMC_FREQ_CORE_N_CTRL(12):
-	case PMC_FREQ_CORE_N_CTRL(13):
-	case PMC_FREQ_CORE_N_CTRL(14):
-	case PMC_FREQ_CORE_N_CTRL(15):
 	case PMC_FREQ_OCN_MON:
 	case PMC_FREQ_OCN_CTRL:
-	case PMC_FREQ_GRAPHIC_N_MON(0):
-	case PMC_FREQ_GRAPHIC_N_MON(1):
-	case PMC_FREQ_GRAPHIC_N_MON(2):
-	case PMC_FREQ_GRAPHIC_N_MON(3):
-	case PMC_FREQ_GRAPHIC_N_CTRL(0):
-	case PMC_FREQ_GRAPHIC_N_CTRL(1):
-	case PMC_FREQ_GRAPHIC_N_CTRL(2):
-	case PMC_FREQ_GRAPHIC_N_CTRL(3):
 	case PMC_SYS_MON_1:
 	case PMC_FAN_CFG:
 		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
-	case PMC_FREQ_CORE_N_SLEEP(0):
-	case PMC_FREQ_CORE_N_SLEEP(1):
-	case PMC_FREQ_CORE_N_SLEEP(2):
-	case PMC_FREQ_CORE_N_SLEEP(3):
-	case PMC_FREQ_CORE_N_SLEEP(4):
-	case PMC_FREQ_CORE_N_SLEEP(5):
-	case PMC_FREQ_CORE_N_SLEEP(6):
-	case PMC_FREQ_CORE_N_SLEEP(7):
-	case PMC_FREQ_CORE_N_SLEEP(8):
-	case PMC_FREQ_CORE_N_SLEEP(9):
-	case PMC_FREQ_CORE_N_SLEEP(10):
-	case PMC_FREQ_CORE_N_SLEEP(11):
-	case PMC_FREQ_CORE_N_SLEEP(12):
-	case PMC_FREQ_CORE_N_SLEEP(13):
-	case PMC_FREQ_CORE_N_SLEEP(14):
-	case PMC_FREQ_CORE_N_SLEEP(15):
-		return node_nbsr_write_pmc(nbsr, node_id, reg_offset, reg_value);
 	case MC_ECC:
 		return node_nbsr_write_ignore(node_id, reg_offset, reg_value);
 	case HC_CTRL:
@@ -3010,31 +2958,60 @@ static int node_nbsr_sic_write_v6(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 	case EFUSE_RAM_DATA:
 		return node_nbsr_write_efuse(nbsr, node_id, reg_offset, reg_value);
 	default:
-		return unsupported_reg_write(node_id, reg_offset);
+		return unsupported_reg_write("v6", node_id, reg_offset, reg_value);
 	}
 }
 
 static int node_nbsr_sic_write_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbsr,
 			       int node_id, unsigned int reg_offset, u32 reg_value)
 {
-	switch (reg_offset) {
-	case PMC_FREQ_CORE_N_SLEEP_V7(0):
-	case PMC_FREQ_CORE_N_SLEEP_V7(1):
-	case PMC_FREQ_CORE_N_SLEEP_V7(2):
-	case PMC_FREQ_CORE_N_SLEEP_V7(3):
-	case PMC_FREQ_CORE_N_SLEEP_V7(4):
-	case PMC_FREQ_CORE_N_SLEEP_V7(5):
-	case PMC_FREQ_CORE_N_SLEEP_V7(6):
-	case PMC_FREQ_CORE_N_SLEEP_V7(7):
-	case PMC_FREQ_CORE_N_SLEEP_V7(8):
-	case PMC_FREQ_CORE_N_SLEEP_V7(9):
-	case PMC_FREQ_CORE_N_SLEEP_V7(10):
-	case PMC_FREQ_CORE_N_SLEEP_V7(11):
-	case PMC_FREQ_CORE_N_SLEEP_V7(12):
-	case PMC_FREQ_CORE_N_SLEEP_V7(13):
-	case PMC_FREQ_CORE_N_SLEEP_V7(14):
-	case PMC_FREQ_CORE_N_SLEEP_V7(15):
+	if (is_pmc_freq_core_mon(reg_offset, true) ||
+	    is_pmc_freq_core_ctrl(reg_offset, true) ||
+	    is_pmc_freq_graphic_mon(reg_offset, true) ||
+	    is_pmc_freq_graphic_ctrl(reg_offset, true))
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
+
+	if (is_pmc_freq_core_sleep(reg_offset, true))
 		return node_nbsr_write_pmc(nbsr, node_id, reg_offset, reg_value);
+
+	switch (reg_offset) {
+	case PMC_TERM_CTRL:
+	case PMC_TERM_CONV:
+	case PMC_TERM_TS0:
+	case PMC_TERM_TS1:
+	case PMC_TERM_TS2:
+	case PMC_TERM_TS3:
+	case PMC_TERM_TS4:
+	case PMC_TERM_TS5:
+	case PMC_TERM_TS6:
+	case PMC_TERM_TS7:
+	case PMC_FREQ_CFG:
+	case PMC_FREQ_STEPS:
+	case PMC_FREQ_C2:
+	case PMC_FREQ_BND:
+	case PMC_FREQ_CORE_FLOAT:
+	case PMC_FREQ_OCN_FLOAT:
+	case PMC_FREQ_CORE_TABLE0:
+	case PMC_FREQ_CORE_TABLE1:
+	case PMC_FREQ_CORE_TABLE2:
+	case PMC_FREQ_CORE_TABLE3:
+	case PMC_FREQ_CORE_TABLE4:
+	case PMC_FREQ_CORE_TABLE5:
+	case PMC_FREQ_CORE_TABLE6:
+	case PMC_FREQ_CORE_TABLE7:
+	case PMC_FREQ_OCN_TABLE0:
+	case PMC_FREQ_OCN_TABLE1:
+	case PMC_FREQ_OCN_TABLE2:
+	case PMC_FREQ_OCN_TABLE3:
+	case PMC_FREQ_OCN_TABLE4:
+	case PMC_FREQ_OCN_TABLE5:
+	case PMC_FREQ_OCN_TABLE6:
+	case PMC_FREQ_OCN_TABLE7:
+	case PMC_FREQ_OCN_MON:
+	case PMC_FREQ_OCN_CTRL:
+	case PMC_SYS_MON_1:
+	case PMC_FAN_CFG:
+		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
 	case SIC_rt_pcim0_xmu_l:
 		return node_nbsr_write_rt_pcim_xmu(nbsr, node_id, RT_XMU_l, reg_value);
 	case SIC_rt_pcim0_xmu_a:
@@ -3084,7 +3061,7 @@ static int node_nbsr_sic_write_v7(const struct kvm_vcpu *vcpu, struct kvm_nbsr *
 	case EDBC_IOMMU_CTRL ... EDBC_IOMMU_ERR_INFO_HI:
 		return node_nbsr_write_generic(nbsr, node_id, reg_offset, reg_value);
 	default:
-		return unsupported_reg_write(node_id, reg_offset);
+		return unsupported_reg_write("v7", node_id, reg_offset, reg_value);
 	}
 }
 
@@ -3178,7 +3155,7 @@ static int node_nbsr_sic_write(const struct kvm_vcpu *vcpu, struct kvm_nbsr *nbs
 		case 7:
 			return node_nbsr_sic_write_v7(vcpu, nbsr, node_id, reg_offset, reg_value);
 		default:
-			return unsupported_reg_write(node_id, reg_offset);
+			return unsupported_reg_write("v?", node_id, reg_offset, reg_value);
 		}
 	}
 }
@@ -3241,8 +3218,8 @@ static void nbsr_setup_lo_mem_region(struct kvm_nbsr *nbsr, int node_id,
 	ASSERT(base < NBSR_LOW_MEMORY_BOUND &&
 	       base + size <= NBSR_LOW_MEMORY_BOUND);
 
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_SIZE_RT_MLO);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_SIZE_RT_MLO) - 1;
+	start = round_down(base, E2K_SIC_SIZE_RT_MLO);
+	end = round_up(base + size, E2K_SIC_SIZE_RT_MLO) - 1;
 	AW(rt_mlo) = 0;
 	rt_mlo.bgn = start >> E2K_SIC_ALIGN_RT_MLO;
 	rt_mlo.end = end >> E2K_SIC_ALIGN_RT_MLO;
@@ -3274,8 +3251,8 @@ static void nbsr_setup_hi_mem_region(struct kvm_nbsr *nbsr, int node_id,
 	ASSERT(base >= NBSR_LOW_MEMORY_BOUND &&
 	       base + size > NBSR_LOW_MEMORY_BOUND);
 
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_SIZE_RT_MHI);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_SIZE_RT_MHI) - 1;
+	start = round_down(base, E2K_SIC_SIZE_RT_MHI);
+	end = round_up(base + size, E2K_SIC_SIZE_RT_MHI) - 1;
 	AW(rt_mhi) = 0;
 	rt_mhi.bgn = start >> E2K_SIC_ALIGN_RT_MHI;
 	rt_mhi.end = end >> E2K_SIC_ALIGN_RT_MHI;
@@ -3300,9 +3277,13 @@ int nbsr_setup_memory_region(struct kvm_nbsr *nbsr, int node_id,
 {
 	if (base < NBSR_LOW_MEMORY_BOUND) {
 		ASSERT(base + size <= NBSR_LOW_MEMORY_BOUND);
+		nbsr->lo_mem_base = base;
+		nbsr->lo_mem_size = size;
 		nbsr_setup_lo_mem_region(nbsr, node_id, base, size);
 	} else {
 		ASSERT(base + size > NBSR_LOW_MEMORY_BOUND);
+		nbsr->hi_mem_base = base;
+		nbsr->hi_mem_size = size;
 		nbsr_setup_hi_mem_region(nbsr, node_id, base, size);
 	}
 	return 0;
@@ -3317,11 +3298,11 @@ int nbsr_setup_mmio_region(struct kvm_nbsr *nbsr, int node_id,
 	gpa_t start, end;
 	int node, link;
 
-	ASSERT(base < NBSR_LOW_MEMORY_BOUND &&
-	       base + size <= NBSR_LOW_MEMORY_BOUND);
+	ASSERT(base < NBSR_PCI_BOUND &&
+	       base + size <= NBSR_PCI_BOUND);
 
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_SIZE_RT_PCIM);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_SIZE_RT_PCIM) - 1;
+	start = round_down(base, E2K_SIC_SIZE_RT_PCIM);
+	end = round_up(base + size, E2K_SIC_SIZE_RT_PCIM) - 1;
 	AW(rt_pcim) = 0;
 	rt_pcim.bgn = start >> E2K_SIC_ALIGN_RT_PCIM;
 	rt_pcim.end = end >> E2K_SIC_ALIGN_RT_PCIM;
@@ -3347,27 +3328,6 @@ int nbsr_setup_mmio_region(struct kvm_nbsr *nbsr, int node_id,
 	return 0;
 }
 
-int nbsr_setup_mmio_xmu_region(struct kvm_nbsr *nbsr, int node_id, char xmu_k,
-			       gpa_t base, gpa_t size)
-{
-	unsigned int reg_value;
-	gpa_t start, end;
-
-	ASSERT(nbsr->iset_no >= E2K_ISET_V7);
-
-	node_nbsr_read_rt_pcim(nbsr, node_id, SIC_rt_pcim0, &reg_value);
-	ASSERT(size != 0 && base >= nbsr_get_rt_pcim_bgn(reg_value) &&
-	       base + size <= nbsr_get_rt_pcim_end(reg_value));
-
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_SIZE_RT_PCIM);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_SIZE_RT_PCIM) - 1;
-	reg_value = nbsr_set_rt_pcim_reg(start, end);
-
-	node_nbsr_write_rt_pcim_xmu(nbsr, node_id, xmu_k, reg_value);
-
-	return 0;
-}
-
 static int nbsr_setup_io_region(struct kvm_nbsr *nbsr, int node_id,
 				gpa_t base, gpa_t size)
 {
@@ -3379,8 +3339,8 @@ static int nbsr_setup_io_region(struct kvm_nbsr *nbsr, int node_id,
 	ASSERT(base < NBSR_LOW_MEMORY_BOUND &&
 	       base + size <= NBSR_LOW_MEMORY_BOUND);
 
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_SIZE_RT_PCIIO);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_SIZE_RT_PCIIO) - 1;
+	start = round_down(base, E2K_SIC_SIZE_RT_PCIIO);
+	end = round_up(base + size, E2K_SIC_SIZE_RT_PCIIO) - 1;
 	reg_value = nbsr_set_rt_pciio_reg(start, end, nbsr->iset_no);
 
 	node_nbsr_write_rt_pciio(nbsr, node_id, SIC_rt_pciio0, reg_value);
@@ -3403,27 +3363,6 @@ static int nbsr_setup_io_region(struct kvm_nbsr *nbsr, int node_id,
 	return 0;
 }
 
-int nbsr_setup_io_xmu_region(struct kvm_nbsr *nbsr, int node_id, char xmu_k,
-			     gpa_t base, gpa_t size)
-{
-	unsigned int reg_value;
-	gpa_t start, end;
-
-	ASSERT(nbsr->iset_no >= E2K_ISET_V7);
-
-	node_nbsr_read_rt_pciio(nbsr, node_id, SIC_rt_pciio0, &reg_value);
-	ASSERT(size != 0 && base >= nbsr_get_rt_pciio_bgn_v7(reg_value) &&
-	       base + size <= nbsr_get_rt_pciio_end_v7(reg_value));
-
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_SIZE_RT_PCIIO);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_SIZE_RT_PCIIO) - 1;
-	reg_value = nbsr_set_rt_pciio_reg_v7(start, end);
-
-	node_nbsr_write_rt_pciio_xmu(nbsr, node_id, xmu_k, reg_value);
-
-	return 0;
-}
-
 int nbsr_setup_pref_mmio_region(struct kvm_nbsr *nbsr, int node_id,
 				gpa_t base, gpa_t size)
 {
@@ -3435,8 +3374,8 @@ int nbsr_setup_pref_mmio_region(struct kvm_nbsr *nbsr, int node_id,
 	ASSERT(base < NBSR_HI_MEMORY_BOUND &&
 	       base + size <= NBSR_HI_MEMORY_BOUND);
 
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_SIZE_RT_PCIMP);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_SIZE_RT_PCIMP) - 1;
+	start = round_down(base, E2K_SIC_SIZE_RT_PCIMP);
+	end = round_up(base + size, E2K_SIC_SIZE_RT_PCIMP) - 1;
 
 	reg_value_b = nbsr_set_rt_pcimp_bgn_reg(start);
 	node_nbsr_write_rt_pcimp_b(nbsr, node_id, SIC_rt_pcimp_b0, reg_value_b);
@@ -3462,30 +3401,6 @@ int nbsr_setup_pref_mmio_region(struct kvm_nbsr *nbsr, int node_id,
 		node_nbsr_write_rt_pcimp_b_xmu(nbsr, node_id, RT_XMU_l, reg_value_b);
 		node_nbsr_write_rt_pcimp_e_xmu(nbsr, node_id, RT_XMU_l, reg_value_e);
 	}
-	return 0;
-}
-
-int nbsr_setup_pref_mmio_xmu_region(struct kvm_nbsr *nbsr, int node_id, char xmu_k,
-				    gpa_t base, gpa_t size)
-{
-	unsigned int reg_value_b, reg_value_e;
-	gpa_t start, end;
-
-	ASSERT(nbsr->iset_no >= E2K_ISET_V7);
-
-	node_nbsr_read_rt_pcimp_b(nbsr, node_id, SIC_rt_pcimp_b0, &reg_value_b);
-	node_nbsr_read_rt_pcimp_e(nbsr, node_id, SIC_rt_pcimp_e0, &reg_value_e);
-	ASSERT(size != 0 && base >= nbsr_get_rt_pcimp_bgn(reg_value_b) &&
-	       base + size <= nbsr_get_rt_pcimp_end(reg_value_e));
-
-	start = ALIGN_DOWN_TO_SIZE(base, E2K_SIC_ALIGN_RT_PCIMP);
-	end = ALIGN_UP_TO_SIZE(base + size, E2K_SIC_ALIGN_RT_PCIMP) - 1;
-	reg_value_b = nbsr_set_rt_pcimp_bgn_reg(start);
-	reg_value_e = nbsr_set_rt_pcimp_bgn_reg(end);
-
-	node_nbsr_write_rt_pcimp_b_xmu(nbsr, node_id, xmu_k, reg_value_b);
-	node_nbsr_write_rt_pcimp_e_xmu(nbsr, node_id, xmu_k, reg_value_e);
-
 	return 0;
 }
 
@@ -3589,7 +3504,7 @@ static int nbsr_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	return ret;
 }
 
-static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
+void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 {
 	e2k_rt_mhi_t rt_mhi;
 	e2k_rt_mlo_t rt_mlo;
@@ -3758,39 +3673,24 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 		node_nbsr_reg_set(nbsr, node, EFUSE_RAM_ADDR, 0x00000000);
 		for (i = 0; i < 16; i++)
 			node_nbsr_reg_set(nbsr, node, SIC_st_core(i), 0x00000001);
-		if (nbsr->iset_no == E2K_ISET_V7) {
-			for (i = 0; i < 16; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_CORE_N_MON_V7(i), 0x00000000);
-			for (i = 0; i < 16; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_CORE_N_CTRL_V7(i), 0x00000000);
-			for (i = 0; i < 16; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_CORE_N_SLEEP_V7(i), 0x00000000);
-			for (i = 0; i < 4; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_GRAPHIC_N_MON_V7(i), 0x00000000);
-			for (i = 0; i < 4; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_GRAPHIC_N_CTRL_V7(i), 0x00000000);
-		} else {
-			for (i = 0; i < 16; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_CORE_N_MON(i), 0x00000000);
-			for (i = 0; i < 16; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_CORE_N_CTRL(i), 0x00000000);
-			for (i = 0; i < 16; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_CORE_N_SLEEP(i), 0x00000000);
-			for (i = 0; i < 4; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_GRAPHIC_N_MON(i), 0x00000000);
-			for (i = 0; i < 4; i++)
-				node_nbsr_reg_set(nbsr, node,
-					PMC_FREQ_GRAPHIC_N_CTRL(i), 0x00000000);
+
+		bool is_v7 = (nbsr->iset_no >= E2K_ISET_V7);
+		for (i = 0; i < ((is_v7) ? 64 : 16); i++) {
+			node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_MON(i, is_v7), 0);
+			node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_CTRL(i, is_v7), 0);
+			node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_CORE_SLEEP(i, is_v7), 0);
 		}
+
+		for (i = 0; i < 4; i++) {
+			node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_GRAPHIC_MON(i, is_v7), 0);
+			node_nbsr_reg_set(nbsr, node,
+					PMC_FREQ_GRAPHIC_CTRL(i, is_v7), 0);
+		}
+
 		for (i = 0; i < EFUSE_RAM_LINES; i++)
 			node_nbsr->efuse_ram[offset_to_no(i)] = 0x00000000;
 
@@ -3845,6 +3745,13 @@ static void kvm_nbsr_reset(struct kvm *kvm, struct kvm_nbsr *nbsr)
 		node_nbsr_reg_set(nbsr, node, SIC_iommu_mar1_lo, 0x00000000);
 		node_nbsr_reg_set(nbsr, node, SIC_iommu_mar1_hi, 0x00000000);
 	}
+
+	/* *FIXME* setup memory regions after reset only for node #0
+	 * Need to update after NUMA support will be implemented */
+	if (nbsr->lo_mem_size != 0)
+		nbsr_setup_lo_mem_region(nbsr, 0, nbsr->lo_mem_base, nbsr->lo_mem_size);
+	if (nbsr->hi_mem_size != 0)
+		nbsr_setup_hi_mem_region(nbsr, 0, nbsr->hi_mem_base, nbsr->hi_mem_size);
 }
 
 static const struct kvm_io_device_ops nbsr_mmio_ops = {

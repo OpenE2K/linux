@@ -13,7 +13,6 @@
  * works for e2k_syswork
  */
 #define PRINT_STACK		2
-#define PRINT_TASKS		3
 #define GET_ADDR_PROT		4
 
 #define PRINT_REGS		6
@@ -27,8 +26,6 @@
 #define FAST_RETURN             58	/* Using to estimate time needed */
 					/* for entering to OS */
 #define E2K_ACCESS_VM		60      /* Deprecated */
-#define USER_CONTROL_INTERRUPT	62      /* user can control all interrupts */
-					/* (for degugging hardware) */
 #define PRINT_CPU_REGS		63
 
 /* modes for sys_access_hw_stacks */

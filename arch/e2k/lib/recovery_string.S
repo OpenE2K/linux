@@ -3,10 +3,9 @@
  * Copyright (c) 2023 MCST
  */
 
-#include <asm-generic/export.h>
 #include <linux/linkage.h>
-#include <asm/e2k_api.h>
-
+#include <asm/asm-offsets.h>
+#include <asm/export.h>
 
 .text
 
@@ -220,10 +219,10 @@ SYM_FUNC_START(__recovery_memcpy_8)
 		ipd 1
 		disp %ctpr1, 4f /* copy_tail */
 
-		ldb,0,sm [ %db[0] + 0 ] (MAS_LOAD_SPEC | MAS_BYPASS_L1_CACHE), %empty ? ~ %pred15
-		ldb,2,sm [ %db[0] + 0x40 ] (MAS_LOAD_SPEC | MAS_BYPASS_L1_CACHE), %empty ? ~ %pred15
-		ldb,3,sm [ %db[0] + 0x80 ] (MAS_LOAD_SPEC | MAS_BYPASS_L1_CACHE), %empty ? ~ %pred15
-		ldb,5,sm [ %db[0] + 0xc0 ] (MAS_LOAD_SPEC | MAS_BYPASS_L1_CACHE), %empty ? ~ %pred15
+		ldb,0,sm [ %db[0] + 0 ] (MAS_SPECULATIVE_BYPASS_L1), %empty ? ~ %pred15
+		ldb,2,sm [ %db[0] + 0x40 ] (MAS_SPECULATIVE_BYPASS_L1), %empty ? ~ %pred15
+		ldb,3,sm [ %db[0] + 0x80 ] (MAS_SPECULATIVE_BYPASS_L1), %empty ? ~ %pred15
+		ldb,5,sm [ %db[0] + 0xc0 ] (MAS_SPECULATIVE_BYPASS_L1), %empty ? ~ %pred15
 
 		cmpbdb,1 %dr2, 0xe0, %pred0
 

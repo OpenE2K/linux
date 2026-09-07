@@ -234,6 +234,9 @@ static void auxiliary_bus_shutdown(struct device *dev)
 {
 	struct auxiliary_driver *auxdrv = NULL;
 	struct auxiliary_device *auxdev;
+#ifdef CONFIG_MCST
+	auxdev = NULL;
+#endif
 
 	if (dev->driver) {
 		auxdrv = to_auxiliary_drv(dev->driver);

@@ -219,7 +219,7 @@
 #define RX_CTRL_RBROADCAST	SET_BIT(1)
 #define RX_CTRL_RAWMODE		SET_BIT(0)
 #define RX_DSTMAC_TBLSIZE	8
-#define RX_DSTMAC_SETIDX(d)	(0x80000000 | (SET_FIELD((d), 27, 0x0F)))
+#define RX_DSTMAC_SETIDX(d)	(0x80000000 | (SET_FIELD((d), 24, 0x07)))
 #define RX_DSTMAC_SETMAC(d)	SET_FIELD((d), 0, 0x00FFFFFF)
 #define RX_DSTMAC_RECFRAME	SET_BIT(28)
 #define RX_MCASTHASH_TBLSIZE	(8192 / 16)
@@ -305,7 +305,8 @@ typedef union {	/* +0x00 */
 		uint64_t MERGED		: 1; /* [47]    */
 		uint64_t FRMSIZE	:16; /* [63:48] */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_ctrl_t;
 #else
 typedef union {	/* +0x00 */
@@ -352,7 +353,8 @@ typedef union {	/* +0x00 */
 		uint64_t BFERR		: 1; /* [01]    */
 		uint64_t _res1_		: 1; /* [00]    */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_ctrl_t;
 #endif
 
@@ -394,7 +396,8 @@ typedef union {	/* +0x08 */
 		uint64_t SPLIT		: 2; /* [62:61] */
 		uint64_t OWNER		: 1; /* [63]    */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_addr_t;
 #else
 typedef union {	/* +0x08 */
@@ -418,7 +421,8 @@ typedef union {	/* +0x08 */
 		uint64_t SPLIT		: 2; /* [62:61] */
 		uint64_t BUFPTR		:61; /* [60:00] */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_addr_t;
 #endif
 
@@ -458,7 +462,8 @@ typedef union {	/* +0x10 for long only */
 		uint64_t OVLAN		:16; /* [31:16] */
 		uint64_t TICKS		:32; /* [63:32] */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_vlan_t;
 #else
 typedef union {	/* +0x10 for long only */
@@ -481,7 +486,8 @@ typedef union {	/* +0x10 for long only */
 		uint64_t OVLAN		:16; /* [31:16] */
 		uint64_t IVLAN		:16; /* [15:00] */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_vlan_t;
 #endif
 
@@ -503,7 +509,8 @@ typedef union {	/* +0x18 for long only */
 		uint64_t TIMEBITS	: 8; /* [55:48] */
 		uint64_t _res1_		: 8; /* [63:56] */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_time_t;
 #else
 typedef union {	/* +0x18 for long only */
@@ -523,7 +530,8 @@ typedef union {	/* +0x18 for long only */
 		uint64_t TIMEBITS	: 8; /* [55:48] */
 		uint64_t SECONDS	:48; /* [47:00] */
 	} __packed RD;
-	uint64_t r;
+	__le64 r;
+	u64 ru;
 } __packed mxgbe_time_t;
 #endif
 

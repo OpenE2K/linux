@@ -14,7 +14,6 @@
 #include <asm/tlb_regs_types.h>
 
 extern probe_entry_t kvm_mmu_entry_probe(e2k_addr_t virt_addr);
-extern probe_entry_t kvm_mmu_address_probe(e2k_addr_t virt_addr);
 extern mmu_reg_t kvm_read_dtlb_reg(e2k_addr_t virt_addr);
 
 #endif	/* __KERNEL__ */

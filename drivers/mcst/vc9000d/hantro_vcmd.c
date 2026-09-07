@@ -60,6 +60,7 @@
 #include <linux/module.h>
 /* needed for __init,__exit directives */
 #include <linux/init.h>
+#include <linux/types.h>
 /* needed for remap_page_range
  * SetPageReserved
  * ClearPageReserved
@@ -107,7 +108,6 @@
 #endif
 #include "hantrovcmddbgfs.h"
 #include "hantroabnormalirq.h"
-#include "subsys_cfg.h"
 #ifdef AXI2TO1_SUPPORT
 #include "hantroaxi2to1.h"
 #endif
@@ -149,13 +149,6 @@
 /* PCI base register address (memalloc) */
 extern unsigned long gBaseDDRHw;
 extern unsigned int mmu_enable;
-struct vcmd_config vcmd_core_array[MAX_SUBSYS_NUM];
-extern unsigned long vcmd_isr_polling;
-extern u32 arbiter_weight;
-extern u32 arbiter_urgent;
-extern u32 arbiter_timewindow;
-extern u32 arbiter_bw_overflow;
-extern unsigned long sw_timeout_time;
 extern unsigned long ddr_offset;
 
 /****************************************************************
@@ -170,8 +163,10 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id, struct pt_regs *regs);
 static irqreturn_t hantrovcmd_isr(int irq, void *dev_id);
 #endif
 static void vcmd_start(struct hantrovcmd_dev *dev);
-
-extern void abort_vcd(volatile u8 *reg_base);
+void _dbg_log_instr(u32 offset, u32 instr, u32 *size, char *str);
+void proc_add_done_job(vcmd_mgr_t *vcmd_mgr, struct cmdbuf_obj *obj);
+void _vcmd_kthread_wakeup(vcmd_mgr_t *vcmd_mgr);
+extern int abort_vcd(void __iomem *reg_base);
 /****************************************************************
  * watchdog, irq_simulation, kernel thread and debug functions
  ***************************************************************/
@@ -275,10 +270,9 @@ static void watchdog_reset_vcmd_arbiter(struct hantrovcmd_dev *dev)
 	unsigned long flags;
 
 	spin_lock_irqsave(dev->spinlock, flags);
-	arb = vcmd_read_reg((const void *)dev->hwregs,
-						VCMD_REGISTER_ARB_OFFSET);
+	arb = vcmd_read_reg(dev->hwregs, VCMD_REGISTER_ARB_OFFSET);
 	arb &= 0xfffffff8;
-	vcmd_write_reg((const void *)dev->hwregs, VCMD_REGISTER_ARB_OFFSET, arb);
+	vcmd_write_reg(dev->hwregs, VCMD_REGISTER_ARB_OFFSET, arb);
 	spin_unlock_irqrestore(dev->spinlock, flags);
 
 	do {
@@ -302,7 +296,7 @@ static int watchdog_wait_vcmd_aborted(struct hantrovcmd_dev *dev)
 	u32 state;
 
 	do {
-		state = vcmd_get_register_value((const void *)dev->hwregs,
+		state = vcmd_get_register_value(dev->hwregs,
 									dev->reg_mirror, HWIF_VCMD_WORK_STATE);
 		if (state == HW_WORK_STATE_IDLE) {
 			//aborted
@@ -326,7 +320,7 @@ static int watchdog_stop_vcmd(struct hantrovcmd_dev *dev)
 
 	vcmd_klog(LOGLVL_WARNING, "enter %s\n", __func__);
 
-	state = vcmd_get_register_value((const void *)dev->hwregs,
+	state = vcmd_get_register_value(dev->hwregs,
 				dev->reg_mirror, HWIF_VCMD_WORK_STATE);
 
 	if (state == HW_WORK_STATE_IDLE || state == HW_WORK_STATE_PEND) {
@@ -341,7 +335,7 @@ static int watchdog_stop_vcmd(struct hantrovcmd_dev *dev)
 		dev->abort_mode = 0x1;
 		vcmd_set_reg_mirror(dev->reg_mirror, HWIF_VCMD_ABORT_MODE, 0x1);
 	}
-	vcmd_write_register_value((const void *)dev->hwregs,
+	vcmd_write_register_value(dev->hwregs,
 					dev->reg_mirror,
 					HWIF_VCMD_START_TRIGGER, 0);
 	dev->state = VCMD_STATE_POWER_ON;
@@ -464,9 +458,9 @@ static int process_subsystem_exceptions(struct hantrovcmd_dev *dev)
 
 	if (dev->hw_version_id < HW_ID_1_6_0) {
 		// VCMD reset
-		val = vcmd_read_reg((const void *)dev->hwregs, 0x40);
+		val = vcmd_read_reg(dev->hwregs, 0x40);
 		val |= (0x1 << 1);
-		vcmd_write_reg((const void *)dev->hwregs, 0x40, val);
+		vcmd_write_reg(dev->hwregs, 0x40, val);
 
 		// IP core and AXI2TO1 reset
 		val = SUBSYSTEM_RESET(IP_RESET_CORE);
@@ -480,16 +474,16 @@ static int process_subsystem_exceptions(struct hantrovcmd_dev *dev)
 		vcmd_write_reg((const void *)dev->hwregs, 0x40, 0);
 	} else {
 		// IP core and AXI2TO1 reset
-		val = vcmd_read_reg((const void *)dev->hwregs, 0x40);
+		val = vcmd_read_reg(dev->hwregs, 0x40);
 		val |= SUBSYSTEM_RESET(IP_RESET_CORE);
 		val |= SUBSYSTEM_RESET(IP_RESET_AXI2TO1);
 		val |= SUBSYSTEM_RESET(IP_RESET_DEC400);
 		val |= SUBSYSTEM_RESET(IP_RESET_AXIF);
 		val |= SUBSYSTEM_RESET(IP_RESET_MMU);
-		vcmd_write_reg((const void *)dev->hwregs, 0x40, val);
+		vcmd_write_reg(dev->hwregs, 0x40, val);
 		// VCMD reset
 		val = (0x1 << 1);
-		vcmd_write_reg((const void *)dev->hwregs, 0x40, val);
+		vcmd_write_reg(dev->hwregs, 0x40, val);
 
 		// after vcmd reset, need not to release ip reset
 	}
@@ -906,7 +900,7 @@ static void _dbg_log_dev_regs(struct hantrovcmd_dev *dev, u32 dump)
 
 	if (dump) {
 		for (i = 0; i < ASIC_VCMD_SWREG_AMOUNT; i++) {
-			reg_val = vcmd_read_reg((const void *)dev->hwregs, i * 4);
+			reg_val = vcmd_read_reg(dev->hwregs, i * 4);
 			vcmd_klog(LOGLVL_FLOW, "vcmd swreg%d: 0x%x\n", i, reg_val);
 		}
 	} else {
@@ -918,13 +912,13 @@ static void _dbg_log_dev_regs(struct hantrovcmd_dev *dev, u32 dump)
 }
 #endif
 
-static void printk_vcmd_register_debug(const void *hwregs, char *info)
+static void printk_vcmd_register_debug(void __iomem *hwregs, char *info)
 {
 #ifdef VCMD_DEBUG_INTERNAL
 	u32 i, fordebug;
 
 	for (i = 0; i < ASIC_VCMD_SWREG_AMOUNT; i++) {
-		fordebug = vcmd_read_reg((const void *)hwregs, i * 4);
+		fordebug = vcmd_read_reg(hwregs, i * 4);
 		vcmd_klog(LOGLVL_FLOW, "%s vcmd register %d:0x%x\n", info, i,
 			fordebug);
 	}
@@ -1591,7 +1585,7 @@ struct sub_ip_init_cfg {
 };
 
 #ifdef SUPPORT_AXIFE
-struct sub_ip_init_cfg axife_init_cfg[] = {
+static struct sub_ip_init_cfg axife_init_cfg[] = {
 	{AXI_REG10_SW_FRONTEND_EN, 0x02},
 	{AXI_REG11_SW_WORK_MODE, 0x00},
 	{0xffff, }	//end guard
@@ -1599,7 +1593,7 @@ struct sub_ip_init_cfg axife_init_cfg[] = {
 #endif
 
 #ifdef SUPPORT_MMU
-struct sub_ip_init_cfg mmu_init_cfg[] = {
+static struct sub_ip_init_cfg mmu_init_cfg[] = {
 	{MMU_REG_ADDRESS, 0x0000},		//not move, sw will update mmu addr LSB to index0
 	{MMU_REG_ADDRESS_MSB, 0x0000},	//not move, sw will update mmu addr MSB to index1
 #ifdef SUPPORT_48PA_MMU
@@ -1613,7 +1607,7 @@ struct sub_ip_init_cfg mmu_init_cfg[] = {
 #endif
 
 #ifdef AXI2TO1_SUPPORT
-struct sub_ip_init_cfg axi2to1_init_cfg[] = {
+static struct sub_ip_init_cfg axi2to1_init_cfg[] = {
 	{AXI2TO1_REG6_SW_IRQ_EN, 0xffffffff}, // axi2to1 irq enable
 	{AXI2TO1_REG7_SW_TIMEOUT_CYCLES, 0x40000000} // axife flush timeout cycles
 };
@@ -1681,7 +1675,7 @@ static void vcmd_set_init_cmds(struct hantrovcmd_dev *dev)
 	dev->reg_mirror[dev->init_cmd_idx++] = 0x00;
 
 	for (i = VCMD_REG_ID_SW_INIT_CMD0; i < dev->init_cmd_idx; i++)
-		vcmd_write_reg((const void *)dev->hwregs, i*4, dev->reg_mirror[i]);
+		vcmd_write_reg(dev->hwregs, i*4, dev->reg_mirror[i]);
 #endif //HANTROVCMD_ENABLE_IP_SUPPORT
 }
 
@@ -1697,20 +1691,15 @@ static void vcmd_reset_asic(vcmd_mgr_t *vcmd_mgr)
 	for (n = 0; n < vcmd_mgr->subsys_num; n++) {
 		if (dev[n].hwregs) {
 			//disable interrupt at first
-			vcmd_write_reg((const void *)dev[n].hwregs,
-					   VCMD_REGISTER_INT_CTL_OFFSET, 0x0000);
+			vcmd_write_reg(dev[n].hwregs, VCMD_REGISTER_INT_CTL_OFFSET, 0x0000);
 			//reset core
-			vcmd_write_reg((const void *)dev[n].hwregs,
-					   VCMD_REGISTER_CONTROL_OFFSET, 0x0004);
+			vcmd_write_reg(dev[n].hwregs, VCMD_REGISTER_CONTROL_OFFSET, 0x0004);
 			//read status register
-			status = vcmd_read_reg((const void *)dev[n].hwregs,
-						   VCMD_REGISTER_INT_STATUS_OFFSET);
+			status = vcmd_read_reg(dev[n].hwregs, VCMD_REGISTER_INT_STATUS_OFFSET);
 			//clean status register
-			vcmd_write_reg((const void *)dev[n].hwregs,
-					   VCMD_REGISTER_INT_STATUS_OFFSET, status);
+			vcmd_write_reg(dev[n].hwregs, VCMD_REGISTER_INT_STATUS_OFFSET, status);
 			//when reset core need clear reg[3]
-			vcmd_write_reg((const void *)dev[n].hwregs,
-							VCMD_REGISTER_EXE_CMDBUF_COUNT_OFFSET, 0x0000);
+			vcmd_write_reg(dev[n].hwregs, VCMD_REGISTER_EXE_CMDBUF_COUNT_OFFSET, 0x0000);
 		}
 	}
 }
@@ -1723,24 +1712,19 @@ static void vcmd_reset_current_asic(struct hantrovcmd_dev *dev)
 {
 	u32 status;
 
-	volatile u8 *hwregs = dev->hwregs;
+	void __iomem *hwregs = dev->hwregs;
 
 	if (hwregs) {
 		//disable interrupt at first
-		vcmd_write_reg((const void *)hwregs,
-				   VCMD_REGISTER_INT_CTL_OFFSET, 0x0000);
+		vcmd_write_reg(hwregs, VCMD_REGISTER_INT_CTL_OFFSET, 0x0000);
 		//reset core
-		vcmd_write_reg((const void *)hwregs,
-				   VCMD_REGISTER_CONTROL_OFFSET, 0x0004);
+		vcmd_write_reg(hwregs, VCMD_REGISTER_CONTROL_OFFSET, 0x0004);
 		//read status register
-		status = vcmd_read_reg((const void *)hwregs,
-					   VCMD_REGISTER_INT_STATUS_OFFSET);
+		status = vcmd_read_reg(hwregs, VCMD_REGISTER_INT_STATUS_OFFSET);
 		//clean status register
-		vcmd_write_reg((const void *)hwregs,
-				   VCMD_REGISTER_INT_STATUS_OFFSET, status);
+		vcmd_write_reg(hwregs, VCMD_REGISTER_INT_STATUS_OFFSET, status);
 		//when reset core need clear reg[3]
-		vcmd_write_reg((const void *)hwregs,
-						VCMD_REGISTER_EXE_CMDBUF_COUNT_OFFSET, 0x0000);
+		vcmd_write_reg(hwregs, VCMD_REGISTER_EXE_CMDBUF_COUNT_OFFSET, 0x0000);
 	}
 }
 #endif
@@ -1749,25 +1733,22 @@ static void vcmd_reset_current_asic(struct hantrovcmd_dev *dev)
 /**
  * @brief vcmd get online for arbiter
  */
-void vcmd_online_for_arbiter(const volatile u8 *hwregs)
+void vcmd_online_for_arbiter(void __iomem *hwregs)
 {
 	u32 arbiter_cfg;
 
-	arbiter_cfg = ioread32((void __iomem *)(hwregs +
-							VCMD_REGISTER_ARBITER_CONFIG_OFFSET));
+	arbiter_cfg = ioread32(hwregs + VCMD_REGISTER_ARBITER_CONFIG_OFFSET);
 	iowrite32((arbiter_cfg | VCMD_ARBITER_ENABLE),
-			(void __iomem *)(hwregs +
-			VCMD_REGISTER_ARBITER_CONFIG_OFFSET));
+			  hwregs + VCMD_REGISTER_ARBITER_CONFIG_OFFSET);
 }
 
 /**
  * @brief vcmd get offline for arbiter
  */
-void vcmd_offline_for_arbiter(const volatile u8 *hwregs)
+void vcmd_offline_for_arbiter(void __iomem *hwregs)
 {
 	// vcmd offline
-	iowrite32(0, (void __iomem *)(hwregs +
-			VCMD_REGISTER_ARBITER_CONFIG_OFFSET));
+	iowrite32(0, hwregs + VCMD_REGISTER_ARBITER_CONFIG_OFFSET);
 }
 
 /**
@@ -1777,19 +1758,16 @@ void vcmd_request_arbiter(void *_vcmd_mgr, u32 subsys_id)
 {
 	vcmd_mgr_t *vcmd_mgr = (vcmd_mgr_t *)_vcmd_mgr;
 	struct hantrovcmd_dev *dev = &vcmd_mgr->dev_ctx[subsys_id];
-	volatile u8 *hwregs = dev->hwregs;
+	void __iomem *hwregs = dev->hwregs;
 
 	if (dev->hw_feature.vcarb_ver == 0)
 		return;
 	if (dev->hw_feature.vcarb_ver == VCARB_VERSION_2_0)
 		vcmd_online_for_arbiter(hwregs);
 
-	iowrite32(0x0, (void __iomem *)(hwregs +
-			VCMD_REGISTER_ARB_OFFSET));
-	iowrite32(0x1, (void __iomem *)(hwregs +
-			VCMD_REGISTER_ARB_OFFSET));
-	while ((ioread32((void __iomem *)(hwregs +
-		VCMD_REGISTER_ARB_OFFSET)) & 0x4) == 0)
+	iowrite32(0x0, hwregs + VCMD_REGISTER_ARB_OFFSET);
+	iowrite32(0x1, hwregs + VCMD_REGISTER_ARB_OFFSET);
+	while ((ioread32(hwregs + VCMD_REGISTER_ARB_OFFSET) & 0x4) == 0)
 		schedule();
 }
 
@@ -1800,7 +1778,7 @@ void vcmd_release_arbiter(void *_vcmd_mgr, u32 subsys_id)
 {
 	vcmd_mgr_t *vcmd_mgr = (vcmd_mgr_t *)_vcmd_mgr;
 	struct hantrovcmd_dev *dev = &vcmd_mgr->dev_ctx[subsys_id];
-	volatile u8 *hwregs = dev->hwregs;
+	void __iomem *hwregs = dev->hwregs;
 
 	if (dev->hw_feature.vcarb_ver == 0)
 		return;
@@ -1808,8 +1786,7 @@ void vcmd_release_arbiter(void *_vcmd_mgr, u32 subsys_id)
 		vcmd_offline_for_arbiter(hwregs);
 
 	// write arb_fe to clear arb_req
-	iowrite32(0x2, (void __iomem *)(hwregs +
-			VCMD_REGISTER_ARB_OFFSET));
+	iowrite32(0x2, hwregs + VCMD_REGISTER_ARB_OFFSET);
 }
 #endif // VCARB_REQUEST
 
@@ -1819,7 +1796,7 @@ void vcmd_release_arbiter(void *_vcmd_mgr, u32 subsys_id)
 static void vcmd_start(struct hantrovcmd_dev *dev)
 {
 	struct cmdbuf_obj *obj = NULL;
-	const void *hwregs = (const void *)dev->hwregs;
+	void __iomem *hwregs = dev->hwregs;
 	bi_list_node *node;
 	u32 *reg_mirror = dev->reg_mirror;
 	addr_t cmd_ba;
@@ -2001,8 +1978,7 @@ static int vcmd_abort(vcmd_mgr_t *vcmd_mgr, struct hantrovcmd_dev *dev, u32 *abo
 	u32 cnt = 100000, irq;
 
 	spin_lock_irqsave(dev->spinlock, flags);
-	vcmd_write_register_value((const void *)dev->hwregs,
-								dev->reg_mirror,
+	vcmd_write_register_value(dev->hwregs, dev->reg_mirror,
 								HWIF_VCMD_START_TRIGGER, 0);
 	spin_unlock_irqrestore(dev->spinlock, flags);
 	if (vcmd_isr_polling == 0) {
@@ -2089,7 +2065,7 @@ static int select_vcmd(vcmd_mgr_t *vcmd_mgr, bi_list_node *new_node)
 	if (obj->priority == CMDBUF_PRIORITY_NORMAL)
 		reg_id_exe = REG_ID2_CMDBUF_EXE_ID;
 
-	least_workload = 0xffffffffffffffff;
+	least_workload = U64_MAX;
 	smallest_dev = NULL;
 	//calculate remain workload of all dev, find the least one
 	for (i = 0; i < module->num; i++) {
@@ -2102,14 +2078,13 @@ static int select_vcmd(vcmd_mgr_t *vcmd_mgr, bi_list_node *new_node)
 
 		//get the executing cmdbuf node.
 		if (dev->hw_version_id <= HW_ID_1_0_C) {
-			curr_exe_addr = VCMDGetAddrRegisterValue((const void *)dev->hwregs,
-												dev->reg_mirror,
-												HWIF_VCMD_CMDBUF_EXE_ADDR);
+			curr_exe_addr = VCMDGetAddrRegisterValue(dev->hwregs, dev->reg_mirror,
+								 HWIF_VCMD_CMDBUF_EXE_ADDR);
 
 			curr_node = get_cmdbuf_node_by_addr(vcmd_mgr, dev, curr_exe_addr);
 
 		} else {
-			//cmdbuf_id = vcmd_get_register_value((const void *)dev->hwregs,
+			//cmdbuf_id = vcmd_get_register_value(dev->hwregs,
 			//dev->reg_mirror,HWIF_VCMD_CMDBUF_EXE_ID);
 			cmdbuf_id = *(dev->reg_mem_va + reg_id_exe);
 			if (cmdbuf_id >= SLOT_NUM_CMDBUF) {
@@ -2396,10 +2371,8 @@ static long link_and_run_cmdbuf(vcmd_mgr_t *vcmd_mgr, struct proc_obj *po,
 								obj->workload);
 #endif
 		//just update cmdbuf ready number
-		vcmd_write_register_value((const void *)dev->hwregs,
-									dev->reg_mirror,
-									HWIF_VCMD_RDY_CMDBUF_COUNT,
-									dev->sw_cmdbuf_rdy_num);
+		vcmd_write_register_value(dev->hwregs, dev->reg_mirror,
+					  HWIF_VCMD_RDY_CMDBUF_COUNT, dev->sw_cmdbuf_rdy_num);
 #ifdef SUPPORT_WATCHDOG
 		_vcmd_watchdog_feed(dev);
 #endif
@@ -2548,7 +2521,7 @@ static void _vcmd_pcie_cleanup(vcmd_mgr_t *vcmd_mgr)
 	}
 #endif
 	if (vcmd_mgr->pcie_pool.va) {
-		iounmap((void __iomem *)vcmd_mgr->pcie_pool.va);
+		iounmap((void __iomem * __force)vcmd_mgr->pcie_pool.va);
 		release_mem_region(vcmd_mgr->pcie_pool.pa, vcmd_mgr->pcie_pool.size);
 		vcmd_mgr->pcie_pool.va = NULL;
 	}
@@ -2790,7 +2763,7 @@ static void create_read_all_registers_cmdbuf(vcmd_mgr_t *vcmd_mgr,
 static void vcmd_release_submodule_IO(struct vcmd_subsys_info *subsys, u32 sub_mod_id)
 {
 	if (subsys->hwregs[sub_mod_id]) {
-		iounmap((volatile u8 __iomem *)subsys->hwregs[sub_mod_id]);
+		iounmap(subsys->hwregs[sub_mod_id]);
 		release_mem_region(subsys->reg_base + subsys->reg_off[sub_mod_id],
 			subsys->io_size[sub_mod_id]);
 		subsys->hwregs[sub_mod_id] = NULL;
@@ -2809,9 +2782,9 @@ static u32 vcmd_reserve_submodule_IO(struct vcmd_subsys_info *subsys, u32 sub_mo
 		return -EBUSY;
 
 #if (KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE)
-	subsys->hwregs[sub_mod_id] = (volatile u8 __force *)ioremap_nocache(pa, sz);
+	subsys->hwregs[sub_mod_id] = ioremap_nocache(pa, sz);
 #else
-	subsys->hwregs[sub_mod_id] = (volatile u8 __force *)ioremap(pa, sz);
+	subsys->hwregs[sub_mod_id] = ioremap(pa, sz);
 #endif
 
 	return 0;
@@ -2851,10 +2824,9 @@ static int vcmd_reserve_IO(vcmd_mgr_t *vcmd_mgr)
 			continue;
 		}
 		dev->hwregs = subsys->hwregs[SUB_MOD_VCMD];
-		vcmd_core_array[i].submodule_vcmd_virtual_address = dev->hwregs;
 
 		/*read hwid and check validness and store it*/
-		hwid = (u32)ioread32((void __iomem *)dev->hwregs);
+		hwid = ioread32(dev->hwregs);
 		vcmd_klog(LOGLVL_CONFIG, DRIVER_NAME "_vcmd: vcmd[%d] hwid=0x%08x\n", i, hwid);
 		dev->hw_version_id = hwid;
 
@@ -2862,14 +2834,14 @@ static int vcmd_reserve_IO(vcmd_mgr_t *vcmd_mgr)
 		if (((hwid >> 16) & 0xFFFF) != VCMD_HW_ID) {
 			vcmd_klog(LOGLVL_WARNING, "HW not found at 0x%llx\n",
 				(unsigned long long)subsys->reg_base);
-			iounmap((void __iomem *)dev->hwregs);
+			iounmap(dev->hwregs);
 			release_mem_region(subsys->reg_base,
 								subsys->io_size[SUB_MOD_VCMD]);
 			dev->hwregs = NULL;
 			continue;
 		}
 
-		reg_val = (u32)ioread32((void __iomem *)dev->hwregs +
+		reg_val = ioread32(dev->hwregs +
 				   VCMD_REGISTER_HW_APB_ARBITER_MODE_OFFSET);
 		has_arbiter = (u8)((reg_val >> HW_APB_ARBITER_MODE_BIT) & 0x01);
 		dev->hw_feature.vcarb_ver = 0;
@@ -2877,7 +2849,7 @@ static int vcmd_reserve_IO(vcmd_mgr_t *vcmd_mgr)
 			dev->hw_feature.vcarb_ver = hwid < HW_ID_1_5_9 ? VCARB_VERSION_2_0 :
 										VCARB_VERSION_3_0;
 
-		reg_val = (u32)ioread32((void __iomem *)dev->hwregs +
+		reg_val = ioread32(dev->hwregs +
 				   VCMD_REGISTER_HW_INIT_MODE_OFFSET);
 		dev->hw_feature.has_init_mode = (u8)((reg_val >> HW_INIT_MODE_BIT) &
 										0x01);
@@ -3083,12 +3055,12 @@ static void SubsysToVcmdCoreCfg(struct subsys_config *subsys,
 			core_array->io_size[SUB_MOD_UFBC] = subsys[i].submodule_iosize[HW_AFBC];
 			core_array->io_size[SUB_MOD_AXI2TO1] = subsys[i].submodule_iosize[HW_AXI2TO1];
 
-			core_array->hwregs[SUB_MOD_MAIN] = vcmd_core_array[i].submodule_vcd_virtual_address;
-			core_array->hwregs[SUB_MOD_DEC400] = vcmd_core_array[i].submodule_dec400_virtual_address;
-			core_array->hwregs[SUB_MOD_MMU] = vcmd_core_array[i].submodule_MMU_virtual_address;
-			core_array->hwregs[SUB_MOD_MMU_WR] = vcmd_core_array[i].submodule_MMUWrite_virtual_address;
-			core_array->hwregs[SUB_MOD_AXIFE] = vcmd_core_array[i].submodule_axife_virtual_address;
-			core_array->hwregs[SUB_MOD_AXI2TO1] = vcmd_core_array[i].submodule_axi2to1_virtual_address;
+			core_array->hwregs[SUB_MOD_MAIN] = subsys[i].submodule_hwregs[HW_VCD];
+			core_array->hwregs[SUB_MOD_DEC400] = subsys[i].submodule_hwregs[HW_DEC400];
+			core_array->hwregs[SUB_MOD_MMU] = subsys[i].submodule_hwregs[HW_MMU];
+			core_array->hwregs[SUB_MOD_MMU_WR] = subsys[i].submodule_hwregs[HW_MMU_WR];
+			core_array->hwregs[SUB_MOD_AXIFE] = subsys[i].submodule_hwregs[HW_AXIFE];
+			core_array->hwregs[SUB_MOD_AXI2TO1] = subsys[i].submodule_hwregs[HW_AXI2TO1];
 
 			j++;
 		}
@@ -3260,7 +3232,7 @@ static long flush_slice_regs(vcmd_mgr_t *vcmd_mgr,
 	struct hantrovcmd_dev *dev = NULL;
 	struct cmdbuf_obj *obj = NULL;
 	bi_list_node *node = NULL;
-	volatile u8 *hwregs;
+	void __iomem *hwregs;
 	unsigned long flags;
 	u32 reg_id;
 	int i;
@@ -3273,11 +3245,11 @@ static long flush_slice_regs(vcmd_mgr_t *vcmd_mgr,
 
 	for (i = 0; i < slice_regs->reg_num - 1; i++) {
 		reg_id = slice_regs->regs[i].reg_id;
-		iowrite32(slice_regs->regs[i].reg_data, (void __iomem *)(hwregs + 4 * reg_id));
+		iowrite32(slice_regs->regs[i].reg_data, hwregs + 4 * reg_id);
 	}
 
 	spin_lock_irqsave(&dev->abn_irq_lock, flags);
-	iowrite32(slice_regs->regs[i].reg_data, (void __iomem *)(hwregs + 0x4));
+	iowrite32(slice_regs->regs[i].reg_data, hwregs + 0x4);
 	obj->slice_run_done = 0;
 	spin_unlock_irqrestore(&dev->abn_irq_lock, flags);
 
@@ -3287,9 +3259,7 @@ static long flush_slice_regs(vcmd_mgr_t *vcmd_mgr,
 	spin_unlock_irqrestore(dev->spinlock, flags);
 #endif
 
-	vcmd_write_reg((const void *)dev->hwregs,
-		VCMD_REGISTER_EXT_INT_GATE_OFFSET,
-		dev->intr_gate_mask);
+	vcmd_write_reg(dev->hwregs, VCMD_REGISTER_EXT_INT_GATE_OFFSET, dev->intr_gate_mask);
 
 	return 0;
 }
@@ -3302,7 +3272,7 @@ static long abort_cmdbuf(vcmd_mgr_t *vcmd_mgr, u16 cmdbuf_id)
 	struct hantrovcmd_dev *dev = NULL;
 	struct cmdbuf_obj *obj = NULL;
 	bi_list_node *node = NULL;
-	volatile u8 *hwregs;
+	void __iomem *hwregs;
 	u16 reg_id_exe;
 	unsigned long flags;
 
@@ -3334,9 +3304,8 @@ static void vcmd_get_executing_cmdbuf(vcmd_mgr_t *vcmd_mgr, struct hantrovcmd_de
 {
 	u32 curr_id;
 
-	curr_id = vcmd_get_register_value((const void *)dev->hwregs,
-									dev->reg_mirror,
-									HWIF_VCMD_CMDBUF_EXE_ID);
+	curr_id = vcmd_get_register_value(dev->hwregs, 	dev->reg_mirror,
+						HWIF_VCMD_CMDBUF_EXE_ID);
 	*node = &vcmd_mgr->nodes[curr_id];
 }
 
@@ -3565,9 +3534,9 @@ long hantrovcmd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 				 _IOC_SIZE(cmd));
 #else
 	if (_IOC_DIR(cmd) & _IOC_READ)
-		err = !access_ok((void *)arg, _IOC_SIZE(cmd));
+		err = !access_ok((void __user *)arg, _IOC_SIZE(cmd));
 	else if (_IOC_DIR(cmd) & _IOC_WRITE)
-		err = !access_ok((void *)arg, _IOC_SIZE(cmd));
+		err = !access_ok((void __user *)arg, _IOC_SIZE(cmd));
 #endif
 	if (err)
 		return -EFAULT;
@@ -3916,8 +3885,7 @@ static void process_abnormal_irq(vcmd_mgr_t *vcmd_mgr,
 	u32 intr_src;
 
 	/* check vcmd interrupt source. */
-	intr_src = vcmd_read_reg((const void *)dev->hwregs,
-								VCMD_REGISTER_SW_EXT_INT_SRC_OFFSET);
+	intr_src = vcmd_read_reg(dev->hwregs, VCMD_REGISTER_SW_EXT_INT_SRC_OFFSET);
 	/* abnormal interrupts source from VCD */
 	if (intr_src & dev->vcd_abn_irq_mask)
 		process_vcd_abn_irq(vcmd_mgr, dev, obj);
@@ -3984,7 +3952,7 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 	bi_list_node *curr_node;
 
 	u32 i;
-	volatile u8 *hwregs;
+	void __iomem *hwregs;
 
 	if (vcmd_mgr->vcmd_irq_enabled == 0) {
 		/* all vcmd_irq==-1, there is no IRQ, use irq as dev id */
@@ -4014,12 +3982,10 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 		spin_unlock_irqrestore(dev->spinlock, flags);
 		return IRQ_HANDLED;
 	}
-	irq_status = vcmd_read_reg((const void *)hwregs,
-				   VCMD_REGISTER_INT_STATUS_OFFSET);
+	irq_status = vcmd_read_reg(hwregs, VCMD_REGISTER_INT_STATUS_OFFSET);
 
 	if (dev->hw_version_id >= HW_ID_1_5_0 && irq_status == 0) {
-		curr_id = vcmd_get_register_value((const void *)dev->hwregs,
-							dev->reg_mirror,
+		curr_id = vcmd_get_register_value(dev->hwregs, dev->reg_mirror,
 							HWIF_VCMD_CMDBUF_EXE_ID);
 		if (curr_id >= SLOT_NUM_CMDBUF) {
 			vcmd_klog(LOGLVL_ERROR, "%s error cmdbuf_id %d !!\n",
@@ -4031,8 +3997,7 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 
 		process_abnormal_irq(vcmd_mgr, dev, curr_obj);
 
-		irq_status = vcmd_read_reg((const void *)dev->hwregs,
-									VCMD_REGISTER_INT_STATUS_OFFSET);
+		irq_status = vcmd_read_reg(dev->hwregs, VCMD_REGISTER_INT_STATUS_OFFSET);
 		if (!irq_status) {
 			spin_unlock_irqrestore(dev->spinlock, flags);
 			return IRQ_HANDLED;
@@ -4053,8 +4018,7 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 	vcmd_klog(LOGLVL_FLOW, "%s: received IRQ!\n",  __func__);
 	vcmd_klog(LOGLVL_FLOW, "irq_status of core[%d] is: 0x%x\n", dev->core_id, irq_status);
 
-	vcmd_write_reg((const void *)hwregs,
-						VCMD_REGISTER_INT_STATUS_OFFSET, irq_status);
+	vcmd_write_reg(hwregs, VCMD_REGISTER_INT_STATUS_OFFSET, irq_status);
 	dev->reg_mirror[VCMD_REGISTER_INT_STATUS_OFFSET / 4] = irq_status;
 
 	node = dev->work_list.head;
@@ -4068,9 +4032,8 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 
 	// get current node/obj/id
 	if (dev->hw_version_id < HW_ID_1_0_C) {
-		exe_cmdbuf_ba = VCMDGetAddrRegisterValue((const void *)hwregs,
-												dev->reg_mirror,
-												HWIF_VCMD_CMDBUF_EXE_ADDR);
+		exe_cmdbuf_ba = VCMDGetAddrRegisterValue(hwregs, dev->reg_mirror,
+								HWIF_VCMD_CMDBUF_EXE_ADDR);
 		//get the executing cmdbuf node.
 		curr_node = get_cmdbuf_node_by_addr(vcmd_mgr, dev, exe_cmdbuf_ba);
 		if (curr_node == NULL) {
@@ -4084,8 +4047,7 @@ static irqreturn_t hantrovcmd_isr(int irq, void *dev_id)
 	} else {
 		if (irq_status & VCMD_IRQ_ERR_MASK) {
 			//if error, read curr_id from register directly.
-			curr_id = vcmd_get_register_value((const void *)hwregs,
-									dev->reg_mirror,
+			curr_id = vcmd_get_register_value(hwregs, dev->reg_mirror,
 									HWIF_VCMD_CMDBUF_EXE_ID);
 
 		} else {

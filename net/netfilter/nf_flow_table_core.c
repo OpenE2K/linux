@@ -494,6 +494,7 @@ void nf_flow_snat_port(const struct flow_offload *flow,
 	struct flow_ports *hdr;
 	__be16 port, new_port;
 
+
 	hdr = (void *)(skb_network_header(skb) + thoff);
 
 	switch (dir) {
@@ -507,6 +508,12 @@ void nf_flow_snat_port(const struct flow_offload *flow,
 		new_port = flow->tuplehash[FLOW_OFFLOAD_DIR_ORIGINAL].tuple.src_port;
 		hdr->dest = new_port;
 		break;
+#ifdef CONFIG_MCST
+	default:
+		port = 0;
+		new_port = 0;
+		break;
+#endif
 	}
 
 	nf_flow_nat_port(skb, thoff, protocol, port, new_port);
@@ -533,6 +540,12 @@ void nf_flow_dnat_port(const struct flow_offload *flow, struct sk_buff *skb,
 		new_port = flow->tuplehash[FLOW_OFFLOAD_DIR_ORIGINAL].tuple.dst_port;
 		hdr->source = new_port;
 		break;
+#ifdef CONFIG_MCST
+	default:
+		port = 0;
+		new_port = 0;
+		break;
+#endif
 	}
 
 	nf_flow_nat_port(skb, thoff, protocol, port, new_port);

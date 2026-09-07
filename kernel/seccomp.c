@@ -716,7 +716,7 @@ seccomp_prepare_user_filter(const char __user *user_filter)
 			if (get_user_tagged_16(ap.qword, tag, &f128p->filter) || !IS_AP(ap, tag))
 				goto out;
 			fprog.len = len;
-			fprog.filter = (struct sock_filter __user *)AP_PTR(ap);
+			fprog.filter = U_AP_PTR(ap);
 			set_ap_u_border(ap);
 		} else {
 			fprog.len = 0;

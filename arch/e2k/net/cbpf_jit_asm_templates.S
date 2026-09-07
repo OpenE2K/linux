@@ -7,9 +7,9 @@
  * Templates for cBPF JIT compiler.
  */
 
-#include <asm/trap_table.h>
-#include <generated/asm-offsets.h>
+#include <asm/asm-offsets.h>
 #include <asm/alternative-asm.h>
+#include <asm/trap_table.S.h>
 
 #include "cbpf_jit.h"
 
@@ -1113,7 +1113,7 @@ BPF_TEMPL_LABEL(BPF_JIT_K_LABEL(cbpf_jit_jmp_jgt_k))
 BPF_TEMPL_LABEL(BPF_JIT_JMP_LABEL(cbpf_jit_jmp_jgt_k, jf))
 {
 	nop 3
-	disp %ctpr2, cbpf_jit_jmp_jgt_x
+	disp %ctpr2, cbpf_jit_jmp_jgt_k
 }
 {
 	ct %ctpr1 ? ~ %pred0
@@ -1152,7 +1152,7 @@ BPF_TEMPL_LABEL(BPF_JIT_K_LABEL(cbpf_jit_jmp_jge_k))
 BPF_TEMPL_LABEL(BPF_JIT_JMP_LABEL(cbpf_jit_jmp_jge_k, jf))
 {
 	nop 3
-	disp %ctpr2, cbpf_jit_jmp_jge_x
+	disp %ctpr2, cbpf_jit_jmp_jge_k
 }
 {
 	ct %ctpr1 ? ~ %pred0
@@ -1164,7 +1164,6 @@ SYM_FUNC_END_SIZED(cbpf_jit_jmp_jge_k)
 
 SYM_FUNC_START_SIZED(cbpf_jit_jmp_jeq_x)
 BPF_TEMPL_LABEL(BPF_JIT_JMP_LABEL(cbpf_jit_jmp_jeq_x, jt))
-BPF_TEMPL_LABEL(cbpf_jit_jmp_jeq_x_jt_cs0)
 {
 	cmpesb,0 %r_A, %r_X, %pred0
 	disp %ctpr1, cbpf_jit_jmp_jeq_x
@@ -1192,7 +1191,7 @@ BPF_TEMPL_LABEL(BPF_JIT_K_LABEL(cbpf_jit_jmp_jeq_k))
 BPF_TEMPL_LABEL(BPF_JIT_JMP_LABEL(cbpf_jit_jmp_jeq_k, jf))
 {
 	nop 3
-	disp %ctpr2, cbpf_jit_jmp_jeq_x
+	disp %ctpr2, cbpf_jit_jmp_jeq_k
 }
 {
 	ct %ctpr1 ? %pred0
@@ -1233,7 +1232,7 @@ BPF_TEMPL_LABEL(BPF_JIT_JMP_LABEL(cbpf_jit_jmp_jset_k, jf))
 {
 	nop 3
 	cmpesb,0 %r_TMP1, 0x0, %pred0
-	disp %ctpr2, cbpf_jit_jmp_jset_x
+	disp %ctpr2, cbpf_jit_jmp_jset_k
 }
 {
 	ct %ctpr1 ? ~ %pred0

@@ -8579,7 +8579,7 @@ megasas_ptr128_iocpacket_get_user(void __user *arg)
 			goto out;
 		if (ioc->sgl[i].iov_len > AP_OBJ_SIZE(ap))
 			goto out;
-		ioc->sgl[i].iov_base = (void __user *)AP_PTR(ap);
+		ioc->sgl[i].iov_base = U_AP_PTR(ap);
 	}
 	set_max_u_border();
 	return ioc;

@@ -24,6 +24,7 @@
 #include "pgtable-gp.h"
 #include "mmu-pt.h"
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static unsigned int
 mmu_get_pte_val_memory_type_v3(pgprot_t pte)
 {
@@ -52,7 +53,7 @@ mmu_get_pte_val_memory_type_gp(pgprot_t pte)
 static pgprot_t
 mmu_set_pte_val_memory_type_gp(pgprot_t pte, unsigned int mtype)
 {
-	return mmu_pt_set_pte_val_memory_type_gp(pte, mtype);
+	return mmu_pt_set_pte_val_memory_type_v6(pte, mtype);
 }
 static unsigned int
 mmu_get_pte_val_memory_type_rule_gp(pgprot_t pte)
@@ -64,6 +65,7 @@ mmu_set_pte_val_memory_type_rule_gp(pgprot_t pte, unsigned int mtcr)
 {
 	return mmu_pt_set_pte_val_memory_type_rule_gp(pte, mtcr);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Hardware MMUs page tables have some differences from one ISET to other
@@ -97,10 +99,12 @@ pt_struct_t pgtable_struct_e2k_v3 = {
 	.ptd_kernel_prot = _PAGE_KERNEL_PT_V3,
 	.ptd_user_prot	= _PAGE_USER_PT_V3,
 	.levels_num	= E2K_PT_LEVELS_NUM,
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	.get_pte_val_memory_type = &mmu_get_pte_val_memory_type_v3,
 	.set_pte_val_memory_type = &mmu_set_pte_val_memory_type_v3,
 	.get_pte_val_memory_type_rule = NULL,
 	.set_pte_val_memory_type_rule = NULL,
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	.levels		= {
 		[E2K_PAGES_LEVEL_NUM] = {
 			.id		= E2K_PAGES_LEVEL_NUM,
@@ -193,10 +197,12 @@ pt_struct_t pgtable_struct_e2k_v5 = {
 	.ptd_kernel_prot = _PAGE_KERNEL_PT_V3,
 	.ptd_user_prot	= _PAGE_USER_PT_V3,
 	.levels_num	= E2K_PT_LEVELS_NUM,
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	.get_pte_val_memory_type = &mmu_get_pte_val_memory_type_v3,
 	.set_pte_val_memory_type = &mmu_set_pte_val_memory_type_v3,
 	.get_pte_val_memory_type_rule = NULL,
 	.set_pte_val_memory_type_rule = NULL,
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	.levels		= {
 		[E2K_PAGES_LEVEL_NUM] = {
 			.id		= E2K_PAGES_LEVEL_NUM,
@@ -290,10 +296,12 @@ pt_struct_t pgtable_struct_e2k_v6_pt_v6 = {
 	.ptd_kernel_prot = _PAGE_KERNEL_PT_V6,
 	.ptd_user_prot	= _PAGE_USER_PT_V6,
 	.levels_num	= E2K_PT_LEVELS_NUM,
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	.get_pte_val_memory_type = &mmu_get_pte_val_memory_type_v6,
 	.set_pte_val_memory_type = &mmu_set_pte_val_memory_type_v6,
 	.get_pte_val_memory_type_rule = NULL,
 	.set_pte_val_memory_type_rule = NULL,
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	.levels		= {
 		[E2K_PAGES_LEVEL_NUM] = {
 			.id		= E2K_PAGES_LEVEL_NUM,
@@ -386,10 +394,12 @@ pt_struct_t pgtable_struct_e2k_v6_gp = {
 	.ptd_kernel_prot = _PAGE_KERNEL_PT_GP,
 	.ptd_user_prot	= _PAGE_KERNEL_PT_GP,
 	.levels_num	= E2K_PT_LEVELS_NUM,
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	.get_pte_val_memory_type = &mmu_get_pte_val_memory_type_gp,
 	.set_pte_val_memory_type = &mmu_set_pte_val_memory_type_gp,
 	.get_pte_val_memory_type_rule = &mmu_get_pte_val_memory_type_rule_gp,
 	.set_pte_val_memory_type_rule = &mmu_set_pte_val_memory_type_rule_gp,
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	.levels		= {
 		[E2K_PAGES_LEVEL_NUM] = {
 			.id		= E2K_PAGES_LEVEL_NUM,

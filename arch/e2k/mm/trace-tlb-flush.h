@@ -33,7 +33,7 @@ TRACE_EVENT(
 #endif /* _MM_TRACE_TLB_FLUSH_H */
 
 #undef	TRACE_INCLUDE_PATH
-#define	TRACE_INCLUDE_PATH ../arch/e2k/mm
+#define	TRACE_INCLUDE_PATH ../../arch/e2k/mm
 #undef	TRACE_INCLUDE_FILE
 #define	TRACE_INCLUDE_FILE trace-tlb-flush
 

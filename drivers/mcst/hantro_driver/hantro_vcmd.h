@@ -409,9 +409,9 @@ typedef struct vcmd_core {
 	u32 useirq;
 	struct vcmd_config vcmd_core_cfg;
 	/* IO mem base */
-	volatile u8 *hwregs;
-	volatile u8 *main_hwregs;
-	volatile u8 *axife_hwregs[2];
+	void  __iomem *hwregs;
+	void  __iomem *main_hwregs;
+	void  __iomem *axife_hwregs[2];
 
 	u32 sw_cmdbuf_rdy_num;
 	/* */

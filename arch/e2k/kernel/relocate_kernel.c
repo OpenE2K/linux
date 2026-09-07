@@ -10,9 +10,9 @@
 #define __relocate__	__attribute__((__section__(".kexec_relocate_kernel")))
 
 #define r64(_a)	({						\
-		void *_v = (void *)NATIVE_READ_MAS_D(_a, MAS_LOAD_PA); \
+		void *_v = (void *)NATIVE_READ_MAS_D(_a, MAS_DISABLED_TRANSLATION); \
 		_v; })
-#define w64(_v, _a)	NATIVE_WRITE_MAS_D(_a, _v, MAS_STORE_PA)
+#define w64(_v, _a)	NATIVE_WRITE_MAS_D(_a, _v, MAS_DISABLED_TRANSLATION)
 
 static notrace inline void __relocate__ pagecpy(u64 *from, u64 *to)
 {

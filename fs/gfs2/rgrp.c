@@ -1629,6 +1629,9 @@ static u64 gfs2_next_unreserved_block(struct gfs2_rgrpd *rgd, u64 block,
 	struct rb_node *n;
 	int rc;
 
+#ifdef CONFIG_MCST
+	rs = NULL;
+#endif
 	spin_lock(&rgd->rd_rsspin);
 	n = rgd->rd_rstree.rb_node;
 	while (n) {

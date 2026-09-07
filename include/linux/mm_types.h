@@ -627,10 +627,6 @@ struct mm_struct {
 		unsigned long start_brk, brk, start_stack;
 		unsigned long arg_start, arg_end, env_start, env_end;
 
-#ifdef CONFIG_MCST_4RT
-		unsigned long extra_vm_flags;
-#endif /* CONFIG_MCST_4RT */
-
 		unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
 
 		/*

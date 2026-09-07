@@ -58,9 +58,7 @@ struct pic_chip_data {
 	unsigned int		irq;
 	struct hlist_node	clist;
 	unsigned int		move_in_progress	: 1,
-				is_managed		: 1,
-				can_reserve		: 1,
-				has_reserved		: 1;
+				is_managed		: 1;
 };
 
 
@@ -88,7 +86,6 @@ static inline int cpu_to_short_picid(unsigned int cpu)
 	return cpuid_to_picid[cpu];
 }
 
-struct irq_desc *__setup_vector_irq(int vector);
 u32 apic_default_calc_apicid(unsigned int cpu);
 bool pic_check_vector_to_be_cleaned(unsigned vector);
 int pic_get_vector_by_name(struct device_node *np, char *path,

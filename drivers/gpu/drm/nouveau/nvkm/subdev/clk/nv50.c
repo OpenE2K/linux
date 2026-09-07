@@ -57,6 +57,9 @@ read_pll_src(struct nv50_clk *clk, u32 base)
 	u32 rsel = nvkm_rd32(device, 0x00e18c);
 	int P, N, M, id;
 
+#ifdef CONFIG_MCST
+	id = 0;
+#endif
 	switch (device->chipset) {
 	case 0x50:
 	case 0xa0:

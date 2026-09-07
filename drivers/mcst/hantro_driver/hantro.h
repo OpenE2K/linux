@@ -223,7 +223,7 @@ struct hantro_releasebuf {
 struct core_desc {
 	__u32 id; /* id of the core */
 	__u32 type; /* type of core to be written */
-	__u32 *regs; /* pointer to user registers */
+	__u32 __user *regs; /* pointer to user registers */
 	__u32 size; /* size of register space */
 	__u32 reg_id;
 };

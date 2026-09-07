@@ -11,7 +11,7 @@
 #include <linux/types.h>
 #include <linux/kernel.h>
 
-#include <asm/host_printk.h>
+#include <asm/kvm/paravirt_sw/host_printk.h>
 #include <asm/kvm/hypercall.h>
 
 int kvm_host_printk(const char *fmt, ...)

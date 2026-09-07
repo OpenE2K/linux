@@ -8,5 +8,7 @@
 #include <asm/trace-pt-atomic.h>
 #include <asm/trace.h>
 #include <asm/trace/irq_vectors.h>
-#include <asm/kvm/trace-hw-stacks.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/trace-hw-stacks.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #endif

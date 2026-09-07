@@ -14,6 +14,7 @@
 #include <linux/cpuhotplug.h>
 #include <linux/acpi_pmtmr.h>
 #include <asm/l_timer.h>
+#include <asm/pic.h>
 
 #include "epic.h"
 
@@ -79,7 +80,7 @@ static int cepic_next_event(unsigned long delta,
 }
 
 /* Stop generating timer interrupts and mask them */
-int cepic_timer_shutdown(struct clock_event_device *evt)
+static int cepic_timer_shutdown(struct clock_event_device *evt)
 {
 	union cepic_timer_lvtt reg;
 
@@ -132,7 +133,7 @@ void cepic_timer_interrupt(struct clock_event_device *evt)
 static irqreturn_t cepic_smp_timer_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *evt = dev_id;
-	int cpu;
+	unsigned int cpu;
 	long long cur_time;
 	long long next_time;
 
@@ -175,6 +176,9 @@ static int cepic_timer_starting_cpu(unsigned int cpu)
 
 static int cepic_timer_dying_cpu(unsigned int cpu)
 {
+	struct clock_event_device *evt = this_cpu_ptr(cepic_timer_evt);
+	cepic_timer_shutdown(evt);
+
 	disable_percpu_irq(cepic_timer_irq);
 	return 0;
 }

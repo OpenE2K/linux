@@ -708,6 +708,7 @@ static bool symbol__is_idle(const char *name)
 		"C2_enter",
 		"C3_enter_v3",
 		"C3_enter_v6",
+		"C1_wait_trap",
 #endif
 #if defined(CONFIG_MCST) && defined(CONFIG_E90S)
 		"e90s_enter_idle",

@@ -2025,7 +2025,9 @@ static int ksz886x_cable_test_get_status(struct phy_device *phydev,
 	unsigned long pair_mask = type->pair_mask;
 	int retries = 20;
 	int pair, ret;
-
+#ifdef CONFIG_MCST
+	ret = -EINVAL;
+#endif
 	*finished = false;
 
 	/* Try harder if link partner is active */

@@ -12,7 +12,7 @@
 # Check compiler just in case
 PHONY += check_e2k_compiler
 check_e2k_compiler:
-	$(Q)if $(CC) -dumpmachine 2>&1 | grep -v e2k > /dev/null; then \
+	$(Q)if $(CC) --target=e2k-linux -dumpmachine 2>&1 | grep -v e2k > /dev/null; then \
 		echo 'Specified compiler is not for e2k architecture' >&2; \
 		exit 1; \
 	fi
@@ -27,15 +27,16 @@ $(check-targets): check_e2k_compiler
 KBUILD_DEFCONFIG ?= defconfig
 
 # "-fno-devirtualize" - performance on average is the same but .text size -2%
-KBUILD_CFLAGS += -fms-extensions $(call lcc-options,-fkernel -gline -masm-inline) \
-		 $(call lcc-option,-mdmodel=large) $(call lcc-option,-fno-devirtualize) \
+KBUILD_CFLAGS += $(call lcc-options,-fkernel -gline -mdmodel=large -fno-devirtualize) \
+		 -fms-extensions $(call cc-option,-masm-inline) \
 		 $(call lcc-options,-fglobal-regs \
 				    -ffixed-g16 -ffixed-g17 -ffixed-g18 -ffixed-g19 \
 				    -ffixed-g20 -ffixed-g21 -ffixed-g22 -ffixed-g23 \
 				    -ffixed-g24 -ffixed-g25) \
 		 $(call lcc-option,-fno-spec-volatile-st) \
 		 $(call lcc-option,-Wassign-where-compare-meant) \
-		 $(call lcc-option,-finline-functions-called-once)
+		 $(call lcc-option,-finline-functions-called-once) \
+		 $(call lcc-option,-mfixed-gregs-base)
 
 # Must go after -fkernel
 ifeq ($(CONFIG_SEMI_SPECULATIVE_KERNEL),y)
@@ -55,8 +56,8 @@ else
  endif
 endif
 
-KBUILD_CFLAGS += -Werror=return-type $(call lcc-option,-Wno-maybe-uninitialized) \
-		 $(call lcc-option,-Werror=bad-initializer-type)
+
+KBUILD_CFLAGS += -Werror
 
 ifneq ($(LLVM),)
 KBUILD_CPPFLAGS += -ferror-limit=5 -Wno-logical-op-parentheses -Wno-microsoft-anon-tag
@@ -68,22 +69,19 @@ KBUILD_CFLAGS += -fmax-errors=5
 CC_CPU_OPTION := -mtune
 endif
 
-ifdef CONFIG_CC_IS_CLANG
-# TODO 165551 temporary workaround
-KBUILD_CFLAGS += -flb-option=-fno-ident
-endif
-
 ifdef CONFIG_CC_IS_LCC
 # Some uninteresting or broken warnings can be disabled with #pragma's only
-KBUILD_CFLAGS += -Wno-reduced-alignment -Wno-overflow -Wno-signed-one-bit-field \
-		 -Wno-alignment-reduction-ignored \
+KBUILD_CFLAGS += -Wno-alignment-reduction-ignored \
 		 -include $(srctree)/arch/e2k/include/asm/override-lcc-warnings.h
+endif
+
+ifndef CONFIG_CC_IS_GCC
 # Don't create symbols at 0x0 (otherwise can't pack symbols map into 32 bits)
 KBUILD_CFLAGS += -fno-ident
 endif
 
 LDFLAGS_vmlinux :=
-# ASM_SAVE_GREG() relies on speicific __iset__ values, just define 3 here for simplicity
+# ASM_SAVE_GREG() relies on specific __iset__ values, just define 3 here for simplicity
 CHECKFLAGS	+= -D__e2k__ -D__iset__=3
 
 CFLAGS_GENERIC	:= -march=elbrus-v$(CONFIG_CPU_ISET_MIN)
@@ -94,19 +92,17 @@ CFLAGS_E8C2	:= $(CC_CPU_OPTION)=elbrus-8c2
 CFLAGS_E12C	:= $(CC_CPU_OPTION)=elbrus-12c
 CFLAGS_E16C	:= $(CC_CPU_OPTION)=elbrus-16c
 CFLAGS_E2C3	:= $(CC_CPU_OPTION)=elbrus-2c3
-CFLAGS_E48C	:= $(CC_CPU_OPTION)=elbrus-48c
 CFLAGS_E8V7	:= $(CC_CPU_OPTION)=elbrus-8v7
 
 CFLAGS_ALL_CPUS	:= $(CFLAGS_E2S) $(CFLAGS_E8C) $(CFLAGS_E1CP) $(CFLAGS_E8C2) \
-		   $(CFLAGS_E12C) $(CFLAGS_E16C) $(CFLAGS_E2C3) $(CFLAGS_E48C) \
-		   $(CFLAGS_E8V7)
+		   $(CFLAGS_E12C) $(CFLAGS_E16C) $(CFLAGS_E2C3) $(CFLAGS_E8V7)
 
 export	CFLAGS_E2S CFLAGS_E8C CFLAGS_E1CP CFLAGS_E8C2 CFLAGS_E2C3 CFLAGS_E12C \
-	CFLAGS_E16C CFLAGS_E48C CFLAGS_E8V7 CFLAGS_ALL_CPUS
+	CFLAGS_E16C CFLAGS_E8V7 CFLAGS_ALL_CPUS
 
-ifneq ($(filter y,$(CONFIG_CPU_E2C3) $(CONFIG_CPU_E12C) $(CONFIG_CPU_E16C)),)
-  KBUILD_CFLAGS += $(call lcc-option,-ffix-lcc-bug146899)
-endif
+#ifneq ($(filter y,$(CONFIG_CPU_E2C3) $(CONFIG_CPU_E12C) $(CONFIG_CPU_E16C)),)
+#  KBUILD_CFLAGS += $(call lcc-option,-ffix-lcc-bug146899)
+#endif
 
 ifneq ($(filter y,$(CONFIG_E2K_E8C2) $(CONFIG_CPU_E12C) $(CONFIG_CPU_E16C)),)
   KBUILD_CFLAGS += $(call lcc-option,-ffix-lcc-bug123567)
@@ -137,9 +133,6 @@ else
   else ifeq ($(CONFIG_E2K_E2C3),y)
     KBUILD_CFLAGS += $(CFLAGS_E2C3)
     KBUILD_AFLAGS += $(CFLAGS_E2C3)
-  else ifeq ($(CONFIG_E2K_E48C),y)
-    KBUILD_CFLAGS += $(CFLAGS_E48C)
-    KBUILD_AFLAGS += $(CFLAGS_E48C)
   else ifeq ($(CONFIG_E2K_E8V7),y)
     KBUILD_CFLAGS += $(CFLAGS_E8V7)
     KBUILD_AFLAGS += $(CFLAGS_E8V7)
@@ -187,9 +180,6 @@ e16cboot: vmlinux
 
 e2c3boot: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) need-builtin=1 CONFIG_E2C3=y boot
-
-e48cboot: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) need-builtin=1 CONFIG_E48C=y boot
 
 e8v7boot: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) need-builtin=1 CONFIG_E8V7=y boot
@@ -244,7 +234,6 @@ define archhelp
   echo  '  e12cboot		- Build kernel boot image with small embedded boot for e12c simulator'
   echo  '  e16cboot		- Build kernel boot image with small embedded boot for e16c simulator'
   echo  '  e2c3boot		- Build kernel boot image with small embedded boot for e2c3 simulator'
-  echo  '  e48cboot		- Build kernel boot image with small embedded boot for e48c simulator'
   echo  '  e8v7boot		- Build kernel boot image with small embedded boot for e8v7 simulator'
   echo  '  [with_kernel=1]	- When building boot, build in compressed kernel into the boot image'
   echo  ''

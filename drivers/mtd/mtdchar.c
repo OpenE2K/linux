@@ -1387,7 +1387,7 @@ static long mtdchar_ptr128_ioctl(struct file *file, unsigned int cmd,
 		}
 		set_u_border(MAX_U_BORDER);
 		ret = mtdchar_writeoob(file, mtd, buf.start,
-				buf.length, (void __user *)AP_PTR(ap),
+				buf.length, U_AP_PTR(ap),
 				&buf_user->length);
 		break;
 	}
@@ -1409,7 +1409,7 @@ static long mtdchar_ptr128_ioctl(struct file *file, unsigned int cmd,
 		}
 		set_u_border(MAX_U_BORDER);
 		ret = mtdchar_readoob(file, mtd, buf.start,
-				buf.length, (void __user *)AP_PTR(ap),
+				buf.length, U_AP_PTR(ap),
 				&buf_user->start);
 		break;
 	}
@@ -1429,7 +1429,7 @@ static long mtdchar_ptr128_ioctl(struct file *file, unsigned int cmd,
 			ret = -EFAULT;
 			break;
 		}
-		a.data = (void __user *)AP_PTR(ap);
+		a.data = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 
 		ret = mtdchar_blkpg_ioctl(mtd, &a);

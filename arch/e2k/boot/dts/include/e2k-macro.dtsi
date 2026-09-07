@@ -19,6 +19,10 @@
 #define _SIC(_n) __SIC(_n)
 #define SIC _SIC(NODE)
 
+#define __IPLINKS(_n) iplinks ## _n
+#define _IPLINKS(_n) __IPLINKS(_n)
+#define IPLINKS _IPLINKS(NODE)
+
 #define __PMC_FREQ(_n) pmc_freq ## _n
 #define _PMC_FREQ(_n) __PMC_FREQ(_n)
 #define PMC_FREQ _PMC_FREQ(NODE)
@@ -34,3 +38,11 @@
 #define __L_PCS(_n) l_pcs ## _n
 #define _L_PCS(_n) __L_PCS(_n)
 #define L_PCS _L_PCS(NODE)
+
+#define __HW_CHECK(_n) hw_check ## _n
+#define _HW_CHECK(_n) __HW_CHECK(_n)
+#define HW_CHECK _HW_CHECK(NODE)
+
+#define __FATAL_TEMP(_n) fatal_temp ## _n
+#define _FATAL_TEMP(_n) __FATAL_TEMP(_n)
+#define FATAL_TEMP _FATAL_TEMP(NODE)

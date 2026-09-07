@@ -21,18 +21,19 @@
 #include <asm/mmu_regs_types.h>
 #include <asm/tlbflush.h>
 #include <asm/pgalloc.h>
+#include <asm/trap_cellar.h>
 #include <asm/mman.h>
 #include <asm/tlb.h>
 #include <asm/process.h>
 #include <asm/cpu_regs.h>
-#include <asm/kvm/gpid.h>
+#include <asm/kvm/paravirt_sw/gpid.h>
 #include <asm/kvm/switch.h>
-#include <asm/kvm/gva_cache.h>
+#include <asm/kvm/paravirt_sw/gva_cache.h>
 #include <asm/traps.h>
 
-#include "../mmu_defs.h"
+#include "mmu_defs.h"
 #include "mmu.h"
-#include "../mman.h"
+#include "mman.h"
 #include "../cpu.h"
 #include "../process.h"
 #include "../user_area.h"
@@ -621,12 +622,12 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 
 	AW(ftype) = cond.fault_type;
 	AW(opcode) = cond.opcode;
-	fmt = TC_COND_FMT_FULL(cond);
+	fmt = tc_cond_fmt_full(cond);
 	E2K_KVM_BUG_ON(opcode.fmt == 0 || opcode.fmt == 6);
 	bytes = tc_cond_to_size(cond);
 	error_code = PFRES_SET_ACCESS_SIZE(error_code, bytes);
 	mas = cond.mas;
-	store = tc_cond_is_store(cond, machine.native_iset_ver);
+	store = tc_cond_is_store(cond);
 	DebugNONP("page fault on guest address 0x%lx fault type 0x%x\n",
 		  address, AW(ftype));
 
@@ -705,12 +706,12 @@ int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		DebugSPF("hardware access page fault type\n");
 	}
 
-	if (mas == MAS_WAIT_LOCK || (mas == MAS_WAIT_LOCK_Q && bytes == 16)) {
+	if (tc_cond_is_lock_wait(cond)) {
 		DebugREEXEC("not writable page fault on load and lock operation\n");
 		/* this mas has store semantic */
 		error_code |= PFERR_WAIT_LOCK_MASK;
 	}
-	if (mas == MAS_IOADDR) {
+	if (mas == MAS_IO_OPERATION) {
 		DebugSPF("IO space access operation\n");
 		error_code |= PFERR_MMIO_MASK;
 	}
@@ -1067,7 +1068,7 @@ int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 		error_code |= PFERR_USER_ADDR_MASK;
 
 	error_code |= (PFERR_NOT_PRESENT_MASK | PFERR_FAPB_MASK);
-	store = tc_cond_is_store(cond, machine.native_iset_ver);
+	store = tc_cond_is_store(cond);
 	if (store) {
 		error_code |= PFERR_WRITE_MASK;
 	}

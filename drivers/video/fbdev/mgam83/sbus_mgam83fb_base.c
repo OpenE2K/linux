@@ -39,8 +39,6 @@
 
 #if defined(CONFIG_SBUS)
 #define mga_ioremap of_ioremap
-#elif defined(CONFIG_PCI2SBUS_MODULE)
-#include <linux/mcst/p2ssbus.h>
 #endif
 
 #include "sbus_mgam83fb.h"
@@ -143,12 +141,12 @@ static void MMIO_WRITE( struct mgam83fb_par* p, unsigned long reg, uint32_t val 
 	TRACE_MSG( "MMIO[0x%03lx] <= 0x%08x\n", reg, val );
 
 	switch( p->bus_type ) {
-#if defined(CONFIG_SBUS) || defined(CONFIG_PCI2SBUS_MODULE)
+#if defined(CONFIG_SBUS)
 	case BUS_TYPE_SBUS :
 		// registers are little-endian like in PCI model
 		writel( val, (void*)((unsigned long)p->mmio.vbase + reg) );
 		break;
-#endif /* CONFIG_SBUS || CONFIG_PCI2SBUS_MODULE */
+#endif /* CONFIG_SBUS */
 	default :
 		printk( KERN_WARNING "Cannot write to mmio: unsupported MGA/M video card model!\n" );
 	}
@@ -161,14 +159,14 @@ static uint32_t MMIO_READ( struct mgam83fb_par* p, unsigned long reg )
 	uint32_t result;
 
 	switch( p->bus_type ) {
-#if defined(CONFIG_SBUS) || defined(CONFIG_PCI2SBUS_MODULE)
+#if defined(CONFIG_SBUS)
 	case BUS_TYPE_SBUS :
 		// registers are little-endian like in PCI model
 		result = readl( (void*)((unsigned long) p->mmio.vbase + reg) );
 
 		
 		break;
-#endif /* CONFIG_SBUS || CONFIG_PCI2SBUS_MODULE */
+#endif /* CONFIG_SBUS */
 	default :
 		result = ~(uint32_t)0;
 		printk( KERN_WARNING "Cannot write to mmio: unsupported MGA/M video card model!\n" );
@@ -897,7 +895,7 @@ static int __fb_init( struct fb_info* info )
 	return 0;
 }
 
-#if defined(CONFIG_SBUS) || defined(CONFIG_PCI2SBUS_MODULE)
+#if defined(CONFIG_SBUS)
 static int mga_sbus_probe(struct of_device* op, const struct of_device_id *match)
 {
 	struct fb_info* info;

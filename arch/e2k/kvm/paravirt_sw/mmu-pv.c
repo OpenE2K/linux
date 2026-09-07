@@ -26,12 +26,12 @@
 #include <asm/mman.h>
 #include <asm/tlb.h>
 #include <asm/process.h>
-#include <asm/kvm/gpid.h>
+#include <asm/kvm/paravirt_sw/gpid.h>
 #include <asm/kvm/trace_kvm_pv.h>
 
 #include "../process.h"
 #include "../cpu.h"
-#include "../mmu_defs.h"
+#include "mmu_defs.h"
 #include "mmu.h"
 #include "gaccess.h"
 #include "../user_area.h"
@@ -1145,7 +1145,7 @@ long kvm_recovery_faulted_guest_load(struct kvm_vcpu *vcpu, e2k_addr_t address,
 UACCESS_FN_DEFINE6(recovery_faulted_move_fn,
 		   e2k_addr_t, addr_from, e2k_addr_t, addr_to, e2k_addr_t,
 		   addr_to_hi, union recovery_faulted_arg, arg, u64, ld_rec_opc,
-		   u32, first_time)
+		   bool, single_byte)
 {
 	native_recovery_faulted_move(addr_from, addr_to, addr_to_hi, arg.vr,
 			(ldst_rec_op_t) { .word = ld_rec_opc }, arg.chan, arg.qp,

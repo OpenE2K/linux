@@ -47,7 +47,7 @@ typedef	struct lt_regs_eioh {
 	u32	power_counter_hi;	/* power counter high bits */
 } lt_regs_eioh_t;
 
-extern lt_regs_t *lt_regs;
+extern lt_regs_t __iomem *lt_regs;
 extern u64 lt_clock_rate;
 
 /* counters registers structure */

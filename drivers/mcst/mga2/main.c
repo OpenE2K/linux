@@ -263,12 +263,12 @@ struct drm_gem_object *mga2_gem_create(struct drm_device *drm,
 			goto fail;
 
 		obj->dma_addr = node->start - mga2->vram_paddr;
-		obj->vaddr = ioremap_wc(node->start, size);
+		obj->vaddr = (void __force *)ioremap_wc(node->start, size);
 		if (!obj->vaddr) {
 			ret = -EFAULT;
 			goto fail;
 		}
-		memset_io(obj->vaddr, 0, size);
+		memset_io((void __iomem __force *)obj->vaddr, 0, size);
 	}
 	break;
 	case MGA2_GEM_DOMAIN_CPU: {
@@ -390,6 +390,7 @@ struct drm_gem_object *mga2_prime_import_sg_table(struct drm_device *dev,
 	return &mo->base;
 }
 
+#if 0
 int mga2_gem_object_cpu_prep_ioctl(struct drm_device *drm, void *data,
 				  struct drm_file *file)
 {
@@ -452,6 +453,8 @@ int mga2_gem_object_cpu_fini_ioctl(struct drm_device *drm, void *data,
 
 	return err;
 }
+#endif
+
 
 /*
  * mga2_mmap - (struct file_operation)->mmap callback function

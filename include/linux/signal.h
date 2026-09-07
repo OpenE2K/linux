@@ -468,6 +468,12 @@ void signals_init(void);
 int restore_altstack(const stack_t __user *);
 int __save_altstack(stack_t __user *, unsigned long);
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+struct prot_stack;
+int prot_restore_altstack(const struct prot_stack __user *);
+int __prot_save_altstack(struct prot_stack __user *, unsigned long);
+#endif
+
 #define unsafe_save_altstack(uss, sp, label) do { \
 	stack_t __user *__uss = uss; \
 	struct task_struct *t = current; \

@@ -2,7 +2,7 @@
 #ifndef __LINUX_KBUILD_H
 #define __LINUX_KBUILD_H
 
-#if defined CONFIG_E2K && defined __LCC__
+#if defined CONFIG_E2K && (defined CONFIG_CC_IS_LCC || defined CONFIG_CC_IS_CLANG)
 # define pragma_no_asm_inline _Pragma ("no_asm_inline")
 #else
 # define pragma_no_asm_inline

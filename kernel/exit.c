@@ -816,14 +816,6 @@ void __noreturn do_exit(long code)
 	struct task_struct *tsk = current;
 	int group_dead;
 
-#ifdef CONFIG_MCST_RT_SMP
-	if (mcst_rt_affinity(tsk)) {
-		local_irq_disable();
-		tsk->mcst_smp_cpu = 0;
-		local_irq_enable();
-		dec_unbound_tasks();
-	}
-#endif
 
 	WARN_ON(irqs_disabled());
 

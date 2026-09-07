@@ -96,8 +96,7 @@ void *__memset(void *s, int pattern, size_t count)
 
 	if (count & ~0xfUL) {
 		fast_tagged_memory_set(s, c, 0, count & ~0xfUL,
-			LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT
-			| MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT);
+				ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1));
 	}
 
 	return orig_s;
@@ -179,7 +178,7 @@ void __memset_io(void *s, long c, size_t count)
 	s = PTR_ALIGN(s, 16);
 	count -= head & 0xf;
 
-	fast_tagged_memset_io(s, c, 0, count & ~0x7UL);
+	fast_memset_io(s, c, 0, count & ~0x7UL);
 
 	/* Set the tail */
 	s += count & ~0x7UL;
@@ -389,8 +388,7 @@ void __memcpy_fromio(void *__restrict dst,
 
 		n -= length;
 
-		fast_tagged_memcpy_io(dst, (__force const void *__restrict) src,
-					length, 0);
+		fast_memcpy_io(dst, (__force const void *__restrict) src, length, 0);
 
 		src += length;
 		dst += length;
@@ -565,8 +563,7 @@ void __memcpy_toio(volatile void __iomem *__restrict dstntn, const void *__restr
 
 		n -= length;
 
-		fast_tagged_memcpy_io((__force void *__restrict) dst, src,
-					length, true);
+		fast_memcpy_io((__force void *__restrict) dst, src, length, true);
 
 		src += length;
 		dst += length;
@@ -893,14 +890,14 @@ void *memchr(const void *s, int c_in, size_t n)
 
 	qword = *qword_ptr++;
 	mask = cmp(qword, qcharmask);
-	if (mask == 0 && qword_ptr < end_ptr) {
+	if (mask == 0 && (const void *) qword_ptr < end_ptr) {
 		/* We will test a 16 bytes at a time. */
 #pragma noprefetch
 #pragma loop count (15)
 		for (;;) {
 			qword = *qword_ptr++;
 			mask = cmp(qword, qcharmask);
-			if (!(mask == 0 && qword_ptr < end_ptr))
+			if (!(mask == 0 && (const void *) qword_ptr < end_ptr))
 				break;
 		}
 	}

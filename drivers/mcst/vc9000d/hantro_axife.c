@@ -79,23 +79,21 @@
 
 #include "hantroaxife.h"
 
-void AXIFEEnable(volatile unsigned char *hwregs)
+void AXIFEEnable(void __iomem *hwregs)
 {
 #ifndef HANTROVCMD_ENABLE_IP_SUPPORT
 	if (!hwregs)
 		return;
 
 	//AXI FE non-secure mode
-	iowrite32(0x0, (void __iomem *)(hwregs + HANTRO_AXIFE_OFFSET + 0x2C));
-	pr_info("AXI FE: 0x2C = 0x%x\n",
-		ioread32((void __iomem *)(hwregs + 0x2C)));
-	iowrite32(0x2, (void __iomem *)(hwregs + HANTRO_AXIFE_OFFSET + 0x28));
-	pr_info("AXI FE: 0x28 = 0x%x\n",
-		ioread32((void __iomem *)(hwregs + 0x28)));
+	iowrite32(0x0, hwregs + HANTRO_AXIFE_OFFSET + 0x2C);
+	pr_info("AXI FE: 0x2C = 0x%x\n", ioread32(hwregs + 0x2C));
+	iowrite32(0x2, hwregs + HANTRO_AXIFE_OFFSET + 0x28);
+	pr_info("AXI FE: 0x28 = 0x%x\n", ioread32(hwregs + 0x28));
 #endif
 }
 
-int AXIFEFlush(volatile unsigned char *hwregs)
+int AXIFEFlush(void __iomem *hwregs)
 {
 #ifndef HANTROVCMD_ENABLE_IP_SUPPORT
 	int loop_cnt = 0;
@@ -106,12 +104,11 @@ int AXIFEFlush(volatile unsigned char *hwregs)
 	/* trigger AXI FE flush, AXI FE will automatically read or empty data in its
 	 * Master side until the Master status is IDLE.
 	 */
-	iowrite32(0x01, (void __iomem *)(hwregs + HANTRO_AXIFE_OFFSET + 0x8C));
-	pr_info("AXI FE Flush Enable: 0x8C = 0x%x\n",
-		ioread32((void __iomem *)(hwregs + 0x8C)));
+	iowrite32(0x01, hwregs + HANTRO_AXIFE_OFFSET + 0x8C);
+	pr_info("AXI FE Flush Enable: 0x8C = 0x%x\n", ioread32(hwregs + 0x8C));
 
 	//polling read flush status(swreg[0]). If it is set to 1, means flush is completed.
-	while (!(ioread32(((void __iomem *)(hwregs + AXI_REG0_SW_HWCFG)))) >> 31) {
+	while (!(ioread32((hwregs + AXI_REG0_SW_HWCFG)) >> 31)) {
 		loop_cnt++;
 		mdelay(10); // wait 10ms
 		if (loop_cnt > 20) { // too long

@@ -9,7 +9,7 @@
 #include <asm/pgtable.h>
 
 
-u32 save_tags_from_data(u64 *datap, u8 *tagp)
+u32 save_tags_colors_from_data(u64 *datap, u8 *tagp, u8 *clrp)
 {
 	u32 res = 0;
 	int i;
@@ -22,21 +22,42 @@ u32 save_tags_from_data(u64 *datap, u8 *tagp)
 
 		tagp[i] = tag;
 		res |= tag;
+#ifdef CONFIG_PROTECTED_MODE
+		if (cpu_has(CPU_FEAT_ISET_V7)) {
+			u8 clr;
+			// get color of datap[2 * i] chunk */
+			clr = __kernel_ldrd_d_opc(&datap[2 * i],
+				(ldst_rec_op_t) { .fmt_h = LDST_MCOLOR_FMT_H});
+			clrp[i / 2] = (i & 1) ? ((clrp[i / 2] | (clr << 4))) : clr;
+			res |= clr;
+		}
+#endif
 	}
 
 	return res;
 }
 
-void restore_tags_for_data(u64 *datap, u8 *tagp)
+void restore_tags_colors_for_data(u64 *datap, u8 *tagp, u8 *clrp)
 {
 	int i;
 
 	for (i = 0; i < (int) TAGS_BYTES_PER_PAGE; i++) {
-		u64 data_lo = datap[2 * i], data_hi = datap[2 * i + 1];
-		u32 tag = (u32) tagp[i];
+		u64 ptr_to_store = (u64)&datap[2 * i];
+		e2k_qreg_t data = (e2k_qreg_t) {
+			.lo = datap[2 * i],
+			.hi = datap[2 * i + 1],
+		};
 
-		store_tagged_dword(&datap[2 * i], data_lo, tag);
-		store_tagged_dword(&datap[2 * i + 1], data_hi, tag >> 4);
+#ifdef CONFIG_PROTECTED_MODE
+		if (cpu_has(CPU_FEAT_ISET_V7)) {
+			u8 clr = (i & 1) ? (clrp[i / 2] >> 4) : (clrp[i / 2] & 0xf);
+			if (clr) {
+				ptr_to_store = ptr_to_store | (clr << ((i & 1) ? 61 : 60));
+			}
+			store_tagged_colored_qword((void *)ptr_to_store, data, tagp[i]);
+		} else
+#endif
+			store_tagged_qword((void *)ptr_to_store, data, tagp[i], 8);
 	}
 }
 

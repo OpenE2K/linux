@@ -98,41 +98,23 @@ static void apic_ack_edge(struct irq_data *irqd)
 	apic_ack_irq(irqd);
 }
 
-#define MSI_LO_ADDRESS			0x48
-#define MSI_HI_ADDRESS			0x4c
-
-static void get_io_apic_msi(int node, u32 *lo, u32 *hi)
+static void apic_chip_eoi(struct irq_data *irqd)
 {
-	/*
-	 * QEMU always creates EIOHUB for all CPU models, so we can
-	 * safely use the address from NBSR in guest.
-	 */
-	if (IS_HV_GM()) {
-		return get_io_pic_msi(node, lo, hi);
-	}
-
-	u32 bus, devfn = PCI_DEVFN(0, 0); /* it is iohub2 */
-	if (node < 0)
-		node = 0;
-	if (IS_MACHINE_E2S) /* it is iohub */
-		devfn = PCI_DEVFN(1, 0);
-	conf_inl(node, 0,  CONFIG_CMD(0, devfn, PCI_PRIMARY_BUS), &bus);
-
-	bus = (bus >> 8) & 0xFF;
-	/* Read from i2c-spi controller */
-	conf_inl(node, bus,  CONFIG_CMD(bus, PCI_DEVFN(2, 1), MSI_LO_ADDRESS), lo);
-	conf_inl(node, bus,  CONFIG_CMD(bus, PCI_DEVFN(2, 1), MSI_HI_ADDRESS), hi);
+	ack_APIC_irq();
 }
 
-static void apic_msi_compose_msg(struct irq_data *irqd,
+static void apic_compose_msi_msg(struct irq_data *irqd,
 				       struct msi_msg *msg)
 {
+	int node = irq_data_get_node(irqd);
 	struct irq_cfg *cfg = irqd_cfg(irqd);
-	ioapic_msi_msg_addr_lo_t *lo = (ioapic_msi_msg_addr_lo_t *)&msg->address_lo;
-	ioapic_msi_msg_data_t *d = (ioapic_msi_msg_data_t *)&msg->data;
+	ioapic_msi_msg_addr_lo_t *lo = (void *)&msg->address_lo;
+	ioapic_msi_msg_data_t *d = (void *)&msg->data;
+
 	memset(msg, 0, sizeof(*msg));
-	get_io_apic_msi(irq_data_get_node(irqd),
-			&msg->address_lo, &msg->address_hi);
+
+	/*set address for compatibility with old devtrees */
+	get_io_pic_msi(node, &msg->address_lo, &msg->address_hi);
 
 	lo->dest_mode_logical = false;
 	lo->destid_0_7 = cfg->dest_apicid & 0xFF;
@@ -151,11 +133,20 @@ static bool apic_check_sys_vect(unsigned v)
 
 static void apic_irq_enable(struct irq_data *d)
 {
+	int cpu;
 	unsigned vector = irqd_to_hwirq(d);
 	int node = irq_data_get_node(d);
-	int cpu = irq_is_percpu_devid(d->irq) ?
-				smp_processor_id() :
-				cpumask_first(cpumask_of_node(node));
+	int percpu = irq_is_percpu_devid(d->irq);
+	if (!percpu && WARN_ON(node < 0))
+		return;
+	if (!percpu && WARN_ON(!node_online(node)))
+		return;
+	if (!percpu && cpumask_weight(cpumask_of_node(node)) < 1)
+		return;
+
+	cpu = percpu ?
+		smp_processor_id() :
+		cpumask_first(cpumask_of_node(node));
 
 	if (!vector && !WARN_ON(apic_check_sys_vect(vector)))
 		return;
@@ -178,7 +169,7 @@ static void apic_irq_disable(struct irq_data *d)
 		return;
 	WARN_ON(IS_ERR_OR_NULL(per_cpu(vector_irq, cpu)[vector]));
 
-	per_cpu(vector_irq, cpu)[vector] = __setup_vector_irq(vector);
+	per_cpu(vector_irq, cpu)[vector] = VECTOR_UNUSED;
 }
 
 #ifdef CONFIG_SMP
@@ -193,8 +184,9 @@ static void apic_ipi_send_single(struct irq_data *d, unsigned int cpu)
 struct irq_chip lapic_controller = {
 	.name			= "APIC",
 	.irq_ack		= apic_ack_edge,
+	.irq_eoi		= apic_chip_eoi,
 	.irq_set_affinity	= pic_set_affinity,
-	.irq_compose_msi_msg	= apic_msi_compose_msg,
+	.irq_compose_msi_msg	= apic_compose_msi_msg,
 	.irq_retrigger		= apic_retrigger_irq,
 
 	.irq_enable		= apic_irq_enable,
@@ -223,10 +215,53 @@ static int apic_dying_cpu(unsigned int cpu)
 
 static int apic_starting_cpu(unsigned int cpu)
 {
-	unsigned int value;
+#ifdef CONFIG_MCST
+	unsigned int value, acked = 0;
+#else
+	unsigned int value, acked;
+#endif
 	unsigned long flags;
-
 	local_irq_save(flags);
+
+	/*
+	* If this comes from kexec/kcrash the APIC might be enabled in
+	* SPIV. Soft disable it before doing further initialization.
+	*/
+	value = apic_read(APIC_SPIV);
+	value &= ~APIC_SPIV_APIC_ENABLED;
+	apic_write(APIC_SPIV, value);
+
+	/*
+	* After a crash, we no longer service the interrupts and a pending
+	* interrupt from previous kernel might still have ISR bit set.
+	*/
+	for (int i = APIC_ISR_NR - 1; i >= 0; i--) {
+		value = apic_read(APIC_ISR + i*0x10);
+		if (!value)
+			continue;
+		for (int j = 31; j >= 0; j--) {
+			if (value & (1<<j)) {
+				ack_APIC_irq();
+				acked++;
+			}
+		}
+	}
+
+	do {
+		value = 0;
+		for (int i = APIC_ISR_NR - 1; i >= 0; i--) {
+			if ((value = apic_read(APIC_IRR + i*0x10)))
+				break;
+		}
+		if (value) {
+			apic_get_vector();
+			ack_APIC_irq();
+			acked++;
+		}
+	} while (value && acked <= 256);
+
+	if (acked > 256)
+		pr_err("LAPIC pending interrupts after %d EOI\n", acked);
 
 	/*
 	 * Set Task Priority to 'accept all'. We never change this

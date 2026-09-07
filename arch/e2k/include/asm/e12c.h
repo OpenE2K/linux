@@ -6,7 +6,6 @@
 #ifndef _ASM_E12C_H_
 #define _ASM_E12C_H_
 
-#ifndef __ASSEMBLY__
 struct pt_regs;
 
 #ifdef CONFIG_CPU_E12C
@@ -15,7 +14,6 @@ extern void e12c_setup_machine(void);
 #else
 static inline void boot_e12c_setup_arch(void) { }
 static inline void e12c_setup_machine(void) { }
-#endif
 #endif
 
 #define	E12C_NR_NODE_CPUS		12

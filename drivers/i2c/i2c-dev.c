@@ -616,7 +616,8 @@ static long ptr128_i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned lo
 	}
 	switch (cmd) {
 	case I2C_RDWR: {
-		struct i2c_rdwr_ioctl_data128 *argp = (struct i2c_rdwr_ioctl_data128 *)arg;
+		struct i2c_rdwr_ioctl_data128 __user *argp =
+			(struct i2c_rdwr_ioctl_data128 __user __force*)arg;
 		u32 nmsgs;
 		struct i2c_msg128 __user *p;
 		struct i2c_msg *rdwr_pa;
@@ -641,7 +642,7 @@ static long ptr128_i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned lo
 		if (!rdwr_pa)
 			return -ENOMEM;
 
-		p = (struct i2c_msg128 __user *)AP_PTR(ap);
+		p = (struct i2c_msg128 __user *)U_AP_PTR(ap);
 		set_ap_u_border(ap);
 		for (i = 0; i < nmsgs; i++) {
 			struct i2c_msg128 umsg;
@@ -682,7 +683,7 @@ static long ptr128_i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned lo
 		}
 		set_ap_u_border(ap);
 		return i2cdev_ioctl_smbus(client, data128.read_write, data128.command,
-					  data128.size, (void *)AP_PTR(ap));
+					  data128.size, U_AP_PTR(ap));
 	}
 	default:
 		return i2cdev_ioctl(file, cmd, arg);

@@ -28,7 +28,7 @@ static int save_stack_address_kernel(e2k_mem_crs_t *frame, unsigned long real_fr
 	struct pt_regs *regs = args->regs;
 	u64 ip;
 
-	if (regs && corrected_frame_addr > PCSP_PTR(regs->stacks.pcsp)) {
+	if (regs && corrected_frame_addr > (unsigned long)U_PCSP_PTR(regs->stacks.pcsp)) {
 		return 0;
 	}
 	if (frame->cr1.pm == 0) {
@@ -83,7 +83,7 @@ void notrace save_stack_trace(struct stack_trace *trace)
 
 	args.trace = trace;
 	args.regs = NULL;
-	parse_chain_stack(false, NULL, save_stack_address_kernel, &args);
+	parse_chain_stack(false, false, NULL, save_stack_address_kernel, &args);
 
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
@@ -96,7 +96,7 @@ void save_stack_trace_regs(struct pt_regs *regs, struct stack_trace *trace)
 
 	args.trace = trace;
 	args.regs = regs;
-	parse_chain_stack(false, NULL, save_stack_address_kernel, &args);
+	parse_chain_stack(false, false, NULL, save_stack_address_kernel, &args);
 
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
@@ -108,7 +108,7 @@ void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
 
 	args.trace = trace;
 	args.regs = NULL;
-	parse_chain_stack(false, tsk, save_stack_address_kernel, &args);
+	parse_chain_stack(false, false, tsk, save_stack_address_kernel, &args);
 
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
@@ -117,7 +117,7 @@ EXPORT_SYMBOL_GPL(save_stack_trace_tsk);
 
 void save_stack_trace_user(struct stack_trace *trace)
 {
-	parse_chain_stack(true, NULL, save_stack_address_user, trace);
+	parse_chain_stack(true, false, NULL, save_stack_address_user, trace);
 
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;

@@ -98,18 +98,7 @@ kvm_check_is_user_address(struct task_struct *task, e2k_addr_t address)
 		false		/* own guest is not supported */
 #define	trap_on_pv_hv_guest(vcpu, regs)					\
 		false		/* own guest is not supported */
-/* trap occurred on guest user or kernel */
-#define	guest_trap_on_host(regs)					\
-		false		/* own guest is not supported */
-#define	guest_trap_on_pv_hv_host(vcpu, regs)				\
-		false		/* own guest is not supported */
-/* trap occurred on guest kernel or user, but in host mode */
-/* and the trap can be due to guest or not */
-#define	host_trap_on_guest(regs)					\
-		false		/* own guest is not supported */
 /* trap occurred on guest user or kernel or on host but due to guest */
-#define	due_to_guest_trap_on_host(regs)					\
-		false		/* own guest is not supported */
 #define	due_to_guest_trap_on_pv_hv_host(vcpu, regs)			\
 		false		/* own guest is not supported */
 
@@ -118,10 +107,6 @@ kvm_check_is_user_address(struct task_struct *task, e2k_addr_t address)
 		is_call_from_user(cr0, cr1, ON_HOST_KERNEL())
 #define	call_from_kernel_mode(cr0, cr1)					\
 		is_call_from_kernel(cr0, cr1, ON_HOST_KERNEL())
-#define	call_from_user(regs)						\
-		call_from_user_mode((regs)->crs.cr0, (regs)->crs.cr1)
-#define	call_from_kernel(regs)						\
-		call_from_kernel_mode((regs)->crs.cr0, (regs)->crs.cr1)
 
 static inline void atomic_load_osgd_to_gd(void)
 {

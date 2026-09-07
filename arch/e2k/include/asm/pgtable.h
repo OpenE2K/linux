@@ -45,8 +45,8 @@
 #define pgtable_l5_enabled	0
 
 
-extern u32 save_tags_from_data(u64 *datap, u8 *tagp);
-extern void restore_tags_for_data(u64 *datap, u8 *tagp);
+extern u32 save_tags_colors_from_data(u64 *datap, u8 *tagp, u8 *clrp);
+extern void restore_tags_colors_for_data(u64 *datap, u8 *tagp, u8 *clrp);
 
 extern int e2k_swap_save_tags(struct page *page);
 extern void e2k_swap_restore_tags(swp_entry_t entry, struct page *page);
@@ -165,7 +165,7 @@ static inline unsigned long pud_page_vaddr(pud_t pud)
 {
 	return (unsigned long) __va(_PAGE_PFN_TO_PADDR(pud_val(pud)));
 }
- 
+
 static inline unsigned long p4d_page_vaddr(p4d_t p4d)
 {
 	return (unsigned long) __va(_PAGE_PFN_TO_PADDR(p4d_val(p4d)));
@@ -339,6 +339,7 @@ static inline void pmd_clear(pmd_t *pmdp)
 {
 	trace_pt_update("pmd_clear: pmdp 0x%lx, value 0x%lx\n",
 			pmdp, _PAGE_INIT_VALID);
+	VM_BUG_ON(pmd_val(*pmdp) & KERNEL_PT_MARK);
 	native_set_pmd(pmdp, __pmd(_PAGE_INIT_VALID));
 }
 
@@ -362,6 +363,7 @@ static inline void pud_clear(pud_t *pudp)
 {
 	trace_pt_update("pud_clear: pudp 0x%lx, value 0x%lx\n",
 			pudp, _PAGE_INIT_VALID);
+	VM_BUG_ON(pud_val(*pudp) & KERNEL_PT_MARK);
 	native_set_pud(pudp, __pud(_PAGE_INIT_VALID));
 }
 
@@ -381,6 +383,7 @@ static inline void set_p4d_at(struct mm_struct *mm, unsigned long addr, p4d_t *p
 
 static inline void p4d_clear(p4d_t *p4d)
 {
+	VM_BUG_ON(p4d_val(*p4d) & KERNEL_PT_MARK);
 	p4d_val(*p4d) = _PAGE_INIT_VALID;
 }
 

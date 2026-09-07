@@ -483,11 +483,10 @@ mode_parameter_t getCurrentModeParam(
  *  Output:
  *      1) Fill up input structure mode_parameter_t with possible timing for SM750.
  */
-long adjustModeParam(
-mode_parameter_t *pModeParam,/* Pointer to mode parameter */
-mode_parameter_t *pMode,     /* Pointer to mode parameter to be updated here */
-unsigned long ulPClk         /* real pixel clock feasible by SM750 */
-)
+static long adjustModeParam(mode_parameter_t *pModeParam,/* Pointer to mode parameter */
+		mode_parameter_t *pMode,     /* Pointer to mode parameter to be updated here */
+		unsigned long ulPClk         /* real pixel clock feasible by SM750 */
+	    )
 {
     unsigned long blank_width, sync_start, sync_width;
 
@@ -630,12 +629,12 @@ void setDisplayBaseAddress(
 /* 
  * Program the hardware for a specific video mode
  */
-void programModeRegisters(
-mode_parameter_t *pModeParam,   /* mode information about pixel clock, horizontal total, etc. */
-unsigned long ulBpp,            /* Color depth for this mode */
-unsigned long ulBaseAddress,    /* Offset in frame buffer */
-unsigned long ulPitch,          /* Mode pitch value in byte: no of bytes between two lines. */
-pll_value_t *pPLL               /* Pre-calculated values for the PLL */
+static void programModeRegisters(
+    mode_parameter_t *pModeParam,   /* mode information about pixel clock, horizontal total, etc. */
+    unsigned long ulBpp,            /* Color depth for this mode */
+    unsigned long ulBaseAddress,    /* Offset in frame buffer */
+    unsigned long ulPitch,          /* Mode pitch value in byte: no of bytes between two lines. */
+    pll_value_t *pPLL               /* Pre-calculated values for the PLL */
 )
 {
     unsigned long ulTmpValue, ulReg, ulReservedBits;

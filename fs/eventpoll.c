@@ -39,6 +39,10 @@
 #include <linux/rculist.h>
 #include <net/busy_poll.h>
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#include <asm/protected_syscalls.h>
+#endif
+
 /*
  * LOCKING:
  * There are three level of locking required by epoll :
@@ -170,6 +174,15 @@ struct epitem {
 	struct epoll_event event;
 };
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+/* This is element of container to keep correspondence between descriptors and pointers: */
+struct epoll_descr_bt_node {
+	struct rb_node rb_node;
+	e2k_ptr_t descr;
+	u64       addr;
+};
+#endif
+
 /*
  * This structure is stored inside the "private_data" member of the file
  * structure and represents the main data structure for the eventpoll
@@ -237,7 +250,21 @@ struct eventpoll {
 	/* tracks wakeup nests for lockdep validation */
 	u8 nests;
 #endif
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	/* RB tree root used to store descriptors registered by 'epoll_ctl' syscall;
+	 *	the list is used by 'epoll_wait' syscall
+	 *	to restore original descriptors in structure 'eventpoll'.
+	 */
+	struct rb_root *descr_bt;
+	/* Lock which protects descr_bt: */
+	struct mutex descr_bt_mutex;
+#endif
 };
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+static inline void release_descr_bt(struct eventpoll *ep);
+#endif
 
 /* Wrapper struct used by poll queueing */
 struct ep_pqueue {
@@ -1013,6 +1040,9 @@ again:
 		 */
 		ep = epi->ep;
 		mutex_lock(&ep->mtx);
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+		release_descr_bt(ep);
+#endif
 
 		ep_unregister_pollwait(ep, epi);
 
@@ -1053,6 +1083,10 @@ static int ep_alloc(struct eventpoll **pep)
 
 	*pep = ep;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+	ep->descr_bt = NULL;
+	mutex_init(&ep->descr_bt_mutex);
+#endif
 	return 0;
 
 free_uid:
@@ -1604,8 +1638,8 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi,
 	 *     additional field (descriptor size).
 	 */
 	if (TASK_IS_PROTECTED(current))
-		((struct prot_epoll_event *)(&epi->event))->size =
-				((struct prot_epoll_event *)&event)->size;
+		((struct prot_epoll_event *)(&epi->event))->tags =
+			((struct prot_epoll_event *)&event)->tags;
 #endif
 	if (epi->event.events & EPOLLWAKEUP) {
 		if (!ep_has_wakeup_source(epi))
@@ -1724,8 +1758,8 @@ static int ep_send_events(struct eventpoll *ep,
 		events = epoll_put_uevent(revents, epi->event.data, events);
 #if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
 		if (!events || TASK_IS_PROTECTED(current) &&
-				__put_user(((struct prot_epoll_event *)&epi->event)->size,
-					&((struct prot_epoll_event __user *)events)->size)) {
+				__put_user(((struct prot_epoll_event *)&epi->event)->tags,
+					&((struct prot_epoll_event __user *)events)->tags)) {
 #else
 		if (!events) {
 #endif
@@ -2491,3 +2525,337 @@ static int __init eventpoll_init(void)
 	return 0;
 }
 fs_initcall(eventpoll_init);
+
+#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+
+static inline
+void lock_epoll_descr_bt(void *ptr_ep)
+		__acquires(&(((struct eventpoll *)ptr_ep)->descr_bt_mutex))
+{
+	mutex_lock(&(((struct eventpoll *)ptr_ep)->descr_bt_mutex));
+}
+
+static inline
+void unlock_epoll_descr_bt(void *ptr_ep)
+		__releases(&(((struct eventpoll *)ptr_ep)->descr_bt_mutex))
+{
+	mutex_unlock(&(((struct eventpoll *)ptr_ep)->descr_bt_mutex));
+}
+
+/**
+ * get_user_descr_on_address_in_bt() - Looks for a descriptor components in the RB tree
+ *					attached to the given poll event.
+ *	Operations are protected by "descr_bt_mutex" mutex,
+ *	and ep_find() must be called with the mutex held.
+ *
+ * @ep: epoll event pointer.
+ * @address: memory address to search for in the saved list.
+ * @pdescr: pointer to the descriptor structure
+ *
+ * Return: pointer to the descriptor structure if found; NULL - otherwise.
+ */
+static inline
+e2k_ptr_t get_user_descr_on_address_in_bt(struct eventpoll *ep, u64 address)
+{
+	int kcmp;
+	struct rb_root *root = ep->descr_bt;
+	struct rb_node *rbp;
+	struct epoll_descr_bt_node *node;
+	e2k_ptr_t descr;
+
+	if (!root)
+		goto nothing_found;
+
+	for (rbp = root->rb_node; rbp; ) {
+		node = rb_entry(rbp, struct epoll_descr_bt_node, rb_node);
+		kcmp = (address > node->addr ? +1 : (address < node->addr ? -1 : 0));
+		if (kcmp > 0)
+			rbp = rbp->rb_right;
+		else if (kcmp < 0)
+			rbp = rbp->rb_left;
+		else
+			return node->descr;
+	}
+
+nothing_found:
+	pr_err("%s:%d :: descriptor for 0x%llx not found\n", __FILE__, __LINE__, address);
+	descr = MAKE_FAKE_AP(address);
+	return descr;
+}
+
+/**
+ * epoll_get_user_descr_on_address() - Looks for a descriptor components in the saved list of
+ *					(address, descr) couples.
+ * @epfd: epoll file descriptor.
+ * @address: memory address to search for in the saved list.
+ * @pdescr: pointer to the descriptor structure
+ *
+ * Return: 1 - descriptor found and saved in 'pdescr'; 0 - not found.
+ */
+int epoll_get_user_descr_on_address(int epfd, u64 address, e2k_ap_t *pdescr)
+{
+	struct fd f;
+	struct eventpoll *ep = NULL;
+	int ret = 0;
+
+	if (address < mmap_min_addr)
+		return 0;
+
+	/* Get the "struct file *" for the eventpoll file */
+	f = fdget(epfd);
+	if (!f.file) {
+		pr_err("%s:%d :: empty field 'file' in eventpoll file #%d\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	/*
+	 * We have to check that the file structure underneath the epfd
+	 * the user passed to us _is_ an eventpoll file.
+	 */
+	if (!is_file_epoll(f.file)) {
+		pr_err("%s:%d :: file #%d appeared not eventpoll file\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	/*
+	 * At this point it is safe to assume that the "private_data" contains
+	 * our own data structure.
+	 */
+	ep = f.file->private_data;
+	if (!ep) {
+		pr_err("%s:%d :: empty field 'private_data' in eventpoll file #%d\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	lock_epoll_descr_bt(ep);
+	*pdescr = get_user_descr_on_address_in_bt(ep, address);
+	unlock_epoll_descr_bt(ep);
+
+error_fput:
+	fdput(f);
+	return ret;
+}
+
+/**
+ * fill_user_descr_in_prot_epoll_events() - Fills 'data' fields in the epoll event array
+ *	with original user descriptors stored in the RB-tree attached to the eventpoll structure.
+ * @epfd: epoll file descriptor.
+ * @events_128: array of protected epoll event structures.
+ * @count: number of elements in the array.
+ *
+ * Return: number of descriptors added to the 'events_128' array or error code if any.
+ */
+int fill_user_descr_in_prot_epoll_events(int epfd,
+					 struct prot_epoll_event __user *events_128,
+					 const int count)
+{
+	struct fd f;
+	struct eventpoll *ep = NULL;
+	struct prot_epoll_event __user *evnt128;
+	u64 address;
+	e2k_ap_t descr;
+	int tags, i, ret = 0, rval;
+
+	/* Get the "struct file *" for the eventpoll file */
+	f = fdget(epfd);
+	if (!f.file) {
+		pr_err("%s:%d :: empty field 'file' in eventpoll file #%d\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	/*
+	 * We have to check that the file structure underneath the epfd
+	 * the user passed to us _is_ an eventpoll file.
+	 */
+	if (!is_file_epoll(f.file)) {
+		pr_err("%s:%d :: file #%d appeared not eventpoll file\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	/*
+	 * At this point it is safe to assume that the "private_data" contains
+	 * our own data structure.
+	 */
+	ep = f.file->private_data;
+	if (!ep) {
+		pr_err("%s:%d :: empty field 'private_data' in eventpoll file #%d\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	lock_epoll_descr_bt(ep);
+
+	for (evnt128 = events_128, i = 0; i < count; i++, evnt128++) {
+		if (evnt128 == NULL)
+			continue;
+		rval = get_user(address, &evnt128->address);
+		rval = rval ?: get_user(tags, &evnt128->tags);
+		if (rval) {
+			ret = rval;
+			break;
+		}
+		if (!tags || (address < mmap_min_addr)) {
+			/* This is numerical data: */
+			rval = put_user(address, &evnt128->data.u64);
+			goto data_copied;
+		}
+		descr = get_user_descr_on_address_in_bt(ep, address);
+		rval = put_user_tagged_16(descr.qword, tags, &evnt128->data);
+		ret++;
+data_copied:
+		if (rval) {
+			ret = rval;
+			break;
+		}
+		cond_resched();
+	}
+	unlock_epoll_descr_bt(ep);
+
+error_fput:
+	fdput(f);
+	return ret;
+}
+
+
+/**
+ * add_descr_into_bt() - Adds (new) (address, descr) couple into BT.
+ *
+ * @ep: pointer to epoll event structure.
+ * @addr: memory address to add to the list.
+ * @descr: descriptor structure
+ *
+ * Return: 0 - descriptor added or in the list already; -1 - something wrong happened.
+ */
+static inline
+void add_descr_into_bt(struct eventpoll *ep, u64 addr, e2k_ptr_t descr)
+{
+	struct rb_root *descr_bt;
+	struct rb_node **p;
+	struct rb_node *parent = NULL;
+	struct epoll_descr_bt_node *node;
+	int kcmp;
+
+	descr_bt = ep->descr_bt;
+
+	if (!descr_bt) {
+		/* BT initialization: */
+		descr_bt = kmalloc(sizeof(*descr_bt), GFP_KERNEL);
+		ep->descr_bt = descr_bt;
+		RB_CLEAR_NODE(descr_bt->rb_node);
+	}
+
+	p = &descr_bt->rb_node;
+	while (*p != NULL) {
+		parent = *p;
+		node = rb_entry(parent, struct epoll_descr_bt_node, rb_node);
+		kcmp = (addr > node->addr ? +1 : (addr < node->addr ? -1 : 0));
+		if (kcmp > 0) {
+			p = &(*p)->rb_left;
+		} else if (kcmp < 0) {
+			p = &(*p)->rb_right;
+		} else {
+			if ((descr.qword.lo != node->descr.qword.lo)
+					|| (descr.qword.hi != node->descr.qword.hi)) {
+				/* Descriptor updated? */
+				node->descr = descr;
+			}
+			return;
+		}
+	}
+	/* Adding new node to BT: */
+	node = kmalloc(sizeof(*node), GFP_KERNEL);
+	node->addr = addr;
+	node->descr = descr;
+	rb_link_node(&node->rb_node, parent, p);
+	rb_insert_color(&node->rb_node, descr_bt);
+}
+
+/**
+ * add_2_prot_epoll_descr_bt() - Adds (new) descriptor to the list of
+ *					(address, descr) couples.
+ *
+ * @epfd: epoll file descriptor.
+ * @addr: memory address to add to the list.
+ * @descr: descriptor structure
+ *
+ * Return: 0 - descriptor added or in the list already; -1 - something wrong.
+ */
+int add_2_prot_epoll_descr_bt(int epfd, u64 addr, e2k_ptr_t descr)
+{
+	struct fd f;
+	struct eventpoll *ep = NULL;
+	int ret = -1;
+
+	if (addr < mmap_min_addr)
+		return ret;
+
+	/* Get the "struct file *" for the eventpoll file */
+	f = fdget(epfd);
+	if (!f.file) {
+		pr_err("%s:%d :: empty field 'file' in eventpoll file #%d\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	/*
+	 * We have to check that the file structure underneath the epfd
+	 * the user passed to us _is_ an eventpoll file.
+	 */
+	if (!is_file_epoll(f.file)) {
+		pr_err("%s:%d :: file #%d appeared not eventpoll file\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	/*
+	 * At this point it is safe to assume that the "private_data" contains
+	 * our own data structure.
+	 */
+	ep = f.file->private_data;
+	if (!ep) {
+		pr_err("%s:%d :: empty field 'private_data' in eventpoll file #%d\n",
+			__FILE__, __LINE__, epfd);
+		goto error_fput;
+	}
+
+	lock_epoll_descr_bt(ep);
+	add_descr_into_bt(ep, addr, descr);
+	unlock_epoll_descr_bt(ep);
+
+error_fput:
+	fdput(f);
+	return ret;
+}
+
+/**
+ * release_descr_bt() - Releases descriptor BT attached to the given poll event.
+ *
+ * @ep: epoll event pointer.
+ */
+static inline void release_descr_bt(struct eventpoll *ep)
+{
+	struct rb_root *root = ep->descr_bt;
+	struct rb_node *rbp;
+	struct epoll_descr_bt_node *node;
+
+	if (!root)
+		return;
+
+	lock_epoll_descr_bt(ep);
+
+	for (rbp = rb_first(root); rbp; ) {
+		node = rb_entry(rbp, struct epoll_descr_bt_node, rb_node);
+		rbp = rb_next(&node->rb_node);
+		rb_erase(&node->rb_node, root);
+		kfree(node);
+	}
+
+	unlock_epoll_descr_bt(ep);
+}
+
+#endif /* CONFIG_PROTECTED_MODE */

@@ -145,11 +145,7 @@ static inline u64 native_readq(const volatile void __iomem *addr)
 static inline void native_writeb(u8 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		IO_STORE_NV_MAS((volatile u8 __force *) addr, value,
-				MAS_STORE_RELEASE_V6(MAS_MT_0), b, "memory");
-		/* wmb() after MMIO writes is not required by documentation, but
-		 * this is how x86 works and how most of the drivers are tested. */
-		wmb();
+		IO_STORE_WITH_BARRIERS_V6((volatile u8 __force *) addr, value, b, "memory");
 	} else {
 		native_writeb_relaxed(value, addr);
 	}
@@ -158,9 +154,7 @@ static inline void native_writeb(u8 value, volatile void __iomem *addr)
 static inline void native_writew(u16 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		IO_STORE_NV_MAS((volatile u16 __force *) addr, value,
-				MAS_STORE_RELEASE_V6(MAS_MT_0), h, "memory");
-		wmb();
+		IO_STORE_WITH_BARRIERS_V6((volatile u16 __force *) addr, value, h, "memory");
 	} else {
 		native_writew_relaxed(value, addr);
 	}
@@ -169,9 +163,7 @@ static inline void native_writew(u16 value, volatile void __iomem *addr)
 static inline void native_writel(u32 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		IO_STORE_NV_MAS((volatile u32 __force *) addr, value,
-				MAS_STORE_RELEASE_V6(MAS_MT_0), w, "memory");
-		wmb();
+		IO_STORE_WITH_BARRIERS_V6((volatile u32 __force *) addr, value, w, "memory");
 	} else {
 		native_writel_relaxed(value, addr);
 	}
@@ -180,9 +172,7 @@ static inline void native_writel(u32 value, volatile void __iomem *addr)
 static inline void native_writeq(u64 value, volatile void __iomem *addr)
 {
 	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		IO_STORE_NV_MAS((volatile u64 __force *) addr, value,
-				MAS_STORE_RELEASE_V6(MAS_MT_0), d, "memory");
-		wmb();
+		IO_STORE_WITH_BARRIERS_V6((volatile u64 __force *) addr, value, d, "memory");
 	} else {
 		native_writeq_relaxed(value, addr);
 	}
@@ -196,27 +186,27 @@ static inline void native_writeq(u64 value, volatile void __iomem *addr)
 
 static inline u8 native_inb(unsigned int port)
 {
-	return NATIVE_READ_MAS_B(IO_AREA_PHYS_BASE + port, MAS_IOADDR);
+	return NATIVE_READ_MAS_B(IO_AREA_PHYS_BASE + port, MAS_IO_OPERATION);
 }
 static inline u16 native_inw(unsigned int port)
 {
-	return NATIVE_READ_MAS_H(IO_AREA_PHYS_BASE + port, MAS_IOADDR);
+	return NATIVE_READ_MAS_H(IO_AREA_PHYS_BASE + port, MAS_IO_OPERATION);
 }
 static inline u32 native_inl(unsigned int port)
 {
-	return NATIVE_READ_MAS_W(IO_AREA_PHYS_BASE + port, MAS_IOADDR);
+	return NATIVE_READ_MAS_W(IO_AREA_PHYS_BASE + port, MAS_IO_OPERATION);
 }
 static inline void native_outb(u8 byte, unsigned int port)
 {
-	NATIVE_WRITE_MAS_B(IO_AREA_PHYS_BASE + port, byte, MAS_IOADDR);
+	NATIVE_WRITE_MAS_B(IO_AREA_PHYS_BASE + port, byte, MAS_IO_OPERATION);
 }
 static inline void native_outw(u16 halfword, unsigned int port)
 {
-	NATIVE_WRITE_MAS_H(IO_AREA_PHYS_BASE + port, halfword, MAS_IOADDR);
+	NATIVE_WRITE_MAS_H(IO_AREA_PHYS_BASE + port, halfword, MAS_IO_OPERATION);
 }
 static inline void native_outl(u32 word, unsigned int port)
 {
-	NATIVE_WRITE_MAS_W(IO_AREA_PHYS_BASE + port, word, MAS_IOADDR);
+	NATIVE_WRITE_MAS_W(IO_AREA_PHYS_BASE + port, word, MAS_IO_OPERATION);
 }
 
 
@@ -495,7 +485,7 @@ extern void __memset_io(void *s, long c, size_t count);
 static inline void _memset_io(volatile void __iomem *dst, int c, size_t n,
 		const unsigned long dst_align)
 {
-	long cc;
+	u64 cc;
 
 	cc = c & 0xff;
 	cc = cc | (cc << 8);
@@ -504,7 +494,7 @@ static inline void _memset_io(volatile void __iomem *dst, int c, size_t n,
 
 	if (__builtin_constant_p(n) && dst_align >= 8 && n < 136) {
 		/* Inline small aligned memset's */
-		volatile u64 __iomem *l_dst = dst;
+		volatile u64  *l_dst = (u64 * __force)dst;
 
 		if (n >= 8)
 			l_dst[0] = cc;
@@ -541,11 +531,11 @@ static inline void _memset_io(volatile void __iomem *dst, int c, size_t n,
 
 		/* Set the tail */
 		if (n & 4)
-			*(u32 __iomem *) (dst + (n & ~0x7UL)) = cc;
+			*(u32 __force *) (dst + (n & ~0x7UL)) = cc;
 		if (n & 2)
-			*(u16 __iomem *) (dst + (n & ~0x3UL)) = cc;
+			*(u16 __force *) (dst + (n & ~0x3UL)) = cc;
 		if (n & 1)
-			*(u8 __iomem *) (dst + (n & ~0x1UL)) = cc;
+			*(u8 __force *) (dst + (n & ~0x1UL)) = cc;
 	} else {
 		__memset_io((void * __force) dst, cc, n);
 	}

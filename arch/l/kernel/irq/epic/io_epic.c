@@ -12,6 +12,7 @@
 #include <linux/irq.h>
 #include <linux/pci.h>
 
+#include "../apic/apic.h"
 #include "../io_pic.h"
 #include "../pic.h"
 #include "epic.h"
@@ -77,10 +78,31 @@ union io_epic_entry_union {
 	struct IO_EPIC_route_entry entry;
 };
 
-static void __ioepic_write_entry(struct iopic *pic,
-			int pin, struct IO_EPIC_route_entry e)
+static struct IO_EPIC_route_entry __ioepic_read_entry(struct iopic *pic, int pin)
 {
+	return (struct IO_EPIC_route_entry) {
+		.int_ctrl.raw = io_epic_read(pic, IOEPIC_TABLE_INT_CTRL(pin)),
+		.msg_data.raw = io_epic_read(pic, IOEPIC_TABLE_MSG_DATA(pin)),
+		.addr_high = io_epic_read(pic, IOEPIC_TABLE_ADDR_HIGH(pin)),
+		.addr_low.raw = io_epic_read(pic, IOEPIC_TABLE_ADDR_LOW(pin)),
+		.rid.raw = io_epic_read(pic, IOEPIC_INT_RID(pin)),
+	};
+}
 
+static struct IO_EPIC_route_entry ioepic_read_entry(struct iopic *epic, int pin)
+{
+	struct IO_EPIC_route_entry entry;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&epic->lock, flags);
+	entry = __ioepic_read_entry(epic, pin);
+	raw_spin_unlock_irqrestore(&epic->lock, flags);
+
+	return entry;
+}
+
+static void __ioepic_write_entry(struct iopic *pic, int pin, struct IO_EPIC_route_entry e)
+{
 	union io_epic_entry_union eu;
 	union IO_EPIC_INT_CTRL reg;
 
@@ -102,7 +124,18 @@ static void __ioepic_write_entry(struct iopic *pic,
 	io_epic_write(pic, IOEPIC_TABLE_INT_CTRL(pin), reg.raw);
 }
 
-struct pci_dev *__of_find_pci_device_by_node(struct device_node *np)
+#ifdef CONFIG_PM
+static void ioepic_write_entry(struct iopic *epic, int pin, struct IO_EPIC_route_entry e)
+{
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&epic->lock, flags);
+	__ioepic_write_entry(epic, pin, e);
+	raw_spin_unlock_irqrestore(&epic->lock, flags);
+}
+#endif
+
+static struct pci_dev *__of_find_pci_device_by_node(struct device_node *np)
 {
 	struct pci_dev *pdev = NULL;
 
@@ -113,7 +146,7 @@ struct pci_dev *__of_find_pci_device_by_node(struct device_node *np)
 	return pdev;
 }
 
-struct pci_dev *of_find_pci_device_by_node(struct device_node *np)
+static struct pci_dev *of_find_pci_device_by_node(struct device_node *np)
 {
 	struct pci_dev *pdev = NULL;
 	while (np) {
@@ -132,7 +165,6 @@ static int ioepic_setup_msg_from_msi(struct irq_data *irqd,
 	struct irq_desc *desc = irq_data_to_desc(irqd);
 	lockdep_assert_held(&desc->lock);
 
-	/* Let the parent dmn compose the MSI message */
 	irq_chip_compose_msi_msg(irqd, &msg);
 
 	e->addr_high	= msg.address_hi;
@@ -268,6 +300,7 @@ static inline void ioepic_finish_move(struct irq_data *irqd, bool moveit)
 static void ioepic_ack_level(struct irq_data *irqd)
 {
 	struct irq_cfg *cfg = irqd_cfg(irqd);
+	struct irq_data *pd = irqd->parent_data;
 	struct ioepic_chip_data *data = irqd->chip_data;
 	struct iopic *pic = data->d.pic;
 	bool moveit;
@@ -275,7 +308,8 @@ static void ioepic_ack_level(struct irq_data *irqd)
 	irq_complete_move(cfg);
 	moveit = ioepic_prepare_move(irqd);
 
-	ack_epic_irq();
+	pd->chip->irq_eoi(pd);
+
 	ioepic_level_eoi(pic, data->d.pin);
 
 	ioepic_finish_move(irqd, moveit);
@@ -294,6 +328,104 @@ static void unmask_ioepic_irq(struct irq_data *irqd)
 	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
 	__unmask_ioepic(data);
 }
+
+static void __cold io_epic_print_entries(struct iopic *pic)
+{
+	int pin;
+
+	pr_info("NR Dest Mask Trig Stat Deli Vect  Sid\n");
+
+	for_each_iopic_pin(pic, pin) {
+		struct IO_EPIC_route_entry entry = ioepic_read_entry(pic, pin);
+		pr_info("%-2d %-4d %1d    %1d    %1d    %1d    0x%-3x 0x%-4x\n",
+			pin, cepic_id_full_to_short(entry.addr_low.dst),
+			entry.int_ctrl.mask, entry.int_ctrl.trigger,
+			entry.int_ctrl.delivery_status, entry.msg_data.dlvm,
+			entry.msg_data.vector, entry.rid.raw);
+	}
+}
+
+void __cold print_IO_EPIC(struct iopic *pic)
+{
+	union IO_EPIC_ID reg_id;
+	union IO_EPIC_VERSION reg_version;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&pic->lock, flags);
+	reg_id.raw = io_epic_read(pic, IOEPIC_ID);
+	reg_version.raw = io_epic_read(pic, IOEPIC_VERSION);
+	raw_spin_unlock_irqrestore(&pic->lock, flags);
+
+	pr_info("IO-EPIC #%d......\n", pic->id);
+	pr_info(".... IOEPIC_ID: 0x%x\n", reg_id.raw);
+	pr_info("....... physical IOEPIC id: %d\n", reg_id.id);
+	pr_info("....... node id: %d\n", reg_id.nodeid);
+
+	pr_info(".... IOEPIC_VERSION: 0x%x\n", reg_version.raw);
+	pr_info("....... max redirection entries: %d\n", reg_version.entries);
+	pr_info("....... IO EPIC version: 0x%x\n", reg_version.version);
+
+	pr_info(".... IRQ redirection table:\n");
+	io_epic_print_entries(pic);
+}
+
+#ifdef CONFIG_PM
+static int save_ioepic_entries(struct iopic *pic)
+{
+	int pin;
+	struct IO_EPIC_route_entry *saved_registers = pic->saved_registers;
+
+	if (!saved_registers)
+		return -ENOMEM;
+
+	for_each_iopic_pin(pic, pin)
+		saved_registers[pin] = ioepic_read_entry(pic, pin);
+
+	return 0;
+}
+
+/*
+ * Restore IO APIC entries which was saved in the ioepic structure.
+ */
+static int restore_ioepic_entries(struct iopic *pic)
+{
+	int pin;
+	struct IO_EPIC_route_entry *saved_registers = pic->saved_registers;
+
+	if (!saved_registers)
+		return 0;
+
+	for_each_iopic_pin(pic, pin)
+		ioepic_write_entry(pic, pin, saved_registers[pin]);
+
+	return 0;
+}
+
+static void resume_ioepic_id(struct iopic *pic)
+{
+	union IO_EPIC_ID reg_id;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&pic->lock, flags);
+	reg_id.raw = io_epic_read(pic, IOEPIC_ID);
+	if (reg_id.id != pic->id) {
+		reg_id.id = pic->id;
+		io_epic_write(pic, IOEPIC_ID, reg_id.raw);
+	}
+	raw_spin_unlock_irqrestore(&pic->lock, flags);
+}
+
+static int ioepic_suspend(struct iopic *pic)
+{
+	return save_ioepic_entries(pic);
+}
+
+static void ioepic_resume(struct iopic *pic)
+{
+	resume_ioepic_id(pic);
+	restore_ioepic_entries(pic);
+}
+#endif /* CONFIG_PM */
 
 static int ioepic_irq_set_type(struct irq_data *d, unsigned int flow_type)
 {
@@ -405,6 +537,22 @@ static int ioepic_irq_get_chip_state(struct irq_data *irqd,
 	return 0;
 }
 
+
+static void ioepic_compose_msi_msg(struct irq_data *irqd,
+				       struct msi_msg *msg)
+{
+	u32 lo = 0;
+	union IO_EPIC_MSG_ADDR_LOW *l = (void *)&msg->address_lo;
+	int node = of_node_to_nid(to_of_node(irqd->domain->fwnode));
+
+	WARN_ON(!is_of_node(irqd->domain->fwnode));
+	/* Let the parent dmn compose the MSI message */
+	irq_chip_compose_msi_msg(irqd->parent_data, msg);
+
+	get_io_pic_msi(node, &lo, &msg->address_hi);
+	l->MSI = lo >> 20;
+}
+
 #ifdef CONFIG_E2K
 static void ioepic_initialize_pin(struct irq_data *irqd)
 {
@@ -428,6 +576,14 @@ static void io_epic_reset_pin(struct iopic *epic, unsigned pin)
 	io_epic_write(epic, IOEPIC_TABLE_MSG_DATA(pin), 0);
 	io_epic_write(epic, IOEPIC_TABLE_ADDR_HIGH(pin), 0);
 	io_epic_write(epic, IOEPIC_TABLE_ADDR_LOW(pin), 0);
+}
+
+static void ioepic_reset(struct iopic *pic)
+{
+	unsigned int pin;
+
+	for_each_iopic_pin(pic, pin)
+		io_epic_reset_pin(pic, pin);
 }
 
 static int ioepic_setup_pin_passthrough(struct irq_data *irqd,
@@ -509,7 +665,7 @@ static int ioepic_set_vcpu_affinity(struct irq_data *irqd, void *vcpu_info)
 # define ioepic_set_vcpu_affinity NULL
 #endif
 
-struct irq_chip ioepic_chip __read_mostly = {
+static struct irq_chip ioepic_chip __read_mostly = {
 	.name			= "IO-EPIC",
 	.irq_request_resources	= ioepic_irq_request_resources,
 	.irq_startup		= startup_ioepic_irq,
@@ -518,6 +674,7 @@ struct irq_chip ioepic_chip __read_mostly = {
 	.irq_set_type		= ioepic_irq_set_type,
 	.irq_ack		= irq_chip_ack_parent,
 	.irq_eoi		= ioepic_ack_level,
+	.irq_compose_msi_msg	= ioepic_compose_msi_msg,
 	.irq_set_affinity	= ioepic_set_affinity,
 	.irq_retrigger		= irq_chip_retrigger_hierarchy,
 	.irq_get_irqchip_state	= ioepic_irq_get_chip_state,
@@ -538,8 +695,22 @@ static void ioepic_get_id_ver_pins(struct iopic *pic,
 	*pins    = reg_version.entries;
 }
 
+static void ioepic_set_id(struct iopic *pic, int id)
+{
+	union IO_EPIC_ID reg_id;
+	reg_id.raw = io_epic_read(pic, IOEPIC_ID);
+	reg_id.id = id;
+	io_epic_write(pic, IOEPIC_ID, reg_id.raw);
+}
+
 struct iopic_chip iopic_ioepic_chip = {
-	.iopic_get_id_ver_pins = ioepic_get_id_ver_pins,
-	.iopic_chip = &ioepic_chip,
-	.iopic_sizeof_entry = sizeof(struct IO_EPIC_route_entry),
+#ifdef CONFIG_PM
+	.iopic_suspend		= ioepic_suspend,
+	.iopic_resume		= ioepic_resume,
+#endif
+	.iopic_get_id_ver_pins	= ioepic_get_id_ver_pins,
+	.iopic_set_id		= ioepic_set_id,
+	.iopic_reset		= ioepic_reset,
+	.iopic_chip		= &ioepic_chip,
+	.iopic_sizeof_entry	= sizeof(struct IO_EPIC_route_entry),
 };

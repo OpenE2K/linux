@@ -30,7 +30,7 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
@@ -167,7 +167,7 @@ pv_vcpu_user_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs, e2k_stacks_t
 
 	if (unlikely(pcs_copy_size > 0)) {
 		e2k_pcsp_t k_pcsp = native_read_PCSP_reg();
-		void __user *dst;
+		void  __priv *dst;
 		void *src;
 
 		/* Since SPILL'ed guest user data will be copyed to guest */
@@ -180,7 +180,7 @@ pv_vcpu_user_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs, e2k_stacks_t
 			       vcpu_pcsp_ind(vcpu, g_pcsp));
 			E2K_KVM_BUG_ON(true);
 		}
-		dst = (void __user *)vcpu_pcsp_ptr(vcpu, g_pcsp);
+		dst = vcpu_pcsp_ptr(vcpu, g_pcsp);
 		if (!guest_user) {
 			/* stack index has been incremented on PCSHTP */
 			dst -= g_pcshtp_size;
@@ -190,8 +190,7 @@ pv_vcpu_user_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs, e2k_stacks_t
 		if (trace_host_copy_hw_stack_enabled())
 			trace_host_copy_hw_stack(dst, src, pcs_copy_size, true);
 
-		ret = user_hw_stack_frames_copy(dst, src, pcs_copy_size, regs,
-						PCSP_IND(k_pcsp), true);
+		ret = user_pcsp_stack_copy(dst, PCSP_IND(k_pcsp), src, pcs_copy_size, regs);
 		if (trace_host_chain_stack_frame_enabled())
 			trace_chain_stack_frames((e2k_mem_crs_t __user *) dst,
 					(e2k_mem_crs_t *) src, pcs_copy_size,
@@ -209,7 +208,7 @@ pv_vcpu_user_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs, e2k_stacks_t
 
 	if (unlikely(ps_copy_size > 0)) {
 		e2k_psp_t k_psp = native_read_PSP_reg();
-		void __user *dst;
+		volatile void __user __priv *dst;
 		void *src;
 
 		/* Since SPILL'ed guest user data will be copyed to guest */
@@ -220,7 +219,7 @@ pv_vcpu_user_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs, e2k_stacks_t
 			       __func__, vcpu_psp_ind(vcpu, g_psp), vcpu_psp_size(vcpu, g_psp));
 			E2K_KVM_BUG_ON(true);
 		}
-		dst = (void __user *)vcpu_psp_ptr(vcpu, g_psp);
+		dst = vcpu_psp_ptr(vcpu, g_psp);
 		if (!guest_user) {
 			/* stack index has been incremented on PSHTP */
 			dst -= g_pshtp_size;
@@ -230,8 +229,7 @@ pv_vcpu_user_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs, e2k_stacks_t
 		if (trace_host_copy_hw_stack_enabled())
 			trace_host_copy_hw_stack(dst, src, ps_copy_size, false);
 
-		ret = user_hw_stack_frames_copy(dst, src, ps_copy_size, regs,
-						PSP_IND(k_psp), false);
+		ret = user_psp_stack_copy(dst, PSP_IND(k_psp), src, ps_copy_size, regs);
 		if (trace_host_proc_stack_frame_enabled())
 			trace_proc_stack_frames((kernel_mem_ps_t __user *) dst,
 					(kernel_mem_ps_t *) src, ps_copy_size,
@@ -431,7 +429,7 @@ user_hw_stacks_copy(struct e2k_stacks *stacks,
 	return native_user_hw_stacks_copy(stacks, regs, cur_window_q, copy_full);
 }
 
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is native guest kernel */

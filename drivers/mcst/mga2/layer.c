@@ -5,6 +5,14 @@
 
 struct mga2_layer {
 	struct drm_plane	plane;
+
+	struct {
+		struct drm_property *colorkey_min;
+		struct drm_property *colorkey_max;
+	} props;
+
+	uint64_t colorkey_min;
+	uint64_t colorkey_max;
 };
 
 struct mga2_plane_desc {
@@ -373,6 +381,86 @@ static int mga2_rect_calc_hscale(const struct drm_rect *src,
 	return dst_w ? src_w / dst_w : 1 << 16;
 }
 
+struct mga2_csc_data {
+	s16 coeff[3][3];
+	s16 preoff[3];
+	s16 min[3];
+	s16 max[3];
+	u32 postoff[3];
+};
+
+#define CSC_PARAMS_LIMITED \
+	.preoff  = { -16, -128, -128 }, \
+	.min     = {   0, -112, -112 }, \
+	.max     = { 219,  112,  112 }, \
+	.postoff = { 128,  128,  128 }
+
+static const struct mga2_csc_data
+mga2_yuv2rgb_coeffs[] = {
+	[DRM_COLOR_YCBCR_BT601] = {
+		.coeff = {
+			{ 298,    0,    409 },
+			{ 298, -100,   -208 },
+			{ 298,  514,      0 },
+		},
+		CSC_PARAMS_LIMITED
+
+	},
+	[DRM_COLOR_YCBCR_BT709] = {
+		.coeff = {
+			{ 298,   0,    459 },
+			{ 298, -54,   -136 },
+			{ 298, 538,      0 },
+		},
+		CSC_PARAMS_LIMITED
+	},
+};
+
+static inline u32 pack_yuvpre(s16 add, s16 min, s16 max)
+{
+	u32 add_u, min_u, max_u;
+
+	add_u = (u16)add & 0x1ff;
+	min_u = (u16)min & 0x1ff;
+	max_u = (u16)max & 0x1ff;
+
+	return (add_u & 0xff)
+	       | ((min_u & 0xff) <<  8)
+	       | ((max_u & 0xff) << 16)
+	       | ((add_u >> 8)   << 24)
+	       | ((min_u >> 8)   << 28)
+	       | ((max_u >> 8)   << 31);
+}
+
+static int mga2_overlay_set_colorspace(struct mga2_crtc *mcrtc,
+			 enum drm_color_encoding color_encoding)
+{
+	if (WARN_ON(color_encoding != DRM_COLOR_YCBCR_BT601 &&
+				color_encoding != DRM_COLOR_YCBCR_BT709))
+		return -EINVAL;
+
+	const struct mga2_csc_data *csc = &mga2_yuv2rgb_coeffs[color_encoding];
+
+	wcrtc(pack_yuvpre(csc->preoff[0], csc->min[0], csc->max[0]), Y2R_YPRE);
+	wcrtc(pack_yuvpre(csc->preoff[1], csc->min[1], csc->max[1]), Y2R_UPRE);
+	wcrtc(pack_yuvpre(csc->preoff[2], csc->min[2], csc->max[2]), Y2R_VPRE);
+
+	unsigned int i, j;
+	for (i = 0; i < ARRAY_SIZE(csc->coeff); ++i) {
+		for (j = 0; j < ARRAY_SIZE(csc->coeff[0]); ++j) {
+			wcrtc(i << 24 |
+			      j << 16 |
+			      csc->coeff[i][j], Y2R_MATRIX);
+		}
+	}
+
+	wcrtc(csc->postoff[0], Y2R_RSH);
+	wcrtc(csc->postoff[1], Y2R_GSH);
+	wcrtc(csc->postoff[2], Y2R_BSH);
+
+	return 0;
+}
+
 static void mga2_overlay_atomic_update(struct drm_plane *plane,
 					      struct drm_atomic_state *astate)
 {
@@ -389,7 +477,8 @@ static void mga2_overlay_atomic_update(struct drm_plane *plane,
 	int hscale, vscale, scale = 0;
 	struct drm_rect os, s = drm_plane_state_src(new_state);
 	struct drm_rect od, d = drm_plane_state_dest(new_state);
-	struct mga2 *mga2 = plane->dev->dev_private;
+	struct mga2_layer *layer =
+		container_of(plane, struct mga2_layer, plane);
 
 	BUILD_BUG_ON(-1 >> 1 != -1);
 	if (!new_state->fb  || WARN_ON(!new_state->crtc) ||
@@ -425,6 +514,9 @@ static void mga2_overlay_atomic_update(struct drm_plane *plane,
 
 	mga2_set_zoom(mcrtc, hscale, vscale);
 
+	if (!old_state->visible && new_state->visible)
+		mga2_overlay_set_colorspace(mcrtc, new_state->color_encoding);
+
 	v = mga2_rect_xy(&d);
 	if (mga2_rect_xy(&od) != v || scale)
 		wcrtc(v, OVL_XY);
@@ -458,44 +550,43 @@ static void mga2_overlay_atomic_update(struct drm_plane *plane,
 			new_state->alpha >> 8 :
 			fb->format->has_alpha ? 0 : 0xff;
 	alpha <<= MGA2_DC0_OVL_ALPHA_SHIFT;
-	wcrtc(MGA2_DC0_OVL_UPD_BUSY | MGA2_DC0_OVL_ENABLE | alpha, OVL_CTRL);
 
 	if (!old_state->visible && new_state->visible) {
-		wcrtc(mga2->props.colorkey_min_val, OVL_KEY_MIN);
-		wcrtc(mga2->props.colorkey_max_val, OVL_KEY_MAX);
+		wcrtc(layer->colorkey_min, OVL_KEY_MIN);
+		wcrtc(layer->colorkey_max, OVL_KEY_MAX);
 	}
+
+	wcrtc(MGA2_DC0_OVL_UPD_BUSY | MGA2_DC0_OVL_ENABLE | alpha, OVL_CTRL);
 
 	mga2_check_scanout_enable(new_state, old_state, plane->type);
 
 }
 
-static int mga2_layer_create_properties(struct drm_device *drm)
+static int mga2_layer_create_properties(struct drm_device *drm, struct mga2_layer *layer)
 {
-	struct mga2 *mga2 = drm->dev_private;
-
-	if (mga2->props.colorkey_min || mga2->props.colorkey_max)
+	if (layer->props.colorkey_min || layer->props.colorkey_max)
 		return 0;
 
-	mga2->props.colorkey_min = drm_property_create_range(drm, 0,
+	layer->props.colorkey_min = drm_property_create_range(drm, 0,
 					"colorkey_min", 0, 0xffffff);
-	mga2->props.colorkey_max = drm_property_create_range(drm, 0,
+	layer->props.colorkey_max = drm_property_create_range(drm, 0,
 					"colorkey_max", 0, 0xffffff);
 
-	if (!mga2->props.colorkey_min || !mga2->props.colorkey_max)
+	if (!layer->props.colorkey_min ||
+	    !layer->props.colorkey_max)
 		return -ENOMEM;
 
 	return 0;
 }
 
 static void mga2_layer_attach_properties(struct drm_device *drm,
-					struct drm_mode_object *obj)
+					struct mga2_layer *layer)
 {
-	struct mga2 *mga2 = drm->dev_private;
-
-	drm_object_attach_property(obj, mga2->props.colorkey_min, 0);
-	drm_object_attach_property(obj, mga2->props.colorkey_max, ~0);
-	mga2->props.colorkey_min_val = 0;
-	mga2->props.colorkey_max_val = ~0;
+	struct drm_mode_object *obj = &layer->plane.base;
+	drm_object_attach_property(obj, layer->props.colorkey_min, 0);
+	drm_object_attach_property(obj, layer->props.colorkey_max, 0xffffff);
+	layer->colorkey_min = 0;
+	layer->colorkey_max = 0xffffff;
 }
 
 static int mga2_overlay_atomic_set_property(struct drm_plane *plane,
@@ -503,12 +594,13 @@ static int mga2_overlay_atomic_set_property(struct drm_plane *plane,
 					struct drm_property *property,
 					uint64_t val)
 {
-	struct mga2 *mga2 = plane->dev->dev_private;
+	struct mga2_layer *layer =
+		container_of(plane, struct mga2_layer, plane);
 
-	if (property == mga2->props.colorkey_min) {
-		mga2->props.colorkey_min_val = le24_to_cpu(val);
-	} else if (property == mga2->props.colorkey_max) {
-		mga2->props.colorkey_max_val = le24_to_cpu(val);
+	if (property == layer->props.colorkey_min) {
+		layer->colorkey_min = le24_to_cpu(val);
+	} else if (property == layer->props.colorkey_max) {
+		layer->colorkey_max = le24_to_cpu(val);
 	} else {
 		return -EINVAL;
 	}
@@ -521,12 +613,13 @@ static int mga2_overlay_atomic_get_property(struct drm_plane *plane,
 					struct drm_property *property,
 					uint64_t *val)
 {
-	struct mga2 *mga2 = plane->dev->dev_private;
+	struct mga2_layer *layer =
+		container_of(plane, struct mga2_layer, plane);
 
-	if (property == mga2->props.colorkey_min) {
-		*val = cpu_to_le24(mga2->props.colorkey_min_val);
-	} else if (property == mga2->props.colorkey_max) {
-		*val = cpu_to_le24(mga2->props.colorkey_max_val);
+	if (property == layer->props.colorkey_min) {
+		*val = cpu_to_le24(layer->colorkey_min);
+	} else if (property == layer->props.colorkey_max) {
+		*val = cpu_to_le24(layer->colorkey_max);
 	} else {
 		return -EINVAL;
 	}
@@ -842,13 +935,24 @@ static struct mga2_layer *mga2_layer_init_one(struct drm_device *drm,
 	}
 
 	if (plane->type == DRM_PLANE_TYPE_OVERLAY) {
-		ret = mga2_layer_create_properties(drm);
+		ret = mga2_layer_create_properties(drm, layer);
 		if (ret) {
 			dev_err(drm->dev, "Couldn't create layer properties\n");
 			return ERR_PTR(ret);
 		}
 
-		mga2_layer_attach_properties(drm, &layer->plane.base);
+		mga2_layer_attach_properties(drm, layer);
+
+		ret = drm_plane_create_color_properties(
+			&layer->plane,
+			BIT(DRM_COLOR_YCBCR_BT601) |
+			BIT(DRM_COLOR_YCBCR_BT709),
+			BIT(DRM_COLOR_YCBCR_LIMITED_RANGE),
+			DRM_COLOR_YCBCR_BT709, DRM_COLOR_YCBCR_LIMITED_RANGE);
+		if (ret) {
+			dev_err(drm->dev, "Couldn't create color properties\n");
+			return ERR_PTR(ret);
+		}
 
 		ret = drm_plane_create_alpha_property(&layer->plane);
 		if (ret)

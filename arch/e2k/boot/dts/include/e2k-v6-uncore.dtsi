@@ -59,6 +59,12 @@
 		interrupt-names = "SIC error interrupts";
 	};
 #if CELLS == 2
+	IPLINKS: iplinks@NODE,604 {
+		compatible = "mcst,iplinks";
+		reg = <NSR_ADDR(00000) 0 0x1000>; /* IPCC_ */
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
 	PMC_FREQ: pmc_freq@NODE,1200 {
 		compatible = "mcst,pmc-freq";
 		reg = <NSR_ADDR(01200) 0 0xfc>, <NSR_ADDR(00cc0) 0 0x8>;
@@ -68,41 +74,65 @@
 	PCSM_DRV: pcsm_drv@NODE,1008 {
 		compatible = "mcst,pcsm-drv";
 		reg = <NSR_ADDR(01008) 0 0x28>,
-		      <NSR_ADDR(021b8) 0 0x200>,
-		      <NSR_ADDR(01540) 0 0x4>,
-		      <NSR_ADDR(01510) 0 0x14>;
+			  <NSR_ADDR(021b8) 0 0x200>,
+			  <NSR_ADDR(01540) 0 0x4>,
+			  <NSR_ADDR(01510) 0 0x14>;
 		numa-node-id = <NODE>;
 		nonposted-mmio;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP5_INTERRUPT_VECTOR 5 0>;
+		interrupt-names = "PCS interrupts";
 	};
 	UNCORE_MC: uncore_mc@NODE,0 {
 		compatible = "mcst,uncore_mc";
-		reg = <NSR_ADDR(00000) 0 0x1000>, <NSR_ADDR(04000) 0 0x1000>;
+		reg = <NSR_ADDR(00000) 0 0x1000>, /* ST_P...HMU, DIR */
+			  <NSR_ADDR(04000) 0 0x1000>; /* DDRREG_ */
 		nonposted-mmio;
 	};
-
+	HW_CHECK: hw_check@NODE,0 {
+		compatible = "mcst,hw_check";
+		reg = <NSR_ADDR(00000) 0 0x20>,	 /* ST_P, RT_ */
+			  <NSR_ADDR(00400) 0 0x60>,	 /* MC_ */
+			  <NSR_ADDR(00604) 0 0x8c>,	 /* IPCC_ */
+			  <NSR_ADDR(01000) 0 0x700>, /* PCS */
+			  <NSR_ADDR(00d00) 0 0x4>,	 /* HMU, DIR */
+			  <NSR_ADDR(00cc0) 0 0x8>;	 /* EFUSE_ */
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
+	FATAL_TEMP: fatal_temp@NODE,0 {
+		compatible = "mcst,fatal_temp";
+		reg = <NSR_ADDR(0100c) 0 0x4>;	 /* PCS */
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
 #ifdef E2C3
 #ifndef LINUX_PATCH /* devtree version < 2.0 has theese devices too */
 	devfreq_mga2: devfreq_mga2@0,1410 {
 		compatible = "mcst,devfreq_pmc_dev";
-		reg = <NSR_ADDR(01410) 0 0x8>;
+		reg = <NSR_ADDR(01410) 0 0x8>,
+			  <NSR_ADDR(00cc0) 0 0x8>;	 /* EFUSE_ */
 		nonposted-mmio;
 	};
 
 	devfreq_3dgpu: devfreq_3dgpu@0,1420 {
 		compatible = "mcst,devfreq_pmc_dev";
-		reg = <NSR_ADDR(01420) 0 0x8>;
+		reg = <NSR_ADDR(01420) 0 0x8>,
+			  <NSR_ADDR(00cc0) 0 0x8>;	 /* EFUSE_ */
 		nonposted-mmio;
 	};
 
 	devfreq_encoders: devfreq_encoders@0,1430 {
 		compatible = "mcst,devfreq_pmc_dev";
-		reg = <NSR_ADDR(01430) 0 0x8>;
+		reg = <NSR_ADDR(01430) 0 0x8>,
+			  <NSR_ADDR(00cc0) 0 0x8>;	 /* EFUSE_ */
 		nonposted-mmio;
 	};
 
 	devfreq_hantrodec: devfreq_decoders@0,1440 {
 		compatible = "mcst,devfreq_pmc_dev";
-		reg = <NSR_ADDR(01440) 0 0x8>;
+		reg = <NSR_ADDR(01440) 0 0x8>,
+			  <NSR_ADDR(00cc0) 0 0x8>;	 /* EFUSE_ */
 		nonposted-mmio;
 	};
 #endif /* LINUX_PATCH */

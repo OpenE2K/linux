@@ -36,6 +36,7 @@
 static int redo_esclk_reset = 0;
 static int esclkr_no = 0;
 bool esclk_initialized __ro_after_init = false;
+EXPORT_SYMBOL(esclk_initialized);
 static unsigned long long esclk_step = 10 << 27;	/* hw default step for esclk_clk 100 MHz */
 
 static int __init esclkr_setup(char *s)

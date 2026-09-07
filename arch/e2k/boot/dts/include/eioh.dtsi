@@ -23,6 +23,10 @@
 #define _IOMMU(_n) __IOMMU(_n)
 #define IOMMU _IOMMU(NODE)
 
+#define __MSI(_n) msi ## _n
+#define _MSI(_n) __MSI(_n)
+#define MSI _MSI(NODE)
+
 #define __GPIO(_n) l_gpio ## _n
 #define _GPIO(_n) __GPIO(_n)
 #define L_GPIO _GPIO(NODE)
@@ -47,7 +51,12 @@
 
 		#interrupt-cells = <2>;
 	};
-
+	MSI: MSI {
+		compatible = "mcst,l-msi";
+		interrupt-parent = <&lpic>;
+		msi-controller;
+		numa-node-id = <NODE>;
+	};
 	IOMMU: iommu@NODE,380 {
 		compatible = "mcst,e2k-iommu";
 		REG = <NSR_ADDR(00380) 0 0x80>,
@@ -60,7 +69,6 @@
 		interrupt-parent = <&LVT>;
 		interrupts = <LINP1_INTERRUPT_VECTOR 1 0>;
 	};
-
 	pci@NODE {
 		compatible = "mcst,l-pci";
 		REG = <PCICFG_ADDR(0000000) 0 0x10000000>, /*E2S_PCICFG_AREA_PHYS_BASE*/
@@ -72,7 +80,7 @@
 
 		linux,pci-domain = <NODE>;
 		numa-node-id = <NODE>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 		/*rid-base,iommu,iommu-base,length*/
 		iommu-map = <0x0 &IOMMU 0x0 0x10000>;
@@ -194,6 +202,34 @@
 				reg = <0x00004800 0 0 0 0>;
 				interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
 			};
+#ifdef IOHUB2_BUS_NR
+			pci@a,0 { /* iohub2 */
+				reg = <0x00005000 0 0 0 0>;
+
+				interrupt-parent = <&iohub2_pic>;
+#include <e2k/iohub2-devices.dtsi>
+				iohub2_pic: pic {
+					compatible = "mcst,ioapic";
+/* IOHUB2_BUS_NR macro must be 2 characters long (for example: 0b) and
+  should be taken from bootloader log */
+#define __IOHUB2_PIC_REGBAR(__b, __a) __b ## __a
+#define _IOHUB2_PIC_REGBAR(_b, _a) __IOHUB2_PIC_REGBAR(_b, _a)
+#define IOHUB2_PIC_REGBAR _IOHUB2_PIC_REGBAR(IOHUB2_BUS_NR, 11040) /*i2c-spi xx:02.1 */
+					regbar-and-size64 = /bits/ 64 <PCICFG_ADDRL(IOHUB2_PIC_REGBAR) 20>;
+
+					interrupt-parent = <&lpic>;
+					interrupt-controller;
+					/* hw bug 170189: iohub2 interrupts can
+					 * be handled only by processor 0, but
+					 * end of interrupt should be sent from
+					 * processor to which iohub2 is connected */
+					numa-node-id = <0>;
+					real-numa-node-id = <NODE>;
+
+					#interrupt-cells = <2>;
+				};
+			};
+#endif
 		};
 #ifdef E2C3
 		display_subsystem: mga2@0,d0 /*1a.0 */ { /*MGA2 graphic controller*/

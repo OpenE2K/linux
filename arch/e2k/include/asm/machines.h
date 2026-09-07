@@ -13,7 +13,6 @@
 #include <asm/e12c.h>
 #include <asm/e16c.h>
 #include <asm/e2c3.h>
-#include <asm/e48c.h>
 #include <asm/e8v7.h>
 
 #endif

@@ -558,7 +558,7 @@ void videoGetInitialScale(
  *      dstWidth     - The destination video width 
  *      dstHeight    - The destination video height
  */
-void videoScale(
+static void videoScale(
 	unsigned dispCtrl,
     unsigned long srcWidth,
     unsigned long srcHeight,

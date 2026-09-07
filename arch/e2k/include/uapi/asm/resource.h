@@ -14,8 +14,4 @@
 #undef	_STK_LIM
 #define	_STK_LIM	(16*1024*1024)
 
-#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
-#define	_BINCOMP_STK_LIM	(8*1024*1024)
-#endif
-
 #endif /* _E2K_RESOURCE_H_ */

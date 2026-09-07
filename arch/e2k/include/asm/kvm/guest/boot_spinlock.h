@@ -12,12 +12,12 @@
 #define __ASM_KVM_GUEST_BOOT_SPINLOCK_H
 
 #include <linux/types.h>
+#include <linux/spinlock_types.h>
 
 extern void kvm_arch_boot_spin_lock_slow(void *lock);
 extern void kvm_arch_boot_spin_locked_slow(void *lock);
 extern void kvm_arch_boot_spin_unlock_slow(void *lock);
 
-#ifdef	CONFIG_KVM_GUEST_KERNEL
 /* native guest kernel */
 
 #define arch_spin_relax(lock)	kvm_cpu_relax()
@@ -37,6 +37,22 @@ static inline void boot_arch_spin_unlock_slow(boot_spinlock_t *lock)
 	kvm_arch_boot_spin_unlock_slow(lock);
 }
 
-#endif	/* CONFIG_KVM_GUEST_KERNEL */
+#define arch_boot_spin_unlock kvm_boot_spin_unlock
+static inline void kvm_boot_spin_unlock(boot_spinlock_t *lock)
+{
+	boot_spinlock_t val;
+	u16 ticket, ready;
+
+	wmb();	/* wait for all store completion */
+	val.lock = __api_atomic16_add_return32_lock(
+			1 << BOOT_SPINLOCK_HEAD_SHIFT, &lock->lock);
+	ticket = val.tail;
+	ready = val.head;
+
+	if (unlikely(ticket != ready)) {
+		/* spinlock has more user(s): so activate it(s) */
+		boot_arch_spin_unlock_slow(lock);
+	}
+}
 
 #endif	/* __ASM_KVM_GUEST_BOOT_SPINLOCK_H */

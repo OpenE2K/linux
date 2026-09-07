@@ -812,7 +812,11 @@ int bpf_bprintf_prepare(char *fmt, u32 fmt_size, const u64 *raw_args,
 	bool get_buffers = (data->get_bin_args && num_args) || data->get_buf;
 	char *unsafe_ptr = NULL, *tmp_buf = NULL, *tmp_buf_end, *fmt_end;
 	struct bpf_bprintf_buffers *buffers = NULL;
+#ifdef CONFIG_MCST
+	size_t sizeof_cur_arg = 0, sizeof_cur_ip;
+#else
 	size_t sizeof_cur_arg, sizeof_cur_ip;
+#endif
 	int err, i, num_spec = 0;
 	u64 cur_arg;
 	char fmt_ptype, cur_ip[16], ip_spec[] = "%pXX";

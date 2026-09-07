@@ -29,6 +29,11 @@ ieee80211_update_from_he_6ghz_capa(const struct ieee80211_he_6ghz_capa *he_6ghz_
 		case WLAN_HT_CAP_SM_PS_DISABLED:
 			smps_mode = IEEE80211_SMPS_OFF;
 			break;
+#ifdef CONFIG_MCST
+		default:
+			smps_mode = IEEE80211_SMPS_OFF;
+			break;
+#endif
 		}
 
 		link_sta->pub->smps_mode = smps_mode;

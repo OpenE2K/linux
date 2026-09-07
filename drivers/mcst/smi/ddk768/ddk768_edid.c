@@ -405,6 +405,8 @@ long ddk768_edidGetAnalogSignalInfo(
                 whiteReference = 700;
                 syncLevel = 0;
                 break;
+	    default:
+		return -1;
         }
         
         if (pRefWhiteAboveBlank != (unsigned short *)0)
@@ -1498,6 +1500,8 @@ static long edidCalculateStdTiming(
             case 3:
                 y = x * 9 / 16;             /* 16:9 aspect ratio */
                 break;
+	    default:
+		return -1;
         }
 
         if (pWidth != (unsigned long *)0)

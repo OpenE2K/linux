@@ -26,7 +26,7 @@
 #include <linux/pps_kernel.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/clock.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "mpv.h"
 
@@ -34,7 +34,7 @@
 #include <linux/mcst/mcst_selftest.h>
 #endif
 
-int mpv_debug_more = 0;
+static int mpv_debug_more = 0;
 
 #define DBGMPVDETAIL_MODE
 #undef DBGMPVDETAIL_MODE
@@ -63,7 +63,7 @@ int mpv_debug_more = 0;
 #define SBUS_DEV 	1
 #define PCI_DEV  	2
 
-atomic_t mpv_instances = ATOMIC_INIT(0);
+static atomic_t mpv_instances = ATOMIC_INIT(0);
 
 static struct pci_dev *cur_pdev;
 static int major_base = 0; /* first =0, furher - dynamically received from OS */
@@ -105,14 +105,14 @@ static int mpv_remove(struct platform_device *pl_dev);
 static void mpv_shutdown(struct platform_device *pl_dev);
 
 static	int	mpv_open(struct inode *inode, struct file *file);
-static  ssize_t mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos);
-static  ssize_t mpv_write (struct file *file, const char *buf, size_t sz, loff_t *f_pos);
+static  ssize_t mpv_read (struct file *file, char __user *buf, size_t sz, loff_t *f_pos);
+static  ssize_t mpv_write (struct file *file, const char __user *buf, size_t sz, loff_t *f_pos);
 static	int	mpv_close(struct inode *inode, struct file *file);
 static	long	mpv_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 #ifdef CONFIG_COMPAT
 static	long	mpv_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 #endif
-static  unsigned int  mpv_chpoll(struct file *file, struct poll_table_struct *wait);
+static  __poll_t  mpv_chpoll(struct file *file, struct poll_table_struct *wait);
 
 static int mpv_check_initial_value_reg(mpv_state_t *mpv_st);
 static irqreturn_t mpv_intr_handler(int irq, void *arg);
@@ -124,7 +124,7 @@ static int mpv_get_freq(u32 bus);
 /* number of msecs for fsecs_per_mpvclock calculating
  * Should be less then 131 ms for 32 MHz MPV and 20-bit MPV_REG_CHECK */
 #define	measure_sleep_time_ms	100
-int	stv_num_msrms = 0;
+static int	stv_num_msrms = 0;
 
 static struct file_operations mpv_fops = {
 	owner:		THIS_MODULE,
@@ -145,12 +145,12 @@ static struct file_operations mpv_fops = {
 #define mpv_write_regl(mpv_st, a, v)	writel(v, mpv_st->regs_base + a)
 #define mpv_read_regl(mpv_st, a)	readl(mpv_st->regs_base + a)
 
-long	dbg_avg_getcor = 0;
-int	dbg_max_atpt_getcor = 0;
-int	dbg_sum_atpt = 0;
-int	dbg_num_get_cc = 0;
-int	dbg_num_intr = 0;
-int	do_log_stv1 = 0;
+static long	dbg_avg_getcor = 0;
+static int	dbg_max_atpt_getcor = 0;
+static int	dbg_sum_atpt = 0;
+static int	dbg_num_get_cc = 0;
+static int	dbg_num_intr = 0;
+static int	do_log_stv1 = 0;
 extern	int	do_log_stv;
 
 #ifdef CONFIG_SYSCTL
@@ -287,7 +287,7 @@ mpv_exit(void)
 
 static int
 mpv_common_probe(struct pci_dev *pci_dev, mpv_state_t **mpv_stp,
-		void *r_base, int mpv_new, int revision_id, int dev_type)
+		void __iomem *r_base, int mpv_new, int revision_id, int dev_type)
 {
 	mpv_state_t	*mpv_st;
 	int		i;
@@ -590,11 +590,12 @@ mpv_probe(struct platform_device *pl_dev)
 	u8		mpv_new = 0;
 	u8		revision_id;
 	u16		vendor_id, device_id;
-	void		*regs_base;
+	void __iomem	*regs_base;
 	int		rval;
 	int		bar = 0;
 	struct pci_dev *pci_dev;
 	int		dev_id = MPV_CARD_DEVID;
+	int i, irq_nr = platform_irq_count(pl_dev);
 
 	if (WARN_ON(!pl_dev->dev.parent))
 		return -ENODEV;
@@ -660,85 +661,42 @@ mpv_probe(struct platform_device *pl_dev)
 	pci_read_config_byte(pci_dev, PCI_HW_REV_ID, &(mpv_st->hw_rev_id));
 	mpv_st->pci_dev = pci_dev;
 	platform_set_drvdata(pl_dev, (void *)mpv_st);
-	mpv_st->irq = platform_get_irq(pl_dev, 0);
-	mpv_st->irq1 = platform_get_irq(pl_dev, 1);
-	mpv_st->irq2 = platform_get_irq(pl_dev, 2);
 
-	if (mpv_new == MPV_KPI2) {
-		rval = request_threaded_irq(mpv_st->irq, &mpv_intr_handler,
-			&mpv_threaded_handler,
-			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
-		if (rval) {
-			pr_err("MPV-%d: Can't get irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq, rval);
-			goto err_unmap;
-		}
-		rval = request_threaded_irq(mpv_st->irq1, &mpv_intr_handler,
-			&mpv_threaded_handler,
-			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
-		if (rval) {
-			pr_err("MPV-%d: Can't get irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq1, rval);
-			goto err_unmap;
-		}
-	} else if (mpv_new == MPV_EIOH) {
-		rval = request_threaded_irq(mpv_st->irq, &mpv_intr_handler,
-			&mpv_threaded_handler,
-			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
-		if (rval) {
-			pr_err("MPV-%d: Can't get 1-st irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq, rval);
-			goto err_unmap;
-		}
-		rval = request_threaded_irq(mpv_st->irq1, &mpv_intr_handler,
-			&mpv_threaded_handler,
-			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
-		if (rval) {
-			pr_err("MPV-%d: Can't get 2-nd irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq1, rval);
-			goto err_unmap;
-		}
-		rval = request_threaded_irq(mpv_st->irq2, &mpv_intr_handler,
-			&mpv_threaded_handler,
-			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
-		if (rval) {
-			pr_err("MPV-%d: Can't get 3-rd irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq2, rval);
-			goto err_unmap;
-		}
-	} else {
-		rval = request_threaded_irq(mpv_st->irq, &mpv_intr_handler,
-			&mpv_threaded_handler,
-			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, (void *)mpv_st);
-		if (rval) {
-			pr_err("MPV-%d: Can't get irq %d, err [%d]\n",
-				mpv_st->inst, mpv_st->irq, rval);
-			goto err_unmap;
-		}
+	for (i = rval = 0; i < irq_nr && !rval; i++) {
+		mpv_st->irq[i] = platform_get_irq(pl_dev, i);
+		rval = devm_request_threaded_irq(&pl_dev->dev, mpv_st->irq[i],
+			&mpv_intr_handler, &mpv_threaded_handler,
+			IRQF_SHARED | IRQF_NO_THREAD, MPV_NAME, mpv_st);
 	}
+	if (rval) {
+		pr_err("MPV-%d: Can't get irq %d, err [%d]\n",
+				mpv_st->inst, mpv_st->irq[i], rval);
+		goto err_unmap;
+	}
+
 #ifdef CONFIG_MCST
-	mk_hndl_first(mpv_st->irq, MPV_NAME);
+	mk_hndl_first(mpv_st->irq[0], MPV_NAME);
 #endif
 	if (mpv_st->mpv_new == MPV_KPI2) {
 		pr_info("%d-MPV KPI-2 DEV=0x%x VEND=0x%x REV=0x%x drv.ver.%d IRQ 0=%d IRQ 1,2=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 			mpv_st->inst,
 			MPV_KPI2_DEVID, vendor_id, mpv_st->revision_id,
-			MPV_DRV_VER, mpv_st->irq, mpv_st->irq1,
+			MPV_DRV_VER, mpv_st->irq[0], mpv_st->irq[1],
 			pci_name(pci_dev), mpv_st->fsecs_per_mpvclock);
 	} else
 		if (mpv_st->mpv_new == MPV_EIOH) {
 			pr_info("%d-MPV EIOH DEV=0x%x VEND=0x%x REV=0x%x drv.ver.%d IRQ 0=%d IRQ 1=%d IRQ 2=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 				mpv_st->inst,
 				MPV_KPI2_DEVID, vendor_id, mpv_st->revision_id,
-				MPV_DRV_VER, mpv_st->irq, mpv_st->irq1,
-								mpv_st->irq2,
+				MPV_DRV_VER, mpv_st->irq[0], mpv_st->irq[1],
+								mpv_st->irq[2],
 				pci_name(pci_dev), mpv_st->fsecs_per_mpvclock);
 	} else {
 		if (mpv_st->mpv_new == MPV_4)
 			dev_id = MPV4_DEVID;
 		pr_info("%d-MPV DEV=0x%x VEND=0x%x REV=0x%x HWREV=0x%x. drv.ver.%d IRQ=%d, BUS =%s, femtosecond per counter clock = %lld\n",
 			mpv_st->inst, dev_id, vendor_id, mpv_st->revision_id,
-			mpv_st->hw_rev_id, MPV_DRV_VER, mpv_st->irq,
+			mpv_st->hw_rev_id, MPV_DRV_VER, mpv_st->irq[0],
 			pci_name(pci_dev), mpv_st->fsecs_per_mpvclock);
 	}
 	dbgmpv("MPV inst. =%d :MAJOR =%d, MINOR =%03d-%03d\n",
@@ -770,15 +728,8 @@ mpv_remove(struct platform_device *pl_dev)
 	}
 	if (mpv_st->mpv_new == MPV_KPI2) {
 		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
-		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq1, mpv_st);
 	} else if (mpv_st->mpv_new == MPV_EIOH) {
 		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
-		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq1, mpv_st);
-		free_irq(mpv_st->irq2, mpv_st);
-	} else {
-		free_irq(mpv_st->irq, mpv_st);
 	}
 	_mpv_remove(pci_dev, mpv_st);
 	dbgmpv("inst. %d %s: finished.\n", mpv_st->inst, __func__);
@@ -797,21 +748,14 @@ mpv_shutdown(struct platform_device *pl_dev)
 	mpv_reset_module(mpv_st);
 	if (mpv_st->mpv_new == MPV_KPI2) {
 		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
-		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq1, mpv_st);
 	} else if (mpv_st->mpv_new == MPV_EIOH) {
 		pci_write_config_byte(mpv_st->pci_dev, GPIO_MPV_SW, 0);
-		free_irq(mpv_st->irq, mpv_st);
-		free_irq(mpv_st->irq1, mpv_st);
-		free_irq(mpv_st->irq2, mpv_st);
-	} else {
-		free_irq(mpv_st->irq, mpv_st);
 	}
 	dbgmpv("inst. %d %s: finished.\n", mpv_st->inst, __func__);
 }
 #endif /* pci */
 
-static unsigned int
+static __poll_t
 mpv_chpoll(struct file *file, struct poll_table_struct *wait)
 {
 	dev_t	dev = (dev_t)(long)file->private_data;
@@ -820,17 +764,21 @@ mpv_chpoll(struct file *file, struct poll_table_struct *wait)
 	int	instance = get_mpv_instance(MAJOR(dev), MINOR(dev), &intr);
 	mpv_state_t	*mpv_st = mpv_states[instance];
 	unsigned long   flags;
-
+#if 0
 	if ( mpv_st == NULL )
-		return ENXIO;
+		return (__poll_t)ENXIO;
 	if ( !MPV_IN(dev) )
-		return EINVAL;
+		return (__poll_t)EINVAL;
+#else
+	if (mpv_st == NULL || !MPV_IN(dev))
+		return (__poll_t)0;
+#endif
 	mask = 1 << intr;
 	raw_spin_lock_irqsave(&mpv_st->mpv_lock, flags);
 	if ((mpv_st->intr_assemble & mask) != 0) {
 		mpv_st->intr_assemble &= ~mask;
 		raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
-		return POLLIN;
+		return EPOLLIN;
 	} else {
 		raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);
 		poll_wait(file, &(mpv_st->pollhead),  wait);
@@ -977,7 +925,7 @@ copy_mpv_st(mpv_intr_t *intr_user, mpv_state_t *mpv_st, int mpv_in)
  * supplied buffer is less than sizeof (mpv_intr_t).
  */
 static	ssize_t
-mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos)
+mpv_read (struct file *file, char __user *buf, size_t sz, loff_t *f_pos)
 {
 	mpv_state_t	*mpv_st;
 	int		instance;
@@ -989,9 +937,6 @@ mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos)
 	int		corr_cnt = 0;
 	int interrupts;
 	unsigned long long clock_limit, prev_cycl;
-#ifdef SHOW_WOKEN_TIME
-	unsigned long long cur_cycl;
-#endif
 	struct	timespec64 intr_real_tm;
 	unsigned long	expire;
 
@@ -1044,15 +989,15 @@ mpv_read (struct file *file, char *buf, size_t sz, loff_t *f_pos)
 			raw_spin_unlock_irq(&mpv_st->mpv_lock);
 			return -ETIME;
 got:
+			current->wakeup_tm = getns64timeofday();
 			if (mpv_st->num_time_regs >= bus) {
 				corr_cnt = mpv_read_regl(mpv_st,
 						mpv_st->corr_cnt_reg[bus]);
 			}
 			mpv_st->kdata_intr[bus].num_reciv_intr++;
-#ifdef SHOW_WOKEN_TIME
-			cur_cycl = get_cycles();
+#if defined(SHOW_WOKEN_TIME) || defined(CONFIG_E90S)
 			mpv_st->kdata_intr[bus].irq_enter_clks =
-				cycles_2nsec(cur_cycl - prev_cycl);
+				cycles_2nsec(get_cycles() - prev_cycl);
 #endif
 			ktime_get_real_ts64(&intr_real_tm);
 			mpv_st->kdata_intr[bus].intr_appear_nsec =
@@ -1126,7 +1071,7 @@ finish:
 		raw_spin_unlock_irq(&mpv_st->mpv_lock);
 		if (sz < sizeof(mpv_rd_inf_t))
 			min_sz = sz;
-		if (copy_to_user((void *)buf, (void *)&uinf_read, min_sz))
+		if (copy_to_user(buf, (void *)&uinf_read, min_sz))
 			return -EFAULT;
 		return min_sz;
 	}
@@ -1136,7 +1081,7 @@ finish:
 			instance, bus);
 		st = !!(mpv_read_regl(mpv_st, MPV_REG_OUT_STAT) & disposal_bit);
 		if (sz >= sizeof (int)){
-			return copy_to_user((void *)buf, (void *)&st, sizeof (int)) ? -EFAULT : 0;
+			return copy_to_user(buf, (void *)&st, sizeof (int)) ? -EFAULT : 0;
 		} else {
 			dbgmpv_rw("mpv_read: buf size =%lld; expected %lld\n",
 				(long long)sz, (long long)sizeof (int));
@@ -1146,7 +1091,7 @@ finish:
 }
 
 static	ssize_t
-mpv_write (struct file *file, const char *buf, size_t sz, loff_t *f_pos)
+mpv_write (struct file *file, const char __user *buf, size_t sz, loff_t *f_pos)
 {
 	int		rval;
 	int		instance;
@@ -1164,7 +1109,7 @@ mpv_write (struct file *file, const char *buf, size_t sz, loff_t *f_pos)
 	if (mpv_st == NULL) {
 		return (-ENXIO);
 	};
-	rval = copy_from_user((void *)&st, (void *)buf, sizeof(int));
+	rval = copy_from_user((void *)&st, buf, sizeof(int));
 	if (rval != 0) {
 		pr_err("mpv_write: copy_from_user() finished with error.");
 		return -EFAULT;
@@ -1341,7 +1286,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			st_pci->major = MAJOR(dev);
 			st_pci->minor = MINOR(dev);
 
-			rval = copy_to_user((void *)arg, (void *)&st, sizeof(selftest_t));
+			rval = copy_to_user((void __user __force *)arg, (void *)&st, sizeof(selftest_t));
 			if ( rval != 0 ) {
 				printk( "%s: MCST_SELFTEST_MAGIC: copy_to_user() failed\n", __func__);
 				return -EFAULT;
@@ -1364,7 +1309,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (arg) {
 			unsigned long clock;
 			clock = get_cycles();
-			rval = copy_to_user((void *)arg, (void *)&clock, sizeof (clock));
+			rval = copy_to_user((void __user __force *)arg, (void *)&clock, sizeof (clock));
 			if (rval != 0) {
 				printk( "inst. %d mpv_ioctl (MPVIO_SEND_INTR): "
 					"copy_to_user() finish with error.\n",
@@ -1394,7 +1339,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			"external interrupts polarity bus = %d.\n",
 			instance, bus);
 		raw_spin_lock_irqsave(&mpv_st->mpv_lock, flags);
-		if ((unsigned long)arg == 0) {
+		if (arg == 0) {
 			mpv_st->polar &= ~disposal_bit;
 		} else {
 			mpv_st->polar |= disposal_bit;
@@ -1419,8 +1364,8 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
  * Initial stat os each bus is 0.
  */
 	case MPVIO_SET_STATE : {
-	int	arg0;
-	int	argw;
+		unsigned long	arg0;
+		unsigned long	argw;
 		if ((MPV_OS(dev) == 0) && (MPV_OUT(dev) == 0)){
 			printk( "inst. %d mpv_ioctl (MPVIO_SET_STATE): "
 				"outgoing state bus adjusting. MPV_OS|OUT(dev) = 0.\n",
@@ -1505,7 +1450,8 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		int		i;
 		long long	wait_time = get_usec_tod();
 		
-		rval = copy_from_user((caddr_t)&intr_user, (caddr_t)arg, sizeof (mpv_intr_t));
+		rval = copy_from_user((caddr_t)&intr_user,
+					(void __user __force *)arg, sizeof (mpv_intr_t));
 		if (rval != 0) {
 			printk( "mpv_ioctl (MPVIO_WAIT_INTR): copy_from_user() finished with error.");
 			return (-EFAULT);
@@ -1566,7 +1512,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				mpv_st->intr_assemble = 0;
 		mpv_st->time_gener_intr = 0;
 		raw_spin_unlock_irq(&mpv_st->mpv_lock);
-		rval = copy_to_user((void *)arg, (void *)&intr_user, sizeof (mpv_intr_t));
+		rval = copy_to_user((void __user __force *)arg, &intr_user, sizeof (mpv_intr_t));
 		if (rval != 0) {
 			printk( "mpv_ioctl (MPVIO_WAIT_INTR): copy_to_user() finished with error.\n");
 			return (-EFAULT);
@@ -1599,7 +1545,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (cmd == MPVIO_GET_INTR)
 			state_in &= (1 << bus);
 
-		rval = copy_to_user((void *)arg,
+		rval = copy_to_user((void __user __force *)arg,
 					(void *)&state_in, sizeof(u_int));
 		if (cmd == MPVIO_GET_INTR)
 			dbgmpv( "%d mpv_ioctl GET_INTR N%d=%05X (%05X)\n",
@@ -1623,7 +1569,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		intr_user.mpv_drv_ver = MPV_DRV_VER;
 		intr_user.mpv_dev_rev = mpv_st->revision_id;
 		raw_spin_unlock_irqrestore(&mpv_st->mpv_lock, flags);   
-		rval = copy_to_user((void *)arg, (void *)&intr_user, sizeof (mpv_intr_t));
+		rval = copy_to_user((void __user __force*)arg, &intr_user, sizeof (mpv_intr_t));
 		if (rval != 0) {
 			printk( "mpv_ioctl (MPVIO_GET_INTR_INFO copy_to_user() finished with error.\n");
 			return (-EFAULT);
@@ -1633,7 +1579,7 @@ mpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case MPVIO_SET_STV :
 		raw_spin_lock_irqsave(&mpv_st->mpv_lock, flags);
 		mpv_st->listen_alive &= ~disposal_bit;
-		if ((int) arg >= 1) {
+		if (arg >= 1) {
 			dbg_max_atpt_getcor = 0;
 			dbg_sum_atpt = 0;
 			dbg_num_get_cc = 0;
@@ -2298,7 +2244,7 @@ mpv_intr_handler(int irq, void *arg)
 	long long prev_interv = 0;
 	int wk_cpu = -1;
 
-#ifdef SHOW_WOKEN_TIME
+#if defined(SHOW_WOKEN_TIME) || defined(CONFIG_E90S)
 	long long	irq_enter_clks;
 	irq_enter_clks = get_cycles() - current_thread_info()->irq_enter_clk;
 #endif
@@ -2336,7 +2282,6 @@ mpv_intr_handler(int irq, void *arg)
 	if (interrupts & mpv_st->stv_in_mask) {
 		pps_get_ts(&ts);
 		intr_real_tm = ts.ts_real;
-		stv_raw_tm = ts.ts_raw;
 		if (mpv_st->mpv_new)
 			mpv_write_regl(mpv_st, MPV_RPV, mpv_st->stv_in_mask);
 		if (mpv_st->mpv_new || mpv_st->revision_id >= 2) {
@@ -2366,8 +2311,6 @@ mpv_intr_handler(int irq, void *arg)
 			(int)corr_count_ns;
 		mpv_st->kdata_intr[stv_in_nmb].read_cc_ns = (int)read_cc_ns;
 		corr_tm.tv_nsec = corr_count_ns;
-		timespec64_sub(stv_raw_tm, corr_tm);
-		timespec64_sub(intr_real_tm, corr_tm);
 		mpv_st->kdata_intr[stv_in_nmb].intr_appear_nsec =
 		    timespec64_to_ns(&intr_real_tm);
 		mpv_st->kdata_intr[stv_in_nmb].intr_appear_nsec_mono =
@@ -2375,6 +2318,9 @@ mpv_intr_handler(int irq, void *arg)
 #ifdef	CONFIG_NTP_PPS
 #define READ_CC_LIM	15000 /* nanosec */
 #define CORR_CNT_LIM	300000 /* nanosec */
+		stv_raw_tm = ts.ts_raw;
+		timespec64_sub(stv_raw_tm, corr_tm);
+		timespec64_sub(intr_real_tm, corr_tm);
 		if (read_cc_ns < READ_CC_LIM &&
 					corr_count_ns < CORR_CNT_LIM) {
 			set_pps_stat2(STA_PPSTIME | STA_PPSFREQ);
@@ -2396,7 +2342,7 @@ mpv_intr_handler(int irq, void *arg)
 					    mpv_st->corr_cnt_reg[stv_in_nmb]));
 		}
 #endif
-#ifdef SHOW_WOKEN_TIME
+#if defined(SHOW_WOKEN_TIME) || defined(CONFIG_E90S)
 		mpv_st->kdata_intr[stv_in_nmb].irq_enter_clks = irq_enter_clks;
 #endif
 		if (mpv_st->mpv_new || mpv_st->revision_id >= 2)
@@ -2466,7 +2412,7 @@ mpv_intr_handler(int irq, void *arg)
 			mpv_st->kdata_intr[i].correct_counter_nsec = 0;
 			mpv_st->kdata_intr[i].read_cc_ns = 0;
 		}
-#ifdef SHOW_WOKEN_TIME
+#if defined(SHOW_WOKEN_TIME) || defined(CONFIG_E90S)
 		mpv_st->kdata_intr[i].irq_enter_clks = irq_enter_clks;
 #endif
 		if (mpv_st->mpv_new || mpv_st->revision_id >= 2)

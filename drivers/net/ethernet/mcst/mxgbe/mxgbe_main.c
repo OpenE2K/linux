@@ -22,12 +22,6 @@
 #endif /* CONFIG_MXGBE_DCA */
 
 
-mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev, void __iomem *base);
-int mxgbe_net_register(mxgbe_priv_t *priv);
-int mxgbe_net_reinit(mxgbe_priv_t *priv);
-void mxgbe_net_remove(mxgbe_priv_t *priv);
-void mxgbe_net_free(mxgbe_priv_t *priv);
-int mxgbe_board_up(mxgbe_priv_t *priv);
 
 
 /**
@@ -204,7 +198,16 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 	priv->proc_hint = 0;
 #endif
 
-	raw_spin_lock_init(&priv->mgio_lock);
+	priv->node = dev_to_node(&pdev->dev);
+	if (priv->node == NUMA_NO_NODE)
+		priv->node = 0;
+
+	if (priv->node >= MAX_NUMNODES) {
+		dev_err(&pdev->dev, "node = %d >= MAX_NUMNODES (%d)\n",
+			priv->node, MAX_NUMNODES);
+		err =  -ENODEV;
+		goto err_out;
+	}
 
 	err = mxgbe_board_up(priv);
 	if (err)
@@ -212,9 +215,9 @@ int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[],
 
 	dev_info(&pdev->dev,
 #ifdef __sparc__
-		 "MAC = %012llX\n", be64_to_cpu(priv->MAC >> 16));
+		 "MAC = %012llX\n", be64_to_cpu(priv->MAC) >> 16);
 #else
-		 "MAC = %012llX\n", be64_to_cpu(priv->MAC << 16));
+		 "MAC = %012llX\n", be64_to_cpu(priv->MAC) << 16);
 #endif
 
 err_out:
@@ -300,10 +303,11 @@ int mxgbe_board_up(mxgbe_priv_t *priv)
 
 	/* MAC */
 	if (priv->ndev->reg_state != NETREG_REGISTERED) {
-		if (priv->i2c_2)
-			priv->MAC = cpu_to_be64(mxgbe_i2c_read_mac(priv)) >> 16;
-		else
+		if (priv->i2c_2) {
+			priv->MAC = mxgbe_i2c_read_mac(priv);
+		} else {
 			l_set_ethernet_macaddr(priv->pdev, (char *)&priv->MAC);
+		}
 	}
 
 	/* GPIO */
@@ -371,6 +375,7 @@ err_free_priv:
 void mxgbe_release_board(struct pci_dev *pdev)
 {
 	mxgbe_priv_t *priv = pci_get_drvdata(pdev);
+	int qn;
 
 	if (!priv)
 		return;
@@ -378,6 +383,8 @@ void mxgbe_release_board(struct pci_dev *pdev)
 	mxgbe_dbg_board_exit(priv);
 
 	pdev = priv->pdev;
+
+	mxgbe_hw_reset(priv);
 
 	/* free_irq */
 	mxgbe_msix_release(priv);
@@ -392,6 +399,12 @@ void mxgbe_release_board(struct pci_dev *pdev)
 		mxgbe_i2c_destroy(priv->i2c_1);
 	if (priv->i2c_0)
 		mxgbe_i2c_destroy(priv->i2c_0);
+
+	for (qn = 0; qn < priv->num_rx_queues; qn++)
+		net_rxq_clean_q(priv, qn);
+
+	for (qn = 0; qn < priv->num_tx_queues; qn++)
+		net_txq_clean_q(priv, qn);
 
 	mxgbe_rxq_free_all(priv);
 	mxgbe_txq_free_all(priv);
@@ -418,6 +431,9 @@ void mxgbe_board_down(mxgbe_priv_t *priv)
 
 	for (qn = 0; qn < priv->num_rx_queues; qn++)
 		net_rxq_clean_q(priv, qn);
+
+	for (qn = 0; qn < priv->num_tx_queues; qn++)
+		net_txq_clean_q(priv, qn);
 
 	mxgbe_rxq_free_all(priv);
 	mxgbe_txq_free_all(priv);
@@ -449,8 +465,6 @@ static inline void mxgbe_enable_dca(void)
  ******************************************************************************
  **/
 
-int mxgbe_device_event(struct notifier_block *unused, unsigned long event,
-		       void *ptr);
 
 static struct notifier_block mxgbe_notifier = {
 	.notifier_call = mxgbe_device_event,

@@ -23,7 +23,7 @@ static inline void DBG_func(const char *fmt, ...)
 	vprintk(fmt, va);
 	va_end(va);
 }
-/* #define I3C_PCI_DEBUG */
+#define I3C_PCI_DEBUG
 #ifdef I3C_PCI_DEBUG
 #define DBG(fmt, ...)   DBG_func(KERN_INFO "%s: "  fmt "\n", __func__, ##__VA_ARGS__)
 #else

@@ -11,6 +11,7 @@
 
 #include <linux/tracepoint.h>
 #include <asm/kvm_host.h>
+#include <asm/kvm/pgtable-tdp.h>
 #include <asm/mmu_types.h>
 #include <asm/trace-defs.h>
 
@@ -61,7 +62,7 @@
 		{ IME_GPA_DATA, "GPA_DATA" }, \
 		{ IME_GPA_INSTR, "GPA_INSTR" }, \
 		{ IME_GPA_AINSTR, "GPA_AINSTR" }, \
-		{ IME_MAS_IOADDR, "MAS_IOADDR" }, \
+		{ IME_MAS_IOADDR, "MAS_IO_OPERATION" }, \
 		{ IME_READ_MU, "READ_MU" }, \
 		{ IME_WRITE_MU, "WRITE_MU" }, \
 		{ IME_CACHE_FLUSH, "CACHE_FLUSH" }, \
@@ -125,10 +126,9 @@ TRACE_EVENT(
 		__entry->header = AW(mu[0].hdr);
 		__entry->gpa = mu[0].gpa;
 		__entry->gva = mu[0].gva;
-		load_value_and_tagd(&mu[0].data, &__entry->data_val,
-						&__entry->data_tag);
+		load_value_and_tagd(&mu[0].data, &__entry->data_val, &__entry->data_tag);
 		load_value_and_tagd(&mu[0].data_ext, &__entry->data_ext_val,
-						&__entry->data_ext_tag);
+				    &__entry->data_ext_tag);
 		__entry->condition = AW(mu[0].condition);
 		__entry->mask = AW(mu[0].mask);
 	),
@@ -189,13 +189,105 @@ TRACE_EVENT(
 			))
 );
 
+/* Workaround libtraceevent - use magic number */
+#define E2K_TDP_ALL_FLAGS_V6 0x000000000ce3ULL
+
+#define E2K_TRACE_PRINT_TDP_FLAGS(entry, print) \
+	((print) ? __print_flags(entry & E2K_TDP_ALL_FLAGS_V6, "|", \
+			{ _PAGE_P_TDP ,		"present" }, \
+			{ _PAGE_W_TDP,		"writable" }, \
+			{ _PAGE_A_TDP,		"accessed" }, \
+			{ _PAGE_D_TDP,		"dirty" }, \
+			{ _PAGE_HUGE_TDP,	"large" }, \
+			{ _PAGE_SW1_TDP,	"OS-1" }, \
+			{ _PAGE_SW2_TDP,	"OS-2" } \
+		) : "(none)")
+
+#define E2K_TRACE_PRINT_TDP_MT(entry, print) \
+	((print) ? __print_symbolic((entry & _PAGE_MT_TDP) >> _PAGE_MT_SHIFT_TDP, \
+			{ 0, "|GC" }, \
+			{ 1, "|GnC" }, \
+			{ 4, "|XP" }, \
+			{ 6, "|XnP" }, \
+			{ 7, "|XC" }, \
+			{ 2, "|MT reserved (2)" }, \
+			{ 3, "|MT reserved (3)" }, \
+			{ 5, "|MT reserved (5)" } \
+		) : "")
+
+#define E2K_TRACE_PRINT_TDP_MTCR(entry, print) \
+	((print) ? __print_symbolic((entry & _PAGE_MTCR_TDP) >> _PAGE_MTCR_SHIFT_TDP, \
+			{ 0, "|strictest MT" }, \
+			{ 2, "|hypervisor MT" }, \
+			{ 3, "|guest MT" }, \
+			{ 1, "|MTCR reserved (1)" } \
+		) : "")
+
+#define	mmu_print_tdp_flags(entry, print) \
+		E2K_TRACE_PRINT_TDP_FLAGS(entry, print), \
+		E2K_TRACE_PRINT_TDP_MTCR(entry, print), \
+		E2K_TRACE_PRINT_TDP_MT(entry, print)
+
+extern void get_tdp_levels(struct kvm_vcpu *vcpu, gpa_t gpa,
+		u64 values[4], u64 pointers[4], int *pt_level);
+
+TRACE_EVENT(mu_intc_tdp,
+
+	TP_PROTO(struct kvm_vcpu *vcpu, u64 gpa),
+
+	TP_ARGS(vcpu, gpa),
+
+	TP_STRUCT__entry(
+		__field(	u64,	gpa		)
+		__field(	int,	pt_level	)
+		__array(	u64,	values,		4	)
+		__array(	u64,	pointers,	4	)
+	),
+
+	TP_fast_assign(
+		get_tdp_levels(vcpu, gpa, __entry->values, __entry->pointers, &__entry->pt_level);
+		__entry->gpa = gpa;
+	),
+
+	TP_printk("\n"
+		"Guest physical address 0x%llx\n"
+		"TDP entries (all f's if entry hasn't been read)\n"
+		"  tdp pgd 0x%llx: %s%s%s (at 0x%llx)\n"
+		"  tdp pud 0x%llx: %s%s%s (at 0x%llx)\n"
+		"  tdp pmd 0x%llx: %s%s%s (at 0x%llx)\n"
+		"  tdp pte 0x%llx: %s%s%s (at 0x%llx)\n",
+		__entry->gpa,
+		__entry->values[0],
+		mmu_print_tdp_flags(__entry->values[0], __entry->pt_level >= 0),
+		__entry->pointers[0],
+		__entry->values[1],
+		mmu_print_tdp_flags(__entry->values[1], __entry->pt_level >= 1),
+		__entry->pointers[1],
+		__entry->values[2],
+		mmu_print_tdp_flags(__entry->values[2], __entry->pt_level >= 2),
+		__entry->pointers[2],
+		__entry->values[3],
+		mmu_print_tdp_flags(__entry->values[3], __entry->pt_level >= 3),
+		__entry->pointers[3]
+	)
+);
+
+#ifndef intc_stacks_regs_number
+# define intc_stacks_regs_number intc_stacks_regs_number
+static inline size_t intc_stacks_regs_number(const kvm_hw_cpu_context_t *hw_ctxt,
+					     const e2k_mem_crs_t *crs)
+{
+	return 2 * min_t(size_t, crs->cr1.wbs, PSP_IND(hw_ctxt->bu_psp) / EXT_4_NR_SZ);
+}
+#endif
+
 TRACE_EVENT(
 	intc_stacks,
 
-	TP_PROTO(const kvm_sw_cpu_context_t *sw_ctxt, const kvm_hw_cpu_context_t *hw_ctxt,
-		 const e2k_mem_crs_t *crs),
+	TP_PROTO(const struct kvm_sw_cpu_context *sw_ctxt, const kvm_hw_cpu_context_t *hw_ctxt,
+		 const e2k_mem_crs_t *crs, int iset),
 
-	TP_ARGS(sw_ctxt, hw_ctxt, crs),
+	TP_ARGS(sw_ctxt, hw_ctxt, crs, iset),
 
 	TP_STRUCT__entry(
 		/* Stacks */
@@ -211,6 +303,9 @@ TRACE_EVENT(
 		/* Backup stacks */
 		__dynamic_array(u64, frames, PCSP_IND(hw_ctxt->bu_pcsp) / SZ_OF_CR)
 		__field(size_t, frames_len)
+		__dynamic_array(u64, reg_values, intc_stacks_regs_number(hw_ctxt, crs))
+		__dynamic_array(u8, reg_tags, intc_stacks_regs_number(hw_ctxt, crs))
+		__field(size_t, reg_len)
 		__field(	u64,	bu_psp_lo	)
 		__field(	u64,	bu_psp_hi	)
 		__field(	u64,	bu_pcsp_lo	)
@@ -224,13 +319,25 @@ TRACE_EVENT(
 
 	TP_fast_assign(
 		u64 *frames = __get_dynamic_array(frames);
-		e2k_mem_crs_t *chain_stack = (e2k_mem_crs_t *)PCSP_BASE(hw_ctxt->bu_pcsp);
-		size_t len = PCSP_IND(hw_ctxt->bu_pcsp) / SZ_OF_CR;
-		unsigned long i;
+		u64 *reg_values = __get_dynamic_array(reg_values);
+		u8 *reg_tags = __get_dynamic_array(reg_tags);
+		const e2k_mem_crs_t *chain_stack = (e2k_mem_crs_t *)PCSP_BASE(hw_ctxt->bu_pcsp);
 
-		__entry->frames_len = len;
-		for (i = 0; i < len; i++)
+		__entry->frames_len = PCSP_IND(hw_ctxt->bu_pcsp) / SZ_OF_CR;
+		for (size_t i = 0; i < __entry->frames_len; i++)
 			frames[i] = get_cr0_ip(chain_stack[i].cr0);
+
+		__entry->reg_len = intc_stacks_regs_number(hw_ctxt, crs);
+		const volatile void *proc_stack = K_PSP_PTR(hw_ctxt->bu_psp) -
+						  16 * __entry->reg_len;
+		for (size_t i = 0; i < __entry->reg_len; i += 2) {
+			const volatile void *reg_frame = proc_stack + 16 * i;
+			size_t qnr1_offset = (iset >= E2K_ISET_V5) ? 16 : 8;
+
+			load_value_and_tagd(reg_frame, &reg_values[i], &reg_tags[i]);
+			load_value_and_tagd(reg_frame + qnr1_offset,
+					    &reg_values[i + 1], &reg_tags[i + 1]);
+		}
 
 		__entry->sbr = AW(sw_ctxt->sbr);
 		__entry->usd_lo = LO(sw_ctxt->usd);
@@ -258,7 +365,9 @@ TRACE_EVENT(
 		"cr0_lo 0x%llx, cr0_hi 0x%llx, cr1_lo 0x%llx, cr1_hi 0x%llx\n"
 		"bu_psp_lo 0x%llx, bu_psp_hi 0x%llx\n"
 		"bu_pcsp_lo 0x%llx, bu_pcsp_hi 0x%llx\n"
-		"backup chain stack IPs: %s"
+		"backup chain stack IPs: %s\n"
+		"last frame regs: %s\n"
+		"last frame tags: %s"
 		,
 		__entry->sbr, __entry->usd_lo, __entry->usd_hi,
 		__entry->psp_lo, __entry->psp_hi, __entry->pshtp,
@@ -266,9 +375,9 @@ TRACE_EVENT(
 		__entry->cr0_lo, __entry->cr0_hi, __entry->cr1_lo, __entry->cr1_hi,
 		__entry->bu_psp_lo, __entry->bu_psp_hi,
 		__entry->bu_pcsp_lo, __entry->bu_pcsp_hi,
-		__print_array(__get_dynamic_array(frames),
-				__entry->frames_len, sizeof(u64)))
-
+		__print_array(__get_dynamic_array(frames), __entry->frames_len, sizeof(u64)),
+		__print_array(__get_dynamic_array(reg_values), __entry->reg_len, sizeof(u64)),
+		__print_array(__get_dynamic_array(reg_tags), __entry->reg_len, sizeof(u8)))
 );
 
 TRACE_EVENT(

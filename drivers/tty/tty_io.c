@@ -3047,7 +3047,7 @@ static int ptr128_tty_tiocgserial(struct tty_struct *tty,
 	err = tty->ops->get_serial(tty, &v);
 	if (!err) {
 		memcpy(&v128, &v, offsetof(struct serial_struct128, iomem_base));
-		v128.iomem_base = MAKE_AP(v.iomem_base, 0);
+		v128.iomem_base = MAKE_FAKE_AP(v.iomem_base);
 		v128.iomem_reg_shift = v.iomem_reg_shift;
 		v128.port_high = v.port_high;
 		if (copy_to_user(ss, &v128, sizeof(v128)))

@@ -26,7 +26,7 @@ static void replace_instruction(unsigned long *src, unsigned long phys_dst,
 	int i;
 
 	for (i = 0; i < instr_size / 8; i++)
-		NATIVE_WRITE_MAS_D(phys_dst + 8 * i, src[i], MAS_STORE_PA);
+		NATIVE_WRITE_MAS_D(phys_dst + 8 * i, src[i], MAS_DISABLED_TRANSLATION);
 }
 
 static unsigned long copy_instr(unsigned long *src, unsigned long *dst)
@@ -129,7 +129,7 @@ static void arch_replace_insn_all_nodes(unsigned long insn, unsigned long ip)
 			break;
 		}
 
-		NATIVE_WRITE_MAS_D(phys_ip, insn, MAS_STORE_PA);
+		NATIVE_WRITE_MAS_D(phys_ip, insn, MAS_DISABLED_TRANSLATION);
 	}
 }
 

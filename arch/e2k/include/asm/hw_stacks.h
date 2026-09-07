@@ -224,12 +224,7 @@ extern int chain_stack_frame_init(e2k_mem_crs_t *crs, unsigned long fn,
 				  size_t dstack_free_size, size_t dstack_frame_size,
 				  e2k_psr_t psr, int wbs, int wpsz, bool user);
 
-extern void __update_psp_regs(unsigned long base, unsigned long size,
-			      unsigned long new_fp, e2k_psp_t *psp);
-extern void update_psp_regs(unsigned long new_fp, e2k_psp_t *psp);
-
-extern void __update_pcsp_regs(unsigned long base, unsigned long size,
-			       unsigned long new_fp, e2k_pcsp_t *pcsp);
-extern void update_pcsp_regs(unsigned long new_fp, e2k_pcsp_t *pcsp);
+extern void update_psp_regs(volatile void __priv *new_fp, e2k_psp_t *psp);
+extern void update_pcsp_regs(void __priv *new_fp, e2k_pcsp_t *pcsp);
 
 #endif /* _E2K_HW_STACKS_H */

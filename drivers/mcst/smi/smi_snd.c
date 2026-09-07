@@ -40,8 +40,8 @@
 
 #include "smi_dbg.h"
 
-struct sm768chip *chip_irq_id=NULL;/*chip_irq_id is use for request and free irq*/
-int use_wm8978 = 0;
+static struct sm768chip *chip_irq_id=NULL;/*chip_irq_id is use for request and free irq*/
+static int use_wm8978 = 0;
 
 static int SM768_AudioInit(unsigned long wordLength, unsigned long sampleRate)
 {
@@ -522,14 +522,16 @@ static int snd_smi_play_copy_data(struct sm768chip *chip,int sramTxSection)
 	play_substream = chip->play_substream;
 
 	if(play_substream == NULL)
-		memset_io(chip->pvReg + SRAM_OUTPUT_BASE + SRAM_SECTION_SIZE * sramTxSection, 0x00, P_PERIOD_BYTE);
+		memset_io(chip->pvReg + SRAM_OUTPUT_BASE + SRAM_SECTION_SIZE * sramTxSection,
+			  0x0, P_PERIOD_BYTE);
 	else{
 		play_runtime = play_substream->runtime;
 
 		if (play_runtime->dma_area == NULL) 
 			return 0;
 
-		memcpy_toio(chip->pvReg + SRAM_OUTPUT_BASE + SRAM_SECTION_SIZE * sramTxSection, play_runtime->dma_area + chip->ppointer, P_PERIOD_BYTE);
+		__memcpy_toio(chip->pvReg + SRAM_OUTPUT_BASE + SRAM_SECTION_SIZE * sramTxSection,
+			      play_runtime->dma_area + chip->ppointer, P_PERIOD_BYTE);
 		chip->ppointer+= P_PERIOD_BYTE;
 		chip->ppointer%= ((play_runtime->periods) * (P_PERIOD_BYTE));
 		snd_pcm_period_elapsed(play_substream);
@@ -545,16 +547,19 @@ static int snd_smi_capture_copy_data(struct sm768chip *chip,int sramTxSection)
 
 	capture_substream = chip->capture_substream;
 
-	if(capture_substream == NULL)	
-		memset_io(chip->pvReg + SRAM_INPUT_BASE + SRAM_SECTION_SIZE * sramTxSection, 0x00,  P_PERIOD_BYTE);
+	if (capture_substream == NULL)	
+		memset_io(chip->pvReg + SRAM_INPUT_BASE + SRAM_SECTION_SIZE * sramTxSection,
+			    0x00,  P_PERIOD_BYTE);
 		
-	else{
+	else {
 		capture_runtime = capture_substream->runtime;
 
 		if (capture_runtime->dma_area == NULL) 
 			return 0;
 
-		memcpy_fromio(capture_runtime->dma_area + chip->cpointer, chip->pvReg + SRAM_INPUT_BASE + SRAM_SECTION_SIZE * sramTxSection,  P_PERIOD_BYTE);
+		__memcpy_fromio(capture_runtime->dma_area + chip->cpointer,
+			      chip->pvReg + SRAM_INPUT_BASE + SRAM_SECTION_SIZE * sramTxSection,
+			      P_PERIOD_BYTE);
 		chip->cpointer+= P_PERIOD_BYTE;
 		chip->cpointer%= ((capture_runtime->periods) * (P_PERIOD_BYTE));		
 		snd_pcm_period_elapsed(capture_substream);

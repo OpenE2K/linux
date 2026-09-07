@@ -42,14 +42,14 @@
 
 #include "smi_sysfs.h"
 
-int smi_modeset = -1;
+static int smi_modeset = -1;
 int smi_indent = 0;
 int smi_bpp = 32;
 int force_connect = 0;
 int g_specId = 0;
 int smi_pat = 0xff;
 int lvds_channel = 0;
-int usb_host = 0;
+/* int usb_host = 0; */
 int audio_en = 0;
 int fixed_width = 0;
 int fixed_height = 0;

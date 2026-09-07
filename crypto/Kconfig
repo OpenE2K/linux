@@ -1397,6 +1397,9 @@ endif
 if ARM64
 source "arch/arm64/crypto/Kconfig"
 endif
+if E2K
+source "arch/e2k/crypto/Kconfig"
+endif
 if MIPS
 source "arch/mips/crypto/Kconfig"
 endif

@@ -7,16 +7,11 @@
 #define _E2K_PTRACE_H
 
 
-#ifndef __ASSEMBLY__
 #include <linux/types.h>
 #include <linux/threads.h>
 
 #include <asm/current.h>
-#endif /* __ASSEMBLY__ */
-
 #include <asm/page.h>
-
-#ifndef __ASSEMBLY__
 #include <asm/e2k_api.h>
 #include <asm/cpu_regs.h>
 #include <asm/glob_regs.h>
@@ -25,10 +20,9 @@
 #include <asm/mmu_regs_types.h>
 #include <asm/mlt.h>
 #include <asm/ptrace-abi.h>
-
-#endif /* __ASSEMBLY__ */
-#include <uapi/asm/ptrace.h>
 #include <asm/pv_info.h>
+
+#include <uapi/asm/ptrace.h>
 
 #define TASK_TOP	TASK_SIZE
 
@@ -36,8 +30,6 @@
  * User process size in MA32 mode.
  */
 #define TASK32_SIZE		(0xf0000000UL)
-
-#ifndef __ASSEMBLY__
 
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
 #include <asm/clock_info.h>
@@ -52,26 +44,23 @@ typedef struct pt_regs ptregs_t;
 typedef struct sw_regs sw_regs_t;
 
 struct e2k_greg {
+	volatile u64 base;
 	union {
-		u64 xreg[2];		/* extended register */
-		struct {
-			u64 base;	/* main part of value */
-			u64 ext;	/* extended part of floating point */
-					/* value */
-		};
+		volatile u64 v5_ext;	/* extended register */
+		u16 v3_ext;		/* extended part of floating point value */
 	};
 } __aligned(16); /* must be aligned for stgdq/stqp/ldqp to work */
 
 
 typedef struct e2k_gregs {
-	struct e2k_greg g[E2K_GLOBAL_REGS_NUM];
+	volatile struct e2k_greg g[E2K_GLOBAL_REGS_NUM];
 	e2k_bgr_t bgr;
 } e2k_global_regs_t;
 
 /* According to user ABI registers %g0-%g15 should not be saved upon signal
  * delivery (so called "global" gregs) */
 struct global_gregs {
-	struct e2k_greg g[GLOBAL_GREGS_NUM];
+	volatile struct e2k_greg g[GLOBAL_GREGS_NUM];
 };
 
 /* According to user ABI registers %g16-%g31 should be saved upon signal
@@ -79,7 +68,7 @@ struct global_gregs {
  *
  * And %bgr holds additinal settings for %g24-%g31. */
 typedef struct local_gregs {
-	struct e2k_greg g[LOCAL_GREGS_NUM];
+	volatile struct e2k_greg g[LOCAL_GREGS_NUM];
 	e2k_bgr_t bgr;
 } local_gregs_t;
 
@@ -87,14 +76,14 @@ typedef struct local_gregs {
  * registers (i.e. for -fglobal-regs optimization).  The other
  * part is used to hold often accessed data. */
 struct scratch_gregs {
-	struct e2k_greg g[LOCAL_GREGS_NUM - KERNEL_GREGS_MAX_NUM];
+	volatile struct e2k_greg g[SCRATCH_GREGS_NUM];
 };
 
 /* gN and gN+1 global registers hold pointers to current in kernel, */
 /* gN+2 and gN+3 are used for per-cpu data pointer and current cpu id. */
 /* Now N = 16 (see real numbers at asm/glob_regs.h) */
 typedef struct kernel_gregs {
-	struct e2k_greg g[KERNEL_GREGS_NUM];
+	volatile struct e2k_greg g[KERNEL_GREGS_NUM];
 } kernel_gregs_t;
 
 #define HW_TC_SIZE 7
@@ -119,10 +108,7 @@ typedef struct trap_pt_regs {
 			u16 tc_called		: 1;
 			u16 pcsp_fill_adjusted	: 1;
 			u16 psp_fill_adjusted	: 1;
-			u16 srp			: 1;
 			u16 rp			: 1;
-			/* intercept page fault */
-			u16 is_intc		: 1;
 			/* set if dim_ip field has been initialized */
 			u16 dim_ip_valid	: 1;
 		};
@@ -130,10 +116,13 @@ typedef struct trap_pt_regs {
 	};
 	int		prev_state;
 	e2k_upsr_t	upsr;
-	e2k_addr_t	srp_ip;
-	e2k_tir_t	TIRs[TIR_NUM];
+
 	trap_cellar_t	tcellar[HW_TC_SIZE];
+
+	/* These are freezed on trap and unfreezed on writing %tir.lo */
+	e2k_tir_t	TIRs[TIR_NUM];
 	u64 sbbp[SBBP_ENTRIES_NUM];
+	e2k_usincr_t usincr;
 
 	/* User's %bgr, %g16-%g31 are saved to thread_struct in user traps and syscalls.
 	 * Kernel's %g26-g31 are saved here in kernel traps. */
@@ -158,10 +147,12 @@ union pt_regs_flags {
 		u32 sig_restart_syscall	: 1;
 		/* From hardware guest interception */
 		u32 kvm_hw_intercept	: 1;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		/* trap or system call is on or from guest */
 		u32 trap_as_intc_emul	: 1;
 		/* Trap occurred in light hypercall */
 		u32 light_hypercall	: 1;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	};
 	u32 word;
 };
@@ -291,7 +282,6 @@ typedef struct sw_regs {   /* to save/restore regs when stack switches */
 	e2k_mem_crs_t	crs;
 	u64		top;	/* top of all user data stacks */
 	e2k_usd_t	usd;
-	e2k_usincr_t	usincr;
 	e2k_psp_t	psp;	/* procedure stack pointer (as empty) */
 	e2k_pcsp_t	pcsp;	/* procedure chaine stack pointer (as empty) */
 	e2k_psr_t	psr;
@@ -386,14 +376,15 @@ static inline int kstack_end(void *addr)
 #define from_trap(regs)		((regs)->trap != NULL)
 #define from_syscall(regs)	(!from_trap(regs))
 
-static inline u64 user_stack_pointer(struct pt_regs *regs)
+static inline u64 user_stack_pointer(const struct pt_regs *regs)
 {
 	e2k_usd_t usd = regs->stacks.usd;
 
-	return USD_P(usd) ? USD_PPTR(usd) + (regs->stacks.top & ~0xffffffffULL) : USD_PTR(usd);
+	return USD_P(usd) ? USD_PPTR(usd) + (regs->stacks.top & ~0xffffffffULL)
+			  : USD_PTR(usd);
 }
 
-static inline unsigned long kernel_stack_pointer(struct pt_regs *regs)
+static inline unsigned long kernel_stack_pointer(const struct pt_regs *regs)
 {
 	return USD_PTR(regs->stacks.usd);
 }
@@ -505,7 +496,9 @@ typedef struct signal_stack_context {
 	struct k_sigaction	sigact;
 	e2k_aau_t		aau_regs;
 	struct local_gregs	l_gregs;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct pv_vcpu_ctxt	vcpu_ctxt;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 } signal_stack_context_t;
 
 #define __signal_pt_regs_last(ti) \
@@ -562,7 +555,7 @@ typedef struct signal_stack_context {
 	struct trap_pt_regs __priv *u_trap; \
  \
 	if (get_priv(u_trap, &__spr_u_regs->trap)) {\
-		u_trap = (struct trap_pt_regs __priv *) ERR_PTR(-EFAULT); \
+		u_trap = (struct trap_pt_regs __priv __force *) ERR_PTR(-EFAULT); \
 	} else if (u_trap) { \
 		u_trap = (struct trap_pt_regs __priv *) \
 				((void __priv *) __spr_u_regs - \
@@ -627,79 +620,9 @@ static inline unsigned long instruction_pointer(const struct pt_regs *regs)
 	return get_return_ip(regs);
 }
 
-
-#ifdef	CONFIG_DEBUG_PT_REGS
-#define	CHECK_PT_REGS_LOOP(regs)						\
-({										\
-	if ((regs) != NULL) {							\
-		if ((regs)->next == (regs)) {					\
-			pr_err("LOOP in regs list: regs 0x%px next 0x%px\n",	\
-				(regs), (regs)->next);				\
-			dump_stack();						\
-		}								\
-	}									\
-})
-#define	CHECK_PT_REGS_CHAIN(regs, bottom, top)						\
-({											\
-	pt_regs_t *next_regs = (regs);							\
-	pt_regs_t *prev_regs = (pt_regs_t *)(bottom);					\
-	while ((next_regs) != NULL) {							\
-		if (IS_USER_ADDR(bottom))						\
-			break;								\
-		if ((e2k_addr_t)next_regs > (e2k_addr_t)((top) - sizeof(pt_regs_t))) {	\
-			pr_err("%s(): next regs %px above top 0x%llx\n",		\
-				__func__, next_regs,					\
-				(top) - sizeof(pt_regs_t));				\
-			print_pt_regs(next_regs);					\
-			WARN_ON(true);							\
-		} else if ((e2k_addr_t)next_regs == (e2k_addr_t)prev_regs) {		\
-			pr_err("%s(): next regs %px is same as previous %px\n",		\
-				__func__, next_regs, prev_regs);			\
-			print_pt_regs(next_regs);					\
-			BUG_ON(true);							\
-		} else if ((e2k_addr_t)next_regs < (e2k_addr_t)prev_regs) {		\
-			pr_err("%s(): next regs %px below previous %px\n",		\
-				__func__, next_regs, prev_regs);			\
-			print_pt_regs(next_regs);					\
-			BUG_ON(true);							\
-		}									\
-		prev_regs = next_regs;							\
-		next_regs = next_regs->next;						\
-	}										\
-})
-
-/*
- *  The hook to find 'ct' command ( return to user)
- *  be interrapted with cloused interrupt / HARDWARE problem #59886/
- */
-#define CHECK_CT_INTERRUPTED(regs)					\
-({									\
-	struct pt_regs *__regs = regs;					\
-	do {								\
-		if (__call_from_user(__regs) || __trap_from_user(__regs)) \
-			break;						\
-		__regs = __regs->next;					\
-	} while (__regs);						\
-	if (!__regs) {							\
-		printk(" signal delivery started on kernel instruction"	\
-		       " top = 0x%lx TIR_lo=0x%lx "			\
-		       " crs.cr0.ip << 3 = 0x%lx\n",			\
-			(regs)->stacks.top, (regs)->TIR_lo,		\
-			instruction_pointer(regs));			\
-		dump_stack();						\
-	}								\
-})
-#else /* ! CONFIG_DEBUG_PT_REGS */
-#define	CHECK_PT_REGS_LOOP(regs)	/* nothing */
-#define	CHECK_PT_REGS_CHAIN(regs, bottom, top)
-#define CHECK_CT_INTERRUPTED(regs)
-#endif /* CONFIG_DEBUG_PT_REGS */
-
 static inline struct pt_regs *find_user_regs(const struct pt_regs *regs)
 {
 	do {
-		CHECK_PT_REGS_LOOP(regs);
-
 		if (user_mode(regs) && !regs->flags.kvm_hw_intercept)
 			break;
 
@@ -720,8 +643,6 @@ static inline struct pt_regs *find_entry_regs(const struct pt_regs *regs)
 	const struct pt_regs *prev_regs;
 
 	do {
-		CHECK_PT_REGS_LOOP(regs);
-
 		if (user_mode(regs) && !regs->flags.kvm_hw_intercept)
 			goto found;
 
@@ -739,8 +660,6 @@ found:
 static inline struct pt_regs *find_host_regs(const struct pt_regs *regs)
 {
 	while (regs) {
-		CHECK_PT_REGS_LOOP(regs);
-
 		if (likely(!regs->flags.kvm_hw_intercept))
 			break;
 
@@ -753,8 +672,6 @@ static inline struct pt_regs *find_host_regs(const struct pt_regs *regs)
 static inline struct pt_regs *find_trap_host_regs(const struct pt_regs *regs)
 {
 	while (regs) {
-		CHECK_PT_REGS_LOOP(regs);
-
 		if (from_trap(regs) && !regs->flags.kvm_hw_intercept)
 			break;
 
@@ -764,12 +681,13 @@ static inline struct pt_regs *find_trap_host_regs(const struct pt_regs *regs)
 	return (struct pt_regs *) regs;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define count_trap_regs(regs) \
 ({ \
 	struct pt_regs *__regs = regs; \
 	int traps = 0; \
 	while (__regs) { \
-		if (from_trap(regs)) \
+		if (from_trap(__regs)) \
 			traps++; \
 		__regs = __regs->next; \
 	} \
@@ -783,13 +701,13 @@ static inline struct pt_regs *find_trap_host_regs(const struct pt_regs *regs)
 	struct pt_regs *__regs = regs; \
 	int regs_num = 0; \
 	while (__regs) { \
-		CHECK_PT_REGS_LOOP(__regs); \
-		if (user_mode(regs)) \
+		if (user_mode(__regs)) \
 			regs_num++; \
 		__regs = __regs->next; \
 	} \
 	regs_num; \
 })
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #if defined(CONFIG_SMP)
 extern unsigned long profile_pc(struct pt_regs *regs);
@@ -804,5 +722,4 @@ extern void syscall_trace_leave(struct pt_regs *regs);
 extern long common_ptrace(struct task_struct *child, long request,
 			  unsigned long addr, unsigned long data, bool compat);
 
-#endif /* __ASSEMBLY__ */
 #endif /* _E2K_PTRACE_H */

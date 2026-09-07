@@ -1031,7 +1031,11 @@ static void sync_rcu_do_polled_gp(struct work_struct *wp)
  */
 unsigned long start_poll_synchronize_rcu_expedited(void)
 {
+#ifdef CONFIG_MCST
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 	struct rcu_data *rdp;
 	struct rcu_node *rnp;
 	unsigned long s;

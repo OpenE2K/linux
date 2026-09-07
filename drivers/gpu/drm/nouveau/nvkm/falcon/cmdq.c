@@ -29,6 +29,9 @@ nvkm_falcon_cmdq_has_room(struct nvkm_falcon_cmdq *cmdq, u32 size, bool *rewind)
 	u32 tail = nvkm_falcon_rd32(cmdq->qmgr->falcon, cmdq->tail_reg);
 	u32 free;
 
+#ifdef CONFIG_MCST
+	free = 0;
+#endif
 	size = ALIGN(size, QUEUE_ALIGNMENT);
 
 	if (head >= tail) {

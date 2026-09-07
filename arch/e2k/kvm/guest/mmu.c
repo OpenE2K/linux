@@ -24,7 +24,7 @@
 #include <asm/copy-hw-stacks.h>
 
 #include <asm/kvm/hypercall.h>
-#include <asm/kvm/priv-hypercall.h>
+#include <asm/kvm/paravirt_sw/priv-hypercall.h>
 
 #undef	DEBUG_KVM_PTE_MODE
 #undef	DebugKVMPTE
@@ -83,10 +83,10 @@
 static bool is_simple_ldst_op(u64 ldst_rec_opc, tc_cond_t cond)
 {
 	ldst_rec_op_t *opc = (ldst_rec_op_t *) &ldst_rec_opc;
-	bool is_simple_lock_check_ld = tc_cond_is_check_ld(cond) ||
-				tc_cond_is_check_unlock_ld(cond) ||
-				tc_cond_is_lock_check_ld(cond) ||
-				tc_cond_is_spec_lock_check_ld(cond);
+	bool is_simple_lock_check_ld = tc_cond_is_check(cond) ||
+				tc_cond_is_check_unlock(cond) ||
+				tc_cond_is_lock_check(cond) ||
+				tc_cond_is_spec_lock_check(cond);
 
 	return (!opc->mas || is_simple_lock_check_ld) &&
 		!opc->prot && !opc->root && !opc->mode_h && !opc->fmt_h &&
@@ -97,10 +97,10 @@ static bool is_simple_ldst_op(u64 ldst_rec_opc, tc_cond_t cond)
 static void simple_recovery_faulted_load_to_greg(e2k_addr_t address,
 				u32 greg_num_d, u64 ld_rec_opc, tc_cond_t cond)
 {
-	if (tc_cond_is_lock_check_ld(cond)) {
+	if (tc_cond_is_lock_check(cond)) {
 		SIMPLE_RECOVERY_LOAD_TO_GREG(address, ld_rec_opc, greg_num_d,
 						",sm", 0x0);
-	} else if (tc_cond_is_spec_lock_check_ld(cond)) {
+	} else if (tc_cond_is_spec_lock_check(cond)) {
 		SIMPLE_RECOVERY_LOAD_TO_GREG(address, ld_rec_opc, greg_num_d,
 						",sm", 0x3);
 	} else {
@@ -113,10 +113,10 @@ static void simple_recovery_faulted_move(e2k_addr_t addr_from,
 			e2k_addr_t addr_to, u64 ldst_rec_opc, u32 first_time,
 			tc_cond_t cond)
 {
-	if (tc_cond_is_lock_check_ld(cond)) {
+	if (tc_cond_is_lock_check(cond)) {
 		SIMPLE_RECOVERY_MOVE(addr_from, addr_to, ldst_rec_opc,
 				first_time, ",sm", 0x0);
-	} else if (tc_cond_is_spec_lock_check_ld(cond)) {
+	} else if (tc_cond_is_spec_lock_check(cond)) {
 		SIMPLE_RECOVERY_MOVE(addr_from, addr_to, ldst_rec_opc,
 				first_time, ",sm", 0x3);
 	} else {
@@ -342,16 +342,6 @@ kvm_mmu_entry_probe(e2k_addr_t virt_addr)
 	unsigned long probe_val;
 
 	probe_val = HYPERVISOR_mmu_probe(virt_addr, KVM_MMU_PROBE_ENTRY);
-
-	return check_native_mmu_probe(virt_addr, probe_val);
-}
-/* Get physical address for virtual address */
-probe_entry_t
-kvm_mmu_address_probe(e2k_addr_t virt_addr)
-{
-	unsigned long probe_val;
-
-	probe_val = HYPERVISOR_mmu_probe(virt_addr, KVM_MMU_PROBE_ADDRESS);
 
 	return check_native_mmu_probe(virt_addr, probe_val);
 }
@@ -924,7 +914,7 @@ failed:
 		u8 tag;
 
 		if (DEBUG_KVM_RECOVERY_MODE)
-			load_value_and_tagd((void *) addr_to, &val, &tag);
+			load_value_and_tagd((volatile void *) addr_to, &val, &tag);
 		DebugKVMREC("moved data 0x%llx tag 0x%x from address 0x%lx\n",
 			val, tag, addr_from);
 	} else {
@@ -1119,20 +1109,6 @@ u64 kvm_read_dcache_l1_fault_reg(void)
 	panic("kvm_read_l1_fault_reg() not implemented\n");
 }
 
-void kvm_clear_dcache_l1_set(e2k_addr_t virt_addr, unsigned long set)
-{
-	long ret;
-
-	DebugKVMMMU("started for address 0x%lx, set 0x%lx\n",
-		virt_addr, set);
-	ret = HYPERVISOR_clear_dcache_l1_set(virt_addr, set);
-	if (ret != 0) {
-		pr_err("kvm_flush_dcache_range() hypervisor could not clear "
-			"DCACHE L1 set 0x%lx for addres 0x%lx, error %ld\n",
-			set, virt_addr, ret);
-	}
-}
-
 void kvm_flush_dcache_range(void *addr, size_t len)
 {
 	long ret;
@@ -1147,20 +1123,6 @@ void kvm_flush_dcache_range(void *addr, size_t len)
 	}
 }
 EXPORT_SYMBOL(kvm_flush_dcache_range);
-
-void kvm_clear_dcache_l1_range(void *virt_addr, size_t len)
-{
-	long ret;
-
-	DebugKVMMMU("started for address %px size 0x%lx\n",
-		virt_addr, len);
-	ret = HYPERVISOR_clear_dcache_l1_range(virt_addr, len);
-	if (ret != 0) {
-		pr_err("kvm_flush_dcache_range() hypervisor could not clear "
-			"DCACHE L1 range from %px, size 0x%lx error %ld\n",
-			virt_addr, len, ret);
-	}
-}
 
 /*
  * Guest kernel functions can be run on any guest user processes and can have

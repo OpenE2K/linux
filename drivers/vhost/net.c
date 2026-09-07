@@ -1071,7 +1071,9 @@ static int get_rx_bufs(struct vhost_virtqueue *vq,
 	 * datalen > 0.
 	 */
 	u32 len;
-
+#ifdef CONFIG_MCST
+	len = 0;
+#endif
 	while (datalen > 0 && headcount < quota) {
 		if (unlikely(seg >= UIO_MAXIOV)) {
 			r = -ENOBUFS;

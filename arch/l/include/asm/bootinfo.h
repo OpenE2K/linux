@@ -196,6 +196,8 @@ extern	bootblock_struct_t *bootblock_virt;	/* bootblock structure virtual pointe
 /* RECOVERY_BB_FLAG flag). */
 #define NO_READ_IMAGE_BB_FLAG		0x0004
 
+#define KEXEC_CRASH_BB_FLAG		0x0008
+
 /*
  * The machine identification flags
  */

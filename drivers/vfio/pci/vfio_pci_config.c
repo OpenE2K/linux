@@ -205,6 +205,14 @@ static int vfio_default_config_write(struct vfio_pci_core_device *vdev, int pos,
 
 	memcpy(&write, perm->write + offset, count);
 
+#ifdef CONFIG_E2K
+	/* allow amdgpu driver restore corrupted interrupt line */
+	if (vdev->pdev->vendor == PCI_VENDOR_ID_ATI &&
+		(vdev->pdev->class >> 8) == PCI_CLASS_DISPLAY_VGA &&
+		pos == PCI_INTERRUPT_LINE)
+		write |= 0xff;
+#endif
+
 	if (!write)
 		return count; /* drop, no writable bits */
 
@@ -690,8 +698,19 @@ static int __init init_pci_cap_basic_perm(struct perm_bits *perm)
 	/* Allow us to adjust capability chain */
 	p_setb(perm, PCI_CAPABILITY_LIST, (u8)ALL_VIRT, NO_WRITE);
 
+#ifdef CONFIG_E2K
+	/*
+	 * amdgpu driver corrupts register by performing reset,
+	 * so allow reading interrupt line from hardware to detect
+	 * changed value. In vfio_default_config_write we allows to
+	 * write into harware register (only for amd device) to restore
+	 * corrupted register.
+	 */
+	p_setb(perm, PCI_INTERRUPT_LINE, (u8)NO_VIRT, (u8)NO_WRITE);
+#else
 	/* Sometimes used by sw, just virtualize */
 	p_setb(perm, PCI_INTERRUPT_LINE, (u8)ALL_VIRT, (u8)ALL_WRITE);
+#endif
 
 	/* Virtualize interrupt pin to allow hiding INTx */
 	p_setb(perm, PCI_INTERRUPT_PIN, (u8)ALL_VIRT, (u8)NO_WRITE);

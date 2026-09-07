@@ -7542,6 +7542,9 @@ int ocfs2_trim_mainbm(struct super_block *sb, struct fstrim_range *range)
 	struct ocfs2_dinode *main_bm;
 	struct ocfs2_group_desc *gd = NULL;
 
+#ifdef CONFIG_MCST
+	first_bit = 0;
+#endif
 	start = range->start >> osb->s_clustersize_bits;
 	len = range->len >> osb->s_clustersize_bits;
 	minlen = range->minlen >> osb->s_clustersize_bits;

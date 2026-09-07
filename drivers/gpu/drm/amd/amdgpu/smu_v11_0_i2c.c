@@ -648,6 +648,9 @@ static int smu_v11_0_i2c_xfer(struct i2c_adapter *i2c_adap,
 	int i, ret;
 	u16 addr, dir;
 
+#ifdef CONFIG_MCST
+	addr = 0;
+#endif
 	smu_v11_0_i2c_init(i2c_adap);
 
 	/* From the client's point of view, this sequence of

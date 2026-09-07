@@ -6,6 +6,9 @@
 #ifndef _ASM_E2K_NMI_H
 #define _ASM_E2K_NMI_H
 
+#include <linux/cpumask.h>
+#include <linux/irqflags.h>
+
 /*
  * ATTENTION nmi_call_function_xxx() are actually more limited
  * than smp_call_function_xxx().

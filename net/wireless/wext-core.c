@@ -1204,7 +1204,7 @@ int ptr128_wext_handle_ioctl(struct net *net, unsigned long cmd,
 	if (IS_AP(ap, tag)) {
 		iwrp->u.data.flags = iwr128.u.pointer.flags;
 		iwrp->u.data.length = iwr128.u.pointer.length;
-		iwrp->u.data.pointer = (void __user *)AP_PTR(ap);
+		iwrp->u.data.pointer = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 	} else {
 		set_u_border(0);

@@ -50,7 +50,7 @@ static const uint32_t smi_formats[] = { DRM_FORMAT_RGB565,   DRM_FORMAT_BGR565,
 					DRM_FORMAT_ARGB8888};
 
 
-int smi_cursor_atomic_check(struct drm_plane *plane, 
+static int smi_cursor_atomic_check(struct drm_plane *plane, 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0)  
 				struct drm_plane_state *state
 #else
@@ -148,8 +148,8 @@ static void smi_cursor_atomic_update(struct drm_plane *plane,
 			LEAVE();
 		}
 
-		cursor_offset = drm_gem_vram_offset(gbo);
-		if (cursor_offset < 0) {
+		cursor_offset = (u64)drm_gem_vram_offset(gbo);
+		if ((s64)cursor_offset < 0) {
 			dbg_msg("get gpu_addr failed\n");
 			drm_gem_vram_unpin(gbo);
 			LEAVE();
@@ -195,7 +195,7 @@ static void smi_cursor_atomic_update(struct drm_plane *plane,
 		drm_gem_vram_unpin(gbo);
 #else
 		bo = gem_to_smi_bo(fb->obj[0]);
-		if (smi_bo_pin(bo, TTM_PL_FLAG_VRAM, &cursor_offset) < 0) {
+		if (smi_bo_pin(bo, TTM_PL_FLAG_VRAM, &(u64)cursor_offset) < 0) {
 			dbg_msg("smi_bo_pin failed\n");
 			LEAVE();
 		}
@@ -231,7 +231,7 @@ static void smi_cursor_atomic_update(struct drm_plane *plane,
 	}
 }
 
-void smi_cursor_atomic_disable(struct drm_plane *plane, 
+static void smi_cursor_atomic_disable(struct drm_plane *plane, 
 #if KERNEL_VERSION(5, 13, 0) >  LINUX_VERSION_CODE
 				struct drm_plane_state *old_state
 #else

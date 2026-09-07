@@ -56,9 +56,6 @@
 #ifdef CONFIG_E2K
 #include <asm/process.h>
 #endif
-#ifdef CONFIG_MCST_4RT
-#include <uapi/linux/mcst_rt.h>
-#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/mmap.h>
@@ -1034,7 +1031,11 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 			struct anon_vma_name *anon_name)
 {
 	pgoff_t pglen = (end - addr) >> PAGE_SHIFT;
+#ifdef CONFIG_MCST
+	struct vm_area_struct *mid, *next, *res = NULL;
+#else
 	struct vm_area_struct *mid, *next, *res;
+#endif
 	int err = -1;
 	bool merge_prev = false;
 	bool merge_next = false;
@@ -1276,13 +1277,6 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	validate_mm(mm);
 	*populate = 0;
-#ifdef CONFIG_MCST_4RT
-	if (mm->extra_vm_flags & VM_MLOCK_DONE) {
-		/* That is RT task, which done mlockall().
-		 * New mmap() is impossible */
-		return -EFAULT;
-	}
-#endif
 
 	if (!len)
 		return -EINVAL;

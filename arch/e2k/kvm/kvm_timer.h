@@ -14,8 +14,6 @@ typedef enum kvm_timer_type {
 	kvm_wd_timer_type,		/* lt watchdog timer */
 	kvm_reset_timer_type,		/* lt reset counter */
 	kvm_power_timer_type,		/* lt power counter */
-	kvm_apic_timer_type,		/* APIC local timer */
-	kvm_epic_timer_type,		/* CEPIC local timer */
 	kvm_sci_timer_type,		/* SPMC SCI timer */
 } kvm_timer_type_t;
 
@@ -37,12 +35,16 @@ typedef struct kvm_timer {
 	s64 period;			/* unit: ns */
 	u64 period_start;		/* counter value at the start of */
 					/* current timer period */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	s64 running_time;		/* value of VCPU running time at */
 					/* moment of last timer setting */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	u64 host_start_ns;		/* hrtimer start time on host */
 					/* at nsecs */
 	atomic_t pending;		/* accumulated triggered timers */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool reinject;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool started;			/* timer is runing */
 	bool hrtimer_started;		/* hrtimer is started and is active */
 	raw_spinlock_t lock;		/* lock to update timer struct */

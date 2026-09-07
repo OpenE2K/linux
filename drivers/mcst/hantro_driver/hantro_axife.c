@@ -29,6 +29,10 @@
 #include "hantro_device.h"
 #include "ipoffset/axife_offset.h"
 
+static struct axife_core_cfg axifecores[] = {                                                               
+    { 0x000400, 64*4, 0, 0x000800 },                                                                 
+};
+
 static int axifeprobed;
 long AxifeReadRegs(struct axife_t *dev, struct core_desc *core)
 {
@@ -42,7 +46,7 @@ long AxifeReadRegs(struct axife_t *dev, struct core_desc *core)
 
 	/* read specific registers from hardware */
 	for (i = core->reg_id; i < core->reg_id + core->size / 4; i++)
-		dev->dec_regs[i] = ioread32((void *)dev->hwregs + i * 4);
+		dev->dec_regs[i] = ioread32(dev->hwregs + i * 4);
 
 	/* put registers to user space*/
 	ret = copy_to_user(core->regs, dev->dec_regs + core->reg_id,
@@ -67,24 +71,28 @@ long AxifeWriteRegs(struct axife_t *dev, struct core_desc *core)
 		return -EFAULT;
 	}
 	for (i = core->reg_id; i < core->reg_id + core->size / 4; i++)
-		iowrite32(dev->dec_regs[i], (void *)dev->hwregs + i * 4);
+		iowrite32(dev->dec_regs[i], dev->hwregs + i * 4);
 
 	return 0;
 }
 
-void AXIFEEnable(volatile unsigned char *hwregs)
+void AXIFEEnable(volatile u8 __iomem *hwregs)
 {
 	if (!hwregs)
 		return;
 
 	//AXI FE pass through
-	iowrite32(0x0, (void *)(hwregs + HANTRO_AXIFE_OFFSET + AXI_REG11_SW_WORK_MODE));
-	pr_info("AXI FE: 0x2C = 0x%x\n", ioread32((void *)(hwregs + AXI_REG11_SW_WORK_MODE)));
-	iowrite32(0x2, (void *)(hwregs + HANTRO_AXIFE_OFFSET + AXI_REG10_SW_FRONTEND_EN));
-	pr_info("AXI FE: 0x28 = 0x%x\n", ioread32((void *)(hwregs + AXI_REG10_SW_FRONTEND_EN)));
+	iowrite32(0x0, (void __iomem *)(hwregs + HANTRO_AXIFE_OFFSET +
+						 AXI_REG11_SW_WORK_MODE));
+	pr_info("AXI FE: 0x2C = 0x%x\n",
+		ioread32((void __iomem *)(hwregs + AXI_REG11_SW_WORK_MODE)));
+	iowrite32(0x2, (void __iomem *)(hwregs + HANTRO_AXIFE_OFFSET +
+		 AXI_REG10_SW_FRONTEND_EN));
+	pr_info("AXI FE: 0x28 = 0x%x\n",
+		ioread32((void __iomem *)(hwregs + AXI_REG10_SW_FRONTEND_EN)));
 }
 
-int AXIFEFlush(volatile unsigned char *hwregs)
+int AXIFEFlush(volatile u8 __iomem *hwregs)
 {
 	int loop_cnt = 0;
 
@@ -99,7 +107,7 @@ int AXIFEFlush(volatile unsigned char *hwregs)
 		ioread32((void __iomem *)(hwregs + 0x8C)));
 
 	//polling read flush status(swreg[0]). If it is set to 1, means flush is completed.
-	while (!(ioread32(((void __iomem *)(hwregs + AXI_REG0_SW_HWCFG)))) >> 31) {
+	while (!(ioread32((void __iomem *)hwregs + AXI_REG0_SW_HWCFG) >> 31)) {
 		loop_cnt++;
 		mdelay(10); // wait 10ms
 		if (loop_cnt > 20) { // too long
@@ -146,17 +154,15 @@ int hantro_axife_probe(dtbnode *pnode, int loop, struct axife_t *axifecore)
 			pr_err("axife: HW regs busy\n");
 			return -ENODEV;
 		}
-		axifecore->hwregs =
-			(u8 *)ioremap(axifecore->core_cfg.axifecorebase,
-				      axifecore->core_cfg.iosize);
+		axifecore->hwregs = ioremap(axifecore->core_cfg.axifecorebase,
+				    	    axifecore->core_cfg.iosize);
 		if (!axifecore->hwregs) {
 			release_mem_region(axifecore->core_cfg.axifecorebase,
 					   axifecore->core_cfg.iosize);
 			pr_err("axife: failed to map HW regs\n");
 			return -ENODEV;
 		}
-		axifecore->dec_regs =
-			vmalloc(axifecore->core_cfg.iosize);
+		axifecore->dec_regs = vmalloc(axifecore->core_cfg.iosize);
 		if (!axifecore->dec_regs)
 			return -ENOMEM;
 

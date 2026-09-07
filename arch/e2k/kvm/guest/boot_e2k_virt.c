@@ -23,7 +23,7 @@
 #include <asm/smp.h>
 #include <asm/p2v/boot_head.h>
 #include <asm/console.h>
-#include <asm/host_printk.h>
+#include <asm/kvm/paravirt_sw/host_printk.h>
 
 #include <asm/kvm/hypercall.h>
 

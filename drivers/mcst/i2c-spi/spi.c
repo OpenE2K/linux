@@ -549,7 +549,7 @@ next_transaction:
 	if (buf_i) {
 		/* i2c-driver will do buffer locking. */
 		if (buf_write) /* Prepare data to be sent */
-			memcpy_toio(l_spi->data, buf, buf_i);
+			__memcpy_toio(l_spi->data, buf, buf_i);
 	}
 	l_spi_write(l_spi, cmd, L_SPI_CONTROL);
 
@@ -561,7 +561,7 @@ next_transaction:
 #ifdef DEBUG
 			int i;
 #endif
-			memcpy_fromio(rbuf, l_spi->data, buf_i);
+			__memcpy_fromio(rbuf, l_spi->data, buf_i);
 #ifdef DEBUG
 			dev_dbg(dev, "read data:");
 			for (i = 0; i < buf_i; i++)

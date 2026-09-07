@@ -13,7 +13,6 @@
 #include <asm/page_tags.h>
 #include <asm/set_memory.h>
 
-#define TAGS_PER_PAGE	(PAGE_SIZE / TAGS_BYTES_PER_PAGE)
 
 struct tags_info {
 		void *page[TAGS_PER_PAGE];
@@ -29,7 +28,6 @@ struct tag_data {
 static struct tag_data *e2k_tag_data, *tag_wp;
 static unsigned long tag_in_page, tags_info_cnt;
 static unsigned long *metadata_pfns, metadata_nr;
-
 /*
  * Free e2k_tag_data list of arrays.
  */
@@ -65,7 +63,6 @@ int alloc_tag_pages(unsigned long pages, unsigned long *tags)
 	k = get_order(metadata_nr * sizeof(metadata_pfns));
 	metadata_pfns = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, k);
 	if (!metadata_pfns) {
-		free_tag_pages();
 		return -ENOMEM;
 	}
 	k = 1 << k;
@@ -78,16 +75,13 @@ int alloc_tag_pages(unsigned long pages, unsigned long *tags)
 			free_tag_pages();
 			return -ENOMEM;
 		}
-		for (i = 0; i < ARRAY_SIZE(pk->tags_info) &&
-				   j < metadata_nr; i++, j++) {
-			pk->tags_info[i].tags = (void *)
-					__get_free_page(GFP_KERNEL);
+		for (i = 0; i < ARRAY_SIZE(pk->tags_info) && j < metadata_nr; i++, j++) {
+			pk->tags_info[i].tags = (void *) __get_free_page(GFP_KERNEL);
 			if (!pk->tags_info[i].tags) {
 				free_tag_pages();
 				return -ENOMEM;
 			}
-			metadata_pfns[j] = page_to_pfn(virt_to_page(
-					pk->tags_info[i].tags));
+			metadata_pfns[j] = page_to_pfn(virt_to_page(pk->tags_info[i].tags));
 		}
 		pk->next = e2k_tag_data;
 		e2k_tag_data = pk;
@@ -102,7 +96,7 @@ int alloc_tag_pages(unsigned long pages, unsigned long *tags)
 /*
  * Save the tags.
  */
-void save_tag_for_pfn(unsigned long pfn)
+void save_tag_clr_for_pfn(unsigned long pfn)
 {
 	void *to, *r, *from = page_address(pfn_to_page(pfn));
 	struct tags_info *t;
@@ -124,10 +118,10 @@ void save_tag_for_pfn(unsigned long pfn)
 		if (WARN_ON_ONCE(!t->tags))
 			return;
 	}
-	to = t->tags + tag_in_page * TAGS_BYTES_PER_PAGE;
+	to = t->tags + tag_in_page * (TAGS_BYTES_PER_PAGE + CLRS_BYTES_PER_PAGE);
 
-	if (!save_tags_from_data(from, to)) {
-		/* No tags in the page, skip it when restoring tags */
+	if (!save_tags_colors_from_data(from, to, to + TAGS_BYTES_PER_PAGE)) {
+		/* No tags and colors in the page, skip it when restoring tags */
 		return;
 	}
 
@@ -145,18 +139,27 @@ void save_tag_for_pfn(unsigned long pfn)
 	tag_wp = tag_wp->next;
 }
 
-UACCESS_FN_DEFINE2(restore_tags_for_data, u64 *, datap, u8 *, tagp)
+UACCESS_FN_DEFINE3(restore_tags_colors_for_data, u64 *, datap, u8 *, tagp, u8 *, clrp)
 {
 	int i;
 
 	for (i = 0; i < (int) TAGS_BYTES_PER_PAGE; i++) {
-		u64 data_lo = datap[2 * i], data_hi = datap[2 * i + 1];
-		u32 tag = (u32) tagp[i];
+		u64 ptr_to_store = (u64)&datap[2 * i];
+		e2k_qreg_t data = (e2k_qreg_t) {
+			.lo = datap[2 * i],
+			.hi = datap[2 * i + 1],
+		};
 
-		store_tagged_dword(&datap[2 * i], data_lo, tag);
-		store_tagged_dword(&datap[2 * i + 1], data_hi, tag >> 4);
+#ifdef CONFIG_PROTECTED_MODE
+		if (cpu_has(CPU_FEAT_ISET_V7)) {
+			u8 clr = (i & 1) ? clrp[i /2] >> 4 : clrp[i /2] & 0xf;
+			if (clr)
+				ptr_to_store = ptr_to_store | (clr << ((i & 1) ? 61 : 60));
+			store_tagged_colored_qword((void *)ptr_to_store, data, tagp[i]);
+		} else
+#endif
+			store_tagged_qword((void *)ptr_to_store, data, tagp[i], 8);
 	}
-
 	return 0;
 }
 
@@ -171,16 +174,18 @@ static void restore_tags_info(struct tags_info *t)
 
 	for (i = 0; i < ARRAY_SIZE(t->page); i++) {
 		void *to = t->page[i];
-		void *from = t->tags + i * TAGS_BYTES_PER_PAGE;
+		void *from = t->tags + i * (TAGS_BYTES_PER_PAGE + CLRS_BYTES_PER_PAGE);
 
 		if (unlikely(!to))
 			break;
 
-		if (__UACCESS_FN_CALL(restore_tags_for_data, to, from)) {
+		if (__UACCESS_FN_CALL(restore_tags_colors_for_data, to, from,
+				      from + TAGS_BYTES_PER_PAGE)) {
 			int ret;
 
 			set_memory_rw((unsigned long) to, 1);
-			ret = __UACCESS_FN_CALL(restore_tags_for_data, to, from);
+			ret = __UACCESS_FN_CALL(restore_tags_colors_for_data, to, from,
+						from + TAGS_BYTES_PER_PAGE);
 			set_memory_ro((unsigned long) to, 1);
 
 			if (ret) {
@@ -239,20 +244,17 @@ int swsusp_arch_suspend(void)
 }
 
 #define r64(_a)	({						\
-		void *_v = (void *)NATIVE_READ_MAS_D(__pa(_a), MAS_LOAD_PA); \
+		void *_v = (void *)NATIVE_READ_MAS_D(__pa(_a), MAS_DISABLED_TRANSLATION); \
 		_v; })
-#define w64(_v, _a)	NATIVE_WRITE_MAS_D(__pa(_a), _v, MAS_STORE_PA)
+#define w64(_v, _a)	NATIVE_WRITE_MAS_D(__pa(_a), _v, MAS_DISABLED_TRANSLATION)
 
 static inline void copy_image(void)
 {
-	struct pbe *pbe;
-	for (pbe = restore_pblist; pbe; pbe = r64(&pbe->next)) {
-		u64 *to = r64(&pbe->orig_address);
-		u64 *from = r64(&pbe->address);
-		int i;
+	for (auto pbe = restore_pblist; pbe; pbe = r64(&pbe->next)) {
+		void *to = r64(&pbe->orig_address);
+		void *from = r64(&pbe->address);
 
-		for (i = 0; i < PAGE_SIZE / sizeof(*to); i++, to++, from++)
-			w64(r64(from), to);
+		copy_page_pa(__pa(to), __pa(from));
 	}
 }
 

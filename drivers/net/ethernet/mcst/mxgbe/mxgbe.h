@@ -172,6 +172,7 @@ enum mxgbe_buff_type {
 	MXGBE_TYPE_SKB = 0,
 	MXGBE_TYPE_XDP,
 	MXGBE_TYPE_XDP_TX,
+	MXGBE_TYPE_PAGE,
 };
 
 struct mxgbe_stats {
@@ -184,25 +185,19 @@ struct mxgbe_stats {
 struct mxgbe_vector;
 struct mxgbe_priv;
 
-struct mxgbe_tx_buff {
-	enum mxgbe_buff_type type;
+struct mxgbe_buff {
 	union {
 		struct sk_buff *skb;
 		struct xdp_frame *xdpf;
+		struct page *page;
 	};
 	DEFINE_DMA_UNMAP_ADDR(dma);
 	DEFINE_DMA_UNMAP_LEN(len);
 	unsigned int bytes;
+	enum mxgbe_buff_type type;
 };
-typedef struct mxgbe_tx_buff mxgbe_tx_buff_t; /* net, txq */
 
-struct mxgbe_rx_buff {
-	struct page *page;
-	DEFINE_DMA_UNMAP_ADDR(dma);
-	DEFINE_DMA_UNMAP_LEN(len);
-	unsigned int bytes;
-};
-typedef struct mxgbe_rx_buff mxgbe_rx_buff_t; /* net, rxq */
+typedef struct mxgbe_buff mxgbe_buff_t; /* net, txq, rxq */
 
 struct mxgbe_queue {
 	struct mxgbe_vector	*vector;	/* backpointer to host vector */
@@ -214,10 +209,7 @@ struct mxgbe_queue {
 	void			*tail_addr;	/* CPU-viewed addr */
 	dma_addr_t		tail_handle;	/* dev-viewed addr */
 	int			prio;
-	union {
-		mxgbe_rx_buff_t	*rx_buff;	/* [sizeof() * descr_cnt] */
-		mxgbe_tx_buff_t	*tx_buff;	/* [sizeof() * descr_cnt] */
-	};
+	mxgbe_buff_t	*buff;	/* [sizeof() * descr_cnt] */
 	int			last_alloc;
 
 	spinlock_t		tlock;		/* lock .tail */
@@ -312,16 +304,16 @@ typedef struct mxgbe_priv {
 	u32			msg_enable;	/* debug message level */
 
 	/* MDIO */
-	raw_spinlock_t		mgio_lock;
 	struct mii_bus		*mii_bus;
 	int			pcsaddr;	/* Address of Internal PHY */
 	u32			pcs_dev_id;
+	int			node;
 
 	/* I2C */
 	struct i2c_adapter	*i2c_0;	/* SFP */
 	struct i2c_adapter	*i2c_1;	/* VSC */
 	struct i2c_adapter	*i2c_2;	/* EEPROM */
-	u64			MAC;
+	__be64			MAC;
 
 	/* MAC */
 	struct task_struct	*mac_task;
@@ -343,12 +335,33 @@ typedef struct mxgbe_priv {
 } mxgbe_priv_t;
 
 
+extern spinlock_t eldwcxpcs_mgio_lock[];
 extern struct pci_driver mxgbe_pci_driver;
 
 int mxgbe_tx_q_mapping(mxgbe_priv_t *priv, struct sk_buff *skb);
 int mxgbe_open(struct net_device *ndev);
 int mxgbe_stop(struct net_device *ndev);
 void net_rxq_clean_q(mxgbe_priv_t *priv, int qn);
+void net_txq_clean_q(mxgbe_priv_t *priv, int qn);
 int net_rxq_init_q(mxgbe_priv_t *priv, int qn);
+
+void mxgbe_set_ethtool_ops(struct net_device *ndev);
+
+void mxgbe_net_rx_irq_handler(mxgbe_vector_t *vector);
+void mxgbe_net_tx_irq_handler(mxgbe_vector_t *vector);
+void mxgbe_net_mac_irq_handler(mxgbe_priv_t *priv, u32 state);
+
+mxgbe_priv_t *mxgbe_net_alloc(struct pci_dev *pdev, void __iomem *base);
+int mxgbe_net_register(mxgbe_priv_t *priv);
+int mxgbe_net_reinit(mxgbe_priv_t *priv);
+void mxgbe_net_remove(mxgbe_priv_t *priv);
+void mxgbe_net_free(mxgbe_priv_t *priv);
+int mxgbe_board_up(mxgbe_priv_t *priv);
+void mxgbe_board_down(mxgbe_priv_t *priv);
+
+int mxgbe_device_event(struct notifier_block *unused, unsigned long event, void *ptr);
+
+int mxgbe_init_board(struct pci_dev *pdev, void __iomem *bar_addr[], phys_addr_t bar_addr_bus[]);
+void mxgbe_release_board(struct pci_dev *pdev);
 
 #endif /* MXGBE_H__ */

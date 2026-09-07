@@ -191,7 +191,9 @@ static int sysbrg_mmap(
 
     /* Get infomation for this mappable region...*/
     psMappableReg = SYSBRGU_GetMappableRegion((IMG_PHYSADDR)vma->vm_pgoff<<PAGE_SHIFT);
+#ifndef CONFIG_MCST
     IMG_ASSERT(psMappableReg != IMG_NULL);
+#endif
     if (psMappableReg == IMG_NULL)
     {
         return -EINVAL;

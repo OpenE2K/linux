@@ -32,11 +32,6 @@ static DEFINE_PER_CPU(struct hlist_head, cleanup_list);
 #endif
 
 
-struct irq_desc *__setup_vector_irq(int vector)
-{
-	return VECTOR_UNUSED;
-}
-
 void lock_vector_lock(void)
 {
 	/* Used to the online set of cpus does not change
@@ -128,6 +123,7 @@ static void apic_update_vector(struct irq_data *irqd, unsigned int newvec,
 	} else {
 		irq_matrix_free(vector_matrix, picd->cpu, picd->vector,
 				managed);
+		per_cpu(vector_irq, picd->cpu)[picd->vector] = VECTOR_SHUTDOWN;
 	}
 
 setnew:
@@ -159,33 +155,10 @@ static int reserve_managed_vector(struct irq_data *irqd)
 	return ret;
 }
 
-static void reserve_irq_vector_locked(struct irq_data *irqd)
-{
-	struct pic_chip_data *picd = pic_chip_data(irqd);
-
-	irq_matrix_reserve(vector_matrix);
-	picd->can_reserve = true;
-	picd->has_reserved = true;
-	irqd_set_can_reserve(irqd);
-	trace_vector_reserve(irqd->irq, 0);
-	vector_assign_managed_shutdown(irqd);
-}
-
-static int reserve_irq_vector(struct irq_data *irqd)
-{
-	unsigned long flags;
-
-	raw_spin_lock_irqsave(&vector_lock, flags);
-	reserve_irq_vector_locked(irqd);
-	raw_spin_unlock_irqrestore(&vector_lock, flags);
-	return 0;
-}
-
 static int
 assign_vector_locked(struct irq_data *irqd, const struct cpumask *dest)
 {
 	struct pic_chip_data *picd = pic_chip_data(irqd);
-	bool resvd = picd->has_reserved;
 	unsigned int cpu = picd->cpu;
 	int vector = picd->vector;
 
@@ -208,9 +181,9 @@ assign_vector_locked(struct irq_data *irqd, const struct cpumask *dest)
 	if (picd->move_in_progress || !hlist_unhashed(&picd->clist))
 		return -EBUSY;
 
-	vector = irq_matrix_alloc(vector_matrix, dest, resvd, &cpu);
+	vector = irq_matrix_alloc(vector_matrix, dest, false, &cpu);
 
-	trace_vector_alloc(irqd->irq, vector, resvd, vector);
+	trace_vector_alloc(irqd->irq, vector, vector);
 	if (vector < 0)
 		return vector;
 	apic_update_vector(irqd, vector, cpu);
@@ -263,14 +236,13 @@ static int assign_irq_vector_any_locked(struct irq_data *irqd)
 static int assign_irq_system_vector_locked(struct irq_data *irqd, bool percpu)
 {
 	struct pic_chip_data *picd = pic_chip_data(irqd);
-	bool resvd = picd->has_reserved;
 	int vector = picd->vector;
 
 	lockdep_assert_held(&vector_lock);
 
 	BUG_ON(vector);
 	vector = irqd->hwirq;
-	trace_vector_alloc(irqd->irq, vector, resvd, vector);
+	trace_vector_alloc(irqd->irq, vector, vector);
 
 	picd->hw_irq_cfg.vector = vector;
 
@@ -304,13 +276,7 @@ assign_irq_vector_policy(struct irq_data *irqd, bool system_vec, bool percpu)
 
 	if (irqd_affinity_is_managed(irqd))
 		return reserve_managed_vector(irqd);
-	if (affmsk)
-		return assign_irq_vector(irqd, affmsk);
-	/*
-	 * Make only a global reservation with no guarantee. A real vector
-	 * is associated at activation time.
-	 */
-	return reserve_irq_vector(irqd);
+	return assign_irq_vector(irqd, affmsk);
 }
 
 static int
@@ -375,55 +341,16 @@ static void l_vector_deactivate(struct irq_domain *dmn, struct irq_data *irqd)
 	sys = !!d->hwirq;
 	if (sys)
 		return;
-	trace_vector_deactivate(irqd->irq, picd->is_managed,
-				picd->can_reserve, false);
+	trace_vector_deactivate(irqd->irq, picd->is_managed, false);
 
 	/* Regular fixed assigned interrupt */
-	if (!picd->is_managed && !picd->can_reserve)
-		return;
-	/* If the interrupt has a global reservation, nothing to do */
-	if (picd->has_reserved)
+	if (!picd->is_managed)
 		return;
 
 	raw_spin_lock_irqsave(&vector_lock, flags);
 	clear_irq_vector(irqd);
-	if (picd->can_reserve)
-		reserve_irq_vector_locked(irqd);
-	else
-		vector_assign_managed_shutdown(irqd);
+	vector_assign_managed_shutdown(irqd);
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
-}
-
-static int activate_reserved(struct irq_data *irqd)
-{
-	struct pic_chip_data *picd = pic_chip_data(irqd);
-	int ret;
-
-	ret = assign_irq_vector_any_locked(irqd);
-	if (!ret) {
-		picd->has_reserved = false;
-		/*
-		 * Core might have disabled reservation mode after
-		 * allocating the irq descriptor. Ideally this should
-		 * happen before allocation time, but that would require
-		 * completely convoluted ways of transporting that
-		 * information.
-		 */
-		if (!irqd_can_reserve(irqd))
-			picd->can_reserve = false;
-	}
-
-	/*
-	 * Check to ensure that the effective affinity mask is a subset
-	 * the user supplied affinity mask, and warn the user if it is not
-	 */
-	if (!cpumask_subset(irq_data_get_effective_affinity_mask(irqd),
-			    irq_data_get_affinity_mask(irqd))) {
-		pr_warn("irq %u: Affinity broken due to vector space exhaustion.\n",
-			irqd->irq);
-	}
-
-	return ret;
 }
 
 static int activate_managed(struct irq_data *irqd)
@@ -463,33 +390,27 @@ static int l_vector_activate(struct irq_domain *dmn, struct irq_data *irqd,
 	if (sys)
 		return 0;
 
-	trace_vector_activate(irqd->irq, picd->is_managed,
-			      picd->can_reserve, reserve);
+	trace_vector_activate(irqd->irq, picd->is_managed, reserve);
 
 
 	raw_spin_lock_irqsave(&vector_lock, flags);
-	if (!picd->can_reserve && !picd->is_managed)
+	if (!picd->is_managed)
 		assign_irq_vector_any_locked(irqd);
 	else if (reserve || irqd_is_managed_and_shutdown(irqd))
 		vector_assign_managed_shutdown(irqd);
-	else if (picd->is_managed)
+	else
 		ret = activate_managed(irqd);
-	else if (picd->has_reserved)
-		ret = activate_reserved(irqd);
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
 	return ret;
 }
 
-static void vector_free_reserved_and_managed(struct irq_data *irqd)
+static void vector_free_managed(struct irq_data *irqd)
 {
 	const struct cpumask *dest = irq_data_get_affinity_mask(irqd);
 	struct pic_chip_data *picd = pic_chip_data(irqd);
 
-	trace_vector_teardown(irqd->irq, picd->is_managed,
-			      picd->has_reserved);
+	trace_vector_teardown(irqd->irq, picd->is_managed);
 
-	if (picd->has_reserved)
-		irq_matrix_remove_reserved(vector_matrix);
 	if (picd->is_managed)
 		irq_matrix_remove_managed(vector_matrix, dest);
 }
@@ -507,7 +428,7 @@ static void l_vector_free_irqs(struct irq_domain *dmn,
 		if (irqd && irqd->chip_data) {
 			raw_spin_lock_irqsave(&vector_lock, flags);
 			clear_irq_vector(irqd);
-			vector_free_reserved_and_managed(irqd);
+			vector_free_managed(irqd);
 			picd = irqd->chip_data;
 			irq_domain_reset_irq_data(irqd);
 			raw_spin_unlock_irqrestore(&vector_lock, flags);
@@ -638,8 +559,6 @@ static void l_vector_debug_show(struct seq_file *m, struct irq_domain *d,
 	}
 	seq_printf(m, "%*smove_in_progress: %u\n", ind, "", picd.move_in_progress ? 1 : 0);
 	seq_printf(m, "%*sis_managed:       %u\n", ind, "", picd.is_managed ? 1 : 0);
-	seq_printf(m, "%*scan_reserve:      %u\n", ind, "", picd.can_reserve ? 1 : 0);
-	seq_printf(m, "%*shas_reserved:     %u\n", ind, "", picd.has_reserved ? 1 : 0);
 	seq_printf(m, "%*scleanup_pending:  %u\n", ind, "", !hlist_unhashed(&picd.clist));
 }
 #endif
@@ -659,24 +578,16 @@ static const struct irq_domain_ops l_vector_domain_ops = {
 /* Online the local APIC infrastructure and initialize the vectors */
 static int pic_starting_cpu(unsigned int cpu)
 {
-	unsigned int vector;
-
 	lock_vector_lock();
 
 	/* Online the vector matrix array for this CPU */
 	irq_matrix_online(vector_matrix);
 
 	/*
-	 * The interrupt affinity logic never targets interrupts to offline
-	 * CPUs. The exception are the legacy PIC interrupts. In general
-	 * they are only targeted to CPU0, but depending on the platform
-	 * they can be distributed to any online CPU in hardware. The
-	 * kernel has no influence on that. So all active legacy vectors
-	 * must be installed on all CPUs. All non legacy interrupts can be
-	 * cleared.
+	 * Can get here after hibernation in which case `vector_irq`
+	 * would be initialized in accordance with `pic_chip_data`.
+	 * So avoid unconditional clearing of `vector_irq`.
 	 */
-	for (vector = 0; vector < NR_VECTORS; vector++)
-		this_cpu_write(vector_irq[vector], __setup_vector_irq(vector));
 	unlock_vector_lock();
 	return 0;
 }
@@ -893,11 +804,13 @@ unlock:
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
+
+#if 0	/* not used */
 /*
  * Note, this is not accurate accounting, but at least good enough to
  * prevent that the actual interrupt move will run out of vectors.
  */
-int lapic_can_unplug_cpu(void)
+static int lapic_can_unplug_cpu(void)
 {
 	unsigned int rsvd, avl, tomove, cpu = smp_processor_id();
 	int ret = 0;
@@ -921,6 +834,7 @@ out:
 	raw_spin_unlock(&vector_lock);
 	return ret;
 }
+#endif /* if 0 */
 #endif /* HOTPLUG_CPU */
 #endif /* SMP */
 

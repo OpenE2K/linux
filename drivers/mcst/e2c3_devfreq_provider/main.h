@@ -54,13 +54,13 @@ http://www.lab.sun.mcst.ru/honey/elbrus_2c3/doc/hw/pcs/pcs_config.pdf */
 struct e2c3_devfreq_provider {
 	struct device *dev;
 	struct devfreq *devfreq_device;
-	char *reg;
+	char __iomem *reg;
 	unsigned long *freq_table;
 	unsigned int divF_limit_lo;
 	unsigned int divF_limit_hi;
 };
 
-int e2c3_get_f_pll(const int);
+int e2c3_get_f_pll(char __iomem *reg);
 long e2c3_init_dvfs(struct e2c3_devfreq_provider *);
 void e2c3_deinit_dvfs(const struct e2c3_devfreq_provider *);
 

@@ -51,7 +51,7 @@ do { \
 #define	NATIVE_SAVE_AAU_MASK_REGS(aau_context, aasr) \
 		PREFIX_SAVE_AAU_MASK_REGS(NATIVE, native, aau_context, aasr)
 
-static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
+static __always_inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 {
 	if (unlikely(aau_active(aasr))) {
 		/* As it turns out AAU can be in ACTIVE state
@@ -69,13 +69,17 @@ static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 }
 
 #define	PREFIX_RESTORE_AAU_MASK_REGS(PV_TYPE, pv_type, aaldm, aaldv, aasr) \
-({									\
-	pv_type##_write_aafstr_reg_value(0);				\
-	pv_type##_write_aaldm_reg(aaldm);				\
-	pv_type##_write_aaldv_reg(aaldv);				\
-	/* aasr can be in 'ACTIVE' state, so we set it last */		\
-	pv_type##_write_aasr_reg(aasr);					\
-})
+do { \
+	e2k_aaldm_t __pra_aaldm = (aaldm); \
+	e2k_aaldv_t __pra_aaldv = (aaldv); \
+	e2k_aasr_t __pra_aasr = (aasr); \
+	pv_type##_write_aafstr_reg_value(0); \
+	pv_type##_write_aaldm_reg(__pra_aaldm); \
+	pv_type##_write_aaldv_reg(__pra_aaldv); \
+	barrier(); \
+	/* aasr can be in 'ACTIVE' state, so we set it last */ \
+	pv_type##_write_aasr_reg(__pra_aasr); \
+} while (0)
 
 #define	NATIVE_RESTORE_AAU_MASK_REGS(aaldm, aaldv, aasr) \
 		PREFIX_RESTORE_AAU_MASK_REGS(NATIVE, native, aaldm, aaldv, aasr)
@@ -167,17 +171,13 @@ static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 #define NATIVE_SAVE_AALDIS_V5(regs)	\
 		PREFIX_SAVE_AALDIS_V5(NATIVE, native, regs)
 #define NATIVE_SAVE_AALDIS(regs)	\
-({ \
-	if (IS_AAU_ISET_V5()) { \
+do { \
+	if (likely(cpu_has(CPU_FEAT_ISET_V5))) { \
 		NATIVE_SAVE_AALDIS_V5(regs); \
-	} else if (IS_AAU_ISET_V3()) { \
-		NATIVE_SAVE_AALDIS_V3(regs); \
-	} else if (IS_AAU_ISET_GENERIC()) { \
-		machine.save_aaldi(regs); \
 	} else { \
-		BUILD_BUG_ON(true); \
+		NATIVE_SAVE_AALDIS_V3(regs); \
 	} \
-})
+} while (0)
 
 #define	PREFIX_GET_ARRAY_DESCRIPTORS_V3(PV_TYPE, pv_type, aau_context)	\
 ({									\
@@ -612,14 +612,10 @@ static inline e2k_aasr_t aasr_parse(e2k_aasr_t aasr)
 		PREFIX_GET_AAU_CONTEXT_V5(NATIVE, native, aau_context, aasr)
 #define NATIVE_GET_AAU_CONTEXT(aau_context, aasr)	\
 do { \
-	if (IS_AAU_ISET_V5()) { \
+	if (cpu_has(CPU_FEAT_ISET_V5)) { \
 		NATIVE_GET_AAU_CONTEXT_V5(aau_context, aasr); \
-	} else if (IS_AAU_ISET_V3()) { \
-		NATIVE_GET_AAU_CONTEXT_V3(aau_context, aasr); \
-	} else if (IS_AAU_ISET_GENERIC()) { \
-		machine.get_aau_context(aau_context, aasr); \
 	} else { \
-		BUILD_BUG_ON(true); \
+		NATIVE_GET_AAU_CONTEXT_V3(aau_context, aasr); \
 	} \
 } while (0)
 
@@ -706,7 +702,7 @@ do { \
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* It is virtualized guest kernel */
-#include <asm/kvm/aau_regs_access.h>
+#include <asm/kvm/guest/aau_regs_access.h>
 #else	/* !CONFIG_KVM_GUEST_KERNEL */
 /* native kernel without virtualization */
 /* or native host kernel with virtualization support */

@@ -83,9 +83,9 @@ void perf_callchain_user(struct perf_callchain_entry_ctx *entry,
 	struct save_stack_address_args args;
 
 	args.entry = entry;
-	args.top = PCSP_PTR(regs->stacks.pcsp);
+	args.top = (unsigned long)U_PCSP_PTR(regs->stacks.pcsp);
 	args.type = PERF_CONTEXT_USER;
-	parse_chain_stack(true, NULL, save_stack_address, &args);
+	parse_chain_stack(true, false, NULL, save_stack_address, &args);
 }
 
 void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
@@ -94,9 +94,9 @@ void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
 	struct save_stack_address_args args;
 
 	args.entry = entry;
-	args.top = PCSP_PTR(regs->stacks.pcsp);
+	args.top = (unsigned long)U_PCSP_PTR(regs->stacks.pcsp);
 	args.type = PERF_CONTEXT_KERNEL;
-	parse_chain_stack(false, NULL, save_stack_address, &args);
+	parse_chain_stack(false, false, NULL, save_stack_address, &args);
 }
 
 /*
@@ -390,8 +390,10 @@ void perf_instr_overflow_handle(struct pt_regs *regs)
 		if (event0->pmu->type != e2k_pmu.type) {
 			dimtp_overflow(event0);
 		} else {
-			regs->trap->dim_ip = read_DIMAR0_reg();
-			regs->trap->dim_ip_valid = 1;
+			if (cpu_has(CPU_FEAT_PRECISE_DIMAR)) {
+				regs->trap->dim_ip = read_DIMAR0_reg();
+				regs->trap->dim_ip_valid = 1;
+			}
 			s64 period = handle_event_overflow("DIM0", event0, regs);
 			write_DIMAR0_reg(-period);
 		}
@@ -399,24 +401,30 @@ void perf_instr_overflow_handle(struct pt_regs *regs)
 	}
 
 	if (dibsr.m1 && event1 && (monitors_used & _BITUL(DIM1))) {
-		regs->trap->dim_ip = read_DIMAR1_reg();
-		regs->trap->dim_ip_valid = 1;
+		if (cpu_has(CPU_FEAT_PRECISE_DIMAR)) {
+			regs->trap->dim_ip = read_DIMAR1_reg();
+			regs->trap->dim_ip_valid = 1;
+		}
 		s64 period = handle_event_overflow("DIM1", event1, regs);
 		write_DIMAR1_reg(-period);
 		dibsr.m1 = 0;
 	}
 
 	if (dibsr.m2 && event2 && (monitors_used & _BITUL(DIM2))) {
-		regs->trap->dim_ip = read_DIMAR2_reg();
-		regs->trap->dim_ip_valid = 1;
+		if (cpu_has(CPU_FEAT_PRECISE_DIMAR)) {
+			regs->trap->dim_ip = read_DIMAR2_reg();
+			regs->trap->dim_ip_valid = 1;
+		}
 		s64 period = handle_event_overflow("DIM2", event2, regs);
 		write_DIMAR2_reg(-period);
 		dibsr.m2 = 0;
 	}
 
 	if (dibsr.m3 && event3 && (monitors_used & _BITUL(DIM3))) {
-		regs->trap->dim_ip = read_DIMAR3_reg();
-		regs->trap->dim_ip_valid = 1;
+		if (cpu_has(CPU_FEAT_PRECISE_DIMAR)) {
+			regs->trap->dim_ip = read_DIMAR3_reg();
+			regs->trap->dim_ip_valid = 1;
+		}
 		s64 period = handle_event_overflow("DIM3", event3, regs);
 		write_DIMAR3_reg(-period);
 		dibsr.m3 = 0;
@@ -434,7 +442,6 @@ static void monitor_resume(struct hw_perf_event *hwc, int reload, s64 period)
 	unsigned long flags;
 	e2k_dimcr_t dimcr, dimcr1;
 	e2k_ddmcr_t ddmcr, ddmcr1;
-	e2k_dibcr_t dibcr;
 	int num;
 
 	raw_all_irq_save(flags);
@@ -444,8 +451,7 @@ static void monitor_resume(struct hw_perf_event *hwc, int reload, s64 period)
 	/* Clear PERF_HES_STOPPED */
 	hwc->state = 0;
 
-	dibcr = read_DIBCR_reg();
-	WARN_ON(dibcr.stop);
+	WARN_ON(read_DIBCR_reg().stop);
 
 	if (config.instruction && num <= 1) {
 		/* DIM0 / DIM1 */
@@ -529,7 +535,6 @@ static s64 monitor_pause(struct perf_event *event,
 	unsigned long flags;
 	e2k_dimcr_t dimcr, dimcr1;
 	e2k_ddmcr_t ddmcr, ddmcr1;
-	e2k_dibcr_t dibcr;
 	s64 left = 0;
 	int num, overflow;
 
@@ -539,8 +544,7 @@ static s64 monitor_pause(struct perf_event *event,
 
 	hwc->state |= PERF_HES_STOPPED;
 
-	dibcr = read_DIBCR_reg();
-	WARN_ON(dibcr.stop);
+	WARN_ON(read_DIBCR_reg().stop);
 
 	if (config.instruction && num <= 1) {
 		/* DIM0 / DIM1 */
@@ -709,28 +713,149 @@ static s64 monitor_pause(struct perf_event *event,
 	return left;
 }
 
-static int monitor_enable(s64 period, struct perf_event *event, int run)
+/**
+ * set_hw_event_monitor - update monitor configuration to new event
+ * @hwc: configuration to update
+ * @monitor: new monitor
+ * @event_id: new event id
+ */
+static inline void set_hw_event_monitor(struct hw_perf_event *hwc,
+		enum cpu_monitor monitor, int event_id)
+{
+	union core_event_config config = (union core_event_config) { .word = hwc->config };
+
+	config.mask = 0;
+	config.monitor = monitor;
+	config.event_id = event_id;
+
+	hwc->config = config.word;
+	hwc->idx = config_to_hwc_idx(config);
+}
+
+/**
+ * set_hw_event_mask - update monitor configuration to new data event
+ * @hwc: configuration to update
+ * @mask: new monitors, mask of _BITUL(D[ID]M[0123])
+ * @event_id: new event id
+ */
+static inline void set_hw_event_mask(struct hw_perf_event *hwc, u16 mask, int event_id)
+{
+	union core_event_config config = (union core_event_config) { .word = hwc->config };
+
+	BUILD_BUG_ON(8 * sizeof(mask) < MAX_HW_MONITORS);
+
+	config.mask = 0; /* Clear all other bits in config.mask */
+	config.monitor = 0;
+	config.ddm0 = !!(mask & (_BITUL(DDM0) | _BITUL(DDM0_DDM1)));
+	config.ddm1 = !!(mask & (_BITUL(DDM1) | _BITUL(DDM0_DDM1)));
+	config.ddm2 = !!(mask & _BITUL(DDM2));
+	config.ddm3 = !!(mask & _BITUL(DDM3));
+	config.dim0 = !!(mask & (_BITUL(DIM0) | _BITUL(DIM0_DIM1)));
+	config.dim1 = !!(mask & (_BITUL(DIM1) | _BITUL(DIM0_DIM1)));
+	config.dim2 = !!(mask & _BITUL(DIM2));
+	config.dim3 = !!(mask & _BITUL(DIM3));
+	config.event_id = event_id;
+
+	hwc->config = config.word;
+	hwc->idx = config_to_hwc_idx(config);
+}
+
+/* Maximum number of siblings for switch_to_sibling() */
+static int max_siblings = 1;
+
+/**
+ * switch_to_sibling - find sibling encoding for the same hardware event
+ *		       and switch to it
+ * @hwc: current event encoding that will be modified to sibling (if possible)
+ *
+ * This is not a proper iterator (because C) and if called repeatedly will
+ * cycle endlessly.  So use `max_siblings` to limit retries.
+ *
+ * Returns true if sibling was found.
+ */
+static bool switch_to_sibling(struct hw_perf_event *hwc)
+{
+	union core_event_config *config = (union core_event_config *) (void *) &hwc->config;
+	BUILD_BUG_ON(sizeof(hwc->config) != sizeof(*config));
+
+	if (!cpu_has(CPU_FEAT_ISET_V7))
+		return false;
+
+	if ((config->event_id >= 0 && config->event_id <= 3 ||
+	     config->event_id >= 5 && config->event_id <= 7) &&
+	    config_has_monitor(*config, DDM0)) {
+		set_hw_event_monitor(hwc, DDM2, config->event_id + 0x60);
+		hwc->idx = 2;
+		return true;
+	}
+
+	if ((config->event_id >= 0x60 && config->event_id <= 0x63 ||
+	     config->event_id >= 0x65 && config->event_id <= 0x67) &&
+	    config_has_monitor(*config, DDM2)) {
+		set_hw_event_monitor(hwc, DDM0, config->event_id - 0x60);
+		return true;
+	}
+
+	if (config_has_event(*config, DDM0, 0x4b)) {
+		set_hw_event_monitor(hwc, DDM2, 0x87);
+		return true;
+	}
+
+	if (config_has_event(*config, DDM2, 0x87)) {
+		set_hw_event_monitor(hwc, DDM0, 0x4b);
+		return true;
+	}
+
+	if (config_has_event(*config, DDM1, 0xa)) {
+		set_hw_event_monitor(hwc, DDM3, 0xb);
+		return true;
+	}
+
+	if (config_has_event(*config, DDM3, 0xb)) {
+		set_hw_event_monitor(hwc, DDM1, 0xa);
+		return true;
+	}
+
+	if ((config->event_id >= 0 && config->event_id <= 3 ||
+	     config->event_id >= 5 && config->event_id <= 7) &&
+	    config_has_monitor(*config, DDM1)) {
+		set_hw_event_monitor(hwc, DDM3, config->event_id + 0x60);
+		return true;
+	}
+
+	if ((config->event_id >= 0x60 && config->event_id <= 0x63 ||
+	     config->event_id >= 0x65 && config->event_id <= 0x67) &&
+	    config_has_monitor(*config, DDM3)) {
+		set_hw_event_monitor(hwc, DDM1, config->event_id - 0x60);
+		return true;
+	}
+
+	if (config_has_event(*config, DDM0_DDM1, 0x4)) {
+		set_hw_event_mask(hwc, _BITUL(DDM2) | _BITUL(DDM3), 0x64);
+		return true;
+	}
+
+	if (config_has_event(*config, DDM2, 0x64) ||
+	    config_has_event(*config, DDM3, 0x64)) {
+		set_hw_event_mask(hwc, _BITUL(DDM0) | _BITUL(DDM1), 0x4);
+		return true;
+	}
+
+	return false;
+}
+
+/* Try to enable configuration currently set in config */
+static int monitor_enable_single_noirq(s64 period, struct perf_event *event, int run)
 {
 	struct hw_perf_event *hwc = &event->hw;
 	union core_event_config config = (union core_event_config) { .word = hwc->config };
-	unsigned long flags;
 	e2k_dimcr_t dimcr, dimcr1;
 	e2k_ddmcr_t ddmcr, ddmcr1;
-	e2k_dibcr_t dibcr;
 	e2k_dibsr_t dibsr;
 	e2k_ddbsr_t ddbsr;
-	int num, ret = 0;
-	u16 monitors_used;
+	int num;
+	u16 monitors_used = __this_cpu_read(perf_monitors_used);
 	u8 monitor;
-
-	raw_all_irq_save(flags);
-
-	period = -period;
-
-	dibcr = read_DIBCR_reg();
-	WARN_ON(dibcr.stop);
-
-	monitors_used = __this_cpu_read(perf_monitors_used);
 
 	/* Find available slot if event is supported in several slots.
 	 *
@@ -761,8 +886,7 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 			monitor = DDM0;
 			hwc->idx = 0;
 		} else {
-			ret = -ENOSPC;
-			goto out_irq;
+			return -ENOSPC;
 		}
 	} else {
 		switch (config.monitor) {
@@ -774,8 +898,7 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 				monitor = DIM0;
 				hwc->idx = 0;
 			} else {
-				ret = -ENOSPC;
-				goto out_irq;
+				return -ENOSPC;
 			}
 			break;
 		case DDM0_DDM1:
@@ -786,8 +909,7 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 				monitor = DDM0;
 				hwc->idx = 0;
 			} else {
-				ret = -ENOSPC;
-				goto out_irq;
+				return -ENOSPC;
 			}
 			break;
 		default:
@@ -800,10 +922,8 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 	case DIM0:
 	case DIM1:
 		if (monitor == DIM1 && (monitors_used & _BITUL(DIM1)) ||
-		    monitor == DIM0 && (monitors_used & _BITUL(DIM0))) {
-			ret = -ENOSPC;
-			break;
-		}
+		    monitor == DIM0 && (monitors_used & _BITUL(DIM0)))
+			return -ENOSPC;
 
 		dimcr = read_DIMCR_reg();
 		num = (monitor == DIM1);
@@ -842,10 +962,8 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 	case DIM2:
 	case DIM3:
 		if (monitor == DIM3 && (monitors_used & _BITUL(DIM3)) ||
-		    monitor == DIM2 && (monitors_used & _BITUL(DIM2))) {
-			ret = -ENOSPC;
-			break;
-		}
+		    monitor == DIM2 && (monitors_used & _BITUL(DIM2)))
+			return -ENOSPC;
 
 		dimcr1 = read_DIMCR1_reg();
 		num = (monitor == DIM3);
@@ -884,10 +1002,8 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 	case DDM0:
 	case DDM1:
 		if (monitor == DDM1 && (monitors_used & _BITUL(DDM1)) ||
-		    monitor == DDM0 && (monitors_used & _BITUL(DDM0))) {
-			ret = -ENOSPC;
-			break;
-		}
+		    monitor == DDM0 && (monitors_used & _BITUL(DDM0)))
+			return -ENOSPC;
 
 		ddmcr = READ_DDMCR_REG();
 		num = (monitor == DDM1);
@@ -926,10 +1042,8 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 	case DDM2:
 	case DDM3:
 		if (monitor == DDM3 && (monitors_used & _BITUL(DDM3)) ||
-		    monitor == DDM2 && (monitors_used & _BITUL(DDM2))) {
-			ret = -ENOSPC;
-			break;
-		}
+		    monitor == DDM2 && (monitors_used & _BITUL(DDM2)))
+			return -ENOSPC;
 
 		ddmcr1 = READ_DDMCR1_REG();
 		num = (monitor == DDM3);
@@ -971,7 +1085,40 @@ static int monitor_enable(s64 period, struct perf_event *event, int run)
 		break;
 	}
 
-out_irq:
+	return 0;
+}
+
+
+static int monitor_enable(s64 period, struct perf_event *event, int run)
+{
+	struct hw_perf_event *hwc = &event->hw;
+	unsigned long flags;
+	int ret = -ENOSPC;
+
+	raw_all_irq_save(flags);
+
+	period = -period;
+
+	WARN_ON(read_DIBCR_reg().stop);
+
+	/*
+	 * Some events are encoded by different numbers.  For them
+	 * we try sequentially all available numbers.
+	 */
+	for (int siblings_tried = 0; siblings_tried <= max_siblings; siblings_tried++) {
+		ret = monitor_enable_single_noirq(period, event, run);
+
+		if (ret == -ENOSPC && siblings_tried < max_siblings && switch_to_sibling(hwc)) {
+			union core_event_config sibling =
+					(union core_event_config) { .word = hwc->config };
+			pr_debug("trying sibling %hhx:%hhx:%02hhx\n",
+					sibling.mask, sibling.monitor, sibling.event_id);
+			continue;
+		}
+
+		break;
+	}
+
 	raw_all_irq_restore(flags);
 
 	return ret;
@@ -1446,8 +1593,9 @@ static void e2k_pmu_start(struct perf_event *event, int flags)
 #define DIM1_CONFIG 0x20
 #define DIM2_CONFIG 0x40
 #define DIM3_CONFIG 0x80
-#define DIM012_CONFIG	(DIM0_CONFIG | DIM1_CONFIG | DIM2_CONFIG)
-#define DIM0123_CONFIG	(DIM0_CONFIG | DIM1_CONFIG | DIM2_CONFIG | DIM3_CONFIG)
+#define DIM012_CONFIG	(DIM0_CONFIG | DIM1_CONFIG | (cpu_has(CPU_HWBUG_DIMCR1) ? 0 : DIM2_CONFIG))
+#define DIM0123_CONFIG	(DIM0_CONFIG | DIM1_CONFIG | \
+			 (cpu_has(CPU_HWBUG_DIMCR1) ? 0 : (DIM2_CONFIG | DIM3_CONFIG)))
 #define config_mask(_mask, _event_id) \
 	((union core_event_config) { \
 		.monitor = 0, \
@@ -1573,8 +1721,7 @@ static __init int init_perf_events_map(void)
 		hw_events_map[PERF_COUNT_HW_CPU_CYCLES] = config_mask(DIM0123_CONFIG, 0x72);
 		hw_events_map[PERF_COUNT_HW_INSTRUCTIONS] = config_mask(DIM012_CONFIG, 0x13);
 		hw_events_map[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND] =
-						config_mask(DIM0123_CONFIG, 0x18);
-		hw_events_map[PERF_COUNT_HW_BRANCH_MISSES] = config_mask(DIM0123_CONFIG, 0x98);
+						config_mask(DIM0123_CONFIG, 0x7f);
 	}
 
 	return 0;
@@ -1632,6 +1779,17 @@ static const char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 		[0x1d ... 0x1e]	= E2K_ISET_SINCE_V7_MASK,
 		[0x3b ... 0x3e] = E2K_ISET_SINCE_V7_MASK,
 	},
+	[DDM2] = {
+		[0x0 ... 0x22]	= E2K_ISET_SINCE_V7_MASK,
+		[0x40 ... 0x48]	= E2K_ISET_SINCE_V7_MASK,
+		[0x60 ... 0x67]	= E2K_ISET_SINCE_V7_MASK,
+		[0x80 ... 0x87]	= E2K_ISET_SINCE_V7_MASK,
+	},
+	[DDM3] = {
+		[0x0 ... 0x48]	= E2K_ISET_SINCE_V7_MASK,
+		[0x60 ... 0x67]	= E2K_ISET_SINCE_V7_MASK,
+		[0x80 ... 0x86]	= E2K_ISET_SINCE_V7_MASK,
+	},
 	[DIM0] = {
 		[0x0 ... 0x3]	= E2K_ISET_SINCE_V3_MASK,
 		[0x7 ... 0xa]	= E2K_ISET_SINCE_V3_MASK,
@@ -1648,7 +1806,8 @@ static const char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 		[0x27]		= E2K_ISET_SINCE_V6_MASK,
 
 		[0x28]		= E2K_ISET_SINCE_V7_MASK,
-		[0x80 ... 0x99] = E2K_ISET_SINCE_V7_MASK,
+		[0x75 ... 0x7b] = E2K_ISET_SINCE_V7_MASK,
+		[0x7f ... 0x99] = E2K_ISET_SINCE_V7_MASK,
 		[0x9c ... 0x9f] = E2K_ISET_SINCE_V7_MASK,
 	},
 	[DIM1] = {
@@ -1667,7 +1826,8 @@ static const char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 		[0x27]		= E2K_ISET_SINCE_V6_MASK,
 
 		[0x28]		= E2K_ISET_SINCE_V7_MASK,
-		[0x80 ... 0x99] = E2K_ISET_SINCE_V7_MASK,
+		[0x75 ... 0x7b] = E2K_ISET_SINCE_V7_MASK,
+		[0x7f ... 0x99] = E2K_ISET_SINCE_V7_MASK,
 		[0x9c ... 0x9f] = E2K_ISET_SINCE_V7_MASK,
 	},
 	[DIM2] = {
@@ -1697,6 +1857,8 @@ static const char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 		[0x62]		= E2K_ISET_SINCE_V7_MASK,
 		[0x66]		= E2K_ISET_SINCE_V7_MASK,
 		[0x72]		= E2K_ISET_SINCE_V7_MASK,
+		[0x77 ... 0x7b]	= E2K_ISET_SINCE_V7_MASK,
+		[0x7f]		= E2K_ISET_SINCE_V7_MASK,
 		[0x83]		= E2K_ISET_SINCE_V7_MASK,
 		[0x85]		= E2K_ISET_SINCE_V7_MASK,
 		[0x87]		= E2K_ISET_SINCE_V7_MASK,
@@ -1731,6 +1893,8 @@ static const char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 		[0x63]		= E2K_ISET_SINCE_V7_MASK,
 		[0x67]		= E2K_ISET_SINCE_V7_MASK,
 		[0x72]		= E2K_ISET_SINCE_V7_MASK,
+		[0x77 ... 0x7b]	= E2K_ISET_SINCE_V7_MASK,
+		[0x7f]		= E2K_ISET_SINCE_V7_MASK,
 		[0x84]		= E2K_ISET_SINCE_V7_MASK,
 		[0x86 ... 0x87] = E2K_ISET_SINCE_V7_MASK,
 		[0x8b]		= E2K_ISET_SINCE_V7_MASK,
@@ -1760,14 +1924,9 @@ static const char hw_raw_event_to_iset[MAX_HW_MONITORS][MAX_EVENTS] = {
 		[0x27]		= E2K_ISET_SINCE_V6_MASK,
 
 		[0x28]		= E2K_ISET_SINCE_V7_MASK,
-		[0x80 ... 0x99] = E2K_ISET_SINCE_V7_MASK,
+		[0x75 ... 0x7b] = E2K_ISET_SINCE_V7_MASK,
+		[0x7f ... 0x99] = E2K_ISET_SINCE_V7_MASK,
 		[0x9c ... 0x9f] = E2K_ISET_SINCE_V7_MASK,
-	},
-	[DDM2] = {
-		[0x0 ... 0x1d]	= E2K_ISET_SINCE_V7_MASK,
-	},
-	[DDM3] = {
-		[0x0 ... 0x37]	= E2K_ISET_SINCE_V7_MASK,
 	}
 };
 
@@ -1944,10 +2103,7 @@ static int e2k_pmu_event_init(struct perf_event *event)
 	}
 
 	hwc->config = config.word;
-	hwc->idx = (config.monitor == DIM3 || config.monitor == DDM3) ? 3 :
-		   (config.monitor == DIM2 || config.monitor == DDM2) ? 2 :
-		   (config.monitor == DIM1 || config.monitor == DDM1) ? 1 :
-		   0;
+	hwc->idx = config_to_hwc_idx(config);
 
 	pr_debug("perf event %lld initialized with config %hhx:%hhx:%hhx\n",
 		 event->id, config.mask, config.monitor, config.event_id);
@@ -1970,7 +2126,7 @@ error:
 
 static DEFINE_PER_CPU(unsigned long, saved_flags);
 
-static void e2k_pmu_disable(struct pmu *pmu)
+void e2k_pmu_disable(struct pmu *pmu)
 {
 	unsigned long flags;
 	int count;
@@ -1989,7 +2145,7 @@ static void e2k_pmu_disable(struct pmu *pmu)
 		__this_cpu_write(saved_flags, flags);
 }
 
-static void e2k_pmu_enable(struct pmu *pmu)
+void e2k_pmu_enable(struct pmu *pmu)
 {
 	int count;
 
@@ -2001,8 +2157,6 @@ static void e2k_pmu_enable(struct pmu *pmu)
 		/* Enable NMIs to get all interrupts that might
 		 * have arrived while we were disabling perf */
 		raw_all_irq_restore(flags);
-
-		BUG_ON(raw_nmi_irqs_disabled_flags(flags));
 	}
 }
 

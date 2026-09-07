@@ -395,6 +395,10 @@ static int amdgpu_vram_mgr_new(struct ttm_resource_manager *man,
 	unsigned long pages_per_block;
 	int r;
 
+#ifdef CONFIG_MCST
+	size = 0;
+	cur_size = 0;
+#endif
 	lpfn = (u64)place->lpfn << PAGE_SHIFT;
 	if (!lpfn || lpfn > man->size)
 		lpfn = man->size;

@@ -5,6 +5,7 @@
 
 #include <linux/seq_file.h>
 #include <linux/namei.h>
+#include <linux/proc_fs.h>
 
 #include "internal.h"
 #include "files.h"
@@ -84,12 +85,44 @@ out:
 
 static int rtcfs_delete_dentry(const struct dentry *dentry)
 {
-	/* FIXME: Disabling dcache */
+	struct dentry *proc_dentry = PROC_DENTRY(d_inode(dentry));
+	struct dentry_operations const *d_op = proc_dentry->d_op;
+
+	if (d_op && d_op->d_delete)
+		return d_op->d_delete(proc_dentry);
+	return 1;
+}
+
+static int rtcfs_revalidate_dentry(struct dentry *dentry, unsigned int flags)
+{
+	struct inode *inode;
+	struct dentry *proc_dentry;
+	struct dentry_operations const *d_op;
+
+	if (flags & LOOKUP_RCU) {
+		inode = d_inode_rcu(dentry);
+		if (!inode)
+			return -ECHILD;
+	} else {
+		inode = d_inode(dentry);
+		if (!inode)
+			return 0;
+	}
+
+	if (is_root_inode(inode))
+		return 1;
+
+	proc_dentry = PROC_DENTRY(inode);
+	d_op = proc_dentry->d_op;
+
+	if (d_op && d_op->d_revalidate)
+		return d_op->d_revalidate(proc_dentry, flags);
 	return 1;
 }
 
 static const struct dentry_operations rtcfs_dentry_operations = {
 	.d_delete    = rtcfs_delete_dentry,
+	.d_revalidate = rtcfs_revalidate_dentry,
 };
 
 /**
@@ -550,4 +583,13 @@ struct dentry *rtcfs_root_lookup(struct inode *dir, struct dentry *dentry,
 ret_orig:
 	return rtcfs_allocate_object(dentry, &file_path, NULL, NULL);
 
+}
+struct pid *rtcfs_tgid_pidfd_to_pid(const struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+
+	if (dentry->d_op == &rtcfs_dentry_operations)
+		return tgid_pidfd_to_pid((struct file *)file->private_data);
+
+	return ERR_PTR(-EBADF);
 }

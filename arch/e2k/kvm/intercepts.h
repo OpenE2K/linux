@@ -11,7 +11,9 @@
 #include <asm/kvm/cpu_hv_regs_types.h>
 #include <asm/kvm/cpu_hv_regs_access.h>
 
-#include "mmu_defs.h"
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include "paravirt_sw/mmu_defs.h"
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_INTC_TIRs_MODE
 #undef	DebugTIRs
@@ -28,7 +30,7 @@ typedef int (*mu_intc_handler_t) (struct kvm_vcpu *vcpu,
 				  intc_info_mu_t *intc_info_mu,
 				  pt_regs_t *regs);
 
-extern int parse_INTC_registers(struct kvm_vcpu_arch *vcpu);
+extern int parse_INTC_registers(struct kvm_vcpu *vcpu);
 
 typedef struct cond_exc_info {
 	int no;			/* relative number at VIRT_CTRL_CU.exc_c & */
@@ -135,16 +137,6 @@ kvm_update_vcpu_intc_TIR(struct kvm_vcpu *vcpu, int TIR_no, e2k_tir_t TIR)
 }
 
 static inline void
-kvm_need_pass_vcpu_exception(struct kvm_vcpu *vcpu, u64 exc_mask)
-{
-	u64 tir_exc = vcpu->arch.intc_ctxt.exceptions;
-
-	exc_mask &= tir_exc;
-	E2K_KVM_BUG_ON(exc_mask == 0);
-	vcpu->arch.intc_ctxt.exc_to_pass |= exc_mask;
-}
-
-static inline void
 kvm_need_create_vcpu_exception(struct kvm_vcpu *vcpu, u64 exc_mask)
 {
 	u64 tir_exc = vcpu->arch.intc_ctxt.exceptions;
@@ -154,6 +146,7 @@ kvm_need_create_vcpu_exception(struct kvm_vcpu *vcpu, u64 exc_mask)
 	vcpu->arch.intc_ctxt.exc_to_create |= exc_mask;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 kvm_need_create_vcpu_exc_and_IP(struct kvm_vcpu *vcpu, u64 exc_mask, gva_t IP)
 {
@@ -161,16 +154,7 @@ kvm_need_create_vcpu_exc_and_IP(struct kvm_vcpu *vcpu, u64 exc_mask, gva_t IP)
 	kvm_need_create_vcpu_exception(vcpu, exc_mask);
 	vcpu->arch.intc_ctxt.exc_IP_to_create = IP;
 }
-
-static inline void
-kvm_need_delete_vcpu_exception(struct kvm_vcpu *vcpu, u64 exc_mask)
-{
-	u64 tir_exc = vcpu->arch.intc_ctxt.exceptions;
-
-	exc_mask &= tir_exc;
-	E2K_KVM_BUG_ON(exc_mask == 0);
-	vcpu->arch.intc_ctxt.exc_to_delete |= exc_mask;
-}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool kvm_has_vcpu_exception(struct kvm_vcpu *vcpu, u64 exc_mask)
 {
@@ -184,6 +168,7 @@ static inline bool kvm_has_vcpu_exc_recovery_point(struct kvm_vcpu *vcpu)
 	return kvm_has_vcpu_exception(vcpu, exc_recovery_point_mask);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void kvm_clear_vcpu_trap_cellar(struct kvm_vcpu *vcpu)
 {
 	void *tc_kaddr = vcpu->arch.mmu.tc_kaddr;
@@ -198,74 +183,16 @@ static inline void kvm_clear_vcpu_trap_cellar(struct kvm_vcpu *vcpu)
 	vcpu->arch.mmu.tc_num = 0;
 	kvm_write_pv_vcpu_mmu_TRAP_COUNT_reg(vcpu, 0 * 3);
 }
-
-/* FIXME: simulator bug: simulator does not reexecute requests */
-/* from INTC_INFO_MU unlike the hardware, so do it by software */
-static inline void kvm_restore_vcpu_trap_cellar(struct kvm_vcpu *vcpu)
-{
-	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
-	intc_info_mu_t *mu = intc_ctxt->mu;
-	intc_info_mu_t *mu_event;
-	unsigned long intc_mu_to_move = intc_ctxt->intc_mu_to_move;
-	int mu_num = intc_ctxt->mu_num;
-	int evn_no;
-	void *tc_kaddr = vcpu->arch.mmu.tc_kaddr;
-	kernel_trap_cellar_t *tc;
-	kernel_trap_cellar_ext_t *tc_ext;
-	tc_opcode_t opcode;
-	int cnt, fmt;
-
-	tc = tc_kaddr;
-	tc_ext = tc_kaddr + TC_EXT_OFFSET;
-	cnt = 0;
-
-	for (evn_no = 0;
-	     intc_mu_to_move != 0 && evn_no < mu_num;
-	     intc_mu_to_move >>= 1, evn_no++) {
-		if (likely(!(intc_mu_to_move & 0x1)))
-			continue;
-		E2K_KVM_BUG_ON(cnt >= HW_TC_SIZE);
-		mu_event = &mu[evn_no];
-		tc->address = mu_event->gva;
-		tc->condition = mu_event->condition;
-		AW(opcode) = mu_event->condition.opcode;
-		fmt = opcode.fmt;
-		if (fmt == LDST_QP_FMT)
-			tc_ext->mask = mu_event->mask;
-		if (mu_event->condition.store) {
-			NATIVE_MOVE_TAGGED_DWORD(&mu_event->data, &tc->data);
-			if (fmt == LDST_QP_FMT) {
-				NATIVE_MOVE_TAGGED_DWORD(&mu_event->data_ext,
-							 &tc_ext->data);
-			}
-		}
-		cnt++;
-		tc++;
-		tc_ext++;
-	}
-	E2K_KVM_BUG_ON(intc_mu_to_move != 0);
-
-	/* MMU TRAP_COUNT cannot be set, so write flag of end of records */
-	AW(tc->condition) = -1;
-
-	intc_ctxt->intc_mu_to_move = 0;
-}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 extern const cond_exc_info_t cond_exc_info_table[INTC_CU_COND_EXC_MAX];
-extern exc_intc_handler_t intc_exc_table[INTC_CU_COND_EXC_MAX];
+extern const exc_intc_handler_t intc_exc_table[INTC_CU_COND_EXC_MAX];
 
 static inline exc_intc_handler_t
 kvm_get_cond_exc_handler(struct kvm_vcpu *vcpu, int exc_no)
 {
 	E2K_KVM_BUG_ON(exc_no < 0 || exc_no >= INTC_CU_COND_EXC_MAX);
 	return intc_exc_table[exc_no];
-}
-
-static inline void
-kvm_set_cond_exc_handler(struct kvm_vcpu *vcpu, int exc_no, exc_intc_handler_t handler)
-{
-	E2K_KVM_BUG_ON(exc_no < 0 || exc_no >= INTC_CU_COND_EXC_MAX);
-	intc_exc_table[exc_no] = handler;
 }
 
 static inline int kvm_cond_exc_no_to_exc_mask(struct kvm_vcpu *vcpu, int exc_no)
@@ -282,14 +209,6 @@ static inline const char *kvm_cond_exc_no_to_exc_name(struct kvm_vcpu *vcpu, int
 	E2K_KVM_BUG_ON(cond_exc_info_table[exc_no].no != exc_no &&
 		       cond_exc_info_table[exc_no].no >= 0);
 	return cond_exc_info_table[exc_no].name;
-}
-
-static inline void kvm_pass_cond_exc_to_vcpu(struct kvm_vcpu *vcpu, int exc_no)
-{
-	u64 exc_mask;
-
-	exc_mask = kvm_cond_exc_no_to_exc_mask(vcpu, exc_no);
-	kvm_need_pass_vcpu_exception(vcpu, exc_mask);
 }
 
 static inline void

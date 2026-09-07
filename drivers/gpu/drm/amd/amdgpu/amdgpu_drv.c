@@ -2312,8 +2312,29 @@ amdgpu_pci_shutdown(struct pci_dev *pdev)
 	 */
 	if (!amdgpu_passthrough(adev))
 		adev->mp1_state = PP_MP1_STATE_UNLOAD;
+
+#ifdef CONFIG_E2K
+	/*
+	 * For kexec crash kernel scenario after kernel panic we need
+	 * to reset the device before jumping on new kernel image.
+	 * Ignoring reset leaves device with unfinished DMA operations,
+	 * which causes IOMMU page fault when device enables.
+	 */
+	struct amdgpu_reset_context reset_context;
+
+	adev->shutdown = true;
+	memset(&reset_context, 0, sizeof(reset_context));
+	reset_context.method = AMD_RESET_METHOD_NONE;
+	reset_context.reset_req_dev = adev;
+	set_bit(AMDGPU_NEED_FULL_RESET, &reset_context.flags);
+	set_bit(AMDGPU_RESET_FOR_DEVICE_REMOVE, &reset_context.flags);
+
+	amdgpu_device_gpu_recover(adev, NULL, &reset_context);
+	amdgpu_device_halt(adev);
+#else
 	amdgpu_device_ip_suspend(adev);
 	adev->mp1_state = PP_MP1_STATE_NONE;
+#endif /* CONFIG_E2K */
 }
 
 /**

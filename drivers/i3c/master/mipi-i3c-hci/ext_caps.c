@@ -28,9 +28,9 @@ static int hci_extcap_hardware_id(struct i3c_hci *hci, void __iomem *base)
 	hci->vendor_product_id	= readl(base + 0x0c);
 #ifdef CONFIG_E2K
 	if (mipi_verbose) {
-		dev_info(&hci->master.dev, "vendor MIPI ID: %#x\n", hci->vendor_mipi_id);
-		dev_info(&hci->master.dev, "vendor version ID: %#x\n", hci->vendor_version_id);
-		dev_info(&hci->master.dev, "vendor product ID: %#x\n", hci->vendor_product_id);
+	dev_info(&hci->master.dev, "vendor MIPI ID: %#x\n", hci->vendor_mipi_id);
+	dev_info(&hci->master.dev, "vendor version ID: %#x\n", hci->vendor_version_id);
+	dev_info(&hci->master.dev, "vendor product ID: %#x\n", hci->vendor_product_id);
 	}
 #else
 	dev_info(&hci->master.dev, "vendor MIPI ID: %#x\n", hci->vendor_mipi_id);

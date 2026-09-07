@@ -6,9 +6,6 @@
 #ifndef	_E2K_CONSOLE_H_
 #define	_E2K_CONSOLE_H_
 
-#ifdef __KERNEL__
-
-#ifndef __ASSEMBLY__
 #include <linux/init.h>
 #include <linux/stdarg.h>
 
@@ -46,7 +43,4 @@ virt_console_dump_putc(char c)
 	native_virt_console_dump_putc(c);
 }
 
-#endif /* __ASSEMBLY__ */
-
-#endif  /* __KERNEL__ */
 #endif  /* _E2K_CONSOLE_H_ */

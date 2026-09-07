@@ -4,6 +4,7 @@
  */
 
 #include "f_pll.h"
+#include "main.h"
 
 #ifdef DEBUG
 static inline void e2c3_print_efuse_data(efuse_data_t *efuse_data)
@@ -37,7 +38,7 @@ static inline int64_t e2c3_get_nf(uint64_t *data)
 
 /* http://bugzilla.lab.sun.mcst.ru/bugzilla-mcst/show_bug.cgi?id=130347#c14 */
 
-int e2c3_get_f_pll(const int node)
+int e2c3_get_f_pll(char __iomem *fuse_base)
 {
 	int addr;
 	int f_pll = DEFAULT_F_PLL;
@@ -51,8 +52,8 @@ int e2c3_get_f_pll(const int node)
 #ifdef DEBUG
 		e2c3_print_efuse_data(&efuse_data);
 #endif
-		sic_write_node_nbsr_reg(node, EFUSE_RAM_ADDR, addr);
-		efuse_data.word = sic_read_node_nbsr_reg(node, EFUSE_RAM_DATA);
+		writel(addr, fuse_base + EFUSE_RAM_ADDR_OFFSET);
+		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA_OFFSET);
 		if (efuse_data.sign && !efuse_data.disable
 		    && efuse_data.broadcast && (efuse_data.addr >= 0x45)
 		    && (efuse_data.addr <= 0x48)) {

@@ -2606,7 +2606,11 @@ static int rtl8xxxu_init_queue_priority(struct rtl8xxxu_priv *priv)
 		vop = viq ^ 3;
 		break;
 	default:
+#ifdef CONFIG_MCST
+		return -EINVAL;
+#else
 		ret = -EINVAL;
+#endif
 	}
 
 	/*

@@ -152,6 +152,7 @@ void ddk768_enableUsbDevice(unsigned long enable)
 	pokeRegisterDWord(CLOCK_ENABLE, regValue);
 }
 
+#if 0
 /*
  *  Enable/disable jpeg decoder.
  */
@@ -183,6 +184,7 @@ void ddk768_enableVPU(unsigned long enable)
 
 	pokeRegisterDWord(CLOCK_ENABLE, regValue);
 }
+#endif
 
 
 /*

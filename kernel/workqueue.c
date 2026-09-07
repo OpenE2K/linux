@@ -51,9 +51,6 @@
 #include <linux/sched/isolation.h>
 #include <linux/nmi.h>
 #include <linux/kvm_para.h>
-#ifdef CONFIG_MCST_RT
-#include <linux/mcst_rt.h>
-#endif
 
 #include "workqueue_internal.h"
 
@@ -2103,10 +2100,6 @@ static void maybe_create_worker(struct worker_pool *pool)
 __releases(&pool->lock)
 __acquires(&pool->lock)
 {
-#ifdef CONFIG_MCST_RT
-	if (rts_act_mask & RTS_NO_FORK)
-		return;
-#endif
 restart:
 	raw_spin_unlock_irq(&pool->lock);
 

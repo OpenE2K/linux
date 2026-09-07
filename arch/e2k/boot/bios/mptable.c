@@ -13,9 +13,9 @@
 #include <asm/e2k_api.h>
 #include <asm/e2k.h>
 
-#include "printk.h"
+#include "console/printk.h"
 #include "pci.h"
-#include "../boot_io.h"
+#include "boot_io.h"
 
 #undef BIOS_DEBUG
 #define MTABLE_DEBUG 0
@@ -433,18 +433,15 @@ void *smp_write_config_table(struct intel_mp_floating *mpf,
 	smp_write_bus(mc, 1, "PCI   ");
 	smp_write_bus(mc, 2, "PCI   ");
 
-#ifdef CONFIG_E2K_SIC
 	smp_write_bus(mc, 3, "PCI   ");
-#endif	/* ! CONFIG_E2K_SIC */
 	smp_write_bus(mc, 0x1f, "ISA   ");
 
-#ifdef CONFIG_E2K_SIC
 #ifdef CONFIG_EIOH
 	rom_printk("MP: Scanning PCI bus for eiohub i2c/spi+ioepic\n");
 	dev = NULL;
 	do {
 		dev = bios_pci_find_device(PCI_VENDOR_ID_MCST_TMP,
-				PCI_DEVICE_ID_MCST_I2C_SPI_EPIC, dev);
+				PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI, dev);
 		if (dev) {
 			domain = bios_pci_domain_nr(dev->bus);
 			bus = dev->bus->number;
@@ -508,7 +505,6 @@ void *smp_write_config_table(struct intel_mp_floating *mpf,
 			iopic_id++;
 		}
 	} while (dev);
-#endif
 
 #ifndef CONFIG_EIOH
 	/* Standard local interrupt assignments */

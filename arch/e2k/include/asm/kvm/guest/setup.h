@@ -29,7 +29,7 @@ static inline void arch_setup_machine(void)
 	e2k_virt_setup_machine();
 }
 
-static inline void bsp_switch_to_init_stack(void)
+static __always_inline void bsp_switch_to_init_stack(void)
 {
 	kvm_bsp_switch_to_init_stack();
 }

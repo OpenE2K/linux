@@ -1108,9 +1108,6 @@ static void local_apic_timer_interrupt(void)
 }
 
 #ifdef CONFIG_MCST
-DEFINE_PER_CPU(long long, next_rt_intr) = 0;
-EXPORT_SYMBOL(next_rt_intr);
-DEFINE_PER_CPU(long long, must_do_timer) = 0;
 
 #define DELTA_NS	(NSEC_PER_SEC / HZ / 2)
 

@@ -421,6 +421,7 @@ static int dw_hdmi_imx_bind(struct device *dev, struct device *master,
 	encoder = &hdmi_encoder->encoder;
 
 #ifdef CONFIG_MCST
+	ret = 0;
 	plat_data = (struct dw_hdmi_plat_data *)
 				platform_get_device_id(pdev)->driver_data;
 	drm_for_each_crtc(crtc, drm)
@@ -444,6 +445,7 @@ static int dw_hdmi_imx_bind(struct device *dev, struct device *master,
 	 * If dw_hdmi_bind() fails we'll never call dw_hdmi_unbind(),
 	 * which would have called the encoder cleanup.  Do it manually.
 	 */
+	
 	if (IS_ERR(hdmi->hdmi)) {
 		ret = PTR_ERR(hdmi->hdmi);
 		drm_encoder_cleanup(encoder);

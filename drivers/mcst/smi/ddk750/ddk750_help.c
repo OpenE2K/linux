@@ -7,7 +7,7 @@ unsigned short devId750 = 0;
 
 
 /* after driver mapped io registers, use this function first */
-void ddk750_set_mmio(volatile unsigned char * addr,unsigned short devId,char revId)
+void ddk750_set_mmio(volatile unsigned char __iomem * addr,unsigned short devId,char revId)
 {
 	mmio750 = addr;
 	devId750 = devId;

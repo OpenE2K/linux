@@ -8,11 +8,9 @@
 #include <linux/types.h>
 #include <asm/e2k_api.h>
 #include "asm/string.h"
-#include <asm/cpu_regs_access.h>
+#include <asm/cpu_regs.h>
 #include <asm/head.h>
 #include "pci.h"
-
-#define	GCC_WORKS_ON_O2		0
 
 /**************************** DEBUG DEFINES *****************************/
 #undef	DEBUG_BOOT_MODE
@@ -139,29 +137,6 @@ void pci_get_size(struct bios_pci_dev *dev, unsigned long reg,
 	bios_pci_write_config_dword(dev, PCI_BASE_ADDRESS_0 + (reg << 2),
 					addr);
 
-	// some broken hardware has read-only registers that do not 
-	// really size correctly. You can tell this if addr == size
-	// Example: the acer m7229 has BARs 1-4 normally read-only. 
-	// so BAR1 at offset 0x10 reads 0x1f1. If you size that register
-	// by writing 0xffffffff to it, it will read back as 0x1f1 -- a 
-	// violation of the spec. 
-	// We catch this case and ignore it by settting size and type to 0.
-	// This incidentally catches the common case where registers 
-	// read back as 0 for both address and size. 
-
-#if 0 /* DON'T WORk on E2K */
-	if (addr == size) {
-		printk_debug(
-			"pci_get_size: dev_fn 0x%x, register %d, read-only"
-			" SO, ignoring it\n",
-			dev->devfn, reg);
-		printk_debug("addr was 0x%x, size was 0x%x\n",addr,size); 
-		type = 0;
-		size = 0;
-	 }
-	// Now compute the actual size, See PCI Spec 6.2.5.1 ... 
-	 else
-#endif
 	if (size & PCI_BASE_ADDRESS_SPACE_IO) {
 		type = size & (~PCI_BASE_ADDRESS_IO_MASK);
 		size &= (PCI_BASE_ADDRESS_IO_MASK);
@@ -249,14 +224,12 @@ static unsigned int pci_size(unsigned int base, unsigned int maxbase, unsigned l
 	return size;
 }
 
-#ifdef CONFIG_E2K_SIC
 /* That means the level of buses hierarchy. The 0 level means the main bus called 
 *  the pci_root. The main bus may has several subbuses due to the CPU amount.
 *  Each system on CPU has its own PCI2PCI bridge that serves the link between
 *  the main bus pci_root and other devices chiped in that system on CPU. So each 
 *  system has its own configuration space.  */
 int level = -1; 
-#endif
 
 /** Scan the bus, first for bridges and next for devices. 
  * @param bios_pci_bus pointer to the bus structure
@@ -268,19 +241,11 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 	struct bios_pci_dev *dev, **bus_last;
 	struct bios_pci_bus *child;
 	int domain = bios_pci_domain_nr(bus);
-#if 0
-	unsigned int  msg_st[2], msg_end[2];
-	unsigned long start, end;
-#endif
-#ifdef CONFIG_E2K_SIC
 	/* Each time we enter the bios_pci_scan_bus function we must to
 	 * encrease the bus hierarchy level */
 	level++;
-	Dprintk("PCI #%d: bios_pci_scan_bus enter for level %d\n",
-		domain, level);
-#endif
-	Dprintk("PCI #%d: bios_pci_scan_bus for bus %d\n",
-		domain, bus->number);
+	Dprintk("PCI #%d: bios_pci_scan_bus enter for level %d bus %d\n",
+		domain, level, bus->number);
 
 	bus_last = &bus->devices;
 	max = bus->secondary;
@@ -291,18 +256,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 		u32 id, class, addr, size;
 		u8 cmd, tmp, hdr_type;
 		u16 subsystem;
-#if 0
-		u32 tmphdr;
-#endif	/* 0 */
-		// gcc just went to hell. Don't test -- this always
-		// returns 0 anyway. 
-#if GCC_WORKS_ON_O2
-		if (pcibios_read_config_dword(domain, bus->number, devfn, PCI_VENDOR_ID, &id)) {
-		   printk_spew("PCI #%d: devfn 0x%x, read_config_dword fails\n",
-				domain, devfn);
-		    continue;
-		}
-#endif
+
 		pcibios_read_config_dword(domain, bus->number, devfn, PCI_VENDOR_ID, &id);
 
 		/* some broken boards return 0 if a slot is empty: */
@@ -495,7 +449,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 			child->number = child->secondary = ++max;
 			child->primary = bus->secondary;
 			child->subordinate = 0xff;
-#ifdef CONFIG_E2K_SIC
+
 			/* you are programming the main bus bridges when
 			 * the level is 0
 			 * FIXME must be reconstructed using NSR number
@@ -507,7 +461,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 					"please!!!\n");
 				break;
 			}
-#endif
+
 			/* Clear all status bits and turn off memory, I/O and master enables. */
 			pcibios_read_config_word(domain, bus->number, devfn, PCI_COMMAND, &cr);
 			pcibios_write_config_word(domain, bus->number, devfn, PCI_COMMAND, 0x0000);
@@ -549,7 +503,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 					  ((unsigned int) (child->subordinate) << 16));
 				pcibios_write_config_dword(domain, bus->number, devfn,
 							   PCI_PRIMARY_BUS, buses);
-#ifdef	CONFIG_E2K_SIC
+
 #ifndef	CONFIG_L_IOH2
 				/* Here we need to setup system commutator register for PCI bridges
 				 * (PCI Bridge Bus Number Reg - 0x18 - 0x1b ) that is in accordance with 
@@ -601,7 +555,6 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 						domain, (scrb_base | 0x1));
 				}
 #endif	/* ! CONFIG_L_IOH2 */
-#endif	
 				/* Now we can scan all subordinate buses i.e. the bus hehind the bridge */
 				max = bios_pci_scan_bus(child);
 
@@ -616,7 +569,6 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 									16);
 				pcibios_write_config_dword(domain, bus->number,
 					devfn, PCI_PRIMARY_BUS, buses);
-#ifdef CONFIG_E2K_SIC
 #ifndef	CONFIG_L_IOH2
 				if ((dev->device !=
 					PCI_DEVICE_ID_MCST_VIRT_PCI_BRIDGE) &&
@@ -627,10 +579,7 @@ static unsigned int bios_pci_scan_bus(struct bios_pci_bus *bus)
 						buses);
 				}
 #endif	/* ! CONFIG_L_IOH2 */
-#endif
-				Dprintk("PCI #%d: bios_pci_scan_bus: found "
-					"Bridge, primary = %d, number = %d, "
-					"subordinate = %d\n",
+				Dprintk("PCI #%d: bios_pci_scan_bus: found Bridge, primary = %d, number = %d, subordinate = %d\n",
 					domain, child->primary, child->number,
 					child->subordinate);
 			}
@@ -647,14 +596,11 @@ skip_it:
 	 *
 	 * Return how far we've got finding sub-buses.
 	 */
-	
-	Dprintk("PCI #%d: bios_pci_scan_bus returning with max=%02x\n",
-		domain, max);
-#ifdef CONFIG_E2K_SIC
+	Dprintk("PCI #%d: bios_pci_scan_bus returning with max=%02x\n", domain, max);
 	/* Each time we leave bios_pci_scan_bus function we must to decrease
 	 * the bus hierarchy level */
 	level--;
-#endif
+
 	return max;
 }
 

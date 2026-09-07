@@ -579,7 +579,11 @@ void __init of_irq_init(const struct of_device_id *matches)
 			goto err;
 		}
 
+#ifdef CONFIG_MCST
+		desc->irq_init_cb = (of_irq_init_cb_t)match->data;
+#else
 		desc->irq_init_cb = match->data;
+#endif
 		desc->dev = of_node_get(np);
 		/*
 		 * interrupts-extended can reference multiple parent domains.

@@ -89,7 +89,7 @@ struct mga2 {
 	dma_addr_t bctrl_dma;
 	int head, tail;
 
-	u64 *ring;
+	__le64 *ring;
 	dma_addr_t ring_dma;
 	struct auc2_st *status;
 	dma_addr_t status_dma;
@@ -108,14 +108,6 @@ struct mga2 {
 
 	/* page-flip handling */
 	struct drm_pending_vblank_event *event[MGA2_MAX_CRTS_NR];
-
-	/* overlay properties */
-	struct {
-		struct drm_property *colorkey_min;
-		struct drm_property *colorkey_max;
-		uint64_t colorkey_min_val;
-		uint64_t colorkey_max_val;
-	} props;
 };
 
 
@@ -125,7 +117,7 @@ struct mga2_gem_object {
 	struct drm_gem_object base;
 	struct drm_mm_node node;
 
-	void *vaddr;
+	void  *vaddr;
 	dma_addr_t dma_addr;
 
 	struct sg_table *sgt;
@@ -353,6 +345,19 @@ struct mga2_pll {
 	/* pll id */
 	uint32_t id;
 };
+
+extern struct i2c_driver cy22394_driver;
+extern struct platform_driver mga2_pic_driver;
+extern struct platform_driver mga2_lvds_driver;
+extern struct platform_driver mga2_hdmi_driver;
+extern struct platform_driver mga2_rgb_driver;
+extern struct platform_driver mga2_dsi_driver;
+extern struct platform_driver mga2_crtc_driver;
+extern struct platform_driver mga2_gpio_driver;
+extern struct platform_driver mga2_pwm_driver;
+extern struct platform_driver mga2_gpio_pwm_driver;
+extern struct platform_driver mga2_pll_driver;
+extern struct platform_driver mga2_clk_mux_driver;
 
 int mga2_pll_compute(const struct mga2_pll *pll,
 			 const u32 freq,

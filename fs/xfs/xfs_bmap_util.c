@@ -486,6 +486,12 @@ xfs_getbmap(
 
 		lock = xfs_ilock_data_map_shared(ip);
 		break;
+#ifdef CONFIG_MCST
+	default:
+		lock = 0;
+		max_len = 0;
+		break;
+#endif
 	}
 
 	ifp = xfs_ifork_ptr(ip, whichfork);

@@ -55,11 +55,11 @@ $(obj)/ttable.o: $(obj)/ttable_wbs.h
 endif
 
 # "-fexclude-ctpr2" - to make sure that AAU is not zeroed before we get to it.
-# "-fno-dam" - hardware bug 124206 workaround (CPU_HWBUG_L1I_STOPS_WORKING)
+# "-fno-dam" - see CPU_HWBUG_L1I_RBRANCH_CALLS
 # "-fno-semi-spec-ld" - to make sure nothing bad happens between restoring %cont
 # and %root_ptb registers and DONE instruction.
 CC_FLAGS_KERNEL_ENTRY := $(call lcc-option,-fexclude-ctpr2) $(call lcc-option,-fno-semi-spec-ld)
-ifeq ($(CONFIG_MIGHT_HAVE_CPU_HWBUG_L1I_STOPS_WORKING),y)
+ifeq ($(CONFIG_MIGHT_HAVE_CPU_HWBUG_L1I_RBRANCH_CALLS),y)
 CC_FLAGS_KERNEL_ENTRY += $(call lcc-option,-fno-dam)
 endif
 
@@ -136,11 +136,23 @@ obj-$(CONFIG_CRASH_DUMP) += crash_dump.o
 obj-$(CONFIG_SOFT_PM) += soft_pm.o
 
 # For E2K_WAIT_ALL and atomic operations support on phys memory
-CFLAGS_kexec.o += -DE2K_P2V $(call lcc-option,-fno-semi-spec-ld) \
-		  $(call lcc-option,-fno-spec-ld) \
-		  -ftrivial-auto-var-init=uninitialized
-CFLAGS_REMOVE_kexec.o := -fprofile-generate-kernel $(call lcc-option,-fsemi-spec-ld)
+CC_FLAGS_PHYS_MODE_ADD := -DE2K_P2V $(call lcc-option,-fno-semi-spec-ld) \
+		$(call lcc-option,-fno-spec-ld) -fno-jump-tables \
+		-ftrivial-auto-var-init=uninitialized
+CC_FLAGS_PHYS_MODE_REMOVE := -fprofile-generate-kernel $(call lcc-option,-fsemi-spec-ld)
 
-GCOV_PROFILE_kexec.o := n # Since it disables virtual memory
+CFLAGS_kexec.o += $(CC_FLAGS_PHYS_MODE_ADD)
+CFLAGS_REMOVE_kexec.o += $(CC_FLAGS_PHYS_MODE_REMOVE)
+
+CFLAGS_machine_kexec.o += $(CC_FLAGS_PHYS_MODE_ADD)
+CFLAGS_REMOVE_machine_kexec.o += $(CC_FLAGS_PHYS_MODE_REMOVE)
+
+CFLAGS_relocate_kernel.o += $(CC_FLAGS_PHYS_MODE_ADD)
+CFLAGS_REMOVE_relocate_kernel.o += $(CC_FLAGS_PHYS_MODE_REMOVE)
+
+ # Since it disables virtual memory
+GCOV_PROFILE_kexec.o := n
+GCOV_PROFILE_machine_kexec.o := n
+GCOV_PROFILE_relocate_kernel.o := n
 
 kernelclean:	dummy

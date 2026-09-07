@@ -430,7 +430,6 @@ __kprobes void _mcount(const u64 frompc)
 	if (ftrace_graph_caller_enabled) {
 		unsigned long flags;
 		e2k_mem_crs_t *frame;
-		e2k_pcsp_t pcsp;
 		e2k_cr0_t *parent;
 		u64 wbs;
 		int index;
@@ -440,10 +439,10 @@ __kprobes void _mcount(const u64 frompc)
 
 		raw_all_irq_save(flags);
 		E2K_FLUSHC;
-		pcsp = read_PCSP_reg();
 
 		/* Find frame of the function being traced. */
-		frame = (e2k_mem_crs_t *) PCSP_PTR(pcsp) - 1;
+		frame = K_PCSP_PTR(read_PCSP_reg());
+		--frame;
 		parent = &frame->cr0;
 
 		wbs = frame->cr1.wbs;

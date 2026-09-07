@@ -1784,6 +1784,11 @@ int vfio_pci_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	vma->vm_pgoff = (pci_resource_start(pdev, index) >> PAGE_SHIFT) + pgoff;
 
+#ifdef CONFIG_E2K
+	unsigned long flags = pci_resource_flags(pdev, index);
+	if (flags & IORESOURCE_PREFETCH)
+		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+#endif
 	/*
 	 * See remap_pfn_range(), called from vfio_pci_fault() but we can't
 	 * change vm_flags within the fault handler.  Set them now.

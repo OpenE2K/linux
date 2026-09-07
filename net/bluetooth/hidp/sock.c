@@ -260,7 +260,7 @@ static int hidp_sock_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigne
 		if (get_user_tagged_16(ap.qword, tag, &clp->ci) || !IS_AP(ap, tag)) {
 			return -EFAULT;
 		}
-		cl.ci = (void __user *)AP_PTR(ap);
+		cl.ci = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 
 		err = hidp_get_connlist(&cl);
@@ -288,7 +288,7 @@ static int hidp_sock_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigne
 		if (get_user_tagged_16(ap.qword, tag, &ca128p->rd_data) || !IS_AP(ap, tag)) {
 			return -EFAULT;
 		}
-		ca.rd_data = (void __user *)AP_PTR(ap);
+		ca.rd_data = U_AP_PTR(ap);
 
 		ca.ctrl_sock = ca128.ctrl_sock;
 		ca.intr_sock = ca128.intr_sock;

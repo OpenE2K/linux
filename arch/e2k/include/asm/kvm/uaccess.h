@@ -42,7 +42,7 @@ native_copy_from_user_with_tags(void *to, const void __user *from,
 #define	native_get_user(kval, uptr)	get_user(kval, uptr)
 #define	native_put_user(kval, uptr)	put_user(kval, uptr)
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 /* it is host kernel with virtualization support */
 #define	__e2k_kvm_get_guest(__slot, gfn, __hk_ptr, offset,		\
 					gk_ptrp, __writable)		\
@@ -56,7 +56,7 @@ native_copy_from_user_with_tags(void *to, const void __user *from,
 		gk_ptrp = NULL;						\
 		r = -EFAULT;						\
 	} else {							\
-		gk_ptr = (__typeof__((__hk_ptr)) *)(addr + offset);	\
+		gk_ptr = (__typeof__((__hk_ptr)) __user *)(addr + offset);	\
 		gk_ptrp = gk_ptr;					\
 		r = __get_user((__hk_ptr), gk_ptr);			\
 	}								\
@@ -218,8 +218,10 @@ static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
 {
 	struct kvm_vcpu *vcpu;
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
+	};
 
 	if (likely(!host_test_intc_emul_mode(regs))) {
 		return native_fast_tagged_memory_copy_to_user(dst, src,
@@ -238,8 +240,11 @@ static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
 {
 	struct kvm_vcpu *vcpu;
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
+		.prot = 1,
+	};
 
 	if (likely(!host_test_intc_emul_mode(regs))) {
 		return native_fast_tagged_memory_copy_from_user(dst, src,
@@ -286,8 +291,10 @@ static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
 		const struct pt_regs *regs, int prefetch)
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
+	};
 
 	return native_fast_tagged_memory_copy_to_user(dst, src, len,
 			regs, strd_opcode, ldrd_opcode, prefetch);
@@ -298,17 +305,20 @@ static inline size_t fast_tagged_memory_copy_from_user_gva(void *dst,
 		const struct pt_regs *regs, int prefetch)
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
-	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
+		.prot = 1,
+	};
 
 	return native_fast_tagged_memory_copy_from_user(dst, src, len, regs,
 			strd_opcode, ldrd_opcode, prefetch);
 }
 #endif
-#endif	/* CONFIG_KVM_HOST_MODE */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 static inline unsigned long
-host_copy_to_user(void __user *to, const void *from,
+host_copy_to_user(void __priv *to, const void *from,
 				unsigned long n, const struct pt_regs *regs)
 {
 	return host_copy_to_user_with_tags(to, from, n, regs);

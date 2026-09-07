@@ -138,11 +138,9 @@ typedef union {
 	u64 word;
 } dtlb_entry_t;
 
-#ifndef	__ASSEMBLY__
 typedef	e2k_addr_t		tlb_addr_t;
 typedef	tlb_addr_t		dtlb_addr_t;
 typedef	tlb_addr_t		itlb_addr_t;
-#endif	/* ! __ASSEMBLY__ */
 
 #define	tlb_addr_val(tlb_addr)		(tlb_addr)
 #define	dtlb_addr_val(dtlb_addr)	tlb_addr_val(dtlb_addr)
@@ -211,9 +209,7 @@ typedef	tlb_addr_t		itlb_addr_t;
 
 /* DTLB/ITLB tag structure */
 
-#ifndef	__ASSEMBLY__
 typedef	e2k_addr_t		tlb_tag_t;
-#endif	/* ! __ASSEMBLY__ */
 
 #define	tlb_tag_val(tlb_tag)		(tlb_tag)
 
@@ -224,19 +220,16 @@ typedef	e2k_addr_t		tlb_tag_t;
  */
 
 /* Virtual address for TLB address probe & Entry probe operations */
-#ifndef __ASSEMBLY__
 typedef	e2k_addr_t			probe_addr_t;
 
 #define	probe_addr_val(probe_addr)	(probe_addr)
 
 #define	__probe_addr(probe_addr_val)	(probe_addr_val)
-#endif /* __ASSEMBLY__ */
 
 #define _PROBE_ADDR_VA		0x0000ffffffffffff	/* virtual address */
 							/* [47: 0] */
 
 /* Result of TLB Entry probe operation */
-#ifndef __ASSEMBLY__
 typedef	unsigned long			probe_entry_t;
 
 #define	probe_entry_val(probe_entry)	(probe_entry)
@@ -398,7 +391,7 @@ dtlb_pha_to_phys_addr(probe_entry_t dtlb_val)
 #define	RES_BITS_EP_RES		DTLB_ENTRY_RES_BITS
 
 
-#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* or it is native host kernel with virtualization support */
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
@@ -406,8 +399,6 @@ dtlb_pha_to_phys_addr(probe_entry_t dtlb_val)
 #include <asm/kvm/guest/tlb_regs_types.h>
 #else
  #error	"Unknown virtualization type"
-#endif	/* ! CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
-
-#endif /* __ASSEMBLY__ */
+#endif	/* ! CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_KERNEL */
 
 #endif

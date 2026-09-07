@@ -6,16 +6,11 @@
 /*
  * Kernel performance measuring tool and support
  */
-#ifndef _E2K_CLOCK_INFO_H
-#define _E2K_CLOCK_INFO_H
+#pragma once
+
+#ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
 
 #include <linux/types.h>
-
-#ifndef __ASSEMBLY__
-#include <asm/types.h>
-#endif /* __ASSEMBLY__ */
-
-#ifndef __ASSEMBLY__
 
 typedef u64 e2k_clock_t;
 
@@ -109,6 +104,4 @@ typedef struct kernel_times {
 
 extern void sys_e2k_print_kernel_times(struct task_struct *task,
 		kernel_times_t *times, long times_num, int times_index);
-
-#endif /* __ASSEMBLY__ */
-#endif /* _E2K_THREAD_INFO_H */
+#endif /* CONFIG_KERNEL_TIMES_ACCOUNT */

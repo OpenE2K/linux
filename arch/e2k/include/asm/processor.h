@@ -5,7 +5,6 @@
 
 #ifndef _E2K_PROCESSOR_H_
 #define _E2K_PROCESSOR_H_
-#ifndef __ASSEMBLY__
 
 #include <linux/threads.h>
 #include <linux/init.h>
@@ -56,9 +55,9 @@ extern cpuinfo_e2k_t cpu_data[NR_CPUS];
  * space during mmap's.
  */
 #define TASK_UNMAPPED_BASE \
-	PAGE_ALIGN((current->thread.flags & \
-		    (E2K_FLAG_32BIT | E2K_FLAG_PROTECTED_MODE)) ? \
-				(TASK32_SIZE / 3) : (TASK_SIZE / 3))
+	round_up((current->thread.flags & (E2K_FLAG_32BIT | E2K_FLAG_PROTECTED_MODE)) ? \
+			(TASK32_SIZE / 3) : (TASK_SIZE / 3), \
+			E2K_LARGE_PAGE_SIZE)
 
 /*
  * Size of io_bitmap in longwords: 32 is ports 0-0x3ff.
@@ -102,7 +101,9 @@ typedef struct thread_struct {
 		e2k_pcsp_t u_pcsp;
 		int from;
 		bool return_to_user;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		bool ts_host_at_vcpu_mode;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	} fill;
 
 	struct {
@@ -113,6 +114,9 @@ typedef struct thread_struct {
 #endif
 		u64 u_root_ptb;
 	} regs;
+
+	/* CPU_HWBUG_GENERATIONS_L2_PREF */
+	struct e2k_l2_prefetcher l2_prefetcher;
 
 	/* Helper for passing parameters from copy_thread() to __ret_from_fork() */
 	struct {
@@ -174,8 +178,6 @@ typedef struct thread_struct {
 	INIT_THREAD_REGS \
 }
 
-#endif /* !__ASSEMBLY__ */
-
 /*
  * Thread flags
  */
@@ -194,7 +196,7 @@ typedef struct thread_struct {
 /*
  * Various task info flags (is common for host and guest task)
  * See last 'flags' argument of function switch_to_new_user() and
- * same as field 'flags' of structure kvm_task_info_t (asm/kvm/hypervisor.h)
+ * same as field 'flags' of structure kvm_task_info_t (asm/kvm/paravirt_sw/hypervisor.h)
  */
 #define	BIN_32_CODE_TASK_FLAG_BIT	2	/* task is 32-bit binary */
 						/* application */
@@ -233,8 +235,6 @@ typedef struct thread_struct {
 		(1UL << PCS_HAS_NOT_GUARD_PAGE_TASK_BIT)
 #define SWITCH_TO_COMPLETE_TASK_FLAG	(1UL << SWITCH_TO_COMPLETE_TASK_BIT)
 #define	RETURN_TO_USER_STACKS_TASK_FLAG	(1UL << RETURN_TO_USER_STACKS_TASK_BIT)
-
-#ifndef __ASSEMBLY__
 
 #define K_STK_BASE(thr)		((thr)->k_stk_base)
 #define K_STK_TOP(thr)		((thr)->k_stk_base + KERNEL_C_STACK_SIZE)
@@ -310,9 +310,8 @@ typedef enum restore_caller {
  */
 static inline u64 __untagged_addr(u64 addr)
 {
-	if (cpu_has(CPU_FEAT_MADM)) {
+	if (cpu_has(CPU_FEAT_MADM))
 		return addr & E2K_VA_MASK;
-	}
 
 	return addr;
 }
@@ -357,8 +356,7 @@ do { \
 /*  Use L2 cache line size since we are prefetching to L2 */
 #define PREFETCH_STRIDE 64
 
-static __always_inline void __prefetch_nospec_range(const void *addr,
-						    size_t len, int mas)
+static __always_inline void __prefetch_nospec_range(const void *addr, size_t len, int mas)
 {
 
 #ifndef CONFIG_SEMI_SPECULATIVE_KERNEL
@@ -446,10 +444,9 @@ static __always_inline void prefetchw_nospec_range(const void *addr, size_t len)
 
 static __always_inline void prefetchr_nospec_range(const void *addr, size_t len)
 {
-	__prefetch_nospec_range(addr, len, 0);
+	__prefetch_nospec_range(addr, len, MAS_BYPASS_NONE);
 }
 
-extern u64 cacheinfo_get_l1d_line_size(void);
 extern void show_cacheinfo(struct seq_file *m);
 extern int get_cpuinfo(char *buffer);
 extern void native_print_machine_type_info(void);
@@ -498,8 +495,6 @@ static inline void paravirt_banner(void)
 }
 #endif /* CONFIG_VIRTUALIZATION */
 #endif /* CONFIG_KVM_GUEST_KERNEL */
-
-#endif /* !__ASSEMBLY__ */
 
 /*
  * If there are user pt_regs, return them.

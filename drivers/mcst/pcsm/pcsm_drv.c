@@ -16,7 +16,6 @@
 
 #include "pcsm.h"
 
-struct delayed_work pcsm_monitor;
 
 enum pcsm_base_addr {
 	TERM_BASE = 0,
@@ -30,18 +29,21 @@ struct pcsm_data {
 	struct platform_device *pdev;
 	struct device *hdev;
 	void __iomem *base[BASE_NUM];
+	struct delayed_work pcsm_int_cleanup_work;
+	event_info_t pcs_events[PCS_EVENTS_MAX];
+	unsigned int pcs_events_count;
 };
 
 static const struct cpu_sensors *cpu_sensors __read_mostly;
 
 static const struct cpu_sensors cpu_sensors_e16c = {
 	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS5},
-		{"CORE_1",  PMC_TERM_TS1},
-		{"CORE_14", PMC_TERM_TS2},
-		{"CORE_15", PMC_TERM_TS3},
-		{"EIOH",    PMC_TERM_TS4},
-		{"TEST",    PMC_TERM_TS0}
+		{"CORE_0",  REG_OFFSET_PMC_TERM_TS5},
+		{"CORE_1",  REG_OFFSET_PMC_TERM_TS1},
+		{"CORE_14", REG_OFFSET_PMC_TERM_TS2},
+		{"CORE_15", REG_OFFSET_PMC_TERM_TS3},
+		{"EIOH",    REG_OFFSET_PMC_TERM_TS4},
+		{"TEST",    REG_OFFSET_PMC_TERM_TS0}
 	},
 	.vm_table_type = {
 		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
@@ -65,12 +67,12 @@ static const struct cpu_sensors cpu_sensors_e16c = {
 
 static const struct cpu_sensors cpu_sensors_e16c_improved_vm = {
 	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS5},
-		{"CORE_1",  PMC_TERM_TS1},
-		{"CORE_14", PMC_TERM_TS2},
-		{"CORE_15", PMC_TERM_TS3},
-		{"EIOH",    PMC_TERM_TS4},
-		{"TEST",    PMC_TERM_TS0}
+		{"CORE_0",  REG_OFFSET_PMC_TERM_TS5},
+		{"CORE_1",  REG_OFFSET_PMC_TERM_TS1},
+		{"CORE_14", REG_OFFSET_PMC_TERM_TS2},
+		{"CORE_15", REG_OFFSET_PMC_TERM_TS3},
+		{"EIOH",    REG_OFFSET_PMC_TERM_TS4},
+		{"TEST",    REG_OFFSET_PMC_TERM_TS0}
 	},
 	.vm_table_type = {
 		{VEXT,  VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
@@ -94,12 +96,12 @@ static const struct cpu_sensors cpu_sensors_e16c_improved_vm = {
 
 static const struct cpu_sensors cpu_sensors_e12c = {
 	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS5},
-		{"CORE_1",  PMC_TERM_TS1},
-		{"CORE_14", PMC_TERM_TS2},
-		{"CORE_15", PMC_TERM_TS3},
-		{"EIOH",    PMC_TERM_TS4},
-		{"TEST",    PMC_TERM_TS0}
+		{"CORE_0",  REG_OFFSET_PMC_TERM_TS5},
+		{"CORE_1",  REG_OFFSET_PMC_TERM_TS1},
+		{"CORE_14", REG_OFFSET_PMC_TERM_TS2},
+		{"CORE_15", REG_OFFSET_PMC_TERM_TS3},
+		{"EIOH",    REG_OFFSET_PMC_TERM_TS4},
+		{"TEST",    REG_OFFSET_PMC_TERM_TS0}
 	},
 	.vm_table_type = {
 		{VCORE, VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, },
@@ -123,11 +125,11 @@ static const struct cpu_sensors cpu_sensors_e12c = {
 
 static const struct cpu_sensors cpu_sensors_e12c_improved_vm = {
 	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS1},
-		{"CORE_1",  PMC_TERM_TS0},
-		{"CORE_10", PMC_TERM_TS2},
-		{"CORE_11", PMC_TERM_TS3},
-		{"EIOH",    PMC_TERM_TS4}
+		{"CORE_0",  REG_OFFSET_PMC_TERM_TS1},
+		{"CORE_1",  REG_OFFSET_PMC_TERM_TS0},
+		{"CORE_10", REG_OFFSET_PMC_TERM_TS2},
+		{"CORE_11", REG_OFFSET_PMC_TERM_TS3},
+		{"EIOH",    REG_OFFSET_PMC_TERM_TS4}
 	},
 	.vm_table_type = {
 		{VEXT,  VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
@@ -151,11 +153,11 @@ static const struct cpu_sensors cpu_sensors_e12c_improved_vm = {
 
 static const struct cpu_sensors cpu_sensors_e2c3 = {
 	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS2},
-		{"CORE_1",  PMC_TERM_TS1},
-		{"MC0",	    PMC_TERM_TS3},
-		{"MC1",	    PMC_TERM_TS0},
-		{"EIOH",    PMC_TERM_TS4}
+		{"CORE_0",  REG_OFFSET_PMC_TERM_TS2},
+		{"CORE_1",  REG_OFFSET_PMC_TERM_TS1},
+		{"MC0",	    REG_OFFSET_PMC_TERM_TS3},
+		{"MC1",	    REG_OFFSET_PMC_TERM_TS0},
+		{"EIOH",    REG_OFFSET_PMC_TERM_TS4}
 	},
 	.vm_table_type = {
 		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
@@ -179,11 +181,11 @@ static const struct cpu_sensors cpu_sensors_e2c3 = {
 
 static const struct cpu_sensors cpu_sensors_e2c3_improved_vm = {
 	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS2},
-		{"CORE_1",  PMC_TERM_TS1},
-		{"MC0",	    PMC_TERM_TS3},
-		{"MC1",	    PMC_TERM_TS0},
-		{"EIOH",    PMC_TERM_TS4}
+		{"CORE_0",  REG_OFFSET_PMC_TERM_TS2},
+		{"CORE_1",  REG_OFFSET_PMC_TERM_TS1},
+		{"MC0",	    REG_OFFSET_PMC_TERM_TS3},
+		{"MC1",	    REG_OFFSET_PMC_TERM_TS0},
+		{"EIOH",    REG_OFFSET_PMC_TERM_TS4}
 	},
 	.vm_table_type = {
 		{VEXT,  VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
@@ -207,42 +209,11 @@ static const struct cpu_sensors cpu_sensors_e2c3_improved_vm = {
 
 static const struct cpu_sensors cpu_sensors_e8v7 = {
 	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS1},
-		{"CORE_3",  PMC_TERM_TS2},
-		{"CORE_5",  PMC_TERM_TS3},
-		{"CORE_6",  PMC_TERM_TS4},
-		{"MGA",	    PMC_TERM_TS0}
-	},
-	.vm_table_type = {
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VDDR,  VCORE, VCORE, VDDR,  VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
-	}
-};
-
-static const struct cpu_sensors cpu_sensors_e48c = {
-	.ts_map = {
-		{"CORE_0",  PMC_TERM_TS1},
-		{"CORE_1",  PMC_TERM_TS2},
-		{"CORE_14", PMC_TERM_TS3},
-		{"CORE_15", PMC_TERM_TS4},
-		{"CORE_30", PMC_TERM_TS5},
-		{"CORE_31", PMC_TERM_TS6},
-		{"EIOH",    PMC_TERM_TS7},
-		{"TEST",    PMC_TERM_TS0}
+		{"CORE_0",  REG_OFFSET_PMC_TERM_TS1},
+		{"CORE_3",  REG_OFFSET_PMC_TERM_TS2},
+		{"CORE_5",  REG_OFFSET_PMC_TERM_TS3},
+		{"CORE_6",  REG_OFFSET_PMC_TERM_TS4},
+		{"MGA",	    REG_OFFSET_PMC_TERM_TS0}
 	},
 	.vm_table_type = {
 		{VCORE, VCORE, VCORE, VCORE, VCORE, NO_EXIST, NO_EXIST, NO_EXIST, },
@@ -489,7 +460,13 @@ static ssize_t set_pwm_byte(struct device *dev,
 		return err;
 	}
 
-	 write_pwm_data(data->base[FAN_BASE], nr, addr, val);
+	if (val > 0xff) {
+		dev_err(dev,
+			"Invalid pwm control value (valid range 0x0-0xff).\n");
+		return -EINVAL;
+	}
+
+	write_pwm_data(data->base[FAN_BASE], nr, addr, val);
 
 	return count;
 }
@@ -1007,6 +984,7 @@ static ssize_t set_pcs_adjust_period(struct device *dev,
 				     struct device_attribute *devattr,
 				     const char *buf, size_t count)
 {
+	struct pcsm_data *data = dev_get_drvdata(dev);
 	unsigned long value;
 
 	int err = kstrtoul(buf, 10, &value);
@@ -1016,7 +994,7 @@ static ssize_t set_pcs_adjust_period(struct device *dev,
 
 	PCS_ADJUST_PERIOD = value;
 
-	flush_delayed_work(&pcsm_monitor);
+	flush_delayed_work(&data->pcsm_int_cleanup_work);
 
 	return count;
 }
@@ -1032,15 +1010,15 @@ static ssize_t show_pcs_events(struct device *dev,
 	pos += snprintf(&buf[pos], PAGE_SIZE - 1, "%-20s %-5s %-19s\n",
 			"name", "count", "date");
 
-	for (i = 0; i < PCS_EVENTS_MAX; i++) {
+	for (i = 0; i < PCS_EVENTS_MAX && i < data->pcs_events_count; i++) {
 		struct tm tm_event;
 
-		if (pcs_events[i].count != 0) {
-			time64_to_tm(pcs_events[i].time, 0, &tm_event);
+		if (data->pcs_events[i].count != 0) {
+			time64_to_tm(data->pcs_events[i].time, 0, &tm_event);
 
 			pos += snprintf(&buf[pos], PAGE_SIZE - 1,
 					"%-20s %5d %04ld-%02d-%02d %02d:%02d:%02d\n",
-					pmc_sys_events[i], pcs_events[i].count,
+					pmc_sys_events[i], data->pcs_events[i].count,
 					tm_event.tm_year + 1900, tm_event.tm_mon + 1,
 					tm_event.tm_mday, tm_event.tm_hour,
 					tm_event.tm_min, tm_event.tm_sec);
@@ -1053,38 +1031,65 @@ static ssize_t show_pcs_events(struct device *dev,
 	return pos;
 }
 
-void pcsm_interrupt(void __iomem *base)
-{
-	int i, reg = 0;
-
-	reg = readl(base + PMC_SYS_EVENTS_POLLING_V6);
-
-	for (i = 0; i < PCS_EVENTS_MAX; i++) {
-		if (reg & (1 << i)) {
-			pcs_events[i].count++;
-			pcs_events[i].time = ktime_get_real_seconds();
-		}
-	}
-}
-
 #ifdef CONFIG_EPIC
-static void pcs_events_enable(void __iomem *base)
+static void pcs_events_enable(struct pcsm_data *data)
 {
 	pcs_sys_events_t pcs_sys_events;
+
 	if (cpu_has(CPU_FEAT_ISET_V7)) {
+		data->pcs_events_count = PCS_EVENTS_MAX;
 		if (IS_MACHINE_E8V7) {
 			pcs_sys_events.reg = ALL_EVENTS_MASK_E8V7;
 		} else {
-			if (cpu_has(CPU_FEAT_E48C_MAKET))
-				pcs_sys_events.reg = ALL_EVENTS_MASK_E48C_REV0;
-			else
-				pcs_sys_events.reg = ALL_EVENTS_MASK_E48C;
+			BUG();
 		}
-		writel(pcs_sys_events.reg, base + PMC_SYS_EVENTS_MASK_0_V7);
+		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_MASK_0_V7);
+	} else {
+		data->pcs_events_count = PCS_EVENTS_COUNT_V6;
+		pcs_sys_events.reg = ALL_EVENTS_MASK_V6;
+		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_MASK_V6);
+	}
+}
+
+static irqreturn_t pcsm_interrupt(int irq, void *data)
+{
+	struct pcsm_data *pdata = data;
+	pcs_sys_events_t pcs_sys_events;
+	int i;
+
+	if (cpu_has(CPU_FEAT_ISET_V7)) {
+		pcs_sys_events.reg = readl(pdata->base[SYS_BASE] + PMC_SYS_EVENTS_POLLING_0_V7);
+	} else {
+		pcs_sys_events.reg = readl(pdata->base[SYS_BASE] + PMC_SYS_EVENTS_POLLING_V6);
+	}
+
+	for (i = 0; i < PCS_EVENTS_MAX && i < pdata->pcs_events_count; i++) {
+		if (pcs_sys_events.reg & (1 << i)) {
+			pdata->pcs_events[i].count++;
+			pdata->pcs_events[i].time = ktime_get_real_seconds();
+		}
+	}
+
+	return IRQ_HANDLED;
+}
+
+static void pcsm_int_cleanup_irq(struct work_struct *work)
+{
+	struct pcsm_data *data;
+	pcs_sys_events_t pcs_sys_events;
+
+	data = container_of(work, struct pcsm_data, pcsm_int_cleanup_work.work);
+
+	if (cpu_has(CPU_FEAT_ISET_V7)) {
+		pcs_sys_events.reg = ALL_EVENTS_MASK_E8V7;
+		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_INT_0_V7);
 	} else {
 		pcs_sys_events.reg = ALL_EVENTS_MASK_V6;
-		writel(pcs_sys_events.reg, base + PMC_SYS_EVENTS_MASK_V6);
+		writel(pcs_sys_events.reg, data->base[SYS_BASE] + PMC_SYS_EVENTS_INT_V6);
 	}
+
+	queue_delayed_work(system_power_efficient_wq, &data->pcsm_int_cleanup_work,
+			   msecs_to_jiffies(PCS_ADJUST_PERIOD));
 }
 #endif
 
@@ -1097,8 +1102,6 @@ static SENSOR_DEVICE_ATTR(temp3_input, MATTR, pmc_show_temp, NULL, 2);
 static SENSOR_DEVICE_ATTR(temp4_input, MATTR, pmc_show_temp, NULL, 3);
 static SENSOR_DEVICE_ATTR(temp5_input, MATTR, pmc_show_temp, NULL, 4);
 static SENSOR_DEVICE_ATTR(temp6_input, MATTR, pmc_show_temp, NULL, 5);
-static SENSOR_DEVICE_ATTR(temp7_input, MATTR, pmc_show_temp, NULL, 6);
-static SENSOR_DEVICE_ATTR(temp8_input, MATTR, pmc_show_temp, NULL, 7);
 static DEVICE_ATTR(temp9_input, MATTR, pmc_show_temp_max, NULL);
 
 static SENSOR_DEVICE_ATTR_RO(temp1_label, ts_label, 0);
@@ -1107,8 +1110,6 @@ static SENSOR_DEVICE_ATTR_RO(temp3_label, ts_label, 2);
 static SENSOR_DEVICE_ATTR_RO(temp4_label, ts_label, 3);
 static SENSOR_DEVICE_ATTR_RO(temp5_label, ts_label, 4);
 static SENSOR_DEVICE_ATTR_RO(temp6_label, ts_label, 5);
-static SENSOR_DEVICE_ATTR_RO(temp7_label, ts_label, 6);
-static SENSOR_DEVICE_ATTR_RO(temp8_label, ts_label, 7);
 static SENSOR_DEVICE_ATTR_RO(temp9_label, ts_max_label, 8);
 
 /* VOLT */
@@ -1334,22 +1335,8 @@ static struct attribute *temp_e16c_attrs[] = {
 	NULL
 };
 
-static struct attribute *temp_e48c_attrs[] = {
-	&sensor_dev_attr_temp6_input.dev_attr.attr,
-	&sensor_dev_attr_temp6_label.dev_attr.attr,
-	&sensor_dev_attr_temp7_input.dev_attr.attr,
-	&sensor_dev_attr_temp7_label.dev_attr.attr,
-	&sensor_dev_attr_temp8_input.dev_attr.attr,
-	&sensor_dev_attr_temp8_label.dev_attr.attr,
-	NULL
-};
-
 static const struct attribute_group temp_e16c_group = {
 	.attrs = temp_e16c_attrs,
-};
-
-static const struct attribute_group temp_e48c_group = {
-	.attrs = temp_e48c_attrs,
 };
 
 static struct attribute *pcs_event_attrs[] = {
@@ -1493,17 +1480,44 @@ static const struct attribute_group *pcsm_attr_groups[8];
 static int pcsm_drv_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	int node = dev_to_node(&pdev->dev);
+	char new_dev_name[64];
 	struct resource *res;
 	void __iomem *base;
 	int error = 0;
 	struct pcsm_data *pcsm_drv;
 	struct device *hwmon_dev;
 	int group = 0;
-	int i;
+	int i, ret = 0;
+
+	if (node == NUMA_NO_NODE)
+		node = 0;
+
+	snprintf(new_dev_name, sizeof(new_dev_name), "pcsm_drv.%d", node);
+	ret = device_rename(&pdev->dev, new_dev_name);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to rename device to %s: %d\n", new_dev_name, ret);
+		return ret;
+	}
 
 	pcsm_drv = devm_kzalloc(dev, sizeof(*pcsm_drv), GFP_KERNEL);
 	if (!pcsm_drv)
 		return -ENOMEM;
+
+#ifdef CONFIG_EPIC
+	int irq = platform_get_irq(pdev, 0);
+	if (irq < 0) {
+		ret = irq;
+		dev_err(dev, "No IRQ: %d\n", ret);
+		return ret;
+	}
+
+	ret = devm_request_irq(dev, irq, pcsm_interrupt, 0, dev_name(dev), pcsm_drv);
+	if (ret) {
+		dev_err(dev, "failed to request irq %d\n", ret);
+		return ret;
+	}
+#endif
 
 	for (i = 0; i < BASE_NUM; i++) {
 		res = platform_get_resource(pdev, IORESOURCE_MEM, i);
@@ -1537,20 +1551,18 @@ static int pcsm_drv_probe(struct platform_device *pdev)
 			cpu_sensors = &cpu_sensors_e2c3;
 	} else if (IS_MACHINE_E8V7) {
 		cpu_sensors = &cpu_sensors_e8v7;
-	} else if (IS_MACHINE_E48C && !cpu_has(CPU_FEAT_E48C_MAKET)) {
-		cpu_sensors = &cpu_sensors_e48c;
-		pcsm_attr_groups[group++] = &temp_e48c_group;
 	}
 
 	if (cpu_has(CPU_FEAT_IMPROVED_VM))
 		pcsm_attr_groups[group++] = &in_ext_group;
 
-	if (!cpu_has(CPU_FEAT_E48C_MAKET)) {
-		pcsm_attr_groups[group++] = &temp_group;
-		pcsm_attr_groups[group++] = &in_group;
-	}
+	pcsm_attr_groups[group++] = &temp_group;
+	pcsm_attr_groups[group++] = &in_group;
 	pcsm_attr_groups[group++] = &pwm1_group;
 	pcsm_attr_groups[group++] = &pwm2_group;
+#ifdef CONFIG_EPIC
+	pcsm_attr_groups[group++] = &pcs_event_group;
+#endif
 
 	pcsm_attr_groups[group++] = NULL;
 
@@ -1566,7 +1578,9 @@ static int pcsm_drv_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, pcsm_drv);
 
 #ifdef CONFIG_EPIC
-	pcs_events_enable(pcsm_drv->base[SYS_BASE]);
+	pcs_events_enable(pcsm_drv);
+	INIT_DEFERRABLE_WORK(&pcsm_drv->pcsm_int_cleanup_work, pcsm_int_cleanup_irq);
+	queue_delayed_work(system_power_efficient_wq, &pcsm_drv->pcsm_int_cleanup_work, 0);
 #endif
 
 	return error;
@@ -1577,6 +1591,9 @@ static int pcsm_drv_remove(struct platform_device *pdev)
 	int error = 0;
 	struct pcsm_data *pcsm_drv = platform_get_drvdata(pdev);
 
+#ifdef CONFIG_EPIC
+	cancel_delayed_work(&pcsm_drv->pcsm_int_cleanup_work);
+#endif
 	hwmon_device_unregister(pcsm_drv->hdev);
 	return error;
 } /* pcsm_drv_remove */

@@ -14,7 +14,7 @@
 
 #include <asm/mmu_types.h>
 #include <asm/pgtable_def.h>
-#include <asm/kvm/hypervisor.h>
+#include <asm/kvm/paravirt_sw/hypervisor.h>
 
 #ifdef	CONFIG_KVM_SHADOW_PT
 extern pgprot_t kvm_pt_atomic_update(struct mm_struct *mm,

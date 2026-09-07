@@ -13,23 +13,23 @@
 #include <linux/compiler.h>
 #include <linux/acpi.h>
 #include <linux/export.h>
-#include <linux/syscore_ops.h>
 #include <linux/freezer.h>
 #include <linux/kthread.h>
 #include <linux/jiffies.h>	/* time_after() */
 #include <linux/slab.h>
 #include <linux/memblock.h>
 #include <linux/msi.h>
+#include <asm/pic.h>
+#include <asm/sic_regs_access.h>
+#include <asm/iolinkmask.h>
 
 #include "apic.h"
 #include "io_apic.h"
 #include "apic-msidef.h"
 #include "../io_pic.h"
+#include "../epic/io_epic_regs.h"
 
 static void ioapic_configure_entry(struct irq_data *irqd);
-
-#define	for_each_pin(apic, pin)		\
-	for ((pin) = 0; (pin) < apic->nr_pins; (pin)++)
 
 struct ioapic_chip_data {
 	struct iopic_chip_data d;
@@ -68,18 +68,17 @@ static void io_apic_write(struct iopic *apic, unsigned int reg,
 {
 	struct io_apic __iomem *io_apic = io_apic_base(apic);
 	lockdep_assert_held(&apic->lock);
+
 	writel(reg, &io_apic->index);
 	writel(value, &io_apic->data);
 }
 
 static struct IO_APIC_route_entry __ioapic_read_entry(struct iopic *apic, int pin)
 {
-	struct IO_APIC_route_entry entry;
-
-	entry.w1 = io_apic_read(apic, 0x10 + 2 * pin);
-	entry.w2 = io_apic_read(apic, 0x11 + 2 * pin);
-
-	return entry;
+	return (struct IO_APIC_route_entry) {
+		.w1 = io_apic_read(apic, 0x10 + 2 * pin),
+		.w2 = io_apic_read(apic, 0x11 + 2 * pin),
+	};
 }
 
 static struct IO_APIC_route_entry ioapic_read_entry(struct iopic *apic, int pin)
@@ -102,8 +101,8 @@ static struct IO_APIC_route_entry ioapic_read_entry(struct iopic *apic, int pin)
  */
 static void __ioapic_write_entry(struct iopic *apic, int pin, struct IO_APIC_route_entry e)
 {
-	io_apic_write(apic, 0x11 + 2*pin, e.w2);
-	io_apic_write(apic, 0x10 + 2*pin, e.w1);
+	io_apic_write(apic, 0x11 + 2 * pin, e.w2);
+	io_apic_write(apic, 0x10 + 2 * pin, e.w1);
 }
 
 static void ioapic_write_entry(struct iopic *apic, int pin, struct IO_APIC_route_entry e)
@@ -164,56 +163,95 @@ static void unmask_ioapic_irq(struct irq_data *irqd)
 	raw_spin_unlock_irqrestore(&apic->lock, flags);
 }
 
-static void __eoi_ioapic_pin(struct iopic *apic, int pin, int vector)
-{
-	io_apic_eoi(apic, vector);
-
-}
-
-static void eoi_ioapic_pin(int vector, struct ioapic_chip_data *data)
-{
-	unsigned long flags;
-	struct iopic *apic = data->d.pic;
-	raw_spin_lock_irqsave(&apic->lock, flags);
-	__eoi_ioapic_pin(data->d.pic, data->d.pin, vector);
-	raw_spin_unlock_irqrestore(&apic->lock, flags);
-}
-static int save_ioapic_entries(struct device *dev)
+static void io_apic_print_entries(struct iopic *pic)
 {
 	int pin;
-	int err = 0;
-	struct iopic *apic = dev_get_drvdata(dev);
-	struct IO_APIC_route_entry *saved_registers = apic->saved_registers;
 
-	if (!saved_registers) {
-		err = -ENOMEM;
-		goto err;
+	pr_info(" NR Dst Mask Level IRR Pol Stat Dmod Deli Vect:\n");
+
+	for_each_iopic_pin(pic, pin) {
+		struct IO_APIC_route_entry entry = ioapic_read_entry(pic, pin);
+		pr_info(" %02x %02X  %1d    %1d     %1d   %1d   %1d    %1d    %1d    %02X\n",
+			pin, entry.destid_0_7, entry.masked, entry.is_level,
+			entry.irr, entry.active_low, entry.delivery_status,
+			entry.dest_mode_logical, entry.delivery_mode, entry.vector);
+	}
+}
+
+void print_IO_APIC(struct iopic *pic)
+{
+	union IO_APIC_reg_00 reg_00;
+	union IO_APIC_reg_01 reg_01;
+	union IO_APIC_reg_02 reg_02;
+	union IO_APIC_reg_03 reg_03;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&pic->lock, flags);
+	reg_00.raw = io_apic_read(pic, 0);
+	reg_01.raw = io_apic_read(pic, 1);
+	if (reg_01.bits.version >= 0x10)
+		reg_02.raw = io_apic_read(pic, 2);
+	if (reg_01.bits.version >= 0x20)
+		reg_03.raw = io_apic_read(pic, 3);
+	raw_spin_unlock_irqrestore(&pic->lock, flags);
+
+	pr_info("IO-APIC #%d......\n", pic->id);
+	pr_info(".... register #00: %08X\n", reg_00.raw);
+	pr_info(".......    : physical APIC id: %02X\n", reg_00.bits.ID);
+	pr_info(".......    : Delivery Type: %X\n", reg_00.bits.delivery_type);
+	pr_info(".......    : LTS          : %X\n", reg_00.bits.LTS);
+	pr_info(".... register #01: %08X\n", *(int *)&reg_01);
+	pr_info(".......     : max redirection entries: %02X\n", reg_01.bits.entries);
+	pr_info(".......     : PRQ implemented: %X\n", reg_01.bits.PRQ);
+	pr_info(".......     : IO APIC version: %02X\n", reg_01.bits.version);
+
+	if (reg_01.bits.version >= 0x10) {
+		pr_info(".... register #02: %08X\n", reg_02.raw);
+		pr_info(".......     : arbitration: %02X\n", reg_02.bits.arbitration);
 	}
 
-	for_each_pin(apic, pin)
-		saved_registers[pin] =
-			ioapic_read_entry(apic, pin);
-err:
-	return err;
+	if (reg_01.bits.version >= 0x20) {
+		pr_info(".... register #03: %08X\n", reg_03.raw);
+		pr_info(".......     : Boot DT    : %X\n", reg_03.bits.boot_DT);
+	}
+
+	pr_info(".... IRQ redirection table:\n");
+
+	io_apic_print_entries(pic);
+}
+
+#ifdef CONFIG_PM
+static int save_ioapic_entries(struct iopic *pic)
+{
+	int pin;
+	struct IO_APIC_route_entry *saved_registers = pic->saved_registers;
+
+	if (!saved_registers)
+		return -ENOMEM;
+
+	for_each_iopic_pin(pic, pin)
+		saved_registers[pin] = ioapic_read_entry(pic, pin);
+
+	return 0;
 }
 
 /*
  * Restore IO APIC entries which was saved in the ioapic structure.
  */
-static int restore_ioapic_entries(struct iopic *apic)
+static int restore_ioapic_entries(struct iopic *pic)
 {
 	int pin;
-	struct IO_APIC_route_entry *saved_registers = apic->saved_registers;
+	struct IO_APIC_route_entry *saved_registers = pic->saved_registers;
 
 	if (!saved_registers)
 		return 0;
 
-	for_each_pin(apic, pin)
-		ioapic_write_entry(apic, pin,
-					saved_registers[pin]);
+	for_each_iopic_pin(pic, pin)
+		ioapic_write_entry(pic, pin, saved_registers[pin]);
 
 	return 0;
 }
+#endif
 
 /*
  * In the SMP+IOAPIC case it might happen that there are an unspecified
@@ -323,69 +361,37 @@ static inline void ioapic_finish_move(struct irq_data *irqd, bool moveit)
 }
 #endif
 
+static void epic_ioapic_eoi(int node, u8 vector)
+{
+	unsigned v = (vector << 8) | 0x5;
+	/*
+	 * To send a message from CEPIC to IOAPIC we need to write HC_IOAPIC_EOI
+	 * SIC register
+	 */
+	sic_write_node_nbsr_reg(node, SIC_hc_ioapic_eoi, v);
+}
+
 static void ioapic_ack_level(struct irq_data *irqd)
 {
 	struct irq_cfg *cfg = irqd_cfg(irqd);
-	unsigned long v;
+	struct irq_data *pd = irqd->parent_data;
 	bool moveit;
-	int i;
+	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
 
 	irq_complete_move(cfg);
 	moveit = ioapic_prepare_move(irqd);
 
 	/*
-	 * It appears there is an erratum which affects at least version 0x11
-	 * of I/O APIC (that's the 82093AA and cores integrated into various
-	 * chipsets).  Under certain conditions a level-triggered interrupt is
-	 * erroneously delivered as edge-triggered one but the respective IRR
-	 * bit gets set nevertheless.  As a result the I/O unit expects an EOI
-	 * message but it will never arrive and further interrupts are blocked
-	 * from the source.  The exact reason is so far unknown, but the
-	 * phenomenon was observed when two consecutive interrupt requests
-	 * from a given source get delivered to the same CPU and the source is
-	 * temporarily disabled in between.
-	 *
-	 * A workaround is to simulate an EOI message manually.  We achieve it
-	 * by setting the trigger mode to edge and then to level when the edge
-	 * trigger mode gets detected in the TMR of a local APIC for a
-	 * level-triggered interrupt.  We mask the source for the time of the
-	 * operation to prevent an edge-triggered interrupt escaping meanwhile.
-	 * The idea is from Manfred Spraul.  --macro
-	 *
-	 * Also in the case when cpu goes offline, fixup_irqs() will forward
-	 * any unhandled interrupt on the offlined cpu to the new cpu
-	 * destination that is handling the corresponding interrupt. This
-	 * interrupt forwarding is done via IPI's. Hence, in this case also
-	 * level-triggered io-apic interrupt will be seen as an edge
-	 * interrupt in the IRR. And we can't rely on the cpu's EOI
-	 * to be broadcasted to the IO-APIC's which will clear the remoteIRR
-	 * corresponding to the level-triggered interrupt. Hence on IO-APIC's
-	 * supporting EOI register, we do an explicit EOI to clear the
-	 * remote IRR and on IO-APIC's which don't have an EOI register,
-	 * we use the above logic (mask+edge followed by unmask+level) from
-	 * Manfred Spraul to clear the remote IRR.
-	 */
-	i = cfg->vector;
-	v = apic_read(APIC_TMR + ((i & ~0x1f) >> 1));
-
-	/*
 	 * We must acknowledge the irq before we move it or the acknowledge will
 	 * not propagate properly.
 	 */
-	ack_APIC_irq();
+	pd->chip->irq_eoi(pd);
 
-	/*
-	 * Tail end of clearing remote IRR bit (either by delivering the EOI
-	 * message via io-apic EOI register write or simulating it using
-	 * mask+edge followed by unmask+level logic) manually when the
-	 * level triggered interrupt is seen as the edge triggered interrupt
-	 * at the cpu.
-	 */
-	if (!(v & (1 << (i & 0x1f)))) {
-		atomic_inc(&irq_mis_count);
-		eoi_ioapic_pin(cfg->vector, irqd->chip_data);
+	if (cpu_has_epic()) {
+		struct ioapic_chip_data *data = irqd->chip_data;
+		struct iopic *pic = data->d.pic;
+		epic_ioapic_eoi(pic->node, cfg->vector);
 	}
-
 	ioapic_finish_move(irqd, moveit);
 }
 
@@ -406,21 +412,32 @@ static void ioapic_ack_level(struct irq_data *irqd)
  * generic message routing information which is used for the MSI.
  */
 static void ioapic_setup_msg_from_msi(struct irq_data *irqd,
-				      struct IO_APIC_route_entry *entry)
+				      struct IO_APIC_route_entry *e)
 {
 	struct msi_msg msg;
-	ioapic_msi_msg_addr_lo_t *lo = (ioapic_msi_msg_addr_lo_t *)&msg.address_lo;
-	ioapic_msi_msg_data_t *d = (ioapic_msi_msg_data_t *)&msg.data;
 
 	lockdep_assert_held(&irq_data_to_desc(irqd)->lock);
-
-	/* Let the parent dmn compose the MSI message */
 	irq_chip_compose_msi_msg(irqd, &msg);
 
-	entry->vector			= d->vector;
-	entry->delivery_mode		= d->delivery_mode;
-	entry->dest_mode_logical	= lo->dest_mode_logical;
-	entry->destid_0_7		= lo->destid_0_7;
+	if (cpu_has_epic()) {
+		union IO_EPIC_MSG_ADDR_LOW *lo = (void *)&msg.address_lo;
+		union IO_EPIC_MSG_DATA *d = (void *)&msg.data;
+		WARN_ONCE(lo->dst > 0xff, "hw bug 170189:ioapic: iohub2 interrupts can be handled only by processor 0");
+		WARN_ONCE(d->vector > 0xff, "ioapic: vector number to big: %d", d->vector);
+
+		e->vector		= d->vector;
+		e->delivery_mode	= d->dlvm;
+		e->dest_mode_logical	= 0;
+		e->destid_0_7		= lo->dst;
+	} else {
+		ioapic_msi_msg_addr_lo_t *lo = (void *)&msg.address_lo;
+		ioapic_msi_msg_data_t *d = (void *)&msg.data;
+
+		e->vector		= d->vector;
+		e->delivery_mode	= d->delivery_mode;
+		e->dest_mode_logical	= lo->dest_mode_logical;
+		e->destid_0_7		= lo->destid_0_7;
+	}
 }
 
 static void __ioapic_configure_entry(struct irq_data *irqd)
@@ -530,11 +547,29 @@ static int ioapic_irq_get_chip_state(struct irq_data *irqd,
 	return 0;
 }
 
-struct irq_chip ioapic_chip __read_mostly = {
+static void ioapic_compose_msi_msg(struct irq_data *irqd,
+				       struct msi_msg *msg)
+{
+	u32 lo = 0;
+	ioapic_msi_msg_addr_lo_t *l = (void *)&msg->address_lo;
+	int node = of_node_to_nid(to_of_node(irqd->domain->fwnode));
+
+	WARN_ON_ONCE(!is_of_node(irqd->domain->fwnode));
+	WARN_ON_ONCE(node >= 0 && !iohub_online(node));
+
+	/* Let the parent dmn compose the MSI message */
+	irq_chip_compose_msi_msg(irqd->parent_data, msg);
+
+	get_io_pic_msi(node, &lo, &msg->address_hi);
+	l->base_address = lo >> 20;
+}
+
+static struct irq_chip ioapic_chip __read_mostly = {
 	.name			= "IO-APIC",
 	.irq_startup		= startup_ioapic_irq,
 	.irq_mask		= mask_ioapic_irq,
 	.irq_unmask		= unmask_ioapic_irq,
+	.irq_compose_msi_msg	= ioapic_compose_msi_msg,
 	.irq_set_type		= ioapic_irq_set_type,
 	.irq_ack		= irq_chip_ack_parent,
 	.irq_eoi		= ioapic_ack_level,
@@ -545,6 +580,7 @@ struct irq_chip ioapic_chip __read_mostly = {
 				  IRQCHIP_AFFINITY_PRE_STARTUP,
 };
 
+#ifdef CONFIG_PM
 static void resume_ioapic_id(struct iopic *apic)
 {
 	unsigned long flags;
@@ -559,19 +595,17 @@ static void resume_ioapic_id(struct iopic *apic)
 	raw_spin_unlock_irqrestore(&apic->lock, flags);
 }
 
-static int ioapic_resume(struct device *dev)
+static int ioapic_suspend(struct iopic *pic)
 {
-	struct iopic *apic = dev_get_drvdata(dev);
-	resume_ioapic_id(apic);
-	restore_ioapic_entries(apic);
-	return 0;
+	return save_ioapic_entries(pic);
 }
 
-
-static const struct dev_pm_ops ioapic_pm_ops = {
-	SET_RUNTIME_PM_OPS(save_ioapic_entries,
-			   ioapic_resume, NULL)
-};
+static void ioapic_resume(struct iopic *pic)
+{
+	resume_ioapic_id(pic);
+	restore_ioapic_entries(pic);
+}
+#endif /* CONFIG_PM */
 
 static int ioapic_get_redir_entries(struct iopic *apic)
 {
@@ -620,9 +654,103 @@ static void ioapic_get_id_ver_pins(struct iopic *apic,
 	*pins    = ioapic_get_redir_entries(apic);
 }
 
+static void ioapic_set_id(struct iopic *apic, int id)
+{
+	unsigned long flags;
+	union IO_APIC_reg_00 reg_00;
+
+	raw_spin_lock_irqsave(&apic->lock, flags);
+	reg_00.raw = io_apic_read(apic, 0);
+
+	reg_00.bits.ID = id;
+	io_apic_write(apic, 0, reg_00.raw);
+
+	raw_spin_unlock_irqrestore(&apic->lock, flags);
+}
+
+static void eoi_ioapic_pin(struct iopic *apic, int pin)
+{
+	struct IO_APIC_route_entry entry, entry1;
+
+	entry = __ioapic_read_entry(apic, pin);
+	entry1 = entry;
+
+	/* Mask the entry and change the trigger mode to edge. */
+	entry1.masked = true;
+	entry1.is_level = false;
+
+	__ioapic_write_entry(apic, pin, entry1);
+
+	/* Restore the previous level triggered entry. */
+	__ioapic_write_entry(apic, pin, entry);
+}
+
+static void ioapic_reset_pin(struct iopic *apic, unsigned int pin)
+{
+	struct IO_APIC_route_entry entry;
+
+	/* Check delivery_mode to be sure we're not clearing an SMI pin */
+	entry = ioapic_read_entry(apic, pin);
+	if (entry.delivery_mode == APIC_DELIVERY_MODE_SMI)
+		return;
+
+	/*
+	 * Make sure the entry is masked and re-read the contents to check
+	 * if it is a level triggered pin and if the remote-IRR is set.
+	 */
+	if (!entry.masked) {
+		entry.masked = true;
+		ioapic_write_entry(apic, pin, entry);
+		entry = ioapic_read_entry(apic, pin);
+	}
+
+	if (entry.irr) {
+		unsigned long flags;
+
+		/*
+		 * Make sure the trigger mode is set to level. Explicit EOI
+		 * doesn't clear the remote-IRR if the trigger mode is not
+		 * set to level.
+		 */
+		if (!entry.is_level) {
+			entry.is_level = true;
+			ioapic_write_entry(apic, pin, entry);
+		}
+		raw_spin_lock_irqsave(&apic->lock, flags);
+		eoi_ioapic_pin(apic, pin);
+		raw_spin_unlock_irqrestore(&apic->lock, flags);
+	}
+
+	/*
+	 * Clear the rest of the bits in the IO-APIC RTE except for the mask
+	 * bit.
+	 */
+	struct IO_APIC_route_entry e = { .masked = true };
+	ioapic_write_entry(apic, pin, e);
+	entry = ioapic_read_entry(apic, pin);
+	if (entry.irr)
+		pr_err("Unable to reset IRR for apic: %d, pin :%d\n",
+		       apic->id, pin);
+}
+
+static void ioapic_reset(struct iopic *apic)
+{
+	unsigned int pin;
+
+	for_each_iopic_pin(apic, pin) {
+		ioapic_reset_pin(apic, pin);
+	}
+}
+
 struct iopic_chip iopic_ioapic_chip = {
-	.iopic_get_id_ver_pins = ioapic_get_id_ver_pins,
-	.iopic_chip = &ioapic_chip,
-	.iopic_sizeof_entry = sizeof(struct IO_APIC_route_entry),
+#ifdef CONFIG_PM
+	.iopic_suspend		= ioapic_suspend,
+	.iopic_resume		= ioapic_resume,
+#endif
+	.iopic_get_id_ver_pins	= ioapic_get_id_ver_pins,
+	.iopic_set_id		= ioapic_set_id,
+	.iopic_reset		= ioapic_reset,
+	.iopic_chip		= &ioapic_chip,
+	.iopic_sizeof_entry	= sizeof(struct IO_APIC_route_entry),
 };
 

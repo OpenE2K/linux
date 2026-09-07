@@ -801,7 +801,7 @@
         "Unit" : "sic_0_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_0",
+        "EventName": "L3_STALL_REQ_CORES_0",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {
@@ -1641,7 +1641,7 @@
         "Unit" : "sic_1_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_1",
+        "EventName": "L3_STALL_REQ_CORES_1",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {
@@ -1678,41 +1678,6 @@
         "EventCode": "0x13f",
         "EventName": "L3_STALL_RING_DRES2_1",
         "BriefDescription": "Количество срабатываний блокировки в кольце данных при транзитной передаче в соседнюю четверть."
-    },
-    {
-        "Unit" : "sic_1_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x217",
-        "EventName": "DDR_EMPTY_MC_CLK_1",
-        "BriefDescription": "Количество пустых тактов mc_clk на шине данных DDR при непустом входном буфере запросов МС."
-    },
-    {
-        "Unit" : "sic_1_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x218",
-        "EventName": "DDR_PRECHARGE_1",
-        "BriefDescription": "Количество команд Precharge."
-    },
-    {
-        "Unit" : "sic_1_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x219",
-        "EventName": "DDR_RMW_1",
-        "BriefDescription": "Количество команд RMW."
-    },
-    {
-        "Unit" : "sic_1_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x21a",
-        "EventName": "DDR_READ_WRITE_SWITCH_1",
-        "BriefDescription": "Количество переключений rd->wr и wr->rd."
-    },
-    {
-        "Unit" : "sic_1_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x21b",
-        "EventName": "DDR_REFRESH_1",
-        "BriefDescription": "Количество команд Refresh."
     },
     {
         "Unit" : "sic_2_mcm",
@@ -2516,7 +2481,7 @@
         "Unit" : "sic_2_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_2",
+        "EventName": "L3_STALL_REQ_CORES_2",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {
@@ -2553,41 +2518,6 @@
         "EventCode": "0x13f",
         "EventName": "L3_STALL_RING_DRES2_2",
         "BriefDescription": "Количество срабатываний блокировки в кольце данных при транзитной передаче в соседнюю четверть."
-    },
-    {
-        "Unit" : "sic_2_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x217",
-        "EventName": "DDR_EMPTY_MC_CLK_2",
-        "BriefDescription": "Количество пустых тактов mc_clk на шине данных DDR при непустом входном буфере запросов МС."
-    },
-    {
-        "Unit" : "sic_2_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x218",
-        "EventName": "DDR_PRECHARGE_2",
-        "BriefDescription": "Количество команд Precharge."
-    },
-    {
-        "Unit" : "sic_2_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x219",
-        "EventName": "DDR_RMW_2",
-        "BriefDescription": "Количество команд RMW."
-    },
-    {
-        "Unit" : "sic_2_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x21a",
-        "EventName": "DDR_READ_WRITE_SWITCH_2",
-        "BriefDescription": "Количество переключений rd->wr и wr->rd."
-    },
-    {
-        "Unit" : "sic_2_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x21b",
-        "EventName": "DDR_REFRESH_2",
-        "BriefDescription": "Количество команд Refresh."
     },
     {
         "Unit" : "sic_3_mcm",
@@ -3391,7 +3321,7 @@
         "Unit" : "sic_3_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_3",
+        "EventName": "L3_STALL_REQ_CORES_3",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {
@@ -3428,40 +3358,5 @@
         "EventCode": "0x13f",
         "EventName": "L3_STALL_RING_DRES2_3",
         "BriefDescription": "Количество срабатываний блокировки в кольце данных при транзитной передаче в соседнюю четверть."
-    },
-    {
-        "Unit" : "sic_3_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x217",
-        "EventName": "DDR_EMPTY_MC_CLK_3",
-        "BriefDescription": "Количество пустых тактов mc_clk на шине данных DDR при непустом входном буфере запросов МС."
-    },
-    {
-        "Unit" : "sic_3_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x218",
-        "EventName": "DDR_PRECHARGE_3",
-        "BriefDescription": "Количество команд Precharge."
-    },
-    {
-        "Unit" : "sic_3_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x219",
-        "EventName": "DDR_RMW_3",
-        "BriefDescription": "Количество команд RMW."
-    },
-    {
-        "Unit" : "sic_3_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x21a",
-        "EventName": "DDR_READ_WRITE_SWITCH_3",
-        "BriefDescription": "Количество переключений rd->wr и wr->rd."
-    },
-    {
-        "Unit" : "sic_3_mcm",
-        "PerPkg": "1",
-        "EventCode": "0x21b",
-        "EventName": "DDR_REFRESH_3",
-        "BriefDescription": "Количество команд Refresh."
     }
 ]

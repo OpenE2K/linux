@@ -123,6 +123,9 @@ static void uart_stop(struct tty_struct *tty)
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
 	unsigned long flags;
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 
 	port = uart_port_lock(state, flags);
 	if (port)
@@ -144,6 +147,9 @@ static void uart_start(struct tty_struct *tty)
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port;
 	unsigned long flags;
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 
 	port = uart_port_lock(state, flags);
 	__uart_start(tty);
@@ -232,6 +238,9 @@ static int uart_port_startup(struct tty_struct *tty, struct uart_state *state,
 	unsigned long flags;
 	unsigned long page;
 	int retval = 0;
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 
 	if (uport->type == PORT_UNKNOWN)
 		return 1;
@@ -326,6 +335,9 @@ static void uart_shutdown(struct tty_struct *tty, struct uart_state *state)
 	struct tty_port *port = &state->port;
 	unsigned long flags;
 	char *xmit_buf = NULL;
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 
 	/*
 	 * Set the TTY IO error marker
@@ -538,6 +550,9 @@ static int uart_put_char(struct tty_struct *tty, unsigned char c)
 	struct circ_buf *circ;
 	unsigned long flags;
 	int ret = 0;
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 
 	circ = &state->xmit;
 	port = uart_port_lock(state, flags);
@@ -568,6 +583,9 @@ static int uart_write(struct tty_struct *tty,
 	struct circ_buf *circ;
 	unsigned long flags;
 	int c, ret = 0;
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 
 	/*
 	 * This means you called this function _after_ the port was
@@ -609,6 +627,9 @@ static unsigned int uart_write_room(struct tty_struct *tty)
 	struct uart_port *port;
 	unsigned long flags;
 	unsigned int ret;
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 
 	port = uart_port_lock(state, flags);
 	ret = uart_circ_chars_free(&state->xmit);
@@ -623,6 +644,9 @@ static unsigned int uart_chars_in_buffer(struct tty_struct *tty)
 	unsigned long flags;
 	unsigned int ret;
 
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 	port = uart_port_lock(state, flags);
 	ret = uart_circ_chars_pending(&state->xmit);
 	uart_port_unlock(port, flags);
@@ -635,6 +659,9 @@ static void uart_flush_buffer(struct tty_struct *tty)
 	struct uart_port *port;
 	unsigned long flags;
 
+#ifdef CONFIG_MCST
+	flags = 0;
+#endif
 	/*
 	 * This means you called this function _after_ the port was
 	 * closed.  No cookie for you.

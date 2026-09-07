@@ -36,9 +36,10 @@
 #include <linux/signal.h>
 #include <linux/irqflags.h>
 
-#ifndef __ASSEMBLY__
-#include <asm/e2k_api.h>
+#include <asm/aau_context.h>
 #include <asm/cpu_regs.h>
+#include <asm/e2k_api.h>
+#include <asm/e2k_syswork.h>
 #include <asm/gregs.h>
 #include <asm/mmu.h>
 #include <asm/mmu_fault.h>
@@ -50,15 +51,16 @@
 #include <asm/head.h>
 #include <asm/tags.h>
 #include <asm/traps.h>
-#include <asm/kvm/regs_state.h>
+#include <asm/user.h>
 #ifdef CONFIG_MLT_STORAGE
 #include <asm/mlt.h>
 #endif
-#include <asm/aau_context.h>
-
-#endif /* __ASSEMBLY__ */
-
-#include <asm/e2k_syswork.h>
+ 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/regs_state.h>
+#else
+#define	RESTORE_USER_CUT_REGS(ti, regs, in_syscall) /* CUTD is already set */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 
 #ifdef	CONTROL_USD_BASE_SIZE
@@ -145,13 +147,13 @@ do {									\
 #define NATIVE_SAVE_STACK_REGS(regs, from_current, flushc) \
 		PREFIX_SAVE_STACK_REGS(native, regs, from_current, flushc)
 
-static inline void update_u_stack_limits(unsigned long bottom, unsigned long top)
+static inline void update_u_stack_limits(unsigned long size, unsigned long top)
 {
-	current_thread_info()->u_stack.bottom = bottom;
 	current_thread_info()->u_stack.top = top;
-	current_thread_info()->u_stack.size = top - bottom;
+	current_thread_info()->u_stack.size = size;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Interrupts should be disabled by caller to read all hardware
  * stacks registers in coordinated state
@@ -177,6 +179,7 @@ do {									\
 				get_cr1_ussz((crs)->cr1));		\
 	}								\
 } while (0)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	NATIVE_DO_SAVE_MONITOR_COUNTERS(sw_regs)				\
 do {										\
@@ -237,10 +240,68 @@ static inline void native_save_user_only_regs(struct sw_regs *sw_regs)
 #if (E2K_MAXGR_d == 32)
 
 /* Save/Restore global registers */
-#define	SAVE_GREGS_PAIR(gregs, nolo_save, nohi_save, nolo_greg, nohi_greg, iset) \
-		NATIVE_SAVE_GREG(&(gregs)[nolo_save], &(gregs)[nohi_save], \
-				 nolo_greg, nohi_greg, iset)
+#define	SAVE_GREGS_PAIR(gregs, mem_index, reg_lo, reg_hi, iset) \
+	ASM_SAVE_GREG((gregs) + (mem_index), reg_lo, reg_hi, iset)
+#define	RESTORE_GREGS_PAIR(gregs, mem_index, reg_lo, reg_hi, iset) \
+	ASM_RESTORE_GREG((gregs) + (mem_index), reg_lo, reg_hi, iset)
 
+static __always_inline void save_global_gregs_iset(struct global_gregs *gregs, int iset)
+{
+	volatile struct e2k_greg *g = gregs->g;
+
+	SAVE_GREGS_PAIR(g,  0,  0,  1, iset);
+	SAVE_GREGS_PAIR(g,  2,  2,  3, iset);
+	SAVE_GREGS_PAIR(g,  4,  4,  5, iset);
+	SAVE_GREGS_PAIR(g,  6,  6,  7, iset);
+	SAVE_GREGS_PAIR(g,  8,  8,  9, iset);
+	SAVE_GREGS_PAIR(g, 10, 10, 11, iset);
+	SAVE_GREGS_PAIR(g, 12, 12, 13, iset);
+	SAVE_GREGS_PAIR(g, 14, 14, 15, iset);
+}
+
+static __always_inline void save_local_gregs_iset(struct local_gregs *gregs, int iset)
+{
+	volatile struct e2k_greg *g = gregs->g;
+
+	SAVE_GREGS_PAIR(g,  0, 16, 17, iset);
+	SAVE_GREGS_PAIR(g,  2, 18, 19, iset);
+	SAVE_GREGS_PAIR(g,  4, 20, 21, iset);
+	SAVE_GREGS_PAIR(g,  6, 22, 23, iset);
+	SAVE_GREGS_PAIR(g,  8, 24, 25, iset);
+	SAVE_GREGS_PAIR(g, 10, 26, 27, iset);
+	SAVE_GREGS_PAIR(g, 12, 28, 29, iset);
+	SAVE_GREGS_PAIR(g, 14, 30, 31, iset);
+}
+
+static __always_inline void restore_global_gregs_iset(const struct global_gregs *gregs, int iset)
+{
+	const volatile struct e2k_greg *g = gregs->g;
+
+	RESTORE_GREGS_PAIR(g,  0,  0,  1, iset);
+	RESTORE_GREGS_PAIR(g,  2,  2,  3, iset);
+	RESTORE_GREGS_PAIR(g,  4,  4,  5, iset);
+	RESTORE_GREGS_PAIR(g,  6,  6,  7, iset);
+	RESTORE_GREGS_PAIR(g,  8,  8,  9, iset);
+	RESTORE_GREGS_PAIR(g, 10, 10, 11, iset);
+	RESTORE_GREGS_PAIR(g, 12, 12, 13, iset);
+	RESTORE_GREGS_PAIR(g, 14, 14, 15, iset);
+}
+
+static __always_inline void restore_local_gregs_iset(const struct local_gregs *gregs, int iset)
+{
+	const volatile struct e2k_greg *g = gregs->g;
+
+	RESTORE_GREGS_PAIR(g,  0, 16, 17, iset);
+	RESTORE_GREGS_PAIR(g,  2, 18, 19, iset);
+	RESTORE_GREGS_PAIR(g,  4, 20, 21, iset);
+	RESTORE_GREGS_PAIR(g,  6, 22, 23, iset);
+	RESTORE_GREGS_PAIR(g,  8, 24, 25, iset);
+	RESTORE_GREGS_PAIR(g, 10, 26, 27, iset);
+	RESTORE_GREGS_PAIR(g, 12, 28, 29, iset);
+	RESTORE_GREGS_PAIR(g, 14, 30, 31, iset);
+}
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Registers gN-g(N+3) are reserved by ABI. Now N=16.
  * These registers hold pointers to current, so we can skip saving and
@@ -250,80 +311,52 @@ static inline void native_save_user_only_regs(struct sw_regs *sw_regs)
 #define DO_SAVE_GREGS_ON_MASK(gregs, iset, PAIR_MASK_NOT_SAVE)		\
 do {									\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 0) | (1 << 1))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  0,  1,  0,  1, iset);		\
+		SAVE_GREGS_PAIR(gregs,  0,  0,  1, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 2) | (1 << 3))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  2,  3,  2,  3, iset);		\
+		SAVE_GREGS_PAIR(gregs,  2,  2,  3, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 4) | (1 << 5))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  4,  5,  4,  5, iset);		\
+		SAVE_GREGS_PAIR(gregs,  4,  4,  5, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 6) | (1 << 7))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  6,  7,  6,  7, iset);		\
+		SAVE_GREGS_PAIR(gregs,  6,  6,  7, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 8) | (1 << 9))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  8,  9,  8,  9, iset);		\
+		SAVE_GREGS_PAIR(gregs,  8,  8,  9, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 10) | (1 << 11))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 10, 11, 10, 11, iset);		\
+		SAVE_GREGS_PAIR(gregs, 10, 10, 11, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 12) | (1 << 13))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 12, 13, 12, 13, iset);		\
+		SAVE_GREGS_PAIR(gregs, 12, 12, 13, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 14) | (1 << 15))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 14, 15, 14, 15, iset);		\
+		SAVE_GREGS_PAIR(gregs, 14, 14, 15, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 16) | (1 << 17))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 16, 17, 16, 17, iset);		\
+		SAVE_GREGS_PAIR(gregs, 16, 16, 17, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 18) | (1 << 19))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 18, 19, 18, 19, iset);		\
+		SAVE_GREGS_PAIR(gregs, 18, 18, 19, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 20) | (1 << 21))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 20, 21, 20, 21, iset);		\
+		SAVE_GREGS_PAIR(gregs, 20, 20, 21, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 22) | (1 << 23))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 22, 23, 22, 23, iset);		\
+		SAVE_GREGS_PAIR(gregs, 22, 22, 23, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 24) | (1 << 25))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 24, 25, 24, 25, iset);		\
+		SAVE_GREGS_PAIR(gregs, 24, 24, 25, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 26) | (1 << 27))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 26, 27, 26, 27, iset);		\
+		SAVE_GREGS_PAIR(gregs, 26, 26, 27, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 28) | (1 << 29))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 28, 29, 28, 29, iset);		\
+		SAVE_GREGS_PAIR(gregs, 28, 28, 29, iset);		\
 	}								\
 	if (((PAIR_MASK_NOT_SAVE) & ((1 << 30) | (1 << 31))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 30, 31, 30, 31, iset);		\
-	}								\
-} while (0)
-
-#define SAVE_LOCAL_GREGS_ON_MASK(gregs, iset, PAIR_MASK_NOT_SAVE)	\
-do {									\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 16) | (1 << 17))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  0,  1, 16, 17, iset);		\
-	}								\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 18) | (1 << 19))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  2,  3, 18, 19, iset);		\
-	}								\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 20) | (1 << 21))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  4,  5, 20, 21, iset);		\
-	}								\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 22) | (1 << 23))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  6,  7, 22, 23, iset);		\
-	}								\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 24) | (1 << 25))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs,  8,  9, 24, 25, iset);		\
-	}								\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 26) | (1 << 27))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 10, 11, 26, 27, iset);		\
-	}								\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 28) | (1 << 29))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 12, 13, 28, 29, iset);		\
-	}								\
-	if (((PAIR_MASK_NOT_SAVE) & ((1 << 30) | (1 << 31))) == 0) {	\
-		SAVE_GREGS_PAIR(gregs, 14, 15, 30, 31, iset);		\
+		SAVE_GREGS_PAIR(gregs, 30, 30, 31, iset);		\
 	}								\
 } while (0)
 
@@ -347,89 +380,55 @@ do {									\
 	}								\
 } while (false)
 
-#define	RESTORE_GREGS_PAIR(gregs, nolo_save, nohi_save, \
-			   nolo_greg, nohi_greg, iset) \
-	NATIVE_RESTORE_GREG((gregs), nolo_save * sizeof((gregs)[0]), \
-			    nohi_save * sizeof((gregs)[0]), \
-			    nolo_greg, nohi_greg, iset)
-
 #define DO_RESTORE_GREGS_ON_MASK(gregs, iset, PAIR_MASK_NOT_RESTORE)	\
 do {									\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 0) | (1 << 1))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  0,  1,  0,  1, iset);	\
+		RESTORE_GREGS_PAIR(gregs,  0,  0,  1, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 2) | (1 << 3))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  2,  3,  2,  3, iset);	\
+		RESTORE_GREGS_PAIR(gregs,  2,  2,  3, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 4) | (1 << 5))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  4,  5,  4,  5, iset);	\
+		RESTORE_GREGS_PAIR(gregs,  4,  4,  5, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 6) | (1 << 7))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  6,  7,  6,  7, iset);	\
+		RESTORE_GREGS_PAIR(gregs,  6,  6,  7, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 8) | (1 << 9))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  8,  9,  8,  9, iset);	\
+		RESTORE_GREGS_PAIR(gregs,  8,  8,  9, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 10) | (1 << 11))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 10, 11, 10, 11, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 10, 10, 11, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 12) | (1 << 13))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 12, 13, 12, 13, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 12, 12, 13, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 14) | (1 << 15))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 14, 15, 14, 15, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 14, 14, 15, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 16) | (1 << 17))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 16, 17, 16, 17, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 16, 16, 17, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 18) | (1 << 19))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 18, 19, 18, 19, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 18, 18, 19, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 20) | (1 << 21))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 20, 21, 20, 21, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 20, 20, 21, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 22) | (1 << 23))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 22, 23, 22, 23, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 22, 22, 23, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 24) | (1 << 25))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 24, 25, 24, 25, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 24, 24, 25, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 26) | (1 << 27))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 26, 27, 26, 27, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 26, 26, 27, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 28) | (1 << 29))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 28, 29, 28, 29, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 28, 28, 29, iset);	\
 	}								\
 	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 30) | (1 << 31))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 30, 31, 30, 31, iset);	\
-	}								\
-} while (0)
-
-#define RESTORE_LOCAL_GREGS_ON_MASK(gregs, iset, PAIR_MASK_NOT_RESTORE) \
-do {									\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 16) | (1 << 17))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  0,  1, 16, 17, iset);	\
-	}								\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 18) | (1 << 19))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  2,  3, 18, 19, iset);	\
-	}								\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 20) | (1 << 21))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  4,  5, 20, 21, iset);	\
-	}								\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 22) | (1 << 23))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  6,  7, 22, 23, iset);	\
-	}								\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 24) | (1 << 25))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs,  8,  9, 24, 25, iset);	\
-	}								\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 26) | (1 << 27))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 10, 11, 26, 27, iset);	\
-	}								\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 28) | (1 << 29))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 12, 13, 28, 29, iset);	\
-	}								\
-	if (((PAIR_MASK_NOT_RESTORE) & ((1 << 30) | (1 << 31))) == 0) {	\
-		RESTORE_GREGS_PAIR(gregs, 14, 15, 30, 31, iset);	\
+		RESTORE_GREGS_PAIR(gregs, 30, 30, 31, iset);	\
 	}								\
 } while (0)
 
@@ -452,6 +451,7 @@ do {									\
 		RESTORE_GREGS_EXCEPT_GLOBAL_AND_KERNEL(gregs, iset);	\
 	}								\
 } while (false)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	NATIVE_INIT_G_REGS(skip_k_gregs) \
 ({ \
@@ -461,28 +461,11 @@ do {									\
 	NATIVE_GREGS_SET_EMPTY(skip_k_gregs); \
 })
 
-#define	NATIVE_BOOT_INIT_G_REGS() \
+#define	NATIVE_BOOT_INIT_G_REGS(clear_qp) \
 do { \
 	native_write_BGR_reg(E2K_INITIAL_BGR); \
-	NATIVE_SET_GREGS_EMPTY(true, true); \
+	NATIVE_SET_GREGS_EMPTY(true, true, clear_qp); \
 } while (0)
-
-/* ptrace related guys: we do not use them on switching. */
-# define NATIVE_GET_GREGS_FROM_THREAD(g_user, gtag_user, gbase)		\
-({									\
-		void * g_u = g_user;					\
-		void * gt_u = gtag_user;				\
-									\
-		E2K_GET_GREGS_FROM_THREAD(g_u, gt_u, gbase);		\
-})
-
-# define NATIVE_SET_GREGS_TO_THREAD(gbase, g_user, gtag_user)		\
-({									\
-		void * g_u = g_user;					\
-		void * gt_u = gtag_user;				\
-									\
-		E2K_SET_GREGS_TO_THREAD(gbase, g_u, gt_u);		\
-})
 
 #define NATIVE_CLEAR_DAM	NATIVE_SET_MMUREG(dam_inv, 0)
 
@@ -499,11 +482,11 @@ static __always_inline void switch_local_gregs(struct local_gregs *dst,
 
 	/* cpuhas_greg0/1 might be not initialized yet, so use cpu_has_slow() */
 	if (cpu_has_slow(CPU_FEAT_ISET_V5)) {
-		SAVE_LOCAL_GREGS_ON_MASK(dst->g, E2K_ISET_V5, 0);
-		RESTORE_LOCAL_GREGS_ON_MASK(src->g, E2K_ISET_V5, 0);
+		save_local_gregs_iset(dst, E2K_ISET_V5);
+		restore_local_gregs_iset(src, E2K_ISET_V5);
 	} else {
-		SAVE_LOCAL_GREGS_ON_MASK(dst->g, E2K_ISET_V3, 0);
-		RESTORE_LOCAL_GREGS_ON_MASK(src->g, E2K_ISET_V3, 0);
+		save_local_gregs_iset(dst, E2K_ISET_V3);
+		restore_local_gregs_iset(src, E2K_ISET_V3);
 	}
 
 	native_write_BGR_reg(src->bgr);
@@ -525,16 +508,16 @@ static __always_inline void switch_local_gregs(struct local_gregs *dst,
 static __always_inline void restore_local_gregs(const struct local_gregs *gregs)
 {
 	if (cpu_has(CPU_FEAT_ISET_V5))
-		RESTORE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, 0);
+		restore_local_gregs_iset(gregs, E2K_ISET_V5);
 	else
-		RESTORE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V3, 0);
+		restore_local_gregs_iset(gregs, E2K_ISET_V3);
 
 	native_write_BGR_reg(gregs->bgr);
 }
 
 static inline void get_qpg_single(u64 *__restrict g, u8 *__restrict gtag,
-					     u64 *__restrict gext, u8 *__restrict gext_tag,
-					     const struct e2k_greg *src)
+				  u64 *__restrict gext, u8 *__restrict gext_tag,
+				  const volatile struct e2k_greg *src)
 {
 	e2k_qreg_t data;
 	u8 tag;
@@ -547,7 +530,7 @@ static inline void get_qpg_single(u64 *__restrict g, u8 *__restrict gtag,
 }
 
 static inline void get_qg_single(u64 *__restrict g, u8 *__restrict gtag,
-		u16 *__restrict gext, const struct e2k_greg *src)
+		u16 *__restrict gext, const volatile struct e2k_greg *src)
 {
 	e2k_qreg_t data;
 	u8 tag;
@@ -557,8 +540,8 @@ static inline void get_qg_single(u64 *__restrict g, u8 *__restrict gtag,
 	g[1] = data.hi;
 	gtag[0] = tag & 0xf;
 	gtag[1] = tag >> 4;
-	gext[0] = src[0].ext;
-	gext[1] = src[1].ext;
+	gext[0] = src[0].v3_ext;
+	gext[1] = src[1].v3_ext;
 }
 
 static inline void get_gregs_from_thread(struct user_regs_struct *user,
@@ -596,20 +579,20 @@ static inline void get_gregs_from_thread(struct user_regs_struct *user,
 	}
 }
 
-static inline void set_qpg_single(struct e2k_greg *__restrict dst, const u64 *g,
+static inline void set_qpg_single(volatile struct e2k_greg *__restrict dst, const u64 *g,
 				  const u8 *gtag, const u64 *gext, const u8 *gext_tag)
 {
 	e2k_qreg_t data = (e2k_qreg_t) { .lo = g[0], .hi = gext[0] };
 	store_tagged_qword(dst, data, gtag[0] | (gext_tag[0] << 4), 8);
 }
 
-static inline void set_qg_single(struct e2k_greg *__restrict dst, u64 g_lo, u64 g_hi,
+static inline void set_qg_single(volatile struct e2k_greg *__restrict dst, u64 g_lo, u64 g_hi,
 				 u8 tag_lo, u8 tag_hi, u16 ext_lo, u16 ext_hi)
 {
 	e2k_qreg_t data = (e2k_qreg_t) { .lo = g_lo, .hi = g_hi };
 	store_tagged_qword(dst, data, tag_lo | (tag_hi << 4), 16);
-	dst[0].ext = ext_lo;
-	dst[1].ext = ext_hi;
+	dst[0].v3_ext = ext_lo;
+	dst[1].v3_ext = ext_hi;
 }
 
 static inline void set_gregs_to_thread(struct global_gregs *g_gregs, struct local_gregs *l_gregs,
@@ -643,12 +626,6 @@ static inline void set_gregs_to_thread(struct global_gregs *g_gregs, struct loca
 		}
 	}
 }
-
-#define GET_GREGS_FROM_THREAD(g_user, gtag_user, gbase)         \
-	NATIVE_GET_GREGS_FROM_THREAD(g_user, gtag_user, gbase)
-
-#define SET_GREGS_TO_THREAD(gbase, g_user, gtag_user)           \
-	NATIVE_SET_GREGS_TO_THREAD(gbase, g_user, gtag_user)
 
 #define CLEAR_DAM	NATIVE_CLEAR_DAM
 
@@ -772,7 +749,6 @@ DECLARE_PER_CPU(unsigned long, kernel_trap_cellar[MMU_TRAP_CELLAR_MAX_SIZE]);
 	(trap)->curr_cnt = -1;						\
 	(trap)->ignore_user_tc = 0;					\
 	(trap)->tc_called = 0;						\
-	(trap)->is_intc = false;					\
 	if (cs_req_num > 0) {						\
 		/* recover chain stack pointers to repeat FILL */	\
 		e2k_pcshtp_t pcshtp = native_read_PCSHTP_reg();		\
@@ -807,19 +783,6 @@ do { \
 # define ENABLE_US_CLW()
 # define DISABLE_US_CLW()
 #endif /* CONFIG_CLW_ENABLE */
-
-#define NATIVE_RESTORE_COMMON_REGS(regs) \
-do { \
-	u64 ctpr1 = LO(regs->ctpr1), ctpr2 = LO(regs->ctpr2), \
-	    ctpr3 = LO(regs->ctpr3), ctpr1_hi = HI(regs->ctpr1), \
-	    ctpr2_hi = HI(regs->ctpr2), ctpr3_hi = HI(regs->ctpr3), \
-	    lsr = regs->lsr, lsr1 = regs->lsr1, \
-	    ilcr = regs->ilcr, ilcr1 = regs->ilcr1; \
- \
-	NATIVE_RESTORE_COMMON_REGS_VALUES(ctpr1, ctpr2, ctpr3, ctpr1_hi, \
-			ctpr2_hi, ctpr3_hi, lsr, lsr1, ilcr, ilcr1); \
-} while (0)
-
 
 #define PREFIX_RESTORE_USER_STACK_REGS(PV_TYPE, regs, in_syscall)	\
 ({									\
@@ -862,11 +825,9 @@ static inline void kvm_trap_init(unsigned long cellar_addr) { }
 		RESTORE_USER_STACK_REGS(regs, false)
 #define RESTORE_USER_SYSCALL_STACK_REGS(regs) \
 		RESTORE_USER_STACK_REGS(regs, true)
-#define RESTORE_COMMON_REGS(regs) \
-		NATIVE_RESTORE_COMMON_REGS(regs)
 
 #define INIT_G_REGS(skip_k_gregs)	NATIVE_INIT_G_REGS(skip_k_gregs)
-#define BOOT_INIT_G_REGS()	NATIVE_BOOT_INIT_G_REGS()
+#define BOOT_INIT_G_REGS(clear_qp)	NATIVE_BOOT_INIT_G_REGS(clear_qp)
 
 #endif /* CONFIG_KVM_GUEST_KERNEL */
 
@@ -886,23 +847,17 @@ static inline void restore_monitor_counters(const struct sw_regs *sw_regs)
 	u64 __maybe_unused dimar3 = sw_regs->dimar[3];
 
 	native_write_DIMTP_reg(sw_regs->dimtp);
-	NATIVE_WRITE_DDMAR0_REG_VALUE(ddmar0);
-	NATIVE_WRITE_DDMAR1_REG_VALUE(ddmar1);
+	native_write_DDMAR0_DDMAR1(ddmar0, ddmar1);
 	NATIVE_WRITE_DDMCR_REG(ddmcr);
 	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		NATIVE_WRITE_DDMAR2_REG_VALUE(ddmar2);
-		NATIVE_WRITE_DDMAR3_REG_VALUE(ddmar3);
+		native_write_DDMAR2_DDMAR3(ddmar2, ddmar3);
 		NATIVE_WRITE_DDMCR1_REG(ddmcr1);
 	}
-	native_write_DIMAR0_reg(dimar0);
-	native_write_DIMAR1_reg(dimar1);
+	native_write_DIMAR0_DIMAR1(dimar0, dimar1);
 	native_write_DIMCR_reg(dimcr);
-	if (cpu_has(CPU_FEAT_ISET_V7)) {
-		if (!cpu_has(CPU_HWBUG_DIMCR1)) {
-			native_write_DIMAR2_reg(dimar2);
-			native_write_DIMAR3_reg(dimar3);
-			native_write_DIMCR1_reg(dimcr1);
-		}
+	if (cpu_has(CPU_FEAT_ISET_V7) && !cpu_has(CPU_HWBUG_DIMCR1)) {
+		native_write_DIMAR2_DIMAR3(dimar2, dimar3);
+		native_write_DIMCR1_reg(dimcr1);
 	}
 }
 
@@ -943,19 +898,15 @@ static inline void native_clear_user_only_regs(void)
 				native_write_DIMCR1_reg(TOS(e2k_dimcr_t, 0));
 			NATIVE_WRITE_DDMCR1_REG_VALUE(0);
 			if (!cpu_has(CPU_HWBUG_DIMCR1)) {
-				native_write_DIMAR2_reg(0);
-				native_write_DIMAR3_reg(0);
+				native_write_DIMAR2_DIMAR3(0, 0);
 			}
-			NATIVE_WRITE_DDMAR2_REG_VALUE(0);
-			NATIVE_WRITE_DDMAR3_REG_VALUE(0);
+			native_write_DDMAR2_DDMAR3(0, 0);
 		}
 		native_write_DIMCR_reg(TOS(e2k_dimcr_t, 0));
-		native_write_DIMAR0_reg(0);
-		native_write_DIMAR1_reg(0);
+		native_write_DIMAR0_DIMAR1(0, 0);
 		native_write_DIBSR_reg(TOS(e2k_dibsr_t, 0));
 		NATIVE_WRITE_DDMCR_REG_VALUE(0);
-		NATIVE_WRITE_DDMAR0_REG_VALUE(0);
-		NATIVE_WRITE_DDMAR1_REG_VALUE(0);
+		native_write_DDMAR0_DDMAR1(0, 0);
 		NATIVE_WRITE_DDBSR_REG_VALUE(0);
 	} else {
 		e2k_dimcr_t dimcr = native_read_DIMCR_reg();
@@ -1093,6 +1044,9 @@ static inline void NATIVE_SAVE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 
 	sw_regs->top = native_read_SBR_reg().base;
 	sw_regs->usd = native_read_USD_reg();
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
+		sw_regs->usd = incr_usd_ind(sw_regs->usd, read_USFS_reg());
+	}
 	sw_regs->crs.cr1 = native_read_CR1_reg();
 	sw_regs->crs.cr0 = native_read_CR0_reg();
 
@@ -1100,9 +1054,6 @@ static inline void NATIVE_SAVE_TASK_REGS_TO_SWITCH(struct task_struct *task)
 	 * the flush some time to finish. */
 	sw_regs->psp = native_read_PSP_reg();
 	sw_regs->pcsp = native_read_PCSP_reg();
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		sw_regs->usincr = native_read_USINCR_reg();
-	}
 }
 
 /*
@@ -1148,9 +1099,6 @@ static inline void NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
 
 	native_write_stacks_cr(sw_regs->psp, sw_regs->pcsp, sw_regs->usd,
 			TOS(e2k_sbr_t, sw_regs->top), sw_regs->crs.cr0, sw_regs->crs.cr1);
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		native_write_USINCR_reg(sw_regs->usincr);
-	}
 
 	write_OSEM_reg_value(osem);
 	uaccess_max = uaccess_max_value;
@@ -1185,7 +1133,7 @@ static inline void NATIVE_RESTORE_TASK_REGS_TO_SWITCH(struct task_struct *task,
 	}
 }
 
-static inline void
+static __always_inline void
 NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
 			      e2k_addr_t pcs_base, e2k_size_t pcs_size,
 			      e2k_addr_t ds_base, e2k_size_t ds_size)
@@ -1223,23 +1171,30 @@ NATIVE_SWITCH_TO_KERNEL_STACK(e2k_addr_t ps_base, e2k_size_t ps_size,
  * For more info see instruction set doc.
  * Read tir regs order is significant
  */
-#define SAVE_TIRS(TIRs, TIRs_num, from_intc)				\
-({									\
-	unsigned long nr_TIRs = -1;					\
-	unsigned long all_interrupts = 0;				\
-	e2k_tir_t TIR;							\
-	do {								\
-		TIR.hi = native_read_TIR_HI_reg();			\
-		if (unlikely(from_intc && TIR.j >= TIR_NUM))		\
-			break;						\
-		TIR.lo = native_read_TIR_LO_reg();			\
-		++nr_TIRs;						\
-		TIRs[TIR.j] = TIR;					\
-		all_interrupts |= TIR.hi;				\
-	} while (TIR.j);							\
-	TIRs_num = nr_TIRs;						\
-	all_interrupts & (exc_all_mask | aau_exc_mask);			\
-})
+static __always_inline u64 save_tirs(e2k_tir_t *TIRs, s8 *nr_TIRs,
+		e2k_usincr_t *usincr, bool from_intc)
+{
+	s8 nr = -1;
+	u64 all_interrupts = 0;
+	e2k_tir_t TIR;
+
+	do {
+		TIR.hi = native_read_TIR_HI_reg();
+		if (unlikely(from_intc && TIR.j >= TIR_NUM))
+			break;
+		TIR.lo = native_read_TIR_LO_reg();
+		++nr;
+		TIRs[TIR.j] = TIR;
+		all_interrupts |= TIR.hi;
+	} while (TIR.j);
+
+	*nr_TIRs = nr;
+
+	*usincr = (cpu_has(CPU_FEAT_ISET_V7)) ? native_read_USINCR_reg()
+					      : (e2k_usincr_t) { .word = 0 };
+
+	return all_interrupts & (exc_all_mask | aau_exc_mask);
+}
 
 static __always_inline void save_sbbp(u64 *sbbp)
 {

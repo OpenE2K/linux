@@ -4,7 +4,7 @@
  */
 
 /*
- * EDAC ECC kernel module for e2k platforms e8c* (P1, P9), e16c, e2c3, e12c, e48c, e8v7
+ * EDAC ECC kernel module for e2k platforms e8c* (P1, P9), e16c, e2c3, e12c, e8v7
  */
 
 #include <linux/module.h>
@@ -57,7 +57,7 @@ MODULE_PARM_DESC(poll_msec, KBUILD_MODNAME "poll period delay");
 
 static struct task_struct *e2k_edac_thread = NULL;
 /*
-   We have MC_ECC regs in many chips - e8c2, e16c, e48c, e8v7.
+   We have MC_ECC regs in many chips - e8c2, e16c, e8v7.
    And in all arch's they are different.
    Declare abstract mcc reg, read_mcc_reg() will return it,
    no need understand type of reg in each place to use
@@ -117,14 +117,13 @@ static inline bool ecc_enabled(void)
 }
 
 
-static int num_arch_nodes(void)
+static int num_arch_max_cores(void)
 {
 	switch (machine.native_id) {
 		case MACHINE_ID_E8C:
 		case MACHINE_ID_E8C2:
 		case MACHINE_ID_E16C:
 		case MACHINE_ID_E12C:
-		case MACHINE_ID_E48C:
 		case MACHINE_ID_E1CP:
 		case MACHINE_ID_E2C3:
 		case MACHINE_ID_E8V7:
@@ -202,33 +201,16 @@ static int pb_type(struct mem_ctl_info *mci, int node, int mc, int pb, int *wtyp
 	}
 
 	int dqw;
-	if (machine.native_id == MACHINE_ID_E48C) {
-		e2k_e48c_mc_cfg_t mc_cfg;
-		AW(mc_cfg) = sic_get_mc_cfg(node, mc);
-		pbtype = mc_cfg.pbm & (1 << pb);
-		if (!pbtype) {
-			return 0;
-		}
-		if (is_prototype()) {
-			mci->mtype_cap = MEM_FLAG_DDR4;
-			pbtype = mc_cfg.rm ? MEM_RDDR4 : MEM_DDR4;
-		} else {
-			mci->mtype_cap = MEM_FLAG_DDR5;
-			pbtype = mc_cfg.rm ? MEM_RDDR5 : MEM_DDR5;
-		}
-		/* DQ Width (dqw) = ct[1:0] - 1 */
-		dqw = (((pb & 1) >> 1 ? mc_cfg.ct1 : mc_cfg.ct0) & 3) - 1;
-	} else {
-		e2k_mc_cfg_t mc_cfg;
-		AW(mc_cfg) = sic_get_mc_cfg(node, mc);
-		pbtype = mc_cfg.pbm & (1 << pb);
-		if (!pbtype) {
-			return 0;
-		}
-		mci->mtype_cap = MEM_FLAG_DDR4;
-		pbtype = mc_cfg.rm ? MEM_RDDR4 : MEM_DDR4;
-		dqw = mc_cfg.dqw;
+	e2k_mc_cfg_t mc_cfg;
+	AW(mc_cfg) = sic_get_mc_cfg(node, mc);
+	pbtype = mc_cfg.pbm & (1 << pb);
+	if (!pbtype) {
+		return 0;
 	}
+	mci->mtype_cap = MEM_FLAG_DDR4;
+	pbtype = mc_cfg.rm ? MEM_RDDR4 : MEM_DDR4;
+	dqw = mc_cfg.dqw;
+
 	switch (dqw) {
 	case 0:
 		*wtype = DEV_X4;
@@ -309,10 +291,7 @@ static int init_csrows(struct mem_ctl_info *mci)
 
 static inline int cpu_supported(void)
 {
-	if (cpu_has(CPU_FEAT_E48C_MAKET)) {
-		return 0;
-	}
-	return num_arch_nodes() > 0;
+	return num_arch_max_cores() > 0;
 }
 
 /* In v7 CPUs the tool to generate ecc errors introduced.
@@ -520,7 +499,7 @@ static ssize_t inject_poison_store(struct device *dev,
 	if (sscanf(data, "0x%lx", &m) != 1) {
 		return -EINVAL;
 	}
-	if (!access_ok(m, PAGE_SIZE)) {
+	if (!access_ok((void __user __force *)m, PAGE_SIZE)) {
 		return -EFAULT;
 	}
 	if (m & (PAGE_SIZE - 1)) {
@@ -625,49 +604,33 @@ static void edac_remove_sysfs_attributes(struct mem_ctl_info *mci)
 static void send_edac_v7_single_error_message(int node, int mc, int pb, u16 cnt)
 {
 	char s[256];
-	if (machine.native_id == MACHINE_ID_E48C) {
-		snprintf(s, 256, "Single recovered ecc error on node %d,"
-			" chanel %d, mch = %d,  pb %d.\n",
-			node, mc >> 1, mc & 1, pb);
-	} else { /*e8v7 */
-		snprintf(s, 256, "Single recovered ecc error on node %d,"
-			" chanel %d, slot %d.\n",
-			node, mc, pb);
-	}
-	e2k_edac_dbg("%s", s);
 
+	snprintf(s, 256, "Single recovered ecc error on node %d,"
+		" chanel %d, slot %d.\n",
+			node, mc, pb);
+	e2k_edac_dbg("%s", s);
 	edac_mc_handle_error(HW_EVENT_ERR_CORRECTED, mci,
 			     cnt, 0, 0, 0,
 			     node, mc, pb,
 			     "E2K MC", s);
-
 }
-
 
 static void send_edac_v7_multiple_error_message(int node, int mc, int pb, u32 cnt)
 {
 	char s[256];
-	if (machine.native_id == MACHINE_ID_E48C) {
-		snprintf(s, 256, "Multiple ecc error on node %d, chanel %d, mch = %d,  pb %d.\n",
-			node, mc >> 1, mc & 1, pb);
-	} else { /*e8v7 */
-		snprintf(s, 256, "Multiple ecc error on node %d, chanel %d, slot %d.\n",
-			node, mc, pb);
-	}
+	snprintf(s, 256, "Multiple ecc error on node %d, chanel %d, slot %d.\n",
+		node, mc, pb);
 	e2k_edac_dbg("%s", s);
 	edac_mc_handle_error(HW_EVENT_ERR_DEFERRED, mci, cnt, 0, 0, 0,
 			     node, mc, pb, "E2K MC", s);
 }
-
-
 
 static void handle_mc(int node)
 {
 	e2k_mc_status_t mc_st;
 	int mc;
 	e2k_edac_dbg("node %d\n", node);
-	if (machine.native_id != MACHINE_ID_E48C &&
-	    machine.native_id != MACHINE_ID_E8V7) {
+	if (machine.native_id != MACHINE_ID_E8V7) {
 		return;
 	}
 	mutex_lock(&mc_lock);
@@ -760,36 +723,36 @@ static void handle_l1(void)
 
 static void handle_l2(void)
 {
-	int bank = 0;
-	e2k_l2_err_t l2_err;
-	e2k_l2_cnt_err1_t cnt_err1;
-	e2k_l2_cnt_err2_t cnt_err2;
-	for (; bank < E2K_L2_BANK_NUM; bank++) {
-		AW(l2_err) = read_DCACHE_L2_ERR_reg(bank);
+	for (int bank = 0; bank < E2K_L2_BANK_NUM; bank++) {
+		e2k_l2_err_t l2_err = read_L2_ERR(bank);
 		if (!l2_err.fv) {
 			continue;
 		}
-		AW(cnt_err1) = read_DCACHE_L2_CNT_ERR1_reg(bank);
+
+		e2k_l2_cnt_err1_t cnt_err1 = read_L2_CNT_ERR1(bank);
 		if (cnt_err1.ce_cnt) {
 			char m[48];
-			snprintf(m, 47, "bank %d L2_ERR = %#16llx", bank, AW(l2_err));
+			snprintf(m, sizeof(m), "bank %d L2_ERR = %#16llx", bank, AW(l2_err));
 			edac_device_handle_ce_count(l12caches, cnt_err1.ce_cnt,
 				smp_processor_id(), 1, m);
-			clear_DCACHE_L2_CNT_ERR1_reg(bank);
+			clear_L2_CNT_ERR1(bank);
 		}
-		AW(cnt_err2) = read_DCACHE_L2_CNT_ERR2_reg(bank);
+
+		e2k_l2_cnt_err2_t cnt_err2 = read_L2_CNT_ERR2(bank);
 		if (cnt_err2.err2_cnt > cnt_err2.psn_cnt) {
 			/* poisoned data were logged by MC */
 			char m[48];
-			snprintf(m, 47, "bank %d L2_ERR = %#16llx", bank, AW(l2_err));
+			snprintf(m, sizeof(m), "bank %d L2_ERR = %#16llx",
+					bank, AW(l2_err));
 			edac_device_handle_ue_count(l12caches, cnt_err2.psn_cnt,
 					smp_processor_id(), 1, m);
-			clear_DCACHE_L2_CNT_ERR2_reg(bank);
+			clear_L2_CNT_ERR2(bank);
 		} else if (cnt_err2.psn_cnt == 0x3ff) {
-			clear_DCACHE_L2_CNT_ERR2_reg(bank);
+			clear_L2_CNT_ERR2(bank);
 		}
+
 		if (!l2_err.err_fatal)
-			write_DCACHE_L2_ERR_reg(bank, AW(l2_err));
+			write_L2_ERR(bank, l2_err);
 	}
 }
 
@@ -895,7 +858,7 @@ static int __init e2k_edac_init(void)
 	struct edac_mc_layer layers[3];
 	/* Possible nodes(cpus) in machine */
 	layers[0].type = EDAC_MC_LAYER_BRANCH;
-	layers[0].size = num_arch_nodes();
+	layers[0].size = num_arch_max_cores();
 	layers[0].is_virt_csrow = false;
 	/* Possible controllers in cpu */
 	layers[1].type = EDAC_MC_LAYER_CHANNEL;

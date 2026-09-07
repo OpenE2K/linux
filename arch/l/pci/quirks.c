@@ -24,7 +24,10 @@
 #include <linux/delay.h>
 #include <linux/vgaarb.h>
 #include <linux/moduleparam.h>
-#include "../../../drivers/pci/pci.h"
+#include <linux/screen_info.h>
+#include <linux/async.h>
+#include <linux/memblock.h>
+#include "../../../drivers/pci/pci.h" /*for pci_speed_string()*/
 
 static unsigned long l_slink_freq;
 
@@ -42,7 +45,7 @@ __setup("slink=", l_slink_freq_setup);
 #define SLINK_PLLSTS				0x6f
 # define SLINK_PLLSTS_0_LOCKED			0x3
 
-struct l_slink_freqs {
+static struct l_slink_freqs {
 	unsigned long dflt, min, max, mult, div;
 } l_slink_freqs[] = {
 	{
@@ -258,9 +261,6 @@ static void fixup_vga(struct pci_dev *pdev)
 {
 	u16 cmd;
 
-	if (vga_default_device())
-		return;
-
 	pci_read_config_word(pdev, PCI_COMMAND, &cmd);
 	if ((pdev->class >> 8) != PCI_CLASS_DISPLAY_VGA) { /* mgam83 */
 		if ((cmd & (PCI_COMMAND_MEMORY)) != (PCI_COMMAND_MEMORY))
@@ -280,6 +280,34 @@ static void fixup_vga(struct pci_dev *pdev)
 DECLARE_PCI_FIXUP_CLASS_FINAL(PCI_ANY_ID, PCI_ANY_ID,
 			      PCI_CLASS_DISPLAY_VGA, 8, fixup_vga);
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MGAM83, PCI_DEVICE_ID_MGAM83, fixup_vga);
+
+/* Add vga16fb device if only vga pci-class device exits */
+static void __l_add_vga16_device(void *data, async_cookie_t cookie)
+{
+	struct platform_device *pdev;
+	struct screen_info si = {
+		.orig_video_isVGA = VIDEO_TYPE_VGAC,
+		.orig_video_mode = 0x12, /* 640x480/4 (VGA) */
+	};
+	pdev = platform_device_register_resndata(NULL,
+			"vga-framebuffer", PLATFORM_DEVID_NONE,
+			NULL, 0, &si, sizeof(si));
+	WARN_ON(IS_ERR(pdev));
+}
+
+static void l_add_vga16_device(struct pci_dev *unused)
+{
+	static atomic_t dev_ctn = ATOMIC_INIT(0);
+	if (atomic_fetch_inc(&dev_ctn))
+		return;
+	if (memblock_is_region_memory(VGA_FB_PHYS_BASE, VGA_FB_PHYS_SIZE)) {
+		pr_info("Legacy VGA MMIO range routes to system memory.");
+		return;
+	}
+	async_schedule(__l_add_vga16_device, NULL);
+}
+DECLARE_PCI_FIXUP_CLASS_FINAL(PCI_ANY_ID, PCI_ANY_ID,
+			      PCI_CLASS_DISPLAY_VGA, 8, l_add_vga16_device);
 
 #define	 MGA2_REGS_SIZE	(512 * 1024)
 #define	 MGA2_DC0_CTRL		0x00800
@@ -528,5 +556,32 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_PCIE_X4,
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
 				PCI_DEVICE_ID_MCST_R2000P_PCIE_X4,
 			 l_pcie_retrain_link_quirk);
+
+/*
+ * Decoding should be disabled for a PCI device during BAR sizing to avoid conflict. But doing so
+ * may cause problems on timer & serial port. For devices that need to have mmio decoding
+ * always-on, we need to set the dev->mmio_always_on bit.
+ */
+static void l_quirk_mmio_always_on(struct pci_dev *dev)
+{
+	dev->mmio_always_on = 1;
+}
+
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_SPI, l_quirk_mmio_always_on);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_IOEPIC_I2C_SPI, l_quirk_mmio_always_on);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_I2C_SPI, l_quirk_mmio_always_on);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_ELBRUS,
+			PCI_DEVICE_ID_MCST_I2CSPI, l_quirk_mmio_always_on);
+
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_SERIAL, l_quirk_mmio_always_on);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_MCST_TMP,
+			PCI_DEVICE_ID_MCST_PARALLEL_SERIAL,
+			l_quirk_mmio_always_on);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_ELBRUS,
+			PCI_DEVICE_ID_PAR_SER, l_quirk_mmio_always_on);
 
 

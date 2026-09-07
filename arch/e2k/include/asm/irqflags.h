@@ -6,8 +6,6 @@
 #ifndef _E2K_IRQFLAGS_H_
 #define _E2K_IRQFLAGS_H_
 
-#ifndef __ASSEMBLY__
-
 #ifndef _LINUX_TRACE_IRQFLAGS_H
 # error "Do not include <asm/irqflags.h> directly; use <linux/irqflags.h> instead."
 #endif
@@ -550,35 +548,8 @@ static __always_inline int psr_glob_irqs_disabled(e2k_psr_t psr)
 		((IS_IRQ_MASK_GLOBAL()) ? __raw_glob_irqs_disabled_flags(flags) : \
 					  __raw_loc_irqs_disabled_flags(flags))
 
-#ifdef CONFIG_MCST_RT
-
-#define SAVE_CURR_TIME_SWITCH_TO                                        \
-{ 									\
-	cpu_times[raw_smp_processor_id()].curr_time_switch_to =         \
-						read_CLKR_reg_value();	\
-}
-
-#define CALCULATE_TIME_SWITCH_TO                                        \
-{                                                                       \
-	int cpu = raw_smp_processor_id();                               \
-	cpu_times[cpu].curr_time_switch_to = read_CLKR_reg_value() -    \
-			      cpu_times[cpu].curr_time_switch_to;       \
-	if (cpu_times[cpu].curr_time_switch_to <                        \
-	    cpu_times[cpu].min_time_switch_to){                         \
-	    cpu_times[cpu].min_time_switch_to =                         \
-			       cpu_times[cpu].curr_time_switch_to;      \
-	}                                                               \
-	if (cpu_times[cpu].curr_time_switch_to >                        \
-	    cpu_times[cpu].max_time_switch_to){                         \
-	    cpu_times[cpu].max_time_switch_to =                         \
-				cpu_times[cpu].curr_time_switch_to;     \
-	}                                                               \
-}
-
-#else /* !CONFIG_MCST_RT */
 # define SAVE_CURR_TIME_SWITCH_TO
 # define CALCULATE_TIME_SWITCH_TO
-#endif /* CONFIG_MCST_RT */
 
 #ifdef CONFIG_CLI_CHECK_TIME
 
@@ -779,5 +750,4 @@ static inline void arch_safe_halt(void)
 {
 }
 
-#endif /* __ASSEMBLY__ */
 #endif /* _E2K_IRQFLAGS_H_ */

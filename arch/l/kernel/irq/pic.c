@@ -23,9 +23,6 @@ DEFINE_EARLY_PER_CPU_READ_MOSTLY(u16, cpu_to_picid, BAD_APICID);
  */
 physid_mask_t phys_cpu_present_map;
 
-DEFINE_PER_CPU(long long, next_rt_intr) = 0;
-DEFINE_PER_CPU(long long, must_do_timer) = 0;
-
 
 /* Processor that is doing the boot up */
 unsigned int boot_cpu_physical_apicid = -1U;
@@ -38,10 +35,13 @@ int smp_found_config;
 
 unsigned int read_pic_id(void)
 {
-	if (cpu_has_epic())
-		return read_epic_id();
-	else
-		return read_apic_id();
+	unsigned int pic_id;
+
+	pic_id = (cpu_has_epic()) ? read_epic_id() : read_apic_id();
+
+	WARN_ON_ONCE(pic_id >= MAX_PHYSID_NUM);
+
+	return pic_id;
 }
 
 int pic_get_vector(void)
@@ -120,8 +120,6 @@ out:
 
 void fixup_irqs_pic(void)
 {
-	unsigned int vector;
-
 	/*
 	 * We can remove mdelay() and then send spuriuous interrupts to
 	 * new cpu targets for all the irqs that were handled previously by
@@ -133,19 +131,19 @@ void fixup_irqs_pic(void)
 	 */
 	mdelay(1);
 
-	for (vector = FIRST_EXTERNAL_VECTOR; vector < NR_VECTORS; vector++) {
+	for (unsigned int vector = FIRST_EXTERNAL_VECTOR; vector < NR_VECTORS; vector++) {
+		struct irq_desc *desc = __this_cpu_read(vector_irq[vector]);
 		unsigned int irr;
 
-		if (__this_cpu_read(vector_irq[vector]) < 0)
+		if (IS_ERR_OR_NULL(desc))
 			continue;
 
 		irr = cpu_has_epic() ? get_irr_epic(vector) : get_irr_apic(vector);
-		if (irr  & (1 << (vector % 32))) {
-			struct irq_desc *desc = __this_cpu_read(vector_irq[vector]);
+		if (irr & (1 << (vector % 32))) {
+			raw_spin_lock(&desc->lock);
 			struct irq_data *data = irq_desc_get_irq_data(desc);
 			struct irq_chip *chip = irq_data_get_irq_chip(data);
 
-			raw_spin_lock(&desc->lock);
 			if (chip->irq_retrigger)
 				chip->irq_retrigger(data);
 			raw_spin_unlock(&desc->lock);

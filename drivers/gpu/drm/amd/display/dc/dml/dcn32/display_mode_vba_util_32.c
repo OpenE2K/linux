@@ -1597,6 +1597,9 @@ double dml32_TruncToValidBPP(
 	unsigned int   NonDSCBPP2;
 	unsigned int   NonDSCBPP3;
 
+#ifdef CONFIG_MCST
+	NonDSCBPP3 = 0;
+#endif
 	if (Format == dm_420) {
 		NonDSCBPP0 = 12;
 		NonDSCBPP1 = 15;

@@ -84,7 +84,7 @@
 #ifdef PCIE_EN
 #include <linux/pci.h>
 #endif
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/ioport.h>
 
 #include <asm/irq.h>

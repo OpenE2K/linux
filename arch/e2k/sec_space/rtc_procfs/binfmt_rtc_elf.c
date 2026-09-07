@@ -488,7 +488,7 @@ static int set_x86_brk(unsigned long start, unsigned long end,
 			int prot, struct bincomp_map_info *info,
 			const struct x86_va_layout *va_layout)
 {
-	int error;
+	unsigned long error;
 
 	start	= ELF_PAGEALIGN(start);
 	end	= ELF_PAGEALIGN(end);
@@ -738,10 +738,12 @@ static unsigned long load_x86_elf_interp(struct elfhdr *interp_elf_ex,
 	last_bss = ELF_PAGEALIGN(last_bss);
 	/* Finally, if there is still more bss to allocate, do it. */
 	if (last_bss > elf_bss) {
-		error = set_x86_brk(elf_bss, last_bss - elf_bss, bss_prot,
-				    map_info, va_layout);
-		if (error)
+		error = vm_mmap(NULL, elf_bss, last_bss - elf_bss, bss_prot,
+				MAP_FIXED|MAP_PRIVATE|MAP_ANONYMOUS, 0);
+		if (is_bad_addr(error, va_layout->task_size, va_layout->ss_shift)) {
+			error = -EINVAL;
 			goto out;
+		}
 	}
 
 	error = load_addr;

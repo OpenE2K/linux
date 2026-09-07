@@ -444,7 +444,7 @@ static int i2c_v7_xfer(struct i2c_adapter *adap, struct i2c_msg *pmsg, int num)
 		}
 	}
 	/* Finished with filling up MEM -> Enable i2c controller executing */
-	init_completion(&i2c->last_cmd_completion);
+	reinit_completion(&i2c->last_cmd_completion);
 	i2c_write32(i2c, I2C_V7_REG_I2HC_CONTROL, (ignore_nack << 2 | I2C_V7_CTRL_EN));
 
 	/* Once enabled it will start exec commands one by one until stop interrupt */
@@ -475,10 +475,7 @@ static int i2c_v7_xfer(struct i2c_adapter *adap, struct i2c_msg *pmsg, int num)
 		}
 		/* Read finished --> Transfer finished */
 	}
-	if (ret)
-		return ret;
-	else
-		return i;
+	return i;
 }
 
 static u32 i2c_v7_func(struct i2c_adapter *adap)
@@ -517,6 +514,7 @@ static int i2c_v7_probe(struct pci_dev *pdev,
 	if (IS_ERR(regs)) {
 		return IS_ERR(regs);
 	}
+	init_completion(&i2c->last_cmd_completion);
 
 	msi_vectors = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_MSI);
 	if (msi_vectors < 0) {

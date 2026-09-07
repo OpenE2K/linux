@@ -47,8 +47,19 @@ static dtb_t e2s_dtb_a1s1_patch[ilog2(MAX_NUMNODES) + 1] __initdata = {
 	[2] = DTB(e2s_a1s1_4x4),
 # endif
 };
+DTB_DECL(e2s_a2s2_1x1);
+DTB_DECL(e2s_a2s2_2x2);
+DTB_DECL(e2s_a2s2_4x4);
+static dtb_t e2s_dtb_a2s2_patch[ilog2(MAX_NUMNODES) + 1] __initdata = {
+	[0] = DTB(e2s_a2s2_1x1),
+# ifdef CONFIG_NUMA
+	[1] = DTB(e2s_a2s2_2x2),
+	[2] = DTB(e2s_a2s2_4x4),
+# endif
+};
 #else
 #define e2s_dtb_a1s1_patch NULL
+#define e2s_dtb_a2s2_patch NULL
 #endif
 
 #ifdef CONFIG_CPU_E1CP
@@ -56,8 +67,13 @@ DTB_DECL(e1cp_a1s1);
 static dtb_t e1cp_dtb_a1s1_patch[ilog2(MAX_NUMNODES) + 1] __initdata = {
 	[0] = DTB(e1cp_a1s1),
 };
+DTB_DECL(e1cp_a2s2);
+static dtb_t e1cp_dtb_a2s2_patch[ilog2(MAX_NUMNODES) + 1] __initdata = {
+	[0] = DTB(e1cp_a2s2),
+};
 #else
 #define e1cp_dtb_a1s1_patch NULL
+#define e1cp_dtb_a2s2_patch NULL
 #endif
 
 #if defined(CONFIG_CPU_E8C)
@@ -176,10 +192,12 @@ static dtb_t e16c_dtb_a2s2_patch[ilog2(MAX_NUMNODES) + 1] __initdata = {
 #endif
 
 static dtb_t *e2k_dtb_patch[][2][3] __initdata = {
-	[CPU_TYPE_E2S]      = { { NULL, e2s_dtb_a1s1_patch  }, },
+	[CPU_TYPE_E2S]      = { { NULL, e2s_dtb_a1s1_patch  },
+				{ NULL, NULL, e2s_dtb_a2s2_patch }, },
 	[CPU_TYPE_E8C]	    = { { e8c_dtb_a1s0_patch, e8c_dtb_a1s1_patch },
 				{ NULL, NULL, e8c_dtb_a2s2_patch }, },
-	[CPU_TYPE_E1CP]	    = { { NULL, e1cp_dtb_a1s1_patch }, },
+	[CPU_TYPE_E1CP]	    = { { NULL, e1cp_dtb_a1s1_patch },
+				{ NULL, NULL, e1cp_dtb_a2s2_patch }, },
 	[CPU_TYPE_E8C2]	    = { { e8c2_dtb_a1s0_patch, e8c2_dtb_a1s1_patch },
 				{ NULL, NULL, e8c2_dtb_a2s2_patch }, },
 	[CPU_TYPE_E12C]	    = { { NULL, e16c_dtb_a1s1_patch },
@@ -223,8 +241,9 @@ static int __init e2k_of_disable_offline_iohubs(void)
 {
 	int ret = 0, i;
 	struct device_node *np;
-	char *dv[] = {"mcst,l-iommu", "mcst,ioapic", "mcst,l-pci",
-			 "mcst,ioepic", "mcst,e2k-iommu"};
+	char *dv[] = {     "mcst,l-pci", "mcst,l-msi",
+			 "mcst,l-iommu", "mcst,e2k-iommu",
+			  "mcst,ioapic", "mcst,ioepic"};
 
 	for (i = 0; i < ARRAY_SIZE(dv); i++) {
 		for_each_compatible_node(np, NULL, dv[i]) {
@@ -580,16 +599,10 @@ out:
 	return 0;
 }
 
-#ifdef CONFIG_CPU_E48C
-DTB_DECL(e48c_a2s2);
-#endif
 #ifdef CONFIG_CPU_E8V7
 DTB_DECL(e8v7_a2s2);
 #endif
 static struct e2k_dtb e2k_dtb[] __initdata = {
-#ifdef CONFIG_CPU_E48C
-	[CPU_TYPE_E48C]	    =  DTB(e48c_a2s2),
-#endif
 #ifdef CONFIG_CPU_E8V7
 	[CPU_TYPE_E8V7]	    =  DTB(e8v7_a2s2),
 #endif

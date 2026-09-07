@@ -2,42 +2,42 @@
     {
         "EventCode": "0x000",
         "EventName": "MEM_QUERY",
-        "BriefDescription": "0:00 количество обращений в память. Учитываются все значимые заявки (как синхронные, так и асинхронные от устройств CLW, TLU, AAU) с выхода DTLB (фаза Е2), успешно прошедшие трансляцию виртуального адреса (без \"exception\") или не требующие трансляции."
+        "BriefDescription": "0:00 6:60 количество обращений в память. Учитываются все значимые заявки (как синхронные, так и асинхронные от устройств CLW, TLU, AAU) с выхода DTLB (фаза Е2), успешно прошедшие трансляцию виртуального адреса (без \"exception\") или не требующие трансляции."
     },
     {
         "EventCode": "0x001",
         "EventName": "L1_ST_QUERY",
-        "BriefDescription": "0:01 количество обращений в L1 кэш по записи (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "0:01 6:61 количество обращений в L1 кэш по записи (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x002",
         "EventName": "L1_HIT",
-        "BriefDescription": "0:02 количество попаданий в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "0:02 6:62 количество попаданий в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x003",
         "EventName": "L1_LINE",
-        "BriefDescription": "0:03 количество заведений новой строки в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "0:03 6:63 количество заведений новой строки в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x404",
         "EventName": "L1_QUERY",
-        "BriefDescription": "0,1:04 количество обращений в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "0,1:04 6,7:64 количество обращений в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x005",
         "EventName": "L1_LD_QUERY",
-        "BriefDescription": "0:05 количество обращений в L1 кэш по считыванию (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "0:05 6:65 количество обращений в L1 кэш по считыванию (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x006",
         "EventName": "L1_MISS",
-        "BriefDescription": "0:06 количество промахов в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "0:06 6:66 количество промахов в L1 кэш (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x007",
         "EventName": "L1_PREFETCH",
-        "BriefDescription": "0:07 количество обращений в L1 кэш по предподкачке (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "0:07 6:67 количество обращений в L1 кэш по предподкачке (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x008",
@@ -266,8 +266,8 @@
     },
     {
         "EventCode": "0x04b",
-        "EventName": "L2_WBQ_WBC_BUSY",
-        "BriefDescription": "0:4b количество тактов полной занятости буфера wbq_wbcbuf (L2 внутренняя)"
+        "EventName": "L2_LD_QUERY_RESPONDED",
+        "BriefDescription": "0:4b 6:87 количество обращений в L2 кэш по чтению с заведением в L1 или ответом в RF"
     },
     {
         "EventCode": "0x04c",
@@ -292,37 +292,37 @@
     {
         "EventCode": "0x100",
         "EventName": "L1_LD_HIT",
-        "BriefDescription": "1:00 количество попаданий в L1 кэш по считыванию (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "1:00 7:60 количество попаданий в L1 кэш по считыванию (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x101",
         "EventName": "L1_ST_HIT",
-        "BriefDescription": "1:01 количество попаданий в L1 кэш по записи (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "1:01 7:61 количество попаданий в L1 кэш по записи (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x102",
         "EventName": "L1_LINE_MBF_FULL",
-        "BriefDescription": "1:02 количество отмен заведений в L1 кэш из-за mbf_full"
+        "BriefDescription": "1:02 7:62 количество отмен заведений в L1 кэш из-за mbf_full"
     },
     {
         "EventCode": "0x103",
         "EventName": "L1_ST_MISS",
-        "BriefDescription": "1:03 количество промахов в L1 кэш по записи (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "1:03 7:63 количество промахов в L1 кэш по записи (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x105",
         "EventName": "L1_LD_MISS",
-        "BriefDescription": "1:05 количество промахов в L1 кэш по считыванию (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "1:05 7:65 количество промахов в L1 кэш по считыванию (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x106",
         "EventName": "L1_PREFETCH_MISS",
-        "BriefDescription": "1:06 количество промахов в L1 кэш по предподкачке (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "1:06 7:66 количество промахов в L1 кэш по предподкачке (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x107",
         "EventName": "L1_PREFETCH_HIT",
-        "BriefDescription": "1:07 количество попаданий в L1 кэш по предподкачке (синхронные, а также асинхронные от CLW с выхода DTLB)"
+        "BriefDescription": "1:07 7:67 количество попаданий в L1 кэш по предподкачке (синхронные, а также асинхронные от CLW с выхода DTLB)"
     },
     {
         "EventCode": "0x108",
@@ -337,7 +337,7 @@
     {
         "EventCode": "0x10a",
         "EventName": "L1_HIT_HW_PREFETCH",
-        "BriefDescription": "1:0a количество попаданий в L1 кэш по аппаратной предподкачке"
+        "BriefDescription": "1:0a 7:0b количество попаданий в L1 кэш по аппаратной предподкачке"
     },
     {
         "EventCode": "0x110",
@@ -352,7 +352,7 @@
     {
         "EventCode": "0x112",
         "EventName": "TLU_BUSY",
-        "BriefDescription": "1:12 количество тактов занятости устройства TLU"
+        "BriefDescription": "1:12 количество тактов занятости устройства TLU, исключая запросы по аппаратной предподкачке DTLB"
     },
     {
         "EventCode": "0x113",
@@ -427,7 +427,7 @@
     {
         "EventCode": "0x122",
         "EventName": "DAM_BELL_STORE_CONFLICT",
-        "BriefDescription": "1:22 количество \"звонков\" (срабатываний предиката %MLOCK) в DAM по конфликту со store в одной команде, определяемое по 12 разрядам"
+        "BriefDescription": "1:22 количество \"звонков\" (срабатываний предиката %MLOCK) в DAM по конфликту со store в одной команде, определяемому по 12 разрядам"
     },
     {
         "EventCode": "0x123",
@@ -526,7 +526,7 @@
     },
     {
         "EventCode": "0x142",
-        "EventName": "L2_LINE_DISCARD",
+        "EventName": "L2_LINE_DISCARD_WRITEBACK",
         "BriefDescription": "1:42 количество вытеснений строки (writeback) из L2 кэша"
     },
     {
@@ -572,7 +572,7 @@
     {
         "EventCode": "0x14b",
         "EventName": "L2_SNOOPM_HIT",
-        "BriefDescription": "1:4b количество snoop-попаданий с выдачей модифицированных данных из L2 кэша"
+        "BriefDescription": "1:4b количество внешних snoop-попаданий с выдачей модифицированных данных из L2 кэша"
     },
     {
         "EventCode": "0x14d",
@@ -596,108 +596,108 @@
     },
     {
         "EventCode": "0x601",
-        "EventName": "STRIDED_OUTPUT_FILTERED",
-        "BriefDescription": "6:01 количество префетч-запросов strided-префетчера L1Pref, прошедших выходной фильтр L1Pref"
+        "EventName": "USTR_PREFETCH",
+        "BriefDescription": "6:01 количество префетч-запросов USTR-префетчера, прошедших выходной фильтр L1Pref"
     },
     {
         "EventCode": "0x602",
-        "EventName": "SPP_OUTPUT_FILTERED",
+        "EventName": "SPP_PREFETCH",
         "BriefDescription": "6:02 количество префетч-запросов SPP-префетчера, прошедших выходной фильтр L1Pref"
     },
     {
         "EventCode": "0x603",
-        "EventName": "STRIDED_P2_QUERY",
-        "BriefDescription": "6:03 количество значимых запросов на фазе P2 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P2_QUERY",
+        "BriefDescription": "6:03 количество значимых программных чтений на фазе P2 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x604",
-        "EventName": "STRIDED_P2_CANCEL",
-        "BriefDescription": "6:04 количество отмен запроса на фазе P2 конвейера strided-префетчера L1Pref"
+        "EventName": "L1PREF_QUERY",
+        "BriefDescription": "6:04 количество обращений по аппаратной предподкачке L1"
     },
     {
         "EventCode": "0x605",
-        "EventName": "STRIDED_P3_QUERY",
-        "BriefDescription": "6:05 количество значимых запросов на фазе P3 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P3_QUERY",
+        "BriefDescription": "6:05 количество значимых программных чтений на фазе P3 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x606",
-        "EventName": "STRIDED_P3_CANCEL",
-        "BriefDescription": "6:06 количество отмен запроса на фазе P3 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P3_CANCEL",
+        "BriefDescription": "6:06 количество отмен программного чтения на фазе P3 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x607",
-        "EventName": "STRIDED_P2_CANCEL_COND",
-        "BriefDescription": "6:07 количество появлений условия, по которому требуется отменить значимый запрос на фазе P2 конвейера stided-префетчера L1Pref"
+        "EventName": "USTR_P2_CANCEL_COND",
+        "BriefDescription": "6:07 количество появлений условия, по которому требуется отменить значимое программное чтение на фазе P2 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x608",
-        "EventName": "STRIDED_P3_P1_BYPASS",
-        "BriefDescription": "6:08 количество байпасов P3 -> P1 - случай, когда запросы на стадиях P3 и P1 принадлежат одному потоку strided-префетчера L1Pref"
+        "EventName": "USTR_P3_P1_BYPASS",
+        "BriefDescription": "6:08 количество байпасов P3 -> P1 - случай, когда программные чтения на стадиях P3 и P1 принадлежат одному потоку USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x609",
-        "EventName": "STRIDED_P3_P2_BYPASS",
-        "BriefDescription": "6:09 количество байпасов P3 -> P2 - случай, когда запросы на стадиях P3 и P2 принадлежат одному потоку strided-префетчера L1Pref"
+        "EventName": "USTR_P3_P2_BYPASS",
+        "BriefDescription": "6:09 количество байпасов P3 -> P2 - случай, когда программные чтения на стадиях P3 и P2 принадлежат одному потоку USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x60a",
-        "EventName": "STRIDED_P0_RPT_HIT",
-        "BriefDescription": "6:0a количество попаданий запроса на фазе P0 в значимую строку (значимый поток) таблицы RPT strided-префетчера L1Pref"
+        "EventName": "USTR_P0_RPT_HIT",
+        "BriefDescription": "6:0a количество попаданий программного чтения на фазе P0 в значимую строку (значимый поток) таблицы RPT USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x60b",
-        "EventName": "STRIDED_P1_RPT_HIT_BEFORE_BYPASS",
-        "BriefDescription": "6:0b количество попаданий запроса на фазе P1 в значимую строку (значимый поток) таблицы RPT strided-префетчера L1Pref до применения байпассирования и фильтрации"
+        "EventName": "USTR_P1_RPT_HIT_BEFORE_BYPASS",
+        "BriefDescription": "6:0b количество попаданий программного чтения на фазе P1 в значимую строку (значимый поток) таблицы RPT USTR-префетчера L1Pref до применения байпассирования и фильтрации"
     },
     {
         "EventCode": "0x60c",
-        "EventName": "STRIDED_P1_RPT_HIT_AFTER_BYPASS",
-        "BriefDescription": "6:0c количество попаданий запроса на фазе P1 в значимую строку (значимый поток) таблицы RPT strided-префетчера L1Pref после применения байпассирования и фильтрации"
+        "EventName": "USTR_P1_RPT_HIT_AFTER_BYPASS",
+        "BriefDescription": "6:0c количество попаданий программного чтения на фазе P1 в значимую строку (значимый поток) таблицы RPT USTR-префетчера L1Pref после применения байпассирования и фильтрации"
     },
     {
         "EventCode": "0x60d",
-        "EventName": "STRIDED_P3_RPT_REMOVE",
-        "BriefDescription": "6:0d количество принятых решений на фазе P3 об удалении потока из таблицы RPT strided-префетчера L1Pref"
+        "EventName": "USTR_P3_RPT_REMOVE",
+        "BriefDescription": "6:0d количество принятых решений на фазе P3 об удалении потока из таблицы RPT USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x60e",
-        "EventName": "STRIDED_P3_RPT_ALLOC",
-        "BriefDescription": "6:0e количество принятых решений на фазе P3 о размещении нового потока в таблице RPT strided-префетчера L1Pref"
+        "EventName": "USTR_P3_RPT_ALLOC",
+        "BriefDescription": "6:0e количество принятых решений на фазе P3 о размещении нового потока в таблице RPT USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x60f",
-        "EventName": "STRIDED_RPT_RSV_FINISH",
-        "BriefDescription": "6:0f количество срабатываний условия окончания резервирования потока (строки таблицы RPT) или факт удаления потока, который резервировался, для strided-префетчера L1Pref"
+        "EventName": "USTR_RPT_UNLOCK",
+        "BriefDescription": "6:0f количество срабатываний условия окончания резервирования потока (строки таблицы RPT) или факт удаления потока, который резервировался, для USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x610",
-        "EventName": "STRIDED_P2_SKIP_BAD",
-        "BriefDescription": "6:10 количество событий пропуска запроса из-за несоответствия шаблону потока на фазе P2 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P2_SKIP_BAD",
+        "BriefDescription": "6:10 количество событий пропуска запроса потока из-за несоответствия шаблону потока на фазе P2 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x611",
-        "EventName": "STRIDED_RPT_TRAINED",
-        "BriefDescription": "6:11 количество успешных обучений потоков strided-префетчера L1Pref"
+        "EventName": "USTR_RPT_TRAINED",
+        "BriefDescription": "6:11 количество успешных обучений потоков USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x612",
-        "EventName": "STRIDED_P3_VALID_PREDICTION",
-        "BriefDescription": "6:12 количество префетч-запросов (значимых предсказаний) на фазе P3 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P3_PREFETCH",
+        "BriefDescription": "6:12 количество префетч-запросов (значимых предсказаний) на фазе P3 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x613",
         "EventName": "SPP_INPUT",
-        "BriefDescription": "6:13 количество входных запросов SPP-префетчера L1Pref"
+        "BriefDescription": "6:13 количество программных чтений, поступающих в SPP-префетчер L1Pref"
     },
     {
         "EventCode": "0x614",
-        "EventName": "L1PREF_INPUT_ST",
-        "BriefDescription": "6:14 количество попаданий входных запросов в таблицу Signature Table SPP-префетчера L1Pref"
+        "EventName": "SPP_INPUT_ST",
+        "BriefDescription": "6:14 количество попаданий программных чтений в таблицу Signature Table SPP-префетчера L1Pref"
     },
     {
         "EventCode": "0x615",
-        "EventName": "L1PREF_INPUT_ST_NEGDELTA",
-        "BriefDescription": "6:15 количество попаданий входных запросов в таблицу Signature Table SPP-префетчера L1Pref с отрицательной дельтой"
+        "EventName": "SPP_INPUT_ST_NEG_DELTA",
+        "BriefDescription": "6:15 количество попаданий программных чтений в таблицу Signature Table SPP-префетчера L1Pref с отрицательной дельтой"
     },
     {
         "EventCode": "0x616",
@@ -732,156 +732,206 @@
     {
         "EventCode": "0x61c",
         "EventName": "SPP_INPUT_CANCEL_WEIGHT",
-        "BriefDescription": "6:1c количество отмен входных запросов при снижении общего веса пути ниже порогового для SPP-префетчера L1Pref"
+        "BriefDescription": "6:1c количество отмен входных программных чтений при снижении общего веса пути ниже порогового для SPP-префетчера L1Pref"
     },
     {
         "EventCode": "0x61d",
         "EventName": "SPP_THROTTLE_LOW_QUALITY",
-        "BriefDescription": "6:1d количество интервалов механизма SPP throttling со снижением качества префетчей для SPP-префетчера L1Pref"
+        "BriefDescription": "6:1d количество интервалов механизма SPP throttling со снижением качества префетч-запросов для SPP-префетчера L1Pref"
+    },
+    {
+        "EventCode": "0x61e",
+        "EventName": "TLBPREF_HIT",
+        "BriefDescription": "6:1e количество попаданий в Prefetch Buffer блока TLBPref"
+    },
+    {
+        "EventCode": "0x61f",
+        "EventName": "TLBPREF_QUERY_TLU",
+        "BriefDescription": "6:1f количество запросов на предсказание из TLU в блок TLBPref"
+    },
+    {
+        "EventCode": "0x620",
+        "EventName": "TLBPREF_PREFETCH",
+        "BriefDescription": "6:20 количество префетч-запросов от блока TLBPref"
+    },
+    {
+        "EventCode": "0x621",
+        "EventName": "TLBPREF_SEQ_H_THREADS_MISS",
+        "BriefDescription": "6:21 количество промахов в буфер потоков префетчера Seq_H блока TLBPref"
+    },
+    {
+        "EventCode": "0x622",
+        "EventName": "TLBPREF_SEQ_H_HISTORY_MISS",
+        "BriefDescription": "6:22 количество промахов в шкале истории префетчера Seq_H блока TLBPref"
+    },
+    {
+        "EventCode": "0x680",
+        "EventName": "L2_WBQ_WBC_BUSY",
+        "BriefDescription": "6:80 количество тактов полной занятости буфера wbq_wbcbuf (L2 внутренняя)"
+    },
+    {
+        "EventCode": "0x681",
+        "EventName": "L2_MISS_L2PREF",
+        "BriefDescription": "6:81 количество промахов в L2 кэш для запросов от префетчера L2Pref"
+    },
+    {
+        "EventCode": "0x683",
+        "EventName": "L2_HIT_PREF",
+        "BriefDescription": "6:83 количество попаданий в L2 кэш в строки, помеченные pref-битом (строки, заведённые запросами префетчера L2Pref, к которым не было других обращений после заведения)"
+    },
+    {
+        "EventCode": "0x684",
+        "EventName": "L2PREF_ENABLED",
+        "BriefDescription": "6:84 количество тактов, когда префетчер L2Pref был включён"
+    },
+    {
+        "EventCode": "0x685",
+        "EventName": "L2_QUERY_L2PREF_NEG_OFFSET",
+        "BriefDescription": "6:85 количество запросов в L2 кэш от префетчера L2Pref с отрицательным адресным смещением"
+    },
+    {
+        "EventCode": "0x686",
+        "EventName": "L2_QUERY_L2PREF_BAD",
+        "BriefDescription": "6:86 количество \"плохих\" запросов в L2 кэш для префетчера L2Pref (промахи в L2 по \"тестовым\" запросам или попадание в строки, не помеченные битом pref)"
     },
     {
         "EventCode": "0x700",
         "EventName": "L1PREF_INPUT_LOST",
-        "BriefDescription": "7:00 количество потерянных запросов для входной очереди L1Pref"
+        "BriefDescription": "7:00 количество программных чтений, потерянных из-за переполнения входной очереди L1Pref"
     },
     {
         "EventCode": "0x701",
         "EventName": "L1PREF_OUTPUT_LOST",
-        "BriefDescription": "7:01 количество потерянных запросов для выходных очередей L1Pref"
+        "BriefDescription": "7:01 количество потерянных префетч-запросов для выходных очередей L1Pref"
     },
     {
         "EventCode": "0x702",
-        "EventName": "L1PREF_INPUT_STRIDED",
-        "BriefDescription": "7:02 количество входных запросов L1Pref с попаданием в L1 кэш в строку с признаком подкачки strided-префетчером L1Pref"
+        "EventName": "L1PREF_INPUT_USTR",
+        "BriefDescription": "7:02 количество программных чтений, получивших попадание в кэш-строку с p-битом от подкачки по префетч-запросу USTR-префетчера. Подсчитываются программные чтения, попавшие на интерфейс L1Pref после входной очереди"
     },
     {
         "EventCode": "0x703",
         "EventName": "L1PREF_INPUT_SPP",
-        "BriefDescription": "7:03 количество входных запросов L1Pref с попаданием в L1 кэш в строку с признаком подкачки SPP-префетчером L1Pref"
+        "BriefDescription": "7:03 количество программных чтений, получивших попадание в кэш-строку с p-битом от подкачки по префетч-запросу SPP-префетчера. Подсчитываются программные чтения, попавшие на интерфейс L1Pref после входной очереди"
     },
     {
         "EventCode": "0x704",
         "EventName": "L1PREF_INPUT_MBF",
-        "BriefDescription": "7:04 количество входных запросов L1Pref с попаданием в строку L1 MBF"
+        "BriefDescription": "7:04 количество программных чтений с признаком попадания в строку L1 MBF. Подсчитываются программные чтения, попавшие на интерфейс L1Pref после входной очереди"
     },
     {
         "EventCode": "0x705",
-        "EventName": "L1PREF_INPUT_MBF_STRIDED",
-        "BriefDescription": "7:05 количество входных запросов L1Pref с попаданием в строку L1 MBF с признаком подкачки strided-префетчером L1Pref"
+        "EventName": "L1PREF_INPUT_MBF_USTR",
+        "BriefDescription": "7:05 количество программных чтений с признаком попадания в строку L1 MBF и p-битом от подкачки по префетч-запросу USTR-префетчера. Подсчитываются программные чтения, попавшие на интерфейс L1Pref после входной очереди"
     },
     {
         "EventCode": "0x706",
         "EventName": "L1PREF_INPUT_MBF_SPP",
-        "BriefDescription": "7:06 количество входных запросов L1Pref с попаданием в строку L1 MBF с признаком подкачки SPP-префетчером L1Pref"
+        "BriefDescription": "7:06 количество программных чтений с признаком попадания в строку L1 MBF и p-битом от подкачки по префетч-запросу SPP-префетчера. Подсчитываются программные чтения, попавшие на интерфейс L1Pref после входной очереди"
     },
     {
         "EventCode": "0x707",
-        "EventName": "L1PREF_L1_EVICT_STRIDED",
-        "BriefDescription": "7:07 количество вытеснений из L1 кэша строк с признаком подкачки strided-префетчером L1Pref"
+        "EventName": "L1PREF_L1_EVICT_USTR",
+        "BriefDescription": "7:07 количество вытеснений из L1 кэша строк с p-битом, проставленным от подкачки по префетч-запросу USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x708",
         "EventName": "L1PREF_L1_EVICT_SPP",
-        "BriefDescription": "7:08 количество вытеснений из L1 кэша строк с признаком подкачки SPP-префетчером L1Pref"
+        "BriefDescription": "7:08 количество вытеснений из L1 кэша строк с p-битом, проставленным от подкачки по префетч-запросу SPP-префетчера L1Pref"
     },
     {
         "EventCode": "0x709",
-        "EventName": "STRIDED_OUTPUT_FILTERED_DYN",
-        "BriefDescription": "7:09 количество префетч-запросов strided-префетчера L1Pref с учётом выходного фильтра и динамического отключения L1Pref"
+        "EventName": "L1PREF_L1_HIT",
+        "BriefDescription": "7:09 количество программных чтений, получивших попадание в кэш-строку с p-битом от подкачки по префетч-запросу любого типа (USTR- или SPP-префетчера). Подсчитываются программные чтения, попавшие на интерфейс L1Pref после входной очереди"
     },
     {
         "EventCode": "0x70a",
-        "EventName": "SPP_OUTPUT_FILTERED_DYN",
-        "BriefDescription": "7:0a количество префетч-запросов SPP-префетчера с учётом выходного фильтра и динамического отключения L1Pref"
-    },
-    {
-        "EventCode": "0x70b",
-        "EventName": "STRIDED_P0_QUERY",
-        "BriefDescription": "7:0b количество значимых запросов на фазе P0 конвейера strided-префетчера L1Pref"
+        "EventName": "L1PREF_L1_EVICT",
+        "BriefDescription": "7:0a количество вытеснений из L1 кэша строк с p-битом, проставленным от подкачки по аппаратному префетч-запросу любого типа (USTR- или SPP-префетчера L1Pref)"
     },
     {
         "EventCode": "0x70c",
-        "EventName": "STRIDED_P0_CANCEL",
-        "BriefDescription": "7:0c количество отмен значимого запроса после фильтрации на фазе P0 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_OUTPUT",
+        "BriefDescription": "7:0c количество выданных префетч-запросов USTR-префетчера L1Pref с учётом выходного фильтра и динамического отключения L1Pref"
     },
     {
         "EventCode": "0x70d",
-        "EventName": "STRIDED_P1_QUERY",
-        "BriefDescription": "7:0d количество значимых запросов на фазе P1 конвейера strided-префетчера L1Pref"
+        "EventName": "SPP_OUTPUT",
+        "BriefDescription": "7:0d количество выданных префетч-запросов SPP-префетчера L1Pref с учётом выходного фильтра и динамического отключения L1Pref"
     },
     {
         "EventCode": "0x70e",
-        "EventName": "STRIDED_P1_CANCEL",
-        "BriefDescription": "7:0e количество отмен значимого запроса после фильтрации на фазе P1 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P1_CANCEL",
+        "BriefDescription": "7:0e количество отмен значимого программного чтения после LAM-фильтрации на фазе P1 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x70f",
-        "EventName": "STRIDED_P4_P1_BYPASS",
-        "BriefDescription": "7:0f количество байпасов P4 -> P1 - случай, когда запросы на стадиях P4 и P1 принадлежат одному потоку strided-префетчера L1Pref"
+        "EventName": "USTR_P4_P1_BYPASS",
+        "BriefDescription": "7:0f количество байпасов P4 -> P1 — случай, когда программные чтения на стадиях P4 и P1 принадлежат одному потоку USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x710",
-        "EventName": "STRIDED_P2_RPT_HIT_BEFORE_BYPASS",
-        "BriefDescription": "7:10 количество попаданий запроса на фазе P2 в значимую строку (значимый поток) таблицы RPT strided-префетчера L1Pref до байпассирования"
+        "EventName": "USTR_P2_RPT_HIT_BEFORE_BYPASS",
+        "BriefDescription": "7:10 количество попаданий программного чтения на фазе P2 в значимую строку (значимый поток) таблицы RPT USTR-префетчера L1Pref до байпассирования"
     },
     {
         "EventCode": "0x711",
-        "EventName": "STRIDED_P2_RPT_HIT_AFTER_BYPASS",
-        "BriefDescription": "7:11 количество попаданий запроса на фазе P2 в значимую строку (значимый поток) таблицы RPT strided-префетчера L1Pref после байпассирования"
+        "EventName": "USTR_P2_RPT_HIT_AFTER_BYPASS",
+        "BriefDescription": "7:11 количество попаданий программного чтения на фазе P2 в значимую строку (значимый поток) таблицы RPT USTR-префетчера L1Pref после байпассирования"
     },
     {
         "EventCode": "0x712",
-        "EventName": "STRIDED_P2_RPT_HIT",
-        "BriefDescription": "7:12 количество попаданий запроса на фазе P2 в значимую строку (значимый поток) таблицы RPT strided-префетчера L1Pref"
+        "EventName": "USTR_P2_RPT_HIT",
+        "BriefDescription": "7:12 количество попаданий программного чтения на фазе P2 в значимую строку (значимый поток) таблицы RPT USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x713",
-        "EventName": "STRIDED_P3_RPT_ALLOC_CANCELLED",
-        "BriefDescription": "7:13 количество отмен заведения потока на фазе P3 конвейера strided-префетчера L1Pref по причине запрета заведения"
+        "EventName": "USTR_P3_RPT_ALLOC_CANCELLED",
+        "BriefDescription": "7:13 количество отмен заведения потока на фазе P3 конвейера USTR-префетчера L1Pref по причине запрета заведения"
     },
     {
         "EventCode": "0x714",
-        "EventName": "STRIDED_P3_RPT_EVICT",
-        "BriefDescription": "7:14 количество вытеснений значимого потока из таблицы RPT при размещении нового потока на фазе P3 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P3_RPT_EVICT",
+        "BriefDescription": "7:14 количество вытеснений значимого потока из таблицы RPT при размещении нового потока на фазе P3 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x715",
-        "EventName": "STRIDED_P3_RPT_EVICT_COLD",
-        "BriefDescription": "7:15 количество вытеснений \"холодного\" значимого потока из таблицы RPT при размещении нового потока на фазе P3 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P3_RPT_EVICT_COLD",
+        "BriefDescription": "7:15 количество вытеснений \"холодного\" значимого потока из таблицы RPT при размещении нового потока на фазе P3 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x716",
-        "EventName": "STRIDED_P3_RPT_EVICT_WARM",
-        "BriefDescription": "7:16 количество вытеснений \"тёплого\" значимого потока из таблицы RPT при размещении нового потока на фазе P3 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P3_RPT_EVICT_WARM",
+        "BriefDescription": "7:16 количество вытеснений \"теплого\" значимого потока из таблицы RPT при размещении нового потока на фазе P3 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x717",
-        "EventName": "STRIDED_P2_SKIP_BAD_OVERFLOW",
-        "BriefDescription": "7:17 количество ситуаций превышения предела счетчика пропуска запросов (количество удалений потока по причине несоответствия шаблону) на фазе P2 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P2_SKIP_BAD_OVERFLOW",
+        "BriefDescription": "7:17 количество ситуаций превышения предела счётчика пропуска запросов (количество удалений потока по причине несоответствия шаблону) на фазе P2 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x718",
-        "EventName": "STRIDED_P3_UNALIGNED",
-        "BriefDescription": "7:18 количество невыровненных префетчей на фазе P3 конвейера strided-префетчера L1Pref"
+        "EventName": "USTR_P3_UNALIGNED",
+        "BriefDescription": "7:18 количество невыровненных префетч-запросов на фазе P3 конвейера USTR-префетчера L1Pref"
     },
     {
         "EventCode": "0x719",
         "EventName": "SPP_INPUT_SAME_ADDRESS",
-        "BriefDescription": "7:19 количество входных запросов SPP-префетчера L1Pref, отфильтрованных на входе по совпадению адреса кэш-строки L1"
+        "BriefDescription": "7:19 количество программных чтений, попавших в SPP-префетчер L1Pref после фильтрации на входе по совпадению адреса кэш-строки L1"
     },
     {
         "EventCode": "0x71a",
-        "EventName": "SPP_INPUT_CANCELLED_FROM_STRIDED_P1",
-        "BriefDescription": "7:1a количество входных запросов SPP-префетчера L1Pref, отменённых на фазе p1 попаданием в strided-префетчер L1Pref"
+        "EventName": "SPP_INPUT_CANCELLED_FROM_USTR_P1",
+        "BriefDescription": "7:1a количество программных чтений, отмененных в SPP-префетчере L1Pref на фазе p1 попаданием в USTR-префетчер L1Pref"
     },
     {
         "EventCode": "0x71b",
-        "EventName": "SPP_INPUT_CANCELLED_FROM_STRIDED_P2",
-        "BriefDescription": "7:1b количество входных запросов SPP-префетчера L1Pref, отменённых на фазе p2 попаданием в strided-префетчер L1Pref"
+        "EventName": "SPP_INPUT_CANCELLED_FROM_USTR_P2",
+        "BriefDescription": "7:1b количество программных чтений, отмененных в SPP-префетчере L1Pref на фазе p2 попаданием в USTR-префетчер L1Pref"
     },
     {
         "EventCode": "0x71c",
-        "EventName": "SPP_OUTPUT",
+        "EventName": "SPP_OUTPUT_UNFILTERED",
         "BriefDescription": "7:1c количество префетч-запросов SPP-префетчера без учёта выходного фильтра и динамического отключения L1Pref"
     },
     {
@@ -911,13 +961,13 @@
     },
     {
         "EventCode": "0x722",
-        "EventName": "SPP_OUTPUT_NEGDELTA",
+        "EventName": "SPP_OUTPUT_UNFILTERED_NEG_DELTA",
         "BriefDescription": "7:22 количество префетч-запросов SPP-префетчера с отрицательной дельтой без учёта выходного фильтра и динамического отключения L1Pref"
     },
     {
         "EventCode": "0x723",
         "EventName": "SPP_PT_DELTA_HIT",
-        "BriefDescription": "7:23 количество попаданий в одну из дельт строки таблицы Pattern Table SPP-префетчера L1Pref"
+        "BriefDescription": "7:23 количество попаданий в одну из дельт строки таблицы Pattern Table SPP-префетчера LPref"
     },
     {
         "EventCode": "0x724",
@@ -1012,12 +1062,132 @@
     {
         "EventCode": "0x736",
         "EventName": "SPP_THROTTLE_HIGH_QUALITY",
-        "BriefDescription": "7:36 количество интервалов механизма SPP throttling с повышением качества префетчей для SPP-префетчера L1Pref"
+        "BriefDescription": "7:36 количество интервалов механизма SPP throttling с повышением качества префетч-запросов для SPP-префетчера L1Pref"
     },
     {
         "EventCode": "0x737",
-        "EventName": "",
-        "BriefDescription": "7:37 количество интервалов механизма SPP throttling с ненулевым счётчиком деградации качества префетчей для SPP-префетчера L1Pref"
+        "EventName": "SPP_THROTTLE_DEGRADATION",
+        "BriefDescription": "7:37 количество интервалов механизма SPP throttling с ненулевым счётчиком деградации качества префетч-запросов для SPP-префетчера L1Pref"
+    },
+    {
+        "EventCode": "0x738",
+        "EventName": "TLBPREF_QUERY_PB",
+        "BriefDescription": "7:38 количество запросов на предсказание из Prefetch Buffer блока TLBPref на вход блока TLBPref"
+    },
+    {
+        "EventCode": "0x739",
+        "EventName": "TLBPREF_SEQ_H_PREFETCH",
+        "BriefDescription": "7:39 количество префетч-запросов префетчера Seq_H блока TLBPref"
+    },
+    {
+        "EventCode": "0x73a",
+        "EventName": "TLBPREF_SEQ_H_HISTORY_QUERY",
+        "BriefDescription": "7:3a количество запросов поиска по шкале истории префетчера Seq_H блока TLBPref"
+    },
+    {
+        "EventCode": "0x73b",
+        "EventName": "TLBPREF_SEQ_H_HISTORY_CLEAR",
+        "BriefDescription": "7:3b количество событий очистки шкалы истории префетчера Seq_H блока TLBPref"
+    },
+    {
+        "EventCode": "0x73c",
+        "EventName": "TLBPREF_ASP_PREFETCH",
+        "BriefDescription": "7:3c количество префетч-запросов префетчера ASP блока TLBPref"
+    },
+    {
+        "EventCode": "0x73d",
+        "EventName": "TLBPREF_DISTANCE_PREFETCH",
+        "BriefDescription": "7:3d количество префетч-запросов префетчера Distance блока TLBPref"
+    },
+    {
+        "EventCode": "0x73e",
+        "EventName": "USTR_P0_QUERY",
+        "BriefDescription": "7:3e количество значимых программных чтений на фазе P0 конвейера USTR-префетчера L1Pref"
+    },
+    {
+        "EventCode": "0x73f",
+        "EventName": "USTR_P1_QUERY",
+        "BriefDescription": "7:3f количество значимых программных чтений на фазе P1 конвейера USTR-префетчера L1Pref"
+    },
+    {
+        "EventCode": "0x780",
+        "EventName": "L2_LINE_DISCARD_PREF",
+        "BriefDescription": "7:80 количество вытеснений из L2 кэша строк, помеченных битом pref (строк, заведённых запросами префетчера L2Pref, к которым не было других обращений после заведения)"
+    },
+    {
+        "EventCode": "0x781",
+        "EventName": "L2_HIT_PREF_WAIT",
+        "BriefDescription": "7:81 количество \"поздних\" попаданий в L2 кэш по строкам, заведённым префетчером L2 - попадание в состоянии wait с пометкой битом pref"
+    },
+    {
+        "EventCode": "0x783",
+        "EventName": "L2_PREF_SWITCH_OFFSET",
+        "BriefDescription": "7:83 количество событий переключения адресного смещения или знака адресного смещения префетчера L2"
+    },
+    {
+        "EventCode": "0x784",
+        "EventName": "L2_QUERY_L2PREF_OFFSET_1",
+        "BriefDescription": "7:84 количество запросов в L2 кэш от префетчера L2Pref с адресным смещением \"1\" без учёта знака"
+    },
+    {
+        "EventCode": "0x785",
+        "EventName": "L2PREF_DISABLED",
+        "BriefDescription": "7:85 количество тактов, когда префетчер L2Pref был выключен"
+    },
+    {
+        "EventCode": "0x786",
+        "EventName": "L2_LD_MISS_RESPONDED",
+        "BriefDescription": "7:86 количество промахов в L2 кэш по чтению с заведением в L1 или ответом в RF "
+    },
+    {
+        "EventCode": "0xc0040",
+        "EventName": "SDTLB_QUERY",
+        "BriefDescription": "0xc0:40 количество обращений в SDTLB"
+    },
+    {
+        "EventCode": "0xc0041",
+        "EventName": "SDTLB_HIT",
+        "BriefDescription": "0xc0:41 количество попаданий в SDTLB"
+    },
+    {
+        "EventCode": "0xc0042",
+        "EventName": "SDTLB_HIT_4K",
+        "BriefDescription": "0xc0:42 количество попаданий в 4 KB страницы в SDTLB"
+    },
+    {
+        "EventCode": "0xc0043",
+        "EventName": "SDTLB_HIT_2M",
+        "BriefDescription": "0xc0:43 количество попаданий в 2 MB страницы в SDTLB"
+    },
+    {
+        "EventCode": "0xc0044",
+        "EventName": "SDTLB_HIT_1G",
+        "BriefDescription": "0xc0:44 количество попаданий в 1 GB страницы в SDTLB"
+    },
+    {
+        "EventCode": "0xc0045",
+        "EventName": "SDTLB_ALLOC",
+        "BriefDescription": "0xc0:45 количество заведений новой страницы в SDTLB"
+    },
+    {
+        "EventCode": "0xc0046",
+        "EventName": "SDTLB_ALLOC_4K",
+        "BriefDescription": "0xc0:46 количество заведений новой 4 KB страницы в SDTLB"
+    },
+    {
+        "EventCode": "0xc0047",
+        "EventName": "SDTLB_ALLOC_2M",
+        "BriefDescription": "0xc0:47 количество заведений новой 2 MB страницы в SDTLB"
+    },
+    {
+        "EventCode": "0xc0048",
+        "EventName": "SDTLB_ALLOC_1G",
+        "BriefDescription": "0xc0:48 количество заведений новой 1 GB страницы в SDTLB"
+    },
+    {
+        "EventCode": "0xc0082",
+        "EventName": "L2_QUERY_L2PREF",
+        "BriefDescription": "0xc0:82 количество запросов в L2 кэш от префетчера L2Pref"
     },
     {
         "EventCode": "0x300000",
@@ -1066,13 +1236,13 @@
     },
     {
         "EventCode": "0xf00011",
-        "EventName": "BUB_E2",
-        "BriefDescription": "0xf0:11 количество запусков МПК с фазы E3 (см. событие 2f для количества тактов)"
+        "EventName": "BUB_E3_RETRY",
+        "BriefDescription": "0xf0:11 количество запусков МПК с фазы E3 (см. событие ticks_e3_retry для количества тактов)"
     },
     {
         "EventCode": "0x700013",
         "EventName": "EXEC",
-        "BriefDescription": "0x70:13 количество выполненных команд"
+        "BriefDescription": "0x70:13 количество выполненных программных команд"
     },
     {
         "EventCode": "0xb00015",
@@ -1087,12 +1257,12 @@
     {
         "EventCode": "0x300017",
         "EventName": "RBRANCH",
-        "BriefDescription": "0x30:17 количество выполненных переходов по recovery branch"
+        "BriefDescription": "0x30:17 количество переходов по recovery branch"
     },
     {
         "EventCode": "0xf00018",
         "EventName": "IB_NO_COMMAND",
-        "BriefDescription": "0xf0:18 количество тактов отсутствия команд, влияющего на производительность, то есть не скрытого блокировками конвейера"
+        "BriefDescription": "0xf0:18 количество тактов отсутствия команд в IB, влияющего на производительность, то есть не скрытого блокировками конвейера"
     },
     {
         "EventCode": "0xf00019",
@@ -1102,11 +1272,11 @@
     {
         "EventCode": "0x30001a",
         "EventName": "BUB_B_NOP",
-        "BriefDescription": "0x30:1a количество тактов блокировки фазы B из-за операций NOP (при отсутствии верхних блокировок конвейера)"
+        "BriefDescription": "0x30:1a количество тактов блокировки фазы B из-за операций NOP с ненулевым аргументом (при отсутствии верхних блокировок конвейера)"
     },
     {
         "EventCode": "0x70001b",
-        "EventName": "BUB_B_E2_BLOCKS_RET",
+        "EventName": "BUB_B_E3_BLOCKS_RET",
         "BriefDescription": "0x70:1b количество тактов блокировки фазы B из-за того, что проц. переход ждет ухода пред. возврата из фазы E3 (при отсутствии верхних блокировок конвейера)"
     },
     {
@@ -1191,43 +1361,43 @@
     },
     {
         "EventCode": "0xf0002f",
-        "EventName": "TICKS_E3",
-        "BriefDescription": "0xf0:2f количество тактов повтора команд с фазы E3"
+        "EventName": "TICKS_E3_RETRY",
+        "BriefDescription": "0xf0:2f количество тактов, потерянных в результате механизма повтора команд с фазы E3"
     },
     {
         "EventCode": "0xf00030",
         "EventName": "BUB_E3_MEM",
-        "BriefDescription": "0xf0:30 количество запусков МПК с фазы E3 из-за того, что нет операндов alu (сумма bub_e2_alu[0-5]_mem, чтение из памяти в т.ч. mova)"
+        "BriefDescription": "0xf0:30 количество запусков МПК с фазы E3 из-за того, что нет операндов alu из памяти, включая MOVA (сумма bub_e3_alu[0-5]_mem)"
     },
     {
         "EventCode": "0x300031",
         "EventName": "BUB_E3_ALU0_MEM",
-        "BriefDescription": "0x30:31 количество запусков МПК с фазы E3 из-за того, что нет операндов alu0 из памяти"
+        "BriefDescription": "0x30:31 количество запусков МПК с фазы E3 из-за того, что нет операндов alu0 из памяти, включая MOVA"
     },
     {
         "EventCode": "0xf00032",
         "EventName": "BUB_E3_ALU1_MEM",
-        "BriefDescription": "0xf0:32 количество запусков МПК с фазы E3 из-за того, что нет операндов alu1 из памяти"
+        "BriefDescription": "0xf0:32 количество запусков МПК с фазы E3 из-за того, что нет операндов alu1 из памяти, включая MOVA"
     },
     {
         "EventCode": "0x300033",
         "EventName": "BUB_E3_ALU2_MEM",
-        "BriefDescription": "0x30:33 количество запусков МПК с фазы E3 из-за того, что нет операндов alu2 из памяти"
+        "BriefDescription": "0x30:33 количество запусков МПК с фазы E3 из-за того, что нет операндов alu2 из памяти, включая MOVA"
     },
     {
         "EventCode": "0xf00034",
         "EventName": "BUB_E3_ALU3_MEM",
-        "BriefDescription": "0xf0:34 количество запусков МПК с фазы E3 из-за того, что нет операндов alu3 из памяти"
+        "BriefDescription": "0xf0:34 количество запусков МПК с фазы E3 из-за того, что нет операндов alu3 из памяти, включая MOVA"
     },
     {
         "EventCode": "0x300035",
         "EventName": "BUB_E3_ALU4_MEM",
-        "BriefDescription": "0x30:35 количество запусков МПК с фазы E3 из-за того, что нет операндов alu4 из памяти"
+        "BriefDescription": "0x30:35 количество запусков МПК с фазы E3 из-за того, что нет операндов alu4 из памяти, включая MOVA"
     },
     {
         "EventCode": "0xf00036",
         "EventName": "BUB_E3_ALU5_MEM",
-        "BriefDescription": "0xf0:36 количество запусков МПК с фазы E3 из-за того, что нет операндов alu5 из памяти"
+        "BriefDescription": "0xf0:36 количество запусков МПК с фазы E3 из-за того, что нет операндов alu5 из памяти, включая MOVA"
     },
     {
         "EventCode": "0x300037",
@@ -1282,7 +1452,7 @@
     {
         "EventCode": "0x300043",
         "EventName": "BUB_E3_ALU012",
-        "BriefDescription": "0x30:43 количество запусков МПК с фазы E3, инициированных alu0 или alu1 или alu2"
+        "BriefDescription": "0x30:43 количество запусков МПК с фазы E3, инициированных alu0 или alu1 или alu2 по причинам, отличным от неготовности операндов"
     },
     {
         "EventCode": "0x700044",
@@ -1337,7 +1507,7 @@
     {
         "EventCode": "0xf00053",
         "EventName": "BUB_E3_ALU345",
-        "BriefDescription": "0xf0:53 количество запусков МПК с фазы E3, инициированных alu3 или alu4 или alu5"
+        "BriefDescription": "0xf0:53 количество запусков МПК с фазы E3, инициированных alu3 или alu4 или alu5 по причинам, отличным от неготовности операндов"
     },
     {
         "EventCode": "0x300054",
@@ -1397,7 +1567,7 @@
     {
         "EventCode": "0x300064",
         "EventName": "BUB_E3_CNTXT_PIPELINED",
-        "BriefDescription": "0x30:64 количество запусков МПК с фазы E3 из-за того, что считывание контекста ожидает окончания считывания предыдущего"
+        "BriefDescription": "0x30:64 количество запусков МПК с фазы E3 из-за того, что считывание контекста ожидает окончания считывания предыдущего (невостребованного) контекста"
     },
     {
         "EventCode": "0x300065",
@@ -1451,8 +1621,43 @@
     },
     {
         "EventCode": "0x300075",
-        "EventName": "TICKS_HIDDEN_TRAPS_UNMASKABLE",
-        "BriefDescription": "0x30:75 количество блокировок дешифрации, добавленных механизмом адаптивного замедления дешифрации CU_PMGR0"
+        "EventName": "TICKS_CU_PMGR0",
+        "BriefDescription": "0x30:75 количество тактов блокировки дешифрации, добавленных механизмом адаптивного замедления дешифрации CU_PMGR0 (5.29.4.1)"
+    },
+    {
+        "EventCode": "0x300076",
+        "EventName": "TICKS_CU_PMGR0_ALLOWED",
+        "BriefDescription": "0x30:76 количество тактов, в которых механизм CU_PMGR0 (5.29.4.1) выработал условие блокировки дешифрации"
+    },
+    {
+        "EventCode": "0xf00077",
+        "EventName": "TICKS_E3_FLUSH",
+        "BriefDescription": "0xf0:77 количество тактов, потерянных в результате флаша конвейера с фазы E3"
+    },
+    {
+        "EventCode": "0xf00078",
+        "EventName": "BUB_B_FLUSH",
+        "BriefDescription": "0xf0:78 количество тактов, потерянных в результате флаша конвейера с фазы B"
+    },
+    {
+        "EventCode": "0xf00079",
+        "EventName": "BUB_B_WAIT",
+        "BriefDescription": "0xf0:79 количество тактов блокировки из-за операций WAIT (при отсутствии верхних блокировок конвейера)"
+    },
+    {
+        "EventCode": "0xf0007a",
+        "EventName": "BUB_B_OTHER",
+        "BriefDescription": "0xf0:7a количество тактов блокировки на стадии B, за исключением событий bub_b_nop (операция NOP N), bub_b_wait (операция WAIT), bub_b_hwcmd (аппаратные команды) и ticks_cu_pmgr0 (механизм адаптивного замедления CU_PMGR0)"
+    },
+    {
+        "EventCode": "0xf0007b",
+        "EventName": "STALL_PIPELINE_FLUSH",
+        "BriefDescription": "0xf0:7b количество тактов, потерянных в результате флаша конвейера с фазы E3 или фазы B (сумма ticks_e3_flush и bub_b_flush)"
+    },
+    {
+        "EventCode": "0xf0007f",
+        "EventName": "STALL_FRONTEND",
+        "BriefDescription": "0xf0:7f количество тактов, потерянных в результате отсутствия кода или флаша конвейера (сумма ib_no_command и pipeline_flush)"
     },
     {
         "EventCode": "0x300080",
@@ -1586,22 +1791,22 @@
     },
     {
         "EventCode": "0x30009c",
-        "EventName": "IB_NO_COMMAND_BP_SHORT",
+        "EventName": "STALL_BP_SHORT",
         "BriefDescription": "0x30:9c количество тактов отсутствия команд в результате ошибки предсказания с \"коротким откатом\"; подсчитываются такты, влияющие на производительность, то есть не скрытые блокировками конвейера"
     },
     {
         "EventCode": "0x30009d",
-        "EventName": "IB_NO_COMMAND_BP_LONG",
+        "EventName": "STALL_BP_LONG",
         "BriefDescription": "0x30:9d количество тактов отсутствия команд в результате ошибки предсказания с \"длинным откатом\"; подсчитываются такты, влияющие на производительность, то есть не скрытые блокировками конвейера"
     },
     {
         "EventCode": "0x30009e",
-        "EventName": "IB_NO_COMMAND_BP",
-        "BriefDescription": "0x30:9e количество тактов отсутствия команд в результате ошибки предсказания (сумма ib_no_command_bp_{short,long}); подсчитываются такты, влияющие на производительность, то есть  не скрытые блокировками конвейера"
+        "EventName": "STALL_BP",
+        "BriefDescription": "0x30:9e количество тактов отсутствия команд в результате ошибки предсказания (сумма stall_bp_{short,long}); подсчитываются такты, влияющие на производительность, то есть не скрытые блокировками конвейера"
     },
     {
         "EventCode": "0xf0009f",
-        "EventName": "IB_NO_COMMAND_AFTER_BP_HIT",
+        "EventName": "STALL_BP_AFTER_HIT",
         "BriefDescription": "0xf0:9f количество тактов отсутствия команд после верного предсказания \"taken\"; подсчитываются такты, влияющие на производительность, то есть не скрытые блокировками конвейера"
     }
 ]

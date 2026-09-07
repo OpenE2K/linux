@@ -276,7 +276,7 @@ static int next_getadapter_fib(struct aac_dev * dev, void __user *arg)
 			return -EFAULT;
 		if (IS_AP(ap, tag)) {
 			set_ap_u_border(ap);
-			f.fib = (void __user *)AP_PTR(ap);
+			f.fib = U_AP_PTR(ap);
 		} else {
 			f.fib = NULL;
 		}

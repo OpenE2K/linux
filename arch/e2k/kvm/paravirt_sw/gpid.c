@@ -14,7 +14,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/kvm_host.h>
-#include <asm/kvm/gpid.h>
+#include <asm/kvm/paravirt_sw/gpid.h>
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM
@@ -104,7 +104,7 @@ int kvm_gpidmap_init(struct kvm *kvm, kvm_gpid_table_t *gpid_table,
 		pr_err("kvm_gpidmap_init() could not create NID map\n");
 		return ret;
 	}
-	sprintf(gpid_table->nid_cache_name, "gpid_VM%d", kvm->arch.vmid.nr);
+	sprintf(gpid_table->nid_cache_name, "gpid_VM%d", kvm->arch.vm_id);
 	gpid_table->nid_cachep =
 		kmem_cache_create(gpid_table->nid_cache_name,
 					sizeof(gpid_t), 0,

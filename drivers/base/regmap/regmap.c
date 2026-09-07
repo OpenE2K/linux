@@ -2185,6 +2185,14 @@ static int regmap_noinc_readwrite(struct regmap *map, unsigned int reg,
 #endif
 	int ret;
 	int i;
+#ifdef CONFIG_MCST
+	u8p = NULL;
+	u16p = NULL;
+	u32p = NULL;
+#ifdef CONFIG_64BIT
+	u64p = NULL;
+#endif
+#endif
 
 	switch (val_bytes) {
 	case 1:

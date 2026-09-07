@@ -11,8 +11,8 @@
 
 #define EFUSE_START_ADDR    0x0
 #define EFUSE_END_ADDR	    0xff
-#define EFUSE_RAM_ADDR          0x0cc0
-#define EFUSE_RAM_DATA          0x0cc4
+#define EFUSE_RAM_ADDR_OFFSET 0x0
+#define EFUSE_RAM_DATA_OFFSET 0x4
 
 #define OD_MASK		    0x7ff
 #define OD_OFFSET           5

@@ -5,12 +5,52 @@
 
 #include "e2k-v3-uncore.dtsi"
 
+/*
+ * NODE REGS (e8c) - "mcst,sic"
+ *
+ * Offset Regs Name
+ * ------ ---------
+ * 0x0000 ST_P
+ * 0x0008 RT_*
+ * 0x0100 ST_CORE*
+ * 0x0200 BT_REG0
+ * 0x0280 PWR_
+ * 0x0380 IOMMU_*
+ * 0x0400 MC_*
+ * 0x0604 IPCC_*
+ * 0x0700 IOL_*
+ * 0x0cb0 PCS_*
+ * 0x3000 L3*
+ */
+
 #if CELLS == 2
+	IPLINKS: iplinks@NODE,604 {
+		compatible = "mcst,iplinks";
+		reg = <NSR_ADDR(00000) 0 0x1000>; /* IPCC_ */
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
 	L_PCS: pcs@NODE,cc4 {
 		compatible = "mcst,l_pcs";
-		reg = <NSR_ADDR(00cc4) 0 0x14>;
+		reg = <NSR_ADDR(00cc4) 0 0x14>;	 /* PCS */
 		numa-node-id = <NODE>;
 		nonposted-mmio;
 		#thermal-sensor-cells = <1>;
+	};
+	HW_CHECK: hw_check@NODE,0 {
+		compatible = "mcst,hw_check";
+		reg = <NSR_ADDR(00000) 0 0x20>,	 /* ST_P, RT_ */
+			  <NSR_ADDR(00284) 0 0x12>,	 /* PWR_ */
+			  <NSR_ADDR(00400) 0 0xc8>,	 /* MC_ */
+			  <NSR_ADDR(00604) 0 0x112>, /* IPCC_, IOL_ */
+			  <NSR_ADDR(00cbc) 0 0x4>;	 /* PCS_ */
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+	};
+	FATAL_TEMP: fatal_temp@NODE,0 {
+		compatible = "mcst,fatal_temp";
+		reg = <NSR_ADDR(00cb8) 0 0x4>;	 /* PCS_ */
+		numa-node-id = <NODE>;
+		nonposted-mmio;
 	};
 #endif

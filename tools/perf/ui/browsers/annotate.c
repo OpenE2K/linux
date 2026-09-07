@@ -720,6 +720,8 @@ static int annotate_browser__run(struct annotate_browser *browser,
 	int delay_secs = hbt ? hbt->refresh : 0;
 	char title[256];
 	int key;
+	struct list_head *pos;
+	struct list_head *head;
 
 	hists__scnprintf_title(hists, title, sizeof(title));
 	if (annotate_browser__show(&browser->b, title, help) < 0)
@@ -733,6 +735,15 @@ static int annotate_browser__run(struct annotate_browser *browser,
 	}
 
 	nd = browser->curr_hot;
+
+	head = browser->b.entries;
+	pos = browser->b.top;
+	fprintf(stderr, "annotate_browser__run(): =========== RUN ==========\n");
+	list_for_each_from(pos, head) {
+		struct annotation_line *al = list_entry(pos, struct annotation_line, node);
+		fprintf(stderr, "annotate_browser__run(): al 0x%lx\n", al);
+	}
+	fprintf(stderr, "annotate_browser__run(): =========== END RUN ==========\n");
 
 	while (1) {
 		key = ui_browser__run(&browser->b, delay_secs);

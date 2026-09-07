@@ -8,7 +8,7 @@
 # Leads to non-deterministic coverage that is not a function of syscall inputs.
 
 obj-$(CONFIG_L_LOCAL_APIC)	+= apic.o apic_timer.o apic_nmi.o \
-					apic_irqchip.o apic_lvt.o
+				   apic_irqchip.o apic_lvt.o debug.o
 
 obj-$(CONFIG_L_IO_APIC)	+= io_apic.o
 

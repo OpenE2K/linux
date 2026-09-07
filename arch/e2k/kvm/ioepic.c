@@ -63,7 +63,23 @@
 })
 
 
-static int ioepic_deliver_to_cepic(struct kvm_ioepic *ioepic, int irq);
+static int ioepic_deliver_to_cepic(struct kvm_ioepic *ioepic, int irq)
+{
+	struct IO_EPIC_route_entry *entry = &ioepic->redirtbl[irq];
+	struct kvm_cepic_irq irqe;
+
+	ioepic_debug("dest=%x vector=%x trig_mode=%x dlvm=%x\n",
+		     entry->addr_low.dst, entry->msg_data.vector,
+		     entry->int_ctrl.trigger, entry->msg_data.dlvm);
+
+	irqe.dest_id = entry->addr_low.dst;
+	irqe.vector = entry->msg_data.vector;
+	irqe.trig_mode = entry->int_ctrl.trigger;
+	irqe.delivery_mode = entry->msg_data.dlvm;
+	irqe.shorthand = CEPIC_ICR_DST_FULL;
+
+	return kvm_irq_delivery_to_epic(ioepic->kvm, ioepic->id, &irqe);
+}
 
 static int ioepic_service(struct kvm_ioepic *ioepic, unsigned int idx)
 {
@@ -82,24 +98,6 @@ static int ioepic_service(struct kvm_ioepic *ioepic, unsigned int idx)
 	}
 
 	return injected;
-}
-
-int ioepic_deliver_to_cepic(struct kvm_ioepic *ioepic, int irq)
-{
-	struct IO_EPIC_route_entry *entry = &ioepic->redirtbl[irq];
-	struct kvm_cepic_irq irqe;
-
-	ioepic_debug("dest=%x vector=%x trig_mode=%x dlvm=%x\n",
-		     entry->addr_low.dst, entry->msg_data.vector,
-		     entry->int_ctrl.trigger, entry->msg_data.dlvm);
-
-	irqe.dest_id = entry->addr_low.dst;
-	irqe.vector = entry->msg_data.vector;
-	irqe.trig_mode = entry->int_ctrl.trigger;
-	irqe.delivery_mode = entry->msg_data.dlvm;
-	irqe.shorthand = CEPIC_ICR_DST_FULL;
-
-	return kvm_irq_delivery_to_epic(ioepic->kvm, ioepic->id, &irqe);
 }
 
 int kvm_ioepic_set_irq(struct kvm_ioepic *ioepic, int irq, int pin_status)
@@ -411,6 +409,9 @@ static void ioepic_write_int_ctrl(struct kvm_ioepic *ioepic, unsigned int pin,
 	if (kvm_ioepic_version(ioepic->kvm) >= IOEPIC_VERSION_2 && (eoi || sint_eoi))
 		new_val.raw = old_val.raw;
 
+	if (old_val.delivery_status)
+		new_val.delivery_status = old_val.delivery_status;
+
 	if (eoi)
 		new_val.delivery_status = 0;
 
@@ -427,6 +428,7 @@ static void ioepic_write_int_ctrl(struct kvm_ioepic *ioepic, unsigned int pin,
 			pr_err("kvm_ioepic: firing pin %d, not eoi/unmasking\n", pin);
 
 		ioepic_service(ioepic, pin);
+		ioepic->irr &= ~(1 << pin);
 	}
 }
 
@@ -545,8 +547,7 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base)
 		return -ENODEV;
 	}
 	if (ioepic->base_address == new_base) {
-		DebugIOEPIC("%s(): IOEPIC base 0x%lx is the same, "
-			"so ignore update\n",
+		DebugIOEPIC("%s(): IOEPIC base 0x%lx is the same, so ignore update\n",
 			__func__, new_base);
 		return 0;
 	} else if (new_base == 0xffffffff) {
@@ -591,33 +592,3 @@ int kvm_ioepic_set_base(struct kvm *kvm, unsigned long new_base)
 
 	return 0;
 }
-
-/* KVM_GET/SET_IRQCHIP is not yet supported for IOEPIC */
-
-#if 0
-int kvm_get_ioepic(struct kvm *kvm, struct kvm_ioepic_state *state)
-{
-	struct kvm_ioepic *ioepic = ioepic_irqchip(kvm);
-
-	if (!ioepic)
-		return -EINVAL;
-
-	mutex_lock(&ioepic->lock);
-	memcpy(state, ioepic, sizeof(struct kvm_ioepic_state));
-	mutex_unlock(&ioepic->lock);
-	return 0;
-}
-
-int kvm_set_ioepic(struct kvm *kvm, struct kvm_ioepic_state *state)
-{
-	struct kvm_ioepic *ioepic = ioepic_irqchip(kvm);
-
-	if (!ioepic)
-		return -EINVAL;
-
-	mutex_lock(&ioepic->lock);
-	memcpy(ioepic, state, sizeof(struct kvm_ioepic_state));
-	mutex_unlock(&ioepic->lock);
-	return 0;
-}
-#endif

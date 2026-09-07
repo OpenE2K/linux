@@ -71,33 +71,33 @@
 #define	MPV_CPU_INTR 0x3 /* cpu interrupt number for sbus-mpv by default */
 
 /*  reg. number  0     1     2     3     4     5     6     7     8     9 */
-unsigned char corr_cnt_reg_v2[10] = {	/* correct counter */
+static unsigned char corr_cnt_reg_v2[10] = {	/* correct counter */
 		0x18, 0x28, 0x38, 0x48, 0x58, 0x88, 0x98, 0xa8, 0xb8, 0xc8};
-unsigned char corr_cnt_reg_v0[4] = {	/* correct counter */
+static unsigned char corr_cnt_reg_v0[4] = {	/* correct counter */
 		0x18, 0x38, 0x58, 0x78};
-unsigned char gen_period_reg_v2[10] = {
+static unsigned char gen_period_reg_v2[10] = {
 		0x7c, 0x2c, 0x3c, 0x4c, 0x5c, 0x8c, 0x9c, 0xac, 0xbc, 0xcc};
-unsigned char intpts_cnt_reg_v2[10] = {
+static unsigned char intpts_cnt_reg_v2[10] = {
 		0x80, 0x30, 0x40, 0x50, 0x70, 0x90, 0xa0, 0xb0, 0xc0, 0xd0};
-unsigned char prev_time_reg_v2[10]  = {
+static unsigned char prev_time_reg_v2[10]  = {
 		0x84, 0x34, 0x44, 0x54, 0x74, 0x94, 0xa4, 0xb4, 0xc4, 0xd4};
-unsigned char corr_cnt_reg_new[4]   = {0x1c, 0x30, 0x44, 0x58};
-unsigned char gen_period_reg_new[4] = {0x20, 0x34, 0x48, 0x5c};
-unsigned char intpts_cnt_reg_new[4] = {0x24, 0x38, 0x4c, 0x60};
-unsigned char prev_time_reg_new[4]  = {0x28, 0x3c, 0x50, 0x64};
+static unsigned char corr_cnt_reg_new[4]   = {0x1c, 0x30, 0x44, 0x58};
+static unsigned char gen_period_reg_new[4] = {0x20, 0x34, 0x48, 0x5c};
+static unsigned char intpts_cnt_reg_new[4] = {0x24, 0x38, 0x4c, 0x60};
+static unsigned char prev_time_reg_new[4]  = {0x28, 0x3c, 0x50, 0x64};
 /* basic counter copy*/
-unsigned char mpv_time_reg_new[4]   = {0x2c, 0x40, 0x54, 0x68};
+static unsigned char mpv_time_reg_new[4]   = {0x2c, 0x40, 0x54, 0x68};
 /*  mpv or mpv_ioh2 version                           0  1   2  3   4 */
 /* number of corr. time  regs */
-unsigned char num_time_regs_v2[MAX_MPV_VER + 1]    = {4, 5, 10, 10, 8};
-unsigned char num_time_regs_ioh2[MAX_IOH2_VER + 1] = {3};
+static unsigned char num_time_regs_v2[MAX_MPV_VER + 1]    = {4, 5, 10, 10, 8};
+static unsigned char num_time_regs_ioh2[MAX_IOH2_VER + 1] = {3};
 /* number of inputs */
-unsigned char num_inputs_v2[MAX_MPV_VER + 1]       = {20, 20, 20, 20, 16};
-unsigned char num_inputs_ioh2[MAX_IOH2_VER + 1]    = {3};
+static unsigned char num_inputs_v2[MAX_MPV_VER + 1]       = {20, 20, 20, 20, 16};
+static unsigned char num_inputs_ioh2[MAX_IOH2_VER + 1]    = {3};
 /* enable generetor mask */
-unsigned char gen_mode_reg_v2[MAX_MPV_VER + 1]     = {
+static unsigned char gen_mode_reg_v2[MAX_MPV_VER + 1]     = {
 					0xff, 0xff, 0x68, 0x68, 0x68};
-unsigned char gen_mode_reg_ioh2[MAX_IOH2_VER + 1]  = {0x14};
+static unsigned char gen_mode_reg_ioh2[MAX_IOH2_VER + 1]  = {0x14};
  
 typedef struct __raw_wqueue {
 	struct task_struct *task;
@@ -185,7 +185,7 @@ typedef struct mpv_state_struct {
 	int			open_in_excl;
 	int			open_out_excl;
 	int			open_st_excl;
-	void 			*regs_base;
+	void 	__iomem		*regs_base;
 	int			acc_regs;
 	int			base_polar;
 	int			polar;
@@ -197,9 +197,7 @@ typedef struct mpv_state_struct {
 	/* The time when interrupt was sent by MPV */
 	long long		time_gener_intr;
 	int			dev_type;	/* sbus, pci */
-	int			irq;
-	int			irq1;
-	int			irq2;
+	int			irq[3];
 	/* listen alive and mask input on interrupt */
 	int			listen_alive;
 } mpv_state_t;

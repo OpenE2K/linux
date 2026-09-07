@@ -1175,7 +1175,9 @@ static int _set_opp(struct device *dev, struct opp_table *opp_table,
 {
 	struct dev_pm_opp *old_opp;
 	int scaling_down, ret;
-
+#ifdef CONFIG_MCST
+	ret = -EINVAL;
+#endif
 	if (unlikely(!opp))
 		return _disable_opp_table(dev, opp_table);
 

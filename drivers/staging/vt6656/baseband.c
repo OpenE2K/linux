@@ -221,6 +221,9 @@ int vnt_vt3184_init(struct vnt_private *priv)
 	const u8 *c_addr;
 	u8 data;
 
+#ifdef CONFIG_MCST
+	c_addr = NULL;
+#endif
 	ret = vnt_control_in(priv, MESSAGE_TYPE_READ, 0, MESSAGE_REQUEST_EEPROM,
 			     EEP_MAX_CONTEXT_SIZE, priv->eeprom);
 	if (ret)

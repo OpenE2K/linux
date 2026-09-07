@@ -5,7 +5,7 @@ char revId768 = 0;
 unsigned short devId768 = 0;
 
 /* after driver mapped io registers, use this function first */
-void ddk768_set_mmio(volatile unsigned char * addr,unsigned short devId,char revId)
+void ddk768_set_mmio(volatile unsigned char __iomem * addr,unsigned short devId,char revId)
 {
 	mmio768 = addr;
 	devId768 = devId;

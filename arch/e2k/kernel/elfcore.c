@@ -21,8 +21,7 @@
  * Support for tags and colors dumping
  */
 
-#define MEM_HAS_COLORS	(cpu_has(CPU_FEAT_ISET_V7) && !cpu_has(CPU_FEAT_E48C_MAKET) && \
-				TASK_IS_PROTECTED(current))
+#define CURRENT_HAS_COLORS() (cpu_has(CPU_FEAT_MADM) && TASK_IS_PROTECTED(current))
 
 Elf64_Half elf_core_extra_phdrs(struct coredump_params *cprm)
 {
@@ -46,7 +45,9 @@ static int elf_core_write_color_phdrs(struct coredump_params *cprm, loff_t offse
 	struct vm_area_struct *gate_vma = get_gate_vma(mm);
 	MA_STATE(mas, &mm->mm_mt, 0, 0);
 
+	rcu_read_lock();
 	while ((vma = coredump_next_vma(&mas, vma, gate_vma)) != NULL) {
+		rcu_read_unlock();
 		phdr.p_type = PT_E2K_COLORS;
 		phdr.p_offset = offset;
 		phdr.p_vaddr = vma->vm_start;
@@ -58,7 +59,9 @@ static int elf_core_write_color_phdrs(struct coredump_params *cprm, loff_t offse
 		phdr.p_align = 1;
 		if (!dump_emit(cprm, &phdr, sizeof(phdr)))
 			return 0;
+		rcu_read_lock();
 	}
+	rcu_read_unlock();
 	return 1;
 }
 
@@ -71,7 +74,9 @@ int elf_core_write_extra_phdrs(struct coredump_params *cprm, loff_t offset)
 	struct vm_area_struct *gate_vma = get_gate_vma(mm);
 	MA_STATE(mas, &mm->mm_mt, 0, 0);
 
+	rcu_read_lock();
 	while ((vma = coredump_next_vma(&mas, vma, gate_vma)) != NULL) {
+		rcu_read_unlock();
 		phdr.p_type = PT_E2K_TAGS;
 		phdr.p_offset = offset;
 		phdr.p_vaddr = vma->vm_start;
@@ -83,8 +88,10 @@ int elf_core_write_extra_phdrs(struct coredump_params *cprm, loff_t offset)
 		phdr.p_align = 1;
 		if (!dump_emit(cprm, &phdr, sizeof(phdr)))
 			return 0;
+		rcu_read_lock();
 	}
-	if (MEM_HAS_COLORS) {
+	rcu_read_unlock();
+	if (CURRENT_HAS_COLORS()) {
 		return elf_core_write_color_phdrs(cprm, offset);
 	}
 	return 1;
@@ -101,13 +108,11 @@ static int elf_core_write_colors(struct coredump_params *cprm)
 	unsigned long end;
 	struct page *page;
 	int stop = 0;
-	ldst_rec_op_t ld_op = (ldst_rec_op_t) {
-				.prot = 1,
-				.fmt_h = LDST_MCOLOR_FMT_H,
-				.mas = MAS_BYPASS_L1_CACHE
-			};
+	ldst_rec_op_t ld_op = (ldst_rec_op_t) { .fmt_h = LDST_MCOLOR_FMT_H };
 
+	rcu_read_lock();
 	while ((vma = coredump_next_vma(&mas, vma, gate_vma)) != NULL) {
+		rcu_read_unlock();
 		end = vma->vm_start + vma_dump_size(vma, mm_flags);
 
 		for (addr = vma->vm_start; addr < end; addr += PAGE_SIZE) {
@@ -146,7 +151,9 @@ static int elf_core_write_colors(struct coredump_params *cprm)
 			if (stop)
 				return 0;
 		}
+		rcu_read_lock();
 	}
+	rcu_read_unlock();
 	return 1;
 }
 
@@ -163,7 +170,9 @@ int elf_core_write_extra_data(struct coredump_params *cprm)
 	struct page *page;
 	int stop = 0;
 
+	rcu_read_lock();
 	while ((vma = coredump_next_vma(&mas, vma, gate_vma)) != NULL) {
+		rcu_read_unlock();
 		end = vma->vm_start + vma_dump_size(vma, mm_flags);
 
 		for (addr = vma->vm_start; addr < end; addr += PAGE_SIZE) {
@@ -198,8 +207,10 @@ int elf_core_write_extra_data(struct coredump_params *cprm)
 			if (stop)
 				return 0;
 		}
+		rcu_read_lock();
 	}
-	if (MEM_HAS_COLORS) {
+	rcu_read_unlock();
+	if (CURRENT_HAS_COLORS()) {
 		return elf_core_write_colors(cprm);
 	}
 	return 1;
@@ -216,15 +227,17 @@ size_t elf_core_extra_data_size(struct coredump_params *cprm)
 	unsigned long end;
 	size_t size = 0;
 
+	rcu_read_lock();
 	while ((vma = coredump_next_vma(&mas, vma, gate_vma)) != NULL) {
 		end = vma->vm_start + vma_dump_size(vma, mm_flags);
 		for (addr = vma->vm_start; addr < end; addr += PAGE_SIZE) {
 			size += PAGE_SIZE / 16;
-			if (MEM_HAS_COLORS) {
+			if (CURRENT_HAS_COLORS()) {
 				/* 1 bite for 2 colors. 1 color for 16 bytes */
 				size += PAGE_SIZE / 32;
 			}
 		}
 	}
+	rcu_read_unlock();
 	return size;
 }

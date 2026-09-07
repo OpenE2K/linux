@@ -12,13 +12,10 @@
 #ifndef _E2K_TAGS_H_
 #define _E2K_TAGS_H_
 
-#ifndef __ASSEMBLY__
-
 /* Internal tags list. Old style */
 #define	E2K_AP_ITAG		0x0
 #define	E2K_PL_ITAG		0x1
 #define	E2K_PL_V3_ITAG		0x0
-#define	E2K_SAP_ITAG		0x4
 
 #define	ITAG_MASK		ULL(0x4000000040000000)
 #define	ITAGDWD_DEBUG		(ITAG_MASK | ULL(0xdead0000dead))
@@ -35,10 +32,8 @@
 #define	E2K_AP_HI_ETAG_V6	0xC
 #define	E2K_AP_HI_ETAG_V7	0xF
 #define	E2K_AP_HI_ETAG \
-		(unlikely(cpu_has(CPU_FEAT_ISET_V7)) ? E2K_AP_HI_ETAG_V7 : E2K_AP_HI_ETAG_V6)
+		(cpu_has(CPU_FEAT_ISET_V7) ? E2K_AP_HI_ETAG_V7 : E2K_AP_HI_ETAG_V6)
 #define	E2K_AP_LO_ETAG		0xF
-#define	E2K_SAP_HI_ETAG		0xC
-#define	E2K_SAP_LO_ETAG		0xF
 
 /* External tags. New style */
 
@@ -61,13 +56,11 @@
 #define	ETAGDWQ		0x55		/* Diagnotic quadro */
 #define	ETAGAPQ_V6	0xCF		/* v6 Array pointer */
 #define	ETAGAPQ_V7	0xFF		/* v7 Array pointer */
-#define	ETAGAPQ		(unlikely(cpu_has(CPU_FEAT_ISET_V7)) ? 0xFF : 0xCF)
+#define	ETAGAPQ		(cpu_has(CPU_FEAT_ISET_V7) ? 0xFF : 0xCF)
 #define	ETAGSAP		0xCF		/* Stack array pointer */
 #define	ETAGPLQ		0xFF		/* Procedure label (v6-...) */
-#define	ETAGPL		(unlikely(cpu_has(CPU_FEAT_ISET_V6)) ? ETAGPLQ : ETAGPLD)
+#define	ETAGPL		(cpu_has(CPU_FEAT_ISET_V6) ? ETAGPLQ : ETAGPLD)
 
 #define	ETAGBADQ	0xee	/* Invalid tag for quadro object */
-
-#endif /* !(__ASSEMBLY__) */
 
 #endif /* !(_E2K_TAGS_H_) */

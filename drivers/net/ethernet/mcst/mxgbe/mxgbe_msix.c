@@ -45,11 +45,6 @@ static void msix_lut_set(mxgbe_vector_t *vector, uint16_t idx)
 	if (-1 == vector->bidx)
 		vector->bidx = idx;
 
-	DEV_DBG(MXGBE_DBG_MSK_IRQ, &vector->priv->pdev->dev,
-		"set MSIXLUT: event=%3u(%3u), vect=%3u, irq=%3u, qn=%3u - %s\n",
-		idx, vector->bidx, vector->vect, vector->irq, vector->qn,
-		vector->name);
-
 	mxgbe_wreg32(base, MSIX_LUT, MSIX_LUT_SETIDX(idx));
 	mxgbe_wreg32(base, MSIX_LUT, MSIX_LUT_SETVECT(vector->vect));
 } /* msix_lut_set */
@@ -65,6 +60,7 @@ int mxgbe_msix_prepare(mxgbe_priv_t *priv)
 {
 	int err;
 	int vectors;
+	int node;
 
 	/* init priv->msix_entries */
 #ifdef MSIX_COMPACTMODE
@@ -86,14 +82,13 @@ int mxgbe_msix_prepare(mxgbe_priv_t *priv)
 	vectors = min_t(int, vectors, MSIX_V_NUM);
 	priv->num_msix_entries = vectors;
 
-	dev_dbg(&priv->pdev->dev,
-		"msix_prepare: rxn=%d txn=%d macn=%d vectors=%d cpus=%d\n",
-		priv->msix_rx_num, priv->msix_tx_num, priv->msix_mac_num,
-		vectors, num_online_cpus());
+	node = dev_to_node(&priv->pdev->dev);
+	if (node == NUMA_NO_NODE)
+		node = 0;
 
 	priv->msix_entries = kzalloc_node(vectors * sizeof(struct msix_entry),
 					  GFP_KERNEL,
-					  dev_to_node(&priv->pdev->dev));
+					  node);
 	if (priv->msix_entries) {
 		int i;
 		for (i = 0; i < priv->num_msix_entries; i++) {
@@ -136,11 +131,12 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 	int err;
 	unsigned int un;
 	int node;
-	int nr_cpus;
 	int i;
+	int cpus = num_online_cpus();
 
 	node = dev_to_node(&priv->pdev->dev);
-	nr_cpus = nr_cpus_node(node);
+	if (node == NUMA_NO_NODE)
+		node = 0;
 
 	/* cleanup irq struct */
 	for (i = 0; i < priv->num_msix_entries; i++) {
@@ -148,17 +144,11 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 		priv->vector[i].irq = -1;
 		priv->vector[i].bidx = -1;
 		/* setup affinity mask and node */
-		priv->vector[i].cpu = \
-			(i < priv->num_rx_queues) ?
-			((node * nr_cpus) + nr_cpus - i - 1) :
-			(i < (priv->num_rx_queues + priv->num_tx_queues)) ?
-			(i + (node * nr_cpus) - priv->num_rx_queues) :
-			(node * nr_cpus);
-		if (priv->vector[i].cpu != -1)
-			cpumask_set_cpu(priv->vector[i].cpu,
-					&priv->vector[i].affinity_mask);
-		if (cpu_online(priv->vector[i].cpu))
-			priv->vector[i].numa_node =
+		priv->vector[i].cpu = (i +
+			node * (priv->num_rx_queues + priv->num_tx_queues)) % cpus;
+		cpumask_set_cpu(priv->vector[i].cpu,
+				&priv->vector[i].affinity_mask);
+		priv->vector[i].numa_node =
 				cpu_to_node(priv->vector[i].cpu);
 	}
 
@@ -222,13 +212,6 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 			}
 		}
 		priv->vector[i].irq = priv->msix_entries[i].vector;
-
-		DEV_DBG(MXGBE_DBG_MSK_IRQ, &priv->pdev->dev,
-			"request_irq: %d - %s (cpu = %d, node = %d)\n",
-			priv->msix_entries[i].vector,
-			dev_name(&priv->ndev->dev),
-			priv->vector[i].cpu,
-			priv->vector[i].numa_node);
 	}
 
 	/* Init MSIX (ch1.pdf) */
@@ -293,7 +276,6 @@ int mxgbe_msix_init(mxgbe_priv_t *priv)
 	un += 1;
 #endif
 
-	assert(priv->num_msix_entries == un);
 	return 0;
 
 err_unregister_irq:

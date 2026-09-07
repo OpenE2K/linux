@@ -28,7 +28,7 @@
 #include <asm/irq_regs.h>
 #include <asm/pic.h>
 
-#include <asm/kvm/guest.h>
+#include <asm/kvm/paravirt_sw/guest.h>
 #include <asm/kvm/hypercall.h>
 #include <asm/kvm/guest/irq.h>
 

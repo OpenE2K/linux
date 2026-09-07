@@ -35,9 +35,9 @@ typedef struct el_netdev_udata {
 	int rx_len;
 	int skipped;
 	int timeout;
-	char * rx_buf;
+	char __user *rx_buf;
 	int tx_len;
-	char *tx_buf;
+	char __user *tx_buf;
 	unsigned char src_mac[ETH_ALEN];
 	unsigned char dst_mac[ETH_ALEN];
 } el_netdev_udata_t;

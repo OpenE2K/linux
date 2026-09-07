@@ -14,8 +14,11 @@
 extern void __init e2k_start_kernel(void);
 extern void __init native_setup_machine(void);
 extern void __init e2k_start_kernel_switched_stacks(void);
+extern unsigned int __initdata maxcpus;
+extern int __initdata max_iolinks;
+extern int __initdata max_node_iolinks;
 
-static inline void native_bsp_switch_to_init_stack(void)
+static __always_inline void native_bsp_switch_to_init_stack(void)
 {
 	unsigned long stack_base = (unsigned long) &init_stack;
 
@@ -42,7 +45,7 @@ static inline void arch_setup_machine(void)
 {
 	native_setup_machine();
 }
-static inline void bsp_switch_to_init_stack(void)
+static __always_inline void bsp_switch_to_init_stack(void)
 {
 	native_bsp_switch_to_init_stack();
 }

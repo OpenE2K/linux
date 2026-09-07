@@ -39,7 +39,7 @@ static struct dentry *mmrse_dbg_root;
  **/
 
 /* REGS */
-const u_int32_t mmrse_dbg_regs_id[21] = {
+static const u_int32_t mmrse_dbg_regs_id[21] = {
 	COMMON_STATUS_REG,
 	DMA_LATENCY_REG,
 	BC_COMMAND_REG,
@@ -63,7 +63,7 @@ const u_int32_t mmrse_dbg_regs_id[21] = {
 	BM_WPTR_REG,
 	BM_RPTR_REG,
 };
-const char *mmrse_dbg_regs_name[21] = {
+static const char *mmrse_dbg_regs_name[21] = {
 	"Common_Status",
 	"DMA_Latency",
 	"BC_Command",
@@ -90,7 +90,7 @@ const char *mmrse_dbg_regs_name[21] = {
 
 #define DPREG_32(R, N) \
 do { \
-	u32 val = reg32rd(((void *)priv->reg_base) + (R)); \
+	u32 val = reg32rd(priv->reg_base + (R)); \
 	offs += \
 	scnprintf(buf + offs, PAGE_SIZE - 1 - offs, \
 		"%02X: %08X (%02X %02X %02X %02X) - %s\n", \
@@ -382,7 +382,7 @@ static ssize_t mmrse_dbg_buf1_read(struct file *filp, char __user *buffer,
 	mmrse_priv_t *priv = filp->private_data;
 	char *buf = mmrse_dbg_buf1_buf;
 	u16 *dma_buff;
-	u32 *ram_buff;
+	u32 __iomem *ram_buff;
 	u32 dat;
 
 	/* don't allow partial reads */
@@ -436,7 +436,7 @@ static ssize_t mmrse_dbg_buf1_read(struct file *filp, char __user *buffer,
 			  pci_name(priv->pdev));
 
 	for (j = 1; j < 2; j++) {
-		ram_buff = (u32 *)priv->buf_base + (j * 16);
+		ram_buff = (u32 __iomem *)priv->buf_base + (j * 16);
 		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
 				  "%02X: ", j);
 		for (i = 0; i < 8; i++) {
@@ -463,7 +463,7 @@ static ssize_t mmrse_dbg_buf1_read(struct file *filp, char __user *buffer,
 			  pci_name(priv->pdev));
 
 	for (j = 1; j < 2; j++) {
-		ram_buff = (u32 *)priv->buf_base + (j * 16) + (32 * 16);
+		ram_buff = (u32 __iomem *)priv->buf_base + (j * 16) + (32 * 16);
 		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
 				  "%02X: ", j);
 		for (i = 0; i < 8; i++) {
@@ -516,7 +516,7 @@ static ssize_t mmrse_dbg_rt_out_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mmrse_priv_t *priv = filp->private_data;
 	char *buf = mmrse_dbg_rt_out_buf;
-	u32 *ram_buff;
+	u32 __iomem *ram_buff;
 	u32 dat;
 
 	/* don't allow partial reads */
@@ -528,7 +528,7 @@ static ssize_t mmrse_dbg_rt_out_read(struct file *filp, char __user *buffer,
 			  pci_name(priv->pdev));
 
 	for (j = 0; j < 16; j++) {
-		ram_buff = (u32 *)priv->buf_base + (j * 16);
+		ram_buff = (u32 __iomem *)priv->buf_base + (j * 16);
 		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
 				  "%02X: ", j);
 		for (i = 0; i < 8; i++) {
@@ -575,7 +575,7 @@ static ssize_t mmrse_dbg_rt_out1_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mmrse_priv_t *priv = filp->private_data;
 	char *buf = mmrse_dbg_rt_out1_buf;
-	u32 *ram_buff;
+	u32 __iomem *ram_buff;
 	u32 dat;
 
 	/* don't allow partial reads */
@@ -587,7 +587,7 @@ static ssize_t mmrse_dbg_rt_out1_read(struct file *filp, char __user *buffer,
 			  pci_name(priv->pdev));
 
 	for (j = 16; j < 32; j++) {
-		ram_buff = (u32 *)priv->buf_base + (j * 16);
+		ram_buff = (u32 __iomem *)priv->buf_base + (j * 16);
 		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
 				  "%02X: ", j);
 		for (i = 0; i < 8; i++) {
@@ -640,7 +640,7 @@ static ssize_t mmrse_dbg_rt_in_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mmrse_priv_t *priv = filp->private_data;
 	char *buf = mmrse_dbg_rt_in_buf;
-	u32 *ram_buff;
+	u32 __iomem *ram_buff;
 	u32 dat;
 
 	/* don't allow partial reads */
@@ -652,7 +652,7 @@ static ssize_t mmrse_dbg_rt_in_read(struct file *filp, char __user *buffer,
 			  pci_name(priv->pdev));
 
 	for (j = 0; j < 16; j++) {
-		ram_buff = (u32 *)priv->buf_base + (j * 16) + (32 * 16);
+		ram_buff = (u32 __iomem *)priv->buf_base + (j * 16) + (32 * 16);
 		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
 				  "%02X: ", j);
 		for (i = 0; i < 8; i++) {
@@ -699,7 +699,7 @@ static ssize_t mmrse_dbg_rt_in1_read(struct file *filp, char __user *buffer,
 	int offs = 0;
 	mmrse_priv_t *priv = filp->private_data;
 	char *buf = mmrse_dbg_rt_in1_buf;
-	u32 *ram_buff;
+	u32 __iomem *ram_buff;
 	u32 dat;
 
 	/* don't allow partial reads */
@@ -711,7 +711,7 @@ static ssize_t mmrse_dbg_rt_in1_read(struct file *filp, char __user *buffer,
 			  pci_name(priv->pdev));
 
 	for (j = 16; j < 32; j++) {
-		ram_buff = (u32 *)priv->buf_base + (j * 16) + (32 * 16);
+		ram_buff = (u32 __iomem *)priv->buf_base + (j * 16) + (32 * 16);
 		offs += scnprintf(buf + offs, PAGE_SIZE - 1 - offs,
 				  "%02X: ", j);
 		for (i = 0; i < 8; i++) {
@@ -905,7 +905,7 @@ static ssize_t mmrse_dbg_reg_ops_write(struct file *filp,
 		cnt = sscanf(&mmrse_dbg_reg_ops_buf[5], "%x %x", &reg, &value);
 		if (cnt == 2) {
 			priv->reg_last_value = value;
-			reg32wr(value, ((void *)priv->reg_base) + reg);
+			reg32wr(value, priv->reg_base + reg);
 		} else {
 			priv->reg_last_value = 0xFFFFFFFF;
 			pr_err(KBUILD_MODNAME
@@ -916,7 +916,7 @@ static ssize_t mmrse_dbg_reg_ops_write(struct file *filp,
 		int cnt;
 		cnt = sscanf(&mmrse_dbg_reg_ops_buf[4], "%x", &reg);
 		if (cnt == 1) {
-			value = reg32rd(((void *)priv->reg_base) + reg);
+			value = reg32rd(priv->reg_base + reg);
 			priv->reg_last_value = value;
 		} else {
 			priv->reg_last_value = 0xFFFFFFFF;

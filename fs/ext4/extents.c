@@ -110,7 +110,11 @@ static void ext4_ext_drop_refs(struct ext4_ext_path *path)
 {
 	int depth, i;
 
+#ifdef CONFIG_MCST
+	if (IS_ERR_OR_NULL(path))
+#else
 	if (!path)
+#endif
 		return;
 	depth = path->p_depth;
 	for (i = 0; i <= depth; i++, path++) {
@@ -121,6 +125,10 @@ static void ext4_ext_drop_refs(struct ext4_ext_path *path)
 
 void ext4_free_ext_path(struct ext4_ext_path *path)
 {
+#ifdef CONFIG_MCST
+	if (IS_ERR_OR_NULL(path))
+		return;
+#endif
 	ext4_ext_drop_refs(path);
 	kfree(path);
 }

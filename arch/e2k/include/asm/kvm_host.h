@@ -31,17 +31,19 @@
 #include <asm/kvm/cpu_hv_regs_types.h>
 #include <asm/kvm/mmu_hv_regs_types.h>
 #include <asm/traps.h>
-#include <asm/kvm/guest.h>
-#include <asm/kvm/gpid.h>
-#include <asm/kvm/mm.h>
+#include <asm/kvm/mmu_pte.h>
 #include <asm/kvm/thread_info.h>
 #include <asm/kvm/threads.h>
-#include <asm/kvm/csd_lock.h>
 #include <asm/kvm/page_track.h>
 
-#include <asm/kvm/boot_spinlock_slow.h>
-#include <asm/kvm/spinlock_slow.h>
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/csd_lock.h>
+#include <asm/kvm/paravirt_sw/mm.h>
+#include <asm/kvm/paravirt_sw/boot_spinlock_slow.h>
+#include <asm/kvm/paravirt_sw/spinlock_slow.h>
+#include <asm/kvm/paravirt_sw/gpid.h>
+#include <asm/kvm/paravirt_sw/guest.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define KVM_E2K_DEBUG
 
@@ -66,10 +68,12 @@
 	unlikely(__ret_warn_on);					\
 })
 #endif
+#ifdef	CONFIG_KVM_PARAVIRTUALIZATION
 #define	KVM_E2K_SV_VM_TYPE_MASK		(1 << KVM_E2K_SV_VM_TYPE)
 #define	KVM_E2K_SW_PV_VM_TYPE_MASK	(1 << KVM_E2K_SW_PV_VM_TYPE)
-#define	KVM_E2K_HV_VM_TYPE_MASK		(1 << KVM_E2K_HV_VM_TYPE)
 #define	KVM_E2K_HW_PV_VM_TYPE_MASK	(1 << KVM_E2K_HW_PV_VM_TYPE)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+#define	KVM_E2K_HV_VM_TYPE_MASK		(1 << KVM_E2K_HV_VM_TYPE)
 
 /* mask of available and supported by the hypervisor VM types */
 /* depends on hardware, CPU ISET, kernel & hypervisor configuration */
@@ -124,10 +128,12 @@ static inline bool kvm_is_hv_vm_available(void)
 	return kvm_vm_types_available & KVM_E2K_HV_VM_TYPE_MASK;
 }
 
+#ifdef	CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool kvm_is_hw_pv_vm_available(void)
 {
 	return kvm_vm_types_available & KVM_E2K_HW_PV_VM_TYPE_MASK;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool kvm_is_sic_nbsr_iset_available(void)
 {
@@ -223,11 +229,15 @@ struct kvm_vcpu_stat {
 	struct kvm_vcpu_stat_generic generic;
 
 	/* MMU stat */
+	u64 signal_exits;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	u64 pf_fixed;
 	u64 pf_guest;
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 	u64 flush_gva;
+#endif /* CONFIG_KVM_HW_SHADOW_PT_ENABLE */
 	u64 mmio_exits;
-	u64 signal_exits;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 };
 
 /*
@@ -242,71 +252,43 @@ typedef struct bu_hw_stack {
 					/* base & index & size */
 	e2k_pcsp_t	pcsp;		/* Procedure chain stack */
 					/* pointer: base & index & size */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int		users;		/* number of active hypercalls, */
 					/* handlers on these stacks */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 } bu_hw_stack_t;
 
 /* sizes as common kernel stacks */
 #define	HYPV_BACKUP_PS_SIZE		KERNEL_P_STACK_SIZE
 #define	HYPV_BACKUP_PCS_SIZE		KERNEL_PC_STACK_SIZE
 
-#define GET_BACKUP_PS_SIZE(bu_stacks)	((bu_stacks)->ps.size)
-#define GET_BACKUP_PCS_SIZE(bu_stacks)	((bu_stacks)->pcs.size)
-#define SET_BACKUP_PS_SIZE(bu_stacks, val)	\
-		(GET_BACKUP_PS_SIZE(bu_stacks) = (val))
-#define SET_BACKUP_PCS_SIZE(bu_stacks, val)	\
-		(GET_BACKUP_PCS_SIZE(bu_stacks) = (val))
-#define	GET_BACKUP_PS_BASE(bu_stacks)	GET_PS_BASE(bu_stacks)
-#define	GET_BACKUP_PCS_BASE(bu_stacks)	GET_PCS_BASE(bu_stacks)
-
 /*
  * guest VCPU boot-time stacks
  */
+typedef struct {
+	void __user *base;		/* Hardware stack base pointer */
+	e2k_size_t size;		/* Hardware stack total size */
+} vcpu_hw_stack_area_t;
+
 typedef struct vcpu_boot_stack {
-	data_stack_t	data;		/* local data stack */
-	void		*data_stack;	/* data stack pointer at user space */
-	hw_stack_area_t	ps;		/* procedure stack area */
-	hw_stack_area_t	pcs;		/* chain stack area */
-	void		*proc_stack;	/* procedure stack pointer at user */
-					/* space */
-	void		*chain_stack;	/* procedure chain stack pointer at */
-					/* user space */
+	struct data_stack data;		/* local data stack */
+	void __user	*data_stack;	/* data stack pointer at user space */
+	vcpu_hw_stack_area_t	ps;	/* procedure stack area */
+	vcpu_hw_stack_area_t	pcs;	/* chain stack area */
+	void __user	*proc_stack;	/* procedure stack pointer at user space */
+	void __user	*chain_stack;	/* procedure chain stack pointer at user space */
 	guest_hw_stack_t regs;		/* current registers state */
 } vcpu_boot_stack_t;
 
-#define GET_VCPU_BOOT_CS_BASE(boot_stacks)	((boot_stacks)->data.bottom)
-#define GET_VCPU_BOOT_CS_TOP(boot_stacks)	((boot_stacks)->data.top)
-#define GET_VCPU_BOOT_CS_SIZE(boot_stacks)	((boot_stacks)->data.size)
 #define	GET_VCPU_BOOT_PS_BASE(boot_stacks)	((void __force *) (boot_stacks)->ps.base)
-#define GET_VCPU_BOOT_PS_SIZE(boot_stacks)	((boot_stacks)->ps.size)
 #define	GET_VCPU_BOOT_PCS_BASE(boot_stacks)	((void __force *) (boot_stacks)->pcs.base)
-#define GET_VCPU_BOOT_PCS_SIZE(boot_stacks)	((boot_stacks)->pcs.size)
-#define SET_VCPU_BOOT_CS_BASE(boot_stacks, val)	\
-		(GET_VCPU_BOOT_CS_BASE(boot_stacks) = (e2k_addr_t)(val))
-#define SET_VCPU_BOOT_CS_TOP(boot_stacks, val)	\
-		(GET_VCPU_BOOT_CS_TOP(boot_stacks) = (e2k_addr_t)(val))
-#define SET_VCPU_BOOT_CS_SIZE(boot_stacks, val)	\
-		(GET_VCPU_BOOT_CS_SIZE(boot_stacks) = (val))
 #define SET_VCPU_BOOT_PS_BASE(boot_stacks, val)	\
 		((boot_stacks)->ps.base = (void __user __force *) (val))
-#define SET_VCPU_BOOT_PS_SIZE(boot_stacks, val)	\
-		(GET_VCPU_BOOT_PS_SIZE(boot_stacks) = (val))
 #define SET_VCPU_BOOT_PCS_BASE(boot_stacks, val)	\
 		((boot_stacks)->pcs.base = (void __user __force *) (val))
-#define SET_VCPU_BOOT_PCS_SIZE(boot_stacks, val)	\
-		(GET_VCPU_BOOT_PCS_SIZE(boot_stacks) = (val))
 
 struct kvm_vm_stat {
 	struct kvm_vm_stat_generic generic;
-	ulong mmu_shadow_zapped;
-	ulong mmu_pte_write;
-	ulong mmu_pte_updated;
-	ulong mmu_pde_zapped;
-	ulong mmu_flooded;
-	ulong mmu_recycled;
-	ulong mmu_cache_miss;
-	ulong mmu_unsync;
-	ulong lpages;
 };
 
 /*
@@ -326,35 +308,24 @@ typedef struct kvm_arch_mmu_memory_cache {
  * the pages used as guest page table on soft mmu are tracked by
  * kvm_memory_slot.arch.gfn_track which is 16 bits, so the role bits used
  * by indirect shadow page can not be more than 15 bits.
- *
- * Currently, we used 14 bits that are @level, @cr4_pae, @quadrant, @access,
- * @nxe, @cr0_wp, @smep_andnot_wp and @smap_andnot_wp.
  */
 typedef union kvm_mmu_page_role {
 	unsigned word;
 	struct {
 		unsigned level:4;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		unsigned cr4_pae:1;
-		unsigned quadrant:2;
 		unsigned direct:1;
 		unsigned access:3;
+#else
+		unsigned :5;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		unsigned invalid:1;
-		unsigned nxe:1;
-		unsigned cr0_wp:1;
-		unsigned smep_andnot_wp:1;
-		unsigned smap_andnot_wp:1;
-		unsigned unused:8;
-
-		/*
-		 * This is left at the top of the word so that
-		 * kvm_memslots_for_spte_role can extract it with a
-		 * simple shift.  While there is room, give it a whole
-		 * byte so it is also faster to load it from memory.
-		 */
-		unsigned smm:8;
+		unsigned : 22;
 	};
 } kvm_mmu_page_role_t;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 typedef union kvm_mmu_root_flags {
 	unsigned word;
 	struct {
@@ -364,6 +335,7 @@ typedef union kvm_mmu_root_flags {
 		unsigned unused:29;
 	};
 } kvm_mmu_root_flags_t;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 typedef struct kvm_rmap_head {
 	unsigned long val;
@@ -387,21 +359,29 @@ typedef struct kvm_mmu_page {
 	 */
 	gfn_t gfn;
 	kvm_mmu_page_role_t role;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_mmu_root_flags_t root_flags;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	pgprot_t *spt;
 	gva_t gva;	/* the shadow PT map guest virtual addresses from */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* hold the gpa of guest huge page table entry */
 	/* for direct shadow page table level */
 	gpa_t huge_gpt_gpa;
 	/* hold the gfn of each spte inside spt */
 	gfn_t *gfns;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool unsync;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool host_synced;		/* host kernel range already synced */
 	bool guest_kernel_synced;	/* guest kernel range already synced */
 	bool guest_user_synced;		/* guest user range synced */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool released;			/* root already under release */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	atomic_t atomic_unsync;	/* there are atomicaly updated of PT entries */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	int root_count;		/* Currently serving as active root */
 	unsigned int unsync_children;
 	struct kvm_rmap_head parent_ptes; /* rmap pointers to parent sptes */
@@ -411,12 +391,14 @@ typedef struct kvm_mmu_page {
 
 	DECLARE_BITMAP(unsync_child_bitmap, 512);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Number of writes since the last time traversal visited this page.  */
 	atomic_t write_flooding_count;
 #ifdef	CONFIG_GUEST_MM_SPT_LIST
 	struct list_head gmm_entry;	/* entry at the gmm list of SPs */
 #endif /* CONFIG_GUEST_MM_SPT_LIST */
 	gmm_struct_t *gmm;		/* the gmm in whose list the entry */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 } kvm_mmu_page_t;
 
 /* page fault handling results */
@@ -466,11 +448,14 @@ typedef const pt_struct_t * (*get_vcpu_pt_struct_func_t)(struct kvm_vcpu *vcpu);
  * The kvm_mmu structure abstracts the details of the current mmu mode.
  */
 typedef struct kvm_mmu {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	hpa_t	sh_u_root_hpa;	/* shadow PT root for user for guest user running */
 	hpa_t	sh_gk_root_hpa;	/* shadow PT root for user for guest kernel -''- */
 	hpa_t	sh_os_root_hpa;	/* shadow PT root for OS (separate spoaces) */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	hpa_t	gp_root_hpa;	/* physical base of root PT to translate */
 				/* guest physical addresses */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gva_t	sh_u_vptb;	/* shadow base address to map user */
 				/* (and probably OS) PTs to virtual space */
 	gva_t	sh_os_vptb;	/* shadow base address to map kernel */
@@ -478,23 +463,31 @@ typedef struct kvm_mmu {
 	gva_t	sh_os_vab;	/* common hypervisor and guest pointer to */
 				/* border of user and OS spaces */
 	hpa_t	sh_root_hpa;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool	sep_virt_space;	/* separate virtual spaces for OS and user */
 	bool	direct_map;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool	is_spae;	/* extended physical memory is enabled */
 	bool	is_pse;		/* 4 Mb pages is enable for secondary space */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool	paging_on;	/* virtual space translation mode is ON */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool	shadow_pt_on;	/* shadow PT mode is enabled */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool	phys_pt_on;	/* guest physical addresses PT is ON */
 	bool	tdp_on;		/* two dimensional paging is ON */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool	spt_gpa_fault;	/* guest physical address access fault */
 				/* at shodow paging mode */
 	bool	nx;		/* not executable is ??? */
 	bool	u_context_on;	/* guest user MMU context created and is ON */
 	int	pid;		/* guest process ID (mmu context) */
 	int	pid2;		/* guest process ID at secondary space */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	int	root_level;
 	int	shadow_root_level;
 	kvm_mmu_page_role_t base_role;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	u64		*pae_root;
 	u64		*lm_root;
 	/* guest PT roots pointers */
@@ -513,11 +506,13 @@ typedef struct kvm_mmu {
 	pgprotval_t	pdptes[4];	/* current root level PTEs registers */
 					/* of VCPU for extended physical */
 					/* address mode (SPAE) */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	gpa_t		tc_gpa;		/* guest 'physical address' of */
 					/* trap cellar (TRAP_POINT MMU reg.) */
 	struct page	*tc_page;	/* host page of guest trap cellar */
 	void		*tc_kaddr;	/* host virtual address of guest */
 					/* trap cellar */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int		tc_num;		/* number of entries at trap cellar */
 					/* same as TRAP_COUNT / 3 */
 	gmm_struct_t	*gmm;		/* host agent of current guest mm */
@@ -527,6 +522,7 @@ typedef struct kvm_mmu {
 
 	/* jump point, if recovery operation failed */
 	unsigned long	recovery_pfault_jump;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* MMU interceptions control registers state */
 	virt_ctrl_mu_t	virt_ctrl_mu;
@@ -536,13 +532,16 @@ typedef struct kvm_mmu {
 	e2k_mmu_cr_t	init_sh_mmu_cr;
 	mmu_reg_t	init_sh_pid;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Can have large pages at levels 2..last_nonleaf_level-1. */
 	u8	last_nonleaf_level;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	e2k_mu_hw0_t	mu_hw0;
 
 	/* MMU interface */
 	bool (*is_paging)(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	void (*set_vcpu_u_pptb)(struct kvm_vcpu *vcpu, pgprotval_t base);
 	void (*set_vcpu_sh_u_pptb)(struct kvm_vcpu *vcpu, hpa_t root);
 	void (*set_vcpu_sh_gk_pptb)(struct kvm_vcpu *vcpu, hpa_t gk_root);
@@ -553,7 +552,9 @@ typedef struct kvm_mmu {
 	void (*set_vcpu_os_vptb)(struct kvm_vcpu *vcpu, gva_t base);
 	void (*set_vcpu_sh_os_vptb)(struct kvm_vcpu *vcpu, gva_t base);
 	void (*set_vcpu_os_vab)(struct kvm_vcpu *vcpu, gva_t os_virt_base);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	void (*set_vcpu_gp_pptb)(struct kvm_vcpu *vcpu, hpa_t root);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	pgprotval_t (*get_vcpu_u_pptb)(struct kvm_vcpu *vcpu);
 	hpa_t (*get_vcpu_sh_u_pptb)(struct kvm_vcpu *vcpu);
 	hpa_t (*get_vcpu_sh_gk_pptb)(struct kvm_vcpu *vcpu);
@@ -564,31 +565,39 @@ typedef struct kvm_mmu {
 	gva_t (*get_vcpu_os_vptb)(struct kvm_vcpu *vcpu);
 	gva_t (*get_vcpu_sh_os_vptb)(struct kvm_vcpu *vcpu);
 	gva_t (*get_vcpu_os_vab)(struct kvm_vcpu *vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	hpa_t (*get_vcpu_gp_pptb)(struct kvm_vcpu *vcpu);
 	void (*set_vcpu_pt_context)(struct kvm_vcpu *vcpu, unsigned flags);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	void (*set_vcpu_u_pptb_context)(struct kvm_vcpu *vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	void (*init_vcpu_ptb)(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	pgprotval_t (*get_vcpu_context_u_pptb)(struct kvm_vcpu *vcpu);
 	gva_t (*get_vcpu_context_u_vptb)(struct kvm_vcpu *vcpu);
 	pgprotval_t (*get_vcpu_context_os_pptb)(struct kvm_vcpu *vcpu);
 	gva_t (*get_vcpu_context_os_vptb)(struct kvm_vcpu *vcpu);
 	gva_t (*get_vcpu_context_os_vab)(struct kvm_vcpu *vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	hpa_t (*get_vcpu_context_gp_pptb)(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	pgprotval_t (*get_vcpu_pdpte)(struct kvm_vcpu *vcpu, int index);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* MMU page tables management functions */
 	pf_res_t (*page_fault)(struct kvm_vcpu *vcpu, gva_t gva, u32 err,
 			       bool prefault, gfn_t *gfn, kvm_pfn_t *pfn);
 	void (*inject_page_fault)(struct kvm_vcpu *vcpu,
 				  struct kvm_arch_exception *fault);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gpa_t (*gva_to_gpa)(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
-			    struct kvm_arch_exception *exception,
-			    gw_attr_t *gw_res);
+			    struct kvm_arch_exception *exception, gw_attr_t *gw_res);
 	void (*update_spte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
 			    pgprot_t *spte, pgprotval_t gpte);
 	int (*sync_gva)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm, gva_t gva);
 	long (*sync_gva_range)(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
 			       gva_t gva_start, gva_t gva_end);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	int (*sync_page)(struct kvm_vcpu *vcpu, kvm_mmu_page_t *sp);
 } kvm_mmu_t;
 
@@ -607,13 +616,15 @@ typedef struct kvm_mmu_pt_ops {
 					/* structure, if is enable */
 	get_pt_struct_func_t get_host_pt_struct;
 	get_vcpu_pt_struct_func_t get_vcpu_pt_struct;
-	get_pt_struct_func_t get_gp_pt_struct;
 
 	/* MMU page tables management functions */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	pgprotval_t (*get_spte_valid_mask)(struct kvm *kvm);
 	pgprotval_t (*get_spte_pfn_mask)(struct kvm *kvm);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	gfn_t (*kvm_gfn_to_index)(struct kvm *kvm, gfn_t gfn, gfn_t base_gfn,
 				  int level_id);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool (*kvm_is_thp_gpmd_invalidate)(struct kvm_vcpu *vcpu,
 				pgprot_t old_gpmd,  pgprot_t new_gpmd);
 	void (*kvm_vmlpt_kernel_spte_set)(struct kvm *kvm, pgprot_t *spte,
@@ -631,16 +642,16 @@ typedef struct kvm_mmu_pt_ops {
 				struct kvm_memory_slot *slot, u64 gfn);
 	void (*account_shadowed)(struct kvm *kvm, struct kvm_mmu_page *sp);
 	void (*unaccount_shadowed)(struct kvm *kvm, struct kvm_mmu_page *sp);
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int (*walk_shadow_pts)(struct kvm_vcpu *vcpu, gva_t addr,
 				struct kvm_shadow_trans *st, hpa_t spt_root);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	pf_res_t (*nonpaging_page_fault)(struct kvm_vcpu *vcpu, gva_t gva,
 				u32 error_code, bool prefault,
 				gfn_t *gfnp, kvm_pfn_t *pfnp);
 	pgprot_t (*nonpaging_gpa_to_pte)(struct kvm_vcpu *vcpu, gva_t addr);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	long (*kvm_hv_mmu_page_fault)(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 				      intc_info_mu_t *intc_info_mu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	void (*kvm_mmu_pte_write)(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
 				  gpa_t gpa, const u8 *new, int bytes,
 				  unsigned long flags);
@@ -652,8 +663,10 @@ typedef struct kvm_mmu_pt_ops {
 			unsigned long flags);
 	int (*shadow_protection_fault)(struct kvm_vcpu *vcpu,
 				gpa_t addr, kvm_mmu_page_t *sp);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	void (*direct_unmap_prefixed_mmio_gfn)(struct kvm *kvm, gfn_t gfn);
 	void (*kvm_mmu_free_page)(struct kvm *kvm, struct kvm_mmu_page *sp);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	void (*copy_guest_shadow_root_range)(struct kvm_vcpu *vcpu,
 			gmm_struct_t *gmm, pgprot_t *dst_root, pgprot_t *src_root,
 			int start_index, int end_index);
@@ -661,6 +674,7 @@ typedef struct kvm_mmu_pt_ops {
 	void (*zap_linked_children)(struct kvm *kvm, pgprot_t *root_spt,
 				    int start_index, int end_index);
 	void (*mark_parents_unsync)(struct kvm *kvm, kvm_mmu_page_t *sp);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	int (*prepare_zap_page)(struct kvm *kvm, struct kvm_mmu_page *sp,
 				struct list_head *invalid_list);
 	bool (*unmap_gfn_range)(struct kvm *kvm, struct kvm_gfn_range *range);
@@ -670,23 +684,11 @@ typedef struct kvm_mmu_pt_ops {
 	void (*arch_mmu_enable_log_dirty_pt_masked)(struct kvm *kvm,
 					struct kvm_memory_slot *slot,
 					gfn_t gfn_offset, unsigned long mask);
-	bool (*slot_handle_ptes_level_range)(struct kvm *kvm,
-			const struct kvm_memory_slot *memslot,
-			slot_level_handler fn, int start_level, int end_level,
-			gfn_t start_gfn, gfn_t end_gfn, bool lock_flush_tlb);
 	bool (*slot_handle_rmap_write_protect)(struct kvm *kvm,
 			const struct kvm_memory_slot *memslot,
 			slot_level_handler fn, bool lock_flush_tlb);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool (*slot_handle_collapsible_sptes)(struct kvm *kvm,
-			const struct kvm_memory_slot *memslot,
-			slot_level_handler fn, bool lock_flush_tlb);
-	bool (*slot_handle_clear_dirty)(struct kvm *kvm,
-			const struct kvm_memory_slot *memslot,
-			slot_level_handler fn, bool lock_flush_tlb);
-	bool (*slot_handle_largepage_remove_write_access)(struct kvm *kvm,
-			const struct kvm_memory_slot *memslot,
-			slot_level_handler fn, bool lock_flush_tlb);
-	bool (*slot_handle_set_dirty)(struct kvm *kvm,
 			const struct kvm_memory_slot *memslot,
 			slot_level_handler fn, bool lock_flush_tlb);
 
@@ -700,14 +702,17 @@ typedef struct kvm_mmu_pt_ops {
 
 	void (*dump_host_and_guest_pts)(struct kvm *kvm, gmm_struct_t *gmm,
 					    e2k_addr_t start, e2k_addr_t end);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* MMU interafce init functions */
 	void (*mmu_init_vcpu_pt_struct)(struct kvm_vcpu *vcpu);
 	void (*kvm_init_mmu_pt_structs)(struct kvm *kvm);
 	void (*kvm_init_nonpaging_pt_structs)(struct kvm *kvm, hpa_t root);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	void (*setup_shadow_pt_structs)(struct kvm_vcpu *vcpu);
 	void (*kvm_init_mmu_spt_context)(struct kvm_vcpu *vcpu,
 						struct kvm_mmu *context);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	void (*kvm_init_mmu_tdp_context)(struct kvm_vcpu *vcpu,
 						struct kvm_mmu *context);
 	void (*kvm_init_mmu_nonpaging_context)(struct kvm_vcpu *vcpu,
@@ -719,8 +724,10 @@ typedef struct intc_mu_state {
 					/* gfn->pfn translation */
 	pf_res_t pfres;			/* page fault handling result */
 	bool may_be_retried;		/* the MMU request can be retied */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool ignore_notifier;		/* the MMU request should ignore the
 					 * MMU notifier status */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 } intc_mu_state_t;
 
 /* define exit reasons (requests) from guest to host */
@@ -728,7 +735,9 @@ typedef struct intc_mu_state {
 #define EXIT_REASON_MMIO_REQ	1
 #define EXIT_REASON_IOPORT_REQ	2
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	EXIT_NOTIFY_IO		3
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	EXIT_SHUTDOWN		4
 
@@ -794,7 +803,7 @@ typedef struct kvm_guest_virq {
  * Context that is saved and restored by software when
  * switching from hypervisor to guest or vice versa.
  */
-typedef struct kvm_sw_cpu_context {
+struct kvm_sw_cpu_context {
 	int osem;
 	bool in_hypercall;
 	bool in_fast_syscall;
@@ -817,7 +826,6 @@ typedef struct kvm_sw_cpu_context {
 
 	e2k_usd_t usd;
 	e2k_sbr_t sbr;
-	e2k_usincr_t usincr;
 	/* Save free space here when entering hypercall so that we
 	 * can restore hypervisor's USD.size on hypercall return.
 	 * Note that when CORE_MODE.descr_v7=1 can rely on USFS instead. */
@@ -838,7 +846,9 @@ typedef struct kvm_sw_cpu_context {
 	e2k_usd_t host_usd;
 	e2k_sbr_t host_sbr;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	e2k_mem_crs_t	crs;	/* only for PV guest */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	long ret_value;		/* return value from hypercall to guest */
 
@@ -921,7 +931,10 @@ typedef struct kvm_sw_cpu_context {
 	clw_reg_t us_cl_m2;
 	clw_reg_t us_cl_m3;
 #endif
-} kvm_sw_cpu_context_t;
+
+	/* CPU_HWBUG_GENERATIONS_L2_PREF */
+	bool l2_prefetcher_enabled;
+};
 
 /*
  * Context that is saved and restored by software _only_ for
@@ -948,16 +961,17 @@ typedef struct kvm_intc_cpu_context {
 				/* at the interception moment */
 				/* should be the same as INTC_INFO_CU.hi.exc */
 	u64 exc_to_create;	/* mask of the new exceptions to add at TIRs */
-	u64 exc_to_delete;	/* mask of the exceptions to delete from TIRs */
-	u64 exc_to_pass;	/* mask of the exceptions from source */
-				/* TIRs exceptions to pass to the guest */
 	gva_t exc_IP_to_create;	/* IP to create exceptions like instruction */
 				/* page faults */
 	bool coredump;		/* need to inject a trap with empty TIRs */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool start_gm;		/* first GLAUNCH guest VM */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+	/* These are freezed on interception and unfreezed on writing %tir.lo */
 	e2k_tir_t TIRs[TIR_NUM];
 	u64 sbbp[SBBP_ENTRIES_NUM];
-	u64 intc_mu_to_move;
+	e2k_usincr_t usincr;
 } kvm_intc_cpu_context_t;
 
 struct kvm_epic_page;
@@ -1025,6 +1039,7 @@ typedef struct kvm_hw_cpu_context {
 	u64 pdpte3;
 } kvm_hw_cpu_context_t;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * The structure needs only for paravitualized guest mode:
  *	!vcpu->arch.is_hv && vcpu->arch.is_pv
@@ -1069,6 +1084,7 @@ typedef struct kvm_host_context {
 	/* kgregs of host kernel */
 	struct kernel_gregs	k_gregs;
 } kvm_host_context_t;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_KVM_ASYNC_PF
 struct kvm_apf_ready {
@@ -1078,13 +1094,12 @@ struct kvm_apf_ready {
 #endif /* CONFIG_KVM_ASYNC_PF */
 
 struct kvm_vcpu_arch {
-	kvm_sw_cpu_context_t	sw_ctxt;
+	struct kvm_sw_cpu_context	sw_ctxt;
 	kvm_intc_cpu_context_t	intc_ctxt;
 	kvm_hw_cpu_context_t	hw_ctxt;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_host_context_t	host_ctxt;
 
-	int launched;
-	int last_exit;
 	bool is_pv;			/* VCPU is under paravirtualized */
 					/* support */
 	bool is_hv;			/* VCPU is under hardware virtualized */
@@ -1101,6 +1116,7 @@ struct kvm_vcpu_arch {
 						/* mapped into guest kernel VM */
 						/* to access from guest */
 	e2k_cute_t __user *guest_cut;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	e2k_addr_t guest_phys_base;	/* guest image (kernel) physical base */
 	char *guest_base;		/* guest image (kernel) virtual base */
 	e2k_size_t guest_size;		/* guest image (kernel) size */
@@ -1125,15 +1141,11 @@ struct kvm_vcpu_arch {
 	 */
 	kvm_mmu_t mmu;
 
-	/*
-	 * Pointer to the mmu context currently used for
-	 * gva_to_gpa translations.
-	 */
-	kvm_mmu_t *walk_mmu;
-
 	kvm_arch_mmu_memory_cache_t mmu_pte_list_desc_cache;
 	kvm_arch_mmu_memory_cache_t mmu_page_cache;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_arch_mmu_memory_cache_t mmu_guest_pt_cache;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_arch_mmu_memory_cache_t mmu_page_header_cache;
 
 	/* FIXME: Cache MMIO info is not fully implemented */
@@ -1143,9 +1155,12 @@ struct kvm_vcpu_arch {
 	u64 mmio_gen;
 	u64 mmio_data[2];
 	u64 mmio_offset;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	u64 *mmio_user_data;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	intc_info_mu_t *io_intc_info;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/*
 	 * Indicate whether the access faults on its page table in guest
 	 * which is set when fix page fault and used to detect unhandeable
@@ -1153,19 +1168,24 @@ struct kvm_vcpu_arch {
 	 * FIXME: it is field from x86 arch, so does it need for e2k???
 	 */
 	bool write_fault_to_shadow_pgtable;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* irq vectors used by kvm */
 	int timer_vector;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int sysrq_showstate_vector;
 	int sysrq_nmi_vector;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	u64 apic_base;
 	struct kvm_lapic *apic;		/* kernel irqchip context */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int32_t apic_arb_prio;
 
 	/* Software KVM CEPIC model */
 	u64 epic_base;
 	struct kvm_cepic *epic;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* Hardware guest CEPIC support */
 	raw_spinlock_t epic_dat_lock;	/* lock to update dam_active */
@@ -1174,19 +1194,20 @@ struct kvm_vcpu_arch {
 	ktime_t cepic_idle_start_time;
 
 	int mp_state;
-	int sipi_vector;
-	struct task_struct *guest_task;	/* guest task */
 	struct task_struct *host_task;	/* host task: main VCPU host */
 					/* or VIRQ VCPU host for VIRQ VCPUs */
 	struct mutex lock;		/* host and guest part of VCPU */
 					/* including VIRQ VCPUs */
 					/* synchronization */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct list_head vcpus_to_spin;	/* list of VCPUs to support boot-time */
 					/* spin lock/unlock */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool blocked;			/* VCPU running is blocked */
 	bool unhalted;			/* VCPU was woken up by pv_kick */
 	bool halted;			/* VCPU is halted */
 	bool reboot;			/* VCPU is rebooted */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool on_idle;			/* VCPU is on idle waiting for some */
 					/* events for guest */
 	bool on_spinlock;		/* VCPU is on slow spinlock waiting */
@@ -1196,11 +1217,9 @@ struct kvm_vcpu_arch {
 					/* pass pending VIRQs to guest */
 	bool virq_injected;		/* interrupt is injected to handle */
 					/* pending VIRQs by guest */
-	bool on_virqs_handling;		/* VCPU is handling pending VIRQs */
 	bool vm_exit_wish;		/* VCPU is need to VM exit and */
 					/* exit reason handling */
 	bool trap_wish;			/* VCPU is need to inject traps */
-	bool hcall_irqs_disabled;	/* VCPU entered HCALL with disabled interrupts */
 	unsigned long trap_mask_wish;	/* mask of traps to wish */
 	struct completion exited;	/* guest VCPU thread completed */
 	struct completion released;	/* all VCPU threads completed and */
@@ -1210,6 +1229,8 @@ struct kvm_vcpu_arch {
 	long hrt_period;		/* period of hr timer */
 	long hrt_running_start;		/* VCPU running time when timer */
 					/* was started */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+	bool hcall_irqs_disabled;	/* VCPU entered HCALL with disabled interrupts */
 
 	char *entry_point;	/* startup point of guest image */
 	int args_num;		/* arguments number to pass to guest */
@@ -1220,13 +1241,10 @@ struct kvm_vcpu_arch {
 	kvm_ioport_req_t ioport;	/* IO port access (in()/out()) */
 	void *ioport_data;		/* pointer to IO port data at */
 					/* kvm_run page (now middle) */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int64_t ioport_data_size;	/* max size of IO port data area */
 	uint32_t notifier_io;		/* IO request notifier */
-
-	struct work_struct dump_work;	/* to schedule work to dump */
-					/* guest VCPU state */
-
-	u8 event_exit_inst_len;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	uint32_t exit_shutdown_terminate;
 
@@ -1248,8 +1266,6 @@ struct kvm_vcpu_arch {
 		bool in_pm; /* Is privilidged mode intercepted? */
 	} apf;
 #endif /* CONFIG_KVM_ASYNC_PF */
-
-	u64 gst_mkctxt_trampoline;
 };
 
 typedef struct kvm_lpage_info {
@@ -1259,23 +1275,32 @@ typedef struct kvm_lpage_info {
 typedef struct kvm_arch_memory_slot {
 	kvm_rmap_head_t		*rmap[KVM_NR_PAGE_SIZES];
 	kvm_lpage_info_t	*lpage_info[KVM_NR_PAGE_SIZES - 1];
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	unsigned long		page_size;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_mem_guest_t		guest_areas;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	unsigned short		*gfn_track[KVM_PAGE_TRACK_MAX];
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 } kvm_arch_memory_slot_t;
 
 /* E2K vCPU requests */
 /* Hardware virtualization */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	KVM_REQ_TO_COREDUMP		KVM_ARCH_REQ(0)	/* pending coredump request */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #define	KVM_REQ_MMU_RELOAD		KVM_ARCH_REQ_FLAGS(1, \
 	KVM_REQUEST_WAIT | KVM_REQUEST_NO_WAKEUP)	/* reload GP_PPTB on VCPU */
 
 /* Shadow Page Tables */
 #define	KVM_REQ_ADDR_FLUSH		KVM_ARCH_REQ(2)	/* local flush the TLB address */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	KVM_REQ_MMU_SYNC		KVM_ARCH_REQ(3)	/* FIXME: not implemented */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* Paravirtualization */
 #define	KVM_REQ_KICK			KVM_ARCH_REQ(4)	/* VCPU should be kicked */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	KVM_REG_SHOW_STATE		KVM_ARCH_REQ(5)	/* bit should be cleared */
 							/* after show state of VCPU */
 							/* completion */
@@ -1323,12 +1348,7 @@ do { \
 		kvm_test_request(KVM_REQ_TO_COREDUMP, vcpu)
 #define	kvm_test_and_clear_request_to_coredump(vcpu)	\
 		kvm_check_request(KVM_REQ_TO_COREDUMP, vcpu)
-
-struct kvm_irq_mask_notifier {
-	void (*func)(struct kvm_irq_mask_notifier *kimn, bool masked);
-	int irq;
-	struct hlist_node link;
-};
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 struct ioepic_pt_pin {
 	unsigned pin; /* Guest pin == host pin relative to current IOEPIC */
@@ -1349,7 +1369,8 @@ struct pt_device {
 struct kvm_arch {
 	unsigned long vm_type;	/* virtual machine type */
 	unsigned long flags;
-	kvm_nid_t vmid;		/* VM ID */
+	int vm_id;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool is_pv;		/* paravirtualized VM */
 	bool is_hv;		/* hardware virtualized VM */
 	bool shadow_pt_enable;	/* shadow PT is supported and is base of */
@@ -1359,7 +1380,9 @@ struct kvm_arch {
 	bool tdp_enable;	/* two dimensional paging is supported */
 				/* by hardware MMU and hypervisor */
 	bool shadow_pt_set_up;	/* shadow PT was set up, skip setup on other VCPUs */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	atomic_t vcpus_to_reset;	/* atomic counter of VCPUs ready to reset */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_nidmap_t gpid_nidmap[GPIDMAP_ENTRIES];
 	struct hlist_head gpid_hash[GPID_HASH_SIZE];
 	kvm_gpid_table_t gpid_table;
@@ -1369,21 +1392,25 @@ struct kvm_arch {
 	struct hlist_head gmmid_hash[GMMID_HASH_SIZE];
 	gmmid_table_t gmmid_table;
 	gmm_struct_t *init_gmm;		/* host agent of guest kernel mm */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	/* MMU nonpaging mode */
 	hpa_t nonp_root_hpa;		/* physical base of nonpaging root PT */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/*
 	 * If set, rmaps have been allocated for all memslots and should be
 	 * allocated for any newly created or modified memslots.
 	 */
 	bool memslots_have_rmaps;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_KVM_HV_MMU
 	/* MMU pages statistic */
 	unsigned int n_used_mmu_pages;
-	unsigned int n_requested_mmu_pages;
 	unsigned int n_max_mmu_pages;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	unsigned int indirect_shadow_pages;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	unsigned long mmu_valid_gen;
 	struct hlist_head mmu_page_hash[KVM_NUM_MMU_PAGES];
 
@@ -1396,26 +1423,29 @@ struct kvm_arch {
 
 	kvm_mmu_pt_ops_t mmu_pt_ops;	/* MMU PTs interface */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	kvm_host_info_t __user *host_info;	/* host machine and kernel INFO */
 	kvm_host_info_t *kmap_host_info; /* host machine and kernel INFO */
 					 /* mapped to kernel space */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	kvm_guest_info_t guest_info;	/* guest machine and kernel INFO */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	raw_spinlock_t time_state_lock;	/* lock to update VM time */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool is_epic;	/* 0 - paravirt LAPIC/IO-APIC model */
 			/* 1 - paravirt CEPIC/IO-EPIC model */
 	struct kvm_ioapic *vioapic;
 	struct kvm_ioepic *ioepic;
-	int vapics_in_nmi_mode;
 	struct page *epic_pages; /* HW CEPIC support */
 	struct iommu_domain *iommu_domain;
 	bool ioepic_direct_map;
 	struct list_head ioepic_pt_pin;
 	struct list_head pt_device;
-	unsigned long irq_sources_bitmap;
 	struct kvm_nbsr *nbsr;
 	struct kvm_lt *lt[KVM_MAX_EIOHUB_NUM];
 	struct kvm_spmc *spmc[KVM_MAX_EIOHUB_NUM];
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* boot-time spinlocks manage */
 	struct hlist_head boot_spinlock_hash[BOOT_SPINLOCK_HASH_SIZE];
 	boot_spinlock_unlocked_t boot_spinunlocked_list[BOOT_SPINUNLOCKED_LIST_SIZE];
@@ -1447,11 +1477,7 @@ struct kvm_arch {
 						/* structures */
 	csd_lock_waiter_t csd_lock_free_list[KVM_MAX_CSD_LOCK_FREE_NUM];
 #endif /* CONFIG_SMP */
-
-	/* reads protected by irq_srcu, writes by irq_lock */
-	struct hlist_head irq_ack_notifier_list;
-
-	struct hlist_head mask_notifier_list;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	bool halted;			/* VM is halted */
 	/* sign of reboot VM, true - reboot */
@@ -1465,10 +1491,6 @@ struct kvm_arch {
 
 	/* CEPIC timer frequency (Hz) */
 	unsigned long cepic_freq;
-
-	/* Multiplier for watchdog timer prescaler (allows to slow down
-	 * its frequency) */
-	unsigned long wd_prescaler_mult;
 
 	/* Offset from raw monotonic clock to time of guest start */
 	s64 raw_clock_offset;
@@ -1584,8 +1606,6 @@ typedef enum mmu_retry {
 	DO_MMU_RETRY,
 } mmu_retry_t;
 
-extern void kvm_fire_mask_notifiers(struct kvm *kvm, int irq, bool mask);
-
 extern int kvm_wake_up_vcpu_host(struct kvm_vcpu *vcpu, int wait);
 extern struct kvm_vcpu *kvm_get_vcpu_on_id(struct kvm *kvm, int cpuid);
 extern bool kvm_vcpu_is_bsp(struct kvm_vcpu *vcpu);
@@ -1640,8 +1660,10 @@ extern void kvm_sclkm1_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
 extern void kvm_sclkm2_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
 extern void kvm_sclkm3_write(struct kvm_vcpu *, intc_info_cu_entry_t *);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern struct work_struct kvm_dump_stacks;
 extern void wait_for_print_all_guest_stacks(struct work_struct *work);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void kvm_arch_async_page_present_queued(struct kvm_vcpu *vcpu)
 {

@@ -21,6 +21,7 @@
 #include <linux/dma-map-ops.h>
 #include <linux/of_platform.h>
 #include <linux/irq.h>
+#include <video/vga.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/pic.h>
@@ -32,7 +33,7 @@
 #undef	DEBUG_PASSTHROUGH_MODE
 #undef	DebugPT
 #define	DEBUG_PASSTHROUGH_MODE	1	/* IOMMU Passthrough debugging */
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 #define	DebugPT(fmt, args...)					\
 ({								\
 	if (DEBUG_PASSTHROUGH_MODE || kvm_debug)		\
@@ -194,7 +195,7 @@ static irqreturn_t e2k_iommu_error_interrupt(int irq, void *data);
 #define E2K_IOMMU_LEVEL_MASK(lvl) \
 	(~((1UL << E2K_IOMMU_LEVEL_SHIFT(lvl)) - 1))
 
-const long e2k_iommu_page_sizes[] = {
+static const long e2k_iommu_page_sizes[] = {
 	-1, SZ_1G, SZ_2M, SZ_4K
 };
 #define E2K_IOMMU_PGSIZE(lvl)	e2k_iommu_page_sizes[lvl]
@@ -431,13 +432,16 @@ static void e2k_iommu_flush_all(struct e2k_iommu *i)
 	e2k_iommu_flush(i, 0, 0, FL_ALL);
 }
 
-void e2k_iommu_flush_page(struct device *dev,
+#if 0
+static void e2k_iommu_flush_page(struct device *dev,
 			  const void *virt, phys_addr_t phys)
 {
 	struct e2k_iommu_domain *d =
 			 to_e2k_domain(iommu_get_domain_for_dev(dev));
 	e2k_iommu_flush_pte(d, (unsigned long)virt);
 }
+#endif
+
 static void __e2k_iommu_free_pgtable(struct e2k_iommu_domain *d,
 				unsigned long iova, int lvl, io_pte *ptep);
 
@@ -1003,7 +1007,6 @@ static const struct pci_device_id e2c3_devices[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_3D_IMAGINATION_GX6650)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_IMAGINATION_VXE)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_IMAGINATION_VXD)},
-	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_BIGEV2)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_VP9_G2)},
 	{ }	/* terminate list */
 };
@@ -1386,8 +1389,6 @@ static bool e2k_iommu_capable(struct device *dev, enum iommu_cap cap)
 	}
 }
 
-#define VGA_MEMORY_OFFSET            0x000A0000
-#define VGA_MEMORY_SIZE              0x00020000
 #define RT_MSI_MEMORY_SIZE           0x100000	/* 1 Mb */
 static void e2k_iommu_get_resv_regions(struct device *dev,
 				      struct list_head *head)
@@ -1418,7 +1419,8 @@ static void e2k_iommu_get_resv_regions(struct device *dev,
 		return;
 	list_add_tail(&region->list, head);
 
-	region = iommu_alloc_resv_region(VGA_MEMORY_OFFSET, VGA_MEMORY_SIZE, prot,
+	region = iommu_alloc_resv_region(VGA_FB_PHYS_BASE,
+			2 * VGA_FB_PHYS_SIZE, prot,
 			IOMMU_RESV_RESERVED, GFP_KERNEL);
 	if (!region)
 		return;
@@ -1468,12 +1470,6 @@ static struct iommu_ops e2k_iommu_ops = {
 };
 
 /* Platform API */
-static int e2k_iommu_suspend(struct platform_device *pdev, pm_message_t state)
-{
-	struct e2k_iommu *i = platform_get_drvdata(pdev);
-	e2k_iommu_stop_hw(i);
-	return 0;
-}
 
 static int e2k_iommu_resume(struct platform_device *pdev)
 {
@@ -1484,8 +1480,8 @@ static int e2k_iommu_resume(struct platform_device *pdev)
 
 static void e2k_iommu_shutdown(struct platform_device *pdev)
 {
-	 pm_message_t state = {};
-	e2k_iommu_suspend(pdev, state);
+	struct e2k_iommu *i = platform_get_drvdata(pdev);
+	e2k_iommu_stop_hw(i);
 }
 
 static int __init e2k_iommu_setup(char *str)
@@ -1538,7 +1534,6 @@ static struct platform_driver e2k_iommu_driver = {
 	},
 	.probe    = e2k_iommu_probe,
 	.remove   = e2k_iommu_remove,
-	.suspend  = e2k_iommu_suspend,
 	.resume   = e2k_iommu_resume,
 	.shutdown = e2k_iommu_shutdown,
 };
@@ -1572,7 +1567,7 @@ static void e2k_iommu_virt_enable(struct e2k_iommu *i)
 	}
 }
 
-int kvm_iommu_setup_nonpaging(struct kvm *kvm, struct device *dev)
+static int kvm_iommu_setup_nonpaging(struct kvm *kvm, struct device *dev)
 {
 	unsigned long int_table, domain_id, flags;
 	struct e2k_iommu *i;
@@ -1589,7 +1584,7 @@ int kvm_iommu_setup_nonpaging(struct kvm *kvm, struct device *dev)
 		DebugPT("Enabling single-stage translation for device %s\n", dev_name(dev));
 		e2k_iommu_virt_enable(i);
 		int_table = __pa(page_address(kvm->arch.epic_pages)) >> IO_PAGE_SHIFT;
-		domain_id = kvm->arch.vmid.nr;
+		domain_id = kvm->arch.vm_id;
 	} else {
 		DebugPT("Disabling single-stage translation for device %s\n", dev_name(dev));
 		/* TODO Disable virtualization support in IOMMU */
@@ -1630,7 +1625,7 @@ void e2k_iommu_set_kvm_device(struct device *dev, struct kvm *kvm)
 }
 EXPORT_SYMBOL(e2k_iommu_set_kvm_device);
 
-void kvm_iommu_setup_tdp(struct device *dev, u64 g_page_table, bool enable)
+static void kvm_iommu_setup_tdp(struct device *dev, u64 g_page_table, bool enable)
 {
 	struct e2k_iommu *iommu;
 	struct e2k_iommu_domain *domain;
@@ -1685,7 +1680,7 @@ void kvm_iommu_write_ctrl_ptbar(struct kvm *kvm, u32 ctrl, u64 ptbar)
 		kvm_iommu_setup_tdp(pt_dev->dev, ptbar, 1);
 }
 
-void kvm_iommu_flush_device(struct device *dev, u64 command, u32 vmid)
+static void kvm_iommu_flush_device(struct device *dev, u64 command, u32 vmid)
 {
 	u32 edid = vmid | E2K_IOMMU_EDID_GUEST_MASK;
 	struct e2k_iommu *iommu;
@@ -1721,5 +1716,5 @@ void kvm_iommu_flush(struct kvm *kvm, u64 command)
 	struct pt_device *pt_dev;
 
 	list_for_each_entry(pt_dev, &kvm->arch.pt_device, list)
-		kvm_iommu_flush_device(pt_dev->dev, command, kvm->arch.vmid.nr);
+		kvm_iommu_flush_device(pt_dev->dev, command, kvm->arch.vm_id);
 }

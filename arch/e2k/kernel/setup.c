@@ -62,7 +62,7 @@
 
 #include <asm-l/l_timer.h>
 #include <asm-l/i2c-spi.h>
-#include <asm-l/smp.h>
+#include <asm/smp.h>
 
 
 #undef	DEBUG_PROCESS_MODE
@@ -92,7 +92,6 @@ char command_line[COMMAND_LINE_SIZE] = {'a'};
 #define MACH_TYPE_NAME_E12C		5
 #define MACH_TYPE_NAME_E16C		6
 #define MACH_TYPE_NAME_E2C3		7
-#define MACH_TYPE_NAME_E48C		8
 #define MACH_TYPE_NAME_E8V7		9
 
 /*
@@ -108,7 +107,6 @@ static const char *const native_cpu_type_name[] = {
 	"e12c",
 	"e16c",
 	"e2c3",
-	"e48c",
 	"e8v7",
 };
 
@@ -121,7 +119,6 @@ static const char *const native_mach_type_name[] = {
 	"Elbrus-e2k-e12c",
 	"Elbrus-e2k-e16c",
 	"Elbrus-e2k-e2c3",
-	"Elbrus-e2k-e48c",
 	"Elbrus-e2k-e8v7",
 };
 
@@ -180,12 +177,6 @@ int e2k_get_machine_type_name(int mach_id)
 	case MACHINE_ID_E2C3_LMS:
 	case MACHINE_ID_E2C3:
 		mach_type = MACH_TYPE_NAME_E2C3;
-		break;
-#endif
-#ifdef CONFIG_CPU_E48C
-	case MACHINE_ID_E48C_LMS:
-	case MACHINE_ID_E48C:
-		mach_type = MACH_TYPE_NAME_E48C;
 		break;
 #endif
 #ifdef CONFIG_CPU_E8V7
@@ -270,7 +261,6 @@ static int __init iohub_i2c_line_id_setup(char *str)
 }
 __setup("iohub_i2c_line_id=", iohub_i2c_line_id_setup);
 
-extern int __initdata max_iolinks;
 static int __init max_iolinks_num_setup(char *str)
 {
 	get_option(&str, &max_iolinks);
@@ -282,7 +272,6 @@ static int __init max_iolinks_num_setup(char *str)
 }
 early_param("iolinks", max_iolinks_num_setup);
 
-extern int __initdata max_node_iolinks;
 static int __init max_node_iolinks_num_setup(char *str)
 {
 	get_option(&str, &max_node_iolinks);
@@ -347,12 +336,6 @@ static int __init parse_bootinfo(void)
 			initrd_start = initrd_end = 0;
 		}
 #endif /* CONFIG_BLK_DEV_INITRD */
-
-		/* Workaround against misfortunate 80x30 vmode BOOT leftover  */
-		if (bootblock->vga_mode == 0xe2) {
-			screen_info.orig_y = 30;
-			screen_info.orig_video_lines = 30;
-		};
 	} else {
 		return -1;
 	}
@@ -364,7 +347,7 @@ struct cpu_update_feature {
 	bool set;
 };
 
-void cpu_update_feature_greg(void *arg)
+static void cpu_update_feature_greg(void *arg)
 {
 	struct cpu_update_feature *args = arg;
 	int feature = args->feature;
@@ -452,8 +435,10 @@ void __init e2k_start_kernel_switched_stacks(void)
 	 * to save initial state of debugging registers to enable
 	 * hardware breakpoints
 	 */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* FIXME: debug registers is privileged */
 	if (!paravirt_enabled())
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		native_save_user_only_regs(&current->thread.sw_regs);
 
 	/*
@@ -498,11 +483,20 @@ arch_initcall(mark_linear_kernel_alias_ro);
 
 static void __init setup_cmd_line(char **cmdline_p)
 {
-	*cmdline_p = boot_command_line;
+	char *src = command_line, *dst = boot_command_line;
+	/* Expand devtree command line with boot command line */
+	if (dst[0])
+		strlcat(dst, " ", COMMAND_LINE_SIZE);
+	strlcat(dst, src, COMMAND_LINE_SIZE);
+	*cmdline_p = dst;
 
 	jump_label_init();
 	parse_early_param();
 }
+
+#ifdef CONFIG_SECONDARY_SPACE_SUPPORT
+#define	_BINCOMP_STK_LIM	(8*1024*1024)
+#endif
 
 static void __init rlim_init(void)
 {
@@ -619,9 +613,6 @@ void __init setup_arch(char **cmdline_p)
 
 	device_tree_init();
 
-	/* Must be called after paging_init() & device_tree_init() */
-	l_setup_vga();
-
 	/* ACPI Tables are to be placed to phys addr in machine.setup_arch().
 	 * acpi_boot_table_init() will parse the ACPI tables (if they are) for
 	 * possible boot-time SMP configuration. If machine does not support
@@ -725,10 +716,12 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 
 static void *c_update(loff_t *pos)
 {
-	while (*pos < NR_CPUS && !cpumask_test_cpu(*pos, cpu_online_mask))
-		++*pos;
+	if (*pos)
+		*pos = cpumask_next(*pos - 1, cpu_online_mask);
+	else
+		*pos = cpumask_first(cpu_online_mask);
 
-	return *pos < NR_CPUS ? &cpu_data[*pos] : NULL;
+	return *pos < nr_cpu_ids ? &cpu_data[*pos] : NULL;
 }
 
 static void *c_start(struct seq_file *m, loff_t *pos)
@@ -894,8 +887,7 @@ static DEVICE_ATTR_RW(cu_hw1);
 static ssize_t l2_ctrl_ext_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "0x%lx\n",
-		       read_DCACHE_L2_reg(_E2K_DCACHE_L2_CTRL_EXT_REG, 0));
+	return sprintf(buf, "0x%llx\n", AW(read_L2_CTRL_EXT(0)));
 }
 
 static ssize_t l2_ctrl_ext_store(struct device *dev,
@@ -903,13 +895,13 @@ static ssize_t l2_ctrl_ext_store(struct device *dev,
 				 const char *buf, size_t count)
 {
 	unsigned long flags;
-	u64 l2_ctrl_ext;
+	e2k_l2_ctrl_ext_t l2_ctrl_ext;
 
-	if (kstrtoull(buf, 0, &l2_ctrl_ext) < 0)
+	if (kstrtoull(buf, 0, &AW(l2_ctrl_ext)) < 0)
 		return -EINVAL;
 
 	raw_all_irq_save(flags);
-	write_DCACHE_L2_reg(l2_ctrl_ext, _E2K_DCACHE_L2_CTRL_EXT_REG, 0);
+	write_L2_CTRL_EXT(l2_ctrl_ext, 0);
 	raw_all_irq_restore(flags);
 
 	return count;

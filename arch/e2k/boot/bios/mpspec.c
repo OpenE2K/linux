@@ -8,7 +8,7 @@
 
 #include <asm/glob_regs.h>
 #include <asm/mpspec.h>
-#include "../pic.h"
+#include "pic/pic.h"
 #include "pci.h"
 
 #undef BIOS_DEBUG
@@ -17,7 +17,7 @@
 
 #define	CONFIG_DEBUG_MPTABLE	0
 
-#include "printk.h"
+#include "console/printk.h"
 
 static int mp_timers_num = 0;
 
@@ -117,7 +117,7 @@ void smp_write_processor(struct mpc_table *mc,
  * Having the proper apicid's in the table so the non-bootstrap
  *  processors can be woken up should be enough.
  */
-void smp_write_processors(struct mpc_table *mc, 
+void smp_write_processors(struct mpc_table *mc,
 			unsigned int phys_cpu_num)
 {
 	int i;
@@ -160,7 +160,7 @@ void smp_write_processors(struct mpc_table *mc,
 			cpu_flags,
 			cpu_features, cpu_feature_flags, cepic_timer_freq
 		);
-	
+
 	}
 }
 
@@ -177,7 +177,7 @@ void smp_write_bus(struct mpc_table *mc,
 }
 
 void smp_write_ioapic(struct mpc_table *mc,
-	unsigned char id, unsigned char ver, 
+	unsigned char id, unsigned char ver,
 	unsigned long apicaddr)
 {
 	struct mpc_ioapic *mpc;
@@ -276,7 +276,7 @@ void smp_i2c_spi_timer(struct mpc_table *mc,
 	mp_timers_num++;
 }
 
-void smp_i2c_spi_dev(struct mpc_table *mc, unsigned char max_channel, 
+void smp_i2c_spi_dev(struct mpc_table *mc, unsigned char max_channel,
 			unsigned char irq, unsigned long pcidevaddr)
 {
 	struct mpc_config_i2c *mpc;
@@ -366,16 +366,3 @@ void smp_write_compatibility_address_space(struct mpc_table *mc,
 	mpe->mpe_range_list = range_list;
 	smp_add_mpe_entry(mc, (mpe_t)mpe);
 }
-
-#if 0 
-/* memcpy standard block */
-const static char smpblock[] =
-{0x5F, 0x4D, 0x50, 0x5F, 0x00, 0x00, 0x00,
- 0x00, 0x01, 0x04, 0x9B, 0x05, 0x00, 0x00, 0x00, 0x00
-};
-void write_smp_table(void *v)
-{
-	memcpy(v, smpblock, sizeof(smpblock));
-}
-#endif /* 0 */
-

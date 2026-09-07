@@ -18,6 +18,7 @@
 
 #include <asm-l/i2c-spi.h>
 #include <asm-l/gpio.h>
+#include <asm-l/setup.h>
 
 #if IS_ENABLED(CONFIG_INPUT_LTC2954)
 #include <linux/gpio.h>
@@ -64,8 +65,8 @@ static int set_iohub_eth_for_special_reset(int m, void __iomem *eth_addr)
 	boot_writel(m, eth_addr + E_BASE_ADDR);
 	(void)boot_readl(eth_addr + E_BASE_ADDR);
 
-	pr_info("Special reboot data written to 0x%llx\n",
-		(u64)(eth_addr + E_BASE_ADDR));
+	pr_info("Special reboot data written to 0x%lx\n",
+		(unsigned long)(eth_addr + E_BASE_ADDR));
 	return 0;
 }
 
@@ -91,8 +92,8 @@ static int set_eioh_eth_for_special_reset(int m, void __iomem *eth_addr)
 
 	boot_writel(m, eth_addr + MGB_E_BASE_ADDR);
 	(void)boot_readl(eth_addr + MGB_E_BASE_ADDR);
-	pr_info("Special reboot data written to 0x%llx\n",
-		(u64)(eth_addr + MGB_E_BASE_ADDR));
+	pr_info("Special reboot data written to 0x%lx\n",
+		(unsigned long)(eth_addr + MGB_E_BASE_ADDR));
 	return 0;
 }
 
@@ -131,7 +132,7 @@ found:
 	ret = pci_enable_device(pdev);
 	if (WARN_ON(ret))
 		return ret;
-	return l_set_boot_mode_hook(mode, (void *)phys_regs);
+	return l_set_boot_mode_hook(mode, (void __iomem __force *)phys_regs);
 }
 
 static int l_set_boot_mode(int mode)

@@ -979,6 +979,9 @@ static u16 rs_get_adjacent_rate(struct iwl_mvm *mvm, u8 index, u16 rate_mask,
 	if (is_type_a_band(rate_type) || !is_type_legacy(rate_type)) {
 		int i;
 		u32 mask;
+#ifdef CONFIG_MCST
+		mask = 0;
+#endif
 
 		/* Find the previous rate that is in the rate mask */
 		i = index - 1;

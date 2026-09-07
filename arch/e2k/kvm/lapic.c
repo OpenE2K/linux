@@ -22,10 +22,12 @@
 #include <asm/page.h>
 #include <asm/current.h>
 #include <asm/atomic.h>
-#include <asm/kvm/runstate.h>
 #include <asm/kvm/guest/irq.h>
 #include <trace/events/kvm.h>
 #include <asm/kvm/trace_kvm.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/runstate.h>
+# endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG
 
@@ -147,6 +149,7 @@ static inline void apic_set_reg(struct kvm_lapic *apic, int reg_off, u32 val)
 		((u32 *) (apic->regs + reg_off)));
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int apic_test_and_set_vector(int vec, void *bitmap)
 {
 	return test_and_set_bit(VEC_POS(vec), (bitmap) + REG_POS(vec));
@@ -166,6 +169,7 @@ static inline void apic_clear_vector(int vec, void *bitmap)
 {
 	clear_bit(VEC_POS(vec), (bitmap) + REG_POS(vec));
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline int apic_hw_enabled(struct kvm_lapic *apic)
 {
@@ -177,10 +181,12 @@ static inline int apic_sw_enabled(struct kvm_lapic *apic)
 	return apic_get_reg(apic, APIC_SPIV) & APIC_SPIV_APIC_ENABLED;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int apic_enabled(struct kvm_lapic *apic)
 {
 	return apic_sw_enabled(apic) &&	apic_hw_enabled(apic);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define LVT_MASK	\
 	(APIC_LVT_MASKED | APIC_SEND_PENDING | APIC_VECTOR_MASK)
@@ -194,6 +200,7 @@ static inline int kvm_apic_id(struct kvm_lapic *apic)
 	return GET_APIC_ID(apic_get_reg(apic, APIC_ID));
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int apic_lvt_enabled(struct kvm_lapic *apic, int lvt_type)
 {
 	return !(apic_get_reg(apic, lvt_type) & APIC_LVT_MASKED);
@@ -208,6 +215,7 @@ static inline int apic_lvtt_period(struct kvm_lapic *apic)
 {
 	return apic_get_reg(apic, APIC_LVTT) & APIC_LVT_TIMER_PERIODIC;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline int apic_lvt_nmi_mode(u32 lvt_val)
 {
@@ -254,6 +262,7 @@ static int find_highest_vector(void *bitmap)
 		return fls(word[word_offset << 2]) - 1 + (word_offset << 5);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int apic_test_and_set_irr(int vec, struct kvm_lapic *apic)
 {
 	if (unlikely(apic_test_and_set_vector(vec, apic->regs + APIC_IRR)))
@@ -262,6 +271,7 @@ static inline int apic_test_and_set_irr(int vec, struct kvm_lapic *apic)
 	apic->irr_pending = true;
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline int apic_search_irr(struct kvm_lapic *apic)
 {
@@ -283,31 +293,7 @@ static inline int apic_find_highest_irr(struct kvm_lapic *apic)
 	return result;
 }
 
-static inline void apic_clear_irr(int vec, struct kvm_lapic *apic)
-{
-	apic->irr_pending = false;
-	apic_clear_vector(vec, apic->regs + APIC_IRR);
-	if (apic_search_irr(apic) != -1)
-		apic->irr_pending = true;
-}
-
-int kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu)
-{
-	struct kvm_lapic *apic = vcpu->arch.apic;
-	int highest_irr;
-
-	/* This may race with setting of irr in __apic_accept_irq() and
-	 * value returned may be wrong, but kvm_vcpu_kick() in __apic_accept_irq
-	 * will cause vmexit immediately and the value will be recalculated
-	 * on the next vmentry.
-	 */
-	if (!apic)
-		return 0;
-	highest_irr = apic_find_highest_irr(apic);
-
-	return highest_irr;
-}
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode);
 
@@ -326,6 +312,7 @@ int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq)
 	return __apic_accept_irq(apic, irq->delivery_mode, irq->vector,
 			irq->level, irq->trig_mode);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline int apic_find_highest_isr(struct kvm_lapic *apic)
 {
@@ -437,6 +424,7 @@ int kvm_apic_match_dest(struct kvm_vcpu *vcpu, struct kvm_lapic *source,
 	return result;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Add a pending IRQ into lapic.
  * Return 1 if successfully added and 0 if discarded.
@@ -483,24 +471,17 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 				DebugVIRQs("LAPIC #%d edge mode VIRQ coalesced "
 					"for vector %x\n",
 					vcpu->vcpu_id, vector);
-				if (vector == 0x49 ||
-					vector == 0x40 ||
-					vector == 0x81 ||
-					vector == 0xfd ||
-					(vector == 0xef &&
-						apic_lvtt_period(apic)))
+				if (vector == 0x49 || vector == 0x40 ||
+						vector == 0x81 || vector == 0xfd ||
+						(vector == 0xef && apic_lvtt_period(apic)))
 					break;
-				if (vector == 0xef &&
-					!apic_lvtt_period(apic) &&
-					atomic_read(
-						&apic->lapic_timer.pending) <=
-							2 &&
-					atomic_read(
-						&apic->lapic_timer.pending) >
-							0)
+				if (vector == 0xef && !apic_lvtt_period(apic) &&
+				    atomic_read(&apic->lapic_timer.pending) <= 2 &&
+				    atomic_read(&apic->lapic_timer.pending) > 0) {
 					/* it can be while switch periodic */
 					/* mode to one shot or back */
 					break;
+				}
 			}
 			DebugVIRQs("LAPIC #%d current pending VIRQs num %d\n",
 				vcpu->vcpu_id,
@@ -528,7 +509,7 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 	case APIC_DM_NMI:
 		DebugKVMVEC("delivery mode is APIC_DM_NMI\n");
 		result = 1;
-		kvm_inject_nmi(vcpu);
+		kvm_apic_nmi_deliver(vcpu);
 		kvm_vcpu_kick(vcpu);
 		break;
 
@@ -554,7 +535,6 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			   vcpu->vcpu_id, vector);
 		if (vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
 			result = 1;
-			vcpu->arch.sipi_vector = vector;
 			vcpu->arch.mp_state = KVM_MP_STATE_SIPI_RECEIVED;
 			kvm_inject_lapic_virq(apic);
 		}
@@ -582,43 +562,6 @@ int kvm_apic_compare_prio(struct kvm_vcpu *vcpu1, struct kvm_vcpu *vcpu2)
 	return vcpu1->arch.apic_arb_prio - vcpu2->arch.apic_arb_prio;
 }
 
-#ifdef CONFIG_KVM_HW_VIRTUALIZATION
-static u32 hw_apic_find_cepic_priority(struct kvm_lapic *apic)
-{
-	int i;
-
-	for (i = MAX_CEPIC_PRIORITY; i >= 0; i--) {
-		if (apic->cepic_vector[i])
-			return i;
-	}
-
-	pr_err("%s(): could not find cepic priority\n", __func__);
-
-	return 0;
-}
-
-void hw_apic_set_eoi(struct kvm_lapic *apic)
-{
-	union cepic_eoi reg_eoi;
-	union cepic_cpr reg_cpr;
-	u32 cepic_priority = hw_apic_find_cepic_priority(apic);
-	u32 cepic_vector = apic->cepic_vector[cepic_priority];
-
-	reg_eoi.raw = 0;
-	reg_eoi.rcpr = cepic_priority;
-	epic_write_guest_w(CEPIC_EOI, reg_eoi.raw);
-
-	/* Restore CPR */
-	reg_cpr.raw = 0;
-	reg_cpr.cpr = cepic_priority;
-	epic_write_guest_w(CEPIC_CPR, reg_cpr.raw);
-
-	kvm_ioapic_update_eoi(apic->vcpu->kvm, cepic_vector);
-
-	apic->cepic_vector[cepic_priority] = 0;
-}
-#endif
-
 void sw_apic_set_eoi(struct kvm_lapic *apic)
 {
 	int vector = apic_find_highest_isr(apic);
@@ -636,42 +579,6 @@ void sw_apic_set_eoi(struct kvm_lapic *apic)
 	if (!(apic_get_reg(apic, APIC_SPIV) & APIC_SPIV_DIRECTED_EOI))
 		kvm_ioapic_update_eoi(apic->vcpu->kvm, vector);
 }
-
-static void apic_send_ipi(struct kvm_lapic *apic)
-{
-	u32 icr_low = apic_get_reg(apic, APIC_ICR);
-	u32 icr_high = apic_get_reg(apic, APIC_ICR2);
-	struct kvm_lapic_irq irq;
-
-	irq.vector = icr_low & APIC_VECTOR_MASK;
-	irq.delivery_mode = icr_low & APIC_MODE_MASK;
-	irq.dest_mode = icr_low & APIC_DEST_MASK;
-	irq.level = icr_low & APIC_INT_ASSERT;
-	irq.trig_mode = icr_low & APIC_INT_LEVELTRIG;
-	irq.shorthand = icr_low & APIC_SHORT_MASK;
-	if (apic_x2apic_mode(apic))
-		irq.dest_id = icr_high;
-	else
-		irq.dest_id = GET_XAPIC_DEST_FIELD(icr_high);
-
-	trace_kvm_apic_ipi(icr_low, irq.dest_id);
-
-	apic_debug("icr_high 0x%x, icr_low 0x%x, "
-		   "short_hand 0x%x, dest 0x%x, trig_mode 0x%x, level 0x%x, "
-		   "dest_mode 0x%x, delivery_mode 0x%x, vector 0x%x\n",
-		   icr_high, icr_low, irq.shorthand, irq.dest_id,
-		   irq.trig_mode, irq.level, irq.dest_mode, irq.delivery_mode,
-		   irq.vector);
-
-	kvm_irq_delivery_to_apic(apic->vcpu->kvm, apic, &irq);
-}
-
-#ifdef CONFIG_KVM_HW_VIRTUALIZATION
-u32 hw_apic_get_tmcct(struct kvm_lapic *apic)
-{
-	return epic_read_guest_w(CEPIC_TIMER_CUR);
-}
-#endif
 
 u32 sw_apic_get_tmcct(struct kvm_lapic *apic)
 {
@@ -725,16 +632,86 @@ u32 sw_apic_get_tmcct(struct kvm_lapic *apic)
 	return tmcct;
 }
 
+u32 sw_apic_read_nm(struct kvm_lapic *apic)
+{
+	return apic_get_reg(apic, APIC_NM);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 #ifdef CONFIG_KVM_HW_VIRTUALIZATION
+static u32 hw_apic_find_cepic_priority(struct kvm_lapic *apic)
+{
+	int i;
+
+	for (i = MAX_CEPIC_PRIORITY; i >= 0; i--) {
+		if (apic->cepic_vector[i])
+			return i;
+	}
+
+	pr_err("%s(): could not find cepic priority\n", __func__);
+
+	return 0;
+}
+
+void hw_apic_set_eoi(struct kvm_lapic *apic)
+{
+	union cepic_eoi reg_eoi;
+	union cepic_cpr reg_cpr;
+	u32 cepic_priority = hw_apic_find_cepic_priority(apic);
+	u32 cepic_vector = apic->cepic_vector[cepic_priority];
+
+	reg_eoi.raw = 0;
+	reg_eoi.rcpr = cepic_priority;
+	epic_write_guest_w(CEPIC_EOI, reg_eoi.raw);
+
+	/* Restore CPR */
+	reg_cpr.raw = 0;
+	reg_cpr.cpr = cepic_priority;
+	epic_write_guest_w(CEPIC_CPR, reg_cpr.raw);
+
+	kvm_ioapic_update_eoi(apic->vcpu->kvm, cepic_vector);
+
+	apic->cepic_vector[cepic_priority] = 0;
+}
+
+u32 hw_apic_get_tmcct(struct kvm_lapic *apic)
+{
+	return epic_read_guest_w(CEPIC_TIMER_CUR);
+}
+
 u32 hw_apic_read_nm(struct kvm_lapic *apic)
 {
 	return epic_read_guest_w(CEPIC_PNMIRR);
 }
 #endif
 
-u32 sw_apic_read_nm(struct kvm_lapic *apic)
+static void apic_send_ipi(struct kvm_lapic *apic)
 {
-	return apic_get_reg(apic, APIC_NM);
+	u32 icr_low = apic_get_reg(apic, APIC_ICR);
+	u32 icr_high = apic_get_reg(apic, APIC_ICR2);
+	struct kvm_lapic_irq irq;
+
+	irq.vector = icr_low & APIC_VECTOR_MASK;
+	irq.delivery_mode = icr_low & APIC_MODE_MASK;
+	irq.dest_mode = icr_low & APIC_DEST_MASK;
+	irq.level = icr_low & APIC_INT_ASSERT;
+	irq.trig_mode = icr_low & APIC_INT_LEVELTRIG;
+	irq.shorthand = icr_low & APIC_SHORT_MASK;
+	if (apic_x2apic_mode(apic))
+		irq.dest_id = icr_high;
+	else
+		irq.dest_id = GET_XAPIC_DEST_FIELD(icr_high);
+
+	trace_kvm_apic_ipi(icr_low, irq.dest_id);
+
+	apic_debug("icr_high 0x%x, icr_low 0x%x, "
+		   "short_hand 0x%x, dest 0x%x, trig_mode 0x%x, level 0x%x, "
+		   "dest_mode 0x%x, delivery_mode 0x%x, vector 0x%x\n",
+		   icr_high, icr_low, irq.shorthand, irq.dest_id,
+		   irq.trig_mode, irq.level, irq.dest_mode, irq.delivery_mode,
+		   irq.vector);
+
+	kvm_irq_delivery_to_apic(apic->vcpu->kvm, apic, &irq);
 }
 
 static u32 __apic_read(struct kvm_lapic *apic, unsigned int offset)
@@ -870,6 +847,7 @@ void start_hw_apic_timer(struct kvm_lapic *apic, u32 apic_tmict)
 }
 #endif
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void start_sw_apic_timer(struct kvm_lapic *apic, u32 apic_tmict)
 {
 	ktime_t now;
@@ -946,6 +924,7 @@ again:
 			   ktime_to_ns(ktime_add_ns(now,
 					apic->lapic_timer.period)));
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void apic_manage_nmi_watchdog(struct kvm_lapic *apic, u32 lvt0_val)
 {
@@ -953,12 +932,9 @@ static void apic_manage_nmi_watchdog(struct kvm_lapic *apic, u32 lvt0_val)
 
 	if (apic_lvt_nmi_mode(lvt0_val)) {
 		if (!nmi_wd_enabled) {
-			apic_debug("Receive NMI setting on APIC_LVT0 "
-				   "for cpu %d\n", apic->vcpu->vcpu_id);
-			apic->vcpu->kvm->arch.vapics_in_nmi_mode++;
+			apic_debug("Receive NMI setting on APIC_LVT0 for cpu %d\n",
+					apic->vcpu->vcpu_id);
 		}
-	} else if (nmi_wd_enabled) {
-		apic->vcpu->kvm->arch.vapics_in_nmi_mode--;
 	}
 }
 
@@ -1049,8 +1025,9 @@ static int apic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 				apic_set_reg(apic, APIC_LVTT + 0x10 * i,
 					     lvt_val | APIC_LVT_MASKED);
 			}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 			atomic_set(&apic->lapic_timer.pending, 0);
-
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		}
 		break;
 	}
@@ -1088,10 +1065,12 @@ static int apic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		fallthrough;
 
 	case APIC_TMICT:
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		if (!apic->lapic_timer.started) {
 			DebugKVMSH("VCPU #%d local apic timer is starting up\n",
 				apic->vcpu->vcpu_id);
 		}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		start_apic_timer(apic, val);
 		break;
 
@@ -1167,8 +1146,10 @@ void kvm_free_lapic(struct kvm_vcpu *vcpu)
 	if (!vcpu->arch.apic)
 		return;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!kvm_vcpu_is_hw_apic(vcpu))
 		hrtimer_cancel(&vcpu->arch.apic->lapic_timer.timer);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	if (vcpu->arch.apic->regs_page)
 		__free_page(vcpu->arch.apic->regs_page);
@@ -1218,12 +1199,14 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu)
 	apic = vcpu->arch.apic;
 	ASSERT(apic != NULL);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Stop the timer in case it's a reset to an active apic */
 	if (!kvm_vcpu_is_hw_apic(vcpu)) {
 		hrtimer_cancel(&apic->lapic_timer.timer);
 		DebugKVMSH("VCPU #%d local apic at %px was shutting down\n",
 			vcpu->vcpu_id, &apic->lapic_timer.timer);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	apic_set_reg(apic, APIC_ID, vcpu->vcpu_id << 24);
 
@@ -1260,18 +1243,22 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu)
 
 	apic->irr_pending = false;
 	update_divide_count(apic);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!kvm_vcpu_is_hw_apic(vcpu)) {
 		atomic_set(&apic->lapic_timer.pending, 0);
 		apic->lapic_timer.started = false;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	reg = APIC_BSP_ENABLE;
 	if (kvm_vcpu_is_bsp(vcpu))
 		reg |= APIC_BSP_IS_BSP;
 	apic_set_reg(apic, APIC_BSP, reg);
 	apic_update_ppr(apic);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	vcpu->arch.apic_arb_prio = 0;
 	apic->virq_is_setup = false;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	apic_debug(KERN_INFO "%s: vcpu=%px, id=%d, base_msr="
 		   "0x%016" PRIx64 ", base_address=0x%0lx.\n", __func__,
@@ -1279,6 +1266,7 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu)
 		   vcpu->arch.apic_base, apic->base_address);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_lapic_virq_setup(struct kvm_vcpu *vcpu)
 {
 	struct kvm_lapic *apic;
@@ -1292,26 +1280,29 @@ void kvm_lapic_virq_setup(struct kvm_vcpu *vcpu)
 		apic->virq_is_setup = true;
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Reset & restart LAPIC
  */
 void kvm_lapic_restart(struct kvm_vcpu *vcpu)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int irq, ret;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	kvm_lapic_reset(vcpu);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_hv) {
 		irq = vcpu->vcpu_id * KVM_NR_VIRQS + KVM_VIRQ_LAPIC;
 		ret = kvm_get_guest_direct_virq(vcpu, irq, KVM_VIRQ_LAPIC);
 		WARN_ON_ONCE(ret);
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (vcpu->arch.is_pv) {
 		/* paravirtualized guest should register VCPUs itself */
 		;
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 bool kvm_apic_present(struct kvm_vcpu *vcpu)
@@ -1330,6 +1321,7 @@ int kvm_lapic_enabled(struct kvm_vcpu *vcpu)
  *----------------------------------------------------------------------
  */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static bool lapic_is_periodic(struct kvm_timer *ktimer)
 {
 	struct kvm_lapic *apic = container_of(ktimer, struct kvm_lapic,
@@ -1398,6 +1390,7 @@ int kvm_apic_nmi_deliver(struct kvm_vcpu *vcpu)
 static const struct kvm_timer_ops lapic_timer_ops = {
 	.is_periodic = lapic_is_periodic,
 };
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static const struct kvm_io_device_ops apic_mmio_ops = {
 	.read     = apic_mmio_read,
@@ -1431,6 +1424,7 @@ int kvm_create_lapic(struct kvm_vcpu *vcpu)
 	memset(apic->regs, 0, PAGE_SIZE);
 	apic->vcpu = vcpu;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* If possible, use hardware CEPIC timer instead */
 	if (!kvm_vcpu_is_hw_apic(vcpu)) {
 		hrtimer_init(&apic->lapic_timer.timer, CLOCK_MONOTONIC,
@@ -1440,6 +1434,7 @@ int kvm_create_lapic(struct kvm_vcpu *vcpu)
 		apic->lapic_timer.kvm = vcpu->kvm;
 		apic->lapic_timer.vcpu = vcpu;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	apic->base_address = APIC_DEFAULT_PHYS_BASE;
 	vcpu->arch.apic_base = APIC_DEFAULT_PHYS_BASE;
@@ -1527,14 +1522,17 @@ void kvm_print_local_APIC(struct kvm_vcpu *vcpu)
 
 	pr_info("local APIC on VCPU #%d timer state:\n",
 		vcpu->vcpu_id);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	pr_info("... started %d pending %d period 0x%llx start at 0x%llx\n",
 		apic->lapic_timer.started,
 		atomic_read(&apic->lapic_timer.pending),
 		apic->lapic_timer.period,
 		apic->lapic_timer.running_time);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
-int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+static int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
 	int highest_irr;
@@ -1554,21 +1552,6 @@ int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 		return -1;
 	}
 	return highest_irr;
-}
-
-int kvm_apic_accept_pic_intr(struct kvm_vcpu *vcpu)
-{
-	u32 lvt0 = apic_get_reg(vcpu->arch.apic, APIC_LVT0);
-	int r = 0;
-
-	if (kvm_vcpu_is_bsp(vcpu)) {
-		if (!apic_hw_enabled(vcpu->arch.apic))
-			r = 1;
-		if ((lvt0 & APIC_LVT_MASKED) == 0 &&
-		    GET_APIC_DELIVERY_MODE(lvt0) == APIC_MODE_EXTINT)
-			r = 1;
-	}
-	return r;
 }
 
 void kvm_inject_apic_timer_irqs(struct kvm_vcpu *vcpu)
@@ -1595,6 +1578,7 @@ void kvm_inject_apic_timer_irqs(struct kvm_vcpu *vcpu)
 		}
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_KVM_HW_VIRTUALIZATION
 int kvm_get_hw_apic_interrupt(struct kvm_vcpu *vcpu)
@@ -1627,6 +1611,15 @@ int kvm_get_hw_apic_interrupt(struct kvm_vcpu *vcpu)
 	return reg_vect_inta.vect;
 }
 #endif
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+static inline void apic_clear_irr(int vec, struct kvm_lapic *apic)
+{
+	apic->irr_pending = false;
+	apic_clear_vector(vec, apic->regs + APIC_IRR);
+	if (apic_search_irr(apic) != -1)
+		apic->irr_pending = true;
+}
 
 int kvm_get_sw_apic_interrupt(struct kvm_vcpu *vcpu)
 {
@@ -1668,65 +1661,6 @@ int kvm_get_sw_apic_interrupt(struct kvm_vcpu *vcpu)
 	return vector;
 }
 
-#if 0
-void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu)
-{
-	struct kvm_lapic *apic = vcpu->arch.apic;
-
-	apic->base_address = vcpu->arch.apic_base;
-	kvm_apic_set_version(vcpu);
-
-	apic_update_ppr(apic);
-	hrtimer_cancel(&apic->lapic_timer.timer);
-	update_divide_count(apic);
-	start_apic_timer(apic);
-	apic->irr_pending = true;
-}
-#endif
-
-#ifdef	CONFIG_VIRT_LOCAL_APIC
-void kvm_lapic_sync_from_vapic(struct kvm_vcpu *vcpu)
-{
-	u32 data;
-
-	if (test_bit(KVM_APIC_PV_EOI_PENDING, &vcpu->arch.apic_attention))
-		apic_sync_pv_eoi_from_guest(vcpu, vcpu->arch.apic);
-
-	if (!test_bit(KVM_APIC_CHECK_VAPIC, &vcpu->arch.apic_attention))
-		return;
-
-	if (kvm_read_guest_cached(vcpu->kvm, &vcpu->arch.apic->vapic_cache,
-					&data, sizeof(u32)))
-		return;
-
-	apic_set_tpr(vcpu->arch.apic, data & 0xff);
-}
-
-void kvm_lapic_sync_to_vapic(struct kvm_vcpu *vcpu)
-{
-	u32 data, tpr;
-	int max_irr, max_isr;
-	struct kvm_lapic *apic = vcpu->arch.apic;
-
-	apic_sync_pv_eoi_to_guest(vcpu, apic);
-
-	if (!test_bit(KVM_APIC_CHECK_VAPIC, &vcpu->arch.apic_attention))
-		return;
-
-	tpr = kvm_apic_get_reg(apic, APIC_TASKPRI) & 0xff;
-	max_irr = apic_find_highest_irr(apic);
-	if (max_irr < 0)
-		max_irr = 0;
-	max_isr = apic_find_highest_isr(apic);
-	if (max_isr < 0)
-		max_isr = 0;
-	data = (tpr & 0xff) | ((max_isr & 0xf0) << 8) | (max_irr << 24);
-
-	kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.apic->vapic_cache, &data,
-				sizeof(u32));
-}
-#endif	/* CONFIG_VIRT_LOCAL_APIC */
-
 void kvm_lapic_set_vapic_addr(struct kvm_vcpu *vcpu, gpa_t vapic_addr)
 {
 	if (!irqchip_in_kernel(vcpu->kvm))
@@ -1734,10 +1668,15 @@ void kvm_lapic_set_vapic_addr(struct kvm_vcpu *vcpu, gpa_t vapic_addr)
 
 	vcpu->arch.apic->vapic_addr = vapic_addr;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 bool kvm_vcpu_has_apic_interrupts(const struct kvm_vcpu *vcpu)
 {
+	//TODO apic on top of hw epic support (currently this always returns false)
+	return false;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	return !vcpu->arch.hcall_irqs_disabled && kvm_test_pending_virqs(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 bool kvm_check_lapic_priority(struct kvm_vcpu *vcpu)

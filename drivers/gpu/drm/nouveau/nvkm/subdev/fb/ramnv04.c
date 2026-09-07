@@ -53,6 +53,11 @@ nv04_ram_new(struct nvkm_fb *fb, struct nvkm_ram **pram)
 		case NV04_PFB_BOOT_0_RAM_AMOUNT_4MB:
 			size = 4 * 1024 * 1024;
 			break;
+#ifdef CONFIG_MCST
+		default:
+			size = 0;
+			break;
+#endif
 		}
 	}
 

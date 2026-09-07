@@ -6,14 +6,12 @@
 #ifndef _ASM_E2S_H_
 #define _ASM_E2S_H_
 
-#ifndef __ASSEMBLY__
 #ifdef CONFIG_CPU_E2S
 extern void boot_e2s_setup_arch(void);
 extern void e2s_setup_machine(void);
 #else
 static inline void boot_e2s_setup_arch(void) { }
 static inline void e2s_setup_machine(void) { }
-#endif
 #endif
 
 #define	E2S_NR_NODE_CPUS		4

@@ -77,4 +77,7 @@ extern void relocate_kernel(struct kimage *img);
 
 void kexec_scc_init(u64 base);
 
+extern bool kexec_wakeup_offline;
+extern void __cpu_wait_jump(void *info);
+
 #endif /* E2K_KEXEC_H */

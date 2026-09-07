@@ -6,8 +6,8 @@
 #include <linux/pci.h>
 #include <linux/pci_ids.h>
 
-#include "../boot_io.h"
-#include "../e2k_sic.h"
+#include "boot_io.h"
+#include "e2k_sic.h"
 
 #include <asm/e2k_debug.h>
 #include <asm/e2k.h>
@@ -15,11 +15,9 @@
 #include <asm/sic_regs.h>
 #include <asm/hb_regs.h>
 #include <asm/l_timer.h>
+#include <asm/sic_regs_access.h>
 
-#include "pci_isa_config.h"
 #include "ide_config.h"
-#include "southbridge.h"
-#include "mc146818rtc.h"
 #include "pci.h"
 
 #define DEBUG_IOSB		0
@@ -28,17 +26,10 @@
 #define AS_WORD	AW
 #define AS_STRUCT(x)	(x)
 
-extern volatile unsigned long	phys_node_pres_map;
-extern int			phys_node_num;
 extern volatile unsigned long	online_iohubs_map;
-extern int			online_iohubs_num;
 extern volatile unsigned long	possible_iohubs_map;
-extern int			possible_iohubs_num;
 
-int SB_bus, SB_device;
-
-#ifdef CONFIG_E2K_SIC
-# define E2K_IO_APIC_AREA_PHYS_BASE	0x00000000fec00000UL
+#define E2K_IO_APIC_AREA_PHYS_BASE	0x00000000fec00000UL
 static void configure_iohub_apic(int domain)
 {
 	struct bios_pci_dev *dev = NULL;
@@ -51,7 +42,7 @@ static void configure_iohub_apic(int domain)
 #endif	/* CONFIG_E2K_FULL_SIC */
 #endif
 	unsigned long tmp;
-	
+
 	rom_printk("Scanning PCI domain %d bus for ioapic/pic/timer i2c/spi "
 		"controller ...", domain);
 	do {
@@ -115,8 +106,6 @@ static void configure_iohub_apic(int domain)
 	tmp = E16C_SAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E2C3)
 	tmp = E2C3_SAPICINT_BASE + (domain * (APICINT_SIZE));
-#elif	defined(CONFIG_E48C)
-	tmp = E48C_SAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E8V7)
 	tmp = E8V7_SAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
@@ -124,7 +113,7 @@ static void configure_iohub_apic(int domain)
 #endif	/* CONFIG_E2S */
 	sapic_base = tmp & 0xffffffff;
 	sapic_upper32 = (tmp >> 32) & 0xffffffff;
-	DebugSB("configure_apic_system: --> to i2c & scrb (iohub)\n" 
+	DebugSB("configure_apic_system: --> to i2c & scrb (iohub)\n"
 		"sapic_message_upper32  = 0x%x, sapic_message_base  = 0x%x\n",
 		sapic_upper32, sapic_base);
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
@@ -149,8 +138,6 @@ static void configure_iohub_apic(int domain)
 	tmp = E16C_LAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E2C3)
 	tmp = E2C3_LAPICINT_BASE + (domain * (APICINT_SIZE));
-#elif	defined(CONFIG_E48C)
-	tmp = E48C_LAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E8V7)
 	tmp = E8V7_LAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
@@ -171,7 +158,7 @@ static void configure_iohub_apic(int domain)
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
 				LAPIC_MESSAGE_UPPER_ADDRESS, lapic_upper32);
 #endif
-	
+
 	/* configure configuration space for ioapic on BSP */
 #if	defined(CONFIG_E2S)
 	tmp = E2S_IOAPICINT_BASE + (domain * APICINT_SIZE);
@@ -185,8 +172,6 @@ static void configure_iohub_apic(int domain)
 	tmp = E16C_IOAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E2C3)
 	tmp = E2C3_IOAPICINT_BASE + (domain * (APICINT_SIZE));
-#elif	defined(CONFIG_E48C)
-	tmp = E48C_IOAPICINT_BASE + (domain * (APICINT_SIZE));
 #elif	defined(CONFIG_E8V7)
 	tmp = E8V7_IOAPICINT_BASE + (domain * (APICINT_SIZE));
 #else
@@ -252,7 +237,7 @@ void configure_pic_system(void)
 }
 
 #define ONEMEG (1 << 20)
-/** round a number to an alignment. 
+/** round a number to an alignment.
  * @param val the starting value
  * @param roundup Alignment as a power of two
  * @returns rounded up number
@@ -304,7 +289,7 @@ static void configure_iohub_system_timer(int domain)
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
 				SYSTEM_TIMER_BASE_ADDRESS, timer_base);
 	pcibios_write_config_dword(domain, dev->bus->number, dev->devfn,
-				SYSTEM_TIMER_UPPER_ADDRESS, timer_upper32); 
+				SYSTEM_TIMER_UPPER_ADDRESS, timer_upper32);
 	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
 				A3_BA0, timer_base);
 	system_commutator_e2s_ioh_write_dword(domain, dev->bus->number,
@@ -312,15 +297,15 @@ static void configure_iohub_system_timer(int domain)
 	/* Disable WD timer */
 	AS_WORD(wd_control) = 0;
 	addr = timer_base + WD_CONTROL;
-	AS_WORD(wd_control) = NATIVE_READ_MAS_W(addr, MAS_IOADDR);
+	AS_WORD(wd_control) = NATIVE_READ_MAS_W(addr, MAS_IO_OPERATION);
 	if (AS_STRUCT(wd_control).w_out_e){
 		DebugSB("configure_system_timer: wd timer found to be enabled.\n");
 		DebugSB("configure_system_timer: Set wd timer to disable mode\n");
 		AS_STRUCT(wd_control).w_out_e = 0;
 		AS_STRUCT(wd_control).w_m = 1; /* Interrupt mode  */
-		NATIVE_WRITE_MAS_W(addr, AS_WORD(wd_control), MAS_IOADDR);
+		NATIVE_WRITE_MAS_W(addr, AS_WORD(wd_control), MAS_IO_OPERATION);
 	}
-}	
+}
 
 void configure_system_timer(void)
 {
@@ -331,44 +316,4 @@ void configure_system_timer(void)
 			continue;
 		configure_iohub_system_timer(domain);
 	}
-}
-
-#endif
-
-void sb_enable_rtc(void)
-{
-	int xdata;
-	
-	rom_printk("southbridge enable rtc ...\n");
-	
-	xdata = SB_read_config32(SB_GENCFG, 0);
-	xdata |= SB_GENCFG_SIGNAL_PIN_SELECTED14;
-	SB_write_config32(xdata, SB_GENCFG, 0);
-	
-	DebugSB("GENCFG = 0x%x\n",
-			SB_read_config32(SB_GENCFG, 0));
-
-	rtc_init(0);
-}
-
-void sb_enable_ide(void)
-{
-	int xdata;
-	
-	rom_printk("southbridge enable ide ...\n");
-	
-	xdata = SB_read_config32(SB_IDETIM, 1);
-	xdata |= ((SB_IDETIM_DECODE_ENABLE << SB_IDETIM_SHIFT) |
-			SB_IDETIM_DECODE_ENABLE);
-	SB_write_config32(xdata, SB_IDETIM, 1);
-	
-	DebugSB("IDETIM = 0x%x\n",
-			SB_read_config32(SB_IDETIM, 1));
-
-	xdata = SB_read_config16(SB_PCICMD, 1);
-	xdata |= SB_PCICMD_IOSE;
-	SB_write_config32(xdata, SB_PCICMD, 1);
-	
-	DebugSB("PCICMD = 0x%x\n",
-			SB_read_config16(SB_PCICMD, 1) & 0xffff);
 }

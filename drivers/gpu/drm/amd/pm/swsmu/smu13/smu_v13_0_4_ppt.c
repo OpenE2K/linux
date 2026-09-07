@@ -775,6 +775,9 @@ static int smu_v13_0_4_get_dpm_ultimate_freq(struct smu_context *smu,
 	}
 
 	if (max) {
+#ifdef CONFIG_MCST
+		max_dpm_level = 0;
+#endif
 		switch (clk_type) {
 		case SMU_GFXCLK:
 		case SMU_SCLK:
@@ -806,6 +809,9 @@ static int smu_v13_0_4_get_dpm_ultimate_freq(struct smu_context *smu,
 	}
 
 	if (min) {
+#ifdef CONFIG_MCST
+		min_dpm_level = 0;
+#endif
 		switch (clk_type) {
 		case SMU_GFXCLK:
 		case SMU_SCLK:

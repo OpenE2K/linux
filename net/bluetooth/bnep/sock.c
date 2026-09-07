@@ -172,10 +172,10 @@ static int bnep_sock_compat_ioctl(struct socket *sock, unsigned int cmd, unsigne
 #if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
 static int bnep_sock_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 {
-	void __user *argp = compat_ptr(arg);
+	void __user *argp = (void __user __force *)arg;
 	if (cmd == BNEPGETCONNLIST) {
 		struct bnep_connlist_req cl;
-		struct bnep_ptr128_connlist_req *p = (struct bnep_ptr128_connlist_req *)argp;
+		struct bnep_ptr128_connlist_req __user *p = argp;
 		e2k_ap_t ap;
 		int tag;
 		int err;
@@ -187,7 +187,7 @@ static int bnep_sock_ptr128_ioctl(struct socket *sock, unsigned int cmd, unsigne
 		if (get_user_tagged_16(ap.qword, tag, &p->ci) || !IS_AP(ap, tag)) {
 			return -EFAULT;
 		}
-		cl.ci = (void __user *)AP_PTR(ap);
+		cl.ci = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 		err = bnep_get_connlist(&cl);
 

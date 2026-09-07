@@ -13,9 +13,9 @@
 #define KEXEC_ON_CRASH		0x00000001
 #define KEXEC_PRESERVE_CONTEXT	0x00000002
 #define KEXEC_ARCH_MASK		0xffff0000
-#ifdef CONFIG_E2K
+
+/* CONFIG_E2K: kexec flag */
 #define KEXEC_E2K_LINTEL_IMAGE  0x00001000
-#endif
 
 /*
  * Kexec file load interface flags.
@@ -47,10 +47,8 @@
 #define KEXEC_ARCH_AARCH64 (183 << 16)
 #define KEXEC_ARCH_RISCV   (243 << 16)
 #define KEXEC_ARCH_LOONGARCH	(258 << 16)
-
-#ifdef CONFIG_E2K
+/* CONFIG_E2K */
 #define KEXEC_ARCH_E2K		(175 << 16)
-#endif
 
 /* The artificial cap on the number of segments passed to kexec_load. */
 #define KEXEC_SEGMENT_MAX 16

@@ -34,6 +34,7 @@
 #define __KVM_HAVE_MSIX
 #define __KVM_HAVE_MCE
 #define __KVM_HAVE_VCPU_EVENTS
+#define KVM_HAVE_LEGACY_VGA_PASSTHROUGH
 
 /* KVM (for /dev/kvm fds) capabilities (especially for e2k arch) */
 /* number of CAPs is advisedly very big to don't intersect with other arch'es */
@@ -270,13 +271,12 @@ typedef struct kvm_guest_info {
 	_Bool	is_pv;			/* guest is paravirtualized */
 					/* and should not be run as bare */
 	unsigned long	features;	/* guest features */
-					/* see details <asm/kvm/hypervisor.h> */
 } kvm_guest_info_t;
 
 typedef struct kvm_guest_area_alloc {
 	void	*region;	/* guest memory region to allocate area */
 				/* or NULL if any region */
-	void	*area;		/* allocated area - result of ioctl() */
+	void __user	*area;	/* allocated area - result of ioctl() */
 	unsigned long start;	/* start address to allocate */
 				/* or 0 if any address */
 	unsigned long size;	/* area size (bytes) */
@@ -404,8 +404,6 @@ typedef struct kvm_guest_nbsr_state {
 #define GUEST_FAST_SYSCALL_TRAP_NUM		6
 #define GUEST_PROT_FAST_SYSCALL_TRAP_NUM	7
 
-#ifndef __ASSEMBLY__
-
 #define KVM_GET_ARCH_API_VERSION	_IO(KVMIO, 0xe1)
 #define KVM_VCPU_THREAD_SETUP		_IO(KVMIO, 0xe0)
 #define KVM_GET_GUEST_ADDRESS		_IOWR(KVMIO, 0xe2, unsigned long *)
@@ -425,6 +423,8 @@ typedef struct kvm_guest_nbsr_state {
 #define	KVM_CREATE_SIC_NBSR		_IO(KVMIO, 0xef)
 #define	KVM_SET_PCI_REGION		_IOW(KVMIO, 0xf0, kvm_pci_region_t)
 #define	KVM_CREATE_SIC_NBSR_ISET	_IOW(KVMIO, 0xf1, unsigned long)
+#define	KVM_RESET_SIC_NBSR		_IO(KVMIO, 0xf2)
+#define	KVM_SET_LEGACY_VGA_PASSTHROUGH	_IOW(KVMIO, 0xf6, unsigned long)
 
 /* e2k-specific exit reasons from KVM to userspace assistance */
 #define KVM_EXIT_E2K_NOTIFY_IO		33
@@ -433,7 +433,5 @@ typedef struct kvm_guest_nbsr_state {
 #define KVM_EXIT_E2K_PANIC		38
 #define	KVM_EXIT_E2K_INTR		39
 #define	KVM_EXIT_E2K_UNKNOWN		44
-
-#endif	/* __ASSEMBLY__ */
 
 #endif /* _UAPI_ASM_E2K_KVM_H */

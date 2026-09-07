@@ -213,7 +213,11 @@ static inline char *rtl819x_translate_scan(struct ieee80211_device *ieee,
 	iwe.cmd = IWEVCUSTOM;
 	p = custom;
 	p += scnprintf(p, MAX_CUSTOM_LEN - (p - custom),
+#ifdef CONFIG_MCST
+		      " Last beacon: %lums ago", (jiffies - network->last_scanned) * 100 / HZ);
+#else
 		      " Last beacon: %lums ago", (jiffies - network->last_scanned) / (HZ / 100));
+#endif
 	iwe.u.data.length = p - custom;
 	if (iwe.u.data.length)
 		start = iwe_stream_add_point(info, start, stop, &iwe, custom);
@@ -254,7 +258,11 @@ int ieee80211_wx_get_scan(struct ieee80211_device *ieee,
 				escape_essid(network->ssid,
 					     network->ssid_len),
 				network->bssid,
+#ifdef CONFIG_MCST
+				(jiffies - network->last_scanned) * 100 / HZ);
+#else
 				(jiffies - network->last_scanned) / (HZ / 100));
+#endif
 	}
 
 	spin_unlock_irqrestore(&ieee->lock, flags);

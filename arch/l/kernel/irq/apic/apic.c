@@ -4,6 +4,7 @@
  */
 
 #include <linux/perf_event.h>
+#include <linux/syscore_ops.h>
 
 #include <asm/pic.h>
 
@@ -175,14 +176,6 @@ static int __init apic_set_verbosity(char *arg)
 early_param("apic", apic_set_verbosity);
 
 /*
- * Get the maximum number of local vector table entries
- */
-int lapic_get_maxlvt(void)
-{
-	return GET_APIC_MAXLVT(apic_read(APIC_LVR));
-}
-
-/*
  * Shutdown the local APIC.
  *
  * This is called, when a CPU is disabled and before rebooting, so the state of
@@ -257,3 +250,104 @@ unsigned int get_irr_apic(unsigned int vector)
 {
 	return apic_read(APIC_IRR + vector / 32 * 0x10);
 }
+
+#ifdef CONFIG_PM
+
+static struct {
+	unsigned int apic_id;
+	unsigned int apic_taskpri;
+	unsigned int apic_ldr;
+	unsigned int apic_dfr;
+	unsigned int apic_spiv;
+	unsigned int apic_lvtt;
+	unsigned int apic_lvtpc;
+	unsigned int apic_lvt0;
+	unsigned int apic_lvt1;
+	unsigned int apic_lvterr;
+	unsigned int apic_tmict;
+	unsigned int apic_tdcr;
+	unsigned int apic_thmr;
+} apic_pm_state;
+
+static int lapic_suspend(void)
+{
+	unsigned long flags;
+	int maxlvt;
+
+	maxlvt = lapic_get_maxlvt();
+
+	apic_pm_state.apic_id = apic_read(APIC_ID);
+	apic_pm_state.apic_taskpri = apic_read(APIC_TASKPRI);
+	apic_pm_state.apic_ldr = apic_read(APIC_LDR);
+	apic_pm_state.apic_dfr = apic_read(APIC_DFR);
+	apic_pm_state.apic_spiv = apic_read(APIC_SPIV);
+	apic_pm_state.apic_lvtt = apic_read(APIC_LVTT);
+	if (maxlvt >= 4)
+		apic_pm_state.apic_lvtpc = apic_read(APIC_LVTPC);
+	apic_pm_state.apic_lvt0 = apic_read(APIC_LVT0);
+	apic_pm_state.apic_lvt1 = apic_read(APIC_LVT1);
+	apic_pm_state.apic_lvterr = apic_read(APIC_LVTERR);
+	apic_pm_state.apic_tmict = apic_read(APIC_TMICT);
+	apic_pm_state.apic_tdcr = apic_read(APIC_TDCR);
+
+	local_irq_save(flags);
+	disable_local_APIC();
+	local_irq_restore(flags);
+
+	return 0;
+}
+
+static void lapic_resume(void)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	int maxlvt = lapic_get_maxlvt();
+	apic_write(APIC_LVTERR, ERROR_APIC_VECTOR | APIC_LVT_MASKED);
+	apic_write(APIC_ID, apic_pm_state.apic_id);
+	apic_write(APIC_DFR, apic_pm_state.apic_dfr);
+	apic_write(APIC_LDR, apic_pm_state.apic_ldr);
+	apic_write(APIC_TASKPRI, apic_pm_state.apic_taskpri);
+	apic_write(APIC_SPIV, apic_pm_state.apic_spiv);
+	apic_write(APIC_LVT0, apic_pm_state.apic_lvt0);
+	apic_write(APIC_LVT1, apic_pm_state.apic_lvt1);
+	if (maxlvt >= 4)
+		apic_write(APIC_LVTPC, apic_pm_state.apic_lvtpc);
+	apic_write(APIC_LVTT, apic_pm_state.apic_lvtt);
+	apic_write(APIC_TDCR, apic_pm_state.apic_tdcr);
+	apic_write(APIC_TMICT, apic_pm_state.apic_tmict);
+	apic_write(APIC_ESR, 0);
+	apic_read(APIC_ESR);
+	apic_write(APIC_LVTERR, apic_pm_state.apic_lvterr);
+	apic_write(APIC_ESR, 0);
+	apic_read(APIC_ESR);
+
+	local_irq_restore(flags);
+}
+
+/*
+ * This device has no shutdown method - fully functioning local APICs
+ * are needed on every CPU up until machine_halt/restart/poweroff.
+ *
+ * suspend/resume are needed for the main CPU when using hibernation
+ * etc. - the standard cpu hotplug procedur is invoked for secondary
+ * CPUs only.
+ */
+
+static struct syscore_ops lapic_syscore_ops = {
+	.resume		= lapic_resume,
+	.suspend	= lapic_suspend,
+};
+
+static int __init init_lapic_ops(void)
+{
+	if (!cpu_has_epic())
+		register_syscore_ops(&lapic_syscore_ops);
+
+	return 0;
+}
+/* local apic needs to resume before other devices access its registers. */
+core_initcall(init_lapic_ops);
+
+#endif	/* CONFIG_PM */

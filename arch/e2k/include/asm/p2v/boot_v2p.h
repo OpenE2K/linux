@@ -15,21 +15,8 @@
 #include <asm/e2k_api.h>
 #include <asm/pv_info.h>
 
-#define	EOS_RAM_BASE_LABEL	_data
 #define	KERNEL_START_LABEL	_start		/* start label of Linux Image */
 #define	KERNEL_END_LABEL	_end		/* end label of Linux Image */
-
-#ifdef __ASSEMBLY__
-
-#define	KERNEL_BASE	[KERNEL_START_LABEL]	/* virtual address of Linux */
-						/* Image begining */
-#define	KERNEL_END	[KERNEL_END_LABEL]	/* virtual address of Linux */
-						/* Image end */
-#define	EOS_RAM_BASE	[EOS_RAM_BASE_LABEL]
-
-#else /* !(__ASSEMBLY__) */
-
-#define	EOS_RAM_BASE	((e2k_addr_t)&EOS_RAM_BASE_LABEL)
 
 #define	KERNEL_BASE	((e2k_addr_t)&KERNEL_START_LABEL)
 #define	KERNEL_END	((e2k_addr_t)&KERNEL_END_LABEL)
@@ -281,6 +268,5 @@ static inline e2k_addr_t pa_to_vpa(e2k_addr_t pa)
 	return native_pa_to_vpa(pa);
 }
 #endif /* CONFIG_KVM_GUEST_KERNEL */
-#endif /* __ASSEMBLY__ */
 
 #endif /* !(_E2K_P2V_BOOT_V2P_H) */

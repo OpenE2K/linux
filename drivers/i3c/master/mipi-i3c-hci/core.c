@@ -196,8 +196,6 @@ static inline struct i3c_hci *to_i3c_hci(struct i3c_master_controller *m)
 	return container_of(m, struct i3c_hci, master);
 }
 
-
-
 static int i3c_hci_bus_init(struct i3c_master_controller *m)
 {
 	struct i3c_hci *hci = to_i3c_hci(m);
@@ -232,6 +230,7 @@ static int i3c_hci_bus_init(struct i3c_master_controller *m)
 #endif
 	reg_set(HC_CONTROL, HC_CONTROL_BUS_ENABLE);
 	DBG("HC_CONTROL = %#x", reg_read(HC_CONTROL));
+
 	return 0;
 }
 
@@ -537,7 +536,7 @@ static int i3c_hci_attach_i3c_dev(struct i3c_dev_desc *dev)
 	i3c_dev_set_master_data(dev, dev_data);
 #ifdef CONFIG_E2K
 	DBG("dev = %ps, dev_data = %ps, dat_idx = %d, dyn_addr = %d",
-	    dev, dev_data, ret, dev->info.dyn_addr);
+	    dev, dev_data, dev_data->dat_idx, dev->info.dyn_addr);
 #endif
 	return 0;
 }
@@ -566,7 +565,7 @@ static void i3c_hci_detach_i3c_dev(struct i3c_dev_desc *dev)
 	struct i3c_hci *hci = to_i3c_hci(m);
 	struct i3c_hci_dev_data *dev_data = i3c_dev_get_master_data(dev);
 
-	DBG("0x%llx", (u64)dev);
+	DBG("");
 
 	i3c_dev_set_master_data(dev, NULL);
 	if (hci->cmd == &mipi_i3c_hci_cmd_v1)
@@ -644,6 +643,7 @@ static int i3c_hci_enable_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct i3c_hci *hci = to_i3c_hci(m);
 	struct i3c_hci_dev_data *dev_data = i3c_dev_get_master_data(dev);
+
 	mipi_i3c_hci_dat_v1.clear_flags(hci, dev_data->dat_idx, DAT_0_SIR_REJECT, 0);
 	return i3c_master_enec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
 }
@@ -762,8 +762,8 @@ static int i3c_hci_init(struct i3c_hci *hci)
 		hci->DAT_entry_size = 8;
 	}
 	if (mipi_verbose)
-		dev_info(&hci->master.dev, "DAT: %u %u-bytes entries at offset %#x\n",
-			 hci->DAT_entries, hci->DAT_entry_size * 4, offset);
+	dev_info(&hci->master.dev, "DAT: %u %u-bytes entries at offset %#x\n",
+		 hci->DAT_entries, hci->DAT_entry_size * 4, offset);
 #else
 	dev_info(&hci->master.dev, "DAT: %u %u-bytes entries at offset %#x\n",
 		 hci->DAT_entries, hci->DAT_entry_size * 4, offset);
@@ -778,8 +778,8 @@ static int i3c_hci_init(struct i3c_hci *hci)
 		hci->DCT_entry_size = 8;
 	}
 	if (mipi_verbose)
-		dev_info(&hci->master.dev, "DCT: %u %u-bytes entries at offset %#x\n",
-			 hci->DCT_entries, hci->DCT_entry_size * 4, offset);
+	dev_info(&hci->master.dev, "DCT: %u %u-bytes entries at offset %#x\n",
+		 hci->DCT_entries, hci->DCT_entry_size * 4, offset);
 #else
 	dev_info(&hci->master.dev, "DCT: %u %u-bytes entries at offset %#x\n",
 		 hci->DCT_entries, hci->DCT_entry_size * 4, offset);
@@ -789,7 +789,7 @@ static int i3c_hci_init(struct i3c_hci *hci)
 	hci->RHS_regs = offset ? hci->base_regs + offset : NULL;
 #ifdef CONFIG_E2K
 	if (mipi_verbose)
-		dev_info(&hci->master.dev, "Ring Headers at offset %#x\n", offset);
+	dev_info(&hci->master.dev, "Ring Headers at offset %#x\n", offset);
 #else
 	dev_info(&hci->master.dev, "Ring Headers at offset %#x\n", offset);
 #endif
@@ -884,7 +884,7 @@ static int i3c_hci_init(struct i3c_hci *hci)
 			hci->io = &mipi_i3c_hci_dma;
 #ifdef CONFIG_E2K
 			if (mipi_verbose)
-				dev_info(&hci->master.dev, "Using DMA\n");
+			dev_info(&hci->master.dev, "Using DMA\n");
 #else
 			dev_info(&hci->master.dev, "Using DMA\n");
 #endif
@@ -1077,6 +1077,26 @@ static int i3c_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int err;
 	resource_size_t ioaddr;
 	struct resource *res;
+	struct pci_bus *pcib;
+	u32 v;
+
+	if (pdev->dev.of_node == NULL) {
+		dev_err(&pdev->dev, "no record for i3c device in device tree\n");
+		return -ENODEV;
+	}
+	pcib = pdev->bus;
+	while (pcib->parent) {
+		pcib = pcib->parent;
+	}
+	if (pci_bus_read_config_dword(pcib, 0, 0x44, &v)) {
+		dev_err(&pdev->dev, "Error reading root bridge config space\n");
+		return -EFAULT;
+	}
+	if (!(v & 0x10000)) {
+		dev_err(&pdev->dev,
+			"mipi_i3c_hci. Not turned on in pci main bridge config space: 0x%08x\n", v);
+		return -ENODEV;
+	}
 
 	hci = devm_kzalloc(&pdev->dev, sizeof(*hci), GFP_KERNEL);
 	if (!hci)
@@ -1211,7 +1231,6 @@ static void __exit i3c_pci_cleanup_module(void)
 static int __init i3c_pci_init_module(void)
 {
 	int status;
-
 
 	status = pci_register_driver(&i3c_pci_driver);
 	if (status != 0) {

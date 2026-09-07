@@ -3339,6 +3339,9 @@ int drbd_adm_dump_devices(struct sk_buff *skb, struct netlink_callback *cb)
 	struct device_statistics device_statistics;
 	struct idr *idr_to_search;
 
+#ifdef CONFIG_MCST
+	device = NULL;
+#endif
 	resource = (struct drbd_resource *)cb->args[0];
 	if (!cb->args[0] && !cb->args[1]) {
 		resource_filter = find_cfg_context_attr(cb->nlh, T_ctx_resource_name);
@@ -3429,6 +3432,9 @@ int drbd_adm_dump_connections(struct sk_buff *skb, struct netlink_callback *cb)
 	struct connection_info connection_info;
 	struct connection_statistics connection_statistics;
 
+#ifdef CONFIG_MCST
+	connection = NULL;
+#endif
 	rcu_read_lock();
 	resource = (struct drbd_resource *)cb->args[0];
 	if (!cb->args[0]) {
@@ -3591,6 +3597,9 @@ int drbd_adm_dump_peer_devices(struct sk_buff *skb, struct netlink_callback *cb)
 	struct drbd_genlmsghdr *dh;
 	struct idr *idr_to_search;
 
+#ifdef CONFIG_MCST
+	device = NULL;
+#endif
 	resource = (struct drbd_resource *)cb->args[0];
 	if (!cb->args[0] && !cb->args[1]) {
 		resource_filter = find_cfg_context_attr(cb->nlh, T_ctx_resource_name);

@@ -6,8 +6,6 @@
 #ifndef __ASM_MPSPEC_H
 #define __ASM_MPSPEC_H
 
-#ifdef __KERNEL__
-
 #include <linux/numa.h>
 #include <asm/e2k.h>
 
@@ -31,10 +29,6 @@ boot_mpf_do_checksum(unsigned char *mp, int len)
 	return 0x100 - (sum & 0xFF);
 }
 
-#endif  /* __KERNEL__ */
-
-#if defined(__KERNEL__) || defined(__KVM_MPSPEC_SUPPORT__)
 #include <asm-l/mpspec.h>
-#endif  /* __KERNEL__ || __KVM_MPSPEC_SUPPORT__ */
 
 #endif	/* __ASM_MPSPEC_H */

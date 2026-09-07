@@ -61,7 +61,6 @@
 
 /* subsystem configuration */
 #include "subsys_cfg.h"
-//extern struct vcmd_config vcmd_core_array[MAX_SUBSYS_NUM];
 //extern u32 total_vcmd_core_num;
 //extern unsigned long multicorebase[];
 //extern int irq[];
@@ -69,15 +68,6 @@
 //extern int reg_count[];
 extern unsigned long gBaseHdwr;
 
-static struct SubsysDesc subsys_array[] = {
-	{0, 0, 0x0},
-};
-
-static struct CoreDesc core_array[] = {
-	{0, 0, HW_VCD, 0x800, MAX_REG_COUNT * 4, -1},
-	{0, 0, HW_VCMD, 0x000, 30 * 4, -1},
-	{0, 0, HW_AXIFE, 0x400, 64 * 4, -1},
-};
 
 /*
  * Convert subsys_array & core_array to subsys_config array

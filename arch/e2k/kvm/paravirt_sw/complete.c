@@ -18,10 +18,10 @@
 
 #include <../kernel/sched/sched.h>
 
-#include <asm/kvm/csd_lock.h>
+#include <asm/kvm/paravirt_sw/csd_lock.h>
 
 #include "complete.h"
-#include "irq.h"
+#include "../irq.h"
 
 #undef	DEBUG_KVM_MODE
 #undef	DebugKVM

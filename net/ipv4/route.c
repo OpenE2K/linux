@@ -605,7 +605,9 @@ static void fnhe_remove_oldest(struct fnhe_hash_bucket *hash)
 {
 	struct fib_nh_exception __rcu **fnhe_p, **oldest_p;
 	struct fib_nh_exception *fnhe, *oldest = NULL;
-
+#ifdef CONFIG_MCST
+	oldest_p = NULL;
+#endif
 	for (fnhe_p = &hash->chain; ; fnhe_p = &fnhe->fnhe_next) {
 		fnhe = rcu_dereference_protected(*fnhe_p,
 						 lockdep_is_held(&fnhe_lock));

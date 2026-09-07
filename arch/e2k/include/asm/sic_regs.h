@@ -6,15 +6,10 @@
 #ifndef	_E2K_SIC_REGS_H_
 #define	_E2K_SIC_REGS_H_
 
-#ifdef __KERNEL__
+#include <linux/align.h>
+#include <linux/types.h>
 
-#include <asm/types.h>
-#include <asm/cpu_regs.h>
-#include <asm/e2k_sic.h>
-
-#ifndef __ASSEMBLY__
-#include <asm/e2k_api.h>
-#endif /* __ASSEMBLY__ */
+#include <asm/base_regs_types.h>
 
 
 #define	E2K_SIC_ALIGN_RT_MSI	20	/* 1 Mb */
@@ -27,28 +22,6 @@
 
 #define SIC_st_p	0x00
 
-#define	SIC_st_core0	0x100
-#define	SIC_st_core1	0x104
-#define	SIC_st_core2	0x108
-#define	SIC_st_core3	0x10c
-#define	SIC_st_core4	0x110
-#define	SIC_st_core5	0x114
-#define	SIC_st_core6	0x118
-#define	SIC_st_core7	0x11c
-#define	SIC_st_core8	0x120
-#define	SIC_st_core9	0x124
-#define	SIC_st_core10	0x128
-#define	SIC_st_core11	0x12c
-#define	SIC_st_core12	0x130
-#define	SIC_st_core13	0x134
-#define	SIC_st_core14	0x138
-#define	SIC_st_core15	0x13c
-
-#define SIC_st_core(num) (0x100 + (num) * 4)
-
-#define	SIC_st_ipl	0x0e0
-#define	SIC_st_xmu	0x0f0
-
 #define SIC_rt_ln	0x08
 #define SIC_rt_lcfg0	0x10
 #define SIC_rt_lcfg1	0x14
@@ -59,11 +32,13 @@
 #define SIC_rt_mhi1	0x24
 #define SIC_rt_mhi2	0x28
 #define SIC_rt_mhi3	0x2c
+#define SIC_rt_mhi_nr(nr)	(0x20 + 4 * (nr))
 
 #define SIC_rt_mlo0	0x30
 #define SIC_rt_mlo1	0x34
 #define SIC_rt_mlo2	0x38
 #define SIC_rt_mlo3	0x3c
+#define SIC_rt_mlo_nr(nr)	(0x30 + 4 * (nr))
 
 #define SIC_rt_pcim0	0x40
 #define SIC_rt_pcim1	0x44
@@ -90,108 +65,131 @@
 #define SIC_rt_pcimp_e2	0x88
 #define SIC_rt_pcimp_e3	0x8c
 
+
+#define	SIC_rt_pcicfgb		0x90
+#define SIC_rt_ioapicintb	0x94
+#define	SIC_rt_pcicfged		0x98 /* for v7 e8v7 only */
+#define	SIC_rt_vgamemed		0x9c /* >= v6, e8v7 only */
+#define SIC_rt_vgamem_ext	0xa0 /* v7 */
+
+#define SIC_rt_lapicintb	0xa0 /* <= v5 */
+
+#define	SIC_rt_msi	0xb0	/* >= v6 */
+#define	SIC_rt_msi_h	0xb4	/* >= v6 */
+
+#define	SIC_st_ipl	0xe0	/* v7, e32c only */
+#define	SIC_st_xmu	0xf0	/* v7 */
+
+#define	SIC_st_core0	0x100
+#define	SIC_st_core1	0x104
+#define	SIC_st_core2	0x108
+#define	SIC_st_core3	0x10c
+#define	SIC_st_core4	0x110
+#define	SIC_st_core5	0x114
+#define	SIC_st_core6	0x118
+#define	SIC_st_core7	0x11c
+#define	SIC_st_core8	0x120
+#define	SIC_st_core9	0x124
+#define	SIC_st_core10	0x128
+#define	SIC_st_core11	0x12c
+#define	SIC_st_core12	0x130
+#define	SIC_st_core13	0x134
+#define	SIC_st_core14	0x138
+#define	SIC_st_core15	0x13c
+#define SIC_st_core(num) (0x100 + (num) * 4)
+
+/* >= v7 registers */
 #define SIC_rt_pcim0_xmu_l	0x220
 #define SIC_rt_pcim0_xmu_a	0x224
 #define SIC_rt_pcim0_xmu_b	0x228
-#define SIC_rt_pcim0_xmu_c	0x22c
-#define SIC_rt_pcim0_xmu_d	0x230
+#define SIC_rt_pcim0_xmu_c	0x22c /* e32c only */
+#define SIC_rt_pcim0_xmu_d	0x230 /* e32c only */
 
 #define SIC_rt_pciio0_xmu_l	0x240
 #define SIC_rt_pciio0_xmu_a	0x244
 #define SIC_rt_pciio0_xmu_b	0x248
-#define SIC_rt_pciio0_xmu_c	0x24c
-#define SIC_rt_pciio0_xmu_d	0x250
+#define SIC_rt_pciio0_xmu_c	0x24c /* e32c only */
+#define SIC_rt_pciio0_xmu_d	0x250 /* e32c only */
 
 #define SIC_rt_pcimp0_xmu_l_bgn	0x260
 #define SIC_rt_pcimp0_xmu_a_bgn	0x264
 #define SIC_rt_pcimp0_xmu_b_bgn	0x268
-#define SIC_rt_pcimp0_xmu_c_bgn	0x26c
-#define SIC_rt_pcimp0_xmu_d_bgn	0x270
+#define SIC_rt_pcimp0_xmu_c_bgn	0x26c /* e32c only */
+#define SIC_rt_pcimp0_xmu_d_bgn	0x270 /* e32c only */
 
 #define SIC_rt_pcimp0_xmu_l_end	0x280
 #define SIC_rt_pcimp0_xmu_a_end	0x284
 #define SIC_rt_pcimp0_xmu_b_end	0x288
-#define SIC_rt_pcimp0_xmu_c_end	0x28c
-#define SIC_rt_pcimp0_xmu_d_end	0x290
+#define SIC_rt_pcimp0_xmu_c_end	0x28c /* e32c only */
+#define SIC_rt_pcimp0_xmu_d_end	0x290 /* e32c only */
 
-#define SIC_esclkr		0xc00
+#define SIC_rt_pcimp0_xmu_l_m32_bgn	0x2a0
+#define SIC_rt_pcimp0_xmu_a_m32_bgn	0x2a4
+#define SIC_rt_pcimp0_xmu_b_m32_bgn	0x2a8
+#define SIC_rt_pcimp0_xmu_c_m32_bgn	0x2ac /* e32c only */
+#define SIC_rt_pcimp0_xmu_d_m32_bgn	0x2b0 /* e32c only */
 
-#define SIC_rt_ioapic10	0x1060
-#define SIC_rt_ioapic11	0x1064
-#define SIC_rt_ioapic12	0x1068
-#define SIC_rt_ioapic13	0x106c
+#define SIC_rt_pcimp0_xmu_l_m32_end	0x2c0
+#define SIC_rt_pcimp0_xmu_a_m32_end	0x2c4
+#define SIC_rt_pcimp0_xmu_b_m32_end	0x2c8
+#define SIC_rt_pcimp0_xmu_c_m32_end	0x2cc /* e32c only */
+#define SIC_rt_pcimp0_xmu_d_m32_end	0x2d0 /* e32c only */
 
-#define SIC_rt_ioapicintb 0x94
-#define SIC_rt_lapicintb 0xa0
+/* end of >= v7 registers */
 
-#define	SIC_rt_pcicfgb	0x90
-#define	SIC_rt_pcicfged	0x98
-#define	SIC_rt_vgamemed	0x9c
+/* Power management */
+#define SIC_pwr_mgr		0x280	/* <= v5 */
+#define SIC_pwr_mgr1		0x284	/* <= v5 */
 
-/* PREPIC */
-#define	SIC_prepic_version	0x8000
-#define	SIC_prepic_ctrl		0x8010
-#define	SIC_prepic_id		0x8020
-#define	SIC_prepic_ctrl2	0x8030
-#define	SIC_prepic_err_stat	0x8040
-#define	SIC_prepic_err_msg_lo	0x8050
-#define	SIC_prepic_err_msg_hi	0x8054
-#define	SIC_prepic_err_int	0x8060
-#define	SIC_prepic_mcr		0x8070
-#define	SIC_prepic_mid		0x8074
-#define	SIC_prepic_mar0_lo	0x8080
-#define	SIC_prepic_mar0_hi	0x8084
-#define	SIC_prepic_mar1_lo	0x8090
-#define	SIC_prepic_mar1_hi	0x8094
-#define	SIC_prepic_linp0	0x8c00
-#define	SIC_prepic_linp1	0x8c04
-#define	SIC_prepic_linp2	0x8c08
-#define	SIC_prepic_linp3	0x8c0c
-#define	SIC_prepic_linp4	0x8c10
-#define	SIC_prepic_linp5	0x8c14
-#define	SIC_prepic_linp6	0x8c18
-#define	SIC_prepic_linp7	0x8c1c
-#define	SIC_prepic_linp8	0x8c20
-#define	SIC_prepic_linp9	0x8c24
-#define	SIC_prepic_linp10	0x8c28
-#define	SIC_prepic_linp11	0x8c2c
-#define	SIC_prepic_linp12	0x8c30
-#define	SIC_prepic_linp13	0x8c34
-#define	SIC_prepic_linp14	0x8c38
-#define	SIC_prepic_linp15	0x8c3c
-
-
+/* >= v6 registers */
 /* Host Controller */
-#define SIC_xmu_a_hc_ctrl	0xa340
-#define SIC_xmu_b_hc_ctrl	0xb340
-#define SIC_xmu_c_hc_ctrl	0xc340
-#define SIC_xmu_d_hc_ctrl	0xd340
+#define HC_CTRL			0x0340
 
-#define HC_CTRL_DCAE	BIT(7)
-#define HC_CTRL_WL3STE	BIT(15)
+/* HC monitors */
+#define HC_MCR			0x360
+#define HC_MID			0x364
+#define HC_MAR0_LO		0x368
+#define HC_MAR0_HI		0x36c
+#define HC_MAR1_LO		0x370
+#define HC_MAR1_HI		0x374
+/* end v6 registers */
+
+/* < v6 registers */
 
 /* IOMMU */
-#define SIC_iommu_ctrl		0x0380
-#define SIC_iommu_ba_lo		0x0390
-#define SIC_iommu_ba_hi		0x0394
-#define SIC_iommu_dtba_lo	0x0398
-#define SIC_iommu_dtba_hi	0x039c
-#define SIC_iommu_flush		0x03a0
-#define SIC_iommu_flushP	0x03a4
-#define SIC_iommu_cmd_c_lo	0x03a0
-#define SIC_iommu_cmd_c_hi	0x03a4
-#define SIC_iommu_cmd_d_lo	0x03a8
-#define SIC_iommu_cmd_d_hi	0x03ac
-#define SIC_iommu_err		0x03b0
-#define SIC_iommu_err1		0x03b4
-#define SIC_iommu_err_info_lo	0x03b8
-#define SIC_iommu_err_info_hi	0x03bc
-#define SIC_iommu_mcr		0x03c0
-#define SIC_iommu_mid		0x03c4
-#define SIC_iommu_mar0_lo	0x03c8
-#define SIC_iommu_mar0_hi	0x03cc
-#define SIC_iommu_mar1_lo	0x03d0
-#define SIC_iommu_mar1_hi	0x03d4
+#define SIC_iommu_ctrl		0x380
+#define SIC_iommu_ba_lo		0x390
+#define SIC_iommu_ba_hi		0x394
+#define SIC_iommu_dtba_lo	0x398
+#define SIC_iommu_dtba_hi	0x39c
+#define SIC_iommu_flush		0x3a0
+#define SIC_iommu_flushP	0x3a4
+#define SIC_iommu_cmd_c_lo	0x3a0
+#define SIC_iommu_cmd_c_hi	0x3a4
+#define SIC_iommu_cmd_d_lo	0x3a8
+#define SIC_iommu_cmd_d_hi	0x3ac
+#define SIC_iommu_err		0x3b0 /* <= v5 */
+#define SIC_iommu_err1		0x3b4 /* <= v5 */
+/* >=v6 registers */
+#define CIC_iommu_err_lo	0x3b0
+#define CIC_iommu_err_hi	0x3b4
+#define SIC_iommu_err_info_lo	0x3b8
+#define SIC_iommu_err_info_hi	0x3bc
+#define SIC_iommu_mcr		0x3c0
+#define SIC_iommu_mid		0x3c4
+#define SIC_iommu_mar0_lo	0x3c8
+#define SIC_iommu_mar0_hi	0x3cc
+#define SIC_iommu_mar1_lo	0x3d0
+#define SIC_iommu_mar1_hi	0x3d4
+/* >= v7 registers */
+#define SIC_iommu_cmd_bar_lo	0x3d8
+#define SIC_iommu_cmd_bar_hi	0x3dc
+#define SIC_iommu_cmd_hpr	0x3e0
+#define SIC_iommu_cmd_tpr	0x3e4
+#define SIC_iommu_el_bar_lo	0x3e8
+#define SIC_iommu_el_bar_hi	0x3ec
+#define SIC_iommu_el_hpr	0x3f0
+#define SIC_iommu_el_tpr	0x3f4
 
 #define SIC_iommu_reg_base	SIC_iommu_ctrl
 #define SIC_iommu_reg_size	0x0080
@@ -199,46 +197,14 @@
 #define SIC_embedded_iommu_base	0x5d00
 #define	SIC_embedded_iommu_size	SIC_iommu_reg_size
 
-/* IO link & RDMA */
-#define	SIC_iol_csr		0x900
-#define	SIC_io_vid		0x700
-#define	SIC_io_csr		0x704
-#define	SIC_io_str		0x70c
-#define	SIC_io_str_hi		0x72c
-#define	SIC_rdma_vid		0x880
-#define	SIC_rdma_cs		0x888
-
-/* Second IO link */
-#define	SIC_iol_csr1	0x1900
-#define	SIC_io_vid1	0x1700
-#define	SIC_io_csr1	0x1704
-#define	SIC_io_str1	0x170c
-#define	SIC_rdma_vid1	0x1880
-#define	SIC_rdma_cs1	0x1888
-
-/* DSP */
-#define SIC_ic_ir0	0x2004
-#define SIC_ic_ir1      0x2008
-#define SIC_ic_mr0      0x2010
-#define SIC_ic_mr1      0x2014
-
-/* Monitors */
-#define SIC_sic_mcr	0xc30
-#define SIC_sic_mar0_lo	0xc40
-#define SIC_sic_mar0_hi	0xc44
-#define SIC_sic_mar1_lo	0xc48
-#define SIC_sic_mar1_hi	0xc4c
-
-/* Interrupt register */
-#define SIC_sic_int	0xc60
 
 /* MC */
-
-#define SIC_MAX_MC_COUNT	E48C_SIC_MC_COUNT
+#define SIC_MAX_MC_COUNT	E16C_SIC_MC_COUNT
 #define SIC_MC_COUNT		(machine.sic_mc_count)
-
 #define SIC_MC_BASE		0x400
 #define SIC_MC_SIZE		(machine.sic_mc_size)
+
+/* < v6 refisters */
 
 #define SIC_mc0_ecc		0x400
 #define SIC_mc1_ecc		0x440
@@ -254,26 +220,149 @@
 #define SIC_mc1_cfg		0x458
 #define SIC_mc2_cfg		0x498
 #define SIC_mc3_cfg		0x4d8
+/* >= v6 registers */
+#define MC_CH			0x400
+#define MC_CTL			0x404
+#define MC_CFG			0x418
+#define MC_PERF			0x41c
+#define MC_OPMB			0x424
+#define MC_PWR			0x430
+#define MC_ECC			0x440
+/* Use e2k suffix to avoid conflict with Radeon */
+#define MC_STATUS_E2K		0x44c
+#define MC_MON_CTL		0x450
+#define MC_MON_CTR0		0x454
+#define MC_MON_CTR1		0x458
+#define MC_MON_CTRext		0x45c
+/*  >=v7 registers */
+#define MC_ECCDIAG		0x444
+#define MCNA_CTRL		0x4c0
+#define MCNA_INT		0x4c4
+#define MCNA_DIAG_ADDR		0x4c8
+#define MCNA_DIAG_DATA		0x4cc
+
+#define MCNA_REG(reg) ((reg == MC_ECCDIAG) || ((reg >= MCNA_CTRL) && (reg <= MCNA_DIAG_DATA)))
+/* end of MC */
+
+
+#define SIC_sccfg		0xc00 /* <= v5 */
+#define SIC_esclkr		0xc00 /* >= v7 */
+
+
+
 
 /* IPCC */
 #define SIC_IPCC_LINKS_COUNT	3
-#define SIC_ipcc_csr1		0x604
-#define SIC_ipcc_csr2		0x644
-#define SIC_ipcc_csr3		0x684
-#define SIC_ipcc_str1		0x60c
-#define SIC_ipcc_str2		0x64c
-#define SIC_ipcc_str3		0x68c
+#define SIC_ipcc_csr1		0x604 /* <=v6 */
+#define SIC_ipcc_csr2		0x644 /* <=v6 */
+#define SIC_ipcc_csr3		0x684 /* <=v6 */
+#define SIC_ipcc_str1		0x60c /* <=v6 */
+#define SIC_ipcc_str2		0x64c /* <=v6 */
+#define SIC_ipcc_str3		0x68c /* <=v6 */
 
-#define SIC_hw0			0xc80
-#define SIC_hw1			0xc84
-#define SIC_hw2			0xc88
-#define SIC_hw3			0xc8c
+/* IO link & RDMA . <= v5 */
+#define	SIC_io_vid		0x700
+#define	SIC_io_csr		0x704
+#define	SIC_io_str		0x70c
+#define	SIC_io_str_hi		0x72c
+#define	SIC_rdma_vid		0x880
+#define	SIC_rdma_cs		0x888
+#define	SIC_iol_csr		0x900
 
-/* Power management */
-#define SIC_pwr_mgr		0x280
+/* v7 MHIO_* registers, e32c only */
+#define SIC_rt_mhio_mc		0x700
+#define SIC_rt_mhio_cxl_a	0x704
+#define SIC_rt_mhio_cxl_b	0x708
+#define SIC_rt_mhio_cxl_c	0x70c
+#define SIC_rt_mhio_cxl_d	0x710
 
+#define SIC_rt_mhio_cxl_a_0	0x720
+#define SIC_rt_mhio_cxl_a_1	0x724
+#define SIC_rt_mhio_cxl_a_2	0x728
+#define SIC_rt_mhio_cxl_a_3	0x726
+
+#define SIC_rt_mhio_cxl_b_0	0x740
+#define SIC_rt_mhio_cxl_b_1	0x744
+#define SIC_rt_mhio_cxl_b_2	0x748
+#define SIC_rt_mhio_cxl_b_3	0x746
+
+#define SIC_rt_mhio_cxl_c_0	0x760
+#define SIC_rt_mhio_cxl_c_1	0x764
+#define SIC_rt_mhio_cxl_c_2	0x768
+#define SIC_rt_mhio_cxl_c_3	0x766
+
+#define SIC_rt_mhio_cxl_d_0	0x780
+#define SIC_rt_mhio_cxl_d_1	0x784
+#define SIC_rt_mhio_cxl_d_2	0x788
+#define SIC_rt_mhio_cxl_d_3	0x786
+
+/* Monitors. <= v5 */
+#define SIC_sic_mcr		0xc30
+#define SIC_sic_mar0_lo		0xc40
+#define SIC_sic_mar0_hi		0xc44
+#define SIC_sic_mar1_lo		0xc48
+#define SIC_sic_mar1_hi		0xc4c
+
+/* Interrupt register */
+#define SIC_sic_int		0xc60 /* <=v5 */
+#define SIC_xmu_int		0xc60 /* v6 */
+#define SIC_xmu_l_int		0xc60 /* v7 */
+
+#define SIC_xmu_l_int_m		0xc64 /* >=v6 */
+#define SIC_xmu_l_la_ctl	0xc70 /* v7 */
+#define SIC_xmu_l_hw		0xc80 /* >=v6 */
+#define SIC_xmu_l_dda_lo	0xc88 /* >=v6 */
+#define SIC_xmu_l_dda_hi	0xc8c /* >=v6 */
+
+#define SIC_err_addr_lo		0xc68 /* <=v5 */
+#define SIC_err_addr_hi		0xc6c /* <= v5 */
+#define SIC_hw0			0xc80 /* <= v5 */
+#define SIC_hw1			0xc84 /* <= v5 */
+#define SIC_hw2			0xc88 /* <= v5 */
+#define SIC_hw3			0xc8c /* <= v5 */
+
+#define SIC_fuse_ram_addr	0xcc0 /* >=v6 */
+#define SIC_fuse_ram_data	0xcc4 /* >=v6 */
+
+
+
+/* HMU monitors, v6 only */
+#define HMU_MIC		0xd00
+#define HMU_MCR		0xd14
+#define HMU0_INT	0xd40
+#define HMU0_MAR0_LO	0xd44
+#define HMU0_MAR0_HI	0xd48
+#define HMU0_MAR1_LO	0xd4c
+#define HMU0_MAR1_HI	0xd50
+#define HMU1_INT	0xd70
+#define HMU1_MAR0_LO	0xd74
+#define HMU1_MAR0_HI	0xd78
+#define HMU1_MAR1_LO	0xd7c
+#define HMU1_MAR1_HI	0xd80
+#define HMU2_INT	0xda0
+#define HMU2_MAR0_LO	0xda4
+#define HMU2_MAR0_HI	0xda8
+#define HMU2_MAR1_LO	0xdac
+#define HMU2_MAR1_HI	0xdb0
+#define HMU3_INT	0xdd0
+#define HMU3_MAR0_LO	0xdd4
+#define HMU3_MAR0_HI	0xdd8
+#define HMU3_MAR1_LO	0xddc
+#define HMU3_MAR1_HI	0xde0
+
+/* HA regs in v7 */
+#define HA_BASC		0xd00 /* v7 */
+#define HA_MCR		0xd14 /* v7 */
+
+/* Local HA regs offsets */
+#define LOC_HA_BASC(ha_bank) (0xd40 + (ha_bank << 2))
+#define HA_INT		0
+#define HA_MAR_LO(i)	(4 + 8 * (i))
+#define HA_MAR_HI(i)	(8 + 8 * (i))
+
+#define PMC_INFO			0x1000 /* v6+ only */
 /* E12C/E16C/E2C3 Power Control System (PCS) registers
- * PMC base = 0x1000 is added */
+ * PMC_INFO = 0x1000 is added */
 #define _PMC_TERM_CONV			0x8
 #define _PMC_TERM_CTRL			0xc
 #define _PMC_TERM_TS0			0x10
@@ -306,35 +395,29 @@
 #define _PMC_FREQ_OCN_TABLE5		0x154
 #define _PMC_FREQ_OCN_TABLE6		0x158
 #define _PMC_FREQ_OCN_TABLE7		0x15c
-#define _PMC_FREQ_CORE_0_MON		0x200
-#define _PMC_FREQ_CORE_0_CTRL		0x204
-#define _PMC_FREQ_CORE_0_SLEEP		0x208
-#define _PMC_FREQ_CORE_N_MON(n)		(_PMC_FREQ_CORE_0_MON +  n * 16)
-#define _PMC_FREQ_CORE_N_CTRL(n)	(_PMC_FREQ_CORE_0_CTRL +  n * 16)
-#define _PMC_FREQ_CORE_N_SLEEP(n)	(_PMC_FREQ_CORE_0_SLEEP +  n * 16)
-#define _PMC_FREQ_CORE_0_MON_V7	0x400
-#define _PMC_FREQ_CORE_0_CTRL_V7	0x404
-#define _PMC_FREQ_CORE_0_SLEEP_V7	0x408
-#define _PMC_FREQ_CORE_N_MON_V7(n)	(_PMC_FREQ_CORE_0_MON_V7 +  n * 16)
-#define _PMC_FREQ_CORE_N_CTRL_V7(n)	(_PMC_FREQ_CORE_0_CTRL_V7 +  n * 16)
-#define _PMC_FREQ_CORE_N_SLEEP_V7(n)	(_PMC_FREQ_CORE_0_SLEEP_V7 +  n * 16)
-#define _PMC_FREQ_OCN_MON		0x400
-#define _PMC_FREQ_OCN_CTRL		0x404
-#define _PMC_FREQ_GRAPHIC_0_MON	0x410
-#define _PMC_FREQ_GRAPHIC_0_CTRL	0x414
-#define _PMC_FREQ_GRAPHIC_N_MON(n)	(_PMC_FREQ_GRAPHIC_0_MON +  n * 16)
-#define _PMC_FREQ_GRAPHIC_N_CTRL(n)	(_PMC_FREQ_GRAPHIC_0_CTRL +  n * 16)
+#define _PMC_FREQ_CFG_OFFS_V7		0x300
+#define _PMC_FREQ_STEPS_OFFS_V7		0x304
+#define _PMC_FREQ_C2_OFFS_V7		0x308
+#define _PMC_FREQ_BND_OFFS_V7		0x30c
 #define _PMC_FREQ_OCN_MON_V7		0x380
 #define _PMC_FREQ_OCN_CTRL_V7		0x384
-#define _PMC_FREQ_GRAPHIC_0_MON_V7	0x3c0
-#define _PMC_FREQ_GRAPHIC_0_CTRL_V7	0x3c4
-#define _PMC_FREQ_GRAPHIC_N_MON_V7(n)	(_PMC_FREQ_GRAPHIC_0_MON_V7 +  n * 16)
-#define _PMC_FREQ_GRAPHIC_N_CTRL_V7(n)	(_PMC_FREQ_GRAPHIC_0_CTRL_V7 +  n * 16)
+#define _PMC_FREQ_OCN_MON		0x400
+#define _PMC_FREQ_OCN_CTRL		0x404
 #define _PMC_SYS_MON_0			0x500
 #define _PMC_SYS_MON_1			0x504
 #define _PMC_FAN_CFG			0x540
+#define _PMC_FREQ_OCN_MON_OFFS_V7	0x800
+#define _PMC_FREQ_OCN_CTRL_OFFS_V7	0x804
+#define _PMC_UC_ENABLE_V7		0x860
+#define _PMC_SYS_MON_0_OFFS_V7		0x900
+#define _PMC_SYS_MON_1_OFFS_V7		0x904
+#define _PMC_FAN_CFG_OFFS_V7		0x940
+#define _PMC_FREQ_CORE_MON(n, is_v7)		(((is_v7) ? 0x400 : 0x200) + (n) * 0x10)
+#define _PMC_FREQ_CORE_CTRL(n, is_v7)		(((is_v7) ? 0x404 : 0x204) + (n) * 0x10)
+#define _PMC_FREQ_CORE_SLEEP(n, is_v7)	(((is_v7) ? 0x408 : 0x208) + (n) * 0x10)
+#define _PMC_FREQ_GRAPHIC_MON(n, is_v7)	(((is_v7) ? 0x3c0 : 0x410) + (n) * 0x10)
+#define _PMC_FREQ_GRAPHIC_CTRL(n, is_v7)	(((is_v7) ? 0x3c4 : 0x414) + (n) * 0x10)
 
-#define PMC_INFO			0x1000
 
 #define PMC_TERM_CONV			(PMC_INFO + _PMC_TERM_CONV)
 #define PMC_TERM_CTRL			(PMC_INFO + _PMC_TERM_CTRL)
@@ -368,35 +451,205 @@
 #define PMC_FREQ_OCN_TABLE5		(PMC_INFO + _PMC_FREQ_OCN_TABLE5)
 #define PMC_FREQ_OCN_TABLE6		(PMC_INFO + _PMC_FREQ_OCN_TABLE6)
 #define PMC_FREQ_OCN_TABLE7		(PMC_INFO + _PMC_FREQ_OCN_TABLE7)
-#define PMC_FREQ_CORE_0_MON		(PMC_INFO + _PMC_FREQ_CORE_0_MON)
-#define PMC_FREQ_CORE_0_CTRL		(PMC_INFO + _PMC_FREQ_CORE_0_CTRL)
-#define PMC_FREQ_CORE_0_SLEEP		(PMC_INFO + _PMC_FREQ_CORE_0_SLEEP)
-#define PMC_FREQ_CORE_N_MON(n)		(PMC_INFO + _PMC_FREQ_CORE_N_MON(n))
-#define PMC_FREQ_CORE_N_CTRL(n)	(PMC_INFO + _PMC_FREQ_CORE_N_CTRL(n))
-#define PMC_FREQ_CORE_N_SLEEP(n)	(PMC_INFO + _PMC_FREQ_CORE_N_SLEEP(n))
-#define PMC_FREQ_CORE_0_MON_V7		(PMC_INFO + _PMC_FREQ_CORE_0_MON_V7)
-#define PMC_FREQ_CORE_0_CTRL_V7	(PMC_INFO + _PMC_FREQ_CORE_0_CTRL_V7)
-#define PMC_FREQ_CORE_0_SLEEP_V7	(PMC_INFO + _PMC_FREQ_CORE_0_SLEEP_V7)
-#define PMC_FREQ_CORE_N_MON_V7(n)	(PMC_INFO + _PMC_FREQ_CORE_N_MON_V7(n))
-#define PMC_FREQ_CORE_N_CTRL_V7(n)	(PMC_INFO + _PMC_FREQ_CORE_N_CTRL_V7(n))
-#define PMC_FREQ_CORE_N_SLEEP_V7(n)	(PMC_INFO + _PMC_FREQ_CORE_N_SLEEP_V7(n))
+#define PMC_FREQ_CORE_MON(n, is_v7)	(PMC_INFO + _PMC_FREQ_CORE_MON((n), (is_v7)))
+#define PMC_FREQ_CORE_CTRL(n, is_v7)	(PMC_INFO + _PMC_FREQ_CORE_CTRL((n), (is_v7)))
+#define PMC_FREQ_CORE_SLEEP(n, is_v7)	(PMC_INFO + _PMC_FREQ_CORE_SLEEP((n), (is_v7)))
+#define PMC_FREQ_CFG_OFFS_V7		(PMC_INFO + _PMC_FREQ_CFG_OFFS_V7)
+#define PMC_FREQ_STEPS_OFFS_V7		(PMC_INFO + _PMC_FREQ_STEPS_OFFS_V7)
+#define PMC_FREQ_C2_OFFS_V7		(PMC_INFO + _PMC_FREQ_C2_OFFS_V7)
+#define PMC_FREQ_BND_OFFS_V7		(PMC_INFO + _PMC_FREQ_BND_OFFS_V7)
 #define PMC_FREQ_OCN_MON		(PMC_INFO + _PMC_FREQ_OCN_MON)
 #define PMC_FREQ_OCN_CTRL		(PMC_INFO + _PMC_FREQ_OCN_CTRL)
 #define PMC_FREQ_OCN_MON_V7		(PMC_INFO + _PMC_FREQ_OCN_MON_V7)
 #define PMC_FREQ_OCN_CTRL_V7		(PMC_INFO + _PMC_FREQ_OCN_CTRL_V7)
-#define PMC_FREQ_GRAPHIC_0_MON		(PMC_INFO + _PMC_FREQ_GRAPHIC_0_MON)
-#define PMC_FREQ_GRAPHIC_0_CTRL	(PMC_INFO + _PMC_FREQ_GRAPHIC_0_CTRL)
-#define PMC_FREQ_GRAPHIC_N_MON(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_MON(n))
-#define PMC_FREQ_GRAPHIC_N_CTRL(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_CTRL(n))
-#define PMC_FREQ_GRAPHIC_0_MON_V7	(PMC_INFO + _PMC_FREQ_GRAPHIC_0_MON_V7)
-#define PMC_FREQ_GRAPHIC_0_CTRL_V7	(PMC_INFO + _PMC_FREQ_GRAPHIC_0_CTRL_V7)
-#define PMC_FREQ_GRAPHIC_N_MON_V7(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_MON_V7(n))
-#define PMC_FREQ_GRAPHIC_N_CTRL_V7(n)	(PMC_INFO + _PMC_FREQ_GRAPHIC_N_CTRL_V7(n))
+#define PMC_FREQ_GRAPHIC_MON(n, is_v7)  (PMC_INFO + _PMC_FREQ_GRAPHIC_MON((n), (is_v7)))
+#define PMC_FREQ_GRAPHIC_CTRL(n, is_v7) (PMC_INFO + _PMC_FREQ_GRAPHIC_CTRL((n), (is_v7)))
 #define PMC_SYS_MON_0			(PMC_INFO + _PMC_SYS_MON_0)
 #define PMC_SYS_MON_1			(PMC_INFO + _PMC_SYS_MON_1)
 #define PMC_FAN_CFG			(PMC_INFO + _PMC_FAN_CFG)
+#define PMC_FREQ_OCN_MON_OFFS_V7	(PMC_INFO + _PMC_FREQ_OCN_MON_OFFS_V7)
+#define PMC_FREQ_OCN_CTRL_OFFS_V7	(PMC_INFO + _PMC_FREQ_OCN_CTRL_OFFS_V7)
+#define PMC_UC_ENABLE_V7		(PMC_INFO + _PMC_UC_ENABLE_V7)
+#define PMC_SYS_MON_0_OFFS_V7		(PMC_INFO + _PMC_SYS_MON_0_OFFS_V7)
+#define PMC_SYS_MON_1_OFFS_V7		(PMC_INFO + _PMC_SYS_MON_1_OFFS_V7)
+#define PMC_FAN_CFG_OFFS_V7		(PMC_INFO + _PMC_FAN_CFG_OFFS_V7)
 
-#ifndef __ASSEMBLY__
+static inline bool is_pmc_freq_core_mon(u64 reg_offset, bool is_v7)
+{
+	u64 max_regs = (is_v7) ? 64 : 16;
+	u64 offset = reg_offset - PMC_FREQ_CORE_MON(0, is_v7);
+	u64 n = offset / 0x10;
+
+	return IS_ALIGNED(offset, 0x10) && n < max_regs;
+}
+
+static inline bool is_pmc_freq_core_ctrl(u64 reg_offset, bool is_v7)
+{
+	u64 max_regs = (is_v7) ? 64 : 16;
+	u64 offset = reg_offset - PMC_FREQ_CORE_CTRL(0, is_v7);
+	u64 n = offset / 0x10;
+
+	return IS_ALIGNED(offset, 0x10) && n < max_regs;
+}
+
+static inline bool is_pmc_freq_core_sleep(u64 reg_offset, bool is_v7)
+{
+	u64 max_regs = (is_v7) ? 64 : 16;
+	u64 offset = reg_offset - PMC_FREQ_CORE_SLEEP(0, is_v7);
+	u64 n = offset / 0x10;
+
+	return IS_ALIGNED(offset, 0x10) && n < max_regs;
+}
+
+static inline bool is_pmc_freq_graphic_mon(u64 reg_offset, bool is_v7)
+{
+	u64 offset = reg_offset - PMC_FREQ_GRAPHIC_MON(0, is_v7);
+	u64 n = offset / 0x10;
+
+	return IS_ALIGNED(offset, 0x10) && n < 4;
+}
+
+static inline bool is_pmc_freq_graphic_ctrl(u64 reg_offset, bool is_v7)
+{
+	u64 offset = reg_offset - PMC_FREQ_GRAPHIC_CTRL(0, is_v7);
+	u64 n = offset / 0x10;
+
+	return IS_ALIGNED(offset, 0x10) && n < 4;
+}
+
+/* L3 global regs */
+#define L3_BASC		0x300c
+#define L3_IMSK		0x3024
+#define L3_PMON_UCTL	0x3050
+#define L3_PMON_FLT0	0x3054
+#define L3_PMON_FLT1	0x3058
+#define L3_PMON_CTL0_V6	0x3060
+#define L3_PMON_CTL0_V7	0x305c
+#define L3_PMON_CTL1_V6	0x3064
+#define L3_PMON_CTL1_V7	0x3060
+#define L3_BASR(i)	(0x3100 + ((i) << 2))
+
+/* L3 local regs */
+#define L3_INT			0
+#define L3_ECC			0x04
+#define L3_PMON_CNT0_LO		0x10
+#define L3_PMON_CNT0_HI		0x14
+#define L3_PMON_CNT1_LO		0x18
+#define L3_PMON_CNT1_HI		0x1c
+#define L3_EMRG0                0x40 /* >= v7 */
+#define L3_EMRG1                0x44 /* >= v7 */
+#define L3_EMRG2                0x48 /* >= v7 */
+#define L3_EMRG3                0x4c /* >= v7 */
+
+/* OCN regs */
+#define OCN_MIL		0x3804
+#define OCN_L3EN0	0x3810
+#define OCN_L3EN1	0x3814
+#define OCN_LASC	0x3840
+#define OCN_LASR(i)	(0x3a00 + ((i) << 2))
+#define OCN_PAR(i)	(0 + ((i) << 2))
+
+
+/* Additional IOMMU monitors - e2c3, e8v7 only.
+ * EDBC_IOMMU_* registers are used only to broadcast
+ * writing into ED{26-31}_IOMMU_* registers. */
+#define EDBC_IOMMU_CTRL		0x5080
+#define EDBC_IOMMU_BA_LO	0x5090
+#define EDBC_IOMMU_BA_HI	0x5094
+#define EDBC_IOMMU_DTBA_LO	0x5098
+#define EDBC_IOMMU_DTBA_HI	0x509c
+#define EDBC_IOMMU_CMD_C_LO	0x50a0
+#define EDBC_IOMMU_CMD_C_HI	0x50a4
+#define EDBC_IOMMU_ERR		0x50b0
+#define EDBC_IOMMU_ERR1		0x50b4
+#define EDBC_IOMMU_ERR_INFO_LO	0x50b8
+#define EDBC_IOMMU_ERR_INFO_HI	0x50bc
+#define EDBC_IOMMU_MCR		0x50c0
+#define EDBC_IOMMU_MID		0x50c4
+#define EDBC_IOMMU_MAR0_LO	0x50c8
+#define EDBC_IOMMU_MAR0_HI	0x50cc
+#define EDBC_IOMMU_MAR1_LO	0x50d0
+#define EDBC_IOMMU_MAR1_HI	0x50d4
+#define ED26_IOMMU_MCR		0x5d40
+#define ED26_IOMMU_MID		0x5d44
+#define ED26_IOMMU_MAR0_LO	0x5d48
+#define ED26_IOMMU_MAR0_HI	0x5d4c
+#define ED26_IOMMU_MAR1_LO	0x5d50
+#define ED26_IOMMU_MAR1_HI	0x5d54
+#define ED27_IOMMU_MCR		0x5dc0
+#define ED27_IOMMU_MID		0x5dc4
+#define ED27_IOMMU_MAR0_LO	0x5dc8
+#define ED27_IOMMU_MAR0_HI	0x5dcc
+#define ED27_IOMMU_MAR1_LO	0x5dd0
+#define ED27_IOMMU_MAR1_HI	0x5dd4
+#define ED28_IOMMU_MCR		0x5e40
+#define ED28_IOMMU_MID		0x5e44
+#define ED28_IOMMU_MAR0_LO	0x5e48
+#define ED28_IOMMU_MAR0_HI	0x5e4c
+#define ED28_IOMMU_MAR1_LO	0x5e50
+#define ED28_IOMMU_MAR1_HI	0x5e54
+#define ED29_IOMMU_MCR		0x5ec0
+#define ED29_IOMMU_MID		0x5ec4
+#define ED29_IOMMU_MAR0_LO	0x5ec8
+#define ED29_IOMMU_MAR0_HI	0x5ecc
+#define ED29_IOMMU_MAR1_LO	0x5ed0
+#define ED29_IOMMU_MAR1_HI	0x5ed4
+#define ED30_IOMMU_MCR		0x5f40
+#define ED30_IOMMU_MID		0x5f44
+#define ED30_IOMMU_MAR0_LO	0x5f48
+#define ED30_IOMMU_MAR0_HI	0x5f4c
+#define ED30_IOMMU_MAR1_LO	0x5f50
+#define ED30_IOMMU_MAR1_HI	0x5f54
+#define ED31_IOMMU_MCR		0x5fc0
+#define ED31_IOMMU_MID		0x5fc4
+#define ED31_IOMMU_MAR0_LO	0x5fc8
+#define ED31_IOMMU_MAR0_HI	0x5fcc
+#define ED31_IOMMU_MAR1_LO	0x5fd0
+#define ED31_IOMMU_MAR1_HI	0x5fd4
+
+
+/* PREPIC, >=v6 */
+#define	SIC_prepic_version	0x8000
+#define	SIC_prepic_ctrl		0x8010
+#define	SIC_prepic_id		0x8020
+#define	SIC_prepic_ctrl2	0x8030
+#define	SIC_prepic_err_stat	0x8040
+#define	SIC_prepic_err_msg_lo	0x8050
+#define	SIC_prepic_err_msg_hi	0x8054
+#define	SIC_prepic_err_int	0x8060
+#define	SIC_prepic_mcr		0x8070
+#define	SIC_prepic_mid		0x8074
+#define	SIC_prepic_mar0_lo	0x8080
+#define	SIC_prepic_mar0_hi	0x8084
+#define	SIC_prepic_mar1_lo	0x8090
+#define	SIC_prepic_mar1_hi	0x8094
+#define	SIC_prepic_linp0	0x8c00
+#define	SIC_prepic_linp1	0x8c04
+#define	SIC_prepic_linp2	0x8c08
+#define	SIC_prepic_linp3	0x8c0c
+#define	SIC_prepic_linp4	0x8c10
+#define	SIC_prepic_linp5	0x8c14
+#define	SIC_prepic_linp6	0x8c18
+#define	SIC_prepic_linp7	0x8c1c
+#define	SIC_prepic_linp8	0x8c20
+#define	SIC_prepic_linp9	0x8c24
+#define	SIC_prepic_linp10	0x8c28
+#define	SIC_prepic_linp11	0x8c2c
+#define	SIC_prepic_linp12	0x8c30
+#define	SIC_prepic_linp13	0x8c34
+#define	SIC_prepic_linp14	0x8c38
+#define	SIC_prepic_linp15	0x8c3c
+
+
+/* Host Controller, v7 */
+#define SIC_xmu_a_hc_ctrl	0xa340
+#define SIC_xmu_b_hc_ctrl	0xb340
+#define SIC_xmu_c_hc_ctrl	0xc340
+#define SIC_xmu_d_hc_ctrl	0xd340
+
+#define HC_CTRL_DCAE	BIT(7)
+#define HC_CTRL_WL3STE	BIT(15)
+
 /* PMC_FREQ_CORE_0_SLEEP fields: */
 typedef union {
 	struct {
@@ -445,8 +698,22 @@ typedef union {
 		u32 divF_curr		: 6;
 		u32 bfs_bypass		: 1;
 		u32 rmwen		: 1;
-	};
-	e2k_reg_t;
+	} v6;
+	struct {
+		u32 enable		: 1;
+		u32 progr_limits_en	: 1;
+		u32 rsv1		: 2;
+		u32 progr_divF		: 6;
+		u32 progr_divF_max	: 6;
+		u32 decr_dsbl		: 1;
+		u32 rsv2		: 5;
+		u32 ev_term		: 1;
+		u32 mon_Fmax		: 1;
+		u32 divF_curr		: 6;
+		u32 bfs_bypass		: 1;
+		u32 rmwen		: 1;
+	} v7;
+	u32 word;
 } freq_core_ctrl_t;
 
 /* PMC_SYS_MON_1 fields: */
@@ -550,7 +817,6 @@ typedef union {
 	};
 	u32 word;
 } pcs_ctrl3_t;
-#endif	/* __ASSEMBLY__ */
 
 /* Cache L3 */
 #define	SIC_l3_ctrl		0x3000
@@ -709,7 +975,6 @@ typedef union {
 /* SCCFG */
 #define SIC_sccfg	0xc00
 
-#ifndef __ASSEMBLY__
 typedef union {			/* Structure of lower word */
 	struct {
 		u32 vp		: 1;	/* [0] */
@@ -845,6 +1110,17 @@ typedef union {
 
 #define	E2K_SIC_ALIGN_RT_MHI	32	/* 4 Gb */
 #define	E2K_SIC_SIZE_RT_MHI	(1UL << E2K_SIC_ALIGN_RT_MHI)
+
+/*
+ *   Read/Write RT_MHI0_MC Regs
+ */
+typedef union {
+	struct {
+		u16 bgn;
+		u16 end;
+	};
+	e2k_reg_t;
+} e2k_rt_mhio_mc_t;
 
 /*
  *   Read/Write RT_IOAPICj Regs
@@ -1350,6 +1626,551 @@ typedef union {
 	e2k_reg_t;
 } bc_mp_stat_t;
 
-#endif /* ! __ASSEMBLY__ */
-#endif /* __KERNEL__ */
+
+
+typedef union {
+	struct {
+		u32 ocn_par_irq		: 1;
+		u32 ocn_par_srq		: 1;
+		u32 ocn_par_ack		: 1;
+		u32 ocn_par_rls		: 1;
+		u32 ocn_par_hak		: 1;
+		u32 ocn_par_dat_h	: 1;
+		u32 ocn_par_dat_b	: 1;
+		u32			: 4;
+		u32 ipcc_A		: 1;	/* 10 */
+		u32 ipcc_B		: 1;
+		u32 ipcc_C		: 1;
+		u32 ipcc_D		: 1;
+	};
+	u32 word;
+} xmu_l_int_m_t;
+
+
+typedef union {
+	struct {
+		u32 ld_cnt		: 13;
+		u32 ld_sed		:  1;
+		u32 ded			:  1;
+		u32			:  1;
+		u32 dm_cnt		: 13;
+		u32 dm_sed		:  1;
+		u32 dm_ded		:  1;
+		u32 dm_ded_poison	:  1;
+	};
+	u32 word;
+} e2k_l3_ecc_t;
+
+typedef union {	/* iset V7 */
+	struct {
+		u32 ecc_dm		:  1;
+		u32 ecc_ld		:  1;
+		u32 ecc_sed_dm		:  1;
+		u32 ecc_sed_ld		:  1;
+		u32 emrg		:  1;
+		u32			:  3;
+		u32 par_irq		:  1;
+		u32 par_srq		:  1;
+		u32 par_dat_hdr;
+		u32 par_dat_bdy		:  1;
+		u32 par_ack		:  1;
+		u32 par_hak		:  1;
+		u32 par_rls		:  1;
+		u32			:  1;
+		u32 pmon		:  1;
+	};
+	u32 word;
+} e2k_l3_imsk_t;
+
+typedef e2k_l3_imsk_t e2k_l3_int_t;
+
+
+/*
+ * HC monitor control register (HC_MCR)
+ */
+typedef union {
+	struct {
+		u32 v0		: 1;
+		u32 __unused1	: 1;
+		u32 es0		: 6;
+		u32 v1		: 1;
+		u32 __unused2	: 1;
+		u32 es1		: 6;
+		u32 __unused3	: 16;
+	};
+	u32 word;
+} e2k_hc_mcr_t;
+
+/*
+ * HC monitor ID register (HC_MID)
+ */
+typedef union {
+	struct {
+		u32 id0 : 16;
+		u32 id1 : 16;
+	};
+	u32 word;
+} e2k_hc_mid_t;
+
+/*
+ * IOMMU monitor control register (IOMMU_MCR)
+ */
+typedef union {
+	struct {
+		u32 v0		: 1;
+		u32 __unused1	: 1;
+		u32 es0		: 6;
+		u32 v1		: 1;
+		u32 __unused2	: 1;
+		u32 es1		: 6;
+		u32 __unused3	: 16;
+	};
+	u32 word;
+} e2k_iommu_mcr_t;
+
+/*
+ * IOMMU monitor ID register (IOMMU_MID)
+ */
+typedef union {
+	struct {
+		u32 id0 : 16;
+		u32 id1 : 16;
+	};
+	u32 word;
+} e2k_iommu_mid_t;
+
+/*
+ * MC status register (MC_STATUS_E2K)
+ */
+typedef union {
+	struct {
+		u32 ecc_err		: 1;
+		u32 ddrint_err		: 1;
+		u32 phyccm_par_err	: 1;
+		u32 dmem_par_err	: 1;
+		u32 bridge_par_err	: 1;
+		u32 phy_interrupt	: 1;
+		u32 phy_init_complete	: 1;
+		u32 dfi_par_err		: 1;
+		u32 meminit_finish	: 1;
+		u32 mon0_of		: 1;
+		u32 mon1_of		: 1;
+		u32 dfi_err		: 1;
+		u32 dfi_err_info	: 1;
+		u32 par_alert_delay	: 6;
+		u32 rst_done		: 1;
+		u32 wrcrc_aleert_delay	: 6;
+		u32 ce_int		: 1;	/* from v7 */
+		u32 __unused		: 5;
+	};
+	u32 word;
+} e2k_mc_status_t;
+
+#define MC_STATUS_REG_GOOD	0x80040
+/*
+ * MC channel select register (MC_CH)
+ */
+typedef union {
+	struct {
+		u32 n : 4;
+		u32   : 28;
+	};
+	u32 word;
+} e2k_mc_ch_t;
+
+/*
+ * MC control register (MC_CTL)
+ */
+typedef union {
+	struct {
+		u32 mcen         : 1;
+		u32 phyupd       : 1;
+		u32 mcinitreq    : 1;
+		u32 phyinitreq   : 1;
+		u32 mc_ps        : 1;
+		u32 lpreq        : 1;
+		u32 lpwkup       : 4;
+		u32 upd0_en      : 1;
+		u32 parint_en    : 1;
+		u32 phyint_en    : 1;
+		u32 mi_bg        : 1;
+		u32 mrs_en       : 1;
+		u32 dfi_freq     : 5;
+		u32 phyreset_cfg : 1;
+		u32 phy_reset    : 1;
+		u32 trwm         : 3;
+		u32 tdly         : 3;
+		u32 dmemint_en   : 1;
+		u32 bridgeint_en : 1;
+		u32 mcln         : 1;
+		u32 mcstart      : 1;
+
+		u32   : 28;
+	};
+	u32 word;
+} e2k_mc_ctl_t;
+
+/*
+ * MC performance register (MC_PERF)
+ */
+typedef union {
+	struct {
+		u32 reg_nr0       : 1; /* == 0 for MC_PERF0 */
+		u32 pbmask        : 1;
+		u32 arp_en        : 1;
+		u32 flt_rdpr_type : 1;
+		u32 flt_rdpr_sign : 2;
+		u32 flt_brop      : 1;
+		u32 cmdpack       : 1;
+		u32 sldrd_fast    : 1;
+		u32 rd_weight     : 3;
+		u32 flt_prio      : 1;
+		u32 apen          : 1;
+		u32 pt            : 1;
+		u32 rdpr_l        : 6;
+		u32 rdpr_h        : 6;
+		u32 rd_prio_rsv   : 5;
+	} reg0;
+	struct {
+		u32 reg_nr1 : 1; /* == 1 for MC_PERF0 */
+		u32         : 1;
+		u32 ap_mgn  : 6;
+		u32         : 1;
+		u32 sldrd   : 8;
+		u32 sldwr   : 8;
+		u32         : 8;
+	} reg1;
+	u32 word;
+} e2k_mc_perf_t;
+
+/*
+ * MC power control register (MC_PWR)
+ */
+typedef union {
+	struct {
+		u32 pdmod           : 3;
+		u32 memhot_en       : 1;
+		u32 memhot_sense    : 3;
+		u32 pdg             : 1;
+		u32 pdtmr           : 21;
+		u32 memhot_throttle : 3;
+	};
+	u32 word;
+} e2k_mc_pwr_t;
+
+/*
+ * MC monitor control register (MC_MON_CTL)
+ */
+typedef union {
+	struct {
+		u32 rst0 : 1;
+		u32 rst1 : 1;
+		u32 frz0 : 1;
+		u32 frz1 : 1;
+		u32 ld0  : 1;
+		u32 ld1  : 1;
+		u32 es0  : 5;
+		u32 es1  : 5;
+		u32 lb0  : 8;
+		u32 lb1  : 8;
+	};
+	struct {
+		u32 __pad : 16;
+		u32 ba0  : 2;
+		u32 bg0  : 2;
+		u32 cid0 : 3;
+		u32 all0 : 1;
+		u32 ba1  : 2;
+		u32 bg1  : 2;
+		u32 cid1 : 3;
+		u32 all1 : 1;
+	};
+	u32 word;
+} e2k_mc_mon_ctl_t;
+
+/*
+ * MC monitor #0,1 counter high (MC_MON_CTRext)
+ */
+typedef union {
+	u16 cnt[2];
+	u32 word;
+} e2k_mc_mon_ctrext_t;
+
+
+/*
+ * HMU memory interleaving control register (HMU_MIC)
+ */
+typedef union {
+	struct {
+		u32 mcil_bit0	: 6;
+		u32 mcil_bit1	: 6;
+		u32 mcil_bit2	: 6;
+		u32 mcil_bit3	: 6;
+		u32 mcen	: 8;
+	};
+	u32 word;
+} e2k_hmu_mic_t;
+
+/*
+ * HMU monitor control register (HMU_MCR)
+ */
+typedef union {
+	struct {
+		u32 v0		: 1;
+		u32 __unused1	: 1;
+		u32 es0		: 6;
+		u32 v1		: 1;
+		u32 __unused2	: 1;
+		u32 es1		: 6;
+		u32 flt0_off	: 1;
+		u32 flt0_rqid	: 7;
+		u32 flt0_cid	: 1;
+		u32 flt0_bid	: 1;
+		u32 flt0_xid	: 1;
+		u32 flt1_off	: 1;
+		u32 flt1_node	: 2;
+		u32 flt1_rnode	: 1;
+		u32 __unused3	: 1;
+	};
+	u32 word;
+} e2k_hmu_mcr_t;
+
+/*
+ * PREPIC monitor control register (PREPIC_MCR)
+ */
+typedef union {
+	struct {
+		u32 vc0		: 1;
+		u32 __unused1	: 1;
+		u32 es0		: 6;
+		u32 vc1		: 1;
+		u32 __unused2	: 1;
+		u32 es1		: 6;
+		u32 __unused3	: 16;
+	};
+	u32 word;
+} e2k_prepic_mcr_t;
+
+/*
+ * PREPIC monitor ID register (PREPIC_MID)
+ */
+typedef union {
+	struct {
+		u32 id0 : 16;
+		u32 id1 : 16;
+	};
+	u32 word;
+} e2k_prepic_mid_t;
+
+
+
+
+
+
+
+/* V7 regs */
+
+typedef union {
+	struct {
+		u32 ct0		: 4;
+		u32 ct1		: 4;
+		u32 pbm0	: 2;
+		u32 pbm1	: 2; /* [11 : 10] */
+		u32 rm		: 1;
+		u32 ds3		: 2; /* 3ds */
+		u32 mtad_dsbl	: 1;
+		u32 sf		: 4;
+		u32		: 1; /* [20] */
+		u32 ptrr_mode	: 2;
+		u32 oddpb_crc_calc_alt_dis	: 1;
+		u32 ca_sdr_en	: 1;
+		u32 poison_dsbl	: 1;
+		u32 pbswap	: 1;
+		u32 pda_sel	: 5;
+	};
+	struct {
+		u32		: 8;
+		u32 pbm		: 4;
+	};
+	u32 word;
+} e2k_e48c_mc_cfg_t;
+
+
+typedef union {
+	struct {
+		u32			: 8;
+		u32 regnum		: 2;
+		u32 cid			: 3;
+		u32 pb			: 2;
+		u32 clr			: 1;
+		u32 ce_ins		: 1;
+		u32 ue_ins		: 1;
+		u32 ce_int_en		: 1;
+	};
+	u32 word;
+} e2k_mc_eccdiag1_t;
+
+
+typedef union {
+	struct {
+		u32 mil_bit0	:  6;
+		u32 mil_bit1	:  6;
+		u32 mil_bit2	:  6;
+		u32		:  6;
+		u32 mc_en	:  8;
+	};
+	u32 word;
+} e2k_ocn_mil_t;
+
+
+typedef union {
+	struct {
+		u32 phys_addr		: 24;
+		u32 data_word		:  3;
+		u32 addr_half		:  1;
+		u32 rddata_val		:  1;
+		u32 data_type		:  1;
+		u32 req_type		:  1;
+		u32 req_gen		:  1;
+	};
+	struct {
+		u32			: 29;
+		u32 rddata_poison	:  1;
+	};
+	u32 word;
+} e2k_mcna_diag_addr_t;
+
+typedef union {
+	struct {
+		u32 v0			: 1;
+		u32			: 1;
+		u32 es0			: 6;
+		u32 v1			: 1;
+		u32 es1			: 6;
+		u32 flt0_off		: 1; /* [15] */
+		u32 flt0_rqid		: 8;
+		u32 flt0_cid		: 1;
+		u32 flt0_bid		: 1;
+		u32 flt0_xid		: 1;
+		u32 flt1_off		: 1; /* [27] */
+		u32 flt1_node		: 2;
+		u32 flt1_rnode		: 1; /* [30] */
+	};
+	u32 word;
+} e2k_ha_mcr_t;
+
+
+typedef union {
+	struct {
+		u32 rst_cnt		: 1;
+		u32 rst_cfg		: 1;
+		u32 frz			: 1;
+		u32			: 29;
+	};
+	u32 word;
+} e2k_l3_pmon_uctl;
+
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32 rst			: 1;
+		u32 sbnk		: 2;
+		u32 rqf			: 1;
+		u32 stf			: 1;
+		u32 edg			: 1;
+		u32 inv			: 1;
+		u32 sel			: 8;
+		u32 msk			: 8;
+		u32 thr			: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_ctl_v6;
+
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32 rst			: 1;
+		u32 sbnk		: 2;
+		u32 rqf			: 1;
+		u32 stf			: 1;
+		u32 edg			: 1;
+		u32 inv			: 1;
+		u32 sel			: 6;
+		u32 msk			: 10;
+		u32 thr			: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_ctl_v7;
+
+typedef union {
+	struct {
+		u32 rqf			: 9;
+		u32			: 3;
+		u32 rqf_mask		: 2;
+		u32			: 2;
+		u32 stf			: 10;
+		u32			: 6;
+	};
+	u32 word;
+} e2k_l3_pmon_flt0_v6;
+
+typedef union {
+	struct {
+		u32 rqf			: 7;
+		u32			: 1;
+		u32 rqf_mask		: 3;
+		u32			: 5;
+		u32 stf			: 10;
+		u32			: 6;
+	};
+	u32 word;
+} e2k_l3_pmon_flt0_v7;
+
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32			: 3;
+		u32 code		: 1;
+		u32 data		: 1;
+		u32 loc			: 1;
+		u32 rem			: 1;
+		u32 opf			: 8;
+		u32 opc0		: 8;
+		u32 opc1		: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_flt1_v6;
+
+typedef union {
+	struct {
+		u32 en			: 1;
+		u32 code		: 1;
+		u32 data		: 1;
+		u32 loc			: 1;
+		u32 rem			: 1;
+		u32 opf			: 10;
+		u32			: 2;
+		u32 opc_injc		: 3;
+		u32 opc_injc_en		: 1;
+		u32 opc_srq		: 3;
+		u32 opc_srq_en		: 1;
+		u32 opc_irq		: 6;
+		u32 opc_irq_en		: 1;
+	};
+	u32 word;
+} e2k_l3_pmon_flt1_v7;
+
+typedef union {
+	u32 val;
+	u32 word;
+} e2k_l3_pmon_cnt_lo;
+
+typedef union {
+	struct {
+		u32 val			: 24;
+		u32			: 8;
+	};
+	u32 word;
+} e2k_l3_pmon_cnt_hi;
+
 #endif /* _E2K_SIC_REGS_H_ */

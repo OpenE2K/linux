@@ -1537,7 +1537,7 @@ long protected_sys_mq_notify(mqd_t mqdes,
 	if (sevp) {
 		size = AP_OBJ_SIZE(regs->qargs[1]);
 		if (size < sizeof(struct prot_sigevent)) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_PTR_SIZE_TOO_LITTLE,
+			PROTECTED_MODE_ERROR(PMSCERRMSG_PTR_SIZE_TOO_LITTLE,
 				__func__, "'sevp'",
 				size, sizeof(struct prot_sigevent));
 			PM_BNDERR_EXCEPTION_IF_ORTH_MODE(2/*arg_num*/, regs);

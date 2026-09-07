@@ -21,7 +21,6 @@
 #endif /* CONFIG_INPUT_LTC2954 */
 #include <asm/gpio.h>
 #include <asm/pic.h>
-#include <linux/mcst/gpio.h>
 
 /* Offsets from BAR for MCST GPIO registers */
 #define L_GPIO_CNTRL	0x00
@@ -71,7 +70,7 @@ struct l_gpio {
 /* Registering gpio-bound devices on board. This is embedded style. */
 #if IS_ENABLED(CONFIG_INPUT_LTC2954)
 
-struct gpio_keys_button ltc2954_descr = {
+static struct gpio_keys_button ltc2954_descr = {
 	.code = KEY_SLEEP,
 	.gpio = LTC2954_IRQ_GPIO_PIN,
 	.active_low = 0,
@@ -99,7 +98,8 @@ static struct platform_device ltc2954_dev = {
 static int register_l_gpio_bound_devices(void)
 {
 	int ret = 0;
-	if (!__ONCE_LITE_IF(true))
+	/* Power button is availble only in iohub1 */
+	if (!IS_MACHINE_E2S)
 		return 0;
 
 	/* Only power button is available today: */
@@ -402,7 +402,7 @@ static int __l_gpio_probe(struct platform_device *pdev, struct l_gpio *c)
 	for (i = ret = 0; i < irq_nr && !ret; i++) {
 		irq = platform_get_irq(pdev, i);
 		ret = devm_request_irq(dev, irq, l_gpio_irq_handler,
-				IRQF_SHARED, "l-gpio", c);
+				IRQF_NO_THREAD, "l-gpio", c);
 	}
 	if (ret) {
 		dev_err(dev, "IRQ handler registering failed (%d)\n", ret);
@@ -431,6 +431,9 @@ static int l_gpio_probe(struct platform_device *pdev)
 	struct l_gpio *c;
 	struct gpio_chip *gc;
 	struct device *dev = &pdev->dev;
+	int node = dev_to_node(dev);
+	if (node < 0)
+		node = 0;
 	ret = of_property_read_u32(dev->of_node, "ngpios", &ngpio);
 	if (ret) {
 		dev_err(dev, "no 'ngpios' property: %d\n", ret);
@@ -448,6 +451,7 @@ static int l_gpio_probe(struct platform_device *pdev)
 	gc->get = l_gpio_get_value;
 	gc->set = l_gpio_set_value;
 	gc->ngpio = ngpio;
+	gc->base = node * ngpio;
 	gc->can_sleep = 0;
 	gc->of_node = dev->of_node;
 

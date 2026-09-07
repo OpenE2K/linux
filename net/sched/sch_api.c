@@ -1062,7 +1062,9 @@ static int qdisc_graft(struct net_device *dev, struct Qdisc *parent,
 	if (parent == NULL) {
 		unsigned int i, num_q, ingress;
 		struct netdev_queue *dev_queue;
-
+#ifdef CONFIG_MCST
+		dev_queue = NULL;
+#endif
 		ingress = 0;
 		num_q = dev->num_tx_queues;
 		if ((q && q->flags & TCQ_F_INGRESS) ||

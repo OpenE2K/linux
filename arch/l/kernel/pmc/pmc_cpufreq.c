@@ -277,7 +277,7 @@ static int pmc_l_cpufreq_set_target(struct cpufreq_policy *policy,
 {
 	int ii = 0;
 	unsigned int i;
-	unsigned int newstate = 0;
+	int newstate = 0;
 	int ffound = 0;
 	struct cpufreq_freqs freqs;
 	unsigned long volt = 0;
@@ -452,7 +452,7 @@ static struct freq_attr *pmc_l_cpufreq_attr[] = {
 	NULL,
 };
 
-struct cpufreq_driver pmc_l_cpufreq_driver = {
+static struct cpufreq_driver pmc_l_cpufreq_driver = {
 	.init		= pmc_l_cpufreq_init,
 	.verify		= pmc_l_cpufreq_verify_policy,
 	.target		= pmc_l_cpufreq_set_target,

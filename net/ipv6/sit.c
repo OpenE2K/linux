@@ -458,6 +458,9 @@ static int ipip6_tunnel_prl_ctl(struct net_device *dev,
 	struct ip_tunnel_prl prl;
 	int err;
 
+#ifdef CONFIG_MCST
+	err = 0;
+#endif
 	if (!ns_capable(t->net->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 	if (dev == dev_to_sit_net(dev)->fb_tunnel_dev)

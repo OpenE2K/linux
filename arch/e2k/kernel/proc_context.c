@@ -148,7 +148,7 @@ release_referenced() {
 #include <asm/ucontext.h>
 #include <asm/proc_context_stacks.h>
 #include <asm/protected_syscalls.h>
-#include <asm/kvm/ctx_signal_stacks.h>
+#include <asm/kvm/paravirt_sw/ctx_signal_stacks.h>
 
 #ifdef CONFIG_PROTECTED_MODE
 #include <asm/3p.h>
@@ -375,6 +375,18 @@ static void context_free_rcu(struct rcu_head *head)
 
 static void context_free(struct coroutine *ctx)
 {
+	struct mm_struct *mm = current->mm;
+	struct hw_stack *hw_stack = &current_thread_info()->u_hw_stack;
+
+	/*
+	 * Clear pointers in thread_info if we are freeing
+	 * current user stack to avoid double free.
+	 */
+	if (hw_stack->pcs.base == ctx->ti.u_hw_stack.pcs.base)
+		hw_stack->pcs.base = NULL;
+	if (hw_stack->ps.base == ctx->ti.u_hw_stack.ps.base)
+		hw_stack->ps.base = NULL;
+
 	/*
 	 * element_free() (see above).
 	 *
@@ -388,8 +400,8 @@ static void context_free(struct coroutine *ctx)
 	 * 3) In the unlikely case that the context is still in use by some
 	 *    other thread it will be freed by that thread instead.
 	 */
-	mmget(current->mm);
-	ctx->mm = current->mm;
+	mmget(mm);
+	ctx->mm = mm;
 	call_rcu(&ctx->rcu_head, &context_free_rcu);
 }
 
@@ -708,8 +720,7 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 		/*
 		 * Put descriptor of user function frame in %qr0.
 		 */
-		qptr = new_ap((unsigned long) func_frame_ptr, args_size + 16,
-				0, RW_ENABLE);
+		qptr = MAKE_AP((unsigned long) func_frame_ptr, args_size + 16);
 		if (put_priv_tagged_16_offset(qptr.qword, ETAGAPQ,
 						ps_frame, machine.qnr1_offset))
 			return -EFAULT;
@@ -744,7 +755,7 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 
 	if (args_stack_size) {
 		DebugCTX("Copying stack arguments to 0x%px\n", func_frame_ptr + 64);
-		if (copy_in_user_with_tags(func_frame_ptr + (protected ? 128 : 64),
+		if (copy_in_user_tagged(func_frame_ptr + (protected ? 128 : 64),
 					   &args[args_registers_size / sizeof(args[0])],
 					   args_stack_size))
 			return -EFAULT;
@@ -764,7 +775,6 @@ static int makecontext_prepare_user_stacks(struct longjmp_regs *user_regs,
 	/*
 	 * Initialize thread_info
 	 */
-	ctx->ti.u_stack.bottom = (unsigned long) u_stk_base;
 	ctx->ti.u_stack.size = u_stk_size;
 	ctx->ti.u_stack.top = (unsigned long) u_stk_base + u_stk_size;
 	ctx->ti.signal_stack.base = NULL;
@@ -1107,13 +1117,13 @@ static long do_makecontext(void __user *ucp, void __user *func, u64 args_size,
 		}
 
 		if (size < u_stk_size) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
+			PROTECTED_MODE_ERROR(PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
 					"makecontext", "uc_stack.ss_sp", size,
 					"uc_stack.ss_size", u_stk_size);
 			return -EFAULT;
 		}
 
-		u_stk_base = (void __user *)AP_PTR(stack_ptr);
+		u_stk_base = U_AP_PTR(stack_ptr);
 	}
 #endif
 	if (ret)
@@ -1800,11 +1810,11 @@ static long do_swapcontext(void __user *oucp, const void __user *ucp,
 	/*
 	 * 6) Do we need to jump backwards in the new context?
 	 *
-	 * Skip glibc glue by subtracting SZ_OF_CR (the same this is done
+	 * Skip glibc glue by subtracting one frame (the same way this is done
 	 * when saving context in getcontext() and for oucp in swapcontext())
 	 */
 	sigset = next_user_ctx.sigset;
-	if (PCSP_PTR(regs->stacks.pcsp) - SZ_OF_CR != PCSP_PTR(next_user_ctx.pcsp) ||
+	if (U_PCSP_PTR(regs->stacks.pcsp) - 1 != U_PCSP_PTR(next_user_ctx.pcsp) ||
 	    get_cr0_ip(k_crs[0].cr0) != get_cr0_ip(next_user_ctx.cr0)) {
 		/* A hack to make do_longjmp() restore
 		 * blocked signals mask */

@@ -8,16 +8,16 @@
 
 /* Does not include this header directly, include <asm/trap_table.h> */
 
-#ifndef	__ASSEMBLY__
-
 #include <linux/kvm.h>
 #include <linux/kvm_host.h>
 
 #include <asm/ptrace.h>
 #include <asm/thread_info.h>
 #include <asm/traps.h>
-#include <asm/kvm/cpu_regs_access.h>
 #include <asm/kvm/mmu.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/cpu_regs_access.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_KVM_GUEST_TRAPS_MODE
 #undef	DebugKVMGT
@@ -292,10 +292,12 @@ kvm_init_guest_traps_handling(struct pt_regs *regs, bool user_mode_trap)
 	regs->is_guest_user = false;	/* only for host */
 	regs->g_stacks_valid = false;	/* only for host */
 	regs->in_fast_syscall = false;	/* only for host */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (user_mode_trap && test_thread_flag(TIF_LIGHT_HYPERCALL) &&
 	    native_read_CR1_reg().pm) {
 		regs->flags.light_hypercall = 1;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 static __always_inline void
@@ -307,6 +309,8 @@ kvm_init_guest_syscalls_handling(struct pt_regs *regs)
 	regs->in_fast_syscall = false;	/* only for host */
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#ifdef CONFIG_KVM_GUEST_KERNEL
 static inline void kvm_exit_handle_syscall(e2k_sbr_t sbr, e2k_usd_t usd,
 					   e2k_upsr_t upsr, e2k_mem_crs_t crs)
 {
@@ -316,6 +320,7 @@ static inline void kvm_exit_handle_syscall(e2k_sbr_t sbr, e2k_usd_t usd,
 	KVM_WRITE_CR0_REG(crs.cr0);
 	KVM_WRITE_CR1_REG(crs.cr1);
 }
+#endif /* CONFIG_KVM_GUEST_KERNEL */
 
 /*
  * The function should return boolen value 'true' if the trap is wish
@@ -348,7 +353,6 @@ static inline bool kvm_handle_guest_last_wish(struct pt_regs *regs)
 	return false;
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Some traps need not pass to guest, they can be handled by host only.
  */
@@ -510,6 +514,7 @@ static __always_inline void init_guest_syscalls_handling(struct pt_regs *regs)
 	kvm_init_guest_syscalls_handling(regs);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool is_guest_TIRs_frozen(struct pt_regs *regs)
 {
 	if (!kvm_test_intc_emul_flag(regs))
@@ -517,12 +522,14 @@ static inline bool is_guest_TIRs_frozen(struct pt_regs *regs)
 
 	return kvm_is_guest_TIRs_frozen(regs);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline bool is_injected_guest_coredump(struct pt_regs *regs)
 {
 	return regs->traps_to_guest == core_dump_mask;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool handle_guest_last_wish(struct pt_regs *regs)
 {
 	if (!kvm_test_intc_emul_flag(regs))
@@ -531,7 +538,6 @@ static inline bool handle_guest_last_wish(struct pt_regs *regs)
 	return kvm_handle_guest_last_wish(regs);
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static bool kvm_check_sys_call_disable(pt_regs_t *regs, e2k_tir_t TIR)
 {
 	e2k_tir_t tir;
@@ -705,19 +711,6 @@ failed:
 	}
 	return ret;
 }
-#else
-static inline unsigned long
-pass_aau_trap_to_guest(struct pt_regs *regs, e2k_tir_t TIR)
-{
-	return 0;
-}
-
-static inline unsigned long
-pass_the_trap_to_guest(struct pt_regs *regs, e2k_tir_t TIR, int trap_no)
-{
-	return 0;
-}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline unsigned long pass_coredump_trap_to_guest(struct pt_regs *regs)
 {
@@ -732,6 +725,7 @@ static inline unsigned long pass_coredump_trap_to_guest(struct pt_regs *regs)
 
 	return kvm_pass_coredump_trap_to_guest(vcpu, regs);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Now interrupts are handled by guest only in bottom half style
@@ -752,6 +746,7 @@ pass_nm_interrupt_to_guest(struct pt_regs *regs, e2k_tir_t TIR, int trap_no)
 	return 0;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long
 pass_virqs_to_guest(struct pt_regs *regs, e2k_tir_t TIR)
 {
@@ -765,7 +760,6 @@ pass_virqs_to_guest(struct pt_regs *regs, e2k_tir_t TIR)
 	return kvm_pass_virqs_to_guest(regs, TIR);
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long
 pass_clw_fault_to_guest(struct pt_regs *regs, trap_cellar_t *tcellar)
 {
@@ -789,6 +783,18 @@ static inline void complete_page_fault_to_guest(unsigned long what_complete)
 	kvm_complete_page_fault_to_guest(what_complete);
 }
 #else
+static inline unsigned long
+pass_aau_trap_to_guest(struct pt_regs *regs, e2k_tir_t TIR)
+{
+	return 0;
+}
+
+static inline unsigned long
+pass_the_trap_to_guest(struct pt_regs *regs, e2k_tir_t TIR, int trap_no)
+{
+	return 0;
+}
+
 static inline unsigned long
 pass_clw_fault_to_guest(struct pt_regs *regs, trap_cellar_t *tcellar)
 {
@@ -858,9 +864,5 @@ do_aau_page_fault(struct pt_regs *const regs, e2k_addr_t address,
 #endif /* CONFIG_VIRTUALIZATION */
 
 #endif /* CONFIG_KVM_GUEST_KERNEL */
-
-#else /* __ASSEMBLY__ */
-#include <asm/kvm/trap_table.S.h>
-#endif /* ! __ASSEMBLY__ */
 
 #endif /* __KVM_E2K_TRAP_TABLE_H */

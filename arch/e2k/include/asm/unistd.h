@@ -7,9 +7,8 @@
 #define _E2K_UNISTD_H_
 
 #include <linux/types.h>
-#ifndef	__ASSEMBLY__
+
 #include <asm/e2k_api.h>
-#endif	/* __ASSEMBLY__ */
 #include <uapi/asm/unistd.h>
 
 #define NR_fast_syscalls_mask	0x7

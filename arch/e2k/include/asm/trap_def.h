@@ -208,7 +208,6 @@
 #define fp_de	(1UL << 1)	/* - denormalized operand exception flag; */
 #define fp_ie	(1UL << 0)	/* - invalid operation exception flag; */
 
-#ifndef	__ASSEMBLY__
 /*
  * do_page_fault() return values
  */
@@ -230,7 +229,6 @@ enum pf_ret {
 	/* recover faulted operation */
 	PFR_KVM_KERNEL_ADDRESS,
 };
-#endif /* ! __ASSEMBLY__ */
 
 /*
  * Common system calls (trap table entries numbers)

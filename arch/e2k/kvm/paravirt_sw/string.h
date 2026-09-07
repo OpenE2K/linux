@@ -67,7 +67,6 @@ kvm_priv_tagged_memory_set_user(void *addr, u64 val, u64 tag, size_t len,
 	return cleared;
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern long kvm_fast_guest_kernel_tagged_memory_copy_light_hcall(
 		struct kvm_vcpu *vcpu, void *dst, const void *src, size_t len,
 		unsigned long  strd_opcode, unsigned long ldrd_opcode,
@@ -92,7 +91,7 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 	int ret;
 
 	AW(ldst_rec_op) = ldrd_opcode;
-	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
+	if (ldst_rec_op.mas == MAS_DISABLED_TRANSLATION) {
 		if (!IS_GUEST_PHYS_ADDRESS((e2k_addr_t) src)) {
 			pr_err("%s(): bad guest phys src %px ldrd 0x%lx hys start 0x%lx end 0x%lx\n",
 			       __func__, src, ldrd_opcode, GUEST_PAGE_OFFSET,
@@ -100,11 +99,11 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 			ret = -EFAULT;
 			goto failed;
 		}
-		ldst_rec_op.mas = MAS_LOAD_OPERATION;
+		ldst_rec_op.mas = MAS_NORMAL(CACHE_BYPASS_NONE, 0);
 		ldrd_opcode = AW(ldst_rec_op);
 	}
 	AW(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
-	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
+	if (ldst_rec_op.mas == MAS_DISABLED_TRANSLATION) {
 		if (!IS_GUEST_PHYS_ADDRESS((e2k_addr_t) dst)) {
 			pr_err("%s(): bad guest phys dst %px ldrd 0x%lx phys start 0x%lx end 0x%lx\n",
 			       __func__, dst, strd_opcode, GUEST_PAGE_OFFSET,
@@ -112,7 +111,7 @@ kvm_fast_guest_tagged_memory_copy(struct kvm_vcpu *vcpu,
 			ret = -EFAULT;
 			goto failed;
 		}
-		ldst_rec_op.mas = MAS_STORE_OPERATION;
+		ldst_rec_op.mas = MAS_NORMAL(CACHE_BYPASS_NONE, 0);
 		strd_opcode = AW(ldst_rec_op);
 	}
 	return kvm_vcpu_copy_guest_virt_system(vcpu, dst, src, len, copied,
@@ -132,12 +131,12 @@ kvm_fast_guest_tagged_memory_set(struct kvm_vcpu *vcpu,
 	int ret;
 
 	AW(ldst_rec_op) = strd_opcode;
-	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
+	if (ldst_rec_op.mas == MAS_DISABLED_TRANSLATION) {
 		if (!IS_GUEST_PHYS_ADDRESS((e2k_addr_t) addr)) {
 			ret = -EFAULT;
 			goto failed;
 		}
-		ldst_rec_op.mas = MAS_STORE_OPERATION;
+		ldst_rec_op.mas = MAS_NORMAL(CACHE_BYPASS_NONE, 0);
 		strd_opcode = AW(ldst_rec_op);
 	}
 	return kvm_vcpu_set_guest_virt_system(vcpu, addr, val, tag, len,
@@ -151,19 +150,19 @@ static inline long
 kvm_fast_guest_user_tagged_memory_copy(struct kvm_vcpu *vcpu,
 				       void *dst, const void *src, size_t len,
 				       size_t *copied,
-				       unsigned long strd_opcode,
-				       unsigned long ldrd_opcode, int prefetch)
+				       ldst_rec_op_t strd_opcode,
+				       ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	ldst_rec_op_t ldst_rec_op;
 	int ret;
 
 	AW(ldst_rec_op) = ldrd_opcode;
-	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
+	if (ldst_rec_op.mas == MAS_DISABLED_TRANSLATION) {
 		ret = -EFAULT;
 		goto failed;
 	}
 	AW(ldst_rec_op) = LDST_PREFETCH_FLAG_CLEAR(strd_opcode);
-	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
+	if (ldst_rec_op.mas == MAS_DISABLED_TRANSLATION) {
 		ret = -EFAULT;
 		goto failed;
 	}
@@ -184,7 +183,7 @@ kvm_fast_guest_user_tagged_memory_set(struct kvm_vcpu *vcpu,
 	int ret;
 
 	AW(ldst_rec_op) = strd_opcode;
-	if (ldst_rec_op.mas == MAS_LOAD_PA || ldst_rec_op.mas == MAS_STORE_PA) {
+	if (ldst_rec_op.mas == MAS_DISABLED_TRANSLATION) {
 		ret = -EFAULT;
 		goto failed;
 	}
@@ -215,10 +214,8 @@ kvm_fast_tagged_guest_memory_copy(struct kvm_vcpu *vcpu,
 static inline long
 kvm_copy_from_to_user_with_tags(struct kvm_vcpu *vcpu, void *dst, void *src, size_t len)
 {
-	unsigned long st_opcode = TAGGED_MEM_STORE_REC_OPC |
-	    MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT;
-	unsigned long ld_opcode = TAGGED_MEM_LOAD_REC_OPC |
-	    MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT;
+	ldst_rec_op_t st_opcode = ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1);
+	ldst_rec_op_t ld_opcode = ldst_rec_tagged_load_bypass(CACHE_BYPASS_L1);
 
 	return kvm_vcpu_copy_guest_virt_system(vcpu, dst, src, len, NULL,
 					       st_opcode, ld_opcode, 0);
@@ -249,6 +246,5 @@ static inline long kvm_extract_guest_tags_32(u16 *dst, const void *src)
 	}
 	return native_extract_tags_32(dst, src);
 }
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif /* _KVM_STRING_H_ */

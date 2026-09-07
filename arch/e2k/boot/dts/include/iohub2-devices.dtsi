@@ -1,0 +1,111 @@
+#address-cells = <3>;
+#size-cells = <2>;
+
+ranges;
+
+interrupts =	<16 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ A*/
+		<17 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ B*/
+		<18 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ C*/
+		<19 IRQ_TYPE_LEVEL_LOW>; /*PCI IRQ D*/
+
+/* pci@0,0 PCI-to-PCI Bridge */
+
+pci@1,0 { /*Ethernet controller*/
+	reg = <0x00000800 0 0 0 0>;
+	interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@1,1 { /*Ethernet controller*/
+	reg = <0x00000900 0 0 0 0>;
+	interrupts = <10 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@1,2 { /*Ethernet controller*/
+	reg = <0x00000a00 0 0 0 0>;
+	interrupts = <14 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@2,0 { /*IDE controller*/
+	reg = <0x00001000 0 0 0 0>;
+	interrupts = <11 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@2,1 { /*i2c-spi*/
+	reg = <0x000001100 0 0 0 0>;
+	interrupts =	<15 IRQ_TYPE_LEVEL_HIGH>, /*I2C-SPI*/
+			< 8 IRQ_TYPE_LEVEL_HIGH>; /* WD Timer*/
+};
+pci@2,2 { /*Serial and Parallel ports*/
+	reg = <0x00001200 0 0 0 0>;
+	interrupts =	< 3 IRQ_TYPE_LEVEL_HIGH>, /*Serial Port*/
+			< 7 IRQ_TYPE_LEVEL_HIGH>; /*Parallel Port*/
+};
+pci@2,3 { /*Audio controller*/
+	reg = <0x00001300 0 0 0 0>;
+	interrupts = <5 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@2,4 { /*GPIO-MPV controller*/
+	reg = <0x00001400 0 0 0 0>;
+
+	#address-cells = <2>;
+	#size-cells = <1>;
+
+	/*ranges will added in gpio-mpv driver */
+	gpio@0 {
+		compatible = "mcst,l-gpio";
+		reg = <0 /*bar 0*/ 0 32>;
+		interrupts = < 7 IRQ_TYPE_LEVEL_HIGH>, /*GPIO0*/
+				<11 IRQ_TYPE_LEVEL_HIGH>; /*GPIO1*/
+		interrupt-names = "gpio0", "gpio1";
+		ngpios = <32>;
+	};
+	mpv@0 {
+		reg = <1 /*bar 1*/ 0 128>;
+		compatible = "mcst,mpv";
+		interrupts = < 6 IRQ_TYPE_LEVEL_HIGH>, /*Mpv_timers0*/
+				< 9 IRQ_TYPE_LEVEL_HIGH>; /*Mpv_timers12*/
+		interrupt-names = "mpv0", "mpv1";
+	};
+};
+pci@3,0 { /*SATA controller*/
+	reg = <0x00001800 0 0 0 0>;
+	interrupts = <20 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@3,1 { /*SATA controller*/
+	reg = <0x00001900 0 0 0 0>;
+	interrupts = <21 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@4,0 { /*PCIe bridge*/
+	reg = <0x00002000 0 0 0 0>;
+};
+pci@5,0 { /*PCIe bridge*/
+	reg = <0x00002800 0 0 0 0>;
+};
+pci@6,0 { /*PCIe bridge*/
+	reg = <0x00003000 0 0 0 0>;
+};
+pci@7,0 { /*PCIe bridge*/
+	reg = <0x00003800 0 0 0 0>;
+};
+pci@8,0 { /*PCIe bridge*/
+	reg = <0x00004000 0 0 0 0>;
+};
+pci@9,0 { /*PCIe bridge*/
+	reg = <0x00004800 0 0 0 0>;
+};
+pci@a,0 { /*USB Controller (ohci)*/
+	reg = <0x00005000 0 0 0 0>;
+	interrupts = <12 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@a,1 { /*USB Controller (ehci)*/
+	reg = <0x00005100 0 0 0 0>;
+	interrupts = <12 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@b,0 { /*USB Controller (ohci)*/
+	reg = <0x00005800 0 0 0 0>;
+	interrupts = <13 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@b,1 { /*USB Controller (ehci)*/
+	reg = <0x00005900 0 0 0 0>;
+	interrupts = <13 IRQ_TYPE_LEVEL_HIGH>;
+};
+pci@c,0 { /*SPMC System Power Managment Controller*/
+	reg = <0x00006000 0 0 0 0>;
+	interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+};

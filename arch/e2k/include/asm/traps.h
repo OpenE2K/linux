@@ -29,7 +29,7 @@ do {									\
 									\
 	if (trap) {							\
 		nr_TIRs = trap->TIR.j;					\
-		addr = (void __user *) (trap->TIRs[nr_TIRs].ip);	\
+		addr = (void __user __force *) (trap->TIRs[nr_TIRs].ip);\
 	} else {							\
 		addr = NULL;						\
 	}								\
@@ -78,7 +78,12 @@ extern void do_trap_cellar(struct pt_regs *regs, int only_system_tc);
 
 extern int constrict_user_data_stack(struct pt_regs *regs, unsigned long incr);
 extern int expand_user_data_stack(struct pt_regs *regs, unsigned long incr);
-extern void do_notify_resume(struct pt_regs *regs);
+
+#ifdef CONFIG_E2K_DELAYED_SIGNALS
+extern void e2k_deliver_delayed_signals(void);
+#else
+static inline void e2k_deliver_delayed_signals(void) { }
+#endif
 
 extern void coredump_in_future(void);
 
@@ -128,7 +133,7 @@ enum getsp_action {
 	GETSP_OP_DECREMENT
 };
 extern enum getsp_action parse_getsp_operation(const struct pt_regs *regs,
-					       int *incr, void __user **fault_addr);
+					       s64 *incr, void __user **fault_addr);
 
 static inline unsigned int osem_calculate(bool kernel, bool protected_mode)
 {

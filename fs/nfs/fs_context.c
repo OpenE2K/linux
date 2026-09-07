@@ -1213,7 +1213,7 @@ struct ptr128_nfs_string {
 static inline void ptr128_nfs_string(struct nfs_string *dst,
 				     struct ptr128_nfs_string __user *src)
 {
-	dst->data = (void __user *)AP_PTR(src->data);
+	dst->data = U_AP_PTR(src->data);
 	dst->len = src->len;
 }
 
@@ -1244,10 +1244,10 @@ static void nfs4_ptr128_mount_data_conv(struct nfs4_mount_data *m)
 			(struct ptr128_nfs4_mount_data_v1 *)m;
 	struct nfs4_mount_data data;
 
-	data.auth_flavours = (void __user *)AP_PTR(compat->auth_flavours);
+	data.auth_flavours = U_AP_PTR(compat->auth_flavours);
 	data.auth_flavourlen = compat->auth_flavourlen;
 	data.proto = compat->proto;
-	data.host_addr = (void __user *)AP_PTR(compat->host_addr);
+	data.host_addr = U_AP_PTR(compat->host_addr);
 	data.host_addrlen = compat->host_addrlen;
 	ptr128_nfs_string(&data.hostname, &compat->hostname);
 	ptr128_nfs_string(&data.mnt_path, &compat->mnt_path);

@@ -635,9 +635,7 @@ again:
 						"CAN REMAP TO HIGH MEM");
 			flags |= BOOT_IGNORE_AT_HIGH_PHYS_MEM;
 		}
-		/* Check this is not panic kernel,
-		 * where only one node available */
-		if (mem_type != busy_area->type && !is_kdump_kernel()) {
+		if (mem_type != busy_area->type) {
 			BOOT_WARNING("The area from 0x%lx to 0x%lx type %d "
 				"intersects with area from 0x%lx to 0x%lx "
 				"type %d",
@@ -793,7 +791,7 @@ boot_reserve_bank_physmem(int node_id, boot_phys_mem_t *node_mem,
  * Function returns the physical pointer of the bank description structure or
  * NULL, if memory bank did not found.
  */
-static	boot_phys_bank_t * __init_recv
+boot_phys_bank_t *__init_recv
 boot_find_bank_of_addr(e2k_addr_t phys_addr, int *node_id,
 		short *bank_index, bool *skip)
 {
@@ -2177,7 +2175,7 @@ node_next_try:
 		if (node_mem != (void *)-1) {
 			/* Check this is not panic kernel,
 			 * where only one node available */
-			if (cur_node != node_id && !is_kdump_kernel()) {
+			if (cur_node != node_id && !boot_is_kdump_kernel()) {
 				BOOT_WARNING("Could allocate area on node #%d "
 					"insteed of #%d, addr 0x%lx size 0x%lx "
 					"align 0x%lx page size 0x%lx",

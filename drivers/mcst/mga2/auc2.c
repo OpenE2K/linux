@@ -37,12 +37,12 @@
 #define	DESC0_REG_OFFSET		32
 
 struct auc2_st {
-	u64 status;
+	__le64 status;
 } __packed;
 
 struct desc0 {
 	u64	next;
-	u64	val;
+	__le64	val;
 } __packed;
 
 #define	DESC1_NOT_LAST			(1UL << 63)
@@ -53,14 +53,14 @@ struct desc0 {
 #define	DESC1_REG_MASK_OFFSET		32
 
 struct desc1 {
-	u64	next;
+	__le64	next;
 	union  {
 		struct {
 			u32 mask;
 			u32 regs[15];
 		};
 		u32 val32[16];
-		u64 val64[8];
+		__le64 val64[8];
 	};
 } __packed;
 
@@ -71,7 +71,7 @@ static u64 auc2_get_current_desc(struct mga2 *mga2)
 
 static void auc2_update_ptr(struct mga2 *mga2)
 {
-	u16 tail = le64_to_cpu(mga2->status->status);
+	u16 tail = le64_to_cpu(mga2->status->status) & 0xffff;
 	tail %= MGA2_HW_RING_SIZE;
 	mga2->tail = mga2_hw_to_ptr(tail);
 }
@@ -99,8 +99,7 @@ static int auc2_append_desc(struct mga2 *mga2,
 	int ret = 0;
 	int h = mga2->head;
 	struct desc1 *c = mo ? (struct desc1 *)mo->vaddr : &mga2->desc1[h];
-	dma_addr_t dma_addr = mo ? mo->dma_addr :
-			mga2->desc1_dma + h * sizeof(*c);
+	dma_addr_t dma_addr = mo ? mo->dma_addr : mga2->desc1_dma + h * sizeof(*c);
 
 	if (!mo)
 		mga2_desc1_serialize(c);
@@ -122,13 +121,14 @@ static struct mga2_gem_object *mga2_auc_ioctl(struct drm_device *drm,
 	int ret = 0;
 	void __user *p;
 	int head;
-	u32 *desc, nr, handle, reltype;
+	__le32 *desc;
+	u32 nr, handle, reltype;
 	struct mga2_gem_object *mo;
 	struct dma_resv *resv;
 	struct dma_fence *fence;
 	struct drm_mga2_bctrl *udesc = data;
 	struct mga2 *mga2 = drm->dev_private;
-	struct drm_mga2_buffers __user *b = (void *)((long)udesc->buffers_ptr);
+	struct drm_mga2_buffers __user *b = u64_to_user_ptr(udesc->buffers_ptr);
 	struct drm_gem_object *gobj = NULL;
 
 	head = get_free_desc(mga2);
@@ -150,7 +150,7 @@ static struct mga2_gem_object *mga2_auc_ioctl(struct drm_device *drm,
 		goto out;
 	}
 
-	desc = mo->vaddr;
+	desc = (__le32 *)mo->vaddr;
 	fence = mga2->mga2_fence[head];
 
 	for (p = b; !ret;) {

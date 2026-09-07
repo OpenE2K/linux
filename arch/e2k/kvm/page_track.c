@@ -21,6 +21,7 @@
 
 #include "mmu.h"
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_page_track_free_memslot(struct kvm_memory_slot *free)
 {
 	int i;
@@ -153,6 +154,7 @@ bool kvm_page_track_is_active(struct kvm *kvm, struct kvm_memory_slot *slot,
 	index = mmu_pt_gfn_to_index(kvm, gfn, slot->base_gfn, PT_PAGE_TABLE_LEVEL);
 	return !!READ_ONCE(slot->arch.gfn_track[mode][index]);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 void kvm_page_track_cleanup(struct kvm *kvm)
 {
@@ -206,6 +208,7 @@ kvm_page_track_unregister_notifier(struct kvm *kvm,
 	synchronize_srcu(&head->track_srcu);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Notify the node that write access is intercepted and write emulation is
  * finished at this time.
@@ -231,6 +234,7 @@ void kvm_page_track_write(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
 			n->track_write(vcpu, gmm, gpa, new, bytes, flags);
 	srcu_read_unlock(&head->track_srcu, idx);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /*
  * Notify the node that memory slot is being removed or moved so that it can

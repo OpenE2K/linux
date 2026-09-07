@@ -851,6 +851,10 @@ static int yellow_carp_get_dpm_ultimate_freq(struct smu_context *smu,
 	uint32_t max_dpm_level, min_dpm_level;
 	int ret = 0;
 
+#ifdef CONFIG_MCST
+	max_dpm_level = 0;
+	min_dpm_level = 1;
+#endif
 	if (!yellow_carp_clk_dpm_is_enabled(smu, clk_type)) {
 		switch (clk_type) {
 		case SMU_MCLK:

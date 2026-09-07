@@ -19,7 +19,7 @@
 
 
 
-void ddk750_set_mmio(volatile unsigned char * addr,unsigned short devId,char revId);
+void ddk750_set_mmio(volatile unsigned char __iomem * addr,unsigned short devId,char revId);
 unsigned long ddk750_getFrameBufSize(void);
 long ddk750_initChip(void);
 void ddk750_deInit(void);

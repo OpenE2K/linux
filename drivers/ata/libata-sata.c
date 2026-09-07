@@ -1000,7 +1000,9 @@ static ssize_t ata_ncq_prio_supported_show(struct device *device,
 	struct ata_device *dev;
 	bool ncq_prio_supported;
 	int rc = 0;
-
+#ifdef CONFIG_MCST
+	ncq_prio_supported = false;
+#endif
 	spin_lock_irq(ap->lock);
 	dev = ata_scsi_find_dev(ap, sdev);
 	if (!dev)
@@ -1024,7 +1026,9 @@ static ssize_t ata_ncq_prio_enable_show(struct device *device,
 	struct ata_device *dev;
 	bool ncq_prio_enable;
 	int rc = 0;
-
+#ifdef CONFIG_MCST
+	ncq_prio_enable = false;
+#endif
 	spin_lock_irq(ap->lock);
 	dev = ata_scsi_find_dev(ap, sdev);
 	if (!dev)

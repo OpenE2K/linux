@@ -6,14 +6,12 @@
 #ifndef _ASM_E1CP_H_
 #define _ASM_E1CP_H_
 
-#ifndef __ASSEMBLY__
 #ifdef CONFIG_CPU_E1CP
 extern void boot_e1cp_setup_arch(void);
 extern void e1cp_setup_machine(void);
 #else
 static inline void boot_e1cp_setup_arch(void) { }
 static inline void e1cp_setup_machine(void) { }
-#endif
 #endif
 
 #define E1CP_NR_NODE_CPUS		1

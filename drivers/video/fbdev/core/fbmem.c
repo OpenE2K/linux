@@ -1378,21 +1378,21 @@ static int fb_getput_cmap128(struct fb_info *info, unsigned int cmd,
 	if (get_user_tagged_16(ap.qword, tag, &cmapp->red) || !IS_AP(ap, tag) ||
 			AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
 		return -EFAULT;
-	cmap.red = (void *)AP_PTR(ap);
+	cmap.red = U_AP_PTR(ap);
 	if (get_user_tagged_16(ap.qword, tag, &cmapp->green) || !IS_AP(ap, tag) ||
 			AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
 		return -EFAULT;
-	cmap.green = (void *)AP_PTR(ap);
+	cmap.green = U_AP_PTR(ap);
 	if (get_user_tagged_16(ap.qword, tag, &cmapp->blue) || !IS_AP(ap, tag) ||
 			AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
 		return -EFAULT;
-	cmap.blue = (void *)AP_PTR(ap);
+	cmap.blue = U_AP_PTR(ap);
 	if (get_user_tagged_16(ap.qword, tag, &cmapp->transp))
 		return -EFAULT;
 	if (IS_AP(ap, tag)) {
 		if (AP_OBJ_SIZE(ap) < cmap.len * sizeof(u16))
 			return -EFAULT;
-		cmap.transp = (void *)AP_PTR(ap);
+		cmap.transp = U_AP_PTR(ap);
 	} else if (AP_NULL(ap, tag)) {
 		cmap.transp = NULL;
 	} else {

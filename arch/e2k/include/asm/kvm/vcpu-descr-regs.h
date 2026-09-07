@@ -6,50 +6,25 @@
 #ifndef	__KVM_VCPU_DESCR_REGS_H_
 #define	__KVM_VCPU_DESCR_REGS_H_
 
-#ifndef __ASSEMBLY__
-
-#include <asm/cpu_regs_types_defs.h>
 #include <asm/cpu_regs_types.h>
 #include <asm/kvm_host.h>
 
-static inline bool kvm_is_getsp_v6(struct kvm *kvm)
-{
-	return test_kvm_mode_flag(kvm, KVMF_GETSP_V6);
-}
-
-static inline bool kvm_is_getsp_v7(struct kvm *kvm)
-{
-	return !test_kvm_mode_flag(kvm, KVMF_GETSP_V6);
-}
-
-static inline bool kvm_is_descr_v6(const struct kvm *kvm)
-{
-	return test_kvm_mode_flag(kvm, KVMF_DESCR_V6);
-}
-
-static inline bool kvm_is_descr_v7(const struct kvm *kvm)
-{
-	return !test_kvm_mode_flag(kvm, KVMF_DESCR_V6);
-}
-
-static inline bool vcpu_getsp_v6(struct kvm_vcpu *vcpu)
-{
-	return kvm_is_getsp_v6(vcpu->kvm);
-}
-
+/**
+ * vcpu_getsp_v7 - calculate CORE_MODE.getsp_v7 for vcpu
+ */
 static inline bool vcpu_getsp_v7(struct kvm_vcpu *vcpu)
 {
-	return kvm_is_getsp_v7(vcpu->kvm);
+	/* Must check CPU_FEAT_V7_CPU_REGS since the other flag is from user */
+	return cpu_has(CPU_FEAT_V7_CPU_REGS) && !test_kvm_mode_flag(vcpu->kvm, KVMF_GETSP_V6);
 }
 
-static inline bool vcpu_descr_v6(const struct kvm_vcpu *vcpu)
-{
-	return kvm_is_descr_v6(vcpu->kvm);
-}
-
+/**
+ * vcpu_descr_v7 - calculate CORE_MODE.descr_v7 for vcpu
+ */
 static inline bool vcpu_descr_v7(const struct kvm_vcpu *vcpu)
 {
-	return kvm_is_descr_v7(vcpu->kvm);
+	/* Must check CPU_FEAT_V7_CPU_REGS since the other flag is from user */
+	return cpu_has(CPU_FEAT_V7_CPU_REGS) && !test_kvm_mode_flag(vcpu->kvm, KVMF_DESCR_V6);
 }
 
 /*
@@ -165,13 +140,13 @@ vcpu_psp_ind(struct kvm_vcpu *vcpu, e2k_psp_t psp)
 	}
 }
 
-static __always_inline u64
+static __always_inline volatile void __priv *
 vcpu_psp_ptr(struct kvm_vcpu *vcpu, e2k_psp_t psp)
 {
 	if (vcpu_descr_v7(vcpu)) {
-		return PSP_PTR_V7(psp);
+		return (volatile void __priv __force *)PSP_PTR_V7(psp);
 	} else {
-		return PSP_PTR_V6(psp);
+		return (volatile void __priv __force *)PSP_PTR_V6(psp);
 	}
 }
 
@@ -239,13 +214,13 @@ vcpu_pcsp_ind(struct kvm_vcpu *vcpu, e2k_pcsp_t pcsp)
 	}
 }
 
-static __always_inline u64
+static __always_inline void __priv *
 vcpu_pcsp_ptr(struct kvm_vcpu *vcpu, e2k_pcsp_t pcsp)
 {
 	if (vcpu_descr_v7(vcpu)) {
-		return PCSP_PTR_V7(pcsp);
+		return (void __priv *)PCSP_PTR_V7(pcsp);
 	} else {
-		return PCSP_PTR_V6(pcsp);
+		return (void __priv *)PCSP_PTR_V6(pcsp);
 	}
 }
 
@@ -432,7 +407,5 @@ vcpu_set_cr1p_ussz(struct kvm_vcpu *vcpu, e2k_cr1_t *cr1p,  u64 sz)
 		set_cr1p_ussz_v6(cr1p, sz);
 	}
 }
-
-#endif /* ! __ASSEMBLY__ */
 
 #endif /* __KVM_VCPU_DESCR_REGS_H_ */

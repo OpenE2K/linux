@@ -24,9 +24,7 @@ extern void smp_flush_icache_all(void);
 
 extern void kvm_flush_dcache_line(e2k_addr_t virt_addr);
 extern u64 kvm_read_dcache_l1_fault_reg(void);
-extern void kvm_clear_dcache_l1_set(e2k_addr_t virt_addr, unsigned long set);
 extern void kvm_flush_dcache_range(void *addr, size_t len);
-extern void kvm_clear_dcache_l1_range(void *virt_addr, size_t len);
 extern void kvm_write_dcache_l2_reg(unsigned long reg_val,
 					int reg_num, int bank_num);
 extern unsigned long kvm_read_dcache_l2_reg(int reg_num, int bank_num);
@@ -41,11 +39,6 @@ static inline void
 flush_DCACHE_range(void *addr, size_t len)
 {
 	kvm_flush_dcache_range(addr, len);
-}
-static inline void
-clear_DCACHE_L1_range(void *virt_addr, size_t len)
-{
-	kvm_clear_dcache_l1_range(virt_addr, len);
 }
 static inline void
 __flush_icache_all(void)

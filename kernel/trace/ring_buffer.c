@@ -1117,7 +1117,11 @@ int ring_buffer_wait(struct trace_buffer *buffer, int cpu, int full)
 __poll_t ring_buffer_poll_wait(struct trace_buffer *buffer, int cpu,
 			  struct file *filp, poll_table *poll_table, int full)
 {
+#ifdef CONFIG_MCST
+	struct ring_buffer_per_cpu *cpu_buffer = NULL;
+#else
 	struct ring_buffer_per_cpu *cpu_buffer;
+#endif
 	struct rb_irq_work *rbwork;
 
 	if (cpu == RING_BUFFER_ALL_CPUS) {

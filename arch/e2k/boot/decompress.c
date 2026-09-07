@@ -12,6 +12,7 @@
 #include <asm/cpu_regs.h>
 #include <asm/e2k_api.h>
 #include <asm/head.h>
+#include <asm/regs_state.h>
 #include <asm/string.h>
 #include <asm/mpspec.h>
 #include <asm/kvm/hypercall.h>
@@ -130,17 +131,17 @@ static u32 dec_readl(void __iomem *addr)
 
 static void dec_writeb(u8 b, void __iomem *addr)
 {
-	NATIVE_WRITE_MAS_B((unsigned long __force) addr, b, MAS_IOADDR);
+	NATIVE_WRITE_MAS_B((unsigned long __force) addr, b, MAS_IO_OPERATION);
 }
 
 static u8 dec_readb(void __iomem *addr)
 {
-	return NATIVE_READ_MAS_B((unsigned long __force) addr, MAS_IOADDR);
+	return NATIVE_READ_MAS_B((unsigned long __force) addr, MAS_IO_OPERATION);
 }
 
 static u32 dec_readl(void __iomem *addr)
 {
-	return NATIVE_READ_MAS_W((unsigned long __force) addr, MAS_IOADDR);
+	return NATIVE_READ_MAS_W((unsigned long __force) addr, MAS_IO_OPERATION);
 }
 #endif
 
@@ -752,12 +753,19 @@ __visible void decompress_kernel(int n, bootblock_struct_t *bootblock)
 	e2k_idr_t idr;
 	int bsp;
 
+	boot_write_UPSR_reg(E2K_KERNEL_UPSR_LOC_IRQ_DISABLED_ALL);
+
 	atomic_inc(&dec_cpus_arrived);
 
 	/*
 	 * Only bootstrap processor proceeds to unpacking
 	 */
 	idr = read_IDR_reg();
+
+	bool clear_qp = !(idr.mdl <= IDR_E2S_MDL ||
+			  idr.mdl == IDR_E8C_MDL ||
+			  idr.mdl == IDR_E1CP_MDL);
+	BOOT_INIT_G_REGS(clear_qp);
 
 	if (idr.mdl >= IDR_E12C_MDL)
 		bsp = dec_epic_is_bsp();

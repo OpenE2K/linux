@@ -126,19 +126,6 @@ get_MMU_DTLB_ENTRY(e2k_addr_t virt_addr)
 	return __probe_entry(GET_MMU_DTLB_ENTRY(virt_addr));
 }
 
-/*
- * Get physical address for virtual address
- */
-
-#define	GET_MMU_PHYS_ADDR(virt_addr)	\
-		((unsigned long)ADDRESS_PROBE_MMU_OP(probe_addr_val(virt_addr)))
-static inline	probe_entry_t
-get_MMU_phys_addr(e2k_addr_t virt_addr)
-{
-	DebugMR("Get physical address for virtual address 0x%lx\n",
-		virt_addr);
-	return __probe_entry(GET_MMU_PHYS_ADDR(virt_addr));
-}
 
 typedef struct tlb_set_state {
 	tlb_tag_t	tlb_tag;

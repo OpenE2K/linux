@@ -48,6 +48,9 @@ static int xhci_create_usb3x_bos_desc(struct xhci_hcd *xhci, char *buf,
 	int				offset;
 	int				i;
 
+#ifdef CONFIG_MCST
+	min_ssid = 0;
+#endif
 	/* BOS descriptor */
 	bos = (struct usb_bos_descriptor *)buf;
 	bos->bLength = USB_DT_BOS_SIZE;

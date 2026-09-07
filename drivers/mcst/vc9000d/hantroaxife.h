@@ -71,8 +71,8 @@ extern "C" {
 #define AXI_REG0_SW_HWCFG            (0 * 4) //0x0
 #define AXI_REG10_SW_FRONTEND_EN     (10 * 4) //0x28
 #define AXI_REG11_SW_WORK_MODE       (11 * 4) //0x2c
-void AXIFEEnable(volatile unsigned char *hwregs);
-int AXIFEFlush(volatile unsigned char *hwregs);
+void AXIFEEnable(void __iomem *hwregs);
+int AXIFEFlush(void __iomem *hwregs);
 
 #ifdef __cplusplus
 }

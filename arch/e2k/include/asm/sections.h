@@ -6,12 +6,9 @@
 #ifndef _E2K_SECTIONS_H
 #define _E2K_SECTIONS_H
 
-/* nothing to see, move along */
-#ifndef __ASSEMBLY__
 #include <asm-generic/sections.h>
-#endif	/* ! __ASSEMBLY__ */
 
-#if defined __LCC__
+#ifdef CONFIG_CC_IS_LCC
 #define __interrupt     __attribute__((__check_stack__))
 #else
 #define __interrupt     __attribute__((__interrupt__))
@@ -34,13 +31,12 @@
 
 /* privileged actions hypercall support */
 #define	__priv_hypercall	notrace __interrupt
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 #define	__can_be_priv_hypercall	__priv_hypercall
-#else	/* !CONFIG_KVM_HOST_MODE */
+#else	/* !CONFIG_KVM_HOST_KERNEL */
 #define	__can_be_priv_hypercall
-#endif	/* CONFIG_KVM_HOST_MODE */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
-#ifndef __ASSEMBLY__
 extern char _start[];
 extern char __ttable_start[];
 extern char __ttable_end[];
@@ -59,7 +55,6 @@ extern char __entry_handlers_start[], __entry_handlers_end[];
 extern char __entry_handlers_hcalls_start[], __entry_handlers_hcalls_end[];
 extern char __start_ro_after_init[], __end_ro_after_init[];
 extern char __trampolines_start[], __trampolines_end[];
-#endif	/* ! __ASSEMBLY__ */
 
 #ifdef	CONFIG_NUMA
 #define __nodedata	__section(".node.data")

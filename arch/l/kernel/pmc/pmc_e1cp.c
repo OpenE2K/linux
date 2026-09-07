@@ -82,7 +82,7 @@ int pmc_l_gpufreq_get_frequency(void)
 }
 EXPORT_SYMBOL(pmc_l_gpufreq_get_frequency);
 
-void pmc_l_gpufreq_set_state(unsigned int state)
+static void pmc_l_gpufreq_set_state(unsigned int state)
 {
 	unsigned int st;
 
@@ -144,7 +144,7 @@ static int pmc_l_gpufreq_set_target(unsigned int target_clk1x_freq,
 {
 	int ii = 0, j;
 	unsigned int target_freq, transition_latency;
-	unsigned int newstate, clk1x_newstate, clkSh_newstate;
+	int newstate, clk1x_newstate, clkSh_newstate;
 	int ffound, clk1x_ffound, clkSh_ffound;
 	struct cpufreq_frequency_table *target_table, *available_freqs;
 	struct cpufreq_freqs freqs, clk1x_freqs = {}, clkSh_freqs;

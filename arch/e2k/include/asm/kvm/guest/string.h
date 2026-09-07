@@ -182,11 +182,11 @@ static inline void fast_tagged_memory_copy(void *dst, const void *src,
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t)
-		{ .fmt = LDST_QWORD_FMT, .mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+		{ .fmt = LDST_QWORD_FMT, .mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0) };
 	kvm_fast_kernel_tagged_memory_copy(dst, src, len, strd_opcode,
 						  ldrd_opcode, prefetch);
 }
-static inline void fast_tagged_memcpy_io(void *dst, const void *src, size_t len, int prefetch)
+static inline void fast_memcpy_io(void *dst, const void *src, size_t len, int prefetch)
 {
 	fast_tagged_memory_copy(dst, src, len, prefetch);
 }
@@ -196,7 +196,7 @@ fast_tagged_memory_copy_to_user(void __user *dst, const void *src, size_t len,
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+			.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0) };
 	return kvm_fast_tagged_memory_copy_user((void __force *) dst, src, len,
 			copied, strd_opcode, ldrd_opcode, prefetch);
 }
@@ -206,7 +206,7 @@ fast_tagged_memory_copy_from_user(void *dst, const void __user *src, size_t len,
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+			.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0), .prot = 1 };
 	return kvm_fast_tagged_memory_copy_user(dst, (void __force *) src, len,
 			copied, strd_opcode, ldrd_opcode, prefetch);
 }
@@ -216,7 +216,7 @@ fast_tagged_memory_copy_in_user(void __user *dst, const void __user *src, size_t
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+			.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0), .prot = 1 };
 	return kvm_fast_tagged_memory_copy_user((void __force *)  dst, (void __force *) src,
 			len, copied, strd_opcode, ldrd_opcode, prefetch);
 }
@@ -225,17 +225,17 @@ boot_fast_tagged_memory_copy(void *dst, const void *src, size_t len, int prefetc
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t)
-		{ .fmt = LDST_QWORD_FMT, .mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+		{ .fmt = LDST_QWORD_FMT, .mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0) };
 	return boot_kvm_fast_tagged_memory_copy(dst, src, len, strd_opcode,
 						ldrd_opcode, prefetch);
 }
 static inline unsigned long
 fast_tagged_memory_set(void *addr, u64 val, u64 tag,
-		size_t len, u64 strd_opcode)
+		size_t len, ldst_rec_op_t strd_opcode)
 {
-	return kvm_fast_kernel_tagged_memory_set(addr, val, tag, len, strd_opcode);
+	return kvm_fast_kernel_tagged_memory_set(addr, val, tag, len, AW(strd_opcode));
 }
-static inline void fast_tagged_memset_io(void *addr, u64 val, u64 tag, size_t len)
+static inline void fast_memset_io(void *addr, u64 val, u64 tag, size_t len)
 {
 	ldst_rec_op_t st_op = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	(void) kvm_fast_kernel_tagged_memory_set(addr, val, tag, len, AW(st_op));
@@ -266,7 +266,7 @@ static inline size_t fast_tagged_memory_copy_to_user_gva(void __user *dst,
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .prot = 1 };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE };
+			.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0) };
 
 	return kvm_fast_tagged_memory_copy_to_user(dst, src, len, NULL, regs,
 				strd_opcode, ldrd_opcode, prefetch);
@@ -278,7 +278,7 @@ fast_tagged_memory_copy_from_user_gva(void *dst, const void __user *src,
 {
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-			.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE, .prot = 1 };
+			.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0), .prot = 1 };
 
 	return kvm_fast_tagged_memory_copy_from_user(dst, src, len, NULL, regs,
 				strd_opcode, ldrd_opcode, prefetch);

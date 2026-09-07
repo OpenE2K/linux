@@ -29,7 +29,9 @@
 #include <asm/tlbflush.h>
 #include <asm/e2k_debug.h>
 #include <asm/mmzone.h>
-#include <asm/kvm/gmmu_context.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/gmmu_context.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 extern struct cpuinfo_e2k cpu_data[NR_CPUS];
 
@@ -250,11 +252,9 @@ static inline void p4d_populate_kernel(struct mm_struct *mm, p4d_t *p4d, pud_t *
 	for_each_node_mm_pgdmask(node, mm) {
 		pgd_t *node_pgd = mm->context.node_pgds[node] + index;
 		p4d_set_k(pgdp_to_p4dp(node_pgd), pud);
-		virt_kernel_p4d_populate(mm, pgdp_to_p4dp(node_pgd));
 	}
 #else
 	p4d_set_k(p4d, pud);
-	virt_kernel_p4d_populate(mm, p4d);
 #endif
 }
 
@@ -270,7 +270,6 @@ static inline void p4d_populate_user(struct mm_struct *mm, p4d_t *p4d, pud_t *pu
 		for_each_node_mm_pgdmask(node, mm) {
 			pgd_t *node_pgd = mm->context.node_pgds[node] + index;
 			p4d_set_u(pgdp_to_p4dp(node_pgd), pud);
-			virt_kernel_p4d_populate(mm, pgdp_to_p4dp(node_pgd));
 		}
 
 		return;
@@ -278,7 +277,6 @@ static inline void p4d_populate_user(struct mm_struct *mm, p4d_t *p4d, pud_t *pu
 #endif
 
 	p4d_set_u(p4d, pud);
-	virt_kernel_p4d_populate(mm, p4d);
 }
 
 static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
@@ -301,7 +299,6 @@ static inline void p4d_populate_kernel_numa(struct mm_struct *mm, p4d_t *p4d, pu
 	BUG_ON(mm != &init_mm);
 
 	p4d_set_k(p4d, pud);
-	virt_kernel_p4d_populate(mm, p4d);
 }
 #endif /* CONFIG_E2K_MODULES_DUPLICATION */
 

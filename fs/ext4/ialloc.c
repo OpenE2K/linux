@@ -433,7 +433,11 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 	unsigned int ndirs;
 	int max_dirs, min_inodes;
 	ext4_grpblk_t min_clusters;
+#ifdef CONFIG_MCST
+	ext4_group_t i, grp = (ext4_group_t)-1, g, ngroups;
+#else
 	ext4_group_t i, grp, g, ngroups;
+#endif
 	struct ext4_group_desc *desc;
 	struct orlov_stats stats;
 	int flex_size = ext4_flex_bg_size(sbi);

@@ -14,9 +14,9 @@
 #include <linux/kvm_host.h>
 #include <linux/kvm.h>
 
-#include <asm/kvm/gva_cache.h>
-
 #include "../mmu.h"
+
+#include <asm/kvm/paravirt_sw/gva_cache.h>
 
 /*
  * The follow defines is expansion of arch-independent GVA->HVA translation
@@ -48,7 +48,6 @@ kvm_mmu_gva_is_gpa(struct kvm_vcpu *vcpu, gva_t gva)
 	gfn_t gfn;
 	e2k_addr_t hva;
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_pv) {
 		if (is_paging(vcpu))
 			/* can be only virtual addresses */
@@ -56,7 +55,6 @@ kvm_mmu_gva_is_gpa(struct kvm_vcpu *vcpu, gva_t gva)
 		if (gva >= GUEST_PAGE_OFFSET)
 			return false;
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	gpa = (gpa_t)gva;
 	gfn = gpa_to_gfn(gpa);
@@ -85,7 +83,6 @@ kvm_mmu_gvpa_to_gpa(gva_t gvpa)
 	return (gpa_t)__guest_pa(gvpa);
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool
 kvm_mmu_gva_is_gvpa(struct kvm_vcpu *vcpu, gva_t gva)
 {
@@ -120,21 +117,6 @@ kvm_mmu_gva_is_gvpa_range(struct kvm_vcpu *vcpu, gva_t gva, unsigned int bytes)
 		return true;
 	return kvm_mmu_gva_is_gvpa(vcpu, end);
 }
-#else
-static inline bool
-kvm_mmu_gva_is_gvpa(struct kvm_vcpu *vcpu, gva_t gva)
-{
-	/* it is unknown in common case */
-	return false;
-}
-
-static inline bool
-kvm_mmu_gva_is_gvpa_range(struct kvm_vcpu *vcpu, gva_t gva, unsigned int bytes)
-{
-	/* it is unknown in common case */
-	return false;
-}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline gpa_t
 kvm_mmu_gva_to_gpa(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
@@ -146,10 +128,8 @@ kvm_mmu_gva_to_gpa(struct kvm_vcpu *vcpu, gva_t gva, u32 access,
 	gva_cache_t *gva_cache;
 #endif /* CONFIG_KVM_GVA_CACHE */
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (likely(kvm_mmu_gva_is_gvpa(vcpu, gva)))
 		return kvm_mmu_gvpa_to_gpa(gva);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 again:
 
@@ -290,22 +270,21 @@ extern long kvm_vcpu_set_guest_user_virt_system(struct kvm_vcpu *vcpu,
 		u64 strd_opcode);
 extern long kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 		void *dst, const void *src, size_t len, size_t *copied,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
 		int prefetch);
 extern long kvm_vcpu_copy_guest_virt_system_16(struct kvm_vcpu *vcpu,
 		void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
 		int prefetch);
 extern long kvm_vcpu_copy_guest_user_virt_system(struct kvm_vcpu *vcpu,
 		void *dst, const void *src, size_t len, size_t *copied,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
 		int prefetch);
 extern long kvm_vcpu_copy_guest_user_virt_system_16(struct kvm_vcpu *vcpu,
 		void *dst, const void *src, size_t len,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
 		int prefetch);
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long
 kvm_vcpu_copy_from_guest(struct kvm_vcpu *vcpu,
 		void *to, const void *from, unsigned long n)
@@ -319,6 +298,5 @@ kvm_vcpu_copy_to_guest(struct kvm_vcpu *vcpu,
 {
 	return kvm_vcpu_write_guest_system(vcpu, (gva_t)to, (void *)from, n);
 }
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif	/* __KVM_E2K_GACCESS_H */

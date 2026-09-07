@@ -871,11 +871,18 @@ int jbd2_journal_next_log_block(journal_t *journal, unsigned long long *retp)
 int jbd2_fc_get_buf(journal_t *journal, struct buffer_head **bh_out)
 {
 	unsigned long long pblock;
+#ifdef CONFIG_MCST
+	unsigned long blocknr = 0;
+#else
 	unsigned long blocknr;
+#endif
 	int ret = 0;
 	struct buffer_head *bh;
+#ifdef CONFIG_MCST
+	int fc_off = 0;
+#else
 	int fc_off;
-
+#endif
 	*bh_out = NULL;
 
 	if (journal->j_fc_off + journal->j_fc_first < journal->j_fc_last) {
@@ -1780,6 +1787,7 @@ static int __jbd2_journal_erase(journal_t *journal, unsigned int flags)
 	int err = 0;
 	unsigned long block, log_offset; /* logical */
 	unsigned long long phys_block, block_start, block_stop; /* physical */
+
 	loff_t byte_start, byte_stop, byte_count;
 
 	/* flags must be set to either discard or zeroout */
@@ -1798,6 +1806,9 @@ static int __jbd2_journal_erase(journal_t *journal, unsigned int flags)
 	 */
 	log_offset = be32_to_cpu(journal->j_superblock->s_first);
 	block_start =  ~0ULL;
+#ifdef CONFIG_MCST
+	block_stop =  ~0ULL;
+#endif
 	for (block = log_offset; block < journal->j_total_len; block++) {
 		err = jbd2_journal_bmap(journal, block, &phys_block);
 		if (err) {

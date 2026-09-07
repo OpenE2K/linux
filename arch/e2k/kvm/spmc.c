@@ -12,8 +12,10 @@
 #include <linux/slab.h>
 #include <linux/math64.h>
 #include <asm/e2k_debug.h>
-#include <asm/kvm/runstate.h>
 #include <asm/spmc_regs.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/runstate.h>
+# endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #include "ioepic.h"
 #include "irq.h"
@@ -112,16 +114,6 @@ static inline struct kvm_spmc *to_spmc(struct kvm_io_device *dev)
 static inline struct kvm_spmc *timer_to_spmc(struct kvm_timer *timer)
 {
 	return container_of(timer, struct kvm_spmc, sci_timer);
-}
-
-static inline u64 cycles_to_count(struct kvm_spmc *spmc, u64 cycles)
-{
-	return mul_u64_u32_div(cycles, spmc->frequency, spmc->ticks_per_sec);
-}
-
-static inline u64 count_to_cycles(struct kvm_spmc *spmc, u64 counter)
-{
-	return mul_u64_u32_div(counter, spmc->ticks_per_sec, spmc->frequency);
 }
 
 #if	DEBUG_SPMC_REGS_MODE
@@ -247,13 +239,10 @@ static u64 kvm_get_up_to_date_sci_timer(struct kvm_vcpu *vcpu,
 					struct kvm_spmc *spmc)
 {
 	struct kvm_timer *timer = &spmc->sci_timer;
-	u64 running_time;
-	s64 running_cycles;
-	s64 running_ns, host_ns;
-	s64 cycles, host_cycles;
+	s64 host_ns;
 	ktime_t now;
 	u64 now_ns;
-	u64 counter, host_counter;
+	u64 host_counter;
 	u32 limit, start_count, new_count;
 	unsigned long flags;
 
@@ -279,40 +268,24 @@ static u64 kvm_get_up_to_date_sci_timer(struct kvm_vcpu *vcpu,
 		return spmc->regs.pm_timer.counter;
 	}
 	start_count = timer->start_count;
-	running_time =
-		(vcpu != NULL) ? kvm_do_get_guest_vcpu_running_time(vcpu) : 0;
-	cycles = get_cycles();
 	now = timer->timer.base->get_time();
 	now_ns = ktime_to_ns(now);
-	DebugSCI("%s : running cycles at start 0x%llx, now 0x%llx, "
-		"current cycles 0x%llx, start counter 0x%x period ns 0x%llx\n",
-		timer->name, timer->running_time, running_time,
-		cycles, start_count, timer->period);
+	DebugSCI("%s : start counter 0x%x period ns 0x%llx\n",
+		timer->name, start_count, timer->period);
 	DebugSCI("%s : host start time at nsec 0x%llx, now 0x%llx\n",
 		timer->name, timer->host_start_ns, now_ns);
 
-	running_cycles = running_time - timer->running_time;
-	if (running_cycles < 0) {
-		/* probably it starts on or migrates to other VCPU/CPU */
-		running_cycles = 0;
-	}
-	running_ns = cycles_2nsec(running_cycles);
 	host_ns = now_ns - timer->host_start_ns;
 	if (host_ns < 0) {
 		/* probably it starts on or migrates to other CPU */
 		host_ns = 0;
 	}
-	host_cycles = nsecs_2cycles(host_ns);
-	DebugSCI("%s : current running cycles 0x%llx ns 0x%llx\n",
-		timer->name, running_cycles, running_ns);
-	DebugSCI("%s : host    running cycles 0x%llx ns 0x%llx\n",
-		timer->name, host_cycles, host_ns);
+	DebugSCI("%s : host    running ns 0x%llx\n", timer->name, host_ns);
 
 	limit = kvm_get_sci_timer_limit(spmc);
 
-	counter = cycles_to_count(spmc, running_cycles) + start_count;
-	host_counter = cycles_to_count(spmc, host_cycles) + start_count;
-	new_count = host_counter & kvm_get_sci_timer_max_mask(spmc);
+	host_counter = mul_u64_u32_div(host_ns, spmc->frequency, NSEC_PER_SEC) + start_count;
+	new_count = host_counter & kvm_get_sci_timer_limit_mask(spmc);
 
 	/* update timer counter value */
 	if (timer->type == kvm_sci_timer_type) {
@@ -323,17 +296,11 @@ static u64 kvm_get_up_to_date_sci_timer(struct kvm_vcpu *vcpu,
 	}
 	timer->start_count = new_count;
 	timer->host_start_ns = now_ns;
-	timer->running_time = running_time;
 	timer->vcpu = vcpu;
 
 	raw_spin_unlock_irqrestore(&timer->lock, flags);
 
-	DebugSCI("%s : guest running cycles 0x%llx "
-		"counter 0x%llx : %lld%%\n",
-		timer->name, running_cycles, counter,
-		(counter * 100) / host_counter);
-	DebugSCI("%s : host  running cycles 0x%llx counter 0x%llx\n",
-		timer->name, host_cycles, host_counter);
+	DebugSCI("%s : host  running counter 0x%llx\n", timer->name, host_counter);
 	DebugSCI("%s : host counter 0x%llx limit 0x%x : new counter 0x%x\n",
 		timer->name, host_counter, limit, new_count);
 
@@ -440,11 +407,16 @@ static inline void reset_sleep_state_enable(struct kvm_spmc *spmc)
 	spmc->regs.pm1_control.slp_en = 0;
 }
 
-static void generate_interrupt(struct kvm *kvm, spmc_irq_map_t irq_id,
+static int generate_interrupt(struct kvm *kvm, spmc_irq_map_t irq_id,
 				bool active)
 {
-	DebugIRQ("IRQ #%d level is %d\n", irq_id, active);
-	kvm_set_irq(kvm, irq_id, irq_id, active, false);
+	int r = kvm_set_irq(kvm, irq_id, irq_id, active, false);
+
+	if (r >= 0) {
+		DebugIRQ("IRQ #%d level is %d\n", irq_id, active);
+	}
+
+	return r;
 }
 
 static bool spmc_calculate_sci(struct kvm_spmc *spmc)
@@ -464,10 +436,12 @@ static bool spmc_calculate_sci(struct kvm_spmc *spmc)
 static void spmc_check_sci(struct kvm_spmc *spmc)
 {
 	bool new_sci = spmc_calculate_sci(spmc);
+	int r;
 
 	if (new_sci != spmc->sci_state) {
-		generate_interrupt(spmc->kvm, spmc->sci_timer_irq_id, new_sci);
-		spmc->sci_state = new_sci;
+		r = generate_interrupt(spmc->kvm, spmc->sci_timer_irq_id, new_sci);
+		if (r > 0)
+			spmc->sci_state = new_sci;
 	}
 }
 
@@ -507,14 +481,14 @@ static u32 update_sci_timer_value(struct kvm_vcpu *vcpu, struct kvm_spmc *spmc)
 }
 
 static void start_sci_timer(struct kvm_vcpu *vcpu, struct kvm_spmc *spmc,
-				u32 start_count, u64 cycles_period)
+				u32 start_count, u64 count_period)
 {
 	struct kvm_timer *sci_timer = &spmc->sci_timer;
 	ktime_t now;
 	u64 ns_period;
-	s64 offset, ns_expired;
+	s64 ns_expired;
 
-	ns_period = cycles_2nsec(cycles_period);
+	ns_period = mul_u64_u32_div(count_period, NSEC_PER_SEC, spmc->frequency);
 	if (ns_period == 0) {
 		sci_timer->period = 0;
 		return;
@@ -536,36 +510,28 @@ static void start_sci_timer(struct kvm_vcpu *vcpu, struct kvm_spmc *spmc,
 	sci_timer->period = ns_period;
 	now = sci_timer->timer.base->get_time();
 	sci_timer->host_start_ns = ktime_to_ns(now);
-	sci_timer->running_time =
-		(vcpu) ? kvm_get_guest_vcpu_running_time(vcpu) : 0;
 	ns_expired = ns_period;
 	if (start_count > 0) {
 		/* counter statrs from current freezed value */
-		offset = count_to_cycles(spmc, start_count);
-		ns_expired -= cycles_2nsec(offset % cycles_period);
-		ASSERT(ns_expired >= 0);
+		ns_expired -= mul_u64_u32_div(start_count % count_period,
+				NSEC_PER_SEC, spmc->frequency);
+		if (WARN_ON_ONCE(ns_expired < 0)) {
+			return;
+		}
 	}
-	hrtimer_start(&sci_timer->timer,
-			ktime_add_ns(now, ns_expired),
-			HRTIMER_MODE_ABS);
-	DebugTM("%s started hrtimer at host ns 0x%llx start count 0x%x, "
-		"period 0x%llx\n",
-		sci_timer->name, sci_timer->host_start_ns,
-		start_count, ns_period);
-	DebugTM("%s        running time cycles 0x%llx\n",
-		sci_timer->name, sci_timer->running_time);
+	hrtimer_start(&sci_timer->timer, ktime_add_ns(now, ns_expired), HRTIMER_MODE_ABS);
+	DebugTM("%s started hrtimer at host ns 0x%llx start count 0x%x, period 0x%llx\n",
+		sci_timer->name, sci_timer->host_start_ns, start_count, ns_period);
 
-	DebugTM("%s freq is %d Hz, now 0x%llx, timer period cycles 0x%llx, "
-		"nsec %lld, expire @ 0x%llx\n",
+	DebugTM("%s freq is %d Hz, now 0x%llx, nsec %lld, expire @ 0x%llx\n",
 		sci_timer->name, spmc->frequency, ktime_to_ns(now),
-		cycles_period, sci_timer->period,
-		hrtimer_get_expires_ns(&sci_timer->timer));
+		sci_timer->period, hrtimer_get_expires_ns(&sci_timer->timer));
 }
 
 static void restart_sci_timer(struct kvm_vcpu *vcpu, struct kvm_spmc *spmc)
 {
 	u32 start, limit;
-	u64 increments, cycles_increments;
+	u64 increments;
 
 	hrtimer_cancel(&spmc->sci_timer.timer);
 	kthread_flush_work(&spmc->sci_timer.expired);
@@ -579,11 +545,9 @@ static void restart_sci_timer(struct kvm_vcpu *vcpu, struct kvm_spmc *spmc)
 	limit = kvm_get_sci_timer_limit(spmc);
 
 	increments = limit - 0	/* counter start value */;
-	cycles_increments = count_to_cycles(spmc, increments);
-	DebugTM("PM timer counter from 0x%x to limit 0x%x, increments: 0x%llx "
-		"cycles 0x%llx\n",
-		start, limit, increments, cycles_increments);
-	start_sci_timer(vcpu, spmc, start, cycles_increments);
+	DebugTM("PM timer counter from 0x%x to limit 0x%x, increments: 0x%llx\n",
+		start, limit, increments);
+	start_sci_timer(vcpu, spmc, start, increments);
 }
 
 static int spmc_conf_io_read(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
@@ -853,15 +817,18 @@ static void spmc_sci_timer_do_work(struct kthread_work *work)
 	struct kvm_timer *timer = container_of(work, struct kvm_timer, expired);
 	struct kvm *kvm = timer->kvm;
 	struct kvm_spmc *spmc = timer_to_spmc(timer);
+	int r;
 
 	if (timer->work == kvm_set_irq_timer_work) {
 		ASSERT(spmc->sci_state == false);
-		generate_interrupt(kvm, spmc->sci_timer_irq_id, true);
-		spmc->sci_state = true;
+		r = generate_interrupt(kvm, spmc->sci_timer_irq_id, true);
+		if (r > 0)
+			spmc->sci_state = true;
 	} else if (timer->work == kvm_reset_irq_timer_work) {
 		ASSERT(spmc->sci_state == true);
-		generate_interrupt(kvm, spmc->sci_timer_irq_id, false);
-		spmc->sci_state = false;
+		r = generate_interrupt(kvm, spmc->sci_timer_irq_id, false);
+		if (r > 0)
+			spmc->sci_state = false;
 	} else {
 		pr_err("%s(): %d is unknown or unsupported timer "
 			"expires work\n",

@@ -1690,6 +1690,10 @@ static int load_config(const struct i2c_client *client, enum chips chip)
 	int err;
 	const char *prop1, *prop2;
 
+#ifdef CONFIG_MCST
+	prop1 = NULL;
+	prop2 = NULL;
+#endif
 	switch (chip) {
 	case adt7473:
 	case adt7475:

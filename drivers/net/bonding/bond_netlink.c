@@ -219,6 +219,9 @@ static int bond_changelink(struct net_device *bond_dev, struct nlattr *tb[],
 	int miimon = 0;
 	int err;
 
+#ifdef CONFIG_MCST
+	err = -EINVAL;
+#endif
 	if (!data)
 		return 0;
 

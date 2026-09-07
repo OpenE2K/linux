@@ -117,9 +117,6 @@ static inline uint8_t hw_get_intsrc(void __iomem *base_addr)
 }
 
 
-void mmrse_bc_irq_handler(mmrse_priv_t *priv);
-void mmrse_bm_irq_handler(mmrse_priv_t *priv);
-void mmrse_rt_irq_handler(mmrse_priv_t *priv);
 
 /**
  * Interrupt handler
@@ -174,8 +171,6 @@ void mmrse_hw_bc_init(mmrse_priv_t *priv, dma_addr_t mem_addr);
 void mmrse_hw_rt_reset(mmrse_priv_t *priv, int rst);
 void mmrse_hw_bm_reset(mmrse_priv_t *priv);
 
-int mmrse_cdev_register(mmrse_priv_t *priv, int devtype);
-void mmrse_cdev_remove(mmrse_priv_t *priv, int devtype);
 
 
 /**
@@ -295,14 +290,14 @@ static int init_board(struct pci_dev *pdev, mmrse_priv_t **dev_priv,
 	}
 	/* RTOUT */
 	for (i = 0; i < (16 * 32); i++) {
-		u32 *ram_buff;
-		ram_buff = (u32 *)priv->buf_base + i;
+		volatile void __iomem  *ram_buff;
+		ram_buff = (u32 __iomem *)priv->buf_base + i;
 		buf32wr(0, ram_buff);
 	}
 	/* RTIN */
 	for (i = 0; i < (16 * 32); i++) {
-		u32 *ram_buff;
-		ram_buff = (u32 *)priv->buf_base + i + (16 * 32);
+		volatile void __iomem *ram_buff;
+		ram_buff = (u32 __iomem *)priv->buf_base + i + (16 * 32);
 		buf32wr(0, ram_buff);
 	}
 
@@ -374,10 +369,6 @@ static void release_board(mmrse_priv_t *priv)
  ******************************************************************************
  **/
 
-#ifdef CONFIG_DEBUG_FS
-void mmrse_dbg_board_init(mmrse_priv_t *priv);
-void mmrse_dbg_board_exit(mmrse_priv_t *priv);
-#endif /*CONFIG_DEBUG_FS*/
 
 
 /**
@@ -608,20 +599,6 @@ static struct pci_driver mmrse_pci_driver = {
 #endif
 };
 
-
-/**
- ******************************************************************************
- * Module Part
- ******************************************************************************
- **/
-
-int __init mmrse_dev_init(void);
-void __exit mmrse_dev_exit(void);
-
-#ifdef CONFIG_DEBUG_FS
-void mmrse_dbg_init(void);
-void mmrse_dbg_exit(void);
-#endif /*CONFIG_DEBUG_FS*/
 
 
 /**

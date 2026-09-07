@@ -48,7 +48,7 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 		/* In kernel there is no swap or thp, valid page
 		 * is always mapped, so do not keep the valid bit.
 		 * This is important because in kernel we cannot
-		 * tolerate spurious page faults from h.-s. loads. */
+		 * tolerate spurious page faults from semi-spec. loads. */
 		oldpte = __pte(pt_get_and_xchg_atomic(mm, addr, 0ull, (pgprot_t *) ptep));
 	} else {
 		oldpte = __pte(pt_get_and_clear_atomic(mm, addr, (pgprot_t *) ptep));

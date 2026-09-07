@@ -1038,6 +1038,12 @@ static int zswap_writeback_entry(struct zpool *pool, unsigned long handle)
 
 		/* page is up to date */
 		SetPageUptodate(page);
+#ifdef CONFIG_MCST
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+#endif
 	}
 
 	/* move it to the tail of the inactive list after end_writeback */

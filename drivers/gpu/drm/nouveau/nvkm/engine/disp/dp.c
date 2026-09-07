@@ -551,6 +551,9 @@ nvkm_dp_acquire(struct nvkm_outp *outp)
 	u8  stat[3];
 	int ret, i;
 
+#ifdef CONFIG_MCST
+	ret = 0;
+#endif
 	mutex_lock(&outp->dp.mutex);
 
 	/* Check that link configuration meets current requirements. */

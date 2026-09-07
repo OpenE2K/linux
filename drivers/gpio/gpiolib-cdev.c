@@ -1414,6 +1414,9 @@ static long linereq_get_values(struct linereq *lr, void __user *ip)
 	unsigned int i, didx, num_get;
 	bool val;
 	int ret;
+#ifdef CONFIG_MCST
+	descs = NULL;
+#endif
 
 	/* NOTE: It's ok to read values of output lines. */
 	if (copy_from_user(&lv, ip, sizeof(lv)))
@@ -1475,6 +1478,9 @@ static long linereq_set_values_unlocked(struct linereq *lr,
 	unsigned int i, didx, num_set;
 	int ret;
 
+#ifdef CONFIG_MCST
+	descs = NULL;
+#endif
 	bitmap_zero(vals, GPIO_V2_LINES_MAX);
 	for (num_set = 0, i = 0; i < lr->num_lines; i++) {
 		if (lv->mask & BIT_ULL(i)) {

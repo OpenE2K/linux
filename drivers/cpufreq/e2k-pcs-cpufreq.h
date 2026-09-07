@@ -9,7 +9,6 @@
 #define N_BFS 16
 #define MAX_STATES (M_BFS*N_BFS)
 #define F_REF				100
-#define DEF_F_PLL_E48C_REV0		1800
 
  /* default pll_clkr, pll_clkod, pll_clkf */
 #define DEF_PLL_CLKR_V6			0x0
@@ -18,15 +17,10 @@
 #define DEF_PLL_CLKR_E8V7		0x0
 #define DEF_PLL_CLKOD_E8V7		0x0
 #define DEF_PLL_CLKF_E8V7		0x2800000000
-#define DEF_PLL_CLKR_E48C		0x0
-#define DEF_PLL_CLKOD_E48C		0x1
-#define DEF_PLL_CLKF_E48C		0x31
 
 #define EFUSE_START_ADDR		0x0
 #define EFUSE_END_ADDR_V6		0xff
 #define EFUSE_END_ADDR_E8V7		0x1fff
-#define EFUSE_END_ADDR_E48C		0xfff
-#define EFUSE_END_ADDR_E48C_REV0	0xff
 
 #define V5_PCS_MODE_3			0x3
 #define V5_PCS_MODE_7			0x7
@@ -38,16 +32,16 @@
 
 /* E12C/E16C/E2C3 Power Control System (PCS) cpufreq registers:
  * PMC base = 0x1000, FREQ_CORE_0_MON base = 0x200, FUSE base = 0xcc0
- * E48C/E8V7 Power Control System (PCS) cpufreq registers:
+ * E8V7 Power Control System (PCS) cpufreq registers:
  * PMC base = 0x1000, FREQ_CORE_0_MON base = 0x400, FUSE base = 0xcc0
  * */
-#define PMC_FREQ_CORE_0_MON		0x0
-#define PMC_FREQ_CORE_0_CTRL		0x4
-#define PMC_FREQ_CORE_N_MON(n)		(PMC_FREQ_CORE_0_MON +  n * 16)
-#define PMC_FREQ_CORE_N_CTRL(n)		(PMC_FREQ_CORE_0_CTRL +  n * 16)
+#define PMC_FREQ_CORE_0_MON_SHIFT		0x0
+#define PMC_FREQ_CORE_0_CTRL_SHIFT		0x4
+#define PMC_FREQ_CORE_N_MON_SHIFT(n)		(PMC_FREQ_CORE_0_MON_SHIFT +  n * 16)
+#define PMC_FREQ_CORE_N_CTRL_SHIFT(n)		(PMC_FREQ_CORE_0_CTRL_SHIFT +  n * 16)
 
-#define EFUSE_RAM_ADDR          0x0
-#define EFUSE_RAM_DATA          0x4
+#define EFUSE_RAM_ADDR_SHIFT          0x0
+#define EFUSE_RAM_DATA_SHIFT          0x4
 
 typedef union {
 	struct {
@@ -108,78 +102,9 @@ typedef union {
 		u32 pll_clkr		:12;
 		u32 empty		:19;
 	} e8v7_partnum9;
-	struct {
-		u32 pll_clkod		:4;
-		u32 pll_clkf		:13;
-		u32 pll_clkr_lo		:3;
-		u32 empty		:12;
-	} e48c_rev0_partnum5;
-	struct {
-		u32 pll_clkr_hi		:3;
-		u32 empty		:29;
-	} e48c_rev0_partnum6;
-	struct {
-		u32 pll_clkod		:4;
-		u32 pll_clkf_lo		:12;
-		u32 empty		:16;
-	} e48c_partnum5;
-	struct {
-		u32 pll_clkf_hi		:1;
-		u32 pll_clkr		:6;
-		u32 empty		:25;
-	} e48c_partnum6;
 	u32 word;
 } efuse_data_t;
 
-/* PMC_FREQ_CORE_0_MON fields: */
-typedef union {
-	struct {
-		u32 divF_curr		: 6;
-		u32 divF_target		: 6;
-		u32 divF_limit_hi	: 6;
-		u32 divF_limit_lo	: 6;
-		u32 divF_init		: 6;
-		u32 bfs_bypass		: 1;
-		u32 rsv			: 1;
-	};
-	u32 word;
-} freq_core_mon_t;
-
-/* PMC_FREQ_CORE_0_CTRL fields: */
-typedef union {
-	struct {
-		u32 enable		: 1;
-		u32 mode		: 3;
-		u32 progr_divF		: 6;
-		u32 progr_divF_max	: 6;
-		u32 decr_dsbl		: 1;
-		u32 pin_en		: 1;
-		u32 clk_en		: 1;
-		u32 log_en		: 1;
-		u32 sleep_c2		: 1;
-		u32 w_trap		: 1;
-		u32 ev_term		: 1;
-		u32 mon_Fmax		: 1;
-		u32 divF_curr		: 6;
-		u32 bfs_bypass		: 1;
-		u32 rmwen		: 1;
-	} v6;
-	struct {
-		u32 enable		: 1;
-		u32 progr_limits_en	: 1;
-		u32 rsv1		: 2;
-		u32 progr_divF		: 6;
-		u32 progr_divF_max	: 6;
-		u32 decr_dsbl		: 1;
-		u32 rsv2		: 5;
-		u32 ev_term		: 1;
-		u32 mon_Fmax		: 1;
-		u32 divF_curr		: 6;
-		u32 bfs_bypass		: 1;
-		u32 rmwen		: 1;
-	} v7;
-	u32 word;
-} freq_core_ctrl_t;
 
 /* V6 fuse */
 #define V6_ADDR_45				(1 << 5)
@@ -197,10 +122,11 @@ typedef union {
 
 /* E8C2 Power Control System (PCS) freq registers:
  * PCS_CTRL0 base = 0xbc0 */
-#define SIC_pcs_ctrl0		0x0
-#define SIC_pcs_ctrl1		0x4
-#define SIC_pcs_ctrl3		0xc
+#define SIC_pcs_ctrl0_shift		0x0
+#define SIC_pcs_ctrl1_shift		0x4
+#define SIC_pcs_ctrl3_shift		0xc
 
+#if 0
 /* PCS_CTRL1 fields: */
 typedef union {
 	struct {
@@ -235,6 +161,7 @@ typedef union {
 	};
 	u32 word;
 } pcs_ctrl3_t;
+#endif
 
 typedef union {
 	struct {

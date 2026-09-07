@@ -359,7 +359,7 @@ void DBG_dump_reg(void *pvDevContext)
 #include <linux/string.h>
 #include <linux/kobject.h>
 #include <linux/fs.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/page.h>
 #include <linux/slab.h>
 #include <linux/miscdevice.h>

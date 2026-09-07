@@ -945,7 +945,7 @@ static int put_ptr128_request_table(struct ptr128_sg_req_info __user *o,
 	e2k_ap_t ap;
 	int tag = 0;
 	for (i = 0; i < SG_MAX_QUEUE; i++) {
-		ap = MAKE_AP(rinfo[i].usr_ptr, 0);   /* realy so ??? */
+		ap = MAKE_FAKE_AP(rinfo[i].usr_ptr);   /* realy so ??? */
 		if (copy_to_user(o + i, rinfo + i, offsetof(sg_req_info_t, usr_ptr)) ||
 		    put_user_tagged_16(ap.qword, tag, &o[i].usr_ptr) ||
 		    put_user(rinfo[i].duration, &o[i].duration) ||

@@ -114,10 +114,6 @@ static void pmc_pci_remove(struct l_pmc *l_pmc)
 	platform_device_unregister(l_pmc->vdev);
 }
 
-#ifdef CONFIG_CPU_FREQ
-int pmc_cpufreq_init(void);
-void pmc_cpufreq_exit(void);
-#endif
 
 static int pmc_drv_probe(struct pci_dev *pdev, const struct pci_device_id *no_name)
 {
@@ -180,8 +176,6 @@ static struct pci_driver pmc_drv_driver = {
 	.remove   = pmc_drv_remove,
 };
 
-int pmc_hwmon_init(void);
-void pmc_hwmon_exit(void);
 
 static int pmc_drv_init(void)
 {

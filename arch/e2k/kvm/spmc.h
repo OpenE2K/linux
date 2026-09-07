@@ -102,10 +102,10 @@ static inline u32 kvm_get_sci_timer_limit(struct kvm_spmc *spmc)
 {
 	if (kvm_sci_timer_32(spmc)) {
 		/* counter is 32 bits */
-		return 1UL << 31;
+		return (1UL << 32) - 1;
 	} else {
 		/* counter is 24 bits */
-		return 1UL << 23;
+		return (1UL << 24) - 1;
 	}
 }
 

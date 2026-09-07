@@ -6,7 +6,6 @@
 #ifndef _ASM_E8V7_H_
 #define _ASM_E8V7_H_
 
-#ifndef __ASSEMBLY__
 struct pt_regs;
 
 #ifdef CONFIG_CPU_E8V7
@@ -15,7 +14,6 @@ extern void e8v7_setup_machine(void);
 #else
 static inline void boot_e8v7_setup_arch(void) { }
 static inline void e8v7_setup_machine(void) { }
-#endif
 #endif
 
 #define	E8V7_NR_NODE_CPUS		8

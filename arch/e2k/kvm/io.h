@@ -22,6 +22,7 @@ extern unsigned long kvm_complete_guest_mmio_request(struct kvm_vcpu *vcpu);
 extern unsigned long kvm_guest_ioport_request(struct kvm_vcpu *vcpu,
 			u16 port, u32 *user_data, u8 size, u8 is_out);
 extern unsigned long kvm_complete_guest_ioport_request(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern unsigned long kvm_guest_ioport_string_request(struct kvm_vcpu *vcpu,
 			u16 port, void *data, u8 size, u32 count,
 			u8 is_out);
@@ -31,6 +32,7 @@ extern unsigned long kvm_guest_notify_io(struct kvm_vcpu *vcpu,
 			unsigned int notifier_io);
 extern int kvm_guest_printk_on_host(struct kvm_vcpu *vcpu,
 			char *msg, int size);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 extern int vcpu_mmio_write(struct kvm_vcpu *vcpu, gpa_t addr, int len,
 				const void *v);
 extern int vcpu_mmio_read(struct kvm_vcpu *vcpu, gpa_t addr, int len, void *v);
@@ -41,8 +43,13 @@ extern pf_res_t kvm_hv_io_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa,
 
 static inline kvm_pfn_t mmio_prefixed_gfn_to_pfn(struct kvm *kvm, gfn_t gfn)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!(kvm_is_epic(kvm) && kvm->arch.is_hv))
 		return 0;
+#else
+	if (!kvm_is_epic(kvm))
+		return 0;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* CEPIC page - always mapped */
 	if (gfn == gpa_to_gfn(EPIC_DEFAULT_PHYS_BASE))

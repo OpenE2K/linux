@@ -40,7 +40,7 @@ static int snd_pcm_ioctl_xferi_ptr128(struct snd_pcm_substream *substream,
 		return -EFAULT;
 	if (get_user_tagged_16(ap.qword, tag, &data128->buf) || !IS_AP(ap, tag))
 		return -EFAULT;
-	buf = (void __user *)AP_PTR(ap);
+	buf = U_AP_PTR(ap);
 	set_ap_u_border(ap);
 	if (dir == SNDRV_PCM_STREAM_PLAYBACK)
 		err = snd_pcm_lib_write(substream, buf, frames);
@@ -97,7 +97,7 @@ static int snd_pcm_ioctl_xfern_ptr128(struct snd_pcm_substream *substream,
 	if (get_user_tagged_16(ap.qword, tag, &data128->bufs) || !IS_AP(ap, tag)) {
 		return -EFAULT;
 	}
-	bufptr = (e2k_ap_t  __user *)AP_PTR;
+	bufptr = U_AP_PTR(ap);
 
 	bufs = kmalloc_array(ch, sizeof(void __user *), GFP_KERNEL);
 	if (bufs == NULL)
@@ -108,7 +108,7 @@ static int snd_pcm_ioctl_xfern_ptr128(struct snd_pcm_substream *substream,
 			kfree(bufs);
 			return -EFAULT;
 		}
-		bufs[i] = IS_AP(ap, tag) ? (void __user *)AP_PTR(ap) : NULL;
+		bufs[i] = IS_AP(ap, tag) ? U_AP_PTR(ap) : NULL;
 		bufptr++;
 	}
 	/* Too complex, turn off checking */

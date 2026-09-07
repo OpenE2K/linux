@@ -19,11 +19,9 @@
 
 /* MMU address to access to MMU internal registers */
 
-#ifndef __ASSEMBLY__
 typedef e2k_addr_t			mmu_addr_t;
 #define	mmu_addr_val(mmu_addr)		(mmu_addr)
 #define	__mmu_addr(mmu_addr_val)	(mmu_addr_val)
-#endif /* __ASSEMBLY__ */
 
 #define	_MMU_ADDR_REG_NO_SHIFT		4	/* [ 9: 4] */
 
@@ -112,7 +110,6 @@ typedef e2k_addr_t			mmu_addr_t;
 
 /* MMU internel register contents */
 
-#ifndef __ASSEMBLY__
 typedef unsigned long long 		mmu_reg_t;
 #define	mmu_reg_val(mmu_reg)		(mmu_reg)
 #define	__mmu_reg(mmu_reg_val)		(mmu_reg_val)
@@ -181,7 +178,6 @@ typedef union {
 	.cd     = MMU_CR_CD_DIS, \
 	.ipd    = MMU_CR_IPD_DIS, \
 })
-#endif /* __ASSEMBLY__ */
 
 /*
  * MMU Process ID Register MMU_PID (renamed name from MMU_CONT)
@@ -299,107 +295,42 @@ typedef union {
 #define _MMU_PH_H_B		0x00000000ffc00000UL
 #define	_MMU_PH_H_B_ALIGN_MASK	0x00000000003fffffUL
 
-/*
- * CACHEs (DCACHE & ICACHE) structure
- */
-
-#define	E2K_DCACHE_L1_LINES_BITS_NUM	9
-#define	E2K_DCACHE_L1_LINES_NUM		(1 << E2K_DCACHE_L1_LINES_BITS_NUM)
-#define	E2K_DCACHE_L1_SETS_BITS_NUM	2
-#define	E2K_DCACHE_L1_SETS_NUM		(1 << E2K_DCACHE_L1_SETS_BITS_NUM)
-
-#define	E2K_DCACHE_L2_LINES_BITS_NUM	10
-#define	E2K_DCACHE_L2_LINES_NUM		(1 << E2K_DCACHE_L2_LINES_BITS_NUM)
-#define	E2K_DCACHE_L2_SETS_BITS_NUM	2
-#define	E2K_DCACHE_L2_SETS_NUM		(1 << E2K_DCACHE_L2_SETS_BITS_NUM)
-
-#define	E2K_ICACHE_SETS_NUM		4
-#define	E2K_ICACHE_SET_SIZE		256
-#define	E2K_ICACHE_SET_MASK		(E2K_ICACHE_SET_SIZE - 1)
-#define	E2K_ICACHE_LINES_NUM		64
 
 /*
- * CACHEs (DCACHE & ICACHE) registers operations
+ * CACHEs (DCACHE & ICACHE)
  */
 
-/* CACHEs (DCACHE & ICACHE) registers access operations address */
+#define	E2K_ICACHE_SET_SIZE	256
 
-#ifndef	__ASSEMBLY__
-typedef e2k_addr_t	dcache_addr_t;
-typedef dcache_addr_t	dcache_l1_addr_t;
-typedef dcache_addr_t	dcache_l2_addr_t;
-#endif /* ! __ASSEMBLY__ */
+typedef union {
+	struct {
+		u64            : 3;
+		u64 cache_word : 2;
+		u64 line       : 9;
+		u64            : 13;
+		u64 type_h     : 1;
+		u64            : 1;
+		u64 type       : 1;
+		u64 set        : 2;
+	};
+	u64 word;
+} dcache_l1_addr_t;
 
-#define dcache_addr_val(dcache_addr)	      (dcache_addr)
-#define dcache_l1_addr_val(dcache_l1_addr)    dcache_addr_val(dcache_l1_addr)
-#define dcache_l2_addr_val(dcache_l2_addr)    dcache_addr_val(dcache_l2_addr)
+#define E2K_DCACHE_L1_LINE_SHIFT	5
 
-#define __dcache_addr(dcache_addr_val)	      (dcache_addr_val)
-#define __dcache_l1_addr(dcache_l1_addr_val)  __dcache_addr(dcache_l1_addr_val)
-#define __dcache_l2_addr(dcache_l2_addr_val)  __dcache_addr(dcache_l2_addr_val)
+static __always_inline u64 mk_dcache_l1_addr(u64 virt_addr,
+		int set, int type, int type_h, int word)
+{
+	dcache_l1_addr_t addr = (dcache_l1_addr_t) {
+		.cache_word = word,
+		.line = virt_addr >> E2K_DCACHE_L1_LINE_SHIFT,
+		.type_h = type_h,
+		.type = type,
+		.set = set,
+	};
+	return AW(addr);
+}
 
-#define _E2K_DCACHE_L1_SET		0x00000000C0000000
-#define _E2K_DCACHE_L1_TYPE		0x0000000020000000
-#define _E2K_DCACHE_L1_TYPE_H		0x0000000008000000
-#define _E2K_DCACHE_L1_LINE		0x0000000000003FE0
-#define _E2K_DCACHE_L1_WORD		0x0000000000000018
-
-#define _E2K_DCACHE_L1_SET_SHIFT	30
-#define _E2K_DCACHE_L1_TYPE_SHIFT	29
-#define _E2K_DCACHE_L1_TYPE_H_SHIFT	27
-#define _E2K_DCACHE_L1_LINE_SHIFT	5
-#define _E2K_DCACHE_L1_WORD_SHIFT	3
-
-#define	DCACHE_L1_VADDR_TO_ADDR(virt_addr)				     \
-		((virt_addr) & _E2K_DCACHE_L1_LINE)
-
-#define	dcache_l1_set_set(addr, set)					     \
-		(__dcache_l1_addr(					     \
-			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_SET) |   \
-			(((set) << _E2K_DCACHE_L1_SET_SHIFT) & _E2K_DCACHE_L1_SET)))
-#define	dcache_l1_get_set(addr)						     \
-		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_SET)
-
-#define	dcache_l1_set_type_h(addr, type_h)				      \
-		(__dcache_l1_addr(					      \
-			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_TYPE_H) | \
-			(((type_h) << _E2K_DCACHE_L1_TYPE_H_SHIFT) & _E2K_DCACHE_L1_TYPE_H)))
-#define	dcache_l1_get_type_h(addr)					     \
-		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_TYPE_H)
-
-#define	dcache_l1_set_type(addr, type)					     \
-		(__dcache_l1_addr(					     \
-			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_TYPE) |  \
-			(((type) << _E2K_DCACHE_L1_TYPE_SHIFT) & _E2K_DCACHE_L1_TYPE)))
-#define	dcache_l1_get_type(addr)					     \
-		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_TYPE)
-
-#define	dcache_l1_set_line(addr, line)					     \
-		(__dcache_l1_addr(					     \
-			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_LINE) |  \
-			(((line) << _E2K_DCACHE_L1_LINE_SHIFT) & _E2K_DCACHE_L1_LINE)))
-#define	dcache_l1_get_line(addr)					     \
-		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_LINE)
-
-#define	dcache_l1_set_word(addr, word)					     \
-		(__dcache_l1_addr(					     \
-			(dcache_l1_addr_val(addr) & ~_E2K_DCACHE_L1_WORD) |  \
-			(((word) << _E2K_DCACHE_L1_WORD_SHIFT) & _E2K_DCACHE_L1_WORD)))
-#define	dcache_l1_get_word(addr)					     \
-		(dcache_l1_addr_val(addr) & _E2K_DCACHE_L1_WORD)
-
-#define mk_dcache_l1_addr(virt_addr, set, type, type_h, word)		     \
-({									     \
-	dcache_l1_addr_t addr;						     \
-	addr = __dcache_l1_addr(DCACHE_L1_VADDR_TO_ADDR(virt_addr));	     \
-	addr = dcache_l1_set_set(addr, set);				     \
-	addr = dcache_l1_set_type(addr, type);				     \
-	addr = dcache_l1_set_type_h(addr, type_h);			     \
-	addr = dcache_l1_set_word(addr, word);				     \
-	addr;								     \
-})
-
-#ifndef	__ASSEMBLY__
 typedef union {
 	struct {
 		u64 l1pref_str_dsbl             : 1;
@@ -444,45 +375,41 @@ typedef union {
 	u64 word;
 } e2k_l1_fault_reg_t;
 
-#endif	/* ! __ASSEMBLY__ */
-
-#define _E2K_DCACHE_L2_TYPE		0x0000000030000000
-#define _E2K_DCACHE_L2_DATA_TYPE		0x0
-#define _E2K_DCACHE_L2_REGS_TYPE		0x1
-#define _E2K_DCACHE_L2_TAG_TYPE		0x2
-#define _E2K_DCACHE_L2_REGS_TYPE2		0x3
-#define _E2K_DCACHE_L2_LINE		0x000000000007ffc0
-#define	_E2K_DCACHE_L2_REG_NUM		0x000000000000ff00
-#define _E2K_DCACHE_L2_BIST_SIG1_REG		0x00
-#define _E2K_DCACHE_L2_BIST_SIG2_REG		0x01
-#define _E2K_DCACHE_L2_BISR_CTRL_REG		0x02
-#define _E2K_DCACHE_L2_CTRL_REG		0x03
-#define _E2K_DCACHE_L2_ECC_DBG_REG		0x04
-#define _E2K_DCACHE_L2_ERR_REG			0x05
-#define _E2K_DCACHE_L2_CNT_ERR1_REG		0x06
-#define _E2K_DCACHE_L2_CNT_ERR2_REG		0x07
-#define _E2K_DCACHE_L2_CTRL_EXT_REG		0x08
-#define	_E2K_DCACHE_L2_BANK_NUM		0x00000000000000c0
-#define _E2K_DCACHE_L2_WORD		0x0000000000000038
-
-#define _E2K_DCACHE_L2_TYPE_SHIFT	28
-#define _E2K_DCACHE_L2_LINE_SHIFT	6
-#define _E2K_DCACHE_L2_REG_NUM_SHIFT	8
-#define _E2K_DCACHE_L2_BANK_NUM_SHIFT	6
-#define _E2K_DCACHE_L2_WORD_SHIFT	3
-
+typedef union {
+	struct {
+		u64 zero : 6; /* Required to be zero */
 #define	E2K_L2_BANK_NUM			4
+		u64 bank : 2;
+		u64 reg  : 8;
+#define E2K_DCACHE_L2_BIST_SIG1_REG	0x00
+#define E2K_DCACHE_L2_BIST_SIG2_REG	0x01
+#define E2K_DCACHE_L2_BISR_CTRL_REG	0x02
+#define E2K_DCACHE_L2_CTRL_REG		0x03
+#define E2K_DCACHE_L2_ECC_DBG_REG	0x04
+#define E2K_DCACHE_L2_ERR_REG		0x05
+#define E2K_DCACHE_L2_CNT_ERR1_REG	0x06
+#define E2K_DCACHE_L2_CNT_ERR2_REG	0x07
+#define E2K_DCACHE_L2_CTRL_EXT_REG	0x08
+		u64      : 12;
+		u64 type : 2;
+#define E2K_DCACHE_L2_DATA_TYPE		0x0
+#define E2K_DCACHE_L2_REGS_TYPE		0x1
+#define E2K_DCACHE_L2_TAG_TYPE		0x2
+#define E2K_DCACHE_L2_REGS_TYPE2	0x3
+	};
+	u64 word;
+} dcache_l2_addr_t;
 
-#define	E2K_L2_CNTR_EN_CORR		0x0000000000000001
-#define	E2K_L2_CNTR_EN_DET		0x0000000000000002
-#define	E2K_L2_CNTR_EN_CINT		0x0000000000000004
-#define	E2K_L2_CNTR_DSBL_PREF_L3	0x8000
+static __always_inline u64 mk_dcache_l2_addr(int reg, int bank)
+{
+	dcache_l2_addr_t addr = (dcache_l2_addr_t) {
+		.type = E2K_DCACHE_L2_REGS_TYPE,
+		.reg = reg,
+		.bank = bank
+	};
+	return AW(addr);
+}
 
-#define E2K_L3_MAX_BANK_IN_NODE		32
-#define E2K_MC_MAX_NUM_IN_NODE		16
-#define E2K_MAX_PB_IN_MC		4
-
-#ifndef	__ASSEMBLY__
 typedef union {
 	struct {
 		u64 clwb_period           : 6;
@@ -496,7 +423,7 @@ typedef union {
 		u64 v7_l2pref_ctrl        : 8;
 		u64                       : 23;
 	};
-	u64 reg;
+	u64 word;
 } e2k_l2_ctrl_ext_t;
 
 typedef union {		/* starting from v7 */
@@ -519,6 +446,7 @@ typedef union {		/* starting from v7 */
 	u64 word;
 } e2k_l2_err_t;
 
+#define V_CPU_LD_MAU	7
 
 typedef union {
 	struct {
@@ -536,74 +464,13 @@ typedef union {
 } e2k_l2_cnt_err2_t;
 
 
-
-#endif	/* ! __ASSEMBLY__ */
-
-#define	DCACHE_L2_PADDR_TO_ADDR(phys_addr)				     \
-		((virt_addr) & _E2K_DCACHE_L2_LINE)
-
-#define	dcache_l2_set_type(addr, type)					     \
-		(__dcache_l2_addr(					     \
-			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_TYPE) |  \
-			(((type) << _E2K_DCACHE_L2_TYPE_SHIFT) & _E2K_DCACHE_L2_TYPE)))
-#define	dcache_l2_get_type(addr)					     \
-		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_TYPE)
-
-#define	dcache_l2_set_line(addr, line)					     \
-		(__dcache_l2_addr(					     \
-			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_LINE) |  \
-			(((index) << _E2K_DCACHE_L2_LINE_SHIFT) & _E2K_DCACHE_L2_LINE)))
-#define	dcache_l2_get_line(addr)					     \
-		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_LINE)
-
-#define	dcache_l2_set_reg_num(addr, reg_num)				     \
-		(__dcache_l2_addr(					     \
-			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_REG_NUM) | \
-			(((reg_num) << _E2K_DCACHE_L2_REG_NUM_SHIFT) & _E2K_DCACHE_L2_REG_NUM)))
-#define	dcache_l2_get_reg_num(addr)					     \
-		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_REG_NUM_SHIFT)
-
-#define	dcache_l2_set_bank_num(addr, bank_num)				     \
-		(__dcache_l2_addr(					     \
-			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_BANK_NUM) |		     \
-			(((bank_num) << _E2K_DCACHE_L2_BANK_NUM_SHIFT) & _E2K_DCACHE_L2_BANK_NUM)))
-#define	dcache_l2_get_bank_num(addr)					     \
-		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_BANK_NUM_SHIFT)
-
-#define	dcache_l2_set_word(addr, word)					     \
-		(__dcache_l2_addr(					     \
-			(dcache_l2_addr_val(addr) & ~_E2K_DCACHE_L2_WORD) |  \
-			(((word) << _E2K_DCACHE_L2_WORD_SHIFT) & _E2K_DCACHE_L2_WORD)))
-#define	dcache_l2_get_word(addr)					     \
-		(dcache_l2_addr_val(addr) & _E2K_DCACHE_L2_WORD)
-
-#define mk_dcache_l2_addr(phys_addr, type, word)			     \
-({									     \
-	dcache_l2_addr_t addr = 0;					     \
-	addr = __dcache_l2_addr(DCACHE_L1_PADDR_TO_ADDR(phys_addr));	     \
-	addr = dcache_l2_set_type(addr, type);				     \
-	addr = dcache_l2_set_word(addr, word);				     \
-	addr;								     \
-})
-
-#define mk_dcache_l2_reg_addr(reg_num, bank_num)			     \
-({									     \
-	dcache_l2_addr_t addr = 0;					     \
-	addr = dcache_l2_set_type(addr, _E2K_DCACHE_L2_REGS_TYPE);	     \
-	addr = dcache_l2_set_reg_num(addr, reg_num);			     \
-	addr = dcache_l2_set_bank_num(addr, bank_num);			     \
-	addr;								     \
-})
-
 /*
  * ICACHE/DTLB/ITLB line flush operations
  */
 
 /* ICACHE/DTLB/ITLB line flush operations address */
 
-#ifndef	__ASSEMBLY__
 typedef e2k_addr_t flush_op_t;
-#endif /* ! __ASSEMBLY__ */
 
 #define FLUSH_OP_TYPE			ULL(7)	/* type of operation */
 #define	FLUSH_ICACHE_LINE_USER_OP	ULL(0)
@@ -617,9 +484,7 @@ typedef e2k_addr_t flush_op_t;
 
 /* ICACHE/DTLB/ITLB line flush extended virtual address structure */
 
-#ifndef	__ASSEMBLY__
 typedef e2k_addr_t flush_addr_t;
-#endif /* ! __ASSEMBLY__ */
 
 #define	FLUSH_ADDR_CONTEXT_SHIFT ULL(50)		/* [61:50] */
 #define FLUSH_ADDR_VA		ULL(0x0000ffffffffffff)	/* virtual address */
@@ -685,9 +550,7 @@ typedef e2k_addr_t flush_addr_t;
  * MU address to access to CLW internal registers
  */
 
-#ifndef __ASSEMBLY__
 typedef e2k_addr_t clw_addr_t;
-#endif /* __ASSEMBLY__ */
 
 #define ADDR_US_CL_B		0x024	/* User stack bottom to clean */
 #define ADDR_US_CL_UP		0x124	/* User stack up to clean */
@@ -698,9 +561,7 @@ typedef e2k_addr_t clw_addr_t;
 
 /* CLW internel register contents */
 
-#ifndef __ASSEMBLY__
 typedef u64 clw_reg_t;
-#endif /* __ASSEMBLY__ */
 
 /*
  * User Stack Window clean bit-mask structure
@@ -742,7 +603,6 @@ typedef u64 clw_reg_t;
 		((((reg_no) << _MMU_ADDR_DEBUG_REG_NO_SHIFT) & \
 			_MMU_ADDR_DEBUG_REG_NO) | _MMU_ADDR_DEBUG_REG_TYPE)
 
-#ifndef	__ASSEMBLY__
 
 typedef union {
 	u32 half_word[2];
@@ -751,8 +611,8 @@ typedef union {
 		u32 system	: 1;	/*  [ 1: 1] */
 		u32 trap	: 1;	/*  [ 2: 2] */
 		u32		: 13;	/*  [15: 3] */
-		u32 event	: 7;	/*  [22:16] */
-		u32		: 9;	/*  [31:23] */
+		u32 event	: 8;	/*  [23:16] */
+		u32		: 8;	/*  [31:24] */
 	} ddmar[2];
 	u64 word;
 } e2k_ddmcr_t;
@@ -923,10 +783,14 @@ typedef union {
 		u64 macp_l1_dsbl : 1;
 		u64 mtag_dsbl : 1;
 		u64 ext_lock_tlb_en : 1;
+		u64 l1_nal_dsbl : 1;
+		u64 mem_err_mau_en : 1;
+		u64 mem_err_core_en_int : 1;
+		u64 mem_err_core_led : 1;
+		u64 mem_test_mode_l1 : 1;
+		u64 l1_st_byp_dsbl : 1;
 	} v7;
 	u64 word;
 } e2k_mu_hw0_t;
-
-#endif /* ! __ASSEMBLY__ */
 
 #endif /* _E2K_MMU_REGS_TYPES_H_ */

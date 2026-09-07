@@ -23,9 +23,9 @@
 #include <asm/e2k_debug.h>
 
 #include <asm/kvm/hypercall.h>
-#include <asm/kvm/priv-hypercall.h>
-#include <asm/kvm/cpu_regs_access.h>
-#include <asm/kvm/runstate.h>
+#include <asm/kvm/paravirt_sw/priv-hypercall.h>
+#include <asm/kvm/paravirt_sw/cpu_regs_access.h>
+#include <asm/kvm/paravirt_sw/runstate.h>
 #include <asm/kvm/guest/traps.h>
 #include <asm/kvm/guest/trap_table.h>
 #include <asm/kvm/guest/regs_state.h>
@@ -952,7 +952,7 @@ kvm_guest_startup_entry(int bsp, bootblock_struct_t *bootblock)
 
 	/* VCPU state base can be on global register, so save & restore */
 	KVM_SAVE_VCPU_STATE_BASE(vcpu_base);
-	NATIVE_BOOT_INIT_G_REGS();
+	NATIVE_BOOT_INIT_G_REGS(false);
 	KVM_RESTORE_VCPU_STATE_BASE(vcpu_base);
 
 	boot_startup(bsp, bootblock);

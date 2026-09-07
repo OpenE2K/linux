@@ -6,8 +6,6 @@
 #ifndef _E2K_PCI_H
 #define _E2K_PCI_H
 
-#ifdef __KERNEL__
-
 #define HAVE_PCI_LEGACY			1
 
 #define PCIBIOS_MIN_IO		0x1000
@@ -31,7 +29,5 @@
 
 /* Generic PCI */
 #include <asm-generic/pci.h>
-
-#endif  /* __KERNEL__ */
 
 #endif /* _E2K_PCI_H */

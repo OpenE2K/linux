@@ -17,9 +17,9 @@ MODULE_LICENSE("GPL v2");
 #define AREAS_IN_MULTI_MODE 10
 #define ALLOC_ORDER 9
 
-void *mem[AREAS_IN_MULTI_MODE] = {NULL};
-unsigned long allocated = 0, aorder;
-size_t areas = 1;
+static void *mem[AREAS_IN_MULTI_MODE] = {NULL};
+static unsigned long allocated = 0, aorder;
+static size_t areas = 1;
 
 typedef enum test_mode {
 	SINGLE,
@@ -163,7 +163,7 @@ static int access_write(void)
 	return 0;
 }
 
-int test_map_level(unsigned long addr)
+static int test_map_level(unsigned long addr)
 {
 	pud_t *pudp = pud_offset(p4d_offset(pgd_offset_k(addr), addr), addr);
 
@@ -178,7 +178,7 @@ int test_map_level(unsigned long addr)
 	return E2K_PTE_LEVEL_NUM;
 }
 
-void assert_test_work_handler(struct work_struct *work)
+static void assert_test_work_handler(struct work_struct *work)
 {
 	WARN_ON(test_map_level((unsigned long)mem[0]) == E2K_PTE_LEVEL_NUM);
 
@@ -188,7 +188,7 @@ void assert_test_work_handler(struct work_struct *work)
 	run_test_sceduler();
 }
 
-DECLARE_DELAYED_WORK(dense_assert, assert_test_work_handler);
+static DECLARE_DELAYED_WORK(dense_assert, assert_test_work_handler);
 
 static void dense_test(struct work_struct *work)
 {
@@ -206,7 +206,7 @@ static void dense_test(struct work_struct *work)
 
 }
 
-DECLARE_DELAYED_WORK(sparse_assert, assert_test_work_handler);
+static DECLARE_DELAYED_WORK(sparse_assert, assert_test_work_handler);
 
 static void sparse_test(struct work_struct *work)
 {
@@ -223,8 +223,8 @@ static void sparse_test(struct work_struct *work)
 	run_test_sceduler();
 }
 
-DECLARE_DELAYED_WORK(dense_work, dense_test);
-DECLARE_DELAYED_WORK(sparse_work, sparse_test);
+static DECLARE_DELAYED_WORK(dense_work, dense_test);
+static DECLARE_DELAYED_WORK(sparse_work, sparse_test);
 
 static struct delayed_work *suite_sched[] = {
 	&dense_work,

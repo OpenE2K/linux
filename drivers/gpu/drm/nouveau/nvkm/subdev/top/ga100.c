@@ -30,6 +30,10 @@ ga100_top_oneinit(struct nvkm_top *top)
 	u32 data, type, inst;
 	int i, n, size = nvkm_rd32(device, 0x0224fc) >> 20;
 
+#ifdef CONFIG_MCST
+	type = ~0;
+	inst = 0;
+#endif
 	for (i = 0, n = 0; i < size; i++) {
 		if (!info) {
 			if (!(info = nvkm_top_device_new(top)))

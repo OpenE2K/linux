@@ -17,8 +17,6 @@
 #include <asm/p2v/boot_v2p.h>
 
 
-#ifdef __KERNEL__
-
 struct cpuinfo_e2k;
 struct pt_regs;
 struct seq_file;
@@ -87,10 +85,12 @@ typedef struct machdep {
 	void (*save_scratch_gregs)(struct scratch_gregs *);
 	void (*restore_scratch_gregs)(const struct scratch_gregs *);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	void (*save_gregs_on_mask)(struct e2k_gregs *, bool dirty_bgr,
 				   unsigned long not_save_gregs_mask);
 	void (*restore_gregs_on_mask)(struct e2k_gregs *, bool dirty_bgr,
 				      unsigned long not_restore_gregs_mask);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	void (*save_kvm_context)(struct kvm_vcpu_arch *);
 	void (*restore_kvm_context)(const struct kvm_vcpu_arch *);
 
@@ -98,7 +98,6 @@ typedef struct machdep {
 					    e2k_aalda_t *aaldas,
 					    e2k_aau_t *context);
 	void (*do_aau_fault)(int aa_field, struct pt_regs *regs);
-	void (*save_aaldi)(u64 *aaldis);
 	void (*get_aau_context)(e2k_aau_t *, e2k_aasr_t);
 #ifdef CONFIG_MLT_STORAGE
 	void		(*get_and_invalidate_MLT_context)(struct e2k_mlt *mlt_state);
@@ -184,8 +183,6 @@ extern void calculate_aau_aaldis_aaldas_v6(const struct pt_regs *regs,
 extern void do_aau_fault_v3(int aa_field, struct pt_regs *regs);
 extern void do_aau_fault_v5(int aa_field, struct pt_regs *regs);
 extern void do_aau_fault_v6(int aa_field, struct pt_regs *regs);
-extern void save_aaldi_v3(u64 *aaldis);
-extern void save_aaldi_v5(u64 *aaldis);
 extern void get_aau_context_v3(e2k_aau_t*, e2k_aasr_t);
 extern void get_aau_context_v5(e2k_aau_t*, e2k_aasr_t);
 
@@ -203,6 +200,5 @@ void C1_enter_v3(void);
 void C1_enter_v6(void);
 void C3_enter_v3(void);
 void C3_enter_v6(void);
-#endif /* __KERNEL__ */
 
 #endif /* _E2K_MACHDEP_H_ */

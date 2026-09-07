@@ -3931,7 +3931,11 @@ void ext4_mb_mark_bb(struct super_block *sb, ext4_fsblk_t block,
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	ext4_group_t group;
 	ext4_grpblk_t blkoff;
+#ifdef CONFIG_MCST
+	int i, err = -EINVAL;
+#else
 	int i, err;
+#endif
 	int already;
 	unsigned int clen, clen_changed, thisgrp_len;
 

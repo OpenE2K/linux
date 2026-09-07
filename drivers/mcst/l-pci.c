@@ -2,7 +2,6 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2023 MCST
  */
-
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -22,10 +21,8 @@ typedef struct iohub_sysdata {
 	int	node;		/* NUMA node */
 	int	link;		/* local number of IO link on the node */
 	/* IOHUB can be connected to EIOHUB and vice versa */
-	bool	has_iohub;
 	u8	iohub_revision;		/* IOHUB revision */
 	u8	iohub_generation;	/* IOHUB generation */
-	bool	has_eioh;
 	u8	eioh_generation;	/* EIOHUB generation */
 	u8	eioh_revision;		/* EIOHUB revision */
 
@@ -117,13 +114,9 @@ static bool __l_eioh_device(struct pci_dev *pdev)
 
 bool l_eioh_device(struct pci_dev *pdev)
 {
-	struct pci_config_window *cfg = pdev->bus->sysdata;
-	struct iohub_sysdata *sd = cfg->priv;
-	if (!sd->has_eioh)
-		return false;
-	if (!sd->has_iohub)
-		return true;
-	return __l_eioh_device(pdev);
+	bool ret = __l_eioh_device(pdev);
+	dev_dbg(&pdev->dev, " %s device\n", ret ? "eioh" : "iohub");
+	return ret;
 }
 EXPORT_SYMBOL(l_eioh_device);
 
@@ -192,6 +185,28 @@ static int e2k_get_iohub_generation(void)
 	return -1;
 }
 
+ /* fix iohub + eioh configuration */
+static void quirk_set_iohub_sysdata(struct pci_dev *pdev)
+{
+	struct pci_config_window *cfg = pdev->bus->sysdata;
+	struct iohub_sysdata *sd = cfg->priv;
+	int gen, rev = pdev->revision;
+
+	if (pdev->device == PCI_DEVICE_ID_MCST_I2CSPI)
+		gen = 0;
+	else if (pdev->device == PCI_DEVICE_ID_MCST_I2C_SPI)
+		gen = 1;
+	else
+		BUG();
+
+	sd->iohub_generation = gen;
+	sd->iohub_revision = rev;
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ELBRUS,
+			  PCI_DEVICE_ID_MCST_I2CSPI, quirk_set_iohub_sysdata);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MCST_TMP,
+			  PCI_DEVICE_ID_MCST_I2C_SPI, quirk_set_iohub_sysdata);
+
 static void e2k_init_iohub_sysdata(struct device *dev, struct iohub_sysdata *sd)
 {
 	int gen = e2k_get_iohub_generation();
@@ -213,13 +228,11 @@ static void e2k_init_iohub_sysdata(struct device *dev, struct iohub_sysdata *sd)
 	case 0:
 	case 1:
 		sd->iohub_generation = gen;
-		sd->has_iohub = true;
 		sd->iohub_revision = rev;
 		break;
 	case 2:
 	case 3:
 		sd->eioh_generation = gen;
-		sd->has_eioh = true;
 		sd->eioh_revision = rev;
 		break;
 	default:
@@ -322,8 +335,8 @@ static int l_pci_get_prf_resource(struct platform_device *pdev, struct resource 
 	if (WARN_ON(!m))
 		return -ENOMEM;
 
-	AW(b) = boot_readl((void *)rb->start);
-	AW(e) = boot_readl((void *)re->start);
+	AW(b) = boot_readl((void __iomem __force *)rb->start);
+	AW(e) = boot_readl((void __iomem __force *)re->start);
 	if (IS_MACHINE_E1CP) {
 		/*TODO:*/
 		m->start = ~0UL;
@@ -349,7 +362,7 @@ static int l_pci_get_mem_resource(struct platform_device *pdev, struct resource 
 	if (WARN_ON(!m))
 		return -ENOMEM;
 
-	AW(v) = boot_readl((void *)res->start);
+	AW(v) = boot_readl((void __iomem __force *)res->start);
 	if (IS_MACHINE_E1CP) {
 		m->start = AW(v);
 		m->end   = 0xffffFFFF;
@@ -375,7 +388,7 @@ static int l_pci_get_io_resource(struct platform_device *pdev, struct resource *
 	if (!res)
 		return -ENOENT;
 
-	AW(v) = boot_readl((void *)res->start);
+	AW(v) = boot_readl((void __iomem __force *)res->start);
 	if (e2k_is_multi_domain()) {
 		m->start = (u32)v.bgn << E2K_SIC_ALIGN_RT_PCIIO;
 		m->end   = (((u32)v.end + 1) << E2K_SIC_ALIGN_RT_PCIIO) - 1;

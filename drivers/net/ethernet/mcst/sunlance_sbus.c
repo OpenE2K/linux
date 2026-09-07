@@ -86,9 +86,6 @@ static int sparc_lance_probe_one(struct of_device *op,
 
 	if (sparc_lance_debug && version_printed++ == 0)
 		printk (KERN_INFO "%s", version);
-#ifdef CONFIG_MCST_RT
-	raw_spin_lock_init(&lp->rt_stuff_lock);
-#endif
 	raw_spin_lock_init(&lp->init_lock);
 	raw_spin_lock_init(&lp->lock);
 	lance_setup_mac(dev);
@@ -173,11 +170,7 @@ static int sparc_lance_probe_one(struct of_device *op,
 	lp->dev = dev;
 	SET_NETDEV_DEV(dev, &op->dev);
 	dev_set_drvdata(&op->dev, lp);
-#if IS_ENABLED(CONFIG_PCI2SBUS)
-	dev->irq = op->irqs[0] & 0xff0f;
-#else
 	dev->irq = op->irqs[0];
-#endif
 	if (lance_common_init(dev, lp)) {
 		goto fail;
 	}

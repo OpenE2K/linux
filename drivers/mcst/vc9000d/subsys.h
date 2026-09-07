@@ -77,6 +77,55 @@
 /* subsys level */
 /***********************************************/
 
+#ifdef EMU
+  #define VCMD_BUF_POOL_OFFSET      0x5000000
+
+  #define PCI_VENDOR_ID_HANTRO      0x1d9b//0x16c3//0x1ae0
+  #define PCI_DEVICE_ID_HANTRO      0xface//0x7011//0x001a
+
+  /* Base address got control register */
+  #define PCI_CONTROL_BAR              2
+
+  /* Base address DDR register */
+  #define PCI_DDR_BAR             4
+
+#else //EMU
+
+  #define VCMD_BUF_POOL_OFFSET      0x1000000
+
+#if defined(CONFIG_MCST)
+  #define PCI_VENDOR_ID_HANTRO      PCI_VENDOR_ID_MCST_TMP
+  #define PCI_DEVICE_ID_HANTRO      PCI_DEVICE_ID_MCST_VC9000D
+
+  /* Base address got control register */
+  #define PCI_CONTROL_BAR           0
+
+ /* Base address DDR register */
+  #undef PCI_DDR_BAR
+#else
+
+#ifdef PLATFORM_GEN7
+  #define PCI_VENDOR_ID_HANTRO      0x10ee//0x16c3
+  #define PCI_DEVICE_ID_HANTRO      0x9014// 0x7011
+
+  /* Base address got control register */
+  #define PCI_CONTROL_BAR              2
+
+  /* Base address DDR register */
+  #define PCI_DDR_BAR             0
+#else //PLATFORM_GEN7
+  #define PCI_VENDOR_ID_HANTRO      0x10ee//0x16c3
+  #define PCI_DEVICE_ID_HANTRO      0x8014// 0x7011
+
+  /* Base address got control register */
+  #define PCI_CONTROL_BAR              4
+
+  /* Base address DDR register */
+  #define PCI_DDR_BAR             0
+#endif //PLATFORM_GEN7
+#endif
+#endif //EMU
+
 #define MAX_SUBSYS_NUM 4 /* up to 4 subsystem (temporary) */
 #define HXDEC_MAX_CORES MAX_SUBSYS_NUM /* used in hantro_dec_xxx.c */
 
@@ -122,7 +171,7 @@ struct subsys_config {
 	u32 submodule_offset[HW_CORE_MAX]; /* in bytes */
 	u16 submodule_iosize[HW_CORE_MAX]; /* in bytes */
 
-	volatile u8 *submodule_hwregs[HW_CORE_MAX]; /* virtual address */
+	void __iomem *submodule_hwregs[HW_CORE_MAX]; /* virtual address */
 	int has_apbfilter[HW_CORE_MAX];
 };
 

@@ -187,7 +187,7 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 								!IS_AP(cbuf, tag)) {
 				return -EFAULT;
 			}
-			buf = (void __user *)AP_PTR(cbuf);
+			buf = U_AP_PTR(cbuf);
 			set_ap_u_border(cbuf);
 #endif
 		} else {
@@ -224,7 +224,7 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 			}
 			if (get_user(number, &sioc->number))
 				return -EFAULT;
-			buf = (void __user *)AP_PTR(ap);
+			buf = U_AP_PTR(ap);
 			set_ap_u_border(ap);
 #endif
 		} else {

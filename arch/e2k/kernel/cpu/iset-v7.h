@@ -7,7 +7,9 @@
 #define __E2K_CPU_ISET_V7_H
 
 #include <asm/kvm/cpu_hv_regs_access.h>
+#include <asm/kvm/mmu_hv_regs_access.h>
 
+#ifdef CONFIG_KVM_HOST_KERNEL
 static __always_inline void
 save_sh_context_v7(struct kvm_vcpu *vcpu)
 {
@@ -17,7 +19,7 @@ save_sh_context_v7(struct kvm_vcpu *vcpu)
 	hw_ctxt->sh_t_off = read_SH_T_off_reg();
 
 	/* MMU shadow context */
-	AW(hw_ctxt->sh_os_madmr) = READ_SH_OS_MADMR_REG_VALUE();
+	hw_ctxt->sh_os_madmr = read_SH_OS_MADMR_reg();
 }
 
 static __always_inline void
@@ -29,7 +31,7 @@ restore_sh_context_v7(struct kvm_vcpu *vcpu)
 	write_SH_T_off_reg(hw_ctxt->sh_t_off);
 
 	/* MMU shadow context */
-	WRITE_SH_OS_MADMR_REG_VALUE(AW(hw_ctxt->sh_os_madmr));
+	write_SH_OS_MADMR_reg(hw_ctxt->sh_os_madmr);
 }
 
 static __always_inline void
@@ -42,5 +44,6 @@ restore_hst_context_v7(struct kvm_arch *ka)
 	write_SH_T_off_reg(ka->hst_t_off);
 	/* Guest time run resumed (including still sleeping vcpu-s) */
 }
+#endif /* CONFIG_KVM_HOST_KERNEL */
 
 #endif /* __E2K_CPU_ISET_V7_H */

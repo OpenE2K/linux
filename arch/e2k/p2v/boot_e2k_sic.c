@@ -43,8 +43,6 @@ unsigned int boot_get_e2k_machine_id(void)
 		mach_id = MACHINE_ID_E16C;
 	} else if (mdl == IDR_E2C3_MDL) {
 		mach_id = MACHINE_ID_E2C3;
-	} else if (mdl == IDR_E48C_MDL) {
-		mach_id = MACHINE_ID_E48C;
 	} else if (mdl == IDR_E8V7_MDL) {
 		mach_id = MACHINE_ID_E8V7;
 	} else {

@@ -65,6 +65,10 @@ extern void arch_init_secure_computing_mode(void *context_ptr);
  * # 1 - zeroing; 2 - emptying freed contents; 3 - check for dangling pointers
  * kernel.e2k.SCM.dangling_pointers_control = 2
  *
+ * # Malloc operation mode in PM:
+ * # 0 - 64-bit compatible; 1 - zeroing of memory allocated; 2 - emptying of memory allocated.
+ * kernel.e2k.SCM.prot_malloc_mode_control = 2
+ *
  * # Enabling/disabling risky protected syscalls that reduce security protection level:
  *
  * # kernel.e2k.SCM.protected_syscall_ptrace_enabled = 1
@@ -78,6 +82,7 @@ struct scm_controls_struct {
 	int default_syscall_debug_mode;
 	int dynamic_syscall_debug_control_disabled;
 	int dangling_pointers_control;
+	int prot_malloc_mode_control;
 
 	int protected_syscall_ptrace_enabled;
 
@@ -104,6 +109,11 @@ static inline int get_sysctld_default_syscall_debug_mode(void)
 static inline int get_sysctld_dangling_pointers_control(void)
 {
 	return scm_controls.dangling_pointers_control;
+}
+
+static inline int get_sysctld_prot_malloc_mode_control(void)
+{
+	return scm_controls.prot_malloc_mode_control;
 }
 
 static inline int get_sysctld_dynamic_syscall_debug_control_disabled(void)

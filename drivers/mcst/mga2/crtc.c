@@ -581,12 +581,6 @@ static const struct drm_crtc_funcs mga2_crtc_funcs = {
 	.disable_vblank		= mga2_crtc_disable_vblank,
 };
 
-static int mga2_y2r_matrix38[3][3] = {
-	{1.1644 * 0x100,  0.0000 * 0x100,  1.7927 * 0x100},
-	{1.1644 * 0x100, -0.2123 * 0x100, -0.5329 * 0x100},
-	{1.1644 * 0x100,  2.1030 * 0x100,  0.0000 * 0x100},
-};
-
 static void mga2_crtc_load_default_pallete(struct drm_crtc *crtc)
 {
 	int i;
@@ -601,7 +595,6 @@ static void mga2_crtc_load_default_pallete(struct drm_crtc *crtc)
 
 static void mga2_crtc_hw_init(struct drm_crtc *crtc)
 {
-	int i, j;
 	struct mga2_crtc *mcrtc = to_mga2_crtc(crtc);
 	/* Load default values as drm uses gamma-table for C8 pixels */
 	mga2_crtc_load_default_pallete(crtc);
@@ -612,22 +605,8 @@ static void mga2_crtc_hw_init(struct drm_crtc *crtc)
 	wcrtc(0, ZOOM_CTRL);
 	wcrtc(0, OVL_KEY_MIN);
 	wcrtc(~0, OVL_KEY_MAX);
-	wcrtc(0.5 * 0x100, Y2R_RSH); /* round to nearest */
-	wcrtc(0.5 * 0x100, Y2R_GSH); /* round to nearest */
-	wcrtc(0.5 * 0x100, Y2R_BSH); /* round to nearest */
 
-	wcrtc((1 << 24) | (219 << 16) | (0 << 8) | (255 & -16), Y2R_YPRE);
-	wcrtc((0 << 31) | (1 << 28) | (1 << 24) |
-		(112 << 16) | ((255 & -112) << 8) | 128, Y2R_UPRE);
-	wcrtc((0 << 31) | (1 << 28) | (1 << 24) |
-		(112 << 16) | ((255 & -112) << 8) | 128, Y2R_VPRE);
-
-	for (i = 0; i < ARRAY_SIZE(mga2_y2r_matrix38); i++) {
-		for (j = 0; j < ARRAY_SIZE(mga2_y2r_matrix38[0]); j++) {
-			wcrtc((i << 24) | (j << 16) |
-				(mga2_y2r_matrix38[i][j] & 0x7ff), Y2R_MATRIX);
-		}
-	}
+	mga2_overlay_set_colorspace(mcrtc, DRM_COLOR_YCBCR_BT709);
 out:;
 }
 
@@ -728,7 +707,7 @@ static void mga2_crtc_unbind(struct device *dev, struct device *master, void *da
 	dev_set_drvdata(dev, NULL);
 }
 
-const struct component_ops mga2_crtc_component_ops = {
+static const struct component_ops mga2_crtc_component_ops = {
 	.bind = mga2_crtc_bind,
 	.unbind = mga2_crtc_unbind,
 };

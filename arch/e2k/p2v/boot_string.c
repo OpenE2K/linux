@@ -251,8 +251,7 @@ notrace void boot_fast_memset(void *s_va, long c, size_t count)
 	 * cpu_has() -> boot_cpu_has() in recovery_memset_8()
 	 * might access uninitilized data when clearing kernel BSS. */
 	boot_fast_tagged_memory_set(s, c, 0, count & ~0x7UL,
-			LDST_DWORD_FMT << LDST_REC_OPC_FMT_SHIFT
-			| MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT);
+			ldst_rec_dword_bypass(CACHE_BYPASS_L1));
 
 	/* Set the tail */
 	s += count & ~0x7UL;

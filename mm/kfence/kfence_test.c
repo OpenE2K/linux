@@ -259,6 +259,10 @@ static void *test_alloc(struct kunit *test, size_t size, gfp_t gfp, enum allocat
 	case ALLOCATE_NONE:
 		policy_name = "none";
 		break;
+#ifdef CONFIG_CC_IS_LCC
+	default:
+		BUG(); /* silence warning */
+#endif
 	}
 
 	kunit_info(test, "%s: size=%zu, gfp=%x, policy=%s, cache=%i\n", __func__, size, gfp,
@@ -599,6 +603,9 @@ static void test_memcache_ctor(struct kunit *test)
 	KUNIT_EXPECT_FALSE(test, report_available());
 }
 
+/* This test has a lot false positives as the chances
+ * of getting the same address twice are pretty low. */
+#ifndef CONFIG_MCST
 /* Test that memory is zeroed if requested. */
 static void test_gfpzero(struct kunit *test)
 {
@@ -636,6 +643,7 @@ static void test_gfpzero(struct kunit *test)
 
 	KUNIT_EXPECT_FALSE(test, report_available());
 }
+#endif /* CONFIG_E2K */
 
 static void test_invalid_access(struct kunit *test)
 {
@@ -788,7 +796,11 @@ static struct kunit_case kfence_test_cases[] = {
 	KUNIT_CASE(test_shrink_memcache),
 	KUNIT_CASE(test_memcache_ctor),
 	KUNIT_CASE(test_invalid_access),
+#ifndef CONFIG_MCST
+	/* This test has a lot false positives as the chances
+	 * of getting the same address twice are pretty low. */
 	KUNIT_CASE(test_gfpzero),
+#endif
 	KUNIT_CASE(test_memcache_typesafe_by_rcu),
 	KUNIT_CASE(test_krealloc),
 	KUNIT_CASE(test_memcache_alloc_bulk),

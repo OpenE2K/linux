@@ -45,7 +45,6 @@ static volatile int serial_console_inited = 0;
 serial_console_opts_t *serial_console_opts = NULL;
 static void *serial_console_io_base = NULL;
 unsigned char serial_dump_console_num = 0;
-static struct console *serial_console_to_printk = NULL;
 #ifdef	CONFIG_EARLY_VIRTIO_CONSOLE
 bool early_virtio_cons_enabled = false;
 #endif	/* CONFIG_EARLY_VIRTIO_CONSOLE */
@@ -60,15 +59,6 @@ void *get_serial_console_io_base(void)
 	return serial_console_io_base;
 }
 
-void set_serial_console_to_printk(struct console *console)
-{
-	serial_console_to_printk = console;
-}
-
-struct console *get_serial_console_to_printk(void)
-{
-	return serial_console_to_printk;
-}
 
 /*
  * Iterates through the list of serial consoles,
@@ -226,7 +216,7 @@ static void LMS_dump_putc(char c)
 }
 #endif	/* CONFIG_LMS_CONSOLE */
 
-void early_serial_write(struct console *con, const char *s,
+static void early_serial_write(struct console *con, const char *s,
 		unsigned int count)
 {
 	int i;
@@ -843,7 +833,7 @@ static struct kmsg_dumper kmsg_dumper = {
 	.dump = kmsg_dumper_stdout
 };
 
-int __init kmsg_dumper_stdout_init(void)
+static int __init kmsg_dumper_stdout_init(void)
 {
 	return kmsg_dump_register(&kmsg_dumper);
 }

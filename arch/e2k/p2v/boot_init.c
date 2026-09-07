@@ -102,7 +102,7 @@ static int __init boot_mem_set(char *cmd)
 	else if (*cmd == 'G' || *cmd == 'g')
 		boot_mem_limit <<= 30;
 
-	boot_mem_limit &= ~(PAGE_SIZE - 1);
+	boot_mem_limit &= PAGE_MASK;
 
 	boot_printk("Physical memory limit set to 0x%lx\n", boot_mem_limit);
 
@@ -122,7 +122,7 @@ static int __init boot_node_mem_set(char *cmd)
 	else if (*cmd == 'M' || *cmd == 'm')
 		boot_node_mem_limit <<= 20;
 
-	boot_node_mem_limit &= ~(PAGE_SIZE - 1);
+	boot_node_mem_limit &= PAGE_MASK;
 
 	boot_printk("Node physical memory limit set to 0x%lx\n",
 		    boot_node_mem_limit);
@@ -131,82 +131,6 @@ static int __init boot_node_mem_set(char *cmd)
 }
 __boot_setup("nodemem", boot_node_mem_set);
 
-/*
- * Disabling caches setup
- */
-
-unsigned long disable_caches = MMU_CR_CD_EN;
-#define boot_disable_caches	boot_get_vo_value(disable_caches)
-
-static int __init boot_disable_L1_setup(char *cmd)
-{
-	if (boot_disable_caches < MMU_CR_CD_D1_DIS)
-		boot_disable_caches = MMU_CR_CD_D1_DIS;
-	return 0;
-}
-__boot_setup("disL1", boot_disable_L1_setup);
-
-static int __init boot_disable_L2_setup(char *cmd)
-{
-	if (boot_disable_caches < MMU_CR_CD_D_DIS)
-		boot_disable_caches = MMU_CR_CD_D_DIS;
-	return 0;
-}
-__boot_setup("disL2", boot_disable_L2_setup);
-
-static int __init boot_disable_L3_setup(char *cmd)
-{
-	if (boot_disable_caches < MMU_CR_CD_DIS)
-		boot_disable_caches = MMU_CR_CD_DIS;
-	return 0;
-}
-__boot_setup("disL3", boot_disable_L3_setup);
-
-bool disable_secondary_caches = false;
-#define boot_disable_secondary_caches	\
-		boot_get_vo_value(disable_secondary_caches)
-
-static int __init boot_disable_LI_setup(char *cmd)
-{
-	boot_disable_secondary_caches = true;
-	return 0;
-}
-__boot_setup("disLI", boot_disable_LI_setup);
-
-bool disable_IP = false;
-#define boot_disable_IP	boot_get_vo_value(disable_IP)
-
-static int __init boot_disable_IP_setup(char *cmd)
-{
-	boot_disable_IP = true;
-	return 0;
-}
-__boot_setup("disIP", boot_disable_IP_setup);
-
-static bool enable_l2_cint = false;
-#define boot_enable_l2_cint	boot_get_vo_value(enable_l2_cint)
-
-static int __init boot_enable_L2_CINT_setup(char *str)
-{
-	boot_enable_l2_cint = true;
-	return 0;
-}
-__boot_setup("L2CINT", boot_enable_L2_CINT_setup);
-
-static inline void boot_native_set_l2_crc_state(bool enable)
-{
-	unsigned long l2_cntr;
-	int l2_bank;
-
-	if (!enable)
-		return;
-	for (l2_bank = 0; l2_bank < E2K_L2_BANK_NUM; l2_bank++) {
-		l2_cntr = native_read_DCACHE_L2_CNTR_reg(l2_bank);
-		l2_cntr |= E2K_L2_CNTR_EN_CINT;
-		native_write_DCACHE_L2_CNTR_reg(l2_cntr, l2_bank);
-		l2_cntr = native_read_DCACHE_L2_CNTR_reg(l2_bank);
-	}
-}
 
 /*
  * bootblock.banks_ex is extended area for all nodes. Firstly, we fill
@@ -1399,7 +1323,9 @@ static void __init boot_reserve_0_phys_page(bool bsp, boot_info_t * boot_info)
 	if (BOOT_IS_BSP(bsp)) {
 		area_base = 0;
 		area_size = PAGE_SIZE;
-		boot_reserve_physmem("0-page", area_base, area_size,
+
+		if (!boot_is_kdump_kernel())
+			boot_reserve_physmem("0-page", area_base, area_size,
 				     hw_reserved_mem_type,
 				     BOOT_NOT_IGNORE_BUSY_BANK |
 				     BOOT_IGNORE_BANK_NOT_FOUND |
@@ -2075,10 +2001,6 @@ boot_native_switch_to_virt(bool bsp, int cpuid,
 	e2k_usd_t usd;
 	e2k_usbr_t usbr;
 	e2k_psr_t psr;
-	unsigned long loc_disable_caches = boot_disable_caches;
-	bool loc_disable_secondary_caches = boot_disable_secondary_caches;
-	bool loc_disable_IP = boot_disable_IP;
-	bool loc_enable_l2_cint = boot_enable_l2_cint;
 	e2k_mmu_cr_t mmu_cr = MMU_CR_KERNEL;
 #ifdef	CONFIG_SMP
 	int cpus_to_sync = boot_cpu_to_sync_num;
@@ -2134,16 +2056,6 @@ boot_native_switch_to_virt(bool bsp, int cpuid,
 	 * Turn on virtual addressing translation mode and disable caches
 	 * (write to the MMU control register enables TLB & TLU)
 	 */
-
-	if (loc_disable_caches != MMU_CR_CD_EN)
-		mmu_cr.cd = loc_disable_caches;
-	if (loc_disable_secondary_caches)
-		mmu_cr.cr0_cd = 1;
-	if (loc_disable_IP)
-		mmu_cr.ipd = MMU_CR_IPD_DIS;
-
-	/* set L2 CRC control state */
-	boot_native_set_l2_crc_state(loc_enable_l2_cint);
 
 #ifdef	CONFIG_ONLY_HIGH_PHYS_MEM
 	/* low memory kernel data remapped to equal high memory */

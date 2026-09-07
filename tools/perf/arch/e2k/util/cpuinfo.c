@@ -2,7 +2,8 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+
+#include <linux/string.h>
 
 #include "../include/cpuinfo.h"
 
@@ -56,6 +57,8 @@ int e2k_cpuinfo_feature(const char *feature, uint64_t *value)
 	result++;
 
 	for (;;) {
+		char next;
+
 		result = strstr(result, feature);
 		if (!result)
 			return 0;
@@ -68,7 +71,7 @@ int e2k_cpuinfo_feature(const char *feature, uint64_t *value)
 				continue;
 			}
 		}
-		char next = result[feature_len];
+		next = result[feature_len];
 		if (!value && next != '\n' && next != ' ' && next != '\0' ||
 		    value && next != '=') {
 			result += feature_len;

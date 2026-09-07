@@ -25,7 +25,11 @@ void __init timer_probe(void)
 		if (!of_device_is_available(np))
 			continue;
 
+#ifdef CONFIG_MCST
+		init_func_ret = (of_init_fn_1_ret)match->data;
+#else
 		init_func_ret = match->data;
+#endif
 
 		ret = init_func_ret(np);
 		if (ret) {

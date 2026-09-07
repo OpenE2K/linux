@@ -12,7 +12,6 @@
 #include <asm/regs_state.h>
 #include <asm/p2v/boot_head.h>
 #include <asm/boot_recovery.h>
-#include <asm/boot_flags.h>
 #include <asm/debug_print.h>
 #include <asm/time.h>
 #include <asm/traps.h>
@@ -40,6 +39,10 @@ struct aligned_task	task_to_restart[NR_CPUS];
 void recover_kernel(void)
 {
 	DebugR("recover_kernel() started\n");
+
+#ifdef CONFIG_SMP
+	smp_prepare_boot_cpu_to_recover();
+#endif
 
 	/*
 	 * Mark the boot cpu "online" so that it can call console drivers in
@@ -71,18 +74,12 @@ void recover_kernel(void)
 }
 #endif
 
-static void str_adjust_bootblock(void)
-{
-	set_bootblock_flags(bootblock_phys,
-		RECOVERY_BB_FLAG | NO_READ_IMAGE_BB_FLAG);
-}
-
 static noinline void do_restart_system(void (*restart_func)(void *), void *arg)
 {
 	task_to_recover = current;
 	NATIVE_SAVE_TASK_REGS_TO_SWITCH(current);
 
-	str_adjust_bootblock();
+	bootblock_virt->boot_flags |= RECOVERY_BB_FLAG | NO_READ_IMAGE_BB_FLAG;
 
 	restart_func(arg);
 

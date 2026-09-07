@@ -96,11 +96,22 @@ static const int lvt_regs[] = {
 static int lvt_irq_setup(struct irq_domain *dmn, struct irq_data *irqd,
 				smp_call_func_t func)
 {
-	int ret;
+	int ret, cpu;
 	struct lvt_data l = { .irqd = irqd };
 	irq_hw_number_t pin = irqd_to_hwirq(irqd);
 	int node = irq_data_get_node(irqd);
-	int cpu = cpumask_first(cpumask_of_node(node));
+	if (WARN_ON(node < 0))
+		node = 0;
+	if (WARN_ON(!node_online(node)))
+		return -ENODEV;
+
+	if (cpumask_weight(cpumask_of_node(node)) < 1 ||
+			!cpu_online(cpumask_first(cpumask_of_node(node)))) {
+		pr_warn("lvt: can not setup irq %d: cpu is not online\n",
+				irqd->irq);
+		return 0;
+	}
+	cpu = cpumask_first(cpumask_of_node(node));
 
 	/* Let the parent dmn compose the MSI message */
 	ret = irq_chip_compose_msi_msg(irqd, &l.msg);
@@ -108,7 +119,7 @@ static int lvt_irq_setup(struct irq_domain *dmn, struct irq_data *irqd,
 		return ret;
 
 	if (WARN_ON(pin >= ARRAY_SIZE(lvt_regs)))
-		return -EINVAL;
+		return -EDOM;
 	l.reg = lvt_regs[pin];
 	ret = smp_call_function_single(cpu, func, &l, true);
 	if (WARN(ret, "cpu%d call failed:%d", cpu, ret))
@@ -172,7 +183,7 @@ static void lvt_irqdomain_free(struct irq_domain *dmn, unsigned int virq,
 }
 
 
-const struct irq_domain_ops lvt_apic_irqdomain_ops = {
+static const struct irq_domain_ops lvt_apic_irqdomain_ops = {
 	.translate	= lvt_irq_domain_translate,
 	.alloc		= lvt_irqdomain_alloc,
 	.free		= lvt_irqdomain_free,

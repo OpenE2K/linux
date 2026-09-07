@@ -98,7 +98,9 @@ static ssize_t ata_scsi_park_show(struct device *device,
 	unsigned long now;
 	unsigned int msecs;
 	int rc = 0;
-
+#ifdef CONFIG_MCST
+	msecs = 0;
+#endif
 	ap = ata_shost_to_port(sdev->host);
 
 	spin_lock_irq(ap->lock);

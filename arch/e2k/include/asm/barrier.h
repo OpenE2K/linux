@@ -66,54 +66,39 @@ do { \
 
 extern int __smp_store_release_bad(void) __attribute__((noreturn));
 #if CONFIG_CPU_ISET_MIN >= 6
-# define __smp_store_release(p, v) \
+# define smp_store_release_mt(p, v, mt) \
 do { \
 	__typeof__(*(p)) __ssr_v = (v); \
+	int mas_mt = (mt) ? MAS_MT_1 : MAS_MT_0; \
 	switch (sizeof(*p)) { \
-	case 1: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(MAS_MT_1), b, "memory"); break; \
-	case 2: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(MAS_MT_1), h, "memory"); break; \
-	case 4: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(MAS_MT_1), w, "memory"); break; \
-	case 8: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(MAS_MT_1), d, "memory"); break; \
+	case 1: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(mas_mt), b, "memory"); break; \
+	case 2: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(mas_mt), h, "memory"); break; \
+	case 4: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(mas_mt), w, "memory"); break; \
+	case 8: STORE_NV_MAS((p), __ssr_v, MAS_STORE_RELEASE_V6(mas_mt), d, "memory"); break; \
 	default: __smp_store_release_bad(); break; \
 	} \
 } while (0)
 #else
-# define __smp_store_release(p, v) \
+# define smp_store_release_mt(p, v, mt) \
 do { \
 	compiletime_assert(sizeof(*p) == 1 || sizeof(*p) == 2 || \
 			sizeof(*p) == 4 || sizeof(*p) == 8, \
 			"Need native word sized stores/loads for atomicity."); \
-	E2K_WAIT(_st_c | _sas | _ld_c | _sal | _mt); \
+	E2K_WAIT(_st_c | _sas | _ld_c | _sal | ((mt) ? _mt : 0)); \
 	WRITE_ONCE(*(p), (v)); \
 } while (0)
 #endif /* CONFIG_CPU_ISET_MIN >= 6 */
 
-/*
- * store_release() - same as __smp_store_release but acts on device accesses too
- */
-#define store_release_v3 __smp_store_release
-#define store_release_v6(p, v) \
-do { \
-	__typeof__(*(p)) __sr6_v = (v); \
-	switch (sizeof(*p)) { \
-	case 1: STORE_NV_MAS((p), __sr6_v, MAS_STORE_RELEASE_V6(MAS_MT_0), b, "memory"); break; \
-	case 2: STORE_NV_MAS((p), __sr6_v, MAS_STORE_RELEASE_V6(MAS_MT_0), h, "memory"); break; \
-	case 4: STORE_NV_MAS((p), __sr6_v, MAS_STORE_RELEASE_V6(MAS_MT_0), w, "memory"); break; \
-	case 8: STORE_NV_MAS((p), __sr6_v, MAS_STORE_RELEASE_V6(MAS_MT_0), d, "memory"); break; \
-	default: __smp_store_release_bad(); break; \
-	} \
-} while (0)
-#define store_release(p, v) \
-do { \
-	if (cpu_has(CPU_FEAT_ISET_V6)) \
-		store_release_v6((p), (v)); \
-	else \
-		store_release_v3((p), (v)); \
-} while (0)
+#define __smp_store_release(p, v)	smp_store_release_mt((p), (v), true)
+#define store_release(p, v)		smp_store_release_mt((p), (v), false)
 
-#if CONFIG_CPU_ISET_MIN >= 6
+
+#ifdef __CHECKER__
+/* sparse does not understand macro magic trickery */
+#elif CONFIG_CPU_ISET_MIN >= 6
 extern int __smp_load_acquire_bad(void) __attribute__((noreturn));
-# define __smp_load_acquire(p) \
+# ifdef CONFIG_CC_IS_LCC
+#  define __smp_load_acquire(p) \
 ({ \
 	__unqual_scalar_typeof(*(p)) __ret_la; \
 	typeof(p) __p = (p); \
@@ -131,6 +116,26 @@ extern int __smp_load_acquire_bad(void) __attribute__((noreturn));
 	} \
 	__ret_la; \
 })
+# else
+#  define __smp_load_acquire(p) \
+({ \
+	union { __unqual_scalar_typeof(*p) __val; char __c[1]; } __u; \
+	typeof(p) __p = (p); \
+	compiletime_assert_atomic_type(*p); \
+	switch (sizeof(*p)) { \
+	case 1: LOAD_NV_MAS(__p, *(u8 *) __u.__c, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), b, "memory"); \
+		break; \
+	case 2: LOAD_NV_MAS(__p, *(u16 *) __u.__c, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), h, "memory"); \
+		break; \
+	case 4: LOAD_NV_MAS(__p, *(u32 *) __u.__c, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), w, "memory"); \
+		break; \
+	case 8: LOAD_NV_MAS(__p, *(u64 *) __u.__c, MAS_LOAD_ACQUIRE_V6(MAS_MT_1), d, "memory"); \
+		break; \
+	default: __smp_load_acquire_bad(); break; \
+	} \
+	(typeof(*p))__u.__val; \
+})
+# endif /* CONFIG_CC_IS_LCC */
 #else
 # define __smp_load_acquire(p) \
 ({ \

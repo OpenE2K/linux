@@ -23,7 +23,7 @@
 extern volatile unsigned  char __iomem * mmio750;
 extern char revId750;
 extern unsigned short devId750;
-void ddk750_set_mmio(volatile unsigned char *,unsigned short,char);
+void ddk750_set_mmio(volatile unsigned char __iomem *,unsigned short,char);
 
 #else
 /* implement if you want use it*/

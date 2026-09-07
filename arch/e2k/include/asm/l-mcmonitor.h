@@ -50,7 +50,7 @@ static inline void l_mcmonitor_fill_data(u64 *a, bool make_error)
 	int i, mc = SIC_MC_COUNT;
 	int sz = L_MCMONITOR_TEST_SIZE / L_MC_ECC_WORDS_NR / sizeof(*a);
 	e2k_mc_ecc_t mc_ecc[SIC_MAX_MC_COUNT];
-	a = (void *)__pa(a);
+	void __iomem *aa = (void __iomem __force *)__pa(a);
 
 	for (i = 0; i < mc; i++)
 		mc_ecc[i] = sic_get_mc_ecc(0, i);
@@ -62,14 +62,14 @@ static inline void l_mcmonitor_fill_data(u64 *a, bool make_error)
 	}
 	mb();
 
-	for (i = 0; i < sz; i++, a += L_MC_ECC_WORDS_NR) {
+	for (i = 0; i < sz; i++, aa += L_MC_ECC_WORDS_NR) {
 		int j;
 		u64 d = 0;
 		for (j = 0; j < L_MC_ECC_WORDS_NR; j++) {
 			u64 v = d;
 			if (j == 0 && make_error)
 				v |= (1UL << (i % 64));
-			boot_writeq(v, a + j);
+			boot_writeq(v, aa + j);
 		}
 		mb();
 	}

@@ -186,9 +186,9 @@ static int gpio_sysfs_request_irq(struct device *dev, unsigned char flags)
 	ret = gpiochip_lock_as_irq(desc->gdev->chip, gpio_chip_hwgpio(desc));
 	if (ret < 0)
 		goto err_put_kn;
-
 	ret = request_any_context_irq(data->irq, gpio_sysfs_irq, irq_flags,
 				"gpiolib", data);
+
 	if (ret < 0)
 		goto err_unlock;
 

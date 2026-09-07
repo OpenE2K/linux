@@ -6,9 +6,6 @@
 #ifndef	_E2K_P2V_BOOT_CONSOLE_H_
 #define	_E2K_P2V_BOOT_CONSOLE_H_
 
-#ifdef __KERNEL__
-
-#ifndef __ASSEMBLY__
 #include <linux/stdarg.h>
 
 #include <asm/types.h>
@@ -79,7 +76,4 @@ static inline void boot_warning(const char *fmt_v, ...)
 
 #define	boot_printk	if (DEBUG_BOOT_MODE) do_boot_printk
 
-#endif /* __ASSEMBLY__ */
-
-#endif  /* __KERNEL__ */
 #endif  /* _E2K_P2V_BOOT_CONSOLE_H_ */

@@ -11,23 +11,27 @@
 
 #define UNCORE_PMU_NAME_LEN	32
 
-#define E2K_UNCORE_HAS_IPCC	(IS_MACHINE_E2S || IS_MACHINE_E8C)
-#define E2K_UNCORE_HAS_IOCC	(IS_MACHINE_E2S || IS_MACHINE_E1CP)
+#define E2K_UNCORE_HAS_IPCC		(IS_MACHINE_E2S || IS_MACHINE_E8C)
+#define E2K_UNCORE_HAS_IOCC		(IS_MACHINE_E2S || IS_MACHINE_E1CP)
 #define E2K_UNCORE_HAS_SIC \
 		(HAS_MACHINE_L_SIC && (IS_MACHINE_E2S || IS_MACHINE_E8C || IS_MACHINE_E8C2))
 #define E2K_UNCORE_HAS_SIC_L3 \
 		(E2K_UNCORE_HAS_SIC && (IS_MACHINE_E8C || IS_MACHINE_E8C2))
-#define E2K_UNCORE_HAS_HMU	(IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C)
-#define E2K_UNCORE_HAS_IOMMU	cpu_has(CPU_FEAT_ISET_V6)
-#define E2K_UNCORE_HAS_HC	cpu_has(CPU_FEAT_ISET_V6)
-#define E2K_UNCORE_HAS_MC	cpu_has(CPU_FEAT_ISET_V6)
-#define E2K_UNCORE_HAS_PREPIC	cpu_has(CPU_FEAT_ISET_V6)
-#define E2K_UNCORE_HAS_HA	cpu_has(CPU_FEAT_ISET_V7)
+#define E2K_UNCORE_HAS_L3_V6		(IS_MACHINE_E16C || IS_MACHINE_E12C)
+#define E2K_UNCORE_HAS_L3_V7		(IS_MACHINE_E8V7)
+#define E2K_UNCORE_HAS_HMU		(IS_MACHINE_E2C3 || IS_MACHINE_E12C || IS_MACHINE_E16C)
+#define E2K_UNCORE_HAS_IOMMU		cpu_has(CPU_FEAT_ISET_V6)
+#define E2K_UNCORE_HAS_HC		cpu_has(CPU_FEAT_ISET_V6)
+#define E2K_UNCORE_HAS_MC		cpu_has(CPU_FEAT_ISET_V6)
+#define E2K_UNCORE_HAS_PREPIC		cpu_has(CPU_FEAT_ISET_V6)
+#define E2K_UNCORE_HAS_HA		cpu_has(CPU_FEAT_ISET_V7)
 
 enum {
 	E2K_UNCORE_IOCC = 1,
 	E2K_UNCORE_IPCC,
 	E2K_UNCORE_SIC,
+	E2K_UNCORE_L3_V6,
+	E2K_UNCORE_L3_V7,
 	E2K_UNCORE_HMU,
 	E2K_UNCORE_IOMMU,
 	E2K_UNCORE_HC,
@@ -38,6 +42,8 @@ enum {
 extern int __init register_iocc_pmus(void);
 extern int __init register_ipcc_pmus(void);
 extern int __init register_sic_pmus(void);
+extern int __init register_l3_v6_pmus(void);
+extern int __init register_l3_v7_pmus(void);
 extern int __init register_hmu_pmus(void);
 extern int __init register_iommu_pmus(void);
 extern int __init register_hc_pmus(void);

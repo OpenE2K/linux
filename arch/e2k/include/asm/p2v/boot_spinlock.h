@@ -11,7 +11,7 @@
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is virtualized guest kernel */
-#  include <asm/kvm/boot_spinlock.h>
+#  include <asm/kvm/guest/boot_spinlock.h>
 #  define arch_boot_spin_lock_slow(lock)	\
 		kvm_arch_boot_spin_lock_slow((lock))
 #  define arch_boot_spin_locked_slow(lock)	\

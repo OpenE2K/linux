@@ -2891,7 +2891,7 @@ ptr128_mptfwxfer_ioctl(struct file *filp, unsigned int cmd,
 	dctlprintk(iocp, printk(MYIOC_s_DEBUG_FMT "ptr128_mptfwxfer_ioctl() called\n",
 	    iocp->name));
 
-	ret = mptctl_do_fw_download(iocp, (char __user *)AP_PTR(ap), kfw128.fwlen);
+	ret = mptctl_do_fw_download(iocp, (char __user *)U_AP_PTR(ap), kfw128.fwlen);
 
 	mutex_unlock(&iocp->ioctl_cmds.mutex);
 
@@ -2959,7 +2959,7 @@ ptr128_mpt_command(struct file *filp, unsigned int cmd,
 		if (AP_OBJ_SIZE(ap) < karg128.maxReplyBytes)
 			return -EFAULT;
 		karg.maxReplyBytes = karg128.maxReplyBytes;
-		karg.replyFrameBufPtr = (void __user *)AP_PTR(ap);
+		karg.replyFrameBufPtr = U_AP_PTR(ap);
 	} else {
 		karg.maxReplyBytes = 0;
 		karg.replyFrameBufPtr = NULL;
@@ -2971,7 +2971,7 @@ ptr128_mpt_command(struct file *filp, unsigned int cmd,
 		if (AP_OBJ_SIZE(ap) < karg128.dataInSize)
 			return -EFAULT;
 		karg.dataInSize = karg128.dataInSize;
-		karg.dataInBufPtr = (void __user *)AP_PTR(ap);
+		karg.dataInBufPtr = U_AP_PTR(ap);
 	} else {
 		karg.dataInSize = 0;
 		karg.dataInBufPtr = NULL;
@@ -2983,7 +2983,7 @@ ptr128_mpt_command(struct file *filp, unsigned int cmd,
 		if (AP_OBJ_SIZE(ap) < karg128.dataOutSize)
 			return -EFAULT;
 		karg.dataOutSize = karg128.dataOutSize;
-		karg.dataOutBufPtr = (void __user *)AP_PTR(ap);
+		karg.dataOutBufPtr = U_AP_PTR(ap);
 	} else {
 		karg.dataOutSize = 0;
 		karg.dataOutBufPtr = NULL;
@@ -2995,7 +2995,7 @@ ptr128_mpt_command(struct file *filp, unsigned int cmd,
 		if (AP_OBJ_SIZE(ap) < karg128.maxSenseBytes)
 			return -EFAULT;
 		karg.maxSenseBytes = karg128.maxSenseBytes;
-		karg.senseDataPtr = (void __user *)AP_PTR(ap);
+		karg.senseDataPtr = U_AP_PTR(ap);
 	} else {
 		karg.maxSenseBytes = 0;
 		karg.senseDataPtr = NULL;

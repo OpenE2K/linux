@@ -48,7 +48,7 @@
 					/*<0x0000 2f00 0000 0000 */
 #endif	/* CONFIG_VIRTUALIZATION */
 
-#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* or host kernel with virtualization support */
 #ifndef	CONFIG_VIRTUALIZATION
@@ -74,6 +74,6 @@
 #include <asm/kvm/guest/pgatomic.h>
 #else
  #error	"Unknown virtualization type"
-#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
+#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_KERNEL */
 
 #endif /* ! _E2K_KVM_PGTABLE_H */

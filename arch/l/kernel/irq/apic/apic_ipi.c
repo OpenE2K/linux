@@ -11,15 +11,6 @@
 #include "apic_local.h"
 
 
-#ifdef CONFIG_SMP
-void apic_send_IPI_allbutself(unsigned int vector)
-{
-	if (num_online_cpus() < 2)
-		return;
-
-	default_send_IPI_mask_allbutself_phys(cpu_online_mask, vector);
-}
-#endif /* CONFIG_SMP */
 
 static inline int __prepare_ICR2(unsigned int mask)
 {

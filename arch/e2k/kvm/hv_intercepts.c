@@ -15,7 +15,9 @@
 #include <linux/kvm_host.h>
 #include <linux/kvm.h>
 #include <linux/uaccess.h>
+
 #include <asm/cpu_regs.h>
+#include <asm/trap_cellar.h>
 #include <asm/trap_table.h>
 #include <asm/traps.h>
 #include <asm/mmu_regs_access.h>
@@ -25,7 +27,6 @@
 #include <asm/kvm/mmu_hv_regs_types.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
 #include <asm/kvm/process.h>
-#include <asm/kvm/runstate.h>
 #include <asm/kvm/switch.h>
 #include <asm/kvm/guest/tlb_regs_types.h>
 #include <asm/kvm/async_pf.h>
@@ -33,13 +34,16 @@
 #include <asm/kvm/trace_kvm_hv.h>
 #include <asm/kvm/gregs.h>
 
-#include "cpu_defs.h"
-#include "mmu_defs.h"
 #include "cpu.h"
 #include "mmu.h"
 #include "process.h"
 #include "io.h"
 #include "intercepts.h"
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/runstate.h>
+#include "paravirt_sw/cpu_defs.h"
+#include "paravirt_sw/mmu_defs.h"
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_EXC_INSTR_FAULT_MODE
 #undef	DebugIPF
@@ -223,7 +227,7 @@ do_unsupported_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 }
 
 /* Interception table. */
-exc_intc_handler_t intc_exc_table[INTC_CU_COND_EXC_MAX] = {
+const exc_intc_handler_t intc_exc_table[INTC_CU_COND_EXC_MAX] = {
 	[0 ... INTC_CU_COND_EXC_MAX - 1] =
 			(exc_intc_handler_t)(do_unsupported_intc)
 };
@@ -293,9 +297,10 @@ static int do_read_mmu_intc_mu(struct kvm_vcpu *vcpu,
 			intc_info_mu_t *intc_info_mu, pt_regs_t *regs);
 static int do_write_mmu_reg_intc_mu(struct kvm_vcpu *vcpu,
 			intc_info_mu_t *intc_info_mu, pt_regs_t *regs);
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 static int do_tlb_line_flush_intc_mu(struct kvm_vcpu *vcpu,
 			intc_info_mu_t *intc_info_mu, pt_regs_t *regs);
-
+#endif
 
 static noinline notrace int
 do_unsupported_intc_mu(struct kvm_vcpu *vcpu,
@@ -407,12 +412,20 @@ const mu_event_desc_t mu_events_desc_table[MU_INTC_EVENTS_MAX] = {
 	},
 	{
 		.code	= IME_TLB_PAGE_FLUSH_LAST,
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 		.handler	= do_tlb_line_flush_intc_mu,
+#else
+		.handler	= do_unsupported_intc_mu,
+#endif
 		.name	= "main TLB page flush operation",
 	},
 	{
 		.code	= IME_TLB_PAGE_FLUSH_UPPER,
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 		.handler	= do_tlb_line_flush_intc_mu,
+#else
+		.handler	= do_unsupported_intc_mu,
+#endif
 		.name	= "upper level TLB page flush operation",
 	},
 	{
@@ -421,116 +434,6 @@ const mu_event_desc_t mu_events_desc_table[MU_INTC_EVENTS_MAX] = {
 		.name	= "TLB entry probe operation",
 	},
 };
-
-static int do_instr_page_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs,
-				bool nonpaging)
-{
-	int evn_no = 0;	/* should not be used here */
-	intc_mu_state_t *mu_state;
-	struct trap_pt_regs *trap = regs->trap;
-	e2k_tir_t tir;
-	gva_t address;
-	unsigned long exc;
-	u64 exc_mask;
-	u32 error_code;
-	bool async_instr = false;
-	const char *trap_name;
-	int ret;
-	pf_res_t pfres;
-
-	E2K_KVM_BUG_ON(nonpaging != !is_paging(vcpu));
-
-	trap->TIR = trap->TIRs[0];
-	tir = trap->TIR;
-
-	error_code = PFERR_INSTR_FAULT_MASK;
-	exc = tir.exc;
-
-	if (likely(tir.exc_instr_page_miss)) {
-		trap->nr_page_fault_exc = exc_instr_page_miss_num;
-		exc_mask = exc_instr_page_miss_mask;
-		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_PT_FAULT_MASK;
-		trap_name = "instr_page_miss";
-	} else if (tir.exc_instr_page_prot) {
-		trap->nr_page_fault_exc = exc_instr_page_prot_num;
-		exc_mask = exc_instr_page_prot_mask;
-		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_INSTR_PROT_MASK |
-				PFERR_PT_FAULT_MASK;
-		trap_name = "instr_page_prot";
-	} else if (tir.exc_ainstr_page_miss) {
-		trap->nr_page_fault_exc = exc_ainstr_page_miss_num;
-		exc_mask = exc_ainstr_page_miss_mask;
-		async_instr = true;
-		trap_name = "async_instr_page_miss";
-	} else if (tir.exc_ainstr_page_prot) {
-		trap->nr_page_fault_exc = exc_ainstr_page_prot_num;
-		exc_mask = exc_ainstr_page_prot_mask;
-		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_INSTR_PROT_MASK |
-				PFERR_PT_FAULT_MASK;
-		async_instr = true;
-		trap_name = "async_instr_page_prot";
-	} else {
-		exc_mask = 0;
-		E2K_KVM_BUG_ON(true);
-	}
-
-	if (!async_instr) {
-		address = tir.ip;
-	} else {
-		address = regs->ctpr2.ta_base;
-	}
-
-	if (nonpaging)
-		address = nonpaging_gva_to_gpa(vcpu, address, ACC_EXEC_MASK,
-					       NULL, NULL);
-
-	DebugIPF("intercept on %s exception for IP 0x%lx\n",
-		 trap_name, address);
-
-	vcpu->arch.intc_ctxt.cur_mu = evn_no;
-	mu_state = get_intc_mu_state(vcpu);
-	mu_state->may_be_retried = false;
-	mu_state->ignore_notifier = false;
-
-	ret = kvm_mmu_instr_page_fault(vcpu, address, async_instr, error_code);
-	pfres = mu_state->pfres;
-	if (ret < 0) {
-		/* page fault handler detected error, so pass fault */
-		/* to guest handler */
-		pr_err("%s(): instr page fault for IP 0x%lx could not be handled, error %d\n",
-			__func__, address, ret);
-		kvm_need_pass_vcpu_exception(vcpu, exc_mask);
-	} else if (ret == 0) {
-		if (pfres == PFRES_NO_ERR) {
-			/* page fault successfuly handled and guest can */
-			/* continue execution without fault injection */
-			kvm_need_delete_vcpu_exception(vcpu, exc_mask);
-		} else if (pfres == PFRES_RETRY) {
-			/* page fault handling should be retried, but */
-			/* it is not allowed (implemented) in this case */
-			kvm_need_pass_vcpu_exception(vcpu, exc_mask);
-		} else {
-			/* page fault failed */
-			kvm_need_pass_vcpu_exception(vcpu, exc_mask);
-		}
-	} else {
-		/* The page is not mapped by the guest. */
-		/* pass to let the guest handle it */
-		kvm_need_pass_vcpu_exception(vcpu, exc_mask);
-	}
-	return 0;
-}
-
-static int do_nonp_instr_page_intc_exc(struct kvm_vcpu *vcpu,
-				       struct pt_regs *regs)
-{
-	return do_instr_page_exc(vcpu, regs, true /* nonpaging ? */);
-}
-
-static int do_instr_page_intc_exc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
-{
-	return do_instr_page_exc(vcpu, regs, false /* nonpaging ? */);
-}
 
 static int instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
 				    intc_info_mu_t *intc_info_mu,
@@ -542,7 +445,9 @@ static int instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
 	gva_t address;
 	tc_cond_t cond;
 	tc_fault_type_t ftype;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool nonpaging = !is_paging(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	const char *trap_name;
 	u32 error_code;
 
@@ -554,6 +459,7 @@ static int instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
 	DebugIPINTC("intercept on %s instr page, IP gpa 0x%llx gva 0x%lx, fault type 0x%x\n",
 		    (async_instr) ? "async" : "sync", gpa, address, AW(ftype));
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (likely(!nonpaging)) {
 		/* paging mode */
 		if (is_shadow_paging(vcpu)) {
@@ -570,10 +476,17 @@ static int instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
 		} else if (is_shadow_paging(vcpu)) {
 			/* GP_* PT is not used, GPA is not set by HW */
 			address = nonpaging_gva_to_gpa(vcpu, address, ACC_EXEC_MASK, NULL, NULL);
-		} else {
+		} else
+		{
 			E2K_KVM_BUG_ON(true);
 		}
 	}
+#else
+	if (WARN_ON_ONCE(!is_phys_paging(vcpu)))
+		return -EINVAL;
+
+	address = nonpaging_gva_to_gpa(vcpu, gpa, ACC_EXEC_MASK, NULL, NULL);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	error_code = PFERR_INSTR_FAULT_MASK | PFERR_PT_FAULT_MASK;
 	if (ftype.page_miss) {
@@ -585,7 +498,9 @@ static int instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
 		error_code |= PFERR_NOT_PRESENT_MASK | PFERR_INSTR_PROT_MASK;
 		trap_name = "instr_page_prot";
 	} else if (ftype.illegal_page) {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		E2K_KVM_BUG_ON(is_shadow_paging(vcpu) && !nonpaging);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		trap->nr_page_fault_exc = exc_instr_page_miss_num;
 		error_code |= PFERR_NOT_PRESENT_MASK;
 		trap_name = "illegal_instr_page";
@@ -596,13 +511,15 @@ static int instr_page_fault_intc_mu(struct kvm_vcpu *vcpu,
 	} else {
 		pr_err("%s(): bad fault type 0x%x, probably it need pass fault to guest\n",
 			__func__, AW(ftype));
-		E2K_KVM_BUG_ON(true);
+		return -EINVAL;
 	}
 
 	DebugIPINTC("intercept on %s fault, IP 0x%lx\n", trap_name, address);
 
 	mu_state->may_be_retried = true;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	mu_state->ignore_notifier = false;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return kvm_mmu_instr_page_fault(vcpu, address, async_instr, error_code);
 }
@@ -627,7 +544,7 @@ static int do_forced_data_page_intc_mu(struct kvm_vcpu *vcpu,
 {
 	int event = intc_info_mu->hdr.event_code;
 	tc_cond_t cond = intc_info_mu->condition;
-	int fmt = TC_COND_FMT_FULL(cond);
+	int fmt = tc_cond_fmt_full(cond);
 	int cur_mu = vcpu->arch.intc_ctxt.cur_mu;
 	bool ss_under_rpr;
 	bool root = cond.root;	/* secondary space */
@@ -661,7 +578,7 @@ static int do_forced_data_page_intc_mu(struct kvm_vcpu *vcpu,
 		return 0;
 	}
 
-	ignore_store = tc_cond_is_store(cond, machine.native_iset_ver);
+	ignore_store = tc_cond_is_store(cond);
 	if (!ignore_store) {
 		DebugPFFORCED("Load from secondary space in generation (RPR) mode, will be reexecuted\n");
 		return 0;
@@ -711,7 +628,7 @@ static int do_forced_gva_data_page_intc_mu(struct kvm_vcpu *vcpu,
 		return 0;
 	}
 
-	ignore_store = tc_cond_is_store(cond, machine.native_iset_ver);
+	ignore_store = tc_cond_is_store(cond);
 	if (!ignore_store) {
 		DebugPFFORCED("Load from secondary space in generation (RPR) mode, will be reexecuted\n");
 		return 0;
@@ -759,6 +676,7 @@ static int do_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	return mmu_pt_hv_page_fault(vcpu, regs, intc_info_mu);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static int do_shadow_data_page_intc_mu(struct kvm_vcpu *vcpu,
 				       intc_info_mu_t *intc_info_mu,
 				       pt_regs_t *regs)
@@ -799,7 +717,16 @@ static int do_shadow_data_page_intc_mu(struct kvm_vcpu *vcpu,
 	}
 	return ret;
 }
+#else
+static int do_shadow_data_page_intc_mu(struct kvm_vcpu *vcpu,
+				       intc_info_mu_t *intc_info_mu,
+				       pt_regs_t *regs)
+{
+	return -ENOTSUPP;
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 static int do_tlb_line_flush_intc_mu(struct kvm_vcpu *vcpu,
 				     intc_info_mu_t *intc_info_mu,
 				     pt_regs_t *regs)
@@ -825,6 +752,7 @@ static int do_tlb_line_flush_intc_mu(struct kvm_vcpu *vcpu,
 
 	return 0;
 }
+#endif /* CONFIG_KVM_HW_SHADOW_PT_ENABLE */
 
 static int write_trap_point_mmu_reg(struct kvm_vcpu *vcpu,
 				    intc_info_mu_t *intc_info_mu)
@@ -851,6 +779,7 @@ static int write_mmu_cr_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
 	return vcpu_write_mmu_cr_reg(vcpu, (e2k_mmu_cr_t) {.word = intc_info_mu->data});
 }
 
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 static int write_mmu_u_pptb_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
 {
 	pgprotval_t u_pptb;
@@ -908,6 +837,7 @@ static int write_mmu_pid_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu
 {
 	return vcpu_write_mmu_pid_reg(vcpu, intc_info_mu->data);
 }
+#endif /* CONFIG_KVM_HW_SHADOW_PT_ENABLE */
 
 static int write_mmu_hw0_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
 {
@@ -928,6 +858,7 @@ static int write_mmu_hw0_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu
 	return 0;
 }
 
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 static int write_mmu_ss_ptb_reg(struct kvm_vcpu *vcpu,
 				intc_info_mu_t *intc_info_mu, int mmu_reg_no)
 {
@@ -1024,6 +955,7 @@ static int write_mmu_ss_pid_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info
 
 	return 0;
 }
+#endif /* CONFIG_KVM_HW_SHADOW_PT_ENABLE */
 
 static int read_trap_point_mmu_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
 {
@@ -1055,6 +987,17 @@ static int read_mmu_cr_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
 	return 0;
 }
 
+static int read_mmu_hw0_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
+{
+	struct kvm_mmu *mmu = &vcpu->arch.mmu;
+
+	intc_info_mu->data = AW(mmu->mu_hw0);
+	kvm_set_intc_info_mu_is_updated(vcpu);
+
+	return 0;
+}
+
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 static int read_mmu_u_pptb_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
 {
 	pgprotval_t u_pptb;
@@ -1080,17 +1023,6 @@ static int read_mmu_pid_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
 		return r;
 
 	intc_info_mu->data = (pgprotval_t)pid;
-	kvm_set_intc_info_mu_is_updated(vcpu);
-
-	return 0;
-}
-
-static int read_mmu_hw0_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_mu)
-{
-	struct kvm_mmu *mmu = &vcpu->arch.mmu;
-
-	/* probably here should be analysis of modes & flags */
-	intc_info_mu->data = AW(mmu->mu_hw0);
 	kvm_set_intc_info_mu_is_updated(vcpu);
 
 	return 0;
@@ -1206,66 +1138,67 @@ static int read_mmu_os_vab_reg(struct kvm_vcpu *vcpu, intc_info_mu_t *intc_info_
 
 	return 0;
 }
+#endif /* CONFIG_KVM_HW_SHADOW_PT_ENABLE */
 
 static int do_write_mmu_reg_intc_mu(struct kvm_vcpu *vcpu,
 				    intc_info_mu_t *intc_info_mu,
 				    pt_regs_t *regs)
 {
-	mmu_addr_t mmu_reg_addr;
-	int mmu_reg_no;
-	int ret;
+	mmu_addr_t reg_addr = intc_info_mu->gva;
+	int mmu_reg_no = MMU_REG_NO_FROM_MMU_ADDR(reg_addr);
+	e2k_mas_t mas;
 
 	E2K_KVM_BUG_ON(intc_info_mu->hdr.event_code != IME_WRITE_MU);
 
-	mmu_reg_addr = intc_info_mu->gva;
-	mmu_reg_no = MMU_REG_NO_FROM_MMU_ADDR(mmu_reg_addr);
-	switch (mmu_reg_no) {
-	case _MMU_TRAP_POINT_NO:
-		ret = write_trap_point_mmu_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_CR_NO:
-		ret = write_mmu_cr_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_U_PPTB_NO:
-		ret = write_mmu_u_pptb_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_OS_PPTB_NO:
-		ret = write_mmu_os_pptb_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_U2_PPTB_NO:
-	case _MMU_MPT_B_NO:
-	case _MMU_PDPTE0_NO:
-	case _MMU_PDPTE1_NO:
-	case _MMU_PDPTE2_NO:
-	case _MMU_PDPTE3_NO:
-		ret = write_mmu_ss_ptb_reg(vcpu, intc_info_mu, mmu_reg_no);
-		break;
-	case _MMU_U_VPTB_NO:
-		ret = write_mmu_u_vptb_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_OS_VPTB_NO:
-		ret = write_mmu_os_vptb_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_OS_VAB_NO:
-		ret = write_mmu_os_vab_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_PID_NO:
-		ret = write_mmu_pid_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_HW0_NO:
-		ret = write_mmu_hw0_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_PID2_NO:
-		ret = write_mmu_ss_pid_reg(vcpu, intc_info_mu);
-		break;
-	default:
-		pr_err("%s(): unimplemented MMU register #%d intercept\n",
-		       __func__, mmu_reg_no);
-		ret = -ENOSYS;
-		break;
-	}
+	AW(mas) = intc_info_mu->condition.mas;
 
-	return ret;
+	switch (mas.masf1.opc) {
+	case MAS_OPC_DTLB_REG:
+	case MAS_OPC_L1_REG:
+	case MAS_OPC_L2_REG:
+	case MAS_OPC_ICACHE_REG:
+		/* Ignore */
+		return 0;
+	case MAS_OPC_MMU_REG:
+		switch (mmu_reg_no) {
+		case _MMU_TRAP_POINT_NO:
+			return write_trap_point_mmu_reg(vcpu, intc_info_mu);
+		case _MMU_CR_NO:
+			return write_mmu_cr_reg(vcpu, intc_info_mu);
+		case _MMU_HW0_NO:
+			return write_mmu_hw0_reg(vcpu, intc_info_mu);
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
+		case _MMU_U_PPTB_NO:
+			return write_mmu_u_pptb_reg(vcpu, intc_info_mu);
+		case _MMU_OS_PPTB_NO:
+			return write_mmu_os_pptb_reg(vcpu, intc_info_mu);
+		case _MMU_U2_PPTB_NO:
+		case _MMU_MPT_B_NO:
+		case _MMU_PDPTE0_NO:
+		case _MMU_PDPTE1_NO:
+		case _MMU_PDPTE2_NO:
+		case _MMU_PDPTE3_NO:
+			return write_mmu_ss_ptb_reg(vcpu, intc_info_mu, mmu_reg_no);
+		case _MMU_U_VPTB_NO:
+			return write_mmu_u_vptb_reg(vcpu, intc_info_mu);
+		case _MMU_OS_VPTB_NO:
+			return write_mmu_os_vptb_reg(vcpu, intc_info_mu);
+		case _MMU_OS_VAB_NO:
+			return write_mmu_os_vab_reg(vcpu, intc_info_mu);
+		case _MMU_PID_NO:
+			return write_mmu_pid_reg(vcpu, intc_info_mu);
+		case _MMU_PID2_NO:
+			return write_mmu_ss_pid_reg(vcpu, intc_info_mu);
+#endif /* CONFIG_KVM_HW_SHADOW_PT_ENABLE */
+		default:
+			goto unimplemented;
+		}
+	default:
+unimplemented:
+		pr_err("%s(): unimplemented MMU register 0x%x (address 0x%lx, opc 0x%x) write intercept\n",
+				__func__, mmu_reg_no, reg_addr, mas.masf1.opc);
+		return -ENOSYS;
+	}
 }
 
 static int read_mmu_reg_intc_mu(struct kvm_vcpu *vcpu,
@@ -1284,6 +1217,10 @@ static int read_mmu_reg_intc_mu(struct kvm_vcpu *vcpu,
 	case _MMU_CR_NO:
 		ret = read_mmu_cr_reg(vcpu, intc_info_mu);
 		break;
+	case _MMU_HW0_NO:
+		ret = read_mmu_hw0_reg(vcpu, intc_info_mu);
+		break;
+#ifdef CONFIG_KVM_HW_SHADOW_PT_ENABLE
 	case _MMU_U_PPTB_NO:
 		ret = read_mmu_u_pptb_reg(vcpu, intc_info_mu);
 		break;
@@ -1292,9 +1229,6 @@ static int read_mmu_reg_intc_mu(struct kvm_vcpu *vcpu,
 		break;
 	case _MMU_PID_NO:
 		ret = read_mmu_pid_reg(vcpu, intc_info_mu);
-		break;
-	case _MMU_HW0_NO:
-		ret = read_mmu_hw0_reg(vcpu, intc_info_mu);
 		break;
 	case _MMU_U2_PPTB_NO:
 	case _MMU_MPT_B_NO:
@@ -1314,9 +1248,10 @@ static int read_mmu_reg_intc_mu(struct kvm_vcpu *vcpu,
 	case _MMU_OS_VAB_NO:
 		ret = read_mmu_os_vab_reg(vcpu, intc_info_mu);
 		break;
+#endif /* CONFIG_KVM_HW_SHADOW_PT_ENABLE */
 	default:
-		pr_err("%s(): unimplemented MMU register #%d intercept\n",
-		       __func__, mmu_reg_no);
+		pr_err("%s(): unimplemented MMU register 0x%x (address 0x%lx) read intercept\n",
+		       __func__, mmu_reg_no, mmu_reg_addr);
 		ret = -ENOSYS;
 		break;
 	}
@@ -1325,11 +1260,15 @@ static int read_mmu_reg_intc_mu(struct kvm_vcpu *vcpu,
 }
 
 static int read_dtlb_reg_intc_mu(struct kvm_vcpu *vcpu,
-				 intc_info_mu_t *intc_info_mu,
-				 pt_regs_t *regs)
+				 intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
 	tlb_addr_t tlb_addr;
 	mmu_reg_t tlb_entry;
+
+	if (!kvm_debug) {
+		intc_info_mu->data = 0;
+		return 0;
+	}
 
 	tlb_addr = intc_info_mu->gva;
 	tlb_entry = NATIVE_READ_DTLB_REG(tlb_addr);
@@ -1385,93 +1324,41 @@ static int read_mlt_reg_intc_mu(struct kvm_vcpu *vcpu,
 static int do_read_mmu_intc_mu(struct kvm_vcpu *vcpu,
 			       intc_info_mu_t *intc_info_mu, pt_regs_t *regs)
 {
-	tc_cond_t cond;
-	unsigned int mas;
-	int ret;
+	mmu_addr_t reg_addr = intc_info_mu->gva;
+	e2k_mas_t mas;
 
 	E2K_KVM_BUG_ON(intc_info_mu->hdr.event_code != IME_READ_MU);
 
-	cond = intc_info_mu->condition;
-	mas = cond.mas;
-	if (mas == MAS_MMU_REG) {
-		return read_mmu_reg_intc_mu(vcpu, intc_info_mu, regs);
-	} else if (mas == MAS_DTLB_REG) {
-		return read_dtlb_reg_intc_mu(vcpu, intc_info_mu, regs);
-	} else if (mas == MAS_DAM_REG) {
+	AW(mas) = intc_info_mu->condition.mas;
+
+	switch (mas.masf1.opc) {
+	case MAS_OPC_L1_REG:
+	case MAS_OPC_L2_REG:
+	case MAS_OPC_ICACHE_REG:
+		/* Ignore; these are diagnostic registers so returning 0 is OK */
+		intc_info_mu->data = 0;
+		return 0;
+	case MAS_OPC_DAM_REG:
 		check_virt_ctrl_mu_rr_dbg1();
 
-		if ((intc_info_mu->gva & REG_DAM_TYPE) == REG_DAM_TYPE) {
+		if ((reg_addr & REG_DAM_TYPE) == REG_DAM_TYPE) {
 			return read_dam_reg_intc_mu(vcpu, intc_info_mu, regs);
-		} else if ((intc_info_mu->gva & REG_MLT_TYPE) == REG_MLT_TYPE) {
+		} else if ((reg_addr & REG_MLT_TYPE) == REG_MLT_TYPE) {
 			return read_mlt_reg_intc_mu(vcpu, intc_info_mu, regs);
 		} else {
-			pr_err("%s(): not implemented special MMU or AAU operation type, mas.mod %d, mas.opc %d, addr 0x%lx\n",
-			       __func__,
-			       (mas & MAS_MOD_MASK) >> MAS_MOD_SHIFT,
-			       (mas & MAS_OPC_MASK) >> MAS_OPC_SHIFT,
-			       intc_info_mu->gva);
-			ret = -EINVAL;
+			pr_err("%s(): not implemented special MMU or AAU operation type, opc 0x%x, addr 0x%lx\n",
+			       __func__, mas.masf1.opc, reg_addr);
+			return -EINVAL;
 		}
-	} else {
-		pr_err("%s(): not implemented special MMU or AAU operation type, mas.mod %d, mac.opc %d\n",
-		       __func__,
-		       (mas & MAS_MOD_MASK) >> MAS_MOD_SHIFT,
-		       (mas & MAS_OPC_MASK) >> MAS_OPC_SHIFT);
-		ret = -EINVAL;
+	case MAS_OPC_DTLB_REG:
+		return read_dtlb_reg_intc_mu(vcpu, intc_info_mu, regs);
+	case MAS_OPC_MMU_REG:
+		return read_mmu_reg_intc_mu(vcpu, intc_info_mu, regs);
+	default:
+		pr_err("%s(): not implemented special MMU or AAU operation type, opc 0x%x\n",
+		       __func__, mas.masf1.opc);
+		return -EINVAL;
 	}
-
-	return ret;
-}
-
-static int handle_exc_interrupt_intc(struct kvm_vcpu *vcpu,
-				     struct pt_regs *regs,
-				     unsigned long exc_mask)
-{
-	struct trap_pt_regs *trap = regs->trap;
-	unsigned long exc;
-
-	DebugINTR("intercept on interrupt exception\n");
-
-	trap->TIR = trap->TIRs[0];
-	exc = trap->TIRs[0].exc;
-	if (unlikely((exc & exc_mask) != exc_mask)) {
-		pr_err("%s(): intercept on interrupt exception 0x%016lx, but TIR[0].exc 0x%016lx has not interrupt\n",
-		       __func__, exc_mask, exc);
-	}
-	local_irq_disable();
-	if (exc_mask & exc_nm_interrupt_mask)
-		do_nm_interrupt(regs);
-	if (exc_mask & exc_interrupt_mask)
-		native_do_interrupt(regs);
-	local_irq_enable();
-
-	return 0;
-}
-
-static int do_exc_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
-{
-	return handle_exc_interrupt_intc(vcpu, regs, exc_interrupt_mask);
-}
-
-static int do_exc_nm_interrupt_intc(struct kvm_vcpu *vcpu, struct pt_regs *regs)
-{
-	return handle_exc_interrupt_intc(vcpu, regs, exc_nm_interrupt_mask);
-}
-
-void mmu_init_nonpaging_intc(struct kvm_vcpu *vcpu)
-{
-	kvm_set_cond_exc_handler(vcpu, INTC_CU_EXC_INSTR_PAGE_NO,
-			(exc_intc_handler_t)(do_nonp_instr_page_intc_exc));
-}
-
-void kvm_init_kernel_intc(struct kvm_vcpu *vcpu)
-{
-	kvm_set_cond_exc_handler(vcpu, INTC_CU_EXC_INSTR_PAGE_NO,
-			(exc_intc_handler_t)(do_instr_page_intc_exc));
-	kvm_set_cond_exc_handler(vcpu, INTC_CU_EXC_INTERRUPT_NO,
-			(exc_intc_handler_t)(do_exc_interrupt_intc));
-	kvm_set_cond_exc_handler(vcpu, INTC_CU_EXC_NM_INTERRUPT_NO,
-			(exc_intc_handler_t)(do_exc_nm_interrupt_intc));
 }
 
 static void print_intc_ctxt(struct kvm_vcpu *vcpu)
@@ -1494,12 +1381,12 @@ static void print_intc_ctxt(struct kvm_vcpu *vcpu)
 		intc_info_mu_t *mu_event = &mu[evn_no];
 		int event = mu_event->hdr.event_code;
 
-		pr_alert("MU entry %d: code %d %s\n",
-			evn_no, event, kvm_get_mu_event_name(vcpu, event));
-		pr_alert("hdr 0x%llx gpa 0x%lx gva 0x%lx data 0x%lx\n",
-			mu_event->hdr.word, mu_event->gpa, mu_event->gva, mu_event->data);
-		pr_alert("condition 0x%llx data_ext 0x%lx mask 0x%llx\n",
-			mu_event->condition.word, mu_event->data_ext, mu_event->mask.word);
+		pr_alert("MU entry %d: code %d %s\n"
+			 "hdr 0x%llx gpa 0x%lx gva 0x%lx\n"
+			 "condition 0x%llx mask 0x%llx\n",
+			 evn_no, event, kvm_get_mu_event_name(vcpu, event),
+			 mu_event->hdr.word, mu_event->gpa, mu_event->gva,
+			 mu_event->condition.word, mu_event->mask.word);
 	}
 
 	print_all_TIRs(intc_ctxt->TIRs, intc_ctxt->nr_TIRs);
@@ -1582,122 +1469,60 @@ error:
 	}
 }
 
-static void kvm_pass_coredump_to_vm(struct kvm_vcpu *vcpu, struct pt_regs *regs)
-{
-	e2k_tir_t tir;
-	int tir_no;
-
-	if (regs->traps_to_guest != 0 && !is_injected_guest_coredump(regs) ||
-	    !kvm_check_is_guest_TIRs_empty(vcpu)) {
-		if (regs->traps_to_guest != 0 && !is_injected_guest_coredump(regs)) {
-			pr_err("%s(): there is other trap(s) passed to guest 0x%016lx\n",
-			       __func__, regs->traps_to_guest);
-		}
-		if (!kvm_check_is_guest_TIRs_empty(vcpu)) {
-			pr_err("%s(): guest TIRs is not empty, handling in progress TIR[0].hi : 0x%016llx\n",
-				__func__, HI(kvm_get_guest_vcpu_TIR(vcpu, 0)));
-		}
-		if (unlikely(kvm_test_request_to_coredump(vcpu))) {
-			pr_err("%s(): coredump request has been already suspended\n",
-			     __func__);
-		} else {
-			kvm_set_request_to_coredump(vcpu);
-		}
-		/* coredump trap cannot be passed, but was suspended */
-		/* to inject some later */
-		return;
-	}
-	/* empty TIRs is signal to do coredump */
-	tir.ip = 0;
-	tir.exc_al_aa_j = GET_CLEAR_TIR_HI(0);
-	tir_no = 0;
-	kvm_update_vcpu_intc_TIR(vcpu, tir_no, tir);
-	regs->traps_to_guest |= core_dump_mask;
-	kvm_clear_request_to_coredump(vcpu);
-	DebugCDUMP("trap is set to guest TIRs #0 hi 0x%016llx lo 0x%016llx\n",
-		    HI(tir), LO(tir));
-}
-
 static int handle_cu_cond_exceptions(struct kvm_vcpu *vcpu,
 				     intc_info_cu_t *cu, pt_regs_t *regs)
 {
 	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
-	u64 tir_exc = intc_ctxt->exceptions;
-	u64 cond_exc = cu->header.exc_c;
-	u64 cond_evn = cu->header.evn_c;
-	u64 uncond_evn = cu->header.evn_u;
-	u64 exc_to_intc;
+	kvm_hw_cpu_context_t *hw_ctxt = &vcpu->arch.hw_ctxt;
+	intc_info_cu_hdr_t *header = &cu->header;
 	exc_intc_handler_t handler;
 	int exc_no;
 	u64 cond_exc_mask, tir_exc_mask;
 	int r;
 	bool exit_ioctl = false;
 
-	exc_to_intc = vcpu->arch.hw_ctxt.virt_ctrl_cu.exc_c;
-
 	for (exc_no = 0; exc_no < INTC_CU_COND_EXC_MAX; exc_no++) {
 		cond_exc_mask = 1ULL << exc_no;
 		tir_exc_mask = kvm_cond_exc_no_to_exc_mask(vcpu, exc_no);
-		if (likely((cond_exc & cond_exc_mask) == 0)) {
-			/* intercept of exception did not occur */
-			if (tir_exc_mask == 0)
-				/* it is reserved bit of exc_c field */
-				continue;
-			if (likely((tir_exc & tir_exc_mask) == 0))
-				/* exception did not occur too */
-				continue;
-			/* exception occured */
-			if (cu->header.tir_fz)
-				/* exceptions at frozen TIRs, so guest is not */
-				/* yet read TIRs to start handling */
-				continue;
-			if (likely((exc_to_intc & cond_exc_mask) == 0)) {
-				/* exception is not expected and */
-				/* intercepted, so it is guest trap, */
-				/* pass to guest */
-				if (cond_exc == 0 && cond_evn == 0 &&
-							uncond_evn == 0) {
-					pr_err("%s(): unexpected conditional exception #%d (0x%llx) %s occured, but did not intercepted, expected mask 0x%llx, so it is trap of guest and will be passed to guest\n",
-						__func__, exc_no, cond_exc_mask,
-						kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
-						exc_to_intc);
-				}
-				kvm_pass_cond_exc_to_vcpu(vcpu, exc_no);
-				continue;
+
+		/* Check if there was no interception... */
+		if (!(header->exc_c & cond_exc_mask)) {
+			if (/* ...while the exception did occur... */
+			    (intc_ctxt->exceptions & tir_exc_mask) &&
+			    /* ...and it was duly visible in TIRs... */
+			    !cu->header.tir_fz &&
+			    /* ...but was not intercepted although it was expected to be */
+			    (hw_ctxt->virt_ctrl_cu.exc_c & cond_exc_mask)) {
+				pr_err("Has interception enabled for exception 0x%llx (%s), but it was not intercepted, virt_ctrl_cu.exc_c=0x%x\n",
+					cond_exc_mask, kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
+					hw_ctxt->virt_ctrl_cu.exc_c);
+				return -ENOTSUPP;
 			}
-			pr_err("%s(): expected conditional exception #%d (0x%llx) %s occured, but did not intercepted, expected mask 0x%llx, so will be passed "
-				"to guest\n",
-				__func__, exc_no, cond_exc_mask,
-				kvm_cond_exc_no_to_exc_name(vcpu, exc_no), exc_to_intc);
-			kvm_pass_cond_exc_to_vcpu(vcpu, exc_no);
+
+			/* No interception to handle */
 			continue;
 		}
 
-		/* intercept on conditional exception occured */
-		DebugINTCEXC("INTC CU exception #%d\n", exc_no);
-		E2K_KVM_BUG_ON(tir_exc_mask == 0);
-		if (unlikely((exc_to_intc & cond_exc_mask) == 0)) {
-			pr_err("%s(): unexpected intercept of conditional exception #%d (0x%llx), "
-				"expected mask 0x%llx\n",
-				__func__, exc_no, cond_exc_mask, exc_to_intc);
-			if (tir_exc_mask & tir_exc) {
-				kvm_pass_cond_exc_to_vcpu(vcpu, exc_no);
-				pr_err("%s(): unexpected exception %s is detected in the TIRs, so will be passed to guest\n",
-					__func__, kvm_cond_exc_no_to_exc_name(vcpu, exc_no));
-			} else {
-				pr_err("%s(): unexpected exception %s is not detected in the TIRs, so will be ignored\n",
-					__func__, kvm_cond_exc_no_to_exc_name(vcpu, exc_no));
-			}
-			continue;
+		/* Check if there was interception...*/
+		if ((header->exc_c & cond_exc_mask) &&
+		    /* ...which was not expected */
+		    !(hw_ctxt->virt_ctrl_cu.exc_c & cond_exc_mask)) {
+			pr_err("Unexpected interception of conditional exception 0x%llx (%s), expected mask 0x%x\n",
+				cond_exc_mask, kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
+				hw_ctxt->virt_ctrl_cu.exc_c);
+			return -ENOTSUPP;
 		}
-		if (unlikely((tir_exc_mask & tir_exc) == 0)) {
-			/* but exception did not occur */
-			pr_err("%s(): there is intercept of expected conditional exception #%d (0x%llx) %s, but exception did not occur, mask of all TIRs exceptions 0x%llx, so will be ignored\n",
-				__func__, exc_no, cond_exc_mask,
-				kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
-				tir_exc);
-			continue;
+
+		/* Check if there was interception...*/
+		if ((header->exc_c & cond_exc_mask) &&
+		    /* ...without matching exception */
+		    !(tir_exc_mask & intc_ctxt->exceptions)) {
+			pr_err("Interception of exception 0x%llx (%s) without exception in TIRs (0x%llx)\n",
+				cond_exc_mask, kvm_cond_exc_no_to_exc_name(vcpu, exc_no),
+				intc_ctxt->exceptions);
+			return -ENOTSUPP;
 		}
+
 		handler = kvm_get_cond_exc_handler(vcpu, exc_no);
 		r = handler(vcpu, regs);
 		if (r < 0) {
@@ -1783,9 +1608,9 @@ static u64 restore_vcpu_intc_TIRs(struct kvm_vcpu *vcpu,
 	if (last_valid_TIR_no < TIRs_num)
 		kvm_set_vcpu_intc_TIRs_num(vcpu, last_valid_TIR_no);
 
-	if (kvm_check_is_vcpu_intc_TIRs_empty(vcpu)) {
+	if (vcpu->arch.intc_ctxt.nr_TIRs < 0) {
 		DebugTIRs("intercept TIRs are empty to pass to guest\n");
-		E2K_KVM_BUG_ON(new_TIRs_exc || new_TIRs_aa);
+		WARN_ON_ONCE(new_TIRs_exc || new_TIRs_aa);
 		return 0;
 	}
 	DebugTIRs("intercept TIRs of %d num total exc mask 0x%llx,\n"
@@ -2010,6 +1835,7 @@ static u64 inject_new_vcpu_intc_exceptions(struct kvm_vcpu *vcpu,
 	return created;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void handle_pending_virqs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 {
 	if (likely(!kvm_test_pending_virqs(vcpu))) {
@@ -2028,32 +1854,23 @@ static void handle_pending_virqs(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 			   vcpu->vcpu_id);
 	}
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static void handle_cu_exceptions(struct kvm_vcpu *vcpu,
 				intc_info_cu_t *cu, pt_regs_t *regs)
 {
 	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
-	u64 tir_exc, to_delete, to_create, to_pass;
+	u64 tir_exc, to_create;
 	u64 new_tir_exc;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	handle_pending_virqs(vcpu, regs);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	tir_exc = intc_ctxt->exceptions;
-	to_delete = intc_ctxt->exc_to_delete;
 	to_create = intc_ctxt->exc_to_create;
-	to_pass = intc_ctxt->exc_to_pass;
-	if (tir_exc == 0 && to_pass == 0 && to_delete == 0 && to_create == 0) {
+	if (tir_exc == 0 && to_create == 0) {
 		return;
-	}
-	if (unlikely((to_pass & tir_exc) != to_pass)) {
-		pr_err("%s(): not all exceptions to pass 0x%llx are present at TIRs 0x%llx\n",
-			__func__, to_pass, tir_exc);
-		E2K_KVM_BUG_ON(true);
-	}
-	if (unlikely((to_delete & tir_exc) != to_delete)) {
-		pr_err("%s(): not all exceptions to delete 0x%llx are present at TIRs 0x%llx\n",
-			__func__, to_delete, tir_exc);
-		E2K_KVM_BUG_ON(true);
 	}
 	if (unlikely((to_create & tir_exc) != 0)) {
 		pr_err("%s(): not all exceptions to create 0x%llx are not\n"
@@ -2061,35 +1878,9 @@ static void handle_cu_exceptions(struct kvm_vcpu *vcpu,
 		       __func__, to_create, tir_exc, to_create & tir_exc);
 		E2K_KVM_BUG_ON(true);
 	}
-	if (unlikely((to_pass & to_delete) != 0)) {
-		pr_err("%s(): exceptions to delete 0x%llx and to pass 0x%llx  intersection 0x%llx\n",
-		       __func__, to_delete, to_pass, to_pass & to_delete);
-		E2K_KVM_BUG_ON(true);
-	}
-	if (unlikely((to_pass & to_create) != 0)) {
-		pr_err("%s(): exceptions to create 0x%llx and to pass 0x%llx intersection 0x%llx\n",
-		       __func__, to_create, to_pass, to_pass & to_create);
-		E2K_KVM_BUG_ON(true);
-	}
-	if (unlikely((to_delete & to_create) != 0)) {
-		pr_err("%s(): exceptions to create 0x%llx and to delete 0x%llx intersection 0x%llx\n",
-		       __func__, to_create, to_create, to_create & to_create);
-		E2K_KVM_BUG_ON(true);
-	}
 
 	new_tir_exc = restore_vcpu_intc_TIRs(vcpu, tir_exc,
-					     to_pass, to_delete, to_create);
-	if (unlikely((new_tir_exc & to_pass) != to_pass)) {
-		pr_err("%s(): not all exception to pass 0x%llx were passed 0x%llx, not passed 0x%llx\n",
-		       __func__, to_pass, new_tir_exc, new_tir_exc & to_pass);
-		E2K_KVM_BUG_ON(true);
-	}
-	if (unlikely((new_tir_exc & to_delete) != 0)) {
-		pr_err("%s(): not all exception to delete 0x%llx were deleted 0x%llx, not deleted 0x%llx\n",
-		       __func__, to_delete, new_tir_exc,
-		       new_tir_exc & to_delete);
-		E2K_KVM_BUG_ON(true);
-	}
+					     0, 0, to_create);
 	to_create &= ~new_tir_exc;
 	if (to_create != 0) {
 		u64 created;
@@ -2118,6 +1909,7 @@ static int handle_cu_intercepts(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 	}
 
 	if (header.hret_last_wish) {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		ret = intc_hret_last_wish(vcpu, regs);
 		if (ret < 0) {
 			pr_err("%s [%d]: conditional event HRET last wish intercept handler failed, error %d\n",
@@ -2129,12 +1921,16 @@ static int handle_cu_intercepts(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 			ret = 0;
 			exit_ioctl = true;
 		}
+#else
+		pr_err("%s [%d]: unknown reason for HRET last wish intercept\n",
+				current->comm, current->pid);
+#endif
 		header.hret_last_wish = 0;
 	}
 
 	if (header.virt) {
 		pr_err("%s [%d]: unexpected virtualization resources access\n",
-			current->comm, current->pid);
+				current->comm, current->pid);
 		print_intc_ctxt(vcpu);
 		return -EINVAL;
 	}
@@ -2158,7 +1954,7 @@ static int handle_cu_intercepts(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 		 *   stop_hard in guest
 		 */
 		coredump_in_future();
-		kvm_pass_coredump_to_vm(vcpu, regs);
+		vcpu->arch.intc_ctxt.coredump = true;
 		header.dbg = 0;
 	}
 
@@ -2233,6 +2029,8 @@ static int handle_cu_intercepts(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 				cu_num -= 1;
 			}
 		}
+
+		intc_ctxt->cu_num = cu_num;
 	}
 
 	/* handle intercepts on conditional exceptions */
@@ -2246,106 +2044,6 @@ static int handle_cu_intercepts(struct kvm_vcpu *vcpu, struct pt_regs *regs)
 	handle_cu_exceptions(vcpu, cu, regs);
 
 	return ret < 0 ? ret : !!exit_ioctl;
-}
-
-static int soft_reexecute_mu_one_intercept(struct kvm_vcpu *vcpu,
-					   intc_info_mu_t * mu_event,
-					   pt_regs_t * regs)
-{
-	int event = mu_event->hdr.event_code;
-	gpa_t gpa;
-	gva_t address;
-	tc_cond_t cond;
-	tc_fault_type_t ftype;
-	bool nonpaging = !is_paging(vcpu);
-	int ret;
-
-	gpa = mu_event->gpa;
-	address = mu_event->gva;
-	cond = mu_event->condition;
-	AW(ftype) = cond.fault_type;
-
-	if (unlikely(!nonpaging && !is_shadow_paging(vcpu))) {
-		pr_err("%s(): MU %s GVA 0x%lx GPA 0x%llx fault type 0x%x "
-			"cannot be software reexecuted\n",
-			__func__, kvm_get_mu_event_name(vcpu, event),
-			address, gpa, AW(ftype));
-		E2K_KVM_BUG_ON(true);
-	}
-	DebugREEXECMU("INTC MU event code %d %s GVA 0x%lx GPA 0x%llx "
-		"fault type 0x%x\n",
-		event, kvm_get_mu_event_name(vcpu, event), address, gpa, AW(ftype));
-
-	if (nonpaging) {
-		/* GPA & GVA should be equal */
-		gpa = address;
-		mu_event->gpa = gpa;
-	}
-
-	ret = mmu_pt_hv_page_fault(vcpu, regs, mu_event);
-	if (ret != PFRES_NO_ERR) {
-		pr_err("%s(): could not software reexecute %s GVA 0x%lx "
-			"GPA 0x%llx fault type 0x%x\n",
-			__func__, kvm_get_mu_event_name(vcpu, event),
-			address, gpa, AW(ftype));
-		E2K_KVM_BUG_ON(true);
-	}
-	return 0;
-}
-
-static int soft_reexecute_mu_intercepts(struct kvm_vcpu *vcpu, pt_regs_t *regs)
-{
-	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
-	intc_info_mu_t *mu = intc_ctxt->mu;
-	int mu_num = intc_ctxt->mu_num;
-	unsigned long intc_mu_to_move = intc_ctxt->intc_mu_to_move;
-	int evn_no;
-	int reexec_num = 0;
-	int ret = 0;
-
-	E2K_KVM_BUG_ON(mu_num < 0);
-
-	if (intc_mu_to_move == 0)
-		/* nothing to reexecute */
-		return 0;
-
-	for (evn_no = 0; evn_no < mu_num; evn_no++) {
-		if (intc_mu_to_move & (1UL << evn_no))
-			/* intercept should be moved to guest trap cellar */
-			/* to handle by guest */
-			continue;
-
-		intc_info_mu_t *mu_event = &mu[evn_no];
-		int event = mu_event->hdr.event_code;
-
-		DebugREEXECMUV("INTC MU event #%d code %d %s\n",
-			evn_no, event, kvm_get_mu_event_name(vcpu, event));
-		switch (event) {
-		case IME_FORCED:
-		case IME_FORCED_GVA:
-			/* should be reexecuted */
-			break;
-		case IME_SHADOW_DATA:
-		case IME_GPA_DATA:
-		case IME_GPA_INSTR:
-		case IME_GPA_AINSTR:
-			/* should be already reexecuted */
-			continue;
-		default:
-			DebugREEXECMU("event #%d %s should not be software reexecuted\n",
-				evn_no, kvm_get_mu_event_name(vcpu, event));
-			continue;
-		}
-		ret = soft_reexecute_mu_one_intercept(vcpu, mu_event, regs);
-		if (ret != 0)
-			break;
-		reexec_num++;
-	}
-
-	DebugREEXECMUV("total number of sofware reexecuted requests %d\n",
-		       reexec_num);
-
-	return ret;
 }
 
 static int handle_mu_one_intercept(struct kvm_vcpu *vcpu,
@@ -2407,27 +2105,22 @@ static int try_handle_mu_intercepts(struct kvm_vcpu *vcpu, pt_regs_t *regs, bool
 				/* the MMU event is not retried */
 				continue;
 			}
-			if (mmu_notifier_no_retry(vcpu->kvm,
-						event_state->notifier_seq)) {
+			if (mmu_notifier_no_retry(vcpu->kvm, event_state->notifier_seq)) {
 				/* MMU event already uptime */
 				continue;
 			}
-			DebugTRY("retry seq 0x%lx: event #%d code %d : "
-				"gpa 0x%lx gva 0x%lx data 0x%lx\n",
-				event_state->notifier_seq,
-				evn_no, event, mu_event->gpa,
-				mu_event->gva, mu_event->data);
+			DebugTRY("retry seq 0x%lx: event #%d code %d : gpa 0x%lx gva 0x%lx\n",
+				event_state->notifier_seq, evn_no, event,
+				mu_event->gpa, mu_event->gva);
 		}
 #endif	/* KVM_ARCH_WANT_MMU_NOTIFIER */
 		intc_ctxt->cur_mu = evn_no;
-		DebugINTCMU("INTC MU event #%d code %d %s\n",
-			evn_no, event, kvm_get_mu_event_name(vcpu, event));
-		DebugINTCMU("hdr 0x%llx gpa 0x%lx gva 0x%lx data 0x%lx\n",
-			mu_event->hdr.word, mu_event->gpa, mu_event->gva,
-			mu_event->data);
-		DebugINTCMU("condition 0x%llx data_ext 0x%lx mask 0x%llx\n",
-			mu_event->condition.word, mu_event->data_ext,
-			mu_event->mask.word);
+		DebugINTCMU("INTC MU event #%d code %d %s\n"
+			    "hdr 0x%llx gpa 0x%lx gva 0x%lx\n"
+			    "condition 0x%llx mask 0x%llx\n",
+			    evn_no, event, kvm_get_mu_event_name(vcpu, event),
+			    mu_event->hdr.word, mu_event->gpa, mu_event->gva,
+			    mu_event->condition.word, mu_event->mask.word);
 		r = handle_mu_one_intercept(vcpu, mu_event, regs);
 		if (r != 0)
 			ret = r;
@@ -2457,10 +2150,6 @@ static int handle_mu_intercepts(struct kvm_vcpu *vcpu, pt_regs_t *regs)
 
 		ret = try_handle_mu_intercepts(vcpu, regs, !!(try > 0));
 
-		if (unlikely(ret != 0))
-			goto out;
-
-		ret = soft_reexecute_mu_intercepts(vcpu, regs);
 		if (unlikely(ret != 0))
 			goto out;
 
@@ -2502,19 +2191,19 @@ out:
  * Each intercept handler should return same as the function
  */
 noinline	/* So that caller's %psr restoring works as intended */
-int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
+int parse_INTC_registers(struct kvm_vcpu *vcpu)
 {
+	struct kvm *kvm = vcpu->kvm;
 	struct pt_regs regs;
 	struct trap_pt_regs trap;
-	kvm_hw_cpu_context_t *hw_ctxt = &vcpu->hw_ctxt;
-	kvm_sw_cpu_context_t *sw_ctxt = &vcpu->sw_ctxt;
-	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->intc_ctxt;
+	kvm_hw_cpu_context_t *hw_ctxt = &vcpu->arch.hw_ctxt;
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
+	kvm_intc_cpu_context_t *intc_ctxt = &vcpu->arch.intc_ctxt;
 	intc_info_cu_t *cu = &intc_ctxt->cu;
 	int cu_num = intc_ctxt->cu_num, mu_num = intc_ctxt->mu_num;
 	e2k_mem_crs_t *frame;
 	intc_info_cu_hdr_t cu_hdr;
-	int ret = 0, ret_mu, ret_cu;
-	int r, i;
+	int ret = 0, ret_mu, ret_cu, i;
 
 	/*
 	 * We handle interceptions in the following order
@@ -2542,7 +2231,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	trap.curr_cnt = -1;
 	trap.ignore_user_tc = 0;
 	trap.tc_called = 0;
-	trap.is_intc = false;
 	trap.tc_count = 0;
 	trap.flags = 0;
 
@@ -2575,11 +2263,10 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	/* This makes sure that user_mode(regs) returns true (thus we
 	 * cannot put here real guest SBR since it could be >PAGE_OFFSET). */
 	regs.stacks.top = 0;
-	regs.stacks.usd = (e2k_usd_t) {
-	0};
+	regs.stacks.usd = (e2k_usd_t) {0};
 
 	/* CR registers are used e.g. in perf to get user IP */
-	frame = (e2k_mem_crs_t *)PCSP_PTR(hw_ctxt->bu_pcsp);
+	frame = K_PCSP_PTR(hw_ctxt->bu_pcsp);
 	--frame;
 	regs.crs = *frame;
 
@@ -2591,23 +2278,30 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	regs.next = current_thread_info()->pt_regs;
 	current_thread_info()->pt_regs = &regs;
 
-	trace_kvm_pid(FROM_HV_INTERCEPT, arch_to_vcpu(vcpu)->kvm->arch.vmid.nr,
-		      arch_to_vcpu(vcpu)->vcpu_id,
-		      read_guest_PID_reg(arch_to_vcpu(vcpu)));
+	trace_kvm_pid(FROM_HV_INTERCEPT, kvm->arch.vm_id, vcpu->vcpu_id, read_guest_PID_reg(vcpu));
 
-	trace_intc_stacks(sw_ctxt, hw_ctxt, frame);
+	trace_intc_stacks(sw_ctxt, hw_ctxt, frame, kvm->arch.guest_info.cpu_iset);
 
-	if (trace_cu_intc_enabled())
+	if (trace_cu_intc_enabled()) {
 		for (i = 0; i < cu_num + 1; i++)
 			trace_cu_intc(&intc_ctxt->cu, i);
+	}
 
-	if (trace_mu_intc_enabled())
-		for (i = 0; i < mu_num; i++)
+	if (trace_mu_intc_enabled() || trace_mu_intc_tdp_enabled()) {
+		for (i = 0; i < mu_num; i++) {
 			trace_mu_intc(&intc_ctxt->mu[i], i);
 
-	if (trace_intc_tir_enabled())
+			int type = intc_ctxt->mu[i].hdr.event_code;
+			if (type == IME_GPA_DATA || is_tdp_paging(vcpu) &&
+					(type == IME_GPA_INSTR || type == IME_GPA_AINSTR))
+				trace_mu_intc_tdp(vcpu, intc_ctxt->mu[i].gpa);
+		}
+	}
+
+	if (trace_intc_tir_enabled()) {
 		for (i = 0; i <= trap.nr_TIRs; i++)
 			trace_intc_tir(LO(trap.TIRs[i]), HI(trap.TIRs[i]));
+	}
 
 	trace_intc_ctprs(&intc_ctxt->ctpr1, &intc_ctxt->ctpr2, &intc_ctxt->ctpr3);
 
@@ -2623,8 +2317,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 #endif
 
 	intc_ctxt->exc_to_create = 0;
-	intc_ctxt->exc_to_delete = 0;
-	intc_ctxt->exc_to_pass = 0;
 	intc_ctxt->exc_IP_to_create = 0;
 
 	if (cu_num != -1) {
@@ -2637,8 +2329,8 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	}
 
 #ifdef CONFIG_KVM_ASYNC_PF
-	if (vcpu->apf.enabled)
-		vcpu->apf.in_pm = is_in_pm(&regs);
+	if (vcpu->arch.apf.enabled)
+		vcpu->arch.apf.in_pm = is_in_pm(&regs);
 #endif /* CONFIG_KVM_ASYNC_PF */
 
 	/*
@@ -2646,23 +2338,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	 */
 	if (unlikely(cu_num != -1 && cu->header.hv_nm_int)) {
 		do_nm_interrupt(&regs);
-	} else if (cu_hdr.exc_nm_interrupt) {
-		exc_intc_handler_t handler;
-
-		/* Simulator bug: hypervisor interrupts on guest */
-		/* do not cause immediate intercept */
-		handler = kvm_get_cond_exc_handler(arch_to_vcpu(vcpu),
-						   INTC_CU_EXC_NM_INTERRUPT_NO);
-		r = handler(arch_to_vcpu(vcpu), &regs);
-		if (r != 0) {
-			pr_err("%s(): intercept handler %pF failed, "
-				"error %d\n",
-				__func__, handler, r);
-			E2K_KVM_BUG_ON(true);
-		}
-		if (intc_ctxt->exceptions & exc_nm_interrupt_mask)
-			kvm_need_delete_vcpu_exception(arch_to_vcpu(vcpu),
-						exc_nm_interrupt_mask);
 	}
 
 	/*
@@ -2682,22 +2357,6 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	 */
 	if (cu_num != -1 && cu->header.hv_int) {
 		native_do_interrupt(&regs);
-	} else if (cu_hdr.exc_interrupt) {
-		exc_intc_handler_t handler;
-
-		/* Simulator bug: hypervisor interrupts on guest */
-		/* do not cause immediate intercept */
-		handler = kvm_get_cond_exc_handler(arch_to_vcpu(vcpu),
-						   INTC_CU_EXC_INTERRUPT_NO);
-		r = handler(arch_to_vcpu(vcpu), &regs);
-		if (r != 0) {
-			pr_err("%s(): intercept handler %pF failed, error %d\n",
-				__func__, handler, r);
-			E2K_KVM_BUG_ON(true);
-		}
-		if (intc_ctxt->exceptions & exc_interrupt_mask)
-			kvm_need_delete_vcpu_exception(arch_to_vcpu(vcpu),
-						       exc_interrupt_mask);
 	}
 
 	/*
@@ -2720,19 +2379,19 @@ int parse_INTC_registers(struct kvm_vcpu_arch *vcpu)
 	 * done by hardware for all entries in INTC_INFO_MU registers.
 	 */
 	if (mu_num > 0) {
-		ret_mu = handle_mu_intercepts(arch_to_vcpu(vcpu), &regs);
+		ret_mu = handle_mu_intercepts(vcpu, &regs);
 		if (ret_mu)
 			ret = ret_mu;
 	}
 #ifdef CONFIG_KVM_ASYNC_PF
-	if (vcpu->apf.enabled)
-		kvm_check_async_pf_completion(arch_to_vcpu(vcpu));
+	if (vcpu->arch.apf.enabled)
+		kvm_check_async_pf_completion(vcpu);
 #endif /* CONFIG_KVM_ASYNC_PF */
 
 	/*
 	 * 7) Handle CU interceptions
 	 */
-	ret_cu = handle_cu_intercepts(arch_to_vcpu(vcpu), &regs);
+	ret_cu = handle_cu_intercepts(vcpu, &regs);
 	if (ret == 0)
 		ret = ret_cu;
 

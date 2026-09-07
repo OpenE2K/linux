@@ -1622,9 +1622,6 @@ struct net_device_ops {
 						  const struct skb_shared_hwtstamps *hwtstamps,
 						  bool cycles);
 
-#ifdef CONFIG_MCST_RT
-	int                     ndo_unlocked_ioctl;
-#endif
 };
 
 /**

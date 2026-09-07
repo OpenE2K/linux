@@ -11,7 +11,7 @@
 #define __SMI_SOUND_H__
 
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/ioport.h>
 #include <sound/control.h>
 #include <sound/core.h>

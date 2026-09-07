@@ -26,7 +26,7 @@ static int ptr128_mga_getparam(struct file *file, unsigned int cmd,
 		return -EFAULT;
 	if (get_user_tagged_16(ap.qword, tag, &gp128->value) || !IS_AP(ap, tag))
 		return -EFAULT;
-	getparam.value = (void __user *)AP_PTR(ap);
+	getparam.value = U_AP_PTR(ap);
 	set_ap_u_border(ap);
 	err = drm_ioctl_kernel(file, mga_getparam, &getparam, DRM_AUTH);
 	set_u_border(saved_ub);

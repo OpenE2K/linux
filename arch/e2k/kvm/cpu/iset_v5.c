@@ -12,6 +12,7 @@
 #include <asm/trap_table.h>
 #include <asm/debug_print.h>
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Host kernel is using some additional global registers to support
  * virtualization and guest kernel
@@ -53,3 +54,4 @@ void kvm_guest_restore_local_gregs_v5(const local_gregs_t *gregs,
 		DO_RESTORE_GUEST_LOCAL_GREGS_EXCEPT_KERNEL_V5(gregs);
 	native_write_BGR_reg(gregs->bgr);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */

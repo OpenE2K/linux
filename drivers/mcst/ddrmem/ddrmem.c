@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2025 MCST
  */
+
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/of.h>
@@ -65,7 +66,8 @@ static const struct of_device_id ddrmem_of_match[] = {
 	{}
 };
 
-MODULE_DEVICE_TABLE(of, ddrmem_of_match);
+/* MODULE_DEVICE_TABLE(of, ddrmem_of_match);
+ * Disable autoloading */
 
 static struct platform_driver ddrmem_pldr = {
 	.driver = {

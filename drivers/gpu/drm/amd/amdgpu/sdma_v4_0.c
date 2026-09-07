@@ -579,6 +579,9 @@ static int sdma_v4_0_init_microcode(struct amdgpu_device *adev)
 	char fw_name[30];
 	int ret, i;
 
+#ifdef CONFIG_MCST
+	ret = 0;
+#endif
 	DRM_DEBUG("\n");
 
 	switch (adev->ip_versions[SDMA0_HWIP][0]) {

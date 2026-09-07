@@ -14,8 +14,10 @@
 
 #include <asm/kvm/mmu.h>
 
-#include "cpu_defs.h"
 #include "pic.h"
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include "paravirt_sw/cpu_defs.h"
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_KVM_VIRQs_MODE
 #undef	DebugVIRQs
@@ -35,6 +37,7 @@ static inline int irqchip_in_kernel(struct kvm *kvm)
 	return 1;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int lapic_in_kernel(struct kvm_vcpu *vcpu)
 {
 	/* Same as irqchip_in_kernel(vcpu->kvm), but with less
@@ -45,7 +48,7 @@ static inline int lapic_in_kernel(struct kvm_vcpu *vcpu)
 
 /*
  * Basic functions to access to VIRQs state structure on host
- * (see asm/kvm/guest.h)
+ * (see asm/kvm/paravirt_sw/guest.h)
  */
 static inline kvm_virqs_state_t *kvm_get_guest_virqs_state(struct kvm_vcpu *vcpu)
 {
@@ -106,21 +109,12 @@ extern void kvm_cancel_clockdev(struct kvm_vcpu *vcpu);
 
 extern void kvm_guest_set_clockevent(struct kvm_vcpu *vcpu, unsigned long delta);
 
-extern int kvm_setup_default_irq_routing(struct kvm *kvm);
-
-extern pid_t kvm_guest_intr_handler(struct kvm_vcpu *vcpu, int irq, int virq_id,
-				    irq_handler_t fn, void *arg);
-extern int kvm_guest_intr_thread(int vcpu_id, int irq, int virq_id,
-				 int gpid_nr, irq_thread_t fn, void *arg);
-extern int kvm_guest_free_intr_handler(struct kvm *kvm, int irq, void *arg);
 extern int kvm_get_guest_direct_virq(struct kvm_vcpu *vcpu, int irq, int virq_id);
 extern int kvm_free_guest_direct_virq(struct kvm *kvm, int irq);
 extern int kvm_vcpu_interrupt(struct kvm_vcpu *vcpu, int irq);
 extern int kvm_vcpu_ioctl_interrupt(struct kvm_vcpu *vcpu, int virq_id);
-extern int kvm_guest_wait_for_virq(struct kvm *kvm, int irq, bool in_progress);
 extern void kvm_inject_lapic_virq(struct kvm_lapic *apic);
 extern void kvm_inject_cepic_virq(struct kvm_cepic *epic);
-extern void kvm_inject_nmi(struct kvm_vcpu *vcpu);
 extern enum hrtimer_restart kvm_apic_timer_fn(struct hrtimer *data);
 extern enum hrtimer_restart kvm_epic_timer_fn(struct hrtimer *data);
 extern int kvm_find_pending_virqs(struct kvm_vcpu *vcpu,
@@ -137,22 +131,6 @@ static inline int kvm_get_pending_virqs_num(struct kvm_vcpu *vcpu)
 	return kvm_find_pending_virqs(vcpu, false, false);
 }
 
-static inline bool kvm_is_handling_vcpu_virqs(struct kvm_vcpu *vcpu)
-{
-	return vcpu->arch.on_virqs_handling;
-}
-
-static inline void kvm_set_handling_vcpu_virqs(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.on_virqs_handling = true;
-}
-
-static inline void kvm_clear_handling_vcpu_virqs(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.on_virqs_handling = false;
-}
-
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool kvm_test_hw_stack_bounds_waiting(struct kvm_vcpu *vcpu,
 						    thread_info_t *ti)
 {
@@ -163,13 +141,6 @@ static inline bool kvm_test_hw_stack_bounds_waiting(struct kvm_vcpu *vcpu,
 						  exc_proc_stack_bounds_mask |
 						  exc_chain_stack_bounds_mask);
 }
-#else
-static inline bool kvm_test_hw_stack_bounds_waiting(struct kvm_vcpu *vcpu,
-						    thread_info_t *ti)
-{
-	return false;
-}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* kvm->arch.virq_lock should be locked by caller */
 static inline bool kvm_has_virqs_to_guest(struct kvm_vcpu *vcpu)
@@ -284,6 +255,8 @@ kvm_try_inject_direct_guest_virqs(struct kvm_vcpu *vcpu,
 #endif /* CONFIG_DIRECT_VIRQ_INJECTION */
 
 extern void kvm_free_all_VIRQs(struct kvm *kvm);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 extern bool kvm_irq_bypass;
 extern bool kvm_ioepic_unsafe_direct_map;
 

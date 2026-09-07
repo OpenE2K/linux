@@ -1298,7 +1298,11 @@ static int userfaultfd_register(struct userfaultfd_ctx *ctx,
 	struct uffdio_register __user *user_uffdio_register;
 	unsigned long vm_flags, new_flags;
 	bool found;
+#ifdef CONFIG_MCST
+	bool basic_ioctls = false;
+#else
 	bool basic_ioctls;
+#endif
 	unsigned long start, end, vma_end;
 	MA_STATE(mas, &mm->mm_mt, 0, 0);
 

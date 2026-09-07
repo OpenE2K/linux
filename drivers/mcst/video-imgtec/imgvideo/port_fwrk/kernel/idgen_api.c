@@ -413,7 +413,7 @@ IMG_RESULT IDGEN_AllocId(
     /* If incrementing IDs, just add the ID node to the correct hash table list */
     else
     {
-        IDGEN_sId *  psId;
+        IDGEN_sId *  psId = IMG_NULL;
         IMG_UINT32   ui32CurrentIncNumber;
 
         /* If incrementing IDs, increment the id for returning back, and save the ID node in the list

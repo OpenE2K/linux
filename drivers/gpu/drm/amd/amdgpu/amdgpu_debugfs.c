@@ -1696,7 +1696,9 @@ static void amdgpu_ib_preempt_mark_partial_job(struct amdgpu_ring *ring)
 	struct amdgpu_fence_driver *drv = &ring->fence_drv;
 	struct drm_gpu_scheduler *sched = &ring->sched;
 	bool preempted = true;
-
+#ifdef CONFIG_MCST
+	fence = NULL;
+#endif
 	if (ring->funcs->type != AMDGPU_RING_TYPE_GFX)
 		return;
 

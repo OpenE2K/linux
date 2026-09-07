@@ -5727,7 +5727,7 @@ static long btrfs_protected_ioctl_v2(struct file *file,
 					AP_OBJ_SIZE(ap) < size) {
 		return -EFAULT;
 	}
-	if (put_user((void *)AP_PTR, &arg64p->qgroup_inherit) ||
+	if (put_user(U_AP_PTR(ap), &arg64p->qgroup_inherit) ||
 	    put_user(size, &arg64p->size))
 		return -EFAULT;
 	return btrfs_ioctl(file, cmd, (unsigned long)arg64p);
@@ -5770,7 +5770,7 @@ static long btrfs_protected_send_ioctl(struct file *file,
 	set_u_border(MAX_U_BORDER);
 	if (put_user(arg128.clone_sources_count, &arg64p->clone_sources_count) ||
 	    arg128.clone_sources_count ?
-		put_user((__u64 *)AP_PTR(ap), &arg64p->clone_sources) : 0 ||
+		put_user(U_AP_PTR(ap), &arg64p->clone_sources) : 0 ||
 	    put_user(arg128.send_fd, &arg64p->send_fd) ||
 	    put_user(arg128.parent_root, &arg64p->parent_root) ||
 	    put_user(arg128.flags, &arg64p->flags) ||

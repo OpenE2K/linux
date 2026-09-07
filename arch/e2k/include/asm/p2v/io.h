@@ -16,59 +16,59 @@ static inline void boot_native_writeb(u8 b, void __iomem *address)
 {
 	e2k_addr_t addr = (e2k_addr_t __force) address;
 
-	NATIVE_WRITE_MAS_B((e2k_addr_t)addr, b, MAS_IOADDR);
+	NATIVE_WRITE_MAS_B((e2k_addr_t)addr, b, MAS_IO_OPERATION);
 }
 
 static inline void boot_native_writew(u16 w, void __iomem *addr)
 {
-	NATIVE_WRITE_MAS_H((e2k_addr_t __force)addr, w, MAS_IOADDR);
+	NATIVE_WRITE_MAS_H((e2k_addr_t __force)addr, w, MAS_IO_OPERATION);
 }
 
 static inline void boot_native_writel(u32 l, void __iomem *addr)
 {
-	NATIVE_WRITE_MAS_W((e2k_addr_t __force)addr, l, MAS_IOADDR);
+	NATIVE_WRITE_MAS_W((e2k_addr_t __force)addr, l, MAS_IO_OPERATION);
 }
 
 static inline void boot_native_writeq(u64 q, void __iomem *addr)
 {
-	NATIVE_WRITE_MAS_D((e2k_addr_t __force)addr, q, MAS_IOADDR);
+	NATIVE_WRITE_MAS_D((e2k_addr_t __force)addr, q, MAS_IO_OPERATION);
 }
 
 static inline u8 boot_native_readb(void __iomem *address)
 {
 	void *addr = (void __force *) address;
 
-	return NATIVE_READ_MAS_B((e2k_addr_t)addr, MAS_IOADDR);
+	return NATIVE_READ_MAS_B((e2k_addr_t)addr, MAS_IO_OPERATION);
 }
 
 static inline u16 boot_native_readw(void __iomem *addr)
 {
-	return NATIVE_READ_MAS_H((e2k_addr_t __force)addr, MAS_IOADDR);
+	return NATIVE_READ_MAS_H((e2k_addr_t __force)addr, MAS_IO_OPERATION);
 }
 
 static inline u32 boot_native_readl(void __iomem *address)
 {
 	void *addr = (void __force *) address;
 
-	return NATIVE_READ_MAS_W((e2k_addr_t)addr, MAS_IOADDR);
+	return NATIVE_READ_MAS_W((e2k_addr_t)addr, MAS_IO_OPERATION);
 }
 
 static inline u64 boot_native_readq(void __iomem *addr)
 {
-	return NATIVE_READ_MAS_D((e2k_addr_t __force)addr, MAS_IOADDR);
+	return NATIVE_READ_MAS_D((e2k_addr_t __force)addr, MAS_IO_OPERATION);
 }
 
 //TODO seems like these are unused, probably should delete them
 
 static inline void boot_native_outb(u8 byte, u16 port)
 {
-	NATIVE_WRITE_MAS_B(BOOT_IO_AREA_PHYS_BASE + port, byte, MAS_IOADDR);
+	NATIVE_WRITE_MAS_B(BOOT_IO_AREA_PHYS_BASE + port, byte, MAS_IO_OPERATION);
 }
 static inline u8 boot_native_inb(u16 port)
 {
-	return (u8) NATIVE_READ_MAS_B(BOOT_IO_AREA_PHYS_BASE + port, MAS_IOADDR);
+	return (u8) NATIVE_READ_MAS_B(BOOT_IO_AREA_PHYS_BASE + port, MAS_IO_OPERATION);
 }
 static inline u32 boot_native_inl(u16 port)
 {
-	return (u32) NATIVE_READ_MAS_W(BOOT_IO_AREA_PHYS_BASE + port, MAS_IOADDR);
+	return (u32) NATIVE_READ_MAS_W(BOOT_IO_AREA_PHYS_BASE + port, MAS_IO_OPERATION);
 }

@@ -36,8 +36,7 @@ extern u64 finish_syscall_sw_fill_wsz;
 extern u64 return_to_injected_syscall_sw_fill_wsz;
 
 static __always_inline void
-user_hw_stacks_restore__hw(e2k_stacks_t *stacks, u64 cur_window_q,
-			   clear_rf_t clear_fn)
+user_hw_stacks_restore__hw(e2k_stacks_t *stacks, u64 cur_window_q)
 {
 	e2k_psp_t u_psp;
 	e2k_pcsp_t u_pcsp;
@@ -289,10 +288,10 @@ user_hw_stacks_restore(e2k_stacks_t *stacks, u64 cur_window_q,
 		       u64 sw_fill_window_q)
 {
 	if (cpu_has(CPU_FEAT_FILLC) && cpu_has(CPU_FEAT_FILLR))
-		user_hw_stacks_restore__hw(stacks, cur_window_q, clear_fn);
+		user_hw_stacks_restore__hw(stacks, cur_window_q);
 	else
 		user_hw_stacks_restore__sw(stacks, cur_window_q, clear_fn, sw_fill_sequel,
-			sw_fill_window_q);
+					   sw_fill_window_q);
 }
 
 static __always_inline void
@@ -435,6 +434,12 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 		if (need_resched())
 			schedule();
 
+		/*
+		 * Send delayed signals _before_ delivering, to prevent
+		 * force_sig_info() from overriding handler with SIG_DFL.
+		 */
+		e2k_deliver_delayed_signals();
+
 		/* This will set SIG_*_FLAG_PT_REGS flags */
 		if (signal_pending_usermode_loop(regs)) {
 			e2k_aau_t *aau_regs = regs->aau_context;
@@ -488,24 +493,23 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 			}
 		}
 
-		if (test_thread_flag(TIF_NOTIFY_RESUME)) {
-			clear_thread_flag(TIF_NOTIFY_RESUME);
-			do_notify_resume(regs);
-		}
+		if (test_thread_flag(TIF_NOTIFY_RESUME))
+			resume_user_mode_work(regs);
 
 		/*
 		 * Signal handler delivery does magic with stack,
 		 * so check again whether manual copy is needed
 		 */
 		if (regs->flags.sig_call_handler) {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 			/* this case has not yet been accounted for */
 			BUG_ON(!syscall &&
 			       guest_trap_from_user(current_thread_info()) ||
 			       syscall &&
 			       guest_syscall_from_user(current_thread_info()));
-			host_user_hw_stacks_prepare(&regs->stacks, regs,
-				wsz, from, !(from & ~(FROM_SYSCALL_N_PROT |
-						      FROM_SYSCALL_PROT_8)));
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+			host_user_hw_stacks_prepare(&regs->stacks, regs, wsz, from,
+				!(from & ~(FROM_SYSCALL_N_PROT | FROM_SYSCALL_PROT_8)));
 		}
 
 		pshtp = regs->stacks.pshtp;
@@ -518,45 +522,29 @@ static __always_inline e2k_pshtp_t exit_to_usermode_loop(struct pt_regs *regs,
 static __noreturn __always_inline void finish_user_trap_handler_done(struct thread_info *ti,
 		const struct pt_regs *regs, restore_caller_t from)
 {
-	e2k_rndpr_t rndpr = regs->rndpr;
-	e2k_aau_t *aau_regs = regs->aau_context;
-
 	BUILD_BUG_ON(!__builtin_constant_p(from));
 
-	/*
-	 * There must not be any branches after restoring ctpr register
-	 * because of hardware bug (old one that was not found and also
-	 * CPU_HWBUG_BRANCH_ACTIVATES_CTPR), so this 'if' is done before
-	 * restoring %ctpr2 (actually it belongs to set_aau_aaldis_aaldas()).
-	 *
-	 * RESTORE_COMMON_REGS() must be called before RESTORE_AAU_MASK_REGS()
-	 * because of ctpr2 and AAU registers restoring dependencies.
-	 */
 	if (likely(!aau_stopped(regs->aasr))) {
-		RESTORE_COMMON_REGS(regs);
-		RESTORE_AAU_MASK_REGS((e2k_aaldm_t) { .word = 0 },
-				(e2k_aaldv_t) { .word = 0 }, regs->aasr);
 		if (from & FROM_SIGRETURN) {
-			CLEAR_DO_SIGRETURN_INTERRUPT(rndpr);
+			TRAP_HANDLER_DONE(regs, 1, 0, NULL, CLEAR_DO_SIGRETURN_INTERRUPT_ASM);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
-			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr);
+			TRAP_HANDLER_DONE(regs, 1, 0, NULL, CLEAR_RETURN_PV_VCPU_TRAP_WINDOW_ASM);
 #endif
 		} else {
-			CLEAR_USER_TRAP_HANDLER_WINDOW(rndpr);
+			TRAP_HANDLER_DONE(regs, 1, 0, NULL, CLEAR_USER_TRAP_HANDLER_WINDOW_ASM);
 		}
 	} else {
-		RESTORE_COMMON_REGS(regs);
-		native_set_aau_aaldis_aaldas(ti->aalda, aau_regs);
-		RESTORE_AAU_MASK_REGS(aau_regs->aaldm, aau_regs->aaldv, regs->aasr);
 		if (from & FROM_SIGRETURN) {
-			CLEAR_DO_SIGRETURN_INTERRUPT(rndpr);
+			TRAP_HANDLER_DONE(regs, 1, 1, ti->aalda, CLEAR_DO_SIGRETURN_INTERRUPT_ASM);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		} else if (from & (FROM_RETURN_PV_VCPU_TRAP)) {
-			CLEAR_RETURN_PV_VCPU_TRAP_WINDOW(rndpr);
+			TRAP_HANDLER_DONE(regs, 1, 1, ti->aalda,
+					  CLEAR_RETURN_PV_VCPU_TRAP_WINDOW_ASM);
 #endif
 		} else {
-			CLEAR_USER_TRAP_HANDLER_WINDOW(rndpr);
+			TRAP_HANDLER_DONE(regs, 1, 1, ti->aalda,
+					  CLEAR_USER_TRAP_HANDLER_WINDOW_ASM);
 		}
 	}
 
@@ -576,14 +564,6 @@ finish_user_trap_handler_switched_hw_stacks(struct pt_regs *regs, struct trap_pt
 	e2k_wd_t wd;
 
 	RESTORE_USER_TRAP_STACK_REGS(regs);
-#if DEBUG_TRACE_TRAP_USD_CR1
-	E2K_WAIT(_all_e);
-	current_thread_info()->d_usd = native_read_USD_reg();
-	current_thread_info()->d_cr1  = native_read_CR1_reg();
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		current_thread_info()->d_usfs  = native_read_USFS_reg();
-	}
-#endif
 	if (current->thread.flags & E2K_FLAG_PROTECTED_MODE)
 		ENABLE_US_CLW();
 
@@ -700,15 +680,14 @@ finish_user_trap_handler(struct pt_regs *regs, restore_caller_t from)
 	pcshtp = regs->stacks.pcshtp;
 	ctpr3 = regs->ctpr3;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Update run state info, if trap occured on guest kernel */
 	SET_RUNSTATE_OUT_USER_TRAP();
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	read_ticks(start_tick);
 
 	info_restore_mmu_reg(start_tick);
-
-	CHECK_PT_REGS_CHAIN(regs, native_read_USD_reg().base,
-			    current->stack + KERNEL_C_STACK_SIZE);
 
 	read_ticks(clock);
 
@@ -858,7 +837,11 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 {
 	e2k_pshtp_t pshtp;
 	u64 wsz, finish_wsz, num_q;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool ts_host_at_vcpu_mode, intc_emul_flag;
+#else
+	bool ts_host_at_vcpu_mode = false;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	clear_rf_t clear_fn;
 
 	/*
@@ -871,8 +854,10 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 
 	pshtp = exit_to_usermode_loop(regs, from, &return_to_user, finish_wsz, true);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	intc_emul_flag = kvm_test_intc_emul_flag(regs);
 	ts_host_at_vcpu_mode = ts_host_at_vcpu_mode() || intc_emul_flag;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	num_q = get_ps_clear_size(finish_wsz, pshtp);
 
@@ -881,7 +866,9 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 	if (!cpu_has(CPU_FEAT_FILLC) || !cpu_has(CPU_FEAT_FILLR)) {
 		current->thread.fill.from = from;
 		current->thread.fill.return_to_user = return_to_user;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		current->thread.fill.ts_host_at_vcpu_mode = ts_host_at_vcpu_mode;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	}
 
 	/*
@@ -889,16 +876,15 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 	 */
 	BUG_ON(from & FROM_USER_TRAP);
 
-	CHECK_PT_REGS_CHAIN(regs, USD_PTR(native_read_USD_reg()),
-			    current->stack + KERNEL_C_STACK_SIZE);
-
 	clear_fn = get_clear_rf_fn(num_q);
 
 	/* MMU registers must be written with not active CLW/AAU */
 	uaccess_enable();
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* complete intercept emulation mode */
 	guest_exit_intc(regs, intc_emul_flag, from);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * If either FILLC or FILLR isn't supported, jump to finish_syscall_sw_fill.
@@ -913,7 +899,9 @@ void finish_syscall(struct pt_regs *regs, enum restore_caller from, bool return_
 	unreachable();
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* virtualization support */
-#include "../kvm/ttable-inline.h"
+#include "../kvm/paravirt_sw/ttable-inline.h"
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif /* _E2K_KERNEL_TTABLE_H */

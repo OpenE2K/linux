@@ -61,6 +61,9 @@ static enum dc_lut_mode dpp30_get_gamcor_current(struct dpp *dpp_base)
 	uint32_t lut_mode;
 	struct dcn3_dpp *dpp = TO_DCN30_DPP(dpp_base);
 
+#ifdef CONFIG_MCST
+	mode = LUT_BYPASS;
+#endif
 	REG_GET(CM_GAMCOR_CONTROL, CM_GAMCOR_MODE_CURRENT, &state_mode);
 
 	if (state_mode == 0)

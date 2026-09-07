@@ -747,8 +747,7 @@ static int lt_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 		break;
 	case WD_PRESCALER:
 		lt->regs.wd_counter.wd_c = 0;	/* counter reset */
-		lt->regs.wd_prescaler.reg =
-			(val + 1) * vcpu->kvm->arch.wd_prescaler_mult - 1;
+		lt->regs.wd_prescaler.reg = val;
 		wd_debug = true;
 		restart_wd_timer(vcpu, lt);
 		reg_name = "WD Prescaler";

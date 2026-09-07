@@ -128,5 +128,9 @@ extern struct cpufreq_frequency_table
 			pmc_l_3d_clk1x_available_freqs[E1CP_MAX_AV_PSTATES];
 extern struct cpufreq_frequency_table
 			pmc_l_3d_clkSh_available_freqs[E1CP_MAX_AV_PSTATES];
-
+                                                                               
+int pmc_cpufreq_init(void);                                                                          
+void pmc_cpufreq_exit(void);                                                                         
+int pmc_hwmon_init(void);
+void pmc_hwmon_exit(void); 
 #endif /* _PMC_H_ */

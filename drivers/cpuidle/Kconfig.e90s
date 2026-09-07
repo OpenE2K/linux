@@ -7,7 +7,7 @@
 
 config E90S_CPUIDLE
 	tristate "CPU Idle Driver for E90S machines (r2000)"
-	depends on E90S && !MCST_RT
+	depends on E90S
 	default m
 	help
 	  CPU Idle driver for E90S machines (r2000).

@@ -1,11 +1,5 @@
 [
     {
-        "MetricExpr": "100 * (CT_I - BP_MISS_I) / CT_I",
-        "MetricGroup": "hit_rate",
-        "MetricName": "bp_i_hit_rate",
-        "BriefDescription": "процент попаданий предсказателя переходов для операций неподготовленной передачи управления = (ct_i - bp_miss_i) / ct_i"
-    },
-    {
         "MetricExpr": "100 * L1_LD_HIT / L1_LD_QUERY",
         "MetricGroup": "hit_rate",
         "MetricName": "l1_ld_hit_rate",
@@ -48,9 +42,21 @@
         "BriefDescription": "процент попаданий в IB = (ticks - ib_no_command) / ticks"
     },
     {
+        "MetricExpr": "100 * (TICKS - STALL_BP) / TICKS",
+        "MetricGroup": "hit_rate",
+        "MetricName": "bp_hit_rate",
+        "BriefDescription": "процент потерь производительности из-за ошибок предсказания перехода, влияющих на производительность, т.е. не скрытых другими блокировками конвейера = (ticks - stall_bp) / ticks"
+    },
+    {
         "MetricExpr": "100 * (TICKS - BUB_E3_OPND * 6) / TICKS",
         "MetricGroup": "hit_rate",
         "MetricName": "alu_channel_hit_rate",
         "BriefDescription": "процент попаданий в канал с результатом вычислений ALU (удачность планирования компилятором инструкций по каналам) = (ticks - bub_e3_opnd * 6) / ticks"
+    },
+    {
+        "MetricExpr": "LDB_LINE_CACHED_LIFETIME / LDB_LINE_CACHED_SELECT",
+        "MetricGroup": "hit_rate",
+        "MetricName": "load_to_l2",
+        "BriefDescription": "среднее время доступа в тактах из L2 для реальных чтений и чтений подложек, для памяти типа General, учитывает также чистые префетчи без возврата данных, поэтому при обилии префетчей в L3 может выдать результат меньше реального = ldb_line_cached_lifetime / ldb_line_cached_select"
     }
 ]

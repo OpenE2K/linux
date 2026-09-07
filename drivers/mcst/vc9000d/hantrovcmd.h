@@ -158,38 +158,6 @@ typedef u32 mmu_iova;
 #define VCARB_VERSION_2_0         0x2  // arbiter2.0, dual-os version
 #define VCARB_VERSION_3_0         0x3  // arbiter3.0, virtulization version
 
-/* Used in vcmd initialization in hantro_vcmd_xxx.c. */
-/* May be unified in next step. */
-struct vcmd_config {
-	unsigned long vcmd_base_addr;
-	u32 vcmd_iosize;
-	int vcmd_irq;
-	/*input vce=0,IM=1,vcd=2,jpege=3, jpegd=4*/
-	u32 sub_module_type;
-	u16 submodule_main_addr; // in byte
-	/* if submodule addr == 0xffff,
-	 * this submodule does not exist.// in byte
-	 */
-	u16 submodule_dec400_addr;
-	u16 submodule_MMU_addr; // in byte
-	u16 submodule_MMUWrite_addr; // in byte
-	u16 submodule_axife_addr; // in byte
-
-	/* for Hw Register Print */
-	volatile u8 *submodule_vcmd_virtual_address;
-	volatile u8 *submodule_vcd_virtual_address;
-	volatile u8 *submodule_dec400_virtual_address;
-	volatile u8 *submodule_MMU_virtual_address;
-	volatile u8 *submodule_MMUWrite_virtual_address;
-	volatile u8 *submodule_axife_virtual_address;
-	volatile u8 *submodule_axi2to1_virtual_address;
-	u32 submodule_vcd_iosize;
-	u32 submodule_dec400_iosize;
-	u32 submodule_MMU_iosize;
-	u32 submodule_MMUWrite_iosize;
-	u32 submodule_axife_iosize;
-
-};
 #define ANY_CMDBUF_ID 0xFFFF
 
 /* platform frequency: need adjust it according your platform

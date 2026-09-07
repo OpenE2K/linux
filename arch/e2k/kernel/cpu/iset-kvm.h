@@ -18,15 +18,15 @@
 #if	defined(CONFIG_KVM_HW_VIRTUALIZATION) && !defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is hardware virtualized host */
 
-extern void mem_wait_vcpumask_set(int vcpu_id, struct cpumask *vcpu_mask);
-extern void mem_wait_vcpumask_reset(int vcpu_id, struct cpumask *vcpu_mask);
+extern void mem_wait_vcpumask_set(int vcpu_id, physid_mask_t *vcpu_mask);
+extern void mem_wait_vcpumask_reset(int vcpu_id, physid_mask_t *vcpu_mask);
 
-static inline void mem_wait_vcpu_startup(int vcpu_id, struct cpumask *vcpu_mask)
+static inline void mem_wait_vcpu_startup(int vcpu_id, physid_mask_t *vcpu_mask)
 {
 	mem_wait_vcpumask_set(vcpu_id, vcpu_mask);
 }
 
-static inline void mem_wait_vcpu_wake_up(int vcpu_id, struct cpumask *vcpu_mask)
+static inline void mem_wait_vcpu_wake_up(int vcpu_id, physid_mask_t *vcpu_mask)
 {
 	mem_wait_vcpumask_reset(vcpu_id, vcpu_mask);
 }
@@ -240,7 +240,7 @@ kvm_restore_host_context(const struct kvm_vcpu *vcpu, e2k_iset_ver_t iset)
 	 * VIRT_CTRL_* registers
 	 */
 	write_VIRT_CTRL_CU_reg(hw_ctxt->virt_ctrl_cu);
-	WRITE_VIRT_CTRL_MU_REG(hw_ctxt->virt_ctrl_mu);
+	write_VIRT_CTRL_MU_reg(hw_ctxt->virt_ctrl_mu);
 	WRITE_G_W_IMASK_MMU_CR_REG_VALUE(AW(hw_ctxt->g_w_imask_mmu_cr));
 
 	/*

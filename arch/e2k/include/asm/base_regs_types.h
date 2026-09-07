@@ -29,9 +29,6 @@
 
 
 
-#ifndef __ASSEMBLY__
-
-
 typedef struct {
 	u32 word;
 } e2k_reg_t;
@@ -103,7 +100,6 @@ static __always_inline unsigned long ap_align_mask(unsigned long size)
 		return (1 << 24) - 1;
 	}
 }
-#endif /* __ASSEMBLY__ */
 
 #endif /* _BASE_REGS_TYPES_H_ */
 

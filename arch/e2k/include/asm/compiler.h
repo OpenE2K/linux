@@ -61,6 +61,8 @@
 #define ASM_LENGTH_15	_Pragma("asm_length(14)")
 #define ASM_LENGTH_16	_Pragma("asm_length(14)")
 #define ASM_LENGTH_17	_Pragma("asm_length(14)")
+#define ASM_LENGTH_18	_Pragma("asm_length(14)")
+#define ASM_LENGTH_30	_Pragma("asm_length(14)")
 
 #define __asm_length(len) CONCATENATE(ASM_LENGTH_,len)
 
@@ -192,12 +194,31 @@ do { \
 	__asm__ NOT_VOLATILE("" : : "r"(ptr) : "memory", PREEMPTION_CLOBBERS); \
 } while (0)
 
+/* Protects against function calls and `disp %ctpr` */
+#define barrier_calls() \
+do { \
+	__no_asm_inline(0) \
+	__asm__ volatile ("" : : : "call", "memory"); \
+} while (0)
+
 #define RELOC_HIDE(ptr, off)	((typeof(ptr)) ((unsigned long) (ptr) + (off)))
 
 #ifdef CONFIG_CC_IS_LCC
 # define builtin_expect_wrapper(x, val)	__builtin_expect_with_probability((x), (val), 0.9999)
 #else
 #  define builtin_expect_wrapper(x, val) __builtin_expect((x), (val))
+#endif
+
+#ifdef CONFIG_CC_IS_CLANG
+/* TODO bug 163804 - replace optnone with needed options only */
+# define __no_semispec __attribute__((optnone))
+#elif CONFIG_CC_IS_LCC
+# if __LCC__ == 131 && __LCC_MINOR__ >= 5 || __LCC__ > 131
+#  define __no_semispec __attribute__((optimize("-fno-semi-spec-ld"))) \
+		       __attribute__((optimize("-fno-loop-apb")))
+# else
+#  define __no_semispec __attribute__((optimize("O1")))
+# endif
 #endif
 
 #endif /* _ASM_COMPILER_H */

@@ -20,8 +20,6 @@
 #include <asm/cpu_regs.h>
 #include <asm/bootinfo.h>
 
-#ifndef __ASSEMBLY__
-
 /*
  * The next structures describe list of the memory areas used by boot-time
  * initialization. The item 'phys' points to physical base address of
@@ -169,10 +167,6 @@ extern bootmem_areas_t		kernel_bootmem;
 #define init_initrd_size	kernel_bootmem.initrd.size
 #endif /* CONFIG_BLK_DEV_INITRD */
 
-extern unsigned long disable_caches;
-extern bool disable_secondary_caches;
-extern bool disable_IP;
-
 /*
  * Forwards of functions of Virtual memory support initialization
  */
@@ -250,5 +244,4 @@ static inline void native_boot_pv_ops_to_ops(void)
 }
 #endif /* CONFIG_KVM_GUEST_KERNEL */
 
-#endif /* !(__ASSEMBLY__) */
 #endif /* _E2K_P2V_BOOT_INIT_H */

@@ -27,7 +27,6 @@
 static inline struct pt_regs *find_intc_emul_regs(const pt_regs_t *pt_regs)
 {
 	while (pt_regs) {
-		CHECK_PT_REGS_LOOP(pt_regs);
 		if (kvm_test_intc_emul_flag((pt_regs_t *) pt_regs))
 			break;
 		pt_regs = pt_regs->next;
@@ -213,7 +212,7 @@ static void vcpu_stack_banner(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 		gmm = gti->gmm;
 
 	pr_info("VCPU #%d GPID %d guest %s Thread\n",
-		vcpu->vcpu_id, vcpu->kvm->arch.vmid.nr,
+		vcpu->vcpu_id, vcpu->kvm->arch.vm_id,
 		(gmm == NULL) ? "Kernel" : "User");
 
 	if (gti != NULL) {

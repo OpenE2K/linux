@@ -225,6 +225,11 @@ static __always_inline void native_clear_aau_context(void)
 #define SAVE_AALDIS_V3(regs)	NATIVE_SAVE_AALDIS_V3(regs)
 #define SAVE_AALDIS_V5(regs)	NATIVE_SAVE_AALDIS_V5(regs)
 
+static __always_inline void save_aaldi(u64 *aaldis)
+{
+	NATIVE_SAVE_AALDIS(aaldis);
+}
+
 #define SAVE_AALDA(aaldas)					\
 ({								\
 	register u32	aalda0, aalda4, aalda8, aalda12,	\

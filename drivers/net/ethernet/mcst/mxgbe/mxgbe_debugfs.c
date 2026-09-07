@@ -52,7 +52,7 @@ static struct dentry *mxgbe_dbg_root;
  */
 
 /* MAC */
-const u_int32_t mxgbe_dbg_reg_id_mac[31] = {
+static const u_int32_t mxgbe_dbg_reg_id_mac[31] = {
 	MAC_LOOPBACK,
 	MAC_LINK_STAT,
 	MAC_LINK_CHG,
@@ -85,7 +85,7 @@ const u_int32_t mxgbe_dbg_reg_id_mac[31] = {
 	MAC_MAX_PPS,
 	MAC_PAUSE_CONSTS,
 };
-const char *mxgbe_dbg_reg_name_mac[31] = {
+static const char *mxgbe_dbg_reg_name_mac[31] = {
 	"MAC_LOOPBACK: loopback control (def: 0)",
 	"MAC_LINK_STAT: XGMI/XAUI link status (def: -)",
 	"MAC_LINK_CHG: MSI-X MAC_LINK interrupt control (def: 0)",
@@ -120,7 +120,7 @@ const char *mxgbe_dbg_reg_name_mac[31] = {
 };
 
 /* TX */
-const u_int32_t mxgbe_dbg_reg_id_tx[37] = {
+static const u_int32_t mxgbe_dbg_reg_id_tx[37] = {
 	TX_QNUM,
 	TX_BUFSIZE,
 	TX_OFFS_PRI0,
@@ -159,7 +159,7 @@ const u_int32_t mxgbe_dbg_reg_id_tx[37] = {
 	TX_PACK_CNT,
 	TX_MAX_REQ_SIZE,
 };
-const char *mxgbe_dbg_reg_name_tx[37] = {
+static const char *mxgbe_dbg_reg_name_tx[37] = {
 	"TX_QNUM: tx queue size (4..256)",
 	"TX_BUFSIZE: tx buffer length (def: -)",
 	"TX_OFFS_PRI0: offset in buf for prio 0 (def: 0)",
@@ -200,7 +200,7 @@ const char *mxgbe_dbg_reg_name_tx[37] = {
 };
 
 /* RX */
-const u_int32_t mxgbe_dbg_reg_id_rx[53] = {
+static const u_int32_t mxgbe_dbg_reg_id_rx[53] = {
 	RX_QNUM,
 	RX_BUFSIZE,
 	RX_OFFS_PRI0,
@@ -258,7 +258,7 @@ const u_int32_t mxgbe_dbg_reg_id_rx[53] = {
 	RX_FULL_TH6,
 	RX_FULL_TH7,
 };
-const char *mxgbe_dbg_reg_name_rx[53] = {
+static const char *mxgbe_dbg_reg_name_rx[53] = {
 	"RX_QNUM: tx queue size (4..256)",
 	"RX_BUFSIZE: tx buffer length (def: -)",
 	"RX_OFFS_PRI0: offset in buf for prio 0 (def: 0)",
@@ -318,7 +318,7 @@ const char *mxgbe_dbg_reg_name_rx[53] = {
 };
 
 /* TX/RX Q */
-const u_int32_t mxgbe_dbg_reg_id_q[11] = {
+static const u_int32_t mxgbe_dbg_reg_id_q[11] = {
 	Q_CTRL,
 	Q_IRQ,
 	Q_EMPTYTHR,
@@ -331,7 +331,7 @@ const u_int32_t mxgbe_dbg_reg_id_q[11] = {
 	Q_HEAD,
 	Q_TAIL,
 };
-const char *mxgbe_dbg_reg_name_q[11] = {
+static const char *mxgbe_dbg_reg_name_q[11] = {
 	"Q_CTRL: queue control (def:0)",
 	"Q_IRQ: irq control (def:0)",
 	"Q_EMPTYTHR: tx irq level (def:0)",
@@ -346,7 +346,7 @@ const char *mxgbe_dbg_reg_name_q[11] = {
 };
 
 /* IRQST */
-const u_int32_t mxgbe_dbg_reg_id_irq[17] = {
+static const u_int32_t mxgbe_dbg_reg_id_irq[17] = {
 	IRQST_0,
 	IRQST_1,
 	IRQST_2,
@@ -365,7 +365,7 @@ const u_int32_t mxgbe_dbg_reg_id_irq[17] = {
 	IRQST_15,
 	IRQST_16,
 };
-const char *mxgbe_dbg_reg_name_irq[17] = {
+static const char *mxgbe_dbg_reg_name_irq[17] = {
 	"IRQST_0:  irq status: RXQ   0.. 31 (def: 0)",
 	"IRQST_1:  irq status: RXQ  32.. 63 (def: 0)",
 	"IRQST_2:  irq status: RXQ  64.. 95 (def: 0)",
@@ -386,7 +386,7 @@ const char *mxgbe_dbg_reg_name_irq[17] = {
 };
 
 /* MISC */
-const u_int32_t mxgbe_dbg_reg_id_misc[25] = {
+static const u_int32_t mxgbe_dbg_reg_id_misc[25] = {
 	/* PRST */
 	PRST_CST,
 	/* I2C */
@@ -417,7 +417,7 @@ const u_int32_t mxgbe_dbg_reg_id_misc[25] = {
 	MDIO_CSR,
 	MDIO_DATA,
 };
-const char *mxgbe_dbg_reg_name_misc[25] = {
+static const char *mxgbe_dbg_reg_name_misc[25] = {
 	/* PRST */
 	"PRST_CST: reset status (def: 0x400003FF)",
 	/* I2C */
@@ -531,7 +531,7 @@ const u_int32_t mxgbe_dbg_reg_id_phy[12] = {
 	0x010008,
 	0x01000A,
 #else
-const u_int32_t mxgbe_dbg_reg_id_phy[51] = {
+static const u_int32_t mxgbe_dbg_reg_id_phy[51] = {
 	SR_XS_PCS_CTRL1,
 	SR_XS_PCS_DEV_ID1,
 	SR_XS_PCS_DEV_ID2,
@@ -604,7 +604,7 @@ const char *mxgbe_dbg_reg_name_phy[12] = {
 	"PMA/PMD Status 2 (def: 0xB1EF)",
 	"PMA/PMD Receive SigDet (def: 0x0000)",
 #else
-const char *mxgbe_dbg_reg_name_phy[51] = {
+static const char *mxgbe_dbg_reg_name_phy[51] = {
 	"SR_XS_PCS_CTRL1",
 	"SR_XS_PCS_DEV_ID1",
 	"SR_XS_PCS_DEV_ID2",
@@ -660,7 +660,7 @@ const char *mxgbe_dbg_reg_name_phy[51] = {
 };
 
 /* CNT */
-const u_int32_t mxgbe_dbg_reg_id_cnt[7] = {
+static const u_int32_t mxgbe_dbg_reg_id_cnt[7] = {
 	TX_BYTE_CNT,
 	TX_PACK_CNT,
 	RX_BYTE_CNT,
@@ -669,7 +669,7 @@ const u_int32_t mxgbe_dbg_reg_id_cnt[7] = {
 	RX_DROP_CNT,
 	RX_ERR_CNT,
 };
-const char *mxgbe_dbg_reg_name_cnt[7] = {
+static const char *mxgbe_dbg_reg_name_cnt[7] = {
 	"TX_BYTE_CNT: TX bytes",
 	"TX_PACK_CNT: TX packets",
 	"RX_BYTE_CNT: RX bytes",
@@ -1309,8 +1309,6 @@ static ssize_t mxgbe_dbg_reg_ops_read(struct file *filp, char __user *buffer,
 	return len;
 } /* mxgbe_dbg_reg_ops_read */
 
-u16 mxgbe_pcs_read(mxgbe_priv_t *priv, int regnum);
-void mxgbe_pcs_write(mxgbe_priv_t *priv, int regnum, u16 value);
 
 /**
  * mxgbe_dbg_reg_ops_write - write into reg_ops datum

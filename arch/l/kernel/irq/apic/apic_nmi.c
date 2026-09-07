@@ -8,7 +8,7 @@
 #include <asm/nmi.h>
 
 #include "apic.h"
-
+#include "../pic.h"
 
 static void unknown_nmi_error(unsigned int reason, struct pt_regs *regs)
 {

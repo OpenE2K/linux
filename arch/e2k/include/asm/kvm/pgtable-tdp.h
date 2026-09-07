@@ -25,8 +25,6 @@
 /* max. number of physical address bits (architected) */
 #define E2K_MAX_PHYS_BITS_TDP	E2K_MAX_PHYS_BITS_V6
 
-#ifndef __ASSEMBLY__
-
 /*
  * TDP-PTE format
  */
@@ -141,7 +139,5 @@ static inline int get_tdp_root_level(void)
 {
 	return E2K_PT_LEVELS_NUM;
 }
-
-#endif	/* ! __ASSEMBLY__ */
 
 #endif /* ! _ASM_E2K_KVM_PGTABLE_TDP_H */

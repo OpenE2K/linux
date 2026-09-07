@@ -20,6 +20,7 @@
 #include <asm/trap_table.h>
 #include <asm/kdebug.h>
 #include <asm/kvm/uaccess.h>
+#include <asm/kexec.h>
 
 /******************************* DEBUG DEFINES ********************************/
 #undef	DEBUG_PF_MODE
@@ -64,12 +65,6 @@ void get_and_invalidate_MLT_context_v3(e2k_mlt_t *mlt_state)
 }
 #endif
 
-__section(".entry.text")
-notrace __interrupt void save_global_gregs_v3(struct global_gregs *gregs)
-{
-	DO_SAVE_GREGS_ON_MASK(gregs->g, E2K_ISET_V3, LOCAL_GREGS_USER_MASK);
-}
-
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 __section(".entry.text")
 notrace __interrupt
@@ -77,17 +72,7 @@ void save_local_gregs_v3(struct local_gregs *gregs)
 {
 	gregs->bgr = native_read_BGR_reg();
 	init_BGR_reg(); /* enable whole GRF */
-	SAVE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V3, 0);
-}
-#endif
-
-__section(".entry.text")
-notrace __interrupt void save_scratch_gregs_v3(struct scratch_gregs *gregs)
-{
-	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
-	SAVE_GREGS_PAIR(gregs->g, 0, 1, 26, 27, E2K_ISET_V3);
-	SAVE_GREGS_PAIR(gregs->g, 2, 3, 28, 29, E2K_ISET_V3);
-	SAVE_GREGS_PAIR(gregs->g, 4, 5, 30, 31, E2K_ISET_V3);
+	save_local_gregs_iset(gregs, E2K_ISET_V3);
 }
 
 notrace __interrupt
@@ -116,29 +101,6 @@ void save_gregs_on_mask_v3(struct e2k_gregs *gregs, bool dirty_bgr,
 		native_write_BGR_reg(gregs->bgr);
 }
 
-__section(".entry.text")
-notrace __interrupt void restore_global_gregs_v3(const struct global_gregs *gregs)
-{
-	DO_RESTORE_GREGS_ON_MASK(gregs->g, E2K_ISET_V3, LOCAL_GREGS_USER_MASK);
-}
-
-__section(".entry.text")
-notrace __interrupt
-void restore_local_gregs_v3(const struct local_gregs *gregs)
-{
-	RESTORE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V3, 0);
-	native_write_BGR_reg(gregs->bgr);
-}
-
-__section(".entry.text")
-notrace __interrupt void restore_scratch_gregs_v3(const struct scratch_gregs *gregs)
-{
-	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
-	RESTORE_GREGS_PAIR(gregs->g, 0, 1, 26, 27, E2K_ISET_V3);
-	RESTORE_GREGS_PAIR(gregs->g, 2, 3, 28, 29, E2K_ISET_V3);
-	RESTORE_GREGS_PAIR(gregs->g, 4, 5, 30, 31, E2K_ISET_V3);
-}
-
 notrace __interrupt
 void restore_gregs_on_mask_v3(struct e2k_gregs *gregs, bool dirty_bgr,
 			      unsigned long mask_not_restore)
@@ -163,6 +125,45 @@ void restore_gregs_on_mask_v3(struct e2k_gregs *gregs, bool dirty_bgr,
 	}
 	if (!dirty_bgr)
 		native_write_BGR_reg(gregs->bgr);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+__section(".entry.text")
+notrace __interrupt void save_global_gregs_v3(struct global_gregs *gregs)
+{
+	save_global_gregs_iset(gregs, E2K_ISET_V3);
+}
+
+__section(".entry.text")
+notrace __interrupt void save_scratch_gregs_v3(struct scratch_gregs *gregs)
+{
+	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
+	SAVE_GREGS_PAIR(gregs->g, 0, 26, 27, E2K_ISET_V3);
+	SAVE_GREGS_PAIR(gregs->g, 2, 28, 29, E2K_ISET_V3);
+	SAVE_GREGS_PAIR(gregs->g, 4, 30, 31, E2K_ISET_V3);
+}
+
+__section(".entry.text")
+notrace __interrupt void restore_global_gregs_v3(const struct global_gregs *gregs)
+{
+	restore_global_gregs_iset(gregs, E2K_ISET_V3);
+}
+
+__section(".entry.text")
+notrace __interrupt
+void restore_local_gregs_v3(const struct local_gregs *gregs)
+{
+	restore_local_gregs_iset(gregs, E2K_ISET_V3);
+	native_write_BGR_reg(gregs->bgr);
+}
+
+__section(".entry.text")
+notrace __interrupt void restore_scratch_gregs_v3(const struct scratch_gregs *gregs)
+{
+	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
+	RESTORE_GREGS_PAIR(gregs->g, 0, 26, 27, E2K_ISET_V3);
+	RESTORE_GREGS_PAIR(gregs->g, 2, 28, 29, E2K_ISET_V3);
+	RESTORE_GREGS_PAIR(gregs->g, 4, 30, 31, E2K_ISET_V3);
 }
 
 /* calculate current array prefetch buffer indices values
@@ -224,10 +225,10 @@ void calculate_aau_aaldis_aaldas_v3(const struct pt_regs *regs,
 		}
 
 		if (area_num < 32) {
-			fapb_addr = (e2k_fapb_instr_t __user *)
+			fapb_addr = (e2k_fapb_instr_t __user __force *)
 				(regs->ctpr2.ta_base + 16 * area_num);
 		} else {
-			fapb_addr = (e2k_fapb_instr_t __user *)
+			fapb_addr = (e2k_fapb_instr_t __user __force *)
 				(regs->ctpr2.ta_base + 8 + 16 * (area_num - 32));
 		}
 
@@ -338,10 +339,10 @@ void do_aau_fault_v3(int aa_field, struct pt_regs *regs)
 			aa_bit, area_num);
 
 		if (area_num < 32) {
-			fapb_addr = (e2k_fapb_instr_t __user *) (regs->ctpr2.ta_base
+			fapb_addr = (e2k_fapb_instr_t __user __force *) (regs->ctpr2.ta_base
 							  + 16 * area_num);
 		} else {
-			fapb_addr = (e2k_fapb_instr_t __user *) (regs->ctpr2.ta_base
+			fapb_addr = (e2k_fapb_instr_t __user __force *) (regs->ctpr2.ta_base
 							  + 16 * (area_num - 32) + 8);
 		}
 
@@ -446,12 +447,6 @@ die:
 		force_sig(SIGSEGV);
 	else
 		die("AAU error", regs, 0);
-}
-
-__section(".entry.text")
-notrace void save_aaldi_v3(u64 *aaldis)
-{
-	SAVE_AALDIS_V3(aaldis);
 }
 
 /*
@@ -570,7 +565,7 @@ void __no_sanitize_address native_clock_off_v3(void)
 
 	/* Make sure we do not race with `callin_go` write */
 	raw_all_irq_save(flags);
-	if (!cpumask_test_cpu(hard_smp_processor_id(), &callin_go))
+	if (!physid_isset(hard_smp_processor_id(), callin_go))
 		C3_wait_trap(true);
 	raw_all_irq_restore(flags);
 }
@@ -582,7 +577,12 @@ static void clock_on_v3_ipi(void *unused)
 
 void native_clock_on_v3(int cpu)
 {
+#ifdef CONFIG_KEXEC
+	bool wait = !kexec_wakeup_offline;
+#else
+	bool wait = true;
+#endif
 	/* Wake CPU disabled by clk_off(CPU_HOTPLUG_CLOCK_OFF) */
-	nmi_call_function_single_offline(cpu, clock_on_v3_ipi, NULL, true, 0);
+	nmi_call_function_single_offline(cpu, clock_on_v3_ipi, NULL, wait, 0);
 }
 #endif

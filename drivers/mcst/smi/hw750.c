@@ -51,7 +51,7 @@ struct smi_750_register{
 };
 
 
-
+void hw750_suspend(struct smi_750_register * pSave); /* just to satisfy sparse */
 void hw750_suspend(struct smi_750_register * pSave)
 {
 
@@ -120,7 +120,7 @@ void hw750_suspend(struct smi_750_register * pSave)
 		pSave->secondary_auto_centering_br = PEEK32(SECONDARY_AUTO_CENTERING_BR);
 
 }
-
+void hw750_resume(struct smi_750_register * pSave); /* just to satisfy sparse */
 void hw750_resume(struct smi_750_register * pSave)
 {
 	/* restore mmio registers */
@@ -189,6 +189,7 @@ void hw750_resume(struct smi_750_register * pSave)
 
 }
 
+void hw750_set_base(int display,int pitch,int base_addr); /* just to satisfy sparse */
 void hw750_set_base(int display,int pitch,int base_addr)
 {	
 
@@ -207,8 +208,8 @@ void hw750_set_base(int display,int pitch,int base_addr)
 		setDisplayBaseAddress(SECONDARY_CTRL, base_addr);
 	}
 }
-
-void hw750_set_dpms(int display,int state)
+#if 0
+void hw750_set_dpms(int display, int state)
 {
 	if(display == 0)
 	{
@@ -221,7 +222,7 @@ void hw750_set_dpms(int display,int state)
 		setPath(CRT_PATH, SECONDARY_CTRL, state);
 	}
 }
-
+#endif
  
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)
 int hw750_en_dis_interrupt(int status, int pipe)
@@ -242,6 +243,7 @@ int hw750_en_dis_interrupt(int status, int pipe)
 
 }
 #else
+int hw750_en_dis_interrupt(int status);  /* just to satisfy sparse */
 int hw750_en_dis_interrupt(int status)
 	{
 		if(status == 0)
@@ -259,7 +261,7 @@ int hw750_en_dis_interrupt(int status)
 
 #endif
 
-
+int hw750_check_vsync_interrupt(int path);  /* just to satisfy spsrse */
 int hw750_check_vsync_interrupt(int path)
 {
 
@@ -286,7 +288,7 @@ int hw750_check_vsync_interrupt(int path)
 }
 
 
-
+void hw750_clear_vsync_interrupt(int path);  /* just to satisfy sparse */
 void hw750_clear_vsync_interrupt(int path)
 {
 
@@ -307,13 +309,14 @@ void hw750_clear_vsync_interrupt(int path)
 
 }
 
+void ddk750_disable_IntMask(void );  /* just to satisfy sparse */
 void ddk750_disable_IntMask(void)
 {
 	
     pokeRegisterDWord(INT_MASK, 0);
 }
 
-
+void hw750_setgamma(disp_control_t dispCtrl, unsigned long enable);   /* just to satisfy sparse */
 void hw750_setgamma(disp_control_t dispCtrl, unsigned long enable)
 {
 	unsigned long value;
@@ -337,6 +340,8 @@ void hw750_setgamma(disp_control_t dispCtrl, unsigned long enable)
 	pokeRegisterDWord(regCtrl, value);    
 }
 
+/* just to satisfy sparse */
+void hw750_load_lut(disp_control_t dispCtrl, int size, u8 lut_r[], u8 lut_g[], u8 lut_b[]);
 void hw750_load_lut(disp_control_t dispCtrl, int size, u8 lut_r[], u8 lut_g[], u8 lut_b[])
 {
 	unsigned int i, v;

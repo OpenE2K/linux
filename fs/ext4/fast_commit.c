@@ -338,7 +338,11 @@ restart:
 void ext4_fc_mark_ineligible(struct super_block *sb, int reason, handle_t *handle)
 {
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
+#ifdef CONFIG_MCST
+	tid_t tid = 0;
+#else
 	tid_t tid;
+#endif
 	bool has_transaction = true;
 	bool is_ineligible;
 

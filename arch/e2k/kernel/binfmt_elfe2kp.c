@@ -41,7 +41,8 @@ static struct linux_binfmt elf_format = {
 };
 
 #define BAD_ADDR(x)	((unsigned long)(x) > TASK_SIZE)
-#define	check_len(x)	((u64)(x) >= (1L << 32))
+#define check_len(x)    (cpu_has(CPU_FEAT_V7_CPU_REGS) ?	\
+					((u64)(x) >= AP_SIZE_ALIGN_PAGE) : ((u64)(x) >> 32))
 
 #if defined(CONFIG_MMU) && !defined(MAX_ARG_PAGES)
 # define MAX_ARG_PAGES	32
@@ -837,8 +838,8 @@ e2p_load_cu_file_by_headers(struct file *loadf,
 			/* According to my believes pages preceding the one
 			 * matching p_vaddr should not be accessible.
 			 */
-			start_aligned = start & ~(PAGE_SIZE - 1);
-			offset = prog_p->p_offset & ~(PAGE_SIZE - 1);
+			start_aligned = start & PAGE_MASK;
+			offset = prog_p->p_offset & PAGE_MASK;
 
 		}
 		end = PAGE_ALIGN(start + prog_p->p_filesz);

@@ -11,22 +11,14 @@
 #define _E2K_TRAP_TABLE_H
 
 #include <linux/types.h>
+
 #include <asm/e2k_api.h>
 #include <asm/cpu_regs_types.h>
 #include <asm/trap_def.h>
 #include <asm/glob_regs.h>
 #include <asm/mmu_regs_types.h>
 #include <asm/e2k_debug.h>
-
-#ifndef	__ASSEMBLY__
 #include <asm/process.h>
-#endif /* __ASSEMBLY__ */
-
-#ifdef	__ASSEMBLY__
-#include <generated/asm-offsets.h>
-#endif /* __ASSEMBLY__ */
-
-#ifndef	__ASSEMBLY__
 
 #define GDB_BREAKPOINT_STUB_MASK	0xffffffffffffff8fUL
 #define	GDB_BREAKPOINT_STUB		0x0dc0c08004000001UL
@@ -170,7 +162,7 @@ extern const protected_system_call_func sys_call_table_entry8[NR_syscalls];
 extern const system_call_func sys_protcall_table[NR_syscalls];
 extern const system_call_func sys_call_table_deprecated[NR_syscalls];
 
-#if !defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if !defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* or it is host kernel with virtualization support */
 
@@ -232,29 +224,10 @@ is_kernel_data_stack_bounds(bool on_kernel, e2k_usd_t usd)
 }
 #endif /* ! CONFIG_VIRTUALIZATION */
 
-#endif /* !CONFIG_VIRTUALIZATION ||  CONFIG_KVM_HOST_MODE */
-
-#else /* __ASSEMBLY__ */
-
-/*
- * Global registers map used by kernel
- * Numbers of used global registers see at arch/e2k/include/asm/glob_regs.h
- */
-
-#define	GET_GREG_MEMONIC(greg_no)	%dg ## greg_no
-#define	DO_GET_GREG_MEMONIC(greg_no)	GET_GREG_MEMONIC(greg_no)
-
-#define	GCURTASK	DO_GET_GREG_MEMONIC(CURRENT_TASK_GREG)
-#define	GCPUOFFSET	DO_GET_GREG_MEMONIC(MY_CPU_OFFSET_GREG)
-#define	GCPUID_PREEMPT	DO_GET_GREG_MEMONIC(SMP_CPU_ID_GREG)
-/* Macroses for virtualization support on assembler */
-#define	GVCPUSTATE	DO_GET_GREG_MEMONIC(GUEST_VCPU_STATE_GREG)
-
-#endif /* ! __ASSEMBLY__ */
+#endif /* !CONFIG_VIRTUALIZATION ||  CONFIG_KVM_HOST_KERNEL */
 
 #include <asm/kvm/trap_table.h>
 
-#ifndef __ASSEMBLY__
 __always_inline	/* For CPU_HWBUG_VIRT_PSIZE_INTERCEPTION */
 static void init_pt_regs_for_syscall(struct pt_regs *regs)
 {
@@ -266,6 +239,5 @@ static void init_pt_regs_for_syscall(struct pt_regs *regs)
 	regs->aasr = E2K_NULL_AASR;
 	init_guest_syscalls_handling(regs);
 }
-#endif
 
 #endif /* _E2K_TRAP_TABLE_H */

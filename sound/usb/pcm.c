@@ -1437,6 +1437,9 @@ static int prepare_playback_urb(struct snd_usb_substream *subs,
 	unsigned long flags;
 	int err = 0;
 
+#ifdef CONFIG_MCST
+	bytes = 0;
+#endif
 	stride = ep->stride;
 
 	frames = 0;

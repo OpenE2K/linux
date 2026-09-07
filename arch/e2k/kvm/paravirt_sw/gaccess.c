@@ -388,8 +388,8 @@ static inline long copy_aligned_guest_virt_system(struct kvm_vcpu *vcpu,
 						  const void *src,
 						  size_t size,
 						  size_t *copied_p,
-						  unsigned long strd_opcode,
-						  unsigned long ldrd_opcode,
+						  ldst_rec_op_t strd_opcode,
+						  ldst_rec_op_t ldrd_opcode,
 						  int prefetch, int ALIGN,
 						  bool copy_user)
 {
@@ -628,8 +628,8 @@ return_fault:
 long kvm_vcpu_copy_guest_virt_system(struct kvm_vcpu *vcpu,
 				     void *dst, const void *src,
 				     size_t size, size_t *copied,
-				     unsigned long strd_opcode,
-				     unsigned long ldrd_opcode, int prefetch)
+				     ldst_rec_op_t strd_opcode,
+				     ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	return copy_aligned_guest_virt_system(vcpu, dst, src, size, copied,
 					      strd_opcode, ldrd_opcode,
@@ -640,8 +640,8 @@ EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_virt_system);
 long kvm_vcpu_copy_guest_virt_system_16(struct kvm_vcpu *vcpu,
 					void *dst,
 					const void *src, size_t size,
-					unsigned long strd_opcode,
-					unsigned long ldrd_opcode, int prefetch)
+					ldst_rec_op_t strd_opcode,
+					ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	return copy_aligned_guest_virt_system(vcpu, dst, src, size, NULL,
 					      strd_opcode, ldrd_opcode,
@@ -653,8 +653,8 @@ long kvm_vcpu_copy_guest_user_virt_system(struct kvm_vcpu *vcpu,
 					  void *dst,
 					  const void *src, size_t size,
 					  size_t *copied,
-					  unsigned long strd_opcode,
-					  unsigned long ldrd_opcode,
+					  ldst_rec_op_t strd_opcode,
+					  ldst_rec_op_t ldrd_opcode,
 					  int prefetch)
 {
 	return copy_aligned_guest_virt_system(vcpu, dst, src, size, copied,
@@ -667,8 +667,8 @@ long kvm_vcpu_copy_guest_user_virt_system_16(struct kvm_vcpu *vcpu,
 					     void *dst,
 					     const void *src,
 					     size_t size,
-					     unsigned long strd_opcode,
-					     unsigned long ldrd_opcode,
+					     ldst_rec_op_t strd_opcode,
+					     ldst_rec_op_t ldrd_opcode,
 					     int prefetch)
 {
 	return copy_aligned_guest_virt_system(vcpu, dst, src, size, NULL,
@@ -680,8 +680,8 @@ EXPORT_SYMBOL_GPL(kvm_vcpu_copy_guest_user_virt_system_16);
 static size_t kvm_vcpu_copy_host_guest(struct kvm_vcpu *vcpu,
 				       void *host, void *guest,
 				       size_t size, bool to_host,
-				       unsigned long strd_opcode,
-				       unsigned long ldrd_opcode, int prefetch)
+				       ldst_rec_op_t strd_opcode,
+				       ldst_rec_op_t ldrd_opcode, int prefetch)
 {
 	size_t len = size, quad, head, head_len, tail, ret;
 	unsigned long hva;
@@ -929,7 +929,7 @@ out:
 
 size_t kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
 		const void *host, void __user *guest, size_t size,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
 		int prefetch)
 {
 	return kvm_vcpu_copy_host_guest(vcpu, (void *)host, (void __force *)guest, size,
@@ -938,7 +938,7 @@ size_t kvm_vcpu_copy_host_to_guest(struct kvm_vcpu *vcpu,
 
 size_t kvm_vcpu_copy_host_from_guest(struct kvm_vcpu *vcpu,
 		void *host, const void __user *guest, size_t size,
-		unsigned long strd_opcode, unsigned long ldrd_opcode,
+		ldst_rec_op_t strd_opcode, ldst_rec_op_t ldrd_opcode,
 		int prefetch)
 {
 	return kvm_vcpu_copy_host_guest(vcpu, host, (void __force *)guest, size,
@@ -963,8 +963,8 @@ unsigned long kvm_copy_in_user_with_tags(struct kvm_vcpu *vcpu, void *to,
 	head = min(head, len);
 	ret = copy_aligned_guest_virt_system(current_thread_info()->vcpu,
 			dst_addr, src_addr, head, NULL,
-			TAGGED_MEM_STORE_REC_OPC | MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			TAGGED_MEM_LOAD_REC_OPC | MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
+			ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1),
+			ldst_rec_tagged_load_bypass(CACHE_BYPASS_L1),
 			false /* prefetch */ , 1, false);
 	if (ret < 0) {
 		if (ret != -EAGAIN) {
@@ -998,8 +998,8 @@ unsigned long kvm_copy_in_user_with_tags(struct kvm_vcpu *vcpu, void *to,
 
 	ret = copy_aligned_guest_virt_system(current_thread_info()->vcpu,
 			dst_addr, src_addr, quad, NULL,
-			TAGGED_MEM_STORE_REC_OPC | MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			TAGGED_MEM_LOAD_REC_OPC | MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
+			ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1),
+			ldst_rec_tagged_load_bypass(CACHE_BYPASS_L1),
 			true /* prefetch */ , 16, false);
 	if (ret < 0) {
 		if (ret != -EAGAIN) {
@@ -1029,8 +1029,8 @@ tail_copy:
 
 	ret = copy_aligned_guest_virt_system(current_thread_info()->vcpu,
 			dst_addr, src_addr, len, NULL,
-			TAGGED_MEM_STORE_REC_OPC | MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
-			TAGGED_MEM_LOAD_REC_OPC | MAS_BYPASS_L1_CACHE << LDST_REC_OPC_MAS_SHIFT,
+			ldst_rec_tagged_store_bypass(CACHE_BYPASS_L1),
+			ldst_rec_tagged_load_bypass(CACHE_BYPASS_L1),
 			false /* prefetch */ , 1, false);
 	if (ret < 0) {
 		if (ret != -EAGAIN) {
@@ -1136,7 +1136,7 @@ unsigned long kvm_copy_from_user_with_tags(void *to,
 		 * located below usual hardware stacks area (USER_ADDR_MAX),
 		 * thus there is no need to bypass access_ok() check. */
 		left =
-		    copy_from_user_with_tags(to, (__user void *)from_hva, copy_len);
+		    copy_from_user_tagged(to, (__user void *)from_hva, copy_len);
 		if (unlikely(left)) {
 			pr_err("%s(): error: copied 0x%lx/0x%lx bytes from %px to %px\n",
 			     __func__, copy_len - left, copy_len, from, to);

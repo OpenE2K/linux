@@ -2,7 +2,7 @@
 
 #include <x86emu.h>
 #include "init.h"
-#include "printk.h"
+#include "console/printk.h"
 
 #include <linux/pci_ids.h>
 
@@ -21,10 +21,6 @@ void x86emu_dump_xregs(void);
 int int15_handler(void);
 int int16_handler(void);
 int int1A_handler(void);
-#ifndef _PC
-int int42_handler(void);
-#endif
-int intE6_handler(void);
 void setup_int_vect(void);
 int run_bios_int(int num);
 u32 getIntVect(int num);
@@ -55,10 +51,6 @@ void do_int(int num)
 	case 0x10:
 	case 0x42:
 	case 0x6D:
-
-		if (getIntVect(num) == 0xFF065) {
-			ret = int42_handler();
-		}
 		break;
 #endif
 	case 0x15:
@@ -71,7 +63,7 @@ void do_int(int num)
 		ret = int1A_handler();
 		break;
 	case 0xe6:
-		ret = intE6_handler();
+		rom_printk("inte6 not supported\n");
 		break;
 	default:
 		break;
@@ -202,13 +194,6 @@ int pci_video_bios_init(struct bios_pci_dev *dev)
 	}
 #endif
 
-#if 0
-	debugflag = DEBUG_MEM_TRACE_F |
-		    DEBUG_DECODE_F | DEBUG_DISASSEMBLE_F |
-		    DEBUG_TRACE_F | 
-		    DEBUG_SYSINT_F;
-#endif
-
 #ifdef DEBUG
 //	debugflag = 0x00ffffff;
 	if (debugflag) {
@@ -326,49 +311,6 @@ unsigned char read_att_b(unsigned short addr) {
 	bios_outb(addr, ATT_IW);
 	return bios_inb(ATT_R);
 }
-
-
-#if 0
-
-void vga_set_amode (void) {
-        unsigned char byte;
-
-	rom_printk("Switching into alpha mode...");
-
-
-        write_att(0x0c, ATC_MODE);
-
-        //reset palette to normal in the case it was changed
-        write_att(0x0, ATC_COLOR_PAGE);
-//
-// display is off at this point
-
-	write_seq(0x3, SEQ_PLANE_WRITE);	/* planes 0 & 1 */
-	byte = read_seq_b(SEQ_MEMORY_MODE) & ~0x04;
-	write_seq(byte, SEQ_MEMORY_MODE);
-
-	byte = read_gra_b(GDC_MODE) & ~0x60;
-	write_gra(byte|0x10, GDC_MODE);
-
-	write_gra(0x0e, GDC_MISC);
-
-	write_crtc(0x00, CRTC_CURSOR_START);
-	write_crtc(CHAR_HEIGHT-1, CRTC_CURSOR_END);
-
-	byte = read_crtc_b(CRTC_MODE) & ~0xe0;
-	write_crtc(byte|0xa0, CRTC_MODE);
-	byte = read_crtc_b(CRTC_MAX_SCAN) & ~0x01f;
-	write_crtc(byte | (CHAR_HEIGHT-1), CRTC_MAX_SCAN);
-
-
-// turn on display, disable access to attr palette
-	bios_inb(IS1_RC);
-	bios_outb(0x20, ATT_IW);
-
-	rom_printk("done.\n");
-}
-
-#endif
 
 /*
  * by Steve M. Gehlbach, Ph.D. <steve@kesa.com>
@@ -551,14 +493,6 @@ void video_bios(void)
 
 		atyr128_font_enable( (unsigned char *) VGA_FONT_BASE, 
 					CHAR_HEIGHT, 256);
-#if 0
-
-		unsigned char *vidmem = (unsigned char *) dev->base_address[0];
-		int i;
-		for (i=0; i < (1 * 1024 * 1024); i++) {
-			vidmem[i] = 0;	
-		};
-#endif
 	}
 
 //	vga_set_amode();
@@ -575,18 +509,5 @@ void video_bios(void)
 			} while (0) ;
 		}
 	}
-
-#if 0
-	if (cl5446)
-	{
-		long int i;
-
-//		rom_printk("qwertyuiopasdfghjklzxcvbnm\n");
-//		rom_printk("qwertyuiopasdfghjklzxcvbnm\n");
-//		rom_printk("qwertyuiopasdfghjklzxcvbnm\n");
-		for (i=0; i<2000000L; i++) { do {i; } while (0) ; }
-	}
-#endif
-
 }
 

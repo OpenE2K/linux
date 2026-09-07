@@ -568,6 +568,10 @@ static void mmhub_v2_0_update_medium_grain_clock_gating(struct amdgpu_device *ad
 {
 	uint32_t def, data, def1, data1;
 
+#ifdef CONFIG_MCST
+	data = 0;
+	def = 0;
+#endif
 	if (!(adev->cg_flags & AMD_CG_SUPPORT_MC_MGCG))
 		return;
 

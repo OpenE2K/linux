@@ -1850,7 +1850,7 @@ static void __attribute((unused)) FreeDMAMem(struct drm_gem_hantro_object *cma_o
 
 	if (!pslice)
 		return;
-	dma_free_coherent(pslice->dev, cma_obj->base.size,
+	dma_free_wc(pslice->dev, cma_obj->base.size,
 				cma_obj->vaddr, cma_obj->paddr);
 }
 

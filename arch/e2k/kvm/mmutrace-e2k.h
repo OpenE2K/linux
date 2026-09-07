@@ -12,6 +12,7 @@
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM kvmmmu
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define KVM_MMU_PAGE_FIELDS			\
 	__field(unsigned long, mmu_valid_gen)	\
 	__field(__u64, gfn)			\
@@ -41,13 +42,12 @@
 									\
 	trace_seq_printf(p, "sp gen %lx gfn %llx gpt gpa %llx "		\
 			"gva %llx %u %s %s %s"				\
-			 " %snxe root %u %s%c",	__entry->mmu_valid_gen,	\
+			 " root %u %s%c",	__entry->mmu_valid_gen,	\
 			 __entry->gfn, __entry->gpt_gpa,		\
 			 __entry->gva, role.level,			\
 			 role.direct ? " direct" : "",			\
 			 access_str[role.access],			\
 			 role.invalid ? " invalid" : "",		\
-			 role.nxe ? "" : "!",				\
 			 __entry->root_count,				\
 			 __entry->unsync ? "unsync" : "sync", 0);	\
 	saved_ptr;							\
@@ -85,7 +85,7 @@
 	{ PFERR_DONT_RECOVER_MASK, "NotRec" },	\
 	{ PFERR_FETCH_MASK, "F" }
 
-/*
+	/*
  * A pagetable walk has started
  */
 TRACE_EVENT(
@@ -183,6 +183,70 @@ TRACE_EVENT(
 				kvm_mmu_trace_pferr_flags),
 		  PFRES_GET_ACCESS_SIZE(__entry->pferr))
 );
+#else
+#define KVM_MMU_PAGE_FIELDS			\
+	__field(unsigned long, mmu_valid_gen)	\
+	__field(__u64, gfn)			\
+	__field(__u64, gva)			\
+	__field(__u32, role)			\
+	__field(__u32, root_count)		\
+	__field(bool, unsync)
+
+#define KVM_MMU_PAGE_ASSIGN(sp)				\
+	__entry->mmu_valid_gen = sp->mmu_valid_gen;	\
+	__entry->gfn = sp->gfn;				\
+	__entry->gva = sp->gva;				\
+	__entry->role = sp->role.word;			\
+	__entry->root_count = sp->root_count;		\
+	__entry->unsync = sp->unsync;
+
+#define KVM_MMU_PAGE_PRINTK() ({					\
+	const char *saved_ptr = trace_seq_buffer_ptr(p);		\
+	union kvm_mmu_page_role role;					\
+									\
+	role.word = __entry->role;					\
+									\
+	trace_seq_printf(p, "sp gen %lx gfn %llx gva %llx %u %s" \
+			 " root %u %s%c",	__entry->mmu_valid_gen,	\
+			 __entry->gfn, __entry->gva, role.level, \
+			 role.invalid ? " invalid" : "",		\
+			 __entry->root_count,				\
+			 __entry->unsync ? "unsync" : "sync", 0);	\
+	saved_ptr;							\
+		})
+
+#define	KVM_MMU_PT_LEVEL_NAME(__level)					\
+	(((__level) == E2K_PGD_LEVEL_NUM) ? "pgd" : \
+		(((__level) == E2K_PUD_LEVEL_NUM) ? "pud" : \
+			(((__level) == E2K_PMD_LEVEL_NUM) ? "pmd" : \
+				(((__level) == E2K_PTE_LEVEL_NUM) ? \
+							"pte" : "???"))))
+
+#define kvm_mmu_trace_pferr_flags		\
+	{ PFERR_PRESENT_MASK, "P" },		\
+	{ PFERR_WRITE_MASK, "W" },		\
+	{ PFERR_USER_MASK, "U" },		\
+	{ PFERR_RSVD_MASK, "RSVD" },		\
+	{ PFERR_NOT_PRESENT_MASK, "NotP" },	\
+	{ PFERR_PT_FAULT_MASK, "PF" },		\
+	{ PFERR_INSTR_FAULT_MASK, "InstrF" },	\
+	{ PFERR_INSTR_PROT_MASK, "InstrP" },	\
+	{ PFERR_FORCED_MASK, "Empty" },		\
+	{ PFERR_GPTE_CHANGED_MASK, "GpteCH" },	\
+	{ PFERR_MMIO_MASK, "MMIO" },		\
+	{ PFERR_ONLY_VALID_MASK, "OValid" },	\
+	{ PFERR_READ_PROT_MASK, "RProt" },	\
+	{ PFERR_IS_UNMAPPED_MASK, "UNMap" },	\
+	{ PFERR_FAPB_MASK, "UNMap" },		\
+	{ PFERR_HW_ACCESS_MASK, "HWacs" },	\
+	{ PFERR_USER_ADDR_MASK, "Uaddr" },	\
+	{ PFERR_ILLEGAL_PAGE_MASK, "IllPage" },	\
+	{ PFERR_DONT_INJECT_MASK, "NotInj" },	\
+	{ PFERR_SPEC_MASK, "Spec" },		\
+	{ PFERR_DONT_RECOVER_MASK, "NotRec" },	\
+	{ PFERR_FETCH_MASK, "F" }
+
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	mmu_topup_memory_cache,
@@ -391,11 +455,13 @@ DEFINE_EVENT(kvm_mmu_page_class, kvm_mmu_sync_page,
 	TP_ARGS(sp)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 DEFINE_EVENT(kvm_mmu_page_class, kvm_mmu_unsync_page,
 	TP_PROTO(struct kvm_mmu_page *sp),
 
 	TP_ARGS(sp)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 DEFINE_EVENT(kvm_mmu_page_class, kvm_mmu_prepare_zap_page,
 	TP_PROTO(struct kvm_mmu_page *sp),
@@ -403,6 +469,7 @@ DEFINE_EVENT(kvm_mmu_page_class, kvm_mmu_prepare_zap_page,
 	TP_ARGS(sp)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	kvm_sync_shadow_pt_range,
 	TP_PROTO(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
@@ -539,6 +606,7 @@ TRACE_EVENT(
 		KVM_MMU_PT_LEVEL_NAME(__entry->level),
 		(unsigned long)__entry->sptep, __entry->spte)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	kvm_sync_spte,
@@ -661,6 +729,7 @@ TRACE_EVENT(
 		__entry->old_spte, __entry->new_spte)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	mmu_write_new_pte,
 	TP_PROTO(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
@@ -689,11 +758,11 @@ TRACE_EVENT(
 
 	TP_printk("vcpu #%d gmm #%d guest pte at %px level #%u\n"
 		"     update shadow %s at %px : old %016lx new %016lx",
-		__entry->vcpu_id, __entry->gmm_id, (void *)__entry->gpa,
-		__entry->level,
-		KVM_MMU_PT_LEVEL_NAME(__entry->level),
+		__entry->vcpu_id, __entry->gmm_id,
+		(void *)__entry->gpa, __entry->level, KVM_MMU_PT_LEVEL_NAME(__entry->level),
 		__entry->sptep, __entry->old_spte, __entry->new_spte)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	mark_mmio_spte,
@@ -739,6 +808,7 @@ TRACE_EVENT(
 		  __entry->access)
 );
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	kvm_gva_to_gpa,
 	TP_PROTO(struct kvm_vcpu *vcpu, gva_t gva, u32 access, gpa_t gpa),
@@ -794,6 +864,7 @@ TRACE_EVENT(
 		  __entry->mmu_pid
 	)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	kvm_nonpaging_page_fault,
@@ -957,6 +1028,7 @@ TRACE_EVENT(
 			{ PFRES_DONT_INJECT,		"inject but cannot" }, \
 			{ PFRES_TRY_MMIO,		"try as mmio" }))
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 TRACE_EVENT(
 	kvm_spt_page_fault,
 	TP_PROTO(struct kvm_vcpu *vcpu, gmm_struct_t *gmm,
@@ -1089,15 +1161,14 @@ TRACE_EVENT(
 		),
 
 	TP_printk("guest addr %lx %s gfn %llx\n"
-		"vcpu #%d gmm id #%d level #%u %s shadow %016lx : %016lx "
-		"guest %016lx",
+		"vcpu #%d gmm id #%d level #%u %s shadow %016lx : %016lx guest %016lx",
 		__entry->gva, (__entry->direct) ? "direct page" : "shadow pt",
-		__entry->gfn,
-		__entry->vcpu_id, __entry->gmm_id, __entry->level,
-		KVM_MMU_PT_LEVEL_NAME(__entry->level),
-		(unsigned long)__entry->sptep, __entry->spte,
-		__entry->gpte)
+		__entry->gfn, __entry->vcpu_id,
+		__entry->gmm_id,
+		__entry->level, KVM_MMU_PT_LEVEL_NAME(__entry->level),
+		(unsigned long)__entry->sptep, __entry->spte, __entry->gpte)
 );
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 TRACE_EVENT(
 	gpte_atomic_update,

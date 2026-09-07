@@ -21,9 +21,11 @@
 
 /* 0x0000 e200 0000 0000 - 0x0000 e200 3fff ffff host image area + modules */
 #define	HOST_KERNEL_IMAGE_AREA_BASE	NATIVE_KERNEL_IMAGE_AREA_BASE
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* 0x0000 2e00 0000 0000 - 0x0000 2e00 3fff ffff shadow host image area + */
 /*						 modules at guest space */
 #define	SHADOW_KERNEL_IMAGE_AREA_BASE	0x00002e0000000000
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #endif	/* CONFIG_VIRTUALIZATION */
 
 #if	!defined(CONFIG_VIRTUALIZATION)
@@ -31,11 +33,13 @@
 #include <asm/pv_info.h>
 
 #define	E2K_KERNEL_IMAGE_AREA_BASE	NATIVE_KERNEL_IMAGE_AREA_BASE
-#elif	defined(CONFIG_KVM_HOST_MODE)
+#elif	defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native host kernel with virtualization support */
 
 #define	E2K_KERNEL_IMAGE_AREA_BASE	HOST_KERNEL_IMAGE_AREA_BASE
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	GUEST_KERNEL_IMAGE_AREA_BASE	SHADOW_KERNEL_IMAGE_AREA_BASE
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is virtalized guest kernel */
 #include <asm/kvm/guest/pv_info.h>
@@ -48,15 +52,16 @@
 
 #ifdef	CONFIG_VIRTUALIZATION
 
+#define GUEST_NBSR_BASE			THE_NODE_NBSR_PHYS_BASE(0);
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #ifndef	__ASSEMBLY__
-#include <asm/kvm/guest.h>
+#include <asm/kvm/paravirt_sw/guest.h>
 #endif	/* !__ASSEMBLY__ */
 
 #define	HOST_KERNEL_PHYS_MEM_VIRT_BASE	HOST_PAGE_OFFSET  /* 0x0000c000 ... */
 #define	GUEST_KERNEL_PHYS_MEM_VIRT_BASE	GUEST_PAGE_OFFSET /* 0x00002000 ... */
 #define	GUEST_IO_PORTS_VIRT_BASE	0x00003f7e7e000000UL
-
-#define GUEST_NBSR_BASE			THE_NODE_NBSR_PHYS_BASE(0);
 
 /*
  * Guest physical memory (RAM) is emulated as one or more host virtual
@@ -88,8 +93,6 @@
 /* but VRAM should be created for all VCPU and VIRQ VCPU */
 #define	GUEST_ONE_VCPU_VRAM_SIZE	sizeof(kvm_vcpu_state_t)
 #define	HOST_INFO_VCPU_VRAM_SIZE	sizeof(kvm_host_info_t)
-#define	GUEST_VCPU_VRAM_PHYS_BASE	0x000000ff00000000UL
-#define	GUEST_MAX_VCPU_VRAM_SIZE	0x0000000001000000UL
 #define GUEST_VCPU_VRAM_VIRT_BASE	\
 		(GUEST_VCPU_VRAM_PHYS_BASE + GUEST_PAGE_OFFSET)
 
@@ -108,6 +111,7 @@
 #define	GUEST_IO_VRAM_SIZE		0x0000000000100000UL
 #define GUEST_IO_VRAM_VIRT_BASE		\
 		(GUEST_IO_VRAM_PHYS_BASE + GUEST_PAGE_OFFSET)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif	/* CONFIG_VIRTUALIZATION */
 

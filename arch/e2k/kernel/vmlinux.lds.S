@@ -10,13 +10,8 @@
 /* No __ro_after_init data in the .rodata section - which will always be ro */
 #define RO_AFTER_INIT_DATA
 
-#include <asm/cache.h>
-#include <asm/cpu_regs_types_defs.h>
+#include <asm/asm-offsets.h>
 #include <asm/vmlinux.lds.h>
-#include <asm/head.h>
-#include <asm/stacks.h>
-
-#include <uapi/asm/kvm.h>
 
 OUTPUT_FORMAT("elf64-e2k", "elf64-e2k", "elf64-e2k")
 
@@ -35,8 +30,6 @@ OUTPUT_FORMAT("elf64-e2k", "elf64-e2k", "elf64-e2k")
  OUTPUT_ARCH(elbrus-v6)
  #elif defined(CONFIG_E2K_E16C)
  OUTPUT_ARCH(elbrus-v6)
- #elif defined(CONFIG_E2K_E48C)
- OUTPUT_ARCH(elbrus-v7)
  #elif defined(CONFIG_E2K_E8V7)
  OUTPUT_ARCH(elbrus-v7)
  #else
@@ -93,7 +86,7 @@ SECTIONS
 			. = _t_entry + 0x6000;
 			*(.ttable_entry12)
 
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 /* or native host kernel with virtualization support */
 /* hypervisor and host features is not supported on guest mode */
 
@@ -107,7 +100,7 @@ SECTIONS
 			__priv_host_entries_end = .;
 			. = _t_entry + 0x9800;
 
-#endif	/* CONFIG_KVM_HOST_MODE */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 		_t_entry_end = .;
 		__ttable_end = .;
@@ -143,25 +136,25 @@ SECTIONS
 		. = _t_entry + (KVM_PV_VCPU_TRAP_ENTRY_NUM + 7) *
 					E2K_SYSCALL_TRAP_ENTRY_SIZE;
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 		/* Hypercalls entry points */
 		. = ALIGN(PAGE_SIZE);
 		__hypercalls_begin = .;
 		*(.hcall_entry0)	/* generic hypercalls */
 		. = __hypercalls_begin + 0x1000;
 		*(.hcall_entry1)	/* light hypercalls */
-#endif	/* CONFIG_KVM_HOST_MODE */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 		__entry_handlers_start = .;
 		SOFTIRQENTRY_TEXT
 		__entry_handlers_hcalls_start = .;
 		*(.text.entry_hcalls)
 		__entry_handlers_hcalls_end = .;
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 		__entry_priv_handlers_hcalls_start = .;
 		*(.text.entry_priv_hcalls)
 		__entry_priv_handlers_hcalls_end = .;
-#endif	/* CONFIG_KVM_HOST_MODE */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 		ENTRY_TEXT
 		IRQENTRY_TEXT
 		__entry_handlers_end = .;

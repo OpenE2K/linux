@@ -1153,7 +1153,7 @@ ptr128_kdfontop_ioctl(struct ptr128_console_font_op __user *fontop,
 	if (!IS_AP(ap, tag)) {
 		op->data = NULL;
 	} else {
-		op->data = (void *)AP_PTR(ap);
+		op->data = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 	}
 	i = con_font_op(vc, op);
@@ -1182,7 +1182,7 @@ ptr128_unimap_ioctl(unsigned int cmd, struct ptr128_unimapdesc __user *user_ud,
 		return -EFAULT;
 	if (get_user_tagged_16(ap.qword, tag, &user_ud->entries) || !IS_AP(ap, tag))
 		return -EFAULT;
-	tmp_entries = (void *)AP_PTR(ap);
+	tmp_entries = U_AP_PTR(ap);
 	set_ap_u_border(ap);
 	switch (cmd) {
 	case PIO_UNIMAP:

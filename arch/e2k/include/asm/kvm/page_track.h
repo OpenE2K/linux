@@ -39,6 +39,7 @@ struct kvm_page_track_notifier_head {
 struct kvm_page_track_notifier_node {
 	struct hlist_node node;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/*
 	 * It is called when guest is writing the write-tracked page
 	 * and write emulation is finished at that time.
@@ -50,6 +51,7 @@ struct kvm_page_track_notifier_node {
 	 */
 	void (*track_write)(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
 			gpa_t gpa, const u8 *new, int bytes, unsigned long flags);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	/*
 	 * It is called when memory slot is being moved or removed
 	 * users can drop write-protection for the pages in that memory slot
@@ -65,6 +67,7 @@ struct kvm_page_track_notifier_node {
 void kvm_page_track_init(struct kvm *kvm);
 void kvm_page_track_cleanup(struct kvm *kvm);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_page_track_free_memslot(struct kvm_memory_slot *free);
 int kvm_page_track_create_memslot(struct kvm_memory_slot *slot,
 				  unsigned long npages);
@@ -75,6 +78,7 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 void kvm_slot_page_track_remove_page(struct kvm *kvm,
 				     struct kvm_memory_slot *slot, gfn_t gfn,
 				     enum kvm_page_track_mode mode);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 bool kvm_page_track_is_active(struct kvm *kvm, struct kvm_memory_slot *slot,
 			gfn_t gfn, enum kvm_page_track_mode mode);
 
@@ -84,8 +88,10 @@ kvm_page_track_register_notifier(struct kvm *kvm,
 void
 kvm_page_track_unregister_notifier(struct kvm *kvm,
 				   struct kvm_page_track_notifier_node *n);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 void kvm_page_track_write(struct kvm_vcpu *vcpu, struct gmm_struct *gmm,
 		gpa_t gpa, const u8 *new, int bytes, unsigned long flags);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 void kvm_page_track_flush_slot(struct kvm *kvm, struct kvm_memory_slot *slot);
 #else	/* ! CONFIG_KVM_HV_MMU */
 static inline void kvm_page_track_init(struct kvm *kvm)

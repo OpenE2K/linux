@@ -20,10 +20,8 @@ unsigned long light_hw_hypercall(unsigned long nr,
 	return ret;
 }
 
-unsigned long generic_hw_hypercall(unsigned long nr,
-	unsigned long arg1, unsigned long arg2, unsigned long arg3,
-	unsigned long arg4, unsigned long arg5, unsigned long arg6,
-	unsigned long arg7)
+u64 generic_hw_hypercall(u64 nr, u64 arg1, u64 arg2, u64 arg3,
+			 u64 arg4, u64 arg5, u64 arg6, u64 arg7)
 {
 	unsigned long ret;
 	e2k_upsr_t upsr_before, upsr_after;

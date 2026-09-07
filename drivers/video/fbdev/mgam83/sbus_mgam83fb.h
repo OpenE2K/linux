@@ -32,13 +32,9 @@
 // device identificatoors
 #define MGA_PROM_NAME	"mga"
 
-#elif defined(CONFIG_PCI2SBUS_MODULE)
-// device identificatoors
-#define MGA_PROM_NAME	"MCST, MGA/M"
-
 #endif
 
-#if defined (CONFIG_SBUS) || defined (CONFIG_PCI2SBUS_MODULE)
+#if defined(CONFIG_SBUS)
 
 // sbus_dev.resource[]
 #define SBUS_FCODE_BAR		0

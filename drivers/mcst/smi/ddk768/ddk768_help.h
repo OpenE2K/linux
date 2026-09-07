@@ -25,7 +25,7 @@
 #define SM768_PCI_ALLOC_MEMORY_SIZE     (128*1024*1024)
 
 
-void ddk768_set_mmio(volatile unsigned char * addr,unsigned short devId,char revId);
+void ddk768_set_mmio(volatile unsigned char __iomem * addr,unsigned short devId,char revId);
 
 extern volatile unsigned  char __iomem * mmio768;
 extern char revId768;

@@ -4432,6 +4432,9 @@ static int bond_get_lowest_level_rcu(struct net_device *dev)
 	struct list_head *niter, *iter, *iter_stack[MAX_NEST_DEV + 1];
 	int cur = 0, max = 0;
 
+#ifdef CONFIG_MCST
+	niter = NULL;
+#endif
 	now = dev;
 	iter = &dev->adj_list.lower;
 

@@ -25,6 +25,7 @@ SECTIONS {
 
 		*(EXCLUDE_FILE (arch/e2k/boot/romstartup.o arch/e2k/boot/apstartup.o) .text .gnu.linkonce.t.*)
 		*(EXCLUDE_FILE (arch/e2k/boot/romstartup.o) .rodata .rodata.*)
+		*(.init.text)
 
 		. = ALIGN(16);
 	_etext = .;		/* End of text section */
@@ -36,6 +37,11 @@ SECTIONS {
 		arch/e2k/boot/apstartup.o(.text)
 		__apstartup_end = .;
 		*(EXCLUDE_FILE (arch/e2k/boot/romstartup.o) .data .gnu.linkonce.d.*)
+
+		. = ALIGN(8);
+		__cpuhas_initcalls = .;
+		*(.cpuhas_initcall)
+		__cpuhas_initcalls_end = .;
 
 		. = ALIGN(16);
 	_edata = .;		/* End of data section */

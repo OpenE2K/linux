@@ -444,6 +444,9 @@ MPI mpi_read_raw_from_sgl(struct scatterlist *sgl, unsigned int nbytes)
 	mpi_limb_t a;
 	MPI val = NULL;
 
+#ifdef CONFIG_MCST
+	buff = NULL;
+#endif
 	ents = sg_nents_for_len(sgl, nbytes);
 	if (ents < 0)
 		return NULL;

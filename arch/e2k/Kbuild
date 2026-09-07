@@ -5,7 +5,7 @@
 # because while it is noisy, it still catches real bugs.
 subdir-ccflags-y := -Werror -Wswitch -Wenum-compare $(call lcc-option,-Wmaybe-uninitialized)
 
-obj-y += kernel/ mm/ net/ p2v/ fast_syscalls/ lib/
+obj-y += kernel/ mm/ net/ p2v/ fast_syscalls/ lib/ crypto/
 
 obj-$(CONFIG_SECONDARY_SPACE_SUPPORT) += sec_space/
 

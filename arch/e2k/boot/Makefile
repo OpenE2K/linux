@@ -8,7 +8,7 @@ OBJCOPY		+= -O binary -R .note -R .comment -S
 OBJCOPYFLAGS	:= -O binary -R .note -R .comment -S
 
 ccflags-y := -DCONFIG_BOOT_E2K $(call lcc-options,-fno-semi-spec-ld -fno-spec-ld) \
-	     -ftrivial-auto-var-init=uninitialized
+	     -fno-jump-tables -ftrivial-auto-var-init=uninitialized
 
 targets := vmlinux vmlinux.bin vmlinux.bin.gz vmlinux.bin.bz2 vmlinux.bin.xz \
 	   vmlinux.bin.lzma vmlinux.bin.lzo vmlinux.bin.lz4 cimage image \
@@ -24,8 +24,6 @@ KBUILD_CFLAGS := $(ORIG_CFLAGS)
 RANLIB = $(shell $(CC) -print-prog-name=ranlib)
 
 ROMSCRIPT = $(obj)/aploader.lds
-KBUILD_CFLAGS += -DCONFIG_E2K_SIC
-KBUILD_AFLAGS += -DCONFIG_E2K_SIC
 
 FLAGS_EPIC_EIOH := -DCONFIG_BOOT_EPIC -DCONFIG_EIOH
 
@@ -91,19 +89,6 @@ else ifeq ($(CONFIG_E2C3),y)
 			 -DCONFIG_NBSR_CFG_V6 \
 			 -DCONFIG_L_IOH2 \
 			 $(FLAGS_EPIC_EIOH)
-else ifeq ($(CONFIG_E48C),y)
-	KBUILD_CFLAGS += -DCONFIG_E48C \
-			 -DCONFIG_E2K_FULL_SIC \
-			 -DCONFIG_NBSR_CFG_V6 \
-			 -DCONFIG_E2K_SIC_V7 \
-			 -DCONFIG_L_IOH2 \
-			 $(FLAGS_EPIC_EIOH)
-	KBUILD_AFLAGS += -DCONFIG_E48C \
-			 -DCONFIG_E2K_FULL_SIC \
-			 -DCONFIG_NBSR_CFG_V6 \
-			 -DCONFIG_E2K_SIC_V7 \
-			 -DCONFIG_L_IOH2 \
-			 $(FLAGS_EPIC_EIOH)
 else ifeq ($(CONFIG_E8V7),y)
 	KBUILD_CFLAGS += -DCONFIG_E8V7 \
 			 -DCONFIG_E2K_FULL_SIC \
@@ -126,24 +111,9 @@ KBUILD_CFLAGS := $(subst -pg,,$(ORIG_CFLAGS))
 START_OBJ = $(obj)/romstartup.o $(obj)/apstartup.o
 targets += romstartup.o apstartup.o
 
-obj-y := romloader.o jumpstart.o keyboard.o zip.o malloc.o stdio.o \
-	 string.o recovery_string.o recovery_string_v5.o epic.o
- 
-AFLAGS_REMOVE_recovery_string_v5.o = $(CFLAGS_ALL_CPUS)
-AFLAGS_recovery_string_v5.o += -march=elbrus-v5
-
-obj-$(CONFIG_SMP) 			+= aploader.o smp.o
-obj-$(CONFIG_L_LOCAL_APIC)		+= apic.o
-
-obj-$(CONFIG_SERIAL_AM85C30_BOOT_CONSOLE) += Am85C30.o
-
-obj-$(CONFIG_VGA_CONSOLE)		+= vga.o
-obj-$(CONFIG_LMS_CONSOLE)		+= console.o
-
 obj-$(CONFIG_BIOS)			+= bios/
 
 BIOS_ELF   = image
-ROM_LDFLAGS  = -e start -T $(TOPDIR)/$(ROMSCRIPT)
 
 # lcc option '-fvisibility=hidden' allows us to reduce
 # .got section size - this is a small optimization.
@@ -187,7 +157,7 @@ dep:
 	$(TOPDIR)/scripts/mkdep *.[Sch] > .depend
 
 clean:
-	rm -rf $(obj)/built-in-sym.o $(START_OBJ) $(BIOS_ELF) $(BIOS_IMAGE) _tmp_*
+	rm -rf $(obj)/bios/built-in-sym.o $(START_OBJ) $(BIOS_ELF) $(BIOS_IMAGE) _tmp_*
 	$(Q)$(MAKE) $(build)=arch/e2k/boot/bios clean
 
 
@@ -236,12 +206,12 @@ $(objtree)/vmlinux.bin: $(obj)/vmlinux.bin
 	@cp $(obj)/vmlinux.bin $(objtree)/vmlinux.bin
 endif
 
-$(obj)/built-in-sym.o: $(obj)/built-in.a
-	@cp $(obj)/built-in.a $(obj)/built-in-sym.o; \
-	$(RANLIB) $(obj)/built-in-sym.o
+$(obj)/bios/built-in-sym.o: $(obj)/bios/built-in.a
+	@cp $(obj)/bios/built-in.a $(obj)/bios/built-in-sym.o; \
+	$(RANLIB) $(obj)/bios/built-in-sym.o
 
-LDFLAGS_bimage := $(ROM_LDFLAGS)
-$(obj)/bimage: $(obj)/built-in-sym.o $(START_OBJ) $(PIGGYO) $(INITRDO) FORCE
+LDFLAGS_bimage := -e start -T $(TOPDIR)/$(ROMSCRIPT)
+$(obj)/bimage: $(obj)/bios/built-in-sym.o $(START_OBJ) $(PIGGYO) $(INITRDO) FORCE
 	$(call if_changed,ld)
 
 $(obj)/image.bios: $(obj)/bimage FORCE
@@ -259,6 +229,7 @@ $(obj)/vmlinux.bin: vmlinux FORCE
 	$(call if_changed,objcopy)
 	@ksize=`ls -l $(obj)/vmlinux.bin | awk '{print $$5;}'`; \
 	echo "Non-compressed kernel size:" $$ksize
+	@echo 'Kernel: vmlinux.bin is ready' ' (#'`cat .version`')'
 
 suffix-y :=
 suffix-$(CONFIG_KERNEL_GZIP) := .gz
@@ -301,8 +272,7 @@ LDFLAGS_cpiggy.o := -r -b binary --oformat elf64-e2k -T $(srctree)/$(src)/vmlinu
 $(obj)/cpiggy.o: $(obj)/vmlinux.bin$(suffix-y) FORCE
 	$(call if_changed,ld)
 
-LDFLAGS_image = -static -e 0x0 -T $(srctree)/$(src)/boot.lds \
- -defsym __kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin)
+LDFLAGS_image = -static -e 0x0 -T $(srctree)/$(src)/boot.lds
 $(obj)/image: $(obj)/bpiggy.o $(obj)/bootblock.o FORCE
 	$(call if_changed,ld)
 
@@ -316,8 +286,7 @@ COMPRESSED_SCRIPT=compressed.lds
 endif
 
 LDFLAGS_cimage = -static -e decompress_kernel -T $(srctree)/$(src)/$(COMPRESSED_SCRIPT) \
- -defsym __orig_kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin) \
- -defsym __kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin$(suffix-y))
+ -defsym __orig_kernel_size=$(shell wc -c < $(objtree)/$(obj)/vmlinux.bin)
 $(obj)/cimage: $(obj)/cpiggy.o $(obj)/bootblock.o $(obj)/decompress.o  \
 	       $(obj)/string_fpic.o $(STRING_GUEST_FPIC_O) \
 	       $(obj)/recovery_string_fpic.o $(obj)/recovery_string_v5_fpic.o \

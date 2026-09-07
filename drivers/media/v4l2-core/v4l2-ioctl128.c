@@ -63,7 +63,7 @@ static int get_v4l2_window128(struct v4l2_window *p64,
 	if (get_user_tagged_16(ap.qword, tag, &p128->bitmap))
 		return -EFAULT;
 	if (IS_AP(ap, tag)) {
-		p64->bitmap = (void __user *)AP_PTR(ap);
+		p64->bitmap = U_AP_PTR(ap);
 	} else {
 		p64->bitmap = NULL;
 	}
@@ -402,7 +402,7 @@ static int get_v4l2_framebuffer128(struct v4l2_framebuffer *p64,
 static int put_v4l2_framebuffer128(struct v4l2_framebuffer *p64,
 				  struct v4l2_framebuffer128 __user *p128)
 {
-	e2k_ap_t ap = MAKE_AP(p64->base, 0);
+	e2k_ap_t ap = MAKE_FAKE_AP(p64->base);
 	if (put_user_tagged_16(ap.qword, 0, &p128->base) ||
 	    put_user(p64->capability, &p128->capability) ||
 	    put_user(p64->flags, &p128->flags) ||

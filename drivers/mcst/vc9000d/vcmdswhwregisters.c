@@ -90,11 +90,11 @@ const regVcmdField_s asicVcmdRegisterDesc[] = {
  * Return type     : u32
  * Argument        : u32 offset
  */
-u32 vcmd_read_reg(const void *hwregs, u32 offset)
+u32 vcmd_read_reg(void __iomem *hwregs, u32 offset)
 {
 	u32 val;
 
-	val = (u32)ioread32((void __iomem *)hwregs + offset);
+	val = ioread32(hwregs + offset);
 
 	PDEBUG("%s 0x%02x --> %08x\n", __func__, offset, val);
 
@@ -108,9 +108,9 @@ u32 vcmd_read_reg(const void *hwregs, u32 offset)
  * Argument        : u32 offset
  * Argument        : u32 val
  */
-void vcmd_write_reg(const void *hwregs, u32 offset, u32 val)
+void vcmd_write_reg(void __iomem *hwregs, u32 offset, u32 val)
 {
-	iowrite32(val, (void __iomem *)hwregs + offset);
+	iowrite32(val, hwregs + offset);
 
 	PDEBUG("%s 0x%02x with value %08x\n", __func__, offset, val);
 }
@@ -121,7 +121,7 @@ void vcmd_write_reg(const void *hwregs, u32 offset, u32 val)
  * Write a value into a defined register field (write will happens actually).
  *
  */
-void vcmd_write_register_value(const void *hwregs, u32 *reg_mirror,
+void vcmd_write_register_value(void __iomem *hwregs, u32 *reg_mirror,
 			       regVcmdName name, u32 value)
 {
 	int base = asicVcmdRegisterDesc[name].base;
@@ -137,7 +137,7 @@ void vcmd_write_register_value(const void *hwregs, u32 *reg_mirror,
  * Get an unsigned value from the ASIC registers
  *
  */
-u32 vcmd_get_register_value(const void *hwregs, u32 *reg_mirror,
+u32 vcmd_get_register_value(void __iomem *hwregs, u32 *reg_mirror,
 			    regVcmdName name)
 {
 	const regVcmdField_s *field;

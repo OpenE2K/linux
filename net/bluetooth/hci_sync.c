@@ -2590,6 +2590,9 @@ static int hci_resume_advertising_sync(struct hci_dev *hdev)
 	struct adv_info *adv, *tmp;
 	int err;
 
+#ifdef CONFIG_MCST
+	err = -EINVAL;
+#endif
 	/* If advertising has not been paused there is nothing  to do. */
 	if (!hdev->advertising_paused)
 		return 0;

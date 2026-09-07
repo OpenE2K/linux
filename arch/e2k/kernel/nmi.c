@@ -164,7 +164,7 @@ static int __nmi_call_function_single(int cpu, void (*func) (void *info), void *
 	/*
 	 * Can deadlock when called with NMI interrupts disabled.
 	 */
-	if (unlikely(psr_and_upsr_nm_irqs_disabled())) {
+	if (wait && unlikely(psr_and_upsr_nm_irqs_disabled())) {
 		WARN_ONCE(1, "nmi_call_function() called with NMIs disabled");
 		wait = 0;
 	}
@@ -254,7 +254,7 @@ static int nmi_call_function_many(const struct cpumask *mask,
 	/*
 	 * Can deadlock when called with NMI interrupts disabled.
 	 */
-	if (unlikely(psr_and_upsr_nm_irqs_disabled())) {
+	if (wait && unlikely(psr_and_upsr_nm_irqs_disabled())) {
 		WARN_ONCE(1, "nmi_call_function() called with NMIs disabled");
 		wait = 0;
 	}
@@ -365,8 +365,8 @@ noinline void nmi_call_function_interrupt(void)
 	entry = llist_del_all(head);
 	entry = llist_reverse_order(entry);
 
-	WARN_ONCE(!psr_and_upsr_nm_irqs_disabled(),
-		"nmi_call_function() called with NMIs disabled");
+	WARN_ONCE(!psr_and_upsr_irqs_disabled(),
+		  "nmi_call_function_interrupt() could have migrated after receiving NMI");
 
 	llist_for_each_entry_safe(csd, csd_next, entry, llist) {
 		smp_call_func_t func = csd->func;

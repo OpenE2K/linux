@@ -256,6 +256,9 @@ __netlink_policy_dump_write_attr(struct netlink_policy_dump_state *state,
 	int estimate = netlink_policy_dump_attr_size_estimate(pt);
 	enum netlink_attribute_type type;
 	struct nlattr *attr;
+#ifdef CONFIG_MCST
+	type = NL_ATTR_TYPE_INVALID;
+#endif
 
 	attr = nla_nest_start(skb, nestattr);
 	if (!attr)

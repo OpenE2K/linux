@@ -33,7 +33,6 @@
 #define MXGBE_MTU			(MXGBE_MAXFRAMESIZE - MXGBE_ETH_LEN - MXGBE_SKB_HEADROOM)
 
 
-void mxgbe_set_ethtool_ops(struct net_device *ndev);
 
 /**
  ******************************************************************************
@@ -41,7 +40,7 @@ void mxgbe_set_ethtool_ops(struct net_device *ndev);
  ******************************************************************************
  */
 
-static int net_rxq_alloc_buff(mxgbe_priv_t *priv, mxgbe_rx_buff_t *rxq_buff, int qn)
+static int net_rxq_alloc_buff(mxgbe_priv_t *priv, mxgbe_buff_t *rxq_buff, int qn)
 {
 	dma_addr_t dma;
 	struct page *page;
@@ -82,7 +81,7 @@ static int net_rxq_alloc_buff(mxgbe_priv_t *priv, mxgbe_rx_buff_t *rxq_buff, int
 	return 0;
 } /* net_rxq_alloc_buff */
 
-static void net_rxq_clean_buff(mxgbe_priv_t *priv, mxgbe_rx_buff_t *rxq_buff, int qn)
+static void net_rxq_clean_buff(mxgbe_priv_t *priv, mxgbe_buff_t *rxq_buff, int qn)
 {
 	struct mxgbe_queue *q = &priv->rxq[qn];
 
@@ -104,7 +103,7 @@ static void net_rxq_clean_buff(mxgbe_priv_t *priv, mxgbe_rx_buff_t *rxq_buff, in
 } /* net_rxq_clean_buff */
 
 static int net_rxq_init_buff(mxgbe_priv_t *priv, int qn,
-			     mxgbe_rx_buff_t *rxq_buff, u16 head)
+			     mxgbe_buff_t *rxq_buff, u16 head)
 {
 	mxgbe_descr_t descr;
 	struct mxgbe_queue *q = &priv->rxq[qn];
@@ -126,11 +125,15 @@ static int mxgbe_rx_page_pool_create(mxgbe_priv_t *priv, int qn)
 {
 	struct page_pool_params pp = { 0 };
 	struct mxgbe_queue *q = &priv->rxq[qn];
+	int node;
 
 	pp.order = (MXGBE_MAXFRAMESIZE / PAGE_SIZE) / 2;
 	pp.pool_size = q->descr_cnt;
 	pp.dev = &priv->pdev->dev;
-	pp.nid = dev_to_node(&priv->pdev->dev);
+	node = dev_to_node(&priv->pdev->dev);
+	if (node == NUMA_NO_NODE)
+		node = 0;
+	pp.nid = node;
 	pp.dma_dir = DMA_BIDIRECTIONAL;
 
 	q->page_pool = page_pool_create(&pp);
@@ -152,7 +155,7 @@ int net_rxq_init_q(mxgbe_priv_t *priv, int qn)
 {
 	int err;
 	int i;
-	mxgbe_rx_buff_t *rxq_buff;
+	mxgbe_buff_t *rxq_buff;
 	struct mxgbe_queue *q = &priv->rxq[qn];
 
 	/* Create page pool first */
@@ -188,7 +191,7 @@ int net_rxq_init_q(mxgbe_priv_t *priv, int qn)
 	q->rx_dma_offset = XDP_PACKET_HEADROOM;
 
 	/* Init Rx ring */
-	rxq_buff = priv->rxq[qn].rx_buff;
+	rxq_buff = priv->rxq[qn].buff;
 	for (i = 0; i < priv->rxq[qn].descr_cnt - 1; i++) {
 		priv->rxq[qn].last_alloc = i;
 		/* Alloc RAM for RX Data */
@@ -212,10 +215,10 @@ err_free_ring:
 void net_rxq_clean_q(mxgbe_priv_t *priv, int qn)
 {
 	int i;
-	mxgbe_rx_buff_t *rxq_buff;
+	mxgbe_buff_t *rxq_buff;
 	struct mxgbe_queue *q = &priv->rxq[qn];
 
-	rxq_buff = q->rx_buff;
+	rxq_buff = q->buff;
 	for (i = 0; i < q->descr_cnt; i++) {
 		net_rxq_clean_buff(priv, rxq_buff, qn);
 		rxq_buff++;
@@ -240,7 +243,7 @@ void net_rxq_clean_q(mxgbe_priv_t *priv, int qn)
 static void reinit_rxbuf_descr(mxgbe_priv_t *priv, int qn, u16 tail_cur)
 {
 	void __iomem *base = priv->bar0_base;
-	mxgbe_rx_buff_t *rxq_buff;
+	mxgbe_buff_t *rxq_buff;
 	u16 head;
 	int err;
 	int j;
@@ -249,7 +252,7 @@ static void reinit_rxbuf_descr(mxgbe_priv_t *priv, int qn, u16 tail_cur)
 		INC_RXQ_INDEX(j, priv->rxq[qn].last_alloc, qn);
 		if (j == tail_cur)
 			break; /* head == tail - 1 */
-		rxq_buff = priv->rxq[qn].rx_buff + j;
+		rxq_buff = priv->rxq[qn].buff + j;
 
 		head = Q_HEAD_GET_PTR(mxgbe_rreg32(base,
 						   RXQ_REG_ADDR(qn, Q_HEAD)));
@@ -283,11 +286,11 @@ static int mxgbe_rx_csum(mxgbe_ctrl_t *descr_ctrl)
  * Get one descriptor
  * return 0 for some work done
  */
-int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
+static int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 {
 	struct net_device *ndev = priv->ndev;
 	u16 tail_new, tail_hw, tail_cur;
-	mxgbe_rx_buff_t *rxq_buff;
+	mxgbe_buff_t *rxq_buff;
 	mxgbe_descr_t *descr;
 	struct sk_buff *skb;
 	mxgbe_addr_t descr_addr;
@@ -303,7 +306,7 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 		return 0;
 
 	descr = ((mxgbe_descr_t *)(q->que_addr)) + tail_cur;
-	descr_addr.r = le64_to_cpu(READ_ONCE(descr->addr.r));
+	descr_addr.ru = le64_to_cpu(READ_ONCE(descr->addr.r));
 	if (!descr_addr.RD.OWNER)
 		return 0;
 
@@ -311,9 +314,9 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	INC_RXQ_INDEX(tail_new, tail_cur, qn);
 	priv->rxq[qn].tail = tail_new;
 
-	descr_ctrl.r = le64_to_cpu(READ_ONCE(descr->ctrl.r));
+	descr_ctrl.ru = le64_to_cpu(READ_ONCE(descr->ctrl.r));
 
-	rxq_buff = q->rx_buff + tail_cur;
+	rxq_buff = q->buff + tail_cur;
 	rxq_buff->bytes = descr_ctrl.RD.FRMSIZE + 1;
 
 	dma_sync_single_for_cpu(&priv->pdev->dev,
@@ -381,7 +384,7 @@ int mxgbe_net_hw_rx(mxgbe_priv_t *priv, int qn)
 	}
 	skb->ip_summed = mxgbe_rx_csum(&descr_ctrl);
 
-	descr_vlan.r = le64_to_cpu(READ_ONCE(descr->vlan.r));
+	descr_vlan.ru = le64_to_cpu(READ_ONCE(descr->vlan.r));
 
 	if ((descr_vlan.RD.OVLAN) &&
 	    (ndev->features & NETIF_F_HW_VLAN_CTAG_FILTER)) {
@@ -460,7 +463,7 @@ static int mxgbe_poll_rx(struct napi_struct *napi, int budget)
  * called from irq handler or poll
  */
 static void mxgbe_net_tx_confirm(mxgbe_priv_t *priv, int qn,
-				 mxgbe_tx_buff_t *tx_buff)
+				 mxgbe_buff_t *tx_buff)
 {
 	struct sk_buff *skb = NULL;
 	struct xdp_frame *xdpf = NULL;
@@ -507,15 +510,28 @@ static void mxgbe_net_tx_confirm(mxgbe_priv_t *priv, int qn,
 	tx_buff->bytes = 0;
 } /* mxgbe_net_tx_confirm */
 
+void net_txq_clean_q(mxgbe_priv_t *priv, int qn)
+{
+	int i;
+	mxgbe_buff_t *txq_buff;
+	struct mxgbe_queue *q = &priv->txq[qn];
+
+	txq_buff = q->buff;
+	for (i = 0; i < q->descr_cnt; i++) {
+		mxgbe_net_tx_confirm(priv, qn, txq_buff);
+		txq_buff++;
+	}
+} /* net_txq_clean_q */
+
 /*
  * Clean sended resource
  * called from irq handler or poll
  */
-int mxgbe_txq_confirm(mxgbe_priv_t *priv, int qn)
+static int mxgbe_txq_confirm(mxgbe_priv_t *priv, int qn)
 {
 	u16 cur_tail;
 	u16 tail;
-	mxgbe_tx_buff_t *tx_buff;
+	mxgbe_buff_t *tx_buff;
 	void __iomem *base = priv->bar0_base;
 
 	spin_lock(&priv->txq[qn].tlock);
@@ -527,15 +543,20 @@ int mxgbe_txq_confirm(mxgbe_priv_t *priv, int qn)
 		return 0; /* DONE */
 	}
 
-	priv->txq[qn].tail = tail;
-
 	while (cur_tail != tail) {
-		tx_buff = &priv->txq[qn].tx_buff[cur_tail];
+		mxgbe_descr_t *descr;
+
+		descr = ((mxgbe_descr_t *)((&priv->txq[qn])->que_addr)) + cur_tail;
+		if (!descr->addr.TD.OWNER)
+			break;
+
+		tx_buff = &priv->txq[qn].buff[cur_tail];
 		if (tx_buff)
 			mxgbe_net_tx_confirm(priv, qn, tx_buff);
 
 		INC_TXQ_INDEX(cur_tail, cur_tail, qn);
 	}
+	priv->txq[qn].tail = cur_tail;
 	spin_unlock(&priv->txq[qn].tlock);
 
 	return 1;
@@ -685,10 +706,10 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 				    struct net_device *ndev)
 {
 	int ret = -1;
-	mxgbe_priv_t *priv;
+	mxgbe_priv_t *priv = netdev_priv(ndev);;
 	mxgbe_descr_t descr;
 	dma_addr_t dmaaddr;
-	mxgbe_tx_buff_t tx_buff;
+	mxgbe_buff_t tx_buff;
 	ssize_t size = skb->len;
 	int nq;
 	int ipv6 = 0;
@@ -703,12 +724,10 @@ static netdev_tx_t mxgbe_start_xmit(struct sk_buff *skb,
 		goto tx_free_skb;
 
 	if (skb_put_padto(skb, ETH_ZLEN))
-		goto tx_free_skb;
+		goto tx_dropped;
 
 	if (netif_queue_stopped(ndev))
 		goto tx_free_skb;
-
-	priv = netdev_priv(ndev);
 
 	nq = mxgbe_tx_q_mapping(priv, skb);
 
@@ -807,10 +826,11 @@ dma_unmap_skb:
 	dma_unmap_single(&priv->pdev->dev,
 			 dmaaddr, size, DMA_TO_DEVICE);
 tx_free_skb:
+	dev_kfree_skb_any(skb);
+tx_dropped:
 	u64_stats_update_begin(&priv->stats.syncp);
 	priv->stats.tx_dropped++;
 	u64_stats_update_end(&priv->stats.syncp);
-	dev_kfree_skb_any(skb);
 
 	return NETDEV_TX_OK;
 } /* mxgbe_start_xmit */
@@ -827,6 +847,13 @@ int mxgbe_open(struct net_device *ndev)
 	mxgbe_priv_t *priv = netdev_priv(ndev);
 	int qn;
 	int node;
+	int err;
+
+	mxgbe_board_down(priv);
+
+	err = mxgbe_board_up(priv);
+	if (err)
+		return err;
 
 	mxgbe_mac_event_dis(priv);
 	netif_carrier_off(ndev);
@@ -857,6 +884,8 @@ int mxgbe_open(struct net_device *ndev)
 		netif_carrier_on(ndev);
 
 	node = dev_to_node(&priv->pdev->dev);
+	if (node == NUMA_NO_NODE)
+		node = 0;
 	dev_info(&ndev->dev, KBUILD_MODNAME " node%d interface OPEN\n", node);
 
 	return 0;
@@ -876,6 +905,8 @@ int mxgbe_stop(struct net_device *ndev)
 	int node;
 
 	node = dev_to_node(&priv->pdev->dev);
+	if (node == NUMA_NO_NODE)
+		node = 0;
 	dev_info(&ndev->dev, KBUILD_MODNAME " node%d interface STOP\n", node);
 
 	/* Disable interrupt */
@@ -898,6 +929,8 @@ int mxgbe_stop(struct net_device *ndev)
 	/* bug#158116: software bypass */
 	mxgbe_rx_multicast_disable(priv);
 
+	mxgbe_hw_reset(priv);
+
 	return 0;
 } /* mxgbe_stop */
 
@@ -915,10 +948,10 @@ static void mxgbe_dump_rx_queue(struct net_device *ndev, unsigned int qn)
 	u16 tail = Q_TAIL_GET_PTR(mxgbe_rreg32(base, RXQ_REG_ADDR(qn, Q_TAIL)));
 
 	dev_warn(&priv->pdev->dev, "RX %d: head=%d tail=%d\n", qn, head, tail);
-	for (i = 0; i < q->descr_cnt - 1; i++) {
+	for (i = 0; i < q->descr_cnt; i++) {
 		descr = ((mxgbe_descr_t *)(q->que_addr)) + i;
-		descr_ctrl.r = le64_to_cpu(READ_ONCE(descr->ctrl.r));
-		descr_addr.r = le64_to_cpu(READ_ONCE(descr->addr.r));
+		descr_ctrl.ru = le64_to_cpu(READ_ONCE(descr->ctrl.r));
+		descr_addr.ru = le64_to_cpu(READ_ONCE(descr->addr.r));
 		dev_warn(&priv->pdev->dev, "\t%d 0x%llx 0x%llx\n", i, descr_ctrl.r, descr_addr.r);
 	}
 }
@@ -945,10 +978,10 @@ static void mxgbe_dump_tx_queue(struct net_device *ndev, unsigned int qn)
 	u16 tail = Q_TAIL_GET_PTR(mxgbe_rreg32(base, TXQ_REG_ADDR(qn, Q_TAIL)));
 
 	dev_warn(&priv->pdev->dev, "TX %d: head=%d tail=%d\n", qn, head, tail);
-	for (i = 0; i < q->descr_cnt - 1; i++) {
+	for (i = 0; i < q->descr_cnt; i++) {
 		descr = ((mxgbe_descr_t *)(q->que_addr)) + i;
-		descr_ctrl.r = le64_to_cpu(READ_ONCE(descr->ctrl.r));
-		descr_addr.r = le64_to_cpu(READ_ONCE(descr->addr.r));
+		descr_ctrl.ru = le64_to_cpu(READ_ONCE(descr->ctrl.r));
+		descr_addr.ru = le64_to_cpu(READ_ONCE(descr->addr.r));
 		dev_warn(&priv->pdev->dev, "\t%d 0x%llx 0x%llx\n", i, descr_ctrl.r, descr_addr.r);
 	}
 }
@@ -1281,7 +1314,7 @@ static void mxgbe_set_rx_mode(struct net_device *ndev)
 /**
  * net_device_ops
  */
-const struct net_device_ops mxgbe_netdev_ops = {
+static const struct net_device_ops mxgbe_netdev_ops = {
 	.ndo_open		= mxgbe_open,
 	.ndo_stop		= mxgbe_stop,
 	.ndo_start_xmit		= mxgbe_start_xmit,
@@ -1515,6 +1548,9 @@ void mxgbe_net_remove(mxgbe_priv_t *priv)
 	mxgbe_mac_event_dis(priv);
 	netif_carrier_off(ndev);
 
+	for (qn = 0; qn < priv->num_tx_queues; qn++)
+		net_txq_clean_q(priv, qn);
+
 	/* Free RAM for RX Data */
 	for (qn = 0; qn < priv->num_rx_queues; qn++)
 		net_rxq_clean_q(priv, qn);
@@ -1538,9 +1574,6 @@ void mxgbe_net_free(mxgbe_priv_t *priv)
  ******************************************************************************
  **/
 
-#ifdef CONFIG_DEBUG_FS
-void mxgbe_dbg_rename(mxgbe_priv_t *priv, const char *name);
-#endif /* CONFIG_DEBUG_FS */
 
 /* Use network device events to rename some file entries. */
 int mxgbe_device_event(struct notifier_block *unused, unsigned long event,
@@ -1548,6 +1581,7 @@ int mxgbe_device_event(struct notifier_block *unused, unsigned long event,
 {
 	struct net_device *ndev = netdev_notifier_info_to_dev(ptr);
 	mxgbe_priv_t *priv;
+	int node;
 
 	if (!ndev)
 		goto done;
@@ -1561,9 +1595,12 @@ int mxgbe_device_event(struct notifier_block *unused, unsigned long event,
 
 	switch (event) {
 	case NETDEV_CHANGENAME:
+		node = dev_to_node(&priv->pdev->dev);
+		if (node == NUMA_NO_NODE)
+			node = 0;
 		dev_info(&priv->pdev->dev,
 			": node%d 10G network interface name - %s\n",
-			dev_to_node(&priv->pdev->dev), ndev->name);
+			node, ndev->name);
 
 #ifdef CONFIG_DEBUG_FS
 		snprintf(priv->dbg_name, sizeof(priv->dbg_name) - 1,

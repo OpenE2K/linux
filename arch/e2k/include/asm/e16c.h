@@ -6,7 +6,6 @@
 #ifndef _ASM_E16C_H_
 #define _ASM_E16C_H_
 
-#ifndef __ASSEMBLY__
 struct pt_regs;
 
 #ifdef CONFIG_CPU_E16C
@@ -15,7 +14,6 @@ extern void e16c_setup_machine(void);
 #else
 static inline void boot_e16c_setup_arch(void) { }
 static inline void e16c_setup_machine(void) { }
-#endif
 #endif
 
 #define	E16C_NR_NODE_CPUS		16

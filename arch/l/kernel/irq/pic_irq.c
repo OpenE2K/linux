@@ -16,6 +16,7 @@
 #include <linux/irq.h>
 #include <linux/irqdesc.h>
 #include <linux/msi.h>
+#include <linux/el_posix.h>
 
 #include <asm/pic.h>
 #include <asm/irq_regs.h>
@@ -163,12 +164,13 @@ void __ref do_postpone_tick(int to_next_rt_ns)
 		per_cpu(next_rt_intr, cpu) = cur_time + to_next_rt_ns;
 	} else {
 		per_cpu(next_rt_intr, cpu) = 0;
+		per_cpu(must_do_timer, cpu) = 0;
 	}
 #if 0
 	trace_printk("DOPOSTP old_nx-cur=%lld cur=%lld nx=%lld\n",
 		next_tm - cur_time, cur_time, cur_time + to_next_rt_ns);
 #endif
-	if (next_tm == 1) {
+	if (per_cpu(must_do_timer, cpu)) {
 		/* FIXME next line has long run time and may be deleted */
 		memset(&regs_new, 0, sizeof(struct pt_regs));
 		/* need to get answer to user_mod() only */
@@ -200,12 +202,12 @@ notrace_on_host int hard_smp_processor_id(void)
  *
  * NOTE: Reserve 0 for BSP.
  */
-int nr_logical_cpuids = 1;
+int nr_logical_cpuids __ro_after_init = 1;
 
 /*
  * Used to store mapping between logical CPU IDs and APIC/short EPIC IDs.
  */
-int cpuid_to_picid[] = {
+int cpuid_to_picid[] __ro_after_init = {
 	[0 ... NR_CPUS - 1] = -1,
 };
 
@@ -213,15 +215,13 @@ int cpuid_to_picid[] = {
  * Should use this API to allocate logical CPU IDs to keep nr_logical_cpuids
  * and cpuid_to_picid[] synchronized.
  */
-int allocate_logical_cpuid(int picid)
+int __init allocate_logical_cpuid(int picid)
 {
-	int i;
-
 	/*
 	 * cpuid <-> picid mapping is persistent, so when a cpu is up,
 	 * check if the kernel has allocated a cpuid for it.
 	 */
-	for (i = 0; i < nr_logical_cpuids; i++) {
+	for (int i = 0; i < nr_logical_cpuids; i++) {
 		if (cpuid_to_picid[i] == picid)
 			return i;
 	}

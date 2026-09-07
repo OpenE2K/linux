@@ -13,10 +13,7 @@
 
 static inline bool cpu_has_epic(void)
 {
-	if (cpu_has(CPU_FEAT_EPIC))
-		return true;
-	else
-		return false;
+	return cpu_has(CPU_FEAT_EPIC);
 }
 
 unsigned int read_pic_id(void);
@@ -57,17 +54,30 @@ static inline void pic_disable(void)
 }
 
 struct seq_file;
+struct iopic;
 
 #ifdef CONFIG_EPIC
 extern void cpuinfo_epic(struct seq_file *);
+extern void print_epics(void) __cold;
+extern void print_cepic(void) __cold;
+extern void print_IO_EPIC(struct iopic *pic) __cold;
 #else
 static inline void cpuinfo_epic(struct seq_file *m) { }
+static inline void print_epics(void) { }
+static inline void print_cepic(void) { }
+static inline void print_IO_EPIC(struct iopic *pic) { }
 #endif
 
 #ifdef CONFIG_L_LOCAL_APIC
 extern void cpuinfo_apic(struct seq_file *);
+extern void print_local_APICs(void) __cold;
+extern void print_local_APIC(void) __cold;
+extern void print_IO_APIC(struct iopic *pic) __cold;
 #else
 static inline void cpuinfo_apic(struct seq_file *m) { }
+static inline void print_local_APICs(void) { }
+static inline void print_local_APIC(void) { }
+static inline void print_IO_APIC(struct iopic *pic) { };
 #endif
 
 static inline void cpuinfo_pic(struct seq_file *m)
@@ -75,5 +85,31 @@ static inline void cpuinfo_pic(struct seq_file *m)
 	cpuinfo_epic(m);
 	cpuinfo_apic(m);
 }
+
+static inline void print_local_pic(void)
+{
+	if (cpu_has_epic())
+		return print_cepic();
+	else
+		return print_local_APIC();
+}
+
+static inline void print_local_pics(void)
+{
+	if (cpu_has_epic())
+		return print_epics();
+	else
+		return print_local_APICs();
+}
+
+static inline void print_IO_PIC(struct iopic *pic, int pic_idx)
+{
+	if (cpu_has_epic())
+		return print_IO_EPIC(pic);
+	else
+		return print_IO_APIC(pic);
+}
+
+extern void __cold print_IO_PICs(void);
 
 #endif	/* __ASM_E2K_PIC_H */

@@ -1141,6 +1141,11 @@ static unsigned int pci_oxsemi_tornado_get_divisor(struct uart_port *port,
 	u8 tcr;
 	int i;
 
+#ifdef CONFIG_MCST
+	cpr = 0;
+	tcr = 0;
+	quot = 0;
+#endif
 	/* Old custom speed handling.  */
 	if (baud == 38400 && (port->flags & UPF_SPD_MASK) == UPF_SPD_CUST) {
 		unsigned int cust_div = port->custom_divisor;

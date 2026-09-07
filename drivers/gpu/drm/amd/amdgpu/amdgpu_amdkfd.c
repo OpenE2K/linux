@@ -570,6 +570,9 @@ int amdgpu_amdkfd_get_xgmi_bandwidth_mbytes(struct amdgpu_device *dst,
 	struct amdgpu_device *adev = dst, *peer_adev;
 	int num_links;
 
+#ifdef CONFIG_MCST
+	peer_adev = NULL;
+#endif
 	if (adev->asic_type != CHIP_ALDEBARAN)
 		return 0;
 

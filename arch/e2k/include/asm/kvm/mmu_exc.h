@@ -12,7 +12,9 @@
 #define E2K_INVALID_PAGE	(~(hpa_t)0)
 
 #define UNMAPPED_GVA		(~(gpa_t)0)
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	arch_is_error_gpa(gpa)	((gpa_t)(gpa) == UNMAPPED_GVA)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 
 typedef struct kvm_arch_exception {

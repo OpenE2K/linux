@@ -51,6 +51,9 @@ static void _rtl92de_query_rxphystatus(struct ieee80211_hw *hw,
 	bool is_cck_rate;
 	u8 rxmcs;
 
+#ifdef CONFIG_MCST
+	rx_pwr_all = 0;
+#endif
 	rxmcs = get_rx_desc_rxmcs(pdesc);
 	is_cck_rate = rxmcs <= DESC_RATE11M;
 	pstats->packet_matchbssid = packet_match_bssid;

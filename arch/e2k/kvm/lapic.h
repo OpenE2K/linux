@@ -10,22 +10,27 @@
 #include "kvm_timer.h"
 
 #include <linux/kvm_host.h>
-#include <asm/kvm/guest.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/guest.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	MAX_CEPIC_PRIORITY 4
 struct kvm_lapic {
 	unsigned long base_address;
 	struct kvm_io_device dev;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct kvm_timer lapic_timer;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	u32 divide_count;
 	struct kvm_vcpu *vcpu;
 	bool irr_pending;
 	struct page *regs_page;
 	void *regs;
 	gpa_t vapic_addr;
-	struct page *vapic_page;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	int virq_no;
 	bool virq_is_setup;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	/* APIC v6 (APIC model based on hardware CEPIC support) */
 	u32 cepic_vector[MAX_CEPIC_PRIORITY + 1];
 };
@@ -33,8 +38,6 @@ struct kvm_lapic {
 int kvm_create_lapic(struct kvm_vcpu *vcpu);
 void kvm_free_lapic(struct kvm_vcpu *vcpu);
 
-int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu);
-int kvm_apic_accept_pic_intr(struct kvm_vcpu *vcpu);
 void kvm_lapic_reset(struct kvm_vcpu *vcpu);
 extern void kvm_lapic_restart(struct kvm_vcpu *vcpu);
 void kvm_lapic_set_base(struct kvm_vcpu *vcpu, u64 value);
@@ -48,10 +51,8 @@ extern void kvm_lapic_virq_setup(struct kvm_vcpu *vcpu);
 
 u64 kvm_get_apic_base(struct kvm_vcpu *vcpu);
 void kvm_set_apic_base(struct kvm_vcpu *vcpu, u64 data);
-void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu);
 int kvm_lapic_enabled(struct kvm_vcpu *vcpu);
 bool kvm_apic_present(struct kvm_vcpu *vcpu);
-int kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu);
 
 void kvm_lapic_set_vapic_addr(struct kvm_vcpu *vcpu, gpa_t vapic_addr);
 void kvm_lapic_sync_from_vapic(struct kvm_vcpu *vcpu);
@@ -65,9 +66,10 @@ int kvm_apic_nmi_deliver(struct kvm_vcpu *vcpu);
 extern void kvm_print_APIC_field(struct kvm_lapic *apic, int base);
 extern void kvm_print_local_APIC(struct kvm_vcpu *vcpu);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * Basic functions to access to local APIC state structure
- * (see asm/kvm/guest.h) on host.
+ * (see asm/kvm/paravirt_sw/guest.h) on host.
  */
 static inline kvm_apic_state_t *
 kvm_get_guest_lapic_state(struct kvm_vcpu *vcpu)
@@ -136,6 +138,7 @@ kvm_dec_and_test_guest_lapic_virqs_num(struct kvm_vcpu *vcpu)
 
 	return atomic_dec_and_test(&lapic->virqs_num);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	MAX_PENDING_VIRQS	8	/* why 8 ???? */
 

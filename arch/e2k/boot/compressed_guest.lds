@@ -40,4 +40,6 @@ SECTIONS {
 		_egot = .;
 	}
 	_end = .;
+
+	__kernel_size = _end - _start - 0x10000;
 }

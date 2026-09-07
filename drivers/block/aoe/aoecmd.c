@@ -821,6 +821,11 @@ rexmit_timer(struct timer_list *timer)
 out:
 	if ((d->flags & DEVFL_KICKME) && d->blkq) {
 		d->flags &= ~DEVFL_KICKME;
+#ifdef CONFIG_MCST
+		/* rm 35225: if blk queue is empty aoe will be blocked forever,
+		 so try to process unfinished buffers (d->ip) first */
+		aoecmd_work(d);
+#endif
 		blk_mq_run_hw_queues(d->blkq, true);
 	}
 

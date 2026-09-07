@@ -276,4 +276,7 @@ extern void *__init_recv boot_alloc_node_mem(int node_id, e2k_size_t mem_size,
 extern long boot_map_physmem(pgprot_t prot_flags, e2k_size_t max_page_size);
 extern void boot_expand_phys_banks_reserved_areas(void);
 
+#define boot_is_kdump_kernel()	(boot_bootblock_phys->boot_flags	\
+					& KEXEC_CRASH_BB_FLAG)
+
 #endif /* _E2K_P2V_BOOT_PHYS_H */

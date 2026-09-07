@@ -41,8 +41,8 @@
 
 
 struct bctrl_base {
-	u64 current_desc;
-	u32 status;
+	__le64 current_desc;
+	__le32 status;
 	u32 reserved;
 } __packed;
 
@@ -52,9 +52,9 @@ struct bctrl_desc {
 	u32 next_lo;
 	u32 next_hi;
 	struct bctrl_cmd {
-		u16 ctrl;
-		u16 reg;
-		u32 data;
+		__le16 ctrl;
+		__le16 reg;
+		__le32 data;
 	} cmd[BCTRL_CMD_NR] __packed;
 } __packed;
 
@@ -90,11 +90,13 @@ static dma_addr_t idx_to_fence_addr(struct mga2 *mga2, int i)
 
 static inline void write_desc(void *p, dma_addr_t addr)
 {
-	volatile dma_addr_t *d = p;
-	if (sizeof(dma_addr_t) == 32)
+	if (sizeof(dma_addr_t) == 32) {
+		volatile __le32 *d = p;
 		*d = cpu_to_le32(addr);
-	else
+	} else {
+	volatile __le64 *d = p;
 		*d = cpu_to_le64(addr);
+	}
 }
 
 static inline dma_addr_t read_desc(void *p)
@@ -217,7 +219,7 @@ int mga2_debugfs_bctrl(struct seq_file *s, void *data)
 }
 #endif
 
-int __mga2fb_bctrl_hw_init(struct mga2 *mga2)
+static int __mga2fb_bctrl_hw_init(struct mga2 *mga2)
 {
 	u64 addr = mga2->bctrl_dma;
 	wfb(mga2->tail << 16, MGA2_BCTRL_TAIL);

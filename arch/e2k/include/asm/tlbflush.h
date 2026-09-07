@@ -194,8 +194,8 @@ static inline void native_local_flush_tlb_page_and_pgtables(
 		native_local_flush_tlb_page_and_pgtables
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
-#ifdef	CONFIG_KVM_HOST_MODE
-#include <asm/kvm/tlbflush.h>
-#endif	/* CONFIG_KVM_HOST_MODE */
+#if defined CONFIG_KVM_HOST_KERNEL && defined CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/tlbflush.h>
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 #endif /* _E2K_TLBFLUSH_H */

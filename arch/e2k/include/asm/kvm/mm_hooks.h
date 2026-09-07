@@ -16,7 +16,7 @@
  * Virtualization support
  */
 
-#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* it is host kernel with virtualization support */
 static inline int
@@ -28,6 +28,6 @@ get_mm_notifier_locked(struct mm_struct *mm)
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is virtualized guest kernel */
 #include <asm/kvm/guest/mm_hooks.h>
-#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
+#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_KERNEL */
 
 #endif /* !(_E2K_KVM_MM_HOOKS_H) */

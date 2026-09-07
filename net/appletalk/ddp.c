@@ -1922,7 +1922,7 @@ static int atalk_ptr128_routing_ioctl(struct sock *sk, unsigned int cmd,
 		return -EFAULT;
 	}
 	if (IS_AP(ap, tag)) {
-		rt.rt_dev = (void __user *)AP_PTR(ap);
+		rt.rt_dev = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 	} else {
 		rt.rt_dev = NULL;

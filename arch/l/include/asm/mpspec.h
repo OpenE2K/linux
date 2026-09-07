@@ -374,16 +374,7 @@ typedef struct mpc_gpio_act {
 #ifdef __KERNEL__
 extern int __init mp_ioepic_find_bus(int ioepic_id);
 #ifdef	CONFIG_IOHUB_DOMAINS
-extern int mp_find_iolink_root_busnum(int node, int link);
-extern int mp_find_iolink_io_apicid(int node, int link);
-extern int mp_fix_io_apicid(unsigned int src_apicid, unsigned int new_apicid);
 extern int mp_iohubs_num;
-#else
-static inline int mp_fix_io_apicid(unsigned int src_apicid,
-				   unsigned int new_apicid)
-{
-	return 0;
-}
 #endif /* CONFIG_IOHUB_DOMAINS */
 extern int get_bus_to_io_apicid(int busnum);
 
@@ -558,72 +549,31 @@ static inline int acpi_probe_gsi(void)
 #endif /* CONFIG_ACPI */
 
 /* physid definitions */
-/*
- * On e2k and sparc lapics number is the same as cpus number
- * IO-APICs number is defined by MAX_IO_APICS
- * IO-APICs IDs can be placed higher than local APICs IDs or at its hole
- * so physid_t cannot be a synonim to cpumask_t.
- */
+
 #include <linux/bitmap.h>
 
-#define	MAX_PHYSID_NUM		(NR_CPUS + MAX_IO_APICS)
+#if defined(CONFIG_E2K)
+/* 64 is an upper bound for the number of cores on e2k processors up to v7 */
+# define MAX_CORES_NUM		64
+#endif
+/* 4 is max number of nodes on e2k and sparc processors */
+#define MAX_NODES_NUM		4
+#define MAX_PHYSID_NUM		(MAX_NODES_NUM * MAX_CORES_NUM)
 typedef struct physid_mask {
 	DECLARE_BITMAP(bits, MAX_PHYSID_NUM);
 } physid_mask_t;
 
-#define PHYSID_ARRAY_SIZE	BITS_TO_LONGS(MAX_PHYSID_NUM)
-
+#define physid_bits(mapp)		((mapp)->bits)
 #define physid_set(physid, map)		set_bit((physid), (map).bits)
 #define physid_clear(physid, map)	clear_bit((physid), (map).bits)
 #define physid_isset(physid, map)	test_bit((physid), (map).bits)
-#define physid_test_and_set(physid, map) test_and_set_bit((physid), (map).bits)
-
-#define physids_and(dstp, src1, src2)	\
-		bitmap_and((dst).bits, (src1).bits, (src2).bits, MAX_PHYSID_NUM)
-
-#define physids_or(dst, src1, src2)	\
-		bitmap_or((dst).bits, (src1).bits, (src2).bits, MAX_PHYSID_NUM)
-
-#define physids_clear(map)		\
-		bitmap_zero((map).bits, MAX_PHYSID_NUM)
-
-#define physids_complement(dst, src)	\
-		bitmap_complement((dst).bits, (src).bits, MAX_PHYSID_NUM)
-
-#define physids_empty(map)		\
-		bitmap_empty((map).bits, MAX_PHYSID_NUM)
-
-#define physids_equal(map1, map2)	\
-		bitmap_equal((map1).bits, (map2).bits, MAX_PHYSID_NUM)
-
-#define physids_weight(map)		\
-		bitmap_weight((map).bits, MAX_PHYSID_NUM)
-
-#define physids_shift_left(dst, src, n)	\
-		bitmap_shift_left((dst).bits, (src).bits, (n), MAX_PHYSID_NUM)
 
 static inline unsigned long physids_coerce(physid_mask_t *map)
 {
 	return map->bits[0];
 }
 
-static inline void physids_promote(unsigned long physids, physid_mask_t *map)
-{
-	physids_clear(*map);
-	map->bits[0] = physids;
-}
-
-static inline void physid_set_mask_of_physid(int physid, physid_mask_t *map)
-{
-	physids_clear(*map);
-	physid_set(physid, *map);
-}
-
-#define PHYSID_MASK_ALL		{ {[0 ... PHYSID_ARRAY_SIZE-1] = ~0UL} }
-#define PHYSID_MASK_NONE	{ {[0 ... PHYSID_ARRAY_SIZE-1] = 0UL} }
-
 extern physid_mask_t phys_cpu_present_map;
-extern physid_mask_t phys_cpu_offline_map;
 
 #endif	/* __ASSEMBLY__ */
 

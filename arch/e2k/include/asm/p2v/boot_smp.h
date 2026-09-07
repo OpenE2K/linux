@@ -23,8 +23,6 @@
 #include <asm/p2v/boot_bitops.h>
 #include <asm/p2v/boot_spinlock.h>
 
-#ifndef __ASSEMBLY__
-
 /*
  * Atomic operations for boot-time initialization
  */
@@ -135,14 +133,11 @@ extern int	cpu_to_sync_num;	/* real number of CPUs to make */
 					/* sinchronization */
 
 #define	boot_set_phys_cpu(cpuid, mask)	physid_set(cpuid, mask)
-#define	boot_test_phys_cpu(cpuid, mask)	physid_isset(cpuid, mask)
 
 #define	boot_phys_cpu_present_map_p	boot_vp_to_pp(&phys_cpu_present_map)
 
 #define	boot_set_phys_cpu_present(cpu)	\
 		boot_set_phys_cpu(cpu, *boot_phys_cpu_present_map_p)
-#define boot_phys_cpu_present(cpu)	\
-		boot_test_phys_cpu(cpu, *boot_phys_cpu_present_map_p)
 
 #define	boot_phys_cpu_present_num	boot_get_vo_value(phys_cpu_present_num)
 #ifdef CONFIG_SMP
@@ -152,26 +147,6 @@ extern int	cpu_to_sync_num;	/* real number of CPUs to make */
 #endif
 
 #ifdef	CONFIG_NUMA
-#define boot_physid_to_cpu_mask(physid_mask_p)				\
-({									\
-	cpumask_t cpu_mask;						\
-	bitmap_copy(cpumask_bits(&cpu_mask), physid_mask_p->bits,	\
-			nr_cpumask_bits);				\
-	cpu_mask;							\
-})
-
-#define boot_node_to_cpumask(node)					\
-({									\
-	cpumask_t cpumask;						\
-	cpumask_t node_cpumask;						\
-	cpumask_t boot_main_cpu_mask = boot_physid_to_cpu_mask(		\
-			boot_phys_cpu_present_map_p);			\
-	bitmap_fill(cpumask_bits(&cpumask), boot_machine.nr_node_cpus);	\
-	cpumask_shift_left(&node_cpumask, (const cpumask_t *)&cpumask,	\
-			node * boot_machine.max_nr_node_cpus);		\
-	cpumask_and(&cpumask, &node_cpumask, &boot_main_cpu_mask);	\
-	cpumask;							\
-})
 
 #define boot___apicid_to_node	boot_get_vo_value(__apicid_to_node)
 
@@ -181,29 +156,8 @@ extern int	cpu_to_sync_num;	/* real number of CPUs to make */
 #define	BOOT_BS_NODE_ID		(0)
 #define	BOOT_IS_BS_NODE		(boot_numa_node_id() == BOOT_BS_NODE_ID)
 
-#define	boot_node_is_online(node)	\
-		(boot_phys_nodes_map & (1 << (node))) 
 #define boot_node_has_online_mem(nid)	\
 		(boot_nodes_phys_mem[nid].pfns_num != 0)
-
-#define	boot_for_each_node_has_online_mem(node)				\
-		for ((node) = 0,					\
-				({while ((node) < MAX_NUMNODES &&	\
-					!boot_node_has_online_mem(node))\
-					(node) ++;});			\
-			(node) < MAX_NUMNODES;				\
-			({ (node) ++; while ((node) < MAX_NUMNODES &&	\
-					!boot_node_has_online_mem(node))\
-					(node) ++;}))
-
-#define boot_for_each_cpu(cpu, mask)				\
-	for ((cpu) = -1;				\
-		(cpu) = cpumask_next((cpu), (mask)),	\
-		(cpu) < NR_CPUS;)
-
-#define	boot_for_each_online_cpu_of_node(node, cpu, cpu_mask)		\
-		cpu_mask = boot_node_to_cpumask(node);			\
-		boot_for_each_cpu(cpu, &cpu_mask)
 
 /*
  * Next variables, arrays, structures have own copy on each nodes
@@ -317,5 +271,4 @@ boot_smp_node_config(boot_info_t *bootblock)
 }
 #endif	/* CONFIG_KVM_GUEST_KERNEL */
 
-#endif /* !(__ASSEMBLY__) */
 #endif /* !(_E2K_P2V_BOOT_SMP_H) */

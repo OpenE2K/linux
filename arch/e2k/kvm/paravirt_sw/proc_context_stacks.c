@@ -5,7 +5,7 @@
 
 #include <linux/kvm_host.h>
 
-#include <asm/kvm/proc_context_stacks.h>
+#include <asm/kvm/paravirt_sw/proc_context_stacks.h>
 #include <asm/trap_table.h>
 #include <asm/mmu_types.h>
 #include <asm/thread_info.h>
@@ -46,12 +46,12 @@ unsigned long kvm_prepare_gst_mkctxt_hw_stacks(struct kvm_vcpu *vcpu,
 
 		kvm_vcpu_copy_guest_virt_system(vcpu, ps_frame_lo,
 				g_stacks.args + 16 * i, 8, NULL,
-				TAGGED_MEM_STORE_REC_OPC,
-				TAGGED_MEM_LOAD_REC_OPC, 0);
+				ldst_rec_tagged_store(),
+				ldst_rec_tagged_load(), 0);
 		kvm_vcpu_copy_guest_virt_system(vcpu, ps_frame_hi,
 				g_stacks.args + 16 * i + 8, 8, NULL,
-				TAGGED_MEM_STORE_REC_OPC,
-				TAGGED_MEM_LOAD_REC_OPC, 0);
+				ldst_rec_tagged_store(),
+				ldst_rec_tagged_load(), 0);
 	}
 
 	/* Put uc_link pointer into trampoline frame */
@@ -69,8 +69,8 @@ unsigned long kvm_prepare_gst_mkctxt_hw_stacks(struct kvm_vcpu *vcpu,
 		if (8 != kvm_vcpu_copy_guest_virt_system(vcpu,
 				&g_stacks.trampoline_ps_frames[0].word_lo,
 				(const void __force *) g_stacks.uc_link, 8,
-				NULL, TAGGED_MEM_STORE_REC_OPC,
-				TAGGED_MEM_LOAD_REC_OPC, 0)) {
+				NULL, ldst_rec_tagged_store(),
+				ldst_rec_tagged_load(), 0)) {
 			ret = -EFAULT;
 		}
 	} else if (format == CTX_128_BIT) {
@@ -83,12 +83,12 @@ unsigned long kvm_prepare_gst_mkctxt_hw_stacks(struct kvm_vcpu *vcpu,
 
 		if (8 != kvm_vcpu_copy_guest_virt_system(vcpu, ps_frame_lo,
 					(const void __force *) g_stacks.uc_link,
-					8, NULL, TAGGED_MEM_STORE_REC_OPC,
-					TAGGED_MEM_LOAD_REC_OPC, 0) ||
+					8, NULL, ldst_rec_tagged_store(),
+					ldst_rec_tagged_load(), 0) ||
 				8 != kvm_vcpu_copy_guest_virt_system(vcpu, ps_frame_hi,
 					(const void __force *) g_stacks.uc_link + 8,
-					8, NULL, TAGGED_MEM_STORE_REC_OPC,
-					TAGGED_MEM_LOAD_REC_OPC, 0)) {
+					8, NULL, ldst_rec_tagged_store(),
+					ldst_rec_tagged_load(), 0)) {
 			ret = -EFAULT;
 		}
 	} else {
@@ -102,8 +102,8 @@ unsigned long kvm_prepare_gst_mkctxt_hw_stacks(struct kvm_vcpu *vcpu,
 
 		kvm_vcpu_copy_guest_virt_system(vcpu, ps_frame_lo,
 				g_stacks.args + 16 * i, 8, NULL,
-				TAGGED_MEM_STORE_REC_OPC,
-				TAGGED_MEM_LOAD_REC_OPC, 0);
+				ldst_rec_tagged_store(),
+				ldst_rec_tagged_load(), 0);
 	}
 
 	ret = chain_stack_frame_init(&crs_trampoline, hw_stacks->trampoline,

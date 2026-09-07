@@ -5,7 +5,7 @@
 
 /*
  * HW_CHECK kernel module for e2k platforms
- * e8c, e8c2, e16c, e2c3, e12c
+ * e8c, e8c2, e16c, e2c3, e12c, e8v7
  */
 
 #include <linux/io.h>
@@ -22,655 +22,10 @@
 #include <linux/pci.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
+#include <linux/workqueue.h>
+#include <linux/completion.h>
+#include "hw_check.h"
 
-#include <asm/sic_regs.h>
-#ifdef CONFIG_E2K
-#include <asm/nbsr_v6_regs.h>
-#include <asm/sic_regs_access.h>
-#endif
-
-#define MEMSIZE 100
-#define CHECKTIME 30
-#define WORKTIME 900
-
-#define IPCC_CSR1 0x604
-#define IPCC_CSR2 0x644
-#define IPCC_CSR3 0x684
-#define IPCC_CSR1_SPARC 0x4004
-#define IPCC_CSR2_SPARC 0x5004
-#define IPCC_CSR3_SPARC 0x6004
-
-#define IPCC_A_0_3 0x14
-#define IPCC_A_4_7 0x15
-#define IPCC_A_8_11 0x16
-#define IPCC_A_12_15 0x17
-#define IPCC_B_0_3 0x18
-#define IPCC_B_4_7 0x19
-#define IPCC_B_8_11 0x1a
-#define IPCC_B_12_15 0x1b
-#define IPCC_C_0_3 0x1c
-#define IPCC_C_4_7 0x1d
-#define IPCC_C_8_11 0x1e
-#define IPCC_C_12_15 0x1f
-
-#define PCI_VIRT_BRIDGE_DEVICE_ID 0x8017
-#define PCI_VIRT_GX6650_DEVICE_ID 0x802a
-#define PCI_VIRT_E5810_DEVICE_ID 0x802b
-#define PCI_VIRT_D5520_DEVICE_ID 0x802c
-#define PCI_VIRT_MGA25_DEVICE_ID 0x8031
-#define PCI_VIRT_BRIDGE_VENDOR_ID 0x1fff
-
-#define PCIBIOS_SUCCESSFUL 0x00
-
-#define SUP_DIG_MPLLA_ASIC_IN_0 0xe
-#define SUP_DIG_MPLLB_ASIC_IN_0 0x11
-#define SUP_DIG_ASIC_IN 0x15
-#define LANEN_DIG_ASIC_RX_ASIC_IN_0 0x1011
-#define ST_P 0x0004
-#define MULTILINK_SHIFT 25
-#define MULTILINK_MASK 0x1
-#define MLC_SHIFT 24
-#define MLC_MASK 0x1
-
-#define MPLLA_SHIFT 5
-#define MPLLA_MASK 0xFF
-#define MPLLA_DIV2_SHIFT 1
-#define MPLLA_DIV2_MASK 0x1
-#define CLK_DIV2_EN_SHIFT 2
-#define CLK_DIV2_EN_MASK 0x1
-#define RX_RATE_SHIFT 7
-#define RX_RATE_MASK 0x3
-
-#define IPCC_STR1 0x60c
-#define IPCC_STR2 0x64c
-#define IPCC_STR3 0x68c
-#define IPCC_STR1_SPARC 0x400c
-#define IPCC_STR2_SPARC 0x500c
-#define IPCC_STR3_SPARC 0x600c
-
-#define MC0_ECC 0x400
-#define MC1_ECC 0x440
-#define MC2_ECC 0x480
-#define MC3_ECC 0x4C0
-
-#define MC_CH 0x400
-#define MC_ECC 0x440
-#define MC_ECC_R1000 0x0000
-
-#define ACTIVE_MASK 0x80000000
-#define WIDTH_MASK  0x0F000000
-#define STATE_MASK  0x00070000
-#define CNT_MASK    0x1FFFFFFF
-#define OVER_CNT_MASK 0x20000000
-#define ERR_CNT_MASK 0x7FF
-#define ERR_OV_MASK 0x800
-#define ERR_OV_SHIFT 11
-#define ERR_MD_MASK 0x3000
-#define ERR_MD_SHIFT 12
-#define CNT_LIMIT 1000
-#define IOL_DLL_STSR 0x70C
-#define IOL_DLL_STSR_SHIFT 0xC
-
-#define MC_ENABLE_MASK 0x1
-#define MC_SECNT_MASK 0xFFFF
-#define MC_UECNT_MASK 0x3FFF
-#define MC_DMODE_MASK 0x1
-
-#define MC_SECNT_SHIFT 16
-#define MC_UECNT_SHIFT 2
-#define MC_DMODE_SHIFT 1
-
-#define MC_CTL 0x404
-#define MC_STATUS 0x44c
-#define MC_MON_CTL 0x450
-#define MC_MON_CTR0 0x454
-#define MC_MON_CTR1 0x458
-#define MC_MON_CTRext 0x45c
-
-#define MC_MNT0_MASK 0xFFFF
-#define MC_MNT0_SHIFT 32
-
-#define MC_CTL_MCEN_MASK 0x1
-#define MC_ST_RST_DONE_SHIFT 19
-#define MC_ST_RST_DONE_MASK 0x1
-#define MC_FREQ_SPARC 0x708c
-#define MC_ECCCFG0 0x70
-#define MC_ECCSTAT 0x78
-#define MC_DDR_PHY_REGISTER_ADDRESS 0x0
-#define MC_REGISTER_DATA 0x4
-
-#define ECC_STAT_CECNT_MASK 0xF00
-#define ECC_STAT_CECNT_SHIFT 8
-#define ECC_STAT_UECNT_MASK 0xF0000
-#define ECC_STAT_UECNT_SHIFT 16
-#define ECC_MODE_MASK 0x7
-
-#define PCS_PMC_REGS_base PMC_INFO
-#define E2C3_size 7
-#define DIVF_LIM_LO_MASK 0x00FC0000
-#define DIVF_LIM_LO_SHIFT 18
-#define DIVF_LIM_HI_MASK 0x0003F000
-#define DIVF_LIM_HI_SHIFT 12
-#define DIVF_CURR_MASK 0x0000003F
-#define BFS_BYPASS_MASK 0x40000000
-#define BFS_BYPASS_SHIFT 30
-#define CORE_MPLL_FREQ 2000
-#define UNCORE_MPLL_FREQ 1600
-#define GRAPHIC_MPLL_FREQ 2000
-#define MASK 0x1
-#define BFS_BYPASS_MASK 0x40000000
-#define BFS_BYPASS_SHIFT 30
-#define CTRL_CLK_MASK 0x00020000
-#define CTRL_CLK_SHIFT 17
-#define CTRL_MODE_MASK 0x0000000E
-#define CTRL_MODE_SHIFT 1
-#define CTRL_EN_MASK 0x00000001
-#define FLOAT_LO_MASK 0x000001FF
-#define FLOAT_HI_MASK 0x001FF000
-#define FLOAT_HI_SHIFT 12
-#define PMC_VERSION_MASK 0x00000F00
-#define PMC_VERSION_SHIFT 8
-#define PMC_MODEL_MASK   0x000000FF
-#define CFG_ALTER_MASK 0x40000000
-#define CFG_ALTER_SHIFT 30
-#define E12C_ID 10
-#define E16C_ID 11
-#define E2C3_ID 12
-#define RT_LCFG0 0x0010
-#define RT_LCFG1 0x0014
-#define RT_LCFG2 0x0018
-#define RT_LCFG3 0x001c
-#define RT_LCFG_VP_MASK 0x1
-#define RT_LCFG_PN_SHIFT 4
-#define RT_LCFG_PN_MASK 0x3
-#define IOL_MASK 0x00000008
-#define IOL_SHIFT 3
-
-#define HMU_MCEN_SHIFT 24
-#define HMU_MCEN_MASK 0xFF
-#define HMU_ENABLE 0x1
-
-#define PIN_IPLA_PRE_DET_SHIFT 5
-#define PIN_ATE_MODE_SHIFT 11
-#define PIN_DBG_RST_DSBL_SHIFT 12
-#define PIN_DBG_STOP_SHIFT 13
-#define PIN_IPL_MULTILINK_SHIFT 14
-#define PIN_IPL_GEN2_ADAPT_SHIFT 15
-#define PIN_WLCC_SPEED_PRESETS_SHIFT 16
-#define PIN_LIMIT_PHYS_SHIFT 19
-#define PIN_LIMIT_CORES_SHIFT 21
-#define PIN_CORE_ENBL_SHIFT 25
-#define PIN_FREQ_MODE_SHIFT 27
-#define PIN_SYS_KPI2BOOT_ENA_SHIFT 29
-#define PIN_CPU_BSP_SHIFT 30
-#define PIN_CPU_DISABLE_SOFT_RST_SHIFT 31
-
-#define PIN_IPLA_PRE_DET_MASK 0xF
-#define PIN_ATE_MODE_MASK 0x1
-#define PIN_DBG_RST_DSBL_MASK 0x1
-#define PIN_DBG_STOP_MASK 0x1
-#define PIN_IPL_MULTILINK_MASK 0x1
-#define PIN_IPL_GEN2_ADAPT_MASK 0x1
-#define PIN_WLCC_SPEED_PRESETS_MASK 0x7
-#define PIN_LIMIT_PHYS_MASK 0x3
-#define PIN_LIMIT_CORES_MASK 0xF
-#define PIN_CORE_ENBL_MASK 0x3
-#define PIN_FREQ_MODE_MASK 0x3
-#define PIN_SYS_KPI2BOOT_ENA_MASK 0x1
-#define PIN_CPU_BSP_MASK 0x1
-#define PIN_CPU_DISABLE_SOFT_RST_MASK 0x1
-
-#define MACHINE_GEN_ALERT_SHIFT 0
-#define MACHINE_PWR_ALERT_SHIFT 1
-#define CPU_PWR_ALERT_SHIFT 2
-#define MC47_PWR_ALERT_SHIFT 3
-#define MC1_PWR_ALERT_SHIFT 3
-#define MC03_PWR_ALERT_SHIFT 4
-#define MC0_PWR_ALERT_SHIFT 4
-#define MC_PWR_ALERT_SHIFT 4
-#define MC47_DIMM_EVENT_SHIFT 5
-#define MC1_DIMM_EVENT_SHIFT 5
-#define MC03_DIMM_EVENT_SHIFT 6
-#define MC0_DIMM_EVENT_SHIFT 6
-#define MC_DIMM_EVENT_SHIFT 6
-#define MC7_FAULT_SHIFT 9
-#define MC6_FAULT_SHIFT 10
-#define MC5_FAULT_SHIFT 11
-#define MC4_FAULT_SHIFT 12
-#define MC3_FAULT_SHIFT 13
-#define MC2_FAULT_SHIFT 14
-#define MC1_FAULT_SHIFT 15
-#define MC0_FAULT_SHIFT 16
-#define CPU_FAULT_SHIFT 17
-#define PIN_SATAETH_CONFIG_SHIFT 18
-#define PIN_IPLC_PRE_DET_SHIFT 19
-#define PIN_IPLC_PE_CONFIG_SHIFT 21
-#define PIN_IPLA_PE_CONFIG_SHIFT 21
-#define PIN_IPLA_FLIP_EN_SHIFT 23
-#define PIN_IOWL_PE_PRE_DET_SHIFT 24
-#define PIN_IOWL_PE_CONFIG_SHIFT 28
-#define PIN_EFUSE_MODE_SHIFT 30
-
-#define MACHINE_GEN_ALERT_MASK 0x1
-#define MACHINE_PWR_ALERT_MASK 0x1
-#define CPU_PWR_ALERT_MASK  0x1
-#define MC47_PWR_ALERT_MASK 0x1
-#define MC1_PWR_ALERT_MASK 0x1
-#define MC03_PWR_ALERT_MASK 0x1
-#define MC0_PWR_ALERT_MASK 0x1
-#define MC_PWR_ALERT_MASK 0x1
-#define MC47_DIMM_EVENT_MASK 0x1
-#define MC1_DIMM_EVENT_MASK 0x1
-#define MC03_DIMM_EVENT_MASK 0x1
-#define MC0_DIMM_EVENT_MASK 0x1
-#define MC_DIMM_EVENT_MASK 0x1
-#define MC7_FAULT_MASK 0x1
-#define MC6_FAULT_MASK 0x1
-#define MC5_FAULT_MASK 0x1
-#define MC4_FAULT_MASK 0x1
-#define MC3_FAULT_MASK 0x1
-#define MC2_FAULT_MASK 0x1
-#define MC1_FAULT_MASK 0x1
-#define MC0_FAULT_MASK 0x1
-#define CPU_FAULT_MASK 0x1
-#define PIN_SATAETH_CONFIG_MASK 0x1
-#define PIN_IPLC_PRE_DET_MASK 0x3
-#define PIN_IPLC_PE_CONFIG_MASK 0x3
-#define PIN_IPLA_PE_CONFIG_MASK 0x3
-#define PIN_IPLA_FLIP_EN_MASK 0x1
-#define PIN_IOWL_PE_PRE_DET_MASK 0xF
-#define PIN_IOWL_PE_CONFIG_MASK 0x3
-#define PIN_EFUSE_MODE_MASK 0x3
-
-#define MC_MON_DELAY_MS 10000
-
-#define IPCC_STR_MODE_LERR  0x1
-#define IPCC_STR_MODE_RTRY  0x2
-
-#define ACTIVE_SHIFT 31
-#define WIDTH_SHIFT 24
-#define STATE_SHIFT 16
-#define ERR_MODE_MASK 0xC0000000
-#define ERR_MODE_SHIFT 30
-#define LINK_NOT_ACTIVE 0
-#define LINK_ACTIVE 1
-
-#define POWEROFF_STATE 0
-#define DISABLE_STATE 1
-#define SLEEP_STATE 2
-#define LINKUP_STATE 3
-#define SERVICE_STATE 4
-#define REINIT_STATE 5
-#define FULL_WIDTH 0xf
-
-#define PCS_CTRL3 0xCBC
-#define MPLL_MASK 0x00700000
-#define MPLL_SHIFT 20
-#define MPLL_LINK_MASK 0x07000000
-#define MPLL_LINK_SHIFT 24
-#define IOL_PLM_CTLR 0x708
-#define IOL_PLM_CTLR_SHIFT 0x8
-#define WLCC_RATE_MASK 0x20000000
-#define WLCC_RATE_SHIFT 29
-#define IOL_PLS_CTLR 0x704
-#define IOL_PLS_CTLR_SHIFT 0x4
-#define WLCC_ACTIVE_MASK 0x80000000
-#define WLCC_ACTIVE_SHIFT 31
-#define WLCC_STATE_MASK 0x07000000
-#define WLCC_STATE_SHIFT 24
-#define WLCC_WIDTH_MASK 0x000F0000
-#define WLCC_WIDTH_SHIFT 16
-
-#define PWR_MGR1 0x284
-#define PWR_MGR2 0x288
-#define RST_MASK 0x00000001
-#define OUTENA_MASK 0x00000002
-#define OUTENA_SHIFT 1
-#define CLKR_MASK 0x000000FC
-#define CLKR_SHIFT 2
-#define CLKF_MASK 0x001FFF00
-#define CLKF_SHIFT 8
-#define CLKOD_MASK 0x01E00000
-#define CLKOD_SHIFT 21
-#define LOCK_MASK 0x80000000
-#define LOCK_SHIFT 31
-#define PCI_KPI_SIZE 0x1000
-#define PCI_IOL_SIZE 0x1000
-
-#define PCI_BIST_SIZE 0x1000
-
-#define MEM_LINKS 8
-#define IPCC_LINKS 3
-
-#define MAX_NODES 4
-#define MAX_GPU 13
-#define MAX_VXE 10
-#define MAX_VXD 5
-#define MAX_MGA 10
-#define WORD_SIZE 20
-
-typedef union {
-	struct {
-		u32 reserved_1		: 4;
-		u32 NS_dsbl		: 1;
-		u32 IOMMU_dsbl		: 1;
-		u32 Reset		: 1;
-		u32 Prio_req_dsbl	: 1;
-		u32 SLC2		: 1;
-		u32 TA_UVS		: 1;
-		u32 tornado		: 1;
-		u32 texas_ph0		: 1;
-		u32 raterisation_ph0	: 1;
-		u32 USC0_dustA_ph0	: 1;
-		u32 USC1_dustA_ph0	: 1;
-		u32 USC0_dustB_ph0	: 1;
-		u32 USC1_dustB_ph0	: 1;
-		u32 texas_ph1		: 1;
-		u32 raterisation_ph1	: 1;
-		u32 USC0_dustA_ph1	: 1;
-		u32 USC1_dustA_ph1	: 1;
-		u32 reserved_2		: 11;
-	};
-	u32 word;
-} hw_ctrl_gx6650_t;
-
-typedef union {
-	struct {
-		u32 reserved_1		: 5;
-		u32 IOMMU_dsbl		: 1;
-		u32 Reset		: 1;
-		u32 Prio_req_dsbl	: 1;
-		u32 front_end_p0	: 1;
-		u32 cache_p0		: 1;
-		u32 back_end_p0		: 1;
-		u32 front_end_p1	: 1;
-		u32 cache_p1		: 1;
-		u32 back_end_p1		: 1;
-		u32 front_end_p2	: 1;
-		u32 cache_p2		: 1;
-		u32 back_end_p2		: 1;
-		u32 sys_if		: 1;
-		u32 bist_reserved	: 3;
-		u32 reserved_2		: 11;
-	};
-	u32 word;
-} hw_ctrl_e5810_t;
-
-typedef union {
-	struct {
-		u32 reserved_1		: 5;
-		u32 IOMMU_dsbl		: 1;
-		u32 Reset		: 1;
-		u32 Prio_req_dsbl	: 1;
-		u32 mmu_cache		: 1;
-		u32 mtx_core_ram	: 1;
-		u32 pipe1		: 1;
-		u32 pipe2		: 1;
-		u32 pipe3		: 1;
-		u32 bist_reserved	: 8;
-		u32 reserved_2		: 11;
-
-	};
-	u32 word;
-} hw_ctrl_d5520_t;
-
-typedef union {
-	struct {
-		u32 bist_0		: 1;
-		u32 bist_1		: 1;
-		u32 bist_2		: 1;
-		u32 bist_3		: 1;
-		u32 bist_4		: 1;
-		u32 bist_5		: 1;
-		u32 bist_6		: 1;
-		u32 bist_7		: 1;
-		u32 bist_8		: 1;
-		u32 bist_9		: 1;
-		u32 reserved		: 22;
-	};
-	u32 word;
-} mga25_bist_t;
-
-struct ctrl_info {
-	int offset;
-};
-
-static const struct ctrl_info mc_ctrls[] = {
-	{ MC0_ECC },
-	{ MC1_ECC },
-	{ MC2_ECC },
-	{ MC3_ECC },
-	{ MC_CH },
-	{ MC_ECC }
-};
-
-static const struct ctrl_info ipcc_ctrls[] = {
-	{ IPCC_CSR1 },
-	{ IPCC_CSR2 },
-	{ IPCC_CSR3 },
-	{ IPCC_STR1 },
-	{ IPCC_STR2 },
-	{ IPCC_STR3 }
-};
-
-static const struct ctrl_info ipcc_sparc_ctrls[] = {
-	{ IPCC_CSR1_SPARC },
-	{ IPCC_CSR2_SPARC },
-	{ IPCC_CSR3_SPARC },
-	{ IPCC_STR1_SPARC },
-	{ IPCC_STR2_SPARC },
-	{ IPCC_STR3_SPARC }
-};
-
-static const struct ctrl_info ipcc_rate_ctrls[] = {
-	{ IPCC_A_0_3 },
-	{ IPCC_A_4_7 },
-	{ IPCC_A_8_11 },
-	{ IPCC_A_12_15 },
-	{ IPCC_B_0_3 },
-	{ IPCC_B_4_7 },
-	{ IPCC_B_8_11 },
-	{ IPCC_B_12_15 },
-	{ IPCC_C_0_3 },
-	{ IPCC_C_4_7 },
-	{ IPCC_C_8_11 },
-	{ IPCC_C_12_15 }
-};
-
-struct hwmon_data {
-	struct platform_device *pdev;
-	struct device *hdev;
-	int node;
-};
-
-struct link_data {
-	int active[IPCC_LINKS];
-	int width[IPCC_LINKS];
-	int state[IPCC_LINKS];
-	int cnt_err[IPCC_LINKS];
-	int multilink;
-	int vp[IPCC_LINKS];
-	int pn[IPCC_LINKS];
-	int csr_reg[IPCC_LINKS];
-	int str_reg[IPCC_LINKS];
-	int str_val[IPCC_LINKS];
-	int err_mode[IPCC_LINKS];
-	int mlc;
-	int st_p;
-	int link_bitrate[IPCC_LINKS];
-	int io_mpll;
-	int ip_mpll;
-	int wlcc_rate;
-	int wlcc_active;
-	int wlcc_state;
-	int wlcc_width;
-	int iol;
-	int kpi_rate;
-	int kpi_active;
-	int kpi_state;
-	int kpi_width;
-	int kpi_cnt;
-	int kpi_ov;
-	int kpi_md;
-	int wlcc_cnt;
-	int wlcc_ov;
-	int wlcc_md;
-
-};
-
-struct mem_data {
-	int mem_reg[MEM_LINKS];
-	int mem_mode[MEM_LINKS];
-	int mem_secnt[MEM_LINKS];
-	int mem_uecnt[MEM_LINKS];
-	int mem_dmode[MEM_LINKS];
-	int mem_reg_val[MEM_LINKS];
-	int mem_rst_done[MEM_LINKS];
-	int mem_ctl_mcen[MEM_LINKS];
-	int mem_ctl_val[MEM_LINKS];
-	int mem_status_val[MEM_LINKS];
-	int mem_freq[MEM_LINKS];
-	int mem_ddr_rate[MEM_LINKS];
-	int mem_hmu_mcen;
-	int mem_freq_e8c_mgr1;
-	int mem_ddr_e8c_mgr1;
-	int mem_freq_e8c_mgr2;
-	int mem_ddr_e8c_mgr2;
-
-};
-
-struct pins_data {
-	int vp;
-	int pn;
-	int sys_mon_0;
-	int sys_mon_1;
-	int pmc_info;
-};
-
-struct cpu_data {
-	int base_freq[E2C3_size];
-	int mon_divF_curr[E2C3_size];
-	int mon_divF_lim_lo[E2C3_size];
-	int mon_divF_lim_hi[E2C3_size];
-	int mon_freq_curr[E2C3_size];
-	int mon_freq_lim_hi[E2C3_size];
-	int mon_freq_lim_lo[E2C3_size];
-	int mon_bfs_bypass[E2C3_size];
-	int graph_ctrl_bfs_bypass[E2C3_size];
-	int graph_ctrl_en[E2C3_size];
-	int graph_ctrl_clk_mux[E2C3_size];
-	int graph_ctrl_mode[E2C3_size];
-	int ctrl_bfs_bypass[E2C3_size];
-	int ctrl_en[E2C3_size];
-	int ctrl_mode[E2C3_size];
-	int pmc_freq_gra_float_T_lo_dec[E2C3_size];
-	int pmc_freq_gra_float_T_hi_dec[E2C3_size];
-	int pmc_freq_cfg_alter_disable[E2C3_size];
-	int pmc_freq_core_float_T_lo_dec[E2C3_size];
-	int pmc_freq_core_float_T_hi_dec[E2C3_size];
-	int pmc_freq_ocn_float_T_lo_dec[E2C3_size];
-	int pmc_freq_ocn_float_T_hi_dec[E2C3_size];
-};
-
-struct pins_info {
-	int shift;
-	int mask;
-	char *name;
-
-};
-
-struct bist_data {
-	hw_ctrl_gx6650_t GPU;
-	hw_ctrl_e5810_t VXE;
-	hw_ctrl_d5520_t VXD;
-	mga25_bist_t MGA;
-	bool MGA_present;
-};
-
-static const struct pins_info pins_ctrls[] = {
-	{ PIN_ATE_MODE_SHIFT, PIN_ATE_MODE_MASK,
-					"pin_ate_mode" },
-	{ PIN_DBG_RST_DSBL_SHIFT, PIN_DBG_RST_DSBL_MASK,
-					"pin_dbg_rst_dsbl" },
-	{ PIN_DBG_STOP_SHIFT, PIN_DBG_STOP_MASK,
-					"pin_dbg_stop" },
-	{ PIN_WLCC_SPEED_PRESETS_SHIFT, PIN_WLCC_SPEED_PRESETS_MASK,
-					"pin_wlcc_speed_presets" },
-	{ PIN_FREQ_MODE_SHIFT, PIN_FREQ_MODE_MASK,
-					"pin_freq_mode"},
-	{ PIN_SYS_KPI2BOOT_ENA_SHIFT, PIN_SYS_KPI2BOOT_ENA_MASK,
-					"pin_sys_kpi2boot_ena" },
-	{ PIN_CPU_BSP_SHIFT, PIN_CPU_BSP_MASK,
-					"pin_cpu_bsp"},
-	{ PIN_CPU_DISABLE_SOFT_RST_SHIFT, PIN_CPU_DISABLE_SOFT_RST_MASK,
-					"pin_cpu_disable_soft_rst" },
-	{ PIN_IPLA_PRE_DET_SHIFT, PIN_IPLA_PRE_DET_MASK,
-					"pin_ipla_pre_det" },
-	{ PIN_IPL_GEN2_ADAPT_SHIFT, PIN_IPL_GEN2_ADAPT_MASK,
-					"pin_ipl_gen2_adapt" },
-	{ PIN_IPL_MULTILINK_SHIFT, PIN_IPL_MULTILINK_MASK,
-					"pin_ipl_multilink" },
-	{ PIN_LIMIT_PHYS_SHIFT, PIN_LIMIT_PHYS_SHIFT,
-					"pin_limit_phys" },
-	{ PIN_LIMIT_CORES_SHIFT, PIN_LIMIT_CORES_MASK,
-					"pin_limit_cores" },
-	{ PIN_CORE_ENBL_SHIFT, PIN_CORE_ENBL_MASK,
-					"pin_core_enbl" },
-	{ MACHINE_GEN_ALERT_SHIFT, MACHINE_GEN_ALERT_MASK,
-					"machine_gen_alert" },
-	{ MACHINE_PWR_ALERT_SHIFT, MACHINE_PWR_ALERT_MASK,
-					"machine_pwr_alert" },
-	{ CPU_PWR_ALERT_SHIFT, CPU_PWR_ALERT_MASK,
-					"cpu_pwr_alert" },
-	{ MC1_FAULT_SHIFT, MC1_FAULT_MASK,
-					"mc1_fault" },
-	{ MC0_FAULT_SHIFT, MC0_FAULT_MASK,
-					"mc0_fault" },
-	{ CPU_FAULT_SHIFT, CPU_FAULT_MASK,
-					"cpu_fault" },
-	{ PIN_IOWL_PE_PRE_DET_SHIFT, PIN_IOWL_PE_PRE_DET_MASK,
-					"pin_iowl_pe_pre_det" },
-	{ PIN_IOWL_PE_CONFIG_SHIFT, PIN_IOWL_PE_CONFIG_MASK,
-					"pin_iowl_pe_config" },
-	{ PIN_EFUSE_MODE_SHIFT, PIN_EFUSE_MODE_MASK,
-					"pin_efuse_mode" },
-	{ MC1_PWR_ALERT_SHIFT, MC1_PWR_ALERT_MASK,
-					"mc1_pwr_alert" },
-	{ MC0_PWR_ALERT_SHIFT, MC0_PWR_ALERT_MASK,
-					"mc0_pwr_alert" },
-	{ MC1_DIMM_EVENT_SHIFT, MC1_DIMM_EVENT_MASK,
-					"mc1_dimm_event" },
-	{ MC0_DIMM_EVENT_SHIFT, MC0_DIMM_EVENT_MASK,
-					"mc0_dimm_event" },
-	{ PIN_IPLA_PE_CONFIG_SHIFT, PIN_IPLA_PE_CONFIG_MASK,
-					"pin_ipla_pe_config" },
-	{ MC47_PWR_ALERT_SHIFT, MC47_PWR_ALERT_MASK,
-					"mc47_pwr_alert" },
-	{ MC03_PWR_ALERT_SHIFT, MC03_PWR_ALERT_MASK,
-					"mc03_pwr_alert" },
-	{ MC47_DIMM_EVENT_SHIFT, MC47_DIMM_EVENT_MASK,
-					"mc47_dimm_event" },
-	{ MC03_DIMM_EVENT_SHIFT, MC03_DIMM_EVENT_MASK,
-					"mc03_dimm_event" },
-	{ MC7_FAULT_SHIFT, MC7_FAULT_MASK, "mc7_fault" },
-	{ MC6_FAULT_SHIFT, MC6_FAULT_MASK, "mc6_fault" },
-	{ MC5_FAULT_SHIFT, MC5_FAULT_MASK, "mc5_fault" },
-	{ MC4_FAULT_SHIFT, MC4_FAULT_MASK, "mc4_fault" },
-	{ MC3_FAULT_SHIFT, MC3_FAULT_MASK, "mc3_fault" },
-	{ MC2_FAULT_SHIFT, MC2_FAULT_MASK, "mc2_fault" },
-	{ PIN_IPLC_PRE_DET_SHIFT, PIN_IPLC_PRE_DET_MASK,
-					"pin_iplc_pre_det" },
-	{ PIN_IPLC_PE_CONFIG_SHIFT, PIN_IPLC_PE_CONFIG_MASK,
-					"pin_iplc_pe_config" },
-	{ PIN_IPLA_FLIP_EN_SHIFT, PIN_IPLA_FLIP_EN_MASK,
-					"pin_ipla_flip_en" },
-	{ PIN_SATAETH_CONFIG_SHIFT, PIN_SATAETH_CONFIG_MASK,
-					"pin_sataeth_config" },
-	{ MC_PWR_ALERT_SHIFT, MC_PWR_ALERT_MASK,
-					"mc_pwr_alert" },
-	{ MC_DIMM_EVENT_SHIFT, MC_DIMM_EVENT_MASK,
-					"mc_dimm_event" }
-};
 #ifdef CONFIG_E2K
 static int CalcFreq(int base, int div)
 {
@@ -703,55 +58,251 @@ static int CalcTemp(int T_data)
 	return Temp;
 }
 
-int e2c3_block[E2C3_size] = {0, 1, 32, 33, 34, 35, 36};
-static struct cpu_data read_cpu_data(int node)
+static unsigned int get_mpll_freq_e8v7(void __iomem *fuse_base, enum mode_for_get_pll mode)
 {
-	struct cpu_data a;
+	uint64_t DEF_PLL_CLKF_E8V7;
+	int PLL_BFS_ADDR_V7;
+
+	if (mode) {
+		DEF_PLL_CLKF_E8V7	= DEF_PLL_UNCORE_CLKF_E8V7;
+		PLL_BFS_ADDR_V7		= PLL_BFS_UNCORE_ADDR_V7;
+	} else {
+		DEF_PLL_CLKF_E8V7	= DEF_PLL_CORE_CLKF_E8V7;
+		PLL_BFS_ADDR_V7		= PLL_BFS_CORE_ADDR_V7;
+	}
+	efuse_data_t efuse_data;
+	unsigned int addr;
+	unsigned int f_pll;
+	uint32_t pll_clkr = DEF_PLL_CLKR_E8V7;
+	union {
+		struct {
+			u32 lo		: 4;
+			u32 hi		: 7;
+			u32 empty	: 21;
+		};
+		u32 reg;
+	} pll_clkod = {
+		.reg = DEF_PLL_CLKOD_E8V7
+	};
+	uint16_t flags = 0;
+	union {
+		struct {
+			u64 lo		: 13;
+			u64 med_lo	: 20;
+			u64 med_hi	: 20;
+			u64 hi		: 1;
+			u64	empty	: 10;
+		};
+		u64 reg;
+	} pll_clkf = {
+		.reg = DEF_PLL_CLKF_E8V7
+	};
+
+	for (addr = EFUSE_START_ADDR; addr < EFUSE_END_ADDR_E8V7; addr++) {
+		writel(addr, fuse_base + EFUSE_RAM_ADDR_SHIFT);
+		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA_SHIFT);
+		if (efuse_data.v7.val && !efuse_data.v7.disable &&
+				efuse_data.v7.addr == PLL_BFS_ADDR_V7) {
+			switch (efuse_data.v7.part_num) {
+			case PARTNUM_5:
+				pll_clkod.lo = efuse_data.e8v7_partnum5.pll_clkod_lo;
+				flags |= PARTNUM_5_FLAG;
+				break;
+			case PARTNUM_6:
+				pll_clkod.hi = efuse_data.e8v7_partnum6.pll_clkod_hi;
+				pll_clkf.lo = efuse_data.e8v7_partnum6.pll_clkf_lo;
+				flags |= PARTNUM_6_FLAG;
+				break;
+			case PARTNUM_7:
+				pll_clkf.med_lo = efuse_data.e8v7_partnum7.pll_clkf_med_lo;
+				flags |= PARTNUM_7_FLAG;
+				break;
+			case PARTNUM_8:
+				pll_clkf.med_hi = efuse_data.e8v7_partnum8.pll_clkf_med_hi;
+				flags |= PARTNUM_8_FLAG;
+				break;
+			case PARTNUM_9:
+				pll_clkf.hi = efuse_data.e8v7_partnum9.pll_clkf_hi;
+				pll_clkr = efuse_data.e8v7_partnum9.pll_clkr;
+				flags |= PARTNUM_9_FLAG;
+				break;
+			}
+		}
+		if (flags == (PARTNUM_5_FLAG | PARTNUM_6_FLAG |
+				PARTNUM_7_FLAG | PARTNUM_8_FLAG | PARTNUM_9_FLAG))
+			break;
+	}
+
+	if (pll_clkr == 0 && pll_clkod.reg == 0 && pll_clkf.reg == 0) {
+		pll_clkr = DEF_PLL_CLKR_E8V7;
+		pll_clkod.reg = DEF_PLL_CLKOD_E8V7;
+		pll_clkf.reg = DEF_PLL_CLKF_E8V7;
+	}
+
+	f_pll = F_REF * pll_clkf.reg / ((1ULL << 33) * (pll_clkr + 1) * (pll_clkod.reg + 1));
+
+	return f_pll;
+}
+
+static unsigned int get_core_mpll_freq(void __iomem *fuse_base)
+{
+	efuse_data_t efuse_data;
+	unsigned int addr;
+	unsigned int f_pll;
+	uint32_t pll_clkr, pll_clkod;
+	uint16_t flags = 0;
+	union {
+		struct {
+			u64 lo		: 13;
+			u64 med_lo	: 21;
+			u64 med_hi	: 21;
+			u64 hi		: 7;
+			u64	empty	: 2;
+		};
+		u64 reg;
+	} pll_clkf;
+
+	for (addr = EFUSE_START_ADDR; addr < EFUSE_END_ADDR; addr++) {
+		writel(addr, fuse_base + EFUSE_RAM_ADDR_SHIFT);
+		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA_SHIFT);
+		if (efuse_data.string_from_efuse.val &&
+				!efuse_data.string_from_efuse.disable &&
+					efuse_data.string_from_efuse.broadcast) {
+			switch (efuse_data.string_from_efuse.addr) {
+			case ADDR_FIRST_CORE_SUB_BLOCK:
+				pll_clkod = efuse_data.first_sub_block.pll_clkod;
+				pll_clkf.lo = efuse_data.first_sub_block.pll_clkf_lo;
+				flags |= FIRST_SUB_BLOCK;
+				break;
+			case ADDR_SECOND_CORE_SUB_BLOCK:
+				pll_clkf.med_lo = efuse_data.second_sub_block.pll_clkf_med_lo;
+				flags |= SECOND_SUB_BLOCK;
+				break;
+			case ADDR_THIRD_CORE_SUB_BLOCK:
+				pll_clkf.med_hi = efuse_data.third_sub_block.pll_clkf_med_hi;
+				flags |= THIRD_SUB_BLOCK;
+				break;
+			case ADDR_FOURTH_CORE_SUB_BLOCK:
+				pll_clkf.hi = efuse_data.fourth_sub_block.pll_clkf_hi;
+				pll_clkr = efuse_data.fourth_sub_block.pll_clkr;
+				flags |= FOURTH_SUB_BLOCK;
+				break;
+			}
+		}
+		if (flags == (FIRST_SUB_BLOCK | SECOND_SUB_BLOCK |
+				THIRD_SUB_BLOCK | FOURTH_SUB_BLOCK))
+			break;
+	}
+
+	if ((flags != (FIRST_SUB_BLOCK | SECOND_SUB_BLOCK |
+			THIRD_SUB_BLOCK | FOURTH_SUB_BLOCK)) ||
+				(pll_clkr == 0 && pll_clkod == 0 && pll_clkf.reg == 0))
+		f_pll = CORE_MPLL_FREQ;
+	else
+		f_pll = F_REF * pll_clkf.reg / ((1ULL << 33) * (pll_clkr + 1) * (pll_clkod + 1));
+
+	return f_pll;
+}
+
+static unsigned int get_uncore_mpll_freq(void __iomem *fuse_base)
+{
+	efuse_data_t efuse_data;
+	unsigned int addr;
+	unsigned int f_pll;
+	uint32_t pll_clkr, pll_clkod;
+	uint16_t flags = 0;
+	union {
+		struct {
+			u64 lo		: 13;
+			u64 med_lo	: 21;
+			u64 med_hi	: 21;
+			u64 hi		: 7;
+			u64	empty	: 2;
+		};
+		u64 reg;
+	} pll_clkf;
+
+	for (addr = EFUSE_START_ADDR; addr < EFUSE_END_ADDR; addr++) {
+		writel(addr, fuse_base + EFUSE_RAM_ADDR_SHIFT);
+		efuse_data.word = readl(fuse_base + EFUSE_RAM_DATA_SHIFT);
+		if (efuse_data.string_from_efuse.val &&
+				!efuse_data.string_from_efuse.disable &&
+					efuse_data.string_from_efuse.broadcast) {
+			switch (efuse_data.string_from_efuse.addr) {
+			case ADDR_FIRST_UNCORE_SUB_BLOCK:
+				pll_clkod = efuse_data.first_sub_block.pll_clkod;
+				pll_clkf.lo = efuse_data.first_sub_block.pll_clkf_lo;
+				flags |= FIRST_SUB_BLOCK;
+				break;
+			case ADDR_SECOND_UNCORE_SUB_BLOCK:
+				pll_clkf.med_lo = efuse_data.second_sub_block.pll_clkf_med_lo;
+				flags |= SECOND_SUB_BLOCK;
+				break;
+			case ADDR_THIRD_UNCORE_SUB_BLOCK:
+				pll_clkf.med_hi = efuse_data.third_sub_block.pll_clkf_med_hi;
+				flags |= THIRD_SUB_BLOCK;
+				break;
+			case ADDR_FOURTH_UNCORE_SUB_BLOCK:
+				pll_clkf.hi = efuse_data.fourth_sub_block.pll_clkf_hi;
+				pll_clkr = efuse_data.fourth_sub_block.pll_clkr;
+				flags |= FOURTH_SUB_BLOCK;
+				break;
+			}
+		}
+		if (flags == (FIRST_SUB_BLOCK | SECOND_SUB_BLOCK |
+				THIRD_SUB_BLOCK | FOURTH_SUB_BLOCK))
+			break;
+	}
+
+	if ((flags != (FIRST_SUB_BLOCK | SECOND_SUB_BLOCK |
+			THIRD_SUB_BLOCK | FOURTH_SUB_BLOCK)) ||
+				(pll_clkr == 0 && pll_clkod == 0 && pll_clkf.reg == 0))
+		f_pll = UNCORE_MPLL_FREQ;
+	else
+		f_pll = F_REF * pll_clkf.reg / ((1ULL << 33) * (pll_clkr + 1) * (pll_clkod + 1));
+
+	return f_pll;
+}
+
+int e8v7_block[E8V7_size] = {0, 1, 2, 3, 4, 5, 6, 7, 32, 33, 34, 35, 36};
+static struct cpu_data_e8v7 read_cpu_data_e8v7(struct hwmon_data *hwmon)
+{
+	struct cpu_data_e8v7 a;
 	int i;
-	int rr_addr;
 	int block_addr_shift;
 	int rr_data;
 	int block_is_graphic;
 	int graphic_num;
-	int ctrl_addr;
 	int ctrl_data;
-	int graph_addr;
-	int graph_data;
-	int pmc_freq_addr;
 	int pmc_freq_data;
-	int pmc_freq_gra_float_T_lo[E2C3_size];
-	int pmc_freq_gra_float_T_hi[E2C3_size];
-	int core_addr;
-	int core_data;
-	int pmc_freq_core_float_T_lo[E2C3_size];
-	int pmc_freq_core_float_T_hi[E2C3_size];
-	int ocn_addr;
-	int ocn_data;
-	int pmc_freq_ocn_float_T_lo[E2C3_size];
-	int pmc_freq_ocn_float_T_hi[E2C3_size];
+	enum mode_for_get_pll mode;
 
-	for (i = 0; i < E2C3_size; i++) {
-		block_addr_shift = 0x10 * e2c3_block[i];
-		graphic_num = e2c3_block[i] - 33;
-		if (e2c3_block[i] < 16) {
-			a.base_freq[i] = CORE_MPLL_FREQ;
+	for (i = 0; i < E8V7_size; i++) {
+		block_addr_shift = 0x10 * e8v7_block[i];
+		graphic_num = e8v7_block[i] - 33;
+		if (e8v7_block[i] < 16) {
+			mode = CORE;
+			a.base_freq[i] = get_mpll_freq_e8v7(hwmon->base[4], mode);
 			block_is_graphic = 0;
-		} else if (e2c3_block[i] < 32) {
+			block_addr_shift += 0x400;
+		} else if (e8v7_block[i] < 32) {
 			a.base_freq[i] = 0;
 			block_is_graphic = 0;
-		} else if (e2c3_block[i] == 32) {
-			a.base_freq[i] = UNCORE_MPLL_FREQ;
+		} else if (e8v7_block[i] == 32) {
+			mode = UNCORE;
+			a.base_freq[i] = get_mpll_freq_e8v7(hwmon->base[4], mode);
 			block_is_graphic = 0;
-		} else if (e2c3_block[i] < 37) {
-			a.base_freq[i] = GRAPHIC_MPLL_FREQ;
+			block_addr_shift += 0x180;
+		} else if (e8v7_block[i] < 37) {
+			mode = CORE;
+			a.base_freq[i] = get_mpll_freq_e8v7(hwmon->base[4], mode);
 			block_is_graphic = 1;
-
+			block_addr_shift += 0x1B0;
 		} else {
 			a.base_freq[i] = 0;
 			block_is_graphic = 0;
 		}
-		rr_addr = (PCS_PMC_REGS_base + 0x200 + block_addr_shift);
-		rr_data = sic_read_node_nbsr_reg(node, rr_addr);
+		rr_data = readl(hwmon->base[3] + block_addr_shift);
 		a.mon_divF_curr[i] = rr_data & DIVF_CURR_MASK;
 		a.mon_divF_lim_lo[i] = (rr_data & DIVF_LIM_LO_MASK) >>
 							DIVF_LIM_LO_SHIFT;
@@ -766,8 +317,159 @@ static struct cpu_data read_cpu_data(int node)
 		a.mon_freq_lim_lo[i] = CalcFreq(a.base_freq[i],
 						a.mon_divF_lim_lo[i]);
 
-		ctrl_addr = (PCS_PMC_REGS_base + 0x204 + block_addr_shift);
-		ctrl_data = sic_read_node_nbsr_reg(node, ctrl_addr);
+		ctrl_data = readl(hwmon->base[3] + block_addr_shift + 0x4);
+
+		if (block_is_graphic == 1) {
+			a.graph_ctrl_bfs_bypass[i] = (ctrl_data &
+				BFS_BYPASS_MASK) >> BFS_BYPASS_SHIFT;
+			a.graph_ctrl_en[i] = (ctrl_data & CTRL_EN_MASK);
+		}
+		a.ctrl_bfs_bypass[i] = (ctrl_data & BFS_BYPASS_MASK) >> BFS_BYPASS_SHIFT;
+		a.ctrl_en[i] = (ctrl_data & CTRL_EN_MASK);
+		pmc_freq_data = readl(hwmon->base[3] + 0x300);
+		a.pmc_freq_cfg_alter_disable[i] = (pmc_freq_data & CFG_ALTER_MASK)
+						>> CFG_ALTER_SHIFT;
+	}
+
+	return a;
+}
+
+static ssize_t show_cpu_data_e8v7(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct hwmon_data *hwmon = dev_get_drvdata(dev);
+	struct cpu_data_e8v7 b = read_cpu_data_e8v7(hwmon);
+	int j = 0;
+	int i;
+	int graphic_num;
+	int block_is_graphic;
+	int graph_ctrl_freq_bypassed;
+	char block_name[30];
+	char *GRAPHIC_NAME[] = {"MGA", "GPU", "ENCODERs", "DECODERs"};
+	int block_is_core;
+	int block_is_uncore;
+
+	for (i = 0; i < E8V7_size; i++) {
+		graphic_num = e8v7_block[i] - 33;
+		if (e8v7_block[i] < 16) {
+			block_is_core = 1;
+			block_is_uncore = 0;
+			block_is_graphic = 0;
+			sprintf(block_name, "CORE_%d", e8v7_block[i]);
+		} else if (e8v7_block[i] < 32) {
+			block_is_core = 0;
+			block_is_uncore = 0;
+			block_is_graphic = 0;
+			sprintf(block_name, "reserved");
+		} else if (e8v7_block[i] == 32) {
+			block_is_core = 0;
+			block_is_uncore = 1;
+			block_is_graphic = 0;
+			sprintf(block_name, "OCI");
+		} else if (e8v7_block[i] < 37) {
+			block_is_core = 0;
+			block_is_uncore = 0;
+			block_is_graphic = 1;
+			sprintf(block_name, "%s", GRAPHIC_NAME[graphic_num]);
+		} else {
+			block_is_core = 0;
+			block_is_uncore = 0;
+			block_is_graphic = 0;
+			sprintf(block_name, "reserved");
+		}
+		j += sprintf(buf + j, "NODE_%d: Checking block %s\n", hwmon->node, block_name);
+		if (b.mon_bfs_bypass[i]) {
+			if (block_is_graphic == 1) {
+				j += sprintf(buf + j, " - presence of a controlled frequency ");
+				j += sprintf(buf + j, "divider: simple divider 1/%d or 1/%d\n",
+							1, 1);
+			} else {
+				j += sprintf(buf + j, " - presence of a controlled frequency ");
+				j += sprintf(buf + j, "divider: absent (BFS bypass)\n");
+				j += sprintf(buf + j, " - current frequency: %d MHz (BFS bypass)\n",
+										b.base_freq[i]);
+				j += sprintf(buf + j, " - hardware allowed frequency range:");
+				j += sprintf(buf + j, " absent (BFS bypass)\n");
+			}
+		} else {
+			j += sprintf(buf + j, " - presence of a controlled frequency divider:");
+			j += sprintf(buf + j, " standard (BFS bypass)\n");
+			j += sprintf(buf + j, " - current frequency: %d MHz (divF=0x%x)\n",
+						b.mon_freq_curr[i], b.mon_divF_curr[i]);
+			j += sprintf(buf + j, " - hardware allowed frequency range:");
+			j += sprintf(buf + j, " from %d MHz to %d MHz (0x%x>=divF>=0x%x)\n",
+						b.mon_freq_lim_hi[i], b.mon_freq_lim_lo[i],
+						b.mon_divF_lim_hi[i], b.mon_divF_lim_lo[i]);
+		}
+
+		if (block_is_graphic) {
+			if (b.graph_ctrl_bfs_bypass[i]) {
+				graph_ctrl_freq_bypassed = b.base_freq[i];
+				j += sprintf(buf + j, " - current frequency: %d MHz\n",
+							graph_ctrl_freq_bypassed);
+			}
+		}
+	}
+
+	return sprintf(buf, "%s", buf);
+}
+
+static int e2c3_block[E2C3_size] = {0, 1, 32, 33, 34, 35, 36};
+static struct cpu_data read_cpu_data(struct hwmon_data *hwmon)
+{
+	struct cpu_data a;
+	int i;
+	int block_addr_shift;
+	int rr_data;
+	int block_is_graphic;
+	int graphic_num;
+	int ctrl_data;
+	int graph_data;
+	int pmc_freq_data;
+	int pmc_freq_gra_float_T_lo[E2C3_size];
+	int pmc_freq_gra_float_T_hi[E2C3_size];
+	int core_data;
+	int pmc_freq_core_float_T_lo[E2C3_size];
+	int pmc_freq_core_float_T_hi[E2C3_size];
+	int ocn_data;
+	int pmc_freq_ocn_float_T_lo[E2C3_size];
+	int pmc_freq_ocn_float_T_hi[E2C3_size];
+
+	for (i = 0; i < E2C3_size; i++) {
+		block_addr_shift = 0x10 * e2c3_block[i];
+		graphic_num = e2c3_block[i] - 33;
+		if (e2c3_block[i] < 16) {
+			a.base_freq[i] = get_core_mpll_freq(hwmon->base[5]);
+			block_is_graphic = 0;
+		} else if (e2c3_block[i] < 32) {
+			a.base_freq[i] = 0;
+			block_is_graphic = 0;
+		} else if (e2c3_block[i] == 32) {
+			a.base_freq[i] = get_uncore_mpll_freq(hwmon->base[5]);
+			block_is_graphic = 0;
+		} else if (e2c3_block[i] < 37) {
+			a.base_freq[i] = get_core_mpll_freq(hwmon->base[5]);
+			block_is_graphic = 1;
+		} else {
+			a.base_freq[i] = 0;
+			block_is_graphic = 0;
+		}
+		rr_data = readl(hwmon->base[3] + 0x200 + block_addr_shift);
+		a.mon_divF_curr[i] = rr_data & DIVF_CURR_MASK;
+		a.mon_divF_lim_lo[i] = (rr_data & DIVF_LIM_LO_MASK) >>
+							DIVF_LIM_LO_SHIFT;
+		a.mon_divF_lim_hi[i] = (rr_data & DIVF_LIM_HI_MASK) >>
+							DIVF_LIM_HI_SHIFT;
+		a.mon_bfs_bypass[i] = (rr_data & BFS_BYPASS_MASK) >>
+							BFS_BYPASS_SHIFT;
+		a.mon_freq_curr[i] = CalcFreq(a.base_freq[i],
+						a.mon_divF_curr[i]);
+		a.mon_freq_lim_hi[i] = CalcFreq(a.base_freq[i],
+						a.mon_divF_lim_hi[i]);
+		a.mon_freq_lim_lo[i] = CalcFreq(a.base_freq[i],
+						a.mon_divF_lim_lo[i]);
+
+		ctrl_data = readl(hwmon->base[3] + 0x204 + block_addr_shift);
 
 		if (block_is_graphic == 1) {
 			a.graph_ctrl_bfs_bypass[i] = (ctrl_data &
@@ -777,8 +479,7 @@ static struct cpu_data read_cpu_data(int node)
 							>> CTRL_CLK_SHIFT;
 			a.graph_ctrl_mode[i] = (ctrl_data & CTRL_MODE_MASK)
 							>> CTRL_MODE_SHIFT;
-			graph_addr = PCS_PMC_REGS_base + 0x600 + (0x4 * graphic_num);
-			graph_data = sic_read_node_nbsr_reg(node, graph_addr);
+			graph_data = readl(hwmon->base[3] + 0x600 + (0x4 * graphic_num));
 			pmc_freq_gra_float_T_lo[i] = graph_data & FLOAT_LO_MASK;
 			pmc_freq_gra_float_T_hi[i] = (graph_data & FLOAT_HI_MASK)
 							>> FLOAT_HI_SHIFT;
@@ -788,19 +489,16 @@ static struct cpu_data read_cpu_data(int node)
 		a.ctrl_bfs_bypass[i] = (ctrl_data & BFS_BYPASS_MASK) >> BFS_BYPASS_SHIFT;
 		a.ctrl_en[i] = (ctrl_data & CTRL_EN_MASK);
 		a.ctrl_mode[i] = (ctrl_data & CTRL_MODE_MASK) >> CTRL_MODE_SHIFT;
-		core_addr = PCS_PMC_REGS_base + 0x110;
-		core_data = sic_read_node_nbsr_reg(node, core_addr);
+		core_data = readl(hwmon->base[3] + 0x110);
 		pmc_freq_core_float_T_lo[i] = core_data & FLOAT_LO_MASK;
 		pmc_freq_core_float_T_hi[i] = (core_data & FLOAT_HI_MASK)
 						>> FLOAT_HI_SHIFT;
 		a.pmc_freq_core_float_T_lo_dec[i] = CalcTemp(pmc_freq_core_float_T_lo[i]);
 		a.pmc_freq_core_float_T_hi_dec[i] = CalcTemp(pmc_freq_core_float_T_hi[i]);
-		pmc_freq_addr = PCS_PMC_REGS_base + 0x100;
-		pmc_freq_data = sic_read_node_nbsr_reg(node, pmc_freq_addr);
+		pmc_freq_data = readl(hwmon->base[3] + 0x100);
 		a.pmc_freq_cfg_alter_disable[i] = (pmc_freq_data & CFG_ALTER_MASK)
 						>> CFG_ALTER_SHIFT;
-		ocn_addr = PCS_PMC_REGS_base + 0x114;
-		ocn_data = sic_read_node_nbsr_reg(node, ocn_addr);
+		ocn_data = readl(hwmon->base[3] + 0x114);
 		pmc_freq_ocn_float_T_lo[i] = ocn_data & FLOAT_LO_MASK;
 		pmc_freq_ocn_float_T_hi[i] = (ocn_data & FLOAT_HI_MASK)
 						>> FLOAT_HI_SHIFT;
@@ -815,7 +513,7 @@ static ssize_t show_cpu_data(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	struct cpu_data b = read_cpu_data(hwmon->node);
+	struct cpu_data b = read_cpu_data(hwmon);
 	int j = 0;
 	int i;
 	int graphic_num;
@@ -937,14 +635,21 @@ static ssize_t show_cpu_data(struct device *dev,
 	return sprintf(buf, "%s", buf);
 }
 
-static u32 read_reg(void)
+static u32 read_reg(bool *present)
 {
-	u32 value;
 	struct pci_dev *dev;
+	u32 value = 0;
+	*present = true;
 
 	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 				PCI_VIRT_BRIDGE_DEVICE_ID, NULL);
+	if (!dev) {
+		*present = false;
+		return value;
+	}
 	pci_read_config_dword(dev, 0x70, &value);
+	pci_dev_put(dev);
+
 	/* To read needed info I use this shift and mask,
 	   just like it's done in the script  */
 	value = (value >> 16) & 0xffff;
@@ -952,23 +657,23 @@ static u32 read_reg(void)
 
 }
 
-#ifdef CONFIG_E2K
 static int prev_str_err_mode[IPCC_LINKS] = {-1, -1, -1};
-#endif
 
-static int read_wlcc_data(struct link_data *data, int node)
+static int read_wlcc_data(struct link_data *data, struct hwmon_data *hwmon)
 {
 	struct link_data *a = data;
 	struct pci_dev *dev;
 	static void __iomem *base_addr;
-	int iol_pls;
-	int wlcc_err_val;
-	int cpu_type = machine.native_id;
+	int iol_pls = 0;
+	int wlcc_err_val = 0;
 
-	if ((cpu_type == MACHINE_ID_E16C) || (cpu_type == MACHINE_ID_E12C)
-						|| (cpu_type == MACHINE_ID_E2C3)) {
+	if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+			IS_MACHINE_E2C3) {
 		dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 					PCI_VIRT_BRIDGE_DEVICE_ID, NULL);
+		if (!dev)
+			return -ENODEV;
+
 		base_addr = pci_iomap(dev, 0, PCI_IOL_SIZE);
 		if (!base_addr) {
 			pci_release_regions(dev);
@@ -978,26 +683,25 @@ static int read_wlcc_data(struct link_data *data, int node)
 		/* iol_bitrate[22:20] from PCS_CTRL3 reg (v5) moved
 		 * to pin_wlcc_speed_presets[18:16] PMC_SYS_MON_0 reg (v6)
 		 * */
-		a->io_mpll = (sic_read_node_nbsr_reg(node, PMC_SYS_MON_0)
+		a->io_mpll = (readl(hwmon->base[3] + PMC_SYS_MON_0_SHIFT)
 				& PIN_WLCC_SPEED_PRESETS_MASK) >> PIN_WLCC_SPEED_PRESETS_SHIFT;
-
-		a->wlcc_rate = (readl(base_addr + IOL_PLM_CTLR_SHIFT)
+		a->wlcc_rate = (readl(base_addr + IOL_PLM_CTLR_SHIFT_PCI)
 							& WLCC_RATE_MASK) >> WLCC_RATE_SHIFT;
-		iol_pls = readl(base_addr) + IOL_PLS_CTLR_SHIFT;
-		wlcc_err_val = readl(base_addr + IOL_DLL_STSR_SHIFT);
+		iol_pls = readl(base_addr + IOL_PLS_CTLR_SHIFT_PCI);
+		wlcc_err_val = readl(base_addr + IOL_DLL_STSR_SHIFT_PCI);
 		pci_iounmap(dev, base_addr);
+		pci_dev_put(dev);
 	}
 
-	if ((cpu_type == MACHINE_ID_E8C) ||
-				(cpu_type == MACHINE_ID_E8C2)) {
-		a->io_mpll = (sic_read_node_nbsr_reg(node, PCS_CTRL3)
+	if (IS_MACHINE_E8C || IS_MACHINE_E8C2) {
+		a->io_mpll = (readl(hwmon->base[4])
 					& MPLL_MASK) >> MPLL_SHIFT;
-		a->ip_mpll = (sic_read_node_nbsr_reg(node, PCS_CTRL3)
+		a->ip_mpll = (readl(hwmon->base[4])
 				& MPLL_LINK_MASK) >> MPLL_LINK_SHIFT;
-		a->wlcc_rate = (sic_read_node_nbsr_reg(node, IOL_PLM_CTLR)
+		a->wlcc_rate = (readl(hwmon->base[3] + IOL_PLM_CTLR_SHIFT)
 					& WLCC_RATE_MASK) >> WLCC_RATE_SHIFT;
-		iol_pls = sic_read_node_nbsr_reg(node, IOL_PLS_CTLR);
-		wlcc_err_val = sic_read_node_nbsr_reg(node, IOL_DLL_STSR);
+		iol_pls = readl(hwmon->base[3] + IOL_PLS_CTLR_SHIFT);
+		wlcc_err_val = readl(hwmon->base[3] + IOL_DLL_STSR_SHIFT);
 	}
 
 	a->wlcc_active = (iol_pls & WLCC_ACTIVE_MASK) >>
@@ -1015,7 +719,7 @@ static int read_wlcc_data(struct link_data *data, int node)
 	return 0;
 }
 
-static int read_kpi_data(struct link_data *data, int node)
+static int read_kpi_data(struct link_data *data, struct hwmon_data *hwmon)
 {
 	struct link_data *a = data;
 	struct pci_dev *dev;
@@ -1023,11 +727,13 @@ static int read_kpi_data(struct link_data *data, int node)
 	int kpi_err_val;
 	u32 pls_ctrl;
 
-	a->iol = (sic_read_node_nbsr_reg(node, RT_LCFG0) &
+	a->iol = (readl(hwmon->base[0] + RT_LCFG0_SHIFT) &
 					IOL_MASK) >> IOL_SHIFT;
 	if (a->iol == 1) {
 		dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 					PCI_VIRT_BRIDGE_DEVICE_ID, NULL);
+		if (!dev)
+			return -ENODEV;
 		base_addr = pci_iomap(dev, 0, PCI_KPI_SIZE);
 		if (!base_addr) {
 			pci_release_regions(dev);
@@ -1050,13 +756,15 @@ static int read_kpi_data(struct link_data *data, int node)
 		a->kpi_md = (kpi_err_val & ERR_MD_MASK) >>
 							 ERR_MD_SHIFT;
 		pci_iounmap(dev, base_addr);
+		pci_dev_put(dev);
 	}
 
 	return 0;
 }
 
-static void read_ipcc_data(struct link_data *data, int node)
+static void read_ipcc_data(struct link_data *data, struct hwmon_data *hwmon)
 {
+	static void __iomem *base;
 	struct link_data *a = data;
 	int curr_LCFG;
 	int str_shift = 3; /*This shift is used to read from str regs*/
@@ -1075,36 +783,43 @@ static void read_ipcc_data(struct link_data *data, int node)
 	u32 mplla_div2_val;
 	int bitrate, bitrate_mean = 0, lnum = 0;
 	int b, i, j;
-	int cpu_type = machine.native_id;
+	bool present;
 
-	a->multilink = ((sic_read_node_nbsr_reg(node, ST_P)) >>
+	a->multilink = ((readl(hwmon->base[0] + ST_P_SHIFT)) >>
 				 MULTILINK_SHIFT) & MULTILINK_MASK;
-	a->mlc = (sic_read_node_nbsr_reg(node, ST_P) >>
+	a->mlc = (readl(hwmon->base[0] + ST_P_SHIFT) >>
 				 MLC_SHIFT) & MLC_MASK;
-	a->st_p = sic_read_node_nbsr_reg(node, ST_P);
+	a->st_p = readl(hwmon->base[0] + ST_P_SHIFT);
 
 	/*Depending on the number of ipcc link, reading from definite regs */
 	for (i = 0; i < IPCC_LINKS; i++) {
 		switch (i) {
 		case 0:
-			curr_LCFG = RT_LCFG1;
+			curr_LCFG = RT_LCFG1_SHIFT;
 			break;
 		case 1:
-			curr_LCFG = RT_LCFG2;
+			curr_LCFG = RT_LCFG2_SHIFT;
 			break;
 		case 2:
-			curr_LCFG = RT_LCFG3;
+			curr_LCFG = RT_LCFG3_SHIFT;
+			break;
+		default:
+			curr_LCFG = 0;
 			break;
 		}
-		rt_lcfg_val = sic_read_node_nbsr_reg(node, curr_LCFG);
+		rt_lcfg_val = readl(hwmon->base[0] + curr_LCFG);
+
 		a->vp[i] = rt_lcfg_val & RT_LCFG_VP_MASK;
 		a->pn[i] = (rt_lcfg_val >>
 				RT_LCFG_PN_SHIFT)&RT_LCFG_PN_MASK;
-		ipcc_str[i] = sic_read_node_nbsr_reg(node,
-					ipcc_ctrls[i+str_shift].offset);
+		if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+				IS_MACHINE_E2C3)
+			base = hwmon->base[2];
+		else
+			base = hwmon->base[3];
+		ipcc_str[i] = readl(base + ipcc_ctrls_off[i+str_shift].offset);
 		a->str_val[i] = ipcc_str[i];
-		ipcc_csr[i] = sic_read_node_nbsr_reg(node,
-						ipcc_ctrls[i].offset);
+		ipcc_csr[i] = readl(base + ipcc_ctrls_off[i].offset);
 		a->csr_reg[i] = ipcc_csr[i];
 		a->str_reg[i] = ipcc_ctrls[i+str_shift].offset;
 		a->active[i] = (ipcc_csr[i] & ACTIVE_MASK) >> ACTIVE_SHIFT;
@@ -1118,13 +833,13 @@ static void read_ipcc_data(struct link_data *data, int node)
 		 * to reset the cnt_err counter [28:0].*/
 
 		if (prev_str_err_mode[i] >=  0 && prev_str_err_mode[i] != a->err_mode[i]) {
-			sic_write_node_nbsr_reg(node, ipcc_ctrls[i+str_shift].offset,
-								a->str_val[i] | OVER_CNT_MASK);
+			writel(a->str_val[i] | OVER_CNT_MASK,
+				base + ipcc_ctrls_off[i+str_shift].offset);
 		}
 		prev_str_err_mode[i] = a->err_mode[i];
 
-		if ((cpu_type == MACHINE_ID_E16C) || (cpu_type == MACHINE_ID_E12C)
-							|| (cpu_type == MACHINE_ID_E2C3)) {
+		if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+				IS_MACHINE_E2C3) {
 			/*Depening on bitrate link*/
 			switch (i) {
 			case 0:
@@ -1136,10 +851,17 @@ static void read_ipcc_data(struct link_data *data, int node)
 			case 2:
 				b = 8;
 				break;
+			default:
+				b = 0;
+				break;
 			}
 
 			dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 						PCI_VIRT_BRIDGE_DEVICE_ID, NULL);
+			if (!dev) {
+				pr_err("PCI Virtual Bridge not presented\n");
+				return;
+			}
 			for (j = 0; j < lanes; j++) {
 				lnum++;
 				/* All magical numbers were got from engineer scripts */
@@ -1149,7 +871,12 @@ static void read_ipcc_data(struct link_data *data, int node)
 
 				pci_write_config_dword(dev, 0x6c,
 							mplla_multiplier_and_clk_mplla);
-				mplla_val = read_reg();
+				mplla_val = read_reg(&present);
+				if (!present) {
+					pr_err("PCI Virtual Bridge not presented\n");
+					pci_dev_put(dev);
+					return;
+				}
 
 				mplla_mult_val = (mplla_val >> MPLLA_SHIFT) & MPLLA_MASK;
 				mplla_div2_val = (mplla_val >> MPLLA_DIV2_SHIFT) &
@@ -1159,7 +886,12 @@ static void read_ipcc_data(struct link_data *data, int node)
 						(ipcc_rate_ctrls[b+j].offset << 16)|
 									SUP_DIG_ASIC_IN);
 				pci_write_config_dword(dev, 0x6c, ref_clk_div2_en);
-				clk_div2_en_val = read_reg();
+				clk_div2_en_val = read_reg(&present);
+				if (!present) {
+					pr_err("PCI Virtual Bridge not presented\n");
+					pci_dev_put(dev);
+					return;
+				}
 				clk_div2_en_val = (clk_div2_en_val >> CLK_DIV2_EN_SHIFT) &
 									CLK_DIV2_EN_MASK;
 
@@ -1167,7 +899,12 @@ static void read_ipcc_data(struct link_data *data, int node)
 								LANEN_DIG_ASIC_RX_ASIC_IN_0);
 
 				pci_write_config_dword(dev, 0x6c, rx_rate);
-				rx_rate_val = read_reg();
+				rx_rate_val = read_reg(&present);
+				if (!present) {
+					pr_err("PCI Virtual Bridge not presented\n");
+					pci_dev_put(dev);
+					return;
+				}
 				rx_rate_val = (rx_rate_val >> RX_RATE_SHIFT) & RX_RATE_MASK;
 
 				bitrate = 2 * 100 * (mplla_mult_val & 0x7f);
@@ -1197,28 +934,28 @@ static void read_ipcc_data(struct link_data *data, int node)
 			a->link_bitrate[i] = bitrate_mean;
 			bitrate_mean = 0;
 			lnum = 0;
+			pci_dev_put(dev);
 		}
 	}
 }
 
-static struct link_data read_link_data(int node)
+static struct link_data read_link_data(struct hwmon_data *hwmon)
 {
 	struct link_data a;
-	int cpu_type = machine.native_id;
 	int ret;
 
-	ret = read_wlcc_data(&a, node);
+	ret = read_wlcc_data(&a, hwmon);
 	if (ret < 0) {
 		a.wlcc_state = ret;
 	}
 
-	ret = read_kpi_data(&a, node);
+	ret = read_kpi_data(&a, hwmon);
 	if (ret < 0) {
 		a.kpi_state = ret;
 	}
 
-	if (cpu_type != MACHINE_ID_E2C3) {
-		read_ipcc_data(&a, node);
+	if (!IS_MACHINE_E2C3) {
+		read_ipcc_data(&a, hwmon);
 	}
 
 	return a;
@@ -1316,7 +1053,6 @@ static int get_wlcc_information(struct link_data *data, char *buf,
 					struct hwmon_data *hwmon, int j)
 {
 	struct link_data *b = data;
-	int cpu_type = machine.native_id;
 	char *wlcc_half_rate_v6[] = {"2.5", "3", "2.5", "3", "1.25", "1.5", "2", "4"};
 	char *wlcc_full_rate_v6[] = {"5", "6", "5", "6", "2.5", "3", "4", "8"};
 	char *wlcc_half_rate[] = {"1.25", "1.5", "2.5", "3", "1", "2", "2.25", "2.75"};
@@ -1324,8 +1060,8 @@ static int get_wlcc_information(struct link_data *data, char *buf,
 
 	j += sprintf(buf + j, "NODE%d-wlcc: ", hwmon->node);
 	if (b->wlcc_rate == 1) {
-		if ((cpu_type == MACHINE_ID_E16C) || (cpu_type == MACHINE_ID_E12C) ||
-							 (cpu_type == MACHINE_ID_E2C3)) {
+		if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+				IS_MACHINE_E2C3) {
 			j += sprintf(buf + j, "%s Gbit/s (mpll=0x%x full rate), ",
 						wlcc_full_rate_v6[b->io_mpll], b->io_mpll);
 		} else {
@@ -1333,8 +1069,8 @@ static int get_wlcc_information(struct link_data *data, char *buf,
 						wlcc_full_rate[b->io_mpll], b->io_mpll);
 		}
 	} else {
-		if ((cpu_type == MACHINE_ID_E16C) || (cpu_type == MACHINE_ID_E12C) ||
-							 (cpu_type == MACHINE_ID_E2C3)) {
+		if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+				IS_MACHINE_E2C3) {
 			j += sprintf(buf + j, "%s Gbit/s (mpll=0x%x half rate), ",
 						 wlcc_half_rate_v6[b->io_mpll], b->io_mpll);
 		} else {
@@ -1418,7 +1154,7 @@ static int get_ipcc_information(struct link_data *data, char *buf,
 {
 	struct link_data *b = data;
 	char *ip_rate[] = {"2.5", "3", "4", "4.5", "5", "5.5", "6", "6.25"};
-	int i, cpu_type = machine.native_id;
+	int i;
 	char gbit_link_bitrate[10];
 	char letter;
 
@@ -1433,17 +1169,19 @@ static int get_ipcc_information(struct link_data *data, char *buf,
 		case IPCC_CSR3:
 			letter = 'C';
 			break;
+		default:
+			letter = '?';
+			break;
 		}
 
 		j += sprintf(buf + j, "NODE%d-ipcc-%c-csr(0x%x) width=0x%x, ",
 					 hwmon->node, letter, ipcc_ctrls[i].offset, b->width[i]);
-		if ((cpu_type == MACHINE_ID_E8C) ||
-					(cpu_type == MACHINE_ID_E8C2)) {
+		if (IS_MACHINE_E8C || IS_MACHINE_E8C2) {
 			j += sprintf(buf + j, "%s Gbit/s(mpll=0x%x), ",
 						ip_rate[b->ip_mpll], b->ip_mpll);
-		} else if ((cpu_type == MACHINE_ID_E16C) ||
-					(cpu_type == MACHINE_ID_E12C) ||
-						 (cpu_type == MACHINE_ID_E2C3)) {
+		} else if (IS_MACHINE_E16C ||
+						IS_MACHINE_E12C ||
+							IS_MACHINE_E2C3) {
 			convert_mbit2gbit(gbit_link_bitrate, b->link_bitrate[i]);
 			j += sprintf(buf + j, "%s Gbit/s, ", gbit_link_bitrate);
 		}
@@ -1500,7 +1238,7 @@ static int get_ipcc_information(struct link_data *data, char *buf,
 				", without connection\n");
 		}
 
-		if (machine.native_id != MACHINE_ID_E16C) {
+		if (!IS_MACHINE_E16C) {
 			if ((b->multilink != 0) || (b->mlc != 0)) {
 				j += sprintf(buf + j,
 					"ERROR!!! Multilink is not supported for this ");
@@ -1566,8 +1304,7 @@ static ssize_t show_link_data(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	struct link_data b = read_link_data(hwmon->node);
-	int cpu_type = machine.native_id;
+	struct link_data b = read_link_data(hwmon);
 	int j = 0;
 
 	/* KPI INFORMATION */
@@ -1581,7 +1318,7 @@ static ssize_t show_link_data(struct device *dev,
 	}
 
 	/* IPCC INFORMATION */
-	if (cpu_type != MACHINE_ID_E2C3) {
+	if (!IS_MACHINE_E2C3) {
 		j = get_ipcc_information(&b, buf, hwmon, j);
 	}
 
@@ -1590,7 +1327,7 @@ static ssize_t show_link_data(struct device *dev,
 
 static int get_mem_channels(void)
 {
-	int mem_channels;
+	int mem_channels = 0;
 	int cpu_type = machine.native_id;
 
 	switch (cpu_type) {
@@ -1609,12 +1346,15 @@ static int get_mem_channels(void)
 	case MACHINE_ID_E8C:
 		mem_channels = 4;
 		break;
+	case MACHINE_ID_E8V7:
+		mem_channels = 2;
+		break;
 	}
 
 	return mem_channels;
 }
 
-static struct mem_data read_mem(int node)
+static struct mem_data read_mem(struct hwmon_data *hwmon)
 {
 	struct mem_data a;
 	int val;
@@ -1622,15 +1362,37 @@ static struct mem_data read_mem(int node)
 	int i;
 	int mem_channels = get_mem_channels();
 
-	/* Reading information from MC in case of e12c, e16c, e2c3 */
-	if (((machine.native_id == MACHINE_ID_E16C) ||
-			 (machine.native_id == MACHINE_ID_E12C)) ||
-				(machine.native_id == MACHINE_ID_E2C3)) {
+	/* Reading information from MC in case of e8v7 */
+	if (IS_MACHINE_E8V7) {
 		for (i = 0; i < mem_channels; i++) {
-			sic_write_node_nbsr_reg(node,
-					mc_ctrls[4].offset, num_link[i]);
-			val = sic_read_node_nbsr_reg(node,
-					mc_ctrls[5].offset);
+			writel(num_link[i], hwmon->base[1] + mc_ctrls_off[4].offset);
+			val = readl(hwmon->base[1] + mc_ctrls_off[5].offset);
+			a.mem_mode[i] = val & MC_ENABLE_MASK;
+			a.mem_secnt[i] = (val >> MC_SECNT_SHIFT) &
+							 MC_SECNT_MASK;
+			a.mem_uecnt[i] = (val >> MC_UECNT_SHIFT_E8V7) &
+							MC_UECNT_MASK_E8V7;
+			a.mem_dmode[i] = (val >> MC_DMODE_SHIFT) &
+							MC_DMODE_MASK;
+			a.mem_reg_val[i] = val;
+			a.mem_ctl_val[i] = readl(hwmon->base[1] + MC_CTL_SHIFT);
+			a.mem_ctl_mcen[i] = readl(hwmon->base[1] + MC_CTL_SHIFT) & MC_CTL_MCEN_MASK;
+			a.mem_status_val[i] = readl(hwmon->base[1] + MC_STATUS_SHIFT);
+			a.mem_rst_done[i] = (readl(hwmon->base[1] + MC_STATUS_SHIFT)
+							>> MC_ST_RST_DONE_SHIFT)
+								& MC_ST_RST_DONE_MASK;
+			a.mem_reg[i] = mc_ctrls[5].offset;
+			a.mem_hmu_mcen = (readl(hwmon->base[2]) >> OCN_MIL_SHIFT)
+						& OCN_MIL_MASK;
+		}
+	}
+
+	/* Reading information from MC in case of e12c, e16c, e2c3 */
+	if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+				IS_MACHINE_E2C3) {
+		for (i = 0; i < mem_channels; i++) {
+			writel(num_link[i], hwmon->base[1] + mc_ctrls_off[4].offset);
+			val = readl(hwmon->base[1] + mc_ctrls_off[5].offset);
 			a.mem_mode[i] = val & MC_ENABLE_MASK;
 			a.mem_secnt[i] = (val >> MC_SECNT_SHIFT) &
 							 MC_SECNT_MASK;
@@ -1639,26 +1401,22 @@ static struct mem_data read_mem(int node)
 			a.mem_dmode[i] = (val >> MC_DMODE_SHIFT) &
 							MC_DMODE_MASK;
 			a.mem_reg_val[i] = val;
-			a.mem_ctl_val[i] = sic_read_node_nbsr_reg(node,
-								MC_CTL);
-			a.mem_ctl_mcen[i] = sic_read_node_nbsr_reg(node,
-						MC_CTL) & MC_CTL_MCEN_MASK;
-			a.mem_status_val[i] = sic_read_node_nbsr_reg(node,
-								MC_STATUS);
-			a.mem_rst_done[i] = (sic_read_node_nbsr_reg(node,
-				MC_STATUS) >> MC_ST_RST_DONE_SHIFT)
-						& MC_ST_RST_DONE_MASK;
+			a.mem_ctl_val[i] = readl(hwmon->base[1] + MC_CTL_SHIFT);
+			a.mem_ctl_mcen[i] = readl(hwmon->base[1] + MC_CTL_SHIFT) & MC_CTL_MCEN_MASK;
+			a.mem_status_val[i] = readl(hwmon->base[1] + MC_STATUS_SHIFT);
+			a.mem_rst_done[i] = (readl(hwmon->base[1] + MC_STATUS_SHIFT)
+							>> MC_ST_RST_DONE_SHIFT)
+								& MC_ST_RST_DONE_MASK;
 			a.mem_reg[i] = mc_ctrls[5].offset;
-			a.mem_hmu_mcen = (sic_read_node_nbsr_reg(node,
-				HMU_MIC) >> HMU_MCEN_SHIFT) & HMU_MCEN_MASK;
+			a.mem_hmu_mcen = (readl(hwmon->base[4]) >> HMU_MCEN_SHIFT)
+						& HMU_MCEN_MASK;
 		}
 	}
 
 	/* Reading information from MC in case of e8c, e8c2 */
-	else if ((machine.native_id == MACHINE_ID_E8C) ||
-			 (machine.native_id == MACHINE_ID_E8C2)) {
+	else if (IS_MACHINE_E8C || IS_MACHINE_E8C2) {
 		for (i = 0; i < mem_channels; i++) {
-			val = sic_read_node_nbsr_reg(node, mc_ctrls[i].offset);
+			val = readl(hwmon->base[2] + mc_ctrls_off[i].offset);
 			a.mem_mode[i] = val & MC_ENABLE_MASK;
 			a.mem_secnt[i] = (val >> MC_SECNT_SHIFT)
 							& MC_SECNT_MASK;
@@ -1667,15 +1425,12 @@ static struct mem_data read_mem(int node)
 			a.mem_dmode[i] = (val >> MC_DMODE_SHIFT)
 							& MC_DMODE_MASK;
 			a.mem_reg_val[i] = val;
-			a.mem_ctl_val[i] = sic_read_node_nbsr_reg(node,
-							MC_CTL);
-			a.mem_ctl_mcen[i] = sic_read_node_nbsr_reg(node,
-						MC_CTL) & MC_CTL_MCEN_MASK;
-			a.mem_status_val[i] = sic_read_node_nbsr_reg(node,
-						MC_STATUS);
-			a.mem_rst_done[i] = (sic_read_node_nbsr_reg(node,
-				MC_STATUS) >> MC_ST_RST_DONE_SHIFT) &
-							 MC_ST_RST_DONE_MASK;
+			a.mem_ctl_val[i] = readl(hwmon->base[2] + mc_ctls_off[i].offset);
+			a.mem_ctl_mcen[i] = readl(hwmon->base[2] + mc_ctls_off[i].offset)
+						& MC_CTL_MCEN_MASK;
+			a.mem_status_val[i] = readl(hwmon->base[2] + MC_STATUS_SHIFT);
+			a.mem_rst_done[i] = (readl(hwmon->base[2] + MC_STATUS_SHIFT)
+						>> MC_ST_RST_DONE_SHIFT) & MC_ST_RST_DONE_MASK;
 			a.mem_reg[i] = mc_ctrls[i].offset;
 		}
 	}
@@ -1687,11 +1442,10 @@ static ssize_t show_mem_data(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	struct mem_data b = read_mem(hwmon->node);
+	struct mem_data b = read_mem(hwmon);
 	int j = 0;
 	int i;
 	int mem_channels = get_mem_channels();
-	int cpu_type = machine.native_id;
 	int mc_enabled;
 
 	for (i = 0; i < mem_channels; i++) {
@@ -1700,18 +1454,23 @@ static ssize_t show_mem_data(struct device *dev,
 						hwmon->node, i, b.mem_reg[i],
 						b.mem_mode[i], b.mem_secnt[i],
 						b.mem_uecnt[i], b.mem_dmode[i]);
-		if ((b.mem_ctl_mcen[i] != 1) && ((cpu_type == MACHINE_ID_E8C) ||
-					 (cpu_type == MACHINE_ID_E8C2))) {
+		if ((b.mem_ctl_mcen[i] != 1) && (IS_MACHINE_E8C ||
+					 IS_MACHINE_E8C2)) {
 			j += sprintf(buf + j,
 				"warning!!! MC%d IS DISABLED, MCEN IS OFF\n", i);
 		}
 		mc_enabled = (b.mem_hmu_mcen >> i) & HMU_ENABLE;
 		if ((mc_enabled == 0) &&
-			((cpu_type == MACHINE_ID_E16C) ||
-				 (cpu_type == MACHINE_ID_E2C3) ||
-					      (cpu_type == MACHINE_ID_E12C))) {
+			(IS_MACHINE_E16C || IS_MACHINE_E2C3 ||
+					IS_MACHINE_E12C)) {
 			j += sprintf(buf + j,
 				"warning!!! MC%d IS DISABLED, HMU_MIC_MCEN IS OFF\n", i);
+		}
+
+		if ((mc_enabled == 0) &&
+				IS_MACHINE_E8V7) {
+			j += sprintf(buf + j,
+				"warning!!! MC%d IS DISABLED, OCN_MIL_MCEN IS OFF\n", i);
 		}
 
 
@@ -1742,9 +1501,8 @@ static ssize_t show_mem_data(struct device *dev,
 				"Warning!!! controller is disabled (MC_CTL = 0x%x)\n",
 							b.mem_ctl_val[i]);
 		}
-		if ((cpu_type == MACHINE_ID_E16C) ||
-				(cpu_type == MACHINE_ID_E12C) ||
-						(cpu_type == MACHINE_ID_E2C3)) {
+		if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+				IS_MACHINE_E2C3 || IS_MACHINE_E8V7) {
 			if (b.mem_rst_done[i] == 0) {
 				j += sprintf(buf + j,
 					"Warning!!! status rst_done = 0x%x (MC_STATUS = 0x%x)\n",
@@ -1757,7 +1515,7 @@ static ssize_t show_mem_data(struct device *dev,
 	return sprintf(buf, "%s", buf);
 }
 
-static struct mem_data read_mem_rate(int node)
+static struct mem_data read_mem_rate(struct hwmon_data *hwmon)
 {
 	struct mem_data a;
 	int i;
@@ -1776,26 +1534,22 @@ static struct mem_data read_mem_rate(int node)
 	int mc_clkf;
 	int mc_clkod;
 	int mc_lock;
-	int cpu_type = machine.native_id;
 	int mem_channels = get_mem_channels();
 
-	if ((cpu_type == MACHINE_ID_E2C3) ||
-		(cpu_type == MACHINE_ID_E12C) ||
-			(cpu_type == MACHINE_ID_E16C)) {
-		sic_write_node_nbsr_reg(node, MC_CH, 0xF);
-		sic_write_node_nbsr_reg(node, MC_MON_CTL, 0xFFFF000F);
-		sic_write_node_nbsr_reg(node, MC_MON_CTL, 0XFFFF0000);
+	if (IS_MACHINE_E2C3 || IS_MACHINE_E12C ||
+			IS_MACHINE_E16C || IS_MACHINE_E8V7) {
+		writel(0xF, hwmon->base[1]);
+		writel(0xFFFF000F, hwmon->base[1] + MC_MON_CTL_SHIFT);
+		writel(0xFFFF0000, hwmon->base[1] + MC_MON_CTL_SHIFT);
 		mdelay(MC_MON_DELAY_MS);
-		sic_write_node_nbsr_reg(node, MC_CH, 0xF);
-		sic_write_node_nbsr_reg(node, MC_MON_CTL, 0x0000000C);
-		sic_write_node_nbsr_reg(node, MC_CH, 0X0);
+		writel(0xF, hwmon->base[1]);
+		writel(0x0000000C, hwmon->base[1] + MC_MON_CTL_SHIFT);
+		writel(0x0, hwmon->base[1]);
 
 		for (i = 0; i < mem_channels; i++) {
-			sic_write_node_nbsr_reg(node, MC_CH, num_link[i]);
-			mc_mon_ctr0 = sic_read_node_nbsr_reg(node,
-			MC_MON_CTR0);
-			mc_mon_ctr_ext = sic_read_node_nbsr_reg(node,
-			MC_MON_CTRext);
+			writel(num_link[i], hwmon->base[1]);
+			mc_mon_ctr0 = readl(hwmon->base[1] + MC_MON_CTR0_SHIFT);
+			mc_mon_ctr_ext = readl(hwmon->base[1] + MC_MON_CTRext_SHIFT);
 
 			mc_mnt0 = mc_mon_ctr_ext & MC_MNT0_MASK;
 			mc_mnt0 = (mc_mnt0 << MC_MNT0_SHIFT) + mc_mon_ctr0;
@@ -1804,17 +1558,19 @@ static struct mem_data read_mem_rate(int node)
 			mc_ddr_rate = mc_freq * 2 * 2;
 			a.mem_freq[i] = mc_freq;
 			a.mem_ddr_rate[i] = mc_ddr_rate;
-			a.mem_ctl_val[i] = sic_read_node_nbsr_reg(node,
-							MC_CTL);
-			a.mem_ctl_mcen[i] = sic_read_node_nbsr_reg(node,
-					MC_CTL) & MC_CTL_MCEN_MASK;
+			a.mem_ctl_val[i] = readl(hwmon->base[1] + MC_CTL_SHIFT);
+			a.mem_ctl_mcen[i] = readl(hwmon->base[1] + MC_CTL_SHIFT) & MC_CTL_MCEN_MASK;
 			}
-		a.mem_hmu_mcen = (sic_read_node_nbsr_reg(node,
-				HMU_MIC) >> HMU_MCEN_SHIFT) & HMU_MCEN_MASK;
-	} else if ((cpu_type == MACHINE_ID_E8C) ||
-			 (cpu_type == MACHINE_ID_E8C2)) {
+		if (IS_MACHINE_E8V7) {
+			a.mem_hmu_mcen = (readl(hwmon->base[2]) >> OCN_MIL_SHIFT)
+				& OCN_MIL_MASK;
+		} else {
+			a.mem_hmu_mcen = (readl(hwmon->base[4]) >> HMU_MCEN_SHIFT)
+				& HMU_MCEN_MASK;
+		}
+	} else if (IS_MACHINE_E8C || IS_MACHINE_E8C2) {
 		/* Here I get memory freq from mgr1 */
-		pwr_mgr1 = sic_read_node_nbsr_reg(node, PWR_MGR1);
+		pwr_mgr1 = readl(hwmon->base[1]);
 		mc_rst = pwr_mgr1 & RST_MASK;
 		mc_outena = (pwr_mgr1 & OUTENA_MASK) >> OUTENA_SHIFT;
 		mc_clkr = (pwr_mgr1 & CLKR_MASK) >> CLKR_SHIFT;
@@ -1827,7 +1583,7 @@ static struct mem_data read_mem_rate(int node)
 						(mc_clkod + 1);
 
 		/* Here I do th same thing but from mgr2 */
-		pwr_mgr2 = sic_read_node_nbsr_reg(node, PWR_MGR2);
+		pwr_mgr2 = readl(hwmon->base[1] + PWR_MGR2_SHIFT);
 		mc_rst = pwr_mgr2 & RST_MASK;
 		mc_outena = (pwr_mgr2 & OUTENA_MASK) >> OUTENA_SHIFT;
 		mc_clkr = (pwr_mgr2 & CLKR_MASK) >> CLKR_SHIFT;
@@ -1843,11 +1599,48 @@ static struct mem_data read_mem_rate(int node)
 	return a;
 }
 
+static struct mem_data save[MAX_NODES];
+static struct mem_data new[MAX_NODES];
+static void thread_func(struct work_struct *work)
+{
+	struct th_info *th_info_var = container_of(work, struct th_info, work);
+
+	if (!th_info_var) {
+		pr_err("THREAD FUNCTION: th_info_var is empty!\n");
+		return;
+	}
+
+	struct hwmon_data *hwmon = container_of(th_info_var, struct hwmon_data, th_info_var);
+
+	if (th_info_var->mode == 0)
+		save[th_info_var->node] = read_mem_rate(hwmon);
+	else
+		new[th_info_var->node] = read_mem_rate(hwmon);
+
+	complete(&th_info_var->rate_done);
+}
+
+
 static ssize_t show_mem_rate(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	struct mem_data b = read_mem_rate(hwmon->node);
+	struct th_info *th_info_var = &hwmon->th_info_var;
+
+	mutex_lock(&th_info_var->mutex_measure);
+
+	wait_for_completion(&th_info_var->rate_done);
+
+	th_info_var->mode = 1;
+
+	int ret = queue_work_on(1, hwmon->wq, &th_info_var->work);
+	if (!ret) {
+		mutex_unlock(&th_info_var->mutex_measure);
+		return -EAGAIN;
+	}
+	wait_for_completion(&th_info_var->rate_done);
+
+	struct mem_data b = new[hwmon->node];
 	int j = 0;
 	int curr_ch;
 	int mc_enabled;
@@ -1856,9 +1649,14 @@ static ssize_t show_mem_rate(struct device *dev,
 	for (curr_ch = 0; curr_ch < mem_channels; curr_ch++) {
 		mc_enabled = ((b.mem_hmu_mcen >> curr_ch) & HMU_ENABLE);
 		if (mc_enabled == 0) {
-			j += sprintf(buf + j,
-				"WARNING!!! NODE_%d: MC_%d: controller is disabled (MIC_HMU_MCEN=%d)\n",
-					hwmon->node, curr_ch, b.mem_hmu_mcen);
+			if (!IS_MACHINE_E8V7)
+				j += sprintf(buf + j,
+					"WARNING!!! NODE_%d: MC_%d: controller is disabled (MIC_HMU_MCEN=%d)\n",
+						hwmon->node, curr_ch, b.mem_hmu_mcen);
+			else
+				j += sprintf(buf + j,
+					"WARNING!!! NODE_%d: MC_%d: controller is disabled (OCN_MIL_MCEN=%d)\n",
+						hwmon->node, curr_ch, b.mem_hmu_mcen);
 		} else {
 			j += sprintf(buf + j,
 				"NODE_%d: MC_%d: DDR4: %d (MC_freq %d MHz) likely!\n",
@@ -1866,12 +1664,11 @@ static ssize_t show_mem_rate(struct device *dev,
 									b.mem_freq[curr_ch]);
 		}
 	}
-
+	complete(&th_info_var->rate_done);
+	mutex_unlock(&th_info_var->mutex_measure);
 	return sprintf(buf, "%s", buf);
 }
 
-uint8_t mem_flag;
-static struct mem_data save[MAX_NODES];
 static ssize_t show_mem_rate_saved(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -1884,42 +1681,33 @@ static ssize_t show_mem_rate_saved(struct device *dev,
 	for (curr_ch = 0; curr_ch < mem_channels; curr_ch++) {
 		mc_enabled = ((save[hwmon->node].mem_hmu_mcen >> curr_ch) & HMU_ENABLE);
 		if (mc_enabled == 0) {
-			j += sprintf(buf + j,
-				"WARNING!!! NODE_%d: MC_%d: controller is disabled (MIC_HMU_MCEN=%d)\n",
-					hwmon->node, curr_ch, save[hwmon->node].mem_hmu_mcen);
+			if (!IS_MACHINE_E8V7)
+				j += sprintf(buf + j,
+					"WARNING!!! NODE_%d: MC_%d: controller is disabled (MIC_HMU_MCEN=%d)\n",
+						hwmon->node, curr_ch,
+							save[hwmon->node].mem_hmu_mcen);
+			else
+				j += sprintf(buf + j,
+					"WARNING!!! NODE_%d: MC_%d: controller is disabled (OCN_MIL_MCEN=%d)\n",
+						hwmon->node, curr_ch,
+							save[hwmon->node].mem_hmu_mcen);
 		} else {
 			j += sprintf(buf + j,
 				"NODE_%d: MC_%d: DDR4: %d (MC_freq %d MHz) likely!\n",
 					hwmon->node, curr_ch,
 						save[hwmon->node].mem_ddr_rate[curr_ch],
-						save[hwmon->node].mem_freq[curr_ch]);
+							save[hwmon->node].mem_freq[curr_ch]);
 		}
 	}
 
 	return sprintf(buf, "%s", buf);
 }
 
-#ifdef CONFIG_E2K
-static struct task_struct *kthread[MAX_NODES];
-#endif
-static int t[MAX_NODES] = {1, 2, 3, 4};
-
-int thread_function(void *thread_nr)
-{
-	int t_nr = *(int *)thread_nr;
-	int curr_node;
-
-	curr_node = t_nr - 1;
-	save[curr_node] = read_mem_rate(curr_node);
-
-	return 0;
-}
-
 static ssize_t show_mem_rate_e8c(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	struct mem_data b = read_mem_rate(hwmon->node);
+	struct mem_data b = read_mem_rate(hwmon);
 	int mem_channels = get_mem_channels();
 	int i;
 	int j = 0;
@@ -1941,35 +1729,46 @@ static ssize_t show_mem_rate_e8c(struct device *dev,
 	return sprintf(buf, "%s", buf);
 }
 
-static struct pins_data read_pins(int node)
+static struct pins_data read_pins(struct hwmon_data *hwmon)
 {
+	int node = hwmon->node;
 	struct pins_data a;
-	int pmc_inform = sic_read_node_nbsr_reg(node, PMC_INFO);
+	int pmc_inform = 0;
 	int rt_lcfg_val;
-	int sys_mon_0_reg = PMC_SYS_MON_0;
-	int sys_mon_1_reg = PMC_SYS_MON_1;
-	int curr_LCFG;
+	int curr_LCFG = 0;
 
 	switch (node) {
 	case 0:
-		curr_LCFG = RT_LCFG0;
+		curr_LCFG = RT_LCFG0_SHIFT;
 		break;
 	case 1:
-		curr_LCFG = RT_LCFG1;
+		curr_LCFG = RT_LCFG1_SHIFT;
 		break;
 	case 2:
-		curr_LCFG = RT_LCFG2;
+		curr_LCFG = RT_LCFG2_SHIFT;
 		break;
 	case 3:
-		curr_LCFG = RT_LCFG3;
+		curr_LCFG = RT_LCFG3_SHIFT;
+		break;
+	default:
+		curr_LCFG = 0;
 		break;
 	}
 
-	rt_lcfg_val = sic_read_node_nbsr_reg(node, curr_LCFG);
+	rt_lcfg_val = readl(hwmon->base[0] + curr_LCFG);
 	a.vp = rt_lcfg_val & RT_LCFG_VP_MASK;
 	a.pn = (rt_lcfg_val >> RT_LCFG_PN_SHIFT) & RT_LCFG_PN_MASK;
-	a.sys_mon_0 = sic_read_node_nbsr_reg(node, sys_mon_0_reg);
-	a.sys_mon_1 = sic_read_node_nbsr_reg(node, sys_mon_1_reg);
+	if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+			IS_MACHINE_E2C3) {
+		pmc_inform = readl(hwmon->base[3]);
+		a.sys_mon_0 = readl(hwmon->base[3] + PMC_SYS_MON_0_SHIFT);
+		a.sys_mon_1 = readl(hwmon->base[3] + PMC_SYS_MON_1_SHIFT);
+	}
+	if (IS_MACHINE_E8V7) {
+		pmc_inform = readl(hwmon->base[3]);
+		a.sys_mon_0 = readl(hwmon->base[3] + PMC_SYS_MON_0_SHIFT_E8V7);
+		a.sys_mon_1 = readl(hwmon->base[3] + PMC_SYS_MON_1_SHIFT_E8V7);
+	}
 	a.pmc_info = pmc_inform;
 
 	return a;
@@ -1979,9 +1778,9 @@ static ssize_t show_pins(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	struct pins_data b = read_pins(hwmon->node);
+	struct pins_data b = read_pins(hwmon);
 	int i;
-	char *machine_model;
+	char *machine_model = NULL;
 	int cpu_type = machine.native_id;
 	int pin;
 	int id_model = b.pmc_info & PMC_MODEL_MASK;
@@ -1998,6 +1797,9 @@ static ssize_t show_pins(struct device *dev,
 	case MACHINE_ID_E2C3:
 		machine_model = "Elbrus-E2C3";
 		break;
+	case MACHINE_ID_E8V7:
+		machine_model = "Elbrus-E8V7";
+		break;
 	}
 
 	j = sprintf(buf, "Identificator PMC: 0x%x\n", b.pmc_info);
@@ -2010,18 +1812,20 @@ static ssize_t show_pins(struct device *dev,
 				hwmon->node, b.sys_mon_0);
 
 	/* Here depending on cpu type, I'm printing config of pins */
-	for (i = 0; i < 8; i++) {
-		pin = (b.sys_mon_0 >> pins_ctrls[i].shift) &
-						pins_ctrls[i].mask;
-		j += sprintf(buf + j, " - %s=0x%x",
-					pins_ctrls[i].name, pin);
-		if ((i == 0 || i == 1 || i == 2 || i == 4) &&  (pin == 1)) {
-			j += sprintf(buf + j, " (warning!!!)");
+	if (!IS_MACHINE_E8V7) {
+		for (i = 0; i < 8; i++) {
+			pin = (b.sys_mon_0 >> pins_ctrls[i].shift) &
+							pins_ctrls[i].mask;
+			j += sprintf(buf + j, " - %s=0x%x",
+						pins_ctrls[i].name, pin);
+			if ((i == 0 || i == 1 || i == 2 || i == 4) &&  (pin == 1)) {
+				j += sprintf(buf + j, " (warning!!!)");
+			}
+			j += sprintf(buf + j, "\n");
 		}
-		j += sprintf(buf + j, "\n");
 	}
 
-	if (cpu_type == MACHINE_ID_E12C) {
+	if (IS_MACHINE_E12C) {
 		for (i = 8; i < 10; i++) {
 			pin = (b.sys_mon_0 >> pins_ctrls[i].shift) &
 							pins_ctrls[i].mask;
@@ -2030,7 +1834,7 @@ static ssize_t show_pins(struct device *dev,
 		}
 	}
 
-	if (cpu_type == MACHINE_ID_E16C) {
+	if (IS_MACHINE_E16C) {
 		for (i = 9; i < 13; i++) {
 			pin = (b.sys_mon_0 >> pins_ctrls[i].shift) &
 							pins_ctrls[i].mask;
@@ -2043,33 +1847,81 @@ static ssize_t show_pins(struct device *dev,
 		}
 	}
 
-	if (cpu_type == MACHINE_ID_E2C3) {
-		pin = (b.sys_mon_0 >> pins_ctrls[i].shift) &
-					pins_ctrls[13].mask;
+	if (IS_MACHINE_E2C3) {
+		pin = (b.sys_mon_0 >> pins_ctrls[PIN_CORE_ENABLE_NUM].shift) &
+					pins_ctrls[PIN_CORE_ENABLE_NUM].mask;
 		j += sprintf(buf + j, " - %s=0x%x",
-				pins_ctrls[13].name, pin);
+				pins_ctrls[PIN_CORE_ENABLE_NUM].name, pin);
 		if (pin == 1) {
 			j += sprintf(buf + j, " (warning!!!)");
 		}
 		j += sprintf(buf + j, "\n");
 	}
 
+	if (IS_MACHINE_E8V7) {
+		for (i = 44; i < 46; i++) {
+			pin = (b.sys_mon_0 >> pins_ctrls[i].shift) &
+							pins_ctrls[i].mask;
+			j += sprintf(buf + j, " - %s=0x%x",
+					pins_ctrls[i].name, pin);
+		j += sprintf(buf + j, "\n");
+		}
+	}
+
 	j += sprintf(buf + j,
 			"NODE_%d: Register PMC_SYS_MON_1=0x%x\n",
 					hwmon->node, b.sys_mon_1);
-	for (i = 14; i < 23; i++) {
-		pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
-						 pins_ctrls[i].mask;
-		j += sprintf(buf + j, " - %s=0x%x",
-				pins_ctrls[i].name, pin);
+	if (!IS_MACHINE_E8V7) {
+		for (i = 14; i < 23; i++) {
+			pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
+							 pins_ctrls[i].mask;
+			j += sprintf(buf + j, " - %s=0x%x",
+					pins_ctrls[i].name, pin);
 
-		if ((i != 20 && i != 21 && i != 22) && (pin == 1)) {
+			if ((i != 20 && i != 21 && i != 22) && (pin == 1)) {
+				j += sprintf(buf + j, " (warning!!!)");
+			}
+			j += sprintf(buf + j, "\n");
+		}
+	}
+
+	if (IS_MACHINE_E8V7) {
+		pin = (b.sys_mon_1 >> pins_ctrls[PIN_FREQ_MODE_NUM].shift) &
+					pins_ctrls[PIN_FREQ_MODE_NUM].mask;
+		j += sprintf(buf + j, " - %s=0x%x",
+				pins_ctrls[PIN_FREQ_MODE_NUM].name, pin);
+		if (pin == 1) {
 			j += sprintf(buf + j, " (warning!!!)");
 		}
 		j += sprintf(buf + j, "\n");
+		pin = (b.sys_mon_1 >> pins_ctrls[MACHINE_GEN_ALERT_NUM].shift) &
+					pins_ctrls[MACHINE_GEN_ALERT_NUM].mask;
+		j += sprintf(buf + j, " - %s=0x%x",
+				pins_ctrls[MACHINE_GEN_ALERT_NUM].name, pin);
+		if (pin == 1) {
+			j += sprintf(buf + j, " (warning!!!)");
+		}
+		j += sprintf(buf + j, "\n");
+
+		for (i = 17; i < 20; i++) {
+			pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
+							pins_ctrls[i].mask;
+			j += sprintf(buf + j, " - %s=0x%x",
+					pins_ctrls[i].name, pin);
+			if (pin == 1) {
+				j += sprintf(buf + j, " (warning!!!)");
+			}
+			j += sprintf(buf + j, "\n");
+		}
+
+		pin = (b.sys_mon_1 >> pins_ctrls[PIN_EFUSE_MODE_NUM].shift) &
+					pins_ctrls[PIN_EFUSE_MODE_NUM].mask;
+		j += sprintf(buf + j, " - %s=0x%x",
+				pins_ctrls[PIN_EFUSE_MODE_NUM].name, pin);
+		j += sprintf(buf + j, "\n");
 	}
 
-	if (cpu_type == MACHINE_ID_E12C) {
+	if (IS_MACHINE_E12C) {
 		for (i = 23; i < 28; i++) {
 			pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
 							pins_ctrls[i].mask;
@@ -2082,7 +1934,7 @@ static ssize_t show_pins(struct device *dev,
 		}
 	}
 
-	if (cpu_type == MACHINE_ID_E16C) {
+	if (IS_MACHINE_E16C) {
 		for (i = 28; i < 42; i++) {
 			pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
 					pins_ctrls[i].mask;
@@ -2096,7 +1948,7 @@ static ssize_t show_pins(struct device *dev,
 		}
 	}
 
-	if (cpu_type == MACHINE_ID_E2C3) {
+	if (IS_MACHINE_E2C3) {
 		for (i = 41; i < 44; i++) {
 			pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
 							pins_ctrls[i].mask;
@@ -2110,6 +1962,200 @@ static ssize_t show_pins(struct device *dev,
 		}
 	}
 
+	if (IS_MACHINE_E8V7) {
+		for (i = 46; i < 51; i++) {
+			pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
+							pins_ctrls[i].mask;
+			j += sprintf(buf + j,
+				" - %s=0x%x", pins_ctrls[i].name, pin);
+			if (pin == 1) {
+				j += sprintf(buf + j, " (warning!!!)");
+			}
+			j += sprintf(buf + j, "\n");
+		}
+
+		for (i = 51; i < 59; i++) {
+			pin = (b.sys_mon_1 >> pins_ctrls[i].shift) &
+							pins_ctrls[i].mask;
+			j += sprintf(buf + j,
+				" - %s=0x%x", pins_ctrls[i].name, pin);
+			j += sprintf(buf + j, "\n");
+		}
+	}
+
+	return sprintf(buf, "%s", buf);
+}
+
+static struct bist_data read_bist_e8v7(int node)
+{
+	struct bist_data a;
+	struct pci_dev *dev;
+	static void __iomem *base_addr;
+	/* GPU_BIST READ */
+	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
+				PCI_VIRT_3DGPU_DEVICE_ID, NULL);
+	if (dev) {
+		a.GPU_present = true;
+		pci_read_config_dword(dev, 0x50, &a.GPU0_E8V7.word);
+		pci_read_config_dword(dev, 0x54, &a.GPU1_E8V7.word);
+		pci_dev_put(dev);
+	} else {
+		a.GPU_present = false;
+	}
+	/* VXD_BIST READ */
+	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
+				PCI_VIRT_DEC_DEVICE_ID, NULL);
+	if (dev) {
+		a.VXD_present = true;
+		pci_read_config_dword(dev, 0x50, &a.VXD_E8V7.word);
+		pci_dev_put(dev);
+	} else {
+		a.VXD_present = false;
+	}
+	/* MGA2_BIST READ (READING FROM BAR0) */
+	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
+			PCI_VIRT_MGA27_DEVICE_ID, NULL);
+	if (dev) {
+		a.MGA_present = true;
+		base_addr = pci_iomap(dev, 0, PCI_BIST_SIZE);
+		if (!base_addr) {
+			pci_release_regions(dev);
+			a.MGA_present = false;
+		} else {
+			a.MGA_E8V7.word = readl(base_addr + 0x3F8);
+			pci_iounmap(dev, base_addr);
+		}
+		pci_dev_put(dev);
+	} else {
+		a.MGA_present = false;
+	}
+	return a;
+}
+
+static ssize_t show_bist_info_e8v7(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct hwmon_data *hwmon = dev_get_drvdata(dev);
+	struct bist_data a = read_bist_e8v7(hwmon->node);
+	int i;
+	int j = 0;
+	int GPU0_BIST_bits[MAX_GPU0_E8V7] = {a.GPU0_E8V7.hi_mmu_slave_cache_u_mem_3,
+			a.GPU0_E8V7.hi_mmu_slave_cache_u_mem_2,
+			a.GPU0_E8V7.hi_mmu_slave_cache_u_mem_1,
+			a.GPU0_E8V7.hi_mmu_slave_cache_u_mem_0, a.GPU0_E8V7.pe_color_src_3,
+			a.GPU0_E8V7.tx_LodAddressRam_3, a.GPU0_E8V7.tx_fast_cache_3,
+			a.GPU0_E8V7.LFIFO_3, a.GPU0_E8V7.us_dirbank_cache_3,
+			a.GPU0_E8V7.pixel_input_buffer_3, a.GPU0_E8V7.a0_ram_3,
+			a.GPU0_E8V7.context_ram_3, a.GPU0_E8V7.temporary_register_3,
+			a.GPU0_E8V7.pe_color_src_2, a.GPU0_E8V7.tx_LodAddressRam_2,
+			a.GPU0_E8V7.tx_fast_cache_2, a.GPU0_E8V7.LFIFO_2,
+			a.GPU0_E8V7.us_dirbank_cache_2, a.GPU0_E8V7.pixel_input_buffer_2,
+			a.GPU0_E8V7.a0_ram_2, a.GPU0_E8V7.context_ram_2,
+			a.GPU0_E8V7.temporary_register_2, a.GPU0_E8V7.pe_color_src_1,
+			a.GPU0_E8V7.tx_LodAddressRam_1, a.GPU0_E8V7.tx_fast_cache_1,
+			a.GPU0_E8V7.LFIFO_1, a.GPU0_E8V7.us_dirbank_cache_1,
+			a.GPU0_E8V7.pixel_input_buffer_1, a.GPU0_E8V7.a0_ram_1,
+			a.GPU0_E8V7.context_ram_1, a.GPU0_E8V7.temporary_register_1,
+			a.GPU0_E8V7.pe_color_src_0};
+	char GPU0_BIST_name[MAX_GPU0_E8V7][WORD_SIZE_E8V7] = {"hi_mmu_slave_cache_u_mem_3",
+				"hi_mmu_slave_cache_u_mem_2", "hi_mmu_slave_cache_u_mem_1",
+				"hi_mmu_slave_cache_u_mem_0", "pe_color_src_3",
+				"tx_LodAddressRam_3", "tx_fast_cache_3", "LFIFO_3",
+				"us_dirbank_cache_3", "pixel_input_buffer_3", "a0_ram_3",
+				"context_ram_3", "temporary_register_3", "pe_color_src_2",
+				"tx_LodAddressRam_2",	"tx_fast_cache_2", "LFIFO_2",
+				"us_dirbank_cache_2", "pixel_input_buffer_2", "a0_ram_2",
+				"context_ram_2", "temporary_register_2", "pe_color_src_1",
+				"tx_LodAddressRam_1", "tx_fast_cache_1", "LFIFO_1",
+				"us_dirbank_cache_1", "pixel_input_buffer_1", "a0_ram_1",
+				"context_ram_1", "temporary_register_1",
+				"pe_color_src_0"};
+
+	int GPU1_BIST_bits[MAX_GPU1_E8V7] = {a.GPU1_E8V7.tx_LodAddressRam_0,
+			a.GPU1_E8V7.tx_fast_cache_0, a.GPU1_E8V7.LFIFO_0,
+			a.GPU1_E8V7.us_dirbank_cache_0, a.GPU1_E8V7.pixel_input_buffer_0,
+			a.GPU1_E8V7.a0_ram_0, a.GPU1_E8V7.context_ram_0,
+			a.GPU1_E8V7.temporary_register_0};
+	char GPU1_BIST_name[MAX_GPU1_E8V7][WORD_SIZE_E8V7] = {"tx_LodAddressRam_0",
+				"tx_fast_cache_0", "LFIFO_0", "us_dirbank_cache_0",
+				"pixel_input_buffer_0", "a0_ram_0", "context_ram_0",
+				"temporary_register_0"};
+
+	int VXD_BIST_bits[MAX_VXD_E8V7] = {a.VXD_E8V7.prefetch_cache_3,
+			a.VXD_E8V7.emd_ctrl_frame_cdf_3, a.VXD_E8V7.mvd_above0_ambc0_3,
+			a.VXD_E8V7.pred_ambc_3, a.VXD_E8V7.ref_bwd_ref_fwd_3,
+			a.VXD_E8V7.filter_above_bs_data_2, a.VXD_E8V7.filter_above_df_data_2,
+			a.VXD_E8V7.sao_filter_shared_ram_2, a.VXD_E8V7.dec_400_ch_lu_ts_0,
+			a.VXD_E8V7.sca_row_0, a.VXD_E8V7.cache_data_0, a.VXD_E8V7.reorder_row_0,
+			a.VXD_E8V7.stile_row_0, a.VXD_E8V7.shaper_0};
+	char VXD_BIST_name[MAX_VXD_E8V7][WORD_SIZE_E8V7] = {"prefetch_cache_3",
+				"emd_ctrl_frame_cdf_3", "mvd_above0_ambc0_3", "pred_ambc_3",
+				"ref_bwd_ref_fwd_3", "filter_above_bs_data_2",
+				"filter_above_df_data_2", "sao_filter_shared_ram_2",
+				"dec400_ch_lu_ts_0", "sca_row_0", "cache_data_0", "reorder_row_0",
+				"stile_row_0", "shaper_0"};
+
+	int MGA_BIST_bits[MAX_MGA_E8V7] = {a.MGA_E8V7.bist_0, a.MGA_E8V7.bist_1, a.MGA_E8V7.bist_2,
+			a.MGA_E8V7.bist_3, a.MGA_E8V7.bist_4, a.MGA_E8V7.bist_5, a.MGA.bist_6,};
+	char MGA_BIST_name[MAX_MGA_E8V7][WORD_SIZE_E8V7] = {"bist_0", "bist_1", "bist_2", "bist_3",
+				"bist_4", "bist_5", "bist_6"};
+
+	/*Checking GPU_BIST*/
+	if (a.GPU_present) {
+		j += sprintf(buf + j, "GPU_BIST:\n");
+		for (i = 0; i < MAX_GPU0_E8V7; i++) {
+			if (GPU0_BIST_bits[i]) {
+				j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
+							GPU0_BIST_name[i], GPU0_BIST_bits[i]);
+			} else {
+				j += sprintf(buf + j, "%s=%d\n",
+							GPU0_BIST_name[i], GPU0_BIST_bits[i]);
+			}
+		}
+		for (i = 0; i < MAX_GPU1_E8V7; i++) {
+			if (GPU1_BIST_bits[i]) {
+				j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
+							GPU1_BIST_name[i], GPU1_BIST_bits[i]);
+			} else {
+				j += sprintf(buf + j, "%s=%d\n",
+							GPU1_BIST_name[i], GPU1_BIST_bits[i]);
+			}
+		}
+	} else {
+		j += sprintf(buf + j, "Warning!!! GPU is disabled\n");
+	}
+
+	/*Checking VXD_BIST*/
+	if (a.VXD_present) {
+		j += sprintf(buf + j, "\nVXD_BIST:\n");
+		for (i = 0; i < MAX_VXD_E8V7; i++) {
+			if (VXD_BIST_bits[i]) {
+				j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
+							VXD_BIST_name[i], VXD_BIST_bits[i]);
+			} else {
+				j += sprintf(buf + j, "%s=%d\n",
+							VXD_BIST_name[i], VXD_BIST_bits[i]);
+			}
+		}
+	} else {
+		j += sprintf(buf + j, "Warning!!! VXD is disabled\n");
+	}
+
+	/*Checking MGA27_BIST*/
+	if (a.MGA_present) {
+		j += sprintf(buf + j, "\nMGA2.7_BIST:\n");
+		for (i = 0; i < MAX_MGA_E8V7; i++) {
+			if (MGA_BIST_bits[i]) {
+				j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
+							MGA_BIST_name[i], MGA_BIST_bits[i]);
+			} else {
+				j += sprintf(buf + j, "%s=%d\n",
+							MGA_BIST_name[i], MGA_BIST_bits[i]);
+			}
+		}
+	} else {
+		j += sprintf(buf + j, "Warning!!! MGA2.7 is disabled\n");
+	}
 	return sprintf(buf, "%s", buf);
 }
 
@@ -2121,31 +2167,52 @@ static struct bist_data read_bist(int node)
 	/* GPU_BIST READ */
 	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 				PCI_VIRT_GX6650_DEVICE_ID, NULL);
-	pci_read_config_dword(dev, 0x40, &a.GPU.word);
+	if (dev) {
+		a.GPU_present = true;
+		pci_read_config_dword(dev, 0x40, &a.GPU.word);
+		pci_dev_put(dev);
+	} else {
+		a.GPU_present = false;
+	}
 	/* VXE_BIST READ */
 	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 				PCI_VIRT_E5810_DEVICE_ID, NULL);
-	pci_read_config_dword(dev, 0x40, &a.VXE.word);
+	if (dev) {
+		a.VXE_present = true;
+		pci_read_config_dword(dev, 0x40, &a.VXE.word);
+		pci_dev_put(dev);
+	} else {
+		a.VXE_present = false;
+	}
 	/* VXD_BIST READ */
 	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 				PCI_VIRT_D5520_DEVICE_ID, NULL);
-	pci_read_config_dword(dev, 0x40, &a.VXD.word);
+	if (dev) {
+		a.VXD_present = true;
+		pci_read_config_dword(dev, 0x40, &a.VXD.word);
+		pci_dev_put(dev);
+	} else {
+		a.VXD_present = false;
+	}
 	/* MGA2_BIST READ (READING FROM BAR0) */
 	dev = pci_get_device(PCI_VIRT_BRIDGE_VENDOR_ID,
 			PCI_VIRT_MGA25_DEVICE_ID, NULL);
-	base_addr = pci_iomap(dev, 0, PCI_BIST_SIZE);
-	if (!base_addr) {
-		pci_release_regions(dev);
-		a.MGA_present = false;
-	} else {
-		a.MGA.word = readl(base_addr + 0x3F8);
+	if (dev) {
 		a.MGA_present = true;
+		base_addr = pci_iomap(dev, 0, PCI_BIST_SIZE);
+		if (!base_addr) {
+			pci_release_regions(dev);
+			a.MGA_present = false;
+		} else {
+			a.MGA.word = readl(base_addr + 0x3F8);
+			pci_iounmap(dev, base_addr);
+		}
+		pci_dev_put(dev);
+	} else {
+		a.MGA_present = false;
 	}
-	pci_iounmap(dev, base_addr);
-
 	return a;
 }
-
 
 static ssize_t show_bist_info(struct device *dev,
 			struct device_attribute *attr, char *buf)
@@ -2181,36 +2248,51 @@ static ssize_t show_bist_info(struct device *dev,
 				 "bist_5", "bist_6", "bist_7", "bist_8", "bist_9"};
 
 	/*Checking GPU_BIST*/
-	j += sprintf(buf + j, "GPU_BIST:\n");
-	for (i = 0; i < MAX_GPU; i++) {
-		if (GPU_BIST_bits[i]) {
-			j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
-						GPU_BIST_name[i], GPU_BIST_bits[i]);
-		} else {
-			j += sprintf(buf + j, "%s=%d\n", GPU_BIST_name[i], GPU_BIST_bits[i]);
+	if (a.GPU_present) {
+		j += sprintf(buf + j, "GPU_BIST:\n");
+		for (i = 0; i < MAX_GPU; i++) {
+			if (GPU_BIST_bits[i]) {
+				j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
+							GPU_BIST_name[i], GPU_BIST_bits[i]);
+			} else {
+				j += sprintf(buf + j, "%s=%d\n",
+							GPU_BIST_name[i], GPU_BIST_bits[i]);
+			}
 		}
+	} else {
+		j += sprintf(buf + j, "Warning!!! GPU is disabled\n");
 	}
 
 	/*Checking VXE_BIST*/
-	j += sprintf(buf + j, "\nVXE_BIST:\n");
-	for (i = 0; i < MAX_VXE; i++) {
-		if (VXE_BIST_bits[i]) {
-			j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
-						VXE_BIST_name[i], VXE_BIST_bits[i]);
-		} else {
-			j += sprintf(buf + j, "%s=%d\n", VXE_BIST_name[i], VXE_BIST_bits[i]);
+	if (a.VXE_present) {
+		j += sprintf(buf + j, "\nVXE_BIST:\n");
+		for (i = 0; i < MAX_VXE; i++) {
+			if (VXE_BIST_bits[i]) {
+				j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
+							VXE_BIST_name[i], VXE_BIST_bits[i]);
+			} else {
+				j += sprintf(buf + j, "%s=%d\n",
+							VXE_BIST_name[i], VXE_BIST_bits[i]);
+			}
 		}
+	} else {
+		j += sprintf(buf + j, "Warning!!! VXE is disabled\n");
 	}
 
 	/*Checking VXD_BIST*/
-	j += sprintf(buf + j, "\nVXD_BIST:\n");
-	for (i = 0; i < MAX_VXD; i++) {
-		if (VXD_BIST_bits[i]) {
-			j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
-						VXD_BIST_name[i], VXD_BIST_bits[i]);
-		} else {
-			j += sprintf(buf + j, "%s=%d\n", VXD_BIST_name[i], VXD_BIST_bits[i]);
+	if (a.VXD_present) {
+		j += sprintf(buf + j, "\nVXD_BIST:\n");
+		for (i = 0; i < MAX_VXD; i++) {
+			if (VXD_BIST_bits[i]) {
+				j += sprintf(buf + j, "%s=%d -- ERROR in memory\n",
+							VXD_BIST_name[i], VXD_BIST_bits[i]);
+			} else {
+				j += sprintf(buf + j, "%s=%d\n",
+							VXD_BIST_name[i], VXD_BIST_bits[i]);
+			}
 		}
+	} else {
+		j += sprintf(buf + j, "Warning!!! VXD is disabled\n");
 	}
 
 	/*Checking MGA25_BIST*/
@@ -2225,10 +2307,12 @@ static ssize_t show_bist_info(struct device *dev,
 							MGA_BIST_name[i], MGA_BIST_bits[i]);
 			}
 		}
+	} else {
+		j += sprintf(buf + j, "Warning!!! MGA2.5 is disabled\n");
 	}
 	return sprintf(buf, "%s", buf);
 }
-#endif
+#endif /* CONFIG_E2K */
 
 static ssize_t show_node(struct device *dev,
 			struct device_attribute *attr, char *buf)
@@ -2300,7 +2384,7 @@ static ssize_t show_mem_info_sparc(struct device *dev, struct device_attribute *
 	int uecnt;
 	switch (e90s_get_cpu_type()) {
 	case E90S_CPU_R1000:
-		mc_ecc_r1000.word = sic_read_node_nbsr_reg(hwmon->node, MC_ECC_R1000);
+		mc_ecc_r1000.word = readl(hwmon->base[0]);
 		sprintf(buf, "NODE-%d DMODE=0x%x CINT=0x%x CORR=0x%X DET=0x%x\n",
 				hwmon->node, mc_ecc_r1000.ECC_DMODE, mc_ecc_r1000.ECC_CINT,
 				mc_ecc_r1000.ECC_CORR, mc_ecc_r1000.ECC_DET);
@@ -2330,8 +2414,9 @@ static ssize_t show_mem_info_sparc(struct device *dev, struct device_attribute *
 }
 
 
-static int read_mem_rate_sparc(int node)
+static int read_mem_rate_sparc(struct hwmon_data *hwmon)
 {
+	int node = hwmon->node;
 	int Nf;
 	int Nod;
 	int Nr;
@@ -2343,7 +2428,7 @@ static int read_mem_rate_sparc(int node)
 		Fmc = 250;
 		break;
 	case E90S_CPU_R2000:
-		mc_freq_reg.word = sic_read_node_nbsr_reg(node, MC_FREQ_SPARC);
+		mc_freq_reg.word = readl(hwmon->base[1] + MC_FREQ_SPARC_SHIFT);
 		Nf = mc_freq_reg.McPllNf + 1;
 		Nod = mc_freq_reg.McPllNod + 1;
 		Nr = mc_freq_reg.McPllNr + 1;
@@ -2359,7 +2444,7 @@ static int read_mem_rate_sparc(int node)
 static ssize_t show_mem_rate_sparc(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	int Fmc = read_mem_rate_sparc(hwmon->node);
+	int Fmc = read_mem_rate_sparc(hwmon);
 	int j = 0;
 	if (e90s_get_cpu_type() == E90S_CPU_R1000)
 		j += sprintf(buf + j, "For R1000 frequency is just printed, not from register:\n");
@@ -2367,8 +2452,9 @@ static ssize_t show_mem_rate_sparc(struct device *dev, struct device_attribute *
 	return sprintf(buf, "%s", buf);
 }
 
-static struct link_data read_link_info_sparc(int node)
+static struct link_data read_link_info_sparc(struct hwmon_data *hwmon)
 {
+	int node = hwmon->node;
 	struct link_data a;
 	int str_shift = 3;
 	int ipcc_csr;
@@ -2377,8 +2463,8 @@ static struct link_data read_link_info_sparc(int node)
 	int wlcc_err_val;
 	int iol_pls;
 	for (i = 0; i < IPCC_LINKS; i++) {
-		ipcc_csr = sic_read_node_nbsr_reg(node, ipcc_sparc_ctrls[i].offset);
-		ipcc_str = sic_read_node_nbsr_reg(node, ipcc_sparc_ctrls[i+str_shift].offset);
+		ipcc_csr = readl(hwmon->base[1] + ipcc_sparc_ctrls_off[i].offset);
+		ipcc_str = readl(hwmon->base[1] + ipcc_sparc_ctrls_off[i+str_shift].offset);
 		a.csr_reg[i] = ipcc_csr;
 		a.str_reg[i] = ipcc_sparc_ctrls[i+str_shift].offset;
 		a.active[i] = (ipcc_csr & ACTIVE_MASK) >> ACTIVE_SHIFT;
@@ -2388,14 +2474,14 @@ static struct link_data read_link_info_sparc(int node)
 		a.cnt_err[i] = (ipcc_str & CNT_MASK);
 		a.err_mode[i] = (ipcc_str & ERR_MODE_MASK) >> ERR_MODE_SHIFT;
 	}
-	a.wlcc_rate = (sic_read_node_nbsr_reg(node, IOL_PLM_CTLR) & WLCC_RATE_MASK) >>
+	a.wlcc_rate = (readl(hwmon->base[2] + IOL_PLM_CTLR_SHIFT_SPARC) & WLCC_RATE_MASK) >>
 					 WLCC_RATE_SHIFT;
-	iol_pls = sic_read_node_nbsr_reg(node, IOL_PLS_CTLR);
+	iol_pls = readl(hwmon->base[2]);
 	a.wlcc_active = (iol_pls & WLCC_ACTIVE_MASK) >> WLCC_ACTIVE_SHIFT;
 	a.wlcc_state = (iol_pls & WLCC_STATE_MASK) >> WLCC_STATE_SHIFT;
 	a.wlcc_width = (iol_pls & WLCC_WIDTH_MASK) >> WLCC_WIDTH_SHIFT;
-	a.iol = (sic_read_node_nbsr_reg(node, RT_LCFG0) & IOL_MASK) >> IOL_SHIFT;
-	wlcc_err_val = sic_read_node_nbsr_reg(node, IOL_DLL_STSR);
+	a.iol = (readl(hwmon->base[0] + RT_LCFG0_SHIFT) & IOL_MASK) >> IOL_SHIFT;
+	wlcc_err_val = readl(hwmon->base[2] + IOL_DLL_STSR);
 	a.wlcc_cnt = wlcc_err_val & ERR_CNT_MASK;
 	a.wlcc_ov = (wlcc_err_val & ERR_OV_MASK) >> ERR_OV_SHIFT;
 	a.wlcc_md = (wlcc_err_val & ERR_MD_MASK) >> ERR_MD_SHIFT;
@@ -2573,7 +2659,7 @@ static int get_ipcc_information_sparc(struct link_data *data, char *buf,
 static ssize_t show_link_info_sparc(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct hwmon_data *hwmon = dev_get_drvdata(dev);
-	struct link_data b = read_link_info_sparc(hwmon->node);
+	struct link_data b = read_link_info_sparc(hwmon);
 	int j = 0;
 
 	/* WLCC INFORMATION */
@@ -2585,7 +2671,7 @@ static ssize_t show_link_info_sparc(struct device *dev, struct device_attribute 
 	return sprintf(buf, "%s", buf);
 }
 
-#endif
+#endif /* CONFIG_E90S */
 
 #define MAX_NAME  18
 static int num_attrs = 0;
@@ -2608,7 +2694,7 @@ static struct hwmon_device_attribute *hwmon_attrs;
 
 static int create_info_device_attr(struct device *dev)
 {
-	int num_files;
+	int num_files = 0;
 #ifdef CONFIG_E2K
 	int cpu_type = machine.native_id;
 #endif
@@ -2629,6 +2715,9 @@ static int create_info_device_attr(struct device *dev)
 		break;
 	case MACHINE_ID_E8C2:
 		num_files = 4;
+		break;
+	case MACHINE_ID_E8V7:
+		num_files = 7;
 		break;
 	}
 #endif
@@ -2657,14 +2746,16 @@ static int create_info_device_attr(struct device *dev)
 	struct hwmon_device_attribute *pattr;
 
 #ifdef CONFIG_E2K
-	pattr = hwmon_attrs + num_attrs;
-	snprintf(pattr->name, MAX_NAME, "link_info");
-	pattr->s_attrs.dev_attr.attr.name = pattr->name;
-	pattr->s_attrs.dev_attr.attr.mode = 0444;
-	pattr->s_attrs.dev_attr.show = show_link_data;
-	pattr->s_attrs.dev_attr.store = NULL;
-	sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
-	num_attrs++;
+	if (!IS_MACHINE_E8V7) {
+		pattr = hwmon_attrs + num_attrs;
+		snprintf(pattr->name, MAX_NAME, "link_info");
+		pattr->s_attrs.dev_attr.attr.name = pattr->name;
+		pattr->s_attrs.dev_attr.attr.mode = 0444;
+		pattr->s_attrs.dev_attr.show = show_link_data;
+		pattr->s_attrs.dev_attr.store = NULL;
+		sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
+		num_attrs++;
+	}
 
 	pattr = hwmon_attrs + num_attrs;
 	snprintf(pattr->name, MAX_NAME, "mem_info");
@@ -2675,7 +2766,7 @@ static int create_info_device_attr(struct device *dev)
 	sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
 	num_attrs++;
 
-	if (machine.native_id == MACHINE_ID_E2C3) {
+	if (IS_MACHINE_E2C3) {
 		pattr = hwmon_attrs + num_attrs;
 		snprintf(pattr->name, MAX_NAME, "cpu_info");
 		pattr->s_attrs.dev_attr.attr.name = pattr->name;
@@ -2695,8 +2786,27 @@ static int create_info_device_attr(struct device *dev)
 		num_attrs++;
 	}
 
-	if ((machine.native_id == MACHINE_ID_E8C) ||
-			(machine.native_id == MACHINE_ID_E8C2)) {
+	if (IS_MACHINE_E8V7) {
+		pattr = hwmon_attrs + num_attrs;
+		snprintf(pattr->name, MAX_NAME, "cpu_info");
+		pattr->s_attrs.dev_attr.attr.name = pattr->name;
+		pattr->s_attrs.dev_attr.attr.mode = 0444;
+		pattr->s_attrs.dev_attr.show = show_cpu_data_e8v7;
+		pattr->s_attrs.dev_attr.store = NULL;
+		sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
+		num_attrs++;
+
+		pattr = hwmon_attrs + num_attrs;
+		snprintf(pattr->name, MAX_NAME, "bist_info");
+		pattr->s_attrs.dev_attr.attr.name = pattr->name;
+		pattr->s_attrs.dev_attr.attr.mode = 0444;
+		pattr->s_attrs.dev_attr.show = show_bist_info_e8v7;
+		pattr->s_attrs.dev_attr.store = NULL;
+		sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
+		num_attrs++;
+	}
+
+	if (IS_MACHINE_E8C || IS_MACHINE_E8C2) {
 		pattr = hwmon_attrs + num_attrs;
 		snprintf(pattr->name, MAX_NAME, "mem_rate");
 		pattr->s_attrs.dev_attr.attr.name = pattr->name;
@@ -2707,9 +2817,8 @@ static int create_info_device_attr(struct device *dev)
 		num_attrs++;
 	}
 
-	if ((machine.native_id == MACHINE_ID_E16C) ||
-		(machine.native_id == MACHINE_ID_E12C) ||
-			 (machine.native_id == MACHINE_ID_E2C3)) {
+	if (IS_MACHINE_E16C || IS_MACHINE_E12C ||
+				IS_MACHINE_E2C3 || IS_MACHINE_E8V7) {
 		pattr = hwmon_attrs + num_attrs;
 		snprintf(pattr->name, MAX_NAME, "config_pins");
 		pattr->s_attrs.dev_attr.attr.name = pattr->name;
@@ -2737,7 +2846,7 @@ static int create_info_device_attr(struct device *dev)
 		sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
 		num_attrs++;
 	}
-#endif
+#endif /* CONFIG_E2K */
 
 #ifdef CONFIG_E90S
 	if (e90s_get_cpu_type() != E90S_CPU_R2000P) {
@@ -2768,7 +2877,7 @@ static int create_info_device_attr(struct device *dev)
 	pattr->s_attrs.dev_attr.store = NULL;
 	sysfs_attr_init(&pattr->s_attrs.dev_attr.attr);
 	num_attrs++;
-#endif
+#endif /* CONFIG_E90S */
 	pattr = hwmon_attrs + num_attrs;
 	snprintf(pattr->name, MAX_NAME, "curr_node");
 	pattr->s_attrs.dev_attr.attr.name = pattr->name;
@@ -2794,105 +2903,140 @@ static int create_hwmon_group(struct device *dev)
 
 	for (i = 0; i < num_attrs; i++) {
 		*(attrs + i) = &((hwmon_attrs + i)->s_attrs.dev_attr.attr);
-		hwmon_group.attrs = attrs;
 	}
+	hwmon_group.attrs = attrs;
 
 	return 0;
 }
 
 #define MAX_NODE 4
 
-struct hwmon_data *p_hwmon[MAX_NODE];
-static int online_num_node = 0;
+static struct hwmon_data *p_hwmon[MAX_NODE];
 
-static int __init hwmon_probe(void)
+static int hwmon_probe(struct platform_device *pdev)
 {
+	int base_num = SPARC_BASE_NUM;
+	struct device *dev = &pdev->dev;
+	void __iomem *base;
+	struct resource *r;
 	int node;
 #ifdef CONFIG_E2K
-	int curr_node;
-	int cpu_type = machine.native_id;
+	base_num = E2K_BASE_NUM;
+	if (IS_MACHINE_E2C3)
+		base_num = E2C3_BASE_NUM;
 #endif
-	struct hwmon_data *hwmon;
-	struct device *dev = cpu_subsys.dev_root;
-	struct platform_device *pdev;
+	struct hwmon_data *hwmon = devm_kzalloc(&pdev->dev, sizeof(*hwmon), GFP_KERNEL);
+	dev_set_drvdata(dev, hwmon);
+
+	if (!hwmon)
+		return -ENOMEM;
 	struct device *hwmon_dev;
 	int ret;
 
 #ifdef CONFIG_E2K
-	if (cpu_type != MACHINE_ID_E8C && cpu_type != MACHINE_ID_E8C2 &&
-			cpu_type != MACHINE_ID_E12C && cpu_type != MACHINE_ID_E16C &&
-			cpu_type != MACHINE_ID_E2C3)
+	if (!(IS_MACHINE_E8C || IS_MACHINE_E8C2 ||
+			IS_MACHINE_E12C || IS_MACHINE_E16C ||
+			IS_MACHINE_E2C3 || IS_MACHINE_E8V7))
 		return -ENODEV;
 #endif
-
-	ret = create_info_device_attr(dev);
-	if (ret)
-		return -ENOMEM;
-
-	ret = create_hwmon_group(dev);
-	if (ret)
-		return -ENOMEM;
-
-	for_each_online_node(node) {
-		pdev = platform_device_register_data(dev, "hw_check", node, NULL, 0);
-		if (IS_ERR(pdev)) {
-			dev_err(dev, "failed to create hw_check platform device");
-			return PTR_ERR(pdev);
-		}
-
-		hwmon = devm_kzalloc(&pdev->dev, sizeof(*hwmon), GFP_KERNEL);
-		if (!hwmon) {
-			platform_device_unregister(pdev);
+	for (int i = 0; i < base_num; ++i) {
+		r = platform_get_resource(pdev, IORESOURCE_MEM, i);
+		if (!r) {
+			dev_err(dev, "failed to get mem resource %d\n", i);
 			return -ENOMEM;
 		}
+		base = devm_ioremap(dev, r->start, resource_size(r));
+		if (IS_ERR(base)) {
+			dev_err(dev, "failed to map resource %d\n", i);
+			return PTR_ERR(base);
+		}
+		hwmon->base[i] = base;
+	}
+	node = dev_to_node(&pdev->dev);
 
-		hwmon->pdev = pdev;
-		hwmon->node = node;
+	if (node == -1)
+		node++;
+	if (node == 0) {
+		ret = create_info_device_attr(dev);
+		if (ret)
+			return -ENOMEM;
+		ret = create_hwmon_group(dev);
+		if (ret)
+			return -ENOMEM;
+	}
 
-		hwmon_dev = hwmon_device_register_with_groups(&pdev->dev,
+	hwmon->pdev = pdev;
+	hwmon->node = node;
+	hwmon_dev = hwmon_device_register_with_groups(&pdev->dev,
 								KBUILD_MODNAME,
 								hwmon,
 								hwmon_groups);
-		if (IS_ERR(hwmon_dev)) {
-			platform_device_unregister(pdev);
-			return PTR_ERR(hwmon_dev);
-		}
+	if (IS_ERR(hwmon_dev))
+		return PTR_ERR(hwmon_dev);
 
-		hwmon->hdev = hwmon_dev;
-		p_hwmon[node] = hwmon;
-
-		online_num_node++;
-	}
+	hwmon->hdev = hwmon_dev;
+	p_hwmon[node] = hwmon;
 
 #ifdef CONFIG_E2K
-	if ((cpu_type == MACHINE_ID_E2C3) || (cpu_type == MACHINE_ID_E12C) ||
-						(cpu_type == MACHINE_ID_E16C)) {
-		for (curr_node = 0; curr_node < online_num_node; curr_node++) {
-			kthread[curr_node] = kthread_create(thread_function,
-						&t[curr_node], "kthread");
-			if (kthread[curr_node] != NULL) {
-				wake_up_process(kthread[curr_node]);
-			} else {
-				return -1;
-			}
-		}
+	if (IS_MACHINE_E2C3 || IS_MACHINE_E12C ||
+			IS_MACHINE_E16C || IS_MACHINE_E8V7) {
+		struct workqueue_struct *wq = create_singlethread_workqueue("mem_rate_measure");
+
+		if (!wq)
+			return -EINVAL;
+
+		struct th_info *th_info_var = &hwmon->th_info_var;
+
+		hwmon->wq = wq;
+		th_info_var->node = node;
+		th_info_var->mode = 0;
+		mutex_init(&th_info_var->mutex_measure);
+		init_completion(&th_info_var->rate_done);
+		INIT_WORK(&th_info_var->work, thread_func);
+		queue_work_on(1, wq, &th_info_var->work);
 	}
 #endif
 	return 0;
 }
 
-static void __exit hwmon_remove(void)
-{
-	int node;
 
-	for_each_online_node(node) {
-		hwmon_device_unregister(p_hwmon[node]->hdev);
-		platform_device_unregister(p_hwmon[node]->pdev);
+static int hwmon_remove(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct hwmon_data *hwmon = dev_get_drvdata(dev);
+	int node = hwmon->th_info_var.node;
+
+#ifdef CONFIG_E2K
+	if (IS_MACHINE_E2C3 || IS_MACHINE_E12C ||
+			IS_MACHINE_E16C || IS_MACHINE_E8V7) {
+		wait_for_completion(&hwmon->th_info_var.rate_done);
+		destroy_workqueue(hwmon->wq);
 	}
+#endif
+	if (node == -1)
+		node++;
+	hwmon_device_unregister(hwmon->hdev);
+	return 0;
 }
 
-module_init(hwmon_probe);
-module_exit(hwmon_remove);
+static const struct of_device_id hw_check_of_match[] = {
+	{ .compatible = "mcst,hw_check", },
+	{}
+};
+
+/* MODULE_DEVICE_TABLE(of, hw_check_of_match);
+ * Disable autoloading
+ */
+
+static struct platform_driver hw_check_driver = {
+	.driver = {
+		.name = "hw_check",
+		.of_match_table = hw_check_of_match,
+	},
+	.probe = hwmon_probe,
+	.remove = hwmon_remove,
+};
+module_platform_driver(hw_check_driver);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("MCST");

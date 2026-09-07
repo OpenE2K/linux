@@ -174,11 +174,6 @@ int drm_legacy_lock(struct drm_device *dev, void *data,
 	struct drm_master *master = file_priv->master;
 	int ret = 0;
 
-#ifndef CONFIG_MCST /*Vivante galcore needs this*/
-	if (!drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
-#endif
-
 	++file_priv->lock_count;
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
@@ -265,11 +260,6 @@ int drm_legacy_unlock(struct drm_device *dev, void *data, struct drm_file *file_
 {
 	struct drm_lock *lock = data;
 	struct drm_master *master = file_priv->master;
-
-#ifndef CONFIG_MCST /*Vivante galcore needs this*/
-	if (!drm_core_check_feature(dev, DRIVER_LEGACY))
-		return -EOPNOTSUPP;
-#endif
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",

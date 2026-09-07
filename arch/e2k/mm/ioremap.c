@@ -87,7 +87,7 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	if (phys_addr >= VGA_VRAM_PHYS_BASE &&
 			last_addr < (VGA_VRAM_PHYS_BASE + VGA_VRAM_SIZE)) {
 		DebugIO("VGA VRAM phys. area, it's always mapped\n");
-		return (void __iomem *) phys_to_virt((phys_addr_t) phys_addr);
+		return (void __iomem __force *) phys_to_virt((phys_addr_t) phys_addr);
 	}
 
 	/*
@@ -177,8 +177,8 @@ void iounmap(volatile void __iomem *addr)
 	DebugIO("started for virtual addr 0x%px\n", addr);
 
 	/* Don't unmap the VGA area, it's always mapped */
-	if (addr >= (void __iomem *) phys_to_virt(VGA_VRAM_PHYS_BASE) &&
-	    addr < (void __iomem *) phys_to_virt(VGA_VRAM_PHYS_BASE + VGA_VRAM_SIZE)) {
+	if (addr >= (void __iomem __force *) phys_to_virt(VGA_VRAM_PHYS_BASE) &&
+	    addr < (void __iomem __force *) phys_to_virt(VGA_VRAM_PHYS_BASE + VGA_VRAM_SIZE)) {
 		DebugIO("VGA VRAM phys. area, it's always mapped\n");
 		return;
 	}

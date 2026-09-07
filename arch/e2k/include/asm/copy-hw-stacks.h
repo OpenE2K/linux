@@ -12,7 +12,9 @@
 #include <asm/pv_info.h>
 #include <asm/process.h>
 
-#include <asm/kvm/trace-hw-stacks.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/trace-hw-stacks.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_PV_UST_MODE
 #undef	DebugUST
@@ -42,6 +44,7 @@ extern bool debug_guest_ust;
  */
 #endif /* ! CONFIG_VIRTUALIZATION */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 typedef void (*trace_ps_frame_func_t)(kernel_mem_ps_t __user *base, kernel_mem_ps_t *frame);
 typedef void (*trace_pcs_frame_func_t)(e2k_mem_crs_t __user *base, e2k_mem_crs_t *frame);
 
@@ -114,6 +117,7 @@ static inline void trace_host_hva_area(u64 __user *hva_base, u64 hva_size)
 	}
 	raw_all_irq_restore(flags);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static __always_inline void native_check_last_user_frame_loss(e2k_stacks_t *stacks)
 {
@@ -188,7 +192,7 @@ native_dup_chain_stack_frame_to_user(e2k_mem_crs_t *crs, e2k_stacks_t *stacks)
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* It is virtualized guest kernel */
 #include <asm/kvm/guest/copy-hw-stacks.h>
-#elif	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#elif	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* native kernel with virtualization support */
 /* native kernel without virtualization support */
 
@@ -258,13 +262,48 @@ static __always_inline s64 get_pcs_copy_size(s64 u_pcshtp_size)
  * Copy hardware stack from user to *current* kernel stack.
  * One has to be careful to avoid hardware FILL of this stack.
  */
-static inline int copy_user_to_current_hw_stack(void *dst, const void __user *src,
-			unsigned long size, const pt_regs_t *regs, bool chain)
+static inline int copy_user_buf_to_current_proc_stack(volatile void *dst,
+						      const volatile void __user *src,
+						      unsigned long size)
 {
 	u64 counter;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (likely(!host_test_intc_emul_mode(regs)) && !access_ok(src, size))
 		return -EFAULT;
+#endif
+	/*
+	 * Every interrupt and exception here has a chance of FILL'ing
+	 * the frame that is being copied, in which case we repeat the copy.
+	 */
+	do {
+		counter = READ_ONCE(current->thread.traps_count);
+		NATIVE_FLUSHR;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+		unsigned long ts_flag;
+		size_t copied;
+		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+		copied = fast_tagged_memory_copy_from_user_gva(dst, src, size, NULL, true);
+		clear_ts_flag(ts_flag);
+		if (unlikely(copied != size))
+			return -EFAULT;
+#else
+		if (unlikely(copy_from_user_tagged(dst, src, size)))
+			return -EFAULT;
+#endif
+	} while (unlikely(counter != READ_ONCE(current->thread.traps_count)));
 
+	return 0;
+}
+
+static inline int copy_from_user_psp_to_current_hw_stack(volatile void *dst,
+			const volatile void __priv *src,
+			unsigned long size, const pt_regs_t *regs)
+{
+	u64 counter;
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	if (likely(!host_test_intc_emul_mode(regs)) && !access_ok(src, size))
+		return -EFAULT;
 	/*
 	 * Every interrupt and exception here has a chance of FILL'ing
 	 * the frame that is being copied, in which case we repeat the copy.
@@ -273,12 +312,10 @@ static inline int copy_user_to_current_hw_stack(void *dst, const void __user *sr
 		unsigned long ts_flag;
 		size_t copied;
 
-		counter = READ_ONCE(current->thread.traps_count);
+                counter = READ_ONCE(current->thread.traps_count);
 
-		if (chain)
-			NATIVE_FLUSHC;
-		else
-			NATIVE_FLUSHR;
+		/* Will retry anyway if interrupt arrives while flushr executes */
+		NATIVE_FLUSHR_NOIRQ;
 
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
 		copied = fast_tagged_memory_copy_from_user_gva(dst, src, size, regs, true);
@@ -286,17 +323,37 @@ static inline int copy_user_to_current_hw_stack(void *dst, const void __user *sr
 		if (unlikely(copied != size))
 			return -EFAULT;
 	} while (unlikely(counter != READ_ONCE(current->thread.traps_count)));
+#else
+	/*
+	 * Every interrupt and exception here has a chance of FILL'ing
+	 * the frame that is being copied, in which case we repeat the copy.
+	 */
+	do {
+		counter = READ_ONCE(current->thread.traps_count);
 
+		/* Will retry anyway if interrupt arrives while flushr executes */
+		NATIVE_FLUSHR_NOIRQ;
+
+		/*
+		 * Do not use copy_from_priv_tagged(), we can be executing under
+		 * closed maskable interrupts which will trigger debug checks.
+		 */
+		size_t copied = fast_tagged_memory_copy_from_priv(dst, src, size, true);
+		if (unlikely(copied != size))
+			return -EFAULT;
+	} while (unlikely(counter != READ_ONCE(current->thread.traps_count)));
+#endif
 	return 0;
 }
 
-static inline int copy_priv_to_current_hw_stack(void *dst, const void __priv *src,
-			unsigned long size, const pt_regs_t *regs, bool chain)
+static inline int copy_from_user_pcsp_to_current_hw_stack(void *dst, const void __priv *src,
+			unsigned long size, const pt_regs_t *regs)
 {
 	u64 counter;
-	if (likely(!host_test_intc_emul_mode(regs)) && !access_priv_ok(src, size))
-		return -EFAULT;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	if (likely(!host_test_intc_emul_mode(regs)) && !access_ok(src, size))
+		return -EFAULT;
 	/*
 	 * Every interrupt and exception here has a chance of FILL'ing
 	 * the frame that is being copied, in which case we repeat the copy.
@@ -305,59 +362,58 @@ static inline int copy_priv_to_current_hw_stack(void *dst, const void __priv *sr
 		unsigned long ts_flag;
 		size_t copied;
 
-		counter = READ_ONCE(current->thread.traps_count);
+                counter = READ_ONCE(current->thread.traps_count);
 
-		if (chain)
-			NATIVE_FLUSHC;
-		else
-			NATIVE_FLUSHR;
+		/* Will retry anyway if interrupt arrives while flushc executes */
+		NATIVE_FLUSHC_NOIRQ;
 
 		ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-		copied = fast_tagged_memory_copy_from_user_gva(dst,
-				(const void __user __force *) src, size, regs, true);
+		copied = fast_tagged_memory_copy_from_user_gva(dst, src, size, regs, true);
 		clear_ts_flag(ts_flag);
 		if (unlikely(copied != size))
 			return -EFAULT;
 	} while (unlikely(counter != READ_ONCE(current->thread.traps_count)));
+#else
 
+	/*
+	 * Every interrupt and exception here has a chance of FILL'ing
+	 * the frame that is being copied, in which case we repeat the copy.
+	 */
+	do {
+		counter = READ_ONCE(current->thread.traps_count);
+
+		/* Will retry anyway if interrupt arrives while flushc executes */
+		NATIVE_FLUSHC_NOIRQ;
+
+		/*
+		 * Do not use copy_from_priv(), we can be executing under
+		 * closed maskable interrupts which will trigger debug checks.
+		 */
+		size_t copied = fast_memory_copy_from_priv(dst, src, size, true);
+		if (unlikely(copied != size))
+			return -EFAULT;
+	} while (unlikely(counter != READ_ONCE(current->thread.traps_count)));
+#endif
 	return 0;
 }
+
 
 /*
  * Copy hardware stack from kernel buffer to *current* kernel stack.
  * One has to be careful to avoid hardware FILL of this stack.
  */
-static inline void copy_to_current_hw_stack(void *dst, void *src,
-		unsigned long size, bool chain)
+static inline void copy_kernel_buf_to_current_proc_stack(volatile void *dst,
+							 volatile void *src, unsigned long size)
 {
 	unsigned long flags;
 
 	raw_all_irq_save(flags);
-	if (chain)
-		NATIVE_FLUSHC;
-	else
-		NATIVE_FLUSHR;
-	memcpy(dst, src, size);
+	NATIVE_FLUSHC;
+	tagged_memcpy_8(dst, src, size);
 	raw_all_irq_restore(flags);
 }
 
-static inline int copy_e2k_stack_from_user(void *dst, void __priv *src,
-					   unsigned long size, pt_regs_t *regs)
-{
-	unsigned long ts_flag;
-	int ret;
-
-	if (likely(!host_test_intc_emul_mode(regs)) && !access_priv_ok(src, size))
-		return -EFAULT;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = host_copy_from_user_with_tags(dst,
-			(void __user __force *) src, size, regs);
-	clear_ts_flag(ts_flag);
-
-	return (ret) ? -EFAULT : 0;
-}
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int copy_e2k_stack_to_user(void __user *dst, void *src,
 					 unsigned long size, pt_regs_t *regs)
 {
@@ -374,76 +430,45 @@ static inline int copy_e2k_stack_to_user(void __user *dst, void *src,
 
 	return (ret) ? -EFAULT : 0;
 }
+#endif
+
+
 
 static __always_inline int
-user_hw_stack_frames_copy(void __user *dst, void *src, long copy_size,
-			  const pt_regs_t *regs, long hw_stack_ind, bool is_pcsp)
-{
-	unsigned long ts_flag, copied;
-
-	if (unlikely(hw_stack_ind < copy_size)) {
-		unsigned long flags;
-		raw_all_irq_save(flags);
-		if (is_pcsp) {
-			NATIVE_FLUSHC;
-		} else {
-			NATIVE_FLUSHR;
-		}
-		raw_all_irq_restore(flags);
-	}
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	copied = fast_tagged_memory_copy_to_user_gva(dst, src, copy_size, regs, true);
-	clear_ts_flag(ts_flag);
-
-	if (unlikely(copied != copy_size)) {
-		pr_err("process %s (%d) %s stack could not be copied\n"
-		       "from %px to %px size 0x%lx (out of memory?)\n",
-		       current->comm, current->pid,
-		       (is_pcsp) ? "chain" : "procedure", src, dst, copy_size);
-		return -EFAULT;
-	}
-	DebugUST("copying guest %s stack spilled to host from %px\n"
-		 "to guest kernel stack from %px, size 0x%lx\n",
-		 (is_pcsp) ? "chain" : "procedure", src, dst, copy_size);
-
-	return 0;
-}
-
-static __always_inline int
-user_crs_frames_copy(e2k_mem_crs_t __user *u_frame, pt_regs_t *regs,
+user_crs_frames_copy(e2k_mem_crs_t __priv *u_frame, pt_regs_t *regs,
 		     e2k_mem_crs_t *crs)
 {
-	unsigned long ts_flag;
-	int ret;
-
-	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = host_copy_to_user(u_frame, crs, sizeof(*crs), regs);
-	clear_ts_flag(ts_flag);
-	if (unlikely(ret))
+	if (unlikely(copy_to_priv(u_frame, crs, sizeof(*crs))))
 		return -EFAULT;
-
 	return 0;
 }
 
 static __always_inline int user_psp_stack_copy(e2k_psp_t u_psp, s64 u_pshtp_size,
 		e2k_psp_t k_psp, unsigned long copy_size, const pt_regs_t *regs)
 {
-	void __user *dst;
-	void *src;
-	int ret;
+	volatile void __priv *dst;
+	volatile void *src;
+	int ret = 0;
 
-	dst = (void __user *) (PSP_PTR(u_psp) - u_pshtp_size);
-	src = (void *) PSP_BASE(k_psp);
+	dst = U_PSP_PTR(u_psp) - u_pshtp_size;
+	src = (volatile void *) PSP_BASE(k_psp);
 
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_copy_hw_stack_enabled())
 		trace_host_copy_hw_stack(dst, src, copy_size, false);
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
-
-	ret = user_hw_stack_frames_copy(dst, src, copy_size,
-					regs, PSP_IND(k_psp), false);
-
+	if (unlikely(PSP_IND(k_psp) < copy_size)) {
+		unsigned long flags;
+		raw_all_irq_save(flags);
+		NATIVE_FLUSHR;
+		raw_all_irq_restore(flags);
+	}
+	if (unlikely(copy_to_priv_tagged(dst, src, copy_size))) {
+		pr_err("process %s (%d) %s: procedure stack could not be copied\n"
+		       "from %px to %px size 0x%lx.\n",
+		       current->comm, current->pid, __func__, src, dst, copy_size);
+		ret = -EFAULT;
+	}
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_proc_stack_frame_enabled())
 		trace_proc_stack_frames((kernel_mem_ps_t __user *) dst,
@@ -458,20 +483,30 @@ static __always_inline int user_psp_stack_copy(e2k_psp_t u_psp, s64 u_pshtp_size
 static __always_inline int user_pcsp_stack_copy(e2k_pcsp_t u_pcsp, s64 u_pcshtp_size,
 		e2k_pcsp_t k_pcsp, unsigned long copy_size, const pt_regs_t *regs)
 {
-	void __user *dst;
+	void __priv *dst;
 	void *src;
-	int ret;
+	int ret = 0;
 
-	dst = (void __user *)(PCSP_PTR(u_pcsp) - u_pcshtp_size);
+	dst = U_PCSP_PTR(u_pcsp);
+	dst -= u_pcshtp_size;
 	src = (void *)PCSP_BASE(k_pcsp);
 
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_copy_hw_stack_enabled())
 		trace_host_copy_hw_stack(dst, src, copy_size, true);
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
-	ret = user_hw_stack_frames_copy(dst, src, copy_size,
-					regs, PCSP_IND(k_pcsp), true);
-
+	if (unlikely(PCSP_IND(k_pcsp) < copy_size)) {
+		unsigned long flags;
+		raw_all_irq_save(flags);
+		NATIVE_FLUSHC;
+		raw_all_irq_restore(flags);
+	}
+	if (unlikely(copy_to_priv(dst, src, copy_size))) {
+		pr_err("process %s (%d - %d) chain stack could not be copied\n"
+		       "from %px to %px size 0x%lx (out of memory?)\n",
+		       current->comm, current->pid, current->tgid, src, dst, copy_size);
+		ret =  -EFAULT;
+	}
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (host_test_intc_emul_mode(regs) && trace_host_chain_stack_frame_enabled())
 		trace_chain_stack_frames((e2k_mem_crs_t __user *) dst,
@@ -483,7 +518,7 @@ static __always_inline int user_pcsp_stack_copy(e2k_pcsp_t u_pcsp, s64 u_pcshtp_
 }
 
 /**
- * user_hw_stacks_copy - copy user hardware stacks that have been
+ * native_user_hw_stacks_copy - copy user hardware stacks that have been
  *			 SPILLed to kernel back to user space
  * @stacks - saved user stack registers
  * @cur_window_q - size of current window in procedure stack,
@@ -692,7 +727,7 @@ static __always_inline void native_user_hw_stacks_prepare(struct e2k_stacks *sta
 		write_PCSP_reg(k_pcsp);
 
 		k_crs = (e2k_mem_crs_t *) PCSP_BASE(current_thread_info()->k_pcsp);
-		u_cframe = (e2k_mem_crs_t __priv *) PCSP_PTR(u_pcsp);
+		u_cframe = U_PCSP_PTR(u_pcsp);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		u_cbase = ((from & FROM_RETURN_PV_VCPU_TRAP) || host_test_intc_emul_mode(regs)) ?
 					PCSP_BASE(u_pcsp) :
@@ -701,8 +736,8 @@ static __always_inline void native_user_hw_stacks_prepare(struct e2k_stacks *sta
 		u_cbase = (unsigned long) CURRENT_PCS_BASE();
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		if ((unsigned long) u_cframe > u_cbase) {
-			ret = copy_priv_to_current_hw_stack(k_crs, u_cframe - 1,
-							    sizeof(*k_crs), regs, true);
+			ret = copy_from_user_pcsp_to_current_hw_stack(k_crs, u_cframe - 1,
+							    sizeof(*k_crs), regs);
 		}
 		raw_all_irq_restore(flags);
 
@@ -718,9 +753,10 @@ static __always_inline void native_user_hw_stacks_prepare(struct e2k_stacks *sta
 		}
 
 		if (PCSP_IND(u_pcsp) < SZ_OF_CR) {
-			update_pcsp_regs(PCSP_BASE(u_pcsp), &u_pcsp);
+			/* XXX Software can't get pscp with index < 0, but ... */
+			update_pcsp_regs((void __priv __force *)PCSP_BASE(u_pcsp), &u_pcsp);
 			stacks->pcsp = u_pcsp;
-			BUG_ON(PCSP_IND(u_pcsp) < SZ_OF_CR);
+			BUG_ON((long)PCSP_IND(u_pcsp) < SZ_OF_CR);
 		}
 
 		u_pcshtp.ind = SZ_OF_CR;
@@ -753,7 +789,7 @@ host_user_hw_stacks_prepare(struct e2k_stacks *stacks, pt_regs_t *regs,
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
 /* It is virtualized guest kernel */
 #include <asm/kvm/guest/copy-hw-stacks.h>
-#elif	defined(CONFIG_KVM_HOST_MODE)
+#elif	defined(CONFIG_KVM_HOST_KERNEL)
 /* It is host kernel with virtualization support */
 #include <asm/kvm/copy-hw-stacks.h>
 #else /* unknow mode */
@@ -806,25 +842,20 @@ static inline int do_user_hw_stacks_copy_full(struct e2k_stacks *stacks,
 	 * (last user frame from pcshtp == SZ_OF_CR).
 	 */
 	if (crs) {
-		e2k_mem_crs_t __user *u_frame;
-		int ret;
 
 		/*
 		 * Make sure there is enough space in user chain stack
 		 * before copying
 		 */
 		if (unlikely(PCSP_IND(stacks->pcsp) + SZ_OF_CR > PCSP_SIZE(stacks->pcsp))) {
-			stacks->pcsp = incr_pcsp_ind(stacks->pcsp, SZ_OF_CR);
+		    stacks->pcsp = incr_pcsp_ind(stacks->pcsp, SZ_OF_CR);
 			ret = handle_chain_stack_bounds(stacks, regs->trap);
 			stacks->pcsp = decr_pcsp_ind(stacks->pcsp, SZ_OF_CR);
 			if (ret)
 				return ret;
 		}
 
-		u_frame = (void __user *) PCSP_PTR(stacks->pcsp);
-		ret = user_crs_frames_copy(u_frame, regs, &regs->crs);
-		if (unlikely(ret))
-			return ret;
+		return user_crs_frames_copy(U_PCSP_PTR(stacks->pcsp), regs,  &regs->crs);
 	}
 
 	return 0;

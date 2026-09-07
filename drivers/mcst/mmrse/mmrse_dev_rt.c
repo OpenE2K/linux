@@ -472,31 +472,30 @@ static loff_t rt_cdev_llseek(struct file *filp, loff_t off, int whence)
  * Used for RT buffers only.
  *
  * Returns:
- *   -ENODEV
- *   POLLIN | POLLRDNORM - if new data available
- *   POLLOUT | POLLWRNORM - if all data sended
+ *   EPOLLIN  | EPOLLRDNORM - if new data available
+ *   EPOLLOUT | EPOLLWRNORM - if all data sended
  *   0
  */
-static unsigned int rt_cdev_poll(struct file *filp, poll_table *wait)
+static __poll_t rt_cdev_poll(struct file *filp, poll_table *wait)
 {
 	mmrse_priv_t *priv = (mmrse_priv_t *)filp->private_data;
 	uint32_t valid;
 	uint32_t rewrite;
 	uint32_t request;
-	unsigned int mask = 0;
+	__poll_t mask = (__poll_t)0;
 
 	if (!priv)
-		return -ENODEV;
+		return (__poll_t)0;
 
 	poll_wait(filp, &priv->wq_rt_event, wait);
 
 	hw_rt_get_ibuf(priv, &valid, &rewrite);
 	if (valid)
-		mask |= POLLIN | POLLRDNORM; /* readable */
+		mask |= EPOLLIN | EPOLLRDNORM; /* readable */
 
 	hw_rt_get_obuf(priv, &valid, &request);
 	if (!valid)
-		mask |= POLLOUT | POLLWRNORM; /* writable */
+		mask |= EPOLLOUT | EPOLLWRNORM; /* writable */
 
 	return mask;
 } /* rt_cdev_poll */
@@ -514,7 +513,7 @@ static unsigned int rt_cdev_poll(struct file *filp, poll_table *wait)
  *   0 - no data
  *   >0 - bytes readed
  */
-static ssize_t rt_cdev_read(struct file *filp, char *buf, size_t count,
+static ssize_t rt_cdev_read(struct file *filp, char __user *buf, size_t count,
 			    loff_t *ppos)
 {
 	mmrse_priv_t *priv = (mmrse_priv_t *)filp->private_data;
@@ -581,7 +580,7 @@ static ssize_t rt_cdev_read(struct file *filp, char *buf, size_t count,
  * write file operation
  * Write RT data buffers
  */
-static ssize_t rt_cdev_write(struct file *filp, const char *buf, size_t count,
+static ssize_t rt_cdev_write(struct file *filp, const char __user *buf, size_t count,
 			     loff_t *ppos)
 {
 	mmrse_priv_t *priv = (mmrse_priv_t *)filp->private_data;
@@ -615,7 +614,7 @@ static ssize_t rt_cdev_write(struct file *filp, const char *buf, size_t count,
 	len = GET_RT_BUF_SIZE;
 	len = (count < len) ? count : len;
 
-	if (copy_from_user(dat, (void *)buf, len)) {
+	if (copy_from_user(dat, buf, len)) {
 		dev_err(priv->dev_rt,
 			"WRITE ERROR: copy_from_user failure\n");
 

@@ -789,7 +789,7 @@ static long orangefs_devreq_ptr128_ioctl(struct file *filp, unsigned int cmd,
 		if (get_user_tagged_16(ap.qword, tag, &d128p->ptr) || !IS_AP(ap, tag) ||
 					AP_OBJ_SIZE(ap) < desc.total_size)
 			return -EFAULT;
-		desc.ptr = (void *)AP_PTR(ap);
+		desc.ptr = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 		desc.size = d128.size;
 		desc.count = d128.count;

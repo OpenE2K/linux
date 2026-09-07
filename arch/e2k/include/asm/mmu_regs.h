@@ -10,10 +10,8 @@
 #ifndef	_E2K_MMU_REGS_H_
 #define	_E2K_MMU_REGS_H_
 
-#ifndef __ASSEMBLY__
 #include <linux/linkage.h>
 #include <linux/types.h>
-#endif /* __ASSEMBLY__ */
 
 #include <asm/p2v/boot_head.h>
 #include <asm/debug_print.h>
@@ -26,7 +24,6 @@
  * MMU registers operations
  */
 
-#ifndef __ASSEMBLY__
 /*
  * Write MMU register
  */
@@ -299,115 +296,67 @@ flush_DCACHE_line(e2k_addr_t virt_addr)
 	flush_DCACHE_line_end(false);
 }
 
-/*
- * Clear DCACHE L1 set
- */
-static inline void
-clear_DCACHE_L1_set(e2k_addr_t virt_addr, unsigned long set)
-{
-	E2K_WAIT_ALL;
-	CLEAR_DCACHE_L1_SET(virt_addr, set);
-	E2K_WAIT_ST;
-}
 
 /*
- * Clear DCACHE L1 line
+ * DCACHE L2 registers
  */
-static inline void
-clear_DCACHE_L1_line(e2k_addr_t virt_addr)
+
+static __always_inline u64 read_DCACHE_L2_reg(int reg, int bank)
 {
-	unsigned long set;
-	for (set = 0; set < E2K_DCACHE_L1_SETS_NUM; set++)
-		clear_DCACHE_L1_set(virt_addr, set);
-}
-/*
- * Write DCACHE L2 registers
- */
-static inline void
-native_write_DCACHE_L2_reg(unsigned long reg_val, int reg_num, int bank_num)
-{
-	__E2K_WAIT_ALL;
-	NATIVE_WRITE_L2_REG(reg_val, reg_num, bank_num);
-	__E2K_WAIT_ALL;
-}
-static inline void
-native_write_DCACHE_L2_CNTR_reg(unsigned long reg_val, int bank_num)
-{
-	native_write_DCACHE_L2_reg(reg_val, _E2K_DCACHE_L2_CTRL_REG, bank_num);
-}
-static inline void
-write_DCACHE_L2_reg(unsigned long reg_val, int reg_num, int bank_num)
-{
-	WRITE_L2_REG(reg_val, reg_num, bank_num);
-}
-static inline void
-write_DCACHE_L2_CNTR_reg(unsigned long reg_val, int bank_num)
-{
-	write_DCACHE_L2_reg(reg_val, _E2K_DCACHE_L2_CTRL_REG, bank_num);
+	return READ_L2_REG(reg, bank);
 }
 
-static inline void
-write_DCACHE_L2_ERR_reg(int bank_num, u64 val)
+static __always_inline void write_DCACHE_L2_reg(u64 value, int reg, int bank)
 {
-	write_DCACHE_L2_reg(val, _E2K_DCACHE_L2_ERR_REG, bank_num);
+	WRITE_L2_REG(value, reg, bank);
 }
 
-
-static inline void
-clear_DCACHE_L2_CNT_ERR1_reg(int bank_num)
+static __always_inline e2k_l2_ctrl_ext_t read_L2_CTRL_EXT(int bank)
 {
-	write_DCACHE_L2_reg(0, _E2K_DCACHE_L2_CNT_ERR1_REG, bank_num);
-}
-static inline void
-clear_DCACHE_L2_CNT_ERR2_reg(int bank_num)
-{
-	write_DCACHE_L2_reg(0, _E2K_DCACHE_L2_CNT_ERR2_REG, bank_num);
+	return (e2k_l2_ctrl_ext_t) {
+		.word = read_DCACHE_L2_reg(E2K_DCACHE_L2_CTRL_EXT_REG, bank)
+	};
 }
 
-/*
- * Read DCACHE L2 registers
- */
-static inline unsigned long
-native_read_DCACHE_L2_reg(int reg_num, int bank_num)
+static __always_inline void write_L2_CTRL_EXT(e2k_l2_ctrl_ext_t l2_ctrl_ext, int bank)
 {
-	return NATIVE_READ_L2_REG(reg_num, bank_num);
-}
-static inline unsigned long
-native_read_DCACHE_L2_CNTR_reg(int bank_num)
-{
-	return native_read_DCACHE_L2_reg(_E2K_DCACHE_L2_CTRL_REG, bank_num);
-}
-static inline unsigned long
-native_read_DCACHE_L2_ERR_reg(int bank_num)
-{
-	return native_read_DCACHE_L2_reg(_E2K_DCACHE_L2_ERR_REG, bank_num);
-}
-static inline unsigned long
-read_DCACHE_L2_reg(int reg_num, int bank_num)
-{
-	return READ_L2_REG(reg_num, bank_num);
-}
-static inline unsigned long
-read_DCACHE_L2_CNTR_reg(int bank_num)
-{
-	return read_DCACHE_L2_reg(_E2K_DCACHE_L2_CTRL_REG, bank_num);
-}
-static inline unsigned long
-read_DCACHE_L2_ERR_reg(int bank_num)
-{
-	return read_DCACHE_L2_reg(_E2K_DCACHE_L2_ERR_REG, bank_num);
+	write_DCACHE_L2_reg(AW(l2_ctrl_ext), E2K_DCACHE_L2_CTRL_EXT_REG, bank);
 }
 
-
-static inline unsigned long
-read_DCACHE_L2_CNT_ERR1_reg(int bank_num)
+static inline void write_L2_ERR(int bank, e2k_l2_err_t value)
 {
-	return read_DCACHE_L2_reg(_E2K_DCACHE_L2_CNT_ERR1_REG, bank_num);
+	write_DCACHE_L2_reg(AW(value), E2K_DCACHE_L2_ERR_REG, bank);
 }
-static inline unsigned long
-read_DCACHE_L2_CNT_ERR2_reg(int bank_num)
+
+static __always_inline e2k_l2_err_t read_L2_ERR(int bank)
 {
-	return read_DCACHE_L2_reg(_E2K_DCACHE_L2_CNT_ERR2_REG, bank_num);
+	return (e2k_l2_err_t) {
+		.word = read_DCACHE_L2_reg(E2K_DCACHE_L2_ERR_REG, bank)
+	};
+}
+
+static __always_inline e2k_l2_cnt_err1_t read_L2_CNT_ERR1(int bank)
+{
+	return (e2k_l2_cnt_err1_t) {
+		.word = read_DCACHE_L2_reg(E2K_DCACHE_L2_CNT_ERR1_REG, bank)
+	};
+}
+
+static __always_inline void clear_L2_CNT_ERR1(int bank)
+{
+	write_DCACHE_L2_reg(0, E2K_DCACHE_L2_CNT_ERR1_REG, bank);
+}
+
+static __always_inline e2k_l2_cnt_err2_t read_L2_CNT_ERR2(int bank)
+{
+	return (e2k_l2_cnt_err2_t) {
+		.word = read_DCACHE_L2_reg(E2K_DCACHE_L2_CNT_ERR2_REG, bank)
+	};
+}
+
+static __always_inline void clear_L2_CNT_ERR2(int bank)
+{
+	write_DCACHE_L2_reg(0, E2K_DCACHE_L2_CNT_ERR2_REG, bank);
 }
 
 /*
@@ -531,7 +480,5 @@ write_CLW_reg(clw_addr_t clw_addr, clw_reg_t val)
 {
 	WRITE_CLW_REG(clw_addr, val);
 }
-
-#endif /* ! __ASSEMBLY__ */
 
 #endif  /* _E2K_MMU_REGS_H_ */

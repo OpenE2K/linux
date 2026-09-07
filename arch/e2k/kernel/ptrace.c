@@ -24,6 +24,7 @@
 #include <linux/compat.h>
 #include <linux/task_work.h>
 
+#include <asm/aau_regs_access.h>
 #include <asm/check_hw_ctx.h>
 #include <asm/compat.h>
 #include <asm/gregs.h>
@@ -209,9 +210,9 @@ unsigned long regs_get_register(const struct pt_regs *regs, unsigned int offset)
 	e2k_psp_t psp = regs->stacks.psp;
 	e2k_psp_t cur_psp;
 	e2k_cr1_t cr1 = regs->crs.cr1;
-	unsigned long base, spilled, size;
 	u64 value;
 	u8 tag;
+	unsigned long flags;
 
 	if (unlikely((signed int) offset < 0))
 		return 0xdead;
@@ -248,7 +249,12 @@ unsigned long regs_get_register(const struct pt_regs *regs, unsigned int offset)
 		return (ptag << 1) | pval;
 	}
 
+	/* %r/%b register.  Currently only kernel's stack is supported */
+	if (user_mode(regs))
+		return 0xdead;
+	all_irq_save(flags);
 	cur_psp = read_PSP_reg();
+	all_irq_restore(flags);
 
 	if (offset & REGS_B_REGISTER_FLAG) {
 		int qr, r, br, rbs, rsz, rcur;
@@ -277,21 +283,24 @@ unsigned long regs_get_register(const struct pt_regs *regs, unsigned int offset)
 		}
 	}
 
-	size = cr1.wbs * EXT_4_NR_SZ;
-	base = PSP_PTR(psp) - size;
-
-	spilled = PSP_BASE(psp) + PSP_IND(cur_psp);
-
+	size_t size = cr1.wbs * EXT_4_NR_SZ;
 	if (unlikely(offset + 8 > size))
 		return 0xdead;
 
-	if (base + offset >= spilled)
-		E2K_FLUSHR;
+	volatile void *base = K_PSP_PTR(psp) - size;
 
-	load_value_and_tagd((void *) base + offset, &value, &tag);
+	size_t spilled = PSP_BASE(psp) + PSP_IND(cur_psp);
+	if ((uintptr_t) base + offset >= spilled) {
+		all_irq_save(flags);
+		E2K_FLUSHR;
+		all_irq_restore(flags);
+	}
+
+	load_value_and_tagd(base + offset, &value, &tag);
 
 	return value;
 }
+EXPORT_SYMBOL(regs_get_register);
 
 static void user_regs_struct_size_checks(long size)
 {
@@ -332,12 +341,12 @@ static inline int get_user_regs_struct_size(struct user_regs_struct __user *ureg
 			val = sizeof(struct user_regs_struct);
 		*size = val;
 		if (val < offsetof(struct user_regs_struct, idr))
-			ret = -EPERM;
+			ret = -EINVAL;
 
 		/* do not allow to set arrays gext_v5 and gext_tag_v5 partially */
 		if (val > offsetof(struct user_regs_struct, gext_v5[0]) &&
 		    val < offsetofend(struct user_regs_struct, gext_tag_v5[31]))
-			ret = -EPERM;
+			ret = -EINVAL;
 	}
 
 	if (!ret)
@@ -412,7 +421,6 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 				struct user_regs_struct *user_regs)
 {
 	struct trap_pt_regs *trap;
-	long size = sizeof(struct user_regs_struct);
 	int i;
 	struct thread_info *ti = current_thread_info();
 	volatile struct global_gregs g_gregs;
@@ -421,7 +429,7 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 
 	DebugTRACE("%s: current->pid=%d(%s)\n", __func__, current->pid, current->comm);
 
-	memset(user_regs, 0, size);
+	memset(user_regs, 0, sizeof(struct user_regs_struct));
 
 	machine.save_global_gregs((struct global_gregs *) &g_gregs);
 	get_gregs_from_thread(user_regs, (struct global_gregs *) &g_gregs,
@@ -456,7 +464,7 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 	machine.get_aau_context(&aau_regs, aasr);
 	SAVE_AADS(&aau_regs);
 
-	machine.save_aaldi(user_regs->aaldi);
+	save_aaldi(user_regs->aaldi);
 	SAVE_AALDA(user_regs->aalda);
 
 	BUILD_BUG_ON(AADS_REGS_NUM != 32 || AAINDS_REGS_NUM != 16 ||
@@ -579,8 +587,12 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 
 		/* MLT */
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
-		/* FIXME: it need implement for guest */
-		if (!paravirt_enabled() && trap->mlt_state.num)
+		if (trap->mlt_state.num
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+				/* FIXME: it need implement for guest */
+				&& !paravirt_enabled()
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+				)
 			memcpy(user_regs->mlt, trap->mlt_state.mlt,
 			       sizeof(e2k_mlt_entry_t) * trap->mlt_state.num);
 #endif
@@ -610,24 +622,22 @@ void core_pt_regs_to_user_regs(struct pt_regs *pt_regs,
 		user_regs->arg5     = pt_regs->dargs[4];
 		user_regs->arg6     = pt_regs->dargs[5];
 #ifdef CONFIG_PROTECTED_MODE
-		if (pt_regs->kernel_entry == 8
-			&& (size >= offsetofend(struct user_regs_struct, arg12))) {
+		if (pt_regs->kernel_entry == 8) {
 			user_regs->arg7     = pt_regs->dargs[6];
 			user_regs->arg8     = pt_regs->dargs[7];
 			user_regs->arg9     = pt_regs->dargs[8];
 			user_regs->arg10    = pt_regs->dargs[9];
 			user_regs->arg11    = pt_regs->dargs[10];
 			user_regs->arg12    = pt_regs->dargs[11];
-			if (size >= offsetofend(struct user_regs_struct, flags)) {
-				user_regs->flags = USER_REGS_FLAG_PROTECTED_MODE;
-				user_regs->arg_tags = pt_regs->tags;
-				if (pt_regs->return_desk) {
-					user_regs->sys_rval_lo = pt_regs->rval1;
-					user_regs->sys_rval_hi = pt_regs->rval2;
-					user_regs->sys_rval_tag = pt_regs->rv1_tag |
-								(pt_regs->rv2_tag << 4);
-					user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
-				}
+
+			user_regs->flags = USER_REGS_FLAG_PROTECTED_MODE;
+			user_regs->arg_tags = pt_regs->tags;
+			if (pt_regs->return_desk) {
+				user_regs->sys_rval_lo = pt_regs->rval1;
+				user_regs->sys_rval_hi = pt_regs->rval2;
+				user_regs->sys_rval_tag = pt_regs->rv1_tag |
+							(pt_regs->rv2_tag << 4);
+				user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
 			}
 		}
 #endif /* CONFIG_PROTECTED_MODE */
@@ -970,10 +980,15 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 
 		/* MLT */
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
-		/* FIXME: it need implement for guest */
-		if (!paravirt_enabled() && trap->mlt_state.num)
+		if (trap->mlt_state.num
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+				/* FIXME: it need implement for guest */
+				&& !paravirt_enabled()
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+				) {
 			memcpy(user_regs->mlt, trap->mlt_state.mlt,
 			       sizeof(e2k_mlt_entry_t) * trap->mlt_state.num);
+		}
 #endif
 
 		/* TC */
@@ -1003,24 +1018,22 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 		user_regs->arg5    = pt_regs->dargs[4];
 		user_regs->arg6    = pt_regs->dargs[5];
 #ifdef CONFIG_PROTECTED_MODE
-		if ((pt_regs->kernel_entry == 8)
-			&& (size >= offsetofend(struct user_regs_struct, arg12))) {
+		if (pt_regs->kernel_entry == 8) {
 			user_regs->arg7     = pt_regs->dargs[6];
 			user_regs->arg8     = pt_regs->dargs[7];
 			user_regs->arg9     = pt_regs->dargs[8];
 			user_regs->arg10    = pt_regs->dargs[9];
 			user_regs->arg11    = pt_regs->dargs[10];
 			user_regs->arg12    = pt_regs->dargs[11];
-			if (size >= offsetofend(struct user_regs_struct, flags)) {
-				user_regs->flags = USER_REGS_FLAG_PROTECTED_MODE;
-				user_regs->arg_tags = pt_regs->tags;
-				if (pt_regs->return_desk) {
-					user_regs->sys_rval_lo = pt_regs->rval1;
-					user_regs->sys_rval_hi = pt_regs->rval2;
-					user_regs->sys_rval_tag = pt_regs->rv1_tag |
-								(pt_regs->rv2_tag << 4);
-					user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
-				}
+
+			user_regs->flags = USER_REGS_FLAG_PROTECTED_MODE;
+			user_regs->arg_tags = pt_regs->tags;
+			if (pt_regs->return_desk) {
+				user_regs->sys_rval_lo = pt_regs->rval1;
+				user_regs->sys_rval_hi = pt_regs->rval2;
+				user_regs->sys_rval_tag = pt_regs->rv1_tag |
+							(pt_regs->rv2_tag << 4);
+				user_regs->flags |= USER_REGS_FLAG_RETURN_DESCRIPTOR;
 			}
 		}
 #endif /* CONFIG_PROTECTED_MODE */
@@ -1044,7 +1057,7 @@ static int pt_regs_to_user_regs(struct task_struct *child,
 }
 
 /* Check if ctpr doesn't contain privileged label */
-static bool is_priv_or_inv_ctpr(e2k_ctpr_t ctpr, e2k_cud_t oscud)
+static bool is_priv_or_inv_ctpr(e2k_ctpr_t ctpr)
 {
 	u64 opc = ctpr_opc(ctpr);
 	u64 ta_tag = ctpr_ta_tag(ctpr);
@@ -1055,6 +1068,13 @@ static bool is_priv_or_inv_ctpr(e2k_ctpr_t ctpr, e2k_cud_t oscud)
 
 	/* System label should be properly aligned and point to kernel entry */
 	if (ta_tag == CTPSL_CT_TAG) {
+		/*
+		 * OSCUD register is neither writable nor readable via ptrace(),
+		 * so user has no legal opportunity to provide valid value
+		 * in user_regs->oscud. That's why we get the value directly
+		 * from the register.
+		 */
+		e2k_cud_t oscud = read_OSCUD_reg();
 		u64 cud_offset = ctpr.ta_base - CUD_BASE(oscud);
 
 		if (cud_offset % 0x800)
@@ -1147,10 +1167,8 @@ static int check_permissions(const struct user_regs_struct *user_regs)
 	ctpr2 = ctpr_new(user_regs->ctpr2, user_regs->ctpr2_hi);
 	ctpr3 = ctpr_new(user_regs->ctpr3, user_regs->ctpr3_hi);
 
-	/* Check, that all ctprs contain only user-space labels */
-	if (is_priv_or_inv_ctpr(ctpr1, user_regs->oscud) ||
-			is_priv_or_inv_ctpr(ctpr2, user_regs->oscud) ||
-			is_priv_or_inv_ctpr(ctpr3, user_regs->oscud))
+	/* Check that all ctprs contain only allowed labels */
+	if (is_priv_or_inv_ctpr(ctpr1) || is_priv_or_inv_ctpr(ctpr2) || is_priv_or_inv_ctpr(ctpr3))
 		return -EPERM;
 
 	/*
@@ -1295,7 +1313,8 @@ static int user_regs_to_pt_regs(struct user_regs_struct *user_regs,
 		pt_regs->crs.cr1.ussz_hi = cr1.ussz_hi;
 	pt_regs->crs.cr1.ussz_lo = cr1.ussz_lo;
 	pt_regs->crs.cr1.wdbl = cr1.wdbl;
-	pt_regs->crs.cr1.br = cr1.br;
+	/* CR1.br is obtained later from user_regs->br */
+	/* pt_regs->crs.cr1.br = cr1.br; */
 
 	AW(pt_regs->aasr) = user_regs->aasr;
 
@@ -1372,17 +1391,13 @@ void ptrace_disable(struct task_struct *child)
 }
 
 
-u8 get_tag_and_color_from_user_page(const void *src)
+u8 get_tag_and_color_from_user_page(const volatile void *src)
 {
 	u64 color;
 	u8 tag;
 	load_value_and_tagd(src, &color, &tag);
-	if (cpu_has(CPU_FEAT_ISET_V7) && !cpu_has(CPU_FEAT_E48C_MAKET)) {
-		ldst_rec_op_t ld_op = (ldst_rec_op_t) {
-			.prot = 1,
-			.fmt_h = LDST_MCOLOR_FMT_H,
-			.mas = MAS_BYPASS_L1_CACHE
-		};
+	if (cpu_has(CPU_FEAT_MADM)) {
+		ldst_rec_op_t ld_op = (ldst_rec_op_t) { .fmt_h = LDST_MCOLOR_FMT_H };
 		NATIVE_RECOVERY_LOAD_TO((u64 *)src, AW(ld_op), color, 0);
 		tag = (tag & 0xf) | ((color & 0x7) << 4);
 	}
@@ -1397,10 +1412,9 @@ static int arch_ptrace_peek(struct task_struct *child,
 	unsigned long value;
 	int copied;
 	bool privileged_access = range_intersects(addr, sizeof(tmp),
-			USER_ADDR_MAX, PAGE_OFFSET - USER_ADDR_MAX);
+			USER_ADDR_MAX, TASK_SIZE - USER_ADDR_MAX);
 	unsigned long ts_flag = 0;
 	int tag_addr_alligned_8;
-
 
 	if (tag) {
 		if (!IS_ALIGNED(addr, 4))
@@ -1413,7 +1427,10 @@ static int arch_ptrace_peek(struct task_struct *child,
 		/* Only allow access to CUT and hw stacks */
 		if (!range_includes(USER_HW_STACKS_BASE, E2K_ALL_STACKS_MAX_SIZE,
 				    addr, sizeof(tmp)) &&
-		    !range_includes(USER_CUT_AREA_BASE, USER_CUT_AREA_SIZE, addr, sizeof(tmp))) {
+		    !range_includes(USER_CUT_AREA_BASE, USER_CUT_AREA_SIZE,
+				    addr, sizeof(tmp)) &&
+		    !range_includes(USER_TRAMPOLINES_BASE, USER_TRAMPOLINES_SIZE,
+				    addr, sizeof(tmp))) {
 			return -EPERM;
 		}
 		/* Chain stack access works only with aligned dwords.
@@ -1510,11 +1527,11 @@ static void poke_work_fn(struct callback_head *head)
 	/*
 	 * Calculate stack frame addresses
 	 */
-	pcs_base = (unsigned long) CURRENT_PCS_BASE();
-	ps_base = (unsigned long) CURRENT_PS_BASE();
+	pcs_base = CURRENT_PCS_BASE();
+	ps_base = CURRENT_PS_BASE();
 
-	pcs_used_top = PCSP_PTR(regs->stacks.pcsp);
-	ps_used_top = PSP_PTR(regs->stacks.psp);
+	pcs_used_top = (unsigned long)U_PCSP_PTR(regs->stacks.pcsp);
+	ps_used_top = (unsigned long)U_PSP_PTR(regs->stacks.psp);
 
 	store_tagged_dword((u64 *) &value, data, tag);
 
@@ -1913,7 +1930,7 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 			if ((addr & 15) != 0)
 				break;
 
-			ap = new_ap(data, gd_base + gd_size - data, 0, RW_ENABLE);
+			ap = MAKE_AP(data, gd_base + gd_size - data);
 
 			if (arch_ptrace_poke(child, addr,
 					     ap.lo, E2K_AP_LO_ETAG))
@@ -1979,9 +1996,12 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 				(struct user_regs_struct __user *) data, &size);
 		if (ret) {
 			unsigned long long zero = 0;
-			if (copy_to_user((void __user *) data, &zero,
-					 sizeof(zero)))
-				break;
+			unsigned long unused;
+
+			/* Do not check return value, we are already on error path */
+			unused = copy_to_user((void __user *) data, &zero, sizeof(zero));
+
+			break;
 		}
 		ret = pt_regs_to_user_regs(child, &local_user_regs, size);
 		if (ret) {
@@ -1997,8 +2017,8 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 			local_user_regs.sizeof_struct = size;
 		}
 
-		ret = copy_to_user((void __user *) data,
-				   &local_user_regs, size);
+		if (copy_to_user((void __user *) data, &local_user_regs, size))
+			ret = -EFAULT;
 		break;
 	}
 
@@ -2012,10 +2032,10 @@ long common_ptrace(struct task_struct *child, long request, unsigned long addr,
 		if (ret)
 			break;
 
-		ret = copy_from_user(&local_user_regs,
-				     (void __user *) data, size);
-		if (ret)
+		if (copy_from_user(&local_user_regs, (void __user *) data, size)) {
+			ret = -EFAULT;
 			break;
+		}
 
 		ret = user_regs_to_pt_regs(&local_user_regs, child, size);
 		break;

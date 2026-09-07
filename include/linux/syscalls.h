@@ -1094,10 +1094,6 @@ asmlinkage long sys_spu_run(int fd, __u32 __user *unpc,
 asmlinkage long sys_spu_create(const char __user *name,
 		unsigned int flags, umode_t mode, int fd);
 
-#ifdef CONFIG_MCST
-asmlinkage long sys_el_posix(int req, void *a1, void *a2, void *a3, int a4);
-asmlinkage long sys_compat_el_posix(int req, void *a1, void *a2, void *a3, int a4);
-#endif
 #ifdef CONFIG_E2K
 asmlinkage long sys_arch_prctl(int option,
 				unsigned long arg2, unsigned long arg3,

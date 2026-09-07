@@ -44,7 +44,14 @@ int e2k_setjmp(struct jump_buf_e2k *jb)
 
 	raw_all_irq_restore(flags);
 
-	return 0;
+	/*
+	 * clang is the most aggressive with optimizations and ignores
+	 * returns_twice/noinline attributes when propagating constant 0.
+	 * So we need to hide the constant from clang.
+	 */
+	int ret = 0;
+	OPTIMIZER_HIDE_VAR(ret);
+	return ret;
 }
 EXPORT_SYMBOL(e2k_setjmp);
 

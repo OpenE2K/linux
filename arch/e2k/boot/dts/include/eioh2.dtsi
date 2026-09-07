@@ -32,6 +32,11 @@
 # define DMN_4_STS "disabled"
 #endif
 
+
+#define __MSI(_n) msi ## _n
+#define _MSI(_n) __MSI(_n)
+#define MSI _MSI(NODE)
+
 #if NODE == 0
 # define PCICFG_ADDRL(_a) 0x2 ## _a
 # define PCICFG_ADDR(_a) 0x2 _a
@@ -196,29 +201,59 @@
 
 		#interrupt-cells = <2>;
 	};
-
+	MSI: MSI {
+		compatible = "mcst,l-msi";
+		interrupt-parent = <&lpic>;
+		msi-controller;
+		numa-node-id = <NODE>;
+	};
 	IOMMU_0: iommu@DMN_0,380 {
 		compatible = "mcst,e2k-iommu";
-		REG = <NSR_ADDR(00380) 0 0x80>,
-			<NSR_ADDR(05080) 0 0x380>; /* for embedded devices */
+		REG = <NSR_ADDR(00380) 0 0x80>;
 		nonposted-mmio;
-
 		#iommu-cells = <1>;
-
 		numa-node-id = <NODE>;
 		interrupt-parent = <&LVT>;
-		interrupts = <LINP1_INTERRUPT_VECTOR   1 0>
-#ifdef E8V7
-			    ,<LINP26_INTERRUPT_VECTOR 26 0>
-			    ,<LINP27_INTERRUPT_VECTOR 27 0>
-			    ,<LINP28_INTERRUPT_VECTOR 28 0>
-			    ,<LINP29_INTERRUPT_VECTOR 29 0>
-			    ,<LINP30_INTERRUPT_VECTOR 30 0>
-			    ,<LINP31_INTERRUPT_VECTOR 31 0>
-#endif
-		;
+		interrupts = <LINP1_INTERRUPT_VECTOR 1 0>;
 	};
-
+#ifdef E8V7
+	iommu_26: iommu@DMN_0,5d00 {
+		compatible = "mcst,e2k-iommu";
+		REG = <NSR_ADDR(05d00) 0 0x80>;
+		nonposted-mmio;
+		#iommu-cells = <1>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP26_INTERRUPT_VECTOR 26 0>;
+	};
+	iommu_27: iommu@DMN_0,5d80 {
+		compatible = "mcst,e2k-iommu";
+		REG = <NSR_ADDR(05d80) 0 0x80>;
+		nonposted-mmio;
+		#iommu-cells = <1>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP27_INTERRUPT_VECTOR 27 0>;
+	};
+	iommu_29: iommu@DMN_0,5e80 {
+		compatible = "mcst,e2k-iommu";
+		REG = <NSR_ADDR(05e80) 0 0x80>;
+		nonposted-mmio;
+		#iommu-cells = <1>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP29_INTERRUPT_VECTOR 29 0>;
+	};
+	iommu_30: iommu@DMN_0,5f00 {
+		compatible = "mcst,e2k-iommu";
+		REG = <NSR_ADDR(05f00) 0 0x80>;
+		nonposted-mmio;
+		#iommu-cells = <1>;
+		numa-node-id = <NODE>;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP30_INTERRUPT_VECTOR 30 0>;
+	};
+#endif
 	pci@DMN_0 {
 		compatible = "mcst,l-pci";
 		REG = <PCICFG_ADDR(0x00000000) 0 0x10000000>, /*E2S_PCICFG_AREA_PHYS_BASE*/
@@ -231,11 +266,21 @@
 
 		linux,pci-domain = <DMN_0>;
 		numa-node-id = <NODE>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 
 		/*rid-base,iommu,iommu-base,length*/
+#ifdef E8V7
+		iommu-map = <0 &IOMMU_0 0 0xd0>, /* tranclate 00:xx.x - 00:19.x devices */
+				<0xd0 &iommu_26 0xd0 0x3>,
+				<0xd8 &iommu_27 0xd8 0x1>,
+				<0xe8 &iommu_29 0xe8 0x1>,
+				<0xf0 &iommu_30 0xf0 0x1>,
+				/*translate 01:xx.x - ff:xx.x devices */
+				<0x100 &IOMMU_0 0x100 0xff00>;
+#else
 		iommu-map = <0x0 &IOMMU_0 0x0 0x10000>;
+#endif
 		/* 1:1 translation, max size (48-bit) of e2k address space */
 		ranges = <  0 0 0 /* child address */
 			      0 0 /* parent address */
@@ -403,7 +448,7 @@
 #ifdef E8V7
 		display_subsystem: pci@1a,0 { /* 2D GPU MGA 2.7 */
 			reg = <0x0000d000 0 0 0 0>;
-				interrupts = <32 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <32 IRQ_TYPE_LEVEL_HIGH>;
 		};
 		pci@1a,1 { /* I2S0 */
 			reg = <0x0000d100 0 0 0 0>;
@@ -413,20 +458,20 @@
 			reg = <0x0000d200 0 0 0 0>;
 			interrupts = <34 IRQ_TYPE_LEVEL_HIGH>;
 		};
-		pci@1b,0 { /* 3D GPU, drivers/mcst/gpu-viv-e8v7 */
+		pci@1b,0 { /* 3D GPU */
 			reg = <0x0000d800 0 0 0 0>;
 			interrupts = <35 IRQ_TYPE_LEVEL_HIGH>;
-			iommus = <&IOMMU_0 0>; /*for generated subdevices*/
+			iommus = <&iommu_27 0>; /*for subdevices*/
 		};
 		pci@1d,0 { /* Video decoder (VPU) HEVC/H264/JPEG/AV1/VP9 */
 			reg = <0x0000e800 0 0 0 0>;
 			interrupts = <37 IRQ_TYPE_LEVEL_HIGH>;
-			iommus = <&IOMMU_0 0>; /*for generated subdevices*/
+			iommus = <&iommu_29 0>; /*for subdevices*/
 		};
 		pci@1e,0 { /* Video encoder BigEv2, drivers/mcst/BigEv2 */
 			reg = <0x0000f000 0 0 0 0>;
 			interrupts = <38 IRQ_TYPE_LEVEL_HIGH>;
-			iommus = <&IOMMU_0 0>; /*for generated subdevices*/
+			iommus = <&iommu_30 0>; /*for subdevices*/
 		};
 #endif /*E8V7*/
 	};
@@ -468,7 +513,7 @@
 		linux,pci-domain = <DMN_1>;
 		numa-node-id = <NODE>;
 		interrupt-parent = <&PIC_1>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 
 		/*rid-base,iommu,iommu-base,length*/
@@ -560,7 +605,7 @@
 		linux,pci-domain = <DMN_2>;
 		numa-node-id = <NODE>;
 		interrupt-parent = <&PIC_2>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 
 		/*rid-base,iommu,iommu-base,length*/
@@ -652,7 +697,7 @@
 		linux,pci-domain = <DMN_3>;
 		numa-node-id = <NODE>;
 		interrupt-parent = <&PIC_3>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 
 		/*rid-base,iommu,iommu-base,length*/
@@ -735,16 +780,16 @@
 		compatible = "mcst,l-pci";
 		status = DMN_4_STS;
 		REG = <PCICFG_ADDR(0x40000000) 0 0x10000000>,
-			<NSR_ADDR(0024c) 0 4>,
-			<NSR_ADDR(0022c) 0 4>,
-			<NSR_ADDR(0026c) 0 4>,
-			<NSR_ADDR(0028c) 0 4>;
+			<NSR_ADDR(00250) 0 4>,
+			<NSR_ADDR(00230) 0 4>,
+			<NSR_ADDR(00270) 0 4>,
+			<NSR_ADDR(00290) 0 4>;
 		reg-names = "cfg", "io", "mem", "pref-bgn", "pref-end";
 
 		linux,pci-domain = <DMN_4>;
 		numa-node-id = <NODE>;
 		interrupt-parent = <&PIC_4>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 
 		/*rid-base,iommu,iommu-base,length*/

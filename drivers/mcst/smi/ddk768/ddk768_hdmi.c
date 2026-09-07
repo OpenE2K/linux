@@ -80,13 +80,13 @@ static hdmi_vic_param_t gHdmiVICParamTable[] =
 
 BYTE g_INT_94h = 0;
 BYTE g_INT_95h = 0;
-BYTE PowerMode = PowerMode_A;
+static BYTE PowerMode = PowerMode_A;
 BYTE g_ucHDMIedidRead=0;
 BYTE AudioMode = 0;
 BYTE gEdidBuffer[256] = {0};
 
 /* Find mode VIC parameer from the table according to Width & Height*/
-unsigned char FindVicParam(unsigned long Width, unsigned long Height)
+static unsigned char FindVicParam(unsigned long Width, unsigned long Height)
 {
     unsigned char index = 0;
     hdmi_vic_param_t * pVicTable = gHdmiVICParamTable;
@@ -115,6 +115,7 @@ void DelayMs (BYTE millisecond)
 	mdelay(millisecond);
 }
 
+#if 0
 //-----------------------------------------------------------------------------
 // HDMI Interrupt functions
 //-----------------------------------------------------------------------------
@@ -128,7 +129,7 @@ hdmi_interrupt_t;
 static hdmi_interrupt_t *g_pHdmiIntHandlers = ((hdmi_interrupt_t *)0);
 
 /* HDMI Interrupt Service Routine */
-void hdmiISR(
+static void hdmiISR(
     unsigned long status
 )
 {
@@ -155,7 +156,7 @@ void hdmiISR(
         writeHDMIRegister (X95_INT2_ST, 0xFF);
     }            
 }
-
+#endif
 /*
  * This is the main interrupt hook for HDMI engine.
  */

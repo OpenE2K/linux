@@ -641,7 +641,12 @@ static ssize_t tap_get_user(struct tap_queue *q, void *msg_control,
 	int copylen = 0;
 	int depth;
 	bool zerocopy = false;
+#ifdef CONFIG_MCST
+	/* *E2K* add initializer to prevent werror problem */
+	size_t linear = 0;
+#else
 	size_t linear;
+#endif /* CONFIG_MCST */
 	enum skb_drop_reason drop_reason;
 
 	if (q->flags & IFF_VNET_HDR) {

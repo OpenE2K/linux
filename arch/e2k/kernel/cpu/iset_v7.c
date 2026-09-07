@@ -21,7 +21,7 @@ void restore_kvm_context_v7(const struct kvm_vcpu_arch *vcpu)
 	kvm_restore_host_context(arch_to_vcpu(vcpu), E2K_ISET_V7);
 }
 
-e2k_tlb_pref_ctrl_t tlb_prefetcher_save(void)
+e2k_tlb_pref_ctrl_t tlb_prefetcher_save_v7(void)
 {
 	e2k_tlb_pref_ctrl_t tlb_pref_ctrl;
 
@@ -42,7 +42,7 @@ e2k_tlb_pref_ctrl_t tlb_prefetcher_save(void)
 	return tlb_pref_ctrl;
 }
 
-void tlb_prefetcher_restore(e2k_tlb_pref_ctrl_t tlb_pref_ctrl)
+void tlb_prefetcher_restore_v7(e2k_tlb_pref_ctrl_t tlb_pref_ctrl)
 {
 	unsigned long flags;
 
@@ -54,7 +54,7 @@ void tlb_prefetcher_restore(e2k_tlb_pref_ctrl_t tlb_pref_ctrl)
 	raw_all_irq_restore(flags);
 }
 
-e2k_l1_pref_ctrl_t l1_prefetcher_save(void)
+e2k_l1_pref_ctrl_t l1_prefetcher_save_v7(void)
 {
 	e2k_l1_pref_ctrl_t l1_pref_ctrl;
 
@@ -76,7 +76,7 @@ e2k_l1_pref_ctrl_t l1_prefetcher_save(void)
 	return l1_pref_ctrl;
 }
 
-void l1_prefetcher_restore(e2k_l1_pref_ctrl_t l1_pref_ctrl)
+void l1_prefetcher_restore_v7(e2k_l1_pref_ctrl_t l1_pref_ctrl)
 {
 	unsigned long flags;
 

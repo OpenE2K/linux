@@ -11,7 +11,7 @@
 #define _E2K_KVM_GUEST_PROCESS_H
 
 #include <asm/kvm/hypercall.h>
-#include <asm/kvm/priv-hypercall.h>
+#include <asm/kvm/paravirt_sw/priv-hypercall.h>
 #include <asm/cpu_regs_types.h>
 #include <asm/stacks.h>
 #include <asm/ptrace.h>
@@ -305,19 +305,11 @@ kvm_free_old_kernel_hardware_stacks(void)
 
 #define	UPDATE_VCPU_THREAD_CONTEXT(task, ti, regs, gti, vcpu)	\
 		KVM_GUEST_UPDATE_VCPU_THREAD_CONTEXT(task, ti, regs, gti, vcpu)
-#define	CHECK_VCPU_THREAD_CONTEXT(__ti)	\
-		KVM_GUEST_CHECK_VCPU_THREAD_CONTEXT(__ti)
 
 #define	do_map_user_hard_stack_to_kernel(node, kstart, ubase, size) \
 		do_map_native_user_hard_stack_to_kernel(node, kstart, \
 							ubase, size)
 #define	resume_vm_thread()	/* none any virtual machines and threads */
-
-static inline bool host_is_at_HV_GM_mode(void)
-{
-	/* the guest has not own guests, so cannot be as host */
-	return false;
-}
 
 static inline void COPY_STACKS_TO_MEMORY(void)
 {
@@ -482,16 +474,6 @@ free_old_kernel_hardware_stacks(void)
 	}
 }
 #endif	/* COMMON_KERNEL_USER_HW_STACKS */
-
-/* the function is not used in guest mode so only to compile without errors */
-static __always_inline __interrupt void
-complete_switch_to_user_func(void)
-{
-	/* none own guests, so nothing to do in virtualization mode */
-	/* but the function should switch interrupt control from UPSR to */
-	/* PSR and set initial state of user UPSR */
-	KVM_SET_USER_INITIAL_UPSR(E2K_USER_INITIAL_UPSR);
-}
 
 static inline void
 clear_virt_thread_struct(thread_info_t *ti)

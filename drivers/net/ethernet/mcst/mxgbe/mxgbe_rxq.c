@@ -16,7 +16,6 @@
 #include "mxgbe_rxq.h"
 
 
-void mxgbe_net_rx_irq_handler(mxgbe_vector_t *vector);
 
 
 /**
@@ -35,8 +34,7 @@ static void mxgbe_rx_init_dstmac(mxgbe_priv_t *priv, int idx, u64 mac)
 	mxgbe_wreg32(base, RX_DSTMAC, RX_DSTMAC_SETIDX(idx));
 	mxgbe_wreg32(base, RX_DSTMAC,
 		     RX_DSTMAC_RECFRAME | RX_DSTMAC_SETMAC(mac >> 24));
-	mxgbe_wreg32(base, RX_DSTMAC,
-		     RX_DSTMAC_RECFRAME | RX_DSTMAC_SETMAC(mac));
+	mxgbe_wreg32(base, RX_DSTMAC, RX_DSTMAC_SETMAC(mac));
 } /* mxgbe_rx_init_dstmac */
 
 
@@ -79,6 +77,7 @@ int mxgbe_rxq_alloc_all(mxgbe_priv_t *priv)
 	int qn;
 	size_t size;
 	struct pci_dev *pdev = priv->pdev; /* for DMA_*_RAM macro */
+	int node;
 
 	size = priv->rx_ring_count * sizeof(mxgbe_descr_t);
 	size = (size < PAGE_SIZE) ? PAGE_SIZE : size; /* Rx queue size */
@@ -105,11 +104,14 @@ int mxgbe_rxq_alloc_all(mxgbe_priv_t *priv)
 		priv->rxq[qn].vector = NULL;
 
 		/* Alloc RAM for RX ring */
-		priv->rxq[qn].rx_buff = kzalloc_node(sizeof(mxgbe_rx_buff_t) *
+		node = dev_to_node(&priv->pdev->dev);
+		if (node == NUMA_NO_NODE)
+			node = 0;
+		priv->rxq[qn].buff = kzalloc_node(sizeof(mxgbe_buff_t) *
 						priv->rxq[qn].descr_cnt,
 						GFP_KERNEL,
-						dev_to_node(&priv->pdev->dev));
-		if (!priv->rxq[qn].rx_buff) {
+						node);
+		if (!priv->rxq[qn].buff) {
 			dev_err(&priv->pdev->dev,
 				"ERROR: Cannot allocate memory for RX ring,"
 				" aborting\n");
@@ -135,7 +137,7 @@ void mxgbe_rxq_free_all(mxgbe_priv_t *priv)
 
 	for (qn = 0; qn < priv->num_rx_queues; qn++) {
 		/* Free RAM for RX ring */
-		kfree(priv->rxq[qn].rx_buff);
+		kfree(priv->rxq[qn].buff);
 
 		/* Free RAM for HW Queue */
 		DMA_FREE_RAM(priv->rxq[qn].que_size,
@@ -427,10 +429,10 @@ int mxgbe_rxq_request(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 	void __iomem *base = priv->bar0_base;
 
 	q_descr = ((mxgbe_descr_t *)(priv->rxq[qn].que_addr)) + head;
-	q_descr->vlan.r = cpu_to_le64(descr->vlan.r);
-	q_descr->time.r = cpu_to_le64(descr->time.r);
-	q_descr->addr.r = cpu_to_le64(descr->addr.r);
-	q_descr->ctrl.r = cpu_to_le64(descr->ctrl.r);
+	q_descr->vlan.r = cpu_to_le64(descr->vlan.ru);
+	q_descr->time.r = cpu_to_le64(descr->time.ru);
+	q_descr->addr.r = cpu_to_le64(descr->addr.ru);
+	q_descr->ctrl.r = cpu_to_le64(descr->ctrl.ru);
 
 	/* Force memory writes to complete before letting h/w
 	 * know there are new descriptors to fetch. */

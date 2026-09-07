@@ -11,17 +11,17 @@
 #include <linux/mm.h>
 #include <linux/kvm.h>
 #include <asm/pgalloc.h>
-#include <asm/kvm/gpid.h>
+#include <asm/kvm/paravirt_sw/gpid.h>
 #include <asm/process.h>
-#include <asm/kvm/mm.h>
-#include <asm/kvm/gva_cache.h>
-#include <asm/kvm/ctx_signal_stacks.h>
+#include <asm/kvm/paravirt_sw/mm.h>
+#include <asm/kvm/paravirt_sw/gva_cache.h>
+#include <asm/kvm/paravirt_sw/ctx_signal_stacks.h>
 #include "mmu.h"
 #include "../process.h"
-#include "../mman.h"
+#include "mman.h"
 
 #include "../mmutrace-e2k.h"
-#include "../trace-gmm.h"
+#include "trace-gmm.h"
 
 
 #undef	DEBUG_KVM_MODE
@@ -502,7 +502,7 @@ static int kvm_gmmidmap_init(struct kvm *kvm, gmmid_table_t *gmmid_table,
 		return ret;
 	}
 	sprintf(gmmid_table->nid_cache_name, "gmm_struct_VM%d",
-		kvm->arch.vmid.nr);
+		kvm->arch.vm_id);
 	gmmid_table->nid_cachep =
 	    kmem_cache_create(gmmid_table->nid_cache_name,
 			      sizeof(gmm_struct_t), 0,

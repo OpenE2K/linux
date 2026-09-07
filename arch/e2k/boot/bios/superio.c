@@ -6,9 +6,7 @@
 #include <asm/mas.h>
 
 #include "bios.h"
-#include "mc146818rtc.h"
-
-#include "../boot_io.h"
+#include "boot_io.h"
 
 /* Control */
 #define UART_IER 0x01
@@ -102,8 +100,6 @@ void enable_rtc(void)
 
 	if (!set_irq) set_irq_pin();
 	set_irq = 1;
-
-	hardware.rtc = 1;
 }
 
 void enable_keyboard(void)
@@ -144,42 +140,6 @@ void enable_mouse(void)
 	set_irq = 1;
 
 	hardware.mouse = 1;
-}
-
-void enable_floppy(void)
-{
-	unsigned char byte;
-	rom_printk("enable superio fdc ...\n");
-	
-	bios_outb(0x55, 0x3f0);
-	
-	byte = read_sio(0x22);
-	byte |= (1 << 0);
-	write_sio(0x22, byte); // fdc power on	
-	
-	write_sio(0x7, 0x0);
-	write_sio(0x30, 0);	// disable fdc
-	write_sio(0x70, 0x06);	// irq
-	write_sio(0x30, 0x1);	// enable fdc
-	
-	bios_outb(0xAA, 0x3f0);
-
-	if (!set_irq) set_irq_pin();
-	set_irq = 1;
-	
-	/* 0x10	CMOS	fd drive type (2 nibbles: high=fd0, low=fd1)
-	 * values:
-	 * 1: 360K 5.25"
-	 * 2: 1.2MB 5.25"
-	 * 3: 720K 3.5"
-	 * 4: 1.44MB 3.5"
-	 * 5: 2.88MB 3.5"
-	 */
-	if (!CMOS_READ(0x10))
-		CMOS_WRITE(0x40, 0x10);
-
-
-	hardware.floppy = 1;
 }
 
 void set_irq_pin(void)

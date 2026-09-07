@@ -3687,26 +3687,26 @@ void _copy_siginfo_to_prot_user(struct prot_siginfo *to,
 		to->si_fd   = from->si_fd;
 		break;
 	case SIL_FAULT:
-		to->si_addr = MAKE_AP(from->si_addr, 0);
+		to->si_addr = MAKE_FAKE_AP(from->si_addr);
 		break;
 	case SIL_FAULT_TRAPNO:
-		to->si_addr = MAKE_AP(from->si_addr, 0);
+		to->si_addr = MAKE_FAKE_AP(from->si_addr);
 		break;
 	case SIL_FAULT_MCEERR:
-		to->si_addr = MAKE_AP(from->si_addr, 0);
+		to->si_addr = MAKE_FAKE_AP(from->si_addr);
 		to->si_addr_lsb = from->si_addr_lsb;
 		break;
 	case SIL_FAULT_BNDERR:
-		to->si_addr = MAKE_AP(from->si_addr, 0);
-		to->si_lower = MAKE_AP(from->si_lower, 0);
-		to->si_upper = MAKE_AP(from->si_upper, 0);
+		to->si_addr = MAKE_FAKE_AP(from->si_addr);
+		to->si_lower = MAKE_FAKE_AP(from->si_lower);
+		to->si_upper = MAKE_FAKE_AP(from->si_upper);
 		break;
 	case SIL_FAULT_PKUERR:
-		to->si_addr = MAKE_AP(from->si_addr, 0);
+		to->si_addr = MAKE_FAKE_AP(from->si_addr);
 		to->si_pkey = from->si_pkey;
 		break;
 	case SIL_FAULT_PERF_EVENT:
-		to->si_addr = MAKE_AP(from->si_addr, 0);
+		to->si_addr = MAKE_FAKE_AP(from->si_addr);
 		to->si_perf_data = from->si_perf_data;
 		to->si_perf_type = from->si_perf_type;
 		to->si_perf_flags = from->si_perf_flags;
@@ -3723,10 +3723,10 @@ void _copy_siginfo_to_prot_user(struct prot_siginfo *to,
 		to->si_uid = from->si_uid;
 		DebugSCP("to->si_ptr = 0x%px\n", from->si_ptr);
 		/* NB> We use the biggest union field over here: */
-		to->si_ptr = MAKE_AP(from->si_ptr, 0);
+		to->si_ptr = MAKE_FAKE_AP(from->si_ptr);
 		break;
 	case SIL_SYS:
-		to->si_call_addr = MAKE_AP(from->si_call_addr, 0);
+		to->si_call_addr = MAKE_FAKE_AP(from->si_call_addr);
 		to->si_syscall   = from->si_syscall;
 		to->si_arch      = from->si_arch;
 		break;
@@ -3755,7 +3755,7 @@ static inline int  set_sigval_from_prot_siginfo(kernel_siginfo_t *to,
 	 * We use it to recjgnize ap in union
 	 */
 	if (!get_user_tagged_16(kap.qword, tag, &usi->si_ptr) || IS_AP(kap, tag)) {
-		to->si_ptr = (void *)AP_PTR(kap);
+		to->si_ptr = U_AP_PTR(kap);
 		to->si_errno = 1;
 		DebugSCP("to->si_ptr = 0x%px\n", to->si_ptr);
 		return 1;
@@ -3786,26 +3786,26 @@ static int post_copy_siginfo_from_prot_user(kernel_siginfo_t *to,
 		to->si_fd   = from->si_fd;
 		break;
 	case SIL_FAULT:
-		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
+		to->si_addr = U_AP_PTR(pusi->si_addr);
 		break;
 	case SIL_FAULT_TRAPNO:
-		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
+		to->si_addr = U_AP_PTR(pusi->si_addr);
 		break;
 	case SIL_FAULT_MCEERR:
-		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
+		to->si_addr = U_AP_PTR(pusi->si_addr);
 		to->si_addr_lsb = from->si_addr_lsb;
 		break;
 	case SIL_FAULT_BNDERR:
-		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
-		to->si_lower = (void __user *)AP_PTR(pusi->si_lower);
-		to->si_upper = (void __user *)AP_PTR(pusi->si_upper);
+		to->si_addr = U_AP_PTR(pusi->si_addr);
+		to->si_lower = U_AP_PTR(pusi->si_lower);
+		to->si_upper = U_AP_PTR(pusi->si_upper);
 		break;
 	case SIL_FAULT_PKUERR:
-		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
+		to->si_addr = U_AP_PTR(pusi->si_addr);
 		to->si_pkey = from->si_pkey;
 		break;
 	case SIL_FAULT_PERF_EVENT:
-		to->si_addr = (void __user *)AP_PTR(pusi->si_addr);
+		to->si_addr = U_AP_PTR(pusi->si_addr);
 		to->si_perf_data = pusi->si_perf_data;
 		to->si_perf_type = pusi->si_perf_type;
 		to->si_perf_flags = pusi->si_perf_flags;
@@ -3825,7 +3825,7 @@ static int post_copy_siginfo_from_prot_user(kernel_siginfo_t *to,
 		}
 		break;
 	case SIL_SYS:
-		to->si_call_addr = (void __user *)AP_PTR(pusi->si_call_addr);
+		to->si_call_addr = U_AP_PTR(pusi->si_call_addr);
 		to->si_syscall   = from->si_syscall;
 		to->si_arch      = from->si_arch;
 		break;
@@ -4176,7 +4176,14 @@ static struct pid *pidfd_to_pid(const struct file *file)
 	if (!IS_ERR(pid))
 		return pid;
 
+#if defined(CONFIG_E2K) && defined(CONFIG_RTC_PROC_FS)
+	pid = tgid_pidfd_to_pid(file);
+	if (!IS_ERR(pid))
+		return pid;
+	return rtcfs_tgid_pidfd_to_pid(file);
+#else
 	return tgid_pidfd_to_pid(file);
+#endif
 }
 
 /**
@@ -4714,8 +4721,7 @@ int __compat_save_altstack(compat_stack_t __user *uss, unsigned long sp)
 #endif
 
 #if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
-
-static inline int bad_ap(const e2k_ptr_t *ptr, size_t size)
+static inline int bad_ap(const e2k_ptr_t __user *ptr, size_t size)
 {
 	e2k_ap_t ap;
 	int tag;
@@ -4723,6 +4729,16 @@ static inline int bad_ap(const e2k_ptr_t *ptr, size_t size)
 	if (get_user_tagged_16(ap.qword, tag, ptr)) {
 		return -EFAULT;
 	}
+
+	if ((tag & 0x3) == ETAGNUM && (((u32)ap.lo) == 0)) {
+		/*
+		 * NULL descriptor, nothing criminal. To create a NULL descriptor,
+		 * the compiler may clear only the bits and tag of the first word
+		 * of this quadro word, so check it and ignore other words.
+		 */
+		return 0;
+	}
+
 	if (!IS_AP(ap, tag)) {
 		return -EINVAL;
 	}
@@ -4735,7 +4751,6 @@ static inline int bad_ap(const e2k_ptr_t *ptr, size_t size)
 	return 0;
 }
 
-
 static int do_prot_sigaltstack(const struct prot_stack __user *uss_ptr,
 				 struct prot_stack __user *uoss_ptr)
 {
@@ -4747,12 +4762,12 @@ static int do_prot_sigaltstack(const struct prot_stack __user *uss_ptr,
 
 		if (copy_from_user(&uss128, uss_ptr, sizeof(struct prot_stack)))
 			return -EFAULT;
-		if (bad_ap(&uss_ptr->ss_sp, uss128.ss_size)) {
+		if (bad_ap(&uss_ptr->ss_sp, uss128.ss_size))
 			return -EFAULT;
-		}
+
 		uss.ss_flags = uss128.ss_flags;
 		uss.ss_size = uss128.ss_size;
-		uss.ss_sp = (void *)AP_PTR(uss128.ss_sp);
+		uss.ss_sp = U_AP_PTR(uss128.ss_sp);
 	}
 	ret = do_sigaltstack(uss_ptr ? &uss : NULL, &uoss,
 			     current_user_stack_pointer(),
@@ -4797,8 +4812,6 @@ int __prot_save_altstack(struct prot_stack __user *uss, unsigned long sp)
 		__put_user(t->sas_ss_size, &uss->ss_size)) {
 		return -EFAULT;
 	}
-	if (t->sas_ss_flags & SS_AUTODISARM)
-		sas_ss_reset(t);
 	return 0;
 }
 #endif
@@ -4986,7 +4999,7 @@ long protected_sys_rt_sigaction(int sig,
 			pr_err("%s:%d : SigSetSize seems extended beyond 64 bits.\n",
 			       __FILE__, __LINE__);
 		} else {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_UNEXPECTED_ARG_VALUE,
+			PROTECTED_MODE_ERROR(PMSCERRMSG_SC_UNEXPECTED_ARG_VALUE,
 					     "rt_sigaction", "sigsetsize",
 					     sigsetsize, sizeof(sigset_t));
 			PM_EXCEPTION_IF_ORTH_MODE(SIGILL, ILL_ILLOPN, -EINVAL);

@@ -686,6 +686,10 @@ static int vega10_patch_voltage_dependency_tables_with_lookup_table(
 			case 3: vdt = table_info->vdd_dep_on_pixclk; break;
 			case 4: vdt = table_info->vdd_dep_on_dispclk; break;
 			case 5: vdt = table_info->vdd_dep_on_phyclk; break;
+#ifdef CONFIG_MCST
+			default:
+				return -EINVAL;
+#endif
 		}
 
 		for (entry_id = 0; entry_id < vdt->count; entry_id++) {

@@ -10,12 +10,7 @@
 #include <linux/linkage.h>
 
 #include <asm/alternative-asm.h>
-#include <asm/mmu_regs_types.h>
-#include <asm/cpu_regs_types.h>
-#include <asm/e2k_api.h>
-#include <generated/asm-offsets.h>
-#include <asm/pv_info.h>
-#include <asm/trap_table.h>
+#include <asm/asm-offsets.h>
 #include <asm/trap_table.S.h>
 
 #ifdef CONFIG_CLW_ENABLE

@@ -42,10 +42,8 @@ TRACE_EVENT(
 	TP_fast_assign(
 		__entry->nr = nr;
 		__entry->address = tc->address;
-		load_value_and_tagd(&tc->data,
-				&__entry->data_val, &__entry->data_tag);
-		load_value_and_tagd(&tc->data_ext,
-				&__entry->data_ext_val, &__entry->data_ext_tag);
+		load_value_and_tagd(&tc->data, &__entry->data_val, &__entry->data_tag);
+		load_value_and_tagd(&tc->data_ext, &__entry->data_ext_val, &__entry->data_ext_tag);
 		__entry->condition = AW(tc->condition);
 		__entry->mask = AW(tc->mask);
 	),

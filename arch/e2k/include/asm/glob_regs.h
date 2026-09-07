@@ -10,8 +10,6 @@
 #ifndef _E2K_GLOB_REGS_H
 #define _E2K_GLOB_REGS_H
 
-#ifdef __KERNEL__
-
 /*
  * MAP of global registers using for the user purposes
  */
@@ -20,8 +18,10 @@
 #define	GLOBAL_GREGS_NUM	(E2K_MAXGR_d / 2)
 #define	LOCAL_GREGS_START	(E2K_MAXGR_d / 2)
 #define	LOCAL_GREGS_NUM		(E2K_MAXGR_d / 2)
+
 /* Registers used for temporary values (`-fglobal-regs` compiler option) */
 #define SCRATCH_GREGS_START	(LOCAL_GREGS_START + KERNEL_GREGS_MAX_NUM)
+#define SCRATCH_GREGS_NUM	(LOCAL_GREGS_NUM - KERNEL_GREGS_MAX_NUM)
 
 /* Follow global registers are global for user applications according to ABI */
 #define	GLOBAL_GREGS_USER_MASK		\
@@ -205,5 +205,4 @@
 #define	KERNEL_GREGS_PAIRS_NUM		NATIVE_KERNEL_GREGS_PAIRS_NUM
 #define	KERNEL_GREGS_PAIRS_SIZE		NATIVE_KERNEL_GREGS_PAIRS_SIZE
 
-#endif /* __KERNEL__ */
 #endif /* _E2K_GLOB_REGS_H */

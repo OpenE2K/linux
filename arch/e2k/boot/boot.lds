@@ -22,4 +22,6 @@ SECTIONS {
 		arch/e2k/boot/bpiggy.o(.rodata)
 		_ekernel = .;
 	}
+
+	__kernel_size = _ekernel - _kernel;
 }

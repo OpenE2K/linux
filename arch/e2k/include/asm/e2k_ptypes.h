@@ -10,10 +10,9 @@
 #ifndef	_E2K_PTYPES_H_
 #define	_E2K_PTYPES_H_
 
-
-#ifndef __ASSEMBLY__
 #include <asm/e2k_api.h>
 #include <asm/base_regs_types.h>
+#include <asm/cpu_features.h>
 #include <asm/e2k.h>
 #include <asm/tags.h>
 
@@ -71,15 +70,16 @@ typedef e2k_ptr_t e2k_ap_t;
 #define	ITAG_PL		1
 
 
-#define AP_ITAG(ap)	(unlikely(cpu_has(CPU_FEAT_ISET_V7)) ? (ap).itag_v7 : (ap).itag_v6)
-#define AP_RW(ap)	(unlikely(cpu_has(CPU_FEAT_ISET_V7)) ? (ap).rw_v7 : (ap).rw_v6)
+#define AP_ITAG(ap)	(cpu_has(CPU_FEAT_ISET_V7) ? (ap).itag_v7 : (ap).itag_v6)
+#define AP_RW(ap)	(cpu_has(CPU_FEAT_ISET_V7) ? (ap).rw_v7 : (ap).rw_v6)
 
 #define IS_AP_V6(ap, tag)	((tag) == ETAGAPQ_V6)
-#define IS_AP(ap, tag)	(unlikely(cpu_has(CPU_FEAT_ISET_V7)) \
+#define IS_AP(ap, tag)	(cpu_has(CPU_FEAT_ISET_V7) \
 					? (((tag) == ETAGAPQ_V7) && ((ap).itag_v7 == ITAG_AP)) \
 					: IS_AP_V6(ap, tag))
+#define AP_IS_ADDR(ap, tag)	(!(tag) && !(ap).qword.hi)
 
-#define IS_PL(pl, tag)	(unlikely(cpu_has(CPU_FEAT_ISET_V7)) ? \
+#define IS_PL(pl, tag)	(cpu_has(CPU_FEAT_ISET_V7) ? \
 				(((tag) == ETAGPLQ) && ((pl).itag_v7 == ITAG_PL)) : \
 				((((tag) & 0xf) == ETAGPLD) || ((tag) == ETAGPLQ)))
 
@@ -105,7 +105,7 @@ static __always_inline u64 AP_SIZE(e2k_ap_t ap)
 }
 
 
-static __always_inline u64 AP_IND(e2k_ap_t ap)
+static __always_inline s64 AP_IND(e2k_ap_t ap)
 {
 	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
 		return GET_V7_CPU_REG_IND(ap.qword);
@@ -122,6 +122,15 @@ static __always_inline u64 AP_PTR(e2k_ap_t ap)
 		return ap.Base + ap.Curptr;
 	}
 }
+#define U_AP_PTR(ap)	((void __user __force *)AP_PTR(ap))
+
+static __always_inline u64 AP_PTR_T(e2k_ap_t ap, unsigned int tag)
+{
+	return AP_IS_ADDR(ap, tag) ? LO(ap) : AP_PTR(ap);
+}
+
+#define U_AP_PTR_T(ap, tag)	((void __user __force *)AP_PTR_T(ap, tag))
+
 
 static __always_inline u64 AP_PTRC(e2k_ap_t ap)
 {
@@ -256,7 +265,5 @@ static __always_inline u64 AAD_SIZE(e2k_aadj_t aadj)
 /* If AADj has aauds tag, it contains a segment descriptor */
 #define AAD_IS_SD(aadj) (cpu_has(CPU_FEAT_ISET_V7) ? \
 			IS_AAD_SD_V7(aadj) : IS_AAD_SD_V6(aadj))
-
-#endif	/*  __ASSEMBLY__ */
 
 #endif	/* _E2K_PTYPES_H_ */

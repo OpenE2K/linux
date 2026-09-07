@@ -24,9 +24,7 @@
 #include "ddk768_help.h"
 
 extern int lvds_channel;
-
 extern int clk_phase;
-
 
 /* The valid signature of the user data pointer  for the setmode function. 
    The following definition is ASCII representation of the word 'USER'
@@ -416,7 +414,7 @@ static mode_parameter_t gChannel1ModeParamTable[MAX_MODE_TABLE_ENTRIES] =
 static mode_parameter_t gChannel0CurrentModeParam;
 static mode_parameter_t gChannel1CurrentModeParam;
 
-
+#if 0
 void debug_mode_param(mode_parameter_t *modeParam)
 {
     printk(KERN_INFO "%lu %lu %lu %lu %s %lu %lu %lu %lu %s %lu %lu %lu %s\n",
@@ -430,7 +428,7 @@ void debug_mode_param(mode_parameter_t *modeParam)
         modeParam->vertical_frequency,
         modeParam->clock_phase_polarity == POS ? "POS" : "NEG");
 }
-
+#endif
 
 
 /*
@@ -833,10 +831,10 @@ long isDisplayBasePending(
  *         0 = success
  *        -1 = fail.
  */
-long ddk768_programModeRegisters(
-logicalMode_t *pLogicalMode, 
-mode_parameter_t *pModeParam,   /* mode information about pixel clock, horizontal total, etc. */
-pll_value_t *pPLL               /* Pre-calculated values for the PLL */
+static long ddk768_programModeRegisters(
+  logicalMode_t *pLogicalMode, 
+  mode_parameter_t *pModeParam,   /* mode information about pixel clock, horizontal total, etc. */
+  pll_value_t *pPLL               /* Pre-calculated values for the PLL */
 )
 {
     unsigned long ulTmpValue;

@@ -7,9 +7,6 @@
 #ifndef	_E2K_NATIVE_CPU_REGS_ACCESS_H_
 #define	_E2K_NATIVE_CPU_REGS_ACCESS_H_
 
-#ifdef __KERNEL__
-
-#ifndef __ASSEMBLY__
 #include <asm/bug.h>
 #include <asm/cpu_regs_types.h>
 #include <asm/e2k_api.h>
@@ -287,7 +284,7 @@ static __always_inline void native_strip_PCSHTP_window(void)
 }
 
 /*
- * Read/write double-word Control Transfer Preparation Registers
+ * Read double-word Control Transfer Preparation Registers
  * (CTPR1/CTPR2/CTPR3)
  */
 
@@ -319,33 +316,6 @@ static inline e2k_ctpr_t native_read_CTPR3_reg(void)
 				? NATIVE_GET_DREG_CLOSED_ISET(6, ctpr3.hi, "ctpr3")
 				: 0,
 	};
-}
-
-static __always_inline void native_write_CTPR1_reg(e2k_ctpr_t ctpr)
-{
-	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		NATIVE_SET_DREGS_EXC(6, ctpr1, ctpr1.hi, LO(ctpr), HI(ctpr), "ctpr1");
-	} else {
-		NATIVE_SET_DREG_EXC(3, ctpr1, LO(ctpr), "ctpr1");
-	}
-}
-
-static __always_inline void native_write_CTPR2_reg(e2k_ctpr_t ctpr)
-{
-	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		NATIVE_SET_DREGS_EXC(6, ctpr2, ctpr2.hi, LO(ctpr), HI(ctpr), "ctpr2");
-	} else {
-		NATIVE_SET_DREG_EXC(3, ctpr2, LO(ctpr), "ctpr2");
-	}
-}
-
-static __always_inline void native_write_CTPR3_reg(e2k_ctpr_t ctpr)
-{
-	if (cpu_has(CPU_FEAT_ISET_V6)) {
-		NATIVE_SET_DREGS_EXC(6, ctpr3, ctpr3.hi, LO(ctpr), HI(ctpr), "ctpr3");
-	} else {
-		NATIVE_SET_DREG_EXC(3, ctpr3, LO(ctpr), "ctpr3");
-	}
 }
 
 
@@ -422,14 +392,12 @@ static __always_inline e2k_usd_t native_read_USD_reg(void)
 	return (e2k_usd_t) { .lo = lo, .hi = hi };
 }
 
-static __always_inline __interrupt void
-native_write_USBR_USD_regs(e2k_usbr_t usbr, e2k_usd_t usd)
+static __always_inline void native_write_USBR_USD_regs(e2k_usbr_t usbr, e2k_usd_t usd)
 {
 	NATIVE_SET_DATA_STACK_HOST_REGS(usd, usbr);
 }
 
-static __always_inline __interrupt void
-native_write_guest_USBR_USD_regs(e2k_usbr_t usbr, e2k_usd_t usd)
+static __always_inline void native_write_guest_USBR_USD_regs(e2k_usbr_t usbr, e2k_usd_t usd)
 {
 	NATIVE_SET_DATA_STACK_GUEST_REGS(usd, usbr);
 }
@@ -442,12 +410,12 @@ static __always_inline void native_write_USD_reg(e2k_usd_t usd)
 /* Read USINCR register */
 
 #if __iset__ >= 7
-static inline e2k_usincr_t native_read_USINCR_reg(void)
+static __always_inline e2k_usincr_t native_read_USINCR_reg(void)
 {
 	return (e2k_usincr_t) {.word = NATIVE_GET_DREG_OPEN(usincr)};
 }
 #else
-static inline e2k_usincr_t native_read_USINCR_reg(void)
+static __always_inline e2k_usincr_t native_read_USINCR_reg(void)
 {
 	return (e2k_usincr_t) {.word = NATIVE_GET_DREG_CLOSED_ISET(7, usincr)};
 }
@@ -462,7 +430,7 @@ static __always_inline void native_write_USINCR_reg(e2k_usincr_t USINCR)
  * Read/write double-word Window Descriptor Register (WD)
  */
 
-static inline e2k_wd_t native_read_WD_reg(void)
+static __always_inline e2k_wd_t native_read_WD_reg(void)
 {
 	return (e2k_wd_t) {
 		.word = NATIVE_GET_DREG_OPEN(wd)
@@ -475,7 +443,7 @@ static __always_inline void native_write_WD_reg(e2k_wd_t wd)
 }
 
 /*
- * Read/write double-word Loop Status Register (LSR/LSR1)
+ * Read double-word Loop Status Register (LSR/LSR1)
  */
 
 static __always_inline e2k_lsr_t native_read_LSR_reg(void)
@@ -492,18 +460,8 @@ static __always_inline e2k_lsr_t native_read_LSR1_reg(void)
 	};
 }
 
-static __always_inline void native_write_LSR_reg(e2k_lsr_t lsr)
-{
-	NATIVE_SET_DREG_EXC(3, lsr, lsr.word);
-}
-
-static __always_inline void native_write_LSR1_reg(e2k_lsr_t lsr1)
-{
-	NATIVE_SET_DREG_EXC(3, lsr1, lsr1.word);
-}
-
 /*
- * Read/write double-word Loop Status Register (ILCR/ILCR1)
+ * Read double-word Loop Status Register (ILCR/ILCR1)
  */
 
 static __always_inline e2k_ilcr_t native_read_ILCR_reg(void)
@@ -518,16 +476,6 @@ static __always_inline e2k_ilcr_t native_read_ILCR1_reg(void)
 	return (e2k_ilcr_t) {
 		.word = NATIVE_GET_DREG_OPEN(ilcr1)
 	};
-}
-
-static __always_inline void native_write_ILCR_reg(e2k_ilcr_t ilcr)
-{
-	NATIVE_SET_DREG_NOEXC(3, ilcr, ilcr.word);
-}
-
-static __always_inline void native_write_ILCR1_reg(e2k_ilcr_t ilcr1)
-{
-	NATIVE_SET_DREG_NOEXC(3, ilcr1, ilcr1.word);
 }
 
 /*
@@ -730,15 +678,6 @@ static __always_inline e2k_rpr_t native_read_RPR_reg(void)
 static __always_inline void native_write_RPR_reg(e2k_rpr_t rpr)
 {
 	NATIVE_SET_DREGS_EXC(3, rpr.lo, rpr.hi, rpr.lo, rpr.hi);
-}
-
-/*
- * Read/write word Base Global Register (BGR)
- */
-
-static __always_inline void native_write_SBBP_reg_value(u64 sbbp)
-{
-	NATIVE_SET_DREG_EXC(3, sbbp, sbbp);
 }
 
 /*
@@ -971,6 +910,11 @@ static __always_inline void native_write_DIBAR3_reg(u64 dibar)
 	NATIVE_SET_DREG_NOEXC(3, dibar3, dibar);
 }
 
+static __always_inline void native_write_DIBARs(u64 dibar0, u64 dibar1, u64 dibar2, u64 dibar3)
+{
+	NATIVE_SET_4_DREGS_NOEXC(3, dibar0, dibar1, dibar2, dibar3, dibar0, dibar1, dibar2, dibar3);
+}
+
 static __always_inline void native_write_DIMAR0_reg(s64 dimar)
 {
 	NATIVE_SET_DREG_NOEXC(3, dimar0, dimar);
@@ -981,6 +925,11 @@ static __always_inline void native_write_DIMAR1_reg(s64 dimar)
 	NATIVE_SET_DREG_NOEXC(3, dimar1, dimar);
 }
 
+static __always_inline void native_write_DIMAR0_DIMAR1(s64 dimar0, s64 dimar1)
+{
+	NATIVE_SET_DREGS_NOEXC(3, dimar0, dimar1, dimar0, dimar1);
+}
+
 static __always_inline void native_write_DIMAR2_reg(s64 dimar)
 {
 	NATIVE_SET_DREG_NOEXC(7, dimar2, dimar);
@@ -989,6 +938,11 @@ static __always_inline void native_write_DIMAR2_reg(s64 dimar)
 static __always_inline void native_write_DIMAR3_reg(s64 dimar)
 {
 	NATIVE_SET_DREG_NOEXC(7, dimar3, dimar);
+}
+
+static __always_inline void native_write_DIMAR2_DIMAR3(s64 dimar2, s64 dimar3)
+{
+	NATIVE_SET_DREGS_NOEXC(7, dimar2, dimar3, dimar2, dimar3);
 }
 
 /*
@@ -1248,9 +1202,5 @@ static inline instr_lts_t *find_lts_f32s(const void *ip, int n)
 	((e2k_core_mode_t) { .word = NATIVE_GET_SREG_OPEN(core_mode) })
 #define	native_write_CORE_MODE_reg(modes)	\
 		NATIVE_SET_SREG_NOEXC(3, core_mode, modes.word)
-
-#endif /*  __ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
 
 #endif /* _E2K_NATIVE_CPU_REGS_ACCESS_H_ */

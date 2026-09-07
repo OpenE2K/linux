@@ -24,6 +24,10 @@
 #define _IOMMU(_n) __IOMMU(_n)
 #define IOMMU _IOMMU(NODE)
 
+#define __MSI(_n) msi ## _n
+#define _MSI(_n) __MSI(_n)
+#define MSI _MSI(NODE)
+
 #define __PCICFG_ADDRL(_a, _n) 0x2 ## _n ## _a
 #define _PCICFG_ADDRL(_a, _n) __PCICFG_ADDRL(_a, _n)
 #define PCICFG_ADDRL(_a) _PCICFG_ADDRL(_a, NODE)
@@ -44,7 +48,12 @@
 
 		#interrupt-cells = <2>;
 	};
-
+	MSI: MSI {
+		compatible = "mcst,l-msi";
+		interrupt-parent = <&lpic>;
+		msi-controller;
+		numa-node-id = <NODE>;
+	};
 	IOMMU: iommu@NODE,380 {
 		compatible = "mcst,l-iommu";
 		REG = <NSR_ADDR(00380) 0 0x80>;
@@ -55,7 +64,6 @@
 		interrupt-parent = <&LVT>;
 		interrupts = <LVT3_INTERRUPT_VECTOR 3 0>;
 	};
-
 	pci@NODE {
 		compatible = "mcst,l-pci";
 		REG = <PCICFG_ADDR(0000000) 0 0x10000000>, /*E2S_PCICFG_AREA_PHYS_BASE*/
@@ -67,7 +75,7 @@
 
 		linux,pci-domain = <NODE>;
 		numa-node-id = <NODE>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 		/*rid-base,iommu,iommu-base,length*/
 		iommu-map = <0x0 &IOMMU 0x0 0x10000>;
@@ -90,10 +98,10 @@
 		/* reg: 00000000 00000000 dddddfff 00000000 */
 		pci@0,0 { /* PCI-Express Bridge */
 			reg = <0x00000000 0 0 0 0>;
-			interrupts =	<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
-					<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
-					<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
-					<19 IRQ_TYPE_LEVEL_HIGH>; /*PCI IRQ D*/
+			interrupts =	<16 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ A*/
+					<17 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ B*/
+					<18 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ C*/
+					<19 IRQ_TYPE_LEVEL_LOW>; /*PCI IRQ D*/
 		};
 		pci@1,0 {
 			reg = <0x00000800 0 0 0 0>;
@@ -104,10 +112,10 @@
 
 			pci@0,0 { /*PCI-to-PCI Bridge*/
 				reg = <0x00000000 0 0 0 0>;
-				interrupts =	<16 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ A*/
-						<17 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ B*/
-						<18 IRQ_TYPE_LEVEL_HIGH>, /*PCI IRQ C*/
-						<19 IRQ_TYPE_LEVEL_HIGH>; /*PCI IRQ D*/
+				interrupts =	<16 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ A*/
+						<17 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ B*/
+						<18 IRQ_TYPE_LEVEL_LOW>, /*PCI IRQ C*/
+						<19 IRQ_TYPE_LEVEL_LOW>; /*PCI IRQ D*/
 			};
 			pci@1,0 { /*Ethernet controller*/
 				reg = <0x00000800 0 0 0 0>;

@@ -425,10 +425,10 @@ if ($arch eq "e2k") {
     if ($filename =~ /iset_v3\.o|iset_v5\.o|iset_v6\.o|hv_cpu\.o/) {
         $cc =~ s/-mtune=elbrus-4c|-mtune=elbrus-8c2|-mtune=elbrus-1c\+|
             -mtune=elbrus-8c|-mtune=elbrus-12c|-mtune=elbrus-16c|
-            -mtune=elbrus-2c3|-mtune=elbrus-48c|-mtune=elbrus-8v7//x;
+            -mtune=elbrus-2c3|-mtune=elbrus-8v7//x;
         $cc =~ s/-mcpu=elbrus-4c|-mcpu=elbrus-8c2|-mcpu=elbrus-1c\+|
             -mcpu=elbrus-8c|-mcpu=elbrus-12c|-mcpu=elbrus-16c|
-            -mcpu=elbrus-2c3|-mcpu=elbrus-48c|-mcpu=elbrus-8v7//x;
+            -mcpu=elbrus-2c3|-mcpu=elbrus-8v7//x;
     }
 
     if ($filename eq "iset_v3.o") {

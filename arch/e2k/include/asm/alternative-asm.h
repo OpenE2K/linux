@@ -6,7 +6,9 @@
 #ifndef _ASM_E2K_ALTERNATIVE_ASM_H
 #define _ASM_E2K_ALTERNATIVE_ASM_H
 
-#ifdef __ASSEMBLY__
+#ifndef __ASSEMBLY__
+# error This version of alternatives.h is intended for .S files
+#endif
 
 /*
  * Check the length of an instruction sequence, must be a multiple of 8.
@@ -43,7 +45,7 @@
  */
 .macro alt_pad bytes
 	.if ( \bytes >= 576 )
-		.error Expand with NOPs manually; use of ibranch here is not recommended (see bug 142105)
+		.error Expand with NOPs manually; use of ibranch here is not recommended (see CPU_HWBUG_CODE_PLACEMENT)
 	.else
 		alt_pad_64bytes \bytes, 512
 		alt_pad_64bytes \bytes, 448
@@ -205,7 +207,5 @@ NONTARGET_LABEL(775)	.pushsection .altinstructions,"a"
 	alt_entry 773b, 775b, 770b, 771b, feature1 ; \
 	alt_entry 773b, 775b, 771b, 772b, feature2 ; \
 	.popsection
-
-#endif	/*  __ASSEMBLY__  */
 
 #endif /* _ASM_E2K_ALTERNATIVE_ASM_H */

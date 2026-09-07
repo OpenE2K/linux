@@ -554,7 +554,8 @@ int hantro_map_internal_address(struct file *filp, struct vm_area_struct *vma)
 static int hantro_drm_probe(struct platform_device *pdev)
 {
 #ifdef USE_DTB_PROBE
-	struct device *dev = &pdev->dev;
+	/*rm 38042: x86 bind only pci devices */
+	struct device *dev = &pdev->dev->parent;
 	int result = 0;
 	int sliceidx = -1;
 
@@ -1150,8 +1151,8 @@ int __init hantro_init(void)
 #endif //USE_DTB_PROBE
 
 #ifndef HAS_VCMD
-	if (get_slicenumber() == 0)
-		addslice(hantro_dev.drm_dev->dev, -1,
+	if (get_slicenumber() == 0) /*rm 38042: x86 bind only pci devices */
+		addslice(hantro_dev.drm_dev->dev->parent, -1,
 			 0); //for PC, no HW, create a default dev
 	for (i = 0; i < get_slicenumber(); i++) {
 		struct slice_info *pslice = getslicenode_ininit(i);
@@ -1195,12 +1196,12 @@ static struct pci_driver hantro_pci_driver = {
 	.remove     = hantro_remove,
 };
 
-void __exit hantro_cleanup(void)
+static void __exit hantro_cleanup(void)
 {
 	pci_unregister_driver(&hantro_pci_driver);
 }
 
-int __init hantro_init(void)
+static int __init hantro_init(void)
 {
 	int status = pci_register_driver(&hantro_pci_driver);
 

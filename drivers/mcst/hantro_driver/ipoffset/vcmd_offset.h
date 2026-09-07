@@ -55,9 +55,12 @@
 */
 
 #define VCMD_SLICE_NUM 1 //always using VCMD_SLICE_NUM equal to 1 if you don't specify different slice in UMD source code
+#if 0
 struct vcmd_config vcmd_core_array[VCMD_SLICE_NUM][2] = {
     {
 		{ 0x000000, 30*4, -1, 2, 0x800, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, { 0x400, 0xFFFF } },
        //{ 0x500000, 30*4, -1, 2, 0x800, 0xFFFF, 0xFFFF, 0x1400, 0xFFFF, { 0xFFFF, 0xFFFF } }
     },
 };
+#endif
+

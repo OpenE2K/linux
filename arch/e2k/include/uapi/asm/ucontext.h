@@ -6,6 +6,13 @@
 #ifndef _UAPI_E2K_UCONTEXT_H
 #define _UAPI_E2K_UCONTEXT_H
 
+/*
+ * If signal handler sets this when changing return IP in
+ * ucontext.uc_mcontext.cr0_hi then sys_sigreturn will handle
+ * remaining trap cellar entries.
+ */
+#define UC_HANDLE_SIGRETURN_CELLAR	1
+
 struct ucontext {
 	unsigned long	  uc_flags;
 	struct ucontext  *uc_link;

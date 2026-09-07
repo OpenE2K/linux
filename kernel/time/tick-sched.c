@@ -26,9 +26,6 @@
 #include <linux/posix-timers.h>
 #include <linux/context_tracking.h>
 #include <linux/mm.h>
-#ifdef CONFIG_MCST_RT
-#include <linux/mcst_rt.h>
-#endif 
 
 #include <asm/irq_regs.h>
 
@@ -1065,11 +1062,6 @@ static bool report_idle_softirq(void)
 
 static bool can_stop_idle_tick(int cpu, struct tick_sched *ts)
 {
-#ifdef CONFIG_MCST_RT
-	if (rts_act_mask & RTS_HZ_RT)
-		/* can not stop idle */
-		return false;
-#endif
 
 	/*
 	 * If this CPU is offline and it is the one which updates
@@ -1506,11 +1498,7 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 	 * Do not call, when we are not in irq context and have
 	 * no valid regs pointer
 	 */
-#ifdef CONFIG_MCST_RT
-	if (hardirq_count() && regs)	/* rt bug if set_irq_regs wasn't made */
-#else
 	if (regs)
-#endif
 		tick_sched_handle(ts, regs);
 	else
 		ts->next_tick = 0;

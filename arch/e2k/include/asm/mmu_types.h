@@ -12,8 +12,6 @@
 #include <asm/mas.h>
 #include <uapi/asm/iset_ver.h>
 
-#ifndef	__ASSEMBLY__
-
 /*
  * These are used to enable C type-checking
  */
@@ -41,8 +39,6 @@ typedef struct { pgprotval_t pgprot; } pgprot_t;
 #define __pmd(x)	((pmd_t) { (x) } )
 #define __pgd(x)	((pgd_t) { (x) } )
 #define __pgprot(x)	((pgprot_t) { (x) } )
-
-#endif /* ! __ASSEMBLY__ */
 
 /* one page table occupies one 4K page and has 512 entries */
 #define	PT_ENTRIES_SHIFT	3	/* 8 bytes, 3 bits */
@@ -116,8 +112,6 @@ typedef struct { pgprotval_t pgprot; } pgprot_t;
 
 /* Additional trap cellar fields are located at this offset */
 #define TC_EXT_OFFSET	512
-
-#ifndef	__ASSEMBLY__
 
 /*
  * Hardware MMUs page tables have some differences from one ISET to other
@@ -239,6 +233,7 @@ typedef struct pt_struct {
 	pgprotval_t	ptd_kernel_prot; /* kernel PT directories protection */
 	pgprotval_t	ptd_user_prot;	/* user PT directories protection */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* interface function to get/set some protections */
 	unsigned int (*get_pte_val_memory_type)(pgprot_t pte_val);
 	pgprot_t (*set_pte_val_memory_type)(pgprot_t pte_val,
@@ -246,6 +241,7 @@ typedef struct pt_struct {
 	unsigned int (*get_pte_val_memory_type_rule)(pgprot_t pte_val);
 	pgprot_t (*set_pte_val_memory_type_rule)(pgprot_t pte_val,
 						 unsigned int mtcr);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 			/* level #0 is always physical page */
 	pt_level_t	levels[ARCH_MAX_PT_LEVELS + 1];
@@ -320,10 +316,12 @@ static inline e2k_addr_t get_pt_level_page_offset(const pt_level_t *pt_level)
 	return pt_level->page_offset;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int get_ptrs_per_pt_level(const pt_level_t *pt_level)
 {
 	return pt_level->ptrs_per_pt;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline const pt_level_t *
 get_pt_struct_level_on_id(const pt_struct_t *pt_struct, int level_id)
@@ -371,8 +369,6 @@ typedef union {
  * (16 since e8c2) */
 #define E2K_MAX_FORMAT 16
 
-#endif /* ! __ASSEMBLY__ */
-
 #define	LDST_INVALID_FMT	0x00UL	/* invalid format value */
 #define	LDST_BYTE_FMT		0x01UL	/* load/store byte (8 bits) */
 #define	LDST_HALF_FMT		0x02UL	/* load/store halfword (16 bits) */
@@ -401,7 +397,6 @@ typedef union {
 #define TC_FMT_DWORD_QP		0x1fUL	/* Single 8 position, tag as for QP */
 
 
-#ifndef	__ASSEMBLY__
 static inline bool tc_fmt_has_valid_mask(int fmt)
 {
 	return fmt == LDST_QP_FMT || fmt == TC_FMT_QWORD_QP || fmt == TC_FMT_DWORD_QP;
@@ -503,8 +498,7 @@ typedef union {
 	e2k_dreg_t;
 } tc_cond_t;
 
-#define TC_COND_FMT_FULL(cond) ((cond).fmt | ((cond).fmtc << 3))
-
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * A one bit of the fault type field of condition word is used by KVM
  * to mark fault injected by host for guest kernel
@@ -618,106 +612,7 @@ static inline bool tc_test_is_as_kvm_recovery_user(tc_cond_t cond)
 	injected = tc_test_is_kvm_fault_injected(cond);
 	return (injected) ? tc_test_is_kvm_recovery_user(cond) : false;
 }
-
-static inline bool tc_cond_is_special_mmu_aau(tc_cond_t cond)
-{
-	unsigned int mas = cond.mas;
-	int chan = cond.chan;
-	int store = cond.store;
-	int spec_mode = cond.spec;
-
-	if (unlikely(is_mas_special_mmu_aau(mas) &&
-		     (store || !store && !spec_mode && (chan == 1 || chan == 3))))
-		return true;
-
-	return false;
-}
-
-static inline bool tc_cond_is_big_endian(tc_cond_t cond)
-{
-	if (tc_cond_is_special_mmu_aau(cond) || cond.root)
-		return false;
-
-	/* MASF1 has been handled so this is MASF{2-4} */
-	return !!(cond.mas & MAS_BIGENDIAN);
-}
-
-static inline bool tc_cond_is_check_ld(tc_cond_t cond)
-{
-	unsigned int mas = cond.mas;
-	int store = cond.store;
-	int spec_mode = cond.spec;
-
-	return is_mas_check(mas) && !spec_mode && !store;
-}
-
-static inline bool tc_cond_is_check_unlock_ld(tc_cond_t cond)
-{
-	unsigned int mas = cond.mas;
-	int store = cond.store;
-	int spec_mode = cond.spec;
-
-	return is_mas_check_unlock(mas) && !spec_mode && !store;
-}
-
-static inline bool tc_cond_is_lock_check_ld(tc_cond_t cond)
-{
-	unsigned int mas = cond.mas;
-	int store = cond.store;
-	int spec_mode = cond.spec;
-
-	return is_mas_lock_check(mas) && spec_mode && !store;
-}
-
-static inline bool tc_cond_is_spec_lock_check_ld(tc_cond_t cond)
-{
-	unsigned int mas = cond.mas;
-	int store = cond.store;
-	int spec_mode = cond.spec;
-
-	return is_mas_spec_lock_check(mas) && spec_mode && !store;
-}
-
-static inline bool tc_cond_is_vector_aau(tc_cond_t cond)
-{
-	/* We use bitwise OR for performance */
-	return !(cond.scal | cond.sru | cond.clw);
-}
-
-/*
- * Caveat: for qword accesses this will return 16 bytes for
- * the first entry in trap cellar and 8 bytes for the second one.
- */
-static inline int tc_cond_to_size(tc_cond_t cond)
-{
-	const int fmt = TC_COND_FMT_FULL(cond);
-	int size;
-
-	if (fmt == LDST_QP_FMT || fmt == TC_FMT_QPWORD_Q) {
-		size = 16;
-	} else if (fmt == LDST_QWORD_FMT || fmt == TC_FMT_QWORD_QP) {
-		if (cond.chan == 0 || cond.chan == 2)
-			size = 16;
-		else
-			size = 8;
-	} else if (fmt == TC_FMT_DWORD_Q || fmt == TC_FMT_DWORD_QP) {
-		size = 8;
-	} else if (tc_test_is_as_kvm_injected(cond)) {
-		/* format is fake value, set size to 1 byte */
-		size = 1;
-	} else {
-		size = 1 << ((fmt & 0x7) - 1);
-	}
-
-	return size;
-}
-
-static inline bool tc_cond_check_reserved_fmt(tc_cond_t condition)
-{
-	const int fmt = TC_COND_FMT_FULL(condition);
-
-	return tc_fmt_check_reserved(fmt);
-}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 typedef union {
 	struct {
@@ -732,76 +627,15 @@ typedef union {
 	e2k_dreg_t;
 } tc_mask_t;
 
-static inline int ldst_chan_opc_to_chan_num(int chan_opc)
-{
-	switch (chan_opc) {
-	case 0:
-		return 0;
-	case 1:
-		return 2;
-	case 2:
-		return 3;
-	case 3:
-		return 5;
-	default:
-		return -1;
-	}
-}
-
-static inline int ldst_chan_num_to_chan_opc(int chan_opc)
-{
-	switch (chan_opc) {
-	case 0:
-		return 0;
-	case 2:
-		return 1;
-	case 3:
-		return 2;
-	case 5:
-		return 3;
-	default:
-		return -1;
-	}
-}
-
-static inline bool
-tc_cond_load_has_store_semantics(tc_cond_t condition, unsigned iset_ver)
-{
-	const unsigned mas = condition.mas;
-	const unsigned mod = (mas & MAS_MOD_MASK) >> MAS_MOD_SHIFT;
-	const unsigned chan = condition.chan;
-	const bool root = condition.root;
-	const bool spec = condition.spec;
-
-	if (chan != 0)
-		return false;
-	if (spec)
-		return false;
-	return mod == _MAS_MODE_LOAD_OP_WAIT ||
-		root && ((mas & MAS_TRAP_ON_LD_ST_MASK) == MAS_LOAD_SEC_TRAP_ON_LD_ST ||
-			 mas == MAS_SEC_SLT) ||
-		iset_ver >= E2K_ISET_V5 && mod == _MAS_MODE_LOAD_OP_WAIT_1 &&
-				tc_cond_to_size(condition) == 16;
-}
-
-static inline bool tc_cond_is_store(tc_cond_t condition, unsigned iset_ver)
-{
-	const unsigned mas = condition.mas;
-
-	if (condition.store && (mas != MAS_DCACHE_LINE_FLUSH))
-		return true;
-	return tc_cond_load_has_store_semantics(condition, iset_ver);
-}
-
 /*
  * Trap cellar as it is in hardware plus additional fields
  */
 typedef struct {
-	unsigned long	address;
-	unsigned long	data;
-	tc_cond_t	condition;
-	unsigned long	data_ext;
-	tc_mask_t	mask;
+	u64 address;
+	volatile u64 data;
+	tc_cond_t condition;
+	volatile u64 data_ext;
+	tc_mask_t mask;
 
 	union {
 		struct {
@@ -881,105 +715,129 @@ static inline bool is_hw_access_page_fault(trap_cellar_t *tcellar)
 }
 
 
-#endif /* ! __ASSEMBLY__ */
-
 /*
- * Second operand of Load and Store recovery instruction (LDRD & STRD):
- *
- *	operation code and MAS flags
+ * Second operand of Load and Store recovery instruction (LDRD, STRD, LDRQP, STRQP)
  */
-
-#define	LDST_REC_OPC_INDEX_SHIFT	 0
-#define	LDST_REC_OPC_INDEX_SIZE		32	/* [31- 0] byte index */
-#define	LDST_REC_OPC_MAS_SHIFT		32
-#define	LDST_REC_OPC_MAS_SIZE		 7	/* [38-32] MAS */
-#define	LDST_REC_OPC_PROT_SHIFT		39
-#define	LDST_REC_OPC_PROT_SIZE		 1	/*    [39] protected access */
-#define	LDST_REC_OPC_FMT_SHIFT		40
-#define	LDST_REC_OPC_FMT_SIZE		 3	/* [42-40] format of access */
-#define	LDST_REC_OPC_ROOT_SHIFT		43
-#define	LDST_REC_OPC_ROOT_SIZE		 1	/*    [43] virtual space */
-						/*	   type flag */
-#define	LDST_REC_OPC_RG_SHIFT		44
-#define	LDST_REC_OPC_RG_SIZE		 8	/* [51-44] physical address */
-						/*	   of an NR (in terms */
-						/*	   of single-NR) used */
-						/*	   for handling */
-						/*	   memory locks */
-						/*	   conflicts */
-#define	LDST_REC_OPC_FMT_H_SHIFT	52
-#define	LDST_REC_OPC_FMT_H_SIZE		1	/* [52] format of access */
-#define	LDST_REC_OPC_MODE_H_SHIFT	53
-#define	LDST_REC_OPC_MODE_H_SIZE	1	/* [53] mode (hi) of access */
-#define	LDST_REC_OPC_UNUSED_SHIFT	54
-#define	LDST_REC_OPC_UNUZED_SIZE	2	/* [55-54] unused bits */
-
-#define LDST_REC_OPC_MASK_SHIFT		56
-#define LDST_REC_OPC_MASK_SIZE		8
-
-#define	LDST_REC_OPC_PROT		(1UL << LDST_REC_OPC_PROT_SHIFT)
-#define	LDST_REC_OPC_ROOT		(1UL << LDST_REC_OPC_ROOT_SHIFT)
-#define	LDST_REC_OPC_MODE_H		(1UL << LDST_REC_OPC_MODE_H_SHIFT)
-#define	LDST_REC_OPC_MODE_MASK		\
-		(LDST_REC_OPC_PROT | LDST_REC_OPC_ROOT | LDST_REC_OPC_MODE_H)
-
-#define	LDST_REC_OPC_GET_MODE(ldst_rec_opc)	\
-		((((ldst_rec_opc) & LDST_REC_OPC_PROT) >> \
-					(LDST_REC_OPC_PROT_SHIFT - 0)) | \
-		(((ldst_rec_opc) & LDST_REC_OPC_ROOT) >> \
-					(LDST_REC_OPC_ROOT_SHIFT - 1)) | \
-		(((ldst_rec_opc) & LDST_REC_OPC_MODE_H) >> \
-					(LDST_REC_OPC_MODE_H_SHIFT - 2)))
-#define	LDST_REC_OPC_SET_MODE(ldst_rec_opc, mode)	\
-		(((ldst_rec_opc) & ~LDST_REC_OPC_MODE_MASK) | \
-			(((mode) & 0x01) << (LDST_REC_OPC_PROT_SHIFT - 0)) | \
-			(((mode) & 0x02) << (LDST_REC_OPC_ROOT_SHIFT - 1)) | \
-			(((mode) & 0x04) << (LDST_REC_OPC_MODE_H_SHIFT - 2)))
-
-#ifndef	__ASSEMBLY__
-typedef union {
+typedef union ldst_rec_op {
 	struct {
 		u64 index	: 32;	/* [31- 0] */
 		u64 mas		: 7;	/* [38-32] */
 		u64 prot	: 1;	/*    [39] */
 		u64 fmt		: 3;	/* [42-40] */
 		u64 root	: 1;	/*    [43] */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		u64		: 7;	/* [50-44]; should be [51-44] */
 		/* software bit to mark privileged user space access */
 		u64 pm		: 1;	/* [51] */
+#else
+		u64		: 8;	/* [51-44] */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		u64 fmt_h	: 1;	/* [52] */
 		u64 mode_h	: 1;	/* [53] */
-		u64		: 1;	/* [54] */
+		u64 spec	: 1;	/* [54] CPU_FEAT_SPEC_PROT_LDRD */
 		u64 dcp		: 1;	/* [55] */
 		u64 mask	: 8;	/* [63-56] */
 	};
 	unsigned long word;
 } ldst_rec_op_t;
 
-static inline ldst_rec_op_t ldst_rec_dword(void)
+static __always_inline e2k_mas_t ldst_rec_get_mas(ldst_rec_op_t opcode)
 {
-	return (ldst_rec_op_t) { .fmt = LDST_DWORD_FMT };
+	return (e2k_mas_t) { .word = opcode.mas };
 }
 
-#endif /* ! __ASSEMBLY__ */
+static __always_inline ldst_rec_op_t ldst_rec_byte(void)
+{
+	return (ldst_rec_op_t) { .fmt = LDST_BYTE_FMT };
+}
 
-#define LDST_REC_OPC_BYPASS_L1		(MAS_BYPASS_L1_CACHE << \
-							LDST_REC_OPC_MAS_SHIFT)
-#define LDST_REC_OPC_BYPASS_CACHE	(MAS_BYPASS_ALL_CACHES << \
-							LDST_REC_OPC_MAS_SHIFT)
+static __always_inline ldst_rec_op_t ldst_rec_word(void)
+{
+	return (ldst_rec_op_t) { .fmt = LDST_WORD_FMT };
+}
 
-#define	TAGGED_MEM_LOAD_REC_OPC	(0UL | \
-			LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT | \
-			MAS_FILL_OPERATION << LDST_REC_OPC_MAS_SHIFT)
-#define	TAGGED_MEM_LOAD_REC_OPC_W (0UL | \
-			LDST_WORD_FMT << LDST_REC_OPC_FMT_SHIFT | \
-			MAS_FILL_OPERATION << LDST_REC_OPC_MAS_SHIFT)
-#define	TAGGED_MEM_STORE_REC_OPC (LDST_QWORD_FMT << LDST_REC_OPC_FMT_SHIFT)
-#define	TAGGED_MEM_STORE_REC_OPC_W (LDST_WORD_FMT << LDST_REC_OPC_FMT_SHIFT)
-#define	MEM_STORE_REC_OPC_B (LDST_BYTE_FMT << LDST_REC_OPC_FMT_SHIFT)
+static __always_inline ldst_rec_op_t ldst_rec_dword_bypass(int cache_bypass)
+{
+	return (ldst_rec_op_t) {
+		.fmt = LDST_DWORD_FMT,
+		.mas = MAS_NORMAL(cache_bypass, 0),
+	};
+}
 
+static __always_inline ldst_rec_op_t ldst_rec_dword(void)
+{
+	return ldst_rec_dword_bypass(CACHE_BYPASS_NONE);
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_qword(void)
+{
+	return (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_disabled_translation(int cache_bypass)
+{
+	return (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_DISABLED_TRANSLATION_BYPASS(cache_bypass),
+	};
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_color_load(int cache_bypass)
+{
+	return (ldst_rec_op_t) {
+		.fmt_h = LDST_MCOLOR_FMT_H,
+		.mas = MAS_NORMAL(cache_bypass, 0),
+	};
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_color_store(int cache_bypass)
+{
+	return (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.dcp = 1,
+		.mas = MAS_NORMAL(cache_bypass, 0),
+	};
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_tagged_load_bypass(int cache_bypass)
+{
+	return (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(cache_bypass, 0),
+	};
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_tagged_load(void)
+{
+	return ldst_rec_tagged_load_bypass(CACHE_BYPASS_NONE);
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_tagged_store_bypass(int cache_bypass)
+{
+	return (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_NORMAL(cache_bypass, 0),
+	};
+}
+
+static __always_inline ldst_rec_op_t ldst_rec_tagged_store(void)
+{
+	return ldst_rec_tagged_store_bypass(CACHE_BYPASS_NONE);
+}
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#define	TAGGED_MEM_LOAD_REC_OPC_W ((ldst_rec_op_t) { \
+	.fmt = LDST_WORD_FMT, \
+	.mas = MAS_FILL_OPERATION(CACHE_BYPASS_NONE, 0), \
+}).word
+
+#define	TAGGED_MEM_STORE_REC_OPC_W	((ldst_rec_op_t) { .fmt = LDST_WORD_FMT }).word
+#define	MEM_STORE_REC_OPC_B		((ldst_rec_op_t) { .fmt = LDST_BYTE_FMT } ).word
+
+#define	LDST_REC_OPC_RG_SHIFT		44
 #define	LDST_PREFETCH_FLAG_SET(flag)	((flag) << LDST_REC_OPC_RG_SHIFT)
 #define	LDST_PREFETCH_FLAG_GET(strd)	(((strd) >> LDST_REC_OPC_RG_SHIFT) & 0x1UL)
 #define	LDST_PREFETCH_FLAG_CLEAR(strd)	((strd) & ~LDST_PREFETCH_FLAG_SET(1UL))
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif /* _E2K_MMU_TYPES_H_ */

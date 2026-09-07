@@ -82,34 +82,6 @@ config FB_MGA3D
 	depends on PCI && FB
 	default m
 
-config FB_LYNXFB
-	tristate "SMI lynx sm750/718/712/722/502 display support"
-	depends on FB && PCI
-	select FB_CFB_IMAGEBLIT
-	select FB_CFB_FILLRECT
-	select FB_CFB_COPYAREA
-	default y
-	help
-	  This driver supports graphic board with the siliconmotion
-	  sm750/sm718/sm712/sm722/sm502. Say Y if you have such a
-	  graphic board.
-	  To compile this driver as a module, choose M here: the
-	  module will be called lynxfb.
-
-config FB_LYNXFB_DOMAINS
-    bool "SMI lynx multiple frame buffers (fb domains)"
-    depends on FB && PCI && FB_LYNXFB
-    select CONFIG_MCST_PCI_DOMAINS
-    select CONFIG_IOHUB_DOMAINS
-    default y
-    help
-      This option implements support for multiple lynx frame buffers
-      for sm750/sm718/sm712/sm722/sm502. Say Y if you have NUMA with
-      multiple pci domains and VGA monitor bound to each domain.
-      Images will be bound to different devices but configured
-      by common kernel command line options (same as existant).
-
-
 endif # HAS_IOMEM
 
 if VT

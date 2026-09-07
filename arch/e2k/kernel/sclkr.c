@@ -752,12 +752,13 @@ static struct notifier_block sclkr_reboot_notifier = {
 
 static int __init sclkr_timer_of_register(struct device_node *np)
 {
-	u32 freq;
+	u32 freq, cur_freq = read_SCLKM1_reg().div;
 
 	/* Get clock frequency if present */
 	if (!of_property_read_u32(np, "clock-frequency", &freq)) {
 		basic_freq_hz = freq;
-		pr_info("sclkr frequency set to %u.%04u MHz from device tree.\n",
+		pr_info("Current sclkr frequency= %u.%04u MHz. Set to %u.%04u MHz from device tree.\n",
+				cur_freq / 1000000, cur_freq % 1000000,
 				basic_freq_hz / 1000000, basic_freq_hz % 1000000);
 	}
 
@@ -772,6 +773,8 @@ static int __init sclkr_timer_of_register(struct device_node *np)
 		break;
 	case SCLKR_NO:
 		sclkr_mode = SCLKR_NO;
+		break;
+	default:
 		break;
 	}
 

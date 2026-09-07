@@ -74,14 +74,6 @@ static const struct e2k_cache_info e2k_caches[] = {
 		CACHE_READ_ALLOCATE | CACHE_WRITE_THROUGH },
 	{ IDR_E2C3_MDL, 2, CACHE_TYPE_UNIFIED, 1, 4, 4, 2 * 1024 * 1024, 64,
 		CACHE_READ_ALLOCATE | CACHE_WRITE_ALLOCATE | CACHE_WRITE_BACK },
-	{ IDR_E48C_MDL, 1, CACHE_TYPE_INST, 1, 4, 1, 128 * 1024, 256,
-		CACHE_READ_ALLOCATE | CACHE_WRITE_THROUGH },
-	{ IDR_E48C_MDL, 1, CACHE_TYPE_DATA, 1, 4, 1, 64 * 1024, 32,
-		CACHE_READ_ALLOCATE | CACHE_WRITE_THROUGH },
-	{ IDR_E48C_MDL, 2, CACHE_TYPE_UNIFIED, 1, 4, 4, 1024 * 1024, 64,
-		CACHE_READ_ALLOCATE | CACHE_WRITE_ALLOCATE | CACHE_WRITE_BACK },
-	{ IDR_E48C_MDL, 3, CACHE_TYPE_UNIFIED, 0, 16, 16, 48 * 1024 * 1024, 64,
-		CACHE_READ_ALLOCATE | CACHE_WRITE_ALLOCATE | CACHE_WRITE_BACK },
 	{ IDR_E8V7_MDL, 1, CACHE_TYPE_INST, 1, 4, 1, 128 * 1024, 256,
 		CACHE_READ_ALLOCATE | CACHE_WRITE_THROUGH },
 	{ IDR_E8V7_MDL, 1, CACHE_TYPE_DATA, 1, 4, 1, 64 * 1024, 32,
@@ -179,28 +171,6 @@ static const char * const cache_type_string[] = {
 	"",
 	"Unified",
 };
-
-u64 cacheinfo_get_l1d_line_size(void)
-{
-	struct cpu_cacheinfo *this_cpu_ci;
-	struct cacheinfo *cache;
-	int idx;
-
-	this_cpu_ci = get_cpu_cacheinfo(cpumask_any(cpu_online_mask));
-	for (idx = 0; idx < this_cpu_ci->num_leaves; idx++) {
-		cache = this_cpu_ci->info_list + idx;
-		if (cache->level != 1 ||
-				cache->type != CACHE_TYPE_DATA &&
-				cache->type != CACHE_TYPE_UNIFIED)
-			continue;
-
-		return cache->coherency_line_size;
-	}
-
-	WARN_ON_ONCE(system_state == SYSTEM_RUNNING);
-
-	return 32;
-}
 
 void show_cacheinfo(struct seq_file *m)
 {

@@ -70,69 +70,79 @@ static enum getsp_action get_getsp_16(u16 *value, unsigned long address,
 
 static enum getsp_action parse_getsp_literal_operand(e2k_addr_t trap_ip,
 						     instr_hs_t hs, instr_als_t als0,
-						     int *incr, void __user **fault_addr)
+						     s64 *incr, void __user **fault_addr)
 {
-	instr_syl_t *lts;
-	int lts_num, lts_mask = 0, lts_shift = 0;
-	bool lts_sign_ext = false;
+	unsigned long lts;
+	int lts_num;
 	enum getsp_action ret;
 
-	lts_num = als0.alf2.src2 & INSTR_SRC2_LTS_NUM_MASK;
+	lts_num = AW(als0.alf2.src2) & INSTR_SRC2_LTS_NUM_MASK;
+	lts = (unsigned long) &E2K_GET_INSTR_SYL(trap_ip,
+			(hs.lng + 1) * 2 - hs.pl - hs.cd - lts_num - 1);
 
-	if ((als0.alf2.src2 & INSTR_SRC2_BIT_MASK) == INSTR_SRC2_16BIT_VALUE) {
-		WARN_ON_ONCE(lts_num > 1);
-		if (als0.alf2.src2 & INSTR_SRC2_LTS_SHIFT_MASK) {
-			lts_shift = INSTR_LTS_16BIT_SHIFT;
-			lts_mask = INSTR_LTS_16BIT_SHIFT_MASK;
-			lts_sign_ext = false;
-		} else {
-			lts_shift = INSTR_LTS_16BIT_NOSHIFT;
-			lts_mask = INSTR_LTS_16BIT_NOSHIFT_MASK;
-			lts_sign_ext = true;
-		}
-	} else if ((als0.alf2.src2 & INSTR_SRC2_BIT_MASK) == INSTR_SRC2_32BIT_VALUE) {
-		lts_mask = INSTR_LTS_32BIT_MASK;
-		lts_shift = INSTR_LTS_32BIT_SHIFT;
-		lts_sign_ext = false;
+	if (instr_src2_is_lts16(als0.alf2.src2)) {
+		if (lts_num > 1)
+			return GETSP_OP_FAIL;
+
+		if (AW(als0.alf2.src2) & INSTR_SRC2_LTS_SHIFT_MASK)
+			lts += 2;
+
+		s16 simm16;
+		ret = get_getsp_16((u16 *) &simm16, lts, fault_addr);
+		if (ret)
+			return ret;
+
+		*incr = (s64) simm16;
+	} else if (instr_src2_is_lts32(als0.alf2.src2)) {
+		s32 simm32;
+		ret = get_getsp_32((u32 *) &simm32, lts, fault_addr);
+		if (ret)
+			return ret;
+
+		*incr = (s64) simm32;
+	} else if (instr_src2_is_lts64(als0.alf2.src2)) {
+		u32 lo, hi;
+
+		if (lts_num > 2)
+			return GETSP_OP_FAIL;
+
+		ret = get_getsp_32(&lo, lts, fault_addr);
+		if (ret)
+			return ret;
+		ret = get_getsp_32(&hi, lts - 4, fault_addr);
+		if (ret)
+			return ret;
+
+		*incr = (u64) lo | ((u64) hi << 32);
 	} else {
 		DebugUS("not known literal operand\n");
 		return GETSP_OP_FAIL;
 	}
 
-	lts = (instr_syl_t *)
-		&E2K_GET_INSTR_SYL(trap_ip, (hs.lng + 1) * 2 - hs.pl - hs.cd - lts_num - 1);
-	ret = get_getsp_32((u32 *) incr, (unsigned long) lts, fault_addr);
-	if (ret)
-		return ret;
-
-	DebugUS("LTS%d=0x%x lng=%d pl=%d cd=%d lts_shift=0x%x lts_mask=0x%x\n",
-		lts_num, *incr, hs.lng, hs.pl, hs.cd, lts_shift, lts_mask);
-
-	*incr = ((s32) ((*incr) & lts_mask)) >> lts_shift;
-	if (lts_sign_ext)
-		*incr = (((s32) *incr) << INSTR_LTS_16BIT_SHIFT) >>
-						INSTR_LTS_16BIT_SHIFT;
+	DebugUS("LTS%d=0x%llx lng=%d pl=%d cd=%d\n", lts_num, *incr, hs.lng, hs.pl, hs.cd);
 
 	return 0;
 }
 
-static enum getsp_action get_getsp_greg(int greg_num, int *greg)
+static enum getsp_action get_getsp_greg(int greg_num, s64 *greg, bool use_dword)
 {
-	u32 gr, tag;
+	u64 gr;
+	u8 tag;
 
 	switch (greg_num) {
 	case LOCAL_GREGS_START ... (LOCAL_GREGS_START + LOCAL_GREGS_NUM - 1):
-		NATIVE_LOAD_VAL_AND_TAGW(&current->thread.u_gregs.g[greg_num -
-						LOCAL_GREGS_START].base, gr, tag);
+		load_value_and_tagd(
+			(const volatile void *)&current->thread.u_gregs.g[greg_num - LOCAL_GREGS_START].base,
+			&gr, &tag);
 		break;
 	default:
 		DebugUS("Invalid greg_num %d\n", greg_num);
 		return GETSP_OP_FAIL;
 	}
 
-	if (tag) {
-		DebugUS("Invalid tag 0x%x for greg num %d with greg val %u\n",
-			tag, greg_num, gr);
+	if (use_dword && tag || !use_dword && (tag & 3)) {
+		DebugUS("Invalid tag 0x%hhx for greg num %d with greg val %llu, dword=%d\n",
+			tag, greg_num, gr, (int) use_dword);
 		return GETSP_OP_FAIL;
 	}
 
@@ -141,14 +151,14 @@ static enum getsp_action get_getsp_greg(int greg_num, int *greg)
 	return 0;
 }
 
-static enum getsp_action parse_getsp_greg_operand(instr_als_t als0, int *incr)
+static enum getsp_action parse_getsp_greg_operand(instr_als_t als0, s64 *incr, bool use_dword)
 {
 	int		greg_num;
 	e2k_bgr_t	bgr, oldbgr;
 	unsigned long	flags;
 	enum getsp_action ret;
 
-	greg_num = als0.alf2.src2 & INSTR_SRC_DST_GREG_NUM_MASK;
+	greg_num = AW(als0.alf2.src2) & INSTR_SRC_DST_GREG_NUM_MASK;
 
 	raw_local_irq_save(flags);
 
@@ -157,8 +167,8 @@ static enum getsp_action parse_getsp_greg_operand(instr_als_t als0, int *incr)
 	bgr.val = E2K_INITIAL_BGR_VAL;
 	write_BGR_reg(bgr);
 
-	if ((ret = get_getsp_greg(greg_num, incr)))
-		DebugUS("greg num %d, greg val 0x%x\n", greg_num, *incr);
+	if ((ret = get_getsp_greg(greg_num, incr, use_dword)))
+		DebugUS("greg num %d, greg val 0x%llx\n", greg_num, *incr);
 
 	write_BGR_reg(oldbgr);
 
@@ -168,9 +178,9 @@ static enum getsp_action parse_getsp_greg_operand(instr_als_t als0, int *incr)
 }
 
 static enum getsp_action parse_getsp_reg_operand(instr_src_t src2,
-		 const struct pt_regs *regs, int *incr, void __user **fault_addr)
+		 const struct pt_regs *regs, s64 *incr, void __user **fault_addr)
 {
-	unsigned long ps_top = PSP_PTR(regs->stacks.psp);
+	unsigned long ps_top = (unsigned long)U_PSP_PTR(regs->stacks.psp);
 	unsigned long u_ps_top = ps_top - PSHTP_MEM_INDEX(regs->stacks.pshtp);
 	int ind_d, offset_d;
 	unsigned long raddr, flags;
@@ -195,10 +205,10 @@ static enum getsp_action parse_getsp_reg_operand(instr_src_t src2,
 		COPY_STACKS_TO_MEMORY();
 		raw_all_irq_restore(flags);
 
-		*incr = *(int *) raddr;
+		*incr = *(s64 *) raddr;
 	} else {
-		if (__get_user(*incr, (int __user *) raddr)) {
-			*fault_addr = (int __user *) raddr;
+		if (__get_user(*incr, (s64 __user *) raddr)) {
+			*fault_addr = (s64 __user *) raddr;
 			return GETSP_OP_SIGSEGV;
 		}
 	}
@@ -206,13 +216,12 @@ static enum getsp_action parse_getsp_reg_operand(instr_src_t src2,
 	return 0;
 }
 
-enum getsp_action parse_getsp_operation(const struct pt_regs *regs, int *incr,
+enum getsp_action parse_getsp_operation(const struct pt_regs *regs, s64 *incr,
 					void __user **fault_addr)
 {
 	instr_hs_t hs;
-	instr_als_t als0 = { .word = 0 };
+	instr_als_t als0;
 	instr_ales_t ales0 = { .word = 0 };
-	instr_src_t src2;
 	e2k_tir_t tir = regs->trap->TIR;
 	unsigned long trap_ip = tir.ip;
 	enum getsp_action ret;
@@ -220,7 +229,7 @@ enum getsp_action parse_getsp_operation(const struct pt_regs *regs, int *incr,
 	*incr = USER_C_STACK_BYTE_INCR;
 
 	DebugUS("started for IP 0x%lx, TIR_hi 0x%llx\n", trap_ip, HI(tir));
-	if (!(tir.al & ALS0_mask)) {
+	if (!cpu_has(CPU_FEAT_ISET_V7) && !tir.al0) {
 		DebugUS("exception is not for ALS0\n");
 		return GETSP_OP_FAIL;
 	}
@@ -247,16 +256,17 @@ enum getsp_action parse_getsp_operation(const struct pt_regs *regs, int *incr,
 		return ret;
 	DebugUS("ALS0 syllable 0x%08x get from addr 0x%px\n", AW(als0), fault_addr);
 
-	if (als0.alf2.cop != GETSP_ALS_COP && als0.alf2.cop != DRTOAP_ALS_COP ||
-	    als0.alf2.cop == GETSP_ALS_COP && !hs.ale0 ||
+	u32 cop = als0.alf2.cop;
+	if (cop != GETSP_ALS_COP && cop != GETSPD_ALS_COP && cop != DRTOAP_ALS_COP ||
+	    (cop == GETSP_ALS_COP || cop == GETSPD_ALS_COP) && !hs.ale0 ||
 	    als0.alf2.opce != USD_ALS_OPCE) {
 		DebugUS("ALS0 0x%x is neither GETSP nor GETSAP\n", AW(als0));
 		return GETSP_OP_FAIL;
 	}
-	if (als0.alf2.opc == GETSP_ALS_COP) {
+
+	if (cop == GETSP_ALS_COP || cop == GETSPD_ALS_COP) {
 		ret = get_getsp_16(&AW(ales0),
-				   (unsigned long) &E2K_GET_INSTR_ALES0(trap_ip, hs.mdl),
-				   fault_addr);
+				(unsigned long) &E2K_GET_INSTR_ALES0(trap_ip, hs.mdl), fault_addr);
 		if (ret)
 			return ret;
 		DebugUS("ALES0 syllable 0x%04x\n", AW(ales0));
@@ -268,14 +278,14 @@ enum getsp_action parse_getsp_operation(const struct pt_regs *regs, int *incr,
 		}
 	}
 
-	AW(src2) = als0.alf2.src2;
-	if ((als0.alf2.src2 & INSTR_SRC2_BIT_MASK) == INSTR_SRC2_16BIT_VALUE ||
-	    (als0.alf2.src2 & INSTR_SRC2_BIT_MASK) == INSTR_SRC2_32BIT_VALUE) {
+	bool use_dword = (cop == GETSPD_ALS_COP);
+	if (instr_src2_is_lts16(als0.alf2.src2) || instr_src2_is_lts32(als0.alf2.src2) ||
+			instr_src2_is_lts64(als0.alf2.src2)) {
 		ret = parse_getsp_literal_operand(trap_ip, hs, als0, incr, fault_addr);
-	} else if ((als0.alf2.src2 & INSTR_SRC_DST_GREG_MASK) == INSTR_SRC_DST_GREG_VALUE) {
-		ret = parse_getsp_greg_operand(als0, incr);
-	} else if (!src2.rt7 || src2.rt7 && !src2.rt6) {
-		ret = parse_getsp_reg_operand(src2, regs, incr, fault_addr);
+	} else if (instr_src2_is_greg(als0.alf2.src2)) {
+		ret = parse_getsp_greg_operand(als0, incr, use_dword);
+	} else if (instr_src2_is_rf_reg(als0.alf2.src2)) {
+		ret = parse_getsp_reg_operand(als0.alf2.src2, regs, incr, fault_addr);
 	} else {
 		ret = GETSP_OP_FAIL;
 	}
@@ -287,14 +297,17 @@ enum getsp_action parse_getsp_operation(const struct pt_regs *regs, int *incr,
 		return ret;
 	}
 
+	if (!use_dword)
+		*incr = (s64) (s32) *incr;
+
 	if (*incr < 0) {
 		*incr = round_up(-(*incr), PAGE_SIZE);
 		*incr = max(USER_C_STACK_BYTE_INCR, (unsigned long)*incr);
-		DebugUS("expand on %d bytes detected\n", *incr);
+		DebugUS("expand on %lld bytes detected\n", *incr);
 		return GETSP_OP_INCREMENT;
 	}
 
-	DebugUS("constrict on %d bytes detected\n", *incr);
+	DebugUS("constrict on %lld bytes detected\n", *incr);
 	return GETSP_OP_DECREMENT;
 }
 

@@ -68,10 +68,10 @@ extern void _vcmd_kthread_wakeup(vcmd_mgr_t *vcmd_mgr);
 /**
  * process vcd pp line-counter irq
  */
-static void process_vcd_line_cnt_irq(volatile void *hwregs, u32 irq)
+static void process_vcd_line_cnt_irq(void __iomem *hwregs, u32 irq)
 {
 	irq &= IRQ_BIT_MASK(VCD_STATUS_LINE_CNT_INT);
-	iowrite32(irq, (void __iomem *)(hwregs + 4 * 1));
+	iowrite32(irq, hwregs + 4 * 1);
 
 	vcmd_klog(LOGLVL_BRIEF, "VCD has a line-counter interrupt.\n");
 }
@@ -79,10 +79,10 @@ static void process_vcd_line_cnt_irq(volatile void *hwregs, u32 irq)
 /**
  * process vcd bus-err abnormal irq
  */
-static void process_vcd_bus_err_irq(volatile void *hwregs, u32 irq)
+static void process_vcd_bus_err_irq(void __iomem *hwregs, u32 irq)
 {
 	irq &= IRQ_BIT_MASK(VCD_STATUS_BUS_ERR_INT);
-	iowrite32(irq, (void __iomem *)(hwregs + 4*1));
+	iowrite32(irq, hwregs + 4*1);
 
 	vcmd_klog(LOGLVL_WARNING, "VCD has a bus err interrupt.\n");
 }
@@ -96,8 +96,8 @@ extern void _vcmd_watchdog_stop(struct hantrovcmd_dev *dev);
  * process vcd multi-slice abnormal irq
  */
 static void process_vcd_slice_irq(vcmd_mgr_t *vcmd_mgr,
-									struct hantrovcmd_dev *dev,
-									struct cmdbuf_obj *obj, u32 irq)
+				  struct hantrovcmd_dev *dev,
+				  struct cmdbuf_obj *obj, u32 irq)
 {
 	struct vcmd_subsys_info *subsys = dev->subsys_info;
 	u32 *status_va;
@@ -109,8 +109,7 @@ static void process_vcd_slice_irq(vcmd_mgr_t *vcmd_mgr,
 		*status_va = irq & (~0x100);	// clean sw_dec_irq (bit 8 of reg1)
 
 		//Gate abnormal interrupt from VCD, to avoid repeatly BUF_EMPTY to CPU.
-		vcmd_write_reg((const void *)dev->hwregs,
-						VCMD_REGISTER_EXT_INT_GATE_OFFSET,
+		vcmd_write_reg(dev->hwregs, VCMD_REGISTER_EXT_INT_GATE_OFFSET,
 						dev->intr_gate_mask | dev->abn_irq_mask);
 
 		obj->slice_run_done = 1;
@@ -125,11 +124,11 @@ static void process_vcd_slice_irq(vcmd_mgr_t *vcmd_mgr,
  * process vcd abnormal irq
  */
 void process_vcd_abn_irq(vcmd_mgr_t *vcmd_mgr,
-						struct hantrovcmd_dev *dev, struct cmdbuf_obj *obj)
+			 struct hantrovcmd_dev *dev, struct cmdbuf_obj *obj)
 {
 	struct vcmd_subsys_info *subsys = dev->subsys_info;
 
-	volatile void *hwregs;
+	void __iomem *hwregs;
 	unsigned long flags;
 	u32 irq;
 
@@ -137,7 +136,7 @@ void process_vcd_abn_irq(vcmd_mgr_t *vcmd_mgr,
 
 	// read VCD int_status
 	spin_lock_irqsave(&dev->abn_irq_lock, flags);
-	irq = (u32)ioread32((void __iomem *)(hwregs + 0x04));
+	irq = ioread32(hwregs + 0x04);
 
 	if (irq & VCD_STATUS_LINE_CNT_INT) {
 		/* pp line counter irq */

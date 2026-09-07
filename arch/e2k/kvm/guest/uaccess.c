@@ -31,7 +31,7 @@ UACCESS_FN_DEFINE3(kvm_get_user_val_and_tagd_fn,
 		const void __user *, ptr, u64 *, val, u8 *, tag)
 {
 	HYPERVISOR_recovery_faulted_load((unsigned long) ptr, val, tag,
-			TAGGED_MEM_LOAD_REC_OPC, 0);
+			AW(ldst_rec_tagged_load()), 0);
 	return 0;
 }
 
@@ -49,9 +49,9 @@ UACCESS_FN_DEFINE6(kvm_get_user_val_and_tagq_fn, const void __user *, ptr,
 		unsigned long, offset)
 {
 	HYPERVISOR_recovery_faulted_load((unsigned long) ptr, val_lo, tag_lo,
-			TAGGED_MEM_LOAD_REC_OPC, 0);
+			AW(ldst_rec_tagged_load()), 0);
 	HYPERVISOR_recovery_faulted_load((unsigned long) ptr + offset,
-			val_hi, tag_hi, TAGGED_MEM_LOAD_REC_OPC, 0);
+			val_hi, tag_hi, AW(ldst_rec_tagged_load()), 0);
 	return 0;
 }
 
@@ -70,7 +70,8 @@ UACCESS_FN_DEFINE3(kvm_put_user_val_and_tagd_fn,
 		void __user *, ptr, u64, val, u32, tag)
 {
 	recovery_faulted_tagged_store((unsigned long) ptr, val, tag,
-			TAGGED_MEM_STORE_REC_OPC, 0, 0, 0, 1, 0, 0);
+			ldst_rec_tagged_store(), 0, 0,
+			ldst_rec_tagged_store(), 1, 0, 0);
 	return 0;
 }
 
@@ -87,9 +88,12 @@ UACCESS_FN_DEFINE6(kvm_put_user_val_and_tagq_fn, void __user *, ptr,
 		u64, val_lo, u64, val_hi, u32, tag_lo, u32, tag_hi,
 		unsigned long, offset)
 {
+	auto opcode = ldst_rec_tagged_store();
+	auto opcode_offset = opcode;
+	opcode_offset.index = offset;
 	recovery_faulted_tagged_store((unsigned long) ptr, val_lo, tag_lo,
-			TAGGED_MEM_STORE_REC_OPC, val_hi, tag_hi,
-			TAGGED_MEM_STORE_REC_OPC | offset, 0, 0, 1);
+			opcode, val_hi, tag_hi,
+			opcode_offset, 0, 0, 1);
 	return 0;
 }
 

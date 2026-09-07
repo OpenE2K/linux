@@ -49,7 +49,7 @@ static inline void __user *get_ptr_from_args(u32 tags, const int arg_num,
 			*ptr_size = 0;
 			ptr = NULL;
 		} else {
-			ptr = (typeof(ptr)) AP_PTRC(qarg);
+			ptr = (void __user __force *) AP_PTRC(qarg);
 		}
 	} else {
 		ptr = NULL;

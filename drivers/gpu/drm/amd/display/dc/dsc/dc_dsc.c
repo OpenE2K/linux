@@ -758,6 +758,9 @@ static bool setup_dsc_config(
 	int slice_height;
 	struct dc_dsc_policy policy;
 
+#ifdef CONFIG_MCST
+	num_slices_h = 0;
+#endif
 	memset(dsc_cfg, 0, sizeof(struct dc_dsc_config));
 
 	dc_dsc_get_policy_for_timing(timing, max_dsc_target_bpp_limit_override_x16, &policy);

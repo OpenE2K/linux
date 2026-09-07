@@ -74,28 +74,6 @@ int pcie_init(struct hantro_pci_t *pci_par)
 		goto out;
 	}
 
-	if (dev->dev.bus->dma_configure) {
-		int ret;
-		struct pci_driver driver = { };
-		if (!dev->dev.driver) /*HACK: dma_configure() uses the pointer*/
-			dev->dev.driver = &driver.driver;
-
-		/* Bind iommu. Normally it is done just before pci-probe call,
-		but vc9000d is not pci driver */
-		ret = dev->dev.bus->dma_configure(&dev->dev);
-		if (dev->dev.driver == &driver.driver)
-			dev->dev.driver = NULL;
-		if (ret)
-			return ret;
-	}
-
-	/* Bind irq. Normally it is done just before pci-probe call,
-	   but hantro is not pci driver */
-	if (pcibios_alloc_irq(dev) < 0) {
-		pr_err("Init: pcibios_alloc_irq failed.\n");
-		goto out;
-	}
-
 	if (pci_enable_device(dev) < 0) {
 		pr_err("Init: Device not enabled.\n");
 		goto out;

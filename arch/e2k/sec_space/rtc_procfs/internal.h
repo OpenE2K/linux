@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <linux/binfmts.h>
+
 struct rtcfs_sb_info {
 	struct pid_namespace *ns;
 	struct vfsmount *proc_mnt;

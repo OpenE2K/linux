@@ -31,7 +31,7 @@ static int snd_hwdep_dsp_load_ptr128(struct snd_hwdep *hw,
 		return -EFAULT;
 	if (get_user_tagged_16(ap.qword, tag, &src->image) || !IS_AP(ap, tag))
 		return -EFAULT;
-	info.image = (unsigned char __user *)AP_PTR(ap);
+	info.image = U_AP_PTR(ap);
 	set_ap_u_border(ap);
 
 	return snd_hwdep_dsp_load(hw, &info);

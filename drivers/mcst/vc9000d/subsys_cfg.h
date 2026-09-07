@@ -65,28 +65,17 @@
 #ifndef _SUBSYS_CFG_H_
 #define _SUBSYS_CFG_H_
 
-#ifdef EMU
-  #define VCMD_BUF_POOL_OFFSET      0x5000000
 
-  #define PCI_VENDOR_ID_HANTRO      0x1d9b//0x16c3//0x1ae0
-  #define PCI_DEVICE_ID_HANTRO      0xface//0x7011//0x001a
 
-  /* Base address got control register */
-  #define PCI_CONTROL_BAR              2
 
-  /* Base address DDR register */
-  #define PCI_DDR_BAR             4
 
-#else /* EMU */
-  #define VCMD_BUF_POOL_OFFSET      0x1000000
+static struct SubsysDesc subsys_array[] = {
+	{0, 0, 0x0},
+};
 
-  #define PCI_VENDOR_ID_HANTRO      PCI_VENDOR_ID_MCST_TMP
-  #define PCI_DEVICE_ID_HANTRO      PCI_DEVICE_ID_MCST_VC9000D
-
-  /* Base address got control register */
-  #define PCI_CONTROL_BAR           0
-
- /* Base address DDR register */
-  #undef PCI_DDR_BAR
-#endif /* EMU */
+static struct CoreDesc core_array[] = {
+	{0, 0, HW_VCD, 0x800, MAX_REG_COUNT * 4, -1},
+	{0, 0, HW_VCMD, 0x000, 30 * 4, -1},
+	{0, 0, HW_AXIFE, 0x400, 64 * 4, -1},
+};
 #endif /*_SUBSYS_CFG_H_ */

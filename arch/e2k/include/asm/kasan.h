@@ -17,16 +17,12 @@
 #define KASAN_SHADOW_SIZE  _UL(0x80000000000)
 #define KASAN_SHADOW_END   (KASAN_SHADOW_START + KASAN_SHADOW_SIZE)
 
-#ifndef __ASSEMBLY__
-
 #ifdef CONFIG_KASAN
 void __init kasan_early_init(void);
 void __init kasan_init(void);
 #else
 static inline void kasan_early_init(void) { }
 static inline void kasan_init(void) { }
-#endif
-
 #endif
 
 #endif

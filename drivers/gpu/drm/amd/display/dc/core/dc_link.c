@@ -4638,6 +4638,9 @@ void dc_link_set_preferred_link_settings(struct dc *dc,
 	struct dc_stream_state *link_stream;
 	struct dc_link_settings store_settings = *link_setting;
 
+#ifdef CONFIG_MCST
+	link_stream = NULL;
+#endif
 	link->preferred_link_setting = store_settings;
 
 	/* Retrain with preferred link settings only relevant for

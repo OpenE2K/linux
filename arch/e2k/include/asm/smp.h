@@ -59,15 +59,17 @@ struct call_data_struct {
 extern atomic_t	cpu_present_num;
 extern unsigned long smp_invalidate_needed;
 extern int pic_mode;
-extern cpumask_t callin_go;
+extern physid_mask_t callin_go;
 
 extern void e2k_start_secondary(int cpuid);
 extern void start_secondary_resume(int cpuid, int cpu);
 extern void wait_for_startup(int cpuid, int hotplug);
 extern void smp_send_reschedule(int cpu);
+extern void smp_prepare_boot_cpu_to_recover(void);
 extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 extern void native_stop_this_cpu_ipi(void *dummy);
+extern unsigned int mp_num_processors;
 
 #ifdef	CONFIG_DATA_BREAKPOINT
 typedef struct hw_data_bp {
@@ -161,8 +163,8 @@ extern void native_csd_unlock(struct __call_single_data *csd);
 
 # ifdef	CONFIG_KVM_HW_VIRTUALIZATION
 /* it is host kernel with hardware virtualization support */
-extern void hv_vcpu_wait_for_booting(int vcpu_id, struct cpumask *vcpu_mask);
-extern void hv_vcpu_wait_for_wake_up(int vcpu_id, struct cpumask *vcpu_mask);
+extern void hv_vcpu_wait_for_booting(int vcpu_id, physid_mask_t *vcpu_mask);
+extern void hv_vcpu_wait_for_wake_up(int vcpu_id, physid_mask_t *vcpu_mask);
 extern int hv_vcpu_activate(int cpu_id);
 
 static inline void wait_for_cpu_booting(int cpuid)

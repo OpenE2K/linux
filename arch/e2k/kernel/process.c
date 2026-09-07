@@ -175,8 +175,10 @@ static void clear_thread_info(struct task_struct *task)
 	thread_info->pm_robust_list.hi = 0;
 #endif
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* clear virtualization support fields into thread info */
 	clear_virt_thread_struct(thread_info);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
@@ -273,7 +275,7 @@ static unsigned long *__alloc_thread_stack_node(int node, const void *caller)
 
 	/* For hardware stacks uninitialized data usage is impossible
 	 * so clear data stack only */
-	clear_memory_8(address + KERNEL_C_STACK_OFFSET, KERNEL_C_STACK_SIZE, ETAGEWD);
+	memset(address + KERNEL_C_STACK_OFFSET, 0, KERNEL_C_STACK_SIZE);
 
 	if (cpu_has(CPU_HWBUG_FALSE_SS))
 		clean_pc_stack_zero_frame_kernel(address + KERNEL_PC_STACK_OFFSET);
@@ -366,16 +368,16 @@ static void free_user_stack(void __priv *stack_base, e2k_size_t max_stack_size)
 	int ret;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	ret = vm_munmap_notkillable((unsigned long) stack_base, max_stack_size);
+	ret = vm_munmap_notkillable((unsigned long)stack_base, max_stack_size);
 	clear_ts_flag(ts_flag);
 	DebugHS("stack base 0x%lx max stack size 0x%lx, munmap returned %d\n",
-		(unsigned long) stack_base, max_stack_size, ret);
+		(unsigned long)stack_base, max_stack_size, ret);
 	if (ret == -ENOMEM) {
 		struct user_stack_free_work *work = kmalloc(sizeof(*work), GFP_KERNEL);
 
 		BUG_ON(!work);
 
-		work->stack_base = (unsigned long) stack_base;
+		work->stack_base = (unsigned long)stack_base;
 		work->max_stack_size = max_stack_size;
 		work->mm = current->mm;
 
@@ -492,8 +494,8 @@ int alloc_user_hw_stacks(hw_stack_t *hw_stacks, size_t p_size, size_t pc_size)
 		if ((cached = list_first_entry_or_null(&context->cached_stacks,
 				struct cached_stacks_entry, list_entry))) {
 			list_del(&cached->list_entry);
-			context->cached_stacks_size -= cached->stack.pcs.size +
-						       cached->stack.ps.size;
+			WRITE_ONCE(context->cached_stacks_size, context->cached_stacks_size -
+				   (cached->stack.pcs.size + cached->stack.ps.size));
 		}
 		spin_unlock(&context->cached_stacks_lock);
 		if (unlikely(!cached))
@@ -546,8 +548,8 @@ void free_user_hw_stacks(hw_stack_t *hw_stacks)
 	 * a kworker in some cases, thus we can't access
 	 * 'current' here. */
 	if (hw_stacks->ps.base && hw_stacks->pcs.base &&
-	    context->cached_stacks_size + hw_stacks->ps.size +
-	    hw_stacks->pcs.size < SZ_1M) {
+	    READ_ONCE(context->cached_stacks_size) +
+			hw_stacks->ps.size + hw_stacks->pcs.size < SZ_1M) {
 		struct cached_stacks_entry *cached = kmalloc(sizeof(*cached), GFP_KERNEL);
 
 		if (cached) {
@@ -556,8 +558,8 @@ void free_user_hw_stacks(hw_stack_t *hw_stacks)
 			spin_lock(&context->cached_stacks_lock);
 			INIT_LIST_HEAD(&cached->list_entry);
 			list_add(&cached->list_entry, &context->cached_stacks);
-			context->cached_stacks_size += hw_stacks->ps.size +
-						       hw_stacks->pcs.size;
+			WRITE_ONCE(context->cached_stacks_size, context->cached_stacks_size +
+				   hw_stacks->ps.size + hw_stacks->pcs.size);
 			spin_unlock(&context->cached_stacks_lock);
 
 			hw_stacks->ps.base = NULL;
@@ -599,8 +601,10 @@ void free_user_old_pc_stack_areas(struct list_head *old_u_pcs_list)
 
 void arch_release_task_struct(struct task_struct *tsk)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* free virtual part of task structure */
 	free_virt_task_struct(tsk);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 static u64 get_user_main_c_stack(unsigned long sp, unsigned long *stack_top)
@@ -696,8 +700,7 @@ create_user_hard_stacks(hw_stack_t *hw_stacks, struct e2k_stacks *stacks)
 		 user_pcsp_size);
 
 	stacks->psp = new_psp((unsigned long)GET_PS_BASE(hw_stacks), user_psp_size, 0);
-	stacks->pcsp = new_pcsp((unsigned long)GET_PCS_BASE(hw_stacks),
-			user_pcsp_size, 0);
+	stacks->pcsp = new_pcsp((unsigned long)GET_PCS_BASE(hw_stacks), user_pcsp_size, 0);
 	stacks->pshtp = (e2k_pshtp_t) {0};
 	stacks->pcshtp = (e2k_pcshtp_t) {0};
 
@@ -765,7 +768,7 @@ unsigned long __get_wchan(struct task_struct *p)
 {
 	unsigned long ip = 0;
 
-	parse_chain_stack(false, p, check_wchan, &ip);
+	parse_chain_stack(false, false, p, check_wchan, &ip);
 
 	return ip;
 }
@@ -965,7 +968,6 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 	u64 __priv *pframe;
 	e2k_size_t	cut_size;
 	int		cui, ret, tag;
-	u64		flags;
 	e2k_qreg_t qr0;
 
 	DebugP("entry 0x%lx sp 0x%lx\n", entry, sp);
@@ -976,12 +978,12 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 
 	sp = round_down(sp, (protected) ? E2K_ALIGN_PUSTACK_SIZE : E2K_ALIGN_USTACK_SIZE);
 
-#if defined CONFIG_KVM_HOST_MODE && defined CONFIG_KVM_PARAVIRTUALIZATION
+#if defined CONFIG_KVM_HOST_KERNEL && defined CONFIG_KVM_PARAVIRTUALIZATION
 	if (ti->gthread_info) {
 		/* It is guest thread: clear from old process */
 		kvm_pv_clear_guest_thread_info(ti->gthread_info);
 	}
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
 
 	u_stk_bottom = get_user_main_c_stack(sp, &stack_top);
 	if (!u_stk_bottom) {
@@ -1024,7 +1026,7 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 		tag = 0;
 	}
 	stacks.psp = set_psp_ind(stacks.psp, pframe_size_q * EXT_4_NR_SZ);
-	pframe = (u64 __priv *) PSP_BASE(stacks.psp);
+	pframe = (u64 __priv __force *) PSP_BASE(stacks.psp);
 
 	if (clear_priv(pframe, pframe_size_q * EXT_4_NR_SZ) ||
 	    put_priv_tagged_16_offset(qr0, tag, &pframe[0], machine.qnr1_offset)) {
@@ -1060,7 +1062,10 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 		ptr -= delta;
 		ind -= delta;
 
-		stacks.usd = new_pusd(ptr - ind, USD_SIZE(stacks.usd), ind, 2);
+		stacks.usd = new_pusd(ptr - ind,
+				cpu_has(CPU_FEAT_V7_CPU_REGS) ? USD_SIZE_V7(stacks.usd)
+								  : 0ULL,
+				ind, 2);
 
 #ifdef CONFIG_PROTECTED_MODE
 		/* Init Secure Computing execution mode: */
@@ -1083,7 +1088,6 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 	free_getsp_adj(&ti->getsp_adj);
 
 	/* save local data & hardware stacks pointers */
-	ti->u_stack.bottom = u_stk_bottom;
 	ti->u_stack.size = stack_top - u_stk_bottom;
 	ti->u_stack.top = stack_top;
 
@@ -1101,6 +1105,7 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 	if (cpu_has(CPU_FEAT_MADM))
 		native_write_MADMR_reg((e2k_madmr_t) { .word = 0 });
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/*
 	 * The next function can be paravirtualized and do various actions:
 	 *	on host (or pure native mode) should only return 0 to continue
@@ -1109,7 +1114,7 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 	 * user entry point (to do all into one hypercall) Function can
 	 * return 1 on exit from user or negative error code
 	 */
-	flags = 0;
+	u64 flags = 0;
 	if (TASK_IS_BINCO(current))
 		flags |= BIN_COMP_CODE_TASK_FLAG;
 	if (current->thread.flags & E2K_FLAG_32BIT)
@@ -1131,6 +1136,7 @@ void start_thread(struct pt_regs *regs, unsigned long entry, unsigned long sp)
 		/* guest execve() completed and returned from user */
 		panic("return from user execve(), return value %d\n", ret);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	native_write_RPR_reg(INITIAL_ZEROED_RPR);
 
@@ -1260,7 +1266,7 @@ static void set_default_registers(struct task_struct *new_task,
 				sizeof(new_l_gregs->g));
 		new_l_gregs->bgr = current->thread.u_gregs.bgr;
 	} else {
-		memset(&new_l_gregs->g, 0, sizeof(new_l_gregs->g));
+		memset((void *)&new_l_gregs->g, 0, sizeof(new_l_gregs->g));
 		new_l_gregs->bgr = E2K_INITIAL_BGR;
 	}
 
@@ -1448,7 +1454,7 @@ int native_clone_prepare_spilled_user_stacks(e2k_stacks_t *child_stacks,
 	u64 ps_copy_size;
 	s64 u_pshtp_size, u_pcshtp_size, parent_pshtp_size;
 	unsigned long flags;
-	void __priv *child_pframe;
+	volatile void __priv *child_pframe;
 
 	u_pshtp_size = PSHTP_MEM_INDEX(child_stacks->pshtp);
 	u_pcshtp_size = child_stacks->pcshtp.ind;
@@ -1502,17 +1508,17 @@ int native_clone_prepare_spilled_user_stacks(e2k_stacks_t *child_stacks,
 	/*
 	 * Copy procedure stack from parent.
 	 */
-	child_pframe = (void __priv *) PSP_PTR(child_stacks->psp);
+	child_pframe =  U_PSP_PTR(child_stacks->psp);
 	parent_pshtp_size = PSHTP_MEM_INDEX(regs->stacks.pshtp);
 
 	if (ps_copy_size > parent_pshtp_size) {
-		void __priv *parent_pframe;
+		volatile void __priv *parent_pframe;
 		u64 size;
 
 		size = ps_copy_size - parent_pshtp_size;
-		parent_pframe = (void __priv *) (PSP_PTR(regs->stacks.psp) - ps_copy_size);
+		parent_pframe = U_PSP_PTR(regs->stacks.psp) - ps_copy_size;
 
-		if (copy_in_priv(child_pframe, parent_pframe, size)) {
+		if (copy_in_priv_tagged(child_pframe, parent_pframe, size)) {
 			pr_err("%s(): copying of parent procedure frames to child failed\n",
 			       __func__);
 			return -EFAULT;
@@ -1714,6 +1720,14 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 	bool save_local_gregs = (args->fn == NULL && !(clone_flags & CLONE_VM));
 	int ret;
 
+	if (sp && !(clone_flags & (CLONE_VM | CLONE_NEWNS | CLONE_NEWCGROUP | CLONE_NEWUTS |
+				   CLONE_NEWIPC | CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET))) {
+		pr_alert_once("%s [%d]: uses sys_clone with copy-on-write (no CLONE_VM) and a separate stack specified.  This application might require porting to e2k, one of the following might help:\n"
+			"1) If the intention is to create a new coroutine, use makecontext_e2k()/freecontext_e2k() API instead and switch coroutines explicitly using swapcontext(), setcontext() or longjmp().\n"
+			"2) If stack pointer is used just because glibc's clone() function expects a non-zero sp, call syscall(__NR_clone) directly instead.\n",
+			current->comm, current->pid);
+	}
+
 	ktimes_account_copy_thread(new_ti);
 
 	/* Initialize sw_regs with default values */
@@ -1778,7 +1792,6 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 			childregs->stacks.usd =	new_usd(sp, stack_size, stack_size);
 		}
 
-		new_ti->u_stack.bottom = sp;
 		new_ti->u_stack.top = sp + stack_size;
 		new_ti->u_stack.size = stack_size;
 
@@ -1834,6 +1847,9 @@ int copy_thread(struct task_struct *new_task, const struct kernel_clone_args *ar
 #ifdef CONFIG_PROTECTED_MODE
 		/* Secure Computing execution mode: */
 		new_task->mm->context.pm_sc_debug_mode = current->mm->context.pm_sc_debug_mode;
+		memcpy(new_task->mm->context.pm_sc_warned_once_msgs,
+		       current->mm->context.pm_sc_warned_once_msgs,
+		       sizeof(current->mm->context.pm_sc_warned_once_msgs));
 #endif
 	}
 
@@ -1862,7 +1878,7 @@ void native_deactivate_mm(struct task_struct *dead_task, struct mm_struct *mm)
 		dead_task, dead_task->pid, dead_task->comm, mm);
 	BUG_ON(dead_task != current);
 
-#if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
+#ifdef CONFIG_PROTECTED_MODE
 	if (unlikely(ti->pm_robust_list.hi)) {
 		pm_exit_robust_list(dead_task);
 		ti->pm_robust_list.lo = 0;
@@ -1883,8 +1899,10 @@ void native_deactivate_mm(struct task_struct *dead_task, struct mm_struct *mm)
 	/*
 	 * Do not want any surprises from MLT later on.
 	 */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* FIXME: MLT support is not yet implemented for guest kernel */
 	if (!paravirt_enabled())
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		invalidate_MLT();
 
 	hw_context_deactivate_mm(dead_task);
@@ -1924,10 +1942,6 @@ void release_thread(struct task_struct *dead_task)
 void exit_thread(struct task_struct *task)
 {
 	thread_info_t *ti = task_thread_info(task);
-
-	DebugP("CPU#%d : started for %s pid %d, user data stack base 0x%lx\n",
-	       smp_processor_id(), current->comm, current->pid,
-	       ti->u_stack.bottom);
 
 	free_getsp_adj(&ti->getsp_adj);
 
@@ -2030,12 +2044,13 @@ void flush_thread(void)
 {
 	DebugP("flush_thread entered.\n");
 
-	NATIVE_SET_GREGS_EMPTY(true, false);
-	memset(&current->thread.u_gregs.g, 0, sizeof(current->thread.u_gregs.g));
+	NATIVE_SET_GREGS_EMPTY(true, false, cpu_has(CPU_FEAT_QPREG));
+	memset((void *)&current->thread.u_gregs.g, 0, sizeof(current->thread.u_gregs.g));
 	current->thread.u_gregs.bgr = E2K_INITIAL_BGR;
 
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 	current_thread_info()->last_ic_flush_cpu = -1;
+	current_thread_info()->bc_flags = 0;
 #endif
 	flush_ptrace_hw_breakpoint(current);
 
@@ -2155,7 +2170,6 @@ static __always_inline void flush_ic_on_switch(void) { }
  * 5. Return value of system call in child will be that of __ret_from_fork().
  */
 notrace noinline
-__interrupt /* just to have USFS == 0 for v7 when real switch */
 struct task_struct *__sched __switch_to(struct task_struct *prev,
 				    struct task_struct *next)
 {
@@ -2165,8 +2179,7 @@ struct task_struct *__sched __switch_to(struct task_struct *prev,
 #endif
 
 	/* Save interrupt mask state and disable NMIs */
-	SAVE_IRQ_AND_ALL_CLI(AW(prev->thread.sw_regs.psr),
-			     AW(prev->thread.sw_regs.upsr));
+	SAVE_IRQ_AND_ALL_CLI(AW(prev->thread.sw_regs.psr), AW(prev->thread.sw_regs.upsr));
 
 	NATIVE_SAVE_TASK_REGS_TO_SWITCH(prev);
 
@@ -2189,9 +2202,11 @@ struct task_struct *__sched __switch_to(struct task_struct *prev,
 
 	flush_ic_on_switch();
 
+	l2_prefetcher_switch_binco(TASK_IS_BINCO(prev), TASK_IS_BINCO(next),
+			&prev->thread.l2_prefetcher, &next->thread.l2_prefetcher);
+
 	/* Restore interrupt mask and enable NMIs */
-	RESTORE_IRQ_REG(AW(next->thread.sw_regs.psr),
-			AW(next->thread.sw_regs.upsr));
+	RESTORE_IRQ_REG(AW(next->thread.sw_regs.psr), AW(next->thread.sw_regs.upsr));
 
 	return prev;
 }

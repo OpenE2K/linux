@@ -71,7 +71,7 @@ int dev_ifconf(struct net *net, struct ifconf __user *uifc)
 			}
 		} else {
 			/* real request */
-			pos = (void *)AP_PTR(ap);
+			pos = U_AP_PTR(ap);
 			if (get_user(len, &uifc128->ifc_len)) {
 				return -EFAULT;
 			}
@@ -470,27 +470,6 @@ void dev_load(struct net *net, const char *name)
 EXPORT_SYMBOL(dev_load);
 
 
-#ifdef CONFIG_MCST_RT
-static int mcst_dev_ifsioc(struct net *net, struct ifreq *ifr, void __user *data,
-			   unsigned int cmd)
-{
-	int err;
-	struct net_device *dev = __dev_get_by_name(net, ifr->ifr_name);
-	const struct net_device_ops *ops;
-
-	if (!dev)
-		return -ENODEV;
-	ops = dev->netdev_ops;
-	if (!ops->ndo_unlocked_ioctl || (cmd < SIOCDEVPRIVATE) ||
-		(cmd > (SIOCDEVPRIVATE + 15))) {
-		rtnl_lock();
-		err = dev_ifsioc(net, ifr, data, cmd);
-		rtnl_unlock();
-		return err;
-	}
-        return dev_ifsioc(net, ifr, data, cmd);
-}
-#endif
 
 /*
  *	This function handles all "interface"-type I/O control requests. The actual
@@ -578,13 +557,9 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr,
 		dev_load(net, ifr->ifr_name);
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
-#ifdef CONFIG_MCST_RT
-		ret = mcst_dev_ifsioc(net, ifr, data, cmd);
-#else
 		rtnl_lock();
 		ret = dev_ifsioc(net, ifr, data, cmd);
 		rtnl_unlock();
-#endif
 		if (colon)
 			*colon = ':';
 		return ret;
@@ -651,13 +626,9 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr,
 		    (cmd >= SIOCDEVPRIVATE &&
 		     cmd <= SIOCDEVPRIVATE + 15)) {
 			dev_load(net, ifr->ifr_name);
-#ifdef CONFIG_MCST_RT
-			ret = mcst_dev_ifsioc(net, ifr, data, cmd);
-#else
 			rtnl_lock();
 			ret = dev_ifsioc(net, ifr, data, cmd);
 			rtnl_unlock();
-#endif
 			return ret;
 		}
 		return -ENOTTY;

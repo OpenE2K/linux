@@ -2072,7 +2072,7 @@ static void l_atapi_wait_for_command(void *data, async_cookie_t cookie)
 	void __iomem *port_mmio = ahci_port_base(ap);
 	struct ahci_port_priv *pp = ap->private_data;
 	int timeout = 15;
-	u64 ap_qc_active, qc_active;
+	u64 ap_qc_active, qc_active = 0;
 	do {
 		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(msecs_to_jiffies(20));

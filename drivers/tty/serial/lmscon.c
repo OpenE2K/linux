@@ -27,7 +27,7 @@
 #ifdef __e2k__
 # include <asm/e2k.h>
 #endif
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #ifdef __e2k__
 # include <asm/e2k_debug.h>
 # include <asm/console.h>

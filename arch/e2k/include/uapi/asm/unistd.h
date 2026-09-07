@@ -226,7 +226,6 @@
 #define __NR_getdents64		220
 #define __NR_fcntl64		221
 
-#define __NR_macctl		223
 #define __NR_newfstatat		224
 
 #define __NR_e2k_sigsetjmp	226
@@ -259,7 +258,7 @@
 #define __NR_set_backtrace	252
 #define __NR_get_backtrace	253
 #define __NR_access_hw_stacks	254
-#define	__NR_el_posix		255
+
 #define __NR_io_uring_setup	256
 #define __NR_io_uring_enter	257
 #define __NR_io_uring_register	258

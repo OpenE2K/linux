@@ -117,27 +117,28 @@ recovery_faulted_load(e2k_addr_t address, u64 *ld_val, u8 *data_tag,
 static inline void
 recovery_faulted_move(e2k_addr_t addr_from, e2k_addr_t addr_to, e2k_addr_t addr_to_hi,
 		int vr, ldst_rec_op_t ld_rec_opc, int chan, int qp_load,
-		int atomic_load, bool big_endian, u32 first_time, tc_cond_t cond)
+		int atomic_load, bool big_endian, bool single_byte, tc_cond_t cond,
+		bool clear_lo, bool clear_hi)
 {
 	if (likely(IS_HV_GM()))
-		native_recovery_faulted_move(addr_from, addr_to,
-				addr_to_hi, vr, ld_rec_opc, chan,
-				qp_load, atomic_load, big_endian, first_time);
+		native_recovery_faulted_move(addr_from, addr_to, addr_to_hi, vr,
+				ld_rec_opc, chan, qp_load, atomic_load, big_endian,
+				single_byte, clear_lo, clear_hi);
 	else
-		kvm_recovery_faulted_move(addr_from, addr_to,
-				addr_to_hi, vr, AW(ld_rec_opc), chan,
-				qp_load, atomic_load, big_endian, first_time, cond);
+		kvm_recovery_faulted_move(addr_from, addr_to, addr_to_hi, vr,
+				AW(ld_rec_opc), chan, qp_load, atomic_load, big_endian,
+				first_time, cond);
 }
 static inline void
 recovery_faulted_load_to_greg(e2k_addr_t address, u32 greg_num_d, int vr,
 		ldst_rec_op_t ld_rec_opc, int chan, int qp_load, int atomic_load,
 		bool big_endian, void *saved_greg_lo, void *saved_greg_hi,
-		tc_cond_t cond)
+		tc_cond_t cond, bool clear_lo, bool clear_hi)
 {
 	if (likely(IS_HV_GM()))
 		native_recovery_faulted_load_to_greg(address, greg_num_d,
 				vr, ld_rec_opc, chan, qp_load, atomic_load,
-				big_endian, saved_greg_lo, saved_greg_hi);
+				big_endian, saved_greg_lo, saved_greg_hi, clear_lo, clear_hi);
 	else
 		kvm_recovery_faulted_load_to_greg(address, greg_num_d,
 				vr, AW(ld_rec_opc), chan, qp_load, atomic_load,

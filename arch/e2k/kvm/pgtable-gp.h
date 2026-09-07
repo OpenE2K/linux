@@ -21,8 +21,6 @@
 #include <linux/types.h>
 #include <asm/pgtable_types.h>
 
-#ifndef __ASSEMBLY__
-
 /*
  * PTE-GP format
  */
@@ -108,6 +106,7 @@
 
 #define _PAGE_KERNEL_PT_GP	_PAGE_KERNEL_RW_GP
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline pteval_t
 get_pte_val_gp_changeable_mask(void)
 {
@@ -208,7 +207,6 @@ set_pte_val_gp_memory_type_rule(pteval_t pte_val, unsigned int mtcr)
 
 	return _PAGE_MTCR_SET_VAL_GP(pte_val, mtcr);
 }
-
-#endif	/* ! __ASSEMBLY__ */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif /* ! _E2K_KVM_PGTABLE_GP_H */

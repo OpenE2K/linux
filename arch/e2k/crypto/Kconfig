@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 MCST
+
+menu "Accelerated Cryptographic Algorithms for CPU (e2k)"
+
+config CRYPTO_CHACHA_E2K
+	tristate "Ciphers: ChaCha20"
+	depends on E2K && CPU_ISET_MAX >= 3
+	default m
+	select CRYPTO_SKCIPHER
+	select CRYPTO_LIB_CHACHA_GENERIC
+	select CRYPTO_ARCH_HAVE_LIB_CHACHA
+	help
+	  Length-preserving cipher: ChaCha stream ciphers (RFC 7539)
+
+	  Architecture: E2K using: 64 and 128 bits SIMD operations
+
+	  It is available as of E2Kv3+.
+
+config CRYPTO_CRC32C_E2K
+	tristate "CRC32c (CLMUL)"
+	depends on E2K && CPU_ISET_MAX >= 6
+	default y
+	select CRYPTO_HASH
+	help
+	  CRC32c CRC algorithm with the iSCSI polynomial (RFC 3385 and RFC 3720)
+
+	  Used by btrfs, ext4, jbd2, NVMeoF/TCP, and iSCSI.
+
+	  Architecture: E2Kv6+ using:
+	    - CLMULH/CLMULL (64 bit carry-less multiplication)
+
+endmenu

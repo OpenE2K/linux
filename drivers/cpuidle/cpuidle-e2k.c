@@ -28,7 +28,7 @@ static int __cpuidle C2_enter(struct cpuidle_device *dev,
 	unsigned long flags;
 	unsigned int node = numa_node_id();
 	int core = cpu_to_cpuid(dev->cpu) % cpu_max_cores_num();
-	int reg = PMC_FREQ_CORE_N_SLEEP(core);
+	int reg = PMC_FREQ_CORE_SLEEP(core, cpu_has(CPU_FEAT_ISET_V7));
 	freq_core_sleep_t C2 = { .cmd = 2 }, C0 = { .cmd = 0 };
 
 	/* We do not want an NMI to arrive just before
@@ -115,7 +115,8 @@ static void __init initialize_C2_state(void *unused)
 	 * value in choosing C2 over C3. */
 	int new_divF = 0x10;
 
-	C2_mon.word = sic_read_node_nbsr_reg(node, PMC_FREQ_CORE_N_MON(core));
+	C2_mon.word = sic_read_node_nbsr_reg(node,
+			PMC_FREQ_CORE_MON(core, cpu_has(CPU_FEAT_ISET_V7)));
 	if (C2_mon.divF_limit_hi < new_divF)
 		new_divF = C2_mon.divF_limit_hi;
 

@@ -574,7 +574,7 @@ static long media_device_enum_links128(struct media_device *mdev,
 		return -EFAULT;
 	if (IS_AP(ap, tag)) {
 		unsigned int p;
-		struct media_pad_desc *upa = (struct media_pad_desc *)AP_PTR(ap);
+		struct media_pad_desc __user *upa = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 		for (p = 0; p < entity->num_pads; p++) {
 			struct media_pad_desc pad;
@@ -591,8 +591,7 @@ static long media_device_enum_links128(struct media_device *mdev,
 		return -EFAULT;
 	if (IS_AP(ap, tag)) {
 		struct media_link *link;
-		struct media_link_desc __user *ulink_desc =
-			(struct media_link_desc __user *)AP_PTR(ap);
+		struct media_link_desc __user *ulink_desc = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 		list_for_each_entry(link, &entity->links, list) {
 			struct media_link_desc klink_desc;

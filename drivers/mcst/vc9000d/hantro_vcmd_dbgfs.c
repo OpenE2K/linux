@@ -262,7 +262,7 @@ static void _dev_record_linked_and_processed_cmdbuf(
 	char str[100];
 	struct hantrovcmd_dev *dev = (struct hantrovcmd_dev *)dev_dbgfs->dev;
 
-	hw_rdy_cmdbuf_num = ioread32((void __iomem *)(dev->hwregs + 3 * 4));
+	hw_rdy_cmdbuf_num = ioread32(dev->hwregs + 3 * 4);
 		sprintf(str, "\nthe number of cmdbuffer linked: %u\n",
 			dev->sw_cmdbuf_rdy_num);
 		strcat(out, str);
@@ -391,12 +391,12 @@ static ssize_t cmdbuf_parse(struct file *file, char __user *user_buf,
 	return ret;
 }
 
-const struct file_operations cmdbuf_op = {
+static const struct file_operations cmdbuf_op = {
 	.read = cmdbuf_parse,
 	.open = _dbgfs_open,
 };
 
-static void _dev_record_hw_regs(volatile u8 *hwregs, u32 reg_num, u32 *start,
+static void _dev_record_hw_regs(void __iomem *hwregs, u32 reg_num, u32 *start,
 			char *out)
 {
 	int swreg_mes, i;
@@ -407,7 +407,7 @@ static void _dev_record_hw_regs(volatile u8 *hwregs, u32 reg_num, u32 *start,
 		return;
 
 	for (i = 0; i < reg_num; i++) {
-		swreg_mes = ioread32((void __iomem *)(hwregs + j * 4));
+		swreg_mes = ioread32(hwregs + j * 4);
 		if ((j & 3) == 0)
 			sprintf(str, "%04x: %08x ", j * 4, swreg_mes);
 		else
@@ -451,7 +451,7 @@ static ssize_t hw_register_print(struct file *file, char __user *user_buf, size_
 	struct hantrovcmd_dev *dev = vcmd_mgr->dev_ctx;
 	int subsys_num = vcmd_mgr->subsys_num;
 
-	volatile u8 *hwregs;
+	void __iomem *hwregs;
 
 	u32 record_num = RECORD_N_HW_REGS;
 
@@ -563,11 +563,11 @@ static ssize_t hw_vcd_mem_regs_print(struct file *file, char __user *user_buf, s
 	return ret;
 }
 
-const struct file_operations fileop_vcmd_reg_print = {
+static const struct file_operations fileop_vcmd_reg_print = {
 	.read = hw_register_print,
 	.open = _dbgfs_open,
 };
-const struct file_operations fileop_vcd_mem_regs_print = {
+static const struct file_operations fileop_vcd_mem_regs_print = {
 	.read = hw_vcd_mem_regs_print,
 	.open = _dbgfs_open,
 };
@@ -614,8 +614,7 @@ void _dbgfs_record_link_time(void *_dev_dbgfs, u32 cmdbuf_id,
 	int l_index = dev_dbgfs->link_index;
 
 	time_val = _dgbfs_get_time();
-	hw_rdy_cmdbuf_num =
-		ioread32((void __iomem *)(dev->hwregs + 3 * 4));
+	hw_rdy_cmdbuf_num = ioread32(dev->hwregs + 3 * 4);
 	dev_dbgfs->num_cmdbuf_linked = sw_cmdbuf_rdy_num - hw_rdy_cmdbuf_num;
 
 	sprintf(v, "%u", cmdbuf_id);
@@ -732,8 +731,7 @@ void _dbgfs_init_ctx(void *_vcmd_mgr, u32 store_hw_rdy_cmdbuf)
 			dev_dbgfs[i].prev_cmdbuf_done[k] = 0;
 		}
 		if (store_hw_rdy_cmdbuf) {
-			hw_rdy_cmdbuf_num =
-				ioread32((void __iomem *)(dev[i].hwregs + 3 * 4));
+			hw_rdy_cmdbuf_num = ioread32(dev[i].hwregs + 3 * 4);
 			dev_dbgfs[i].prev_cmdbuf_done[0] = hw_rdy_cmdbuf_num;
 		} else {
 			dev_dbgfs[i].num_cmdbuf_twoidle = 0;
@@ -768,8 +766,7 @@ void _dbgfs_record_cmdbuf_num(void *_dev_dbgfs)
 	struct hantrovcmd_dev *dev = (struct hantrovcmd_dev *)dev_dbgfs->dev;
 
 	if (dev->hw_version_id <= HW_ID_1_0_C)
-		hw_rdy_cmdbuf_num = vcmd_get_register_value(
-			(const void *)dev->hwregs, dev->reg_mirror,
+		hw_rdy_cmdbuf_num = vcmd_get_register_value(dev->hwregs, dev->reg_mirror,
 			HWIF_VCMD_EXE_CMDBUF_COUNT);
 	else {
 		hw_rdy_cmdbuf_num = *(dev->reg_mem_va + REG_ID_CMDBUF_EXE_CNT);
@@ -781,9 +778,7 @@ void _dbgfs_record_cmdbuf_num(void *_dev_dbgfs)
 
 	if ((dev_dbgfs->active_state == 1) &&
 		(dev->sw_cmdbuf_rdy_num == hw_rdy_cmdbuf_num)) {
-		if (vcmd_get_register_value(
-					(const void *)dev->hwregs, dev->reg_mirror,
-					HWIF_VCMD_IRQ_JMP)) {
+		if (vcmd_get_register_value(dev->hwregs, dev->reg_mirror, HWIF_VCMD_IRQ_JMP)) {
 			time_val = _dgbfs_get_time();
 			dev_dbgfs->active_return_time[index] = time_val;
 			dev_dbgfs->cmdbuf_num_done[index] =

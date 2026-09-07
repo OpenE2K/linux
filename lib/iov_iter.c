@@ -12,7 +12,8 @@
 #include <linux/compat.h>
 #if defined(CONFIG_E2K) && defined(CONFIG_PROTECTED_MODE)
 #include <asm/prot_compat.h>
-#endif
+#include <asm/unsafe_uint64_to_ptr.h>
+#endif /* CONFIG_PROTECTED_MODE */
 #include <net/checksum.h>
 #include <linux/scatterlist.h>
 #include <linux/instrumented.h>
@@ -1743,11 +1744,42 @@ static int copy_ptr128_iovec_from_user(struct iovec *iov,
 			goto uaccess_end;
 		}
 		if (len > 0) {
-			if (get_user_tagged_16(ap.qword, tag, &uiov[i].iov_base)
-					|| !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < len) {
+			if (get_user_tagged_16(ap.qword, tag, &uiov[i].iov_base))
+				goto uaccess_end;
+			if (IS_AP(ap, tag)) {
+				if (AP_OBJ_SIZE(ap) < len) {
+					goto uaccess_end;
+				}
+				iov[i].iov_base = (void __user *)AP_PTR(ap);
+			} else if (AP_IS_ADDR(ap, tag)) { /* This is address, not descriptor */
+				struct pt_regs *regs = current_pt_regs();
+
+				if (regs->sys_num == __NR_process_vm_readv ||
+						regs->sys_num == __NR_process_vm_writev) {
+					e2k_addr_t base;
+					unsigned long length;
+
+					ret = get_descriptor_ranges_on_mm(ap.qword.lo,
+								&base, &length,
+								current_thread_info()->pt_regs);
+					if (ret) { /* this must be 'ESRCH' */
+						ret = -EFAULT;
+						goto uaccess_end;
+					} else if ((base + length) < (AP_PTR_T(ap, tag) + len)) {
+						ret = -EFAULT;
+						goto uaccess_end;
+					}
+					/* NB> This is valid user address.
+					*	We allow it in the SOFT PM mode for these syscalls.
+					*/
+					iov[i].iov_base = (void __user *) ap.qword.lo;
+				} else {
+					goto uaccess_end;
+				}
+			} else {
 				goto uaccess_end;
 			}
-			iov[i].iov_base = (void __user *)AP_PTR(ap);
+			iov[i].iov_base = U_AP_PTR(ap);
 		} else if (len == 0) {
 			iov[i].iov_base = NULL;
 		} else {

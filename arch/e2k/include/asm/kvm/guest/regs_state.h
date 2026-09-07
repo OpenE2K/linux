@@ -127,7 +127,7 @@ static inline void guest_get_all_user_glob_regs(e2k_global_regs_t *gregs)
 	unsigned long vcpu_base; \
 	/* VCPU state base can be on global register, so save & restore */ \
 	KVM_SAVE_VCPU_STATE_BASE(vcpu_base); \
-	NATIVE_BOOT_INIT_G_REGS(); \
+	NATIVE_BOOT_INIT_G_REGS(false); \
 	KVM_RESTORE_VCPU_STATE_BASE(vcpu_base); \
 })
 
@@ -162,23 +162,6 @@ static inline void guest_get_all_user_glob_regs(e2k_global_regs_t *gregs)
 				greg_vals[greg_no], greg_tag);		\
 		glob_regs += 4;						\
 	}								\
-})
-
-/* ptrace related guys: we do not use them on switching. */
-#define GET_GREGS_FROM_THREAD(g_user, gtag_user, gbase)		\
-({									\
-	if (likely(IS_HV_GM()))						\
-		NATIVE_GET_GREGS_FROM_THREAD(g_user, gtag_user, gbase);	\
-	else								\
-		KVM_GET_GREGS_FROM_THREAD(g_user, gtag_user, gbase);	\
-})
-
-#define SET_GREGS_TO_THREAD(gbase, g_user, gtag_user)			\
-({									\
-	if (likely(IS_HV_GM()))						\
-		NATIVE_SET_GREGS_TO_THREAD(gbase, g_user, gtag_user);	\
-	else								\
-		KVM_SET_GREGS_TO_THREAD(gbase, g_user, gtag_user);	\
 })
 
 /* Save stack registers on guest kernel mode */
@@ -260,7 +243,6 @@ do { \
 	(trap)->curr_cnt = -1;						\
 	(trap)->ignore_user_tc = 0;					\
 	(trap)->tc_called = 0;						\
-	(trap)->is_intc = false;					\
 	BUG_ON(max_cnt > 3 * HW_TC_SIZE);				\
 	for (cnt = 0; 3 * cnt < max_cnt; cnt++) {			\
 		tc_opcode_t opcode;					\

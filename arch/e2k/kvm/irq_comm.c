@@ -157,6 +157,7 @@ int kvm_irq_delivery_to_hw_apic(struct kvm *kvm, struct kvm_lapic *src,
 }
 #endif
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int kvm_irq_delivery_to_sw_apic(struct kvm *kvm, struct kvm_lapic *src,
 		struct kvm_lapic_irq *irq)
 {
@@ -193,6 +194,7 @@ int kvm_irq_delivery_to_sw_apic(struct kvm *kvm, struct kvm_lapic *src,
 
 	return r;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_KVM_HW_VIRTUALIZATION
 /* VCPU is not running now. Set bit in the PMIRR copy in hw context */
@@ -329,7 +331,7 @@ int kvm_hw_epic_deliver_to_icr(struct kvm_vcpu *vcpu, unsigned int vector,
 	 */
 	reg.raw = 0;
 	reg.dst = kvm_vcpu_to_full_cepic_id(vcpu);
-	reg.gst_id = vcpu->kvm->arch.vmid.nr;
+	reg.gst_id = vcpu->kvm->arch.vm_id;
 	reg.dst_sh = CEPIC_ICR_DST_FULL;
 	reg.dlvm = dlvm;
 	reg.vect = vector;
@@ -342,7 +344,7 @@ int kvm_hw_epic_deliver_to_icr(struct kvm_vcpu *vcpu, unsigned int vector,
 	return 1;
 }
 
-int kvm_epic_match_dest(int cepic_id, int src, int short_hand, int dest)
+static int kvm_epic_match_dest(int cepic_id, int src, int short_hand, int dest)
 {
 	int result = 0;
 
@@ -382,6 +384,7 @@ static void kvm_wake_up_irq(struct kvm_vcpu *vcpu)
 	kvm_vcpu_wake_up(vcpu);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int kvm_irq_delivery_to_sw_epic(struct kvm *kvm, int src,
 		struct kvm_cepic_irq *irq)
 {
@@ -404,6 +407,7 @@ int kvm_irq_delivery_to_sw_epic(struct kvm *kvm, int src,
 
 	return -1;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_KVM_HW_VIRTUALIZATION
 //TODO fix this and all other delivery functions to return 0 on success and proper errno on error
@@ -500,6 +504,7 @@ int kvm_irq_delivery_to_hw_epic(struct kvm *kvm, int src,
 	return delivered ? 1 : -1;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int kvm_hw_epic_sysrq_deliver(struct kvm_vcpu *vcpu)
 {
 	struct kvm_cepic_irq irq;
@@ -512,6 +517,7 @@ int kvm_hw_epic_sysrq_deliver(struct kvm_vcpu *vcpu)
 
 	return kvm_irq_delivery_to_hw_epic(vcpu->kvm, 0, &irq);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_KVM_ASYNC_PF
 int kvm_hw_epic_async_pf_wake_deliver(struct kvm_vcpu *vcpu)
@@ -543,8 +549,10 @@ void kvm_deliver_cepic_epic_interrupt(void)
 	struct kvm_cepic_irq irq;
 	union cepic_epic_int2 reg;
 	struct kvm *kvm;
-	u32 src = cepic_id_short_to_full(read_epic_id());
 	struct kvm_vcpu *vcpu = current_thread_info()->vcpu;
+	/* Rely on CEPIC_EPIC_INT being delivered before migrations
+	 * (see comment in save_epic_context())	*/
+	u32 src = epic_read_guest_w(CEPIC_ID);
 
 	reg.raw = epic_read_d(CEPIC_EPIC_INT2);
 
@@ -552,7 +560,7 @@ void kvm_deliver_cepic_epic_interrupt(void)
 		return;
 
 	kvm = vcpu->kvm;
-	if (WARN_ONCE(kvm->arch.vmid.nr != reg.gst_id,
+	if (WARN_ONCE(kvm->arch.vm_id != reg.gst_id,
 			"Received CEPIC_EPIC_INT with bad gst_id %d\n", reg.gst_id))
 		return;
 
@@ -573,8 +581,11 @@ void kvm_int_violat_delivery_to_hw_epic(struct kvm *kvm)
 
 int kvm_cpu_has_pending_apic_timer(struct kvm_vcpu *vcpu)
 {
+	//TODO apic on top of hw epic support
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (lapic_in_kernel(vcpu))
 		return apic_has_pending_timer(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return 0;
 }
@@ -662,17 +673,6 @@ int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
 	return kvm_set_pic_msi(e, kvm, irq_source_id, level, line_status);
 }
 EXPORT_SYMBOL(kvm_set_msi);
-
-void kvm_fire_mask_notifiers(struct kvm *kvm, int irq, bool mask)
-{
-	struct kvm_irq_mask_notifier *kimn;
-
-	rcu_read_lock();
-	hlist_for_each_entry_rcu(kimn, &kvm->arch.mask_notifier_list, link)
-		if (kimn->irq == irq)
-			kimn->func(kimn, mask);
-	rcu_read_unlock();
-}
 
 int kvm_set_routing_entry(struct kvm *kvm,
 				struct kvm_kernel_irq_routing_entry *e,
@@ -836,7 +836,7 @@ int kvm_arch_irq_bypass_add_producer(struct irq_bypass_consumer *cons,
 		.valid = true,
 		.msi_valid = false,
 		.ioepic_pt_pin = &kvm->arch.ioepic_pt_pin,
-		.vmid = kvm->arch.vmid.nr,
+		.vmid = kvm->arch.vm_id,
 		.int_table = __pa(page_address(kvm->arch.epic_pages))
 	};
 	int ret;
@@ -890,7 +890,7 @@ int kvm_arch_update_irqfd_routing(struct kvm *kvm, unsigned int host_irq,
 		.valid = true,
 		.msi_valid = false,
 		.ioepic_pt_pin = &kvm->arch.ioepic_pt_pin,
-		.vmid = kvm->arch.vmid.nr,
+		.vmid = kvm->arch.vm_id,
 		.int_table = __pa(page_address(kvm->arch.epic_pages))
 	};
 	int ret;

@@ -44,7 +44,7 @@ static struct pmc_temp_coeff {
 };
 static int pmc_temp_coeff_index;
 
-void __iomem *pmc_regs(struct device *dev)
+static void __iomem *pmc_regs(struct device *dev)
 {
 	struct pmcmon_data *pmcmon = dev_get_drvdata(dev);
 	return pmcmon->cntrl_base;
@@ -230,16 +230,16 @@ static ssize_t show_node(struct device *dev,
 } /* show_node */
 
 
-SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, hwmon_show_temp, NULL, 0);
-SENSOR_DEVICE_ATTR(temp2_input, S_IRUGO, hwmon_show_temp, NULL, 1);
+static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, hwmon_show_temp, NULL, 0);
+static SENSOR_DEVICE_ATTR(temp2_input, S_IRUGO, hwmon_show_temp, NULL, 1);
 
-SENSOR_DEVICE_ATTR(temp1_label, S_IRUGO, hwmon_show_label, NULL, 0);
-SENSOR_DEVICE_ATTR(temp2_label, S_IRUGO, hwmon_show_label, NULL, 1);
+static SENSOR_DEVICE_ATTR(temp1_label, S_IRUGO, hwmon_show_label, NULL, 0);
+static SENSOR_DEVICE_ATTR(temp2_label, S_IRUGO, hwmon_show_label, NULL, 1);
 
-SENSOR_DEVICE_ATTR(temp1_type, S_IRUGO, hwmon_show_type, NULL, 0);
-SENSOR_DEVICE_ATTR(temp2_type, S_IRUGO, hwmon_show_type, NULL, 1);
+static SENSOR_DEVICE_ATTR(temp1_type, S_IRUGO, hwmon_show_type, NULL, 0);
+static SENSOR_DEVICE_ATTR(temp2_type, S_IRUGO, hwmon_show_type, NULL, 1);
 
-SENSOR_DEVICE_ATTR(node, S_IRUGO, show_node, NULL, 3);
+static SENSOR_DEVICE_ATTR(node, S_IRUGO, show_node, NULL, 3);
 
 static struct attribute *pmcmon_attrs[] = {
 	&sensor_dev_attr_temp1_input.dev_attr.attr,

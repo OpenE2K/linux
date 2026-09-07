@@ -1207,22 +1207,22 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 		DebugSS
 		    ("SET_BIN_COMP_INFO: info = 0x%llx, size = 0x%llx, pid = %d\n",
 		     arg2, arg3, (int)arg4);
-		res = set_user_bin_comp_info_info((void __user *)arg2, arg3, arg4);
+		res = set_user_bin_comp_info_info((void __user __force *)arg2, arg3, arg4);
 		break;
 	case GET_BIN_COMP_INFO:
 		DebugSS("GET_BIN_COMP_INFO: info = 0x%llx, pid = %d\n",
 			arg2, (int)arg3);
-		res = get_user_bin_comp_info_info((void __user *)arg2, arg3);
+		res = get_user_bin_comp_info_info((void __user __force *)arg2, arg3);
 		break;
 	case SET_RLIM:
 		DebugSS("SET_RLIM: resource = 0x%x, rlim = 0x%llx, pid = %d\n",
 			(unsigned int)arg2, arg3, (int)arg4);
-		res = set_rlim(arg2, (struct rlimit __user *)arg3, arg4);
+		res = set_rlim(arg2, (struct rlimit __user __force *)arg3, arg4);
 		break;
 	case GET_RLIM:
 		DebugSS("GET_RLIM: resource = 0x%x, rlim = 0x%llx, pid = %d\n",
 			(unsigned int)arg2, arg3, (int)arg4);
-		res = get_rlim(arg2, (struct rlimit __user *)arg3, arg4);
+		res = get_rlim(arg2, (struct rlimit __user __force *)arg3, arg4);
 		break;
 	case SET_BIN_COMP_FD:
 		DebugSS("SET_BIN_COMP_FD: specfd = %d, fd = %d\n",
@@ -1233,7 +1233,7 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 		DebugSS
 		    ("BIN_COMP_FD_WRITE: fd = %d, buf = 0x%llx, count = 0x%llx\n",
 		     (unsigned int)arg2, arg3, arg4);
-		res = bin_comp_fd_write(arg2, (const char __user *)arg3, arg4);
+		res = bin_comp_fd_write(arg2, (const char __user __force *)arg3, arg4);
 		break;
 	case IS_BIN_COMP_FD_SET:
 		DebugSS("IS_BIN_COMP_SET: fd = %d\n", (unsigned int)arg2);
@@ -1242,7 +1242,7 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 	case SET_BIN_COMP_SEARCH_PATH:
 		DebugSS("SET_BIN_COMP_SEARCH_PATH: path = %s\n",
 			(const char *)arg2);
-		res = set_bin_comp_info_search_path((const char __user *)arg2);
+		res = set_bin_comp_info_search_path((const char __user __force *)arg2);
 		break;
 	case SET_CHILD_IS_SERVING_THREAD:
 		DebugSS("SET_CHILD_IS_SERVING_THREAD: cur val = 0x%x, val = 0x%x\n",
@@ -1269,7 +1269,7 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 		DebugSS("SEND_SIGNAL_TO_OUTMOST_TID: tid = %u, sig = %d, si = %llx\n",
 			(pid_t)arg2, (int)arg3, arg4);
 		res = send_signal_to_outmost_tid((pid_t)arg2, (int)arg3,
-						(siginfo_t __user *)arg4);
+						(siginfo_t __user __force *)arg4);
 		break;
 	case BIN_COMP_UFFD_IOCTL:
 		DebugSS("BIN_COMP_UFFD_IOCTL: fd = %u cmd = %u arg = %lu\n",
@@ -1291,12 +1291,12 @@ SYSCALL_DEFINE6(el_binary, s64, work,
 	case GET_MAP_INFO:
 		 DebugSS("GET_MAP_INFO: info = %lx num = %d start addr = %lx\n",
 			  (unsigned long)arg2, (int)arg3, (unsigned long)arg4);
-		 res = get_map_info((char __user *)arg2, (int)arg3, (unsigned long)arg4);
+		 res = get_map_info((char __user __force *)arg2, (int)arg3, (unsigned long)arg4);
 		 break;
 	case GET_FD_PATH:
 		DebugSS("GET_FD_PATH: fd = %d, buf = %lx, size = %u\n",
 				(int)arg2, (unsigned long)arg3, (int)arg4);
-		res = get_fd_path((int)arg2, (char __user *)arg3, (int)arg4);
+		res = get_fd_path((int)arg2, (char __user __force *)arg3, (int)arg4);
 		break;
 	case BIN_COMP_FD_OPEN:
 		DebugSS("BIN_COMP_FD_OPEN: place = %d\n", (int)arg2);

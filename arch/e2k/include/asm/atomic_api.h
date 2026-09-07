@@ -13,10 +13,6 @@
 #include <asm/cpu_features.h>
 #include <asm/native_dcache_regs_access.h>
 
-#ifdef	__KERNEL__
-
-#ifndef	__ASSEMBLY__
-
 /*
  * Special page that is accessible for reading by every user
  * process is used for hardware bug #89242 workaround.
@@ -32,10 +28,8 @@
 # ifdef E2K_FAST_SYSCALL
 #  define NATIVE_HWBUG_AFTER_LD_ACQ_CPU NATIVE_GET_DREG_OPEN(clkr)
 # else
-#  ifndef __ASSEMBLY__
-#   include <asm/glob_regs.h>
+#  include <asm/glob_regs.h>
 register unsigned long long __cpu_preempt_reg ASM_GREG(SMP_CPU_ID_GREG);
-#  endif
 #  define NATIVE_HWBUG_AFTER_LD_ACQ_CPU ((unsigned int) __cpu_preempt_reg)
 # endif
 
@@ -78,21 +72,21 @@ do { \
 			__hwbug_atomic_flags & ~(_UPSR_IE | _UPSR_NMIE)); \
 		NATIVE_CLEAN_LD_ACQ_ADDRESS(__reg1, __reg2, __hwbug_address); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 0 * 4096 + 0 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 0 * 4096 + 4 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 8 * 4096 + 1 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 8 * 4096 + 5 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 16 * 4096 + 2 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 16 * 4096 + 6 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 24 * 4096 + 3 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		NATIVE_WRITE_MAS_D(__hwbug_address + 24 * 4096 + 7 * 64, 0UL, \
-				MAS_DCACHE_LINE_FLUSH); \
+				MAS_CACHE_LINE_FLUSH); \
 		__E2K_WAIT(_fl_c); \
 		NATIVE_SET_UPSR_IRQ_BARRIER(__hwbug_atomic_flags); \
 	} \
@@ -326,9 +320,5 @@ do { \
 
 #define __api_atomic32_add_oldval_lock(val, addr) \
 		__api_atomic_fetch_op(val, addr, w, "adds", LOCK_MB)
-
-#endif /* ! __ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
 
 #endif /* _ASM_E2K_ATOMIC_API_H_ */

@@ -775,7 +775,7 @@ int get_sg_io_hdr(struct sg_io_hdr *hdr, const void __user *argp)
 			if (get_user_tagged_16(ap.qword, tag, &hdr128p->dxferp) ||
 			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hdr128.dxfer_len)
 				return -EFAULT;
-			hdr->dxferp = (void __user *)AP_PTR(ap);
+			hdr->dxferp = U_AP_PTR(ap);
 		} else {
 			hdr->dxferp = NULL;
 		}
@@ -783,7 +783,7 @@ int get_sg_io_hdr(struct sg_io_hdr *hdr, const void __user *argp)
 			if (get_user_tagged_16(ap.qword, tag, &hdr128p->cmdp) ||
 			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hdr128.cmd_len)
 				return -EFAULT;
-			hdr->cmdp = (void __user *)AP_PTR(ap);
+			hdr->cmdp = U_AP_PTR(ap);
 		} else {
 			hdr->cmdp = NULL;
 		}
@@ -791,7 +791,7 @@ int get_sg_io_hdr(struct sg_io_hdr *hdr, const void __user *argp)
 			if (get_user_tagged_16(ap.qword, tag, &hdr128p->sbp) ||
 			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < hdr128.mx_sb_len)
 				return -EFAULT;
-			hdr->sbp = (void __user *)AP_PTR(ap);
+			hdr->sbp = U_AP_PTR(ap);
 		} else {
 			hdr->sbp = NULL;
 		}
@@ -874,7 +874,7 @@ static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 			return -EFAULT;
 
 		*cgc = (struct cdrom_generic_command) {
-			.buffer		= (void *)AP_PTR(cgc128.buffer),
+			.buffer		= U_AP_PTR(cgc128.buffer),
 			.buflen		= cgc128.buflen,
 			.stat		= cgc128.stat,
 			.data_direction	= cgc128.data_direction,
@@ -886,7 +886,7 @@ static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 			if (get_user_tagged_16(ap.qword, tag, &arg128->buffer) ||
 			    !IS_AP(ap, tag) || AP_OBJ_SIZE(ap) < cgc128.buflen)
 				return -EFAULT;
-			cgc->buffer = (void __user *)AP_PTR(ap);
+			cgc->buffer = U_AP_PTR(ap);
 		} else {
 			cgc->buffer = NULL;
 		}
@@ -895,7 +895,7 @@ static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 		if (IS_AP(ap, tag)) {
 			if (AP_OBJ_SIZE(ap) < sizeof(struct request_sense))
 				return -EFAULT;
-			cgc->sense = (void __user *)AP_PTR(ap);
+			cgc->sense = U_AP_PTR(ap);
 		} else {
 			cgc->sense = NULL;
 		}
@@ -904,7 +904,7 @@ static int scsi_get_cdrom_generic_arg(struct cdrom_generic_command *cgc,
 		if (IS_AP(ap, tag)) {
 			if (AP_OBJ_SIZE(ap) < sizeof(struct request_sense))
 				return -EFAULT;
-			cgc->sense = (void __user *)AP_PTR(ap);
+			cgc->sense = U_AP_PTR(ap);
 		} else {
 			cgc->sense = NULL;
 		}

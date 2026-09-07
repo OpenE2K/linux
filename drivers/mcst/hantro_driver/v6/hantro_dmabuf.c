@@ -23,7 +23,7 @@
 #include "hantro_priv.h"
 
 int hantro_gem_prime_mmap(struct drm_gem_object *obj,
-				 struct vm_area_struct *vma);
+			  struct vm_area_struct *vma);
 
 static void hantro_gem_dmabuf_release(struct dma_buf *dma_buf)
 {

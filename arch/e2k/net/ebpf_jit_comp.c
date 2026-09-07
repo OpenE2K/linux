@@ -9,7 +9,6 @@
 
 #include <linux/filter.h>
 #include <linux/types.h>
-#include <asm/cpu_regs_types.h>
 #include <asm/cpu_regs.h>
 #include <asm/machdep.h>
 
@@ -462,7 +461,7 @@ static struct e2k_jit_data *alloc_jit_data(const struct bpf_prog *prog)
 
 	info->addrs = kvzalloc(sizeof(*info->addrs) * len, GFP_KERNEL);
 	if (!info->addrs) {
-		kfree(jit_data);
+		kvfree(jit_data);
 		return NULL;
 	}
 
@@ -480,8 +479,8 @@ static struct e2k_jit_data *alloc_jit_data(const struct bpf_prog *prog)
 
 	info->prologue = kvzalloc(alloc_size, GFP_KERNEL);
 	if (!info->prologue) {
-		kfree(info->addrs);
-		kfree(jit_data);
+		kvfree(info->addrs);
+		kvfree(jit_data);
 		return NULL;
 	}
 	info->prologue_len = prologue_num;
@@ -705,7 +704,7 @@ static inline u32 form_reg(const u8 n)
 	instr_als_t *fill_als_src_and_dst_syl_ptr = NULL; \
 	if ((fill_als_src_and_dst_syl_ptr = find_als(ptr, als_num)) != NULL) { \
 		FILL_OPERAND_SRC_DST(fill_als_src_and_dst_syl_ptr, src, dest, opce); \
-		FILL_OPERAND_SRC_DST(fill_als_src_and_dst_syl_ptr, src, dest, src2); \
+		FILL_OPERAND_SRC_DST(fill_als_src_and_dst_syl_ptr, src, dest, src2.word); \
 		FILL_OPERAND_SRC_DST(fill_als_src_and_dst_syl_ptr, src, dest, dst); \
 	} \
 })
@@ -1025,7 +1024,8 @@ static int build_call(void *ptr, const int pass, struct ebpf_prog_info *info,
 	ret = bpf_jit_get_func_addr(info->prog, instr, is_extra_pass(pass),
 				    &func_addr, &func_addr_fixed);
 	if (ret < 0)
-		BUG_ON(1);
+		return ret;
+
 	if (func_addr_fixed) {
 		size = BPF_JIT_COPY_ON_2ND_PASS(ebpf_jit_jmp_call_hlp, ptr, pass, cur);
 		if (is_first_pass(pass))
@@ -1079,7 +1079,8 @@ static int build_tail_call(void *ptr, int pass, const struct ebpf_prog_info *inf
  * This function is a huge switch that matches BPF instrution codes
  * to the corresponding template names. Depending in the value of `pass',
  * it just returns the length of the template or copies the template
- * to the allocated memory with some changes.
+ * to the allocated memory with some changes. A negative value is returned
+ * to indicate an error.
  */
 static int compile_single_instruction(void *ptr, const int pass,
 				      struct ebpf_prog_info *info, const unsigned int num,
@@ -1617,7 +1618,7 @@ static int compile_single_instruction(void *ptr, const int pass,
 		if (!is_codegen_pass(pass))
 			break;
 		if (!BPF_JIT_INSERT_DISP_JUMP(ebpf_jit_jmp_jle_k, ptr, off, cur) ||
-		    !BPF_JIT_INSERT_IMM(ebpf_jit_jmp32_jlt_k, ptr, imm, cur))
+		    !BPF_JIT_INSERT_IMM(ebpf_jit_jmp_jle_k, ptr, imm, cur))
 			return -EINVAL;
 		break;
 	case BPF_JMP32 | BPF_JLE | BPF_K:
@@ -2104,9 +2105,9 @@ image_alloc_err:
 	prog->aux->jit_data = NULL;
 	prog = orig_prog;
 free_and_exit:
-	kfree(bpf_prog_info->addrs);
-	kfree(bpf_prog_info->prologue);
-	kfree(jit_data);
+	kvfree(bpf_prog_info->addrs);
+	kvfree(bpf_prog_info->prologue);
+	kvfree(jit_data);
 exit:
 	if (blinded)
 		bpf_jit_prog_release_other(prog, prog == orig_prog ?

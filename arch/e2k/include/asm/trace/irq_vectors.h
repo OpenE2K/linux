@@ -197,28 +197,24 @@ DEFINE_IRQ_VECTOR_RESERVE_EVENT(vector_reserve);
 
 TRACE_EVENT(vector_alloc,
 
-	TP_PROTO(unsigned int irq, unsigned int vector, bool reserved,
-		 int ret),
+	TP_PROTO(unsigned int irq, unsigned int vector, int ret),
 
-	TP_ARGS(irq, vector, reserved, ret),
+	TP_ARGS(irq, vector, ret),
 
 	TP_STRUCT__entry(
 		__field(	unsigned int,	irq		)
 		__field(	unsigned int,	vector		)
-		__field(	bool,		reserved	)
 		__field(	int,		ret		)
 	),
 
 	TP_fast_assign(
 		__entry->irq		= irq;
 		__entry->vector		= ret < 0 ? 0 : vector;
-		__entry->reserved	= reserved;
 		__entry->ret		= ret > 0 ? 0 : ret;
 	),
 
-	TP_printk("irq=%u vector=%u reserved=%d ret=%d",
-		  __entry->irq, __entry->vector,
-		  __entry->reserved, __entry->ret)
+	TP_printk("irq=%u vector=%u ret=%d",
+		  __entry->irq, __entry->vector, __entry->ret)
 );
 
 TRACE_EVENT(vector_alloc_managed,
@@ -246,59 +242,52 @@ TRACE_EVENT(vector_alloc_managed,
 
 DECLARE_EVENT_CLASS(vector_activate,
 
-	TP_PROTO(unsigned int irq, bool is_managed, bool can_reserve,
-		 bool reserve),
+	TP_PROTO(unsigned int irq, bool is_managed, bool reserve),
 
-	TP_ARGS(irq, is_managed, can_reserve, reserve),
+	TP_ARGS(irq, is_managed, reserve),
 
 	TP_STRUCT__entry(
 		__field(	unsigned int,	irq		)
 		__field(	bool,		is_managed	)
-		__field(	bool,		can_reserve	)
 		__field(	bool,		reserve		)
 	),
 
 	TP_fast_assign(
 		__entry->irq		= irq;
 		__entry->is_managed	= is_managed;
-		__entry->can_reserve	= can_reserve;
 		__entry->reserve	= reserve;
 	),
 
-	TP_printk("irq=%u is_managed=%d can_reserve=%d reserve=%d",
-		  __entry->irq, __entry->is_managed, __entry->can_reserve,
-		  __entry->reserve)
+	TP_printk("irq=%u is_managed=%d reserve=%d",
+		  __entry->irq, __entry->is_managed, __entry->reserve)
 );
 
 #define DEFINE_IRQ_VECTOR_ACTIVATE_EVENT(name)				\
 DEFINE_EVENT_FN(vector_activate, name,					\
-	TP_PROTO(unsigned int irq, bool is_managed,			\
-		 bool can_reserve, bool reserve),			\
-	TP_ARGS(irq, is_managed, can_reserve, reserve), NULL, NULL);	\
+	TP_PROTO(unsigned int irq, bool is_managed, bool reserve),			\
+	TP_ARGS(irq, is_managed, reserve), NULL, NULL);	\
 
 DEFINE_IRQ_VECTOR_ACTIVATE_EVENT(vector_activate);
 DEFINE_IRQ_VECTOR_ACTIVATE_EVENT(vector_deactivate);
 
 TRACE_EVENT(vector_teardown,
 
-	TP_PROTO(unsigned int irq, bool is_managed, bool has_reserved),
+	TP_PROTO(unsigned int irq, bool is_managed),
 
-	TP_ARGS(irq, is_managed, has_reserved),
+	TP_ARGS(irq, is_managed),
 
 	TP_STRUCT__entry(
 		__field(	unsigned int,	irq		)
 		__field(	bool,		is_managed	)
-		__field(	bool,		has_reserved	)
 	),
 
 	TP_fast_assign(
 		__entry->irq		= irq;
 		__entry->is_managed	= is_managed;
-		__entry->has_reserved	= has_reserved;
 	),
 
-	TP_printk("irq=%u is_managed=%d has_reserved=%d",
-		  __entry->irq, __entry->is_managed, __entry->has_reserved)
+	TP_printk("irq=%u is_managed=%d",
+		  __entry->irq, __entry->is_managed)
 );
 
 TRACE_EVENT(vector_setup,

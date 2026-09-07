@@ -95,8 +95,8 @@ static inline unsigned long *e2c3_get_freq_table(const int f_pll)
 	}
 }
 
-static inline void e2c3_get_divF_limits(const char *reg, unsigned int *divF_limit_lo,
-									unsigned int *divF_limit_hi)
+static inline void e2c3_get_divF_limits(const volatile char __iomem *reg,
+					unsigned int *divF_limit_lo, unsigned int *divF_limit_hi)
 {
 	const unsigned int val = readl(reg + PMC_FREQ_CORE_MON_REGISTER);
 	*divF_limit_lo = (val & LIMIT_LO_MASK) >> DIV_F_LIMIT_LO_REGISTER_SHIFT;
@@ -106,47 +106,56 @@ static inline void e2c3_get_divF_limits(const char *reg, unsigned int *divF_limi
 static int e2c3_devfreq_provider_probe(struct platform_device *pdev)
 {
 	long err = 0;
-	const int f_pll = e2c3_get_f_pll(0);
 	struct resource *res = NULL;
-	char *reg = NULL;
+	char __iomem *reg_main = NULL;
+	char __iomem *reg = NULL;
 	unsigned int divF_limit_lo = 0;
 	unsigned int divF_limit_hi = 0;
 	struct e2c3_devfreq_provider *provider = NULL;
+	unsigned long *freq_table = NULL;
 
-	unsigned long *freq_table = e2c3_get_freq_table(f_pll);
-	if (unlikely(!freq_table)) {
-		print_debug_err("Wrong f_pll value=%d\n", &pdev->dev, f_pll);
-		return -EINVAL;
-	}
-
-#ifdef DEBUG
-	print_debug_info("f_pll=%d\n", &pdev->dev, f_pll);
-#endif
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (unlikely(IS_ERR_OR_NULL(res))) {
-		print_debug_err("Couldn`t get resource, res error=%ld\n", &pdev->dev, PTR_ERR(res));
-		return PTR_ERR(res);
-	}
+	for (int i = 0; i < 2; ++i) {
+		res = platform_get_resource(pdev, IORESOURCE_MEM, i);
+		if (unlikely(IS_ERR_OR_NULL(res))) {
+			print_debug_err("Couldn`t get resource, res error=%ld\n",
+							&pdev->dev, PTR_ERR(res));
+			return PTR_ERR(res);
+		}
 
 #ifdef DEBUG
-	print_debug_info("res->start=0x%llx, res->size=%lld\n",
-			&pdev->dev, res->start, resource_size(res));
+		print_debug_info("res->start=0x%llx, res->size=%lld\n",
+				&pdev->dev, res->start, resource_size(res));
 #endif
 
-	reg = devm_ioremap(&pdev->dev, res->start, resource_size(res));
-	if (unlikely(IS_ERR_OR_NULL(reg))) {
-		print_debug_err("Couldn`t remap resource, reg error=%ld\n",
-			&pdev->dev, PTR_ERR(reg));
-		return PTR_ERR(reg);
-	}
-
-	e2c3_get_divF_limits(reg, &divF_limit_lo, &divF_limit_hi);
-	if (unlikely((divF_limit_lo > MAX_DIVF_VALUE) ||
-		(divF_limit_hi > MAX_DIVF_VALUE) || (divF_limit_lo > divF_limit_hi))) {
-		print_debug_err("Wrong divF limits, divF_limit_lo=0x%x, divF_limit_hi=0x%x\n",
+		reg = devm_ioremap(&pdev->dev, res->start, resource_size(res));
+		if (!i)
+			reg_main = reg;
+		if (unlikely(IS_ERR_OR_NULL(reg))) {
+			print_debug_err("Couldn`t remap resource, reg error=%ld\n",
+				&pdev->dev, PTR_ERR(reg));
+			return PTR_ERR(reg);
+		}
+		if (!i) {
+			e2c3_get_divF_limits(reg, &divF_limit_lo, &divF_limit_hi);
+			if (unlikely((divF_limit_lo > MAX_DIVF_VALUE) ||
+						(divF_limit_hi > MAX_DIVF_VALUE) ||
+						(divF_limit_lo > divF_limit_hi))) {
+				print_debug_err("Wrong divF limits, divF_limit_lo=0x%x, divF_limit_hi=0x%x\n",
 						&pdev->dev, divF_limit_lo, divF_limit_hi);
-		return -EINVAL;
+				return -EINVAL;
+			}
+		} else {
+			const int f_pll = e2c3_get_f_pll(reg);
+			freq_table = e2c3_get_freq_table(f_pll);
+			if (unlikely(!freq_table)) {
+				print_debug_err("Wrong f_pll value=%d\n", &pdev->dev, f_pll);
+				return -EINVAL;
+			}
+#ifdef DEBUG
+			print_debug_info("f_pll=%d\n", &pdev->dev, f_pll);
+#endif
+			break;
+		}
 	}
 
 #ifdef DEBUG
@@ -166,7 +175,7 @@ static int e2c3_devfreq_provider_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	provider->reg = reg;
+	provider->reg = reg_main;
 	provider->freq_table = freq_table;
 	provider->dev = &pdev->dev;
 	provider->divF_limit_lo = divF_limit_lo;
@@ -215,5 +224,5 @@ static struct platform_driver e2c3_devfreq_provider_driver = {
 
 module_platform_driver(e2c3_devfreq_provider_driver);
 
-MODULE_AUTHOR("Semyon Baklitskiy, Semen.D.Baklitskiy@mcst.ru");
+MODULE_AUTHOR("MCST");
 MODULE_LICENSE("GPL");

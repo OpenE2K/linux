@@ -2958,6 +2958,9 @@ static int ice_ptp_port_cmd_e810(struct ice_hw *hw, enum ice_ptp_tmr_cmd cmd)
 		cmd_val = GLTSYN_CMD_ADJ_INIT_TIME;
 		break;
 	case ICE_PTP_NOP:
+#ifdef CONFIG_MCST
+	default:
+#endif
 		return 0;
 	}
 

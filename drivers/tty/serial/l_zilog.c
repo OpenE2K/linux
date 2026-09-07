@@ -25,7 +25,7 @@
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/console.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/mpspec.h>
 
 #define	NUM_L_ZILOGS	MAX_NUMIOHUBS

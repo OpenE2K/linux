@@ -37,7 +37,7 @@ struct smi_768_register{
 };
 
 
-mode_parameter_t convert_drm_mode_to_ddk_mode(struct drm_display_mode mode)
+static mode_parameter_t convert_drm_mode_to_ddk_mode(struct drm_display_mode mode)
 {
 	mode_parameter_t modeP;
 
@@ -66,7 +66,7 @@ mode_parameter_t convert_drm_mode_to_ddk_mode(struct drm_display_mode mode)
 }
 
 
-
+void hw768_enable_lvds(int channels);   /* just to satisfy sparse */
 void hw768_enable_lvds(int channels)
 {
 	if(channels == 1){	
@@ -127,6 +127,7 @@ void ddk768_setDisplayPlaneDisableOnly(
 
 
 
+void hw768_suspend(struct smi_768_register * pSave);
 void hw768_suspend(struct smi_768_register * pSave)
 {
 
@@ -150,6 +151,7 @@ void hw768_suspend(struct smi_768_register * pSave)
 
 }
 
+void hw768_resume(struct smi_768_register * pSave);
 void hw768_resume(struct smi_768_register * pSave)
 {
 
@@ -171,6 +173,9 @@ void hw768_resume(struct smi_768_register * pSave)
 		pokeRegisterDWord(0x8000 + HWC_CONTROL + i * 4, pSave->secondary_hwcurs_ctrl[i]);
 
 }
+
+
+void hw768_set_base(int display,int pitch,int base_addr);
 void hw768_set_base(int display,int pitch,int base_addr)
 {	
 
@@ -209,12 +214,15 @@ void hw768_set_base(int display,int pitch,int base_addr)
 	}
 }
 
-
+void hw768_init_hdmi(void );  /* just to satisfy sparse */
 void hw768_init_hdmi(void)
 {
 	HDMI_Init();
 }
 
+
+/* just to satisfy sparse */
+int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode, struct drm_display_mode mode, bool isHDMI);
 int hw768_set_hdmi_mode(logicalMode_t *pLogicalMode, struct drm_display_mode mode, bool isHDMI)
 {
 	int ret = 1;
@@ -247,6 +255,7 @@ int hw768_en_dis_interrupt(int status, int pipe)
 	return 0;
 }
 #else
+int hw768_en_dis_interrupt(int status);  /* just to satisfy sparse */
 int hw768_en_dis_interrupt(int status)
 	{
 		if(status == 0)
@@ -274,7 +283,7 @@ void hw768_HDMI_Disable_Output(void)
 	HDMI_Disable_Output();
 }
 
-
+#if 0
 int hw768_get_hdmi_edid(unsigned char *pEDIDBuffer)
 {
     int ret;
@@ -284,7 +293,9 @@ int hw768_get_hdmi_edid(unsigned char *pEDIDBuffer)
 
     return ret;
 }
+#endif
 
+int hw768_check_iis_interrupt(void );  /* just to satisfy sparse */
 int hw768_check_iis_interrupt(void)
 {
 
@@ -299,7 +310,7 @@ int hw768_check_iis_interrupt(void)
 		return false;
 }
 
-
+int hw768_check_vsync_interrupt(int path);  /* just to satisfy sparse */
 int hw768_check_vsync_interrupt(int path)
 {
 
@@ -326,7 +337,7 @@ int hw768_check_vsync_interrupt(int path)
 	return false;
 }
 
-
+void hw768_clear_vsync_interrupt(int path);  /* just to satisfy sparse */
 void hw768_clear_vsync_interrupt(int path)
 {
 	
@@ -344,6 +355,8 @@ void hw768_clear_vsync_interrupt(int path)
 	}
 }
 
+/* just to satisfy sparse */
+long hw768_setMode(logicalMode_t *pLogicalMode, struct drm_display_mode mode);
 long hw768_setMode(logicalMode_t *pLogicalMode, struct drm_display_mode mode)
 {
 	
@@ -359,7 +372,7 @@ long hw768_setMode(logicalMode_t *pLogicalMode, struct drm_display_mode mode)
 }
 
 
-int hdmi_int_status = 0;
+static int hdmi_int_status = 0;
 
 inline int hdmi_hotplug_detect(void)
 {
@@ -390,6 +403,7 @@ inline int hdmi_hotplug_detect(void)
 	return hdmi_int_status;
 }
 
+void ddk768_disable_IntMask(void );   /* just to satisfy sparse */
 void ddk768_disable_IntMask(void)
 {
 	
@@ -419,6 +433,8 @@ void hw768_SetPixelClockFormat(disp_control_t dispControl,unsigned int is_half)
     pokeRegisterDWord(ulDispCtrlAddr, ulDispCtrlReg);
 }
 
+/* just to satisfy sparse */
+void hw768_setgamma(disp_control_t dispCtrl, unsigned long enable, unsigned long lvds_ch);
 void hw768_setgamma(disp_control_t dispCtrl, unsigned long enable, unsigned long lvds_ch)
 {
 	unsigned long value;
@@ -443,6 +459,8 @@ void hw768_setgamma(disp_control_t dispCtrl, unsigned long enable, unsigned long
 	pokeRegisterDWord(regCtrl, value);    
 }
 
+/* just to satisfy sparse */
+void hw768_load_lut(disp_control_t dispCtrl, int size, u8 lut_r[], u8 lut_g[], u8 lut_b[]);
 void hw768_load_lut(disp_control_t dispCtrl, int size, u8 lut_r[], u8 lut_g[], u8 lut_b[])
 {
 	unsigned int i, v;

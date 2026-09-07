@@ -14,6 +14,7 @@
 #include <linux/thread_info.h>
 
 #include <asm/alternative.h>
+#include <asm/compiler.h>
 #include <asm/errno.h>
 #include <asm/page.h>
 #include <asm/e2k_api.h>
@@ -76,7 +77,8 @@ static inline bool pagefault_disabled(void);
 #define __access_priv_ok(addr, size) \
 ({ \
 	__chk_priv_ptr(addr); \
-	likely(__range_ok((unsigned long) (addr), (size), PAGE_OFFSET)); \
+	likely((unsigned long)(addr) >= user_addr_max() &&\
+	       __range_ok((unsigned long) (addr), (size), PAGE_OFFSET)); \
 })
 
 #define access_priv_ok(addr, size) \
@@ -115,7 +117,6 @@ struct exception_table_entry
 
 #define __UFN_DECL(t, a)	t a
 #define __UFN_ARGS(t, a)	a
-
 
 /*
  * The macros to work safely in kernel with user memory.
@@ -166,7 +167,8 @@ struct exception_table_entry
 	static __always_inline long __uaccess_##name##_body( \
 			__MAP_UFN_ARGS(x,__UFN_DECL,args)); \
 	STATIC_FN __section(".uaccess_functions") \
-	/* There are places in kernel which: \
+	/* \
+	 * There are places in kernel which: \
 	 *  - call pagefault_disable(); \
 	 *  - call some user access function; \
 	 *  - manually fault-in any missing pages. \
@@ -174,10 +176,8 @@ struct exception_table_entry
 	 * only the memory it was explicitly asked to, thus such \
 	 * functions must not use semi-speculative loads.  To make \
 	 * sure this is the case, we disable corresponding mode. \
-	 * \
-	 * TODO bug 140465 - replace O1 with only needed options */ \
-	__attribute__((optimize("O1"))) \
-	noinline notrace __must_check long __uaccess_##name( \
+	 */ \
+	noinline notrace __must_check __no_semispec long __uaccess_##name( \
 			__MAP_UFN_ARGS(x,__UFN_DECL,args)) \
 	{ \
 		e2k_madmr_t madmr = E2K_MADMR_EMPTY; \
@@ -329,8 +329,76 @@ static inline int from_uaccess_allowed_code(const struct pt_regs *regs)
 	return false;
 }
 
-extern bool handle_uaccess_trap(struct pt_regs *regs, bool exc_diag);
-extern bool handle_kernel_macp_trap(struct pt_regs *regs);
+extern bool handle_uaccess_trap(struct pt_regs *regs, bool skip_get_user);
+
+
+extern int __noreturn __put_kernel_bad(void);
+
+#define __put_kernel_nofault(dst, src, type, err_label) \
+do { \
+	u64 __x = (u64)(*(type *)(src)); \
+	int __ret_pk; \
+ \
+	switch (sizeof(type)) { \
+	case 1: \
+		__ret_pk = PUT_KERNEL_ASM(__x, (type *)(src), b); \
+		break; \
+	case 2: \
+		__ret_pk = PUT_KERNEL_ASM(__x, (type *)(src), h); \
+		break; \
+	case 4: \
+		__ret_pk = PUT_KERNEL_ASM(__x, (type *)(src), w); \
+		break; \
+	case 8: \
+		__ret_pk = PUT_KERNEL_ASM(__x, (type *)(src), d); \
+		break; \
+	default: \
+		__ret_pk = -EFAULT; __put_kernel_bad(); break; \
+	} \
+ \
+	if (unlikely(__ret_pk)) \
+		goto err_label; \
+} while (0)
+
+
+extern int __noreturn __get_kernel_bad(void);
+
+#define __get_kernel_nofault(dst, src, type, err_label) \
+do { \
+	int __ret_gk; \
+ \
+	switch (sizeof(type)) { \
+	case 1: { \
+		u8 __x; \
+		GET_KERNEL_ASM(__x, (type *)(src), __ret_gk, b); \
+		*((type *)(dst)) = (type)__x; \
+		break; \
+	} \
+	case 2: { \
+		u16 __x; \
+		GET_KERNEL_ASM(__x, (type *)(src), __ret_gk, h); \
+		*((type *)(dst)) = (type)__x; \
+		break; \
+	} \
+	case 4: { \
+		u32 __x; \
+		GET_KERNEL_ASM(__x, (type *)(src), __ret_gk, w); \
+		*((type *)(dst)) = (type)__x; \
+		break; \
+	} \
+	case 8: { \
+		u64 __x; \
+		GET_KERNEL_ASM(__x, (type *)(src), __ret_gk, d); \
+		*((type *)(dst)) = (type)__x; \
+		break; \
+	} \
+	default: \
+		__ret_gk = -EFAULT; __get_kernel_bad(); break; \
+	} \
+ \
+	if (unlikely(__ret_gk)) \
+		goto err_label; \
+} while (0)
 
 /*
  * These are the main single-value transfer routines.  They automatically
@@ -697,10 +765,15 @@ copy_in_user(void __user *to, const void __user *from, unsigned long n)
 	return n;
 }
 
-extern __must_check unsigned long raw_copy_in_user_with_tags(void __user *to,
-		const void __user *from, unsigned long n);
+
+
+
+
+extern __must_check unsigned long raw_copy_in_user_with_tags(volatile void __user *to,
+		const volatile void __user *from, unsigned long n);
+
 static inline __must_check
-unsigned long copy_in_user_with_tags(void __user *to, const void __user *from,
+unsigned long copy_in_user_tagged(volatile void __user *to, const volatile void __user *from,
 				     unsigned long n)
 {
 	if (likely(access_ok(from, n) && access_ok(to, n)))
@@ -709,10 +782,14 @@ unsigned long copy_in_user_with_tags(void __user *to, const void __user *from,
 	return n;
 }
 
-extern __must_check unsigned long raw_copy_to_user_with_tags(void __user *to,
-		const void *from, unsigned long n);
+
+
+
+extern __must_check unsigned long raw_copy_to_user_with_tags(volatile void __user *to,
+		const volatile void *from, unsigned long n);
+
 static inline __must_check
-unsigned long copy_to_user_with_tags(void __user *to, const void *from,
+unsigned long copy_to_user_tagged(volatile void __user *to, const volatile void *from,
 				     unsigned long n)
 {
 	if (access_ok(to, n))
@@ -721,10 +798,14 @@ unsigned long copy_to_user_with_tags(void __user *to, const void *from,
 	return n;
 }
 
-extern __must_check unsigned long raw_copy_from_user_with_tags(void *to,
-		const void __user *from, unsigned long n);
+
+
+
+extern __must_check unsigned long raw_copy_from_user_with_tags(volatile void *to,
+		const volatile void __user *from, unsigned long n);
+
 static inline __must_check
-unsigned long copy_from_user_with_tags(void *to, const void __user *from,
+unsigned long copy_from_user_tagged(volatile void *to, const volatile void __user *from,
 				       unsigned long n)
 {
 	if (access_ok(from, n))
@@ -732,6 +813,9 @@ unsigned long copy_from_user_with_tags(void *to, const void __user *from,
 
 	return n;
 }
+
+
+
 
 #define strlen_user(str) strnlen_user(str, ~0UL >> 1)
 __must_check long strnlen_user(const char __user *str, long count) __pure;
@@ -762,8 +846,11 @@ __must_check unsigned long __fill_user_with_tags(void __user *dst,
 static inline __must_check unsigned long
 fill_user_with_tags(void __user *to, unsigned long n, unsigned long tag, unsigned long dw)
 {
-	ldst_rec_op_t opc = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT, .mas = MAS_BYPASS_L1_CACHE,
-					      .prot = 1 };
+	ldst_rec_op_t opc = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_BYPASS_L1_CACHE,
+		.prot = 1,
+	};
 	int ret = 0;
 
 	if (!access_ok(to, n))
@@ -1046,13 +1133,34 @@ copy_in_priv(void __priv *to, const void __priv *from, unsigned long n)
 }
 
 /**
+ * copy_in_priv_tagged - tagged copy in __priv area
+ * @to: __priv destination
+ * @from: __priv source
+ * @n: length to copy
+ */
+static inline __must_check unsigned long
+copy_in_priv_tagged(volatile void __priv *to, const volatile void __priv *from, unsigned long n)
+{
+	unsigned long left, ts_flag;
+
+	if (unlikely(!access_priv_ok(from, n) || !access_priv_ok(to, n)))
+		return n;
+
+	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+	left = raw_copy_in_user_with_tags((volatile void __force __user *) to,
+			(const volatile void __force __user *) from, n);
+	clear_ts_flag(ts_flag);
+	return left;
+}
+
+/**
  * copy_to_priv_tagged - tagged copy to __priv area
  * @to: __priv destination
  * @from: kernel source
  * @n: length to copy
  */
 static inline __must_check unsigned long
-copy_to_priv_tagged(void __priv *to, const void *from, unsigned long n)
+copy_to_priv_tagged(volatile void __priv *to, const volatile void *from, unsigned long n)
 {
 	unsigned long left, ts_flag;
 
@@ -1060,7 +1168,7 @@ copy_to_priv_tagged(void __priv *to, const void *from, unsigned long n)
 		return n;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_to_user_with_tags((void __force __user *) to, from, n);
+	left = raw_copy_to_user_with_tags((volatile void __force __user *) to, from, n);
 	clear_ts_flag(ts_flag);
 	return left;
 }
@@ -1072,7 +1180,7 @@ copy_to_priv_tagged(void __priv *to, const void *from, unsigned long n)
  * @n: length to copy
  */
 static inline __must_check unsigned long
-copy_from_priv_tagged(void *to, const void __priv *from, unsigned long n)
+copy_from_priv_tagged(volatile void *to, const volatile void __priv *from, unsigned long n)
 {
 	unsigned long left, ts_flag;
 
@@ -1092,7 +1200,8 @@ copy_from_priv_tagged(void *to, const void __priv *from, unsigned long n)
  * @n: length to copy
  */
 static inline __must_check unsigned long
-copy_priv_to_user_tagged(void __user *to, const void __priv *from, unsigned long n)
+copy_priv_to_user_tagged(volatile void __user *to,
+			 const volatile void __priv *from, unsigned long n)
 {
 	unsigned long left, ts_flag;
 
@@ -1100,7 +1209,7 @@ copy_priv_to_user_tagged(void __user *to, const void __priv *from, unsigned long
 		return n;
 
 	ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
-	left = raw_copy_in_user_with_tags(to, (const void __force __user *) from, n);
+	left = raw_copy_in_user_with_tags(to, (const volatile void __force __user *) from, n);
 	clear_ts_flag(ts_flag);
 	return left;
 }
@@ -1149,42 +1258,54 @@ clear_priv(void __priv *to, unsigned long n)
 #ifdef CONFIG_PROTECTED_MODE
 
 static __always_inline e2k_ap_t
-new_ap(u64 base, u64 size, u64 ind, u64 rw)
+new_ap_no_check(u64 base, u64 size, u64 ind, u64 rw)
 {
-	if (unlikely(!access_ok((void __user *)base, size))) {
-		base = 0;
-		size = 1; /* For v7 maxind */
-		ind = 0;
-		rw = 0;
-	}
-
+	e2k_ap_t ap;
 	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		e2k_ap_t ap = (e2k_ap_t){.qword = NEW_V7_CPU_REG(base, ind, size)};
+		if (!size) {
+			/* special case of v7 zero length AP */
+			size = 1;
+			ind = 0;
+			rw = 0;
+		}
+		ap = (e2k_ap_t){.qword = NEW_V7_CPU_REG(base, ind, size)};
 		ap.rw_v7 = rw;
 		ap.itag_v7 = ITAG_AP;
-		return ap;
 	} else {
-		e2k_ap_t ap = (e2k_ap_t) {.Base	= base, .Size	= size, .Curptr	= ind};
+		ap = (e2k_ap_t) {.Base	= base, .Size	= size, .Curptr	= ind};
 		ap.rw_v6 = rw;
 		ap.itag_v6 = E2K_AP_ITAG;
-		return ap;
 	}
+	return ap;
 }
 
-#define AP_NULL(ap, tag)	(!tag && !LO(ap))
-#define MAKE_AP_RW(base, len, rw)      new_ap((u64)(base), (u64)(len), 0, rw)
-#define MAKE_AP(base, len)      MAKE_AP_RW(base, len, RW_ENABLE)
+static __always_inline e2k_ap_t
+new_ap(u64 base, u64 size, u64 ind, u64 rw)
+{
+	if (likely(size)) {
+		if (unlikely(!access_ok((void __user __force *)base, size))) {
+			base = 0;
+			size = 0;
+			ind = 0;
+			rw = 0;
+		}
+	}
+	return new_ap_no_check(base, size, ind, rw);
+}
 
-#define MAKE_TAGGED_AP_RW(ap, tag, base, len, rw)			\
+#define MAKE_FAKE_AP(base)		new_ap_no_check((unsigned long)(base), 0, 0, 0)
+#define AP_NULL(ap, tag)		(!tag && !LO(ap))
+#define MAKE_AP_RW(base, len, ind, rw)	new_ap((unsigned long)(base), (u64)(len), ind, rw)
+#define MAKE_AP(base, len)		MAKE_AP_RW((base), (len), 0, RW_ENABLE)
+#define MAKE_AP_IND(base, len, ind)	MAKE_AP_RW((base), (len), (ind), RW_ENABLE)
+
+#define MAKE_TAGGED_AP_RW(ap, tag, base, len, ind, rw)		\
 {								\
-	ap = new_ap((u64)(base), (u64)(len), 0, RW_ENABLE);	\
-	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {			\
-		tag = ETAGAPQ_V7;				\
-	} else {						\
-		tag = ETAGAPQ_V6;				\
-	}							\
+	ap = new_ap((u64)(base), (u64)(len), (ind), (rw));	\
+	tag = ETAGAPQ;						\
 }
-#define MAKE_TAGGED_AP(ap, tag, base, len)	MAKE_TAGGED_AP_RW(ap, tag, base, len, RW_ENABLE)
+#define MAKE_TAGGED_AP(ap, tag, base, len, ind) \
+			MAKE_TAGGED_AP_RW(ap, tag, base, len, 0, RW_ENABLE)
 
 
 static inline __must_check int PUT_USER_AP(e2k_ptr_t __user *ptr, u64 base,
@@ -1197,10 +1318,10 @@ static inline __must_check int PUT_USER_AP(e2k_ptr_t __user *ptr, u64 base,
 		return -EFAULT;
 
 	if (base == 0) {
-		tmp = new_ap(0, 0, 0, 0);
-		tag = ETAGNVQ;
+		tmp = MAKE_FAKE_AP(0);
+		tag = ETAGNPQ;
 	} else {
-		tmp = new_ap(base, len, off, rw);
+		tmp = MAKE_AP_RW(base, len, off, rw);
 		tag = ETAGAPQ;
 	}
 
@@ -1262,4 +1383,50 @@ static inline __must_check size_t native_fast_tagged_memory_copy_from_user(
 	return copied;
 }
 
+static inline size_t fast_tagged_memory_copy_from_priv(volatile void *dst,
+						       const volatile void __priv *src, size_t len,
+						       int prefetch)
+{
+	size_t copied;
+	ldst_rec_op_t strd_opcode = ldst_rec_qword();
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
+		.prot = 1,
+	};
+
+	unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+
+	SET_USR_PFAULT("$recovery_memcpy_fault", false);
+	copied = native_fast_tagged_memory_copy((void __force *)dst, (const void __force *)src, len,
+						 strd_opcode, ldrd_opcode, prefetch);
+	RESTORE_USR_PFAULT(false);
+
+	clear_ts_flag(ts_flag);
+
+	return copied;
+}
+
+static inline size_t fast_memory_copy_from_priv(void *dst, const void __priv *src, size_t len,
+						       int prefetch)
+{
+	size_t copied;
+	ldst_rec_op_t strd_opcode = ldst_rec_qword();
+	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
+		.fmt = LDST_QWORD_FMT,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
+		.prot = 1,
+	};
+
+	unsigned long ts_flag = set_ts_flag(TS_KERNEL_SYSCALL);
+
+	SET_USR_PFAULT("$recovery_memcpy_fault", false);
+	copied = native_fast_tagged_memory_copy(dst, (const void __force *)src, len,
+						 strd_opcode, ldrd_opcode, prefetch);
+	RESTORE_USR_PFAULT(false);
+
+	clear_ts_flag(ts_flag);
+
+	return copied;
+}
 #endif /* _E2K_UACCESS_H_ */

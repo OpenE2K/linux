@@ -6,8 +6,6 @@
 #ifndef _E2K_SIC_REGS_ACCESS_H_
 #define _E2K_SIC_REGS_ACCESS_H_
 
-#ifdef __KERNEL__
-
 #include <asm/io.h>
 #include <asm/e2k_sic.h>
 
@@ -100,7 +98,5 @@ extern u64 mc_enabled_mask[MAX_NUMNODES];
 		for_each_mc_enabled_of_node(node, (mc))
 
 #include <asm-l/sic_regs_access.h>
-
-#endif	/* __KERNEL__ */
 
 #endif  /* _E2K_SIC_REGS_ACCESS_H_ */

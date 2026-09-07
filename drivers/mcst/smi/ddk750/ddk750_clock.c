@@ -187,7 +187,7 @@ unsigned long formatPllReg(pll_value_t *pPLL)
  *      The actual clock value calculated, together with the values of
  *      PLL register stored in the pPLL pointer.
  */
-unsigned long getPllValue(clock_type_t clockType, pll_value_t *pPLL)
+static unsigned long getPllValue(clock_type_t clockType, pll_value_t *pPLL)
 {
     unsigned long ulPllReg = 0;
 
@@ -441,6 +441,8 @@ unsigned long getMasterClock(void)
         case CURRENT_GATE_MCLK_DIV_8:
             divisor = 8;
             break;
+	default:
+		return 0;
     }
 
     return (getChipClock() / divisor);
@@ -479,6 +481,8 @@ unsigned long getMemoryClock(void)
         case CURRENT_GATE_M2XCLK_DIV_4:
             divisor = 4;
             break;
+	default:
+		return 0;
     }
 
     return (getChipClock() / divisor);

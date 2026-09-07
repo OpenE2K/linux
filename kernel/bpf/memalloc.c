@@ -489,7 +489,11 @@ static void destroy_mem_alloc(struct bpf_mem_alloc *ma, int rcu_in_progress)
 void bpf_mem_alloc_destroy(struct bpf_mem_alloc *ma)
 {
 	struct bpf_mem_caches *cc;
+#ifdef CONFIG_MCST
+	struct bpf_mem_cache *c = NULL;
+#else
 	struct bpf_mem_cache *c;
+#endif
 	int cpu, i, rcu_in_progress;
 
 	if (ma->cache) {

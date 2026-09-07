@@ -492,7 +492,7 @@ void mxgbe_i2c_wr(struct i2c_adapter *adapter, u8 slave_addr, u8 addr, u8 val)
 } /* mxgbe_i2c_wr */
 
 
-u64 mxgbe_i2c_read_mac(mxgbe_priv_t *priv)
+__be64 mxgbe_i2c_read_mac(mxgbe_priv_t *priv)
 {
 	int i;
 	u8 v8;
@@ -508,6 +508,6 @@ u64 mxgbe_i2c_read_mac(mxgbe_priv_t *priv)
 			mac |= v8;
 		}
 	}
-
-	return mac;
+	mac = mac <<16;
+	return cpu_to_be64(mac);
 } /* mxgbe_i2c_read_mac */

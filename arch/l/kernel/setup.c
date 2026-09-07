@@ -9,32 +9,19 @@
 #include <linux/fb.h>
 #include <linux/pci.h>
 #include <linux/console.h>
-#include <linux/screen_info.h>
 #include <linux/vgaarb.h>
 #include <linux/pci_ids.h>
 #include <linux/random.h>
 #include <linux/memblock.h>
 #include <linux/sort.h>
+#include <video/vga.h>
 #include <asm/bootinfo.h>
 #include <asm/io.h>
 #include <asm/console.h>
+#include <asm/setup.h>
+#include <asm/fb.h>
 
 #include "../../../drivers/pci/pci.h"
-
-struct screen_info screen_info = {
-	.orig_x = 0,
-	.orig_y = 25,
-	.orig_video_page = 0,
-	.orig_video_mode = 7,
-	.orig_video_cols = 80,
-	.orig_video_lines = 25,
-	.orig_video_isVGA = 1,
-	.orig_video_points = 16
-};
-EXPORT_SYMBOL(screen_info);
-
-#define VGA_FB_PHYS 0xA0000
-#define VGA_FB_PHYS_LEN 65536
 
 int fb_is_primary_device(struct fb_info *info)
 {
@@ -49,7 +36,7 @@ int fb_is_primary_device(struct fb_info *info)
 	if (!pci_dev) {
 		struct apertures_struct *gen_aper = info->apertures;
 		if (gen_aper && gen_aper->count &&
-				gen_aper->ranges[0].base == VGA_FB_PHYS)
+				gen_aper->ranges[0].base == VGA_FB_PHYS_BASE)
 			return 1;
 		return 0;
 	}
@@ -68,39 +55,6 @@ int fb_is_primary_device(struct fb_info *info)
 	return 0;
 }
 EXPORT_SYMBOL(fb_is_primary_device);
-
-void __init l_setup_vga(void)
-{
-	boot_info_t *boot_info = &bootblock_virt->info;
-#ifdef CONFIG_VT
-#ifdef CONFIG_VGA_CONSOLE
-	struct device_node *root;
-	const char *model = "";
-#endif
-#ifdef CONFIG_DUMMY_CONSOLE
-	conswitchp = &dummy_con;
-#endif
-#ifdef CONFIG_VGA_CONSOLE
-	if (memblock_is_region_memory(VGA_FB_PHYS, VGA_FB_PHYS_LEN)) {
-		pr_info("Legacy VGA MMIO range routes to system memory.");
-		return;
-	}
-
-	root = of_find_node_by_path("/");
-	of_property_read_string(root, "model", &model);
-	/* tablet displays garbage */
-	if (!strcmp(model, "e1c+,mcst,e1cmt,tablet")) {
-		of_node_put(root);
-		return;
-	}
-	of_node_put(root);
-	conswitchp = &vga_con;
-#endif	/*CONFIG_VGA_CONSOLE*/
-#endif /*CONFIG_VT*/
-	if (boot_info->vga_mode != 0xe2) /* new boot */
-		screen_info.orig_video_mode = boot_info->vga_mode;
-}
-
 
 #define L_MAC_MAX 32
 static unsigned char l_base_mac_addr[6] = {0};
@@ -273,12 +227,12 @@ static int get_long_option(char **str, u64 *pint)
 
 static int __init machine_mac_addr_setup(char *str)
 {
-	u64 machine_mac_addr;
+	__be64 machine_mac_addr;
 	if (!strcmp(str, "new")) {
 		l_get_all_mac_addr_from_boot = 1;
 	} else if (!strcmp(str, "old")) {
 		l_get_all_mac_addr_from_boot = 0;
-	} else if (get_long_option(&str, &machine_mac_addr)) {
+	} else if (get_long_option(&str, (u64 *)&machine_mac_addr)) {
 		u64 tmp = be64_to_cpu(machine_mac_addr);
 		memcpy(l_base_mac_addr, ((u8 *)&tmp) + 2,
 					sizeof(l_base_mac_addr));

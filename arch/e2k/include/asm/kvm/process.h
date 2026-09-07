@@ -20,34 +20,10 @@
 #include <asm/kvm/page.h>
 #include <asm/kvm/switch.h>
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern int kvm_correct_guest_trap_return_ip(unsigned long return_ip, struct kvm *kvm);
 
 extern long return_pv_vcpu_syscall_fork(u64 sys_rval);
-
-/*
- * Is the CPU at guest Hardware Virtualized mode
- * CORE_MODE.gmi is true only at guest HV mode
- */
-static inline bool is_CPU_at_guest_hv_vm_mode(void)
-{
-	e2k_core_mode_t CORE_MODE;
-
-	CORE_MODE = native_read_CORE_MODE_reg();
-	if (CORE_MODE.gmi) {
-		return true;
-	}
-	return false;
-}
-
-#ifdef	CONFIG_KVM_HOST_MODE
-/* it is native host kernel with virtualization support */
-static inline bool host_is_at_HV_GM_mode(void)
-{
-	if (unlikely(!IS_HV_GM() && is_CPU_at_guest_hv_vm_mode()))
-		return true;
-	return false;
-}
-#endif /* CONFIG_KVM_HOST_MODE */
 
 static __always_inline bool
 is_guest_user_hardware_stack(e2k_addr_t stack_base, e2k_size_t stack_size)
@@ -149,16 +125,14 @@ static inline void kvm_clear_virt_thread_struct(thread_info_t *ti)
 	ti->gthread_info = NULL;
 }
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 /* host kernel with virtualization support */
 
 #define	UPDATE_VCPU_THREAD_CONTEXT(__task, __ti, __regs, __gti, __vcpu)	\
 		KVM_HOST_UPDATE_VCPU_THREAD_CONTEXT(__task, __ti, __regs, \
 						__gti, __vcpu)
-#define	CHECK_VCPU_THREAD_CONTEXT(__ti)	\
-		KVM_HOST_CHECK_VCPU_THREAD_CONTEXT(__ti)
 
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
 
 /*
  * Set global registers used by host to support virtualization
@@ -166,12 +140,11 @@ static inline void kvm_clear_virt_thread_struct(thread_info_t *ti)
  */
 #ifndef	CONFIG_USE_GD_TO_VCPU_ACCESS
 #define	SET_HOST_GREG(greg_no, value)	NATIVE_SET_DGREG(greg_no, value)
-#define	GET_HOST_GREG(greg_no)		NATIVE_GET_UNTEGGED_DGREG(greg_no)
 #else /* CONFIG_USE_GD_TO_VCPU_ACCESS */
 # error	"Global pointer to VCPU state can not be loadded to GD register"
 #endif /* ! CONFIG_USE_GD_TO_VCPU_ACCESS */
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 /* it is host kernel with virtualization support */
 
 #define	GET_GUEST_VCPU_STATE_POINTER(__vcpu)				\
@@ -194,7 +167,7 @@ static inline void kvm_clear_virt_thread_struct(thread_info_t *ti)
 	vs = TO_GUEST_VCPU_STATE_PHYS_POINTER(__vcpu);			\
 	if (!IS_INVALID_GPA(vs)) {					\
 		if (is_paging(__vcpu))					\
-			vs = (gpa_t)__guest_va(vs);			\
+			vs = __guest_gpa(vs);			\
 	}								\
 	(gva_t)vs;							\
 })
@@ -214,7 +187,6 @@ static inline void kvm_clear_virt_thread_struct(thread_info_t *ti)
 	INIT_HOST_VCPU_STATE_GREG_COPY(__ti, vcpu);			\
 })
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static __always_inline void
 host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 {
@@ -260,7 +232,6 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 		pv_vcpu_switch_to_host_from_intc(current_thread_info());
 	}
 }
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_SMP
 #define	SAVE_GUEST_KERNEL_GREGS_COPY_TO(__k_gregs, __g_gregs,		\
@@ -364,24 +335,15 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 	INIT_HOST_VCPU_STATE_GREG_COPY(__ti, __vcpu);			\
 })
 
-/*
- * The function completes on host switch to new user process (sys_execve())
- * of guest kernel.
- */
-static __always_inline __interrupt void kvm_complete_switch_to_user_func(void)
-{
-	/* set initial state of user UPSR and in a local IRQ mask mode */
-	/* the function should switch interrupt control from UPSR to PSR */
-	NATIVE_SET_USER_INITIAL_UPSR();
-}
-#else /* ! CONFIG_KVM_HOST_MODE */
+#else /* ! CONFIG_KVM_HOST_KERNEL */
 /* it is native kernel without any virtualization or */
 /* virtualized guest kernel */
 
 #define	INIT_HOST_VCPU_STATE_GREG_COPY(__ti, __vcpu)
 #define	INIT_HOST_GREGS_COPY(__ti, __vcpu)
 
-#endif /* CONFIG_KVM_HOST_MODE */
+#endif /* CONFIG_KVM_HOST_KERNEL */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is virtualized guest kernel */
@@ -390,20 +352,17 @@ static __always_inline __interrupt void kvm_complete_switch_to_user_func(void)
 /* it is host kernel with virtualization support */
 #define	usd_cannot_be_expanded(regs)	kvm_usd_cannot_be_expanded(regs)
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void clear_virt_thread_struct(thread_info_t *thread_info)
 {
 	kvm_clear_virt_thread_struct(thread_info);
-}
-
-static __always_inline __interrupt void complete_switch_to_user_func(void)
-{
-	kvm_complete_switch_to_user_func();
 }
 
 static inline void free_virt_task_struct(struct task_struct *task)
 {
 	/* nothing to free */
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #endif /* CONFIG_KVM_GUEST_KERNEL */
 
 #endif /* ! _E2K_KVM_PROCESS_H */

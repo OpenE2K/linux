@@ -16,8 +16,10 @@
 #include <asm/machdep.h>
 #include <asm/mman.h>
 #include <linux/version.h>
+#include <linux/eventpoll.h>
 #include "asm/syscalls.h"
 #include <asm/protected_mode.h>
+#include <asm/protected_diag_msg_ids.h>
 
 #undef	DYNAMIC_DEBUG_SYSCALLP_ENABLED
 #define	DYNAMIC_DEBUG_SYSCALLP_ENABLED	1 /* Dynamic prot. syscalls control */
@@ -41,15 +43,14 @@
 #if DEBUG_SYSCALLP_CHECK
 #define DbgSCP_ERR(fmt, ...) pr_err(fmt,  ##__VA_ARGS__)
 #define DbgSCP_WARN(fmt, ...) pr_warn(fmt,  ##__VA_ARGS__)
-#define DbgSCP_ALERT(fmt, ...) pr_alert(fmt,  ##__VA_ARGS__)
 #else
 #define DbgSC_ERR(...)
 #define DbgSC_WARN(...)
-#define DbgSC_ALERT(...)
 #endif /* DEBUG_SYSCALLP_CHECK */
 
-#define PROTECTED_MODE_ALERT(...)
+#define PROTECTED_MODE_ERROR(...)
 #define PROTECTED_MODE_WARNING(...)
+#define PROTECTED_MODE_WARN_ONCE(...)
 #define PROTECTED_MODE_MESSAGE(...)
 
 #else /* DYNAMIC_DEBUG_SYSCALLP_ENABLED */
@@ -87,12 +88,6 @@ do { \
 		pr_err("%s: " fmt, __func__,  ##__VA_ARGS__); \
 } while (0)
 
-#define DbgSCP_ALERT(fmt, ...) \
-do { \
-	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES) == 0) \
-		pr_alert("%s: " fmt, __func__,  ##__VA_ARGS__); \
-} while (0)
-
 #define DbgSCP_WARN(fmt, ...) \
 do { \
 	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES) == 0) \
@@ -116,10 +111,16 @@ do { \
 #define	DEBUG_SYSCALLP_CHECK 1	/* protected syscall args checks enabled */
 
 
-#define PROTECTED_MODE_ALERT(MSG_ID, ...) \
+#define PROTECTED_MODE_ERROR(MSG_ID, ...) \
 do { \
 	if (check_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES) == 0) \
 		protected_mode_message(1, MSG_ID, ##__VA_ARGS__); \
+} while (0)
+
+#define PROTECTED_MODE_ERR_ONCE(MSG_ID, ...) \
+do { \
+	if (!__test_and_set_bit(MSG_ID, current->mm->context.pm_sc_warned_once_msgs)) \
+		PROTECTED_MODE_ERROR(MSG_ID, ##__VA_ARGS__); \
 } while (0)
 
 #define PM_SC_DBG_MODE_MSG_TYPE_INFO		0
@@ -137,6 +138,17 @@ do { \
 		} else { \
 			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_WARNING, \
 						MSG_ID, ##__VA_ARGS__); \
+		} \
+	} \
+} while (0)
+
+#define PROTECTED_MODE_WARN_ONCE(MSG_ID, ...) \
+do { \
+	if ((check_pm_sc_debug_mode(PM_SC_DBG_MODE_NO_ERR_MESSAGES) == 0) \
+				&& IF_PM_DBG_MODE(PM_SC_DBG_ISSUE_WARNINGS)) { \
+		if (!__test_and_set_bit(MSG_ID, current->mm->context.pm_sc_warned_once_msgs)) { \
+			protected_mode_message(PM_SC_DBG_MODE_MSG_TYPE_WARNING, \
+					       MSG_ID, ##__VA_ARGS__); \
 		} \
 	} \
 } while (0)
@@ -189,141 +201,6 @@ do { \
 
 #endif /* DYNAMIC_DEBUG_SYSCALLP_ENABLED */
 
-/*
- * Protected mode diagnostic message ID's:
- * NB> Add new messages at the bottom of the array only !!!
- *	ID's are fixed as these are used in qualification tests.
- */
-enum pm_syscall_err_msg_id {
-	PMSCERRMSG_ERR_ID,
-	/* Syscall arg related messages: */
-	PMSCERRMSG_UNEXP_ARG_TAG_ID,
-	PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
-	PMSCERRMSG_SC_ARGNAME_VAL_EXCEEDS_DSCR_MAX,
-	PMSCERRMSG_SC_ARGNUM_VAL_EXCEEDS_DSCR_MAX,
-	PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
-	PMSCERRMSG_NOT_DESCR_IN_SC_ARG_NAME,
-	PMSCERRMSG_UNEXPECTED_DESCR_IN_SC_ARG,
-	PMSCERRMSG_NOT_STRING_IN_SC_ARG,
-	PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE,
-	PMSCERRMSG_NEGATIVE_SIZE_VALUE,
-	PMSCERRMSG_BAD_STRUCT_IN_SC_ARG,
-	PMSCERRMSG_BAD_UNSUPP_VAL_IN_SC_ARG,
-	PMSCERRMSG_PTR_SIZE_TOO_LITTLE,
-	PMSCERRMSG_SC_BAD_STRUCT_INT_FIELD,
-	PMSCERRMSG_SC_UNEXPECTED_FUNC_IN_ARG,
-	PMSCERRMSG_SC_NOT_DESCR_IN_FIELD,
-	PMSCERRMSG_SC_NOT_DESCR_IN_STRUCT_FIELD,
-
-	PMSCERRMSG_SC_BAD_STRUCT_IN_ARG_NAME,
-	PMSCERRMSG_SC_BAD_FIELD_STRUCT_IN_ARG_NAME,
-	PMSCERRMSG_SC_FAILED_TO_LOAD_LIBRARY,
-	PMSCERRMSG_SC_BAD_ARG_VALUE,
-	PMSCERRMSG_SC_ARG_SIZE_DIFFERS_STRUCT_SIZE,
-	PMSCERRMSG_SC_ARG_SIZE_MISMATCHES_FIELD_VAL,
-	PMSCERRMSG_SC_FAILED_TO_UPDATE_STRUCT,
-	PMSCERRMSG_SC_WRONG_ARG_VALUE_LX,
-	PMSCERRMSG_SC_WRONG_ARG_VALUE_LX_TAG,
-	PMSCERRMSG_SC_UNEXPECTED_ARG_VALUE,
-	PMSCERRMSG_SC_CMD_WRONG_ARG_VALUE_LX,
-	PMSCERRMSG_SC_ARG_VAL_EXCEEDS_DSCR_SIZE,
-	PMSCERRMSG_SC_ARG_VAL_UNSUPPORTED,
-	PMSCERRMSG_SC_ARGPTR_SIZE_TOO_LITTLE,
-	PMSCERRMSG_NOT_DESCR_IN_SC_ARG_NAME_TAG,
-
-	/* Structure analysis related messages: */
-	PMSCERRMSG_STRUCT_UNALIGNED_DESCR,
-	PMSCERRMSG_STRUCT_UNINIT_INT_FIELD,
-	PMSCERRMSG_STRUCT_BAD_TAG_INT_FIELD,
-	PMSCERRMSG_STRUCT_NOT_PL_IN_FIELD,
-	PMSCERRMSG_STRUCT_NOT_DSCR_IN_FIELD,
-	PMSCERRMSG_STRUCT_FAILED_TO_READ_FIELD,
-	PMSCERRMSG_INSUFFICIENT_STRUCT_SIZE,
-
-	/* convert_array related messages: */
-	PMCNVSTRMSG_STRUCT_SIZE_EXCEEDS_MAX,
-	PMCNVSTRMSG_STRUCT_DESCR_UNALIGNED,
-	PMCNVSTRMSG_STRUCT_DOESNT_CONTAIN_DESCR,
-
-	/* sigaltstack() related message: */
-	PMSIGALTSTMSG_ERR_BOTH_SS_EMPTY,
-	/* clean_descriptors related message: */
-	PMCLNDSCRSMSG_WRONG_ARG_SIZE,
-	PMCLNDSCRSMSG_EXITED_WITH_ERR,
-	/* mmap() related messages: */
-	PMMMAPMSG_ATTEMPT_TO_MAP_BYTES,
-	PMMMAPMSG_CANT_MAP_OVER_2GB,
-	PMMMAPMSG_CANT_REMAP_OVER_ALLOCATED,
-	PMSCERRMSG_UNSUPPORTED_FLAG,
-	/* mprotect() related message: */
-	PMSCWARN_DSCR_PROT_MISMATCH,
-	/* Other messages: */
-	PMSCERRMSG_EMPTY_STRUCTURE_FIELD,
-	PMSCERRMSG_COUNT_EXCEEDS_LIMIT,
-	PMSCERRMSG_UNEXPECTED_FIELD_TAG,
-	/* Warnings: */
-	PMMMAPMSG_DSCR_WITHOUT_ACCESS_RIGHTS,
-	PMSCWARN_SOCKETCALL_FAILED_TO_UPDATE_FLD,
-	PMSCWARN_PROC_RETURNED_ERROR,
-	PMSCWARN_TAGS_GET_LOST_WHEN_READ,
-	PMSCWARN_NEGATIVE_DSCR_SIZE,
-	PMSCWARN_ADDR_IN_SIGINFO,
-
-	PMSCERRMSG_SC_NOT_AVAILABLE_IN_PM,
-	PMSCERRMSG_FUNC_NOT_AVAILABLE_IN_PM,
-	PMSCERRMSG_FATAL_READ_FROM,
-	PMSCERRMSG_FATAL_READ_ERR_FROM,
-	PMSCERRMSG_FATAL_WRITE_AT,
-	PMSCERRMSG_FATAL_WRITE_AT_FIELD,
-	PMSCERRMSG_FATAL_DESCR_IN_STACK,
-
-	PMSCERRMSG_EXECUTION_TERMINATED,
-
-	/* Comment messages: */
-	PMSCERRMSG_SC_ARG_COUNT_TRUNCATED,
-	PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT,
-	PMSCERRMSG_STRUCT_FIELD_VAL_IGNORED,
-	PMSCWARN_DSCR_COMPONENTS,
-
-	/* read/write related message: */
-	PMSCERRMSG_DSCR_WITHOUT_READ_PERM,
-	PMSCERRMSG_DSCR_WITHOUT_WRITE_PERM,
-	PMSCERRMSG_UNEXPECTED_TAG_IN_BUFF,
-	PMSCERRMSG_CUI_NOT_FOUND,
-	PMSCERRMSG_CUI_MISMATCH_IN_PL_IP,
-
-	PMSCERRMSG_SC_NOT_DSCR_TAG_STRCT_FLD_VAL,
-	PMSCERRMSG_SC_NOT_YET_SUPPORTED_IN_PM,
-	PMSCERRMSG_SC_BRK_NON_ZERO_ARG_IN_PM,
-
-	/* iset-specific messages: */
-	/* __iset__ >= 6 */
-	PMSCWARN_MMAP_SHARED_FLAG,
-
-	/* MISC: */
-	PMSCWARN_UNALIGNED_PL_IN_ARG,
-	PMSCERRMSG_SC_NOT_ENABLED,
-	PMSCWARN_UNALIGNED_DSCR_IN_ARG,
-	PMSCERRMSG_SC_ALLOWED_IN_SOFT_MODE,
-
-	/* NB> New messages to add above this line */
-	/* Unclassified */ PMSCERRMSG_FILLING_FREED_MEM_BLOCKED,
-	/* Unclassified */ PMSCERRMSG_FILLING_FREED_MEM_IN_NON_HM,
-
-	/* Intro diagnostic messages: */
-	PMSCERRMSG_RUNTIME_ERROR,
-	PMSCERRMSG_RUNTIME_WARNING,
-	PMSCERRMSG_RUNTIME_PWARNING,
-
-	/* Total message number: */
-	PMSCERRMSG_NUMBER,
-
-};
-#define PMSC_NO_ID_ERRMSG_START1 PMSCERRMSG_EXECUTION_TERMINATED
-#define PMSC_NO_ID_ERRMSG_FINAL1 PMSCERRMSG_CUI_MISMATCH_IN_PL_IP
-#define PMSC_NO_ID_ERRMSG_START2 PMSCERRMSG_RUNTIME_ERROR
-#define PMSC_NO_ID_ERRMSG_FINAL2 PMSCERRMSG_NUMBER
-
 
 extern char const **protected_error_list;
 
@@ -368,14 +245,14 @@ int prot_sc_arg_tag(const int arg_num, const struct pt_regs *regs)
 	return (tags & 0xf) ? tags : 0;
 }
 static inline
-int prot_sc_arg_not_ptr(const int arg_num, const struct pt_regs *regs)
-{
-	return !IS_AP(regs->qargs[arg_num - 1], prot_sc_arg_tag(arg_num, regs));
-}
-static inline
 int prot_sc_arg_is_ap(const int arg_num, const struct pt_regs *regs)
 {
 	return IS_AP(regs->qargs[arg_num - 1], prot_sc_arg_tag(arg_num, regs));
+}
+static inline
+int prot_sc_arg_not_ptr(const int arg_num, const struct pt_regs *regs)
+{
+	return !prot_sc_arg_is_ap(arg_num, regs);
 }
 static inline
 int prot_sc_arg_NULL_ptr(const int arg_num, const struct pt_regs *regs)
@@ -410,7 +287,7 @@ do { \
 /* Ditto for warnings: */
 #define PM_EXCEPTION_ON_WARNING(signo, code, errno) \
 do { \
-	if ((PM_SYSCALL_WARN_ONLY == 0) && IF_PM_DBG_MODE(PM_SC_DBG_WARNINGS_AS_ERRORS)) \
+	if ((PM_SYSCALL_WARN_ONLY == 0) || IF_PM_DBG_MODE(PM_SC_DBG_WARNINGS_AS_ERRORS)) \
 		pm_deliver_exception(signo, code, errno); \
 } while (0)
 
@@ -423,7 +300,7 @@ do { \
 /* Ditto for warnings: */
 #define PM_BNDERR_EXCEPTION_ON_WARNING(arg_num, regs) \
 do { \
-	if ((PM_SYSCALL_WARN_ONLY == 0) && IF_PM_DBG_MODE(PM_SC_DBG_WARNINGS_AS_ERRORS)) \
+	if ((PM_SYSCALL_WARN_ONLY == 0) || IF_PM_DBG_MODE(PM_SC_DBG_WARNINGS_AS_ERRORS)) \
 		pm_deliver_sig_bnderr(arg_num, regs); \
 } while (0)
 
@@ -457,7 +334,7 @@ static inline bool e2k_ptr_str_check(char __user *str, u64 max_size)
 
 static inline char __user *e2k_ptr_str(e2k_ap_t ap)
 {
-	char __user *str = (char __user *) AP_PTR(ap);
+	char __user *str = (char __user __force *) AP_PTR(ap);
 
 	if (!e2k_ptr_str_check(str, AP_OBJ_SIZE(ap)))
 		return str;
@@ -476,7 +353,7 @@ static inline long  ptr128_2_ptr64(long __user *pdescr)
 	int tag;
 
 	if (get_user_tagged_16(descr.qword, tag, pdescr)) {
-		DbgSCP_ALERT("%s failed with pdescr == 0x%px\n", __func__, pdescr);
+		DbgSCP_ERR("%s failed with pdescr == 0x%px\n", __func__, pdescr);
 		return -EFAULT;
 	}
 
@@ -497,7 +374,7 @@ static inline int this_is_descriptor(long __user *pdescr, const int ret_val_zero
 	int tag;
 
 	if (get_user_tagged_16(descr.qword, tag, pdescr)) {
-		DbgSCP_ALERT("%s failed with pdescr == 0x%px\n", __func__, pdescr);
+		DbgSCP_ERR("%s failed with pdescr == 0x%px\n", __func__, pdescr);
 		return -EFAULT;
 	}
 
@@ -511,36 +388,50 @@ static inline int this_is_descriptor(long __user *pdescr, const int ret_val_zero
 #define CHECK4DESCR_WARNING	1
 #define CHECK4DESCR_ERROR	2
 static inline int warn_if_not_descr(const int		n,
-				    const int		exception, /* _WARNING/_ERROR */
-				const struct pt_regs	*regs)
+				    const int		msg_type, /* _WARNING/_ERROR */
+				    const struct pt_regs	*regs)
 {
-	if (prot_sc_arg_not_ptr(n, regs)) {
-		int tags = exception ? prot_sc_arg_tag(n, regs) : 0;
+	int tags;
 
-		if ((tags & 0x3) && (tags & 0x3) != ETAGEWD)
+	if (!prot_sc_arg_not_ptr(n, regs))
+		return 0;
+	else if (!msg_type)
+		return 1;
+
+	tags = prot_sc_arg_tag(n, regs);
+
+	if (tags & 0x3) {
+		if ((tags & 0x3) == ETAGEWS)
+			PROTECTED_MODE_MESSAGE(0, PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT, n);
+		else
 			PROTECTED_MODE_WARNING(PMSCERRMSG_UNEXP_ARG_TAG_ID,
 				regs->sys_num, sys_call_ID_to_name[regs->sys_num], tags, n);
-
-		if (exception == CHECK4DESCR_ERROR) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
-				regs->sys_num, sys_call_ID_to_name[regs->sys_num], n);
-			if ((tags & 0x3) == ETAGEWD)
-				PROTECTED_MODE_MESSAGE(0, PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT, n);
-			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
-		} else if (exception) { /* this is warning */
-			PROTECTED_MODE_WARNING(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
-				regs->sys_num, sys_call_ID_to_name[regs->sys_num], n);
-			if ((tags & 0x3) == ETAGEWD)
-				PROTECTED_MODE_MESSAGE(0, PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT, n);
-			PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EFAULT);
-		}
-		return 1;
 	}
-	return 0;
+
+	if (msg_type == CHECK4DESCR_ERROR) {
+		PROTECTED_MODE_ERROR(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
+				     regs->sys_num, sys_call_ID_to_name[regs->sys_num], n);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, SI_KERNEL, EFAULT);
+	} else { /* this is warning */
+		PROTECTED_MODE_WARNING(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
+				       regs->sys_num, sys_call_ID_to_name[regs->sys_num], n);
+		PM_EXCEPTION_ON_WARNING(SIGABRT, SI_KERNEL, EFAULT);
+	}
+
+	return 1;
 }
 
 
-/* Returns 1 if 'size' exceeds max allowed descriptor size; 0 - otherwise */
+/**
+ * size_exceeds_descr_max_capacity() - Checks if 'size' exceeds max allowed descriptor size.
+ * @size: value to check.
+ * @arg_name: syscall argument name for error message.
+ * @arg_val: argument value - this is either same as 'size' or
+ *		 multiplicator for array of items if it's too big.
+ * @regs: 'pt_regs' structure (syscall context).
+ *
+ * Return: 1 (true) if 'size' exceeds max allowed descriptor size; 0 - otherwise.
+ */
 static inline int size_exceeds_descr_max_capacity(const size_t size,
 					   const char *arg_name,
 					   const size_t arg_val,
@@ -555,7 +446,7 @@ static inline int size_exceeds_descr_max_capacity(const size_t size,
 			return 0;
 		}
 	}
-	PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARGNAME_VAL_EXCEEDS_DSCR_MAX,
+	PROTECTED_MODE_ERROR(PMSCERRMSG_SC_ARGNAME_VAL_EXCEEDS_DSCR_MAX,
 		regs->sys_num, sys_call_ID_to_name[regs->sys_num], arg_val, arg_name);
 	return 1;
 }
@@ -641,7 +532,7 @@ int check_buffer_is_readable(const struct pt_regs	*regs,
 		if (regs->qargs[arg_num - 1].rw_v6 & PROT_READ)
 			return 1;
 	}
-	PROTECTED_MODE_ALERT(PMSCERRMSG_DSCR_WITHOUT_READ_PERM,
+	PROTECTED_MODE_ERROR(PMSCERRMSG_DSCR_WITHOUT_READ_PERM,
 			     sys_call_ID_to_name[regs->sys_num], arg_num);
 	return 0;
 }
@@ -659,20 +550,24 @@ int check_buffer_is_writeable(const struct pt_regs	*regs,
 			return 1;
 	}
 
-	PROTECTED_MODE_ALERT(PMSCERRMSG_DSCR_WITHOUT_WRITE_PERM,
+	PROTECTED_MODE_ERROR(PMSCERRMSG_DSCR_WITHOUT_WRITE_PERM,
 			     sys_call_ID_to_name[regs->sys_num], arg_num);
 	return 0;
 }
+
+extern int add_2_prot_epoll_descr_bt(int epfd, u64 addr, e2k_ptr_t descr);
+extern int fill_user_descr_in_prot_epoll_events(int epfd,
+					 struct prot_epoll_event __user *events_128,
+					 const int count);
 
 #else /* #ifndef CONFIG_PROTECTED_MODE */
 
 #define DbgSCP(...)		do { } while (0)
 #define DbgSC_ERR(...)		do { } while (0)
 #define DbgSC_WARN(...)		do { } while (0)
-#define DbgSC_ALERT(...)	do { } while (0)
 
 #define PM_EXCEPTION_ON_WARNING(...)	do { } while (0)
-#define PROTECTED_MODE_ALERT(...)	do { } while (0)
+#define PROTECTED_MODE_ERROR(...)	do { } while (0)
 #define PROTECTED_MODE_WARNING(...)	do { } while (0)
 #define PROTECTED_MODE_MESSAGE(...)	do { } while (0)
 

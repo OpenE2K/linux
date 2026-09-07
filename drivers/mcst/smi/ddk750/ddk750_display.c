@@ -200,7 +200,7 @@ void waitNextVerticalSync(disp_control_t dispControl, unsigned long vsync_count)
  * Use Primary vertical sync as time delay function.
  * Input: Number of vertical sync to wait.
  */
-void primaryWaitVerticalSync(unsigned long vsync_count)
+static void primaryWaitVerticalSync(unsigned long vsync_count)
 {
     waitNextVerticalSync(PRIMARY_CTRL, vsync_count);
 }
@@ -209,7 +209,7 @@ void primaryWaitVerticalSync(unsigned long vsync_count)
  * Use crt vertical sync as time delay function.
  * Input: Number of vertical sync to wait.
  */
-void secondaryWaitVerticalSync(unsigned long vsync_count)
+static void secondaryWaitVerticalSync(unsigned long vsync_count)
 {
     waitNextVerticalSync(SECONDARY_CTRL, vsync_count);
 }

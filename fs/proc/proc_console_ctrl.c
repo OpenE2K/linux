@@ -10,7 +10,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/seqlock.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #ifdef __DBG_PRINT__
 #include <linux/tty.h>

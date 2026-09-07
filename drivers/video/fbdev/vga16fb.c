@@ -10,6 +10,7 @@
  * archive for more details.
  */
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -21,12 +22,76 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/screen_info.h>
-#if defined(CONFIG_E90S) || defined(CONFIG_E2K)
-#include <linux/pci.h>
-#endif
 
 #include <asm/io.h>
 #include <video/vga.h>
+
+static inline unsigned int __screen_info_video_type(unsigned int type)
+{
+	switch (type) {
+	case VIDEO_TYPE_MDA:
+	case VIDEO_TYPE_CGA:
+	case VIDEO_TYPE_EGAM:
+	case VIDEO_TYPE_EGAC:
+	case VIDEO_TYPE_VGAC:
+	case VIDEO_TYPE_VLFB:
+	case VIDEO_TYPE_PICA_S3:
+	case VIDEO_TYPE_MIPS_G364:
+	case VIDEO_TYPE_SGI:
+	case VIDEO_TYPE_TGAC:
+	case VIDEO_TYPE_SUN:
+	case VIDEO_TYPE_SUNPCI:
+	case VIDEO_TYPE_PMAC:
+	case VIDEO_TYPE_EFI:
+		return type;
+	default:
+		return 0;
+	}
+}
+
+/**
+ * screen_info_video_type() - Decodes the video type from struct screen_info
+ * @si: an instance of struct screen_info
+ *
+ * Returns:
+ * A VIDEO_TYPE_ constant representing si's type of video display, or 0 otherwise.
+ */
+static inline unsigned int screen_info_video_type(const struct screen_info *si)
+{
+	unsigned int type;
+
+	// check if display output is on
+	if (!si->orig_video_isVGA)
+		return 0;
+
+	// check for a known VIDEO_TYPE_ constant
+	type = __screen_info_video_type(si->orig_video_isVGA);
+	if (type)
+		return si->orig_video_isVGA;
+
+	// check if text mode has been initialized
+	if (!si->orig_video_lines || !si->orig_video_cols)
+		return 0;
+
+	// 80x25 text, mono
+	if (si->orig_video_mode == 0x07) {
+		if ((si->orig_video_ega_bx & 0xff) != 0x10)
+			return VIDEO_TYPE_EGAM;
+		else
+			return VIDEO_TYPE_MDA;
+	}
+
+	// EGA/VGA, 16 colors
+	if ((si->orig_video_ega_bx & 0xff) != 0x10) {
+		if (si->orig_video_isVGA)
+			return VIDEO_TYPE_VGAC;
+		else
+			return VIDEO_TYPE_EGAC;
+	}
+
+	// the rest...
+	return VIDEO_TYPE_CGA;
+}
 
 #define MODE_SKIP4	1
 #define MODE_8BPP	2
@@ -187,11 +252,10 @@ static inline void setindex(int index)
 /* Check if the video mode is supported by the driver */
 static inline int check_mode_supported(const struct screen_info *si)
 {
-	/* non-x86 architectures treat orig_video_isVGA as a boolean flag */
-#if defined(CONFIG_X86)
+	unsigned int type = screen_info_video_type(si);
+
 	/* only EGA and VGA in 16 color graphic mode are supported */
-	if (si->orig_video_isVGA != VIDEO_TYPE_EGAC &&
-	    si->orig_video_isVGA != VIDEO_TYPE_VGAC)
+	if (type != VIDEO_TYPE_EGAC && type != VIDEO_TYPE_VGAC)
 		return -ENODEV;
 
 	if (si->orig_video_mode != 0x0D &&	/* 320x200/4 (EGA) */
@@ -199,7 +263,7 @@ static inline int check_mode_supported(const struct screen_info *si)
 	    si->orig_video_mode != 0x10 &&	/* 640x350/4 (EGA) */
 	    si->orig_video_mode != 0x12)	/* 640x480/4 (VGA) */
 		return -ENODEV;
-#endif
+
 	return 0;
 }
 
@@ -1312,22 +1376,6 @@ static int vga16fb_probe(struct platform_device *dev)
 	int i;
 	int ret = 0;
 
-#if defined(CONFIG_E90S) || defined(CONFIG_E2K)
-#define PCI_VENDOR_ID_SMI	0x126f
-	/* start vga16fb driver if only vga pci-class device exits */
-	struct pci_dev *pdev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, NULL);
-
-	if (!pdev)
-		return -ENODEV;
-
-	if (pdev->vendor == PCI_VENDOR_ID_SMI) {/* smi does not work */
-		pci_dev_put(pdev);
-		return -ENODEV;
-	}
-
-	pci_dev_put(pdev);
-#endif
-
 	si = dev_get_platdata(&dev->dev);
 	if (!si)
 		return -ENODEV;
@@ -1336,37 +1384,32 @@ static int vga16fb_probe(struct platform_device *dev)
 	if (ret)
 		return ret;
 
-	printk(KERN_DEBUG "vga16fb: initializing\n");
+	dev_dbg(&dev->dev, "initializing\n");
+	if (!request_mem_region(vga16fb_fix.smem_start, vga16fb_fix.smem_len,
+				"vga16b")) {
+		dev_err(&dev->dev, "cannot reserve video memory at 0x%lx\n",
+		       vga16fb_fix.smem_start);
+	}
 	info = framebuffer_alloc(sizeof(struct vga16fb_par), &dev->dev);
 
 	if (!info) {
 		ret = -ENOMEM;
 		goto err_fb_alloc;
 	}
-	info->apertures = alloc_apertures(1);
-	if (!info->apertures) {
-		ret = -ENOMEM;
-		goto err_ioremap;
-	}
 
 	/* XXX share VGA_FB_PHYS_BASE and I/O region with vgacon and others */
 	info->screen_base = (void __iomem *)VGA_MAP_MEM(VGA_FB_PHYS_BASE, 0);
 
 	if (!info->screen_base) {
-		printk(KERN_ERR "vga16fb: unable to map device\n");
+		dev_err(&dev->dev, "unable to map device\n");
 		ret = -ENOMEM;
 		goto err_ioremap;
 	}
 
-	printk(KERN_INFO "vga16fb: mapped to 0x%p\n", info->screen_base);
+	dev_info(&dev->dev, "mapped to 0x%p\n", info->screen_base);
 	par = info->par;
 
-#if defined(CONFIG_X86)
-	par->isVGA = si->orig_video_isVGA == VIDEO_TYPE_VGAC;
-#else
-	/* non-x86 architectures treat orig_video_isVGA as a boolean flag */
-	par->isVGA = si->orig_video_isVGA;
-#endif
+	par->isVGA = screen_info_video_type(si) == VIDEO_TYPE_VGAC;
 	par->palette_blanked = 0;
 	par->vesa_blanked = 0;
 
@@ -1382,30 +1425,29 @@ static int vga16fb_probe(struct platform_device *dev)
 	info->fix = vga16fb_fix;
 	/* supports rectangles with widths of multiples of 8 */
 	info->pixmap.blit_x = 1 << 7 | 1 << 15 | 1 << 23 | 1 << 31;
-	info->flags = FBINFO_FLAG_DEFAULT | FBINFO_MISC_FIRMWARE |
-		FBINFO_HWACCEL_YPAN;
+	info->flags = FBINFO_HWACCEL_YPAN;
 
 	i = (info->var.bits_per_pixel == 8) ? 256 : 16;
 	ret = fb_alloc_cmap(&info->cmap, i, 0);
 	if (ret) {
-		printk(KERN_ERR "vga16fb: unable to allocate colormap\n");
+		dev_err(&dev->dev, "unable to allocate colormap\n");
 		ret = -ENOMEM;
 		goto err_alloc_cmap;
 	}
 
 	if (vga16fb_check_var(&info->var, info)) {
-		printk(KERN_ERR "vga16fb: unable to validate variable\n");
+		dev_err(&dev->dev, "unable to validate variable\n");
 		ret = -EINVAL;
 		goto err_check_var;
 	}
 
 	vga16fb_update_fix(info);
 
-	info->apertures->ranges[0].base = VGA_FB_PHYS_BASE;
-	info->apertures->ranges[0].size = VGA_FB_PHYS_SIZE;
-
+	ret = devm_aperture_acquire_for_platform_device(dev, VGA_FB_PHYS_BASE, VGA_FB_PHYS_SIZE);
+	if (ret)
+		goto err_check_var;
 	if (register_framebuffer(info) < 0) {
-		printk(KERN_ERR "vga16fb: unable to register framebuffer\n");
+		dev_err(&dev->dev, "unable to register framebuffer\n");
 		ret = -EINVAL;
 		goto err_check_var;
 	}
@@ -1422,6 +1464,8 @@ static int vga16fb_probe(struct platform_device *dev)
  err_ioremap:
 	framebuffer_release(info);
  err_fb_alloc:
+	release_mem_region(vga16fb_fix.smem_start,
+		    vga16fb_fix.smem_len);
 	return ret;
 }
 
@@ -1431,7 +1475,8 @@ static int vga16fb_remove(struct platform_device *dev)
 
 	if (info)
 		unregister_framebuffer(info);
-
+	release_mem_region(vga16fb_fix.smem_start,
+		    vga16fb_fix.smem_len);
 	return 0;
 }
 

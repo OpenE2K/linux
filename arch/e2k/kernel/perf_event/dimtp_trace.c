@@ -47,6 +47,8 @@ typedef union {
 	u64 word;
 } dimtp_config_attr_t;
 
+static void dimtp_stop(struct perf_event *event, int flags);
+
 /* Returns -1 in case of bad configuration */
 static inline int config_to_size(dimtp_config_attr_t cfg)
 {
@@ -80,7 +82,9 @@ static struct attribute *dimtp_format_attr[] = {
 };
 
 /* Convert a free-running index from perf into an DIMTP buffer offset */
-#define PERF_IDX2OFF(idx, buf)	((idx) % ((buf)->nr_pages << PAGE_SHIFT))
+#define PERF_IDX2OFF(idx, buf) \
+	((idx) % ((unsigned long)(buf)->nr_pages << PAGE_SHIFT))
+
 static inline u64 perf_idx_round_down(u64 idx, struct dimtp_buf *buf)
 {
 	u64 buf_size = (buf)->nr_pages << PAGE_SHIFT;
@@ -317,29 +321,31 @@ static u64 dimtp_next_snapshot_off(struct perf_output_handle *handle,
 	return limit;
 }
 
-static void dimtp_start(struct perf_event *event, int flags)
+static int dimtp_perf_aux_output_begin(struct perf_event *event, int flags)
 {
 	struct hw_perf_event *hwc = &event->hw;
 	dimtp_config_attr_t config = { .word = event->attr.config };
 	struct dimtp_pmu *dimtp_pmu = to_dimtp_pmu(event->pmu);
 	struct perf_output_handle *handle = this_cpu_ptr(dimtp_pmu->handle);
-	union core_event_config hw_config;
 	struct dimtp_buf *buf;
-	e2k_dimcr_t dimcr;
 	e2k_dimtp_t dimtp;
-	u64 limit;
-
-	hwc->state = 0;
+	u64 limit, ind;
 
 	/* Start a new aux session */
 	buf = perf_aux_output_begin(handle, event);
-	if (!buf) {
-		event->hw.state |= PERF_HES_STOPPED;
-		return;
-	}
+	if (!buf)
+		return -EIO;
 
 	limit = (buf->snapshot) ? dimtp_next_snapshot_off(handle, buf, config) :
 				  dimtp_next_off(handle, buf, config);
+
+	ind = PERF_IDX2OFF(handle->head, buf);
+
+	if (!limit)
+		return -EIO;
+
+	if (WARN_ON_ONCE(limit <= ind))
+		return -EIO;
 
 	if (flags & PERF_EF_RELOAD) {
 		u64 left = local64_read(&hwc->period_left);
@@ -348,8 +354,24 @@ static void dimtp_start(struct perf_event *event, int flags)
 		write_DIMAR1_reg(-hwc->sample_period);
 	}
 
-	dimtp = new_dimtp((unsigned long)buf->base, limit, PERF_IDX2OFF(handle->head, buf));
+	dimtp = new_dimtp((unsigned long)buf->base, limit, ind);
 	native_write_DIMTP_reg(dimtp);
+
+	return 0;
+}
+
+static void dimtp_start(struct perf_event *event, int flags)
+{
+	e2k_dimcr_t dimcr;
+	struct hw_perf_event *hwc = &event->hw;
+	union core_event_config hw_config;
+	dimtp_config_attr_t config = { .word = event->attr.config };
+
+	hwc->state = 0;
+	if (dimtp_perf_aux_output_begin(event, flags)) {
+		dimtp_stop(event, 0);
+		return;
+	}
 
 	AW(dimcr) = 0;
 	dimcr.mode = config.mode;
@@ -514,6 +536,9 @@ static struct dimtp_pmu dimtp_pmu = {
 		 */
 		.task_ctx_nr	= perf_sw_context,
 
+		.pmu_enable	= e2k_pmu_enable,
+		.pmu_disable	= e2k_pmu_disable,
+
 		.event_init	= dimtp_event_init,
 		.add		= dimtp_add,
 		.del		= dimtp_del,
@@ -554,8 +579,8 @@ void dimtp_overflow(struct perf_event *event)
 	if (handle->aux_flags & PERF_AUX_FLAG_TRUNCATED)
 		return;
 
-	/* Start a new aux session */
-	dimtp_start(event, PERF_EF_RELOAD);
+	if (dimtp_perf_aux_output_begin(event, PERF_EF_RELOAD))
+		dimtp_stop(event, PERF_EF_UPDATE);
 }
 
 static int __init dimtp_pmu_init(void)

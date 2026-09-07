@@ -509,12 +509,16 @@ unsigned int ui_browser__list_head_refresh(struct ui_browser *browser)
 	pos = browser->top;
 
 	list_for_each_from(pos, head) {
+		fprintf(stderr, "ui_browser__list_head_refresh(): row %d\n", row);
 		if (!browser->filter || !browser->filter(browser, pos)) {
 			ui_browser__gotorc(browser, row, 0);
 			browser->write(browser, pos, row);
 			if (++row == browser->rows)
 				break;
+		} else {
+			fprintf(stderr, "ui_browser__list_head_refresh(): filter\n");
 		}
+
 	}
 
 	return row;

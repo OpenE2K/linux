@@ -274,6 +274,20 @@ static int __init e2k_uncore_init(void)
 			init_ret = ret;
 		}
 	}
+	if (E2K_UNCORE_HAS_L3_V6) {
+		ret = register_l3_v6_pmus();
+		if (ret) {
+			pr_info("WARNING Could not register SIC V6 pmu\n");
+			init_ret = ret;
+		}
+	}
+	if (E2K_UNCORE_HAS_L3_V7) {
+		ret = register_l3_v7_pmus();
+		if (ret) {
+			pr_info("WARNING Could not register SIC V7 pmu\n");
+			init_ret = ret;
+		}
+	}
 	if (E2K_UNCORE_HAS_HMU) {
 		ret = register_hmu_pmus();
 		if (ret) {

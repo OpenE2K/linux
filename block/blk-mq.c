@@ -3161,8 +3161,12 @@ int blk_rq_prep_clone(struct request *rq, struct request *rq_src,
 		      int (*bio_ctr)(struct bio *, struct bio *, void *),
 		      void *data)
 {
+
 	struct bio *bio, *bio_src;
 
+#ifdef CONFIG_MCST
+	bio = NULL;
+#endif
 	if (!bs)
 		bs = &fs_bio_set;
 

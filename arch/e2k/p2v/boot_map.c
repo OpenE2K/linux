@@ -685,7 +685,7 @@ void __init_recv init_unmap_virt_to_equal_phys(bool bsp, int cpus_to_sync)
 	init_sync_all_processors(cpus_to_sync);
 
 	/* TODO after paravirtualizing flush_TLB_all() remove the check */
-	if (!IS_ENABLED(CONFIG_KVM_GUEST_MODE))
+	if (!IS_ENABLED(CONFIG_KVM_GUEST_KERNEL))
 		flush_TLB_all();
 
 	/* See comment before flush_pte_from_ic() for why this is needed */

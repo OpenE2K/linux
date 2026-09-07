@@ -13,7 +13,7 @@
 #include <linux/types.h>
 
 #include <uapi/asm/kvm.h>
-#include <asm/kvm/guest.h>
+#include <asm/kvm/paravirt_sw/guest.h>
 
 typedef struct vram_area {
 	e2k_addr_t	base_addr;	/* base physical address of the start */

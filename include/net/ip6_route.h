@@ -139,7 +139,9 @@ static inline int ip6_route_get_saddr(struct net *net, struct fib6_info *f6i,
 	struct net_device *dev;
 	bool same_vrf;
 	int err = 0;
-
+#ifdef CONFIG_MCST
+	dev = NULL;
+#endif
 	rcu_read_lock();
 
 	l3mdev = dev_get_by_index_rcu(net, l3mdev_index);

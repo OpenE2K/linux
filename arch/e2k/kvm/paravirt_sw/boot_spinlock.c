@@ -15,7 +15,7 @@
 #include <linux/spinlock.h>
 #include <linux/kvm_host.h>
 
-#include <asm/kvm/spinlock_slow.h>
+#include <asm/kvm/paravirt_sw/spinlock_slow.h>
 
 #include "../irq.h"
 #include "../process.h"

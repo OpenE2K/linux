@@ -107,7 +107,7 @@ static int mga2_info_ioctl(struct drm_device *drm, void *data, struct drm_file *
 	return 0;
 }
 
-struct drm_ioctl_desc mga2_ioctls[] = {
+static struct drm_ioctl_desc mga2_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(MGA2_BCTRL, mga2_bctrl_ioctl,  DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_CREATE, mga2_gem_create_ioctl, DRM_AUTH | DRM_UNLOCKED),
 	DRM_IOCTL_DEF_DRV(MGA2_GEM_MMAP, mga2_gem_mmap_ioctl, DRM_AUTH | DRM_UNLOCKED),
@@ -457,17 +457,6 @@ done:
 	return ret;
 }
 
-extern struct platform_driver mga2_pic_driver;
-extern struct platform_driver mga2_lvds_driver;
-extern struct platform_driver mga2_hdmi_driver;
-extern struct platform_driver mga2_rgb_driver;
-extern struct platform_driver mga2_dsi_driver;
-extern struct platform_driver mga2_crtc_driver;
-extern struct platform_driver mga2_gpio_driver;
-extern struct platform_driver mga2_pwm_driver;
-extern struct platform_driver mga2_gpio_pwm_driver;
-extern struct platform_driver mga2_pll_driver;
-extern struct platform_driver mga2_clk_mux_driver;
 
 static struct platform_driver * const drivers[] = {
 	&mga2_pic_driver,
@@ -483,7 +472,6 @@ static struct platform_driver * const drivers[] = {
 	&mga2_clk_mux_driver,
 };
 
-extern struct i2c_driver cy22394_driver;
 
 static void mga2_load_3d(void *data, async_cookie_t cookie)
 {
@@ -537,7 +525,7 @@ static void mga25_enable_iommu(struct pci_dev *pdev)
 	pci_write_config_byte(pdev, PCI_MCST_CFG, tmp8);
 }
 
-void mga2_reset(struct drm_device *drm)
+static void mga2_reset(struct drm_device *drm)
 {
 	struct mga2 *mga2 = drm->dev_private;
 	struct device *dev = drm->dev;
@@ -854,6 +842,18 @@ static SIMPLE_DEV_PM_OPS(mga2_pm_ops, mga2_suspend, mga2_resume);
 static void mga2_pci_shutdown(struct pci_dev *pdev)
 {
 	mga2_suspend(&pdev->dev);
+
+	/*
+	 * After kexec MGA missing some setup from boot, so
+	 * forbid access for VGA-IO registers through IO space
+	 * (and allow through MEMBAR space) and set VGA-incompatible
+	 * mode for display controller.
+	 */
+	struct drm_device *drm = pci_get_drvdata(pdev);
+	struct mga2 *mga2 = drm->dev_private;
+	if (mga2->dev_id == MGA25 || mga2->dev_id == MGA25_PROTO)
+		regmap_write(mga2->regmap, 0x400, 0x3);
+
 }
 
 static const struct pci_device_id mga2_pci_id_list[] = {

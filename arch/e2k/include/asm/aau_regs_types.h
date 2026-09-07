@@ -23,21 +23,7 @@
 #define _E2K_AAU_REGS_TYPES_H_
 
 #include <asm/types.h>
-#include <asm/cpu_regs_types_defs.h>
-
-#if CONFIG_CPU_ISET_MIN >= 5
-#  define	IS_AAU_ISET_V5()	true
-#  define	IS_AAU_ISET_V3()	false
-#  define	IS_AAU_ISET_GENERIC()	false
-#elif defined CONFIG_E2K_MACHINE
-#  define	IS_AAU_ISET_V3()	true
-#  define	IS_AAU_ISET_V5()	false
-#  define	IS_AAU_ISET_GENERIC()	false
-#else
-#  define	IS_AAU_ISET_GENERIC()	true
-#  define	IS_AAU_ISET_V3()	false
-#  define	IS_AAU_ISET_V5()	false
-#endif
+#include <asm/cpu_regs_types.h>
 
 typedef union {			/* aadj quad-word */
 	struct {

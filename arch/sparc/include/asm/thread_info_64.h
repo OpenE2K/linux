@@ -62,9 +62,6 @@ struct thread_info {
 
 	unsigned long		fpregs[(7 * 256) / sizeof(unsigned long)]
 		__attribute__ ((aligned(64)));
-#ifdef SHOW_WOKEN_TIME
-	long long               irq_enter_clk;
-#endif
 };
 
 #endif /* !(__ASSEMBLY__) */

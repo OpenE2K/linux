@@ -19,6 +19,7 @@
 typedef unsigned long cycles_t;
 
 #define ARCH_HAS_READ_CURRENT_TIMER
+#define get_cycles get_cycles
 static inline cycles_t get_cycles(void)
 {
 	return read_CLKR_reg_value();

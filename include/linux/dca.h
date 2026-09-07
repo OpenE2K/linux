@@ -55,11 +55,6 @@ int dca_remove_requester(struct device *dev);
 u8 dca_get_tag(int cpu);
 u8 dca3_get_tag(struct device *dev, int cpu);
 
-#ifdef CONFIG_E2K_DCA
-int is_e2k_dca_enabled(struct pci_dev *pdev);
-struct dca_provider *e2k_dca_provider_init(struct pci_dev *pdev);
-#endif
-
 /* internal stuff */
 int __init dca_sysfs_init(void);
 void __exit dca_sysfs_exit(void);

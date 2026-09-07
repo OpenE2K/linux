@@ -878,8 +878,11 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 		int node = is_of_node(domain->fwnode) ?
 				of_node_to_nid(to_of_node(domain->fwnode)) :
 				NUMA_NO_NODE;
+		struct irq_affinity_desc af = {
+			.mask = *cpumask_of_node(node)
+		};
 		virq = irq_domain_alloc_irqs_locked(domain, -1, 1, node,
-						    fwspec, false, NULL);
+				fwspec, false, &af);
 #else
 		virq = irq_domain_alloc_irqs_locked(domain, -1, 1, NUMA_NO_NODE,
 						    fwspec, false, NULL);

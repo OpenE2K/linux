@@ -165,6 +165,9 @@ void rxrpc_encap_err_rcv(struct sock *sk, struct sk_buff *skb,
 	u8 type = icmp_hdr(skb)->type;
 	u8 code = icmp_hdr(skb)->code;
 
+#ifdef CONFIG_MCST
+	err = -EINVAL;
+#endif
 	rcu_read_lock();
 	local = rcu_dereference_sk_user_data(sk);
 	if (unlikely(!local)) {

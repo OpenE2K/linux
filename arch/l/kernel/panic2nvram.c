@@ -171,7 +171,7 @@ static ssize_t nvram_panic_seq_write(struct file *file, const char __user *buf,
 		
 
 
-int show_nvram_panic(struct seq_file *p, void *v)
+static int show_nvram_panic(struct seq_file *p, void *v)
 {
 	char *data = kmalloc(size_nvram_panic_area, GFP_KERNEL);
 	char *l;

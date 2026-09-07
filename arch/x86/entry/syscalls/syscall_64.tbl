@@ -372,8 +372,6 @@
 448	common	process_mrelease	sys_process_mrelease 
 449	common	futex_waitv		sys_futex_waitv
 450	common	set_mempolicy_home_node	sys_set_mempolicy_home_node 
-# MCST extentions
-500	common	el_posix		sys_el_posix
 
 #
 # Due to a historical design error, certain syscalls are numbered differently

@@ -89,6 +89,12 @@ static void nf_flow_snat_ip(const struct flow_offload *flow,
 		new_addr = flow->tuplehash[FLOW_OFFLOAD_DIR_ORIGINAL].tuple.src_v4.s_addr;
 		iph->daddr = new_addr;
 		break;
+#ifdef CONFIG_MCST
+	default:
+		addr = 0;
+		new_addr = 0;
+		break;
+#endif
 	}
 	csum_replace4(&iph->check, addr, new_addr);
 
@@ -112,6 +118,12 @@ static void nf_flow_dnat_ip(const struct flow_offload *flow,
 		new_addr = flow->tuplehash[FLOW_OFFLOAD_DIR_ORIGINAL].tuple.dst_v4.s_addr;
 		iph->saddr = new_addr;
 		break;
+#ifdef CONFIG_MCST
+	default:
+		addr = 0;
+		new_addr = 0;
+		break;
+#endif
 	}
 	csum_replace4(&iph->check, addr, new_addr);
 
@@ -426,6 +438,11 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 		if (ret == NF_DROP)
 			flow_offload_teardown(flow);
 		break;
+#ifdef CONFIG_MCST
+	default:
+		ret = NF_STOLEN;
+		break;
+#endif
 	}
 
 	return ret;
@@ -687,6 +704,12 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 		if (ret == NF_DROP)
 			flow_offload_teardown(flow);
 		break;
+#ifdef CONFIG_MCST
+	default:
+		ret = NF_STOLEN;
+		break;
+#endif
+
 	}
 
 	return ret;

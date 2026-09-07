@@ -61,7 +61,7 @@ static __always_inline bool test_preempt_need_resched(void)
 
 static __always_inline void preempt_count_set(int pc)
 {
-	E2K_INSFD_ATOMIC(pc,
+	E2K_INSFD_ATOMIC((u64) (u32) pc,
 			31 /*shift*/ | (33 /*size*/  << 6) | (1 /*me1hi*/ << 13),
 			__cpu_preempt_reg);
 }

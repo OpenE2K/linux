@@ -14,6 +14,10 @@ extern const char linux_proc_banner[];
 
 extern int oops_in_progress;	/* If set, an oops, panic(), BUG() or die() is in progress */
 
+#if defined(CONFIG_MCST) && defined(CONFIG_NVRAM_PANIC)
+extern void write_to_nvram_panic_area(const char *str, int len);
+#endif
+
 #define PRINTK_MAX_SINGLE_HEADER_LEN 2
 
 static inline int printk_get_level(const char *buffer)

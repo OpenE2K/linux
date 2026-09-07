@@ -23,6 +23,8 @@
 #include <linux/iommu-helper.h>
 #include <linux/of_platform.h>
 #include <linux/irq.h>
+#include <video/vga.h>
+#include <linux/crash_dump.h>
 
 #include <asm/l-iommu.h>
 
@@ -35,13 +37,7 @@
 #define IOMMU_HIGH_TABLE	0
 #endif
 
-int l_use_swiotlb = 0;
-int l_iommu_no_numa_bug = 0;
-EXPORT_SYMBOL(l_iommu_no_numa_bug);
-
-int l_iommu_force_numa_bug_on = 0;
-EXPORT_SYMBOL(l_iommu_force_numa_bug_on);
-unsigned long l_iommu_win_sz = DFLT_IOMMU_WINSIZE;
+static unsigned long l_iommu_win_sz = DFLT_IOMMU_WINSIZE;
 
 static int l_not_use_prefetch = 0;
 static struct iommu_ops l_iommu_ops;
@@ -174,7 +170,6 @@ static struct pci_dev *l_dev_to_parent_pcidev(struct device *dev)
  */
 static bool l_iommu_check_device(struct device *dev)
 {
-	struct pci_dev *pdev;
 
 	if (!dev || !dev->dma_mask)
 		return false;
@@ -183,14 +178,6 @@ static bool l_iommu_check_device(struct device *dev)
 		dev = dev->parent;
 
 	if (!dev || !dev_is_pci(dev))
-		return false;
-	pdev = to_pci_dev(dev);
-
-	/* Check if r2000+ is a video card */
-	if (pdev->device == PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P &&
-			pdev->vendor == PCI_VENDOR_ID_MCST_TMP &&
-			((pdev->subsystem_device != 3) &&
-			(pdev->subsystem_device != 4)))
 		return false;
 
 	return true;
@@ -542,8 +529,6 @@ static bool l_iommu_capable(struct device *dev, enum iommu_cap cap)
 	}
 }
 
-#define VGA_MEMORY_OFFSET            0x000A0000
-#define VGA_MEMORY_SIZE              0x00020000
 #define RT_MSI_MEMORY_SIZE           0x100000	/* 1 Mb */
 static void l_iommu_get_resv_regions(struct device *dev,
 				      struct list_head *head)
@@ -585,8 +570,8 @@ static void l_iommu_get_resv_regions(struct device *dev,
 		return;
 	list_add_tail(&region->list, head);
 
-	region = iommu_alloc_resv_region(VGA_MEMORY_OFFSET, VGA_MEMORY_SIZE, prot,
-			IOMMU_RESV_RESERVED, GFP_KERNEL);
+	region = iommu_alloc_resv_region(VGA_FB_PHYS_BASE, 2 * VGA_FB_PHYS_SIZE,
+			prot, IOMMU_RESV_RESERVED, GFP_KERNEL);
 	if (!region)
 		return;
 	list_add_tail(&region->list, head);
@@ -643,33 +628,6 @@ static void l_quirk_iommu_direct_devices(struct pci_dev *pdev)
 }
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP, PCI_DEVICE_ID_MCST_MGA2,
 			  l_quirk_iommu_direct_devices);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
-	PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P, l_quirk_iommu_direct_devices);
-
-#define VCFG 0x40
-# define VCFG_Convert32BitAddressForIommu 0x00000002
-static void l_quirk_iommu_direct_devices_r2000p(struct pci_dev *pdev)
-{
-	/*
-	 * http://wiki.lab.sun.mcst.ru/e2kwiki/R2000p#.D0.A0.D0.B5.D0.B3.D0.B8.D1.81.D1.82.D1.80_VCFG
-	 *
-	 * Clear VCFG.Convert32BitAddressForIommu bit: disable hardware
-	 * setting of [39:32] bits in IOMMU DMA addresses with IommuEnable.
-	 */
-	u32 data;
-	pci_read_config_dword(pdev, VCFG, &data);
-	data = data & ~VCFG_Convert32BitAddressForIommu;
-	pci_write_config_dword(pdev, VCFG, data);
-	/* Check if r2000+ is a video card */
-	if ((pdev->subsystem_device != 3) &&
-		(pdev->subsystem_device != 4)) {
-		/* use dma-direct interface */
-		set_dma_ops(&pdev->dev, NULL);
-	}
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MCST_TMP,
-	PCI_DEVICE_ID_MCST_3D_VIVANTE_R2000P, l_quirk_iommu_direct_devices_r2000p);
-
 
 int iommu_panic_off = 0;
 
@@ -710,7 +668,7 @@ static irqreturn_t l_iommu_interrupt(int irq, void *data)
 	n = snprintf(str, sizeof(str),
 		"IOMMU:%d: error on cpu %d:\n"
 		       "\t%s at address 0x%lx "
-			"(device: %lx:%lx:%lx, error regs:%lx,%lx).\n",
+			"(device: %02lx:%02lx.%ld, error regs:%lx,%lx).\n",
 			node, cpu,
 			err, addr,
 			(fsr2 >> 8) & 0xff, (fsr2 >> 3) & 0x1f,
@@ -770,6 +728,14 @@ static int l_iommu_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	int node = l_dev_to_node(dev);
 	size_t tbl_sz = l_iommu_win_sz / IO_PAGE_SIZE * sizeof(iopte_t);
+
+	/* In case when we booting after panic of previous kernel (crash kexec)
+	 * some devices continue their work, because crashed kernel can't
+	 * properly shutdown them. We should ignore incorrect requests from
+	 * devices setted up to work with previous kernel. */
+	if (is_kdump_kernel()) {
+		iommu_panic_off = 1;
+	}
 
 	if (paravirt_enabled()) {
 		l_iommu_shutdown_node(node);

@@ -118,15 +118,14 @@ static inline int getsp_adj_set_correction(int correction, unsigned long frame)
 
 static inline void getsp_adj_apply(struct pt_regs *regs)
 {
-	unsigned long frame, frame_index;
+	unsigned long frame_index;
 	struct getsp_adj *p;
 	u64 new_usd_base;
 
 	if (cpu_has(CPU_FEAT_V7_CPU_REGS))
 		return;
 
-	frame = PCSP_PTR(regs->stacks.pcsp);
-	frame_index = frame - (unsigned long) CURRENT_PCS_BASE();
+	frame_index = (unsigned long)U_PCSP_PTR(regs->stacks.pcsp) - CURRENT_PCS_BASE();
 
 	list_for_each_entry(p, &current_thread_info()->getsp_adj, list_entry) {
 		if (p->frame_index == frame_index)

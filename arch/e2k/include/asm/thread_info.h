@@ -11,9 +11,6 @@
 #ifndef _E2K_THREAD_INFO_H
 #define _E2K_THREAD_INFO_H
 
-#ifdef __KERNEL__
-
-#ifndef __ASSEMBLY__
 #include <linux/list.h>
 #include <linux/restart_block.h>
 #include <linux/types.h>
@@ -30,14 +27,9 @@
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
 #include <asm/clock_info.h>
 #endif /* CONFIG_KERNEL_TIMES_ACCOUNT */
-#endif /* __ASSEMBLY__ */
 #ifdef CONFIG_PROTECTED_MODE
 #include <asm/e2k_ptypes.h>
 #endif
-
-#ifndef __ASSEMBLY__
-
-#define	DEBUG_TRACE_TRAP_USD_CR1	0
 
 struct signal_stack {
 	void __priv *base;
@@ -72,13 +64,13 @@ typedef struct thread_info {
 	e2k_psp_t		k_psp;
 	e2k_pcsp_t		k_pcsp;
 
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 	struct kernel_gregs	k_gregs_light;
 #endif
 
 	e2k_upsr_t              upsr;           /* kernel upsr */
 
-	data_stack_t		u_stack;	/* User data stack info */
+	struct data_stack	u_stack;	/* User data stack info */
 	hw_stack_t		u_hw_stack;	/* User hardware stacks info */
 
 	/* These fields are needed only for uhws_mode = UHWS_MODE_PSEUDO */
@@ -126,11 +118,6 @@ typedef struct thread_info {
 	e2k_aalda_t	aalda[AALDAS_REGS_NUM];
 
 	struct ksignal	ksig;
-#if DEBUG_TRACE_TRAP_USD_CR1
-	e2k_cr1_t d_cr1;
-	e2k_usd_t d_usd;
-	u64 d_usfs;
-#endif
 	/* signal stack area is used to store interrupted context */
 	struct signal_stack signal_stack;
 
@@ -169,40 +156,82 @@ typedef struct thread_info {
 #endif /* CONFIG_VIRTUALIZATION */
 } __aligned(SMP_CACHE_BYTES) thread_info_t;
 
-#endif /* !__ASSEMBLY__ */
-
 /*
  * Thread information flags:
  *
  * TIF_SYSCALL_TRACE is known to be 0 via blbs.
  */
-#define TIF_SYSCALL_TRACE	0	/* syscall trace active */
-#define TIF_NOTIFY_RESUME	1	/* resumption notification requested */
-#define TIF_SIGPENDING		2	/* signal pending */
-#define TIF_NEED_RESCHED	3	/* rescheduling necessary */
-#define TIF_POLLING_NRFLAG	4	/* poll_idle is polling NEED_RESCHED */
-#define TIF_32BIT		5	/* 32-bit binary */
-#define TIF_MEMDIE		6
-#define TIF_KERNEL_TRACE	7	/* kernel trace active */
-#define TIF_NOHZ		8
-#define TIF_SYSCALL_AUDIT	9	/* syscall auditing active */
-#define TIF_SECCOMP		10	/* secure computing */
-#define TIF_NEED_RESCHED_LAZY	11	/* lazy rescheduling necessary */
-#define TIF_NOTIFY_SIGNAL	12	/* signal notifications exist */
-#define	TIF_USD_NOT_EXPANDED	13	/* local data stack cannot be */
-					/* expanded (fixed size) */
-					/* not used yet */
-#define	TIF_USR_CONTROL_INTERRUPTS 14	/* user can control interrupts */
-/* Following flags only for virtualization support */
-#define	TIF_VIRQS_ACTIVE	15	/* the thread is ready to inject */
-					/* VIRQS interrupt */
-#define	TIF_LIGHT_HYPERCALL	16	/* hypervisor is executing light */
-					/* hypercall */
-#define	TIF_GENERIC_HYPERCALL	17	/* hypervisor is executing generic */
-					/* hypercall */
-/* End of flags only for virtualization support */
-#define TIF_SYSCALL_TRACEPOINT	18	/* syscall tracepoint instrumentation */
-#define TIF_NAPI_WORK		19	/* napi_wq_worker() is running */
+enum {
+	/* syscall trace active */
+	TIF_SYSCALL_TRACE = 0,
+#define TIF_SYSCALL_TRACE TIF_SYSCALL_TRACE
+
+	/* resumption notification requested */
+	TIF_NOTIFY_RESUME,
+#define TIF_NOTIFY_RESUME TIF_NOTIFY_RESUME
+
+	/* signal pending */
+	TIF_SIGPENDING,
+#define TIF_SIGPENDING TIF_SIGPENDING
+
+	/* rescheduling necessary */
+	TIF_NEED_RESCHED,
+#define TIF_NEED_RESCHED TIF_NEED_RESCHED
+
+	/* poll_idle is polling NEED_RESCHED */
+	TIF_POLLING_NRFLAG,
+#define TIF_POLLING_NRFLAG TIF_POLLING_NRFLAG
+
+	/* 32-bit binary */
+	TIF_32BIT,
+#define TIF_32BIT TIF_32BIT
+
+	TIF_MEMDIE,
+#define TIF_MEMDIE TIF_MEMDIE
+
+	/* kernel trace active */
+	TIF_KERNEL_TRACE,
+#define TIF_KERNEL_TRACE TIF_KERNEL_TRACE
+
+	TIF_NOHZ,
+#define TIF_NOHZ TIF_NOHZ
+
+	/* syscall auditing active */
+	TIF_SYSCALL_AUDIT,
+#define TIF_SYSCALL_AUDIT TIF_SYSCALL_AUDIT
+
+	/* secure computing */
+	TIF_SECCOMP,
+#define TIF_SECCOMP TIF_SECCOMP
+
+	/* lazy rescheduling necessary */
+	TIF_NEED_RESCHED_LAZY,
+#define TIF_NEED_RESCHED_LAZY TIF_NEED_RESCHED_LAZY
+
+	/* signal notifications exist */
+	TIF_NOTIFY_SIGNAL,
+#define TIF_NOTIFY_SIGNAL TIF_NOTIFY_SIGNAL
+
+	/* local data stack cannot be expanded (fixed size) */
+	TIF_USD_NOT_EXPANDED,
+
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	/* the thread is ready to inject VIRQS interrupt */
+	TIF_VIRQS_ACTIVE,
+
+	/* hypervisor is executing light hypercall */
+	TIF_LIGHT_HYPERCALL,
+
+	/* hypervisor is executing generic hypercall */
+	TIF_GENERIC_HYPERCALL,
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+	/* syscall tracepoint instrumentation */
+	TIF_SYSCALL_TRACEPOINT,
+
+	/* napi_wq_worker() is running */
+	TIF_NAPI_WORK,
+};
 
 #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)
 #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)
@@ -217,10 +246,11 @@ typedef struct thread_info {
 #define _TIF_NEED_RESCHED_LAZY	(1 << TIF_NEED_RESCHED_LAZY)
 #define _TIF_NOTIFY_SIGNAL	(1 << TIF_NOTIFY_SIGNAL)
 #define	_TIF_USD_NOT_EXPANDED	(1 << TIF_USD_NOT_EXPANDED)
-#define _TIF_USR_CONTROL_INTERRUPTS	(1 << TIF_USR_CONTROL_INTERRUPTS)
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	_TIF_VIRQS_ACTIVE	(1 << TIF_VIRQS_ACTIVE)
 #define _TIF_LIGHT_HYPERCALL	(1 << TIF_LIGHT_HYPERCALL)
 #define _TIF_GENERIC_HYPERCALL	(1 << TIF_GENERIC_HYPERCALL)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #define _TIF_SYSCALL_TRACEPOINT	(1 << TIF_SYSCALL_TRACEPOINT)
 #define _TIF_NAPI_WORK		(1 << TIF_NAPI_WORK)
 
@@ -256,8 +286,6 @@ typedef struct thread_info {
 #define	TS_HOST_AT_VCPU_MODE		0x00001000
 #define	TS_HOST_TO_GUEST_USER		0x00002000
 #define	TS_HOST_SWITCH_MMU_PID		0x00004000
-
-#ifndef __ASSEMBLY__
 
 #ifdef CONFIG_SECONDARY_SPACE_SUPPORT
 /* Mark children as serving threads */
@@ -375,7 +403,4 @@ extern void arch_release_task_struct(struct task_struct *tsk);
 extern void arch_setup_new_exec(void);
 #define arch_setup_new_exec arch_setup_new_exec
 
-#endif /* __ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
 #endif /* _E2K_THREAD_INFO_H */

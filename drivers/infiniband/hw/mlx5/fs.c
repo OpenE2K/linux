@@ -782,7 +782,11 @@ static struct mlx5_ib_flow_prio *get_flow_table(struct mlx5_ib_dev *dev,
 		num_groups = 1;
 		break;
 	default:
+#ifdef CONFIG_MCST
+		return ERR_PTR(-EOPNOTSUPP);
+#else
 		break;
+#endif
 	}
 
 	if (!ns)

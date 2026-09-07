@@ -14,61 +14,63 @@
 #include <asm/kvm/switch.h>
 #include <asm/sections.h>
 
+
+static void launch_hv_vcpu_nostack(struct kvm_vcpu *vcpu);
+static void launch_hv_vcpu_exit(struct kvm_vcpu *vcpu);
+
 /*
  * This function is written this way (not used e2k_ctpr_t struct)
  * due to lcc troubles whith check_stack (the same as __interrupt)
  * compilation mode
  */
-noinline  __interrupt void launch_hv_vcpu(struct kvm_vcpu_arch *vcpu)
+noinline void launch_hv_vcpu(struct kvm_vcpu_arch *vcpu_arch)
 {
-	struct thread_info *ti = current_thread_info();
-	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->intc_ctxt;
-	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->sw_ctxt;
+	struct kvm_vcpu *vcpu = arch_to_vcpu(vcpu_arch);
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu_arch->sw_ctxt;
 
-	e2k_ctpr_t ctpr1 = intc_ctxt->ctpr1;
-	e2k_ctpr_t ctpr2 = intc_ctxt->ctpr2;
-	e2k_ctpr_t ctpr3 = intc_ctxt->ctpr3;
-	u64 lsr = intc_ctxt->lsr, lsr1 = intc_ctxt->lsr1,
-	    ilcr = intc_ctxt->ilcr, ilcr1 = intc_ctxt->ilcr1;
-
-	if (cpu_has(CPU_HWBUG_VIRT_PUSD_PSL) &&
-			unlikely(vcpu_usd_p(arch_to_vcpu(vcpu), sw_ctxt->usd))) {
-		E2K_KVM_BUG_ON(!vcpu_usd_psl(arch_to_vcpu(vcpu), sw_ctxt->usd));
-		sw_ctxt->usd.Psl--;
+	if (cpu_has(CPU_HWBUG_VIRT_PUSD_PSL) && unlikely(vcpu_usd_p(vcpu, sw_ctxt->usd))) {
+		if (!WARN_ON_ONCE(!vcpu_usd_psl(vcpu, sw_ctxt->usd)))
+			sw_ctxt->usd.Psl--;
 	}
 
-	/*
-	 * Here kernel is on guest context including data stack
-	 * so nothing complex: calls, prints, etc
-	 */
+	__guest_enter(current_thread_info(), vcpu_arch,
+		      FULL_CONTEXT_SWITCH | DONT_SAVE_KGREGS_SWITCH | DEBUG_REGS_SWITCH);
 
-	__guest_enter(ti, vcpu, FULL_CONTEXT_SWITCH | USD_CONTEXT_SWITCH |
-		      DEBUG_REGS_SWITCH);
+	E2K_JUMP_WITH_ARGUMENTS(launch_hv_vcpu_nostack, 1, vcpu);
+}
 
-	/* CPU_HWBUG_BRANCH_ACTIVATES_CTPR: avoid rbranch, ibranch and ibranchd
-	 * instructions between %ctpr[.hi] restoring and glaunch instruction. */
-	RWSH_CTPR_NOIRQ(ctpr2, ctpr2);
-	/* These registers must be restored after ctpr2 */
-	native_set_aau_aaldis_aaldas(ti->aalda, &sw_ctxt->aau_context);
-	NATIVE_RESTORE_AAU_MASK_REGS(sw_ctxt->aau_context.aaldm,
-				     sw_ctxt->aau_context.aaldv, sw_ctxt->aasr);
-	/* issue GLAUNCH instruction.
-	 * This macro does not restore %ctpr2 register because of ordering
-	 * with AAU restore. */
-	E2K_GLAUNCH(LO(ctpr1), HI(ctpr1), LO(ctpr2), HI(ctpr2),
-		    LO(ctpr3), HI(ctpr3), lsr, lsr1, ilcr, ilcr1);
+/*
+ * This executes on guest context including data stack so
+ * must not use anything complex: calls, prints, etc.
+ *
+ * To reduce compiler incompatibilities this should execute
+ * only the part that actually does not have access to
+ * kernel's data stack.
+ */
+static noinline __interrupt void launch_hv_vcpu_nostack(struct kvm_vcpu *vcpu)
+{
+	struct kvm_intc_cpu_context *intc_ctxt = &vcpu->arch.intc_ctxt;
+	struct kvm_sw_cpu_context *sw_ctxt = &vcpu->arch.sw_ctxt;
 
-	intc_ctxt->ctpr1 = ctpr1;
-	/* Make sure that the first kernel memory access is store.
-	 * This is needed to flush SLT before trying to load anything. */
-	barrier();
-	intc_ctxt->ctpr2 = ctpr2;
-	intc_ctxt->ctpr3 = ctpr3;
-	intc_ctxt->lsr = lsr;
-	intc_ctxt->lsr1 = lsr1;
-	intc_ctxt->ilcr = ilcr;
-	intc_ctxt->ilcr1 = ilcr1;
+	/* Switch data stack after all function calls */
+	kvm_guest_enter_stack_regs(sw_ctxt, false);
 
-	__guest_exit(ti, vcpu, FULL_CONTEXT_SWITCH | USD_CONTEXT_SWITCH |
-		     DEBUG_REGS_SWITCH);
+	/* Cannot use current and cpu_has() after this */
+	kvm_switch_gregs(sw_ctxt, true);
+
+	E2K_GLAUNCH(intc_ctxt, sw_ctxt);
+
+	/* Can use current and cpu_has() after this */
+	kvm_switch_gregs(sw_ctxt, false);
+
+	/* Switch data stack before all function calls */
+	kvm_guest_exit_stack_regs(sw_ctxt, &vcpu->arch.hw_ctxt, false);
+
+	E2K_JUMP_WITH_ARGUMENTS(launch_hv_vcpu_exit, 1, vcpu);
+}
+
+static noinline void launch_hv_vcpu_exit(struct kvm_vcpu *vcpu)
+{
+	__guest_exit(current_thread_info(), &vcpu->arch,
+		     FULL_CONTEXT_SWITCH | DONT_SAVE_KGREGS_SWITCH | DEBUG_REGS_SWITCH);
 }

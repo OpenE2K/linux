@@ -17,14 +17,13 @@
 #include <linux/file.h>
 #include <asm/traps.h>
 #include <asm/ptrace.h>
+#include <asm/cpu_regs_types.h>
 #include <asm/e2k_debug.h>
 #include <asm/instr_regs_types.h>
 #include <asm/processor.h>
 #include <asm/process.h>
-#include <asm/instr_regs_types.h>
-#include <asm/cpu_regs_types_defs.h>
 #include <asm/mmu_fault.h>
-#include <asm/native_cpu_regs_access.h>
+#include <asm/cpu_regs.h>
 #include <asm/thread_info.h>
 #include <asm/protected_mode.h>
 #include <asm/protected_syscalls.h>
@@ -578,40 +577,40 @@ static int softpm_suitable(const struct pt_regs *regs)
 	return 1;
 }
 
-static inline void load_dvalue_and_tagd_from_psp(const void *psp_addr,
+static inline void load_dvalue_and_tagd_from_psp(const volatile void *psp_addr,
 						 e2k_dreg_t *dword, u8 *tags)
 {
 	load_value_and_tagd(psp_addr, &dword->word, tags);
 }
 
-static inline void load_qvalue_and_tagq_from_psp(const void *psp_addr,
+static inline void load_qvalue_and_tagq_from_psp(const volatile void *psp_addr,
 						 e2k_qreg_t *qword, u8 *tags)
 {
 	load_qvalue_and_tagq(psp_addr, qword, tags, machine.qnr1_offset);
 }
 
-static inline void load_xvalue_and_tagx_from_psp(const void *psp_addr,
+static inline void load_xvalue_and_tagx_from_psp(const volatile void *psp_addr,
 						 e2k_xreg_t *xword, u8 *tags)
 {
 	u64 ext_offset = (CURRENT_ISET <= 4) ? 16 : 8;
 	load_qvalue_and_tagq(psp_addr, (e2k_qreg_t *)xword, tags, ext_offset);
 }
 
-static inline void load_qpvalue_and_tagqp_from_psp(const void *psp_addr,
+static inline void load_qpvalue_and_tagqp_from_psp(const volatile void *psp_addr,
 						   e2k_qreg_t *qword, u8 *tags)
 {
 	BUG_ON(CURRENT_ISET <= 4);
 	load_qvalue_and_tagq(psp_addr, qword, tags, 8);
 }
 
-static inline void load_dvalue_and_tagd_from_k_gregs(const void *k_greg_addr,
+static inline void load_dvalue_and_tagd_from_k_gregs(const volatile void *k_greg_addr,
 						     e2k_dreg_t *dword,
 						     u8 *tags)
 {
 	load_value_and_tagd(k_greg_addr, &dword->word, tags);
 }
 
-static inline void load_qvalue_and_tagq_from_k_gregs(const void *k_greg_addr,
+static inline void load_qvalue_and_tagq_from_k_gregs(const volatile void *k_greg_addr,
 						     e2k_qreg_t *qword,
 						     u8 *tags)
 {
@@ -620,14 +619,14 @@ static inline void load_qvalue_and_tagq_from_k_gregs(const void *k_greg_addr,
 	load_qvalue_and_tagq(k_greg_addr, qword, tags, sizeof(struct e2k_greg));
 }
 
-static inline void load_xvalue_and_tagx_from_k_gregs(const void *k_greg_addr,
+static inline void load_xvalue_and_tagx_from_k_gregs(const volatile void *k_greg_addr,
 						     e2k_xreg_t *xword,
 						     u8 *tags)
 {
 	load_qvalue_and_tagq(k_greg_addr, (e2k_qreg_t *)xword, tags, 8);
 }
 
-static inline void load_qpvalue_and_tagqp_from_k_gregs(const void *k_greg_addr,
+static inline void load_qpvalue_and_tagqp_from_k_gregs(const volatile void *k_greg_addr,
 						       e2k_qreg_t *qword,
 						       u8 *tags)
 {
@@ -658,7 +657,7 @@ load_qvalue_and_tagq_from_real_greg(int rnum_d, e2k_qreg_t *qword, u8 *tags)
 static inline void
 load_xvalue_and_tagx_from_real_greg(int rnum_d, e2k_xreg_t *xword, u8 *tags)
 {
-	e2k_xreg_t qreg_saved;
+	volatile e2k_xreg_t qreg_saved;
 	NATIVE_SAVE_SINGLE_GREG_VAR(&qreg_saved, rnum_d, CURRENT_ISET);
 	load_qvalue_and_tagq(&qreg_saved, (e2k_qreg_t *)xword, tags, 8);
 }
@@ -667,24 +666,24 @@ static inline void
 load_qpvalue_and_tagqp_from_real_greg(int rnum_d, e2k_qreg_t *qword, u8 *tags)
 {
 	BUG_ON(CURRENT_ISET <= 4);
-	e2k_qreg_t qreg_saved;
+	volatile e2k_qreg_t qreg_saved;
 	NATIVE_SAVE_SINGLE_GREG_VAR(&qreg_saved, rnum_d, CURRENT_ISET);
 	load_qvalue_and_tagq(&qreg_saved, qword, tags, 8);
 }
 
 static inline void
-store_dvalue_and_tagd_to_psp(void *psp_addr, const e2k_dreg_t *dword, u8 tags)
+store_dvalue_and_tagd_to_psp(volatile void *psp_addr, const e2k_dreg_t *dword, u8 tags)
 {
 	store_tagged_dword(psp_addr, dword->word, tags & 0b1111);
 }
 
 static inline void
-store_qvalue_and_tagq_to_psp(void *psp_addr, const e2k_qreg_t *qword, u8 tags)
+store_qvalue_and_tagq_to_psp(volatile void *psp_addr, const e2k_qreg_t *qword, u8 tags)
 {
 	store_tagged_qword(psp_addr, *qword, tags, machine.qnr1_offset);
 }
 
-static inline void store_xvalue_and_tagx_to_psp_v3(void *psp_addr,
+static inline void store_xvalue_and_tagx_to_psp_v3(volatile void *psp_addr,
 						   const e2k_xreg_t *xword,
 						   u8 tags)
 {
@@ -697,20 +696,20 @@ static inline void store_xvalue_and_tagx_to_psp_v3(void *psp_addr,
 }
 
 static inline void
-store_qpvalue_and_tagqp_to_psp(void *psp_addr, const e2k_qreg_t *qword, u8 tags)
+store_qpvalue_and_tagqp_to_psp(volatile void *psp_addr, const e2k_qreg_t *qword, u8 tags)
 {
 	BUG_ON(CURRENT_ISET <= 4);
 	store_tagged_qword(psp_addr, *qword, tags, 8);
 }
 
-static inline void store_dvalue_and_tagd_to_k_gregs(void *k_greg_addr,
+static inline void store_dvalue_and_tagd_to_k_gregs(volatile void *k_greg_addr,
 						    const e2k_dreg_t *dword,
 						    u8 tags)
 {
 	store_tagged_dword(k_greg_addr, dword->word, tags & 0b1111);
 }
 
-static inline void store_qvalue_and_tagq_to_k_gregs(void *k_greg_addr,
+static inline void store_qvalue_and_tagq_to_k_gregs(volatile void *k_greg_addr,
 						    const e2k_qreg_t *qword,
 						    u8 tags)
 {
@@ -719,7 +718,7 @@ static inline void store_qvalue_and_tagq_to_k_gregs(void *k_greg_addr,
 	store_tagged_qword(k_greg_addr, *qword, tags, 16);
 }
 
-static inline void store_xvalue_and_tagx_to_k_gregs_v3(void *k_greg_addr,
+static inline void store_xvalue_and_tagx_to_k_gregs_v3(volatile void *k_greg_addr,
 						       const e2k_xreg_t *xword,
 						       u8 tags)
 {
@@ -730,7 +729,7 @@ static inline void store_xvalue_and_tagx_to_k_gregs_v3(void *k_greg_addr,
 	store_tagged_qword(k_greg_addr, data, tags, 8);
 }
 
-static inline void store_qpvalue_and_tagqp_to_k_gregs(void *k_greg_addr,
+static inline void store_qpvalue_and_tagqp_to_k_gregs(volatile void *k_greg_addr,
 						      const e2k_qreg_t *qword,
 						      u8 tags)
 {
@@ -756,7 +755,7 @@ store_xvalue_and_tagx_to_real_greg_v3(int rnum_d, const e2k_xreg_t *xword,
 				      u8 tags)
 {
 	BUG_ON(CURRENT_ISET > 4);
-	struct e2k_greg tagged_saved_greg;
+	volatile struct e2k_greg tagged_saved_greg;
 	/* on <= V4 ext part is not tagged. On >= V5 it is tagged */
 	tags &= 0b1111;
 	e2k_qreg_t data = { .lo = xword->word, .hi = xword->ext };
@@ -770,7 +769,7 @@ static inline void store_qpvalue_and_tagqp_to_real_greg(int rnum_d,
 							u8 tags)
 {
 	BUG_ON(CURRENT_ISET <= 4);
-	struct e2k_greg tagged_saved_greg;
+	volatile struct e2k_greg tagged_saved_greg;
 	store_tagged_qword(&tagged_saved_greg, *qword, tags, 8);
 	NATIVE_RESTORE_SINGLE_GREG_VAR(&tagged_saved_greg, rnum_d,
 				       CURRENT_ISET);
@@ -1181,7 +1180,7 @@ struct register_struct {
 	bool is_qp;
 	register_type type;
 	register_size size;
-	u64 *mem_addr;
+	volatile u64 *mem_addr;
 	int rnum_d;
 	int bnum_d;
 	register_stage stage;
@@ -1510,8 +1509,8 @@ static int _register_fill_addr_G(register_t *reg)
 	if ((reg->rnum_d >= LOCAL_GREGS_START) &&
 	    (reg->rnum_d < LOCAL_GREGS_START + LOCAL_GREGS_NUM)) {
 		int k_greg_i = reg->rnum_d - LOCAL_GREGS_START;
-		struct e2k_greg *pgreg = &(current->thread.u_gregs.g[k_greg_i]);
-		reg->mem_addr = &(pgreg->xreg[0]);
+		volatile struct e2k_greg *pgreg = &(current->thread.u_gregs.g[k_greg_i]);
+		reg->mem_addr = &pgreg->base;
 		pr_debug_reg("Addr of g%d (saved to k_gregs) is: 0x%llx\n",
 			     reg->rnum_d, (u64)reg->mem_addr);
 	}
@@ -1544,14 +1543,14 @@ static int _register_load_store_R(register_t *reg, bool is_load)
 	 */
 	unsigned long flags;
 	raw_all_irq_save(flags);
-	u64 psp_ptr_before_spill = PSP_PTR(read_PSP_reg());
+	u64 psp_ptr_before_spill = (unsigned long)K_PSP_PTR(read_PSP_reg());
 	int spilled_took_place = 0;
 	const char *op_repr = "StoreR";
 	if (psp_ptr_before_spill <= (u64)reg->mem_addr) { /* not spilled yet */
 		E2K_FLUSHR;
 		spilled_took_place = 1;
 	}
-	u64 psp_ptr_after_spill = PSP_PTR(read_PSP_reg());
+	u64 psp_ptr_after_spill = (unsigned long)K_PSP_PTR(read_PSP_reg());
 
 	/* we can safely do this, as regs are spilled into kernel stack: */
 	if (is_load) {
@@ -2234,16 +2233,14 @@ static int dec_als(syllable_t *syllable)
 	int als_eff_ch = syllable->als_pos > 2 ? syllable->als_pos - 3 :
 						 syllable->als_pos;
 	int ales_opc2 = syllable->instr_ales.alef2.opc2;
-	int src[4] = { syllable->instr_als.alf3.src1,
+	instr_src_t src[4] = { syllable->instr_als.alf3.src1,
 		       syllable->instr_als.alf3.src2,
 		       syllable->instr_als.alf3.src3,
 		       syllable->instr_ales.alef1.src3 };
 	pr_debug_operation(
-		"DEC: Decoding als%d with cop=0x%x; ales=0x%x; "
-		"src1/opce/reg#=0x%x; src2=0x%x; src3/dst/reg#=0x%x; "
-		"ales_src=0x%x\n",
-		syllable->als_pos, cop, syllable->instr_ales.word, src[0],
-		src[1], src[2], src[3]);
+		"DEC: Decoding als%d with cop=0x%x; ales=0x%x; src1/opce/reg#=0x%x; src2=0x%x; src3/dst/reg#=0x%x; ales_src=0x%x\n",
+		syllable->als_pos, cop, syllable->instr_ales.word,
+		AW(src[0]), AW(src[1]), AW(src[2]), AW(src[3]));
 	const struct _dec_als(*dec_tbl)[3] = NULL;
 	size_t dec_tbl_size = 0;
 	switch (ales_opc2) {
@@ -2280,7 +2277,7 @@ static int dec_als(syllable_t *syllable)
 		_DEC_ALS_SRC_SIZE(decoded, 2), _DEC_ALS_SRC_SIZE(decoded, 3));
 	for (int i = 0; i < 4; i++) {
 		if (_DEC_ALS_HAS_SRC(decoded, i)) {
-			register_fill(&syllable->operands[i], src[i],
+			register_fill(&syllable->operands[i], AW(src[i]),
 				      _DEC_ALS_SRC_SIZE(decoded, i),
 				      _DEC_ALS_SRC_IS_QP(decoded, i));
 			if (corrhistory_reg_is_already_corr(
@@ -2297,7 +2294,7 @@ static int dec_als(syllable_t *syllable)
 		else {
 			s64 imm;
 			int ret;
-			if ((ret = get_src2_imm(syllable->ip, src[1], &imm)))
+			if ((ret = get_src2_imm(syllable->ip, AW(src[1]), &imm)))
 				return ret;
 			syllable->mem_ext_ind = (s32)imm;
 		}
@@ -2320,7 +2317,7 @@ static int dec_als(syllable_t *syllable)
  */
 static int dec_generic_alu(syllable_t *syllable, register_size size, bool is_qp)
 {
-	int src[4] = { syllable->instr_als.alf3.src1,
+	instr_src_t src[4] = { syllable->instr_als.alf3.src1,
 		       syllable->instr_als.alf3.src2,
 		       syllable->instr_als.alf3.src3,
 		       syllable->instr_ales.alef1.src3 };
@@ -2329,17 +2326,17 @@ static int dec_generic_alu(syllable_t *syllable, register_size size, bool is_qp)
 		"NoDEC: \"Decoding\" ALU als%d with cop=0x%x; ales=0x%x; "
 		"src1/opce/reg#=0x%x; src2=0x%x; src3/dst/reg#=0x%x; "
 		"ales_src=0x%x\n",
-		syllable->als_pos, cop, syllable->instr_ales.word, src[0],
-		src[1], src[2], src[3]);
+		syllable->als_pos, cop, syllable->instr_ales.word,
+		AW(src[0]), AW(src[1]), AW(src[2]), AW(src[3]));
 	for (int i = 0; i < 4; i++) {
 		bool skip = 0;
 		for (int j = 0; j < i; j++) {
-			if (src[j] == src[i])
+			if (AW(src[j]) == AW(src[i]))
 				skip = 1;
 		}
 		if (skip)
 			continue;
-		register_fill(&syllable->operands[i], src[i], size, is_qp);
+		register_fill(&syllable->operands[i], AW(src[i]), size, is_qp);
 		if (corrhistory_reg_is_already_corr(
 			    &syllable->correction_history,
 			    &syllable->operands[i]))
@@ -2420,27 +2417,26 @@ static int dec_generic_alu_next(syllable_t *syllable)
  */
 static int dec_generic_mem(syllable_t *syllable, u8 format)
 {
-	int descr_src = syllable->instr_als.alf3.src1;
-	int offset_src = syllable->instr_als.alf3.src2;
+	instr_src_t descr_src = syllable->instr_als.alf3.src1;
+	instr_src_t offset_src = syllable->instr_als.alf3.src2;
 	int cop = syllable->instr_als.alf3.cop;
 	pr_debug_operation(
-		"NoDEC: \"Decoding\" MEM als%d with cop=0x%x; ales=0x%x; "
-		"descr_src=0x%x; offset_src=0x%x\n",
-		syllable->als_pos, cop, syllable->instr_ales.word, descr_src,
-		offset_src);
-	register_fill(&syllable->operands[0], descr_src, REG_SIZE_QWORD, 0);
+		"NoDEC: \"Decoding\" MEM als%d with cop=0x%x; ales=0x%x; descr_src=0x%x; offset_src=0x%x\n",
+		syllable->als_pos, cop, syllable->instr_ales.word,
+		AW(descr_src), AW(offset_src));
+	register_fill(&syllable->operands[0], AW(descr_src), REG_SIZE_QWORD, 0);
 	if (corrhistory_reg_is_already_corr(&syllable->correction_history,
 					    &syllable->operands[0]))
 		syllable->operands[0].corrected = 1;
 
-	register_fill(&syllable->operands[1], offset_src, REG_SIZE_WORD, 0);
+	register_fill(&syllable->operands[1], AW(offset_src), REG_SIZE_WORD, 0);
 	syllable->mem_format = format;
 	if (syllable->operands[1].type != REG_NONE) {
 		syllable->mem_ext_ind = (s32)syllable->operands[1].value_s.word;
 	} else {
 		s64 imm;
 		int ret;
-		if ((ret = get_src2_imm(syllable->ip, offset_src, &imm)))
+		if ((ret = get_src2_imm(syllable->ip, AW(offset_src), &imm)))
 			return ret;
 		syllable->mem_ext_ind = (s32)imm;
 	}
@@ -2706,7 +2702,7 @@ static int _overflow_constr_same_page(u64 one_addr, u64 another_addr)
 		min_addr = another_addr;
 		max_addr = one_addr;
 	}
-	u64 page_start = min_addr & (~(PAGE_SIZE - 1));
+	u64 page_start = min_addr & PAGE_MASK;
 	if ((max_addr >= page_start) && (max_addr < page_start + PAGE_SIZE))
 		return 1;
 	return 0;
@@ -2948,7 +2944,7 @@ static int correct_overflow(register_t *descr, s32 extra_ind, u8 format)
 		return -EFAULT;
 	}
 
-	e2k_ptr_t new_val = new_ap(new_start, new_end - new_start,
+	e2k_ptr_t new_val = MAKE_AP_RW(new_start, new_end - new_start,
 				   target_addr - new_start - extra_ind,
 				   AP_RW(descr->value_p));
 
@@ -3019,7 +3015,7 @@ static int correct_descr_tags(register_t *descr, s32 extra_ind, u8 format)
 		pr_debug_correction(
 			"Size, itag and rw are 0. Seems like convertion from integer.\n"
 		);
-		new_val = new_ap(base, size, curptr, E2K_AP_RW);
+		new_val = MAKE_AP_RW(base, size, curptr, E2K_AP_RW);
 		new_tags = ((E2K_AP_HI_ETAG << 4) | E2K_AP_LO_ETAG);
 	} else if (size != 0 && itag == E2K_AP_ITAG && rw != 0) {
 		pr_debug_correction(
@@ -3027,7 +3023,7 @@ static int correct_descr_tags(register_t *descr, s32 extra_ind, u8 format)
 		if (curptr >= size)
 			pr_debug_correction(
 				"Untagged descriptor is also overfilled.\n");
-		new_val = new_ap(base, size, curptr, rw);
+		new_val = MAKE_AP_RW(base, size, curptr, rw);
 		new_tags = ((E2K_AP_HI_ETAG << 4) | E2K_AP_LO_ETAG);
 	} else {
 		goto err;

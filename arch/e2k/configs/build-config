@@ -12,13 +12,12 @@ Confs()
 {
 cat <<EOF
  e2k_nort e2k_rt e2k_nn e2k_nnrt e2k_host e2k_guest
- v6_nort v6_nn
- e2c3_proto e12c_proto e16c_proto e48c_proto e8v7_proto
+ v4_nort v6_nort v6_nn
+ e2c3_proto e12c_proto e16c_proto e8v7_proto
  e8v7_nort e8v7_rt
- e48c_nort e48c_rt e48c_nn e48c_nnrt
  e12c_nort e12c_rt e12c_nn e12c_nnrt
  e16c_nort e16c_rt e16c_nn e16c_nnrt
- e2c3_nort e2c3_rt
+ e2c3_nort e2c3_rt e2c3_nort_debug
  e8c2_nort e8c2_rt e8c2_nn e8c2_nnrt e8c2_host e8c2_guest e8c2_nort_debug
  e8c_nort e8c_rt e8c_nn e8c_nnrt e8c_host e8c_guest e8c_nort_debug
  e1cp_nort e1cp_rt e1cp_host e1cp_guest
@@ -36,13 +35,13 @@ Confs
 usage()
 {
 	echo "incorrect param: $1"
-	echo "usage: $scname [--def] [--release] --conf <conf> [--file <anyname>_defconfig] [CC=<cc>]" >&2
+	echo "usage: $scname [--def] [--release] [--tcb] --conf <conf> [--file <anyname>_defconfig] [CC=<cc>]" >&2
 	exit 1
 }
 Usage() {
 	cat >&2 <<EOL
 Usage:
-        $scname [--def] [--release] --conf <conf> [--output_directory/-o <path>] [--file <anyname>_defconfig]
+        $scname [--def] [--release] [--tcb] --conf <conf> [--output_directory/-o <path>] [--file <anyname>_defconfig]
 
 Generate .config or|and <defconfig> files for some kernel configuration
 from arch/e2k/configs/defconfig | arch/e2k/configs/rt_defconfig
@@ -63,6 +62,7 @@ this script, otherwise default `gcc` value will be used.
 4. To generate .config only in separate directory
    $scname --conf <conf> -o <output directory>
 5. To generate .config for production kernel also use --release flag
+6. To generate .config for TCB kernel also use --tcb flag.
 
 <conf>s meaning:
 
@@ -98,9 +98,15 @@ conf_spi_eth()
 	-m CONFIG_WIZNET_W5100 -m CONFIG_WIZNET_W5100_SPI \
 	|| exit 1
 }
+conf_v4()
+{
+	$conf_script $OPTFILE \
+	-e CONFIG_E2K_MINVER_V4 \
+	|| exit 1;
+
+}
 conf_v6()
 {
-	# union of conf_e2c3, conf_e12c and conf_e16c
 	$conf_script $OPTFILE \
 	-e CONFIG_E2K_MINVER_V6 \
 	|| exit 1;
@@ -148,12 +154,6 @@ conf_e16c()
 	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E16C \
 	|| exit 1;
 }
-conf_e48c()
-{
-	$conf_script $OPTFILE \
-	-e CONFIG_E2K_MACHINE -e CONFIG_E2K_E48C \
-	|| exit 1;
-}
 conf_e8v7()
 {
 	$conf_script $OPTFILE \
@@ -189,7 +189,6 @@ conf_pv_host()
 	-d CONFIG_KVM_GUEST_KERNEL \
 	-e CONFIG_KVM_PARAVIRTUALIZATION \
 	-e CONFIG_KVM_HOST_KERNEL \
-	-e CONFIG_KVM_HOST_MODE \
 	-e CONFIG_KVM_SHADOW_PT_ENABLE \
 	-e CONFIG_KVM_TDP_ENABLE \
 	-e CONFIG_KVM_NONPAGING_ENABLE \
@@ -203,7 +202,6 @@ conf_pv_guest()
 	-d CONFIG_KVM_HOST_KERNEL \
 	-e CONFIG_KVM_PARAVIRTUALIZATION \
 	-e CONFIG_KVM_GUEST_KERNEL \
-	-e CONFIG_KVM_GUEST_MODE \
 	-e CONFIG_KVM_GUEST_SMP \
 	-d CONFIG_KVM_GUEST_DEBUG \
 	-d CONFIG_KVM_GUEST_HW_HCALL \
@@ -224,6 +222,7 @@ e2k_nn()    { conf_nn; }
 e2k_nnrt()  { conf_nn; }
 e2k_host()  { conf_pv_host; }
 e2k_guest() { conf_pv_guest; }
+v4_nort()   { conf_v4; }
 v6_nort()   { conf_v6; }
 v6_nn()     { conf_v6; conf_nn; }
 e1cp_nort() { conf_e1cp; }
@@ -268,16 +267,11 @@ e12c_nn()   { conf_e12c; conf_nn; }
 e12c_nnrt() { conf_e12c; conf_nn; }
 e2c3_nort() { conf_e2c3; conf_nn; }
 e2c3_rt()   { conf_e2c3; conf_nn; }
-e48c_nort() { conf_e48c; }
-e48c_rt()   { conf_e48c; }
-e48c_nn()   { conf_e48c; conf_nn; }
-e48c_nnrt() { conf_e48c; conf_nn; }
 e8v7_nort() { conf_e8v7; conf_nn; }
 e8v7_rt()   { conf_e8v7; conf_nn; }
 e12c_proto(){ conf_e12c; conf_prototype; }
 e16c_proto(){ conf_e16c; conf_prototype; }
 e2c3_proto(){ conf_e2c3; conf_prototype; conf_nn; }
-e48c_proto(){ conf_e48c; conf_prototype; conf_spi_eth; }
 e8v7_proto(){ conf_e8v7; conf_prototype; }
 ###############################################################################
 trap "cleanup" 1 2 3 6 15 EXIT
@@ -288,6 +282,7 @@ while [ "$1" != "" ] ; do
 	case "$opt" in
 	--def|-d) def_flg=0;;
 	--release|-r) rel_flag=0;;
+	--tcb|-t) tcb_flag=0;;
 	--conf|-c) [ x"$DCONF" != x ] && usage; DCONF="$1"; shift;;
 	--file|-f) [ x"$DFILE" != x ] && usage; DFILE="$1"; shift;;
 	--output_directory|-o) OUTPUT_DIR="$1"; shift;;
@@ -313,6 +308,9 @@ if [[  "$DCONF" == *"debug"* ]]; then
 fi
 if [[ "$rel_flag" == "0" ]]; then
 	ADDITIONAL_CONFIGS+=" mcst_release.config "
+fi
+if [[ "$tcb_flag" == "0" ]]; then
+	ADDITIONAL_CONFIGS+=" tcb.config "
 fi
 # src defconfig
 SFILE=$conf_path/defconfig

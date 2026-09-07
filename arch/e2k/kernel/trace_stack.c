@@ -155,7 +155,7 @@ static void save_extended_stack_trace(struct extended_stack_trace *trace)
 	args.trace = trace;
 	args.prev = &prev_used;
 	args.prev_kernel_frame = &prev_kernel_frame;
-	parse_chain_stack(false, NULL, save_stack_address, &args);
+	parse_chain_stack(false, false, NULL, save_stack_address, &args);
 
 	trace->sizes[prev_kernel_frame] = prev_used;
 
@@ -193,7 +193,7 @@ static int save_p_stack_address(e2k_mem_crs_t *frame, unsigned long real_frame_a
 noinline
 static void save_extended_p_stack_trace(struct extended_stack_trace *trace)
 {
-	parse_chain_stack(false, NULL, save_p_stack_address, trace);
+	parse_chain_stack(false, false, NULL, save_p_stack_address, trace);
 
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
@@ -240,7 +240,7 @@ static void get_kernel_stacks_size(unsigned long *cs_size,
 	args.cs_size = cs_size;
 	args.ps_size = ps_size;
 	args.skip = &skip;
-	parse_chain_stack(false, NULL, read_kernel_stacks_size, &args);
+	parse_chain_stack(false, false, NULL, read_kernel_stacks_size, &args);
 }
 
 static inline void check_stack(void)

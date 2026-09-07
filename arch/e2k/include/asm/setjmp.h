@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <asm/cpu_regs_types_defs.h>
+#include <asm/cpu_regs_types.h>
 
 struct jump_buf_e2k {
 	e2k_mem_crs_t crs;

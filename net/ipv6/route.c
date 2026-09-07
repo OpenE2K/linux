@@ -4513,7 +4513,6 @@ int ipv6_route_ioctl(struct net *net, unsigned int cmd, struct in6_rtmsg *rtmsg)
 {
 	struct fib6_config cfg;
 	int err;
-
 	if (cmd != SIOCADDRT && cmd != SIOCDELRT)
 		return -EINVAL;
 	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
@@ -4532,6 +4531,11 @@ int ipv6_route_ioctl(struct net *net, unsigned int cmd, struct in6_rtmsg *rtmsg)
 	case SIOCDELRT:
 		err = ip6_route_del(&cfg, NULL);
 		break;
+#ifdef CONFIG_MCST
+	default:
+		err = -EINVAL;
+		break;
+#endif
 	}
 	rtnl_unlock();
 	return err;

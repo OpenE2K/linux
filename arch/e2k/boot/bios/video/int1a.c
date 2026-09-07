@@ -8,7 +8,7 @@
 #include "init.h"
 #include "pci-iface.h"
 #include "pci.h"
-#include "printk.h"
+#include "console/printk.h"
 
 #define DEBUG_INT1A
 

@@ -49,6 +49,9 @@ static int blksize;
 #define KEY_TRUSTED_PREFIX_LEN (sizeof (KEY_TRUSTED_PREFIX) - 1)
 #define KEY_USER_PREFIX_LEN (sizeof (KEY_USER_PREFIX) - 1)
 #define KEY_ECRYPTFS_DESC_LEN 16
+#ifdef CONFIG_MCST
+#undef HASH_SIZE
+#endif
 #define HASH_SIZE SHA256_DIGEST_SIZE
 #define MAX_DATA_SIZE 4096
 #define MIN_DATA_SIZE  20

@@ -84,9 +84,11 @@ do {	\
 #include <asm/trace.h>
 #include <asm/ucontext.h>
 #include <asm/umalloc.h>
-#include <asm/kvm/runstate.h>
 #include <asm/kvm/switch.h>
 #include <asm/fast_syscalls.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/runstate.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_COMPAT
 #include <linux/compat.h>
@@ -129,51 +131,6 @@ bool debug_guest_ust = false;
 	(rval1) = (regs)->rval1;					\
 	(rval2) = (regs)->rval2;					\
 })
-
-/*
- * Maximum number of hardware interrupts:
- * 1) Interrupt on user - we must open interrupts to handle AAU;
- * 2) Page fault exception in kernel on access to user space;
- * 3) Maskable interrupt or we could have got a page fault exception
- * in execute_mmu_operations();
- * 4) Another maskable interrupt in kernel after preempt_schedule_irq()
- * opened interrupts;
- * 5) Non-maskable interrupt in kernel.
- *
- * Plus we can have a signal.
- */
-#define	MAX_HW_INTR	6
-
-#ifdef	CONFIG_DEBUG_PT_REGS
-#define	DO_NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_reg)		\
-{									\
-									\
-	register struct pt_regs *new_regs;				\
-	register e2k_addr_t	delta_sp;				\
-	register e2k_usd_t	usd_cur;				\
-									\
-	usd_cur = native_read_USD_REG();				\
-	delta_sp = USD_BASE(usd_cur) - USD_BASE(usd_reg);		\
-	new_regs = (pt_regs_t *)(((e2k_addr_t) prev_regs) + delta_sp);	\
-	if (regs != new_regs) {						\
-		pr_alert("ttable_entry() calculated pt_regs structure 0x%px is not the same as from thread_info structure 0x%px\n", \
-			new_regs, regs);				\
-		dump_stack();						\
-	}								\
-}
-
-/*
- * pt_regs structure is placed as local data of the
- * trap handler (or system call handler) function
- * into the kernel local data stack
- * Calculate placement of pt_regs structure, it should be
- * same as from thread_info structure
- */
-#define	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_reg)	\
-		DO_NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_reg)
-#else
-#define	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_lo_reg)
-#endif
 
 #ifndef CONFIG_CPU_HW_CLEAR_RF
 /*
@@ -244,7 +201,6 @@ static __interrupt notrace void dump_u64_no_stack(u64 num)
 static arch_spinlock_t dump_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 static __always_inline __interrupt notrace void dump_debug_info_no_stack(void)
 {
-	e2k_usd_t usd;
 	u64 usd_base;
 	e2k_cr0_t cr0;
 	e2k_cr1_t cr1;
@@ -262,8 +218,7 @@ static __always_inline __interrupt notrace void dump_debug_info_no_stack(void)
 	raw_all_irq_save(flags);
 	arch_spin_lock(&dump_lock);
 
-	usd = native_read_USD_reg();
-	usd_base = USD_PTR(usd);
+	usd_base = USD_PTR(native_read_USD_reg());
 	cr0 = native_read_CR0_reg();
 	ip = get_cr0_ip(cr0);
 
@@ -502,22 +457,15 @@ static int init_cf_fill_depth(void)
 
 pure_initcall(init_cf_fill_depth);
 
-static void e2k_notify_resume(void)
-{
 #ifdef CONFIG_E2K_DELAYED_SIGNALS
+void e2k_deliver_delayed_signals(void)
+{
 	if (unlikely(current->forced_info.si_signo)) {
 		force_sig_info(&current->forced_info);
 		current->forced_info.si_signo = 0;
 	}
+}
 #endif
-}
-
-void do_notify_resume(struct pt_regs *regs)
-{
-	e2k_notify_resume();
-	resume_user_mode_work(regs);
-	rseq_handle_notify_resume(NULL, regs);
-}
 
 /**
  * on_kernel_entry - called on every transition from user into kernel
@@ -535,15 +483,13 @@ static __always_inline void on_kernel_entry(void)
 	cpuhas_greg1 = cpu_features[1];
 }
 
-/*
- * Trap occurred on user or kernel function but on user's stacks
- * So, it needs to switch to kernel stacks
- */
 void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 {
-#if defined(CONFIG_KVM_HOST_MODE)
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#if defined(CONFIG_KVM_HOST_KERNEL)
 	struct thread_info *thread_info = current_thread_info();
 #endif
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	struct trap_pt_regs *trap;
 #if defined(CONFIG_KERNEL_TIMES_ACCOUNT) || defined(CONFIG_E2K_PROFILING)
 	register e2k_clock_t clock = NATIVE_READ_CLKR_REG_VALUE();
@@ -650,7 +596,7 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	 */
 
 	read_ticks(clock1);
-	exceptions = SAVE_TIRS(trap->TIRs, trap->nr_TIRs, false);
+	exceptions = save_tirs(trap->TIRs, &trap->nr_TIRs, &trap->usincr, false);
 	info_save_tir_reg(clock1);
 
 	if (exceptions & have_tc_exc_mask) {
@@ -676,22 +622,25 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 		aau_regs->aafstr = native_read_aafstr_reg_value();
 
 	/*
-	 * Function calls are allowed from this point on,
-	 * mark it with a compiler barrier.
+	 * Function calls are allowed from this point on, mark it with
+	 * a compiler barrier (but see CPU_HWBUG_L1I_RBRANCH_CALLS below).
 	 */
 	barrier();
 
+	/* Since iset v6 %aaldi must be saved too. */
+	if (machine.native_iset_ver >= E2K_ISET_V6 && unlikely(aau_stopped(aasr)))
+		save_aaldi(aau_regs->aaldi);
+
+	/*
+	 * No atomic/DAM/call operations are allowed before this point.
+	 * Note that we cannot do this before saving AAU.
+	 */
+	if (cpu_has(CPU_HWBUG_L1I_RBRANCH_CALLS))
+		E2K_DISP_CTPRS();
+
+	/* Rarely issues a function call */
 	raw_get_mmu_pid_irqs_off(&current->mm->context, MMU_PID_RELOAD_CHECK);
 
-	/* Since iset v6 %aaldi must be saved too */
-	if (machine.native_iset_ver >= E2K_ISET_V6 && unlikely(aau_stopped(aasr)))
-		NATIVE_SAVE_AALDIS(aau_regs->aaldi);
-
-	/* No atomic/DAM operations are allowed before this point.
-	 * Note that we cannot do this before saving AAU. */
-	if (cpu_has(CPU_HWBUG_L1I_STOPS_WORKING)) {
-		E2K_DISP_CTPRS();
-	}
 	/* un-freeze the TIR's LIFO. Tracing can issue a call
 	 * here so we cannot do it earlier. */
 	if (trace_tir_ip_trace_enabled() && rcu_is_watching()) {
@@ -730,10 +679,6 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	BUILD_BUG_ON(sizeof(enum ctx_state) != sizeof(trap->prev_state));
 	trap->prev_state = exception_enter();
 
-	CHECK_PT_REGS_LOOP(current_thread_info()->pt_regs);
-	CHECK_PT_REGS_CHAIN(regs, USD_PTR(native_read_USD_reg()),
-			    current->stack + KERNEL_C_STACK_SIZE);
-
 	if (aau_working(aasr))
 		machine.get_aau_context(aau_regs, aasr);
 #ifdef CONFIG_CLI_CHECK_TIME
@@ -749,28 +694,17 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 		do_exit(SIGKILL);
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Update run state info, if trap occured on guest kernel */
 	SET_RUNSTATE_IN_USER_TRAP();
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * This will enable interrupts
 	 */
-#if DEBUG_TRACE_TRAP_USD_CR1
-	if (current->pid == 1) {
-		struct thread_info *ti = current_thread_info();
-		print_USD("Trap exit ", ti->d_usd);
-		pr_info("CR1.ussz = 0x%llx, usfs = 0x%llx\n", get_cr1_ussz(ti->d_cr1), ti->d_usfs);
-		e2k_usd_t usd = regs->stacks.usd;
-		pr_info("======  new trap = 0x%llx on %d ======\n", exceptions, current->pid);
-		print_USD("Trap enter", usd);
-		pr_info("CR1.ussz = 0x%llx\n", get_cr1_ussz(regs->crs.cr1));
-		if (USD_IND(usd) > USD_SIZE(usd)) {
-			pr_info("!!!!!! Error : USD ind > USD size\n");
-		}
-	}
-#endif
 	parse_TIR_registers(regs, exceptions);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Guest trap handling can be scheduled and migrate to other VCPU */
 	/* see comments at arch/e2k/include/asm/process.h */
 	/* So: */
@@ -778,6 +712,7 @@ void notrace __irq_entry user_trap_handler(struct pt_regs *regs)
 	/* 2) need update thread info and */
 	/* 3) regs satructures pointers */
 	UPDATE_VCPU_THREAD_CONTEXT(NULL, &thread_info, &regs, NULL, NULL);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	finish_user_trap_handler(regs, FROM_USER_TRAP);
 }
@@ -820,7 +755,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #endif /* CONFIG_KERNEL_TIMES_ACCOUNT */
 	e2k_cr0_t cr0;
 	e2k_cr1_t cr1;
-	e2k_aalda_t *aaldas;
 	e2k_aau_t *aau_regs;
 	e2k_aasr_t aasr;
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
@@ -828,13 +762,12 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 #endif /* CONFIG_KERNEL_TIMES_ACCOUNT */
 	e2k_upsr_t upsr;
 	u64 exceptions, nmi, hw_overflow, kstack_pf_addr;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #if	defined(CONFIG_VIRTUALIZATION) && !defined(CONFIG_KVM_GUEST_KERNEL)
 	int to_save_runstate;
 #endif /* CONFIG_VIRTUALIZATION && ! CONFIG_KVM_GUEST_KERNEL */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	int hrdirqs_enabled = lockdep_hardirqs_enabled();
-#ifdef CONFIG_DEBUG_PT_REGS
-	e2k_usd_t usd_prev;
-#endif
 #ifdef CONFIG_CLI_CHECK_TIME
 	register u64 start_tick = native_read_CLKR_reg_value();
 #endif
@@ -846,10 +779,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	trap->upsr = read_UPSR_reg();
 	trap->flags = 0;
 	regs->trap = trap;
-
-#ifdef CONFIG_DEBUG_PT_REGS
-	usd_prev = native_read_USD_reg();
-#endif
 
 	/*
 	 * We are not using ctpr2 here (compiling with -fexclude-ctpr2)
@@ -915,7 +844,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 * current pt_regs structure
 	 */
 	read_ticks(clock);
-	exceptions = SAVE_TIRS(trap->TIRs, trap->nr_TIRs, false);
+	exceptions = save_tirs(trap->TIRs, &trap->nr_TIRs, &trap->usincr, false);
 	nmi = exceptions & non_maskable_exc_mask;
 	hw_overflow = unlikely(exceptions & (exc_chain_stack_bounds_mask |
 					     exc_proc_stack_bounds_mask));
@@ -943,20 +872,33 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	if (unlikely(trap->TIRs[0].aa))
 		aau_regs->aafstr = native_read_aafstr_reg_value();
 
-	/* Even function calls under _false_ predicate will trigger
-	 * hardware SPILL of chain stack.  To make sure such a spill
-	 * does not mess emergency stack dump, we do this check before
-	 * the barrier() below that marks allowed function calls. */
+	/*
+	 * Function calls are allowed from this point on, mark it with
+	 * a compiler barrier (but see CPU_HWBUG_L1I_RBRANCH_CALLS below).
+	 */
+	barrier();
+
+	/* Since iset v6 %aaldi must be saved too. */
+	if (machine.native_iset_ver >= E2K_ISET_V6 && unlikely(aau_stopped(aasr)))
+		save_aaldi(aau_regs->aaldi);
+
+	/*
+	 * No atomic/DAM/call operations are allowed before this point.
+	 * Note that we cannot do this before saving AAU.
+	 */
+	if (cpu_has(CPU_HWBUG_L1I_RBRANCH_CALLS))
+		E2K_DISP_CTPRS();
+
+	/*
+	 * Even function calls under _false_ predicate will trigger
+	 * hardware SPILL of chain stack.  Use special barrier to
+	 * make sure such a spill does not mess emergency stack dump.
+	 */
 	if (unlikely(hw_overflow || kstack_pf_addr)) {
 		switch_to_reserve_stacks();
 		kernel_hw_stack_fatal_error(regs, exceptions, kstack_pf_addr);
 	}
-
-	/*
-	 * Function calls are allowed from this point on,
-	 * mark it with a compiler barrier.
-	 */
-	barrier();
+	barrier_calls();
 
 	/* un-freeze the TIR's LIFO. Tracing can issue a call
 	 * here so we cannot do it earlier. */
@@ -970,16 +912,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	/* Move kernel's scratch gregs to final destination */
 	copy_scratch_gregs_from_local(&trap->k_gregs, &current->thread.tmp_gregs);
 
-	/* Since iset v6 %aaldi must be saved too */
-	if (machine.native_iset_ver >= E2K_ISET_V6 &&
-	    unlikely(aau_stopped(aasr)))
-		NATIVE_SAVE_AALDIS(aau_regs->aaldi);
-
-	/* No atomic/DAM operations are allowed before this point.
-	 * Note that we cannot do this before saving AAU. */
-	if (cpu_has(CPU_HWBUG_L1I_STOPS_WORKING))
-		E2K_DISP_CTPRS();
-
 	psp = regs->stacks.psp;
 	pcsp = regs->stacks.pcsp;
 
@@ -991,10 +923,6 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	 */
 	SAVE_INIT_KERNEL_IRQ_MASK_REG(false, true, AW(upsr));
 
-	CHECK_PT_REGS_LOOP(current_thread_info()->pt_regs);
-	CHECK_PT_REGS_CHAIN(regs, USD_PTR(native_read_USD_reg()),
-			    current->stack + KERNEL_C_STACK_SIZE);
-
 	if (aau_working(aasr))
 		machine.get_aau_context(aau_regs, aasr);
 
@@ -1005,14 +933,17 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	tt0_prolog_ticks(E2K_GET_DSREG(clkr) - start_tick);
 #endif
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Update run state info, if trap occured on guest kernel */
 	SET_RUNSTATE_IN_KERNEL_TRAP(to_save_runstate);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * This will enable non-maskable interrupts if (!nmi)
 	 */
 	parse_TIR_registers(regs, exceptions);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Guest trap handling can be scheduled and migrate to other VCPU */
 	/* see comments at arch/e2k/include/asm/process.h */
 	/* So: */
@@ -1020,6 +951,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	/* 2) need update thread info and */
 	/* 3) regs satructures pointers */
 	UPDATE_VCPU_THREAD_CONTEXT(NULL, &thread_info, &regs, NULL, NULL);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef CONFIG_PREEMPTION
 	/*
@@ -1041,25 +973,21 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 			unsigned long flags;
 			raw_all_irq_save(flags);
 			/* Check again under closed interrupts to avoid races */
-			if (!host_is_at_HV_GM_mode())
-				if (likely(need_resched()
+			if (likely(need_resched()
 #ifdef CONFIG_PREEMPT_LAZY
 				    || ((current_thread_info()->preempt_lazy_count == 0)
 					&& test_thread_flag(TIF_NEED_RESCHED_LAZY))
 #endif
-				))
-					preempt_schedule_irq();
+					)) {
+				preempt_schedule_irq();
+			}
 			raw_all_irq_restore(flags);
 		}
 	}
 #endif
 
-	if (unlikely(aau_stopped(aasr))) {
-		aaldas = __builtin_alloca(AALDAS_REGS_NUM * sizeof(aaldas[0]));
-		machine.calculate_aau_aaldis_aaldas(regs, aaldas, aau_regs);
-	} else {
-		aaldas = NULL;
-	}
+	/* AAU in kernel is not supported */
+	BUG_ON(aau_stopped(aasr));
 
 	/*
 	 * Return control from UPSR register to PSR, if UPSR interrupts
@@ -1086,19 +1014,14 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 	if (cpu_has(CPU_HWBUG_SS) && test_ts_flag(TS_SINGLESTEP_KERNEL))
 		cr1.ss = 1;
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Update run state info, if trap occured on guest kernel */
 	SET_RUNSTATE_OUT_KERNEL_TRAP(to_save_runstate);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-	/*
-	 * Dequeue current pt_regs structure and previous
-	 * regs will be now actuale
-	 */
-
-	CHECK_PT_REGS_CHAIN(regs, USD_PTR(native_read_USD_reg()),
-			    current->stack + KERNEL_C_STACK_SIZE);
+	/* Dequeue current pt_regs structure */
 	current_thread_info()->pt_regs = regs->next;
 	regs->next = NULL;
-	CHECK_PT_REGS_LOOP(current_thread_info()->pt_regs);
 
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
 	trap_times->psp_to_done = native_read_PSP_reg();
@@ -1137,27 +1060,7 @@ kernel_trap_handler(struct pt_regs *regs, thread_info_t *thread_info)
 		write_USD_reg(usd_value);
 	}
 
-	/*
-	 * There must not be any branches after restoring ctpr register
-	 * because of hardware bug (old one that was not found and also
-	 * CPU_HWBUG_BRANCH_ACTIVATES_CTPR), so this 'if' is done before
-	 * restoring %ctpr2 (actually it belongs to set_aau_aaldis_aaldas()).
-	 *
-	 * RESTORE_COMMON_REGS() must be called before RESTORE_AAU_MASK_REGS()
-	 * because of ctpr2 and AAU registers restoring dependencies.
-	 */
-	if (likely(!aau_stopped(aasr))) {
-		NATIVE_RESTORE_COMMON_REGS(regs);
-		NATIVE_RESTORE_AAU_MASK_REGS((e2k_aaldm_t) {.word = 0},
-					     (e2k_aaldv_t) {.word = 0},
-					     aasr);
-		E2K_DONE();
-	} else {
-		NATIVE_RESTORE_COMMON_REGS(regs);
-		native_set_aau_aaldis_aaldas(aaldas, aau_regs);
-		NATIVE_RESTORE_AAU_MASK_REGS(aau_regs->aaldm, aau_regs->aaldv, aasr);
-		E2K_DONE();
-	}
+	TRAP_HANDLER_DONE(regs, 0, 0, NULL, E2K_DONE_ASM);
 }
 
 /***********************************************************************/
@@ -1196,7 +1099,7 @@ fetch_pm_robust_entry(long __user **entry, long __user *head,
 	}
 
 	*pi = (unsigned int)addr & 1;
-	if (put_user((addr & ~1), (long __user *)entry))
+	if (put_user((addr & ~1), (long __user __force *)entry))
 		goto err_out;
 
 	return 0;
@@ -1211,7 +1114,7 @@ err_out:
 static void __user *pm_futex_uaddr(long __user *entry, long futex_offset)
 {
 	compat_uptr_t base = (unsigned long) entry;
-	void __user *uaddr = (void __user *)(base + futex_offset);
+	void __user *uaddr = (void __user __force *)(base + futex_offset);
 
 	return uaddr;
 }
@@ -1360,7 +1263,7 @@ unsigned long e2k_dscr_ptr_size(e2k_ptr_t dscr, long min_size, long *ptr_size,
 	*ptr_size = AP_OBJ_SIZE(dscr);
 
 #if DEBUG_1SYSCALL
-	if (unlikely(cpu_has(CPU_FEAT_ISET_V7)))
+	if (cpu_has(CPU_FEAT_ISET_V7))
 		Dbg1SC("dscr=0x%llx:0x%llx sys_num=%d arg#%d minSize=0x%lx OBJ_SIZE=0x%lx\n",
 			dscr.lo, dscr.hi,
 			sys_num, argnum, min_size, *ptr_size);
@@ -1375,13 +1278,13 @@ unsigned long e2k_dscr_ptr_size(e2k_ptr_t dscr, long min_size, long *ptr_size,
 		PROTECTED_MODE_WARNING(PMSCERRMSG_NEGATIVE_SIZE_VALUE,
 				       sys_num, sys_call_ID_to_name[sys_num],
 				       min_size, argnum);
-		PM_EXCEPTION_ON_WARNING(SIGABRT, 0, EINVAL);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
 	} else if (likely(!cpu_has(CPU_FEAT_ISET_V7)) && unlikely(min_size >> 31)) {
 		argnum = get_size_arg_number(sys_num, argnum);
 		PROTECTED_MODE_WARNING(PMSCERRMSG_SC_ARGNUM_VAL_EXCEEDS_DSCR_MAX,
 				     sys_num, sys_call_ID_to_name[sys_num],
 				     min_size, argnum);
-		PM_EXCEPTION_ON_WARNING(SIGABRT, 0, EINVAL);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
 		*ptr_size = 0;
 		*fatal = -EINVAL;
 		return 0;
@@ -1392,14 +1295,14 @@ unsigned long e2k_dscr_ptr_size(e2k_ptr_t dscr, long min_size, long *ptr_size,
 				&& check_pm_sc_debug_mode(PM_SC_DBG_WARNINGS))
 			protected_mode_message(0, PMSCWARN_DSCR_COMPONENTS,
 						dscr.lo, AP_SIZE(dscr), AP_IND(dscr));
-		PM_EXCEPTION_ON_WARNING(SIGABRT, 0, EINVAL);
+		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
 		*ptr_size = 0;
 		if (unlikely(check_pm_sc_debug_mode(PM_SC_DBG_WARNINGS_AS_ERRORS))) {
 			*fatal = -EINVAL;
 			return 0;
 		}
 	} else if (*ptr_size < min_size) {
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_SC_ARG_SIZE_TOO_LITTLE,
 				     sys_num, sys_call_ID_to_name[sys_num],
 				     *ptr_size, min_size, argnum);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EFAULT);
@@ -1454,7 +1357,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 				protected_mode_message(0,
 						       PMSCERRMSG_SC_ARG_MISSED_OR_UNINIT,
 						       a_num);
-			PM_EXCEPTION_ON_WARNING(SIGABRT, 0, EINVAL);
+			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
 		}
 		return 0L;	/* arg was not passed or irrelevant */
 	}
@@ -1477,7 +1380,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 
 	if (!optional_arg && !protarg_lo && (msk & MASK_PROT_ARG_NON_EMPTY)) {
 		arg[1] = '0' + a_num; /* string # of the argument: "#1" .. "#6" */
-		PROTECTED_MODE_ALERT(PMSCERRMSG_SC_ARG_VAL_UNSUPPORTED,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_SC_ARG_VAL_UNSUPPORTED,
 				     sys_call_ID_to_name[regs->sys_num], arg, 0);
 		PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
 		*fatal = -EINVAL;
@@ -1508,7 +1411,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 			&& (tag != ETAGAPQ) && (tag != ETAGPL)) {
 		DbgSCP("tag=0x%x tag_lo=0x%x msk=0x%x a_num=%d\n",
 		       tag, tag_lo, (int)msk, a_num);
-		PROTECTED_MODE_ALERT(PMSCERRMSG_UNEXP_ARG_TAG_ID,
+		PROTECTED_MODE_ERROR(PMSCERRMSG_UNEXP_ARG_TAG_ID,
 			sys_num, sys_call_ID_to_name[sys_num], (u8)tag, a_num);
 		if (((tag == ETAGDWD)
 				&& ((msk_type == MASK_PROT_ARG_LONG)
@@ -1527,7 +1430,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 		e2k_pl_t pl;
 
 		if (msk_type != MASK_PROT_ARG_FPTR) {
-			PROTECTED_MODE_ALERT(PMSCERRMSG_SC_UNEXPECTED_FUNC_IN_ARG,
+			PROTECTED_MODE_ERROR(PMSCERRMSG_SC_UNEXPECTED_FUNC_IN_ARG,
 					sys_num, sys_call_ID_to_name[sys_num], tag, a_num);
 			PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
 			*fatal = -EINVAL;
@@ -1537,13 +1440,13 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 			pl.qword = ap_arg.qword;
 			cui = find_cui_by_ip(pl.target);
 			if (cui < 0) {
-				PROTECTED_MODE_ALERT(PMSCERRMSG_CUI_NOT_FOUND,
+				PROTECTED_MODE_ERROR(PMSCERRMSG_CUI_NOT_FOUND,
 						sys_num, sys_call_ID_to_name[sys_num],
 						(unsigned long)pl.target);
 				PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
 				*fatal = 1;
 			} else if (cui != pl.cui) {
-				PROTECTED_MODE_ALERT(PMSCERRMSG_CUI_MISMATCH_IN_PL_IP,
+				PROTECTED_MODE_ERROR(PMSCERRMSG_CUI_MISMATCH_IN_PL_IP,
 						sys_num, sys_call_ID_to_name[sys_num],
 						(unsigned long)pl.target, pl.cui, cui);
 				PM_EXCEPTION_IF_ORTH_MODE(SIGABRT, 0, EINVAL);
@@ -1567,7 +1470,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 				*fatal = -EINVAL;
 			DbgSCP("tag=0x%x tag_lo=0x%x msk=0x%x protarg_lo=0x%lx\n",
 			     tag, tag_lo, (int)msk, protarg_lo);
-			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
+			PROTECTED_MODE_ERROR(PMSCERRMSG_NOT_DESCR_IN_SC_ARG,
 					     sys_num,
 					     sys_call_ID_to_name[sys_num],
 					     a_num);
@@ -1591,7 +1494,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 		if (e2k_ptr_str_check((char __user *)ptr, size)) {
 			if (PM_SYSCALL_WARN_ONLY == 0)
 				*fatal = -EINVAL;
-			PROTECTED_MODE_ALERT(PMSCERRMSG_NOT_STRING_IN_SC_ARG,
+			PROTECTED_MODE_ERROR(PMSCERRMSG_NOT_STRING_IN_SC_ARG,
 					     sys_num,
 					     sys_call_ID_to_name[sys_num],
 					     a_num);
@@ -1601,7 +1504,7 @@ static unsigned long get_protected_ARG(u64 sys_num, u8 tag, u64 mask,
 		if (unlikely(sys_num && msk_type != MASK_PROT_ARG_DSCR)) {
 			if (PM_SYSCALL_WARN_ONLY == 0)
 				*fatal = -EINVAL;
-			PROTECTED_MODE_ALERT
+			PROTECTED_MODE_ERROR
 			    (PMSCERRMSG_UNEXPECTED_DESCR_IN_SC_ARG, sys_num,
 			     sys_call_ID_to_name[sys_num], a_num);
 		}
@@ -1614,8 +1517,7 @@ return_ptr:
 
 static inline
 long check_arg_descr_size(int sys_num, int arg_num, int neg_size,
-			 struct pt_regs *regs, u64 mask,
-			 long *arg3, long *arg5, long *arg7)
+			 struct pt_regs *regs, u64 mask)
 /* In case of negative size in syscall argument mask,
  * calculate effective argument size and update args3-7
  * If ((neg_size < 0) && adjust_bufsize) :
@@ -1652,7 +1554,7 @@ long check_arg_descr_size(int sys_num, int arg_num, int neg_size,
 	/* Requested size appeared bigger than descriptor size.
 	 * Adjusting the requested size value:
 	 */
-	PROTECTED_MODE_ALERT(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE,
+	PROTECTED_MODE_ERROR(PMSCERRMSG_COUNT_EXCEEDS_DESCR_SIZE,
 			     sys_num, sys_call_ID_to_name[sys_num],
 			     size, descr_size, arg_num);
 	if (PM_SYSCALL_WARN_ONLY && adjust_bufsize)
@@ -1666,27 +1568,10 @@ long check_arg_descr_size(int sys_num, int arg_num, int neg_size,
 		e2k_ap_t ap = regs->qargs[arg_num - 1];
 		PROTECTED_MODE_WARNING(PMSCERRMSG_EXECUTION_TERMINATED,
 				       current->pid, current->comm, EINVAL);
-		force_sig_bnderr((void __user *)AP_PTR(ap),
-				 (void __user *)AP_BASE(ap),
-				 (void __user *)(AP_BASE(ap) + AP_SIZE(ap)));
+		force_sig_bnderr(U_AP_PTR(ap),
+				 (void __user __force *)AP_BASE(ap),
+				 (void __user __force *)(AP_BASE(ap) + AP_SIZE(ap)));
 	}
-
-	if (adjust_bufsize)
-		switch (index) {
-		case 3:
-			*arg3 = size;
-			break;
-		case 5:
-			*arg5 = size;
-			break;
-		case 7:
-			*arg7 = size;
-			break;
-		default:
-			pr_alert("FATAL: bad 'index' (%ld) at %s:%d !!!\n",
-				 index, __FILE__, __LINE__);
-			break;
-		}
 
 	return size;
 }
@@ -1736,7 +1621,7 @@ static inline void print_prot_syscall_arg_masks(int sys_num)
 static inline
 void report_unsupported_prot_syscall(int sys_num)
 {
-	PROTECTED_MODE_ALERT(PMSCERRMSG_SC_NOT_AVAILABLE_IN_PM,
+	PROTECTED_MODE_ERROR(PMSCERRMSG_SC_NOT_AVAILABLE_IN_PM,
 			     sys_num, SYSCALL_NAME_ON_ID(sys_num));
 	if (sys_num < NR_syscalls)
 		print_prot_syscall_arg_masks(sys_num);
@@ -1800,12 +1685,8 @@ __section(".entry.text")
 SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 		long arg2, long arg3, long arg4, struct pt_regs *regs)
 {
-#ifdef CONFIG_DEBUG_PT_REGS
-	e2k_usd_t usd_prev;
-	struct pt_regs *prev_regs = regs;
-#endif
 	long rval = -EINVAL;
-	long arg5 = regs->dargs[4], arg7 = regs->dargs[6];
+	long arg5 = regs->dargs[4], arg7 = regs->dargs[6], arg9 = regs->dargs[8];
 	unsigned long a1, a2, a3, a4, a5, a6;
 	protected_system_call_func sys_call = (protected_system_call_func) (void *) sys_ni_syscall;
 	unsigned long ti_flags = current_thread_info()->flags;
@@ -1821,14 +1702,6 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 	init_pt_regs_for_syscall(regs);
 	on_kernel_entry();
 
-#ifdef CONFIG_DEBUG_PT_REGS
-	/*
-	 * pt_regs structure is placed as local data of the
-	 * trap handler (or system call handler) function
-	 * into the kernel local data stack
-	 */
-	usd_prev = native_read_USD_reg();
-#endif
 	raw_get_mmu_pid_irqs_off(&current->mm->context, MMU_PID_RELOAD_CHECK);
 	SAVE_STACK_REGS(regs, true, false);
 	regs->sys_num = sys_num;
@@ -1941,10 +1814,10 @@ SYS_RET_TYPE notrace ttable_entry8_C(u64 sys_num, u64 tags, long arg1,
 			(arg_tag & 0xff) == TAG_PROT_ARG_NOT_SBMTD))
 			goto end_of_args;
 		if ((arg_tag & 0xff) == ETAGAPQ) /* arg9-10 */
-			pr_cont("\n\t\targ9 = 0x%lx, arg10 = 0x%.8x.%.8x ", regs->dargs[8],
+			pr_cont("\n\t\targ9 = 0x%lx, arg10 = 0x%.8x.%.8x ", arg9,
 				(u32)(regs->dargs[9] >> 32), (u32)regs->dargs[9]);
 		else
-			pr_cont("arg9 = 0x%lx, arg10 = 0x%lx ", regs->dargs[8], regs->dargs[9]);
+			pr_cont("arg9 = 0x%lx, arg10 = 0x%lx ", arg9, regs->dargs[9]);
 
 		arg_tag >>= 8;
 		arg_msk >>= 8;
@@ -1963,18 +1836,13 @@ end_of_args:
 			sys_num, SYSCALL_NAME_ON_ID(sys_num), mask, current, current->pid);
 	}
 	if (size1 < 0)
-		size1 = check_arg_descr_size(sys_num, 1, size1, regs, mask,
-					     &arg3, &arg5, &arg7);
+		size1 = check_arg_descr_size(sys_num, 1, size1, regs, mask);
 	size3 = prot_syscall_arg_masks[sys_num].size3;
 	if (size3 < 0)
-		size3 = check_arg_descr_size(sys_num, 3, size3, regs, mask,
-					     &arg3, &arg5, &arg7);
+		size3 = check_arg_descr_size(sys_num, 3, size3, regs, mask);
 	size4 = prot_syscall_arg_masks[sys_num].size4;
-	/* So far we don't have negative size in the 4th row.
-	 * To be added in the future if needed:
-	 if (size4 < 0)
-	 size4 = regs->args[-size4];
-	 */
+	if (size4 < 0)
+		size4 = check_arg_descr_size(sys_num, 4, size4, regs, mask);
 	size5 = prot_syscall_arg_masks[sys_num].size5;
 	/* So far we don't have negative size in the 5th row.
 	 * To be added in the future if needed:
@@ -1982,8 +1850,7 @@ end_of_args:
 	 size5 = regs->args[-size5];
 	 */
 	if (size2 < 0)
-		size2 = check_arg_descr_size(sys_num, 2, size2, regs, mask,
-					     &arg3, &arg5, &arg7);
+		size2 = check_arg_descr_size(sys_num, 2, size2, regs, mask);
 	size6 = prot_syscall_arg_masks[sys_num].size6;
 	/* So far we don't have negative size in the 6th row.
 	 * To be added in the future if needed:
@@ -2071,13 +1938,6 @@ wrong_res:
 	/* It works only under CONFIG_FTRACE flag */
 	add_info_syscall(sys_num, start_tick);
 
-	/* We may skip assigning 'args' here because
-	 * it is used only in the switch above.
-	 * args = (long *) ((((unsigned long) regs) + sizeof(struct pt_regs)
-	 *		+ 0xfUL) & (~0xfUL));
-	 */
-	NEW_CHECK_PT_REGS_ADDR(prev_regs, regs, usd_prev);
-
 	finish_syscall(regs, FROM_SYSCALL_PROT_8, true);
 }
 
@@ -2146,11 +2006,13 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 
 	SAVE_STACK_REGS(regs, true, false);
 	get_mmu_pid_irqs_off_impl(&mm->context, MMU_PID_RELOAD_CHECK, ctx, last_ctx);
+
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* Switch back to host page tables under closed interrupts
 	 * (before we can be rescheduled from an interrupt). */
 	bool guest_enter = guest_syscall_enter(regs, ts_host_at_vcpu_mode());
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 	/* Make sure current_pt_regs() works properly by initializing
 	 * pt_regs pointer before enabling any interrupts. */
 	current_thread_info()->pt_regs = regs;
@@ -2216,14 +2078,10 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 		/* Update args, since tracer could have changed them */
 		RESTORE_SYSCALL_ARGS(regs, arg1, arg2, arg3, arg4, arg5, arg6);
 
-		if (unlikely(rval)) {
-			regs->sys_rval = rval;
-			goto nosys;
-		}
 		/* Update system call number, since tracer could have changed it */
 		if (unlikely(regs->sys_num >= NR_syscalls || regs->sys_num < 0)) {
-			regs->sys_rval = -ENOSYS;
-			goto nosys;
+			sys_call = (system_call_func) (void *) sys_ni_syscall;
+			goto call_sys_call;
 		}
 		if (regs->kernel_entry == 3) {
 			sys_call = sys_call_table[regs->sys_num];
@@ -2234,16 +2092,18 @@ SYS_RET_TYPE notrace handle_sys_call(system_call_func sys_call,
 		} else {
 			BUG();
 		}
-
-		regs->sys_rval =
-			    sys_call((unsigned long)arg1, (unsigned long)arg2,
-				     (unsigned long)arg3, (unsigned long)arg4,
-				     (unsigned long)arg5, (unsigned long)arg6);
-nosys:
+call_sys_call:
+		if (!rval && regs->sys_num != -1) {
+			rval = sys_call((unsigned long)arg1, (unsigned long)arg2,
+						  (unsigned long)arg3, (unsigned long)arg4,
+						  (unsigned long)arg5, (unsigned long)arg6);
+			regs->sys_rval = rval;
+		}
 		/* Trace syscall exit */
 		syscall_trace_leave(regs);
+		rval = regs->sys_rval;
 		Dbg1SC(regs->sys_num, "\t\t_NR_ %d rval = %ld / 0x%lx\n",
-		       regs->sys_num, regs->sys_rval, regs->sys_rval);
+		       regs->sys_num, rval, rval);
 	}
 
 	add_info_syscall(regs->sys_num, clock);
@@ -2264,7 +2124,11 @@ void notrace __noreturn finish_syscall_sw_fill(void)
 	struct pt_regs *regs = current_thread_info()->pt_regs;
 	restore_caller_t from = current->thread.fill.from;
 	bool return_to_user = current->thread.fill.return_to_user;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool ts_host_at_vcpu_mode = current->thread.fill.ts_host_at_vcpu_mode;
+#else
+	bool ts_host_at_vcpu_mode = false;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	user_hw_stacks_restore__sw_sequel();
 
@@ -2356,10 +2220,9 @@ int copy_user_second_cframe(const struct pt_regs *regs)
 	BUG_ON(regs->stacks.pcshtp.ind != SZ_OF_CR);
 
 	k_crs = (e2k_mem_crs_t *) PCSP_BASE(current_thread_info()->k_pcsp);
-	u_cframe = (void __priv *) PCSP_PTR(regs->stacks.pcsp);
+	u_cframe = U_PCSP_PTR(regs->stacks.pcsp);
 
-	return copy_priv_to_current_hw_stack(k_crs, u_cframe - 1,
-					     sizeof(*k_crs), regs, true);
+	return copy_from_user_pcsp_to_current_hw_stack(k_crs, u_cframe - 1, sizeof(*k_crs), regs);
 }
 
 __section(".entry.text")
@@ -2404,12 +2267,12 @@ notrace long do_sigreturn(void)
 	frame = (const rt_sigframe_t __user *) current_thread_info()->u_stack.top;
 
 	usd = regs.stacks.usd;
-	update_u_stack_limits(USD_BASE(usd), regs.stacks.top);
+	update_u_stack_limits(regs.stacks.top - USD_BASE(usd), regs.stacks.top);
 
 	if (restore_rt_frame(frame, &ka)) {
-		printk("%s%s[%d] bad frame:%px\n",
-		       task_pid_nr(current) > 1 ? KERN_INFO : KERN_EMERG,
-		       current->comm, current->pid, frame);
+		printk_ratelimited("%s%s[%d] bad frame:%px\n",
+				   task_pid_nr(current) > 1 ? KERN_INFO : KERN_EMERG,
+				   current->comm, current->pid, frame);
 
 		force_sig(SIGSEGV);
 	}

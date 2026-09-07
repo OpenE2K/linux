@@ -10,20 +10,33 @@
 #ifndef _E2K_TRAP_TABLE_ASM_H
 #define _E2K_TRAP_TABLE_ASM_H
 
-#ifdef	__ASSEMBLY__
-
 #include <linux/stringify.h>
 
 #include <asm/alternative-asm.h>
+#include <asm/asm-offsets.h>
 #include <asm/glob_regs.h>
-#include <asm/mmu_types.h>
+#include <asm/kvm/trap_table.S.h>
 
-#include <generated/asm-offsets.h>
+/*
+ * Global registers map used by kernel
+ * Numbers of used global registers see at arch/e2k/include/asm/glob_regs.h
+ */
+
+#define	GET_GREG_MEMONIC(greg_no)	%dg ## greg_no
+#define	DO_GET_GREG_MEMONIC(greg_no)	GET_GREG_MEMONIC(greg_no)
+
+#define	GCURTASK	DO_GET_GREG_MEMONIC(CURRENT_TASK_GREG)
+#define	GCPUOFFSET	DO_GET_GREG_MEMONIC(MY_CPU_OFFSET_GREG)
+#define	GCPUID_PREEMPT	DO_GET_GREG_MEMONIC(SMP_CPU_ID_GREG)
+/* Macroses for virtualization support on assembler */
+#define	GVCPUSTATE	DO_GET_GREG_MEMONIC(GUEST_VCPU_STATE_GREG)
 
 #if defined CONFIG_SMP
 # define SMP_ONLY(...) __VA_ARGS__
+# define NOT_SMP_ONLY(...)
 #else
 # define SMP_ONLY(...)
+# define NOT_SMP_ONLY(...) __VA_ARGS__
 #endif
 
 #ifndef CONFIG_MMU_SEP_VIRT_SPACE_ONLY
@@ -58,7 +71,7 @@
 #define SWITCH_HW_STACKS_SYSCALL(pred) \
 	KERNEL_ENTRY(TSK_U_, %r0 /* syscall number */, 0 /* hw_trap */, pred)
 
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 # define CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(pred) \
 	ALTERNATIVE_1_ALTINSTR \
 		/* CPU_HWBUG_HCALL_EXC_ILL_INSTR_ADDR version */ \
@@ -81,9 +94,9 @@
 	{ \
 		ibranch done_to_hcall ? pred; \
 	}
-#else	/* !CONFIG_KVM_HOST_MODE */
+#else	/* !CONFIG_KVM_HOST_KERNEL */
 # define CHECK_HWBUG_HCALL_EXC_ILL_INSTR_ADDR(pred)	;
-#endif	/* CONFIG_KVM_HOST_MODE */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 #define KERNEL_ENTRY_OSR0(prefix, nr_syscall, hw_trap, pred) \
 .ifnb nr_syscall; .ifne hw_trap; .error "@nr_syscall set with @hw_trap"; .endif; .endif; \
@@ -103,6 +116,7 @@
 		} \
 		/* Bug 116851 - all strqp must be speculative if dealing with tags */ \
 		{ \
+			nop 1; /* ldrd -> %g16 -> strd */ \
 			strqp,2,sm %qpg16, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G16; \
 			ldrd,5 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | (TSK_G_TMP_TAG + 8), %dg16; \
 		} \
@@ -117,22 +131,6 @@
 		{ \
 			strqp,2,sm %qpg22, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G22; \
 			strqp,5,sm %qpg23, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G23; \
-		} \
-		{ \
-			strqp,2,sm %qpg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24; \
-			strqp,5,sm %qpg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25; \
-		} \
-		{ \
-			strqp,2,sm %qpg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26; \
-			strqp,5,sm %qpg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27; \
-		} \
-		{ \
-			strqp,2,sm %qpg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28; \
-			strqp,5,sm %qpg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29; \
-		} \
-		{ \
-			strqp,2,sm %qpg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30; \
-			strqp,5,sm %qpg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31; \
 		} \
 		{ \
 			rrs %bgr, %g16; \
@@ -163,42 +161,20 @@
 			movfi,4 %xg21, %dg21; \
 		} \
 		{ \
+			nop 1; /* movfi -> strd */ \
 			strd,2 %dg22, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G22; \
 			strd,5 %dg23, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G23; \
 			movfi,1 %xg22, %dg22; \
 			movfi,4 %xg23, %dg23; \
 		} \
 		{ \
-			strd,2 %dg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24; \
-			strd,5 %dg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25; \
-			movfi,1 %xg24, %dg24; \
-			movfi,4 %xg25, %dg25; \
-		} \
-		{ \
 			strd,2 %dg18, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G18_EXT; \
 			strd,5 %dg19, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G19_EXT; \
 		} \
 		{ \
+			nop 2; /* ldrd -> g18,g19 -> strd */ \
 			ldrd,0 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G16_EXT, %dg18; \
 			ldrd,3 GCURTASK, TAGGED_MEM_LOAD_REC_OPC | prefix##G17, %dg19; \
-		} \
-		{ \
-			strd,2 %dg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26; \
-			strd,5 %dg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27; \
-			movfi,1 %xg26, %dg26; \
-			movfi,4 %xg27, %dg27; \
-		} \
-		{ \
-			strd,2 %dg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28; \
-			strd,5 %dg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29; \
-			movfi,1 %xg28, %dg28; \
-			movfi,4 %xg29, %dg29; \
-		} \
-		{ \
-			strd,2 %dg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30; \
-			strd,5 %dg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31; \
-			movfi,1 %xg30, %dg30; \
-			movfi,4 %xg31, %dg31; \
 		} \
 		{ \
 			strd,2 %dg20, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G20_EXT; \
@@ -207,22 +183,6 @@
 		{ \
 			strd,2 %dg22, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G22_EXT; \
 			strd,5 %dg23, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G23_EXT; \
-		} \
-		{ \
-			strd,2 %dg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24_EXT; \
-			strd,5 %dg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25_EXT; \
-		} \
-		{ \
-			strd,2 %dg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26_EXT; \
-			strd,5 %dg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27_EXT; \
-		} \
-		{ \
-			strd,2 %dg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28_EXT; \
-			strd,5 %dg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29_EXT; \
-		} \
-		{ \
-			strd,2 %dg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30_EXT; \
-			strd,5 %dg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31_EXT; \
 		} \
 		{ \
 			rrs %bgr, %g16; \
@@ -286,6 +246,68 @@
 		rrd %sbr, %dg16; \
 	} \
 .endif; \
+	ALTERNATIVE_1_ALTINSTR \
+		/* CPU_FEAT_QPREG - save qp registers extended part */ \
+		/* Bug 116851 - all strqp must be speculative if dealing with tags */ \
+		{ \
+			strqp,2,sm %qpg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24; \
+			strqp,5,sm %qpg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25; \
+		} \
+		{ \
+			strqp,2,sm %qpg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26; \
+			strqp,5,sm %qpg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27; \
+		} \
+		{ \
+			strqp,2,sm %qpg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28; \
+			strqp,5,sm %qpg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29; \
+		} \
+		{ \
+			strqp,2,sm %qpg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30; \
+			strqp,5,sm %qpg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31; \
+		} \
+	ALTERNATIVE_2_OLDINSTR \
+		/* Original instruction - save only 16 bits */ \
+		{ \
+			strd,2 %dg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24; \
+			strd,5 %dg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25; \
+			movfi,1 %xg24, %dg24; \
+			movfi,4 %xg25, %dg25; \
+		} \
+		{ \
+			strd,2 %dg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26; \
+			strd,5 %dg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27; \
+			movfi,1 %xg26, %dg26; \
+			movfi,4 %xg27, %dg27; \
+		} \
+		{ \
+			strd,2 %dg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28; \
+			strd,5 %dg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29; \
+			movfi,1 %xg28, %dg28; \
+			movfi,4 %xg29, %dg29; \
+		} \
+		{ \
+			strd,2 %dg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30; \
+			strd,5 %dg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31; \
+			movfi,1 %xg30, %dg30; \
+			movfi,4 %xg31, %dg31; \
+		} \
+		{ \
+			strd,2 %dg24, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G24_EXT; \
+			strd,5 %dg25, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G25_EXT; \
+		} \
+		{ \
+			strd,2 %dg26, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G26_EXT; \
+			strd,5 %dg27, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G27_EXT; \
+		} \
+		{ \
+			strd,2 %dg28, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G28_EXT; \
+			strd,5 %dg29, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G29_EXT; \
+		} \
+		{ \
+			strd,2 %dg30, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G30_EXT; \
+			strd,5 %dg31, GCURTASK, TAGGED_MEM_STORE_REC_OPC | prefix##G31_EXT; \
+		} \
+	ALTERNATIVE_3_FEATURE(CPU_FEAT_QPREG) \
 	{ \
 .ifne hw_trap; \
 		/* Switch hardware stacks only if we are on user stacks (sbr <= TASK_SIZE) */ \
@@ -367,6 +389,7 @@
 .ifne hw_trap; \
 	{ \
 		/* Restore cpuhas gregs as they were when entering kernel trap. */ \
+		ldgdd 0, TSK_TMP_G22, %dg22 ? ~ pred; \
 		ldgdd 0, TSK_TMP_G23, %dg23 ? ~ pred; \
 		ldgdd 0, TSK_TMP_G24, %dg24 ? ~ pred; \
 	} \
@@ -690,7 +713,5 @@
 	{ std,2 r1, [ GCURTASK + TSK_DAM + 0xe8]; } \
 	{ std,2 r2, [ GCURTASK + TSK_DAM + 0xf0 ]; } \
 	{ std,2 r3, [ GCURTASK + TSK_DAM + 0xf8 ]; }
-
-#endif	/* __ASSEMBLY__ */
 
 #endif	/* _E2K_TRAP_TABLE_ASM_H */

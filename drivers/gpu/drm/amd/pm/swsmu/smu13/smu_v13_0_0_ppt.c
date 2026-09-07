@@ -1016,6 +1016,9 @@ static int smu_v13_0_0_print_clk_levels(struct smu_context *smu,
 	int i, curr_freq, size = 0;
 	int ret = 0;
 
+#ifdef CONFIG_MCST
+	single_dpm_table = NULL;
+#endif
 	smu_cmn_get_sysfs_buf(&buf, &size);
 
 	if (amdgpu_ras_intr_triggered()) {
@@ -1148,6 +1151,9 @@ static int smu_v13_0_0_force_clk_levels(struct smu_context *smu,
 	uint32_t min_freq, max_freq;
 	int ret = 0;
 
+#ifdef CONFIG_MCST
+	single_dpm_table = NULL;
+#endif
 	soft_min_level = mask ? (ffs(mask) - 1) : 0;
 	soft_max_level = mask ? (fls(mask) - 1) : 0;
 

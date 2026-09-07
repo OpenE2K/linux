@@ -10,6 +10,7 @@
 #include <asm/pgalloc.h>
 
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* guest area allocation flags */
 #define	KVM_ALLOC_AREA_PRESENT		0x00000001ULL
 #define	KVM_ALLOC_AREA_LOCKED		0x00000002ULL
@@ -25,6 +26,9 @@
 		(KVM_ALLOC_AREA_PROT_READ | KVM_ALLOC_AREA_PROT_WRITE | \
 			KVM_ALLOC_AREA_PROT_EXEC | \
 				KVM_ALLOC_AREA_HUGE)
+#else
+#define	KVM_ALLOC_AREA_MAP_FLAGS	0
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 /* user area and chunks flags */
 /* WARNING should not intersect with protection flags */
@@ -33,13 +37,16 @@
 #define	USER_AREA_CHUNK_ALLOC	0x0001UL
 #define	USER_AREA_ORDERED	0x0002UL
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	USER_AREA_RESERVED	0x0010UL
 #define	USER_AREA_ALLOCATED	0x0020UL
 #define	USER_AREA_PRESENT	0x0040UL
 #define	USER_AREA_LOCKED	0x0080UL
 #define	USER_AREA_VMAPPED	0x0100UL
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	USER_AREA_FREE		0x1000UL
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	USER_AREA_QUEUE		0x2000UL
 
 /* user area allocation/free flags */
@@ -49,6 +56,7 @@
 
 #define	MAX_NUM_A_FEW_PAGES	2	/* optimization for tipical case: */
 					/* only a few page need allocate */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 typedef	struct user_chunk {
 	unsigned long		flags;
@@ -57,11 +65,13 @@ typedef	struct user_chunk {
 	e2k_size_t		size;
 	struct user_chunk	*next;
 	struct user_chunk	*prev;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	struct page		**pages;	/* pages to map to kernel */
 	int			nr_pages;	/* number of physical pages */
 	void			*vmap_base;	/* kernel virtual area base */
 						/* where user area map to */
 	struct page		*few_pages[MAX_NUM_A_FEW_PAGES];
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 } user_chunk_t;
 
 typedef struct user_area {
@@ -71,7 +81,9 @@ typedef struct user_area {
 	spinlock_t		area_list_lock;
 	user_chunk_t		*free_list;
 	user_chunk_t		*busy_list;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	user_chunk_t		*to_free_list;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	e2k_size_t		freebytes;
 } user_area_t;
 
@@ -106,6 +118,7 @@ user_area_get(user_area_t *user_area, e2k_addr_t start, e2k_size_t size,
 			flags & KVM_ALLOC_AREA_MAP_FLAGS);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void __user *
 user_area_alloc_present(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
@@ -114,7 +127,6 @@ user_area_alloc_present(user_area_t *user_area, e2k_addr_t start,
 			(flags & KVM_ALLOC_AREA_MAP_FLAGS) | UA_ALLOC_PRESENT);
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void __user *
 user_area_alloc_pages(user_area_t *user_area, e2k_addr_t start,
 		e2k_addr_t size, e2k_addr_t align, unsigned long flags)
@@ -138,7 +150,6 @@ user_area_alloc_locked_present(user_area_t *user_area, e2k_addr_t start,
 			(flags & KVM_ALLOC_AREA_MAP_FLAGS) |
 					UA_ALLOC_PRESENT | UA_ALLOC_LOCKED);
 }
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline void __user *
 user_area_alloc_locked(user_area_t *user_area, e2k_addr_t start,
@@ -158,12 +169,15 @@ user_area_alloc_locked_pages(user_area_t *user_area, e2k_addr_t start,
 }
 
 extern void *map_user_area_to_vmalloc_range(user_area_t *user_area,
-					void *user_base, pgprot_t prot);
+					void __user *user_base, pgprot_t prot);
 extern void unmap_user_area_to_vmalloc_range(user_area_t *user_area,
 					void *vmalloc_area);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 extern void user_area_free_chunk(user_area_t *user_area, void __user *chunk);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern void user_area_queue_chunk_to_free(user_area_t *user_area, void __user *chunk);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif	/* _E2K_USER_AREA_ALLOC_H */
 

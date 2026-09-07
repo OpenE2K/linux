@@ -7,7 +7,6 @@
 #include <linux/perf_event.h>
 #include <linux/nodemask.h>
 #include <linux/slab.h>
-#include <asm/nbsr_v6_regs.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/perf_event_uncore.h>
@@ -15,7 +14,7 @@
 
 #define perf_ha_dbg(fmt, args...) pr_info("%s: " fmt, __func__, ##args)
 
-/* As it is possuble to have 48HA in e48c there is no enough room
+/* As it is possuble to have 48HA in V7 there is no enough room
  * in u64 to have a bit for each HA. To solve the problem all HAs devided to 12
  * groups, 4 HAs in each jne. There is one bit for group
  * of 4 HA in ha_mask. So no possibility to monitor a single HA, just a group only

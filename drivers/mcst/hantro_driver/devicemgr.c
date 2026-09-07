@@ -298,8 +298,8 @@ int add_decnode(u32 sliceindex, struct hantrodec_t *deccore)
 		return -EINVAL;
 #else
 	if (!splice && sliceindex == atomic_read(&slicenum)) {
-		sliceindex = addslice(NULL, 0, 0);
-		if (sliceindex < 0)
+		sliceindex = (u32)addslice(NULL, 0, 0);
+		if ((s32)sliceindex < 0)
 			return -EINVAL;
 		splice = getslicenode_ininit(sliceindex);
 	}
@@ -336,8 +336,8 @@ int add_encnode(u32 sliceindex, struct hantroenc_t *enccore)
 		return -EINVAL;
 #else
 	if (!splice && sliceindex == atomic_read(&slicenum)) {
-		sliceindex = addslice(NULL, 0, 0);
-		if (sliceindex < 0)
+		sliceindex = (u32)addslice(NULL, 0, 0);
+		if ((s32)sliceindex < 0)
 			return -EINVAL;
 		splice = getslicenode_ininit(sliceindex);
 	}
@@ -605,8 +605,8 @@ int add_mmunode(u32 sliceindex, struct mmu_t *mmucore)
 	}
 #else
 	if (!splice && sliceindex == atomic_read(&slicenum)) {
-		sliceindex = addslice(NULL, 0, 0);
-		if (sliceindex < 0)
+		sliceindex = (u32)addslice(NULL, 0, 0);
+		if ((s32)sliceindex < 0)
 			return -EINVAL;
 		pr_info("add mmu node at sliceid %d\n", sliceindex);
 		splice = getslicenode_ininit(sliceindex);
@@ -635,6 +635,7 @@ int add_mmunode(u32 sliceindex, struct mmu_t *mmucore)
 	return 0;
 }
 
+#if 0
 int add_vcmdnode(u32 sliceindex, struct hantrovcmd_t *vcmdcore)
 {
 	struct hantrovcmd_t *pvcmd;
@@ -693,6 +694,7 @@ int add_vcmdnode(u32 sliceindex, struct hantrovcmd_t *vcmdcore)
 end:
 	return 0;
 }
+#endif
 
 int get_slicenumber(void)
 {

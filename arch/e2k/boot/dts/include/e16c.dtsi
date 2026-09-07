@@ -15,30 +15,55 @@
 	#size-cells = <CELLS>;
 
 #define NODE 0
+#ifdef IOHUB2_NODE_0_BUS_NR
+# define IOHUB2_BUS_NR IOHUB2_NODE_0_BUS_NR
+#endif
+
+
 #include <e2k/e2k-v6.dtsi>
 
 #include <e2k/e2k-v6-uncore.dtsi>
 #include <e2k/eioh.dtsi>
+
+#undef IOHUB2_BUS_NR
 #undef NODE
 
 #if NODES > 1
 # define NODE 1
+# ifdef IOHUB2_NODE_1_BUS_NR
+#  define IOHUB2_BUS_NR IOHUB2_NODE_1_BUS_NR
+# endif
+
 #include <e2k/e2k-v6-uncore.dtsi>
 #include <e2k/eioh.dtsi>
+
+# undef IOHUB2_BUS_NR
 # undef NODE
 #endif
 
 #if NODES > 2
 # define NODE 2
+# ifdef IOHUB2_NODE_2_BUS_NR
+#  define IOHUB2_BUS_NR IOHUB2_NODE_2_BUS_NR
+# endif
+
 #include <e2k/e2k-v6-uncore.dtsi>
 #include <e2k/eioh.dtsi>
+
+# undef IOHUB2_BUS_NR
 # undef NODE
 #endif
 
 #if NODES > 3
 # define NODE 3
+# ifdef IOHUB2_NODE_3_BUS_NR
+#  define IOHUB2_BUS_NR IOHUB2_NODE_3_BUS_NR
+# endif
+
 #include <e2k/e2k-v6-uncore.dtsi>
 #include <e2k/eioh.dtsi>
+
+# undef IOHUB2_BUS_NR
 # undef NODE
 #endif
 

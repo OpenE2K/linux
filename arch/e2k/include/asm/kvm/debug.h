@@ -13,7 +13,9 @@
 /* do not include this header directly, only through asm/e2k_debug.h */
 
 #include <linux/types.h>
-#include <asm/kvm/vcpu-regs-debug-inline.h>
+#ifdef CONFIG_KVM_GUEST_KERNEL
+#include <asm/kvm/guest/vcpu-regs-debug-inline.h>
+#endif /* CONFIG_KVM_GUEST_KERNEL */
 
 extern bool kvm_debug;
 extern bool kvm_ftrace_dump;
@@ -26,14 +28,13 @@ extern unsigned int kvm_g_tmr;
 extern e2k_addr_t kvm_get_guest_phys_addr(struct task_struct *task,
 						e2k_addr_t virt);
 extern void kvm_print_all_vm_stacks(void);
-extern void kvm_print_vcpu_stack(struct kvm_vcpu *vcpu);
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern void kvm_dump_guest_stack(struct task_struct *task,
 		stack_regs_t *const stack_regs, bool show_reg_window);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	IS_GUEST_USER_ADDR(task, addr)	\
 		(((e2k_addr_t)(addr)) < GUEST_TASK_SIZE)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_KVM_GUEST_KERNEL
 /* it is native guest kernel */
@@ -41,9 +42,13 @@ extern void kvm_dump_guest_stack(struct task_struct *task,
 #else	/* CONFIG_VIRTUALIZATION && ! CONFIG_KVM_GUEST_KERNEL */
 /* it is native host kernel with virtualization support */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	debug_guest_regs(task)	\
-		(paravirt_enabled() && !IS_HV_GM() || \
-			is_task_at_vcpu_intc_emul_mode(task))
+		(IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) || is_task_at_vcpu_intc_emul_mode(task))
+#else
+#define	debug_guest_regs(task)	false
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
 #define	get_cpu_type_name()	\
 		((paravirt_enabled()) ? "VCPU" : "CPU")
 
@@ -55,10 +60,6 @@ static inline void print_all_tlb(void)
 static inline void print_all_guest_stacks(void)
 {
 	kvm_print_all_vm_stacks();
-}
-static inline void print_guest_vcpu_stack(struct kvm_vcpu *vcpu)
-{
-	kvm_print_vcpu_stack(vcpu);
 }
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
@@ -76,6 +77,7 @@ host_ftrace_stop(void)
 	if (paravirt_enabled())
 		HYPERVISOR_ftrace_stop();
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void
 host_ftrace_dump(void)
 {
@@ -94,6 +96,7 @@ host_tracing_start(void)
 	if (paravirt_enabled())
 		HYPERVISOR_tracing_start();
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #endif	/* ! CONFIG_KVM_GUEST_KERNEL */
 

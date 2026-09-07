@@ -1234,8 +1234,8 @@ static long mon_bin_ptr128_ioctl(struct file *file,
 		{
 		struct mon_bin_get128 getb;
 		struct mon_bin_get128 __user *argp = (struct mon_bin_get128 __user *)arg;
-		void *datap = NULL;
-		void *hdrp;
+		void __user *datap = NULL;
+		void __user *hdrp;
 
 		if (copy_from_user(&getb, (void __user *)arg,
 					    sizeof(struct mon_bin_get32)))
@@ -1246,14 +1246,14 @@ static long mon_bin_ptr128_ioctl(struct file *file,
 			}
 			if (AP_OBJ_SIZE(ap) < getb.alloc)
 				return -EFAULT;
-			datap = (void *)AP_PTR(ap);
+			datap = U_AP_PTR(ap);
 		}
 		if (get_user_tagged_16(ap.qword, tag, &argp->hdr) || !IS_AP(ap, tag)) {
 			return -EFAULT;
 		}
 		if (AP_OBJ_SIZE(ap) < ((cmd == MON_IOCX_GET32) ? PKT_SZ_API0 : PKT_SZ_API1))
 			return -EFAULT;
-		hdrp = (void *)AP_PTR(ap);
+		hdrp = U_AP_PTR(ap);
 		set_u_border(MAX_U_BORDER);
 		ret = mon_bin_get_event(file, rp, hdrp,
 					(cmd == MON_IOCX_GET32) ? PKT_SZ_API0 : PKT_SZ_API1,
@@ -1287,7 +1287,7 @@ static long mon_bin_ptr128_ioctl(struct file *file,
 			}
 			if (AP_OBJ_SIZE(ap) < sizeof(u32) * mfetch.nfetch)
 				return -EFAULT;
-			offvec = (u32 __user *)AP_PTR(ap);
+			offvec = U_AP_PTR(ap);
 		}
 		set_u_border(MAX_U_BORDER);
 		ret = mon_bin_fetch(file, rp, offvec, mfetch.nfetch);

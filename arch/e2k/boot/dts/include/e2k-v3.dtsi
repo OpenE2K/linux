@@ -7,6 +7,8 @@
 #include "apic-vectors.h"
 #include "e2k-macro.dtsi"
 
+#include "sclkr.dtsi"
+
 	lpic: lpic {
 		compatible = "mcst,apic";
 		interrupt-controller;
@@ -31,11 +33,6 @@
 				"IWI IRQ work interrupts",
 				"IMI IRQ move cleanup interrupts",
 				"MSV managed irq shutdown vector";
-	};
-	lmsi: lmsi {
-		compatible = "mcst,l-msi";
-		interrupt-parent = <&lpic>;
-		msi-controller;
 	};
 	timer {
 		compatible = "mcst,lt";

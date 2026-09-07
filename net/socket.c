@@ -3284,7 +3284,7 @@ int get_user_ifreq128(struct ifreq *ifr, void __user **ifrdata, void __user *arg
 	if (get_user_tagged_16(ap.qword, tag, &arg128->ifr_data))
 		return -EFAULT;
 	if (IS_AP(ap, tag)) {
-		*ifrdata = (void __user *)AP_PTR(ap);
+		*ifrdata = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 	} else {
 		/* sock_do_ioctl tries go get ifreq for ioctl cmds wich not requiered ireq */
@@ -3549,7 +3549,7 @@ static int ptr128_siocwandev(struct net *net, struct ptr128_ifreq __user *uifr12
 	if (get_user_tagged_16(ap.qword, tag, &uifr128->ifr_settings.ap) || !IS_AP(ap, tag))
 		return -EFAULT;
 
-	ifr.ifr_settings.ifs_ifsu.raw_hdlc = (void __user *)AP_PTR(ap);
+	ifr.ifr_settings.ifs_ifsu.raw_hdlc = U_AP_PTR(ap);
 	set_ap_u_border(ap);
 	err = dev_ioctl(net, SIOCWANDEV, &ifr, NULL, NULL);
 	set_u_border(saved_ub);

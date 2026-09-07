@@ -15,6 +15,7 @@
 #include <linux/acpi_pmtmr.h>
 #include <linux/seq_file.h>
 #include <asm/l_timer.h>
+#include <asm/pic.h>
 
 #include "apic.h"
 #include "apicdef.h"
@@ -201,7 +202,7 @@ static struct clock_event_device lapic_clockevent = {
 
 
 #ifdef CONFIG_L_WDT
-void (*wd_reset_ask)(void) = NULL;
+static void (*wd_reset_ask)(void) = NULL;
 #endif
 
 /*
@@ -253,7 +254,7 @@ static irqreturn_t smp_apic_timer_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *evt = dev_id;
 #ifdef CONFIG_MCST
-	int cpu;
+	unsigned int cpu;
 	long long cur_time;
 	long long next_time;
 
@@ -438,6 +439,9 @@ static int apic_timer_starting_cpu(unsigned int cpu)
 
 static int apic_timer_dying_cpu(unsigned int cpu)
 {
+	struct clock_event_device *evt = this_cpu_ptr(apic_timer_evt);
+	lapic_timer_shutdown(evt);
+
 	/* Deregisteration is done in tick_cleanup_dead_cpu() */
 	disable_percpu_irq(apic_timer_irq);
 	return 0;

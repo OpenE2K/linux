@@ -26,21 +26,24 @@
 		(TASK_SIZE - USER_VPTB_BASE_SIZE - USER_TAG_MEM_SIZE - PAGE_SIZE)
 
 /*
- * User's high address below tags memory space is reserved for CUT.
+ * User's high address below tags memory space is reserved for CUT
+ * and trampolines.
  */
 
 #define	USER_CUT_AREA_SIZE		(PAGE_SIZE)
 #define	USER_CUT_AREA_BASE		(USER_TAG_MEM_BASE - USER_CUT_AREA_SIZE)
 #define CUI_SIZE			(USER_CUT_AREA_SIZE / sizeof(e2k_cute_t))
 
-#ifndef __ASSEMBLY__
+#define	USER_TRAMPOLINES_SIZE		(__trampolines_end - __trampolines_start)
+#define	USER_TRAMPOLINES_BASE		(USER_CUT_AREA_BASE - USER_TRAMPOLINES_SIZE)
+
 /*
  * The structure define state of all e2k stacks:
  * hardware pointers and registers
  */
 
 typedef struct e2k_stacks {
-#ifdef CONFIG_KVM_HOST_MODE
+#ifdef CONFIG_KVM_HOST_KERNEL
 	/* gthread_info uses these fields */
 	e2k_addr_t	u_top;
 	e2k_usd_t	u_usd;
@@ -57,13 +60,13 @@ typedef struct e2k_stacks {
 	e2k_pcshtp_t	pcshtp;
 } e2k_stacks_t;
 
-typedef struct data_stack {
-	e2k_addr_t	bottom;		/* data stack bottom */
-	e2k_size_t	size;		/* data stack size */
+struct data_stack {
+	size_t size;
+
 	/* Top of the stack in terms of memory address (or bottom in
 	 * terms of stack operation); in non-protected mode equals SBR. */
-	e2k_addr_t	top;
-} data_stack_t;
+	unsigned long top;
+};
 
 struct e2k_stack {
 	e2k_addr_t	top; /* top address (same as SBR pointer) */
@@ -95,20 +98,19 @@ typedef struct hw_stack {
 
 typedef struct old_pcs_area {
 	void __priv *base;		/* Hardware stack base pointer */
-	long size;			/* Hardware stack total size */
+	e2k_size_t size;		/* Hardware stack total size */
 	struct list_head list_entry;
 } old_pcs_area_t;
 
 #define GET_PS_BASE(hw_stacks)		((hw_stacks)->ps.base)
 #define GET_PCS_BASE(hw_stacks)		((hw_stacks)->pcs.base)
 
-#define CURRENT_PS_BASE()	(current_thread_info()->u_hw_stack.ps.base)
-#define CURRENT_PCS_BASE()	(current_thread_info()->u_hw_stack.pcs.base)
+#define CURRENT_PS_BASE()	(unsigned long)(current_thread_info()->u_hw_stack.ps.base)
+#define CURRENT_PCS_BASE()	(unsigned long)(current_thread_info()->u_hw_stack.pcs.base)
 
 #define SET_PS_BASE(hw_stacks, val)	(GET_PS_BASE(hw_stacks) = (val))
 #define SET_PCS_BASE(hw_stacks, val)	(GET_PCS_BASE(hw_stacks) = (val))
 
-#endif /* ! __ASSEMBLY__ */
 
 /*
  * Data and hardware user stacks descriptions.

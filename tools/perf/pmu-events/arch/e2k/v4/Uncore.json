@@ -493,7 +493,7 @@
         "Unit" : "sic_0_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_0",
+        "EventName": "L3_STALL_REQ_CORES_0",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {
@@ -1025,7 +1025,7 @@
         "Unit" : "sic_1_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_1",
+        "EventName": "L3_STALL_REQ_CORES_1",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {
@@ -1555,7 +1555,7 @@
         "Unit" : "sic_2_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_2",
+        "EventName": "L3_STALL_REQ_CORES_2",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {
@@ -2087,7 +2087,7 @@
         "Unit" : "sic_3_mcm",
         "PerPkg": "1",
         "EventCode": "0x13a",
-        "EventName": "L3_STALL_REQ_3",
+        "EventName": "L3_STALL_REQ_CORES_3",
         "BriefDescription": "Количество срабатываний блокировки на входе в конвейер банка для запросов от своих процессорных ядер."
     },
     {

@@ -21,6 +21,7 @@
 #include <linux/pci.h>
 #include <drm/drm_print.h>
 #include "smi_drv.h"
+#include "smi_sysfs.h"
 #include "ddk768/ddk768_pwm.h"
 
 extern int pwm_ctrl;

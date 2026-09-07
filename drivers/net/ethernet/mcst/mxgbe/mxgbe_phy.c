@@ -166,7 +166,7 @@ static int mdio_read(struct mii_bus *bus, int phy_id, int reg_num)
 	if (!base)
 		return -ENODEV;
 
-	raw_spin_lock_irqsave(&priv->mgio_lock, flags);
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[priv->node], flags);
 
 	/* Write Address */
 	val = 0;
@@ -177,7 +177,7 @@ static int mdio_read(struct mii_bus *bus, int phy_id, int reg_num)
 	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	val |= reg_num & 0xFFFF;
 	if (mdio_io(base, val) != 0) {
-		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[priv->node], flags);
 		dev_err(&priv->pdev->dev, "Unable to write MDIO addr\n");
 		return -EAGAIN;
 	}
@@ -190,18 +190,14 @@ static int mdio_read(struct mii_bus *bus, int phy_id, int reg_num)
 	val |= (phy_id & 0x1F) << MDIO_PHY_AD_OFF;
 	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	if (mdio_io(base, val) != 0) {
-		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[priv->node], flags);
 		dev_err(&priv->pdev->dev, "Unable to read MDIO data\n");
 		return -EAGAIN;
 	}
 
 	val_out = (u16)(mxgbe_rreg32(base, MDIO_DATA) & 0xFFFF);
 
-	raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
-
-	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
-		"mdio_read: dev 0x%02X - reg 0x%04X = 0x%04X\n",
-		(reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F, reg_num & 0xFFFF, val_out);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[priv->node], flags);
 
 	return (int)val_out;
 } /* mdio_read */
@@ -217,7 +213,7 @@ static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
 	if (!base)
 		return -ENODEV;
 
-	raw_spin_lock_irqsave(&priv->mgio_lock, flags);
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[priv->node], flags);
 
 	/* Write Address */
 	val = 0;
@@ -228,7 +224,7 @@ static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
 	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	val |= reg_num & 0xFFFF;
 	if (mdio_io(base, val) != 0) {
-		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[priv->node], flags);
 		dev_err(&priv->pdev->dev, "Unable to write MDIO addr\n");
 		return -EAGAIN;
 	}
@@ -242,16 +238,12 @@ static int mdio_write(struct mii_bus *bus, int phy_id, int reg_num, u16 val_in)
 	val |= ((reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F) << MDIO_REG_AD_OFF;
 	val |= val_in & 0xFFFF;
 	if (mdio_io(base, val) != 0) {
-		raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[priv->node], flags);
 		dev_err(&priv->pdev->dev, "Unable to write MDIO data\n");
 		return -EAGAIN;
 	}
 
-	raw_spin_unlock_irqrestore(&priv->mgio_lock, flags);
-
-	DEV_DBG(MXGBE_DBG_MSK_PHY, &priv->pdev->dev,
-		"mdio_write: dev 0x%02X - reg 0x%04X := 0x%04X\n",
-		(reg_num >> MII_DEVADDR_C45_SHIFT) & 0x1F, reg_num & 0xFFFF, val_in);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[priv->node], flags);
 
 	return 0;
 } /* mdio_write */
@@ -266,7 +258,6 @@ void mxgbe_pcs_write(mxgbe_priv_t *priv, int regnum, u16 value)
 {
 	mdio_write(priv->mii_bus, priv->pcsaddr, regnum, value);
 }
-
 
 /**
  ******************************************************************************
@@ -371,7 +362,7 @@ static void mxgbe_pcs_first_init(mxgbe_priv_t *priv)
 		dev_dbg(&priv->pdev->dev, "PCS_TYPE_SEL - Ok\n");
 	}
 
-#ifdef __e2k__
+#ifdef CONFIG_E2K
 
 	/* 4.2. Program the register bits for 12G PHY */
 	mxgbe_pcs_write(priv, VR_XS_PMA_Gen5_12G_16G_MPLL_CMN_CTRL,	0x0001);

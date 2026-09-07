@@ -327,12 +327,10 @@ static int __set_single_step_breakpoint(e2k_mem_crs_t *frame, unsigned long real
 
 static void set_single_step_breakpoint(struct pt_regs *regs)
 {
-	u64 target_frame;
 	long ret;
 
-	target_frame = PCSP_PTR(regs->stacks.pcsp);
-	ret = parse_chain_stack(user_mode(regs), NULL,
-				__set_single_step_breakpoint, (void *)target_frame);
+	ret = parse_chain_stack(user_mode(regs), false, NULL, __set_single_step_breakpoint,
+				(void __force *) U_PCSP_PTR(regs->stacks.pcsp));
 	if (ret == 0)
 		ret = -ESRCH;
 
@@ -365,7 +363,7 @@ void bp_instr_overflow_handle(struct pt_regs *regs)
 			 * arrive on the first instruction of kernel entry,
 			 * do not send signal in this case since gdb is not
 			 * expecting a kernel IP */
-			if (call_from_user(regs))
+			if (call_from_user_mode(regs->crs.cr0, regs->crs.cr1))
 				S_SIG(regs, SIGTRAP, TRAP_HWBKPT);
 		}
 

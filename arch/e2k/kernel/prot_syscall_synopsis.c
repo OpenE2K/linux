@@ -674,9 +674,6 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 	[__NR_fcntl64] =
 		{ 0xFFFFFF02040400,	/*	fcntl64	221		II?	*/
 					0, 0, 0, 0, 0, 0 },
-	[__NR_macctl] =
-		{ 0xFFFFFF04010400,	/*	macctl	223		IPI	*/
-					0, 0, 0, 0, 0, 0 },
 	[__NR_newfstatat] =
 		{ 0xFFFF0401030400,	/*	newfstatat 224		ISPI	*/
 					0, 0, sizeof(struct stat), 0, 0, 0 },
@@ -759,14 +756,11 @@ const struct prot_syscall_arg_attrs prot_syscall_arg_masks[NR_syscalls + 1] = {
 		{ 0xFF010001010000,	/*	access_hw_stacks 254	LPPLP	*/
 					0, sizeof(unsigned long long), -4,
 					0, sizeof(unsigned long), 0 },
-	[__NR_el_posix] =
-		{ 0xFF040202020400,	/*	el_posix	255	I???I	*/
-					0, 0, 0, 0, 0, 0 },
 
 	[__NR_io_uring_setup] =		{ 0xFFFFFFFF010400, /* #256	IP	*/
 					0, sizeof(struct io_uring_params), 0, 0, 0, 0 },
 
-	[__NR_io_uring_enter] =		{ 0x00010404040400, /* #257	IIIIPL	*/
+	[__NR_io_uring_enter] =		{ 0x00810404040400, /* #257	IIIIPL	*/
 					0, 0, 0, 0, sizeof(sigset_t), 0 },
 
 	[__NR_io_uring_register] =	{ 0xFFFF0402040400, /* #258	IIPI	*/

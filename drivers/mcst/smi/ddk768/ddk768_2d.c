@@ -266,7 +266,7 @@ unsigned long ddk768_deGetTransparency(void)
 /*
  * This function sets the pixel format that will apply to the 2D Engine.
  */
-void ddk768_deSetPixelFormat(
+static void ddk768_deSetPixelFormat(
     unsigned long bpp
 )
 {

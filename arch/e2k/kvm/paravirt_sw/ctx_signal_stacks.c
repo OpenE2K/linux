@@ -16,9 +16,9 @@
 #include <asm/thread_info.h>
 #include <asm/process.h>
 
-#include <asm/kvm/mm.h>
+#include <asm/kvm/paravirt_sw/mm.h>
 #include <asm/kvm/thread_info.h>
-#include <asm/kvm/ctx_signal_stacks.h>
+#include <asm/kvm/paravirt_sw/ctx_signal_stacks.h>
 #include <asm/kvm/switch.h>
 
 

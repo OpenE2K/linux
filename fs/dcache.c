@@ -2783,7 +2783,11 @@ EXPORT_SYMBOL(__d_lookup_unhash_wake);
 
 static inline void __d_add(struct dentry *dentry, struct inode *inode)
 {
+#ifdef CONFIG_MCST
+	wait_queue_head_t *d_wait = NULL;
+#else
 	wait_queue_head_t *d_wait;
+#endif
 	struct inode *dir = NULL;
 	unsigned n;
 	spin_lock(&dentry->d_lock);

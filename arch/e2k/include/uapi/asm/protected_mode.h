@@ -58,27 +58,48 @@
 /* Default mmu control mode: */
 #define PM_MM_DEFAULT_FREE_PTR_MODE	PM_MM_EMPTYING_FREED_POINTERS
 
+/* Malloc ops mode in PM: no initialization of memory allocated (64-bit compatible) */
+#define PM_MM_MALLOC_MODE_MASK		0x030000UL
+#define PM_MM_MALLOC_MODE_MASK_SHIFT	16 /* 0x030000 */
+enum {
+	PM_MALLOC_MODE_COMPATIBLE =	0, /* 64-bit compatible mode */
+	PM_MALLOC_MODE_ZEROING =	1, /* zeroing of memory allocated */
+	PM_MALLOC_MODE_EMPTYING =	2  /* emptying of memory allocated */
+};
+#define MAX_PM_MALLOC_MODE		2
+#define PM_MM_MALLOC_MODE_DEFAULT	PM_MALLOC_MODE_ZEROING
+
+/* Don't run clean_descriptors syscall (f.e. in the 'unsafe' protected mode: */
+#define PM_SC_NO_CLEAN_DESCRIPTORS	0x040000
+
 /* Error Messaging Interface:
  * NB> Calculated from the env vars at thread start up time
  * Message Language type: 0 - C / 1 - KOI8-R/RU.UTF-8
  */
-#define PM_SC_ERR_MESSAGES_RU_UTF	0x010000
-#define PM_SC_ERR_MESSAGES_KOI8_R	0x020000
+#define PM_SC_ERR_MESSAGES_RU_UTF	0x0100000
+#define PM_SC_ERR_MESSAGES_KOI8_R	0x0200000
 /* Deliver diagnostic messages to journal: */
-#define PM_DIAG_MESSAGES_IN_JOURNAL	0x040000
+#define PM_DIAG_MESSAGES_IN_JOURNAL	0x0400000
 /* Deliver diagnostic messages to stderr: */
-#define PM_DIAG_MESSAGES_IN_STDERR	0x080000
+#define PM_DIAG_MESSAGES_IN_STDERR	0x0800000
 
 /* Print out contents of string syscall arguments: */
-#define PM_SC_DBG_STRING_ARGS			0x100000
+#define PM_SC_DBG_STRING_ARGS			0x1000000
 
 /* Enable 'ptrace' syscall in PM: */
-#define PM_SC_PTRACE_ENABLED			0x200000
+#define PM_SC_PTRACE_ENABLED			0x2000000
 /* Enable 'unsafe_uint64_to_ptr' syscall in PM: */
-#define PM_SC_UNSAFE_UINT64_TO_PTR_ENABLED	0x400000
+#define PM_SC_UNSAFE_UINT64_TO_PTR_ENABLED	0x4000000
 /* The 'unsafe_uint64_to_ptr' syscall options:	*/
 /* The syscall to return whole-size stack descriptor: */
 #define PM_SC_UNSAFE_UINT64_TO_PTR_WHOLE_STACK_MODE	0x0001
+/* 3rd argument of the syscall to return descriptor (i.e. this is pointer-to-descriptor) */
+#define PM_SC_UNSAFE_UINT64_TO_PTR_RETURN_MODE	0x1000
+
+/* Sometimes it's important to know a repaired descriptor points at the stack memory: */
+#define PM_SC_DBG_WARN_ON_REPAIRED_SAP		0x10000000
+/* Enable 'extended' boundaries in repaired descriptor: */
+#define PM_SC_UNSAFE_EXT_REPAIRED_BOUNDARIES	0x20000000
 
 /* Enable all debug/diagnostic output: */
 #define PM_SC_DBG_MODE_ALL		(PM_SC_DBG_MODE_DEBUG \
@@ -90,6 +111,15 @@
 					| PM_SC_CHECK4TAGS_IN_BUFF \
 					| PM_SC_DBG_WARNINGS \
 					| PM_MM_EMPTYING_FREED_POINTERS)
+
+/* All debug/diagnostic print mask: */
+#define PM_SC_DBG_DIAG_MASK_ALL		(PM_SC_DBG_MODE_DEBUG			\
+					| PM_SC_DBG_MODE_COMPLEX_WRAPPERS	\
+					| PM_SC_DBG_MODE_CHECK			\
+					| PM_SC_DBG_MODE_CONV_STRUCT		\
+					| PM_SC_DBG_MODE_SIGNALS		\
+					| PM_SC_CHECK4TAGS_IN_BUFF		\
+					| PM_SC_DBG_WARNINGS)
 
 #define IF_PM_DBG_MODE(mask)	\
 	(current->mm->context.pm_sc_debug_mode & (mask))

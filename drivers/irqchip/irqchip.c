@@ -36,8 +36,11 @@ int platform_irqchip_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct device_node *par_np __free(device_node) = of_irq_find_parent(np);
+#ifdef CONFIG_MCST
+	of_irq_init_cb_t irq_init_cb = (of_irq_init_cb_t)of_device_get_match_data(&pdev->dev);
+#else
 	of_irq_init_cb_t irq_init_cb = of_device_get_match_data(&pdev->dev);
-
+#endif
 	if (!irq_init_cb) {
 		return -EINVAL;
 	}

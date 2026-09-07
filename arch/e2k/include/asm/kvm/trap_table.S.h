@@ -10,15 +10,7 @@
 #ifndef _E2K_KVM_TRAP_TABLE_ASM_H
 #define _E2K_KVM_TRAP_TABLE_ASM_H
 
-#ifdef	__ASSEMBLY__
-
-#include <asm/thread_info.h>
-#include <asm/e2k_api.h>
-#include <asm/cpu_regs_types_defs.h>
-#include <asm/glob_regs.h>
-#include <asm/mmu_regs_types.h>
-
-#include <generated/asm-offsets.h>
+#include <asm/asm-offsets.h>
 
 #if defined CONFIG_SMP
 # define SMP_ONLY(...) __VA_ARGS__
@@ -110,7 +102,7 @@
 		SET_KERNEL_GREGS \runused, \rtask, \rpercpu_off, \rcpu
 .endm	/* ONLY_SET_KERNEL_GREGS */
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 /* it is host kernel with virtualization support */
 /* or paravirtualized host and guest kernel */
 .macro	DO_SAVE_HOST_GREGS_V3 gvcpu_lo, gvcpu_hi, hvcpu_lo, hvcpu_hi \
@@ -163,7 +155,7 @@
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is pure guest kernel (not paravirtualized based on pv_ops) */
 #include <asm/kvm/guest/trap_table.S.h>
-#else	/* ! CONFIG_KVM_HOST_MODE && ! CONFIG_KVM_GUEST_KERNEL */
+#else	/* ! CONFIG_KVM_HOST_KERNEL && ! CONFIG_KVM_GUEST_KERNEL */
 /* It is native host kernel without any virtualization */
 .macro	SAVE_HOST_GREGS_TO_VIRT_V3 drti, predSAVE, drtmp, rtmp0, rtmp1
 	/* not used */
@@ -177,8 +169,6 @@
 	/* not used */
 .endm	/* SAVE_HOST_GREGS_TO_VIRT_UNEXT */
 
-#endif	/* CONFIG_KVM_HOST_MODE */
-
-#endif	/* __ASSEMBLY__ */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 #endif	/* _E2K_KVM_TRAP_TABLE_ASM_H */

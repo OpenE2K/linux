@@ -1073,7 +1073,7 @@ static struct bpf_prog *ptr128_ppp_get_filter(struct sock_fprog128 __user *p)
 		return ERR_PTR(-EFAULT);
 	if (get_user_tagged_16(ap.qword, tag, &p->filter) || !IS_AP(ap, tag))
 		return ERR_PTR(-EFAULT);
-	uprog.filter = (void __user *)AP_PTR(ap);
+	uprog.filter = U_AP_PTR(ap);
 	set_ap_u_border(ap);
 	return get_filter(&uprog);
 }
@@ -1136,7 +1136,7 @@ static long ppp_ptr128_ioctl(struct file *file, unsigned int cmd, unsigned long 
 				err = -EFAULT;
 				break;
 			}
-			struct ppp_option_data data = {	.ptr = (void __user *)AP_PTR,
+			struct ppp_option_data data = {	.ptr = U_AP_PTR(ap),
 							.length = data128.length,
 							.transmit = data128.transmit
 						      };

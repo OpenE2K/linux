@@ -1,0 +1,19 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0
+ * Copyright (c) 2026 MCST
+ */
+
+#if CELLS == 2
+	cpufreq {
+		compatible = "mcst,cpufreq";
+#if NODES > 3
+		mcst,freq-nodes = <&pmc_freq0>, <&pmc_freq1>, <&pmc_freq2>, <&pmc_freq3>;
+#elif NODES > 2
+		mcst,freq-nodes = <&pmc_freq0>, <&pmc_freq1>, <&pmc_freq2>;
+#elif NODES > 1
+		mcst,freq-nodes = <&pmc_freq0>, <&pmc_freq1>;
+#else
+		mcst,freq-nodes = <&pmc_freq0>;
+#endif
+	};
+#endif

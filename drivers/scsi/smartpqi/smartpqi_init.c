@@ -6035,6 +6035,9 @@ static int pqi_scsi_queue_command(struct Scsi_Host *shost, struct scsi_cmnd *scm
 	bool raid_bypassed;
 	u8 lun;
 
+#ifdef CONFIG_MCST
+	rc = 0;
+#endif
 	scmd->host_scribble = PQI_NO_COMPLETION;
 
 	device = scmd->device->hostdata;

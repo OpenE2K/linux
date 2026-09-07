@@ -68,6 +68,32 @@ out:										\
 	sz;									\
 })
 
+
+#ifdef CONFIG_MCST
+#define FIND_NTH_BIT(FETCH, size, num)						\
+({										\
+	unsigned long sz = (size), nr = (num), idx, w, tmp = 0;			\
+										\
+	for (idx = 0; (idx + 1) * BITS_PER_LONG <= sz; idx++) {			\
+		if (idx * BITS_PER_LONG + nr >= sz)				\
+			goto out;						\
+										\
+		tmp = (FETCH);							\
+		w = hweight_long(tmp);						\
+		if (w > nr)							\
+			goto found;						\
+										\
+		nr -= w;							\
+	}									\
+										\
+	if (sz % BITS_PER_LONG)							\
+		tmp = (FETCH) & BITMAP_LAST_WORD_MASK(sz);			\
+found:										\
+	sz = min(idx * BITS_PER_LONG + fns(tmp, nr), sz);			\
+out:										\
+	sz;									\
+})
+#else
 #define FIND_NTH_BIT(FETCH, size, num)						\
 ({										\
 	unsigned long sz = (size), nr = (num), idx, w, tmp;			\
@@ -91,6 +117,7 @@ found:										\
 out:										\
 	sz;									\
 })
+#endif /* CONDIG_MCST */
 
 #ifndef find_first_bit
 /*

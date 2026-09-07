@@ -21,12 +21,8 @@
 #include <asm/e2k_ptypes.h>
 
 #include <asm/siginfo.h>
-#include <asm/stacks.h>
-
-
-#ifndef __ASSEMBLY__
-
 #include <asm/sigcontext.h>
+#include <asm/stacks.h>
 
 typedef unsigned long old_sigset_t;
 
@@ -157,7 +153,5 @@ static inline void remove_ctx_signal_stack(u64 key)
 }
 
 #endif /* CONFIG_KVM_GUEST_KERNEL */
-
-#endif /* __ASSEMBLY__ */
 
 #endif /* _E2K_SIGNAL_H_ */

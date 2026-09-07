@@ -28,6 +28,7 @@
 	(__vs) = (__k_gregs)->g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].base; \
 })
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	HOST_GET_SAVED_VCPU_STATE_GREG(__ti)				\
 ({									\
 	unsigned long greg_vs;						\
@@ -44,6 +45,7 @@
 						greg_vs);		\
 	greg_vs;							\
 })
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	HOST_ONLY_SAVE_VCPU_STATE_GREG(vs__)				\
 ({									\
@@ -54,6 +56,7 @@
 	NATIVE_SET_DGREG(GUEST_VCPU_STATE_GREG, vs__);			\
 })
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	HOST_INIT_VCPU_STATE_GREG(__ti)					\
 ({									\
 	kernel_gregs_t *k_gregs = &(__ti)->k_gregs;			\
@@ -62,8 +65,9 @@
 	vs = k_gregs->g[GUEST_VCPU_STATE_GREGS_PAIRS_INDEX].base;	\
 	HOST_ONLY_RESTORE_VCPU_STATE_GREG(vs);				\
 })
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 #define	HOST_SAVE_HOST_GREGS_TO(__k_gregs, only_kernel)			\
 ({									\
 	kernel_gregs_t *k_gregs = (__k_gregs);				\
@@ -86,6 +90,7 @@
 #define	HOST_SAVE_KERNEL_GREGS_AS_LIGHT(__ti) \
 		HOST_SAVE_HOST_GREGS_TO(&(__ti)->k_gregs_light, false)
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	HOST_SAVE_KERNEL_GREGS(__ti) \
 		HOST_SAVE_HOST_GREGS_TO(&(__ti)->k_gregs, true)
 
@@ -94,6 +99,7 @@
 
 #define	HOST_SAVE_GUEST_KERNEL_GREGS(__gti) \
 		HOST_SAVE_HOST_GREGS_TO(&(__gti)->gk_gregs, false)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	HOST_RESTORE_HOST_GREGS_FROM(__k_gregs, only_kernel)		\
 ({									\
@@ -114,6 +120,7 @@
 	ONLY_RESTORE_KERNEL_GREGS(task__, cpu_id__, cpu_off__);		\
 })
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define HOST_VCPU_STATE_REG_SWITCH_TO_GUEST(vcpu)			\
 ({									\
 	machine.save_kernel_gregs(&vcpu->arch.host_ctxt.k_gregs);	\
@@ -140,6 +147,7 @@
 	HOST_ONLY_COPY_FROM_VCPU_STATE_GREG(gk_gregs, guest_vs);	\
 	HOST_ONLY_COPY_TO_VCPU_STATE_GREG(k_gregs, guest_vs);		\
 })
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	HOST_RESTORE_KERNEL_GREGS_AS_LIGHT(_ti) \
 		HOST_RESTORE_HOST_GREGS_FROM(&(_ti)->k_gregs_light, false)
@@ -153,12 +161,12 @@
 #define	HOST_RESTORE_GUEST_KERNEL_GREGS(_gti) \
 		HOST_RESTORE_HOST_GREGS_FROM(&(_gti)->gk_gregs, false)
 
-#else	/* !CONFIG_KVM_HOST_MODE */
+#else	/* !CONFIG_KVM_HOST_KERNEL */
 #define	HOST_SAVE_HOST_GREGS(__ti)
 #define	HOST_RESTORE_HOST_GREGS(_ti)
 #define	HOST_SAVE_KERNEL_GREGS_AS_LIGHT(__ti)
 #define	HOST_RESTORE_KERNEL_GREGS_AS_LIGHT(_ti)
-#endif	/* CONFIG_KVM_HOST_MODE */
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 #else	/* ! CONFIG_VIRTUALIZATION */
 /* It is native host kernel without any virtualization */

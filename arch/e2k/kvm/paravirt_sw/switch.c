@@ -4,7 +4,7 @@
  */
 
 #include <asm/thread_info.h>
-#include <asm/kvm/regs_state.h>
+#include <asm/kvm/paravirt_sw/regs_state.h>
 #include <asm/kvm/switch.h>
 
 notrace void host_syscall_guest_exit_trap(struct thread_info *ti,

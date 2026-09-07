@@ -74,7 +74,8 @@ video_ctrl_t;
 typedef enum _file_format
 {
     FFT_RGB565 = 0 ,
-    FFT_RGBx888
+    FFT_RGBx888,
+    FFT_INVALID
 }file_format;
 
 typedef struct YUV_BUF_ADDR

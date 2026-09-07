@@ -152,6 +152,11 @@ extern void dimcr1_continue(e2k_dimcr_t dimcr1_old);
 extern void ddmcr_continue(e2k_ddmcr_t ddmcr_old);
 extern void ddmcr1_continue(e2k_ddmcr_t ddmcr1_old);
 
+struct pmu;
+
+extern void e2k_pmu_enable(struct pmu *pmu);
+extern void e2k_pmu_disable(struct pmu *pmu);
+
 /*
  * Attention!!! Structures bpf_user_pt_regs_t defined at <uapi/asm/ptrace.h>
  * and user_pt_regs defined at <asm/ptrace.h> must be the same, otherwise

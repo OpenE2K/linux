@@ -17,7 +17,7 @@
  * Virtualization support
  */
 
-#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if	!defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* it is host kernel with virtualization support */
 
@@ -37,6 +37,6 @@ deactivate_mm(struct task_struct *dead_task, struct mm_struct *mm)
 #elif	defined(CONFIG_KVM_GUEST_KERNEL)
 /* it is virtualized guest kernel */
 #include <asm/kvm/guest/mmu_context.h>
-#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
+#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_KERNEL */
 
 #endif /* !(_E2K_KVM_MMU_CONTEXT_H) */

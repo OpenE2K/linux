@@ -49,7 +49,7 @@ static int get_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 		return 0;
 	}
 
-	if (!is_privileged_return(ip) && !access_ok((void __user *) ip, 8))
+	if (!is_privileged_return(ip) && !access_ok((void __user __force *) ip, 8))
 		return -EFAULT;
 
 	/* Special case of "just return" function */
@@ -84,7 +84,7 @@ static long do_get_backtrace(void __user *buf, size_t count, size_t skip,
 	if (!access_ok(buf, count * step))
 		return -EFAULT;
 
-	ret = parse_chain_stack(true, NULL, get_backtrace_fn, &args);
+	ret = parse_chain_stack(true, false, NULL, get_backtrace_fn, &args);
 
 	if (args.nr_read)
 		ret = args.nr_read;
@@ -181,10 +181,20 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 		--(args->skip);
 		return 0;
 	}
-
-	if ((step == 8) ? __get_user(ip, (u64 __user *) buf) :
-			  __get_user(ip, (u32 __user *) buf))
-		return -EFAULT;
+repeat_get_user:
+	/* mm rwsem locked. we need to avoid nested rwsem lock */
+	/* see rm 39419 for details */
+	pagefault_disable();
+	int ret = (step == 8) ? __get_user(ip, (u64 __user *) buf) :
+				__get_user(ip, (u32 __user *) buf);
+	pagefault_enable();
+	if (ret) {
+		if (fixup_user_fault(mm, (unsigned long)buf, 0, NULL))
+			return -EFAULT;
+		args->cached_pvma = NULL;
+		args->cached_vma = NULL;
+		goto repeat_get_user;
+	}
 
 	/* Special case of "just return" function */
 	if (step == 8 && ip == -1ULL || step != 8 && ip == 0xffffffffULL)
@@ -199,7 +209,7 @@ static int set_backtrace_fn(e2k_mem_crs_t *frame, unsigned long real_frame_addr,
 	}
 
 	if (!is_privileged_return(ip)) {
-		if (!access_ok((void __user *) ip, 8))
+		if (!access_ok((void __user __force *) ip, 8))
 			return -EFAULT;
 
 		if (!vma || vma->vm_start > ip || vma->vm_end <= ip) {
@@ -278,7 +288,7 @@ static long do_set_backtrace(void __user *buf, size_t count, size_t skip,
 
 	if (!access_ok((void __user *) buf, count * step))
 		return -EFAULT;
-
+repeat:
 	mmap_read_lock(mm);
 
 	args.skip = skip + 1; /* Skip caller's frame */
@@ -289,8 +299,12 @@ static long do_set_backtrace(void __user *buf, size_t count, size_t skip,
 	args.cached_vma = NULL;
 	args.cached_pvma = NULL;
 	args.frames_count = 0;
-	ret = parse_chain_stack(true, NULL, set_backtrace_fn, &args);
-
+	ret = parse_chain_stack(true, true, NULL, set_backtrace_fn, &args);
+	if (ret == -EAGAIN) {
+		/* __uaccess_copy_crs_fn unlocked mm before handle page fault to avoid deadlock */
+		mmap_read_unlock(mm);
+		goto repeat;
+	}
 	if (args.frames_count)
 		write_updated_frames(&args);
 

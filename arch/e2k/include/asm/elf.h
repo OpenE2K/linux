@@ -11,6 +11,7 @@
  */
 
 #include <asm/auxvec.h>
+#include <asm/hw_prefetchers.h>
 #include <asm/ptrace.h>
 #include <asm/e2k_api.h>
 #include <asm/user.h>
@@ -46,7 +47,7 @@ struct vm_area_struct *coredump_next_vma(struct ma_state *mas, struct vm_area_st
 #define ELF_CLASS	ELFCLASS64
 #define ELF_DATA	ELFDATA2LSB
 
-#define ELF_CORE_EFLAGS (machine.native_iset_ver << 24)
+#define ELF_CORE_EFLAGS ((machine.native_iset_ver) << 24)
 
 /*
  * This is used to ensure we don't load something for the wrong architecture.
@@ -99,14 +100,6 @@ static inline bool elf_check_e2k_mtype(unsigned long mt, bool incompat)
 	struct pt_regs *regs = current_pt_regs();
 	int iset = machine.native_iset_ver;
 
-	/*
-	 * Execute only e48c maket binaries (mt=26) on e48c maket.
-	 * Exclude this check for init_module and finit_module syscalls.
-	 */
-	if (cpu_has(CPU_FEAT_E48C_MAKET) && regs && regs->sys_num != 128 && regs->sys_num != 383 &&
-			mt != 26)
-		return false;
-
 	switch (mt) {
 	case 0:
 	case 2:
@@ -153,16 +146,8 @@ static inline bool elf_check_e2k_mtype(unsigned long mt, bool incompat)
 		if (IS_MACHINE_E2C3)
 			return true;
 		break;
-	case 24:
-		if (IS_MACHINE_E48C)
-			return true;
-		break;
 	case 25:
 		if (IS_MACHINE_E8V7)
-			return true;
-		break;
-	case 26:
-		if (cpu_has(CPU_FEAT_E48C_MAKET))
 			return true;
 		break;
 	default:
@@ -232,18 +217,10 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
 #define CORE_DUMP_USE_REGSET
 #define ELF_EXEC_PAGESIZE       4096
 
-#ifdef __KERNEL__
-/* #define ELF_CORE_COPY_REGS(gregs, regs) \
-	memcpy(gregs, regs, sizeof(struct pt_regs)); */
-
-/* regs is struct pt_regs, pr_reg is elf_gregset_t (which is
-   now struct_user_regs, they are different) */
-
 #define ELF_CORE_COPY_REGS(pr_reg, regs) \
 	core_pt_regs_to_user_regs(regs, (struct user_regs_struct*) (&pr_reg));
 extern void core_pt_regs_to_user_regs (struct pt_regs *pt_regs,
 				  struct user_regs_struct *user_regs);
-#endif /* __KERNEL__ */
 	
 /* This yields a mask that user programs can use to figure out what
    instruction set this cpu supports.  This could be done in userspace,
@@ -268,7 +245,6 @@ extern void core_pt_regs_to_user_regs (struct pt_regs *pt_regs,
 #define ELF_ET_DYN_BASE         (2 * TASK_SIZE / 3)	/* NEEDSWORK */
 #define COMPAT_ELF_ET_DYN_BASE	(2 * TASK32_SIZE / 3)
 
-#ifdef __KERNEL__
 #define SET_PERSONALITY(ex)			        		\
 do {									\
 	current->thread.flags &= ~E2K_FLAG_64BIT_BINCO;			\
@@ -291,12 +267,15 @@ do {									\
 		current->thread.flags |= E2K_FLAG_32BIT;                \
 	else                                                            \
 		current->thread.flags &= ~E2K_FLAG_32BIT;               \
-	if ((ex).e_flags & ELF_BIN_COMP)                               \
-		current->thread.flags |= E2K_FLAG_BIN_COMP_CODE;        \
-	else                                                            \
-		current->thread.flags &= ~E2K_FLAG_BIN_COMP_CODE;       \
+ \
+	l2_prefetcher_switch_binco(current->thread.flags & E2K_FLAG_BIN_COMP_CODE, \
+			(ex).e_flags & ELF_BIN_COMP, \
+			&current->thread.l2_prefetcher, &current->thread.l2_prefetcher); \
+	if ((ex).e_flags & ELF_BIN_COMP) \
+		current->thread.flags |= E2K_FLAG_BIN_COMP_CODE; \
+	else \
+		current->thread.flags &= ~E2K_FLAG_BIN_COMP_CODE; \
 } while (0)
-#endif
 
 #define FAST_SYSCALLS_ENTRY 0x1f
 /*

@@ -42,7 +42,7 @@ static inline void native_vga_writeb(u8 val, u8 *addr)
 	if (cpu_has(CPU_FEAT_WC_LEGACY_VGA)) {
 		*addr = val;
 	} else {
-		native_writeb_relaxed(val, (volatile u8 *) addr);
+		native_writeb_relaxed(val, (volatile void __iomem __force *) addr);
 	}
 }
 
@@ -51,7 +51,7 @@ static inline u8 native_vga_readb(const u8 *addr)
 	if (cpu_has(CPU_FEAT_WC_LEGACY_VGA)) {
 		return *addr;
 	} else {
-		return native_readb_relaxed((volatile u8 *) addr);
+		return native_readb_relaxed((volatile void __iomem __force *) addr);
 	}
 }
 

@@ -2939,6 +2939,9 @@ static int smp_sig_channel(struct l2cap_chan *chan, struct sk_buff *skb)
 	__u8 code, reason;
 	int err = 0;
 
+#ifdef CONFIG_MCST
+	reason = SMP_CMD_NOTSUPP;
+#endif
 	if (skb->len < 1)
 		return -EILSEQ;
 

@@ -12,7 +12,9 @@
 		interrupt-controller;
 		numa-node-id = <NODE>;
 		nonposted-mmio;
-
+		interrupts-extended = <&lpic 0xff0f0f0f 0xff0f0f0f>, /*stub for linux to find parent*/
+					 <&LVT PREPIC_ERROR_VECTOR 32 0>;
+		interrupt-names = "stub", "PREPIC error interrupts";
 		#interrupt-cells = <3>;
 	};
 	SIC {
@@ -43,6 +45,19 @@
 		      <NSR_ADDR(010d0) 0 0x130>,
 		      <NSR_ADDR(01950) 0 0x4>,
 		      <NSR_ADDR(01910) 0 0x28>;
+		numa-node-id = <NODE>;
+		nonposted-mmio;
+		interrupt-parent = <&LVT>;
+		interrupts = <LINP5_INTERRUPT_VECTOR 5 0>;
+		interrupt-names = "PCS interrupts";
+	};
+	HW_CHECK: hw_check@NODE,0 {
+		compatible = "mcst,hw_check";
+		reg = <NSR_ADDR(00000) 0 0x20>,
+		      <NSR_ADDR(00400) 0 0x60>,
+		      <NSR_ADDR(03804) 0 0x4>,
+		      <NSR_ADDR(01000) 0 0x700>,
+		      <NSR_ADDR(00cc0) 0 0x8>;
 		numa-node-id = <NODE>;
 		nonposted-mmio;
 	};

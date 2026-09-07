@@ -5,9 +5,11 @@
 
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
+#include <linux/syscore_ops.h>
 
 #include "epic.h"
-
+#include <asm/pic.h>
+#include "../pic.h"
 
 /* Enable CEPIC debugging from kernel cmdline */
 bool epic_debug = false;
@@ -34,7 +36,7 @@ int epic_get_vector(void)
 void ack_epic_irq(void)
 {
 	union cepic_eoi reg;
-
+	BUG_ON(!cpu_has_epic());
 	reg.raw = 0;
 	reg.rcpr = get_current_epic_core_priority();
 	epic_write_w(CEPIC_EOI, reg.raw);
@@ -66,7 +68,7 @@ bool epic_check_vector_to_be_cleaned(unsigned vector)
  * so we must exclude the influence of the order in which all
  * processors get here.
  */
-int epic_processor_info(int epicid, int version, unsigned int cepic_freq)
+int __init epic_processor_info(int epicid, int version, unsigned int cepic_freq)
 {
 	unsigned int bsp_id = read_epic_id();
 	bool boot_cpu_detected = physid_isset(bsp_id, phys_cpu_present_map);
@@ -141,12 +143,45 @@ static int cepic_timer_shutdown(struct clock_event_device *evt)
 	return 0;
 }
 
+#ifdef CONFIG_PM
+
+struct cepic_timer {
+	u32 lvtt;
+	u32 init;
+	u32 cur;
+	u32 div;
+};
+
+static struct {
+	u32 id;
+	u32 cpr;
+	u32 svr;
+	struct cepic_timer timer;
+	struct cepic_timer nm_timer;
+} cepic_pm_state;
+
 static int cepic_suspend(void)
 {
 	union cepic_ctrl reg_ctrl;
 	unsigned long flags;
 
 	local_irq_save(flags);
+
+	cepic_pm_state.id = epic_read_w(CEPIC_ID);
+	cepic_pm_state.cpr = epic_read_w(CEPIC_CPR);
+	cepic_pm_state.svr = epic_read_w(CEPIC_SVR);
+	cepic_pm_state.timer = (struct cepic_timer) {
+		.lvtt = epic_read_w(CEPIC_TIMER_LVTT),
+		.init = epic_read_w(CEPIC_TIMER_INIT),
+		.cur = epic_read_w(CEPIC_TIMER_CUR),
+		.div = epic_read_w(CEPIC_TIMER_DIV),
+	};
+	cepic_pm_state.nm_timer = (struct cepic_timer) {
+		.lvtt = epic_read_w(CEPIC_NM_TIMER_LVTT),
+		.init = epic_read_w(CEPIC_NM_TIMER_INIT),
+		.cur = epic_read_w(CEPIC_NM_TIMER_CUR),
+		.div = epic_read_w(CEPIC_NM_TIMER_DIV),
+	};
 
 	/* Disable CEPIC */
 	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
@@ -158,10 +193,60 @@ static int cepic_suspend(void)
 	return 0;
 }
 
+static void cepic_resume(void)
+{
+	union cepic_ctrl reg_ctrl;
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	epic_write_w(CEPIC_ID, cepic_pm_state.id);
+	epic_write_w(CEPIC_CPR, cepic_pm_state.cpr);
+	epic_write_w(CEPIC_SVR, cepic_pm_state.svr);
+	epic_write_w(CEPIC_TIMER_LVTT, cepic_pm_state.timer.lvtt);
+	epic_write_w(CEPIC_TIMER_INIT, cepic_pm_state.timer.init);
+	epic_write_w(CEPIC_TIMER_CUR, cepic_pm_state.timer.cur);
+	epic_write_w(CEPIC_TIMER_DIV, cepic_pm_state.timer.div);
+	epic_write_w(CEPIC_NM_TIMER_LVTT, cepic_pm_state.nm_timer.lvtt);
+	epic_write_w(CEPIC_NM_TIMER_INIT, cepic_pm_state.nm_timer.init);
+	epic_write_w(CEPIC_NM_TIMER_CUR, cepic_pm_state.nm_timer.cur);
+	epic_write_w(CEPIC_NM_TIMER_DIV, cepic_pm_state.nm_timer.div);
+
+	/* Enable CEPIC */
+	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
+	reg_ctrl.soft_en = 1;
+	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
+
+	local_irq_restore(flags);
+}
+
+static struct syscore_ops cepic_syscore_ops = {
+	.resume		= cepic_resume,
+	.suspend	= cepic_suspend,
+};
+
+static int __init init_cepic_ops(void)
+{
+	if (cpu_has_epic())
+		register_syscore_ops(&cepic_syscore_ops);
+
+	return 0;
+}
+
+/* cepic needs to resume before other devices access its registers. */
+core_initcall(init_cepic_ops);
+#endif	/* CONFIG_PM */
+
 void cepic_disable(void)
 {
+	union cepic_ctrl reg_ctrl;
+
 	cepic_timer_shutdown(NULL);
-	cepic_suspend();
+
+	/* Disable CEPIC */
+	reg_ctrl.raw = epic_read_w(CEPIC_CTRL);
+	reg_ctrl.soft_en = 0;
+	epic_write_w(CEPIC_CTRL, reg_ctrl.raw);
 }
 
 void cpuinfo_epic(struct seq_file *m)

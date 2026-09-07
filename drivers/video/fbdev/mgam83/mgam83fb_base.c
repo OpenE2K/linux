@@ -41,7 +41,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <asm/mman.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #ifdef CONFIG_E90
 #include <asm/e90.h>	
 #endif

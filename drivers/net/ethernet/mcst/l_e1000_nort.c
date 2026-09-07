@@ -31,6 +31,7 @@
 #include <linux/pps_kernel.h>		/* for IEEE 1588 */
 #include <linux/phy.h>
 #include <linux/irq.h>
+#include <linux/rtnetlink.h>
 
 #ifndef MODULE
 #undef CONFIG_DEBUG_FS
@@ -41,7 +42,7 @@
 
 #include <asm/dma.h>
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/irqflags.h>
 #include <asm/irq.h>
 #include <asm/setup.h>
@@ -116,20 +117,20 @@ MODULE_LICENSE("GPL v2");
 /* E1000 Rx and Tx ring descriptors. */
 
 struct e1000_rx_head {
-	u32	base;		/* RBADR [31:0] */ 
-	s16	buf_length;	/* BCNT only [13:0] */
-	s16	status;
-	s16	msg_length;	/* MCNT only [13:0] */
+	__le32	base;		/* RBADR [31:0] */ 
+	__le16	buf_length;	/* BCNT only [13:0] */
+	__le16	status;
+	__le16	msg_length;	/* MCNT only [13:0] */
 	u16	reserved1;
-	u32	etmr;	/* timer count for ieee 1588 is set by hardware */
+	__le32	etmr;	/* timer count for ieee 1588 is set by hardware */
 } __attribute__((packed));
 
 struct e1000_tx_head {
-	u32	base;		/* TBADR [31:0] */
-	s16	buf_length;	/* BCNT only [13:0] */
-	s16	status;
-	u32	misc;		/* [31:26] + [3:0] */
-	u32	etmr;	/* timer count for ieee 1588 is set by hardware */
+	__le32	base;		/* TBADR [31:0] */
+	__le16	buf_length;	/* BCNT only [13:0] */
+	__le16	status;
+	__le32	misc;		/* [31:26] + [3:0] */
+	__le32	etmr;	/* timer count for ieee 1588 is set by hardware */
 } __attribute__((packed));
 
 struct e1000_dma_area {
@@ -147,6 +148,8 @@ typedef struct napi_work {
  * so we allocate the structure should be allocated by pci_alloc_consistent().
  */
 struct e1000_private {
+	void				*next;
+	struct net_device	*dev;
 #if 0
 	init_block_t		init_block __attribute__((aligned(32)));
 
@@ -171,7 +174,6 @@ struct e1000_private {
 						 */
 	void			*smpkts_area;
 	dma_addr_t		smpkts_dma;
-	struct net_device	*dev;
 	struct resource		*resource;
 	int			msi_status;
 	int			bar;		/* MSIX support */
@@ -183,7 +185,7 @@ struct e1000_private {
 	struct sk_buff		*rx_skbuff[RX_RING_SIZE];
 	dma_addr_t		tx_dma_addr[TX_RING_SIZE];
 	dma_addr_t		rx_dma_addr[RX_RING_SIZE];
-	unsigned char		*base_ioaddr;
+	unsigned char __iomem	*base_ioaddr;
 
 	raw_spinlock_t		lock;		/* Guard lock */
 	unsigned int		cur_rx, cur_tx;	/* The next free ring entry */
@@ -234,10 +236,11 @@ struct e1000_private {
 	struct dentry		*l_e1000_dbg_board;
 	u32			reg_last_value;
 #endif /*CONFIG_DEBUG_FS*/
+	struct ctl_table_header *sysct_table_header;
 };
 
 
-static void *iohub_eth_base_addr;
+static void __iomem *iohub_eth_base_addr;
 
 static int e1000_debug = 0;
 
@@ -577,7 +580,7 @@ static void dump_rx_ring_state(struct e1000_private *ep)
 		pr_cont("   RX %03d base %08x buf len %04x msg len %04x status"
 			" %04x\n", i,
 			le32_to_cpu(ep->rx_ring[i].base),
-			le16_to_cpu((-ep->rx_ring[i].buf_length& 0xffff) ),
+			(-le16_to_cpu(ep->rx_ring[i].buf_length)) & 0xffff,
 			le16_to_cpu(ep->rx_ring[i].msg_length),
 			(u16)le16_to_cpu((ep->rx_ring[i].status)));
 	}
@@ -594,9 +597,9 @@ static void dump_tx_ring_state(struct e1000_private *ep)
 		pr_cont("   TX %03d base %08x buf len %04x misc %04x status"
 			" %04x\n", i,
 			le32_to_cpu(ep->tx_ring[i].base),
-			le16_to_cpu((-ep->tx_ring[i].buf_length) & 0xffff),
+			(~le16_to_cpu(ep->tx_ring[i].buf_length)) & 0xffff,
 			le32_to_cpu(ep->tx_ring[i].misc),
-			le16_to_cpu((u16)(ep->tx_ring[i].status)));
+			(u16)le16_to_cpu(ep->tx_ring[i].status));
 	}
 	pr_cont("\n");
 }
@@ -1077,27 +1080,21 @@ static void e1000_load_multicast(struct net_device *dev)
 {
 	struct e1000_private *ep = netdev_priv(dev);
 	volatile init_block_t *ib = ep->init_block;
-	volatile u16 *mcast_table = (u16 *)&ib->laddrf;
 	struct netdev_hw_addr *ha;
 	u32 crc;
 
 	/* set all multicast bits */
 	if (dev->flags & IFF_ALLMULTI) {
-		ib->laddrf = 0xffffffffffffffffLL;
+		ib->laddrf = cpu_to_le64(0xffffffffffffffffLL);
 		return;
 	}
-	/* clear the multicast filter */
+
 	ib->laddrf = 0;
 
-	/* Add addresses */
 	netdev_for_each_mc_addr(ha, dev) {
 		crc = ether_crc_le(6, ha->addr);
 		crc = crc >> 26;
-		/* TODO 3.10 cpu_to_le16 is called for store, but is not 
-		 * called for load?
-		 */
-		mcast_table[crc >> 4] = cpu_to_le16((mcast_table[crc >> 4]) |
-						    (1 << (crc & 0xf)));
+		ib->laddrf |= cpu_to_le64(1UL << crc);
 	}
 	return;
 }
@@ -1259,6 +1256,12 @@ static int e1000_restart(struct net_device *dev, unsigned int csr0_bits)
 {
 	struct e1000_private *ep = netdev_priv(dev);
 	int i;
+
+	/* rm 27517 */
+	if ((ep->pci_dev->vendor == PCI_VENDOR_ID_MCST_TMP) &&
+	    (ep->pci_dev->device == PCI_DEVICE_ID_MCST_MGEX)) {
+		mdelay(1);
+	}
 
 	if (netif_msg_rx_err(ep) || netif_msg_tx_err(ep))
 		dev_info(&dev->dev, "reset started\n");
@@ -1423,8 +1426,7 @@ static int e1000_rx(struct e1000_private *ep, int budget)
 			ep->rx_ring[entry].status &= cpu_to_le16(RD_ENP|RD_STP);
 			goto try_next;
 		}
-		pkt_len = (le16_to_cpu(ep->rx_ring[entry].msg_length) & 0xfff)
-			  - CRC_SZ;
+		pkt_len = le16_to_cpu(ep->rx_ring[entry].msg_length) - CRC_SZ;
 		/* Malloc up new buffer, compatible with net-2e. */
 		/* Discard oversize frames. */
 		if (unlikely(pkt_len > PKT_BUF_SZ)) {
@@ -1648,7 +1650,7 @@ static int e1000_rx(struct e1000_private *ep, int budget)
 	/* You may want to set other cpu for napi processing to get high
 	 * performance by means of command e.g for cpu 1 anf for eth4
 	 * echo 1 > /proc/sys/dev/l_e1000/napi_cpu/eth4 */
-	if (ep->napi_cpu >= 0 && !cpu_online(ep->napi_cpu))
+	if (ep->napi_cpu >= 0 && !cpu_online((unsigned int)ep->napi_cpu))
 		/* it was mistaken set of napi_cpu */
 		ep->napi_cpu = -1;
 	if (ep->napi_cpu >= 0) {
@@ -2371,9 +2373,6 @@ static int e1000_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 			max_min_tstmp[MIN_RX_TSMP] = 0xffffffff;
 			return 0;
 		}
-	case SIOCGHWTSTAMP:
-		return copy_to_user(rq->ifr_data, &config,
-				    sizeof(config)) ? -EFAULT : 0;
 	case SIOCSHWTSTAMP:
 		if (copy_from_user(&config, rq->ifr_data, sizeof(config)))
 			return -EFAULT;
@@ -2555,7 +2554,7 @@ static int e1000_open(struct net_device *dev)
 		goto err_free_irq;
 	}
 
-	ep->init_block->mode = le16_to_cpu(e1000_mode);
+	ep->init_block->mode = cpu_to_le16(e1000_mode);
 	ep->init_block->laddrf = 0UL;
 
 	if (netif_msg_ifup(ep))
@@ -3338,7 +3337,7 @@ static int e1000_init_dma_ba(struct e1000_private *ep)
 }
 
 /* probe nort device - create netdev */
-static int e1000_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
+static int e1000_probe1(unsigned long ioaddr, unsigned char __iomem *base_ioaddr,
 			int shared, struct pci_dev *pdev,
 			struct resource *res, int bar,
 			struct msix_entry *msix_entries, int msi_status)
@@ -3351,6 +3350,8 @@ static int e1000_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	struct e1000_dma_area *m;
 	size_t sz;
 	u8 mac_addr[6/*ETH_ALEN*/];
+	struct net_device *head_dev;
+	struct e1000_private *tmp_ep;
 
 	shared = (msi_status != L_E1000_MSIX);
 	dev = alloc_etherdev(sizeof(struct e1000_private));
@@ -3496,7 +3497,18 @@ static int e1000_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	}
 
 	/* Fill in the generic fields of the device structure. */
-	pci_set_drvdata(pdev, dev);
+
+	head_dev = dev_get_drvdata(&pdev->dev);
+
+	if (!head_dev) {
+		pci_set_drvdata(pdev, dev);
+	} else {
+		tmp_ep = netdev_priv(head_dev);
+
+		while (tmp_ep->next)
+			tmp_ep = tmp_ep->next;
+		tmp_ep->next = ep;
+	}
 
 	if (register_netdev(dev))
 		goto err_free_consistent;
@@ -3559,7 +3571,7 @@ static int e1000_probe1(unsigned long ioaddr, unsigned char *base_ioaddr,
 	napi_cpu_table->maxlen = sizeof(ep->napi_cpu);
 	napi_cpu_table->mode = 0644;
 	napi_cpu_table->proc_handler = proc_dointvec;
-	register_sysctl("dev/l_e1000/napi_cpu", napi_cpu_table);
+	ep->sysct_table_header = register_sysctl("dev/l_e1000/napi_cpu", napi_cpu_table);
 #endif /* CONFIG_SYSCTL */
 	dev_info(&pdev->dev,
 		 "registered as " KBUILD_MODNAME " (rev. %d)\n", ep->revision);
@@ -3590,60 +3602,13 @@ err_release_region:
 	return ret;
 }
 
-
-static char *rt = NULL;
-#define MAX_NUM_L_E1000_RT	32
-static void *l_1000_rts[MAX_NUM_L_E1000_RT];
-static int num_l_e1000_rt;
-
-static int is_rt_device(struct pci_dev *pdev, int bar)
-{
-	char *s = rt;
-	int inst;
-
-retry :
-	if (s == NULL) {
-		return 0;
-	}
-	s = strstr(s, pci_name(pdev));
-	if (s == NULL) {
-		return 0;
-	}
-	s += strlen(pci_name(pdev));
-	if (*s != '#') {
-		goto yes;
-	}
-	s++;
-	inst = simple_strtol(s, NULL, 10);
-	if (inst == bar) {
-		goto yes;
-	}
-	goto retry;
-yes:
-	return 1;
-}
-
-static int was_rt_device(void *ep)
-{
-	int i;
-	for (i = 0; i < num_l_e1000_rt; i++) {
-		if (l_1000_rts[i] == ep) {
-			return 1;
-		}
-	}
-	return 0;
-}
-
-#define IS_RT_DEVICE(pdev) (rt && strstr(rt, pci_name(pdev)))
-module_param(rt, charp, 0444);
-
 static int e1000_probe_pci_bar(struct pci_dev *pdev,
 			       const struct pci_device_id *ent,
 			       int bar, struct msix_entry *msix_entries,
 			       int msi_status)
 {
 	resource_size_t ioaddr;
-	unsigned char *base_ioaddr;
+	unsigned char __iomem *base_ioaddr;
 	struct resource *res;
 	int err;
 	u16 subven;
@@ -3675,25 +3640,7 @@ static int e1000_probe_pci_bar(struct pci_dev *pdev,
 		return -ENOMEM;
 	}
 
-	if (is_rt_device(pdev, bar)) {
-		if (num_l_e1000_rt >= (MAX_NUM_L_E1000_RT - 1)) {
-			dev_warn(&pdev->dev,
-				 "l_e1000: max rt devices reached.\n");
-			err = -ENOMEM;
-		} else {
-			struct net_device *dev = dev_get_drvdata(&pdev->dev);
-			err = e1000_rt_probe1(ioaddr, base_ioaddr, 1, pdev, res,
-					      bar, msix_entries, msi_status);
-			if (err >= 0) {
-				dev = dev_get_drvdata(&pdev->dev);
-				l_1000_rts[num_l_e1000_rt] = netdev_priv(dev);
-				num_l_e1000_rt++;
-			}
-		}
-	} else {
-		err = e1000_probe1(ioaddr, base_ioaddr, 1, pdev, res,
-				   bar, msix_entries, msi_status);
-	}
+	err = e1000_probe1(ioaddr, base_ioaddr, 1, pdev, res, bar, msix_entries, msi_status);
 
 	if (err < 0) {
 		iounmap(base_ioaddr);
@@ -3833,6 +3780,8 @@ static int e1000_probe_pci(struct pci_dev *pdev,
 		}
 	}
 
+	dev_set_drvdata(&pdev->dev, NULL);
+
 	for (bar = 0; bar < l_e1000_num_chanels(pdev); bar++) {
 		res = e1000_probe_pci_bar(pdev, ent, bar,
 					  msix_entries, msi_status);
@@ -3842,11 +3791,11 @@ static int e1000_probe_pci(struct pci_dev *pdev,
 	}
 
 	if (err) {
-		if (msi_status == L_E1000_MSIX) {
+		if (msi_status == L_E1000_MSIX)
 			pci_disable_msix(pdev);
-		} else if (msi_status == L_E1000_MSI) {
+		else if (msi_status == L_E1000_MSI)
 			pci_disable_msi(pdev);
-		}
+
 #ifdef MCST_MSIX
 		kfree(msix_entries);
 #endif /* MCST_MSIX */
@@ -3860,67 +3809,68 @@ static void e1000_remove(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct e1000_private *ep = netdev_priv(dev);
+	int msi_status = ep->msi_status;
+
+	while (ep) {
+		dev = ep->dev;
+	
+		rtnl_lock();
+		if (netif_running(dev))
+			dev_close(dev);
+		rtnl_unlock();
 
 #ifdef CONFIG_DEBUG_FS
-	l_e1000_dbg_board_exit(ep);
+		l_e1000_dbg_board_exit(ep);
 #endif /*CONFIG_DEBUG_FS*/
 
-	if (was_rt_device(ep)) {
-		e1000_rt_remove(pdev);
-		return;
+		/* cleanup e1000_probe1: */
+		if (netif_msg_drv(ep))
+			dev_info(&pdev->dev,
+				 "cleanup - unregister phy and net\n");
+
+		if (ep->sysct_table_header) {
+			unregister_sysctl_table(ep->sysct_table_header);
+			ep->sysct_table_header = NULL;
+		}
+
+		mdiobus_unregister(ep->mii_bus);
+		unregister_netdev(dev);
+
+		if (ep->dma_area) {
+			dma_free_coherent(&pdev->dev,
+					  ALIGN(sizeof(struct e1000_dma_area), 64),
+					  ep->dma_area, ep->dma_addr);
+		}
+		if (ep->smpkts_area) {
+			dma_free_coherent(&pdev->dev,
+					  SMALL_PKT_SZ * TX_RING_SIZE,
+					  ep->smpkts_area, ep->smpkts_dma);
+		}
+		if (ep->ptp_clock) {
+			ptp_clock_unregister(ep->ptp_clock);
+			ep->ptp_clock = NULL;
+			if (netif_msg_timer(ep))
+				dev_info(&pdev->dev, "cleanup - remove PHC\n");
+		}
+
+		free_netdev(dev);
+
+		/* cleanup e1000_probe_pci_bar: */
+
+		if (iohub_eth_base_addr != ep->base_ioaddr)
+			iounmap(ep->base_ioaddr);
+
+		release_mem_region(pci_resource_start(pdev, ep->bar),
+				   E1000_TOTAL_SIZE);
+
+		ep = ep->next;
 	}
-
-	/* close */
-	netif_carrier_off(dev);
-	if (dev->phydev) {
-		phy_stop(dev->phydev);
-		phy_disconnect(dev->phydev);
-		dev->phydev = NULL;
-	}
-	e1000_write_e_csr(ep, STOP);
-
-	/* cleanup e1000_probe1: */
-	if (netif_msg_drv(ep))
-		dev_info(&pdev->dev,
-			 "cleanup - unregister phy and net\n");
-
-	mdiobus_unregister(ep->mii_bus);
-	unregister_netdev(dev);
-
-	if (ep->dma_area) {
-		dma_free_coherent(&pdev->dev,
-				  ALIGN(sizeof (struct e1000_dma_area), 64),
-				  ep->dma_area, ep->dma_addr);
-	}
-	if (ep->smpkts_area) {
-		dma_free_coherent(&pdev->dev,
-				  SMALL_PKT_SZ * TX_RING_SIZE,
-				  ep->smpkts_area, ep->smpkts_dma);
-	}
-	if (ep->ptp_clock) {
-		ptp_clock_unregister(ep->ptp_clock);
-		ep->ptp_clock = NULL;
-		if (netif_msg_timer(ep))
-			dev_info(&pdev->dev, "cleanup - remove PHC\n");
-	}
-
-	free_netdev(dev);
-
-	/* cleanup e1000_probe_pci_bar: */
-
-	if (iohub_eth_base_addr != ep->base_ioaddr)
-		iounmap(ep->base_ioaddr);
-
-	release_mem_region(pci_resource_start(pdev, ep->bar),
-			   E1000_TOTAL_SIZE);
-
 	/* cleanup e1000_probe_pci: */
 
-	if (ep->msi_status == L_E1000_MSIX) {
+	if (msi_status == L_E1000_MSIX)
 		pci_disable_msix(pdev);
-	} else if (ep->msi_status == L_E1000_MSI) {
+	else if (msi_status == L_E1000_MSI)
 		pci_disable_msi(pdev);
-	}
 
 #ifdef MCST_MSIX
 	if (pdev->mcst_msix_cap_base) {
@@ -3945,22 +3895,26 @@ static void e1000_shutdown(struct pci_dev *pdev)
 	int i;
 	unsigned long flags;
 
-	if (!(dev->priv_flags & IFF_NO_QUEUE) && netif_running(dev)) {
-		napi_disable(&ep->napi);
-		netif_stop_queue(dev);
+	while (ep) {
+		dev = ep->dev;
+		if (!(dev->priv_flags & IFF_NO_QUEUE) && netif_running(dev)) {
+			napi_disable(&ep->napi);
+			netif_stop_queue(dev);
 
-		raw_spin_lock_irqsave(&ep->lock, flags);
-		e1000_write_e_csr(ep, STOP);
-		/* wait for stop */
-		for (i = 0; i < 1000; i++)
-			if (e1000_read_e_csr(ep) & STOP)
-				break;
-		if (i >= 100 && netif_msg_drv(ep))
-			dev_warn(&pdev->dev,
-				 "%s timed out waiting for stop.\n", __func__);
-		raw_spin_unlock_irqrestore(&ep->lock, flags);
+			raw_spin_lock_irqsave(&ep->lock, flags);
+			e1000_write_e_csr(ep, STOP);
+			/* wait for stop */
+			for (i = 0; i < 1000; i++)
+				if (e1000_read_e_csr(ep) & STOP)
+					break;
+			if (i >= 100 && netif_msg_drv(ep))
+				dev_warn(&pdev->dev,
+					 "%s timed out waiting for stop.\n", __func__);
+			raw_spin_unlock_irqrestore(&ep->lock, flags);
 
-		netif_carrier_off(dev);
+			netif_carrier_off(dev);
+		}
+		ep = ep->next;
 	}
 }
 
@@ -3976,19 +3930,22 @@ static int e1000_resume(struct pci_dev *pdev)
 	struct e1000_private *ep = netdev_priv(dev);
 	unsigned long flags;
 
-	if (!netif_running(dev)) {
-		return 0;
+	while (ep) {
+		dev = ep->dev;
+		if (!netif_running(dev))
+			return 0;
+
+		napi_enable(&ep->napi);
+		e1000_init_dma_ba(ep);
+
+		raw_spin_lock_irqsave(&ep->lock, flags);
+		e1000_restart(dev, INEA | STRT);
+		raw_spin_unlock_irqrestore(&ep->lock, flags);
+
+		netif_start_queue(dev);
+		netif_carrier_on(dev);
+		ep = ep->next;
 	}
-
-	napi_enable(&ep->napi);
-	e1000_init_dma_ba(ep);
-
-	raw_spin_lock_irqsave(&ep->lock, flags);
-	e1000_restart(dev, INEA | STRT);
-	raw_spin_unlock_irqrestore(&ep->lock, flags);
-
-	netif_start_queue(dev);
-	netif_carrier_on(dev);
 	return 0;
 }
 
@@ -3996,7 +3953,7 @@ static int e1000_resume(struct pci_dev *pdev)
 
 #define PCI_SUBVENDOR_ID_E1000	0x0000
 
-const struct pci_device_id e1000_pci_tbl[] = {
+static const struct pci_device_id e1000_pci_tbl[] = {
 	{
 		.vendor = PCI_VENDOR_ID_ELBRUS,
 		.device = PCI_DEVICE_ID_MCST_E1000,

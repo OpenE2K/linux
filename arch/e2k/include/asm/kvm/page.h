@@ -6,8 +6,6 @@
 #ifndef _ASM_E2K_KVM_PAGE_H
 #define _ASM_E2K_KVM_PAGE_H
 
-#ifdef __KERNEL__
-
 #include <linux/types.h>
 
 #ifdef	CONFIG_VIRTUALIZATION
@@ -27,11 +25,12 @@
 							/* kernel virtual */
 							/* space */
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 /* it is host kernel with virtualization support */
 #define	__guest_pa(x)		((e2k_addr_t)(x) - GUEST_PAGE_OFFSET)
-#define __guest_va(x)		((void *)((e2k_addr_t) (x) + GUEST_PAGE_OFFSET))
-#endif	/* CONFIG_KVM_HOST_MODE */
+#define __guest_va(x)		((void __user *)((e2k_addr_t) (x) + GUEST_PAGE_OFFSET))
+#define __guest_gpa(x)		(gpa_t)((e2k_addr_t) (x) + GUEST_PAGE_OFFSET)
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 #endif	/* CONFIG_VIRTUALIZATION */
 
@@ -40,7 +39,7 @@
 
 #define	guest_user_address_to_pva(task, addr)	(-1)	/* none guests */
 
-#elif defined(CONFIG_KVM_HOST_MODE)
+#elif defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native host kernel with virtualization support */
 #define PAGE_OFFSET		HOST_PAGE_OFFSET
 #define BOOT_PAGE_OFFSET	PAGE_OFFSET
@@ -50,7 +49,5 @@
 #else
  #error	"Unknown virtualization type"
 #endif	/* !CONFIG_VIRTUALIZATION */
-
-#endif /* !(__KERNEL__) */
 
 #endif /* ! _ASM_E2K_KVM_PAGE_H */

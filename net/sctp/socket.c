@@ -1426,7 +1426,7 @@ static int sctp_getsockopt_connectx3(struct sock *sk, int len,
 			return -EFAULT;
 		if (get_user_tagged_16(ap.qword, tag, &u128->addrs) || !IS_AP(ap, tag))
 			return -EFAULT;
-		param.addrs = (struct sockaddr  __user *)AP_PTR(ap);
+		param.addrs = U_AP_PTR(ap);
 		set_ap_u_border(ap);
 	} else
 #endif

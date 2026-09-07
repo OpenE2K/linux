@@ -132,12 +132,19 @@ static int irq_domain_translate_threecell(struct irq_domain *d,
 
 static void linp_epic_irq_enable(struct irq_data *irqd)
 {
-	int ret;
+	int ret, cpu;
 	struct msi_msg msg;
 	union prepic_linpn reg = {};
 	irq_hw_number_t pin = irqd_to_hwirq(irqd);
 	int node = irq_data_get_node(irqd);
-	int cpu = cpumask_first(cpumask_of_node(node));
+
+	if (cpumask_weight(cpumask_of_node(node)) < 1) {
+		pr_warn("linp: can not setup irq %d: cpu is not online\n",
+				irqd->irq);
+		return;
+	}
+
+	cpu = cpumask_first(cpumask_of_node(node));
 
 	union IO_EPIC_MSG_DATA *data = (void *)&msg.data;
 
@@ -232,29 +239,19 @@ static void linp_irqdomain_free(struct irq_domain *dmn, unsigned int virq,
 	irq_domain_free_irqs_top(dmn, virq, nr_irqs);
 }
 
-
-const struct irq_domain_ops linp_epic_irqdomain_ops = {
+static const struct irq_domain_ops linp_epic_irqdomain_ops = {
 	.translate	= linp_irq_domain_translate,
 	.alloc		= linp_irqdomain_alloc,
 	.free		= linp_irqdomain_free,
 };
 
-static int __init
-linp_epic_init(struct device_node *np, struct device_node *parent)
+static int __init __prepic_request_irq(struct device_node *np)
 {
 	int ret;
-	struct irq_domain *dmn;
 	const char *iname = "PREPIC error interrupts";
-	struct fwnode_handle *fn = of_node_to_fwnode(np);
 
-	dmn = irq_domain_create_linear(fn, ARRAY_SIZE(linp_regs),
-				&linp_epic_irqdomain_ops, NULL);
-	if (!dmn)
-		return -ENOMEM;
-
-	dmn->parent = irq_find_host(parent);
-	BUG_ON(!dmn->parent);
-
+	if (!np)
+		return 0;
 	ret = of_property_match_string(np, "interrupt-names", iname);
 	if (ret < 0) {
 		pr_warn("%pOF: failed to get irq index: %d\n", np, ret);
@@ -270,9 +267,46 @@ linp_epic_init(struct device_node *np, struct device_node *parent)
 			IRQF_NO_THREAD,
 			iname, NULL);
 	if (WARN(ret, "%pOF: %d", np, ret))
-		return ret;
-out:
-	return 0;
+		goto out;
+out:;
+	return ret;
 }
 
+static struct device_node *prepic_dn[MAX_NUMNODES] __initdata;
+
+static int __init prepic_request_irq(void)
+{
+	int i, ret;
+	for (i = ret = 0; ret == 0 && i < ARRAY_SIZE(prepic_dn); i++)
+		ret = __prepic_request_irq(prepic_dn[i]);
+
+	return ret;
+}
+/* rm #33255: postpone PREPIC error interrupt registration
+ untill all cpus have started */
+late_initcall(prepic_request_irq);
+
+static int __init
+linp_epic_init(struct device_node *np, struct device_node *parent)
+{
+	struct irq_domain *dmn;
+	struct fwnode_handle *fn = of_node_to_fwnode(np);
+	int node = of_node_to_nid(np);
+	if (node < 0)
+		node = 0;
+
+	dmn = irq_domain_create_linear(fn, ARRAY_SIZE(linp_regs),
+				&linp_epic_irqdomain_ops, NULL);
+	if (!dmn)
+		return -ENOMEM;
+
+	dmn->parent = irq_find_host(parent);
+	BUG_ON(!dmn->parent);
+
+	WARN_ON(prepic_dn[node] != 0);
+	/* not all numa/cpus started yet */
+	prepic_dn[node] = np;
+
+	return 0;
+}
 IRQCHIP_DECLARE(epic, "mcst,epic-linp", linp_epic_init);

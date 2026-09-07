@@ -1198,7 +1198,11 @@ static struct page *new_page(struct page *page, unsigned long start)
 {
 	struct folio *dst, *src = page_folio(page);
 	struct vm_area_struct *vma;
+#ifdef CONFIG_MCST
+	unsigned long address = (unsigned long)(-EINVAL);
+#else
 	unsigned long address;
+#endif
 	VMA_ITERATOR(vmi, current->mm, start);
 	gfp_t gfp = GFP_HIGHUSER_MOVABLE | __GFP_RETRY_MAYFAIL;
 

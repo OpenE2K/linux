@@ -65,9 +65,6 @@
 #include <linux/kasan.h>
 #include <linux/context_tracking.h>
 #include "../time/tick-internal.h"
-#ifdef CONFIG_MCST_RT
-#include <linux/mcst_rt.h>
-#endif
 
 #include "tree.h"
 #include "rcu.h"
@@ -1468,7 +1465,11 @@ static void rcu_poll_gp_seq_end(unsigned long *snap)
 // where caller does not hold the root rcu_node structure's lock.
 static void rcu_poll_gp_seq_start_unlocked(unsigned long *snap)
 {
+#ifdef CONFIG_MCST
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 	struct rcu_node *rnp = rcu_get_root();
 
 	if (rcu_init_invoked()) {
@@ -1484,7 +1485,11 @@ static void rcu_poll_gp_seq_start_unlocked(unsigned long *snap)
 // caller does not hold the root rcu_node structure's lock.
 static void rcu_poll_gp_seq_end_unlocked(unsigned long *snap)
 {
+#ifdef CONFIG_MCST
+	unsigned long flags = 0;
+#else
 	unsigned long flags;
+#endif
 	struct rcu_node *rnp = rcu_get_root();
 
 	if (rcu_init_invoked()) {
@@ -3930,9 +3935,6 @@ static int rcu_pending(int user)
 
 	lockdep_assert_irqs_disabled();
 
-#ifdef CONFIG_MCST_RT
-	if (!rts_mode)
-#endif
 	/* Check for CPU stalls, if enabled. */
 	check_cpu_stall(rdp);
 

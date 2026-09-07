@@ -19,7 +19,7 @@
 #include <linux/types.h>
 
 #include <asm/process.h>
-#include <asm/kvm/hypervisor.h>
+#include <asm/kvm/paravirt_sw/hypervisor.h>
 #include <asm/signal.h>
 #include <asm/kvm/guest/cpu.h>
 

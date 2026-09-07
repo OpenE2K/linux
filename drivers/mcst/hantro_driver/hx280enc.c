@@ -90,15 +90,15 @@ static int hantroenc_major;
 /**
  * @brief abort vce when needed
  */
-int abort_vce(volatile u8 *reg_base)
+int abort_vce(void __iomem *reg_base)
 {
 	u32 status;
 
-	status = (u32)ioread32((void __iomem *)(reg_base + 0x14));
+	status = (u32)ioread32(reg_base + 0x14);
 	if (status & 0x1) {
 		//Stop VCE by setting reg5 bit0 to 0.
 		status &= (~0x01);
-		iowrite32(status, (void __iomem *)(reg_base + 0x14));
+		iowrite32(status, reg_base + 0x14);
 		return 1;
 	}
 	return 0;

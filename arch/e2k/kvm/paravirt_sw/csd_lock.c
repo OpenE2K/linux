@@ -15,7 +15,7 @@
 #include <linux/spinlock.h>
 #include <linux/kvm_host.h>
 
-#include <asm/kvm/csd_lock.h>
+#include <asm/kvm/paravirt_sw/csd_lock.h>
 
 #include "../process.h"
 #include "../cpu.h"

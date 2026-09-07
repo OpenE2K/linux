@@ -17,7 +17,6 @@
 #include "mxgbe_txq.h"
 
 
-void mxgbe_net_tx_irq_handler(mxgbe_vector_t *vector);
 
 
 /**
@@ -35,6 +34,7 @@ int mxgbe_txq_alloc_all(mxgbe_priv_t *priv)
 	int qn;
 	size_t size;
 	struct pci_dev *pdev = priv->pdev; /* for DMA_*_RAM macro */
+	int node;
 
 	size = priv->tx_ring_count * sizeof(mxgbe_descr_t);
 	size = (size < PAGE_SIZE) ? PAGE_SIZE : size; /* Tx queue size */
@@ -53,11 +53,14 @@ int mxgbe_txq_alloc_all(mxgbe_priv_t *priv)
 		priv->txq[qn].vector = NULL;
 
 		/* Alloc RAM for TX ring */
-		priv->txq[qn].tx_buff = kzalloc_node(sizeof(mxgbe_tx_buff_t) *
+		node = dev_to_node(&priv->pdev->dev);
+		if (node == NUMA_NO_NODE)
+			node = 0;
+		priv->txq[qn].buff = kzalloc_node(sizeof(mxgbe_buff_t) *
 						priv->txq[qn].descr_cnt,
 						GFP_KERNEL,
-						dev_to_node(&pdev->dev));
-		if (!priv->txq[qn].tx_buff) {
+						node);
+		if (!priv->txq[qn].buff) {
 			dev_err(&pdev->dev,
 				"ERROR: Cannot allocate memory for TX ring,"
 				" aborting\n");
@@ -83,7 +86,7 @@ void mxgbe_txq_free_all(mxgbe_priv_t *priv)
 
 	for (qn = 0; qn < priv->num_tx_queues; qn++) {
 		/* Free RAM for TX ring */
-		kfree(priv->txq[qn].tx_buff);
+		kfree(priv->txq[qn].buff);
 
 		/* Free RAM for HW Queue */
 		DMA_FREE_RAM(priv->txq[qn].que_size,
@@ -242,7 +245,7 @@ void mxgbe_txq_start(mxgbe_priv_t *priv, int qn)
  */
 
 int mxgbe_txq_send(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
-		   mxgbe_tx_buff_t *tx_buff)
+		   mxgbe_buff_t *tx_buff)
 {
 	u16 head, tail, new_head;
 	mxgbe_descr_t *q_descr;
@@ -266,17 +269,17 @@ int mxgbe_txq_send(mxgbe_priv_t *priv, int qn, mxgbe_descr_t *descr,
 	priv->tx_err_flags[qn].quefull_f = 0;
 
 	q_descr = ((mxgbe_descr_t *)(priv->txq[qn].que_addr)) + head;
-	q_descr->vlan.r = cpu_to_le64(descr->vlan.r);
-	q_descr->time.r = cpu_to_le64(descr->time.r);
-	q_descr->addr.r = cpu_to_le64(descr->addr.r);
-	q_descr->ctrl.r = cpu_to_le64(descr->ctrl.r);
+	q_descr->vlan.r = cpu_to_le64(descr->vlan.ru);
+	q_descr->time.r = cpu_to_le64(descr->time.ru);
+	q_descr->addr.r = cpu_to_le64(descr->addr.ru);
+	q_descr->ctrl.r = cpu_to_le64(descr->ctrl.ru);
 
 	/* Force memory writes to complete before letting h/w
 	 * know there are new descriptors to fetch. */
 	wmb();
 
 	if (tx_buff)
-		priv->txq[qn].tx_buff[head] = *tx_buff;
+		priv->txq[qn].buff[head] = *tx_buff;
 
 	/* start Tx */
 	mxgbe_wreg32(base, TXQ_REG_ADDR(qn, Q_HEAD), Q_HEAD_SET_PTR(new_head));

@@ -4072,8 +4072,11 @@ static inline bool mnt_allow_writers(const struct mount_kattr *kattr,
 static int mount_setattr_prepare(struct mount_kattr *kattr, struct mount *mnt)
 {
 	struct mount *m;
+#ifdef CONFIG_MCST
+	int err = -EINVAL;
+#else
 	int err;
-
+#endif
 	for (m = mnt; m; m = next_mnt(m, mnt)) {
 		if (!can_change_locked_flags(m, recalc_flags(kattr, m))) {
 			err = -EPERM;

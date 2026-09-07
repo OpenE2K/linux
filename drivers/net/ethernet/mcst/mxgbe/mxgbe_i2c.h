@@ -25,7 +25,7 @@ void mxgbe_i2c_destroy(struct i2c_adapter *adapter);
 u8 mxgbe_i2c_rd(struct i2c_adapter *adapter, u8 slave_addr, u8 addr);
 void mxgbe_i2c_wr(struct i2c_adapter *adapter, u8 slave_addr, u8 addr, u8 val);
 
-u64 mxgbe_i2c_read_mac(mxgbe_priv_t *priv);
+__be64 mxgbe_i2c_read_mac(mxgbe_priv_t *priv);
 
 
 #endif /* MXGBE_I2C_H__ */

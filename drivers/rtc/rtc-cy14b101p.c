@@ -723,6 +723,7 @@ static void init_pps(struct spi_device *spi, struct rtc_device *rtc)
 		cy14b101p_rtc_unlock(dev);
 
 		if (!sclk_register_rtc()) {
+			clear_bit(RTC_FEATURE_ALARM, rtc->features);
 			cy14b101p_ops.set_alarm = NULL;
 			dev_warn(dev, "used for clocksource, alarm functionality is disabled\n");
 		}
@@ -752,6 +753,7 @@ static void init_pps(struct spi_device *spi, struct rtc_device *rtc)
 					error);
 			}
 		}
+		clear_bit(RTC_FEATURE_ALARM, rtc->features);
 		((struct rtc_class_ops *)
 			cy14b101p->rtc->ops)->set_alarm = NULL;
 		dev_warn(dev, "RTC is used for clocksource. Alarm functionality is disabled\n");

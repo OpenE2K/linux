@@ -10,15 +10,18 @@
 #include <linux/mm_types.h>
 #include <linux/kvm.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
-#include <asm/kvm/hypervisor.h>
 #include <asm/mmu_fault.h>
 #include <asm/kvm/pv-emul.h>
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/hypervisor.h>
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_VIRTUALIZATION
 
 extern void kvm_arch_mmu_notifier_invalidate_range_end(struct kvm *kvm,
 				const struct mmu_notifier_range *range);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool is_guest_user_gva(gva_t gva)
 {
 	return gva < GUEST_TASK_SIZE;
@@ -33,6 +36,7 @@ static inline bool is_ss(struct kvm_vcpu *vcpu)
 {
 	return false;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static inline bool is_sep_virt_spaces(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.mmu.sep_virt_space;
@@ -45,6 +49,7 @@ static inline void reset_sep_virt_spaces(struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.mmu.sep_virt_space = false;
 }
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool is_shadow_paging(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.mmu.shadow_pt_on;
@@ -61,6 +66,7 @@ static inline void reset_shadow_paging(struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.mmu.shadow_pt_on = false;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static inline bool is_phys_paging(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.mmu.phys_pt_on;
@@ -80,10 +86,12 @@ static inline bool is_tdp_paging(struct kvm_vcpu *vcpu)
 static inline void set_tdp_paging(struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.mmu.tdp_on = true;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	set_bit(KVM_FEAT_MMU_TDP_BIT,
 			&vcpu->kvm->arch.kmap_host_info->features);
 	clear_bit(KVM_FEAT_MMU_SPT_BIT,
 			&vcpu->kvm->arch.kmap_host_info->features);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 static inline void reset_tdp_paging(struct kvm_vcpu *vcpu)
 {
@@ -103,6 +111,7 @@ static inline void reset_paging_flag(struct kvm_vcpu *vcpu)
 	vcpu->arch.mmu.paging_on = false;
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline bool is_pv_paging(struct kvm_vcpu *vcpu)
 {
 	return is_paging_flag(vcpu);
@@ -111,6 +120,7 @@ static inline bool is_spt_paging(struct kvm_vcpu *vcpu)
 {
 	return is_paging_flag(vcpu);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static inline bool is_hv_paging(struct kvm_vcpu *vcpu)
 {
 	if (current_thread_info()->vcpu != vcpu)
@@ -128,13 +138,14 @@ static inline bool is_paging(struct kvm_vcpu *vcpu)
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(vcpu->arch.is_pv))
 		return is_pv_paging(vcpu);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	if (unlikely(is_shadow_paging(vcpu)))
 		return is_spt_paging(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	return is_paging_flag(vcpu);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 typedef enum sw_to_host_type {
 	undefined_sw_to_host,	/* undefined reason to switch */
 	syscall_sw_to_host,	/* syscall from guest: return to host */
@@ -161,7 +172,6 @@ static inline void reset_spt_gpa_fault(struct kvm_vcpu *vcpu)
 	vcpu->arch.mmu.spt_gpa_fault = false;
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline unsigned long get_mmu_u_pptb_reg(void)
 {
 	return NATIVE_READ_MMU_U_PPTB_REG();
@@ -184,40 +194,26 @@ kvm_set_gp_phys_root(struct kvm_vcpu *vcpu, hpa_t root)
 	vcpu->arch.mmu.set_vcpu_gp_pptb(vcpu, root);
 }
 
-static __always_inline hpa_t
-kvm_get_space_type_spt_root(struct kvm_vcpu *vcpu, bool u_root)
-{
-	return (u_root) ? vcpu->arch.mmu.get_vcpu_sh_u_pptb(vcpu) :
-				vcpu->arch.mmu.get_vcpu_sh_os_pptb(vcpu);
-}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline hpa_t
 kvm_get_space_type_spt_os_root(struct kvm_vcpu *vcpu)
 {
-	return kvm_get_space_type_spt_root(vcpu, false);
+	return vcpu->arch.mmu.get_vcpu_sh_os_pptb(vcpu);
 }
 static __always_inline hpa_t
 kvm_get_space_type_spt_u_root(struct kvm_vcpu *vcpu)
 {
-	return kvm_get_space_type_spt_root(vcpu, true);
-}
-static inline void
-kvm_set_space_type_spt_root(struct kvm_vcpu *vcpu, hpa_t root, bool u_root)
-{
-	if (u_root) {
-		vcpu->arch.mmu.set_vcpu_sh_u_pptb(vcpu, root);
-	} else {
-		vcpu->arch.mmu.set_vcpu_sh_os_pptb(vcpu, root);
-	}
+	return vcpu->arch.mmu.get_vcpu_sh_u_pptb(vcpu);
 }
 static inline void
 kvm_set_space_type_spt_os_root(struct kvm_vcpu *vcpu, hpa_t root)
 {
-	kvm_set_space_type_spt_root(vcpu, root, false);
+	vcpu->arch.mmu.set_vcpu_sh_os_pptb(vcpu, root);
 }
 static inline void
 kvm_set_space_type_spt_u_root(struct kvm_vcpu *vcpu, hpa_t root)
 {
-	kvm_set_space_type_spt_root(vcpu, root, true);
+	vcpu->arch.mmu.set_vcpu_sh_u_pptb(vcpu, root);
 }
 static inline hpa_t
 kvm_get_space_type_spt_gk_root(struct kvm_vcpu *vcpu)
@@ -252,9 +248,8 @@ kvm_get_space_addr_spt_root(struct kvm_vcpu *vcpu, gva_t gva)
 static inline hpa_t
 kvm_get_space_addr_root(struct kvm_vcpu *vcpu, gva_t gva)
 {
-	if (likely(is_tdp_paging(vcpu) ||
-			((!is_paging(vcpu) || is_spt_gpa_fault(vcpu)) &&
-						is_phys_paging(vcpu)))) {
+	if (likely(is_tdp_paging(vcpu) || ((!is_paging(vcpu) ||
+			is_spt_gpa_fault(vcpu)) && is_phys_paging(vcpu)))) {
 		return kvm_get_gp_phys_root(vcpu);
 	} else if (is_shadow_paging(vcpu)) {
 		return kvm_get_space_addr_spt_root(vcpu, gva);
@@ -358,7 +353,6 @@ static inline void do_gmm_get(gmm_struct_t *gmm)
 	atomic_inc(&gmm->mm_count);
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline void kvm_gmm_get(struct kvm_vcpu *vcpu, gthread_info_t *gti,
 				gmm_struct_t *gmm)
 {
@@ -387,13 +381,26 @@ static inline void kvm_init_gmm_get(struct kvm_vcpu *vcpu, gthread_info_t *gti)
 	do_gmm_get(init_gmm);
 	gti->gmm = NULL;
 }
+#else
+static inline hpa_t
+kvm_get_space_addr_root(struct kvm_vcpu *vcpu, gva_t gva)
+{
+	if (likely(is_tdp_paging(vcpu) || !is_paging(vcpu) && is_phys_paging(vcpu))) {
+		return kvm_get_gp_phys_root(vcpu);
+	} else {
+		E2K_KVM_BUG_ON(true);
+		return (hpa_t)-EINVAL;
+	}
+}
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define	INVALID_GPA		((gpa_t)E2K_INVALID_PAGE)
 #define	IS_INVALID_GPA(gpa)	((gpa) == INVALID_GPA)
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #define	INVALID_GVA		((gva_t)E2K_INVALID_PAGE)
 #define	IS_INVALID_GVA(gpa)	((gpa) == INVALID_GVA)
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline struct kvm_mmu_page *page_header(hpa_t shadow_page)
 {
@@ -407,10 +414,12 @@ static inline bool spte_same(pgprot_t pgd_a, pgprot_t pgd_b)
 	return pgprot_val(pgd_a) == pgprot_val(pgd_b);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern void kvm_get_spt_translation(struct kvm_vcpu *vcpu, e2k_addr_t address,
 				    pgdval_t *pgd, pudval_t *pud, pmdval_t *pmd,
 				    pteval_t *pte, int *pt_level);
 extern unsigned long kvm_get_gva_to_hva(struct kvm_vcpu *vcpu, gva_t gva);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline gpa_t kvm_hva_to_gpa(struct kvm *kvm, unsigned long hva)
 {
@@ -447,24 +456,8 @@ kvm_vcpu_hva_to_gpa(struct kvm_vcpu *vcpu, unsigned long hva)
 	return kvm_hva_to_gpa(vcpu->kvm, hva);
 }
 
-static inline void kvm_setup_host_mmu_info(struct kvm_vcpu *vcpu)
-{
-	if (is_tdp_paging(vcpu)) {
-		set_bit(KVM_FEAT_MMU_TDP_BIT,
-			&vcpu->kvm->arch.kmap_host_info->features);
-		clear_bit(KVM_FEAT_MMU_SPT_BIT,
-			&vcpu->kvm->arch.kmap_host_info->features);
-	} else if (is_shadow_paging(vcpu)) {
-		set_bit(KVM_FEAT_MMU_SPT_BIT,
-			&vcpu->kvm->arch.kmap_host_info->features);
-		clear_bit(KVM_FEAT_MMU_TDP_BIT,
-			&vcpu->kvm->arch.kmap_host_info->features);
-	} else {
-		E2K_KVM_BUG_ON(true);
-	}
-}
-
 #ifdef	CONFIG_KVM_SHADOW_PT_ENABLE
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern int kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 				trap_cellar_t *tcellar, bool user_mode);
 extern int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
@@ -473,19 +466,14 @@ extern int kvm_pv_mmu_instr_page_fault(struct kvm_vcpu *vcpu,
 extern int kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu,
 				struct pt_regs *regs, e2k_addr_t address,
 				tc_cond_t cond, unsigned int aa_no);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 extern int kvm_mmu_instr_page_fault(struct kvm_vcpu *vcpu, gva_t address,
 				bool async_instr, u32 error_code);
 #else	/* ! CONFIG_KVM_SHADOW_PT_ENABLE */
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline int
 kvm_pv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
 			trap_cellar_t *tcellar, bool user_mode)
-{
-	/* page fault should be handled by host */
-	return -1;
-}
-static inline long
-kvm_hv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
-			intc_info_mu_t *intc_info_mu)
 {
 	/* page fault should be handled by host */
 	return -1;
@@ -506,6 +494,14 @@ kvm_pv_mmu_aau_page_fault(struct kvm_vcpu *vcpu,
 	/* page fault should be handled by host */
 	return -1;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+static inline long
+kvm_hv_mmu_page_fault(struct kvm_vcpu *vcpu, struct pt_regs *regs,
+			intc_info_mu_t *intc_info_mu)
+{
+	/* page fault should be handled by host */
+	return -1;
+}
 
 static inline int
 kvm_mmu_instr_page_fault(struct kvm_vcpu *vcpu, gva_t address,
@@ -516,11 +512,13 @@ kvm_mmu_instr_page_fault(struct kvm_vcpu *vcpu, gva_t address,
 }
 #endif	/* CONFIG_KVM_SHADOW_PT_ENABLE */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern int kvm_guest_addr_to_host(void **addr);
 extern void __user *kvm_guest_ptr_to_host_ptr(const void *guest_ptr, bool is_write,
 					int size, bool need_inject);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-#ifdef	CONFIG_KVM_HOST_MODE
+#ifdef	CONFIG_KVM_HOST_KERNEL
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /* it is native host kernel with virtualization support */
 static inline void __user *
@@ -533,20 +531,8 @@ guest_ptr_to_host(void *ptr, bool is_write, int size, const pt_regs_t *regs)
 
 	return kvm_guest_ptr_to_host_ptr(ptr, is_write, size, false);
 }
-#else
-static inline void __user *guest_ptr_to_host(void *ptr, bool is_write,
-				int size, const pt_regs_t *regs)
-{
-	return native_guest_ptr_to_host(ptr, size);
-}
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
-#endif	/* CONFIG_KVM_HOST_MODE */
-
-#else	/* !CONFIG_VIRTUALIZATION */
-
-typedef enum sw_to_host_type {
-	undefined_sw_to_host,	/* undefined reason to switch */
-} sw_to_host_type_t;
+#endif	/* CONFIG_KVM_HOST_KERNEL */
 
 #endif	/* CONFIG_VIRTUALIZATION */
 

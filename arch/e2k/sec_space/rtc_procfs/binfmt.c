@@ -175,6 +175,7 @@ static int exec_rtc(bin_comp_info_t *bi, struct linux_binprm *bprm)
 	size_t bi_info_size;
 	int ret;
 
+	memset(&map_info, 0, sizeof(map_info));
 	x86_compat = is_elf_compat(bprm->buf);
 
 	read_lock(&bi->lock);

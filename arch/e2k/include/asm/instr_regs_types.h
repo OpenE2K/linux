@@ -7,8 +7,6 @@
 #ifndef __INSTR_REGS_TYPES_H__
 #define __INSTR_REGS_TYPES_H__
 
-#ifndef __ASSEMBLY__
-
 #include <linux/types.h>
 #include <asm/base_regs_types.h>
 
@@ -143,6 +141,51 @@ typedef union instr_ss {
 } instr_ss_t;
 
 /*
+ * src1/src2/src3
+ */
+typedef union {
+	struct {
+		u8		: 5;
+		u8 rt5		: 1;
+		u8 rt6		: 1;
+		u8 rt7		: 1;
+	};
+	u8 word;
+} instr_src_t;
+
+static inline bool instr_src2_is_lts16(instr_src_t src2)
+{
+	return (src2.word & 0xf8) == 0xd0;
+}
+
+static inline bool instr_src2_is_lts32(instr_src_t src2)
+{
+	return (src2.word & 0xfc) == 0xd8;
+}
+
+static inline bool instr_src2_is_lts64(instr_src_t src2)
+{
+	return (src2.word & 0xfc) == 0xdc;
+}
+
+static inline bool instr_src2_is_greg(instr_src_t src2)
+{
+	return (src2.word & 0xe0) == 0xe0;
+}
+
+static inline bool instr_src2_is_rf_reg(instr_src_t src2)
+{
+	return !src2.rt7 || src2.rt7 && !src2.rt6;
+}
+
+#define INSTR_SRC_DST_GREG_NUM_MASK	0x1f
+#define INSTR_SRC_DST_NREG_VALUE	0x80
+#define INSTR_SRC_DST_NREG_MASK		0xc0
+#define INSTR_SRC_DST_NREG_NUM_MASK	0x3f
+#define INSTR_SRC2_LTS_NUM_MASK		0x03
+#define INSTR_SRC2_LTS_SHIFT_MASK	0x04
+
+/*
  * ALU syllables structure
  */
 
@@ -150,11 +193,11 @@ typedef union {
 	union {
 		union {
 			struct {
-				u32 dst		: 8;	/* [ 7: 0] destination */
-				u32 src2	: 8;	/* [15: 8] source register #2 */
-				u32 opce	: 8;	/* [23:16] opcode extension */
-				u32 cop		: 7;	/* [30:24] code of operation */
-				u32 spec	: 1;	/*    [31] speculative mode */
+				u8 dst;			/* [ 7: 0] destination */
+				instr_src_t src2;	/* [15: 8] source register #2 */
+				u8 opce;		/* [23:16] opcode extension */
+				u8 cop	: 7;		/* [30:24] code of operation */
+				u8 spec	: 1;		/*    [31] speculative mode */
 			};
 			struct {
 				u32		: 24;
@@ -163,11 +206,11 @@ typedef union {
 		} alf2;
 		union {
 			struct {
-				u32 src3	: 8;	/* [ 7: 0] source #3 */
-				u32 src2	: 8;	/* [15: 8] source #2 */
-				u32 src1	: 8;	/* [23:16] source #1 */
-				u32 cop		: 7;	/* [30:24] code of operation */
-				u32 spec	: 1;	/*    [31] speculative mode */
+				instr_src_t src3;	/* [ 7: 0] source #3 */
+				instr_src_t src2;	/* [15: 8] source #2 */
+				instr_src_t src1;	/* [23:16] source #1 */
+				u8 cop	: 7;		/* [30:24] code of operation */
+				u8 spec	: 1;		/*    [31] speculative mode */
 			};
 			struct {
 				u32		: 24;
@@ -180,8 +223,8 @@ typedef union {
 
 typedef union instr_ales {
 	struct {
-		u16 src3	: 8;
-		u16 opc2	: 8;
+		instr_src_t src3;
+		u8 opc2;
 	} alef1;
 	struct {
 		u16 opce	: 8;
@@ -190,41 +233,12 @@ typedef union instr_ales {
 	u16 word;		/* as entire syllable   */
 } instr_ales_t;
 
-typedef union {
-	struct {
-		u8		: 5;
-		u8 rt5		: 1;
-		u8 rt6		: 1;
-		u8 rt7		: 1;
-	};
-	u8 word;
-} instr_src_t;
-
-#define INSTR_SRC_DST_GREG_VALUE	0xe0
-#define INSTR_SRC_DST_GREG_MASK		0xe0
-#define INSTR_SRC_DST_GREG_NUM_MASK	0x1f
-#define INSTR_SRC_DST_NREG_VALUE	0x80
-#define INSTR_SRC_DST_NREG_MASK		0xc0
-#define INSTR_SRC_DST_NREG_NUM_MASK	0x3f
-#define INSTR_SRC2_16BIT_VALUE		0xd0
-#define INSTR_SRC2_32BIT_VALUE		0xd8
-#define INSTR_SRC2_64BIT_VALUE		0xdc
-#define INSTR_SRC2_BIT_MASK		0xf8
-#define INSTR_SRC2_LTS_NUM_MASK		0x03
-#define INSTR_SRC2_LTS_SHIFT_MASK	0x04
-#define INSTR_LTS_32BIT_SHIFT		0
-#define INSTR_LTS_16BIT_SHIFT		16
-#define INSTR_LTS_16BIT_NOSHIFT		0
-#define INSTR_LTS_32BIT_MASK		0xffffffff
-#define INSTR_LTS_16BIT_SHIFT_MASK	0xffff0000
-#define INSTR_LTS_16BIT_NOSHIFT_MASK	0x0000ffff
-
 /*
  * ALU syllable code of operations and opcode extentions
  */
 #define	DRTOAP_ALS_COP		0x62	/* DRTOAP */
 #define	GETSP_ALS_COP		0x58	/* GETSP */
-#define	GETSOD_ALS_COP		0x5a	/* GETSOP */
+#define	GETSPD_ALS_COP		0x59	/* GETSPd */
 #define	EXT_ALES_OPC2		0x01	/* EXTension  */
 #define	USD_ALS_OPCE		0xec	/* USD  */
 
@@ -305,6 +319,9 @@ typedef union {
 	};
 	e2k_reg_t;
 } instr_cs1_t;
+
+/* Use this to ensure created syllable is a compile-time constant */
+#define instr_cs1_c1f1(param, opc) ((param) | ((opc) << 28))
 
 #define CS1_OPC_SETR0	0
 #define CS1_OPC_SETR1	1
@@ -415,8 +432,5 @@ typedef union {
 
 #define CDS_PRED_PCNT_MASK	0x40
 #define CDS_PRED_PSRC_MASK	0x60
-
-
-#endif /* #ifndef __ASSEMBLY__ */
 
 #endif

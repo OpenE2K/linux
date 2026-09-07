@@ -399,6 +399,8 @@ long edidGetAnalogSignalInfo(
                 whiteReference = 700;
                 syncLevel = 0;
                 break;
+	    default:
+		return -1;
         }
         
         if (pRefWhiteAboveBlank != (unsigned short *)0)
@@ -1280,7 +1282,7 @@ long ddk750_edidReadMonitorEx_HW(
 }
 
 
-
+#if 0
 /*
  *  edidReadMonitor
  *      This function reads the EDID structure from the attached monitor
@@ -1304,6 +1306,7 @@ long ddk750_edidReadMonitor(
 {
     return ddk750_edidReadMonitorEx(displayPath, pEDIDBuffer, bufferSize, edidExtNo, DEFAULT_I2C_SCL, DEFAULT_I2C_SDA);
 }
+#endif
 
 #define HEADER_EDID_REGISTERS               8
 
@@ -1569,7 +1572,7 @@ static long edidCalculateStdTiming(
     unsigned long *pRefreshRate
 )
 {
-    unsigned long x, y;
+    unsigned long x, y = 0;
      
     /* Calculate the standard timing into x and y mode dimension */
     if (pStdTiming->horzActive != 0x01)

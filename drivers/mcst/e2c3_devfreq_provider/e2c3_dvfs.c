@@ -22,7 +22,7 @@ static inline int e2c3_set_freq(const struct e2c3_devfreq_provider *provider,
 								const unsigned long freq)
 
 {
-	char *reg = provider->reg + PMC_FREQ_CORE_CTRL_REGISTER;
+	volatile char __iomem *reg = provider->reg + PMC_FREQ_CORE_CTRL_REGISTER;
 	const unsigned int divF = e2c3_get_divF(provider, freq);
 	const unsigned int val = (ENABLE << ENABLE_CHANGING_BFS_REGISTER_SHIFT) |
 					(SOFT_CHANGE_FREQ_MODE << MODE_REGISTER_SHIFT)  |
@@ -90,7 +90,7 @@ static inline unsigned long e2c3_round_freq(const struct e2c3_devfreq_provider *
 
 static inline unsigned long e2c3_get_current_freq(const struct e2c3_devfreq_provider *provider)
 {
-	const char *reg = provider->reg + PMC_FREQ_CORE_CTRL_REGISTER;
+	const volatile char __iomem *reg = provider->reg + PMC_FREQ_CORE_CTRL_REGISTER;
 
 	const unsigned int val = readl(reg);
 	const unsigned int mode = (val & MODE_MASK) >> MODE_REGISTER_SHIFT;

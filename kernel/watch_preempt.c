@@ -14,7 +14,7 @@
 #include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/sched/clock.h>
 
 #if defined(CONFIG_E90S) || defined(CONFIG_E2K)

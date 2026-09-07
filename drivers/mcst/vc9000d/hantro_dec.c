@@ -118,7 +118,9 @@
 #ifdef SUPPORT_AFBC
 #include "hantroafbc.h"
 #endif
+#ifdef DTB_SUPPORT
 #include "subsys_cfg.h"
+#endif
 #ifdef AXI2TO1_SUPPORT
 #include "hantroaxi2to1.h"
 #endif
@@ -257,7 +259,7 @@ u32 arbiter_urgent;
 u32 arbiter_timewindow = 0x1d;
 u32 arbiter_bw_overflow;
 unsigned long sw_timeout_time = SW_TIMEOUT_TIME_FOR_ARBITER;
-u32 use_vcmd = 1;
+static u32 use_vcmd = 1;
 unsigned long ddr_offset;
 
 /* module_param(name, type, perm) */
@@ -281,8 +283,6 @@ struct clk *clk_cfg;
 int is_clk_on;
 struct timer_list timer;
 #endif
-
-extern struct vcmd_config vcmd_core_array[MAX_SUBSYS_NUM];
 
 #ifdef SUPPORT_DBGFS
 /*debugfs for performance statistics*/
@@ -334,9 +334,9 @@ typedef struct {
 
 	volatile unsigned int iosize[HXDEC_MAX_CORES];
 	/* mapped address to different HW cores regs*/
-	volatile u8 *hwregs[HXDEC_MAX_CORES][HW_CORE_MAX];
+	void __iomem *hwregs[HXDEC_MAX_CORES][HW_CORE_MAX];
 	/* mapped address to different HW cores regs*/
-	volatile u8 *apbfilter_hwregs[HXDEC_MAX_CORES][HW_CORE_MAX];
+	void __iomem *apbfilter_hwregs[HXDEC_MAX_CORES][HW_CORE_MAX];
 	volatile int irq[HXDEC_MAX_CORES];
 	int hw_id[HXDEC_MAX_CORES][HW_CORE_MAX];
 	/* Requested client type for given core,
@@ -434,18 +434,20 @@ static int hantrodec_mmap(struct file *filp, struct vm_area_struct *vma);
 
 static int CoreHasFormat(const u32 *cfg, int core, u32 format);
 
+int abort_vcd(void __iomem *reg_base);
+
 /**
  * @brief stop vcd normall
  */
-int abort_vcd(volatile u8 *reg_base)
+int abort_vcd(void __iomem *reg_base)
 {
 	u32 status;
 
-	status = (u32)ioread32((void __iomem *)(reg_base + HANTRODEC_IRQ_STAT_DEC_OFF));
+	status = ioread32(reg_base + HANTRODEC_IRQ_STAT_DEC_OFF);
 	if (status & 0x1) {
 		//abort vcd
 		status |= HANTRODEC_DEC_ABORT;
-		iowrite32(status, (void __iomem *)(reg_base + HANTRODEC_IRQ_STAT_DEC_OFF));
+		iowrite32(status, reg_base + HANTRODEC_IRQ_STAT_DEC_OFF);
 
 		return 1;
 	}
@@ -475,10 +477,10 @@ int watchdog_stop_vcd(volatile u8 *reg_base)
 
 	if (abort_vcd(reg_base)) {
 		mdelay(10); //delay 10ms
-		status = (u32)ioread32((void __iomem *)(reg_base + HANTRODEC_IRQ_STAT_DEC_OFF));
+		status = (u32)ioread32(reg_base + HANTRODEC_IRQ_STAT_DEC_OFF);
 		//Stop VCD by setting reg1 bit0 to 0.
 		if ((status & 0x1) == 0)
-			iowrite32(0, (void __iomem *)(reg_base + HANTRODEC_IRQ_STAT_DEC_OFF));
+			iowrite32(0, reg_base + HANTRODEC_IRQ_STAT_DEC_OFF);
 	}
 
 	return 0;
@@ -678,7 +680,7 @@ static long DecRestoreRegs(hantrodec_t *dev, u32 id)
 	/* write all regs to hardware */
 	for (i = 1; i < HANTRO_VCD_REGS; i++)
 		iowrite32(subsys_mgr.shadow_dec_regs[id][i],
-			(void __iomem *)(dev->hwregs[id][HW_VCD] + i*4));
+				dev->hwregs[id][HW_VCD] + i*4);
 
 	return 0;
 }
@@ -690,7 +692,7 @@ static long DecStoreRegs(hantrodec_t *dev, u32 id)
 	/* read all registers from hardware */
 	for (i = 0; i < HANTRO_VCD_REGS; i++)
 		subsys_mgr.shadow_dec_regs[id][i] =
-			ioread32((void __iomem *)(dev->hwregs[id][HW_VCD] + i*4));
+			ioread32(dev->hwregs[id][HW_VCD] + i*4);
 
 	return 0;
 }
@@ -825,7 +827,7 @@ static ssize_t subsys_state(struct file *file, char __user *user_buf, size_t cou
 	return ret;
 }
 
-const struct file_operations fileop_subsys_state = {
+static const struct file_operations fileop_subsys_state = {
 	.read = subsys_state,
 };
 
@@ -850,24 +852,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "[VCD]\n");
 				strcat(v0, v1);
 				for (j = 0; j < MAX_REG_COUNT;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCD] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCD] + j * 4);
 					sprintf(v1, "%d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < MAX_REG_COUNT) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCD] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCD] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 						j++;
 					}
 					if (j < MAX_REG_COUNT) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCD] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCD] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 						j++;
 					}
 					if (j < MAX_REG_COUNT) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCD] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCD] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 						j++;
@@ -879,24 +881,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "[VCDJ]\n");
 				strcat(v0, v1);
 				for (j = 0; j < NUM_REGS;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4);
 					sprintf(v1, "%3d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_VCDJ] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 					}
@@ -908,24 +910,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "\n[BIGOCEAN]\n");
 				strcat(v0, v1);
 				for (j = 0; j < NUM_REGS;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4);
 					sprintf(v1, "%3d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_BIGOCEAN] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 					}
@@ -937,24 +939,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "\n[MMU]\n");
 				strcat(v0, v1);
 				for (j = 0; j < NUM_REGS;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_MMU] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_MMU] + j * 4);
 					sprintf(v1, "%d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_MMU] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_MMU] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 						j++;
 					}
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_MMU] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_MMU] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 						j++;
 					}
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][HW_MMU] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][HW_MMU] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 						j++;
@@ -966,24 +968,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "\n[MMU_WR]\n");
 				strcat(v0, v1);
 				for (j = 0; j < NUM_REGS;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 					sprintf(v1, "%3d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 					}
@@ -995,24 +997,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "\n[DEC400]\n");
 				strcat(v0, v1);
 				for (j = 0; j < NUM_REGS;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 					sprintf(v1, "%3d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 						j++;
 					}
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 						j++;
 					}
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 						j++;
@@ -1024,24 +1026,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "\n[AXIFE]\n");
 				strcat(v0, v1);
 				for (j = 0; j < NUM_REGS;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 					sprintf(v1, "%3d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 					}
@@ -1053,24 +1055,24 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 				sprintf(v1, "\n[AFBC]\n");
 				strcat(v0, v1);
 				for (j = 0; j < NUM_REGS;) {
-					swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+					swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 					sprintf(v1, "%3d: %08x ", j, swreg_mes);
 					strcat(v0, v1);
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x ", swreg_mes);
 						strcat(v0, v1);
 					}
 					j++;
 					if (j < NUM_REGS) {
-						swreg_mes = ioread32((void __iomem *)(hantrodec_data.hwregs[i][k] + j * 4));
+						swreg_mes = ioread32(hantrodec_data.hwregs[i][k] + j * 4);
 						sprintf(v1, "%08x\n", swreg_mes);
 						strcat(v0, v1);
 					}
@@ -1084,7 +1086,7 @@ static ssize_t Hw_Register_Print(struct file *file, char __user *user_buf, size_
 	return ret;
 }
 
-const struct file_operations fileop_hw_reg_print = {
+static const struct file_operations fileop_hw_reg_print = {
 	.read = Hw_Register_Print,
 };
 
@@ -1099,9 +1101,9 @@ static ssize_t hw_cycles(struct file *file, char __user *user_buf, size_t count,
 	v0 = kzalloc(subsys_mgr.hantrodec_data.cores * 40, GFP_KERNEL);
 	for (i = 0; i < subsys_mgr.hantrodec_data.cores; i++) {
 		if (subsys_mgr.hantrodec_data.hwregs[i][HW_VCD])
-			swreg_mes = ioread32((void __iomem *)(subsys_mgr.hantrodec_data.hwregs[i][HW_VCD] + 63 * 4));
+			swreg_mes = ioread32(subsys_mgr.hantrodec_data.hwregs[i][HW_VCD] + 63 * 4);
 		if (subsys_mgr.hantrodec_data.hwregs[i][HW_VCDJ])
-			swreg_mes = ioread32((void __iomem *)(subsys_mgr.hantrodec_data.hwregs[i][HW_VCDJ] + 63 * 4));
+			swreg_mes = ioread32(subsys_mgr.hantrodec_data.hwregs[i][HW_VCDJ] + 63 * 4);
 		sprintf(v1, "hw cycles(core[%d] swreg 63) = %u\n", i, swreg_mes);
 		strcat(v0, v1);
 	}
@@ -1110,7 +1112,7 @@ static ssize_t hw_cycles(struct file *file, char __user *user_buf, size_t count,
 	return ret;
 }
 
-const struct file_operations fileop_cycles = {
+static const struct file_operations fileop_cycles = {
 	.read = hw_cycles,
 };
 
@@ -1203,7 +1205,7 @@ static ssize_t perf_statistic_read(struct file *file, char __user *user_buf, siz
 	return ret;
 }
 
-const struct file_operations fileop_perfor_statistic = {
+static const struct file_operations fileop_perfor_statistic = {
 	.write = perf_statistic_write,
 	.read = perf_statistic_read,
 };
@@ -1331,8 +1333,7 @@ static void ReadCoreConfig(hantrodec_t *dev)
 			/* Decoder configuration */
 			if (IS_VCD(dev->hw_id[c][j])) {
 				if (!use_vcmd)
-					reg = ioread32((void __iomem *)(dev->hwregs[c][j] +
-						HANTRODEC_SYNTH_CFG * 4));
+					reg = ioread32(dev->hwregs[c][j] + HANTRODEC_SYNTH_CFG * 4);
 				else
 					reg = *(regs_va + HANTRODEC_SYNTH_CFG);
 
@@ -1417,8 +1418,7 @@ static void ReadCoreConfig(hantrodec_t *dev)
 					tmp ? 1 << DWL_CLIENT_TYPE_VP6_DEC : 0;
 
 				if (!use_vcmd)
-					reg = ioread32((void __iomem *)(dev->hwregs[c][j] +
-						HANTRODEC_SYNTH_CFG_2 * 4));
+					reg = ioread32(dev->hwregs[c][j] + HANTRODEC_SYNTH_CFG_2 * 4);
 				else
 					reg = *(regs_va + HANTRODEC_SYNTH_CFG_2);
 
@@ -1426,8 +1426,7 @@ static void ReadCoreConfig(hantrodec_t *dev)
 					c, HANTRODEC_SYNTH_CFG_2, reg);
 
 				if (!use_vcmd)
-					hw_build_id = ioread32((void __iomem *)(dev->hwregs[c][j] +
-							HANTRODEC_HWBUILD_ID_OFF));
+					hw_build_id = ioread32(dev->hwregs[c][j] + HANTRODEC_HWBUILD_ID_OFF);
 				else
 					hw_build_id = *(regs_va + HANTRODEC_HWBUILD_ID_OFF);
 				if (hw_build_id != 0x1F70) {
@@ -1465,8 +1464,7 @@ static void ReadCoreConfig(hantrodec_t *dev)
 					tmp ? 1 << DWL_CLIENT_TYPE_RV_DEC : 0;
 
 				if (!use_vcmd)
-					reg = ioread32((void __iomem *)(dev->hwregs[c][j] +
-							HANTRODEC_SYNTH_CFG_3 * 4));
+					reg = ioread32(dev->hwregs[c][j] + HANTRODEC_SYNTH_CFG_3 * 4);
 				else
 					reg = *(regs_va + HANTRODEC_SYNTH_CFG_3);
 				pr_info(DRIVER_NAME ": subsys[%d] swreg[%d] = 0x%08x\n",
@@ -1488,8 +1486,7 @@ static void ReadCoreConfig(hantrodec_t *dev)
 
 				/* Post-processor configuration */
 				if (!use_vcmd)
-					reg = ioread32((void __iomem *)(dev->hwregs[c][j] +
-							HANTRODECPP_CFG_STAT * 4));
+					reg = ioread32(dev->hwregs[c][j] + HANTRODECPP_CFG_STAT * 4);
 				else
 					reg = *(regs_va + HANTRODECPP_CFG_STAT);
 
@@ -1636,9 +1633,8 @@ static void ReleaseDecoder(hantrodec_t *dev, long core)
 		core_type = HW_VCDJ;
 	PDEBUG("%s %ld\n", __func__, core);
 
-	status = ioread32((void __iomem *)
-			(dev->hwregs[core][core_type] +
-			HANTRODEC_IRQ_STAT_DEC_OFF));
+	status = ioread32(dev->hwregs[core][core_type] +
+					HANTRODEC_IRQ_STAT_DEC_OFF);
 
 	/* make sure HW is disabled */
 	if (status & HANTRODEC_DEC_E) {
@@ -1647,9 +1643,8 @@ static void ReleaseDecoder(hantrodec_t *dev, long core)
 
 		/* abort decoder */
 		status |= HANTRODEC_DEC_ABORT | HANTRODEC_DEC_IRQ_DISABLE;
-		iowrite32(status, (void __iomem *)
-		  (dev->hwregs[core][core_type] +
-		  HANTRODEC_IRQ_STAT_DEC_OFF));
+		iowrite32(status, dev->hwregs[core][core_type] +
+				HANTRODEC_IRQ_STAT_DEC_OFF);
 	}
 #ifdef SUPPORT_WATCHDOG
 	/* if interrupt uses polling mode */
@@ -1736,8 +1731,7 @@ static long DecFlushRegs(hantrodec_t *dev, struct core_desc *core)
 				 i++) {
 				/* check whether register value is updated. */
 				if (subsys_mgr.dec_regs[id][i] != subsys_mgr.shadow_dec_regs[id][i]) {
-					iowrite32(subsys_mgr.dec_regs[id][i], (void __iomem *)
-					  (dev->hwregs[id][type] + i * 4));
+					iowrite32(subsys_mgr.dec_regs[id][i], dev->hwregs[id][type] + i * 4);
 					subsys_mgr.shadow_dec_regs[id][i] = subsys_mgr.dec_regs[id][i];
 
 #ifdef HANTRODEC_DEBUG
@@ -1749,8 +1743,7 @@ static long DecFlushRegs(hantrodec_t *dev, struct core_desc *core)
 			for (i = 3;
 				 i < subsys_mgr.vpu_subsys[id].submodule_iosize[type] / 4;
 				 i++) {
-				iowrite32(subsys_mgr.dec_regs[id][i], (void __iomem *)
-						  (dev->hwregs[id][type] + i * 4));
+				iowrite32(subsys_mgr.dec_regs[id][i], dev->hwregs[id][type] + i * 4);
 
 #ifdef VALIDATE_REGS_WRITE
 	if (subsys_mgr.dec_regs[id][i] !=
@@ -1771,8 +1764,7 @@ static long DecFlushRegs(hantrodec_t *dev, struct core_desc *core)
 		}
 
 		/* write swreg2 for AV1, in which bit0 is the start bit */
-		iowrite32(subsys_mgr.dec_regs[id][2],
-			  (void __iomem *)(dev->hwregs[id][type] + 8));
+		iowrite32(subsys_mgr.dec_regs[id][2], dev->hwregs[id][type] + 8);
 		subsys_mgr.shadow_dec_regs[id][2] = subsys_mgr.dec_regs[id][2];
 #ifdef DEBUG_PRINT_REGS
        pr_info(DRIVER_NAME ": swreg[%ld]: write %08x\n", 2L, subsys_mgr.dec_regs[id][2]);
@@ -1784,8 +1776,7 @@ static long DecFlushRegs(hantrodec_t *dev, struct core_desc *core)
 #endif
 
 		/* write the status register, which may start the decoder */
-		iowrite32(subsys_mgr.dec_regs[id][1],
-			  (void __iomem *)(dev->hwregs[id][type] + 4));
+		iowrite32(subsys_mgr.dec_regs[id][1], dev->hwregs[id][type] + 4);
 #ifdef DEBUG_PRINT_REGS
        pr_info(DRIVER_NAME ": swreg[%ld]: write %08x\n", 1L, subsys_mgr.dec_regs[id][1]);
 #endif
@@ -1836,9 +1827,7 @@ static long DecFlushRegs(hantrodec_t *dev, struct core_desc *core)
 		/* write all regs but the status reg[1] to hardware */
 		for (i = 0; i < subsys_mgr.vpu_subsys[id].submodule_iosize[type] / 4;
 			 i++) {
-			iowrite32(subsys_mgr.dec_regs[id][i],
-				  (void __iomem *)(dev->hwregs[id][type] +
-				  i * 4));
+			iowrite32(subsys_mgr.dec_regs[id][i], dev->hwregs[id][type] + i * 4);
 #ifdef VALIDATE_REGS_WRITE
 			if (subsys_mgr.dec_regs[id][i] !=
 				ioread32((void *)(dev->hwregs[id][type] + i * 4)))
@@ -1892,8 +1881,7 @@ static long DecWriteRegs(hantrodec_t *dev, struct core_desc *core)
 	for (i = core->reg_id; i < core->reg_id + core->size / 4; i++) {
 		PDEBUG(DRIVER_NAME ": write %08x to reg[%d] core %d\n",
 		       subsys_mgr.dec_regs[id][i - core->reg_id], i, id);
-		iowrite32(subsys_mgr.dec_regs[id][i - core->reg_id],
-			  (void __iomem *)(dev->hwregs[id][type] + i * 4));
+		iowrite32(subsys_mgr.dec_regs[id][i - core->reg_id], dev->hwregs[id][type] + i * 4);
 		if (type == HW_VCD)
 			subsys_mgr.shadow_dec_regs[id][i] = subsys_mgr.dec_regs[id][i - core->reg_id];
 	}
@@ -1930,9 +1918,7 @@ static long DecWriteApbFilterRegs(hantrodec_t *dev, struct core_desc *core)
 		PDEBUG(DRIVER_NAME ": write %08x to reg[%d] core %d\n",
 		       subsys_mgr.dec_regs[id][i - core->reg_id], i, id);
 		iowrite32(subsys_mgr.apbfilter_regs[id][i - core->reg_id],
-			  (void __iomem *)
-				  (dev->apbfilter_hwregs[id][core->type] +
-				  i * 4));
+				  dev->apbfilter_hwregs[id][core->type] + i * 4);
 	}
 	return 0;
 }
@@ -1968,8 +1954,7 @@ static long DecReadRegs(hantrodec_t *dev, struct core_desc *core)
 
 	/* read specific registers from hardware */
 	for (i = core->reg_id; i < core->reg_id + core->size / 4; i++) {
-		subsys_mgr.dec_regs[id][i] = ioread32(
-			(void __iomem *)(dev->hwregs[id][type] + i * 4));
+		subsys_mgr.dec_regs[id][i] = ioread32(dev->hwregs[id][type] + i * 4);
 #ifdef SUPPORT_DBGFS
 		if ((i == 1) && ((subsys_mgr.dec_regs[id][1] & 0x1) == 0)) {
 			subsys_mgr.decode_state[id] = DONE;
@@ -2045,8 +2030,7 @@ static long DecRefreshRegs(hantrodec_t *dev, struct core_desc *core)
 	if (!reg_access_opt) {
 		for (i = 0; i < subsys_mgr.vpu_subsys[id].submodule_iosize[type] / 4;
 	 i++) {
-			subsys_mgr.dec_regs[id][i] = ioread32((
-	void __iomem *)(dev->hwregs[id][type] + i * 4));
+			subsys_mgr.dec_regs[id][i] = ioread32(dev->hwregs[id][type] + i * 4);
 		}
 	} else {
 		// only need to read swreg1,62(?),63,168,169
@@ -2054,7 +2038,7 @@ static long DecRefreshRegs(hantrodec_t *dev, struct core_desc *core)
 	do {                                                                   \
 		i = (idx);                                                     \
 		subsys_mgr.shadow_dec_regs[id][i] = subsys_mgr.dec_regs[id][i] = ioread32(           \
-			(void __iomem *)(dev->hwregs[id][type] + i * 4));      \
+			dev->hwregs[id][type] + i * 4);      \
 	} while (0)
 
 		REFRESH_REG(0);
@@ -2239,9 +2223,8 @@ static long WaitCoreReady(hantrodec_t *dev, const struct file *filp, int *id)
 				/* abort decoder */
 				status |= HANTRODEC_DEC_ABORT |
 						HANTRODEC_DEC_IRQ_DISABLE;
-				iowrite32(status,
-					  (void *)(dev->hwregs[i][HW_VCD] +
-					HANTRODEC_IRQ_STAT_DEC_OFF));
+				iowrite32(status, dev->hwregs[i][HW_VCD] +
+					HANTRODEC_IRQ_STAT_DEC_OFF);
 				break;
 			}
 		}
@@ -2318,9 +2301,9 @@ static long hantrodec_ioctl(struct file *filp, unsigned int cmd,
 						 _IOC_SIZE(cmd));
 #else
 	if (_IOC_DIR(cmd) & _IOC_READ)
-		err = !access_ok((void *)arg, _IOC_SIZE(cmd));
+		err = !access_ok((void __user *)arg, _IOC_SIZE(cmd));
 	else if (_IOC_DIR(cmd) & _IOC_WRITE)
-		err = !access_ok((void *)arg, _IOC_SIZE(cmd));
+		err = !access_ok((void __user *)arg, _IOC_SIZE(cmd));
 #endif
 
 	if (err)
@@ -2583,13 +2566,11 @@ static long hantrodec_ioctl(struct file *filp, unsigned int cmd,
 
 		core.size = subsys_mgr.vpu_subsys[core.id].submodule_iosize[core.type];
 		if (subsys_mgr.vpu_subsys[core.id].submodule_hwregs[core.type]) {
-			core.asic_id = ioread32((void __iomem *)
-				subsys_mgr.hantrodec_data.hwregs[core.id][core.type]);
+			core.asic_id =
+				ioread32(subsys_mgr.hantrodec_data.hwregs[core.id][core.type]);
 		} else if (core.type == HW_VCD &&
 			 subsys_mgr.hantrodec_data.hwregs[core.id][HW_VCDJ]) {
-			core.asic_id =
-				ioread32((void __iomem *)
-				subsys_mgr.hantrodec_data.hwregs[core.id][HW_VCDJ]);
+			core.asic_id = ioread32(subsys_mgr.hantrodec_data.hwregs[core.id][HW_VCDJ]);
 		} else {
 			core.asic_id = 0;
 		}
@@ -2619,15 +2600,14 @@ static long hantrodec_ioctl(struct file *filp, unsigned int cmd,
 			return -EFAULT;
 		if (subsys_mgr.hantrodec_data.hwregs[id][HW_VCD] ||
 		    subsys_mgr.hantrodec_data.hwregs[id][HW_VCDJ]) {
-			volatile u8 *hwregs;
+			void __iomem *hwregs;
 			/* VCD first if it exists, otherwise VCDJ. */
 			if (subsys_mgr.hantrodec_data.hwregs[id][HW_VCD])
 				hwregs = subsys_mgr.hantrodec_data.hwregs[id][HW_VCD];
 			else
 				hwregs = subsys_mgr.hantrodec_data.hwregs[id][HW_VCDJ];
 
-			hw_id = ioread32((void __iomem *)(hwregs +
-						HANTRODEC_HW_BUILD_ID_OFF));
+			hw_id = ioread32(hwregs + HANTRODEC_HW_BUILD_ID_OFF);
 			__put_user(hw_id, (u32 __user *)arg);
 		}
 		return 0;
@@ -2682,8 +2662,8 @@ static long hantrodec_ioctl(struct file *filp, unsigned int cmd,
             pci_position[2] = PCI_SLOT(gDev->devfn);
             pci_position[3] = PCI_FUNC(gDev->devfn);
 
-            err = copy_to_user((u8 __user *) arg, pci_position, sizeof(pci_position));
-            if (err)
+            tmp = copy_to_user((u8 __user *) arg, pci_position, sizeof(pci_position));
+            if (tmp)
             {
                 PDEBUG("copy_to_user failed, returned %li\n", tmp);
                 return -EFAULT;
@@ -2979,7 +2959,7 @@ static const struct vm_operations_struct hantrodec_vm_ops = {
  * @brief init apbfilter ctx
  * @param u32 hwid: hardware build id
  */
-static void apbfilter_ctx_init(u32 subsys_id, u32 core_id, volatile u8 *hwregs, u32 hwid)
+static void apbfilter_ctx_init(u32 subsys_id, u32 core_id, void __iomem *hwregs, u32 hwid)
 {
 	u32 i = subsys_id, j = core_id;
 
@@ -3011,8 +2991,8 @@ static void apbfilter_ctx_init(u32 subsys_id, u32 core_id, volatile u8 *hwregs, 
 			subsys_mgr.apbfilter_cfg[i][j].mask_reg_offset = AXIFE_MASK_REG_OFFSET;
 			subsys_mgr.apbfilter_cfg[i][j].mask_bits_per_reg = AXIFE_MASK_BITS_PER_REG;
 			subsys_mgr.apbfilter_cfg[i][j].page_sel_addr =
-			subsys_mgr.apbfilter_cfg[i][j].mask_reg_offset +
-			subsys_mgr.apbfilter_cfg[i][j].nbr_mask_regs * 4;
+					subsys_mgr.apbfilter_cfg[i][j].mask_reg_offset +
+					subsys_mgr.apbfilter_cfg[i][j].nbr_mask_regs * 4;
 		}
 
 		if (hwid != 0x1F58 && hwid != 0x1F58)
@@ -3029,7 +3009,7 @@ static void apbfilter_ctx_init(u32 subsys_id, u32 core_id, volatile u8 *hwregs, 
  * @brief init axife ctx
  * @param u32 hwid: hardware build id
  */
-static void axife_ctx_init(u32 subsys_id, u32 core_id, volatile u8 *hwregs, u32 hwid)
+static void axife_ctx_init(u32 subsys_id, u32 core_id, void __iomem *hwregs, u32 hwid)
 {
 	u32 i = subsys_id, j = core_id;
 	u32 axife_config;
@@ -3037,7 +3017,7 @@ static void axife_ctx_init(u32 subsys_id, u32 core_id, volatile u8 *hwregs, u32 
 
 	if (j == HW_AXIFE) {
 		if (!use_vcmd) {
-			axife_config = ioread32((void __iomem *)hwregs);
+			axife_config = ioread32(hwregs);
 		} else {
 			regs_va = get_submodule_regs_va(subsys_mgr.vcmd_mgr, i, SUB_MOD_AXIFE);
 			axife_config = *(regs_va + 0);
@@ -3061,24 +3041,21 @@ static void auxcore_ctx_init(void)
 	int i, j;
 	u32 hwid = 0;
 	u32 core_type = HW_VCD; /* vcd */
-	volatile u8 *hwregs;
+	void __iomem *hwregs;
 	u32 *regs_va;
 
 	for (i = 0; i < MAX_SUBSYS_NUM; i++) {
 		for (j = 0; j < HW_CORE_MAX; j++) {
-			if (j == HW_VCMD)
-				hwregs = vcmd_core_array[i].submodule_vcmd_virtual_address;
-			else
-				hwregs = subsys_mgr.hantrodec_data.hwregs[i][j];
+			hwregs = subsys_mgr.hantrodec_data.hwregs[i][j];
 			if (!hwregs)
 				continue;
 
 			if (!use_vcmd)
-				hwid = ioread32((void __iomem *)
-						(subsys_mgr.hantrodec_data.hwregs[i][core_type] +
-						HANTRODEC_HW_BUILD_ID_OFF));
+				hwid = ioread32(subsys_mgr.hantrodec_data.hwregs[i][core_type] +
+						HANTRODEC_HW_BUILD_ID_OFF);
 			else {
-				regs_va = get_submodule_regs_va(subsys_mgr.vcmd_mgr, i, SUB_MOD_MAIN);
+				regs_va = get_submodule_regs_va(subsys_mgr.vcmd_mgr,
+										i, SUB_MOD_MAIN);
 				hwid = *(regs_va + HANTRODEC_HW_BUILD_ID_OFF / 4);
 			}
 
@@ -3094,15 +3071,14 @@ static void auxcore_ctx_init(void)
 /**
  * @brief set interrupt gate and not gate the interrupts from IPs to CPU
  */
-static void dec_interrupt_gate_set(volatile u8 *hwregs)
+static void dec_interrupt_gate_set(void __iomem *hwregs)
 {
-	iowrite32(0x0000, (void __iomem *)(hwregs + 25 * 4));
+	iowrite32(0x0000, hwregs + 25 * 4);
 }
 
 #ifdef PCIE_EN
 static int PcieInit(void)
 {
-	int ret;
 	/* Base register address Length */
 	u32 pci_reg_len;
 #ifdef PCI_DDR_BAR
@@ -3114,26 +3090,6 @@ static int PcieInit(void)
 		goto out;
 	}
 
-	if (gDev->dev.bus->dma_configure) {
-		struct pci_driver driver = { };
-		if (!gDev->dev.driver) /*HACK: dma_configure() uses the pointer*/
-			gDev->dev.driver = &driver.driver;
-	
-		/* Bind iommu. Normally it is done just before pci-probe call,
-		but vc9000d is not pci driver */
-		ret = gDev->dev.bus->dma_configure(&gDev->dev);
-		if (gDev->dev.driver == &driver.driver)
-			gDev->dev.driver = NULL;
-		if (ret)
-			return ret;
-	}
-	/* Bind irq. Normally it is done just before pci-probe call,
-	but vc9000d is not pci driver */
-	ret = pcibios_alloc_irq(gDev);
-	if (ret < 0) {
-		pr_err(DRIVER_NAME ": pcibios_alloc_irq failed.\n");
-		return ret;
-	}
 	if (pci_enable_device(gDev) < 0) {
 		pr_info("%s: Device not enabled.\n", __func__);
 		goto out;
@@ -3360,7 +3316,7 @@ static int __init hantrodec_init(void)
 			// interrupt gate set
 			dec_interrupt_gate_set(subsys_mgr.hantrodec_data.hwregs[i][HW_VCMD]);
 
-			iounmap((void __iomem *)subsys_mgr.hantrodec_data.hwregs[i][HW_VCMD]);
+			iounmap(subsys_mgr.hantrodec_data.hwregs[i][HW_VCMD]);
 			release_mem_region(subsys_mgr.vpu_subsys[i].base_addr + vcmd_offset, vcmd_iosize);
 			subsys_mgr.hantrodec_data.hwregs[i][HW_VCMD] = NULL;
 		}
@@ -3432,26 +3388,6 @@ static int __init hantrodec_init(void)
 #endif
 
 	if (use_vcmd) {
-		for (i = 0; i < subsys_mgr.hantrodec_data.cores; i++) {
-			if (subsys_mgr.hantrodec_data.hwregs[i][HW_VCD])
-				vcmd_core_array[i].submodule_vcd_virtual_address =
-					subsys_mgr.hantrodec_data.hwregs[i][HW_VCD];
-			if (subsys_mgr.hantrodec_data.hwregs[i][HW_DEC400])
-				vcmd_core_array[i].submodule_dec400_virtual_address =
-					subsys_mgr.hantrodec_data.hwregs[i][HW_DEC400];
-			if (subsys_mgr.hantrodec_data.hwregs[i][HW_MMU])
-				vcmd_core_array[i].submodule_MMU_virtual_address =
-					subsys_mgr.hantrodec_data.hwregs[i][HW_MMU];
-			if (subsys_mgr.hantrodec_data.hwregs[i][HW_MMU_WR])
-				vcmd_core_array[i].submodule_MMUWrite_virtual_address =
-					subsys_mgr.hantrodec_data.hwregs[i][HW_MMU_WR];
-			if (subsys_mgr.hantrodec_data.hwregs[i][HW_AXIFE])
-				vcmd_core_array[i].submodule_axife_virtual_address =
-					subsys_mgr.hantrodec_data.hwregs[i][HW_AXIFE];
-			if (subsys_mgr.hantrodec_data.hwregs[i][HW_AXI2TO1])
-				vcmd_core_array[i].submodule_axi2to1_virtual_address =
-					subsys_mgr.hantrodec_data.hwregs[i][HW_AXI2TO1];
-		}
 		subsys_mgr.vcmd_mgr = hantrovcmd_init(subsys_mgr.vpu_subsys, subsys_num, subsys_mgr.platformdev);
 		if (!subsys_mgr.vcmd_mgr)
 			goto err;
@@ -3533,7 +3469,7 @@ static int __init hantrodec_init(void)
 
 	for (i = 0; i < subsys_mgr.hantrodec_data.cores; i++) {
 		u32 core_type = HW_VCD;
-		volatile u8 *hwregs = subsys_mgr.hantrodec_data.hwregs[i][core_type];
+		void __iomem *hwregs = subsys_mgr.hantrodec_data.hwregs[i][core_type];
 
 		if (!hwregs) {
 			core_type = HW_VCDJ;
@@ -3543,8 +3479,7 @@ static int __init hantrodec_init(void)
 		if (hwregs) {
 			pr_info(DRIVER_NAME ": %s [%d] has build id 0x%08x\n",
 				CoreTypeStr(core_type), i,
-				ioread32((void __iomem *)
-				(hwregs + HANTRODEC_HWBUILD_ID_OFF)));
+				ioread32(hwregs + HANTRODEC_HWBUILD_ID_OFF));
 		}
 #ifdef SUPPORT_WATCHDOG
 		subsys_mgr.hantrodec_data.watchdog[i].triggered = 0;
@@ -3610,9 +3545,8 @@ static void __exit hantrodec_cleanup(void)
 
 		if (dev->hwregs[i][HW_DEC400]) {
 			/* disable dec400 when rmmod driver. */
-			iowrite32(0x00810002,
-				  (void __iomem *)(dev->hwregs[i][HW_DEC400] +
-				 0x800));
+			iowrite32(0x00810002,dev->hwregs[i][HW_DEC400] +
+				 0x800);
 		}
 
 #ifdef VCARB_REQUEST
@@ -3808,7 +3742,7 @@ static int CheckHwId(hantrodec_t *dev)
 			if ((j == HW_VCD || j == HW_VCDJ) &&
 			    dev->hwregs[i][j]) {
 				if (!use_vcmd) {
-					hwid = ioread32((void __iomem *)dev->hwregs[i][j]);
+					hwid = ioread32(dev->hwregs[i][j]);
 				} else {
 					regs_va = get_submodule_regs_va(subsys_mgr.vcmd_mgr, i, SUB_MOD_MAIN);
 					hwid = *regs_va;
@@ -3853,7 +3787,7 @@ static int ReserveIO(void)
 	int i, j;
 	u32 vcmd_offset;
 	u32 vcmd_iosize;
-	volatile u8 *vcmd_hwregs;
+	void __iomem *vcmd_hwregs;
 
 	memcpy((unsigned int *)(subsys_mgr.hantrodec_data.iosize), subsys_mgr.iosize,
 	       HXDEC_MAX_CORES * sizeof(unsigned int));
@@ -3887,14 +3821,13 @@ static int ReserveIO(void)
 #if (KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE)
 				subsys_mgr.vpu_subsys[i].submodule_hwregs[j] =
 					subsys_mgr.hantrodec_data.hwregs[i][j] =
-					(volatile u8 __force *)
 					ioremap_nocache(subsys_mgr.vpu_subsys[i].base_addr +
 					subsys_mgr.vpu_subsys[i].submodule_offset[j],
 					subsys_mgr.vpu_subsys[i].submodule_iosize[j]);
 #else
 				subsys_mgr.vpu_subsys[i].submodule_hwregs[j] =
 					subsys_mgr.hantrodec_data.hwregs[i][j] =
-						(volatile u8 *)ioremap(subsys_mgr.vpu_subsys[i].base_addr +
+						ioremap(subsys_mgr.vpu_subsys[i].base_addr +
 							subsys_mgr.vpu_subsys[i].submodule_offset[j],
 							subsys_mgr.vpu_subsys[i].submodule_iosize[j]);
 #endif
@@ -3925,10 +3858,10 @@ static int ReserveIO(void)
 			}
 
 #if (KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE)
-			vcmd_hwregs = (volatile u8 __force *)ioremap_nocache(subsys_mgr.vpu_subsys[i].base_addr +
+			vcmd_hwregs = ioremap_nocache(subsys_mgr.vpu_subsys[i].base_addr +
 						   vcmd_offset, vcmd_iosize);
 #else
-			vcmd_hwregs = (volatile u8 __force *)ioremap(subsys_mgr.vpu_subsys[i].base_addr +
+			vcmd_hwregs = ioremap(subsys_mgr.vpu_subsys[i].base_addr +
 							vcmd_offset, vcmd_iosize);
 #endif
 			if (!vcmd_hwregs) {
@@ -3960,8 +3893,7 @@ static void ReleaseIO(void)
 	for (i = 0; i < subsys_mgr.hantrodec_data.cores; i++) {
 		for (j = 0; j < HW_CORE_MAX; j++) {
 			if (subsys_mgr.hantrodec_data.hwregs[i][j]) {
-				iounmap((void __iomem *)
-				subsys_mgr.hantrodec_data.hwregs[i][j]);
+				iounmap(subsys_mgr.hantrodec_data.hwregs[i][j]);
 				release_mem_region(subsys_mgr.vpu_subsys[i].base_addr +
 				  subsys_mgr.vpu_subsys[i].submodule_offset[j],
 				  subsys_mgr.vpu_subsys[i].submodule_iosize[j]);
@@ -3986,7 +3918,7 @@ static irqreturn_t hantrodec_isr(int irq, void *dev_id)
 	unsigned long flags;
 	unsigned int handled = 0;
 	int i;
-	volatile u8 *hwregs;
+	void __iomem *hwregs;
 #ifdef SUPPORT_DBGFS
 	u64 time_num;
 #if (KERNEL_VERSION(4, 19, 94) > LINUX_VERSION_CODE)
@@ -4009,8 +3941,7 @@ static irqreturn_t hantrodec_isr(int irq, void *dev_id)
 		hwregs = dev->hwregs[i][core_type];
 
 		/* interrupt status register read */
-		irq_status_dec = ioread32((void __iomem *)
-			(hwregs + HANTRODEC_IRQ_STAT_DEC_OFF));
+		irq_status_dec = ioread32(hwregs + HANTRODEC_IRQ_STAT_DEC_OFF);
 
 		if (irq_status_dec & HANTRODEC_DEC_IRQ) {
 #ifdef SUPPORT_WATCHDOG
@@ -4036,9 +3967,7 @@ static irqreturn_t hantrodec_isr(int irq, void *dev_id)
 		/* clear dec IRQ */
 
 			irq_status_dec &= (~HANTRODEC_DEC_IRQ);
-			iowrite32(irq_status_dec,
-				  (void __iomem *)(hwregs +
-				 HANTRODEC_IRQ_STAT_DEC_OFF));
+			iowrite32(irq_status_dec, hwregs + HANTRODEC_IRQ_STAT_DEC_OFF);
 
 			PDEBUG("decoder IRQ received! core %d\n", i);
 #ifdef CONFIG_DEC_PM
@@ -4077,28 +4006,21 @@ static void ResetAsic(hantrodec_t *dev)
 		if (!dev->hwregs[j][HW_VCD])
 			continue;
 
-		status = ioread32((void __iomem *)(dev->hwregs[j][HW_VCD] +
-						  HANTRODEC_IRQ_STAT_DEC_OFF));
+		status = ioread32(dev->hwregs[j][HW_VCD] + HANTRODEC_IRQ_STAT_DEC_OFF);
 
 		if (status & HANTRODEC_DEC_E) {
 			/* abort with IRQ disabled */
 			status = HANTRODEC_DEC_ABORT |
 					 HANTRODEC_DEC_IRQ_DISABLE;
-			iowrite32(status, (void __iomem *)
-					  (dev->hwregs[j][HW_VCD] +
-					  HANTRODEC_IRQ_STAT_DEC_OFF));
+			iowrite32(status, dev->hwregs[j][HW_VCD] + HANTRODEC_IRQ_STAT_DEC_OFF);
 		}
 
 		if (IS_G1(dev->hw_id[j][HW_VCD]))
 			/* reset PP */
-			iowrite32(0, (void __iomem *)
-					  (dev->hwregs[j][HW_VCD] +
-					  HANTRO_IRQ_STAT_PP_OFF));
+			iowrite32(0, dev->hwregs[j][HW_VCD] + HANTRO_IRQ_STAT_PP_OFF);
 
 		for (i = 4; i < dev->iosize[j]; i += 4)
-			iowrite32(0, (void __iomem *)
-					  (dev->hwregs[j][HW_VCD] +
-					  i));
+			iowrite32(0, dev->hwregs[j][HW_VCD] + i);
 	}
 }
 
@@ -4214,12 +4136,12 @@ static struct pci_driver vc9000d_pci_driver = {
 	.remove     = vc9000d_remove,
 };
 
-void __exit vc9000d_cleanup(void)
+static void __exit vc9000d_cleanup(void)
 {
 	pci_unregister_driver(&vc9000d_pci_driver);
 }
 
-int __init vc9000d_init(void)
+static int __init vc9000d_init(void)
 {
 	int status = pci_register_driver(&vc9000d_pci_driver);
 

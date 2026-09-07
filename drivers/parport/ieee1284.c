@@ -777,6 +777,7 @@ ssize_t parport_write (struct parport *port, const void *buffer, size_t len)
 #ifdef _WORKAROUND_MCST_PP
 	char ppc_cr = 0;
 	struct parport_pc_private *priv = port->private_data;
+	retval = 0;
 #endif /* _WORKAROUND_MCST_PP */
 
 	/* Ignore the device-ID-request bit and the address bit. */

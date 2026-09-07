@@ -12,12 +12,28 @@
 #include "epic/io_epic.h"
 #include "../../../e2k/kvm/ioepic.h"
 
-#ifdef CONFIG_EPIC
+static void l_msi_compose_msi_msg(struct irq_data *irqd,
+				       struct msi_msg *msg)
+{
+	u32 lo = 0;
+	union IO_EPIC_MSG_ADDR_LOW *l = (void *)&msg->address_lo;
+	/* rm 39170:get node number from the device not from the irq domain
+	 in order to keep compatibility with old device trees */
+	int node = dev_to_node(irq_data_get_msi_desc(irqd)->dev);
 
+	WARN_ON(!is_of_node(irqd->domain->fwnode));
+	/* Let the parent dmn compose the MSI message */
+	irq_chip_compose_msi_msg(irqd->parent_data, msg);
+
+	get_io_pic_msi(node, &lo, &msg->address_hi);
+	/* epic field MSI suits apic too */
+	l->MSI = lo >> 20;
+}
+
+#ifdef CONFIG_EPIC
 static int epic_msi_set_vcpu_affinity(struct irq_data *data, void *vcpu_info)
 {
 	struct ioepic_vcpu_info *info = vcpu_info;
-	struct irq_cfg *cfg = irqd_cfg(data);
 
 	pci_msi_mask_irq(data);
 
@@ -36,8 +52,6 @@ static int epic_msi_set_vcpu_affinity(struct irq_data *data, void *vcpu_info)
 	 */
 	pci_write_msi_msg(data->irq, &info->msi);
 
-	/* cfg->passthrough = info->valid; */
-
 	pci_msi_unmask_irq(data);
 
 	return 0;
@@ -46,6 +60,7 @@ static int epic_msi_set_vcpu_affinity(struct irq_data *data, void *vcpu_info)
 
 static struct irq_chip l_pci_msi_controller = {
 	.name			= "PCI-MSI",
+	.irq_compose_msi_msg	= l_msi_compose_msi_msg,
 	.irq_ack		= irq_chip_ack_parent,
 	.irq_retrigger		= irq_chip_retrigger_hierarchy,
 #ifdef CONFIG_EPIC

@@ -2700,6 +2700,9 @@ lpfc_calc_bg_err(struct lpfc_hba *phba, struct lpfc_io_buf *lpfc_cmd)
 	uint16_t sum;
 	unsigned blksize;
 
+#ifdef CONFIG_MCST
+	app_tag = 0;
+#endif
 	err_type = BGS_GUARD_ERR_MASK;
 	sum = 0;
 	guard_tag = 0;

@@ -45,24 +45,10 @@ config ETH1000
 config MXGBE
 	tristate "Elbrus 10-Gigabit Ethernet support"
 	depends on PCI && EPIC && ELDWCXPCS
-	depends on E90S || E2K && (CPU_E16C || CPU_E12C || CPU_E48C || CPU_E8V7)
+	depends on E90S || E2K && (CPU_E16C || CPU_E12C || CPU_E8V7)
 	default n
-
-config MXGBE_DCA
-	bool "Direct Cache Access (DCA) Support"
-	default y
-	depends on MXGBE && E2K_E48C
-	help
-	   Say Y here if you want to use Direct Cache Access (DCA) in the
-	   MXGBE driver.  DCA is a method for warming the CPU cache before data
-	   is used, with the intent of lessening the impact of cache misses.
 
 config MGB
 	tristate "Elbrus 1/2.5 Gigabit Ethernet card (KPI3)"
 	depends on PCI && EPIC && ELDWCXPCS
 	default n
-
-config MGB_RT
-	tristate "KPI3 Gigabit Ethernet card as p-2-p "
-	depends on MCST_RT && PCI && EPIC && ELDWCXPCS
-	default m

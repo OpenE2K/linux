@@ -27,12 +27,6 @@
 /******************************************************************************/
 
 
-__section(".entry.text")
-notrace __interrupt void save_global_gregs_v5(struct global_gregs *gregs)
-{
-	DO_SAVE_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, LOCAL_GREGS_USER_MASK);
-}
-
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 __section(".entry.text")
 notrace __interrupt
@@ -40,17 +34,7 @@ void save_local_gregs_v5(struct local_gregs *gregs)
 {
 	gregs->bgr = native_read_BGR_reg();
 	init_BGR_reg();	/* enable whole GRF */
-	SAVE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, 0);
-}
-#endif
-
-__section(".entry.text")
-notrace __interrupt void save_scratch_gregs_v5(struct scratch_gregs *gregs)
-{
-	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
-	SAVE_GREGS_PAIR(gregs->g, 0, 1, 26, 27, E2K_ISET_V5);
-	SAVE_GREGS_PAIR(gregs->g, 2, 3, 28, 29, E2K_ISET_V5);
-	SAVE_GREGS_PAIR(gregs->g, 4, 5, 30, 31, E2K_ISET_V5);
+	save_local_gregs_iset(gregs, E2K_ISET_V5);
 }
 
 notrace __interrupt
@@ -79,29 +63,6 @@ void save_gregs_on_mask_v5(struct e2k_gregs *gregs, bool dirty_bgr,
 		native_write_BGR_reg(gregs->bgr);
 }
 
-__section(".entry.text")
-notrace __interrupt void restore_global_gregs_v5(const struct global_gregs *gregs)
-{
-	DO_RESTORE_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, LOCAL_GREGS_USER_MASK);
-}
-
-__section(".entry.text")
-notrace __interrupt
-void restore_local_gregs_v5(const struct local_gregs *gregs)
-{
-	RESTORE_LOCAL_GREGS_ON_MASK(gregs->g, E2K_ISET_V5, 0);
-	native_write_BGR_reg(gregs->bgr);
-}
-
-__section(".entry.text")
-notrace __interrupt void restore_scratch_gregs_v5(const struct scratch_gregs *gregs)
-{
-	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
-	RESTORE_GREGS_PAIR(gregs->g, 0, 1, 26, 27, E2K_ISET_V5);
-	RESTORE_GREGS_PAIR(gregs->g, 2, 3, 28, 29, E2K_ISET_V5);
-	RESTORE_GREGS_PAIR(gregs->g, 4, 5, 30, 31, E2K_ISET_V5);
-}
-
 notrace __interrupt
 void restore_gregs_on_mask_v5(struct e2k_gregs *gregs, bool dirty_bgr,
 				unsigned long mask_not_restore)
@@ -125,6 +86,45 @@ void restore_gregs_on_mask_v5(struct e2k_gregs *gregs, bool dirty_bgr,
 	}
 	if (!dirty_bgr)
 		native_write_BGR_reg(gregs->bgr);
+}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+__section(".entry.text")
+notrace __interrupt void save_global_gregs_v5(struct global_gregs *gregs)
+{
+	save_global_gregs_iset(gregs, E2K_ISET_V5);
+}
+
+__section(".entry.text")
+notrace __interrupt void save_scratch_gregs_v5(struct scratch_gregs *gregs)
+{
+	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
+	SAVE_GREGS_PAIR(gregs->g, 0, 26, 27, E2K_ISET_V5);
+	SAVE_GREGS_PAIR(gregs->g, 2, 28, 29, E2K_ISET_V5);
+	SAVE_GREGS_PAIR(gregs->g, 4, 30, 31, E2K_ISET_V5);
+}
+
+__section(".entry.text")
+notrace __interrupt void restore_global_gregs_v5(const struct global_gregs *gregs)
+{
+	restore_global_gregs_iset(gregs, E2K_ISET_V5);
+}
+
+__section(".entry.text")
+notrace __interrupt
+void restore_local_gregs_v5(const struct local_gregs *gregs)
+{
+	restore_local_gregs_iset(gregs, E2K_ISET_V5);
+	native_write_BGR_reg(gregs->bgr);
+}
+
+__section(".entry.text")
+notrace __interrupt void restore_scratch_gregs_v5(const struct scratch_gregs *gregs)
+{
+	BUILD_BUG_ON(KERNEL_GREGS_MAX_NUM != 10 || KERNEL_GREGS_PAIRS_START != 16);
+	RESTORE_GREGS_PAIR(gregs->g, 0, 26, 27, E2K_ISET_V5);
+	RESTORE_GREGS_PAIR(gregs->g, 2, 28, 29, E2K_ISET_V5);
+	RESTORE_GREGS_PAIR(gregs->g, 4, 30, 31, E2K_ISET_V5);
 }
 
 notrace void qpswitchd_sm(int greg)
@@ -193,10 +193,10 @@ void calculate_aau_aaldis_aaldas_v5(const struct pt_regs *regs,
 		}
 
 		if (area_num < 32) {
-			fapb_addr = (e2k_fapb_instr_t __user *)
+			fapb_addr = (e2k_fapb_instr_t __user __force *)
 					(regs->ctpr2.ta_base + 16 * area_num);
 		} else {
-			fapb_addr = (e2k_fapb_instr_t __user *)
+			fapb_addr = (e2k_fapb_instr_t __user __force *)
 					(regs->ctpr2.ta_base + 8 + 16 * (area_num - 32));
 		}
 
@@ -282,10 +282,10 @@ void do_aau_fault_v5(int aa_field, struct pt_regs *regs)
 			aa_bit, area_num);
 
 		if (area_num < 32) {
-			fapb_addr = (e2k_fapb_instr_t __user *)
+			fapb_addr = (e2k_fapb_instr_t __user __force *)
 					(regs->ctpr2.ta_base + 16 * area_num);
 		} else {
-			fapb_addr = (e2k_fapb_instr_t __user *)
+			fapb_addr = (e2k_fapb_instr_t __user __force *)
 					(regs->ctpr2.ta_base + 16 * (area_num - 32) + 8);
 		}
 
@@ -389,12 +389,6 @@ die:
 		force_sig(SIGSEGV);
 	else
 		die("AAU error", regs, 0);
-}
-
-__section(".entry.text")
-notrace void save_aaldi_v5(u64 *aaldis)
-{
-	SAVE_AALDIS_V5(aaldis);
 }
 
 /*

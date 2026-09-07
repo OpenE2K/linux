@@ -451,15 +451,6 @@ config E2K_E2C3
 	  the kernel on other machines types,
 	  otherwise you should say N here.
 
-config E2K_E48C
-	bool "Elbrus 48C (NUMA, 48 cores, IOHUB-2 , SOC)"
-	help
-	  Support for Elbrus 48C systems.  Say 'Y' here if this kernel is
-	  supposed to run on an Elbrus 48C System On Chip
-	  Only choose this option if you have such a system and cannot run
-	  the kernel on other machines types,
-	  otherwise you should say N here.
-
 config E2K_E8V7
 	bool "Elbrus 8V7 (8 cores, IOHUB-2 , SOC)"
 	help
@@ -508,7 +499,7 @@ config E2K_MINVER_V7
 	bool "Elbrus v7"
 	help
 	  This options enables kernel with minimally supported Elbrus v7
-	  CPU architecture (Elbrus 48c, 8v7 and later).
+	  CPU architecture (Elbrus 8v7 and later).
 endchoice
 
 
@@ -525,7 +516,7 @@ config CPU_ISET_MIN
 	default 4 if E2K_E8C || E2K_E1CP
 	default 5 if E2K_E8C2
 	default 6 if E2K_E16C || E2K_E12C || E2K_E2C3
-	default 7 if E2K_E48C || E2K_E8V7
+	default 7 if E2K_E8V7
 
 config CPU_ISET_MAX
 	int
@@ -556,17 +547,12 @@ config CPU_E16C
 config CPU_E2C3
 	def_bool E2K_E2C3 || !E2K_MACHINE && CPU_ISET_MIN <= 6
 
-config CPU_E48C
-	def_bool E2K_E48C || !E2K_MACHINE && CPU_ISET_MIN <= 7
-	select RAS
-	select EDAC
-
 config CPU_E8V7
 	def_bool E2K_E8V7 || !E2K_MACHINE && CPU_ISET_MIN <= 7
 	select RAS
 	select EDAC
 
-config MIGHT_HAVE_CPU_HWBUG_L1I_STOPS_WORKING
+config MIGHT_HAVE_CPU_HWBUG_L1I_RBRANCH_CALLS
 	def_bool CPU_ISET_MIN <= 6
 
 # Since iset v5 hardware clears RF automatically.
@@ -643,16 +629,6 @@ config SECCOMP
 
 	  If unsure, say Y. Only embedded should say N here.
 
-config ENABLE_EXTMEM
-	def_bool y
-	help
-	  E2K can use more than 4 Gigabytes of physical memory.
-	  However, the address space of e2k processors has two regions with
-	  hole between them:
-
-	     low region from 0 up to 2 Gigabytes            0 -        8000 0000
-	     high region from 2**32 up to 2**48   n 0000 0000 - 1 0000 0000 0000
-
 source "kernel/Kconfig.hz"
 
 source "arch/e2k/sec_space/Kconfig"
@@ -678,21 +654,6 @@ config ONLY_HIGH_PHYS_MEM
 	  to access to physical memory.
 	  It allows to extend the low MMIO and PCI addresses areas
 	  and map physical memory to virtual pages of max order
-
-config	ONLY_BSP_MEMORY
-	bool "Only specified nodes memory can be used by other CPUs"
-	default n
-	help
-	  CPUs can have own memory and access to memory of other CPUs.
-	  If you see Y then all CPUs can use only memory of nodes from
-	  following config parametr
-	  and ignore own
-
-config MEMORY_PRES_MAP
-	int "Specify mask of nodes with memory"
-	default 1
-	depends on ONLY_BSP_MEMORY
-	range 1 65536
 
 config ARCH_FORCE_MAX_ORDER
 	int "Maximum zone order"
@@ -748,15 +709,6 @@ config E2K_MODULES_DUPLICATION
 		With this option enabled, module's memory is duplicated across
 		all possible NUMA nodes of the system.
 
-
-config KTHREAD_ON_CPU
-	bool "Create kernel threads on specified CPU"
-	default n
-	depends on NUMA
-	help
-		Support creation of kernel threads on cpecified CPU
-		to allocate memory resources on the node of this CPU
-
 config BOOT_PRINTK
 	def_bool n
 
@@ -789,7 +741,7 @@ config BOOT_SERIAL_BAUD
 
 config EARLY_VIRTIO_CONSOLE
 	bool "Early VIRTIO console on guest kernel"
-	depends on VIRTIO_CONSOLE && KVM
+	depends on VIRTIO_CONSOLE && KVM && KVM_PARAVIRTUALIZATION
 	default n
 	select BOOT_PRINTK
 	select L_EARLY_PRINTK
@@ -812,7 +764,6 @@ config MEMLIMIT
 
 config EXT_MEMLIMIT
 	int "Extended physical memory probing range (Megabytes)"
-	depends on ENABLE_EXTMEM
 	range 0 61440
 	default 2048
 
@@ -871,16 +822,6 @@ config GLOBAL_IRQ_MASK
 config ACCESS_CONTROL
 	bool
 	default N
-
-config USR_CONTROL_INTERRUPTS
-	bool "USER can control interrupts"
-	default N
-	help
-		USER can use UPSR register to control interrupts
-                 (only for hardware debugging)
-                To control interrupts in user mode it needs to call:
-                e2k_syswork(USER_CONTROL_INTERRUPT, 1, 0); // start
-                e2k_syswork(USER_CONTROL_INTERRUPT, 0, 0); // stop
 
 config KERNEL_TIMES_ACCOUNT
 	bool "Collect kernel traps and system calls clock time info"
@@ -943,12 +884,6 @@ config CLW_ENABLE
         depends on PROTECTED_MODE
         default y
 
-config IGNORE_MEM_LOCK_AS
-	bool "Ignore exc_mem_lock_as"
-	help
-	   Ignore mem_lock_as exception in binary compiler task
-	default n
-
 config RECOVERY
 	bool "Enable system recovery"
 	select PM
@@ -1001,16 +936,18 @@ config TRACE_PT_ATOMIC
 choice
 	prompt "Kernel command line"
 	optional
-	default CMDLINE_OVERWRITE
+	default CMDLINE_FORCE
 	help
 	  Setting this option allows the kernel command line arguments
 	  to be set.
 
-config CMDLINE_OVERWRITE
-	bool "Overwrite bootloader kernel arguments"
+config CMDLINE_FORCE
+	bool "Always use the default kernel command string"
 	help
-	  Given string will overwrite any arguments passed in by
-	  a bootloader.
+	  Always use the default kernel command string, even if the boot
+	  loader passes other arguments to the kernel.
+	  This is useful if you cannot or don't want to change the
+	  command-line options your boot loader passes to the kernel.
 
 config CMDLINE_EXTEND
 	bool "Extend bootloader kernel arguments"
@@ -1022,7 +959,7 @@ endchoice
 
 config CMDLINE
 	string "Kernel command line arguments string"
-	depends on CMDLINE_OVERWRITE || CMDLINE_EXTEND
+	depends on CMDLINE_FORCE || CMDLINE_EXTEND
 	default "root=/dev/sda3 console=ttyS0,115200 init=/root/init.sh ipv6.disable=1 usbcore.nousb scsi_mod.scan=sync raid=noautodetect force_C3"
 
 #
@@ -1059,7 +996,7 @@ config SMP
 	  If you don't know what to do here, say N.
 
 config NR_CPUS
-	int "Maximum number of CPUs (1-256)"
+	int
 	range 1 256
 	depends on SMP
 	default 256 if !E2K_MACHINE
@@ -1074,8 +1011,6 @@ config NR_CPUS
 	default 64 if E2K_E12C && NUMA
 	default 16 if E2K_E16C && !NUMA
 	default 64 if E2K_E16C && NUMA
-	default 48 if E2K_E48C && !NUMA
-	default 256 if E2K_E48C && NUMA
 	help
 	  This allows you to specify the maximum number of CPUs which this
 	  kernel will support.  The maximum supported value is 256 and the

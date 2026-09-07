@@ -18,8 +18,10 @@
 #include <asm/kvm/mmu_hv_regs_types.h>
 #include <asm/kvm/mmu_hv_regs_access.h>
 #include "cpu.h"
-#include "mmu_defs.h"
 #include "mmu.h"
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include "paravirt_sw/mmu_defs.h"
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #undef	DEBUG_MMU_REG_MODE
 #undef	DebugMMUREG
@@ -40,6 +42,7 @@
 		pr_info("%s(): " fmt, __func__, ##args);		\
 })
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 int vcpu_read_mmu_u_pptb_reg(struct kvm_vcpu *vcpu, pgprotval_t *u_pptb_p)
 {
 	struct kvm_mmu *mmu = &vcpu->arch.mmu;
@@ -260,6 +263,7 @@ int vcpu_read_mmu_os_vab_reg(struct kvm_vcpu *vcpu, gva_t *os_vab_p)
 
 	return 0;
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 int kvm_hv_setup_tdp_paging(struct kvm_vcpu *vcpu)
 {

@@ -348,6 +348,30 @@ static void __init init_check_order_bank_areas(int node_id,
 		}
 	}
 }
+extern boot_phys_bank_t *boot_find_bank_of_addr(e2k_addr_t phys_addr,
+	int *node_id, short *bank_index, bool *skip);
+static void __init remove_old_kernel_mem(void)
+{
+	bank_info_t *busy = boot_bootblock_virt->info.busy;
+	u16 num = boot_bootblock_virt->info.num_of_busy;
+	u64 dmi = boot_bootblock_virt->info.dmi_info;
+
+	for (u16 i = 0; i < num; i++)
+		memblock_remove(busy[i].address, busy[i].size);
+
+	/* restore dmi mem */
+	memblock_add(dmi, 0x10000);
+	memblock_reserve(dmi, 0x10000);
+#ifdef CONFIG_NUMA
+	int node_id = -1;
+	short bank_idx = -1;
+	bool skip = false;
+	boot_phys_bank_t *bank = boot_find_bank_of_addr(dmi, &node_id,
+					&bank_idx, &skip);
+	if (bank && numa_add_memblk(node_id, dmi, dmi + 0x10000))
+		INIT_BUG("Couldn't add numa node %d.", node_id);
+#endif
+}
 
 static void __init register_free_bootmem(void)
 {
@@ -439,12 +463,13 @@ static void __init register_free_bootmem(void)
 					start_addr, start_addr + size);
 			}
 
+#ifndef CONFIG_RECOVERY
 			memblock_phys_free((phys_addr_t)phys_bank->busy_areas,
 				BOOT_RESERVED_AREAS_SIZE);
 			DebugB("Node #%d bank #%d register free memory from 0x%px to 0x%px\n",
 				node, bank, phys_bank->busy_areas,
-				phys_bank->busy_areas +
-				BOOT_RESERVED_AREAS_SIZE);
+				(void *)phys_bank->busy_areas + BOOT_RESERVED_AREAS_SIZE);
+#endif
 		}
 	}
 }
@@ -456,6 +481,7 @@ static void __init register_free_bootmem(void)
 static void __init notrace
 setup_memory(void)
 {
+	bool is_kdump;
 	/*
 	 * Initialize the boot-time allocator.
 	 */
@@ -466,6 +492,10 @@ setup_memory(void)
 	 * allocator.
 	 */
 	register_free_bootmem();
+
+	is_kdump = boot_bootblock_virt->boot_flags & KEXEC_CRASH_BB_FLAG;
+	if (is_kdump)
+		remove_old_kernel_mem();
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_end > initrd_start) {
@@ -657,9 +687,8 @@ static void setup_zero_pages(void)
 	int node;
 
 	/* Clear the zero-page */
-	fast_tagged_memory_set(empty_zero_page,
-			0, CLEAR_MEMORY_TAG, sizeof(empty_zero_page),
-			LDST_DWORD_FMT << LDST_REC_OPC_FMT_SHIFT);
+	fast_tagged_memory_set(empty_zero_page, 0, CLEAR_MEMORY_TAG,
+			       sizeof(empty_zero_page), ldst_rec_dword());
 
 	/* It will be duplicated later when memory subsystem is initialized */
 	for_each_node(node) {
@@ -821,7 +850,8 @@ void free_initmem(void)
 		writel(WD_EVENT, lt_regs_eioh
 				? &lt_regs_eioh->wd_control
 				: &((lt_regs_eioh_t __iomem *)lt_regs)->wd_control);
-		writel(WD_SET_COUNTER_VAL(0), &((lt_regs_eioh_t __iomem *)lt_regs)->wd_limit);
+		writel(WD_SET_COUNTER_VAL(0),
+		       &((lt_regs_eioh_t __iomem *)lt_regs)->wd_limit);
 	}
 
 	WARN_ON(set_memory_np((unsigned long) &__init_begin,
@@ -840,7 +870,7 @@ void free_initmem(void)
 					   (void *)(stack_start + stack_size),
 					   -1, NULL);
 		pr_info("Freeing CPU%d boot-time data stack: %ldK (%lx - %lx)\n",
-			cpuid, (pages * E2K_KERNEL_US_PAGE_SIZE) >> 10,
+			cpuid, (pages * PAGE_SIZE) >> 10,
 			stack_start, stack_start + stack_size);
 
 		stack_start = kernel_boot_ps_virt_base(cpuid);
@@ -849,7 +879,7 @@ void free_initmem(void)
 					   (void *)(stack_start + stack_size),
 					   -1, NULL);
 		pr_info("Freeing CPU%d boot-time procedure stack: %ldK (%lx - %lx)\n",
-			cpuid, (pages * E2K_KERNEL_PS_PAGE_SIZE) >> 10,
+			cpuid, (pages * PAGE_SIZE) >> 10,
 			stack_start, stack_start + stack_size);
 
 		stack_start = kernel_boot_pcs_virt_base(cpuid);
@@ -858,7 +888,7 @@ void free_initmem(void)
 					   (void *)(stack_start + stack_size),
 					   -1, NULL);
 		pr_info("Freeing CPU%d boot-time chain stack: %ldK (%lx - %lx)\n",
-			cpuid, (pages * E2K_KERNEL_PCS_PAGE_SIZE) >> 10,
+			cpuid, (pages * PAGE_SIZE) >> 10,
 			stack_start, stack_start + stack_size);
 	}
 #endif	/* ! (CONFIG_RECOVERY) */

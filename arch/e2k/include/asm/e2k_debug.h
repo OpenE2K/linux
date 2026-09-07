@@ -9,7 +9,6 @@
 #ifndef _E2K_DEBUG_H_
 #define _E2K_DEBUG_H_
 
-#ifndef __ASSEMBLY__
 #include <linux/types.h>
 #include <linux/kernel.h>
 
@@ -105,19 +104,19 @@ typedef int (*chain_write_fn_t)(unsigned long real_frame_addr, const e2k_mem_crs
 typedef int (*parse_chain_fn_t)(e2k_mem_crs_t *crs,
 		unsigned long real_frame_addr, unsigned long corrected_frame_addr,
 		chain_write_fn_t write_frame, void *arg);
-extern notrace long parse_chain_stack(bool user, struct task_struct *p,
+extern notrace long parse_chain_stack(bool user, bool mm_locked, struct task_struct *p,
 				      parse_chain_fn_t func, void *arg);
 
-extern notrace int ____parse_chain_stack(bool user, struct task_struct *p,
+extern notrace int ____parse_chain_stack(bool user, bool mm_locked, struct task_struct *p,
 			parse_chain_fn_t func, void *arg, unsigned long delta_user,
 			unsigned long top, unsigned long bottom);
 
 static inline int
-native_do_parse_chain_stack(bool user, struct task_struct *p,
+native_do_parse_chain_stack(bool user, bool mm_locked, struct task_struct *p,
 		parse_chain_fn_t func, void *arg, unsigned long delta_user,
 		unsigned long top, unsigned long bottom)
 {
-	return ____parse_chain_stack(user, p, func, arg, delta_user, top, bottom);
+	return ____parse_chain_stack(user, mm_locked, p, func, arg, delta_user, top, bottom);
 }
 
 #define NATIVE_IS_USER_ADDR(task, addr)		\
@@ -138,7 +137,7 @@ native_do_parse_chain_stack(bool user, struct task_struct *p,
  * when showing kernel data stack */
 #define MAX_PT_REGS_SHOWN 30
 
-typedef struct printed_trap_regs {
+struct printed_trap_regs {
 	bool valid;
 	u64 frame;
 	e2k_ctpr_t ctpr1;
@@ -149,7 +148,14 @@ typedef struct printed_trap_regs {
 	u64 lsr1;
 	u64 ilcr1;
 	u64 sbbp[SBBP_ENTRIES_NUM];
-} printed_trap_regs_t;
+
+	/* Chosen depending on user_mode() */
+	bool user;
+	union {
+		struct local_gregs u_gregs;
+		struct scratch_gregs k_gregs;
+	};
+};
 
 typedef struct stack_regs {
 	bool used;
@@ -159,16 +165,15 @@ typedef struct stack_regs {
 	e2k_mem_crs_t crs;
 	e2k_pcsp_t pcsp;
 	e2k_psp_t psp;
-	void *base_psp_stack;
+	volatile void *base_psp_stack;
 	u64 user_size_psp_stack;
 	u64 orig_base_psp_stack_u;
 	u64 orig_base_psp_stack_k;
-	void *psp_stack_cache;
+	volatile void *psp_stack_cache;
 	u64 size_psp_stack;
 	bool show_user_regs;
 	struct printed_trap_regs trap[MAX_USER_TRAPS];
-	struct global_gregs g_gregs;
-	struct local_gregs l_gregs;
+	struct global_gregs global_gregs;
 	bool gregs_valid;
 #ifdef CONFIG_DATA_STACK_WINDOW
 	bool show_k_data_stack;
@@ -193,7 +198,7 @@ extern void print_chain_stack(struct stack_regs *regs, int show_reg_window);
 extern void copy_stack_regs(struct task_struct *task,
 		const struct pt_regs *limit_regs, struct stack_regs *regs);
 extern void fill_trap_stack_regs(const pt_regs_t *trap_pt_regs,
-				 printed_trap_regs_t *regs_trap);
+				 struct printed_trap_regs *regs_trap);
 
 extern struct stack_regs stack_regs_cache[NR_CPUS];
 
@@ -208,18 +213,17 @@ static inline void print_address_tlb(unsigned long address)
 }
 
 static inline int
-do_parse_chain_stack(bool user, struct task_struct *p,
+do_parse_chain_stack(bool user, bool mm_locked, struct task_struct *p,
 		parse_chain_fn_t func, void *arg, unsigned long delta_user,
 		unsigned long top, unsigned long bottom)
 {
-	return native_do_parse_chain_stack(user, p, func, arg, delta_user, top, bottom);
+	return native_do_parse_chain_stack(user, mm_locked, p, func, arg, delta_user, top, bottom);
 }
 #endif /* !CONFIG_KVM_GUEST_KERNEL */
 
 #ifndef	CONFIG_VIRTUALIZATION
 /* it is native kernel without any virtualization */
 #define	print_all_guest_stacks()	/* nothing to do */
-#define	print_guest_vcpu_stack(vcpu)	/* nothing to do */
 #define	debug_guest_regs(task)		false	/* none any guests */
 #define	get_cpu_type_name()		"CPU"	/* real CPU */
 
@@ -330,6 +334,17 @@ static inline void print_cpu_regs(char *str)
 		cr1.rbs, cr1.rsz, cr1.rcur, cr1.psz, cr1.pcur,
 		get_cr1_ussz(cr1), cr1.wpsz, cr1.wbs, cr1.psr);
 	pr_info("wd %llx\n", read_WD_reg().word);
+}
+
+static inline void print_USD(char *prolog, e2k_usd_t usd)
+{
+	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
+		pr_info("%s: USD: base 0x%llx, ind 0x%llx, size 0x%llx. lo:hi 0x%llx : 0x%llx\n",
+			prolog, USD_BASE(usd), USD_IND(usd), USD_SIZE_V7(usd), LO(usd), HI(usd));
+	} else {
+		pr_info("%s: USD: base 0x%llx, ind 0x%llx. lo:hi 0x%llx : 0x%llx\n",
+			prolog, USD_BASE(usd), USD_IND(usd), LO(usd), HI(usd));
+	}
 }
 
 
@@ -705,7 +720,5 @@ static inline void debug_signal_print(const char *message,
 
 	__debug_signal_print(message, regs, print_stack);
 }
-
-#endif /* !(__ASSEMBLY__) */
 
 #endif /* _E2K_DEBUG_H_ */

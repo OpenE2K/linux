@@ -7,9 +7,11 @@
 #define __ASM_PROTOTYPES_H
 
 #include <asm-generic/asm-prototypes.h>
+
 extern unsigned long __recovery_memcpy_8(void *dst, const void *src, size_t len,
 		unsigned long strd_opcode, unsigned long ldrd_opcode, int prefetch);
 extern unsigned long __recovery_memcpy_16(void *dst, const void *src, size_t len,
 		unsigned long strqp_opcode, unsigned long ldrqp_opcode, int prefetch);
+extern void colored_page_copy(volatile void *dst, const volatile void *src);
 
 #endif /* __ASM_PROTOTYPES_H */

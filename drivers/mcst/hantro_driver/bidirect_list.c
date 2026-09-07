@@ -43,7 +43,11 @@
 /* needed for virt_to_phys() */
 #include <asm/io.h>
 #include <linux/pci.h>
+#ifdef CONFIG_MCST
+#include <linux/uaccess.h>
+#else
 #include <asm/uaccess.h>
+#endif
 #include <linux/ioport.h>
 
 #include <asm/irq.h>

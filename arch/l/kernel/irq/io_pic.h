@@ -6,11 +6,18 @@
 #ifndef __ASM_IO_PIC_H
 #define __ASM_IO_PIC_H
 
+#include <asm/pic.h>
+
 struct iopic;
 
 struct iopic_chip {
-	void (*iopic_get_id_ver_pins)(struct iopic *apic,
-			int *id, int *version, int *pins);
+#ifdef CONFIG_PM
+	int (*iopic_suspend)(struct iopic *pic);
+	void (*iopic_resume)(struct iopic *pic);
+#endif
+	void (*iopic_get_id_ver_pins)(struct iopic *pic, int *id, int *version, int *pins);
+	void (*iopic_set_id)(struct iopic *apic, int id);
+	void (*iopic_reset)(struct iopic *pic);
 	struct irq_chip *iopic_chip;
 	int iopic_sizeof_entry;
 };
@@ -35,6 +42,9 @@ struct iopic {
 	raw_spinlock_t lock;
 	struct iopic_chip *iopic_chip;
 };
+
+#define	for_each_iopic_pin(iopic, pin) \
+	for ((pin) = 0; (pin) < (iopic)->nr_pins; (pin)++)
 
 struct iopic_chip_data {
 	struct iopic *pic;

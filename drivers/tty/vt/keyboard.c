@@ -2066,6 +2066,10 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 	char *kbs;
 	int ret;
 
+#ifdef CONFIG_MCST
+	kbs = NULL;
+	ret = -EINVAL;
+#endif
 	if (get_user(kb_func, &user_kdgkb->kb_func))
 		return -EFAULT;
 

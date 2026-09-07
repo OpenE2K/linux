@@ -635,6 +635,10 @@ static void _rtl92cu_init_chipn_two_out_ep_priority(struct ieee80211_hw *hw,
 		valuelow = QUEUE_NORMAL;
 		break;
 	default:
+#ifdef CONFIG_MCST
+		valuelow = QUEUE_LOW;
+		valuehi = QUEUE_LOW;
+#endif
 		WARN_ON(1);
 		break;
 	}

@@ -97,5 +97,6 @@ do { \
 #undef nFDEBUG
 #define nFDEBUG do {} while (0)
 
+void mxgbe_dbg_rename(mxgbe_priv_t *priv, const char *name);
 
 #endif /* MXGBE_DBG_H__ */

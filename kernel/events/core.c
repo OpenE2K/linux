@@ -6667,19 +6667,20 @@ static void __perf_pending_irq(struct perf_event *event)
 		return;
 	}
 
+	/* MCST partial backport of mainline commit 1476b218327b */
 	/*
 	 *  CPU-A			CPU-B
 	 *
 	 *  perf_event_disable_inatomic()
-	 *    @pending_disable = CPU-A;
+	 *    @pending_disable = 1;
 	 *    irq_work_queue();
 	 *
 	 *  sched-out
-	 *    @pending_disable = -1;
+	 *    @pending_disable = 0;
 	 *
 	 *				sched-in
 	 *				perf_event_disable_inatomic()
-	 *				  @pending_disable = CPU-B;
+	 *				  @pending_disable = 1;
 	 *				  irq_work_queue(); // FAILS
 	 *
 	 *  irq_work_run()

@@ -21,7 +21,7 @@ static DEFINE_XARRAY(tag_pages);
 
 static void *e2k_swap_allocate_tag_storage(void)
 {
-	return kmalloc(TAGS_BYTES_PER_PAGE, GFP_KERNEL);
+	return kmalloc(TAGS_BYTES_PER_PAGE + CLRS_BYTES_PER_PAGE, GFP_KERNEL);
 }
 
 static void e2k_swap_free_tag_storage(char *storage)
@@ -37,7 +37,8 @@ int e2k_swap_save_tags(struct page *page)
 	if (!tag_storage)
 		return -ENOMEM;
 
-	if (!save_tags_from_data(page_address(page), tag_storage)) {
+	if (!save_tags_colors_from_data(page_address(page), tag_storage,
+				      tag_storage + TAGS_BYTES_PER_PAGE)) {
 		e2k_swap_free_tag_storage(tag_storage);
 		return 0;
 	}
@@ -66,7 +67,7 @@ void e2k_swap_restore_tags(swp_entry_t entry, struct page *page)
 	DebugTM("e2k_swap_restore_tags(): restore tags 0x%px for page 0x%px (index %ld)\n",
 		tags, page, entry.val);
 
-	restore_tags_for_data(page_address(page), tags);
+	restore_tags_colors_for_data(page_address(page), tags, tags + TAGS_BYTES_PER_PAGE);
 }
 
 void e2k_swap_invalidate_tags(int type, pgoff_t offset)

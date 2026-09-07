@@ -9,9 +9,7 @@
 #ifndef _E2K_SYSTEM_H_
 #define _E2K_SYSTEM_H_
 
-#ifndef __ASSEMBLY__
 #include <linux/kernel.h>
-#endif /* !(__ASSEMBLY__) */
 #include <linux/irqflags.h>
 #include <asm/mas.h>
 #include <asm/cpu_regs.h>

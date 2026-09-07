@@ -320,26 +320,34 @@ void memtype_free(phys_addr_t start, phys_addr_t end)
  * track_pfn_copy is called when vma that is covering the pfnmap gets
  * copied through copy_page_range().
  */
-int track_pfn_copy(struct vm_area_struct *vma)
+int track_pfn_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+		   unsigned long *pfn)
 {
-	phys_addr_t paddr;
+	resource_size_t paddr;
 	unsigned long prot;
 
 	/* Note that for non-ram memory this bit won't be set.
 	 * Also the only reason this bit exists now is the debugging
 	 * check below.  If after some time it never triggers, then it
 	 * should be safe to remove VM_MEMTYPE_TRACKED altogether. */
-	if (!(vma->vm_flags & VM_MEMTYPE_TRACKED))
+	if (!(src_vma->vm_flags & VM_MEMTYPE_TRACKED))
 		return 0;
 
 	/* Check that memtype did not change unexpectedly */
-	if (follow_phys(vma, vma->vm_start, 0, &prot, &paddr)) {
+	if (follow_phys(src_vma, src_vma->vm_start, 0, &prot, &paddr)) {
 		WARN_ON_ONCE(1);
 		return -EINVAL;
 	}
-	check_memtypes_are_same(prot, paddr, vma->vm_end - vma->vm_start);
+	check_memtypes_are_same(prot, paddr, src_vma->vm_end - src_vma->vm_start);
 
+	dst_vma->vm_flags |= VM_MEMTYPE_TRACKED;
+	*pfn = PHYS_PFN(paddr);
 	return 0;
+}
+
+void untrack_pfn_copy(struct vm_area_struct *dst_vma, unsigned long pfn)
+{
+	untrack_pfn(dst_vma, pfn, dst_vma->vm_end - dst_vma->vm_start);
 }
 
 static pgprot_t __must_check fixup_pgprot_from_page_memtype(pgprot_t req_prot,
@@ -451,10 +459,11 @@ void untrack_pfn(struct vm_area_struct *vma, unsigned long pfn, unsigned long si
 		vma->vm_flags &= ~VM_MEMTYPE_TRACKED;
 }
 
+
 /*
- * untrack_pfn_moved is called while mremapping a pfnmap for a new region.
+ * untrack_pfn_clear is called while mremapping a pfnmap for a new region.
  */
-void untrack_pfn_moved(struct vm_area_struct *vma)
+void untrack_pfn_clear(struct vm_area_struct *vma)
 {
 	vma->vm_flags &= ~VM_MEMTYPE_TRACKED;
 }
@@ -556,6 +565,11 @@ int pudp_set_access_flags(struct vm_area_struct *vma,
 #endif
 
 #ifdef CONFIG_HAVE_ARCH_HUGE_VMAP
+/**
+ * pmd_set_huge - setup kernel PMD mapping
+ *
+ * Returns 1 on success and 0 on failure.
+ */
 int pmd_set_huge(pmd_t *pmd, phys_addr_t phys, pgprot_t prot)
 {
 	BUG_ON(phys & ~PMD_MASK);
@@ -566,19 +580,43 @@ int pmd_set_huge(pmd_t *pmd, phys_addr_t phys, pgprot_t prot)
 	return 1;
 }
 
+/**
+ * pmd_clear_huge - clear kernel PMD mapping when it is set
+ *
+ * Returns 1 on success and 0 on failure (no PMD map is found).
+ */
 int pmd_clear_huge(pmd_t *pmd)
 {
 	if (!kernel_pmd_huge(*pmd))
 		return 0;
-	pmd_clear(pmd);
+
+	/*
+	 * In kernel there is no swap or thp, valid page is always mapped,
+	 * so do not keep the valid bit when clearing.  This is important
+	 * because in kernel we cannot tolerate spurious page faults from
+	 * semi-speculative loads.
+	 *
+	 * Invalid uses of pmd_clear() are catched by debugging check, set
+	 * CONFIG_MARK_KERNEL_PAGE_TABLES=y to enable it.
+	 */
+	set_pmd(pmd, __pmd(0ul));
 	return 1;
 }
 
+/**
+ * pmd_free_pte_page - Clear pmd entry and free pte page.
+ * @pmd: Pointer to a PMD.
+ * @addr: Virtual address associated with pmd.
+ *
+ * Context: The pmd range has been unmapped and TLB purged.
+ * Return: 1 if clearing the entry succeeded. 0 otherwise.
+ */
 int pmd_free_pte_page(pmd_t *pmd, unsigned long addr)
 {
 	pte_t *pte = (pte_t *) pmd_page_vaddr(*pmd);
-	pmd_clear(pmd);
 
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_pmd(pmd, __pmd(0ul));
 	flush_tlb_kernel_range(addr, addr + PMD_SIZE);
 
 	pte_free_kernel(&init_mm, pte);
@@ -586,6 +624,9 @@ int pmd_free_pte_page(pmd_t *pmd, unsigned long addr)
 	return 1;
 }
 
+/**
+ * pud_set_huge - setup kernel PUD mapping
+ */
 int pud_set_huge(pud_t *pud, phys_addr_t phys, pgprot_t prot)
 {
 	BUG_ON(phys & ~PUD_MASK);
@@ -596,14 +637,31 @@ int pud_set_huge(pud_t *pud, phys_addr_t phys, pgprot_t prot)
 	return 1;
 }
 
+/**
+ * pud_clear_huge - clear kernel PUD mapping when it is set
+ *
+ * Returns 1 on success and 0 on failure (no PUD map is found).
+ */
 int pud_clear_huge(pud_t *pud)
 {
 	if (!kernel_pud_huge(*pud))
 		return 0;
-	pud_clear(pud);
+
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_pud(pud, __pud(0ul));
 	return 1;
 }
 
+/**
+ * pud_free_pmd_page - Clear pud entry and free pmd page.
+ * @pud: Pointer to a PUD.
+ * @addr: Virtual address associated with pud.
+ *
+ * Context: The pud range has been unmapped and TLB purged.
+ * Return: 1 if clearing the entry succeeded. 0 otherwise.
+ *
+ * NOTE: Callers must allow a single page allocation.
+ */
 int pud_free_pmd_page(pud_t *pud, unsigned long addr)
 {
 	pmd_t *pmd_save, *pmd_page = (pmd_t *)pud_page_vaddr(*pud);
@@ -620,12 +678,14 @@ int pud_free_pmd_page(pud_t *pud, unsigned long addr)
 		 * they point to after the whole PUD range is flushed from TLB.
 		 */
 		pmd_save[i] = pmd_page[i];
-		if (!pmd_none(pmd_page[i]))
-			pmd_clear(&pmd_page[i]);
+		if (!pmd_none(pmd_page[i])) {
+			/* See comment in pmd_clear_huge() before set_pmd() call */
+			set_pmd(&pmd_page[i], __pmd(0ul));
+		}
 	}
 
-	pud_clear(pud);
-
+	/* See comment in pmd_clear_huge() before set_pmd() call */
+	set_pud(pud, __pud(0ul));
 	flush_tlb_kernel_range(addr, addr + PUD_SIZE);
 
 	for (i = 0; i < PTRS_PER_PMD; i++) {

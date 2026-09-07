@@ -916,7 +916,7 @@ static int ahci_avn_hardreset(struct ata_link *link, unsigned int *class,
 }
 
 #ifdef CONFIG_MCST
-void mcst_ahci_port_reset(struct pci_dev *pdev)
+static void mcst_ahci_port_reset(struct pci_dev *pdev)
 {
 	struct ata_host *host = pci_get_drvdata(pdev);
 	struct ahci_host_priv *hpriv = host->private_data;

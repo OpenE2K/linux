@@ -17,6 +17,3 @@
  *    Version 2 at the following locations:
  *    https://opensource.org/licenses/gpl-2.0.php
  */
-struct axife_core_cfg axifecores[] = {
-    { 0x000400, 64*4, 0, 0x000800 },
-};

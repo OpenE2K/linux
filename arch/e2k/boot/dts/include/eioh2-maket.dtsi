@@ -32,6 +32,10 @@
 # define DMN_4_STS "disabled"
 #endif
 
+#define __MSI(_n) msi ## _n
+#define _MSI(_n) __MSI(_n)
+#define MSI _MSI(NODE)
+
 #if NODE == 0
 # define PCICFG_ADDRL(_a) 0x2 ## _a
 # define PCICFG_ADDR(_a) 0x2 _a
@@ -196,7 +200,11 @@
 
 		#interrupt-cells = <2>;
 	};
-
+	MSI: MSI {
+		compatible = "mcst,l-msi";
+		interrupt-parent = <&lpic>;
+		msi-controller;
+	};
 	IOMMU_0: iommu@DMN_0,380 {
 		compatible = "mcst,e2k-iommu";
 		REG = <NSR_ADDR(00380) 0 0x80>,
@@ -231,7 +239,7 @@
 
 		linux,pci-domain = <DMN_0>;
 		numa-node-id = <NODE>;
-		msi-parent = <&lmsi>;
+		msi-parent = <&MSI>;
 		linux,pci-probe-only = <1>;
 
 		/*rid-base,iommu,iommu-base,length*/

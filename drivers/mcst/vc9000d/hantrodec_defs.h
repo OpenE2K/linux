@@ -146,4 +146,13 @@
 #define HANTRO_DEC_IRQ               0x100
 #define HANTRO_PP_IRQ                0x100
 
+extern unsigned long alloc_base;
+extern unsigned long alloc_size;
+extern unsigned int arbiter_urgent;
+extern unsigned int arbiter_bw_overflow;
+extern unsigned int arbiter_weight;
+extern unsigned long vcmd_isr_polling;
+extern unsigned long sw_timeout_time;
+extern int vsi_kloglvl;
+
 #endif /* HANTRODEC_DEFS_H_ */

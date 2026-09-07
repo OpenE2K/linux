@@ -22,8 +22,10 @@
 # ifdef __LCC__
 #define INDIRECT_CALL_2(f, f2, f1, ...)					\
 	({								\
-		(f == f2) ? f2(__VA_ARGS__) :			\
-				  INDIRECT_CALL_1(f, f1, __VA_ARGS__);	\
+		typeof(f) __f2 = (f);					\
+		(__f2 == f2) ? f2(__VA_ARGS__) :			\
+				  INDIRECT_CALL_1(__f2, f1, __VA_ARGS__);	\
+
 	})
 # else
 #define INDIRECT_CALL_2(f, f2, f1, ...)					\

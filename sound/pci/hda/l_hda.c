@@ -601,6 +601,9 @@ static bool azx_is_pm_ready(struct azx *chip)
 {
 	struct hda_intel *hda;
 
+	if (!chip)
+		return false;
+
 	hda = container_of(chip, struct hda_intel, chip);
 	if (chip->disabled || hda->init_failed || !chip->running)
 		return false;
@@ -725,6 +728,9 @@ static int azx_runtime_idle(struct device *dev)
 {
 	struct azx *chip = dev_get_drvdata(dev);
 	struct hda_intel *hda;
+
+	if (!chip)
+		return 0;
 
 	hda = container_of(chip, struct hda_intel, chip);
 	if (chip->disabled || hda->init_failed)

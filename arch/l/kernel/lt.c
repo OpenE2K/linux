@@ -40,7 +40,7 @@ static int setup_lt_clock_rate(void)
 }
 pure_initcall(setup_lt_clock_rate);
 
-lt_regs_t *lt_regs = NULL;
+lt_regs_t __iomem *lt_regs = NULL;
 
 /* Points to the installed clock event device */
 struct clock_event_device *global_clock_event;
@@ -173,7 +173,7 @@ static struct clock_event_device lt_ce = {
  * Initialize the conversion factor and the min/max deltas of the clock event
  * structure and register the clock event source with the framework.
  */
-void __init setup_lt_timer(void)
+static void __init setup_lt_timer(void)
 {
 	/* Can be called before any initcalls so initialize manually */
 	setup_lt_clock_rate();

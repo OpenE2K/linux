@@ -16,7 +16,6 @@
 #include <asm/e2k_api.h>
 #include <asm/e2k.h>
 #include <asm/e2k_sic.h>
-#include <asm/nbsr_v6_regs.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/iolinkmask.h>
@@ -24,6 +23,7 @@
 #include <asm/console.h>
 #include <asm/hardirq.h>
 #include <asm/pic.h>
+#include <asm/setup.h>
 
 #include <asm/l-mcmonitor.h>
 
@@ -40,8 +40,6 @@
 #define DebugENBSR(...)		DebugPrint(DEBUG_ERALY_NBSR_MODE ,##__VA_ARGS__)
 
 
-extern int __initdata max_iolinks;
-extern int __initdata max_node_iolinks;
 
 e2k_addr_t sic_get_io_area_max_size(void)
 {
@@ -59,7 +57,6 @@ static e2k_mc_ctl_t sic_get_mc_ctl(int node, int channel)
 	u32 val;
 	if (machine.native_iset_ver >= E2K_ISET_V6) {
 		unsigned long flags;
-
 		raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
 		sic_write_node_nbsr_reg(node, MC_CH, channel);
 		val = sic_read_node_nbsr_reg(node, MC_CTL);
@@ -78,7 +75,8 @@ sic_read_node_mc_nbsr_reg(int node, int channel, int reg_offset)
 
 	if (machine.native_iset_ver >= E2K_ISET_V6) {
 		unsigned long flags;
-
+		if (cpu_has(CPU_HWBUG_MCNA_PLLMC_ACCESS) && MCNA_REG(reg_offset) && (channel == 1))
+			channel = 2;
 		raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
 		sic_write_node_nbsr_reg(node, MC_CH, channel);
 		reg_val = sic_read_node_nbsr_reg(node, reg_offset);
@@ -92,6 +90,8 @@ sic_read_node_mc_nbsr_reg(int node, int channel, int reg_offset)
 u32 sic_read_node_v7_mc_nbsr_reg(int node, int channel, int reg_offset)
 {
 	unsigned long flags;
+	if (cpu_has(CPU_HWBUG_MCNA_PLLMC_ACCESS) && MCNA_REG(reg_offset) && (channel == 1))
+		channel = 2;
 	u32 reg_val;
 	raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
 	sic_write_node_nbsr_reg(node, MC_CH, channel);
@@ -107,7 +107,8 @@ sic_write_node_mc_nbsr_reg(int node, int channel, int reg_offset, unsigned int r
 {
 	if (machine.native_iset_ver >= E2K_ISET_V6) {
 		unsigned long flags;
-
+		if (cpu_has(CPU_HWBUG_MCNA_PLLMC_ACCESS) && MCNA_REG(reg_value) && (channel == 1))
+			channel = 2;
 		raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
 		sic_write_node_nbsr_reg(node, MC_CH, channel);
 		sic_write_node_nbsr_reg(node, reg_offset, reg_value);
@@ -120,6 +121,8 @@ sic_write_node_mc_nbsr_reg(int node, int channel, int reg_offset, unsigned int r
 void sic_write_node_v7_mc_nbsr_reg(int node, int channel, int reg_offset, u32 reg_value)
 {
 	unsigned long flags;
+	if (cpu_has(CPU_HWBUG_MCNA_PLLMC_ACCESS) && MCNA_REG(reg_value) && (channel == 1))
+		channel = 2;
 	raw_spin_lock_irqsave(&sic_mc_reg_lock, flags);
 	sic_write_node_nbsr_reg(node, MC_CH, channel);
 	sic_write_node_nbsr_reg(node, reg_offset, reg_value);
@@ -417,23 +420,6 @@ EXPORT_SYMBOL_GPL(nodes_nbsr_base);
 /* Secret knowledge of v7. See bug 129813
 mc_en  = [31 : 24]
 mch_en = [12 : 11]
-       for e48c:
-MCH0  turned on,  if OCN_MIL.mc_en[0]=1   and  MC_CH=0, MCNA_CTRL.mch_en[0]=1
-MCH1  turned on,  if OCN_MIL.mc_en[0]=1   and  MC_CH=0, MCNA_CTRL.mch_en[1]=1
-MCH2  turned on,  if OCN_MIL.mc_en[3]=1   and  MC_CH=2, MCNA_CTRL.mch_en[0]=1
-MCH3  turned on,  if OCN_MIL.mc_en[3]=1   and  MC_CH=2, MCNA_CTRL.mch_en[1]=1
-MCH4  turned on,  if OCN_MIL.mc_en[2]=1   and  MC_CH=4, MCNA_CTRL.mch_en[0]=1
-MCH5  turned on,  if OCN_MIL.mc_en[2]=1   and  MC_CH=4, MCNA_CTRL.mch_en[1]=1
-MCH6  turned on,  if OCN_MIL.mc_en[1]=1   and  MC_CH=6, MCNA_CTRL.mch_en[0]=1
-MCH7  turned on,  if OCN_MIL.mc_en[1]=1   and  MC_CH=6, MCNA_CTRL.mch_en[1]=1
-MCH8  turned on,  if OCN_MIL.mc_en[4]=1   and  MC_CH=8, MCNA_CTRL.mch_en[0]=1
-MCH9  turned on,  if OCN_MIL.mc_en[4]=1   and  MC_CH=8, MCNA_CTRL.mch_en[1]=1
-MCH10 turned on,  if OCN_MIL.mc_en[7]=1   and  MC_CH=10, MCNA_CTRL.mch_en[0]=1
-MCH11 turned on,  if OCN_MIL.mc_en[7]=1   and  MC_CH=10, MCNA_CTRL.mch_en[1]=1
-MCH12 turned on,  if OCN_MIL.mc_en[6]=1   and  MC_CH=12, MCNA_CTRL.mch_en[0]=1
-MCH13 turned on,  if OCN_MIL.mc_en[6]=1   and  MC_CH=12, MCNA_CTRL.mch_en[1]=1
-MCH14 turned on,  if OCN_MIL.mc_en[5]=1   and  MC_CH=14, MCNA_CTRL.mch_en[0]=1
-MCH15 turned on,  if OCN_MIL.mc_en[5]=1   and  MC_CH=14, MCNA_CTRL.mch_en[1]=1
        for e8v7:
 MC0  turned on,  if OCN_MIL.mc_en[0]=1
 MC1  turned on,  if OCN_MIL.mc_en[1]=1
@@ -446,18 +432,17 @@ static int v7_mc_enabled(e2k_ocn_mil_t ocn_mil, int mc)
 		return (mc_en & (1 << mc));
 	}
 	switch (mc >> 1) {
-		case 0: return (mc_en & (1 << 0)); 
-		case 1: return (mc_en & (1 << 3)); 
-		case 2: return (mc_en & (1 << 2)); 
-		case 3: return (mc_en & (1 << 1)); 
-		case 4: return (mc_en & (1 << 4)); 
-		case 5: return (mc_en & (1 << 7)); 
-		case 6: return (mc_en & (1 << 6)); 
-		case 7: return (mc_en & (1 << 5));
-		default: return 0;
+	case 0: return (mc_en & (1 << 0));
+	case 1: return (mc_en & (1 << 3));
+	case 2: return (mc_en & (1 << 2));
+	case 3: return (mc_en & (1 << 1));
+	case 4: return (mc_en & (1 << 4));
+	case 5: return (mc_en & (1 << 7));
+	case 6: return (mc_en & (1 << 6));
+	case 7: return (mc_en & (1 << 5));
+	default: return 0;
 	}
-	return 0;
-} 
+}
 
 static int v7_mch_enabled(int node, int mc)
 {
@@ -466,7 +451,7 @@ static int v7_mch_enabled(int node, int mc)
 	}
 	u32 mcna_ctrl = sic_read_node_v7_mc_nbsr_reg(node, 2 * (mc >> 1), MCNA_CTRL);
 	return ((mcna_ctrl >> 11) & (1 << (mc & 1)));
-} 
+}
 
 static int is_mc_enabled(int node, int mch)
 {
@@ -524,7 +509,7 @@ int __init e2k_sic_init(void)
 			if (is_mc_enabled(node, mc)) {
 				mc_enabled_mask[node] |= (1 << mc);
 			}
-		} 
+		}
 		pr_info("mc_enabled_mask[%d] = 0x%08llx\n", node, mc_enabled_mask[node]);
 		if (CURRENT_ISET >= E2K_ISET_V7) {
 			e2k_l3_imsk_t r;
@@ -533,14 +518,6 @@ int __init e2k_sic_init(void)
 			r.ecc_sed_ld = 1;
 			r.pmon = 1;
 			sic_write_node_nbsr_reg(node, L3_IMSK, AW(r));
-		}
-		if (cpu_has(CPU_FEAT_E48C_MAKET)) { /* rm26756 */
-			xmu_l_int_m_t r;
-			AW(r) = sic_read_node_nbsr_reg(node, XMU_L_INT_M);
-			r.ocn_par_irq = 1;
-			r.ocn_par_ack = 1;
-			r.ocn_par_dat_h = 1;
-			sic_write_node_nbsr_reg(node, XMU_L_INT_M, AW(r));
 		}
 	}
 	create_nodes_io_config();
@@ -820,7 +797,7 @@ static void sic_mc_regs_dump(int node)
 			pr_cont("0x%08x ", sic_read_node_nbsr_reg(node, offset));
 		}
 		pr_emerg("\n");
-	} else { 
+	} else {
 		int mc;
 		u32 reg;
 		pr_emerg("Crime MC_STATUS regs:\n");
@@ -853,10 +830,20 @@ static void sic_ha_l3_regs_dump(int node)
 		reg = sic_read_l3_reg(node, ha, L3_INT);
 		if (reg) {
 			pr_emerg("L3_INT of L3 %d: 0x%08x\n", ha, reg);
+			if (cpu_has(CPU_FEAT_V7_CPU_REGS) && (reg & (1 << 4))) {
+				reg = sic_read_l3_reg(node, ha, L3_EMRG0);
+				pr_emerg("       L3_EMRG0 of L3 %d: 0x%08x\n", ha, reg);
+				reg = sic_read_l3_reg(node, ha, L3_EMRG1);
+				pr_emerg("       L3_EMRG1 of L3 %d: 0x%08x\n", ha, reg);
+				reg = sic_read_l3_reg(node, ha, L3_EMRG2);
+				pr_emerg("       L3_EMRG2 of L3 %d: 0x%08x\n", ha, reg);
+				reg = sic_read_l3_reg(node, ha, L3_EMRG3);
+				pr_emerg("       L3_EMRG3 of L3 %d: 0x%08x\n", ha, reg);
+			}
 		}
 	}
 }
-		
+
 static void sic_hmu_regs_dump(int node)
 {
 	pr_emerg("HMU0_INT 0x%x HMU1_INT 0x%x HMU2_INT 0x%x HMU3_INT 0x%x\n",

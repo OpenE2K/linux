@@ -17,7 +17,6 @@
 #include <linux/delay.h>
 #include <linux/pci.h>
 #include <linux/pci_ids.h>
-#include <linux/delay.h>
 #include <asm/io.h>
 
 #ifndef MODULE
@@ -459,13 +458,23 @@ MODULE_PARM_DESC(pcs_mode,
 	"An array of PCS MPLL mode - "
 	"0:1G+1G 1:1G+1Gbif 2:2G5+1G 3:1G+2G5 4:2G5+2G5 5:10G+1G 6:10G+2G5");
 
+extern spinlock_t eldwcxpcs_mgio_lock[];
 
+spinlock_t eldwcxpcs_mgio_lock[MAX_NUMNODES];
+EXPORT_SYMBOL(eldwcxpcs_mgio_lock);
+
+static struct mutex eldwcxpcs_mx[MAX_NUMNODES];
+
+static spinlock_t eldwcxpcs_mode_lock;
+
+int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);  /* for sparse */
 int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev)
 {
 	int ret = -ENODEV;
 
 	if (pdev) {
 		int node = dev_to_node(&pdev->dev);
+		unsigned long flags;
 
 		if (node < 0)
 			node = 0; /* nn */
@@ -477,15 +486,17 @@ int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev)
 			goto out;
 		}
 
-		if (pcs_mode[node] >= PCS_MODES)
-			pcs_mode[node] = PCS_MODE_1G_1G; /* default */
+		spin_lock_irqsave(&eldwcxpcs_mode_lock, flags);
 
-		ret = MPLL_MODE_1G; /* default */
+		if (pcs_mode[node] >= PCS_MODES)
+			pcs_mode[node] = PCS_MODE_1GBIF_1GBIF;
+
+		if (pcs_mode[node] == PCS_MODE_1G_1G)
+			pcs_mode[node] = PCS_MODE_1GBIF_1GBIF;
+
+		ret = MPLL_MODE_1G_BIF; /* default */
 		if (PCI_FUNC(pdev->devfn) != 0) {
 			switch (pcs_mode[node]) { /* ch1 */
-			case PCS_MODE_1G_1G:
-				ret = MPLL_MODE_1G;
-				break;
 			case PCS_MODE_1GBIF_1GBIF:
 				ret = MPLL_MODE_1G_BIF;
 				break;
@@ -507,9 +518,6 @@ int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev)
 			}
 		} else {
 			switch (pcs_mode[node]) { /* ch0 */
-			case PCS_MODE_1G_1G:
-				ret = MPLL_MODE_1G;
-				break;
 			case PCS_MODE_1GBIF_1GBIF:
 				ret = MPLL_MODE_1G_BIF;
 				break;
@@ -533,16 +541,125 @@ int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev)
 		dev_dbg(&pdev->dev,
 			 "eldwcxpcs: MPLL mode (%d) %s\n", ret,
 			 (ret == MPLL_MODE_10G)    ? "10G" :
-			 (ret == MPLL_MODE_1G)     ? "1G" :
 			 (ret == MPLL_MODE_2G5)    ? "2.5G" :
-			 (ret == MPLL_MODE_1G_BIF) ? "1Gbif" :
+			 (ret == MPLL_MODE_1G_BIF) ? "1G" :
 						     "unknown");
+
+		spin_unlock_irqrestore(&eldwcxpcs_mode_lock, flags);
 	}
 
 out:
 	return ret;
 }
 EXPORT_SYMBOL(eldwcxpcs_get_mpll_mode);
+
+void eldwcxpcs_set_mpll_mode(struct pci_dev *pdev, unsigned int mpll_mode)
+{
+	int node;
+	unsigned int mode;
+	unsigned long flags;
+
+	if (!pdev)
+		return;
+
+	mode = mpll_mode;
+	node = dev_to_node(&pdev->dev);
+	if (node < 0)
+		node = 0;
+
+	if (node >= MAX_NUMNODES) {
+		dev_err(&pdev->dev,
+			"eldwcxpcs: node = %d >= MAX_NUMNODES (%d)\n",
+			node, MAX_NUMNODES);
+		return;
+	}
+
+	spin_lock_irqsave(&eldwcxpcs_mode_lock, flags);
+
+	if (mode >= MPLL_MODES)
+		mode = MPLL_MODE_1G_BIF;
+
+	if (mode == MPLL_MODE_1G)
+		mode = MPLL_MODE_1G_BIF;
+
+	if (pcs_mode[node] >= PCS_MODES)
+		pcs_mode[node] = PCS_MODE_1GBIF_1GBIF; /* default */
+
+	if (PCI_FUNC(pdev->devfn) != 0) { /* channel 1 */
+		switch (mode) {
+		case MPLL_MODE_1G_BIF:
+			switch (pcs_mode[node]) {
+			case PCS_MODE_1GBIF_2G5:
+				pcs_mode[node] = PCS_MODE_1GBIF_1GBIF;
+				break;
+			case PCS_MODE_2G5_2G5:
+				pcs_mode[node] = PCS_MODE_2G5_1GBIF;
+				break;
+			case PCS_MODE_10G_2G5:
+				pcs_mode[node] = PCS_MODE_10G_1GBIF;
+				break;
+			default:
+				break;
+			}
+			break;
+		case MPLL_MODE_2G5:
+			switch (pcs_mode[node]) {
+			case PCS_MODE_1GBIF_1GBIF:
+				pcs_mode[node] = PCS_MODE_1GBIF_2G5;
+				break;
+			case PCS_MODE_2G5_1GBIF:
+				pcs_mode[node] = PCS_MODE_2G5_2G5;
+				break;
+			case PCS_MODE_10G_1GBIF:
+				pcs_mode[node] = PCS_MODE_10G_2G5;
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+	} else { /* channel 0 */
+		switch (mode) {
+		case MPLL_MODE_1G_BIF:
+			switch (pcs_mode[node]) {
+			case PCS_MODE_2G5_1GBIF:
+				pcs_mode[node] = PCS_MODE_1GBIF_1GBIF;
+				break;
+			case PCS_MODE_2G5_2G5:
+				pcs_mode[node] = PCS_MODE_1GBIF_2G5;
+				break;
+			default:
+				break;
+			}
+			break;
+		case MPLL_MODE_2G5:
+			switch (pcs_mode[node]) {
+			case PCS_MODE_1GBIF_1GBIF:
+				pcs_mode[node] = PCS_MODE_2G5_1GBIF;
+				break;
+			case PCS_MODE_1GBIF_2G5:
+				pcs_mode[node] = PCS_MODE_2G5_2G5;
+				break;
+			default:
+				break;
+			}
+			break;
+		case MPLL_MODE_10G:
+			break;
+		}
+	}
+	dev_dbg(&pdev->dev,
+		"eldwcxpcs: set MPLL mode (n%df%d) %s pcs mode %d\n",
+		node, PCI_FUNC(pdev->devfn),
+		(mode == MPLL_MODE_10G)    ? "10G" :
+		(mode == MPLL_MODE_2G5)    ? "2.5G" :
+		(mode == MPLL_MODE_1G_BIF) ? "1G" :
+					     "unknown",
+		pcs_mode[node]);
+
+	spin_unlock_irqrestore(&eldwcxpcs_mode_lock, flags);
+}
+EXPORT_SYMBOL(eldwcxpcs_set_mpll_mode);
 
 static inline bool my_is_eiohub_proto(struct pci_dev *pdev)
 {
@@ -655,7 +772,7 @@ static struct dentry *eldwcxpcs_dbg_root = NULL;
 #define MGIO_OP_CODE_OFF	28
 #define MGIO_ST_OF_F_OFF	30
 
-static inline int wait_rrdy(unsigned char *mgb_ioaddr)
+static inline int wait_rrdy(unsigned char __iomem *mgb_ioaddr)
 {
 	int i;
 
@@ -668,11 +785,18 @@ static inline int wait_rrdy(unsigned char *mgb_ioaddr)
 	return i == PHY_WAIT_NUM;
 } /* wait_rrdy */
 
-static int pcs_read_c45(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
+static int pcs_read_c45(struct pci_dev *pdev, unsigned char __iomem *mgb_ioaddr,
 			int reg_num)
 {
 	u32 rd;
 	int mii_id = my_is_eiohub_proto(pdev) ? PCS_ADDR_PROTO : PCS_ADDR_DEF;
+	unsigned long flags;
+	int node = dev_to_node(&pdev->dev);
+
+	if (node < 0)
+		node = 0;
+
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[node], flags);
 
 	writel((readl(mgb_ioaddr + MGIO_CSR) & ~MG_W1C_MASK) | MG_RRDY,
 	       mgb_ioaddr + MGIO_CSR);
@@ -692,22 +816,29 @@ static int pcs_read_c45(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 		goto bad_result;
 
 	rd = readl(mgb_ioaddr + MGIO_DATA) & 0xffff;
-
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[node], flags);
 	return (int)rd;
 
 bad_result:
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[node], flags);
 	pr_err(KBUILD_MODNAME ": %s: Unable to read from MGIO_DATA reg 0x%x\n",
 	       __func__, reg_num);
 
 	return -1;
 } /* pcs_read_c45 */
 
-static void pcs_write_c45(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
+static void pcs_write_c45(struct pci_dev *pdev, unsigned char __iomem *mgb_ioaddr,
 			  int reg_num, int val)
 {
 	u32 wr;
 	int mii_id = my_is_eiohub_proto(pdev) ? PCS_ADDR_PROTO : PCS_ADDR_DEF;
+	unsigned long flags;
+	int node = dev_to_node(&pdev->dev);
 
+	if (node < 0)
+		node = 0;
+
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[node], flags);
 
 	writel((readl(mgb_ioaddr + MGIO_CSR) & ~MG_W1C_MASK) | MG_RRDY,
 	       mgb_ioaddr + MGIO_CSR);
@@ -729,9 +860,12 @@ static void pcs_write_c45(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 	if (wait_rrdy(mgb_ioaddr))
 		goto bad_result;
 
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[node], flags);
+
 	return;
 
 bad_result:
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[node], flags);
 	pr_err(KBUILD_MODNAME ": %s: Unable to write MGIO_DATA reg 0x%x\n",
 	       __func__, reg_num);
 
@@ -740,7 +874,7 @@ bad_result:
 
 /* Initiate the Vendor specific software reset */
 /* reset for both controllers are configured via func 0 */
-static void pcs0_vs_reset(struct pci_dev *pdev, unsigned char *mgb_ioaddr)
+static void pcs0_vs_reset(struct pci_dev *pdev, unsigned char __iomem *mgb_ioaddr)
 {
 	int i;
 	u16 val;
@@ -764,14 +898,14 @@ static void pcs0_vs_reset(struct pci_dev *pdev, unsigned char *mgb_ioaddr)
 			"(VR_XS_PCS_DIG_CTRL1.15)\n",
 			dev_name(&pdev->dev));
 	} else {
-		pr_info(KBUILD_MODNAME
+		pr_debug(KBUILD_MODNAME
 			" %s: vendor specific reset "
 			"(VR_XS_PCS_DIG_CTRL1.15) - done\n",
 			dev_name(&pdev->dev));
 	}
 } /* pcs0_vs_reset */
 
-static int pcs0_wait1reset(struct pci_dev *pdev, unsigned char *mgb_ioaddr)
+static int pcs0_wait1reset(struct pci_dev *pdev, unsigned char __iomem *mgb_ioaddr)
 {
 	int i;
 
@@ -791,7 +925,7 @@ static int pcs0_wait1reset(struct pci_dev *pdev, unsigned char *mgb_ioaddr)
 	return 0;
 } /* pcs0_wait1reset */
 
-static void pcs_configure(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
+static void pcs_configure(struct pci_dev *pdev, unsigned char __iomem *mgb_ioaddr,
 			 int mpll_mode)
 {
 	int i = 0;
@@ -803,19 +937,20 @@ static void pcs_configure(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 	}
 } /* pcs_configure */
 
-static void pcs_raw_init_rst(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
+static void pcs_raw_init_rst(struct pci_dev *pdev, unsigned char __iomem *mgb_ioaddr,
 			     int node)
 {
 	int r;
 	u16 val;
 	u32 pcs_dev_id;
 	int pcsaddr;
+	unsigned long flags;
 
 	if (pcs_mode[node] >= PCS_MODES)
-		pcs_mode[node] = PCS_MODE_1G_1G; /* default */
+		pcs_mode[node] = PCS_MODE_1GBIF_1GBIF; /* default */
 
 	if (PCI_FUNC(pdev->devfn) == 0) {
-		pr_info(KBUILD_MODNAME
+		pr_debug(KBUILD_MODNAME
 			" %s: configure PCS MPLL on node %d: %s\n",
 			dev_name(&pdev->dev), node,
 			(pcs_mode[node] == PCS_MODE_1G_1G) ? "1G+1G norm" :
@@ -832,7 +967,7 @@ static void pcs_raw_init_rst(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 		 " %s: clean MGIO_CSR W1C bits and start soft reset\n",
 		 dev_name(&pdev->dev));
 	/* reset_mgio */
-	/*raw_spin_lock_irqsave(&ep->mgio_lock, flags);*/
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[node], flags);
 	r = readl(mgb_ioaddr + MGIO_CSR);
 	r &= ~MG_W1C_MASK;
 	r |= MG_SRST; /* RST */
@@ -840,7 +975,7 @@ static void pcs_raw_init_rst(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 	r &= ~MG_SRST; /* ~RST */
 	mdelay(20); /* 10ms min */
 	writel(r, mgb_ioaddr + MGIO_CSR);
-	/*raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);*/
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[node], flags);
 	mdelay(100); /* wait for reset min 15ms@156 */
 
 	if (PCI_FUNC(pdev->devfn) != 0)
@@ -873,7 +1008,7 @@ static void pcs_raw_init_rst(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 		(pcs_dev_id == PCS_DEV_ID_1G_2G5) ? "1G/2.5G" : "unknown");
 } /* pcs_raw_init_rst */
 
-static void pcs_raw_init_pll(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
+static void pcs_raw_init_pll(struct pci_dev *pdev, unsigned char __iomem *mgb_ioaddr,
 			     int node)
 {
 	int mpll_mode;
@@ -946,9 +1081,6 @@ static void pcs_raw_init_pll(struct pci_dev *pdev, unsigned char *mgb_ioaddr,
 
 ch0andch1:
 	mpll_mode = eldwcxpcs_get_mpll_mode(pdev);
-	if (mpll_mode < 0)
-		mpll_mode = MPLL_MODE_1G; /* default */
-
 	pcs_configure(pdev, mgb_ioaddr, mpll_mode);
 } /* pcs_raw_init_pll */
 
@@ -961,8 +1093,28 @@ static int chk_cmdline(void)
 		 num_online_nodes(), pcs_mode_argc);
 
 	if (!pcs_mode_argc) {
+		int i;
+#if defined(CONFIG_E2K)
+#if defined(CONFIG_CPU_E2C3)
+		for (i = 0; i < MAX_NUMNODES; i++)
+			pcs_mode[i] = PCS_MODE_1GBIF_1GBIF;
+
 		pr_info(KBUILD_MODNAME
 			": no PCS modes in cmdline, use default 1G+1G");
+#else /* E16C, E12C */
+		for (i = 0; i < MAX_NUMNODES; i++)
+			pcs_mode[i] = PCS_MODE_1GBIF_1GBIF;
+
+		pr_info(KBUILD_MODNAME
+			": no PCS modes in cmdline, use default 1G+1G");
+#endif
+#else /* R2000+ */
+		for (i = 0; i < MAX_NUMNODES; i++)
+			pcs_mode[i] = PCS_MODE_1G_1G;
+
+		pr_info(KBUILD_MODNAME
+			": no PCS modes in cmdline, use default 1G+1G");
+#endif
 		return 0;
 	}
 
@@ -976,7 +1128,8 @@ static int chk_cmdline(void)
 	return 0;
 } /* chk_cmdline */
 
-void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char *ioaddr)
+void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char __iomem *ioaddr); /* for sparse */
+void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char __iomem *ioaddr)
 {
 	u16 val;
 	int node;
@@ -1010,8 +1163,8 @@ void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char *ioaddr)
 	val = pcs_read_c45(pdev, ioaddr, SR_XS_PCS_CTRL1);
 	/* Wait RST (SR_XS_PCS_CTRL1) to 1'h0 */
 	if (pcs0_wait1reset(pdev, ioaddr) == 0) {
-		pr_info(KBUILD_MODNAME " %s: reset PCS0 - done\n",
-			dev_name(&pdev->dev));
+		pr_debug(KBUILD_MODNAME " %s: reset PCS0 - done\n",
+			 dev_name(&pdev->dev));
 	}
 	mdelay(1);
 
@@ -1024,10 +1177,10 @@ void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char *ioaddr)
 	mdelay(100);
 	reg = (u16)pcs_read_c45(pdev, ioaddr,
 				VR_XS_PMA_Gen5_12G_16G_MISC_STS);
-	pr_info(KBUILD_MODNAME ": MPLL A%s B%s (0x%04X)",
-		((reg >> 9) & 1) ? "+" : "-",
-		((reg >> 10) & 1) ? "+" : "-",
-		reg);
+	pr_debug(KBUILD_MODNAME ": MPLL A%s B%s (0x%04X)",
+		 ((reg >> 9) & 1) ? "+" : "-",
+		 ((reg >> 10) & 1) ? "+" : "-",
+		 reg);
 
 	/* Vendor specific software reset 2! */
 	pcs0_vs_reset(pdev, ioaddr);
@@ -1052,15 +1205,109 @@ static struct mdio_driver eldwcxpcs_driver = {
 struct mgb_pcs {
 	struct pci_dev *pdev;
 	resource_size_t res0;
-	unsigned char *mgb_ioaddr;
+	unsigned char __iomem *mgb_ioaddr;
 	int node;
 };
+
+void eldwcxpcs_node_reinit(int node)
+{
+	int ret;
+	struct pci_dev *pdev = NULL;
+	struct mgb_pcs pcs[MAX_PCS] = { 0 };
+	int pnum = 0;
+	int i;
+
+	mutex_lock(&eldwcxpcs_mx[node]);
+	pr_debug(KBUILD_MODNAME " %s: node %d reinit starts\n", __func__, node);
+
+	while ((pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,
+				      PCI_DEVICE_ID_MCST_MGB, pdev))) {
+		int cur_node;
+
+		ret = pci_enable_device(pdev);
+		if (ret < 0) {
+			dev_err(&pdev->dev,
+				"failed to enable device err=%d\n", ret);
+			continue;
+		}
+
+		cur_node = dev_to_node(&pdev->dev);
+		if (cur_node < 0)
+			cur_node = 0;
+		if (node != cur_node) {
+			pci_disable_device(pdev);
+			continue;
+		}
+
+		pcs[pnum].node = cur_node;
+		pcs[pnum].pdev = pdev;
+		pcs[pnum].res0 = pci_resource_start(pcs[pnum].pdev, 0);
+		request_mem_region(pcs[pnum].res0, MGB_TOTAL_SIZE,
+				   KBUILD_MODNAME);
+		pcs[pnum].mgb_ioaddr = ioremap(pcs[pnum].res0, MGB_TOTAL_SIZE);
+
+		pnum += 1;
+		if (pnum >= MAX_PCS)
+			break;
+	}
+
+	pr_debug(KBUILD_MODNAME " %s: node %d found pnum %d\n", __func__, node, pnum);
+	if (!pnum) {
+		pr_warn(KBUILD_MODNAME ": no node %d reinitialization done!", node);
+		mutex_unlock(&eldwcxpcs_mx[node]);
+		return;
+	}
+
+	for (i = 0; i < pnum; i++) {
+		if (pcs[i].pdev)
+			pcs_raw_init_rst(pcs[i].pdev, pcs[i].mgb_ioaddr, pcs[i].node);
+	}
+	for (i = 0; i < pnum; i++) {
+		if (pcs[i].pdev) {
+			pcs_raw_init_pll(pcs[i].pdev, pcs[i].mgb_ioaddr, pcs[i].node);
+
+			/* Vendor specific software reset 1! */
+			pcs0_vs_reset(pcs[i].pdev, pcs[i].mgb_ioaddr);
+
+			/* wait for MPLL started */
+			if (PCI_FUNC(pcs[i].pdev->devfn) == 0) {
+				u16 reg;
+
+				mdelay(100);
+				reg = (u16)pcs_read_c45(pcs[i].pdev, pcs[i].mgb_ioaddr,
+						VR_XS_PMA_Gen5_12G_16G_MISC_STS);
+				pr_debug(KBUILD_MODNAME ": node %d : MPLL A%s B%s (0x%04X)",
+					 pcs[i].node,
+					 ((reg >> 9) & 1) ? "+" : "-",
+					 ((reg >> 10) & 1) ? "+" : "-",
+					 reg);
+			}
+		}
+	}
+	for (i = 0; i < pnum; i++) {
+		if (pcs[i].pdev) {
+			/* Vendor specific software reset 2! */
+			pcs0_vs_reset(pcs[i].pdev, pcs[i].mgb_ioaddr);
+		}
+	}
+
+	/* release mgb pci resource */
+	for (i = 0; i < pnum; i++) {
+		if (pcs[i].pdev) {
+			iounmap(pcs[i].mgb_ioaddr);
+			release_mem_region(pcs[i].res0, MGB_TOTAL_SIZE);
+			pci_disable_device(pcs[i].pdev);
+		}
+	}
+	mutex_unlock(&eldwcxpcs_mx[node]);
+}
+EXPORT_SYMBOL(eldwcxpcs_node_reinit);
 
 static int __init mdio_module_init(void)
 {
 	int ret;
 	struct pci_dev *pdev = NULL;
-	struct mgb_pcs pcs[MAX_PCS];
+	struct mgb_pcs pcs[MAX_PCS] = { 0 };
 	int pnum = 0;
 	int i;
 
@@ -1076,6 +1323,13 @@ static int __init mdio_module_init(void)
 	if (eldwcxpcs_dbg_root == NULL)
 		pr_warn(KBUILD_MODNAME ": Init of debugfs failed\n");
 #endif /* CONFIG_DEBUG_FS */
+
+	spin_lock_init(&eldwcxpcs_mode_lock);
+
+	for (i = 0; i < MAX_NUMNODES; i++) {
+		spin_lock_init(&eldwcxpcs_mgio_lock[i]);
+		mutex_init(&eldwcxpcs_mx[i]);
+	}
 
 	/* get mgb pci resource */
 	while ((pdev = pci_get_device(PCI_VENDOR_ID_MCST_TMP,

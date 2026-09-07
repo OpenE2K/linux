@@ -7,12 +7,10 @@
 #include "pci.h"
 #include <linux/pci_ids.h>
 
-#ifdef	CONFIG_E2K_SIC
-#include "../e2k_sic.h"
-#endif	/* CONFIG_E2K_SIC */
+#include "e2k_sic.h"
 
-#include "../topology.h"
-#include "../boot_io.h"
+#include "topology.h"
+#include "boot_io.h"
 
 #undef __KERNEL__
 
@@ -46,12 +44,8 @@
 #define	IOHUB_AMR_SECONDARY_NATIVE	0x4	/* IDE secondary channel at */
 						/* native mode */ 
 
-extern volatile unsigned long	phys_node_pres_map;
-extern int			phys_node_num;
 extern volatile unsigned long	online_iohubs_map;                                   
-extern int			online_iohubs_num;
 extern volatile unsigned long	possible_iohubs_map;
-extern int			possible_iohubs_num;
 
 // historical functions, sometimes very useful. 
 /*
@@ -97,7 +91,6 @@ static const struct bios_pci_ops *conf;
  * Functions for accessing PCI configuration space with type 1 accesses
  */
 
-#ifdef CONFIG_E2K_SIC
 #define CONFIG_CMD(bus,devfn,where)   	((bus&0xFF)<<20)|((devfn&0xFF)<<12)|(where&0xFFF)
 #define BUS_DEV_FUNC(bus,devfn)		((bus&0xFF)<<20)|((devfn&0xFF)<<12)
 #define	SLOT_DEV_FN(devfn)		((devfn) >> 3)
@@ -129,51 +122,31 @@ static const struct bios_pci_ops *conf;
 #define EIOH_B1_2_2	BUS_DEV_FUNC(1, ((2<<3)|2))
 #define EIOH_B1_3_0	BUS_DEV_FUNC(1, ((3<<3)|0))
 #endif	/* CONFIG_EIOH */
-#else
-#undef	CONFIG_CMD
-#define CONFIG_CMD(bus,devfn,where)   (0x80000000 | (bus << 16) | (devfn << 8) | (where & ~3))
-#endif
 
 static int pci_conf1_read_config_byte(int domain, unsigned char bus, int devfn,
 					int where, u8 * value)
 {
-#ifdef CONFIG_E2K_SIC
 	printk_spew("pci_conf1_read_config_byte start\n");
 	*value = bios_conf_inb(domain, bus, CONFIG_CMD(bus, devfn, where));
-#else
-	bios_outl(CONFIG_CMD(bus, devfn, where), 0xCF8);
-	*value = bios_inb(0xCFC + (where & 3));
-#endif
 	return 0;
 }
 
 static int pci_conf1_read_config_word(int domain, unsigned char bus, int devfn,
 					int where, u16 * value)
 {
-#ifdef CONFIG_E2K_SIC
 	printk_spew("pci_conf1_read_config_word start\n");
 	*value = bios_conf_inw(domain, bus, CONFIG_CMD(bus, devfn, where));
-#else
-	bios_outl(CONFIG_CMD(bus, devfn, where), 0xCF8);
-	*value = bios_inw(0xCFC + (where & 2));
-#endif
 	return 0;
 }
 
 static int pci_conf1_read_config_dword(int domain, unsigned char bus, int devfn,
 					int where, u32 * value)
 {
-#ifdef CONFIG_E2K_SIC
 	printk_spew("pci_conf1_read_config_dword start\n");
 	*value = bios_conf_inl(domain, bus, CONFIG_CMD(bus, devfn, where));
-#else
-	bios_outl(CONFIG_CMD(bus, devfn, where), 0xCF8);
-	*value = bios_inl(0xCFC);
-#endif
 	return 0;
 }
 
-#ifdef	CONFIG_E2K_SIC
 #ifndef	CONFIG_L_IOH2
 int system_commutator_e2s_ioh_write_byte(int domain, unsigned char bus,
 						int where, u8 value)
@@ -234,44 +207,28 @@ int system_commutator_e2s_ioh_read_dword(int domain, unsigned char bus,
 	return 0;
 }
 #endif	/* ! CONFIG_L_IOH2 */
-#endif
 
 static int pci_conf1_write_config_byte(int domain, unsigned char bus, int devfn,
 					int where, u8 value)
 {
-#ifdef CONFIG_E2K_SIC
 	printk_spew("pci_conf1_write_config_byte start\n");
 	bios_conf_outb(domain, bus, value, CONFIG_CMD(bus, devfn, where));
-#else
-	bios_outl(CONFIG_CMD(bus, devfn, where), 0xCF8);
-	bios_outb(value, 0xCFC + (where & 3));
-#endif
 	return 0;
 }
 
 static int pci_conf1_write_config_word(int domain, unsigned char bus, int devfn,
 					int where, u16 value)
 {
-#ifdef CONFIG_E2K_SIC
 	printk_spew("pci_conf1_write_config_word start\n");
 	bios_conf_outw(domain, bus, value, CONFIG_CMD(bus, devfn, where));
-#else
-	bios_outl(CONFIG_CMD(bus, devfn, where), 0xCF8);
-	bios_outw(value, 0xCFC + (where & 2));
-#endif
 	return 0;
 }
 
 static int pci_conf1_write_config_dword(int domain, unsigned char bus,
 					int devfn, int where, u32 value)
 {
-#ifdef CONFIG_E2K_SIC
 	printk_spew("pci_conf1_write_config_dword start\n");
 	bios_conf_outl(domain, bus, value, CONFIG_CMD(bus, devfn, where));
-#else
-	bios_outl(CONFIG_CMD(bus, devfn, where), 0xCF8);
-	bios_outl(value, 0xCFC);
-#endif
 	return 0;
 }
 
@@ -927,10 +884,8 @@ void assign_resources(struct bios_pci_bus *bus)
 {
 	struct bios_pci_dev *curdev = pci_devices;
 	struct bios_pci_bus *curbus;
-#ifdef CONFIG_E2K_SIC
 	u16	b1_iobl_val;
 	u32	b1_mbl_val, b1_pmbl_val;
-#endif	
 	int	domain = bios_pci_domain_nr(bus);
 
 	DaRprintk("ASSIGN RESOURCES, bus %d\n", bus->number);
@@ -952,7 +907,6 @@ void assign_resources(struct bios_pci_bus *bus)
 				curbus->self->bus->number, curbus->iobase,
 				curbus->iolimit);
 
-#ifdef CONFIG_E2K_SIC
 			if (curbus->self->device !=
 				PCI_DEVICE_ID_MCST_VIRT_PCI_BRIDGE &&
 				curbus->self->device !=
@@ -970,7 +924,6 @@ void assign_resources(struct bios_pci_bus *bus)
 					"skiping device 0x%x on bus 0x%x\n",
 					curbus->self->device, bus->number);
 			}
-#endif
 			DaRprintk("Bus 0x%x Child Bus %x iobase to 0x%x "
 				"iolimit 0x%x\n",
 				bus->number, curbus->number, curbus->iobase,
@@ -984,7 +937,6 @@ void assign_resources(struct bios_pci_bus *bus)
 				PCI_MEMORY_BASE, curbus->membase >> 16);
 			bios_pci_write_config_word(curbus->self,
 				PCI_MEMORY_LIMIT, curbus->memlimit >> 16);
-#ifdef CONFIG_E2K_SIC
 			if (curbus->self->device !=
 				PCI_DEVICE_ID_MCST_VIRT_PCI_BRIDGE &&
 				curbus->self->device !=
@@ -1009,7 +961,6 @@ void assign_resources(struct bios_pci_bus *bus)
 					"skiping device 0x%x on bus 0x%x\n",
 					curbus->self->device, bus->number);
 			}
-#endif			
 			DaRprintk("Bus 0x%x Child Bus %x membase to 0x%x "
 				"memlimit 0x%x\n",
 				bus->number, curbus->number, curbus->membase,
@@ -1026,7 +977,6 @@ void assign_resources(struct bios_pci_bus *bus)
 			bios_pci_write_config_word(curbus->self,
 				PCI_PREF_MEMORY_LIMIT,
 				curbus->prefmemlimit >> 16);
-#ifdef CONFIG_E2K_SIC
 			if (curbus->self->device !=
 				PCI_DEVICE_ID_MCST_VIRT_PCI_BRIDGE &&
 				curbus->self->device !=
@@ -1047,7 +997,6 @@ void assign_resources(struct bios_pci_bus *bus)
 					"0x%x on bus 0x%x\n",
 					curbus->self->device, bus->number);
 			}
-#endif
 			DaRprintk("Bus 0x%x Child Bus %x prefmembase to 0x%x "
 				"prefmemlimit 0x%x\n",
 				bus->number, curbus->number,
@@ -1068,7 +1017,6 @@ void assign_resources(struct bios_pci_bus *bus)
 			reg = PCI_BASE_ADDRESS_0 + (i << 2);
 			bios_pci_write_config_dword(curdev, reg,
 						curdev->base_address[i]);
-#ifdef CONFIG_E2K_SIC
 #ifndef CONFIG_EIOH
 			switch (BUS_DEV_FUNC(curdev->bus->number,
 							curdev->devfn)) {
@@ -1261,7 +1209,6 @@ void assign_resources(struct bios_pci_bus *bus)
 				break;
 			}
 #endif
-#endif
 			DaRprintk("PCI #%d Bus 0x%x slot %d func %d "
 				"resource #%d base to 0x%x\n",
 				domain, curdev->bus->number,
@@ -1297,7 +1244,6 @@ void enable_resources(struct bios_pci_bus *bus)
 
 		domain = bios_pci_domain_nr(curdev->bus);
 		bios_pci_read_config_word(curdev, PCI_COMMAND, &command);
-#ifdef CONFIG_E2K_SIC
 #ifdef CONFIG_EIOH
 		if ((BUS_DEV_FUNC(curdev->bus->number, curdev->devfn) ==
 								EIOH_B1_2_1)) {
@@ -1314,12 +1260,10 @@ void enable_resources(struct bios_pci_bus *bus)
 			curdev->command |= PCI_COMMAND_MASTER;
 		}
 #endif
-#endif
 		command |= curdev->command;
 		Dprintk("DEV Set command bus 0x%x devfn 0x%x to 0x%x\n",
 		    curdev->bus->number, curdev->devfn, command);
 		bios_pci_write_config_word(curdev, PCI_COMMAND, command);
-#ifdef CONFIG_E2K_SIC
 #ifndef	CONFIG_EIOH
 		switch (BUS_DEV_FUNC(curdev->bus->number,curdev->devfn)){
 		case B2_2_3:  /* BUS:2 DEV:2 FUNC:3 = AC97 audio/gpio */
@@ -1397,7 +1341,6 @@ void enable_resources(struct bios_pci_bus *bus)
 				(curdev->devfn)&0x7);
 			break;
 		}
-#endif
 #endif
 	}
 }
@@ -1547,7 +1490,7 @@ void assign_interrupts(struct bios_pci_bus *bus)
 {
 #ifdef	CONFIG_EIOH
 	assign_eiohub_interrupts(bus);
-#elif	defined(CONFIG_E2K_SIC)
+#else
 	struct bios_pci_dev *curdev = pci_devices;
 	int domain = bios_pci_domain_nr(bus);
 
@@ -1616,7 +1559,6 @@ void assign_interrupts(struct bios_pci_bus *bus)
 								int_line);
 		DprintkDev(": Assign IRQ %d\n", int_line);
 	}
-#else	/* !CONFIG_E2K_SIC && !CONFIG_EIOH */
 #endif	/* CONFIG_EIOH */
 }
 
@@ -1625,7 +1567,6 @@ void assign_interrupts(struct bios_pci_bus *bus)
 struct bios_pci_bus *pci_enumerate(int domain)
 {
 	struct bios_pci_bus  *bus_root;
-#ifdef CONFIG_E2K_SIC
 	unsigned int iohub_rev_id;
 	char *iohub_name = "unknown";
 
@@ -1649,7 +1590,6 @@ struct bios_pci_bus *pci_enumerate(int domain)
 	printk_info("Found %s revision 0x%02x domain %d (node %d link %d)\n",
 		iohub_name, iohub_rev_id,
 		domain, iohub_domain_to_node(domain), iohub_domain_to_link(domain));
-#endif	/* CONFIG_E2K_SIC */
 
 	printk_info("Scanning PCI domain %d (node %d link %d) bus...",
 			domain, iohub_domain_to_node(domain),

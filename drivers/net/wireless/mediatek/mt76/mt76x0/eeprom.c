@@ -228,6 +228,9 @@ void mt76x0_get_power_info(struct mt76x02_dev *dev,
 	int i, idx = 0;
 	u16 data;
 
+#ifdef CONFIG_MCST
+	offset = 0;
+#endif
 	if (mt76x0_tssi_enabled(dev)) {
 		s8 target_power;
 

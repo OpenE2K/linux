@@ -1538,6 +1538,9 @@ smb2_ioctl_query_info(const unsigned int xid,
 	int create_options = is_dir ? CREATE_NOT_FILE : CREATE_NOT_DIR;
 	void (*free_req1_func)(struct smb_rqst *r);
 
+#ifdef CONFIG_MCST
+	free_req1_func = (void (*)(struct smb_rqst *r))0L;
+#endif
 	vars = kzalloc(sizeof(*vars), GFP_ATOMIC);
 	if (vars == NULL)
 		return -ENOMEM;

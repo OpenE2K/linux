@@ -7,8 +7,7 @@
  * In-kernel KVM process related definitions
  */
 
-#ifndef __KVM_PROCESS_H
-#define __KVM_PROCESS_H
+#pragma once
 
 #include <linux/types.h>
 #include <linux/kvm.h>
@@ -19,14 +18,15 @@
 #include <asm/regs_state.h>
 #include <asm/copy-hw-stacks.h>
 
-#include <asm/kvm/mm.h>
 #include <asm/kvm/thread_info.h>
 #include <asm/kvm/hypercall.h>
 #include <asm/kvm/switch.h>
 
-#include "cpu_defs.h"
 #include "irq.h"
 #include "mmu.h"
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/mm.h>
+#include "paravirt_sw/cpu_defs.h"
 #include "paravirt_sw/gaccess.h"
 
 extern bool debug_guest_user_stacks;
@@ -44,7 +44,6 @@ extern bool debug_guest_user_stacks;
 #define	DEBUG_GPT_REGS_MODE	0	/* KVM host and guest kernel */
 					/* stack activations print */
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 
 #define	GUEST_KERNEL_THREAD_STACK_SIZE	(64 * 1024U)	/* 64 KBytes */
 
@@ -127,8 +126,6 @@ static inline struct gthread_info *kvm_get_guest_thread_info(struct kvm *kvm, in
 		/* It is host stack */					\
 		CHECK_BUG((g_sbr) != (ti)->u_stack.top, 1);		\
 		CHECK_BUG((g_usd_size) > (ti)->u_stack.size, 2);	\
-		CHECK_BUG((ti)->u_stack.bottom + (ti)->u_stack.size !=	\
-						(ti)->u_stack.top, 3);	\
 	} else {							\
 		/* It is VCPU stack */					\
 		CHECK_BUG((ti)->vcpu->arch.is_hv, 8);			\
@@ -144,10 +141,10 @@ static inline struct gthread_info *kvm_get_guest_thread_info(struct kvm *kvm, in
 		CHECK_BUG((g_sbr) != stacks->top, 6);			\
 		if ((g_sbr) == (ti)->u_stack.top) {			\
 			CHECK_BUG(vcpu_usd_base(vcpu, stacks->usd) !=	\
-					(ti)->u_stack.bottom, 7);	\
+				(ti)->u_stack.top - (ti)->u_stack.size, 7); \
 		} else {						\
 			CHECK_BUG(vcpu_usd_base(vcpu, stacks->usd) !=	\
-					gti->data_stack.bottom, 5);	\
+				gti->data_stack.top - gti->data_stack.size, 5); \
 		}							\
 	}								\
 })
@@ -301,8 +298,8 @@ HOST_RESTORE_TASK_USER_REGS_TO_SWITCH(struct kvm_vcpu *vcpu,
 	sbr.base = (__ti)->u_stack.top;					\
 	struct kvm_vcpu *vcpu = (__ti)->vcpu;				\
 									\
-	usd = vcpu_new_usd(vcpu, (__ti)->u_stack.bottom , (__g_usd_size), \
-				 (__g_usd_size));			\
+	usd = vcpu_new_usd(vcpu, (__ti)->u_stack.top - (__ti)->u_stack.size, \
+			(__g_usd_size), (__g_usd_size));		\
 	native_write_USBR_USD_regs(sbr, usd);				\
 })
 
@@ -535,11 +532,6 @@ extern unsigned long kvm_switch_to_virt_mode(struct kvm_vcpu *vcpu,
 				   void (*func) (void *data, void *arg1,
 						 void *arg2),
 				   void *data, void *arg1, void *arg2);
-#else
-static inline int pv_vcpu_setup_thread(struct kvm_vcpu *vcpu)
-{
-	return -ENOTSUPP;
-}
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
@@ -550,9 +542,8 @@ extern void prepare_stacks_to_startup_vcpu(struct kvm_vcpu *vcpu,
 
 extern int kvm_init_vcpu_thread(struct kvm_vcpu *vcpu);
 extern void kvm_halt_host_vcpu_thread(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern void kvm_spare_host_vcpu_release(struct kvm_vcpu *vcpu);
-extern void kvm_guest_vcpu_thread_stop(struct kvm_vcpu *vcpu);
-extern void kvm_guest_vcpu_thread_restart(struct kvm_vcpu *vcpu);
 extern int kvm_copy_guest_kernel_stacks(struct kvm_vcpu *vcpu,
 					kvm_task_info_t *task_info,
 					e2k_cr1_t cr1);
@@ -580,12 +571,15 @@ extern void kvm_guest_vcpu_relax(void);
 extern int kvm_activate_host_vcpu(struct kvm *kvm, int vcpu_id);
 extern int kvm_activate_guest_all_vcpus(struct kvm *kvm);
 #endif /* CONFIG_SMP */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 extern void kvm_pv_wait(struct kvm *kvm, struct kvm_vcpu *vcpu);
 extern int kvm_pv_kick(struct kvm *kvm, int vcpu_id);
 
 extern void prepare_vcpu_startup_args(struct kvm_vcpu *vcpu);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 extern void vcpu_clear_signal_stack(struct kvm_vcpu *vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #ifdef	CONFIG_KVM_HW_VIRTUALIZATION
 extern int kvm_start_hv_guest(struct kvm_vcpu *vcpu);
@@ -651,7 +645,7 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 	e2k_stacks_t *u_stacks = &regs->stacks;
 	e2k_psp_t  g_psp = g_stacks->psp,   k_psp = current_thread_info()->k_psp;
 	e2k_pcsp_t g_pcsp = g_stacks->pcsp, k_pcsp = current_thread_info()->k_pcsp;
-	void *dst, *src;
+	void  *src;
 	int ret;
 
 	DebugGUST("guest user procedure stack state: base 0x%llx size 0x%llx ind 0x%llx PSHTP size %d\n",
@@ -675,6 +669,7 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 
 	if (unlikely(pcs_size > 0)) {
 		unsigned long flags;
+		void __priv * dst;
 		raw_all_irq_save(flags);
 		k_pcsp = native_read_PCSP_reg();
 		raw_all_irq_restore(flags);
@@ -685,12 +680,11 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 			E2K_KVM_BUG_ON(true);
 		}
 
-		dst = (void *)(vcpu_pcsp_base(vcpu, g_pcsp) + pcs_off);
+		dst = vcpu_pcsp_base(vcpu, g_pcsp) + pcs_off;
 		src = (void *)(PCSP_BASE(k_pcsp) + pcs_off);
 		DebugGUST("copy guest user chain stack frames from host %px to guest kernel %px, size 0x%lx\n",
 			  src, dst, pcs_size);
-		ret = user_hw_stack_frames_copy((void __user __force *) dst, src,
-				pcs_size, regs, PCSP_IND(k_pcsp) - pcs_off, true);
+		ret = user_pcsp_stack_copy(dst, PCSP_IND(k_pcsp) - pcs_off, src,	pcs_size, regs);
 		if (ret)
 			return ret;
 		g_pcsp = vcpu_incr_pcsp_ind(vcpu, g_pcsp, pcs_size);
@@ -700,6 +694,7 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 	}
 
 	if (unlikely(ps_size > 0)) {
+		volatile __priv void *dst;
 		HI(k_psp) = HI(native_read_PSP_reg());
 
 		if (unlikely(vcpu_psp_ind(vcpu, g_psp) > vcpu_psp_size(vcpu, g_psp))) {
@@ -708,12 +703,11 @@ pv_vcpu_hw_stacks_copy(struct kvm_vcpu *vcpu, pt_regs_t *regs,
 			E2K_KVM_BUG_ON(true);
 		}
 
-		dst = (void *)(vcpu_psp_base(vcpu, g_psp) + ps_off);
+		dst = vcpu_psp_base(vcpu, g_psp) + ps_off;
 		src = (void *)(PSP_BASE(k_psp) + ps_off);
 		DebugGUST("copy guest user procedure stack frames from host %px to guest kernel %px, size 0x%lx\n",
 			  src, dst, ps_size);
-		ret = user_hw_stack_frames_copy((void __user __force *) dst, src,
-				ps_size, regs, PSP_IND(k_psp) - ps_off, false);
+		ret = user_psp_stack_copy(dst, PSP_IND(k_psp) - ps_off, src, ps_size, regs);
 		if (ret)
 			return ret;
 		g_psp = vcpu_incr_psp_ind(vcpu, g_psp, ps_size);
@@ -868,11 +862,9 @@ pv_vcpu_user_crs_copy_to_kernel(struct kvm_vcpu *vcpu,
 
 	return 0;
 }
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 unsigned long kvm_add_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key,
 				       bool is_main);
 
 void kvm_remove_ctx_signal_stack(struct kvm_vcpu *vcpu, u64 key);
-
-#endif /* __KVM_PROCESS_H */
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */

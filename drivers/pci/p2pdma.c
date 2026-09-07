@@ -291,8 +291,8 @@ static bool cpu_supports_p2pdma(void)
 	/* Any AMD CPU whose family ID is Zen or newer supports p2pdma */
 	if (c->x86_vendor == X86_VENDOR_AMD && c->x86 >= 0x17)
 		return true;
-#elifdef CONFIG_E2K
-	if (IS_MACHINE_E48C || IS_MACHINE_E8V7)
+#elif defined(CONFIG_E2K)
+	if (IS_MACHINE_E8V7)
 		return true;
 #endif
 

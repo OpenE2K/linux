@@ -16,8 +16,6 @@
 #include "mxgbe_rxq.h"
 #include "mxgbe_txq.h"
 
-void mxgbe_board_down(mxgbe_priv_t *priv);
-int mxgbe_board_up(mxgbe_priv_t *priv);
 
 static int mxgbe_get_link_ksettings(struct net_device *ndev,
 			struct ethtool_link_ksettings *ecmd)

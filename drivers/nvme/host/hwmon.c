@@ -28,10 +28,17 @@ static int nvme_get_temp_thresh(struct nvme_ctrl *ctrl, int sensor, bool under,
 
 	ret = nvme_get_features(ctrl, NVME_FEAT_TEMP_THRESH, threshold, NULL, 0,
 				&status);
+#ifdef CONFIG_MCST
+	if (ret) {
+		*temp = 0;
+		return 0;
+	}
+#else
 	if (ret > 0)
 		return -EIO;
 	if (ret < 0)
 		return ret;
+#endif
 	*temp = kelvin_to_millicelsius(status & NVME_TEMP_THRESH_MASK);
 
 	return 0;

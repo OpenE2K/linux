@@ -39,6 +39,7 @@
 #include <linux/of_device.h>
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
+#include <linux/of_irq.h>
 #include <linux/bpf.h>
 #include <linux/bpf_trace.h>
 #include <net/xdp.h>
@@ -53,15 +54,13 @@
 
 #include <asm/dma.h>
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/irqflags.h>
 #include <asm/irq.h>
 #include <asm/setup.h>
 #include <asm/pci.h>
 #ifdef CONFIG_E2K
-#ifdef CONFIG_SCLKR_CLOCKSOURCE
 #include <asm/sclkr.h>
-#endif
 #else
 #include <asm-l/clk_rt.h>
 #endif
@@ -77,7 +76,7 @@
 /* Realtek RTL8211F phy identifier values (not in .h) */
 #define RTL8211F_PHY_ID		0x001CC916
 
-#define DBG_PTP
+/* #define DBG_PTP */
 
 static int assigned_speed = SPEED_1000;
 module_param_named(rate, assigned_speed, int, 0444);
@@ -102,6 +101,11 @@ static int an_sgmii[MGB_MAX_NETDEV_NUMBER] = {[0 ... MGB_MAX_NETDEV_NUMBER - 1] 
 module_param_array(an_sgmii, int, NULL, 0444);
 MODULE_PARM_DESC(an_sgmii,
 		 KBUILD_MODNAME  " Array: apply sgmii mode to clause 37 auto-negotiation for internal PHY");
+
+static int an_discovery[MGB_MAX_NETDEV_NUMBER] = {[0 ... MGB_MAX_NETDEV_NUMBER - 1] = 1};
+module_param_array(an_discovery, int, NULL, 0444);
+MODULE_PARM_DESC(an_discovery,
+		 KBUILD_MODNAME  " Array: use a AN discovery for internal PHY");
 
 static int an_monitor;
 module_param(an_monitor, int, 0444);
@@ -327,8 +331,12 @@ static DEFINE_MUTEX(mgb_mutex);
 #define SH_R_MODE_PADDR0	(1 << 0)  /* RW1  */
 
 /* eldwcxpcs.ko */
-void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char *ioaddr);
+void eldwcxpcs_mpll_reinit(struct pci_dev *pdev, unsigned char __iomem *ioaddr);
+void eldwcxpcs_node_reinit(int node);
 int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);
+void eldwcxpcs_set_mpll_mode(struct pci_dev *pdev, unsigned int mpll_mode);
+extern spinlock_t eldwcxpcs_mgio_lock[];
+
 /* PCS MPLL MODE */
 #define MPLL_MODE_10G		0
 #define MPLL_MODE_1G		1
@@ -370,12 +378,12 @@ int eldwcxpcs_get_mpll_mode(struct pci_dev *pdev);
 /* MGB Rx and Tx ring descriptors. */
 
 struct mgb_rx_head {
-	u32	base;		/* RBADR [31:0] */
-	s16	buf_length;	/* BCNT only [13:0] */
-	s16	status;
-	s16	msg_length;	/* MCNT only [13:0] */
+	__le32	base;		/* RBADR [31:0] */
+	__le16	buf_length;	/* BCNT only [13:0] */
+	__le16	status;
+	__le16	msg_length;	/* MCNT only [13:0] */
 	u16	reserved1;
-	u32	etmr;		/* timer count for ieee 1588 */
+	__le32	etmr;		/* timer count for ieee 1588 */
 } __packed;
 
 /* RX Descriptor status bits */
@@ -397,11 +405,11 @@ struct mgb_rx_head {
 
 
 struct mgb_tx_head {
-	u32	base;		/* TBADR [31:0] */
-	s16	buf_length;	/* BCNT only [13:0] */
-	u16	status;
-	u32	misc;		/* [31:26] + [3:0] tramsmit retry count */
-	u32	etmr;		/* timer count for ieee 1588 */
+	__le32	base;		/* TBADR [31:0] */
+	__le16	buf_length;	/* BCNT only [13:0] */
+	__le16	status;
+	__le32	misc;		/* [31:26] + [3:0] tramsmit retry count */
+	__le32	etmr;		/* timer count for ieee 1588 */
 } __packed;
 
 /* TX Descriptor status bits */
@@ -531,7 +539,7 @@ struct mgb_buff {
 
 struct mgb_q {
 	struct mgb_private	*ep;
-	raw_spinlock_t		lock;
+	spinlock_t			lock;
 	struct napi_struct	napi;
 
 	struct mgb_rx_head	*rx;
@@ -566,21 +574,21 @@ struct mgb_q {
  * initialization must be in acordance with that
  */
 typedef struct init_block {
-	u16	mode;
+	__le16	mode;
 	u8	paddr0[6];
-	u64	laddrf0;
-	u32	rdra0; /* 31:4 = addr of recieving desc ring (16 bytes align) +
+	__le64	laddrf0;
+	__le32	rdra0; /* 31:4 = addr of recieving desc ring (16 bytes align) +
 			* 3:0  = number of descriptors (the power of two)
 			*/
-	u32	tdra0; /* 31:4 = addr of xmit desc ring (16 bytes align) +
+	__le32	tdra0; /* 31:4 = addr of xmit desc ring (16 bytes align) +
 			* 3:0  = number of descriptors (the power of two)
 			*/
 	u8	paddr1[6];
-	u64	laddrf1;
-	u32	rdra1; /* 31:4 = addr of recieving desc ring (16 bytes align) +
+	__le64	laddrf1;
+	__le32	rdra1; /* 31:4 = addr of recieving desc ring (16 bytes align) +
 			* 3:0  = number of descriptors (the power of two)
 			*/
-	u32	tdra1; /* 31:4 = addr of transm desc ring (16 bytes align) +
+	__le32	tdra1; /* 31:4 = addr of transm desc ring (16 bytes align) +
 			* 3:0  = number of descriptors (the power of two)
 			*/
 } __packed init_block_t;
@@ -639,10 +647,10 @@ struct mgb_private {
 	unsigned long		status;
 	struct mgb_q		*mgb_qs[2];
 	struct pci_dev		*pci_dev;
+	int				node;
 	struct net_device	*dev;
 	struct resource		*resource;
-	unsigned char		*base_ioaddr;
-	raw_spinlock_t		mgio_lock;
+	unsigned char	__iomem	*base_ioaddr;
 	struct mutex		mx;
 	struct mgb_stats	l_stats;
 	u64			ethtool_stats[ARRAY_SIZE(mgb_statistics)];
@@ -666,6 +674,7 @@ struct mgb_private {
 	u32			irq_delay;
 	u32			psf_csr;
 	int			mgb_ticks_per_usec;
+	int			transmitter_fault;
 	unsigned char		log_rx_buffs;
 	unsigned char		log_tx_buffs;
 	unsigned char		linkup;
@@ -691,9 +700,12 @@ struct mgb_private {
 	int			an_sgmii;
 	int			an_clause_73;
 	atomic_t		an_cnt;
+	int			an_discovery;
+	int			an_pass;
 	struct bpf_prog		*xdp_prog;
 	/* PRP */
 	int			prp_index;
+	int			irqs[MGB_SYS_INTR + 1];
 };
 
 struct mgb_prp_block {
@@ -1041,18 +1053,18 @@ static int mgio_read_clause_22(struct mgb_private *ep, int phy_id, int reg_num)
 		((phy_id  & 0x1f) << MGIO_PHY_AD_OFF) |
 		((reg_num & 0x1f) << MGIO_REG_AD_OFF);
 
-	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
 	mgb_write_mgio_csr(ep, (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) |
 					MG_RRDY);
 	mgb_write_mgio_data(ep, rd);
 	if (mgb_wait_rrdy(ep)) {
-		raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 		dev_err(&ep->pci_dev->dev,
 			"%s: Unable to read from MGIO_DATA reg\n", __func__);
 		return -1;
 	}
 	val_out = (int)(mgb_read_mgio_data(ep) & 0xffff);
-	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 
 	return val_out;
 }
@@ -1066,17 +1078,17 @@ static void mgio_write_clause_22(struct mgb_private *ep, int phy_id,
 		(val & 0xffff);
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
 	mgb_write_mgio_csr(ep, (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) |
 					MG_RRDY);
 	mgb_write_mgio_data(ep, wr);
 	if (mgb_wait_rrdy(ep)) {
-		raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 		dev_err(&ep->pci_dev->dev,
 			"%s: Unable to write MGIO_DATA reg\n", __func__);
 		return;
 	}
-	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 
 	return;
 }
@@ -1194,6 +1206,9 @@ static int mgb_prp_check_link(struct net_device *dev, int speed, int duplex)
 
 static void mgb_an_start(struct mgb_private *ep)
 {
+	if (ep->an_discovery && ep->transmitter_fault)
+		return;
+
 	if (!test_and_set_bit(MGB_F_AN_BUSY, &ep->an_status)) {
 		set_bit(MGB_F_AN_STRT, &ep->an_status);
 		clear_bit(MGB_F_AN_FAIL, &ep->an_status);
@@ -1229,17 +1244,14 @@ static void mgb_check_phydev_link_status(struct net_device *dev)
 				del_timer(&ep->an_monitor_timer);
 
 			mgb_an_start(ep);
-
-			dev_info(&dev->dev,
-				 "link up, %dMbps, %s-duplex\n",
-				 phydev->speed,
-				 phydev->duplex == DUPLEX_FULL ? "full" : "half");
 		}
 
 		mgb_link_up(dev);
 	} else {
-		if (ep->linkup)
+		if (ep->an_pass) {
 			dev_info(&dev->dev, "link down\n");
+			ep->an_pass = 0;
+		}
 		mgb_link_down(dev);
 	}
 }
@@ -1345,7 +1357,7 @@ static int mgio_read_clause_45(struct mgb_private *ep, int mii_id, int reg_num)
 	u32 rd;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
 	rd = (0x2UL << MGIO_CS_OFF) |
@@ -1364,7 +1376,7 @@ static int mgio_read_clause_45(struct mgb_private *ep, int mii_id, int reg_num)
 		goto bad_result;
 
 	rd = mgb_read_mgio_data(ep) & 0xffff;
-	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 
 	if (netif_msg_hw(ep))
 		dev_info(&ep->dev->dev,
@@ -1374,7 +1386,7 @@ static int mgio_read_clause_45(struct mgb_private *ep, int mii_id, int reg_num)
 	return (int)rd;
 
 bad_result:
-	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 	dev_err(&ep->pci_dev->dev,
 		"%s: Unable to read from MGIO_DATA reg 0x%x\n",
 		__func__, reg_num);
@@ -1387,7 +1399,7 @@ static void mgio_write_clause_45(struct mgb_private *ep, int mii_id,
 	u32 wr;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
 	mgb_write_mgio_csr(ep,
 			   (mgb_read_mgio_csr(ep) & ~MG_W1C_MASK) | MG_RRDY);
 	wr = (0x2 << MGIO_CS_OFF) |
@@ -1408,7 +1420,7 @@ static void mgio_write_clause_45(struct mgb_private *ep, int mii_id,
 	if (mgb_wait_rrdy(ep))
 		goto bad_result;
 
-	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 
 	if (netif_msg_hw(ep))
 		dev_info(&ep->dev->dev,
@@ -1418,7 +1430,7 @@ static void mgio_write_clause_45(struct mgb_private *ep, int mii_id,
 	return;
 
 bad_result:
-	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 	dev_err(&ep->pci_dev->dev,
 		"%s: Unable to write MGIO_DATA reg 0x%x\n", __func__, reg_num);
 	return;
@@ -1902,6 +1914,20 @@ static void mgb_monitor_auto_negotiation(struct net_device *dev)
 		return;
 }
 
+static int mgb_get_pcs_speed(u32 mgio_csr)
+{
+	int speed = 10;
+
+	if (mgio_csr & MG_GETH)
+		speed = 1000;
+	else if (mgio_csr & MG_FETH)
+		speed = 100;
+	if (mgio_csr & MG_EMST)
+		speed = (speed * 5) / 2;
+
+	return speed;
+}
+
 static void mgb_run_auto_negotiation(struct net_device *dev)
 {
 	struct mgb_private *ep = netdev_priv(dev);
@@ -1912,9 +1938,11 @@ static void mgb_run_auto_negotiation(struct net_device *dev)
 	} else if (test_bit(MGB_F_AN_CL37, &ep->an_status)) {
 		r = mgb_set_pcs_an_clause_37(ep);
 	} else {
-		dev_err(&dev->dev,
-			"Auto-Negotiation invalid status: 0x%lX\n",
-			ep->an_status);
+		if (unlikely(netif_msg_ifup(ep))) {
+			dev_err(&dev->dev,
+				"Auto-Negotiation invalid status: 0x%lX\n",
+				ep->an_status);
+		}
 		return;
 	}
 
@@ -1922,17 +1950,55 @@ static void mgb_run_auto_negotiation(struct net_device *dev)
 		if (test_bit(MGB_F_AN_FAIL, &ep->an_status)) {
 			int an_37 = test_bit(MGB_F_AN_CL37, &ep->an_status);
 
-			dev_err(&dev->dev,
-				"Clause %d%s Auto-Negotiation: failed\n",
-				an_37 ? 37 : 73,
-				an_37 ?
-				((test_bit(MGB_F_AN_SGMII, &ep->an_status)) ?
-				"(SGMII)" : "(BASE-X)") : "");
-			if (an_monitor)
-				mod_timer(&ep->an_monitor_timer, jiffies + 10);
+			if (!netif_running(ep->dev))
+				return;
+
+			if (!ep->an_discovery) {
+				if (unlikely(netif_msg_ifup(ep)))
+					dev_info(&dev->dev,
+						 "Clause %d%s Auto-Negotiation: failed\n",
+						 an_37 ? 37 : 73,
+						 an_37 ?
+						 ((test_bit(MGB_F_AN_SGMII, &ep->an_status)) ?
+						 "(SGMII)" : "(BASE-X)") : "");
+
+				if (an_monitor)
+					mod_timer(&ep->an_monitor_timer, jiffies + 10);
+				return;
+			}
+
+			if (ep->transmitter_fault)
+				return;
+
+			if (ep->mpll_mode == MPLL_MODE_2G5) {
+				eldwcxpcs_set_mpll_mode(ep->pci_dev, MPLL_MODE_1G_BIF);
+				eldwcxpcs_node_reinit(ep->node);
+				ep->mpll_mode = eldwcxpcs_get_mpll_mode(ep->pci_dev);
+				set_bit(MGB_F_AN_CL37, &ep->an_status);
+				clear_bit(MGB_F_AN_CL73, &ep->an_status);
+			} else {
+				if (an_37) {
+					set_bit(MGB_F_AN_CL73, &ep->an_status);
+					clear_bit(MGB_F_AN_CL37, &ep->an_status);
+				} else {
+					eldwcxpcs_set_mpll_mode(ep->pci_dev, MPLL_MODE_2G5);
+					eldwcxpcs_node_reinit(ep->node);
+					ep->mpll_mode = eldwcxpcs_get_mpll_mode(ep->pci_dev);
+				}
+			}
+			if (unlikely(netif_msg_ifup(ep))) {
+				an_37 = test_bit(MGB_F_AN_CL37, &ep->an_status);
+				dev_info(&dev->dev,
+					 "Restart Clause %d Auto-Negotiation (%s)\n",
+					 an_37 ? 37 : 73, (ep->mpll_mode == 3) ? "1G" : "2.5G");
+			}
+			mgb_an_start(ep);
 		}
 	} else {
-		if (netif_msg_link(ep)) {
+		int speed;
+		bool duplex;
+
+		if (unlikely(netif_msg_ifup(ep))) {
 			int an_37 = test_bit(MGB_F_AN_CL37, &ep->an_status);
 
 			dev_info(&dev->dev,
@@ -1942,8 +2008,32 @@ static void mgb_run_auto_negotiation(struct net_device *dev)
 				 ((test_bit(MGB_F_AN_SGMII, &ep->an_status)) ?
 				 "(SGMII)" : "(BASE-X)") : "");
 		}
+
 		if (an_monitor)
 			mod_timer(&ep->an_monitor_timer, jiffies + 10);
+
+		if (!netif_running(ep->dev))
+			return;
+
+		if (ep->extphyaddr != -1) {
+			struct phy_device *phydev = dev->phydev;
+
+			speed = phydev->speed;
+			duplex = (phydev->duplex == DUPLEX_FULL);
+		} else {
+			unsigned long flags;
+			u32 mgio_csr;
+
+			spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
+			mgio_csr = mgb_read_mgio_csr(ep);
+			spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
+			speed = mgb_get_pcs_speed(mgio_csr);
+			duplex = !!(mgio_csr & MG_FDUP);
+		}
+		dev_info(&dev->dev,
+			 "link up, %dMbps, %s-duplex\n",
+			 speed, duplex ? "full" : "half");
+		ep->an_pass = 1;
 	}
 }
 
@@ -2005,21 +2095,30 @@ static void mgb_set_an(struct net_device *dev)
 	struct mgb_private *ep = netdev_priv(dev);
 
 	if (ep->extphyaddr != -1) {
+		ep->an_discovery = 0;
 		clear_bit(MGB_F_AN_CL73, &ep->an_status);
 		set_bit(MGB_F_AN_CL37, &ep->an_status);
 		set_bit(MGB_F_AN_SGMII, &ep->an_status);
 	} else {
+		ep->an_discovery = an_discovery[ep->nd_number];
+		clear_bit(MGB_F_AN_SGMII, &ep->an_status);
 		if (ep->an_clause_73) {
 			set_bit(MGB_F_AN_CL73, &ep->an_status);
 			clear_bit(MGB_F_AN_CL37, &ep->an_status);
-			clear_bit(MGB_F_AN_SGMII, &ep->an_status);
 		} else {
 			set_bit(MGB_F_AN_CL37, &ep->an_status);
-			if (ep->an_sgmii)
-				set_bit(MGB_F_AN_SGMII, &ep->an_status);
-			else
-				clear_bit(MGB_F_AN_SGMII, &ep->an_status);
+			clear_bit(MGB_F_AN_CL73, &ep->an_status);
 		}
+	}
+
+	if (ep->an_discovery) {
+		u32 mgio_csr;
+		unsigned long flags;
+
+		spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
+		mgio_csr = mgb_read_mgio_csr(ep);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
+		ep->transmitter_fault = !!(mgio_csr & (MG_TFLT | MG_MABS));
 	}
 
 	mgb_an_start(ep);
@@ -2236,7 +2335,7 @@ static void mgb_dump_rx_ring_state(struct mgb_private *ep, int qn)
 			 "RX %03d base %08x buf len %04x"
 			 " msg len %04x status %04x\n", i,
 			 le32_to_cpu(q->rx[i].base),
-			 le16_to_cpu(-(q->rx[i].buf_length & 0xffff)),
+			 ~le16_to_cpu(q->rx[i].buf_length) & 0xffff,
 			 le16_to_cpu(q->rx[i].msg_length),
 			 le16_to_cpu((q->rx[i].status)));
 	}
@@ -2271,9 +2370,9 @@ static void mgb_dump_tx_ring_state(struct mgb_private *ep, int qn)
 			 "TX %03d base %08x buf len %04x misc %08x status "
 			 "%04x\n", i,
 			 le32_to_cpu(q->tx[i].base),
-			 le16_to_cpu(-(q->tx[i].buf_length & 0xffff)),
+			 ~le16_to_cpu(q->tx[i].buf_length) & 0xffff,
 			 le32_to_cpu(q->tx[i].misc),
-			 le16_to_cpu((u16)(q->tx[i].status)));
+			 le16_to_cpu(q->tx[i].status));
 	}
 	pr_cont("\n");
 }
@@ -2446,11 +2545,7 @@ static void mgb_hwtstamp(struct mgb_private *ep, struct sk_buff *skb,
 {
 	struct skb_shared_hwtstamps *hwtstamps;
 	int mgb_freq;
-	s64 ns_mgb, now_tai;
-	s64 ns_clksrc, delta;
-#ifdef CONFIG_SCLKR_CLOCKSOURCE
-	s64 sec_clksrc;
-#endif
+	s64 now_tai, ns_clksrc = 0, delta = 0;
 	u32 cur_etmr;
 
 	now_tai = ktime_get_clocktai_ns() + ptp_utc2tai_offset * NSEC_PER_SEC;
@@ -2458,7 +2553,6 @@ static void mgb_hwtstamp(struct mgb_private *ep, struct sk_buff *skb,
 		return;
 	hwtstamps = skb_hwtstamps(skb);
 	memset(hwtstamps, 0, sizeof(*hwtstamps));
-#ifdef CONFIG_E2K
 	mgb_write_sh_init_cntrl(ep, SH_R_ETMR);
 	cur_etmr = mgb_read_sh_data_l(ep);
 	mgb_freq = mgb_read_sh_data_h(ep);
@@ -2467,23 +2561,28 @@ static void mgb_hwtstamp(struct mgb_private *ep, struct sk_buff *skb,
 			"mgb_hwtstamp: ERROR mgb_freq=%d\n", mgb_freq);
 		return;
 	}
-#ifdef CONFIG_SCLKR_CLOCKSOURCE
-	ns_clksrc = read_sclkr(NULL);
+	ns_clksrc = sched_clock(); /* sched_clock() reads (E)SCLKR */
 	delta = now_tai - ns_clksrc;
-	sec_clksrc = ns_clksrc % NSEC_PER_SEC;
-	ns_mgb = (ns_clksrc / NSEC_PER_SEC) * NSEC_PER_SEC +
+#ifdef CONFIG_SCLKR_CLOCKSOURCE
+	if (likely(use_sclk_sched_clock())) {
+		ns_clksrc = (ns_clksrc / NSEC_PER_SEC) * NSEC_PER_SEC +
 					etmr * NSEC_PER_SEC / mgb_freq;
-	if (ns_mgb > ns_clksrc)
-		ns_mgb -= NSEC_PER_SEC;
+	}
 #endif
 #ifdef CONFIG_ESCLKR_CLOCKSOURCE
-	delta = now_tai - sched_clock(); /* sched_clock==READ_ESCLKR */
-	ns_clksrc = mgb2esclkr(etmr, mgb_freq, (etmr > cur_etmr));
+	if (likely(use_esclk_sched_clock())) {
+		ns_clksrc = mgb2esclkr(etmr, mgb_freq, (etmr > cur_etmr));
+	}
 #endif
-#else
+#ifdef CONFIG_E90S
 	ns_clksrc = read_clk_rt(NULL);
+	delta = now_tai - ns_clksrc;
+	ns_clksrc = (ns_clksrc / NSEC_PER_SEC) * NSEC_PER_SEC +
+					etmr * NSEC_PER_SEC / mgb_freq;
 #endif
-	hwtstamps->hwtstamp = ns_mgb + delta + ep->phc_adjtime;
+	if (etmr > cur_etmr)
+		ns_clksrc -= NSEC_PER_SEC;
+	hwtstamps->hwtstamp = ns_clksrc + delta + ep->phc_adjtime;
 #ifdef DBG_PTP
 	pr_warn("%s %s e_tmr=%d now_tai - hwts = %lld - %lld = %lld now_tai-get_clocktai= %lld\n",
 		 __func__, (!!in_irq()) ? "tx" : "rx" ,
@@ -2500,13 +2599,15 @@ static int mgb_alloc_queue(struct mgb_private *ep, int nq)
 	struct mgb_q *q;
 	int node = dev_to_node(&ep->pci_dev->dev);
 
+	if (node == NUMA_NO_NODE)
+		node = 0;
 	q = kzalloc_node(sizeof(struct mgb_q), GFP_KERNEL, node);
 	if (!q) {
 		return -ENOMEM;
 	}
 	ep->mgb_qs[nq] = q;
 	q->ep = ep;
-	raw_spin_lock_init(&q->lock);
+	spin_lock_init(&q->lock);
 	atomic64_set(&q->missed_errors, 0);
 
 	return 0;
@@ -2619,10 +2720,14 @@ static int mgb_rx_page_pool_create(struct mgb_q *q)
 {
 	struct mgb_private *ep = q->ep;
 	struct page_pool_params pp = { 0 };
+	int node;
 
 	pp.order = MGB_PP_ORDER;
 	pp.pool_size = RX_RING_SIZE;
-	pp.nid = dev_to_node(&ep->pci_dev->dev);
+	node = dev_to_node(&ep->pci_dev->dev);
+	if (node == NUMA_NO_NODE)
+		node = 0;
+	pp.nid = node;
 	pp.dev = &ep->pci_dev->dev;
 	pp.dma_dir = DMA_BIDIRECTIONAL;
 	q->pp_len = (PAGE_SIZE << MGB_PP_ORDER);
@@ -2639,7 +2744,6 @@ static int mgb_rx_page_pool_create(struct mgb_q *q)
 static int mgb_set_queue(struct mgb_q *q)
 {
 	struct mgb_private *ep = q->ep;
-	int node;
 	int nq = mgb_nq(ep, q);
 	int rc =  mgb_rx_page_pool_create(q);
 
@@ -2696,14 +2800,13 @@ static int mgb_set_queue(struct mgb_q *q)
 	}
 	memset(q->tx, 0, sizeof(struct mgb_tx_head) * TX_RING_SIZE);
 
-	node = dev_to_node(&ep->pci_dev->dev);
 	q->rx_buff = kzalloc_node(sizeof(*q->rx_buff) * RX_RING_SIZE,
-				  GFP_KERNEL, node);
+				  GFP_KERNEL, ep->node);
 	if (!q->rx_buff)
 		goto nomem;
 
 	q->tx_buff = kzalloc_node(sizeof(*q->tx_buff) * TX_RING_SIZE,
-				  GFP_KERNEL, node);
+				  GFP_KERNEL, ep->node);
 	if (!q->tx_buff)
 		goto nomem;
 
@@ -2968,36 +3071,66 @@ static char *mgb_set_mq_name(struct mgb_q *mq, int pin)
 static int request_mgb_irq(struct mgb_private *ep, unsigned int pin,
 			   irq_handler_t fn, struct mgb_q *mq)
 {
-	unsigned int irq = pin + ep->pci_dev->irq;
+	struct device_node *np = dev_of_node(&ep->pci_dev->dev);
 	char *nm = mgb_set_mq_name(mq, pin);
+	int irq = -EINVAL;
+	int rc;
+
+	if (np)
+		irq = of_irq_get(np, pin);
+
+	/**
+	 * of_irq_get - Decode a node's IRQ and return it as a Linux IRQ number
+	 * Return: Linux IRQ number on success, or 0 on the IRQ mapping failure, or
+	 * -EPROBE_DEFER if the IRQ domain is not yet created, or error code in case
+	 * of any other failure.
+	 */
+	if (irq <= 0)
+		irq = pin + ep->pci_dev->irq;
 
 	if (netif_msg_intr(ep))
 		dev_info(&ep->dev->dev,
-			 "mgb requests irq %s  msi_irq %u\n",
+			 "mgb requests irq %s irq %d\n",
 			 nm, irq);
 
-	return request_irq(irq, fn, IRQF_NO_THREAD, nm, mq);
+	rc = request_irq(irq, fn, IRQF_NO_THREAD, nm, mq);
+	if (!rc)
+		ep->irqs[pin] = irq;
+
+	return rc;
 }
 
 static int request_mgb_sys_irq(struct mgb_private *ep,
 			       irq_handler_t fn1, irq_handler_t fn2)
 {
-	unsigned int irq = MGB_SYS_INTR + ep->pci_dev->irq;
+	struct device_node *np = dev_of_node(&ep->pci_dev->dev);
+	int irq = -EINVAL;
+	int rc;
+
+	if (np)
+		irq = of_irq_get(np, MGB_SYS_INTR);
+
+	if (irq <= 0)
+		irq = MGB_SYS_INTR + ep->pci_dev->irq;
 
 	if (netif_msg_intr(ep))
 		dev_info(&ep->dev->dev,
-			 "mgb requests threaded irq for msi_irq %u\n", irq);
+			 "mgb requests system irq %d\n", irq);
 
-	return request_threaded_irq(irq, fn1, fn2, 0, ep->dev->name, ep);
+	rc = request_threaded_irq(irq, fn1, fn2, 0, ep->dev->name, ep);
+	if (!rc)
+		ep->irqs[MGB_SYS_INTR] = irq;
+
+	return rc;
 }
 
 static void free_mgb_irq(struct mgb_private *ep, unsigned int pin, void *arg)
 {
-	unsigned int irq = pin + ep->pci_dev->irq;
+	int irq = ep->irqs[pin];
 
 	if (netif_msg_intr(ep))
 		dev_info(&ep->dev->dev,
-			 "mgb frees irq: msi_irq %u\n", irq);
+			 "mgb frees irq %d\n", irq);
 
 	irq_set_affinity_hint(irq, NULL);
 	free_irq(irq, arg);
@@ -3009,7 +3142,6 @@ static void mgb_distribute_irqs(struct mgb_private *ep)
 	int step = 0;
 	struct cpumask dev_m;
 	int fc = PCI_FUNC(ep->pci_dev->devfn);
-	int irq = ep->pci_dev->irq;
 
 	if (!ep->mgb_qs[1])
 		return;
@@ -3017,7 +3149,7 @@ static void mgb_distribute_irqs(struct mgb_private *ep)
 	if (num_online_cpus() < 2)
 		return;
 
-	cpumask_copy(&dev_m, cpumask_of_node(dev_to_node(&ep->dev->dev)));
+	cpumask_copy(&dev_m, cpumask_of_node(ep->node));
 	do {
 	for (i = 0; i < num_possible_cpus(); i++) {
 		struct cpumask m;
@@ -3044,8 +3176,7 @@ static void mgb_distribute_irqs(struct mgb_private *ep)
 		}
 
 		ep->affinity_mask[vec] = m;
-
-		if (irq_set_affinity_hint(irq + vec, &ep->affinity_mask[vec]))
+		if (irq_set_affinity_hint(ep->irqs[vec], &ep->affinity_mask[vec]))
 			break;
 		step++;
 	}
@@ -3212,6 +3343,8 @@ err_queues:
 	}
 	rc = -EFAULT;
 	dev_err(&dev->dev, "mgb not opened, error %d\n", rc);
+	mutex_unlock(&ep->mx);
+	return rc;
 ok:
 	mutex_unlock(&ep->mx);
 	return rc;
@@ -3232,6 +3365,8 @@ static int mgb_close(struct net_device *dev)
 		mgb_link_down(dev);
 		dev_info(&dev->dev, "link down\n");
 	}
+
+	ep->an_pass = 0;
 
 	/* External PHY stop */
 	if (dev->phydev) {
@@ -3399,10 +3534,10 @@ static int mgb_start_xmit_to_q(struct sk_buff *skb, struct mgb_q *q)
 		status |= TD_CCRC;
 	}
 
-	raw_spin_lock_irqsave(&q->lock, flags);
+	spin_lock_irqsave(&q->lock, flags);
 
 	if (unlikely(q->full_tx)) {
-		raw_spin_unlock_irqrestore(&q->lock, flags);
+		spin_unlock_irqrestore(&q->lock, flags);
 		if (ep->hw_features & NETIF_F_HW_HSR_DUP)
 			spin_unlock_irqrestore(&mgb_prp.lock, prp_flags);
 		dma_unmap_single(&ep->pci_dev->dev, dmaaddr,
@@ -3416,7 +3551,7 @@ static int mgb_start_xmit_to_q(struct sk_buff *skb, struct mgb_q *q)
 	}
 
 	if (mgb_set_flag_bit(MGB_F_XMIT + nq, &ep->flags)) {
-		raw_spin_unlock_irqrestore(&q->lock, flags);
+		spin_unlock_irqrestore(&q->lock, flags);
 		if (ep->hw_features & NETIF_F_HW_HSR_DUP)
 			spin_unlock_irqrestore(&mgb_prp.lock, prp_flags);
 		dma_unmap_single(&ep->pci_dev->dev, dmaaddr,
@@ -3465,7 +3600,7 @@ static int mgb_start_xmit_to_q(struct sk_buff *skb, struct mgb_q *q)
 
 	clear_bit(MGB_F_XMIT + nq, &ep->flags);
 	txq_trans_cond_update(netdev_get_tx_queue(dev, nq));
-	raw_spin_unlock_irqrestore(&q->lock, flags);
+	spin_unlock_irqrestore(&q->lock, flags);
 	if (ep->hw_features & NETIF_F_HW_HSR_DUP) {
 		mgb_prp.last_xmit = ep->prp_index;
 		spin_unlock_irqrestore(&mgb_prp.lock, prp_flags);
@@ -3553,7 +3688,7 @@ static int mgb_tx(struct mgb_q *q)
 	unsigned long flags;
 	int count = 0;
 
-	raw_spin_lock_irqsave(&q->lock, flags);
+	spin_lock_irqsave(&q->lock, flags);
 	dirty_tx = q->dirty_tx;
 
 	delta = (q->cur_tx - dirty_tx) & (TX_RING_MOD_MASK);
@@ -3563,7 +3698,7 @@ static int mgb_tx(struct mgb_q *q)
 		ep->l_stats.max_tx_q[nq] = delta;
 
 	if (unlikely(!delta && !(q->tx[q->dirty_tx].status))) {
-		raw_spin_unlock_irqrestore(&q->lock, flags);
+		spin_unlock_irqrestore(&q->lock, flags);
 		return 0;
 	}
 	while (((dirty_tx + 1) & (TX_RING_MOD_MASK)) != q->cur_tx) {
@@ -3692,7 +3827,7 @@ no_unqueue:
 	if (count)
 		txq_trans_cond_update(netdev_get_tx_queue(dev, nq));
 
-	raw_spin_unlock_irqrestore(&q->lock, flags);
+	spin_unlock_irqrestore(&q->lock, flags);
 
 	if (must_restart)
 		mgb_write_e_csr(ep, INEA | SWINT);
@@ -4075,14 +4210,11 @@ static inline int mgb_get_lstc_intr_enable(int mgio_csr,
 					   struct mgb_private *ep)
 {
 	if (!(mgio_csr & MG_LSTS0) && (mgio_csr & MG_LSTS1)) {
-		if (test_bit(MGB_F_AN_CL73, &ep->an_status))
-			return MG_ECPL;
 		if (test_bit(MGB_F_AN_SGMII, &ep->an_status))
-			return MG_ECST;
-		else
-			return MG_ECRL | MG_ECPL;
+			return MG_ECST | MG_EFTC | MG_ECRL | MG_ECMB;
+		return MG_ECRL | MG_ECPL | MG_EFTC | MG_ECMB;
 	}
-	return MG_ECRL;
+	return MG_ECRL | MG_EFTC | MG_ECMB;
 }
 
 static void mgb_set_regs_after_reset(struct mgb_private *ep)
@@ -4090,7 +4222,7 @@ static void mgb_set_regs_after_reset(struct mgb_private *ep)
 	int mgio_csr;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+	spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
 
 	/* Reset the MGIO_CSR register manually:
 	 * the 20-th bit is set to 1, the remaining bits are set to 0 or
@@ -4105,19 +4237,16 @@ static void mgb_set_regs_after_reset(struct mgb_private *ep)
 		mgb_write_q_csr(ep, 1, Q_TINT_EN | Q_RINT_EN | Q_MISS_EN);
 	}
 	if (ep->extphyaddr == -1) {
-		if (test_bit(MGB_F_AN_CL37, &ep->an_status) &&
-		    !test_bit(MGB_F_AN_SGMII, &ep->an_status)) {
-			/* BASE-X */
-			mgio_csr |= MG_HARD;
-			mgb_write_mgio_csr(ep, mgio_csr);
-			mgio_csr |= (MG_GETH | MG_FDUP);
-			mgio_csr &= ~MG_FETH;
-		}
+		/* 1000BASE-X PCS */
+		mgio_csr |= MG_HARD;
+		mgb_write_mgio_csr(ep, mgio_csr);
+		mgio_csr |= (MG_GETH | MG_FDUP);
+		mgio_csr &= ~MG_FETH;
 		mgio_csr |= (mgb_get_lstc_intr_enable(mgio_csr, ep));
 	}
 	mgio_csr |= (MG_GEPL | MG_FEPL);
 	mgb_write_mgio_csr(ep, mgio_csr);
-	raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+	spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 
 	mgb_write_psf_csr(ep, ep->psf_csr);
 	mgb_write_psf_data(ep, 0);	/* we have no plans to
@@ -4142,7 +4271,7 @@ static void mgb_phy_reset(struct mgb_private *ep)
 		unsigned long flags;
 		u32 r;
 
-		raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+		spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
 		r = mgb_read_mgio_csr(ep);
 		r &= ~MG_W1C_MASK;
 		r |= MG_SRST;				/* RST */
@@ -4150,7 +4279,7 @@ static void mgb_phy_reset(struct mgb_private *ep)
 		r &= ~MG_SRST;				/* ~RST */
 		mdelay(20);					/* 10ms min */
 		mgb_write_mgio_csr(ep, r);
-		raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+		spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 		mdelay(100);				/* wait for reset min 15ms@156 */
 
 		if (PCI_FUNC(ep->pci_dev->devfn) == 1) {
@@ -4174,9 +4303,9 @@ static void mgb_phy_reset(struct mgb_private *ep)
 			/* Reinit mplls only if
 			 * mpll_mode = MPLL_MODE_2G5/MPLL_MODE_1G_BIF(MPLL_B)
 			 */
-			raw_spin_lock_irqsave(&ep->mgio_lock, flags);
+			spin_lock_irqsave(&eldwcxpcs_mgio_lock[ep->node], flags);
 			eldwcxpcs_mpll_reinit(ep->pci_dev, ep->base_ioaddr);
-			raw_spin_unlock_irqrestore(&ep->mgio_lock, flags);
+			spin_unlock_irqrestore(&eldwcxpcs_mgio_lock[ep->node], flags);
 		}
 	}
 }
@@ -4268,20 +4397,12 @@ static int mgb_1gb_link_up(struct mgb_private *ep)
 static void mgb_check_link_status(struct mgb_private *ep, u32 mgio_csr)
 {
 	struct net_device *dev = ep->dev;
-	int speed = 10;
 	unsigned long flags;
 
 	local_irq_save(flags);
 
-	if (mgio_csr & MG_GETH) {
-		speed = 1000;
-	} else if (mgio_csr & MG_FETH) {
-		speed = 100;
-	}
-	if (mgio_csr & MG_EMST)
-		speed = (speed * 5) / 2;
-
 	if (mgb_get_link_status(ep, mgio_csr)) {
+		int speed = mgb_get_pcs_speed(mgio_csr);
 
 		if (mgb_prp_check_link(dev,
 		    speed, (int)(mgio_csr & MG_FDUP)))
@@ -4293,18 +4414,19 @@ static void mgb_check_link_status(struct mgb_private *ep, u32 mgio_csr)
 				del_timer(&ep->an_monitor_timer);
 
 			mgb_an_start(ep);
-
-			dev_info(&dev->dev,
-				 "link up, %dMbps, %s-duplex\n",
-				 speed,
-				 mgio_csr & MG_FDUP ? "full" : "half");
 		}
 
 		mgb_link_up(dev);
 	} else {
-		if (ep->linkup)
+		if (ep->an_pass) {
 			dev_info(&dev->dev, "link down\n");
+			ep->an_pass = 0;
+		}
+
 		mgb_link_down(dev);
+
+		if (ep->an_discovery)
+			mgb_an_start(ep);
 	}
 failed:
 	local_irq_restore(flags);
@@ -4324,8 +4446,8 @@ static int mgb_board_up(struct mgb_private *ep)
 	int i;
 	unsigned long flags;
 
-	local_irq_save(flags);
 	netif_tx_lock(dev);
+	local_irq_save(flags);
 	if (mgb_wait_for_freeze(&ep->flags)) {
 		dev_err(&dev->dev,
 			"%s: No freeze card: flags = 0x%0lx\n",
@@ -4359,7 +4481,8 @@ static int mgb_board_up(struct mgb_private *ep)
 
 		return 1;
 	}
-	dev_info(&dev->dev, "reset done\n");
+	if (unlikely(netif_msg_ifup(ep)))
+		dev_info(&dev->dev, "reset done\n");
 
 	for (i = 0; i < dev->num_tx_queues; i++) {
 		struct netdev_queue *txq;
@@ -4370,8 +4493,8 @@ static int mgb_board_up(struct mgb_private *ep)
 	}
 	mod_timer(&ep->watchdog_timer, jiffies + ep->watchdog_timeo);
 
-	netif_tx_unlock(dev);
 	local_irq_restore(flags);
+	netif_tx_unlock(dev);
 
 	mgb_update_link_status(ep);
 
@@ -4403,25 +4526,33 @@ static void mgb_handle_mgio_interrupt(struct mgb_private *ep)
 	u32 mgio_csr;
 
 	/* irq disabled */
-	raw_spin_lock(&ep->mgio_lock);
+	spin_lock(&eldwcxpcs_mgio_lock[ep->node]);
 	mgio_csr = mgb_read_mgio_csr(ep);
 	mgb_write_mgio_csr(ep, mgio_csr);
-	raw_spin_unlock(&ep->mgio_lock);
+	spin_unlock(&eldwcxpcs_mgio_lock[ep->node]);
 
-	if (mgio_csr & (MG_CLST | MG_CRLS | MG_CPLS)) {
+	if (mgio_csr & (MG_CLST | MG_CRLS | MG_CPLS | MG_CTFL | MG_CMAB)) {
 		if (unlikely(netif_msg_ifup(ep)))
 			dev_info(&ep->dev->dev,
 				 "%s: mgio_csr = 0x%08x\n"
 				 "%10sCHANGED: %sPCS LINK STATUS\n"
 				 "%10sCHANGED: %sRECEIVER LOSS\n"
+				 "%10sCHANGED: %sTRANSMITTER FAULT\n"
+				 "%10sCHANGED: %sMODULE ABSENT\n"
 				 "%10sCHANGED: %sLINK STATUS\n",
 				 __func__, mgio_csr,
 				 (mgio_csr & MG_CPLS)  ? "+" : "-",
 				 (mgio_csr & MG_PLST)  ? "+" : "-",
 				 (mgio_csr & MG_CRLS)  ? "+" : "-",
 				 (mgio_csr & MG_RLOS)  ? "+" : "-",
+				 (mgio_csr & MG_CTFL)  ? "+" : "-",
+				 (mgio_csr & MG_TFLT)  ? "+" : "-",
+				 (mgio_csr & MG_CMAB)  ? "+" : "-",
+				 (mgio_csr & MG_MABS)  ? "+" : "-",
 				 (mgio_csr & MG_CLST)  ? "+" : "-",
 				 (mgio_csr & MG_LSTA)  ? "+" : "-");
+		if (ep->an_discovery)
+			ep->transmitter_fault = !!(mgio_csr & (MG_TFLT | MG_MABS));
 		mgb_check_link_status(ep, mgio_csr);
 	}
 }
@@ -4519,10 +4650,10 @@ static void mgb_update_err_stats(struct mgb_private *ep)
 	count_l = mgb_read_sh_data_l(ep);
 	count_h = mgb_read_sh_data_h(ep);
 
-	rx_buff = le16_to_cpu((u16)(0x0000FFFF & count_l));
-	rx_crc = le16_to_cpu((u16)(count_l >> 16));
-	rx_oflo = le16_to_cpu((u16)(0x0000FFFF & count_h));
-	rx_miss = le16_to_cpu((u16)(count_h >> 16));
+	rx_buff = (u16)(0x0000FFFF & count_l);
+	rx_crc = (u16)(count_l >> 16);
+	rx_oflo = (u16)(0x0000FFFF & count_h);
+	rx_miss = (u16)(count_h >> 16);
 
 	/* Only 0-th queue stats are updated! */
 	u64_stats_update_begin(&q->rx_stats.syncp);
@@ -4547,10 +4678,10 @@ static void mgb_update_err_stats(struct mgb_private *ep)
 	count_l = mgb_read_sh_data_l(ep);
 	count_h = mgb_read_sh_data_h(ep);
 
-	tx_rtry = le16_to_cpu((u16)(0x0000FFFF & count_l));
-	tx_lcar = le16_to_cpu((u16)(count_l >> 16));
-	tx_lcol = le16_to_cpu((u16)(0x0000FFFF & count_h));
-	tx_uflo = le16_to_cpu((u16)(count_h >> 16));
+	tx_rtry = (u16)(0x0000FFFF & count_l);
+	tx_lcar = (u16)(count_l >> 16);
+	tx_lcol = (u16)(0x0000FFFF & count_h);
+	tx_uflo = (u16)(count_h >> 16);
 
 	/* Only 0-th queue stats are updated! */
 	u64_stats_update_begin(&q->tx_stats.syncp);
@@ -4620,8 +4751,8 @@ static void mgb_load_multicast(struct net_device *dev)
 
 	/* allways held laddrf0 and laddrf1 equal */
 	if (dev->flags & IFF_ALLMULTI) {
-		ib->laddrf0 = 0xffffffffffffffffLL;
-		ib->laddrf1 = 0xffffffffffffffffLL;
+		ib->laddrf0 = cpu_to_le64(0xffffffffffffffffLL);
+		ib->laddrf1 = cpu_to_le64(0xffffffffffffffffLL);
 		return;
 	}
 	/* clear the multicast filter */
@@ -5342,10 +5473,10 @@ static int mgb_xdp_xmit_back(struct net_device *dev, struct xdp_buff *xdp)
 	if (unlikely(!xdpf))
 		return rc;
 
-	raw_spin_lock_irqsave(&q->lock, flags);
+	spin_lock_irqsave(&q->lock, flags);
 
 	if (mgb_set_flag_bit(MGB_F_XMIT + nq, &ep->flags)) {
-		raw_spin_unlock_irqrestore(&q->lock, flags);
+		spin_unlock_irqrestore(&q->lock, flags);
 
 		return -ENETDOWN;
 	}
@@ -5357,7 +5488,7 @@ static int mgb_xdp_xmit_back(struct net_device *dev, struct xdp_buff *xdp)
 
 	clear_bit(MGB_F_XMIT + nq, &ep->flags);
 
-	raw_spin_unlock_irqrestore(&q->lock, flags);
+	spin_unlock_irqrestore(&q->lock, flags);
 
 	return rc;
 }
@@ -5379,10 +5510,10 @@ static int mgb_xdp_xmit(struct net_device *dev, int n,
 	if (!xdp_prog)
 		return -EINVAL;
 
-	raw_spin_lock_irqsave(&q->lock, flags);
+	spin_lock_irqsave(&q->lock, flags);
 
 	if (mgb_set_flag_bit(MGB_F_XMIT + nq, &ep->flags)) {
-		raw_spin_unlock_irqrestore(&q->lock, flags);
+		spin_unlock_irqrestore(&q->lock, flags);
 
 		return -ENETDOWN;
 	}
@@ -5403,7 +5534,7 @@ static int mgb_xdp_xmit(struct net_device *dev, int n,
 
 	clear_bit(MGB_F_XMIT + nq, &ep->flags);
 
-	raw_spin_unlock_irqrestore(&q->lock, flags);
+	spin_unlock_irqrestore(&q->lock, flags);
 
 	u64_stats_update_begin(&q->tx_stats.syncp);
 	q->tx_stats.xdp_xmit += nxmit;
@@ -6084,7 +6215,7 @@ do { \
 
 static char mgb_dbg_reg_mgb_buf[PAGE_SIZE] = "";
 
-const u_int32_t mgb_dbg_reg_id_mgb[16] = {
+static const u_int32_t mgb_dbg_reg_id_mgb[16] = {
 	E_CSR,
 	E_CAP,
 	E_Q0CSR,
@@ -6102,7 +6233,7 @@ const u_int32_t mgb_dbg_reg_id_mgb[16] = {
 	RX_QUEUE_ARB,
 	PSF_DATA1,
 };
-const char *mgb_dbg_reg_name_mgb[16] = {
+static const char *mgb_dbg_reg_name_mgb[16] = {
 	"Ethernet Control/Status",
 	"Ethernet Capabilities",
 	"Queue0 Control/Status",
@@ -6197,7 +6328,7 @@ do { \
 
 static char mgb_dbg_reg_phy_buf[PAGE_SIZE] = "";
 
-const u_int32_t mgb_dbg_reg_id_phy[24] = {
+static const u_int32_t mgb_dbg_reg_id_phy[24] = {
 	MII_BMCR,
 	MII_BMSR,
 	MII_PHYSID1,
@@ -6223,7 +6354,7 @@ const u_int32_t mgb_dbg_reg_id_phy[24] = {
 	MII_TPISTATUS,
 	MII_NCONFIG,
 };
-const char *mgb_dbg_reg_name_phy[24] = {
+static const char *mgb_dbg_reg_name_phy[24] = {
 	"MII_BMCR: Basic mode control register",
 	"MII_BMSR: Basic mode status register",
 	"MII_PHYSID1: PHYS ID 1",
@@ -6305,7 +6436,7 @@ do { \
 
 static char mgb_dbg_reg_pcs_buf[PAGE_SIZE] = "";
 
-const u32 mgb_dbg_reg_id_pcs[] = {
+static const u32 mgb_dbg_reg_id_pcs[] = {
 	SR_XS_PCS_CTRL1,
 	SR_XS_PCS_DEV_ID1,
 	SR_XS_PCS_DEV_ID2,
@@ -6363,7 +6494,7 @@ const u32 mgb_dbg_reg_id_pcs[] = {
 	VR_XS_PMA_Gen5_12G_16G_MISC_STS,
 };
 
-const char *mgb_dbg_reg_name_pcs[] = {
+static const char *mgb_dbg_reg_name_pcs[] = {
 	"SR_XS_PCS_CTRL1",
 	"SR_XS_PCS_DEV_ID1",
 	"SR_XS_PCS_DEV_ID2",
@@ -6792,13 +6923,12 @@ static void mgb_ptp_init(struct mgb_private *ep)
 
 /** TITLE: PROBE stuff */
 
-static int mgb_nd_number;
 
 static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	int err = 0;
 	resource_size_t ioaddr;
-	unsigned char *base_ioaddr;
+	unsigned char __iomem *base_ioaddr;
 	struct resource *res;
 	struct mgb_private *ep = NULL;
 	struct net_device *dev = NULL;
@@ -6808,12 +6938,24 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	const char *of_sfp_prop = NULL;
 	int mpllm;
 	u8 mac_addr[6/*ETH_ALEN*/];
+	int mgb_nd_number;
+	int node = dev_to_node(&pdev->dev);
+
+	if (node < 0)
+		node = 0;
+
+	if (node >= MAX_NUMNODES) {
+		dev_err(&pdev->dev, "node = %d >= MAX_NUMNODES (%d)\n",
+			node, MAX_NUMNODES);
+		return -ENODEV;
+	}
+
+	mgb_nd_number = (node * 2) + PCI_FUNC(pdev->devfn);
 
 	/* check cmdline param */
 	if (mgb_status[mgb_nd_number % MGB_MAX_NETDEV_NUMBER] == 0) {
 		dev_info(&pdev->dev, "device %d disabled in cmdline\n",
 			 mgb_nd_number);
-		mgb_nd_number++;
 		return -ENODEV;
 	} else if (mgb_status[mgb_nd_number % MGB_MAX_NETDEV_NUMBER] > 1) {
 		/* check devtree config */
@@ -6824,8 +6966,6 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 					dev_info(&pdev->dev,
 						 "device %d disabled in devicetree\n",
 						 mgb_nd_number);
-					of_node_put(np);
-					mgb_nd_number++;
 					return -ENODEV;
 				}
 				dev_info(&pdev->dev,
@@ -6842,7 +6982,6 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			 mgb_nd_number);
 	}
 
-	mgb_nd_number++;
 	/* PCS MPLL mode: 0-10G, 1-1G, 2-2.5G, 3-bifurcation */
 	mpllm = eldwcxpcs_get_mpll_mode(pdev);
 	if (mpllm < 0) {
@@ -6920,13 +7059,13 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	ep->flags = 0;
 	ep->status = 0;
 	ep->msg_enable = mgb_debug;
-	ep->nd_number = (mgb_nd_number - 1) % MGB_MAX_NETDEV_NUMBER;
+	ep->nd_number = mgb_nd_number % MGB_MAX_NETDEV_NUMBER;
+	ep->node = node;
 
 	ep->mpll_mode = mpllm;
 
 	ep->mgb_ticks_per_usec = mgb_is_eiohub_proto(ep) ? 125 : 480;
 
-	raw_spin_lock_init(&ep->mgio_lock);
 	mutex_init(&ep->mx);
 
 	int r = l_set_ethernet_macaddr(pdev, (char *)mac_addr);
@@ -6937,9 +7076,9 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	eth_hw_addr_set(dev, mac_addr);
 	dev_info(&pdev->dev,
 #ifdef __sparc__
-		 "MAC = %012llX\n", be64_to_cpu(*(u64 *)(dev->dev_addr) >> 16));
+		 "MAC = %012llX\n", be64_to_cpu(*(__be64 *)(dev->dev_addr)) >> 16);
 #else
-		 "MAC = %012llX\n", be64_to_cpu(*(u64 *)(dev->dev_addr) << 16));
+		 "MAC = %012llX\n", be64_to_cpu(*(__be64 *)(dev->dev_addr)) << 16);
 #endif
 
 	mgb_write_e_csr(ep, STOP); /* Stop card */
@@ -7060,7 +7199,6 @@ static int mgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* PHY register mdio bus */
 	err = mgb_mdio_register(ep, np);
-	of_node_put(np);
 	if (err) {
 		dev_err(&pdev->dev, "register mdio failed.\n");
 		err = -ENODEV;
@@ -7265,7 +7403,7 @@ static int mgb_resume(struct pci_dev *pdev)
 }
 #endif	/*CONFIG_PM*/
 
-const struct pci_device_id mgb_pci_tbl[] = {
+static const struct pci_device_id mgb_pci_tbl[] = {
 	{
 		.vendor = PCI_VENDOR_ID_MCST_TMP,
 		.device = PCI_DEVICE_ID_MCST_MGB,

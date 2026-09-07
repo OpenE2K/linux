@@ -79,12 +79,18 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 	if (len > TASK_SIZE)
 		return -ENOMEM;
 
+	if (is_protected && !cpu_has(CPU_FEAT_V7_CPU_REGS) && (len >> 31)) {
+		return -ENOMEM;
+	}
 	if (flags & MAP_FIXED) {
 		if (!test_ts_flag(TS_KERNEL_SYSCALL) &&
 				!__range_ok(addr, len, USER_ADDR_MAX))
 			return -ENOMEM;
 		if (prepare_hugepage_range(file, addr, len))
 			return -EINVAL;
+		if (is_protected && cpu_has(CPU_FEAT_V7_CPU_REGS))
+			if (addr & ap_align_mask(len))
+				return -EINVAL;
 		return addr;
 	}
 
@@ -114,6 +120,10 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 	info.low_limit = begin;
 	info.high_limit = end;
 	info.align_mask = PAGE_MASK & ~huge_page_mask(h);
+	if (is_protected && cpu_has(CPU_FEAT_V7_CPU_REGS)) {
+		info.align_mask |= ap_align_mask(len);
+		info.length = (len + ap_align_mask(len)) & ~ap_align_mask(len);
+	}
 	info.align_offset = 0;
 
 	return vm_unmapped_area(&info);

@@ -48,9 +48,7 @@
 #define DRIVER_MAJOR 1
 #define DRIVER_MINOR 1
 
-#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
 static const struct drm_gem_object_funcs hantro_drm_gem_cma_funcs;
-#endif
 static int AllocateMem(struct drm_gem_hantro_object *cma_obj, struct drm_mode_create_dumb *args);
 static void FreeMem(struct drm_gem_hantro_object *cma_obj);
 static int hantro_prime_pin(struct drm_gem_object *obj);
@@ -137,18 +135,14 @@ static int hantro_gem_dumb_create_internal(struct drm_file *file_priv,
 	cma_obj->vaddr = NULL;
 	cma_obj->sliceidx = sliceidx;
 	mutex_init(&cma_obj->pages_lock);
-
 	ret = AllocateMem(cma_obj, args);
 	if (ret != 0) {
 		kfree(cma_obj);
 		ret = -ENOMEM;
 		goto out;
 	}
-
-#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
 	if (!obj->funcs)
 		obj->funcs = &hantro_drm_gem_cma_funcs;
-#endif
 	drm_gem_object_init(dev, obj, args->size);
 	ret = drm_gem_handle_create(file_priv, obj, &args->handle);
 	hantro_unref_drmobj(obj);
@@ -199,7 +193,6 @@ static int hantro_destroy_dumb(struct drm_device *dev, void *data,
 	struct drm_mode_destroy_dumb *args = data;
 	struct drm_gem_object *obj;
 	struct drm_gem_hantro_object *cma_obj;
-
 	if (mutex_lock_interruptible(&dev->struct_mutex))
 		return -EBUSY;
 	obj = hantro_gem_object_lookup(dev, file_priv, args->handle);
@@ -208,9 +201,7 @@ static int hantro_destroy_dumb(struct drm_device *dev, void *data,
 		return -EINVAL;
 	}
 	hantro_unref_drmobj(obj);
-
 	cma_obj = to_drm_gem_hantro_obj(obj);
-
 	drm_gem_handle_delete(file_priv, args->handle);
 	mutex_unlock(&dev->struct_mutex);
 	return 0;
@@ -227,18 +218,13 @@ hantro_gem_prime_get_sg_table(struct drm_gem_object *obj)
 	if (!pslice)
 		return NULL;
 	if (cma_obj->flag & HANTRO_GEM_FLAG_USEVMALLOC) {
-
 		pr_info("%s %s bef %p\n", DRIVER_NAME, __func__, cma_obj->pages);
 		if (!cma_obj->pages)
 			hantro_prime_pin(obj);
 		pr_info("%s %s after %p\n", DRIVER_NAME, __func__, cma_obj->pages);
 		if (cma_obj->pages) {
 			pr_info("%s befor drm_prime_pages_to_sg in %p, %lu\n", DRIVER_NAME, cma_obj->pages, cma_obj->num_pages);
-#if KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE
 			sgt = drm_prime_pages_to_sg(obj->dev, cma_obj->pages, cma_obj->num_pages);
-#else
-			sgt = drm_prime_pages_to_sg(cma_obj->pages, cma_obj->num_pages);
-#endif
 			pr_info("%s after drm_prime_pages_to_sg\n", DRIVER_NAME);
 		}
 		pr_info("%s: %s vaddr pages %p, vadrr %p to sgt: %d, %d, %d\n", DRIVER_NAME,
@@ -266,14 +252,7 @@ hantro_gem_prime_import_sg_table(struct drm_device *dev,
 {
 	struct drm_gem_hantro_object *cma_obj;
 	struct drm_gem_object *obj;
-#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
-#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
-	struct dma_buf_map map;
-#else
 	struct iosys_map map;
-#endif
-#endif
-
 	cma_obj = kzalloc(sizeof(*cma_obj), GFP_KERNEL);
 	if (!cma_obj)
 		return ERR_PTR(-ENOMEM);
@@ -288,19 +267,13 @@ hantro_gem_prime_import_sg_table(struct drm_device *dev,
 		cma_obj->num_pages = attach->dmabuf->size >> PAGE_SHIFT;
 		cma_obj->pages_pin_count++; /* perma-pinned */
 		pr_info("%s: beg drm_prime_sg_to_page_array\n",DRIVER_NAME);
-#if KERNEL_VERSION(5, 12, 0) <= LINUX_VERSION_CODE
 		drm_prime_sg_to_page_array(sgt, cma_obj->pages, npages);
-#else
-		drm_prime_sg_to_page_addr_arrays(sgt, cma_obj->pages, NULL, npages);
-#endif
 		pr_info("%s: end drm_prime_sg_to_page_array\n",DRIVER_NAME);
 	}
 
 	obj = &cma_obj->base;
-#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
 	if (!obj->funcs)
 		obj->funcs = &hantro_drm_gem_cma_funcs;
-#endif
 
 	if (drm_gem_object_init(dev, obj, attach->dmabuf->size) != 0) {
 		kfree(cma_obj);
@@ -308,12 +281,8 @@ hantro_gem_prime_import_sg_table(struct drm_device *dev,
 	}
 
 	cma_obj->paddr = sg_dma_address(sgt->sgl);
-#if KERNEL_VERSION(5, 11, 0) > LINUX_VERSION_CODE
-	cma_obj->vaddr = dma_buf_vmap(attach->dmabuf);
-#else
 	dma_buf_vmap(attach->dmabuf, &map);
 	cma_obj->vaddr = map.vaddr;
-#endif
 	cma_obj->sgt = sgt;
 	cma_obj->num_pages = attach->dmabuf->size >> PAGE_SHIFT;
 	cma_obj->dmapriv.meta_data =
@@ -328,46 +297,16 @@ hantro_gem_prime_import_sg_table(struct drm_device *dev,
 	return obj;
 }
 
-#if KERNEL_VERSION(5, 11, 0) > LINUX_VERSION_CODE
-static void *hantro_gem_prime_vmap(struct drm_gem_object *obj)
-{
-	struct drm_gem_hantro_object *cma_obj = to_drm_gem_hantro_obj(obj);
-
-	return cma_obj->vaddr;
-}
-
-static void hantro_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr)
-{
-	pr_info("hantro_gem_prime_vmap xxx\n");
-
-}
-
-#else
 static int hantro_gem_prime_vmap(struct drm_gem_object *obj,
-#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
-				 struct dma_buf_map *map)
-#else
 				 struct iosys_map *map)
-#endif
 {
 	struct drm_gem_hantro_object *cma_obj = to_drm_gem_hantro_obj(obj);
-
-#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
-	dma_buf_map_set_vaddr(map, cma_obj->vaddr);
-#else
 	iosys_map_set_vaddr(map, cma_obj->vaddr);
-#endif
-
-
 	return 0;
 }
 
 static void hantro_gem_prime_vunmap(struct drm_gem_object *obj,
-#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
-				   struct dma_buf_map *map)
-#else
 				   struct iosys_map *map)
-#endif
 {
 	struct drm_gem_hantro_object *cma_obj = to_drm_gem_hantro_obj(obj);
 
@@ -376,20 +315,8 @@ static void hantro_gem_prime_vunmap(struct drm_gem_object *obj,
 	hantro_unpin_pages(cma_obj);
 	pr_info("%s: hantro_gem_prime_vunmap END\n", DRIVER_NAME);
 }
-#endif
 
-/* omitted in kernel version > 5.4.0
- *static struct reservation_object *hantro_gem_prime_res_obj(
- *	struct drm_gem_object *obj)
- *{
- *	struct drm_gem_hantro_object *hobj = to_drm_gem_hantro_obj(obj);
- *
- *	return &hobj->kresv;
- *}
- */
-
-int hantro_gem_prime_mmap(struct drm_gem_object *obj,
-				 struct vm_area_struct *vma)
+int hantro_gem_prime_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma)
 {
 	struct drm_gem_hantro_object *cma_obj;
 	unsigned long page_num = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
@@ -431,23 +358,15 @@ static void hantro_gem_free_object(struct drm_gem_object *gem_obj)
 	/* dma buf imported from others,
 	 * release data structures allocated by ourselves
 	 */
-#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
-#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
-	struct dma_buf_map map;
-#else
 	struct iosys_map map;
-#endif
-#endif
 
 	cma_obj = to_drm_gem_hantro_obj(gem_obj);
 	if (gem_obj->import_attach) {
 		if (cma_obj->vaddr) {
-#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
 			pr_info("%s: bef dma_buf_vunmap vaddr %p, dma_bufops %p, %p\n", DRIVER_NAME, cma_obj->vaddr, gem_obj->import_attach->dmabuf->ops, &hantro_dmabuf_ops);
 			map.is_iomem = 0;
 			map.vaddr = cma_obj->vaddr;
 			dma_buf_vunmap(gem_obj->import_attach->dmabuf, &map);
-#endif
 		}
 
 		drm_prime_gem_destroy(gem_obj, cma_obj->sgt);
@@ -766,24 +685,17 @@ static int hantro_fb_create2(struct drm_device *dev, void *data,
 	struct hantro_drm_fb *vsifb;
 	struct drm_gem_object *objs[4];
 	struct drm_gem_object *obj;
-#if KERNEL_VERSION(4, 16, 0) <= LINUX_VERSION_CODE
 	const struct drm_format_info *info = drm_get_format_info(dev, mode_cmd);
-#endif
 	unsigned int hsub;
 	unsigned int vsub;
 	int num_planes;
 	int ret;
 	int i;
 
-#if KERNEL_VERSION(4, 16, 0) <= LINUX_VERSION_CODE
 	hsub = info->hsub;
 	vsub = info->vsub;
 	num_planes = min_t(int, info->num_planes, 4);
-#else
-	hsub = drm_format_horz_chroma_subsampling(mode_cmd->pixel_format);
-	vsub = drm_format_vert_chroma_subsampling(mode_cmd->pixel_format);
-	num_planes = min(drm_format_num_planes(mode_cmd->pixel_format), 4);
-#endif
+
 	for (i = 0; i < num_planes; i++) {
 		unsigned int width = mode_cmd->width / (i ? hsub : 1);
 		unsigned int height = mode_cmd->height / (i ? vsub : 1);
@@ -798,12 +710,7 @@ static int hantro_fb_create2(struct drm_device *dev, void *data,
 		hantro_unref_drmobj(obj);
 		min_size = (height - 1) * mode_cmd->pitches[i] +
 			   mode_cmd->offsets[i] +
-#if KERNEL_VERSION(4, 16, 0) <= LINUX_VERSION_CODE
 			   width * info->cpp[i];
-#else
-			   width * drm_format_plane_cpp(mode_cmd->pixel_format,
-							i);
-#endif
 		if (obj->size < min_size) {
 			//hantro_unref_drmobj(obj);
 			ret = -EINVAL;
@@ -924,12 +831,7 @@ static int hantro_get_cap(struct drm_device *dev, void *data,
 			req->value = 64;
 		break;
 	case DRM_CAP_ADDFB2_MODIFIERS:
-#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
-		req->value = dev->mode_config.allow_fb_modifiers;
-#else
-		// for kernel 6.1 compile
 		req->value = dev->mode_config.fb_modifiers_not_supported;
-#endif
 		break;
 	default:
 		return -EINVAL;
@@ -950,18 +852,9 @@ static int hantro_test(struct drm_device *dev, void *data,
 	obj = hantro_gem_object_lookup(dev, file_priv, handle);
 	if (!obj)
 		return -EINVAL;
-
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-	pfence = dma_resv_get_excl(obj->dma_buf->resv);
-#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
-	pfence = dma_resv_excl_fence(obj->dma_buf->resv);
-#else
-	// for kernel 6.1 compile
 	hantro_fence_t **fence;
-
 	dma_resv_get_fences(obj->dma_buf->resv, 0, NULL, &fence);
 	pfence = *fence;
-#endif
 	while (ret > 0)
 		ret = schedule_timeout(ret);
 
@@ -1366,25 +1259,17 @@ static long hantro_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	char *kdata = stack_kdata;
 	unsigned int in_size, out_size;
 
-#if KERNEL_VERSION(4, 15, 0) <= LINUX_VERSION_CODE
 	if (drm_dev_is_unplugged(dev))
 		return -ENODEV;
-#else
-	if (drm_device_is_unplugged(dev))
-		return -ENODEV;
-#endif
-
 	in_size = _IOC_SIZE(cmd);
 	out_size = in_size;
 	pr_debug("ioctl cmd %d:%d\n", _IOC_TYPE(cmd), nr);
 
 	if (in_size > 0) {
 		if (_IOC_DIR(cmd) & _IOC_READ)
-			retcode = !hantro_access_ok(VERIFY_WRITE, (void *)arg,
-						    in_size);
+			retcode = !hantro_access_ok(VERIFY_WRITE, (void __user *)arg, in_size);
 		else if (_IOC_DIR(cmd) & _IOC_WRITE)
-			retcode = !hantro_access_ok(VERIFY_READ, (void *)arg,
-						    in_size);
+			retcode = !hantro_access_ok(VERIFY_READ, (void __user *)arg, in_size);
 		if (retcode)
 			return -EFAULT;
 	}
@@ -1397,7 +1282,7 @@ static long hantro_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			if (cmd == HANTROENC_IOCG_CORE_NUM) {
 				int corenum = 0;
 
-				__put_user(corenum, (unsigned int *)arg);
+				__put_user(corenum, (int __user  *)arg);
 			} else {
 				return -EFAULT;
 			}
@@ -1591,7 +1476,6 @@ static int hantro_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct device *dev;
 
 	hantro_mmaplog("%s :%lx", __func__, vma->vm_pgoff);
-
 	if (vma->vm_pgoff < VSI_MMAP_ADDRES_CEIL_MMAP)
 		return hantro_map_internal_address(filp, vma);
 	if (mutex_lock_interruptible(&hantro_dev.drm_dev->struct_mutex))
@@ -1643,7 +1527,6 @@ static int hantro_mmap(struct file *filp, struct vm_area_struct *vma)
 			return ret;
 		}
 	} else {
-
 		pscatter = &cma_obj->sgt->sgl[sgtidx];
 #ifndef CONFIG_MCST
 #ifdef __amd64__
@@ -1659,15 +1542,13 @@ static int hantro_mmap(struct file *filp, struct vm_area_struct *vma)
 		unsigned long uaddr = vma->vm_start;
 		void *address = cma_obj->vaddr;
 		struct page *pages = NULL;
-
 #if KERNEL_VERSION(6, 3, 0) < LINUX_VERSION_CODE
 		vm_flags_set(vma, VM_LOCKED);
 		vm_flags_clear(vma, VM_PFNMAP);
 #else
 		vma->vm_flags |= VM_LOCKED;
-                vma->vm_flags &= ~VM_PFNMAP;
+		vma->vm_flags &= ~VM_PFNMAP;
 #endif
-
 		for (i = 0; i < page_num; i++) {
 			pages = (vmalloc_to_page(address));
 			if (IS_ERR(pages) || !page_count(pages) ||
@@ -1689,12 +1570,15 @@ static int hantro_mmap(struct file *filp, struct vm_area_struct *vma)
 			address += PAGE_SIZE;
 		}
 	} else {
-
 #ifndef VSI_FPGA_MEM
 		vma->vm_pgoff = 0;
 
 		/*drm_gem_mmap_obj() sets this flag for unknown reason*/
+#if KERNEL_VERSION(6, 3, 0) < LINUX_VERSION_CODE
+		vm_flags_clear(vma, VM_PFNMAP);
+#else
 		vma->vm_flags &= ~VM_PFNMAP;
+#endif
 		if (dma_mmap_wc(dev, vma, cma_obj->vaddr, cma_obj->paddr,
 				      page_num << PAGE_SHIFT)) {
 			mutex_unlock(&hantro_dev.drm_dev->struct_mutex);
@@ -1702,10 +1586,23 @@ static int hantro_mmap(struct file *filp, struct vm_area_struct *vma)
 		}
 #else
 #error FIXME E2K
+#ifdef USE_CONTINUOUSMEM_MEM
+		vma->vm_pgoff = 0;
+		if (dma_mmap_coherent(dev, vma, cma_obj->vaddr, cma_obj->paddr,
+				      page_num << PAGE_SHIFT)) {
+			mutex_unlock(&hantro_dev.drm_dev->struct_mutex);
+			return -EAGAIN;
+		}
+#else
+#ifdef VSI_FPGA_MEM
 		remap_pfn_range(vma, vma->vm_start,
 				cma_obj->paddr >> PAGE_SHIFT,
 				(vma->vm_end - vma->vm_start),
 				vma->vm_page_prot);
+#else
+		pr_info("Customer implement it\n");
+#endif
+#endif
 #endif
 	}
 	vma->vm_private_data = cma_obj;
@@ -1733,23 +1630,10 @@ static void hantro_gem_vm_close(struct vm_area_struct *vma)
 	drm_gem_vm_close(vma);
 }
 
-#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-static int hantro_unload(struct drm_device *dev)
-{
-	return 0;
-}
-#else
 static void hantro_release(struct drm_device *dev)
 {
-#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-	drm_dev_unregister(hantro_dev.drm_dev);
-#elif KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE
-	drm_dev_fini(hantro_dev.drm_dev);
-#else
 	drm_dev_put(hantro_dev.drm_dev);
-#endif
 }
-#endif
 
 static int hantro_gem_prime_handle_to_fd(struct drm_device *dev,
 					 struct drm_file *filp, uint32_t handle,
@@ -1758,23 +1642,10 @@ static int hantro_gem_prime_handle_to_fd(struct drm_device *dev,
 	return drm_gem_prime_handle_to_fd(dev, filp, handle, flags, prime_fd);
 }
 
-#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
-/*we shall not support page fault. */
-static int hantro_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
-{
-	return -EPERM;
-}
-#elif KERNEL_VERSION(5, 0, 0) > LINUX_VERSION_CODE
-static int hantro_vm_fault(struct vm_fault *vmf)
-{
-	return -EPERM;
-}
-#else
 static vm_fault_t hantro_vm_fault(struct vm_fault *vmf)
 {
-	return -EPERM;
+	return VM_FAULT_HWPOISON; /* ??? but what & */
 }
-#endif
 
 static const struct vm_operations_struct hantro_drm_gem_cma_vm_ops = {
 	.open = drm_gem_vm_open,
@@ -1790,6 +1661,32 @@ static u32 hantro_vblank_no_hw_counter(struct drm_device *dev,
 	return 0;
 }
 #endif
+
+#if defined(PCIE_EN) && !defined(PCI_DDR_BAR)
+static void FreeDMAMem(struct drm_gem_hantro_object *cma_obj)
+{
+	struct slice_info *pslice = getslicenode(cma_obj->sliceidx);
+
+	if (!pslice)
+		return;
+
+	dma_free_wc(pslice->dev, cma_obj->base.size,
+				cma_obj->vaddr, cma_obj->paddr);
+}
+
+static int AllocateDMAMem(struct drm_gem_hantro_object *cma_obj, struct drm_mode_create_dumb *args)
+{
+	struct slice_info *pslice = getslicenode(args->handle);
+
+	WARN_ON(!pslice->dev);
+	cma_obj->vaddr = dma_alloc_wc(pslice->dev, args->size,
+						&cma_obj->paddr,
+						GFP_KERNEL);
+	if (!cma_obj->vaddr)
+		return -ENOMEM;
+	return 0;
+}
+#else
 
 #ifdef HAS_MMU
 #ifndef VSI_FPGA_MEM
@@ -1816,15 +1713,20 @@ static int AllocMemWithMMU(struct drm_gem_hantro_object *cma_obj,  struct drm_mo
 }
 #endif
 #else
-#ifdef USE_CMA
-static void FreeCMAMem(struct drm_gem_hantro_object *cma_obj)
+#ifdef USE_CONTINUOUSMEM_MEM
+static void FreeContinuousMem(struct drm_gem_hantro_object *cma_obj)
 {
 	struct slice_info *pslice = getslicenode(cma_obj->sliceidx);
-
 	if (!pslice)
 		return;
+#ifndef USE_CMA
+	dma_free_coherent(pslice->dev, cma_obj->base.size,
+				cma_obj->vaddr, cma_obj->paddr);
+#else
+
 	dma_release_from_contiguous(pslice->dev, cma_obj->pageaddr,
 					cma_obj->num_pages);
+#endif
 }
 
 /*For X86 environment, CMA maybe need disabled for these reasons:
@@ -1833,53 +1735,57 @@ static void FreeCMAMem(struct drm_gem_hantro_object *cma_obj)
  *3. a boot parameter like "cma=268435456@134217728" should be added
  *4. CMA's memory management is not stable.
  */
-
-static int AllocateCMAMem(struct drm_gem_hantro_object *cma_obj, struct drm_mode_create_dumb *args)
+static int AllocateContinuousMem(struct drm_gem_hantro_object *cma_obj, struct drm_mode_create_dumb *args)
 {
 	struct slice_info *pslice = getslicenode(args->handle);
-#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-	cma_obj->pageaddr = dma_alloc_from_contiguous(
-		pslice->dev, args->size >> PAGE_SHIFT, 1);
+	if (!pslice)
+		return -ENOMEM;
+#ifndef USE_CMA
+	cma_obj->vaddr = dma_alloc_coherent(pslice->dev, args->size,
+						&cma_obj->paddr,
+						GFP_KERNEL | GFP_DMA);
+	if (!cma_obj->vaddr)
+		return -ENOMEM;
 #else
 	cma_obj->pageaddr = dma_alloc_from_contiguous(
 		pslice->dev, args->size >> PAGE_SHIFT, 1, GFP_KERNEL);
-#endif
 	if (!cma_obj->pageaddr)
 		return -ENOMEM;
-
 #error FIXME E2K
 	cma_obj->vaddr = page_to_virt(cma_obj->pageaddr);
 	cma_obj->paddr = virt_to_phys(cma_obj->vaddr);
+#endif
 	return 0;
 }
 #else
-static void __attribute((unused)) FreeDMAMem(struct drm_gem_hantro_object *cma_obj)
+#ifndef VSI_FPGA_MEM
+static void FreeVitualMem(struct drm_gem_hantro_object *cma_obj)
 {
-	struct slice_info *pslice = getslicenode(cma_obj->sliceidx);
-
-	if (!pslice)
-		return;
-	dma_free_coherent(pslice->dev, cma_obj->base.size,
-				cma_obj->vaddr, cma_obj->paddr);
+	pr_info("%s vfree\n", DRIVER_NAME);
+	vfree(cma_obj->vaddr);
 }
 
-static int __attribute((unused)) AllocateDMAMem(struct drm_gem_hantro_object *cma_obj, struct drm_mode_create_dumb *args)
+static int AllocVitualMem(struct drm_gem_hantro_object *cma_obj,  struct drm_mode_create_dumb *args)
 {
-	struct slice_info *pslice = getslicenode(args->handle);
-
-	cma_obj->vaddr = dma_alloc_wc(pslice->dev, args->size,
-						&cma_obj->paddr,
-						GFP_KERNEL);
+	cma_obj->vaddr = vmalloc(args->size);
 	if (!cma_obj->vaddr)
 		return -ENOMEM;
+	pr_info("%s:vmalloc size %llu vaddr %p\n", DRIVER_NAME, args->size, cma_obj->vaddr);
+	cma_obj->paddr = page_to_phys(vmalloc_to_page(cma_obj->vaddr));
+	cma_obj->flag |= HANTRO_GEM_FLAG_USEVMALLOC;
 	return 0;
 }
-#endif//USE_CMA end
+#endif
+#endif
 #endif//HAS_MMU end
+#endif
 
 static void FreeMem(struct drm_gem_hantro_object *cma_obj)
 {
 
+#if defined(PCIE_EN) && !defined(PCI_DDR_BAR)
+	FreeDMAMem(cma_obj);
+#else
 #ifdef VSI_FPGA_MEM
 	FreeHantroFpgaMem(cma_obj);
 #else
@@ -1889,20 +1795,23 @@ static void FreeMem(struct drm_gem_hantro_object *cma_obj)
 	FreeMemWithMMU(cma_obj);
 #else
 
-#ifdef USE_CMA
-	FreeCMAMem(cma_obj);
+#ifdef USE_CONTINUOUSMEM_MEM
+	FreeContinuousMem(cma_obj);
 #else
-	FreeDMAMem(cma_obj);
+	FreeVitualMem(cma_obj);
 #endif
-
 #endif//HAS_MMU end
-
 #endif//VSI_FPGA_MEM end
+#endif
 }
 
 static int AllocateMem(struct drm_gem_hantro_object *cma_obj, struct drm_mode_create_dumb *args)
 {
 	int ret;
+
+#if defined(PCIE_EN) && !defined(PCI_DDR_BAR)
+	ret = AllocateDMAMem(cma_obj, args);
+#else
 #ifdef VSI_FPGA_MEM
 	ret = AllocHantroFpgaMem(cma_obj, args);
 #else
@@ -1912,19 +1821,18 @@ static int AllocateMem(struct drm_gem_hantro_object *cma_obj, struct drm_mode_cr
 	ret = AllocMemWithMMU(cma_obj, args);
 #else
 
-#ifdef USE_CMA
-	ret = AllocateCMAMem(cma_obj, args);
+#ifdef USE_CONTINUOUSMEM_MEM
+	ret = AllocateContinuousMem(cma_obj, args);
 #else
-	ret = AllocateDMAMem(cma_obj, args);
+	ret = AllocVitualMem(cma_obj, args);
+#endif
 #endif
 
 #endif
-
 #endif
 	return ret;
 }
 
-#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
 static const struct drm_gem_object_funcs hantro_drm_gem_cma_funcs = {
 	.export = hantro_prime_export,
 	.get_sg_table = hantro_gem_prime_get_sg_table,
@@ -1933,7 +1841,6 @@ static const struct drm_gem_object_funcs hantro_drm_gem_cma_funcs = {
 	.free = hantro_gem_free_object,
 	.vm_ops = &hantro_drm_gem_cma_vm_ops,
 };
-#endif
 
 struct drm_driver hantro_drm_driver = {
 	//these two are related with controlD and renderD
@@ -1942,11 +1849,7 @@ struct drm_driver hantro_drm_driver = {
 	.get_vblank_counter = hantro_vblank_no_hw_counter,
 #endif
 	.open = hantro_drm_open,
-#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-	.unload = hantro_unload,
-#else
 	.release = hantro_release,
-#endif
 	.dumb_create = hantro_gem_dumb_create_internal,
 	.dumb_map_offset = hantro_gem_dumb_map_offset,
 	.gem_prime_import = hantro_drm_gem_prime_import,
@@ -1960,30 +1863,6 @@ struct drm_driver hantro_drm_driver = {
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 };
-
-#if 0
-struct drm_device *create_hantro_drm(struct device *dev)
-{
-	struct drm_device *ddev;
-	int result;
-
-	ddev = drm_dev_alloc(&hantro_drm_driver, dev);
-	if (IS_ERR(ddev))
-		return ddev;
-
-	ddev->dev = dev;
-	drm_mode_config_init(ddev);
-	result = drm_dev_register(ddev, 0);
-	if (result < 0) {
-		drm_dev_unregister(ddev);
-		drm_dev_put(ddev);
-		return NULL;
-	}
-
-	return ddev;
-}
-#endif
-
 
 static struct page **hantro_pin_pages(struct drm_gem_hantro_object *bo)
 {
@@ -2045,25 +1924,12 @@ static int hantro_drm_gem_mmap_obj(struct drm_gem_object *obj, unsigned long obj
 	 * (which should happen whether the vma was created by this call, or
 	 * by a vm_open due to mremap or partial unmap or whatever).
 	 */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
-	struct drm_device *dev = obj->dev;
-	if (!dev->driver->gem_vm_ops)
-		return -EINVAL;
-
-	vma->vm_flags |= VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP;
-	vma->vm_ops = dev->driver->gem_vm_ops;
-	vma->vm_private_data = obj;
-	vma->vm_page_prot = pgprot_noncached(vm_get_page_prot(vma->vm_flags));
-	drm_gem_object_get(obj);
-	return 0;
-#else
 	drm_gem_object_get(obj);
 	vma->vm_private_data = obj;
 	vma->vm_ops = obj->funcs->vm_ops;
 	if (!vma->vm_ops) {
 		goto err_drm_gem_object_put;
 	}
-
 #if KERNEL_VERSION(6, 3, 0) < LINUX_VERSION_CODE
 	vm_flags_set(vma, VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP);
 #else
@@ -2075,5 +1941,4 @@ static int hantro_drm_gem_mmap_obj(struct drm_gem_object *obj, unsigned long obj
 err_drm_gem_object_put:
 	drm_gem_object_put(obj);
 	return -EINVAL;
-#endif
 }

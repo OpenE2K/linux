@@ -19,6 +19,7 @@
 #include <linux/kvm_host.h>
 #include <linux/pgtable.h>
 
+#include <asm/hw_prefetchers.h>
 #include <asm/page.h>
 #include <asm/regs_state.h>
 #include <asm/tlb_regs_access.h>
@@ -26,20 +27,22 @@
 #include <asm/process.h>
 #include <asm/fast_syscalls.h>
 
-#include <asm/kvm/mm.h>
-#include <asm/kvm/runstate.h>
 #include <asm/kvm/switch.h>
 #include <asm/kvm/trace_kvm.h>
-#include <asm/kvm/proc_context_stacks.h>
 
 #include "process.h"
 #include "cpu.h"
 #include "mmu.h"
 #include "irq.h"
 #include "io.h"
-#include "mman.h"
-#include "time.h"
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+#include <asm/kvm/paravirt_sw/mm.h>
+#include <asm/kvm/paravirt_sw/proc_context_stacks.h>
+#include <asm/kvm/paravirt_sw/runstate.h>
+#include "paravirt_sw/mman.h"
 #include "paravirt_sw/string.h"
+#include "paravirt_sw/time.h"
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #include "trace-tlb-flush.h"
 
 #undef	DEBUG_KVM_SWITCH_MODE
@@ -94,8 +97,6 @@
 #undef	DEBUG_GPT_REGS_MODE
 #define	DEBUG_GPT_REGS_MODE	0	/* KVM host and guest kernel */
 					/* stack activations print */
-
-int last_light_hcall = -1;
 
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
@@ -356,6 +357,8 @@ static int __init init_unpriv_hcalls(void)
 	/* Mark hypercalls that are safe to use by non-root user */
 	__set_bit(KVM_HCALL_PV_WAIT, unpriv_generic_hcalls);
 	__set_bit(KVM_HCALL_PV_KICK, unpriv_generic_hcalls);
+	__set_bit(KVM_HCALL_L2_PREFETCHER_SAVE, unpriv_generic_hcalls);
+	__set_bit(KVM_HCALL_L2_PREFETCHER_RESTORE, unpriv_generic_hcalls);
 #ifdef CONFIG_KVM_ASYNC_PF
 	__set_bit(KVM_HCALL_PV_ENABLE_ASYNC_PF, unpriv_generic_hcalls);
 #endif
@@ -380,12 +383,11 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 	thread_info_t *thread_info;
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gthread_info_t *gti;
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	bool from_light_hypercall;
 	bool from_generic_hypercall;
-	e2k_cr1_t cr1;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	unsigned long irq_flags;
-	bool need_inject;
+	bool need_inject = false;
 	unsigned long ret = 0;
 	unsigned long from_sdisp = hcall_num >> 63;
 
@@ -397,17 +399,21 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 
 	__guest_exit_light(thread_info, &vcpu->arch);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* check VCPU ID of global register and running VCPU */
 	kvm_check_vcpu_ids_as_light(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* set kernel state of UPSR to preserve FP disable exception */
 	/* on movfi instructions while global registers saving */
 	NATIVE_SWITCH_TO_KERNEL_IRQ_MASK_REG(irq_flags, false,	/* enable IRQs */
 					     false /* disable NMI */);
 
+	//TODO
 	vcpu->mode = OUTSIDE_GUEST_MODE;
 	smp_wmb();		/* See the comment in kvm_vcpu_exiting_guest_mode() */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!vcpu->arch.is_hv) {
 		/* Do not switch guest MMU context to host MMU one to enable */
 		/* light access to guest address space from host. */
@@ -416,16 +422,12 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 		;
 	}
 
-	cr1 = native_read_CR1_reg();
-
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gti = thread_info->gthread_info;
 	if (gti != NULL) {
 		/* save guest kernel UPSR state at guest thread info
 		   DO_SAVE_GUEST_KERNEL_UPSR(gti, user_upsr);
 		 */
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	from_light_hypercall = test_thread_flag(TIF_LIGHT_HYPERCALL);
 	from_generic_hypercall = test_thread_flag(TIF_GENERIC_HYPERCALL);
@@ -433,13 +435,13 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 		set_thread_flag(TIF_LIGHT_HYPERCALL);
 	if (from_generic_hypercall)
 		clear_thread_flag(TIF_GENERIC_HYPERCALL);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-	last_light_hcall = hcall_num;
-
-	trace_kvm_pid(FROM_LIGHT_HYPERCALL, vcpu->kvm->arch.vmid.nr,
+	trace_kvm_pid(FROM_LIGHT_HYPERCALL, vcpu->kvm->arch.vm_id,
 		      vcpu->vcpu_id, read_guest_PID_reg(vcpu));
 	trace_light_hcall(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* in common case cannot enable hardware stacks bounds traps, */
 	/* disabled by assembler entry of the hypercall handler */
 	/* (see arch/e2k/kvm/ttable.S). */
@@ -451,6 +453,7 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 		//TODO needed?? This is only for virtualization w/o hardware support
 		//native_set_sge();
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	if (hcall_num >= KVM_LIGHT_HCALLS_NUM || !test_bit(hcall_num, unpriv_light_hcalls) &&
 	    !capable(CAP_SYS_ADMIN)) {
@@ -541,14 +544,8 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 	case KVM_HCALL_FLUSH_DCACHE_LINE:
 		ret = kvm_flush_guest_dcache_line(arg1);
 		break;
-	case KVM_HCALL_CLEAR_DCACHE_L1_SET:
-		ret = kvm_clear_guest_dcache_l1_set(arg1, arg2);
-		break;
 	case KVM_HCALL_FLUSH_DCACHE_RANGE:
 		ret = kvm_flush_guest_dcache_range((void *)arg1, arg2);
-		break;
-	case KVM_HCALL_CLEAR_DCACHE_L1_RANGE:
-		ret = kvm_clear_guest_dcache_l1_range((void *)arg1, arg2);
 		break;
 	case KVM_HCALL_FLUSH_ICACHE_ALL:
 		ret = kvm_flush_guest_icache_all();
@@ -574,7 +571,6 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 						  (e2k_mem_crs_t *) arg2,
 						  (e2k_mem_crs_t *) arg3);
 		break;
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #ifdef	CONFIG_DIRECT_VIRQ_INJECTION
 	case KVM_HCALL_VIRQ_HANDLED:
 		/* injected interrupt to handle VIRQs was completed */
@@ -583,13 +579,14 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 	case KVM_HCALL_TEST_PENDING_VIRQ:
 		ret = kvm_test_pending_virqs(vcpu);
 		break;
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+#endif
 	case KVM_HCALL_TRACING_START:
 		tracing_on();
 		break;
 	case KVM_HCALL_TRACING_STOP:
 		tracing_off();
 		break;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #ifdef CONFIG_TEST_HYPERCALLS_LOOP
 	case -1u:
 		ret = 0;
@@ -600,7 +597,9 @@ __visible unsigned long kvm_light_hcalls(unsigned long hcall_num,
 	}
 
 skip_hcall:
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	KVM_HOST_CHECK_VCPU_THREAD_CONTEXT(thread_info);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	trace_light_hcall_exit(ret);
 
@@ -610,17 +609,16 @@ skip_hcall:
 		kvm_vcpu_flush_tlb(vcpu);
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* light hypercall execution completed */
 	if (!from_light_hypercall)
 		clear_thread_flag(TIF_LIGHT_HYPERCALL);
 	if (from_generic_hypercall)
 		set_thread_flag(TIF_GENERIC_HYPERCALL);
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* reread guest thread structure pointer, which can be changed */
 	/* while switching guest processes hypercall */
 	gti = thread_info->gthread_info;
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* if there are pending VIRQs, then provide with direct injection */
 	/* to cause guest interrupting and handling VIRQs */
@@ -630,6 +628,7 @@ skip_hcall:
 
 	/* check VCPU ID of global register and running VCPU */
 	kvm_check_vcpu_ids_as_light(vcpu);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * Ensure we set mode to IN_GUEST_MODE after we disable
@@ -665,6 +664,7 @@ skip_hcall:
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*
  * hardware hypercall should return to new guest stacks and function
  */
@@ -762,7 +762,6 @@ switch_to_new_user_pv_vcpu_stacks(struct kvm_vcpu *vcpu,
 	native_write_hw_stacks_cr(psp, pcsp, cr0, cr1);
 }
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline long outdated_hypercall(const char *hcall_name)
 {
 	pr_err("%s(): hypercall %s is outdated and cannot be supported\n",
@@ -770,6 +769,31 @@ static inline long outdated_hypercall(const char *hcall_name)
 	return -ENOSYS;
 }
 #endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+
+static s64 kvm_l2_prefetcher_save(struct kvm_sw_cpu_context *sw_ctxt, u64 params)
+{
+	if (unlikely(params))
+		return -EINVAL;
+
+	if (!cpu_has(CPU_FEAT_HW_PREFETCHER_L2))
+		return 0;
+
+	bool state = sw_ctxt->l2_prefetcher_enabled;
+	sw_ctxt->l2_prefetcher_enabled = false;
+	return state;
+}
+
+static s64 kvm_l2_prefetcher_restore(struct kvm_sw_cpu_context *sw_ctxt, u64 params, s64 state)
+{
+	if (unlikely(params || (u64) state > 1))
+		return -EINVAL;
+
+	if (!cpu_has(CPU_FEAT_HW_PREFETCHER_L2))
+		return 0;
+
+	sw_ctxt->l2_prefetcher_enabled = state;
+	return 0;
+}
 
 static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 		unsigned long arg1, unsigned long arg2, unsigned long arg3,
@@ -784,8 +808,8 @@ __visible unsigned long kvm_generic_hcalls(unsigned long hcall_num,
 		unsigned long arg1, unsigned long arg2, unsigned long arg3,
 		unsigned long arg4, unsigned long arg5, unsigned long arg6)
 {
-	thread_info_t *ti;
-	struct kvm_vcpu *vcpu;
+	struct thread_info *ti = native_read_CURRENT_reg_value();
+	struct kvm_vcpu *vcpu = ti->vcpu;
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gmm_struct_t *gmm = NULL;
 	hpa_t root, gk_root;
@@ -794,9 +818,6 @@ __visible unsigned long kvm_generic_hcalls(unsigned long hcall_num,
 	unsigned guest_exit_flags = FROM_HYPERCALL_SWITCH | USD_CONTEXT_SWITCH | DEBUG_REGS_SWITCH;
 
 	hcall_num &= ~(1UL << 63);
-
-	ti = native_read_CURRENT_reg_value();
-	vcpu = ti->vcpu;
 
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (from_sdisp) {
@@ -819,10 +840,10 @@ __visible unsigned long kvm_generic_hcalls(unsigned long hcall_num,
 		trace_host_gmm_root_hpa(pv_vcpu_get_gmm(vcpu), root, gk_root,
 					native_read_IP_reg_value());
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* check saved greg and running VCPU IDs: should be the same */
 	kvm_check_vcpu_state_greg();
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * Hardware system hypercall operation disables interrupts mask in PSR
@@ -838,6 +859,7 @@ __visible unsigned long kvm_generic_hcalls(unsigned long hcall_num,
 	vcpu->mode = OUTSIDE_GUEST_MODE;
 	smp_wmb();		/* See the comment in kvm_vcpu_exiting_guest_mode() */
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (!vcpu->arch.is_hv) {
 		struct mm_struct *mm;
 		unsigned long mmu_pid;
@@ -850,6 +872,7 @@ __visible unsigned long kvm_generic_hcalls(unsigned long hcall_num,
 		trace_kvm_switch_to_host_mmu_pid(vcpu, mm, mmu_pid,
 						 hypercall_sw_to_host);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	E2K_JUMP_WITH_ARGUMENTS(kvm_generic_hcalls_continue, 7, hcall_num,
 				arg1, arg2, arg3, arg4, arg5, arg6);
@@ -860,18 +883,21 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 		unsigned long arg1, unsigned long arg2, unsigned long arg3,
 		unsigned long arg4, unsigned long arg5, unsigned long arg6)
 {
-	thread_info_t *ti;
-	struct kvm_vcpu *vcpu;
-	struct kvm *kvm;
+	struct thread_info *ti = native_read_CURRENT_reg_value();
+	struct kvm_vcpu *vcpu = ti->vcpu;
+	struct kvm *kvm = vcpu->kvm;
+	e2k_cr1_t cr1;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	bool from_generic_hypercall;
 	bool from_light_hypercall;
-	e2k_cr1_t cr1;
 	guest_hw_stack_t stack_regs;
 	bool to_new_stacks = false;
 	bool to_host_vcpu = false;	/* it need return to host qemu thread */
 	bool to_new_user_stacks = false;	/* it need switch to new user */
 	/* process */
-	bool need_inject, has_signal_pending;
+	bool has_signal_pending;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
+	bool need_inject;
 	unsigned guest_enter_flags = FROM_HYPERCALL_SWITCH | USD_CONTEXT_SWITCH | DEBUG_REGS_SWITCH;
 	unsigned long ret = 0;
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
@@ -882,14 +908,8 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 
 	hcall_num &= ~(1UL << 63);
 
-	ti = native_read_CURRENT_reg_value();
-	vcpu = ti->vcpu;
-
-	kvm = vcpu->kvm;
-
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	gti = ti->gthread_info;
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* Update run state of guest */
 	BUG_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_running);
@@ -902,8 +922,9 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 		set_thread_flag(TIF_GENERIC_HYPERCALL);
 	if (from_light_hypercall)
 		clear_thread_flag(TIF_LIGHT_HYPERCALL);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
-	trace_kvm_pid(FROM_GENERIC_HYPERCALL, vcpu->kvm->arch.vmid.nr,
+	trace_kvm_pid(FROM_GENERIC_HYPERCALL, kvm->arch.vm_id,
 		      vcpu->vcpu_id, read_guest_PID_reg(vcpu));
 	trace_generic_hcall(hcall_num, arg1, arg2, arg3, arg4, arg5, arg6);
 
@@ -913,15 +934,20 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 	/* hypercalss and at concrete time */
 	/* native_set_sge(); */
 
+	cr1 = native_read_CR1_reg();
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (vcpu->arch.is_hv && hcall_num == KVM_HCALL_SWITCH_TO_VIRT_MODE)
 		to_new_stacks = true;
 
-	cr1 = native_read_CR1_reg();
 	vcpu->arch.hcall_irqs_disabled = kvm_guest_vcpu_irqs_disabled(vcpu,
 					(vcpu->arch.is_hv) ? AW(vcpu->arch.sw_ctxt.upsr)
 						: AW(kvm_get_guest_vcpu_UPSR(vcpu)),
 					(vcpu->arch.is_hv) ? cr1.psr
 						: AW(kvm_get_guest_vcpu_PSR(vcpu)));
+#else
+	vcpu->arch.hcall_irqs_disabled = psr_and_upsr_loc_irqs_disabled_flags(cr1.psr,
+						AW(vcpu->arch.sw_ctxt.upsr));
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	local_irq_enable();
 
@@ -938,6 +964,12 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 		break;
 	case KVM_HCALL_PV_KICK:
 		ret = kvm_pv_kick(kvm, arg1);
+		break;
+	case KVM_HCALL_L2_PREFETCHER_SAVE:
+		ret = kvm_l2_prefetcher_save(&vcpu->arch.sw_ctxt, arg1);
+		break;
+	case KVM_HCALL_L2_PREFETCHER_RESTORE:
+		kvm_l2_prefetcher_restore(&vcpu->arch.sw_ctxt, arg1, arg2);
 		break;
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	case KVM_HCALL_RELEASE_TASK_STRUCT:
@@ -1231,17 +1263,18 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 			tracing_off();
 		}
 		break;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	case KVM_HCALL_FTRACE_DUMP:
 		ftrace_dump(DUMP_ALL);
 		break;
 	case KVM_HCALL_DUMP_COMPLETION:
 		kvm_complete_vcpu_show_state(vcpu);
 		break;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #ifdef CONFIG_KVM_ASYNC_PF
 	case KVM_HCALL_PV_ENABLE_ASYNC_PF:
 		ret = kvm_pv_host_enable_async_pf(vcpu, (u64) arg1,
-						  (u64) arg2, (u32) arg3,
-						  (u32) arg4);
+				(u64) arg2, (u32) arg3, (u32) arg4);
 		break;
 #endif /* CONFIG_KVM_ASYNC_PF */
 #ifdef CONFIG_KVM_PARAVIRTUALIZATION
@@ -1272,10 +1305,12 @@ static unsigned long kvm_generic_hcalls_continue(unsigned long hcall_num,
 	}
 
 skip_hcall:
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (ret == RETURN_TO_HOST_APP_HCRET) {
 		to_host_vcpu = true;
 		ret = 0;
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	all_irq_disable();
 	while (need_resched()) {
@@ -1284,6 +1319,7 @@ skip_hcall:
 		all_irq_disable();
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* It can be trap on hypercall handler (due to guest user address */
 	/* access while copy from/to user for example). So: */
 	/* 1) the guest process can be scheduled and migrate to other VCPU */
@@ -1291,33 +1327,31 @@ skip_hcall:
 	/* 3) need update thread info and */
 	/* 4) VCPU satructures pointers */
 	KVM_HOST_UPDATE_VCPU_THREAD_CONTEXT(NULL, &ti, NULL, NULL, &vcpu);
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	GTI_BUG_ON(gti != ti->gthread_info);
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* Update run state of guest */
 	WARN_ON(kvm_get_guest_vcpu_runstate(vcpu) != RUNSTATE_in_hcall);
 	kvm_do_update_guest_vcpu_current_runstate(vcpu, RUNSTATE_running);
 	/* update guest system time common with host */
 	kvm_update_guest_system_time(vcpu->kvm);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	vcpu->arch.hcall_irqs_disabled = false;
 
 	trace_generic_hcall_exit(ret);
 
-	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu)
-	    || cpu_has(CPU_HWBUG_VIRT_TLU_IB)) {
+	if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu) || cpu_has(CPU_HWBUG_VIRT_TLU_IB)) {
 		trace_host_flush_tlb(vcpu);
 		kvm_vcpu_flush_tlb(vcpu);
 	}
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/* generic hypercall execution completed */
 	if (!from_generic_hypercall)
 		clear_thread_flag(TIF_GENERIC_HYPERCALL);
 	if (from_light_hypercall)
 		set_thread_flag(TIF_LIGHT_HYPERCALL);
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	/*
 	 * Now we should restore kernel saved stack state and
 	 * return to guest kernel data stack, if it need
@@ -1334,7 +1368,6 @@ skip_hcall:
 		if (DEBUG_GPT_REGS_MODE)
 			print_all_gpt_regs(ti);
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	if (to_new_stacks) {
 		switch_to_new_hv_vcpu_stacks(vcpu, &stack_regs);
@@ -1350,8 +1383,11 @@ skip_hcall:
 							AW(kvm_get_guest_vcpu_UPSR(vcpu)),
 							AW(kvm_get_guest_vcpu_PSR(vcpu)));
 	} else {
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 		need_inject = false;
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
 	 * Ensure we set mode to IN_GUEST_MODE after we disable
@@ -1374,12 +1410,10 @@ skip_hcall:
 			kvm_set_vcpu_spt_u_pptb_context(vcpu);
 		}
 	}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/* check saved greg and running VCPU IDs: should be the same */
 	kvm_check_vcpu_state_greg();
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (from_sdisp) {
 		trace_host_get_gmm_root_hpa(pv_vcpu_get_gmm(vcpu),
 					    native_read_IP_reg_value());
@@ -1433,10 +1467,16 @@ static int test_hypercalls(void)
 	if (!IS_HV_GM())
 		return 0;
 
-	for (int i = 0; i < 10000; i++)
+	auto trap_count = current->thread.traps_count;
+	do {
 		generic_hypercall0(-1u);
-	for (int i = 0; i < 10000; i++)
+	} while (current->thread.traps_count < trap_count + 5);
+
+	trap_count = current->thread.traps_count;
+	do {
 		light_hypercall0(-1u);
+	} while (current->thread.traps_count < trap_count + 5);
+
 	return 0;
 }
 arch_initcall(test_hypercalls);

@@ -110,6 +110,7 @@ static inline stack_frame_t get_user_stack_frame_type(void)
 static inline stack_frame_t
 get_the_stack_frame_type(e2k_cr0_t cr0, e2k_cr1_t cr1, bool guest, bool ignore_IP)
 {
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (likely(!guest)) {
 		/* host kernel: guest kernel is host user */
 		if (is_call_from_host_kernel_IP(cr0, cr1, ignore_IP)) {
@@ -137,24 +138,29 @@ get_the_stack_frame_type(e2k_cr0_t cr0, e2k_cr1_t cr1, bool guest, bool ignore_I
 		}
 	}
 	return undefined_frame_type;
+#else
+	return cr1.pm ? kernel_frame_type : user_frame_type;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 }
 
 static inline stack_frame_t get_stack_frame_type(e2k_cr0_t cr0, e2k_cr1_t cr1)
 {
-	return get_the_stack_frame_type(cr0, cr1, paravirt_enabled() && !IS_HV_GM(), false);
+	return get_the_stack_frame_type(cr0, cr1, IS_ENABLED(CONFIG_KVM_GUEST_KERNEL), false);
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static inline stack_frame_t
 get_stack_frame_type_IP(e2k_cr0_t cr0, e2k_cr1_t cr1, bool ignore_IP)
 {
-	return get_the_stack_frame_type(cr0, cr1, paravirt_enabled() && !IS_HV_GM(), ignore_IP);
+	return get_the_stack_frame_type(cr0, cr1, IS_ENABLED(CONFIG_KVM_GUEST_KERNEL), ignore_IP);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static inline stack_frame_t
 get_task_stack_frame_type_IP(struct task_struct *task,
 			     e2k_cr0_t cr0, e2k_cr1_t cr1, bool ignore_IP)
 {
-	return get_the_stack_frame_type(cr0, cr1, paravirt_enabled() && !IS_HV_GM() ||
+	return get_the_stack_frame_type(cr0, cr1, IS_ENABLED(CONFIG_KVM_GUEST_KERNEL) ||
 					guest_task_mode(task), ignore_IP);
 }
 
@@ -369,6 +375,7 @@ extern int alloc_user_hw_stacks(hw_stack_t *hw_stacks, size_t p_size, size_t pc_
 extern void free_user_hw_stacks(hw_stack_t *hw_stacks);
 extern void free_user_old_pc_stack_areas(struct list_head *old_u_pcs_list);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 #if 0
 #define	ATOMIC_GET_HW_STACK_INDEXES(ps_ind, pcs_ind)			\
 ({									\
@@ -660,6 +667,7 @@ atomic_save_all_stacks_regs(e2k_stacks_t *stacks, e2k_cr1_t *cr1_p)
 {
 	ATOMIC_SAVE_ALL_STACKS_REGS(stacks, cr1_p);
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 #define user_stack_cannot_be_expanded()	test_thread_flag(TIF_USD_NOT_EXPANDED)
 
@@ -677,13 +685,6 @@ atomic_save_all_stacks_regs(e2k_stacks_t *stacks, e2k_cr1_t *cr1_p)
 #ifndef	CONFIG_VIRTUALIZATION
 /* it native kernel without virtualization support */
 
-/*
- * Is the CPU at guest Hardware Virtualized mode
- * CORE_MODE.gmi is true only at guest HV mode
- */
-/* native kernel does not support VMs and cannot be at guest mode */
-#define host_is_at_HV_GM_mode()		0
-
 #define	usd_cannot_be_expanded(regs)	user_stack_cannot_be_expanded()
 						/* all user stacks can be */
 						/* expanded if it possible */
@@ -691,8 +692,6 @@ atomic_save_all_stacks_regs(e2k_stacks_t *stacks, e2k_cr1_t *cr1_p)
 #define	UPDATE_VCPU_THREAD_CONTEXT(__task, __ti, __regs, __gti, __vcpu)	\
 		NATIVE_UPDATE_VCPU_THREAD_CONTEXT(__task, __ti, __regs, \
 							__gti, __vcpu)
-#define	CHECK_VCPU_THREAD_CONTEXT(__ti)	\
-		NATIVE_CHECK_VCPU_THREAD_CONTEXT(__ti)
 
 static inline void clear_virt_thread_struct(thread_info_t *thread_info)
 {
@@ -705,20 +704,11 @@ host_exit_to_usermode_loop(struct pt_regs *regs, bool syscall, bool has_signal)
 	/* native & guest kernels cannot be as host */
 }
 
-static __always_inline __interrupt void complete_switch_to_user_func(void)
-{
-	/* virtualization not supported, so nothing to do */
-	/* but the function should switch interrupt control from UPSR to */
-	/* PSR (only for local IRQ mask case) */
-	/* and set initial state of user UPSR */
-	NATIVE_SET_USER_INITIAL_UPSR();
-}
-
 static inline void free_virt_task_struct(struct task_struct *task)
 {
 	/* virtual machines is not supported */
 }
-#elif	defined(CONFIG_KVM_HOST_MODE)
+#elif	defined(CONFIG_KVM_HOST_KERNEL)
 /* It is native host kernel with virtualization support */
 # include <asm/kvm/process.h>
 #endif /* ! CONFIG_VIRTUALIZATION */

@@ -7,7 +7,6 @@
 #include <linux/perf_event.h>
 #include <linux/nodemask.h>
 #include <linux/slab.h>
-#include <asm/nbsr_v6_regs.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/perf_event_uncore.h>
@@ -81,9 +80,9 @@ static u64 get_iommu_str_cnt(struct e2k_uncore *uncore, struct hw_perf_event *hw
 		do {
 			if (!trace0)
 				break;
-			mar_hi = sic_read_node_nbsr_reg(node, IOMMU_MAR0_HI);
-			mar_lo = sic_read_node_nbsr_reg(node, IOMMU_MAR0_LO);
-		} while (mar_hi != sic_read_node_nbsr_reg(node, IOMMU_MAR0_HI));
+			mar_hi = sic_read_node_nbsr_reg(node, SIC_iommu_mar0_hi);
+			mar_lo = sic_read_node_nbsr_reg(node, SIC_iommu_mar0_lo);
+		} while (mar_hi != sic_read_node_nbsr_reg(node, SIC_iommu_mar0_hi));
 		do {
 			if (!trace26)
 				break;
@@ -125,9 +124,9 @@ static u64 get_iommu_str_cnt(struct e2k_uncore *uncore, struct hw_perf_event *hw
 		do {
 			if (!trace0)
 				break;
-			mar_hi = sic_read_node_nbsr_reg(node, IOMMU_MAR1_HI);
-			mar_lo = sic_read_node_nbsr_reg(node, IOMMU_MAR1_LO);
-		} while (mar_hi != sic_read_node_nbsr_reg(node, IOMMU_MAR1_HI));
+			mar_hi = sic_read_node_nbsr_reg(node, SIC_iommu_mar1_hi);
+			mar_lo = sic_read_node_nbsr_reg(node, SIC_iommu_mar1_lo);
+		} while (mar_hi != sic_read_node_nbsr_reg(node, SIC_iommu_mar1_hi));
 		do {
 			if (!trace26)
 				break;
@@ -253,7 +252,7 @@ static void set_iommu_str_cfg(struct e2k_uncore *uncore,
 	}
 
 	if (trace0)
-		modify_mid_mcr(IOMMU_MID, IOMMU_MCR, node, config, enable);
+		modify_mid_mcr(SIC_iommu_mid, SIC_iommu_mcr, node, config, enable);
 	if (trace26)
 		modify_mid_mcr(ED26_IOMMU_MID, ED26_IOMMU_MCR, node, config, enable);
 	if (trace27)
@@ -319,8 +318,8 @@ static void set_iommu_str_cnt(struct e2k_uncore *uncore,
 
 	switch (config.counter) {
 	case 0:
-		sic_write_node_nbsr_reg(node, IOMMU_MAR0_LO, mar_lo);
-		sic_write_node_nbsr_reg(node, IOMMU_MAR0_HI, mar_hi);
+		sic_write_node_nbsr_reg(node, SIC_iommu_mar0_lo, mar_lo);
+		sic_write_node_nbsr_reg(node, SIC_iommu_mar0_hi, mar_hi);
 
 		if (read_IDR_reg().mdl != IDR_E2C3_MDL)
 			break;
@@ -339,8 +338,8 @@ static void set_iommu_str_cnt(struct e2k_uncore *uncore,
 		sic_write_node_nbsr_reg(node, ED31_IOMMU_MAR0_HI, mar31_hi);
 		break;
 	case 1:
-		sic_write_node_nbsr_reg(node, IOMMU_MAR1_LO, mar_lo);
-		sic_write_node_nbsr_reg(node, IOMMU_MAR1_HI, mar_hi);
+		sic_write_node_nbsr_reg(node, SIC_iommu_mar1_lo, mar_lo);
+		sic_write_node_nbsr_reg(node, SIC_iommu_mar1_hi, mar_hi);
 
 		if (read_IDR_reg().mdl != IDR_E2C3_MDL)
 			break;

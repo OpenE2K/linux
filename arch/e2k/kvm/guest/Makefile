@@ -54,7 +54,7 @@ endef
 KASAN_SANITIZE := n
 BOOT_CFLAGS_REMOVE := $(CC_FLAGS_FTRACE)
 BOOT_CFLAGS_ADD := -DE2K_P2V $(call lcc-option,-fno-semi-spec-ld) \
-		   $(call lcc-option,-fno-spec-ld) \
+		   $(call lcc-option,-fno-spec-ld) -fno-jump-tables \
 		   -ftrivial-auto-var-init=uninitialized
 
 CFLAGS_ttable.o += -Wframe-larger-than=4096
@@ -75,7 +75,7 @@ CFLAGS_boot_string.o = $(BOOT_CFLAGS_ADD)
 CFLAGS_REMOVE_boot-pv-hpt.o = $(BOOT_CFLAGS_REMOVE)
 CFLAGS_boot-pv-hpt.o = $(BOOT_CFLAGS_ADD)
 
-obj-$(CONFIG_KVM_GUEST_MODE) +=	ttable.o traps.o fast_syscalls.o \
+obj-$(CONFIG_KVM_GUEST_KERNEL) +=	ttable.o traps.o fast_syscalls.o \
 				process.o signal.o mmu.o uaccess.o \
 				e2k_virt.o time.o io.o string.o \
 				spinlock.o irq.o lapic.o \
@@ -84,10 +84,8 @@ obj-$(CONFIG_KVM_GUEST_MODE) +=	ttable.o traps.o fast_syscalls.o \
 				boot_vram.o boot_string.o tlbflush.o
 
 ifeq ($(CONFIG_EPIC),y)
-obj-$(CONFIG_KVM_GUEST_MODE) += cepic.o
+obj-$(CONFIG_KVM_GUEST_KERNEL) += cepic.o
 endif # CONFIG_EPIC
-
-obj-$(CONFIG_KVM_ASYNC_PF) +=	async_pf.o
 
 CFLAGS_smp.o += -Wframe-larger-than=4096
 obj-$(CONFIG_KVM_GUEST_SMP) += smp.o

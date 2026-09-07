@@ -41,7 +41,7 @@ static u32 sicreg_offset;
 static u32 sicreg_format;
 
 
-int hwdebug = 0;
+static int hwdebug = 0;
 
 static int __init hwdebug_setup(char *str)
 {
@@ -57,9 +57,16 @@ __setup("hwdebug", hwdebug_setup);
  */
 
 static atomic64_t masread_addr;
-static atomic64_t masread_mas = ATOMIC64_INIT(MAS_DCACHE_L2_REG);
+static atomic64_t masread_mas;
 
-static ssize_t common_proc_write(const char *__user buffer, size_t count,
+static int masread_init(void)
+{
+	atomic64_set(&masread_mas, MAS_DCACHE_L2_REG);
+	return 0;
+}
+pure_initcall(masread_init);
+
+static ssize_t common_proc_write(const char  __user *buffer, size_t count,
 		char *proc_buffer, size_t maxcount, const char *msg, void (*func)(char *))
 {
 	long ret;
@@ -89,14 +96,11 @@ static int masread_proc_show(struct seq_file *s, void *v)
 {
 	u64 val, mas = atomic64_read(&masread_mas);
 
-	switch (mas) {
-	case MAS_MMU_REG:
+	if (mas == MAS_MMU_REG) {
 		val = NATIVE_READ_MAS_D(atomic64_read(&masread_addr), MAS_MMU_REG);
-		break;
-	case MAS_DCACHE_L2_REG:
+	} else if (mas == MAS_DCACHE_L2_REG) {
 		val = NATIVE_READ_MAS_D(atomic64_read(&masread_addr), MAS_DCACHE_L2_REG);
-		break;
-	default:
+	} else {
 		BUG();
 	}
 
@@ -170,14 +174,11 @@ static void maswrite_write_reg(char *str)
 		return;
 	}
 
-	switch (mas) {
-	case MAS_MMU_REG:
+	if (mas == MAS_MMU_REG) {
 		NATIVE_WRITE_MAS_D(addr, val, MAS_MMU_REG);
-		break;
-	case MAS_DCACHE_L2_REG:
+	} else if (mas == MAS_DCACHE_L2_REG) {
 		NATIVE_WRITE_MAS_D(addr, val, MAS_DCACHE_L2_REG);
-		break;
-	default:
+	} else {
 		BUG();
 	}
 }

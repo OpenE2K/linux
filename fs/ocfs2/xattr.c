@@ -2965,6 +2965,9 @@ static int ocfs2_xattr_block_set(struct inode *inode,
 	int ret;
 	struct ocfs2_xa_loc loc;
 
+#ifdef CONFIG_MCST
+	ret = 0;
+#endif
 	if (!xs->xattr_bh) {
 		ret = ocfs2_create_xattr_block(inode, xs->inode_bh, ctxt,
 					       0, &new_bh);

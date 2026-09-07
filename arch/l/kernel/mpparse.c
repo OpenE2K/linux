@@ -30,7 +30,7 @@
 #include <asm/mpspec.h>
 #include <asm/pgalloc.h>
 #include <asm/console.h>
-
+#include <asm/setup.h>
 
 #undef	DEBUG_MPT_MODE
 #undef	DebugMPT
@@ -422,75 +422,6 @@ static int __init smp_read_mpc(struct mpc_table *mpc)
 	}
 	return mp_num_processors;
 }
-
-#ifdef CONFIG_IOHUB_DOMAINS
-static int
-mp_fix_iolinks_io_apicid(unsigned int src_apicid, unsigned int new_apicid)
-{
-	mpc_config_iolink_t *iolink;
-	int i;
-
-	if (mp_iolinks_num <= 0)
-		return 0;
-	for (i = 0; i < mp_iolinks_num; i++) {
-		iolink = &mp_iolinks[i];
-		if (iolink->mpc_iolink_type != MP_IOLINK_IOHUB)
-			continue;
-		if (iolink->apicid == src_apicid) {
-			iolink->apicid = new_apicid;
-			pr_err("... IOLINK node #%d link #%d IO-APIC ID "
-				"fixing up to %d\n",
-				iolink->node, iolink->link, new_apicid);
-			return 0;
-		}
-	}
-	pr_err("BIOS MP table bug: could not find IOLINK this IO-APIC ID %d\n",
-		src_apicid);
-	return -1;
-}
-
-int mp_fix_io_apicid(unsigned int src_apicid, unsigned int new_apicid)
-{
-	int ret = 0;
-
-	if (mp_iolinks_num > 0)
-		ret += mp_fix_iolinks_io_apicid(src_apicid, new_apicid);
-/*	ret += mp_fix_intsrc_io_apicid(src_apicid, new_apicid); */
-	return ret;
-}
-
-int mp_find_iolink_root_busnum(int node, int link)
-{
-	mpc_config_iolink_t *iolink;
-	int i;
-
-	for (i = 0; i < mp_iolinks_num; i ++) {
-		iolink = &mp_iolinks[i];
-		if (iolink->mpc_iolink_type != MP_IOLINK_IOHUB)
-			continue;
-		if (iolink->node == node && iolink->link == link)
-			return (iolink->bus_min);
-	}
-	return (-1);
-}
-
-int mp_find_iolink_io_apicid(int node, int link)
-{
-	mpc_config_iolink_t *iolink;
-	int i;
-
-	for (i = 0; i < mp_iolinks_num; i ++) {
-		iolink = &mp_iolinks[i];
-		if (iolink->mpc_iolink_type != MP_IOLINK_IOHUB)
-			continue;
-		if (iolink->node == node && iolink->link == link)
-			return (iolink->apicid);
-	}
-	return (-1);
-}
-#else  /* ! CONFIG_IOHUB_DOMAINS */
-#define	MP_construct_default_iolinks()
-#endif /* CONFIG_IOHUB_DOMAINS */
 
 static inline void __init
 MP_construct_default_timer(void)

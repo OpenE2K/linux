@@ -389,7 +389,9 @@ int __rtnl_register_many(const struct rtnl_msg_handler *handlers, int n)
 {
 	const struct rtnl_msg_handler *handler;
 	int i, err;
-
+#ifdef CONFIG_MCST
+	err = -EINVAL;
+#endif
 	for (i = 0, handler = handlers; i < n; i++, handler++) {
 		err = rtnl_register_internal(handler->owner, handler->protocol,
 					     handler->msgtype, handler->doit,

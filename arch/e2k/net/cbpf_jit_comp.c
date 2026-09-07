@@ -31,11 +31,11 @@
  * the number of memory cell to the destination/source register from template,
  * so the value is stored/loaded to/from the right scratch memory cell.
  */
-#define BPF_JIT_INSERT_REG(template, pointer, reg_num, cmd_lens, field) \
+#define BPF_JIT_INSERT_REG(template, pointer, reg_num, cmd_lens, name, field) \
 ({ \
 	bool insert_reg_res = false; \
 	void *insert_reg_tmp_ptr = pointer + real_wide_instr_offset(cmd_lens, \
-			BPF_JIT_OFFSET(BPF_JIT_MEM_LABEL(template, field), template)); \
+			BPF_JIT_OFFSET(BPF_JIT_MEM_LABEL(template, name), template)); \
 	instr_als_t *insert_reg_als_ptr = find_als(insert_reg_tmp_ptr, 0); \
 	if (insert_reg_als_ptr) { \
 		insert_reg_als_ptr->alf2.field += reg_num; \
@@ -48,9 +48,9 @@
 })
 
 #define BPF_JIT_INSERT_SRC_REG(template, pointer, reg_num, cmd_lens) \
-		BPF_JIT_INSERT_REG(template, pointer, reg_num, cmd_lens, src2)
+		BPF_JIT_INSERT_REG(template, pointer, reg_num, cmd_lens, src2, src2.word)
 #define BPF_JIT_INSERT_DST_REG(template, pointer, reg_num, cmd_lens) \
-		BPF_JIT_INSERT_REG(template, pointer, reg_num, cmd_lens, dst)
+		BPF_JIT_INSERT_REG(template, pointer, reg_num, cmd_lens, dst, dst)
 
 /*
  * Declare all cBPF templates.
@@ -255,7 +255,7 @@ static inline int init_prog_info(struct cbpf_prog_info *info, unsigned int len)
 
 static inline void free_prog_info(struct cbpf_prog_info *info)
 {
-	kfree(info->body);
+	kvfree(info->body);
 }
 
 /*
@@ -550,7 +550,7 @@ static unsigned int compile_single_instruction(void *ptr, const int pass,
 		    !BPF_JIT_INSERT_DISP_JUMP(cbpf_jit_jmp_jgt_x, jf, ptr, instr->jf, lens))
 			return 0;
 		break;
-	case BPF_JMP | BPF_JGT | BPF_K: /* pc += (A > K) ? jt : jt */
+	case BPF_JMP | BPF_JGT | BPF_K: /* pc += (A > K) ? jt : jf */
 		size = BPF_JIT_COPY_ON_2ND_PASS(cbpf_jit_jmp_jgt_k, ptr, pass, lens);
 		if (is_first_pass(pass))
 			break;

@@ -16,7 +16,6 @@
 
 
 static int mac_kthread(void *arg);
-void mxgbe_net_mac_irq_handler(mxgbe_priv_t *priv, u32 state);
 
 
 /**
@@ -31,8 +30,6 @@ void mxgbe_net_mac_irq_handler(mxgbe_priv_t *priv, u32 state);
 void mxgbe_mac_init(mxgbe_priv_t *priv)
 {
 	void __iomem *base = priv->bar0_base;
-
-	FDEBUG;
 
 	/* Init MAC */
 	if (mxgbe_loopback_mode) {
@@ -63,9 +60,7 @@ void mxgbe_mac_start(mxgbe_priv_t *priv)
 {
 	void __iomem *base = priv->bar0_base;
 
-	FDEBUG;
-
-	mxgbe_wreg64(base, MAC_PAUSE_MAC, priv->MAC);
+	mxgbe_wreg64(base, MAC_PAUSE_MAC, (u64 __force)priv->MAC);
 
 	/* Default - Disable pause frame - Bug 98328 */
 	mxgbe_wreg32(base, MAC_PAUSE_CTRL, 0);
@@ -75,8 +70,6 @@ void mxgbe_mac_start(mxgbe_priv_t *priv)
 void mxgbe_mac_event_en(mxgbe_priv_t *priv)
 {
 	void __iomem *base = priv->bar0_base;
-
-	FDEBUG;
 
 	/* Enable interrupt */
 	mxgbe_wreg32(base, MAC_LINK_CHG, MAC_LINK_ENSETBITS | MAC_LINK_EN_ALL);
@@ -89,8 +82,6 @@ void mxgbe_mac_event_en(mxgbe_priv_t *priv)
 void mxgbe_mac_event_dis(mxgbe_priv_t *priv)
 {
 	void __iomem *base = priv->bar0_base;
-
-	FDEBUG;
 
 	/* Disable interrupt */
 	mxgbe_wreg32(base, MAC_LINK_CHG, MAC_LINK_EN_ALL | MAC_LINK_REQ_ALL);
@@ -123,40 +114,25 @@ irqreturn_t mxgbe_mac_irq_handler(int irq, void *dev_id)
 	u32 irqst;
 	u32 val, stat;
 
-	nFDEBUG;
-
 	if (!dev_id)
 		return IRQ_NONE;
+
 	vector = (mxgbe_vector_t *)dev_id;
 	priv = vector->priv;
 	base = priv->bar0_base;
 
-	assert(irq == vector->irq);
-
 	/* MSIX_IRQST_* value */
 	irqst = mxgbe_rreg32(base, MSIX_IRQST_MACBASE);
-	if (0 == irqst) {
+
+	if (0 == irqst)
 		return IRQ_NONE;
-	}
 
 	stat = mxgbe_rreg32(base, MAC_LINK_STAT);
-	DEV_DBG(MXGBE_DBG_MSK_IRQ, &priv->pdev->dev,
-		"mac_irq: vect %d, IRQST16=0x%08X, LINK_STAT=0x%08X\n",
-		vector->qn, irqst, stat);
-
-#if 0
-	if (MSIX_IDX_DMA_ERROR == X) {
-		/* TODO: task - mxgbe_hw_reset(priv); */
-	}
-#endif
 
 	/* clean request flags */
 	val = mxgbe_rreg32(base, MAC_LINK_CHG);
 	val &= MAC_LINK_REQ_ALL;
 	mxgbe_wreg32(base, MAC_LINK_CHG, val);
-	DEV_DBG(MXGBE_DBG_MSK_IRQ, &priv->pdev->dev,
-		"mac_irq: clean 0x%X\n", val);
-
 	mxgbe_net_mac_irq_handler(priv, stat & (MAC_LINK_REQ_LINKINT |
 						MAC_LINK_REQ_REMFAULT |
 						MAC_LINK_REQ_LOCFAULT));
@@ -173,27 +149,14 @@ static int mac_kthread(void *arg)
 	mxgbe_priv_t *priv = (mxgbe_priv_t *)arg;
 	void __iomem *base = priv->bar0_base;
 
-	FDEBUG;
-
-	DEV_DBG(MXGBE_DBG_MSK_MAC, &priv->ndev->dev,
-		"mac_kthread: started\n");
-
 	while (!kthread_should_stop()) {
 		set_current_state(TASK_RUNNING);
-		DEV_DBG(MXGBE_DBG_MSK_MAC, &priv->ndev->dev,
-			"mac_kthread: run\n");
-
 		stat = mxgbe_rreg32(base, MAC_LINK_STAT);
 		if (stat != priv->carrier) {
 			/* clean request flags */
 			val = mxgbe_rreg32(base, MAC_LINK_CHG);
 			val &= MAC_LINK_REQ_ALL;
 			mxgbe_wreg32(base, MAC_LINK_CHG, val);
-
-			DEV_DBG(MXGBE_DBG_MSK_MAC, &priv->ndev->dev,
-				"mac_kthread: stat=0x%X, chg=0x%X\n",
-				stat, val);
-
 			mxgbe_net_mac_irq_handler(priv, stat &
 						  (MAC_LINK_REQ_LINKINT |
 						   MAC_LINK_REQ_REMFAULT |
@@ -203,9 +166,6 @@ static int mac_kthread(void *arg)
 		set_current_state(TASK_INTERRUPTIBLE);
 		msleep(1000); /* millisecond sleep */
 	}
-
-	DEV_DBG(MXGBE_DBG_MSK_MAC, &priv->ndev->dev,
-		"mac_kthread: stopped\n");
 
 	return 0;
 } /* mac_kthread */

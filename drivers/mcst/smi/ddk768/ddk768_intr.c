@@ -15,7 +15,7 @@
 #include "ddk768_intr.h"
 #include "ddk768_help.h"
 
-
+#if 0
 /* 
  * Change interrupt mask 
  */
@@ -36,7 +36,7 @@ void setIntMask(
     /* Program new interrupt mask */
     pokeRegisterDWord(INT_MASK, mask);
 }
-
+#endif
 
 void sb_IRQMask(int irq_num)
 {

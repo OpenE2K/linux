@@ -867,6 +867,9 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	kuid_t uid;
 	kgid_t gid;
 
+#ifdef CONFIG_MCST
+	opt = Opt_err;
+#endif
 	cifs_dbg(FYI, "CIFS: parsing cifs mount option '%s'\n", param->key);
 
 	/*

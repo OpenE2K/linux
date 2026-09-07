@@ -953,7 +953,6 @@ config NUMA_BALANCING_DEFAULT_ENABLED
 
 menuconfig CGROUPS
 	bool "Control Group support"
-	depends on !CONFIG_MCST_RT_GRQ
 	select KERNFS
 	help
 	  This option adds support for grouping sets of processes together, for
@@ -1022,7 +1021,6 @@ config CGROUP_WRITEBACK
 
 menuconfig CGROUP_SCHED
 	bool "CPU controller"
-	depends on !CONFIG_MCST_RT_GRQ
 	default n
 	help
 	  This feature lets CPU scheduler recognize task groups and control CPU

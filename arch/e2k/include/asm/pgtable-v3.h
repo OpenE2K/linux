@@ -19,8 +19,6 @@
 #include <linux/types.h>
 #include <asm/pgtable_types.h>
 
-#ifndef __ASSEMBLY__
-
 /*
  * PTE-V3 format
  */
@@ -44,8 +42,8 @@
 #define _PAGE_INT_PR_BIT_V3		42	/* Integer address access Protection */
 #define _PAGE_NON_EX_BIT_V3		43	/* Non Executable Page */
 #define	_PAGE_RES_SHIFT_V3		44	/* shift of Res field */
-#define	_PAGE_RES_BITS_NUM_V3		4	/* occupies 4 bits */
-#define _PAGE_SW3_BIT_V3		46	/* SoftWare bit #1, included in Res field */
+#define _PAGE_SW4_BIT_V3		45	/* SoftWare bit #4, included in Res field */
+#define _PAGE_SW3_BIT_V3		46	/* SoftWare bit #3, included in Res field */
 #define _PAGE_SW2_BIT_V3		47	/* SoftWare bit #2, included in Res field */
 #define	_PAGE_C_UNIT_SHIFT_V3		48	/* shift of Compilation Unit field */
 #define	_PAGE_C_UNIT_BITS_NUM_V3	16	/* occupies 16 bits */
@@ -68,7 +66,7 @@
 #define _PAGE_PV_V3	(1ULL << _PAGE_PV_BIT_V3)
 #define _PAGE_INT_PR_V3	(1ULL << _PAGE_INT_PR_BIT_V3)
 #define _PAGE_NON_EX_V3	(1ULL << _PAGE_NON_EX_BIT_V3)
-#define _PAGE_RES_V3	(((1ULL << _PAGE_RES_BITS_NUM_V3) - 1) << _PAGE_RES_SHIFT_V3)
+#define _PAGE_SW4_V3	(1ULL << _PAGE_SW4_BIT_V3)
 #define _PAGE_SW3_V3	(1ULL << _PAGE_SW3_BIT_V3)
 #define _PAGE_SW2_V3	(1ULL << _PAGE_SW2_BIT_V3)
 #define _PAGE_C_UNIT_V3	(((1ULL << _PAGE_C_UNIT_BITS_NUM_V3) - 1) << _PAGE_C_UNIT_SHIFT_V3)
@@ -92,6 +90,7 @@
 #define	_PAGE_SPECIAL_V3	_PAGE_AVAIL_V3
 #define	_PAGE_GFN_V3		_PAGE_AVAIL_V3	/* Page is mapped to guest physical memory */
 #define _PAGE_DEVMAP_V3		_PAGE_SW2_V3
+#define _PAGE_KERNEL_MARK_V3	_PAGE_SW4_V3
 
 /* Cache disable flags */
 #define _PAGE_CD_MASK_V3	(_PAGE_CD1_V3 | _PAGE_CD2_V3)
@@ -199,6 +198,8 @@ convert_uni_pte_flags_to_pte_val_v3(uni_pteval_t uni_flags)
 		pte_flags |= _PAGE_SWP_UFFD_WP_V3;
 	if (uni_flags & UNI_PAGE_DEVMAP)
 		pte_flags |= _PAGE_DEVMAP_V3;
+	if (uni_flags & UNI_PAGE_KERNEL_MARK)
+		pte_flags |= _PAGE_KERNEL_MARK_V3;
 
 	BUG_ON(pte_flags == 0);
 
@@ -345,7 +346,5 @@ convert_swap_entry_to_pte_v3(swp_entry_t swap_entry)
 	return pte;
 }
 #endif	/* ! CONFIG_MAKE_ALL_PAGES_VALID */
-
-#endif	/* ! __ASSEMBLY__ */
 
 #endif /* ! _ASM_E2K_PGTABLE_V3_H */

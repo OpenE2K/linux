@@ -488,7 +488,11 @@ read_kcore_iter(struct kiocb *iocb, struct iov_iter *iter)
 	while (buflen) {
 		struct page *page;
 		unsigned long pfn;
+#ifdef CONFIG_MCST
+		phys_addr_t phys = 0;
+#else
 		phys_addr_t phys;
+#endif
 		void *__start;
 
 		/*

@@ -3,6 +3,7 @@
  * Copyright (c) 2023 MCST
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -47,48 +48,9 @@ static void print_header(int wsz, int rbs, int rsz, int type)
 	printf(B "}" E);
 }
 
-/*
- * @name - macro name
- * @regs - number of *quadro* registers to clear
- * @keep - number of *double* registers to keep
- * @interrupt - should we use "done" or "return" + "ct" to return
- */
-static void print_clear_macro(char *name, int regs, int type)
+static void print_gnu_asm_body(int regs, int type, int keep, bool continued)
 {
-	int i, bn = 0, keep;
-
-	return_printed = 0;
-
-	switch (type) {
-	case TYPE_INTERRUPT:
-		keep = 0;
-		if (regs < FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE)
-			regs = FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE;
-		break;
-	case TYPE_SYSCALL:
-		keep = 1;
-		if (regs < FINISH_SYSCALL_SW_FILL_SIZE)
-			regs = FINISH_SYSCALL_SW_FILL_SIZE;
-		break;
-	case TYPE_SYSCALL_PROT:
-		keep = 4;
-		if (regs < FINISH_SYSCALL_SW_FILL_SIZE)
-			regs = FINISH_SYSCALL_SW_FILL_SIZE;
-		break;
-	default:
-		exit(1);
-	}
-	printf("/* %s regs = %d, type = %d */\n", name, regs, type);
-	printf("#define %s(", name);
-	for (i = 0; i < keep; i++)
-		printf("r%d%s", i, (i + 1 != keep) ? ", " : "");
-	if (type == TYPE_SYSCALL_PROT)
-		printf(", tag2, tag3");
-	if (keep != 0 || type == TYPE_SYSCALL_PROT)
-		printf(", ");
-	printf( "_rndpr) \\\n"
-		"do { \\\n"
-		"\tasm volatile ( \\\n");
+	int i, bn = 0;
 
 	rndpr_restored = 0;
 	for (i = 0; i < regs; i++) {
@@ -118,28 +80,89 @@ static void print_clear_macro(char *name, int regs, int type)
 	if (type == TYPE_INTERRUPT) {
 		/* #80747: must repeat interrupted barriers */
 		printf(B "{wait st_c=1}" E);
-		printf(B "{nop 2; mmurw %%%%db[0], %%%%dam_inv}" E);
-		printf(B "{done}" E);
+		printf(B "{mmurw %%%%db[0], %%%%dam_inv}" E);
+		printf(B "{wait all_e=1}" E);
+		printf(B "{done}");
 	} else {
 		/* System call return */
-		printf(B "{nop 2; mmurw %%%%db[0], %%%%dam_inv}" E);
-		printf(B "{ct %%%%ctpr3}" E);
+		printf(B "{mmurw %%%%db[0], %%%%dam_inv}" E);
+		printf(B "{wait all_e=1}" E);
+		printf(B "{ct %%%%ctpr3}");
 	}
 
-	printf("\t\t::");
-	for (i = 0; i < keep; i++)
-		printf(" [_r%d] \"ir\" (r%d)%s",
-				i, i, (i + 1 != keep) ? "," : "");
-	if (type == TYPE_SYSCALL_PROT) {
-		printf(", \\\n\t\t[_tag2] \"ir\" (tag2), [_tag3] \"ir\" (tag3), ");
-	} else if (keep != 0) {
-		printf(", ");
+	if (continued) {
+		printf(E);
+	} else {
+		printf("\"\n\n");
 	}
-	printf("\\\n\t\t[rndpr] \"ir\" (AW(_rndpr))");
-	printf(" \\\n\t\t: \"ctpr3\"");
-	printf("); \\\n");
-	printf("\tunreachable(); \\\n");
-	printf("} while (0)\n");
+}
+
+/*
+ * @name - macro name
+ * @regs - number of *quadro* registers to clear
+ * @keep - number of *double* registers to keep
+ * @interrupt - should we use "done" or "return" + "ct" to return
+ */
+static void print_clear_macro(char *name, int regs, int type)
+{
+	int i, keep;
+
+	return_printed = 0;
+
+	switch (type) {
+	case TYPE_INTERRUPT:
+		keep = 0;
+		if (regs < FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE)
+			regs = FINISH_USER_TRAP_HANDLER_SW_FILL_SIZE;
+		break;
+	case TYPE_SYSCALL:
+		keep = 1;
+		if (regs < FINISH_SYSCALL_SW_FILL_SIZE)
+			regs = FINISH_SYSCALL_SW_FILL_SIZE;
+		break;
+	case TYPE_SYSCALL_PROT:
+		keep = 4;
+		if (regs < FINISH_SYSCALL_SW_FILL_SIZE)
+			regs = FINISH_SYSCALL_SW_FILL_SIZE;
+		break;
+	default:
+		exit(1);
+	}
+
+	if (type == TYPE_INTERRUPT) {
+		printf("/* %s regs = %d, type = %d */\n", name, regs, type);
+		printf("#define %s_ASM \\\n", name);
+		print_gnu_asm_body(regs, type, keep, false);
+	} else {
+		printf("/* %s regs = %d, type = %d */\n", name, regs, type);
+		printf("#define %s(", name);
+		for (i = 0; i < keep; i++)
+			printf("r%d%s", i, (i + 1 != keep) ? ", " : "");
+		if (type == TYPE_SYSCALL_PROT)
+			printf(", tag2, tag3");
+		if (keep != 0 || type == TYPE_SYSCALL_PROT)
+			printf(", ");
+		printf( "_rndpr) \\\n"
+			"do { \\\n"
+			"\tasm volatile ( \\\n");
+
+		print_gnu_asm_body(regs, type, keep, true);
+
+		printf("\t\t::");
+		for (i = 0; i < keep; i++)
+			printf(" [_r%d] \"ir\" (r%d)%s", i, i, (i + 1 != keep) ? "," : "");
+		if (type == TYPE_SYSCALL_PROT) {
+			printf(", \\\n\t\t[_tag2] \"ir\" (tag2), [_tag3] \"ir\" (tag3), ");
+		} else if (keep != 0) {
+			printf(", ");
+		}
+		printf("\\\n\t\t[rndpr] \"ir\" (AW(_rndpr))");
+		printf(" \\\n\t\t: \"ctpr3\"");
+		printf("); \\\n");
+		printf("\tunreachable(); \\\n");
+		printf("} while (0)\n\n");
+	}
+
 }
 
 int main(void)

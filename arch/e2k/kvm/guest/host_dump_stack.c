@@ -27,7 +27,7 @@
 #include <asm/pci.h>
 #include <asm/traps.h>
 #include <asm/mmu_context.h>
-#include <asm/host_printk.h>
+#include <asm/kvm/paravirt_sw/host_printk.h>
 
 static void host_print_chain_stack(struct stack_regs *regs, int show_rf_window);
 
@@ -41,7 +41,7 @@ static void print_reg_window(u64 window_base, int window_size,
 		int fx, e2k_cr1_hi_t cr1_hi)
 {
 	int qreg, dreg, dreg_ind;
-	u64 *rw = (u64 *)window_base;
+	volatile u64 *rw = (volatile u64 *)window_base;
 	u64 qreg_lo, qreg_hi, ext_lo, ext_hi;
 	u8 tag_lo, tag_hi, tag_ext_lo, tag_ext_hi;
 	char brX0_name[6], brX1_name[6];

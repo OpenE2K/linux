@@ -151,8 +151,6 @@ native_setup_machine(void)
 	e16c_setup_machine();
 # elif defined(CONFIG_E2K_E2C3)
 	e2c3_setup_machine();
-# elif defined(CONFIG_E2K_E48C)
-	e48c_setup_machine();
 # elif defined(CONFIG_E2K_E8V7)
 	e8v7_setup_machine();
 # else
@@ -189,9 +187,6 @@ native_setup_machine(void)
 		case MACHINE_ID_E2C3:
 			e2c3_setup_machine();
 			break;
-		case MACHINE_ID_E48C_LMS:
-		case MACHINE_ID_E48C:
-			e48c_setup_machine();
 			break;
 		case MACHINE_ID_E8V7_LMS:
 		case MACHINE_ID_E8V7:
@@ -238,12 +233,26 @@ static int e2k_cpu_starting(unsigned int cpu)
 {
 	int node = cpu_to_node(cpu);
 
+	if (cpu_has(CPU_FEAT_ISET_V6)) {
+		/* Required for newer versions of binco */
+		e2k_cu_hw0_t cu_hw0 = native_read_CU_HW0_reg();
+		cu_hw0.upt_sec_ad_shift_dsbl = 1;
+		native_write_CU_HW0_reg(cu_hw0);
+	}
+
 	if (cpu_has(CPU_HWBUG_DMA_WR_GLUE)) {
 		e2k_sic_hw1_t sic_hw1 = {
 			.word = sic_read_node_nbsr_reg(node, SIC_hw1)
 		};
 		sic_hw1.v4_v5.dma_wr_glue_en = 0;
 		sic_write_node_nbsr_reg(node, SIC_hw1, AW(sic_hw1));
+	}
+
+	if (cpu_has(CPU_HWBUG_CLW_ASYNC_UNALIGNED_STORE) ||
+	    cpu_has(CPU_HWBUG_CLW_ASYNC_MTAG_DSBL) && native_read_MU_HW0_reg().v7.mtag_dsbl) {
+		e2k_mu_hw0_t mu_hw0 = native_read_MU_HW0_reg();
+		mu_hw0.v7.clw_async_dsbl = 1;
+		native_write_MU_HW0_reg(mu_hw0);
 	}
 
 	return 0;

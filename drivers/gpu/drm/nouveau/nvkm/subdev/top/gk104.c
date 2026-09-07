@@ -32,6 +32,10 @@ gk104_top_oneinit(struct nvkm_top *top)
 	u32 data, type, inst;
 	int i;
 
+#ifdef CONFIG_MCST
+	type = ~0;
+	inst = 0;
+#endif
 	for (i = 0; i < 64; i++) {
 		if (!info) {
 			if (!(info = nvkm_top_device_new(top)))

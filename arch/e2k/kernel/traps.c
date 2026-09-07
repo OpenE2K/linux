@@ -107,7 +107,9 @@ static void do_ainstr_page_prot(struct pt_regs *regs);
 static void do_last_wish(struct pt_regs *regs);
 static void do_base_not_aligned(struct pt_regs *regs);
 static void do_software_trap(struct pt_regs *regs);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void do_kernel_coredump(struct pt_regs *regs);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 static void do_data_debug(struct pt_regs *regs);
 static void do_data_page(struct pt_regs *regs);
 static void do_macp(struct pt_regs *regs);
@@ -118,7 +120,7 @@ static void do_mem_lock(struct pt_regs *regs);
 static void do_mem_lock_as(struct pt_regs *regs);
 static void do_data_error(struct pt_regs *regs);
 void do_mem_error(struct pt_regs *regs);
-#if 0
+#ifndef CONFIG_KVM_PARAVIRTUALIZATION
 static __noreturn void do_unknown_exc(struct pt_regs *regs);
 #endif
 static void do_recovery_point(struct pt_regs *regs);
@@ -183,7 +185,11 @@ const exceptions exc_tbl[] = {
 /*24*/	(exceptions)(do_last_wish),
 /*25*/	(exceptions)(do_base_not_aligned),
 /*26*/	(exceptions)(do_software_trap),
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*27*/	(exceptions)(do_kernel_coredump),
+#else
+/*27*/	(exceptions)(do_unknown_exc),
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 /*28*/	(exceptions)(do_data_debug),
 /*29*/	(exceptions)(do_data_page),
 
@@ -233,7 +239,11 @@ const char *exc_tbl_name[] = {
 /*24*/	"exc_last_wish",
 /*25*/	"exc_base_not_aligned",
 /*26*/	"exc_software_trap",
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 /*27*/	"core_dump",
+#else
+/*27*/	"unknown exception",
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 /*28*/	"exc_data_debug",
 /*29*/	"exc_data_page",
 /*30*/	"exc_macp",
@@ -560,13 +570,19 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 #endif
 	u64 nmi = exceptions & non_maskable_exc_mask;
 	int aa_field;
+	bool from_user = user_mode(regs);
 	/*
 	 * We enable interrupts if this is a user interrupt (required to
 	 * handle AAU) or if this is a page fault on a user address that
 	 * did not happen in an atomic context.
 	 */
-	bool enable_irqs = user_mode(regs) || nr_TIRs > 0 &&
+	bool enable_irqs = from_user || nr_TIRs > 0 &&
 		TIRs[1].exc_data_page && !in_atomic() && !pagefault_disabled();
+	/*
+	 * Make sure we handle exc_mem_error on the same CPU
+	 * for reliable diagnostics and hwpoison
+	 */
+	bool forbid_migration = enable_irqs && (exceptions & exc_mem_error_mask);
 #ifdef CONFIG_DUMP_ALL_STACKS
 	bool core_dump = unlikely(nr_TIRs == 0 &&
 				  TIRs[0].exc == 0 && TIRs[0].aa == 0);
@@ -574,11 +590,12 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 
 	/*
 	 * We handle interrupts in the following order:
-	 * 1) Non-maskable interrupts are handled under closed NMIs
-	 * 2) Open non-maskable interrupts
-	 * 3) exc_interrupt
-	 * 4) Open maskable interrupts if this is user mode intertupt
-	 * 5) Handle everything else.
+	 * 1) Open non-maskable interrupts if `from_user`.
+	 * 2) Non-maskable interrupts are handled under closed NMIs
+	 * 3) Open non-maskable interrupts if `!from_user`.
+	 * 4) exc_interrupt
+	 * 5) Open maskable interrupts if this is user mode intertupt
+	 * 6) Handle everything else.
 	 */
 
 #ifdef	CONFIG_KERNEL_TIMES_ACCOUNT
@@ -598,8 +615,26 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 
 	TIRs[0] = TIR0_clear_false_exceptions(TIRs[0], nr_TIRs);
 
+	/* Initialize info for get_trap_ip() */
+	TIR = TIRs[0];
+	trap->TIR = TIR;
+
 	/*
-	 * 1) Handle NMIs
+	 * 1) Open non-maskable interrupts if `from_user`.
+	 *
+	 * For NMIs there is a special case: if trap happened in user
+	 * code then can call NMI handlers without all the special
+	 * casing.  This allows to simplify handling NMIs that do
+	 * something only if happened in user (e.g. exc_mem_lock_as).
+	 */
+	if (from_user) {
+		SET_KERNEL_IRQ_MASK_REG(false, nmi && !enable_irqs &&
+					!(exceptions & exc_interrupt_mask), true);
+		trace_hardirqs_off();
+	}
+
+	/*
+	 * 2) Handle NMIs
 	 */
 
 	if (unlikely(nmi))
@@ -607,7 +642,7 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 
 
 	/*
-	 * 2) All NMIs have been handled, now we can open them.
+	 * 3) All NMIs have been handled, now we can open them.
 	 * Note that we do not allow NMIs nesting to avoid stack overflow.
 	 *
 	 *
@@ -620,13 +655,15 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 	 * We disable NMI in UPSR here again in case a local_irq_save()
 	 * called from an NMI handler enabled it.
 	 */
-	SET_KERNEL_IRQ_MASK_REG(false, nmi && !enable_irqs &&
-				!(exceptions & exc_interrupt_mask), true);
-	trace_hardirqs_off();
+	if (!from_user) {
+		SET_KERNEL_IRQ_MASK_REG(false, nmi && !enable_irqs &&
+					!(exceptions & exc_interrupt_mask), true);
+		trace_hardirqs_off();
+	}
 
 
 	/*
-	 * 3) Handle external interrupts before enabling interrupts
+	 * 4) Handle external interrupts before enabling interrupts
 	 */
 	if (trace_tir_enabled() && rcu_is_watching()) {
 		unsigned long flags;
@@ -637,7 +674,8 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 		psr_all_irq_restore(flags);
 	}
 
-	if (IS_ENABLED(CONFIG_KVM_HOST_MODE) && kvm_test_intc_emul_flag(regs) &&
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
+	if (IS_ENABLED(CONFIG_KVM_HOST_KERNEL) && kvm_test_intc_emul_flag(regs) &&
 			rcu_is_watching()) {
 		unsigned long flags;
 
@@ -647,12 +685,10 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 				trace_intc_tir(TIRs[i].lo, TIRs[i].hi);
 		}
 
-#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 		if (trace_intc_trap_cellar_enabled()) {
 			for (int cnt = 0; (3 * cnt) < trap->tc_count; cnt++)
 				trace_intc_trap_cellar(&trap->tcellar[cnt], cnt);
 		}
-#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 		trace_intc_ctprs(&regs->ctpr1, &regs->ctpr2, &regs->ctpr3);
 
@@ -665,15 +701,18 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 		}
 		psr_all_irq_restore(flags);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	if (exceptions & exc_interrupt_mask)
 		HANDLE_TIR_EXCEPTION(regs, exc_interrupt_num, handle_interrupt,
 				     pass_interrupt_to_guest, TIRs[0]);
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	pass_virqs_to_guest(regs, TIRs[0]);
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 	/*
-	 * 4) Open interrupts if possible
+	 * 5) Open interrupts if possible
 	 *
 	 *
 	 * There are several reasons to not enable interrupts in kernel:
@@ -696,17 +735,13 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 	 *  called from a critical section with disabled interrupts.
 	 */
 
-	if (enable_irqs) {
-		migrate_disable(); /* to handle poisoned data */
-		local_irq_enable();
+	if (forbid_migration) {
+		migrate_disable();
 	}
 
-	/*
-	 * For SDBGPRINT from do_aau_fault_*() -> do_page_fault()
-	 * and for handle_forbidden_aau_load().
-	 */
-	TIR = TIRs[0];
-	trap->TIR = TIR;
+	if (enable_irqs) {
+		local_irq_enable();
+	}
 
 	/*
 	 * AAU fault must be handled with open interrupts if it happened in user
@@ -724,7 +759,7 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 
 
 	/*
-	 * 5) Handle all other exceptions
+	 * 6) Handle all other exceptions
 	 */
 
 #pragma loop count (2)
@@ -761,7 +796,8 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 					     pass_the_trap_to_guest, TIRs[0]);
 		}
 	} while (nr_TIRs-- > 0);
-	if (enable_irqs) {
+
+	if (forbid_migration) {
 		migrate_enable();
 	}
 
@@ -769,9 +805,11 @@ notrace void parse_TIR_registers(struct pt_regs *regs, u64 exceptions)
 	if (unlikely(core_dump)) {
 		coredump_in_future();
 	}
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	if (unlikely(core_dump || is_injected_guest_coredump(regs))) {
 		pass_coredump_trap_to_guest(regs);
 	}
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 #endif /* CONFIG_DUMP_ALL_STACKS */
 }
 
@@ -960,7 +998,7 @@ static void warn_on_legacy_app(const struct pt_regs *regs)
 	if (!hs.c1 || !hs.s)
 		return;
 
-	if (get_user(ss.word, (instr_syl_t __user *) &E2K_GET_INSTR_SS(ip)) ||
+	if (get_user(ss.word, (instr_syl_t __user __force *) &E2K_GET_INSTR_SS(ip)) ||
 	    get_user(cs1.word, (instr_syl_t __user *) (hs_addr + hs.mdl)))
 		return;
 
@@ -1000,8 +1038,10 @@ static notrace void do_instr_debug(struct pt_regs *regs)
 {
 	e2k_dibsr_t dibsr;
 	e2k_dimcr_t dimcr, dimcr1;
+	bool from_user = user_mode(regs);
 
-	nmi_enter();
+	if (!from_user)
+		nmi_enter();
 
 	dimcr = dimcr_pause();
 	dimcr1 = dimcr1_pause();
@@ -1010,7 +1050,7 @@ static notrace void do_instr_debug(struct pt_regs *regs)
 	current->thread.sw_regs.dibsr = read_DIBSR_reg();
 
 	/* Call registered handlers */
-	if (!user_mode(regs))
+	if (!from_user)
 		kprobe_instr_debug_handle(regs);
 	bp_instr_overflow_handle(regs);
 	perf_instr_overflow_handle(regs);
@@ -1019,15 +1059,11 @@ static notrace void do_instr_debug(struct pt_regs *regs)
 	dibsr = read_DIBSR_reg();
 	if (dibsr.m0 || dibsr.m1 || dibsr.m2 || dibsr.m3 || dibsr.ss ||
 	    dibsr.b0 || dibsr.b1 || dibsr.b2 || dibsr.b3) {
-		bool hwbug = cpu_has(CPU_HWBUG_EXC_DEBUG);
-		struct pt_regs *user_regs;
-
 		/* ptrace works in user space only */
-		if (!find_user_regs(regs) || !hwbug && !user_mode(regs))
+		struct pt_regs *user_regs = find_user_regs(regs);
+		if (!user_regs || !cpu_has(CPU_HWBUG_EXC_DEBUG) && !from_user)
 			die("instr_debug trap in kernel mode", regs, 0);
 
-		user_regs = (hwbug) ? find_user_regs(regs) : regs;
-		BUG_ON(!user_regs);
 		S_SIG(user_regs, SIGTRAP, TRAP_HWBKPT);
 
 		/* #24785 Customer asks us to avoid this annoying message
@@ -1048,7 +1084,8 @@ static notrace void do_instr_debug(struct pt_regs *regs)
 	dimcr_continue(dimcr);
 	dimcr1_continue(dimcr1);
 
-	nmi_exit();
+	if (!from_user)
+		nmi_exit();
 }
 
 static void do_window_bounds(struct pt_regs *regs)
@@ -1074,25 +1111,104 @@ static void do_window_bounds(struct pt_regs *regs)
 	}
 }
 
+/* Since v7 only */
+static void force_sigsegv_constrict_stack(struct pt_regs *user_regs)
+{
+	void __user *addr;
+	e2k_usd_t usd = user_regs->stacks.usd;
+
+	/* Pass address of the first byte above the stack */
+	addr = (void __user __force *) (USD_BASE(usd) + USD_SIZE_V7(usd));
+
+	force_sig_fault(SIGSEGV, SEGV_BNDERR, addr);
+}
+
+static void force_sigsegv_expand_stack(struct pt_regs *user_regs)
+{
+	void __user *addr;
+
+	/* #100842 Pass address of the first byte below the stack */
+	addr = (void __user __force *) (user_stack_pointer(user_regs) -
+				USD_IND(user_regs->stacks.usd) - 1);
+
+	force_sig_fault(SIGSEGV, SEGV_BNDERR, addr);
+}
+
+/**
+ * parse_and_handle_getsp() - manually interpret getsp on CPUs without %usincr
+ *			      and handle the requested stack expansion
+ * @regs: regs pointing to getsp/getsap
+ */
+static void parse_and_handle_getsp(struct pt_regs *regs)
+{
+	void __user *fault_addr;
+	s64 incr;
+
+	switch (parse_getsp_operation(regs, &incr, &fault_addr)) {
+	case GETSP_OP_INCREMENT:
+		if (expand_user_data_stack(regs, incr)) {
+			force_sigsegv_expand_stack(regs);
+			debug_signal_print("SIGSEGV. expand on array_bounds", regs, true);
+		}
+		break;
+	case GETSP_OP_DECREMENT:
+		if (constrict_user_data_stack(regs, incr)) {
+			force_sig(SIGSEGV);
+			debug_signal_print("SIGSEGV. constrict on array_bounds", regs, true);
+		}
+		break;
+	case GETSP_OP_SIGSEGV:
+		force_sig_fault(SIGSEGV, SEGV_BNDERR, fault_addr);
+		debug_signal_print("SIGSEGV. array_bounds - could not read getsp instruction",
+				regs, true);
+		break;
+	case GETSP_OP_FAIL: {
+#if IS_ENABLED(CONFIG_SOFT_PM)
+		soft_pm_handler handler = READ_ONCE(soft_pm_array_bounds);
+		if (handler &&
+		    !handler(regs, exc_tbl_name[E2K_EXC_ARRAY_BOUNDS_IND]))
+			break;
+#endif /* CONFIG_SOFT_PM */
+		S_SIG(regs, SIGSEGV, SEGV_BNDERR);
+		debug_signal_print("SIGSEGV. array_bounds on not a getsp instruction",
+				regs, true);
+		break;
+	}
+	default:
+		BUG();
+	}
+}
+
 static void do_user_stack_bounds(struct pt_regs *regs)
 {
 	die_if_kernel("user_stack_bounds trap in kernel mode", regs, 0);
+
 	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
-		DebugUS("do_user_stack_bounds. USINCR = %lld (0x%llx)\n",
-				native_read_USINCR_reg().incr, AW(native_read_USINCR_reg()));
-		s64 incr = native_read_USINCR_reg().incr;
+		if (cpu_has(CPU_HWBUG_RRD_USINCR))
+			return parse_and_handle_getsp(regs);
+
+		e2k_usincr_t usincr = regs->trap->usincr;
+		s64 incr = usincr.incr;
+		DebugUS("do_user_stack_bounds. USINCR = %lld (0x%llx)\n", usincr.incr, AW(usincr));
+
 		if (unlikely(incr >= 0)) {
-			force_sig(SIGSEGV);
-			debug_signal_print("user_stack_bounds requires negative size changing",
-				regs, true);
+			force_sigsegv_constrict_stack(regs);
+			debug_signal_print("SIGSEGV. constrict on USD bounds failed", regs, true);
 		} else if (incr < 0 && expand_user_data_stack(regs, (unsigned long)(-incr))) {
-			force_sig(SIGSEGV);
+			force_sigsegv_expand_stack(regs);
 			debug_signal_print("SIGSEGV. expand on USD bounds failed", regs, true);
 		}
 		return;
 	}
+
+	/*
+	 * Up to v6, exc_user_stack_bounds is triggered only when USD.psl
+	 * (procedure stack level) over- or underflows. TIR0.ip stores
+	 * the IP of instruction that caused the exception.
+	 */
 	S_SIG(regs, SIGSEGV, SEGV_BNDERR);
-	debug_signal_print("SIGSEGV. user_stack_bounds", regs, true);
+	debug_signal_print("SIGSEGV. user_stack_bounds: Procedure Stack level over- or underflow",
+			   regs, true);
 }
 
 static void do_proc_stack_bounds(struct pt_regs *regs)
@@ -1171,23 +1287,8 @@ static void do_illegal_operand(struct pt_regs *regs)
 	debug_signal_print("SIGILL. illegal_operand", regs, true);
 }
 
-static void force_sigsegv_array_bounds(struct pt_regs *user_regs)
-{
-	void __user *addr;
-
-	/* #100842 Pass address of the first byte below the stack */
-	addr = (void __user *) (user_stack_pointer(user_regs) -
-				USD_IND(user_regs->stacks.usd) - 1);
-
-	force_sig_fault(SIGSEGV, SEGV_ACCERR, addr);
-}
-
-
 static void do_array_bounds(struct pt_regs *regs)
 {
-	void __user *fault_addr;
-	int incr;
-
 	die_if_kernel("array_bounds trap in kernel mode\n", regs, 0);
 
 	if (cpu_has(CPU_FEAT_V7_CPU_REGS)) {
@@ -1196,39 +1297,7 @@ static void do_array_bounds(struct pt_regs *regs)
 		return;
 	}
 
-	switch (parse_getsp_operation(regs, &incr, &fault_addr)) {
-	case GETSP_OP_INCREMENT:
-		if (expand_user_data_stack(regs, (unsigned int) incr)) {
-			force_sigsegv_array_bounds(regs);
-			debug_signal_print("SIGSEGV. expand on array_bounds", regs, true);
-		}
-		break;
-	case GETSP_OP_DECREMENT:
-		if (constrict_user_data_stack(regs, incr)) {
-			force_sig(SIGSEGV);
-			debug_signal_print("SIGSEGV. constrict on array_bounds", regs, true);
-		}
-		break;
-	case GETSP_OP_SIGSEGV:
-		force_sig_fault(SIGSEGV, SEGV_BNDERR, fault_addr);
-		debug_signal_print("SIGSEGV. array_bounds - could not read getsp instruction",
-				regs, true);
-		break;
-	case GETSP_OP_FAIL: {
-#if IS_ENABLED(CONFIG_SOFT_PM)
-		soft_pm_handler handler = READ_ONCE(soft_pm_array_bounds);
-		if (handler &&
-		    !handler(regs, exc_tbl_name[E2K_EXC_ARRAY_BOUNDS_IND]))
-			break;
-#endif /* CONFIG_SOFT_PM */
-		S_SIG(regs, SIGSEGV, SEGV_BNDERR);
-		debug_signal_print("SIGSEGV. array_bounds on not a getsp instruction",
-				regs, true);
-		break;
-	}
-	default:
-		BUG();
-	}
+	parse_and_handle_getsp(regs);
 }
 
 static void do_access_rights(struct pt_regs *regs)
@@ -1430,9 +1499,11 @@ static void do_last_wish(struct pt_regs *regs)
 {
 	if (user_mode(regs)) {
 		getsp_adj_apply(regs);
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 	} else if (handle_guest_last_wish(regs)) {
 		/* it is wish of host to support guest and it handled */
 		return;
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 	} else {
 		if (!kretprobe_last_wish_handle(regs))
 			die("last_wish in kernel mode", regs, 0);
@@ -1484,19 +1555,23 @@ static void do_software_trap(struct pt_regs *regs)
 	}
 }
 
+#ifdef CONFIG_KVM_PARAVIRTUALIZATION
 static void do_kernel_coredump(struct pt_regs *regs)
 {
 #ifdef CONFIG_DUMP_ALL_STACKS
 	coredump_in_future();
 #endif
 }
+#endif /* CONFIG_KVM_PARAVIRTUALIZATION */
 
 static notrace void do_data_debug(struct pt_regs *regs)
 {
+	bool from_user = user_mode(regs);
 	e2k_ddbsr_t ddbsr;
 	e2k_ddmcr_t ddmcr, ddmcr1;
 
-	nmi_enter();
+	if (!from_user)
+		nmi_enter();
 
 	ddmcr = ddmcr_pause();
 	ddmcr1 = ddmcr1_pause();
@@ -1511,9 +1586,6 @@ static notrace void do_data_debug(struct pt_regs *regs)
 	ddbsr = READ_DDBSR_REG();
 	if (ddbsr.m0 || ddbsr.m1 || ddbsr.m2 || ddbsr.m3 ||
 	    ddbsr.b0 || ddbsr.b1 || ddbsr.b2 || ddbsr.b3) {
-		bool hwbug = cpu_has(CPU_HWBUG_EXC_DEBUG);
-		struct pt_regs *user_regs;
-
 		if (DATA_BREAKPOINT_ON) {
 			/* data breakpoint occured */
 			dump_stack();
@@ -1521,19 +1593,17 @@ static notrace void do_data_debug(struct pt_regs *regs)
 		}
 
 		/* ptrace works in user space only */
-		if (!find_user_regs(regs) || !hwbug && !user_mode(regs)) {
+		struct pt_regs *user_regs = find_user_regs(regs);
+		if (!user_regs || !cpu_has(CPU_HWBUG_EXC_DEBUG) && !from_user) {
 			struct pt_regs *pregs = regs->next;
-			bool from_execute_mmu_op;
-
-			from_execute_mmu_op = (pregs && pregs->flags.exec_mmu_op);
+			bool from_execute_mmu_op = (pregs && pregs->flags.exec_mmu_op);
 
 			if (!from_uaccess_allowed_code(regs) && !from_execute_mmu_op)
 				die("data_debug trap in kernel mode", regs, 0);
 		}
 
-		user_regs = (hwbug) ? find_user_regs(regs) : regs;
-		BUG_ON(!user_regs);
-		S_SIG(user_regs, SIGTRAP, TRAP_HWBKPT);
+		if (user_regs)
+			S_SIG(user_regs, SIGTRAP, TRAP_HWBKPT);
 
 		/* #24785 Customer asks us to avoid this annoying message
 		debug_signal_print("SIGTRAP. Stop on watchpoint", regs, false); */
@@ -1553,21 +1623,20 @@ out:
 	ddmcr_continue(ddmcr);
 	ddmcr1_continue(ddmcr1);
 
-	nmi_exit();
+	if (!from_user)
+		nmi_exit();
 }
 
 static void do_data_page(struct pt_regs *regs)
 {
 	struct trap_pt_regs *trap = regs->trap;
 
-	DbgTC("call do_trap_cellar\n");
 	if (!trap->tc_called) {
 		trap->nr_page_fault_exc = exc_data_page_num;
 		do_trap_cellar(regs, 1);
 		do_trap_cellar(regs, 0);
 		trap->tc_called = 1;
 	}
-	DbgTC("after do_trap_cellar\n");
 	DbgTC("user_mode(regs) %d signal_pending(current) %d\n",
 	      user_mode(regs), signal_pending(current));
 }
@@ -1576,6 +1645,9 @@ static void do_data_page(struct pt_regs *regs)
 
 static void do_macp(struct pt_regs *regs)
 {
+	if (WARN_ON_ONCE(!cpu_has(CPU_FEAT_MADM)))
+		return;
+
 	/* Only user data in protected mode are affected by MACP for a whule */
 	/* but we can get exc_macp as in user as in kernel mode */
 	e2k_madmr_t madmr = read_MADMR_reg();
@@ -1636,7 +1708,18 @@ static void do_recovery_point(struct pt_regs *regs)
 		return;
 	}
 	if (!(TASK_IS_BINCO(current) && cpu_has(CPU_FEAT_ISET_V6))) {
-		S_SIG(regs, SIGBUS, BUS_OBJERR);
+		/*
+		 * There are several sources of signals in binco.
+		 * force_sig_info_to_task() and it's wrappers are
+		 * problematic because when these events happen
+		 * simultaneously it'll reset to SIG_DFL handler.
+		 *
+		 * So use the common signal delivery.  We do know
+		 * that binco does have handlers for all these signals
+		 * so they won't be lost (there won't be SIG_IGN).
+		 */
+		send_sig_fault(SIGBUS, BUS_OBJERR,
+			       (void __user *) get_trap_ip(regs), current);
 		debug_signal_print("SIGBUS. exc_recovery_point", regs, false);
 	}
 }
@@ -1690,14 +1773,6 @@ irqreturn_t native_do_interrupt(struct pt_regs *regs)
 	if (unlikely(is_from_wait_trap(regs)))
 		handle_wtrap(regs);
 
-#if defined(CONFIG_MCST_4RT) && defined(SHOW_WOKEN_TIME)
-	if (unlikely(show_woken_time) > 1 && system_state == SYSTEM_RUNNING) {
-		er_cpu(prev_intr_clock, smp_processor_id()) =
-				__this_cpu_read(last_intr_clock);
-		per_cpu(last_intr_clock, smp_processor_id()) =
-			getns64timeofday();
-	}
-#endif
 
 	/*
 	 * We store the interrupt vector to detect cases when this irq is moved
@@ -1720,9 +1795,14 @@ irqreturn_t native_do_interrupt(struct pt_regs *regs)
 
 noinline notrace void do_nm_interrupt(struct pt_regs *regs)
 {
-	nmi_enter();
+	bool from_user = user_mode(regs);
+	if (!from_user)
+		nmi_enter();
+
 	do_nmi(regs);
-	nmi_exit();
+
+	if (!from_user)
+		nmi_exit();
 }
 
 static void do_division(struct pt_regs *regs)
@@ -1758,7 +1838,7 @@ static long get_fp_ip(struct trap_pt_regs *trap)
 
 static void do_fp(struct pt_regs *regs)
 {
-	void __user *addr = (void __user *) get_fp_ip(regs->trap);
+	void __user *addr = (void __user __force *) get_fp_ip(regs->trap);
 	int code = 0;
 	e2k_fpsr_t FPSR;
 	e2k_pfpfr_t PFPFR;
@@ -1806,14 +1886,12 @@ static void do_mem_lock(struct pt_regs *regs)
 		struct trap_pt_regs *trap = regs->trap;
 
 		DebugML("started\n");
-		DbgTC("call do_trap_cellar\n");
 		if (!trap->tc_called) {
 			trap->nr_page_fault_exc = exc_mem_lock_num;
 			do_trap_cellar(regs, 1);
 			do_trap_cellar(regs, 0);
 			trap->tc_called = 1;
 		}
-		DbgTC("after do_trap_cellar\n");
 		DbgTC("user_mode(regs) %d signal_pending(current) %d\n",
 		      user_mode(regs), signal_pending(current));
 	} else {
@@ -1826,15 +1904,28 @@ static void do_mem_lock(struct pt_regs *regs)
 
 static notrace void do_mem_lock_as(struct pt_regs *regs)
 {
-	nmi_enter();
-#ifndef CONFIG_IGNORE_MEM_LOCK_AS
-	if (TASK_IS_BINCO(current) && user_mode(regs)) {
+	if (user_mode(regs)) {
+		if (!TASK_IS_BINCO(current))
+			return;
+
+		/*
+		 * Thanks to user_mode() check we can skip nmi_enter()
+		 * and send signal right from here.
+		 */
 		DebugML("started\n");
-		S_SIG(regs, SIGBUS, BUS_OBJERR);
+
+		/* See comment in do_recovery_point() */
+		send_sig_fault(SIGBUS, BUS_OBJERR,
+			       (void __user *) get_trap_ip(regs), current);
 		debug_signal_print("SIGBUS. Memory lock AS signaled", regs, false);
+	} else {
+		nmi_enter();
+		/*
+		 * Ignore exc_mem_lock_as in kernel, but still
+		 * call nmi_enter() for statistics.
+		 */
+		nmi_exit();
 	}
-#endif
-	nmi_exit();
 }
 
 
@@ -1865,14 +1956,15 @@ static void do_poisoning(struct pt_regs *regs)
 	}
 
 	/* Examine L2 regs for fatal error */
-	int bank = 0;
-	e2k_l2_err_t l2_err;
-	for (; bank < E2K_L2_BANK_NUM; bank++) {
-		AW(l2_err) = read_DCACHE_L2_ERR_reg(bank);
+
+	for (int bank = 0; bank < E2K_L2_BANK_NUM; bank++) {
+		e2k_l2_err_t l2_err = read_L2_ERR(bank);
 		if (!l2_err.fv) {
 			continue;
 		}
 		if (l2_err.err_fatal) {
+			goto system_crash;
+		} else if (l2_err.val_op_code ==  V_CPU_LD_MAU && cpu_has(CPU_HWBUG_HWPOISON)) {
 			goto system_crash;
 		} else {
 			debug_signal_print("SIGKILL. Memory poison: l2_err.fatal=1",
@@ -1894,9 +1986,9 @@ kill_user:
 system_crash:
 	pr_alert("CPU %d, exc_mem_error = %#02x. L1 fault reg = 0x%16llx\n", smp_processor_id(),
 				tir.exc_mem_error, (u64)READ_L1_FAULT_REG());
-	for (bank = 0; bank < E2K_L2_BANK_NUM; bank++) {
-		pr_alert("CPU %d. L2_ERR bank %d reg =  0x%16llx\n", smp_processor_id(), bank,
-						(u64)read_DCACHE_L2_ERR_reg(bank));
+	for (int bank = 0; bank < E2K_L2_BANK_NUM; bank++) {
+		pr_alert("CPU %d. L2_ERR bank %d reg =  0x%16llx\n",
+				smp_processor_id(), bank, AW(read_L2_ERR(bank)));
 	}
 	do_sic_error_interrupt();
 	panic("Fatal exc_mem_error recieved\n");
@@ -1991,9 +2083,9 @@ static void do_data_error(struct pt_regs *regs)
 	debug_signal_print("SIGBUS. data_error", regs, true);
 }
 
-#if 0
+#ifndef CONFIG_KVM_PARAVIRTUALIZATION
 __noreturn static void do_unknown_exc(struct pt_regs *regs)
 {
-	panic("EXCEPTION: Unknown e2k exception!!!\n");
+	panic("Unknown e2k exception\n");
 }
 #endif

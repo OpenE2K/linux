@@ -11,16 +11,16 @@
  * PMC_TERM_* Temperature sensors
  * PMC base = 0x1000 + PMC_TERM_CONV_OFFSET(0x8)
  * */
-#define PMC_TERM_CONV			0x0
-#define PMC_TERM_CTRL			0x4
-#define PMC_TERM_TS0			0x8
-#define PMC_TERM_TS1			0xc
-#define PMC_TERM_TS2			0x10
-#define PMC_TERM_TS3			0x14
-#define PMC_TERM_TS4			0x18
-#define PMC_TERM_TS5			0x1c
-#define PMC_TERM_TS6			0x20
-#define PMC_TERM_TS7			0x24
+#define REG_OFFSET_PMC_TERM_CONV	0x0
+#define REG_OFFSET_PMC_TERM_CTRL	0x4
+#define REG_OFFSET_PMC_TERM_TS0		0x8
+#define REG_OFFSET_PMC_TERM_TS1		0xc
+#define REG_OFFSET_PMC_TERM_TS2		0x10
+#define REG_OFFSET_PMC_TERM_TS3		0x14
+#define REG_OFFSET_PMC_TERM_TS4		0x18
+#define REG_OFFSET_PMC_TERM_TS5		0x1c
+#define REG_OFFSET_PMC_TERM_TS6		0x20
+#define REG_OFFSET_PMC_TERM_TS7		0x24
 /*
  * V6, V7 PWMs registers
  * */
@@ -88,6 +88,9 @@
 
 #define MANUFACTURER_ID_LO		0xC3
 #define MANUFACTURER_ID_HI		0xE2
+
+
+
 /*
  * V6, V7 Power System Events
  * */
@@ -120,74 +123,6 @@ typedef union {
 		u32 cpu_forcepr		: 1;
 		u32 rsv			: 7;
 	} v6;
-	struct {
-		u32 mc0246_dimm_event	: 1;
-		u32 mc1357_dimm_event	: 1;
-		u32 mc0246_pwr_alert	: 1;
-		u32 mc1357_pwr_alert	: 1;
-		u32 cpu_pwr_alert	: 1;
-		u32 machine_pwr_alert	: 1;
-		u32 machine_gen_alert	: 1;
-		u32 smbus_alert		: 1;
-		u32 mc0246_throttle	: 1;
-		u32 mc1357_throttle	: 1;
-		u32 cpu_forcepr		: 1;
-		u32 term_nomax		: 1;
-		u32 term_fault		: 1;
-		u32 term_diag		: 1;
-		u32 volt_no_minmax	: 1;
-		u32 volt_fault		: 1;
-		u32 volt_diag		: 1;
-		u32 cpu_hot		: 1;
-		u32 ts_all_int		: 1;
-		u32 ts_alarma		: 1;
-		u32 ts_alarmb		: 1;
-		u32 vm_all_int		: 1;
-		u32 vm_alarma		: 1;
-		u32 vm_alarmb		: 1;
-		u32 pd_all_int		: 1;
-		u32 pd_alarma		: 1;
-		u32 pd_alarmb		: 1;
-		u32 uС_int0		: 1;
-		u32 uС_int1		: 1;
-		u32 uС_int2		: 1;
-		u32 uС_int3		: 1;
-		u32 rsv			: 1;
-	} e48c_rev0;
-	struct {
-		u32 prg_mc0246_dimm_event : 1;
-		u32 prg_mc1357_dimm_event : 1;
-		u32 machine_gen_alert	  : 1;
-		u32 nmi_cpu_sw		  : 1;
-		u32 smbus_alert_0	  : 1;
-		u32 smbus_alert_1	  : 1;
-		u32 board_event		  : 1;
-		u32 cpu_hot		  : 1;
-		u32 mc0246_throttle	  : 1;
-		u32 mc1357_throttle	  : 1;
-		u32 cpu_forcepr		  : 1;
-		u32 term_nomax		  : 1;
-		u32 term_fault		  : 1;
-		u32 term_diag		  : 1;
-		u32 volt_no_minmax	  : 1;
-		u32 volt_fault		  : 1;
-		u32 volt_diag		  : 1;
-		u32 uC_int		  : 1;
-		u32 ts_alarma		  : 1;
-		u32 ts_alarmb		  : 1;
-		u32 vm_alarma		  : 1;
-		u32 vm_alarmb		  : 1;
-		u32 pd_alarma		  : 1;
-		u32 pd_alarmb		  : 1;
-		u32 pvt_all_int		  : 1;
-		u32 rsv0		  : 1;
-		u32 rsv1		  : 1;
-		u32 core_cc_lo		  : 1; /* CORE0-CORE31 */
-		u32 core_cc_hi		  : 1; /* CORE32-CORE47 */
-		u32 core_cu_lo		  : 1; /* CORE0-CORE31 */
-		u32 core_cu_hi		  : 1; /* CORE32-CORE47 */
-		u32 rsv2		  : 1;
-	} e48c;
 	struct {
 		u32 mc0_dimm_event : 1;
 		u32 mc1_dimm_event : 1;
@@ -227,21 +162,20 @@ typedef union {
 
 #define ALL_EVENTS_MASK_V6		0x01ffffff
 #define ALL_EVENTS_MASK_E8V7		0x29ffffff
-#define ALL_EVENTS_MASK_E48C		0x79ffffff
-#define ALL_EVENTS_MASK_E48C_REV0	0x7fffffff
 
-#define PCS_EVENTS_MAX			25
+#define PCS_EVENTS_MAX			31
+#define PCS_EVENTS_COUNT_V6		25
 
 typedef struct event_info {
-	int count;
+	unsigned int count;
 	time64_t time;
 } event_info_t;
 
-event_info_t pcs_events[PCS_EVENTS_MAX];
 
 static int PCS_ADJUST_PERIOD = 300000; /* ms */
 
 #define PMC_TERM_TS_MAX	8
+#undef PMC_FAN_CFG
 #define PMC_FAN_CFG 0x0
 /*
  * V7
@@ -342,6 +276,7 @@ static const char * const pmc_sys_events[] = {
 	"cpu_forcepr"
 };
 
+struct cpufreq_policy;
 extern unsigned int pcsm_l_cpufreq_get(unsigned int cpu);
 extern int pcsm_l_cpufreq_init(struct cpufreq_policy *policy);
 

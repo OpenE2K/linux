@@ -7,7 +7,6 @@
 #include <linux/perf_event.h>
 #include <linux/nodemask.h>
 #include <linux/slab.h>
-#include <asm/nbsr_v6_regs.h>
 #include <asm/sic_regs.h>
 #include <asm/sic_regs_access.h>
 #include <asm/perf_event_uncore.h>

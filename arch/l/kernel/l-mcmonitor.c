@@ -121,7 +121,7 @@ static void do_l_mcmonitor(struct work_struct *work)
 
 #ifdef CONFIG_SYSCTL
 static int proc_do_l_mcmonitor_period(struct ctl_table *table, int write,
-			void __user *buffer, size_t *lenp, loff_t *ppos)
+			void *buffer, size_t *lenp, loff_t *ppos)
 {
 	unsigned long old_period = l_mcmonitor_period;
 	int res;

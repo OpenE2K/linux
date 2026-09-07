@@ -9,8 +9,6 @@
 #include <linux/sched.h>
 #include <asm/current.h>
 
-#ifndef __ASSEMBLY__
-
 #ifdef E2K_P2V
 
 #include <asm/p2v/boot_console.h>
@@ -44,5 +42,4 @@ do { \
 
 #endif
 
-#endif
 #endif /* _DEBUG_PRINT_H_ */

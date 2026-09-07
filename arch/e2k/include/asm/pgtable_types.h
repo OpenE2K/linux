@@ -6,8 +6,6 @@
 #ifndef _E2K_PGTABLE_TYPES_H_
 #define _E2K_PGTABLE_TYPES_H_
 
-#ifndef	__ASSEMBLY__
-
 #include <linux/types.h>
 #include <asm/mmu_types.h>
 
@@ -79,6 +77,7 @@ typedef enum uni_page_bits {
 	UNI_PAGE_DEVMAP_BIT,		/* special device page for P2P DMA */
 	UNI_PAGE_INTL_RD_BIT,		/* Intel Read protection DTLB field */
 	UNI_PAGE_INTL_WR_BIT,		/* Intel Write protection DTLB field */
+	UNI_PAGE_KERNEL_MARK_BIT,	/* debug only, see CONFIG_MARK_KERNEL_PAGE_TABLES */
 	UNI_DTLB_MISS_LEVEL_BIT,	/* miss level DTLB field */
 	UNI_DTLB_RES_BITS_BIT,		/* reserved bits of DTLB probe result */
 } uni_page_bits_t;
@@ -107,6 +106,7 @@ typedef const unsigned long	uni_dtlb_t;
 #define	UNI_PAGE_UFFD_WP	(uni_pteval_t)(1ULL << UNI_PAGE_UFFD_WP_BIT)
 #define	UNI_PAGE_SWP_UFFD_WP	(uni_pteval_t)(1ULL << UNI_PAGE_SWP_UFFD_WP_BIT)
 #define	UNI_PAGE_DEVMAP		(uni_pteval_t)(1ULL << UNI_PAGE_DEVMAP_BIT)
+#define	UNI_PAGE_KERNEL_MARK	(uni_pteval_t)(1ULL << UNI_PAGE_KERNEL_MARK_BIT)
 #define	UNI_PAGE_INTL_RD	(uni_dtlb_t)(1ULL << UNI_PAGE_INTL_RD_BIT)
 #define	UNI_PAGE_INTL_WR	(uni_dtlb_t)(1ULL << UNI_PAGE_INTL_WR_BIT)
 #define	UNI_DTLB_MISS_LEVEL	(uni_dtlb_t)(1ULL << UNI_DTLB_MISS_LEVEL_BIT)
@@ -131,7 +131,5 @@ typedef const unsigned long	uni_dtlb_t;
 				 ((1U << __SWP_TYPE_BITS) - 1))
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __pmd_to_swp_entry(pte)	((swp_entry_t) { pmd_val(pmd) })
-
-#endif	/* ! __ASSEMBLY__ */
 
 #endif /* _E2K_PGTABLE_TYPES_H_ */

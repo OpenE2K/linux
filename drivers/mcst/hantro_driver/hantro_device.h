@@ -169,8 +169,8 @@ struct axife_t {
 	struct axife_core_cfg core_cfg;
 
 	u32 core_id;
-	u8 *hwregs;
-	u32 *dec_regs;
+	u8  __iomem *hwregs;
+	u32         *dec_regs;
 
 	slice_coretype parenttype;
 	u32 parentid; //parent codec core's core_id
@@ -238,7 +238,7 @@ struct hantrodec_t {
 	/*all access to hwregs are through readl/writel
 	 * so volatile is removed according to doc "volatile is evil"
 	 */
-	u8 *hwregs;
+	u8 __iomem *hwregs;
 	int hw_id;
 
 	unsigned long long multicorebase;

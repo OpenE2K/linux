@@ -266,7 +266,7 @@ static s32 l_i2c_xfer_one_msg(struct i2c_adapter *adap, struct i2c_msg *m)
 		v |= I2C_TRANSACTION_TYPE_WRITE;
 
 	if (!(f & I2C_M_RD))
-		memcpy_toio(SMBDATA, buf, len);
+		__memcpy_toio(SMBDATA, buf, len);
 
 	w_i2c(v, SMBCONTROL);
 
@@ -277,7 +277,7 @@ static s32 l_i2c_xfer_one_msg(struct i2c_adapter *adap, struct i2c_msg *m)
 	if (!(f & I2C_M_RD))
 		goto out;
 
-	memcpy_fromio(buf, SMBDATA, len);
+	__memcpy_fromio(buf, SMBDATA, len);
 out:
 	return ret;
 }
@@ -487,10 +487,8 @@ static int l_i2c_probe(struct platform_device *pdev)
 		if (i2c->dev.of_node &&
 			!of_device_is_available(i2c->dev.of_node))
 			continue;
-		id = -1; /* -1 means dynamically assign bus id */
-		/* Assign id only for system busses: */
-		if (pdev->id < MAX_NUMNODES)
-			id = pdev->id * l_i2c->adapters_nr + i;
+
+		id = pdev->id * I2C_MAX_BUSSES + i;
 
 		/* set up the sysfs linkage to our parent device */
 		i2c->dev.parent = &pdev->dev;

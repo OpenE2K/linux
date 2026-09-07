@@ -6,11 +6,7 @@
 #ifndef	_E2K_KVM_CPU_HV_REGS_TYPES_H_
 #define	_E2K_KVM_CPU_HV_REGS_TYPES_H_
 
-#ifdef __KERNEL__
-
 #include <asm/base_regs_types.h>
-
-#ifndef __ASSEMBLY__
 
 typedef union virt_ctrl_cu {
 	struct {
@@ -61,8 +57,6 @@ typedef union virt_ctrl_cu {
 	} since_v7;
 	e2k_dreg_t;		/* as entire register   */
 } virt_ctrl_cu_t;
-
-#endif /* ! __ASSEMBLY__ */
 
 #define	INTC_CU_COND_EVENT_NO		0
 #define	INTC_CU_COND_EVENT_MAX		16
@@ -329,7 +323,5 @@ typedef union {
 	e2k_dreg_t;
 } e2k_g_preempt_tmr_t;
 typedef e2k_g_preempt_tmr_t g_preempt_tmr_t;	/* depricatrd */
-
-#endif /* __KERNEL__ */
 
 #endif /* _E2K_KVM_CPU_HV_REGS_TYPES_H_ */

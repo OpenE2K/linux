@@ -222,6 +222,9 @@ static int vcn_v4_0_hw_init(void *handle)
 	struct amdgpu_ring *ring;
 	int i, r;
 
+#ifdef CONFIG_MCST
+	r = 0;
+#endif
 	if (amdgpu_sriov_vf(adev)) {
 		r = vcn_v4_0_start_sriov(adev);
 		if (r)

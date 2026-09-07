@@ -34,7 +34,7 @@ static int mxgbe_xdp_xmit_back(mxgbe_priv_t *priv, int qn, struct xdp_buff *xdp)
 }
 
 static void mxgbe_put_rx_buff(mxgbe_priv_t *priv,
-			      mxgbe_rx_buff_t *rxq_buff, int qn)
+			      mxgbe_buff_t *rxq_buff, int qn)
 {
 	struct mxgbe_queue *q;
 
@@ -55,7 +55,7 @@ static void mxgbe_put_rx_buff(mxgbe_priv_t *priv,
 
 int mxgbe_run_xdp(struct bpf_prog *prog,
 		  struct xdp_buff *xdp, mxgbe_priv_t *priv,
-		  mxgbe_rx_buff_t *rxq_buff, int qn)
+		  mxgbe_buff_t *rxq_buff, int qn)
 {
 	int act = bpf_prog_run_xdp(prog, xdp);
 	struct mxgbe_queue *q = &priv->rxq[qn];
@@ -166,7 +166,7 @@ int mxgbe_xdp_xmit_to_q(struct xdp_frame *xdpf,
 {
 	int		ret;
 	int		nq;
-	mxgbe_tx_buff_t	tx_buff;
+	mxgbe_buff_t	tx_buff;
 	mxgbe_descr_t	descr;
 	u32		len = xdpf->len;
 	void	*data;

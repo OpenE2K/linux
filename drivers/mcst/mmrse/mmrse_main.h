@@ -34,6 +34,8 @@
 #endif
 
 
+
+
 /**
  *  PCI
  */
@@ -127,5 +129,30 @@ extern const struct file_operations mmrse_bc_dev_fops;
 extern const struct file_operations mmrse_rt_dev_fops;
 extern const struct file_operations mmrse_bm_dev_fops;
 
+int mmrse_cdev_register(mmrse_priv_t *priv, int devtype);
+void mmrse_cdev_remove(mmrse_priv_t *priv, int devtype);
+
+void mmrse_bc_irq_handler(mmrse_priv_t *priv);
+void mmrse_bm_irq_handler(mmrse_priv_t *priv);
+void mmrse_rt_irq_handler(mmrse_priv_t *priv);
+
+#ifdef CONFIG_DEBUG_FS
+void mmrse_dbg_board_init(mmrse_priv_t *priv);
+void mmrse_dbg_board_exit(mmrse_priv_t *priv);
+#endif /*CONFIG_DEBUG_FS*/
+
+/**
+ ******************************************************************************
+ * Module Part
+ ******************************************************************************
+ **/
+
+int __init mmrse_dev_init(void);
+void __exit mmrse_dev_exit(void);
+
+#ifdef CONFIG_DEBUG_FS
+void mmrse_dbg_init(void);
+void mmrse_dbg_exit(void);
+#endif /*CONFIG_DEBUG_FS*/
 
 #endif /* MMRSE_MAIN_H__ */

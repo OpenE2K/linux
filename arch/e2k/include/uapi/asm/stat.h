@@ -53,10 +53,10 @@ struct stat {
 	unsigned long st_dev;
 	unsigned long st_ino;
 	unsigned int  st_mode;
-	__u32 st_nlink;
+	unsigned int  st_nlink;
 	unsigned int st_uid;
 	unsigned int st_gid;
-	__u32 st_rdev;
+	unsigned long st_rdev;
 	long st_size;
 	long st_blksize;
 	long st_blocks;

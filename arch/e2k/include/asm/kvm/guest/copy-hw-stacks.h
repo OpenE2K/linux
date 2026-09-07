@@ -34,7 +34,7 @@ kvm_kernel_hw_stack_frames_copy(u64 *dst, const u64 *src, unsigned long size,
 	unsigned long copied;
 	ldst_rec_op_t strd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT };
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) { .fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0)
 	};
 
 	if (chain_stack) {
@@ -60,7 +60,7 @@ kvm_kernel_hw_stack_frames_copy_user(u64 *dst, const u64 *src,
 	};
 	ldst_rec_op_t ldrd_opcode = (ldst_rec_op_t) {
 		.fmt = LDST_QWORD_FMT,
-		.mas = MAS_FILL_OPERATION | MAS_BYPASS_L1_CACHE,
+		.mas = MAS_FILL_OPERATION(CACHE_BYPASS_L1, 0),
 		.prot = 1
 	};
 

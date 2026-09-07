@@ -2596,6 +2596,12 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, sockptr_t ptr, unsigned int len)
 		break;
 	case IP_VS_SO_SET_DELDEST:
 		ret = ip_vs_del_dest(svc, &udest);
+		break;
+#ifdef CONFIG_MCST
+	default:
+		ret = -EINVAL;
+		break;
+#endif
 	}
 
   out_unlock:

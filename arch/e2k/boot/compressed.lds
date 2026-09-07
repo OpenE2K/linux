@@ -45,6 +45,8 @@ SECTIONS {
 	}
 	_end = .;
 
+	__kernel_size = _end - _start - 0x10000;
+
 	/* Sections to be discarded */
 	/DISCARD/ : {
 		*(.info)

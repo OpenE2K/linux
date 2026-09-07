@@ -123,6 +123,11 @@ static u64 cpuacct_cpuusage_read(struct cpuacct *ca, int cpu,
 	case CPUACCT_STAT_NSTATS:
 		data = *cpuusage;
 		break;
+#ifdef CONFIG_MCST
+	default:
+		data = 0;
+		break;
+#endif
 	}
 
 #ifndef CONFIG_64BIT

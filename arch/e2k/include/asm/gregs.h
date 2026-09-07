@@ -139,17 +139,18 @@
 #define	CLEAR_KERNEL_GREGS_COPY(__ti)	\
 		ONLY_COPY_TO_KERNEL_GREGS(&(__ti)->k_gregs, 0, 0, 0)
 
-#if !defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_MODE)
+#if !defined(CONFIG_VIRTUALIZATION) || defined(CONFIG_KVM_HOST_KERNEL)
 /* it is native kernel without any virtualization */
 /* or it is native host kernel with virtualization support */
 
-#define	CLEAR_KERNEL_GREGS_IN_SYSCALL(...) NATIVE_SET_GREGS_EMPTY(false, true)
+#define	CLEAR_KERNEL_GREGS_IN_SYSCALL(...) \
+	NATIVE_SET_GREGS_EMPTY(false, true, cpu_has(CPU_FEAT_QPREG))
 
  #ifdef	CONFIG_VIRTUALIZATION
   /* it is native host kernel with virtualization support */
   #include <asm/kvm/gregs.h>
  #endif	/* CONFIG_VIRTUALIZATION */
-#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_MODE */
+#endif	/* !CONFIG_VIRTUALIZATION || CONFIG_KVM_HOST_KERNEL */
 
 static inline void copy_k_gregs_to_gregs(struct e2k_gregs *dst,
 		const struct local_gregs *src)
@@ -169,6 +170,11 @@ static inline void copy_local_gregs(struct local_gregs *dst, const struct local_
 {
 	tagged_memcpy_8(dst->g, src->g, sizeof(dst->g) + __must_be_array(dst->g));
 	dst->bgr = src->bgr;
+}
+
+static inline void copy_scratch_gregs(struct scratch_gregs *dst, const struct scratch_gregs *src)
+{
+	tagged_memcpy_8(dst->g, src->g, sizeof(dst->g) + __must_be_array(dst->g));
 }
 
 #endif

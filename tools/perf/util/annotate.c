@@ -1293,6 +1293,8 @@ void annotation__exit(struct annotation *notes)
 
 static void annotation_line__add(struct annotation_line *al, struct list_head *head)
 {
+	fprintf(stderr, "annotation_line__add(): al 0x%lx '%s' addr 0x%lx offset %ld line_nr %d\n",
+		al, al->line, &al->line, al->offset, al->line_nr);
 	list_add_tail(&al->node, head);
 }
 
@@ -1394,6 +1396,9 @@ static int disasm_line__print(struct disasm_line *dl, u64 start, int addr_fmt_wi
 	const u64 addr = start + offset;
 	struct block_range *br;
 
+	fprintf(stderr, "disasm_line__print(): '%s' offset %ld line_nr %d\n",
+		dl->al.line, dl->al.offset, dl->al.line_nr);
+
 	br = block_range__find(addr);
 	color_fprintf(stdout, annotate__address_color(br), "  %*" PRIx64 ":", addr_fmt_width, addr);
 	color_fprintf(stdout, annotate__asm_color(br), "%s", dl->al.line);
@@ -1409,6 +1414,9 @@ annotation_line__print(struct annotation_line *al, struct symbol *sym, u64 start
 {
 	struct disasm_line *dl = container_of(al, struct disasm_line, al);
 	static const char *prev_line;
+
+	fprintf(stderr, "annotation_line__print(): '%s' offset %ld line_nr %d\n",
+		al->line, al->offset, al->line_nr);
 
 	if (al->offset != -1) {
 		double max_percent = 0.0;
@@ -1571,6 +1579,8 @@ static int symbol__parse_objdump_line(struct symbol *sym,
 #else
 		return -1;
 #endif
+
+	fprintf(stderr, "symbol__parse_objdump_line(): dl 0x%lx al 0x%lx\n", dl, &dl->al);
 
 	if (!disasm_line__has_local_offset(dl)) {
 		dl->ops.target.offset = dl->ops.target.addr -
@@ -2076,7 +2086,7 @@ static int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
 		goto out_remove_tmp;
 	}
 
-	pr_debug("Executing: %s\n", command);
+	fprintf(stderr, "Executing: %s\n", command);
 
 	objdump_argv[2] = command;
 	objdump_argv[4] = symfs_filename;
@@ -2113,6 +2123,8 @@ static int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
 		const char *match;
 		char *expanded_line;
 
+		fprintf(stderr, "symbol__disassemble_objdump(): ---------\n");
+
 		if (getline(&line, &line_len, file) < 0 || !line)
 			break;
 
@@ -2121,6 +2133,9 @@ static int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
 		if (match && match[strlen(symfs_filename)] == ':')
 			continue;
 
+		fprintf(stderr, "symbol__disassemble_objdump(): 1: '%s'\n",
+			line);
+ 
 		expanded_line = strim(line);
 #ifdef __e2k__
 		/*
@@ -2133,6 +2148,9 @@ static int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
 		if (!expanded_line)
 			break;
 
+		fprintf(stderr, "symbol__disassemble_objdump(): 1: '%s'\n",
+			expanded_line);
+ 
 		/*
 		 * The source code line number (lineno) needs to be kept in
 		 * across calls to symbol__parse_objdump_line(), so that it
@@ -2597,6 +2615,8 @@ static int symbol__annotate_fprintf2(struct symbol *sym, FILE *fp,
 	};
 	struct annotation_line *al;
 
+	fprintf(stderr, "symbol__annotate_fprintf2()\n");
+
 	list_for_each_entry(al, &notes->src->source, node) {
 		if (annotation_line__filter(al, notes))
 			continue;
@@ -2692,6 +2712,8 @@ size_t disasm__fprintf(struct list_head *head, FILE *fp)
 {
 	struct disasm_line *pos;
 	size_t printed = 0;
+
+	fprintf(stderr, "disasm__fprintf()\n");
 
 	list_for_each_entry(pos, head, al.node)
 		printed += disasm_line__fprintf(pos, fp);
@@ -2882,6 +2904,8 @@ int symbol__tty_annotate2(struct map_symbol *ms, struct evsel *evsel,
 	char buf[1024];
 	int err;
 
+	fprintf(stderr, "symbol__tty_annotate2()\n");
+
 	err = symbol__annotate2(ms, evsel, opts, NULL);
 	if (err) {
 		char msg[BUFSIZ];
@@ -2915,6 +2939,8 @@ int symbol__tty_annotate(struct map_symbol *ms, struct evsel *evsel,
 	struct symbol *sym = ms->sym;
 	struct rb_root source_line = RB_ROOT;
 	int err;
+
+	fprintf(stderr, "symbol__tty_annotate()\n");
 
 	err = symbol__annotate(ms, evsel, opts, NULL);
 	if (err) {
@@ -2972,6 +2998,8 @@ static void disasm_line__write(struct disasm_line *dl, struct annotation *notes,
 			       void (*obj__printf)(void *obj, const char *fmt, ...),
 			       void (*obj__write_graph)(void *obj, int graph))
 {
+	fprintf(stderr, "disasm_line__write()\n");
+
 	if (dl->ins.ops && dl->ins.ops->scnprintf) {
 		if (ins__is_jump(&dl->ins)) {
 			bool fwd;
@@ -3030,6 +3058,9 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 	bool show_title = false;
 	char bf[256];
 	int printed;
+
+	fprintf(stderr, "__annotation_line__write(): al 0x%lx '%s' addr 0x%lx offset %ld line_nr %d\n",
+		al, al->line, &al->line, al->offset, al->line_nr);
 
 	if (first_line && (al->offset == -1 || percent_max == 0.0)) {
 		if (notes->have_cycles) {

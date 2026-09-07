@@ -7,9 +7,9 @@
  * Templates for eBPF JIT compiler.
  */
 
-#include <asm/trap_table.h>
-#include <generated/asm-offsets.h>
+#include <asm/asm-offsets.h>
 #include <asm/alternative-asm.h>
+#include <asm/trap_table.S.h>
 
 #include "ebpf_jit.h"
 
@@ -1053,7 +1053,7 @@ SYM_FUNC_START_SIZED(ebpf_jit_jmp_jset_x)
 BPF_TEMPL_LABEL(BPF_JIT_JMP_LABEL(ebpf_jit_jmp_jset_x))
 {
 	andd,0 %dr_DST, %dr_SRC, %dr_TMP1
-	disp %ctpr1, ebpf_jit_jmp32_jset_x
+	disp %ctpr1, ebpf_jit_jmp_jset_x
 }
 {
 	/* let hardware control cmp -> ct and disp -> ct scheduling */

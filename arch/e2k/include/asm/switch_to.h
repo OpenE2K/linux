@@ -6,8 +6,6 @@
 #ifndef _ASM_L_SWITCH_TO_H
 #define _ASM_L_SWITCH_TO_H
 
-#ifdef __KERNEL__
-
 #include <asm/mmu_context.h>
 #include <asm/regs_state.h>
 
@@ -105,7 +103,5 @@ do { \
 #define	switch_to(prev, next, last)	native_switch_to(prev, next, last)
 
 #endif /* CONFIG_KVM_GUEST_KERNEL */
-
-#endif /* __KERNEL__ */
 
 #endif /* _ASM_L_SWITCH_TO_H */

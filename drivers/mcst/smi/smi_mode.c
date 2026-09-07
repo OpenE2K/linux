@@ -36,11 +36,13 @@
 #include "ddk768/ddk768_chip.h"
 #include "smi_dbg.h"
 
-
+extern struct smi_crtc * smi_crtc_tab[MAX_CRTC]; /* just to satisfy sparse */
 struct smi_crtc * smi_crtc_tab[MAX_CRTC];
+extern struct drm_encoder * smi_enc_tab[MAX_ENCODER]; /* just to satisfy sparse */
 struct drm_encoder * smi_enc_tab[MAX_ENCODER];
 
 //bit 0: DVI, bit 1: VGA, bit 2: HDMI.
+extern int g_m_connector; /* just to satisfy sparse */
 int g_m_connector = 0;
 
 int smi_calc_hdmi_ctrl(int m_connector)
@@ -253,7 +255,7 @@ static void smi_crtc_mode_set_nofb(struct drm_crtc *crtc)
 
 		if(need_to_scale)
 		{
-			file_format srcFormat;
+			file_format srcFormat = FFT_INVALID;
 			if(logicalMode.bpp==16)
 				srcFormat = FFT_RGB565;
 			if(logicalMode.bpp==32)
@@ -577,7 +579,7 @@ static void smi_encoder_commit(struct drm_encoder *encoder)
 
 }
 
-void smi_encoder_destroy(struct drm_encoder *encoder)
+static void smi_encoder_destroy(struct drm_encoder *encoder)
 {
 	struct smi_encoder *smi_encoder = to_smi_encoder(encoder);
 	drm_encoder_cleanup(encoder);
@@ -633,7 +635,7 @@ static struct drm_encoder *smi_encoder_init(struct drm_device *dev, int index)
 }
 
 
-int smi_connector_get_modes(struct drm_connector *connector)
+static int smi_connector_get_modes(struct drm_connector *connector)
 {
 #ifdef USE_HDMICHIP
 	int ret = 0;
